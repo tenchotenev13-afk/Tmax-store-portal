@@ -3,12 +3,12 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ТЕМАКС Портал</title>
+<title>TeMAX — Вътрешна платформа</title>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 :root{
-  --c1:#0f172a;--c2:#1e293b;--c3:#334155;--c4:#64748b;--c5:#94a3b8;
+  --c1:#2f2f2f;--c2:#3a3a3a;--c3:#4a4a4a;--c4:#64748b;--c5:#94a3b8;
   --border:#e2e8f0;--text:#0f172a;--muted:#64748b;--surf:#f8fafc;
   --grn:#16a34a;--grn-bg:#f0fdf4;--grn-b:#bbf7d0;
   --blu:#2563eb;--blu-bg:#eff6ff;--blu-b:#bfdbfe;
@@ -23,7 +23,7 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 /* SCREENS */
 .screen{display:none;min-height:100vh;}
 .screen.active{display:flex;flex-direction:column;}
-#s-login{align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);}
+#s-login{align-items:center;justify-content:center;background:linear-gradient(135deg,#3a3a3a 0%,#1a1a1a 100%);}
 
 /* LOGIN */
 .login-box{background:#fff;border-radius:16px;padding:32px;width:420px;max-width:95vw;box-shadow:0 24px 80px rgba(0,0,0,.4);}
@@ -46,7 +46,7 @@ select.fi{cursor:pointer;}
 .err{color:var(--red);font-size:12px;margin-top:8px;display:none;}
 
 /* NAV */
-.nav{background:var(--c1);padding:0 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;box-shadow:0 2px 10px rgba(0,0,0,.3);position:sticky;top:0;z-index:100;}
+.nav{background:#2f2f2f;padding:0 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;box-shadow:0 2px 10px rgba(0,0,0,.3);position:sticky;top:0;z-index:100;}
 .nav-brand{display:flex;align-items:center;gap:10px;padding:10px 0;}
 .nav-brand h1{font-size:15px;font-weight:600;color:#fff;}
 .nav-tabs{display:flex;gap:0;}
@@ -155,8 +155,8 @@ tr:hover td{background:var(--surf);}
 <div id="s-login" class="screen active">
   <div class="login-box">
     <div class="login-logo">
-      <h1>🏷 ТЕМАКС Портал</h1>
-      <span>Вътрешна платформа</span>
+      <img src="data:image/png;base64,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" alt="TeMAX" style="height:70px;margin-bottom:10px;">
+      <div style="font-size:11px;font-weight:600;color:var(--c4);letter-spacing:.1em;text-transform:uppercase;">Вътрешна платформа</div>
     </div>
     <label class="fl">Твоето три имена</label>
     <input class="fi" id="l-name" placeholder="Иван Петров Иванов" onkeydown="if(event.key==='Enter')doLogin()">
@@ -179,7 +179,7 @@ tr:hover td{background:var(--surf);}
   <!-- Navigation -->
   <nav class="nav">
     <div class="nav-brand">
-      <h1>🏷 ТЕМАКС</h1>
+      <img src="data:image/png;base64,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" alt="TeMAX" style="height:38px;">
     </div>
     <div class="nav-tabs">
       <button class="nav-tab active" onclick="showModule('transport')">🚚 Транспортни заявки</button>
@@ -457,24 +457,35 @@ function statusBadge(s){var m={pending:'⏳ Изчаква',approved:'✓ Одо
 
 // ── LOGIN ────────────────────────────────────────────────────────────────────
 async function init(){
-  sb = supabase.createClient(SB_URL, SB_KEY);
-  // Load stores for dropdown
-  var {data} = await sb.from('stores').select('*').eq('active',true).order('name');
-  stores = data || [];
-  var sel = document.getElementById('l-store');
-  stores.forEach(function(s){
-    var opt = document.createElement('option');
-    opt.value = s.name; opt.textContent = s.name;
-    sel.appendChild(opt);
-  });
+  try{
+    sb = supabase.createClient(SB_URL, SB_KEY);
+    // Load stores for dropdown
+    var result = await sb.from('stores').select('*').order('name');
+    if(result.error){ console.error('Stores error:', result.error); }
+    stores = result.data || [];
+    var sel = document.getElementById('l-store');
+    // Remove old options except first
+    while(sel.options.length > 1){ sel.remove(1); }
+    stores.forEach(function(s){
+      var opt = document.createElement('option');
+      opt.value = s.name; opt.textContent = s.name;
+      sel.appendChild(opt);
+    });
+    console.log('Stores loaded:', stores.length);
+  }catch(e){
+    console.error('Init error:', e);
+  }
   // Check if already logged in
   var saved = localStorage.getItem('tb_portal_user');
   if(saved){
     try{
       var u = JSON.parse(saved);
-      currentUser = u.name; currentStore = u.store;
-      isAdmin = localStorage.getItem('tb_is_admin') === '1';
-      startApp();
+      if(u.name && u.store){
+        currentUser = u.name; currentStore = u.store;
+        isAdmin = localStorage.getItem('tb_is_admin') === '1';
+        startApp();
+        return;
+      }
     }catch(e){}
   }
 }
@@ -483,11 +494,15 @@ function doLogin(){
   var name = document.getElementById('l-name').value.trim();
   var store = document.getElementById('l-store').value;
   var err = document.getElementById('l-err');
-  if(!name||!store){err.style.display='block';return;}
+  if(!name){ err.textContent='Въведи твоето три имена.'; err.style.display='block'; return; }
+  if(!store){ err.textContent='Избери магазин от списъка.'; err.style.display='block'; return; }
   err.style.display='none';
-  currentUser = name; currentStore = store;
-  localStorage.setItem('tb_portal_user', JSON.stringify({name:name,store:store}));
-  localStorage.setItem('tb_name', name);
+  currentUser = name;
+  currentStore = store;
+  try{
+    localStorage.setItem('tb_portal_user', JSON.stringify({name:name, store:store}));
+    localStorage.setItem('tb_name', name);
+  }catch(e){}
   startApp();
 }
 
@@ -500,18 +515,23 @@ function doLogout(){
 }
 
 function startApp(){
+  // Switch screens
   document.getElementById('s-login').classList.remove('active');
   document.getElementById('s-app').classList.add('active');
-  document.getElementById('nav-name').textContent = currentUser;
-  document.getElementById('nav-store').textContent = currentStore;
-  // Show admin UI
+  // Update nav
+  document.getElementById('nav-name').textContent = currentUser || '';
+  document.getElementById('nav-store').textContent = currentStore || '';
+  // Admin UI
   if(isAdmin){
-    document.querySelectorAll('.admin-only').forEach(function(el){el.style.display='';el.style.removeProperty('display');el.style.display='inline-flex';});
-    document.getElementById('tr-metrics').style.display='grid';
-    document.getElementById('tr-filters').style.display='flex';
+    document.querySelectorAll('.admin-only').forEach(function(el){
+      el.style.display = 'inline-flex';
+    });
+    document.getElementById('tr-metrics').style.display = 'grid';
+    document.getElementById('tr-filters').style.display = 'flex';
   }
-  loadOrders();
-  loadDocs();
+  // Load data
+  loadOrders().catch(function(e){ console.error('loadOrders:', e); });
+  loadDocs().catch(function(e){ console.error('loadDocs:', e); });
   showModule('transport');
 }
 
