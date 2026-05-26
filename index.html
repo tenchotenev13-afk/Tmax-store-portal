@@ -4,264 +4,169 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>TeMAX — Вътрешна платформа</title>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
-:root{
-  --c1:#2f2f2f;--c2:#3a3a3a;--c3:#4a4a4a;--c4:#64748b;--c5:#94a3b8;
-  --border:#e2e8f0;--text:#0f172a;--muted:#64748b;--surf:#f8fafc;
-  --grn:#16a34a;--grn-bg:#f0fdf4;--grn-b:#bbf7d0;
-  --blu:#2563eb;--blu-bg:#eff6ff;--blu-b:#bfdbfe;
-  --red:#dc2626;--red-bg:#fff1f2;--red-b:#fecaca;
-  --amb:#d97706;--amb-bg:#fffbeb;--amb-b:#fde68a;
-  --pur:#7c3aed;--pur-bg:#f5f3ff;--pur-b:#ddd6fe;
-  --r:10px;--rsm:7px;
-}
+:root{--dark:#2f2f2f;--red:#e02020;--border:#e2e8f0;--text:#0f172a;--muted:#64748b;--surf:#f8fafc;--grn:#16a34a;--blu:#2563eb;--amb:#d97706;--r:10px;--rsm:7px;}
 *{margin:0;padding:0;box-sizing:border-box;}
-body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--text);font-size:14px;line-height:1.6;min-height:100vh;}
-
-/* SCREENS */
-.screen{display:none;min-height:100vh;}
-.screen.active{display:flex;flex-direction:column;}
-#s-login{align-items:center;justify-content:center;background:linear-gradient(135deg,#3a3a3a 0%,#1a1a1a 100%);}
-
-/* LOGIN */
-.login-box{background:#fff;border-radius:16px;padding:32px;width:420px;max-width:95vw;box-shadow:0 24px 80px rgba(0,0,0,.4);}
-.login-logo{text-align:center;margin-bottom:20px;}
-.login-logo h1{font-size:24px;font-weight:700;color:var(--c1);}
-.login-logo span{color:var(--blu);font-size:12px;font-weight:500;letter-spacing:.08em;text-transform:uppercase;}
-.fl{display:block;font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px;margin-top:12px;text-transform:uppercase;letter-spacing:.06em;}
-.fi{width:100%;font-family:inherit;font-size:14px;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;color:var(--text);background:#fff;transition:border .15s;}
+body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--text);font-size:14px;line-height:1.6;}
+#s-login{display:flex;min-height:100vh;align-items:center;justify-content:center;background:var(--dark);}
+#s-app{display:none;flex-direction:column;min-height:100vh;}
+.login-card{background:#fff;border-radius:16px;width:420px;max-width:95vw;overflow:hidden;box-shadow:0 28px 80px rgba(0,0,0,.5);}
+.login-top{background:var(--dark);padding:28px 28px 22px;text-align:center;}
+.login-top img{height:72px;}
+.login-top p{color:#999;font-size:12px;margin-top:8px;letter-spacing:.08em;text-transform:uppercase;}
+.login-body{padding:24px 28px 28px;}
+.fl{display:block;font-size:11px;font-weight:700;color:var(--muted);margin:12px 0 4px;text-transform:uppercase;letter-spacing:.06em;}
+.fi{width:100%;font-family:inherit;font-size:14px;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;color:var(--text);transition:border .15s;background:#fff;}
 .fi:focus{outline:none;border-color:var(--blu);}
 select.fi{cursor:pointer;}
-.btn{border:none;padding:10px 20px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .15s;white-space:nowrap;display:inline-flex;align-items:center;gap:6px;}
-.btn-primary{background:var(--blu);color:#fff;width:100%;justify-content:center;margin-top:16px;font-size:14px;padding:12px;}
-.btn-primary:hover{background:#1d4ed8;}
-.btn-ghost{background:var(--surf);color:var(--muted);border:1px solid var(--border);}
-.btn-ghost:hover{background:#fff;border-color:#94a3b8;}
-.btn-green{background:var(--grn);color:#fff;}.btn-green:hover{background:#15803d;}
-.btn-red{background:var(--red);color:#fff;}.btn-red:hover{background:#b91c1c;}
-.btn-amber{background:var(--amb);color:#fff;}.btn-amber:hover{background:#b45309;}
-.btn-sm{padding:5px 12px;font-size:12px;border-radius:6px;}
+.btn-login{width:100%;margin-top:18px;padding:12px;border:none;border-radius:8px;background:var(--red);color:#fff;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;}
+.btn-login:hover{background:#c01010;}
+.login-adm{text-align:center;margin-top:10px;}
+.login-adm button{background:none;border:none;color:#999;font-size:12px;cursor:pointer;font-family:inherit;text-decoration:underline;}
 .err{color:var(--red);font-size:12px;margin-top:8px;display:none;}
-
-/* NAV */
-.nav{background:#2f2f2f;padding:0 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;box-shadow:0 2px 10px rgba(0,0,0,.3);position:sticky;top:0;z-index:100;}
-.nav-brand{display:flex;align-items:center;gap:10px;padding:10px 0;}
-.nav-brand h1{font-size:15px;font-weight:600;color:#fff;}
-.nav-tabs{display:flex;gap:0;}
-.nav-tab{padding:14px 18px;font-size:13px;font-weight:500;cursor:pointer;border:none;background:none;color:var(--c5);border-bottom:3px solid transparent;font-family:inherit;transition:all .15s;white-space:nowrap;}
-.nav-tab:hover{color:#fff;}
-.nav-tab.active{color:#fff;border-bottom-color:var(--blu);}
+.nav{background:var(--dark);padding:0 16px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;box-shadow:0 2px 12px rgba(0,0,0,.4);position:sticky;top:0;z-index:100;}
+.nav-brand{padding:10px 0;}.nav-brand img{height:36px;display:block;}
+.nav-tabs{display:flex;}
+.nav-tab{padding:14px 16px;font-size:13px;font-weight:500;cursor:pointer;border:none;background:none;color:#aaa;border-bottom:3px solid transparent;font-family:inherit;transition:all .15s;white-space:nowrap;}
+.nav-tab:hover{color:#fff;}.nav-tab.active{color:#fff;border-bottom-color:var(--red);}
 .nav-right{display:flex;align-items:center;gap:8px;padding:8px 0;}
-.user-badge{font-size:12px;color:var(--c5);display:flex;align-items:center;gap:5px;}
-.store-badge{font-size:11px;color:#4ade80;font-family:'DM Mono',monospace;}
-
-/* PAGE */
-.page-wrap{flex:1;max-width:1200px;width:100%;margin:0 auto;padding:20px 16px 60px;}
-.page-title{font-size:20px;font-weight:600;margin-bottom:4px;}
-.page-sub{font-size:13px;color:var(--muted);margin-bottom:20px;}
+.user-chip{font-size:12px;color:#aaa;display:flex;align-items:center;gap:6px;}
+.store-chip{font-size:11px;color:#4ade80;font-family:'DM Mono',monospace;}
+.btn-sm{border:1px solid #555;background:none;color:#aaa;font-size:12px;padding:4px 12px;border-radius:6px;cursor:pointer;font-family:inherit;}
+.btn-sm:hover{border-color:#aaa;color:#fff;}
+.page{max-width:1200px;width:100%;margin:0 auto;padding:20px 16px 60px;}
+.pg-title{font-size:20px;font-weight:600;margin-bottom:2px;}
+.pg-sub{font-size:13px;color:var(--muted);margin-bottom:18px;}
 .card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:14px;}
-.card-title{font-size:14px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:7px;}
-.sec-lbl{font-size:10px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);margin-bottom:8px;}
-
-/* STATUS BADGES */
-.status{display:inline-flex;align-items:center;font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;white-space:nowrap;}
-.st-pending{background:#fef3c7;color:#92400e;}
-.st-approved{background:#dbeafe;color:#1e3a5f;}
-.st-delivered{background:#dcfce7;color:#14532d;}
-.st-cancelled{background:#fee2e2;color:#991b1b;}
-.st-delayed{background:#f3e8ff;color:#4c1d95;}
-
-/* TABLE */
+.card-title{font-size:14px;font-weight:600;margin-bottom:12px;}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
+@media(max-width:700px){.metrics{grid-template-columns:repeat(2,1fr);}}
+.metric{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:14px;text-align:center;}
+.metric-val{font-size:28px;font-weight:700;font-family:'DM Mono',monospace;}
+.metric-lbl{font-size:11px;color:var(--muted);}
+.filter-bar{display:flex;gap:7px;flex-wrap:wrap;margin-bottom:14px;align-items:center;}
+.filter-btn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;color:var(--muted);transition:.15s;}
+.filter-btn.active{background:var(--dark);color:#fff;border-color:var(--dark);}
+.filter-inp{font-family:inherit;font-size:12px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;width:160px;}
 .tbl-wrap{overflow-x:auto;border-radius:var(--rsm);border:1px solid var(--border);}
 table{width:100%;border-collapse:collapse;font-size:13px;}
 thead{background:var(--surf);}
 th{padding:9px 12px;text-align:left;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;}
 td{padding:9px 12px;border-bottom:1px solid var(--border);vertical-align:top;}
 tr:last-child td{border-bottom:none;}
-tr:hover td{background:var(--surf);}
-
-/* METRICS */
-.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px;}
-@media(max-width:700px){.metrics{grid-template-columns:repeat(2,1fr);}}
-.metric{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;text-align:center;}
-.metric-val{font-size:28px;font-weight:700;font-family:'DM Mono',monospace;margin-bottom:3px;}
-.metric-lbl{font-size:11px;color:var(--muted);}
-
-/* FORM GRID */
+tr:hover td{background:#fafafa;}
+td button{border:1px solid var(--border);background:#fff;border-radius:6px;padding:4px 10px;font-size:11px;cursor:pointer;font-family:inherit;}
+td button:hover{background:var(--surf);}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
 @media(max-width:600px){.form-grid{grid-template-columns:1fr;}}
-.form-grid .full{grid-column:1/-1;}
-.form-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap;}
-
-/* FILTER BAR */
-.filter-bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px;}
-.filter-btn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;color:var(--muted);transition:.15s;}
-.filter-btn.active{background:var(--c1);color:#fff;border-color:var(--c1);}
-.filter-inp{font-family:inherit;font-size:12px;padding:5px 10px;border:1px solid var(--border);border-radius:6px;width:160px;}
-
-/* DOCS */
+.full{grid-column:1/-1;}
 .doc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
 @media(max-width:700px){.doc-grid{grid-template-columns:1fr 1fr;}}
-@media(max-width:480px){.doc-grid{grid-template-columns:1fr;}}
+@media(max-width:450px){.doc-grid{grid-template-columns:1fr;}}
 .doc-card{border:1px solid var(--border);border-radius:var(--r);padding:14px;cursor:pointer;transition:.15s;display:flex;flex-direction:column;gap:6px;}
-.doc-card:hover{border-color:var(--blu);background:var(--blu-bg);}
-.doc-icon{font-size:24px;}
-.doc-title{font-size:13px;font-weight:500;}
-.doc-cat{font-size:11px;color:var(--muted);}
-
-/* MODAL */
-.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:center;justify-content:center;}
+.doc-card:hover{border-color:var(--blu);background:#eff6ff;}
+.modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center;}
 .modal-bg.open{display:flex;}
 .modal{background:#fff;border-radius:14px;padding:22px;width:500px;max-width:95vw;max-height:90vh;overflow-y:auto;}
 .modal h3{font-size:16px;font-weight:600;margin-bottom:4px;}
-.modal-sub{font-size:12px;color:var(--muted);margin-bottom:16px;}
+.modal-sub{font-size:12px;color:var(--muted);margin-bottom:14px;}
 .modal-actions{display:flex;gap:8px;justify-content:flex-end;margin-top:16px;}
-
-/* TOAST */
+.btn{border:none;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:5px;}
+.btn-ghost{background:var(--surf);color:var(--muted);border:1px solid var(--border);}
+.btn-ghost:hover{background:#fff;}
+.btn-green{background:var(--grn);color:#fff;}.btn-green:hover{background:#15803d;}
+.btn-red{background:#dc2626;color:#fff;}
+.btn-amber{background:var(--amb);color:#fff;}
+.status-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;}
+.pin-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;align-items:center;justify-content:center;}
+.pin-overlay.open{display:flex;}
+.pin-box{background:#fff;border-radius:14px;padding:28px;width:300px;text-align:center;}
+.pin-box h3{font-size:17px;font-weight:600;margin-bottom:6px;}
+.pin-box p{font-size:13px;color:var(--muted);margin-bottom:14px;}
+.pin-inp{width:100%;font-size:24px;font-family:'DM Mono',monospace;text-align:center;padding:10px;border:1.5px solid var(--border);border-radius:8px;letter-spacing:.4em;}
+.pin-actions{display:flex;gap:8px;margin-top:14px;}
 .toast{position:fixed;bottom:20px;right:20px;padding:8px 18px;border-radius:40px;font-size:12px;font-weight:600;z-index:999;opacity:0;transition:opacity .3s;pointer-events:none;color:#fff;}
 .toast.show{opacity:1;}
-
-/* PIN screen inside portal */
-.pin-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:center;justify-content:center;}
-.pin-overlay.open{display:flex;}
-.pin-box{background:#fff;border-radius:14px;padding:26px;width:300px;text-align:center;}
-.pin-box h3{font-size:16px;font-weight:600;margin-bottom:6px;}
-.pin-box p{font-size:12px;color:var(--muted);margin-bottom:14px;}
-.pin-inp{width:100%;font-size:22px;font-family:'DM Mono',monospace;text-align:center;padding:10px;border:1.5px solid var(--border);border-radius:8px;letter-spacing:.3em;}
-
-/* IFRAME for bulletin */
-.bul-frame{width:100%;height:calc(100vh - 120px);border:none;border-radius:var(--r);}
-
-/* Empty state */
-.empty{text-align:center;padding:40px 20px;color:var(--muted);}
-.empty-icon{font-size:36px;margin-bottom:8px;}
-.empty-title{font-size:15px;font-weight:500;margin-bottom:4px;}
-.empty-sub{font-size:13px;}
-
-@media(max-width:640px){
-  .nav-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;}
-  .nav-tab{padding:12px 14px;font-size:12px;}
-  .page-wrap{padding:14px 12px 60px;}
-}
+.bul-frame{width:100%;height:calc(100vh - 58px);border:none;display:block;}
+@media(max-width:640px){.nav-tabs{overflow-x:auto;}.nav-tab{padding:12px 12px;font-size:12px;}.page{padding:14px 12px 60px;}}
 </style>
 </head>
 <body>
-
 <div class="toast" id="toast"></div>
 
-<!-- ══ LOGIN SCREEN ══════════════════════════════════════════════ -->
-<div id="s-login" class="screen active">
-  <div class="login-box">
-    <div class="login-logo">
-      <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAFcAAABQCAIAAADjr36DAAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAAMkklEQVR42u1cbWxl11Vde59zP9718/PnzDgzKUlKoSRNSalEAmkqKiK1jdoCAkVCEFARVSoiha8UQQSKSqJWgaCmKW3501ZpRUUrUQIiQUQiIAUkCiElUxJIaEKSZjKeD3s89vP7uveevfhxPR7b47GfZ55nPKnvr6f37j3n3HX2Xnvtfc55cvU11+J7/tLvwXcmuYvCOkDo9gG8w9+f5PJnHWDTlwoQ1SUiIlINWwfV4qXlEcvvX332g233UsRiZ7HjhXGoZUc4d3bc1oFeRGvSN7zZ76qmXRR2URgwCivpcKXY2j5OPfPmc+535eMbt6BbpcNzGNCWOPXMm9eNbYMdg99qQ5eWTO5zDvScG30jRc1ddjwLCn1O8Y5yDRk4CrwEJ5O7HrHTeeFSYdDtRaEf7tgJ/HLxM+udYC+6HdO7QwoW/V/+ovS6XPDri/xXI7Xmqf6bGgAKJNfV81saRNXISjG+/OC67Sx/ufLOlRqBA3Io7d97pRInZD/drnuPngXEs/nFMu7rvioHkXEuDayfJgQQIgCloAQCoIAD9BQimzZSIZjLKnnT/zQqqQQJPbV2sHJBZd2ZFFL6RsdvPBQCQhYihWLU6A0kc0FTpVQRIiFjws4waa62twAEwYGSsyoFuGwUKqIAAQJ29mE0nYKsGRedClEzq+jCBIWICFKuxhfoqCgZk+gD6014QcigsqcIvzez+EPdIKQAHdFjXl6J3cEsfroWHXayZhCrW8CikyHj/dMLP7HYu2uq8cRwUjeaCAADmgKqOCLj+hZUCG6ba//kYj4ewnNp/PfDyVO1KCJbKr8+27q+UzwwXvuvLK5xCUcheyLXt/MjTqbj2PUhr/3GZKZEF7gmDx+a6671dQInOjORfm6i9vBYlhm4HoEVind28o8db9/Y6sFsqgy2TP0iCXnrQrcj8lIS/XfkIKvMm8Scl7d3iruPLdQLg+qPLBY/3u791BVjFDXBFXn5rvl2FuwX3hTZKTssRYbNPnt4/pma/+iBMWebm4PfTM/QASdU2169nfYzghAxwWRhP7OQf2WkRqxlcgFKwViwPzs8v68b2l5r0EZY4hIF5gUfWMzvfX0Bqib489Hkvn0Nx9MOJbA7Z7u/MtuqGTveCREphwOHA+cdAXkh8Sb6tm5xXbv4t3pcJwAsCm4/2Zns2VgE159H6KaxISKmI+0JHBFElghJxAGZAcB17fzDc51FFVexwwpaKiF7ShspWCicQYyXhbKamwBkZredaBukBarxxnYRm1UcoeSiyvsX87unm1MF2+p8xceiMRFVxk+8FHuqxIHvbucF4Mi2yDt65Udm2xQ2FWEgkZJABBzx+lgjdWZZsIRL3q6QVxL3ZD3653rc8VLNoQKFSCFSkXkQjAVGp4Or7C/pSSFaKu9t5e9o50EQQwj2RJZiFmmAo9282DPawcx/ebwWERQRwZLUEEnM/jfxs14B3NAp6sZc4Gh3H18YCSaCmcgHkU0jBcnNVROBmHhgT/2ZWrS/CNe3ixsX80IkAj4zmX29kdaJAGS0XKQQuay0IHLMSY0gMBroiFwEIFSm8jASLHdutLQ7ZtpVXKlgzVVLUAEBeqJX5PkNrZ6K/MVIetg7EBWWFDEIwZh43ct3Er+3sB/slVfl5X9kyT3HmjctFG0nmeHFxBVC6aP6oP2g4IAe5C8b6R/uHT5Y82qsItU724UjIiIx5CI1431Hm4+9PPvXr87+/vHWULBC0AgBJKWKl3xzHvYZjzm9Y65zdacodClSAphXBDmlLFTe3S4nCns98X9bT6BSKTYAXUEPEECBnuqT9RhkI/AtvfCBZveO462eSkzkTr+ZRrFtDoGI9KUdCahgJHC8tCt7JQAKIXxTyZhCohSkxs8fXrhttgWRsZIfOdGaNOTEsFkVXAQIkCzwffO9X5pr3T7b+r+aP+ydLqlRWXAaRBRQIjZ7TysH+chweijyCyIGUQhoM05nIhWCgsT4T0NxK3IAbj/R+uPppgAm4slv1aJnE1/jOpHrvHLKUsUJxg04JQFfjF1PqUAuuOdY813N7tHEf2E0TQUPTgz9j0dG1gNRCT5CySBy54n2p6abpeBLY1kKntJbmHFSACXkcCQHivKGxd7JxP/VSHJ5sClj6QQARVPje1p5DARBSr6URP8wFIO8phcmi1BKFRf0y6NprqL9VST7zaYEMCAzNEqDwEEoeLoWKbDo5JaF7q1zndLpwcTfuth9pJ48NJENEyfBzAhIW5hVgZcg6cy+uHfo2Vin8lAszRVf81qIXFEUtzTLm1u9unFe5aHDzVHjuFGDQaQUeUsvPDjdfN9VY/Pex2ZNwb9n0U+f7OSAExiQGh8fTR+vJ/VAUxlAjFh5mSAjh0kAMXE0ck+nPjFE5C+f7AKSQ27qlM8m0cf21TOCgELqJICvjQ61nADMHVLyW1n0iYn6db0A0iq3dDoT+VJwdbd48NDcB+e7uSILfHu3OFCUSblkgUaC/LuR9Kh3SbA5J+9v9n5jplVWcRpIyWeHoj/YO+QAkX5r01tAIUDqxkawoKK0J4fiI14puDy3t3aLIJIZn4/k16YahWpPEAgnSEmATzTSr47VfGBW2otZ8tsHRtuCa7slKCQd0RN5KXaNwCfryXNZHIDYEJkBUKMHKKAgIb+dRZ8Zr6VEU+XHWvlnDy/sLawUUZEIciiJPnpZY865zFCKlH0A0VekXPaIIKiHUA8kYIpHh+KK3mNYBBIIwP6Cv3mi81Qt6glejX0HEApUO7QHJ+slZMrs82O1Q5HbF+zKvIQAEEd+caT2XORGieOR/9podt/0wvNZ8lzqhbbgdbKwW5pdQI5E7s79jeNOY2KPhT862mwUgYrU0PWaBA4F21OEFxPfUZ0qLSFnnbqNDUF1C7UmAuPBPEngP2vRN9MoNUDwWuRfTdzbWmXH6d5gdx1rAjiURT97+ahBBSRk0SmJT0/WKYiNnhg3/kAeCpWU/PpY+sk99Yw0UMj9wQB+cqL2+Eg6YpxzetNi/sFmD2bfSeLvRm44cN7jrpnOVZ1eiPxR5x4dSf5mOP340YUfbeafOtZ6uGRS2s+1evfsHZ72OsSNEtatVNxIo4wHAhTII4207XU0kEBb5f7J4U/nCxNlqNBajNzHx2uzCgUWBbmiWylukoSQTadXlTZsdOTzqb9/cigCHRCAhLixlb8W+6dr0USwiBLACADR9PpYPQZhKpnx5k7xVKP2J5P17yb+sNMSuGfv8Bfy+Td3insPnYTThyazp1K/KQTroyDrrfYIJAi+Lw9Q/Z2pxqP1qGEMAgCZ8V/q8c9fOfah+e735+Ws1280as8kOmIyq1hwmpBFxa9LGkxKwTXt3JX8xnj6pxNDC06rvDhXOVCUP9wpHh6vzXmdMAZBLpgqiplIfvHy0RdiP1RVIkQ+sXfoYOSPRG7I2DAK8EIt/vCVY7860xoivjpW+9c06geC9XlhXbFFgSemI/ncePaVkXTcuFzzMzILfNm7B/bUq2JiTNZJE4B4JfX/WI87qm65RiZwlLeW4YnR5LemRmIgrSIFWYhc2ytfTt2XRrM6aRCQDpKR9+4Z+nYSTQQLAhER4ok0TsjR0kylypoy4yve/+5lIxXtD1catx/W6/NkAMlK2IoxPlUdWllErQowIgLCgCXlKpKQOcTWFA5EJkJogS1xEWjLgAINEiGc8D4mKaiypwDk4Ok6isjStl0ROyOdX5bk1jfl+T4hWEqrjFXrK6vRS1iIcK1HiQDdJVG8Ks8X8phTJaPVNQkFTgLwPiGWqyZV1a+G0xAsAbFuYR79ZtNbjpQb18s3fmQpsT3jkYiowuiZ0yIVA682Q4pgdeV+UItaW94HfW4dc73CPPtbg182Q1nd+2DX9bZ95X6rw11zv5y6tnVdT7fkPxdlUfsCLPDqeW5GPJ9Bb99S7VYXrLT/JcZ+Q0l/3e+obVF+gEa4wZyvu5dzh5BRvxW38xzBoF54m8xnYOemLsy1feazu8dtF4VdFHZR2EVh4ChccmcltgWFPs+NXESw5IJ5xA7c7Hz6YP3O4YWLAtPGCdV2/f/CuRnqNjnLmuLYph6qFwb7tTefPcvatBfpz9vPtl105b9QbITCORcRqtJw/2n4OXjKeR5KXDmwlb/6NYY6kJ3F55OG92lHg/UUHVQHm5YYzsGVto9U14zzAp0M2GDmN/iJm8XCQUWfHa2ged6Crc/L72QU5ILIkEus1rSNecQbJiM6H629awvAylMiZ55iwhviYP3Zosl62vGU5lujT8/TXy7Y45v+4caZP61c/vx/8JwExyASAcIAAAAASUVORK5CYII=" alt="TeMAX" style="height:70px;margin-bottom:10px;">
-      <div style="font-size:11px;font-weight:600;color:var(--c4);letter-spacing:.1em;text-transform:uppercase;">Вътрешна платформа</div>
+<div id="s-login">
+  <div class="login-card">
+    <div class="login-top">
+      <img src="data:image/png;base64,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" alt="TeMAX">
+      <p>Вътрешна платформа</p>
     </div>
-    <label class="fl">Твоето три имена</label>
-    <input class="fi" id="l-name" placeholder="Иван Петров Иванов" onkeydown="if(event.key==='Enter')doLogin()">
-    <label class="fl">Магазин / Обект</label>
-    <select class="fi" id="l-store">
-      <option value="">-- Избери магазин --</option>
-      <option value="Централен офис">Централен офис</option>
-    </select>
-    <div class="err" id="l-err">Попълни всички полета.</div>
-    <button class="btn btn-primary" onclick="doLogin()">Влез в портала →</button>
-    <div style="text-align:center;margin-top:12px;">
-      <button class="btn btn-ghost btn-sm" onclick="showPin()">🔐 Администратор</button>
+    <div class="login-body">
+      <label class="fl">Три имена</label>
+      <input class="fi" id="l-name" placeholder="Иван Петров Иванов" onkeydown="if(event.key==='Enter')doLogin()">
+      <label class="fl">Магазин / Обект</label>
+      <select class="fi" id="l-store"><option value="">-- Избери --</option></select>
+      <p class="err" id="l-err"></p>
+      <button class="btn-login" onclick="doLogin()">Влез в платформата →</button>
+      <div class="login-adm">
+        <button onclick="showPinScreen()">🔐 Вход за администратор</button>
+      </div>
     </div>
   </div>
 </div>
 
-<!-- ══ MAIN APP ══════════════════════════════════════════════════ -->
-<div id="s-app" class="screen">
-
-  <!-- Navigation -->
+<div id="s-app">
   <nav class="nav">
-    <div class="nav-brand">
-      <img src="data:image/png;base64,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" alt="TeMAX" style="height:38px;">
-    </div>
+    <div class="nav-brand"><img src="data:image/png;base64,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" alt="TeMAX"></div>
     <div class="nav-tabs">
       <button class="nav-tab active" onclick="showModule('transport')">🚚 Транспортни заявки</button>
       <button class="nav-tab" onclick="showModule('bulletin')">📋 Бюлетин</button>
       <button class="nav-tab" onclick="showModule('docs')">📁 Инструкции</button>
-      <button class="nav-tab admin-only" onclick="showModule('admin')" style="display:none;">⚙ Администрация</button>
+      <button class="nav-tab adm" onclick="showModule('admin')" style="display:none;">⚙ Администрация</button>
     </div>
     <div class="nav-right">
-      <div class="user-badge">
-        <span>👤</span>
-        <span id="nav-name">...</span>
-        <span class="store-badge" id="nav-store">...</span>
-      </div>
-      <button class="btn btn-ghost btn-sm" onclick="doLogout()">Изход</button>
+      <div class="user-chip"><span>👤</span><span id="nav-name"></span><span class="store-chip" id="nav-store"></span></div>
+      <button class="btn-sm" onclick="doLogout()">Изход</button>
     </div>
   </nav>
 
-  <!-- ── TRANSPORT MODULE ───────────────────────────────────── -->
-  <div id="mod-transport" class="page-wrap">
-    <div class="page-title">🚚 Транспортни заявки</div>
-    <div class="page-sub">Подай заявка за доставка до клиент.</div>
-
-    <!-- Metrics (admin only) -->
+  <div id="mod-transport" class="page">
+    <div class="pg-title">🚚 Транспортни заявки</div>
+    <div class="pg-sub">Подай заявка за доставка до клиент.</div>
     <div id="tr-metrics" class="metrics" style="display:none;">
-      <div class="metric"><div class="metric-val" id="m-total">0</div><div class="metric-lbl">Общо заявки</div></div>
+      <div class="metric"><div class="metric-val" id="m-total">0</div><div class="metric-lbl">Общо</div></div>
       <div class="metric"><div class="metric-val" style="color:var(--amb);" id="m-pending">0</div><div class="metric-lbl">Изчакват</div></div>
       <div class="metric"><div class="metric-val" style="color:var(--grn);" id="m-done">0</div><div class="metric-lbl">Изпълнени</div></div>
-      <div class="metric"><div class="metric-val" style="color:var(--red);" id="m-cancel">0</div><div class="metric-lbl">Отказани</div></div>
+      <div class="metric"><div class="metric-val" style="color:#dc2626;" id="m-cancel">0</div><div class="metric-lbl">Отказани</div></div>
     </div>
-
-    <!-- New order button -->
-    <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
+      <div id="tr-filters" class="filter-bar" style="display:none;margin:0;">
+        <button class="filter-btn active" onclick="filterOrders('all',this)">Всички</button>
+        <button class="filter-btn" onclick="filterOrders('pending',this)">Изчаква</button>
+        <button class="filter-btn" onclick="filterOrders('approved',this)">Одобрена</button>
+        <button class="filter-btn" onclick="filterOrders('delivered',this)">Изпълнена</button>
+        <button class="filter-btn" onclick="filterOrders('cancelled',this)">Отказана</button>
+        <button class="filter-btn" onclick="filterOrders('delayed',this)">Отложена</button>
+        <input class="filter-inp" id="tr-search" placeholder="Търси..." oninput="renderOrders()">
+      </div>
       <button class="btn btn-green" onclick="openOrderModal()">+ Нова заявка</button>
     </div>
-
-    <!-- Filter bar (admin) -->
-    <div id="tr-filters" class="filter-bar" style="display:none;">
-      <button class="filter-btn active" onclick="filterOrders('all',this)">Всички</button>
-      <button class="filter-btn" onclick="filterOrders('pending',this)">Изчаква</button>
-      <button class="filter-btn" onclick="filterOrders('approved',this)">Одобрена</button>
-      <button class="filter-btn" onclick="filterOrders('delivered',this)">Изпълнена</button>
-      <button class="filter-btn" onclick="filterOrders('cancelled',this)">Отказана</button>
-      <button class="filter-btn" onclick="filterOrders('delayed',this)">Отложена</button>
-      <input class="filter-inp" id="tr-search" placeholder="Търси..." oninput="renderOrders()">
-    </div>
-
-    <div class="card" style="padding:0;">
-      <div class="tbl-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>Дата / Час</th>
-              <th>Магазин</th>
-              <th>Клиент</th>
-              <th>Телефон</th>
-              <th>Продукт</th>
-              <th>Кол.</th>
-              <th>Адрес</th>
-              <th>Статус</th>
-              <th>Действия</th>
-            </tr>
-          </thead>
-          <tbody id="tr-body">
-            <tr><td colspan="10" style="text-align:center;padding:30px;color:var(--muted);">Зареждане...</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
+    <div class="card" style="padding:0;"><div class="tbl-wrap">
+      <table>
+        <thead><tr><th>#</th><th>Дата / Час</th><th>Магазин</th><th>Клиент</th><th>Телефон</th><th>Продукт</th><th>Кол.</th><th>Адрес</th><th>Статус</th><th></th></tr></thead>
+        <tbody id="tr-body"><tr><td colspan="10" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
+      </table>
+    </div></div>
   </div>
 
-  <!-- ── BULLETIN MODULE ────────────────────────────────────── -->
-  <div id="mod-bulletin" class="page-wrap" style="display:none;padding:0;">
+  <div id="mod-bulletin" style="display:none;">
     <iframe class="bul-frame" src="https://tenchotenev13-afk.github.io/--buletin/" title="Т-Бюлетин"></iframe>
   </div>
 
-  <!-- ── DOCS MODULE ────────────────────────────────────────── -->
-  <div id="mod-docs" class="page-wrap" style="display:none;">
-    <div class="page-title">📁 Инструкции & Документи</div>
-    <div class="page-sub">Процедури, наредби и полезни ресурси.</div>
-
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px;">
+  <div id="mod-docs" class="page" style="display:none;">
+    <div class="pg-title">📁 Инструкции & Документи</div>
+    <div class="pg-sub">Процедури, наредби и ресурси.</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px;">
       <div class="filter-bar" style="margin:0;">
         <button class="filter-btn active" onclick="filterDocs('all',this)">Всички</button>
         <button class="filter-btn" onclick="filterDocs('SAP',this)">SAP</button>
@@ -269,523 +174,463 @@ tr:hover td{background:var(--surf);}
         <button class="filter-btn" onclick="filterDocs('Обучения',this)">Обучения</button>
         <button class="filter-btn" onclick="filterDocs('Формуляри',this)">Формуляри</button>
       </div>
-      <button class="btn btn-green btn-sm admin-only" onclick="openDocModal()" style="display:none;">+ Добави документ</button>
+      <button class="btn btn-green adm" onclick="document.getElementById('doc-modal').classList.add('open')" style="display:none;">+ Добави документ</button>
     </div>
-
-    <div class="doc-grid" id="doc-grid">
-      <div class="empty" style="grid-column:1/-1;">
-        <div class="empty-icon">📁</div>
-        <div class="empty-title">Няма документи</div>
-        <div class="empty-sub">Администраторът може да добави инструкции и документи.</div>
-      </div>
-    </div>
+    <div class="doc-grid" id="doc-grid"></div>
   </div>
 
-  <!-- ── ADMIN MODULE ───────────────────────────────────────── -->
-  <div id="mod-admin" class="page-wrap" style="display:none;">
-    <div class="page-title">⚙ Администрация</div>
-    <div class="page-sub">Управление на магазини, получатели и настройки.</div>
-
+  <div id="mod-admin" class="page" style="display:none;">
+    <div class="pg-title">⚙ Администрация</div>
+    <div class="pg-sub">Управление на магазини и настройки.</div>
     <div class="card">
       <div class="card-title">🏪 Магазини</div>
-      <div class="tbl-wrap">
-        <table>
-          <thead><tr><th>Магазин</th><th>Град</th><th>Действия</th></tr></thead>
-          <tbody id="stores-body"><tr><td colspan="3" style="text-align:center;padding:20px;color:var(--muted);">Зареждане...</td></tr></tbody>
-        </table>
-      </div>
-      <div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
-        <input class="fi" id="new-store-name" placeholder="Название на магазина" style="flex:2;min-width:150px;">
+      <div class="tbl-wrap"><table>
+        <thead><tr><th>Магазин</th><th>Град</th><th></th></tr></thead>
+        <tbody id="stores-body"></tbody>
+      </table></div>
+      <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;">
+        <input class="fi" id="new-store-name" placeholder="Название" style="flex:2;min-width:140px;">
         <input class="fi" id="new-store-city" placeholder="Град" style="flex:1;min-width:100px;">
-        <button class="btn btn-green btn-sm" onclick="addStore()">+ Добави</button>
+        <button class="btn btn-green" onclick="addStore()">+ Добави</button>
       </div>
     </div>
-
     <div class="card">
       <div class="card-title">🔐 Смени PIN</div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-        <input type="password" class="fi" id="new-pin" placeholder="Нов PIN (4-6 цифри)" style="flex:1;max-width:200px;">
-        <button class="btn btn-amber btn-sm" onclick="changePin()">Смени PIN</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input type="password" class="fi" id="new-pin" placeholder="Нов PIN (4-6 цифри)" style="max-width:200px;">
+        <button class="btn btn-amber" onclick="changePin()">Смени</button>
       </div>
-    </div>
-  </div>
-
-</div>
-
-<!-- ══ MODALS ════════════════════════════════════════════════════ -->
-
-<!-- New Order Modal -->
-<div class="modal-bg" id="order-modal">
-  <div class="modal">
-    <h3>🚚 Нова транспортна заявка</h3>
-    <div class="modal-sub">Попълни данните за доставката до клиента.</div>
-    <div class="form-grid">
-      <div>
-        <label class="fl">Дата *</label>
-        <input type="date" class="fi" id="o-date">
-      </div>
-      <div>
-        <label class="fl">Час *</label>
-        <input type="time" class="fi" id="o-hour">
-      </div>
-      <div>
-        <label class="fl">Номер на бон</label>
-        <input class="fi" id="o-bon" placeholder="напр. 000123">
-      </div>
-      <div>
-        <label class="fl">Магазин</label>
-        <input class="fi" id="o-store" readonly style="background:var(--surf);">
-      </div>
-      <div>
-        <label class="fl">Три имена на клиента *</label>
-        <input class="fi" id="o-name" placeholder="Иван Петров Иванов">
-      </div>
-      <div>
-        <label class="fl">Телефон *</label>
-        <input class="fi" id="o-phone" placeholder="0888 000 000">
-      </div>
-      <div>
-        <label class="fl">Продукт *</label>
-        <input class="fi" id="o-product" placeholder="напр. Диван Comfort 3+2">
-      </div>
-      <div>
-        <label class="fl">Цвят / Модел</label>
-        <input class="fi" id="o-color" placeholder="напр. Бежово">
-      </div>
-      <div>
-        <label class="fl">Количество</label>
-        <input type="number" class="fi" id="o-qty" value="1" min="1">
-      </div>
-      <div>
-        <label class="fl">Агент (обработва)</label>
-        <input class="fi" id="o-agent" placeholder="напр. Мария Иванова">
-      </div>
-      <div class="full">
-        <label class="fl">Адрес за доставка *</label>
-        <input class="fi" id="o-addr" placeholder="гр. Варна, ул. Примерна 1, ет. 3">
-      </div>
-      <div class="full">
-        <label class="fl">Бележки</label>
-        <input class="fi" id="o-notes" placeholder="Допълнителна информация...">
-      </div>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('order-modal')">Откажи</button>
-      <button class="btn btn-green" onclick="submitOrder()">✓ Подай заявката</button>
     </div>
   </div>
 </div>
 
-<!-- Status change modal (admin) -->
-<div class="modal-bg" id="status-modal">
-  <div class="modal">
-    <h3>Промени статус</h3>
-    <div class="modal-sub" id="status-modal-info">Заявка #...</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">
-      <button class="btn" style="background:#fef3c7;color:#92400e;" onclick="setStatus('pending')">⏳ Изчаква</button>
-      <button class="btn" style="background:#dbeafe;color:#1e3a5f;" onclick="setStatus('approved')">✓ Одобрена</button>
-      <button class="btn btn-green" onclick="setStatus('delivered')">✅ Изпълнена</button>
-      <button class="btn" style="background:#f3e8ff;color:#4c1d95;" onclick="setStatus('delayed')">⏱ Отложена</button>
-      <button class="btn btn-red" style="grid-column:1/-1;" onclick="setStatus('cancelled')">✕ Отказана</button>
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('status-modal')">Затвори</button>
-    </div>
+<!-- ORDER MODAL -->
+<div class="modal-bg" id="order-modal"><div class="modal">
+  <h3>🚚 Нова транспортна заявка</h3><div class="modal-sub">Полетата с * са задължителни.</div>
+  <div class="form-grid">
+    <div><label class="fl">Дата *</label><input type="date" class="fi" id="o-date"></div>
+    <div><label class="fl">Час</label><input type="time" class="fi" id="o-hour"></div>
+    <div><label class="fl">№ Бон</label><input class="fi" id="o-bon" placeholder="000123"></div>
+    <div><label class="fl">Магазин</label><input class="fi" id="o-store" readonly style="background:var(--surf);"></div>
+    <div><label class="fl">Три имена на клиента *</label><input class="fi" id="o-name" placeholder="Иван Петров Иванов"></div>
+    <div><label class="fl">Телефон *</label><input class="fi" id="o-phone" placeholder="0888 000 000"></div>
+    <div><label class="fl">Продукт *</label><input class="fi" id="o-product" placeholder="напр. Диван Comfort"></div>
+    <div><label class="fl">Цвят / Модел</label><input class="fi" id="o-color" placeholder="напр. Бежово"></div>
+    <div><label class="fl">Количество</label><input type="number" class="fi" id="o-qty" value="1" min="1"></div>
+    <div><label class="fl">Агент</label><input class="fi" id="o-agent"></div>
+    <div class="full"><label class="fl">Адрес за доставка *</label><input class="fi" id="o-addr" placeholder="гр. Варна, ул. Примерна 1, ет. 3, ап. 5"></div>
+    <div class="full"><label class="fl">Бележки</label><input class="fi" id="o-notes" placeholder="Допълнителна информация..."></div>
   </div>
-</div>
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick="closeModal('order-modal')">Откажи</button>
+    <button class="btn btn-green" onclick="submitOrder()">✓ Подай заявката</button>
+  </div>
+</div></div>
 
-<!-- Doc modal (admin) -->
-<div class="modal-bg" id="doc-modal">
-  <div class="modal">
-    <h3>+ Добави документ</h3>
-    <label class="fl">Заглавие</label>
-    <input class="fi" id="d-title" placeholder="напр. Процедура за ревизии">
-    <label class="fl">Категория</label>
-    <select class="fi" id="d-cat">
-      <option>SAP</option><option>Процедури</option>
-      <option>Обучения</option><option>Формуляри</option><option>Друго</option>
-    </select>
-    <label class="fl">Линк (URL)</label>
-    <input class="fi" id="d-url" placeholder="https://...">
-    <label class="fl">Описание</label>
-    <input class="fi" id="d-desc" placeholder="Кратко описание">
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeModal('doc-modal')">Откажи</button>
-      <button class="btn btn-green" onclick="submitDoc()">+ Добави</button>
-    </div>
+<!-- STATUS MODAL -->
+<div class="modal-bg" id="status-modal"><div class="modal">
+  <h3>Промени статус</h3><div class="modal-sub" id="status-modal-info"></div>
+  <div class="status-grid">
+    <button class="btn" style="background:#fef3c7;color:#92400e;" onclick="setStatus('pending')">⏳ Изчаква</button>
+    <button class="btn" style="background:#dbeafe;color:#1e3a5f;" onclick="setStatus('approved')">✓ Одобрена</button>
+    <button class="btn btn-green" onclick="setStatus('delivered')">✅ Изпълнена</button>
+    <button class="btn" style="background:#f3e8ff;color:#4c1d95;" onclick="setStatus('delayed')">⏱ Отложена</button>
+    <button class="btn btn-red" style="grid-column:1/-1;" onclick="setStatus('cancelled')">✕ Отказана</button>
   </div>
-</div>
+  <div class="modal-actions"><button class="btn btn-ghost" onclick="closeModal('status-modal')">Затвори</button></div>
+</div></div>
 
-<!-- PIN overlay -->
-<div class="pin-overlay" id="pin-overlay">
-  <div class="pin-box">
-    <h3>🔐 Администратор</h3>
-    <p>Въведи PIN за административен достъп.</p>
-    <input type="password" class="pin-inp" id="pin-inp" maxlength="6" placeholder="••••" onkeydown="if(event.key==='Enter')checkPin()">
-    <div style="display:flex;gap:8px;margin-top:12px;">
-      <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('pin-overlay')">Откажи</button>
-      <button class="btn btn-primary" style="flex:2;margin-top:0;" onclick="checkPin()">Влез</button>
-    </div>
-    <p style="color:var(--red);font-size:12px;margin-top:8px;display:none;" id="pin-err">Грешен PIN</p>
+<!-- DOC MODAL -->
+<div class="modal-bg" id="doc-modal"><div class="modal">
+  <h3>+ Добави документ</h3>
+  <label class="fl">Заглавие</label><input class="fi" id="d-title" placeholder="напр. Процедура за ревизии">
+  <label class="fl">Категория</label>
+  <select class="fi" id="d-cat"><option>SAP</option><option>Процедури</option><option>Обучения</option><option>Формуляри</option><option>Друго</option></select>
+  <label class="fl">Линк (URL)</label><input class="fi" id="d-url" placeholder="https://...">
+  <label class="fl">Описание</label><input class="fi" id="d-desc" placeholder="Кратко описание">
+  <div class="modal-actions">
+    <button class="btn btn-ghost" onclick="closeModal('doc-modal')">Откажи</button>
+    <button class="btn btn-green" onclick="submitDoc()">Добави</button>
   </div>
-</div>
+</div></div>
+
+<!-- PIN OVERLAY -->
+<div class="pin-overlay" id="pin-overlay"><div class="pin-box">
+  <h3>🔐 Администраторски вход</h3>
+  <p>Въведи PIN за достъп.</p>
+  <input type="password" class="pin-inp" id="pin-inp" maxlength="6" placeholder="••••" onkeydown="if(event.key==='Enter')checkPin()">
+  <p style="color:#dc2626;font-size:12px;margin-top:8px;display:none;" id="pin-err">Грешен PIN. Опитай отново.</p>
+  <div class="pin-actions">
+    <button class="btn btn-ghost" style="flex:1;" onclick="closeModal('pin-overlay')">Откажи</button>
+    <button class="btn btn-green" style="flex:2;" onclick="checkPin()">Влез</button>
+  </div>
+</div></div>
 
 <script>
 
-const SB_URL = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
-const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
-const BULETIN_URL = 'https://tenchotenev13-afk.github.io/--buletin/';
-var sb = null;
-var isAdmin = false;
-var currentUser = null;
-var currentStore = null;
-var orders = [];
-var stores = [];
-var docs = [];
-var _orderFilter = 'all';
-var _docFilter = 'all';
-var _statusOrderId = null;
+/* ─── CONFIG ─────────────────────────────────────────────── */
+var API   = 'https://xiwkdiqqplgdcrkewgtv.supabase.co/rest/v1';
+var HEADS = {
+  'apikey':        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
+  'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
+  'Content-Type':  'application/json',
+  'Prefer':        'return=minimal'
+};
 
-// ── UTILS ────────────────────────────────────────────────────────────────────
-function esc(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
-function fmt(d){if(!d)return'—';var dt=new Date(d);return dt.toLocaleDateString('bg-BG')+'  '+dt.toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit'});}
-function today(){return new Date().toISOString().slice(0,10);}
-function nowTime(){var d=new Date();return d.getHours().toString().padStart(2,'0')+':'+d.getMinutes().toString().padStart(2,'0');}
-function toast(msg,c){var t=document.getElementById('toast');t.textContent=msg;t.style.background=c||'#16a34a';t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2500);}
-function closeModal(id){document.getElementById(id).classList.remove('open');}
-function statusBadge(s){var m={pending:'⏳ Изчаква',approved:'✓ Одобрена',delivered:'✅ Изпълнена',cancelled:'✕ Отказана',delayed:'⏱ Отложена'};var cls={pending:'st-pending',approved:'st-approved',delivered:'st-delivered',cancelled:'st-cancelled',delayed:'st-delayed'};return '<span class="status '+( cls[s]||'st-pending')+'">'+esc(m[s]||s)+'</span>';}
-
-// ── LOGIN ────────────────────────────────────────────────────────────────────
-async function init(){
-  try{
-    sb = supabase.createClient(SB_URL, SB_KEY);
-    // Load stores for dropdown
-    var result = await sb.from('stores').select('*').order('name');
-    if(result.error){ console.error('Stores error:', result.error); }
-    stores = result.data || [];
-    var sel = document.getElementById('l-store');
-    // Remove old options except first
-    while(sel.options.length > 1){ sel.remove(1); }
-    stores.forEach(function(s){
-      var opt = document.createElement('option');
-      opt.value = s.name; opt.textContent = s.name;
-      sel.appendChild(opt);
-    });
-    console.log('Stores loaded:', stores.length);
-  }catch(e){
-    console.error('Init error:', e);
-  }
-  // Check if already logged in
-  var saved = localStorage.getItem('tb_portal_user');
-  if(saved){
-    try{
-      var u = JSON.parse(saved);
-      if(u.name && u.store){
-        currentUser = u.name; currentStore = u.store;
-        isAdmin = localStorage.getItem('tb_is_admin') === '1';
-        startApp();
-        return;
-      }
-    }catch(e){}
-  }
+/* ─── SUPABASE REST HELPERS ──────────────────────────────── */
+function sbGet(table, params) {
+  var url = API + '/' + table + (params ? '?' + params : '');
+  return fetch(url, { headers: HEADS }).then(function(r) { return r.json(); });
+}
+function sbPost(table, body) {
+  return fetch(API + '/' + table, {
+    method: 'POST', headers: HEADS, body: JSON.stringify(body)
+  }).then(function(r) { return r.ok ? {ok:true} : r.json().then(function(e){return {ok:false,error:e};}); });
+}
+function sbPatch(table, filter, body) {
+  return fetch(API + '/' + table + '?' + filter, {
+    method: 'PATCH',
+    headers: Object.assign({}, HEADS, {'Prefer':'return=minimal'}),
+    body: JSON.stringify(body)
+  }).then(function(r) { return r.ok ? {ok:true} : r.json().then(function(e){return {ok:false,error:e};}); });
+}
+function sbDelete(table, filter) {
+  return fetch(API + '/' + table + '?' + filter, {
+    method: 'DELETE', headers: HEADS
+  }).then(function(r) { return {ok:r.ok}; });
 }
 
-function doLogin(){
-  var name = document.getElementById('l-name').value.trim();
-  var store = document.getElementById('l-store').value;
-  var err = document.getElementById('l-err');
-  if(!name){ err.textContent='Въведи твоето три имена.'; err.style.display='block'; return; }
-  if(!store){ err.textContent='Избери магазин от списъка.'; err.style.display='block'; return; }
-  err.style.display='none';
-  currentUser = name;
-  currentStore = store;
-  try{
-    localStorage.setItem('tb_portal_user', JSON.stringify({name:name, store:store}));
-    localStorage.setItem('tb_name', name);
-  }catch(e){}
+/* ─── APP STATE ──────────────────────────────────────────── */
+var isAdmin = false, currentUser = '', currentStore = '';
+var orders = [], docs = [];
+var orderFilter = 'all', docFilter = 'all';
+var statusOrderId = null;
+
+var STORES = [
+  'Варна','Бургас','Русе','Стара Загора','Пловдив','Плевен',
+  'Шумен','Добрич','Велико Търново','Сливен','Силистра',
+  'Търговище','Габрово','Карлово','Пирдоп','Раднево',
+  'Севлиево','Монтана','Враца','Козлодуй','Кърджали',
+  'Дупница','Гоце Делчев','Петрич','Троян','Централен офис'
+];
+
+/* ─── UTILS ──────────────────────────────────────────────── */
+function esc(s) {
+  return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '';
+}
+function today()   { return new Date().toISOString().slice(0,10); }
+function nowTime() { var d=new Date(); return ('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2); }
+function toast(msg, col) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.style.background = col||'#16a34a';
+  t.classList.add('show');
+  setTimeout(function(){ t.classList.remove('show'); }, 2500);
+}
+function stBadge(s) {
+  var L = {pending:'⏳ Изчаква',approved:'✓ Одобрена',delivered:'✅ Изпълнена',cancelled:'✕ Отказана',delayed:'⏱ Отложена'};
+  var C = {pending:'background:#fef3c7;color:#92400e',approved:'background:#dbeafe;color:#1e3a5f',delivered:'background:#dcfce7;color:#14532d',cancelled:'background:#fee2e2;color:#991b1b',delayed:'background:#f3e8ff;color:#4c1d95'};
+  return '<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;display:inline-flex;align-items:center;'+(C[s]||C.pending)+'">'+esc(L[s]||s)+'</span>';
+}
+function closeModal(id) { document.getElementById(id).classList.remove('open'); }
+document.addEventListener('click', function(e) {
+  if (e.target.classList.contains('modal-bg') || e.target.classList.contains('pin-overlay'))
+    e.target.classList.remove('open');
+});
+
+/* ─── INIT ───────────────────────────────────────────────── */
+function initApp() {
+  // Populate stores dropdown
+  var sel = document.getElementById('l-store');
+  STORES.slice().sort().forEach(function(name) {
+    var o = document.createElement('option');
+    o.value = name; o.textContent = name;
+    sel.appendChild(o);
+  });
+  // Try loading stores from Supabase (updates list if different)
+  sbGet('stores','select=name&order=name').then(function(data) {
+    if (Array.isArray(data) && data.length) {
+      while (sel.options.length > 1) sel.remove(1);
+      data.forEach(function(s) {
+        var o = document.createElement('option');
+        o.value = s.name; o.textContent = s.name;
+        sel.appendChild(o);
+      });
+    }
+  }).catch(function(){});
+  // Restore session
+  try {
+    var u = JSON.parse(localStorage.getItem('tx_user')||'null');
+    if (u && u.name && u.store) {
+      currentUser = u.name; currentStore = u.store;
+      isAdmin = localStorage.getItem('tx_admin') === '1';
+      startApp(); return;
+    }
+  } catch(e) {}
+}
+
+/* ─── LOGIN ──────────────────────────────────────────────── */
+function doLogin() {
+  var name  = (document.getElementById('l-name').value ||'').trim();
+  var store = (document.getElementById('l-store').value||'').trim();
+  var err   = document.getElementById('l-err');
+  if (!name)  { err.textContent='Въведи твоето три имена.'; err.style.display='block'; return; }
+  if (!store) { err.textContent='Избери магазин.';          err.style.display='block'; return; }
+  err.style.display = 'none';
+  currentUser = name; currentStore = store;
+  try { localStorage.setItem('tx_user', JSON.stringify({name:name,store:store})); } catch(e){}
+  try { localStorage.setItem('tb_name', name); } catch(e){}
   startApp();
 }
 
-function doLogout(){
-  localStorage.removeItem('tb_portal_user');
-  localStorage.removeItem('tb_is_admin');
-  isAdmin = false; currentUser = null; currentStore = null;
-  document.getElementById('s-login').classList.add('active');
-  document.getElementById('s-app').classList.remove('active');
+function doLogout() {
+  try { localStorage.removeItem('tx_user'); localStorage.removeItem('tx_admin'); } catch(e){}
+  isAdmin = false; currentUser = ''; currentStore = '';
+  document.getElementById('s-app').style.display   = 'none';
+  document.getElementById('s-login').style.display = 'flex';
 }
 
-function startApp(){
-  // Switch screens
-  document.getElementById('s-login').classList.remove('active');
-  document.getElementById('s-app').classList.add('active');
-  // Update nav
-  document.getElementById('nav-name').textContent = currentUser || '';
-  document.getElementById('nav-store').textContent = currentStore || '';
-  // Admin UI
-  if(isAdmin){
-    document.querySelectorAll('.admin-only').forEach(function(el){
-      el.style.display = 'inline-flex';
-    });
-    document.getElementById('tr-metrics').style.display = 'grid';
-    document.getElementById('tr-filters').style.display = 'flex';
-  }
-  // Load data
-  loadOrders().catch(function(e){ console.error('loadOrders:', e); });
-  loadDocs().catch(function(e){ console.error('loadDocs:', e); });
+function startApp() {
+  document.getElementById('s-login').style.display = 'none';
+  document.getElementById('s-app').style.display   = 'flex';
+  document.getElementById('nav-name').textContent  = currentUser;
+  document.getElementById('nav-store').textContent = currentStore;
+  if (isAdmin) showAdminUI();
+  loadOrders();
+  loadDocs();
   showModule('transport');
 }
 
-// ── MODULES ──────────────────────────────────────────────────────────────────
-function showModule(mod){
-  ['transport','bulletin','docs','admin'].forEach(function(m){
+function showAdminUI() {
+  document.querySelectorAll('.adm').forEach(function(el){ el.style.display='inline-flex'; });
+  document.getElementById('tr-metrics').style.display = 'grid';
+  document.getElementById('tr-filters').style.display = 'flex';
+}
+
+/* ─── MODULES ────────────────────────────────────────────── */
+function showModule(mod) {
+  ['transport','bulletin','docs','admin'].forEach(function(m) {
     document.getElementById('mod-'+m).style.display = m===mod ? '' : 'none';
   });
-  document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
-  var tabs = {'transport':0,'bulletin':1,'docs':2,'admin':3};
-  var tabEls = document.querySelectorAll('.nav-tab');
-  if(tabEls[tabs[mod]]) tabEls[tabs[mod]].classList.add('active');
-  if(mod==='admin') loadStoresAdmin();
+  document.querySelectorAll('.nav-tab').forEach(function(t){ t.classList.remove('active'); });
+  var i = {transport:0,bulletin:1,docs:2,admin:3}[mod];
+  var tabs = document.querySelectorAll('.nav-tab');
+  if (tabs[i]) tabs[i].classList.add('active');
+  if (mod==='admin') loadStoresAdmin();
 }
 
-// ── TRANSPORT ORDERS ──────────────────────────────────────────────────────────
-async function loadOrders(){
-  var query = sb.from('transport_orders').select('*').order('created_at',{ascending:false});
-  if(!isAdmin) query = query.eq('store_name', currentStore);
-  var {data,error} = await query;
-  if(error){console.error(error);return;}
-  orders = data || [];
-  renderOrders();
-  updateMetrics();
-  // Real-time
-  sb.channel('transport').on('postgres_changes',{event:'*',schema:'public',table:'transport_orders'},function(){loadOrders();}).subscribe();
+/* ─── TRANSPORT ──────────────────────────────────────────── */
+function loadOrders() {
+  var params = 'order=created_at.desc';
+  if (!isAdmin) params += '&store_name=eq.' + encodeURIComponent(currentStore);
+  sbGet('transport_orders', params).then(function(data) {
+    orders = Array.isArray(data) ? data : [];
+    renderOrders();
+    updateMetrics();
+  }).catch(function(e){ console.warn('Orders:', e); });
 }
 
-function updateMetrics(){
-  document.getElementById('m-total').textContent = orders.length;
-  document.getElementById('m-pending').textContent = orders.filter(function(o){return o.status==='pending';}).length;
-  document.getElementById('m-done').textContent = orders.filter(function(o){return o.status==='delivered';}).length;
-  document.getElementById('m-cancel').textContent = orders.filter(function(o){return o.status==='cancelled';}).length;
+function updateMetrics() {
+  document.getElementById('m-total').textContent   = orders.length;
+  document.getElementById('m-pending').textContent  = orders.filter(function(o){ return o.status==='pending'; }).length;
+  document.getElementById('m-done').textContent     = orders.filter(function(o){ return o.status==='delivered'; }).length;
+  document.getElementById('m-cancel').textContent   = orders.filter(function(o){ return o.status==='cancelled'; }).length;
 }
 
-function renderOrders(){
-  var search = (document.getElementById('tr-search')||{}).value||'';
-  var list = orders.filter(function(o){
-    if(_orderFilter!=='all' && o.status!==_orderFilter) return false;
-    if(search){
-      var q = search.toLowerCase();
-      return (o.customer_name||'').toLowerCase().includes(q) ||
-             (o.product||'').toLowerCase().includes(q) ||
-             (o.store_name||'').toLowerCase().includes(q) ||
-             (o.phone||'').includes(q);
-    }
-    return true;
+function renderOrders() {
+  var q = ((document.getElementById('tr-search')||{}).value||'').toLowerCase();
+  var list = orders.filter(function(o) {
+    if (orderFilter!=='all' && o.status!==orderFilter) return false;
+    if (!q) return true;
+    return (o.customer_name||'').toLowerCase().indexOf(q)>=0 ||
+           (o.product||'').toLowerCase().indexOf(q)>=0 ||
+           (o.store_name||'').toLowerCase().indexOf(q)>=0 ||
+           (o.phone||'').indexOf(q)>=0;
   });
   var body = document.getElementById('tr-body');
-  if(!list.length){
-    body.innerHTML = '<tr><td colspan="10"><div class="empty"><div class="empty-icon">🚚</div><div class="empty-title">Няма заявки</div><div class="empty-sub">Натисни "+ Нова заявка" за да подадеш.</div></div></td></tr>';
+  if (!list.length) {
+    body.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:30px;color:#94a3b8;">Няма заявки. Натисни &quot;+ Нова заявка&quot;.</td></tr>';
     return;
   }
-  body.innerHTML = list.map(function(o,i){
-    var acts = isAdmin
-      ? '<button class="btn btn-ghost btn-sm" onclick="openStatusModal(\''+o.id+'\',\''+esc(o.customer_name||'')+'\')">Статус</button>'
+  body.innerHTML = list.map(function(o, i) {
+    var act = isAdmin
+      ? '<button onclick="openStatusModal(\''+o.id+'\',\''+esc(o.customer_name||'')+'\')">Статус</button>'
       : '';
-    return '<tr><td style="font-family:monospace;font-size:11px;color:var(--muted);">'+(i+1)+'</td>'+
-      '<td><div style="font-weight:500;">'+esc(o.date||'')+'</div><div style="font-size:11px;color:var(--muted);">'+esc(o.hour||'')+'</div></td>'+
-      '<td><span style="font-size:11px;background:var(--surf);border:1px solid var(--border);padding:2px 7px;border-radius:20px;">'+esc(o.store_name||'')+'</span></td>'+
-      '<td><div style="font-weight:500;">'+esc(o.customer_name||'')+'</div><div style="font-size:11px;color:var(--muted);">Бон: '+esc(o.bon||'—')+'</div></td>'+
-      '<td style="font-family:monospace;font-size:12px;">'+esc(o.phone||'')+'</td>'+
-      '<td><div>'+esc(o.product||'')+'</div><div style="font-size:11px;color:var(--muted);">'+esc(o.color||'')+'</div></td>'+
-      '<td style="text-align:center;font-weight:600;">'+esc(String(o.qty||1))+'</td>'+
-      '<td style="font-size:12px;max-width:160px;">'+esc(o.address||'')+'</td>'+
-      '<td>'+statusBadge(o.status||'pending')+'</td>'+
-      '<td>'+acts+'</td></tr>';
+    return '<tr>'+
+      '<td style="font-size:11px;color:#94a3b8;">'+(i+1)+'</td>'+
+      '<td><b>'+esc(o.date||'')+'</b><br><small>'+esc(o.hour||'')+'</small></td>'+
+      '<td>'+esc(o.store_name||'')+'</td>'+
+      '<td><b>'+esc(o.customer_name||'')+'</b><br><small>Бон: '+esc(o.bon||'—')+'</small></td>'+
+      '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
+      '<td>'+esc(o.product||'')+' <small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
+      '<td style="text-align:center;">'+esc(String(o.qty||1))+'</td>'+
+      '<td style="font-size:12px;">'+esc(o.address||'')+'</td>'+
+      '<td>'+stBadge(o.status||'pending')+'</td>'+
+      '<td>'+act+'</td></tr>';
   }).join('');
 }
 
-function filterOrders(f, btn){
-  _orderFilter = f;
-  document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.remove('active');});
-  if(btn) btn.classList.add('active');
+function filterOrders(f,btn) {
+  orderFilter = f;
+  document.querySelectorAll('.filter-btn').forEach(function(b){ b.classList.remove('active'); });
+  if (btn) btn.classList.add('active');
   renderOrders();
 }
 
-function openOrderModal(){
-  document.getElementById('o-date').value = today();
-  document.getElementById('o-hour').value = nowTime();
-  document.getElementById('o-bon').value = '';
+function openOrderModal() {
+  ['o-bon','o-name','o-phone','o-product','o-color','o-addr','o-notes'].forEach(function(id){
+    document.getElementById(id).value = '';
+  });
+  document.getElementById('o-date').value  = today();
+  document.getElementById('o-hour').value  = nowTime();
   document.getElementById('o-store').value = currentStore;
-  document.getElementById('o-name').value = '';
-  document.getElementById('o-phone').value = '';
-  document.getElementById('o-product').value = '';
-  document.getElementById('o-color').value = '';
-  document.getElementById('o-qty').value = '1';
+  document.getElementById('o-qty').value   = '1';
   document.getElementById('o-agent').value = currentUser;
-  document.getElementById('o-addr').value = '';
-  document.getElementById('o-notes').value = '';
   document.getElementById('order-modal').classList.add('open');
 }
 
-async function submitOrder(){
-  var name = document.getElementById('o-name').value.trim();
-  var phone = document.getElementById('o-phone').value.trim();
-  var product = document.getElementById('o-product').value.trim();
-  var addr = document.getElementById('o-addr').value.trim();
-  if(!name||!phone||!product||!addr){toast('Попълни задължителните полета *','#dc2626');return;}
-  var order = {
+function submitOrder() {
+  var f = function(id){ return (document.getElementById(id).value||'').trim(); };
+  if (!f('o-name')||!f('o-phone')||!f('o-product')||!f('o-addr')) {
+    toast('Попълни задължителните полета *','#dc2626'); return;
+  }
+  sbPost('transport_orders', {
     store_name: currentStore,
-    date: document.getElementById('o-date').value,
-    hour: document.getElementById('o-hour').value,
-    bon: document.getElementById('o-bon').value.trim(),
-    customer_name: name,
-    phone: phone,
-    product: product,
-    color: document.getElementById('o-color').value.trim(),
+    date: f('o-date'), hour: f('o-hour'), bon: f('o-bon'),
+    customer_name: f('o-name'), phone: f('o-phone'),
+    product: f('o-product'), color: f('o-color'),
     qty: parseInt(document.getElementById('o-qty').value)||1,
-    address: addr,
-    agent: document.getElementById('o-agent').value.trim(),
-    notes: document.getElementById('o-notes').value.trim(),
+    address: f('o-addr'), agent: f('o-agent'), notes: f('o-notes'),
     status: 'pending'
-  };
-  var {error} = await sb.from('transport_orders').insert(order);
-  if(error){toast('Грешка: '+error.message,'#dc2626');return;}
-  closeModal('order-modal');
-  toast('✓ Заявката е подадена успешно!');
-  loadOrders();
+  }).then(function(res) {
+    if (!res.ok) { toast('Грешка при запис','#dc2626'); return; }
+    closeModal('order-modal');
+    toast('✓ Заявката е подадена!');
+    loadOrders();
+  });
 }
 
-function openStatusModal(id, name){
-  _statusOrderId = id;
+function openStatusModal(id, name) {
+  statusOrderId = id;
   document.getElementById('status-modal-info').textContent = 'Клиент: '+name;
   document.getElementById('status-modal').classList.add('open');
 }
 
-async function setStatus(status){
-  if(!_statusOrderId)return;
-  var {error} = await sb.from('transport_orders').update({status:status, updated_at: new Date().toISOString()}).eq('id',_statusOrderId);
-  if(error){toast('Грешка: '+error.message,'#dc2626');return;}
-  closeModal('status-modal');
-  toast('✓ Статусът е обновен');
-  loadOrders();
+function setStatus(status) {
+  if (!statusOrderId) return;
+  sbPatch('transport_orders','id=eq.'+statusOrderId,{status:status}).then(function(res){
+    if (!res.ok) { toast('Грешка при обновяване','#dc2626'); return; }
+    closeModal('status-modal');
+    toast('✓ Статусът е обновен');
+    loadOrders();
+  });
 }
 
-// ── DOCUMENTS ────────────────────────────────────────────────────────────────
-async function loadDocs(){
-  var {data} = await sb.from('documents').select('*').order('created_at',{ascending:false});
-  docs = data || [];
-  renderDocs();
+/* ─── DOCUMENTS ──────────────────────────────────────────── */
+function loadDocs() {
+  sbGet('documents','order=created_at.desc').then(function(data){
+    docs = Array.isArray(data) ? data : [];
+    renderDocs();
+  }).catch(function(){});
 }
 
-function renderDocs(){
-  var list = docs.filter(function(d){return _docFilter==='all'||d.category===_docFilter;});
+function renderDocs() {
+  var list = docs.filter(function(d){ return docFilter==='all'||d.category===docFilter; });
   var grid = document.getElementById('doc-grid');
-  if(!list.length){
-    grid.innerHTML = '<div class="empty" style="grid-column:1/-1;"><div class="empty-icon">📁</div><div class="empty-title">Няма документи в тази категория</div></div>';
+  if (!list.length) {
+    grid.innerHTML='<div style="grid-column:1/-1;text-align:center;padding:30px;color:#94a3b8;"><div style="font-size:32px;">📁</div><div>Няма документи.</div></div>';
     return;
   }
-  var icons = {SAP:'🖥',Процедури:'📋',Обучения:'🎓',Формуляри:'📝',Друго:'📄'};
-  grid.innerHTML = list.map(function(d){
-    return '<div class="doc-card" onclick="window.open(''+d.url+'','_blank')">'+
-      '<div class="doc-icon">'+(icons[d.category]||'📄')+'</div>'+
-      '<div class="doc-title">'+esc(d.title||'')+'</div>'+
-      '<div class="doc-cat">'+esc(d.category||'')+'</div>'+
-      (d.description?'<div style="font-size:11px;color:var(--muted);">'+esc(d.description)+'</div>':'')+
+  var icons={SAP:'🖥',Процедури:'📋',Обучения:'🎓',Формуляри:'📝',Друго:'📄'};
+  grid.innerHTML=list.map(function(d){
+    return '<div class="doc-card" onclick="window.open(\''+d.url+'\',\'_blank\')">' +
+      '<div style="font-size:24px;">'+(icons[d.category]||'📄')+'</div>' +
+      '<div style="font-size:13px;font-weight:500;">'+esc(d.title||'')+'</div>' +
+      '<div style="font-size:11px;color:#94a3b8;">'+esc(d.category||'')+'</div>' +
+      (d.description?'<div style="font-size:11px;color:#64748b;">'+esc(d.description)+'</div>':'') +
       '</div>';
   }).join('');
 }
 
-function filterDocs(f,btn){
-  _docFilter=f;
+function filterDocs(f,btn) {
+  docFilter=f;
   document.querySelectorAll('.filter-btn').forEach(function(b){b.classList.remove('active');});
   if(btn)btn.classList.add('active');
   renderDocs();
 }
 
-function openDocModal(){document.getElementById('doc-modal').classList.add('open');}
+function submitDoc() {
+  var f=function(id){return(document.getElementById(id).value||'').trim();};
+  if (!f('d-title')||!f('d-url')){ toast('Въведи заглавие и линк','#dc2626'); return; }
+  sbPost('documents',{title:f('d-title'),category:document.getElementById('d-cat').value,url:f('d-url'),description:f('d-desc')})
+    .then(function(res){
+      if(!res.ok){toast('Грешка','#dc2626');return;}
+      closeModal('doc-modal');toast('✓ Документът е добавен');loadDocs();
+    });
+}
 
-async function submitDoc(){
-  var title=document.getElementById('d-title').value.trim();
-  var url=document.getElementById('d-url').value.trim();
-  if(!title||!url){toast('Въведи заглавие и линк','#dc2626');return;}
-  var {error} = await sb.from('documents').insert({
-    title:title, category:document.getElementById('d-cat').value,
-    url:url, description:document.getElementById('d-desc').value.trim()
+/* ─── ADMIN ──────────────────────────────────────────────── */
+function loadStoresAdmin() {
+  sbGet('stores','order=name').then(function(data){
+    var list = Array.isArray(data)?data:[];
+    var body = document.getElementById('stores-body');
+    if(!list.length){body.innerHTML='<tr><td colspan="3" style="text-align:center;padding:20px;color:#94a3b8;">Няма магазини.</td></tr>';return;}
+    body.innerHTML=list.map(function(s){
+      return '<tr><td style="font-weight:500;">'+esc(s.name)+'</td><td>'+esc(s.city||'')+'</td>'+
+        '<td><button onclick="deleteStore(\''+s.id+'\')">× Изтрий</button></td></tr>';
+    }).join('');
   });
-  if(error){toast('Грешка: '+error.message,'#dc2626');return;}
-  closeModal('doc-modal');toast('✓ Документът е добавен');loadDocs();
 }
 
-// ── ADMIN ────────────────────────────────────────────────────────────────────
-async function loadStoresAdmin(){
-  var {data} = await sb.from('stores').select('*').order('name');
-  stores = data||[];
-  var body = document.getElementById('stores-body');
-  if(!stores.length){body.innerHTML='<tr><td colspan="3" style="text-align:center;padding:20px;color:var(--muted);">Няма магазини.</td></tr>';return;}
-  body.innerHTML = stores.map(function(s){
-    return '<tr><td style="font-weight:500;">'+esc(s.name)+'</td><td>'+esc(s.city||'')+'</td>'+
-      '<td><button class="btn btn-ghost btn-sm" onclick="deleteStore(\''+s.id+'\')">Изтрий</button></td></tr>';
-  }).join('');
-}
-
-async function addStore(){
-  var name=document.getElementById('new-store-name').value.trim();
-  var city=document.getElementById('new-store-city').value.trim();
+function addStore() {
+  var name=(document.getElementById('new-store-name').value||'').trim();
+  var city=(document.getElementById('new-store-city').value||'').trim();
   if(!name){toast('Въведи название','#dc2626');return;}
-  var {error} = await sb.from('stores').insert({name:name,city:city});
-  if(error){toast('Грешка: '+error.message,'#dc2626');return;}
-  document.getElementById('new-store-name').value='';
-  document.getElementById('new-store-city').value='';
-  toast('✓ Магазинът е добавен');loadStoresAdmin();
+  sbPost('stores',{name:name,city:city,active:true}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    document.getElementById('new-store-name').value='';
+    document.getElementById('new-store-city').value='';
+    toast('✓ Добавен'); loadStoresAdmin();
+  });
 }
 
-async function deleteStore(id){
+function deleteStore(id) {
   if(!confirm('Изтрий магазина?'))return;
-  await sb.from('stores').delete().eq('id',id);
-  toast('✓ Изтрит');loadStoresAdmin();
+  sbDelete('stores','id=eq.'+id).then(function(){toast('✓ Изтрит');loadStoresAdmin();});
 }
 
-function changePin(){
-  var pin=document.getElementById('new-pin').value.trim();
+function changePin() {
+  var pin=(document.getElementById('new-pin').value||'').trim();
   if(!/^\d{4,6}$/.test(pin)){toast('PIN трябва да е 4-6 цифри','#dc2626');return;}
-  localStorage.setItem('tb_pin',pin);
+  try{localStorage.setItem('tx_pin',pin);}catch(e){}
   document.getElementById('new-pin').value='';
   toast('✓ PIN е сменен');
 }
 
-// ── PIN ──────────────────────────────────────────────────────────────────────
-function showPin(){
+/* ─── PIN ────────────────────────────────────────────────── */
+function showPinScreen() {
   document.getElementById('pin-inp').value='';
   document.getElementById('pin-err').style.display='none';
   document.getElementById('pin-overlay').classList.add('open');
-  setTimeout(function(){document.getElementById('pin-inp').focus();},100);
+  setTimeout(function(){document.getElementById('pin-inp').focus();},150);
 }
 
-function checkPin(){
+function checkPin() {
   var pin=document.getElementById('pin-inp').value;
-  var saved=localStorage.getItem('tb_pin')||'1234';
+  var saved=localStorage.getItem('tx_pin')||'1234';
   if(pin===saved){
     isAdmin=true;
-    localStorage.setItem('tb_is_admin','1');
+    try{localStorage.setItem('tx_admin','1');}catch(e){}
     closeModal('pin-overlay');
-    // If not logged in yet — just close
     if(!currentUser){toast('✓ Администраторски достъп');return;}
-    // Show admin elements
-    document.querySelectorAll('.admin-only').forEach(function(el){el.style.display='inline-flex';});
-    document.getElementById('tr-metrics').style.display='grid';
-    document.getElementById('tr-filters').style.display='flex';
-    loadOrders();toast('✓ Администраторски достъп');
+    showAdminUI(); loadOrders();
+    toast('✓ Администраторски достъп');
   } else {
     document.getElementById('pin-err').style.display='block';
   }
 }
 
-// Close modals on backdrop click
-document.addEventListener('click',function(e){
-  if(e.target.classList.contains('modal-bg')||e.target.classList.contains('pin-overlay'))
-    e.target.classList.remove('open');
-});
-
-// ── START ────────────────────────────────────────────────────────────────────
-init();
+/* ─── START ──────────────────────────────────────────────── */
+document.addEventListener('DOMContentLoaded', initApp);
 
 </script>
 </body>
