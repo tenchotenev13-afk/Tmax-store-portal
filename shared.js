@@ -134,7 +134,7 @@ function startApp(){
 }
 function setupTabsForRole(){
   /* Таб Каса — само за kasa, manager, admin, accounting */
-  var kasaRoles=['kasa','manager','admin','accounting','logistics'];
+  var kasaRoles=['kasa','admin','manager']; /* kasa, управители и администратори */
   var kasaTab=document.getElementById('tab-kasa');
   if(kasaTab)kasaTab.style.display=kasaRoles.indexOf(currentUser.role)>=0?'':'none';
   /* Таб Администрация — само за admin */
