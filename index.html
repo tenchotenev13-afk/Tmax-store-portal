@@ -121,6 +121,21 @@ tr:hover td{background:#fafafa;}
 }
 
 @media(max-width:640px){.nav-tab{padding:12px 10px;font-size:11px;}.page{padding:14px 12px 60px;}}
+
+/* NOTIFICATIONS */
+.notif-card{background:#fff;border-radius:10px;padding:12px 16px;margin-bottom:8px;display:flex;align-items:center;gap:12px;border-left:4px solid;}
+.notif-card.urgent{border-color:#dc2626;background:#fff5f5;}
+.notif-card.warning{border-color:#d97706;background:#fffbeb;}
+.notif-card.info{border-color:#2563eb;background:#eff6ff;}
+.notif-card.success{border-color:#16a34a;background:#f0fdf4;}
+.notif-icon{font-size:20px;flex-shrink:0;}
+.notif-text{flex:1;}
+.notif-title{font-size:13px;font-weight:600;}
+.notif-sub{font-size:11px;color:var(--muted);margin-top:1px;}
+.notif-close{font-size:16px;color:#94a3b8;cursor:pointer;flex-shrink:0;padding:2px 6px;}
+.notif-close:hover{color:var(--text);}
+@keyframes slideDown{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
+.notif-card{animation:slideDown .25s ease;}
 </style>
 </head>
 <body>
@@ -152,8 +167,8 @@ tr:hover td{background:#fafafa;}
   <nav class="nav no-print">
     <div class="nav-brand"><img src="data:image/png;base64,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" alt="TeMAX"></div>
     <div class="nav-tabs">
-      <button class="nav-tab active" onclick="showModule('transport')">🚚 Транспорт</button>
-      <button class="nav-tab" onclick="showModule('client')">📋 Клиентски заявки</button>
+      <button class="nav-tab active" onclick="showModule('transport')">🚚 Транспорт <span id="badge-transport" style="display:none;background:#dc2626;color:#fff;border-radius:20px;font-size:10px;font-weight:700;padding:1px 6px;margin-left:4px;vertical-align:middle;"></span></button>
+      <button class="nav-tab" onclick="showModule('client')">📋 Клиентски заявки <span id="badge-client" style="display:none;background:#dc2626;color:#fff;border-radius:20px;font-size:10px;font-weight:700;padding:1px 6px;margin-left:4px;vertical-align:middle;"></span></button>
       <button class="nav-tab" onclick="showModule('bulletin')">📰 Бюлетин</button>
       <button class="nav-tab" onclick="showModule('docs')">📁 Инструкции</button>
       <button class="nav-tab adm" onclick="showModule('admin')" style="display:none;">⚙ Администрация</button>
@@ -164,6 +179,9 @@ tr:hover td{background:#fafafa;}
       <button class="btn-sm" onclick="doLogout()">Изход</button>
     </div>
   </nav>
+
+  <!-- NOTIFICATION BANNER -->
+  <div id="notif-banner" style="display:none;max-width:1300px;margin:12px auto 0;width:100%;padding:0 16px;" class="no-print"></div>
 
   <!-- METRICS -->
   <div id="tr-metrics" class="metrics no-print" style="display:none;padding:14px 16px 0;max-width:1300px;margin:0 auto;width:100%;"></div>
@@ -929,6 +947,172 @@ document.addEventListener('click',function(e){
     e.target.classList.remove('open');
 });
 document.addEventListener('DOMContentLoaded',initApp);
+
+
+
+/* ─── NOTIFICATIONS ──────────────────────────────────────── */
+var _lastTransportCount = 0;
+var _lastClientCount = 0;
+var _pollInterval = null;
+
+function updateBadges(){
+  var tUrgent = transportOrders.filter(function(o){return o._status==='overdue'||o._status==='today';}).length;
+  var cUrgent = clientOrders.filter(function(o){return o._status==='overdue'||o._status==='today';}).length;
+  var bt = document.getElementById('badge-transport');
+  var bc = document.getElementById('badge-client');
+  if(bt){ if(tUrgent>0){bt.textContent=tUrgent;bt.style.display='inline';}else{bt.style.display='none';} }
+  if(bc){ if(cUrgent>0){bc.textContent=cUrgent;bc.style.display='inline';}else{bc.style.display='none';} }
+}
+
+function showLoginBanner(){
+  var banner = document.getElementById('notif-banner');
+  if(!banner) return;
+  var all = transportOrders.concat(clientOrders);
+  var overdue  = all.filter(function(o){return o._status==='overdue';});
+  var todayArr = all.filter(function(o){return o._status==='today';});
+  var tomorrow = all.filter(function(o){return o._status==='tomorrow';});
+  var cards = '';
+  if(overdue.length){
+    cards += '<div class="notif-card urgent">'+
+      '<div class="notif-icon">🚨</div>'+
+      '<div class="notif-text">'+
+        '<div class="notif-title">'+overdue.length+' просрочен'+(overdue.length===1?'а заявка':'и заявки')+'!</div>'+
+        '<div class="notif-sub">Трябва незабавно внимание — датата на доставка е минала.</div>'+
+      '</div>'+
+      '<span class="notif-close" onclick="dismissCard(this)">✕</span>'+
+    '</div>';
+  }
+  if(todayArr.length){
+    cards += '<div class="notif-card info">'+
+      '<div class="notif-icon">🔵</div>'+
+      '<div class="notif-text">'+
+        '<div class="notif-title">'+todayArr.length+' доставк'+(todayArr.length===1?'а':'и')+' ДНЕС</div>'+
+        '<div class="notif-sub">Заявки с дата на доставка за днес.</div>'+
+      '</div>'+
+      '<span class="notif-close" onclick="dismissCard(this)">✕</span>'+
+    '</div>';
+  }
+  if(tomorrow.length){
+    cards += '<div class="notif-card warning">'+
+      '<div class="notif-icon">🟡</div>'+
+      '<div class="notif-text">'+
+        '<div class="notif-title">'+tomorrow.length+' доставк'+(tomorrow.length===1?'а':'и')+' УТРЕ</div>'+
+        '<div class="notif-sub">Подготви стоката навреме.</div>'+
+      '</div>'+
+      '<span class="notif-close" onclick="dismissCard(this)">✕</span>'+
+    '</div>';
+  }
+  if(!overdue.length && !todayArr.length && !tomorrow.length){
+    cards = '<div class="notif-card success">'+
+      '<div class="notif-icon">✅</div>'+
+      '<div class="notif-text">'+
+        '<div class="notif-title">Всичко е наред!</div>'+
+        '<div class="notif-sub">Няма просрочени или спешни заявки за днес.</div>'+
+      '</div>'+
+      '<span class="notif-close" onclick="dismissCard(this)">✕</span>'+
+    '</div>';
+  }
+  banner.innerHTML = cards;
+  banner.style.display = 'block';
+}
+
+function dismissCard(el){
+  var card = el.closest('.notif-card');
+  if(card){
+    card.style.opacity='0'; card.style.transform='translateY(-6px)'; card.style.transition='.2s';
+    setTimeout(function(){ card.remove(); }, 200);
+  }
+}
+
+function playNotifSound(){
+  try{
+    var ctx = new (window.AudioContext||window.webkitAudioContext)();
+    [523,659,784].forEach(function(freq, i){
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.connect(gain); gain.connect(ctx.destination);
+      osc.frequency.value = freq;
+      osc.type = 'sine';
+      gain.gain.setValueAtTime(0, ctx.currentTime + i*0.12);
+      gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + i*0.12 + 0.04);
+      gain.gain.linearRampToValueAtTime(0, ctx.currentTime + i*0.12 + 0.18);
+      osc.start(ctx.currentTime + i*0.12);
+      osc.stop(ctx.currentTime + i*0.12 + 0.2);
+    });
+  }catch(e){}
+}
+
+function checkNewOrders(){
+  var tQ = 'order=created_at.desc';
+  var cQ = 'order=created_at.desc';
+  if(!isAdmin && currentStoreId){ tQ+='&store_id=eq.'+currentStoreId; cQ+='&store_id=eq.'+currentStoreId; }
+  else if(!isAdmin){ tQ+='&store_name=eq.'+encodeURIComponent(currentStore); cQ+='&store_name=eq.'+encodeURIComponent(currentStore); }
+
+  Promise.all([sbGet('transport_orders', tQ), sbGet('client_orders', cQ)]).then(function(results){
+    var newT = Array.isArray(results[0]) ? results[0].length : 0;
+    var newC = Array.isArray(results[1]) ? results[1].length : 0;
+    var hasNew = (_lastTransportCount > 0 && newT > _lastTransportCount) ||
+                 (_lastClientCount   > 0 && newC > _lastClientCount);
+    if(hasNew){
+      playNotifSound();
+      toast('🔔 Нова заявка е постъпила!', '#2563eb');
+    }
+    if(newT !== _lastTransportCount || newC !== _lastClientCount){
+      _lastTransportCount = newT; _lastClientCount = newC;
+      loadAll();
+    }
+  }).catch(function(){});
+}
+
+function startPolling(){
+  if(_pollInterval) clearInterval(_pollInterval);
+  _lastTransportCount = transportOrders.length;
+  _lastClientCount = clientOrders.length;
+  _pollInterval = setInterval(checkNewOrders, 30000);
+}
+
+/* Patch renderAll to update badges + banner */
+var _origRenderTransport = renderTransport;
+var _origRenderClientOrders = renderClientOrders;
+var _notifShown = false;
+
+function afterRender(){
+  updateBadges();
+  if(!_notifShown && currentUser){
+    _notifShown = true;
+    showLoginBanner();
+  }
+}
+
+/* Override original render functions to hook afterRender */
+var _realRenderMetrics = renderMetrics;
+renderMetrics = function(){
+  _realRenderMetrics();
+  updateBadges();
+};
+
+/* Show banner once after first full load */
+var _firstLoad = true;
+var _origLoadAll = loadAll;
+loadAll = function(){
+  _origLoadAll();
+  if(_firstLoad){
+    _firstLoad = false;
+    setTimeout(function(){
+      if(!_notifShown && currentUser){
+        _notifShown = true;
+        showLoginBanner();
+      }
+    }, 1500);
+  }
+};
+
+/* Override startApp to setup polling */
+var _origStartApp = startApp;
+startApp = function(){
+  _origStartApp();
+  setTimeout(function(){startPolling();}, 3000);
+};
 
 </script>
 </body>
