@@ -104,7 +104,7 @@ function doLogin(){
     if(!Array.isArray(data)||!data.length){errEl.textContent='Непознат имейл адрес.';errEl.style.display='block';return;}
     var user=data[0];
     if(user.password!==pass){errEl.textContent='Грешна парола.';errEl.style.display='block';return;}
-    currentUser=user;
+    currentUser=user; /* запазваме за проверка при смяна на парола */
     startApp();
   }).catch(function(){
     document.getElementById('l-btn').disabled=false;
@@ -149,8 +149,40 @@ function showModule(mod){
   var tab=document.getElementById('tab-'+mod);if(tab)tab.classList.add('active');
   if(mod==='admin')loadAdmin();
 }
-document.addEventListener('click',function(e){
-  if(e.target.classList.contains('modal-bg')||e.target.classList.contains('pin-overlay'))
+/* Затваря модал САМО ако mousedown И mouseup са върху тъмния фон
+   (предотвратява случайно затваряне при плъзгане на мишката) */
+var _mouseDownOnBg = false;
+
+/* СМЯНА НА ПАРОЛА */
+function openChangePassword(){
+  document.getElementById('cp-old').value='';
+  document.getElementById('cp-new').value='';
+  document.getElementById('cp-confirm').value='';
+  document.getElementById('cp-err').style.display='none';
+  document.getElementById('change-pass-modal').classList.add('open');
+}
+function submitChangePassword(){
+  var oldPass=v('cp-old'), newPass=v('cp-new'), confirm=v('cp-confirm');
+  var errEl=document.getElementById('cp-err');
+  if(!oldPass||!newPass||!confirm){errEl.textContent='Попълни всички полета.';errEl.style.display='block';return;}
+  if(oldPass!==currentUser.password){errEl.textContent='Старата парола е грешна.';errEl.style.display='block';return;}
+  if(newPass.length<6){errEl.textContent='Новата парола трябва да е поне 6 символа.';errEl.style.display='block';return;}
+  if(newPass!==confirm){errEl.textContent='Паролите не съвпадат.';errEl.style.display='block';return;}
+  sbPatch('users','email=eq.'+encodeURIComponent(currentUser.email),{password:newPass}).then(function(res){
+    if(!res.ok){errEl.textContent='Грешка при запис.';errEl.style.display='block';return;}
+    currentUser.password=newPass;
+    closeModal('change-pass-modal');
+    toast('✓ Паролата е сменена успешно!');
+  });
+}
+
+document.addEventListener('mousedown', function(e){
+  _mouseDownOnBg = e.target.classList.contains('modal-bg') || e.target.classList.contains('pin-overlay');
+});
+document.addEventListener('click', function(e){
+  if(!_mouseDownOnBg) return;
+  if(e.target.classList.contains('modal-bg') || e.target.classList.contains('pin-overlay'))
     e.target.classList.remove('open');
+  _mouseDownOnBg = false;
 });
 document.addEventListener('DOMContentLoaded',initApp);
