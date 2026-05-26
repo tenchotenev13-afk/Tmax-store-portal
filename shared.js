@@ -148,6 +148,7 @@ function showModule(mod){
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
   var tab=document.getElementById('tab-'+mod);if(tab)tab.classList.add('active');
   if(mod==='admin')loadAdmin();
+  if(mod==='kasa')loadKasa();
 }
 /* Затваря модал САМО ако mousedown И mouseup са върху тъмния фон
    (предотвратява случайно затваряне при плъзгане на мишката) */
