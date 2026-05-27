@@ -150,34 +150,27 @@ function markReady() {
   });
 }
 
-/* Добавя документи + бутон след renderKasa */
-var _kasDocs_origRender = renderKasa;
-renderKasa = function() {
-  _kasDocs_origRender();
-  var mod = document.getElementById("mod-kasa");
-  if (!mod) return;
-  var page = mod.querySelector(".page");
-  if (!page) return;
-
-  /* Документи секция */
-  var docsDiv = document.createElement("div");
-  docsDiv.id = "docs-section-pos";
-  page.appendChild(docsDiv);
-  loadKasaDocs(today(), function(docs) {
-    renderDocsSection("docs-section-pos", "pos", docs.filter(function(d) { return d.report_type === "pos"; }));
-  });
-
-  /* Бутон Изпрати за проверка */
-  var canReady = ["kasa","manager","admin"].indexOf(currentUser.role) >= 0;
-  if (canReady) {
-    var btnDiv = document.createElement("div");
-    btnDiv.style.cssText = "margin-top:14px;display:flex;justify-content:flex-end;padding-bottom:20px;";
-    btnDiv.innerHTML = "<button onclick=\"markReady()\" style=\"border:none;background:#2563eb;" +
-      "color:#fff;border-radius:8px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;\">" +
-      "📤 Изпрати за проверка към счетоводство</button>";
-    page.appendChild(btnDiv);
+/* Инициализира документи секцията след renderKasa */
+function initKasaDocsView() {
+  /* Документи */
+  var docsEl = document.getElementById("docs-section-pos");
+  if (docsEl) {
+    loadKasaDocs(today(), function(allDocs) {
+      var filtered = allDocs.filter(function(d) { return d.report_type === "pos"; });
+      renderDocsSection("docs-section-pos", "pos", filtered);
+    });
   }
-};
+  /* Бутон Изпрати за проверка */
+  var btnWrap = document.getElementById("ready-btn-wrap");
+  if (btnWrap) {
+    var canReady = ["kasa","manager","admin"].indexOf(currentUser.role) >= 0;
+    if (canReady) {
+      btnWrap.innerHTML = "<button onclick=\"markReady()\" style=\"border:none;background:#2563eb;" +
+        "color:#fff;border-radius:8px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;\">" +
+        "📤 Изпрати за проверка към счетоводство</button>";
+    }
+  }
+}
 
 /* ─── ДНЕВЕН ПРЕГЛЕД ───────────────────────────────────────── */
 function loadDailyOverview() {

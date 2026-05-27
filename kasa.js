@@ -183,8 +183,11 @@ function renderKasa(){
     });
     html+='</tbody></table></div></div>';
   }
+  html+='<div id="docs-section-pos"></div>';
+  html+='<div id="ready-btn-wrap" style="display:flex;justify-content:flex-end;padding-bottom:20px;"></div>';
   html+='</div>';
   wrap.innerHTML=html;
+  if(typeof initKasaDocsView==='function') setTimeout(initKasaDocsView, 50);
 }
 
 /* ─── ПОС ФОРМА ─────────────────────────────────────────────── */
