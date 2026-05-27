@@ -138,17 +138,20 @@ function setupTabsForRole(){
   var kasaTab=document.getElementById('tab-kasa');
   if(kasaTab)kasaTab.style.display=kasaRoles.indexOf(currentUser.role)>=0?'':'none';
   /* Таб Администрация — само за admin */
+  var histTab=document.getElementById('tab-history');
+  if(histTab)histTab.style.display=isGlobal()?'':'none';
   var adminTab=document.getElementById('tab-admin');
   if(adminTab)adminTab.style.display=currentUser.role==='admin'?'':'none';
 }
 function showModule(mod){
-  ['transport','client','bulletin','docs','kasa','admin','print'].forEach(function(m){
+  ['transport','client','bulletin','docs','kasa','history','admin','print'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
   var tab=document.getElementById('tab-'+mod);if(tab)tab.classList.add('active');
   if(mod==='admin')loadAdmin();
   if(mod==='kasa')loadKasa();
+  if(mod==='history')loadHistory();
 }
 /* Затваря модал САМО ако mousedown И mouseup са върху тъмния фон
    (предотвратява случайно затваряне при плъзгане на мишката) */

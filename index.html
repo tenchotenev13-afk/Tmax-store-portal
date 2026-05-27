@@ -121,6 +121,7 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
       <button id="tab-bulletin" class="nav-tab" onclick="showModule('bulletin')">📰 Бюлетин</button>
       <button id="tab-docs" class="nav-tab" onclick="showModule('docs')">📁 Инструкции</button>
       <button id="tab-kasa" class="nav-tab" onclick="showModule('kasa')" style="display:none;">💰 Каса</button>
+      <button id="tab-history" class="nav-tab" onclick="showModule('history')" style="display:none;">📊 История</button>
       <button id="tab-admin" class="nav-tab" onclick="showModule('admin')" style="display:none;">⚙ Администрация</button>
     </div>
     <div class="nav-right">
@@ -228,6 +229,9 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
       </div>
     </div>
   </div>
+
+  <!-- HISTORY -->
+  <div id="mod-history" style="display:none;"></div>
 
   <!-- PRINT -->
   <div id="mod-print" style="display:none;"></div>
@@ -337,6 +341,7 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
 <script src="docs.js"></script>
 <script src="kasa.js"></script>
 <script src="admin.js"></script>
+<script src="history.js"></script>
 <script src="notifications.js"></script>
 </body>
 </html>
