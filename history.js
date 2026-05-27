@@ -35,6 +35,7 @@ function runHistorySearch(){
 
   document.getElementById('h-results').innerHTML=
     '<div style="text-align:center;padding:30px;color:#94a3b8;">⏳ Зареждане...</div>';
+  document.getElementById('daily-wrap').innerHTML='';
 
   var promises=[];
 
@@ -75,12 +76,15 @@ function renderHistoryShell(){
   var firstDay=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
   var lastDay =new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().slice(0,10);
 
+  /* Дневен преглед при зареждане */
+  setTimeout(function(){loadDailyOverview();},100);
   wrap.innerHTML='<div class="page">'+
     '<div class="pg-title">📊 История & Търсене</div>'+
     '<div class="pg-sub">Преглед на всички записи по период, магазин и тип</div>'+
 
+    '<div id="daily-wrap"></div>'+
     '<div class="card" style="margin-bottom:16px;">'+
-      '<div class="card-title">🔍 Филтри</div>'+
+      '<div class="card-title">🔍 Търсене по период</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:flex-end;flex-wrap:wrap;">'+
         '<div><label class="fl">От дата</label>'+
           '<input type="date" class="fi" id="h-from" value="'+firstDay+'"></div>'+
