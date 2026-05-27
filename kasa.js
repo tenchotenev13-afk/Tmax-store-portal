@@ -22,7 +22,7 @@ var INKASO_DENOM = [500,200,100,50,20,10];
 /* ─── HELPERS ───────────────────────────────────────────────── */
 function fmtMoney(v){
   var n=parseFloat(v)||0;
-  return (n<0?'–':'')+Math.abs(n).toFixed(2)+' лв.';
+  return (n<0?'–':'')+Math.abs(n).toFixed(2)+' EUR';
 }
 function razCol(v){
   var n=parseFloat(v)||0;
@@ -242,10 +242,10 @@ function openKasaForm(report){
     /* Оборот */
     '<div class="card" style="margin-bottom:14px;"><div class="card-title">Оборот</div>'+
     '<div class="form-grid">'+
-      '<div><label class="fl">Общ оборот (лв.)</label><input type="number" step="0.01" class="fi" id="kf-total_turnover" value="'+(r.total_turnover||'')+'" oninput="kasaLiveCalc()" placeholder="0.00"></div>'+
+      '<div><label class="fl">Общ оборот (EUR)</label><input type="number" step="0.01" class="fi" id="kf-total_turnover" value="'+(r.total_turnover||'')+'" oninput="kasaLiveCalc()" placeholder="0.00"></div>'+
       '<div></div>'+
-      '<div><label class="fl">В брой (лв.)</label><input type="number" step="0.01" class="fi" id="kf-cash_turnover" value="'+(r.cash_turnover||'')+'" oninput="kasaLiveCalc()" placeholder="0.00"></div>'+
-      '<div><label class="fl">Деб./кредитни (лв.)</label><input type="number" step="0.01" class="fi" id="kf-card_turnover" value="'+(r.card_turnover||'')+'" oninput="kasaLiveCalc()" placeholder="0.00"></div>'+
+      '<div><label class="fl">В брой (EUR)</label><input type="number" step="0.01" class="fi" id="kf-cash_turnover" value="'+(r.cash_turnover||'')+'" oninput="kasaLiveCalc()" placeholder="0.00"></div>'+
+      '<div><label class="fl">Деб./кредитни (EUR)</label><input type="number" step="0.01" class="fi" id="kf-card_turnover" value="'+(r.card_turnover||'')+'" oninput="kasaLiveCalc()" placeholder="0.00"></div>'+
     '</div></div>'+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">'+
@@ -276,7 +276,7 @@ function openKasaForm(report){
     '<td style="padding:6px 10px;font-family:DM Mono,monospace;font-weight:700;" id="kf-inkaso-total">0.00</td></tr>'+
     '</tbody></table></div>'+
     '<div class="card"><div class="card-title">Сторна</div>'+
-    '<label class="fl">Сума сторна (лв.)</label>'+
+    '<label class="fl">Сума сторна (EUR)</label>'+
     '<input type="number" step="0.01" class="fi" id="kf-storna" value="'+(r.storna_total||0)+'" oninput="kasaLiveCalc()" placeholder="0.00">'+
     '</div></div></div>'+
 
@@ -354,7 +354,7 @@ function kasaLiveCalc(){
   if(rEl){
     var col=razCol(razlika);
     var bg=razlika<0?'#fff5f5':razlika>0?'#fffbeb':'#f0fdf4';
-    rEl.textContent=(razlika<0?'– ':'')+Math.abs(razlika).toFixed(2)+' лв.';
+    rEl.textContent=(razlika<0?'– ':'')+Math.abs(razlika).toFixed(2)+' EUR';
     rEl.style.color=col;
     if(box){box.style.borderColor=col;box.style.background=bg;}
   }
@@ -504,7 +504,7 @@ function renderGlavna(){
     '<tr style="border-top:2px solid #e2e8f0;font-weight:700;background:#f8fafc;">'+
       '<td colspan="'+(1+todayRep.length)+'">ОБЩО НАЛИЧНИ</td>'+
       '<td></td><td></td>'+
-      '<td style="text-align:right;font-family:DM Mono,monospace;font-size:14px;" id="gl-total-counted">'+totalCounted.toFixed(2)+' лв.</td>'+
+      '<td style="text-align:right;font-family:DM Mono,monospace;font-size:14px;" id="gl-total-counted">'+totalCounted.toFixed(2)+' EUR</td>'+
     '</tr>'+
     '</tbody></table></div></div>'+
 
@@ -527,19 +527,19 @@ function renderGlavna(){
     '<tr style="border-top:2px solid #e2e8f0;font-weight:700;background:#f8fafc;">'+
       '<td colspan="'+(1+todayRep.length)+'">ОБЩО ИНКАСО</td>'+
       '<td></td>'+
-      '<td style="text-align:right;font-family:DM Mono,monospace;">'+totalInkaso.toFixed(2)+' лв.</td>'+
+      '<td style="text-align:right;font-family:DM Mono,monospace;">'+totalInkaso.toFixed(2)+' EUR</td>'+
     '</tr></tbody></table></div></div>'+
 
     /* Жълти полета — ръчно въвеждане */
     '<div class="card" style="margin-bottom:14px;background:#fffbeb;border-color:#f0c940;">'+
     '<div class="card-title" style="color:#92400e;">⭐ Ръчно въвеждане (жълти полета)</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">'+
-      '<div><label class="fl">Служебно въведени (лв.)</label>'+
+      '<div><label class="fl">Служебно въведени (EUR)</label>'+
         (isDraft&&canEdit?
           '<input type="number" step="0.01" class="fi" id="gl-slujebno" value="'+(g.slujebno||0)+'" oninput="glavnaLiveCalc()" style="background:#fffbeb;">':
           '<div class="fi" style="background:#f9f8f6;">'+(g.slujebno||0)+'</div>')+
       '</div>'+
-      '<div><label class="fl">Наличност SAP (лв.)</label>'+
+      '<div><label class="fl">Наличност SAP (EUR)</label>'+
         (isDraft&&canEdit?
           '<input type="number" step="0.01" class="fi" id="gl-sap" value="'+(g.sap_balance||0)+'" oninput="glavnaLiveCalc()" style="background:#fffbeb;">':
           '<div class="fi" style="background:#f9f8f6;">'+(g.sap_balance||0)+'</div>')+
@@ -557,19 +557,19 @@ function renderGlavna(){
     '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">'+
       '<div style="text-align:center;padding:12px;border-radius:8px;background:#f0fdf4;">'+
         '<div style="font-size:10px;color:#166534;text-transform:uppercase;margin-bottom:4px;">Общо налични</div>'+
-        '<div style="font-size:15px;font-weight:700;font-family:DM Mono,monospace;color:#166534;" id="gl-r-counted">'+totalCounted.toFixed(2)+' лв.</div>'+
+        '<div style="font-size:15px;font-weight:700;font-family:DM Mono,monospace;color:#166534;" id="gl-r-counted">'+totalCounted.toFixed(2)+' EUR</div>'+
       '</div>'+
       '<div style="text-align:center;padding:12px;border-radius:8px;background:#fef9c3;">'+
         '<div style="font-size:10px;color:#92400e;text-transform:uppercase;margin-bottom:4px;">Служебно въведени</div>'+
-        '<div style="font-size:15px;font-weight:700;font-family:DM Mono,monospace;color:#92400e;" id="gl-r-slujebno">'+slujebno.toFixed(2)+' лв.</div>'+
+        '<div style="font-size:15px;font-weight:700;font-family:DM Mono,monospace;color:#92400e;" id="gl-r-slujebno">'+slujebno.toFixed(2)+' EUR</div>'+
       '</div>'+
       '<div style="text-align:center;padding:12px;border-radius:8px;background:#eff6ff;">'+
         '<div style="font-size:10px;color:#1e40af;text-transform:uppercase;margin-bottom:4px;">Наличност SAP</div>'+
-        '<div style="font-size:15px;font-weight:700;font-family:DM Mono,monospace;color:#1e40af;" id="gl-r-sap">'+sapBalance.toFixed(2)+' лв.</div>'+
+        '<div style="font-size:15px;font-weight:700;font-family:DM Mono,monospace;color:#1e40af;" id="gl-r-sap">'+sapBalance.toFixed(2)+' EUR</div>'+
       '</div>'+
       '<div style="text-align:center;padding:12px;border-radius:8px;border:2px solid '+razCol(razlika)+';background:'+(razlika<0?'#fff5f5':razlika>0?'#fffbeb':'#f0fdf4')+';">'+
         '<div style="font-size:10px;text-transform:uppercase;margin-bottom:4px;color:'+razCol(razlika)+';">РАЗЛИКА</div>'+
-        '<div style="font-size:20px;font-weight:700;font-family:DM Mono,monospace;color:'+razCol(razlika)+';" id="gl-r-razlika">'+(razlika<0?'– ':'')+Math.abs(razlika).toFixed(2)+' лв.</div>'+
+        '<div style="font-size:20px;font-weight:700;font-family:DM Mono,monospace;color:'+razCol(razlika)+';" id="gl-r-razlika">'+(razlika<0?'– ':'')+Math.abs(razlika).toFixed(2)+' EUR</div>'+
       '</div>'+
     '</div></div>'+
   '</div>';
@@ -607,12 +607,12 @@ function glavnaLiveCalc(){
   var razlika=Math.round((total+slujebno-sap)*100)/100;
 
   var set=function(id,v,sfx){ var el=document.getElementById(id); if(el)el.textContent=(v<0?'– ':'')+Math.abs(v).toFixed(2)+(sfx||''); };
-  set('gl-total-counted',total,' лв.');
-  set('gl-r-counted',total,' лв.');
-  set('gl-r-slujebno',slujebno,' лв.');
-  set('gl-r-sap',sap,' лв.');
+  set('gl-total-counted',total,' EUR');
+  set('gl-r-counted',total,' EUR');
+  set('gl-r-slujebno',slujebno,' EUR');
+  set('gl-r-sap',sap,' EUR');
   var rEl=document.getElementById('gl-r-razlika');
-  if(rEl){rEl.textContent=(razlika<0?'– ':'')+Math.abs(razlika).toFixed(2)+' лв.';rEl.style.color=razCol(razlika);}
+  if(rEl){rEl.textContent=(razlika<0?'– ':'')+Math.abs(razlika).toFixed(2)+' EUR';rEl.style.color=razCol(razlika);}
 }
 
 /* ─── SAVE ГЛАВНА КАСА ───────────────────────────────────────── */
@@ -677,7 +677,7 @@ function printKasaReport(){
   var glRaz=Math.round((glCounted+slujebno-sapBal)*100)/100;
 
   function rc(v){var n=parseFloat(v)||0;return n<0?'color:#dc2626':n>0?'color:#d97706':'color:#16a34a';}
-  function fm(v){var n=parseFloat(v)||0;return(n<0?'–':'')+Math.abs(n).toFixed(2)+' лв.';}
+  function fm(v){var n=parseFloat(v)||0;return(n<0?'–':'')+Math.abs(n).toFixed(2)+' EUR';}
 
   /* Таблица купюри */
   var denomRows='';
@@ -709,7 +709,7 @@ function printKasaReport(){
       '<td style="text-align:right;padding:2px 8px;font-weight:600;">'+v+'</td>'+
       posQtys.map(function(q){return '<td style="text-align:center;padding:2px 8px;">'+q+'</td>';}).join('')+
       '<td style="text-align:center;padding:2px 8px;font-weight:700;">'+total+'</td>'+
-      '<td style="text-align:right;padding:2px 8px;font-family:monospace;">'+sum.toFixed(2)+' лв.</td>'+
+      '<td style="text-align:right;padding:2px 8px;font-family:monospace;">'+sum.toFixed(2)+' EUR</td>'+
     '</tr>';
   });
 
@@ -815,12 +815,12 @@ function printKasaReport(){
 
 <h3>🏦 Главна каса</h3>
 <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4mm;margin-bottom:5mm;">
-  <div class="metric"><div class="metric-lbl">Общо налични</div><div class="metric-val green">${glCounted.toFixed(2)} лв.</div></div>
-  <div class="metric"><div class="metric-lbl">Служебно въведени</div><div class="metric-val amber">${slujebno.toFixed(2)} лв.</div></div>
-  <div class="metric"><div class="metric-lbl">Наличност SAP</div><div class="metric-val" style="color:#1e40af;">${sapBal.toFixed(2)} лв.</div></div>
+  <div class="metric"><div class="metric-lbl">Общо налични</div><div class="metric-val green">${glCounted.toFixed(2)} EUR</div></div>
+  <div class="metric"><div class="metric-lbl">Служебно въведени</div><div class="metric-val amber">${slujebno.toFixed(2)} EUR</div></div>
+  <div class="metric"><div class="metric-lbl">Наличност SAP</div><div class="metric-val" style="color:#1e40af;">${sapBal.toFixed(2)} EUR</div></div>
   <div class="metric" style="border-color:${glRaz<0?'#dc2626':glRaz>0?'#d97706':'#16a34a'};">
     <div class="metric-lbl">РАЗЛИКА</div>
-    <div class="metric-val ${rc(glRaz)}">${(glRaz<0?'– ':'')+Math.abs(glRaz).toFixed(2)} лв.</div>
+    <div class="metric-val ${rc(glRaz)}">${(glRaz<0?'– ':'')+Math.abs(glRaz).toFixed(2)} EUR</div>
   </div>
 </div>
 

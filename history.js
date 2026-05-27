@@ -147,7 +147,7 @@ function renderHistoryResults(){
   }
   if(histData.kasa.length){
     var totalRaz=histData.kasa.reduce(function(s,r){return s+(parseFloat(r.razlika)||0);},0);
-    var razStr=(totalRaz<0?'–':'')+Math.abs(totalRaz).toFixed(2)+' лв. разлика';
+    var razStr=(totalRaz<0?'–':'')+Math.abs(totalRaz).toFixed(2)+' EUR разлика';
     html+=metricCard('💰 Касови отчети',histData.kasa.length,'ПОС отчета / '+razStr,'#d97706');
   }
   html+='</div>';
@@ -216,7 +216,7 @@ function renderHistoryResults(){
     html+='<div class="card">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
         '<div class="card-title" style="margin:0;">💰 Касови отчети ('+histData.kasa.length+' ПОС отчета)</div>'+
-        '<div style="font-size:13px;font-weight:700;color:'+razCol+';">Обща разлика: '+(allRaz<0?'–':'')+Math.abs(allRaz).toFixed(2)+' лв.</div>'+
+        '<div style="font-size:13px;font-weight:700;color:'+razCol+';">Обща разлика: '+(allRaz<0?'–':'')+Math.abs(allRaz).toFixed(2)+' EUR</div>'+
       '</div>'+
       '<div class="tbl-wrap"><table>'+
       '<thead><tr><th>Дата</th><th>Магазин</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th></tr></thead>'+
@@ -233,7 +233,7 @@ function renderHistoryResults(){
           '<td style="font-family:monospace;">'+fmtMoney(r.cash_turnover)+'</td>'+
           '<td style="font-family:monospace;">'+fmtMoney(inkaso)+'</td>'+
           '<td style="font-family:monospace;">'+fmtMoney(r.counted_cash)+'</td>'+
-          '<td style="font-family:monospace;font-weight:700;color:'+razC+';">'+(raz<0?'–':'')+Math.abs(raz).toFixed(2)+' лв.</td>'+
+          '<td style="font-family:monospace;font-weight:700;color:'+razC+';">'+(raz<0?'–':'')+Math.abs(raz).toFixed(2)+' EUR</td>'+
           '<td>'+(r.status==='confirmed'?'✅':'✏️')+'</td>'+
         '</tr>';
       }).join('')+
@@ -253,7 +253,7 @@ function metricCard(label,val,sub,col){
 
 function fmtMoney(v){
   var n=parseFloat(v)||0;
-  return (n<0?'–':'')+Math.abs(n).toFixed(2)+' лв.';
+  return (n<0?'–':'')+Math.abs(n).toFixed(2)+'EUR';
 }
 
 /* ─── PRINT HISTORY REPORT ──────────────────────────────────── */
@@ -280,7 +280,7 @@ function printHistoryReport(){
       '<td style="text-align:right;font-family:monospace;">'+fmtMoney(r.cash_turnover)+'</td>'+
       '<td style="text-align:right;font-family:monospace;">'+fmtMoney(ink)+'</td>'+
       '<td style="text-align:right;font-family:monospace;">'+fmtMoney(r.counted_cash)+'</td>'+
-      '<td style="text-align:right;font-family:monospace;font-weight:700;'+rc+'">'+(raz<0?'–':'')+Math.abs(raz).toFixed(2)+' лв.</td>'+
+      '<td style="text-align:right;font-family:monospace;font-weight:700;'+rc+'">'+(raz<0?'–':'')+Math.abs(raz).toFixed(2)+' EUR</td>'+
       '<td style="text-align:center;">'+(r.status==='confirmed'?'✅':'✏️')+'</td>'+
     '</tr>';
   }).join('');
@@ -344,7 +344,7 @@ function printHistoryReport(){
       '<div class="metric"><div class="metric-lbl">Транспортни заявки</div><div class="metric-val" style="color:#2563eb;">'+totalT+'</div></div>'+
       '<div class="metric"><div class="metric-lbl">Клиентски заявки</div><div class="metric-val" style="color:#16a34a;">'+totalC+'</div><div class="metric-lbl">'+tDone+' изпълнени</div></div>'+
       '<div class="metric"><div class="metric-lbl">ПОС отчети</div><div class="metric-val" style="color:#d97706;">'+totalK+'</div></div>'+
-      '<div class="metric" style="border-color:'+razC+'"><div class="metric-lbl">Обща касова разлика</div><div class="metric-val" style="color:'+razC+';">'+(tRaz<0?'–':'')+Math.abs(tRaz).toFixed(2)+'</div><div class="metric-lbl">лв.</div></div>'+
+      '<div class="metric" style="border-color:'+razC+'"><div class="metric-lbl">Обща касова разлика</div><div class="metric-val" style="color:'+razC+';">'+(tRaz<0?'–':'')+Math.abs(tRaz).toFixed(2)+'</div><div class="metric-lbl">EUR</div></div>'+
     '</div>'+
     (totalK?
       '<h2>💰 Касови отчети ('+totalK+')</h2>'+
