@@ -76,13 +76,14 @@ function loadKasa(){
 /* ─── TABS ──────────────────────────────────────────────────── */
 function kasaTab(tab){
   kasaView=tab;
-  ['pos','glavna'].forEach(function(t){
+  ['pos','glavna','zoborot'].forEach(function(t){
     var el=document.getElementById('ktab-'+t);
     if(el) el.style.background=t===tab?'#2f2f2f':'#fff',
             el.style.color=t===tab?'#fff':'#64748b';
   });
   if(tab==='pos') renderKasa();
-  else renderGlavna();
+  else if(tab==='glavna') renderGlavna();
+  else if(tab==='zoborot'){loadZoborot();}
 }
 
 function kasaTabBar(){
@@ -91,6 +92,7 @@ function kasaTabBar(){
   return '<div style="display:flex;gap:0;margin-bottom:18px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">'+
     '<button id="ktab-pos" onclick="kasaTab(\'pos\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#2f2f2f;color:#fff;">📋 ПОС Отчети</button>'+
     '<button id="ktab-glavna" onclick="kasaTab(\'glavna\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#fff;color:#64748b;">🏦 Главна каса</button>'+
+    '<button id="ktab-zoborot" onclick="kasaTab(\'zoborot\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#fff;color:#64748b;">📊 Равнение</button>'+
   '</div>';
 }
 
@@ -855,4 +857,289 @@ function unlockKasaReport(id){
     toast('🔓 Отчетът е разключен — може да се редактира');
     loadKasa();
   });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   РАВНЕНИЕ НА ОБОРОТА (Zoborot)
+   ПОС данни от системата vs Фискални устройства (ФУ)
+═══════════════════════════════════════════════════════════════ */
+var zoborotData = null;
+
+function loadZoborot(){
+  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today()+'&order=created_at.desc';
+  sbGet('kasa_zoborot',q).then(function(data){
+    zoborotData=(Array.isArray(data)&&data.length)?data[0]:null;
+    renderZoborot();
+  }).catch(function(){renderZoborot();});
+}
+
+function renderZoborot(){
+  var wrap=document.getElementById('mod-kasa');if(!wrap)return;
+  var z=zoborotData||{};
+  var isDraft=!z.id||(z.status==='draft');
+  var canConfirm=['manager','admin','accounting'].indexOf(currentUser.role)>=0;
+
+  /* Live изчисления */
+  function posNoBank(){ return Math.round(((parseFloat(z.cash_bgn)||0)+(parseFloat(z.cash_eur)||0)+(parseFloat(z.card_eur)||0)+(parseFloat(z.voucheri)||0))*100)/100; }
+  function fuNet(n){ return Math.round(((parseFloat(z['fu'+n+'_gross'])||0)-(parseFloat(z['fu'+n+'_discount'])||0))*100)/100; }
+  function fuTotalNet(){ return Math.round((fuNet(1)+fuNet(2)+fuNet(3))*100)/100; }
+  function calcRaz(){ return Math.round((posNoBank()-fuTotalNet())*100)/100; }
+
+  var pnb=parseFloat(z.pos_no_bank)||posNoBank();
+  var ftn=parseFloat(z.fu_total_net)||fuTotalNet();
+  var raz=parseFloat(z.razlika)||calcRaz();
+  var razCol=raz===0?'#16a34a':raz<0?'#dc2626':'#d97706';
+  var razBg =raz===0?'#f0fdf4':raz<0?'#fff5f5':'#fffbeb';
+
+  function inp(id,val,placeholder){
+    if(!isDraft) return '<span style="font-family:DM Mono,monospace;">'+(parseFloat(val)||0).toFixed(2)+'</span>';
+    return '<input type="number" step="0.01" id="zf-'+id+'" value="'+(parseFloat(val)||0)+'" '+
+      'oninput="zoborotLiveCalc()" placeholder="'+(placeholder||'0.00')+'" '+
+      'style="width:110px;font-family:DM Mono,monospace;font-size:13px;text-align:right;'+
+      'padding:4px 8px;border:1.5px solid #e2e8f0;border-radius:6px;">';
+  }
+
+  var html='<div class="page">'+
+    '<div class="pg-title">💰 Каса</div>'+
+    '<div class="pg-sub">'+esc(currentUser.store_name)+' — Равнение на оборота</div>'+
+    kasaTabBar()+
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
+      '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(today())+'</b></div>'+
+      '<div style="display:flex;gap:8px;">'+
+        (isDraft&&canConfirm?'<button onclick="saveZoborot()" class="btn btn-green">💾 Запази</button>':'')+
+        (isDraft&&canConfirm&&z.id?'<button onclick="confirmZoborot()" class="btn" style="background:#2563eb;color:#fff;">✅ Потвърди</button>':'')+
+        (!isDraft&&canConfirm?'<button onclick="unlockZoborot()" class="btn" style="background:#fffbeb;color:#d97706;border:1px solid #d97706;">🔓 Разключи</button>':'')+
+        '<button onclick="printZoborot()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer;">🖨 Разпечатай</button>'+
+      '</div>'+
+    '</div>'+
+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">'+
+
+    /* ПОС данни */
+    '<div class="card">'+
+      '<div class="card-title">📊 Данни от POS Zoborot</div>'+
+      '<table style="width:100%;font-size:13px;">'+
+        '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане в брой BGN</td>'+
+          '<td style="text-align:right;padding:6px 4px;">'+inp('cash_bgn',z.cash_bgn)+'</td></tr>'+
+        '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане в брой EUR</td>'+
+          '<td style="text-align:right;padding:6px 4px;">'+inp('cash_eur',z.cash_eur)+'</td></tr>'+
+        '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане с карта EUR</td>'+
+          '<td style="text-align:right;padding:6px 4px;">'+inp('card_eur',z.card_eur)+'</td></tr>'+
+        '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане по банков път EUR</td>'+
+          '<td style="text-align:right;padding:6px 4px;">'+inp('bank_eur',z.bank_eur)+'</td></tr>'+
+        '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Ваучери EUR</td>'+
+          '<td style="text-align:right;padding:6px 4px;">'+inp('voucheri',z.voucheri)+'</td></tr>'+
+        '<tr style="border-top:2px solid #e2e8f0;"><td style="padding:8px 4px;font-weight:700;">Обща сума в ПОС EUR</td>'+
+          '<td style="text-align:right;padding:8px 4px;" id="zf-pos-total">'+
+            '<span style="font-family:DM Mono,monospace;font-weight:700;font-size:14px;">'+pnb.toFixed(2)+' EUR</span>'+
+          '</td></tr>'+
+      '</table>'+
+    '</div>'+
+
+    /* ФУ данни */
+    '<div class="card">'+
+      '<div class="card-title">🖨 Фискални устройства (ФУ)</div>'+
+      '<table style="width:100%;font-size:12px;">'+
+        '<thead><tr>'+
+          '<th style="padding:5px 6px;text-align:left;background:#2f2f2f;color:#fff;font-size:11px;">ФУ</th>'+
+          '<th style="padding:5px 6px;text-align:right;background:#2f2f2f;color:#fff;font-size:11px;">Общ оборот</th>'+
+          '<th style="padding:5px 6px;text-align:right;background:#2f2f2f;color:#fff;font-size:11px;">Сторно/Отст.</th>'+
+          '<th style="padding:5px 6px;text-align:right;background:#2f2f2f;color:#fff;font-size:11px;">Чист оборот</th>'+
+        '</tr></thead>'+
+        '<tbody>'+
+        [1,2,3].map(function(n){
+          var gross=parseFloat(z['fu'+n+'_gross'])||0;
+          var disc=parseFloat(z['fu'+n+'_discount'])||0;
+          var net=Math.round((gross-disc)*100)/100;
+          return '<tr style="border-bottom:1px solid #f1f5f9;">'+
+            '<td style="padding:6px;font-weight:700;">ФУ '+n+'</td>'+
+            '<td style="text-align:right;padding:5px 4px;">'+inp('fu'+n+'_gross',z['fu'+n+'_gross'])+'</td>'+
+            '<td style="text-align:right;padding:5px 4px;">'+inp('fu'+n+'_discount',z['fu'+n+'_discount'])+'</td>'+
+            '<td style="text-align:right;padding:6px;font-family:DM Mono,monospace;font-size:12px;" id="zf-fu'+n+'-net">'+net.toFixed(2)+'</td>'+
+          '</tr>';
+        }).join('')+
+        '<tr style="border-top:2px solid #e2e8f0;font-weight:700;">'+
+          '<td colspan="3" style="padding:8px 6px;">Общо ФУ нетен оборот</td>'+
+          '<td style="text-align:right;padding:8px 6px;font-family:DM Mono,monospace;font-size:14px;" id="zf-fu-total">'+ftn.toFixed(2)+'</td>'+
+        '</tr>'+
+        '</tbody>'+
+      '</table>'+
+    '</div></div>'+
+
+    /* Резултат */
+    '<div class="card" style="background:#f8fafc;">'+
+      '<div class="card-title">📊 Равнение</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">'+
+        '<div style="text-align:center;padding:14px;border-radius:8px;background:#eff6ff;">'+
+          '<div style="font-size:10px;color:#1e40af;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">POS оборот (без банков път)</div>'+
+          '<div style="font-size:18px;font-weight:700;font-family:DM Mono,monospace;color:#1e40af;" id="zf-r-pos">'+pnb.toFixed(2)+' EUR</div>'+
+        '</div>'+
+        '<div style="text-align:center;padding:14px;border-radius:8px;background:#f0fdf4;">'+
+          '<div style="font-size:10px;color:#166534;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Оборот по фискални устройства</div>'+
+          '<div style="font-size:18px;font-weight:700;font-family:DM Mono,monospace;color:#166534;" id="zf-r-fu">'+ftn.toFixed(2)+' EUR</div>'+
+        '</div>'+
+        '<div style="text-align:center;padding:14px;border-radius:8px;border:2px solid '+razCol+';background:'+razBg+';">'+
+          '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;color:'+razCol+';">'+
+            (raz===0?'✅ РАЗЛИКА':'⚠️ РАЗЛИКА')+
+          '</div>'+
+          '<div style="font-size:22px;font-weight:700;font-family:DM Mono,monospace;color:'+razCol+';" id="zf-r-raz">'+
+            (raz<0?'– ':'')+Math.abs(raz).toFixed(2)+' EUR'+
+          '</div>'+
+          (raz===0?'<div style="font-size:11px;color:#16a34a;margin-top:4px;">Без разлика ✓</div>':'')+ 
+        '</div>'+
+      '</div>'+
+    '</div>'+
+
+    (z.id?'<div style="font-size:12px;color:#94a3b8;margin-top:8px;text-align:right;">'+
+      'Статус: '+(z.status==='confirmed'?'✅ Потвърден':'✏️ Чернова')+
+      (z.status==='confirmed'?' · Потвърден от '+esc(z.confirmed_by||''):'')+'</div>':'')+
+  '</div>';
+
+  wrap.innerHTML=html;
+}
+
+/* ─── LIVE CALC ─────────────────────────────────────────────── */
+function zoborotLiveCalc(){
+  var g=function(id){return parseFloat((document.getElementById('zf-'+id)||{}).value)||0;};
+  var cashBgn=g('cash_bgn'),cashEur=g('cash_eur'),card=g('card_eur'),bank=g('bank_eur'),vouch=g('voucheri');
+  var posNoBank=Math.round((cashBgn+cashEur+card+vouch)*100)/100;
+  var fuNets=[1,2,3].map(function(n){
+    var gr=g('fu'+n+'_gross'),disc=g('fu'+n+'_discount');
+    var net=Math.round((gr-disc)*100)/100;
+    var el=document.getElementById('zf-fu'+n+'-net');if(el)el.textContent=net.toFixed(2);
+    return net;
+  });
+  var fuTotal=Math.round((fuNets[0]+fuNets[1]+fuNets[2])*100)/100;
+  var raz=Math.round((posNoBank-fuTotal)*100)/100;
+  var razCol=raz===0?'#16a34a':raz<0?'#dc2626':'#d97706';
+  var razBg =raz===0?'#f0fdf4':raz<0?'#fff5f5':'#fffbeb';
+
+  var set=function(id,val,sfx){var el=document.getElementById(id);if(el)el.textContent=val.toFixed(2)+(sfx||'');};
+  set('zf-pos-total',posNoBank,' EUR');
+  var pt=document.getElementById('zf-pos-total');
+  if(pt)pt.innerHTML='<span style="font-family:DM Mono,monospace;font-weight:700;font-size:14px;">'+posNoBank.toFixed(2)+' EUR</span>';
+  set('zf-fu-total',fuTotal);
+  set('zf-r-pos',posNoBank,' EUR');
+  set('zf-r-fu',fuTotal,' EUR');
+  var rEl=document.getElementById('zf-r-raz');
+  if(rEl){rEl.textContent=(raz<0?'– ':'')+Math.abs(raz).toFixed(2)+' EUR';rEl.style.color=razCol;}
+  var box=rEl?rEl.parentElement:null;
+  if(box){box.style.borderColor=razCol;box.style.background=razBg;}
+}
+
+/* ─── SAVE / CONFIRM / UNLOCK ───────────────────────────────── */
+function saveZoborot(){
+  var g=function(id){return parseFloat((document.getElementById('zf-'+id)||{}).value)||0;};
+  var cashBgn=g('cash_bgn'),cashEur=g('cash_eur'),card=g('card_eur'),bank=g('bank_eur'),vouch=g('voucheri');
+  var fu1g=g('fu1_gross'),fu1d=g('fu1_discount');
+  var fu2g=g('fu2_gross'),fu2d=g('fu2_discount');
+  var fu3g=g('fu3_gross'),fu3d=g('fu3_discount');
+  var fu1n=Math.round((fu1g-fu1d)*100)/100;
+  var fu2n=Math.round((fu2g-fu2d)*100)/100;
+  var fu3n=Math.round((fu3g-fu3d)*100)/100;
+  var posNoBank=Math.round((cashBgn+cashEur+card+vouch)*100)/100;
+  var fuTotal=Math.round((fu1n+fu2n+fu3n)*100)/100;
+  var raz=Math.round((posNoBank-fuTotal)*100)/100;
+
+  var p={
+    store_name:currentUser.store_name,date:today(),
+    cash_bgn:cashBgn,cash_eur:cashEur,card_eur:card,bank_eur:bank,
+    pos_total_eur:Math.round((cashBgn+cashEur+card+bank+vouch)*100)/100,
+    fu1_gross:fu1g,fu1_discount:fu1d,fu1_net:fu1n,
+    fu2_gross:fu2g,fu2_discount:fu2d,fu2_net:fu2n,
+    fu3_gross:fu3g,fu3_discount:fu3d,fu3_net:fu3n,
+    pos_no_bank:posNoBank,fu_total_net:fuTotal,
+    razlika:raz,voucheri:vouch,status:'draft'
+  };
+  var req=zoborotData?sbPatch('kasa_zoborot','id=eq.'+zoborotData.id,p):sbPost('kasa_zoborot',p);
+  req.then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    toast('💾 Равнението е запазено!');
+    loadZoborot();
+  });
+}
+function confirmZoborot(){
+  if(!confirm('Потвърди равнението? След потвърждение не може да се редактира.'))return;
+  if(!zoborotData){saveZoborot();return;}
+  sbPatch('kasa_zoborot','id=eq.'+zoborotData.id,{
+    status:'confirmed',confirmed_by:currentUser.display_name||currentUser.email
+  }).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    toast('✅ Равнението е потвърдено!');loadZoborot();
+  });
+}
+function unlockZoborot(){
+  if(!zoborotData)return;
+  if(!confirm('Разключи за редакция?'))return;
+  sbPatch('kasa_zoborot','id=eq.'+zoborotData.id,{status:'draft',confirmed_by:null}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    toast('🔓 Разключено!');loadZoborot();
+  });
+}
+
+/* ─── PRINT ZOBOROT ─────────────────────────────────────────── */
+function printZoborot(){
+  var z=zoborotData||{};
+  var pnb=parseFloat(z.pos_no_bank)||0;
+  var ftn=parseFloat(z.fu_total_net)||0;
+  var raz=parseFloat(z.razlika)||0;
+  var razCol=raz===0?'#16a34a':raz<0?'#dc2626':'#d97706';
+
+  var win=window.open('','_blank','width=800,height:600');
+  win.document.write('<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">'+
+    '<title>Равнение — '+esc(currentUser.store_name)+' — '+fmtDate(today())+'</title>'+
+    '<style>@page{size:A4;margin:15mm;}*{box-sizing:border-box;margin:0;padding:0;}'+
+    'body{font-family:Arial,sans-serif;font-size:11pt;color:#111;}'+
+    'h1{font-size:15pt;margin-bottom:2mm;}h2{font-size:12pt;margin:5mm 0 3mm;border-bottom:1px solid #ccc;padding-bottom:1mm;}'+
+    'table{width:100%;border-collapse:collapse;margin-bottom:6mm;font-size:10.5pt;}'+
+    'th{background:#2f2f2f;color:#fff;padding:4px 8px;text-align:left;}'+
+    'td{padding:4px 8px;border-bottom:1px solid #e5e7eb;}'+
+    '.summary{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5mm;margin:5mm 0;}'+
+    '.box{border:1.5px solid #ccc;border-radius:5px;padding:4mm;text-align:center;}'+
+    '.bval{font-size:18pt;font-weight:700;font-family:monospace;}'+
+    '.blbl{font-size:8pt;color:#666;margin-bottom:2mm;}'+
+    '@media print{button{display:none;}}'+
+    '</style></head><body>'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5mm;">'+
+      '<div><h1>ТЕМАКС — Равнение на оборота</h1>'+
+      '<div style="font-size:11pt;color:#444;">'+esc(currentUser.store_name)+' &nbsp;|&nbsp; '+fmtDate(today())+'</div>'+
+      '<div style="font-size:8pt;color:#888;margin-top:1mm;">Статус: '+(z.status==='confirmed'?'✅ Потвърден':'✏️ Чернова')+'</div></div>'+
+    '</div>'+
+    '<h2>Данни от POS Zoborot</h2>'+
+    '<table><tbody>'+
+      '<tr><td>Плащане в брой BGN</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.cash_bgn)||0).toFixed(2))+'</td></tr>'+
+      '<tr><td>Плащане в брой EUR</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.cash_eur)||0).toFixed(2))+'</td></tr>'+
+      '<tr><td>Плащане с карта EUR</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.card_eur)||0).toFixed(2))+'</td></tr>'+
+      '<tr><td>Плащане по банков път EUR</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.bank_eur)||0).toFixed(2))+'</td></tr>'+
+      '<tr><td>Ваучери EUR</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.voucheri)||0).toFixed(2))+'</td></tr>'+
+      '<tr style="font-weight:700;"><td>POS оборот (без банков път)</td><td style="text-align:right;font-family:monospace;font-size:13pt;">'+pnb.toFixed(2)+' EUR</td></tr>'+
+    '</tbody></table>'+
+    '<h2>Фискални устройства (ФУ)</h2>'+
+    '<table><thead><tr><th>ФУ</th><th style="text-align:right;">Общ оборот</th><th style="text-align:right;">Сторно/Отст.</th><th style="text-align:right;">Чист оборот</th></tr></thead><tbody>'+
+    [1,2,3].map(function(n){
+      var gr=parseFloat(z['fu'+n+'_gross'])||0;
+      var dc=parseFloat(z['fu'+n+'_discount'])||0;
+      var net=Math.round((gr-dc)*100)/100;
+      return '<tr><td><b>ФУ '+n+'</b></td>'+
+        '<td style="text-align:right;font-family:monospace;">'+gr.toFixed(2)+'</td>'+
+        '<td style="text-align:right;font-family:monospace;">'+dc.toFixed(2)+'</td>'+
+        '<td style="text-align:right;font-family:monospace;font-weight:700;">'+net.toFixed(2)+' EUR</td></tr>';
+    }).join('')+
+    '<tr style="font-weight:700;"><td colspan="3">Общо ФУ нетен оборот</td><td style="text-align:right;font-family:monospace;font-size:13pt;">'+ftn.toFixed(2)+' EUR</td></tr>'+
+    '</tbody></table>'+
+    '<h2>Равнение</h2>'+
+    '<div class="summary">'+
+      '<div class="box"><div class="blbl">POS оборот (без банков път)</div><div class="bval" style="color:#1e40af;">'+pnb.toFixed(2)+' EUR</div></div>'+
+      '<div class="box"><div class="blbl">Оборот по фискални устройства</div><div class="bval" style="color:#166534;">'+ftn.toFixed(2)+' EUR</div></div>'+
+      '<div class="box" style="border-color:'+razCol+'"><div class="blbl">'+(raz===0?'✅':'⚠️')+' РАЗЛИКА</div>'+
+        '<div class="bval" style="color:'+razCol+';">'+(raz<0?'– ':'')+Math.abs(raz).toFixed(2)+' EUR</div></div>'+
+    '</div>'+
+    '<div style="margin-top:10mm;display:grid;grid-template-columns:1fr 1fr;gap:10mm;">'+
+      '<div style="border-top:1px solid #333;padding-top:2mm;font-size:9pt;color:#555;">Изготвил: '+esc(currentUser.display_name||currentUser.email)+'</div>'+
+      '<div style="border-top:1px solid #333;padding-top:2mm;font-size:9pt;color:#555;">Управител: ____________________________</div>'+
+    '</div>'+
+    '<div style="text-align:center;margin-top:6mm;"><button onclick="window.print()" style="border:none;background:#2563eb;color:#fff;padding:8px 24px;border-radius:6px;font-size:11pt;cursor:pointer;">🖨 Принтирай / PDF</button></div>'+
+  '</body></html>');
+  win.document.close();
+  setTimeout(function(){win.focus();},300);
 }
