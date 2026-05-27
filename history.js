@@ -10,6 +10,13 @@ var histStores = [];
 function loadHistory(){
   renderHistoryShell();
   loadHistoryStores();
+  setTimeout(function(){
+    var dw=document.getElementById('daily-overview');
+    if(dw&&typeof loadDailyOverview==='function'){
+      dw.innerHTML='<div style="padding:10px;color:#94a3b8;">⏳ Зареждане дневен преглед...</div>';
+      loadDailyOverview();
+    }
+  },200);
 }
 
 function loadHistoryStores(){
@@ -35,7 +42,6 @@ function runHistorySearch(){
 
   document.getElementById('h-results').innerHTML=
     '<div style="text-align:center;padding:30px;color:#94a3b8;">⏳ Зареждане...</div>';
-  document.getElementById('daily-wrap').innerHTML='';
 
   var promises=[];
 
@@ -76,13 +82,11 @@ function renderHistoryShell(){
   var firstDay=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
   var lastDay =new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().slice(0,10);
 
-  /* Дневен преглед при зареждане */
-  setTimeout(function(){loadDailyOverview();},100);
   wrap.innerHTML='<div class="page">'+
     '<div class="pg-title">📊 История & Търсене</div>'+
     '<div class="pg-sub">Преглед на всички записи по период, магазин и тип</div>'+
 
-    '<div id="daily-wrap"></div>'+
+    '<div id="daily-overview" style="margin-bottom:16px;"></div>'+
     '<div class="card" style="margin-bottom:16px;">'+
       '<div class="card-title">🔍 Търсене по период</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:flex-end;flex-wrap:wrap;">'+
