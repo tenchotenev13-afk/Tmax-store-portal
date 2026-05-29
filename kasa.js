@@ -17,7 +17,7 @@ var DENOM_KEY = {};
 DENOM_KEY[0.5]='coins_50'; DENOM_KEY[0.2]='coins_20'; DENOM_KEY[0.1]='coins_10';
 DENOM_KEY[0.05]='coins_5'; DENOM_KEY[0.02]='coins_2'; DENOM_KEY[0.01]='coins_1';
 
-var INKASO_DENOM = [500,200,100,50,20,10];
+var INKASO_DENOM = [500,200,100,50,20,10,5];
 
 /* ─── HELPERS ───────────────────────────────────────────────── */
 function fmtMoney(v){
@@ -446,7 +446,9 @@ function renderGlavna(){
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g=kasaGlavna||{};
   var isDraft=!g.id||(g.status==='draft');
-  var canEdit=['manager','admin'].indexOf(currentUser.role)>=0;
+  var canEdit=['kasa','manager','admin','accounting'].indexOf(currentUser.role)>=0;
+  /* Manager/kasa могат ВИНАГИ да пишат, независимо от статуса */
+  var canInput=['kasa','manager','admin'].indexOf(currentUser.role)>=0;
 
   /* Сборна таблица по деноминации: ПОС1 + ПОС2 + ПОС3 + Главна */
   function sumDenom(v){
@@ -495,7 +497,7 @@ function renderGlavna(){
     '</tr></thead><tbody>'+
     ALL_DENOM.map(function(v){
       var d=sumDenom(v);
-      var glInput=isDraft&&canEdit?
+      var glInput=canInput?
         '<input type="number" min="0" id="gl-'+DENOM_KEY[v]+'" value="'+(parseInt(g[DENOM_KEY[v]])||0)+'" oninput="glavnaLiveCalc()" style="width:55px;text-align:center;border:1.5px solid #e2e8f0;border-radius:4px;font-family:DM Mono,monospace;font-size:12px;padding:2px 4px;background:#fffbeb;">':
         '<span style="font-family:DM Mono,monospace;">'+(parseInt(g[DENOM_KEY[v]])||0)+'</span>';
       return '<tr style="border-bottom:1px solid #f1f5f9;">'+
@@ -513,44 +515,58 @@ function renderGlavna(){
     '</tr>'+
     '</tbody></table></div></div>'+
 
-    /* Инкасо summary */
-    '<div class="card" style="margin-bottom:14px;">'+
-    '<div class="card-title">Изведени за инкасо — обобщение</div>'+
+    /* Инкасо summary — деноминации като ориентир */
+    '<div class="card" style="margin-bottom:14px;border-top:3px solid #d97706;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
+      '<div class="card-title" style="margin:0;">📤 Изведени за инкасо — по деноминации</div>'+
+      '<div style="font-size:11px;color:#d97706;font-weight:600;">Ориентир за инкасиране</div>'+
+    '</div>'+
     '<div class="tbl-wrap"><table style="font-size:12px;">'+
-    '<thead><tr><th>Ном.</th>'+
-    todayRep.map(function(r){return '<th style="text-align:center;">ПОС '+r.pos_number+'</th>';}).join('')+
-    '<th style="text-align:center;">Брой</th><th style="text-align:right;">Сума</th></tr></thead><tbody>'+
-    INKASO_DENOM.map(function(v){
-      var qty=inkSum(v);
-      return '<tr style="border-bottom:1px solid #f1f5f9;">'+
-        '<td style="font-weight:600;text-align:right;padding:4px 10px;">'+v+'</td>'+
-        todayRep.map(function(r){return '<td style="text-align:center;font-family:DM Mono,monospace;padding:4px 8px;">'+(parseInt(r['inkaso_'+v])||0)+'</td>';}).join('')+
-        '<td style="text-align:center;font-family:DM Mono,monospace;font-weight:600;padding:4px 8px;">'+qty+'</td>'+
-        '<td style="text-align:right;font-family:DM Mono,monospace;padding:4px 10px;">'+(qty*v).toFixed(2)+'</td>'+
+    '<thead><tr>'+
+      '<th style="text-align:right;">Ном.</th>'+
+      todayRep.map(function(r){return '<th style="text-align:center;">ПОС '+r.pos_number+'</th>';}).join('')+
+      '<th style="text-align:center;">Общо бр.</th>'+
+      '<th style="text-align:right;background:#fef3c7;">Сума EUR</th>'+
+    '</tr></thead><tbody>'+
+    (function(){
+      var rows='';var tot=0;
+      INKASO_DENOM.forEach(function(v){
+        var qtys=todayRep.map(function(r){return parseInt(r['inkaso_'+v])||0;});
+        var total=qtys.reduce(function(a,b){return a+b;},0);
+        var sum=Math.round(total*v*100)/100; tot+=sum;
+        rows+='<tr style="border-bottom:1px solid #f1f5f9;">'+
+          '<td style="text-align:right;padding:5px 10px;font-weight:700;">'+v+' EUR</td>'+
+          qtys.map(function(q){return '<td style="text-align:center;padding:5px 8px;font-family:DM Mono,monospace;">'+(q||'—')+'</td>';}).join('')+
+          '<td style="text-align:center;font-family:DM Mono,monospace;font-weight:600;">'+total+'</td>'+
+          '<td style="text-align:right;padding:5px 10px;font-family:DM Mono,monospace;background:#fffbeb;font-weight:'+(total>0?'700':'400')+';color:'+(total>0?'#92400e':'#94a3b8')+';font-size:'+(total>0?'13':'12')+'px;">'+sum.toFixed(2)+'</td>'+
+        '</tr>';
+      });
+      tot=Math.round(tot*100)/100;
+      rows+='<tr style="border-top:2px solid #d97706;background:#fef3c7;font-weight:700;">'+
+        '<td colspan="'+(1+todayRep.length)+'" style="padding:6px 10px;">ОБЩО ЗА ИНКАСО</td>'+
+        '<td></td>'+
+        '<td style="text-align:right;padding:6px 10px;font-family:DM Mono,monospace;font-size:14px;">'+tot.toFixed(2)+' EUR</td>'+
       '</tr>';
-    }).join('')+
-    '<tr style="border-top:2px solid #e2e8f0;font-weight:700;background:#f8fafc;">'+
-      '<td colspan="'+(1+todayRep.length)+'">ОБЩО ИНКАСО</td>'+
-      '<td></td>'+
-      '<td style="text-align:right;font-family:DM Mono,monospace;">'+totalInkaso.toFixed(2)+' EUR</td>'+
-    '</tr></tbody></table></div></div>'+
+      return rows;
+    })()+
+    '</tbody></table></div></div>'+
 
     /* Жълти полета — ръчно въвеждане */
     '<div class="card" style="margin-bottom:14px;background:#fffbeb;border-color:#f0c940;">'+
     '<div class="card-title" style="color:#92400e;">⭐ Ръчно въвеждане (жълти полета)</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">'+
       '<div><label class="fl">Служебно въведени (EUR)</label>'+
-        (isDraft&&canEdit?
+        (canInput?
           '<input type="number" step="0.01" class="fi" id="gl-slujebno" value="'+(g.slujebno||0)+'" oninput="glavnaLiveCalc()" style="background:#fffbeb;">':
           '<div class="fi" style="background:#f9f8f6;">'+(g.slujebno||0)+'</div>')+
       '</div>'+
       '<div><label class="fl">Наличност SAP (EUR)</label>'+
-        (isDraft&&canEdit?
+        (canInput?
           '<input type="number" step="0.01" class="fi" id="gl-sap" value="'+(g.sap_balance||0)+'" oninput="glavnaLiveCalc()" style="background:#fffbeb;">':
           '<div class="fi" style="background:#f9f8f6;">'+(g.sap_balance||0)+'</div>')+
       '</div>'+
       '<div style="display:flex;flex-direction:column;justify-content:flex-end;">'+
-        (isDraft&&canEdit?
+        (canInput?
           '<button onclick="saveGlavna()" class="btn btn-green" style="margin-top:20px;">💾 Запази</button>':
           '<span style="margin-top:20px;font-size:12px;color:#16a34a;font-weight:600;">✅ Потвърдена</span>')+
       '</div>'+
