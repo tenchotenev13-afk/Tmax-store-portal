@@ -60,17 +60,26 @@ function startPolling(){
   _poll=setInterval(checkNewOrders,30000);
 }
 
-/* Hook into renderMetrics */
+/* Hook into renderMetrics — показва банера след като данните са заредени
+   Брои 2 извиквания (транспорт + клиентски), след което е сигурно, че имаме данни */
 var _origMetrics=renderMetrics;
-renderMetrics=function(){_origMetrics();updateBadges();};
-
-/* Hook into loadAll — показва банера един път */
-var _origLoadAll=loadAll,_firstLoad=true;
-loadAll=function(){
-  _origLoadAll();
-  if(_firstLoad){_firstLoad=false;setTimeout(function(){if(!_notifShown&&currentUser){_notifShown=true;showLoginBanner();}},1500);}
+var _metricsCount=0;
+renderMetrics=function(){
+  _origMetrics();
+  updateBadges();
+  _metricsCount++;
+  /* След 2+ рендера данните са готови — показваме банера */
+  if(_metricsCount>=2 && !_notifShown && currentUser){
+    _notifShown=true;
+    showLoginBanner();
+  }
 };
 
-/* Hook into startApp — стартира polling */
+/* Hook into startApp — стартира polling и нулира брояча */
 var _origStart=startApp;
-startApp=function(){_origStart();_notifShown=false;setTimeout(startPolling,3000);};
+startApp=function(){
+  _origStart();
+  _notifShown=false;
+  _metricsCount=0;
+  setTimeout(startPolling,3000);
+};
