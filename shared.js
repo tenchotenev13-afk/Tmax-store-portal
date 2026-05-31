@@ -142,6 +142,13 @@ function setupTabsForRole(){
   if(histTab)histTab.style.display=isGlobal()?'':'none';
   var adminTab=document.getElementById('tab-admin');
   if(adminTab)adminTab.style.display=currentUser.role==='admin'?'':'none';
+
+  /* Покажи .adm елементи (напр. бутон + Добави в Инструкции) за admin */
+  var admRoles=['admin','accounting'];
+  document.querySelectorAll('.adm').forEach(function(el){
+    if(el.id==='tab-admin') return; /* вече е обработен */
+    el.style.display=admRoles.indexOf(currentUser.role)>=0?'inline-flex':'none';
+  });
 }
 function showModule(mod){
   ['transport','client','bulletin','docs','kasa','history','admin','print'].forEach(function(m){
