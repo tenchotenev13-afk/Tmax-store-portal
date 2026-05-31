@@ -242,7 +242,8 @@ function renderHistoryResults(){
           '<td style="font-family:monospace;">'+fmtMoney(inkaso)+'</td>'+
           '<td style="font-family:monospace;">'+fmtMoney(r.counted_cash)+'</td>'+
           '<td style="font-family:monospace;font-weight:700;color:'+razC+';">'+(raz<0?'–':'')+Math.abs(raz).toFixed(2)+' EUR</td>'+
-          '<td>'+(r.status==='confirmed'?'✅':'✏️')+'</td>'+
+          '<td>'+(r.status==='confirmed'?'✅':r.status==='returned'?'↩':'✏️')+'</td>'+
+        '<td><button onclick="openKasaDetail(''+r.store_name+'',''+r.date+'')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 9px;font-size:11px;cursor:pointer;">Детайли →</button></td>'+
         '</tr>';
       }).join('')+
       '</tbody></table></div></div>';
@@ -289,7 +290,7 @@ function printHistoryReport(){
       '<td style="text-align:right;font-family:monospace;">'+fmtMoney(ink)+'</td>'+
       '<td style="text-align:right;font-family:monospace;">'+fmtMoney(r.counted_cash)+'</td>'+
       '<td style="text-align:right;font-family:monospace;font-weight:700;'+rc+'">'+(raz<0?'–':'')+Math.abs(raz).toFixed(2)+' EUR</td>'+
-      '<td style="text-align:center;">'+(r.status==='confirmed'?'✅':'✏️')+'</td>'+
+      '<td style="text-align:center;">'+(r.status==='confirmed'?'✅':r.status==='returned'?'↩':'✏️')+'</td>'+
     '</tr>';
   }).join('');
 

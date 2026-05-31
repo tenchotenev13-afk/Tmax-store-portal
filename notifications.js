@@ -34,6 +34,20 @@ function showLoginBanner(){
   if(td.length) html+='<div class="notif-card info"><div class="notif-icon">🔵</div><div class="notif-text"><div class="notif-title">'+td.length+' доставк'+(td.length===1?'а':'и')+' ДНЕС</div><div class="notif-sub">Заявки с дата на доставка за днес.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   if(oldOrders&&oldOrders.length) html+='<div class="notif-card warning"><div class="notif-icon">⏳</div><div class="notif-text"><div class="notif-title">'+oldOrders.length+' клиентска заявка за изпълнение над 5 дни!</div><div class="notif-sub">Заявките трябва да се изпълнят в рамките на 7-10 дни.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   if(tm.length) html+='<div class="notif-card warning"><div class="notif-icon">🟡</div><div class="notif-text"><div class="notif-title">'+tm.length+' доставк'+(tm.length===1?'а':'и')+' УТРЕ</div><div class="notif-sub">Подготви стоката навреме.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
+  /* Върнати за корекция */
+  sbGet('kasa_reports','store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&status=eq.returned&select=return_reason,returned_by').then(function(ret){
+    if(Array.isArray(ret)&&ret.length){
+      var r=ret[0];
+      var el=document.getElementById('notif-banner');
+      if(el){
+        var card='<div class="notif-card urgent"><div class="notif-icon">↩</div><div class="notif-text">'+
+          '<div class="notif-title">Касов отчет е върнат за корекция!</div>'+
+          '<div class="notif-sub">Причина: '+esc(r.return_reason||'')+'&nbsp;·&nbsp;Върнат от: '+esc(r.returned_by||'')+'</div>'+
+          '</div></div>';
+        el.innerHTML=card+el.innerHTML;el.style.display='block';
+      }
+    }
+  }).catch(function(){});
   if(!od.length&&!td.length&&!tm.length) html='<div class="notif-card success"><div class="notif-icon">✅</div><div class="notif-text"><div class="notif-title">Всичко е наред!</div><div class="notif-sub">Няма просрочени или спешни заявки.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   banner.innerHTML=html;banner.style.display='block';
 }
