@@ -15,12 +15,24 @@ function updateBadges(){
 function showLoginBanner(){
   var banner=document.getElementById('notif-banner');if(!banner)return;
   var all=transportOrders.concat(clientOrders);
-  var od=all.filter(function(o){return o._status==='overdue';});
+  /* Просрочени по дата на доставка + клиентски заявки >7 дни без отговор */
+  var now2=new Date();now2.setHours(0,0,0,0);
+  var od=all.filter(function(o){
+    if(o._status==='overdue') return true;
+    var days=o.created_at?Math.floor((now2-new Date(o.created_at))/86400000):0;
+    return days>=7&&['done','refused','postponed'].indexOf(o._status)<0&&o._isFulfiller;
+  });
   var td=all.filter(function(o){return o._status==='today';});
   var tm=all.filter(function(o){return o._status==='tomorrow';});
+  /* Клиентски заявки >5 дни (предупреждение) */
+  var oldOrders=clientOrders.filter(function(o){
+    var days=o.created_at?Math.floor((now2-new Date(o.created_at))/86400000):0;
+    return days>=5&&days<7&&['done','refused','postponed'].indexOf(o._status)<0&&o._isFulfiller;
+  });
   var html='';
   if(od.length) html+='<div class="notif-card urgent"><div class="notif-icon">🚨</div><div class="notif-text"><div class="notif-title">'+od.length+' просрочен'+(od.length===1?'а заявка':'и заявки')+'!</div><div class="notif-sub">Трябва незабавно внимание.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   if(td.length) html+='<div class="notif-card info"><div class="notif-icon">🔵</div><div class="notif-text"><div class="notif-title">'+td.length+' доставк'+(td.length===1?'а':'и')+' ДНЕС</div><div class="notif-sub">Заявки с дата на доставка за днес.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
+  if(oldOrders&&oldOrders.length) html+='<div class="notif-card warning"><div class="notif-icon">⏳</div><div class="notif-text"><div class="notif-title">'+oldOrders.length+' клиентска заявка за изпълнение над 5 дни!</div><div class="notif-sub">Заявките трябва да се изпълнят в рамките на 7-10 дни.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   if(tm.length) html+='<div class="notif-card warning"><div class="notif-icon">🟡</div><div class="notif-text"><div class="notif-title">'+tm.length+' доставк'+(tm.length===1?'а':'и')+' УТРЕ</div><div class="notif-sub">Подготви стоката навреме.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   if(!od.length&&!td.length&&!tm.length) html='<div class="notif-card success"><div class="notif-icon">✅</div><div class="notif-text"><div class="notif-title">Всичко е наред!</div><div class="notif-sub">Няма просрочени или спешни заявки.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   banner.innerHTML=html;banner.style.display='block';
@@ -45,9 +57,14 @@ function playSound(){
 }
 function checkNewOrders(){
   if(!currentUser)return;
-  var q='order=created_at.desc';
-  if(!isGlobal())q+='&store_name=eq.'+encodeURIComponent(currentUser.store_name);
-  Promise.all([sbGet('transport_orders',q),sbGet('client_orders',q)]).then(function(r){
+  var tq='order=created_at.desc';
+  var cq='order=created_at.desc';
+  if(!isGlobal()){
+    tq+='&store_name=eq.'+encodeURIComponent(currentUser.store_name);
+    var st=encodeURIComponent(currentUser.store_name);
+    cq+='&or=(store_name.eq.'+st+',fulfiller.eq.'+st+')';
+  }
+  Promise.all([sbGet('transport_orders',tq),sbGet('client_orders',cq)]).then(function(r){
     var nt=Array.isArray(r[0])?r[0].length:0;
     var nc=Array.isArray(r[1])?r[1].length:0;
     if((_lastT>0&&nt>_lastT)||(_lastC>0&&nc>_lastC)){playSound();toast('🔔 Нова заявка е постъпила!','#2563eb');}

@@ -1,11 +1,43 @@
 /* client-orders.js — Клиентски заявки + бланка за клиента */
 
+function calcElapsed(createdAt){
+  if(!createdAt) return 0;
+  var created=new Date(createdAt); created.setHours(0,0,0,0);
+  return Math.floor((TODAY-created)/86400000);
+}
+
+function elapsedBadge(days, status){
+  /* Не показваме за финални статуси */
+  if(['done','refused','postponed'].indexOf(status)>=0) return '';
+  if(days<5) return '<span style="font-size:11px;color:#94a3b8;">'+days+' дни</span>';
+  if(days<7)  return '<span style="font-size:11px;font-weight:600;color:#d97706;background:#fef3c7;padding:2px 7px;border-radius:20px;">⚠️ '+days+' дни</span>';
+  if(days<10) return '<span style="font-size:11px;font-weight:600;color:#ea580c;background:#fff7ed;padding:2px 7px;border-radius:20px;">🔶 '+days+' дни</span>';
+  return '<span style="font-size:11px;font-weight:600;color:#dc2626;background:#fee2e2;padding:2px 7px;border-radius:20px;animation:rowPulse 1.5s infinite;">🔴 '+days+' дни!</span>';
+}
+
+function elapsedRowStyle(days, baseStatus){
+  if(['done','refused','postponed'].indexOf(baseStatus)>=0) return '';
+  if(days>=10) return 'background:rgba(220,38,38,.04);animation:rowPulse 1.8s infinite;';
+  if(days>=7)  return 'background:rgba(234,88,12,.03);';
+  if(days>=5)  return 'background:rgba(217,119,6,.03);';
+  return '';
+}
+
 function loadClientOrders(){
   var q='order=created_at.desc';
-  if(!isGlobal())q+='&store_name=eq.'+encodeURIComponent(currentUser.store_name);
+  if(!isGlobal()){
+    /* Показваме заявки на магазина И заявки за изпълнение от него */
+    var store=encodeURIComponent(currentUser.store_name);
+    q+='&or=(store_name.eq.'+store+',fulfiller.eq.'+store+')';
+  }
   sbGet('client_orders',q).then(function(data){
     clientOrders=Array.isArray(data)?data:[];
-    clientOrders.forEach(function(o){o._status=calcStatus(o.delivery,o.status);});
+    clientOrders.forEach(function(o){
+      o._status=calcStatus(o.delivery,o.status);
+      o._days=calcElapsed(o.created_at);
+      /* Маркираме дали текущия магазин е изпълнителят */
+      o._isFulfiller=!isGlobal()&&o.fulfiller===currentUser.store_name&&o.store_name!==currentUser.store_name;
+    });
     renderClientOrders();renderMetrics();updateBadges();
   }).catch(function(e){console.warn('client_orders:',e);});
 }
