@@ -159,6 +159,7 @@ function showModule(mod){
   if(mod==='admin')loadAdmin();
   if(mod==='kasa')loadKasa();
   if(mod==='history')loadHistory();
+  if(mod==='bulletin')loadBulletin();
 }
 /* Затваря модал САМО ако mousedown И mouseup са върху тъмния фон
    (предотвратява случайно затваряне при плъзгане на мишката) */
