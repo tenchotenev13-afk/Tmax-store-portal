@@ -58,8 +58,7 @@ function calcRazlika(r){
 
 /* ─── LOAD ──────────────────────────────────────────────────── */
 function loadKasa(){
-  var q='order=date.desc,pos_number.asc';
-  if(!isGlobal()) q+='&store_name=eq.'+encodeURIComponent(currentUser.store_name);
+  var q='order=date.desc,pos_number.asc'+storeQ();
   sbGet('kasa_reports',q).then(function(data){
     kasaReports=Array.isArray(data)?data:[];
     if(kasaView==='pos') renderKasa();

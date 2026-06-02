@@ -71,12 +71,19 @@ function playSound(){
 }
 function checkNewOrders(){
   if(!currentUser)return;
+  var stores=assignedStores();
   var tq='order=created_at.desc';
   var cq='order=created_at.desc';
-  if(!isGlobal()){
-    tq+='&store_name=eq.'+encodeURIComponent(currentUser.store_name);
-    var st=encodeURIComponent(currentUser.store_name);
-    cq+='&or=(store_name.eq.'+st+',fulfiller.eq.'+st+')';
+  if(stores){
+    if(stores.length===1){
+      var s=encodeURIComponent(stores[0]);
+      tq+='&store_name=eq.'+s;
+      cq+='&or=(store_name.eq.'+s+',fulfiller.eq.'+s+')';
+    } else {
+      tq+=storeQ();
+      var orP=stores.map(function(st){var s=encodeURIComponent(st);return 'store_name.eq.'+s+',fulfiller.eq.'+s;}).join(',');
+      cq+='&or=('+orP+')';
+    }
   }
   Promise.all([sbGet('transport_orders',tq),sbGet('client_orders',cq)]).then(function(r){
     var nt=Array.isArray(r[0])?r[0].length:0;

@@ -25,10 +25,15 @@ function elapsedRowStyle(days, baseStatus){
 
 function loadClientOrders(){
   var q='order=created_at.desc';
-  if(!isGlobal()){
-    /* Показваме заявки на магазина И заявки за изпълнение от него */
-    var store=encodeURIComponent(currentUser.store_name);
-    q+='&or=(store_name.eq.'+store+',fulfiller.eq.'+store+')';
+  var stores=assignedStores();
+  if(!stores){
+    /* admin без ограничение - вижда всичко */
+  } else if(stores.length===1){
+    var s=encodeURIComponent(stores[0]);
+    q+='&or=(store_name.eq.'+s+',fulfiller.eq.'+s+')';
+  } else {
+    var orParts=stores.map(function(st){var s=encodeURIComponent(st);return 'store_name.eq.'+s+',fulfiller.eq.'+s;}).join(',');
+    q+='&or=('+orParts+')';
   }
   sbGet('client_orders',q).then(function(data){
     clientOrders=Array.isArray(data)?data:[];

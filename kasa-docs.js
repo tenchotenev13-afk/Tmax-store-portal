@@ -161,10 +161,10 @@ function loadDailyOverview() {
   wrap.innerHTML = '<div style="text-align:center;padding:20px;color:#94a3b8;">⏳ Зареждане...</div>';
   var todayStr = today();
   Promise.all([
-    sbGet('kasa_reports','date=eq.'+todayStr+'&order=store_name.asc'),
-    sbGet('kasa_zoborot','date=eq.'+todayStr),
-    sbGet('kasa_documents','date=eq.'+todayStr),
-    sbGet('stores','select=name&order=name')
+    sbGet('kasa_reports','date=eq.'+todayStr+'&order=store_name.asc'+storeQ()),
+    sbGet('kasa_zoborot','date=eq.'+todayStr+storeQ()),
+    sbGet('kasa_documents','date=eq.'+todayStr+storeQ()),
+    sbGet('stores','select=name&order=name'+storeQ('name'))
   ]).then(function(res) {
     var reps   = Array.isArray(res[0]) ? res[0] : [];
     var zobs   = Array.isArray(res[1]) ? res[1] : [];

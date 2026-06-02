@@ -20,7 +20,7 @@ function loadHistory(){
 }
 
 function loadHistoryStores(){
-  sbGet('stores','select=name&order=name').then(function(data){
+  sbGet('stores','select=name&order=name'+storeQ('name')).then(function(data){
     histStores=Array.isArray(data)?data.map(function(s){return s.name;}):[]; 
     /* Попълни dropdown */
     var sel=document.getElementById('h-store');
@@ -45,24 +45,24 @@ function runHistorySearch(){
 
   var promises=[];
 
+  /* Ако е избран конкретен магазин от dropdown - използваме него,
+     иначе ограничаваме до назначените магазини на потребителя */
+  var sFilter = store
+    ? '&store_name=eq.'+encodeURIComponent(store)
+    : storeQ();
+
   if(type==='all'||type==='transport'){
-    var q='order=created_at.desc';
-    q+='&date=gte.'+from+'&date=lte.'+to;
-    if(store) q+='&store_name=eq.'+encodeURIComponent(store);
+    var q='order=created_at.desc&date=gte.'+from+'&date=lte.'+to+sFilter;
     promises.push(sbGet('transport_orders',q).then(function(d){histData.transport=Array.isArray(d)?d:[];}));
   } else { histData.transport=[]; }
 
   if(type==='all'||type==='client'){
-    var q2='order=created_at.desc';
-    q2+='&date=gte.'+from+'&date=lte.'+to;
-    if(store) q2+='&store_name=eq.'+encodeURIComponent(store);
+    var q2='order=created_at.desc&date=gte.'+from+'&date=lte.'+to+sFilter;
     promises.push(sbGet('client_orders',q2).then(function(d){histData.client=Array.isArray(d)?d:[];}));
   } else { histData.client=[]; }
 
   if(type==='all'||type==='kasa'){
-    var q3='order=date.desc';
-    q3+='&date=gte.'+from+'&date=lte.'+to;
-    if(store) q3+='&store_name=eq.'+encodeURIComponent(store);
+    var q3='order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter;
     promises.push(sbGet('kasa_reports',q3).then(function(d){histData.kasa=Array.isArray(d)?d:[];}));
   } else { histData.kasa=[]; }
 

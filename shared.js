@@ -15,9 +15,30 @@ var transportOrders=[],clientOrders=[],docs=[];
 var transportFilter='all',orderFilter='all',docFilter='all';
 var statusTargetId=null,statusTargetTable=null;
 
-function isGlobal(){ /* вижда всички магазини */
+function isGlobal(){
   if(!currentUser)return false;
   return ['admin','accounting','logistics'].indexOf(currentUser.role)>=0;
+}
+
+/* Списък магазини за потребителя: null = всички, [] = само своя, [...] = назначени */
+function assignedStores(){
+  if(!currentUser)return null;
+  if(!isGlobal())return [currentUser.store_name];
+  var arr=currentUser.assigned_stores;
+  if(Array.isArray(arr)&&arr.length>0)return arr;
+  if(typeof arr==='string'&&arr.length>2){
+    try{return arr.replace(/^{|}$/g,'').split(',').map(function(s){return s.trim().replace(/^"|"$/g,'');});}catch(e){}
+  }
+  return null;
+}
+
+/* Supabase query string за филтриране по магазин */
+function storeQ(col){
+  col=col||'store_name';
+  var stores=assignedStores();
+  if(!stores)return '';
+  if(stores.length===1)return '&'+col+'=eq.'+encodeURIComponent(stores[0]);
+  return '&'+col+'=in.('+stores.map(encodeURIComponent).join(',')+')';
 }
 
 /* UTILS */

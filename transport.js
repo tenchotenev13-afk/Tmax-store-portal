@@ -27,8 +27,7 @@ function getStoreInfo(name){
 }
 
 function loadTransport(){
-  var q='order=created_at.desc';
-  if(!isGlobal())q+='&store_name=eq.'+encodeURIComponent(currentUser.store_name);
+  var q='order=created_at.desc'+storeQ();
   sbGet('transport_orders',q).then(function(data){
     transportOrders=Array.isArray(data)?data:[];
     transportOrders.forEach(function(o){o._status=calcStatus(o.delivery,o.status);});
