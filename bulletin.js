@@ -134,6 +134,7 @@ function bulHdr(isDraft){
       (canEdit() ? '<button onclick="setBulAnalysis()" class="bbtn">📊 Анализ</button>' : '') +
       (canEdit() ? '<button onclick="openPrintMenu()" class="bbtn">🖨 Печат</button>' : '') +
       (canEdit() && isDraft ? '<button onclick="publishBul()" style="background:#16a34a;color:#fff;border:none;padding:6px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">📤 Публикувай</button>' : '') +
+      (canEdit() && !isDraft ? '<button onclick="openEmailMenu()" style="background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:6px 12px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">📧 Имейли</button>' : '') +
       (canEdit() ? '<button onclick="newBulletin()" style="background:#2563eb;color:#fff;border:none;padding:6px 12px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">+ Нов</button>' : '') +
     '</div>' +
   '</div>';
@@ -239,8 +240,10 @@ function renderBulView(){
     html+='<div style="font-size:12px;color:#64748b;margin-top:4px;">'+done+' от '+tot+' задачи ('+pct+'%)</div></div>';
   }
   html+='</div>';
-  html+=calModalHtml()+printMenuHtml();
+  html+=calModalHtml()+printMenuHtml()+emailMenuHtml();
   wrap.innerHTML=html;
+  /* Auto-check за имейл тригери (само за admin) */
+  if(typeof checkBulletinEmailTriggers==='function') setTimeout(function(){checkBulletinEmailTriggers(curBul,bulTasks,bulComps);},500);
 }
 
 /* View block */
@@ -607,6 +610,38 @@ function newBulletin(){
     toast('✅ Нов бюлетин е създаден!'); bulMode='edit'; loadBulletin();
   });
 }
+
+/* ─── EMAIL MENU ─────────────────────────────────────────── */
+function emailMenuHtml(){
+  return '<div class="bov" id="em-ov"><div class="bmod" style="width:400px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">📧 Имейл нотификации</div>'+
+    '<div style="display:flex;flex-direction:column;gap:8px;">'+
+    '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
+      '<div style="font-size:13px;font-weight:600;margin-bottom:4px;">📋 Седмичен дайджест</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Изпраща задачите за седмицата до всички управители.</div>'+
+      '<button onclick="sendWeeklyDigest(curBul,bulTasks,function(){closeEmailMenu();loadBulletin();})" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати до всички магазини</button>'+
+    '</div>'+
+    '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
+      '<div style="font-size:13px;font-weight:600;margin-bottom:4px;">⚠️ Просрочени задачи</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Изпраща до регионални и контролинг за неизпълнените задачи.</div>'+
+      '<button onclick="sendOverdueAlerts(curBul,bulTasks,bulComps,function(){closeEmailMenu();loadBulletin();})" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати нотификации</button>'+
+    '</div>'+
+    '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
+      '<div style="font-size:13px;font-weight:600;margin-bottom:4px;">🔬 Тестов имейл</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Изпрати тест до твоя имейл за проверка.</div>'+
+      '<div style="display:flex;gap:6px;">'+
+      '<input id="test-email-inp" placeholder="твоя@имейл.com" value="'+(currentUser?currentUser.email:'')+'" style="flex:1;font-size:12px;border:1px solid #e2e8f0;border-radius:5px;padding:5px 8px;font-family:inherit;">'+
+      '<button onclick="bulSendTest()" style="border:none;background:#16a34a;color:#fff;border-radius:5px;padding:5px 12px;font-size:12px;cursor:pointer;">Изпрати</button>'+
+      '</div>'+
+    '</div>'+
+    '</div>'+
+    '<button onclick="closeEmailMenu()" style="width:100%;margin-top:12px;border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:8px;font-size:13px;cursor:pointer;color:#64748b;">Затвори</button>'+
+    '</div></div>';
+}
+function bulSendTest(){var inp=document.getElementById('test-email-inp');if(inp)sendTestEmail(inp.value);}
+function openEmailMenu(){document.getElementById('em-ov').classList.add('open');}
+function closeEmailMenu(){document.getElementById('em-ov').classList.remove('open');}
+
 function renderBulEmpty(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   wrap.innerHTML='<div style="text-align:center;padding:60px;"><div style="font-size:50px;margin-bottom:14px;">📰</div><div style="font-size:18px;font-weight:600;margin-bottom:8px;">Няма бюлетин за тази седмица</div>'+(canEdit()?'<button onclick="newBulletin()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:10px 24px;font-size:14px;font-weight:600;cursor:pointer;">+ Създай бюлетин</button>':'<div style="color:#94a3b8;">Бюлетинът ще бъде публикуван скоро.</div>')+'</div>';
@@ -629,85 +664,191 @@ function bulPrint(btn){closePrintMenu();printSection(btn.getAttribute('data-what
 function printSection(what){
   var c=curBul.content; var wk=curBul.week_number; var yr=curBul.year;
   var days=weekDays(wk,yr); var isDraft=curBul.status==='draft';
-  var imp2=[];DCOLS.forEach(function(k){(c.columns[k]||[]).forEach(function(b){if(b.type==='important')imp2.push(b);});});
+  var imp2=[];
+  DCOLS.forEach(function(k){(c.columns[k]||[]).forEach(function(b){if(b.type==='important')imp2.push(b);});});
 
-  function pB(b){
+  var PRINT_CSS = '@page{size:A4;margin:14mm;}' +
+    '*{box-sizing:border-box;margin:0;padding:0;}' +
+    'body{font-family:Arial,sans-serif;font-size:11.5pt;color:#111;background:#fff;line-height:1.55;}' +
+    'h1{font-size:17pt;font-weight:700;margin-bottom:3mm;}' +
+    'h2{font-size:13pt;font-weight:700;color:#0f172a;border-bottom:2pt solid #e2e8f0;padding-bottom:2mm;margin:5mm 0 3mm;}' +
+    'h3{font-size:12pt;font-weight:700;margin:4mm 0 2mm;}' +
+    '.hdr{background:#0f172a;color:#fff;padding:8mm 10mm;border-radius:3mm;margin-bottom:5mm;display:flex;justify-content:space-between;align-items:center;}' +
+    '.hdr-title{font-size:16pt;font-weight:700;}' +
+    '.hdr-sub{font-size:10pt;color:#94a3b8;margin-top:1mm;}' +
+    '.draft-badge{background:#f59e0b;color:#78350f;font-size:9pt;font-weight:700;padding:2mm 4mm;border-radius:20mm;}' +
+    '.week-badge{background:#1e293b;color:#94a3b8;font-family:monospace;font-size:10pt;padding:2mm 5mm;border-radius:20mm;}' +
+    /* Important section */
+    '.imp-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:3mm;margin-bottom:5mm;}' +
+    '.imp-card{border-radius:2mm;padding:4mm 5mm;}' +
+    '.imp-ok{background:#f0fdf4;border-left:3pt solid #16a34a;}' +
+    '.imp-warn{background:#fffbeb;border-left:3pt solid #f59e0b;}' +
+    '.imp-urgent{background:#fff1f2;border-left:3pt solid #dc2626;}' +
+    '.imp-info{background:#eff6ff;border-left:3pt solid #2563eb;}' +
+    '.imp-title{font-size:12pt;font-weight:700;margin-bottom:1mm;}' +
+    '.imp-sub{font-size:10pt;opacity:.8;}' +
+    /* Calendar */
+    '.cal-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:3mm;margin-bottom:5mm;}' +
+    '.cal-day{border:1pt solid #e2e8f0;border-radius:2mm;padding:3mm 4mm;min-height:35mm;}' +
+    '.cal-day-name{font-size:8pt;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:1mm;}' +
+    '.cal-date{font-family:monospace;font-size:17pt;font-weight:700;color:#0f172a;margin-bottom:2mm;}' +
+    '.cal-entry{display:flex;gap:2mm;padding:1mm 0;border-bottom:1pt dashed #f1f5f9;align-items:flex-start;font-size:10.5pt;}' +
+    '.cal-dot{width:5pt;height:5pt;border-radius:50%;flex-shrink:0;margin-top:2.5pt;}' +
+    '.cal-empty{font-size:10pt;color:#cbd5e1;font-style:italic;}' +
+    /* Department */
+    '.dept-hdr{color:#fff;padding:5mm 7mm;border-radius:2mm 2mm 0 0;font-size:13pt;font-weight:700;}' +
+    '.dept-body{border:1pt solid #e2e8f0;border-top:none;border-radius:0 0 2mm 2mm;padding:5mm 7mm;margin-bottom:5mm;}' +
+    /* Blocks */
+    '.block-text{font-size:11.5pt;color:#374151;margin-bottom:3mm;line-height:1.6;}' +
+    '.block-alert{border-radius:0 2mm 2mm 0;padding:3mm 5mm;margin-bottom:3mm;font-size:11.5pt;}' +
+    '.block-list{margin-bottom:3mm;}' +
+    '.block-list li{font-size:11.5pt;color:#374151;padding:1mm 0;border-bottom:1pt solid #f1f5f9;}' +
+    '.block-img{margin-bottom:3mm;}' +
+    '.block-img img{border-radius:2mm;display:block;}' +
+    '.block-img-cap{font-size:9.5pt;color:#64748b;font-style:italic;margin-top:1mm;}' +
+    /* Tasks */
+    '.tasks-hdr{font-size:9pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b;border-bottom:1.5pt solid #e2e8f0;padding-bottom:2mm;margin:4mm 0 2mm;}' +
+    '.task-row{display:flex;gap:3mm;padding:2.5mm 0;border-bottom:1pt solid #f1f5f9;align-items:flex-start;}' +
+    '.task-cb{width:13pt;height:13pt;border:1.5pt solid #e2e8f0;border-radius:2pt;flex-shrink:0;margin-top:1pt;}' +
+    '.task-title{font-size:11.5pt;font-weight:600;margin-bottom:0.5mm;}' +
+    '.task-desc{font-size:10pt;color:#64748b;}' +
+    '.task-due{font-size:9.5pt;color:#94a3b8;margin-top:0.5mm;}' +
+    '.dept-badge{display:inline-block;padding:1mm 3mm;border-radius:20mm;font-size:9.5pt;font-weight:600;margin-bottom:2mm;}' +
+    '.badge-trade{background:#f0fdf4;color:#14532d;}' +
+    '.badge-wh{background:#eff6ff;color:#1e40af;}' +
+    '.badge-admin{background:#f5f3ff;color:#4c1d95;}' +
+    '@media print{button{display:none!important;}}';
+
+  function pBlock(b){
     if(!b||!b.type)return '';
-    if(b.type==='text')return '<p style="font-size:10.5pt;color:#374151;margin-bottom:6px;line-height:1.5;">'+esc(b.content||'').replace(/\n/g,'<br>')+'</p>';
-    if(b.type==='divider')return '<hr style="border:none;border-top:1px solid #e2e8f0;margin:8px 0;">';
-    if(b.type==='list'){var it=(b.content||'').split('\n').filter(Boolean);return '<ul style="margin-bottom:6px;padding-left:16px;">'+(it.map(function(i){return '<li style="font-size:10.5pt;color:#374151;margin-bottom:2px;">'+esc(i)+'</li>';}).join(''))+'</ul>';}
-    if(b.type==='alert'){var C=({red:'#fff1f2:#ef4444:#991b1b',amb:'#fffbeb:#f59e0b:#92400e',grn:'#f0fdf4:#22c55e:#166534',blu:'#eff6ff:#3b82f6:#1e40af',pur:'#f5f3ff:#8b5cf6:#4c1d95'}[b.color||'blu']||'#eff6ff:#3b82f6:#1e40af').split(':');return '<div style="background:'+C[0]+';border-left:3px solid '+C[1]+';color:'+C[2]+';padding:6px 9px;margin-bottom:6px;font-size:10.5pt;">'+(b.label?'<b>'+esc(b.label)+'</b><br>':'')+esc(b.content||'')+'</div>';}
-    if(b.type==='image'&&b.url)return '<div style="width:'+(b.width||100)+'%;margin:0 auto 6px;"><img src="'+b.url+'" style="width:100%;border-radius:5px;display:block;">'+(b.caption?'<div style="font-size:9pt;color:#64748b;font-style:italic;margin-top:2px;">'+esc(b.caption)+'</div>':'')+'</div>';
-    if(b.type==='file'&&b.url)return '<div style="padding:6px 9px;border:1px solid #e2e8f0;border-radius:5px;margin-bottom:6px;font-size:10pt;">📎 <a href="'+b.url+'" target="_blank">'+esc(b.filename||'Файл')+'</a></div>';
+    if(b.type==='text')return '<div class="block-text">'+esc(b.content||'').replace(/\n/g,'<br>')+'</div>';
+    if(b.type==='divider')return '<hr style="border:none;border-top:1pt solid #e2e8f0;margin:3mm 0;">';
+    if(b.type==='list'){
+      var it=(b.content||'').split('\n').filter(Boolean);
+      return '<ul class="block-list" style="list-style:none;padding:0;">'+(it.map(function(i){return '<li>› '+esc(i)+'</li>';}).join(''))+'</ul>';
+    }
+    if(b.type==='alert'){
+      var aC={red:'#fff1f2:#dc2626:#991b1b',amb:'#fffbeb:#f59e0b:#92400e',grn:'#f0fdf4:#16a34a:#14532d',blu:'#eff6ff:#2563eb:#1e40af',pur:'#f5f3ff:#8b5cf6:#4c1d95'}[b.color||'blu']||'#eff6ff:#2563eb:#1e40af';
+      var aC2=aC.split(':');
+      return '<div class="block-alert" style="background:'+aC2[0]+';border-left:3pt solid '+aC2[1]+';color:'+aC2[2]+';">'+(b.label?'<div style="font-size:10pt;font-weight:700;text-transform:uppercase;margin-bottom:1mm;">'+esc(b.label)+'</div>':'')+esc(b.content||'')+'</div>';
+    }
+    if(b.type==='image'&&b.url){
+      var w=b.width||100;
+      return '<div class="block-img" style="width:'+w+'%;"><img src="'+b.url+'" style="width:100%;border-radius:2mm;">'+(b.caption?'<div class="block-img-cap">'+esc(b.caption)+'</div>':'')+'</div>';
+    }
+    if(b.type==='file'&&b.url){
+      return '<div style="padding:2mm 4mm;border:1pt solid #e2e8f0;border-radius:2mm;font-size:10.5pt;margin-bottom:2mm;">📎 <b>'+esc(b.filename||'Файл')+'</b></div>';
+    }
     return '';
   }
 
   function pImp(){
     if(!imp2.length)return '';
-    var h='<div style="margin-bottom:12px;"><div style="font-size:11pt;font-weight:700;border-bottom:2px solid #e2e8f0;padding-bottom:4px;margin-bottom:8px;">⭐ Важно тази седмица</div><div style="display:flex;flex-wrap:wrap;gap:6px;">';
+    var cls={ok:'imp-ok',warn:'imp-warn',urgent:'imp-urgent',info:'imp-info'};
+    var cols={ok:'#14532d',warn:'#92400e',urgent:'#991b1b',info:'#1e40af'};
+    var s='<h2>⭐ Важно тази седмица</h2><div class="imp-grid">';
     imp2.forEach(function(b){
-      var cl=({ok:'#f0fdf4:#bbf7d0:#166534',warn:'#fffbeb:#fde68a:#92400e',urgent:'#fff1f2:#fecaca:#991b1b',info:'#eff6ff:#bfdbfe:#1e40af'}[b.urgency||'info']||'#eff6ff:#bfdbfe:#1e40af').split(':');
-      h+='<div style="background:'+cl[0]+';border:1px solid '+cl[1]+';border-radius:6px;padding:7px 10px;flex:1;min-width:140px;"><div style="font-size:11pt;font-weight:600;color:'+cl[2]+';">'+esc(b.title||'')+'</div>'+(b.sub?'<div style="font-size:9.5pt;color:'+cl[2]+';opacity:.75;">'+esc(b.sub)+'</div>':'')+'</div>';
+      var ug=b.urgency||'info';
+      s+='<div class="imp-card '+(cls[ug]||'imp-info')+'">';
+      s+='<div class="imp-title" style="color:'+(cols[ug]||'#1e40af')+'">'+esc(b.title||'')+'</div>';
+      if(b.sub)s+='<div class="imp-sub" style="color:'+(cols[ug]||'#1e40af')+'">'+esc(b.sub)+'</div>';
+      s+='</div>';
     });
-    h+='</div></div>';
-    return h;
+    s+='</div>';
+    return s;
   }
 
   function pCal(){
-    var h='<div style="margin-bottom:12px;"><div style="font-size:11pt;font-weight:700;border-bottom:2px solid #e2e8f0;padding-bottom:4px;margin-bottom:8px;">📅 Седмичен календар — С'+wk+' · '+yr+'</div>';
-    h+='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:5px;">';
+    var DNAMES2=['Понеделник','Вторник','Сряда','Четвъртък','Петък'];
+    var dotC={trade:'#14532d',warehouse:'#1e40af',admin:'#5b21b6',general:'#64748b'};
+    var s='<h2>📅 Седмичен календар — Седмица '+wk+' · '+yr+'</h2>';
+    s+='<div class="cal-grid">';
     DKEYS.forEach(function(key,i){
       var ds=days[i].toISOString().slice(0,10);
       var dt=bulTasks.filter(function(t){return t.due_date===ds;});
       var mn=c.calendar[key]||[];
-      h+='<div style="border:1px solid #e2e8f0;border-radius:5px;padding:7px;min-height:60px;">';
-      h+='<div style="font-size:8pt;font-weight:700;text-transform:uppercase;color:#94a3b8;">'+DNAMES[i]+'</div>';
-      h+='<div style="font-family:monospace;font-size:15pt;font-weight:500;margin-bottom:3px;">'+fmtD(days[i])+'</div>';
-      dt.forEach(function(t){h+='<div style="font-size:9pt;font-weight:500;padding:1px 0;">• '+esc(t.title||'')+'</div>';});
-      mn.forEach(function(e){h+='<div style="font-size:9pt;padding:1px 0;">• '+esc(e.title||'')+'</div>';});
-      if(!dt.length&&!mn.length)h+='<div style="font-size:8.5pt;color:#cbd5e1;font-style:italic;">Свободен</div>';
-      h+='</div>';
+      s+='<div class="cal-day">';
+      s+='<div class="cal-day-name">'+DNAMES2[i]+'</div>';
+      s+='<div class="cal-date">'+fmtD(days[i])+'</div>';
+      dt.forEach(function(t){
+        var dc=dotC[t.department]||'#64748b';
+        s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span style="font-weight:600;">'+esc(t.title||'')+'</span></div>';
+      });
+      mn.forEach(function(e){
+        var dc=dotC[e.dept]||'#64748b';
+        s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span>'+esc(e.title||'')+'</span></div>';
+      });
+      if(!dt.length&&!mn.length)s+='<div class="cal-empty">Свободен</div>';
+      s+='</div>';
     });
-    h+='</div></div>';
-    return h;
+    s+='</div>';
+    return s;
   }
 
   function pDept(dk){
     var dept=DEPTS[dk];
+    var hdrC={trade:'#166534',warehouse:'#1e40af',admin:'#5b21b6'}[dk]||'#1e293b';
     var blocks=(c.columns[dk]||[]).filter(function(b){return b.type!=='task'&&b.type!=='important';});
     var dt=bulTasks.filter(function(t){return t.department===dk;});
-    var h='<div style="margin-bottom:12px;">';
-    h+='<div style="background:'+dept.hdr+';color:#fff;padding:7px 12px;border-radius:5px 5px 0 0;font-size:11pt;font-weight:600;">'+dept.icon+' '+dept.label+'</div>';
-    h+='<div style="border:1px solid #e2e8f0;border-top:none;border-radius:0 0 5px 5px;padding:10px;">';
-    blocks.forEach(function(b){h+=pB(b);});
+    var bdg={trade:'badge-trade',warehouse:'badge-wh',admin:'badge-admin'}[dk]||'badge-admin';
+    var s='<div class="dept-hdr" style="background:'+hdrC+';">'+dept.icon+' '+dept.label+'</div>';
+    s+='<div class="dept-body">';
+    blocks.forEach(function(b){s+=pBlock(b);});
     if(dt.length){
-      h+='<div style="font-size:9pt;font-weight:700;text-transform:uppercase;color:#64748b;margin:8px 0 4px;border-bottom:1px solid #e2e8f0;padding-bottom:2px;">✅ Задачи тази седмица</div>';
+      s+='<div class="tasks-hdr">✅ Задачи за изпълнение тази седмица</div>';
       dt.forEach(function(t){
-        h+='<div style="display:flex;gap:6px;padding:3px 0;border-bottom:1px solid #f1f5f9;align-items:flex-start;">';
-        h+='<span style="width:13px;height:13px;border:1.5px solid #e2e8f0;border-radius:3px;flex-shrink:0;display:inline-block;margin-top:2px;"></span>';
-        h+='<div><div style="font-size:10.5pt;font-weight:500;">'+esc(t.title||'')+'</div>'+(t.description?'<div style="font-size:9pt;color:#64748b;">'+esc(t.description)+'</div>':'')+(t.due_date?'<div style="font-size:8.5pt;color:#94a3b8;">Срок: '+fmtDate(t.due_date)+'</div>':'')+'</div></div>';
+        var comp=bulComps.find(function(cc){return cc.task_id===t.id;});
+        var isDone=!!comp;
+        s+='<div class="task-row">';
+        s+='<div class="task-cb" style="'+(isDone?'background:#16a34a;border-color:#16a34a;':'')+'">'+
+          (isDone?'<div style="color:#fff;font-size:9pt;text-align:center;line-height:13pt;">✓</div>':'')+'</div>';
+        s+='<div style="flex:1;">';
+        s+='<div class="task-title">'+esc(t.title||'')+'</div>';
+        if(t.description)s+='<div class="task-desc">'+esc(t.description)+'</div>';
+        if(t.due_date)s+='<div class="task-due">📅 Срок: '+new Date(t.due_date).toLocaleDateString('bg-BG')+(isDone&&comp?' &nbsp; ✅ '+esc(comp.completed_by||''):'')+'</div>';
+        s+='</div></div>';
       });
     }
-    if(!blocks.length&&!dt.length)h+='<div style="color:#94a3b8;font-size:10.5pt;text-align:center;padding:10px;">Няма съдържание.</div>';
-    h+='</div></div>';
-    return h;
+    if(!blocks.length&&!dt.length)s+='<div style="color:#94a3b8;text-align:center;padding:5mm;">Няма съдържание.</div>';
+    s+='</div>';
+    return s;
   }
 
-  var sections='', title='Т-Бюлетин С'+wk+' · '+yr;
-  if(what==='all'){sections=pImp()+pCal()+DCOLS.map(pDept).join(''); title+=' — Пълен';}
-  else if(what==='cal'){sections=pImp()+pCal(); title+=' — Календар & Важно';}
-  else{sections=pDept(what); title+=' — '+DEPTS[what].label;}
+  var sections='';
+  var printTitle='Т-Бюлетин Седмица '+wk+' · '+yr;
+  var sectionTitle='';
+
+  if(what==='all'){
+    sections=pImp()+pCal()+DCOLS.map(function(dk){return '<div style="margin-bottom:6mm;">'+pDept(dk)+'</div>';}).join('');
+    sectionTitle='Пълен';
+  } else if(what==='cal'){
+    sections=pImp()+pCal();
+    sectionTitle='Календар & Важно';
+  } else if(DEPTS[what]){
+    sections='<div>'+pDept(what)+'</div>';
+    sectionTitle=DEPTS[what].label;
+  }
 
   var win=window.open('','_blank','width=900,height=700');
-  win.document.write('<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8"><title>'+title+'</title><style>@page{size:A4;margin:12mm;}*{box-sizing:border-box;margin:0;padding:0;}body{font-family:Arial,sans-serif;font-size:10.5pt;color:#111;background:#fff;}.hdr{background:#0f172a;color:#fff;padding:10px 16px;border-radius:6px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;}.draft{background:#f59e0b;color:#78350f;font-size:9pt;font-weight:700;padding:2px 8px;border-radius:20px;}@media print{button{display:none!important;}}</style></head><body>');
-  win.document.write('<div class="hdr"><div style="font-size:13pt;font-weight:600;">'+title+'</div>'+(isDraft?'<span class="draft">✏ Чернова</span>':'')+'</div>');
+  var fullTitle=printTitle+(sectionTitle?' — '+sectionTitle:'');
+  win.document.write('<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">'+
+    '<title>'+fullTitle+'</title>'+
+    '<style>'+PRINT_CSS+'</style></head><body>');
+  win.document.write('<div class="hdr">'+
+    '<div><div class="hdr-title">'+fullTitle+'</div>'+
+    '<div class="hdr-sub">ТеМАХ Вътрешна платформа · '+new Date().toLocaleDateString('bg-BG')+'</div></div>'+
+    '<div style="display:flex;gap:4mm;align-items:center;">'+
+    '<span class="week-badge">С'+wk+' · '+yr+'</span>'+
+    (isDraft?'<span class="draft-badge">✏ Чернова</span>':'')+'</div>'+
+  '</div>');
   win.document.write(sections);
-  win.document.write('<div style="text-align:center;margin-top:16px;"><button onclick="window.print()" style="border:none;background:#2563eb;color:#fff;padding:8px 24px;border-radius:6px;font-size:11pt;cursor:pointer;">🖨 Принтирай / Запази PDF</button></div>');
+  win.document.write('<div style="text-align:center;margin-top:8mm;"><button onclick="window.print()" style="border:none;background:#2563eb;color:#fff;padding:8pt 20pt;border-radius:5mm;font-size:12pt;cursor:pointer;">🖨 Принтирай / Запази PDF</button></div>');
   win.document.write('</body></html>');
-  win.document.close(); setTimeout(function(){win.focus();},300);
+  win.document.close();
+  setTimeout(function(){win.focus();},300);
 }
 
-/* ════════ ANALYSIS ═════════════════════════════════════════ */
+
 function renderBulAnalysis(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   var wk=curBul?curBul.week_number:weekNum(new Date());
