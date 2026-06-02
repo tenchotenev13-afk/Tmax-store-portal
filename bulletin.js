@@ -472,34 +472,59 @@ function blockPickerHtml(){
 function bulUploadImg(input){
   var file=input.files[0]; if(!file)return;
   var col=input.getAttribute('data-col'), id=input.getAttribute('data-id');
-  var ext=file.name.split('.').pop().toLowerCase();
-  var segs=['bulletin',curBul.id,id+'.'+ext].map(encodeURIComponent).join('/');
+  var ext=(file.name.split('.').pop()||'jpg').toLowerCase();
+  var fname=id+'_'+Date.now()+'.'+ext;
+  var path='bulletin/'+curBul.id+'/'+fname;
+  showBulToast('⏳ Качване на снимка...');
   var reader=new FileReader();
   reader.onload=function(e){
-    showBulToast('⏳ Качване...');
-    fetch(BUL_SB+'/storage/v1/object/'+BUL_BKT+'/'+segs,{method:'POST',headers:{'Authorization':'Bearer '+BUL_KEY,'Content-Type':file.type||'image/jpeg','x-upsert':'true'},body:e.target.result}).then(function(r){
-      if(!r.ok){toast('Грешка при качване','#dc2626');return;}
-      var pub=BUL_PUB+segs;
+    fetch(BUL_SB+'/storage/v1/object/'+BUL_BKT+'/'+path,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+BUL_KEY,'Content-Type':file.type||'image/jpeg','x-upsert':'true'},
+      body:e.target.result
+    }).then(function(r){
+      return r.text().then(function(txt){return {ok:r.ok,status:r.status,txt:txt};});
+    }).then(function(res){
+      if(!res.ok){
+        var msg='';
+        try{msg=JSON.parse(res.txt).message||JSON.parse(res.txt).error||res.txt;}catch(e){msg=res.txt;}
+        toast('Грешка '+res.status+': '+msg,'#dc2626');
+        console.error('Upload error:',res);
+        return;
+      }
+      var pub=BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path;
       var b=(curBul.content.columns[col]||[]).find(function(x){return x.id===id;});
       if(b){b.url=pub; schedSave(); renderBulletin(); toast('✅ Снимката е качена!');}
-    }).catch(function(){toast('Грешка','#dc2626');});
+    }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');console.error(err);});
   };
   reader.readAsArrayBuffer(file);
 }
 function bulUploadFile(input){
   var file=input.files[0]; if(!file)return;
   var col=input.getAttribute('data-col'), id=input.getAttribute('data-id');
-  var ext=file.name.split('.').pop().toLowerCase();
-  var segs=['bulletin',curBul.id,id+'_file.'+ext].map(encodeURIComponent).join('/');
+  var ext=(file.name.split('.').pop()||'bin').toLowerCase();
+  var fname=id+'_file_'+Date.now()+'.'+ext;
+  var path='bulletin/'+curBul.id+'/'+fname;
+  showBulToast('⏳ Качване на файл...');
   var reader=new FileReader();
   reader.onload=function(e){
-    showBulToast('⏳ Качване...');
-    fetch(BUL_SB+'/storage/v1/object/'+BUL_BKT+'/'+segs,{method:'POST',headers:{'Authorization':'Bearer '+BUL_KEY,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},body:e.target.result}).then(function(r){
-      if(!r.ok){toast('Грешка','#dc2626');return;}
-      var pub=BUL_PUB+segs;
+    fetch(BUL_SB+'/storage/v1/object/'+BUL_BKT+'/'+path,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+BUL_KEY,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+      body:e.target.result
+    }).then(function(r){
+      return r.text().then(function(txt){return {ok:r.ok,status:r.status,txt:txt};});
+    }).then(function(res){
+      if(!res.ok){
+        var msg='';
+        try{msg=JSON.parse(res.txt).message||JSON.parse(res.txt).error||res.txt;}catch(e){msg=res.txt;}
+        toast('Грешка '+res.status+': '+msg,'#dc2626');
+        return;
+      }
+      var pub=BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path;
       var b=(curBul.content.columns[col]||[]).find(function(x){return x.id===id;});
       if(b){b.url=pub;b.filename=file.name; schedSave(); renderBulletin(); toast('✅ Файлът е качен!');}
-    }).catch(function(){toast('Грешка','#dc2626');});
+    }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');console.error(err);});
   };
   reader.readAsArrayBuffer(file);
 }
