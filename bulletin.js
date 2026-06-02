@@ -1,3 +1,4 @@
+/* bulletin.js v4.1 — 2026-06-02 */
 /* bulletin.js — Т-Бюлетин v4 */
 
 /* CONFIG */
@@ -134,7 +135,7 @@ function bulHdr(isDraft){
       (canEdit() ? '<button onclick="setBulAnalysis()" class="bbtn">📊 Анализ</button>' : '') +
       (canEdit() ? '<button onclick="openPrintMenu()" class="bbtn">🖨 Печат</button>' : '') +
       (canEdit() && isDraft ? '<button onclick="publishBul()" style="background:#16a34a;color:#fff;border:none;padding:6px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">📤 Публикувай</button>' : '') +
-      (canEdit() && !isDraft ? '<button onclick="openEmailMenu()" style="background:#1e293b;color:#94a3b8;border:1px solid #334155;padding:6px 12px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">📧 Имейли</button>' : '') +
+      (canEdit() ? '<button onclick="openEmailMenu()" style="background:#7c3aed;color:#fff;border:none;padding:6px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">📧 Имейли</button>' : '') +
       (canEdit() ? '<button onclick="newBulletin()" style="background:#2563eb;color:#fff;border:none;padding:6px 12px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">+ Нов</button>' : '') +
     '</div>' +
   '</div>';
