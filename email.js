@@ -9,18 +9,11 @@ var EMAIL_TEST = ''; /* попълва се автоматично от currentU
 /* ─── BASE SEND ─────────────────────────────────────────── */
 function sendEmail(to, subject, html) {
   var toArr = Array.isArray(to) ? to : [to];
-  return fetch('https://api.resend.com/emails', {
+  /* Използваме Supabase Edge Function като proxy (решава CORS) */
+  return fetch('https://xiwkdiqqplgdcrkewgtv.supabase.co/functions/v1/send-email', {
     method: 'POST',
-    headers: {
-      'Authorization': 'Bearer ' + RESEND_KEY,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      from: EMAIL_FROM,
-      to: toArr,
-      subject: subject,
-      html: html
-    })
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ to: toArr, subject: subject, html: html })
   }).then(function(r) {
     return r.json().then(function(d) { return { ok: r.ok, data: d }; });
   });
