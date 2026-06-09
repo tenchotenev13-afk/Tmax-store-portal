@@ -10,12 +10,24 @@ var EMAIL_TEST = ''; /* попълва се автоматично от currentU
 function sendEmail(to, subject, html) {
   var toArr = Array.isArray(to) ? to : [to];
   /* Използваме Supabase Edge Function като proxy (решава CORS) */
-  return fetch('https://xiwkdiqqplgdcrkewgtv.supabase.co/functions/v1/send-email', {
+  /* Пробваме send-email, после index ако неуспешно */
+  var fnUrl='https://xiwkdiqqplgdcrkewgtv.supabase.co/functions/v1/resend-email';
+  return fetch(fnUrl, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
+      'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA'
+    },
     body: JSON.stringify({ to: toArr, subject: subject, html: html })
   }).then(function(r) {
-    return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+    return r.text().then(function(txt) {
+      var d; try{d=JSON.parse(txt);}catch(e){d={message:txt};}
+      return { ok: r.ok, status: r.status, data: d };
+    });
+  }).catch(function(err) {
+    /* Network/CORS грешка */
+    return { ok: false, status: 0, data: { message: 'Network error: ' + err.message } };
   });
 }
 
@@ -296,10 +308,13 @@ function sendTestEmail(toEmail) {
     '<div style="text-align:center;"><a href="https://tenchotenev13-afk.github.io/Tmax-store-portal/" class="btn">Отвори портала</a></div>'
   );
   sendEmail(toEmail, 'ТеМАХ Портал — Тест на имейл нотификации', html).then(function(res) {
-    if (res.ok) toast('✅ Тестов имейл изпратен на ' + toEmail);
-    else toast('❌ Грешка: ' + (res.data.message || JSON.stringify(res.data)), '#dc2626');
-  }).catch(function(e) {
-    toast('❌ Грешка: ' + e.message, '#dc2626');
+    if (res.ok) {
+      toast('✅ Тестов имейл изпратен на ' + toEmail);
+    } else {
+      var msg = (res.data && (res.data.message || res.data.error)) || JSON.stringify(res.data);
+      toast('❌ ' + res.status + ': ' + msg, '#dc2626');
+      console.error('Email error:', res);
+    }
   });
 }
 

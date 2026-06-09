@@ -43,20 +43,33 @@ function initPush(user) {
 }
 
 /* ─── ИЗПРАТИ НОТИФИКАЦИЯ ────────────────────────────────── */
+var SB_NOTIFY_URL = 'https://xiwkdiqqplgdcrkewgtv.supabase.co/functions/v1/resend-email';
+var SB_NOTIFY_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
+
 function osSend(payload) {
-  payload.app_id = OS_APP_ID;
   if (!payload.url) payload.url = OS_PORTAL;
-  return fetch('https://onesignal.com/api/v1/notifications', {
+  /* Викаме Supabase Edge Function като proxy */
+  return fetch(SB_NOTIFY_URL, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Basic ' + OS_API_KEY
+      'Authorization': 'Bearer ' + SB_NOTIFY_KEY,
+      'apikey': SB_NOTIFY_KEY
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify({
+      type: 'push',
+      title: (payload.headings && (payload.headings.bg || payload.headings.en)) || '',
+      message: (payload.contents && (payload.contents.bg || payload.contents.en)) || '',
+      url: payload.url,
+      filters: payload.filters || null
+    })
   }).then(function(r) {
-    return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+    return r.text().then(function(txt) {
+      var d; try{d=JSON.parse(txt);}catch(e){d={message:txt};}
+      return { ok: r.ok, status: r.status, data: d };
+    });
   }).catch(function(err) {
-    return { ok: false, data: { message: err.message } };
+    return { ok: false, status: 0, data: { message: 'Network error: ' + err.message } };
   });
 }
 
@@ -104,7 +117,11 @@ function pushBulletinPublished(wk, yr, taskCount) {
     : 'Новият бюлетин е достъпен. Влез за подробности.';
   return pushToAll(title, msg).then(function(res) {
     if (res.ok) toast('🔔 Нотификацията е изпратена до всички!');
-    else        toast('❌ Грешка: ' + (res.data.message || ''), '#dc2626');
+    else {
+      var err = (res.data && (res.data.message || res.data.error)) || JSON.stringify(res.data);
+      toast('❌ ' + res.status + ': ' + err, '#dc2626');
+      console.error('Push error:', res);
+    }
     return res;
   });
 }
