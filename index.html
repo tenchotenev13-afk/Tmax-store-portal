@@ -91,6 +91,30 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
 </style>
   <!-- OneSignal Push нотификации -->
   <script src="https://cdn.onesignal.com/sdks/web/v16/OneSignalSDK.page.js" defer></script>
+  <script>
+    window.OneSignalDeferred = window.OneSignalDeferred || [];
+    OneSignalDeferred.push(async function(OneSignal) {
+      await OneSignal.init({
+        appId: "a326639e-4ace-46f5-baa7-3f6259431d18",
+        serviceWorkerPath: "OneSignalSDKWorker.js",
+        serviceWorkerParam: { scope: "/Tmax-store-portal/" },
+        promptOptions: {
+          slidedown: {
+            prompts: [{
+              type: "push",
+              autoPrompt: true,
+              delay: { pageViews: 1, timeDelay: 5 },
+              text: {
+                actionMessage: "ТеМАХ Портал — Разреши нотификации за бюлетини и задачи",
+                acceptButton: "Разреши",
+                cancelButton: "По-късно"
+              }
+            }]
+          }
+        }
+      });
+    });
+  </script>
 </head>
 <body>
 <div class="toast" id="toast"></div>

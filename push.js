@@ -6,39 +6,18 @@ var OS_PORTAL  = 'https://tenchotenev13-afk.github.io/Tmax-store-portal/';
 
 /* ─── INIT ──────────────────────────────────────────────── */
 function initPush(user) {
-  if (!window.OneSignal) return;
+  /* Init е в index.html — тук само задаваме таговете за потребителя */
+  if (!user) return;
   window.OneSignalDeferred = window.OneSignalDeferred || [];
   window.OneSignalDeferred.push(async function(OneSignal) {
-    await OneSignal.init({
-      appId: OS_APP_ID,
-      serviceWorkerPath: 'OneSignalSDKWorker.js',
-      serviceWorkerParam: { scope: './' },
-      promptOptions: {
-        slidedown: {
-          prompts: [{
-            type: 'push',
-            autoPrompt: true,
-            delay: { pageViews: 1, timeDelay: 3 },
-            text: {
-              actionMessage: 'ТеМАХ Портал — Разреши нотификации за задачи и бюлетини',
-              acceptButton: 'Разреши',
-              cancelButton: 'По-късно'
-            }
-          }]
-        }
-      }
-    });
-    /* Задай тагове за потребителя */
-    if (user) {
+    try {
       await OneSignal.User.addTags({
-        store_name: user.store_name || '',
-        role:       user.role || '',
+        store_name:   user.store_name   || '',
+        role:         user.role         || '',
         display_name: user.display_name || user.email || ''
       });
-      if (user.email) {
-        await OneSignal.login(user.email);
-      }
-    }
+      if (user.email) await OneSignal.login(user.email);
+    } catch(e) { console.log('OneSignal tags:', e.message); }
   });
 }
 
