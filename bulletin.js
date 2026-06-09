@@ -669,7 +669,24 @@ function pushMenuHtml(){
     '<button onclick="closePushMenu()" style="width:100%;margin-top:12px;border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:8px;font-size:13px;cursor:pointer;color:#64748b;">Затвори</button>'+
     '</div></div>';
 }
-function bulPushTest(){pushToAll('🔔 Тест ТеМАХ Портал','Push нотификациите работят!').then(function(r){toast(r.ok?'✅ Изпратено!':'❌ '+(r.data.message||'Грешка'),r.ok?undefined:'#dc2626');});closePushMenu();}
+function bulPushTest(){
+  closePushMenu();
+  showBulToast('⏳ Изпращане...');
+  pushToAll('🔔 Тест ТеМАХ Портал','Push нотификациите работят!').then(function(r){
+    console.log('Push test result:', JSON.stringify(r));
+    var ok = r.ok && r.data && !r.data.errors;
+    var msg = ok
+      ? '✅ Изпратена! Провери браузъра.'
+      : '❌ Грешка: ' + ((r.data&&(r.data.message||r.data.error||(r.data.errors&&r.data.errors[0])))||r.status);
+    showBulToast(msg);
+    toast(msg, ok ? '#16a34a' : '#dc2626');
+    if(!ok) alert('Push грешка: ' + JSON.stringify(r.data));
+  }).catch(function(err){
+    console.error('Push catch:', err);
+    showBulToast('❌ ' + err.message);
+    alert('Push грешка: ' + err.message);
+  });
+}
 function openPushMenu(){document.getElementById('pm2-ov').classList.add('open');}
 function closePushMenu(){document.getElementById('pm2-ov').classList.remove('open');}
 function sendPushOverdueNow(){

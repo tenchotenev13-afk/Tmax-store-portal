@@ -31,9 +31,7 @@ function osSend(payload) {
   return fetch(SB_NOTIFY_URL, {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json',
-      'Authorization': 'Bearer ' + SB_NOTIFY_KEY,
-      'apikey': SB_NOTIFY_KEY
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify({
       type: 'push',
