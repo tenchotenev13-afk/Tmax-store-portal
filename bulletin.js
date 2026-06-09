@@ -135,7 +135,7 @@ function bulHdr(isDraft){
       (canEdit() ? '<button onclick="setBulAnalysis()" class="bbtn">📊 Анализ</button>' : '') +
       (canEdit() ? '<button onclick="openPrintMenu()" class="bbtn">🖨 Печат</button>' : '') +
       (canEdit() && isDraft ? '<button onclick="publishBul()" style="background:#16a34a;color:#fff;border:none;padding:6px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">📤 Публикувай</button>' : '') +
-      (canEdit() ? '<button onclick="openEmailMenu()" style="background:#7c3aed;color:#fff;border:none;padding:6px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">📧 Имейли</button>' : '') +
+      (canEdit() ? '<button onclick="openPushMenu()" style="background:#7c3aed;color:#fff;border:none;padding:6px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">🔔 Нотификации</button>' : '') +
       (canEdit() ? '<button onclick="newBulletin()" style="background:#2563eb;color:#fff;border:none;padding:6px 12px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">+ Нов</button>' : '') +
     '</div>' +
   '</div>';
@@ -241,10 +241,10 @@ function renderBulView(){
     html+='<div style="font-size:12px;color:#64748b;margin-top:4px;">'+done+' от '+tot+' задачи ('+pct+'%)</div></div>';
   }
   html+='</div>';
-  html+=calModalHtml()+printMenuHtml()+emailMenuHtml();
+  html+=calModalHtml()+printMenuHtml()+emailMenuHtml()+pushMenuHtml();
   wrap.innerHTML=html;
   /* Auto-check за имейл тригери (само за admin) */
-  if(typeof checkBulletinEmailTriggers==='function') setTimeout(function(){checkBulletinEmailTriggers(curBul,bulTasks,bulComps);},500);
+  if(typeof checkPushTriggers==='function') setTimeout(function(){checkPushTriggers(curBul,bulTasks,bulComps);},500);
 }
 
 /* View block */
@@ -599,7 +599,12 @@ function publishBul(){
   if(!curBul||!confirm('Публикувай бюлетина за всички потребители?'))return;
   sbPatch('bulletins','id=eq.'+curBul.id,{status:'published',published_at:new Date().toISOString(),published_by:currentUser.display_name||currentUser.email}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
-    toast('📤 Бюлетинът е публикуван!'); bulMode='view'; loadBulletin();
+    toast('📤 Бюлетинът е публикуван!');
+    /* Изпрати push нотификация до всички */
+    if(typeof pushBulletinPublished==='function'){
+      pushBulletinPublished(curBul.week_number,curBul.year,bulTasks.length);
+    }
+    bulMode='view'; loadBulletin();
   });
 }
 function newBulletin(){
@@ -640,6 +645,50 @@ function emailMenuHtml(){
     '</div></div>';
 }
 function bulSendTest(){var inp=document.getElementById('test-email-inp');if(inp)sendTestEmail(inp.value);}
+
+function pushMenuHtml(){
+  return '<div class="bov" id="pm2-ov"><div class="bmod" style="width:420px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">🔔 Push нотификации</div>'+
+    '<div style="display:flex;flex-direction:column;gap:10px;">'+
+    '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
+      '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">📰 Бюлетин публикуван</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">До всички потребители на портала.</div>'+
+      '<button onclick="pushBulletinPublished(curBul.week_number,curBul.year,bulTasks.length);closePushMenu();" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати до всички</button>'+
+    '</div>'+
+    '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
+      '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">⚠️ Просрочени задачи</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">До регионалните и контролинг.</div>'+
+      '<button onclick="sendPushOverdueNow();closePushMenu();" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">🔔 Изпрати нотификация</button>'+
+    '</div>'+
+    '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
+      '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">🔬 Тест</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Изпрати тестова нотификация до себе си.</div>'+
+      '<button onclick="bulPushTest()" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">🔔 Тест</button>'+
+    '</div>'+
+    '</div>'+
+    '<button onclick="closePushMenu()" style="width:100%;margin-top:12px;border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:8px;font-size:13px;cursor:pointer;color:#64748b;">Затвори</button>'+
+    '</div></div>';
+}
+function bulPushTest(){pushToAll('🔔 Тест ТеМАХ Портал','Push нотификациите работят!').then(function(r){toast(r.ok?'✅ Изпратено!':'❌ '+(r.data.message||'Грешка'),r.ok?undefined:'#dc2626');});closePushMenu();}
+function openPushMenu(){document.getElementById('pm2-ov').classList.add('open');}
+function closePushMenu(){document.getElementById('pm2-ov').classList.remove('open');}
+function sendPushOverdueNow(){
+  var now=new Date(); var overdue={};
+  bulTasks.forEach(function(t){
+    if(!t.due_date||new Date(t.due_date)>=now)return;
+    sbGet('stores','select=name').then(function(stores){
+      if(!Array.isArray(stores))return;
+      stores.forEach(function(s){
+        var done=bulComps.some(function(c){return c.task_id===t.id&&c.store_name===s.name;});
+        if(!done){if(!overdue[s.name])overdue[s.name]=[];overdue[s.name].push(t.title);}
+      });
+      if(Object.keys(overdue).length) pushOverdue(overdue,null);
+      else toast('✅ Всички задачи са изпълнени!');
+    });
+  });
+  if(!bulTasks.length)toast('Няма задачи за проверка');
+}
+
 function openEmailMenu(){document.getElementById('em-ov').classList.add('open');}
 function closeEmailMenu(){document.getElementById('em-ov').classList.remove('open');}
 

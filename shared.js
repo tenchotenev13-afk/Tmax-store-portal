@@ -142,6 +142,7 @@ function doLogout(){
   document.getElementById('l-err').style.display='none';
 }
 function startApp(){
+  if(typeof initPush==='function') initPush(currentUser);
   document.getElementById('s-login').style.display='none';
   document.getElementById('s-app').style.display='flex';
   document.getElementById('nav-name').textContent=currentUser.display_name||currentUser.email;
