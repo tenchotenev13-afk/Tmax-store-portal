@@ -1,3 +1,4 @@
+/* contacts.js v2 */
 /* contacts.js — Контакти & Доставчици */
 
 var SB_CONTACTS = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
@@ -31,7 +32,7 @@ function renderContacts() {
   var wrap = document.getElementById('mod-contacts');
   if (!wrap) return;
 
-  var isAdmin = canEditContacts();
+  var isAdmin = !!(currentUser && ['admin','accounting'].indexOf(currentUser.role)>=0);
   var search  = (document.getElementById('contacts-search')||{}).value || '';
   var list    = allContacts.filter(function(c) { return c.type === contactsTab; });
 
