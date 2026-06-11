@@ -11,9 +11,14 @@ var contactsEdit = null;      /* редактиран запис */
 
 /* ─── LOAD ──────────────────────────────────────────────── */
 function loadContacts() {
+  var wrap = document.getElementById('mod-contacts');
+  if (wrap) wrap.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
   sbGet('contacts', 'order=name').then(function(data) {
     allContacts = Array.isArray(data) ? data : [];
     renderContacts();
+  }).catch(function(err) {
+    if (wrap) wrap.innerHTML = '<div style="color:#dc2626;padding:40px;text-align:center;">Грешка при зареждане: ' + (err.message||err) + '</div>';
+    console.error('loadContacts error:', err);
   });
 }
 
@@ -22,7 +27,7 @@ function renderContacts() {
   var wrap = document.getElementById('mod-contacts');
   if (!wrap) return;
 
-  var isAdmin = currentUser && ['admin','accounting'].indexOf(currentUser.role) >= 0;
+  var isAdmin = canEditContacts();
   var list = allContacts.filter(function(c) { return c.type === contactsTab; });
   var search = (document.getElementById('contacts-search') || {}).value || '';
   if (search) {
@@ -50,7 +55,7 @@ function renderContacts() {
   }
   html += '</div></div>';
 
-  /* Карти */
+  /* Карти — групирани по отдел/категория */
   if (!list.length) {
     html += '<div style="text-align:center;padding:60px;color:#94a3b8;">' +
       '<div style="font-size:40px;margin-bottom:10px;">'+(contactsTab==='contact'?'👥':'🏭')+'</div>' +
@@ -58,7 +63,27 @@ function renderContacts() {
       (isAdmin?'<button onclick="openContactModal(null)" style="margin-top:14px;border:none;background:#2563eb;color:#fff;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави</button>':'') +
       '</div>';
   } else {
-    html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px;">';
+    /* Групирай по категория */
+    var groups = {};
+    list.forEach(function(c) {
+      var cat = c.category || 'Друго';
+      if (!groups[cat]) groups[cat] = [];
+      groups[cat].push(c);
+    });
+    var catOrder = ['Централно снабдяване','Отдел внос','Отдел Реклама','Онлайн магазин','Отдел контролинг','IT','Друго'];
+    var cats = Object.keys(groups).sort(function(a,b){
+      var ai = catOrder.indexOf(a); var bi = catOrder.indexOf(b);
+      if(ai===-1)ai=99; if(bi===-1)bi=99;
+      return ai-bi;
+    });
+    cats.forEach(function(cat) {
+      html += '<div style="margin-bottom:24px;">';
+      html += '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">';
+      html += '<div style="font-size:14px;font-weight:700;color:#0f172a;">'+esc(cat)+'</div>';
+      html += '<div style="flex:1;height:1px;background:#e2e8f0;"></div>';
+      html += '<div style="font-size:11px;color:#94a3b8;">'+groups[cat].length+' '+(contactsTab==='contact'?'души':'доставчика')+'</div>';
+      html += '</div>';
+      html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;">';
     list.forEach(function(c) {
       var initials = (c.name||'?').split(' ').map(function(w){return w[0];}).slice(0,2).join('').toUpperCase();
       var bgColors = ['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2'];
@@ -97,11 +122,14 @@ function renderContacts() {
       }
       html += '</div></div>';
     });
-    html += '</div>';
+      html += '</div></div>'; /* close grid + group */
+    });
   }
 
   html += '</div>';
-  html += contactModalHtml();
+  try {
+    html += contactModalHtml();
+  } catch(e) { console.error('contactModalHtml error:', e); }
   wrap.innerHTML = html;
 }
 
