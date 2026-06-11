@@ -162,6 +162,9 @@ function setupTabsForRole(){
   /* Таб Администрация — само за admin */
   var histTab=document.getElementById('tab-history');
   if(histTab)histTab.style.display=isGlobal()?'':'none';
+  /* Таб Контакти — за всички роли */
+  var contactsTab=document.getElementById('tab-contacts');
+  if(contactsTab)contactsTab.style.display='';
   var adminTab=document.getElementById('tab-admin');
   if(adminTab)adminTab.style.display=currentUser.role==='admin'?'':'none';
 
