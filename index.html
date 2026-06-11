@@ -333,7 +333,13 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
   <label class="fl">Заглавие</label><input class="fi" id="d-title" placeholder="напр. Процедура за ревизии">
   <label class="fl">Категория</label>
   <select class="fi" id="d-cat"><option>SAP</option><option>Процедури</option><option>Обучения</option><option>Формуляри</option><option>Друго</option></select>
-  <label class="fl">Линк (URL)</label><input class="fi" id="d-url" placeholder="https://...">
+  <label class="fl">Файл (PDF / Word / Excel)</label>
+  <label style="display:flex;align-items:center;gap:10px;border:1.5px dashed #cbd5e1;border-radius:8px;padding:10px 14px;cursor:pointer;color:#64748b;font-size:13px;margin-bottom:8px;">
+    <span style="font-size:20px;">📎</span>
+    <span id="doc-file-preview">Избери файл...</span>
+    <input type="file" id="d-file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt" style="display:none;" onchange="docFileSelected(this)">
+  </label>
+  <label class="fl" style="margin-top:4px;">или Линк (URL)</label><input class="fi" id="d-url" placeholder="https://...">
   <label class="fl">Описание</label><input class="fi" id="d-desc" placeholder="Кратко описание">
   <div class="modal-actions">
     <button class="btn btn-ghost" onclick="closeModal('doc-modal')">Откажи</button>
