@@ -50,10 +50,20 @@ function filterDocs(f,btn){
 function docFileSelected(input){
   var file=input.files[0]; if(!file)return;
   var prev=document.getElementById('doc-file-preview');
-  if(prev)prev.textContent='📎 '+file.name;
+  if(prev)prev.innerHTML='📎 <b>'+esc(file.name)+'</b>';
+  /* Винаги актуализира заглавието при нов файл */
   var titleEl=document.getElementById('d-title');
-  if(titleEl&&!titleEl.value)
-    titleEl.value=file.name.replace(/\.[^.]+$/,'').replace(/[-_]/g,' ');
+  if(titleEl) titleEl.value=file.name.replace(/\.[^.]+$/,'').replace(/[-_]/g,' ');
+}
+
+function resetDocModal(){
+  var fi=document.getElementById('d-file');
+  if(fi) fi.value='';
+  var prev=document.getElementById('doc-file-preview');
+  if(prev) prev.innerHTML='Избери файл...';
+  var t=document.getElementById('d-title'); if(t) t.value='';
+  var u=document.getElementById('d-url'); if(u) u.value='';
+  var d=document.getElementById('d-desc'); if(d) d.value='';
 }
 
 function submitDoc(){
@@ -94,6 +104,7 @@ function uploadDocFile(file, title, cat, desc){
 function saveDocRecord(title,cat,desc,url){
   sbPost('documents',{title:title,category:cat,url:url,description:desc}).then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
+    resetDocModal();
     closeModal('doc-modal');toast('✓ Документът е добавен');loadDocs();
   });
 }
