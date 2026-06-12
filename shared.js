@@ -176,8 +176,8 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
-  ['transport','client','bulletin','docs','kasa','history','admin','print'].forEach(function(m){
-    var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'':'none';
+  ['transport','client','bulletin','docs','kasa','history','admin','print','contacts'].forEach(function(m){
+    var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
   var tab=document.getElementById('tab-'+mod);if(tab)tab.classList.add('active');
