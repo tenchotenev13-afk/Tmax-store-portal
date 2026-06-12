@@ -138,7 +138,7 @@ function contactCard(c, isAdmin) {
   return h;
 }
 
-function setContactsTab(tab) { contactsTab = tab; renderContacts(); }
+function setContactsTab(tab) { contactsTab = tab; var si=document.getElementById('contacts-search'); if(si)si.value=''; renderContacts(); }
 function doDeleteContact(id) {
   if (!confirm('Изтрий записа?')) return;
   sbDelete('contacts','id=eq.'+id).then(function(){toast('✓ Изтрит');loadContacts();});
