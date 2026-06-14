@@ -34,7 +34,7 @@ function fmtDMY(d) {
 }
 
 function canEditCal() {
-  return currentUser && ['admin','accounting','logistics','manager'].indexOf(currentUser.role) >= 0;
+  return currentUser && ['admin','accounting','logistics','manager','sklad'].indexOf(currentUser.role) >= 0;
 }
 
 /* ── LOAD ── */
@@ -172,8 +172,8 @@ function calRouteModalHtml(days) {
   var dayOpts = days.slice(0,5).map(function(d,i){
     return '<option value="'+d.toISOString().slice(0,10)+'">'+DAY_NAMES[i]+' ('+fmtDMY(d)+')</option>';
   }).join('');
-  var purposeOpts = Object.entries(PURPOSE).map(function(e){
-    return '<option value="'+e[0]+'">'+e[1].label+'</option>';
+  var purposeOpts = Object.keys(PURPOSE).map(function(k){
+    return '<option value="'+k+'">'+PURPOSE[k].label+'</option>';
   }).join('');
 
   return '<div class="bov" id="calr-ov"><div class="bmod" style="width:460px;">'+
