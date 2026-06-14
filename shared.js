@@ -167,6 +167,8 @@ function setupTabsForRole(){
   if(contactsTab)contactsTab.style.display='';
   var transitTab=document.getElementById('tab-transit');
   if(transitTab)transitTab.style.display='';
+  var calTab=document.getElementById('tab-calendar');
+  if(calTab)calTab.style.display='';
   var adminTab=document.getElementById('tab-admin');
   if(adminTab)adminTab.style.display=currentUser.role==='admin'?'':'none';
 
@@ -178,7 +180,7 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
-  ['transport','client','bulletin','docs','kasa','history','admin','print','contacts','transit'].forEach(function(m){
+  ['transport','client','bulletin','docs','kasa','history','admin','print','contacts','transit','calendar'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -188,6 +190,7 @@ function showModule(mod){
   if(mod==='history')loadHistory();
   if(mod==='contacts')loadContacts();
   if(mod==='transit')loadTransit();
+  if(mod==='calendar')loadCalendar();
   if(mod==='bulletin')loadBulletin();
 }
 /* Затваря модал САМО ако mousedown И mouseup са върху тъмния фон
