@@ -162,9 +162,11 @@ function setupTabsForRole(){
   /* Таб Администрация — само за admin */
   var histTab=document.getElementById('tab-history');
   if(histTab)histTab.style.display=isGlobal()?'':'none';
-  /* Таб Контакти — за всички роли */
+  /* Табове Контакти и Стока на път — за всички */
   var contactsTab=document.getElementById('tab-contacts');
   if(contactsTab)contactsTab.style.display='';
+  var transitTab=document.getElementById('tab-transit');
+  if(transitTab)transitTab.style.display='';
   var adminTab=document.getElementById('tab-admin');
   if(adminTab)adminTab.style.display=currentUser.role==='admin'?'':'none';
 
@@ -176,7 +178,7 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
-  ['transport','client','bulletin','docs','kasa','history','admin','print','contacts'].forEach(function(m){
+  ['transport','client','bulletin','docs','kasa','history','admin','print','contacts','transit'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -185,6 +187,7 @@ function showModule(mod){
   if(mod==='kasa')loadKasa();
   if(mod==='history')loadHistory();
   if(mod==='contacts')loadContacts();
+  if(mod==='transit')loadTransit();
   if(mod==='bulletin')loadBulletin();
 }
 /* Затваря модал САМО ако mousedown И mouseup са върху тъмния фон

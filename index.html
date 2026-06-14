@@ -149,6 +149,7 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
       <button id="tab-kasa" class="nav-tab" onclick="showModule('kasa')" style="display:none;">💰 Каса</button>
       <button id="tab-history" class="nav-tab" onclick="showModule('history')" style="display:none;">📊 История</button>
       <button id="tab-contacts" class="nav-tab" onclick="showModule('contacts')" style="display:none;">👥 Контакти</button>
+      <button id="tab-transit" class="nav-tab" onclick="showModule('transit')" style="display:none;">📦 Стока на път</button>
       <button id="tab-admin" class="nav-tab" onclick="showModule('admin')" style="display:none;">⚙ Администрация</button>
     </div>
     <div class="nav-right">
@@ -233,6 +234,9 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
 
   <!-- CONTACTS -->
   <div id="mod-contacts" class="page" style="display:none;"></div>
+
+  <!-- TRANSIT -->
+  <div id="mod-transit" class="page" style="display:none;"></div>
 
   <!-- ADMIN -->
   <div id="mod-admin" class="page" style="display:none;">
@@ -380,6 +384,7 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
 <script src="admin.js"></script>
 <script src="history.js"></script>
 <script src="contacts.js"></script>
+<script src="transit.js"></script>
 <script src="push.js"></script>
 <script src="email.js"></script>
 <script src="notifications.js"></script>
