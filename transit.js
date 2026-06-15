@@ -236,11 +236,11 @@ function openTransitAdd() {
   if (!ov) return;
   /* Зареди магазини ако admin */
   if (!assignedStores()) {
-    sbGet('stores','select=name&order=name').then(function(data){
+    sbGet('users','select=store_name&store_name=neq.&order=store_name').then(function(data){
       var sel=document.getElementById('tr-store');
       if(sel&&Array.isArray(data)){
         sel.innerHTML='<option value="">-- Избери магазин --</option>'+
-          data.map(function(s){return '<option>'+esc(s.name)+'</option>';}).join('');
+          data.filter(function(u,i,a){return u.store_name&&a.findIndex(function(x){return x.store_name===u.store_name;})==i;}).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
       }
     });
   } else {

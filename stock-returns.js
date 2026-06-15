@@ -195,7 +195,7 @@ function openSRModal(id) {
   if (!ov) return;
   var stores = assignedStores();
   if (!stores) {
-    sbGet('stores','select=name&order=name').then(function(data){
+    sbGet('users','select=store_name&store_name=neq.&order=store_name').then(function(data){
       var sel=document.getElementById('sr-store');
       if(sel&&Array.isArray(data)){
         var r2 = srEditId ? (srData.find(function(x){return x.id===srEditId;})||{}) : {};

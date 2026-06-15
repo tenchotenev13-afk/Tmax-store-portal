@@ -187,7 +187,7 @@ function openSDModal(id) {
   if (!ov) return;
   var stores = assignedStores();
   if (!stores) {
-    sbGet('stores','select=name&order=name').then(function(data){
+    sbGet('users','select=store_name&store_name=neq.&order=store_name').then(function(data){
       var sel=document.getElementById('sd-store');
       if(sel&&Array.isArray(data)){
         var r2=sdEditId?(sdData.find(function(x){return x.id===sdEditId;})||{}):{};
