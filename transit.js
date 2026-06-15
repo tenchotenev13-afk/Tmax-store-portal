@@ -4,6 +4,7 @@ var transitData   = [];
 var transitFilter = 'pending';
 var transitStore  = '';
 var transitEditId = null;
+var transitView   = 'all';
 
 var T_STATUS = {
   pending:  { label: '⏳ Не доставена', bg: '#fef9c3', color: '#92400e' },
@@ -42,7 +43,7 @@ function renderTransit() {
   var canAdd   = canAddTransit();
 
   /* Филтрирай */
-  var list = transitData.filter(function(r) {
+  var list = viewData.filter(function(r) {
     if (transitFilter === 'pending')  return r.status === 'pending';
     if (transitFilter === 'received') return r.status === 'received';
     if (transitFilter === 'rejected') return r.status === 'rejected';
@@ -52,13 +53,22 @@ function renderTransit() {
     list = list.filter(function(r){ return r.store_name === transitStore; });
   }
 
+  /* Изглед за логистичните складове */
+  var isLogistics = currentUser && currentUser.role === 'logistics';
+  var myWarehouse = isLogistics ? (currentUser.store_name || '') : '';
+  var wKey = myWarehouse.indexOf('Добрич') >= 0 ? 'Добрич' : myWarehouse.indexOf('Търговище') >= 0 ? 'Търговище' : '';
+  var viewData = transitData;
+  if (isLogistics && transitView === 'outgoing' && wKey) {
+    viewData = transitData.filter(function(r){ return (r.supplier||'').indexOf(wKey) >= 0; });
+  }
+
   /* Статистика */
   var counts = {pending:0, received:0, rejected:0};
-  transitData.forEach(function(r){ if(counts[r.status]!==undefined) counts[r.status]++; });
+  viewData.forEach(function(r){ if(counts[r.status]!==undefined) counts[r.status]++; });
 
   /* Магазини за dropdown */
   var stores = {};
-  transitData.forEach(function(r){ stores[r.store_name]=1; });
+  viewData.forEach(function(r){ stores[r.store_name]=1; });
   var storeList = Object.keys(stores).sort();
 
   var h = '<div style="max-width:1400px;margin:0 auto;padding:16px;">';
@@ -75,6 +85,16 @@ function renderTransit() {
   h += tStatCard('✅ Прието', counts.received, '#16a34a');
   h += tStatCard('✕ Неприето', counts.rejected, '#dc2626');
   h += '</div>';
+
+  /* Банер за логистичния склад */
+  if (isLogistics && myWarehouse) {
+    var v = transitView;
+    h += '<div style="display:flex;gap:8px;margin-bottom:12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 14px;align-items:center;flex-wrap:wrap;">';
+    h += '<div style="font-size:12px;font-weight:600;color:#16a34a;">🏭 ' + esc(myWarehouse) + '</div>';
+    h += '<button onclick="transitView=\'all\';renderTransit()" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:' + (v==='all'?'#0f172a':'#e2e8f0') + ';color:' + (v==='all'?'#fff':'#374151') + ';">📥 Всички магазини</button>';
+    h += '<button onclick="transitView=\'outgoing\';renderTransit()" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:' + (v==='outgoing'?'#16a34a':'#e2e8f0') + ';color:' + (v==='outgoing'?'#fff':'#374151') + ';">📤 За изпращане от моя склад</button>';
+    h += '</div>';
+  }
 
   /* Филтри */
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">';
@@ -303,5 +323,18 @@ function submitTransit() {
     closeTransitModal();
     toast('✅ '+(transitEditId?'Записано!':'Добавено!'));
     loadTransit();
+  });
+}
+
+function tSetTransferDate(id) {
+  var date = prompt('Въведи дата на трансфер (ГГГГ-ММ-ДД):', new Date().toISOString().slice(0,10));
+  if (!date) return;
+  sbPatch('goods_transit','id=eq.'+id,{
+    transfer_date: date,
+    updated_by: currentUser.display_name||currentUser.email,
+    updated_at: new Date().toISOString()
+  }).then(function(r){
+    if(!r.ok){toast('Грешка','#dc2626');return;}
+    toast('✅ Датата е записана!'); loadTransit();
   });
 }
