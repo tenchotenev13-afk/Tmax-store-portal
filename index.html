@@ -151,6 +151,8 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
       <button id="tab-contacts" class="nav-tab" onclick="showModule('contacts')" style="display:none;">👥 Контакти</button>
       <button id="tab-transit" class="nav-tab" onclick="showModule('transit')" style="display:none;">📦 Стока на път</button>
       <button id="tab-calendar" class="nav-tab" onclick="showModule('calendar')" style="display:none;">🚐 Транспортен календар</button>
+      <button id="tab-stock-returns" class="nav-tab" onclick="showModule('stock-returns')" style="display:none;">📦 Стока за връщане</button>
+      <button id="tab-stock-diff" class="nav-tab" onclick="showModule('stock-diff')" style="display:none;">📋 Разлики</button>
       <button id="tab-admin" class="nav-tab" onclick="showModule('admin')" style="display:none;">⚙ Администрация</button>
     </div>
     <div class="nav-right">
@@ -241,6 +243,9 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
 
   <!-- CALENDAR -->
   <div id="mod-calendar" class="page" style="display:none;"></div>
+
+  <div id="mod-stock-returns" class="page" style="display:none;"></div>
+  <div id="mod-stock-diff" class="page" style="display:none;"></div>
 
   <!-- ADMIN -->
   <div id="mod-admin" class="page" style="display:none;">
@@ -390,6 +395,8 @@ tr:last-child td{border-bottom:none;}tr:hover td{background:#fafafa;}
 <script src="contacts.js"></script>
 <script src="transit.js"></script>
 <script src="calendar.js"></script>
+<script src="stock-returns.js"></script>
+<script src="stock-differences.js"></script>
 <script src="push.js"></script>
 <script src="email.js"></script>
 <script src="notifications.js"></script>

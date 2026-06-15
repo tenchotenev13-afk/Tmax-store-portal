@@ -169,6 +169,10 @@ function setupTabsForRole(){
   if(transitTab)transitTab.style.display='';
   var calTab=document.getElementById('tab-calendar');
   if(calTab)calTab.style.display='';
+  var srTab=document.getElementById('tab-stock-returns');
+  if(srTab)srTab.style.display='';
+  var sdTab=document.getElementById('tab-stock-diff');
+  if(sdTab)sdTab.style.display='';
   var adminTab=document.getElementById('tab-admin');
   if(adminTab)adminTab.style.display=currentUser.role==='admin'?'':'none';
 
@@ -180,7 +184,7 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
-  ['transport','client','bulletin','docs','kasa','history','admin','print','contacts','transit','calendar'].forEach(function(m){
+  ['transport','client','bulletin','docs','kasa','history','admin','print','contacts','transit','calendar','stock-returns','stock-diff'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -191,6 +195,8 @@ function showModule(mod){
   if(mod==='contacts')loadContacts();
   if(mod==='transit')loadTransit();
   if(mod==='calendar')loadCalendar();
+  if(mod==='stock-returns')loadStockReturns();
+  if(mod==='stock-diff')loadStockDiff();
   if(mod==='bulletin')loadBulletin();
 }
 /* Затваря модал САМО ако mousedown И mouseup са върху тъмния фон
