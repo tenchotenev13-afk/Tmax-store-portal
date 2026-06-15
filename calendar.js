@@ -250,9 +250,9 @@ function openCalRouteModal(routeId, dateStr) {
     } else if (stores) {
       storeSel.innerHTML = '<option value="">-- Избери --</option>'+stores.map(function(s){return '<option>'+esc(s)+'</option>';}).join('');
     } else {
-      sbGet('stores','select=name&order=name').then(function(data){
+       sbGet('users','select=store_name&order=store_name').then(function(data){
         if(Array.isArray(data)&&storeSel)
-          storeSel.innerHTML='<option value="">-- Избери --</option>'+data.map(function(s){return '<option>'+esc(s.name)+'</option>';}).join('');
+         if(Array.isArray(data)&&storeSel){var seen={};var opts=data.filter(function(u){if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;seen[u.store_name]=1;return true;}).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');storeSel.innerHTML='<option value="">-- Избери --</option>'+opts;}
       });
     }
   }
@@ -351,11 +351,15 @@ function renderTemplatesMgr() {
   document.body.appendChild(div);
 
   /* Зареди магазини */
-  sbGet('stores','select=name&order=name').then(function(data) {
+  sbGet('users','select=store_name&order=store_name').then(function(data) {
     var sel = document.getElementById('tmpl-store');
     if (sel && Array.isArray(data)) {
-      sel.innerHTML = '<option value="">-- Избери --</option>' +
-        data.map(function(s){ return '<option>'+esc(s.name)+'</option>'; }).join('');
+      var seen={};
+      var opts=data.filter(function(u){
+        if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
+        seen[u.store_name]=1;return true;
+      }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
+      sel.innerHTML = '<option value="">-- Избери --</option>' + opts;
     }
   });
 }
