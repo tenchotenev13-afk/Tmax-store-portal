@@ -26,11 +26,18 @@ function loadTransit() {
   var q = 'order=doc_date.desc,purchase_doc.asc,position.asc' + storeQ();
   sbGet('goods_transit', q).then(function(data) {
     transitData = Array.isArray(data) ? data : [];
-    renderTransit();
+    try {
+      renderTransit();
+    } catch(e) {
+      console.error('renderTransit error:', e);
+      var w = document.getElementById('mod-transit');
+      if (w) w.innerHTML = '<div style="color:#dc2626;padding:40px;text-align:center;">Render грешка: ' + e.message + '</div>';
+    }
   }).catch(function(err) {
     var w = document.getElementById('mod-transit');
-    if (w) w.innerHTML = '<div style="color:#dc2626;padding:40px;text-align:center;">Грешка при зареждане.</div>';
-    console.error(err);
+    var msg = err && err.message ? err.message : JSON.stringify(err);
+    if (w) w.innerHTML = '<div style="color:#dc2626;padding:40px;text-align:center;">DB грешка: ' + msg + '<br><small>Заявка: ' + q + '</small></div>';
+    console.error('loadTransit DB error:', err);
   });
 }
 
@@ -41,6 +48,15 @@ function renderTransit() {
   var isAdmin  = currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
   var canEdit  = canEditTransit();
   var canAdd   = canAddTransit();
+
+  /* viewData — филтрирано за логистичния склад */
+  var isLogistics = currentUser && currentUser.role === 'logistics';
+  var myWarehouse = isLogistics ? (currentUser.store_name || '') : '';
+  var wKey = myWarehouse.indexOf('Добрич') >= 0 ? 'Добрич' : myWarehouse.indexOf('Търговище') >= 0 ? 'Търговище' : '';
+  var viewData = transitData;
+  if (isLogistics && transitView === 'outgoing' && wKey) {
+    viewData = transitData.filter(function(r){ return (r.supplier||'').indexOf(wKey) >= 0; });
+  }
 
   /* Филтрирай */
   var list = viewData.filter(function(r) {
@@ -54,14 +70,6 @@ function renderTransit() {
   }
 
   /* Изглед за логистичните складове */
-  var isLogistics = currentUser && currentUser.role === 'logistics';
-  var myWarehouse = isLogistics ? (currentUser.store_name || '') : '';
-  var wKey = myWarehouse.indexOf('Добрич') >= 0 ? 'Добрич' : myWarehouse.indexOf('Търговище') >= 0 ? 'Търговище' : '';
-  var viewData = transitData;
-  if (isLogistics && transitView === 'outgoing' && wKey) {
-    viewData = transitData.filter(function(r){ return (r.supplier||'').indexOf(wKey) >= 0; });
-  }
-
   /* Статистика */
   var counts = {pending:0, received:0, rejected:0};
   viewData.forEach(function(r){ if(counts[r.status]!==undefined) counts[r.status]++; });
