@@ -151,7 +151,7 @@ function startApp(){
   if(isGlobal())document.getElementById('tr-metrics').style.display='grid';
   loadAll();
   /* Покажи подходящ таб според роля */
-  var startTab=currentUser.role==='kasa'?'kasa':'transport';
+  var startTab=currentUser.role==='kasa'?'kasa':currentUser.role==='info'?'client':'transport';
   showModule(startTab);
 }
 function setupTabsForRole(){

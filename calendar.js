@@ -36,7 +36,7 @@ function fmtDMY(d) {
 }
 
 function canEditCal() {
-  return currentUser && ['admin','accounting','logistics','manager','sklad'].indexOf(currentUser.role) >= 0;
+  return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
 }
 
 /* ── LOAD ── */
@@ -238,21 +238,30 @@ function openCalRouteModal(routeId, dateStr) {
   var ov = document.getElementById('calr-ov');
   if (!ov) return;
   if (dateStr) {
-    var sel = document.getElementById('cr-date');
-    if (sel) sel.value = dateStr;
+    var d = document.getElementById('cr-date');
+    if (d) d.value = dateStr;
   }
-  /* Зареди магазини */
+  /* Магазин — автоматично за sklad/manager, dropdown за admin/logistics */
   var stores = assignedStores();
   var storeSel = document.getElementById('cr-store');
   if (storeSel) {
-    if (stores && stores.length === 1) {
-      storeSel.innerHTML = '<option>'+esc(stores[0])+'</option>';
-    } else if (stores) {
-      storeSel.innerHTML = '<option value="">-- Избери --</option>'+stores.map(function(s){return '<option>'+esc(s)+'</option>';}).join('');
+    if (stores && stores.length >= 1) {
+      /* Един или няколко назначени магазина — само техните */
+      storeSel.outerHTML = stores.length === 1
+        ? '<input type="hidden" id="cr-store" value="'+esc(stores[0])+'"><div class="fi" style="background:#f8fafc;color:#374151;">🏪 '+esc(stores[0])+'</div>'
+        : '<select class="fi" id="cr-store"><option value="">-- Избери --</option>'+stores.map(function(s){return '<option>'+esc(s)+'</option>';}).join('')+'</select>';
     } else {
-       sbGet('users','select=store_name&order=store_name').then(function(data){
-        if(Array.isArray(data)&&storeSel)
-         if(Array.isArray(data)&&storeSel){var seen={};var opts=data.filter(function(u){if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;seen[u.store_name]=1;return true;}).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');storeSel.innerHTML='<option value="">-- Избери --</option>'+opts;}
+      /* Admin/logistics — всички магазини */
+      sbGet('users','select=store_name&order=store_name').then(function(data){
+        var el = document.getElementById('cr-store');
+        if(Array.isArray(data)&&el){
+          var seen={};
+          var opts=data.filter(function(u){
+            if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
+            seen[u.store_name]=1;return true;
+          }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
+          el.innerHTML='<option value="">-- Избери --</option>'+opts;
+        }
       });
     }
   }

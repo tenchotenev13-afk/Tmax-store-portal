@@ -13,7 +13,7 @@ var T_STATUS = {
 };
 
 function canEditTransit() {
-  return currentUser && ['admin','accounting','logistics','manager','sklad'].indexOf(currentUser.role) >= 0;
+  return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
 }
 function canAddTransit() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
@@ -254,20 +254,25 @@ function openTransitAdd() {
   renderTransit();
   var ov = document.getElementById('transit-ov');
   if (!ov) return;
-  /* Зареди магазини ако admin */
-  if (!assignedStores()) {
-    sbGet('users','select=store_name&store_name=neq.&order=store_name').then(function(data){
-      var sel=document.getElementById('tr-store');
-      if(sel&&Array.isArray(data)){
-        sel.innerHTML='<option value="">-- Избери магазин --</option>'+
-          data.filter(function(u,i,a){return u.store_name&&a.findIndex(function(x){return x.store_name===u.store_name;})==i;}).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
-      }
-    });
-  } else {
-    var stores=assignedStores();
-    var sel=document.getElementById('tr-store');
-    if(sel&&stores){
-      sel.innerHTML=stores.map(function(s){return '<option>'+esc(s)+'</option>';}).join('');
+  var myStores = assignedStores();
+  var storeEl = document.getElementById('tr-store');
+  if (storeEl) {
+    if (myStores && myStores.length === 1) {
+      /* Един магазин — автоматично попълване */
+      storeEl.outerHTML = '<div class="fi" style="background:#f8fafc;font-weight:500;">🏪 '+esc(myStores[0])+'</div><input type="hidden" id="tr-store" value="'+esc(myStores[0])+'">';
+    } else if (myStores && myStores.length > 1) {
+      storeEl.innerHTML = '<option value="">-- Избери --</option>'+myStores.map(function(s){return '<option>'+esc(s)+'</option>';}).join('');
+    } else {
+      sbGet('users','select=store_name&order=store_name').then(function(data){
+        var el = document.getElementById('tr-store');
+        if(Array.isArray(data)&&el){
+          var seen={};
+          el.innerHTML='<option value="">-- Избери --</option>'+data.filter(function(u){
+            if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
+            seen[u.store_name]=1;return true;
+          }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
+        }
+      });
     }
   }
   ov.classList.add('open');

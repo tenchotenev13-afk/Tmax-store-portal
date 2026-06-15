@@ -5,7 +5,7 @@ var sdFilter = 'pending';
 var sdEditId = null;
 
 function canEditSD() {
-  return currentUser && ['admin','accounting','logistics','manager','sklad'].indexOf(currentUser.role) >= 0;
+  return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
 }
 function canAddSD() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
@@ -185,18 +185,28 @@ function openSDModal(id) {
   renderStockDiff();
   var ov = document.getElementById('sd-ov');
   if (!ov) return;
-  var stores = assignedStores();
-  if (!stores) {
-    sbGet('users','select=store_name&store_name=neq.&order=store_name').then(function(data){
-      var sel=document.getElementById('sd-store');
-      if(sel&&Array.isArray(data)){
-        var r2=sdEditId?(sdData.find(function(x){return x.id===sdEditId;})||{}):{};
-        sel.innerHTML='<option value="">-- Избери магазин --</option>'+
-          data.map(function(s){return '<option'+(r2.store_name===s.name?' selected':'')+'>'+esc(s.name)+'</option>';}).join('');
-      }
-    });
+  /* Магазин: автоматично или dropdown */
+  var myStores = assignedStores();
+  var storeEl = document.getElementById('sd-store');
+  if (storeEl) {
+    if (myStores && myStores.length === 1) {
+      storeEl.outerHTML = '<div class="fi" style="background:#f8fafc;font-weight:500;">🏪 '+esc(myStores[0])+'</div><input type="hidden" id="sd-store" value="'+esc(myStores[0])+'">';
+    } else if (myStores && myStores.length > 1) {
+      storeEl.innerHTML = '<option value="">-- Избери --</option>'+myStores.map(function(s){return '<option>'+esc(s)+'</option>';}).join('');
+    } else {
+      sbGet('users','select=store_name&order=store_name').then(function(data){
+        var el = document.getElementById('sd-store');
+        if(Array.isArray(data)&&el){
+          var seen={};
+          el.innerHTML='<option value="">-- Избери --</option>'+data.filter(function(u){
+            if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
+            seen[u.store_name]=1;return true;
+          }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
+        }
+      });
+    }
   }
-  ov.classList.add('open');
+    ov.classList.add('open');
 }
 function closeSDModal() {
   var ov=document.getElementById('sd-ov'); if(ov)ov.classList.remove('open');
