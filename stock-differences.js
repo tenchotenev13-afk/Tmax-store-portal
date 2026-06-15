@@ -151,7 +151,12 @@ function sdModalHtml() {
     '⚠️ ЗАПРИХОЖДАВАТЕ САМО АКО СТОКАТА Е ПРИ ВАС И Е В ДОБЪР ТЪРГОВСКИ ВИД!</div>'+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
-    '<div><label class="fl">Магазин *</label><select class="fi" id="sd-store">'+storeOpts+'</select></div>'+
+    '<div><label class="fl">Магазин *</label>'+(function(){
+    var myS=assignedStores();
+    if(myS&&myS.length===1)return '<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(myS[0])+'</div><input type="hidden" id="sd-store" value="'+esc(myS[0])+'">';
+    if(myS&&myS.length>1)return '<select class="fi" id="sd-store"><option value="">-- Избери --</option>'+myS.map(function(s){return '<option>'+esc(s)+'</option>';}).join('')+'</select>';
+    return '<select class="fi" id="sd-store"><option value="">-- Зарежда се... --</option></select>';
+  })()+'</div>'+
     '<div><label class="fl">Доставчик</label><input class="fi" id="sd-supplier" value="'+esc(r.supplier||'')+'" placeholder="напр. ТАГЕМАЛ"></div>'+
     '<div><label class="fl">Код на материал (SAP)</label><input class="fi" id="sd-mat" value="'+esc(r.material_code||'')+'" placeholder="напр. 34989"></div>'+
     '<div><label class="fl">Количество</label><input type="number" step="0.01" class="fi" id="sd-qty" value="'+(r.quantity||'')+'"></div>'+

@@ -201,11 +201,7 @@ function transitModalHtml() {
   var isEdit = !!transitEditId;
 
   /* Магазини */
-  var storeOpts = '<option value="">-- Избери магазин --</option>';
-  var stores = assignedStores();
-  if (stores) {
-    stores.forEach(function(s){ storeOpts += '<option'+(r.store_name===s?' selected':'')+'>'+esc(s)+'</option>'; });
-  }
+
 
   return '<div class="bov" id="transit-ov"><div class="bmod" style="width:580px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'+
@@ -213,7 +209,12 @@ function transitModalHtml() {
     '<button onclick="closeTransitModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
-    '<div><label class="fl">Магазин *</label><select class="fi" id="tr-store">'+storeOpts+'</select></div>'+
+    '<div><label class="fl">Магазин *</label>'+(function(){
+    var myS=assignedStores();
+    if(myS&&myS.length===1)return '<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(myS[0])+'</div><input type="hidden" id="tr-store" value="'+esc(myS[0])+'">';
+    if(myS&&myS.length>1)return '<select class="fi" id="tr-store"><option value="">-- Избери --</option>'+myS.map(function(s){return '<option>'+esc(s)+'</option>';}).join('')+'</select>';
+    return '<select class="fi" id="tr-store"><option value="">-- Зарежда се... --</option></select>';
+  })()+'</div>'+
     '<div><label class="fl">Доставчик / Склад</label><input class="fi" id="tr-supplier" value="'+esc(r.supplier||'')+'" placeholder="напр. 5518 Логистичен склад Добрич"></div>'+
     '<div><label class="fl">Документ за покупка</label><input class="fi" id="tr-doc" value="'+esc(r.purchase_doc||'')+'" placeholder="напр. 4600164280"></div>'+
     '<div><label class="fl">Позиция</label><input class="fi" type="number" id="tr-pos" value="'+(r.position||'')+'" placeholder="напр. 10"></div>'+

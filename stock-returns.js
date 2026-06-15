@@ -156,7 +156,12 @@ function srModalHtml() {
     '<button onclick="closeSRModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
-    '<div><label class="fl">Магазин *</label><select class="fi" id="sr-store">'+storeOpts+'</select></div>'+
+    '<div><label class="fl">Магазин *</label>'+(function(){
+    var myS=assignedStores();
+    if(myS&&myS.length===1)return '<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(myS[0])+'</div><input type="hidden" id="sr-store" value="'+esc(myS[0])+'">';
+    if(myS&&myS.length>1)return '<select class="fi" id="sr-store"><option value="">-- Избери --</option>'+myS.map(function(s){return '<option>'+esc(s)+'</option>';}).join('')+'</select>';
+    return '<select class="fi" id="sr-store"><option value="">-- Зарежда се... --</option></select>';
+  })()+'</div>'+
     '<div><label class="fl">Доставчик</label><input class="fi" id="sr-supplier" value="'+esc(r.supplier||'')+'" placeholder="напр. ДЕНИ-А 8583 ООД"></div>'+
     '<div><label class="fl">НОВА ПВ-ЕВР</label><input class="fi" id="sr-po" value="'+esc(r.purchase_order||'')+'" placeholder="напр. 4200014948"></div>'+
     '<div><label class="fl">НОВА ИД-ЕВРО</label><input class="fi" id="sr-ie" value="'+esc(r.id_euro||'')+'" placeholder="напр. 80413769"></div>'+

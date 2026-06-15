@@ -217,8 +217,12 @@ function calRouteModalHtml(days) {
     '<button onclick="closeCalRoute()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
     '<label class="fl">Дата</label>'+
     '<select class="fi" id="cr-date">'+dayOpts+'</select>'+
-    '<label class="fl">Магазин *</label>'+
-    '<select class="fi" id="cr-store"><option value="">-- Избери --</option></select>'+
+    (function(){
+    var myS=assignedStores();
+    if(myS&&myS.length===1)return '<label class="fl">Магазин *</label>'+'<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(myS[0])+'</div><input type="hidden" id="cr-store" value="'+esc(myS[0])+'">';
+    if(myS&&myS.length>1)return '<label class="fl">Магазин *</label>'+'<select class="fi" id="cr-store"><option value="">-- Избери --</option>'+myS.map(function(s){return '<option>'+esc(s)+'</option>';}).join('')+'</select>';
+    return '<label class="fl">Магазин *</label>'+'<select class="fi" id="cr-store"><option value="">-- Зарежда се... --</option></select>';
+  })()+
     '<label class="fl">Дестинация (до кой магазин/обект)</label>'+
     '<input class="fi" id="cr-dest" placeholder="напр. Кърджали, Хасково">'+
     '<label class="fl">Вид</label>'+
@@ -241,29 +245,18 @@ function openCalRouteModal(routeId, dateStr) {
     var d = document.getElementById('cr-date');
     if (d) d.value = dateStr;
   }
-  /* Магазин — автоматично за sklad/manager, dropdown за admin/logistics */
-  var stores = assignedStores();
-  var storeSel = document.getElementById('cr-store');
-  if (storeSel) {
-    if (stores && stores.length >= 1) {
-      /* Един или няколко назначени магазина — само техните */
-      storeSel.outerHTML = stores.length === 1
-        ? '<input type="hidden" id="cr-store" value="'+esc(stores[0])+'"><div class="fi" style="background:#f8fafc;color:#374151;">🏪 '+esc(stores[0])+'</div>'
-        : '<select class="fi" id="cr-store"><option value="">-- Избери --</option>'+stores.map(function(s){return '<option>'+esc(s)+'</option>';}).join('')+'</select>';
-    } else {
-      /* Admin/logistics — всички магазини */
-      sbGet('users','select=store_name&order=store_name').then(function(data){
-        var el = document.getElementById('cr-store');
-        if(Array.isArray(data)&&el){
-          var seen={};
-          var opts=data.filter(function(u){
-            if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
-            seen[u.store_name]=1;return true;
-          }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
-          el.innerHTML='<option value="">-- Избери --</option>'+opts;
-        }
-      });
-    }
+  /* За admin/logistics — зареди магазините асинхронно */
+  if (!assignedStores()) {
+    sbGet('users','select=store_name&order=store_name').then(function(data){
+      var el = document.getElementById('cr-store');
+      if(Array.isArray(data)&&el){
+        var seen={};
+        el.innerHTML='<option value="">-- Избери --</option>'+data.filter(function(u){
+          if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
+          seen[u.store_name]=1;return true;
+        }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
+      }
+    });
   }
   ov.classList.add('open');
 }
