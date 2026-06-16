@@ -187,8 +187,7 @@ function showPushPrompt(type, data) {
 function checkTaskReminders(tasks, completions, storeName) {
   if (!tasks || !tasks.length) return;
   var today = new Date(); today.setHours(0,0,0,0);
-  var urgent = [];
-  var overdue = [];
+  var overdue = [], dueSoon = [];
 
   tasks.forEach(function(t) {
     if (!t.due_date) return;
@@ -198,36 +197,39 @@ function checkTaskReminders(tasks, completions, storeName) {
     if (done) return;
     var due = new Date(t.due_date); due.setHours(0,0,0,0);
     var diff = Math.ceil((due-today)/86400000);
-    if (diff < 0) overdue.push(t);
-    else if (diff <= 2) urgent.push(t);
+    if (diff < 0)      overdue.push({task:t, diff:diff});
+    else if (diff <= 3) dueSoon.push({task:t, diff:diff});
   });
 
-  /* Изпрати само ако не е изпращано днес */
-  var lastKey = 'task_reminder_' + today.toISOString().slice(0,10);
-  if (localStorage.getItem(lastKey)) return;
+  if (!overdue.length && !dueSoon.length) return;
+
+  /* Изпрати само веднъж на ден */
+  var lastKey = 'task_reminder_' + today.toISOString().slice(0,10) + '_' + storeName;
+  try { if (localStorage.getItem(lastKey)) return; } catch(e){}
 
   var title, msg;
-  if (overdue.length) {
+  if (overdue.length && dueSoon.length) {
+    title = '⚠️ Задачи — ' + storeName;
+    msg = overdue.length + ' просрочени · ' + dueSoon.length + ' изтичат скоро';
+  } else if (overdue.length) {
     title = '⚠️ Просрочени задачи — ' + storeName;
-    msg = overdue.length + ' задачи са просрочени: ' +
-      overdue.slice(0,2).map(function(t){return t.title;}).join(', ') +
-      (overdue.length>2?'...':'');
-  } else if (urgent.length) {
-    title = '🔔 Спешни задачи — ' + storeName;
-    msg = urgent.length + ' задачи изтичат скоро: ' +
-      urgent.slice(0,2).map(function(t){return t.title;}).join(', ') +
-      (urgent.length>2?'...':'');
+    msg = overdue.slice(0,2).map(function(x){return x.task.title;}).join(', ') +
+      (overdue.length>2?' и още '+(overdue.length-2):'');
+  } else {
+    var nearest = dueSoon.sort(function(a,b){return a.diff-b.diff;})[0];
+    var daysLabel = nearest.diff===0?'Днес!':nearest.diff===1?'Утре':'след '+nearest.diff+' дни';
+    title = '🔔 Задача изтича ' + daysLabel + ' — ' + storeName;
+    msg = dueSoon.slice(0,2).map(function(x){return x.task.title;}).join(', ') +
+      (dueSoon.length>2?' и още '+(dueSoon.length-2):'');
   }
 
-  if (title) {
-    osSend({
-      headings: {bg: title, en: title},
-      contents: {bg: msg, en: msg},
-      filters: [{field:'tag', key:'store_name', relation:'=', value: storeName}]
-    }).then(function(res){
-      if (res.ok) localStorage.setItem(lastKey, '1');
-    });
-  }
+  osSend({
+    headings: {bg: title, en: title},
+    contents: {bg: msg, en: msg},
+    filters: [{field:'tag', key:'store_name', relation:'=', value: storeName}]
+  }).then(function(res){
+    if (res.ok) { try { localStorage.setItem(lastKey, '1'); } catch(e){} }
+  });
 }
 
 /* Понеделник сутрин — напомни за всички задачи */

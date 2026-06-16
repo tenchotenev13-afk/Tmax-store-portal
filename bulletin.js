@@ -248,14 +248,16 @@ function renderBulView(){
   wrap.innerHTML=html;
   /* Auto-check за имейл тригери (само за admin) */
   if(typeof checkPushTriggers==='function') setTimeout(function(){checkPushTriggers(curBul,bulTasks,bulComps);},500);
-  /* Напомнящи нотификации — само в продукция (изключено в тест режим) */
-  /* if(typeof checkTaskReminders==='function' && currentUser && currentUser.store_name && !canEdit()) {
-    var dow = new Date().getDay();
-    if(dow===1 && typeof sendWeeklyTasksReminder==='function') {
+  /* Напомнящи нотификации при наближаване на срок */
+  if(typeof checkTaskReminders==='function' && currentUser && currentUser.store_name && !canEdit()) {
+    var dow2 = new Date().getDay();
+    /* Понеделник — изпрати обобщение за седмицата */
+    if(dow2===1 && typeof sendWeeklyTasksReminder==='function') {
       setTimeout(function(){ sendWeeklyTasksReminder(bulTasks, currentUser.store_name); }, 1000);
     }
+    /* Всеки ден — провери за наближаващи/просрочени задачи */
     setTimeout(function(){ checkTaskReminders(bulTasks, bulComps, currentUser.store_name); }, 1500);
-  } */
+  }
 }
 
 /* View block */
