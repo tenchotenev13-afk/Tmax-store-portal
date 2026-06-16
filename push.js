@@ -182,3 +182,69 @@ function showPushPrompt(type, data) {
     };
   }
 }
+
+/* ═══════ НАПОМНЯЩИ НОТИФИКАЦИИ ЗА ЗАДАЧИ ════════════════ */
+function checkTaskReminders(tasks, completions, storeName) {
+  if (!tasks || !tasks.length) return;
+  var today = new Date(); today.setHours(0,0,0,0);
+  var urgent = [];
+  var overdue = [];
+
+  tasks.forEach(function(t) {
+    if (!t.due_date) return;
+    var done = completions.some(function(c){
+      return c.task_id===t.id && c.store_name===storeName;
+    });
+    if (done) return;
+    var due = new Date(t.due_date); due.setHours(0,0,0,0);
+    var diff = Math.ceil((due-today)/86400000);
+    if (diff < 0) overdue.push(t);
+    else if (diff <= 2) urgent.push(t);
+  });
+
+  /* Изпрати само ако не е изпращано днес */
+  var lastKey = 'task_reminder_' + today.toISOString().slice(0,10);
+  if (localStorage.getItem(lastKey)) return;
+
+  var title, msg;
+  if (overdue.length) {
+    title = '⚠️ Просрочени задачи — ' + storeName;
+    msg = overdue.length + ' задачи са просрочени: ' +
+      overdue.slice(0,2).map(function(t){return t.title;}).join(', ') +
+      (overdue.length>2?'...':'');
+  } else if (urgent.length) {
+    title = '🔔 Спешни задачи — ' + storeName;
+    msg = urgent.length + ' задачи изтичат скоро: ' +
+      urgent.slice(0,2).map(function(t){return t.title;}).join(', ') +
+      (urgent.length>2?'...':'');
+  }
+
+  if (title) {
+    osSend({
+      headings: {bg: title, en: title},
+      contents: {bg: msg, en: msg},
+      filters: [{field:'tag', key:'store_name', relation:'=', value: storeName}]
+    }).then(function(res){
+      if (res.ok) localStorage.setItem(lastKey, '1');
+    });
+  }
+}
+
+/* Понеделник сутрин — напомни за всички задачи */
+function sendWeeklyTasksReminder(tasks, storeName) {
+  if (!tasks || !tasks.length) return;
+  var lastKey = 'weekly_reminder_' + new Date().toISOString().slice(0,10);
+  if (localStorage.getItem(lastKey)) return;
+
+  var title = '📋 ' + tasks.length + ' задачи за седмицата — ' + storeName;
+  var msg = tasks.slice(0,3).map(function(t){return t.title;}).join(' · ') +
+    (tasks.length>3?' · ...':'');
+
+  osSend({
+    headings: {bg: title, en: title},
+    contents: {bg: msg, en: msg},
+    filters: [{field:'tag', key:'store_name', relation:'=', value: storeName}]
+  }).then(function(res){
+    if (res.ok) localStorage.setItem(lastKey, '1');
+  });
+}

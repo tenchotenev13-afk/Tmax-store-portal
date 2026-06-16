@@ -198,6 +198,9 @@ function renderBulView(){
   });
   html+='</div></div>';
 
+  /* Задачи панел */
+  html += renderTasksPanel();
+
   /* 3 columns */
   html+='<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;">';
   DCOLS.forEach(function(dk){
@@ -245,6 +248,14 @@ function renderBulView(){
   wrap.innerHTML=html;
   /* Auto-check за имейл тригери (само за admin) */
   if(typeof checkPushTriggers==='function') setTimeout(function(){checkPushTriggers(curBul,bulTasks,bulComps);},500);
+  /* Напомнящи нотификации за задачи */
+  if(typeof checkTaskReminders==='function' && currentUser && currentUser.store_name && !canEdit()) {
+    var dow = new Date().getDay();
+    if(dow===1 && typeof sendWeeklyTasksReminder==='function') {
+      setTimeout(function(){ sendWeeklyTasksReminder(bulTasks, currentUser.store_name); }, 1000);
+    }
+    setTimeout(function(){ checkTaskReminders(bulTasks, bulComps, currentUser.store_name); }, 1500);
+  }
 }
 
 /* View block */
@@ -915,6 +926,129 @@ function printSection(what){
   setTimeout(function(){win.focus();},300);
 }
 
+
+
+/* ═══════ ЗАДАЧИ — ПАНЕЛ ═══════════════════════════════ */
+function renderTasksPanel() {
+  var isAdmin = canEdit();
+  var DEPT = DEPTS;
+
+  if (!bulTasks.length) return '';
+
+  var h = '<div style="margin-bottom:20px;">';
+  h += '<div style="font-size:15px;font-weight:600;color:#0f172a;margin-bottom:12px;">✅ Задачи за седмицата</div>';
+
+  if (!isAdmin) {
+    /* ── ИЗГЛЕД ЗА МАГАЗИНА ── */
+    var store = currentUser.store_name;
+    var depts = ['trade','warehouse','admin'];
+
+    depts.forEach(function(dk) {
+      var dTasks = bulTasks.filter(function(t){ return t.department===dk; });
+      if (!dTasks.length) return;
+      var d = DEPT[dk];
+      var done = dTasks.filter(function(t){
+        return bulComps.some(function(c){return c.task_id===t.id && c.store_name===store;});
+      }).length;
+      var pct = Math.round(done/dTasks.length*100);
+
+      h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;overflow:hidden;">';
+      h += '<div style="background:'+d.hdr+';padding:8px 14px;display:flex;justify-content:space-between;align-items:center;">';
+      h += '<div style="font-size:13px;font-weight:600;color:#fff;">'+d.icon+' '+d.label+'</div>';
+      h += '<div style="display:flex;align-items:center;gap:8px;">';
+      h += '<div style="font-size:11px;color:rgba(255,255,255,.7);">'+done+'/'+dTasks.length+'</div>';
+      h += '<div style="background:rgba(255,255,255,.2);border-radius:20px;width:80px;height:6px;">';
+      h += '<div style="background:'+(pct===100?'#4ade80':'#fff')+';width:'+pct+'%;height:6px;border-radius:20px;transition:.3s;"></div>';
+      h += '</div></div></div>';
+      h += '<div style="padding:8px 14px;">';
+
+      dTasks.forEach(function(t) {
+        var isDone = bulComps.some(function(c){return c.task_id===t.id && c.store_name===store;});
+        var compInfo = isDone ? bulComps.find(function(c){return c.task_id===t.id && c.store_name===store;}) : null;
+        h += '<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
+        h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" onchange="bulToggleTask(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';">' ;
+        h += '<div style="flex:1;">';
+        h += '<div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
+        h += esc(t.title||'')+'</div>';
+        if (t.description) h += '<div style="font-size:11px;color:#94a3b8;">'+esc(t.description)+'</div>';
+        if (t.due_date) {
+          var due = new Date(t.due_date);
+          var today = new Date(); today.setHours(0,0,0,0);
+          var diff = Math.ceil((due-today)/86400000);
+          var dueColor = diff < 0 ? '#dc2626' : diff <= 2 ? '#d97706' : '#94a3b8';
+          h += '<div style="font-size:10px;color:'+dueColor+';margin-top:2px;">📅 Срок: '+due.toLocaleDateString("bg-BG")+(diff<0?' ⚠️ Просрочено':diff===0?' (Днес!)':diff<=2?' ('+diff+' дни)':'')+'</div>';
+        }
+        if (isDone && compInfo) {
+          h += '<div style="font-size:10px;color:#16a34a;margin-top:2px;">✓ '+esc(compInfo.completed_by||'')+'</div>';
+        }
+        h += '</div></div>';
+      });
+      h += '</div></div>';
+    });
+
+  } else {
+    /* ── СТАТИСТИКА ЗА АДМИН ── */
+    h += '<div id="tasks-stat-wrap">⏳ Зареждане на статистика...</div>';
+    setTimeout(loadTasksStats, 100);
+  }
+
+  h += '</div>';
+  return h;
+}
+
+function bulToggleTask(cb){toggleTask(cb.dataset.tid, cb.checked);}
+function loadTasksStats() {
+  var wrap = document.getElementById('tasks-stat-wrap');
+  if (!wrap || !bulTasks.length) return;
+
+  sbGet('users','select=store_name&order=store_name').then(function(users){
+    var seen={};
+    var stores = users ? users.filter(function(u){
+      if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
+      seen[u.store_name]=1;return true;
+    }).map(function(u){return u.store_name;}) : [];
+
+    if (!stores.length) { wrap.innerHTML=''; return; }
+
+    var depts = ['trade','warehouse','admin'];
+    var h = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">';
+    h += '<thead><tr style="background:#f8fafc;">';
+    h += '<th style="text-align:left;padding:8px 12px;border-bottom:1px solid #e2e8f0;">Магазин</th>';
+    depts.forEach(function(dk){
+      h += '<th style="text-align:center;padding:8px 12px;border-bottom:1px solid #e2e8f0;">'+DEPTS[dk].icon+' '+DEPTS[dk].label+'</th>';
+    });
+    h += '<th style="text-align:center;padding:8px 12px;border-bottom:1px solid #e2e8f0;">Общо</th>';
+    h += '</tr></thead><tbody>';
+
+    stores.forEach(function(store) {
+      var totalDone=0, totalAll=0;
+      h += '<tr style="border-bottom:1px solid #f1f5f9;">';
+      h += '<td style="padding:7px 12px;font-weight:500;">'+esc(store)+'</td>';
+      depts.forEach(function(dk){
+        var dTasks = bulTasks.filter(function(t){return t.department===dk;});
+        var done = dTasks.filter(function(t){
+          return bulComps.some(function(c){return c.task_id===t.id&&c.store_name===store;});
+        }).length;
+        totalDone+=done; totalAll+=dTasks.length;
+        var pct = dTasks.length ? Math.round(done/dTasks.length*100) : null;
+        var bg = pct===null?'#f8fafc':pct===100?'#f0fdf4':pct>50?'#fffbeb':'#fff5f5';
+        var color = pct===null?'#94a3b8':pct===100?'#16a34a':pct>50?'#d97706':'#dc2626';
+        h += '<td style="text-align:center;padding:7px 12px;background:'+bg+';">';
+        if (pct !== null) h += '<span style="color:'+color+';font-weight:600;">'+done+'/'+dTasks.length+'</span>';
+        else h += '<span style="color:#cbd5e1;">—</span>';
+        h += '</td>';
+      });
+      var totalPct = totalAll ? Math.round(totalDone/totalAll*100) : 0;
+      var totBg = totalPct===100?'#f0fdf4':totalPct>50?'#fffbeb':'#fff5f5';
+      var totColor = totalPct===100?'#16a34a':totalPct>50?'#d97706':'#dc2626';
+      h += '<td style="text-align:center;padding:7px 12px;background:'+totBg+';"><b style="color:'+totColor+';">'+totalPct+'%</b></td>';
+      h += '</tr>';
+    });
+
+    h += '</tbody></table></div>';
+    wrap.innerHTML = h;
+  });
+}
 
 function renderBulAnalysis(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
