@@ -248,14 +248,14 @@ function renderBulView(){
   wrap.innerHTML=html;
   /* Auto-check за имейл тригери (само за admin) */
   if(typeof checkPushTriggers==='function') setTimeout(function(){checkPushTriggers(curBul,bulTasks,bulComps);},500);
-  /* Напомнящи нотификации за задачи */
-  if(typeof checkTaskReminders==='function' && currentUser && currentUser.store_name && !canEdit()) {
+  /* Напомнящи нотификации — само в продукция (изключено в тест режим) */
+  /* if(typeof checkTaskReminders==='function' && currentUser && currentUser.store_name && !canEdit()) {
     var dow = new Date().getDay();
     if(dow===1 && typeof sendWeeklyTasksReminder==='function') {
       setTimeout(function(){ sendWeeklyTasksReminder(bulTasks, currentUser.store_name); }, 1000);
     }
     setTimeout(function(){ checkTaskReminders(bulTasks, bulComps, currentUser.store_name); }, 1500);
-  }
+  } */
 }
 
 /* View block */
@@ -611,10 +611,6 @@ function publishBul(){
   sbPatch('bulletins','id=eq.'+curBul.id,{status:'published',published_at:new Date().toISOString(),published_by:currentUser.display_name||currentUser.email}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     toast('📤 Бюлетинът е публикуван!');
-    /* Изпрати push нотификация до всички */
-    if(typeof pushBulletinPublished==='function'){
-      pushBulletinPublished(curBul.week_number,curBul.year,bulTasks.length);
-    }
     bulMode='view'; loadBulletin();
   });
 }
