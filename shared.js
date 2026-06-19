@@ -178,6 +178,8 @@ function setupTabsForRole(){
   if(sdTab)sdTab.style.display='';
   var adminTab=document.getElementById('tab-admin');
   if(adminTab)adminTab.style.display=currentUser.role==='admin'?'':'none';
+  var sepAdmin=document.getElementById('sep-admin');
+  if(sepAdmin)sepAdmin.style.display=currentUser.role==='admin'?'':'none';
 
   /* Покажи .adm елементи (напр. бутон + Добави в Инструкции) за admin */
   var admRoles=['admin','accounting'];
