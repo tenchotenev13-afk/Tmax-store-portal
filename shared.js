@@ -148,6 +148,7 @@ function startApp(){
   document.getElementById('nav-name').textContent=currentUser.display_name||currentUser.email;
   document.getElementById('nav-store').textContent=isGlobal()?'Всички магазини':currentUser.store_name;
   setupTabsForRole();
+  if(typeof initTabDrag==='function')setTimeout(initTabDrag,200);
   if(isGlobal())document.getElementById('tr-metrics').style.display='grid';
   loadAll();
   /* Покажи подходящ таб според роля */
@@ -155,13 +156,19 @@ function startApp(){
   showModule(startTab);
 }
 function setupTabsForRole(){
+  /* Покажи Admin секцията само за admin */
+  var sbSecAdmin=document.getElementById('sb-sec-admin');
+  if(sbSecAdmin)sbSecAdmin.style.display=currentUser&&currentUser.role==='admin'?'':'none';
+  /* Обнови потребителя в sidebar */
+  if(typeof updateSbUser==='function')updateSbUser();
+
   /* Таб Каса — само за kasa, manager, admin, accounting */
   var kasaRoles=['kasa','admin','manager']; /* kasa, управители и администратори */
   var kasaTab=document.getElementById('tab-kasa');
-  if(kasaTab)kasaTab.style.display=kasaRoles.indexOf(currentUser.role)>=0?'':'none';
+  if(kasaTab)kasaTab.style.display=kasaRoles.indexOf(currentUser.role)>=0?'flex':'none';
   /* Таб Администрация — само за admin */
   var histTab=document.getElementById('tab-history');
-  if(histTab)histTab.style.display=isGlobal()?'':'none';
+  if(histTab)histTab.style.display=isGlobal()?'flex':'none';
   /* Табове Контакти и Стока на път — за всички */
   var contactsTab=document.getElementById('tab-contacts');
   if(contactsTab)contactsTab.style.display='';
@@ -190,6 +197,10 @@ function showModule(mod){
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
   var tab=document.getElementById('tab-'+mod);if(tab)tab.classList.add('active');
   if(mod==='admin')loadAdmin();
+  if(mod==='transport')loadTransport();
+  if(mod==='client')loadClientOrders();
+  if(mod==='bulletin')loadBulletin();
+  if(mod==='docs')loadDocs();
   if(mod==='kasa')loadKasa();
   if(mod==='history')loadHistory();
   if(mod==='contacts')loadContacts();
@@ -197,7 +208,6 @@ function showModule(mod){
   if(mod==='calendar')loadCalendar();
   if(mod==='stock-returns')loadStockReturns();
   if(mod==='stock-diff')loadStockDiff();
-  if(mod==='bulletin')loadBulletin();
 }
 /* Затваря модал САМО ако mousedown И mouseup са върху тъмния фон
    (предотвратява случайно затваряне при плъзгане на мишката) */
