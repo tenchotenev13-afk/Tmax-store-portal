@@ -157,10 +157,6 @@ function startApp(){
 }
 function setupTabsForRole(){
   /* Покажи Admin секцията само за admin */
-  var sbSecAdmin=document.getElementById('sb-sec-admin');
-  if(sbSecAdmin)sbSecAdmin.style.display=currentUser&&currentUser.role==='admin'?'':'none';
-  /* Обнови потребителя в sidebar */
-  if(typeof updateSbUser==='function')updateSbUser();
 
   /* Таб Каса — само за kasa, manager, admin, accounting */
   var kasaRoles=['kasa','admin','manager']; /* kasa, управители и администратори */
