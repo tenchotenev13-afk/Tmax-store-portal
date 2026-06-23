@@ -53,7 +53,7 @@ function calcRazlika(r){
   var inkaso  = calcInkaso(r);
   var storna  = parseFloat(r.storna_total)||0;
   var counted = parseFloat(r.counted_cash)||calcCounted(r);
-  return Math.round((counted-(cash-inkaso+storna))*100)/100;
+  return Math.round((counted-(cash-storna-inkaso))*100)/100; /* В брой - Сторна - Инкасо */
 }
 
 /* ─── LOAD ──────────────────────────────────────────────────── */
@@ -286,6 +286,10 @@ function openKasaForm(report){
 
     /* Резултат */
     '<div class="card" style="background:#f8fafc;"><div class="card-title">📊 Резултат</div>'+
+    '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">'+
+      '<div style="font-size:13px;color:#1e40af;font-weight:600;">💵 Обща парична наличност (налични + нето ПОС)</div>'+
+      '<div id="kf-total-nalichnost" style="font-size:18px;font-weight:700;font-family:DM Mono,monospace;color:#1e40af;">0.00</div>'+
+    '</div>'+
     '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">'+
       resBox('В брой (отчет)','kf-r-cash','#e0f2fe','#0369a1')+
       resBox('– Инкасо','kf-r-inkaso','#fef9c3','#92400e')+
@@ -324,6 +328,12 @@ function kasaLiveCalc(){
   counted=Math.round(counted*100)/100;
   var ct=document.getElementById('kf-counted-total');
   if(ct) ct.textContent=counted.toFixed(2);
+  /* Общо физически пари = налични + (ПОС брой - сторна - инкасо вече извадено) */
+  var cashEl=document.getElementById('kf-cash_turnover');
+  var stornaEl=document.getElementById('kf-storna');
+  var posNet=cashEl&&stornaEl?Math.round((parseFloat(cashEl.value||0)-parseFloat(stornaEl.value||0))*100)/100:0;
+  var totalCashEl=document.getElementById('kf-total-nalichnost');
+  if(totalCashEl)totalCashEl.textContent=(Math.round((counted+posNet)*100)/100).toFixed(2);
 
   /* Инкасо */
   var inkaso=0;
@@ -344,7 +354,7 @@ function kasaLiveCalc(){
   /* В брой */
   var cash=parseFloat((document.getElementById('kf-cash_turnover')||{}).value)||0;
   /* Резултат = в_брой - инкасо + сторна */
-  var result=Math.round((cash-inkaso+storna)*100)/100;
+  var result=Math.round((cash-storna-inkaso)*100)/100; /* В брой = ПОС брой - Сторна - Инкасо */
   /* Разлика = налични - резултат */
   var razlika=Math.round((counted-result)*100)/100;
 
@@ -390,7 +400,7 @@ function submitKasaForm(){
 
   var cash=parseFloat((document.getElementById('kf-cash_turnover')||{}).value)||0;
   var storna=parseFloat((document.getElementById('kf-storna')||{}).value)||0;
-  var razlika=Math.round((counted-(cash-inkaso+storna))*100)/100;
+  var razlika=Math.round((counted-(cash-storna-inkaso))*100)/100; /* В брой - Сторна - Инкасо */
 
   var p={
     store_name:currentUser.store_name,
@@ -1097,6 +1107,9 @@ function unlockZoborot(){
 
 /* ─── PRINT ZOBOROT ─────────────────────────────────────────── */
 function printZoborot(){
+  /* Автоматично запази преди печат */
+  saveZoborot();
+  setTimeout(function(){
   var z=zoborotData||{};
   var pnb=parseFloat(z.pos_no_bank)||0;
   var ftn=parseFloat(z.fu_total_net)||0;
@@ -1160,5 +1173,6 @@ function printZoborot(){
   '</body></html>');
   win.document.close();
   setTimeout(function(){win.focus();},300);
+  }, 400);
 }
 
