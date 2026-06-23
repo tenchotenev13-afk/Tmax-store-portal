@@ -280,6 +280,9 @@ function openTransitAdd() {
             if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
             seen[u.store_name]=1;return true;
           }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
+          /* Избери текущия магазин при редактиране */
+          var cur = transitEditId ? (transitData.find(function(x){return x.id===transitEditId;}))||{} : {};
+          if(cur.store_name) el.value = cur.store_name;
         }
       });
     }
