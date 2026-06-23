@@ -287,14 +287,17 @@ function openKasaForm(report){
     /* Резултат */
     '<div class="card" style="background:#f8fafc;"><div class="card-title">📊 Резултат</div>'+
     '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;">'+
-      '<div style="font-size:13px;color:#1e40af;font-weight:600;">💵 Обща парична наличност (налични + нето ПОС)</div>'+
+      '<div style="font-size:13px;color:#1e40af;font-weight:600;">💵 Обща парична наличност (налични + инкасо)</div>'+
       '<div id="kf-total-nalichnost" style="font-size:18px;font-weight:700;font-family:DM Mono,monospace;color:#1e40af;">0.00</div>'+
     '</div>'+
-    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">'+
-      resBox('В брой (отчет)','kf-r-cash','#e0f2fe','#0369a1')+
-      resBox('– Инкасо','kf-r-inkaso','#fef9c3','#92400e')+
-      resBox('Налични (броени)','kf-r-counted','#f0fdf4','#166534')+
-      '<div style="text-align:center;padding:12px;border-radius:8px;border:2px solid #e2e8f0;" id="kf-res-box">'+
+    '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px;">'+
+      '<div style="background:#f8fafc;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:11px;color:#64748b;">В брой (ПОС)</div><div style="font-size:16px;font-weight:700;font-family:DM Mono,monospace;" id="kf-r-cash">0.00</div></div>'+
+      '<div style="background:#fff5f5;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:11px;color:#64748b;">– Сторна</div><div style="font-size:16px;font-weight:700;font-family:DM Mono,monospace;color:#dc2626;" id="kf-r-storna">0.00</div></div>'+
+      '<div style="background:#f0fdf4;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:11px;color:#64748b;">= Нето</div><div style="font-size:16px;font-weight:700;font-family:DM Mono,monospace;color:#16a34a;" id="kf-r-net">0.00</div></div>'+
+      '<div style="background:#f8fafc;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:11px;color:#64748b;">– Инкасо</div><div style="font-size:16px;font-weight:700;font-family:DM Mono,monospace;" id="kf-r-inkaso">0.00</div></div>'+
+      '<div style="background:#f8fafc;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:11px;color:#64748b;">Налични (броени)</div><div style="font-size:16px;font-weight:700;font-family:DM Mono,monospace;" id="kf-r-counted">0.00</div></div>'+
+    '</div>'+
+    '<div id="kf-res-box">'+
         '<div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">РАЗЛИКА</div>'+
         '<div style="font-size:20px;font-weight:700;font-family:DM Mono,monospace;" id="kf-r-razlika">0.00</div>'+
       '</div>'+
@@ -328,12 +331,16 @@ function kasaLiveCalc(){
   counted=Math.round(counted*100)/100;
   var ct=document.getElementById('kf-counted-total');
   if(ct) ct.textContent=counted.toFixed(2);
-  /* Общо физически пари = налични + (ПОС брой - сторна - инкасо вече извадено) */
-  var cashEl=document.getElementById('kf-cash_turnover');
-  var stornaEl=document.getElementById('kf-storna');
-  var posNet=cashEl&&stornaEl?Math.round((parseFloat(cashEl.value||0)-parseFloat(stornaEl.value||0))*100)/100:0;
+  /* Обща налична = Броени + Инкасо */
+  var totalCash = Math.round((counted + inkaso)*100)/100;
   var totalCashEl=document.getElementById('kf-total-nalichnost');
-  if(totalCashEl)totalCashEl.textContent=(Math.round((counted+posNet)*100)/100).toFixed(2);
+  if(totalCashEl)totalCashEl.textContent=totalCash.toFixed(2);
+  /* Покажи сторна в резултата */
+  var stEl=document.getElementById('kf-r-storna');
+  if(stEl)stEl.textContent=storna.toFixed(2);
+  /* В брой нето = брой - сторна */
+  var netEl=document.getElementById('kf-r-net');
+  if(netEl)netEl.textContent=(Math.round((cash-storna)*100)/100).toFixed(2);
 
   /* Инкасо */
   var inkaso=0;
