@@ -317,69 +317,69 @@ function resBox(label,id,bg,col){
 
 /* ─── LIVE CALC ─────────────────────────────────────────────── */
 function kasaLiveCalc(){
-  /* Купюри */
-  var counted=0;
+  /* 1. КУПЮРИ — сумира всички банкноти */
+  var counted = 0;
   ALL_DENOM.forEach(function(v){
-    var key=DENOM_KEY[v];
-    var el=document.getElementById('kf-'+key);
-    var qty=el?parseInt(el.value)||0:0;
-    var sub=Math.round(qty*v*100)/100;
-    counted+=sub;
-    var s=document.getElementById('kf-sub-'+key);
-    if(s) s.textContent=sub.toFixed(2);
+    var key = DENOM_KEY[v];
+    var el  = document.getElementById('kf-'+key);
+    var qty = el ? (parseInt(el.value) || 0) : 0;
+    var sub = Math.round(qty * v * 100) / 100;
+    counted = Math.round((counted + sub) * 100) / 100;
+    var sEl = document.getElementById('kf-sub-'+key);
+    if (sEl) sEl.textContent = sub.toFixed(2);
   });
-  counted=Math.round(counted*100)/100;
-  var ct=document.getElementById('kf-counted-total');
-  if(ct) ct.textContent=counted.toFixed(2);
-  /* Обща налична = Броени + Инкасо */
-  var totalCash = Math.round((counted + inkaso)*100)/100;
-  var totalCashEl=document.getElementById('kf-total-nalichnost');
-  if(totalCashEl)totalCashEl.textContent=totalCash.toFixed(2);
-  /* Покажи сторна в резултата */
-  var stEl=document.getElementById('kf-r-storna');
-  if(stEl)stEl.textContent=storna.toFixed(2);
-  /* В брой нето = брой - сторна */
-  var netEl=document.getElementById('kf-r-net');
-  if(netEl)netEl.textContent=(Math.round((cash-storna)*100)/100).toFixed(2);
+  var ctEl = document.getElementById('kf-counted-total');
+  if (ctEl) ctEl.textContent = counted.toFixed(2);
 
-  /* Инкасо */
-  var inkaso=0;
+  /* 2. ИНКАСО — сумира изведените банкноти */
+  var inkaso = 0;
   INKASO_DENOM.forEach(function(v){
-    var el=document.getElementById('kf-inkaso_'+v);
-    var qty=el?parseInt(el.value)||0:0;
-    var sub=qty*v;
-    inkaso+=sub;
-    var s=document.getElementById('kf-sub-inkaso_'+v);
-    if(s) s.textContent=sub.toFixed(2);
+    var el  = document.getElementById('kf-inkaso_' + v);
+    var qty = el ? (parseInt(el.value) || 0) : 0;
+    var sub = Math.round(qty * v * 100) / 100;
+    inkaso  = Math.round((inkaso + sub) * 100) / 100;
+    var sEl = document.getElementById('kf-sub-inkaso_' + v);
+    if (sEl) sEl.textContent = sub.toFixed(2);
   });
-  inkaso=Math.round(inkaso*100)/100;
-  var it=document.getElementById('kf-inkaso-total');
-  if(it) it.textContent=inkaso.toFixed(2);
+  var itEl = document.getElementById('kf-inkaso-total');
+  if (itEl) itEl.textContent = inkaso.toFixed(2);
 
-  /* Сторна */
-  var storna=parseFloat((document.getElementById('kf-storna')||{}).value)||0;
-  /* В брой */
-  var cash=parseFloat((document.getElementById('kf-cash_turnover')||{}).value)||0;
-  /* Резултат = в_брой - инкасо + сторна */
-  var result=Math.round((cash-storna-inkaso)*100)/100; /* В брой = ПОС брой - Сторна - Инкасо */
-  /* Разлика = налични - резултат */
-  var razlika=Math.round((counted-result)*100)/100;
+  /* 3. СТОРНА и В БРОЙ */
+  var storna = parseFloat(document.getElementById('kf-storna')      ? document.getElementById('kf-storna').value      : 0) || 0;
+  var cash   = parseFloat(document.getElementById('kf-cash_turnover') ? document.getElementById('kf-cash_turnover').value : 0) || 0;
 
-  var set=function(id,val){ var el=document.getElementById(id); if(el)el.textContent=val.toFixed(2); };
-  set('kf-r-cash',result);
-  set('kf-r-inkaso',inkaso);
-  set('kf-r-counted',counted);
+  /* 4. ИЗЧИСЛЕНИЯ */
+  var net     = Math.round((cash - storna) * 100) / 100;          /* В брой нето = ПОС - Сторна */
+  var result  = Math.round((net - inkaso) * 100) / 100;           /* Очаквани налични */
+  var razlika = Math.round((counted - result) * 100) / 100;       /* Разлика */
+  var total   = Math.round((counted + inkaso) * 100) / 100;       /* Обща налична */
 
-  var rEl=document.getElementById('kf-r-razlika');
-  var box=document.getElementById('kf-res-box');
-  if(rEl){
-    var col=razCol(razlika);
-    var bg=razlika<0?'#fff5f5':razlika>0?'#fffbeb':'#f0fdf4';
-    rEl.textContent=(razlika<0?'– ':'')+Math.abs(razlika).toFixed(2)+' EUR';
-    rEl.style.color=col;
-    if(box){box.style.borderColor=col;box.style.background=bg;}
+  /* 5. ПОКАЖИ РЕЗУЛТАТИТЕ */
+  function show(id, val) {
+    var el = document.getElementById(id);
+    if (el) el.textContent = (isNaN(val) ? 0 : val).toFixed(2);
+  }
+  show('kf-r-cash',    cash);
+  show('kf-r-storna',  storna);
+  show('kf-r-net',     net);
+  show('kf-r-inkaso',  inkaso);
+  show('kf-r-counted', counted);
+
+  var tcEl = document.getElementById('kf-total-nalichnost');
+  if (tcEl) tcEl.textContent = (isNaN(total) ? 0 : total).toFixed(2);
+
+  /* 6. РАЗЛИКА с цвят */
+  var rEl = document.getElementById('kf-r-razlika');
+  if (rEl) {
+    var col = razlika === 0 ? '#16a34a' : razlika < 0 ? '#dc2626' : '#d97706';
+    var bg  = razlika < 0 ? '#fff5f5' : razlika > 0 ? '#fffbeb' : '#f0fdf4';
+    rEl.textContent = (razlika < 0 ? '– ' : '') + Math.abs(razlika).toFixed(2) + ' EUR';
+    rEl.style.color = col;
+    var box = document.getElementById('kf-res-box');
+    if (box) { box.style.borderColor = col; box.style.background = bg; }
   }
 }
+
 
 /* ─── SUBMIT ────────────────────────────────────────────────── */
 function submitKasaForm(){
