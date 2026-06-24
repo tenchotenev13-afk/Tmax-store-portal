@@ -148,8 +148,7 @@ function bulSetDept(dk) {
   renderBulletin();
 }
 
-function bulPrintDept(e, dk) {
-  e.stopPropagation();
+function bulPrintDept(dk) {
   var d = DEPTS[dk];
   var panelEl = document.getElementById('dept-panel-' + dk);
   if (!panelEl) return;
@@ -229,19 +228,27 @@ function renderBulView(){
 
   /* ── ОТДЕЛНИ ТАБОВЕ ПО ОТДЕЛ ── */
   /* Таб навигация */
-  html+='<div style="display:flex;gap:4px;margin-bottom:0;border-bottom:2px solid #e2e8f0;">';
+  html+='<div style="display:flex;align-items:flex-end;gap:4px;margin-bottom:0;border-bottom:2px solid #e2e8f0;">';
   DCOLS.forEach(function(dk){
     var d=DEPTS[dk];
     var isAct=dk===bulActiveDept;
     html+='<button data-dk="'+dk+'" onclick="bulSetDept(this.dataset.dk)" id="dtab-'+dk+'" style="'+
       'border:none;background:'+(isAct?d.hdr:'#f8fafc')+';color:'+(isAct?'#fff':d.color)+';'+
       'padding:10px 20px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;'+
-      'border-radius:8px 8px 0 0;border-bottom:'+(isAct?'2px solid '+d.hdr:'2px solid transparent')+';'+
-      'display:flex;align-items:center;gap:6px;">'+
+      'border-radius:8px 8px 0 0;border-bottom:none;transition:all .15s;">'+
       d.icon+' '+d.label+
-      (isAct?'<button onclick="bulPrintDept(event,\''+dk+'\')" style="margin-left:8px;border:1px solid rgba(255,255,255,.5);background:rgba(255,255,255,.15);color:#fff;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">🖨 Принтирай</button>':'')+
     '</button>';
   });
+  /* Принтирай бутон вдясно */
+  html+='<div style="margin-left:auto;padding-bottom:4px;">';
+  DCOLS.forEach(function(dk){
+    var d=DEPTS[dk];
+    var isAct=dk===bulActiveDept;
+    if(isAct){
+      html+='<button onclick="bulPrintDept(\'' +dk+ '\')" style="border:1px solid '+d.hdr+';background:#fff;color:'+d.color+';border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">🖨 Принтирай секцията</button>';
+    }
+  });
+  html+='</div>';
   html+='</div>';
 
   /* Съдържание на активния таб */
