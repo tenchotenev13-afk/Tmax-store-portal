@@ -259,7 +259,6 @@ function renderBulView(){
   html+='</div>';
 
   /* Съдържание на активния таб */
-  var isEdit = (bulMode === 'edit');
   DCOLS.forEach(function(dk){
     var dept=DEPTS[dk];
     var blocks=(c.columns[dk]||[]).filter(function(b){return b.type!=='task'&&b.type!=='important';});
@@ -289,15 +288,13 @@ function renderBulView(){
       html+='</div>';
     }
     /* Блокове */
-    if(isEdit){
-      blocks.forEach(function(b,i){html+=editBlock(b,dk,i);});
-      html+='<button class="addblk" data-dept="'+dk+'" onclick="bulOpenPicker(this)">+ Добави блок</button>';
+    if(!blocks.length&&!dTasks.length){
+      html+='<div style="text-align:center;padding:40px;color:#94a3b8;font-size:13px;">Няма информация за тази секция тази седмица.</div>';
     } else {
-      if(!blocks.length&&!dTasks.length){
-        html+='<div style="text-align:center;padding:40px;color:#94a3b8;font-size:13px;">Няма информация за тази секция тази седмица.</div>';
-      } else {
-        blocks.forEach(function(b){html+=viewBlock(b);});
-      }
+      blocks.forEach(function(b,i){html+=editBlock(b,dk,i);});
+    }
+    if(canEdit()){
+      html+='<button class="addblk" data-dept="'+dk+'" onclick="bulOpenPicker(this)">+ Добави блок</button>';
     }
     html+='</div></div>';
   });
