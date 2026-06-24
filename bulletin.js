@@ -46,7 +46,7 @@ function fmtD(d){return d.getDate()+'.'+(d.getMonth()<9?'0':'')+(d.getMonth()+1)
 function loadBulletin(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:300px;color:#94a3b8;font-size:15px;">⏳ Зареждане...</div>';
-  var q=canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=published_at.desc&limit=1';
+  var q=canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1';
   sbGet('bulletins',q).then(function(data){
     curBul=(Array.isArray(data)&&data.length)?data[0]:null;
     if(!curBul){renderBulEmpty();return;}
@@ -92,7 +92,13 @@ function showBulToast(msg){
 function renderBulletin(){
   if(bulMode==='analysis'){renderBulAnalysis();return;}
   if(bulMode==='edit'){renderBulEdit();return;}
-  renderBulView();
+  try {
+    renderBulView();
+  } catch(e) {
+    console.error('renderBulView error:', e);
+    var w = document.getElementById('mod-bulletin');
+    if(w) w.innerHTML = '<div style="color:#dc2626;padding:40px;text-align:center;">Грешка при рендиране: ' + e.message + '</div>';
+  }
 }
 function setBulView(){bulMode='view';renderBulletin();}
 function setBulEdit(){bulMode='edit';renderBulletin();}
