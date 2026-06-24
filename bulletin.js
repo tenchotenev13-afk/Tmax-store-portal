@@ -259,6 +259,7 @@ function renderBulView(){
   html+='</div>';
 
   /* Съдържание на активния таб */
+  var isEdit = (bulMode === 'edit');
   DCOLS.forEach(function(dk){
     var dept=DEPTS[dk];
     var blocks=(c.columns[dk]||[]).filter(function(b){return b.type!=='task'&&b.type!=='important';});
