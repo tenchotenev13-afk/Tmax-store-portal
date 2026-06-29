@@ -108,8 +108,53 @@ function renderMetrics(){
 function loadAll(){loadTransport();loadClientOrders();loadDocs();}
 
 /* AUTH — без session restore */
+/* ── SESSION PERSISTENCE (8 часа) ─────────────────── */
+var SESSION_KEY = 'temax_session';
+var SESSION_TTL = 8 * 60 * 60 * 1000; /* 8 часа в ms */
+
+function saveSession(user) {
+  try {
+    var session = {
+      user: {
+        email:        user.email,
+        display_name: user.display_name,
+        store_name:   user.store_name,
+        role:         user.role,
+        password:     user.password,
+        assigned_stores: user.assigned_stores || null
+      },
+      expires: Date.now() + SESSION_TTL
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  } catch(e) {}
+}
+
+function loadSession() {
+  try {
+    var raw = localStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    var session = JSON.parse(raw);
+    if (!session || !session.user || !session.expires) return null;
+    if (Date.now() > session.expires) {
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
+    return session.user;
+  } catch(e) { return null; }
+}
+
+function clearSession() {
+  try { localStorage.removeItem(SESSION_KEY); } catch(e) {}
+}
+
 function initApp(){
-  /* Нищо не се зарежда автоматично — изчакваме логин */
+  /* Проверяваме за запазена сесия */
+  var saved = loadSession();
+  if (saved) {
+    currentUser = saved;
+    startApp();
+  }
+  /* Иначе изчакваме логин */
 }
 function doLogin(){
   var email=v('l-email').toLowerCase();
@@ -126,6 +171,7 @@ function doLogin(){
     var user=data[0];
     if(user.password!==pass){errEl.textContent='Грешна парола.';errEl.style.display='block';return;}
     currentUser=user; /* запазваме за проверка при смяна на парола */
+    saveSession(user);
     startApp();
   }).catch(function(){
     document.getElementById('l-btn').disabled=false;
@@ -134,6 +180,7 @@ function doLogin(){
   });
 }
 function doLogout(){
+  clearSession();
   currentUser=null;
   transportOrders=[];clientOrders=[];docs=[];
   document.getElementById('s-app').style.display='none';

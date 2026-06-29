@@ -3,7 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>TeMAX — Вътрешна платформа</title>
+<title>ТеМАХ — Вътрешна платформа</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0f172a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="ТеМАХ">
+<link rel="apple-touch-icon" href="icon-192.png">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 :root{--dark:#0f172a;--red:#e02020;--blu:#2563eb;--grn:#16a34a;--amb:#d97706;--border:#e2e8f0;--text:#0f172a;--muted:#64748b;--surf:#f8fafc;--r:10px;}
@@ -305,9 +311,12 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div class="pg-title">⚙ Администрация</div>
     <div class="pg-sub">Управление на магазини и потребители.</div>
     <div class="card">
-      <div class="card-title">👥 Потребители</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div class="card-title" style="margin-bottom:0;">👥 Потребители</div>
+        <button onclick="openUserModal(null)" style="border:none;background:#0f172a;color:#fff;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;">+ Добави колега</button>
+      </div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>Имейл</th><th>Име</th><th>Магазин</th><th>Роля</th><th>Назначени магазини</th></tr></thead>
+        <thead><tr><th>Имейл</th><th>Име</th><th>Магазин</th><th>Роля</th><th>Назначени магазини</th><th style="width:80px;"></th></tr></thead>
         <tbody id="users-body"></tbody>
       </table></div>
     </div>
@@ -548,5 +557,20 @@ function loadTabOrder(){
 <script src="push.js"></script>
 <script src="email.js"></script>
 <script src="notifications.js"></script>
+<script>
+/* ── PWA Service Worker — само на GitHub Pages ── */
+if ('serviceWorker' in navigator &&
+    window.location.hostname === 'tenchotenev13-afk.github.io') {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/Tmax-store-portal/sw.js', {
+      scope: '/Tmax-store-portal/'
+    }).then(function(reg) {
+      console.log('SW регистриран:', reg.scope);
+    }).catch(function(err) {
+      console.log('SW грешка:', err);
+    });
+  });
+}
+</script>
 </body>
 </html>
