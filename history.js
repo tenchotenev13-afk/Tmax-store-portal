@@ -664,31 +664,23 @@ function exportKasaToExcel(){
 /* ── ПРЕГЛЕД НА ДОКУМЕНТ ── */
 function previewKasaDoc(path){
   if(!path){toast('Липсва path','#dc2626');return;}
-  /* Използваме getSignedUrl от kasa-docs.js — същата логика, проверена */
-  if(typeof getSignedUrl === 'function'){
-    toast('⏳ Зареждане...');
-    getSignedUrl(path, function(url){
-      if(url){
-        window.open(url, '_blank');
-      } else {
-        toast('Грешка при генериране на линк','#dc2626');
-      }
-    });
-  } else {
-    /* Fallback ако getSignedUrl не е наличен */
-    var SB  = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
-    var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
-    /* Encode по сегменти — точно като kasa-docs.js */
-    var encPath = path.split('/').map(function(s){return encodeURIComponent(s);}).join('/');
-    toast('⏳ Зареждане...');
-    fetch(SB+'/storage/v1/object/sign/kasa-docs/'+encPath,{
-      method:'POST',
-      headers:{'Authorization':'Bearer '+KEY,'Content-Type':'application/json'},
-      body:JSON.stringify({expiresIn:3600})
-    }).then(function(r){return r.json();})
-    .then(function(d){
-      if(d.signedURL) window.open(SB+d.signedURL,'_blank');
-      else toast('Грешка: '+JSON.stringify(d),'#dc2626');
-    }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
-  }
+  var SB  = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
+  /* Encode по сегменти */
+  var encPath = path.split('/').map(function(s){return encodeURIComponent(s);}).join('/');
+  toast('⏳ Зареждане...');
+  fetch(SB+'/storage/v1/object/sign/kasa-docs/'+encPath,{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+KEY,'Content-Type':'application/json'},
+    body:JSON.stringify({expiresIn:3600})
+  }).then(function(r){return r.json();})
+  .then(function(d){
+    if(d.signedURL){
+      /* signedURL = "/object/sign/..." — добавяме /storage/v1 */
+      var fullUrl = SB + '/storage/v1' + d.signedURL;
+      window.open(fullUrl,'_blank');
+    } else {
+      toast('Грешка: '+(d.error||JSON.stringify(d)),'#dc2626');
+    }
+  }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
 }
