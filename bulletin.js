@@ -301,7 +301,7 @@ function renderBulView(){
     html+='</div></div>';
   });
 
-  html+=blockPickerHtml()+taskModalHtml()+calModalHtml();
+  html+=blockPickerHtml()+taskModalHtml()+calModalHtml()+pushMenuHtml()+printMenuHtml();
   wrap.innerHTML=html;
 }
 
