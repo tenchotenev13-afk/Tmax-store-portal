@@ -81,12 +81,30 @@ function editAssigned(userId, userName){
   if(current===null)return;
   var stores=current.trim()
     ? current.split(',').map(function(s){return s.trim();}).filter(Boolean)
-    : [];
-  sbPatch('users','id=eq.'+userId,{assigned_stores:stores}).then(function(r){
-    if(!r.ok){toast('Грешка при запис','#dc2626');return;}
-    toast(stores.length?'✅ Назначени '+stores.length+' магазина':'✅ Вижда всички магазини');
+    : null;
+  /* Supabase очаква PostgreSQL масив или NULL */
+  /* NULL = вижда всички; масив = само назначените */
+  var payload = stores ? {assigned_stores: stores} : {assigned_stores: null};
+  fetch(
+    'https://xiwkdiqqplgdcrkewgtv.supabase.co/rest/v1/users?id=eq.'+userId,
+    {
+      method: 'PATCH',
+      headers: {
+        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
+        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+      },
+      body: JSON.stringify(payload)
+    }
+  ).then(function(r){ return r.json().then(function(data){ return {ok:r.ok, data:data}; }); })
+  .then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');console.error(res.data);return;}
+    var saved=Array.isArray(res.data)&&res.data[0]?res.data[0].assigned_stores:null;
+    var count=Array.isArray(saved)?saved.length:0;
+    toast(count?'✅ Назначени '+count+' магазина':'✅ Вижда всички магазини');
     loadUsersAdmin();
-  });
+  }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
 }
 
 function deleteUser(id, email){
