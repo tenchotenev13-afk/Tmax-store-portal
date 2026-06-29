@@ -190,10 +190,19 @@ function doLogout(){
 }
 function startApp(){
   if(typeof initPush==='function') initPush(currentUser);
-  document.getElementById('s-login').style.display='none';
-  document.getElementById('s-app').style.display='flex';
-  document.getElementById('nav-name').textContent=currentUser.display_name||currentUser.email;
-  document.getElementById('nav-store').textContent=isGlobal()?'Всички магазини':currentUser.store_name;
+  var sLogin=document.getElementById('s-login');
+  var sApp=document.getElementById('s-app');
+  var navName=document.getElementById('nav-name');
+  var navStore=document.getElementById('nav-store');
+  if(!sLogin||!sApp||!navName||!navStore){
+    /* DOM не е готов — изчакваме */
+    setTimeout(startApp,50);
+    return;
+  }
+  sLogin.style.display='none';
+  sApp.style.display='flex';
+  navName.textContent=currentUser.display_name||currentUser.email;
+  navStore.textContent=isGlobal()?'Всички магазини':currentUser.store_name;
   setupTabsForRole();
   if(typeof initTabDrag==='function')setTimeout(initTabDrag,200);
   if(isGlobal())document.getElementById('tr-metrics').style.display='grid';
