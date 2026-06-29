@@ -92,13 +92,12 @@ function showBulToast(msg){
 /* ROUTER */
 function renderBulletin(){
   if(bulMode==='analysis'){renderBulAnalysis();return;}
-  /* edit and view both use renderBulView — edit controls shown via canEdit() */
   try {
     renderBulView();
   } catch(e) {
     console.error('renderBulView error:', e);
     var w = document.getElementById('mod-bulletin');
-    if(w) w.innerHTML = '<div style="color:#dc2626;padding:40px;text-align:center;">Грешка при рендиране: ' + e.message + '</div>';
+    if(w) w.innerHTML = '<div style="color:#dc2626;padding:40px;text-align:center;">Грешка: ' + e.message + '</div>';
   }
 }
 function setBulView(){bulMode='view';renderBulletin();}
@@ -207,7 +206,7 @@ function renderBulView(){
   DKEYS.forEach(function(key,i){
     var isToday=days[i].toISOString().slice(0,10)===today();
     var dateStr=days[i].toISOString().slice(0,10);
-    var dTasks=bulTasks.filter(function(t){return t.due_date===dateStr;});
+    var dTasks=bulTasks.filter(function(t){return t.due_date&&t.due_date.slice(0,10)===dateStr;});
     var manual=c.calendar[key]||[];
     html+='<div style="border:1px solid '+(isToday?'#2563eb':'#e2e8f0')+';border-radius:7px;padding:10px 12px;min-height:90px;background:'+(isToday?'#eff6ff':'#fff')+'">';
     html+='<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#94a3b8;">'+DNAMES[i]+'</div>';
@@ -441,11 +440,18 @@ function openBlockPicker(dept){_pkDept=dept; document.getElementById('bp-ov').cl
 function closeBlockPicker(){document.getElementById('bp-ov').classList.remove('open');}
 function addBlock(type){
   closeBlockPicker();
+  if(!_pkDept){console.error('addBlock: _pkDept is null');toast('Грешка: не е избран отдел','#dc2626');return;}
+  if(!curBul||!curBul.content||!curBul.content.columns){console.error('addBlock: curBul not ready');return;}
+  if(!curBul.content.columns[_pkDept]){curBul.content.columns[_pkDept]=[];}
   var b={id:genId(),type:type,content:''};
   if(type==='alert')b.color='blu';
   if(type==='important')b.urgency='info';
   if(type==='image')b.width=100;
   curBul.content.columns[_pkDept].push(b);
+  console.log('addBlock: added',type,'to',_pkDept,'total blocks:',curBul.content.columns[_pkDept].length);
+  /* Switch to edit mode so the new block is editable */
+  bulMode='edit';
+  bulActiveDept=_pkDept;
   schedSave(); renderBulletin();
 }
 function blockPickerHtml(){
@@ -819,7 +825,7 @@ function printSection(what){
     s+='<div class="cal-grid">';
     DKEYS.forEach(function(key,i){
       var ds=days[i].toISOString().slice(0,10);
-      var dt=bulTasks.filter(function(t){return t.due_date===ds;});
+      var dt=bulTasks.filter(function(t){return t.due_date&&t.due_date.slice(0,10)===ds;});
       var mn=c.calendar[key]||[];
       s+='<div class="cal-day">';
       s+='<div class="cal-day-name">'+DNAMES2[i]+'</div>';
