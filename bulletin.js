@@ -92,7 +92,7 @@ function showBulToast(msg){
 /* ROUTER */
 function renderBulletin(){
   if(bulMode==='analysis'){renderBulAnalysis();return;}
-  if(bulMode==='edit'){renderBulEdit();return;}
+  /* edit and view both use renderBulView — edit controls shown via canEdit() */
   try {
     renderBulView();
   } catch(e) {
@@ -294,7 +294,10 @@ function renderBulView(){
       blocks.forEach(function(b,i){html+=editBlock(b,dk,i);});
     }
     if(canEdit()){
+      html+='<div style="display:flex;gap:8px;margin-top:8px;">';
       html+='<button class="addblk" data-dept="'+dk+'" onclick="bulOpenPicker(this)">+ Добави блок</button>';
+      html+='<button onclick="openTaskModalForDept(\'' +dk+ '\')" style="border:1px dashed #2563eb;background:#eff6ff;color:#2563eb;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">✅ + Добави задача</button>';
+      html+='</div>';
     }
     html+='</div></div>';
   });
@@ -565,6 +568,11 @@ function taskModalHtml(){
     '<button onclick="closeTk()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button onclick="submitTask()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Добави задача</button>' +
     '</div></div></div>';
+}
+function openTaskModalForDept(dk){
+  openTaskModal();
+  var sel=document.getElementById('tk-dept');
+  if(sel)sel.value=dk;
 }
 function openTaskModal(){document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';}
 function closeTk(){document.getElementById('tk-ov').classList.remove('open');}
