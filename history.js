@@ -254,7 +254,7 @@ function renderHistoryResults(){
 
   /* Секция Документи за периода */
   if(histData.kasa.length){
-    sbGet('kasa_documents','order=date.desc&date=gte.'+histFilter.from+'&date=lte.'+histFilter.to+(histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ())).then(function(docs){
+    sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+histFilter.from+'&date=lte.'+histFilter.to+(histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ())).then(function(docs){
       if(!Array.isArray(docs)||!docs.length) return;
       var docTypes={pos:'ПОС',glavna:'Главна каса',zoborot:'Равнение',other:'Друго'};
       var docHtml='<div class="card" style="margin-top:14px;">'+
@@ -609,7 +609,7 @@ function exportKasaToExcel(){
         XLSX.utils.book_append_sheet(wb, wsSum, 'Обобщение');
 
         /* ── Лист 5: Документи (линкове) ── */
-        sbGet('kasa_documents','order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter2).then(function(docsData){
+        sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+from+'&date=lte.'+to+sFilter2).then(function(docsData){
           var docRows = [['Дата','Магазин','Тип отчет','Тип документ','Файл','Качен от','Дата качване','Линк за преглед']];
           var docTypes = {pos:'ПОС Отчет', glavna:'Главна каса', zoborot:'Равнение', other:'Друго'};
           if(Array.isArray(docsData)){
@@ -664,23 +664,31 @@ function exportKasaToExcel(){
 /* ── ПРЕГЛЕД НА ДОКУМЕНТ ── */
 function previewKasaDoc(path){
   if(!path){toast('Липсва path','#dc2626');return;}
-  var SB = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
-  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
-  var encPath = path.split('/').map(function(s){return encodeURIComponent(s);}).join('/');
-  toast('⏳ Зареждане...');
-  fetch(SB+'/storage/v1/object/sign/kasa-docs/'+encPath,{
-    method:'POST',
-    headers:{
-      'Authorization':'Bearer '+KEY,
-      'Content-Type':'application/json'
-    },
-    body:JSON.stringify({expiresIn:3600})
-  }).then(function(r){return r.json();})
-  .then(function(d){
-    if(d.signedURL){
-      window.open(SB+d.signedURL,'_blank');
-    } else {
-      toast('Грешка при генериране на линк','#dc2626');
-    }
-  }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
+  /* Използваме getSignedUrl от kasa-docs.js — същата логика, проверена */
+  if(typeof getSignedUrl === 'function'){
+    toast('⏳ Зареждане...');
+    getSignedUrl(path, function(url){
+      if(url){
+        window.open(url, '_blank');
+      } else {
+        toast('Грешка при генериране на линк','#dc2626');
+      }
+    });
+  } else {
+    /* Fallback ако getSignedUrl не е наличен */
+    var SB  = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
+    var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
+    /* Encode по сегменти — точно като kasa-docs.js */
+    var encPath = path.split('/').map(function(s){return encodeURIComponent(s);}).join('/');
+    toast('⏳ Зареждане...');
+    fetch(SB+'/storage/v1/object/sign/kasa-docs/'+encPath,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+KEY,'Content-Type':'application/json'},
+      body:JSON.stringify({expiresIn:3600})
+    }).then(function(r){return r.json();})
+    .then(function(d){
+      if(d.signedURL) window.open(SB+d.signedURL,'_blank');
+      else toast('Грешка: '+JSON.stringify(d),'#dc2626');
+    }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
+  }
 }
