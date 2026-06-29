@@ -141,7 +141,10 @@ function renderHistoryResults(){
       (store?' &nbsp;|&nbsp; Магазин: <b>'+esc(store)+'</b>':'')+
       ' &nbsp;|&nbsp; Общо: <b>'+totalAll+'</b> записа'+
     '</div>'+
+    '<div style="display:flex;gap:8px;">'+
     '<button onclick="printHistoryReport()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:500;cursor:pointer;">🖨 Разпечатай отчета</button>'+
+    '<button onclick="exportKasaToExcel()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;">📊 Експорт Excel</button>'+
+    '</div>'+
   '</div>';
 
   /* Статистически карти */
@@ -247,6 +250,36 @@ function renderHistoryResults(){
         '</tr>';
       }).join('')+
       '</tbody></table></div></div>';
+  }
+
+  /* Секция Документи за периода */
+  if(histData.kasa.length){
+    sbGet('kasa_documents','order=date.desc&date=gte.'+histFilter.from+'&date=lte.'+histFilter.to+(histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ())).then(function(docs){
+      if(!Array.isArray(docs)||!docs.length) return;
+      var docTypes={pos:'ПОС',glavna:'Главна каса',zoborot:'Равнение',other:'Друго'};
+      var docHtml='<div class="card" style="margin-top:14px;">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'+
+          '<div class="card-title" style="margin:0;">📎 Прикачени документи ('+docs.length+')</div>'+
+          '<div style="font-size:11px;color:#64748b;">Преглед в портала · Изтегляне от Supabase Storage</div>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">';
+      docs.forEach(function(d){
+        var isPdf = /\.pdf$/i.test(d.file_name||'');
+        var icon = isPdf ? '📄' : '🖼️';
+        var bg = isPdf ? '#eff6ff' : '#f0fdf4';
+        var border = isPdf ? '#bfdbfe' : '#bbf7d0';
+        docHtml+='<div style="border:1px solid '+border+';background:'+bg+';border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;">'+
+          '<div style="font-size:22px;text-align:center;">'+icon+'</div>'+
+          '<div style="font-size:11px;font-weight:600;color:#0f172a;text-align:center;word-break:break-all;">'+esc(d.file_name||'')+'</div>'+
+          '<div style="font-size:10px;color:#64748b;text-align:center;">'+esc(d.store_name||'')+' · '+fmtDate(d.date)+'</div>'+
+          '<div style="font-size:10px;color:#64748b;text-align:center;">'+(docTypes[d.report_type]||d.report_type||'')+'</div>'+
+          '<button data-path="'+esc(d.file_url)+'" onclick="previewKasaDoc(this.dataset.path)" style="border:1px solid #2563eb;background:#fff;color:#2563eb;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600;">👁 Преглед</button>'+
+        '</div>';
+      });
+      docHtml+='</div></div>';
+      var existing=document.getElementById('h-results');
+      if(existing) existing.innerHTML+=docHtml;
+    }).catch(function(){});
   }
 
   wrap.innerHTML=html;
@@ -373,4 +406,281 @@ function printHistoryReport(){
   '</body></html>');
   win.document.close();
   setTimeout(function(){win.focus();},300);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   EXCEL ЕКСПОРТ НА КАСОВИ ОТЧЕТИ
+   Използва SheetJS (CDN) — зарежда се при първо извикване
+══════════════════════════════════════════════════════════════ */
+
+function exportKasaToExcel(){
+  var from = histFilter.from;
+  var to   = histFilter.to;
+  var store = histFilter.store;
+
+  if(!from||!to){toast('Първо избери период и натисни Търси','#dc2626');return;}
+
+  toast('⏳ Подготвя се Excel файлът...');
+
+  /* Зареждаме SheetJS ако не е зареден */
+  function doExport(){
+    var XLSX = window.XLSX;
+    if(!XLSX){toast('Грешка при зареждане на SheetJS','#dc2626');return;}
+
+    var wb = XLSX.utils.book_new();
+
+    /* ── Лист 1: ПОС Отчети ── */
+    var posRows = [['Дата','Магазин','ПОС №','Каса №','Касиер',
+      'Общ оборот (EUR)','В брой (EUR)','Карта (EUR)','Ваучери (EUR)',
+      'Сторна (EUR)','Нето в брой (EUR)',
+      'Инкасо 500','Инкасо 200','Инкасо 100','Инкасо 50',
+      'Инкасо 20','Инкасо 10','Инкасо 5','Общо инкасо (EUR)',
+      'Налични (EUR)','Разлика (EUR)','Статус','Върнат от','Причина за връщане']];
+
+    histData.kasa.forEach(function(r){
+      /* inkaso_500, inkaso_200, inkaso_100, inkaso_50, inkaso_20, inkaso_10, inkaso_5 */
+      var inkaso = [500,200,100,50,20,10,5].map(function(v){
+        return parseInt(r['inkaso_'+v])||0;
+      });
+      var inkasoTotal = inkaso.reduce(function(s,qty,i){
+        return s + qty * [500,200,100,50,20,10,5][i];
+      }, 0);
+      var statusStr = r.status==='confirmed' ? 'Потвърден' :
+                      r.status==='returned'  ? 'Върнат за корекция' : 'Чернова';
+      posRows.push([
+        r.date||'',
+        r.store_name||'',
+        r.pos_number||'',
+        r.kasa_number||'',
+        r.cashier_name||'',
+        parseFloat(r.total_turnover)||0,
+        parseFloat(r.cash_turnover)||0,
+        parseFloat(r.card_turnover)||0,
+        parseFloat(r.voucher_turnover)||0,
+        parseFloat(r.storna_total)||0,
+        Math.round(((parseFloat(r.cash_turnover)||0)-(parseFloat(r.storna_total)||0))*100)/100,
+        inkaso[0], inkaso[1], inkaso[2], inkaso[3], inkaso[4], inkaso[5], inkaso[6],
+        Math.round(inkasoTotal*100)/100,
+        parseFloat(r.counted_cash)||0,
+        parseFloat(r.razlika)||0,
+        statusStr,
+        r.returned_by||'',
+        r.return_reason||''
+      ]);
+    });
+
+    var wsPos = XLSX.utils.aoa_to_sheet(posRows);
+    /* Ширини на колоните */
+    wsPos['!cols'] = [
+      {wch:12},{wch:16},{wch:7},{wch:7},{wch:18},
+      {wch:14},{wch:14},{wch:14},{wch:12},
+      {wch:12},{wch:14},
+      {wch:11},{wch:11},{wch:11},{wch:11},{wch:11},{wch:11},{wch:11},{wch:14},
+      {wch:14},{wch:14},{wch:16},{wch:16},{wch:24}
+    ];
+    XLSX.utils.book_append_sheet(wb, wsPos, 'ПОС Отчети');
+
+    /* ── Лист 2: Равнение (Zoborot) ── */
+    var sFilter2 = store
+      ? '&store_name=eq.'+encodeURIComponent(store)
+      : storeQ();
+    var qZ = 'order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter2;
+
+    sbGet('kasa_zoborot', qZ).then(function(zobData){
+      var zRows = [['Дата','Магазин',
+        'В брой BGN (EUR)','В брой EUR (EUR)','Карта EUR','Банков път EUR','Ваучери EUR',
+        'POS оборот без банков (EUR)',
+        'ФУ1 Общ','ФУ1 Сторно','ФУ1 Нето',
+        'ФУ2 Общ','ФУ2 Сторно','ФУ2 Нето',
+        'ФУ3 Общ','ФУ3 Сторно','ФУ3 Нето',
+        'Общо ФУ Нето (EUR)','Разлика (EUR)','Статус']];
+
+      if(Array.isArray(zobData)){
+        zobData.forEach(function(z){
+          var statusStr = z.status==='confirmed' ? 'Потвърдено' : 'Чернова';
+          zRows.push([
+            z.date||'',
+            z.store_name||'',
+            parseFloat(z.cash_bgn)||0,
+            parseFloat(z.cash_eur)||0,
+            parseFloat(z.card_eur)||0,
+            parseFloat(z.bank_eur)||0,
+            parseFloat(z.voucheri)||0,
+            parseFloat(z.pos_no_bank)||0,
+            parseFloat(z.fu1_gross)||0, parseFloat(z.fu1_discount)||0, parseFloat(z.fu1_net)||0,
+            parseFloat(z.fu2_gross)||0, parseFloat(z.fu2_discount)||0, parseFloat(z.fu2_net)||0,
+            parseFloat(z.fu3_gross)||0, parseFloat(z.fu3_discount)||0, parseFloat(z.fu3_net)||0,
+            parseFloat(z.fu_total_net)||0,
+            parseFloat(z.razlika)||0,
+            statusStr
+          ]);
+        });
+      }
+
+      var wsZob = XLSX.utils.aoa_to_sheet(zRows);
+      wsZob['!cols'] = [
+        {wch:12},{wch:16},
+        {wch:14},{wch:14},{wch:12},{wch:14},{wch:12},{wch:18},
+        {wch:10},{wch:12},{wch:10},
+        {wch:10},{wch:12},{wch:10},
+        {wch:10},{wch:12},{wch:10},
+        {wch:16},{wch:14},{wch:12}
+      ];
+      XLSX.utils.book_append_sheet(wb, wsZob, 'Равнение (Zoborot)');
+
+      /* ── Лист 3: Главна каса ── */
+      sbGet('kasa_glavna', 'order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter2).then(function(glData){
+        var glRows = [['Дата','Магазин',
+          'SAP Баланс (EUR)','Служебно (EUR)',
+          '500лв','200лв','100лв','50лв','20лв','10лв','5лв','2лв','1лв',
+          '0.50ст','0.20ст','0.10ст','0.05ст','0.02ст','0.01ст',
+          'Общо налични (EUR)','Разлика (EUR)','Статус']];
+
+        if(Array.isArray(glData)){
+          glData.forEach(function(g){
+            var statusStr = g.status==='confirmed' ? 'Потвърдена' : 'Чернова';
+            glRows.push([
+              g.date||'',
+              g.store_name||'',
+              parseFloat(g.sap_balance)||0,
+              parseFloat(g.slujebno)||0,
+              parseInt(g.bills_500)||0, parseInt(g.bills_200)||0,
+              parseInt(g.bills_100)||0, parseInt(g.bills_50)||0,
+              parseInt(g.bills_20)||0,  parseInt(g.bills_10)||0,
+              parseInt(g.bills_5)||0,   parseInt(g.bills_2)||0,
+              parseInt(g.bills_1)||0,
+              parseInt(g.coins_50)||0,  parseInt(g.coins_20)||0,
+              parseInt(g.coins_10)||0,  parseInt(g.coins_5)||0,
+              parseInt(g.coins_2)||0,   parseInt(g.coins_1)||0,
+              parseFloat(g.counted_cash)||0,
+              parseFloat(g.razlika)||0,
+              statusStr
+            ]);
+          });
+        }
+
+        var wsGl = XLSX.utils.aoa_to_sheet(glRows);
+        wsGl['!cols'] = [{wch:12},{wch:16},{wch:14},{wch:14},
+          {wch:7},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7},{wch:7},
+          {wch:8},{wch:8},{wch:8},{wch:8},{wch:8},{wch:8},
+          {wch:16},{wch:14},{wch:12}];
+        XLSX.utils.book_append_sheet(wb, wsGl, 'Главна каса');
+
+        /* ── Лист 4: Обобщение по магазин ── */
+        var summary = {};
+        histData.kasa.forEach(function(r){
+          var s = r.store_name||'Неизвестен';
+          if(!summary[s]) summary[s] = {store:s, posCount:0, turnover:0, cash:0, card:0, inkaso:0, counted:0, razlika:0, confirmed:0, returned:0, draft:0};
+          summary[s].posCount++;
+          summary[s].turnover += parseFloat(r.total_turnover)||0;
+          summary[s].cash     += parseFloat(r.cash_turnover)||0;
+          summary[s].card     += parseFloat(r.card_turnover)||0;
+          summary[s].inkaso   += calcInkaso ? (calcInkaso(r)||0) : 0;
+          summary[s].counted  += parseFloat(r.counted_cash)||0;
+          summary[s].razlika  += parseFloat(r.razlika)||0;
+          if(r.status==='confirmed') summary[s].confirmed++;
+          else if(r.status==='returned') summary[s].returned++;
+          else summary[s].draft++;
+        });
+
+        var sumRows = [['Магазин','ПОС Отчети','Общ оборот (EUR)','В брой (EUR)',
+          'Карта (EUR)','Инкасо (EUR)','Налични (EUR)','Разлика (EUR)',
+          'Потвърдени','Върнати','Чернови']];
+        Object.values(summary).sort(function(a,b){return a.store.localeCompare(b.store,'bg');}).forEach(function(s){
+          sumRows.push([
+            s.store,
+            s.posCount,
+            Math.round(s.turnover*100)/100,
+            Math.round(s.cash*100)/100,
+            Math.round(s.card*100)/100,
+            Math.round(s.inkaso*100)/100,
+            Math.round(s.counted*100)/100,
+            Math.round(s.razlika*100)/100,
+            s.confirmed, s.returned, s.draft
+          ]);
+        });
+        /* Общо ред */
+        var totTurn=Object.values(summary).reduce(function(s,r){return s+r.turnover;},0);
+        var totRaz=Object.values(summary).reduce(function(s,r){return s+r.razlika;},0);
+        sumRows.push(['ОБЩО','','',Math.round(totTurn*100)/100,'','','',Math.round(totRaz*100)/100,'','','']);
+
+        var wsSum = XLSX.utils.aoa_to_sheet(sumRows);
+        wsSum['!cols'] = [{wch:18},{wch:12},{wch:16},{wch:14},{wch:12},{wch:12},{wch:14},{wch:14},{wch:12},{wch:10},{wch:10}];
+        XLSX.utils.book_append_sheet(wb, wsSum, 'Обобщение');
+
+        /* ── Лист 5: Документи (линкове) ── */
+        sbGet('kasa_documents','order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter2).then(function(docsData){
+          var docRows = [['Дата','Магазин','Тип отчет','Тип документ','Файл','Качен от','Дата качване','Линк за преглед']];
+          var docTypes = {pos:'ПОС Отчет', glavna:'Главна каса', zoborot:'Равнение', other:'Друго'};
+          if(Array.isArray(docsData)){
+            docsData.forEach(function(d){
+              var signedUrl = 'https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1/object/sign/kasa-docs/' + d.file_url;
+              docRows.push([
+                d.date||'',
+                d.store_name||'',
+                docTypes[d.report_type]||d.report_type||'',
+                docTypes[d.doc_type]||d.doc_type||'',
+                d.file_name||'',
+                d.uploaded_by||'',
+                d.created_at ? d.created_at.slice(0,16).replace('T',' ') : '',
+                '⚠️ Преглед само в портала'
+              ]);
+            });
+          }
+          if(docRows.length > 1){
+            var wsDoc = XLSX.utils.aoa_to_sheet(docRows);
+            wsDoc['!cols'] = [{wch:12},{wch:16},{wch:14},{wch:14},{wch:28},{wch:18},{wch:18},{wch:28}];
+            XLSX.utils.book_append_sheet(wb, wsDoc, 'Документи');
+          }
+
+          /* Генерираме файла */
+          var fname = 'ТеМАХ_Каса_' + (store||'Всички') + '_' + from + '_' + to + '.xlsx';
+          XLSX.writeFile(wb, fname);
+          var docCount = docRows.length - 1;
+          toast('✅ Excel изтеглен!' + (docCount?' ('+docCount+' документа в лист Документи)':''));
+        }).catch(function(){
+          /* Ако документите не се заредят — пак генерираме Excel без тях */
+          var fname = 'ТеМАХ_Каса_' + (store||'Всички') + '_' + from + '_' + to + '.xlsx';
+          XLSX.writeFile(wb, fname);
+          toast('✅ Excel изтеглен!');
+        });
+      }).catch(function(){ toast('Грешка при зареждане на Главна каса','#dc2626'); });
+    }).catch(function(){ toast('Грешка при зареждане на Равнение','#dc2626'); });
+  }
+
+  /* Зареждаме SheetJS ако не е наличен */
+  if(window.XLSX){
+    doExport();
+  } else {
+    var script = document.createElement('script');
+    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.onload = doExport;
+    script.onerror = function(){ toast('Грешка при зареждане на SheetJS','#dc2626'); };
+    document.head.appendChild(script);
+  }
+}
+
+
+/* ── ПРЕГЛЕД НА ДОКУМЕНТ ── */
+function previewKasaDoc(path){
+  if(!path){toast('Липсва path','#dc2626');return;}
+  var SB = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
+  var KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
+  var encPath = path.split('/').map(function(s){return encodeURIComponent(s);}).join('/');
+  toast('⏳ Зареждане...');
+  fetch(SB+'/storage/v1/object/sign/kasa-docs/'+encPath,{
+    method:'POST',
+    headers:{
+      'Authorization':'Bearer '+KEY,
+      'Content-Type':'application/json'
+    },
+    body:JSON.stringify({expiresIn:3600})
+  }).then(function(r){return r.json();})
+  .then(function(d){
+    if(d.signedURL){
+      window.open(SB+d.signedURL,'_blank');
+    } else {
+      toast('Грешка при генериране на линк','#dc2626');
+    }
+  }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
 }
