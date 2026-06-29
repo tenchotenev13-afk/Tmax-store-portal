@@ -27,7 +27,11 @@ function getStoreInfo(name){
 }
 
 function loadTransport(){
-  var q='order=created_at.desc'+storeQ();
+  /* Вариант В: активните винаги + изпълнените/отказаните само за последните 7 дни */
+  var d7=new Date();d7.setDate(d7.getDate()-7);
+  var cutoff=d7.toISOString().slice(0,10);
+  var q='order=created_at.desc'+storeQ()+
+    '&or=(status.in.(pending,approved,postponed,overdue,today,tomorrow),and(status.in.(done,refused),delivery.gte.'+cutoff+'),and(status.in.(done,refused),created_at.gte.'+cutoff+'T00:00:00))';
   sbGet('transport_orders',q).then(function(data){
     transportOrders=Array.isArray(data)?data:[];
     transportOrders.forEach(function(o){o._status=calcStatus(o.delivery,o.status);});
