@@ -455,14 +455,31 @@ function addBlock(type){
   schedSave(); renderBulletin();
 }
 function blockPickerHtml(){
-  var types=[['text','📝','Текст','Параграф'],['alert','🚨','Алерт','Цветна кутия'],['important','⭐','Важно','→ секция Важно горе'],['list','📋','Списък','Точки с информация'],['image','📷','Снимка','JPG / PNG'],['file','📎','Файл','PDF / Word / Excel'],['divider','—','Разделител','Хоризонтална линия']];
-  var h='<div class="bov" id="bp-ov"><div class="bmod"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;"><div style="font-size:15px;font-weight:600;">Избери тип блок</div><button onclick="closeBlockPicker()" style="border:none;background:none;font-size:18px;color:#94a3b8;cursor:pointer;">✕</button></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;">';
+  var types=[
+    ['text','📝','Текст','Параграф'],
+    ['alert','🚨','Алерт','Цветна кутия'],
+    ['important','⭐','Важно','→ секция горе'],
+    ['list','📋','Списък','Точки с информация'],
+    ['image','📷','Снимка','JPG / PNG'],
+    ['file','📎','Файл','PDF / Word / Excel'],
+    ['divider','—','Разделител','Хоризонтална линия']
+  ];
+  var h='<div class="bov" id="bp-ov"><div class="bmod" style="width:520px;">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">';
+  h+='<div style="font-size:15px;font-weight:600;">Избери тип блок</div>';
+  h+='<button onclick="closeBlockPicker()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>';
+  h+='</div><div style="display:grid;grid-template-columns:1fr 1fr;gap:9px;">';
   types.forEach(function(t){
-    h+='<div data-type="'+t[0]+'" onclick="addBlock(this.dataset.type)" style="border:1px solid #e2e8f0;border-radius:9px;padding:12px 14px;cursor:pointer;"><div style="font-size:20px;margin-bottom:4px;">'+t[1]+'</div><div style="font-size:13px;font-weight:600;">'+t[2]+'</div><div style="font-size:11px;color:#64748b;">'+t[3]+'</div></div>';
+    h+='<button type="button" data-btype="'+t[0]+'" onclick="addBlock(this.dataset.btype)" style="border:1px solid #e2e8f0;border-radius:9px;padding:12px 14px;cursor:pointer;background:#fff;text-align:left;font-family:inherit;transition:border-color .15s;">';
+    h+='<div style="font-size:20px;margin-bottom:4px;">'+t[1]+'</div>';
+    h+='<div style="font-size:13px;font-weight:600;color:#0f172a;">'+t[2]+'</div>';
+    h+='<div style="font-size:11px;color:#64748b;">'+t[3]+'</div>';
+    h+='</button>';
   });
   h+='</div></div></div>';
   return h;
 }
+
 
 /* FILE UPLOAD */
 function bulUploadImg(input){
