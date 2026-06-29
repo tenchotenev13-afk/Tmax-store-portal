@@ -558,19 +558,7 @@ function loadTabOrder(){
 <script src="email.js"></script>
 <script src="notifications.js"></script>
 <script>
-/* ── PWA Service Worker — само на GitHub Pages ── */
-if ('serviceWorker' in navigator &&
-    window.location.hostname === 'tenchotenev13-afk.github.io') {
-  window.addEventListener('load', function() {
-    navigator.serviceWorker.register('/Tmax-store-portal/sw.js', {
-      scope: '/Tmax-store-portal/'
-    }).then(function(reg) {
-      console.log('SW регистриран:', reg.scope);
-    }).catch(function(err) {
-      console.log('SW грешка:', err);
-    });
-  });
-}
+/* ── PWA — manifest само, без отделен SW (OneSignal вече управлява SW) ── */
 </script>
 </body>
 </html>
