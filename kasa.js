@@ -120,6 +120,7 @@ function renderKasa(){
   var histRep =kasaReports.filter(function(r){return r.date!==todayStr;});
   var canConfirm=['manager','admin'].indexOf(currentUser.role)>=0;
   var canUnlock=['admin','accounting'].indexOf(currentUser.role)>=0;
+  var canDelete=currentUser.role==='admin';
   var isCustomDate=!!kasaSelectedDate;
 
   var html='<div class="page">'+
@@ -164,6 +165,7 @@ function renderKasa(){
           (draft?'<button onclick="editKasaReport(\''+r.id+'\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Редактирай</button>':'')+
           (draft&&canConfirm?'<button onclick="confirmKasaReport(\''+r.id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Потвърди</button>':'')+
           (!draft&&canUnlock?'<button onclick="unlockKasaReport(\''+r.id+'\')" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🔓 Разключи</button>':'')+
+          (canDelete?'<button onclick="deleteKasaReport(\''+r.id+'\')" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🗑</button>':'')+
         '</div></td></tr>';
     });
     html+='<tr style="background:#f8fafc;font-weight:700;">'+
@@ -184,7 +186,7 @@ function renderKasa(){
   if(histRep.length){
     html+='<div class="card"><div class="card-title">📜 История</div>'+
       '<div class="tbl-wrap"><table>'+
-      '<thead><tr><th>Дата</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th></tr></thead><tbody>';
+      '<thead><tr><th>Дата</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th>'+(canDelete?'<th></th>':'')+'</tr></thead><tbody>';
     histRep.slice(0,40).forEach(function(r){
       html+='<tr>'+
         '<td>'+fmtDate(r.date)+'</td>'+
@@ -194,7 +196,9 @@ function renderKasa(){
         '<td>'+fmtMoney(calcInkaso(r))+'</td>'+
         '<td>'+fmtMoney(r.counted_cash)+'</td>'+
         '<td>'+moneyBadge(r.razlika)+'</td>'+
-        '<td>'+(r.status==='confirmed'?'✅':'✏️')+'</td></tr>';
+        '<td>'+(r.status==='confirmed'?'✅':'✏️')+'</td>'+
+        (canDelete?'<td><button onclick="deleteKasaReport(\''+r.id+'\')" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🗑</button></td>':'')+
+        '</tr>';
     });
     html+='</tbody></table></div></div>';
   }
@@ -573,10 +577,11 @@ function renderGlavna(){
           '<input type="number" step="0.01" class="fi" id="gl-sap" value="'+(g.sap_balance||0)+'" oninput="glavnaLiveCalc()" style="background:#fffbeb;">':
           '<div class="fi" style="background:#f9f8f6;">'+(g.sap_balance||0)+'</div>')+
       '</div>'+
-      '<div style="display:flex;flex-direction:column;justify-content:flex-end;">'+
+      '<div style="display:flex;flex-direction:column;justify-content:flex-end;gap:6px;">'+
         (canInput?
           '<button onclick="saveGlavna()" class="btn btn-green" style="margin-top:20px;">💾 Запази</button>':
           '<span style="margin-top:20px;font-size:12px;color:#16a34a;font-weight:600;">✅ Потвърдена</span>')+
+        (currentUser.role==='admin'&&g.id?'<button onclick="deleteGlavna(\''+g.id+'\')" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:6px;padding:6px;font-size:11px;cursor:pointer;">🗑 Изтрий тестов запис</button>':'')+
       '</div>'+
     '</div></div>'+
 
@@ -904,6 +909,36 @@ function unlockKasaReport(id){
   });
 }
 
+/* ─── ИЗТРИВАНЕ (само admin) ─────────────────────────────────── */
+function deleteKasaReport(id){
+  if(currentUser.role!=='admin'){toast('Нямаш права за изтриване','#dc2626');return;}
+  if(!confirm('Изтрий ПОС отчета? Това действие е необратимо!'))return;
+  sbDelete('kasa_reports','id=eq.'+id).then(function(){
+    toast('🗑 Отчетът е изтрит');
+    loadKasa();
+  });
+}
+
+function deleteGlavna(id){
+  if(currentUser.role!=='admin'){toast('Нямаш права за изтриване','#dc2626');return;}
+  if(!confirm('Изтрий Главна каса за тази дата? Това действие е необратимо!'))return;
+  sbDelete('kasa_glavna','id=eq.'+id).then(function(){
+    toast('🗑 Главна каса е изтрита');
+    kasaGlavna=null;
+    loadKasa();
+  });
+}
+
+function deleteZoborot(id){
+  if(currentUser.role!=='admin'){toast('Нямаш права за изтриване','#dc2626');return;}
+  if(!confirm('Изтрий Равнението за тази дата? Това действие е необратимо!'))return;
+  sbDelete('kasa_zoborot','id=eq.'+id).then(function(){
+    toast('🗑 Равнението е изтрито');
+    zoborotData=null;
+    renderZoborot();
+  });
+}
+
 /* ═══════════════════════════════════════════════════════════════
    РАВНЕНИЕ НА ОБОРОТА (Zoborot)
    ПОС данни от системата vs Фискални устройства (ФУ)
@@ -955,6 +990,7 @@ function renderZoborot(){
         (isDraft&&canConfirm&&z.id?'<button onclick="confirmZoborot()" class="btn" style="background:#2563eb;color:#fff;">✅ Потвърди</button>':'')+
         (!isDraft&&canConfirm?'<button onclick="unlockZoborot()" class="btn" style="background:#fffbeb;color:#d97706;border:1px solid #d97706;">🔓 Разключи</button>':'')+
         '<button onclick="printZoborot()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer;">🖨 Разпечатай</button>'+
+        (currentUser.role==='admin'&&z.id?'<button onclick="deleteZoborot(\''+z.id+'\')" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer;">🗑 Изтрий</button>':'')+
       '</div>'+
     '</div>'+
 
