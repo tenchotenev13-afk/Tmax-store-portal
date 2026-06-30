@@ -150,9 +150,9 @@ function renderTransit(){
     h+='<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📦</div><div style="margin-top:8px;">Няма записи.</div></div>';
   }else{
     h+='<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
-    h+='<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1000px;">';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:800px;">';
     h+='<thead><tr style="background:#f8fafc;">';
-    ['Посока','Магазин','Доставчик/Склад','Документ','Позиция','Дата','Материал','Описание','Кол.','МЕ','Остатък','Дата трансфер','Статус',''].forEach(function(c){
+    ['Посока','Магазин','Доставчик','Документ','Дата','Описание','Кол./МЕ','Остатък','Трансфер','Статус',''].forEach(function(c){
       h+='<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
     });
     h+='</tr></thead><tbody>';
@@ -171,14 +171,12 @@ function renderTransit(){
       h+='</td>';
       h+=
         '<td style="padding:7px 10px;font-weight:500;white-space:nowrap;">'+esc(r.store_name||'')+'</td>'+
-        '<td style="padding:7px 10px;font-size:11px;color:#64748b;max-width:140px;">'+esc(r.supplier||'')+'</td>'+
-        '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;white-space:nowrap;">'+esc(r.purchase_doc||'')+'</td>'+
-        '<td style="padding:7px 10px;text-align:center;color:#94a3b8;">'+(r.position||'')+'</td>'+
+        '<td style="padding:7px 10px;font-size:11px;color:#64748b;max-width:130px;">'+
+        esc((r.supplier||'').replace(/^\d+\s+\d*\s*/,'').replace(/^\d+\s*/,'').replace(/^ТМ\s+/,''))+'</td>'+
+        '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;white-space:nowrap;">'+esc(r.purchase_doc||'')+'<div style="font-size:10px;color:#94a3b8;">Поз. '+(r.position||'—')+'</div></td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;white-space:nowrap;">'+fmtDate(r.doc_date)+'</td>'+
-        '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.material_code||'')+'</td>'+
-        '<td style="padding:7px 10px;max-width:200px;">'+esc(r.material_name||'')+'</td>'+
-        '<td style="padding:7px 10px;text-align:right;">'+(r.ordered_qty||'')+'</td>'+
-        '<td style="padding:7px 10px;color:#94a3b8;">'+esc(r.unit||'')+'</td>'+
+        '<td style="padding:7px 10px;max-width:220px;"><div style="font-size:11px;font-weight:500;">'+esc(r.material_name||'')+'</div><div style="font-size:10px;color:#94a3b8;">'+esc(r.material_code||'')+'</div></td>'+
+        '<td style="padding:7px 10px;text-align:right;white-space:nowrap;">'+(r.ordered_qty||'')+'<span style="font-size:10px;color:#94a3b8;margin-left:2px;">'+esc(r.unit||'')+'</span></td>'+
         '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+(r.remaining_qty||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.transfer_date)+'</td>'+
         '<td style="padding:7px 10px;white-space:nowrap;">'+
