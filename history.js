@@ -5,11 +5,22 @@
 var histData   = { transport:[], client:[], kasa:[] };
 var histFilter = { from:'', to:'', store:'', type:'all' };
 var histStores = [];
+var _histPoll  = null;
+
+/* ── АВТОМАТИЧНО ОПРЕСНЯВАНЕ на 60 сек, само докато История е активен таб ── */
+function startHistoryPolling(){
+  if(_histPoll) clearInterval(_histPoll);
+  _histPoll = setInterval(function(){
+    if(window._currentModule!=='history'){ clearInterval(_histPoll); _histPoll=null; return; }
+    if(histFilter.from && histFilter.to) runHistorySearch(true);
+  }, 60000);
+}
 
 /* ─── LOAD ──────────────────────────────────────────────────── */
 function loadHistory(){
   renderHistoryShell();
   loadHistoryStores();
+  startHistoryPolling();
   setTimeout(function(){
     var dw=document.getElementById('daily-overview');
     if(dw&&typeof loadDailyOverview==='function'){
@@ -32,15 +43,15 @@ function loadHistoryStores(){
   }).catch(function(){});
 }
 
-function runHistorySearch(){
+function runHistorySearch(silent){
   var from=document.getElementById('h-from').value;
   var to  =document.getElementById('h-to').value;
   var store=document.getElementById('h-store').value;
   var type =document.getElementById('h-type').value;
   histFilter={from:from,to:to,store:store,type:type};
-  if(!from||!to){toast('Избери период от — до','#dc2626');return;}
+  if(!from||!to){if(!silent)toast('Избери период от — до','#dc2626');return;}
 
-  document.getElementById('h-results').innerHTML=
+  if(!silent) document.getElementById('h-results').innerHTML=
     '<div style="text-align:center;padding:30px;color:#94a3b8;">⏳ Зареждане...</div>';
 
   var promises=[];

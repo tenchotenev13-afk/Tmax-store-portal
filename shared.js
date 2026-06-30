@@ -105,7 +105,23 @@ function renderMetrics(){
     return '<div class="metric"><div class="metric-val" style="color:'+colors[i]+';">'+cnt+'</div><div class="metric-lbl">'+labels[i]+'</div></div>';
   }).join('');
 }
-function loadAll(){loadTransport();loadClientOrders();loadDocs();}
+function loadAll(){
+  loadTransport();loadClientOrders();loadDocs();
+  /* Презареди и текущо отворения таб, ако не е сред горните */
+  var m=window._currentModule;
+  if(m && ['transport','client','docs'].indexOf(m)<0){
+    if(m==='admin')loadAdmin();
+    else if(m==='bulletin')loadBulletin();
+    else if(m==='kasa')loadKasa();
+    else if(m==='history')loadHistory();
+    else if(m==='contacts')loadContacts();
+    else if(m==='transit')loadTransit();
+    else if(m==='calendar')loadCalendar();
+    else if(m==='stock-returns')loadStockReturns();
+    else if(m==='stock-diff')loadStockDiff();
+  }
+  toast('↻ Данните са обновени');
+}
 
 /* AUTH — без session restore */
 /* ── SESSION PERSISTENCE (8 часа) ─────────────────── */
@@ -245,6 +261,7 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
+  window._currentModule = mod;
   ['transport','client','bulletin','docs','kasa','history','admin','print','contacts','transit','calendar','stock-returns','stock-diff'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
