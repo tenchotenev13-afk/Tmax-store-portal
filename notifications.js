@@ -69,6 +69,8 @@ function playSound(){
     });
   }catch(e){}
 }
+var _seenIds=null; /* Set от id-та на вече видени заявки — избягва фалшиви звуци при простo презареждане */
+
 function checkNewOrders(){
   if(!currentUser)return;
   var stores=assignedStores();
@@ -85,16 +87,31 @@ function checkNewOrders(){
       cq+='&or=('+orP+')';
     }
   }
-  Promise.all([sbGet('transport_orders',tq),sbGet('client_orders',cq)]).then(function(r){
-    var nt=Array.isArray(r[0])?r[0].length:0;
-    var nc=Array.isArray(r[1])?r[1].length:0;
-    if((_lastT>0&&nt>_lastT)||(_lastC>0&&nc>_lastC)){playSound();toast('🔔 Нова заявка е постъпила!','#2563eb');}
-    if(nt!==_lastT||nc!==_lastC){_lastT=nt;_lastC=nc;loadAll();}
+  Promise.all([sbGet('transport_orders',tq+'&select=id'),sbGet('client_orders',cq+'&select=id')]).then(function(r){
+    var allIds=[];
+    if(Array.isArray(r[0])) r[0].forEach(function(o){allIds.push('t_'+o.id);});
+    if(Array.isArray(r[1])) r[1].forEach(function(o){allIds.push('c_'+o.id);});
+    var currentSet={}; allIds.forEach(function(id){currentSet[id]=1;});
+
+    if(_seenIds===null){
+      /* Първо извикване — само записваме базовото състояние, без звук */
+      _seenIds=currentSet;
+      return;
+    }
+
+    /* Намираме реално НОВИ id-та (не са били в предишния snapshot) */
+    var newOnes=allIds.filter(function(id){return !_seenIds[id];});
+    if(newOnes.length>0){
+      playSound();
+      toast('🔔 '+(newOnes.length===1?'Нова заявка е постъпила!':newOnes.length+' нови заявки!'),'#2563eb');
+      loadAll();
+    }
+    _seenIds=currentSet;
   }).catch(function(){});
 }
 function startPolling(){
   if(_poll)clearInterval(_poll);
-  _lastT=transportOrders.length;_lastC=clientOrders.length;
+  _seenIds=null; /* нулираме при всеки нов старт, за да хванем правилния базов snapshot */
   _poll=setInterval(checkNewOrders,30000);
 }
 
