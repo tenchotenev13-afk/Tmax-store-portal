@@ -3,6 +3,12 @@
 function loadAdmin(){
   loadStoresAdmin();
   loadUsersAdmin();
+  /* Backup секция — само за admin */
+  if(currentUser && currentUser.role==='admin'){
+    var backupContainer=document.getElementById('backup-admin-section');
+    if(backupContainer) backupContainer.innerHTML=renderBackupSection();
+    setTimeout(loadBackupAdmin, 500);
+  }
 }
 
 /* ══════════════════════════════════════════
@@ -243,4 +249,164 @@ function submitUserModal(){
     closeUserModal();
     loadUsersAdmin();
   });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BACKUP СИСТЕМА — Admin панел
+   Добавя се в admin.js
+═══════════════════════════════════════════════════════════════ */
+
+function loadBackupAdmin(){
+  sbGet('backup_snapshots','order=created_at.desc&limit=30').then(function(data){
+    var list=Array.isArray(data)?data:[];
+    var body=document.getElementById('backup-body');
+    if(!body)return;
+
+    if(!list.length){
+      body.innerHTML='<tr><td colspan="6" style="text-align:center;padding:20px;color:#94a3b8;">Няма backups.</td></tr>';
+      return;
+    }
+
+    body.innerHTML=list.map(function(b){
+      var typeBg={daily:'#dbeafe',manual:'#dcfce7',initial:'#f3e8ff',weekly:'#fef9c3'};
+      var d=new Date(b.created_at);
+      var timeStr=d.toLocaleDateString('bg-BG')+' '+d.toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit'});
+      return '<tr>'+
+        '<td style="padding:8px 12px;font-family:monospace;font-size:11px;">'+timeStr+'</td>'+
+        '<td style="padding:8px 12px;"><span style="background:'+(typeBg[b.snapshot_type]||'#f3f4f6')+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+esc(b.snapshot_type||'')+'</span></td>'+
+        '<td style="padding:8px 12px;text-align:right;font-family:monospace;">'+(b.total_rows||0)+'</td>'+
+        '<td style="padding:8px 12px;font-size:11px;color:#64748b;">'+esc(b.created_by||'system')+'</td>'+
+        '<td style="padding:8px 12px;">'+
+          '<button onclick="downloadBackup(\''+b.id+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;">📥 Изтегли Excel</button>'+
+        '</td>'+
+      '</tr>';
+    }).join('');
+  });
+
+  /* Последен backup лог */
+  sbGet('backup_log','order=created_at.desc&limit=5').then(function(data){
+    var el=document.getElementById('backup-last-log');
+    if(!el||!Array.isArray(data)||!data.length)return;
+    var last=data[0];
+    var d=new Date(last.created_at);
+    el.innerHTML='Последен: <b>'+d.toLocaleDateString('bg-BG')+' '+d.toLocaleTimeString('bg-BG',{hour:'2-digit',minute:'2-digit'})+'</b> — '+esc(last.notes||'')+'<span style="color:'+(last.status==='success'?'#16a34a':'#dc2626')+';">  '+(last.status==='success'?'✅ Успешен':'❌ Грешка')+'</span>';
+  });
+}
+
+function triggerManualBackup(){
+  if(currentUser.role!=='admin'){toast('Само за admin','#dc2626');return;}
+  toast('⏳ Стартиране на backup...');
+  /* Извикваме Supabase RPC функцията */
+  fetch('https://xiwkdiqqplgdcrkewgtv.supabase.co/rest/v1/rpc/perform_daily_backup',{
+    method:'POST',
+    headers:{
+      'apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
+      'Authorization':'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
+      'Content-Type':'application/json'
+    },
+    body:JSON.stringify({p_type:'manual',p_by:currentUser.display_name||currentUser.email})
+  }).then(function(r){return r.json();})
+  .then(function(id){
+    if(id){
+      toast('✅ Backup завършен! ID: '+String(id).slice(0,8)+'...');
+      setTimeout(loadBackupAdmin,1000);
+    }else{
+      toast('Грешка при backup','#dc2626');
+    }
+  }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
+}
+
+function downloadBackup(id){
+  if(!window.XLSX){
+    var s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload=function(){downloadBackup(id);};
+    document.head.appendChild(s);return;
+  }
+  toast('⏳ Подготвяне на Excel файла...');
+  sbGet('backup_snapshots','id=eq.'+id).then(function(data){
+    if(!Array.isArray(data)||!data.length){toast('Backup не е намерен','#dc2626');return;}
+    var b=data[0];
+    var wb=window.XLSX.utils.book_new();
+    var d=new Date(b.created_at);
+    var dateStr=d.toLocaleDateString('bg-BG').replace(/\./g,'-');
+
+    /* Функция за конвертиране на JSONB масив в worksheet */
+    function jsonToSheet(jsonData,sheetName){
+      if(!jsonData||!jsonData.length)return;
+      var rows=[];
+      /* Headers от първия обект */
+      var keys=Object.keys(jsonData[0]);
+      rows.push(keys);
+      jsonData.forEach(function(obj){
+        rows.push(keys.map(function(k){
+          var v=obj[k];
+          if(v===null||v===undefined)return '';
+          if(typeof v==='object')return JSON.stringify(v);
+          return v;
+        }));
+      });
+      var ws=window.XLSX.utils.aoa_to_sheet(rows);
+      window.XLSX.utils.book_append_sheet(wb,ws,sheetName);
+    }
+
+    /* Добавяме всички таблици като отделни листа */
+    jsonToSheet(b.users_data,'Потребители');
+    jsonToSheet(b.stores_data,'Магазини');
+    jsonToSheet(b.kasa_reports_data,'ПОС Отчети');
+    jsonToSheet(b.kasa_glavna_data,'Главна каса');
+    jsonToSheet(b.kasa_zoborot_data,'Равнение');
+    jsonToSheet(b.transport_data,'Транспорт');
+    jsonToSheet(b.client_orders_data,'Клиентски заявки');
+    jsonToSheet(b.goods_transit_data,'Стока на път');
+    jsonToSheet(b.contacts_data,'Контакти');
+    jsonToSheet(b.bulletins_data,'Бюлетини');
+
+    /* Мета лист */
+    var metaRows=[
+      ['ТеМАХ Платформа — Backup'],
+      ['Дата на backup:',dateStr],
+      ['Тип:',b.snapshot_type],
+      ['Общо записи:',b.total_rows],
+      ['Създаден от:',b.created_by],
+      ['Backup ID:',b.id],
+    ];
+    var wsMeta=window.XLSX.utils.aoa_to_sheet(metaRows);
+    window.XLSX.utils.book_append_sheet(wb,wsMeta,'INFO');
+
+    var fname='ТеМАХ_Backup_'+dateStr+'_'+b.snapshot_type+'.xlsx';
+    window.XLSX.writeFile(wb,fname);
+    toast('✅ Backup изтеглен! ('+b.total_rows+' записа, '+wb.SheetNames.length+' листа)');
+  });
+}
+
+function renderBackupSection(){
+  return '<div class="card" style="margin-top:20px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
+      '<div>'+
+        '<div class="card-title" style="margin:0;">🔐 Backup система</div>'+
+        '<div id="backup-last-log" style="font-size:12px;color:#64748b;margin-top:4px;">Зареждане...</div>'+
+      '</div>'+
+      '<div style="display:flex;gap:8px;">'+
+        '<button onclick="triggerManualBackup()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;">🔄 Ръчен Backup сега</button>'+
+      '</div>'+
+    '</div>'+
+    '<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#14532d;">'+
+      '✅ Автоматичен backup: <b>всяка нощ в 02:00 ч.</b> &nbsp;·&nbsp; '+
+      'Съхранение: <b>последните 90 дни</b> &nbsp;·&nbsp; '+
+      'Формат: <b>Excel с отделен лист за всяка таблица</b>'+
+    '</div>'+
+    '<div class="tbl-wrap"><table style="width:100%;">'+
+      '<thead><tr>'+
+        '<th>Дата и час</th>'+
+        '<th>Тип</th>'+
+        '<th style="text-align:right;">Записи</th>'+
+        '<th>Създаден от</th>'+
+        '<th>Изтегли</th>'+
+      '</tr></thead>'+
+      '<tbody id="backup-body">'+
+        '<tr><td colspan="5" style="text-align:center;padding:20px;color:#94a3b8;">⏳ Зареждане...</td></tr>'+
+      '</tbody>'+
+    '</table></div>'+
+  '</div>';
 }
