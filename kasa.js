@@ -70,6 +70,7 @@ function loadKasa(){
     kasaReports=Array.isArray(data)?data:[];
     if(kasaView==='pos') renderKasa();
     else if(kasaView==='glavna') renderGlavna();
+    checkReturnedReports();
   }).catch(function(){renderKasa();});
   /* Главна каса за избраната дата */
   var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
@@ -78,6 +79,19 @@ function loadKasa(){
     if(kasaView==='glavna') renderGlavna();
   }).catch(function(){});
   if(kasaView==='zoborot') loadZoborot();
+}
+
+/* Винаги проверява за наскоро върнати отчети при отваряне/обновяване на Каса —
+   не разчита само на еднократния банер при логин */
+function checkReturnedReports(){
+  if(!currentUser || isGlobal()) return; /* само за магазинни роли */
+  var returned = kasaReports.filter(function(r){ return r.status==='returned'; });
+  if(!returned.length) return;
+  var seenKey = 'kasa_returned_seen_' + returned.map(function(r){return r.id;}).sort().join('_');
+  try{ if(localStorage.getItem(seenKey)) return; }catch(e){}
+  var r0 = returned[0];
+  toast('↩ Касов отчет ПОС '+(r0.pos_number||'')+' е върнат за корекция! Причина: '+(r0.return_reason||''), '#dc2626');
+  try{ localStorage.setItem(seenKey, '1'); }catch(e){}
 }
 
 /* ─── TABS ──────────────────────────────────────────────────── */
@@ -148,8 +162,9 @@ function renderKasa(){
       '<thead><tr><th>ПОС</th><th>Касиер</th><th>Оборот</th><th>В брой</th><th>Карти</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th><th></th></tr></thead><tbody>';
     todayRep.forEach(function(r){
       var draft=r.status==='draft';
+      var returned=r.status==='returned';
       var inkaso=calcInkaso(r);
-      html+='<tr>'+
+      html+='<tr'+(returned?' style="background:#fff5f5;"':'')+'>'+
         '<td><b>ПОС '+esc(String(r.pos_number||''))+'</b><br><small style="color:#94a3b8;">Каса '+esc(String(r.kasa_number||''))+'</small></td>'+
         '<td>'+esc(r.cashier_name||'')+'</td>'+
         '<td>'+fmtMoney(r.total_turnover)+'</td>'+
@@ -158,13 +173,16 @@ function renderKasa(){
         '<td>'+fmtMoney(inkaso)+'</td>'+
         '<td>'+fmtMoney(r.counted_cash)+'</td>'+
         '<td>'+moneyBadge(r.razlika)+'</td>'+
-        '<td>'+(draft?
+        '<td>'+(returned?
+          '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">↩ Върнат за корекция</span>':
+          draft?
           '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✏️ Чернова</span>':
           '<span style="background:#dcfce7;color:#14532d;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ Потвърден</span>')+'</td>'+
-        '<td><div style="display:flex;gap:4px;">'+
-          (draft?'<button onclick="editKasaReport(\''+r.id+'\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Редактирай</button>':'')+
-          (draft&&canConfirm?'<button onclick="confirmKasaReport(\''+r.id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Потвърди</button>':'')+
-          (!draft&&canUnlock?'<button onclick="unlockKasaReport(\''+r.id+'\')" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🔓 Разключи</button>':'')+
+        '<td><div style="display:flex;gap:4px;flex-wrap:wrap;">'+
+          (returned?'<div style="font-size:10px;color:#991b1b;width:100%;margin-bottom:2px;">'+esc(r.return_reason||'')+'</div>':'')+
+          ((draft||returned)?'<button onclick="editKasaReport(\''+r.id+'\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Редактирай</button>':'')+
+          ((draft||returned)&&canConfirm?'<button onclick="confirmKasaReport(\''+r.id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Потвърди</button>':'')+
+          (!draft&&!returned&&canUnlock?'<button onclick="unlockKasaReport(\''+r.id+'\')" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🔓 Разключи</button>':'')+
           (canDelete?'<button onclick="deleteKasaReport(\''+r.id+'\')" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🗑</button>':'')+
         '</div></td></tr>';
     });
@@ -196,7 +214,7 @@ function renderKasa(){
         '<td>'+fmtMoney(calcInkaso(r))+'</td>'+
         '<td>'+fmtMoney(r.counted_cash)+'</td>'+
         '<td>'+moneyBadge(r.razlika)+'</td>'+
-        '<td>'+(r.status==='confirmed'?'✅':'✏️')+'</td>'+
+        '<td>'+(r.status==='confirmed'?'✅':r.status==='returned'?'↩':'✏️')+'</td>'+
         (canDelete?'<td><button onclick="deleteKasaReport(\''+r.id+'\')" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🗑</button></td>':'')+
         '</tr>';
     });

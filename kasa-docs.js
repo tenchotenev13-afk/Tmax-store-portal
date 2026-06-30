@@ -143,8 +143,14 @@ function markReady() {
   var todayStr = (typeof kasaActiveDate==='function') ? kasaActiveDate() : today();
   var reps = kasaReports.filter(function(r) { return r.date === todayStr; });
   if (!reps.length) { toast('Няма касови отчети за днес','#dc2626'); return; }
-  var hasDraft = reps.some(function(r) { return r.status === 'draft'; });
-  if (hasDraft && !confirm('Има непотвърдени отчети. Продължи ли?')) return;
+  var draftReps = reps.filter(function(r) { return r.status === 'draft'; });
+  if (draftReps.length) {
+    var posLabels = draftReps.map(function(r){
+      return 'ПОС '+(r.pos_number||'?')+(r.cashier_name?' ('+r.cashier_name+')':'');
+    }).join(', ');
+    var word = draftReps.length===1?'е непотвърден':'са непотвърдени';
+    if (!confirm('Внимание: '+posLabels+' '+word+'.\n\nПродължи ли въпреки това?')) return;
+  }
   var by = currentUser.display_name||currentUser.email;
   var now = new Date().toISOString();
   Promise.all(reps.map(function(r) {
@@ -460,11 +466,12 @@ function openKasaDetail(storeName, date) {
     '</div>' +
     '<script>' +
     'function openKasaDocFromDetail(path){' +
-      'fetch("' + SB_STORAGE + '/object/sign/' + BUCKET + '/" + encodeURIComponent(path), {' +
+      'var encPath=path.split("/").map(function(s){return encodeURIComponent(s);}).join("/");' +
+      'fetch("' + SB_STORAGE + '/object/sign/' + BUCKET + '/"+encPath, {' +
         'method:"POST",' +
         'headers:{"Authorization":"Bearer ' + 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA' + '","Content-Type":"application/json"},' +
         'body:JSON.stringify({expiresIn:3600})' +
-      '}).then(function(r){return r.json();}).then(function(d){if(d.signedURL)window.open("' + 'https://xiwkdiqqplgdcrkewgtv.supabase.co' + '"+d.signedURL,"_blank");});' +
+      '}).then(function(r){return r.json();}).then(function(d){if(d.signedURL)window.open("' + 'https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1' + '"+d.signedURL,"_blank");else alert("Грешка: "+JSON.stringify(d));});' +
     '}' +
     'function returnForRevision(store, date){' +
       'var reason=prompt("Причина за връщане за корекция:");' +
