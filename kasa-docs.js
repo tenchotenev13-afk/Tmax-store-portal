@@ -50,7 +50,7 @@ function getSignedUrl(path, onUrl) {
     },
     body: JSON.stringify({ expiresIn: 3600 })
   }).then(function(r) { return r.json(); })
-  .then(function(d) { onUrl(d.signedURL ? 'https://xiwkdiqqplgdcrkewgtv.supabase.co'+d.signedURL : null); })
+  .then(function(d) { onUrl(d.signedURL ? 'https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1'+d.signedURL : null); })
   .catch(function() { onUrl(null); });
 }
 
