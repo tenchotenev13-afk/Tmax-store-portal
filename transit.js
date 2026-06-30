@@ -84,7 +84,10 @@ function renderTransit() {
   /* Заглавие */
   h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">';
   h += '<div style="font-size:20px;font-weight:600;">📦 Стока на път</div>';
-  if (canAdd) h += '<button onclick="openTransitAdd()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави ред</button>';
+  if (canAdd) h += '<div style="display:flex;gap:8px;">'+
+    '<button onclick="openTransitImportModal()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📥 Импорт Excel</button>'+
+    '<button onclick="openTransitAdd()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави ред</button>'+
+    '</div>';
   h += '</div>';
 
   /* Карти */
@@ -354,4 +357,251 @@ function tSetTransferDate(id) {
     if(!r.ok){toast('Грешка','#dc2626');return;}
     toast('✅ Датата е записана!'); loadTransit();
   });
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ИМПОРТ ОТ SAP EXCEL — "Стока на път"
+   Видимост: само admin / accounting / logistics могат да импортират
+══════════════════════════════════════════════════════════════ */
+
+var PLANT_TO_STORE = {
+  '5502':'Севлиево', '5503':'Враца', '5507':'Монтана', '5508':'Кърджали',
+  '5512':'Търговище', '5513':'Сливен', '5514':'Шумен', '5515':'Габрово',
+  '5516':'Добрич', '5519':'Гоце Делчев', '5520':'Силистра', '5521':'Раднево',
+  '5522':'Дупница', '5523':'Петрич', '5524':'Пирдоп', '5525':'Троян',
+  '5526':'Карлово', '5527':'Козлодуй'
+};
+
+function canImportTransit(){
+  return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role)>=0;
+}
+
+function openTransitImportModal(){
+  if(!canImportTransit()){toast('Нямаш права за импорт','#dc2626');return;}
+  var input=document.createElement('input');
+  input.type='file';
+  input.accept='.xlsx,.xls';
+  input.onchange=function(e){
+    var file=e.target.files[0];
+    if(!file)return;
+    handleTransitExcelFile(file);
+  };
+  input.click();
+}
+
+function handleTransitExcelFile(file){
+  toast('⏳ Зареждане на файла...');
+  function doImport(){
+    var reader=new FileReader();
+    reader.onload=function(e){
+      try{
+        var data=new Uint8Array(e.target.result);
+        var workbook=window.XLSX.read(data,{type:'array',cellDates:true});
+        var sheetName=workbook.SheetNames[0];
+        var sheet=workbook.Sheets[sheetName];
+        var rows=window.XLSX.utils.sheet_to_json(sheet,{header:1,raw:false,dateNF:'yyyy-mm-dd'});
+        parseTransitRows(rows);
+      }catch(err){
+        toast('Грешка при четене на файла: '+err.message,'#dc2626');
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+  if(window.XLSX){ doImport(); }
+  else{
+    var s=document.createElement('script');
+    s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.onload=doImport;
+    s.onerror=function(){toast('Грешка при зареждане на Excel библиотека','#dc2626');};
+    document.head.appendChild(s);
+  }
+}
+
+function parseExcelDate(val){
+  if(!val)return null;
+  if(val instanceof Date) return val.toISOString().slice(0,10);
+  var s=String(val).trim();
+  /* Формат DD.M.YYYY или D.M.YYYY */
+  var m=s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
+  if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+  /* Вече ISO формат */
+  var m2=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if(m2) return m2[0];
+  return null;
+}
+
+function parseExcelNum(val){
+  if(val===null||val===undefined||val==='')return null;
+  var s=String(val).trim().replace(',', '.');
+  var n=parseFloat(s);
+  return isNaN(n)?null:n;
+}
+
+var _transitImportRows = [];
+
+function parseTransitRows(rows){
+  if(!rows||rows.length<2){toast('Файлът е празен или невалиден','#dc2626');return;}
+
+  /* Очакван формат (13 колони, header на ред 1):
+     Завод, Доставчик/доставящ завод, Документ за покупка, Позиция,
+     Дата на документ, Материал, Кратък текст, Количество поръчка,
+     МЕ поръчка, Все още недоставено, коментар, дата на трансфер, доп. коментар */
+
+  var parsed = rows.slice(1).map(function(row){
+    var plant = String(row[0]||'').trim();
+    var store = PLANT_TO_STORE[plant] || null;
+    return {
+      plant: plant,
+      store_name: store,
+      supplier: String(row[1]||'').trim(),
+      purchase_doc: String(row[2]||'').trim(),
+      position: parseInt(row[3])||null,
+      doc_date: parseExcelDate(row[4]),
+      material_code: String(row[5]||'').trim(),
+      material_name: String(row[6]||'').trim(),
+      ordered_qty: parseExcelNum(row[7]),
+      unit: String(row[8]||'').trim(),
+      remaining_qty: parseExcelNum(row[9]),
+      comment: String(row[10]||'').trim(),
+      transfer_date: parseExcelDate(row[11]),
+      extra_comment: String(row[12]||'').trim()
+    };
+  }).filter(function(r){ return r.material_code; });
+
+  _transitImportRows = parsed;
+
+  /* Групираме по завод за да покажем mapping екран */
+  var byPlant = {};
+  parsed.forEach(function(r){
+    if(!byPlant[r.plant]) byPlant[r.plant] = {plant:r.plant, store:r.store_name, count:0};
+    byPlant[r.plant].count++;
+  });
+
+  renderTransitImportPreview(byPlant, parsed.length);
+}
+
+function renderTransitImportPreview(byPlant, totalRows){
+  var unmapped = Object.values(byPlant).filter(function(p){ return !p.store; });
+  var mapped   = Object.values(byPlant).filter(function(p){ return p.store; });
+
+  var h = '<div class="bov open" id="transit-import-ov" onclick="if(event.target===this)closeTransitImport()">'+
+    '<div class="bmod" style="width:640px;max-height:85vh;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'+
+      '<div style="font-size:16px;font-weight:700;">📥 Импорт от SAP Excel</div>'+
+      '<button onclick="closeTransitImport()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>'+
+    '</div>'+
+    '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#1e3a5f;">'+
+      'Намерени <b>'+totalRows+'</b> реда в '+(mapped.length+unmapped.length)+' завода. '+
+      mapped.length+' завода са разпознати автоматично.'+
+    '</div>';
+
+  if(unmapped.length){
+    h += '<div style="background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px 14px;margin-bottom:14px;">'+
+      '<div style="font-size:13px;font-weight:700;color:#92400e;margin-bottom:8px;">⚠️ '+unmapped.length+' непознат(и) завод(и) — избери магазин ръчно:</div>';
+    unmapped.forEach(function(p){
+      h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">'+
+        '<span style="font-family:monospace;font-size:12px;background:#fff;border:1px solid #e2e8f0;border-radius:4px;padding:2px 8px;min-width:50px;">'+esc(p.plant)+'</span>'+
+        '<span style="font-size:11px;color:#92400e;">('+p.count+' реда)</span>'+
+        '<select class="fi" data-plant="'+esc(p.plant)+'" style="flex:1;padding:4px 8px;font-size:12px;" onchange="_updateUnmappedPlant(this)">'+
+          '<option value="">-- Пропусни тези редове --</option>'+
+          Object.values(PLANT_TO_STORE).sort().map(function(s){return '<option value="'+esc(s)+'">'+esc(s)+'</option>';}).join('')+
+        '</select>'+
+      '</div>';
+    });
+    h += '</div>';
+  }
+
+  h += '<div style="max-height:240px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;margin-bottom:14px;">'+
+    '<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
+    '<thead><tr style="background:#f8fafc;"><th style="padding:6px 10px;text-align:left;">Завод</th><th style="padding:6px 10px;text-align:left;">Магазин</th><th style="padding:6px 10px;text-align:right;">Редове</th></tr></thead><tbody>';
+  mapped.concat(unmapped).sort(function(a,b){return a.plant.localeCompare(b.plant);}).forEach(function(p){
+    h += '<tr style="border-top:1px solid #f1f5f9;">'+
+      '<td style="padding:5px 10px;font-family:monospace;">'+esc(p.plant)+'</td>'+
+      '<td style="padding:5px 10px;'+(p.store?'':'color:#dc2626;font-style:italic;')+'">'+(p.store?esc(p.store):'непознат')+'</td>'+
+      '<td style="padding:5px 10px;text-align:right;">'+p.count+'</td>'+
+    '</tr>';
+  });
+  h += '</tbody></table></div>';
+
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
+    '<button onclick="closeTransitImport()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 18px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button onclick="confirmTransitImport()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;">✅ Импортирай</button>'+
+  '</div>'+
+  '</div></div>';
+
+  var old=document.getElementById('transit-import-ov');
+  if(old && typeof old.remove==='function') old.remove();
+  document.body.insertAdjacentHTML('beforeend', h);
+}
+
+function _updateUnmappedPlant(sel){
+  var plant = sel.dataset.plant;
+  var store = sel.value;
+  _transitImportRows.forEach(function(r){
+    if(r.plant === plant) r.store_name = store || null;
+  });
+}
+
+function closeTransitImport(){
+  var ov=document.getElementById('transit-import-ov');
+  if(ov && typeof ov.remove==='function') ov.remove();
+  _transitImportRows = [];
+}
+
+function confirmTransitImport(){
+  var rows = _transitImportRows.filter(function(r){ return r.store_name; });
+  var skipped = _transitImportRows.length - rows.length;
+  if(!rows.length){toast('Няма редове за импорт — избери магазини','#dc2626');return;}
+
+  toast('⏳ Импортиране на '+rows.length+' реда...');
+
+  /* Batch insert по 50 записа */
+  var batches = [];
+  for(var i=0; i<rows.length; i+=50){
+    batches.push(rows.slice(i, i+50));
+  }
+
+  var inserted = 0;
+  var failed = 0;
+
+  function processBatch(idx){
+    if(idx >= batches.length){
+      closeTransitImport();
+      var msg = '✅ Импортирани '+inserted+' реда';
+      if(failed) msg += ', '+failed+' грешки';
+      if(skipped) msg += ', '+skipped+' пропуснати (непознат завод)';
+      toast(msg, failed?'#d97706':'#16a34a');
+      loadTransit();
+      return;
+    }
+    var batch = batches[idx].map(function(r){
+      return {
+        store_name: r.store_name,
+        supplier: r.supplier,
+        purchase_doc: r.purchase_doc,
+        position: r.position,
+        doc_date: r.doc_date,
+        material_code: r.material_code,
+        material_name: r.material_name,
+        ordered_qty: r.ordered_qty,
+        unit: r.unit,
+        remaining_qty: r.remaining_qty,
+        comment: r.comment,
+        transfer_date: r.transfer_date,
+        status: 'pending',
+        updated_by: currentUser.display_name||currentUser.email,
+        updated_at: new Date().toISOString()
+      };
+    });
+    sbPost('goods_transit', batch).then(function(res){
+      if(res.ok) inserted += batch.length;
+      else failed += batch.length;
+      processBatch(idx+1);
+    }).catch(function(){
+      failed += batch.length;
+      processBatch(idx+1);
+    });
+  }
+
+  processBatch(0);
 }
