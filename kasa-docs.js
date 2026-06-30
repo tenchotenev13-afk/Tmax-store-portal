@@ -7,7 +7,8 @@ function uploadKasaDoc(file, reportType, docType, onDone) {
   var ext   = file.name.split('.').pop();
   var stamp = Date.now();
   var clean = (currentUser.store_name||'store').replace(/[^a-zA-Z0-9]/g,'_');
-  var path  = clean+'/'+today()+'/'+reportType+'_'+docType+'_'+stamp+'.'+ext;
+  var docDate = (typeof kasaActiveDate==='function') ? kasaActiveDate() : today();
+  var path  = clean+'/'+docDate+'/'+reportType+'_'+docType+'_'+stamp+'.'+ext;
   var reader = new FileReader();
   reader.onload = function(e) {
     var encodedPath = path.split('/').map(function(s){return encodeURIComponent(s);}).join('/');
@@ -23,7 +24,7 @@ function uploadKasaDoc(file, reportType, docType, onDone) {
       if (!r.ok) { toast('Грешка при качване','#dc2626'); return; }
       sbPost('kasa_documents', {
         store_name: currentUser.store_name,
-        date: today(),
+        date: docDate,
         report_type: reportType,
         doc_type: docType,
         file_name: file.name,
@@ -109,7 +110,7 @@ function handleDocUpload(event, reportType) {
     uploadKasaDoc(file, reportType, docType, function() {
       done++;
       if (done === files.length) {
-        loadKasaDocs(today(), function(allDocs) {
+        loadKasaDocs((typeof kasaActiveDate==='function')?kasaActiveDate():today(), function(allDocs) {
           renderDocsSection('docs-section-'+reportType, reportType, allDocs.filter(function(d) { return d.report_type === reportType; }));
         });
       }
@@ -128,7 +129,7 @@ function openKasaDoc(path) {
 function initKasaDocsView() {
   var docsEl = document.getElementById('docs-section-pos');
   if (docsEl) {
-    loadKasaDocs(today(), function(allDocs) {
+    loadKasaDocs((typeof kasaActiveDate==='function')?kasaActiveDate():today(), function(allDocs) {
       renderDocsSection('docs-section-pos', 'pos', allDocs.filter(function(d) { return d.report_type === 'pos'; }));
     });
   }
@@ -139,7 +140,7 @@ function initKasaDocsView() {
 }
 
 function markReady() {
-  var todayStr = today();
+  var todayStr = (typeof kasaActiveDate==='function') ? kasaActiveDate() : today();
   var reps = kasaReports.filter(function(r) { return r.date === todayStr; });
   if (!reps.length) { toast('Няма касови отчети за днес','#dc2626'); return; }
   var hasDraft = reps.some(function(r) { return r.status === 'draft'; });

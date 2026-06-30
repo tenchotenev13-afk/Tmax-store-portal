@@ -6,6 +6,13 @@ var kasaReports = [];
 var kasaGlavna  = null;
 var kasaEditId  = null;
 var kasaView    = 'pos'; /* 'pos' | 'glavna' */
+var kasaSelectedDate = null; /* null = използва today(); иначе избрана дата за уикенд/назад */
+
+function kasaActiveDate(){ return kasaSelectedDate || today(); }
+function kasaSetDate(d){
+  kasaSelectedDate = d || null;
+  loadKasa();
+}
 
 /* ─── ДЕНОМИНАЦИИ ───────────────────────────────────────────── */
 var BILLS = [500,200,100,50,20,10,5,2,1];
@@ -62,14 +69,15 @@ function loadKasa(){
   sbGet('kasa_reports',q).then(function(data){
     kasaReports=Array.isArray(data)?data:[];
     if(kasaView==='pos') renderKasa();
-    else renderGlavna();
+    else if(kasaView==='glavna') renderGlavna();
   }).catch(function(){renderKasa();});
-  /* Главна каса за днес */
-  var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today();
+  /* Главна каса за избраната дата */
+  var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
   sbGet('kasa_glavna',gq).then(function(data){
     kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
     if(kasaView==='glavna') renderGlavna();
   }).catch(function(){});
+  if(kasaView==='zoborot') loadZoborot();
 }
 
 /* ─── TABS ──────────────────────────────────────────────────── */
@@ -88,7 +96,14 @@ function kasaTab(tab){
 function kasaTabBar(){
   var canGlavna=['manager','admin','kasa'].indexOf(currentUser.role)>=0;
   if(!canGlavna) return '';
-  return '<div style="display:flex;gap:0;margin-bottom:18px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">'+
+  var isCustomDate = !!kasaSelectedDate;
+  var dateBar = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;background:'+(isCustomDate?'#fffbeb':'#f8fafc')+';border:1px solid '+(isCustomDate?'#fcd34d':'#e2e8f0')+';border-radius:8px;padding:8px 12px;">'+
+    '<span style="font-size:12px;font-weight:600;color:'+(isCustomDate?'#92400e':'#64748b')+';">📅 Дата на отчета:</span>'+
+    '<input type="date" value="'+kasaActiveDate()+'" onchange="kasaSetDate(this.value)" style="border:1px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;">'+
+    (isCustomDate?'<button onclick="kasaSetDate(null)" style="border:none;background:#fde68a;color:#92400e;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">↺ Днес ('+fmtDate(today())+')</button>':'')+
+    (isCustomDate?'<span style="font-size:11px;color:#92400e;font-weight:600;">⚠️ Работиш с минала/друга дата — за уикенд или забравен отчет</span>':'')+
+  '</div>';
+  return dateBar+'<div style="display:flex;gap:0;margin-bottom:18px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">'+
     '<button id="ktab-pos" onclick="kasaTab(\'pos\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#2f2f2f;color:#fff;">📋 ПОС Отчети</button>'+
     '<button id="ktab-glavna" onclick="kasaTab(\'glavna\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#fff;color:#64748b;">🏦 Главна каса</button>'+
     '<button id="ktab-zoborot" onclick="kasaTab(\'zoborot\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#fff;color:#64748b;">📊 Равнение</button>'+
@@ -100,18 +115,19 @@ function kasaTabBar(){
 ══════════════════════════════════════════════════════════════ */
 function renderKasa(){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var histRep =kasaReports.filter(function(r){return r.date!==todayStr;});
   var canConfirm=['manager','admin'].indexOf(currentUser.role)>=0;
   var canUnlock=['admin','accounting'].indexOf(currentUser.role)>=0;
+  var isCustomDate=!!kasaSelectedDate;
 
   var html='<div class="page">'+
     '<div class="pg-title">💰 Каса</div>'+
     '<div class="pg-sub">'+esc(currentUser.store_name)+'</div>'+
     kasaTabBar()+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
-      '<div style="font-size:13px;color:var(--muted);">Днес: <b>'+todayRep.length+'</b> отчета</div>'+
+      '<div style="font-size:13px;color:var(--muted);">'+(isCustomDate?fmtDate(todayStr):'Днес')+': <b>'+todayRep.length+'</b> отчета</div>'+
       '<button class="btn btn-green" onclick="openKasaForm(null)">+ Нов ПОС отчет</button>'+
       '<button onclick="printKasaReport()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:500;cursor:pointer;">🖨 Разпечатай отчет</button>'+
     '</div>';
@@ -235,7 +251,7 @@ function openKasaForm(report){
     /* Данни */
     '<div class="card" style="margin-bottom:14px;"><div class="card-title">Данни за смяната</div>'+
     '<div class="form-grid">'+
-      '<div><label class="fl">Дата</label><input type="date" class="fi" id="kf-date" value="'+(r.date||today())+'"></div>'+
+      '<div><label class="fl">Дата</label><input type="date" class="fi" id="kf-date" value="'+(r.date||kasaActiveDate())+'"></div>'+
       '<div><label class="fl">ПОС №</label><select class="fi" id="kf-pos">'+
         [1,2,3].map(function(n){return '<option value="'+n+'"'+(r.pos_number==n?' selected':'')+'>ПОС '+n+'</option>';}).join('')+
       '</select></div>'+
@@ -411,7 +427,7 @@ function submitKasaForm(){
 
   var p={
     store_name:currentUser.store_name,
-    date:(document.getElementById('kf-date')||{}).value||today(),
+    date:(document.getElementById('kf-date')||{}).value||kasaActiveDate(),
     pos_number:parseInt((document.getElementById('kf-pos')||{}).value)||1,
     cashier_name:cashier,
     kasa_number:parseInt((document.getElementById('kf-kasa')||{}).value)||1,
@@ -458,118 +474,94 @@ function confirmKasaReport(id){
 ═══════════════════════════════════════════════════════════════ */
 function renderGlavna(){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g=kasaGlavna||{};
   var isDraft=!g.id||(g.status==='draft');
   var canEdit=['kasa','manager','admin','accounting'].indexOf(currentUser.role)>=0;
-  /* Manager/kasa могат ВИНАГИ да пишат, независимо от статуса */
   var canInput=['kasa','manager','admin'].indexOf(currentUser.role)>=0;
 
-  /* Сборна таблица по деноминации: ПОС1 + ПОС2 + ПОС3 + Главна */
-  function sumDenom(v){
-    var posSum=0;
-    todayRep.forEach(function(r){posSum+=parseInt(r[DENOM_KEY[v]])||0;});
-    var gl=parseInt(g[DENOM_KEY[v]])||0;
-    var total=posSum+gl;
-    return {pos:posSum,gl:gl,total:total,sum:Math.round(total*v*100)/100};
+  /* ── ПОС СУМА (READONLY) ── */
+  function posDenomSum(v){
+    var s=0; todayRep.forEach(function(r){s+=parseInt(r[DENOM_KEY[v]])||0;});
+    return s;
   }
+  var posTotalCash=0;
+  ALL_DENOM.forEach(function(v){ posTotalCash+=Math.round(posDenomSum(v)*v*100)/100; });
+  posTotalCash=Math.round(posTotalCash*100)/100;
 
-  /* Изчисли общо налични (всички ПОС + Главна) */
-  var totalCounted=0;
-  ALL_DENOM.forEach(function(v){
-    var d=sumDenom(v);totalCounted+=d.sum;
-  });
-  totalCounted=Math.round(totalCounted*100)/100;
+  /* ── ГЛАВНА КАСА (само от сейфа) ── */
+  function glDenomSum(v){ return parseInt(g[DENOM_KEY[v]])||0; }
+  var glTotalCash=0;
+  ALL_DENOM.forEach(function(v){ glTotalCash+=Math.round(glDenomSum(v)*v*100)/100; });
+  glTotalCash=Math.round(glTotalCash*100)/100;
+
+  var totalCounted=Math.round((posTotalCash+glTotalCash)*100)/100;
   var slujebno=parseFloat(g.slujebno)||0;
   var sapBalance=parseFloat(g.sap_balance)||0;
   var razlika=Math.round((totalCounted+slujebno-sapBalance)*100)/100;
-
-  /* Инкасо от ПОС отчети */
-  var totalInkaso=0;
-  todayRep.forEach(function(r){totalInkaso+=calcInkaso(r);});
-
-  /* Сборна таблица инкасо */
-  function inkSum(v){
-    var s=0;todayRep.forEach(function(r){s+=parseInt(r['inkaso_'+v])||0;});
-    return s;
-  }
 
   var html='<div class="page">'+
     '<div class="pg-title">💰 Каса</div>'+
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — Главна каса</div>'+
     kasaTabBar()+
 
-    /* Сборна таблица деноминации */
-    '<div class="card" style="margin-bottom:14px;">'+
-    '<div class="card-title">📊 Обобщение по купюри — '+fmtDate(todayStr)+'</div>'+
+    /* БЛОК 1: СУМА ОТ ПОС-ОВЕТЕ (READONLY) */
+    '<div class="card" style="margin-bottom:14px;border-top:3px solid #2563eb;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
+      '<div class="card-title" style="margin:0;">🔒 Сума от ПОС-овете (автоматично, нередактируемо)</div>'+
+      '<div style="font-size:11px;color:#2563eb;font-weight:600;">'+todayRep.length+' ПОС отчета за '+fmtDate(todayStr)+'</div>'+
+    '</div>'+
     '<div class="tbl-wrap"><table style="font-size:12px;">'+
     '<thead><tr>'+
       '<th>Ном.</th>'+
       todayRep.map(function(r){return '<th style="text-align:center;">ПОС '+r.pos_number+'</th>';}).join('')+
-      '<th style="text-align:center;background:#fef9c3;">Главна</th>'+
-      '<th style="text-align:center;">Общо бр.</th>'+
-      '<th style="text-align:right;">Сума</th>'+
+      '<th style="text-align:center;background:#eff6ff;">Общо бр.</th>'+
+      '<th style="text-align:right;background:#eff6ff;">Сума</th>'+
     '</tr></thead><tbody>'+
     ALL_DENOM.map(function(v){
-      var d=sumDenom(v);
-      var glInput=canInput?
-        '<input type="number" min="0" id="gl-'+DENOM_KEY[v]+'" value="'+(parseInt(g[DENOM_KEY[v]])||0)+'" oninput="glavnaLiveCalc()" style="width:55px;text-align:center;border:1.5px solid #e2e8f0;border-radius:4px;font-family:DM Mono,monospace;font-size:12px;padding:2px 4px;background:#fffbeb;">':
-        '<span style="font-family:DM Mono,monospace;">'+(parseInt(g[DENOM_KEY[v]])||0)+'</span>';
+      var s=posDenomSum(v);
+      var sum=Math.round(s*v*100)/100;
       return '<tr style="border-bottom:1px solid #f1f5f9;">'+
         '<td style="font-weight:600;text-align:right;padding:4px 10px;">'+v+'</td>'+
-        todayRep.map(function(r){return '<td style="text-align:center;font-family:DM Mono,monospace;padding:4px 8px;">'+(parseInt(r[DENOM_KEY[v]])||0)+'</td>';}).join('')+
-        '<td style="text-align:center;background:#fffbeb;padding:4px 6px;">'+glInput+'</td>'+
-        '<td style="text-align:center;font-family:DM Mono,monospace;font-weight:600;padding:4px 8px;" id="gl-total-'+DENOM_KEY[v]+'">'+d.total+'</td>'+
-        '<td style="text-align:right;font-family:DM Mono,monospace;padding:4px 10px;" id="gl-sum-'+DENOM_KEY[v]+'">'+d.sum.toFixed(2)+'</td>'+
+        todayRep.map(function(r){return '<td style="text-align:center;font-family:DM Mono,monospace;padding:4px 8px;color:#64748b;">'+(parseInt(r[DENOM_KEY[v]])||0)+'</td>';}).join('')+
+        '<td style="text-align:center;font-family:DM Mono,monospace;font-weight:600;padding:4px 8px;background:#eff6ff;">'+s+'</td>'+
+        '<td style="text-align:right;font-family:DM Mono,monospace;padding:4px 10px;background:#eff6ff;">'+sum.toFixed(2)+'</td>'+
       '</tr>';
     }).join('')+
-    '<tr style="border-top:2px solid #e2e8f0;font-weight:700;background:#f8fafc;">'+
-      '<td colspan="'+(1+todayRep.length)+'">ОБЩО НАЛИЧНИ</td>'+
-      '<td></td><td></td>'+
-      '<td style="text-align:right;font-family:DM Mono,monospace;font-size:14px;" id="gl-total-counted">'+totalCounted.toFixed(2)+' EUR</td>'+
+    '<tr style="border-top:2px solid #2563eb;font-weight:700;background:#eff6ff;">'+
+      '<td colspan="'+(1+todayRep.length)+'">ОБЩО ОТ ПОС-ОВЕТЕ</td>'+
+      '<td></td>'+
+      '<td style="text-align:right;font-family:DM Mono,monospace;font-size:14px;color:#1e40af;" id="pos-total-display">'+posTotalCash.toFixed(2)+' EUR</td>'+
     '</tr>'+
     '</tbody></table></div></div>'+
 
-    /* Инкасо summary — деноминации като ориентир */
-    '<div class="card" style="margin-bottom:14px;border-top:3px solid #d97706;">'+
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
-      '<div class="card-title" style="margin:0;">📤 Изведени за инкасо — по деноминации</div>'+
-      '<div style="font-size:11px;color:#d97706;font-weight:600;">Ориентир за инкасиране</div>'+
-    '</div>'+
+    /* БЛОК 2: ГЛАВНА КАСА (само от сейфа) */
+    '<div class="card" style="margin-bottom:14px;background:#fffbeb;border-top:3px solid #d97706;">'+
+    '<div class="card-title" style="color:#92400e;">🏦 Главна каса — въведи купюрите от сейфа</div>'+
+    '<div style="font-size:12px;color:#92400e;margin-bottom:10px;">Брой само наличните в сейфа купюри/монети — НЕ повтаряй сумите от ПОС-овете по-горе.</div>'+
     '<div class="tbl-wrap"><table style="font-size:12px;">'+
-    '<thead><tr>'+
-      '<th style="text-align:right;">Ном.</th>'+
-      todayRep.map(function(r){return '<th style="text-align:center;">ПОС '+r.pos_number+'</th>';}).join('')+
-      '<th style="text-align:center;">Общо бр.</th>'+
-      '<th style="text-align:right;background:#fef3c7;">Сума EUR</th>'+
-    '</tr></thead><tbody>'+
-    (function(){
-      var rows='';var tot=0;
-      INKASO_DENOM.forEach(function(v){
-        var qtys=todayRep.map(function(r){return parseInt(r['inkaso_'+v])||0;});
-        var total=qtys.reduce(function(a,b){return a+b;},0);
-        var sum=Math.round(total*v*100)/100; tot+=sum;
-        rows+='<tr style="border-bottom:1px solid #f1f5f9;">'+
-          '<td style="text-align:right;padding:5px 10px;font-weight:700;">'+v+' EUR</td>'+
-          qtys.map(function(q){return '<td style="text-align:center;padding:5px 8px;font-family:DM Mono,monospace;">'+(q||'—')+'</td>';}).join('')+
-          '<td style="text-align:center;font-family:DM Mono,monospace;font-weight:600;">'+total+'</td>'+
-          '<td style="text-align:right;padding:5px 10px;font-family:DM Mono,monospace;background:#fffbeb;font-weight:'+(total>0?'700':'400')+';color:'+(total>0?'#92400e':'#94a3b8')+';font-size:'+(total>0?'13':'12')+'px;">'+sum.toFixed(2)+'</td>'+
-        '</tr>';
-      });
-      tot=Math.round(tot*100)/100;
-      rows+='<tr style="border-top:2px solid #d97706;background:#fef3c7;font-weight:700;">'+
-        '<td colspan="'+(1+todayRep.length)+'" style="padding:6px 10px;">ОБЩО ЗА ИНКАСО</td>'+
-        '<td></td>'+
-        '<td style="text-align:right;padding:6px 10px;font-family:DM Mono,monospace;font-size:14px;">'+tot.toFixed(2)+' EUR</td>'+
+    '<thead><tr><th>Ном.</th><th style="text-align:center;">Брой в сейфа</th><th style="text-align:right;">Сума</th></tr></thead><tbody>'+
+    ALL_DENOM.map(function(v){
+      var glInput=canInput?
+        '<input type="number" min="0" id="gl-'+DENOM_KEY[v]+'" value="'+(parseInt(g[DENOM_KEY[v]])||0)+'" oninput="glavnaLiveCalc()" style="width:70px;text-align:center;border:1.5px solid #f0c940;border-radius:4px;font-family:DM Mono,monospace;font-size:13px;padding:3px 6px;background:#fff;">':
+        '<span style="font-family:DM Mono,monospace;">'+(parseInt(g[DENOM_KEY[v]])||0)+'</span>';
+      var sum=Math.round(glDenomSum(v)*v*100)/100;
+      return '<tr style="border-bottom:1px solid #fde68a;">'+
+        '<td style="font-weight:600;text-align:right;padding:4px 10px;">'+v+'</td>'+
+        '<td style="text-align:center;padding:4px 6px;">'+glInput+'</td>'+
+        '<td style="text-align:right;font-family:DM Mono,monospace;padding:4px 10px;" id="gl-sum-'+DENOM_KEY[v]+'">'+sum.toFixed(2)+'</td>'+
       '</tr>';
-      return rows;
-    })()+
+    }).join('')+
+    '<tr style="border-top:2px solid #d97706;font-weight:700;background:#fef3c7;">'+
+      '<td colspan="2">ОБЩО ОТ ГЛАВНА КАСА (сейф)</td>'+
+      '<td style="text-align:right;font-family:DM Mono,monospace;font-size:14px;color:#92400e;" id="gl-total-display">'+glTotalCash.toFixed(2)+' EUR</td>'+
+    '</tr>'+
     '</tbody></table></div></div>'+
 
-    /* Жълти полета — ръчно въвеждане */
+    /* Жълти полета */
     '<div class="card" style="margin-bottom:14px;background:#fffbeb;border-color:#f0c940;">'+
-    '<div class="card-title" style="color:#92400e;">⭐ Ръчно въвеждане (жълти полета)</div>'+
+    '<div class="card-title" style="color:#92400e;">⭐ Ръчно въвеждане</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">'+
       '<div><label class="fl">Служебно въведени (EUR)</label>'+
         (canInput?
@@ -591,6 +583,16 @@ function renderGlavna(){
     /* Финален резултат */
     '<div class="card" style="background:#f8fafc;">'+
     '<div class="card-title">📊 Краен резултат</div>'+
+    '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:10px;">'+
+      '<div style="text-align:center;padding:10px;border-radius:8px;background:#eff6ff;">'+
+        '<div style="font-size:10px;color:#1e40af;text-transform:uppercase;margin-bottom:4px;">От ПОС-овете</div>'+
+        '<div style="font-size:14px;font-weight:700;font-family:DM Mono,monospace;color:#1e40af;">'+posTotalCash.toFixed(2)+' EUR</div>'+
+      '</div>'+
+      '<div style="text-align:center;padding:10px;border-radius:8px;background:#fef3c7;">'+
+        '<div style="font-size:10px;color:#92400e;text-transform:uppercase;margin-bottom:4px;">От Главна каса (сейф)</div>'+
+        '<div style="font-size:14px;font-weight:700;font-family:DM Mono,monospace;color:#92400e;">'+glTotalCash.toFixed(2)+' EUR</div>'+
+      '</div>'+
+    '</div>'+
     '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">'+
       '<div style="text-align:center;padding:12px;border-radius:8px;background:#f0fdf4;">'+
         '<div style="font-size:10px;color:#166534;text-transform:uppercase;margin-bottom:4px;">Общо налични</div>'+
@@ -616,35 +618,36 @@ function renderGlavna(){
 
 /* ─── ГЛАВНА КАСА LIVE CALC ──────────────────────────────────── */
 function glavnaLiveCalc(){
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
-  var g={};
+
+  var posTotal=0;
+  ALL_DENOM.forEach(function(v){
+    var s=0; todayRep.forEach(function(r){s+=parseInt(r[DENOM_KEY[v]])||0;});
+    posTotal+=Math.round(s*v*100)/100;
+  });
+  posTotal=Math.round(posTotal*100)/100;
+
+  var glTotal=0;
   ALL_DENOM.forEach(function(v){
     var el=document.getElementById('gl-'+DENOM_KEY[v]);
-    g[DENOM_KEY[v]]=el?parseInt(el.value)||0:0;
-  });
-
-  var total=0;
-  ALL_DENOM.forEach(function(v){
-    var posQty=0;
-    todayRep.forEach(function(r){posQty+=parseInt(r[DENOM_KEY[v]])||0;});
-    var glQty=g[DENOM_KEY[v]]||0;
-    var combined=posQty+glQty;
-    var sum=Math.round(combined*v*100)/100;
-    total+=sum;
-    var te=document.getElementById('gl-total-'+DENOM_KEY[v]);
+    var qty=el?parseInt(el.value)||0:0;
+    var sum=Math.round(qty*v*100)/100;
+    glTotal+=sum;
     var se=document.getElementById('gl-sum-'+DENOM_KEY[v]);
-    if(te)te.textContent=combined;
     if(se)se.textContent=sum.toFixed(2);
   });
-  total=Math.round(total*100)/100;
+  glTotal=Math.round(glTotal*100)/100;
+
+  var total=Math.round((posTotal+glTotal)*100)/100;
 
   var slujebno=parseFloat((document.getElementById('gl-slujebno')||{}).value)||0;
   var sap=parseFloat((document.getElementById('gl-sap')||{}).value)||0;
   var razlika=Math.round((total+slujebno-sap)*100)/100;
 
   var set=function(id,v,sfx){ var el=document.getElementById(id); if(el)el.textContent=(v<0?'– ':'')+Math.abs(v).toFixed(2)+(sfx||''); };
-  set('gl-total-counted',total,' EUR');
+  var glDisp=document.getElementById('gl-total-display');
+  if(glDisp) glDisp.textContent=glTotal.toFixed(2)+' EUR';
   set('gl-r-counted',total,' EUR');
   set('gl-r-slujebno',slujebno,' EUR');
   set('gl-r-sap',sap,' EUR');
@@ -654,7 +657,7 @@ function glavnaLiveCalc(){
 
 /* ─── SAVE ГЛАВНА КАСА ───────────────────────────────────────── */
 function saveGlavna(){
-  var p={store_name:currentUser.store_name,date:today(),status:'draft'};
+  var p={store_name:currentUser.store_name,date:kasaActiveDate(),status:'draft'};
   ALL_DENOM.forEach(function(v){
     var el=document.getElementById('gl-'+DENOM_KEY[v]);
     p[DENOM_KEY[v]]=el?parseInt(el.value)||0:0;
@@ -665,7 +668,15 @@ function saveGlavna(){
   var sapEl=document.getElementById('gl-sap');
   p.slujebno=sEl?parseFloat(sEl.value)||0:0;
   p.sap_balance=sapEl?parseFloat(sapEl.value)||0:0;
-  p.razlika=Math.round((p.counted_cash+p.slujebno-p.sap_balance)*100)/100;
+
+  var todayRep=kasaReports.filter(function(r){return r.date===p.date;});
+  var posTotal=0;
+  ALL_DENOM.forEach(function(v){
+    var s=0; todayRep.forEach(function(r){s+=parseInt(r[DENOM_KEY[v]])||0;});
+    posTotal+=Math.round(s*v*100)/100;
+  });
+  var combinedCounted=Math.round((posTotal+p.counted_cash)*100)/100;
+  p.razlika=Math.round((combinedCounted+p.slujebno-p.sap_balance)*100)/100;
 
   var req=kasaGlavna?
     sbPatch('kasa_glavna','id=eq.'+kasaGlavna.id,p):
@@ -673,8 +684,7 @@ function saveGlavna(){
   req.then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     toast('💾 Главна каса е запазена!');
-    /* Reload */
-    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today();
+    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
     sbGet('kasa_glavna',gq).then(function(data){
       kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
       renderGlavna();
@@ -687,7 +697,7 @@ function saveGlavna(){
    РАЗПЕЧАТВАНЕ НА ПЪЛЕН ОТЧЕТ
 ═══════════════════════════════════════════════════════════════ */
 function printKasaReport(){
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g=kasaGlavna||{};
 
@@ -901,7 +911,7 @@ function unlockKasaReport(id){
 var zoborotData = null;
 
 function loadZoborot(){
-  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today()+'&order=created_at.desc';
+  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate()+'&order=created_at.desc';
   sbGet('kasa_zoborot',q).then(function(data){
     zoborotData=(Array.isArray(data)&&data.length)?data[0]:null;
     renderZoborot();
@@ -939,7 +949,7 @@ function renderZoborot(){
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — Равнение на оборота</div>'+
     kasaTabBar()+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
-      '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(today())+'</b></div>'+
+      '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(kasaActiveDate())+'</b></div>'+
       '<div style="display:flex;gap:8px;">'+
         (isDraft&&canConfirm?'<button onclick="saveZoborot()" class="btn btn-green">💾 Запази</button>':'')+
         (isDraft&&canConfirm&&z.id?'<button onclick="confirmZoborot()" class="btn" style="background:#2563eb;color:#fff;">✅ Потвърди</button>':'')+
@@ -1077,7 +1087,7 @@ function saveZoborot(){
   var raz=Math.round((posNoBank-fuTotal)*100)/100;
 
   var p={
-    store_name:currentUser.store_name,date:today(),
+    store_name:currentUser.store_name,date:kasaActiveDate(),
     cash_bgn:cashBgn,cash_eur:cashEur,card_eur:card,bank_eur:bank,
     pos_total_eur:Math.round((cashBgn+cashEur+card+bank+vouch)*100)/100,
     fu1_gross:fu1g,fu1_discount:fu1d,fu1_net:fu1n,
@@ -1125,7 +1135,7 @@ function printZoborot(){
 
   var win=window.open('','_blank','width=800,height:600');
   win.document.write('<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">'+
-    '<title>Равнение — '+esc(currentUser.store_name)+' — '+fmtDate(today())+'</title>'+
+    '<title>Равнение — '+esc(currentUser.store_name)+' — '+fmtDate(kasaActiveDate())+'</title>'+
     '<style>@page{size:A4;margin:15mm;}*{box-sizing:border-box;margin:0;padding:0;}'+
     'body{font-family:Arial,sans-serif;font-size:11pt;color:#111;}'+
     'h1{font-size:15pt;margin-bottom:2mm;}h2{font-size:12pt;margin:5mm 0 3mm;border-bottom:1px solid #ccc;padding-bottom:1mm;}'+
@@ -1140,7 +1150,7 @@ function printZoborot(){
     '</style></head><body>'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5mm;">'+
       '<div><h1>ТЕМАКС — Равнение на оборота</h1>'+
-      '<div style="font-size:11pt;color:#444;">'+esc(currentUser.store_name)+' &nbsp;|&nbsp; '+fmtDate(today())+'</div>'+
+      '<div style="font-size:11pt;color:#444;">'+esc(currentUser.store_name)+' &nbsp;|&nbsp; '+fmtDate(kasaActiveDate())+'</div>'+
       '<div style="font-size:8pt;color:#888;margin-top:1mm;">Статус: '+(z.status==='confirmed'?'✅ Потвърден':'✏️ Чернова')+'</div></div>'+
     '</div>'+
     '<h2>Данни от POS Zoborot</h2>'+
