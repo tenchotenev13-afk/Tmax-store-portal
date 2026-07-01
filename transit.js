@@ -680,7 +680,7 @@ function confirmTransitImport(){
   if(!rows.length){toast('Няма редове за импорт','#dc2626');return;}
   toast('⏳ Импортиране на '+rows.length+' реда ('+Math.ceil(rows.length/25)+' batch-а)...');
   var batches=[];
-  for(var i=0;i<rows.length;i+=25)batches.push(rows.slice(i,i+25));
+  for(var i=0;i<rows.length;i+=20)batches.push(rows.slice(i,i+25));
   var inserted=0,failed=0;
   function next(idx){
     if(idx>=batches.length){
@@ -711,16 +711,19 @@ function confirmTransitImport(){
       },
       body:JSON.stringify(batch)
     }).then(function(r){
-      if(r.ok){inserted+=batch.length;}
-      else{
+      if(r.ok){
+        inserted+=batch.length;
+        /* Показваме прогрес */
+        if(idx%5===0) toast('⏳ Импортирани '+inserted+' от '+rows.length+'...');
+      }else{
         r.json().then(function(e){
           console.error('Batch грешка:',JSON.stringify(e));
-          toast('Грешка: '+(e.message||e.error||JSON.stringify(e)),'#dc2626');
         }).catch(function(){});
         failed+=batch.length;
       }
-      next(idx+1);
-    }).catch(function(e){console.error('Fetch грешка:',e);failed+=batch.length;next(idx+1);});
+      /* Малък delay между batch-овете за да не претоварим Supabase */
+      setTimeout(function(){next(idx+1);}, 50);
+    }).catch(function(e){console.error('Fetch грешка:',e);failed+=batch.length;setTimeout(function(){next(idx+1);},50);});
   }
   next(0);
 }
