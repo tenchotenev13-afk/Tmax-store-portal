@@ -7,7 +7,6 @@ function calcElapsed(createdAt){
 }
 
 function elapsedBadge(days, status){
-  /* Не показваме за финални статуси */
   if(['done','refused','postponed'].indexOf(status)>=0) return '';
   if(days<5) return '<span style="font-size:11px;color:#94a3b8;">'+days+' дни</span>';
   if(days<7)  return '<span style="font-size:11px;font-weight:600;color:#d97706;background:#fef3c7;padding:2px 7px;border-radius:20px;">⚠️ '+days+' дни</span>';
@@ -24,7 +23,6 @@ function elapsedRowStyle(days, baseStatus){
 }
 
 function loadClientOrders(){
-  /* Вариант В: активните винаги + изпълнените/отказаните само за последните 7 дни */
   var d7=new Date();d7.setDate(d7.getDate()-7);
   var cutoff=d7.toISOString().slice(0,10);
   var stores=assignedStores();
@@ -43,7 +41,6 @@ function loadClientOrders(){
     clientOrders.forEach(function(o){
       o._status=calcStatus(o.delivery,o.status);
       o._days=calcElapsed(o.created_at);
-      /* Маркираме дали текущия магазин е изпълнителят */
       o._isFulfiller=!isGlobal()&&o.fulfiller===currentUser.store_name&&o.store_name!==currentUser.store_name;
     });
     renderClientOrders();renderMetrics();updateBadges();
@@ -55,11 +52,43 @@ function renderClientOrders(){
     return orderFilter==='all'||o._status===orderFilter||o.status===orderFilter;
   });
   var body=document.getElementById('co-body');if(!body)return;
-  if(!list.length){body.innerHTML='<tr><td colspan="12" style="text-align:center;padding:30px;color:#94a3b8;">Няма клиентски заявки.</td></tr>';return;}
+  if(!list.length){body.innerHTML='<tr><td colspan="13" style="text-align:center;padding:30px;color:#94a3b8;">Няма клиентски заявки.</td></tr>';return;}
+  var isAdmin=currentUser&&['admin','accounting'].indexOf(currentUser.role)>=0;
   body.innerHTML=list.map(function(o){
     var urgent=o._status==='overdue'||o._status==='today';
     var bdrColor={overdue:'#dc2626',today:'#2563eb',tomorrow:'#d97706'}[o._status]||'transparent';
     var rowStyle='border-left:3px solid '+bdrColor+';'+(urgent?'animation:rowPulse 2s infinite;':'');
+    /* Изпълнява колона */
+    var fulfillerCell=o.fulfiller&&o.fulfiller!==o.store_name
+      ?'<span style="background:#eff6ff;color:#1e40af;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">🏪 '+esc(o.fulfiller)+'</span>'
+      :'<span style="color:#94a3b8;font-size:10px;">—</span>';
+    /* Заявител / Изпълнява колона */
+    var storeCell=o.fulfiller&&o.fulfiller!==o.store_name
+      ?'<div style="font-size:10px;color:#94a3b8;">Заявител:</div><b>'+esc(o.store_name||'')+'</b><div style="font-size:10px;color:#2563eb;margin-top:2px;">Изпълнява: <b>'+esc(o.fulfiller)+'</b></div>'
+      :esc(o.store_name||'');
+    /* Бутони за действия */
+    var btns='<div style="display:flex;gap:4px;flex-wrap:wrap;">';
+    var myStore=currentUser&&currentUser.store_name;
+    var done=o._status==='done'||o._status==='refused'||o.status==='done'||o.status==='refused';
+    var isRequester=isAdmin||!o.fulfiller||o.store_name===myStore||isGlobal();
+    var isFulfiller=o.fulfiller&&o.fulfiller===myStore&&!isRequester;
+    if(!done){
+      if(isRequester){
+        btns+='<button onclick="openStatus(\''+o.id+'\',\'client_orders\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">Статус</button>';
+      } else if(isFulfiller){
+        btns+='<button onclick="setClientStatus(\''+o.id+'\',\'done\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📦 Изпратена</button>';
+        btns+='<button onclick="setClientStatus(\''+o.id+'\',\'refused\')" style="border:1px solid #dc2626;background:#fff1f2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕ Откаже</button>';
+      }
+    } else {
+      if(isRequester){
+        btns+='<button onclick="revertStatus(\''+o.id+'\',\'client_orders\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">↩ Върни</button>';
+      }
+    }
+    btns+='<button onclick="loadPrint(\''+o.id+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🖨 Бланка</button>';
+    if(isAdmin){
+      btns+='<button onclick="deleteClientOrder(\''+o.id+'\')" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button>';
+    }
+    btns+='</div>';
     return '<tr style="'+rowStyle+'">'+
       '<td style="font-size:11px;color:#94a3b8;font-family:monospace;">'+esc(o.in_num||'—')+'</td>'+
       '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
@@ -69,11 +98,27 @@ function renderClientOrders(){
       '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
       '<td style="text-align:center;">'+esc(String(o.qty||1))+'</td>'+
       '<td>'+esc(o.from_store||'')+'</td>'+
+      '<td style="font-size:11px;">'+fulfillerCell+'</td>'+
       '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
+      '<td>'+elapsedBadge(o._days,o.status)+'</td>'+
       '<td>'+statusBadge(o._status)+'</td>'+
-      '<td>'+esc(o.store_name||'')+'</td>'+
-      '<td>'+actionBtns(o.id,'client_orders',o._status)+'</td></tr>';
+      '<td style="font-size:11px;">'+storeCell+'</td>'+
+      '<td>'+btns+'</td></tr>';
   }).join('');
+}
+
+function setClientStatus(id,status){
+  sbPatch('client_orders','id=eq.'+id,{status:status}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    toast('✓ Статусът е обновен');loadClientOrders();
+  });
+}
+
+function deleteClientOrder(id){
+  if(!confirm('Изтрий тази заявка?'))return;
+  sbDelete('client_orders','id=eq.'+id).then(function(){
+    toast('✓ Заявката е изтрита');loadClientOrders();
+  });
 }
 
 function filterOrders(f,btn){
