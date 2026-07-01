@@ -27,11 +27,7 @@ function getStoreInfo(name){
 }
 
 function loadTransport(){
-  /* Вариант В: активните винаги + изпълнените/отказаните само за последните 7 дни */
-  var d7=new Date();d7.setDate(d7.getDate()-7);
-  var cutoff=d7.toISOString().slice(0,10);
-  var q='order=created_at.desc'+storeQ()+
-    '&or=(status.in.(pending,approved,postponed,overdue,today,tomorrow),and(status.in.(done,refused),delivery.gte.'+cutoff+'),and(status.in.(done,refused),created_at.gte.'+cutoff+'T00:00:00))';
+  var q='order=created_at.desc'+storeQ();
   sbGet('transport_orders',q).then(function(data){
     transportOrders=Array.isArray(data)?data:[];
     transportOrders.forEach(function(o){o._status=calcStatus(o.delivery,o.status);});
@@ -64,7 +60,7 @@ function renderTransport(){
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
       '<td style="font-size:12px;">'+esc(o.address||'')+'</td>'+
       '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
-      '<td style="text-align:center;">'+esc(String(o.qty||1))+'</td>'+
+      '<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>'+
       '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
       '<td>'+statusBadge(o._status)+'</td>'+
       '<td>'+esc(o.store_name||'')+'</td>'+
@@ -86,6 +82,7 @@ function openTransportModal(){
   document.getElementById('o-hour').value='10:00';
   document.getElementById('o-qty').value='1';
   document.getElementById('o-delivery').value='';
+  if(document.getElementById('o-unit'))document.getElementById('o-unit').value='бр.';
   document.getElementById('transport-modal').classList.add('open');
 }
 
@@ -97,7 +94,7 @@ function submitTransport(){
     store_name:currentUser.store_name,
     date:v('o-date'),hour:v('o-hour'),bon:v('o-bon'),sap:v('o-sap'),
     customer_name:name,phone:phone,address:v('o-addr'),
-    product:product,color:v('o-color'),qty:parseInt(v('o-qty'))||1,
+    product:product,color:v('o-color'),qty:parseFloat(v('o-qty'))||1,unit:v('o-unit')||'бр.',
     agent:v('o-agent')||currentUser.display_name,
     notes:v('o-notes'),delivery:delivery,status:calcStatus(delivery,'new')
   }).then(function(res){
@@ -155,7 +152,7 @@ function renderTransportPrint(o){
         '<tr><td>Клиент:</td><td>'+esc(o.customer_name||'')+'</td></tr>'+
         '<tr><td>Адрес:</td><td>'+esc(o.address||'')+'</td></tr>'+
         '<tr><td>Телефон за връзка:</td><td>'+esc(o.phone||'')+'</td></tr>'+
-        '<tr><td>Продукти:</td><td>'+prod+' ('+esc(String(o.qty||1))+' бр.)</td></tr>'+
+        '<tr><td>Продукти:</td><td>'+prod+' ('+esc(String(o.qty||1))+' '+esc(o.unit||'бр.')+')</td></tr>'+
       '</table>'+
       '<div class="p-deliv">'+
         '<span><b>Дата за доставка:</b> '+fmtDate(o.delivery)+'</span>'+

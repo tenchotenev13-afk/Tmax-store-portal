@@ -7,6 +7,7 @@ function calcElapsed(createdAt){
 }
 
 function elapsedBadge(days, status){
+  /* Не показваме за финални статуси */
   if(['done','refused','postponed'].indexOf(status)>=0) return '';
   if(days<5) return '<span style="font-size:11px;color:#94a3b8;">'+days+' дни</span>';
   if(days<7)  return '<span style="font-size:11px;font-weight:600;color:#d97706;background:#fef3c7;padding:2px 7px;border-radius:20px;">⚠️ '+days+' дни</span>';
@@ -23,24 +24,23 @@ function elapsedRowStyle(days, baseStatus){
 }
 
 function loadClientOrders(){
-  var d7=new Date();d7.setDate(d7.getDate()-7);
-  var cutoff=d7.toISOString().slice(0,10);
+  var q='order=created_at.desc';
   var stores=assignedStores();
-  var storeFilter='';
-  if(stores&&stores.length===1){
+  if(!stores){
+    /* admin без ограничение - вижда всичко */
+  } else if(stores.length===1){
     var s=encodeURIComponent(stores[0]);
-    storeFilter='&or=(store_name.eq.'+s+',fulfiller.eq.'+s+')';
-  } else if(stores&&stores.length>1){
+    q+='&or=(store_name.eq.'+s+',fulfiller.eq.'+s+')';
+  } else {
     var orParts=stores.map(function(st){var s=encodeURIComponent(st);return 'store_name.eq.'+s+',fulfiller.eq.'+s;}).join(',');
-    storeFilter='&or=('+orParts+')';
+    q+='&or=('+orParts+')';
   }
-  var q='order=created_at.desc'+storeFilter+
-    '&or=(status.in.(pending,approved,postponed,overdue,today,tomorrow),and(status.in.(done,refused),delivery.gte.'+cutoff+'),and(status.in.(done,refused),created_at.gte.'+cutoff+'T00:00:00))';
   sbGet('client_orders',q).then(function(data){
     clientOrders=Array.isArray(data)?data:[];
     clientOrders.forEach(function(o){
       o._status=calcStatus(o.delivery,o.status);
       o._days=calcElapsed(o.created_at);
+      /* Маркираме дали текущия магазин е изпълнителят */
       o._isFulfiller=!isGlobal()&&o.fulfiller===currentUser.store_name&&o.store_name!==currentUser.store_name;
     });
     renderClientOrders();renderMetrics();updateBadges();
@@ -52,41 +52,38 @@ function renderClientOrders(){
     return orderFilter==='all'||o._status===orderFilter||o.status===orderFilter;
   });
   var body=document.getElementById('co-body');if(!body)return;
-  if(!list.length){body.innerHTML='<tr><td colspan="13" style="text-align:center;padding:30px;color:#94a3b8;">Няма клиентски заявки.</td></tr>';return;}
+  if(!list.length){body.innerHTML='<tr><td colspan="14" style="text-align:center;padding:30px;color:#94a3b8;">Няма клиентски заявки.</td></tr>';return;}
   var isAdmin=currentUser&&['admin','accounting'].indexOf(currentUser.role)>=0;
   body.innerHTML=list.map(function(o){
     var urgent=o._status==='overdue'||o._status==='today';
     var bdrColor={overdue:'#dc2626',today:'#2563eb',tomorrow:'#d97706'}[o._status]||'transparent';
     var rowStyle='border-left:3px solid '+bdrColor+';'+(urgent?'animation:rowPulse 2s infinite;':'');
-    /* Изпълнява колона */
     var fulfillerCell=o.fulfiller&&o.fulfiller!==o.store_name
       ?'<span style="background:#eff6ff;color:#1e40af;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">🏪 '+esc(o.fulfiller)+'</span>'
       :'<span style="color:#94a3b8;font-size:10px;">—</span>';
-    /* Заявител / Изпълнява колона */
     var storeCell=o.fulfiller&&o.fulfiller!==o.store_name
       ?'<div style="font-size:10px;color:#94a3b8;">Заявител:</div><b>'+esc(o.store_name||'')+'</b><div style="font-size:10px;color:#2563eb;margin-top:2px;">Изпълнява: <b>'+esc(o.fulfiller)+'</b></div>'
       :esc(o.store_name||'');
-    /* Бутони за действия */
-    var btns='<div style="display:flex;gap:4px;flex-wrap:wrap;">';
     var myStore=currentUser&&currentUser.store_name;
     var done=o._status==='done'||o._status==='refused'||o.status==='done'||o.status==='refused';
     var isRequester=isAdmin||!o.fulfiller||o.store_name===myStore||isGlobal();
     var isFulfiller=o.fulfiller&&o.fulfiller===myStore&&!isRequester;
+    var btns='<div style="display:flex;gap:4px;flex-wrap:wrap;">';
     if(!done){
       if(isRequester){
-        btns+='<button onclick="openStatus(\''+o.id+'\',\'client_orders\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">Статус</button>';
+        btns+='<button data-id="'+o.id+'" onclick="openStatus(this.dataset.id,&apos;client_orders&apos;)" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">Статус</button>';
       } else if(isFulfiller){
-        btns+='<button onclick="setClientStatus(\''+o.id+'\',\'done\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📦 Изпратена</button>';
-        btns+='<button onclick="setClientStatus(\''+o.id+'\',\'refused\')" style="border:1px solid #dc2626;background:#fff1f2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕ Откаже</button>';
+        btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;done&apos;)" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📦 Изпратена</button>';
+        btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;refused&apos;)" style="border:1px solid #dc2626;background:#fff1f2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕ Откаже</button>';
       }
     } else {
       if(isRequester){
-        btns+='<button onclick="revertStatus(\''+o.id+'\',\'client_orders\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">↩ Върни</button>';
+        btns+='<button data-id="'+o.id+'" onclick="revertStatus(this.dataset.id,&apos;client_orders&apos;)" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">↩ Върни</button>';
       }
     }
-    btns+='<button onclick="loadPrint(\''+o.id+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🖨 Бланка</button>';
+    btns+='<button data-id="'+o.id+'" onclick="loadPrint(this.dataset.id)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🖨 Бланка</button>';
     if(isAdmin){
-      btns+='<button onclick="deleteClientOrder(\''+o.id+'\')" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button>';
+      btns+='<button data-id="'+o.id+'" onclick="deleteClientOrder(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button>';
     }
     btns+='</div>';
     return '<tr style="'+rowStyle+'">'+
@@ -96,7 +93,7 @@ function renderClientOrders(){
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
       '<td style="font-family:monospace;font-size:11px;">'+esc(o.sap||'—')+'</td>'+
       '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
-      '<td style="text-align:center;">'+esc(String(o.qty||1))+'</td>'+
+      '<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>'+
       '<td>'+esc(o.from_store||'')+'</td>'+
       '<td style="font-size:11px;">'+fulfillerCell+'</td>'+
       '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
@@ -105,6 +102,12 @@ function renderClientOrders(){
       '<td style="font-size:11px;">'+storeCell+'</td>'+
       '<td>'+btns+'</td></tr>';
   }).join('');
+}
+
+function filterOrders(f,btn){
+  orderFilter=f;
+  document.querySelectorAll('#co-filters .filter-btn').forEach(function(b){b.classList.remove('active');});
+  if(btn)btn.classList.add('active');renderClientOrders();
 }
 
 function setClientStatus(id,status){
@@ -121,12 +124,6 @@ function deleteClientOrder(id){
   });
 }
 
-function filterOrders(f,btn){
-  orderFilter=f;
-  document.querySelectorAll('#co-filters .filter-btn').forEach(function(b){b.classList.remove('active');});
-  if(btn)btn.classList.add('active');renderClientOrders();
-}
-
 function openClientModal(){
   ['c-bon','c-sap','c-name','c-phone','c-product','c-color','c-agent','c-note'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.value='';
@@ -137,6 +134,7 @@ function openClientModal(){
   document.getElementById('c-delivery').value='';
   document.getElementById('c-from-store').value=currentUser.store_name;
   document.getElementById('c-fulfiller').value=currentUser.store_name;
+  if(document.getElementById('c-unit'))document.getElementById('c-unit').value='бр.';
   document.getElementById('client-modal').classList.add('open');
 }
 
@@ -149,7 +147,7 @@ function submitClientOrder(){
     in_num:num,store_name:currentUser.store_name,
     date:v('c-date'),hour:v('c-hour'),bon:v('c-bon'),sap:v('c-sap'),
     customer_name:name,phone:phone,
-    product:product,color:v('c-color'),qty:parseInt(v('c-qty'))||1,
+    product:product,color:v('c-color'),qty:parseFloat(v('c-qty'))||1,unit:v('c-unit')||'бр.',
     from_store:v('c-from-store'),fulfiller:v('c-fulfiller'),
     agent:v('c-agent')||currentUser.display_name,
     delivery:delivery,status:calcStatus(delivery,'new'),note:v('c-note')
@@ -207,7 +205,7 @@ function renderPrint(o){
             '<div style="font-size:12px;">'+esc(o.color||'—')+'</div></div>'+
           '<div style="background:#f9f8f6;border-radius:5px;padding:7px 9px;">'+
             '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Количество</div>'+
-            '<div style="font-size:12px;">'+esc(String(o.qty||1))+' бр.</div></div>'+
+            '<div style="font-size:12px;">'+esc(String(o.qty||1))+' '+esc(o.unit||'бр.')+'</div></div>'+
           '<div style="background:#fff8e1;border:1px solid #f0c940;border-radius:5px;padding:7px 9px;grid-column:1/-1;">'+
             '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">★ Дата на доставка</div>'+
             '<div style="font-size:13px;font-weight:700;color:#dc2626;">'+fmtDate(o.delivery)+'</div></div>'+
