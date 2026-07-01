@@ -506,10 +506,10 @@ function handleTransitExcelFile(file){
         var detectedFmt='old';
         wb.SheetNames.forEach(function(sheetName){
           var ws=wb.Sheets[sheetName];
-          var rows=window.XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd'});
+          var rows=window.XLSX.utils.sheet_to_json(ws,{header:1,raw:true});
           if(!rows.length)return;
           /* Определяме формата по ПЪРВИЯ ред (header или данни) */
-          if(rows[0][0]&&isNaN(parseInt(String(rows[0][0]).trim()))){
+          if(rows[0][0]&&(isNaN(parseInt(String(rows[0][0]).trim()))||typeof rows[0][0]==='string'&&rows[0][0].trim()==='Завод')){
             detectedFmt='new';
             /* Нов формат: пропускаме header */
             if(rows.length>1) allRows=allRows.concat(rows.slice(1));
@@ -548,12 +548,32 @@ function handleTransitExcelFile(file){
 
 function parseExcelDate(val){
   if(!val)return null;
-  if(val instanceof Date)return val.toISOString().slice(0,10);
+  /* Date обект от raw:true */
+  if(val instanceof Date){
+    if(isNaN(val.getTime()))return null;
+    var y=val.getFullYear();
+    var mo=String(val.getMonth()+1).padStart(2,'0');
+    var d=String(val.getDate()).padStart(2,'0');
+    return y+'-'+mo+'-'+d;
+  }
+  /* Excel serial number */
+  if(typeof val==='number'){
+    var d=new Date(Math.round((val-25569)*86400*1000));
+    return parseExcelDate(d);
+  }
   var s=String(val).trim();
+  /* DD.MM.YYYY */
   var m=s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/);
   if(m)return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
+  /* YYYY-MM-DD */
   var m2=s.match(/^(\d{4})-(\d{2})-(\d{2})/);
   if(m2)return m2[0];
+  /* M/D/YY или M/D/YYYY */
+  var m3=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2,4})$/);
+  if(m3){
+    var y=m3[3].length===2?'20'+m3[3]:m3[3];
+    return y+'-'+m3[1].padStart(2,'0')+'-'+m3[2].padStart(2,'0');
+  }
   return null;
 }
 
