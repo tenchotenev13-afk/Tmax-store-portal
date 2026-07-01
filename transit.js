@@ -253,7 +253,7 @@ function confirmClearTransit(){
 function exportTransitExcel(){
   if(!window.XLSX){
     var s=document.createElement('script');
-    s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.src='https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
     s.onload=exportTransitExcel;
     s.onerror=function(){toast('Грешка при зареждане на SheetJS','#dc2626');};
     document.head.appendChild(s);return;
@@ -465,7 +465,7 @@ function handleTransitExcelFile(file){
   if(window.XLSX)doImport();
   else{
     var s=document.createElement('script');
-    s.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    s.src='https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
     s.onload=doImport;s.onerror=function(){toast('Грешка SheetJS','#dc2626');};
     document.head.appendChild(s);
   }
@@ -674,10 +674,27 @@ function confirmTransitImport(){
         updated_at:new Date().toISOString()
       };
     });
-    sbPost('goods_transit',batch).then(function(res){
-      if(res.ok)inserted+=batch.length; else failed+=batch.length;
+    /* Batch INSERT директно - sbPost не поддържа масиви */
+    fetch('https://xiwkdiqqplgdcrkewgtv.supabase.co/rest/v1/goods_transit',{
+      method:'POST',
+      headers:{
+        'apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
+        'Authorization':'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
+        'Content-Type':'application/json',
+        'Prefer':'return=minimal'
+      },
+      body:JSON.stringify(batch)
+    }).then(function(r){
+      if(r.ok){inserted+=batch.length;}
+      else{
+        r.json().then(function(e){
+          console.error('Batch грешка:',JSON.stringify(e));
+          toast('Грешка: '+(e.message||e.error||JSON.stringify(e)),'#dc2626');
+        }).catch(function(){});
+        failed+=batch.length;
+      }
       next(idx+1);
-    }).catch(function(){failed+=batch.length;next(idx+1);});
+    }).catch(function(e){console.error('Fetch грешка:',e);failed+=batch.length;next(idx+1);});
   }
   next(0);
 }

@@ -664,7 +664,7 @@ function exportKasaToExcel(){
     doExport();
   } else {
     var script = document.createElement('script');
-    script.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    script.src = 'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
     script.onload = doExport;
     script.onerror = function(){ toast('Грешка при зареждане на SheetJS','#dc2626'); };
     document.head.appendChild(script);
