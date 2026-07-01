@@ -42,24 +42,41 @@ function canAddTransit(){
   return currentUser&&['admin','accounting','logistics'].indexOf(currentUser.role)>=0;
 }
 
-/* ── LOAD ── */
+/* ── LOAD с pagination ── */
 function loadTransit(){
   var wrap=document.getElementById('mod-transit');
   if(wrap)wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
-  var q='order=doc_date.desc,purchase_doc.asc,position.asc&limit=5000';
-  /* Магазинните роли виждат и incoming И outgoing свои записи */
+  
+  var storeFilter='';
   if(!isGlobal()){
     var store=currentUser.store_name||'';
     var se=encodeURIComponent(store);
-    q+='&or=(store_name.eq.'+se+',supplier.ilike.*'+se+'*)';
+    storeFilter='&or=(store_name.eq.'+se+',supplier.ilike.*'+se+'*)';
   }
-  sbGet('goods_transit',q).then(function(data){
-    transitData=Array.isArray(data)?data:[];
-    renderTransit();
-  }).catch(function(err){
-    var w=document.getElementById('mod-transit');
-    if(w)w.innerHTML='<div style="color:#dc2626;padding:40px;text-align:center;">DB грешка: '+(err&&err.message?err.message:JSON.stringify(err))+'</div>';
-  });
+  
+  /* Зареждаме всички записи с pagination по 1000 */
+  transitData=[];
+  function loadPage(offset){
+    var q='order=doc_date.desc,purchase_doc.asc,position.asc&limit=1000&offset='+offset+storeFilter;
+    sbGet('goods_transit',q).then(function(data){
+      if(!Array.isArray(data)||!data.length){
+        /* Всички заредени */
+        renderTransit();
+        return;
+      }
+      transitData=transitData.concat(data);
+      if(data.length===1000){
+        /* Може да има още */
+        loadPage(offset+1000);
+      }else{
+        renderTransit();
+      }
+    }).catch(function(err){
+      var w=document.getElementById('mod-transit');
+      if(w)w.innerHTML='<div style="color:#dc2626;padding:40px;text-align:center;">DB грешка: '+(err&&err.message?err.message:JSON.stringify(err))+'</div>';
+    });
+  }
+  loadPage(0);
 }
 
 /* ── RENDER ── */
