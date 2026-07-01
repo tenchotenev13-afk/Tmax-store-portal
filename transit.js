@@ -400,7 +400,7 @@ function submitTransit(){
     direction:document.getElementById('tr-direction').value||'incoming',
     store_name:store,
     supplier:document.getElementById('tr-supplier').value.trim(),
-    purchase_doc:document.getElementById('tr-purchase-doc').value.trim(),
+    purchase_doc:String(document.getElementById('tr-purchase-doc').value.trim()),
     position:parseInt(document.getElementById('tr-position').value)||null,
     doc_date:document.getElementById('tr-doc-date').value||null,
     material_code:document.getElementById('tr-material-code').value.trim(),
@@ -448,25 +448,39 @@ function handleTransitExcelFile(file){
       try{
         var data=new Uint8Array(e.target.result);
         var wb=window.XLSX.read(data,{type:'array',cellDates:true});
-        /* Четем ВСИЧКИ sheet-ове */
+        /* Четем ВСИЧКИ sheet-ове, пропускаме header */
         var allRows=[];
         wb.SheetNames.forEach(function(sheetName){
           var ws=wb.Sheets[sheetName];
           var rows=window.XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd'});
-          if(rows.length>1) allRows=allRows.concat(rows.slice(1)); /* skip header */
+          /* Пропускаме header ред само ако е нов формат (ред 0 е текст) */
+          var startIdx=(rows.length>0&&rows[0][0]&&isNaN(parseInt(rows[0][0])))?1:0;
+          if(rows.length>startIdx) allRows=allRows.concat(rows.slice(startIdx));
         });
+        if(!allRows.length){toast('Файлът е празен или невалиден','#dc2626');return;}
         parseTransitRows(allRows);
       }catch(err){
         toast('Грешка при четене: '+err.message,'#dc2626');
+        console.error('Excel error:',err);
       }
     };
     reader.readAsArrayBuffer(file);
   }
-  if(window.XLSX)doImport();
-  else{
+  /* XLSX се зарежда от index.html - трябва да е готов */
+  if(window.XLSX){
+    doImport();
+  } else {
+    toast('⏳ Зарежда се Excel библиотека...','#2563eb');
     var s=document.createElement('script');
-    s.src='https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
-    s.onload=doImport;s.onerror=function(){toast('Грешка SheetJS','#dc2626');};
+    s.src='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onload=function(){ setTimeout(doImport,200); };
+    s.onerror=function(){
+      var s2=document.createElement('script');
+      s2.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+      s2.onload=function(){ setTimeout(doImport,200); };
+      s2.onerror=function(){ toast('Грешка: Excel библиотеката не може да се зареди. Опитай с Chrome.','#dc2626'); };
+      document.head.appendChild(s2);
+    };
     document.head.appendChild(s);
   }
 }
@@ -525,8 +539,13 @@ function parseTransitRows(rows){
   if(!rows||!rows.length){toast('Файлът е празен','#dc2626');return;}
   
   var fmt=detectSapFormat(rows);
-  /* Пропускаме header ред ако е нов формат */
-  var dataRows=(fmt==='new')?rows.slice(1):rows;
+  /* При нов формат headers вече са пропуснати в handleTransitExcelFile
+     При стар формат данните са директно */
+  var dataRows=rows;
+  /* Ако пак има header - пропускаме го */
+  if(dataRows.length>0 && dataRows[0][0] && isNaN(parseInt(dataRows[0][0]))){
+    dataRows=dataRows.slice(1);
+  }
   
   var parsed=dataRows.map(function(row){
     if(!row[0])return null;
@@ -571,7 +590,7 @@ function parseTransitRows(rows){
     return {
       plant:plant, direction:direction, store_name:store,
       supplier:parseSupplierName(supplierRaw),
-      purchase_doc:purchase_doc, position:position, doc_date:doc_date,
+      purchase_doc:String(purchase_doc||''), position:position, doc_date:doc_date,
       material_code:material_code, material_name:material_name,
       ordered_qty:ordered_qty, unit:unit, remaining_qty:remaining_qty,
       comment:'',     /* Магазините попълват ръчно в портала */
@@ -664,9 +683,9 @@ function confirmTransitImport(){
     }
     var batch=batches[idx].map(function(r){
       return {
-        direction:r.direction,store_name:r.store_name,supplier:r.supplier,
-        purchase_doc:r.purchase_doc,position:r.position,doc_date:r.doc_date,
-        material_code:r.material_code,material_name:r.material_name,
+        direction:r.direction,store_name:r.store_name,supplier:String(r.supplier||''),
+        purchase_doc:String(r.purchase_doc||''),position:r.position,doc_date:r.doc_date,
+        material_code:String(r.material_code||''),material_name:String(r.material_name||''),
         ordered_qty:r.ordered_qty,unit:r.unit,remaining_qty:r.remaining_qty,
         comment:r.comment,transfer_date:r.transfer_date,
         status:'pending',
