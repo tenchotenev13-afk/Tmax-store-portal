@@ -13,7 +13,9 @@ var PLANT_INCOMING = {
   '5516':'Добрич','5519':'Гоце Делчев','5520':'Силистра','5521':'Раднево',
   '5522':'Дупница','5523':'Петрич','5524':'Пирдоп','5525':'Троян',
   '5526':'Карлово','5527':'Козлодуй',
-  '5518':'Логистичен склад Добрич','5505':'Логистичен склад Търговище'
+  '5518':'Логистичен склад Добрич','5505':'Логистичен склад Търговище',
+  /* Допълнителни обекти */
+  '5531':'Сервиз Троян','5510':'Администрация','5506':'Пазарджик'
 };
 var PLANT_OUTGOING = {
   '2502':'Севлиево','2503':'Враца','2513':'Сливен','2520':'Силистра',
@@ -502,9 +504,31 @@ function parseSupplierName(raw){
 
 var _transitImportRows=[];
 
+function detectSapFormat(rows){
+  /* Открива формата автоматично по header или по броя колони */
+  if(!rows||!rows.length)return 'old';
+  var first=rows[0];
+  /* Ако първия ред е header (текст в кол.0) */
+  if(first[0]&&isNaN(parseInt(first[0]))){
+    /* Нов формат: 18 колони с header */
+    /* Колони: Завод(0), Склад(1), Доставчик(2), Документ(3), Позиция(4),
+       Вид(5), Търг.орг(6), Снаб.гр(7), Инд(8), История(9),
+       Дата(10), Материал(11), Текст(12), Гр.мат(13), Кат(14),
+       Кол(15), МЕ(16), Остатък(17) */
+    return 'new';
+  }
+  /* Стар формат: без header, 13 колони */
+  return 'old';
+}
+
 function parseTransitRows(rows){
   if(!rows||!rows.length){toast('Файлът е празен','#dc2626');return;}
-  var parsed=rows.map(function(row){
+  
+  var fmt=detectSapFormat(rows);
+  /* Пропускаме header ред ако е нов формат */
+  var dataRows=(fmt==='new')?rows.slice(1):rows;
+  
+  var parsed=dataRows.map(function(row){
     if(!row[0])return null;
     var plant=String(row[0]||'').trim();
     var direction='incoming';
@@ -516,21 +540,42 @@ function parseTransitRows(rows){
     }else{
       return null; /* Непознат завод — пропускаме */
     }
-    var supplierRaw=String(row[1]||'').trim();
-    var supplierName=parseSupplierName(supplierRaw);
+    
+    var supplierRaw, purchase_doc, position, doc_date, 
+        material_code, material_name, ordered_qty, unit, remaining_qty;
+    
+    if(fmt==='new'){
+      /* Нов SAP формат — 18 колони с header */
+      supplierRaw  = String(row[2]||'').trim();
+      purchase_doc = String(row[3]||'').trim();
+      position     = parseInt(row[4])||null;
+      doc_date     = parseExcelDate(row[10]);
+      material_code= String(row[11]||'').trim();
+      material_name= String(row[12]||'').trim();
+      ordered_qty  = parseExcelNum(row[15]);
+      unit         = String(row[16]||'').trim();
+      remaining_qty= parseExcelNum(row[17]);
+    }else{
+      /* Стар формат — 13 колони без header */
+      supplierRaw  = String(row[1]||'').trim();
+      purchase_doc = String(row[2]||'').trim();
+      position     = parseInt(row[3])||null;
+      doc_date     = parseExcelDate(row[4]);
+      material_code= String(row[5]||'').trim();
+      material_name= String(row[6]||'').trim();
+      ordered_qty  = parseExcelNum(row[7]);
+      unit         = String(row[8]||'').trim();
+      remaining_qty= parseExcelNum(row[9]);
+    }
+    
     return {
       plant:plant, direction:direction, store_name:store,
-      supplier:supplierName,
-      purchase_doc:String(row[2]||'').trim(),
-      position:parseInt(row[3])||null,
-      doc_date:parseExcelDate(row[4]),
-      material_code:String(row[5]||'').trim(),
-      material_name:String(row[6]||'').trim(),
-      ordered_qty:parseExcelNum(row[7]),
-      unit:String(row[8]||'').trim(),
-      remaining_qty:parseExcelNum(row[9]),
-      comment:String(row[10]||'').trim(),
-      transfer_date:parseExcelDate(row[11]),
+      supplier:parseSupplierName(supplierRaw),
+      purchase_doc:purchase_doc, position:position, doc_date:doc_date,
+      material_code:material_code, material_name:material_name,
+      ordered_qty:ordered_qty, unit:unit, remaining_qty:remaining_qty,
+      comment:'',     /* Магазините попълват ръчно в портала */
+      transfer_date:null,
     };
   }).filter(Boolean).filter(function(r){return r.material_code||r.material_name;});
 
