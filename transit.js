@@ -114,7 +114,7 @@ function renderTransit(){
     if(transitFilter==='rejected') return r.status==='rejected';
     return true;
   });
-  if(transitStore) list=list.filter(function(r){return r.store_name===transitStore;});
+  if(transitStore) list=list.filter(function(r){return r.store_name===transitStore||r.supplier===transitStore;});
   if(transitMonthFilter) list=list.filter(function(r){
     return r.doc_date&&r.doc_date.slice(0,7)===transitMonthFilter;
   });
@@ -126,8 +126,12 @@ function renderTransit(){
     if(r.direction==='outgoing') counts.outCount++;
     else counts.incCount++;
   });
-  var allCounts={pending:0,received:0,rejected:0};
-  transitData.forEach(function(r){if(allCounts[r.status]!==undefined)allCounts[r.status]++;});
+  /* allCounts по direction за таб надписите */
+  var allCounts={pending:0,received:0,rejected:0,outPending:0};
+  transitData.forEach(function(r){
+    if(r.direction==='outgoing'){if(r.status==='pending')allCounts.outPending++;}
+    else{if(allCounts[r.status]!==undefined)allCounts[r.status]++;}
+  });
 
   /* Магазини за dropdown */
   var stores={};
@@ -163,7 +167,7 @@ function renderTransit(){
   h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:500px;">';
   [['all','📦📤 Всички','all'+(transitData.length?' ('+transitData.length+')':'')],
    ['incoming','📦 Получавам','('+allCounts.pending+' чакат)'],
-   ['outgoing','📤 Изпращам','']].forEach(function(t){
+   ['outgoing','📤 Изпращам','('+allCounts.outPending+' чакат)']].forEach(function(t){
     var active=transitDir===t[0];
     h+='<button onclick="transitDir=\''+t[0]+'\';renderTransit()" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';">'+t[1]+'<div style="font-size:10px;opacity:0.7;">'+t[2]+'</div></button>';
   });
@@ -176,10 +180,13 @@ function renderTransit(){
     var cnt=f[0]==='all'?viewData.length:counts[f[0]]||0;
     h+='<button onclick="transitFilter=\''+f[0]+'\';renderTransit()" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+' ('+cnt+')</button>';
   });
-  /* Магазин dropdown - всички уникални магазини от данните */
+  /* Магазин dropdown - получатели + доставчици */
   var allStores={};
-  transitData.forEach(function(r){if(r.store_name)allStores[r.store_name]=1;});
-  var allStoreList=Object.keys(allStores).sort();
+  transitData.forEach(function(r){
+    if(r.store_name)allStores[r.store_name]=1;
+    if(r.supplier)allStores[r.supplier]=1;
+  });
+  var allStoreList=Object.keys(allStores).sort(function(a,b){return a.localeCompare(b,'bg');});
   if(allStoreList.length>0){
     h+='<select onchange="setTStore(this.value)" style="border:1px solid #e2e8f0;border-radius:8px;padding:5px 10px;font-size:12px;font-family:inherit;">';
     h+='<option value="">Всички магазини</option>';
