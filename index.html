@@ -3,15 +3,15 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ТеМАХ — Вътрешна платформа</title>
-<link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon-192.png" type="image/png">
 <meta name="theme-color" content="#0f172a">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="ТеМАХ">
 <link rel="apple-touch-icon" href="icon-192.png">
+<title>ТеМАХ — Вътрешна платформа</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png" type="image/png">
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 :root{--dark:#0f172a;--red:#e02020;--blu:#2563eb;--grn:#16a34a;--amb:#d97706;--border:#e2e8f0;--text:#0f172a;--muted:#64748b;--surf:#f8fafc;--r:10px;}
@@ -53,17 +53,6 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .btn-sm{border:1px solid #334155;background:none;color:#94a3b8;font-size:12px;padding:4px 12px;border-radius:6px;cursor:pointer;font-family:inherit;}
 .btn-sm:hover{border-color:#aaa;color:#fff;}
 
-/* ── MOBILE NAV FIX ── */
-@media(max-width:768px){
-  .nav{grid-template-columns:auto 1fr auto;}
-  .nav-tabs{justify-content:flex-start;}
-  .nav-tab{min-width:60px;padding:6px 8px;}
-  .nav-tab .ti{font-size:18px;}
-  .nav-tab .tl{font-size:8px;}
-  .store-chip{display:none;}
-  .user-chip{font-size:11px;}
-  .btn-sm{padding:3px 8px;font-size:11px;}
-}
 /* ── PAGES ── */
 .page{max-width:1300px;width:100%;margin:0 auto;padding:20px 16px 60px;}
 .pg-title{font-size:20px;font-weight:600;margin-bottom:2px;}
@@ -175,6 +164,8 @@ OneSignalDeferred.push(async function(OneSignal) {
   });
 });
 </script>
+  <!-- SheetJS -->
+  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <div class="toast" id="toast"></div>
@@ -347,8 +338,8 @@ OneSignalDeferred.push(async function(OneSignal) {
     </div>
   </div>
 
-  <!-- HISTORY -->  <div id="backup-admin-section"></div>
-
+  <!-- HISTORY -->
+  <div id="backup-admin-section"></div>
   <div id="mod-history" style="display:none;"></div>
 
   <!-- PRINT -->
@@ -571,8 +562,5 @@ function loadTabOrder(){
 <script src="push.js"></script>
 <script src="email.js"></script>
 <script src="notifications.js"></script>
-<script>
-/* ── PWA — manifest само, без отделен SW (OneSignal вече управлява SW) ── */
-</script>
 </body>
 </html>
