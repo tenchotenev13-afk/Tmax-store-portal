@@ -45,7 +45,7 @@ function canAddTransit(){
 function loadTransit(){
   var wrap=document.getElementById('mod-transit');
   if(wrap)wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
-  var q='order=doc_date.desc,purchase_doc.asc,position.asc';
+  var q='order=doc_date.desc,purchase_doc.asc,position.asc&limit=2000';
   /* Магазинните роли виждат и incoming И outgoing свои записи */
   if(!isGlobal()){
     var store=currentUser.store_name||'';
