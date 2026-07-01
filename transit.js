@@ -727,7 +727,7 @@ function confirmTransitImport(){
   if(!rows.length){toast('Няма редове за импорт','#dc2626');return;}
   toast('⏳ Импортиране на '+rows.length+' реда ('+Math.ceil(rows.length/25)+' batch-а)...');
   var batches=[];
-  for(var i=0;i<rows.length;i+=20)batches.push(rows.slice(i,i+25));
+  for(var i=0;i<rows.length;i+=50)batches.push(rows.slice(i,i+50));
   var inserted=0,failed=0;
   function next(idx){
     if(idx>=batches.length){
