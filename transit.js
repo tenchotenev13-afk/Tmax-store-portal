@@ -450,15 +450,23 @@ function handleTransitExcelFile(file){
         var wb=window.XLSX.read(data,{type:'array',cellDates:true});
         /* Четем ВСИЧКИ sheet-ове, пропускаме header */
         var allRows=[];
+        var detectedFmt='old';
         wb.SheetNames.forEach(function(sheetName){
           var ws=wb.Sheets[sheetName];
           var rows=window.XLSX.utils.sheet_to_json(ws,{header:1,raw:false,dateNF:'yyyy-mm-dd'});
-          /* Пропускаме header ред само ако е нов формат (ред 0 е текст) */
-          var startIdx=(rows.length>0&&rows[0][0]&&isNaN(parseInt(rows[0][0])))?1:0;
-          if(rows.length>startIdx) allRows=allRows.concat(rows.slice(startIdx));
+          if(!rows.length)return;
+          /* Определяме формата по ПЪРВИЯ ред (header или данни) */
+          if(rows[0][0]&&isNaN(parseInt(String(rows[0][0]).trim()))){
+            detectedFmt='new';
+            /* Нов формат: пропускаме header */
+            if(rows.length>1) allRows=allRows.concat(rows.slice(1));
+          }else{
+            /* Стар формат: без header */
+            allRows=allRows.concat(rows);
+          }
         });
         if(!allRows.length){toast('Файлът е празен или невалиден','#dc2626');return;}
-        parseTransitRows(allRows);
+        parseTransitRows(allRows, detectedFmt);
       }catch(err){
         toast('Грешка при четене: '+err.message,'#dc2626');
         console.error('Excel error:',err);
@@ -535,15 +543,14 @@ function detectSapFormat(rows){
   return 'old';
 }
 
-function parseTransitRows(rows){
+function parseTransitRows(rows, forceFmt){
   if(!rows||!rows.length){toast('Файлът е празен','#dc2626');return;}
   
-  var fmt=detectSapFormat(rows);
-  /* При нов формат headers вече са пропуснати в handleTransitExcelFile
-     При стар формат данните са директно */
+  /* Ако форматът е подаден директно - използваме го, иначе го определяме */
+  var fmt=forceFmt||detectSapFormat(rows);
   var dataRows=rows;
-  /* Ако пак има header - пропускаме го */
-  if(dataRows.length>0 && dataRows[0][0] && isNaN(parseInt(dataRows[0][0]))){
+  /* Ако пак има header ред (текст в кол.0) - пропускаме го */
+  if(dataRows.length>0&&dataRows[0][0]&&isNaN(parseInt(String(dataRows[0][0]).trim()))){
     dataRows=dataRows.slice(1);
   }
   
