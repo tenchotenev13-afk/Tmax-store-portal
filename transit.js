@@ -42,38 +42,54 @@ function canAddTransit(){
   return currentUser&&['admin','accounting','logistics'].indexOf(currentUser.role)>=0;
 }
 
-/* ── LOAD с pagination ── */
+/* ── LOAD с pagination чрез Range header ── */
 function loadTransit(){
   var wrap=document.getElementById('mod-transit');
   if(wrap)wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
-  
+
   var storeFilter='';
   if(!isGlobal()){
     var store=currentUser.store_name||'';
     var se=encodeURIComponent(store);
     storeFilter='&or=(store_name.eq.'+se+',supplier.ilike.*'+se+'*)';
   }
-  
-  /* Зареждаме всички записи с pagination по 1000 */
+
   transitData=[];
-  function loadPage(offset){
-    var q='order=doc_date.desc,purchase_doc.asc,position.asc&limit=1000&offset='+offset+storeFilter;
-    sbGet('goods_transit',q).then(function(data){
-      if(!Array.isArray(data)||!data.length){
-        /* Всички заредени */
-        renderTransit();
-        return;
+  var SB_URL='https://xiwkdiqqplgdcrkewgtv.supabase.co';
+  var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
+
+  function loadPage(from){
+    var to=from+999;
+    fetch(SB_URL+'/rest/v1/goods_transit?order=doc_date.desc,purchase_doc.asc,position.asc'+storeFilter,{
+      headers:{
+        'apikey':SB_KEY,
+        'Authorization':'Bearer '+SB_KEY,
+        'Range':from+'-'+to,
+        'Range-Unit':'items',
+        'Prefer':'count=exact'
       }
+    }).then(function(r){
+      var range=r.headers.get('content-range')||'';
+      return r.json().then(function(data){
+        return {data:data,range:range};
+      });
+    }).then(function(res){
+      var data=Array.isArray(res.data)?res.data:[];
       transitData=transitData.concat(data);
-      if(data.length===1000){
-        /* Може да има още */
-        loadPage(offset+1000);
+      /* Парсваме total от content-range: "0-999/1305" */
+      var total=0;
+      var m=res.range.match(/\/(\d+)$/);
+      if(m)total=parseInt(m[1]);
+      var loaded=transitData.length;
+      if(total>0&&loaded<total&&data.length===1000){
+        /* Има още - зареждаме следващата страница */
+        loadPage(from+1000);
       }else{
         renderTransit();
       }
     }).catch(function(err){
       var w=document.getElementById('mod-transit');
-      if(w)w.innerHTML='<div style="color:#dc2626;padding:40px;text-align:center;">DB грешка: '+(err&&err.message?err.message:JSON.stringify(err))+'</div>';
+      if(w)w.innerHTML='<div style="color:#dc2626;padding:40px;">Грешка: '+JSON.stringify(err)+'</div>';
     });
   }
   loadPage(0);
