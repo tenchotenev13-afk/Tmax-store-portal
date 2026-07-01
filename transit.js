@@ -5,6 +5,7 @@ var transitFilter = 'pending';
 var transitStore  = '';
 var transitDir    = 'all'; /* 'all' | 'incoming' | 'outgoing' */
 var transitEditId = null;
+var transitMonthFilter = ''; /* 'YYYY-MM' за филтър по месец */
 
 /* ── PLANT MAPPING ── */
 var PLANT_INCOMING = {
@@ -45,7 +46,7 @@ function canAddTransit(){
 function loadTransit(){
   var wrap=document.getElementById('mod-transit');
   if(wrap)wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
-  var q='order=doc_date.desc,purchase_doc.asc,position.asc&limit=2000';
+  var q='order=doc_date.desc,purchase_doc.asc,position.asc&limit=5000';
   /* Магазинните роли виждат и incoming И outgoing свои записи */
   if(!isGlobal()){
     var store=currentUser.store_name||'';
@@ -81,6 +82,9 @@ function renderTransit(){
     return true;
   });
   if(transitStore) list=list.filter(function(r){return r.store_name===transitStore;});
+  if(transitMonthFilter) list=list.filter(function(r){
+    return r.doc_date&&r.doc_date.slice(0,7)===transitMonthFilter;
+  });
 
   /* Статистика */
   var counts={pending:0,received:0,rejected:0,incCount:0,outCount:0};
@@ -132,18 +136,27 @@ function renderTransit(){
   });
   h+='</div>';
 
-  /* Статус + магазин филтри */
+  /* Статус + магазин + дата филтри */
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">';
   [['all','Всички'],['pending','⏳ Не доставени'],['received','✅ Прието'],['rejected','✕ Неприето']].forEach(function(f){
     var a=transitFilter===f[0];
     var cnt=f[0]==='all'?viewData.length:counts[f[0]]||0;
     h+='<button onclick="transitFilter=\''+f[0]+'\';renderTransit()" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+' ('+cnt+')</button>';
   });
-  if(isAdmin&&storeList.length>1){
+  /* Магазин dropdown - всички уникални магазини от данните */
+  var allStores={};
+  transitData.forEach(function(r){if(r.store_name)allStores[r.store_name]=1;});
+  var allStoreList=Object.keys(allStores).sort();
+  if(allStoreList.length>0){
     h+='<select onchange="setTStore(this.value)" style="border:1px solid #e2e8f0;border-radius:8px;padding:5px 10px;font-size:12px;font-family:inherit;">';
     h+='<option value="">Всички магазини</option>';
-    storeList.forEach(function(s){h+='<option value="'+esc(s)+'"'+(transitStore===s?' selected':'')+'>'+esc(s)+'</option>';});
+    allStoreList.forEach(function(s){h+='<option value="'+esc(s)+'"'+(transitStore===s?' selected':'')+'>'+esc(s)+'</option>';});
     h+='</select>';
+  }
+  /* Филтър по месец */
+  h+='<input type="month" id="t-month" value="'+transitMonthFilter+'" onchange="transitMonthFilter=this.value;renderTransit()" style="border:1px solid #e2e8f0;border-radius:8px;padding:5px 10px;font-size:12px;font-family:inherit;" title="Филтър по месец">';
+  if(transitMonthFilter){
+    h+='<button onclick="transitMonthFilter=\'\';document.getElementById(\'t-month\').value=\'\';renderTransit()" style="border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;">✕ Всички</button>';
   }
   h+='</div>';
 
@@ -557,15 +570,16 @@ function parseTransitRows(rows, forceFmt){
   var parsed=dataRows.map(function(row){
     if(!row[0])return null;
     var plant=String(row[0]||'').trim();
-    var direction='incoming';
-    var store=null;
-    if(PLANT_INCOMING[plant]){
-      direction='incoming';store=PLANT_INCOMING[plant];
-    }else if(PLANT_OUTGOING[plant]){
-      direction='outgoing';store=PLANT_OUTGOING[plant];
-    }else{
-      return null; /* Непознат завод — пропускаме */
-    }
+    /* Заводът определя КОЙ ПОЛУЧАВА стоката */
+    var store=PLANT_INCOMING[plant]||PLANT_OUTGOING[plant]||null;
+    if(!store)return null; /* Непознат завод */
+    
+    /* Посоката се определя от ДОСТАВЧИКА:
+       Ако доставчикът е с outgoing код (2xxx/6xxx/7xxx) = магазин изпраща = outgoing
+       Ако доставчикът е с incoming код (5xxx) = склад/логистика изпраща = incoming */
+    var supplierCodeRaw = (fmt==='new'?String(row[2]||''):String(row[1]||'')).trim();
+    var supplierFirstCode = supplierCodeRaw.split(/\s+/)[0]||'';
+    var direction = PLANT_OUTGOING[supplierFirstCode] ? 'outgoing' : 'incoming';
     
     var supplierRaw, purchase_doc, position, doc_date, 
         material_code, material_name, ordered_qty, unit, remaining_qty;
