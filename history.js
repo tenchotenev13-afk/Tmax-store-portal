@@ -666,35 +666,96 @@ function loadHistoryDenomOverview(glData){
 function loadDailyOverview(){
   var el=document.getElementById('daily-overview');
   if(!el)return;
+
+  /* Определяме магазините за показване */
+  var stores=assignedStores();
+  /* assignedStores() връща null за admin/accounting (вижда всичко)
+     или масив от назначени магазини */
+  if(!stores&&currentUser&&currentUser.store_name){
+    /* Обикновен потребител - само неговия магазин */
+    stores=[currentUser.store_name];
+  }
+  if(!stores||!stores.length)return;
+
   var days=[];
   for(var i=1;i<=7;i++){ var d=new Date(); d.setDate(d.getDate()-i); days.push(d.toISOString().slice(0,10)); }
   var from=days[days.length-1], to=days[0];
-  var store=currentUser&&currentUser.store_name;
-  if(!store)return;
-  sbGet('kasa_reports','store_name=eq.'+encodeURIComponent(store)+'&date=gte.'+from+'&date=lte.'+to+'&select=date,status').then(function(data){
+
+  /* Заявка за всички магазини */
+  var storeQ2=stores.map(function(s){return 'store_name=eq.'+encodeURIComponent(s);}).join(',');
+  var q='or=('+storeQ2+')&date=gte.'+from+'&date=lte.'+to+'&select=date,store_name,status';
+
+  sbGet('kasa_reports',q).then(function(data){
+    /* reported[store][date] = status */
     var reported={};
-    if(Array.isArray(data))data.forEach(function(r){reported[r.date]=r.status;});
+    stores.forEach(function(s){reported[s]={};});
+    if(Array.isArray(data))data.forEach(function(r){
+      if(!reported[r.store_name])reported[r.store_name]={};
+      /* Ако има confirmed - запазваме confirmed, иначе draft */
+      if(!reported[r.store_name][r.date]||r.status==='confirmed'){
+        reported[r.store_name][r.date]=r.status;
+      }
+    });
+
     var dayNames=['Нед','Пон','Вт','Ср','Чет','Пет','Съб'];
     var html='<div class="card" style="margin-bottom:16px;">';
-    html+='<div class="card-title">📅 Последните 7 дни — '+esc(store)+'</div>';
-    html+='<div style="display:flex;gap:6px;flex-wrap:wrap;">';
-    days.slice().reverse().forEach(function(dateStr){
-      var d=new Date(dateStr+'T12:00:00'); var dow=d.getDay();
-      var isWeekend=dow===0||dow===6;
-      var status=reported[dateStr];
-      var bg,color,icon,label;
-      if(status==='confirmed'){bg='#f0fdf4';color='#16a34a';icon='✅';label='Потвърден';}
-      else if(status==='draft'){bg='#fef9c3';color='#92400e';icon='📝';label='Чернова';}
-      else if(isWeekend){bg='#f8fafc';color='#94a3b8';icon='🏖';label='Уикенд';}
-      else{bg='#fff1f2';color='#dc2626';icon='⚠️';label='Липсва';}
-      html+='<div data-date="'+dateStr+'" onclick="jumpToKasaDate(this.dataset.date)" style="background:'+bg+';border:1px solid '+(status?color:'#e2e8f0')+';border-radius:8px;padding:8px 12px;text-align:center;min-width:72px;cursor:pointer;" title="'+label+'">';
-      html+='<div style="font-size:10px;color:#94a3b8;">'+dayNames[dow]+'</div>';
-      html+='<div style="font-size:11px;font-weight:600;">'+dateStr.slice(8)+'.'+dateStr.slice(5,7)+'</div>';
-      html+='<div style="font-size:14px;">'+icon+'</div>';
-      html+='<div style="font-size:9px;color:'+color+';font-weight:600;">'+label+'</div>';
+    html+='<div class="card-title">📅 Статус отчети — последните 7 дни</div>';
+
+    /* Таблица: редове = магазини, колони = дни */
+    var isMulti=stores.length>1;
+    if(isMulti){
+      /* Таблична визуализация за счетоводител */
+      html+='<div class="tbl-wrap"><table style="font-size:12px;width:100%;">';
+      html+='<thead><tr><th style="text-align:left;padding:5px 8px;">Магазин</th>';
+      days.slice().reverse().forEach(function(dateStr){
+        var d=new Date(dateStr+'T12:00:00');
+        var dow=d.getDay();
+        html+='<th style="text-align:center;padding:5px 6px;min-width:54px;">'+
+          dayNames[dow]+'<br><span style="font-size:10px;color:#94a3b8;">'+
+          dateStr.slice(8)+'.'+dateStr.slice(5,7)+'</span></th>';
+      });
+      html+='</tr></thead><tbody>';
+      stores.slice().sort().forEach(function(store){
+        html+='<tr><td style="padding:5px 8px;font-weight:600;">'+esc(store)+'</td>';
+        days.slice().reverse().forEach(function(dateStr){
+          var d=new Date(dateStr+'T12:00:00'); var dow=d.getDay();
+          var isWeekend=dow===0||dow===6;
+          var status=reported[store]&&reported[store][dateStr];
+          var bg,color,icon;
+          if(status==='confirmed'){bg='#f0fdf4';color='#16a34a';icon='✅';}
+          else if(status==='draft'){bg='#fef9c3';color='#92400e';icon='📝';}
+          else if(isWeekend){bg='#f8fafc';color='#94a3b8';icon='🏖';}
+          else{bg='#fff1f2';color='#dc2626';icon='⚠️';}
+          html+='<td style="text-align:center;padding:4px;background:'+bg+';">';
+          html+='<span style="font-size:14px;">'+icon+'</span>';
+          html+='</td>';
+        });
+        html+='</tr>';
+      });
+      html+='</tbody></table></div>';
+    } else {
+      /* Карти за единичен магазин */
+      html+='<div style="font-size:12px;color:#64748b;margin-bottom:8px;">'+esc(stores[0])+'</div>';
+      html+='<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+      days.slice().reverse().forEach(function(dateStr){
+        var d=new Date(dateStr+'T12:00:00'); var dow=d.getDay();
+        var isWeekend=dow===0||dow===6;
+        var status=reported[stores[0]]&&reported[stores[0]][dateStr];
+        var bg,color,icon,label;
+        if(status==='confirmed'){bg='#f0fdf4';color='#16a34a';icon='✅';label='Потвърден';}
+        else if(status==='draft'){bg='#fef9c3';color='#92400e';icon='📝';label='Чернова';}
+        else if(isWeekend){bg='#f8fafc';color='#94a3b8';icon='🏖';label='Уикенд';}
+        else{bg='#fff1f2';color='#dc2626';icon='⚠️';label='Липсва';}
+        html+='<div data-date="'+dateStr+'" onclick="jumpToKasaDate(this.dataset.date)" style="background:'+bg+';border:1px solid '+(status?color:'#e2e8f0')+';border-radius:8px;padding:8px 12px;text-align:center;min-width:72px;cursor:pointer;" title="'+label+'">';
+        html+='<div style="font-size:10px;color:#94a3b8;">'+dayNames[dow]+'</div>';
+        html+='<div style="font-size:11px;font-weight:600;">'+dateStr.slice(8)+'.'+dateStr.slice(5,7)+'</div>';
+        html+='<div style="font-size:14px;">'+icon+'</div>';
+        html+='<div style="font-size:9px;color:'+color+';font-weight:600;">'+label+'</div>';
+        html+='</div>';
+      });
       html+='</div>';
-    });
-    html+='</div>';
+    }
+
     html+='<div style="font-size:11px;color:#94a3b8;margin-top:8px;">✅ Потвърден &nbsp; 📝 Чернова &nbsp; ⚠️ Липсва &nbsp; 🏖 Уикенд</div>';
     html+='</div>';
     el.innerHTML=html;
