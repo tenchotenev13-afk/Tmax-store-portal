@@ -30,16 +30,28 @@ function loadHistory(){
 }
 
 function loadHistoryStores(){
-  sbGet('stores','select=name&order=name'+storeQ('name')).then(function(data){
-    histStores=Array.isArray(data)?data.map(function(s){return s.name;}):[]; 
-    /* Попълни dropdown */
+  /* За accounting с assigned_stores - показваме само техните магазини */
+  var assigned=assignedStores();
+  if(assigned&&assigned.length){
+    /* Директно попълваме от assigned_stores */
+    histStores=assigned.slice();
     var sel=document.getElementById('h-store');
     if(sel){
       histStores.forEach(function(name){
         var o=document.createElement('option');o.value=name;o.textContent=name;sel.appendChild(o);
       });
     }
-  }).catch(function(){});
+  } else {
+    sbGet('stores','select=name&order=name'+storeQ('name')).then(function(data){
+      histStores=Array.isArray(data)?data.map(function(s){return s.name;}):[]; 
+      var sel=document.getElementById('h-store');
+      if(sel){
+        histStores.forEach(function(name){
+          var o=document.createElement('option');o.value=name;o.textContent=name;sel.appendChild(o);
+        });
+      }
+    }).catch(function(){});
+  }
 }
 
 function runHistorySearch(silent){
@@ -153,6 +165,7 @@ function renderHistoryResults(){
       ' &nbsp;|&nbsp; Общо: <b>'+totalAll+'</b> записа'+
     '</div>'+
     '<button onclick="printHistoryReport()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:500;cursor:pointer;">🖨 Разпечатай отчета</button>'+
+    (histData.kasa.length?'<button onclick="exportKasaToExcel()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;">📊 Експорт Excel</button>':'')+
   '</div>';
 
   /* Статистически карти */
@@ -686,14 +699,19 @@ function loadDailyOverview(){
   var q='or=('+storeQ2+')&date=gte.'+from+'&date=lte.'+to+'&select=date,store_name,status';
 
   sbGet('kasa_reports',q).then(function(data){
-    /* reported[store][date] = status */
+    /* reported[store][date] = статус:
+       confirmed = поне един ПОС е confirmed
+       draft = има записи но нито един confirmed */
     var reported={};
     stores.forEach(function(s){reported[s]={};});
     if(Array.isArray(data))data.forEach(function(r){
       if(!reported[r.store_name])reported[r.store_name]={};
-      /* Ако има confirmed - запазваме confirmed, иначе draft */
-      if(!reported[r.store_name][r.date]||r.status==='confirmed'){
-        reported[r.store_name][r.date]=r.status;
+      var cur=reported[r.store_name][r.date];
+      /* confirmed има приоритет */
+      if(r.status==='confirmed'){
+        reported[r.store_name][r.date]='confirmed';
+      } else if(!cur){
+        reported[r.store_name][r.date]='draft';
       }
     });
 
@@ -765,4 +783,89 @@ function loadDailyOverview(){
 function jumpToKasaDate(dateStr){
   if(typeof kasaSetDate==='function')kasaSetDate(dateStr);
   showModule('kasa');
+}
+
+/* ── Детайли за касов отчет по дата и магазин ── */
+function openKasaDetail(storeName, date){
+  /* Зареждаме всички ПОС отчети + Главна каса за деня */
+  var q='store_name=eq.'+encodeURIComponent(storeName)+'&date=eq.'+date;
+  Promise.all([
+    sbGet('kasa_reports', q+'&order=pos_number.asc'),
+    sbGet('kasa_glavna', q)
+  ]).then(function(results){
+    var reports=Array.isArray(results[0])?results[0]:[];
+    var glavna=Array.isArray(results[1])&&results[1].length?results[1][0]:null;
+
+    /* Купюрен опис */
+    var BILLS2=[500,200,100,50,20,10,5,2,1];
+    var COINS2=[0.5,0.2,0.1,0.05,0.02,0.01];
+    var ALL_D2=BILLS2.concat(COINS2);
+    var DKEY2={};
+    BILLS2.forEach(function(v){DKEY2[v]='bills_'+v;});
+    DKEY2[0.5]='coins_50';DKEY2[0.2]='coins_20';DKEY2[0.1]='coins_10';
+    DKEY2[0.05]='coins_5';DKEY2[0.02]='coins_2';DKEY2[0.01]='coins_1';
+
+    var g=glavna||{};
+    var html='<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px;" onclick="if(event.target===this)this.remove()">';
+    html+='<div style="background:#fff;border-radius:12px;max-width:700px;width:100%;max-height:90vh;overflow-y:auto;padding:20px;">';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">';
+    html+='<div><div style="font-size:16px;font-weight:700;">📊 Детайли — '+esc(storeName)+'</div>';
+    html+='<div style="font-size:12px;color:#64748b;">'+fmtDate(date)+'</div></div>';
+    html+='<button onclick="this.parentElement.parentElement.parentElement.remove()" style="border:none;background:#f1f5f9;border-radius:6px;padding:6px 12px;cursor:pointer;">✕</button>';
+    html+='</div>';
+
+    /* ПОС отчети */
+    if(reports.length){
+      html+='<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#374151;">💳 ПОС Отчети ('+reports.length+')</div>';
+      html+='<table style="width:100%;font-size:12px;margin-bottom:16px;border-collapse:collapse;">';
+      html+='<thead><tr style="background:#f8fafc;"><th style="padding:6px 8px;text-align:left;">ПОС</th><th style="padding:6px 8px;text-align:left;">Касиер</th><th style="padding:6px 8px;text-align:right;">В брой</th><th style="padding:6px 8px;text-align:right;">Налични</th><th style="padding:6px 8px;text-align:right;">Разлика</th><th style="padding:6px 8px;text-align:center;">Статус</th></tr></thead><tbody>';
+      reports.forEach(function(r){
+        var raz=parseFloat(r.razlika)||0;
+        var razC=raz<0?'#dc2626':raz>0?'#d97706':'#16a34a';
+        html+='<tr style="border-bottom:1px solid #f1f5f9;">';
+        html+='<td style="padding:5px 8px;font-weight:600;">'+esc(String(r.pos_number||''))+'</td>';
+        html+='<td style="padding:5px 8px;">'+esc(r.cashier_name||'')+'</td>';
+        html+='<td style="padding:5px 8px;text-align:right;font-family:monospace;">'+(parseFloat(r.cash_turnover)||0).toFixed(2)+' EUR</td>';
+        html+='<td style="padding:5px 8px;text-align:right;font-family:monospace;">'+(parseFloat(r.counted_cash)||0).toFixed(2)+' EUR</td>';
+        html+='<td style="padding:5px 8px;text-align:right;font-family:monospace;font-weight:700;color:'+razC+';">'+(raz<0?'–':'')+Math.abs(raz).toFixed(2)+' EUR</td>';
+        html+='<td style="padding:5px 8px;text-align:center;">'+(r.status==='confirmed'?'✅':'📝')+'</td>';
+        html+='</tr>';
+      });
+      html+='</tbody></table>';
+    }
+
+    /* Купюрен опис */
+    html+='<div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#374151;">💵 Купюрен опис по деноминации</div>';
+    html+='<table style="width:100%;font-size:12px;border-collapse:collapse;">';
+    html+='<thead><tr style="background:#0f172a;color:#fff;"><th style="padding:5px 8px;text-align:right;">Купюра</th><th style="padding:5px 8px;text-align:center;">ПОС</th><th style="padding:5px 8px;text-align:center;">Сейф</th><th style="padding:5px 8px;text-align:center;font-weight:700;">Общо</th><th style="padding:5px 8px;text-align:right;">Сума</th></tr></thead><tbody>';
+    var grandTotal=0;
+    ALL_D2.forEach(function(v){
+      var k=DKEY2[v];
+      var posQ=0; reports.forEach(function(r){posQ+=parseInt(r[k])||0;});
+      var glQ=parseInt(g[k])||0;
+      var tot=posQ+glQ;
+      var sum=Math.round(tot*v*100)/100;
+      grandTotal=Math.round((grandTotal+sum)*100)/100;
+      if(tot===0)return;
+      html+='<tr style="border-bottom:1px solid #f1f5f9;">';
+      html+='<td style="padding:4px 8px;text-align:right;font-weight:600;font-family:monospace;">'+(v>=1?v.toFixed(0):v.toFixed(2))+' '+(v>=1?'лв':'ст')+'</td>';
+      html+='<td style="padding:4px 8px;text-align:center;color:#2563eb;font-family:monospace;">'+(posQ||'—')+'</td>';
+      html+='<td style="padding:4px 8px;text-align:center;color:#92400e;font-family:monospace;">'+(glQ||'—')+'</td>';
+      html+='<td style="padding:4px 8px;text-align:center;font-weight:700;background:#f8fafc;font-family:monospace;">'+tot+'</td>';
+      html+='<td style="padding:4px 8px;text-align:right;font-family:monospace;">'+sum.toFixed(2)+' EUR</td>';
+      html+='</tr>';
+    });
+    html+='<tr style="border-top:2px solid #0f172a;font-weight:700;background:#f8fafc;">';
+    html+='<td colspan="3" style="padding:6px 8px;">ОБЩА КАСОВА НАЛИЧНОСТ</td>';
+    html+='<td style="padding:6px 8px;text-align:center;font-family:monospace;">—</td>';
+    html+='<td style="padding:6px 8px;text-align:right;font-family:monospace;font-size:14px;color:#0f172a;">'+grandTotal.toFixed(2)+' EUR</td>';
+    html+='</tr>';
+    html+='</tbody></table>';
+    html+='<div style="font-size:10px;color:#94a3b8;margin-top:6px;">🔵 ПОС каси | 🟡 Сейф (Главна каса)</div>';
+    html+='</div></div>';
+
+    var overlay=document.createElement('div');
+    overlay.innerHTML=html;
+    document.body.appendChild(overlay.firstElementChild);
+  }).catch(function(e){toast('Грешка при зареждане','#dc2626');});
 }
