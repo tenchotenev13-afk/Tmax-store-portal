@@ -88,10 +88,12 @@ function runHistorySearch(silent){
 /* ─── RENDER SHELL ──────────────────────────────────────────── */
 function renderHistoryShell(){
   var wrap=document.getElementById('mod-history');if(!wrap)return;
-  /* Default period: current month */
+  /* Default period: от началото на месеца до вчера */
   var now=new Date();
   var firstDay=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
-  var lastDay =new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().slice(0,10);
+  /* До дата = вчера (последния попълнен ден) */
+  var yest=new Date(); yest.setDate(yest.getDate()-1);
+  var lastDay=yest.toISOString().slice(0,10);
 
   wrap.innerHTML='<div class="page">'+
     '<div class="pg-title">📊 История & Търсене</div>'+
@@ -694,4 +696,76 @@ function previewKasaDoc(path){
       toast('Грешка: '+(d.error||JSON.stringify(d)),'#dc2626');
     }
   }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
+}
+
+/* ── DAILY OVERVIEW — последните 7 дни, кои имат/нямат отчет ── */
+function loadDailyOverview(){
+  var el=document.getElementById('daily-overview');
+  if(!el)return;
+
+  /* Генерираме последните 7 дни (без днес) */
+  var days=[];
+  for(var i=1;i<=7;i++){
+    var d=new Date(); d.setDate(d.getDate()-i);
+    days.push(d.toISOString().slice(0,10));
+  }
+  var from=days[days.length-1];
+  var to=days[0];
+
+  var store=currentUser&&currentUser.store_name;
+  if(!store)return;
+
+  /* Взимаме касовите отчети за последните 7 дни */
+  sbGet('kasa_reports','store_name=eq.'+encodeURIComponent(store)+'&date=gte.'+from+'&date=lte.'+to+'&select=date,status').then(function(data){
+    var reported={};
+    if(Array.isArray(data)) data.forEach(function(r){reported[r.date]=r.status;});
+
+    var html='<div class="card" style="margin-bottom:16px;">';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+    html+='<div class="card-title" style="margin:0;">📅 Последните 7 дни — '+esc(store)+'</div>';
+    html+='</div>';
+    html+='<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+
+    var dayNames=['Нед','Пон','Вт','Ср','Чет','Пет','Съб'];
+    days.slice().reverse().forEach(function(dateStr){
+      var d=new Date(dateStr+'T12:00:00');
+      var dow=d.getDay(); /* 0=нед, 6=съб */
+      var isWeekend=dow===0||dow===6;
+      var status=reported[dateStr];
+      var bg,color,icon,label;
+
+      if(status==='confirmed'){
+        bg='#f0fdf4'; color='#16a34a'; icon='✅'; label='Потвърден';
+      } else if(status==='draft'){
+        bg='#fef9c3'; color='#92400e'; icon='📝'; label='Чернова';
+      } else if(isWeekend){
+        bg='#f8fafc'; color='#94a3b8'; icon='🏖'; label='Уикенд';
+      } else {
+        bg='#fff1f2'; color='#dc2626'; icon='⚠️'; label='Липсва';
+      }
+
+      html+='<div data-date="'+dateStr+'" onclick="jumpToKasaDate(this.dataset.date)" style="background:'+bg+';border:1px solid '+(status?color:'#e2e8f0')+';border-radius:8px;padding:8px 12px;text-align:center;min-width:72px;cursor:pointer;transition:opacity .15s;" title="'+label+'">';
+      html+='<div style="font-size:10px;color:#94a3b8;margin-bottom:2px;">'+dayNames[dow]+'</div>';
+      html+='<div style="font-size:11px;font-weight:600;color:#374151;">'+dateStr.slice(8)+'.'+(dateStr.slice(5,7))+'</div>';
+      html+='<div style="font-size:14px;margin-top:2px;">'+icon+'</div>';
+      html+='<div style="font-size:9px;color:'+color+';margin-top:1px;font-weight:600;">'+label+'</div>';
+      html+='</div>';
+    });
+
+    html+='</div>';
+
+    /* Легенда */
+    html+='<div style="display:flex;gap:12px;margin-top:8px;font-size:11px;color:#94a3b8;">';
+    html+='<span>✅ Потвърден</span><span>📝 Чернова</span><span>⚠️ Липсва</span><span>🏖 Уикенд</span>';
+    html+='</div>';
+    html+='</div>';
+
+    el.innerHTML=html;
+  }).catch(function(){ el.innerHTML=''; });
+}
+
+function jumpToKasaDate(dateStr){
+  /* Отива в таб Каса с избраната дата */
+  if(typeof kasaSetDate==='function') kasaSetDate(dateStr);
+  showModule('kasa');
 }
