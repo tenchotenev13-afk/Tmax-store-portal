@@ -6,9 +6,15 @@ var kasaReports = [];
 var kasaGlavna  = null;
 var kasaEditId  = null;
 var kasaView    = 'pos'; /* 'pos' | 'glavna' */
-var kasaSelectedDate = null; /* null = използва today(); иначе избрана дата за уикенд/назад */
+var kasaSelectedDate = null; /* null = използва вчерашна дата; иначе избрана дата */
 
-function kasaActiveDate(){ return kasaSelectedDate || today(); }
+/* Връща вчерашната дата като YYYY-MM-DD */
+function yesterday(){
+  var d=new Date(); d.setDate(d.getDate()-1);
+  return d.toISOString().slice(0,10);
+}
+
+function kasaActiveDate(){ return kasaSelectedDate || yesterday(); }
 function kasaSetDate(d){
   kasaSelectedDate = d || null;
   loadKasa();
@@ -114,7 +120,7 @@ function kasaTabBar(){
   var dateBar = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;background:'+(isCustomDate?'#fffbeb':'#f8fafc')+';border:1px solid '+(isCustomDate?'#fcd34d':'#e2e8f0')+';border-radius:8px;padding:8px 12px;">'+
     '<span style="font-size:12px;font-weight:600;color:'+(isCustomDate?'#92400e':'#64748b')+';">📅 Дата на отчета:</span>'+
     '<input type="date" value="'+kasaActiveDate()+'" onchange="kasaSetDate(this.value)" style="border:1px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;">'+
-    (isCustomDate?'<button onclick="kasaSetDate(null)" style="border:none;background:#fde68a;color:#92400e;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">↺ Днес ('+fmtDate(today())+')</button>':'')+
+    (isCustomDate?'<button onclick="kasaSetDate(null)" style="border:none;background:#fde68a;color:#92400e;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">↺ Вчера ('+fmtDate(yesterday())+')</button>':'')+
     (isCustomDate?'<span style="font-size:11px;color:#92400e;font-weight:600;">⚠️ Работиш с минала/друга дата — за уикенд или забравен отчет</span>':'')+
   '</div>';
   return dateBar+'<div style="display:flex;gap:0;margin-bottom:18px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">'+
@@ -634,6 +640,53 @@ function renderGlavna(){
         '<div style="font-size:20px;font-weight:700;font-family:DM Mono,monospace;color:'+razCol(razlika)+';" id="gl-r-razlika">'+(razlika<0?'– ':'')+Math.abs(razlika).toFixed(2)+' EUR</div>'+
       '</div>'+
     '</div></div>'+
+
+    /* ═══ ОБОБЩЕН ОПИС ПО КУПЮРИ ═══ */
+    '<div class="card" style="border-top:3px solid #0f172a;">'+
+    '<div class="card-title">💵 Обща касова наличност по купюри</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">Обединен опис: всички ПОС каси + Главна каса (сейф) за '+fmtDate(kasaActiveDate())+'</div>'+
+    '<div class="tbl-wrap"><table style="font-size:13px;width:100%;">'+
+    '<thead><tr>'+
+      '<th style="padding:6px 10px;background:#0f172a;color:#fff;text-align:right;">Купюра</th>'+
+      '<th style="padding:6px 10px;background:#0f172a;color:#fff;text-align:center;">ПОС каси</th>'+
+      '<th style="padding:6px 10px;background:#0f172a;color:#fff;text-align:center;">Главна (сейф)</th>'+
+      '<th style="padding:6px 10px;background:#0f172a;color:#fff;text-align:center;font-weight:700;">Общо бройки</th>'+
+      '<th style="padding:6px 10px;background:#0f172a;color:#fff;text-align:right;">Обща сума</th>'+
+    '</tr></thead><tbody>'+
+    (function(){
+      var rows='';
+      var grandTotal=0;
+      ALL_DENOM.forEach(function(v){
+        var posQty=0;
+        todayRep.forEach(function(r){posQty+=parseInt(r[DENOM_KEY[v]])||0;});
+        var glQty=parseInt(g[DENOM_KEY[v]])||0;
+        var totalQty=posQty+glQty;
+        var totalSum=Math.round(totalQty*v*100)/100;
+        grandTotal=Math.round((grandTotal+totalSum)*100)/100;
+        var isNote=v>=1;
+        rows+='<tr style="border-bottom:1px solid #f1f5f9;'+(totalQty===0?'opacity:0.35;':'')+'">';
+        rows+='<td style="font-weight:700;text-align:right;padding:5px 10px;font-family:DM Mono,monospace;">'+(isNote?v.toFixed(0):v.toFixed(2))+' '+(isNote?'лв':'ст')+'</td>';
+        rows+='<td style="text-align:center;padding:5px 8px;font-family:DM Mono,monospace;color:#2563eb;">'+(posQty||'—')+'</td>';
+        rows+='<td style="text-align:center;padding:5px 8px;font-family:DM Mono,monospace;color:#92400e;">'+(glQty||'—')+'</td>';
+        rows+='<td style="text-align:center;padding:5px 8px;font-family:DM Mono,monospace;font-weight:700;background:'+(totalQty>0?'#f8fafc':'')+';">'+totalQty+'</td>';
+        rows+='<td style="text-align:right;padding:5px 10px;font-family:DM Mono,monospace;">'+(totalQty>0?totalSum.toFixed(2)+' EUR':'—')+'</td>';
+        rows+='</tr>';
+      });
+      rows+='<tr style="border-top:2px solid #0f172a;background:#f8fafc;font-weight:700;">';
+      rows+='<td colspan="3" style="padding:8px 10px;">ОБЩА КАСОВА НАЛИЧНОСТ</td>';
+      rows+='<td style="text-align:center;padding:8px;font-family:DM Mono,monospace;font-size:14px;color:#0f172a;">—</td>';
+      rows+='<td style="text-align:right;padding:8px 10px;font-family:DM Mono,monospace;font-size:16px;color:#0f172a;">'+grandTotal.toFixed(2)+' EUR</td>';
+      rows+='</tr>';
+      return rows;
+    })()+
+    '</tbody></table></div>'+
+    '<div style="margin-top:8px;font-size:11px;color:#94a3b8;">'+
+      '🔵 ПОС каси: броят от всички касови апарати | '+
+      '🟡 Главна: броят от физическия сейф | '+
+      'Редове с 0 бройки са скрити'+
+    '</div>'+
+    '</div>'+
+
   '</div>';
 
   wrap.innerHTML=html;
@@ -1246,4 +1299,3 @@ function printZoborot(){
   setTimeout(function(){win.focus();},300);
   }, 400);
 }
-
