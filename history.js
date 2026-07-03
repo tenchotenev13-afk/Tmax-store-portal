@@ -374,19 +374,46 @@ function printHistoryReport(){
   BILLS_P.forEach(function(v){DKEY_P[v]='bills_'+v;});
   DKEY_P[0.5]='coins_50';DKEY_P[0.2]='coins_20';DKEY_P[0.1]='coins_10';
   DKEY_P[0.05]='coins_5';DKEY_P[0.02]='coins_2';DKEY_P[0.01]='coins_1';
+  /* Зареждаме Главна каса за периода */
+  var sFilterP=histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ();
   var denomByDS_P={};
   histData.kasa.forEach(function(r){
     var key=r.date+'|'+(r.store_name||'');
-    if(!denomByDS_P[key])denomByDS_P[key]={date:r.date,store:r.store_name,pos:{}};
+    if(!denomByDS_P[key])denomByDS_P[key]={date:r.date,store:r.store_name,pos:{},gl:{}};
     ALL_D_P.forEach(function(v){var k=DKEY_P[v];denomByDS_P[key].pos[k]=(denomByDS_P[key].pos[k]||0)+(parseInt(r[k])||0);});
   });
+  /* Главна каса данни се зареждат асинхронно — използваме вече заредените ако има */
   var denomHdr_P='<tr><th>Дата</th><th>Магазин</th>'+ALL_D_P.map(function(v){return '<th style="text-align:center;">'+(v>=1?v+'лв':v.toFixed(2)+'ст')+'</th>';}).join('')+'<th style="text-align:right;">Сума EUR</th></tr>';
-  var denomRows_P=Object.values(denomByDS_P).sort(function(a,b){return (b.date+a.store).localeCompare(a.date+b.store,'bg');}).map(function(e){
-    var gt=0;
-    var cells=ALL_D_P.map(function(v){var qty=e.pos[DKEY_P[v]]||0;gt=Math.round((gt+qty*v)*100)/100;return '<td style="text-align:center;'+(qty===0?'color:#ccc;':'')+'">'+qty+'</td>';}).join('');
-    return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.store)+'</td>'+cells+'<td style="text-align:right;font-weight:700;font-family:monospace;">'+gt.toFixed(2)+' EUR</td></tr>';
-  }).join('');
-  var denomSection_P=denomRows_P?('<h2>💵 Купюрен опис — ПОС каси</h2>'+
+  function buildDenomRows_P(glDataP){
+    if(Array.isArray(glDataP))glDataP.forEach(function(g){
+      var key=(g.date||'')+'|'+(g.store_name||'');
+      if(!denomByDS_P[key])denomByDS_P[key]={date:g.date,store:g.store_name,pos:{},gl:{}};
+      ALL_D_P.forEach(function(v){denomByDS_P[key].gl[DKEY_P[v]]=parseInt(g[DKEY_P[v]])||0;});
+    });
+    var rows=Object.values(denomByDS_P).sort(function(a,b){return (b.date+a.store).localeCompare(a.date+b.store,'bg');}).map(function(e){
+      var gt=0;
+      var cells=ALL_D_P.map(function(v){
+        var posQ=e.pos[DKEY_P[v]]||0,glQ=e.gl[DKEY_P[v]]||0,tot=posQ+glQ;
+        gt=Math.round((gt+tot*v)*100)/100;
+        return '<td style="text-align:center;'+(tot===0?'color:#ccc;':'')+'">'+tot+'</td>';
+      }).join('');
+      return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.store)+'</td>'+cells+
+        '<td style="text-align:right;font-weight:700;font-family:monospace;">'+gt.toFixed(2)+' EUR</td></tr>';
+    }).join('');
+    /* ОБЩА КАСОВА НАЛИЧНОСТ ред */
+    var allGT=Object.values(denomByDS_P).reduce(function(s,e){
+      ALL_D_P.forEach(function(v){s+=Math.round(((e.pos[DKEY_P[v]]||0)+(e.gl[DKEY_P[v]]||0))*v*100)/100;});
+      return s;
+    },0);
+    rows+='<tr style="border-top:2px solid #0f172a;background:#f0fdf4;font-weight:700;">'+
+      '<td colspan="2" style="padding:5px 8px;">ОБЩА КАСОВА НАЛИЧНОСТ</td>'+
+      ALL_D_P.map(function(){return '<td></td>';}).join('')+
+      '<td style="text-align:right;padding:5px 8px;font-family:monospace;font-size:11pt;color:#0f172a;">'+Math.round(allGT*100)/100+' EUR</td>'+
+    '</tr>';
+    return rows;
+  }
+  var denomRows_P=buildDenomRows_P([]);
+  var denomSection_P=denomRows_P?('<h2>💵 Купюрен опис — ПОС каси + Главна каса</h2>'+
     '<table><thead>'+denomHdr_P+'</thead><tbody>'+denomRows_P+'</tbody></table>'):'';
 
   var win=window.open('','_blank','width=1000,height=700');
