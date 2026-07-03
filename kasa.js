@@ -18,6 +18,14 @@ DENOM_KEY[0.5]='coins_50'; DENOM_KEY[0.2]='coins_20'; DENOM_KEY[0.1]='coins_10';
 DENOM_KEY[0.05]='coins_5'; DENOM_KEY[0.02]='coins_2'; DENOM_KEY[0.01]='coins_1';
 
 var INKASO_DENOM = [500,200,100,50,20,10,5];
+var kasaSelectedDate = null;
+
+function yesterday(){
+  var d=new Date(); d.setDate(d.getDate()-1);
+  return d.toISOString().slice(0,10);
+}
+function kasaActiveDate(){ return kasaSelectedDate || yesterday(); }
+function kasaSetDate(d){ kasaSelectedDate=d||null; }
 
 /* ─── HELPERS ───────────────────────────────────────────────── */
 function fmtMoney(v){
@@ -687,7 +695,7 @@ function saveGlavna(){
    РАЗПЕЧАТВАНЕ НА ПЪЛЕН ОТЧЕТ
 ═══════════════════════════════════════════════════════════════ */
 function printKasaReport(){
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var reps=kasaReports.filter(function(r){return r.date===todayStr;});
   var gl=kasaGlavna||null;
   var g=gl||{};
