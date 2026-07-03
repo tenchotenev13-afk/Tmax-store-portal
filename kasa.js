@@ -687,7 +687,7 @@ function saveGlavna(){
    РАЗПЕЧАТВАНЕ НА ПЪЛЕН ОТЧЕТ
 ═══════════════════════════════════════════════════════════════ */
 function printKasaReport(){
-  var todayStr=kasaActiveDate();
+  var todayStr=today();
   var reps=kasaReports.filter(function(r){return r.date===todayStr;});
   var gl=kasaGlavna||null;
   var g=gl||{};
@@ -839,7 +839,7 @@ function printKasaReport(){
     '</div>'+
     '<div class="grid2">'+
       '<div><h3>POS данни</h3><table><tbody>'+
-      '<tr><td>В брой BGN</td><td style="text-align:right;font-family:monospace;">'+fm(zob.cash_bgn)+'</td></tr>'+
+      '<tr><td>В брой EUR (BGN)</td><td style="text-align:right;font-family:monospace;">'+fm(zob.cash_bgn)+'</td></tr>'+
       '<tr><td>В брой EUR</td><td style="text-align:right;font-family:monospace;">'+fm(zob.cash_eur)+'</td></tr>'+
       '<tr><td>Карта EUR</td><td style="text-align:right;font-family:monospace;">'+fm(zob.card_eur)+'</td></tr>'+
       '<tr><td>Банков път EUR</td><td style="text-align:right;font-family:monospace;">'+fm(zob.bank_eur)+'</td></tr>'+
@@ -988,7 +988,7 @@ function renderZoborot(){
     '<div class="card">'+
       '<div class="card-title">📊 Данни от POS Zoborot</div>'+
       '<table style="width:100%;font-size:13px;">'+
-        '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане в брой BGN</td>'+
+        '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане в брой EUR (BGN)</td>'+
           '<td style="text-align:right;padding:6px 4px;">'+inp('cash_bgn',z.cash_bgn)+'</td></tr>'+
         '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане в брой EUR</td>'+
           '<td style="text-align:right;padding:6px 4px;">'+inp('cash_eur',z.cash_eur)+'</td></tr>'+
@@ -1179,7 +1179,7 @@ function printZoborot(){
     '</div>'+
     '<h2>Данни от POS Zoborot</h2>'+
     '<table><tbody>'+
-      '<tr><td>Плащане в брой BGN</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.cash_bgn)||0).toFixed(2))+'</td></tr>'+
+      '<tr><td>Плащане в брой EUR (BGN)</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.cash_bgn)||0).toFixed(2))+'</td></tr>'+
       '<tr><td>Плащане в брой EUR</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.cash_eur)||0).toFixed(2))+'</td></tr>'+
       '<tr><td>Плащане с карта EUR</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.card_eur)||0).toFixed(2))+'</td></tr>'+
       '<tr><td>Плащане по банков път EUR</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.bank_eur)||0).toFixed(2))+'</td></tr>'+
