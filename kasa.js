@@ -716,7 +716,8 @@ function printKasaReport(){
   }).catch(function(){_doPrintKasaReport(todayStr,reps,gl,g,[]);});
 }
 
-function _doPrintKasaReport(todayStr,reps,gl,g){
+function _doPrintKasaReport(todayStr,reps,gl,g,docs){
+  docs=docs||[];
 
   var BILLS=[500,200,100,50,20,10,5,2,1];
   var COINS=[0.5,0.2,0.1,0.05,0.02,0.01];
