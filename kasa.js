@@ -702,6 +702,22 @@ function printKasaReport(){
 
   if(!reps.length){toast('Няма отчети за тази дата','#dc2626');return;}
 
+  /* Зареждаме zoborot ако не е в паметта */
+  var enc2=encodeURIComponent(currentUser.store_name);
+  var zq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.desc';
+  var dq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.asc';
+  Promise.all([
+    zoborotData ? Promise.resolve([zoborotData]) : sbGet('kasa_zoborot',zq),
+    sbGet('kasa_documents',dq)
+  ]).then(function(res){
+    if(!zoborotData) zoborotData=(Array.isArray(res[0])&&res[0].length)?res[0][0]:null;
+    var docs=Array.isArray(res[1])?res[1]:[];
+    _doPrintKasaReport(todayStr,reps,gl,g,docs);
+  }).catch(function(){_doPrintKasaReport(todayStr,reps,gl,g,[]);});
+}
+
+function _doPrintKasaReport(todayStr,reps,gl,g){
+
   var BILLS=[500,200,100,50,20,10,5,2,1];
   var COINS=[0.5,0.2,0.1,0.05,0.02,0.01];
   var INKASO_D=[500,200,100,50,20,10,5];
@@ -898,6 +914,7 @@ function printKasaReport(){
     '.tag-confirmed{background:#dcfce7;color:#14532d;}'+
     '.tag-returned{background:#fee2e2;color:#991b1b;}'+
     '.razlika-pos{color:#16a34a;}.razlika-neg{color:#dc2626;}.razlika-warn{color:#d97706;}'+
+    '.doc-item{display:flex;align-items:center;gap:8px;padding:6px 8px;background:#f8fafc;border-radius:5px;margin-bottom:4px;border:1px solid #e2e8f0;}'+
     '@media print{.no-print{display:none!important;}button{display:none!important;}}'+
     '</style></head><body><div class="wrap">'+
     '<div class="header">'+
@@ -921,7 +938,10 @@ function printKasaReport(){
     '<h2>Главна каса</h2>'+glHTML+
     denomSummaryHTML+
     '<h2>Равнение на оборота</h2>'+zobHTML+
-    '</div></body></html>');
+    docsHTML+
+    '</div>'+
+    '<script>function openDocFromPrint(path){var enc=path.split("/").map(function(s){return encodeURIComponent(s);}).join("/");fetch("https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1/object/sign/kasa-docs/"+enc,{method:"POST",headers:{"Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA","Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})}).then(function(r){return r.json();}).then(function(d){if(d.signedURL)window.open("https://xiwkdiqqplgdcrkewgtv.supabase.co"+d.signedURL,"_blank");else alert("Грешка: "+JSON.stringify(d));}).catch(function(e){alert(e);});}<\/script>'+
+    '</body></html>');
   win.document.close();
   setTimeout(function(){win.focus();},300);
 }
