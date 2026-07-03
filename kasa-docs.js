@@ -7,7 +7,8 @@ function uploadKasaDoc(file, reportType, docType, onDone) {
   var ext   = file.name.split('.').pop();
   var stamp = Date.now();
   var clean = (currentUser.store_name||'store').replace(/[^a-zA-Z0-9]/g,'_');
-  var path  = clean+'/'+today()+'/'+reportType+'_'+docType+'_'+stamp+'.'+ext;
+  var docDate = (typeof kasaActiveDate==='function') ? kasaActiveDate() : today();
+  var path  = clean+'/'+docDate+'/'+reportType+'_'+docType+'_'+stamp+'.'+ext;
   var reader = new FileReader();
   reader.onload = function(e) {
     var encodedPath = path.split('/').map(function(s){return encodeURIComponent(s);}).join('/');
@@ -23,7 +24,7 @@ function uploadKasaDoc(file, reportType, docType, onDone) {
       if (!r.ok) { toast('Грешка при качване','#dc2626'); return; }
       sbPost('kasa_documents', {
         store_name: currentUser.store_name,
-        date: today(),
+        date: docDate,
         report_type: reportType,
         doc_type: docType,
         file_name: file.name,
@@ -49,7 +50,7 @@ function getSignedUrl(path, onUrl) {
     },
     body: JSON.stringify({ expiresIn: 3600 })
   }).then(function(r) { return r.json(); })
-  .then(function(d) { onUrl(d.signedURL ? 'https://xiwkdiqqplgdcrkewgtv.supabase.co'+d.signedURL : null); })
+  .then(function(d) { onUrl(d.signedURL ? 'https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1'+d.signedURL : null); })
   .catch(function() { onUrl(null); });
 }
 
@@ -109,7 +110,7 @@ function handleDocUpload(event, reportType) {
     uploadKasaDoc(file, reportType, docType, function() {
       done++;
       if (done === files.length) {
-        loadKasaDocs(today(), function(allDocs) {
+        loadKasaDocs((typeof kasaActiveDate==='function')?kasaActiveDate():today(), function(allDocs) {
           renderDocsSection('docs-section-'+reportType, reportType, allDocs.filter(function(d) { return d.report_type === reportType; }));
         });
       }
@@ -128,7 +129,7 @@ function openKasaDoc(path) {
 function initKasaDocsView() {
   var docsEl = document.getElementById('docs-section-pos');
   if (docsEl) {
-    loadKasaDocs(today(), function(allDocs) {
+    loadKasaDocs((typeof kasaActiveDate==='function')?kasaActiveDate():today(), function(allDocs) {
       renderDocsSection('docs-section-pos', 'pos', allDocs.filter(function(d) { return d.report_type === 'pos'; }));
     });
   }
@@ -139,11 +140,17 @@ function initKasaDocsView() {
 }
 
 function markReady() {
-  var todayStr = today();
+  var todayStr = (typeof kasaActiveDate==='function') ? kasaActiveDate() : today();
   var reps = kasaReports.filter(function(r) { return r.date === todayStr; });
   if (!reps.length) { toast('Няма касови отчети за днес','#dc2626'); return; }
-  var hasDraft = reps.some(function(r) { return r.status === 'draft'; });
-  if (hasDraft && !confirm('Има непотвърдени отчети. Продължи ли?')) return;
+  var draftReps = reps.filter(function(r) { return r.status === 'draft'; });
+  if (draftReps.length) {
+    var posLabels = draftReps.map(function(r){
+      return 'ПОС '+(r.pos_number||'?')+(r.cashier_name?' ('+r.cashier_name+')':'');
+    }).join(', ');
+    var word = draftReps.length===1?'е непотвърден':'са непотвърдени';
+    if (!confirm('Внимание: '+posLabels+' '+word+'.\n\nПродължи ли въпреки това?')) return;
+  }
   var by = currentUser.display_name||currentUser.email;
   var now = new Date().toISOString();
   Promise.all(reps.map(function(r) {
@@ -398,6 +405,44 @@ function openKasaDetail(storeName, date) {
         '</tbody></table></div>' +
       '</div></div>' : '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Главна каса — не е попълнена</div>';
 
+    /* Обобщен купюрен опис ПОС + Главна */
+    var ALL_D2=BILLS.concat(COINS);
+    var grandTotalDenom=0;
+    var denomSummaryHTML='<div class="card"><h2>💵 Отчетени купюри по ПОС + Главна каса</h2>'+
+      '<table><thead><tr>'+
+      '<th>Ном.</th>'+
+      reps.map(function(r){return '<th style="text-align:center;">ПОС '+esc(String(r.pos_number||''))+'<br><span style="font-weight:400;font-size:8pt;">'+esc(r.cashier_name||'')+'</span></th>';}).join('')+
+      (gl?'<th style="text-align:center;background:#92400e;color:#fff;">Главна</th>':'')+
+      '<th style="text-align:center;">Общо бр.</th>'+
+      '<th style="text-align:right;">Сума</th>'+
+      '</tr></thead><tbody>';
+    ALL_D2.forEach(function(v){
+      var k=DK[String(v)];
+      var posQtys=reps.map(function(r){return parseInt(r[k])||0;});
+      var posTotal=posQtys.reduce(function(a,b){return a+b;},0);
+      var glQ=gl?(parseInt(gl[k])||0):0;
+      var total=posTotal+glQ;
+      var sum=Math.round(total*v*100)/100;
+      grandTotalDenom=Math.round((grandTotalDenom+sum)*100)/100;
+      if(total===0)return;
+      denomSummaryHTML+='<tr>'+
+        '<td style="text-align:right;font-weight:600;font-family:monospace;">'+v+'</td>'+
+        posQtys.map(function(q){return '<td style="text-align:center;font-family:monospace;">'+(q||'—')+'</td>';}).join('')+
+        (gl?'<td style="text-align:center;font-family:monospace;color:#92400e;">'+(glQ||'—')+'</td>':'')+
+        '<td style="text-align:center;font-weight:700;font-family:monospace;">'+total+'</td>'+
+        '<td style="text-align:right;font-family:monospace;">'+sum.toFixed(2)+' EUR</td>'+
+      '</tr>';
+    });
+    denomSummaryHTML+=
+      '<tr style="border-top:2px solid #0f172a;background:#f0fdf4;font-weight:700;">'+
+        '<td style="padding:6px 8px;">ОБЩА КАСОВА НАЛИЧНОСТ</td>'+
+        reps.map(function(){return '<td></td>';}).join('')+
+        (gl?'<td></td>':'')+
+        '<td></td>'+
+        '<td style="text-align:right;font-family:monospace;font-size:12pt;color:#0f172a;">'+grandTotalDenom.toFixed(2)+' EUR</td>'+
+      '</tr>'+
+    '</tbody></table></div>';
+
     /* Равнение HTML */
     var zobHTML = zob ? '<div class="card">' +
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
@@ -454,20 +499,18 @@ function openKasaDetail(storeName, date) {
       '</div>' +
       '<h2>ПОС Отчети</h2>' + posHTML +
       '<h2>Главна каса</h2>' + glHTML +
+      denomSummaryHTML +
       '<h2>Равнение на оборота</h2>' + zobHTML +
       '<h2>Документи</h2>' + docsHTML +
     '</div>' +
     '<script>' +
     'function openKasaDocFromDetail(path){' +
-      'var enc=path.split("/").map(function(s){return encodeURIComponent(s);}).join("/");' +
-      'fetch("' + SB_STORAGE + '/object/sign/' + BUCKET + '/"+enc, {' +
+      'var encPath=path.split("/").map(function(s){return encodeURIComponent(s);}).join("/");' +
+      'fetch("' + SB_STORAGE + '/object/sign/' + BUCKET + '/"+encPath, {' +
         'method:"POST",' +
-        'headers:{"Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA","Content-Type":"application/json"},' +
+        'headers:{"Authorization":"Bearer ' + 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA' + '","Content-Type":"application/json"},' +
         'body:JSON.stringify({expiresIn:3600})' +
-      '}).then(function(r){return r.json();}).then(function(d){' +
-        'if(d.signedURL)window.open("https://xiwkdiqqplgdcrkewgtv.supabase.co"+d.signedURL,"_blank");' +
-        'else alert("Грешка: "+JSON.stringify(d));' +
-      '}).catch(function(e){alert("Грешка: "+e);});' +
+      '}).then(function(r){return r.json();}).then(function(d){if(d.signedURL)window.open("' + 'https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1' + '"+d.signedURL,"_blank");else alert("Грешка: "+JSON.stringify(d));});' +
     '}' +
     'function returnForRevision(store, date){' +
       'var reason=prompt("Причина за връщане за корекция:");' +
