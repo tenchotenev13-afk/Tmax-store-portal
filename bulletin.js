@@ -606,7 +606,13 @@ function submitTask(){
   if(!title){toast('Въведи заглавие','#dc2626');return;}
   sbPost('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:document.getElementById('tk-dept').value,title:title,description:document.getElementById('tk-desc').value,due_date:document.getElementById('tk-due').value||null}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
-    closeTk(); toast('✅ Задачата е добавена!'); loadBulletin();
+    closeTk(); toast('✅ Задачата е добавена!');
+    /* Push нотификация до всички */
+    var deptLabel={trade:'🛒 Търговска',warehouse:'📦 Склад/Приемане',admin:'⚙️ Администрация'}[document.getElementById('tk-dept').value]||'';
+    var dueVal=document.getElementById('tk-due').value;
+    var dueStr=dueVal?' · Срок: '+fmtDate(dueVal):'';
+    pushToAll('✅ Нова задача — '+deptLabel, title+dueStr);
+    loadBulletin();
   });
 }
 
@@ -616,6 +622,8 @@ function publishBul(){
   sbPatch('bulletins','id=eq.'+curBul.id,{status:'published',published_at:new Date().toISOString(),published_by:currentUser.display_name||currentUser.email}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     toast('📤 Бюлетинът е публикуван!');
+    /* Автоматична push нотификация до всички */
+    pushBulletinPublished(curBul.week_number, curBul.year, bulTasks.length);
     bulMode='view'; loadBulletin();
   });
 }
@@ -1006,7 +1014,6 @@ function toggleTask(taskId, checked){
   var store = currentUser && currentUser.store_name;
   if(!store){ toast('Грешка: няма магазин','#dc2626'); return; }
   if(checked){
-    /* Добавяме completion */
     sbPost('task_completions',{
       task_id: taskId,
       store_name: store,
@@ -1015,12 +1022,10 @@ function toggleTask(taskId, checked){
     }).then(function(r){
       if(!r.ok){ toast('Грешка при запис','#dc2626'); loadBulletin(); return; }
       toast('✅ Задачата е отбелязана!');
-      /* Обновяваме локалния кеш */
       bulComps.push({task_id:taskId, store_name:store, completed_by: currentUser.display_name||currentUser.email});
       renderBulletin();
     });
   } else {
-    /* Изтриваме completion */
     sbDelete('task_completions','task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)).then(function(){
       toast('↩ Задачата е отбелязана като неизпълнена');
       bulComps = bulComps.filter(function(c){ return !(c.task_id===taskId && c.store_name===store); });
