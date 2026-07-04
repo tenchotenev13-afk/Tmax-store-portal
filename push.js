@@ -27,18 +27,14 @@ var SB_NOTIFY_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 
 function osSend(payload) {
   if (!payload.url) payload.url = OS_PORTAL;
-  /* Минава през Supabase Edge Function (swift-handler) като proxy */
   var body = {
-    type: 'push',
-    app_id: OS_APP_ID,
-    api_key: OS_API_KEY,
-    url: payload.url,
     title: (payload.headings && (payload.headings.bg || payload.headings.en)) || '',
     message: (payload.contents && (payload.contents.bg || payload.contents.en)) || '',
+    url: payload.url,
     filters: payload.filters || null,
     included_segments: payload.included_segments || null
   };
-  return fetch('https://xiwkdiqqplgdcrkewgtv.supabase.co/functions/v1/swift-handler', {
+  return fetch('https://xiwkdiqqplgdcrkewgtv.supabase.co/functions/v1/portal-push', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
