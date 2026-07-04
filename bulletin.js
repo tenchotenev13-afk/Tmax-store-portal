@@ -11,6 +11,7 @@ var BUL_PUB = BUL_SB + '/storage/v1/object/public/' + BUL_BKT + '/';
 var bulActiveDept = 'trade';
 var curBul = null; var bulTasks = []; var bulComps = [];
 var bulMode = 'view'; var bulSaveT = null; var dragInfo = null;
+var bulWk = 0;
 
 /* DEPTS */
 var DEPTS = {
@@ -177,6 +178,7 @@ function renderBulView(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   var c=curBul.content;
   var wk=curBul.week_number; var yr=curBul.year;
+  bulWk=wk; /* глобална за bulPrintDept */
   var days=weekDays(wk,yr);
   var isDraft=curBul.status==='draft';
   var html=bulHdr(isDraft)+BULCSS+'<div style="max-width:1320px;margin:0 auto;padding:16px 16px 60px;" id="bul-body">';
@@ -618,7 +620,10 @@ function publishBul(){
   });
 }
 function newBulletin(){
-  var now=new Date(); var wk=weekNum(now); var yr=now.getFullYear();
+  /* Бюлетинът е за СЛЕДВАЩАТА седмица */
+  var now=new Date();
+  var next=new Date(now); next.setDate(now.getDate()+7);
+  var wk=weekNum(next); var yr=next.getFullYear();
   if(!confirm('Нов бюлетин за Седмица '+wk+' · '+yr+'?'))return;
   var cal={};DKEYS.forEach(function(k){cal[k]=[];});
   sbPost('bulletins',{week_number:wk,year:yr,title:'Т-Бюлетин С'+wk+' · '+yr,content:{calendar:cal,columns:{trade:[],warehouse:[],admin:[]}},status:'draft'}).then(function(r){
@@ -995,6 +1000,34 @@ function renderTasksPanel() {
   return h;
 }
 
+
+/* ─── TOGGLE TASK ─────────────────────────────────────────── */
+function toggleTask(taskId, checked){
+  var store = currentUser && currentUser.store_name;
+  if(!store){ toast('Грешка: няма магазин','#dc2626'); return; }
+  if(checked){
+    /* Добавяме completion */
+    sbPost('task_completions',{
+      task_id: taskId,
+      store_name: store,
+      completed_by: currentUser.display_name || currentUser.email,
+      completed_at: new Date().toISOString()
+    }).then(function(r){
+      if(!r.ok){ toast('Грешка при запис','#dc2626'); loadBulletin(); return; }
+      toast('✅ Задачата е отбелязана!');
+      /* Обновяваме локалния кеш */
+      bulComps.push({task_id:taskId, store_name:store, completed_by: currentUser.display_name||currentUser.email});
+      renderBulletin();
+    });
+  } else {
+    /* Изтриваме completion */
+    sbDelete('task_completions','task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)).then(function(){
+      toast('↩ Задачата е отбелязана като неизпълнена');
+      bulComps = bulComps.filter(function(c){ return !(c.task_id===taskId && c.store_name===store); });
+      renderBulletin();
+    });
+  }
+}
 function bulToggleTask(cb){toggleTask(cb.dataset.tid, cb.checked);}
 function loadTasksStats() {
   var wrap = document.getElementById('tasks-stat-wrap');
