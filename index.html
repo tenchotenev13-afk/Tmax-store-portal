@@ -3,15 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="theme-color" content="#0f172a">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="ТеМАХ">
-<link rel="apple-touch-icon" href="icon-192.png">
-<title>ТеМАХ — Вътрешна платформа</title>
-<link rel="manifest" href="manifest.json">
-<link rel="icon" href="icon-192.png" type="image/png">
+<title>TeMAX — Вътрешна платформа</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600&family=DM+Mono:wght@400;500&display=swap');
 :root{--dark:#0f172a;--red:#e02020;--blu:#2563eb;--grn:#16a34a;--amb:#d97706;--border:#e2e8f0;--text:#0f172a;--muted:#64748b;--surf:#f8fafc;--r:10px;}
@@ -164,8 +156,6 @@ OneSignalDeferred.push(async function(OneSignal) {
   });
 });
 </script>
-  <!-- SheetJS -->
-  <script src="https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 <div class="toast" id="toast"></div>
@@ -270,7 +260,7 @@ OneSignalDeferred.push(async function(OneSignal) {
       <button class="btn btn-green" onclick="openClientModal()">+ Нова заявка</button>
     </div>
     <div class="tbl-wrap"><table>
-      <thead><tr><th>№</th><th>Дата / Час</th><th>Клиент</th><th>Телефон</th><th>SAP</th><th>Продукт</th><th>Бр.</th><th>От магазин</th><th>Изпълнява</th><th>Доставка</th><th>Изминало</th><th>Статус</th><th>Заявител / Изпълнява</th><th></th></tr></thead>
+      <thead><tr><th>№</th><th>Дата / Час</th><th>Клиент</th><th>Телефон</th><th>SAP</th><th>Продукт</th><th>Бр.</th><th>От магазин</th><th>Доставка</th><th>Изминало</th><th>Статус</th><th>Магазин</th><th></th></tr></thead>
       <tbody id="co-body"><tr><td colspan="13" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
     </table></div>
   </div>
@@ -315,12 +305,9 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div class="pg-title">⚙ Администрация</div>
     <div class="pg-sub">Управление на магазини и потребители.</div>
     <div class="card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-        <div class="card-title" style="margin-bottom:0;">👥 Потребители</div>
-        <button onclick="openUserModal(null)" style="border:none;background:#0f172a;color:#fff;border-radius:8px;padding:7px 16px;font-size:12px;font-weight:600;cursor:pointer;">+ Добави колега</button>
-      </div>
+      <div class="card-title">👥 Потребители</div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>Имейл</th><th>Име</th><th>Магазин</th><th>Роля</th><th>Назначени магазини</th><th style="width:80px;"></th></tr></thead>
+        <thead><tr><th>Имейл</th><th>Име</th><th>Магазин</th><th>Роля</th><th>Назначени магазини</th></tr></thead>
         <tbody id="users-body"></tbody>
       </table></div>
     </div>
@@ -339,7 +326,6 @@ OneSignalDeferred.push(async function(OneSignal) {
   </div>
 
   <!-- HISTORY -->
-  <div id="backup-admin-section"></div>
   <div id="mod-history" style="display:none;"></div>
 
   <!-- PRINT -->
@@ -358,8 +344,7 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div class="full"><label class="fl">Адрес за доставка *</label><input class="fi" id="o-addr" placeholder="гр. Варна, ул. Примерна 1, ет. 3, ап. 5"></div>
     <div><label class="fl">Продукт *</label><input class="fi" id="o-product" placeholder="напр. Диван Comfort"></div>
     <div><label class="fl">Цвят / Модел</label><input class="fi" id="o-color" placeholder="напр. Бежово"></div>
-    <div><label class="fl">Количество</label><input type="number" class="fi" id="o-qty" value="1" min="1" step="0.001"></div>
-    <div><label class="fl">Мерна единица</label><select class="fi" id="o-unit"><option value="бр.">бр.</option><option value="м²">м² (кв.м)</option><option value="м">м (лин.м)</option><option value="м³">м³ (куб.м)</option><option value="кг">кг</option><option value="пак.">пак.</option><option value="компл.">компл.</option></select></div>
+    <div><label class="fl">Количество</label><input type="number" class="fi" id="o-qty" value="1" min="1"></div>
     <div><label class="fl">№ Бон</label><input class="fi" id="o-bon" placeholder="000123"></div>
     <div><label class="fl">SAP код</label><input class="fi" id="o-sap" placeholder="напр. 95648"></div>
     <div><label class="fl">★ Дата на доставка</label><input type="date" class="fi" id="o-delivery"></div>
@@ -383,8 +368,7 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div><label class="fl">Телефон *</label><input class="fi" id="c-phone" placeholder="0888 000 000"></div>
     <div><label class="fl">Продукт *</label><input class="fi" id="c-product" placeholder="напр. Диван Comfort"></div>
     <div><label class="fl">Цвят / Размер</label><input class="fi" id="c-color" placeholder="напр. Бежово"></div>
-    <div><label class="fl">Количество</label><input type="number" class="fi" id="c-qty" value="1" min="1" step="0.001"></div>
-    <div><label class="fl">Мерна единица</label><select class="fi" id="c-unit"><option value="бр.">бр.</option><option value="м²">м² (кв.м)</option><option value="м">м (лин.м)</option><option value="м³">м³ (куб.м)</option><option value="кг">кг</option><option value="пак.">пак.</option><option value="компл.">компл.</option></select></div>
+    <div><label class="fl">Количество</label><input type="number" class="fi" id="c-qty" value="1" min="1"></div>
     <div><label class="fl">№ Бон</label><input class="fi" id="c-bon" placeholder="000123"></div>
     <div><label class="fl">SAP код</label><input class="fi" id="c-sap" placeholder="напр. 95648"></div>
     <div><label class="fl">Поръчан от магазин</label><input class="fi" id="c-from-store"></div>
@@ -547,22 +531,22 @@ function loadTabOrder(){
 }
 </script>
 
-<script src="shared.js?v=202607010852"></script>
-<script src="transport.js?v=202607010852"></script>
-<script src="client-orders.js?v=202607010852"></script>
-<script src="docs.js?v=202607010852"></script>
-<script src="bulletin.js?v=202607010852"></script>
-<script src="kasa.js?v=202607010852"></script>
-<script src="kasa-docs.js?v=202607010852"></script>
-<script src="admin.js?v=202607010852"></script>
-<script src="history.js?v=202607010852"></script>
-<script src="contacts.js?v=202607010852"></script>
-<script src="transit.js?v=202607010852"></script>
-<script src="calendar.js?v=202607010852"></script>
-<script src="stock-returns.js?v=202607010852"></script>
-<script src="stock-differences.js?v=202607010852"></script>
-<script src="push.js?v=202607010852"></script>
-<script src="email.js?v=202607010852"></script>
-<script src="notifications.js?v=202607010852"></script>
+<script src="shared.js"></script>
+<script src="transport.js"></script>
+<script src="client-orders.js"></script>
+<script src="docs.js"></script>
+<script src="bulletin.js?v=20260704"></script>
+<script src="kasa.js?v=20260704"></script>
+<script src="kasa-docs.js?v=20260704"></script>
+<script src="admin.js"></script>
+<script src="history.js"></script>
+<script src="contacts.js"></script>
+<script src="transit.js"></script>
+<script src="calendar.js"></script>
+<script src="stock-returns.js"></script>
+<script src="stock-differences.js"></script>
+<script src="push.js?v=20260704"></script>
+<script src="email.js"></script>
+<script src="notifications.js"></script>
 </body>
 </html>
