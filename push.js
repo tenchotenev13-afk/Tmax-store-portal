@@ -27,29 +27,27 @@ var SB_NOTIFY_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 
 function osSend(payload) {
   if (!payload.url) payload.url = OS_PORTAL;
-  /* Директно към OneSignal REST API */
+  /* Минава през Supabase Edge Function (swift-handler) като proxy */
   var body = {
+    type: 'push',
     app_id: OS_APP_ID,
-    url: payload.url
+    api_key: OS_API_KEY,
+    url: payload.url,
+    title: (payload.headings && (payload.headings.bg || payload.headings.en)) || '',
+    message: (payload.contents && (payload.contents.bg || payload.contents.en)) || '',
+    filters: payload.filters || null,
+    included_segments: payload.included_segments || null
   };
-  /* Headings и contents */
-  if (payload.headings) body.headings = payload.headings;
-  if (payload.contents) body.contents = payload.contents;
-  /* Segments или Filters */
-  if (payload.included_segments) {
-    body.included_segments = payload.included_segments;
-  } else if (payload.filters) {
-    body.filters = payload.filters;
-  }
-  return fetch('https://api.onesignal.com/notifications', {
+  return fetch('https://xiwkdiqqplgdcrkewgtv.supabase.co/functions/v1/swift-handler', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Key ' + OS_API_KEY
+      'Authorization': 'Bearer ' + SB_NOTIFY_KEY
     },
     body: JSON.stringify(body)
   }).then(function(r) {
-    return r.json().then(function(d) {
+    return r.text().then(function(txt) {
+      var d; try{d=JSON.parse(txt);}catch(e){d={message:txt};}
       return { ok: r.ok, status: r.status, data: d };
     });
   }).catch(function(err) {
