@@ -1,7 +1,7 @@
 /* push.js — OneSignal Push нотификации */
 
 var OS_APP_ID  = 'a326639e-4ace-46f5-baa7-3f6259431d18';
-var OS_API_KEY = 'os_v2_app_umtghhskzzdplovhh5rfsqy5dc236yo6m3audceswsow4phydw43skbrewfawzapgha7mf7s3dckm2sh2zpgxsexihcw2hhnfqhy5mi';
+var OS_API_KEY = 'os_v2_app_umtghhskzzdplovhh5rfsqy5daarybjwzqye5s4e2gsgrdgac7i5p4nzrdycy77iqhoja5x35xbqmgr46fhymhzunaenysvpfznfkey';
 var OS_PORTAL  = 'https://tenchotenev13-afk.github.io/Tmax-store-portal/';
 
 /* ─── INIT ──────────────────────────────────────────────── */
