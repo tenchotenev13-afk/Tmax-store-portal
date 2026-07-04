@@ -27,22 +27,29 @@ var SB_NOTIFY_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS
 
 function osSend(payload) {
   if (!payload.url) payload.url = OS_PORTAL;
-  /* Викаме Supabase Edge Function като proxy */
-  return fetch(SB_NOTIFY_URL, {
+  /* Директно към OneSignal REST API */
+  var body = {
+    app_id: OS_APP_ID,
+    url: payload.url
+  };
+  /* Headings и contents */
+  if (payload.headings) body.headings = payload.headings;
+  if (payload.contents) body.contents = payload.contents;
+  /* Segments или Filters */
+  if (payload.included_segments) {
+    body.included_segments = payload.included_segments;
+  } else if (payload.filters) {
+    body.filters = payload.filters;
+  }
+  return fetch('https://api.onesignal.com/notifications', {
     method: 'POST',
     headers: {
-      'Content-Type': 'application/json'
+      'Content-Type': 'application/json',
+      'Authorization': 'Key ' + OS_API_KEY
     },
-    body: JSON.stringify({
-      type: 'push',
-      title: (payload.headings && (payload.headings.bg || payload.headings.en)) || '',
-      message: (payload.contents && (payload.contents.bg || payload.contents.en)) || '',
-      url: payload.url,
-      filters: payload.filters || null
-    })
+    body: JSON.stringify(body)
   }).then(function(r) {
-    return r.text().then(function(txt) {
-      var d; try{d=JSON.parse(txt);}catch(e){d={message:txt};}
+    return r.json().then(function(d) {
       return { ok: r.ok, status: r.status, data: d };
     });
   }).catch(function(err) {
