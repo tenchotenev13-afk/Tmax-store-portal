@@ -5,21 +5,11 @@
 var histData   = { transport:[], client:[], kasa:[] };
 var histFilter = { from:'', to:'', store:'', type:'all' };
 var histStores = [];
-var _histPoll  = null;
-
-function startHistoryPolling(){
-  if(_histPoll) clearInterval(_histPoll);
-  _histPoll = setInterval(function(){
-    if(window._currentModule!=='history'){ clearInterval(_histPoll); _histPoll=null; return; }
-    if(histFilter.from && histFilter.to) runHistorySearch(true);
-  }, 60000);
-}
 
 /* ─── LOAD ──────────────────────────────────────────────────── */
 function loadHistory(){
   renderHistoryShell();
   loadHistoryStores();
-  startHistoryPolling();
   setTimeout(function(){
     var dw=document.getElementById('daily-overview');
     if(dw&&typeof loadDailyOverview==='function'){
@@ -30,21 +20,19 @@ function loadHistory(){
 }
 
 function loadHistoryStores(){
-  var assigned=assignedStores();
-  if(assigned&&assigned.length){
-    histStores=assigned.slice();
+  sbGet('stores','select=name&order=name'+storeQ('name')).then(function(data){
+    histStores=Array.isArray(data)?data.map(function(s){return s.name;}):[]; 
+    /* Попълни dropdown */
     var sel=document.getElementById('h-store');
-    if(sel)histStores.forEach(function(name){var o=document.createElement('option');o.value=name;o.textContent=name;sel.appendChild(o);});
-  } else {
-    sbGet('stores','select=name&order=name'+storeQ('name')).then(function(data){
-      histStores=Array.isArray(data)?data.map(function(s){return s.name;}):[]; 
-      var sel=document.getElementById('h-store');
-      if(sel)histStores.forEach(function(name){var o=document.createElement('option');o.value=name;o.textContent=name;sel.appendChild(o);});
-    }).catch(function(){});
-  }
+    if(sel){
+      histStores.forEach(function(name){
+        var o=document.createElement('option');o.value=name;o.textContent=name;sel.appendChild(o);
+      });
+    }
+  }).catch(function(){});
 }
 
-function runHistorySearch(silent){
+function runHistorySearch(){
   var from=document.getElementById('h-from').value;
   var to  =document.getElementById('h-to').value;
   var store=document.getElementById('h-store').value;
@@ -52,7 +40,7 @@ function runHistorySearch(silent){
   histFilter={from:from,to:to,store:store,type:type};
   if(!from||!to){toast('Избери период от — до','#dc2626');return;}
 
-  if(!silent) document.getElementById('h-results').innerHTML=
+  document.getElementById('h-results').innerHTML=
     '<div style="text-align:center;padding:30px;color:#94a3b8;">⏳ Зареждане...</div>';
 
   var promises=[];
@@ -89,11 +77,10 @@ function runHistorySearch(silent){
 /* ─── RENDER SHELL ──────────────────────────────────────────── */
 function renderHistoryShell(){
   var wrap=document.getElementById('mod-history');if(!wrap)return;
-  /* Default period: от началото на месеца до вчера */
+  /* Default period: current month */
   var now=new Date();
   var firstDay=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
-  var yest=new Date(); yest.setDate(yest.getDate()-1);
-  var lastDay=yest.toISOString().slice(0,10);
+  var lastDay =new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().slice(0,10);
 
   wrap.innerHTML='<div class="page">'+
     '<div class="pg-title">📊 История & Търсене</div>'+
@@ -296,6 +283,35 @@ function renderHistoryResults(){
   }
 
   wrap.innerHTML=html;
+  /* Разлики с натрупване — само при касови отчети */
+  if(histData.kasa.length) setTimeout(renderRazlikaReport, 50);
+  /* Документи за периода */
+  if(histData.kasa.length){
+    sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+histFilter.from+'&date=lte.'+histFilter.to+(histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ())).then(function(docs){
+      if(!Array.isArray(docs)||!docs.length) return;
+      var docTypes={pos:'ПОС',glavna:'Главна каса',zoborot:'Равнение',other:'Друго'};
+      var docHtml='<div class="card" style="margin-top:14px;">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'+
+        '<div class="card-title" style="margin:0;">📎 Прикачени документи ('+docs.length+')</div>'+
+        '</div>'+
+        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">';
+      docs.forEach(function(d){
+        var isPdf=/\.pdf$/i.test(d.file_name||'');
+        var icon=isPdf?'📄':'🖼️';
+        var bg=isPdf?'#eff6ff':'#f0fdf4';
+        var border=isPdf?'#bfdbfe':'#bbf7d0';
+        docHtml+='<div style="border:1px solid '+border+';background:'+bg+';border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;">'+
+          '<div style="font-size:22px;text-align:center;">'+icon+'</div>'+
+          '<div style="font-size:11px;font-weight:600;text-align:center;word-break:break-all;">'+esc(d.file_name||'')+'</div>'+
+          '<div style="font-size:10px;color:#64748b;text-align:center;">'+esc(d.store_name||'')+' · '+fmtDate(d.date)+'</div>'+
+          '<button data-path="'+esc(d.file_url)+'" onclick="previewKasaDoc(this.dataset.path)" style="border:1px solid #2563eb;background:#fff;color:#2563eb;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600;">👁 Преглед</button>'+
+        '</div>';
+      });
+      docHtml+='</div></div>';
+      var existing=document.getElementById('h-results');
+      if(existing) existing.innerHTML+=docHtml;
+    }).catch(function(){});
+  }
 }
 
 function metricCard(label,val,sub,col){
@@ -310,6 +326,109 @@ function fmtMoney(v){
   var n=parseFloat(v)||0;
   return (n<0?'–':'')+Math.abs(n).toFixed(2)+'EUR';
 }
+
+/* ─── РАЗЛИКИ С НАТРУПВАНЕ ──────────────────────────────────── */
+function renderRazlikaReport(){
+  var wrap = document.getElementById('h-results'); if(!wrap) return;
+  var from = histFilter.from, to = histFilter.to;
+  var kasa = histData.kasa;
+  if(!kasa.length) return;
+
+  /* Групираме по магазин */
+  var byStore = {};
+  kasa.forEach(function(r){
+    var s = r.store_name||'—';
+    if(!byStore[s]) byStore[s] = {store:s, days:{}, totalRaz:0, count:0};
+    var d = (r.date||'').slice(0,10);
+    if(!byStore[s].days[d]) byStore[s].days[d] = 0;
+    byStore[s].days[d] = Math.round((byStore[s].days[d]+(parseFloat(r.razlika)||0))*100)/100;
+    byStore[s].totalRaz = Math.round((byStore[s].totalRaz+(parseFloat(r.razlika)||0))*100)/100;
+    byStore[s].count++;
+  });
+
+  /* Всички дати */
+  var allDates = [];
+  var allStores = Object.values(byStore).sort(function(a,b){return a.store.localeCompare(b.store,'bg');});
+  allStores.forEach(function(s){
+    Object.keys(s.days).forEach(function(d){ if(allDates.indexOf(d)<0) allDates.push(d); });
+  });
+  allDates.sort();
+
+  function razColor(v){ return v<0?'#dc2626':v>0?'#d97706':'#16a34a'; }
+  function razBg(v){ return v<0?'#fff5f5':v>0?'#fffbeb':'#f0fdf4'; }
+  function fmRaz(v){ var n=Math.round(v*100)/100; return (n<0?'–':n>0?'+':'')+Math.abs(n).toFixed(2); }
+
+  var html = '<div class="card" style="margin-top:16px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
+      '<div class="card-title" style="margin:0;">📉 Разлики с натрупване — '+fmtDate(from)+' → '+fmtDate(to)+'</div>'+
+      '<div style="font-size:11px;color:#94a3b8;">🟢 Без разлика &nbsp; 🟡 Плюс &nbsp; 🔴 Минус</div>'+
+    '</div>';
+
+  /* Обобщение карти */
+  html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-bottom:14px;">';
+  allStores.forEach(function(s){
+    var raz = s.totalRaz;
+    html += '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 14px;border-left:4px solid '+razColor(raz)+';">'+
+      '<div style="font-size:11px;font-weight:600;color:#374151;margin-bottom:4px;">'+esc(s.store)+'</div>'+
+      '<div style="font-size:18px;font-weight:700;font-family:monospace;color:'+razColor(raz)+';">'+fmRaz(raz)+' EUR</div>'+
+      '<div style="font-size:10px;color:#94a3b8;margin-top:2px;">'+s.count+' отчета</div>'+
+    '</div>';
+  });
+  html += '</div>';
+
+  /* Детайлна таблица */
+  if(allDates.length > 0){
+    html += '<div style="overflow-x:auto;">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:11px;">'+
+      '<thead><tr>'+
+        '<th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Дата</th>';
+    allStores.forEach(function(s){
+      html += '<th style="text-align:center;padding:6px 8px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+esc(s.store)+'</th>';
+    });
+    html += '<th style="text-align:right;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Общо</th>'+
+      '</tr></thead><tbody>';
+
+    var cumulative = {};
+    allStores.forEach(function(s){ cumulative[s.store]=0; });
+
+    allDates.forEach(function(d){
+      var dayTotal = 0;
+      html += '<tr style="border-bottom:1px solid #f1f5f9;">'+
+        '<td style="padding:5px 10px;font-family:monospace;font-weight:500;">'+fmtDate(d)+'</td>';
+      allStores.forEach(function(s){
+        var v = s.days[d] !== undefined ? s.days[d] : null;
+        if(v !== null){
+          cumulative[s.store] = Math.round((cumulative[s.store]+v)*100)/100;
+          dayTotal = Math.round((dayTotal+v)*100)/100;
+          html += '<td style="text-align:center;padding:5px 8px;background:'+razBg(v)+';">'+
+            '<div style="font-weight:600;color:'+razColor(v)+';">'+fmRaz(v)+'</div>'+
+            '<div style="font-size:9px;color:#94a3b8;">нат: '+fmRaz(cumulative[s.store])+'</div>'+
+          '</td>';
+        } else {
+          html += '<td style="text-align:center;padding:5px 8px;color:#e2e8f0;">—</td>';
+        }
+      });
+      html += '<td style="text-align:right;padding:5px 10px;font-weight:700;font-family:monospace;color:'+razColor(dayTotal)+';">'+fmRaz(dayTotal)+' EUR</td>';
+      html += '</tr>';
+    });
+
+    /* Общо ред */
+    var grandTotal = 0;
+    html += '<tr style="border-top:2px solid #0f172a;background:#f8fafc;font-weight:700;">'+
+      '<td style="padding:7px 10px;">ОБЩО</td>';
+    allStores.forEach(function(s){
+      grandTotal = Math.round((grandTotal+s.totalRaz)*100)/100;
+      html += '<td style="text-align:center;padding:7px 8px;background:'+razBg(s.totalRaz)+';font-family:monospace;font-weight:700;color:'+razColor(s.totalRaz)+';">'+fmRaz(s.totalRaz)+' EUR</td>';
+    });
+    html += '<td style="text-align:right;padding:7px 10px;font-family:monospace;font-size:13px;color:'+razColor(grandTotal)+';">'+fmRaz(grandTotal)+' EUR</td>';
+    html += '</tr></tbody></table></div>';
+  }
+
+  html += '</div>';
+  var existing = document.getElementById('h-results');
+  if(existing) existing.innerHTML += html;
+}
+
 
 /* ─── PRINT HISTORY REPORT ──────────────────────────────────── */
 function printHistoryReport(){
@@ -366,56 +485,6 @@ function printHistoryReport(){
     '</tr>';
   }).join('');
 
-  /* Купюрен опис */
-  var BILLS_P=[500,200,100,50,20,10,5,2,1];
-  var COINS_P=[0.5,0.2,0.1,0.05,0.02,0.01];
-  var ALL_D_P=BILLS_P.concat(COINS_P);
-  var DKEY_P={};
-  BILLS_P.forEach(function(v){DKEY_P[v]='bills_'+v;});
-  DKEY_P[0.5]='coins_50';DKEY_P[0.2]='coins_20';DKEY_P[0.1]='coins_10';
-  DKEY_P[0.05]='coins_5';DKEY_P[0.02]='coins_2';DKEY_P[0.01]='coins_1';
-  /* Зареждаме Главна каса за периода */
-  var sFilterP=histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ();
-  var denomByDS_P={};
-  histData.kasa.forEach(function(r){
-    var key=r.date+'|'+(r.store_name||'');
-    if(!denomByDS_P[key])denomByDS_P[key]={date:r.date,store:r.store_name,pos:{},gl:{}};
-    ALL_D_P.forEach(function(v){var k=DKEY_P[v];denomByDS_P[key].pos[k]=(denomByDS_P[key].pos[k]||0)+(parseInt(r[k])||0);});
-  });
-  /* Главна каса данни се зареждат асинхронно — използваме вече заредените ако има */
-  var denomHdr_P='<tr><th>Дата</th><th>Магазин</th>'+ALL_D_P.map(function(v){return '<th style="text-align:center;">'+(v>=1?v+'лв':v.toFixed(2)+'ст')+'</th>';}).join('')+'<th style="text-align:right;">Сума EUR</th></tr>';
-  function buildDenomRows_P(glDataP){
-    if(Array.isArray(glDataP))glDataP.forEach(function(g){
-      var key=(g.date||'')+'|'+(g.store_name||'');
-      if(!denomByDS_P[key])denomByDS_P[key]={date:g.date,store:g.store_name,pos:{},gl:{}};
-      ALL_D_P.forEach(function(v){denomByDS_P[key].gl[DKEY_P[v]]=parseInt(g[DKEY_P[v]])||0;});
-    });
-    var rows=Object.values(denomByDS_P).sort(function(a,b){return (b.date+a.store).localeCompare(a.date+b.store,'bg');}).map(function(e){
-      var gt=0;
-      var cells=ALL_D_P.map(function(v){
-        var posQ=e.pos[DKEY_P[v]]||0,glQ=e.gl[DKEY_P[v]]||0,tot=posQ+glQ;
-        gt=Math.round((gt+tot*v)*100)/100;
-        return '<td style="text-align:center;'+(tot===0?'color:#ccc;':'')+'">'+tot+'</td>';
-      }).join('');
-      return '<tr><td>'+fmtDate(e.date)+'</td><td>'+esc(e.store)+'</td>'+cells+
-        '<td style="text-align:right;font-weight:700;font-family:monospace;">'+gt.toFixed(2)+' EUR</td></tr>';
-    }).join('');
-    /* ОБЩА КАСОВА НАЛИЧНОСТ ред */
-    var allGT=Object.values(denomByDS_P).reduce(function(s,e){
-      ALL_D_P.forEach(function(v){s+=Math.round(((e.pos[DKEY_P[v]]||0)+(e.gl[DKEY_P[v]]||0))*v*100)/100;});
-      return s;
-    },0);
-    rows+='<tr style="border-top:2px solid #0f172a;background:#f0fdf4;font-weight:700;">'+
-      '<td colspan="2" style="padding:5px 8px;">ОБЩА КАСОВА НАЛИЧНОСТ</td>'+
-      ALL_D_P.map(function(){return '<td></td>';}).join('')+
-      '<td style="text-align:right;padding:5px 8px;font-family:monospace;font-size:11pt;color:#0f172a;">'+Math.round(allGT*100)/100+' EUR</td>'+
-    '</tr>';
-    return rows;
-  }
-  var denomRows_P=buildDenomRows_P([]);
-  var denomSection_P=denomRows_P?('<h2>💵 Купюрен опис — ПОС каси + Главна каса</h2>'+
-    '<table><thead>'+denomHdr_P+'</thead><tbody>'+denomRows_P+'</tbody></table>'):'';
-
   var win=window.open('','_blank','width=1000,height=700');
   win.document.write('<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">'+
     '<title>История — '+fmtDate(from)+' до '+fmtDate(to)+'</title>'+
@@ -463,7 +532,6 @@ function printHistoryReport(){
       '<h2>📋 Клиентски заявки ('+totalC+')</h2>'+
       '<table><thead><tr><th>№</th><th>Дата</th><th>Магазин</th><th>Клиент</th><th>Телефон</th><th>Продукт</th><th>Доставка</th><th>Статус</th></tr></thead>'+
       '<tbody>'+clientRows+'</tbody></table>':'')+
-    (totalK?denomSection_P:'')+
     '<div style="text-align:center;margin-top:5mm;">'+
       '<button onclick="window.print()" style="border:none;background:#2563eb;color:#fff;padding:7px 20px;border-radius:5px;font-size:10pt;cursor:pointer;">🖨 Принтирай / Запази PDF</button>'+
     '</div>'+
@@ -747,78 +815,4 @@ function previewKasaDoc(path){
       toast('Грешка: '+(d.error||JSON.stringify(d)),'#dc2626');
     }
   }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
-}
-
-function jumpToKasaDate(dateStr){
-  if(typeof kasaSetDate==='function')kasaSetDate(dateStr);
-  showModule('kasa');
-}
-
-/* ── Daily Overview ── */
-function loadDailyOverview(){
-  var el=document.getElementById('daily-overview');
-  if(!el)return;
-  var assigned=assignedStores();
-  var stores=assigned&&assigned.length?assigned:(currentUser&&currentUser.store_name?[currentUser.store_name]:null);
-  if(!stores||!stores.length)return;
-  var days=[];
-  for(var i=1;i<=7;i++){var d=new Date();d.setDate(d.getDate()-i);days.push(d.toISOString().slice(0,10));}
-  var from=days[days.length-1],to=days[0];
-  var storeQ2=stores.map(function(s){return 'store_name=eq.'+encodeURIComponent(s);}).join(',');
-  sbGet('kasa_reports','or=('+storeQ2+')&date=gte.'+from+'&date=lte.'+to+'&select=date,store_name,status').then(function(data){
-    var reported={};
-    stores.forEach(function(s){reported[s]={};});
-    if(Array.isArray(data))data.forEach(function(r){
-      if(!reported[r.store_name])reported[r.store_name]={};
-      if(r.status==='confirmed')reported[r.store_name][r.date]='confirmed';
-      else if(!reported[r.store_name][r.date])reported[r.store_name][r.date]='draft';
-    });
-    var dayNames=['Нед','Пон','Вт','Ср','Чет','Пет','Съб'];
-    var isMulti=stores.length>1;
-    var html='<div class="card" style="margin-bottom:16px;">';
-    html+='<div class="card-title">📅 Статус отчети — последните 7 дни</div>';
-    if(isMulti){
-      html+='<div class="tbl-wrap"><table style="font-size:12px;width:100%;"><thead><tr><th style="text-align:left;padding:5px 8px;">Магазин</th>';
-      days.slice().reverse().forEach(function(dateStr){
-        var d=new Date(dateStr+'T12:00:00');
-        html+='<th style="text-align:center;padding:5px 6px;min-width:54px;">'+dayNames[d.getDay()]+'<br><span style="font-size:10px;color:#94a3b8;">'+dateStr.slice(8)+'.'+dateStr.slice(5,7)+'</span></th>';
-      });
-      html+='</tr></thead><tbody>';
-      stores.slice().sort().forEach(function(store){
-        html+='<tr><td style="padding:5px 8px;font-weight:600;">'+esc(store)+'</td>';
-        days.slice().reverse().forEach(function(dateStr){
-          var d=new Date(dateStr+'T12:00:00');var isWE=d.getDay()===0||d.getDay()===6;
-          var st=reported[store]&&reported[store][dateStr];
-          var icon=st==='confirmed'?'✅':st==='draft'?'📝':isWE?'🏖':'⚠️';
-          var bg=st==='confirmed'?'#f0fdf4':st==='draft'?'#fef9c3':isWE?'#f8fafc':'#fff1f2';
-          html+='<td style="text-align:center;padding:4px;background:'+bg+';">'+icon+'</td>';
-        });
-        html+='</tr>';
-      });
-      html+='</tbody></table></div>';
-    } else {
-      html+='<div style="display:flex;gap:6px;flex-wrap:wrap;">';
-      days.slice().reverse().forEach(function(dateStr){
-        var d=new Date(dateStr+'T12:00:00');var dow=d.getDay();var isWE=dow===0||dow===6;
-        var st=reported[stores[0]]&&reported[stores[0]][dateStr];
-        var bg=st==='confirmed'?'#f0fdf4':st==='draft'?'#fef9c3':isWE?'#f8fafc':'#fff1f2';
-        var col=st==='confirmed'?'#16a34a':st==='draft'?'#92400e':isWE?'#94a3b8':'#dc2626';
-        var icon=st==='confirmed'?'✅':st==='draft'?'📝':isWE?'🏖':'⚠️';
-        var label=st==='confirmed'?'Потвърден':st==='draft'?'Чернова':isWE?'Уикенд':'Липсва';
-        html+='<div data-date="'+dateStr+'" onclick="jumpToKasaDate(this.dataset.date)" style="background:'+bg+';border:1px solid '+(st?col:'#e2e8f0')+';border-radius:8px;padding:8px 12px;text-align:center;min-width:72px;cursor:pointer;">';
-        html+='<div style="font-size:10px;color:#94a3b8;">'+dayNames[dow]+'</div>';
-        html+='<div style="font-size:11px;font-weight:600;">'+dateStr.slice(8)+'.'+dateStr.slice(5,7)+'</div>';
-        html+='<div style="font-size:14px;">'+icon+'</div>';
-        html+='<div style="font-size:9px;color:'+col+';font-weight:600;">'+label+'</div></div>';
-      });
-      html+='</div>';
-    }
-    html+='<div style="font-size:11px;color:#94a3b8;margin-top:8px;">✅ Потвърден &nbsp; 📝 Чернова &nbsp; ⚠️ Липсва &nbsp; 🏖 Уикенд</div></div>';
-    el.innerHTML=html;
-  }).catch(function(){el.innerHTML='';});
-}
-
-function jumpToKasaDate(dateStr){
-  if(typeof kasaSetDate==='function')kasaSetDate(dateStr);
-  showModule('kasa');
 }
