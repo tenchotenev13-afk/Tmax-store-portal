@@ -231,13 +231,35 @@ function openRefAdminList() {
 }
 
 function refQuickAdd(table, promptLabel) {
-  var name = prompt(promptLabel + ':');
-  if (!name || !name.trim()) return;
-  sbPost(table, {name: name.trim()}).then(function(res){
+  var existing = document.getElementById('refqa-ov'); if (existing) existing.remove();
+  var div = document.createElement('div');
+  div.id = 'refqa-ov';
+  div.className = 'bov';
+  div.style.cssText = 'display:flex;';
+  div.innerHTML = '<div class="bmod" style="width:380px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+    '<div style="font-size:15px;font-weight:600;">'+esc(promptLabel)+'</div>' +
+    '<button onclick="document.getElementById(\'refqa-ov\').remove()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>' +
+    '<label class="fl">Име</label><input class="fi" id="refqa-name" placeholder="напр. Адаптери">' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+    '<button onclick="document.getElementById(\'refqa-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="submitRefQuickAdd(\''+table+'\')" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Добави</button>' +
+    '</div></div>';
+  document.body.appendChild(div);
+  div.classList.add('open');
+  setTimeout(function(){ var el=document.getElementById('refqa-name'); if(el) el.focus(); }, 50);
+}
+
+function submitRefQuickAdd(table) {
+  var el = document.getElementById('refqa-name');
+  var name = el ? el.value.trim() : '';
+  if (!name) { toast('Въведи име','#dc2626'); return; }
+  sbPost(table, {name: name}).then(function(res){
     if (!res.ok) { toast('Грешка (възможно е да съществува вече)','#dc2626'); return; }
     toast('✅ Добавено!');
+    var ov = document.getElementById('refqa-ov'); if (ov) ov.remove();
     loadReference();
-    var ov = document.getElementById('ref-admin-ov'); if (ov) ov.remove();
+    var adminOv = document.getElementById('ref-admin-ov'); if (adminOv) adminOv.remove();
   });
 }
 
@@ -245,14 +267,25 @@ function refQuickAdd(table, promptLabel) {
 function refEntryModalHtml() {
   var r = refEntry || {};
   var isEdit = !!refEditId;
+
+  if (!refSubcats.length || !refBrands.length) {
+    return '<div class="bov" id="refe-ov"><div class="bmod" style="width:420px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+      '<div style="font-size:15px;font-weight:600;">⚠️ Няма марки/под-категории</div>' +
+      '<button onclick="closeRefEntryModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>' +
+      '<div style="font-size:13px;color:#64748b;">Преди да добавиш гаранционен запис, трябва първо да имаш поне 1 под-категория и 1 марка. Затвори това и използвай "+ Под-категория" / "+ Марка" от менюто за управление.</div>' +
+      '<div style="text-align:right;margin-top:16px;"><button onclick="closeRefEntryModal()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Разбрах</button></div>' +
+      '</div></div>';
+  }
+
   return '<div class="bov" id="refe-ov"><div class="bmod" style="width:640px;max-width:95vw;max-height:85vh;overflow-y:auto;">' +
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">' +
     '<div style="font-size:15px;font-weight:600;">'+(isEdit?'✏️ Редактирай запис':'+ Нов гаранционен запис')+'</div>' +
     '<button onclick="closeRefEntryModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>' +
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
-    '<div><label class="fl">Под-категория *</label><select class="fi" id="re-subcat">' + refSubcats.map(function(s){return '<option value="'+s.id+'"'+(String(refSelSubcat)===String(s.id)?' selected':'')+'>'+esc(s.name)+'</option>';}).join('') + '</select></div>' +
-    '<div><label class="fl">Марка *</label><select class="fi" id="re-brand">' + refBrands.map(function(b){return '<option value="'+b.id+'"'+(String(refSelBrand)===String(b.id)?' selected':'')+'>'+esc(b.name)+'</option>';}).join('') + '</select></div>' +
+    '<div><label class="fl">Под-категория *</label><select class="fi" id="re-subcat"><option value="">-- Избери --</option>' + refSubcats.map(function(s){return '<option value="'+s.id+'"'+(String(refSelSubcat)===String(s.id)?' selected':'')+'>'+esc(s.name)+'</option>';}).join('') + '</select></div>' +
+    '<div><label class="fl">Марка *</label><select class="fi" id="re-brand"><option value="">-- Избери --</option>' + refBrands.map(function(b){return '<option value="'+b.id+'"'+(String(refSelBrand)===String(b.id)?' selected':'')+'>'+esc(b.name)+'</option>';}).join('') + '</select></div>' +
     '</div>' +
 
     '<label class="fl">Срок на гаранцията</label><input class="fi" id="re-period" value="'+esc(r.warranty_period||'')+'">' +
