@@ -105,72 +105,11 @@ function renderMetrics(){
     return '<div class="metric"><div class="metric-val" style="color:'+colors[i]+';">'+cnt+'</div><div class="metric-lbl">'+labels[i]+'</div></div>';
   }).join('');
 }
-function loadAll(){
-  loadTransport();loadClientOrders();loadDocs();
-  /* Презареди и текущо отворения таб, ако не е сред горните */
-  var m=window._currentModule;
-  if(m && ['transport','client','docs'].indexOf(m)<0){
-    if(m==='admin')loadAdmin();
-    else if(m==='bulletin')loadBulletin();
-    else if(m==='kasa')loadKasa();
-    else if(m==='history')loadHistory();
-    else if(m==='contacts')loadContacts();
-    else if(m==='transit')loadTransit();
-    else if(m==='calendar')loadCalendar();
-    else if(m==='stock-returns')loadStockReturns();
-    else if(m==='stock-diff')loadStockDiff();
-  }
-  toast('↻ Данните са обновени');
-}
+function loadAll(){loadTransport();loadClientOrders();loadDocs();}
 
 /* AUTH — без session restore */
-/* ── SESSION PERSISTENCE (8 часа) ─────────────────── */
-var SESSION_KEY = 'temax_session';
-var SESSION_TTL = 8 * 60 * 60 * 1000; /* 8 часа в ms */
-
-function saveSession(user) {
-  try {
-    var session = {
-      user: {
-        email:        user.email,
-        display_name: user.display_name,
-        store_name:   user.store_name,
-        role:         user.role,
-        password:     user.password,
-        assigned_stores: user.assigned_stores || null
-      },
-      expires: Date.now() + SESSION_TTL
-    };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  } catch(e) {}
-}
-
-function loadSession() {
-  try {
-    var raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    var session = JSON.parse(raw);
-    if (!session || !session.user || !session.expires) return null;
-    if (Date.now() > session.expires) {
-      localStorage.removeItem(SESSION_KEY);
-      return null;
-    }
-    return session.user;
-  } catch(e) { return null; }
-}
-
-function clearSession() {
-  try { localStorage.removeItem(SESSION_KEY); } catch(e) {}
-}
-
 function initApp(){
-  /* Проверяваме за запазена сесия */
-  var saved = loadSession();
-  if (saved) {
-    currentUser = saved;
-    startApp();
-  }
-  /* Иначе изчакваме логин */
+  /* Нищо не се зарежда автоматично — изчакваме логин */
 }
 function doLogin(){
   var email=v('l-email').toLowerCase();
@@ -180,14 +119,13 @@ function doLogin(){
   errEl.style.display='none';
   document.getElementById('l-btn').disabled=true;
   document.getElementById('l-btn').textContent='Влизане...';
-  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name').then(function(data){
+  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name,assigned_stores').then(function(data){
     document.getElementById('l-btn').disabled=false;
     document.getElementById('l-btn').textContent='Влез →';
     if(!Array.isArray(data)||!data.length){errEl.textContent='Непознат имейл адрес.';errEl.style.display='block';return;}
     var user=data[0];
     if(user.password!==pass){errEl.textContent='Грешна парола.';errEl.style.display='block';return;}
     currentUser=user; /* запазваме за проверка при смяна на парола */
-    saveSession(user);
     startApp();
   }).catch(function(){
     document.getElementById('l-btn').disabled=false;
@@ -196,7 +134,6 @@ function doLogin(){
   });
 }
 function doLogout(){
-  clearSession();
   currentUser=null;
   transportOrders=[];clientOrders=[];docs=[];
   document.getElementById('s-app').style.display='none';
@@ -206,19 +143,12 @@ function doLogout(){
 }
 function startApp(){
   if(typeof initPush==='function') initPush(currentUser);
-  var sLogin=document.getElementById('s-login');
-  var sApp=document.getElementById('s-app');
-  var navName=document.getElementById('nav-name');
-  var navStore=document.getElementById('nav-store');
-  if(!sLogin||!sApp||!navName||!navStore){
-    /* DOM не е готов — изчакваме */
-    setTimeout(startApp,50);
-    return;
-  }
-  sLogin.style.display='none';
-  sApp.style.display='flex';
-  navName.textContent=currentUser.display_name||currentUser.email;
-  navStore.textContent=isGlobal()?'Всички магазини':currentUser.store_name;
+  document.getElementById('s-login').style.display='none';
+  document.getElementById('s-app').style.display='flex';
+  document.getElementById('nav-name').textContent=currentUser.display_name||currentUser.email;
+  var _assigned=assignedStores();
+  document.getElementById('nav-store').textContent=!isGlobal()?currentUser.store_name:
+    (_assigned&&_assigned.length?_assigned.join(', '):'Всички магазини');
   setupTabsForRole();
   if(typeof initTabDrag==='function')setTimeout(initTabDrag,200);
   if(isGlobal())document.getElementById('tr-metrics').style.display='grid';
@@ -261,7 +191,6 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
-  window._currentModule = mod;
   ['transport','client','bulletin','docs','kasa','history','admin','print','contacts','transit','calendar','stock-returns','stock-diff'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
