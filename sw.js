@@ -11,6 +11,7 @@ var ASSETS = [
   '/Tmax-store-portal/kasa-docs.js',
   '/Tmax-store-portal/admin.js',
   '/Tmax-store-portal/contacts.js',
+  '/Tmax-store-portal/reference.js',
   '/Tmax-store-portal/docs.js',
   '/Tmax-store-portal/transit.js',
   '/Tmax-store-portal/calendar.js',
