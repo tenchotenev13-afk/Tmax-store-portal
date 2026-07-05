@@ -115,8 +115,6 @@ function renderHistoryShell(){
       '</div>'+
     '</div>'+
   '</div>';
-
-  loadHistoryStores();
 }
 
 /* ─── RENDER RESULTS ────────────────────────────────────────── */
@@ -252,64 +250,28 @@ function renderHistoryResults(){
       '</tbody></table></div></div>';
   }
 
-  /* Секция Документи за периода */
-  if(histData.kasa.length){
-    sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+histFilter.from+'&date=lte.'+histFilter.to+(histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ())).then(function(docs){
-      if(!Array.isArray(docs)||!docs.length) return;
-      var docTypes={pos:'ПОС',glavna:'Главна каса',zoborot:'Равнение',other:'Друго'};
-      var docHtml='<div class="card" style="margin-top:14px;">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'+
-          '<div class="card-title" style="margin:0;">📎 Прикачени документи ('+docs.length+')</div>'+
-          '<div style="font-size:11px;color:#64748b;">Преглед в портала · Изтегляне от Supabase Storage</div>'+
-        '</div>'+
-        '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">';
-      docs.forEach(function(d){
-        var isPdf = /\.pdf$/i.test(d.file_name||'');
-        var icon = isPdf ? '📄' : '🖼️';
-        var bg = isPdf ? '#eff6ff' : '#f0fdf4';
-        var border = isPdf ? '#bfdbfe' : '#bbf7d0';
-        docHtml+='<div style="border:1px solid '+border+';background:'+bg+';border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;">'+
-          '<div style="font-size:22px;text-align:center;">'+icon+'</div>'+
-          '<div style="font-size:11px;font-weight:600;color:#0f172a;text-align:center;word-break:break-all;">'+esc(d.file_name||'')+'</div>'+
-          '<div style="font-size:10px;color:#64748b;text-align:center;">'+esc(d.store_name||'')+' · '+fmtDate(d.date)+'</div>'+
-          '<div style="font-size:10px;color:#64748b;text-align:center;">'+(docTypes[d.report_type]||d.report_type||'')+'</div>'+
-          '<button data-path="'+esc(d.file_url)+'" onclick="previewKasaDoc(this.dataset.path)" style="border:1px solid #2563eb;background:#fff;color:#2563eb;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600;">👁 Преглед</button>'+
-        '</div>';
-      });
-      docHtml+='</div></div>';
-      var existing=document.getElementById('h-results');
-      if(existing) existing.innerHTML+=docHtml;
-    }).catch(function(){});
-  }
-
   wrap.innerHTML=html;
-  /* Разлики с натрупване — само при касови отчети */
+  /* Разлики с натрупване */
   if(histData.kasa.length) setTimeout(renderRazlikaReport, 50);
   /* Документи за периода */
   if(histData.kasa.length){
     sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+histFilter.from+'&date=lte.'+histFilter.to+(histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ())).then(function(docs){
       if(!Array.isArray(docs)||!docs.length) return;
-      var docTypes={pos:'ПОС',glavna:'Главна каса',zoborot:'Равнение',other:'Друго'};
       var docHtml='<div class="card" style="margin-top:14px;">'+
-        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'+
-        '<div class="card-title" style="margin:0;">📎 Прикачени документи ('+docs.length+')</div>'+
-        '</div>'+
+        '<div class="card-title" style="margin:0 0 12px;">📎 Прикачени документи ('+docs.length+')</div>'+
         '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px;">';
       docs.forEach(function(d){
         var isPdf=/\.pdf$/i.test(d.file_name||'');
-        var icon=isPdf?'📄':'🖼️';
-        var bg=isPdf?'#eff6ff':'#f0fdf4';
-        var border=isPdf?'#bfdbfe':'#bbf7d0';
-        docHtml+='<div style="border:1px solid '+border+';background:'+bg+';border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;">'+
-          '<div style="font-size:22px;text-align:center;">'+icon+'</div>'+
+        docHtml+='<div style="border:1px solid '+(isPdf?'#bfdbfe':'#bbf7d0')+';background:'+(isPdf?'#eff6ff':'#f0fdf4')+';border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;">'+
+          '<div style="font-size:22px;text-align:center;">'+(isPdf?'📄':'🖼️')+'</div>'+
           '<div style="font-size:11px;font-weight:600;text-align:center;word-break:break-all;">'+esc(d.file_name||'')+'</div>'+
           '<div style="font-size:10px;color:#64748b;text-align:center;">'+esc(d.store_name||'')+' · '+fmtDate(d.date)+'</div>'+
           '<button data-path="'+esc(d.file_url)+'" onclick="previewKasaDoc(this.dataset.path)" style="border:1px solid #2563eb;background:#fff;color:#2563eb;border-radius:6px;padding:4px 8px;font-size:11px;cursor:pointer;font-weight:600;">👁 Преглед</button>'+
         '</div>';
       });
       docHtml+='</div></div>';
-      var existing=document.getElementById('h-results');
-      if(existing) existing.innerHTML+=docHtml;
+      var el=document.getElementById('h-results');
+      if(el) el.innerHTML+=docHtml;
     }).catch(function(){});
   }
 }
@@ -334,7 +296,6 @@ function renderRazlikaReport(){
   var kasa = histData.kasa;
   if(!kasa.length) return;
 
-  /* Групираме по магазин */
   var byStore = {};
   kasa.forEach(function(r){
     var s = r.store_name||'—';
@@ -346,7 +307,6 @@ function renderRazlikaReport(){
     byStore[s].count++;
   });
 
-  /* Всички дати */
   var allDates = [];
   var allStores = Object.values(byStore).sort(function(a,b){return a.store.localeCompare(b.store,'bg');});
   allStores.forEach(function(s){
@@ -364,7 +324,6 @@ function renderRazlikaReport(){
       '<div style="font-size:11px;color:#94a3b8;">🟢 Без разлика &nbsp; 🟡 Плюс &nbsp; 🔴 Минус</div>'+
     '</div>';
 
-  /* Обобщение карти */
   html += '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px;margin-bottom:14px;">';
   allStores.forEach(function(s){
     var raz = s.totalRaz;
@@ -376,25 +335,20 @@ function renderRazlikaReport(){
   });
   html += '</div>';
 
-  /* Детайлна таблица */
   if(allDates.length > 0){
-    html += '<div style="overflow-x:auto;">'+
-      '<table style="width:100%;border-collapse:collapse;font-size:11px;">'+
-      '<thead><tr>'+
-        '<th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Дата</th>';
+    html += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;">'+
+      '<thead><tr><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Дата</th>';
     allStores.forEach(function(s){
       html += '<th style="text-align:center;padding:6px 8px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+esc(s.store)+'</th>';
     });
-    html += '<th style="text-align:right;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Общо</th>'+
-      '</tr></thead><tbody>';
+    html += '<th style="text-align:right;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Общо</th></tr></thead><tbody>';
 
     var cumulative = {};
     allStores.forEach(function(s){ cumulative[s.store]=0; });
 
     allDates.forEach(function(d){
       var dayTotal = 0;
-      html += '<tr style="border-bottom:1px solid #f1f5f9;">'+
-        '<td style="padding:5px 10px;font-family:monospace;font-weight:500;">'+fmtDate(d)+'</td>';
+      html += '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:5px 10px;font-family:monospace;font-weight:500;">'+fmtDate(d)+'</td>';
       allStores.forEach(function(s){
         var v = s.days[d] !== undefined ? s.days[d] : null;
         if(v !== null){
@@ -402,31 +356,27 @@ function renderRazlikaReport(){
           dayTotal = Math.round((dayTotal+v)*100)/100;
           html += '<td style="text-align:center;padding:5px 8px;background:'+razBg(v)+';">'+
             '<div style="font-weight:600;color:'+razColor(v)+';">'+fmRaz(v)+'</div>'+
-            '<div style="font-size:9px;color:#94a3b8;">нат: '+fmRaz(cumulative[s.store])+'</div>'+
-          '</td>';
+            '<div style="font-size:9px;color:#94a3b8;">нат: '+fmRaz(cumulative[s.store])+'</div></td>';
         } else {
           html += '<td style="text-align:center;padding:5px 8px;color:#e2e8f0;">—</td>';
         }
       });
-      html += '<td style="text-align:right;padding:5px 10px;font-weight:700;font-family:monospace;color:'+razColor(dayTotal)+';">'+fmRaz(dayTotal)+' EUR</td>';
-      html += '</tr>';
+      html += '<td style="text-align:right;padding:5px 10px;font-weight:700;font-family:monospace;color:'+razColor(dayTotal)+';">'+fmRaz(dayTotal)+' EUR</td></tr>';
     });
 
-    /* Общо ред */
     var grandTotal = 0;
-    html += '<tr style="border-top:2px solid #0f172a;background:#f8fafc;font-weight:700;">'+
-      '<td style="padding:7px 10px;">ОБЩО</td>';
+    html += '<tr style="border-top:2px solid #0f172a;background:#f8fafc;font-weight:700;"><td style="padding:7px 10px;">ОБЩО</td>';
     allStores.forEach(function(s){
       grandTotal = Math.round((grandTotal+s.totalRaz)*100)/100;
       html += '<td style="text-align:center;padding:7px 8px;background:'+razBg(s.totalRaz)+';font-family:monospace;font-weight:700;color:'+razColor(s.totalRaz)+';">'+fmRaz(s.totalRaz)+' EUR</td>';
     });
-    html += '<td style="text-align:right;padding:7px 10px;font-family:monospace;font-size:13px;color:'+razColor(grandTotal)+';">'+fmRaz(grandTotal)+' EUR</td>';
-    html += '</tr></tbody></table></div>';
+    html += '<td style="text-align:right;padding:7px 10px;font-family:monospace;font-size:13px;color:'+razColor(grandTotal)+';">'+fmRaz(grandTotal)+' EUR</td></tr>';
+    html += '</tbody></table></div>';
   }
 
   html += '</div>';
-  var existing = document.getElementById('h-results');
-  if(existing) existing.innerHTML += html;
+  var el = document.getElementById('h-results');
+  if(el) el.innerHTML += html;
 }
 
 
