@@ -17,15 +17,7 @@ var DENOM_KEY = {};
 DENOM_KEY[0.5]='coins_50'; DENOM_KEY[0.2]='coins_20'; DENOM_KEY[0.1]='coins_10';
 DENOM_KEY[0.05]='coins_5'; DENOM_KEY[0.02]='coins_2'; DENOM_KEY[0.01]='coins_1';
 
-var INKASO_DENOM = [500,200,100,50,20,10,5];
-var kasaSelectedDate = null;
-
-function yesterday(){
-  var d=new Date(); d.setDate(d.getDate()-1);
-  return d.toISOString().slice(0,10);
-}
-function kasaActiveDate(){ return kasaSelectedDate || yesterday(); }
-function kasaSetDate(d){ kasaSelectedDate=d||null; }
+var INKASO_DENOM = [500,200,100,50,20,10,5,2,1,0.5,0.2,0.1,0.05,0.02,0.01];
 
 /* ─── HELPERS ───────────────────────────────────────────────── */
 function fmtMoney(v){
@@ -695,256 +687,201 @@ function saveGlavna(){
    РАЗПЕЧАТВАНЕ НА ПЪЛЕН ОТЧЕТ
 ═══════════════════════════════════════════════════════════════ */
 function printKasaReport(){
-  var todayStr=kasaActiveDate();
-  var reps=kasaReports.filter(function(r){return r.date===todayStr;});
-  var gl=kasaGlavna||null;
-  var g=gl||{};
+  var todayStr=today();
+  var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
+  var g=kasaGlavna||{};
 
-  if(!reps.length){toast('Няма отчети за тази дата','#dc2626');return;}
-
-  /* Зареждаме zoborot ако не е в паметта */
-  var enc2=encodeURIComponent(currentUser.store_name);
-  var zq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.desc';
-  var dq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.asc';
-  Promise.all([
-    zoborotData ? Promise.resolve([zoborotData]) : sbGet('kasa_zoborot',zq),
-    sbGet('kasa_documents',dq)
-  ]).then(function(res){
-    if(!zoborotData) zoborotData=(Array.isArray(res[0])&&res[0].length)?res[0][0]:null;
-    var docs=Array.isArray(res[1])?res[1]:[];
-    _doPrintKasaReport(todayStr,reps,gl,g,docs);
-  }).catch(function(){_doPrintKasaReport(todayStr,reps,gl,g,[]);});
-}
-
-function _doPrintKasaReport(todayStr,reps,gl,g,docs){
-  docs=docs||[];
-
-  var BILLS=[500,200,100,50,20,10,5,2,1];
-  var COINS=[0.5,0.2,0.1,0.05,0.02,0.01];
-  var INKASO_D=[500,200,100,50,20,10,5];
-  var DK={'500':'bills_500','200':'bills_200','100':'bills_100','50':'bills_50',
-          '20':'bills_20','10':'bills_10','5':'bills_5','2':'bills_2','1':'bills_1',
-          '0.5':'coins_50','0.2':'coins_20','0.1':'coins_10',
-          '0.05':'coins_5','0.02':'coins_2','0.01':'coins_1'};
-
-  function fm(v){var n=parseFloat(v)||0;return(n<0?'– ':'')+Math.abs(n).toFixed(2)+' EUR';}
-  function rc(v){var n=parseFloat(v)||0;return n===0?'razlika-pos':n<0?'razlika-neg':'razlika-warn';}
-  function statusTag(s){
-    if(s==='confirmed')return '<span class="tag tag-confirmed">✅ Потвърден</span>';
-    if(s==='returned') return '<span class="tag tag-returned">↩ Върнат за корекция</span>';
-    return '<span class="tag tag-draft">✏️ Чернова</span>';
-  }
-  function calcCounted2(r){
-    var s=0; BILLS.concat(COINS).forEach(function(v){s+=Math.round((parseInt(r[DK[String(v)]])||0)*v*100)/100;});
-    return Math.round(s*100)/100;
-  }
-  function calcInk2(r){
-    var s=0; INKASO_D.forEach(function(v){s+=(parseInt(r['inkaso_'+v])||0)*v;});
-    return Math.round(s*100)/100;
-  }
-
-  var tTurn=0,tCash=0,tCard=0,tRaz=0,tInkaso=0;
-  reps.forEach(function(r){
-    tTurn+=parseFloat(r.total_turnover)||0; tCash+=parseFloat(r.cash_turnover)||0;
-    tCard+=parseFloat(r.card_turnover)||0;
-    tRaz+=parseFloat(r.razlika)||0; tInkaso+=calcInk2(r);
+  /* Изчисления */
+  var tTurn=0,tCash=0,tCard=0,tCount=0,tRaz=0,tInkaso=0;
+  todayRep.forEach(function(r){
+    tTurn +=parseFloat(r.total_turnover)||0;
+    tCash +=parseFloat(r.cash_turnover)||0;
+    tCard +=parseFloat(r.card_turnover)||0;
+    tCount+=parseFloat(r.counted_cash)||0;
+    tRaz  +=parseFloat(r.razlika)||0;
+    tInkaso+=calcInkaso(r);
   });
 
-  /* ПОС детайл */
-  var posHTML=reps.map(function(r){
-    var ink=calcInk2(r); var counted=calcCounted2(r); var raz=parseFloat(r.razlika)||0;
-    return '<div class="card">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
-        '<h3>ПОС '+esc(String(r.pos_number||''))+' — Каса '+esc(String(r.kasa_number||''))+' — '+esc(r.cashier_name||'')+'</h3>'+
-        statusTag(r.status)+
-      '</div>'+
-      '<div class="grid3" style="margin-bottom:10px;">'+
-        '<div class="metric"><div class="metric-lbl">Общ оборот</div><div class="metric-val">'+fm(r.total_turnover)+'</div></div>'+
-        '<div class="metric"><div class="metric-lbl">В брой</div><div class="metric-val">'+fm(r.cash_turnover)+'</div></div>'+
-        '<div class="metric"><div class="metric-lbl">Карта</div><div class="metric-val">'+fm(r.card_turnover)+'</div></div>'+
-      '</div>'+
-      '<div class="grid2">'+
-        '<div><h3>Отчетени купюри</h3><table><thead><tr><th>Ном.</th><th>Брой</th><th>Сума</th></tr></thead><tbody>'+
-        BILLS.concat(COINS).map(function(v){
-          var k=DK[String(v)]; var qty=parseInt(r[k])||0; if(!qty)return '';
-          return '<tr><td>'+v+' EUR</td><td style="text-align:center;font-family:monospace;">'+qty+'</td>'+
-            '<td style="text-align:right;font-family:monospace;">'+(Math.round(qty*v*100)/100).toFixed(2)+'</td></tr>';
-        }).join('')+
-        '<tr style="font-weight:700;background:#f0fdf4;"><td colspan="2">Общо налични</td>'+
-          '<td style="text-align:right;font-family:monospace;">'+counted.toFixed(2)+'</td></tr>'+
-        '</tbody></table></div>'+
-        '<div><h3>Инкасо & Резултат</h3>'+
-        '<table><thead><tr><th>Ном.</th><th>Брой</th><th>Сума</th></tr></thead><tbody>'+
-        INKASO_D.map(function(v){
-          var qty=parseInt(r['inkaso_'+v])||0; if(!qty)return '';
-          return '<tr><td>'+v+' EUR</td><td style="text-align:center;">'+qty+'</td>'+
-            '<td style="text-align:right;font-family:monospace;">'+(qty*v).toFixed(2)+'</td></tr>';
-        }).join('')+
-        '<tr style="font-weight:700;"><td colspan="2">Общо инкасо</td>'+
-          '<td style="text-align:right;font-family:monospace;">'+ink.toFixed(2)+'</td></tr>'+
-        '</tbody></table>'+
-        '<table style="margin-top:8px;"><tbody>'+
-        '<tr><td>Сторна</td><td style="text-align:right;font-family:monospace;">'+fm(r.storna_total)+'</td></tr>'+
-        '<tr><td>В брой (отчет)</td><td style="text-align:right;font-family:monospace;">'+fm(r.cash_turnover)+'</td></tr>'+
-        '<tr><td>Налични (броени)</td><td style="text-align:right;font-family:monospace;">'+fm(r.counted_cash)+'</td></tr>'+
-        '<tr style="font-weight:700;border-top:2px solid #e2e8f0;"><td>РАЗЛИКА</td>'+
-          '<td style="text-align:right;font-family:monospace;" class="'+rc(raz)+'">'+fm(raz)+'</td></tr>'+
-        '</tbody></table></div>'+
-      '</div></div>';
-  }).join('');
+  var glCounted=0;
+  ALL_DENOM.forEach(function(v){
+    var posQ=0; todayRep.forEach(function(r){posQ+=parseInt(r[DENOM_KEY[v]])||0;});
+    var glQ=parseInt(g[DENOM_KEY[v]])||0;
+    glCounted+=Math.round((posQ+glQ)*v*100)/100;
+  });
+  glCounted=Math.round(glCounted*100)/100;
+  var slujebno=parseFloat(g.slujebno)||0;
+  var sapBal=parseFloat(g.sap_balance)||0;
+  var glRaz=Math.round((glCounted+slujebno-sapBal)*100)/100;
 
-  /* Главна каса */
-  var glHTML=gl?'<div class="card">'+
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
-      '<h3 style="margin:0;">Главна каса</h3>'+statusTag(g.status||'draft')+
-    '</div>'+
-    '<div class="grid2">'+
-      '<div><table><thead><tr><th>Ном.</th><th>Брой</th><th>Сума</th></tr></thead><tbody>'+
-      BILLS.concat(COINS).map(function(v){
-        var k=DK[String(v)]; var qty=parseInt(g[k])||0; if(!qty)return '';
-        return '<tr><td>'+v+' EUR</td><td style="text-align:center;">'+qty+'</td>'+
-          '<td style="text-align:right;font-family:monospace;">'+(Math.round(qty*v*100)/100).toFixed(2)+'</td></tr>';
-      }).join('')+
-      '<tr style="font-weight:700;background:#f0fdf4;"><td colspan="2">Главна налични</td>'+
-        '<td style="text-align:right;font-family:monospace;">'+fm(g.counted_cash)+'</td></tr>'+
-      '</tbody></table></div>'+
-      '<div><table><tbody>'+
-      '<tr><td>Общо налични (всички)</td><td style="text-align:right;font-family:monospace;">'+fm(g.counted_cash)+'</td></tr>'+
-      '<tr><td>Служебно въведени</td><td style="text-align:right;font-family:monospace;">'+fm(g.slujebno)+'</td></tr>'+
-      '<tr><td>Наличност SAP</td><td style="text-align:right;font-family:monospace;">'+fm(g.sap_balance)+'</td></tr>'+
-      '<tr style="font-weight:700;border-top:2px solid #e2e8f0;"><td>РАЗЛИКА</td>'+
-        '<td style="text-align:right;font-family:monospace;" class="'+rc(g.razlika)+'">'+fm(g.razlika)+'</td></tr>'+
-      '</tbody></table></div>'+
-    '</div></div>':
-    '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Главна каса — не е попълнена</div>';
+  function rc(v){var n=parseFloat(v)||0;return n<0?'color:#dc2626':n>0?'color:#d97706':'color:#16a34a';}
+  function fm(v){var n=parseFloat(v)||0;return(n<0?'–':'')+Math.abs(n).toFixed(2)+' EUR';}
 
-  /* Купюрен опис обобщен */
-  var ALL_D2=BILLS.concat(COINS);
-  var grandTotalDenom=0;
-  var denomSummaryHTML='<div class="card"><h2>💵 Отчетени купюри по ПОС + Главна каса</h2>'+
-    '<table><thead><tr>'+
-    '<th>Ном.</th>'+
-    reps.map(function(r){return '<th style="text-align:center;">ПОС '+esc(String(r.pos_number||''))+
-      '<br><span style="font-weight:400;font-size:8pt;">'+esc(r.cashier_name||'')+'</span></th>';}).join('')+
-    (gl?'<th style="text-align:center;background:#92400e;color:#fff;">Главна</th>':'')+
-    '<th style="text-align:center;">Общо бр.</th>'+
-    '<th style="text-align:right;">Сума</th>'+
-    '</tr></thead><tbody>';
-  ALL_D2.forEach(function(v){
-    var k=DK[String(v)];
-    var posQtys=reps.map(function(r){return parseInt(r[k])||0;});
-    var posTotal=posQtys.reduce(function(a,b){return a+b;},0);
-    var glQ=gl?(parseInt(g[k])||0):0;
-    var total=posTotal+glQ; var sum=Math.round(total*v*100)/100;
-    grandTotalDenom=Math.round((grandTotalDenom+sum)*100)/100;
+  /* Таблица купюри */
+  var denomRows='';
+  ALL_DENOM.forEach(function(v){
+    var posQtys=todayRep.map(function(r){return parseInt(r[DENOM_KEY[v]])||0;});
+    var posSum=posQtys.reduce(function(a,b){return a+b;},0);
+    var glQ=parseInt(g[DENOM_KEY[v]])||0;
+    var total=posSum+glQ;
+    var sum=Math.round(total*v*100)/100;
     if(total===0)return;
-    denomSummaryHTML+='<tr>'+
-      '<td style="text-align:right;font-weight:600;font-family:monospace;">'+v+'</td>'+
-      posQtys.map(function(q){return '<td style="text-align:center;font-family:monospace;">'+(q||'—')+'</td>';}).join('')+
-      (gl?'<td style="text-align:center;font-family:monospace;color:#92400e;">'+(glQ||'—')+'</td>':'')+
-      '<td style="text-align:center;font-weight:700;font-family:monospace;">'+total+'</td>'+
-      '<td style="text-align:right;font-family:monospace;">'+sum.toFixed(2)+' EUR</td>'+
+    denomRows+='<tr>'+
+      '<td style="text-align:right;padding:2px 8px;font-weight:600;">'+v+'</td>'+
+      posQtys.map(function(q){return '<td style="text-align:center;padding:2px 8px;">'+q+'</td>';}).join('')+
+      '<td style="text-align:center;padding:2px 8px;background:#fffbeb;">'+glQ+'</td>'+
+      '<td style="text-align:center;padding:2px 8px;font-weight:700;">'+total+'</td>'+
+      '<td style="text-align:right;padding:2px 8px;font-family:monospace;">'+sum.toFixed(2)+'</td>'+
     '</tr>';
   });
-  denomSummaryHTML+=
-    '<tr style="border-top:2px solid #0f172a;background:#f0fdf4;font-weight:700;">'+
-      '<td style="padding:6px 8px;">ОБЩА КАСОВА НАЛИЧНОСТ</td>'+
-      reps.map(function(){return '<td></td>';}).join('')+
-      (gl?'<td></td>':'')+
-      '<td></td>'+
-      '<td style="text-align:right;font-family:monospace;font-size:12pt;color:#0f172a;">'+grandTotalDenom.toFixed(2)+' EUR</td>'+
-    '</tr>'+
-  '</tbody></table></div>';
 
-  /* Равнение */
-  var zob=zoborotData||null;
-  var zobHTML=zob?'<div class="card">'+
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
-      '<h3 style="margin:0;">Равнение на оборота (POS Zoborot)</h3>'+statusTag(zob.status||'draft')+
-    '</div>'+
-    '<div class="grid2">'+
-      '<div><h3>POS данни</h3><table><tbody>'+
-      '<tr><td>В брой EUR (BGN)</td><td style="text-align:right;font-family:monospace;">'+fm(zob.cash_bgn)+'</td></tr>'+
-      '<tr><td>В брой EUR</td><td style="text-align:right;font-family:monospace;">'+fm(zob.cash_eur)+'</td></tr>'+
-      '<tr><td>Карта EUR</td><td style="text-align:right;font-family:monospace;">'+fm(zob.card_eur)+'</td></tr>'+
-      '<tr><td>Банков път EUR</td><td style="text-align:right;font-family:monospace;">'+fm(zob.bank_eur)+'</td></tr>'+
-      '<tr><td>Ваучери EUR</td><td style="text-align:right;font-family:monospace;">'+fm(zob.voucheri)+'</td></tr>'+
-      '<tr style="font-weight:700;"><td>POS оборот (без банков)</td><td style="text-align:right;font-family:monospace;">'+fm(zob.pos_no_bank)+'</td></tr>'+
-      '</tbody></table></div>'+
-      '<div><h3>Фискални устройства</h3>'+
-      '<table><thead><tr><th>ФУ</th><th>Общ</th><th>Сторно</th><th>Чист</th></tr></thead><tbody>'+
-      [1,2,3].map(function(n){
-        return '<tr><td><b>ФУ '+n+'</b></td>'+
-          '<td style="font-family:monospace;">'+fm(zob['fu'+n+'_gross'])+'</td>'+
-          '<td style="font-family:monospace;">'+fm(zob['fu'+n+'_discount'])+'</td>'+
-          '<td style="font-family:monospace;font-weight:700;">'+fm(zob['fu'+n+'_net'])+'</td></tr>';
-      }).join('')+
-      '<tr style="font-weight:700;border-top:2px solid #e2e8f0;"><td colspan="3">Общо ФУ нетен</td>'+
-        '<td style="font-family:monospace;">'+fm(zob.fu_total_net)+'</td></tr>'+
-      '</tbody></table>'+
-      '<div style="margin-top:10px;padding:10px;border-radius:6px;border:2px solid '+(parseFloat(zob.razlika)===0?'#16a34a':'#dc2626')+';text-align:center;">'+
-        '<div style="font-size:8.5pt;text-transform:uppercase;color:#6b7280;">РАЗЛИКА</div>'+
-        '<div style="font-size:16pt;font-weight:700;font-family:monospace;" class="'+rc(zob.razlika)+'">'+fm(zob.razlika)+'</div>'+
-      '</div>'+
-    '</div></div>':
-    '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Равнение — не е попълнено</div>';
+  /* Инкасо таблица */
+  var inkRows='';
+  var totalInk=0;
+  INKASO_DENOM.forEach(function(v){
+    var posQtys=todayRep.map(function(r){return parseInt(r['inkaso_'+v])||0;});
+    var total=posQtys.reduce(function(a,b){return a+b;},0);
+    var sum=total*v;totalInk+=sum;
+    if(total===0)return;
+    inkRows+='<tr>'+
+      '<td style="text-align:right;padding:2px 8px;font-weight:600;">'+v+'</td>'+
+      posQtys.map(function(q){return '<td style="text-align:center;padding:2px 8px;">'+q+'</td>';}).join('')+
+      '<td style="text-align:center;padding:2px 8px;font-weight:700;">'+total+'</td>'+
+      '<td style="text-align:right;padding:2px 8px;font-family:monospace;">'+sum.toFixed(2)+' EUR</td>'+
+    '</tr>';
+  });
 
-  var win=window.open('','_blank','width=1100,height=800');
-  win.document.write('<html><head><meta charset="UTF-8">'+
-    '<title>Касов отчет — '+esc(currentUser.store_name)+' — '+fmtDate(todayStr)+'</title>'+
-    '<style>'+
-    '@page{size:A4;margin:12mm;}'+
-    '*{box-sizing:border-box;margin:0;padding:0;}'+
-    'body{font-family:Arial,sans-serif;font-size:10pt;color:#111;background:#f8fafc;}'+
-    '.wrap{max-width:1050px;margin:0 auto;padding:16px;}'+
-    '.header{background:#2f2f2f;color:#fff;padding:14px 20px;border-radius:8px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;}'+
-    'h2{font-size:13pt;margin:14px 0 6px;color:#2f2f2f;border-bottom:2px solid #e2e8f0;padding-bottom:4px;}'+
-    'h3{font-size:11pt;margin:10px 0 4px;color:#374151;}'+
-    'table{width:100%;border-collapse:collapse;margin-bottom:10px;font-size:9.5pt;}'+
-    'th{background:#2f2f2f;color:#fff;padding:4px 8px;text-align:left;font-size:9pt;}'+
-    'td{padding:3px 8px;border-bottom:1px solid #e5e7eb;vertical-align:top;}'+
-    'tr:nth-child(even) td{background:#f9fafb;}'+
-    '.card{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px;margin-bottom:12px;}'+
-    '.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px;}'+
-    '.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;}'+
-    '.metric{border:1px solid #e2e8f0;border-radius:6px;padding:10px;text-align:center;}'+
-    '.metric-val{font-size:16pt;font-weight:700;font-family:monospace;}'+
-    '.metric-lbl{font-size:8pt;color:#6b7280;margin-bottom:4px;}'+
-    '.tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:9pt;font-weight:600;}'+
-    '.tag-draft{background:#fef3c7;color:#92400e;}'+
-    '.tag-confirmed{background:#dcfce7;color:#14532d;}'+
-    '.tag-returned{background:#fee2e2;color:#991b1b;}'+
-    '.razlika-pos{color:#16a34a;}.razlika-neg{color:#dc2626;}.razlika-warn{color:#d97706;}'+
-    '.doc-item{display:flex;align-items:center;gap:8px;padding:6px 8px;background:#f8fafc;border-radius:5px;margin-bottom:4px;border:1px solid #e2e8f0;}'+
-    '@media print{.no-print{display:none!important;}button{display:none!important;}}'+
-    '</style></head><body><div class="wrap">'+
-    '<div class="header">'+
-      '<div>'+
-        '<div style="font-size:14pt;font-weight:700;">📋 Касов отчет — '+esc(currentUser.store_name)+'</div>'+
-        '<div style="font-size:10pt;color:#9ca3af;margin-top:2px;">'+
-          fmtDate(todayStr)+' · '+reps.length+' ПОС отчета · Изготвен: '+
-          new Date().toLocaleString('bg-BG')+' от '+esc(currentUser.display_name||currentUser.email)+
-        '</div>'+
-      '</div>'+
-      '<div class="no-print">'+
-        '<button onclick="window.print()" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:7px 14px;font-size:10pt;cursor:pointer;">🖨 Принтирай / PDF</button>'+
-      '</div>'+
-    '</div>'+
-    '<div class="grid3" style="margin-bottom:14px;">'+
-      '<div class="metric"><div class="metric-lbl">Общ оборот</div><div class="metric-val">'+fm(tTurn)+'</div></div>'+
-      '<div class="metric"><div class="metric-lbl">Обща разлика ПОС</div><div class="metric-val '+rc(tRaz)+'">'+fm(tRaz)+'</div></div>'+
-      '<div class="metric"><div class="metric-lbl">Общо инкасо</div><div class="metric-val">'+fm(tInkaso)+'</div></div>'+
-    '</div>'+
-    '<h2>ПОС Отчети</h2>'+posHTML+
-    '<h2>Главна каса</h2>'+glHTML+
-    denomSummaryHTML+
-    '<h2>Равнение на оборота</h2>'+zobHTML+
-    docsHTML+
-    '</div>'+
-    '<script>function openDocFromPrint(path){var enc=path.split("/").map(function(s){return encodeURIComponent(s);}).join("/");fetch("https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1/object/sign/kasa-docs/"+enc,{method:"POST",headers:{"Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA","Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})}).then(function(r){return r.json();}).then(function(d){if(d.signedURL)window.open("https://xiwkdiqqplgdcrkewgtv.supabase.co"+d.signedURL,"_blank");else alert("Грешка: "+JSON.stringify(d));}).catch(function(e){alert(e);});}<\/script>'+
-    '</body></html>');
-  win.document.close();
-  setTimeout(function(){win.focus();},300);
+  var posHeaders=todayRep.map(function(r){return '<th style="text-align:center;padding:4px 8px;background:#2f2f2f;color:#fff;font-size:10pt;">ПОС '+r.pos_number+'<br><span style="font-weight:400;font-size:8pt;">'+esc(r.cashier_name||'')+'</span></th>';}).join('');
+
+  var printWin=window.open('','_blank','width=900,height=700');
+  printWin.document.write(`<!DOCTYPE html>
+<html lang="bg"><head><meta charset="UTF-8">
+<title>Касов отчет — ${esc(currentUser.store_name)} — ${fmtDate(todayStr)}</title>
+<style>
+  @page{size:A4;margin:12mm;}
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:Arial,sans-serif;font-size:10pt;color:#111;}
+  h2{font-size:13pt;margin-bottom:2mm;}
+  h3{font-size:11pt;margin:4mm 0 2mm;color:#2f2f2f;border-bottom:1px solid #ccc;padding-bottom:1mm;}
+  table{width:100%;border-collapse:collapse;margin-bottom:4mm;font-size:9.5pt;}
+  th{background:#2f2f2f;color:#fff;padding:4px 8px;text-align:left;font-size:9pt;}
+  td{padding:3px 8px;border-bottom:1px solid #e5e7eb;}
+  tr:last-child td{border-bottom:none;}
+  .total-row{background:#f8fafc;font-weight:700;}
+  .red{color:#dc2626;}.green{color:#16a34a;}.amber{color:#d97706;}
+  .mono{font-family:monospace;}
+  .box{border:1px solid #ccc;border-radius:4px;padding:3mm 4mm;margin-bottom:3mm;}
+  .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:3mm;margin-bottom:5mm;}
+  .metric{border:1px solid #e2e8f0;border-radius:4px;padding:3mm;text-align:center;}
+  .metric-val{font-size:14pt;font-weight:700;font-family:monospace;}
+  .metric-lbl{font-size:8pt;color:#64748b;margin-bottom:1mm;}
+  .sign-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8mm;margin-top:8mm;}
+  .sign-box{border-top:1px solid #333;padding-top:2mm;font-size:8pt;color:#555;}
+  @media print{button{display:none;}}
+</style></head><body>
+<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4mm;">
+  <div>
+    <div style="font-size:16pt;font-weight:700;">ТЕМАКС — Касов отчет</div>
+    <div style="font-size:11pt;color:#444;">${esc(currentUser.store_name)} &nbsp;|&nbsp; ${fmtDate(todayStr)}</div>
+    <div style="font-size:8.5pt;color:#888;margin-top:1mm;">Изготвен: ${new Date().toLocaleString('bg-BG')} от ${esc(currentUser.display_name||currentUser.email)}</div>
+  </div>
+  <img src="data:image/png;base64,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" style="height:44pt;width:auto;">
+</div>
+
+<h3>📋 Резюме по ПОС терминали</h3>
+<table>
+  <thead><tr>
+    <th>ПОС</th><th>Касиер</th><th>Каса №</th>
+    <th style="text-align:right;">Общ оборот</th>
+    <th style="text-align:right;">В брой</th>
+    <th style="text-align:right;">Карти</th>
+    <th style="text-align:right;">Инкасо</th>
+    <th style="text-align:right;">Налични</th>
+    <th style="text-align:right;">Разлика</th>
+    <th style="text-align:center;">Статус</th>
+  </tr></thead>
+  <tbody>
+  ${todayRep.map(function(r){
+    var ink=calcInkaso(r);
+    var raz=parseFloat(r.razlika)||0;
+    return '<tr>'+
+      '<td><b>ПОС '+r.pos_number+'</b></td>'+
+      '<td>'+esc(r.cashier_name||'')+'</td>'+
+      '<td style="text-align:center;">'+esc(String(r.kasa_number||''))+'</td>'+
+      '<td style="text-align:right;" class="mono">'+fm(r.total_turnover)+'</td>'+
+      '<td style="text-align:right;" class="mono">'+fm(r.cash_turnover)+'</td>'+
+      '<td style="text-align:right;" class="mono">'+fm(r.card_turnover)+'</td>'+
+      '<td style="text-align:right;" class="mono">'+fm(ink)+'</td>'+
+      '<td style="text-align:right;" class="mono">'+fm(r.counted_cash)+'</td>'+
+      '<td style="text-align:right;" class="mono '+rc(raz)+'"><b>'+fm(raz)+'</b></td>'+
+      '<td style="text-align:center;">'+(r.status==='confirmed'?'✅ Потвърден':'✏️ Чернова')+'</td>'+
+    '</tr>';
+  }).join('')}
+  <tr class="total-row">
+    <td colspan="3">ОБЩО</td>
+    <td style="text-align:right;" class="mono">${fm(tTurn)}</td>
+    <td style="text-align:right;" class="mono">${fm(tCash)}</td>
+    <td style="text-align:right;" class="mono">${fm(tCard)}</td>
+    <td style="text-align:right;" class="mono">${fm(tInkaso)}</td>
+    <td style="text-align:right;" class="mono">${fm(tCount)}</td>
+    <td style="text-align:right;" class="mono ${rc(tRaz)}"><b>${fm(tRaz)}</b></td>
+    <td></td>
+  </tr>
+  </tbody>
+</table>
+
+<h3>💵 Отчетени купюри по ПОС + Главна каса</h3>
+<table>
+  <thead><tr>
+    <th>Ном.</th>${posHeaders}
+    <th style="text-align:center;padding:4px 8px;background:#92400e;color:#fff;font-size:10pt;">Главна</th>
+    <th style="text-align:center;padding:4px 8px;">Общо бр.</th>
+    <th style="text-align:right;padding:4px 8px;">Сума</th>
+  </tr></thead>
+  <tbody>${denomRows}</tbody>
+</table>
+
+<h3>📤 Изведени за инкасо</h3>
+<table>
+  <thead><tr>
+    <th>Ном.</th>${posHeaders}
+    <th style="text-align:center;padding:4px 8px;">Общо бр.</th>
+    <th style="text-align:right;padding:4px 8px;">Сума</th>
+  </tr></thead>
+  <tbody>${inkRows||'<tr><td colspan="10" style="text-align:center;color:#94a3b8;">Няма изведени за инкасо</td></tr>'}</tbody>
+</table>
+
+<h3>🏦 Главна каса</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4mm;margin-bottom:5mm;">
+  <div class="metric"><div class="metric-lbl">Общо налични</div><div class="metric-val green">${glCounted.toFixed(2)} EUR</div></div>
+  <div class="metric"><div class="metric-lbl">Служебно въведени</div><div class="metric-val amber">${slujebno.toFixed(2)} EUR</div></div>
+  <div class="metric"><div class="metric-lbl">Наличност SAP</div><div class="metric-val" style="color:#1e40af;">${sapBal.toFixed(2)} EUR</div></div>
+  <div class="metric" style="border-color:${glRaz<0?'#dc2626':glRaz>0?'#d97706':'#16a34a'};">
+    <div class="metric-lbl">РАЗЛИКА</div>
+    <div class="metric-val ${rc(glRaz)}">${(glRaz<0?'– ':'')+Math.abs(glRaz).toFixed(2)} EUR</div>
+  </div>
+</div>
+
+${kasaGlavna?'<div style="font-size:8.5pt;color:#888;margin-bottom:4mm;">Главна каса: '+(kasaGlavna.status==='confirmed'?'✅ Потвърдена':'✏️ Чернова')+'</div>':''}
+
+<div class="sign-grid">
+  <div>
+    <div class="sign-box">Изготвил: ________________________</div>
+    <div style="font-size:8pt;color:#888;margin-top:1mm;">${esc(currentUser.display_name||'')}</div>
+  </div>
+  <div>
+    <div class="sign-box">Приел (гл. касиер): ________________________</div>
+  </div>
+  <div>
+    <div class="sign-box">Управител: ________________________</div>
+  </div>
+</div>
+
+<div style="text-align:center;margin-top:6mm;">
+  <button onclick="window.print()" style="border:none;background:#2563eb;color:#fff;padding:8px 24px;border-radius:6px;font-size:11pt;cursor:pointer;">🖨 Принтирай / Запази PDF</button>
+</div>
+</body></html>`);
+  printWin.document.close();
+  setTimeout(function(){printWin.focus();},300);
 }
 
 /* ─── РАЗКЛЮЧВАНЕ (admin / accounting) ─────────────────────── */
@@ -1017,7 +954,7 @@ function renderZoborot(){
     '<div class="card">'+
       '<div class="card-title">📊 Данни от POS Zoborot</div>'+
       '<table style="width:100%;font-size:13px;">'+
-        '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане в брой EUR (BGN)</td>'+
+        '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане в брой BGN</td>'+
           '<td style="text-align:right;padding:6px 4px;">'+inp('cash_bgn',z.cash_bgn)+'</td></tr>'+
         '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане в брой EUR</td>'+
           '<td style="text-align:right;padding:6px 4px;">'+inp('cash_eur',z.cash_eur)+'</td></tr>'+
@@ -1208,7 +1145,7 @@ function printZoborot(){
     '</div>'+
     '<h2>Данни от POS Zoborot</h2>'+
     '<table><tbody>'+
-      '<tr><td>Плащане в брой EUR (BGN)</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.cash_bgn)||0).toFixed(2))+'</td></tr>'+
+      '<tr><td>Плащане в брой BGN</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.cash_bgn)||0).toFixed(2))+'</td></tr>'+
       '<tr><td>Плащане в брой EUR</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.cash_eur)||0).toFixed(2))+'</td></tr>'+
       '<tr><td>Плащане с карта EUR</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.card_eur)||0).toFixed(2))+'</td></tr>'+
       '<tr><td>Плащане по банков път EUR</td><td style="text-align:right;font-family:monospace;">'+((parseFloat(z.bank_eur)||0).toFixed(2))+'</td></tr>'+
