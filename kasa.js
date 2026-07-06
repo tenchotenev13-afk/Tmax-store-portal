@@ -1184,3 +1184,4 @@ function printZoborot(){
   setTimeout(function(){win.focus();},300);
   }, 400);
 }
+
