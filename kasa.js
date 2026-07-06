@@ -17,7 +17,7 @@ var DENOM_KEY = {};
 DENOM_KEY[0.5]='coins_50'; DENOM_KEY[0.2]='coins_20'; DENOM_KEY[0.1]='coins_10';
 DENOM_KEY[0.05]='coins_5'; DENOM_KEY[0.02]='coins_2'; DENOM_KEY[0.01]='coins_1';
 
-var INKASO_DENOM = [500,200,100,50,20,10,5,2,1,0.5,0.2,0.1,0.05,0.02,0.01];
+var INKASO_DENOM = [500,200,100,50,20,10,5];
 
 /* ─── HELPERS ───────────────────────────────────────────────── */
 function fmtMoney(v){
@@ -424,7 +424,9 @@ function submitKasaForm(){
     status:'draft'
   };
   ALL_DENOM.forEach(function(v){ var key=DENOM_KEY[v]; var el=document.getElementById('kf-'+key); p[key]=el?parseInt(el.value)||0:0; });
-  INKASO_DENOM.forEach(function(v){ var el=document.getElementById('kf-inkaso_'+v); p['inkaso_'+v]=el?parseInt(el.value)||0:0; });
+  /* Записваме само банкнотите — монетите нямат колони в базата */
+  var INKASO_BILLS=[500,200,100,50,20,10,5,2,1];
+  INKASO_BILLS.forEach(function(v){ var el=document.getElementById('kf-inkaso_'+v); p['inkaso_'+v]=el?parseInt(el.value)||0:0; });
 
   var req=kasaEditId?sbPatch('kasa_reports','id=eq.'+kasaEditId,p):sbPost('kasa_reports',p);
   req.then(function(res){
