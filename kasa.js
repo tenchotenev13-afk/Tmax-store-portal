@@ -85,9 +85,16 @@ function kasaTab(tab){
   });
   if(tab==='pos') renderKasa();
   else if(tab==='glavna'){
-    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
-    sbGet('kasa_glavna',gq).then(function(data){
-      kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
+    var activeDate=kasaActiveDate();
+    var enc=encodeURIComponent(currentUser.store_name);
+    Promise.all([
+      sbGet('kasa_reports','order=pos_number.asc&date=eq.'+activeDate+'&store_name=eq.'+enc),
+      sbGet('kasa_glavna','store_name=eq.'+enc+'&date=eq.'+activeDate)
+    ]).then(function(res){
+      var fresh=Array.isArray(res[0])?res[0]:[];
+      var other=kasaReports.filter(function(r){return r.date!==activeDate;});
+      kasaReports=other.concat(fresh);
+      kasaGlavna=(Array.isArray(res[1])&&res[1].length)?res[1][0]:null;
       renderGlavna();
     }).catch(function(){renderGlavna();});
   }
