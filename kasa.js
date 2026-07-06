@@ -84,7 +84,13 @@ function kasaTab(tab){
             el.style.color=t===tab?'#fff':'#64748b';
   });
   if(tab==='pos') renderKasa();
-  else if(tab==='glavna') renderGlavna();
+  else if(tab==='glavna'){
+    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
+    sbGet('kasa_glavna',gq).then(function(data){
+      kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
+      renderGlavna();
+    }).catch(function(){renderGlavna();});
+  }
   else if(tab==='zoborot'){loadZoborot();}
 }
 
@@ -196,6 +202,7 @@ function renderKasa(){
 function openKasaForm(report){
   kasaEditId=report?report.id:null;
   var r=report||{};
+  if(r.date) kasaSetDate(r.date);
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
 
   /* Ред за купюра (отчетени) */
@@ -412,9 +419,11 @@ function submitKasaForm(){
   var storna=parseFloat((document.getElementById('kf-storna')||{}).value)||0;
   var razlika=Math.round((counted-(cash-storna-inkaso))*100)/100; /* В брой - Сторна - Инкасо */
 
+  var _chosenDate=(document.getElementById('kf-date')||{}).value||today();
+  kasaSetDate(_chosenDate);
   var p={
     store_name:currentUser.store_name,
-    date:(document.getElementById('kf-date')||{}).value||today(),
+    date:_chosenDate,
     pos_number:parseInt((document.getElementById('kf-pos')||{}).value)||1,
     cashier_name:cashier,
     kasa_number:parseInt((document.getElementById('kf-kasa')||{}).value)||1,
@@ -427,7 +436,6 @@ function submitKasaForm(){
     status:'draft'
   };
   ALL_DENOM.forEach(function(v){ var key=DENOM_KEY[v]; var el=document.getElementById('kf-'+key); p[key]=el?parseInt(el.value)||0:0; });
-  /* Записваме само банкнотите — монетите нямат колони в базата */
   var INKASO_BILLS=[500,200,100,50,20,10,5,2,1];
   INKASO_BILLS.forEach(function(v){ var el=document.getElementById('kf-inkaso_'+v); p['inkaso_'+v]=el?parseInt(el.value)||0:0; });
 
@@ -701,7 +709,6 @@ function printKasaReport(){
     toast('Грешка: openKasaDetail не е заредена','#dc2626');
   }
 }
-
 
 /* ─── РАЗКЛЮЧВАНЕ (admin / accounting) ─────────────────────── */
 function unlockKasaReport(id){
