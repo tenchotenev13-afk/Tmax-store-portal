@@ -179,7 +179,7 @@ function loadDailyOverview(dateOverride) {
     + days.map(function(d,i){
         var active = activeDate===d;
         return '<button onclick="loadDailyOverview(\'' + d + '\')" style="border:1px solid #e2e8f0;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">'
-          + labels[i]+' ('+fmtDate(d)+')</button>';
+          + labels[i]+'('+fmtDate(d)+')</button>';
       }).join('')
     + '<input type="date" value="' + activeDate + '" onchange="loadDailyOverview(this.value)" style="border:1.5px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;">'
     + '</div>';
@@ -405,28 +405,7 @@ function openKasaDetail(storeName, date) {
       '</div>';
     }).join('');
 
-    /* Главна каса HTML */
-    var glHTML = gl ? '<div class="card">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
-        '<h3 style="margin:0;">Главна каса</h3>' + statusTag(gl.status) +
-      '</div>' +
-      '<div class="grid2">' +
-        '<div><table><thead><tr><th>Ном.</th><th>Брой</th><th>Сума</th></tr></thead><tbody>' +
-        BILLS.concat(COINS).map(function(v){
-          var k=DK[String(v)]; var qty=parseInt(gl[k])||0; if(!qty)return '';
-          return '<tr><td>' + v + ' EUR</td><td style="text-align:center;">' + qty + '</td><td style="text-align:right;font-family:monospace;">' + (Math.round(qty*v*100)/100).toFixed(2) + '</td></tr>';
-        }).join('') +
-        '<tr style="font-weight:700;background:#f0fdf4;"><td colspan="2">Главна налични</td><td style="text-align:right;font-family:monospace;">' + fm(gl.counted_cash) + '</td></tr>' +
-        '</tbody></table></div>' +
-        '<div><table><tbody>' +
-        '<tr><td>Общо налични (всички)</td><td style="text-align:right;font-family:monospace;font-weight:700;color:#166534;">' + fm(allCounted) + '</td></tr>' +
-        '<tr><td>Служебно въведени</td><td style="text-align:right;font-family:monospace;">' + fm(gl.slujebno) + '</td></tr>' +
-        '<tr><td>Наличност SAP</td><td style="text-align:right;font-family:monospace;">' + fm(gl.sap_balance) + '</td></tr>' +
-        '<tr style="font-weight:700;border-top:2px solid #e2e8f0;"><td>РАЗЛИКА</td><td style="text-align:right;font-family:monospace;" class="' + rc(Math.round((allCounted+(parseFloat(gl.slujebno)||0)-(parseFloat(gl.sap_balance)||0))*100)/100) + '">' + fm(Math.round((allCounted+(parseFloat(gl.slujebno)||0)-(parseFloat(gl.sap_balance)||0))*100)/100) + '</td></tr>' +
-        '</tbody></table></div>' +
-      '</div></div>' : '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Главна каса — не е попълнена</div>';
-
-    /* Купюрен опис ПОС + Главна */
+    /* Купюрен опис ПОС + Главна — изчислява allCounted преди glHTML */
     var allCounted = 0;
     var grandTotalDenom = 0;
     var ALL_D2 = BILLS.concat(COINS);
@@ -463,6 +442,27 @@ function openKasaDetail(storeName, date) {
       + '<td></td>'
       + '<td style="text-align:right;font-family:monospace;font-size:12pt;color:#0f172a;">' + grandTotalDenom.toFixed(2) + ' EUR</td>'
       + '</tr></tbody></table></div>';
+
+    /* Главна каса HTML */
+    var glHTML = gl ? '<div class="card">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">' +
+        '<h3 style="margin:0;">Главна каса</h3>' + statusTag(gl.status) +
+      '</div>' +
+      '<div class="grid2">' +
+        '<div><table><thead><tr><th>Ном.</th><th>Брой</th><th>Сума</th></tr></thead><tbody>' +
+        BILLS.concat(COINS).map(function(v){
+          var k=DK[String(v)]; var qty=parseInt(gl[k])||0; if(!qty)return '';
+          return '<tr><td>' + v + ' EUR</td><td style="text-align:center;">' + qty + '</td><td style="text-align:right;font-family:monospace;">' + (Math.round(qty*v*100)/100).toFixed(2) + '</td></tr>';
+        }).join('') +
+        '<tr style="font-weight:700;background:#f0fdf4;"><td colspan="2">Главна налични</td><td style="text-align:right;font-family:monospace;">' + fm(gl.counted_cash) + '</td></tr>' +
+        '</tbody></table></div>' +
+        '<div><table><tbody>' +
+        '<tr><td>Общо налични (всички)</td><td style="text-align:right;font-family:monospace;">' + fm(gl.counted_cash) + '</td></tr>' +
+        '<tr><td>Служебно въведени</td><td style="text-align:right;font-family:monospace;">' + fm(gl.slujebno) + '</td></tr>' +
+        '<tr><td>Наличност SAP</td><td style="text-align:right;font-family:monospace;">' + fm(gl.sap_balance) + '</td></tr>' +
+        '<tr style="font-weight:700;border-top:2px solid #e2e8f0;"><td>РАЗЛИКА</td><td style="text-align:right;font-family:monospace;" class="' + rc(gl.razlika) + '">' + fm(gl.razlika) + '</td></tr>' +
+        '</tbody></table></div>' +
+      '</div></div>' : '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Главна каса — не е попълнена</div>';
 
     /* Равнение HTML */
     var zobHTML = zob ? '<div class="card">' +
@@ -564,6 +564,7 @@ function returnKasaForRevision(storeName, date, reason) {
     });
     Promise.all(patches).then(function() {
       toast('↩ Отчетът е върнат за корекция на ' + storeName, '#d97706');
+      if(typeof kasaSetDate==='function') kasaSetDate(date);
       if(typeof loadHistory==='function') loadHistory();
       if(typeof loadKasa==='function') loadKasa();
     });
