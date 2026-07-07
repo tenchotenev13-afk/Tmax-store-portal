@@ -162,11 +162,32 @@ function markReady() {
 }
 
 /* Дневен преглед */
-function loadDailyOverview() {
+var dailyOverviewDate = null;
+function dailyActiveDate(){ return dailyOverviewDate || (function(){ var d=new Date(); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })(); }
+
+function loadDailyOverview(dateOverride) {
+  if(dateOverride) dailyOverviewDate = dateOverride;
   var wrap = document.getElementById('daily-overview') || document.getElementById('h-results');
   if (!wrap) return;
-  wrap.innerHTML = '<div style="text-align:center;padding:20px;color:#94a3b8;">⏳ Зареждане...</div>';
-  var todayStr = today();
+
+  var activeDate = dailyActiveDate();
+  var days = [1,2,3].map(function(i){ var d=new Date(); d.setDate(d.getDate()-i); return d.toISOString().slice(0,10); });
+  var labels = ['Вчера','Завчера','По-завчера'];
+
+  var pickerHtml = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">'
+    + '<div style="font-size:16px;font-weight:600;">📅 Дневен преглед</div>'
+    + days.map(function(d,i){
+        var active = activeDate===d;
+        return '<button onclick="loadDailyOverview(\'' + d + '\')" style="border:1px solid #e2e8f0;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">'
+          + labels[i]+' ('+fmtDate(d)+')</button>';
+      }).join('')
+    + '<input type="date" value="' + activeDate + '" onchange="loadDailyOverview(this.value)" style="border:1.5px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;">'
+    + '</div>';
+
+  wrap.innerHTML = pickerHtml + '<div id="daily-overview-content"><div style="text-align:center;padding:20px;color:#94a3b8;">⏳ Зареждане...</div></div>';
+  var contentWrap = document.getElementById('daily-overview-content') || wrap;
+
+  var todayStr = activeDate;
   Promise.all([
     sbGet('kasa_reports','date=eq.'+todayStr+'&order=store_name.asc'+storeQ()),
     sbGet('kasa_zoborot','date=eq.'+todayStr+storeQ()),
@@ -222,9 +243,9 @@ function loadDailyOverview() {
         + '</tr>';
     });
     html += '</tbody></table></div></div>';
-    wrap.innerHTML = html;
+    contentWrap.innerHTML = html;
   }).catch(function() {
-    wrap.innerHTML = '<div style="color:#dc2626;padding:20px;">Грешка при зареждане.</div>';
+    contentWrap.innerHTML = '<div style="color:#dc2626;padding:20px;">Грешка при зареждане.</div>';
   });
 }
 
@@ -398,10 +419,10 @@ function openKasaDetail(storeName, date) {
         '<tr style="font-weight:700;background:#f0fdf4;"><td colspan="2">Главна налични</td><td style="text-align:right;font-family:monospace;">' + fm(gl.counted_cash) + '</td></tr>' +
         '</tbody></table></div>' +
         '<div><table><tbody>' +
-        '<tr><td>Общо налични (всички)</td><td style="text-align:right;font-family:monospace;">' + fm(gl.counted_cash) + '</td></tr>' +
+        '<tr><td>Общо налични (всички)</td><td style="text-align:right;font-family:monospace;font-weight:700;color:#166534;">' + fm(allCounted) + '</td></tr>' +
         '<tr><td>Служебно въведени</td><td style="text-align:right;font-family:monospace;">' + fm(gl.slujebno) + '</td></tr>' +
         '<tr><td>Наличност SAP</td><td style="text-align:right;font-family:monospace;">' + fm(gl.sap_balance) + '</td></tr>' +
-        '<tr style="font-weight:700;border-top:2px solid #e2e8f0;"><td>РАЗЛИКА</td><td style="text-align:right;font-family:monospace;" class="' + rc(gl.razlika) + '">' + fm(gl.razlika) + '</td></tr>' +
+        '<tr style="font-weight:700;border-top:2px solid #e2e8f0;"><td>РАЗЛИКА</td><td style="text-align:right;font-family:monospace;" class="' + rc(Math.round((allCounted+(parseFloat(gl.slujebno)||0)-(parseFloat(gl.sap_balance)||0))*100)/100) + '">' + fm(Math.round((allCounted+(parseFloat(gl.slujebno)||0)-(parseFloat(gl.sap_balance)||0))*100)/100) + '</td></tr>' +
         '</tbody></table></div>' +
       '</div></div>' : '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Главна каса — не е попълнена</div>';
 
@@ -541,11 +562,10 @@ function returnKasaForRevision(storeName, date, reason) {
         returned_at: now
       });
     });
-Promise.all(patches).then(function() {
-  toast('↩ Отчетът е върнат за корекция на ' + storeName, '#d97706');
-  if(typeof loadHistory==='function') loadHistory();
-  if(typeof loadKasa==='function') loadKasa();
-});
+    Promise.all(patches).then(function() {
+      toast('↩ Отчетът е върнат за корекция на ' + storeName, '#d97706');
+      if(typeof loadHistory==='function') loadHistory();
+      if(typeof loadKasa==='function') loadKasa();
     });
   });
 }
