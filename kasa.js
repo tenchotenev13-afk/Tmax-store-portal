@@ -73,7 +73,7 @@ function loadKasa(){
     else renderGlavna();
   }).catch(function(){renderKasa();});
   /* Главна каса за днес */
-  var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today();
+  var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
   sbGet('kasa_glavna',gq).then(function(data){
     kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
     if(kasaView==='glavna') renderGlavna();
@@ -89,7 +89,20 @@ function kasaTab(tab){
             el.style.color=t===tab?'#fff':'#64748b';
   });
   if(tab==='pos') renderKasa();
-  else if(tab==='glavna') renderGlavna();
+  else if(tab==='glavna'){
+    var activeDate=kasaActiveDate();
+    var enc=encodeURIComponent(currentUser.store_name);
+    Promise.all([
+      sbGet('kasa_reports','order=pos_number.asc&date=eq.'+activeDate+'&store_name=eq.'+enc),
+      sbGet('kasa_glavna','store_name=eq.'+enc+'&date=eq.'+activeDate)
+    ]).then(function(res){
+      var fresh=Array.isArray(res[0])?res[0]:[];
+      var other=kasaReports.filter(function(r){return r.date!==activeDate;});
+      kasaReports=other.concat(fresh);
+      kasaGlavna=(Array.isArray(res[1])&&res[1].length)?res[1][0]:null;
+      renderGlavna();
+    }).catch(function(){renderGlavna();});
+  }
   else if(tab==='zoborot'){loadZoborot();}
 }
 
@@ -176,12 +189,8 @@ function renderKasa(){
   if(histRep.length){
     html+='<div class="card"><div class="card-title">📜 История</div>'+
       '<div class="tbl-wrap"><table>'+
-      '<thead><tr><th>Дата</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th><th></th></tr></thead><tbody>';
+      '<thead><tr><th>Дата</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th></tr></thead><tbody>';
     histRep.slice(0,40).forEach(function(r){
-      var canEdit = r.status==='draft' || r.status==='returned';
-      var statusLabel = r.status==='confirmed' ? '✅'
-        : r.status==='returned' ? '<span style="background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">↩ Върнат</span>'
-        : '✏️';
       html+='<tr>'+
         '<td>'+fmtDate(r.date)+'</td>'+
         '<td>ПОС '+esc(String(r.pos_number||''))+'</td>'+
@@ -190,9 +199,7 @@ function renderKasa(){
         '<td>'+fmtMoney(calcInkaso(r))+'</td>'+
         '<td>'+fmtMoney(r.counted_cash)+'</td>'+
         '<td>'+moneyBadge(r.razlika)+'</td>'+
-        '<td>'+statusLabel+'</td>'+
-        '<td>'+(canEdit?'<button onclick="editKasaReport(\''+r.id+'\')" style="border:1px solid #dc2626;background:#fee2e2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Редактирай</button>':'')+'</td>'+
-      '</tr>';
+        '<td>'+(r.status==='confirmed'?'✅':'✏️')+'</td></tr>';
     });
     html+='</tbody></table></div></div>';
   }
@@ -472,7 +479,7 @@ function confirmKasaReport(id){
 ═══════════════════════════════════════════════════════════════ */
 function renderGlavna(){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g=kasaGlavna||{};
   var isDraft=!g.id||(g.status==='draft');
@@ -630,7 +637,7 @@ function renderGlavna(){
 
 /* ─── ГЛАВНА КАСА LIVE CALC ──────────────────────────────────── */
 function glavnaLiveCalc(){
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g={};
   ALL_DENOM.forEach(function(v){
@@ -668,7 +675,7 @@ function glavnaLiveCalc(){
 
 /* ─── SAVE ГЛАВНА КАСА ───────────────────────────────────────── */
 function saveGlavna(){
-  var p={store_name:currentUser.store_name,date:today(),status:'draft'};
+  var p={store_name:currentUser.store_name,date:kasaActiveDate(),status:'draft'};
   ALL_DENOM.forEach(function(v){
     var el=document.getElementById('gl-'+DENOM_KEY[v]);
     p[DENOM_KEY[v]]=el?parseInt(el.value)||0:0;
@@ -688,7 +695,7 @@ function saveGlavna(){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     toast('💾 Главна каса е запазена!');
     /* Reload */
-    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today();
+    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
     sbGet('kasa_glavna',gq).then(function(data){
       kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
       renderGlavna();
@@ -969,7 +976,7 @@ function unlockKasaReport(id){
 var zoborotData = null;
 
 function loadZoborot(){
-  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today()+'&order=created_at.desc';
+  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate()+'&order=created_at.desc';
   sbGet('kasa_zoborot',q).then(function(data){
     zoborotData=(Array.isArray(data)&&data.length)?data[0]:null;
     renderZoborot();
@@ -1007,7 +1014,7 @@ function renderZoborot(){
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — Равнение на оборота</div>'+
     kasaTabBar()+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
-      '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(today())+'</b></div>'+
+      '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(kasaActiveDate())+'</b></div>'+
       '<div style="display:flex;gap:8px;">'+
         (isDraft&&canConfirm?'<button onclick="saveZoborot()" class="btn btn-green">💾 Запази</button>':'')+
         (isDraft&&canConfirm&&z.id?'<button onclick="confirmZoborot()" class="btn" style="background:#2563eb;color:#fff;">✅ Потвърди</button>':'')+
@@ -1145,7 +1152,7 @@ function saveZoborot(){
   var raz=Math.round((posNoBank-fuTotal)*100)/100;
 
   var p={
-    store_name:currentUser.store_name,date:today(),
+    store_name:currentUser.store_name,date:kasaActiveDate(),
     cash_bgn:cashBgn,cash_eur:cashEur,card_eur:card,bank_eur:bank,
     pos_total_eur:Math.round((cashBgn+cashEur+card+bank+vouch)*100)/100,
     fu1_gross:fu1g,fu1_discount:fu1d,fu1_net:fu1n,
