@@ -73,7 +73,7 @@ function loadKasa(){
     else renderGlavna();
   }).catch(function(){renderKasa();});
   /* Главна каса за днес */
-  var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today();
+  var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
   sbGet('kasa_glavna',gq).then(function(data){
     kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
     if(kasaView==='glavna') renderGlavna();
@@ -89,7 +89,20 @@ function kasaTab(tab){
             el.style.color=t===tab?'#fff':'#64748b';
   });
   if(tab==='pos') renderKasa();
-  else if(tab==='glavna') renderGlavna();
+  else if(tab==='glavna'){
+    var activeDate=kasaActiveDate();
+    var enc=encodeURIComponent(currentUser.store_name);
+    Promise.all([
+      sbGet('kasa_reports','order=pos_number.asc&date=eq.'+activeDate+'&store_name=eq.'+enc),
+      sbGet('kasa_glavna','store_name=eq.'+enc+'&date=eq.'+activeDate)
+    ]).then(function(res){
+      var fresh=Array.isArray(res[0])?res[0]:[];
+      var other=kasaReports.filter(function(r){return r.date!==activeDate;});
+      kasaReports=other.concat(fresh);
+      kasaGlavna=(Array.isArray(res[1])&&res[1].length)?res[1][0]:null;
+      renderGlavna();
+    }).catch(function(){renderGlavna();});
+  }
   else if(tab==='zoborot'){loadZoborot();}
 }
 
@@ -468,7 +481,7 @@ function confirmKasaReport(id){
 ═══════════════════════════════════════════════════════════════ */
 function renderGlavna(){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g=kasaGlavna||{};
   var isDraft=!g.id||(g.status==='draft');
@@ -626,7 +639,7 @@ function renderGlavna(){
 
 /* ─── ГЛАВНА КАСА LIVE CALC ──────────────────────────────────── */
 function glavnaLiveCalc(){
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g={};
   ALL_DENOM.forEach(function(v){
@@ -664,7 +677,7 @@ function glavnaLiveCalc(){
 
 /* ─── SAVE ГЛАВНА КАСА ───────────────────────────────────────── */
 function saveGlavna(){
-  var p={store_name:currentUser.store_name,date:today(),status:'draft'};
+  var p={store_name:currentUser.store_name,date:kasaActiveDate(),status:'draft'};
   ALL_DENOM.forEach(function(v){
     var el=document.getElementById('gl-'+DENOM_KEY[v]);
     p[DENOM_KEY[v]]=el?parseInt(el.value)||0:0;
@@ -684,7 +697,7 @@ function saveGlavna(){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     toast('💾 Главна каса е запазена!');
     /* Reload */
-    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today();
+    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
     sbGet('kasa_glavna',gq).then(function(data){
       kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
       renderGlavna();
@@ -699,26 +712,31 @@ function saveGlavna(){
 function printKasaReport(){
   var todayStr=kasaActiveDate();
   var reps=kasaReports.filter(function(r){return r.date===todayStr;});
-  var gl=kasaGlavna||null;
-  var g=gl||{};
 
   if(!reps.length){toast('Няма отчети за тази дата','#dc2626');return;}
 
-  /* Зареждаме zoborot ако не е в паметта */
   var enc2=encodeURIComponent(currentUser.store_name);
   var zq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.desc';
+  var gq='store_name=eq.'+enc2+'&date=eq.'+todayStr;
   var dq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.asc';
+  /* Зареждаме zoborot, glavna и документи директно от базата */
   Promise.all([
     sbGet('kasa_zoborot',zq),
+    sbGet('kasa_glavna',gq),
     sbGet('kasa_documents',dq)
   ]).then(function(res){
     zoborotData=(Array.isArray(res[0])&&res[0].length)?res[0][0]:null;
-    var docs=Array.isArray(res[1])?res[1]:[];
+    var gl=(Array.isArray(res[1])&&res[1].length)?res[1][0]:null;
+    var g=gl||{};
+    var docs=Array.isArray(res[2])?res[2]:[];
     _doPrintKasaReport(todayStr,reps,gl,g,docs);
-  }).catch(function(e){console.error('Print load error:',e);_doPrintKasaReport(todayStr,reps,gl,g,[]);});
+  }).catch(function(e){
+    console.error('Print load error:',e);
+    _doPrintKasaReport(todayStr,reps,null,{},[]);
+  });
 }
 
-function _doPrintKasaReport(todayStr,reps,gl,g){
+function _doPrintKasaReport(todayStr,reps,gl,g,docs){
 
   var BILLS=[500,200,100,50,20,10,5,2,1];
   var COINS=[0.5,0.2,0.1,0.05,0.02,0.01];
@@ -890,6 +908,22 @@ function _doPrintKasaReport(todayStr,reps,gl,g){
     '</div></div>':
     '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Равнение — не е попълнено</div>';
 
+  /* Документи */
+  var docsHTML = '';
+  if(docs && docs.length){
+    docsHTML = '<h2>📎 Документи</h2><div class="card">';
+    docs.forEach(function(d){
+      var isPdf=/\.pdf$/i.test(d.file_name||'');
+      docsHTML+='<div class="doc-item">';
+      docsHTML+='<span style="font-size:18px;">'+(isPdf?'📄':'🖼️')+'</span>';
+      docsHTML+='<div style="flex:1;"><div style="font-size:10pt;font-weight:500;">'+esc(d.file_name||'')+'</div>';
+      docsHTML+='<div style="font-size:8.5pt;color:#6b7280;">'+esc(d.doc_type||'')+' · '+esc(d.uploaded_by||'')+'</div></div>';
+      docsHTML+='<button onclick="openDocFromPrint(\''+esc(d.file_url)+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:4px;padding:3px 10px;font-size:9pt;cursor:pointer;">Виж</button>';
+      docsHTML+='</div>';
+    });
+    docsHTML += '</div>';
+  }
+
   var win=window.open('','_blank','width=1100,height=800');
   win.document.write('<html><head><meta charset="UTF-8">'+
     '<title>Касов отчет — '+esc(currentUser.store_name)+' — '+fmtDate(todayStr)+'</title>'+
@@ -1022,7 +1056,7 @@ function clearHistFilter() {
 var zoborotData = null;
 
 function loadZoborot(){
-  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today()+'&order=created_at.desc';
+  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate()+'&order=created_at.desc';
   sbGet('kasa_zoborot',q).then(function(data){
     zoborotData=(Array.isArray(data)&&data.length)?data[0]:null;
     renderZoborot();
@@ -1060,7 +1094,7 @@ function renderZoborot(){
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — Равнение на оборота</div>'+
     kasaTabBar()+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
-      '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(today())+'</b></div>'+
+      '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(kasaActiveDate())+'</b></div>'+
       '<div style="display:flex;gap:8px;">'+
         (isDraft&&canConfirm?'<button onclick="saveZoborot()" class="btn btn-green">💾 Запази</button>':'')+
         (isDraft&&canConfirm&&z.id?'<button onclick="confirmZoborot()" class="btn" style="background:#2563eb;color:#fff;">✅ Потвърди</button>':'')+
@@ -1198,7 +1232,7 @@ function saveZoborot(){
   var raz=Math.round((posNoBank-fuTotal)*100)/100;
 
   var p={
-    store_name:currentUser.store_name,date:today(),
+    store_name:currentUser.store_name,date:kasaActiveDate(),
     cash_bgn:cashBgn,cash_eur:cashEur,card_eur:card,bank_eur:bank,
     pos_total_eur:Math.round((cashBgn+cashEur+card+bank+vouch)*100)/100,
     fu1_gross:fu1g,fu1_discount:fu1d,fu1_net:fu1n,
