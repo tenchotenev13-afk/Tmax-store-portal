@@ -189,8 +189,12 @@ function renderKasa(){
   if(histRep.length){
     html+='<div class="card"><div class="card-title">📜 История</div>'+
       '<div class="tbl-wrap"><table>'+
-      '<thead><tr><th>Дата</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th></tr></thead><tbody>';
+      '<thead><tr><th>Дата</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th><th></th></tr></thead><tbody>';
     histRep.slice(0,40).forEach(function(r){
+      var canEdit = r.status==='draft' || r.status==='returned';
+      var statusLabel = r.status==='confirmed' ? '✅'
+        : r.status==='returned' ? '<span style="background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">↩ Върнат</span>'
+        : '✏️';
       html+='<tr>'+
         '<td>'+fmtDate(r.date)+'</td>'+
         '<td>ПОС '+esc(String(r.pos_number||''))+'</td>'+
@@ -199,7 +203,9 @@ function renderKasa(){
         '<td>'+fmtMoney(calcInkaso(r))+'</td>'+
         '<td>'+fmtMoney(r.counted_cash)+'</td>'+
         '<td>'+moneyBadge(r.razlika)+'</td>'+
-        '<td>'+(r.status==='confirmed'?'✅':'✏️')+'</td></tr>';
+        '<td>'+statusLabel+'</td>'+
+        '<td>'+(canEdit?'<button onclick="editKasaReport(\''+r.id+'\')" style="border:1px solid #dc2626;background:#fee2e2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Редактирай</button>':'')+'</td>'+
+      '</tr>';
     });
     html+='</tbody></table></div></div>';
   }
