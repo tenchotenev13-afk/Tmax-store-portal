@@ -202,6 +202,7 @@ function renderKasa(){
 function openKasaForm(report){
   kasaEditId=report?report.id:null;
   var r=report||{};
+  if(r.date) kasaSetDate(r.date);
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
 
   /* Ред за купюра (отчетени) */
