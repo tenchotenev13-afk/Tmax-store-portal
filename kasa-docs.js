@@ -460,7 +460,7 @@ function openKasaDetail(storeName, date) {
         '<tr><td>Общо налични (всички)</td><td style="text-align:right;font-family:monospace;font-weight:700;color:#166534;">' + fm(allCounted) + '</td></tr>' +
         '<tr><td>Служебно въведени</td><td style="text-align:right;font-family:monospace;">' + fm(gl.slujebno) + '</td></tr>' +
         '<tr><td>Наличност SAP</td><td style="text-align:right;font-family:monospace;">' + fm(gl.sap_balance) + '</td></tr>' +
-        '<tr style="font-weight:700;border-top:2px solid #e2e8f0;"><td>РАЗЛИКА</td><td style="text-align:right;font-family:monospace;" class="' + rc(gl.razlika) + '">' + fm(gl.razlika) + '</td></tr>' +
+        '<tr style="font-weight:700;border-top:2px solid #e2e8f0;"><td>РАЗЛИКА</td><td style="text-align:right;font-family:monospace;" class="' + rc(Math.round((allCounted+(parseFloat(gl.slujebno)||0)-(parseFloat(gl.sap_balance)||0))*100)/100) + '">' + fm(Math.round((allCounted+(parseFloat(gl.slujebno)||0)-(parseFloat(gl.sap_balance)||0))*100)/100) + '</td></tr>' +
         '</tbody></table></div>' +
       '</div></div>' : '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Главна каса — не е попълнена</div>';
 
