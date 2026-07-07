@@ -10,8 +10,8 @@ var BUL_PUB = BUL_SB + '/storage/v1/object/public/' + BUL_BKT + '/';
 /* STATE */
 var bulActiveDept = 'trade';
 var curBul = null; var bulTasks = []; var bulComps = [];
+var recurringTasks = []; var recurringComps = []; var subtaskComps = [];
 var bulMode = 'view'; var bulSaveT = null; var dragInfo = null;
-var bulWk = 0;
 
 /* DEPTS */
 var DEPTS = {
@@ -49,6 +49,10 @@ function loadBulletin(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:300px;color:#94a3b8;font-size:15px;">⏳ Зареждане...</div>';
   var q=canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1';
+  /* Зареди постоянни задачи */
+  sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').then(function(rt){
+    recurringTasks=Array.isArray(rt)?rt:[];
+  }).catch(function(){recurringTasks=[];});
   sbGet('bulletins',q).then(function(data){
     curBul=(Array.isArray(data)&&data.length)?data[0]:null;
     if(!curBul){renderBulEmpty();return;}
@@ -59,7 +63,20 @@ function loadBulletin(){
       if(!bulTasks.length){bulComps=[];renderBulletin();return;}
       var ids=bulTasks.map(function(x){return x.id;}).join(',');
       var cq='task_id=in.('+ids+')'+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
-      sbGet('task_completions',cq).then(function(c){bulComps=Array.isArray(c)?c:[];renderBulletin();}).catch(function(){bulComps=[];renderBulletin();});
+      sbGet('task_completions',cq).then(function(c){
+        bulComps=Array.isArray(c)?c:[];
+        /* Зареди subtask completions */
+        var storeF=isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name);
+        sbGet('subtask_completions','select=*'+storeF).then(function(sc){
+          subtaskComps=Array.isArray(sc)?sc:[];
+          /* Зареди recurring completions */
+          var rq='bulletin_id=eq.'+curBul.id+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
+          sbGet('task_completions',rq+'&task_id=is.null').then(function(rc){
+            recurringComps=Array.isArray(rc)?rc:[];
+            renderBulletin();
+          }).catch(function(){recurringComps=[];renderBulletin();});
+        }).catch(function(){subtaskComps=[];renderBulletin();});
+      }).catch(function(){bulComps=[];subtaskComps=[];recurringComps=[];renderBulletin();});
     }).catch(function(){bulTasks=[];bulComps=[];renderBulletin();});
   }).catch(function(){
     var wrap=document.getElementById('mod-bulletin');
@@ -116,8 +133,10 @@ var BULCSS = '<style>' +
 '.blk.drag-hi{border-color:#2563eb;background:#eff6ff;}' +
 '.blk-del{position:absolute;right:4px;top:4px;width:20px;height:20px;border:none;background:#fee2e2;color:#dc2626;border-radius:50%;font-size:11px;cursor:pointer;display:none;align-items:center;justify-content:center;font-weight:700;}' +
 '.blk:hover .blk-del{display:flex;}' +
+'.blk:hover .blk-copy{display:inline-block!important;}' + +
 '.blk-type{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:#94a3b8;margin-bottom:4px;}' +
 '.blk-ta{width:100%;border:none;background:none;font-family:DM Sans,sans-serif;font-size:13px;color:#0f172a;resize:none;outline:none;}' +
+'.task-overdue{outline:2px solid #dc2626;border-radius:6px;}' + +
 '.addblk{width:100%;padding:7px;border:1.5px dashed #cbd5e1;border-radius:7px;background:none;color:#94a3b8;font-size:12px;cursor:pointer;font-family:inherit;margin-top:6px;}' +
 '.addblk:hover{border-color:#64748b;background:#f8fafc;color:#374151;}' +
 '.bov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;align-items:center;justify-content:center;}' +
@@ -178,7 +197,6 @@ function renderBulView(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   var c=curBul.content;
   var wk=curBul.week_number; var yr=curBul.year;
-  bulWk=wk; /* глобална за bulPrintDept */
   var days=weekDays(wk,yr);
   var isDraft=curBul.status==='draft';
   var html=bulHdr(isDraft)+BULCSS+'<div style="max-width:1320px;margin:0 auto;padding:16px 16px 60px;" id="bul-body">';
@@ -279,16 +297,20 @@ function renderBulView(){
         var today=new Date();today.setHours(0,0,0,0);
         var diff=due?Math.ceil((due-today)/86400000):null;
         var dueColor=diff===null?'#94a3b8':diff<0?'#dc2626':diff<=2?'#d97706':'#94a3b8';
-        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
+        var isOverdue = due && diff < 0 && !done;
+        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;'+(isOverdue?'outline:2px solid #dc2626;border-radius:6px;padding:6px 8px;margin-bottom:2px;':'')+'">';
         html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" onchange="bulToggleTask(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;">';
         html+='<div><div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
         if(t.description)html+='<div style="font-size:11px;color:#94a3b8;">'+esc(t.description)+'</div>';
         if(due)html+='<div style="font-size:10px;color:'+dueColor+';margin-top:2px;">📅 Срок: '+due.toLocaleDateString('bg-BG')+(diff<0?' ⚠️':diff===0?' (Днес!)':diff<=2?' ('+diff+' дни)':'')+"</div>";
+        html+=renderSubtasks(t.id, dk);
         html+='</div></div>';
       });
       html+='</div>';
     }
     /* Блокове */
+    /* Постоянни задачи в dept panel */
+    html += renderRecurringTasks(dk);
     if(!blocks.length&&!dTasks.length){
       html+='<div style="text-align:center;padding:40px;color:#94a3b8;font-size:13px;">Няма информация за тази секция тази седмица.</div>';
     } else {
@@ -314,6 +336,7 @@ function editBlock(b,dk,i){
   var tl={text:'📝 Текст',alert:'🚨 Алерт',list:'📋 Списък',image:'📷 Снимка',file:'📎 Файл',divider:'— Разделител',important:'⭐ Важно'}[b.type]||b.type;
   var h='<div class="blk" id="eb-'+b.id+'" draggable="true" data-col="'+dk+'" data-idx="'+i+'" ondragstart="bulDragStart(this)" ondragover="bulDragOver(this)" ondragleave="bulDragLeave(this)" ondrop="bulDropBlock(this)">';
   h+='<button class="blk-del" data-col="'+dk+'" data-id="'+b.id+'" onclick="bulDelBlock(this)">✕</button>';
+  h+='<button onclick="bulCopyToTab(\'' +dk+ '\',\'' +b.id+ '\')" style="position:absolute;right:28px;top:4px;border:none;background:#eff6ff;color:#2563eb;border-radius:4px;font-size:10px;padding:2px 6px;cursor:pointer;display:none;" class="blk-copy">→ Копирай</button>';
   h+='<div class="blk-type">'+tl+'</div>';
 
   if(b.type==='text'){
@@ -348,7 +371,8 @@ function editBlock(b,dk,i){
     h+='</div>';
     if(b.url){
       h+='<img src="'+b.url+'" style="width:'+(b.width||100)+'%;border-radius:7px;display:block;margin-bottom:4px;" onerror="bulImgErr(this)">'; 
-      h+='<input placeholder="Подпис (по избор)" value="'+esc(b.caption||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="caption" oninput="bulSetBlk(this)" style="width:100%;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-family:inherit;box-sizing:border-box;"><br>';
+      h+='<input placeholder="Подпис (по избор)" value="'+esc(b.caption||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="caption" oninput="bulSetBlk(this)" style="width:100%;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-family:inherit;box-sizing:border-box;margin-bottom:4px;"><br>';
+      h+='<textarea class="blk-ta" rows="2" placeholder="Коментар към снимката..." data-col="'+dk+'" data-id="'+b.id+'" data-field="comment" oninput="bulSetBlk(this)" style="border:1px solid #e2e8f0;border-radius:5px;padding:5px 7px;font-size:12px;color:#0f172a;">'+esc(b.comment||'')+'</textarea>';
       h+='<button data-col="'+dk+'" data-id="'+b.id+'" onclick="bulClearImg(this)" style="margin-top:4px;border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">✕ Смени снимката</button>';
     }else{
       h+='<label style="display:flex;flex-direction:column;align-items:center;padding:18px;border:1.5px dashed #cbd5e1;border-radius:7px;cursor:pointer;color:#64748b;font-size:12px;">';
@@ -606,13 +630,7 @@ function submitTask(){
   if(!title){toast('Въведи заглавие','#dc2626');return;}
   sbPost('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:document.getElementById('tk-dept').value,title:title,description:document.getElementById('tk-desc').value,due_date:document.getElementById('tk-due').value||null}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
-    closeTk(); toast('✅ Задачата е добавена!');
-    /* Push нотификация до всички */
-    var deptLabel={trade:'🛒 Търговска',warehouse:'📦 Склад/Приемане',admin:'⚙️ Администрация'}[document.getElementById('tk-dept').value]||'';
-    var dueVal=document.getElementById('tk-due').value;
-    var dueStr=dueVal?' · Срок: '+fmtDate(dueVal):'';
-    pushToAll('✅ Нова задача — '+deptLabel, title+dueStr);
-    loadBulletin();
+    closeTk(); toast('✅ Задачата е добавена!'); loadBulletin();
   });
 }
 
@@ -622,16 +640,11 @@ function publishBul(){
   sbPatch('bulletins','id=eq.'+curBul.id,{status:'published',published_at:new Date().toISOString(),published_by:currentUser.display_name||currentUser.email}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     toast('📤 Бюлетинът е публикуван!');
-    /* Автоматична push нотификация до всички */
-    pushBulletinPublished(curBul.week_number, curBul.year, bulTasks.length);
     bulMode='view'; loadBulletin();
   });
 }
 function newBulletin(){
-  /* Бюлетинът е за СЛЕДВАЩАТА седмица */
-  var now=new Date();
-  var next=new Date(now); next.setDate(now.getDate()+7);
-  var wk=weekNum(next); var yr=next.getFullYear();
+  var now=new Date(); var wk=weekNum(now); var yr=now.getFullYear();
   if(!confirm('Нов бюлетин за Седмица '+wk+' · '+yr+'?'))return;
   var cal={};DKEYS.forEach(function(k){cal[k]=[];});
   sbPost('bulletins',{week_number:wk,year:yr,title:'Т-Бюлетин С'+wk+' · '+yr,content:{calendar:cal,columns:{trade:[],warehouse:[],admin:[]}},status:'draft'}).then(function(r){
@@ -824,7 +837,7 @@ function printSection(what){
     }
     if(b.type==='image'&&b.url){
       var w=b.width||100;
-      return '<div class="block-img" style="width:'+w+'%;"><img src="'+b.url+'" style="width:100%;border-radius:2mm;">'+(b.caption?'<div class="block-img-cap">'+esc(b.caption)+'</div>':'')+'</div>';
+      return '<div class="block-img" style="width:'+w+'%;"><img src="'+b.url+'" style="width:100%;border-radius:2mm;">'+(b.caption?'<div class="block-img-cap">'+esc(b.caption)+'</div>':'')+(b.comment?'<div style="font-size:10.5pt;color:#374151;margin-top:2mm;font-style:italic;">'+esc(b.comment)+'</div>':'')+'</div>';
     }
     if(b.type==='file'&&b.url){
       return '<div style="padding:2mm 4mm;border:1pt solid #e2e8f0;border-radius:2mm;font-size:10.5pt;margin-bottom:2mm;">📎 <b>'+esc(b.filename||'Файл')+'</b></div>';
@@ -993,8 +1006,11 @@ function renderTasksPanel() {
         if (isDone && compInfo) {
           h += '<div style="font-size:10px;color:#16a34a;margin-top:2px;">✓ '+esc(compInfo.completed_by||'')+'</div>';
         }
+        h += renderSubtasks(t.id, dk);
         h += '</div></div>';
       });
+      /* Постоянни задачи за отдела */
+      h += renderRecurringTasks(dk);
       h += '</div></div>';
     });
 
@@ -1008,31 +1024,6 @@ function renderTasksPanel() {
   return h;
 }
 
-
-/* ─── TOGGLE TASK ─────────────────────────────────────────── */
-function toggleTask(taskId, checked){
-  var store = currentUser && currentUser.store_name;
-  if(!store){ toast('Грешка: няма магазин','#dc2626'); return; }
-  if(checked){
-    sbPost('task_completions',{
-      task_id: taskId,
-      store_name: store,
-      completed_by: currentUser.display_name || currentUser.email,
-      completed_at: new Date().toISOString()
-    }).then(function(r){
-      if(!r.ok){ toast('Грешка при запис','#dc2626'); loadBulletin(); return; }
-      toast('✅ Задачата е отбелязана!');
-      bulComps.push({task_id:taskId, store_name:store, completed_by: currentUser.display_name||currentUser.email});
-      renderBulletin();
-    });
-  } else {
-    sbDelete('task_completions','task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)).then(function(){
-      toast('↩ Задачата е отбелязана като неизпълнена');
-      bulComps = bulComps.filter(function(c){ return !(c.task_id===taskId && c.store_name===store); });
-      renderBulletin();
-    });
-  }
-}
 function bulToggleTask(cb){toggleTask(cb.dataset.tid, cb.checked);}
 function loadTasksStats() {
   var wrap = document.getElementById('tasks-stat-wrap');
@@ -1116,5 +1107,245 @@ function renderBulAnalysis(){
     });
     tbl+='</tbody></table></div>';
     var el=document.getElementById('an-tbl'); if(el)el.innerHTML=tbl;
+  });
+}
+
+
+/* ═══════ ПРЕХВЪРЛЯНЕ МЕЖДУ ТАБОВЕ ═══════════════════════════ */
+function bulCopyToTab(fromCol, blockId) {
+  var b = (curBul.content.columns[fromCol]||[]).find(function(x){return x.id===blockId;});
+  if (!b) return;
+  var opts = Object.keys(DEPTS).filter(function(k){return k!==fromCol;});
+  var btnHtml = '';
+  opts.forEach(function(dk) {
+    var d = DEPTS[dk];
+    btnHtml += '<button data-from="'+fromCol+'" data-bid="'+blockId+'" data-to="'+dk+'" onclick="bulDoCopy(this.dataset.from,this.dataset.bid,this.dataset.to)" style="border:1px solid '+d.bdr+';background:'+d.bg+';color:'+d.color+';border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer;text-align:left;width:100%;">'+d.icon+' '+d.label+'</button>';
+  });
+  var ov = document.createElement('div');
+  ov.className = 'bov open';
+  ov.id = 'copy-tab-ov';
+  ov.innerHTML = '<div class="bmod" style="width:360px;"><div style="font-size:15px;font-weight:600;margin-bottom:14px;">→ Копирай блока в</div><div style="display:flex;flex-direction:column;gap:8px;">'+btnHtml+'</div><button onclick="document.getElementById(\"copy-tab-ov\").remove()" style="width:100%;margin-top:10px;border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:8px;font-size:13px;cursor:pointer;color:#64748b;">Откажи</button></div>';
+  document.body.appendChild(ov);
+}
+
+
+function bulDoCopy(fromCol, blockId, toCol) {
+  var b = (curBul.content.columns[fromCol]||[]).find(function(x){return x.id===blockId;});
+  if (!b) return;
+  var copy = JSON.parse(JSON.stringify(b));
+  copy.id = genId();
+  if (!curBul.content.columns[toCol]) curBul.content.columns[toCol] = [];
+  curBul.content.columns[toCol].push(copy);
+  document.getElementById('copy-tab-ov').remove();
+  schedSave();
+  toast('✅ Блокът е копиран в ' + DEPTS[toCol].label);
+  renderBulletin();
+}
+
+/* ═══════ ПОСТОЯННИ ЗАДАЧИ ════════════════════════════════════ */
+function renderRecurringTasks(dk) {
+  var store = currentUser && currentUser.store_name;
+  var dTasks = recurringTasks.filter(function(t){return t.department===dk;});
+  if (!dTasks.length && !canEdit()) return '';
+  var d = DEPTS[dk];
+
+  var h = '<div style="background:#fff;border:1px solid ' + d.bdr + ';border-left:4px solid ' + d.hdr + ';border-radius:8px;margin-bottom:12px;overflow:hidden;">';
+  h += '<div style="background:' + d.bg + ';padding:8px 14px;display:flex;justify-content:space-between;align-items:center;">';
+  h += '<div style="font-size:12px;font-weight:700;color:' + d.color + ';text-transform:uppercase;letter-spacing:.06em;">🔁 Постоянни задачи</div>';
+  if (canEdit()) {
+    h += '<button onclick="openRecurringModal(\'' + dk + '\')" style="border:1px solid ' + d.hdr + ';background:#fff;color:' + d.color + ';border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;">+ Добави</button>';
+  }
+  h += '</div>';
+
+  if (dTasks.length) {
+    h += '<div style="padding:8px 14px;">';
+    dTasks.forEach(function(t) {
+      var done = store && recurringComps.some(function(c){return c.recurring_task_id===t.id && c.store_name===store;});
+      var overdue = false; // постоянните нямат срок
+      h += '<div class="rec-task-row" style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
+      h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" onchange="bulToggleRecurring(this)" ' +
+        'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;">';
+      h += '<div style="flex:1;">';
+      h += '<div style="font-size:13px;font-weight:500;color:' + (done?'#94a3b8':'#0f172a') + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>';
+      if (t.description) h += '<div style="font-size:11px;color:#94a3b8;">' + esc(t.description) + '</div>';
+      h += '</div>';
+      if (canEdit()) {
+        h += '<div style="display:flex;gap:4px;">';
+        h += '<button onclick="toggleRecurringActive(\'' + t.id + '\',' + (!t.active) + ')" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#64748b;">' + (t.active?'⏸ Спри':'▶ Активирай') + '</button>';
+        h += '</div>';
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+  } else if (canEdit()) {
+    h += '<div style="padding:12px 14px;color:#94a3b8;font-size:12px;font-style:italic;">Няма постоянни задачи. Добави с бутона горе.</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+function bulToggleRecurring(cb) {
+  var rtid = cb.dataset.rtid;
+  var store = currentUser && currentUser.store_name;
+  if (!store) { toast('Грешка: няма магазин','#dc2626'); return; }
+  if (cb.checked) {
+    sbPost('task_completions', {
+      task_id: null,
+      recurring_task_id: rtid,
+      bulletin_id: curBul ? curBul.id : null,
+      store_name: store,
+      completed_by: currentUser.display_name || currentUser.email,
+      completed_at: new Date().toISOString()
+    }).then(function(r){
+      if (!r.ok) { toast('Грешка','#dc2626'); return; }
+      toast('✅ Отбелязана!');
+      recurringComps.push({recurring_task_id: rtid, store_name: store});
+      renderBulletin();
+    });
+  } else {
+    sbDelete('task_completions','recurring_task_id=eq.'+rtid+'&store_name=eq.'+encodeURIComponent(store)).then(function(){
+      toast('↩ Отбелязана като неизпълнена');
+      recurringComps = recurringComps.filter(function(c){return !(c.recurring_task_id===rtid && c.store_name===store);});
+      renderBulletin();
+    });
+  }
+}
+
+function toggleRecurringActive(id, active) {
+  sbPatch('recurring_tasks','id=eq.'+id,{active:active}).then(function(){
+    toast(active ? '▶ Активирана' : '⏸ Спряна');
+    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').then(function(rt){
+      recurringTasks = Array.isArray(rt) ? rt : [];
+      renderBulletin();
+    });
+  });
+}
+
+function openRecurringModal(dk) {
+  var d = DEPTS[dk];
+  var ov = document.createElement('div');
+  ov.className = 'bov open';
+  ov.id = 'rec-modal-ov';
+  ov.innerHTML = '<div class="bmod" style="width:420px;">' +
+    '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">🔁 Нова постоянна задача — ' + d.label + '</div>' +
+    '<label class="fl">Заглавие *</label><input class="fi" id="rec-title" placeholder="напр. Провери наличностите">' +
+    '<label class="fl">Описание</label><input class="fi" id="rec-desc" placeholder="Допълнителна информация">' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
+    '<button onclick="document.getElementById(\'rec-modal-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button data-dk="' + dk + '" onclick="submitRecurring(this.dataset.dk)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Добави</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){ var el=document.getElementById('rec-title'); if(el)el.focus(); }, 100);
+}
+
+function submitRecurring(dk) {
+  var title = (document.getElementById('rec-title').value||'').trim();
+  if (!title) { toast('Въведи заглавие','#dc2626'); return; }
+  var desc = document.getElementById('rec-desc').value||'';
+  sbPost('recurring_tasks',{department:dk,title:title,description:desc,active:true,sort_order:recurringTasks.length}).then(function(r){
+    if (!r.ok) { toast('Грешка','#dc2626'); return; }
+    document.getElementById('rec-modal-ov').remove();
+    toast('✅ Постоянната задача е добавена!');
+    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').then(function(rt){
+      recurringTasks = Array.isArray(rt) ? rt : [];
+      renderBulletin();
+    });
+  });
+}
+
+/* ═══════ ПОД-ЗАДАЧИ ══════════════════════════════════════════ */
+function renderSubtasks(taskId, dept) {
+  var store = currentUser && currentUser.store_name;
+  var d = DEPTS[dept] || DEPTS.trade;
+  var containerId = 'sub-' + taskId;
+  setTimeout(function(){
+    sbGet('task_subtasks','task_id=eq.'+taskId+'&order=sort_order.asc').then(function(subs){
+      var el = document.getElementById(containerId);
+      if (!el) return;
+      if (!Array.isArray(subs) || !subs.length) {
+        if (canEdit()) {
+          var addBtn = document.createElement('button');
+          addBtn.style.cssText = 'border:1px dashed #cbd5e1;background:none;color:#94a3b8;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;margin-top:4px;';
+          addBtn.textContent = '+ Добави под-задача';
+          addBtn.setAttribute('data-tid', taskId);
+          addBtn.setAttribute('data-dept', dept);
+          addBtn.onclick = function(){ openSubtaskModal(this.getAttribute('data-tid'), this.getAttribute('data-dept')); };
+          el.appendChild(addBtn);
+        }
+        return;
+      }
+      var h = '<div style="padding:4px 0 4px 20px;border-left:2px solid '+d.bdr+';margin-top:4px;">';
+      subs.forEach(function(s){
+        var done = store && subtaskComps.some(function(c){return c.subtask_id===s.id && c.store_name===store;});
+        h += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;">';
+        h += '<input type="checkbox" '+(done?'checked ':'')+' data-stid="'+s.id+'" onchange="bulToggleSubtask(this)" style="width:13px;height:13px;cursor:pointer;accent-color:'+d.color+';">';
+        h += '<span style="font-size:12px;color:'+(done?'#94a3b8':'#374151')+';'+(done?'text-decoration:line-through;':'')+'">' + esc(s.title) + '</span>';
+        if (canEdit()) h += '<button data-stid="'+s.id+'" data-tid="'+taskId+'" data-dept="'+dept+'" onclick="deleteSubtask(this.dataset.stid,this.dataset.tid,this.dataset.dept)" style="border:none;background:none;color:#dc2626;font-size:10px;cursor:pointer;padding:0;line-height:1;">✕</button>';
+        h += '</div>';
+      });
+      if (canEdit()) {
+        h += '<button data-tid="'+taskId+'" data-dept="'+dept+'" onclick="openSubtaskModal(this.dataset.tid,this.dataset.dept)" style="border:1px dashed #cbd5e1;background:none;color:#94a3b8;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;margin-top:4px;">+ Добави под-задача</button>';
+      }
+      h += '</div>';
+      el.innerHTML = h;
+    });
+  }, 50);
+  return '<div id="' + containerId + '"></div>';
+}
+
+
+function bulToggleSubtask(cb) {
+  var stid = cb.dataset.stid;
+  var store = currentUser && currentUser.store_name;
+  if (!store) return;
+  if (cb.checked) {
+    sbPost('subtask_completions',{subtask_id:stid,store_name:store,completed_by:currentUser.display_name||currentUser.email,completed_at:new Date().toISOString()}).then(function(r){
+      if (!r.ok) { toast('Грешка','#dc2626'); cb.checked=false; return; }
+      subtaskComps.push({subtask_id:stid,store_name:store});
+      toast('✅ Под-задачата е отбелязана!');
+    });
+  } else {
+    sbDelete('subtask_completions','subtask_id=eq.'+stid+'&store_name=eq.'+encodeURIComponent(store)).then(function(){
+      subtaskComps = subtaskComps.filter(function(c){return !(c.subtask_id===stid&&c.store_name===store);});
+      toast('↩ Отбелязана като неизпълнена');
+    });
+  }
+}
+
+function openSubtaskModal(taskId, dept) {
+  var ov = document.createElement('div');
+  ov.className = 'bov open';
+  ov.id = 'st-modal-ov';
+  ov.innerHTML = '<div class="bmod" style="width:380px;">' +
+    '<div style="font-size:14px;font-weight:600;margin-bottom:12px;">+ Нова под-задача</div>' +
+    '<label class="fl">Заглавие *</label><input class="fi" id="st-title" placeholder="напр. Провери склад А">' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">' +
+    '<button onclick="document.getElementById(\'st-modal-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button data-tid="' + taskId + '" data-dept="' + dept + '" onclick="submitSubtask(this.dataset.tid,this.dataset.dept)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Добави</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){var el=document.getElementById('st-title');if(el)el.focus();},100);
+}
+
+function submitSubtask(taskId, dept) {
+  var title = (document.getElementById('st-title').value||'').trim();
+  if (!title) { toast('Въведи заглавие','#dc2626'); return; }
+  sbPost('task_subtasks',{task_id:taskId,title:title,sort_order:0}).then(function(r){
+    if (!r.ok) { toast('Грешка','#dc2626'); return; }
+    document.getElementById('st-modal-ov').remove();
+    toast('✅ Под-задачата е добавена!');
+    /* Презареди под-задачите */
+    sbGet('subtask_completions','store_name=eq.'+encodeURIComponent(currentUser.store_name)).then(function(sc){
+      subtaskComps = Array.isArray(sc)?sc:[];
+      renderSubtasks(taskId, dept);
+    });
+  });
+}
+
+function deleteSubtask(stId, taskId, dept) {
+  if (!confirm('Изтрий под-задачата?')) return;
+  sbDelete('task_subtasks','id=eq.'+stId).then(function(){
+    toast('Изтрита');
+    renderSubtasks(taskId, dept);
   });
 }
