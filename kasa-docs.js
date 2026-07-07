@@ -541,9 +541,11 @@ function returnKasaForRevision(storeName, date, reason) {
         returned_at: now
       });
     });
-    Promise.all(patches).then(function() {
-      toast('↩ Отчетът е върнат за корекция на ' + storeName, '#d97706');
-      loadHistory();
+Promise.all(patches).then(function() {
+  toast('↩ Отчетът е върнат за корекция на ' + storeName, '#d97706');
+  if(typeof loadHistory==='function') loadHistory();
+  if(typeof loadKasa==='function') loadKasa();
+});
     });
   });
 }
