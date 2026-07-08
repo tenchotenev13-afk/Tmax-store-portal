@@ -49,17 +49,38 @@ function loadBulletin(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:300px;color:#94a3b8;font-size:15px;">⏳ Зареждане...</div>';
   var q=canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1';
-  sbGet('bulletins',q).then(function(data){
+  /* Зарежда рекъринг задачи ПЪРВО, след това рендира */
+  sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').then(function(rt){
+    recurringTasks=Array.isArray(rt)?rt:[];
+    return sbGet('bulletins',q);
+  }).catch(function(){
+    recurringTasks=[];
+    return sbGet('bulletins',q);
+  }).then(function(data){
     curBul=(Array.isArray(data)&&data.length)?data[0]:null;
     if(!curBul){renderBulEmpty();return;}
     if(typeof curBul.content==='string'){try{curBul.content=JSON.parse(curBul.content);}catch(e){curBul.content={};}}
     initCols();
     sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=due_date.asc').then(function(t){
       bulTasks=Array.isArray(t)?t:[];
-      if(!bulTasks.length){bulComps=[];renderBulletin();return;}
+      if(!bulTasks.length){
+        bulComps=[];subtaskComps=[];recurringComps=[];
+        renderBulletin();return;
+      }
       var ids=bulTasks.map(function(x){return x.id;}).join(',');
       var cq='task_id=in.('+ids+')'+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
-      sbGet('task_completions',cq).then(function(c){bulComps=Array.isArray(c)?c:[];renderBulletin();}).catch(function(){bulComps=[];renderBulletin();});
+      sbGet('task_completions',cq).then(function(c){
+        bulComps=Array.isArray(c)?c:[];
+        var storeF=isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name);
+        sbGet('subtask_completions','select=*'+storeF).then(function(sc){
+          subtaskComps=Array.isArray(sc)?sc:[];
+          var rq='bulletin_id=eq.'+curBul.id+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
+          sbGet('task_completions',rq+'&task_id=is.null').then(function(rc){
+            recurringComps=Array.isArray(rc)?rc:[];
+            renderBulletin();
+          }).catch(function(){recurringComps=[];renderBulletin();});
+        }).catch(function(){subtaskComps=[];renderBulletin();});
+      }).catch(function(){bulComps=[];subtaskComps=[];recurringComps=[];renderBulletin();});
     }).catch(function(){bulTasks=[];bulComps=[];renderBulletin();});
   }).catch(function(){
     var wrap=document.getElementById('mod-bulletin');
