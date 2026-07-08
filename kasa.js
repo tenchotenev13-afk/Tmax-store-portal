@@ -73,7 +73,7 @@ function loadKasa(){
     else renderGlavna();
   }).catch(function(){renderKasa();});
   /* Главна каса за днес */
-  var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today();
+  var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
   sbGet('kasa_glavna',gq).then(function(data){
     kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
     if(kasaView==='glavna') renderGlavna();
@@ -89,7 +89,20 @@ function kasaTab(tab){
             el.style.color=t===tab?'#fff':'#64748b';
   });
   if(tab==='pos') renderKasa();
-  else if(tab==='glavna') renderGlavna();
+  else if(tab==='glavna'){
+    var activeDate=kasaActiveDate();
+    var enc=encodeURIComponent(currentUser.store_name);
+    Promise.all([
+      sbGet('kasa_reports','order=pos_number.asc&date=eq.'+activeDate+'&store_name=eq.'+enc),
+      sbGet('kasa_glavna','store_name=eq.'+enc+'&date=eq.'+activeDate)
+    ]).then(function(res){
+      var fresh=Array.isArray(res[0])?res[0]:[];
+      var other=kasaReports.filter(function(r){return r.date!==activeDate;});
+      kasaReports=other.concat(fresh);
+      kasaGlavna=(Array.isArray(res[1])&&res[1].length)?res[1][0]:null;
+      renderGlavna();
+    }).catch(function(){renderGlavna();});
+  }
   else if(tab==='zoborot'){loadZoborot();}
 }
 
@@ -111,7 +124,7 @@ function renderKasa(){
   var todayStr=today();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var histRep =kasaReports.filter(function(r){return r.date!==todayStr;});
-  var canConfirm=['manager','admin'].indexOf(currentUser.role)>=0;
+  var canConfirm=['manager','admin','kasa'].indexOf(currentUser.role)>=0;
   var canUnlock=['admin','accounting'].indexOf(currentUser.role)>=0;
 
   var html='<div class="page">'+
@@ -174,21 +187,22 @@ function renderKasa(){
       '<div style="font-size:14px;color:var(--muted);">Няма отчети за днес.</div></div>';
   }
   if(histRep.length){
-    html+='<div class="card"><div class="card-title">📜 История</div>'+
-      '<div class="tbl-wrap"><table>'+
-      '<thead><tr><th>Дата</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th></tr></thead><tbody>';
-    histRep.slice(0,40).forEach(function(r){
-      html+='<tr>'+
-        '<td>'+fmtDate(r.date)+'</td>'+
-        '<td>ПОС '+esc(String(r.pos_number||''))+'</td>'+
-        '<td>'+esc(r.cashier_name||'')+'</td>'+
-        '<td>'+fmtMoney(r.cash_turnover)+'</td>'+
-        '<td>'+fmtMoney(calcInkaso(r))+'</td>'+
-        '<td>'+fmtMoney(r.counted_cash)+'</td>'+
-        '<td>'+moneyBadge(r.razlika)+'</td>'+
-        '<td>'+(r.status==='confirmed'?'✅':'✏️')+'</td></tr>';
-    });
-    html+='</tbody></table></div></div>';
+    html+='<div class="card">';
+    html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">';
+    html+='<div class="card-title" style="margin:0;">📜 История ('+histRep.length+')</div>';
+    html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
+    html+='<input type="date" id="hist-date-filter" style="border:1.5px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;">';
+    html+='<select id="hist-status-filter" style="border:1.5px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;">';
+    html+='<option value="all">— Всички статуси —</option>';
+    html+='<option value="draft">✏️ Чернова</option>';
+    html+='<option value="confirmed">✅ Потвърден</option>';
+    html+='<option value="returned">↩ Върнат</option>';
+    html+='</select>';
+    html+='<button onclick="filterHistRep()" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:5px 14px;font-size:12px;cursor:pointer;">Търси</button>';
+    html+='<button onclick="clearHistFilter()" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;">✕</button>';
+    html+='</div></div>';
+    html+='<div id="hist-table-wrap">'+renderHistTable(histRep)+'</div>';
+    html+='</div>';
   }
   html+='<div id="docs-section-pos"></div>';
   html+='<div id="ready-btn-wrap" style="display:flex;justify-content:flex-end;padding-bottom:20px;"></div>';
@@ -201,6 +215,7 @@ function renderKasa(){
 function openKasaForm(report){
   kasaEditId=report?report.id:null;
   var r=report||{};
+  if(r.date) kasaSetDate(r.date);
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
 
   /* Ред за купюра (отчетени) */
@@ -466,7 +481,7 @@ function confirmKasaReport(id){
 ═══════════════════════════════════════════════════════════════ */
 function renderGlavna(){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g=kasaGlavna||{};
   var isDraft=!g.id||(g.status==='draft');
@@ -624,7 +639,7 @@ function renderGlavna(){
 
 /* ─── ГЛАВНА КАСА LIVE CALC ──────────────────────────────────── */
 function glavnaLiveCalc(){
-  var todayStr=today();
+  var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g={};
   ALL_DENOM.forEach(function(v){
@@ -662,7 +677,7 @@ function glavnaLiveCalc(){
 
 /* ─── SAVE ГЛАВНА КАСА ───────────────────────────────────────── */
 function saveGlavna(){
-  var p={store_name:currentUser.store_name,date:today(),status:'draft'};
+  var p={store_name:currentUser.store_name,date:kasaActiveDate(),status:'draft'};
   ALL_DENOM.forEach(function(v){
     var el=document.getElementById('gl-'+DENOM_KEY[v]);
     p[DENOM_KEY[v]]=el?parseInt(el.value)||0:0;
@@ -682,7 +697,7 @@ function saveGlavna(){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     toast('💾 Главна каса е запазена!');
     /* Reload */
-    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today();
+    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
     sbGet('kasa_glavna',gq).then(function(data){
       kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
       renderGlavna();
@@ -697,26 +712,31 @@ function saveGlavna(){
 function printKasaReport(){
   var todayStr=kasaActiveDate();
   var reps=kasaReports.filter(function(r){return r.date===todayStr;});
-  var gl=kasaGlavna||null;
-  var g=gl||{};
 
   if(!reps.length){toast('Няма отчети за тази дата','#dc2626');return;}
 
-  /* Зареждаме zoborot ако не е в паметта */
   var enc2=encodeURIComponent(currentUser.store_name);
   var zq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.desc';
+  var gq='store_name=eq.'+enc2+'&date=eq.'+todayStr;
   var dq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.asc';
+  /* Зареждаме zoborot, glavna и документи директно от базата */
   Promise.all([
-    zoborotData ? Promise.resolve([zoborotData]) : sbGet('kasa_zoborot',zq),
+    sbGet('kasa_zoborot',zq),
+    sbGet('kasa_glavna',gq),
     sbGet('kasa_documents',dq)
   ]).then(function(res){
-    if(!zoborotData) zoborotData=(Array.isArray(res[0])&&res[0].length)?res[0][0]:null;
-    var docs=Array.isArray(res[1])?res[1]:[];
+    zoborotData=(Array.isArray(res[0])&&res[0].length)?res[0][0]:null;
+    var gl=(Array.isArray(res[1])&&res[1].length)?res[1][0]:null;
+    var g=gl||{};
+    var docs=Array.isArray(res[2])?res[2]:[];
     _doPrintKasaReport(todayStr,reps,gl,g,docs);
-  }).catch(function(){_doPrintKasaReport(todayStr,reps,gl,g,[]);});
+  }).catch(function(e){
+    console.error('Print load error:',e);
+    _doPrintKasaReport(todayStr,reps,null,{},[]);
+  });
 }
 
-function _doPrintKasaReport(todayStr,reps,gl,g){
+function _doPrintKasaReport(todayStr,reps,gl,g,docs){
 
   var BILLS=[500,200,100,50,20,10,5,2,1];
   var COINS=[0.5,0.2,0.1,0.05,0.02,0.01];
@@ -793,16 +813,15 @@ function _doPrintKasaReport(todayStr,reps,gl,g){
   }).join('');
 
   /* Главна каса */
-  /* allCounted = купюри от всички ПОС + Главна каса */
+  /* allCounted = сума ПОС + Главна по деноминации */
   var allCounted=0;
   BILLS.concat(COINS).forEach(function(v){
     var k=DK[String(v)];
-    var posQty=0; reps.forEach(function(r){posQty+=parseInt(r[k])||0;});
+    var posQty=0;reps.forEach(function(r){posQty+=parseInt(r[k])||0;});
     var glQty=gl?(parseInt(g[k])||0):0;
     allCounted=Math.round((allCounted+(posQty+glQty)*v)*100)/100;
   });
   var glRazlika=Math.round((allCounted+(parseFloat(g.slujebno)||0)-(parseFloat(g.sap_balance)||0))*100)/100;
-
   var glHTML=gl?'<div class="card">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
       '<h3 style="margin:0;">Главна каса</h3>'+statusTag(g.status||'draft')+
@@ -898,6 +917,22 @@ function _doPrintKasaReport(todayStr,reps,gl,g){
     '</div></div>':
     '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Равнение — не е попълнено</div>';
 
+  /* Документи */
+  var docsHTML = '';
+  if(docs && docs.length){
+    docsHTML = '<h2>📎 Документи</h2><div class="card">';
+    docs.forEach(function(d){
+      var isPdf=/\.pdf$/i.test(d.file_name||'');
+      docsHTML+='<div class="doc-item">';
+      docsHTML+='<span style="font-size:18px;">'+(isPdf?'📄':'🖼️')+'</span>';
+      docsHTML+='<div style="flex:1;"><div style="font-size:10pt;font-weight:500;">'+esc(d.file_name||'')+'</div>';
+      docsHTML+='<div style="font-size:8.5pt;color:#6b7280;">'+esc(d.doc_type||'')+' · '+esc(d.uploaded_by||'')+'</div></div>';
+      docsHTML+='<button onclick="openDocFromPrint(\''+esc(d.file_url)+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:4px;padding:3px 10px;font-size:9pt;cursor:pointer;">Виж</button>';
+      docsHTML+='</div>';
+    });
+    docsHTML += '</div>';
+  }
+
   var win=window.open('','_blank','width=1100,height=800');
   win.document.write('<html><head><meta charset="UTF-8">'+
     '<title>Касов отчет — '+esc(currentUser.store_name)+' — '+fmtDate(todayStr)+'</title>'+
@@ -966,6 +1001,63 @@ function unlockKasaReport(id){
   });
 }
 
+
+
+/* ─── ИСТОРИЯ ФИЛТРИ ────────────────────────────────────────── */
+function renderHistTable(rows) {
+  if (!rows.length) return '<div style="text-align:center;padding:20px;color:#94a3b8;">Няма записи.</div>';
+  var canConfirm = ['manager','admin','kasa'].indexOf(currentUser.role) >= 0;
+  var h = '<div class="tbl-wrap"><table>'+
+    '<thead><tr><th>Дата</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th><th></th></tr></thead><tbody>';
+  rows.slice(0,60).forEach(function(r){
+    var canEdit = r.status==='draft' || r.status==='returned';
+    var statusLabel = r.status==='confirmed'
+      ? '<span style="background:#dcfce7;color:#14532d;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">✅ Потвърден</span>'
+      : r.status==='returned'
+      ? '<span style="background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">↩ Върнат</span>'
+      : '<span style="background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">✏️ Чернова</span>';
+    h += '<tr>'+
+      '<td>'+fmtDate(r.date)+'</td>'+
+      '<td>ПОС '+esc(String(r.pos_number||''))+'</td>'+
+      '<td>'+esc(r.cashier_name||'')+'</td>'+
+      '<td>'+fmtMoney(r.cash_turnover)+'</td>'+
+      '<td>'+fmtMoney(calcInkaso(r))+'</td>'+
+      '<td>'+fmtMoney(r.counted_cash)+'</td>'+
+      '<td>'+moneyBadge(r.razlika)+'</td>'+
+      '<td>'+statusLabel+'</td>'+
+      '<td><div style="display:flex;gap:4px;">'+
+        (canEdit?'<button onclick="editKasaReport(\''+r.id+'\')" style="border:1px solid #dc2626;background:#fee2e2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Редактирай</button>':'')+
+        (r.status==='draft'&&canConfirm?'<button onclick="confirmKasaReport(\''+r.id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Потвърди</button>':'')+
+      '</div></td>'+
+    '</tr>';
+  });
+  h += '</tbody></table></div>';
+  if (rows.length > 60) h += '<div style="font-size:12px;color:#94a3b8;padding:8px 0;">Показани 60 от '+rows.length+' записа.</div>';
+  return h;
+}
+
+function filterHistRep() {
+  var dateVal = (document.getElementById('hist-date-filter')||{}).value || '';
+  var statusVal = (document.getElementById('hist-status-filter')||{}).value || 'all';
+  var todayStr = today();
+  var all = kasaReports.filter(function(r){ return r.date !== todayStr; });
+  var filtered = all.filter(function(r){
+    if (dateVal && r.date !== dateVal) return false;
+    if (statusVal !== 'all' && r.status !== statusVal) return false;
+    return true;
+  });
+  var wrap = document.getElementById('hist-table-wrap');
+  if (wrap) wrap.innerHTML = renderHistTable(filtered);
+}
+
+function clearHistFilter() {
+  var df = document.getElementById('hist-date-filter');
+  var sf = document.getElementById('hist-status-filter');
+  if (df) df.value = '';
+  if (sf) sf.value = 'all';
+  filterHistRep();
+}
+
 /* ═══════════════════════════════════════════════════════════════
    РАВНЕНИЕ НА ОБОРОТА (Zoborot)
    ПОС данни от системата vs Фискални устройства (ФУ)
@@ -973,7 +1065,7 @@ function unlockKasaReport(id){
 var zoborotData = null;
 
 function loadZoborot(){
-  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+today()+'&order=created_at.desc';
+  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate()+'&order=created_at.desc';
   sbGet('kasa_zoborot',q).then(function(data){
     zoborotData=(Array.isArray(data)&&data.length)?data[0]:null;
     renderZoborot();
@@ -1011,7 +1103,7 @@ function renderZoborot(){
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — Равнение на оборота</div>'+
     kasaTabBar()+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
-      '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(today())+'</b></div>'+
+      '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(kasaActiveDate())+'</b></div>'+
       '<div style="display:flex;gap:8px;">'+
         (isDraft&&canConfirm?'<button onclick="saveZoborot()" class="btn btn-green">💾 Запази</button>':'')+
         (isDraft&&canConfirm&&z.id?'<button onclick="confirmZoborot()" class="btn" style="background:#2563eb;color:#fff;">✅ Потвърди</button>':'')+
@@ -1149,7 +1241,7 @@ function saveZoborot(){
   var raz=Math.round((posNoBank-fuTotal)*100)/100;
 
   var p={
-    store_name:currentUser.store_name,date:today(),
+    store_name:currentUser.store_name,date:kasaActiveDate(),
     cash_bgn:cashBgn,cash_eur:cashEur,card_eur:card,bank_eur:bank,
     pos_total_eur:Math.round((cashBgn+cashEur+card+bank+vouch)*100)/100,
     fu1_gross:fu1g,fu1_discount:fu1d,fu1_net:fu1n,
