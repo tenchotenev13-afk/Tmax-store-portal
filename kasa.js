@@ -702,7 +702,11 @@ function printKasaReport(){
 
   if(!reps.length){toast('Няма отчети за тази дата','#dc2626');return;}
 
-  /* Зареждаме zoborot ако не е в паметта */
+  /* Отваряме прозореца ВЕДНАГА (преди async) за да не го блокира браузърът */
+  var win=window.open('','_blank','width=1100,height=800');
+  if(!win){toast('Разреши popup прозорците за този сайт','#dc2626');return;}
+  win.document.write('<html><head><meta charset="UTF-8"><title>Зареждане...</title></head><body style="font-family:Arial;padding:40px;color:#64748b;">⏳ Зареждане на отчета...</body></html>');
+
   var enc2=encodeURIComponent(currentUser.store_name);
   var zq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.desc';
   var dq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.asc';
@@ -712,11 +716,11 @@ function printKasaReport(){
   ]).then(function(res){
     if(!zoborotData) zoborotData=(Array.isArray(res[0])&&res[0].length)?res[0][0]:null;
     var docs=Array.isArray(res[1])?res[1]:[];
-    _doPrintKasaReport(todayStr,reps,gl,g,docs);
-  }).catch(function(){_doPrintKasaReport(todayStr,reps,gl,g,[]);});
+    _doPrintKasaReport(todayStr,reps,gl,g,docs,win);
+  }).catch(function(){_doPrintKasaReport(todayStr,reps,gl,g,[],win);});
 }
 
-function _doPrintKasaReport(todayStr,reps,gl,g){
+function _doPrintKasaReport(todayStr,reps,gl,g,docs,win){
 
   var BILLS=[500,200,100,50,20,10,5,2,1];
   var COINS=[0.5,0.2,0.1,0.05,0.02,0.01];
@@ -901,7 +905,7 @@ function _doPrintKasaReport(todayStr,reps,gl,g){
     '</div></div>':
     '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Равнение — не е попълнено</div>';
 
-  var win=window.open('','_blank','width=1100,height=800');
+  win.document.open();
   win.document.write('<html><head><meta charset="UTF-8">'+
     '<title>Касов отчет — '+esc(currentUser.store_name)+' — '+fmtDate(todayStr)+'</title>'+
     '<style>'+
