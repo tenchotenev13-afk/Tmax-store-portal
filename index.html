@@ -202,6 +202,7 @@ OneSignalDeferred.push(async function(OneSignal) {
       <div class="tab-sep" id="sep-misc"></div>
       <!-- Група: Справки (сиво) -->
       <button id="tab-contacts" class="nav-tab" onclick="showModule('contacts')" style="display:none;"><span class="ti">👥</span><span class="tl">Контакти</span></button>
+      <button id="tab-reference" class="nav-tab" onclick="showModule('reference')" style="display:none;"><span class="ti">📘</span><span class="tl">Справочник</span></button>
       <button id="tab-kasa" class="nav-tab" onclick="showModule('kasa')" style="display:none;"><span class="ti">💰</span><span class="tl">Каса</span></button>
       <button id="tab-history" class="nav-tab" onclick="showModule('history')" style="display:none;"><span class="ti">📈</span><span class="tl">История</span></button>
       <button id="tab-docs" class="nav-tab" onclick="showModule('docs')"><span class="ti">📁</span><span class="tl">Инструкции</span></button>
@@ -290,6 +291,9 @@ OneSignalDeferred.push(async function(OneSignal) {
 
   <!-- CONTACTS -->
   <div id="mod-contacts" class="page" style="display:none;"></div>
+
+  <!-- REFERENCE (Гаранционен справочник) -->
+  <div id="mod-reference" class="page" style="display:none;"></div>
 
   <!-- TRANSIT -->
   <div id="mod-transit" class="page" style="display:none;"></div>
@@ -548,6 +552,7 @@ function loadTabOrder(){
 <script src="push.js"></script>
 <script src="email.js"></script>
 <script src="notifications.js"></script>
+<script src="reference.js"></script>
 <script src="handbook.js?v=20260707a"></script>
 </body>
 </html>

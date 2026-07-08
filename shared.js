@@ -168,6 +168,8 @@ function setupTabsForRole(){
   /* Табове Контакти и Стока на път — за всички */
   var contactsTab=document.getElementById('tab-contacts');
   if(contactsTab)contactsTab.style.display='';
+  var referenceTab=document.getElementById('tab-reference');
+  if(referenceTab)referenceTab.style.display='';
   var transitTab=document.getElementById('tab-transit');
   if(transitTab)transitTab.style.display='';
   var calTab=document.getElementById('tab-calendar');
@@ -189,7 +191,7 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','transit','calendar','stock-returns','stock-diff'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -206,6 +208,7 @@ function showModule(mod){
   if(mod==='calendar')loadCalendar();
   if(mod==='stock-returns')loadStockReturns();
   if(mod==='stock-diff')loadStockDiff();
+  if(mod==='reference')loadReference();
   if(mod==='handbook')loadHandbook();
 }
 /* Затваря модал САМО ако mousedown И mouseup са върху тъмния фон
