@@ -119,7 +119,7 @@ function doLogin(){
   errEl.style.display='none';
   document.getElementById('l-btn').disabled=true;
   document.getElementById('l-btn').textContent='Влизане...';
-  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name,assigned_stores').then(function(data){
+  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name').then(function(data){
     document.getElementById('l-btn').disabled=false;
     document.getElementById('l-btn').textContent='Влез →';
     if(!Array.isArray(data)||!data.length){errEl.textContent='Непознат имейл адрес.';errEl.style.display='block';return;}
@@ -146,9 +146,7 @@ function startApp(){
   document.getElementById('s-login').style.display='none';
   document.getElementById('s-app').style.display='flex';
   document.getElementById('nav-name').textContent=currentUser.display_name||currentUser.email;
-  var _assigned=assignedStores();
-  document.getElementById('nav-store').textContent=!isGlobal()?currentUser.store_name:
-    (_assigned&&_assigned.length?_assigned.join(', '):'Всички магазини');
+  document.getElementById('nav-store').textContent=isGlobal()?'Всички магазини':currentUser.store_name;
   setupTabsForRole();
   if(typeof initTabDrag==='function')setTimeout(initTabDrag,200);
   if(isGlobal())document.getElementById('tr-metrics').style.display='grid';
@@ -170,8 +168,6 @@ function setupTabsForRole(){
   /* Табове Контакти и Стока на път — за всички */
   var contactsTab=document.getElementById('tab-contacts');
   if(contactsTab)contactsTab.style.display='';
-  var referenceTab=document.getElementById('tab-reference');
-  if(referenceTab)referenceTab.style.display='';
   var transitTab=document.getElementById('tab-transit');
   if(transitTab)transitTab.style.display='';
   var calTab=document.getElementById('tab-calendar');
@@ -193,7 +189,7 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
-  ['transport','client','bulletin','docs','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','transit','calendar','stock-returns','stock-diff'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -206,11 +202,11 @@ function showModule(mod){
   if(mod==='kasa')loadKasa();
   if(mod==='history')loadHistory();
   if(mod==='contacts')loadContacts();
-  if(mod==='reference')loadReference();
   if(mod==='transit')loadTransit();
   if(mod==='calendar')loadCalendar();
   if(mod==='stock-returns')loadStockReturns();
   if(mod==='stock-diff')loadStockDiff();
+  if(mod==='handbook')loadHandbook();
 }
 /* Затваря модал САМО ако mousedown И mouseup са върху тъмния фон
    (предотвратява случайно затваряне при плъзгане на мишката) */

@@ -202,7 +202,6 @@ OneSignalDeferred.push(async function(OneSignal) {
       <div class="tab-sep" id="sep-misc"></div>
       <!-- Група: Справки (сиво) -->
       <button id="tab-contacts" class="nav-tab" onclick="showModule('contacts')" style="display:none;"><span class="ti">👥</span><span class="tl">Контакти</span></button>
-      <button id="tab-reference" class="nav-tab" onclick="showModule('reference')" style="display:none;"><span class="ti">📘</span><span class="tl">Справочник</span></button>
       <button id="tab-kasa" class="nav-tab" onclick="showModule('kasa')" style="display:none;"><span class="ti">💰</span><span class="tl">Каса</span></button>
       <button id="tab-history" class="nav-tab" onclick="showModule('history')" style="display:none;"><span class="ti">📈</span><span class="tl">История</span></button>
       <button id="tab-docs" class="nav-tab" onclick="showModule('docs')"><span class="ti">📁</span><span class="tl">Инструкции</span></button>
@@ -291,9 +290,6 @@ OneSignalDeferred.push(async function(OneSignal) {
 
   <!-- CONTACTS -->
   <div id="mod-contacts" class="page" style="display:none;"></div>
-
-  <!-- REFERENCE (Гаранционен справочник) -->
-  <div id="mod-reference" class="page" style="display:none;"></div>
 
   <!-- TRANSIT -->
   <div id="mod-transit" class="page" style="display:none;"></div>
@@ -535,23 +531,23 @@ function loadTabOrder(){
 }
 </script>
 
-<script src="shared.js?v=20260705b"></script>
+<script src="shared.js"></script>
 <script src="transport.js"></script>
 <script src="client-orders.js"></script>
 <script src="docs.js"></script>
-<script src="bulletin.js?v=20260705b"></script>
-<script src="kasa.js?v=20260706b"></script>
-<script src="kasa-docs.js?v=20260705b"></script>
+<script src="bulletin.js"></script>
+<script src="kasa.js"></script>
+<script src="kasa-docs.js"></script>
 <script src="admin.js"></script>
-<script src="history.js?v=20260705b"></script>
+<script src="history.js"></script>
 <script src="contacts.js"></script>
-<script src="reference.js"></script>
 <script src="transit.js"></script>
 <script src="calendar.js"></script>
 <script src="stock-returns.js"></script>
 <script src="stock-differences.js"></script>
-<script src="push.js?v=20260705b"></script>
+<script src="push.js"></script>
 <script src="email.js"></script>
 <script src="notifications.js"></script>
+<script src="handbook.js?v=20260707a"></script>
 </body>
 </html>
