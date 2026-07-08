@@ -26,7 +26,11 @@ function myDept(){
   var m={manager:'trade',sklad:'warehouse',kasa:'admin',accounting:'admin',logistics:'admin',admin:'admin',info:'trade'};
   return currentUser ? (m[currentUser.role]||'trade') : 'trade';
 }
-function canEdit(){return currentUser && ['admin','accounting'].indexOf(currentUser.role)>=0;}
+function canEdit(){
+  if(!currentUser) return false;
+  var roles = ['admin','accounting','manager'];
+  return roles.indexOf(currentUser.role) >= 0;
+}
 function genId(){return Math.random().toString(36).slice(2,9);}
 
 /* WEEK */
@@ -138,8 +142,7 @@ var BULCSS = '<style>' +
 '.bov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:300;align-items:center;justify-content:center;}' +
 '.bov.open{display:flex;}' +
 '.bmod{background:#fff;border-radius:14px;padding:22px;width:480px;max-width:95vw;max-height:90vh;overflow-y:auto;}' +
-'.task-actions{display:none;gap:4px;flex-shrink:0;}' +
-'.task-actions.show{display:flex;}' +
+'.task-actions{display:inline-flex !important;gap:4px;flex-shrink:0;margin-left:8px;}' +
 '</style>';
 
 /* HEADER */
@@ -276,4 +279,81 @@ function renderBulView(){
   /* Съдържание на активния таб */
   DCOLS.forEach(function(dk){
     var dept=DEPTS[dk];
-    var blocks=(c.columns[dk]||[]).filter(function(b){
+    var blocks=(c.columns[dk]||[]).filter(function(b){return b.type!=='task'&&b.type!=='important';});
+    var dTasks=bulTasks.filter(function(t){return t.department===dk;});
+    var isMyDept=!isGlobal()&&myDept()===dk;
+    var isAct=dk===bulActiveDept;
+    html+='<div id="dept-panel-'+dk+'" style="display:'+(isAct?'block':'none')+';">';
+    html+='<div style="background:#fff;border:1px solid #e2e8f0;border-top:none;border-radius:0 0 10px 10px;padding:16px 20px;min-height:200px;">';
+    /* Задачи */
+    if(dTasks.length){
+      html+='<div style="margin-bottom:14px;">';
+      html+='<div style="font-size:12px;font-weight:700;color:'+dept.color+';text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">✅ Задачи</div>';
+      var store=currentUser&&currentUser.store_name;
+      dTasks.forEach(function(t){
+        var done=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store;});
+        var due=t.due_date?new Date(t.due_date):null;
+        var today=new Date();today.setHours(0,0,0,0);
+        var diff=due?Math.ceil((due-today)/86400000):null;
+        var dueColor=diff===null?'#94a3b8':diff<0?'#dc2626':diff<=2?'#d97706':'#94a3b8';
+        var isOverdue = due && diff < 0 && !done;
+        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;'+(isOverdue?'outline:2px solid #dc2626;border-radius:6px;padding:6px 8px;margin-bottom:2px;':'')+'">';
+        html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" onchange="bulToggleTask(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;">';
+        html+='<div style="flex:1;"><div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
+        if(t.description)html+='<div style="font-size:11px;color:#94a3b8;">'+esc(t.description)+'</div>';
+        if(due)html+='<div style="font-size:10px;color:'+dueColor+';margin-top:2px;">📅 Срок: '+due.toLocaleDateString('bg-BG')+(diff<0?' ⚠️':diff===0?' (Днес!)':diff<=2?' ('+diff+' дни)':'')+"</div>";
+        html+=renderSubtasks(t.id, dk);
+        html+='</div>';
+        /* БУТОНИ ЗА РЕДАКЦИЯ И ИЗТРИВАНЕ */
+        if(canEdit()){
+          html+='<div class="task-actions">';
+          html+='<button onclick="openEditTaskModal(\'' + t.id + '\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:2px 6px;font-size:10px;cursor:pointer;color:#2563eb;" title="Редактирай задача">✏️</button>';
+          html+='<button onclick="bulDelTask(this)" data-task-id="' + t.id + '" style="border:1px solid #fecaca;background:#fff5f5;border-radius:4px;padding:2px 6px;font-size:10px;cursor:pointer;color:#dc2626;" title="Изтрий задача">✕</button>';
+          html+='</div>';
+        }
+        html+='</div>';
+      });
+      html+='</div>';
+    }
+    /* Блокове */
+    html += renderRecurringTasks(dk);
+    if(!blocks.length&&!dTasks.length){
+      html+='<div style="text-align:center;padding:40px;color:#94a3b8;font-size:13px;">Няма информация за тази секция тази седмица.</div>';
+    } else {
+      blocks.forEach(function(b,i){html+=editBlock(b,dk,i);});
+    }
+    if(canEdit()){
+      html+='<div style="display:flex;gap:8px;margin-top:8px;">';
+      html+='<button class="addblk" data-dept="'+dk+'" onclick="bulOpenPicker(this)">+ Добави блок</button>';
+      html+='<button onclick="openTaskModalForDept(\'' +dk+ '\')" style="border:1px dashed #2563eb;background:#eff6ff;color:#2563eb;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">✅ + Добави задача</button>';
+      html+='</div>';
+    }
+    html+='</div></div>';
+  });
+
+  html+=blockPickerHtml()+taskModalHtml()+calModalHtml()+pushMenuHtml()+printMenuHtml();
+  wrap.innerHTML=html;
+}
+
+/* Edit block */
+function editBlock(b,dk,i){
+  var tl={text:'📝 Текст',alert:'🚨 Алерт',list:'📋 Списък',image:'📷 Снимка',file:'📎 Файл',divider:'— Разделител',important:'⭐ Важно'}[b.type]||b.type;
+  var h='<div class="blk" id="eb-'+b.id+'" draggable="true" data-col="'+dk+'" data-idx="'+i+'" ondragstart="bulDragStart(this)" ondragover="bulDragOver(this)" ondragleave="bulDragLeave(this)" ondrop="bulDropBlock(this)">';
+  h+='<button class="blk-del" data-col="'+dk+'" data-id="'+b.id+'" onclick="bulDelBlock(this)">✕</button>';
+  h+='<button onclick="bulCopyToTab(\'' +dk+ '\',\'' +b.id+ '\')" style="position:absolute;right:28px;top:4px;border:none;background:#eff6ff;color:#2563eb;border-radius:4px;font-size:10px;padding:2px 6px;cursor:pointer;display:none;" class="blk-copy">→ Копирай</button>';
+  h+='<div class="blk-type">'+tl+'</div>';
+
+  if(b.type==='text'){
+    h+='<textarea class="blk-ta" rows="3" placeholder="Въведи текст..." data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+  }else if(b.type==='divider'){
+    h+='<hr style="border:none;border-top:1px solid #e2e8f0;">';
+  }else if(b.type==='list'){
+    h+='<div style="font-size:11px;color:#64748b;margin-bottom:3px;">Всеки ред = нова точка</div>';
+    h+='<textarea class="blk-ta" rows="4" placeholder="Ред 1..." data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+  }else if(b.type==='alert'){
+    var cOpts=[['red','🔴 Червено'],['amb','🟡 Жълто'],['grn','🟢 Зелено'],['blu','🔵 Синьо'],['pur','🟣 Лилаво']];
+    h+='<select data-col="'+dk+'" data-id="'+b.id+'" data-field="color" onchange="bulSetBlk(this)" style="font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 6px;margin-bottom:5px;background:#f8fafc;width:100%;">';
+    cOpts.forEach(function(o){h+='<option value="'+o[0]+'"'+(b.color===o[0]?' selected':'')+'>'+o[1]+'</option>';});
+    h+='</select><br>';
+    h+='<input placeholder="Заглавие (по избор)" value="'+esc(b.label||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="label" oninput="bulSetBlk(this)" style="width:100%;font-size:12px;border:1px solid #e2e8f0;border-radius:5px;padding:4px 7px;margin-bottom:4px;font-family:inherit;box-sizing:border-box;"><br>';
+    h+='<textarea class="bl
