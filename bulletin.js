@@ -10,6 +10,7 @@ var BUL_PUB = BUL_SB + '/storage/v1/object/public/' + BUL_BKT + '/';
 /* STATE */
 var bulActiveDept = 'trade';
 var curBul = null; var bulTasks = []; var bulComps = [];
+var recurringTasks = []; var recurringComps = []; var subtaskComps = [];
 var bulMode = 'view'; var bulSaveT = null; var dragInfo = null;
 
 /* DEPTS */
