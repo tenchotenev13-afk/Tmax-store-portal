@@ -702,11 +702,7 @@ function printKasaReport(){
 
   if(!reps.length){toast('Няма отчети за тази дата','#dc2626');return;}
 
-  /* Отваряме прозореца ВЕДНАГА (преди async) за да не го блокира браузърът */
-  var win=window.open('','_blank','width=1100,height=800');
-  if(!win){toast('Разреши popup прозорците за този сайт','#dc2626');return;}
-  win.document.write('<html><head><meta charset="UTF-8"><title>Зареждане...</title></head><body style="font-family:Arial;padding:40px;color:#64748b;">⏳ Зареждане на отчета...</body></html>');
-
+  /* Зареждаме zoborot ако не е в паметта */
   var enc2=encodeURIComponent(currentUser.store_name);
   var zq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.desc';
   var dq='store_name=eq.'+enc2+'&date=eq.'+todayStr+'&order=created_at.asc';
@@ -716,11 +712,11 @@ function printKasaReport(){
   ]).then(function(res){
     if(!zoborotData) zoborotData=(Array.isArray(res[0])&&res[0].length)?res[0][0]:null;
     var docs=Array.isArray(res[1])?res[1]:[];
-    _doPrintKasaReport(todayStr,reps,gl,g,docs,win);
-  }).catch(function(){_doPrintKasaReport(todayStr,reps,gl,g,[],win);});
+    _doPrintKasaReport(todayStr,reps,gl,g,docs);
+  }).catch(function(){_doPrintKasaReport(todayStr,reps,gl,g,[]);});
 }
 
-function _doPrintKasaReport(todayStr,reps,gl,g,docs,win){
+function _doPrintKasaReport(todayStr,reps,gl,g){
 
   var BILLS=[500,200,100,50,20,10,5,2,1];
   var COINS=[0.5,0.2,0.1,0.05,0.02,0.01];
@@ -797,18 +793,15 @@ function _doPrintKasaReport(todayStr,reps,gl,g,docs,win){
   }).join('');
 
   /* Главна каса */
-  /* Изчисляваме allCounted = сума от всички купюри (ПОС + Главна) */
-  var allCounted = 0;
+  /* allCounted = купюри от всички ПОС + Главна каса */
+  var allCounted=0;
   BILLS.concat(COINS).forEach(function(v){
-    var k = DK[String(v)];
-    var posQty = 0;
-    reps.forEach(function(r){ posQty += parseInt(r[k])||0; });
-    var glQty = gl ? (parseInt(g[k])||0) : 0;
-    allCounted = Math.round((allCounted + (posQty + glQty) * v) * 100) / 100;
+    var k=DK[String(v)];
+    var posQty=0; reps.forEach(function(r){posQty+=parseInt(r[k])||0;});
+    var glQty=gl?(parseInt(g[k])||0):0;
+    allCounted=Math.round((allCounted+(posQty+glQty)*v)*100)/100;
   });
-  var glSlujebno = parseFloat(g.slujebno)||0;
-  var glSap = parseFloat(g.sap_balance)||0;
-  var glRazlika = Math.round((allCounted + glSlujebno - glSap) * 100) / 100;
+  var glRazlika=Math.round((allCounted+(parseFloat(g.slujebno)||0)-(parseFloat(g.sap_balance)||0))*100)/100;
 
   var glHTML=gl?'<div class="card">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
@@ -905,7 +898,7 @@ function _doPrintKasaReport(todayStr,reps,gl,g,docs,win){
     '</div></div>':
     '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Равнение — не е попълнено</div>';
 
-  win.document.open();
+  var win=window.open('','_blank','width=1100,height=800');
   win.document.write('<html><head><meta charset="UTF-8">'+
     '<title>Касов отчет — '+esc(currentUser.store_name)+' — '+fmtDate(todayStr)+'</title>'+
     '<style>'+
