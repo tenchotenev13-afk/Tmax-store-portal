@@ -58,7 +58,9 @@ function renderReference() {
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:16px;">';
   h += '<div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:10px;">Избор на комбинация</div>';
   h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">';
-  h += '<div><label class="fl">Под-категория</label><select class="fi" id="ref-subcat" onchange="refOnChange()">' +
+  h += '<div><label class="fl">Под-категория</label>' +
+    '<input class="fi" id="ref-subcat-search" placeholder="🔍 Търси сред '+refFilteredSubcats().length+' под-категории..." oninput="refFilterSelect(\'ref-subcat\',this.value)" style="margin-bottom:6px;">' +
+    '<select class="fi" id="ref-subcat" onchange="refOnChange()" size="1">' +
     '<option value="">-- Избери --</option>' +
     refFilteredSubcats().map(function(s){return '<option value="'+s.id+'"'+(String(refSelSubcat)===String(s.id)?' selected':'')+'>'+esc(s.name)+'</option>';}).join('') +
     '</select></div>';
@@ -92,6 +94,18 @@ function refFilteredBrands() {
   refAllEntries.forEach(function(e){ if (String(e.subcategory_id)===String(refSelSubcat)) validIds[e.brand_id]=1; });
   var filtered = refBrands.filter(function(b){ return validIds[b.id]; });
   return filtered.length ? filtered : refBrands;
+}
+
+/* Филтрира опциите на select по въведен текст (за search полетата над dropdown-ите) */
+function refFilterSelect(selectId, query) {
+  var select = document.getElementById(selectId);
+  if (!select) return;
+  var q = (query || '').trim().toLowerCase();
+  var options = select.querySelectorAll('option');
+  options.forEach(function(opt) {
+    if (!opt.value) { opt.style.display = ''; return; } /* "-- Избери --" винаги видима */
+    opt.style.display = (!q || opt.textContent.toLowerCase().indexOf(q) >= 0) ? '' : 'none';
+  });
 }
 
 function refOnChange() {
@@ -318,7 +332,9 @@ function refEntryModalHtml() {
     '<button onclick="closeRefEntryModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>' +
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
-    '<div><label class="fl">Под-категория *</label><select class="fi" id="re-subcat"><option value="">-- Избери --</option>' + refSubcats.map(function(s){return '<option value="'+s.id+'"'+(String(refSelSubcat)===String(s.id)?' selected':'')+'>'+esc(s.name)+'</option>';}).join('') + '</select></div>' +
+    '<div><label class="fl">Под-категория *</label>' +
+    '<input class="fi" id="re-subcat-search" placeholder="🔍 Търси сред '+refSubcats.length+'..." oninput="refFilterSelect(\'re-subcat\',this.value)" style="margin-bottom:4px;">' +
+    '<select class="fi" id="re-subcat"><option value="">-- Избери --</option>' + refSubcats.map(function(s){return '<option value="'+s.id+'"'+(String(refSelSubcat)===String(s.id)?' selected':'')+'>'+esc(s.name)+'</option>';}).join('') + '</select></div>' +
     '<div><label class="fl">Марка *</label><select class="fi" id="re-brand"><option value="">-- Избери --</option>' + refBrands.map(function(b){return '<option value="'+b.id+'"'+(String(refSelBrand)===String(b.id)?' selected':'')+'>'+esc(b.name)+'</option>';}).join('') + '</select></div>' +
     '</div>' +
 
