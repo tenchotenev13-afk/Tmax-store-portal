@@ -813,15 +813,6 @@ function _doPrintKasaReport(todayStr,reps,gl,g,docs){
   }).join('');
 
   /* Главна каса */
-  /* allCounted = сума ПОС + Главна по деноминации */
-  var allCounted=0;
-  BILLS.concat(COINS).forEach(function(v){
-    var k=DK[String(v)];
-    var posQty=0;reps.forEach(function(r){posQty+=parseInt(r[k])||0;});
-    var glQty=gl?(parseInt(g[k])||0):0;
-    allCounted=Math.round((allCounted+(posQty+glQty)*v)*100)/100;
-  });
-  var glRazlika=Math.round((allCounted+(parseFloat(g.slujebno)||0)-(parseFloat(g.sap_balance)||0))*100)/100;
   var glHTML=gl?'<div class="card">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
       '<h3 style="margin:0;">Главна каса</h3>'+statusTag(g.status||'draft')+
@@ -837,11 +828,11 @@ function _doPrintKasaReport(todayStr,reps,gl,g,docs){
         '<td style="text-align:right;font-family:monospace;">'+fm(g.counted_cash)+'</td></tr>'+
       '</tbody></table></div>'+
       '<div><table><tbody>'+
-      '<tr><td>Общо налични (ПОС + Главна)</td><td style="text-align:right;font-family:monospace;">'+fm(allCounted)+'</td></tr>'+
+      '<tr><td>Общо налични (всички)</td><td style="text-align:right;font-family:monospace;">'+fm(g.counted_cash)+'</td></tr>'+
       '<tr><td>Служебно въведени</td><td style="text-align:right;font-family:monospace;">'+fm(g.slujebno)+'</td></tr>'+
       '<tr><td>Наличност SAP</td><td style="text-align:right;font-family:monospace;">'+fm(g.sap_balance)+'</td></tr>'+
       '<tr style="font-weight:700;border-top:2px solid #e2e8f0;"><td>РАЗЛИКА</td>'+
-        '<td style="text-align:right;font-family:monospace;" class="'+rc(glRazlika)+'">'+fm(glRazlika)+'</td></tr>'+
+        '<td style="text-align:right;font-family:monospace;" class="'+rc(g.razlika)+'">'+fm(g.razlika)+'</td></tr>'+
       '</tbody></table></div>'+
     '</div></div>':
     '<div class="card" style="color:#94a3b8;text-align:center;padding:20px;">Главна каса — не е попълнена</div>';
@@ -985,7 +976,7 @@ function _doPrintKasaReport(todayStr,reps,gl,g,docs){
     '<h2>Равнение на оборота</h2>'+zobHTML+
     docsHTML+
     '</div>'+
-    '<script>function openDocFromPrint(path){var enc=path.split("/").map(function(s){return encodeURIComponent(s);}).join("/");fetch("https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1/object/sign/kasa-docs/"+enc,{method:"POST",headers:{"Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA","Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})}).then(function(r){return r.json();}).then(function(d){if(d.signedURL)window.open("https://xiwkdiqqplgdcrkewgtv.supabase.co"+d.signedURL,"_blank");else alert("Грешка: "+JSON.stringify(d));}).catch(function(e){alert(e);});}<\/script>'+
+    '<script>function openDocFromPrint(path){var enc=path.split("/").map(function(s){return encodeURIComponent(s);}).join("/");fetch("https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1/object/sign/kasa-docs/"+enc,{method:"POST",headers:{"Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA","Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})}).then(function(r){return r.json();}).then(function(d){if(d.signedURL)window.open("https://xiwkdiqqplgdcrkewgtv.supabase.co"+d.signedURL,"_blank");else alert("Грешка: "+JSON.stringify(d));}).catch(function(e){alert(e);});} function openKasaDoc(path){openDocFromPrint(path);}<\/script>'+
     '</body></html>');
   win.document.close();
   setTimeout(function(){win.focus();},300);
