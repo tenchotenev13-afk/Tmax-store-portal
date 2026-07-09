@@ -69,6 +69,13 @@ function renderReference() {
     refFilteredBrands().map(function(b){return '<option value="'+b.id+'"'+(String(refSelBrand)===String(b.id)?' selected':'')+'>'+esc(b.name)+'</option>';}).join('') +
     '</select></div>';
   h += '</div></div>';
+  var filterActive = refSelSubcat || refSelBrand;
+  if (filterActive) {
+    h += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:12px;color:#1e40af;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
+      '<span>🔍 Активен филтър — показват се само реално съществуващи комбинации спрямо избраното.</span>' +
+      '<button onclick="refClearFilter()" style="border:1px solid #93c5fd;background:#fff;color:#2563eb;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">✕ Изчисти филтъра</button>' +
+      '</div>';
+  }
 
   /* Картата */
   h += '<div id="ref-card"></div>';
@@ -118,6 +125,15 @@ function refFilterCheckboxList(containerId, query) {
   });
 }
 
+/* Изчиства избора на под-категория/марка — премахва филтъра и показва пълните списъци */
+function refClearFilter() {
+  refSelSubcat = '';
+  refSelBrand  = '';
+  refEntry     = null;
+  refLocations = [];
+  renderReference();
+}
+
 function refOnChange() {
   var newSubcat = document.getElementById('ref-subcat').value;
   var newBrand  = document.getElementById('ref-brand').value;
@@ -162,14 +178,16 @@ function renderRefCard() {
     return;
   }
 
-  var brandName = (refBrands.find(function(b){return String(b.id)===String(refSelBrand);})||{}).name || '';
+  var brandObj  = refBrands.find(function(b){return String(b.id)===String(refSelBrand);}) || {};
+  var brandName = brandObj.name || '';
   var subcatObj = refSubcats.find(function(s){return String(s.id)===String(refSelSubcat);}) || {};
   var subName   = subcatObj.name || '';
+  var templateFile = brandObj.card_template_file || subcatObj.card_template_file; /* марката има приоритет */
 
   var h = '<div style="background:#0f172a;color:#fff;border-radius:10px 10px 0 0;padding:12px 16px;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
     '<span>' + esc(brandName) + ' &nbsp;|&nbsp; ' + esc(subName) + '</span>' +
-    (subcatObj.card_template_file
-      ? '<a href="warranty-templates/'+encodeURIComponent(subcatObj.card_template_file)+'" target="_blank" style="background:#2563eb;color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;">🖨 Гаранционна карта</a>'
+    (templateFile
+      ? '<a href="warranty-templates/'+encodeURIComponent(templateFile)+'" target="_blank" style="background:#2563eb;color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;">🖨 Гаранционна карта</a>'
       : '') +
     '</div>';
 
