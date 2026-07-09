@@ -56,7 +56,7 @@ function renderTransport(){
     return '<tr style="border-left:3px solid '+bdrColor+';'+anim+'">'+
       '<td style="font-size:11px;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
       '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small></td>'+
-      '<td style="font-family:monospace;font-size:11px;width:60px;max-width:60px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(o.sap||'—')+'</td>'+
+      '<td style="font-family:monospace;font-size:11px;">'+esc(o.sap||'—')+'</td>'+
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
       '<td style="font-size:12px;">'+esc(o.address||'')+'</td>'+
       '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
@@ -94,7 +94,7 @@ function submitTransport(){
     store_name:currentUser.store_name,
     date:v('o-date'),hour:v('o-hour'),bon:v('o-bon'),sap:v('o-sap'),
     customer_name:name,phone:phone,address:v('o-addr'),
-    product:product,color:v('o-color'),qty:parseFloat(v('o-qty'))||1,unit:v('o-unit')||'бр.',
+    product:product,color:v('o-color'),qty:parseFloat(v('o-qty').replace(',','.'))||1,unit:v('o-unit')||'бр.',
     agent:v('o-agent')||currentUser.display_name,
     notes:v('o-notes'),delivery:delivery,status:calcStatus(delivery,'new')
   }).then(function(res){

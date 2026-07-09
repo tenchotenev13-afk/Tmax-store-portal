@@ -147,7 +147,7 @@ function submitClientOrder(){
     in_num:num,store_name:currentUser.store_name,
     date:v('c-date'),hour:v('c-hour'),bon:v('c-bon'),sap:v('c-sap'),
     customer_name:name,phone:phone,
-    product:product,color:v('c-color'),qty:parseFloat(v('c-qty'))||1,unit:v('c-unit')||'бр.',
+    product:product,color:v('c-color'),qty:parseFloat(v('c-qty').replace(',','.'))||1,unit:v('c-unit')||'бр.',
     from_store:v('c-from-store'),fulfiller:v('c-fulfiller'),
     agent:v('c-agent')||currentUser.display_name,
     delivery:delivery,status:calcStatus(delivery,'new'),note:v('c-note')
