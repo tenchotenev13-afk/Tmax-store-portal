@@ -119,7 +119,7 @@ function doLogin(){
   errEl.style.display='none';
   document.getElementById('l-btn').disabled=true;
   document.getElementById('l-btn').textContent='Влизане...';
-  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name').then(function(data){
+  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name,assigned_stores').then(function(data){
     document.getElementById('l-btn').disabled=false;
     document.getElementById('l-btn').textContent='Влез →';
     if(!Array.isArray(data)||!data.length){errEl.textContent='Непознат имейл адрес.';errEl.style.display='block';return;}
@@ -146,7 +146,9 @@ function startApp(){
   document.getElementById('s-login').style.display='none';
   document.getElementById('s-app').style.display='flex';
   document.getElementById('nav-name').textContent=currentUser.display_name||currentUser.email;
-  document.getElementById('nav-store').textContent=isGlobal()?'Всички магазини':currentUser.store_name;
+  var _assigned=assignedStores();
+  document.getElementById('nav-store').textContent=!isGlobal()?currentUser.store_name:
+    (_assigned&&_assigned.length?_assigned.join(', '):'Всички магазини');
   setupTabsForRole();
   if(typeof initTabDrag==='function')setTimeout(initTabDrag,200);
   if(isGlobal())document.getElementById('tr-metrics').style.display='grid';
