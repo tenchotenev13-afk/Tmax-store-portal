@@ -96,7 +96,7 @@ function refFilteredBrands() {
   return filtered.length ? filtered : refBrands;
 }
 
-/* Филтрира опциите на select по въведен текст (за search полетата над dropdown-ите) */
+/* Филтрира opциите на select по въведен текст (за search полетата над dropdown-ите) */
 function refFilterSelect(selectId, query) {
   var select = document.getElementById(selectId);
   if (!select) return;
@@ -105,6 +105,16 @@ function refFilterSelect(selectId, query) {
   options.forEach(function(opt) {
     if (!opt.value) { opt.style.display = ''; return; } /* "-- Избери --" винаги видима */
     opt.style.display = (!q || opt.textContent.toLowerCase().indexOf(q) >= 0) ? '' : 'none';
+  });
+}
+
+/* Филтрира label-ите в checkbox списъка (за multi-select под-категория при нов запис) */
+function refFilterCheckboxList(containerId, query) {
+  var container = document.getElementById(containerId);
+  if (!container) return;
+  var q = (query || '').trim().toLowerCase();
+  container.querySelectorAll('label').forEach(function(lbl) {
+    lbl.style.display = (!q || lbl.textContent.toLowerCase().indexOf(q) >= 0) ? '' : 'none';
   });
 }
 
@@ -332,9 +342,15 @@ function refEntryModalHtml() {
     '<button onclick="closeRefEntryModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>' +
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
-    '<div><label class="fl">Под-категория *</label>' +
-    '<input class="fi" id="re-subcat-search" placeholder="🔍 Търси сред '+refSubcats.length+'..." oninput="refFilterSelect(\'re-subcat\',this.value)" style="margin-bottom:4px;">' +
-    '<select class="fi" id="re-subcat"><option value="">-- Избери --</option>' + refSubcats.map(function(s){return '<option value="'+s.id+'"'+(String(refSelSubcat)===String(s.id)?' selected':'')+'>'+esc(s.name)+'</option>';}).join('') + '</select></div>' +
+    (isEdit
+      ? '<div><label class="fl">Под-категория *</label>' +
+        '<input class="fi" id="re-subcat-search" placeholder="🔍 Търси сред '+refSubcats.length+'..." oninput="refFilterSelect(\'re-subcat\',this.value)" style="margin-bottom:4px;">' +
+        '<select class="fi" id="re-subcat"><option value="">-- Избери --</option>' + refSubcats.map(function(s){return '<option value="'+s.id+'"'+(String(refSelSubcat)===String(s.id)?' selected':'')+'>'+esc(s.name)+'</option>';}).join('') + '</select></div>'
+      : '<div><label class="fl">Под-категории * <span style="font-weight:400;text-transform:none;color:#94a3b8;">(избери 1 или повече — записът ще се приложи към всичките)</span></label>' +
+        '<input class="fi" id="re-subcat-search" placeholder="🔍 Търси сред '+refSubcats.length+'..." oninput="refFilterCheckboxList(\'re-subcat-cb-list\',this.value)" style="margin-bottom:4px;">' +
+        '<div id="re-subcat-cb-list" style="max-height:180px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px;">' +
+        refSubcats.map(function(s){return '<label style="display:flex;align-items:center;gap:6px;padding:3px 2px;font-size:12.5px;cursor:pointer;"><input type="checkbox" class="re-subcat-cb" value="'+s.id+'"> '+esc(s.name)+'</label>';}).join('') +
+        '</div></div>') +
     '<div><label class="fl">Марка *</label><select class="fi" id="re-brand"><option value="">-- Избери --</option>' + refBrands.map(function(b){return '<option value="'+b.id+'"'+(String(refSelBrand)===String(b.id)?' selected':'')+'>'+esc(b.name)+'</option>';}).join('') + '</select></div>' +
     '</div>' +
 
@@ -399,13 +415,22 @@ function closeRefEntryModal() {
 }
 
 function submitRefEntry() {
-  var subcat = document.getElementById('re-subcat').value;
+  var isEdit = !!refEditId;
   var brand  = document.getElementById('re-brand').value;
-  if (!subcat || !brand) { toast('Избери марка и под-категория','#dc2626'); return; }
+  var subcatList; /* масив от subcategory_id — 1 при редакция, N при нов запис */
+
+  if (isEdit) {
+    var subcatSingle = document.getElementById('re-subcat').value;
+    if (!subcatSingle || !brand) { toast('Избери марка и под-категория','#dc2626'); return; }
+    subcatList = [subcatSingle];
+  } else {
+    subcatList = Array.from(document.querySelectorAll('.re-subcat-cb')).filter(function(cb){return cb.checked;}).map(function(cb){return cb.value;});
+    if (!subcatList.length || !brand) { toast('Избери марка и поне 1 под-категория','#dc2626'); return; }
+  }
 
   var qLines = (document.getElementById('re-questions').value||'').split('\n').map(function(s){return s.trim();}).filter(Boolean).slice(0,10);
-  var data = {
-    subcategory_id: subcat, brand_id: brand,
+  var baseData = {
+    brand_id: brand,
     warranty_period: v('re-period'), covers: v('re-covers'), exclusions: v('re-excl'), claim_deadline: v('re-deadline'),
     service_type: v('re-svctype'), service_scope_foreign: v('re-svcscope'),
     service_name: v('re-svcname'), service_address: v('re-svcaddr'), service_phone: v('re-svcphone'),
@@ -418,18 +443,33 @@ function submitRefEntry() {
     internal_notes: v('re-notes'),
     updated_at: new Date().toISOString()
   };
-  qLines.forEach(function(q, i){ data['question_'+(i+1)] = q; });
+  qLines.forEach(function(q, i){ baseData['question_'+(i+1)] = q; });
 
-  var p = refEditId
-    ? sbPatch('warranty_entries','id=eq.'+refEditId,data)
-    : sbPost('warranty_entries',data);
-  p.then(function(res){
-    if (!res.ok) { toast('Грешка при запис (възможно е комбинацията вече да съществува)','#dc2626'); return; }
+  var requests;
+  if (isEdit) {
+    var editData = Object.assign({subcategory_id: subcatList[0]}, baseData);
+    requests = [sbPatch('warranty_entries','id=eq.'+refEditId,editData)];
+  } else {
+    requests = subcatList.map(function(scId){
+      var rowData = Object.assign({subcategory_id: scId}, baseData);
+      return sbPost('warranty_entries', rowData);
+    });
+  }
+
+  Promise.all(requests).then(function(results){
+    var failed = results.filter(function(r){return !r.ok;}).length;
+    if (failed) {
+      toast(failed===results.length
+        ? 'Грешка при запис (възможно е комбинациите вече да съществуват)'
+        : '⚠️ Записани '+(results.length-failed)+' от '+results.length+' (останалите вероятно вече съществуват)', '#dc2626');
+      if (failed===results.length) return;
+    } else {
+      toast(isEdit ? '✅ Записано!' : '✅ Добавени '+results.length+' записа!');
+    }
     closeRefEntryModal();
-    toast('✅ Записано!');
-    refSelSubcat = subcat; refSelBrand = brand;
-    document.getElementById('ref-subcat').value = subcat;
-    document.getElementById('ref-brand').value = brand;
+    refSelSubcat = subcatList[0]; refSelBrand = brand;
+    document.getElementById('ref-subcat').value = refSelSubcat;
+    document.getElementById('ref-brand').value = refSelBrand;
     refOnChange();
   });
 }
