@@ -143,20 +143,31 @@ function markReady() {
   var todayStr = (typeof kasaActiveDate==='function') ? kasaActiveDate() : today();
   var reps = kasaReports.filter(function(r) { return r.date === todayStr; });
   if (!reps.length) { toast('Няма касови отчети за днес','#dc2626'); return; }
+
   var draftReps = reps.filter(function(r) { return r.status === 'draft'; });
-  if (draftReps.length) {
-    var posLabels = draftReps.map(function(r){
+  var confirmedReps = reps.filter(function(r) { return r.status === 'confirmed'; });
+
+  if (!confirmedReps.length) {
+    var posLabels0 = draftReps.map(function(r){
       return 'ПОС '+(r.pos_number||'?')+(r.cashier_name?' ('+r.cashier_name+')':'');
     }).join(', ');
-    var word = draftReps.length===1?'е непотвърден':'са непотвърдени';
-    if (!confirm('Внимание: '+posLabels+' '+word+'.\n\nПродължи ли въпреки това?')) return;
+    toast('❌ Няма потвърдени отчети за изпращане. Непотвърдени: '+posLabels0+'. Потвърди ги първо!','#dc2626');
+    return;
   }
+
   var by = currentUser.display_name||currentUser.email;
   var now = new Date().toISOString();
-  Promise.all(reps.map(function(r) {
+  Promise.all(confirmedReps.map(function(r) {
     return sbPatch('kasa_reports','id=eq.'+r.id,{ready_at:now,ready_by:by});
   })).then(function() {
-    toast('📤 Изпратено за проверка!');
+    if (draftReps.length) {
+      var posLabels = draftReps.map(function(r){
+        return 'ПОС '+(r.pos_number||'?')+(r.cashier_name?' ('+r.cashier_name+')':'');
+      }).join(', ');
+      toast('📤 Изпратени '+confirmedReps.length+' потвърдени! Останаха непотвърдени: '+posLabels+' — изпрати ги отделно, след като ги потвърдиш.','#d97706');
+    } else {
+      toast('📤 Изпратено за проверка!');
+    }
     loadKasa();
   });
 }
