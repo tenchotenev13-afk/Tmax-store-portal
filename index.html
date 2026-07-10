@@ -124,7 +124,25 @@ tr:hover td{background:#fafafa;}
 /* Gray separator between groups */
 .tab-sep{width:1px;background:rgba(255,255,255,.1);margin:8px 4px;flex-shrink:0;}
 @media print{.nav,.no-print{display:none!important;}#s-login{display:none!important;}#s-app{display:block!important;}}
-@media(max-width:640px){.nav-tab{padding:6px 8px;}.nav-tab .ti{font-size:18px;}.page{padding:14px 12px 60px;}}
+@media(max-width:640px){
+  .nav-tab{padding:6px 8px;}
+  .nav-tab .ti{font-size:18px;}
+  .page{padding:14px 12px 60px;}
+  /* Компресираме дясната част (потребител + бутони), за да не изяжда мястото на табовете */
+  .nav{grid-template-columns:auto 1fr auto;padding:0 6px;}
+  .nav-brand{padding:6px 4px 6px 0;}
+  .nav-brand img{height:26px;}
+  .store-chip{display:none;}
+  .user-chip{font-size:15px;gap:0;}
+  #nav-name{display:none;}
+  .nav-right{gap:4px;padding:6px 0 6px 6px;}
+  .btn-sm{padding:4px 7px;font-size:10px;}
+  .nav-tabs{justify-content:flex-start;}
+}
+@media(max-width:420px){
+  .nav-tab{min-width:56px;padding:5px 5px;}
+  .nav-tab .tl{font-size:8px;}
+}
 /* bulletin overlay */
 .bov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:center;justify-content:center;}.bov.open{display:flex;}
 .bmod{background:#fff;border-radius:14px;padding:22px;max-width:95vw;max-height:90vh;overflow-y:auto;}
