@@ -964,7 +964,7 @@ function openEditTaskModal(taskId) {
     '<label class="fl">Срок — ден от седмицата</label>' +
     '<select class="fi" id="etk-due">'+dueOpts+'</select>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
-    '<button onclick="var e=document.getElementById(\"edit-tk-ov\");if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="var e=document.getElementById(&#39;edit-tk-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button data-task-id="'+taskId+'" onclick="submitEditTask(this.dataset.taskId)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>' +
     '</div></div>';
   document.body.appendChild(ov);
@@ -1007,7 +1007,7 @@ function openEditRecurringModal(taskId) {
     '<div><label class="fl">Час (по избор)</label><input type="time" class="fi" id="erec-time" value="'+esc(t.due_time||'')+'"></div>' +
     '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
-    '<button onclick="var e=document.getElementById(\"edit-rec-ov\");if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="var e=document.getElementById(&#39;edit-rec-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button data-task-id="'+taskId+'" onclick="submitEditRecurring(this.dataset.taskId)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>' +
     '</div></div>';
   document.body.appendChild(ov);
@@ -1053,6 +1053,70 @@ function submitTask(){
   sbPost('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:document.getElementById('tk-dept').value,title:title,description:document.getElementById('tk-desc').value,due_date:document.getElementById('tk-due').value||null}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     closeTk(); toast('✅ Задачата е добавена!'); loadBulletin();
+  });
+}
+
+/* ═══════ ПРИКАЧЕНИ ФАЙЛОВЕ КЪМ ПОСТОЯННИ ЗАДАЧИ ══════════════ */
+function renderRecurringAttachments(t){
+  var atts=normAttachments(t.attachments);
+  var h='';
+  if(atts.length){
+    h+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;">';
+    atts.forEach(function(a,i){
+      h+='<div style="position:relative;">';
+      if(a.type==='image'){
+        h+='<a href="'+a.url+'" target="_blank" style="display:block;"><img src="'+a.url+'" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+      }else{
+        h+='<a href="'+a.url+'" target="_blank" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;color:#2563eb;text-decoration:none;max-width:110px;">📎 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(a.filename||'Файл')+'</span></a>';
+      }
+      if(canEdit())h+='<button data-rtid="'+t.id+'" data-idx="'+i+'" onclick="recurringRemoveAttachment(this.dataset.rtid,this.dataset.idx)" style="position:absolute;top:-5px;right:-5px;width:16px;height:16px;border:none;background:#dc2626;color:#fff;border-radius:50%;font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>';
+      h+='</div>';
+    });
+    h+='</div>';
+  }
+  if(canEdit()){
+    h+='<label style="display:inline-flex;align-items:center;gap:4px;margin-top:5px;border:1px dashed #cbd5e1;border-radius:5px;padding:2px 8px;font-size:10px;color:#94a3b8;cursor:pointer;">'+
+      '📎 + Снимка/файл<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display:none;" data-rtid="'+t.id+'" onchange="recurringUploadAttachment(this)"></label>';
+  }
+  return h;
+}
+function recurringUploadAttachment(input){
+  var file=input.files[0]; if(!file)return;
+  var rtid=input.getAttribute('data-rtid');
+  var t=recurringTasks.find(function(x){return String(x.id)===String(rtid);});
+  if(!t)return;
+  var isImg=/\.(jpe?g|png|gif|webp)$/i.test(file.name);
+  var ext=(file.name.split('.').pop()||'bin').toLowerCase();
+  var fname='rec_'+rtid+'_'+Date.now()+'.'+ext;
+  var path='bulletin-tasks/'+fname;
+  showBulToast('⏳ Качване...');
+  var reader=new FileReader();
+  reader.onload=function(e){
+    fetch(BUL_SB+'/storage/v1/object/'+BUL_BKT+'/'+path,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+BUL_KEY,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+      body:e.target.result
+    }).then(function(r){return r.ok;}).then(function(ok){
+      if(!ok){toast('Грешка при качване','#dc2626');return;}
+      var pub=BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path;
+      var atts=normAttachments(t.attachments).slice();
+      atts.push({type:isImg?'image':'file',url:pub,filename:file.name});
+      sbPatch('recurring_tasks','id=eq.'+rtid,{attachments:atts}).then(function(res){
+        if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+        t.attachments=atts; renderBulletin(); toast('✅ Прикачено!');
+      });
+    }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');});
+  };
+  reader.readAsArrayBuffer(file);
+}
+function recurringRemoveAttachment(rtid,idx){
+  var t=recurringTasks.find(function(x){return String(x.id)===String(rtid);});
+  if(!t)return;
+  var atts=normAttachments(t.attachments).slice();
+  atts.splice(idx,1);
+  sbPatch('recurring_tasks','id=eq.'+rtid,{attachments:atts}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    t.attachments=atts; renderBulletin(); toast('✓ Премахнато');
   });
 }
 
@@ -1737,6 +1801,7 @@ function renderRecurringTasks(dk) {
       if (t.description) h += '<div style="font-size:11px;color:#94a3b8;">' + esc(t.description) + '</div>';
       var dueLbl = recurringDueLabel(t);
       if (dueLbl) h += '<div style="font-size:10px;color:'+(dueToday&&!done?'#d97706':'#94a3b8')+';margin-top:2px;">🔁 '+dueLbl+(dueToday&&!done?' (днес!)':'')+'</div>';
+      h += renderRecurringAttachments(t);
       h += '</div>';
       if (canEdit()) {
         h += '<div style="display:flex;gap:4px;">';
@@ -1808,7 +1873,7 @@ function openRecurringModal(dk) {
     '<div><label class="fl">Час (по избор)</label><input type="time" class="fi" id="rec-time"></div>' +
     '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
-    '<button onclick="var e=document.getElementById(\"rec-modal-ov\");if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="var e=document.getElementById(&#39;rec-modal-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button data-dk="' + dk + '" onclick="submitRecurring(this.dataset.dk)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Добави</button>' +
     '</div></div>';
   document.body.appendChild(ov);
@@ -1936,7 +2001,7 @@ function openSubtaskModal(taskId, dept) {
     '<label class="fl">Заглавие *</label><input class="fi" id="st-title" placeholder="напр. Провери склад А">' +
     '<label class="fl">Срок — ден от седмицата</label><select class="fi" id="st-due">'+dueOpts+'</select>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">' +
-    '<button onclick="var e=document.getElementById(\"st-modal-ov\");if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="var e=document.getElementById(&#39;st-modal-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button data-tid="' + taskId + '" data-dept="' + dept + '" onclick="submitSubtask(this.dataset.tid,this.dataset.dept)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Добави</button>' +
     '</div></div>';
   document.body.appendChild(ov);
