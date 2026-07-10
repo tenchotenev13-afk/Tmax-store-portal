@@ -304,6 +304,7 @@ function renderBulView(){
         html+='<div style="flex:1;"><div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
         if(t.description)html+='<div style="font-size:11px;color:#94a3b8;">'+esc(t.description)+'</div>';
         if(due)html+='<div style="font-size:10px;color:'+dueColor+';margin-top:2px;">📅 Срок: '+due.toLocaleDateString('bg-BG')+(diff<0?' ⚠️':diff===0?' (Днес!)':diff<=2?' ('+diff+' дни)':'')+"</div>";
+        html+=renderTaskAttachments(t);
         html+=renderSubtasks(t.id, dk);
         html+='</div>';
         if(canEdit()){html+='<div style="display:flex;gap:4px;flex-shrink:0;">'
@@ -747,6 +748,74 @@ function submitTask(){
   });
 }
 
+/* ═══════ ПРИКАЧЕНИ ФАЙЛОВЕ КЪМ ЗАДАЧИ ══════════════════════ */
+function normAttachments(atts){
+  if(typeof atts==='string'){try{atts=JSON.parse(atts);}catch(e){atts=[];}}
+  return Array.isArray(atts)?atts:[];
+}
+function renderTaskAttachments(t){
+  var atts=normAttachments(t.attachments);
+  var h='';
+  if(atts.length){
+    h+='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:5px;">';
+    atts.forEach(function(a,i){
+      h+='<div style="position:relative;">';
+      if(a.type==='image'){
+        h+='<a href="'+a.url+'" target="_blank" style="display:block;"><img src="'+a.url+'" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+      }else{
+        h+='<a href="'+a.url+'" target="_blank" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;color:#2563eb;text-decoration:none;max-width:110px;">📎 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(a.filename||'Файл')+'</span></a>';
+      }
+      if(canEdit())h+='<button data-tid="'+t.id+'" data-idx="'+i+'" onclick="taskRemoveAttachment(this.dataset.tid,this.dataset.idx)" style="position:absolute;top:-5px;right:-5px;width:16px;height:16px;border:none;background:#dc2626;color:#fff;border-radius:50%;font-size:9px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>';
+      h+='</div>';
+    });
+    h+='</div>';
+  }
+  if(canEdit()){
+    h+='<label style="display:inline-flex;align-items:center;gap:4px;margin-top:5px;border:1px dashed #cbd5e1;border-radius:5px;padding:2px 8px;font-size:10px;color:#94a3b8;cursor:pointer;">'+
+      '📎 + Снимка/файл<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display:none;" data-tid="'+t.id+'" onchange="taskUploadAttachment(this)"></label>';
+  }
+  return h;
+}
+function taskUploadAttachment(input){
+  var file=input.files[0]; if(!file)return;
+  var tid=input.getAttribute('data-tid');
+  var t=bulTasks.find(function(x){return String(x.id)===String(tid);});
+  if(!t)return;
+  var isImg=/\.(jpe?g|png|gif|webp)$/i.test(file.name);
+  var ext=(file.name.split('.').pop()||'bin').toLowerCase();
+  var fname=tid+'_'+Date.now()+'.'+ext;
+  var path='bulletin-tasks/'+fname;
+  showBulToast('⏳ Качване...');
+  var reader=new FileReader();
+  reader.onload=function(e){
+    fetch(BUL_SB+'/storage/v1/object/'+BUL_BKT+'/'+path,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+BUL_KEY,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+      body:e.target.result
+    }).then(function(r){return r.ok;}).then(function(ok){
+      if(!ok){toast('Грешка при качване','#dc2626');return;}
+      var pub=BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path;
+      var atts=normAttachments(t.attachments).slice();
+      atts.push({type:isImg?'image':'file',url:pub,filename:file.name});
+      sbPatch('bulletin_tasks','id=eq.'+tid,{attachments:atts}).then(function(res){
+        if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+        t.attachments=atts; renderBulletin(); toast('✅ Прикачено!');
+      });
+    }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');});
+  };
+  reader.readAsArrayBuffer(file);
+}
+function taskRemoveAttachment(tid,idx){
+  var t=bulTasks.find(function(x){return String(x.id)===String(tid);});
+  if(!t)return;
+  var atts=normAttachments(t.attachments).slice();
+  atts.splice(idx,1);
+  sbPatch('bulletin_tasks','id=eq.'+tid,{attachments:atts}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    t.attachments=atts; renderBulletin(); toast('✓ Премахнато');
+  });
+}
+
 /* PUBLISH / NEW */
 function publishBul(){
   if(!curBul||!confirm('Публикувай бюлетина за всички потребители?'))return;
@@ -1109,6 +1178,7 @@ function renderTasksPanel() {
         h += '<div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
         h += esc(t.title||'')+'</div>';
         if (t.description) h += '<div style="font-size:11px;color:#94a3b8;">'+esc(t.description)+'</div>';
+        h += renderTaskAttachments(t);
         if (t.due_date) {
           var due = new Date(t.due_date);
           var today = new Date(); today.setHours(0,0,0,0);
