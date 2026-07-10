@@ -115,6 +115,8 @@ tr:hover td{background:#fafafa;}
 #tab-bulletin.active{color:#f87171;border-bottom-color:#dc2626;border-top-color:#dc2626;background:rgba(185,28,28,.2);}
 /* Purple: Admin */
 #tab-admin{border-top:3px solid transparent;}
+/* "Наръчник" вече е под-таб вътре в "Инструкции" — самостоятелният таб, който handbook.js инжектира, е скрит */
+#tab-handbook{display:none!important;}
 #tab-admin:hover{color:#c4b5fd;background:rgba(109,40,217,.25);}
 #tab-admin.active{color:#a78bfa;border-bottom-color:#7c3aed;border-top-color:#7c3aed;background:rgba(109,40,217,.2);}
 /* Amber: Kasa/History */
@@ -237,6 +239,12 @@ OneSignalDeferred.push(async function(OneSignal) {
 
   <div id="notif-banner" style="display:none;max-width:1300px;margin:12px auto 0;width:100%;padding:0 16px;" class="no-print"></div>
   <div id="tr-metrics" class="metrics no-print" style="display:none;padding:14px 16px 0;max-width:1300px;margin:0 auto;width:100%;"></div>
+  <div id="docs-handbook-subnav" class="no-print" style="display:none;max-width:1300px;margin:12px auto 0;width:100%;padding:0 16px;">
+    <div style="display:flex;gap:8px;">
+      <button id="dhs-handbook" class="filter-btn" onclick="showModule('handbook')">📖 Наръчник</button>
+      <button id="dhs-documents" class="filter-btn" onclick="showModule('docs')">📁 Документи</button>
+    </div>
+  </div>
 
   <!-- TRANSPORT -->
   <div id="mod-transport" class="page">

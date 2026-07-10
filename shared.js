@@ -119,7 +119,7 @@ function doLogin(){
   errEl.style.display='none';
   document.getElementById('l-btn').disabled=true;
   document.getElementById('l-btn').textContent='Влизане...';
-  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name,assigned_stores').then(function(data){
+  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name').then(function(data){
     document.getElementById('l-btn').disabled=false;
     document.getElementById('l-btn').textContent='Влез →';
     if(!Array.isArray(data)||!data.length){errEl.textContent='Непознат имейл адрес.';errEl.style.display='block';return;}
@@ -146,9 +146,7 @@ function startApp(){
   document.getElementById('s-login').style.display='none';
   document.getElementById('s-app').style.display='flex';
   document.getElementById('nav-name').textContent=currentUser.display_name||currentUser.email;
-  var _assigned=assignedStores();
-  document.getElementById('nav-store').textContent=!isGlobal()?currentUser.store_name:
-    (_assigned&&_assigned.length?_assigned.join(', '):'Всички магазини');
+  document.getElementById('nav-store').textContent=isGlobal()?'Всички магазини':currentUser.store_name;
   setupTabsForRole();
   if(typeof initTabDrag==='function')setTimeout(initTabDrag,200);
   if(isGlobal())document.getElementById('tr-metrics').style.display='grid';
@@ -198,6 +196,15 @@ function showModule(mod){
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
   var tab=document.getElementById('tab-'+mod);if(tab)tab.classList.add('active');
+  /* "Наръчник" и "Инструкции" са обединени в 1 таб с 2 под-таба — поддържаме визуално коректно състояние */
+  var dhSub=document.getElementById('docs-handbook-subnav');
+  if(dhSub){
+    dhSub.style.display=(mod==='docs'||mod==='handbook')?'block':'none';
+    var btnH=document.getElementById('dhs-handbook'),btnD=document.getElementById('dhs-documents');
+    if(btnH)btnH.classList.toggle('active',mod==='handbook');
+    if(btnD)btnD.classList.toggle('active',mod==='docs');
+  }
+  if(mod==='handbook'){var docsTab=document.getElementById('tab-docs');if(docsTab)docsTab.classList.add('active');}
   if(mod==='admin')loadAdmin();
   if(mod==='transport')loadTransport();
   if(mod==='client')loadClientOrders();
