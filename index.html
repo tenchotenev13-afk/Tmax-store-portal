@@ -343,7 +343,10 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div class="pg-title">⚙ Администрация</div>
     <div class="pg-sub">Управление на магазини и потребители.</div>
     <div class="card">
-      <div class="card-title">👥 Потребители</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <div class="card-title" style="margin-bottom:0;">👥 Потребители</div>
+        <button onclick="openUserModal(null)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави колега</button>
+      </div>
       <div class="tbl-wrap"><table>
         <thead><tr><th>Имейл</th><th>Име</th><th>Магазин</th><th>Роля</th><th>Назначени магазини</th></tr></thead>
         <tbody id="users-body"></tbody>

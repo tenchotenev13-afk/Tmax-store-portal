@@ -82,35 +82,79 @@ function loadUsersAdmin(){
   });
 }
 
+var _assignedEditUserId = null;
+
 function editAssigned(userId, userName){
-  var current=prompt('Магазини за '+userName+'\n\nВъведи имената разделени със запетая:\n(остави празно = вижда ВСИЧКИ)\n\nПример: Кърджали, Сливен, Раднево');
-  if(current===null)return;
-  var stores=current.trim()
-    ? current.split(',').map(function(s){return s.trim();}).filter(Boolean)
-    : null;
-  /* Supabase очаква PostgreSQL масив или NULL */
-  /* NULL = вижда всички; масив = само назначените */
-  var payload = stores ? {assigned_stores: stores} : {assigned_stores: null};
-  fetch(
-    'https://xiwkdiqqplgdcrkewgtv.supabase.co/rest/v1/users?id=eq.'+userId,
-    {
-      method: 'PATCH',
-      headers: {
-        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
-        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-      },
-      body: JSON.stringify(payload)
+  _assignedEditUserId = userId;
+  sbGet('users','id=eq.'+userId+'&select=assigned_stores').then(function(data){
+    var current = (Array.isArray(data) && data[0]) ? data[0].assigned_stores : null;
+    var currentList = [];
+    if (Array.isArray(current)) currentList = current;
+    else if (typeof current==='string' && current.length>2) {
+      try { currentList = current.replace(/^{|}$/g,'').split(',').map(function(s){return s.trim().replace(/^"|"$/g,'');}); } catch(e){}
     }
-  ).then(function(r){ return r.json().then(function(data){ return {ok:r.ok, data:data}; }); })
-  .then(function(res){
-    if(!res.ok){toast('Грешка при запис','#dc2626');console.error(res.data);return;}
-    var saved=Array.isArray(res.data)&&res.data[0]?res.data[0].assigned_stores:null;
-    var count=Array.isArray(saved)?saved.length:0;
-    toast(count?'✅ Назначени '+count+' магазина':'✅ Вижда всички магазини');
+    sbGet('stores','order=name&select=name').then(function(storesData){
+      var allStores = (Array.isArray(storesData)?storesData:[]).map(function(s){return s.name;});
+      _renderAssignedModal(userName, allStores, currentList);
+    });
+  });
+}
+
+function _renderAssignedModal(userName, allStores, currentList){
+  var old = document.getElementById('assigned-modal-ov');
+  if (old) old.remove();
+
+  var noneChecked = currentList.length === 0;
+  var html = '<div class="bov open" id="assigned-modal-ov" onclick="if(event.target===this)closeAssignedModal()">' +
+    '<div class="bmod" style="width:420px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+    '<div style="font-size:15px;font-weight:700;">🏪 Магазини за '+esc(userName)+'</div>' +
+    '<button onclick="closeAssignedModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:'+(noneChecked?'#f0fdf4':'#f8fafc')+';border-radius:8px;margin-bottom:10px;cursor:pointer;font-weight:600;font-size:13px;">' +
+    '<input type="checkbox" id="assigned-all" '+(noneChecked?'checked':'')+' onchange="_toggleAssignedAll()"> ✅ Вижда ВСИЧКИ магазини (без ограничение)' +
+    '</label>' +
+    '<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;font-weight:700;margin:10px 0 6px;">или избери конкретни:</div>' +
+    '<div id="assigned-store-list" style="max-height:280px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">' +
+    allStores.map(function(name){
+      var checked = currentList.indexOf(name) >= 0;
+      return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;font-size:13px;cursor:pointer;">' +
+        '<input type="checkbox" class="assigned-store-cb" value="'+esc(name)+'" '+(checked?'checked':'')+' onchange="_uncheckAssignedAll()"> '+esc(name) +
+        '</label>';
+    }).join('') +
+    '</div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+    '<button onclick="closeAssignedModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="submitAssigned()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Запази</button>' +
+    '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function _toggleAssignedAll(){
+  var all = document.getElementById('assigned-all').checked;
+  if (all) document.querySelectorAll('.assigned-store-cb').forEach(function(cb){ cb.checked = false; });
+}
+function _uncheckAssignedAll(){
+  var anyChecked = Array.from(document.querySelectorAll('.assigned-store-cb')).some(function(cb){ return cb.checked; });
+  if (anyChecked) document.getElementById('assigned-all').checked = false;
+}
+
+function closeAssignedModal(){
+  var ov = document.getElementById('assigned-modal-ov');
+  if (ov) ov.remove();
+  _assignedEditUserId = null;
+}
+
+function submitAssigned(){
+  var wantsAll = document.getElementById('assigned-all').checked;
+  var selected = Array.from(document.querySelectorAll('.assigned-store-cb')).filter(function(cb){return cb.checked;}).map(function(cb){return cb.value;});
+  var payload = wantsAll ? {assigned_stores: null} : {assigned_stores: selected.length ? selected : null};
+  sbPatch('users','id=eq.'+_assignedEditUserId, payload).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    toast(wantsAll ? '✅ Вижда всички магазини' : '✅ Назначени '+selected.length+' магазина');
+    closeAssignedModal();
     loadUsersAdmin();
-  }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
+  });
 }
 
 function deleteUser(id, email){
