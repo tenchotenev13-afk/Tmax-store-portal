@@ -121,7 +121,7 @@ function renderClientOrders(){
       '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
       '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small></td>'+
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
-      '<td style="font-family:monospace;font-size:11px;">'+esc(o.sap||'—')+'</td>'+
+      '<td style="font-family:monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(o.sap||'')+'">'+esc(o.sap||'—')+'</td>'+
       '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
       '<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>'+
       '<td>'+esc(o.from_store||'')+'</td>'+
@@ -177,7 +177,7 @@ function submitClientOrder(){
     in_num:num,store_name:currentUser.store_name,
     date:v('c-date'),hour:v('c-hour'),bon:v('c-bon'),sap:v('c-sap'),
     customer_name:name,phone:phone,
-    product:product,color:v('c-color'),qty:parseFloat(v('c-qty'))||1,unit:v('c-unit')||'бр.',
+    product:product,color:v('c-color'),qty:parseFloat(v('c-qty').replace(',','.'))||1,unit:v('c-unit')||'бр.',
     from_store:v('c-from-store'),fulfiller:v('c-fulfiller'),
     agent:v('c-agent')||currentUser.display_name,
     delivery:delivery,status:calcStatus(delivery,'new'),note:v('c-note')
