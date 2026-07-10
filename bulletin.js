@@ -11,6 +11,7 @@ var BUL_PUB = BUL_SB + '/storage/v1/object/public/' + BUL_BKT + '/';
 var bulActiveDept = 'trade';
 var curBul = null; var bulTasks = []; var bulComps = [];
 var recurringTasks = []; var recurringComps = []; var subtaskComps = [];
+var bulPromotions = [];
 var bulMode = 'view'; var bulSaveT = null; var dragInfo = null;
 
 /* DEPTS */
@@ -29,6 +30,192 @@ function myDept(){
 }
 function canEdit(){return currentUser && ['admin','accounting'].indexOf(currentUser.role)>=0;}
 function genId(){return Math.random().toString(36).slice(2,9);}
+
+/* ═══════ ПРОМОЦИИ ══════════════════════════════════════════ */
+function promoStatus(p){
+  var t=new Date(); t.setHours(0,0,0,0);
+  var s=new Date(p.start_date); s.setHours(0,0,0,0);
+  var e=new Date(p.end_date); e.setHours(0,0,0,0);
+  if(t<s) return 'upcoming';
+  if(t>e) return 'expired';
+  var daysLeft=Math.ceil((e-t)/86400000);
+  if(daysLeft<=3) return 'expiring';
+  return 'active';
+}
+var PROMO_STATUS_META={
+  upcoming:{label:'⏳ Предстояща',bg:'#eff6ff',bdr:'#bfdbfe',c:'#1e40af'},
+  active:{label:'✅ Активна',bg:'#f0fdf4',bdr:'#bbf7d0',c:'#166534'},
+  expiring:{label:'⚠️ Изтича скоро',bg:'#fffbeb',bdr:'#fde68a',c:'#92400e'},
+  expired:{label:'🔴 Изтекла',bg:'#fef2f2',bdr:'#fecaca',c:'#991b1b'}
+};
+function renderPromotionsSection(){
+  if(!bulPromotions.length && !canEdit()) return '';
+  var visible=bulPromotions.filter(function(p){ return canEdit() || promoStatus(p)!=='expired'; });
+  var expiringCount=bulPromotions.filter(function(p){return promoStatus(p)==='expiring';}).length;
+  var h='<div class="bcard" id="sec-promo">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
+  h+='<div class="bsec" style="margin-bottom:0;">🎯 Промоции</div>';
+  if(canEdit())h+='<button onclick="openPromoModal(null)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">+ Добави промоция</button>';
+  h+='</div>';
+  if(canEdit() && expiringCount>0){
+    h+='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:8px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">';
+    h+='<span style="font-size:12px;color:#92400e;">⚠️ '+expiringCount+' промоци'+(expiringCount===1?'я изтича':'и изтичат')+' до 3 дни.</span>';
+    h+='<button onclick="sendPromoExpiringNotification()" style="border:none;background:#d97706;color:#fff;border-radius:6px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;">🔔 Изпрати нотификация</button>';
+    h+='</div>';
+  }
+  if(!visible.length){
+    h+='<div style="text-align:center;padding:20px;color:#94a3b8;font-size:12px;">Няма активни промоции.</div>';
+  }else{
+    h+='<div style="display:flex;flex-wrap:wrap;gap:8px;">';
+    visible.forEach(function(p){
+      var st=promoStatus(p);
+      var m=PROMO_STATUS_META[st];
+      var dLabel=DEPTS[p.department]?DEPTS[p.department].label:'Всички';
+      h+='<div style="background:'+m.bg+';border:1px solid '+m.bdr+';border-radius:7px;padding:9px 12px;flex:1;min-width:210px;position:relative;">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;">';
+      h+='<div style="font-size:12px;font-weight:600;color:'+m.c+';">'+esc(p.title||'')+'</div>';
+      h+='<span style="font-size:9px;font-weight:700;color:'+m.c+';white-space:nowrap;">'+m.label+'</span>';
+      h+='</div>';
+      if(p.description)h+='<div style="font-size:11px;color:'+m.c+';opacity:.8;margin-top:2px;">'+linkify(p.description)+'</div>';
+      h+='<div style="font-size:10px;color:'+m.c+';opacity:.7;margin-top:4px;">📅 '+fmtDate2(p.start_date)+' → '+fmtDate2(p.end_date)+' &nbsp;·&nbsp; '+dLabel+'</div>';
+      if(canEdit()){
+        h+='<div style="display:flex;gap:5px;margin-top:7px;">';
+        if(st==='expiring'||st==='expired')h+='<button data-id="'+p.id+'" onclick="openExtendPromoModal(this.dataset.id)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;">↻ Продължи</button>';
+        h+='<button data-id="'+p.id+'" onclick="openPromoModal(this.dataset.id)" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;">✏️</button>';
+        h+='<button data-id="'+p.id+'" onclick="deletePromo(this.dataset.id)" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;">✕</button>';
+        h+='</div>';
+      }
+      h+='</div>';
+    });
+    h+='</div>';
+  }
+  h+='</div>';
+  return h;
+}
+function fmtDate2(d){ if(!d) return '—'; var p=String(d).slice(0,10).split('-'); return p.length===3 ? p[2]+'.'+p[1]+'.'+p[0] : d; }
+
+function openPromoModal(id){
+  var p=id ? bulPromotions.find(function(x){return String(x.id)===String(id);}) : null;
+  var existing=document.getElementById('promo-modal-ov'); if(existing)existing.remove();
+  var ov=document.createElement('div');
+  ov.className='bov open'; ov.id='promo-modal-ov';
+  ov.innerHTML='<div class="bmod" style="width:440px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">🎯 '+(p?'Редактирай промоция':'Нова промоция')+'</div>'+
+    '<label class="fl">Заглавие *</label><input class="fi" id="pm-title" value="'+esc(p?p.title:'')+'" placeholder="напр. -20% на градински инструменти">'+
+    '<label class="fl">Описание</label><input class="fi" id="pm-desc" value="'+esc(p?p.description||'':'')+'" placeholder="Допълнителна информация, линк и т.н.">'+
+    '<label class="fl">Отдел</label><select class="fi" id="pm-dept">'+
+      '<option value="all"'+(!p||p.department==='all'?' selected':'')+'>Всички</option>'+
+      DCOLS.map(function(dk){return '<option value="'+dk+'"'+(p&&p.department===dk?' selected':'')+'>'+DEPTS[dk].label+'</option>';}).join('')+
+    '</select>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
+    '<div><label class="fl">Начална дата *</label><input type="date" class="fi" id="pm-start" value="'+(p?String(p.start_date).slice(0,10):today())+'"></div>'+
+    '<div><label class="fl">Крайна дата *</label><input type="date" class="fi" id="pm-end" value="'+(p?String(p.end_date).slice(0,10):'')+'"></div>'+
+    '</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">'+
+    '<button onclick="var e=document.getElementById(\'promo-modal-ov\');if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button data-id="'+(p?p.id:'')+'" onclick="submitPromo(this.dataset.id)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">'+(p?'💾 Запази':'Добави')+'</button>'+
+    '</div></div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){var el=document.getElementById('pm-title'); if(el)el.focus();},80);
+}
+function submitPromo(id){
+  var title=(document.getElementById('pm-title').value||'').trim();
+  var start=document.getElementById('pm-start').value;
+  var end=document.getElementById('pm-end').value;
+  if(!title){toast('Въведи заглавие','#dc2626');return;}
+  if(!start||!end){toast('Въведи начална и крайна дата','#dc2626');return;}
+  if(end<start){toast('Крайната дата трябва да е след началната','#dc2626');return;}
+  var data={
+    title:title, description:document.getElementById('pm-desc').value||'',
+    department:document.getElementById('pm-dept').value,
+    start_date:start, end_date:end
+  };
+  var p=id
+    ? sbPatch('bulletin_promotions','id=eq.'+id,data)
+    : sbPost('bulletin_promotions',Object.assign({active:true,created_by:currentUser.display_name||currentUser.email},data));
+  p.then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    var el=document.getElementById('promo-modal-ov'); if(el)el.remove();
+    toast(id?'✅ Записано!':'✅ Промоцията е добавена!');
+    sbGet('bulletin_promotions','active=eq.true&order=end_date.asc').then(function(pr){
+      bulPromotions=Array.isArray(pr)?pr:[]; renderBulletin();
+    });
+  });
+}
+function deletePromo(id){
+  if(!confirm('Изтрий промоцията?'))return;
+  sbPatch('bulletin_promotions','id=eq.'+id,{active:false}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    bulPromotions=bulPromotions.filter(function(p){return String(p.id)!==String(id);});
+    renderBulletin(); toast('✓ Изтрита');
+  });
+}
+function openExtendPromoModal(id){
+  var p=bulPromotions.find(function(x){return String(x.id)===String(id);});
+  if(!p)return;
+  var existing=document.getElementById('promo-ext-ov'); if(existing)existing.remove();
+  var ov=document.createElement('div');
+  ov.className='bov open'; ov.id='promo-ext-ov';
+  ov.innerHTML='<div class="bmod" style="width:360px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:6px;">↻ Продължи промоцията</div>'+
+    '<div style="font-size:13px;color:#64748b;margin-bottom:14px;">'+esc(p.title||'')+'</div>'+
+    '<label class="fl">Нова крайна дата *</label><input type="date" class="fi" id="pmx-end" value="'+String(p.end_date).slice(0,10)+'">'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">'+
+    '<button onclick="var e=document.getElementById(\'promo-ext-ov\');if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button data-id="'+p.id+'" onclick="submitExtendPromo(this.dataset.id)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✓ Продължи</button>'+
+    '</div></div>';
+  document.body.appendChild(ov);
+}
+function submitExtendPromo(id){
+  var newEnd=document.getElementById('pmx-end').value;
+  if(!newEnd){toast('Въведи дата','#dc2626');return;}
+  var p=bulPromotions.find(function(x){return String(x.id)===String(id);});
+  if(p && newEnd<String(p.start_date).slice(0,10)){toast('Датата трябва да е след началото на промоцията','#dc2626');return;}
+  sbPatch('bulletin_promotions','id=eq.'+id,{end_date:newEnd}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    if(p)p.end_date=newEnd;
+    var el=document.getElementById('promo-ext-ov'); if(el)el.remove();
+    renderBulletin(); toast('✅ Промоцията е удължена!');
+  });
+}
+/* Композира заглавие+съобщение за изтичащите промоции. Връща null ако няма такива. */
+function composePromoExpiringMessage(){
+  var expiring=bulPromotions.filter(function(p){return promoStatus(p)==='expiring';});
+  if(!expiring.length)return null;
+  var titles=expiring.map(function(p){return p.title;}).join(', ');
+  var title='⚠️ Изтичащи промоции';
+  var msg=expiring.length===1 ? titles+' изтича до 3 дни.' : expiring.length+' промоции изтичат до 3 дни: '+titles;
+  return {title:title,msg:msg,count:expiring.length};
+}
+function sendPromoExpiringNotification(){
+  var m=composePromoExpiringMessage();
+  if(!m){toast('Няма изтичащи промоции','#dc2626');return;}
+  if(typeof pushToAll!=='function'){toast('Нотификациите не са налични в момента','#dc2626');return;}
+  pushToAll(m.title,m.msg).then(function(res){
+    if(res && res.ok) toast('🔔 Нотификацията е изпратена!');
+    else toast('❌ Грешка при изпращане на нотификация','#dc2626');
+  });
+}
+/* ═══════ АВТОМАТИЧНИ НОТИФИКАЦИИ (веднъж на ден, при зареждане) ══════
+   Забележка: dedup-ът е през localStorage на браузъра, не централизирано —
+   ако няколко админа заредят бюлетина в един и същ ден, е възможно нотификация
+   да се изпрати повече от веднъж (по 1 на устройство). За истинска гаранция за
+   еднократност е нужна сървърна (cron) задача — извън обхвата на клиентския код. */
+function autoCheckBulletinNotifications(){
+  if(!canEdit())return; /* само редактиращите роли инициират автоматични известия */
+  autoCheckPromoNotifications();
+  autoCheckDailyDeadlines();
+}
+function autoCheckPromoNotifications(){
+  var key='auto_promo_notif_'+today();
+  try{ if(localStorage.getItem(key))return; }catch(e){}
+  var m=composePromoExpiringMessage();
+  try{ localStorage.setItem(key,'1'); }catch(e){}
+  if(!m || typeof pushToAll!=='function')return;
+  pushToAll(m.title,m.msg);
+}
+
+
 
 /* WEEK */
 function weekNum(d){
@@ -49,8 +236,12 @@ function loadBulletin(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:300px;color:#94a3b8;font-size:15px;">⏳ Зареждане...</div>';
   var q=canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1';
-  /* Зарежда рекъринг задачи ПЪРВО, след това рендира */
-  sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').then(function(rt){
+  /* Зарежда рекъринг задачи и промоции ПЪРВО, след това рендира */
+  sbGet('bulletin_promotions','active=eq.true&order=end_date.asc').then(function(pr){
+    bulPromotions=Array.isArray(pr)?pr:[];
+  }).catch(function(){bulPromotions=[];}).then(function(){
+    return sbGet('recurring_tasks','active=eq.true&order=sort_order.asc');
+  }).then(function(rt){
     recurringTasks=Array.isArray(rt)?rt:[];
     return sbGet('bulletins',q);
   }).catch(function(){
@@ -65,7 +256,7 @@ function loadBulletin(){
       bulTasks=Array.isArray(t)?t:[];
       if(!bulTasks.length){
         bulComps=[];subtaskComps=[];recurringComps=[];
-        renderBulletin();return;
+        renderBulletin();autoCheckBulletinNotifications();return;
       }
       var ids=bulTasks.map(function(x){return x.id;}).join(',');
       var cq='task_id=in.('+ids+')'+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
@@ -77,11 +268,11 @@ function loadBulletin(){
           var rq='bulletin_id=eq.'+curBul.id+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
           sbGet('task_completions',rq+'&task_id=is.null').then(function(rc){
             recurringComps=Array.isArray(rc)?rc:[];
-            renderBulletin();
-          }).catch(function(){recurringComps=[];renderBulletin();});
-        }).catch(function(){subtaskComps=[];renderBulletin();});
-      }).catch(function(){bulComps=[];subtaskComps=[];recurringComps=[];renderBulletin();});
-    }).catch(function(){bulTasks=[];bulComps=[];renderBulletin();});
+            renderBulletin();autoCheckBulletinNotifications();
+          }).catch(function(){recurringComps=[];renderBulletin();autoCheckBulletinNotifications();});
+        }).catch(function(){subtaskComps=[];renderBulletin();autoCheckBulletinNotifications();});
+      }).catch(function(){bulComps=[];subtaskComps=[];recurringComps=[];renderBulletin();autoCheckBulletinNotifications();});
+    }).catch(function(){bulTasks=[];bulComps=[];renderBulletin();autoCheckBulletinNotifications();});
   }).catch(function(){
     var wrap=document.getElementById('mod-bulletin');
     if(wrap)wrap.innerHTML='<div style="color:#dc2626;padding:40px;text-align:center;">Грешка при зареждане.</div>';
@@ -219,6 +410,9 @@ function renderBulView(){
     html+='</div></div>';
   }
 
+  /* Промоции */
+  html+=renderPromotionsSection();
+
   /* Calendar */
   html+='<div class="bcard" id="sec-calendar">';
   html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
@@ -260,7 +454,7 @@ function renderBulView(){
   DCOLS.forEach(function(dk){
     var d=DEPTS[dk];
     var isAct=dk===bulActiveDept;
-    html+='<button data-dk="'+dk+'" onclick="bulSetDept(this.dataset.dk)" id="dtab-'+dk+'" style="'+
+    html+='<button data-dk="'+dk+'" onclick="bulSetDept(this.dataset.dk)" id="dtab-'+dk+'" ondragover="taskTabDragOver(event,this)" ondragleave="taskTabDragLeave(this)" ondrop="taskTabDrop(event,this)" style="'+
       'border:none;background:'+(isAct?d.hdr:'#f8fafc')+';color:'+(isAct?'#fff':d.color)+';'+
       'padding:10px 20px;font-size:13px;font-weight:600;font-family:inherit;cursor:pointer;'+
       'border-radius:8px 8px 0 0;border-bottom:none;transition:all .15s;">'+
@@ -299,7 +493,8 @@ function renderBulView(){
         var today=new Date();today.setHours(0,0,0,0);
         var diff=due?Math.ceil((due-today)/86400000):null;
         var dueColor=diff===null?'#94a3b8':diff<0?'#dc2626':diff<=2?'#d97706':'#94a3b8';
-        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
+        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;'+(canEdit()?'cursor:grab;':'')+'"'+(canEdit()?' draggable="true" data-tid="'+t.id+'" ondragstart="taskDragStart(event,this)" ondragend="taskDragEnd(this)"':'')+'>';
+        if(canEdit())html+='<span style="color:#cbd5e1;font-size:13px;margin-top:3px;flex-shrink:0;" title="Провлачи върху таб, за да преместиш отдела">⠿</span>';
         html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" onchange="bulToggleTask(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;">';
         html+='<div style="flex:1;"><div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
         if(t.description)html+='<div style="font-size:11px;color:#94a3b8;">'+esc(t.description)+'</div>';
@@ -339,26 +534,132 @@ function renderBulView(){
 
 
 /* Edit block */
+/* Превръща http(s):// линкове в текста в кликаеми <a> тагове (текстът вече е escape-нат за безопасност) */
+function linkify(text){
+  var escaped=esc(text||'');
+  return escaped.replace(/(https?:\/\/[^\s<]+)/g,function(url){
+    var trail='';
+    var m=url.match(/[.,;:!?)]+$/);
+    if(m){trail=m[0]; url=url.slice(0,url.length-trail.length);}
+    return '<a href="'+url+'" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:underline;word-break:break-all;">'+url+'</a>'+trail;
+  });
+}
+
+/* ═══════ ДОПЪЛНИТЕЛНА СНИМКА/ФАЙЛ В ЕДИН БЛОК (заедно с текста му) ══════ */
+function renderBlockExtras(b,dk){
+  var isEditing=canEdit()&&bulMode==='edit';
+  var h='';
+  var hasExtra=b.image_url||b.file_url;
+  if(hasExtra)h+='<div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;">';
+  if(b.image_url){
+    h+='<div style="position:relative;">';
+    h+='<img src="'+b.image_url+'" style="max-width:140px;max-height:100px;border-radius:6px;border:1px solid #e2e8f0;display:block;" onerror="bulImgErr(this)">';
+    if(isEditing)h+='<button data-col="'+dk+'" data-id="'+b.id+'" onclick="bulRemoveBlockImage(this.dataset.col,this.dataset.id)" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border:none;background:#dc2626;color:#fff;border-radius:50%;font-size:10px;cursor:pointer;">✕</button>';
+    h+='</div>';
+  }
+  if(b.file_url){
+    h+='<div style="position:relative;">';
+    h+='<a href="'+b.file_url+'" target="_blank" style="display:flex;align-items:center;gap:5px;padding:6px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;color:#2563eb;text-decoration:none;">📎 '+esc(b.file_name||'Файл')+'</a>';
+    if(isEditing)h+='<button data-col="'+dk+'" data-id="'+b.id+'" onclick="bulRemoveBlockFile(this.dataset.col,this.dataset.id)" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border:none;background:#dc2626;color:#fff;border-radius:50%;font-size:10px;cursor:pointer;">✕</button>';
+    h+='</div>';
+  }
+  if(hasExtra)h+='</div>';
+  if(isEditing){
+    h+='<div style="display:flex;gap:6px;margin-top:6px;">';
+    if(!b.image_url)h+='<label style="display:inline-flex;align-items:center;gap:3px;border:1px dashed #cbd5e1;border-radius:5px;padding:2px 8px;font-size:10px;color:#94a3b8;cursor:pointer;">📷 + Снимка<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp" style="display:none;" data-col="'+dk+'" data-id="'+b.id+'" onchange="bulUploadBlockImage(this)"></label>';
+    if(!b.file_url)h+='<label style="display:inline-flex;align-items:center;gap:3px;border:1px dashed #cbd5e1;border-radius:5px;padding:2px 8px;font-size:10px;color:#94a3b8;cursor:pointer;">📎 + Файл<input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display:none;" data-col="'+dk+'" data-id="'+b.id+'" onchange="bulUploadBlockFile(this)"></label>';
+    h+='</div>';
+  }
+  return h;
+}
+function bulUploadBlockImage(input){
+  var file=input.files[0]; if(!file)return;
+  var col=input.getAttribute('data-col'), id=input.getAttribute('data-id');
+  var ext=(file.name.split('.').pop()||'jpg').toLowerCase();
+  var path='bulletin/'+curBul.id+'/'+id+'_extra_'+Date.now()+'.'+ext;
+  showBulToast('⏳ Качване на снимка...');
+  var reader=new FileReader();
+  reader.onload=function(e){
+    fetch(BUL_SB+'/storage/v1/object/'+BUL_BKT+'/'+path,{
+      method:'POST',headers:{'Authorization':'Bearer '+BUL_KEY,'Content-Type':file.type||'image/jpeg','x-upsert':'true'},body:e.target.result
+    }).then(function(r){return r.ok;}).then(function(ok){
+      if(!ok){toast('Грешка при качване','#dc2626');return;}
+      var pub=BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path;
+      var b=(curBul.content.columns[col]||[]).find(function(x){return x.id===id;});
+      if(b){b.image_url=pub; schedSave(); renderBulletin(); toast('✅ Снимката е добавена!');}
+    }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');});
+  };
+  reader.readAsArrayBuffer(file);
+}
+function bulRemoveBlockImage(col,id){
+  var b=(curBul.content.columns[col]||[]).find(function(x){return x.id===id;});
+  if(b){b.image_url=''; schedSave(); renderBulletin();}
+}
+function bulUploadBlockFile(input){
+  var file=input.files[0]; if(!file)return;
+  var col=input.getAttribute('data-col'), id=input.getAttribute('data-id');
+  var ext=(file.name.split('.').pop()||'bin').toLowerCase();
+  var path='bulletin/'+curBul.id+'/'+id+'_extrafile_'+Date.now()+'.'+ext;
+  showBulToast('⏳ Качване на файл...');
+  var reader=new FileReader();
+  reader.onload=function(e){
+    fetch(BUL_SB+'/storage/v1/object/'+BUL_BKT+'/'+path,{
+      method:'POST',headers:{'Authorization':'Bearer '+BUL_KEY,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},body:e.target.result
+    }).then(function(r){return r.ok;}).then(function(ok){
+      if(!ok){toast('Грешка при качване','#dc2626');return;}
+      var pub=BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path;
+      var b=(curBul.content.columns[col]||[]).find(function(x){return x.id===id;});
+      if(b){b.file_url=pub; b.file_name=file.name; schedSave(); renderBulletin(); toast('✅ Файлът е добавен!');}
+    }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');});
+  };
+  reader.readAsArrayBuffer(file);
+}
+function bulRemoveBlockFile(col,id){
+  var b=(curBul.content.columns[col]||[]).find(function(x){return x.id===id;});
+  if(b){b.file_url=''; b.file_name=''; schedSave(); renderBulletin();}
+}
+
 function editBlock(b,dk,i){
   var tl={text:'📝 Текст',alert:'🚨 Алерт',list:'📋 Списък',image:'📷 Снимка',file:'📎 Файл',divider:'— Разделител',important:'⭐ Важно'}[b.type]||b.type;
+  var isEditing=canEdit()&&bulMode==='edit';
   var h='<div class="blk" id="eb-'+b.id+'" draggable="true" data-col="'+dk+'" data-idx="'+i+'" ondragstart="bulDragStart(this)" ondragover="bulDragOver(this)" ondragleave="bulDragLeave(this)" ondrop="bulDropBlock(this)">';
   h+='<button class="blk-del" data-col="'+dk+'" data-id="'+b.id+'" onclick="bulDelBlock(this)">✕</button>';
   h+='<div class="blk-type">'+tl+'</div>';
 
   if(b.type==='text'){
-    h+='<textarea class="blk-ta" rows="3" placeholder="Въведи текст..." data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+    if(isEditing){
+      h+='<textarea class="blk-ta" rows="3" placeholder="Въведи текст... (линковете стават кликаеми в изглед за преглед)" data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+    }else{
+      h+='<div style="font-size:13px;color:#0f172a;white-space:pre-wrap;line-height:1.5;">'+linkify(b.content||'')+'</div>';
+    }
+    h+=renderBlockExtras(b,dk);
   }else if(b.type==='divider'){
     h+='<hr style="border:none;border-top:1px solid #e2e8f0;">';
   }else if(b.type==='list'){
-    h+='<div style="font-size:11px;color:#64748b;margin-bottom:3px;">Всеки ред = нова точка</div>';
-    h+='<textarea class="blk-ta" rows="4" placeholder="Ред 1..." data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+    if(isEditing){
+      h+='<div style="font-size:11px;color:#64748b;margin-bottom:3px;">Всеки ред = нова точка (линковете стават кликаеми в изглед за преглед)</div>';
+      h+='<textarea class="blk-ta" rows="4" placeholder="Ред 1..." data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+    }else{
+      var items=(b.content||'').split('\n').filter(Boolean);
+      h+='<ul style="margin:0;padding-left:18px;">'+items.map(function(it){return '<li style="font-size:13px;color:#0f172a;padding:2px 0;">'+linkify(it)+'</li>';}).join('')+'</ul>';
+    }
+    h+=renderBlockExtras(b,dk);
   }else if(b.type==='alert'){
-    var cOpts=[['red','🔴 Червено'],['amb','🟡 Жълто'],['grn','🟢 Зелено'],['blu','🔵 Синьо'],['pur','🟣 Лилаво']];
-    h+='<select data-col="'+dk+'" data-id="'+b.id+'" data-field="color" onchange="bulSetBlk(this)" style="font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 6px;margin-bottom:5px;background:#f8fafc;width:100%;">';
-    cOpts.forEach(function(o){h+='<option value="'+o[0]+'"'+(b.color===o[0]?' selected':'')+'>'+o[1]+'</option>';});
-    h+='</select><br>';
-    h+='<input placeholder="Заглавие (по избор)" value="'+esc(b.label||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="label" oninput="bulSetBlk(this)" style="width:100%;font-size:12px;border:1px solid #e2e8f0;border-radius:5px;padding:4px 7px;margin-bottom:4px;font-family:inherit;box-sizing:border-box;"><br>';
-    h+='<textarea class="blk-ta" rows="2" placeholder="Съдържание..." data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+    if(isEditing){
+      var cOpts=[['red','🔴 Червено'],['amb','🟡 Жълто'],['grn','🟢 Зелено'],['blu','🔵 Синьо'],['pur','🟣 Лилаво']];
+      h+='<select data-col="'+dk+'" data-id="'+b.id+'" data-field="color" onchange="bulSetBlk(this)" style="font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 6px;margin-bottom:5px;background:#f8fafc;width:100%;">';
+      cOpts.forEach(function(o){h+='<option value="'+o[0]+'"'+(b.color===o[0]?' selected':'')+'>'+o[1]+'</option>';});
+      h+='</select><br>';
+      h+='<input placeholder="Заглавие (по избор)" value="'+esc(b.label||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="label" oninput="bulSetBlk(this)" style="width:100%;font-size:12px;border:1px solid #e2e8f0;border-radius:5px;padding:4px 7px;margin-bottom:4px;font-family:inherit;box-sizing:border-box;"><br>';
+      h+='<textarea class="blk-ta" rows="2" placeholder="Съдържание... (линковете стават кликаеми в изглед за преглед)" data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+    }else{
+      var aC={red:'#fff1f2:#dc2626:#991b1b',amb:'#fffbeb:#f59e0b:#92400e',grn:'#f0fdf4:#16a34a:#14532d',blu:'#eff6ff:#2563eb:#1e40af',pur:'#f5f3ff:#8b5cf6:#4c1d95'}[b.color||'blu']||'#eff6ff:#2563eb:#1e40af';
+      var aC2=aC.split(':');
+      h+='<div style="background:'+aC2[0]+';border-left:3px solid '+aC2[1]+';color:'+aC2[2]+';border-radius:0 6px 6px 0;padding:8px 12px;">'+
+         (b.label?'<div style="font-size:10px;font-weight:700;text-transform:uppercase;margin-bottom:3px;">'+esc(b.label)+'</div>':'')+
+         '<div style="font-size:13px;white-space:pre-wrap;">'+linkify(b.content||'')+'</div></div>';
+    }
+    h+=renderBlockExtras(b,dk);
   }else if(b.type==='important'){
     var uOpts=[['ok','✅ OK'],['warn','⚠️ Предупреждение'],['urgent','🔴 Спешно'],['info','ℹ️ Инфо']];
     h+='<select data-col="'+dk+'" data-id="'+b.id+'" data-field="urgency" onchange="bulSetBlk(this)" style="font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 6px;margin-bottom:5px;background:#f8fafc;width:100%;">';
@@ -701,6 +1002,10 @@ function openEditRecurringModal(taskId) {
     '<input class="fi" id="erec-title" value="'+esc(t.title||'')+'">' +
     '<label class="fl">Описание</label>' +
     '<input class="fi" id="erec-desc" value="'+esc(t.description||'')+'">' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+    '<div><label class="fl">Повтарящ се ден</label><select class="fi" id="erec-weekday">'+recWeekdayOpts(t.due_weekday)+'</select></div>' +
+    '<div><label class="fl">Час (по избор)</label><input type="time" class="fi" id="erec-time" value="'+esc(t.due_time||'')+'"></div>' +
+    '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
     '<button onclick="var e=document.getElementById(\"edit-rec-ov\");if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button data-task-id="'+taskId+'" onclick="submitEditRecurring(this.dataset.taskId)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>' +
@@ -713,7 +1018,10 @@ function submitEditRecurring(taskId) {
   var title = (document.getElementById('erec-title').value||'').trim();
   if (!title) { toast('Въведи заглавие','#dc2626'); return; }
   var desc = document.getElementById('erec-desc').value||'';
-  sbPatch('recurring_tasks','id=eq.'+taskId,{title:title,description:desc}).then(function(r){
+  var wdRaw = document.getElementById('erec-weekday').value;
+  var due_weekday = wdRaw==='' ? null : parseInt(wdRaw,10);
+  var due_time = document.getElementById('erec-time').value || null;
+  sbPatch('recurring_tasks','id=eq.'+taskId,{title:title,description:desc,due_weekday:due_weekday,due_time:due_time}).then(function(r){
     if (!r.ok) { toast('Грешка при запис','#dc2626'); return; }
     var el = document.getElementById('edit-rec-ov');
     if (el) el.remove();
@@ -816,6 +1124,37 @@ function taskRemoveAttachment(tid,idx){
   });
 }
 
+/* ═══════ ПРЕМЕСТВАНЕ НА ЗАДАЧА МЕЖДУ ТАБОВЕ (drag&drop) ══════ */
+var _taskDragId = null;
+function taskDragStart(e,el){
+  _taskDragId=el.getAttribute('data-tid');
+  e.dataTransfer.effectAllowed='move';
+  try{e.dataTransfer.setData('text/plain',_taskDragId);}catch(err){}
+}
+function taskDragEnd(el){_taskDragId=null;}
+function taskTabDragOver(e,btn){
+  if(!_taskDragId)return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect='move';
+  btn.style.outline='2px dashed #2563eb';
+  btn.style.outlineOffset='-2px';
+}
+function taskTabDragLeave(btn){btn.style.outline='';}
+function taskTabDrop(e,btn){
+  e.preventDefault();
+  btn.style.outline='';
+  var tid=_taskDragId; _taskDragId=null;
+  if(!tid)return;
+  var newDept=btn.getAttribute('data-dk');
+  var t=bulTasks.find(function(x){return String(x.id)===String(tid);});
+  if(!t||t.department===newDept)return;
+  sbPatch('bulletin_tasks','id=eq.'+tid,{department:newDept}).then(function(res){
+    if(!res.ok){toast('Грешка при преместване','#dc2626');return;}
+    t.department=newDept; renderBulletin();
+    toast('✅ Преместено в '+((DEPTS[newDept]||{}).label||newDept));
+  });
+}
+
 /* PUBLISH / NEW */
 function publishBul(){
   if(!curBul||!confirm('Публикувай бюлетина за всички потребители?'))return;
@@ -879,6 +1218,11 @@ function pushMenuHtml(){
       '<button onclick="sendPushOverdueNow();closePushMenu();" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">🔔 Изпрати нотификация</button>'+
     '</div>'+
     '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
+      '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">📅 Днешни срокове</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Задачи, под-задачи и постоянни задачи със срок днес — до всички.</div>'+
+      '<button onclick="sendDailyDeadlinesNotification();closePushMenu();" style="border:none;background:#7c3aed;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">🔔 Изпрати нотификация</button>'+
+    '</div>'+
+    '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
       '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">🔬 Тест</div>'+
       '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Изпрати тестова нотификация до себе си.</div>'+
       '<button onclick="bulPushTest()" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">🔔 Тест</button>'+
@@ -907,6 +1251,46 @@ function bulPushTest(){
 }
 function openPushMenu(){document.getElementById('pm2-ov').classList.add('open');}
 function closePushMenu(){document.getElementById('pm2-ov').classList.remove('open');}
+
+/* Събира заглавията на всички задачи/под-задачи/постоянни задачи със срок ДНЕС.
+   cb(items) се вика винаги (items може да е празен масив). */
+function collectTodayDeadlineItems(cb){
+  var todayStr = today();
+  var mainTasks = bulTasks.filter(function(t){ return t.due_date && t.due_date.slice(0,10)===todayStr; });
+  var recTasks = recurringTasks.filter(function(t){ return recurringIsDueToday(t); });
+  sbGet('task_subtasks','due_date=eq.'+todayStr).then(function(subs){
+    var subTasks = Array.isArray(subs) ? subs : [];
+    var items = [];
+    mainTasks.forEach(function(t){ items.push(t.title); });
+    subTasks.forEach(function(s){ items.push(s.title); });
+    recTasks.forEach(function(t){ items.push(t.title + (t.due_time?(' ('+t.due_time+')'):'')); });
+    cb(items);
+  }).catch(function(){ cb([]); });
+}
+function sendDailyDeadlinesNotification(){
+  collectTodayDeadlineItems(function(items){
+    if(!items.length){ showBulToast('Няма задачи със срок днес.'); return; }
+    var title = '📅 '+items.length+' срок'+(items.length===1?'':'а')+' днес';
+    var msg = items.slice(0,5).join(', ') + (items.length>5 ? ' и още '+(items.length-5) : '');
+    showBulToast('⏳ Изпращане...');
+    pushToAll(title,msg).then(function(res){
+      if(res && res.ok) showBulToast('🔔 Изпратена!');
+      else showBulToast('❌ Грешка при изпращане');
+    });
+  });
+}
+function autoCheckDailyDeadlines(){
+  var key='auto_deadlines_notif_'+today();
+  try{ if(localStorage.getItem(key))return; }catch(e){}
+  collectTodayDeadlineItems(function(items){
+    try{ localStorage.setItem(key,'1'); }catch(e){}
+    if(!items.length || typeof pushToAll!=='function')return;
+    var title = '📅 '+items.length+' срок'+(items.length===1?'':'а')+' днес';
+    var msg = items.slice(0,5).join(', ') + (items.length>5 ? ' и още '+(items.length-5) : '');
+    pushToAll(title,msg);
+  });
+}
+
 function sendPushOverdueNow(){
   var now=new Date(); var overdue={};
   bulTasks.forEach(function(t){
@@ -1344,12 +1728,15 @@ function renderRecurringTasks(dk) {
     h += '<div style="padding:8px 14px;">';
     dTasks.forEach(function(t) {
       var done = store && recurringComps.some(function(c){return c.recurring_task_id===t.id && c.store_name===store;});
+      var dueToday = recurringIsDueToday(t);
       h += '<div class="rec-task-row" style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
       h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" onchange="bulToggleRecurring(this)" ' +
         'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;">';
       h += '<div style="flex:1;">';
       h += '<div style="font-size:13px;font-weight:500;color:' + (done?'#94a3b8':'#0f172a') + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>';
       if (t.description) h += '<div style="font-size:11px;color:#94a3b8;">' + esc(t.description) + '</div>';
+      var dueLbl = recurringDueLabel(t);
+      if (dueLbl) h += '<div style="font-size:10px;color:'+(dueToday&&!done?'#d97706':'#94a3b8')+';margin-top:2px;">🔁 '+dueLbl+(dueToday&&!done?' (днес!)':'')+'</div>';
       h += '</div>';
       if (canEdit()) {
         h += '<div style="display:flex;gap:4px;">';
@@ -1416,6 +1803,10 @@ function openRecurringModal(dk) {
     '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">🔁 Нова постоянна задача — ' + d.label + '</div>' +
     '<label class="fl">Заглавие *</label><input class="fi" id="rec-title" placeholder="напр. Провери наличностите">' +
     '<label class="fl">Описание</label><input class="fi" id="rec-desc" placeholder="Допълнителна информация">' +
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
+    '<div><label class="fl">Повтарящ се ден</label><select class="fi" id="rec-weekday">'+recWeekdayOpts()+'</select></div>' +
+    '<div><label class="fl">Час (по избор)</label><input type="time" class="fi" id="rec-time"></div>' +
+    '</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
     '<button onclick="var e=document.getElementById(\"rec-modal-ov\");if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button data-dk="' + dk + '" onclick="submitRecurring(this.dataset.dk)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Добави</button>' +
@@ -1423,12 +1814,37 @@ function openRecurringModal(dk) {
   document.body.appendChild(ov);
   setTimeout(function(){ var el=document.getElementById('rec-title'); if(el)el.focus(); }, 100);
 }
+/* Опции за dropdown "повтарящ се ден" — value="" означава "всеки ден" (due_weekday=null) */
+function recWeekdayOpts(sel){
+  var h='<option value=""'+(sel===null||sel===undefined?' selected':'')+'>Всеки ден</option>';
+  DNAMES.forEach(function(n,i){ h+='<option value="'+i+'"'+(String(sel)===String(i)?' selected':'')+'>'+n+'</option>'; });
+  return h;
+}
+function recurringDueLabel(t){
+  var hasWeekday = t.due_weekday!==null && t.due_weekday!==undefined;
+  if(!hasWeekday){
+    return t.due_time ? ('Всеки ден до '+t.due_time) : '';
+  }
+  var dayName = DNAMES[t.due_weekday]||'';
+  return dayName + (t.due_time ? (' до '+t.due_time) : '');
+}
+function recurringIsDueToday(t){
+  if(t.due_weekday===null||t.due_weekday===undefined){
+    return !!t.due_time; /* "всеки ден" със зададен час -> винаги важи за днес */
+  }
+  var jsDay=new Date().getDay(); /* 0=Нед,1=Пон...6=Съб */
+  var idx=jsDay===0?null:jsDay-1; /* превръщаме в 0=Пон..4=Пет, съб/нед -> null */
+  return idx===t.due_weekday;
+}
 
 function submitRecurring(dk) {
   var title = (document.getElementById('rec-title').value||'').trim();
   if (!title) { toast('Въведи заглавие','#dc2626'); return; }
   var desc = document.getElementById('rec-desc').value||'';
-  sbPost('recurring_tasks',{department:dk,title:title,description:desc,active:true,sort_order:recurringTasks.length}).then(function(r){
+  var wdRaw = document.getElementById('rec-weekday').value;
+  var due_weekday = wdRaw==='' ? null : parseInt(wdRaw,10);
+  var due_time = document.getElementById('rec-time').value || null;
+  sbPost('recurring_tasks',{department:dk,title:title,description:desc,active:true,sort_order:recurringTasks.length,due_weekday:due_weekday,due_time:due_time}).then(function(r){
     if (!r.ok) { toast('Грешка','#dc2626'); return; }
     var el = document.getElementById('rec-modal-ov');
     if (el) el.remove();
@@ -1464,9 +1880,14 @@ function renderSubtasks(taskId, dept) {
       var h = '<div style="padding:4px 0 4px 20px;border-left:2px solid '+d.bdr+';margin-top:4px;">';
       subs.forEach(function(s){
         var done = store && subtaskComps.some(function(c){return c.subtask_id===s.id && c.store_name===store;});
+        var due = s.due_date ? new Date(s.due_date) : null;
+        var t0 = new Date(); t0.setHours(0,0,0,0);
+        var diff = due ? Math.ceil((due-t0)/86400000) : null;
+        var dueColor = diff===null?'#94a3b8':diff<0?'#dc2626':diff<=1?'#d97706':'#94a3b8';
         h += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;">';
         h += '<input type="checkbox" '+(done?'checked ':'')+' data-stid="'+s.id+'" onchange="bulToggleSubtask(this)" style="width:13px;height:13px;cursor:pointer;accent-color:'+d.color+';">';
         h += '<span style="font-size:12px;color:'+(done?'#94a3b8':'#374151')+';'+(done?'text-decoration:line-through;':'')+'">' + esc(s.title) + '</span>';
+        if(due) h += '<span style="font-size:10px;color:'+dueColor+';">📅 '+fmtDate2(s.due_date)+(diff<0?' ⚠️':'')+'</span>';
         if (canEdit()) h += '<button data-stid="'+s.id+'" data-tid="'+taskId+'" data-dept="'+dept+'" onclick="deleteSubtask(this.dataset.stid,this.dataset.tid,this.dataset.dept)" style="border:none;background:none;color:#dc2626;font-size:10px;cursor:pointer;padding:0;line-height:1;">✕</button>';
         h += '</div>';
       });
@@ -1501,12 +1922,19 @@ function bulToggleSubtask(cb) {
 function openSubtaskModal(taskId, dept) {
   var existing = document.getElementById('st-modal-ov');
   if (existing) existing.remove();
+  var wk = curBul ? curBul.week_number : weekNum(new Date());
+  var yr = curBul ? curBul.year : new Date().getFullYear();
+  var days = weekDays(wk, yr);
+  var dueOpts = '<option value="">— Без срок —</option>' + DKEYS.map(function(k,i){
+    return '<option value="'+days[i].toISOString().slice(0,10)+'">'+DNAMES[i]+' ('+fmtD(days[i])+')</option>';
+  }).join('');
   var ov = document.createElement('div');
   ov.className = 'bov open';
   ov.id = 'st-modal-ov';
   ov.innerHTML = '<div class="bmod" style="width:380px;">' +
     '<div style="font-size:14px;font-weight:600;margin-bottom:12px;">+ Нова под-задача</div>' +
     '<label class="fl">Заглавие *</label><input class="fi" id="st-title" placeholder="напр. Провери склад А">' +
+    '<label class="fl">Срок — ден от седмицата</label><select class="fi" id="st-due">'+dueOpts+'</select>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">' +
     '<button onclick="var e=document.getElementById(\"st-modal-ov\");if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button data-tid="' + taskId + '" data-dept="' + dept + '" onclick="submitSubtask(this.dataset.tid,this.dataset.dept)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;">Добави</button>' +
@@ -1518,7 +1946,8 @@ function openSubtaskModal(taskId, dept) {
 function submitSubtask(taskId, dept) {
   var title = (document.getElementById('st-title').value||'').trim();
   if (!title) { toast('Въведи заглавие','#dc2626'); return; }
-  sbPost('task_subtasks',{task_id:taskId,title:title,sort_order:0}).then(function(r){
+  var due = (document.getElementById('st-due')||{}).value || null;
+  sbPost('task_subtasks',{task_id:taskId,title:title,sort_order:0,due_date:due}).then(function(r){
     if (!r.ok) { toast('Грешка','#dc2626'); return; }
     var el = document.getElementById('st-modal-ov');
     if (el) el.remove();
