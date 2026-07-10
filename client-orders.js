@@ -23,6 +23,23 @@ function elapsedRowStyle(days, baseStatus){
   return '';
 }
 
+var CO_BG_MONTHS = ['Януари','Февруари','Март','Април','Май','Юни','Юли','Август','Септември','Октомври','Ноември','Декември'];
+function coMonthLabel(ym){
+  var p=ym.split('-'); var idx=parseInt(p[1],10)-1;
+  return (CO_BG_MONTHS[idx]||ym)+' '+p[0];
+}
+function coBuildMonthOptions(){
+  var sel=document.getElementById('co-month'); if(!sel) return;
+  var cur=sel.value;
+  var months={};
+  clientOrders.forEach(function(o){ if(o.date) months[o.date.slice(0,7)]=1; });
+  var sorted=Object.keys(months).sort().reverse();
+  sel.innerHTML='<option value="">Всички месеци</option>'+sorted.map(function(ym){
+    return '<option value="'+ym+'"'+(ym===cur?' selected':'')+'>'+coMonthLabel(ym)+'</option>';
+  }).join('');
+  if (sorted.indexOf(cur)>=0) sel.value=cur;
+}
+
 function loadClientOrders(){
   var q='order=created_at.desc';
   var stores=assignedStores();
@@ -43,14 +60,27 @@ function loadClientOrders(){
       /* Маркираме дали текущия магазин е изпълнителят */
       o._isFulfiller=!isGlobal()&&o.fulfiller===currentUser.store_name&&o.store_name!==currentUser.store_name;
     });
+    coBuildMonthOptions();
     renderClientOrders();renderMetrics();updateBadges();
   }).catch(function(e){console.warn('client_orders:',e);});
 }
 
 function renderClientOrders(){
+  var search=((document.getElementById('co-search')||{}).value||'').trim().toLowerCase();
+  var month=(document.getElementById('co-month')||{}).value||'';
   var list=clientOrders.filter(function(o){
     return orderFilter==='all'||o._status===orderFilter||o.status===orderFilter;
   });
+  if (month) list=list.filter(function(o){ return o.date && o.date.slice(0,7)===month; });
+  if (search) {
+    list=list.filter(function(o){
+      return (o.customer_name||'').toLowerCase().indexOf(search)>=0 ||
+             (o.product||'').toLowerCase().indexOf(search)>=0 ||
+             (o.sap||'').toLowerCase().indexOf(search)>=0 ||
+             (o.phone||'').indexOf(search)>=0 ||
+             (o.bon||'').toLowerCase().indexOf(search)>=0;
+    });
+  }
   var body=document.getElementById('co-body');if(!body)return;
   if(!list.length){body.innerHTML='<tr><td colspan="14" style="text-align:center;padding:30px;color:#94a3b8;">Няма клиентски заявки.</td></tr>';return;}
   var isAdmin=currentUser&&['admin','accounting'].indexOf(currentUser.role)>=0;
@@ -147,7 +177,7 @@ function submitClientOrder(){
     in_num:num,store_name:currentUser.store_name,
     date:v('c-date'),hour:v('c-hour'),bon:v('c-bon'),sap:v('c-sap'),
     customer_name:name,phone:phone,
-    product:product,color:v('c-color'),qty:parseFloat(v('c-qty').replace(',','.'))||1,unit:v('c-unit')||'бр.',
+    product:product,color:v('c-color'),qty:parseFloat(v('c-qty'))||1,unit:v('c-unit')||'бр.',
     from_store:v('c-from-store'),fulfiller:v('c-fulfiller'),
     agent:v('c-agent')||currentUser.display_name,
     delivery:delivery,status:calcStatus(delivery,'new'),note:v('c-note')

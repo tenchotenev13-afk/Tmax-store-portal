@@ -255,6 +255,10 @@ OneSignalDeferred.push(async function(OneSignal) {
       </div>
       <button class="btn btn-green" onclick="openTransportModal()">+ Нова заявка</button>
     </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <input id="tr-search" placeholder="🔍 Търси клиент/продукт/SAP/бон/телефон..." oninput="renderTransport()" style="flex:1;min-width:220px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 14px;font-size:13px;font-family:inherit;outline:none;">
+      <select id="tr-month" onchange="renderTransport()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
+    </div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>Дата / Час</th><th>Клиент</th><th style="width:60px;">SAP</th><th>Телефон</th><th>Адрес</th><th>Продукт</th><th>Бр.</th><th>Доставка</th><th>Статус</th><th>Магазин</th><th></th></tr></thead>
       <tbody id="tr-body"><tr><td colspan="10" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
@@ -277,6 +281,10 @@ OneSignalDeferred.push(async function(OneSignal) {
         <button class="filter-btn" onclick="filterOrders('refused',this)">Отказана</button>
       </div>
       <button class="btn btn-green" onclick="openClientModal()">+ Нова заявка</button>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+      <input id="co-search" placeholder="🔍 Търси клиент/продукт/SAP/бон/телефон..." oninput="renderClientOrders()" style="flex:1;min-width:220px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 14px;font-size:13px;font-family:inherit;outline:none;">
+      <select id="co-month" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
     </div>
     <div class="tbl-wrap"><table>
       <thead><tr><th>№</th><th>Дата / Час</th><th>Клиент</th><th>Телефон</th><th>SAP</th><th>Продукт</th><th>Бр.</th><th>От магазин</th><th>Доставка</th><th>Изминало</th><th>Статус</th><th>Магазин</th><th></th></tr></thead>

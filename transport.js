@@ -26,11 +26,29 @@ function getStoreInfo(name){
   return STORE_INFO[name]||window._storeDB&&window._storeDB[name]||null;
 }
 
+var TR_BG_MONTHS = ['Януари','Февруари','Март','Април','Май','Юни','Юли','Август','Септември','Октомври','Ноември','Декември'];
+function trMonthLabel(ym){
+  var p=ym.split('-'); var idx=parseInt(p[1],10)-1;
+  return (TR_BG_MONTHS[idx]||ym)+' '+p[0];
+}
+function trBuildMonthOptions(){
+  var sel=document.getElementById('tr-month'); if(!sel) return;
+  var cur=sel.value;
+  var months={};
+  transportOrders.forEach(function(o){ if(o.date) months[o.date.slice(0,7)]=1; });
+  var sorted=Object.keys(months).sort().reverse();
+  sel.innerHTML='<option value="">Всички месеци</option>'+sorted.map(function(ym){
+    return '<option value="'+ym+'"'+(ym===cur?' selected':'')+'>'+trMonthLabel(ym)+'</option>';
+  }).join('');
+  if (sorted.indexOf(cur)>=0) sel.value=cur;
+}
+
 function loadTransport(){
   var q='order=created_at.desc'+storeQ();
   sbGet('transport_orders',q).then(function(data){
     transportOrders=Array.isArray(data)?data:[];
     transportOrders.forEach(function(o){o._status=calcStatus(o.delivery,o.status);});
+    trBuildMonthOptions();
     /* Зареди от stores таблица за евентуални допълнителни магазини */
     sbGet('stores','select=name,addr,phone').then(function(sd){
       if(Array.isArray(sd)){
@@ -43,9 +61,22 @@ function loadTransport(){
 }
 
 function renderTransport(){
+  var search=((document.getElementById('tr-search')||{}).value||'').trim().toLowerCase();
+  var month=(document.getElementById('tr-month')||{}).value||'';
   var list=transportOrders.filter(function(o){
     return transportFilter==='all'||o._status===transportFilter||o.status===transportFilter;
   });
+  if (month) list=list.filter(function(o){ return o.date && o.date.slice(0,7)===month; });
+  if (search) {
+    list=list.filter(function(o){
+      return (o.customer_name||'').toLowerCase().indexOf(search)>=0 ||
+             (o.product||'').toLowerCase().indexOf(search)>=0 ||
+             (o.sap||'').toLowerCase().indexOf(search)>=0 ||
+             (o.phone||'').indexOf(search)>=0 ||
+             (o.bon||'').toLowerCase().indexOf(search)>=0 ||
+             (o.address||'').toLowerCase().indexOf(search)>=0;
+    });
+  }
   var body=document.getElementById('tr-body');if(!body)return;
   if(!list.length){body.innerHTML='<tr><td colspan="11" style="text-align:center;padding:30px;color:#94a3b8;">Няма транспортни заявки.</td></tr>';return;}
   body.innerHTML=list.map(function(o){
@@ -94,7 +125,7 @@ function submitTransport(){
     store_name:currentUser.store_name,
     date:v('o-date'),hour:v('o-hour'),bon:v('o-bon'),sap:v('o-sap'),
     customer_name:name,phone:phone,address:v('o-addr'),
-    product:product,color:v('o-color'),qty:parseFloat(v('o-qty').replace(',','.'))||1,unit:v('o-unit')||'бр.',
+    product:product,color:v('o-color'),qty:parseFloat(v('o-qty'))||1,unit:v('o-unit')||'бр.',
     agent:v('o-agent')||currentUser.display_name,
     notes:v('o-notes'),delivery:delivery,status:calcStatus(delivery,'new')
   }).then(function(res){
