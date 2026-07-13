@@ -111,6 +111,9 @@ function renderClientOrders(){
         btns+='<button data-id="'+o.id+'" onclick="revertStatus(this.dataset.id,&apos;client_orders&apos;)" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">↩ Върни</button>';
       }
     }
+    if(canCorrectRecord(o,'client_orders')){
+      btns+='<button data-id="'+o.id+'" onclick="openCorrection(this.dataset.id,&apos;client_orders&apos;)" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Корекция</button>';
+    }
     btns+='<button data-id="'+o.id+'" onclick="loadPrint(this.dataset.id)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🖨 Бланка</button>';
     if(isAdmin){
       btns+='<button data-id="'+o.id+'" onclick="deleteClientOrder(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button>';

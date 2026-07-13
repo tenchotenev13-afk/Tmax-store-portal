@@ -14,6 +14,7 @@ var currentUser=null; /* {email,display_name,store_name,role} */
 var transportOrders=[],clientOrders=[],docs=[];
 var transportFilter='all',orderFilter='all',docFilter='all';
 var statusTargetId=null,statusTargetTable=null;
+var correctionTargetId=null,correctionTargetTable=null;
 
 function isGlobal(){
   if(!currentUser)return false;
@@ -65,11 +66,23 @@ function statusBadge(s){
   var x=m[s]||m.pending;
   return '<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;display:inline-flex;align-items:center;background:'+x.bg+';color:'+x.c+'">'+x.l+'</span>';
 }
-function actionBtns(id,table,status){
+/* Право на корекция: за client_orders - само магазина-заявител (store_name) или admin/accounting;
+   за transport_orders - само собствения магазин или глобална роля (admin/accounting/logistics). */
+function canCorrectRecord(rec,table){
+  if(!rec||!currentUser)return false;
+  if(table==='client_orders'){
+    var isAdmin=['admin','accounting'].indexOf(currentUser.role)>=0;
+    return isAdmin||rec.store_name===currentUser.store_name;
+  }
+  if(table==='transport_orders')return isGlobal()||rec.store_name===currentUser.store_name;
+  return false;
+}
+function actionBtns(id,table,status,storeName){
   var done=status==='done'||status==='refused';
   var h='<div style="display:flex;gap:4px;flex-wrap:wrap;">';
   if(!done)h+='<button onclick="openStatus(\''+id+'\',\''+table+'\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">Статус</button>';
   else h+='<button onclick="revertStatus(\''+id+'\',\''+table+'\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">↩ Върни</button>';
+  if(canCorrectRecord({store_name:storeName},table))h+='<button onclick="openCorrection(\''+id+'\',\''+table+'\')" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Корекция</button>';
   if(table==='client_orders')h+='<button onclick="loadPrint(\''+id+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🖨 Бланка</button>';
   if(table==='transport_orders')h+='<button onclick="loadTransportPrint(\''+id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🖨 Бланка</button>';
   return h+'</div>';
@@ -79,6 +92,8 @@ function openStatus(id,table){
   var list=table==='transport_orders'?transportOrders:clientOrders;
   var rec=list.find(function(o){return String(o.id)===String(id);});
   document.getElementById('status-info').textContent=rec?(rec.customer_name||rec.name||''):'';
+  var corrBtn=document.getElementById('status-correct-btn');
+  if(corrBtn)corrBtn.style.display=canCorrectRecord(rec,table)?'':'none';
   document.getElementById('status-modal').classList.add('open');
 }
 function setStatus(status){
@@ -93,6 +108,67 @@ function revertStatus(id,table){
   var rec=list.find(function(o){return String(o.id)===String(id);});
   if(!rec)return;
   sbPatch(table,'id=eq.'+id,{status:calcStatus(rec.delivery,'pending')}).then(function(){toast('↩ Върнато');loadAll();});
+}
+
+/* КОРЕКЦИЯ на съществуваща заявка (клиентска или транспортна).
+   id/table по избор - ако липсват, ползва statusTargetId/statusTargetTable (извикано от status-modal). */
+function openCorrection(id,table){
+  id=id||statusTargetId;table=table||statusTargetTable;
+  if(!id||!table)return;
+  var list=table==='transport_orders'?transportOrders:clientOrders;
+  var rec=list.find(function(o){return String(o.id)===String(id);});
+  if(!rec){toast('Записът не е намерен','#dc2626');return;}
+  if(!canCorrectRecord(rec,table)){toast('Нямаш права за корекция на тази заявка','#dc2626');return;}
+  correctionTargetId=id;correctionTargetTable=table;
+  document.getElementById('edt-date').value=rec.date||'';
+  document.getElementById('edt-hour').value=rec.hour||'10:00';
+  document.getElementById('edt-name').value=rec.customer_name||'';
+  document.getElementById('edt-phone').value=rec.phone||'';
+  document.getElementById('edt-product').value=rec.product||'';
+  document.getElementById('edt-color').value=rec.color||'';
+  document.getElementById('edt-qty').value=(rec.qty!=null?String(rec.qty):'1').replace('.',',');
+  if(document.getElementById('edt-unit'))document.getElementById('edt-unit').value=rec.unit||'бр.';
+  document.getElementById('edt-bon').value=rec.bon||'';
+  document.getElementById('edt-sap').value=rec.sap||'';
+  document.getElementById('edt-delivery').value=rec.delivery||'';
+  document.getElementById('edt-agent').value=rec.agent||'';
+  var isClient=table==='client_orders';
+  document.getElementById('edt-note').value=(isClient?rec.note:rec.notes)||'';
+  document.getElementById('edt-addr-wrap').style.display=isClient?'none':'';
+  document.getElementById('edt-fromstore-wrap').style.display=isClient?'':'none';
+  document.getElementById('edt-fulfiller-wrap').style.display=isClient?'':'none';
+  if(isClient){
+    document.getElementById('edt-from-store').value=rec.from_store||'';
+    document.getElementById('edt-fulfiller').value=rec.fulfiller||'';
+  } else {
+    document.getElementById('edt-addr').value=rec.address||'';
+  }
+  closeModal('status-modal');
+  document.getElementById('correction-modal').classList.add('open');
+}
+function submitCorrection(){
+  if(!correctionTargetId||!correctionTargetTable)return;
+  var name=v('edt-name'),phone=v('edt-phone'),product=v('edt-product');
+  if(!name||!phone||!product){toast('Попълни задължителните полета *','#dc2626');return;}
+  var patch={
+    date:v('edt-date'),hour:v('edt-hour'),customer_name:name,phone:phone,
+    product:product,color:v('edt-color'),
+    qty:parseFloat(v('edt-qty').replace(',','.'))||1,unit:v('edt-unit')||'бр.',
+    bon:v('edt-bon'),sap:v('edt-sap'),
+    agent:v('edt-agent'),delivery:v('edt-delivery')||null
+  };
+  if(correctionTargetTable==='client_orders'){
+    patch.from_store=v('edt-from-store');
+    patch.fulfiller=v('edt-fulfiller');
+    patch.note=v('edt-note');
+  } else {
+    patch.address=v('edt-addr');
+    patch.notes=v('edt-note');
+  }
+  sbPatch(correctionTargetTable,'id=eq.'+correctionTargetId,patch).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    closeModal('correction-modal');toast('✓ Заявката е коригирана!');loadAll();
+  });
 }
 function renderMetrics(){
   var all=transportOrders.concat(clientOrders);

@@ -95,7 +95,7 @@ function renderTransport(){
       '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
       '<td>'+statusBadge(o._status)+'</td>'+
       '<td>'+esc(o.store_name||'')+'</td>'+
-      '<td>'+actionBtns(o.id,'transport_orders',o._status)+'</td></tr>';
+      '<td>'+actionBtns(o.id,'transport_orders',o._status,o.store_name)+'</td></tr>';
   }).join('');
 }
 
