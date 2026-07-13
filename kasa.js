@@ -6,8 +6,6 @@ var kasaReports = [];
 var kasaGlavna  = null;
 var kasaEditId  = null;
 var kasaView    = 'pos'; /* 'pos' | 'glavna' */
-var kasaGlavnaDirty  = false; /* незапазени промени в Главна каса — за автозапис при смяна на таб */
-var kasaZoborotDirty = false; /* незапазени промени в Равнение — за автозапис при смяна на таб */
 
 /* ─── ДЕНОМИНАЦИИ ───────────────────────────────────────────── */
 var BILLS = [500,200,100,50,20,10,5,2,1];
@@ -84,9 +82,6 @@ function loadKasa(){
 
 /* ─── TABS ──────────────────────────────────────────────────── */
 function kasaTab(tab){
-  /* Ако имаш незапазени промени в текущия таб — запази ги първо (тихо), после превключи */
-  if(kasaView==='glavna' && kasaGlavnaDirty){ saveGlavna(true, function(){ kasaTab(tab); }); return; }
-  if(kasaView==='zoborot' && kasaZoborotDirty){ saveZoborot(true, function(){ kasaTab(tab); }); return; }
   kasaView=tab;
   ['pos','glavna','zoborot'].forEach(function(t){
     var el=document.getElementById('ktab-'+t);
@@ -220,7 +215,7 @@ function renderKasa(){
 function openKasaForm(report){
   kasaEditId=report?report.id:null;
   var r=report||{};
-  if(r.date) kasaSetDate(r.date);
+  kasaSetDate(r.date||kasaActiveDate()); /* синхронизира споделената дата за POS/Главна каса/Равнение, дори при нов отчет */
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
 
   /* Ред за купюра (отчетени) */
@@ -263,7 +258,7 @@ function openKasaForm(report){
     /* Данни */
     '<div class="card" style="margin-bottom:14px;"><div class="card-title">Данни за смяната</div>'+
     '<div class="form-grid">'+
-      '<div><label class="fl">Дата</label><input type="date" class="fi" id="kf-date" value="'+(r.date||today())+'"></div>'+
+      '<div><label class="fl">Дата</label><input type="date" class="fi" id="kf-date" value="'+(r.date||kasaActiveDate())+'" oninput="kasaSetDate(this.value)"></div>'+
       '<div><label class="fl">ПОС №</label><select class="fi" id="kf-pos">'+
         [1,2,3].map(function(n){return '<option value="'+n+'"'+(r.pos_number==n?' selected':'')+'>ПОС '+n+'</option>';}).join('')+
       '</select></div>'+
@@ -457,6 +452,7 @@ function submitKasaForm(){
   var req=kasaEditId?sbPatch('kasa_reports','id=eq.'+kasaEditId,p):sbPost('kasa_reports',p);
   req.then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    kasaSetDate(p.date); /* гарантира, че Главна каса/Равнение показват СЪЩАТА дата, за която е отчетът */
     toast('💾 Черновата е запазена!');
     kasaEditId=null;kasaView='pos';loadKasa();
   });
@@ -644,7 +640,6 @@ function renderGlavna(){
 
 /* ─── ГЛАВНА КАСА LIVE CALC ──────────────────────────────────── */
 function glavnaLiveCalc(){
-  kasaGlavnaDirty=true;
   var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g={};
@@ -682,7 +677,7 @@ function glavnaLiveCalc(){
 }
 
 /* ─── SAVE ГЛАВНА КАСА ───────────────────────────────────────── */
-function saveGlavna(silent, cb){
+function saveGlavna(){
   var p={store_name:currentUser.store_name,date:kasaActiveDate(),status:'draft'};
   ALL_DENOM.forEach(function(v){
     var el=document.getElementById('gl-'+DENOM_KEY[v]);
@@ -701,13 +696,12 @@ function saveGlavna(silent, cb){
     sbPost('kasa_glavna',p);
   req.then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    kasaGlavnaDirty=false;
-    if(!silent) toast('💾 Главна каса е запазена!');
+    toast('💾 Главна каса е запазена!');
     /* Reload */
     var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
     sbGet('kasa_glavna',gq).then(function(data){
       kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
-      if(cb) cb(); else renderGlavna();
+      renderGlavna();
     });
   });
 }
@@ -1206,7 +1200,6 @@ function renderZoborot(){
 
 /* ─── LIVE CALC ─────────────────────────────────────────────── */
 function zoborotLiveCalc(){
-  kasaZoborotDirty=true;
   var g=function(id){return parseFloat((document.getElementById('zf-'+id)||{}).value)||0;};
   var cashBgn=g('cash_bgn'),cashEur=g('cash_eur'),card=g('card_eur'),bank=g('bank_eur'),vouch=g('voucheri');
   var posNoBank=Math.round((cashBgn+cashEur+card+vouch)*100)/100;
@@ -1235,7 +1228,7 @@ function zoborotLiveCalc(){
 }
 
 /* ─── SAVE / CONFIRM / UNLOCK ───────────────────────────────── */
-function saveZoborot(silent, cb){
+function saveZoborot(){
   var g=function(id){return parseFloat((document.getElementById('zf-'+id)||{}).value)||0;};
   var cashBgn=g('cash_bgn'),cashEur=g('cash_eur'),card=g('card_eur'),bank=g('bank_eur'),vouch=g('voucheri');
   var fu1g=g('fu1_gross'),fu1d=g('fu1_discount');
@@ -1261,9 +1254,8 @@ function saveZoborot(silent, cb){
   var req=zoborotData?sbPatch('kasa_zoborot','id=eq.'+zoborotData.id,p):sbPost('kasa_zoborot',p);
   req.then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    kasaZoborotDirty=false;
-    if(!silent) toast('💾 Равнението е запазено!');
-    if(cb) cb(); else loadZoborot();
+    toast('💾 Равнението е запазено!');
+    loadZoborot();
   });
 }
 function confirmZoborot(){
