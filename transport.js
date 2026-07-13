@@ -184,6 +184,7 @@ function renderTransportPrint(o){
         '<tr><td>Адрес:</td><td>'+esc(o.address||'')+'</td></tr>'+
         '<tr><td>Телефон за връзка:</td><td>'+esc(o.phone||'')+'</td></tr>'+
         '<tr><td>Продукти:</td><td>'+prod+' ('+esc(String(o.qty||1))+' '+esc(o.unit||'бр.')+')</td></tr>'+
+        (o.notes?'<tr><td>Забележка:</td><td>'+esc(o.notes)+'</td></tr>':'')+
       '</table>'+
       '<div class="p-deliv">'+
         '<span><b>Дата за доставка:</b> '+fmtDate(o.delivery)+'</span>'+
