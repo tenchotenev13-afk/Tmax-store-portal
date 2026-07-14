@@ -270,7 +270,7 @@ function doLogin(){
   errEl.style.display='none';
   document.getElementById('l-btn').disabled=true;
   document.getElementById('l-btn').textContent='Влизане...';
-  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name').then(function(data){
+  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name,assigned_stores').then(function(data){
     document.getElementById('l-btn').disabled=false;
     document.getElementById('l-btn').textContent='Влез →';
     if(!Array.isArray(data)||!data.length){errEl.textContent='Непознат имейл адрес.';errEl.style.display='block';return;}
