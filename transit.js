@@ -208,11 +208,16 @@ function renderTransit(){
     h+='<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📦</div><div style="margin-top:8px;">Няма записи.</div></div>';
   }else{
     h+='<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
-    h+='<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:800px;">';
+    h+='<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1000px;table-layout:fixed;">';
+    h+='<colgroup>'+
+      '<col style="width:7%"><col style="width:7%"><col style="width:8%"><col style="width:7%">'+
+      '<col style="width:6%"><col style="width:25%"><col style="width:5%"><col style="width:5%">'+
+      '<col style="width:6%"><col style="width:10%"><col style="width:14%">'+
+    '</colgroup>';
     h+='<thead><tr style="background:#f8fafc;">';
     ['Посока','Магазин','Доставчик','Документ','Дата','Описание','Кол./МЕ','Остатък','Трансфер','Статус',''].forEach(function(c,i){
       var last=i===10;
-      h+='<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
+      h+='<th style="text-align:left;padding:8px 8px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
     });
     h+='</tr></thead><tbody>';
 
@@ -223,43 +228,45 @@ function renderTransit(){
       var dirBg=isOut?'rgba(124,58,237,.04)':'';
       h+='<tr style="border-bottom:1px solid #f1f5f9;'+(isOver?'background:#fffbeb;':dirBg)+'">';
       /* Посока */
-      h+='<td style="padding:6px 10px;white-space:nowrap;">';
+      h+='<td style="padding:6px 8px;overflow:hidden;">';
       h+=isOut?
-        '<span style="background:#f5f3ff;color:#7c3aed;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;">📤 Изпращам</span>':
-        '<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;">📦 Получавам</span>';
+        '<span style="background:#f5f3ff;color:#7c3aed;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">📤 Изпращам</span>':
+        '<span style="background:#eff6ff;color:#1e40af;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">📦 Получавам</span>';
       h+='</td>';
       h+=
-        '<td style="padding:7px 10px;font-weight:500;white-space:nowrap;">'+esc(r.store_name||'')+'</td>'+
-        '<td style="padding:7px 10px;font-size:11px;color:#64748b;max-width:130px;">'+
+        '<td style="padding:7px 8px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.store_name||'')+'">'+esc(r.store_name||'')+'</td>'+
+        '<td style="padding:7px 8px;font-size:11px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.supplier||'')+'">'+
         esc((r.supplier||'').replace(/^\d+\s+\d*\s*/,'').replace(/^\d+\s*/,'').replace(/^ТМ\s+/,''))+'</td>'+
-        '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;white-space:nowrap;">'+esc(r.purchase_doc||'')+'<div style="font-size:10px;color:#94a3b8;">Поз. '+(r.position||'—')+'</div></td>'+
-        '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;white-space:nowrap;">'+fmtDate(r.doc_date)+'</td>'+
-        '<td style="padding:7px 10px;max-width:220px;"><div style="font-size:11px;font-weight:500;">'+esc(r.material_name||'')+'</div><div style="font-size:10px;color:#94a3b8;">'+esc(r.material_code||'')+'</div></td>'+
-        '<td style="padding:7px 10px;text-align:right;white-space:nowrap;">'+(r.ordered_qty||'')+'<span style="font-size:10px;color:#94a3b8;margin-left:2px;">'+esc(r.unit||'')+'</span></td>'+
-        '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+(r.remaining_qty||'')+'</td>'+
-        '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.transfer_date)+'</td>'+
-        '<td style="padding:7px 10px;white-space:nowrap;">'+
-          '<span style="background:'+st.bg+';color:'+st.color+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+st.label+'</span>'+
-          (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;">'+esc(r.comment)+'</div>':'')+
+        '<td style="padding:7px 8px;font-family:DM Mono,monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(r.purchase_doc||'')+'<div style="font-size:10px;color:#94a3b8;">Поз. '+(r.position||'—')+'</div></td>'+
+        '<td style="padding:7px 8px;font-family:DM Mono,monospace;font-size:11px;overflow:hidden;white-space:nowrap;">'+fmtDate(r.doc_date)+'</td>'+
+        '<td style="padding:7px 8px;overflow:hidden;"><div style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.material_name||'')+'">'+esc(r.material_name||'')+'</div><div style="font-size:10px;color:#94a3b8;">'+esc(r.material_code||'')+'</div></td>'+
+        '<td style="padding:7px 8px;text-align:right;overflow:hidden;white-space:nowrap;">'+(r.ordered_qty||'')+'<span style="font-size:10px;color:#94a3b8;margin-left:2px;">'+esc(r.unit||'')+'</span></td>'+
+        '<td style="padding:7px 8px;text-align:right;font-weight:600;overflow:hidden;">'+(r.remaining_qty||'')+'</td>'+
+        '<td style="padding:7px 8px;font-family:DM Mono,monospace;font-size:11px;overflow:hidden;white-space:nowrap;">'+fmtDate(r.transfer_date)+'</td>'+
+        '<td style="padding:7px 8px;overflow:hidden;">'+
+          '<span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">'+st.label+'</span>'+
+          (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.comment)+'">'+esc(r.comment)+'</div>':'')+
         '</td>'+
-        '<td style="padding:7px 10px;white-space:nowrap;position:sticky;right:0;background:'+((isOver?'#fffbeb':(isOut?'#faf9ff':'#fff')))+';box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">';
+        '<td style="padding:6px 6px;position:sticky;right:0;background:'+((isOver?'#fffbeb':(isOut?'#faf9ff':'#fff')))+';box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">';
+      h+='<div style="display:flex;flex-wrap:wrap;gap:3px;">';
       if(canEdit&&r.status==='pending'){
         if(isOut){
-          h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'sent\')" style="border:none;background:#7c3aed;color:#fff;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;margin-right:3px;box-shadow:0 1px 2px rgba(0,0,0,.15);">📤 Изпратена</button>';
+          h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'sent\')" style="border:none;background:#7c3aed;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">📤 Изпратена</button>';
         } else {
-          h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'received\')" style="border:none;background:#16a34a;color:#fff;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;margin-right:3px;box-shadow:0 1px 2px rgba(0,0,0,.15);">✅ Прието</button>';
+          h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'received\')" style="border:none;background:#16a34a;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✅ Прието</button>';
         }
-        h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;margin-right:3px;box-shadow:0 1px 2px rgba(0,0,0,.15);">✕ Неприето</button>';
+        h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✕ Неприето</button>';
       }
       if(canEdit&&r.status!=='pending'){
-        h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;margin-right:3px;">↩ Върни</button>';
+        h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">↩ Върни</button>';
       }
       if(canEdit){
-        h+='<button data-id="'+r.id+'" onclick="openTransitEdit(this.dataset.id)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:5px 9px;font-size:11px;font-weight:600;cursor:pointer;margin-right:3px;">✏️ Редакция</button>';
+        h+='<button data-id="'+r.id+'" onclick="openTransitEdit(this.dataset.id)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">✏️ Редакция</button>';
       }
       if(isAdmin){
-        h+='<button data-id="'+r.id+'" onclick="tDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:5px 9px;font-size:11px;cursor:pointer;">✕</button>';
+        h+='<button data-id="'+r.id+'" onclick="tDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:4px 6px;font-size:10.5px;cursor:pointer;">✕</button>';
       }
+      h+='</div>';
       h+='</td></tr>';
     });
     h+='</tbody></table></div>';
