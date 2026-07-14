@@ -32,7 +32,8 @@ var PLANT_ALL = Object.assign({}, PLANT_INCOMING, PLANT_OUTGOING);
 var T_STATUS = {
   pending:  { label:'⏳ Не доставена', bg:'#fef9c3', color:'#92400e' },
   received: { label:'✅ Прието',       bg:'#f0fdf4', color:'#16a34a' },
-  rejected: { label:'✕ Неприето',     bg:'#fff1f2', color:'#dc2626' }
+  rejected: { label:'✕ Неприето',     bg:'#fff1f2', color:'#dc2626' },
+  sent:     { label:'📤 Изпратена',    bg:'#f5f3ff', color:'#7c3aed' }
 };
 
 function canEditTransit(){
@@ -112,6 +113,7 @@ function renderTransit(){
     if(transitFilter==='pending')  return r.status==='pending';
     if(transitFilter==='received') return r.status==='received';
     if(transitFilter==='rejected') return r.status==='rejected';
+    if(transitFilter==='sent')     return r.status==='sent';
     return true;
   });
   if(transitStore) list=list.filter(function(r){return r.store_name===transitStore||r.supplier===transitStore;});
@@ -120,7 +122,7 @@ function renderTransit(){
   });
 
   /* Статистика */
-  var counts={pending:0,received:0,rejected:0,incCount:0,outCount:0};
+  var counts={pending:0,received:0,rejected:0,sent:0,incCount:0,outCount:0};
   viewData.forEach(function(r){
     if(counts[r.status]!==undefined)counts[r.status]++;
     if(r.direction==='outgoing') counts.outCount++;
@@ -155,10 +157,11 @@ function renderTransit(){
   h+='</div></div>';
 
   /* Stat карти */
-  h+='<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:14px;">';
+  h+='<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px;">';
   h+=tStatCard('📦 Incoming',counts.incCount,'#2563eb');
   h+=tStatCard('📤 Outgoing',counts.outCount,'#7c3aed');
   h+=tStatCard('⏳ Не доставени',counts.pending,'#d97706');
+  h+=tStatCard('📤 Изпратени',counts.sent,'#7c3aed');
   h+=tStatCard('✅ Прието',counts.received,'#16a34a');
   h+=tStatCard('✕ Неприето',counts.rejected,'#dc2626');
   h+='</div>';
@@ -175,7 +178,7 @@ function renderTransit(){
 
   /* Статус + магазин + дата филтри */
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">';
-  [['all','Всички'],['pending','⏳ Не доставени'],['received','✅ Прието'],['rejected','✕ Неприето']].forEach(function(f){
+  [['all','Всички'],['pending','⏳ Не доставени'],['received','✅ Прието'],['sent','📤 Изпратена'],['rejected','✕ Неприето']].forEach(function(f){
     var a=transitFilter===f[0];
     var cnt=f[0]==='all'?viewData.length:counts[f[0]]||0;
     h+='<button onclick="transitFilter=\''+f[0]+'\';renderTransit()" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+' ('+cnt+')</button>';
@@ -207,8 +210,9 @@ function renderTransit(){
     h+='<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
     h+='<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:800px;">';
     h+='<thead><tr style="background:#f8fafc;">';
-    ['Посока','Магазин','Доставчик','Документ','Дата','Описание','Кол./МЕ','Остатък','Трансфер','Статус',''].forEach(function(c){
-      h+='<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
+    ['Посока','Магазин','Доставчик','Документ','Дата','Описание','Кол./МЕ','Остатък','Трансфер','Статус',''].forEach(function(c,i){
+      var last=i===10;
+      h+='<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
     });
     h+='</tr></thead><tbody>';
 
@@ -238,19 +242,23 @@ function renderTransit(){
           '<span style="background:'+st.bg+';color:'+st.color+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+st.label+'</span>'+
           (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;">'+esc(r.comment)+'</div>':'')+
         '</td>'+
-        '<td style="padding:7px 10px;white-space:nowrap;">';
+        '<td style="padding:7px 10px;white-space:nowrap;position:sticky;right:0;background:'+((isOver?'#fffbeb':(isOut?'#faf9ff':'#fff')))+';box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">';
       if(canEdit&&r.status==='pending'){
-        h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'received\')" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">✅</button>';
-        h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:1px solid #fecaca;background:#fff1f2;color:#dc2626;border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">✕</button>';
+        if(isOut){
+          h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'sent\')" style="border:none;background:#7c3aed;color:#fff;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;margin-right:3px;box-shadow:0 1px 2px rgba(0,0,0,.15);">📤 Изпратена</button>';
+        } else {
+          h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'received\')" style="border:none;background:#16a34a;color:#fff;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;margin-right:3px;box-shadow:0 1px 2px rgba(0,0,0,.15);">✅ Прието</button>';
+        }
+        h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:700;cursor:pointer;margin-right:3px;box-shadow:0 1px 2px rgba(0,0,0,.15);">✕ Неприето</button>';
       }
       if(canEdit&&r.status!=='pending'){
-        h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">↩</button>';
+        h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:5px 10px;font-size:11px;font-weight:600;cursor:pointer;margin-right:3px;">↩ Върни</button>';
       }
       if(canEdit){
-        h+='<button data-id="'+r.id+'" onclick="openTransitEdit(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">✏️</button>';
+        h+='<button data-id="'+r.id+'" onclick="openTransitEdit(this.dataset.id)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:5px 9px;font-size:11px;font-weight:600;cursor:pointer;margin-right:3px;">✏️ Редакция</button>';
       }
       if(isAdmin){
-        h+='<button data-id="'+r.id+'" onclick="tDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:4px;padding:2px 7px;font-size:11px;cursor:pointer;">✕</button>';
+        h+='<button data-id="'+r.id+'" onclick="tDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:5px 9px;font-size:11px;cursor:pointer;">✕</button>';
       }
       h+='</td></tr>';
     });
@@ -274,6 +282,11 @@ function setTStore(s){ transitStore=s; renderTransit(); }
 
 /* ── СТАТУС ПРОМЯНА ── */
 function tMarkStatus(id,status){
+  var r=transitData.find(function(x){return String(x.id)===String(id);});
+  if(r&&r.direction==='outgoing'&&status==='received'){
+    toast('Изпращащ магазин/склад не може да отбележи "Прието" — само "Изпратена"','#dc2626');
+    return;
+  }
   sbPatch('goods_transit','id=eq.'+id,{status:status,updated_by:currentUser.display_name||currentUser.email,updated_at:new Date().toISOString()})
   .then(function(){ loadTransit(); }).catch(function(){ toast('Грешка','#dc2626'); });
 }
@@ -359,7 +372,7 @@ function transitModalHtml(){
     '<div style="font-size:16px;font-weight:700;margin-bottom:16px;" id="transit-modal-title">+ Добави ред</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'+
     '<div style="grid-column:1/-1;"><label class="fl">Посока *</label>'+
-      '<select class="fi" id="tr-direction">'+
+      '<select class="fi" id="tr-direction" onchange="updateTrStatusOptions()">'+
         '<option value="incoming">📦 Получавам (incoming)</option>'+
         '<option value="outgoing">📤 Изпращам (outgoing)</option>'+
       '</select></div>'+
@@ -411,7 +424,7 @@ function openTransitAdd(){
   document.getElementById('tr-qty').value='';
   document.getElementById('tr-remaining').value='';
   document.getElementById('tr-transfer-date').value='';
-  document.getElementById('tr-status').value='pending';
+  updateTrStatusOptions('pending');
   document.getElementById('tr-comment').value='';
   m.classList.add('open');
 }
@@ -433,9 +446,23 @@ function openTransitEdit(id){
   document.getElementById('tr-qty').value=r.ordered_qty||'';
   document.getElementById('tr-remaining').value=r.remaining_qty||'';
   document.getElementById('tr-transfer-date').value=r.transfer_date||'';
-  document.getElementById('tr-status').value=r.status||'pending';
+  updateTrStatusOptions(r.status||'pending');
   document.getElementById('tr-comment').value=r.comment||'';
   m.classList.add('open');
+}
+
+/* Статус опциите зависят от посоката: outgoing няма "Прието" (само получателят може), вместо това "Изпратена" */
+function updateTrStatusOptions(preferredStatus){
+  var dirEl=document.getElementById('tr-direction'); if(!dirEl)return;
+  var statusEl=document.getElementById('tr-status'); if(!statusEl)return;
+  var isOut=dirEl.value==='outgoing';
+  var opts='<option value="pending">⏳ Не доставена</option>';
+  opts+= isOut ? '<option value="sent">📤 Изпратена</option>' : '<option value="received">✅ Прието</option>';
+  opts+='<option value="rejected">✕ Неприето</option>';
+  statusEl.innerHTML=opts;
+  var validValues=[].map.call(statusEl.options,function(o){return o.value;});
+  var want = preferredStatus!==undefined ? preferredStatus : statusEl.value;
+  statusEl.value = validValues.indexOf(want)>=0 ? want : 'pending';
 }
 
 function closeTransitModal(){
@@ -449,8 +476,14 @@ function submitTransit(){
   var material=document.getElementById('tr-material-name').value.trim();
   if(!store){toast('Избери магазин','#dc2626');return;}
   if(!material){toast('Въведи описание на материала','#dc2626');return;}
+  var dirVal=document.getElementById('tr-direction').value||'incoming';
+  var statusVal=document.getElementById('tr-status').value||'pending';
+  if(dirVal==='outgoing'&&statusVal==='received'){
+    toast('Изпращащ магазин/склад не може да отбележи "Прието" — избери "Изпратена"','#dc2626');
+    return;
+  }
   var data={
-    direction:document.getElementById('tr-direction').value||'incoming',
+    direction:dirVal,
     store_name:store,
     supplier:document.getElementById('tr-supplier').value.trim(),
     purchase_doc:String(document.getElementById('tr-purchase-doc').value.trim()),
@@ -462,7 +495,7 @@ function submitTransit(){
     ordered_qty:parseFloat(document.getElementById('tr-qty').value)||null,
     remaining_qty:parseFloat(document.getElementById('tr-remaining').value)||null,
     transfer_date:document.getElementById('tr-transfer-date').value||null,
-    status:document.getElementById('tr-status').value||'pending',
+    status:statusVal,
     comment:document.getElementById('tr-comment').value.trim(),
     updated_by:currentUser.display_name||currentUser.email,
     updated_at:new Date().toISOString()
