@@ -127,7 +127,7 @@ function submitTransport(){
     customer_name:name,phone:phone,address:v('o-addr'),
     product:product,color:v('o-color'),qty:parseFloat(v('o-qty').replace(',','.'))||1,unit:v('o-unit')||'бр.',
     agent:v('o-agent')||currentUser.display_name,
-    notes:v('o-notes'),delivery:delivery,status:calcStatus(delivery,'new')
+    notes:v('o-notes'),delivery:delivery,status:'pending'
   }).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     closeModal('transport-modal');toast('✓ Заявката е подадена!');loadTransport();

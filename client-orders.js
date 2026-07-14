@@ -183,7 +183,7 @@ function submitClientOrder(){
     product:product,color:v('c-color'),qty:parseFloat(v('c-qty').replace(',','.'))||1,unit:v('c-unit')||'бр.',
     from_store:v('c-from-store'),fulfiller:v('c-fulfiller'),
     agent:v('c-agent')||currentUser.display_name,
-    delivery:delivery,status:calcStatus(delivery,'new'),note:v('c-note')
+    delivery:delivery,status:'pending',note:v('c-note')
   }).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     closeModal('client-modal');toast('✓ Заявката е записана!');loadClientOrders();

@@ -107,7 +107,7 @@ function revertStatus(id,table){
   var list=table==='transport_orders'?transportOrders:clientOrders;
   var rec=list.find(function(o){return String(o.id)===String(id);});
   if(!rec)return;
-  sbPatch(table,'id=eq.'+id,{status:calcStatus(rec.delivery,'pending')}).then(function(){toast('↩ Върнато');loadAll();});
+  sbPatch(table,'id=eq.'+id,{status:'pending'}).then(function(){toast('↩ Върнато');loadAll();});
 }
 
 /* КОРЕКЦИЯ на съществуваща заявка (клиентска или транспортна).
