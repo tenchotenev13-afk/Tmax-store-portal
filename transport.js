@@ -106,26 +106,29 @@ function filterTransport(f,btn){
 }
 
 function openTransportModal(){
-  ['o-bon','o-sap','o-name','o-phone','o-addr','o-product','o-color','o-agent','o-notes'].forEach(function(id){
+  ['o-bon','o-name','o-phone','o-addr','o-agent','o-notes'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.value='';
   });
   document.getElementById('o-date').value=today();
   document.getElementById('o-hour').value='10:00';
-  document.getElementById('o-qty').value='1';
   document.getElementById('o-delivery').value='';
-  if(document.getElementById('o-unit'))document.getElementById('o-unit').value='бр.';
+  renderItemRows('o-items',[{}]);
   document.getElementById('transport-modal').classList.add('open');
 }
 
 function submitTransport(){
-  var name=v('o-name'),phone=v('o-phone'),product=v('o-product');
-  if(!name||!phone||!product){toast('Попълни задължителните полета *','#dc2626');return;}
+  var name=v('o-name'),phone=v('o-phone'),addr=v('o-addr');
+  var items=collectItems('o-items');
+  if(!name||!phone||!addr){toast('Попълни задължителните полета *','#dc2626');return;}
+  if(!items.length){toast('Добави поне един артикул с продукт','#dc2626');return;}
+  var first=items[0];
   var delivery=v('o-delivery')||null;
   sbPost('transport_orders',{
     store_name:currentUser.store_name,
-    date:v('o-date'),hour:v('o-hour'),bon:v('o-bon'),sap:v('o-sap'),
-    customer_name:name,phone:phone,address:v('o-addr'),
-    product:product,color:v('o-color'),qty:parseFloat(v('o-qty').replace(',','.'))||1,unit:v('o-unit')||'бр.',
+    date:v('o-date'),hour:v('o-hour'),bon:v('o-bon'),
+    customer_name:name,phone:phone,address:addr,
+    product:first.product,color:first.color,sap:first.sap,qty:first.qty,unit:first.unit,
+    items:items,
     agent:v('o-agent')||currentUser.display_name,
     notes:v('o-notes'),delivery:delivery,status:'pending'
   }).then(function(res){
@@ -144,7 +147,6 @@ function renderTransportPrint(o){
   var wrap=document.getElementById('mod-print');
   var sn=o.store_name||currentUser.store_name||'';
   var si=getStoreInfo(sn)||{};
-  var prod=(o.sap?o.sap+' - ':'')+esc(o.product||'')+(o.color?' ('+esc(o.color)+')':'');
 
   var PRINT_CSS=
     '@media print{'+
@@ -183,7 +185,7 @@ function renderTransportPrint(o){
         '<tr><td>Клиент:</td><td>'+esc(o.customer_name||'')+'</td></tr>'+
         '<tr><td>Адрес:</td><td>'+esc(o.address||'')+'</td></tr>'+
         '<tr><td>Телефон за връзка:</td><td>'+esc(o.phone||'')+'</td></tr>'+
-        '<tr><td>Продукти:</td><td>'+prod+' ('+esc(String(o.qty||1))+' '+esc(o.unit||'бр.')+')</td></tr>'+
+        '<tr><td>Продукти:</td><td>'+itemsPrintLine(o)+'</td></tr>'+
         (o.notes?'<tr><td>Забележка:</td><td>'+esc(o.notes)+'</td></tr>':'')+
       '</table>'+
       '<div class="p-deliv">'+

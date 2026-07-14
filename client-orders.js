@@ -158,29 +158,32 @@ function deleteClientOrder(id){
 }
 
 function openClientModal(){
-  ['c-bon','c-sap','c-name','c-phone','c-product','c-color','c-agent','c-note'].forEach(function(id){
+  ['c-bon','c-name','c-phone','c-agent','c-note'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.value='';
   });
   document.getElementById('c-date').value=today();
   document.getElementById('c-hour').value='10:00';
-  document.getElementById('c-qty').value='1';
   document.getElementById('c-delivery').value='';
   document.getElementById('c-from-store').value=currentUser.store_name;
   document.getElementById('c-fulfiller').value=currentUser.store_name;
-  if(document.getElementById('c-unit'))document.getElementById('c-unit').value='бр.';
+  renderItemRows('c-items',[{}]);
   document.getElementById('client-modal').classList.add('open');
 }
 
 function submitClientOrder(){
-  var name=v('c-name'),phone=v('c-phone'),product=v('c-product');
-  if(!name||!phone||!product){toast('Попълни задължителните полета *','#dc2626');return;}
+  var name=v('c-name'),phone=v('c-phone');
+  var items=collectItems('c-items');
+  if(!name||!phone){toast('Попълни задължителните полета *','#dc2626');return;}
+  if(!items.length){toast('Добави поне един артикул с продукт','#dc2626');return;}
+  var first=items[0];
   var delivery=v('c-delivery')||null;
   var num=String(clientOrders.length+1).padStart(4,'0');
   sbPost('client_orders',{
     in_num:num,store_name:currentUser.store_name,
-    date:v('c-date'),hour:v('c-hour'),bon:v('c-bon'),sap:v('c-sap'),
+    date:v('c-date'),hour:v('c-hour'),bon:v('c-bon'),
     customer_name:name,phone:phone,
-    product:product,color:v('c-color'),qty:parseFloat(v('c-qty').replace(',','.'))||1,unit:v('c-unit')||'бр.',
+    product:first.product,color:first.color,sap:first.sap,qty:first.qty,unit:first.unit,
+    items:items,
     from_store:v('c-from-store'),fulfiller:v('c-fulfiller'),
     agent:v('c-agent')||currentUser.display_name,
     delivery:delivery,status:'pending',note:v('c-note')
@@ -209,7 +212,6 @@ function renderPrint(o){
     postponed:{l:'⏱ ОТЛОЖЕНА',bg:'#f3e8ff',c:'#4c1d95'}
   };
   var si=stInfo[st]||stInfo.pending;
-  var prod=(o.sap?o.sap+' - ':'')+esc(o.product||'');
 
   var blank=function(copy,sign1,sign2){
     return '<div style="background:#fff;border:1px solid #ccc;border-radius:10px;overflow:hidden;margin-bottom:16px;font-family:Arial,sans-serif;font-size:12px;color:#1a1a1a;">'+
@@ -230,15 +232,7 @@ function renderPrint(o){
       '<div style="padding:12px 14px;">'+
         '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;padding-bottom:3px;border-bottom:1px solid #f0ede8;">Данни за поръчката</div>'+
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:10px;">'+
-          '<div style="grid-column:1/-1;background:#f9f8f6;border-radius:5px;padding:7px 9px;">'+
-            '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Продукт (SAP - Описание)</div>'+
-            '<div style="font-size:13px;font-weight:700;">'+prod+'</div></div>'+
-          '<div style="background:#f9f8f6;border-radius:5px;padding:7px 9px;">'+
-            '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Цвят / Размер</div>'+
-            '<div style="font-size:12px;">'+esc(o.color||'—')+'</div></div>'+
-          '<div style="background:#f9f8f6;border-radius:5px;padding:7px 9px;">'+
-            '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Количество</div>'+
-            '<div style="font-size:12px;">'+esc(String(o.qty||1))+' '+esc(o.unit||'бр.')+'</div></div>'+
+          itemsPrintBlock(o)+
           '<div style="background:#fff8e1;border:1px solid #f0c940;border-radius:5px;padding:7px 9px;grid-column:1/-1;">'+
             '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">★ Дата на доставка</div>'+
             '<div style="font-size:13px;font-weight:700;color:#dc2626;">'+fmtDate(o.delivery)+'</div></div>'+

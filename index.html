@@ -383,12 +383,12 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div><label class="fl">Три имена на клиента *</label><input class="fi" id="o-name" placeholder="Иван Петров Иванов"></div>
     <div><label class="fl">Телефон *</label><input class="fi" id="o-phone" placeholder="0888 000 000"></div>
     <div class="full"><label class="fl">Адрес за доставка *</label><input class="fi" id="o-addr" placeholder="гр. Варна, ул. Примерна 1, ет. 3, ап. 5"></div>
-    <div><label class="fl">Продукт *</label><input class="fi" id="o-product" placeholder="напр. Диван Comfort"></div>
-    <div><label class="fl">Цвят / Модел</label><input class="fi" id="o-color" placeholder="напр. Бежово"></div>
-    <div><label class="fl">Количество</label><input type="text" inputmode="decimal" class="fi" id="o-qty" value="1" placeholder="напр. 1 или 4,5"></div>
-    <div><label class="fl">Мярка</label><select class="fi" id="o-unit"><option value="бр.">Бр.</option><option value="кашон">Кашон</option><option value="кв.м">Кв.м</option><option value="л.м">Л.м</option><option value="компл.">Компл.</option><option value="пакет">Пакет</option><option value="чифт">Чифт</option></select></div>
+    <div class="full">
+      <label class="fl">Артикули *</label>
+      <div id="o-items"></div>
+      <button type="button" onclick="addItemRow('o-items')" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">+ Добави артикул</button>
+    </div>
     <div><label class="fl">№ Бон</label><input class="fi" id="o-bon" placeholder="000123"></div>
-    <div><label class="fl">SAP код</label><input class="fi" id="o-sap" placeholder="напр. 95648"></div>
     <div><label class="fl">★ Дата на доставка</label><input type="date" class="fi" id="o-delivery"></div>
     <div class="full"><label class="fl">Агент / Изготвил</label><input class="fi" id="o-agent"></div>
     <div class="full"><label class="fl">Бележки</label><input class="fi" id="o-notes" placeholder="Допълнителна информация..."></div>
@@ -408,12 +408,12 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div><label class="fl">Час</label><select class="fi" id="c-hour"><option>08:00</option><option>09:00</option><option selected>10:00</option><option>11:00</option><option>12:00</option><option>13:00</option><option>14:00</option><option>15:00</option><option>16:00</option><option>17:00</option><option>18:00</option><option>19:00</option></select></div>
     <div><label class="fl">Три имена на клиента *</label><input class="fi" id="c-name" placeholder="Иван Петров Иванов"></div>
     <div><label class="fl">Телефон *</label><input class="fi" id="c-phone" placeholder="0888 000 000"></div>
-    <div><label class="fl">Продукт *</label><input class="fi" id="c-product" placeholder="напр. Диван Comfort"></div>
-    <div><label class="fl">Цвят / Размер</label><input class="fi" id="c-color" placeholder="напр. Бежово"></div>
-    <div><label class="fl">Количество</label><input type="text" inputmode="decimal" class="fi" id="c-qty" value="1" placeholder="напр. 1 или 4,5"></div>
-    <div><label class="fl">Мярка</label><select class="fi" id="c-unit"><option value="бр.">Бр.</option><option value="кашон">Кашон</option><option value="кв.м">Кв.м</option><option value="л.м">Л.м</option><option value="компл.">Компл.</option><option value="пакет">Пакет</option><option value="чифт">Чифт</option></select></div>
+    <div class="full">
+      <label class="fl">Артикули *</label>
+      <div id="c-items"></div>
+      <button type="button" onclick="addItemRow('c-items')" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">+ Добави артикул</button>
+    </div>
     <div><label class="fl">№ Бон</label><input class="fi" id="c-bon" placeholder="000123"></div>
-    <div><label class="fl">SAP код</label><input class="fi" id="c-sap" placeholder="напр. 95648"></div>
     <div><label class="fl">Поръчан от магазин</label><input class="fi" id="c-from-store"></div>
     <div><label class="fl">Изпълнява (склад)</label><input class="fi" id="c-fulfiller"></div>
     <div><label class="fl">★ Дата на доставка</label><input type="date" class="fi" id="c-delivery"></div>
@@ -453,12 +453,12 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div><label class="fl">Три имена на клиента *</label><input class="fi" id="edt-name" placeholder="Иван Петров Иванов"></div>
     <div><label class="fl">Телефон *</label><input class="fi" id="edt-phone" placeholder="0888 000 000"></div>
     <div class="full" id="edt-addr-wrap"><label class="fl">Адрес за доставка</label><input class="fi" id="edt-addr" placeholder="гр. Варна, ул. Примерна 1, ет. 3, ап. 5"></div>
-    <div><label class="fl">Продукт *</label><input class="fi" id="edt-product" placeholder="напр. Диван Comfort"></div>
-    <div><label class="fl">Цвят / Модел</label><input class="fi" id="edt-color" placeholder="напр. Бежово"></div>
-    <div><label class="fl">Количество</label><input type="text" inputmode="decimal" class="fi" id="edt-qty" placeholder="напр. 1 или 4,5"></div>
-    <div><label class="fl">Мярка</label><select class="fi" id="edt-unit"><option value="бр.">Бр.</option><option value="кашон">Кашон</option><option value="кв.м">Кв.м</option><option value="л.м">Л.м</option><option value="компл.">Компл.</option><option value="пакет">Пакет</option><option value="чифт">Чифт</option></select></div>
+    <div class="full">
+      <label class="fl">Артикули *</label>
+      <div id="edt-items"></div>
+      <button type="button" onclick="addItemRow('edt-items')" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">+ Добави артикул</button>
+    </div>
     <div><label class="fl">№ Бон</label><input class="fi" id="edt-bon" placeholder="000123"></div>
-    <div><label class="fl">SAP код</label><input class="fi" id="edt-sap" placeholder="напр. 95648"></div>
     <div id="edt-fromstore-wrap"><label class="fl">Поръчан от магазин</label><input class="fi" id="edt-from-store"></div>
     <div id="edt-fulfiller-wrap"><label class="fl">Изпълнява (склад)</label><input class="fi" id="edt-fulfiller"></div>
     <div><label class="fl">★ Дата на доставка</label><input type="date" class="fi" id="edt-delivery"></div>
