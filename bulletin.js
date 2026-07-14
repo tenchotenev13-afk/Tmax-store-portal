@@ -13,6 +13,8 @@ var curBul = null; var bulTasks = []; var bulComps = [];
 var recurringTasks = []; var recurringComps = []; var subtaskComps = [];
 var bulPromotions = [];
 var bulMode = 'view'; var bulSaveT = null; var dragInfo = null;
+var bulSelectedId = null; /* избран ръчно бюлетин (превключвател) - null = автоматично поведение (последен) */
+var bulListCache = []; /* кратък списък с бюлетини за превключвателя (само admin/accounting) */
 
 /* DEPTS */
 var DEPTS = {
@@ -231,13 +233,37 @@ function weekDays(wk,yr){
 }
 function fmtD(d){return d.getDate()+'.'+(d.getMonth()<9?'0':'')+(d.getMonth()+1);}
 
+/* ─── ПРЕВКЛЮЧВАТЕЛ МЕЖДУ БЮЛЕТИНИ (само admin/accounting) ─── */
+function loadBulletinList(){
+  if(!canEdit())return Promise.resolve([]);
+  return sbGet('bulletins','select=id,week_number,year,status,created_at&order=created_at.desc&limit=20').then(function(rows){
+    bulListCache=Array.isArray(rows)?rows:[];
+    return bulListCache;
+  }).catch(function(){bulListCache=[];return [];});
+}
+function bulletinSwitcherHtml(){
+  if(!canEdit()||!bulListCache.length)return '';
+  var statusLbl={draft:' (чернова)',published:' (публикуван)'};
+  var opts=bulListCache.map(function(b){
+    var label='Седмица '+b.week_number+' · '+b.year+(statusLbl[b.status]||'');
+    return '<option value="'+b.id+'"'+(curBul&&String(curBul.id)===String(b.id)?' selected':'')+'>'+label+'</option>';
+  }).join('');
+  return '<select onchange="selectBulletin(this.value)" style="border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:11px;background:#1e293b;color:#e2e8f0;">'+opts+'</select>';
+}
+function selectBulletin(id){
+  bulSelectedId=id;
+  loadBulletin();
+}
+
 /* LOAD */
 function loadBulletin(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:300px;color:#94a3b8;font-size:15px;">⏳ Зареждане...</div>';
-  var q=canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1';
-  /* Зарежда рекъринг задачи и промоции ПЪРВО, след това рендира */
-  sbGet('bulletin_promotions','active=eq.true&order=end_date.asc').then(function(pr){
+  var q=(bulSelectedId&&canEdit())?'id=eq.'+bulSelectedId:(canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1');
+  /* Зарежда списъка за превключвателя (admin/accounting), рекъринг задачи и промоции ПЪРВО, след това рендира */
+  loadBulletinList().then(function(){
+    return sbGet('bulletin_promotions','active=eq.true&order=end_date.asc');
+  }).then(function(pr){
     bulPromotions=Array.isArray(pr)?pr:[];
   }).catch(function(){bulPromotions=[];}).then(function(){
     return sbGet('recurring_tasks','active=eq.true&order=sort_order.asc');
@@ -347,6 +373,7 @@ function bulHdr(isDraft){
       '<div style="font-size:17px;font-weight:600;color:#fff;">Т-Бюлетин <span style="color:#64748b;font-weight:400;">| Седмица '+wk+'</span></div>' +
       '<span style="font-family:DM Mono,monospace;font-size:11px;color:#94a3b8;padding:3px 10px;background:#1e293b;border-radius:40px;border:1px solid #334155;">С'+wk+' · '+yr+'</span>' +
       (isDraft ? '<span style="background:#f59e0b;color:#78350f;font-size:10px;font-weight:700;padding:2px 9px;border-radius:20px;">✏ Чернова</span>' : '') +
+      bulletinSwitcherHtml() +
     '</div>' +
     '<div style="display:flex;gap:6px;flex-wrap:wrap;">' +
       (canEdit() && bulMode!=='edit' ? '<button onclick="setBulEdit()" class="bbtn">✏️ Редактирай</button>' : '') +
@@ -729,6 +756,7 @@ function bulDelBlock(btn){
   schedSave(); renderBulletin();
 }
 function bulDelTask(btn){
+  if(!canEdit()){toast('Нямаш права за това действие','#dc2626');return;}
   var id=btn.getAttribute('data-task-id');
   if(!confirm('Изтрий задачата?'))return;
   sbDelete('bulletin_tasks','id=eq.'+id).then(function(){toast('Изтрита');loadBulletin();});
@@ -932,6 +960,7 @@ function openTaskModalForDept(dk){
 
 /* ─── РЕДАКЦИЯ НА ЗАДАЧА ───────────────────────────────────── */
 function openEditTaskModal(taskId) {
+  if (!canEdit()) { toast('Нямаш права за това действие','#dc2626'); return; }
   var t = bulTasks.find(function(x){ return String(x.id) === String(taskId); });
   if (!t) { toast('Задачата не е намерена','#dc2626'); return; }
   var wk = curBul ? curBul.week_number : weekNum(new Date());
@@ -972,6 +1001,7 @@ function openEditTaskModal(taskId) {
 }
 
 function submitEditTask(taskId) {
+  if (!canEdit()) { toast('Нямаш права за това действие','#dc2626'); return; }
   var title = (document.getElementById('etk-title').value||'').trim();
   if (!title) { toast('Въведи заглавие','#dc2626'); return; }
   var dept = document.getElementById('etk-dept').value;
@@ -1229,12 +1259,18 @@ function publishBul(){
   });
 }
 function newBulletin(){
-  var now=new Date(); var wk=weekNum(now); var yr=now.getFullYear();
-  if(!confirm('Нов бюлетин за Седмица '+wk+' · '+yr+'?'))return;
-  var cal={};DKEYS.forEach(function(k){cal[k]=[];});
-  sbPost('bulletins',{week_number:wk,year:yr,title:'Т-Бюлетин С'+wk+' · '+yr,content:{calendar:cal,columns:{trade:[],warehouse:[],admin:[]}},status:'draft'}).then(function(r){
-    if(!r.ok){toast('Грешка','#dc2626');return;}
-    toast('✅ Нов бюлетин е създаден!'); bulMode='edit'; loadBulletin();
+  sbGet('bulletins','select=week_number,year&order=created_at.desc&limit=20').then(function(rows){
+    var existing=Array.isArray(rows)?rows:[];
+    function exists(wk,yr){return existing.some(function(b){return b.week_number===wk&&b.year===yr;});}
+    var d=new Date(); var wk=weekNum(d); var yr=d.getFullYear();
+    var guard=0;
+    while(exists(wk,yr)&&guard<12){ d.setDate(d.getDate()+7); wk=weekNum(d); yr=d.getFullYear(); guard++; }
+    if(!confirm('Нов бюлетин за Седмица '+wk+' · '+yr+(guard?' (текущата вече има бюлетин - подготвяш предварително)':'')+'?'))return;
+    var cal={};DKEYS.forEach(function(k){cal[k]=[];});
+    sbPost('bulletins',{week_number:wk,year:yr,title:'Т-Бюлетин С'+wk+' · '+yr,content:{calendar:cal,columns:{trade:[],warehouse:[],admin:[]}},status:'draft'}).then(function(r){
+      if(!r.ok){toast('Грешка при създаване','#dc2626');return;}
+      toast('✅ Нов бюлетин е създаден — Седмица '+wk+' · '+yr+'!'); bulMode='edit'; bulSelectedId=null; loadBulletin();
+    });
   });
 }
 
@@ -1640,8 +1676,10 @@ function renderTasksPanel() {
         h += renderSubtasks(t.id, dk);
         h += '</div>';
         h += '<div style="display:flex;gap:4px;flex-shrink:0;">';
-        h += '<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>';
-        h += '<button data-task-id="'+t.id+'" onclick="bulDelTask(this)" style="border:1px solid #fecaca;background:#fff5f5;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#dc2626;">✕</button>';
+        if (canEdit()) {
+          h += '<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>';
+          h += '<button data-task-id="'+t.id+'" onclick="bulDelTask(this)" style="border:1px solid #fecaca;background:#fff5f5;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#dc2626;">✕</button>';
+        }
         h += '</div>';
         h += '</div>';
       });
