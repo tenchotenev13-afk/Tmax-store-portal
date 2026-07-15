@@ -2,6 +2,7 @@
 
 var sdData   = [];
 var sdFilter = 'pending';
+var sdTypeFilter = 'all';
 var sdEditId = null;
 
 function canEditSD() {
@@ -13,6 +14,10 @@ function canAddSD() {
 /* Подаване на нова бланка за разлики - магазинска страна (същите роли като canEditTransit) */
 function canSubmitDiff() {
   return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
+}
+/* Решение по разликата (Заприхождаване/Връщане/Липса) - само централен офис */
+function canReviewDiff() {
+  return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
 
 var DIFF_SB  = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
@@ -47,10 +52,15 @@ function renderStockDiff() {
   var canAdd  = canAddSD();
 
   var list = sdData.filter(function(r) {
+    if (!r.type) return false; /* още не е прегледан от Цветелина - показва се само в секцията "За преглед" */
+    if (sdTypeFilter !== 'all' && r.type !== sdTypeFilter) return false;
     if (sdFilter === 'pending') return r.status === 'pending';
     if (sdFilter === 'taken')   return r.status === 'taken';
     return true;
   });
+
+  var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса' };
+  var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626' };
 
   var pending = sdData.filter(function(r){ return r.status==='pending'; }).length;
   var taken   = sdData.filter(function(r){ return r.status==='taken'; }).length;
@@ -79,6 +89,16 @@ function renderStockDiff() {
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #16a34a;"><div style="font-size:11px;color:#64748b;">✅ Взета</div><div style="font-size:28px;font-weight:700;color:#16a34a;font-family:DM Mono,monospace;">'+taken+'</div></div>';
   h += '</div>';
 
+  /* Филтър по тип */
+  var typeCounts = { writein:0, 'return':0, missing:0 };
+  sdData.forEach(function(r){ if(r.type && typeCounts.hasOwnProperty(r.type)) typeCounts[r.type]++; });
+  h += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">';
+  [['all','Всички типове'],['writein','📥 Заприхождаване ('+typeCounts.writein+')'],['return','↩️ Връщане ('+typeCounts['return']+')'],['missing','❓ Липса ('+typeCounts.missing+')']].forEach(function(f){
+    var a = sdTypeFilter===f[0];
+    h += '<button data-f="'+f[0]+'" onclick="setSDTypeFilter(this.dataset.f)" style="border:1px solid '+(a?'#0f172a':'#e2e8f0')+';padding:4px 12px;border-radius:40px;font-size:11.5px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
+  });
+  h += '</div>';
+
   /* Филтри */
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
   [['all','Всички ('+sdData.length+')'],['pending','⏳ Невзета ('+pending+')'],['taken','✅ Взета ('+taken+')']].forEach(function(f){
@@ -94,7 +114,7 @@ function renderStockDiff() {
     h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">';
     h += '<thead><tr style="background:#f8fafc;">';
-    ['Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Коментар',''].forEach(function(c){
+    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Коментар',''].forEach(function(c){
       h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
     });
     h += '</tr></thead><tbody>';
@@ -106,6 +126,7 @@ function renderStockDiff() {
         : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
 
       h += '<tr style="border-bottom:1px solid #f1f5f9;">'+
+        '<td style="padding:7px 10px;white-space:nowrap;"><span style="background:'+(TYPE_COLORS[r.type]||'#94a3b8')+'1a;color:'+(TYPE_COLORS[r.type]||'#64748b')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(TYPE_LABELS[r.type]||r.type||'—')+'</span></td>'+
         '<td style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#64748b;">'+esc(r.supplier||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.material_code||'')+'</td>'+
@@ -137,7 +158,42 @@ function renderStockDiff() {
   wrap.innerHTML = h;
 }
 
+/* ── Бутони за решение по ред (само canReviewDiff) ── */
+function diffLineResolveButtons(l){
+  if(l.type){
+    var TYPE_LABELS={writein:'📥 Заприхождаване',return:'↩️ Връщане',missing:'❓ Липса'};
+    return '<span style="color:#16a34a;font-weight:600;">✓ '+(TYPE_LABELS[l.type]||l.type)+'</span>';
+  }
+  if(!canReviewDiff()) return '<span style="color:#94a3b8;">чака преглед</span>';
+  return '<div style="display:flex;gap:3px;flex-wrap:wrap;">'+
+    '<button data-id="'+l.id+'" onclick="resolveDiffLine(this.dataset.id,\'writein\')" style="border:none;background:#2563eb;color:#fff;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">📥 Заприх.</button>'+
+    '<button data-id="'+l.id+'" onclick="resolveDiffLine(this.dataset.id,\'return\')" style="border:none;background:#7c3aed;color:#fff;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">↩️ Връщане</button>'+
+    '<button data-id="'+l.id+'" onclick="resolveDiffLine(this.dataset.id,\'missing\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">❓ Липса</button>'+
+  '</div>';
+}
+function resolveDiffLine(id,type){
+  if(!canReviewDiff()){toast('Нямаш права за това действие','#dc2626');return;}
+  var line=sdData.find(function(x){return String(x.id)===String(id);});
+  if(!line)return;
+  sbPatch('stock_differences','id=eq.'+id,{type:type,status:'pending'}).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    line.type=type; line.status='pending'; /* локално, за незабавна проверка по-долу без чакане на reload */
+    var siblingLines=sdData.filter(function(x){return x.report_id===line.report_id;});
+    var allResolved = siblingLines.length>0 && siblingLines.every(function(x){return !!x.type;});
+    if(allResolved && line.report_id){
+      sbPatch('differences_reports','id=eq.'+line.report_id,{reviewed:true}).then(function(){
+        toast('✅ Решено — бланката е напълно прегледана!');
+        loadStockDiff();
+      });
+    } else {
+      toast('✅ Записано!');
+      loadStockDiff();
+    }
+  });
+}
+
 function setSDFilter(f) { sdFilter=f; renderStockDiff(); }
+function setSDTypeFilter(f) { sdTypeFilter=f; renderStockDiff(); }
 
 function sdMarkTaken(id) {
   if (!confirm('Маркирай стоката като ВЗЕТА?')) return;
@@ -258,6 +314,7 @@ function submitSD() {
     comment:        document.getElementById('sd-comment').value,
     created_by:     currentUser.display_name||currentUser.email
   };
+  if(!sdEditId) data.type='writein'; /* ръчно добавен запис = класическото "заприхождаване", запазва старото поведение на таба */
   var p = sdEditId
     ? sbPatch('stock_differences','id=eq.'+sdEditId,data)
     : sbPost('stock_differences',data);
@@ -303,7 +360,7 @@ function renderDiffReportsSection(){
     h+='</div>';
     if(lines.length){
       h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
-      h+='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">По док.</th><th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар</th></tr>';
+      h+='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">По док.</th><th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар</th><th style="padding:3px 6px;">Решение</th></tr>';
       lines.forEach(function(l){
         h+='<tr style="border-top:1px solid #f1f5f9;">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
@@ -312,6 +369,7 @@ function renderDiffReportsSection(){
           '<td style="padding:3px 6px;text-align:right;">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
           '<td style="padding:3px 6px;text-align:right;">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
           '<td style="padding:3px 6px;color:#64748b;">'+esc(l.comment||'')+'</td>'+
+          '<td style="padding:3px 6px;white-space:nowrap;">'+diffLineResolveButtons(l)+'</td>'+
         '</tr>';
       });
       h+='</table>';
