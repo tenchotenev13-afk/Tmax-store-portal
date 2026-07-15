@@ -7,8 +7,13 @@ var EMAIL_FROM = 'ТеМАХ Бюлетин <onboarding@resend.dev>';
 var EMAIL_TEST = ''; /* попълва се автоматично от currentUser */
 
 /* ─── BASE SEND ─────────────────────────────────────────── */
-function sendEmail(to, subject, html) {
+function sendEmail(to, subject, html, extra) {
   var toArr = Array.isArray(to) ? to : [to];
+  extra = extra || {};
+  var payload = { to: toArr, subject: subject, html: html };
+  if (extra.attachments && extra.attachments.length) payload.attachments = extra.attachments;
+  if (extra.cc) payload.cc = extra.cc;
+  if (extra.reply_to) payload.reply_to = extra.reply_to;
   /* Използваме Supabase Edge Function като proxy (решава CORS) */
   /* Пробваме send-email, после index ако неуспешно */
   var fnUrl='https://xiwkdiqqplgdcrkewgtv.supabase.co/functions/v1/resend-email';
@@ -19,7 +24,7 @@ function sendEmail(to, subject, html) {
       'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
       'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA'
     },
-    body: JSON.stringify({ to: toArr, subject: subject, html: html })
+    body: JSON.stringify(payload)
   }).then(function(r) {
     return r.text().then(function(txt) {
       var d; try{d=JSON.parse(txt);}catch(e){d={message:txt};}

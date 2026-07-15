@@ -19,6 +19,10 @@ function canSubmitDiff() {
 function canReviewDiff() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
+/* Изпращане на имейл до доставчик - само Цветелина Тенева */
+function canSendDiffEmail() {
+  return currentUser && (currentUser.email||'').toLowerCase() === 'c.teneva@temax.bg';
+}
 
 var DIFF_SB  = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
 var DIFF_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
@@ -356,7 +360,11 @@ function renderDiffReportsSection(){
     h+='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">';
     h+='<div><span style="font-weight:700;">🏪 '+esc(rep.store_name||'')+'</span>'+
        '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+(rep.direction==='supplier'?'📦 Доставчик':'🔄 Междускладов')+' — '+esc(rep.counterpart||'')+'</span></div>'+
-       '<div style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</div>';
+       '<div style="display:flex;align-items:center;gap:8px;">'+
+       '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</span>'+
+       (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+fmtDate(rep.email_sent_at)+'</span>':'')+
+       (canSendDiffEmail()?'<button data-rid="'+rep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✉️ Изпрати имейл</button>':'')+
+       '</div>';
     h+='</div>';
     if(lines.length){
       h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
@@ -445,33 +453,64 @@ function collectDiffItems(){
 }
 
 /* ── Снимки - качване към Storage, събрани преди submit ── */
+/* Компресира снимка чрез canvas - смалява до maxDim по дългата страна и преизкодира като JPEG.
+   Ако файлът не е снимка (напр. видео), се връща непроменен. */
+function diffCompressImage(file,maxDim,quality){
+  return new Promise(function(resolve){
+    if(!file.type||file.type.indexOf('image/')!==0){ resolve(file); return; }
+    try{
+      var url=URL.createObjectURL(file);
+      var img=new Image();
+      img.onload=function(){
+        URL.revokeObjectURL(url);
+        try{
+          var w=img.width,h=img.height;
+          var scale=Math.min(1,maxDim/Math.max(w,h));
+          var cw=Math.max(1,Math.round(w*scale)), ch=Math.max(1,Math.round(h*scale));
+          var canvas=document.createElement('canvas');
+          canvas.width=cw; canvas.height=ch;
+          var ctx=canvas.getContext('2d');
+          if(!ctx){resolve(file);return;}
+          ctx.drawImage(img,0,0,cw,ch);
+          canvas.toBlob(function(blob){ resolve(blob||file); },'image/jpeg',quality);
+        }catch(err){ resolve(file); }
+      };
+      img.onerror=function(){ try{URL.revokeObjectURL(url);}catch(e){} resolve(file); };
+      img.src=url;
+    }catch(err){ resolve(file); }
+  });
+}
 function diffUploadPhoto(input){
   var files=Array.from(input.files||[]);
   if(!files.length)return;
   var wrap=document.getElementById('diff-photos-wrap');
   files.forEach(function(file){
-    var ext=(file.name.split('.').pop()||'jpg').toLowerCase();
-    var path='differences/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+ext;
     var placeholderId='ph-'+Math.random().toString(36).slice(2,10);
     if(wrap) wrap.insertAdjacentHTML('beforeend','<div id="'+placeholderId+'" style="width:56px;height:56px;border-radius:6px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:10px;color:#94a3b8;">⏳</div>');
-    var reader=new FileReader();
-    reader.onload=function(e){
-      fetch(DIFF_SB+'/storage/v1/object/'+DIFF_BKT+'/'+path,{
-        method:'POST',
-        headers:{'Authorization':'Bearer '+DIFF_KEY,'Content-Type':file.type||'image/jpeg','x-upsert':'true'},
-        body:e.target.result
-      }).then(function(r){return r.ok;}).then(function(ok){
-        var ph=document.getElementById(placeholderId);
-        if(!ok){ if(ph) ph.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>'; return; }
-        var pub=DIFF_SB+'/storage/v1/object/public/'+DIFF_BKT+'/'+path;
-        diffPendingPhotos.push({url:pub,name:file.name});
-        if(ph) ph.outerHTML='<a href="'+esc(pub)+'" target="_blank"><img src="'+esc(pub)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
-      }).catch(function(){
-        var ph2=document.getElementById(placeholderId);
-        if(ph2) ph2.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>';
-      });
-    };
-    reader.readAsArrayBuffer(file);
+    diffCompressImage(file,1600,0.75).then(function(compressed){
+      var isImg=file.type&&file.type.indexOf('image/')===0;
+      var ext=isImg?'jpg':((file.name.split('.').pop()||'bin').toLowerCase());
+      var ctype=isImg?'image/jpeg':(file.type||'application/octet-stream');
+      var path='differences/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+ext;
+      var reader=new FileReader();
+      reader.onload=function(e){
+        fetch(DIFF_SB+'/storage/v1/object/'+DIFF_BKT+'/'+path,{
+          method:'POST',
+          headers:{'Authorization':'Bearer '+DIFF_KEY,'Content-Type':ctype,'x-upsert':'true'},
+          body:e.target.result
+        }).then(function(r){return r.ok;}).then(function(ok){
+          var ph=document.getElementById(placeholderId);
+          if(!ok){ if(ph) ph.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>'; return; }
+          var pub=DIFF_SB+'/storage/v1/object/public/'+DIFF_BKT+'/'+path;
+          diffPendingPhotos.push({url:pub,name:file.name});
+          if(ph) ph.outerHTML='<a href="'+esc(pub)+'" target="_blank"><img src="'+esc(pub)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+        }).catch(function(){
+          var ph2=document.getElementById(placeholderId);
+          if(ph2) ph2.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>';
+        });
+      };
+      reader.readAsArrayBuffer(compressed);
+    });
   });
   input.value='';
 }
@@ -605,5 +644,151 @@ function submitDiffReport(){
         loadStockDiff();
       });
     });
+  });
+}
+
+/* ══════════════════════════════════════════
+   ИМЕЙЛ ДО ДОСТАВЧИК/ИЗПРАЩАЧ (само Цветелина Тенева)
+══════════════════════════════════════════ */
+
+function diffEmailBodyHtml(rep,lines){
+  var h='<div style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;">';
+  h+='<p>Здравейте,</p>';
+  h+='<p>Установени са разлики при '+(rep.direction==='supplier'?'приемане на доставка':'междускладов трансфер')+' — '+esc(rep.counterpart||'')+
+     (rep.document_number?', документ №'+esc(rep.document_number):'')+
+     (rep.doc_date?', дата '+fmtDate(rep.doc_date):'')+'.</p>';
+  h+='<table style="width:100%;border-collapse:collapse;font-size:13px;margin:14px 0;">';
+  h+='<tr style="background:#f3f4f6;"><th style="border:1px solid #ccc;padding:6px;text-align:left;">SAP №</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Артикул</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Категория</th><th style="border:1px solid #ccc;padding:6px;text-align:right;">По документ</th><th style="border:1px solid #ccc;padding:6px;text-align:right;">Реално</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Коментар</th></tr>';
+  lines.forEach(function(l){
+    h+='<tr><td style="border:1px solid #ccc;padding:6px;">'+esc(l.material_code||'')+'</td>'+
+       '<td style="border:1px solid #ccc;padding:6px;">'+esc(l.material_name||'')+'</td>'+
+       '<td style="border:1px solid #ccc;padding:6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
+       '<td style="border:1px solid #ccc;padding:6px;text-align:right;">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
+       '<td style="border:1px solid #ccc;padding:6px;text-align:right;">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
+       '<td style="border:1px solid #ccc;padding:6px;">'+esc(l.comment||'')+'</td></tr>';
+  });
+  h+='</table>';
+  if(rep.general_comment) h+='<p><strong>Допълнителна информация:</strong> '+esc(rep.general_comment)+'</p>';
+  var photos=Array.isArray(rep.photos)?rep.photos:[];
+  if(photos.length) h+='<p>📎 Прикачени са '+photos.length+' снимк'+(photos.length===1?'а':'и')+' към този имейл.</p>';
+  h+='<p>Моля за обратна връзка относно решението по случая.</p>';
+  h+='<p>Поздрави,<br>'+esc(currentUser.display_name||currentUser.email)+'<br>ТеМАХ</p>';
+  h+='</div>';
+  return h;
+}
+
+function diffEmailModalHtml(rep,lines){
+  var subject=(rep.document_number?rep.document_number+' - ':'')+'РАЗЛИКИ ('+esc(rep.store_name||'')+')';
+  return '<div class="bov" id="diff-email-ov"><div class="bmod" style="width:680px;max-height:90vh;overflow-y:auto;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
+    '<div style="font-size:16px;font-weight:700;">✉️ Изпрати имейл до '+(rep.direction==='supplier'?'доставчик':'изпращач')+'</div>'+
+    '<button onclick="closeDiffEmailModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+
+    '<label class="fl">До (имейл на '+(rep.direction==='supplier'?'доставчика':'обекта изпращач')+') *</label>'+
+    '<input class="fi" id="de-to" list="de-supplier-list" placeholder="name@supplier.bg">'+
+    '<datalist id="de-supplier-list"></datalist>'+
+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">'+
+    '<div><label class="fl">Копие до (CC)</label><input class="fi" id="de-cc" value="'+esc(currentUser.email||'')+'"></div>'+
+    '<div><label class="fl">Отговори на (Reply-To)</label><input class="fi" id="de-reply" value="'+esc(currentUser.email||'')+'"></div>'+
+    '</div>'+
+
+    '<label class="fl" style="margin-top:8px;">Тема</label>'+
+    '<input class="fi" id="de-subject" value="'+esc(subject)+'">'+
+
+    '<label class="fl" style="margin-top:8px;">Съдържание</label>'+
+    '<textarea class="fi" id="de-body-note" rows="2" placeholder="(незадължително) кратко въведение отгоре на автоматичната таблица..."></textarea>'+
+
+    '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-top:8px;max-height:220px;overflow-y:auto;font-size:12px;">'+
+    diffEmailBodyHtml(rep,lines)+
+    '</div>'+
+
+    '<div style="font-size:12px;color:#64748b;margin-top:8px;" id="de-photos-note">📎 Ще бъдат прикачени '+((rep.photos||[]).length)+' снимк'+((rep.photos||[]).length===1?'а':'и')+' от бланката.</div>'+
+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="closeDiffEmailModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 18px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button id="de-send-btn" data-rid="'+rep.id+'" onclick="sendDiffEmail(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;">✉️ Изпрати</button>'+
+    '</div></div></div>';
+}
+
+function openDiffEmailModal(reportId){
+  if(!canSendDiffEmail()){toast('Само Цветелина Тенева може да изпраща имейли до доставчици','#dc2626');return;}
+  var rep=diffReports.find(function(r){return String(r.id)===String(reportId);});
+  if(!rep){toast('Бланката не е намерена','#dc2626');return;}
+  var lines=sdData.filter(function(x){return x.report_id===rep.id;});
+  var old=document.getElementById('diff-email-ov'); if(old)old.remove();
+  document.body.insertAdjacentHTML('beforeend',diffEmailModalHtml(rep,lines));
+  document.getElementById('diff-email-ov').classList.add('open');
+  if(rep.counterpart) document.getElementById('de-to').value=''; /* оставяме празно - Цветелина избира от списъка или пише ръчно */
+
+  /* Автоматично предлагане на имейл на доставчика от Контакти */
+  sbGet('contacts','category=eq.supplier&order=name').then(function(rows){
+    if(!Array.isArray(rows))return;
+    var dl=document.getElementById('de-supplier-list');
+    if(!dl)return;
+    dl.innerHTML=rows.filter(function(c){return c.email;}).map(function(c){
+      return '<option value="'+esc(c.email)+'">'+esc(c.name||'')+'</option>';
+    }).join('');
+    /* ако името на доставчика/изпращача съвпада приблизително с контакт - предлагаме директно */
+    if(rep.counterpart){
+      var match=rows.find(function(c){return c.email && c.name && c.name.toLowerCase().indexOf(rep.counterpart.toLowerCase())>=0;});
+      var toEl=document.getElementById('de-to');
+      if(match && toEl) toEl.value=match.email;
+    }
+  });
+}
+function closeDiffEmailModal(){
+  var ov=document.getElementById('diff-email-ov'); if(ov)ov.remove();
+}
+
+function diffUrlToBase64(url){
+  return fetch(url).then(function(r){return r.blob();}).then(function(blob){
+    return new Promise(function(resolve,reject){
+      var reader=new FileReader();
+      reader.onloadend=function(){ resolve(String(reader.result).split(',')[1]||''); };
+      reader.onerror=reject;
+      reader.readAsDataURL(blob);
+    });
+  });
+}
+
+function sendDiffEmail(reportId){
+  if(!canSendDiffEmail()){toast('Нямаш права за това действие','#dc2626');return;}
+  var rep=diffReports.find(function(r){return String(r.id)===String(reportId);});
+  if(!rep){toast('Бланката не е намерена','#dc2626');return;}
+  var to=(document.getElementById('de-to').value||'').trim();
+  if(!to){toast('Въведи имейл на получателя','#dc2626');return;}
+  var cc=(document.getElementById('de-cc').value||'').trim();
+  var replyTo=(document.getElementById('de-reply').value||'').trim();
+  var subject=(document.getElementById('de-subject').value||'').trim()||'РАЗЛИКИ';
+  var note=(document.getElementById('de-body-note').value||'').trim();
+  var lines=sdData.filter(function(x){return x.report_id===rep.id;});
+
+  var bodyHtml=(note?'<p style="font-family:Arial,sans-serif;font-size:14px;">'+esc(note)+'</p>':'')+diffEmailBodyHtml(rep,lines);
+
+  var btn=document.getElementById('de-send-btn');
+  if(btn){btn.disabled=true;btn.textContent='⏳ Подготвям снимките...';}
+
+  var photos=Array.isArray(rep.photos)?rep.photos:[];
+  Promise.all(photos.map(function(p){
+    return diffUrlToBase64(p.url).then(function(b64){ return {filename:p.name||'снимка.jpg',content:b64}; }).catch(function(){ return null; });
+  })).then(function(atts){
+    var attachments=atts.filter(Boolean);
+    if(btn) btn.textContent='⏳ Изпращане...';
+    return sendEmail(to,subject,bodyHtml,{cc:cc||undefined,reply_to:replyTo||undefined,attachments:attachments});
+  }).then(function(res){
+    if(!res.ok){
+      toast('Грешка при изпращане: '+(res.data&&res.data.message?res.data.message:'—'),'#dc2626');
+      if(btn){btn.disabled=false;btn.textContent='✉️ Изпрати';}
+      return;
+    }
+    toast('✅ Имейлът е изпратен!');
+    sbPatch('differences_reports','id=eq.'+rep.id,{email_sent_at:new Date().toISOString()}).then(function(){
+      closeDiffEmailModal();
+      loadStockDiff();
+    });
+  }).catch(function(err){
+    toast('Грешка: '+(err.message||err),'#dc2626');
+    if(btn){btn.disabled=false;btn.textContent='✉️ Изпрати';}
   });
 }
