@@ -524,7 +524,7 @@ function renderBulView(){
         if(canEdit())html+='<span style="color:#cbd5e1;font-size:13px;margin-top:3px;flex-shrink:0;" title="Провлачи върху таб, за да преместиш отдела">⠿</span>';
         html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" onchange="bulToggleTask(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;">';
         html+='<div style="flex:1;"><div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
-        if(t.description)html+='<div style="font-size:11px;color:#94a3b8;">'+esc(t.description)+'</div>';
+        if(t.description)html+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         if(due)html+='<div style="font-size:10px;color:'+dueColor+';margin-top:2px;">📅 Срок: '+due.toLocaleDateString('bg-BG')+(diff<0?' ⚠️':diff===0?' (Днес!)':diff<=2?' ('+diff+' дни)':'')+"</div>";
         html+=renderTaskAttachments(t);
         html+=renderSubtasks(t.id, dk);
@@ -1480,7 +1480,7 @@ function printSection(what){
     '.task-row{display:flex;gap:3mm;padding:2.5mm 0;border-bottom:1pt solid #f1f5f9;align-items:flex-start;}' +
     '.task-cb{width:13pt;height:13pt;border:1.5pt solid #e2e8f0;border-radius:2pt;flex-shrink:0;margin-top:1pt;}' +
     '.task-title{font-size:11.5pt;font-weight:600;margin-bottom:0.5mm;}' +
-    '.task-desc{font-size:10pt;color:#64748b;}' +
+    '.task-desc{font-size:10pt;color:#64748b;overflow-wrap:break-word;}' +
     '.task-due{font-size:9.5pt;color:#94a3b8;margin-top:0.5mm;}' +
     '.dept-badge{display:inline-block;padding:1mm 3mm;border-radius:20mm;font-size:9.5pt;font-weight:600;margin-bottom:2mm;}' +
     '.badge-trade{background:#f0fdf4;color:#14532d;}' +
@@ -1573,7 +1573,7 @@ function printSection(what){
           (isDone?'<div style="color:#fff;font-size:9pt;text-align:center;line-height:13pt;">✓</div>':'')+'</div>';
         s+='<div style="flex:1;">';
         s+='<div class="task-title">'+esc(t.title||'')+'</div>';
-        if(t.description)s+='<div class="task-desc">'+esc(t.description)+'</div>';
+        if(t.description)s+='<div class="task-desc">'+linkify(t.description)+'</div>';
         if(t.due_date)s+='<div class="task-due">📅 Срок: '+new Date(t.due_date).toLocaleDateString('bg-BG')+(isDone&&comp?' &nbsp; ✅ '+esc(comp.completed_by||''):'')+'</div>';
         s+='</div></div>';
       });
@@ -1661,7 +1661,7 @@ function renderTasksPanel() {
         h += '<div style="flex:1;">';
         h += '<div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
         h += esc(t.title||'')+'</div>';
-        if (t.description) h += '<div style="font-size:11px;color:#94a3b8;">'+esc(t.description)+'</div>';
+        if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         h += renderTaskAttachments(t);
         if (t.due_date) {
           var due = new Date(t.due_date);
@@ -1836,7 +1836,7 @@ function renderRecurringTasks(dk) {
         'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;">';
       h += '<div style="flex:1;">';
       h += '<div style="font-size:13px;font-weight:500;color:' + (done?'#94a3b8':'#0f172a') + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>';
-      if (t.description) h += '<div style="font-size:11px;color:#94a3b8;">' + esc(t.description) + '</div>';
+      if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">' + linkify(t.description) + '</div>';
       var dueLbl = recurringDueLabel(t);
       if (dueLbl) h += '<div style="font-size:10px;color:'+(dueToday&&!done?'#d97706':'#94a3b8')+';margin-top:2px;">🔁 '+dueLbl+(dueToday&&!done?' (днес!)':'')+'</div>';
       h += renderRecurringAttachments(t);
