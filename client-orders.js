@@ -165,8 +165,10 @@ function openClientModal(){
   document.getElementById('c-date').value=today();
   document.getElementById('c-hour').value='10:00';
   document.getElementById('c-delivery').value='';
-  document.getElementById('c-from-store').value=currentUser.store_name;
-  document.getElementById('c-fulfiller').value=currentUser.store_name;
+  loadAllStores().then(function(){
+    fillStoreSelect(document.getElementById('c-from-store'),currentUser.store_name);
+    fillStoreSelect(document.getElementById('c-fulfiller'),currentUser.store_name);
+  });
   renderItemRows('c-items',[{}]);
   document.getElementById('client-modal').classList.add('open');
 }

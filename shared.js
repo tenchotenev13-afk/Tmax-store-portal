@@ -145,6 +145,24 @@ function itemsPrintBlock(o){
 
 /* Право на корекция: за client_orders - само магазина-заявител (store_name) или admin/accounting;
    за transport_orders - само собствения магазин или глобална роля (admin/accounting/logistics). */
+/* ── Списък на всички магазини/складове (кеширан) - за dropdown полета вместо свободен текст ── */
+var allStoresCache=null;
+function loadAllStores(){
+  if(allStoresCache)return Promise.resolve(allStoresCache);
+  return sbGet('stores','select=name&order=name').then(function(data){
+    allStoresCache=Array.isArray(data)?data.map(function(s){return s.name;}):[];
+    return allStoresCache;
+  }).catch(function(){allStoresCache=[];return allStoresCache;});
+}
+function fillStoreSelect(selectEl,selectedValue){
+  if(!selectEl||!allStoresCache)return;
+  var opts=allStoresCache.slice();
+  if(selectedValue&&opts.indexOf(selectedValue)<0)opts.push(selectedValue); /* пази стара/невалидна стойност видима, не я трие тихо */
+  selectEl.innerHTML=opts.map(function(name){
+    return '<option'+(name===selectedValue?' selected':'')+'>'+esc(name)+'</option>';
+  }).join('');
+}
+
 /* ── Ограничение на клиентски заявки към складове/ЦО за определен период (Администрация) ── */
 function loadOrderRestrictions(){
   return sbGet('order_restrictions','active=eq.true').then(function(data){
@@ -231,8 +249,10 @@ function openCorrection(id,table){
   document.getElementById('edt-fromstore-wrap').style.display=isClient?'':'none';
   document.getElementById('edt-fulfiller-wrap').style.display=isClient?'':'none';
   if(isClient){
-    document.getElementById('edt-from-store').value=rec.from_store||'';
-    document.getElementById('edt-fulfiller').value=rec.fulfiller||'';
+    loadAllStores().then(function(){
+      fillStoreSelect(document.getElementById('edt-from-store'),rec.from_store||'');
+      fillStoreSelect(document.getElementById('edt-fulfiller'),rec.fulfiller||'');
+    });
   } else {
     document.getElementById('edt-addr').value=rec.address||'';
   }

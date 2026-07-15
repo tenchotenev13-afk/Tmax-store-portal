@@ -422,8 +422,8 @@ OneSignalDeferred.push(async function(OneSignal) {
       <button type="button" onclick="addItemRow('c-items')" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">+ Добави артикул</button>
     </div>
     <div><label class="fl">№ Бон</label><input class="fi" id="c-bon" placeholder="000123"></div>
-    <div><label class="fl">Поръчан от магазин</label><input class="fi" id="c-from-store"></div>
-    <div><label class="fl">Изпълнява (склад)</label><input class="fi" id="c-fulfiller"></div>
+    <div><label class="fl">Поръчан от магазин</label><select class="fi" id="c-from-store"></select></div>
+    <div><label class="fl">Изпълнява (склад)</label><select class="fi" id="c-fulfiller"></select></div>
     <div><label class="fl">★ Дата на доставка</label><input type="date" class="fi" id="c-delivery"></div>
     <div><label class="fl">Агент / Изготвил</label><input class="fi" id="c-agent"></div>
     <div class="full"><label class="fl">Забележка</label><input class="fi" id="c-note" placeholder="Допълнителна информация..."></div>
@@ -467,8 +467,8 @@ OneSignalDeferred.push(async function(OneSignal) {
       <button type="button" onclick="addItemRow('edt-items')" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;">+ Добави артикул</button>
     </div>
     <div><label class="fl">№ Бон</label><input class="fi" id="edt-bon" placeholder="000123"></div>
-    <div id="edt-fromstore-wrap"><label class="fl">Поръчан от магазин</label><input class="fi" id="edt-from-store"></div>
-    <div id="edt-fulfiller-wrap"><label class="fl">Изпълнява (склад)</label><input class="fi" id="edt-fulfiller"></div>
+    <div id="edt-fromstore-wrap"><label class="fl">Поръчан от магазин</label><select class="fi" id="edt-from-store"></select></div>
+    <div id="edt-fulfiller-wrap"><label class="fl">Изпълнява (склад)</label><select class="fi" id="edt-fulfiller"></select></div>
     <div><label class="fl">★ Дата на доставка</label><input type="date" class="fi" id="edt-delivery"></div>
     <div><label class="fl">Агент / Изготвил</label><input class="fi" id="edt-agent"></div>
     <div class="full"><label class="fl">Бележки</label><input class="fi" id="edt-note" placeholder="Допълнителна информация..."></div>
