@@ -41,6 +41,7 @@ function coBuildMonthOptions(){
 }
 
 function loadClientOrders(){
+  loadOrderRestrictions();
   var q='order=created_at.desc';
   var stores=assignedStores();
   if(!stores){
@@ -174,6 +175,12 @@ function submitClientOrder(){
   var name=v('c-name'),phone=v('c-phone');
   var items=collectItems('c-items');
   if(!name||!phone){toast('Попълни задължителните полета *','#dc2626');return;}
+  var fulfillerVal=v('c-fulfiller');
+  var restriction=checkFulfillerRestriction(fulfillerVal);
+  if(restriction){
+    toast('🚫 '+fulfillerVal+' не приема нови заявки от '+fmtDate(restriction.start_date)+' до '+fmtDate(restriction.end_date)+(restriction.note?' — '+restriction.note:''),'#dc2626');
+    return;
+  }
   if(!items.length){toast('Добави поне един артикул с продукт','#dc2626');return;}
   var first=items[0];
   var delivery=v('c-delivery')||null;

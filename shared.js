@@ -15,6 +15,7 @@ var transportOrders=[],clientOrders=[],docs=[];
 var transportFilter='all',orderFilter='all',docFilter='all';
 var statusTargetId=null,statusTargetTable=null;
 var correctionTargetId=null,correctionTargetTable=null;
+var orderRestrictions=[]; /* активни ограничения на заявки към складове/ЦО за определен период */
 
 function isGlobal(){
   if(!currentUser)return false;
@@ -144,6 +145,26 @@ function itemsPrintBlock(o){
 
 /* Право на корекция: за client_orders - само магазина-заявител (store_name) или admin/accounting;
    за transport_orders - само собствения магазин или глобална роля (admin/accounting/logistics). */
+/* ── Ограничение на клиентски заявки към складове/ЦО за определен период (Администрация) ── */
+function loadOrderRestrictions(){
+  return sbGet('order_restrictions','active=eq.true').then(function(data){
+    orderRestrictions=Array.isArray(data)?data:[];
+  }).catch(function(){orderRestrictions=[];});
+}
+/* Връща обекта на ограничението, ако fulfillerName е забранен ДНЕС, иначе null */
+function checkFulfillerRestriction(fulfillerName){
+  if(!fulfillerName||!orderRestrictions.length)return null;
+  var todayStr=today();
+  var hit=orderRestrictions.find(function(r){
+    var stores=Array.isArray(r.restricted_stores)?r.restricted_stores:[];
+    if(stores.indexOf(fulfillerName)<0)return false;
+    if(r.start_date&&todayStr<r.start_date)return false;
+    if(r.end_date&&todayStr>r.end_date)return false;
+    return true;
+  });
+  return hit||null;
+}
+
 function canCorrectRecord(rec,table){
   if(!rec||!currentUser)return false;
   if(table==='client_orders'){
@@ -233,8 +254,14 @@ function submitCorrection(){
     agent:v('edt-agent'),delivery:v('edt-delivery')||null
   };
   if(correctionTargetTable==='client_orders'){
+    var fulfillerVal=v('edt-fulfiller');
+    var restriction=checkFulfillerRestriction(fulfillerVal);
+    if(restriction){
+      toast('🚫 '+fulfillerVal+' не приема заявки от '+fmtDate(restriction.start_date)+' до '+fmtDate(restriction.end_date)+(restriction.note?' — '+restriction.note:''),'#dc2626');
+      return;
+    }
     patch.from_store=v('edt-from-store');
-    patch.fulfiller=v('edt-fulfiller');
+    patch.fulfiller=fulfillerVal;
     patch.note=v('edt-note');
   } else {
     patch.address=v('edt-addr');

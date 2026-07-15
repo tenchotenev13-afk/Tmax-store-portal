@@ -3,6 +3,7 @@
 function loadAdmin(){
   loadStoresAdmin();
   loadUsersAdmin();
+  loadRestrictionsAdmin();
   /* Backup секция — само за admin */
   if(currentUser && currentUser.role==='admin'){
     var backupContainer=document.getElementById('backup-admin-section');
@@ -453,4 +454,124 @@ function renderBackupSection(){
       '</tbody>'+
     '</table></div>'+
   '</div>';
+}
+
+/* ══════════════════════════════════════════
+   ОГРАНИЧЕНИЕ НА КЛИЕНТСКИ ЗАЯВКИ (период + складове/ЦО)
+══════════════════════════════════════════ */
+
+var adminRestrictions = [];
+
+function loadRestrictionsAdmin(){
+  sbGet('order_restrictions','order=start_date.desc').then(function(data){
+    adminRestrictions = Array.isArray(data)?data:[];
+    renderRestrictionsAdmin();
+  }).catch(function(){
+    var body=document.getElementById('restrictions-body');
+    if(body) body.innerHTML='<div style="text-align:center;padding:16px;color:#dc2626;font-size:12px;">Грешка при зареждане.</div>';
+  });
+}
+
+function renderRestrictionsAdmin(){
+  var body=document.getElementById('restrictions-body'); if(!body)return;
+  if(!adminRestrictions.length){
+    body.innerHTML='<div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;">Няма зададени ограничения.</div>';
+    return;
+  }
+  var todayStr=today();
+  body.innerHTML=adminRestrictions.map(function(r){
+    var stores=Array.isArray(r.restricted_stores)?r.restricted_stores:[];
+    var isNow = r.active && (!r.start_date||todayStr>=r.start_date) && (!r.end_date||todayStr<=r.end_date);
+    var statusBadge = !r.active
+      ? '<span style="background:#f1f5f9;color:#94a3b8;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;">Изключено</span>'
+      : (isNow
+        ? '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;">🔴 Активно СЕГА</span>'
+        : '<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;">⏳ Планирано</span>');
+    return '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:8px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;flex-wrap:wrap;">'+
+        '<div>'+
+          '<div style="font-size:12.5px;font-weight:600;margin-bottom:3px;">'+stores.map(function(s){return esc(s);}).join(', ')+'</div>'+
+          '<div style="font-size:11px;color:#64748b;">'+fmtDate(r.start_date)+' — '+fmtDate(r.end_date)+(r.note?' · '+esc(r.note):'')+'</div>'+
+        '</div>'+
+        '<div style="display:flex;align-items:center;gap:6px;flex-shrink:0;">'+
+          statusBadge+
+          '<button onclick="toggleRestrictionActive(\''+r.id+'\','+(!r.active)+')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">'+(r.active?'⏸ Спри':'▶ Активирай')+'</button>'+
+          '<button onclick="deleteRestriction(\''+r.id+'\')" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button>'+
+        '</div>'+
+      '</div></div>';
+  }).join('');
+}
+
+function openRestrictionModal(){
+  sbGet('stores','order=name&select=name').then(function(data){
+    var allStores=(Array.isArray(data)?data:[]).map(function(s){return s.name;});
+    if(allStores.indexOf('Централен офис')<0) allStores.unshift('Централен офис');
+    _renderRestrictionModal(allStores);
+  });
+}
+function _renderRestrictionModal(allStores){
+  var old=document.getElementById('restriction-modal-ov'); if(old)old.remove();
+  var html='<div class="bov open" id="restriction-modal-ov" onclick="if(event.target===this)closeRestrictionModal()">'+
+    '<div class="bmod" style="width:440px;max-height:88vh;overflow-y:auto;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
+    '<div style="font-size:15px;font-weight:700;">🚫 Нова забрана на заявки</div>'+
+    '<button onclick="closeRestrictionModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>'+
+    '</div>'+
+    '<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;font-weight:700;margin-bottom:6px;">Складове / ЦО, които не приемат заявки:</div>'+
+    '<div id="restriction-store-list" style="max-height:220px;overflow-y:auto;border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:12px;">'+
+    allStores.map(function(name){
+      return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;font-size:13px;cursor:pointer;">'+
+        '<input type="checkbox" class="restriction-store-cb" value="'+esc(name)+'"> '+esc(name)+
+        '</label>';
+    }).join('')+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">'+
+    '<div><label class="fl">Начална дата *</label><input type="date" class="fi" id="restr-start" value="'+today()+'"></div>'+
+    '<div><label class="fl">Крайна дата *</label><input type="date" class="fi" id="restr-end"></div>'+
+    '</div>'+
+    '<label class="fl">Бележка (незадължително)</label>'+
+    '<input class="fi" id="restr-note" placeholder="напр. Годишна инвентаризация" style="margin-bottom:14px;">'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
+    '<button onclick="closeRestrictionModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button onclick="submitRestriction()" style="border:none;background:#dc2626;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Запази забраната</button>'+
+    '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+function closeRestrictionModal(){
+  var ov=document.getElementById('restriction-modal-ov'); if(ov)ov.remove();
+}
+function submitRestriction(){
+  var stores=[].map.call(document.querySelectorAll('.restriction-store-cb:checked'),function(cb){return cb.value;});
+  var start=document.getElementById('restr-start').value;
+  var end=document.getElementById('restr-end').value;
+  if(!stores.length){toast('Избери поне един склад/ЦО','#dc2626');return;}
+  if(!start||!end){toast('Задай начална и крайна дата','#dc2626');return;}
+  if(end<start){toast('Крайната дата трябва да е след началната','#dc2626');return;}
+  sbPost('order_restrictions',{
+    restricted_stores:stores,
+    start_date:start,
+    end_date:end,
+    note:document.getElementById('restr-note').value.trim(),
+    active:true,
+    created_by:currentUser.display_name||currentUser.email
+  }).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    toast('✅ Забраната е зададена!');
+    closeRestrictionModal();
+    loadRestrictionsAdmin();
+  });
+}
+function toggleRestrictionActive(id,active){
+  sbPatch('order_restrictions','id=eq.'+id,{active:active}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    loadRestrictionsAdmin();
+  });
+}
+function deleteRestriction(id){
+  if(!confirm('Изтрий тази забрана?'))return;
+  sbDelete('order_restrictions','id=eq.'+id).then(function(res){
+    if(!res.ok){toast('Грешка при изтриване','#dc2626');return;}
+    toast('✅ Изтрито!');
+    loadRestrictionsAdmin();
+  });
 }
