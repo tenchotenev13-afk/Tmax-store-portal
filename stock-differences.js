@@ -10,12 +10,27 @@ function canEditSD() {
 function canAddSD() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
+/* Подаване на нова бланка за разлики - магазинска страна (същите роли като canEditTransit) */
+function canSubmitDiff() {
+  return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
+}
+
+var DIFF_SB  = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
+var DIFF_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
+var DIFF_BKT = 'bulletin-files'; /* преизползваме съществуващия bucket, отделен префикс на пътя */
+
+var diffReports = [];       /* differences_reports - заредени бланки */
+var diffPendingPhotos = []; /* снимки, качени в текущо отворената форма за подаване, преди submit */
 
 function loadStockDiff() {
   var wrap = document.getElementById('mod-stock-diff');
   if (wrap) wrap.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
-  sbGet('stock_differences', 'order=confirmed_date.desc' + storeQ()).then(function(data) {
-    sdData = Array.isArray(data) ? data : [];
+  Promise.all([
+    sbGet('stock_differences', 'order=created_at.desc.nullslast' + storeQ()),
+    sbGet('differences_reports', 'order=created_at.desc' + storeQ())
+  ]).then(function(res){
+    sdData = Array.isArray(res[0]) ? res[0] : [];
+    diffReports = Array.isArray(res[1]) ? res[1] : [];
     renderStockDiff();
   }).catch(function(err) {
     var w = document.getElementById('mod-stock-diff');
@@ -44,14 +59,19 @@ function renderStockDiff() {
 
   /* Заглавие */
   h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">';
-  h += '<div style="font-size:20px;font-weight:600;">📋 Стока за изтегляне по разлики</div>';
-  if (canAdd) h += '<button onclick="openSDModal(null)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави</button>';
-  h += '</div>';
+  h += '<div style="font-size:20px;font-weight:600;">📋 Разлики</div>';
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
+  if (canSubmitDiff()) h += '<button onclick="openDiffSubmitModal()" style="border:none;background:#7c3aed;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📝 Подай бланка</button>';
+  if (canAdd) h += '<button onclick="openSDModal(null)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави ръчно</button>';
+  h += '</div></div>';
 
   /* Важна бележка */
   h += '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;font-weight:600;color:#856404;">'+
     '⚠️ ЗАПРИХОЖДАВАТЕ САМО АКО СТОКАТА Е ПРИ ВАС И Е В ДОБЪР ТЪРГОВСКИ ВИД!'+
     '</div>';
+
+  /* Новоподадени бланки - чакат преглед от Цветелина */
+  h += renderDiffReportsSection();
 
   /* Карти */
   h += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;max-width:400px;">';
@@ -246,5 +266,286 @@ function submitSD() {
     closeSDModal();
     toast('✅ '+(sdEditId?'Записано!':'Добавено!'));
     loadStockDiff();
+  });
+}
+
+/* ══════════════════════════════════════════
+   ПОДАВАНЕ НА БЛАНКА ЗА РАЗЛИКИ (магазинска страна)
+══════════════════════════════════════════ */
+
+var DIFF_CATEGORIES = [
+  ['undelivered','📦 Недоставен артикул (липса)'],
+  ['excess','📈 Излишък (получен в повече)'],
+  ['pack_mismatch','📦 Разлика от фабрична опаковка'],
+  ['damaged','💔 Увредена стока / липсват части'],
+  ['wrong_barcode','🏷️ Грешен баркод / етикет / описание'],
+  ['similar_item','🎨 Сходен артикул (различен цвят/размер)'],
+  ['wrong_item','❌ Грешен артикул (не е поръчван)']
+];
+function diffCategoryLabel(v){
+  var f=DIFF_CATEGORIES.find(function(c){return c[0]===v;});
+  return f?f[1]:(v||'—');
+}
+
+/* ── Секция с подадени бланки (чакат преглед) ── */
+function renderDiffReportsSection(){
+  var unreviewed = diffReports.filter(function(r){return !r.reviewed;});
+  if(!unreviewed.length) return '';
+  var h='<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:14px;">';
+  h+='<div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:10px;">🆕 Нови подадени бланки — чакат преглед ('+unreviewed.length+')</div>';
+  unreviewed.forEach(function(rep){
+    var lines = sdData.filter(function(x){return x.report_id===rep.id;});
+    h+='<div style="background:#fff;border:1px solid #e9d5ff;border-radius:8px;padding:12px;margin-bottom:8px;">';
+    h+='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">';
+    h+='<div><span style="font-weight:700;">🏪 '+esc(rep.store_name||'')+'</span>'+
+       '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+(rep.direction==='supplier'?'📦 Доставчик':'🔄 Междускладов')+' — '+esc(rep.counterpart||'')+'</span></div>'+
+       '<div style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</div>';
+    h+='</div>';
+    if(lines.length){
+      h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
+      h+='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">По док.</th><th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар</th></tr>';
+      lines.forEach(function(l){
+        h+='<tr style="border-top:1px solid #f1f5f9;">'+
+          '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
+          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+'</td>'+
+          '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
+          '<td style="padding:3px 6px;text-align:right;">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
+          '<td style="padding:3px 6px;text-align:right;">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
+          '<td style="padding:3px 6px;color:#64748b;">'+esc(l.comment||'')+'</td>'+
+        '</tr>';
+      });
+      h+='</table>';
+    }
+    if(rep.general_comment) h+='<div style="font-size:12px;color:#374151;background:#f8fafc;border-radius:6px;padding:6px 8px;margin-bottom:6px;">💬 '+esc(rep.general_comment)+'</div>';
+    var photos = Array.isArray(rep.photos)?rep.photos:[];
+    if(photos.length){
+      h+='<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+      photos.forEach(function(p){
+        h+='<a href="'+esc(p.url)+'" target="_blank"><img src="'+esc(p.url)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+      });
+      h+='</div>';
+    }
+    h+='</div>';
+  });
+  h+='</div>';
+  return h;
+}
+
+/* ── Динамични редове с артикули за формата за подаване ── */
+function diffItemRowHtml(item){
+  item=item||{};
+  var catOpts='<option value="">-- категория --</option>'+DIFF_CATEGORIES.map(function(c){
+    return '<option value="'+c[0]+'"'+(item.category===c[0]?' selected':'')+'>'+c[1]+'</option>';
+  }).join('');
+  return '<div class="diff-item-row" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:8px;">'+
+    '<div style="display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-bottom:6px;">'+
+      '<input class="fi di-sap" placeholder="SAP №" value="'+esc(item.sap||'')+'">'+
+      '<input class="fi di-name" placeholder="Наименование на артикула *" value="'+esc(item.name||'')+'">'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:6px;margin-bottom:6px;">'+
+      '<input type="number" step="0.001" class="fi di-qty" placeholder="Кол. по документ" value="'+(item.qty!=null?item.qty:'')+'">'+
+      '<input type="number" step="0.001" class="fi di-qty-real" placeholder="Реално получено" value="'+(item.qtyReal!=null?item.qtyReal:'')+'">'+
+      '<select class="fi di-cat">'+catOpts+'</select>'+
+    '</div>'+
+    '<div style="display:flex;gap:6px;">'+
+      '<input class="fi di-comment" placeholder="Коментар (незадължително)" style="flex:1;" value="'+esc(item.comment||'')+'">'+
+      '<button type="button" onclick="removeDiffItemRow(this)" style="border:none;background:#fee2e2;color:#991b1b;border-radius:5px;padding:0 10px;cursor:pointer;">✕</button>'+
+    '</div>'+
+  '</div>';
+}
+function renderDiffItemRows(items){
+  var el=document.getElementById('diff-items'); if(!el)return;
+  if(!items||!items.length)items=[{}];
+  el.innerHTML=items.map(diffItemRowHtml).join('');
+}
+function addDiffItemRow(){
+  var el=document.getElementById('diff-items'); if(!el)return;
+  el.insertAdjacentHTML('beforeend',diffItemRowHtml({}));
+}
+function removeDiffItemRow(btn){
+  var row=btn.closest('.diff-item-row'); if(!row)return;
+  var container=row.parentNode;
+  if(container.querySelectorAll('.diff-item-row').length<=1){toast('Трябва поне 1 артикул','#dc2626');return;}
+  container.removeChild(row);
+}
+function collectDiffItems(){
+  var rows=document.querySelectorAll('#diff-items .diff-item-row');
+  var items=[];
+  rows.forEach(function(row){
+    var name=row.querySelector('.di-name').value.trim();
+    if(!name)return;
+    items.push({
+      sap:row.querySelector('.di-sap').value.trim(),
+      name:name,
+      qty:parseFloat(row.querySelector('.di-qty').value)||null,
+      qtyReal:parseFloat(row.querySelector('.di-qty-real').value)||null,
+      category:row.querySelector('.di-cat').value||null,
+      comment:row.querySelector('.di-comment').value.trim()
+    });
+  });
+  return items;
+}
+
+/* ── Снимки - качване към Storage, събрани преди submit ── */
+function diffUploadPhoto(input){
+  var files=Array.from(input.files||[]);
+  if(!files.length)return;
+  var wrap=document.getElementById('diff-photos-wrap');
+  files.forEach(function(file){
+    var ext=(file.name.split('.').pop()||'jpg').toLowerCase();
+    var path='differences/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+ext;
+    var placeholderId='ph-'+Math.random().toString(36).slice(2,10);
+    if(wrap) wrap.insertAdjacentHTML('beforeend','<div id="'+placeholderId+'" style="width:56px;height:56px;border-radius:6px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:10px;color:#94a3b8;">⏳</div>');
+    var reader=new FileReader();
+    reader.onload=function(e){
+      fetch(DIFF_SB+'/storage/v1/object/'+DIFF_BKT+'/'+path,{
+        method:'POST',
+        headers:{'Authorization':'Bearer '+DIFF_KEY,'Content-Type':file.type||'image/jpeg','x-upsert':'true'},
+        body:e.target.result
+      }).then(function(r){return r.ok;}).then(function(ok){
+        var ph=document.getElementById(placeholderId);
+        if(!ok){ if(ph) ph.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>'; return; }
+        var pub=DIFF_SB+'/storage/v1/object/public/'+DIFF_BKT+'/'+path;
+        diffPendingPhotos.push({url:pub,name:file.name});
+        if(ph) ph.outerHTML='<a href="'+esc(pub)+'" target="_blank"><img src="'+esc(pub)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+      }).catch(function(){
+        var ph2=document.getElementById(placeholderId);
+        if(ph2) ph2.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>';
+      });
+    };
+    reader.readAsArrayBuffer(file);
+  });
+  input.value='';
+}
+
+/* ── Модал за подаване ── */
+function diffSubmitModalHtml(){
+  var myS=assignedStores();
+  var storeField;
+  if(myS&&myS.length===1) storeField='<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(myS[0])+'</div><input type="hidden" id="diff-store" value="'+esc(myS[0])+'">';
+  else if(myS&&myS.length>1) storeField='<select class="fi" id="diff-store"><option value="">-- Избери --</option>'+myS.map(function(s){return '<option>'+esc(s)+'</option>';}).join('')+'</select>';
+  else storeField='<select class="fi" id="diff-store"><option value="">-- Зарежда се... --</option></select>';
+
+  return '<div class="bov" id="diff-submit-ov"><div class="bmod" style="width:640px;max-height:88vh;overflow-y:auto;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
+    '<div style="font-size:16px;font-weight:700;">📝 Подай бланка за разлики</div>'+
+    '<button onclick="closeDiffSubmitModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
+    '<div><label class="fl">Посока *</label><select class="fi" id="diff-direction" onchange="updateDiffCounterpartLabel()">'+
+      '<option value="interstore">🔄 Междускладов трансфер</option>'+
+      '<option value="supplier">📦 Доставчик</option>'+
+    '</select></div>'+
+    '<div><label class="fl">Магазин *</label>'+storeField+'</div>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
+    '<div><label class="fl" id="diff-counterpart-label">Обект изпращач</label><input class="fi" id="diff-counterpart" placeholder="напр. Лог. Добрич"></div>'+
+    '<div><label class="fl">Документ №</label><input class="fi" id="diff-docnum" placeholder="напр. 4600179694"></div>'+
+    '</div>'+
+    '<div style="margin-bottom:12px;"><label class="fl">Дата на получаване/доставка</label><input type="date" class="fi" id="diff-docdate" value="'+today()+'" style="max-width:200px;"></div>'+
+
+    '<label class="fl">Артикули с разлика *</label>'+
+    '<div id="diff-items"></div>'+
+    '<button type="button" onclick="addDiffItemRow()" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;margin-bottom:12px;">+ Добави артикул</button>'+
+
+    '<label class="fl">Снимки <span style="color:#94a3b8;font-weight:400;">(задължителни при увредена стока, грешен баркод, разлика от опаковка, липса)</span></label>'+
+    '<input type="file" accept="image/*" multiple onchange="diffUploadPhoto(this)" style="margin-bottom:6px;">'+
+    '<div id="diff-photos-wrap" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;"></div>'+
+
+    '<label class="fl">Общ коментар</label>'+
+    '<textarea class="fi" id="diff-comment" rows="2" placeholder="Допълнителна информация за случая..."></textarea>'+
+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="closeDiffSubmitModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 18px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button onclick="submitDiffReport()" style="border:none;background:#7c3aed;color:#fff;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;">✅ Подай бланка</button>'+
+    '</div></div></div>';
+}
+function updateDiffCounterpartLabel(){
+  var dir=document.getElementById('diff-direction').value;
+  var lbl=document.getElementById('diff-counterpart-label');
+  var inp=document.getElementById('diff-counterpart');
+  if(dir==='supplier'){ lbl.textContent='Доставчик'; inp.placeholder='напр. ТАГЕМАЛ ЕООД'; }
+  else { lbl.textContent='Обект изпращач'; inp.placeholder='напр. Лог. Добрич'; }
+}
+
+function openDiffSubmitModal(){
+  diffPendingPhotos=[];
+  var old=document.getElementById('diff-submit-ov'); if(old)old.remove();
+  document.body.insertAdjacentHTML('beforeend',diffSubmitModalHtml());
+  renderDiffItemRows([{}]);
+  var ov=document.getElementById('diff-submit-ov');
+  ov.classList.add('open');
+
+  var myStores=assignedStores();
+  if(!(myStores&&myStores.length)){
+    sbGet('users','select=store_name&order=store_name').then(function(data){
+      var el=document.getElementById('diff-store');
+      if(Array.isArray(data)&&el){
+        var seen={};
+        el.innerHTML='<option value="">-- Избери --</option>'+data.filter(function(u){
+          if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
+          seen[u.store_name]=1;return true;
+        }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
+      }
+    });
+  }
+}
+function closeDiffSubmitModal(){
+  var ov=document.getElementById('diff-submit-ov'); if(ov)ov.remove();
+  diffPendingPhotos=[];
+}
+
+function submitDiffReport(){
+  var store=(document.getElementById('diff-store').value||'').trim();
+  var direction=document.getElementById('diff-direction').value||'interstore';
+  var counterpart=document.getElementById('diff-counterpart').value.trim();
+  var items=collectDiffItems();
+  if(!store){toast('Избери магазин','#dc2626');return;}
+  if(!items.length){toast('Добави поне един артикул с наименование','#dc2626');return;}
+
+  var reportData={
+    direction:direction,
+    store_name:store,
+    counterpart:counterpart,
+    document_number:document.getElementById('diff-docnum').value.trim(),
+    doc_date:document.getElementById('diff-docdate').value||null,
+    submitted_by:currentUser.display_name||currentUser.email,
+    general_comment:document.getElementById('diff-comment').value.trim(),
+    photos:diffPendingPhotos,
+    reviewed:false
+  };
+
+  sbPost('differences_reports',reportData).then(function(res){
+    if(!res.ok){toast('Грешка при запис на бланката','#dc2626');return;}
+    /* PostgREST с Prefer:return=minimal не връща id - взимаме последния запис по store+created_at */
+    sbGet('differences_reports','store_name=eq.'+encodeURIComponent(store)+'&order=created_at.desc&limit=1').then(function(rows){
+      var report=Array.isArray(rows)&&rows[0]?rows[0]:null;
+      if(!report){toast('Бланката е записана, но има забавяне при синхронизация - опреснете страницата','#d97706');closeDiffSubmitModal();loadStockDiff();return;}
+      var lines=items.map(function(it){
+        return {
+          report_id:report.id,
+          store_name:store,
+          supplier:counterpart,
+          material_code:it.sap,
+          material_name:it.name,
+          quantity:it.qty,
+          quantity_received:it.qtyReal,
+          difference_category:it.category,
+          comment:it.comment,
+          status:'new',
+          created_by:currentUser.display_name||currentUser.email
+        };
+      });
+      fetch(DIFF_SB+'/rest/v1/stock_differences',{
+        method:'POST',
+        headers:{'apikey':DIFF_KEY,'Authorization':'Bearer '+DIFF_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},
+        body:JSON.stringify(lines)
+      }).then(function(r2){
+        if(!r2.ok){toast('Бланката е записана, но артикулите не се записаха - виж конзолата','#dc2626');console.error('stock_differences batch insert failed');closeDiffSubmitModal();loadStockDiff();return;}
+        closeDiffSubmitModal();
+        toast('✅ Бланката е подадена! Цветелина ще я прегледа.');
+        loadStockDiff();
+      });
+    });
   });
 }
