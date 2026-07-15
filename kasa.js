@@ -487,8 +487,10 @@ function renderGlavna(){
   var g=kasaGlavna||{};
   var isDraft=!g.id||(g.status==='draft');
   var canEdit=['kasa','manager','admin','accounting'].indexOf(currentUser.role)>=0;
-  /* Manager/kasa могат ВИНАГИ да пишат, независимо от статуса */
-  var canInput=['kasa','manager','admin'].indexOf(currentUser.role)>=0;
+  /* Manager/kasa/admin могат да пишат САМО докато Главна каса е чернова (незаключена) */
+  var canInput=['kasa','manager','admin'].indexOf(currentUser.role)>=0 && isDraft;
+  var canConfirmGlavna=['kasa','manager','admin'].indexOf(currentUser.role)>=0;
+  var canUnlockGlavna=['admin','accounting'].indexOf(currentUser.role)>=0;
 
   /* Сборна таблица по деноминации: ПОС1 + ПОС2 + ПОС3 + Главна */
   function sumDenom(v){
@@ -605,10 +607,16 @@ function renderGlavna(){
           '<input type="number" step="0.01" class="fi" id="gl-sap" value="'+(g.sap_balance||0)+'" oninput="glavnaLiveCalc()" style="background:#fffbeb;">':
           '<div class="fi" style="background:#f9f8f6;">'+(g.sap_balance||0)+'</div>')+
       '</div>'+
-      '<div style="display:flex;flex-direction:column;justify-content:flex-end;">'+
+      '<div style="display:flex;flex-direction:column;justify-content:flex-end;gap:6px;">'+
         (canInput?
-          '<button onclick="saveGlavna()" class="btn btn-green" style="margin-top:20px;">💾 Запази</button>':
-          '<span style="margin-top:20px;font-size:12px;color:#16a34a;font-weight:600;">✅ Потвърдена</span>')+
+          '<div style="display:flex;gap:6px;">'+
+            '<button onclick="saveGlavna()" class="btn btn-green" style="margin-top:20px;">💾 Запази</button>'+
+            (g.id&&canConfirmGlavna?'<button onclick="confirmGlavna()" style="margin-top:20px;border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">✅ Потвърди</button>':'')+
+          '</div>':
+          '<div style="display:flex;align-items:center;gap:8px;margin-top:20px;">'+
+            '<span style="font-size:12px;color:#16a34a;font-weight:600;">✅ Потвърдена — заключена</span>'+
+            (canUnlockGlavna?'<button onclick="unlockGlavna()" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🔓 Разключи</button>':'')+
+          '</div>')+
       '</div>'+
     '</div></div>'+
 
@@ -678,6 +686,7 @@ function glavnaLiveCalc(){
 
 /* ─── SAVE ГЛАВНА КАСА ───────────────────────────────────────── */
 function saveGlavna(){
+  if(kasaGlavna&&kasaGlavna.status==='confirmed'){toast('Потвърдената Главна каса не може да се редактира — първо я разключи','#dc2626');return;}
   var p={store_name:currentUser.store_name,date:kasaActiveDate(),status:'draft'};
   ALL_DENOM.forEach(function(v){
     var el=document.getElementById('gl-'+DENOM_KEY[v]);
@@ -698,6 +707,39 @@ function saveGlavna(){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     toast('💾 Главна каса е запазена!');
     /* Reload */
+    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
+    sbGet('kasa_glavna',gq).then(function(data){
+      kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
+      renderGlavna();
+    });
+  });
+}
+
+function confirmGlavna(){
+  if(!kasaGlavna||!kasaGlavna.id){toast('Първо запази Главна каса','#dc2626');return;}
+  if(kasaGlavna.status==='confirmed'){toast('Вече е потвърдена','#d97706');return;}
+  if(!confirm('Потвърди Главна каса? След потвърждението не може да се редактира.'))return;
+  sbPatch('kasa_glavna','id=eq.'+kasaGlavna.id,{
+    status:'confirmed',
+    confirmed_at:new Date().toISOString(),
+    confirmed_by:currentUser.display_name||currentUser.email
+  }).then(function(res){
+    if(!res.ok){toast('Грешка при потвърждаване','#dc2626');return;}
+    toast('✅ Главна каса е потвърдена и заключена!');
+    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
+    sbGet('kasa_glavna',gq).then(function(data){
+      kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
+      renderGlavna();
+    });
+  });
+}
+
+function unlockGlavna(){
+  if(!kasaGlavna||!kasaGlavna.id)return;
+  if(!confirm('Разключи Главна каса за редакция? Статусът ще се върне на Чернова.'))return;
+  sbPatch('kasa_glavna','id=eq.'+kasaGlavna.id,{status:'draft',confirmed_at:null,confirmed_by:null}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    toast('🔓 Главна каса е разключена за редакция.');
     var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
     sbGet('kasa_glavna',gq).then(function(data){
       kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
@@ -1078,6 +1120,7 @@ function renderZoborot(){
   var z=zoborotData||{};
   var isDraft=!z.id||(z.status==='draft');
   var canConfirm=['manager','admin','accounting'].indexOf(currentUser.role)>=0;
+  var canUnlockZoborot=['admin','accounting'].indexOf(currentUser.role)>=0;
 
   /* Live изчисления */
   function posNoBank(){ return Math.round(((parseFloat(z.cash_bgn)||0)+(parseFloat(z.cash_eur)||0)+(parseFloat(z.card_eur)||0)+(parseFloat(z.voucheri)||0))*100)/100; }
@@ -1108,7 +1151,7 @@ function renderZoborot(){
       '<div style="display:flex;gap:8px;">'+
         (isDraft&&canConfirm?'<button onclick="saveZoborot()" class="btn btn-green">💾 Запази</button>':'')+
         (isDraft&&canConfirm&&z.id?'<button onclick="confirmZoborot()" class="btn" style="background:#2563eb;color:#fff;">✅ Потвърди</button>':'')+
-        (!isDraft&&canConfirm?'<button onclick="unlockZoborot()" class="btn" style="background:#fffbeb;color:#d97706;border:1px solid #d97706;">🔓 Разключи</button>':'')+
+        (!isDraft&&canUnlockZoborot?'<button onclick="unlockZoborot()" class="btn" style="background:#fffbeb;color:#d97706;border:1px solid #d97706;">🔓 Разключи</button>':'')+
         '<button onclick="printZoborot()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer;">🖨 Разпечатай</button>'+
       '</div>'+
     '</div>'+
@@ -1229,6 +1272,7 @@ function zoborotLiveCalc(){
 
 /* ─── SAVE / CONFIRM / UNLOCK ───────────────────────────────── */
 function saveZoborot(){
+  if(zoborotData&&zoborotData.status==='confirmed'){toast('Потвърденото равнение не може да се редактира — първо го разключи','#dc2626');return;}
   var g=function(id){return parseFloat((document.getElementById('zf-'+id)||{}).value)||0;};
   var cashBgn=g('cash_bgn'),cashEur=g('cash_eur'),card=g('card_eur'),bank=g('bank_eur'),vouch=g('voucheri');
   var fu1g=g('fu1_gross'),fu1d=g('fu1_discount');
@@ -1270,6 +1314,7 @@ function confirmZoborot(){
 }
 function unlockZoborot(){
   if(!zoborotData)return;
+  if(['admin','accounting'].indexOf(currentUser.role)<0){toast('Нямаш права за това действие','#dc2626');return;}
   if(!confirm('Разключи за редакция?'))return;
   sbPatch('kasa_zoborot','id=eq.'+zoborotData.id,{status:'draft',confirmed_by:null}).then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
