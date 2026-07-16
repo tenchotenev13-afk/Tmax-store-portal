@@ -38,10 +38,10 @@ function promoStatus(p){
   var t=new Date(); t.setHours(0,0,0,0);
   var s=new Date(p.start_date); s.setHours(0,0,0,0);
   var e=new Date(p.end_date); e.setHours(0,0,0,0);
-  if(t<s) return 'upcoming';
   if(t>e) return 'expired';
-  var daysLeft=Math.ceil((e-t)/86400000);
-  if(daysLeft<=3) return 'expiring';
+  var daysToEnd=Math.ceil((e-t)/86400000);
+  if(daysToEnd<=5) return 'expiring'; /* краят е близо (≤5 дни) - приоритет пред "стартираща", важи и за еднодневни маркери */
+  if(t<s) return 'upcoming';
   return 'active';
 }
 var PROMO_STATUS_META={
