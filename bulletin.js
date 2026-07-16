@@ -313,9 +313,18 @@ function loadBulletin(){
         sbGet('subtask_completions','select=*'+storeF).then(function(sc){
           subtaskComps=Array.isArray(sc)?sc:[];
           var rq='bulletin_id=eq.'+curBul.id+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
-          sbGet('task_completions',rq+'&task_id=is.null').then(function(rc){
-            recurringComps=Array.isArray(rc)?rc:[];
-            renderBulletin();autoCheckBulletinNotifications();
+          fetch(API+'/task_completions?'+rq+'&task_id=is.null',{headers:H}).then(function(r){
+            if(!r.ok){
+              return r.text().then(function(errText){
+                console.error('task_completions (recurring) GET грешка:', errText);
+                toast('Грешка при постоянните задачи: '+errText.slice(0,150),'#dc2626');
+                recurringComps=[];renderBulletin();autoCheckBulletinNotifications();
+              });
+            }
+            return r.json().then(function(rc){
+              recurringComps=Array.isArray(rc)?rc:[];
+              renderBulletin();autoCheckBulletinNotifications();
+            });
           }).catch(function(){recurringComps=[];renderBulletin();autoCheckBulletinNotifications();});
         }).catch(function(){subtaskComps=[];renderBulletin();autoCheckBulletinNotifications();});
       }).catch(function(){bulComps=[];subtaskComps=[];recurringComps=[];renderBulletin();autoCheckBulletinNotifications();});
