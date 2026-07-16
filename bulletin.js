@@ -1221,8 +1221,18 @@ function taskUploadAttachment(input){
       var pub=BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path;
       var atts=normAttachments(t.attachments).slice();
       atts.push({type:isImg?'image':'file',url:pub,filename:file.name});
-      sbPatch('bulletin_tasks','id=eq.'+tid,{attachments:atts}).then(function(res){
-        if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+      fetch(BUL_SB+'/rest/v1/bulletin_tasks?id=eq.'+tid,{
+        method:'PATCH',
+        headers:{'apikey':BUL_KEY,'Authorization':'Bearer '+BUL_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},
+        body:JSON.stringify({attachments:atts})
+      }).then(function(res){
+        if(!res.ok){
+          res.text().then(function(errText){
+            console.error('bulletin_tasks PATCH грешка:', errText);
+            toast('Грешка при запис: '+errText.slice(0,120),'#dc2626');
+          });
+          return;
+        }
         t.attachments=atts; renderBulletin(); toast('✅ Прикачено!');
       });
     }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');});
