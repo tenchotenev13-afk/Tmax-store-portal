@@ -248,6 +248,11 @@ function weekDays(wk,yr){
   return [0,1,2,3,4].map(function(i){var x=new Date(s);x.setDate(s.getDate()+i);return x;});
 }
 function fmtD(d){return d.getDate()+'.'+(d.getMonth()<9?'0':'')+(d.getMonth()+1);}
+/* Локален YYYY-MM-DD без UTC конверсия - toISOString() бута датата с 1 ден назад за UTC+2/+3 (България) */
+function toLocalISO(d){
+  var y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+  return y+'-'+m+'-'+day;
+}
 
 /* ─── ПРЕВКЛЮЧВАТЕЛ МЕЖДУ БЮЛЕТИНИ (само admin/accounting) ─── */
 function loadBulletinList(){
@@ -463,8 +468,8 @@ function renderBulView(){
   if(canEdit())html+='<button onclick="openCalModal(null)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">+ Добави събитие</button>';
   html+='</div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">';
   DKEYS.forEach(function(key,i){
-    var isToday=days[i].toISOString().slice(0,10)===today();
-    var dateStr=days[i].toISOString().slice(0,10);
+    var isToday=toLocalISO(days[i])===today();
+    var dateStr=toLocalISO(days[i]);
     var dTasks=bulTasks.filter(function(t){return t.due_date&&t.due_date.slice(0,10)===dateStr;});
     var manual=c.calendar[key]||[];
     html+='<div style="border:1px solid '+(isToday?'#2563eb':'#e2e8f0')+';border-radius:7px;padding:10px 12px;min-height:90px;background:'+(isToday?'#eff6ff':'#fff')+'">';
@@ -957,7 +962,7 @@ function taskModalHtml(){
   var wk=curBul?curBul.week_number:weekNum(new Date());
   var yr=curBul?curBul.year:new Date().getFullYear();
   var days=weekDays(wk,yr);
-  var opts='<option value="">— Без срок —</option>'+DKEYS.map(function(k,i){return '<option value="'+days[i].toISOString().slice(0,10)+'">'+DNAMES[i]+' ('+fmtD(days[i])+')</option>';}).join('');
+  var opts='<option value="">— Без срок —</option>'+DKEYS.map(function(k,i){return '<option value="'+toLocalISO(days[i])+'">'+DNAMES[i]+' ('+fmtD(days[i])+')</option>';}).join('');
   return '<div class="bov" id="tk-ov"><div class="bmod" style="width:460px;">' +
     '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">✅ Нова задача</div>' +
     '<label class="fl">Заглавие *</label><input class="fi" id="tk-title" placeholder="напр. Провери наличностите">' +
@@ -985,7 +990,7 @@ function openEditTaskModal(taskId) {
   var days = weekDays(wk, yr);
   var dueOpts = '<option value="">— Без срок —</option>' +
     DKEYS.map(function(k,i){
-      var val = days[i].toISOString().slice(0,10);
+      var val = toLocalISO(days[i]);
       var sel = t.due_date && t.due_date.slice(0,10) === val ? ' selected' : '';
       return '<option value="'+val+'"'+sel+'>'+DNAMES[i]+' ('+fmtD(days[i])+')</option>';
     }).join('');
@@ -1550,7 +1555,7 @@ function printSection(what){
     var s='<h2>📅 Седмичен календар — Седмица '+wk+' · '+yr+'</h2>';
     s+='<div class="cal-grid">';
     DKEYS.forEach(function(key,i){
-      var ds=days[i].toISOString().slice(0,10);
+      var ds=toLocalISO(days[i]);
       var dt=bulTasks.filter(function(t){return t.due_date&&t.due_date.slice(0,10)===ds;});
       var mn=c.calendar[key]||[];
       s+='<div class="cal-day">';
@@ -1862,6 +1867,7 @@ function renderRecurringTasks(dk) {
       if (canEdit()) {
         h += '<div style="display:flex;gap:4px;">';
         h += '<button onclick="openEditRecurringModal(\'' + t.id + '\')" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#2563eb;">✏️</button>';
+        h += '<button data-rid="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'recurring_task\',this.dataset.rid,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#d97706;">🔔</button>';
         h += '<button onclick="toggleRecurringActive(\'' + t.id + '\',' + (!t.active) + ')" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#64748b;">' + (t.active?'⏸ Спри':'▶ Активирай') + '</button>';
         h += '<button onclick="deleteRecurring(\'' + t.id + '\')" style="border:1px solid #fecaca;background:#fff5f5;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#dc2626;">✕</button>';
         h += '</div>';
@@ -2052,7 +2058,7 @@ function openSubtaskModal(taskId, dept) {
   var yr = curBul ? curBul.year : new Date().getFullYear();
   var days = weekDays(wk, yr);
   var dueOpts = '<option value="">— Без срок —</option>' + DKEYS.map(function(k,i){
-    return '<option value="'+days[i].toISOString().slice(0,10)+'">'+DNAMES[i]+' ('+fmtD(days[i])+')</option>';
+    return '<option value="'+toLocalISO(days[i])+'">'+DNAMES[i]+' ('+fmtD(days[i])+')</option>';
   }).join('');
   var ov = document.createElement('div');
   ov.className = 'bov open';
