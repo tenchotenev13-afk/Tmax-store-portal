@@ -102,6 +102,7 @@ function renderPromoCard(p){
   if(canEdit()){
     h+='<div style="display:flex;gap:5px;margin-top:7px;">';
     if(st==='expiring'||st==='expired')h+='<button data-id="'+p.id+'" onclick="openExtendPromoModal(this.dataset.id)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;">↻ Продължи</button>';
+    h+='<button data-id="'+p.id+'" data-etitle="'+esc(p.title)+'" onclick="openNotifyScheduleModal(\'promotion\',this.dataset.id,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;color:#d97706;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;">🔔</button>';
     h+='<button data-id="'+p.id+'" onclick="openPromoModal(this.dataset.id)" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;">✏️</button>';
     h+='<button data-id="'+p.id+'" onclick="deletePromo(this.dataset.id)" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;">✕</button>';
     h+='</div>';
@@ -546,6 +547,7 @@ function renderBulView(){
         html+='</div>';
         if(canEdit()){html+='<div style="display:flex;gap:4px;flex-shrink:0;">'
           +'<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>'
+          +'<button data-task-id="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'task\',this.dataset.taskId,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#d97706;">🔔</button>'
           +'<button data-task-id="'+t.id+'" onclick="bulDelTask(this)" style="border:1px solid #fecaca;background:#fff5f5;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#dc2626;">✕</button>'
           +'</div>';}
         html+='</div>';
@@ -1693,6 +1695,7 @@ function renderTasksPanel() {
         h += '<div style="display:flex;gap:4px;flex-shrink:0;">';
         if (canEdit()) {
           h += '<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>';
+          h += '<button data-task-id="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'task\',this.dataset.taskId,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#d97706;">🔔</button>';
           h += '<button data-task-id="'+t.id+'" onclick="bulDelTask(this)" style="border:1px solid #fecaca;background:#fff5f5;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#dc2626;">✕</button>';
         }
         h += '</div>';
@@ -2007,6 +2010,7 @@ function renderSubtasks(taskId, dept) {
         h += '<input type="checkbox" '+(done?'checked ':'')+' data-stid="'+s.id+'" onchange="bulToggleSubtask(this)" style="width:13px;height:13px;cursor:pointer;accent-color:'+d.color+';">';
         h += '<span style="font-size:12px;color:'+(done?'#94a3b8':'#374151')+';'+(done?'text-decoration:line-through;':'')+'">' + esc(s.title) + '</span>';
         if(due) h += '<span style="font-size:10px;color:'+dueColor+';">📅 '+fmtDate2(s.due_date)+(diff<0?' ⚠️':'')+'</span>';
+        if (canEdit()) h += '<button data-stid="'+s.id+'" data-etitle="'+esc(s.title)+'" onclick="openNotifyScheduleModal(\'subtask\',this.dataset.stid,this.dataset.etitle)" style="border:none;background:none;color:#d97706;font-size:10px;cursor:pointer;padding:0;line-height:1;">🔔</button>';
         if (canEdit()) h += '<button data-stid="'+s.id+'" data-tid="'+taskId+'" data-dept="'+dept+'" onclick="deleteSubtask(this.dataset.stid,this.dataset.tid,this.dataset.dept)" style="border:none;background:none;color:#dc2626;font-size:10px;cursor:pointer;padding:0;line-height:1;">✕</button>';
         h += '</div>';
         if(s.description) h += '<div style="font-size:11px;color:#94a3b8;margin:2px 0 0 21px;overflow-wrap:break-word;">'+linkify(s.description)+'</div>';
@@ -2158,5 +2162,119 @@ function subtaskRemoveAttachment(stId,idx,taskId){
       var t=bulTasks.find(function(x){return String(x.id)===String(taskId);});
       renderSubtasks(taskId, t?t.department:'trade');
     });
+  });
+}
+
+/* ══════════════════════════════════════════
+   ГРАФИК ЗА НОТИФИКАЦИИ (ръчно зададени, изпращат се от сървъра)
+══════════════════════════════════════════ */
+var DOW_LABELS={mon:'Понеделник',tue:'Вторник',wed:'Сряда',thu:'Четвъртък',fri:'Петък',sat:'Събота',sun:'Неделя'};
+var notifyCurrentEntity=null;
+
+function openNotifyScheduleModal(entityType,entityId,entityTitle){
+  notifyCurrentEntity={type:entityType,id:entityId,title:entityTitle};
+  var old=document.getElementById('notify-modal-ov'); if(old)old.remove();
+  var ov=document.createElement('div');
+  ov.className='bov open'; ov.id='notify-modal-ov';
+  ov.innerHTML='<div class="bmod" style="width:460px;max-height:85vh;overflow-y:auto;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'+
+    '<div style="font-size:15px;font-weight:700;">🔔 Нотификации</div>'+
+    '<button onclick="closeNotifyScheduleModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>'+
+    '</div>'+
+    '<div style="font-size:12px;color:#94a3b8;margin-bottom:14px;">за: <b style="color:#374151;">'+esc(entityTitle||'')+'</b></div>'+
+    '<div id="notify-list-wrap"><div style="text-align:center;padding:12px;color:#94a3b8;font-size:12px;">⏳ Зареждане...</div></div>'+
+    '<div style="border-top:1px solid #e2e8f0;margin:16px 0;padding-top:14px;">'+
+    '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px;">+ Нов график</div>'+
+    '<select class="fi" id="ns-type" onchange="updateNotifyTypeFields()" style="margin-bottom:8px;">'+
+      '<option value="once">Еднократно</option>'+
+      '<option value="daily">Всеки ден</option>'+
+      '<option value="weekly">Всяка седмица</option>'+
+    '</select>'+
+    '<div id="ns-date-wrap" style="margin-bottom:8px;"><input type="date" class="fi" id="ns-date" value="'+today()+'"></div>'+
+    '<div id="ns-dow-wrap" style="margin-bottom:8px;display:none;"><select class="fi" id="ns-dow">'+
+      Object.keys(DOW_LABELS).map(function(k){return '<option value="'+k+'">'+DOW_LABELS[k]+'</option>';}).join('')+
+    '</select></div>'+
+    '<input type="time" class="fi" id="ns-time" value="09:00" style="margin-bottom:8px;">'+
+    '<input class="fi" id="ns-message" placeholder="Текст на нотификацията (по избор - иначе автоматично)" style="margin-bottom:8px;">'+
+    '<button onclick="submitNotifySchedule()" style="border:none;background:#d97706;color:#fff;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">+ Добави график</button>'+
+    '</div>'+
+    '</div>';
+  document.body.appendChild(ov);
+  loadNotifySchedules();
+}
+function updateNotifyTypeFields(){
+  var type=document.getElementById('ns-type').value;
+  document.getElementById('ns-date-wrap').style.display=type==='once'?'':'none';
+  document.getElementById('ns-dow-wrap').style.display=type==='weekly'?'':'none';
+}
+function closeNotifyScheduleModal(){
+  var ov=document.getElementById('notify-modal-ov'); if(ov)ov.remove();
+  notifyCurrentEntity=null;
+}
+function loadNotifySchedules(){
+  if(!notifyCurrentEntity)return;
+  sbGet('notification_schedules','entity_type=eq.'+notifyCurrentEntity.type+'&entity_id=eq.'+notifyCurrentEntity.id+'&order=created_at.desc').then(function(data){
+    var list=Array.isArray(data)?data:[];
+    var wrap=document.getElementById('notify-list-wrap'); if(!wrap)return;
+    if(!list.length){wrap.innerHTML='<div style="text-align:center;padding:10px;color:#94a3b8;font-size:12px;">Няма зададени графици.</div>';return;}
+    wrap.innerHTML=list.map(function(s){
+      var typeLabel=s.schedule_type==='once'?('Еднократно · '+fmtDate2(s.scheduled_date))
+        :s.schedule_type==='daily'?'Всеки ден'
+        :('Всяка седмица · '+(DOW_LABELS[s.day_of_week]||s.day_of_week));
+      var sentLabel=s.last_sent_at?('<span style="color:#16a34a;">✓ изпратено последно '+fmtDate2(s.last_sent_at)+'</span>'):'<span style="color:#94a3b8;">още не е изпратено</span>';
+      return '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:12px;'+(s.active?'':'opacity:.5;')+'">'+
+        '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+        '<div><b>'+typeLabel+'</b> в '+esc(s.scheduled_time.slice(0,5))+'ч.</div>'+
+        '<div style="display:flex;gap:4px;">'+
+        '<button data-id="'+s.id+'" data-active="'+(!s.active)+'" onclick="toggleNotifySchedule(this.dataset.id,this.dataset.active===\'true\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;">'+(s.active?'⏸':'▶')+'</button>'+
+        '<button data-id="'+s.id+'" onclick="deleteNotifySchedule(this.dataset.id)" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;">✕</button>'+
+        '</div></div>'+
+        (s.message?'<div style="color:#64748b;margin-top:3px;">💬 '+esc(s.message)+'</div>':'')+
+        '<div style="margin-top:3px;font-size:10.5px;">'+sentLabel+'</div>'+
+        '</div>';
+    }).join('');
+  });
+}
+function submitNotifySchedule(){
+  if(!notifyCurrentEntity)return;
+  var type=document.getElementById('ns-type').value;
+  var time=document.getElementById('ns-time').value;
+  if(!time){toast('Задай час','#dc2626');return;}
+  var data={
+    entity_type:notifyCurrentEntity.type,
+    entity_id:String(notifyCurrentEntity.id),
+    schedule_type:type,
+    scheduled_time:time,
+    message:document.getElementById('ns-message').value.trim(),
+    active:true,
+    created_by:currentUser.display_name||currentUser.email
+  };
+  if(type==='once'){
+    var d=document.getElementById('ns-date').value;
+    if(!d){toast('Избери дата','#dc2626');return;}
+    data.scheduled_date=d;
+  }
+  if(type==='weekly'){
+    data.day_of_week=document.getElementById('ns-dow').value;
+  }
+  sbPost('notification_schedules',data).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    toast('✅ Графикът е зададен!');
+    document.getElementById('ns-message').value='';
+    loadNotifySchedules();
+  });
+}
+function toggleNotifySchedule(id,active){
+  sbPatch('notification_schedules','id=eq.'+id,{active:active}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    loadNotifySchedules();
+  });
+}
+function deleteNotifySchedule(id){
+  if(!confirm('Изтрий този график?'))return;
+  sbDelete('notification_schedules','id=eq.'+id).then(function(res){
+    if(!res.ok){toast('Грешка при изтриване','#dc2626');return;}
+    toast('✅ Изтрито!');
+    loadNotifySchedules();
   });
 }
