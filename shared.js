@@ -53,7 +53,7 @@ function toast(msg,col){var t=document.getElementById('toast');t.textContent=msg
 
 var TODAY=new Date();TODAY.setHours(0,0,0,0);
 function calcStatus(delivery,status){
-  if(['done','refused','postponed'].indexOf(status)>=0)return status;
+  if(['done','refused','postponed','approved'].indexOf(status)>=0)return status;
   if(!delivery)return'pending';
   var d=new Date(delivery);d.setHours(0,0,0,0);
   var diff=Math.round((d-TODAY)/86400000);
@@ -62,6 +62,7 @@ function calcStatus(delivery,status){
 function statusBadge(s){
   var m={overdue:{l:'🔴 Просрочена',bg:'#fee2e2',c:'#991b1b'},today:{l:'🔵 Днес',bg:'#dbeafe',c:'#1e3a5f'},
     tomorrow:{l:'🟡 Утре',bg:'#fef3c7',c:'#92400e'},pending:{l:'⏳ Изчаква',bg:'#f3f4f6',c:'#374151'},
+    approved:{l:'✓ Одобрена',bg:'#dbeafe',c:'#1e3a5f'},
     done:{l:'✅ Изпълнена',bg:'#dcfce7',c:'#14532d'},refused:{l:'✕ Отказана',bg:'#fee2e2',c:'#991b1b'},
     postponed:{l:'⏱ Отложена',bg:'#f3e8ff',c:'#4c1d95'}};
   var x=m[s]||m.pending;
