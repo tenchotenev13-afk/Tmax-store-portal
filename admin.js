@@ -720,11 +720,16 @@ function startCatalogImport(){
     }).filter(function(x){return x.sap_code && x.product_name;});
     if(!mapped.length){progEl.innerHTML='<span style="color:#dc2626;">Не бяха разпознати редове. Провери дали колоните се казват точно "Материал"/"Описание на Материал".</span>';return;}
     progEl.textContent='⏳ Качване на 0 / '+mapped.length+'...';
-    batchUpsertCatalog(mapped,function(done,total){
-      progEl.textContent='⏳ Качване на '+done+' / '+total+'...';
-    },function(){
-      progEl.innerHTML='<span style="color:#16a34a;">✅ Готово! Обработени '+mapped.length+' артикула.</span>';
-      toast('✅ Каталогът е обновен!');
+    batchUpsertCatalog(mapped,function(done,total,errCount){
+      progEl.textContent='⏳ Качване на '+done+' / '+total+(errCount?' ('+errCount+' партиди с грешка)':'')+'...';
+    },function(errorCount,firstError){
+      if(errorCount>0){
+        progEl.innerHTML='<span style="color:#dc2626;">⚠️ Завърши с '+errorCount+' неуспешни партиди от общо ~'+Math.ceil(mapped.length/500)+'. Провери конзолата (F12) за детайли.<br>Първа грешка: '+esc(String(firstError).slice(0,200))+'</span>';
+        toast('⚠️ Импортът приключи с грешки - виж детайли','#dc2626');
+      } else {
+        progEl.innerHTML='<span style="color:#16a34a;">✅ Готово! Обработени '+mapped.length+' артикула.</span>';
+        toast('✅ Каталогът е обновен!');
+      }
       loadCatalogAdmin();
     });
   };
@@ -733,21 +738,35 @@ function startCatalogImport(){
 function batchUpsertCatalog(rows,onProgress,onDone){
   var BATCH=500;
   var i=0;
+  var errorCount=0;
+  var firstError=null;
   function next(){
-    if(i>=rows.length){onDone();return;}
+    if(i>=rows.length){onDone(errorCount,firstError);return;}
     var batch=rows.slice(i,i+BATCH);
     fetch(API+'/product_catalog',{
       method:'POST',
       headers:Object.assign({},H,{'Prefer':'resolution=merge-duplicates,return=minimal'}),
       body:JSON.stringify(batch)
-    }).then(function(){
+    }).then(function(res){
+      if(!res.ok){
+        errorCount++;
+        return res.text().then(function(errText){
+          console.error('Каталог upsert ГРЕШКА на партида (редове '+i+'-'+(i+BATCH)+'):',errText);
+          if(!firstError)firstError=errText;
+          i+=BATCH;
+          onProgress(Math.min(i,rows.length),rows.length,errorCount);
+          next();
+        });
+      }
       i+=BATCH;
-      onProgress(Math.min(i,rows.length),rows.length);
+      onProgress(Math.min(i,rows.length),rows.length,errorCount);
       next();
     }).catch(function(err){
-      console.error('Каталог upsert грешка на партида '+i+':',err);
+      errorCount++;
+      console.error('Каталог upsert - мрежова грешка на партида (редове '+i+'-'+(i+BATCH)+'):',err);
+      if(!firstError)firstError=String(err);
       i+=BATCH;
-      onProgress(Math.min(i,rows.length),rows.length);
+      onProgress(Math.min(i,rows.length),rows.length,errorCount);
       next();
     });
   }
