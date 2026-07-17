@@ -170,10 +170,20 @@ function fillStoreSelect(selectEl,selectedValue){
 var allSuppliersCache=null;
 function loadAllSuppliers(){
   if(allSuppliersCache)return Promise.resolve(allSuppliersCache);
-  return sbGet('contacts','category=eq.supplier&select=name&order=name').then(function(data){
-    allSuppliersCache=Array.isArray(data)?data.map(function(s){return s.name;}):[];
-    return allSuppliersCache;
-  }).catch(function(){allSuppliersCache=[];return allSuppliersCache;});
+  return fetch(API+'/contacts?type=eq.supplier&select=name&order=name',{headers:H}).then(function(res){
+    if(!res.ok){
+      return res.text().then(function(errText){
+        console.error('contacts (supplier) GET грешка:',errText);
+        allSuppliersCache=[];
+        return allSuppliersCache;
+      });
+    }
+    return res.json().then(function(data){
+      allSuppliersCache=Array.isArray(data)?data.map(function(s){return s.name;}):[];
+      if(!allSuppliersCache.length)console.log('Заявката към Контакти е успешна, но няма нито един контакт с категория "supplier".');
+      return allSuppliersCache;
+    });
+  }).catch(function(err){console.error('contacts заявка неуспешна:',err);allSuppliersCache=[];return allSuppliersCache;});
 }
 
 /* ── Автоматично зареждане на наименование/мярка по SAP код от каталога (product_catalog) ──
