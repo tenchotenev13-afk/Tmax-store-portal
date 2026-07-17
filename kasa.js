@@ -1119,7 +1119,7 @@ function renderZoborot(){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
   var z=zoborotData||{};
   var isDraft=!z.id||(z.status==='draft');
-  var canConfirm=['manager','admin','accounting'].indexOf(currentUser.role)>=0;
+  var canConfirm=['manager','admin','accounting','kasa'].indexOf(currentUser.role)>=0;
   var canUnlockZoborot=['admin','accounting'].indexOf(currentUser.role)>=0;
 
   /* Live изчисления */
@@ -1305,10 +1305,18 @@ function saveZoborot(){
 function confirmZoborot(){
   if(!confirm('Потвърди равнението? След потвърждение не може да се редактира.'))return;
   if(!zoborotData){saveZoborot();return;}
-  sbPatch('kasa_zoborot','id=eq.'+zoborotData.id,{
-    status:'confirmed',confirmed_by:currentUser.display_name||currentUser.email
+  fetch(API+'/kasa_zoborot?id=eq.'+zoborotData.id,{
+    method:'PATCH',
+    headers:Object.assign({},H,{'Prefer':'return=minimal'}),
+    body:JSON.stringify({status:'confirmed',confirmed_by:currentUser.display_name||currentUser.email})
   }).then(function(res){
-    if(!res.ok){toast('Грешка','#dc2626');return;}
+    if(!res.ok){
+      res.text().then(function(errText){
+        console.error('kasa_zoborot PATCH грешка:', errText);
+        toast('Грешка: '+errText.slice(0,150),'#dc2626');
+      });
+      return;
+    }
     toast('✅ Равнението е потвърдено!');loadZoborot();
   });
 }
