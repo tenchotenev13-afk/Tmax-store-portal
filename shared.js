@@ -83,7 +83,7 @@ function itemRowHtml(item){
   return '<div class="item-row" style="display:grid;grid-template-columns:1.3fr 1fr 1fr 70px 90px 26px;gap:5px;margin-bottom:6px;align-items:center;">'+
     '<input class="fi item-product" placeholder="Продукт *" value="'+escVal(item.product)+'">'+
     '<input class="fi item-color" placeholder="Цвят/Модел" value="'+escVal(item.color)+'">'+
-    '<input class="fi item-sap" placeholder="SAP код" value="'+escVal(item.sap)+'">'+
+    '<input class="fi item-sap" placeholder="SAP код" value="'+escVal(item.sap)+'" onblur="lookupCatalogBySap(this)">'+
     '<input type="text" inputmode="decimal" class="fi item-qty" placeholder="Кол." value="'+esc(item.qty!=null?String(item.qty).replace('.',','):'1')+'">'+
     '<select class="fi item-unit">'+unitOptionsHtml(item.unit)+'</select>'+
     '<button type="button" onclick="removeItemRow(this)" title="Премахни артикула" style="border:none;background:#fee2e2;color:#991b1b;border-radius:5px;height:30px;cursor:pointer;font-size:13px;">✕</button>'+
@@ -164,6 +164,43 @@ function fillStoreSelect(selectEl,selectedValue){
   selectEl.innerHTML=opts.map(function(name){
     return '<option'+(name===selectedValue?' selected':'')+'>'+esc(name)+'</option>';
   }).join('');
+}
+
+/* ── Списък на доставчици (от Контакти, категория "supplier") - за dropdown при посока "Доставчик" в разликите ── */
+var allSuppliersCache=null;
+function loadAllSuppliers(){
+  if(allSuppliersCache)return Promise.resolve(allSuppliersCache);
+  return sbGet('contacts','category=eq.supplier&select=name&order=name').then(function(data){
+    allSuppliersCache=Array.isArray(data)?data.map(function(s){return s.name;}):[];
+    return allSuppliersCache;
+  }).catch(function(){allSuppliersCache=[];return allSuppliersCache;});
+}
+
+/* ── Автоматично зареждане на наименование/мярка по SAP код от каталога (product_catalog) ──
+   Работи и с редовете от Клиентски/Транспорт (.item-row) и с тези от Разлики (.diff-item-row) */
+function lookupCatalogBySap(inputEl){
+  var sap=inputEl.value.trim();
+  if(!sap)return;
+  var row=inputEl.closest('.item-row')||inputEl.closest('.diff-item-row');
+  if(!row)return;
+  var nameEl=row.querySelector('.item-product')||row.querySelector('.di-name');
+  var unitEl=row.querySelector('.item-unit')||row.querySelector('.di-unit');
+  fetch(API+'/product_catalog?sap_code=eq.'+encodeURIComponent(sap)+'&limit=1',{headers:H}).then(function(res){
+    if(!res.ok){
+      return res.text().then(function(errText){
+        console.error('product_catalog GET грешка (SAP '+sap+'):',errText);
+      });
+    }
+    return res.json().then(function(data){
+      var item=Array.isArray(data)&&data[0]?data[0]:null;
+      if(!item){console.log('SAP '+sap+' не е намерен в каталога.');return;}
+      if(nameEl && !nameEl.value.trim()) nameEl.value=item.product_name;
+      if(unitEl && item.default_unit){
+        var opts=[].map.call(unitEl.options,function(o){return o.value;});
+        if(opts.indexOf(item.default_unit)>=0) unitEl.value=item.default_unit;
+      }
+    });
+  }).catch(function(err){console.error('product_catalog заявка неуспешна:',err);});
 }
 
 /* ── Ограничение на клиентски заявки към складове/ЦО за определен период (Администрация) ── */
