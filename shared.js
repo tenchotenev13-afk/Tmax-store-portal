@@ -45,6 +45,8 @@ function storeQ(col){
 
 /* UTILS */
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'—';}
+/* За value="" на input/textarea полета - празно поле трябва да е ИСТИНСКИ празно, не тире (esc() връща тире за показване на данни, тук е грешно) */
+function escVal(s){return s?esc(s):'';}
 function today(){return new Date().toISOString().slice(0,10);}
 function fmtDate(d){if(!d||d==='—')return'—';var p=String(d).split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:d;}
 function v(id){var el=document.getElementById(id);return el?(el.value||'').trim():'';}
@@ -79,9 +81,9 @@ function unitOptionsHtml(sel){
 function itemRowHtml(item){
   item=item||{};
   return '<div class="item-row" style="display:grid;grid-template-columns:1.3fr 1fr 1fr 70px 90px 26px;gap:5px;margin-bottom:6px;align-items:center;">'+
-    '<input class="fi item-product" placeholder="Продукт *" value="'+esc(item.product||'')+'">'+
-    '<input class="fi item-color" placeholder="Цвят/Модел" value="'+esc(item.color||'')+'">'+
-    '<input class="fi item-sap" placeholder="SAP код" value="'+esc(item.sap||'')+'">'+
+    '<input class="fi item-product" placeholder="Продукт *" value="'+escVal(item.product)+'">'+
+    '<input class="fi item-color" placeholder="Цвят/Модел" value="'+escVal(item.color)+'">'+
+    '<input class="fi item-sap" placeholder="SAP код" value="'+escVal(item.sap)+'">'+
     '<input type="text" inputmode="decimal" class="fi item-qty" placeholder="Кол." value="'+esc(item.qty!=null?String(item.qty).replace('.',','):'1')+'">'+
     '<select class="fi item-unit">'+unitOptionsHtml(item.unit)+'</select>'+
     '<button type="button" onclick="removeItemRow(this)" title="Премахни артикула" style="border:none;background:#fee2e2;color:#991b1b;border-radius:5px;height:30px;cursor:pointer;font-size:13px;">✕</button>'+

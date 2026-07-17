@@ -398,6 +398,24 @@ function renderDiffReportsSection(){
 }
 
 /* ── Динамични редове с артикули за формата за подаване ── */
+/* ── Автоматично зареждане на наименование/мярка по SAP код (от каталога) ── */
+function lookupCatalogBySap(inputEl){
+  var sap=inputEl.value.trim();
+  if(!sap)return;
+  var row=inputEl.closest('.diff-item-row'); if(!row)return;
+  var nameEl=row.querySelector('.di-name');
+  var unitEl=row.querySelector('.di-unit');
+  sbGet('product_catalog','sap_code=eq.'+encodeURIComponent(sap)+'&limit=1').then(function(data){
+    var item=Array.isArray(data)&&data[0]?data[0]:null;
+    if(!item)return;
+    if(nameEl && !nameEl.value.trim()) nameEl.value=item.product_name;
+    if(unitEl && item.default_unit){
+      var opts=[].map.call(unitEl.options,function(o){return o.value;});
+      if(opts.indexOf(item.default_unit)>=0) unitEl.value=item.default_unit;
+    }
+  }).catch(function(){});
+}
+
 function diffItemRowHtml(item){
   item=item||{};
   var catOpts='<option value="">-- категория --</option>'+DIFF_CATEGORIES.map(function(c){
@@ -405,16 +423,17 @@ function diffItemRowHtml(item){
   }).join('');
   return '<div class="diff-item-row" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:8px;">'+
     '<div style="display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-bottom:6px;">'+
-      '<input class="fi di-sap" placeholder="SAP №" value="'+esc(item.sap||'')+'">'+
-      '<input class="fi di-name" placeholder="Наименование на артикула *" value="'+esc(item.name||'')+'">'+
+      '<input class="fi di-sap" placeholder="SAP №" value="'+escVal(item.sap)+'" onblur="lookupCatalogBySap(this)">'+
+      '<input class="fi di-name" placeholder="Наименование на артикула *" value="'+escVal(item.name)+'">'+
     '</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1.4fr;gap:6px;margin-bottom:6px;">'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">'+
       '<input type="number" step="0.001" class="fi di-qty" placeholder="Кол. по документ" value="'+(item.qty!=null?item.qty:'')+'">'+
       '<input type="number" step="0.001" class="fi di-qty-real" placeholder="Реално получено" value="'+(item.qtyReal!=null?item.qtyReal:'')+'">'+
-      '<select class="fi di-cat">'+catOpts+'</select>'+
+      '<select class="fi di-unit">'+unitOptionsHtml(item.unit)+'</select>'+
     '</div>'+
+    '<div style="margin-bottom:6px;"><select class="fi di-cat" style="width:100%;">'+catOpts+'</select></div>'+
     '<div style="display:flex;gap:6px;">'+
-      '<input class="fi di-comment" placeholder="Коментар (незадължително)" style="flex:1;" value="'+esc(item.comment||'')+'">'+
+      '<input class="fi di-comment" placeholder="Коментар (незадължително)" style="flex:1;" value="'+escVal(item.comment)+'">'+
       '<button type="button" onclick="removeDiffItemRow(this)" style="border:none;background:#fee2e2;color:#991b1b;border-radius:5px;padding:0 10px;cursor:pointer;">✕</button>'+
     '</div>'+
   '</div>';
@@ -445,6 +464,7 @@ function collectDiffItems(){
       name:name,
       qty:parseFloat(row.querySelector('.di-qty').value)||null,
       qtyReal:parseFloat(row.querySelector('.di-qty-real').value)||null,
+      unit:row.querySelector('.di-unit').value||'бр.',
       category:row.querySelector('.di-cat').value||null,
       comment:row.querySelector('.di-comment').value.trim()
     });
@@ -536,7 +556,7 @@ function diffSubmitModalHtml(){
     '<div><label class="fl">Магазин *</label>'+storeField+'</div>'+
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
-    '<div><label class="fl" id="diff-counterpart-label">Обект изпращач</label><input class="fi" id="diff-counterpart" placeholder="напр. Лог. Добрич"></div>'+
+    '<div><label class="fl" id="diff-counterpart-label">Обект изпращач</label><select class="fi" id="diff-counterpart"></select></div>'+
     '<div><label class="fl">Документ №</label><input class="fi" id="diff-docnum" placeholder="напр. 4600179694"></div>'+
     '</div>'+
     '<div style="margin-bottom:12px;"><label class="fl">Дата на получаване/доставка</label><input type="date" class="fi" id="diff-docdate" value="'+today()+'" style="max-width:200px;"></div>'+
@@ -560,9 +580,18 @@ function diffSubmitModalHtml(){
 function updateDiffCounterpartLabel(){
   var dir=document.getElementById('diff-direction').value;
   var lbl=document.getElementById('diff-counterpart-label');
-  var inp=document.getElementById('diff-counterpart');
-  if(dir==='supplier'){ lbl.textContent='Доставчик'; inp.placeholder='напр. ТАГЕМАЛ ЕООД'; }
-  else { lbl.textContent='Обект изпращач'; inp.placeholder='напр. Лог. Добрич'; }
+  var sel=document.getElementById('diff-counterpart');
+  if(dir==='supplier'){
+    lbl.textContent='Доставчик';
+    loadAllSuppliers().then(function(list){
+      sel.innerHTML='<option value="">-- Избери доставчик --</option>'+list.map(function(n){return '<option>'+esc(n)+'</option>';}).join('');
+    });
+  } else {
+    lbl.textContent='Обект изпращач';
+    loadAllStores().then(function(){
+      fillStoreSelect(sel,'');
+    });
+  }
 }
 
 function openDiffSubmitModal(){
@@ -572,6 +601,7 @@ function openDiffSubmitModal(){
   renderDiffItemRows([{}]);
   var ov=document.getElementById('diff-submit-ov');
   ov.classList.add('open');
+  updateDiffCounterpartLabel(); /* зарежда магазини (посоката по подразбиране е "Междускладов")*/
 
   var myStores=assignedStores();
   if(!(myStores&&myStores.length)){
@@ -628,6 +658,7 @@ function submitDiffReport(){
           quantity:it.qty,
           quantity_received:it.qtyReal,
           difference_category:it.category,
+          unit:it.unit,
           comment:it.comment,
           status:'new',
           created_by:currentUser.display_name||currentUser.email

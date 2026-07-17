@@ -4,6 +4,7 @@ function loadAdmin(){
   loadStoresAdmin();
   loadUsersAdmin();
   loadRestrictionsAdmin();
+  loadCatalogAdmin();
   /* Backup секция — само за admin */
   if(currentUser && currentUser.role==='admin'){
     var backupContainer=document.getElementById('backup-admin-section');
@@ -574,4 +575,181 @@ function deleteRestriction(id){
     toast('✅ Изтрито!');
     loadRestrictionsAdmin();
   });
+}
+
+/* ══════════════════════════════════════════
+   КАТАЛОГ АРТИКУЛИ (от SAP export) - автоматично зареждане на име по SAP код
+══════════════════════════════════════════ */
+
+function loadCatalogAdmin(){
+  sbGet('product_catalog','select=sap_code&limit=1').then(function(){
+    /* само за да проверим, че таблицата съществува; реалният брой - отделна заявка с count */
+    fetch(API+'/product_catalog?select=sap_code',{method:'HEAD',headers:Object.assign({},H,{'Prefer':'count=exact'})}).then(function(res){
+      var count=res.headers.get('content-range');
+      var total=count?count.split('/')[1]:'?';
+      renderCatalogAdmin(total);
+    }).catch(function(){renderCatalogAdmin('?');});
+  }).catch(function(){renderCatalogAdmin('?');});
+}
+function renderCatalogAdmin(total){
+  var body=document.getElementById('catalog-admin-body'); if(!body)return;
+  body.innerHTML=
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px;">'+
+    '<div style="font-size:13px;color:#374151;">📦 Общо артикули в каталога: <b>'+esc(total)+'</b></div>'+
+    '<div style="display:flex;gap:8px;">'+
+    '<button onclick="openAddCatalogItemModal()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">+ Добави артикул</button>'+
+    '<button onclick="openCatalogImportModal()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">📤 Импортирай CSV/TSV</button>'+
+    '</div></div>'+
+    '<div style="display:flex;gap:8px;margin-bottom:8px;">'+
+    '<input class="fi" id="catalog-search-inp" placeholder="Търси по SAP код или наименование..." style="flex:1;" onkeydown="if(event.key===\'Enter\')searchCatalog()">'+
+    '<button onclick="searchCatalog()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 16px;font-size:12.5px;cursor:pointer;">Търси</button>'+
+    '</div>'+
+    '<div id="catalog-search-results" style="font-size:12px;color:#94a3b8;">Въведи SAP код или част от име за търсене.</div>';
+}
+function searchCatalog(){
+  var q=(document.getElementById('catalog-search-inp').value||'').trim();
+  var resultsEl=document.getElementById('catalog-search-results');
+  if(!q){resultsEl.innerHTML='Въведи SAP код или част от име за търсене.';return;}
+  resultsEl.innerHTML='⏳ Търсене...';
+  var filter='or=(sap_code.ilike.*'+encodeURIComponent(q)+'*,product_name.ilike.*'+encodeURIComponent(q)+'*)&limit=30';
+  sbGet('product_catalog',filter).then(function(data){
+    var rows=Array.isArray(data)?data:[];
+    if(!rows.length){resultsEl.innerHTML='<div style="padding:8px;color:#94a3b8;">Няма намерени артикули.</div>';return;}
+    resultsEl.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
+      '<tr style="color:#94a3b8;text-align:left;"><th style="padding:4px 6px;">SAP</th><th style="padding:4px 6px;">Наименование</th><th style="padding:4px 6px;">Мярка</th><th style="padding:4px 6px;"></th></tr>'+
+      rows.map(function(r){
+        return '<tr style="border-top:1px solid #f1f5f9;"><td style="padding:4px 6px;font-family:DM Mono,monospace;">'+esc(r.sap_code)+'</td>'+
+          '<td style="padding:4px 6px;">'+esc(r.product_name)+'</td>'+
+          '<td style="padding:4px 6px;">'+esc(r.default_unit||'—')+'</td>'+
+          '<td style="padding:4px 6px;"><button data-sap="'+esc(r.sap_code)+'" onclick="deleteCatalogItem(this.dataset.sap)" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;">✕</button></td></tr>';
+      }).join('')+
+    '</table>';
+  });
+}
+function openAddCatalogItemModal(){
+  var old=document.getElementById('catalog-item-ov'); if(old)old.remove();
+  var html='<div class="bov open" id="catalog-item-ov"><div class="bmod" style="width:380px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
+    '<div style="font-size:15px;font-weight:700;">+ Артикул в каталога</div>'+
+    '<button onclick="document.getElementById(\'catalog-item-ov\').remove()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<label class="fl">SAP код *</label><input class="fi" id="ci-sap" style="margin-bottom:8px;">'+
+    '<label class="fl">Наименование *</label><input class="fi" id="ci-name" style="margin-bottom:8px;">'+
+    '<label class="fl">Мярка</label><select class="fi" id="ci-unit" style="margin-bottom:14px;">'+unitOptionsHtml('бр.')+'</select>'+
+    '<button onclick="submitCatalogItem()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">Запази</button>'+
+    '</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+function submitCatalogItem(){
+  var sap=document.getElementById('ci-sap').value.trim();
+  var name=document.getElementById('ci-name').value.trim();
+  var unit=document.getElementById('ci-unit').value;
+  if(!sap||!name){toast('Попълни SAP код и наименование','#dc2626');return;}
+  fetch(API+'/product_catalog',{
+    method:'POST',
+    headers:Object.assign({},H,{'Prefer':'resolution=merge-duplicates,return=minimal'}),
+    body:JSON.stringify([{sap_code:sap,product_name:name,default_unit:unit,updated_at:new Date().toISOString()}])
+  }).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    toast('✅ Запазено!');
+    var ov=document.getElementById('catalog-item-ov'); if(ov)ov.remove();
+    loadCatalogAdmin();
+  });
+}
+function deleteCatalogItem(sap){
+  if(!confirm('Изтрий артикул '+sap+' от каталога?'))return;
+  sbDelete('product_catalog','sap_code=eq.'+encodeURIComponent(sap)).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    toast('✅ Изтрито!');
+    searchCatalog();
+    loadCatalogAdmin();
+  });
+}
+
+/* ── Импорт/обновяване през CSV или TSV (SAP export) ── */
+var CATALOG_COL_MAP={sap:'Материал',name:'Описание на Материал',unit:'БМЕ',category:'Група материали',ean:'EAN/UPC код'};
+var CATALOG_UNIT_MAP={'БР':'бр.','КАШ':'кашон','КОМПЛ':'компл.','ЧИФТ':'чифт','ПАК':'пакет','КВМ':'кв.м','ЛМ':'л.м'};
+function normalizeCatalogUnit(u){
+  u=(u||'').trim().toUpperCase();
+  return CATALOG_UNIT_MAP[u]||(u?u.toLowerCase():'бр.');
+}
+function parseDelimitedCatalog(text){
+  var delim=text.indexOf('\t')>=0?'\t':',';
+  var lines=text.split(/\r\n|\n/).filter(function(l){return l.trim().length;});
+  if(!lines.length)return [];
+  var headers=lines[0].split(delim).map(function(h){return h.trim();});
+  var rows=[];
+  for(var i=1;i<lines.length;i++){
+    var cols=lines[i].split(delim);
+    var row={};
+    headers.forEach(function(h,idx){row[h]=(cols[idx]||'').trim();});
+    rows.push(row);
+  }
+  return rows;
+}
+function openCatalogImportModal(){
+  var old=document.getElementById('catalog-import-ov'); if(old)old.remove();
+  var html='<div class="bov open" id="catalog-import-ov"><div class="bmod" style="width:440px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
+    '<div style="font-size:15px;font-weight:700;">📤 Импорт от SAP export (CSV/TSV)</div>'+
+    '<button onclick="document.getElementById(\'catalog-import-ov\').remove()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">Артикул със съществуващ SAP код се обновява; нов SAP код се добавя. Нищо не се трие автоматично.</div>'+
+    '<input type="file" id="catalog-file-inp" accept=".csv,.tsv,.txt" style="margin-bottom:14px;">'+
+    '<div id="catalog-import-progress" style="font-size:12px;color:#94a3b8;"></div>'+
+    '<button onclick="startCatalogImport()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;width:100%;margin-top:8px;">Започни импорт</button>'+
+    '</div></div>';
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+function startCatalogImport(){
+  var fileInp=document.getElementById('catalog-file-inp');
+  var file=fileInp.files[0];
+  if(!file){toast('Избери файл','#dc2626');return;}
+  var progEl=document.getElementById('catalog-import-progress');
+  progEl.textContent='⏳ Четене на файла...';
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var rows=parseDelimitedCatalog(e.target.result);
+    var mapped=rows.map(function(r){
+      return {
+        sap_code:(r[CATALOG_COL_MAP.sap]||'').trim(),
+        product_name:(r[CATALOG_COL_MAP.name]||'').trim(),
+        default_unit:normalizeCatalogUnit(r[CATALOG_COL_MAP.unit]),
+        category:(r[CATALOG_COL_MAP.category]||'').trim()||null,
+        ean_code:(r[CATALOG_COL_MAP.ean]||'').trim()||null,
+        updated_at:new Date().toISOString()
+      };
+    }).filter(function(x){return x.sap_code && x.product_name;});
+    if(!mapped.length){progEl.innerHTML='<span style="color:#dc2626;">Не бяха разпознати редове. Провери дали колоните се казват точно "Материал"/"Описание на Материал".</span>';return;}
+    progEl.textContent='⏳ Качване на 0 / '+mapped.length+'...';
+    batchUpsertCatalog(mapped,function(done,total){
+      progEl.textContent='⏳ Качване на '+done+' / '+total+'...';
+    },function(){
+      progEl.innerHTML='<span style="color:#16a34a;">✅ Готово! Обработени '+mapped.length+' артикула.</span>';
+      toast('✅ Каталогът е обновен!');
+      loadCatalogAdmin();
+    });
+  };
+  reader.readAsText(file,'UTF-8');
+}
+function batchUpsertCatalog(rows,onProgress,onDone){
+  var BATCH=500;
+  var i=0;
+  function next(){
+    if(i>=rows.length){onDone();return;}
+    var batch=rows.slice(i,i+BATCH);
+    fetch(API+'/product_catalog',{
+      method:'POST',
+      headers:Object.assign({},H,{'Prefer':'resolution=merge-duplicates,return=minimal'}),
+      body:JSON.stringify(batch)
+    }).then(function(){
+      i+=BATCH;
+      onProgress(Math.min(i,rows.length),rows.length);
+      next();
+    }).catch(function(err){
+      console.error('Каталог upsert грешка на партида '+i+':',err);
+      i+=BATCH;
+      onProgress(Math.min(i,rows.length),rows.length);
+      next();
+    });
+  }
+  next();
 }
