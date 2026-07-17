@@ -143,7 +143,8 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;white-space:nowrap;">';
 
       if (canEdit && !isTaken) {
-        h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">✅ Взета</button>';
+        var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : '✅ Приета';
+        h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
       }
       if (canEdit) {
         h += '<button data-id="'+r.id+'" onclick="openSDModal(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">✏️</button>';
@@ -398,23 +399,7 @@ function renderDiffReportsSection(){
 }
 
 /* ── Динамични редове с артикули за формата за подаване ── */
-/* ── Автоматично зареждане на наименование/мярка по SAP код (от каталога) ── */
-function lookupCatalogBySap(inputEl){
-  var sap=inputEl.value.trim();
-  if(!sap)return;
-  var row=inputEl.closest('.diff-item-row'); if(!row)return;
-  var nameEl=row.querySelector('.di-name');
-  var unitEl=row.querySelector('.di-unit');
-  sbGet('product_catalog','sap_code=eq.'+encodeURIComponent(sap)+'&limit=1').then(function(data){
-    var item=Array.isArray(data)&&data[0]?data[0]:null;
-    if(!item)return;
-    if(nameEl && !nameEl.value.trim()) nameEl.value=item.product_name;
-    if(unitEl && item.default_unit){
-      var opts=[].map.call(unitEl.options,function(o){return o.value;});
-      if(opts.indexOf(item.default_unit)>=0) unitEl.value=item.default_unit;
-    }
-  }).catch(function(){});
-}
+/* lookupCatalogBySap() вече живее в shared.js - споделена с client-orders.js/transport.js */
 
 function diffItemRowHtml(item){
   item=item||{};
