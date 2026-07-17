@@ -667,7 +667,7 @@ function deleteCatalogItem(sap){
 
 /* ── Импорт/обновяване през CSV или TSV (SAP export) ── */
 var CATALOG_COL_MAP={sap:'Материал',name:'Описание на Материал',unit:'БМЕ',category:'Група материали',ean:'EAN/UPC код'};
-var CATALOG_UNIT_MAP={'БР':'бр.','КАШ':'кашон','КОМПЛ':'компл.','ЧИФТ':'чифт','ПАК':'пакет','КВМ':'кв.м','ЛМ':'л.м'};
+var CATALOG_UNIT_MAP={'БР':'бр.','КАШ':'кашон','M2':'кв.м','M²':'кв.м','ЛМ':'л.м','ПАК':'пакет','ЧФТ':'чифт','КОМПЛ':'компл.'};
 function normalizeCatalogUnit(u){
   u=(u||'').trim().toUpperCase();
   return CATALOG_UNIT_MAP[u]||(u?u.toLowerCase():'бр.');
