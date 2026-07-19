@@ -9,6 +9,20 @@ function sbPost(t,b){return fetch(API+'/'+t,{method:'POST',headers:H,body:JSON.s
 function sbPatch(t,f,b){return fetch(API+'/'+t+'?'+f,{method:'PATCH',headers:Object.assign({},H,{'Prefer':'return=minimal'}),body:JSON.stringify(b)}).then(function(r){return{ok:r.ok};});}
 function sbDelete(t,f){return fetch(API+'/'+t+'?'+f,{method:'DELETE',headers:H}).then(function(r){return{ok:r.ok};});}
 
+/* ОДИТ ЛОГ — тих запис (никога не блокира и не чупи основния поток при грешка) */
+function logAudit(event,extra){
+  extra=extra||{};
+  var payload={
+    event:event,
+    user_email:extra.email||(currentUser&&currentUser.email)||null,
+    user_role:(currentUser&&currentUser.role)||null,
+    store_name:(currentUser&&currentUser.store_name)||null,
+    success:extra.success!==false,
+    details:extra.details||null
+  };
+  sbPost('audit_log',payload).catch(function(){/* тих fail — одитът не трябва да чупи логин/логаут */});
+}
+
 /* STATE */
 var currentUser=null; /* {email,display_name,store_name,role} */
 var transportOrders=[],clientOrders=[],docs=[];
@@ -370,10 +384,11 @@ function doLogin(){
   sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name,assigned_stores').then(function(data){
     document.getElementById('l-btn').disabled=false;
     document.getElementById('l-btn').textContent='Влез →';
-    if(!Array.isArray(data)||!data.length){errEl.textContent='Непознат имейл адрес.';errEl.style.display='block';return;}
+    if(!Array.isArray(data)||!data.length){errEl.textContent='Непознат имейл адрес.';errEl.style.display='block';logAudit('login_failed',{email:email,success:false,details:{reason:'unknown_email'}});return;}
     var user=data[0];
-    if(user.password!==pass){errEl.textContent='Грешна парола.';errEl.style.display='block';return;}
+    if(user.password!==pass){errEl.textContent='Грешна парола.';errEl.style.display='block';logAudit('login_failed',{email:email,success:false,details:{reason:'wrong_password'}});return;}
     currentUser=user; /* запазваме за проверка при смяна на парола */
+    logAudit('login_success');
     startApp();
   }).catch(function(){
     document.getElementById('l-btn').disabled=false;
@@ -382,6 +397,7 @@ function doLogin(){
   });
 }
 function doLogout(){
+  logAudit('logout');
   currentUser=null;
   transportOrders=[];clientOrders=[];docs=[];
   document.getElementById('s-app').style.display='none';
@@ -490,6 +506,7 @@ function submitChangePassword(){
   sbPatch('users','email=eq.'+encodeURIComponent(currentUser.email),{password:newPass}).then(function(res){
     if(!res.ok){errEl.textContent='Грешка при запис.';errEl.style.display='block';return;}
     currentUser.password=newPass;
+    logAudit('password_changed');
     closeModal('change-pass-modal');
     toast('✓ Паролата е сменена успешно!');
   });
