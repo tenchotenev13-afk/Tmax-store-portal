@@ -381,13 +381,22 @@ function doLogin(){
   errEl.style.display='none';
   document.getElementById('l-btn').disabled=true;
   document.getElementById('l-btn').textContent='Влизане...';
-  sbGet('users','email=eq.'+encodeURIComponent(email)+'&active=eq.true&select=email,password,store_name,role,display_name,assigned_stores').then(function(data){
+  fetch(SB_URL+'/functions/v1/auth-login',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_KEY,'apikey':SB_KEY},
+    body:JSON.stringify({email:email,password:pass})
+  }).then(function(r){
+    return r.json().catch(function(){return{};}).then(function(d){return{status:r.status,data:d};});
+  }).then(function(res){
     document.getElementById('l-btn').disabled=false;
     document.getElementById('l-btn').textContent='Влез →';
-    if(!Array.isArray(data)||!data.length){errEl.textContent='Непознат имейл адрес.';errEl.style.display='block';logAudit('login_failed',{email:email,success:false,details:{reason:'unknown_email'}});return;}
-    var user=data[0];
-    if(user.password!==pass){errEl.textContent='Грешна парола.';errEl.style.display='block';logAudit('login_failed',{email:email,success:false,details:{reason:'wrong_password'}});return;}
-    currentUser=user; /* запазваме за проверка при смяна на парола */
+    var d=res.data||{};
+    if(!d.ok){
+      errEl.textContent=d.message||'Грешка при вход.';errEl.style.display='block';
+      logAudit('login_failed',{email:email,success:false,details:{reason:d.reason||'unknown'}});
+      return;
+    }
+    currentUser=d.user;
     logAudit('login_success');
     startApp();
   }).catch(function(){
@@ -500,15 +509,19 @@ function submitChangePassword(){
   var oldPass=v('cp-old'), newPass=v('cp-new'), confirm=v('cp-confirm');
   var errEl=document.getElementById('cp-err');
   if(!oldPass||!newPass||!confirm){errEl.textContent='Попълни всички полета.';errEl.style.display='block';return;}
-  if(oldPass!==currentUser.password){errEl.textContent='Старата парола е грешна.';errEl.style.display='block';return;}
   if(newPass.length<6){errEl.textContent='Новата парола трябва да е поне 6 символа.';errEl.style.display='block';return;}
   if(newPass!==confirm){errEl.textContent='Паролите не съвпадат.';errEl.style.display='block';return;}
-  sbPatch('users','email=eq.'+encodeURIComponent(currentUser.email),{password:newPass}).then(function(res){
-    if(!res.ok){errEl.textContent='Грешка при запис.';errEl.style.display='block';return;}
-    currentUser.password=newPass;
+  fetch(SB_URL+'/functions/v1/auth-set-password',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_KEY,'apikey':SB_KEY},
+    body:JSON.stringify({user_id:currentUser.id,old_password:oldPass,new_password:newPass})
+  }).then(function(r){return r.json().catch(function(){return{};});}).then(function(d){
+    if(!d.ok){errEl.textContent=d.message||'Грешка при запис.';errEl.style.display='block';return;}
     logAudit('password_changed');
     closeModal('change-pass-modal');
     toast('✓ Паролата е сменена успешно!');
+  }).catch(function(){
+    errEl.textContent='Грешка при връзка. Опитай отново.';errEl.style.display='block';
   });
 }
 
