@@ -26,7 +26,7 @@ function loadStoresAdmin(){
       return '<tr>'+
         '<td style="font-weight:500;">'+esc(s.name)+'</td>'+
         '<td>'+esc(s.city||s.addr||'')+'</td>'+
-        '<td><button onclick="deleteStore(\''+s.id+'\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">× Изтрий</button></td>'+
+        '<td><button onclick="deleteStore(\''+s.id+'\',\''+esc(s.name)+'\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">× Изтрий</button></td>'+
       '</tr>';
     }).join('');
   });
@@ -39,13 +39,17 @@ function addStore(){
     if(!res.ok){toast('Грешка','#dc2626');return;}
     document.getElementById('new-store-name').value='';
     document.getElementById('new-store-city').value='';
+    logAudit('store_added',{details:{name:name,city:city}});
     toast('✓ Магазинът е добавен');loadStoresAdmin();
   });
 }
 
-function deleteStore(id){
+function deleteStore(id,name){
   if(!confirm('Изтрий магазина?'))return;
-  sbDelete('stores','id=eq.'+id).then(function(){toast('✓ Изтрит');loadStoresAdmin();});
+  sbDelete('stores','id=eq.'+id).then(function(){
+    logAudit('store_deleted',{details:{id:id,name:name}});
+    toast('✓ Изтрит');loadStoresAdmin();
+  });
 }
 
 /* ══════════════════════════════════════════
@@ -85,9 +89,11 @@ function loadUsersAdmin(){
 }
 
 var _assignedEditUserId = null;
+var _assignedEditUserName = null;
 
 function editAssigned(userId, userName){
   _assignedEditUserId = userId;
+  _assignedEditUserName = userName;
   sbGet('users','id=eq.'+userId+'&select=assigned_stores').then(function(data){
     var current = (Array.isArray(data) && data[0]) ? data[0].assigned_stores : null;
     var currentList = [];
@@ -145,6 +151,7 @@ function closeAssignedModal(){
   var ov = document.getElementById('assigned-modal-ov');
   if (ov) ov.remove();
   _assignedEditUserId = null;
+  _assignedEditUserName = null;
 }
 
 function submitAssigned(){
@@ -153,6 +160,7 @@ function submitAssigned(){
   var payload = wantsAll ? {assigned_stores: null} : {assigned_stores: selected.length ? selected : null};
   sbPatch('users','id=eq.'+_assignedEditUserId, payload).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    logAudit('user_assigned_stores_changed',{details:{target_user_id:_assignedEditUserId,target_user_name:_assignedEditUserName,wants_all:wantsAll,stores:selected}});
     toast(wantsAll ? '✅ Вижда всички магазини' : '✅ Назначени '+selected.length+' магазина');
     closeAssignedModal();
     loadUsersAdmin();
@@ -162,6 +170,7 @@ function submitAssigned(){
 function deleteUser(id, email){
   if(!confirm('Изтрий потребител:\n'+email+'\n\nТова действие е необратимо!'))return;
   sbDelete('users','id=eq.'+id).then(function(){
+    logAudit('user_deleted',{details:{target_user_id:id,target_email:email}});
     toast('✓ Потребителят е изтрит');
     loadUsersAdmin();
   });
@@ -278,23 +287,60 @@ function submitUserModal(){
     active: active
   };
   if(!_userEditId) data.email=email;
-  if(pass) data.password=pass;
 
-  var p=_userEditId
-    ? sbPatch('users','id=eq.'+_userEditId, data)
-    : sbPost('users', Object.assign({email:email}, data));
+  var editingId=_userEditId; /* запазваме преди closeUserModal() да го нулира */
 
-  p.then(function(res){
-    if(!res.ok){
-      res.json&&res.json().then(function(e){
-        toast('Грешка: '+(e.message||e.error||JSON.stringify(e)),'#dc2626');
-      }).catch(function(){toast('Грешка при запис','#dc2626');});
-      return;
-    }
-    toast('✅ '+(_userEditId?'Записано!':'Колегата е добавен!'));
+  function afterPassword(){
+    toast('✅ '+(editingId?'Записано!':'Колегата е добавен!'));
     closeUserModal();
     loadUsersAdmin();
-  });
+  }
+
+  if(editingId){
+    sbPatch('users','id=eq.'+editingId, data).then(function(res){
+      if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+      logAudit('user_edited',{details:{target_user_id:editingId,target_email:email,role:role,store_name:store,active:active}});
+      if(pass){
+        setUserPassword(editingId,pass,function(ok,msg){
+          if(ok) logAudit('user_password_changed_by_admin',{details:{target_user_id:editingId,target_email:email}});
+          else toast('⚠️ Записано, но паролата НЕ бе сменена: '+(msg||''),'#d97706');
+          afterPassword();
+        });
+      } else afterPassword();
+    });
+  } else {
+    /* Prefer: return=representation, за да получим id-то на новосъздадения ред (за паролата) */
+    fetch(API+'/users',{
+      method:'POST',
+      headers:Object.assign({},H,{'Prefer':'return=representation'}),
+      body:JSON.stringify(Object.assign({email:email},data))
+    }).then(function(r){
+      return r.text().then(function(txt){
+        var d=null; try{d=JSON.parse(txt);}catch(e){}
+        return {ok:r.ok, data:d};
+      });
+    }).then(function(res){
+      if(!res.ok||!res.data||!res.data.length){toast('Грешка при запис','#dc2626');return;}
+      var newId=res.data[0].id;
+      logAudit('user_added',{details:{target_user_id:newId,target_email:email,role:role,store_name:store,active:active}});
+      setUserPassword(newId,pass,function(ok,msg){
+        if(ok) logAudit('user_password_changed_by_admin',{details:{target_user_id:newId,target_email:email}});
+        else toast('⚠️ Колегата е добавен, но паролата НЕ бе зададена: '+(msg||''),'#d97706');
+        afterPassword();
+      });
+    });
+  }
+}
+
+/* Хеширане на парола през Edge Function — таблицата users никога не получава чист текст оттук насетне */
+function setUserPassword(userId,newPass,onDone){
+  fetch(SB_URL+'/functions/v1/auth-set-password',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_KEY,'apikey':SB_KEY},
+    body:JSON.stringify({user_id:userId,new_password:newPass})
+  }).then(function(r){return r.json().catch(function(){return{};});}).then(function(d){
+    onDone(!!d.ok, d.message);
+  }).catch(function(){onDone(false,'мрежова грешка');});
 }
 
 /* ═══════════════════════════════════════════════════════════════
