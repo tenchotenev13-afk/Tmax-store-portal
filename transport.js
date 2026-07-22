@@ -69,12 +69,18 @@ function renderTransport(){
   if (month) list=list.filter(function(o){ return o.date && o.date.slice(0,7)===month; });
   if (search) {
     list=list.filter(function(o){
-      return (o.customer_name||'').toLowerCase().indexOf(search)>=0 ||
-             (o.product||'').toLowerCase().indexOf(search)>=0 ||
-             (o.sap||'').toLowerCase().indexOf(search)>=0 ||
-             (o.phone||'').indexOf(search)>=0 ||
-             (o.bon||'').toLowerCase().indexOf(search)>=0 ||
-             (o.address||'').toLowerCase().indexOf(search)>=0;
+      if((o.customer_name||'').toLowerCase().indexOf(search)>=0)return true;
+      if((o.phone||'').indexOf(search)>=0)return true;
+      if((o.bon||'').toLowerCase().indexOf(search)>=0)return true;
+      if((o.address||'').toLowerCase().indexOf(search)>=0)return true;
+      /* Проверяваме ВСИЧКИ артикули на заявката (не само първия) — resolveItems()
+         връща o.items ако има, иначе fallback към старите единични полета */
+      var items=resolveItems(o);
+      for(var i=0;i<items.length;i++){
+        if((items[i].sap||'').toLowerCase().indexOf(search)>=0)return true;
+        if((items[i].product||'').toLowerCase().indexOf(search)>=0)return true;
+      }
+      return false;
     });
   }
   var body=document.getElementById('tr-body');if(!body)return;

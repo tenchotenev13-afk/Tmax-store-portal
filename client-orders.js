@@ -75,11 +75,17 @@ function renderClientOrders(){
   if (month) list=list.filter(function(o){ return o.date && o.date.slice(0,7)===month; });
   if (search) {
     list=list.filter(function(o){
-      return (o.customer_name||'').toLowerCase().indexOf(search)>=0 ||
-             (o.product||'').toLowerCase().indexOf(search)>=0 ||
-             (o.sap||'').toLowerCase().indexOf(search)>=0 ||
-             (o.phone||'').indexOf(search)>=0 ||
-             (o.bon||'').toLowerCase().indexOf(search)>=0;
+      if((o.customer_name||'').toLowerCase().indexOf(search)>=0)return true;
+      if((o.phone||'').indexOf(search)>=0)return true;
+      if((o.bon||'').toLowerCase().indexOf(search)>=0)return true;
+      /* Проверяваме ВСИЧКИ артикули на заявката (не само първия) — resolveItems()
+         връща o.items ако има, иначе fallback към старите единични полета */
+      var items=resolveItems(o);
+      for(var i=0;i<items.length;i++){
+        if((items[i].sap||'').toLowerCase().indexOf(search)>=0)return true;
+        if((items[i].product||'').toLowerCase().indexOf(search)>=0)return true;
+      }
+      return false;
     });
   }
   var body=document.getElementById('co-body');if(!body)return;
@@ -223,64 +229,77 @@ function renderPrint(o){
   };
   var si=stInfo[st]||stInfo.pending;
 
+  /* Печатен CSS — 1 лист А4, 2 компактни копия едно под друго (по модел на transport.js) */
+  var PRINT_CSS=
+    '@media print{'+
+      '@page{size:A4 portrait;margin:8mm;}'+
+      '.no-print{display:none!important;}'+
+      'body{margin:0;padding:0;}'+
+      '.cp-wrap{max-width:none!important;padding:0!important;}'+
+      '.cp-card{page-break-inside:avoid;}'+
+      '.cp-cut{page-break-after:avoid;page-break-before:avoid;}'+
+    '}';
+
   var blank=function(copy,sign1,sign2){
-    return '<div style="background:#fff;border:1px solid #ccc;border-radius:10px;overflow:hidden;margin-bottom:16px;font-family:Arial,sans-serif;font-size:12px;color:#1a1a1a;">'+
-      '<div style="background:#2b2b2b;display:flex;align-items:stretch;min-height:66px;">'+
-        '<div style="padding:10px 14px;display:flex;align-items:center;border-right:1px solid rgba(255,255,255,.1);">'+
-          '<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAC4AAAAqCAIAAABDSv52AAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAAFGklEQVR42u1YW2hcVRRde59z7507M5lkkia1tS9atTRqa4kgaD8UHyBqqVAMgtQHKIJIP9ovoVToTxEKRX/8ED9ExEKRCoIUaREflFIUtahVsNbUhqbmNTOZuc9zth95OElnkpi2mkLP14V7zr7rnrPW2nsf2tB9BxbHYAAi8j8iEJFxAAyAiOacfe1wTD3r+SyYE+uCR31kxqIZ1zmUa0Qdnp3VC6bO7HAbxtfXiKezR2j49gZtr1co/302aAyFRBTAQDPuEUAi9YjroYsIREgEIuPRMI8fa6AgAUImCzDIgWg7Hm+aQ6dAzOyLgAgiDNj6/yNKAENwBQwkRBBxgNnhqM7OrmmnQqRENkTmlihttZISSopZJtImABJUFbUbWR8nF7XSQMJUIQLImdywkNBh7KrEjDFHJDelooGASQECWAikgZz1jNOqELYEyXt9owYAUFJ8vMXd15k3zAoAEBNui9KDF0oxYduadhGsic091fhkzv3DVY4gJKxMzDt9o2uj9P2O7M7lrbsHy3fXkt5VRQJyxr52qXKgq2VQsyPT9olnWI8CjTErK64VAJ2p7R2q3V+NA0IEWCBkenG42l2LFJA3NmC8Mljd1z+6Z6BigAhYG6WHzw3fnBom3BqljpWfPd1TjW4PkwHNz44EW8sRNRLFNCgWyIj86unXlxW+zrtacNrXz68unsloC6xO0oKxFmhNxRJ1pRZATy15rBRaUgpQIjWmp0rBqKJDbb4IIuaMyPcZB8wbw3RzkLw8OHbW08OKtcwUbAPaKuDNjtyAovsqUYvFVzm3wrR7sPrSUO2XjO5dVWw1lkBLUvt4OdpaCQOmFmPLTDUiV+ThsXhvZ36pAYkd1GSBPx0+lXWeHgm2lwLXypc5p6y43YqZngq4kZLRIrI6tQCGNSKi3tFw919j/a76uJARQU4sATGwv780qPmnjBaRfs0ZKztGasXU3hmZJyqhZXVvNdkcJkNaHW7NdAfJplpSdvWHrX7WznVAUyMlKhoL4FjOCwkvjATG4t02/2BHtsNYQ/RR0fetOdnivdWeWxenBPzu6RWp2XNxrJCaXQPlLZXIElWZzjtqfZg8N1QDoab41eUt3/qObiRs3dC/SGRpakH4NO/lLbLWKpHHKlFe8EnBM6C327PH8t6JrLs+TJbE9kzW/SznDbjqtO/84Osv8t72UvjoSG3XsuKQ4qN9Qxui9POC11NL2lP7ZCXqc9Q5R7l1gBofkAU8kTVxeqiYPesqgrzRlf/NdzYFaUAoExnAEB0pZC44/GA1vuTwzuWFc67qDhNDsr8z/0Gbf97ho23+dxlnY2xO5dxH1i15ZmXxQGdu76Wxh8aiIUXq8h24vA8SQIk8UI2OZ92USIOqjLwVAkpMOSvbKuGxnFdVHBPtGKme8N0fPa0JPUGyIjZHCpmcyF1B/I3vpgQNqhIU4AsCpqKxJSYGZphKEygiAEImf3IuCwxNQBSigODJRIYKCErgCSwhBVKCLxAgAlwRAjC58xZgIJnkxLy4Mu7JWSsyac6WJugt018JkBUIYAkAtIgjJAQBMjI5R8ROxQF080zUvLadniSkLoSdTqx/hEkkNJGGppbPSDa2eYqeb+lU79T10RdQ1jRbMt8yu1nZ/G8L8lnm36htb0BZxFCaKYivcD1m7a7njFbfPPOCHWJ8vixIz1fUMzdzGpp09wV3+VOR+arcHlyVG7LFoiAR4UWCY+a9rSxIDvP/4OyS/BsnQaRclmJE7gAAAABJRU5ErkJggg==" style="height:42px;width:auto;" alt="TeMAX"></div>'+
-        '<div style="flex:1;padding:10px 14px;display:flex;flex-direction:column;justify-content:center;">'+
-          '<div style="font-size:11px;color:rgba(255,255,255,.55);">TeMAX — Клиентска заявка за доставка</div>'+
-          '<div style="font-size:10px;color:rgba(255,255,255,.38);margin-top:2px;">'+esc(o.store_name||'')+'</div></div>'+
-        '<div style="padding:10px 14px;text-align:right;display:flex;flex-direction:column;justify-content:center;border-left:1px solid rgba(255,255,255,.1);">'+
-          '<div style="font-size:9px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;">Заявка №</div>'+
-          '<div style="font-size:15px;font-weight:700;color:#fff;margin:2px 0;">'+esc(o.in_num||'0001')+'</div>'+
-          '<div style="font-size:10px;color:rgba(255,255,255,.45);">'+esc(o.date||'')+'</div></div>'+
+    return '<div class="cp-card" style="background:#fff;border:1px solid #ccc;border-radius:8px;overflow:hidden;margin-bottom:10px;font-family:Arial,sans-serif;font-size:11.5px;color:#1a1a1a;">'+
+      '<div style="background:#2b2b2b;display:flex;align-items:stretch;min-height:48px;">'+
+        '<div style="padding:6px 10px;display:flex;align-items:center;border-right:1px solid rgba(255,255,255,.1);">'+
+          '<img src="data:image/png;base64,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" style="height:32px;width:auto;" alt="TeMAX"></div>'+
+        '<div style="flex:1;padding:6px 10px;display:flex;flex-direction:column;justify-content:center;">'+
+          '<div style="font-size:10px;color:rgba(255,255,255,.55);">TeMAX — Клиентска заявка за доставка</div>'+
+          '<div style="font-size:9px;color:rgba(255,255,255,.38);margin-top:1px;">'+esc(o.store_name||'')+'</div></div>'+
+        '<div style="padding:6px 10px;text-align:right;display:flex;flex-direction:column;justify-content:center;border-left:1px solid rgba(255,255,255,.1);">'+
+          '<div style="font-size:8px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;">Заявка №</div>'+
+          '<div style="font-size:13px;font-weight:700;color:#fff;margin:1px 0;">'+esc(o.in_num||'0001')+'</div>'+
+          '<div style="font-size:9px;color:rgba(255,255,255,.45);">'+esc(o.date||'')+'</div></div>'+
       '</div>'+
-      '<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 14px;border-bottom:1px solid #eee;">'+
-        '<span style="font-size:10px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:1px;">'+copy+'</span>'+
-        '<span style="font-size:11px;font-weight:600;padding:2px 10px;border-radius:20px;background:'+si.bg+';color:'+si.c+';">'+si.l+'</span></div>'+
-      '<div style="padding:12px 14px;">'+
-        '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;padding-bottom:3px;border-bottom:1px solid #f0ede8;">Данни за поръчката</div>'+
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-bottom:10px;">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px;border-bottom:1px solid #eee;">'+
+        '<span style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:1px;">'+copy+'</span>'+
+        '<span style="font-size:10px;font-weight:600;padding:1px 9px;border-radius:20px;background:'+si.bg+';color:'+si.c+';">'+si.l+'</span></div>'+
+      '<div style="padding:8px 10px;">'+
+        '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;padding-bottom:2px;border-bottom:1px solid #f0ede8;">Данни за поръчката</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px;">'+
           itemsPrintBlock(o)+
-          '<div style="background:#fff8e1;border:1px solid #f0c940;border-radius:5px;padding:7px 9px;grid-column:1/-1;">'+
-            '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">★ Дата на доставка</div>'+
-            '<div style="font-size:13px;font-weight:700;color:#dc2626;">'+fmtDate(o.delivery)+'</div></div>'+
-          (o.note?'<div style="background:#f9f8f6;border-radius:5px;padding:7px 9px;grid-column:1/-1;"><div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Забележка</div><div style="font-size:11px;">'+esc(o.note)+'</div></div>':'')+
+          '<div style="background:#fff8e1;border:1px solid #f0c940;border-radius:5px;padding:4px 8px;grid-column:1/-1;">'+
+            '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">★ Дата на доставка</div>'+
+            '<div style="font-size:12px;font-weight:700;color:#dc2626;">'+fmtDate(o.delivery)+'</div></div>'+
+          (o.note?'<div style="background:#f9f8f6;border-radius:5px;padding:4px 8px;grid-column:1/-1;"><div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">Забележка</div><div style="font-size:10.5px;">'+esc(o.note)+'</div></div>':'')+
         '</div>'+
-        '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:1px;margin-bottom:6px;padding-bottom:3px;border-bottom:1px solid #f0ede8;">Данни за клиента</div>'+
-        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;">'+
-          '<div style="grid-column:1/-1;background:#f9f8f6;border-radius:5px;padding:7px 9px;">'+
-            '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Три имена</div>'+
-            '<div style="font-size:13px;font-weight:700;">'+esc(o.customer_name||'')+'</div></div>'+
-          '<div style="background:#f9f8f6;border-radius:5px;padding:7px 9px;">'+
-            '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Телефон</div>'+
-            '<div style="font-size:12px;font-family:monospace;">'+esc(o.phone||'')+'</div></div>'+
-          '<div style="background:#f9f8f6;border-radius:5px;padding:7px 9px;">'+
-            '<div style="font-size:8px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px;">Изготвил</div>'+
-            '<div style="font-size:12px;">'+esc(o.agent||'')+'</div></div>'+
+        '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;padding-bottom:2px;border-bottom:1px solid #f0ede8;">Данни за клиента</div>'+
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">'+
+          '<div style="grid-column:1/-1;background:#f9f8f6;border-radius:5px;padding:4px 8px;">'+
+            '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">Три имена</div>'+
+            '<div style="font-size:12px;font-weight:700;">'+esc(o.customer_name||'')+'</div></div>'+
+          '<div style="background:#f9f8f6;border-radius:5px;padding:4px 8px;">'+
+            '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">Телефон</div>'+
+            '<div style="font-size:11px;font-family:monospace;">'+esc(o.phone||'')+'</div></div>'+
+          '<div style="background:#f9f8f6;border-radius:5px;padding:4px 8px;">'+
+            '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">Изготвил</div>'+
+            '<div style="font-size:11px;">'+esc(o.agent||'')+'</div></div>'+
         '</div></div>'+
-      '<div style="background:#f9f8f6;border-top:1px solid #eee;padding:7px 14px;font-size:9px;color:#999;line-height:1.6;"><b style="color:#777;">ОБЩИ УСЛОВИЯ:</b> Поръчката е валидна само след цялостно заплащане или капариране. Срокът за доставка е посочен по-горе.</div>'+
-      '<div style="padding:11px 14px 14px;border-top:1px solid #eee;">'+
-        '<div style="font-size:9px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.8px;margin-bottom:5px;">'+sign1+'</div>'+
-        '<div style="font-size:11px;font-style:italic;color:#555;margin-bottom:14px;padding:5px 10px;background:#f9f8f6;border-left:3px solid #dc2626;border-radius:0 4px 4px 0;">'+sign2+'</div>'+
-        '<div style="display:flex;gap:20px;">'+
-          '<div style="flex:1;"><div style="border-top:1px solid #999;padding-top:4px;font-size:9px;color:#bbb;margin-top:24px;">Подпис: _______________________</div></div>'+
-          '<div style="width:120px;"><div style="border-top:1px solid #999;padding-top:4px;font-size:9px;color:#bbb;margin-top:24px;">Дата: __________ г.</div></div>'+
+      '<div style="background:#f9f8f6;border-top:1px solid #eee;padding:4px 10px;font-size:8.5px;color:#999;line-height:1.4;"><b style="color:#777;">ОБЩИ УСЛОВИЯ:</b> Поръчката е валидна само след цялостно заплащане или капариране. Срокът за доставка е посочен по-горе.</div>'+
+      '<div style="padding:7px 10px 8px;border-top:1px solid #eee;">'+
+        '<div style="font-size:8.5px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">'+sign1+'</div>'+
+        '<div style="font-size:10px;font-style:italic;color:#555;margin-bottom:8px;padding:3px 8px;background:#f9f8f6;border-left:3px solid #dc2626;border-radius:0 4px 4px 0;">'+sign2+'</div>'+
+        '<div style="display:flex;gap:16px;">'+
+          '<div style="flex:1;"><div style="border-top:1px solid #999;padding-top:3px;font-size:8.5px;color:#bbb;margin-top:16px;">Подпис: _______________________</div></div>'+
+          '<div style="width:110px;"><div style="border-top:1px solid #999;padding-top:3px;font-size:8.5px;color:#bbb;margin-top:16px;">Дата: __________ г.</div></div>'+
         '</div></div>'+
     '</div>';
   };
-  var dot='<div style="text-align:center;color:#94a3b8;font-size:11px;margin:4px 0;letter-spacing:.15em;">— — — — — — — — — — ОТКЪСВАТЕ ТУК — — — — — — — — — —</div>';
+  var dot='<div class="cp-cut" style="text-align:center;color:#94a3b8;font-size:10px;margin:2px 0;letter-spacing:.15em;">— — — — — — — — — — ОТКЪСВАТЕ ТУК — — — — — — — — — —</div>';
   wrap.innerHTML=
-    '<div style="max-width:600px;margin:0 auto;padding:20px 16px 60px;">'+
+    '<style>'+PRINT_CSS+'</style>'+
+    '<div class="cp-wrap" style="max-width:600px;margin:0 auto;padding:20px 16px 24px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:14px;" class="no-print">'+
         '<div style="font-size:18px;font-weight:600;">🖨 Бланка за печат</div>'+
         '<div style="display:flex;gap:8px;">'+
-          '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#2563eb;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай</button>'+
+          '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#2563eb;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / PDF</button>'+
           '<button onclick="showModule(\'client\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Обратно</button>'+
         '</div></div>'+
       '<div style="font-size:12px;color:#64748b;background:#f8fafc;border-radius:8px;padding:9px 13px;margin-bottom:14px;" class="no-print">'+
-        '📄 Горна половина — остава при магазина с подпис на клиента. Долна — за клиента.</div>'+
+        '📄 И двете копия се събират на 1 лист А4. Горна половина — остава при магазина с подпис на клиента. Долна — за клиента. '+
+        'За PDF: при печат избери "Запази като PDF" вместо принтер.</div>'+
       blank('КОПИЕ НА МАГАЗИНА','Подпис на клиента','Получих стоката без забележка. Запознат/а съм с условията.')+
       dot+
       blank('КОПИЕ НА КЛИЕНТА','Подпис на клиента','Получих стоката без забележка.')+
