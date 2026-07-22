@@ -206,13 +206,36 @@ function renderRefCard() {
   var brandName = brandObj.name || '';
   var subcatObj = refSubcats.find(function(s){return String(s.id)===String(refSelSubcat);}) || {};
   var subName   = subcatObj.name || '';
-  var templateFile = brandObj.card_template_file || subcatObj.card_template_file; /* марката има приоритет */
+
+  /* РЪЧЕН избор на гаранционна карта вместо автоматично познаване по марка/категория —
+     автоматичното мапване често сочеше към грешен шаблон (потвърден бъг). Колегата,
+     който държи продукта, знае най-добре коя от 11-те карти е правилната. */
+  var WARRANTY_TEMPLATES = [
+    ['hobby.pdf','Hobby / Дребни артикули'],
+    ['heatmann.pdf','Heatmann / Кухненски ел. уреди'],
+    ['tayfun.pdf','Тайфун'],
+    ['mehanik.pdf','Механик / Ръчни инструменти'],
+    ['agromashini.pdf','Агро машини (косачки, тримери...)'],
+    ['smesiteli.pdf','Смесители'],
+    ['praskachka.pdf','Пръскачки'],
+    ['oranzherii.pdf','Оранжерии'],
+    ['monoblok.pdf','Моноблокове'],
+    ['powervac.pdf','Ел. инструменти (винтоверти, перфоратори...)'],
+    ['mivkialpaka.pdf','Мивки алпака']
+  ];
+  var templatePicker =
+    '<div style="position:relative;display:inline-block;">' +
+      '<button onclick="var m=document.getElementById(\'ref-tpl-menu\');m.style.display=m.style.display===\'block\'?\'none\':\'block\';" style="background:#2563eb;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">🖨 Гаранционна карта ▾</button>' +
+      '<div id="ref-tpl-menu" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);min-width:260px;z-index:50;overflow:hidden;">' +
+        WARRANTY_TEMPLATES.map(function(t){
+          return '<a href="warranty-templates/'+encodeURIComponent(t[0])+'" target="_blank" style="display:block;padding:8px 12px;font-size:12.5px;color:#1a1a1a;text-decoration:none;border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">'+esc(t[1])+'</a>';
+        }).join('') +
+      '</div>' +
+    '</div>';
 
   var h = '<div style="background:#0f172a;color:#fff;border-radius:10px 10px 0 0;padding:12px 16px;font-size:14px;font-weight:600;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
     '<span>' + esc(brandName) + ' &nbsp;|&nbsp; ' + esc(subName) + '</span>' +
-    (templateFile
-      ? '<a href="warranty-templates/'+encodeURIComponent(templateFile)+'" target="_blank" style="background:#2563eb;color:#fff;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;text-decoration:none;white-space:nowrap;">🖨 Гаранционна карта</a>'
-      : '') +
+    templatePicker +
     '</div>';
 
   if (!refEntry) {
@@ -689,3 +712,12 @@ function submitRefLocations() {
     refOnChange();
   });
 }
+
+/* Затваря dropdown менюто с гаранционните карти при клик извън него */
+document.addEventListener('click', function(e){
+  var menu = document.getElementById('ref-tpl-menu');
+  if (!menu || menu.style.display !== 'block') return;
+  if (menu.contains(e.target)) return;
+  if (e.target.tagName === 'BUTTON' && e.target.textContent.indexOf('Гаранционна карта') >= 0) return;
+  menu.style.display = 'none';
+});
