@@ -58,6 +58,10 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .filter-btn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;color:var(--muted);}
 .filter-btn.active{background:var(--dark);color:#fff;border-color:var(--dark);}
 .tbl-wrap{overflow-x:auto;border-radius:8px;border:1px solid var(--border);}
+.co-sticky-actions table td:last-child,
+.co-sticky-actions table th:last-child{position:sticky;right:0;background:#fff;box-shadow:-6px 0 6px -6px rgba(0,0,0,.15);}
+.co-sticky-actions table th:last-child{background:var(--surf);}
+.co-sticky-actions tr:hover td:last-child{background:#fafafa;}
 table{width:100%;border-collapse:collapse;font-size:12px;}
 thead{background:var(--surf);}
 th{padding:9px 10px;text-align:left;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;}
@@ -295,8 +299,8 @@ OneSignalDeferred.push(async function(OneSignal) {
       <input id="co-search" placeholder="🔍 Търси клиент/продукт/SAP/бон/телефон..." oninput="renderClientOrders()" style="flex:1;min-width:220px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 14px;font-size:13px;font-family:inherit;outline:none;">
       <select id="co-month" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
     </div>
-    <div class="tbl-wrap"><table>
-      <thead><tr><th>№</th><th>Дата / Час</th><th>Клиент</th><th>Телефон</th><th>SAP</th><th>Продукт</th><th>Бр.</th><th>От магазин</th><th>Доставка</th><th>Изминало</th><th>Статус</th><th>Магазин</th><th></th></tr></thead>
+    <div class="tbl-wrap co-sticky-actions"><table>
+      <thead><tr><th>№</th><th>Дата / Час</th><th>Клиент</th><th>Телефон</th><th style="width:64px;">SAP</th><th>Продукт</th><th>Бр.</th><th>От магазин</th><th>Доставка</th><th>Изминало</th><th>Статус</th><th>Магазин</th><th></th></tr></thead>
       <tbody id="co-body"><tr><td colspan="13" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
     </table></div>
   </div>
