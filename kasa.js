@@ -109,10 +109,14 @@ function kasaTab(tab){
 function kasaTabBar(){
   var canGlavna=['manager','admin','kasa'].indexOf(currentUser.role)>=0;
   if(!canGlavna) return '';
+  var active=kasaView||'pos';
+  function tabStyle(t){
+    return t===active ? 'background:#2f2f2f;color:#fff;' : 'background:#fff;color:#64748b;';
+  }
   return '<div style="display:flex;gap:0;margin-bottom:18px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">'+
-    '<button id="ktab-pos" onclick="kasaTab(\'pos\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#2f2f2f;color:#fff;">📋 ПОС Отчети</button>'+
-    '<button id="ktab-glavna" onclick="kasaTab(\'glavna\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#fff;color:#64748b;">🏦 Главна каса</button>'+
-    '<button id="ktab-zoborot" onclick="kasaTab(\'zoborot\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#fff;color:#64748b;">📊 Равнение</button>'+
+    '<button id="ktab-pos" onclick="kasaTab(\'pos\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;'+tabStyle('pos')+'">📋 ПОС Отчети</button>'+
+    '<button id="ktab-glavna" onclick="kasaTab(\'glavna\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;'+tabStyle('glavna')+'">🏦 Главна каса</button>'+
+    '<button id="ktab-zoborot" onclick="kasaTab(\'zoborot\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;'+tabStyle('zoborot')+'">📊 Равнение</button>'+
   '</div>';
 }
 
