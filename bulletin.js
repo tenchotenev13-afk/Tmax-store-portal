@@ -34,8 +34,8 @@ function canEdit(){return currentUser && ['admin','accounting'].indexOf(currentU
 function genId(){return Math.random().toString(36).slice(2,9);}
 
 /* ═══════ ПРОМОЦИИ ══════════════════════════════════════════ */
-function promoStatus(p){
-  var t=new Date(); t.setHours(0,0,0,0);
+function promoStatus(p,refDate){
+  var t=refDate?new Date(refDate):new Date(); t.setHours(0,0,0,0);
   var s=new Date(p.start_date); s.setHours(0,0,0,0);
   var e=new Date(p.end_date); e.setHours(0,0,0,0);
   if(t>e) return 'expired';
@@ -43,6 +43,16 @@ function promoStatus(p){
   if(daysToEnd<=5) return 'expiring'; /* краят е близо (≤5 дни) - приоритет пред "стартираща", важи и за еднодневни маркери */
   if(t<s) return 'upcoming';
   return 'active';
+}
+/* Връща [понеделник, неделя] за дадена седмица/година - за филтриране и оценка на
+   промоциите спрямо седмицата на РАЗГЛЕЖДАНИЯ бюлетин, не спрямо реалната дата днес.
+   Позволява промоциите да са "автономни" за всяка седмица (стар бюлетин показва
+   промоциите, важащи за тогавашната седмица, не текущите). */
+function promoWeekRange(wk,yr){
+  var days=weekDays(wk,yr); /* [пон..пет] */
+  var mon=days[0];
+  var sun=new Date(mon); sun.setDate(mon.getDate()+6);
+  return {start:toLocalISO(mon), end:toLocalISO(sun), monday:mon};
 }
 var PROMO_STATUS_META={
   upcoming:{label:'⏳ Предстояща',bg:'#eff6ff',bdr:'#bfdbfe',c:'#1e40af'},
@@ -52,8 +62,10 @@ var PROMO_STATUS_META={
 };
 function renderPromotionsSection(){
   if(!bulPromotions.length && !canEdit()) return '';
-  var visible=bulPromotions.filter(function(p){ return canEdit() || promoStatus(p)!=='expired'; });
-  var expiringCount=bulPromotions.filter(function(p){return promoStatus(p)==='expiring';}).length;
+  var wr = (curBul && curBul.week_number && curBul.year) ? promoWeekRange(curBul.week_number, curBul.year) : null;
+  var refDate = wr ? wr.monday : null;
+  var visible=bulPromotions.filter(function(p){ return canEdit() || promoStatus(p,refDate)!=='expired'; });
+  var expiringCount=bulPromotions.filter(function(p){return promoStatus(p,refDate)==='expiring';}).length;
   var h='<div class="bcard" id="sec-promo">';
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">';
   h+='<div class="bsec" style="margin-bottom:0;">🎯 Промоции</div>';
@@ -75,12 +87,12 @@ function renderPromotionsSection(){
       {key:'expired',label:'🔴 Изтекли'}
     ];
     groups.forEach(function(g){
-      var inGroup=visible.filter(function(p){return promoStatus(p)===g.key;});
+      var inGroup=visible.filter(function(p){return promoStatus(p,refDate)===g.key;});
       if(!inGroup.length)return;
       h+='<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.04em;margin:14px 0 6px;">'+g.label+' ('+inGroup.length+')</div>';
       h+='<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:4px;">';
       inGroup.forEach(function(p){
-        h+=renderPromoCard(p);
+        h+=renderPromoCard(p,refDate);
       });
       h+='</div>';
     });
@@ -88,8 +100,8 @@ function renderPromotionsSection(){
   h+='</div>';
   return h;
 }
-function renderPromoCard(p){
-  var st=promoStatus(p);
+function renderPromoCard(p,refDate){
+  var st=promoStatus(p,refDate);
   var m=PROMO_STATUS_META[st];
   var dLabel=DEPTS[p.department]?DEPTS[p.department].label:'Всички';
   var h='<div style="background:'+m.bg+';border:1px solid '+m.bdr+';border-radius:7px;padding:9px 12px;flex:1;min-width:210px;position:relative;">';
@@ -136,6 +148,21 @@ function openPromoModal(id){
   document.body.appendChild(ov);
   setTimeout(function(){var el=document.getElementById('pm-title'); if(el)el.focus();},80);
 }
+/* Заявка към bulletin_promotions, филтрирана спрямо седмицата на curBul (ако е известна) */
+function promoQueryForCurBul(){
+  if(curBul && curBul.week_number && curBul.year){
+    var wr=promoWeekRange(curBul.week_number,curBul.year);
+    return 'active=eq.true&start_date=lte.'+wr.end+'&end_date=gte.'+wr.start+'&order=end_date.asc';
+  }
+  return 'active=eq.true&order=end_date.asc';
+}
+/* Презарежда bulPromotions спрямо текущо избраната седмица и рендира наново */
+function reloadPromotions(){
+  return sbGet('bulletin_promotions',promoQueryForCurBul()).then(function(pr){
+    bulPromotions=Array.isArray(pr)?pr:[];
+    renderBulletin();
+  });
+}
 function submitPromo(id){
   var title=(document.getElementById('pm-title').value||'').trim();
   var start=document.getElementById('pm-start').value;
@@ -155,9 +182,7 @@ function submitPromo(id){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     var el=document.getElementById('promo-modal-ov'); if(el)el.remove();
     toast(id?'✅ Записано!':'✅ Промоцията е добавена!');
-    sbGet('bulletin_promotions','active=eq.true&order=end_date.asc').then(function(pr){
-      bulPromotions=Array.isArray(pr)?pr:[]; renderBulletin();
-    });
+    reloadPromotions();
   });
 }
 function deletePromo(id){
@@ -256,14 +281,15 @@ function toLocalISO(d){
 
 /* ─── ПРЕВКЛЮЧВАТЕЛ МЕЖДУ БЮЛЕТИНИ (само admin/accounting) ─── */
 function loadBulletinList(){
-  if(!canEdit())return Promise.resolve([]);
-  return sbGet('bulletins','select=id,week_number,year,status,created_at&order=created_at.desc&limit=20').then(function(rows){
+  var q='select=id,week_number,year,status,created_at&order=created_at.desc&limit=20';
+  if(!canEdit()) q+='&status=eq.published'; /* обикновените служители виждат само публикувани, не чернови */
+  return sbGet('bulletins',q).then(function(rows){
     bulListCache=Array.isArray(rows)?rows:[];
     return bulListCache;
   }).catch(function(){bulListCache=[];return [];});
 }
 function bulletinSwitcherHtml(){
-  if(!canEdit()||!bulListCache.length)return '';
+  if(!bulListCache.length)return '';
   var statusLbl={draft:' (чернова)',published:' (публикуван)'};
   var opts=bulListCache.map(function(b){
     var label='Седмица '+b.week_number+' · '+b.year+(statusLbl[b.status]||'');
@@ -280,25 +306,26 @@ function selectBulletin(id){
 function loadBulletin(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:300px;color:#94a3b8;font-size:15px;">⏳ Зареждане...</div>';
-  var q=(bulSelectedId&&canEdit())?'id=eq.'+bulSelectedId:(canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1');
-  /* Зарежда списъка за превключвателя (admin/accounting), рекъринг задачи и промоции ПЪРВО, след това рендира */
+  var q=bulSelectedId?'id=eq.'+bulSelectedId:(canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1');
+  /* Зареждаме бюлетина ПЪРВО (за да знаем неговата седмица/година), после промоциите
+     филтрирани спрямо ТАЗИ седмица - за да са "автономни" за всяка седмица, не спрямо
+     реалната дата днес. Рекъринг задачите вървят паралелно, не зависят от седмицата. */
   loadBulletinList().then(function(){
-    return sbGet('bulletin_promotions','active=eq.true&order=end_date.asc');
-  }).then(function(pr){
-    bulPromotions=Array.isArray(pr)?pr:[];
-  }).catch(function(){bulPromotions=[];}).then(function(){
-    return sbGet('recurring_tasks','active=eq.true&order=sort_order.asc');
-  }).then(function(rt){
-    recurringTasks=Array.isArray(rt)?rt:[];
-    return sbGet('bulletins',q);
-  }).catch(function(){
-    recurringTasks=[];
     return sbGet('bulletins',q);
   }).then(function(data){
     curBul=(Array.isArray(data)&&data.length)?data[0]:null;
-    if(!curBul){renderBulEmpty();return;}
+    if(!curBul){bulPromotions=[];renderBulEmpty();return null;}
     if(typeof curBul.content==='string'){try{curBul.content=JSON.parse(curBul.content);}catch(e){curBul.content={};}}
     initCols();
+    var promoQ=promoQueryForCurBul();
+    return Promise.all([
+      sbGet('bulletin_promotions',promoQ).catch(function(){return [];}),
+      sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').catch(function(){return [];})
+    ]);
+  }).then(function(results){
+    if(!results)return; /* curBul беше null - вече показахме renderBulEmpty() по-горе */
+    bulPromotions=Array.isArray(results[0])?results[0]:[];
+    recurringTasks=Array.isArray(results[1])?results[1]:[];
     sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=due_date.asc').then(function(t){
       bulTasks=Array.isArray(t)?t:[];
       if(!bulTasks.length){
