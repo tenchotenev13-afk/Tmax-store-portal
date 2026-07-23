@@ -59,10 +59,13 @@ function loadCalendar() {
     /* Генерирай виртуални маршрути от шаблоните за текущата седмица */
     var templates = Array.isArray(r[3]) ? r[3] : [];
     var days2 = getWeekDates(calWeekOffset);
+    var weekParity = (getWeekNumber(days2[0]) % 2 === 0) ? 'even' : 'odd';
     var dayMap = {mon:0,tue:1,wed:2,thu:3,fri:4,sat:5,sun:6};
     templates.forEach(function(t) {
       var di = dayMap[t.day_of_week];
       if (di === undefined) return;
+      /* Ротационен шаблон (четна/нечетна седмица) — прескачаме, ако не е неговата седмица */
+      if (t.week_parity && t.week_parity !== 'any' && t.week_parity !== weekParity) return;
       var d = days2[di];
       var dateStr = d.toISOString().slice(0,10);
       /* Не добавяй ако вече има ръчен запис за същия магазин/ден */
@@ -78,6 +81,7 @@ function loadCalendar() {
           purpose: t.purpose,
           departure_time: t.departure_time,
           notes: t.notes,
+          week_parity: t.week_parity,
           _fromTemplate: true,
           _templateId: t.id
         });
@@ -154,7 +158,7 @@ function renderCalendar() {
       if (r.departure_time) h += '<div style="color:#94a3b8;">🕐 '+esc(r.departure_time)+'</div>';
       if (r.notes) h += '<div style="color:#94a3b8;font-style:italic;">'+esc(r.notes.slice(0,40))+'</div>';
       if (r._fromTemplate) {
-        h += '<span style="font-size:9px;color:#94a3b8;font-style:italic;">📅 Ротационен</span>';
+        h += '<span style="font-size:9px;color:#94a3b8;font-style:italic;">📅 Ротационен'+(r.week_parity==='even'?' · Четна седм.':r.week_parity==='odd'?' · Нечетна седм.':'')+'</span>';
       } else if (canEdit) {
         h += '<button data-id="'+r.id+'" onclick="deleteCalRoute(this.dataset.id)" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:10px;padding:0;margin-top:2px;">✕ Изтрий</button>';
       }
@@ -162,10 +166,13 @@ function renderCalendar() {
     });
 
     /* Транспортни заявки */
+    var dayConflicts = calFindConflictIds(dayTransport);
     dayTransport.forEach(function(t) {
-      h += '<div style="background:#f0fdf4;border-left:2px solid #16a34a;border-radius:0 5px 5px 0;padding:4px 6px;margin-bottom:4px;font-size:11px;">';
-      h += '<div style="font-weight:600;color:#16a34a;">🚚 Транспорт</div>';
+      var isConflict = !!dayConflicts[t.id];
+      h += '<div style="background:'+(isConflict?'#fef2f2':'#f0fdf4')+';border-left:2px solid '+(isConflict?'#dc2626':'#16a34a')+';border-radius:0 5px 5px 0;padding:4px 6px;margin-bottom:4px;font-size:11px;'+(isConflict?'animation:rowPulse 2s infinite;':'')+'">';
+      h += '<div style="font-weight:600;color:'+(isConflict?'#dc2626':'#16a34a')+';">'+(isConflict?'⚠️ Конфликт — ':'🚚 ')+'Транспорт'+(t.hour?' · '+esc(t.hour)+'ч.':'')+'</div>';
       h += '<div style="color:#374151;">'+esc(t.store_name||'')+(t.destination?' → '+esc(t.destination):'')+'</div>';
+      if (isConflict) h += '<div style="color:#dc2626;font-weight:600;">Друга заявка в рамките на 30 мин, същия магазин</div>';
       if (t.notes) h += '<div style="color:#94a3b8;">'+esc(t.notes.slice(0,30))+'</div>';
       h += '</div>';
     });
@@ -179,12 +186,12 @@ function renderCalendar() {
       h += '</div>';
     });
 
-    if (!total && !isWeekend) {
+    if (!total) {
       h += '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#e2e8f0;font-size:12px;">Свободен</div>';
     }
 
     /* Добави бутон */
-    if (canEdit && !isWeekend) {
+    if (canEdit) {
       h += '<button data-date="'+dateStr+'" onclick="openCalRouteModal(null,this.dataset.date)" style="width:100%;margin-top:auto;padding:3px;border:1px dashed #cbd5e1;border-radius:5px;background:none;color:#94a3b8;font-size:10px;cursor:pointer;font-family:inherit;">+ Добави</button>';
     }
 
@@ -193,6 +200,33 @@ function renderCalendar() {
   h += '</div></div>';
   h += calRouteModalHtml(days);
   wrap.innerHTML = h;
+}
+
+/* Намира кои транспортни заявки за деня се "сблъскват" — същия магазин, часове в
+   рамките на 30 мин един от друг (същия праг като твърдия блок в таб Транспорт).
+   Преизползва hourToMinutes() от transport.js (зареден преди calendar.js). */
+function calFindConflictIds(dayTransport) {
+  var conflictIds = {};
+  var byStore = {};
+  dayTransport.forEach(function(t) {
+    var key = t.store_name || '';
+    if (!byStore[key]) byStore[key] = [];
+    byStore[key].push(t);
+  });
+  Object.keys(byStore).forEach(function(store) {
+    var list = byStore[store];
+    for (var i = 0; i < list.length; i++) {
+      for (var j = i + 1; j < list.length; j++) {
+        var mi = hourToMinutes(list[i].hour), mj = hourToMinutes(list[j].hour);
+        if (mi === null || mj === null) continue;
+        if (Math.abs(mi - mj) <= 30) {
+          conflictIds[list[i].id] = true;
+          conflictIds[list[j].id] = true;
+        }
+      }
+    }
+  });
+  return conflictIds;
 }
 
 function getWeekNumber(d) {
@@ -305,18 +339,21 @@ function renderTemplatesMgr() {
 
   var DAY_BG = {mon:'#eff6ff',tue:'#f0fdf4',wed:'#fffbeb',thu:'#fff1f2',fri:'#f5f3ff',sat:'#f8fafc',sun:'#f8fafc'};
   var DAY_LBL = {mon:'Понеделник',tue:'Вторник',wed:'Сряда',thu:'Четвъртък',fri:'Петък',sat:'Събота',sun:'Неделя'};
+  var PARITY_LBL = {any:'Всяка',even:'Четна',odd:'Нечетна'};
 
   var rows = templatesList.length ? templatesList.map(function(t) {
     var p = PURPOSE[t.purpose]||PURPOSE.other;
+    var parity = t.week_parity||'any';
     return '<tr style="border-bottom:1px solid #f1f5f9;">'+
       '<td style="padding:7px 10px;font-size:12px;"><span style="background:'+(DAY_BG[t.day_of_week]||'#f8fafc')+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+(DAY_LBL[t.day_of_week]||t.day_of_week)+'</span></td>'+
+      '<td style="padding:7px 10px;font-size:11px;color:'+(parity==='any'?'#94a3b8':'#0f172a')+';">'+PARITY_LBL[parity]+'</td>'+
       '<td style="padding:7px 10px;font-weight:500;font-size:13px;">'+esc(t.store_name||'')+'</td>'+
       '<td style="padding:7px 10px;font-size:12px;color:#64748b;">'+esc(t.destination||'—')+'</td>'+
       '<td style="padding:7px 10px;"><span style="background:'+p.bg+';color:'+p.color+';padding:2px 7px;border-radius:20px;font-size:11px;">'+p.label+'</span></td>'+
       '<td style="padding:7px 10px;font-size:12px;color:#94a3b8;">'+esc(t.departure_time||'—')+'</td>'+
       '<td style="padding:7px 10px;"><button data-id="'+t.id+'" onclick="deleteTmpl(this.dataset.id)" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">✕</button></td>'+
       '</tr>';
-  }).join('') : '<tr><td colspan="6" style="text-align:center;padding:20px;color:#94a3b8;">Няма зададени маршрути. Добави с формата по-долу.</td></tr>';
+  }).join('') : '<tr><td colspan="7" style="text-align:center;padding:20px;color:#94a3b8;">Няма зададени маршрути. Добави с формата по-долу.</td></tr>';
 
   var purposeOpts = Object.keys(PURPOSE).map(function(k){return '<option value="'+k+'">'+PURPOSE[k].label+'</option>';}).join('');
   var dayOpts = Object.keys(DAY_LBL).map(function(k){return '<option value="'+k+'">'+DAY_LBL[k]+'</option>';}).join('');
@@ -332,16 +369,18 @@ function renderTemplatesMgr() {
     '<button onclick="closeTemplatesMgr()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:12px;background:#fffbeb;padding:8px 12px;border-radius:6px;border:1px solid #fde68a;">💡 Тези маршрути се показват автоматично всяка седмица в календара. Добавени веднъж — важат за всички бъдещи седмици.</div>'+
     '<div style="overflow-x:auto;margin-bottom:16px;"><table style="width:100%;border-collapse:collapse;font-size:13px;">'+
-    '<thead><tr style="background:#f8fafc;"><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Ден</th><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Магазин</th><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Дестинация</th><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Вид</th><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Час</th><th style="padding:7px 10px;border-bottom:1px solid #e2e8f0;"></th></tr></thead>'+
+    '<thead><tr style="background:#f8fafc;"><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Ден</th><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Седмица</th><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Магазин</th><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Дестинация</th><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Вид</th><th style="text-align:left;padding:7px 10px;border-bottom:1px solid #e2e8f0;">Час</th><th style="padding:7px 10px;border-bottom:1px solid #e2e8f0;"></th></tr></thead>'+
     '<tbody>'+rows+'</tbody></table></div>'+
     '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:14px;">'+
     '<div style="font-size:12px;font-weight:600;color:#0f172a;margin-bottom:10px;">+ Добави постоянен маршрут</div>'+
+    '<div style="font-size:11px;color:#64748b;margin-bottom:10px;">💡 За редуваща се ротация между 2 магазина (напр. Раднево↔Карлово): добави 2 отделни маршрута на същия ден — единия с "Четна седмица", другия с "Нечетна седмица".</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">'+
     '<div><label class="fl">Ден</label><select class="fi" id="tmpl-day">'+dayOpts+'</select></div>'+
+    '<div><label class="fl">Седмица</label><select class="fi" id="tmpl-parity"><option value="any">Всяка</option><option value="even">Четна</option><option value="odd">Нечетна</option></select></div>'+
     '<div><label class="fl">Магазин *</label><select class="fi" id="tmpl-store"><option value="">-- Избери --</option></select></div>'+
-    '<div><label class="fl">Дестинация</label><input class="fi" id="tmpl-dest" placeholder="напр. Хасково"></div>'+
     '</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
+    '<div><label class="fl">Дестинация</label><input class="fi" id="tmpl-dest" placeholder="напр. Хасково"></div>'+
     '<div><label class="fl">Вид</label><select class="fi" id="tmpl-purpose">'+purposeOpts+'</select></div>'+
     '<div><label class="fl">Час</label><input class="fi" id="tmpl-time" type="time" placeholder="08:00"></div>'+
     '</div>'+
@@ -376,6 +415,7 @@ function submitTmpl() {
   if (!store) { toast('Избери магазин','#dc2626'); return; }
   sbPost('route_templates', {
     day_of_week:    document.getElementById('tmpl-day').value,
+    week_parity:    document.getElementById('tmpl-parity').value,
     store_name:     store,
     destination:    document.getElementById('tmpl-dest').value,
     purpose:        document.getElementById('tmpl-purpose').value,
