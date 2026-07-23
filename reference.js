@@ -624,10 +624,24 @@ function refEntryModalHtml() {
 
     taField('Вътрешни инструкции / Бележки','re-notes',r.internal_notes,3) +
 
-    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:16px;">' +
+    (isEdit ? '<button onclick="refDeleteEntryPrompt()" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;margin-right:auto;">🗑 Изтрий запис</button>' : '') +
     '<button onclick="closeRefEntryModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button onclick="submitRefEntry()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">'+(isEdit?'Запази':'Добави')+'</button>' +
     '</div></div></div>';
+}
+
+/* Изтрива текущо редактирания гаранционен запис (не самата марка/под-категория) */
+function refDeleteEntryPrompt() {
+  if (!refEditId) return;
+  if (!confirm('Сигурен ли си, че искаш да изтриеш този гаранционен запис? Действието е необратимо.')) return;
+  sbDelete('warranty_entries','id=eq.'+refEditId).then(function(res){
+    if (!res.ok) { toast('Грешка при изтриване','#dc2626'); return; }
+    toast('✅ Записът е изтрит!');
+    closeRefEntryModal();
+    refSelBrand = ''; refSelSubcat = ''; refEntry = null; refBrandSubcatChoices = [];
+    loadReference();
+  });
 }
 
 function openRefEntryModal(id) {
