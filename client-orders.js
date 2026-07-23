@@ -95,9 +95,6 @@ function renderClientOrders(){
     var urgent=o._status==='overdue'||o._status==='today';
     var bdrColor={overdue:'#dc2626',today:'#2563eb',tomorrow:'#d97706'}[o._status]||'transparent';
     var rowStyle='border-left:3px solid '+bdrColor+';'+(urgent?'animation:rowPulse 2s infinite;':'');
-    var fulfillerCell=o.fulfiller&&o.fulfiller!==o.store_name
-      ?'<span style="background:#eff6ff;color:#1e40af;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">🏪 '+esc(o.fulfiller)+'</span>'
-      :'<span style="color:#94a3b8;font-size:10px;">—</span>';
     var storeCell=o.fulfiller&&o.fulfiller!==o.store_name
       ?'<div style="font-size:10px;color:#94a3b8;">Заявител:</div><b>'+esc(o.store_name||'')+'</b><div style="font-size:10px;color:#2563eb;margin-top:2px;">Изпълнява: <b>'+esc(o.fulfiller)+'</b></div>'
       :esc(o.store_name||'');
@@ -135,7 +132,6 @@ function renderClientOrders(){
       '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
       '<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>'+
       '<td>'+esc(o.from_store||'')+'</td>'+
-      '<td style="font-size:11px;">'+fulfillerCell+'</td>'+
       '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
       '<td>'+elapsedBadge(o._days,o.status)+'</td>'+
       '<td>'+statusBadge(o._status)+'</td>'+
