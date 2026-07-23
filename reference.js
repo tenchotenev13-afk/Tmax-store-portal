@@ -82,12 +82,14 @@ function renderReference() {
   /* Избор на марка */
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:16px;">';
   h += '<div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:10px;">Избор на марка</div>';
-  h += '<div><label class="fl">Марка</label>' +
-    '<input class="fi" id="ref-brand-search" placeholder="🔍 Търси сред '+refBrands.length+' марки..." oninput="refFilterSelect(\'ref-brand\',this.value)" style="margin-bottom:6px;">' +
-    '<select class="fi" id="ref-brand" onchange="refOnBrandChange()">' +
-    '<option value="">-- Избери --</option>' +
-    refBrands.map(function(b){return '<option value="'+b.id+'"'+(String(refSelBrand)===String(b.id)?' selected':'')+'>'+esc(b.name)+'</option>';}).join('') +
-    '</select></div>';
+  var selBrandObj = refBrands.find(function(b){return String(b.id)===String(refSelBrand);});
+  h += '<div style="position:relative;">' +
+    '<label class="fl">Марка</label>' +
+    '<input class="fi" id="ref-brand-search" autocomplete="off" placeholder="🔍 Пиши име на марка..." value="'+(selBrandObj?esc(selBrandObj.name):'')+'"' +
+    ' oninput="refFilterBrandSuggestions(this.value)" onfocus="refFilterBrandSuggestions(this.value)">' +
+    '<input type="hidden" id="ref-brand" value="'+esc(refSelBrand)+'">' +
+    '<div id="ref-brand-suggestions" style="display:none;position:absolute;left:0;right:0;top:calc(100% + 2px);background:#fff;border:1px solid #e2e8f0;border-radius:8px;box-shadow:0 4px 16px rgba(0,0,0,.12);max-height:280px;overflow-y:auto;z-index:50;"></div>' +
+    '</div>';
   h += '</div>';
   if (refSelBrand) {
     h += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:12px;color:#1e40af;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
@@ -95,6 +97,7 @@ function renderReference() {
       '<button onclick="refClearFilter()" style="border:1px solid #93c5fd;background:#fff;color:#2563eb;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">✕ Смени марката</button>' +
       '</div>';
   }
+
 
   /* Картата */
   h += '<div id="ref-card"></div>';
@@ -135,6 +138,42 @@ function refClearFilter() {
   refBrandSubcatChoices = [];
   renderReference();
 }
+
+/* Показва живо филтрирани предложения под полето за търсене на марка (истински combobox,
+   вместо отделен dropdown, който трябваше ръчно да се отваря след писане) */
+function refFilterBrandSuggestions(query) {
+  var box = document.getElementById('ref-brand-suggestions');
+  if (!box) return;
+  var q = (query || '').trim().toLowerCase();
+  var matches = q ? refBrands.filter(function(b){ return (b.name||'').toLowerCase().indexOf(q) >= 0; }) : refBrands;
+  if (!matches.length) {
+    box.innerHTML = '<div style="padding:10px 12px;font-size:13px;color:#94a3b8;">Няма съвпадения</div>';
+  } else {
+    box.innerHTML = matches.slice(0, 50).map(function(b){
+      return '<div onclick="refSelectBrandSuggestion(\''+b.id+'\')" style="padding:8px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid #f1f5f9;" onmouseover="this.style.background=\'#f8fafc\'" onmouseout="this.style.background=\'#fff\'">'+esc(b.name)+'</div>';
+    }).join('');
+  }
+  box.style.display = 'block';
+}
+
+/* Избор на конкретна марка от предложенията */
+function refSelectBrandSuggestion(brandId) {
+  var brandObj = refBrands.find(function(b){return String(b.id)===String(brandId);}) || {};
+  document.getElementById('ref-brand-search').value = brandObj.name || '';
+  document.getElementById('ref-brand').value = brandId;
+  var box = document.getElementById('ref-brand-suggestions');
+  if (box) box.style.display = 'none';
+  refOnBrandChange();
+}
+
+/* Затваря предложенията при клик извън полето/списъка */
+document.addEventListener('click', function(e){
+  var box = document.getElementById('ref-brand-suggestions');
+  var input = document.getElementById('ref-brand-search');
+  if (!box || box.style.display !== 'block') return;
+  if (box.contains(e.target) || e.target === input) return;
+  box.style.display = 'none';
+});
 
 /* Марката е сменена в основния selector.
    0 записа → празно състояние. 1 запис → зарежда директно. >1 → показва picker (renderRefCard). */
@@ -657,8 +696,8 @@ function submitRefEntry() {
       toast(isEdit ? '✅ Записано!' : '✅ Добавени '+results.length+' записа!');
     }
     closeRefEntryModal();
-    renderReference(); /* презарежда селектора на марки, за да отрази нов брой/имена */
-    document.getElementById('ref-brand').value = brand;
+    refSelBrand = brand;
+    renderReference(); /* презарежда селектора на марки, за да отрази нов брой/имена + показва избраната марка в полето */
     refLoadEntry(brand, subcatList[0]);
   });
 }
