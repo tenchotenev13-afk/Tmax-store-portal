@@ -68,6 +68,12 @@ function closeModal(id){var el=document.getElementById(id);if(el)el.classList.re
 function toast(msg,col){var t=document.getElementById('toast');t.textContent=msg;t.style.background=col||'#16a34a';t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2500);}
 
 var TODAY=new Date();TODAY.setHours(0,0,0,0);
+/* TODAY се задаваше само веднъж при зареждане на страницата — ако табът остане отворен
+   през полунощ, статусите (Просрочена/Днес/Утре) и "Изминало" броячите изоставаха с 1 ден.
+   Опресняваме периодично + при връщане на фокус в таба. */
+function refreshToday(){ TODAY=new Date(); TODAY.setHours(0,0,0,0); }
+setInterval(refreshToday, 5*60*1000); /* на всеки 5 минути */
+document.addEventListener('visibilitychange', function(){ if(!document.hidden) refreshToday(); });
 function calcStatus(delivery,status){
   if(['done','refused','postponed','approved'].indexOf(status)>=0)return status;
   if(!delivery)return'pending';
