@@ -111,6 +111,34 @@ function filterTransport(f,btn){
   if(btn)btn.classList.add('active');renderTransport();
 }
 
+/* Превръща "HH:MM" в минути от полунощ, за сравнение на близост на часове */
+function hourToMinutes(h){
+  if(!h) return null;
+  var p=h.split(':');
+  if(p.length<2) return null;
+  var hh=parseInt(p[0],10), mm=parseInt(p[1],10);
+  if(isNaN(hh)||isNaN(mm)) return null;
+  return hh*60+mm;
+}
+
+/* Проверява дали вече има друга активна транспортна заявка от същия магазин,
+   в рамките на +/-2ч на същия ден — предотвратява двойно ангажиране на шофьора
+   в различни посоки по едно и също време. */
+function checkTransportConflict(date, hour, onResolved){
+  var newMin=hourToMinutes(hour);
+  if(!date||newMin===null){ onResolved([]); return; }
+  sbGet('transport_orders','store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+encodeURIComponent(date)).then(function(rows){
+    var list=Array.isArray(rows)?rows:[];
+    var conflicts=list.filter(function(o){
+      if(['done','refused','postponed'].indexOf(o.status)>=0) return false;
+      var m=hourToMinutes(o.hour);
+      if(m===null) return false;
+      return Math.abs(m-newMin)<=30; /* +/- 30 минути */
+    });
+    onResolved(conflicts);
+  }).catch(function(){ onResolved([]); });
+}
+
 function openTransportModal(){
   ['o-bon','o-name','o-phone','o-addr','o-agent','o-notes'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.value='';
@@ -127,6 +155,51 @@ function submitTransport(){
   var items=collectItems('o-items');
   if(!name||!phone||!addr){toast('Попълни задължителните полета *','#dc2626');return;}
   if(!items.length){toast('Добави поне един артикул с продукт','#dc2626');return;}
+
+  var date=v('o-date'), hour=v('o-hour');
+  checkTransportConflict(date, hour, function(conflicts){
+    if(conflicts.length){
+      showTransportConflictModal(conflicts);
+    } else {
+      doSubmitTransport();
+    }
+  });
+}
+
+/* Показва блокиращо предупреждение при засечен конфликт - изисква изрично
+   потвърждение от колегата, преди да позволи запис. */
+function showTransportConflictModal(conflicts){
+  var rows=conflicts.map(function(o){
+    return '<div style="padding:8px 10px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;margin-bottom:6px;font-size:12.5px;">'+
+      '<b>'+esc(o.hour||'')+'ч.</b> — '+esc(o.customer_name||'')+'<br>'+
+      '<span style="color:#64748b;">'+esc(o.address||'')+'</span>'+
+      '</div>';
+  }).join('');
+  var html='<div class="bov" id="transport-conflict-ov"><div class="bmod" style="width:480px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'+
+    '<div style="font-size:15px;font-weight:600;color:#991b1b;">⚠️ Възможен конфликт в графика</div>'+
+    '<button onclick="closeTransportConflictModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<div style="font-size:13px;color:#374151;margin-bottom:10px;">Вече '+(conflicts.length===1?'има заявка':'има '+conflicts.length+' заявки')+' в рамките на 30 минути от избрания час, за същия магазин:</div>'+
+    rows+
+    '<div style="font-size:12px;color:#94a3b8;margin:10px 0 14px;">Провери дали шофьорът реално може да покрие двете направления навреме, преди да продължиш.</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
+    '<button onclick="closeTransportConflictModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Отказ, ще проверя</button>'+
+    '<button onclick="confirmTransportDespiteConflict()" style="border:none;background:#dc2626;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Продължи и запиши</button>'+
+    '</div></div></div>';
+  var existing=document.getElementById('transport-conflict-ov'); if(existing) existing.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+function closeTransportConflictModal(){
+  var el=document.getElementById('transport-conflict-ov'); if(el) el.remove();
+}
+function confirmTransportDespiteConflict(){
+  closeTransportConflictModal();
+  doSubmitTransport();
+}
+
+function doSubmitTransport(){
+  var name=v('o-name'),phone=v('o-phone'),addr=v('o-addr');
+  var items=collectItems('o-items');
   var first=items[0];
   var delivery=v('o-delivery')||null;
   sbPost('transport_orders',{
