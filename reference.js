@@ -6,6 +6,7 @@ var refAllEntries = []; /* {brand_id, subcategory_id} чифтове — за ф
 var refSelSubcat = '';
 var refSelBrand  = '';
 var refEntry     = null;   /* текущо зареден запис от warranty_entries */
+var refBrandSubcatChoices = []; /* subcategory_id-та, когато избраната марка има >1 запис — чака избор */
 var refLocations = [];     /* сервизни точки за избраната марка */
 var refEditId    = null;   /* за админ модала на entry */
 
@@ -76,28 +77,22 @@ function renderReference() {
     h += '</div>';
   }
   h += '</div>';
-  h += '<div style="font-size:12px;color:#94a3b8;margin-bottom:16px;">Изберете под-категория и марка — картата се зарежда автоматично.</div>';
+  h += '<div style="font-size:12px;color:#94a3b8;margin-bottom:16px;">Изберете марка — картата се зарежда автоматично.</div>';
 
-  /* Избор на комбинация */
+  /* Избор на марка */
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:16px;">';
-  h += '<div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:10px;">Избор на комбинация</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">';
-  h += '<div><label class="fl">Под-категория</label>' +
-    '<input class="fi" id="ref-subcat-search" placeholder="🔍 Търси сред '+refFilteredSubcats().length+' под-категории..." oninput="refFilterSelect(\'ref-subcat\',this.value)" style="margin-bottom:6px;">' +
-    '<select class="fi" id="ref-subcat" onchange="refOnChange()" size="1">' +
+  h += '<div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:10px;">Избор на марка</div>';
+  h += '<div><label class="fl">Марка</label>' +
+    '<input class="fi" id="ref-brand-search" placeholder="🔍 Търси сред '+refBrands.length+' марки..." oninput="refFilterSelect(\'ref-brand\',this.value)" style="margin-bottom:6px;">' +
+    '<select class="fi" id="ref-brand" onchange="refOnBrandChange()">' +
     '<option value="">-- Избери --</option>' +
-    refFilteredSubcats().map(function(s){return '<option value="'+s.id+'"'+(String(refSelSubcat)===String(s.id)?' selected':'')+'>'+esc(s.name)+'</option>';}).join('') +
+    refBrands.map(function(b){return '<option value="'+b.id+'"'+(String(refSelBrand)===String(b.id)?' selected':'')+'>'+esc(b.name)+'</option>';}).join('') +
     '</select></div>';
-  h += '<div><label class="fl">Марка</label><select class="fi" id="ref-brand" onchange="refOnChange()">' +
-    '<option value="">-- Избери --</option>' +
-    refFilteredBrands().map(function(b){return '<option value="'+b.id+'"'+(String(refSelBrand)===String(b.id)?' selected':'')+'>'+esc(b.name)+'</option>';}).join('') +
-    '</select></div>';
-  h += '</div></div>';
-  var filterActive = refSelSubcat || refSelBrand;
-  if (filterActive) {
+  h += '</div>';
+  if (refSelBrand) {
     h += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 12px;margin-bottom:16px;font-size:12px;color:#1e40af;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">' +
-      '<span>🔍 Активен филтър — показват се само реално съществуващи комбинации спрямо избраното.</span>' +
-      '<button onclick="refClearFilter()" style="border:1px solid #93c5fd;background:#fff;color:#2563eb;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">✕ Изчисти филтъра</button>' +
+      '<span>🔍 Показва се картата за избраната марка.</span>' +
+      '<button onclick="refClearFilter()" style="border:1px solid #93c5fd;background:#fff;color:#2563eb;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">✕ Смени марката</button>' +
       '</div>';
   }
 
@@ -107,24 +102,6 @@ function renderReference() {
 
   wrap.innerHTML = h;
   renderRefCard();
-}
-
-/* Кои под-категории имат поне 1 запис за избраната марка (или всички, ако няма избрана марка,
-   или ако все още няма никакви записи изобщо — начален bootstrap случай) */
-function refFilteredSubcats() {
-  if (!refSelBrand || !refAllEntries.length) return refSubcats;
-  var validIds = {};
-  refAllEntries.forEach(function(e){ if (String(e.brand_id)===String(refSelBrand)) validIds[e.subcategory_id]=1; });
-  var filtered = refSubcats.filter(function(s){ return validIds[s.id]; });
-  return filtered.length ? filtered : refSubcats; /* марката все още няма нито един запис — покажи всички, не заключвай */
-}
-/* Кои марки имат поне 1 запис за избраната под-категория (симетрично на горното) */
-function refFilteredBrands() {
-  if (!refSelSubcat || !refAllEntries.length) return refBrands;
-  var validIds = {};
-  refAllEntries.forEach(function(e){ if (String(e.subcategory_id)===String(refSelSubcat)) validIds[e.brand_id]=1; });
-  var filtered = refBrands.filter(function(b){ return validIds[b.id]; });
-  return filtered.length ? filtered : refBrands;
 }
 
 /* Филтрира opциите на select по въведен текст (за search полетата над dropdown-ите) */
@@ -149,33 +126,57 @@ function refFilterCheckboxList(containerId, query) {
   });
 }
 
-/* Изчиства избора на под-категория/марка — премахва филтъра и показва пълните списъци */
+/* Изчиства избора на марка — премахва картата и показва пълния списък отначало */
 function refClearFilter() {
   refSelSubcat = '';
   refSelBrand  = '';
   refEntry     = null;
   refLocations = [];
+  refBrandSubcatChoices = [];
   renderReference();
 }
 
-function refOnChange() {
-  var newSubcat = document.getElementById('ref-subcat').value;
-  var newBrand  = document.getElementById('ref-brand').value;
-  var subcatChanged = newSubcat !== refSelSubcat;
-  refSelSubcat = newSubcat;
+/* Марката е сменена в основния selector.
+   0 записа → празно състояние. 1 запис → зарежда директно. >1 → показва picker (renderRefCard). */
+function refOnBrandChange() {
+  var newBrand = document.getElementById('ref-brand').value;
   refSelBrand  = newBrand;
-
-  /* Пре-рендираме само dropdown-ите, за да се стеснят опциите — без да местим фокуса */
+  refSelSubcat = '';
+  refEntry     = null;
+  refLocations = [];
+  refBrandSubcatChoices = [];
   renderReference();
 
-  if (!refSelSubcat || !refSelBrand) { refEntry = null; refLocations = []; renderRefCard(); return; }
+  if (!newBrand) { renderRefCard(); return; }
+
+  var cardEl = document.getElementById('ref-card');
+  if (cardEl) cardEl.innerHTML = '<div style="text-align:center;padding:30px;color:#94a3b8;">⏳ Зареждане...</div>';
+
+  sbGet('warranty_entries','brand_id=eq.'+newBrand+'&select=subcategory_id').then(function(rows){
+    var ids = (Array.isArray(rows) ? rows : []).map(function(r){return r.subcategory_id;});
+    if (!ids.length) { refEntry = null; refLocations = []; renderRefCard(); return; }
+    if (ids.length === 1) { refLoadEntry(newBrand, ids[0]); return; }
+    refBrandSubcatChoices = ids; /* повече от 1 запис за тази марка — колегата избира кой */
+    renderRefCard();
+  }).catch(function(err){
+    console.error(err);
+    var el = document.getElementById('ref-card');
+    if (el) el.innerHTML = '<div style="color:#dc2626;padding:20px;text-align:center;">Грешка при зареждане.</div>';
+  });
+}
+
+/* Реално зарежда конкретния запис (марка+под-категория вече еднозначно определени) и картата към него */
+function refLoadEntry(brandId, subcatId) {
+  refSelBrand  = brandId;
+  refSelSubcat = subcatId;
+  refBrandSubcatChoices = [];
 
   var cardEl = document.getElementById('ref-card');
   if (cardEl) cardEl.innerHTML = '<div style="text-align:center;padding:30px;color:#94a3b8;">⏳ Зареждане на картата...</div>';
 
   Promise.all([
-    sbGet('warranty_entries', 'brand_id=eq.'+refSelBrand+'&subcategory_id=eq.'+refSelSubcat),
-    sbGet('warranty_service_locations', 'brand_id=eq.'+refSelBrand+'&order=store_name.asc')
+    sbGet('warranty_entries', 'brand_id=eq.'+brandId+'&subcategory_id=eq.'+subcatId),
+    sbGet('warranty_service_locations', 'brand_id=eq.'+brandId+'&order=store_name.asc')
   ]).then(function(r) {
     refEntry     = (Array.isArray(r[0]) && r[0].length) ? r[0][0] : null;
     refLocations = Array.isArray(r[1]) ? r[1] : [];
@@ -196,9 +197,28 @@ function renderRefCard() {
   var cardEl = document.getElementById('ref-card');
   if (!cardEl) return;
 
-  if (!refSelSubcat || !refSelBrand) {
+  if (!refSelBrand) {
     cardEl.innerHTML = '<div style="text-align:center;padding:50px;color:#94a3b8;background:#fff;border:1px solid #e2e8f0;border-radius:10px;">' +
-      '<div style="font-size:36px;">📘</div><div style="margin-top:8px;">Изберете под-категория и марка, за да видите картата.</div></div>';
+      '<div style="font-size:36px;">📘</div><div style="margin-top:8px;">Изберете марка, за да видите картата.</div></div>';
+    return;
+  }
+
+  if (refBrandSubcatChoices.length > 1 && !refSelSubcat) {
+    var brandNameForChoice = (refBrands.find(function(b){return String(b.id)===String(refSelBrand);})||{}).name || '';
+    cardEl.innerHTML = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:20px;">' +
+      '<div style="font-size:13px;color:#64748b;margin-bottom:10px;">'+esc(brandNameForChoice)+' покрива няколко категории с различни гаранционни условия — избери коя:</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;">' +
+      refBrandSubcatChoices.map(function(scId){
+        var s = refSubcats.find(function(x){return String(x.id)===String(scId);}) || {};
+        return '<button onclick="refLoadEntry(\''+refSelBrand+'\',\''+scId+'\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 14px;font-size:13px;cursor:pointer;">'+esc(s.name||'—')+'</button>';
+      }).join('') +
+      '</div></div>';
+    return;
+  }
+
+  if (!refSelSubcat) {
+    cardEl.innerHTML = '<div style="text-align:center;padding:50px;color:#94a3b8;background:#fff;border:1px solid #e2e8f0;border-radius:10px;">' +
+      '<div style="font-size:36px;">⏳</div><div style="margin-top:8px;">Зареждане...</div></div>';
     return;
   }
 
@@ -637,10 +657,9 @@ function submitRefEntry() {
       toast(isEdit ? '✅ Записано!' : '✅ Добавени '+results.length+' записа!');
     }
     closeRefEntryModal();
-    refSelSubcat = subcatList[0]; refSelBrand = brand;
-    document.getElementById('ref-subcat').value = refSelSubcat;
-    document.getElementById('ref-brand').value = refSelBrand;
-    refOnChange();
+    renderReference(); /* презарежда селектора на марки, за да отрази нов брой/имена */
+    document.getElementById('ref-brand').value = brand;
+    refLoadEntry(brand, subcatList[0]);
   });
 }
 
@@ -709,7 +728,7 @@ function submitRefLocations() {
     if (results.some(function(r){return !r.ok;})) { toast('Част от записите не бяха запазени','#dc2626'); }
     else toast('✅ Сервизните точки са записани!');
     closeRefLocationsModal();
-    refOnChange();
+    refLoadEntry(refSelBrand, refSelSubcat);
   });
 }
 
