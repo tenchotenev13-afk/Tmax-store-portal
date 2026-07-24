@@ -336,14 +336,26 @@ function submitSD() {
 ══════════════════════════════════════════ */
 
 var DIFF_CATEGORIES = [
-  ['undelivered','📦 Недоставен артикул (липса)'],
-  ['excess','📈 Излишък (получен в повече)'],
-  ['pack_mismatch','📦 Разлика от фабрична опаковка'],
-  ['damaged','💔 Увредена стока / липсват части'],
-  ['wrong_barcode','🏷️ Грешен баркод / етикет / описание'],
-  ['similar_item','🎨 Сходен артикул (различен цвят/размер)'],
-  ['wrong_item','❌ Грешен артикул (не е поръчван)']
+  /* [key, label, посоки[], снимки задължителни?, подсказка за доп. имейл] */
+  ['undelivered','📦 Недоставен артикул (липса)', ['supplier','interstore'], true, null],
+  ['excess','📈 Излишък (получен в повече)', ['supplier','interstore'], false, null],
+  ['wrong_item','❌ Грешен артикул (не е поръчван)', ['supplier'], false, null],
+  ['pack_mismatch','📦 Разлика от фабрична опаковка', ['interstore'], true, 'm.pavlova@temax.bg'],
+  ['damaged','💔 Увредена стока / липсват части', ['supplier','interstore'], true, null],
+  ['wrong_barcode','🏷️ Грешен баркод / етикет / описание', ['supplier','interstore'], true, 'j.jeliazkov@temax.bg, m.pavlova@temax.bg'],
+  ['similar_item','🎨 Сходен артикул (различен цвят/размер)', ['interstore'], false, 'm.pavlova@temax.bg (за ZPACK корекция)']
 ];
+function diffCatMeta(key){
+  return DIFF_CATEGORIES.find(function(c){return c[0]===key;}) || null;
+}
+/* Опции за <select>, филтрирани по посока - доставчик и междускладов трансфер
+   имат различни, невзаимозаменяеми списъци категории (по реалните бланки) */
+function diffCategoryOptionsForDirection(direction,selected){
+  var list=DIFF_CATEGORIES.filter(function(c){return c[2].indexOf(direction)>=0;});
+  return '<option value="">-- категория --</option>'+list.map(function(c){
+    return '<option value="'+c[0]+'"'+(selected===c[0]?' selected':'')+'>'+c[1]+'</option>';
+  }).join('');
+}
 function diffCategoryLabel(v){
   var f=DIFF_CATEGORIES.find(function(c){return c[0]===v;});
   return f?f[1]:(v||'—');
@@ -401,11 +413,11 @@ function renderDiffReportsSection(){
 /* ── Динамични редове с артикули за формата за подаване ── */
 /* lookupCatalogBySap() вече живее в shared.js - споделена с client-orders.js/transport.js */
 
-function diffItemRowHtml(item){
+function diffItemRowHtml(item,direction){
   item=item||{};
-  var catOpts='<option value="">-- категория --</option>'+DIFF_CATEGORIES.map(function(c){
-    return '<option value="'+c[0]+'"'+(item.category===c[0]?' selected':'')+'>'+c[1]+'</option>';
-  }).join('');
+  direction=direction||'interstore';
+  var catOpts=diffCategoryOptionsForDirection(direction,item.category);
+  var meta=item.category?diffCatMeta(item.category):null;
   return '<div class="diff-item-row" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px;margin-bottom:8px;">'+
     '<div style="display:grid;grid-template-columns:1fr 2fr;gap:6px;margin-bottom:6px;">'+
       '<input class="fi di-sap" placeholder="SAP №" value="'+escVal(item.sap)+'" onblur="lookupCatalogBySap(this)">'+
@@ -416,21 +428,41 @@ function diffItemRowHtml(item){
       '<input type="number" step="0.001" class="fi di-qty-real" placeholder="Реално получено" value="'+(item.qtyReal!=null?item.qtyReal:'')+'">'+
       '<select class="fi di-unit">'+unitOptionsHtml(item.unit)+'</select>'+
     '</div>'+
-    '<div style="margin-bottom:6px;"><select class="fi di-cat" style="width:100%;">'+catOpts+'</select></div>'+
+    '<div style="margin-bottom:6px;"><select class="fi di-cat" style="width:100%;" onchange="updateDiffItemHint(this)">'+catOpts+'</select></div>'+
+    '<div class="di-hint"></div>'+
     '<div style="display:flex;gap:6px;">'+
       '<input class="fi di-comment" placeholder="Коментар (незадължително)" style="flex:1;" value="'+escVal(item.comment)+'">'+
       '<button type="button" onclick="removeDiffItemRow(this)" style="border:none;background:#fee2e2;color:#991b1b;border-radius:5px;padding:0 10px;cursor:pointer;">✕</button>'+
     '</div>'+
   '</div>';
 }
+/* Показва инлайн подсказка под артикула, когато категорията е избрана -
+   задължителни снимки и/или кой допълнително трябва да получи имейл */
+function updateDiffItemHint(selectEl){
+  var row=selectEl.closest('.diff-item-row');
+  var hintEl=row?row.querySelector('.di-hint'):null;
+  if(!hintEl)return;
+  var meta=diffCatMeta(selectEl.value);
+  if(!meta){hintEl.innerHTML='';return;}
+  var photosReq=meta[3], notifyHint=meta[4];
+  if(!photosReq&&!notifyHint){hintEl.innerHTML='';return;}
+  var parts=[];
+  if(photosReq)parts.push('📸 <b>Задължителни снимки</b> за тази категория');
+  if(notifyHint)parts.push('✉️ Нужен доп. имейл до: <b>'+esc(notifyHint)+'</b>');
+  hintEl.innerHTML='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:5px 8px;font-size:11px;color:#92400e;margin:-2px 0 6px;">'+parts.join(' &nbsp;·&nbsp; ')+'</div>';
+}
 function renderDiffItemRows(items){
   var el=document.getElementById('diff-items'); if(!el)return;
   if(!items||!items.length)items=[{}];
-  el.innerHTML=items.map(diffItemRowHtml).join('');
+  var dirEl=document.getElementById('diff-direction');
+  var direction=dirEl?dirEl.value:'interstore';
+  el.innerHTML=items.map(function(it){return diffItemRowHtml(it,direction);}).join('');
 }
 function addDiffItemRow(){
   var el=document.getElementById('diff-items'); if(!el)return;
-  el.insertAdjacentHTML('beforeend',diffItemRowHtml({}));
+  var dirEl=document.getElementById('diff-direction');
+  var direction=dirEl?dirEl.value:'interstore';
+  el.insertAdjacentHTML('beforeend',diffItemRowHtml({},direction));
 }
 function removeDiffItemRow(btn){
   var row=btn.closest('.diff-item-row'); if(!row)return;
@@ -551,7 +583,14 @@ function diffSubmitModalHtml(){
     '<button type="button" onclick="addDiffItemRow()" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;margin-bottom:12px;">+ Добави артикул</button>'+
 
     '<label class="fl">Снимки <span style="color:#94a3b8;font-weight:400;">(задължителни при увредена стока, грешен баркод, разлика от опаковка, липса)</span></label>'+
-    '<input type="file" accept="image/*" multiple onchange="diffUploadPhoto(this)" style="margin-bottom:6px;">'+
+    '<div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">'+
+      '<label style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">'+
+        '📷 Снимай сега<input type="file" accept="image/*" capture="environment" onchange="diffUploadPhoto(this)" style="display:none;">'+
+      '</label>'+
+      '<label style="border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:6px;padding:7px 14px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">'+
+        '🖼️ Избери от галерия<input type="file" accept="image/*" multiple onchange="diffUploadPhoto(this)" style="display:none;">'+
+      '</label>'+
+    '</div>'+
     '<div id="diff-photos-wrap" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;"></div>'+
 
     '<label class="fl">Общ коментар</label>'+
@@ -577,6 +616,17 @@ function updateDiffCounterpartLabel(){
       fillStoreSelect(sel,'');
     });
   }
+  /* Обновяваме категориите на вече добавените артикули спрямо новата посока -
+     ако избраната категория вече не е валидна за новата посока, изчистваме я
+     и махаме евентуалната подсказка, без да пипаме останалите въведени данни */
+  document.querySelectorAll('#diff-items .diff-item-row').forEach(function(row){
+    var catSel=row.querySelector('.di-cat');
+    if(!catSel)return;
+    var current=catSel.value;
+    var stillValid=DIFF_CATEGORIES.some(function(c){return c[0]===current&&c[2].indexOf(dir)>=0;});
+    catSel.innerHTML=diffCategoryOptionsForDirection(dir,stillValid?current:'');
+    updateDiffItemHint(catSel);
+  });
 }
 
 function openDiffSubmitModal(){
@@ -614,6 +664,20 @@ function submitDiffReport(){
   var items=collectDiffItems();
   if(!store){toast('Избери магазин','#dc2626');return;}
   if(!items.length){toast('Добави поне един артикул с наименование','#dc2626');return;}
+
+  /* Реална проверка за задължителни снимки (не само текстова подсказка) -
+     ако поне 1 артикул е с категория, изискваща снимки, а няма качена нито 1 */
+  var needsPhotos=items.some(function(it){
+    var meta=it.category?diffCatMeta(it.category):null;
+    return meta&&meta[3];
+  });
+  if(needsPhotos&&!diffPendingPhotos.length){
+    var catsNeeding=items.filter(function(it){var m=it.category?diffCatMeta(it.category):null;return m&&m[3];})
+      .map(function(it){return diffCategoryLabel(it.category);})
+      .filter(function(v,i,arr){return arr.indexOf(v)===i;});
+    toast('📸 Снимки са задължителни за: '+catsNeeding.join(', '),'#dc2626');
+    return;
+  }
 
   var reportData={
     direction:direction,
