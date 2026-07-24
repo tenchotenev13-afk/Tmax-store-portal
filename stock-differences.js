@@ -19,9 +19,11 @@ function canSubmitDiff() {
 function canReviewDiff() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
-/* Изпращане на имейл до доставчик - само Цветелина Тенева */
+/* Изпращане на имейл до доставчик - Цветелина Тенева + admin (за тестване/подпомагане) */
 function canSendDiffEmail() {
-  return currentUser && (currentUser.email||'').toLowerCase() === 'c.teneva@temax.bg';
+  if (!currentUser) return false;
+  if ((currentUser.email||'').toLowerCase() === 'c.teneva@temax.bg') return true;
+  return currentUser.role === 'admin';
 }
 
 var DIFF_SB  = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
