@@ -4,6 +4,7 @@ var sdData   = [];
 var sdFilter = 'pending';
 var sdTypeFilter = 'all';
 var sdEditId = null;
+var sdSearch = '';
 
 function canEditSD() {
   return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
@@ -60,8 +61,13 @@ function renderStockDiff() {
   var list = sdData.filter(function(r) {
     if (!r.type) return false; /* още не е прегледан от Цветелина - показва се само в секцията "За преглед" */
     if (sdTypeFilter !== 'all' && r.type !== sdTypeFilter) return false;
-    if (sdFilter === 'pending') return r.status === 'pending';
-    if (sdFilter === 'taken')   return r.status === 'taken';
+    if (sdFilter === 'pending') { if (r.status !== 'pending') return false; }
+    else if (sdFilter === 'taken') { if (r.status !== 'taken') return false; }
+    if (sdSearch) {
+      var q = sdSearch.toLowerCase();
+      var hay = [r.store_name,r.supplier,r.material_name,r.material_code,r.order_number,r.comment].join(' ').toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
     return true;
   });
 
@@ -105,6 +111,9 @@ function renderStockDiff() {
   });
   h += '</div>';
 
+  /* Търсене */
+  h += '<input id="sd-search-input" value="'+esc(sdSearch)+'" oninput="setSDSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик, артикул, SAP, поръчка..." style="width:100%;max-width:420px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
+
   /* Филтри */
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
   [['all','Всички ('+sdData.length+')'],['pending','⏳ Невзета ('+pending+')'],['taken','✅ Взета ('+taken+')']].forEach(function(f){
@@ -120,7 +129,7 @@ function renderStockDiff() {
     h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">';
     h += '<thead><tr style="background:#f8fafc;">';
-    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Коментар',''].forEach(function(c){
+    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Кредитно','Коментар',''].forEach(function(c){
       h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
     });
     h += '</tr></thead><tbody>';
@@ -130,6 +139,14 @@ function renderStockDiff() {
       var statusBadge = isTaken
         ? '<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ ВЗЕТА</span>'
         : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
+      /* Кредитно известие - релевантно само за тип "Липса" (доставчикът не ни е
+         доставил артикула, трябва финансово да ни компенсира) */
+      var creditCell = '—';
+      if (r.type === 'missing') {
+        creditCell = canEdit
+          ? '<button data-id="'+r.id+'" onclick="sdToggleCreditNote(this.dataset.id)" style="border:none;border-radius:20px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;background:'+(r.credit_note_issued?'#f0fdf4':'#fef2f2')+';color:'+(r.credit_note_issued?'#16a34a':'#dc2626')+';">'+(r.credit_note_issued?'✅ Издадено':'❌ Няма')+'</button>'
+          : (r.credit_note_issued?'<span style="color:#16a34a;">✅ Издадено</span>':'<span style="color:#dc2626;">❌ Няма</span>');
+      }
 
       h += '<tr style="border-bottom:1px solid #f1f5f9;">'+
         '<td style="padding:7px 10px;white-space:nowrap;"><span style="background:'+(TYPE_COLORS[r.type]||'#94a3b8')+'1a;color:'+(TYPE_COLORS[r.type]||'#64748b')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(TYPE_LABELS[r.type]||r.type||'—')+'</span></td>'+
@@ -141,6 +158,7 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.order_number||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.confirmed_date)+'</td>'+
         '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
+        '<td style="padding:7px 10px;white-space:nowrap;">'+creditCell+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.comment||'')+'</td>'+
         '<td style="padding:7px 10px;white-space:nowrap;">';
 
@@ -167,16 +185,43 @@ function renderStockDiff() {
 
 /* ── Бутони за решение по ред (само canReviewDiff) ── */
 function diffLineResolveButtons(l){
-  if(l.type){
-    var TYPE_LABELS={writein:'📥 Заприхождаване',return:'↩️ Връщане',missing:'❓ Липса'};
-    return '<span style="color:#16a34a;font-weight:600;">✓ '+(TYPE_LABELS[l.type]||l.type)+'</span>';
+  var TYPE_LABELS={writein:'📥 Заприх.',return:'↩️ Връщане',missing:'❓ Липса'};
+  if(!canReviewDiff()){
+    if(l.type) return '<span style="color:#16a34a;font-weight:600;">✓ '+(TYPE_LABELS[l.type]||l.type)+'</span>';
+    return '<span style="color:#94a3b8;">чака преглед</span>';
   }
-  if(!canReviewDiff()) return '<span style="color:#94a3b8;">чака преглед</span>';
+  /* Бутоните остават кликаеми и СЛЕД избор - текущият избор е открояван,
+     но може да се коригира директно с 1 клик, ако е избран грешен тип. */
+  var mk=function(type,label,color){
+    var active=l.type===type;
+    return '<button data-id="'+l.id+'" onclick="resolveDiffLine(this.dataset.id,\''+type+'\')" title="'+(active?'Текущ избор — кликни друг бутон, за да коригираш':'Кликни, за да избереш')+'" style="border:none;background:'+(active?color:color+'1a')+';color:'+(active?'#fff':color)+';border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">'+(active?'✓ ':'')+label+'</button>';
+  };
   return '<div style="display:flex;gap:3px;flex-wrap:wrap;">'+
-    '<button data-id="'+l.id+'" onclick="resolveDiffLine(this.dataset.id,\'writein\')" style="border:none;background:#2563eb;color:#fff;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">📥 Заприх.</button>'+
-    '<button data-id="'+l.id+'" onclick="resolveDiffLine(this.dataset.id,\'return\')" style="border:none;background:#7c3aed;color:#fff;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">↩️ Връщане</button>'+
-    '<button data-id="'+l.id+'" onclick="resolveDiffLine(this.dataset.id,\'missing\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">❓ Липса</button>'+
+    mk('writein','📥 Заприх.','#2563eb')+
+    mk('return','↩️ Връщане','#7c3aed')+
+    mk('missing','❓ Липса','#dc2626')+
   '</div>';
+}
+/* Автоматично създава запис в "За връщане" (source='diff'), когато разлика бъде
+   решена като "Връщане" - проверява за вече съществуващ, за да не дублира
+   при евентуална повторна корекция (напр. Връщане -> Липса -> пак Връщане). */
+function autoCreateReturnFromDiff(line,cb){
+  sbGet('stock_returns','diff_line_id=eq.'+line.id+'&limit=1').then(function(existing){
+    if(Array.isArray(existing)&&existing.length){ cb(); return; }
+    var data={
+      store_name:line.store_name,
+      supplier:line.supplier,
+      product_name:line.material_name,
+      sap_code:line.material_code,
+      quantity:line.quantity,
+      reason:'Излишък от разлика'+(line.supplier?' — '+line.supplier:''),
+      status:'pending',
+      source:'diff',
+      diff_line_id:line.id,
+      created_by:currentUser.display_name||currentUser.email
+    };
+    sbPost('stock_returns',data).then(function(){ cb(); }).catch(function(){ cb(); });
+  }).catch(function(){ cb(); });
 }
 function resolveDiffLine(id,type){
   if(!canReviewDiff()){toast('Нямаш права за това действие','#dc2626');return;}
@@ -185,23 +230,54 @@ function resolveDiffLine(id,type){
   sbPatch('stock_differences','id=eq.'+id,{type:type,status:'pending'}).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     line.type=type; line.status='pending'; /* локално, за незабавна проверка по-долу без чакане на reload */
-    var siblingLines=sdData.filter(function(x){return x.report_id===line.report_id;});
-    var allResolved = siblingLines.length>0 && siblingLines.every(function(x){return !!x.type;});
-    if(allResolved && line.report_id){
-      sbPatch('differences_reports','id=eq.'+line.report_id,{reviewed:true}).then(function(){
-        toast('✅ Решено — бланката е напълно прегледана!');
+    var finish=function(){
+      var siblingLines=sdData.filter(function(x){return x.report_id===line.report_id;});
+      var allResolved = siblingLines.length>0 && siblingLines.every(function(x){return !!x.type;});
+      if(allResolved && line.report_id){
+        sbPatch('differences_reports','id=eq.'+line.report_id,{reviewed:true}).then(function(){
+          toast('✅ Решено — бланката е напълно прегледана!');
+          loadStockDiff();
+        });
+      } else {
+        toast('✅ Записано!');
         loadStockDiff();
-      });
+      }
+    };
+    if(type==='return'){
+      autoCreateReturnFromDiff(line,finish);
     } else {
-      toast('✅ Записано!');
-      loadStockDiff();
+      finish();
     }
   });
 }
 
 function setSDFilter(f) { sdFilter=f; renderStockDiff(); }
 function setSDTypeFilter(f) { sdTypeFilter=f; renderStockDiff(); }
+/* Пре-рендира при търсене, но запазва фокуса/позицията на курсора в полето -
+   иначе всяко натискане на клавиш би "изритвало" потребителя от полето. */
+function setSDSearch(val){
+  sdSearch=val;
+  var hadFocus = document.activeElement && document.activeElement.id==='sd-search-input';
+  var cursorPos = hadFocus ? document.activeElement.selectionStart : null;
+  renderStockDiff();
+  if(hadFocus){
+    var el=document.getElementById('sd-search-input');
+    if(el){ el.focus(); if(cursorPos!=null) el.setSelectionRange(cursorPos,cursorPos); }
+  }
+}
 
+/* Превключва статус "Издадено кредитно известие" - релевантно само за тип "Липса" */
+function sdToggleCreditNote(id){
+  var line=sdData.find(function(x){return String(x.id)===String(id);});
+  if(!line)return;
+  var newVal=!line.credit_note_issued;
+  sbPatch('stock_differences','id=eq.'+id,{credit_note_issued:newVal}).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    line.credit_note_issued=newVal;
+    toast(newVal?'✅ Маркирано като издадено':'Маркирано като неиздадено');
+    renderStockDiff();
+  });
+}
 function sdMarkTaken(id) {
   if (!confirm('Маркирай стоката като ВЗЕТА?')) return;
   sbPatch('stock_differences','id=eq.'+id,{status:'taken'}).then(function(r){
@@ -252,6 +328,14 @@ function sdModalHtml() {
     '<div><label class="fl">Поръчка</label><input class="fi" id="sd-order" value="'+esc(r.order_number||'')+'" placeholder="напр. 4100135756"></div>'+
     '<div><label class="fl">Дата потвърдена актуализация</label><input type="date" class="fi" id="sd-cdate" value="'+(r.confirmed_date||'')+'"></div>'+
     '</div>'+
+
+    '<label class="fl">Тип на решение</label>'+
+    '<select class="fi" id="sd-type">'+
+    '<option value=""'+(isEdit&&!r.type?' selected':'')+'>— Още не е решено —</option>'+
+    '<option value="writein"'+((r.type==='writein'||!isEdit)?' selected':'')+'>📥 Заприхождаване</option>'+
+    '<option value="return"'+(r.type==='return'?' selected':'')+'>↩️ Връщане</option>'+
+    '<option value="missing"'+(r.type==='missing'?' selected':'')+'>❓ Липса</option>'+
+    '</select>'+
 
     '<label class="fl">Статус</label>'+
     '<select class="fi" id="sd-status">'+
@@ -317,11 +401,11 @@ function submitSD() {
     quantity:       parseFloat(document.getElementById('sd-qty').value)||null,
     order_number:   document.getElementById('sd-order').value,
     confirmed_date: document.getElementById('sd-cdate').value||null,
+    type:           document.getElementById('sd-type').value||null,
     status:         document.getElementById('sd-status').value,
     comment:        document.getElementById('sd-comment').value,
     created_by:     currentUser.display_name||currentUser.email
   };
-  if(!sdEditId) data.type='writein'; /* ръчно добавен запис = класическото "заприхождаване", запазва старото поведение на таба */
   var p = sdEditId
     ? sbPatch('stock_differences','id=eq.'+sdEditId,data)
     : sbPost('stock_differences',data);
@@ -382,14 +466,18 @@ function renderDiffReportsSection(){
        '</div>';
     h+='</div>';
     if(lines.length){
+      var repIsSupplier=rep.direction==='supplier';
       h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
-      h+='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">По док.</th><th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар</th><th style="padding:3px 6px;">Решение</th></tr>';
+      h+='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">По вх. дост.</th>'+
+        (repIsSupplier?'<th style="padding:3px 6px;text-align:right;">По стокова</th>':'')+
+        '<th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар</th><th style="padding:3px 6px;">Решение</th></tr>';
       lines.forEach(function(l){
         h+='<tr style="border-top:1px solid #f1f5f9;">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
           '<td style="padding:3px 6px;">'+esc(l.material_name||'')+'</td>'+
           '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
           '<td style="padding:3px 6px;text-align:right;">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
+          (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
           '<td style="padding:3px 6px;text-align:right;">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
           '<td style="padding:3px 6px;color:#64748b;">'+esc(l.comment||'')+'</td>'+
           '<td style="padding:3px 6px;white-space:nowrap;">'+diffLineResolveButtons(l)+'</td>'+
@@ -425,8 +513,9 @@ function diffItemRowHtml(item,direction){
       '<input class="fi di-sap" placeholder="SAP №" value="'+escVal(item.sap)+'" onblur="lookupCatalogBySap(this)">'+
       '<input class="fi di-name" placeholder="Наименование на артикула *" value="'+escVal(item.name)+'">'+
     '</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">'+
-      '<input type="number" step="0.001" class="fi di-qty" placeholder="Кол. по документ" value="'+(item.qty!=null?item.qty:'')+'">'+
+    '<div style="display:grid;grid-template-columns:'+(direction==='supplier'?'1fr 1fr 1fr 1fr':'1fr 1fr 1fr')+';gap:6px;margin-bottom:6px;">'+
+      '<input type="number" step="0.001" class="fi di-qty" placeholder="По вх. доставка" value="'+(item.qty!=null?item.qty:'')+'">'+
+      (direction==='supplier'?'<input type="number" step="0.001" class="fi di-qty-supdoc" placeholder="По стокова на дост." value="'+(item.qtySupplierDoc!=null?item.qtySupplierDoc:'')+'">':'')+
       '<input type="number" step="0.001" class="fi di-qty-real" placeholder="Реално получено" value="'+(item.qtyReal!=null?item.qtyReal:'')+'">'+
       '<select class="fi di-unit">'+unitOptionsHtml(item.unit)+'</select>'+
     '</div>'+
@@ -472,16 +561,40 @@ function removeDiffItemRow(btn){
   if(container.querySelectorAll('.diff-item-row').length<=1){toast('Трябва поне 1 артикул','#dc2626');return;}
   container.removeChild(row);
 }
+/* Като collectDiffItems(), но пази ВСИЧКИ редове (дори без въведено име) -
+   ползва се само за запазване на въведените данни при смяна на посоката,
+   когато layout-ът на редовете трябва да се пре-рендира (полето "По стокова
+   на доставчика" се появява/скрива според избраната посока). */
+function collectDiffItemsForRedraw(){
+  var rows=document.querySelectorAll('#diff-items .diff-item-row');
+  var items=[];
+  rows.forEach(function(row){
+    var supDocEl=row.querySelector('.di-qty-supdoc');
+    items.push({
+      sap:row.querySelector('.di-sap').value,
+      name:row.querySelector('.di-name').value,
+      qty:parseFloat(row.querySelector('.di-qty').value)||null,
+      qtySupplierDoc:supDocEl?(parseFloat(supDocEl.value)||null):null,
+      qtyReal:parseFloat(row.querySelector('.di-qty-real').value)||null,
+      unit:row.querySelector('.di-unit').value||'бр.',
+      category:row.querySelector('.di-cat').value||null,
+      comment:row.querySelector('.di-comment').value
+    });
+  });
+  return items.length?items:[{}];
+}
 function collectDiffItems(){
   var rows=document.querySelectorAll('#diff-items .diff-item-row');
   var items=[];
   rows.forEach(function(row){
     var name=row.querySelector('.di-name').value.trim();
     if(!name)return;
+    var supDocEl=row.querySelector('.di-qty-supdoc');
     items.push({
       sap:row.querySelector('.di-sap').value.trim(),
       name:name,
       qty:parseFloat(row.querySelector('.di-qty').value)||null,
+      qtySupplierDoc:supDocEl?(parseFloat(supDocEl.value)||null):null,
       qtyReal:parseFloat(row.querySelector('.di-qty-real').value)||null,
       unit:row.querySelector('.di-unit').value||'бр.',
       category:row.querySelector('.di-cat').value||null,
@@ -618,16 +731,15 @@ function updateDiffCounterpartLabel(){
       fillStoreSelect(sel,'');
     });
   }
-  /* Обновяваме категориите на вече добавените артикули спрямо новата посока -
-     ако избраната категория вече не е валидна за новата посока, изчистваме я
-     и махаме евентуалната подсказка, без да пипаме останалите въведени данни */
-  document.querySelectorAll('#diff-items .diff-item-row').forEach(function(row){
-    var catSel=row.querySelector('.di-cat');
-    if(!catSel)return;
-    var current=catSel.value;
-    var stillValid=DIFF_CATEGORIES.some(function(c){return c[0]===current&&c[2].indexOf(dir)>=0;});
-    catSel.innerHTML=diffCategoryOptionsForDirection(dir,stillValid?current:'');
-    updateDiffItemHint(catSel);
+  /* Пре-рендираме редовете с layout-а на новата посока (полето "По стокова на
+     доставчика" се появява само за посока "Доставчик") - пазим вече въведените данни */
+  var preserved=collectDiffItemsForRedraw();
+  renderDiffItemRows(preserved);
+  preserved.forEach(function(it,i){
+    if(!it.category)return;
+    var rows=document.querySelectorAll('#diff-items .diff-item-row');
+    var catSel=rows[i]?rows[i].querySelector('.di-cat'):null;
+    if(catSel)updateDiffItemHint(catSel);
   });
 }
 
@@ -707,6 +819,7 @@ function submitDiffReport(){
           material_code:it.sap,
           material_name:it.name,
           quantity:it.qty,
+          quantity_supplier_doc:it.qtySupplierDoc,
           quantity_received:it.qtyReal,
           difference_category:it.category,
           unit:it.unit,
@@ -739,13 +852,17 @@ function diffEmailBodyHtml(rep,lines){
   h+='<p>Установени са разлики при '+(rep.direction==='supplier'?'приемане на доставка':'междускладов трансфер')+' — '+esc(rep.counterpart||'')+
      (rep.document_number?', документ №'+esc(rep.document_number):'')+
      (rep.doc_date?', дата '+fmtDate(rep.doc_date):'')+'.</p>';
+  var isSupplier=rep.direction==='supplier';
   h+='<table style="width:100%;border-collapse:collapse;font-size:13px;margin:14px 0;">';
-  h+='<tr style="background:#f3f4f6;"><th style="border:1px solid #ccc;padding:6px;text-align:left;">SAP №</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Артикул</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Категория</th><th style="border:1px solid #ccc;padding:6px;text-align:right;">По документ</th><th style="border:1px solid #ccc;padding:6px;text-align:right;">Реално</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Коментар</th></tr>';
+  h+='<tr style="background:#f3f4f6;"><th style="border:1px solid #ccc;padding:6px;text-align:left;">SAP №</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Артикул</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Категория</th><th style="border:1px solid #ccc;padding:6px;text-align:right;">По вх. доставка</th>'+
+    (isSupplier?'<th style="border:1px solid #ccc;padding:6px;text-align:right;">По стокова на дост.</th>':'')+
+    '<th style="border:1px solid #ccc;padding:6px;text-align:right;">Реално</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Коментар</th></tr>';
   lines.forEach(function(l){
     h+='<tr><td style="border:1px solid #ccc;padding:6px;">'+esc(l.material_code||'')+'</td>'+
        '<td style="border:1px solid #ccc;padding:6px;">'+esc(l.material_name||'')+'</td>'+
        '<td style="border:1px solid #ccc;padding:6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
        '<td style="border:1px solid #ccc;padding:6px;text-align:right;">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
+       (isSupplier?'<td style="border:1px solid #ccc;padding:6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
        '<td style="border:1px solid #ccc;padding:6px;text-align:right;">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
        '<td style="border:1px solid #ccc;padding:6px;">'+esc(l.comment||'')+'</td></tr>';
   });
