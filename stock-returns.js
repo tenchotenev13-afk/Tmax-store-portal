@@ -1,6 +1,12 @@
 /* stock-returns.js — Стока за връщане */
 
 var srData   = [];
+/* Storage за снимки на товарителница/документ при връщане - преизползва
+   същия bucket като модул "Разлики", отделен префикс на пътя */
+var SR_SB    = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
+var SR_KEY   = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
+var SR_BKT   = 'bulletin-files';
+var srPendingPhotos = []; /* снимки, качени в текущо отворения модал, преди submit */
 var srFilter = 'pending';
 var srEditId = null;
 var srTab    = 'diff'; /* 'diff' = по разлики (автоматично) | 'complaint' = по рекламации/срок на годност */
@@ -185,6 +191,8 @@ function setSRFilter(f) { srFilter=f; renderStockReturns(); }
 function srMarkTaken(id) {
   /* Отвори модал за попълване на куриер инфо */
   srEditId = id;
+  var existingR = srData.find(function(x){return x.id===id;});
+  srPendingPhotos = (existingR && Array.isArray(existingR.photos)) ? existingR.photos.slice() : [];
   renderStockReturns();
   var ov = document.getElementById('sr-ov');
   if (ov) {
@@ -192,6 +200,7 @@ function srMarkTaken(id) {
     if (r) {
       var el = document.getElementById('sr-status');
       if (el) el.value = 'taken';
+      updateSRPhotoHint(); /* JS value промяна не тригерира onchange - извикваме ръчно */
       var ed = document.getElementById('sr-wdate');
       if (ed) ed.value = new Date().toISOString().slice(0,10);
     }
@@ -247,9 +256,9 @@ function srModalHtml() {
   }
 
   h += '<label class="fl">Статус</label>'+
-    '<select class="fi" id="sr-status">'+
+    '<select class="fi" id="sr-status" onchange="updateSRPhotoHint()">'+
     '<option value="pending"'+(r.status==='pending'||!r.status?' selected':'')+'>⏳ НЕВЗЕТА</option>'+
-    '<option value="taken"'+(r.status==='taken'?' selected':'')+'>✅ ВЗЕТА</option>'+
+    '<option value="taken"'+(r.status==='taken'?' selected':'')+'>✅ ВЗЕТА / ИЗПРАТЕНА</option>'+
     '</select>'+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
@@ -259,6 +268,21 @@ function srModalHtml() {
 
     '<label class="fl">Изтеглена от/с куриер (номер на товарителница)</label>'+
     '<input class="fi" id="sr-courier" value="'+esc(r.courier_info||'')+'" placeholder="напр. по буса на Кърджали към Сливен / Еконт 5300...">'+
+
+    '<div id="sr-photo-hint" style="display:'+(r.status==='taken'?'block':'none')+';background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11.5px;color:#92400e;">📸 <b>Прикачи снимка на товарителницата</b> при изпращане на стоката.</div>'+
+    '<label class="fl">Снимка на товарителница/документ</label>'+
+    '<div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">'+
+      '<label style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">'+
+        '📷 Снимай сега<input type="file" accept="image/*" capture="environment" onchange="srUploadPhoto(this)" style="display:none;">'+
+      '</label>'+
+      '<label style="border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">'+
+        '🖼️ Избери от галерия<input type="file" accept="image/*" multiple onchange="srUploadPhoto(this)" style="display:none;">'+
+      '</label>'+
+    '</div>'+
+    '<div id="sr-photos-wrap" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">'+
+      (Array.isArray(r.photos)?r.photos.map(function(p){return '<a href="'+esc(p.url)+'" target="_blank"><img src="'+esc(p.url)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';}).join(''):'')+
+    '</div>'+
+
     '<label class="fl">Коментар'+(tab==='complaint'?'':' Контрол')+'</label>'+
     '<input class="fi" id="sr-cc" value="'+esc(r.control_comment||'')+'" placeholder="напр. ИЗД КИ">';
 
@@ -276,6 +300,8 @@ function srModalHtml() {
 
 function openSRModal(id) {
   srEditId = id;
+  var existing = id ? srData.find(function(x){return x.id===id;}) : null;
+  srPendingPhotos = (existing && Array.isArray(existing.photos)) ? existing.photos.slice() : [];
   renderStockReturns();
   var ov = document.getElementById('sr-ov');
   if (!ov) return;
@@ -304,6 +330,73 @@ function openSRModal(id) {
     }
   }
     ov.classList.add('open');
+}
+function srCompressImage(file,maxDim,quality){
+  return new Promise(function(resolve){
+    if(!file.type||file.type.indexOf('image/')!==0){ resolve(file); return; }
+    try{
+      var url=URL.createObjectURL(file);
+      var img=new Image();
+      img.onload=function(){
+        URL.revokeObjectURL(url);
+        try{
+          var w=img.width,h=img.height;
+          var scale=Math.min(1,maxDim/Math.max(w,h));
+          var cw=Math.max(1,Math.round(w*scale)), ch=Math.max(1,Math.round(h*scale));
+          var canvas=document.createElement('canvas');
+          canvas.width=cw; canvas.height=ch;
+          var ctx=canvas.getContext('2d');
+          if(!ctx){resolve(file);return;}
+          ctx.drawImage(img,0,0,cw,ch);
+          canvas.toBlob(function(blob){ resolve(blob||file); },'image/jpeg',quality);
+        }catch(err){ resolve(file); }
+      };
+      img.onerror=function(){ try{URL.revokeObjectURL(url);}catch(e){} resolve(file); };
+      img.src=url;
+    }catch(err){ resolve(file); }
+  });
+}
+function srUploadPhoto(input){
+  var files=Array.from(input.files||[]);
+  if(!files.length)return;
+  var wrap=document.getElementById('sr-photos-wrap');
+  files.forEach(function(file){
+    var placeholderId='srph-'+Math.random().toString(36).slice(2,10);
+    if(wrap) wrap.insertAdjacentHTML('beforeend','<div id="'+placeholderId+'" style="width:56px;height:56px;border-radius:6px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:10px;color:#94a3b8;">⏳</div>');
+    srCompressImage(file,1600,0.75).then(function(compressed){
+      var isImg=file.type&&file.type.indexOf('image/')===0;
+      var ext=isImg?'jpg':((file.name.split('.').pop()||'bin').toLowerCase());
+      var ctype=isImg?'image/jpeg':(file.type||'application/octet-stream');
+      var path='stock-returns/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+ext;
+      var reader=new FileReader();
+      reader.onload=function(e){
+        fetch(SR_SB+'/storage/v1/object/'+SR_BKT+'/'+path,{
+          method:'POST',
+          headers:{'Authorization':'Bearer '+SR_KEY,'Content-Type':ctype,'x-upsert':'true'},
+          body:e.target.result
+        }).then(function(r){return r.ok;}).then(function(ok){
+          var ph=document.getElementById(placeholderId);
+          if(!ok){ if(ph) ph.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>'; return; }
+          var pub=SR_SB+'/storage/v1/object/public/'+SR_BKT+'/'+path;
+          srPendingPhotos.push({url:pub,name:file.name});
+          if(ph) ph.outerHTML='<a href="'+esc(pub)+'" target="_blank"><img src="'+esc(pub)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+        }).catch(function(){
+          var ph2=document.getElementById(placeholderId);
+          if(ph2) ph2.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>';
+        });
+      };
+      reader.readAsArrayBuffer(compressed);
+    });
+  });
+  input.value='';
+}
+/* Показва/скрива подсказката за снимка на товарителница според избрания статус -
+   изисква я само когато записът се маркира като "Взета/Изпратена" */
+function updateSRPhotoHint(){
+  var statusEl=document.getElementById('sr-status');
+  var hintEl=document.getElementById('sr-photo-hint');
+  if(!statusEl||!hintEl)return;
+  hintEl.style.display = statusEl.value==='taken' ? 'block' : 'none';
 }
 function closeSRModal() {
   var ov=document.getElementById('sr-ov'); if(ov)ov.classList.remove('open');
@@ -542,6 +635,7 @@ function submitSR() {
     confirmed_date: document.getElementById('sr-cdate').value||null,
     courier_info:   document.getElementById('sr-courier').value,
     control_comment:document.getElementById('sr-cc').value,
+    photos:         srPendingPhotos,
     created_by:     currentUser.display_name||currentUser.email
   };
   if (tab==='complaint') {
