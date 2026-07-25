@@ -143,9 +143,9 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
 /* Таблица за подтаб "По рекламации / срок на годност" - нови, специфични колони */
 function renderSRTableComplaint(list, canEdit, isAdmin) {
   var h = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
-  h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1000px;">';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1300px;">';
   h += '<thead><tr style="background:#f8fafc;">';
-  ['Продукт','SAP','Кол.','Магазин','Доставчик','Срок на годност','Причина','Статус','Коментар',''].forEach(function(c){
+  ['Продукт','SAP','Кол.','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Завод','Срок на годност','Причина','Статус','Коментар',''].forEach(function(c){
     h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
   });
   h += '</tr></thead><tbody>';
@@ -156,13 +156,16 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
       : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
     var expSoon = r.expiry_date && (new Date(r.expiry_date) - new Date()) < 14*86400000;
     h += '<tr style="border-bottom:1px solid #f1f5f9;">' +
-      '<td style="padding:7px 10px;max-width:200px;">'+esc(r.product_name||'')+'</td>'+
+      '<td style="padding:7px 10px;max-width:180px;">'+esc(r.product_name||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.sap_code||'')+'</td>'+
       '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+((r.quantity)||'')+'</td>'+
+      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.purchase_order||'')+'</td>'+
+      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.id_euro||'')+'</td>'+
       '<td style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#64748b;max-width:150px;">'+esc(r.supplier||'')+'</td>'+
+      '<td style="padding:7px 10px;font-size:11px;color:#64748b;max-width:130px;">'+esc(r.supplier||'')+'</td>'+
+      '<td style="padding:7px 10px;text-align:center;color:#94a3b8;">'+esc(r.plant||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;'+(expSoon?'color:#dc2626;font-weight:700;':'')+'">'+(r.expiry_date?fmtDate(r.expiry_date):'—')+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#374151;max-width:160px;">'+esc(r.reason||'')+'</td>'+
+      '<td style="padding:7px 10px;font-size:11px;color:#374151;max-width:150px;">'+esc(r.reason||'')+'</td>'+
       '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.control_comment||'')+'</td>'+
       '<td style="padding:7px 10px;white-space:nowrap;">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
@@ -252,11 +255,17 @@ function srModalHtml() {
     h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
       '<div><label class="fl">Срок на годност</label><input type="date" class="fi" id="sr-expiry" value="'+(r.expiry_date||'')+'"></div>'+
       '<div><label class="fl">Причина</label><input class="fi" id="sr-reason" value="'+esc(r.reason||'')+'" placeholder="напр. Рекламация - счупен продукт"></div>'+
+      '</div>'+
+      '<div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Полета от ERP импорт (по избор):</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
+      '<div><label class="fl">НОВА ПВ-ЕВР</label><input class="fi" id="sr-po" value="'+escVal(r.purchase_order)+'"></div>'+
+      '<div><label class="fl">НОВА ИД-ЕВРО</label><input class="fi" id="sr-ie" value="'+escVal(r.id_euro)+'"></div>'+
+      '<div><label class="fl">Завод</label><input class="fi" id="sr-plant" value="'+escVal(r.plant)+'"></div>'+
       '</div>';
   } else {
     h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
-      '<div><label class="fl">НОВА ПВ-ЕВР</label><input class="fi" id="sr-po" value="'+esc(r.purchase_order||'')+'" placeholder="напр. 4200014948"></div>'+
-      '<div><label class="fl">НОВА ИД-ЕВРО</label><input class="fi" id="sr-ie" value="'+esc(r.id_euro||'')+'" placeholder="напр. 80413769"></div>'+
+      '<div><label class="fl">НОВА ПВ-ЕВР</label><input class="fi" id="sr-po" value="'+escVal(r.purchase_order)+'" placeholder="напр. 4200014948"></div>'+
+      '<div><label class="fl">НОВА ИД-ЕВРО</label><input class="fi" id="sr-ie" value="'+escVal(r.id_euro)+'" placeholder="напр. 80413769"></div>'+
       '<div><label class="fl">Завод</label><input class="fi" id="sr-plant" value="'+(r.plant||'5521')+'" placeholder="5521"></div>'+
       '</div>'+
       '<label class="fl">Дата на документ</label><input type="date" class="fi" id="sr-docdate" value="'+(r.doc_date||'')+'" style="max-width:200px;margin-bottom:10px;">';
@@ -652,6 +661,10 @@ function submitSR() {
     var expEl=document.getElementById('sr-expiry'), reasonEl=document.getElementById('sr-reason');
     data.expiry_date = expEl?(expEl.value||null):null;
     data.reason = reasonEl?reasonEl.value:'';
+    var poEl2=document.getElementById('sr-po'), ieEl2=document.getElementById('sr-ie'), plantEl2=document.getElementById('sr-plant');
+    data.purchase_order = poEl2?poEl2.value:'';
+    data.id_euro = ieEl2?ieEl2.value:'';
+    data.plant = plantEl2?plantEl2.value:'';
   } else {
     var poEl=document.getElementById('sr-po'), ieEl=document.getElementById('sr-ie'),
         plantEl=document.getElementById('sr-plant'), docdateEl=document.getElementById('sr-docdate'),
