@@ -56,7 +56,7 @@ function renderStockReturns() {
   h += '<div style="font-size:20px;font-weight:600;">📦 Стока за връщане</div>';
   h += '<div style="display:flex;gap:8px;">';
   if (canAdd) h += '<button onclick="openSRModal(null)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави</button>';
-  if (canAdd) h += '<button onclick="openReturnsImportModal()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📤 Импорт от Excel</button>';
+  if (canAdd && srTab==='complaint') h += '<button onclick="openReturnsImportModal()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📤 Импорт от Excel</button>';
   h += '</div></div>';
 
   /* Подтабове */
@@ -507,12 +507,10 @@ function srParseExcelDate(v){
   return isNaN(d.getTime())?null:d.toISOString().slice(0,10);
 }
 function srImportModalHtml(){
-  var hint = srTab==='diff'
-    ? 'Многолистов Excel файл (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони: НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Дата на документ, Завод, Коментар (статус ВЗЕТА/НЕВЗЕТА), Дата на изтегляне, Куриер, Дата на потвърдена актуализация, коментари.'
-    : 'Файлът трябва да съдържа колони за продукт, SAP код, количество, магазин. По желание: доставчик, срок на годност, причина. Имената на колоните може да варират леко (автоматично разпознаване).';
+  var hint = 'Приема 2 формата: (1) Многолистов Excel (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Завод, статус ВЗЕТА/НЕВЗЕТА и т.н.; или (2) единичен лист с колони за продукт, SAP, количество, магазин, срок на годност, причина. Разпознава автоматично кой от двата е.';
   return '<div class="bov" id="sr-import-ov"><div class="bmod" style="width:460px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
-    '<div style="font-size:15px;font-weight:700;">📤 Импорт от Excel — '+(srTab==='diff'?'по разлики':'рекламации/срок на годност')+'</div>'+
+    '<div style="font-size:15px;font-weight:700;">📤 Импорт от Excel — рекламации/срок на годност</div>'+
     '<button onclick="closeReturnsImportModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+hint+'</div>'+
     '<input type="file" id="sr-import-file" accept=".xlsx,.xls" style="margin-bottom:14px;">'+
@@ -543,16 +541,21 @@ function startReturnsImport(){
     document.head.appendChild(s);
     return;
   }
-  var importTab=srTab; /* пазим коя таб-логика да ползваме, преди евентуален async delay */
   progEl.textContent='⏳ Четене на файла...';
   var reader=new FileReader();
   reader.onload=function(e){
     try{
       var wb=window.XLSX.read(new Uint8Array(e.target.result),{type:'array'});
-      var mapped = importTab==='diff'
-        ? parseDiffReturnsWorkbook(wb)
-        : parseComplaintReturnsSheet(wb,progEl);
-      if(mapped===null) return; /* грешката вече е показана вътре в парсъра */
+      /* Автоматично разпознаване на формата - опитваме първо многолистовия ERP
+         формат (по познати номера на листове); ако не намери нищо разпознаваемо,
+         прехвърляме към единичния гъвкав лист. И в двата случая резултатът е
+         за подтаб "Рекламации/срок на годност" - маркираме source изрично. */
+      var mapped = parseDiffReturnsWorkbook(wb);
+      if(!mapped.length){
+        mapped = parseComplaintReturnsSheet(wb,progEl);
+        if(mapped===null) return; /* грешката вече е показана вътре в парсъра */
+      }
+      mapped.forEach(function(row){ row.source='complaint'; });
       if(!mapped.length){
         progEl.innerHTML='<span style="color:#dc2626;">Няма разпознати редове за импорт.</span>';
         return;
