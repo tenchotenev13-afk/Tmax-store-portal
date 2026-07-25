@@ -198,6 +198,13 @@ function srMarkTaken(id) {
   if (ov) {
     var r = srData.find(function(x){return x.id===id;});
     if (r) {
+      /* Магазинът е вече известен от самия запис (редактираме съществуващ) -
+         попълваме го директно, вместо да разчитаме на асинхронно зареждане
+         на списъка (което тук не се случваше изобщо - засядаше на "Зарежда се..."). */
+      var storeEl = document.getElementById('sr-store');
+      if (storeEl && r.store_name) {
+        storeEl.outerHTML = '<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(r.store_name)+'</div><input type="hidden" id="sr-store" value="'+esc(r.store_name)+'">';
+      }
       var el = document.getElementById('sr-status');
       if (el) el.value = 'taken';
       updateSRPhotoHint(); /* JS value промяна не тригерира onchange - извикваме ръчно */
