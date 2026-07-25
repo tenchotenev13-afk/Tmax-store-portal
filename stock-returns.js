@@ -10,7 +10,19 @@ var srPendingPhotos = []; /* снимки, качени в текущо отво
 var srFilter = 'pending';
 var srEditId = null;
 var srTab    = 'diff'; /* 'diff' = по разлики (автоматично) | 'complaint' = по рекламации/срок на годност */
+var srSearch = '';
 function setSRTab(t){ srTab=t; srEditId=null; renderStockReturns(); }
+/* Пре-рендира при търсене, но запазва фокуса/позицията на курсора в полето */
+function setSRSearch(val){
+  srSearch=val;
+  var hadFocus = document.activeElement && document.activeElement.id==='sr-search-input';
+  var cursorPos = hadFocus ? document.activeElement.selectionStart : null;
+  renderStockReturns();
+  if(hadFocus){
+    var el=document.getElementById('sr-search-input');
+    if(el){ el.focus(); if(cursorPos!=null) el.setSelectionRange(cursorPos,cursorPos); }
+  }
+}
 
 function canEditSR() {
   return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
@@ -41,8 +53,13 @@ function renderStockReturns() {
 
   var tabData = srData.filter(function(r){ return (r.source||'diff') === srTab; });
   var list = tabData.filter(function(r) {
-    if (srFilter === 'pending')  return r.status === 'pending';
-    if (srFilter === 'taken')    return r.status === 'taken';
+    if (srFilter === 'pending')  { if (r.status !== 'pending') return false; }
+    else if (srFilter === 'taken') { if (r.status !== 'taken') return false; }
+    if (srSearch) {
+      var q = srSearch.toLowerCase();
+      var hay = [r.store_name,r.supplier,r.product_name,r.sap_code,r.purchase_order,r.id_euro,r.reason,r.control_comment,r.controller_comment,r.courier_info].join(' ').toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
     return true;
   });
 
@@ -58,6 +75,9 @@ function renderStockReturns() {
   if (canAdd) h += '<button onclick="openSRModal(null)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави</button>';
   if (canAdd && srTab==='complaint') h += '<button onclick="openReturnsImportModal()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📤 Импорт от Excel</button>';
   h += '</div></div>';
+
+  /* Търсене */
+  h += '<input id="sr-search-input" value="'+escVal(srSearch)+'" oninput="setSRSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик, артикул, SAP, ПВ-ЕВР, ИД-ЕВРО..." style="width:100%;max-width:460px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
 
   /* Подтабове */
   h += '<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-width:560px;">';

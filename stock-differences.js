@@ -112,7 +112,7 @@ function renderStockDiff() {
   h += '</div>';
 
   /* Търсене */
-  h += '<input id="sd-search-input" value="'+esc(sdSearch)+'" oninput="setSDSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик, артикул, SAP, поръчка..." style="width:100%;max-width:420px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
+  h += '<input id="sd-search-input" value="'+escVal(sdSearch)+'" oninput="setSDSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик, артикул, SAP, поръчка..." style="width:100%;max-width:420px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
 
   /* Филтри */
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
