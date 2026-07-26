@@ -75,7 +75,7 @@ function refreshToday(){ TODAY=new Date(); TODAY.setHours(0,0,0,0); }
 setInterval(refreshToday, 5*60*1000); /* на всеки 5 минути */
 document.addEventListener('visibilitychange', function(){ if(!document.hidden) refreshToday(); });
 function calcStatus(delivery,status){
-  if(['done','refused','postponed','approved'].indexOf(status)>=0)return status;
+  if(['done','refused','postponed','approved','arrived'].indexOf(status)>=0)return status;
   if(!delivery)return'pending';
   var d=new Date(delivery);d.setHours(0,0,0,0);
   var diff=Math.round((d-TODAY)/86400000);
@@ -85,6 +85,7 @@ function statusBadge(s){
   var m={overdue:{l:'🔴 Просрочена',bg:'#fee2e2',c:'#991b1b'},today:{l:'🔵 Днес',bg:'#dbeafe',c:'#1e3a5f'},
     tomorrow:{l:'🟡 Утре',bg:'#fef3c7',c:'#92400e'},pending:{l:'⏳ Изчаква',bg:'#f3f4f6',c:'#374151'},
     approved:{l:'✓ Одобрена',bg:'#dbeafe',c:'#1e3a5f'},
+    arrived:{l:'📦 Пристигнала в магазина',bg:'#e0f2fe',c:'#0369a1'},
     done:{l:'✅ Изпълнена',bg:'#dcfce7',c:'#14532d'},refused:{l:'✕ Отказана',bg:'#fee2e2',c:'#991b1b'},
     postponed:{l:'⏱ Отложена',bg:'#f3e8ff',c:'#4c1d95'}};
   var x=m[s]||m.pending;
@@ -287,6 +288,10 @@ function openStatus(id,table){
   document.getElementById('status-info').textContent=rec?(rec.customer_name||rec.name||''):'';
   var corrBtn=document.getElementById('status-correct-btn');
   if(corrBtn)corrBtn.style.display=canCorrectRecord(rec,table)?'':'none';
+  /* "Пристигнала в магазина" е специфичен за клиентски заявки - складът маркира
+     физическото пристигане на стоката, преди тя да бъде предадена на клиента. */
+  var arrivedBtn=document.getElementById('status-btn-arrived');
+  if(arrivedBtn)arrivedBtn.style.display=(table==='client_orders')?'':'none';
   document.getElementById('status-modal').classList.add('open');
 }
 function setStatus(status){

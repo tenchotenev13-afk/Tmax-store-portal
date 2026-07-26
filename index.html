@@ -450,7 +450,7 @@ OneSignalDeferred.push(async function(OneSignal) {
   <div class="modal-sub" id="status-info"></div>
   <div class="status-grid">
     <button class="btn" style="background:#fef3c7;color:#92400e;" onclick="setStatus('pending')">⏳ Изчаква</button>
-    <button class="btn" style="background:#dbeafe;color:#1e3a5f;" onclick="setStatus('approved')">✓ Одобрена</button>
+    <button class="btn" id="status-btn-arrived" style="background:#e0f2fe;color:#0369a1;" onclick="setStatus('arrived')">📦 Пристигнала в магазина</button>
     <button class="btn btn-green" onclick="setStatus('done')">✅ Изпълнена</button>
     <button class="btn" style="background:#f3e8ff;color:#4c1d95;" onclick="setStatus('postponed')">⏱ Отложена</button>
     <button class="btn btn-red" style="grid-column:1/-1;" onclick="setStatus('refused')">✕ Отказана</button>

@@ -219,6 +219,7 @@ function renderPrint(o){
     tomorrow:{l:'🟡 ДОСТАВКА УТРЕ',bg:'#fef3c7',c:'#92400e'},
     pending:{l:'⏳ ИЗЧАКВА',bg:'#f3f4f6',c:'#374151'},
     approved:{l:'✓ ОДОБРЕНА',bg:'#dbeafe',c:'#1e3a5f'},
+    arrived:{l:'📦 ПРИСТИГНАЛА В МАГАЗИНА',bg:'#e0f2fe',c:'#0369a1'},
     done:{l:'✅ ИЗПЪЛНЕНА',bg:'#dcfce7',c:'#14532d'},
     refused:{l:'✕ ОТКАЗАНА',bg:'#fee2e2',c:'#991b1b'},
     postponed:{l:'⏱ ОТЛОЖЕНА',bg:'#f3e8ff',c:'#4c1d95'}
