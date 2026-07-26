@@ -141,7 +141,11 @@ function contactCard(c, isAdmin) {
 
 function doDeleteContact(id){
   if(!confirm('Изтрий записа?'))return;
-  sbDelete('contacts','id=eq.'+id).then(function(){toast('✓ Изтрит');loadContacts();});
+  var wasSupplier = allContacts.some(function(c){return c.id===id && c.type==='supplier';});
+  sbDelete('contacts','id=eq.'+id).then(function(){
+    if(wasSupplier) invalidateSuppliersCache();
+    toast('✓ Изтрит');loadContacts();
+  });
 }
 
 function contactModalHtml() {
@@ -240,6 +244,7 @@ function saveContact(data) {
     : sbPost('contacts',data);
   p.then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
+    if(data.type==='supplier') invalidateSuppliersCache();
     closeContactModal();
     toast('✅ '+(contactsEdit?'Записано!':'Добавено!'));
     loadContacts();

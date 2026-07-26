@@ -170,6 +170,9 @@ function itemsPrintBlock(o){
    за transport_orders - само собствения магазин или глобална роля (admin/accounting/logistics). */
 /* ── Списък на всички магазини/складове (кеширан) - за dropdown полета вместо свободен текст ── */
 var allStoresCache=null;
+/* Нулира кеша с магазини - извиква се от Администрация при добавяне/изтриване
+   на магазин, за да се вижда веднага навсякъде, без презареждане на страницата. */
+function invalidateStoresCache(){ allStoresCache=null; }
 function loadAllStores(){
   if(allStoresCache)return Promise.resolve(allStoresCache);
   return sbGet('stores','select=name&order=name').then(function(data){
@@ -188,6 +191,11 @@ function fillStoreSelect(selectEl,selectedValue){
 
 /* ── Списък на доставчици (от Контакти, категория "supplier") - за dropdown при посока "Доставчик" в разликите ── */
 var allSuppliersCache=null;
+/* Нулира кеша с доставчици - извиква се от Контакти при добавяне/редакция/
+   изтриване на доставчик, за да се вижда веднага навсякъде, без презареждане
+   на страницата (следващото отваряне на кой да е таб с падащо меню за
+   доставчик ще дръпне свеж списък). */
+function invalidateSuppliersCache(){ allSuppliersCache=null; }
 function loadAllSuppliers(){
   if(allSuppliersCache)return Promise.resolve(allSuppliersCache);
   return fetch(API+'/contacts?type=eq.supplier&select=name&order=name',{headers:H}).then(function(res){

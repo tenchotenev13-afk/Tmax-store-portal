@@ -40,6 +40,7 @@ function addStore(){
     document.getElementById('new-store-name').value='';
     document.getElementById('new-store-city').value='';
     logAudit('store_added',{details:{name:name,city:city}});
+    invalidateStoresCache();
     toast('✓ Магазинът е добавен');loadStoresAdmin();
   });
 }
@@ -48,6 +49,7 @@ function deleteStore(id,name){
   if(!confirm('Изтрий магазина?'))return;
   sbDelete('stores','id=eq.'+id).then(function(){
     logAudit('store_deleted',{details:{id:id,name:name}});
+    invalidateStoresCache();
     toast('✓ Изтрит');loadStoresAdmin();
   });
 }
