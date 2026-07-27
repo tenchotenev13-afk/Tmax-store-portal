@@ -1428,18 +1428,50 @@ function collectTodayDeadlineItems(cb){
   var recTasks = recurringTasks.filter(function(t){ return recurringIsDueToday(t); });
   sbGet('task_subtasks','due_date=eq.'+todayStr).then(function(subs){
     var subTasks = Array.isArray(subs) ? subs : [];
+    /* Всеки елемент носи отдел + час (ако има), вместо голо заглавие -
+       за да можем да групираме по отдел и подредим по спешност/час,
+       вместо всичко да се лее в едно изречение, разделено със запетаи. */
     var items = [];
-    mainTasks.forEach(function(t){ items.push(t.title); });
-    subTasks.forEach(function(s){ items.push(s.title); });
-    recTasks.forEach(function(t){ items.push(t.title + (t.due_time?(' ('+t.due_time+')'):'')); });
+    mainTasks.forEach(function(t){ items.push({title:t.title,time:null,department:t.department||null}); });
+    subTasks.forEach(function(s){
+      var parent=bulTasks.find(function(t){return t.id===s.task_id;});
+      items.push({title:s.title,time:null,department:parent?parent.department:null});
+    });
+    recTasks.forEach(function(t){ items.push({title:t.title,time:t.due_time||null,department:t.department||null}); });
     cb(items);
   }).catch(function(){ cb([]); });
+}
+/* Групира по отдел (📦 Склад/Приемане, 🛒 Търговска, ⚙️ Администрация), сортира
+   по час в рамките на отдела (със зададен час - най-напред, по-ранните преди),
+   и разделя редовете с нов ред вместо запетая - много по-лесно за бърз прочит
+   в push нотификация, отколкото едно дълго изречение с всичко накуп. */
+function formatDeadlinesMessage(items){
+  var groups={};
+  var order=[]; /* пазим реда на първа поява на отдела */
+  items.forEach(function(it){
+    var key=it.department||'other';
+    if(!groups[key]){groups[key]=[];order.push(key);}
+    groups[key].push(it);
+  });
+  var lines=order.map(function(key){
+    var group=groups[key].slice().sort(function(a,b){
+      if(a.time&&b.time)return a.time.localeCompare(b.time);
+      if(a.time)return -1;
+      if(b.time)return 1;
+      return 0;
+    });
+    var info=DEPTS[key];
+    var label=info?(info.icon+' '+info.label):'📋 Общи';
+    var groupText=group.map(function(it){return it.title+(it.time?' ('+it.time+')':'');}).join(', ');
+    return label+': '+groupText;
+  });
+  return lines.join('\n');
 }
 function sendDailyDeadlinesNotification(){
   collectTodayDeadlineItems(function(items){
     if(!items.length){ showBulToast('Няма задачи със срок днес.'); return; }
     var title = '📅 '+items.length+' срок'+(items.length===1?'':'а')+' днес';
-    var msg = items.slice(0,5).join(', ') + (items.length>5 ? ' и още '+(items.length-5) : '');
+    var msg = formatDeadlinesMessage(items);
     showBulToast('⏳ Изпращане...');
     pushToAll(title,msg).then(function(res){
       if(res && res.ok) showBulToast('🔔 Изпратена!');
@@ -1454,7 +1486,7 @@ function autoCheckDailyDeadlines(){
     try{ localStorage.setItem(key,'1'); }catch(e){}
     if(!items.length || typeof pushToAll!=='function')return;
     var title = '📅 '+items.length+' срок'+(items.length===1?'':'а')+' днес';
-    var msg = items.slice(0,5).join(', ') + (items.length>5 ? ' и още '+(items.length-5) : '');
+    var msg = formatDeadlinesMessage(items);
     pushToAll(title,msg);
   });
 }
