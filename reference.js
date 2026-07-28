@@ -2,6 +2,7 @@
 
 var refSubcats   = [];
 var refBrands    = [];
+var warrantyTemplates = [];
 var refAllEntries = []; /* {brand_id, subcategory_id} чифтове — за филтриране на dropdown-ите */
 var refSelSubcat = '';
 var refSelBrand  = '';
@@ -49,11 +50,13 @@ function loadReference() {
   Promise.all([
     sbGet('warranty_subcategories','order=name.asc'),
     sbGet('warranty_brands','order=name.asc'),
-    sbGet('warranty_entries','select=brand_id,subcategory_id')
+    sbGet('warranty_entries','select=brand_id,subcategory_id'),
+    sbGet('warranty_templates','order=sort_order.asc')
   ]).then(function(r) {
     refSubcats = Array.isArray(r[0]) ? r[0] : [];
     refBrands  = Array.isArray(r[1]) ? r[1] : [];
     refAllEntries = Array.isArray(r[2]) ? r[2] : [];
+    warrantyTemplates = Array.isArray(r[3]) ? r[3] : [];
     renderReference();
   }).catch(function(err) {
     if (wrap) wrap.innerHTML = '<div style="color:#dc2626;padding:40px;text-align:center;">Грешка при зареждане.</div>';
@@ -268,20 +271,25 @@ function renderRefCard() {
 
   /* РЪЧЕН избор на гаранционна карта вместо автоматично познаване по марка/категория —
      автоматичното мапване често сочеше към грешен шаблон (потвърден бъг). Колегата,
-     който държи продукта, знае най-добре коя от 11-те карти е правилната. */
-  var WARRANTY_TEMPLATES = [
-    ['hobby.pdf','Hobby / Дребни артикули'],
-    ['heatmann.pdf','Heatmann / Кухненски ел. уреди'],
-    ['tayfun.pdf','Тайфун'],
-    ['mehanik.pdf','Механик / Ръчни инструменти'],
-    ['agromashini.pdf','Агро машини (косачки, тримери...)'],
-    ['smesiteli.pdf','Смесители'],
-    ['praskachka.pdf','Пръскачки'],
-    ['oranzherii.pdf','Оранжерии'],
-    ['monoblok.pdf','Моноблокове'],
-    ['powervac.pdf','Ел. инструменти (винтоверти, перфоратори...)'],
-    ['mivkialpaka.pdf','Мивки алпака']
-  ];
+     който държи продукта, знае най-добре коя от 11-те карти е правилната.
+
+     Имената (label) на шаблоните вече се четат от таблица warranty_templates,
+     редактируема през интерфейса (⚙️ Управление на записи) - не са твърдо кодирани. */
+  var WARRANTY_TEMPLATES = warrantyTemplates.length
+    ? warrantyTemplates.map(function(t){ return [t.filename, t.label]; })
+    : [
+      ['hobby.pdf','Hobby / Дребни артикули'],
+      ['heatmann.pdf','Heatmann / Кухненски ел. уреди'],
+      ['tayfun.pdf','Тайфун'],
+      ['mehanik.pdf','Механик / Ръчни инструменти'],
+      ['agromashini.pdf','Агро машини (косачки, тримери...)'],
+      ['smesiteli.pdf','Смесители'],
+      ['praskachka.pdf','Пръскачки'],
+      ['oranzherii.pdf','Оранжерии'],
+      ['monoblok.pdf','Моноблокове'],
+      ['powervac.pdf','Ел. инструменти (винтоверти, перфоратори...)'],
+      ['mivkialpaka.pdf','Мивки алпака']
+    ]; /* fallback, ако базата все още не е заредена/достъпна */
   var templatePicker =
     '<div style="position:relative;display:inline-block;">' +
       '<button onclick="var m=document.getElementById(\'ref-tpl-menu\');m.style.display=m.style.display===\'block\'?\'none\':\'block\';" style="background:#2563eb;color:#fff;border:none;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">🖨 Гаранционна карта ▾</button>' +
@@ -433,8 +441,58 @@ function openRefAdminList() {
       '</div>' +
     '</div>' +
     '<div style="font-size:12px;color:#64748b;margin-top:14px;">Изтриването е блокирано, ако марката/категорията вече се използва в гаранционен запис или сервизна точка — изтрий тях първо.</div>' +
+
+    '<div style="margin-top:18px;padding-top:14px;border-top:1px solid #e2e8f0;">' +
+      '<div style="font-size:12px;font-weight:700;color:#64748b;text-transform:uppercase;margin-bottom:6px;">Имена на гаранционни шаблони (карти) ('+warrantyTemplates.length+')</div>' +
+      '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">Тук се редактира само показваното име в менюто "🖨 Гаранционна карта" — самите 11 PDF файла остават фиксирани.</div>' +
+      '<div style="border:1px solid #e2e8f0;border-radius:8px;max-height:280px;overflow-y:auto;">' +
+        warrantyTemplates.map(function(t){
+          return '<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:12.5px;">' +
+            '<span>'+esc(t.label)+' <span style="color:#cbd5e1;font-size:10.5px;">('+esc(t.filename)+')</span></span>' +
+            '<button onclick="refTemplateRenamePrompt(\''+t.id+'\')" title="Преименувай" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;flex-shrink:0;">✏️</button>' +
+            '</div>';
+        }).join('') +
+      '</div>' +
+    '</div>' +
     '</div>';
   document.body.appendChild(div);
+}
+
+/* ── Преименуване на етикет на гаранционен шаблон (само label, не и filename) ── */
+function refTemplateRenameModalHtml(currentLabel) {
+  return '<div class="bov" id="reftpl-ov"><div class="bmod" style="width:380px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+    '<div style="font-size:15px;font-weight:600;">✏️ Преименувай шаблон</div>' +
+    '<button onclick="document.getElementById(\'reftpl-ov\').remove()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>' +
+    '<label class="fl">Ново име</label><input class="fi" id="reftpl-label" value="'+esc(currentLabel)+'">' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+    '<button onclick="document.getElementById(\'reftpl-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="submitRefTemplateRename()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Запази</button>' +
+    '</div></div></div>';
+}
+var refTplRenameId = null;
+function refTemplateRenamePrompt(id) {
+  var item = warrantyTemplates.find(function(x){return String(x.id)===String(id);});
+  if (!item) return;
+  refTplRenameId = id;
+  var existing = document.getElementById('reftpl-ov'); if (existing) existing.remove();
+  var div = document.createElement('div');
+  div.innerHTML = refTemplateRenameModalHtml(item.label);
+  document.body.appendChild(div.firstChild);
+}
+function submitRefTemplateRename() {
+  var newLabel = (document.getElementById('reftpl-label').value||'').trim();
+  if (!newLabel) { toast('Въведи име','#dc2626'); return; }
+  sbPatch('warranty_templates','id=eq.'+refTplRenameId,{label:newLabel}).then(function(res){
+    if (!res.ok) { toast('Грешка при запис','#dc2626'); return; }
+    var item = warrantyTemplates.find(function(x){return String(x.id)===String(refTplRenameId);});
+    if (item) item.label = newLabel;
+    var el = document.getElementById('reftpl-ov'); if (el) el.remove();
+    toast('✅ Преименувано!');
+    var adminOv = document.getElementById('ref-admin-ov'); if (adminOv) adminOv.remove();
+    openRefAdminList();
+    renderReference();
+  });
 }
 
 /* ── Преименуване на марка/под-категория ── */
