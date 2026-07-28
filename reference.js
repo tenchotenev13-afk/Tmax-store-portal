@@ -479,6 +479,7 @@ function refTemplateRenamePrompt(id) {
   var div = document.createElement('div');
   div.innerHTML = refTemplateRenameModalHtml(item.label);
   document.body.appendChild(div.firstChild);
+  document.getElementById('reftpl-ov').classList.add('open');
 }
 function submitRefTemplateRename() {
   var newLabel = (document.getElementById('reftpl-label').value||'').trim();
