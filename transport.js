@@ -223,6 +223,7 @@ function showTransportConflictModal(conflicts){
     '</div></div></div>';
   var existing=document.getElementById('transport-conflict-ov'); if(existing) existing.remove();
   document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('transport-conflict-ov').classList.add('open');
 }
 function closeTransportConflictModal(){
   var el=document.getElementById('transport-conflict-ov'); if(el) el.remove();
