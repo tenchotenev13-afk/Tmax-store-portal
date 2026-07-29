@@ -121,22 +121,35 @@ function hourToMinutes(h){
   return hh*60+mm;
 }
 
-/* Проверява дали вече има друга активна транспортна заявка от същия магазин,
-   в рамките на +/-2ч на същия ден — предотвратява двойно ангажиране на шофьора
-   в различни посоки по едно и също време. */
-function checkTransportConflict(date, hour, onResolved){
+/* Проверява дали вече има друга активна транспортна заявка от СЪЩИЯ ИЗБРАН
+   магазин (не непременно магазина на логнатия потребител - важно за admin/
+   global потребители, които подават от името на конкретен магазин),
+   в рамките на +/-30 минути на същия ден. */
+function checkTransportConflict(storeName,date,hour,onResolved){
   var newMin=hourToMinutes(hour);
   if(!date||newMin===null){ onResolved([]); return; }
-  sbGet('transport_orders','store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+encodeURIComponent(date)).then(function(rows){
-    var list=Array.isArray(rows)?rows:[];
-    var conflicts=list.filter(function(o){
+  sbGet('transport_orders','store_name=eq.'+encodeURIComponent(storeName)+'&date=eq.'+encodeURIComponent(date)).then(function(rows){
+    if(!Array.isArray(rows)){
+      /* Заявката е върнала грешка (не масив) - PostgREST/мрежов проблем.
+         НЕ третираме мълчаливо като "няма конфликт" (стар, скрит бъг) -
+         предупреждаваме изрично, за да не се пропусне реален конфликт. */
+      console.error('checkTransportConflict: неочакван отговор (не масив):', rows);
+      toast('⚠️ Проверката за конфликт в графика се провали - провери ръчно преди да продължиш!','#d97706');
+      onResolved([]);
+      return;
+    }
+    var conflicts=rows.filter(function(o){
       if(['done','refused','postponed'].indexOf(o.status)>=0) return false;
       var m=hourToMinutes(o.hour);
       if(m===null) return false;
       return Math.abs(m-newMin)<=30; /* +/- 30 минути */
     });
     onResolved(conflicts);
-  }).catch(function(){ onResolved([]); });
+  }).catch(function(err){
+    console.error('checkTransportConflict: заявката се провали:', err);
+    toast('⚠️ Проверката за конфликт в графика се провали - провери ръчно преди да продължиш!','#d97706');
+    onResolved([]);
+  });
 }
 
 function openTransportModal(){
@@ -146,18 +159,22 @@ function openTransportModal(){
   document.getElementById('o-date').value=today();
   document.getElementById('o-hour').value='10:00';
   document.getElementById('o-delivery').value='';
+  loadAllStores().then(function(){
+    fillStoreSelect(document.getElementById('o-store'),currentUser.store_name);
+  });
   renderItemRows('o-items',[{}]);
   document.getElementById('transport-modal').classList.add('open');
 }
 
 function submitTransport(){
-  var name=v('o-name'),phone=v('o-phone'),addr=v('o-addr');
+  var store=v('o-store'),name=v('o-name'),phone=v('o-phone'),addr=v('o-addr');
   var items=collectItems('o-items');
+  if(!store){toast('Избери магазин','#dc2626');return;}
   if(!name||!phone||!addr){toast('Попълни задължителните полета *','#dc2626');return;}
   if(!items.length){toast('Добави поне един артикул с продукт','#dc2626');return;}
 
   var date=v('o-date'), hour=v('o-hour');
-  checkTransportConflict(date, hour, function(conflicts){
+  checkTransportConflict(store,date,hour,function(conflicts){
     if(conflicts.length){
       showTransportConflictModal(conflicts);
     } else {
@@ -198,12 +215,13 @@ function confirmTransportDespiteConflict(){
 }
 
 function doSubmitTransport(){
+  var store=v('o-store');
   var name=v('o-name'),phone=v('o-phone'),addr=v('o-addr');
   var items=collectItems('o-items');
   var first=items[0];
   var delivery=v('o-delivery')||null;
   sbPost('transport_orders',{
-    store_name:currentUser.store_name,
+    store_name:store,
     date:v('o-date'),hour:v('o-hour'),bon:v('o-bon'),
     customer_name:name,phone:phone,address:addr,
     product:first.product,color:first.color,sap:first.sap,qty:first.qty,unit:first.unit,
