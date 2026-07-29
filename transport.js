@@ -159,9 +159,27 @@ function openTransportModal(){
   document.getElementById('o-date').value=today();
   document.getElementById('o-hour').value='10:00';
   document.getElementById('o-delivery').value='';
-  loadAllStores().then(function(){
-    fillStoreSelect(document.getElementById('o-store'),currentUser.store_name);
-  });
+  /* Обикновените служители (точно 1 назначен магазин) не бива да могат да сменят
+     магазина - заключваме на техния собствен. Само admin/multi-store потребители
+     виждат истински dropdown с всички магазини. */
+  var myStores=assignedStores();
+  var storeEl=document.getElementById('o-store');
+  if(storeEl){
+    if(myStores && myStores.length===1){
+      storeEl.outerHTML='<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(myStores[0])+'</div><input type="hidden" id="o-store" value="'+esc(myStores[0])+'">';
+    } else {
+      /* Гарантираме истински <select>, дори ако предишно отваряне на модала
+         (в същата сесия) го е заключило като <input type="hidden"> - иначе
+         fillStoreSelect() не би имало върху какво да работи. */
+      if(storeEl.tagName!=='SELECT'){
+        storeEl.outerHTML='<select class="fi" id="o-store"></select>';
+        storeEl=document.getElementById('o-store');
+      }
+      loadAllStores().then(function(){
+        fillStoreSelect(document.getElementById('o-store'),currentUser.store_name);
+      });
+    }
+  }
   renderItemRows('o-items',[{}]);
   document.getElementById('transport-modal').classList.add('open');
 }
