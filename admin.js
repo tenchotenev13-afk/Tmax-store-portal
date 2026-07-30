@@ -721,7 +721,14 @@ function normalizeCatalogUnit(u){
   return CATALOG_UNIT_MAP[u]||(u?u.toLowerCase():'бр.');
 }
 function parseDelimitedCatalog(text){
-  var delim=text.indexOf('\t')>=0?'\t':',';
+  /* Excel-ският "CSV UTF-8" запис добавя невидим BOM символ в самото начало
+     на файла - ако не се премахне, "поврежда" името на ПЪРВАТА колона
+     (напр. "Материал" се чете като "\uFEFFМатериал"), чупейки разпознаването. */
+  if(text.charCodeAt(0)===0xFEFF) text=text.slice(1);
+  /* Разпознаване на разделителя: табулация > точка-запетая (стандарт за SAP/
+     европейски CSV износ, тъй като запетаята вече се ползва за десетичен
+     знак в числата, напр. "0,230") > обикновена запетая, като последен fallback. */
+  var delim = text.indexOf('\t')>=0 ? '\t' : (text.indexOf(';')>=0 ? ';' : ',');
   var lines=text.split(/\r\n|\n/).filter(function(l){return l.trim().length;});
   if(!lines.length)return [];
   var headers=lines[0].split(delim).map(function(h){return h.trim();});
@@ -732,6 +739,7 @@ function parseDelimitedCatalog(text){
     headers.forEach(function(h,idx){row[h]=(cols[idx]||'').trim();});
     rows.push(row);
   }
+  rows._detectedHeaders=headers; /* за диагностика, ако нищо не съвпадне */
   return rows;
 }
 function openCatalogImportModal(){
@@ -766,7 +774,11 @@ function startCatalogImport(){
         updated_at:new Date().toISOString()
       };
     }).filter(function(x){return x.sap_code && x.product_name;});
-    if(!mapped.length){progEl.innerHTML='<span style="color:#dc2626;">Не бяха разпознати редове. Провери дали колоните се казват точно "Материал"/"Описание на Материал".</span>';return;}
+    if(!mapped.length){
+      var foundHeaders=rows._detectedHeaders?rows._detectedHeaders.join(' | '):'(няма редове)';
+      progEl.innerHTML='<span style="color:#dc2626;">Не бяха разпознати редове. Очаквани колони: "Материал"/"Описание на Материал".<br>Намерени в твоя файл: <b>'+esc(foundHeaders)+'</b></span>';
+      return;
+    }
     progEl.textContent='⏳ Качване на 0 / '+mapped.length+'...';
     batchUpsertCatalog(mapped,function(done,total,errCount){
       progEl.textContent='⏳ Качване на '+done+' / '+total+(errCount?' ('+errCount+' партиди с грешка)':'')+'...';
