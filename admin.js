@@ -774,12 +774,30 @@ function startCatalogImport(){
         updated_at:new Date().toISOString()
       };
     }).filter(function(x){return x.sap_code && x.product_name;});
+    /* Де-дупликация по SAP код - ако файлът съдържа един и същ SAP код повече
+       от веднъж (реален случай, установен в SAP износи), PostgreSQL хвърля
+       грешка "ON CONFLICT DO UPDATE command cannot affect row a second time",
+       когато дубликатите попаднат в една и съща партида (500 реда). Пазим
+       ПОСЛЕДНОТО срещане на всеки код (обикновено най-актуалната версия). */
+    var seen={};
+    var deduped=[];
+    mapped.forEach(function(x){
+      if(seen.hasOwnProperty(x.sap_code)){
+        deduped[seen[x.sap_code]]=x; /* заменя по-старото срещане с по-новото */
+      } else {
+        seen[x.sap_code]=deduped.length;
+        deduped.push(x);
+      }
+    });
+    var dupCount=mapped.length-deduped.length;
+    mapped=deduped;
     if(!mapped.length){
       var foundHeaders=rows._detectedHeaders?rows._detectedHeaders.join(' | '):'(няма редове)';
       progEl.innerHTML='<span style="color:#dc2626;">Не бяха разпознати редове. Очаквани колони: "Материал"/"Описание на Материал".<br>Намерени в твоя файл: <b>'+esc(foundHeaders)+'</b></span>';
       return;
     }
-    progEl.textContent='⏳ Качване на 0 / '+mapped.length+'...';
+    if(dupCount>0) progEl.textContent='ℹ️ Открити '+dupCount+' дублирани SAP кода (пазено последното срещане). ';
+    progEl.textContent+='⏳ Качване на 0 / '+mapped.length+'...';
     batchUpsertCatalog(mapped,function(done,total,errCount){
       progEl.textContent='⏳ Качване на '+done+' / '+total+(errCount?' ('+errCount+' партиди с грешка)':'')+'...';
     },function(errorCount,firstError){
