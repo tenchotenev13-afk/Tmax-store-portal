@@ -1228,6 +1228,7 @@ function renderRecurringAttachments(t){
       h+='<div style="position:relative;">';
       if(a.type==='image'){
         h+='<a href="'+a.url+'" target="_blank" style="display:block;"><img src="'+a.url+'" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+        if(canEdit())h+=attSizePickerHtml('recurring',t.id,i,a.width);
       }else{
         h+='<a href="'+a.url+'" target="_blank" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;color:#2563eb;text-decoration:none;max-width:110px;">📎 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(a.filename||'Файл')+'</span></a>';
       }
@@ -1287,6 +1288,37 @@ function normAttachments(atts){
   if(typeof atts==='string'){try{atts=JSON.parse(atts);}catch(e){atts=[];}}
   return Array.isArray(atts)?atts:[];
 }
+/* Малки бутони за избор на размер (33/50/66/100%) под снимка в задача/
+   постоянна задача - същия модел като размера на снимки в блоковете,
+   но по-компактен. Размерът определя показването при ПЕЧАТ. */
+function attSizePickerHtml(kind,entityId,attIdx,currentWidth){
+  var sizes=[['33','S'],['50','M'],['66','L'],['100','XL']];
+  var h='<div style="display:flex;gap:2px;margin-top:2px;">';
+  sizes.forEach(function(s){
+    var active=String(currentWidth||100)===s[0];
+    h+='<button data-kind="'+kind+'" data-eid="'+entityId+'" data-aidx="'+attIdx+'" data-w="'+s[0]+'" onclick="attSetWidth(this)" title="'+s[0]+'% (за печат)" style="border:1px solid '+(active?'#2563eb':'#e2e8f0')+';background:'+(active?'#eff6ff':'#fff')+';color:'+(active?'#2563eb':'#94a3b8')+';border-radius:3px;padding:0 3px;font-size:8px;line-height:14px;cursor:pointer;">'+s[1]+'</button>';
+  });
+  h+='</div>';
+  return h;
+}
+/* Записва избрания размер на снимка в задача (kind='task') или постоянна
+   задача (kind='recurring') - засяга само печатния изглед, не екрана. */
+function attSetWidth(btn){
+  var kind=btn.getAttribute('data-kind'), eid=btn.getAttribute('data-eid'),
+      aidx=parseInt(btn.getAttribute('data-aidx')), w=parseInt(btn.getAttribute('data-w'));
+  var list = kind==='task' ? bulTasks : recurringTasks;
+  var table = kind==='task' ? 'bulletin_tasks' : 'recurring_tasks';
+  var entity=list.find(function(x){return String(x.id)===String(eid);});
+  if(!entity)return;
+  var atts=normAttachments(entity.attachments).slice();
+  if(!atts[aidx])return;
+  atts[aidx]=Object.assign({},atts[aidx],{width:w});
+  entity.attachments=atts;
+  sbPatch(table,'id=eq.'+eid,{attachments:atts}).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    renderBulletin();
+  });
+}
 function renderTaskAttachments(t){
   var atts=normAttachments(t.attachments);
   var h='';
@@ -1296,6 +1328,7 @@ function renderTaskAttachments(t){
       h+='<div style="position:relative;">';
       if(a.type==='image'){
         h+='<a href="'+a.url+'" target="_blank" style="display:block;"><img src="'+a.url+'" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+        if(canEdit())h+=attSizePickerHtml('task',t.id,i,a.width);
       }else{
         h+='<a href="'+a.url+'" target="_blank" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;color:#2563eb;text-decoration:none;max-width:110px;">📎 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(a.filename||'Файл')+'</span></a>';
       }
@@ -1678,7 +1711,7 @@ function printSection(what){
     '.task-desc{font-size:10pt;color:#64748b;overflow-wrap:break-word;}' +
     '.task-due{font-size:9.5pt;color:#94a3b8;margin-top:0.5mm;}' +
     '.task-attachments{display:flex;flex-wrap:wrap;gap:3mm;margin-top:2mm;}' +
-    '.task-att-img{width:45mm;height:45mm;object-fit:cover;border-radius:2mm;border:1pt solid #e2e8f0;}' +
+    '.task-att-img{object-fit:cover;border-radius:2mm;border:1pt solid #e2e8f0;}' +
     '.task-att-file{display:inline-block;padding:2mm 4mm;border:1pt solid #e2e8f0;border-radius:2mm;font-size:9.5pt;color:#64748b;}' +
     '.dept-badge{display:inline-block;padding:1mm 3mm;border-radius:20mm;font-size:9.5pt;font-weight:600;margin-bottom:2mm;}' +
     '.badge-trade{background:#f0fdf4;color:#14532d;}' +
@@ -1693,10 +1726,12 @@ function printSection(what){
   function pTaskAttachments(t){
     var atts=normAttachments(t.attachments);
     if(!atts.length)return '';
+    var mmBySize={33:'28mm',50:'42mm',66:'55mm',100:'80mm'};
     var s='<div class="task-attachments">';
     atts.forEach(function(a){
       if(a.type==='image'){
-        s+='<img src="'+a.url+'" class="task-att-img">';
+        var mm=mmBySize[a.width]||mmBySize[100];
+        s+='<img src="'+a.url+'" class="task-att-img" style="width:'+mm+';height:'+mm+';">';
       }else{
         s+='<span class="task-att-file">📎 '+esc(a.filename||'Файл')+'</span>';
       }
@@ -1795,7 +1830,22 @@ function printSection(what){
         s+='</div></div>';
       });
     }
-    if(!blocks.length&&!dt.length)s+='<div style="color:#94a3b8;text-align:center;padding:5mm;">Няма съдържание.</div>';
+    var rdt=recurringTasks.filter(function(t){return t.department===dk;});
+    if(rdt.length){
+      s+='<div class="tasks-hdr">🔁 Постоянни задачи</div>';
+      rdt.forEach(function(t){
+        s+='<div class="task-row">';
+        s+='<div class="task-cb"></div>';
+        s+='<div style="flex:1;">';
+        s+='<div class="task-title">'+esc(t.title||'')+'</div>';
+        if(t.description)s+='<div class="task-desc">'+linkify(t.description)+'</div>';
+        var dueLbl=recurringDueLabel(t);
+        if(dueLbl)s+='<div class="task-due">🔁 '+esc(dueLbl)+'</div>';
+        s+=pTaskAttachments(t);
+        s+='</div></div>';
+      });
+    }
+    if(!blocks.length&&!dt.length&&!rdt.length)s+='<div style="color:#94a3b8;text-align:center;padding:5mm;">Няма съдържание.</div>';
     s+='</div>';
     return s;
   }
