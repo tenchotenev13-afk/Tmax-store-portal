@@ -326,7 +326,7 @@ function loadBulletin(){
     if(!results)return; /* curBul беше null - вече показахме renderBulEmpty() по-горе */
     bulPromotions=Array.isArray(results[0])?results[0]:[];
     recurringTasks=Array.isArray(results[1])?results[1]:[];
-    sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=due_date.asc').then(function(t){
+    sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=sort_order.asc,due_date.asc').then(function(t){
       bulTasks=Array.isArray(t)?t:[];
       if(!bulTasks.length){
         bulComps=[];subtaskComps=[];recurringComps=[];
@@ -517,10 +517,13 @@ function renderBulView(){
     });
     manual.forEach(function(e,ei){
       var dc=({trade:'#166534',warehouse:'#1e40af',admin:'#5b21b6',general:'#64748b'}[e.dept])||'#64748b';
-      html+='<div style="display:flex;gap:4px;padding:2px 0;align-items:flex-start;">';
+      html+='<div style="padding:2px 0;">';
+      html+='<div style="display:flex;gap:4px;align-items:flex-start;">';
       html+='<span style="width:6px;height:6px;border-radius:50%;background:'+dc+';flex-shrink:0;margin-top:4px;"></span>';
       html+='<span style="font-size:11px;flex:1;">'+esc(e.title||'')+'</span>';
       if(canEdit())html+='<button data-key="'+key+'" data-idx="'+ei+'" onclick="bulRmCal(this)" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:11px;padding:0;line-height:1;">✕</button>';
+      html+='</div>';
+      html+=renderCalEntryAttachments(e,key,ei);
       html+='</div>';
     });
     if(!dTasks.length&&!manual.length)html+='<div style="font-size:11px;color:#cbd5e1;font-style:italic;margin-top:4px;">Свободен</div>';
@@ -577,7 +580,7 @@ function renderBulView(){
         var today=new Date();today.setHours(0,0,0,0);
         var diff=due?Math.ceil((due-today)/86400000):null;
         var dueColor=diff===null?'#94a3b8':diff<0?'#dc2626':diff<=2?'#d97706':'#94a3b8';
-        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;'+(canEdit()?'cursor:grab;':'')+'"'+(canEdit()?' draggable="true" data-tid="'+t.id+'" ondragstart="taskDragStart(event,this)" ondragend="taskDragEnd(this)"':'')+'>';
+        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;'+(canEdit()?'cursor:grab;':'')+'"'+(canEdit()?' draggable="true" data-tid="'+t.id+'" ondragstart="taskDragStart(event,this)" ondragend="taskDragEnd(this)" ondragover="taskRowDragOver(event,this)" ondragleave="taskRowDragLeave(this)" ondrop="taskRowDrop(event,this)"':'')+'>';
         if(canEdit())html+='<span style="color:#cbd5e1;font-size:13px;margin-top:3px;flex-shrink:0;" title="Провлачи върху таб, за да преместиш отдела">⠿</span>';
         html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" onchange="bulToggleTask(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;">';
         html+='<div style="flex:1;"><div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
@@ -826,6 +829,67 @@ function bulRmCal(btn){
 function bulOpenCal(btn){openCalModal(btn.getAttribute('data-key'));}
 function bulOpenPicker(btn){openBlockPicker(btn.getAttribute('data-dept'));}
 
+/* ── Прикачени снимки/файлове към ръчен календарен запис (компактен изглед) ── */
+function renderCalEntryAttachments(entry,key,idx){
+  var atts=normAttachments(entry.attachments);
+  var h='';
+  if(atts.length){
+    h+='<div style="display:flex;flex-wrap:wrap;gap:3px;margin:2px 0 2px 12px;">';
+    atts.forEach(function(a,ai){
+      h+='<div style="position:relative;">';
+      if(a.type==='image'){
+        h+='<a href="'+a.url+'" target="_blank" style="display:block;"><img src="'+a.url+'" style="width:26px;height:26px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;"></a>';
+      }else{
+        h+='<a href="'+a.url+'" target="_blank" title="'+esc(a.filename||'Файл')+'" style="display:flex;align-items:center;justify-content:center;width:26px;height:26px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;text-decoration:none;">📎</a>';
+      }
+      if(canEdit())h+='<button data-key="'+key+'" data-idx="'+idx+'" data-aidx="'+ai+'" onclick="calRemoveAttachment(this)" style="position:absolute;top:-4px;right:-4px;width:13px;height:13px;border:none;background:#dc2626;color:#fff;border-radius:50%;font-size:8px;cursor:pointer;display:flex;align-items:center;justify-content:center;line-height:1;">✕</button>';
+      h+='</div>';
+    });
+    h+='</div>';
+  }
+  if(canEdit()){
+    h+='<label style="display:inline-flex;align-items:center;gap:3px;margin:2px 0 2px 12px;border:1px dashed #cbd5e1;border-radius:4px;padding:1px 6px;font-size:9.5px;color:#94a3b8;cursor:pointer;">'+
+      '📎 +<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display:none;" data-key="'+key+'" data-idx="'+idx+'" onchange="calUploadAttachment(this)"></label>';
+  }
+  return h;
+}
+function calUploadAttachment(input){
+  var file=input.files[0]; if(!file)return;
+  var key=input.getAttribute('data-key'), idx=parseInt(input.getAttribute('data-idx'));
+  var entry=curBul.content.calendar[key][idx];
+  if(!entry)return;
+  var isImg=/\.(jpe?g|png|gif|webp)$/i.test(file.name);
+  var ext=(file.name.split('.').pop()||'bin').toLowerCase();
+  var fname='cal_'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+ext;
+  var path='bulletin/'+curBul.id+'/'+fname;
+  showBulToast('⏳ Качване...');
+  var reader=new FileReader();
+  reader.onload=function(e){
+    fetch(BUL_SB+'/storage/v1/object/'+BUL_BKT+'/'+path,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+BUL_KEY,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+      body:e.target.result
+    }).then(function(r){return r.ok;}).then(function(ok){
+      if(!ok){toast('Грешка при качване','#dc2626');return;}
+      var pub=BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path;
+      var atts=normAttachments(entry.attachments).slice();
+      atts.push({type:isImg?'image':'file',url:pub,filename:file.name});
+      entry.attachments=atts;
+      schedSave(); renderBulletin(); toast('✅ Прикачено!');
+    }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');});
+  };
+  reader.readAsArrayBuffer(file);
+}
+function calRemoveAttachment(btn){
+  var key=btn.getAttribute('data-key'), idx=parseInt(btn.getAttribute('data-idx')), aidx=parseInt(btn.getAttribute('data-aidx'));
+  var entry=curBul.content.calendar[key][idx];
+  if(!entry)return;
+  var atts=normAttachments(entry.attachments).slice();
+  atts.splice(aidx,1);
+  entry.attachments=atts;
+  schedSave(); renderBulletin();
+}
+
 /* DRAG DROP */
 
 function bulImgErr(img){img.outerHTML='<div style="color:#dc2626;font-size:11px;padding:8px;">Снимката не се зарежда</div>';}
@@ -989,7 +1053,7 @@ function submitCal(){
   if(!title){toast('Въведи заглавие','#dc2626');return;}
   var key=document.getElementById('cal-day').value;
   curBul.content.calendar[key]=curBul.content.calendar[key]||[];
-  curBul.content.calendar[key].push({title:title,desc:document.getElementById('cal-desc').value,dept:document.getElementById('cal-dept').value});
+  curBul.content.calendar[key].push({title:title,desc:document.getElementById('cal-desc').value,dept:document.getElementById('cal-dept').value,attachments:[]});
   closeCal(); schedSave(); renderBulletin(); toast('✅ Добавено!');
 }
 
@@ -1138,7 +1202,9 @@ function closeTk(){document.getElementById('tk-ov').classList.remove('open');}
 function submitTask(){
   var title=(document.getElementById('tk-title').value||'').trim();
   if(!title){toast('Въведи заглавие','#dc2626');return;}
-  sbPost('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:document.getElementById('tk-dept').value,title:title,description:document.getElementById('tk-desc').value,due_date:document.getElementById('tk-due').value||null}).then(function(r){
+  var dept=document.getElementById('tk-dept').value;
+  var maxOrder=bulTasks.filter(function(t){return t.department===dept;}).reduce(function(m,t){return Math.max(m,t.sort_order||0);},0);
+  sbPost('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:document.getElementById('tk-due').value||null,sort_order:maxOrder+1}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     closeTk(); toast('✅ Задачата е добавена!'); loadBulletin();
   });
@@ -1294,6 +1360,42 @@ function taskDragStart(e,el){
   try{e.dataTransfer.setData('text/plain',_taskDragId);}catch(err){}
 }
 function taskDragEnd(el){_taskDragId=null;}
+/* Пренарежда задача в рамките на СЪЩИЯ списък (drop върху друг ред на задача,
+   за разлика от drop върху таб, което мести МЕЖДУ отдели). */
+function taskRowDragOver(e,el){
+  if(!_taskDragId)return;
+  var tid=el.getAttribute('data-tid');
+  if(tid===_taskDragId)return; /* не подсветва себе си */
+  e.preventDefault();
+  e.dataTransfer.dropEffect='move';
+  el.style.borderTop='2px solid #2563eb';
+}
+function taskRowDragLeave(el){ el.style.borderTop=''; }
+function taskRowDrop(e,el){
+  e.preventDefault();
+  el.style.borderTop='';
+  var draggedId=_taskDragId; _taskDragId=null;
+  var targetId=el.getAttribute('data-tid');
+  if(!draggedId||draggedId===targetId)return;
+  var dragged=bulTasks.find(function(t){return String(t.id)===String(draggedId);});
+  var target=bulTasks.find(function(t){return String(t.id)===String(targetId);});
+  if(!dragged||!target)return;
+  var dept=target.department;
+  if(dragged.department!==dept){
+    /* Пуснато е върху ред от ДРУГ отдел - третираме като местене + подреждане там */
+    dragged.department=dept;
+  }
+  /* Пренарежда локалния масив за визуален отклик, после запазва новия ред за целия отдел */
+  var deptTasks=bulTasks.filter(function(t){return t.department===dept;});
+  deptTasks=deptTasks.filter(function(t){return String(t.id)!==String(draggedId);});
+  var targetIdx=deptTasks.findIndex(function(t){return String(t.id)===String(targetId);});
+  deptTasks.splice(targetIdx,0,dragged);
+  var patches=deptTasks.map(function(t,i){
+    t.sort_order=i+1;
+    return sbPatch('bulletin_tasks','id=eq.'+t.id,{sort_order:i+1,department:t.department});
+  });
+  Promise.all(patches).then(function(){ renderBulletin(); });
+}
 function taskTabDragOver(e,btn){
   if(!_taskDragId)return;
   e.preventDefault();
@@ -1932,7 +2034,8 @@ function renderRecurringTasks(dk) {
     dTasks.forEach(function(t) {
       var done = store && recurringComps.some(function(c){return c.recurring_task_id===t.id && c.store_name===store;});
       var dueToday = recurringIsDueToday(t);
-      h += '<div class="rec-task-row" style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
+      h += '<div class="rec-task-row" style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;'+(canEdit()?'cursor:grab;':'')+'"'+(canEdit()?' draggable="true" data-rtid2="'+t.id+'" ondragstart="recDragStart(event,this)" ondragend="recDragEnd(this)" ondragover="recRowDragOver(event,this)" ondragleave="recRowDragLeave(this)" ondrop="recRowDrop(event,this)"':'')+'>';
+      if (canEdit()) h += '<span style="color:#cbd5e1;font-size:13px;margin-top:3px;flex-shrink:0;" title="Провлачи, за да пренаредиш">⠿</span>';
       h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" onchange="bulToggleRecurring(this)" ' +
         'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;">';
       h += '<div style="flex:1;">';
@@ -1960,6 +2063,43 @@ function renderRecurringTasks(dk) {
   return h;
 }
 
+/* ── Drag&Drop пренареждане на постоянни задачи (в рамките на отдела) ── */
+var _recDragId = null;
+function recDragStart(e,el){
+  _recDragId=el.getAttribute('data-rtid2');
+  e.dataTransfer.effectAllowed='move';
+  try{e.dataTransfer.setData('text/plain',_recDragId);}catch(err){}
+}
+function recDragEnd(el){_recDragId=null;}
+function recRowDragOver(e,el){
+  if(!_recDragId)return;
+  var rtid=el.getAttribute('data-rtid2');
+  if(rtid===_recDragId)return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect='move';
+  el.style.borderTop='2px solid #2563eb';
+}
+function recRowDragLeave(el){ el.style.borderTop=''; }
+function recRowDrop(e,el){
+  e.preventDefault();
+  el.style.borderTop='';
+  var draggedId=_recDragId; _recDragId=null;
+  var targetId=el.getAttribute('data-rtid2');
+  if(!draggedId||draggedId===targetId)return;
+  var dragged=recurringTasks.find(function(t){return String(t.id)===String(draggedId);});
+  var target=recurringTasks.find(function(t){return String(t.id)===String(targetId);});
+  if(!dragged||!target||dragged.department!==target.department)return; /* пренарежда само в рамките на СЪЩИЯ отдел */
+  var dept=target.department;
+  var deptTasks=recurringTasks.filter(function(t){return t.department===dept;});
+  deptTasks=deptTasks.filter(function(t){return String(t.id)!==String(draggedId);});
+  var targetIdx=deptTasks.findIndex(function(t){return String(t.id)===String(targetId);});
+  deptTasks.splice(targetIdx,0,dragged);
+  var patches=deptTasks.map(function(t,i){
+    t.sort_order=i+1;
+    return sbPatch('recurring_tasks','id=eq.'+t.id,{sort_order:i+1});
+  });
+  Promise.all(patches).then(function(){ renderBulletin(); });
+}
 function bulToggleRecurring(cb) {
   var rtid = cb.dataset.rtid;
   var store = currentUser && currentUser.store_name;
