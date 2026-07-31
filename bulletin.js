@@ -1368,12 +1368,12 @@ function taskRowDragOver(e,el){
   if(tid===_taskDragId)return; /* не подсветва себе си */
   e.preventDefault();
   e.dataTransfer.dropEffect='move';
-  el.style.borderTop='2px solid #2563eb';
+  el.style.background='#eff6ff'; el.style.outline='2px dashed #2563eb'; el.style.outlineOffset='-2px';
 }
-function taskRowDragLeave(el){ el.style.borderTop=''; }
+function taskRowDragLeave(el){ el.style.background=''; el.style.outline=''; }
 function taskRowDrop(e,el){
   e.preventDefault();
-  el.style.borderTop='';
+  el.style.background=''; el.style.outline='';
   var draggedId=_taskDragId; _taskDragId=null;
   var targetId=el.getAttribute('data-tid');
   if(!draggedId||draggedId===targetId)return;
@@ -1689,12 +1689,33 @@ function printSection(what){
     '.task-title{font-size:11.5pt;font-weight:600;margin-bottom:0.5mm;}' +
     '.task-desc{font-size:10pt;color:#64748b;overflow-wrap:break-word;}' +
     '.task-due{font-size:9.5pt;color:#94a3b8;margin-top:0.5mm;}' +
+    '.task-attachments{display:flex;flex-wrap:wrap;gap:3mm;margin-top:2mm;}' +
+    '.task-att-img{width:45mm;height:45mm;object-fit:cover;border-radius:2mm;border:1pt solid #e2e8f0;}' +
+    '.task-att-file{display:inline-block;padding:2mm 4mm;border:1pt solid #e2e8f0;border-radius:2mm;font-size:9.5pt;color:#64748b;}' +
     '.dept-badge{display:inline-block;padding:1mm 3mm;border-radius:20mm;font-size:9.5pt;font-weight:600;margin-bottom:2mm;}' +
     '.badge-trade{background:#f0fdf4;color:#14532d;}' +
     '.badge-wh{background:#eff6ff;color:#1e40af;}' +
     '.badge-admin{background:#f5f3ff;color:#4c1d95;}' +
     '@media print{button{display:none!important;}}';
 
+  /* Прикачени снимки към задача в печатния изглед - на екрана са малки (52px,
+     за компактност в списъка), но при печат трябва да се виждат ясно на
+     хартия, затова са значително по-големи тук. Файлове (не снимки) се
+     показват само като текстов етикет - хартията не може да се "кликне". */
+  function pTaskAttachments(t){
+    var atts=normAttachments(t.attachments);
+    if(!atts.length)return '';
+    var s='<div class="task-attachments">';
+    atts.forEach(function(a){
+      if(a.type==='image'){
+        s+='<img src="'+a.url+'" class="task-att-img">';
+      }else{
+        s+='<span class="task-att-file">📎 '+esc(a.filename||'Файл')+'</span>';
+      }
+    });
+    s+='</div>';
+    return s;
+  }
   function pBlock(b){
     if(!b||!b.type)return '';
     if(b.type==='text')return '<div class="block-text">'+esc(b.content||'').replace(/\n/g,'<br>')+'</div>';
@@ -1782,6 +1803,7 @@ function printSection(what){
         s+='<div class="task-title">'+esc(t.title||'')+'</div>';
         if(t.description)s+='<div class="task-desc">'+linkify(t.description)+'</div>';
         if(t.due_date)s+='<div class="task-due">📅 Срок: '+new Date(t.due_date).toLocaleDateString('bg-BG')+(isDone&&comp?' &nbsp; ✅ '+esc(comp.completed_by||''):'')+'</div>';
+        s+=pTaskAttachments(t);
         s+='</div></div>';
       });
     }
@@ -2082,12 +2104,12 @@ function recRowDragOver(e,el){
   if(rtid===_recDragId)return;
   e.preventDefault();
   e.dataTransfer.dropEffect='move';
-  el.style.borderTop='2px solid #2563eb';
+  el.style.background='#eff6ff'; el.style.outline='2px dashed #2563eb'; el.style.outlineOffset='-2px';
 }
-function recRowDragLeave(el){ el.style.borderTop=''; }
+function recRowDragLeave(el){ el.style.background=''; el.style.outline=''; }
 function recRowDrop(e,el){
   e.preventDefault();
-  el.style.borderTop='';
+  el.style.background=''; el.style.outline='';
   var draggedId=_recDragId; _recDragId=null;
   var targetId=el.getAttribute('data-rtid2');
   if(!draggedId||draggedId===targetId)return;
