@@ -451,23 +451,12 @@ function bulSetDept(dk) {
   renderBulletin();
 }
 
+/* Преизползва printSection() (правилната печатна логика с mm-размери за
+   снимките), вместо да копира сурово екранното съдържание - старото
+   поведение показваше винаги малките 52px екранни миниатюри, независимо
+   от избрания размер за печат. */
 function bulPrintDept(dk) {
-  var d = DEPTS[dk];
-  var panelEl = document.getElementById('dept-panel-' + dk);
-  if (!panelEl) return;
-  var win = window.open('', '_blank', 'width=800,height=600');
-  win.document.write('<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">'+
-    '<style>body{font-family:Arial,sans-serif;padding:20px;max-width:900px;margin:0 auto;}'+
-    '.block{background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:14px;margin-bottom:12px;}'+
-    'h2{color:'+d.color+';border-bottom:2px solid '+d.hdr+';padding-bottom:8px;}'+
-    '@media print{button{display:none!important;}}'+
-    '</style></head><body>');
-  win.document.write('<h2>'+d.icon+' '+d.label+' — Т-Бюлетин С'+(curBul?curBul.week_number:'')+'·'+new Date().getFullYear()+'</h2>');
-  win.document.write(panelEl.innerHTML);
-  win.document.write('<div style="text-align:center;margin-top:20px;"><button onclick="window.print()" style="background:'+d.hdr+';color:#fff;border:none;padding:10px 24px;border-radius:6px;font-size:14px;cursor:pointer;">🖨 Принтирай / PDF</button></div>');
-  win.document.write('</body></html>');
-  win.document.close();
-  setTimeout(function(){win.focus();}, 300);
+  printSection(dk);
 }
 
 function renderBulView(){
@@ -1711,7 +1700,7 @@ function printSection(what){
     '.task-desc{font-size:10pt;color:#64748b;overflow-wrap:break-word;}' +
     '.task-due{font-size:9.5pt;color:#94a3b8;margin-top:0.5mm;}' +
     '.task-attachments{display:flex;flex-wrap:wrap;gap:3mm;margin-top:2mm;}' +
-    '.task-att-img{object-fit:cover;border-radius:2mm;border:1pt solid #e2e8f0;}' +
+    '.task-att-img{object-fit:contain;border-radius:2mm;border:1pt solid #e2e8f0;background:#f8fafc;}' +
     '.task-att-file{display:inline-block;padding:2mm 4mm;border:1pt solid #e2e8f0;border-radius:2mm;font-size:9.5pt;color:#64748b;}' +
     '.dept-badge{display:inline-block;padding:1mm 3mm;border-radius:20mm;font-size:9.5pt;font-weight:600;margin-bottom:2mm;}' +
     '.badge-trade{background:#f0fdf4;color:#14532d;}' +
@@ -1731,7 +1720,7 @@ function printSection(what){
     atts.forEach(function(a){
       if(a.type==='image'){
         var mm=mmBySize[a.width]||mmBySize[100];
-        s+='<img src="'+a.url+'" class="task-att-img" style="width:'+mm+';height:'+mm+';">';
+        s+='<img src="'+a.url+'" class="task-att-img" style="width:'+mm+';max-height:'+mm+';">';
       }else{
         s+='<span class="task-att-file">📎 '+esc(a.filename||'Файл')+'</span>';
       }
