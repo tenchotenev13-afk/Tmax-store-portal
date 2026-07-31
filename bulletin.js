@@ -1394,6 +1394,11 @@ function taskRowDrop(e,el){
     t.sort_order=i+1;
     return sbPatch('bulletin_tasks','id=eq.'+t.id,{sort_order:i+1,department:t.department});
   });
+  /* КЛЮЧОВА ПОПРАВКА: обновяването на .sort_order полето на всеки обект не е
+     достатъчно - самият МАСИВ bulTasks трябва да се пренареди по новите
+     стойности, иначе renderRecurringTasks()/dept панелът продължават да четат
+     стария ред от масива (filter() пази оригиналната последователност). */
+  bulTasks.sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
   Promise.all(patches).then(function(){ renderBulletin(); });
 }
 function taskTabDragOver(e,btn){
@@ -2098,6 +2103,9 @@ function recRowDrop(e,el){
     t.sort_order=i+1;
     return sbPatch('recurring_tasks','id=eq.'+t.id,{sort_order:i+1});
   });
+  /* Същата ключова поправка като при обикновените задачи - самият МАСИВ
+     трябва да се пренареди по новите sort_order стойности. */
+  recurringTasks.sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
   Promise.all(patches).then(function(){ renderBulletin(); });
 }
 function bulToggleRecurring(cb) {
