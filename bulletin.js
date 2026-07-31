@@ -580,8 +580,16 @@ function renderBulView(){
         var today=new Date();today.setHours(0,0,0,0);
         var diff=due?Math.ceil((due-today)/86400000):null;
         var dueColor=diff===null?'#94a3b8':diff<0?'#dc2626':diff<=2?'#d97706':'#94a3b8';
-        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;'+(canEdit()?'cursor:grab;':'')+'"'+(canEdit()?' draggable="true" data-tid="'+t.id+'" ondragstart="taskDragStart(event,this)" ondragend="taskDragEnd(this)" ondragover="taskRowDragOver(event,this)" ondragleave="taskRowDragLeave(this)" ondrop="taskRowDrop(event,this)"':'')+'>';
-        if(canEdit())html+='<span style="color:#cbd5e1;font-size:13px;margin-top:3px;flex-shrink:0;" title="Провлачи върху таб, за да преместиш отдела">⠿</span>';
+        var deptTasksForNav=bulTasks.filter(function(x){return x.department===t.department;});
+        var taskIdxInDept=deptTasksForNav.findIndex(function(x){return String(x.id)===String(t.id);});
+        var isFirstTask=taskIdxInDept===0, isLastTask=taskIdxInDept===deptTasksForNav.length-1;
+        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;"'+(canEdit()?' draggable="true" data-tid="'+t.id+'" ondragstart="taskDragStart(event,this)" ondragend="taskDragEnd(this)"':'')+'>';
+        if(canEdit()){
+          html+='<div style="display:flex;flex-direction:column;gap:1px;flex-shrink:0;margin-top:1px;">'+
+            '<button data-task-id="'+t.id+'" onclick="taskMoveUp(this.dataset.taskId)" '+(isFirstTask?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isFirstTask?'#f8fafc':'#fff')+';color:'+(isFirstTask?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isFirstTask?'default':'pointer')+';padding:0;">▲</button>'+
+            '<button data-task-id="'+t.id+'" onclick="taskMoveDown(this.dataset.taskId)" '+(isLastTask?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isLastTask?'#f8fafc':'#fff')+';color:'+(isLastTask?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isLastTask?'default':'pointer')+';padding:0;">▼</button>'+
+            '</div>';
+        }
         html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" onchange="bulToggleTask(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;">';
         html+='<div style="flex:1;"><div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
         if(t.description)html+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
@@ -1360,44 +1368,24 @@ function taskDragStart(e,el){
   try{e.dataTransfer.setData('text/plain',_taskDragId);}catch(err){}
 }
 function taskDragEnd(el){_taskDragId=null;}
-/* Пренарежда задача в рамките на СЪЩИЯ списък (drop върху друг ред на задача,
-   за разлика от drop върху таб, което мести МЕЖДУ отдели). */
-function taskRowDragOver(e,el){
-  if(!_taskDragId)return;
-  var tid=el.getAttribute('data-tid');
-  if(tid===_taskDragId)return; /* не подсветва себе си */
-  e.preventDefault();
-  e.dataTransfer.dropEffect='move';
-  el.style.background='#eff6ff'; el.style.outline='2px dashed #2563eb'; el.style.outlineOffset='-2px';
-}
-function taskRowDragLeave(el){ el.style.background=''; el.style.outline=''; }
-function taskRowDrop(e,el){
-  e.preventDefault();
-  el.style.background=''; el.style.outline='';
-  var draggedId=_taskDragId; _taskDragId=null;
-  var targetId=el.getAttribute('data-tid');
-  if(!draggedId||draggedId===targetId)return;
-  var dragged=bulTasks.find(function(t){return String(t.id)===String(draggedId);});
-  var target=bulTasks.find(function(t){return String(t.id)===String(targetId);});
-  if(!dragged||!target)return;
-  var dept=target.department;
-  if(dragged.department!==dept){
-    /* Пуснато е върху ред от ДРУГ отдел - третираме като местене + подреждане там */
-    dragged.department=dept;
-  }
-  /* Пренарежда локалния масив за визуален отклик, после запазва новия ред за целия отдел */
+/* Пренарежда задача нагоре/надолу в рамките на СЪЩИЯ отдел - заменя старото
+   drag&drop пренареждане в списъка (нестабилно в реални браузъри), докато
+   местенето МЕЖДУ отдели през табовете (taskDragStart/taskTabDrop) остава. */
+function taskMoveUp(id){ moveTaskInDept(id,-1); }
+function taskMoveDown(id){ moveTaskInDept(id,1); }
+function moveTaskInDept(id,dir){
+  var task=bulTasks.find(function(t){return String(t.id)===String(id);});
+  if(!task)return;
+  var dept=task.department;
   var deptTasks=bulTasks.filter(function(t){return t.department===dept;});
-  deptTasks=deptTasks.filter(function(t){return String(t.id)!==String(draggedId);});
-  var targetIdx=deptTasks.findIndex(function(t){return String(t.id)===String(targetId);});
-  deptTasks.splice(targetIdx,0,dragged);
+  var idx=deptTasks.findIndex(function(t){return String(t.id)===String(id);});
+  var newIdx=idx+dir;
+  if(newIdx<0||newIdx>=deptTasks.length)return; /* вече е на края */
+  var tmp=deptTasks[idx]; deptTasks[idx]=deptTasks[newIdx]; deptTasks[newIdx]=tmp;
   var patches=deptTasks.map(function(t,i){
     t.sort_order=i+1;
-    return sbPatch('bulletin_tasks','id=eq.'+t.id,{sort_order:i+1,department:t.department});
+    return sbPatch('bulletin_tasks','id=eq.'+t.id,{sort_order:i+1});
   });
-  /* КЛЮЧОВА ПОПРАВКА: обновяването на .sort_order полето на всеки обект не е
-     достатъчно - самият МАСИВ bulTasks трябва да се пренареди по новите
-     стойности, иначе renderRecurringTasks()/dept панелът продължават да четат
-     стария ред от масива (filter() пази оригиналната последователност). */
   bulTasks.sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
   Promise.all(patches).then(function(){ renderBulletin(); });
 }
@@ -2058,11 +2046,17 @@ function renderRecurringTasks(dk) {
 
   if (dTasks.length) {
     h += '<div style="padding:8px 14px;">';
-    dTasks.forEach(function(t) {
+    dTasks.forEach(function(t,recIdxInDept) {
       var done = store && recurringComps.some(function(c){return c.recurring_task_id===t.id && c.store_name===store;});
       var dueToday = recurringIsDueToday(t);
-      h += '<div class="rec-task-row" style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;'+(canEdit()?'cursor:grab;':'')+'"'+(canEdit()?' draggable="true" data-rtid2="'+t.id+'" ondragstart="recDragStart(event,this)" ondragend="recDragEnd(this)" ondragover="recRowDragOver(event,this)" ondragleave="recRowDragLeave(this)" ondrop="recRowDrop(event,this)"':'')+'>';
-      if (canEdit()) h += '<span style="color:#cbd5e1;font-size:13px;margin-top:3px;flex-shrink:0;" title="Провлачи, за да пренаредиш">⠿</span>';
+      var isFirstRec=recIdxInDept===0, isLastRec=recIdxInDept===dTasks.length-1;
+      h += '<div class="rec-task-row" style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
+      if (canEdit()) {
+        h += '<div style="display:flex;flex-direction:column;gap:1px;flex-shrink:0;margin-top:1px;">'+
+          '<button data-rtid2="'+t.id+'" onclick="recMoveUp(this.dataset.rtid2)" '+(isFirstRec?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isFirstRec?'#f8fafc':'#fff')+';color:'+(isFirstRec?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isFirstRec?'default':'pointer')+';padding:0;">▲</button>'+
+          '<button data-rtid2="'+t.id+'" onclick="recMoveDown(this.dataset.rtid2)" '+(isLastRec?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isLastRec?'#f8fafc':'#fff')+';color:'+(isLastRec?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isLastRec?'default':'pointer')+';padding:0;">▼</button>'+
+          '</div>';
+      }
       h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" onchange="bulToggleRecurring(this)" ' +
         'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;">';
       h += '<div style="flex:1;">';
@@ -2090,43 +2084,23 @@ function renderRecurringTasks(dk) {
   return h;
 }
 
-/* ── Drag&Drop пренареждане на постоянни задачи (в рамките на отдела) ── */
-var _recDragId = null;
-function recDragStart(e,el){
-  _recDragId=el.getAttribute('data-rtid2');
-  e.dataTransfer.effectAllowed='move';
-  try{e.dataTransfer.setData('text/plain',_recDragId);}catch(err){}
-}
-function recDragEnd(el){_recDragId=null;}
-function recRowDragOver(e,el){
-  if(!_recDragId)return;
-  var rtid=el.getAttribute('data-rtid2');
-  if(rtid===_recDragId)return;
-  e.preventDefault();
-  e.dataTransfer.dropEffect='move';
-  el.style.background='#eff6ff'; el.style.outline='2px dashed #2563eb'; el.style.outlineOffset='-2px';
-}
-function recRowDragLeave(el){ el.style.background=''; el.style.outline=''; }
-function recRowDrop(e,el){
-  e.preventDefault();
-  el.style.background=''; el.style.outline='';
-  var draggedId=_recDragId; _recDragId=null;
-  var targetId=el.getAttribute('data-rtid2');
-  if(!draggedId||draggedId===targetId)return;
-  var dragged=recurringTasks.find(function(t){return String(t.id)===String(draggedId);});
-  var target=recurringTasks.find(function(t){return String(t.id)===String(targetId);});
-  if(!dragged||!target||dragged.department!==target.department)return; /* пренарежда само в рамките на СЪЩИЯ отдел */
-  var dept=target.department;
+/* ── ▲/▼ пренареждане на постоянни задачи (в рамките на отдела) - заменя
+   нестабилния drag&drop подход. ── */
+function recMoveUp(id){ moveRecInDept(id,-1); }
+function recMoveDown(id){ moveRecInDept(id,1); }
+function moveRecInDept(id,dir){
+  var task=recurringTasks.find(function(t){return String(t.id)===String(id);});
+  if(!task)return;
+  var dept=task.department;
   var deptTasks=recurringTasks.filter(function(t){return t.department===dept;});
-  deptTasks=deptTasks.filter(function(t){return String(t.id)!==String(draggedId);});
-  var targetIdx=deptTasks.findIndex(function(t){return String(t.id)===String(targetId);});
-  deptTasks.splice(targetIdx,0,dragged);
+  var idx=deptTasks.findIndex(function(t){return String(t.id)===String(id);});
+  var newIdx=idx+dir;
+  if(newIdx<0||newIdx>=deptTasks.length)return;
+  var tmp=deptTasks[idx]; deptTasks[idx]=deptTasks[newIdx]; deptTasks[newIdx]=tmp;
   var patches=deptTasks.map(function(t,i){
     t.sort_order=i+1;
     return sbPatch('recurring_tasks','id=eq.'+t.id,{sort_order:i+1});
   });
-  /* Същата ключова поправка като при обикновените задачи - самият МАСИВ
-     трябва да се пренареди по новите sort_order стойности. */
   recurringTasks.sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
   Promise.all(patches).then(function(){ renderBulletin(); });
 }
