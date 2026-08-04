@@ -1728,7 +1728,7 @@ function printSection(what){
   function pTaskAttachments(t){
     var atts=normAttachments(t.attachments);
     if(!atts.length)return '';
-    var mmBySize={33:'28mm',50:'42mm',66:'55mm',100:'80mm'};
+    var mmBySize={33:'45mm',50:'70mm',66:'95mm',100:'140mm'};
     var s='<div class="task-attachments">';
     atts.forEach(function(a){
       if(a.type==='image'){
