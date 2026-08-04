@@ -436,7 +436,7 @@ function bulHdr(isDraft){
       (canEdit() && bulMode!=='edit' ? '<button onclick="setBulEdit()" class="bbtn">✏️ Редактирай</button>' : '') +
       (canEdit() && bulMode==='edit'  ? '<button onclick="setBulView()" class="bbtn">👁 Преглед</button>' : '') +
       (canEdit() ? '<button onclick="setBulAnalysis()" class="bbtn">📊 Анализ</button>' : '') +
-      (canEdit() ? '<button onclick="openPrintMenu()" class="bbtn">🖨 Печат</button>' : '') +
+      (canEdit()||currentUser.role==='manager' ? '<button onclick="openPrintMenu()" class="bbtn">🖨 Печат</button>' : '') +
       (canEdit() && isDraft ? '<button onclick="publishBul()" style="background:#16a34a;color:#fff;border:none;padding:6px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">📤 Публикувай</button>' : '') +
       (canEdit() ? '<button onclick="openPushMenu()" style="background:#7c3aed;color:#fff;border:none;padding:6px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">🔔 Нотификации</button>' : '') +
       (canEdit() ? '<button onclick="newBulletin()" style="background:#2563eb;color:#fff;border:none;padding:6px 12px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;">+ Нов</button>' : '') +
@@ -1634,8 +1634,21 @@ function renderBulEmpty(){
 }
 
 /* ════════ PRINT ════════════════════════════════════════════ */
+var _printOrientation='portrait';
+function printSetOrientation(o){
+  _printOrientation=o;
+  var pBtn=document.getElementById('po-portrait'), lBtn=document.getElementById('po-landscape');
+  if(pBtn)pBtn.style.cssText=o==='portrait'?'border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;flex:1;':'border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;flex:1;';
+  if(lBtn)lBtn.style.cssText=o==='landscape'?'border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;flex:1;':'border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;flex:1;';
+}
 function printMenuHtml(){
-  return '<div class="bov" id="pm-ov"><div class="bmod" style="width:380px;"><div style="font-size:15px;font-weight:600;margin-bottom:14px;">🖨 Избери какво да принтираш</div><div style="display:flex;flex-direction:column;gap:8px;">' +
+  return '<div class="bov" id="pm-ov"><div class="bmod" style="width:380px;"><div style="font-size:15px;font-weight:600;margin-bottom:14px;">🖨 Избери какво да принтираш</div>' +
+    '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;margin-bottom:6px;">Ориентация на страницата</div>' +
+    '<div style="display:flex;gap:6px;margin-bottom:14px;">' +
+    '<button id="po-portrait" onclick="printSetOrientation(\'portrait\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:6px;padding:6px 10px;font-size:12px;font-weight:600;cursor:pointer;flex:1;">📄 Портрет</button>' +
+    '<button id="po-landscape" onclick="printSetOrientation(\'landscape\')" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;flex:1;">📃 Пейзаж</button>' +
+    '</div>' +
+    '<div style="display:flex;flex-direction:column;gap:8px;">' +
     '<button data-what="all" onclick="bulPrint(this)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer;text-align:left;">📄 Целия бюлетин</button>' +
     '<button data-what="cal" onclick="bulPrint(this)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer;text-align:left;">📅 Само Календар + Важно</button>' +
     '<button data-what="trade" onclick="bulPrint(this)" style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer;text-align:left;color:#166534;">🛒 Само Търговска</button>' +
@@ -1643,7 +1656,7 @@ function printMenuHtml(){
     '<button data-what="admin" onclick="bulPrint(this)" style="border:1px solid #ddd6fe;background:#f5f3ff;border-radius:8px;padding:10px 14px;font-size:13px;cursor:pointer;text-align:left;color:#4c1d95;">⚙️ Само Администрация</button>' +
     '</div><button onclick="closePrintMenu()" style="width:100%;margin-top:12px;border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:8px;font-size:13px;cursor:pointer;color:#64748b;">Откажи</button></div></div>';
 }
-function openPrintMenu(){document.getElementById('pm-ov').classList.add('open');}
+function openPrintMenu(){_printOrientation='portrait';document.getElementById('pm-ov').classList.add('open');}
 function closePrintMenu(){document.getElementById('pm-ov').classList.remove('open');}
 function bulPrint(btn){closePrintMenu();printSection(btn.getAttribute('data-what'));}
 
@@ -1653,17 +1666,17 @@ function printSection(what){
   var imp2=[];
   DCOLS.forEach(function(k){(c.columns[k]||[]).forEach(function(b){if(b.type==='important')imp2.push(b);});});
 
-  var PRINT_CSS = '@page{size:A4;margin:14mm;}' +
+  var PRINT_CSS = '@page{size:A4 '+(_printOrientation==='landscape'?'landscape':'portrait')+';margin:14mm;}' +
     '*{box-sizing:border-box;margin:0;padding:0;}' +
-    'body{font-family:Arial,sans-serif;font-size:11.5pt;color:#111;background:#fff;line-height:1.55;}' +
-    'h1{font-size:17pt;font-weight:700;margin-bottom:3mm;}' +
-    'h2{font-size:13pt;font-weight:700;color:#0f172a;border-bottom:2pt solid #e2e8f0;padding-bottom:2mm;margin:5mm 0 3mm;}' +
-    'h3{font-size:12pt;font-weight:700;margin:4mm 0 2mm;}' +
+    'body{font-family:Arial,sans-serif;font-size:14pt;color:#111;background:#fff;line-height:1.55;}' +
+    'h1{font-size:20pt;font-weight:700;margin-bottom:3mm;}' +
+    'h2{font-size:16pt;font-weight:700;color:#0f172a;border-bottom:2pt solid #e2e8f0;padding-bottom:2mm;margin:5mm 0 3mm;}' +
+    'h3{font-size:14pt;font-weight:700;margin:4mm 0 2mm;}' +
     '.hdr{background:#0f172a;color:#fff;padding:8mm 10mm;border-radius:3mm;margin-bottom:5mm;display:flex;justify-content:space-between;align-items:center;}' +
-    '.hdr-title{font-size:16pt;font-weight:700;}' +
-    '.hdr-sub{font-size:10pt;color:#94a3b8;margin-top:1mm;}' +
-    '.draft-badge{background:#f59e0b;color:#78350f;font-size:9pt;font-weight:700;padding:2mm 4mm;border-radius:20mm;}' +
-    '.week-badge{background:#1e293b;color:#94a3b8;font-family:monospace;font-size:10pt;padding:2mm 5mm;border-radius:20mm;}' +
+    '.hdr-title{font-size:19pt;font-weight:700;}' +
+    '.hdr-sub{font-size:12pt;color:#94a3b8;margin-top:1mm;}' +
+    '.draft-badge{background:#f59e0b;color:#78350f;font-size:11pt;font-weight:700;padding:2mm 4mm;border-radius:20mm;}' +
+    '.week-badge{background:#1e293b;color:#94a3b8;font-family:monospace;font-size:12pt;padding:2mm 5mm;border-radius:20mm;}' +
     /* Important section */
     '.imp-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:3mm;margin-bottom:5mm;}' +
     '.imp-card{border-radius:2mm;padding:4mm 5mm;}' +
@@ -1671,38 +1684,38 @@ function printSection(what){
     '.imp-warn{background:#fffbeb;border-left:3pt solid #f59e0b;}' +
     '.imp-urgent{background:#fff1f2;border-left:3pt solid #dc2626;}' +
     '.imp-info{background:#eff6ff;border-left:3pt solid #2563eb;}' +
-    '.imp-title{font-size:12pt;font-weight:700;margin-bottom:1mm;}' +
-    '.imp-sub{font-size:10pt;opacity:.8;}' +
+    '.imp-title{font-size:14pt;font-weight:700;margin-bottom:1mm;}' +
+    '.imp-sub{font-size:12pt;opacity:.8;}' +
     /* Calendar */
     '.cal-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:3mm;margin-bottom:5mm;}' +
     '.cal-day{border:1pt solid #e2e8f0;border-radius:2mm;padding:3mm 4mm;min-height:35mm;}' +
-    '.cal-day-name{font-size:8pt;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:1mm;}' +
-    '.cal-date{font-family:monospace;font-size:17pt;font-weight:700;color:#0f172a;margin-bottom:2mm;}' +
-    '.cal-entry{display:flex;gap:2mm;padding:1mm 0;border-bottom:1pt dashed #f1f5f9;align-items:flex-start;font-size:10.5pt;}' +
+    '.cal-day-name{font-size:9.5pt;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:1mm;}' +
+    '.cal-date{font-family:monospace;font-size:19pt;font-weight:700;color:#0f172a;margin-bottom:2mm;}' +
+    '.cal-entry{display:flex;gap:2mm;padding:1mm 0;border-bottom:1pt dashed #f1f5f9;align-items:flex-start;font-size:12.5pt;}' +
     '.cal-dot{width:5pt;height:5pt;border-radius:50%;flex-shrink:0;margin-top:2.5pt;}' +
-    '.cal-empty{font-size:10pt;color:#cbd5e1;font-style:italic;}' +
+    '.cal-empty{font-size:12pt;color:#cbd5e1;font-style:italic;}' +
     /* Department */
-    '.dept-hdr{color:#fff;padding:5mm 7mm;border-radius:2mm 2mm 0 0;font-size:13pt;font-weight:700;}' +
+    '.dept-hdr{color:#fff;padding:5mm 7mm;border-radius:2mm 2mm 0 0;font-size:16pt;font-weight:700;}' +
     '.dept-body{border:1pt solid #e2e8f0;border-top:none;border-radius:0 0 2mm 2mm;padding:5mm 7mm;margin-bottom:5mm;}' +
     /* Blocks */
-    '.block-text{font-size:11.5pt;color:#374151;margin-bottom:3mm;line-height:1.6;}' +
-    '.block-alert{border-radius:0 2mm 2mm 0;padding:3mm 5mm;margin-bottom:3mm;font-size:11.5pt;}' +
+    '.block-text{font-size:14pt;color:#374151;margin-bottom:3mm;line-height:1.6;}' +
+    '.block-alert{border-radius:0 2mm 2mm 0;padding:3mm 5mm;margin-bottom:3mm;font-size:14pt;}' +
     '.block-list{margin-bottom:3mm;}' +
-    '.block-list li{font-size:11.5pt;color:#374151;padding:1mm 0;border-bottom:1pt solid #f1f5f9;}' +
+    '.block-list li{font-size:14pt;color:#374151;padding:1mm 0;border-bottom:1pt solid #f1f5f9;}' +
     '.block-img{margin-bottom:3mm;}' +
     '.block-img img{border-radius:2mm;display:block;}' +
-    '.block-img-cap{font-size:9.5pt;color:#64748b;font-style:italic;margin-top:1mm;}' +
+    '.block-img-cap{font-size:11pt;color:#64748b;font-style:italic;margin-top:1mm;}' +
     /* Tasks */
-    '.tasks-hdr{font-size:9pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b;border-bottom:1.5pt solid #e2e8f0;padding-bottom:2mm;margin:4mm 0 2mm;}' +
+    '.tasks-hdr{font-size:10.5pt;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:#64748b;border-bottom:1.5pt solid #e2e8f0;padding-bottom:2mm;margin:4mm 0 2mm;}' +
     '.task-row{display:flex;gap:3mm;padding:2.5mm 0;border-bottom:1pt solid #f1f5f9;align-items:flex-start;}' +
-    '.task-cb{width:13pt;height:13pt;border:1.5pt solid #e2e8f0;border-radius:2pt;flex-shrink:0;margin-top:1pt;}' +
-    '.task-title{font-size:11.5pt;font-weight:600;margin-bottom:0.5mm;}' +
-    '.task-desc{font-size:10pt;color:#64748b;overflow-wrap:break-word;}' +
-    '.task-due{font-size:9.5pt;color:#94a3b8;margin-top:0.5mm;}' +
+    '.task-cb{width:15pt;height:15pt;border:1.5pt solid #e2e8f0;border-radius:2pt;flex-shrink:0;margin-top:1pt;}' +
+    '.task-title{font-size:14pt;font-weight:600;margin-bottom:0.5mm;}' +
+    '.task-desc{font-size:12pt;color:#64748b;overflow-wrap:break-word;}' +
+    '.task-due{font-size:11pt;color:#94a3b8;margin-top:0.5mm;}' +
     '.task-attachments{display:flex;flex-wrap:wrap;gap:3mm;margin-top:2mm;}' +
     '.task-att-img{object-fit:contain;border-radius:2mm;border:1pt solid #e2e8f0;background:#f8fafc;}' +
-    '.task-att-file{display:inline-block;padding:2mm 4mm;border:1pt solid #e2e8f0;border-radius:2mm;font-size:9.5pt;color:#64748b;}' +
-    '.dept-badge{display:inline-block;padding:1mm 3mm;border-radius:20mm;font-size:9.5pt;font-weight:600;margin-bottom:2mm;}' +
+    '.task-att-file{display:inline-block;padding:2mm 4mm;border:1pt solid #e2e8f0;border-radius:2mm;font-size:11pt;color:#64748b;}' +
+    '.dept-badge{display:inline-block;padding:1mm 3mm;border-radius:20mm;font-size:11pt;font-weight:600;margin-bottom:2mm;}' +
     '.badge-trade{background:#f0fdf4;color:#14532d;}' +
     '.badge-wh{background:#eff6ff;color:#1e40af;}' +
     '.badge-admin{background:#f5f3ff;color:#4c1d95;}' +
