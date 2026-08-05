@@ -26,6 +26,13 @@ function setSRSearch(val){
   }
 }
 
+/* Само Цветелина (контролинг) или admin могат да маркират запис като
+   "Приключена" - финален статус, различен от обикновеното "Взета". */
+function canCompleteSR() {
+  if (!currentUser) return false;
+  if ((currentUser.email||'').toLowerCase() === 'c.teneva@temax.bg') return true;
+  return currentUser.role === 'admin';
+}
 function canEditSR() {
   return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
 }
@@ -57,6 +64,7 @@ function renderStockReturns() {
   var list = tabData.filter(function(r) {
     if (srFilter === 'pending')  { if (r.status !== 'pending') return false; }
     else if (srFilter === 'taken') { if (r.status !== 'taken') return false; }
+    else if (srFilter === 'completed') { if (r.status !== 'completed') return false; }
     /* Точен филтър по магазин - ОТДЕЛЕН от свободното търсене по-долу, за да
        не се влияе от текст в коментари/причини, споменаващи друг магазин
        (напр. коментар "изпратено към ЛС Търговище" не бива да кара запис на
@@ -72,6 +80,7 @@ function renderStockReturns() {
 
   var pending = tabData.filter(function(r){ return r.status==='pending'; }).length;
   var taken   = tabData.filter(function(r){ return r.status==='taken'; }).length;
+  var completed = tabData.filter(function(r){ return r.status==='completed'; }).length;
 
   var h = '<div style="max-width:1400px;margin:0 auto;padding:16px;">';
 
@@ -83,29 +92,19 @@ function renderStockReturns() {
   if (canAdd && srTab==='complaint') h += '<button onclick="openReturnsImportModal()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📤 Импорт от Excel</button>';
   h += '</div></div>';
 
-  /* Търсене + филтър по магазин - за "Рекламации" магазините са ТАБОВЕ
-     (по-нагледно), за "По разлики" остава dropdown (много повече записи,
-     табове биха претрупали екрана). */
+  /* Търсене + табове по магазин - вече еднакво и за двата подтаба */
   var storesInTab=tabData.map(function(r){return r.store_name;}).filter(function(s,i,arr){return s&&arr.indexOf(s)===i;}).sort();
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">';
   h += '<input id="sr-search-input" value="'+escVal(srSearch)+'" oninput="setSRSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик, артикул, SAP, ПВ-ЕВР, ИД-ЕВРО..." style="flex:1;min-width:260px;max-width:460px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;">';
-  if(srTab!=='complaint'){
-    h += '<select onchange="setSRStoreFilter(this.value)" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;background:#fff;">';
-    h += '<option value="">🏪 Всички магазини</option>';
-    storesInTab.forEach(function(s){ h += '<option value="'+esc(s)+'"'+(srStoreFilter===s?' selected':'')+'>'+esc(s)+'</option>'; });
-    h += '</select>';
-  }
   h += '</div>';
-  if(srTab==='complaint'){
-    h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">';
-    h += '<button onclick="setSRStoreFilter(\'\')" style="border:1px solid '+(!srStoreFilter?'#2563eb':'#e2e8f0')+';background:'+(!srStoreFilter?'#eff6ff':'#fff')+';color:'+(!srStoreFilter?'#2563eb':'#64748b')+';border-radius:20px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">🏪 Всички ('+tabData.length+')</button>';
-    storesInTab.forEach(function(s){
-      var cnt=tabData.filter(function(r){return r.store_name===s;}).length;
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">';
+  h += '<button onclick="setSRStoreFilter(\'\')" style="border:1px solid '+(!srStoreFilter?'#2563eb':'#e2e8f0')+';background:'+(!srStoreFilter?'#eff6ff':'#fff')+';color:'+(!srStoreFilter?'#2563eb':'#64748b')+';border-radius:20px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">🏪 Всички ('+tabData.length+')</button>';
+  storesInTab.forEach(function(s){
+    var cnt=tabData.filter(function(r){return r.store_name===s;}).length;
       var active=srStoreFilter===s;
       h += '<button onclick="setSRStoreFilter(\''+esc(s).replace(/'/g,"\\'")+'\')" style="border:1px solid '+(active?'#2563eb':'#e2e8f0')+';background:'+(active?'#eff6ff':'#fff')+';color:'+(active?'#2563eb':'#64748b')+';border-radius:20px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">'+esc(s)+' ('+cnt+')</button>';
     });
     h += '</div>';
-  }
 
   /* Подтабове */
   h += '<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-width:560px;">';
@@ -130,7 +129,7 @@ function renderStockReturns() {
 
   /* Филтри */
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
-  [['all','Всички ('+tabData.length+')'],['pending','⏳ Невзета ('+pending+')'],['taken','✅ Взета ('+taken+')']].forEach(function(f){
+  [['all','Всички ('+tabData.length+')'],['pending','⏳ Невзета ('+pending+')'],['taken','✅ Взета ('+taken+')'],['completed','🏁 Приключени ('+completed+')']].forEach(function(f){
     var a = srFilter===f[0];
     h += '<button data-f="'+f[0]+'" onclick="setSRFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
   });
@@ -164,7 +163,9 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
   h += '</tr></thead><tbody>';
   list.forEach(function(r) {
     var isTaken = r.status === 'taken';
-    var statusBadge = isTaken
+    var statusBadge = r.status==='completed'
+      ? '<span style="background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">🏁 ПРИКЛЮЧЕНА</span>'
+      : isTaken
       ? '<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ ВЗЕТА</span>'
       : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
     h += '<tr style="border-bottom:1px solid #f1f5f9;'+(r.diff_line_id?'background:#f5f3ff;':'')+'">' +
@@ -193,24 +194,23 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
   var h = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1300px;">';
   h += '<thead><tr style="background:#f8fafc;">';
-  ['ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Завод','Срок на годност','Причина','Статус','Изтеглена с','Потвърдена акт.','Коментар','Коментар Контролер',''].forEach(function(c){
+  ['ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Завод','Статус','Изтеглена с','Потвърдена акт.','Коментар','Коментар Контролер',''].forEach(function(c){
     h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
   });
   h += '</tr></thead><tbody>';
   list.forEach(function(r) {
     var isTaken = r.status === 'taken';
-    var statusBadge = isTaken
+    var statusBadge = r.status==='completed'
+      ? '<span style="background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">🏁 ПРИКЛЮЧЕНА</span>'
+      : isTaken
       ? '<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ ВЗЕТА</span>'
       : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
-    var expSoon = r.expiry_date && (new Date(r.expiry_date) - new Date()) < 14*86400000;
     h += '<tr style="border-bottom:1px solid #f1f5f9;">' +
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.purchase_order||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.id_euro||'')+'</td>'+
       '<td style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#64748b;max-width:130px;">'+esc(r.supplier||'')+'</td>'+
       '<td style="padding:7px 10px;text-align:center;color:#94a3b8;">'+esc(r.plant||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;'+(expSoon?'color:#dc2626;font-weight:700;':'')+'">'+(r.expiry_date?fmtDate(r.expiry_date):'—')+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#374151;max-width:150px;">'+esc(r.reason||'')+'</td>'+
       '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#374151;max-width:130px;">'+esc(r.courier_info||'—')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+(r.confirmed_date?fmtDate(r.confirmed_date):'—')+'</td>'+
@@ -292,12 +292,15 @@ function srModalHtml() {
   h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
     '<div><label class="fl">Магазин *</label>'+storeSelectHtml+'</div>'+
     '<div><label class="fl">Доставчик</label><input class="fi" id="sr-supplier" value="'+esc(r.supplier||'')+'" placeholder="напр. ДЕНИ-А 8583 ООД"></div>'+
-    '</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
+    '</div>';
+
+  if (tab!=='complaint') {
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
     '<div><label class="fl">Продукт</label><input class="fi" id="sr-product" value="'+esc(r.product_name||'')+'" placeholder="Наименование"></div>'+
     '<div><label class="fl">SAP №</label><input class="fi" id="sr-sap" value="'+esc(r.sap_code||'')+'" placeholder="напр. 34989"></div>'+
     '<div><label class="fl">Количество</label><input type="number" step="0.001" class="fi" id="sr-qty" value="'+(r.quantity!=null?r.quantity:'')+'"></div>'+
     '</div>';
+  }
 
   if (tab==='complaint') {
     h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
@@ -323,7 +326,9 @@ function srModalHtml() {
     '<select class="fi" id="sr-status" onchange="updateSRPhotoHint()">'+
     '<option value="pending"'+(r.status==='pending'||!r.status?' selected':'')+'>⏳ НЕВЗЕТА</option>'+
     '<option value="taken"'+(r.status==='taken'?' selected':'')+'>✅ ВЗЕТА / ИЗПРАТЕНА</option>'+
+    (canCompleteSR()?'<option value="completed"'+(r.status==='completed'?' selected':'')+'>🏁 ПРИКЛЮЧЕНА</option>':'')+
     '</select>'+
+    (!canCompleteSR()&&r.status==='completed'?'<div style="font-size:11px;color:#94a3b8;margin-top:-4px;margin-bottom:6px;">🏁 Записът е приключен от Цветелина - статусът може да се смени само от нея/admin.</div>':'')+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
     '<div><label class="fl">Дата на изтегляне</label><input type="date" class="fi" id="sr-wdate" value="'+(r.withdrawal_date||'')+'"></div>'+
@@ -725,14 +730,17 @@ function submitSR() {
   var store=(document.getElementById('sr-store').value||'').trim();
   if(!store){toast('Избери магазин','#dc2626');return;}
   var tab=(document.getElementById('sr-source')||{}).value||srTab;
+  var productEl=document.getElementById('sr-product'), sapEl=document.getElementById('sr-sap'), qtyEl=document.getElementById('sr-qty');
+  /* Защита: ако записът вече е "completed" и текущият потребител няма права
+     да задава/маха този статус (опцията липсва в dropdown-а му), не пипаме
+     полето status изобщо - предотвратява случайно връщане към "pending"
+     само защото select-ът визуално не показва избраната опция. */
+  var origRecord = srEditId ? srData.find(function(x){return String(x.id)===String(srEditId);}) : null;
+  var lockStatus = origRecord && origRecord.status==='completed' && !canCompleteSR();
   var data={
     store_name:     store,
     supplier:       document.getElementById('sr-supplier').value,
-    product_name:   document.getElementById('sr-product').value,
-    sap_code:       document.getElementById('sr-sap').value,
-    quantity:       parseFloat(document.getElementById('sr-qty').value)||null,
     source:         tab,
-    status:         document.getElementById('sr-status').value,
     withdrawal_date:document.getElementById('sr-wdate').value||null,
     confirmed_date: document.getElementById('sr-cdate').value||null,
     courier_info:   document.getElementById('sr-courier').value,
@@ -740,6 +748,7 @@ function submitSR() {
     photos:         srPendingPhotos,
     created_by:     currentUser.display_name||currentUser.email
   };
+  if(!lockStatus) data.status = document.getElementById('sr-status').value;
   if (tab==='complaint') {
     var expEl=document.getElementById('sr-expiry'), reasonEl=document.getElementById('sr-reason');
     data.expiry_date = expEl?(expEl.value||null):null;
@@ -751,6 +760,9 @@ function submitSR() {
     var ctrlEl2=document.getElementById('sr-ctrl');
     data.controller_comment = ctrlEl2?ctrlEl2.value:'';
   } else {
+    data.product_name = productEl?productEl.value:'';
+    data.sap_code     = sapEl?sapEl.value:'';
+    data.quantity     = qtyEl?(parseFloat(qtyEl.value)||null):null;
     var poEl=document.getElementById('sr-po'), ieEl=document.getElementById('sr-ie'),
         plantEl=document.getElementById('sr-plant'), docdateEl=document.getElementById('sr-docdate'),
         ctrlEl=document.getElementById('sr-ctrl');
