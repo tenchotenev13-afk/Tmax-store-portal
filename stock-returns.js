@@ -11,7 +11,9 @@ var srFilter = 'pending';
 var srEditId = null;
 var srTab    = 'diff'; /* 'diff' = по разлики (автоматично) | 'complaint' = по рекламации/срок на годност */
 var srSearch = '';
-function setSRTab(t){ srTab=t; srEditId=null; renderStockReturns(); }
+var srStoreFilter = '';
+function setSRStoreFilter(val){ srStoreFilter=val; renderStockReturns(); }
+function setSRTab(t){ srTab=t; srEditId=null; srStoreFilter=''; renderStockReturns(); }
 /* Пре-рендира при търсене, но запазва фокуса/позицията на курсора в полето */
 function setSRSearch(val){
   srSearch=val;
@@ -55,6 +57,11 @@ function renderStockReturns() {
   var list = tabData.filter(function(r) {
     if (srFilter === 'pending')  { if (r.status !== 'pending') return false; }
     else if (srFilter === 'taken') { if (r.status !== 'taken') return false; }
+    /* Точен филтър по магазин - ОТДЕЛЕН от свободното търсене по-долу, за да
+       не се влияе от текст в коментари/причини, споменаващи друг магазин
+       (напр. коментар "изпратено към ЛС Търговище" не бива да кара запис на
+       друг магазин да се показва при филтър "Търговище"). */
+    if (srStoreFilter && r.store_name !== srStoreFilter) return false;
     if (srSearch) {
       var q = srSearch.toLowerCase();
       var hay = [r.store_name,r.supplier,r.product_name,r.sap_code,r.purchase_order,r.id_euro,r.reason,r.control_comment,r.controller_comment,r.courier_info].join(' ').toLowerCase();
@@ -76,8 +83,29 @@ function renderStockReturns() {
   if (canAdd && srTab==='complaint') h += '<button onclick="openReturnsImportModal()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📤 Импорт от Excel</button>';
   h += '</div></div>';
 
-  /* Търсене */
-  h += '<input id="sr-search-input" value="'+escVal(srSearch)+'" oninput="setSRSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик, артикул, SAP, ПВ-ЕВР, ИД-ЕВРО..." style="width:100%;max-width:460px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
+  /* Търсене + филтър по магазин - за "Рекламации" магазините са ТАБОВЕ
+     (по-нагледно), за "По разлики" остава dropdown (много повече записи,
+     табове биха претрупали екрана). */
+  var storesInTab=tabData.map(function(r){return r.store_name;}).filter(function(s,i,arr){return s&&arr.indexOf(s)===i;}).sort();
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">';
+  h += '<input id="sr-search-input" value="'+escVal(srSearch)+'" oninput="setSRSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик, артикул, SAP, ПВ-ЕВР, ИД-ЕВРО..." style="flex:1;min-width:260px;max-width:460px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;">';
+  if(srTab!=='complaint'){
+    h += '<select onchange="setSRStoreFilter(this.value)" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;background:#fff;">';
+    h += '<option value="">🏪 Всички магазини</option>';
+    storesInTab.forEach(function(s){ h += '<option value="'+esc(s)+'"'+(srStoreFilter===s?' selected':'')+'>'+esc(s)+'</option>'; });
+    h += '</select>';
+  }
+  h += '</div>';
+  if(srTab==='complaint'){
+    h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">';
+    h += '<button onclick="setSRStoreFilter(\'\')" style="border:1px solid '+(!srStoreFilter?'#2563eb':'#e2e8f0')+';background:'+(!srStoreFilter?'#eff6ff':'#fff')+';color:'+(!srStoreFilter?'#2563eb':'#64748b')+';border-radius:20px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">🏪 Всички ('+tabData.length+')</button>';
+    storesInTab.forEach(function(s){
+      var cnt=tabData.filter(function(r){return r.store_name===s;}).length;
+      var active=srStoreFilter===s;
+      h += '<button onclick="setSRStoreFilter(\''+esc(s).replace(/'/g,"\\'")+'\')" style="border:1px solid '+(active?'#2563eb':'#e2e8f0')+';background:'+(active?'#eff6ff':'#fff')+';color:'+(active?'#2563eb':'#64748b')+';border-radius:20px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">'+esc(s)+' ('+cnt+')</button>';
+    });
+    h += '</div>';
+  }
 
   /* Подтабове */
   h += '<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-width:560px;">';
@@ -165,7 +193,7 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
   var h = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1300px;">';
   h += '<thead><tr style="background:#f8fafc;">';
-  ['Продукт','SAP','Кол.','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Завод','Срок на годност','Причина','Статус','Коментар',''].forEach(function(c){
+  ['ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Завод','Срок на годност','Причина','Статус','Изтеглена с','Потвърдена акт.','Коментар','Коментар Контролер',''].forEach(function(c){
     h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
   });
   h += '</tr></thead><tbody>';
@@ -176,9 +204,6 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
       : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
     var expSoon = r.expiry_date && (new Date(r.expiry_date) - new Date()) < 14*86400000;
     h += '<tr style="border-bottom:1px solid #f1f5f9;">' +
-      '<td style="padding:7px 10px;max-width:180px;">'+esc(r.product_name||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.sap_code||'')+'</td>'+
-      '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+((r.quantity)||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.purchase_order||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.id_euro||'')+'</td>'+
       '<td style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
@@ -187,7 +212,10 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;'+(expSoon?'color:#dc2626;font-weight:700;':'')+'">'+(r.expiry_date?fmtDate(r.expiry_date):'—')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#374151;max-width:150px;">'+esc(r.reason||'')+'</td>'+
       '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
+      '<td style="padding:7px 10px;font-size:11px;color:#374151;max-width:130px;">'+esc(r.courier_info||'—')+'</td>'+
+      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+(r.confirmed_date?fmtDate(r.confirmed_date):'—')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.control_comment||'')+'</td>'+
+      '<td style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.controller_comment||'')+'</td>'+
       '<td style="padding:7px 10px;white-space:nowrap;">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
   });
   h += '</tbody></table></div>';
@@ -319,13 +347,11 @@ function srModalHtml() {
       (Array.isArray(r.photos)?r.photos.map(function(p){return '<a href="'+esc(p.url)+'" target="_blank"><img src="'+esc(p.url)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';}).join(''):'')+
     '</div>'+
 
-    '<label class="fl">Коментар'+(tab==='complaint'?'':' Контрол')+'</label>'+
+    '<label class="fl">Коментар</label>'+
     '<input class="fi" id="sr-cc" value="'+esc(r.control_comment||'')+'" placeholder="напр. ИЗД КИ">';
 
-  if (tab!=='complaint') {
-    h += '<label class="fl">Коментар Контролер</label>'+
-      '<input class="fi" id="sr-ctrl" value="'+esc(r.controller_comment||'')+'" placeholder="напр. КЪМ ЛС ТЪРГОВИЩЕ / ИЗПРАЩАЙТЕ">';
-  }
+  h += '<label class="fl">Коментар Контролер</label>'+
+    '<input class="fi" id="sr-ctrl" value="'+esc(r.controller_comment||'')+'" placeholder="напр. КЪМ ЛС ТЪРГОВИЩЕ / ИЗПРАЩАЙТЕ">';
 
   h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
     '<button onclick="closeSRModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
@@ -536,7 +562,7 @@ function srParseExcelDate(v){
   return isNaN(d.getTime())?null:d.toISOString().slice(0,10);
 }
 function srImportModalHtml(){
-  var hint = 'Приема 2 формата: (1) Многолистов Excel (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Завод, статус ВЗЕТА/НЕВЗЕТА и т.н.; или (2) единичен лист с колони за продукт, SAP, количество, магазин, срок на годност, причина. Разпознава автоматично кой от двата е.';
+  var hint = 'Приема 2 формата: (1) Многолистов Excel (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Завод, статус ВЗЕТА/НЕВЗЕТА и т.н.; или (2) единичен лист с колони за продукт, SAP, количество, магазин, срок на годност, причина. Разпознава автоматично кой от двата е. При повторно качване на обновена версия — редове с вече съществуващ ПВ-ЕВР номер се пропускат автоматично (не се дублират), качват се само истински новите.';
   return '<div class="bov" id="sr-import-ov"><div class="bmod" style="width:460px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
     '<div style="font-size:15px;font-weight:700;">📤 Импорт от Excel — рекламации/срок на годност</div>'+
@@ -589,17 +615,54 @@ function startReturnsImport(){
         progEl.innerHTML='<span style="color:#dc2626;">Няма разпознати редове за импорт.</span>';
         return;
       }
-      progEl.textContent='⏳ Качване на 0 / '+mapped.length+'...';
-      srBatchImport(mapped,function(done,total){
-        progEl.textContent='⏳ Качване на '+done+' / '+total+'...';
-      },function(errorCount){
-        if(errorCount>0){
-          progEl.innerHTML='<span style="color:#dc2626;">⚠️ Завърши с '+errorCount+' грешки. Виж конзолата (F12).</span>';
-        } else {
-          progEl.innerHTML='<span style="color:#16a34a;">✅ Готово! Импортирани '+mapped.length+' записа.</span>';
-          toast('✅ Импортът приключи успешно!');
+      /* Де-дупликация по ПВ-ЕВР (purchase_order) - при повторно качване на
+         обновена версия на файла, редове с ВЕЧЕ СЪЩЕСТВУВАЩ номер се пропускат
+         (не се дублират), само истински новите (без съвпадение) се качват.
+         Редове без ПВ-ЕВР (празно поле) винаги се третират като нови - няма
+         срещу какво да се сравнят. */
+      progEl.textContent='⏳ Проверка за дублирани записи...';
+      var posInFile=mapped.map(function(r){return r.purchase_order;}).filter(function(p){return p;});
+      /* Проверката е на партиди по 200 ПВ-ЕВР номера наведнъж - при файл с
+         много редове, всички номера в 1 заявка биха надхвърлили лимита за
+         дължина на URL адреса. */
+      var uniquePos=posInFile.filter(function(p,i){return posInFile.indexOf(p)===i;});
+      var DEDUP_BATCH=200;
+      var dedupBatches=[];
+      for(var di=0; di<uniquePos.length; di+=DEDUP_BATCH){
+        dedupBatches.push(uniquePos.slice(di,di+DEDUP_BATCH));
+      }
+      var dedupCheck = dedupBatches.length
+        ? Promise.all(dedupBatches.map(function(batchPos){
+            return sbGet('stock_returns','source=eq.complaint&select=purchase_order&purchase_order=in.('+batchPos.map(function(p){return encodeURIComponent(p);}).join(',')+')');
+          })).then(function(results){
+            var merged=[];
+            results.forEach(function(r){ if(Array.isArray(r)) merged=merged.concat(r); });
+            return merged;
+          })
+        : Promise.resolve([]);
+      dedupCheck.then(function(existing){
+        var existingSet={};
+        (Array.isArray(existing)?existing:[]).forEach(function(r){ if(r.purchase_order) existingSet[r.purchase_order]=true; });
+        var toImport = mapped.filter(function(r){ return !r.purchase_order || !existingSet[r.purchase_order]; });
+        var skipped = mapped.length - toImport.length;
+        if(!toImport.length){
+          progEl.innerHTML='<span style="color:#d97706;">⚠️ Всички '+skipped+' реда вече съществуват (по ПВ-ЕВР) - нищо ново за импорт.</span>';
+          return;
         }
-        loadStockReturns();
+        progEl.textContent='⏳ Качване на 0 / '+toImport.length+'...'+(skipped?' ('+skipped+' пропуснати като дублирани)':'');
+        srBatchImport(toImport,function(done,total){
+          progEl.textContent='⏳ Качване на '+done+' / '+total+'...'+(skipped?' ('+skipped+' пропуснати като дублирани)':'');
+        },function(errorCount){
+          if(errorCount>0){
+            progEl.innerHTML='<span style="color:#dc2626;">⚠️ Завърши с '+errorCount+' грешки. Виж конзолата (F12).</span>';
+          } else {
+            progEl.innerHTML='<span style="color:#16a34a;">✅ Готово! Импортирани '+toImport.length+' нови записа.'+(skipped?' Пропуснати '+skipped+' вече съществуващи (по ПВ-ЕВР).':'')+'</span>';
+            toast('✅ Импортът приключи успешно!');
+          }
+          loadStockReturns();
+        });
+      }).catch(function(err){
+        progEl.innerHTML='<span style="color:#dc2626;">Грешка при проверка за дублирани: '+esc(err.message||String(err))+'</span>';
       });
     }catch(err){
       console.error('Грешка при четене на Excel:',err);
@@ -685,6 +748,8 @@ function submitSR() {
     data.purchase_order = poEl2?poEl2.value:'';
     data.id_euro = ieEl2?ieEl2.value:'';
     data.plant = plantEl2?plantEl2.value:'';
+    var ctrlEl2=document.getElementById('sr-ctrl');
+    data.controller_comment = ctrlEl2?ctrlEl2.value:'';
   } else {
     var poEl=document.getElementById('sr-po'), ieEl=document.getElementById('sr-ie'),
         plantEl=document.getElementById('sr-plant'), docdateEl=document.getElementById('sr-docdate'),
