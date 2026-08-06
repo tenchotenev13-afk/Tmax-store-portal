@@ -116,7 +116,19 @@ function renderTransit(){
     if(transitFilter==='sent')     return r.status==='sent';
     return true;
   });
-  if(transitStore) list=list.filter(function(r){return r.store_name===transitStore||r.supplier===transitStore;});
+  if(transitStore){
+    /* Ако избраният е реален магазин (има си собствени редове по store_name),
+       филтрираме само по store_name — иначе редове на ЧУЖДИ магазини се
+       промъкват само защото името съвпада с полето supplier (напр. трансфер
+       Търговище→Петрич се показва и при двамата). Ако избраният е склад/
+       доставчик без собствени редове (напр. "Логистичен склад Добрич"),
+       филтрираме по supplier, както досега. */
+    var _realStoreNames={};
+    transitData.forEach(function(r){if(r.store_name)_realStoreNames[r.store_name]=1;});
+    list = _realStoreNames[transitStore]
+      ? list.filter(function(r){return r.store_name===transitStore;})
+      : list.filter(function(r){return r.supplier===transitStore;});
+  }
   if(transitMonthFilter) list=list.filter(function(r){
     return r.doc_date&&r.doc_date.slice(0,7)===transitMonthFilter;
   });
