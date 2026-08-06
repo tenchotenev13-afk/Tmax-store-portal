@@ -129,14 +129,16 @@ function renderStockDiff() {
     h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">';
     h += '<thead><tr style="background:#f8fafc;">';
-    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Кредитно','Коментар',''].forEach(function(c){
+    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Кредитно','Коментар','Коментар Контролер',''].forEach(function(c){
       h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
     });
     h += '</tr></thead><tbody>';
 
     list.forEach(function(r) {
       var isTaken = r.status === 'taken';
-      var statusBadge = isTaken
+      var statusBadge = r.status==='capitalized'
+        ? '<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📥 ЗАПРИХОДЕНА</span>'
+        : isTaken
         ? '<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ ВЗЕТА</span>'
         : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
       /* Кредитно известие - релевантно само за тип "Липса" (доставчикът не ни е
@@ -160,6 +162,7 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
         '<td style="padding:7px 10px;white-space:nowrap;">'+creditCell+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.comment||'')+'</td>'+
+        '<td style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.resolution_comment||'')+(normSDAttachments(r.attachments).length?' 📎'+normSDAttachments(r.attachments).length:'')+'</td>'+
         '<td style="padding:7px 10px;white-space:nowrap;">';
 
       if (canEdit && !isTaken) {
@@ -295,61 +298,169 @@ function sdDelete(id) {
 function sdModalHtml() {
   var r = sdEditId ? (sdData.find(function(x){return x.id===sdEditId;})||{}) : {};
   var isEdit = !!sdEditId;
+  var canReview = canReviewDiff();
+  /* "Решено" = Цвети/admin/logistics вече е задала Тип на решение. От този
+     момент нататък магазинът вече не може да пипа количество/тип - само
+     статус (Невзета/Взета/Заприходена). */
+  var isResolved = isEdit && !!r.type;
+  var storeLocked = isResolved && !canReview;
   var storeOpts = '<option value="">-- Избери магазин --</option>';
   var stores = assignedStores();
   if (stores) {
     stores.forEach(function(s){ storeOpts += '<option'+(r.store_name===s?' selected':'')+'>'+esc(s)+'</option>'; });
   }
 
-  return '<div class="bov" id="sd-ov"><div class="bmod" style="width:540px;">'+
+  /* Помощна функция - поле, което става само за четене (не input), ако
+     магазинът вече не може да го пипа. */
+  function coreField(label, id, val, placeholder, type){
+    if(storeLocked){
+      return '<div><label class="fl">'+label+'</label><div class="fi" style="background:#f8fafc;color:#64748b;">'+esc(val||'—')+'</div><input type="hidden" id="'+id+'" value="'+esc(val||'')+'"></div>';
+    }
+    return '<div><label class="fl">'+label+'</label><input'+(type?' type="'+type+'"':'')+(type==='number'?' step="0.01"':'')+' class="fi" id="'+id+'" value="'+esc(val||'')+'" placeholder="'+(placeholder||'')+'"></div>';
+  }
+
+  var h = '<div class="bov" id="sd-ov"><div class="bmod" style="width:540px;max-height:88vh;overflow-y:auto;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'+
     '<div style="font-size:15px;font-weight:600;">'+(isEdit?'✏️ Редактирай':'+ Добави стока за изтегляне')+'</div>'+
-    '<button onclick="closeSDModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<button onclick="closeSDModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>';
 
-    '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;font-weight:600;color:#856404;">'+
-    '⚠️ ЗАПРИХОЖДАВАТЕ САМО АКО СТОКАТА Е ПРИ ВАС И Е В ДОБЪР ТЪРГОВСКИ ВИД!</div>'+
+  if(storeLocked){
+    h += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11.5px;color:#1e40af;">'+
+      'ℹ️ Цветелина вече е взела решение по този запис — детайлите вече не могат да се променят. Можеш само да обновиш статуса по-долу.</div>';
+  } else {
+    h += '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:8px 12px;margin-bottom:12px;font-size:11px;font-weight:600;color:#856404;">'+
+      '⚠️ ЗАПРИХОЖДАВАТЕ САМО АКО СТОКАТА Е ПРИ ВАС И Е В ДОБЪР ТЪРГОВСКИ ВИД!</div>';
+  }
 
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
     '<div><label class="fl">Магазин *</label>'+(function(){
     var myS=assignedStores();
     if(myS&&myS.length===1)return '<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(myS[0])+'</div><input type="hidden" id="sd-store" value="'+esc(myS[0])+'">';
     if(myS&&myS.length>1)return '<select class="fi" id="sd-store"><option value="">-- Избери --</option>'+myS.map(function(s){return '<option>'+esc(s)+'</option>';}).join('')+'</select>';
     return '<select class="fi" id="sd-store"><option value="">-- Зарежда се... --</option></select>';
   })()+'</div>'+
-    '<div><label class="fl">Доставчик</label><input class="fi" id="sd-supplier" value="'+esc(r.supplier||'')+'" placeholder="напр. ТАГЕМАЛ"></div>'+
-    '<div><label class="fl">Код на материал (SAP)</label><input class="fi" id="sd-mat" value="'+esc(r.material_code||'')+'" placeholder="напр. 34989"></div>'+
-    '<div><label class="fl">Количество</label><input type="number" step="0.01" class="fi" id="sd-qty" value="'+(r.quantity||'')+'"></div>'+
+    coreField('Доставчик','sd-supplier',r.supplier,'напр. ТАГЕМАЛ')+
+    coreField('Код на материал (SAP)','sd-mat',r.material_code,'напр. 34989')+
+    coreField('Количество','sd-qty',r.quantity,'',storeLocked?'':'number')+
     '</div>'+
 
     '<label class="fl">Наименование *</label>'+
-    '<input class="fi" id="sd-name" value="'+esc(r.material_name||'')+'" placeholder="напр. ЩУЦЕР ЗА МАРКУЧ МЕТАЛЕН С РЕЗБА 1&quot; ПРАВ">'+
+    (storeLocked
+      ? '<div class="fi" style="background:#f8fafc;color:#64748b;">'+esc(r.material_name||'—')+'</div><input type="hidden" id="sd-name" value="'+esc(r.material_name||'')+'">'
+      : '<input class="fi" id="sd-name" value="'+esc(r.material_name||'')+'" placeholder="напр. ЩУЦЕР ЗА МАРКУЧ МЕТАЛЕН С РЕЗБА 1&quot; ПРАВ">')+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
-    '<div><label class="fl">Поръчка</label><input class="fi" id="sd-order" value="'+esc(r.order_number||'')+'" placeholder="напр. 4100135756"></div>'+
-    '<div><label class="fl">Дата потвърдена актуализация</label><input type="date" class="fi" id="sd-cdate" value="'+(r.confirmed_date||'')+'"></div>'+
-    '</div>'+
+    coreField('Поръчка','sd-order',r.order_number,'напр. 4100135756')+
+    coreField('Дата потвърдена актуализация','sd-cdate',r.confirmed_date,'','date')+
+    '</div>';
 
-    '<label class="fl">Тип на решение</label>'+
-    '<select class="fi" id="sd-type">'+
-    '<option value=""'+(isEdit&&!r.type?' selected':'')+'>— Още не е решено —</option>'+
-    '<option value="writein"'+((r.type==='writein'||!isEdit)?' selected':'')+'>📥 Заприхождаване</option>'+
-    '<option value="return"'+(r.type==='return'?' selected':'')+'>↩️ Връщане</option>'+
-    '<option value="missing"'+(r.type==='missing'?' selected':'')+'>❓ Липса</option>'+
-    '</select>'+
+  /* Тип на решение - само Цвети/admin/logistics могат да го задават/сменят;
+     за магазина е само визуален показател. */
+  if(canReview){
+    h += '<label class="fl">Тип на решение</label>'+
+      '<select class="fi" id="sd-type">'+
+      '<option value=""'+(isEdit&&!r.type?' selected':'')+'>— Още не е решено —</option>'+
+      '<option value="writein"'+((r.type==='writein'||!isEdit)?' selected':'')+'>📥 Заприхождаване</option>'+
+      '<option value="return"'+(r.type==='return'?' selected':'')+'>↩️ Връщане</option>'+
+      '<option value="missing"'+(r.type==='missing'?' selected':'')+'>❓ Липса</option>'+
+      '</select>';
+  } else {
+    var typeLabels={writein:'📥 Заприхождаване',return:'↩️ Връщане',missing:'❓ Липса'};
+    h += '<label class="fl">Тип на решение</label>'+
+      '<div class="fi" style="background:#f8fafc;color:#64748b;">'+(r.type?typeLabels[r.type]||r.type:'⏳ Още не е решено от Цветелина')+'</div>'+
+      '<input type="hidden" id="sd-type" value="'+esc(r.type||'')+'">';
+  }
 
-    '<label class="fl">Статус</label>'+
+  /* Статус - винаги редактируем от всеки, вкл. магазина - вече с 3 опции. */
+  h += '<label class="fl">Статус</label>'+
     '<select class="fi" id="sd-status">'+
     '<option value="pending"'+(r.status==='pending'||!r.status?' selected':'')+'>⏳ НЕВЗЕТА</option>'+
     '<option value="taken"'+(r.status==='taken'?' selected':'')+'>✅ ВЗЕТА</option>'+
+    '<option value="capitalized"'+(r.status==='capitalized'?' selected':'')+'>📥 ЗАПРИХОДЕНА</option>'+
     '</select>'+
 
     '<label class="fl">Коментар</label>'+
-    '<input class="fi" id="sd-comment" value="'+esc(r.comment||'')+'" placeholder="напр. ЗАПРИХОДЕТЕ С РЕВИЗИЯ / ЧАКАМЕ">'+
+    '<input class="fi" id="sd-comment" value="'+esc(r.comment||'')+'" placeholder="напр. ЗАПРИХОДЕТЕ С РЕВИЗИЯ / ЧАКАМЕ">';
 
-    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+  /* Коментар Контролер + прикачване на документ - само за Цвети/admin/logistics */
+  if(canReview){
+    h += '<label class="fl">Коментар Контролер (Цветелина)</label>'+
+      '<input class="fi" id="sd-ctrl-comment" value="'+esc(r.resolution_comment||'')+'" placeholder="напр. Изчаква се кредитно от доставчика">';
+    h += '<label class="fl">Прикачени документи</label>';
+    var atts = normSDAttachments(r.attachments);
+    if(atts.length){
+      h += '<div id="sd-att-list" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;">';
+      atts.forEach(function(a,i){
+        h += '<div style="position:relative;">';
+        if(a.type==='image'){
+          h += '<a href="'+a.url+'" target="_blank" style="display:block;"><img src="'+a.url+'" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+        } else {
+          h += '<a href="'+a.url+'" target="_blank" style="display:flex;align-items:center;gap:4px;padding:4px 8px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;font-size:11px;color:#2563eb;text-decoration:none;max-width:110px;">📎 <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(a.filename||'Файл')+'</span></a>';
+        }
+        h += '<button type="button" data-idx="'+i+'" onclick="sdRemoveAttachment(this.dataset.idx)" style="position:absolute;top:-5px;right:-5px;width:16px;height:16px;border:none;background:#dc2626;color:#fff;border-radius:50%;font-size:9px;cursor:pointer;">✕</button></div>';
+      });
+      h += '</div>';
+    } else {
+      h += '<div id="sd-att-list"></div>';
+    }
+    h += '<label style="display:inline-flex;align-items:center;gap:4px;border:1px dashed #cbd5e1;border-radius:5px;padding:3px 10px;font-size:11px;color:#94a3b8;cursor:pointer;">'+
+      '📎 + Прикачи документ<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx" style="display:none;" onchange="sdUploadAttachment(this)"></label>';
+  } else {
+    h += '<input type="hidden" id="sd-ctrl-comment" value="'+esc(r.resolution_comment||'')+'">';
+  }
+
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
     '<button onclick="closeSDModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
     '<button onclick="submitSD()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">'+(isEdit?'Запази':'Добави')+'</button>'+
     '</div></div></div>';
+  return h;
+}
+function normSDAttachments(atts){
+  if(typeof atts==='string'){try{atts=JSON.parse(atts);}catch(e){atts=[];}}
+  return Array.isArray(atts)?atts:[];
+}
+function sdUploadAttachment(input){
+  var file=input.files[0]; if(!file)return;
+  if(!sdEditId){toast('Запази записа първо, после прикачи документ','#dc2626');return;}
+  var record = sdData.find(function(x){return x.id===sdEditId;});
+  if(!record)return;
+  var isImg=/\.(jpe?g|png|gif|webp)$/i.test(file.name);
+  var ext=(file.name.split('.').pop()||'bin').toLowerCase();
+  var fname='sd_'+sdEditId+'_'+Date.now()+'.'+ext;
+  var path='stock-differences/'+fname;
+  toast('⏳ Качване...','#2563eb');
+  var reader=new FileReader();
+  reader.onload=function(e){
+    fetch(DIFF_SB+'/storage/v1/object/'+DIFF_BKT+'/'+path,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+DIFF_KEY,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+      body:e.target.result
+    }).then(function(r){return r.ok;}).then(function(ok){
+      if(!ok){toast('Грешка при качване','#dc2626');return;}
+      var pub=DIFF_SB+'/storage/v1/object/public/'+DIFF_BKT+'/'+path;
+      var atts=normSDAttachments(record.attachments).slice();
+      atts.push({type:isImg?'image':'file',url:pub,filename:file.name});
+      sbPatch('stock_differences','id=eq.'+sdEditId,{attachments:atts}).then(function(res){
+        if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+        record.attachments=atts;
+        openSDModal(sdEditId);
+        toast('✅ Прикачено!');
+      });
+    }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');});
+  };
+  reader.readAsArrayBuffer(file);
+}
+function sdRemoveAttachment(idx){
+  if(!sdEditId)return;
+  var record = sdData.find(function(x){return x.id===sdEditId;});
+  if(!record)return;
+  var atts=normSDAttachments(record.attachments).slice();
+  atts.splice(parseInt(idx),1);
+  sbPatch('stock_differences','id=eq.'+sdEditId,{attachments:atts}).then(function(res){
+    if(!res.ok){toast('Грешка','#dc2626');return;}
+    record.attachments=atts;
+    openSDModal(sdEditId);
+  });
 }
 
 function openSDModal(id) {
@@ -393,6 +504,7 @@ function submitSD() {
   var name=(document.getElementById('sd-name').value||'').trim();
   if(!store){toast('Избери магазин','#dc2626');return;}
   if(!name){toast('Въведи наименование','#dc2626');return;}
+  var origRecord = sdEditId ? sdData.find(function(x){return x.id===sdEditId;}) : null;
   var data={
     store_name:     store,
     supplier:       document.getElementById('sd-supplier').value,
@@ -404,8 +516,15 @@ function submitSD() {
     type:           document.getElementById('sd-type').value||null,
     status:         document.getElementById('sd-status').value,
     comment:        document.getElementById('sd-comment').value,
+    resolution_comment: document.getElementById('sd-ctrl-comment').value,
     created_by:     currentUser.display_name||currentUser.email
   };
+  /* Ако МАГАЗИНЪТ (не Цвети/admin/logistics) коригира запис, който Цвети
+     ОЩЕ НЕ Е решила (type беше празно преди тази редакция) - маркираме
+     момента на корекция, за да изскочи най-отгоре в списъка. */
+  if(sdEditId && !canReviewDiff() && origRecord && !origRecord.type){
+    data.store_corrected_at = new Date().toISOString();
+  }
   var p = sdEditId
     ? sbPatch('stock_differences','id=eq.'+sdEditId,data)
     : sbPost('stock_differences',data);
@@ -451,13 +570,27 @@ function diffCategoryLabel(v){
 function renderDiffReportsSection(){
   var unreviewed = diffReports.filter(function(r){return !r.reviewed;});
   if(!unreviewed.length) return '';
+  /* Бланки с наскоро коригиран от магазина ред изскачат най-отгоре -
+     иначе биха останали "погребани" в дъното на списъка. */
+  unreviewed = unreviewed.slice().sort(function(a,b){
+    var aLines=sdData.filter(function(x){return x.report_id===a.id;});
+    var bLines=sdData.filter(function(x){return x.report_id===b.id;});
+    var aCorr=aLines.reduce(function(m,l){return l.store_corrected_at&&l.store_corrected_at>m?l.store_corrected_at:m;},'');
+    var bCorr=bLines.reduce(function(m,l){return l.store_corrected_at&&l.store_corrected_at>m?l.store_corrected_at:m;},'');
+    if(aCorr&&!bCorr)return -1;
+    if(bCorr&&!aCorr)return 1;
+    if(aCorr&&bCorr)return bCorr.localeCompare(aCorr); /* по-скоро коригираните - по-напред */
+    return 0; /* иначе пази оригиналния ред */
+  });
   var h='<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:14px;">';
   h+='<div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:10px;">🆕 Нови подадени бланки — чакат преглед ('+unreviewed.length+')</div>';
   unreviewed.forEach(function(rep){
     var lines = sdData.filter(function(x){return x.report_id===rep.id;});
-    h+='<div style="background:#fff;border:1px solid #e9d5ff;border-radius:8px;padding:12px;margin-bottom:8px;">';
+    var wasCorrected = lines.some(function(l){return !!l.store_corrected_at;});
+    h+='<div style="background:#fff;border:1px solid '+(wasCorrected?'#fbbf24':'#e9d5ff')+';border-radius:8px;padding:12px;margin-bottom:8px;'+(wasCorrected?'box-shadow:0 0 0 1px #fde68a;':'')+'">';
     h+='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">';
     h+='<div><span style="font-weight:700;">🏪 '+esc(rep.store_name||'')+'</span>'+
+       (wasCorrected?' <span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">✏️ КОРИГИРАНА</span>':'')+
        '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+(rep.direction==='supplier'?'📦 Доставчик':'🔄 Междускладов')+' — '+esc(rep.counterpart||'')+'</span></div>'+
        '<div style="display:flex;align-items:center;gap:8px;">'+
        '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</span>'+
@@ -472,15 +605,18 @@ function renderDiffReportsSection(){
         (repIsSupplier?'<th style="padding:3px 6px;text-align:right;">По стокова</th>':'')+
         '<th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар</th><th style="padding:3px 6px;">Решение</th></tr>';
       lines.forEach(function(l){
-        h+='<tr style="border-top:1px solid #f1f5f9;">'+
+        h+='<tr style="border-top:1px solid #f1f5f9;'+(l.store_corrected_at?'background:#fffbeb;':'')+'">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
-          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+'</td>'+
+          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+'</td>'+
           '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
           '<td style="padding:3px 6px;text-align:right;">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
           (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
           '<td style="padding:3px 6px;text-align:right;">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
           '<td style="padding:3px 6px;color:#64748b;">'+esc(l.comment||'')+'</td>'+
-          '<td style="padding:3px 6px;white-space:nowrap;">'+diffLineResolveButtons(l)+'</td>'+
+          '<td style="padding:3px 6px;white-space:nowrap;">'+diffLineResolveButtons(l)+
+          (canReviewDiff()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
+          (canEditSD()&&!l.type?' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>':'')+
+          '</td>'+
         '</tr>';
       });
       h+='</table>';
@@ -498,6 +634,62 @@ function renderDiffReportsSection(){
   });
   h+='</div>';
   return h;
+}
+
+/* ── Корекция на ред от магазина, докато още не е решен от Цвети ── */
+var sdCorrectLineId = null;
+function openSDCorrectModal(lineId){
+  sdCorrectLineId = lineId;
+  var l = sdData.find(function(x){return String(x.id)===String(lineId);});
+  if(!l)return;
+  var existing = document.getElementById('sdc-ov'); if(existing) existing.remove();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="sdc-ov"><div class="bmod" style="width:420px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">✏️ Коригирай подадената разлика</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">Ако сте открили стоката или сте сгрешили бройка/код при подаването.</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;">'+
+    '<div><label class="fl">SAP код</label><input class="fi" id="sdc-sap" value="'+esc(l.material_code||'')+'"></div>'+
+    '<div><label class="fl">Наименование</label><input class="fi" id="sdc-name" value="'+esc(l.material_name||'')+'"></div>'+
+    '</div>'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
+    '<div><label class="fl">По документ</label><input type="number" step="0.001" class="fi" id="sdc-qty" value="'+(l.quantity!=null?l.quantity:'')+'"></div>'+
+    '<div><label class="fl">Реално получено</label><input type="number" step="0.001" class="fi" id="sdc-qty-real" value="'+(l.quantity_received!=null?l.quantity_received:'')+'"></div>'+
+    '</div>'+
+    '<label class="fl">Коментар (по избор)</label>'+
+    '<input class="fi" id="sdc-comment" value="'+esc(l.comment||'')+'" placeholder="напр. Намерена в склада при ревизия">'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="document.getElementById(\'sdc-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button onclick="submitSDCorrection()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази корекцията</button>'+
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+function submitSDCorrection(){
+  var current = sdData.find(function(x){return String(x.id)===String(sdCorrectLineId);});
+  if(current && current.type){
+    toast('⚠️ Цветелина вече е дала решение по този запис - корекция вече не е възможна.','#d97706');
+    var elLocked=document.getElementById('sdc-ov'); if(elLocked)elLocked.remove();
+    loadStockDiff();
+    return;
+  }
+  var sapEl=document.getElementById('sdc-sap'), nameEl=document.getElementById('sdc-name'),
+      qtyEl=document.getElementById('sdc-qty'), qtyRealEl=document.getElementById('sdc-qty-real'),
+      commentEl=document.getElementById('sdc-comment');
+  var name=(nameEl.value||'').trim();
+  if(!name){toast('Наименованието не може да е празно','#dc2626');return;}
+  var data={
+    material_code: sapEl.value,
+    material_name: name,
+    quantity: qtyEl.value!==''?parseFloat(qtyEl.value):null,
+    quantity_received: qtyRealEl.value!==''?parseFloat(qtyRealEl.value):null,
+    comment: commentEl.value,
+    store_corrected_at: new Date().toISOString()
+  };
+  sbPatch('stock_differences','id=eq.'+sdCorrectLineId,data).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    var el=document.getElementById('sdc-ov'); if(el)el.remove();
+    toast('✅ Корекцията е запазена!');
+    loadStockDiff();
+  });
 }
 
 /* ── Динамични редове с артикули за формата за подаване ── */
