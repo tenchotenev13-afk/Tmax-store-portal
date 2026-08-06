@@ -496,6 +496,22 @@ function normSDAttachments(atts){
   if(typeof atts==='string'){try{atts=JSON.parse(atts);}catch(e){atts=[];}}
   return Array.isArray(atts)?atts:[];
 }
+/* Компактни миниатюри/линкове за прикачените от Цвети документи, показвани
+   директно в реда на таблицата (не само вътре в модала). */
+function diffAttachmentThumbs(l){
+  var atts = normSDAttachments(l.attachments);
+  if(!atts.length) return '';
+  var h='<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;">';
+  atts.forEach(function(a){
+    if(a.type==='image'){
+      h+='<a href="'+esc(a.url)+'" target="_blank"><img src="'+esc(a.url)+'" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;"></a>';
+    } else {
+      h+='<a href="'+esc(a.url)+'" target="_blank" title="'+esc(a.filename||'Файл')+'" style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:12px;text-decoration:none;">📎</a>';
+    }
+  });
+  h+='</div>';
+  return h;
+}
 function sdUploadAttachment(input){
   var file=input.files[0]; if(!file)return;
   if(!sdEditId){toast('Запази записа първо, после прикачи документ','#dc2626');return;}
@@ -683,7 +699,7 @@ function renderDiffReportsSection(){
       h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
       h+='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">По вх. дост.</th>'+
         (repIsSupplier?'<th style="padding:3px 6px;text-align:right;">По стокова</th>':'')+
-        '<th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар</th><th style="padding:3px 6px;">Решение (Цвети)</th><th style="padding:3px 6px;">Отговор на склада</th></tr>';
+        '<th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар (магазин)</th><th style="padding:3px 6px;">Коментар (Цвети)</th><th style="padding:3px 6px;">Решение (Цвети)</th><th style="padding:3px 6px;">Отговор на склада</th></tr>';
       lines.forEach(function(l){
         h+='<tr style="border-top:1px solid #f1f5f9;'+(l.store_corrected_at?'background:#fffbeb;':'')+'">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
@@ -693,6 +709,7 @@ function renderDiffReportsSection(){
           (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
           '<td style="padding:3px 6px;text-align:right;">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
           '<td style="padding:3px 6px;color:#64748b;">'+esc(l.comment||'')+'</td>'+
+          '<td style="padding:3px 6px;color:#7c3aed;">'+esc(l.resolution_comment||'')+diffAttachmentThumbs(l)+'</td>'+
           '<td style="padding:3px 6px;white-space:nowrap;">'+diffLineResolveButtons(l)+
           (canReviewDiff()&&!isLogisticsWarehouseUser()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
           (canEditSD()&&!l.type&&currentUser.store_name===rep.store_name?' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>':'')+
