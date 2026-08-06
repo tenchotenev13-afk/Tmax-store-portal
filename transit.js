@@ -29,6 +29,15 @@ var PLANT_OUTGOING = {
 };
 var PLANT_ALL = Object.assign({}, PLANT_INCOMING, PLANT_OUTGOING);
 
+/* Истинските 18 магазина (без складове/сервиз/администрация) — използва се
+   за разпознаване на "трансфер между магазини" при импорт, независимо дали
+   кодът на доставчика е от "получаващ" или "изпращащ" тип. */
+var REAL_STORE_NAMES = {
+  'Враца':1,'Габрово':1,'Гоце Делчев':1,'Добрич':1,'Дупница':1,'Карлово':1,'Козлодуй':1,
+  'Кърджали':1,'Монтана':1,'Петрич':1,'Пирдоп':1,'Раднево':1,'Севлиево':1,'Силистра':1,
+  'Сливен':1,'Троян':1,'Търговище':1,'Шумен':1
+};
+
 var T_STATUS = {
   pending:  { label:'⏳ Не доставена', bg:'#fef9c3', color:'#92400e' },
   received: { label:'✅ Прието',       bg:'#f0fdf4', color:'#16a34a' },
@@ -41,6 +50,21 @@ function canEditTransit(){
 }
 function canAddTransit(){
   return currentUser&&['admin','accounting','logistics'].indexOf(currentUser.role)>=0;
+}
+
+/* ── ПРАВА ЗА ДВУСТЪПКОВИЯ ПОТОК ПРИ TRANSFER ── */
+function transitIsSenderOf(r){
+  return !!(currentUser&&currentUser.store_name&&currentUser.store_name===r.supplier);
+}
+function transitIsReceiverOf(r){
+  return !!(currentUser&&currentUser.store_name&&currentUser.store_name===r.store_name);
+}
+/* За transfer: pending→sent само подателят (или global); sent→received само получателят (или global) */
+function transitCanMarkSent(r){
+  return canEditTransit()&&(isGlobal()||transitIsSenderOf(r));
+}
+function transitCanMarkReceived(r){
+  return canEditTransit()&&(isGlobal()||transitIsReceiverOf(r));
 }
 
 /* ── LOAD с pagination чрез Range header ── */
@@ -103,9 +127,10 @@ function renderTransit(){
   var canEdit=canEditTransit();
   var canAdd=canAddTransit();
 
-  /* Приложи direction филтър */
+  /* Приложи direction филтър — 3 отделни посоки, не се препокриват */
   var viewData=transitData;
-  if(transitDir==='incoming') viewData=transitData.filter(function(r){return r.direction!=='outgoing';});
+  if(transitDir==='incoming') viewData=transitData.filter(function(r){return r.direction==='incoming';});
+  else if(transitDir==='transfer') viewData=transitData.filter(function(r){return r.direction==='transfer';});
   else if(transitDir==='outgoing') viewData=transitData.filter(function(r){return r.direction==='outgoing';});
 
   /* Статус филтър */
@@ -117,15 +142,21 @@ function renderTransit(){
     return true;
   });
   if(transitStore){
-    /* Ако избраният е реален магазин (има си собствени редове по store_name),
+    /* Ако избраният се среща ПРЕОБЛАДАВАЩО като store_name (истински магазин),
        филтрираме само по store_name — иначе редове на ЧУЖДИ магазини се
        промъкват само защото името съвпада с полето supplier (напр. трансфер
-       Търговище→Петрич се показва и при двамата). Ако избраният е склад/
-       доставчик без собствени редове (напр. "Логистичен склад Добрич"),
-       филтрираме по supplier, както досега. */
-    var _realStoreNames={};
-    transitData.forEach(function(r){if(r.store_name)_realStoreNames[r.store_name]=1;});
-    list = _realStoreNames[transitStore]
+       Търговище→Петрич се показва и при двамата).
+       Ако се среща ПРЕОБЛАДАВАЩО като supplier (логистичен склад — напр.
+       "Логистичен склад Търговище" има само 1 случаен ред като store_name
+       срещу 1988 легитимни като supplier), филтрираме по supplier.
+       Мажоритарното правило е устойчиво на единични аномални редове в данните,
+       за разлика от обикновена проверка "среща ли се изобщо". */
+    var _ownCount=0,_asSupplierCount=0;
+    transitData.forEach(function(r){
+      if(r.store_name===transitStore)_ownCount++;
+      if(r.supplier===transitStore)_asSupplierCount++;
+    });
+    list = (_ownCount>=_asSupplierCount)
       ? list.filter(function(r){return r.store_name===transitStore;})
       : list.filter(function(r){return r.supplier===transitStore;});
   }
@@ -134,16 +165,21 @@ function renderTransit(){
   });
 
   /* Статистика */
-  var counts={pending:0,received:0,rejected:0,sent:0,incCount:0,outCount:0};
+  var counts={pending:0,received:0,rejected:0,sent:0,incCount:0,outCount:0,transferCount:0};
   viewData.forEach(function(r){
     if(counts[r.status]!==undefined)counts[r.status]++;
     if(r.direction==='outgoing') counts.outCount++;
+    else if(r.direction==='transfer') counts.transferCount++;
     else counts.incCount++;
   });
   /* allCounts по direction за таб надписите */
-  var allCounts={pending:0,received:0,rejected:0,outPending:0};
+  var allCounts={pending:0,received:0,rejected:0,outPending:0,transferPending:0,transferSent:0};
   transitData.forEach(function(r){
     if(r.direction==='outgoing'){if(r.status==='pending')allCounts.outPending++;}
+    else if(r.direction==='transfer'){
+      if(r.status==='pending')allCounts.transferPending++;
+      else if(r.status==='sent')allCounts.transferSent++;
+    }
     else{if(allCounts[r.status]!==undefined)allCounts[r.status]++;}
   });
 
@@ -169,8 +205,9 @@ function renderTransit(){
   h+='</div></div>';
 
   /* Stat карти */
-  h+='<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px;">';
+  h+='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin-bottom:14px;">';
   h+=tStatCard('📦 Incoming',counts.incCount,'#2563eb');
+  h+=tStatCard('🔄 Трансфери',counts.transferCount,'#c2410c');
   h+=tStatCard('📤 Outgoing',counts.outCount,'#7c3aed');
   h+=tStatCard('⏳ Не доставени',counts.pending,'#d97706');
   h+=tStatCard('📤 Изпратени',counts.sent,'#7c3aed');
@@ -179,9 +216,10 @@ function renderTransit(){
   h+='</div>';
 
   /* Direction tabs */
-  h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:500px;">';
+  h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:640px;">';
   [['all','📦📤 Всички','all'+(transitData.length?' ('+transitData.length+')':'')],
    ['incoming','📦 Получавам','('+allCounts.pending+' чакат)'],
+   ['transfer','🔄 Трансфери','('+allCounts.transferPending+' за изпр. / '+allCounts.transferSent+' за получ.)'],
    ['outgoing','📤 Изпращам','('+allCounts.outPending+' чакат)']].forEach(function(t){
     var active=transitDir===t[0];
     h+='<button onclick="transitDir=\''+t[0]+'\';renderTransit()" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';">'+t[1]+'<div style="font-size:10px;opacity:0.7;">'+t[2]+'</div></button>';
@@ -236,13 +274,16 @@ function renderTransit(){
     list.forEach(function(r){
       var st=T_STATUS[r.status]||T_STATUS.pending;
       var isOut=r.direction==='outgoing';
+      var isTransfer=r.direction==='transfer';
       var isOver=r.status==='pending'&&r.doc_date&&(new Date()-new Date(r.doc_date))>30*86400000;
-      var dirBg=isOut?'rgba(124,58,237,.04)':'';
+      var dirBg=isOut?'rgba(124,58,237,.04)':(isTransfer?'rgba(194,65,12,.04)':'');
       h+='<tr style="border-bottom:1px solid #f1f5f9;'+(isOver?'background:#fffbeb;':dirBg)+'">';
       /* Посока */
       h+='<td style="padding:6px 8px;overflow:hidden;">';
       h+=isOut?
         '<span style="background:#f5f3ff;color:#7c3aed;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">📤 Изпращам</span>':
+        isTransfer?
+        '<span style="background:#fff7ed;color:#c2410c;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">🔄 Трансфер</span>':
         '<span style="background:#eff6ff;color:#1e40af;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">📦 Получавам</span>';
       h+='</td>';
       h+=
@@ -259,9 +300,35 @@ function renderTransit(){
           '<span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">'+st.label+'</span>'+
           (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.comment)+'">'+esc(r.comment)+'</div>':'')+
         '</td>'+
-        '<td style="padding:6px 6px;position:sticky;right:0;background:'+((isOver?'#fffbeb':(isOut?'#faf9ff':'#fff')))+';box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">';
+        '<td style="padding:6px 6px;position:sticky;right:0;background:'+((isOver?'#fffbeb':(isOut?'#faf9ff':(isTransfer?'#fffaf5':'#fff'))))+';box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">';
       h+='<div style="display:flex;flex-wrap:wrap;gap:3px;">';
-      if(canEdit&&r.status==='pending'){
+      if(canEdit&&isTransfer){
+        /* Двустъпков поток: pending→sent само подателят, sent→received само получателят */
+        if(r.status==='pending'){
+          if(transitCanMarkSent(r)){
+            h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'sent\')" style="border:none;background:#7c3aed;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">📤 Изпратена</button>';
+            h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✕ Неприето</button>';
+          } else {
+            h+='<span style="font-size:10px;color:#94a3b8;white-space:nowrap;">⏳ чака '+esc(r.supplier||'подателя')+'</span>';
+          }
+        } else if(r.status==='sent'){
+          if(transitCanMarkReceived(r)){
+            h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'received\')" style="border:none;background:#16a34a;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✅ Прието</button>';
+            h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✕ Неприето</button>';
+          } else {
+            h+='<span style="font-size:10px;color:#94a3b8;white-space:nowrap;">📤 чака '+esc(r.store_name||'получателя')+'</span>';
+          }
+        }
+        /* Върни: sent→pending само подателят; received→sent само получателят; global винаги */
+        if(r.status==='sent'&&(isGlobal()||transitIsSenderOf(r))){
+          h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">↩ Върни</button>';
+        } else if(r.status==='received'&&(isGlobal()||transitIsReceiverOf(r))){
+          h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'sent\')" style="border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">↩ Върни</button>';
+        } else if(r.status==='rejected'&&isGlobal()){
+          h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">↩ Върни</button>';
+        }
+      }
+      if(canEdit&&!isTransfer&&r.status==='pending'){
         if(isOut){
           h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'sent\')" style="border:none;background:#7c3aed;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">📤 Изпратена</button>';
         } else {
@@ -269,7 +336,7 @@ function renderTransit(){
         }
         h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✕ Неприето</button>';
       }
-      if(canEdit&&r.status!=='pending'){
+      if(canEdit&&!isTransfer&&r.status!=='pending'){
         h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">↩ Върни</button>';
       }
       if(canEdit){
@@ -302,9 +369,21 @@ function setTStore(s){ transitStore=s; renderTransit(); }
 /* ── СТАТУС ПРОМЯНА ── */
 function tMarkStatus(id,status){
   var r=transitData.find(function(x){return String(x.id)===String(id);});
-  if(r&&r.direction==='outgoing'&&status==='received'){
+  if(!r)return;
+  if(r.direction==='outgoing'&&status==='received'){
     toast('Изпращащ магазин/склад не може да отбележи "Прието" — само "Изпратена"','#dc2626');
     return;
+  }
+  if(r.direction==='transfer'){
+    /* Двустъпков поток: pending→sent само подателят; sent→received само получателят */
+    if(status==='sent'&&!transitCanMarkSent(r)){
+      toast('Само изпращащият магазин ('+(r.supplier||'')+') може да маркира "Изпратена"','#dc2626');
+      return;
+    }
+    if(status==='received'&&!transitCanMarkReceived(r)){
+      toast('Само получаващият магазин ('+(r.store_name||'')+') може да маркира "Прието"','#dc2626');
+      return;
+    }
   }
   sbPatch('goods_transit','id=eq.'+id,{status:status,updated_by:currentUser.display_name||currentUser.email,updated_at:new Date().toISOString()})
   .then(function(){ loadTransit(); }).catch(function(){ toast('Грешка','#dc2626'); });
@@ -393,6 +472,7 @@ function transitModalHtml(){
     '<div style="grid-column:1/-1;"><label class="fl">Посока *</label>'+
       '<select class="fi" id="tr-direction" onchange="updateTrStatusOptions()">'+
         '<option value="incoming">📦 Получавам (incoming)</option>'+
+        '<option value="transfer">🔄 Трансфер между магазини</option>'+
         '<option value="outgoing">📤 Изпращам (outgoing)</option>'+
       '</select></div>'+
     '<div><label class="fl">Магазин *</label>'+
@@ -470,13 +550,21 @@ function openTransitEdit(id){
   m.classList.add('open');
 }
 
-/* Статус опциите зависят от посоката: outgoing няма "Прието" (само получателят може), вместо това "Изпратена" */
+/* Статус опциите зависят от посоката: outgoing и transfer имат "Изпратена",
+   transfer допълнително позволява и "Прието" (двустъпков поток) */
 function updateTrStatusOptions(preferredStatus){
   var dirEl=document.getElementById('tr-direction'); if(!dirEl)return;
   var statusEl=document.getElementById('tr-status'); if(!statusEl)return;
-  var isOut=dirEl.value==='outgoing';
+  var dir=dirEl.value;
   var opts='<option value="pending">⏳ Не доставена</option>';
-  opts+= isOut ? '<option value="sent">📤 Изпратена</option>' : '<option value="received">✅ Прието</option>';
+  if(dir==='outgoing'){
+    opts+='<option value="sent">📤 Изпратена</option>';
+  }else if(dir==='transfer'){
+    opts+='<option value="sent">📤 Изпратена (чака получателя)</option>';
+    opts+='<option value="received">✅ Прието</option>';
+  }else{
+    opts+='<option value="received">✅ Прието</option>';
+  }
   opts+='<option value="rejected">✕ Неприето</option>';
   statusEl.innerHTML=opts;
   var validValues=[].map.call(statusEl.options,function(o){return o.value;});
@@ -682,16 +770,32 @@ function parseTransitRows(rows, forceFmt){
   var parsed=dataRows.map(function(row){
     if(!row[0])return null;
     var plant=String(row[0]||'').trim();
-    /* Заводът определя КОЙ ПОЛУЧАВА стоката */
+    /* Заводът определя КОЙ ПОЛУЧАВА стоката (потвърдено от реалния SAP файл:
+       колоната "Завод" винаги е с "получаващ"-тип код в този вид импорт) */
+    var plantIsOutgoingType = !PLANT_INCOMING[plant] && !!PLANT_OUTGOING[plant];
     var store=PLANT_INCOMING[plant]||PLANT_OUTGOING[plant]||null;
     if(!store)return null; /* Непознат завод */
-    
-    /* Посоката се определя от ДОСТАВЧИКА:
-       Ако доставчикът е с outgoing код (2xxx/6xxx/7xxx) = магазин изпраща = outgoing
-       Ако доставчикът е с incoming код (5xxx) = склад/логистика изпраща = incoming */
+
     var supplierCodeRaw = (fmt==='new'?String(row[2]||''):String(row[1]||'')).trim();
     var supplierFirstCode = supplierCodeRaw.split(/\s+/)[0]||'';
-    var direction = PLANT_OUTGOING[supplierFirstCode] ? 'outgoing' : 'incoming';
+    var supplierResolvedName = PLANT_ALL[supplierFirstCode]||null;
+
+    var direction;
+    if(plantIsOutgoingType){
+      /* Заводът сам е с "изпращащ" код — рядък случай (различен тип SAP
+         извлечение), магазинът докладва собствена изходяща пратка. */
+      direction='outgoing';
+    }else if(supplierResolvedName && REAL_STORE_NAMES[supplierResolvedName] && supplierResolvedName!==store){
+      /* Доставчикът е РЕАЛЕН магазин (не склад/сервиз/администрация),
+         различен от получателя — истински трансфер между два магазина,
+         независимо дали кодът му е от "получаващ" или "изпращащ" тип
+         (SAP го записва различно според документа). Изисква двустъпково
+         потвърждение: подателят маркира "Изпратена", после получателят —
+         "Прието". */
+      direction='transfer';
+    }else{
+      direction='incoming';
+    }
     
     var supplierRaw, purchase_doc, position, doc_date, 
         material_code, material_name, ordered_qty, unit, remaining_qty;
@@ -751,7 +855,8 @@ function renderTransitImportPreview(summary,total){
   var rows=Object.values(summary).sort(function(a,b){
     return a.store.localeCompare(b.store,'bg')||(a.dir>b.dir?1:-1);
   });
-  var incoming=rows.filter(function(r){return r.dir!=='outgoing';});
+  var incoming=rows.filter(function(r){return r.dir==='incoming';});
+  var transfer=rows.filter(function(r){return r.dir==='transfer';});
   var outgoing=rows.filter(function(r){return r.dir==='outgoing';});
 
   var h='<div class="bov open" id="transit-import-ov" onclick="if(event.target===this)closeTransitImport()">'+
@@ -764,10 +869,20 @@ function renderTransitImportPreview(summary,total){
       'Разпознати <b>'+total+'</b> реда от SAP файла.'+
     '</div>'+
 
-    /* Incoming */
+    /* Трансфери между магазини — най-важно да се провери преди импорт */
+    '<div style="margin-bottom:14px;">'+
+    '<div style="font-size:12px;font-weight:700;color:#c2410c;margin-bottom:8px;">🔄 ТРАНСФЕРИ МЕЖДУ МАГАЗИНИ (получател / брой) — '+transfer.reduce(function(s,r){return s+r.count;},0)+' реда</div>'+
+    '<div style="max-height:150px;overflow-y:auto;border:1px solid #fed7aa;border-radius:8px;">'+
+    '<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
+    (transfer.length?transfer.map(function(r){
+      return '<tr style="border-bottom:1px solid #fff7ed;"><td style="padding:5px 10px;font-weight:500;">'+esc(r.store)+'</td><td style="padding:5px 10px;text-align:right;color:#c2410c;font-weight:600;">'+r.count+'</td></tr>';
+    }).join(''):'<tr><td style="padding:10px;color:#94a3b8;text-align:center;">Няма трансфери между магазини</td></tr>')+
+    '</table></div></div>'+
+
+    /* Incoming + Outgoing */
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">'+
     '<div>'+
-    '<div style="font-size:12px;font-weight:700;color:#1e40af;margin-bottom:8px;">📦 ПОЛУЧАВАМ (incoming) — '+incoming.reduce(function(s,r){return s+r.count;},0)+' реда</div>'+
+    '<div style="font-size:12px;font-weight:700;color:#1e40af;margin-bottom:8px;">📦 ПОЛУЧАВАМ (от склад) — '+incoming.reduce(function(s,r){return s+r.count;},0)+' реда</div>'+
     '<div style="max-height:200px;overflow-y:auto;border:1px solid #dbeafe;border-radius:8px;">'+
     '<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
     incoming.map(function(r){
