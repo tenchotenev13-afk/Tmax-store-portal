@@ -207,6 +207,13 @@ function renderStockDiff() {
 /* ── Бутони за решение по ред (само canReviewDiff) ── */
 function diffLineResolveButtons(l){
   var TYPE_LABELS={writein:'📥 Заприх.',return:'↩️ Връщане',missing:'❓ Липса'};
+  /* Логистичните складове НИКОГА не виждат/пипат решението на Цвети - то е
+     само за разлики с доставчици, независимо каква роля има складовият
+     профил технически (напр. 'logistics'). */
+  if(isLogisticsWarehouseUser()){
+    if(l.type) return '<span style="color:#94a3b8;">— (за доставчици, не за вас)</span>';
+    return '<span style="color:#cbd5e1;">—</span>';
+  }
   if(!canReviewDiff()){
     if(l.type) return '<span style="color:#16a34a;font-weight:600;">✓ '+(TYPE_LABELS[l.type]||l.type)+'</span>';
     return '<span style="color:#94a3b8;">чака преглед</span>';
@@ -687,7 +694,7 @@ function renderDiffReportsSection(){
           '<td style="padding:3px 6px;text-align:right;">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
           '<td style="padding:3px 6px;color:#64748b;">'+esc(l.comment||'')+'</td>'+
           '<td style="padding:3px 6px;white-space:nowrap;">'+diffLineResolveButtons(l)+
-          (canReviewDiff()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
+          (canReviewDiff()&&!isLogisticsWarehouseUser()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
           (canEditSD()&&!l.type&&currentUser.store_name===rep.store_name?' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>':'')+
           '</td>'+
           '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+'</td>'+
