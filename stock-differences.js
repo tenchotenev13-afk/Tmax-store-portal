@@ -20,6 +20,16 @@ function canSubmitDiff() {
 function canReviewDiff() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
+/* Логистични складове - отделни физически обекти (не роля), чиито служители
+   влизат с обичайните си профили, но с store_name = точно името на склада.
+   Те виждат само разликите, при които ТЕ са насрещната страна (counterpart)
+   на междускладов трансфер - Цвети се грижи за доставчиците, складовете се
+   разбират директно с магазините получатели. */
+var LOGISTICS_WAREHOUSES = ['Логистичен склад Добрич','Логистичен склад Търговище'];
+function isLogisticsWarehouseUser(){
+  return currentUser && LOGISTICS_WAREHOUSES.indexOf(currentUser.store_name) >= 0;
+}
+var WH_RESPONSE_LABELS = {sent:'📤 Изпратено',will_send:'⏳ Ще се изпрати','return':'↩️ Обратно движение'};
 /* Изпращане на имейл до доставчик - Цветелина Тенева + admin (за тестване/подпомагане) */
 function canSendDiffEmail() {
   if (!currentUser) return false;
@@ -60,6 +70,13 @@ function renderStockDiff() {
 
   var list = sdData.filter(function(r) {
     if (!r.type) return false; /* още не е прегледан от Цветелина - показва се само в секцията "За преглед" */
+    /* Логистичен склад - вижда само собствените си насрещни разлики.
+       counterpart живее в differences_reports, не директно в реда - търсим
+       през report_id. */
+    if (isLogisticsWarehouseUser()) {
+      var parentRep = diffReports.find(function(x){return x.id===r.report_id;});
+      if (!parentRep || parentRep.counterpart !== currentUser.store_name) return false;
+    }
     if (sdTypeFilter !== 'all' && r.type !== sdTypeFilter) return false;
     if (sdFilter === 'pending') { if (r.status !== 'pending') return false; }
     else if (sdFilter === 'taken') { if (r.status !== 'taken') return false; }
@@ -129,7 +146,7 @@ function renderStockDiff() {
     h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">';
     h += '<thead><tr style="background:#f8fafc;">';
-    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Кредитно','Коментар','Коментар Контролер',''].forEach(function(c){
+    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Кредитно','Коментар','Коментар Контролер','Отговор на склада',''].forEach(function(c){
       h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
     });
     h += '</tr></thead><tbody>';
@@ -163,6 +180,7 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;white-space:nowrap;">'+creditCell+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.comment||'')+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.resolution_comment||'')+(normSDAttachments(r.attachments).length?' 📎'+normSDAttachments(r.attachments).length:'')+'</td>'+
+        '<td style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
         '<td style="padding:7px 10px;white-space:nowrap;">';
 
       if (canEdit && !isTaken) {
@@ -204,6 +222,58 @@ function diffLineResolveButtons(l){
     mk('return','↩️ Връщане','#7c3aed')+
     mk('missing','❓ Липса','#dc2626')+
   '</div>';
+}
+/* Решение на ЛОГИСТИЧНИЯ СКЛАД (отделно от решението на Цветелина) - само за
+   междускладови разлики, при които складът е насрещна страна (counterpart).
+   Складът: Изпратено/Ще се изпрати/Обратно движение + коментар. Цвети/admin
+   виждат резултата само за оглед, не могат да го сменят. */
+function diffWarehouseResolveButtons(l, rep){
+  var isMyWarehouse = isLogisticsWarehouseUser() && rep && rep.counterpart===currentUser.store_name;
+  if(isMyWarehouse){
+    var mk=function(val,label,color){
+      var active=l.warehouse_response===val;
+      return '<button data-lid="'+l.id+'" data-val="'+val+'" onclick="openWarehouseResponseModal(this.dataset.lid,this.dataset.val)" style="border:none;background:'+(active?color:color+'1a')+';color:'+(active?'#fff':color)+';border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">'+(active?'✓ ':'')+label+'</button>';
+    };
+    var h='<div style="display:flex;gap:3px;flex-wrap:wrap;">'+
+      mk('sent','📤 Изпратено','#16a34a')+
+      mk('will_send','⏳ Ще изпрати','#d97706')+
+      mk('return','↩️ Обратно','#7c3aed')+
+      '</div>';
+    if(l.warehouse_comment) h+='<div style="font-size:10px;color:#64748b;margin-top:2px;">💬 '+esc(l.warehouse_comment)+'</div>';
+    return h;
+  }
+  /* Цвети/admin/обикновени потребители - само за оглед, не могат да пипат */
+  if(l.warehouse_response){
+    var h2='<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[l.warehouse_response]||l.warehouse_response)+'</span>';
+    if(l.warehouse_comment) h2+='<div style="font-size:10px;color:#64748b;">💬 '+esc(l.warehouse_comment)+'</div>';
+    return h2;
+  }
+  return '<span style="color:#94a3b8;">чака склада</span>';
+}
+function openWarehouseResponseModal(lineId,val){
+  var l = sdData.find(function(x){return String(x.id)===String(lineId);});
+  if(!l)return;
+  var existing = document.getElementById('whr-ov'); if(existing) existing.remove();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="whr-ov"><div class="bmod" style="width:380px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">'+(WH_RESPONSE_LABELS[val]||val)+'</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(l.material_name||'')+'</div>'+
+    '<label class="fl">Коментар към магазина (по избор)</label>'+
+    '<input class="fi" id="whr-comment" value="'+esc(l.warehouse_comment||'')+'" placeholder="напр. Ще стигне до вторник с редовния курс">'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="document.getElementById(\'whr-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button data-lid="'+lineId+'" data-val="'+val+'" onclick="submitWarehouseResponse(this.dataset.lid,this.dataset.val)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>'+
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+function submitWarehouseResponse(lineId,val){
+  var commentEl = document.getElementById('whr-comment');
+  sbPatch('stock_differences','id=eq.'+lineId,{warehouse_response:val,warehouse_comment:commentEl?commentEl.value:''}).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    var el=document.getElementById('whr-ov'); if(el)el.remove();
+    toast('✅ Отговорът е запазен!');
+    loadStockDiff();
+  });
 }
 /* Автоматично създава запис в "За връщане" (source='diff'), когато разлика бъде
    решена като "Връщане" - проверява за вече съществуващ, за да не дублира
@@ -569,6 +639,9 @@ function diffCategoryLabel(v){
 /* ── Секция с подадени бланки (чакат преглед) ── */
 function renderDiffReportsSection(){
   var unreviewed = diffReports.filter(function(r){return !r.reviewed;});
+  if(isLogisticsWarehouseUser()){
+    unreviewed = unreviewed.filter(function(r){return r.counterpart===currentUser.store_name;});
+  }
   if(!unreviewed.length) return '';
   /* Бланки с наскоро коригиран от магазина ред изскачат най-отгоре -
      иначе биха останали "погребани" в дъното на списъка. */
@@ -603,7 +676,7 @@ function renderDiffReportsSection(){
       h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
       h+='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">По вх. дост.</th>'+
         (repIsSupplier?'<th style="padding:3px 6px;text-align:right;">По стокова</th>':'')+
-        '<th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар</th><th style="padding:3px 6px;">Решение</th></tr>';
+        '<th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар</th><th style="padding:3px 6px;">Решение (Цвети)</th><th style="padding:3px 6px;">Отговор на склада</th></tr>';
       lines.forEach(function(l){
         h+='<tr style="border-top:1px solid #f1f5f9;'+(l.store_corrected_at?'background:#fffbeb;':'')+'">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
@@ -615,8 +688,9 @@ function renderDiffReportsSection(){
           '<td style="padding:3px 6px;color:#64748b;">'+esc(l.comment||'')+'</td>'+
           '<td style="padding:3px 6px;white-space:nowrap;">'+diffLineResolveButtons(l)+
           (canReviewDiff()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
-          (canEditSD()&&!l.type?' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>':'')+
+          (canEditSD()&&!l.type&&currentUser.store_name===rep.store_name?' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>':'')+
           '</td>'+
+          '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+'</td>'+
         '</tr>';
       });
       h+='</table>';
