@@ -3,6 +3,7 @@
 var sdData   = [];
 var sdFilter = 'pending';
 var sdTypeFilter = 'all';
+var sdDirTab = 'supplier'; /* 'supplier' | 'interstore' - главната таблица за Цвети */
 var sdEditId = null;
 var sdSearch = '';
 
@@ -76,6 +77,13 @@ function renderStockDiff() {
     if (isLogisticsWarehouseUser()) {
       var parentRep = diffReports.find(function(x){return x.id===r.report_id;});
       if (!parentRep || parentRep.counterpart !== currentUser.store_name) return false;
+    } else {
+      /* За всички останали - подтабовете "Доставчици"/"Междускладови" разделят
+         главната таблица, за по-ясно разграничение (най-вече за Цвети, която
+         управлява доставчиковите; междускладовите вече минават през склада). */
+      var rp = diffReports.find(function(x){return x.id===r.report_id;});
+      var rDir = rp ? rp.direction : 'supplier';
+      if (rDir !== sdDirTab) return false;
     }
     if (sdTypeFilter !== 'all' && r.type !== sdTypeFilter) return false;
     if (sdFilter === 'pending') { if (r.status !== 'pending') return false; }
@@ -111,6 +119,24 @@ function renderStockDiff() {
 
   /* Новоподадени бланки - чакат преглед от Цветелина */
   h += renderDiffReportsSection();
+
+  /* Подтабове по посока - разделят главната (резолвирана) таблица, за да не
+     се смесват доставчиковите разлики (грижа на Цвети) с междускладовите
+     (грижа на логистичните складове). Не важи за самите складове - тяхната
+     видимост вече е ограничена другояче (само собствените им насрещни). */
+  if(!isLogisticsWarehouseUser()){
+    var dirCounts = {supplier:0, interstore:0};
+    sdData.forEach(function(r){
+      if(!r.type) return;
+      var rp = diffReports.find(function(x){return x.id===r.report_id;});
+      var d = rp ? rp.direction : 'supplier';
+      if(dirCounts.hasOwnProperty(d)) dirCounts[d]++;
+    });
+    h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
+    h += '<button onclick="setSDDirTab(\'supplier\')" style="border:1px solid '+(sdDirTab==='supplier'?'#0f172a':'#e2e8f0')+';padding:6px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:'+(sdDirTab==='supplier'?'#0f172a':'#fff')+';color:'+(sdDirTab==='supplier'?'#fff':'#64748b')+';">📦 Разлики от доставчици ('+dirCounts.supplier+')</button>';
+    h += '<button onclick="setSDDirTab(\'interstore\')" style="border:1px solid '+(sdDirTab==='interstore'?'#0f172a':'#e2e8f0')+';padding:6px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:'+(sdDirTab==='interstore'?'#0f172a':'#fff')+';color:'+(sdDirTab==='interstore'?'#fff':'#64748b')+';">🔄 Разлики от междускладови трансфери ('+dirCounts.interstore+')</button>';
+    h += '</div>';
+  }
 
   /* Карти */
   h += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;max-width:400px;">';
@@ -153,7 +179,9 @@ function renderStockDiff() {
 
     list.forEach(function(r) {
       var isTaken = r.status === 'taken';
-      var statusBadge = r.status==='capitalized'
+      var statusBadge = r.status==='received'
+        ? '<span style="background:#f0fdfa;color:#0d9488;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📬 ПРИЕТА</span>'
+        : r.status==='capitalized'
         ? '<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📥 ЗАПРИХОДЕНА</span>'
         : isTaken
         ? '<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ ВЗЕТА</span>'
@@ -333,6 +361,7 @@ function resolveDiffLine(id,type){
 
 function setSDFilter(f) { sdFilter=f; renderStockDiff(); }
 function setSDTypeFilter(f) { sdTypeFilter=f; renderStockDiff(); }
+function setSDDirTab(t) { sdDirTab=t; renderStockDiff(); }
 /* Пре-рендира при търсене, но запазва фокуса/позицията на курсора в полето -
    иначе всяко натискане на клавиш би "изритвало" потребителя от полето. */
 function setSDSearch(val){
@@ -454,6 +483,7 @@ function sdModalHtml() {
     '<option value="pending"'+(r.status==='pending'||!r.status?' selected':'')+'>⏳ НЕВЗЕТА</option>'+
     '<option value="taken"'+(r.status==='taken'?' selected':'')+'>✅ ВЗЕТА</option>'+
     '<option value="capitalized"'+(r.status==='capitalized'?' selected':'')+'>📥 ЗАПРИХОДЕНА</option>'+
+    '<option value="received"'+(r.status==='received'?' selected':'')+'>📬 ПРИЕТА</option>'+
     '</select>'+
 
     '<label class="fl">Коментар</label>'+
@@ -668,7 +698,18 @@ function renderDiffReportsSection(){
   if(!unreviewed.length) return '';
   /* Бланки с наскоро коригиран от магазина ред изскачат най-отгоре -
      иначе биха останали "погребани" в дъното на списъка. */
+  /* Бланка, на която складът вече е отговорил напълно (всички редове имат
+     warehouse_response), слиза надолу - вече не е спешна за преглед, чака
+     магазина да потвърди получаването. */
+  function warehouseFullyResponded(repId){
+    var lines = sdData.filter(function(x){return x.report_id===repId;});
+    return lines.length>0 && lines.every(function(l){return !!l.warehouse_response;});
+  }
   unreviewed = unreviewed.slice().sort(function(a,b){
+    var aResponded = warehouseFullyResponded(a.id);
+    var bResponded = warehouseFullyResponded(b.id);
+    if(aResponded&&!bResponded)return 1;
+    if(bResponded&&!aResponded)return -1;
     var aLines=sdData.filter(function(x){return x.report_id===a.id;});
     var bLines=sdData.filter(function(x){return x.report_id===b.id;});
     var aCorr=aLines.reduce(function(m,l){return l.store_corrected_at&&l.store_corrected_at>m?l.store_corrected_at:m;},'');
