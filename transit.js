@@ -142,23 +142,33 @@ function renderTransit(){
     return true;
   });
   if(transitStore){
-    /* Ако избраният се среща ПРЕОБЛАДАВАЩО като store_name (истински магазин),
-       филтрираме само по store_name — иначе редове на ЧУЖДИ магазини се
-       промъкват само защото името съвпада с полето supplier (напр. трансфер
-       Търговище→Петрич се показва и при двамата).
-       Ако се среща ПРЕОБЛАДАВАЩО като supplier (логистичен склад — напр.
-       "Логистичен склад Търговище" има само 1 случаен ред като store_name
-       срещу 1988 легитимни като supplier), филтрираме по supplier.
-       Мажоритарното правило е устойчиво на единични аномални редове в данните,
-       за разлика от обикновена проверка "среща ли се изобщо". */
+    /* За transfer редове ВИНАГИ проверяваме и двете полета — магазинът
+       легитимно може да е подател (supplier) в един ред и получател
+       (store_name) в друг, и искаме да видим всичко, докато гледаме
+       таб "Трансфери" (напр. Кърджали трябва да види и 123-те си incoming
+       реда, И 6-те transfer реда, където Е supplier — мажоритарното
+       правило по-долу би скрило вторите, защото Кърджали се среща много
+       по-често като store_name общо взето).
+
+       За incoming/outgoing редове (не transfer) прилагаме мажоритарно
+       правило: ако избраният се среща ПРЕОБЛАДАВАЩО като store_name
+       (истински магазин), филтрираме само по store_name — иначе редове
+       на ЧУЖДИ магазини се промъкват само защото името съвпада с полето
+       supplier. Ако се среща ПРЕОБЛАДАВАЩО като supplier (логистичен
+       склад — напр. "Логистичен склад Търговище" има само 1 случаен ред
+       като store_name срещу 1988 легитимни като supplier), филтрираме
+       по supplier. Устойчиво на единични аномални редове в данните, за
+       разлика от обикновена проверка "среща ли се изобщо". */
     var _ownCount=0,_asSupplierCount=0;
     transitData.forEach(function(r){
       if(r.store_name===transitStore)_ownCount++;
       if(r.supplier===transitStore)_asSupplierCount++;
     });
-    list = (_ownCount>=_asSupplierCount)
-      ? list.filter(function(r){return r.store_name===transitStore;})
-      : list.filter(function(r){return r.supplier===transitStore;});
+    var _matchByStoreName=_ownCount>=_asSupplierCount;
+    list = list.filter(function(r){
+      if(r.direction==='transfer') return r.store_name===transitStore||r.supplier===transitStore;
+      return _matchByStoreName ? r.store_name===transitStore : r.supplier===transitStore;
+    });
   }
   if(transitMonthFilter) list=list.filter(function(r){
     return r.doc_date&&r.doc_date.slice(0,7)===transitMonthFilter;
@@ -205,22 +215,25 @@ function renderTransit(){
   h+='</div></div>';
 
   /* Stat карти */
-  h+='<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:10px;margin-bottom:14px;">';
+  /* OUTGOING картата е скрита — с текущия SAP формат "Завод" никога не е
+     изпращащ-тип код, затова direction='outgoing' е винаги 0 на практика.
+     Логиката отдолу (parseTransitRows, tMarkStatus) остава непокътната
+     за в случай, че някога дойде различен тип SAP извлечение. */
+  h+='<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px;">';
   h+=tStatCard('📦 Incoming',counts.incCount,'#2563eb');
   h+=tStatCard('🔄 Трансфери',counts.transferCount,'#c2410c');
-  h+=tStatCard('📤 Outgoing',counts.outCount,'#7c3aed');
   h+=tStatCard('⏳ Не доставени',counts.pending,'#d97706');
   h+=tStatCard('📤 Изпратени',counts.sent,'#7c3aed');
   h+=tStatCard('✅ Прието',counts.received,'#16a34a');
   h+=tStatCard('✕ Неприето',counts.rejected,'#dc2626');
   h+='</div>';
 
-  /* Direction tabs */
+  /* Direction tabs — "Изпращам" (outgoing) е скрит по същата причина.
+     Ако някога се появи такъв ред, ще се вижда под "Всички". */
   h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:640px;">';
   [['all','📦📤 Всички','all'+(transitData.length?' ('+transitData.length+')':'')],
    ['incoming','📦 Получавам','('+allCounts.pending+' чакат)'],
-   ['transfer','🔄 Трансфери','('+allCounts.transferPending+' за изпр. / '+allCounts.transferSent+' за получ.)'],
-   ['outgoing','📤 Изпращам','('+allCounts.outPending+' чакат)']].forEach(function(t){
+   ['transfer','🔄 Трансфери','('+allCounts.transferPending+' за изпр. / '+allCounts.transferSent+' за получ.)']].forEach(function(t){
     var active=transitDir===t[0];
     h+='<button onclick="transitDir=\''+t[0]+'\';renderTransit()" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';">'+t[1]+'<div style="font-size:10px;opacity:0.7;">'+t[2]+'</div></button>';
   });
