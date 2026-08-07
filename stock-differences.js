@@ -665,7 +665,7 @@ function submitSD() {
 
 var DIFF_CATEGORIES = [
   /* [key, label, посоки[], снимки задължителни?, подсказка за доп. имейл] */
-  ['undelivered','📦 Недоставен артикул (липса)', ['supplier','interstore'], true, null],
+  ['undelivered','📦 Недоставен артикул (липса)', ['supplier','interstore'], false, null],
   ['excess','📈 Излишък (получен в повече)', ['supplier','interstore'], false, null],
   ['wrong_item','❌ Грешен артикул (не е поръчван)', ['supplier'], false, null],
   ['pack_mismatch','📦 Разлика от фабрична опаковка', ['interstore'], true, 'm.pavlova@temax.bg'],
