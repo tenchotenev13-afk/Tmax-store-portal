@@ -765,7 +765,16 @@ function renderDiffReportsSection(){
     if(photos.length){
       h+='<div style="display:flex;gap:6px;flex-wrap:wrap;">';
       photos.forEach(function(p){
-        h+='<a href="'+esc(p.url)+'" target="_blank"><img src="'+esc(p.url)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+        /* Не всичко, качено през "Снимай сега/Избери от галерия", реално е
+           снимка - служителите понякога прикачват сканирани PDF документи.
+           <img> не може да покаже PDF вградено (затова изглеждаше "счупено"
+           на екрана, макар линкът да работеше коректно при директно отваряне). */
+        var isImg = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(p.url);
+        if(isImg){
+          h+='<a href="'+esc(p.url)+'" target="_blank"><img src="'+esc(p.url)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+        } else {
+          h+='<a href="'+esc(p.url)+'" target="_blank" title="'+esc(p.name||'Файл')+'" style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:56px;height:56px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;text-decoration:none;font-size:20px;">📄</a>';
+        }
       });
       h+='</div>';
     }
@@ -986,7 +995,13 @@ function diffUploadPhoto(input){
           if(!ok){ if(ph) ph.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>'; return; }
           var pub=DIFF_SB+'/storage/v1/object/public/'+DIFF_BKT+'/'+path;
           diffPendingPhotos.push({url:pub,name:file.name});
-          if(ph) ph.outerHTML='<a href="'+esc(pub)+'" target="_blank"><img src="'+esc(pub)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+          if(ph){
+            if(isImg){
+              ph.outerHTML='<a href="'+esc(pub)+'" target="_blank"><img src="'+esc(pub)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+            } else {
+              ph.outerHTML='<a href="'+esc(pub)+'" target="_blank" title="'+esc(file.name)+'" style="display:flex;align-items:center;justify-content:center;width:56px;height:56px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;text-decoration:none;font-size:20px;">📄</a>';
+            }
+          }
         }).catch(function(){
           var ph2=document.getElementById(placeholderId);
           if(ph2) ph2.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>';
