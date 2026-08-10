@@ -1192,7 +1192,7 @@ function submitDiffReport(){
    ИМЕЙЛ ДО ДОСТАВЧИК/ИЗПРАЩАЧ (само Цветелина Тенева)
 ══════════════════════════════════════════ */
 
-function diffEmailBodyHtml(rep,lines){
+function diffEmailBodyHtml(rep,lines,note){
   var h='<div style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;">';
   h+='<p>Здравейте,</p>';
   h+='<p>Установени са разлики при '+(rep.direction==='supplier'?'приемане на доставка':'междускладов трансфер')+' — '+esc(rep.counterpart||'')+
@@ -1216,6 +1216,7 @@ function diffEmailBodyHtml(rep,lines){
   if(rep.general_comment) h+='<p><strong>Допълнителна информация:</strong> '+esc(rep.general_comment)+'</p>';
   var photos=Array.isArray(rep.photos)?rep.photos:[];
   if(photos.length) h+='<p>📎 Прикачени са '+photos.length+' снимк'+(photos.length===1?'а':'и')+' към този имейл.</p>';
+  if(note) h+='<p>'+esc(note).replace(/\n/g,'<br>')+'</p>';
   /* Коментар на Цветелина (resolution_comment) - полето е на ниво ред, не на
      ниво бланка, затова събираме тези от всички редове с непразен коментар. */
   var tsvetiComments = lines.filter(function(l){return l.resolution_comment;});
@@ -1251,7 +1252,7 @@ function diffEmailModalHtml(rep,lines){
     '<input class="fi" id="de-subject" value="'+esc(subject)+'">'+
 
     '<label class="fl" style="margin-top:8px;">Съдържание</label>'+
-    '<textarea class="fi" id="de-body-note" rows="2" placeholder="(незадължително) кратко въведение отгоре на автоматичната таблица..."></textarea>'+
+    '<textarea class="fi" id="de-body-note" rows="2" placeholder="(незадължително) допълнителен текст под таблицата и прикачените файлове..."></textarea>'+
 
     '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-top:8px;max-height:220px;overflow-y:auto;font-size:12px;">'+
     diffEmailBodyHtml(rep,lines)+
@@ -1318,7 +1319,7 @@ function sendDiffEmail(reportId){
   var note=(document.getElementById('de-body-note').value||'').trim();
   var lines=sdData.filter(function(x){return x.report_id===rep.id;});
 
-  var bodyHtml=(note?'<p style="font-family:Arial,sans-serif;font-size:14px;">'+esc(note)+'</p>':'')+diffEmailBodyHtml(rep,lines);
+  var bodyHtml=diffEmailBodyHtml(rep,lines,note);
 
   var btn=document.getElementById('de-send-btn');
   if(btn){btn.disabled=true;btn.textContent='⏳ Подготвям снимките...';}
