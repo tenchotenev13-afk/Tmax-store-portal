@@ -1216,7 +1216,16 @@ function diffEmailBodyHtml(rep,lines){
   if(rep.general_comment) h+='<p><strong>Допълнителна информация:</strong> '+esc(rep.general_comment)+'</p>';
   var photos=Array.isArray(rep.photos)?rep.photos:[];
   if(photos.length) h+='<p>📎 Прикачени са '+photos.length+' снимк'+(photos.length===1?'а':'и')+' към този имейл.</p>';
-  h+='<p>Моля за обратна връзка относно решението по случая.</p>';
+  /* Коментар на Цветелина (resolution_comment) - полето е на ниво ред, не на
+     ниво бланка, затова събираме тези от всички редове с непразен коментар. */
+  var tsvetiComments = lines.filter(function(l){return l.resolution_comment;});
+  if(tsvetiComments.length){
+    h+='<p>💬 <strong>Коментар:</strong><br>';
+    tsvetiComments.forEach(function(l){
+      h+=esc(l.material_name||l.material_code||'')+' — '+esc(l.resolution_comment)+'<br>';
+    });
+    h+='</p>';
+  }
   h+='<p>Поздрави,<br>'+esc(currentUser.display_name||currentUser.email)+'<br>ТеМАХ</p>';
   h+='</div>';
   return h;
