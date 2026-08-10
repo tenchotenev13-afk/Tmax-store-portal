@@ -199,7 +199,7 @@ var allSuppliersCache=null;
 function invalidateSuppliersCache(){ allSuppliersCache=null; }
 function loadAllSuppliers(){
   if(allSuppliersCache)return Promise.resolve(allSuppliersCache);
-  return fetch(API+'/contacts?type=eq.supplier&select=name&order=name',{headers:H}).then(function(res){
+  return fetch(API+'/contacts?type=eq.supplier&store_visible=eq.true&select=name&order=name',{headers:H}).then(function(res){
     if(!res.ok){
       return res.text().then(function(errText){
         console.error('contacts (supplier) GET грешка:',errText);

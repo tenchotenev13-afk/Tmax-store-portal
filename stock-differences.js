@@ -1276,7 +1276,7 @@ function openDiffEmailModal(reportId){
   if(rep.counterpart) document.getElementById('de-to').value=''; /* оставяме празно - Цветелина избира от списъка или пише ръчно */
 
   /* Автоматично предлагане на имейл на доставчика от Контакти */
-  sbGet('contacts','category=eq.supplier&order=name').then(function(rows){
+  sbGet('contacts','type=eq.supplier&order=name').then(function(rows){
     if(!Array.isArray(rows))return;
     var dl=document.getElementById('de-supplier-list');
     if(!dl)return;
