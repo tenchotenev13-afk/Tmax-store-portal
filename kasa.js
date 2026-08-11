@@ -70,14 +70,20 @@ function loadKasa(){
   sbGet('kasa_reports',q).then(function(data){
     kasaReports=Array.isArray(data)?data:[];
     if(kasaView==='pos') renderKasa();
-    else renderGlavna();
-  }).catch(function(){renderKasa();});
+    else if(kasaView==='glavna') renderGlavna();
+  }).catch(function(){if(kasaView==='pos')renderKasa();});
   /* Главна каса за днес */
   var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
   sbGet('kasa_glavna',gq).then(function(data){
     kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
     if(kasaView==='glavna') renderGlavna();
   }).catch(function(){});
+  /* Равнение и Сторно имат собствени зареждания с отделни таблици —
+     иначе при връщане в Каса с активен последен подтаб 'zoborot'/'storno'
+     горното renderGlavna() никога не се вика за тях, а и без този явен
+     извик изгледът остава празен/стар додето потребителят не кликне таба. */
+  if(kasaView==='zoborot') loadZoborot();
+  else if(kasaView==='storno') loadStorno();
 }
 
 /* ─── TABS ──────────────────────────────────────────────────── */
