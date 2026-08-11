@@ -2,7 +2,7 @@
    Видим за: accounting, admin, logistics
    Редактирай САМО тук при промени по модула. */
 
-var histData   = { transport:[], client:[], kasa:[] };
+var histData   = { transport:[], client:[], kasa:[], storno:[] };
 var histFilter = { from:'', to:'', store:'', type:'all' };
 var histStores = [];
 
@@ -17,6 +17,19 @@ function loadHistory(){
       loadDailyOverview();
     }
   },200);
+}
+
+/* Директен скок към История, филтрирана за Сторно бележки — ползва се от банера
+   при вход (notifications.js), за да не се налага админ/счетоводство да търсят ръчно. */
+function goToStornoHistory(){
+  showModule('history');
+  var now=new Date();
+  var from=new Date(now); from.setDate(from.getDate()-30);
+  var fEl=document.getElementById('h-from'), tEl=document.getElementById('h-to'), typeEl=document.getElementById('h-type');
+  if(fEl) fEl.value=from.toISOString().slice(0,10);
+  if(tEl) tEl.value=now.toISOString().slice(0,10);
+  if(typeEl) typeEl.value='storno';
+  runHistorySearch();
 }
 
 function loadHistoryStores(){
@@ -66,6 +79,11 @@ function runHistorySearch(){
     promises.push(sbGet('kasa_reports',q3).then(function(d){histData.kasa=Array.isArray(d)?d:[];}));
   } else { histData.kasa=[]; }
 
+  if(type==='all'||type==='storno'){
+    var q4='order=storno_date.desc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter;
+    promises.push(sbGet('kasa_storno',q4).then(function(d){histData.storno=Array.isArray(d)?d:[];}));
+  } else { histData.storno=[]; }
+
   Promise.all(promises).then(function(){
     renderHistoryResults();
   }).catch(function(e){
@@ -102,6 +120,7 @@ function renderHistoryShell(){
             '<option value="transport">Транспортни заявки</option>'+
             '<option value="client">Клиентски заявки</option>'+
             '<option value="kasa">Касови отчети</option>'+
+            '<option value="storno">Сторно бележки</option>'+
           '</select></div>'+
         '<div><label class="fl">&nbsp;</label>'+
           '<button onclick="runHistorySearch()" class="btn btn-green" style="width:100%;margin-top:0;">Търси →</button></div>'+
@@ -126,7 +145,8 @@ function renderHistoryResults(){
   var totalT=histData.transport.length;
   var totalC=histData.client.length;
   var totalK=histData.kasa.length;
-  var totalAll=totalT+totalC+totalK;
+  var totalS=histData.storno.length;
+  var totalAll=totalT+totalC+totalK+totalS;
 
   if(!totalAll){
     wrap.innerHTML='<div class="card" style="text-align:center;padding:30px;color:#94a3b8;">'+
@@ -160,6 +180,10 @@ function renderHistoryResults(){
     var totalRaz=histData.kasa.reduce(function(s,r){return s+(parseFloat(r.razlika)||0);},0);
     var razStr=(totalRaz<0?'–':'')+Math.abs(totalRaz).toFixed(2)+' EUR разлика';
     html+=metricCard('💰 Касови отчети',histData.kasa.length,'ПОС отчета / '+razStr,'#d97706');
+  }
+  if(histData.storno.length){
+    var flaggedS=histData.storno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum).flagged;}).length;
+    html+=metricCard('🧾 Сторно бележки',histData.storno.length,flaggedS?'⚠️ '+flaggedS+' с по-малка сума':'без разминавания',flaggedS?'#dc2626':'#16a34a');
   }
   html+='</div>';
 
@@ -247,6 +271,35 @@ function renderHistoryResults(){
           '<td style="font-family:monospace;font-weight:700;color:'+razC+';">'+(raz<0?'–':'')+Math.abs(raz).toFixed(2)+' EUR</td>'+
           '<td>'+(r.status==='confirmed'?'✅':r.status==='returned'?'↩':'✏️')+'</td>'+
         '<td><button onclick="openKasaDetail(\''+r.store_name+'\',' + '\''+r.date+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 9px;font-size:11px;cursor:pointer;">Детайли →</button></td>'+
+        '</tr>';
+      }).join('')+
+      '</tbody></table></div></div>';
+  }
+
+  /* Сторно бележки */
+  if(histData.storno.length){
+    var flaggedTotal=histData.storno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum).flagged;}).length;
+    html+='<div class="card" style="margin-top:14px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
+        '<div class="card-title" style="margin:0;">🧾 Сторно бележки ('+histData.storno.length+')</div>'+
+        (flaggedTotal?'<div style="font-size:13px;font-weight:700;color:#dc2626;">⚠️ '+flaggedTotal+' с по-малка сума на новата покупка</div>':'')+
+      '</div>'+
+      '<div class="tbl-wrap"><table>'+
+      '<thead><tr><th>Дата сторно</th><th>Магазин</th><th>Артикул/и</th><th>Име</th><th>Сума върнат</th><th>Причина</th><th>Реална замяна</th><th>Сума нов</th><th>Индикация</th></tr></thead>'+
+      '<tbody>'+
+      histData.storno.map(function(r){
+        var ind=stornoIndicator(r.returned_sum,r.new_sum);
+        return '<tr'+(ind.flagged?' style="background:'+ind.bg+';"':'')+'>'+
+          '<td>'+fmtDate(r.storno_date)+'</td>'+
+          '<td>'+esc(r.store_name||'')+'</td>'+
+          '<td style="font-family:DM Mono,monospace;font-size:11px;">'+esc(r.articles||'')+'</td>'+
+          '<td>'+esc(r.article_name||'')+'</td>'+
+          '<td style="font-family:DM Mono,monospace;">'+fmtMoney(r.returned_sum)+'</td>'+
+          '<td style="font-size:12px;">'+esc(r.reason||'')+'</td>'+
+          '<td style="font-size:12px;"><span style="font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.replacement_articles||'')+'</span>'+
+            (r.replacement_article_name?'<br><b>'+esc(r.replacement_article_name)+'</b>':'')+'</td>'+
+          '<td style="font-family:DM Mono,monospace;">'+fmtMoney(r.new_sum)+'</td>'+
+          '<td><span style="font-weight:700;color:'+ind.color+';font-size:12px;">'+ind.label+'</span></td>'+
         '</tr>';
       }).join('')+
       '</tbody></table></div></div>';
@@ -431,11 +484,13 @@ function exportKasaToExcel(){
     Promise.all([
       sbGet('kasa_zoborot',  'order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
       sbGet('kasa_glavna',   'order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
-      sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+from+'&date=lte.'+to+sFilter)
+      sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
+      sbGet('kasa_storno',   'order=storno_date.desc,store_name.asc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter)
     ]).then(function(res){
-      var zobAll  = Array.isArray(res[0]) ? res[0] : [];
-      var glAll   = Array.isArray(res[1]) ? res[1] : [];
-      var docsAll = Array.isArray(res[2]) ? res[2] : [];
+      var zobAll   = Array.isArray(res[0]) ? res[0] : [];
+      var glAll    = Array.isArray(res[1]) ? res[1] : [];
+      var docsAll  = Array.isArray(res[2]) ? res[2] : [];
+      var stornoAll= Array.isArray(res[3]) ? res[3] : [];
 
       var wb = XLSX.utils.book_new();
 
@@ -665,6 +720,39 @@ function exportKasaToExcel(){
       XLSX.utils.book_append_sheet(wb, wsSum, 'Обобщение');
 
       /* ════════════════════════════════════════════════
+         ЛИСТ СТОРНО БЕЛЕЖКИ
+      ════════════════════════════════════════════════ */
+      if(stornoAll.length){
+        var stornoRows = [
+          ['Дата сторно','Дата бон','Магазин','Артикул/и','Име','Сума върнат (EUR)',
+           'Причина','Заменен арт.','Име на нов артикул','Сума нов (EUR)','Разлика (EUR)','Индикация']
+        ];
+        stornoAll.forEach(function(r){
+          var ind=stornoIndicator(r.returned_sum,r.new_sum);
+          stornoRows.push([
+            r.storno_date||'',
+            r.original_receipt_date||'',
+            r.store_name||'',
+            r.articles||'',
+            r.article_name||'',
+            parseFloat(r.returned_sum)||0,
+            r.reason||'',
+            r.replacement_articles||'',
+            r.replacement_article_name||'',
+            parseFloat(r.new_sum)||0,
+            ind.diff,
+            ind.flagged?'⚠️ ПО-МАЛКО':(ind.diff>0?'✅ ПОВЕЧЕ':'✅ РАВНО')
+          ]);
+        });
+        var flaggedXl=stornoAll.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum).flagged;}).length;
+        stornoRows.push([]);
+        stornoRows.push(['ОБЩО',stornoAll.length+' бележки','','','','','','','','','⚠️ '+flaggedXl+' с по-малка сума','']);
+        var wsStorno = XLSX.utils.aoa_to_sheet(stornoRows);
+        wsStorno['!cols'] = [{wch:12},{wch:12},{wch:18},{wch:16},{wch:22},{wch:14},{wch:22},{wch:16},{wch:22},{wch:14},{wch:12},{wch:14}];
+        XLSX.utils.book_append_sheet(wb, wsStorno, 'Сторно бележки');
+      }
+
+      /* ════════════════════════════════════════════════
          ЛИСТ ДОКУМЕНТИ
       ════════════════════════════════════════════════ */
       if(docsAll.length){
@@ -692,7 +780,7 @@ function exportKasaToExcel(){
       /* Генерираме файла */
       var fname = 'ТеМАХ_Каса_' + (store||'Всички_магазини') + '_' + from + '_' + to + '.xlsx';
       XLSX.writeFile(wb, fname);
-      toast('✅ Excel изтеглен! ' + storeNames.length + ' магазина, ' + histData.kasa.length + ' отчета.');
+      toast('✅ Excel изтеглен! ' + storeNames.length + ' магазина, ' + histData.kasa.length + ' отчета'+(stornoAll.length?', '+stornoAll.length+' сторно бележки':'')+'.');
 
     }).catch(function(e){
       console.error('Excel export error:', e);

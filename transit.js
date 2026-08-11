@@ -6,6 +6,9 @@ var transitStore  = '';
 var transitDir    = 'all'; /* 'all' | 'incoming' | 'outgoing' */
 var transitEditId = null;
 var transitMonthFilter = ''; /* 'YYYY-MM' за филтър по месец */
+var transitSearch = ''; /* търсене по документ / SAP код / описание */
+var _transitPendingScrollY = null; /* мост между loadTransit() и renderTransit() за запазване на скрола */
+var _transitSearchTimer = null;
 
 /* ── PLANT MAPPING ── */
 var PLANT_INCOMING = {
@@ -70,6 +73,10 @@ function transitCanMarkReceived(r){
 /* ── LOAD с pagination чрез Range header ── */
 function loadTransit(){
   var wrap=document.getElementById('mod-transit');
+  /* Улавяме позицията на скрола ПРЕДИ да покажем краткия loading placeholder —
+     иначе страницата рязко се смалява (200px), браузърът "закача" скрола на 0,
+     и след като данните се заредят обратно, вече не се връща сам. */
+  _transitPendingScrollY=window.scrollY||window.pageYOffset||0;
   if(wrap)wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
 
   var storeFilter='';
@@ -123,6 +130,11 @@ function loadTransit(){
 /* ── RENDER ── */
 function renderTransit(){
   var wrap=document.getElementById('mod-transit');if(!wrap)return;
+  /* Ако полето за търсене е фокусирано в момента, запазваме позицията на
+     курсора, за да не губи фокус потребителят на всяка натисната буква
+     (цялата таблица се прерисува наново при всеки renderTransit()). */
+  var _searchHadFocus=document.activeElement&&document.activeElement.id==='t-search';
+  var _searchCursorPos=_searchHadFocus?document.activeElement.selectionStart:null;
   var isAdmin=currentUser&&['admin','accounting','logistics'].indexOf(currentUser.role)>=0;
   var canEdit=canEditTransit();
   var canAdd=canAddTransit();
@@ -173,6 +185,14 @@ function renderTransit(){
   if(transitMonthFilter) list=list.filter(function(r){
     return r.doc_date&&r.doc_date.slice(0,7)===transitMonthFilter;
   });
+  if(transitSearch){
+    var _q=transitSearch.trim().toLowerCase();
+    list=list.filter(function(r){
+      return (r.purchase_doc&&String(r.purchase_doc).toLowerCase().indexOf(_q)>=0)
+          || (r.material_code&&String(r.material_code).toLowerCase().indexOf(_q)>=0)
+          || (r.material_name&&String(r.material_name).toLowerCase().indexOf(_q)>=0);
+    });
+  }
 
   /* Статистика */
   var counts={pending:0,received:0,rejected:0,sent:0,incCount:0,outCount:0,transferCount:0};
@@ -266,6 +286,16 @@ function renderTransit(){
   }
   h+='</div>';
 
+  /* Търсене по документ / SAP код / описание — debounce 180ms, за да не
+     прерисува таблицата на всяка буква; фокусът/курсорът се пазят от
+     логиката горе/долу в renderTransit(). */
+  h+='<div style="margin-bottom:12px;position:relative;max-width:340px;">';
+  h+='<input type="text" id="t-search" placeholder="🔍 Търси по документ, SAP код, описание..." value="'+esc(transitSearch)+'" oninput="setTSearch(this.value)" style="width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:7px 32px 7px 10px;font-size:12.5px;font-family:inherit;">';
+  if(transitSearch){
+    h+='<button onclick="setTSearch(\'\');document.getElementById(\'t-search\').value=\'\';" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:none;color:#94a3b8;cursor:pointer;font-size:14px;padding:2px 6px;">✕</button>';
+  }
+  h+='</div>';
+
   /* Таблица */
   if(!list.length){
     h+='<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📦</div><div style="margin-top:8px;">Няма записи.</div></div>';
@@ -320,7 +350,6 @@ function renderTransit(){
         if(r.status==='pending'){
           if(transitCanMarkSent(r)){
             h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'sent\')" style="border:none;background:#7c3aed;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">📤 Изпратена</button>';
-            h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✕ Неприето</button>';
           } else {
             h+='<span style="font-size:10px;color:#94a3b8;white-space:nowrap;">⏳ чака '+esc(r.supplier||'подателя')+'</span>';
           }
@@ -367,6 +396,20 @@ function renderTransit(){
   h+='</div>';
   h+=transitModalHtml();
   wrap.innerHTML=h;
+
+  /* Възстановяваме скрола (ако идваме от loadTransit()) и фокуса на полето
+     за търсене (ако потребителят пишеше в него в момента на прерисуването). */
+  if(_transitPendingScrollY!=null){
+    var _y=_transitPendingScrollY;_transitPendingScrollY=null;
+    requestAnimationFrame(function(){window.scrollTo(0,_y);});
+  }
+  if(_searchHadFocus){
+    var _si=document.getElementById('t-search');
+    if(_si){
+      _si.focus();
+      if(_searchCursorPos!=null)_si.setSelectionRange(_searchCursorPos,_searchCursorPos);
+    }
+  }
 }
 
 function tStatCard(label,val,color){
@@ -378,6 +421,11 @@ function tStatCard(label,val,color){
 
 function setTFilter(f){ transitFilter=f; renderTransit(); }
 function setTStore(s){ transitStore=s; renderTransit(); }
+function setTSearch(v){
+  transitSearch=v;
+  clearTimeout(_transitSearchTimer);
+  _transitSearchTimer=setTimeout(function(){renderTransit();},180);
+}
 
 /* ── СТАТУС ПРОМЯНА ── */
 function tMarkStatus(id,status){

@@ -99,16 +99,32 @@ function renderClientOrders(){
       ?'<div style="font-size:10px;color:#94a3b8;">Заявител:</div><b>'+esc(o.store_name||'')+'</b><div style="font-size:10px;color:#2563eb;margin-top:2px;">Изпълнява: <b>'+esc(o.fulfiller)+'</b></div>'
       :esc(o.store_name||'');
     var myStore=currentUser&&currentUser.store_name;
+    var rawStatus=o.status||'pending';
     var done=o._status==='done'||o._status==='refused'||o.status==='done'||o.status==='refused';
     var isRequester=isAdmin||!o.fulfiller||o.store_name===myStore||isGlobal();
     var isFulfiller=o.fulfiller&&o.fulfiller===myStore&&!isRequester;
     var btns='<div style="display:flex;gap:4px;flex-wrap:wrap;">';
     if(!done){
+      /* Изпълнителят маркира "Изпратена", когато физически изпрати стоката
+         към заявителя. След това вече чака заявителя — няма повече действия. */
+      if(isFulfiller){
+        if(rawStatus==='pending'||rawStatus==='postponed'){
+          btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;sent&apos;)" style="border:1px solid #5b21b6;background:#ede9fe;color:#5b21b6;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📤 Изпратена</button>';
+          btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;refused&apos;)" style="border:1px solid #dc2626;background:#fff1f2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕ Откаже</button>';
+        } else {
+          btns+='<span style="font-size:10px;color:#94a3b8;white-space:nowrap;">⏳ чака '+esc(o.store_name||'заявителя')+'</span>';
+        }
+      }
+      /* Заявителят маркира "Пристигнала в магазина" при физическо пристигане,
+         после отделно "Изпълнена" след предаване на клиента. "Статус" остава
+         достъпен за ръчна корекция/отлагане на всеки етап. */
       if(isRequester){
+        if(rawStatus==='sent'){
+          btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;arrived&apos;)" style="border:1px solid #0369a1;background:#e0f2fe;color:#0369a1;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📦 Пристигнала</button>';
+        } else if(rawStatus==='arrived'){
+          btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;done&apos;)" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Изпълнена</button>';
+        }
         btns+='<button data-id="'+o.id+'" onclick="openStatus(this.dataset.id,&apos;client_orders&apos;)" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">Статус</button>';
-      } else if(isFulfiller){
-        btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;done&apos;)" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📦 Изпратена</button>';
-        btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;refused&apos;)" style="border:1px solid #dc2626;background:#fff1f2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕ Откаже</button>';
       }
     } else {
       if(isRequester){

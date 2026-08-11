@@ -250,6 +250,12 @@ OneSignalDeferred.push(async function(OneSignal) {
       <button id="dhs-documents" class="filter-btn" onclick="showModule('docs')">📁 Документи</button>
     </div>
   </div>
+  <div id="transport-pallets-subnav" class="no-print" style="display:none;max-width:1300px;margin:12px auto 0;width:100%;padding:0 16px;">
+    <div style="display:flex;gap:8px;">
+      <button id="tps-transport" class="filter-btn" onclick="showModule('transport')">🚚 Заявки</button>
+      <button id="tps-pallets" class="filter-btn" onclick="showModule('pallets')">📦 Палети</button>
+    </div>
+  </div>
 
   <!-- TRANSPORT -->
   <div id="mod-transport" class="page">
@@ -272,11 +278,14 @@ OneSignalDeferred.push(async function(OneSignal) {
       <input id="tr-search" placeholder="🔍 Търси клиент/продукт/SAP/бон/телефон..." oninput="renderTransport()" style="flex:1;min-width:220px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 14px;font-size:13px;font-family:inherit;outline:none;">
       <select id="tr-month" onchange="renderTransport()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
     </div>
-    <div class="tbl-wrap"><table>
+    <div class="tbl-wrap co-sticky-actions"><table>
       <thead><tr><th>Дата / Час</th><th>Клиент</th><th>SAP</th><th>Телефон</th><th>Адрес</th><th>Продукт</th><th>Бр.</th><th>Доставка</th><th>Статус</th><th>Магазин</th><th></th></tr></thead>
       <tbody id="tr-body"><tr><td colspan="10" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
     </table></div>
   </div>
+
+  <!-- PALLETS -->
+  <div id="mod-pallets" class="page" style="display:none;"></div>
 
   <!-- CLIENT ORDERS -->
   <div id="mod-client" class="page" style="display:none;">
@@ -316,8 +325,9 @@ OneSignalDeferred.push(async function(OneSignal) {
       <div id="doc-filters" class="filter-bar" style="margin:0;">
         <button class="filter-btn active" onclick="filterDocs('all',this)">Всички</button>
         <button class="filter-btn" onclick="filterDocs('SAP',this)">SAP</button>
-        <button class="filter-btn" onclick="filterDocs('Обучения',this)">Пожарна Безопасност</button>
-        <button class="filter-btn" onclick="filterDocs('Формуляри',this)">Формуляри</button>
+        <button class="filter-btn" onclick="filterDocs('Процедури',this)">Противопожарна безопасност</button>
+        <button class="filter-btn" onclick="filterDocs('Обучения',this)" style="display:none;">Обучения</button>
+        <button class="filter-btn" onclick="filterDocs('Формуляри',this)" style="display:none;">Формуляри</button>
       </div>
       <button class="btn btn-green adm" id="btn-doc-add" onclick="resetDocModal();document.getElementById('doc-modal').classList.add('open')" style="display:none;">+ Добави документ</button>
     </div>
@@ -450,6 +460,7 @@ OneSignalDeferred.push(async function(OneSignal) {
   <div class="modal-sub" id="status-info"></div>
   <div class="status-grid">
     <button class="btn" style="background:#fef3c7;color:#92400e;" onclick="setStatus('pending')">⏳ Изчаква</button>
+    <button class="btn" id="status-btn-sent" style="background:#ede9fe;color:#5b21b6;" onclick="setStatus('sent')">📤 Изпратена</button>
     <button class="btn" id="status-btn-arrived" style="background:#e0f2fe;color:#0369a1;" onclick="setStatus('arrived')">📦 Пристигнала в магазина</button>
     <button class="btn btn-green" onclick="setStatus('done')">✅ Изпълнена</button>
     <button class="btn" style="background:#f3e8ff;color:#4c1d95;" onclick="setStatus('postponed')">⏱ Отложена</button>
@@ -625,6 +636,7 @@ function loadTabOrder(){
 
 <script src="shared.js"></script>
 <script src="transport.js"></script>
+<script src="pallets.js"></script>
 <script src="client-orders.js"></script>
 <script src="docs.js"></script>
 <script src="bulletin.js"></script>

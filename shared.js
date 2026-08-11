@@ -75,7 +75,7 @@ function refreshToday(){ TODAY=new Date(); TODAY.setHours(0,0,0,0); }
 setInterval(refreshToday, 5*60*1000); /* на всеки 5 минути */
 document.addEventListener('visibilitychange', function(){ if(!document.hidden) refreshToday(); });
 function calcStatus(delivery,status){
-  if(['done','refused','postponed','approved','arrived'].indexOf(status)>=0)return status;
+  if(['done','refused','postponed','approved','arrived','sent'].indexOf(status)>=0)return status;
   if(!delivery)return'pending';
   var d=new Date(delivery);d.setHours(0,0,0,0);
   var diff=Math.round((d-TODAY)/86400000);
@@ -85,6 +85,7 @@ function statusBadge(s){
   var m={overdue:{l:'🔴 Просрочена',bg:'#fee2e2',c:'#991b1b'},today:{l:'🔵 Днес',bg:'#dbeafe',c:'#1e3a5f'},
     tomorrow:{l:'🟡 Утре',bg:'#fef3c7',c:'#92400e'},pending:{l:'⏳ Изчаква',bg:'#f3f4f6',c:'#374151'},
     approved:{l:'✓ Одобрена',bg:'#dbeafe',c:'#1e3a5f'},
+    sent:{l:'📤 Изпратена',bg:'#ede9fe',c:'#5b21b6'},
     arrived:{l:'📦 Пристигнала в магазина',bg:'#e0f2fe',c:'#0369a1'},
     done:{l:'✅ Изпълнена',bg:'#dcfce7',c:'#14532d'},refused:{l:'✕ Отказана',bg:'#fee2e2',c:'#991b1b'},
     postponed:{l:'⏱ Отложена',bg:'#f3e8ff',c:'#4c1d95'}};
@@ -199,7 +200,7 @@ var allSuppliersCache=null;
 function invalidateSuppliersCache(){ allSuppliersCache=null; }
 function loadAllSuppliers(){
   if(allSuppliersCache)return Promise.resolve(allSuppliersCache);
-  return fetch(API+'/contacts?type=eq.supplier&store_visible=eq.true&select=name&order=name',{headers:H}).then(function(res){
+  return fetch(API+'/contacts?type=eq.supplier&select=name&order=name',{headers:H}).then(function(res){
     if(!res.ok){
       return res.text().then(function(errText){
         console.error('contacts (supplier) GET грешка:',errText);
@@ -290,6 +291,8 @@ function openStatus(id,table){
   if(corrBtn)corrBtn.style.display=canCorrectRecord(rec,table)?'':'none';
   /* "Пристигнала в магазина" е специфичен за клиентски заявки - складът маркира
      физическото пристигане на стоката, преди тя да бъде предадена на клиента. */
+  var sentBtn=document.getElementById('status-btn-sent');
+  if(sentBtn)sentBtn.style.display=(table==='client_orders')?'':'none';
   var arrivedBtn=document.getElementById('status-btn-arrived');
   if(arrivedBtn)arrivedBtn.style.display=(table==='client_orders')?'':'none';
   document.getElementById('status-modal').classList.add('open');
@@ -305,7 +308,12 @@ function revertStatus(id,table){
   var list=table==='transport_orders'?transportOrders:clientOrders;
   var rec=list.find(function(o){return String(o.id)===String(id);});
   if(!rec)return;
-  sbPatch(table,'id=eq.'+id,{status:'pending'}).then(function(){toast('↩ Върнато');loadAll();});
+  var target='pending';
+  if(table==='client_orders'){
+    var prevMap={done:'arrived',arrived:'sent',sent:'pending'};
+    target=prevMap[rec.status]||'pending';
+  }
+  sbPatch(table,'id=eq.'+id,{status:target}).then(function(){toast('↩ Върнато');loadAll();});
 }
 
 /* КОРЕКЦИЯ на съществуваща заявка (клиентска или транспортна).
@@ -483,7 +491,7 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -497,6 +505,15 @@ function showModule(mod){
     if(btnD)btnD.classList.toggle('active',mod==='docs');
   }
   if(mod==='handbook'){var docsTab=document.getElementById('tab-docs');if(docsTab)docsTab.classList.add('active');}
+  /* "Транспорт" и "Палети" — под-таб в Транспорт (наличности на празни палети по обекти) */
+  var tpSub=document.getElementById('transport-pallets-subnav');
+  if(tpSub){
+    tpSub.style.display=(mod==='transport'||mod==='pallets')?'block':'none';
+    var btnT=document.getElementById('tps-transport'),btnP=document.getElementById('tps-pallets');
+    if(btnT)btnT.classList.toggle('active',mod==='transport');
+    if(btnP)btnP.classList.toggle('active',mod==='pallets');
+  }
+  if(mod==='pallets'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
   if(mod==='admin')loadAdmin();
   if(mod==='transport')loadTransport();
   if(mod==='client')loadClientOrders();
@@ -509,6 +526,7 @@ function showModule(mod){
   if(mod==='calendar')loadCalendar();
   if(mod==='stock-returns')loadStockReturns();
   if(mod==='stock-diff')loadStockDiff();
+  if(mod==='pallets')loadPallets();
   if(mod==='reference')loadReference();
   if(mod==='handbook')loadHandbook();
 }

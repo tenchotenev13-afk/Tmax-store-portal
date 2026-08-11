@@ -83,7 +83,7 @@ function loadKasa(){
 /* ─── TABS ──────────────────────────────────────────────────── */
 function kasaTab(tab){
   kasaView=tab;
-  ['pos','glavna','zoborot'].forEach(function(t){
+  ['pos','glavna','zoborot','storno'].forEach(function(t){
     var el=document.getElementById('ktab-'+t);
     if(el) el.style.background=t===tab?'#2f2f2f':'#fff',
             el.style.color=t===tab?'#fff':'#64748b';
@@ -104,6 +104,7 @@ function kasaTab(tab){
     }).catch(function(){renderGlavna();});
   }
   else if(tab==='zoborot'){loadZoborot();}
+  else if(tab==='storno'){loadStorno();}
 }
 
 function kasaTabBar(){
@@ -117,6 +118,7 @@ function kasaTabBar(){
     '<button id="ktab-pos" onclick="kasaTab(\'pos\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;'+tabStyle('pos')+'">📋 ПОС Отчети</button>'+
     '<button id="ktab-glavna" onclick="kasaTab(\'glavna\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;'+tabStyle('glavna')+'">🏦 Главна каса</button>'+
     '<button id="ktab-zoborot" onclick="kasaTab(\'zoborot\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;'+tabStyle('zoborot')+'">📊 Равнение</button>'+
+    '<button id="ktab-storno" onclick="kasaTab(\'storno\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;'+tabStyle('storno')+'">🧾 Сторно бележки</button>'+
   '</div>';
 }
 
@@ -1405,3 +1407,212 @@ function printZoborot(){
   }, 400);
 }
 
+
+/* ═══════════════════════════════════════════════════════════════
+   СТОРНО БЕЛЕЖКИ
+══════════════════════════════════════════════════════════════ */
+var kasaStorno = [];
+var kasaStornoEditId = null;
+
+function stornoIndicator(returnedSum, newSum) {
+  var ret = parseFloat(returnedSum) || 0;
+  var nw  = parseFloat(newSum) || 0;
+  var diff = Math.round((nw - ret) * 100) / 100;
+  if (diff < 0) return { flagged: true,  label: '⚠️ ПО-МАЛКО', color: '#dc2626', bg: '#fef2f2', diff: diff };
+  if (diff > 0) return { flagged: false, label: '✅ ПОВЕЧЕ',    color: '#16a34a', bg: '#f0fdf4', diff: diff };
+  return          { flagged: false, label: '✅ РАВНО',      color: '#16a34a', bg: '#f0fdf4', diff: diff };
+}
+
+function loadStorno(){
+  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&order=storno_date.desc,created_at.desc';
+  sbGet('kasa_storno',q).then(function(data){
+    kasaStorno=Array.isArray(data)?data:[];
+    renderStorno();
+  }).catch(function(){kasaStorno=[];renderStorno();});
+}
+
+function renderStorno(){
+  var wrap=document.getElementById('mod-kasa');if(!wrap)return;
+  var canEdit=['manager','admin','kasa'].indexOf(currentUser.role)>=0;
+  var flaggedCount=kasaStorno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum).flagged;}).length;
+
+  var html='<div class="page">'+
+    '<div class="pg-title">💰 Каса</div>'+
+    '<div class="pg-sub">'+esc(currentUser.store_name)+' — Сторно бележки</div>'+
+    kasaTabBar()+
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
+      '<div style="font-size:13px;color:var(--muted);">Общо: <b>'+kasaStorno.length+'</b> бележки'+
+        (flaggedCount?' &nbsp;|&nbsp; <b style="color:#dc2626;">⚠️ '+flaggedCount+'</b> с по-малка сума на новата покупка':'')+
+      '</div>'+
+      (canEdit?'<button class="btn btn-green" onclick="openStornoForm(null)">+ Нова сторно бележка</button>':'')+
+    '</div>';
+
+  if(!kasaStorno.length){
+    html+='<div class="card" style="text-align:center;padding:30px;color:#94a3b8;">Няма въведени сторно бележки.</div></div>';
+    wrap.innerHTML=html;
+    return;
+  }
+
+  html+='<div class="card"><div class="tbl-wrap"><table>'+
+    '<thead><tr>'+
+      '<th>Дата сторно</th><th>Дата бон</th><th>Артикул/и</th><th>Име</th>'+
+      '<th>Сума върнат</th><th>Причина</th><th>Реална замяна</th><th>Сума нов</th>'+
+      '<th>Индикация</th>'+(canEdit?'<th></th>':'')+
+    '</tr></thead><tbody>'+
+    kasaStorno.map(function(r){
+      var ind=stornoIndicator(r.returned_sum,r.new_sum);
+      return '<tr'+(ind.flagged?' style="background:'+ind.bg+';"':'')+'>'+
+        '<td>'+fmtDate(r.storno_date)+'</td>'+
+        '<td>'+fmtDate(r.original_receipt_date)+'</td>'+
+        '<td style="font-family:DM Mono,monospace;font-size:11px;">'+esc(r.articles||'')+'</td>'+
+        '<td>'+esc(r.article_name||'')+'</td>'+
+        '<td style="font-family:DM Mono,monospace;">'+fmtMoney(r.returned_sum)+'</td>'+
+        '<td style="font-size:12px;">'+esc(r.reason||'')+'</td>'+
+        '<td style="font-size:12px;"><span style="font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.replacement_articles||'')+'</span>'+
+          (r.replacement_article_name?'<br><b>'+esc(r.replacement_article_name)+'</b>':'')+'</td>'+
+        '<td style="font-family:DM Mono,monospace;">'+fmtMoney(r.new_sum)+'</td>'+
+        '<td><span style="font-weight:700;color:'+ind.color+';font-size:12px;">'+ind.label+'</span></td>'+
+        (canEdit?'<td style="white-space:nowrap;">'+
+          '<button onclick="openStornoForm(\''+r.id+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px;">✏️</button>'+
+          '<button onclick="deleteStornoEntry(\''+r.id+'\')" style="border:1px solid #dc2626;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🗑</button>'+
+        '</td>':'')+
+      '</tr>';
+    }).join('')+
+    '</tbody></table></div></div></div>';
+
+  wrap.innerHTML=html;
+}
+
+function openStornoForm(id){
+  kasaStornoEditId=id||null;
+  var r=id?(kasaStorno.find(function(x){return x.id===id;})||{}):{};
+  var wrap=document.getElementById('mod-kasa');if(!wrap)return;
+
+  var html='<div style="max-width:640px;margin:0 auto;padding:20px 16px 60px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:18px;">'+
+      '<div style="font-size:18px;font-weight:600;">'+(kasaStornoEditId?'✏️ Редактирай':'+ Нова')+' сторно бележка</div>'+
+      '<div style="display:flex;gap:8px;">'+
+        '<button onclick="submitStornoForm()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>'+
+        '<button onclick="kasaView=\'storno\';loadStorno();" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Обратно</button>'+
+      '</div>'+
+    '</div>'+
+
+    '<div class="card" style="margin-bottom:14px;"><div class="card-title">Дати</div>'+
+    '<div class="form-grid">'+
+      '<div><label class="fl">Дата на сторно</label><input type="date" class="fi" id="sf-storno_date" value="'+(r.storno_date||today())+'"></div>'+
+      '<div><label class="fl">Дата на оригинален касов бон</label><input type="date" class="fi" id="sf-original_receipt_date" value="'+(r.original_receipt_date||'')+'"></div>'+
+    '</div></div>'+
+
+    '<div class="card" style="margin-bottom:14px;"><div class="card-title">Върнат артикул</div>'+
+    '<div class="form-grid">'+
+      '<div><label class="fl">Артикул/и (SAP код, при повече от 1 — разделени с /)</label><input class="fi" id="sf-articles" value="'+escVal(r.articles)+'" onblur="stornoLookupCatalog(\'articles\')"></div>'+
+      '<div><label class="fl">Име</label><input class="fi" id="sf-article_name" value="'+escVal(r.article_name)+'"></div>'+
+      '<div><label class="fl">Сума на върнат артикул/и (EUR)</label><input type="number" step="0.01" class="fi" id="sf-returned_sum" value="'+(r.returned_sum||'')+'" oninput="stornoLiveCalc()" placeholder="0.00"></div>'+
+      '<div><label class="fl">Причина</label><input class="fi" id="sf-reason" value="'+escVal(r.reason)+'"></div>'+
+    '</div></div>'+
+
+    '<div class="card" style="margin-bottom:14px;"><div class="card-title">Нов/заменящ артикул</div>'+
+    '<div class="form-grid">'+
+      '<div><label class="fl">Заменен артикул/и (SAP код/ове)</label><input class="fi" id="sf-replacement_articles" value="'+escVal(r.replacement_articles)+'" onblur="stornoLookupCatalog(\'replacement\')"></div>'+
+      '<div><label class="fl">Име на нов артикул <span style="font-weight:400;color:#94a3b8;">(автоматично от SAP каталога)</span></label><input class="fi" id="sf-replacement_article_name" value="'+escVal(r.replacement_article_name)+'"></div>'+
+      '<div><label class="fl">Сума на нов артикул/и (EUR)</label><input type="number" step="0.01" class="fi" id="sf-new_sum" value="'+(r.new_sum||'')+'" oninput="stornoLiveCalc()" placeholder="0.00"></div>'+
+    '</div></div>'+
+
+    '<div class="card" id="sf-indicator-box" style="background:#f8fafc;text-align:center;padding:16px;">'+
+      '<div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Индикация</div>'+
+      '<div id="sf-indicator" style="font-size:18px;font-weight:700;">—</div>'+
+      '<div style="font-size:11px;color:#94a3b8;margin-top:4px;">Сумата на новата покупка трябва да е равна или по-голяма от сумата на върнатия артикул.</div>'+
+    '</div>'+
+  '</div>';
+
+  wrap.innerHTML=html;
+  stornoLiveCalc();
+}
+
+/* Търсене на наименование по SAP код/ове в product_catalog — поддържа няколко кода,
+   разделени с "/" (напр. "93357/88304"), и ги обединява в едно показвано име. */
+function stornoLookupCatalog(kind){
+  var srcId  = kind==='replacement' ? 'sf-replacement_articles' : 'sf-articles';
+  var destId = kind==='replacement' ? 'sf-replacement_article_name' : 'sf-article_name';
+  var srcEl  = document.getElementById(srcId);
+  var destEl = document.getElementById(destId);
+  if(!srcEl || !destEl) return;
+  if(destEl.value.trim()) return; /* не презаписвай ръчно въведено име */
+
+  var codes=srcEl.value.split('/').map(function(s){return s.trim();}).filter(Boolean);
+  if(!codes.length) return;
+
+  var q='sap_code=in.('+codes.map(encodeURIComponent).join(',')+')&select=sap_code,product_name';
+  sbGet('product_catalog',q).then(function(data){
+    if(!Array.isArray(data)||!data.length) return;
+    var byCode={};
+    data.forEach(function(item){byCode[item.sap_code]=item.product_name;});
+    var names=codes.map(function(c){return byCode[c]||null;}).filter(Boolean);
+    if(names.length) destEl.value=names.join(' / ');
+  }).catch(function(){});
+}
+
+function stornoLiveCalc(){
+  var ret=parseFloat((document.getElementById('sf-returned_sum')||{}).value)||0;
+  var nw =parseFloat((document.getElementById('sf-new_sum')||{}).value)||0;
+  var ind=stornoIndicator(ret,nw);
+  var el=document.getElementById('sf-indicator');
+  var box=document.getElementById('sf-indicator-box');
+  if(el){
+    el.textContent=ind.label+(ind.diff?'  ('+(ind.diff>0?'+':'')+ind.diff.toFixed(2)+' EUR)':'');
+    el.style.color=ind.color;
+  }
+  if(box) box.style.background=ind.bg;
+}
+
+function submitStornoForm(){
+  var articles=(document.getElementById('sf-articles')||{}).value||'';
+  var returnedSum=parseFloat((document.getElementById('sf-returned_sum')||{}).value)||0;
+  if(!articles.trim()){toast('Въведи артикул/и','#dc2626');return;}
+  if(!returnedSum){toast('Въведи сума на върнатия артикул','#dc2626');return;}
+
+  var p={
+    store_name:currentUser.store_name,
+    storno_date:(document.getElementById('sf-storno_date')||{}).value||today(),
+    original_receipt_date:(document.getElementById('sf-original_receipt_date')||{}).value||null,
+    articles:articles.trim(),
+    article_name:((document.getElementById('sf-article_name')||{}).value||'').trim(),
+    returned_sum:returnedSum,
+    reason:((document.getElementById('sf-reason')||{}).value||'').trim(),
+    replacement_articles:((document.getElementById('sf-replacement_articles')||{}).value||'').trim(),
+    replacement_article_name:((document.getElementById('sf-replacement_article_name')||{}).value||'').trim(),
+    new_sum:parseFloat((document.getElementById('sf-new_sum')||{}).value)||0,
+    updated_by:currentUser.display_name||currentUser.email,
+    updated_at:new Date().toISOString()
+  };
+  if(!kasaStornoEditId) p.created_by=currentUser.display_name||currentUser.email;
+
+  var req=kasaStornoEditId?sbPatch('kasa_storno','id=eq.'+kasaStornoEditId,p):sbPost('kasa_storno',p);
+  req.then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    toast('💾 Сторно бележката е запазена!');
+    if(stornoIndicator(p.returned_sum,p.new_sum).flagged) notifyStornoDiscrepancy(p);
+    kasaStornoEditId=null;kasaView='storno';loadStorno();
+  });
+}
+
+/* Push нотификация до admin+accounting при разминаване (нова сума < върната) —
+   изпраща се веднага при запис/редакция, независимо дали получателят е в портала. */
+function notifyStornoDiscrepancy(p){
+  if(typeof pushToRole!=='function') return;
+  var diff=Math.round(((parseFloat(p.new_sum)||0)-(parseFloat(p.returned_sum)||0))*100)/100;
+  var title='⚠️ Сторно с разминаване — '+p.store_name;
+  var msg=(p.article_name||p.articles||'артикул')+': върнато '+(parseFloat(p.returned_sum)||0).toFixed(2)+
+    ' EUR, ново '+(parseFloat(p.new_sum)||0).toFixed(2)+' EUR (разлика '+diff.toFixed(2)+' EUR)';
+  pushToRole('admin',title,msg);
+  pushToRole('accounting',title,msg);
+}
+
+function deleteStornoEntry(id){
+  if(!confirm('Изтрий сторно бележката?'))return;
+  sbDelete('kasa_storno','id=eq.'+id).then(function(res){
+    if(!res.ok){toast('Грешка при изтриване','#dc2626');return;}
+    toast('🗑 Изтрито');
+    loadStorno();
+  });
+}

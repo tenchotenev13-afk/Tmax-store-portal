@@ -157,8 +157,9 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
   var h = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1300px;">';
   h += '<thead><tr style="background:#f8fafc;">';
-  ['Продукт','SAP','Кол.','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Дата изтегляне','Изтеглена с','Коментар',''].forEach(function(c){
-    h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
+  ['Продукт','SAP','Кол.','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Дата изтегляне','Изтеглена с','Коментар',''].forEach(function(c,ci,arr){
+    var last=(ci===arr.length-1);
+    h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
   });
   h += '</tr></thead><tbody>';
   list.forEach(function(r) {
@@ -182,7 +183,7 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.withdrawal_date)+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;max-width:140px;color:#374151;">'+esc(r.courier_info||'')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;max-width:150px;">'+esc(r.reason||r.control_comment||r.controller_comment||'')+'</td>'+
-      '<td style="padding:7px 10px;white-space:nowrap;">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
+      '<td style="padding:7px 10px;white-space:nowrap;position:sticky;right:0;background:#fff;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
   });
   h += '</tbody></table></div>';
   h += '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">🟣 Лилав фон = автоматично наляно от разлика</div>';
@@ -194,8 +195,9 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
   var h = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1300px;">';
   h += '<thead><tr style="background:#f8fafc;">';
-  ['ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Завод','Статус','Изтеглена с','Потвърдена акт.','Коментар','Коментар Контролер',''].forEach(function(c){
-    h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
+  ['ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Завод','Статус','Изтеглена с','Потвърдена акт.','Коментар','Коментар Контролер',''].forEach(function(c,ci,arr){
+    var last=(ci===arr.length-1);
+    h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
   });
   h += '</tr></thead><tbody>';
   list.forEach(function(r) {
@@ -216,7 +218,7 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+(r.confirmed_date?fmtDate(r.confirmed_date):'—')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.control_comment||'')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.controller_comment||'')+'</td>'+
-      '<td style="padding:7px 10px;white-space:nowrap;">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
+      '<td style="padding:7px 10px;white-space:nowrap;position:sticky;right:0;background:#fff;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
   });
   h += '</tbody></table></div>';
   return h;

@@ -48,6 +48,27 @@ function showLoginBanner(){
       }
     }
   }).catch(function(){});
+
+  /* Сторно бележки с разминаване (нова сума < върната) — само за admin/accounting,
+     последните 30 дни, за да не се налага да влизат в История, за да разберат. */
+  if(['admin','accounting'].indexOf(currentUser.role)>=0){
+    var stFrom=new Date();stFrom.setDate(stFrom.getDate()-30);
+    sbGet('kasa_storno','storno_date=gte.'+stFrom.toISOString().slice(0,10)+'&select=store_name,returned_sum,new_sum').then(function(rows){
+      if(!Array.isArray(rows)||!rows.length) return;
+      var flagged=rows.filter(function(r){return (parseFloat(r.new_sum)||0)<(parseFloat(r.returned_sum)||0);});
+      if(!flagged.length) return;
+      var el=document.getElementById('notif-banner');if(!el)return;
+      var stores={};flagged.forEach(function(r){stores[r.store_name]=(stores[r.store_name]||0)+1;});
+      var storeList=Object.keys(stores).map(function(s){return s+' ('+stores[s]+')';}).join(', ');
+      var card='<div class="notif-card urgent"><div class="notif-icon">🧾</div><div class="notif-text">'+
+        '<div class="notif-title">'+flagged.length+' сторно бележк'+(flagged.length===1?'а':'и')+' с по-малка сума на новата покупка!</div>'+
+        '<div class="notif-sub">'+esc(storeList)+' &nbsp;·&nbsp; последните 30 дни</div>'+
+        '</div><button onclick="goToStornoHistory()" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Виж →</button>'+
+        '<span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
+      el.innerHTML=card+el.innerHTML;el.style.display='block';
+    }).catch(function(){});
+  }
+
   if(!od.length&&!td.length&&!tm.length) html='<div class="notif-card success"><div class="notif-icon">✅</div><div class="notif-text"><div class="notif-title">Всичко е наред!</div><div class="notif-sub">Няма просрочени или спешни заявки.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   banner.innerHTML=html;banner.style.display='block';
 }
