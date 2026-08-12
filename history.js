@@ -285,12 +285,13 @@ function renderHistoryResults(){
         (flaggedTotal?'<div style="font-size:13px;font-weight:700;color:#dc2626;">⚠️ '+flaggedTotal+' с по-малка сума на новата покупка</div>':'')+
       '</div>'+
       '<div class="tbl-wrap"><table>'+
-      '<thead><tr><th>Дата сторно</th><th>Магазин</th><th>Артикул/и</th><th>Име</th><th>Сума върнат</th><th>Причина</th><th>Реална замяна</th><th>Сума нов</th><th>Индикация</th></tr></thead>'+
+      '<thead><tr><th>Дата сторно</th><th>Дата бон</th><th>Магазин</th><th>Артикул/и</th><th>Име</th><th>Сума върнат</th><th>Причина</th><th>Реална замяна</th><th>Сума нов</th><th>Индикация</th></tr></thead>'+
       '<tbody>'+
       histData.storno.map(function(r){
         var ind=stornoIndicator(r.returned_sum,r.new_sum);
         return '<tr'+(ind.flagged?' style="background:'+ind.bg+';"':'')+'>'+
           '<td>'+fmtDate(r.storno_date)+'</td>'+
+          '<td>'+fmtDate(r.original_receipt_date)+'</td>'+
           '<td>'+esc(r.store_name||'')+'</td>'+
           '<td style="font-family:DM Mono,monospace;font-size:11px;">'+esc(r.articles||'')+'</td>'+
           '<td>'+esc(r.article_name||'')+'</td>'+
