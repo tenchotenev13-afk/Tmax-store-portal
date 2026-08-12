@@ -183,8 +183,22 @@ function openClientModal(){
   document.getElementById('c-date').value=today();
   document.getElementById('c-hour').value='10:00';
   document.getElementById('c-delivery').value='';
+  /* Обикновените служители (точно 1 назначен магазин) не бива да могат да
+     заявяват "от чуждо име" - заключваме "Поръчан от магазин" на техния
+     собствен магазин. Само admin/multi-store потребители виждат истински
+     dropdown с всички магазини. (Огледален модел на o-store в transport.js) */
+  var myStores=assignedStores();
+  var fromEl=document.getElementById('c-from-store');
+  if(fromEl){
+    if(myStores && myStores.length===1){
+      fromEl.outerHTML='<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(myStores[0])+'</div><input type="hidden" id="c-from-store" value="'+esc(myStores[0])+'">';
+    } else if(fromEl.tagName!=='SELECT'){
+      fromEl.outerHTML='<select class="fi" id="c-from-store"></select>';
+    }
+  }
   loadAllStores().then(function(){
-    fillStoreSelect(document.getElementById('c-from-store'),currentUser.store_name);
+    var el=document.getElementById('c-from-store');
+    if(el && el.tagName==='SELECT') fillStoreSelect(el,currentUser.store_name);
     fillStoreSelect(document.getElementById('c-fulfiller'),currentUser.store_name);
   });
   renderItemRows('c-items',[{}]);

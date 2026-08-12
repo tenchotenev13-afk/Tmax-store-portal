@@ -340,8 +340,18 @@ function openCorrection(id,table){
   document.getElementById('edt-fromstore-wrap').style.display=isClient?'':'none';
   document.getElementById('edt-fulfiller-wrap').style.display=isClient?'':'none';
   if(isClient){
+    var myStores=assignedStores();
+    var efs=document.getElementById('edt-from-store');
+    if(efs){
+      if(myStores && myStores.length===1){
+        efs.outerHTML='<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(rec.from_store||myStores[0])+'</div><input type="hidden" id="edt-from-store" value="'+esc(rec.from_store||myStores[0])+'">';
+      } else if(efs.tagName!=='SELECT'){
+        efs.outerHTML='<select class="fi" id="edt-from-store"></select>';
+      }
+    }
     loadAllStores().then(function(){
-      fillStoreSelect(document.getElementById('edt-from-store'),rec.from_store||'');
+      var el=document.getElementById('edt-from-store');
+      if(el && el.tagName==='SELECT') fillStoreSelect(el,rec.from_store||'');
       fillStoreSelect(document.getElementById('edt-fulfiller'),rec.fulfiller||'');
     });
   } else {
