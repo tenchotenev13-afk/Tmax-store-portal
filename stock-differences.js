@@ -477,12 +477,18 @@ function sdModalHtml() {
       '<input type="hidden" id="sd-type" value="'+esc(r.type||'')+'">';
   }
 
-  /* Статус - винаги редактируем от всеки, вкл. магазина - вече с 3 опции. */
+  /* Статус - опциите са контекстни спрямо типа на решение на Цвети, за да не
+     се бърка магазинът: при "Заприхождане" единствената смислена завършваща
+     стойност е "Заприходена" (не "Взета" - това е за куриер, който взима
+     стока за връщане); при "Връщане" - обратното. "Приета" е за отделния
+     поток на междускладовите (логистичен склад), винаги достъпна. */
+  var showTaken = r.type!=='writein' || r.status==='taken';
+  var showCapitalized = r.type!=='return' || r.status==='capitalized';
   h += '<label class="fl">Статус</label>'+
     '<select class="fi" id="sd-status">'+
     '<option value="pending"'+(r.status==='pending'||!r.status?' selected':'')+'>⏳ НЕВЗЕТА</option>'+
-    '<option value="taken"'+(r.status==='taken'?' selected':'')+'>✅ ВЗЕТА</option>'+
-    '<option value="capitalized"'+(r.status==='capitalized'?' selected':'')+'>📥 ЗАПРИХОДЕНА</option>'+
+    (showTaken?'<option value="taken"'+(r.status==='taken'?' selected':'')+'>✅ ВЗЕТА</option>':'')+
+    (showCapitalized?'<option value="capitalized"'+(r.status==='capitalized'?' selected':'')+'>📥 ЗАПРИХОДЕНА</option>':'')+
     '<option value="received"'+(r.status==='received'?' selected':'')+'>📬 ПРИЕТА</option>'+
     '</select>'+
 
@@ -972,6 +978,16 @@ function diffCompressImage(file,maxDim,quality){
     }catch(err){ resolve(file); }
   });
 }
+/* Премахва грешно качена снимка/документ от бланката за подаване на разлика,
+   преди тя изобщо да бъде подадена (само локално в diffPendingPhotos - самата
+   снимка остава в storage-а, но вече не се прикача към бланката). */
+function diffRemovePendingPhoto(url){
+  diffPendingPhotos = diffPendingPhotos.filter(function(p){return p.url!==url;});
+  var wrap=document.getElementById('diff-photos-wrap');
+  if(!wrap)return;
+  var btn=wrap.querySelector('button[data-url="'+url.replace(/"/g,'\\"')+'"]');
+  if(btn && btn.parentElement) btn.parentElement.remove();
+}
 function diffUploadPhoto(input){
   var files=Array.from(input.files||[]);
   if(!files.length)return;
@@ -995,11 +1011,12 @@ function diffUploadPhoto(input){
           if(!ok){ if(ph) ph.outerHTML='<div style="width:56px;height:56px;border-radius:6px;background:#fee2e2;display:flex;align-items:center;justify-content:center;font-size:16px;">⚠️</div>'; return; }
           var pub=DIFF_SB+'/storage/v1/object/public/'+DIFF_BKT+'/'+path;
           diffPendingPhotos.push({url:pub,name:file.name});
+          var removeBtn='<button type="button" data-url="'+esc(pub)+'" onclick="diffRemovePendingPhoto(this.dataset.url)" style="position:absolute;top:-5px;right:-5px;width:16px;height:16px;border:none;background:#dc2626;color:#fff;border-radius:50%;font-size:9px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;">✕</button>';
           if(ph){
             if(isImg){
-              ph.outerHTML='<a href="'+esc(pub)+'" target="_blank"><img src="'+esc(pub)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+              ph.outerHTML='<div style="position:relative;display:inline-block;"><a href="'+esc(pub)+'" target="_blank"><img src="'+esc(pub)+'" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>'+removeBtn+'</div>';
             } else {
-              ph.outerHTML='<a href="'+esc(pub)+'" target="_blank" title="'+esc(file.name)+'" style="display:flex;align-items:center;justify-content:center;width:56px;height:56px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;text-decoration:none;font-size:20px;">📄</a>';
+              ph.outerHTML='<div style="position:relative;display:inline-block;"><a href="'+esc(pub)+'" target="_blank" title="'+esc(file.name)+'" style="display:flex;align-items:center;justify-content:center;width:56px;height:56px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;text-decoration:none;font-size:20px;">📄</a>'+removeBtn+'</div>';
             }
           }
         }).catch(function(){
@@ -1192,7 +1209,7 @@ function submitDiffReport(){
    ИМЕЙЛ ДО ДОСТАВЧИК/ИЗПРАЩАЧ (само Цветелина Тенева)
 ══════════════════════════════════════════ */
 
-function diffEmailBodyHtml(rep,lines){
+function diffEmailBodyHtml(rep,lines,note){
   var h='<div style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;">';
   h+='<p>Здравейте,</p>';
   h+='<p>Установени са разлики при '+(rep.direction==='supplier'?'приемане на доставка':'междускладов трансфер')+' — '+esc(rep.counterpart||'')+
@@ -1216,6 +1233,7 @@ function diffEmailBodyHtml(rep,lines){
   if(rep.general_comment) h+='<p><strong>Допълнителна информация:</strong> '+esc(rep.general_comment)+'</p>';
   var photos=Array.isArray(rep.photos)?rep.photos:[];
   if(photos.length) h+='<p>📎 Прикачени са '+photos.length+' снимк'+(photos.length===1?'а':'и')+' към този имейл.</p>';
+  if(note) h+='<p>'+esc(note).replace(/\n/g,'<br>')+'</p>';
   /* Коментар на Цветелина (resolution_comment) - полето е на ниво ред, не на
      ниво бланка, затова събираме тези от всички редове с непразен коментар. */
   var tsvetiComments = lines.filter(function(l){return l.resolution_comment;});
@@ -1251,7 +1269,7 @@ function diffEmailModalHtml(rep,lines){
     '<input class="fi" id="de-subject" value="'+esc(subject)+'">'+
 
     '<label class="fl" style="margin-top:8px;">Съдържание</label>'+
-    '<textarea class="fi" id="de-body-note" rows="2" placeholder="(незадължително) кратко въведение отгоре на автоматичната таблица..."></textarea>'+
+    '<textarea class="fi" id="de-body-note" rows="2" placeholder="(незадължително) допълнителен текст под таблицата и прикачените файлове..."></textarea>'+
 
     '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-top:8px;max-height:220px;overflow-y:auto;font-size:12px;">'+
     diffEmailBodyHtml(rep,lines)+
@@ -1318,7 +1336,7 @@ function sendDiffEmail(reportId){
   var note=(document.getElementById('de-body-note').value||'').trim();
   var lines=sdData.filter(function(x){return x.report_id===rep.id;});
 
-  var bodyHtml=(note?'<p style="font-family:Arial,sans-serif;font-size:14px;">'+esc(note)+'</p>':'')+diffEmailBodyHtml(rep,lines);
+  var bodyHtml=diffEmailBodyHtml(rep,lines,note);
 
   var btn=document.getElementById('de-send-btn');
   if(btn){btn.disabled=true;btn.textContent='⏳ Подготвям снимките...';}
