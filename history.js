@@ -182,7 +182,7 @@ function renderHistoryResults(){
     html+=metricCard('💰 Касови отчети',histData.kasa.length,'ПОС отчета / '+razStr,'#d97706');
   }
   if(histData.storno.length){
-    var flaggedS=histData.storno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum).flagged;}).length;
+    var flaggedS=histData.storno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum,r.articles).flagged;}).length;
     html+=metricCard('🧾 Сторно бележки',histData.storno.length,flaggedS?'⚠️ '+flaggedS+' с по-малка сума':'без разминавания',flaggedS?'#dc2626':'#16a34a');
   }
   html+='</div>';
@@ -278,20 +278,26 @@ function renderHistoryResults(){
 
   /* Сторно бележки */
   if(histData.storno.length){
-    var flaggedTotal=histData.storno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum).flagged;}).length;
+    var canReturnStorno=['admin','accounting'].indexOf(currentUser.role)>=0;
+    var flaggedTotal=histData.storno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum,r.articles).flagged;}).length;
     html+='<div class="card" style="margin-top:14px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
         '<div class="card-title" style="margin:0;">🧾 Сторно бележки ('+histData.storno.length+')</div>'+
         (flaggedTotal?'<div style="font-size:13px;font-weight:700;color:#dc2626;">⚠️ '+flaggedTotal+' с по-малка сума на новата покупка</div>':'')+
       '</div>'+
       '<div class="tbl-wrap"><table>'+
-      '<thead><tr><th>Дата сторно</th><th>Дата бон</th><th>Магазин</th><th>Артикул/и</th><th>Име</th><th>Сума върнат</th><th>Причина</th><th>Реална замяна</th><th>Сума нов</th><th>Индикация</th></tr></thead>'+
+      '<thead><tr><th>Дата сторно</th><th>Магазин</th><th>Артикул/и</th><th>Име</th><th>Сума върнат</th><th>Причина</th><th>Реална замяна</th><th>Сума нов</th><th>Индикация</th><th>Статус</th>'+(canReturnStorno?'<th></th>':'')+'</tr></thead>'+
       '<tbody>'+
-      histData.storno.map(function(r){
-        var ind=stornoIndicator(r.returned_sum,r.new_sum);
-        return '<tr'+(ind.flagged?' style="background:'+ind.bg+';"':'')+'>'+
+      histData.storno.slice().sort(function(a,b){return stornoSortPriority(a)-stornoSortPriority(b);}).map(function(r){
+        var ind=stornoIndicator(r.returned_sum,r.new_sum,r.articles);
+        var rowBg=ind.flagged?ind.bg:(r.status==='returned'?'#fffbeb':(r.status==='resubmitted'?'#eff6ff':null));
+        var statusBadge=
+          r.status==='returned'   ? '<span style="background:#fed7aa;color:#9a3412;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">↩ Върнат</span>' :
+          r.status==='resubmitted'? '<span style="background:#dbeafe;color:#1e40af;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">🔄 Изпратен отново</span>' :
+          '';
+        var colspan=canReturnStorno?11:10;
+        var row='<tr'+(rowBg?' style="background:'+rowBg+';"':'')+'>'+
           '<td>'+fmtDate(r.storno_date)+'</td>'+
-          '<td>'+fmtDate(r.original_receipt_date)+'</td>'+
           '<td>'+esc(r.store_name||'')+'</td>'+
           '<td style="font-family:DM Mono,monospace;font-size:11px;">'+esc(r.articles||'')+'</td>'+
           '<td>'+esc(r.article_name||'')+'</td>'+
@@ -301,7 +307,22 @@ function renderHistoryResults(){
             (r.replacement_article_name?'<br><b>'+esc(r.replacement_article_name)+'</b>':'')+'</td>'+
           '<td style="font-family:DM Mono,monospace;">'+fmtMoney(r.new_sum)+'</td>'+
           '<td><span style="font-weight:700;color:'+ind.color+';font-size:12px;">'+ind.label+'</span></td>'+
+          '<td>'+statusBadge+'</td>'+
+          (canReturnStorno?'<td>'+(r.status!=='returned'?'<button onclick="returnStornoForComment(\''+r.id+'\')" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;white-space:nowrap;">↩ Върни за коментар</button>':'')+'</td>':'')+
         '</tr>';
+        /* Видим ред с причината за връщане / пояснението от магазина — не само tooltip */
+        if(r.status==='returned'){
+          row+='<tr'+(rowBg?' style="background:'+rowBg+';"':'')+'>'+
+            '<td colspan="'+colspan+'" style="padding:8px 14px;font-size:12px;color:#9a3412;">'+
+              '<b>Причина за връщане:</b> '+esc(r.return_reason||'')+' &nbsp;·&nbsp; върнато от '+esc(r.returned_by||'')+
+            '</td></tr>';
+        } else if(r.status==='resubmitted'&&r.store_comment){
+          row+='<tr'+(rowBg?' style="background:'+rowBg+';"':'')+'>'+
+            '<td colspan="'+colspan+'" style="padding:8px 14px;font-size:12px;color:#1e40af;">'+
+              '<b>Пояснение от магазина:</b> '+esc(r.store_comment)+' &nbsp;·&nbsp; от '+esc(r.resubmitted_by||'')+
+            '</td></tr>';
+        }
+        return row;
       }).join('')+
       '</tbody></table></div></div>';
   }
@@ -726,10 +747,11 @@ function exportKasaToExcel(){
       if(stornoAll.length){
         var stornoRows = [
           ['Дата сторно','Дата бон','Магазин','Артикул/и','Име','Сума върнат (EUR)',
-           'Причина','Заменен арт.','Име на нов артикул','Сума нов (EUR)','Разлика (EUR)','Индикация']
+           'Причина','Заменен арт.','Име на нов артикул','Сума нов (EUR)','Разлика (EUR)','Индикация','Статус','Причина за връщане','Пояснение от магазина']
         ];
         stornoAll.forEach(function(r){
-          var ind=stornoIndicator(r.returned_sum,r.new_sum);
+          var ind=stornoIndicator(r.returned_sum,r.new_sum,r.articles);
+          var statusLbl=r.status==='returned'?'↩ Върнат за коментар':(r.status==='resubmitted'?'🔄 Изпратен отново':'');
           stornoRows.push([
             r.storno_date||'',
             r.original_receipt_date||'',
@@ -742,14 +764,17 @@ function exportKasaToExcel(){
             r.replacement_article_name||'',
             parseFloat(r.new_sum)||0,
             ind.diff,
-            ind.flagged?'⚠️ ПО-МАЛКО':(ind.diff>0?'✅ ПОВЕЧЕ':'✅ РАВНО')
+            ind.exempt?'➖ Капаро/Ваучер':(ind.flagged?'⚠️ ПО-МАЛКО':(ind.diff>0?'✅ ПОВЕЧЕ':'✅ РАВНО')),
+            statusLbl,
+            r.return_reason||'',
+            r.store_comment||''
           ]);
         });
-        var flaggedXl=stornoAll.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum).flagged;}).length;
+        var flaggedXl=stornoAll.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum,r.articles).flagged;}).length;
         stornoRows.push([]);
-        stornoRows.push(['ОБЩО',stornoAll.length+' бележки','','','','','','','','','⚠️ '+flaggedXl+' с по-малка сума','']);
+        stornoRows.push(['ОБЩО',stornoAll.length+' бележки','','','','','','','','','⚠️ '+flaggedXl+' с по-малка сума','','','','']);
         var wsStorno = XLSX.utils.aoa_to_sheet(stornoRows);
-        wsStorno['!cols'] = [{wch:12},{wch:12},{wch:18},{wch:16},{wch:22},{wch:14},{wch:22},{wch:16},{wch:22},{wch:14},{wch:12},{wch:14}];
+        wsStorno['!cols'] = [{wch:12},{wch:12},{wch:18},{wch:16},{wch:22},{wch:14},{wch:22},{wch:16},{wch:22},{wch:14},{wch:12},{wch:14},{wch:16},{wch:24},{wch:24}];
         XLSX.utils.book_append_sheet(wb, wsStorno, 'Сторно бележки');
       }
 

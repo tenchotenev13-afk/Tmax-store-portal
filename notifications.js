@@ -49,6 +49,22 @@ function showLoginBanner(){
     }
   }).catch(function(){});
 
+  /* Сторно бележка е върната за коментар — банер за самия магазин (не за admin/accounting) */
+  sbGet('kasa_storno','store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&status=eq.returned&select=return_reason,returned_by').then(function(retS){
+    if(Array.isArray(retS)&&retS.length){
+      var rs=retS[0];
+      var el=document.getElementById('notif-banner');
+      if(el){
+        var card='<div class="notif-card urgent"><div class="notif-icon">🧾</div><div class="notif-text">'+
+          '<div class="notif-title">'+(retS.length>1?retS.length+' сторно бележки са върнати за коментар!':'Сторно бележка е върната за коментар!')+'</div>'+
+          '<div class="notif-sub">Причина: '+esc(rs.return_reason||'')+'&nbsp;·&nbsp;Върнато от: '+esc(rs.returned_by||'')+'</div>'+
+          '</div><button onclick="goToStornoTab()" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Виж →</button>'+
+          '<span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
+        el.innerHTML=card+el.innerHTML;el.style.display='block';
+      }
+    }
+  }).catch(function(){});
+
   /* Сторно бележки с разминаване (нова сума < върната) — само за admin/accounting,
      последните 30 дни, за да не се налага да влизат в История, за да разберат. */
   if(['admin','accounting'].indexOf(currentUser.role)>=0){
@@ -133,7 +149,44 @@ function checkNewOrders(){
 function startPolling(){
   if(_poll)clearInterval(_poll);
   _seenIds=null; /* нулираме при всеки нов старт, за да хванем правилния базов snapshot */
-  _poll=setInterval(checkNewOrders,30000);
+  _seenReturnedIds=null;
+  _poll=setInterval(function(){checkNewOrders();checkReturnedItems();},30000);
+}
+
+/* Банерът (showLoginBanner) се показва само веднъж — веднага след вход. Ако Цветелина/admin
+   върне касов отчет или сторно бележка, докато магазинът вече е в портала, той няма да разбере
+   без тази проверка на всеки 30 сек — засича НОВО върнати записи и известява веднага. */
+var _seenReturnedIds=null;
+function checkReturnedItems(){
+  if(!currentUser||isGlobal())return; /* само за магазински роли — admin/accounting нямат store_name */
+  var enc=encodeURIComponent(currentUser.store_name);
+  Promise.all([
+    sbGet('kasa_reports','store_name=eq.'+enc+'&status=eq.returned&select=id'),
+    sbGet('kasa_storno','store_name=eq.'+enc+'&status=eq.returned&select=id')
+  ]).then(function(r){
+    var ids=[];
+    if(Array.isArray(r[0])) r[0].forEach(function(x){ids.push('kr_'+x.id);});
+    if(Array.isArray(r[1])) r[1].forEach(function(x){ids.push('ks_'+x.id);});
+    var currentSet={}; ids.forEach(function(id){currentSet[id]=1;});
+
+    if(_seenReturnedIds===null){
+      /* Първо извикване — само базов snapshot, без известяване */
+      _seenReturnedIds=currentSet;
+      return;
+    }
+
+    var newOnes=ids.filter(function(id){return !_seenReturnedIds[id];});
+    if(newOnes.length>0){
+      var hasKasa=newOnes.some(function(id){return id.indexOf('kr_')===0;});
+      var hasStorno=newOnes.some(function(id){return id.indexOf('ks_')===0;});
+      var msg=hasKasa&&hasStorno?'Касов отчет и сторно бележка са върнати за корекция!':
+              hasStorno?'Сторно бележка е върната за коментар!':'Касов отчет е върнат за корекция!';
+      playSound();
+      toast('↩ '+msg,'#dc2626');
+      if(typeof showLoginBanner==='function')showLoginBanner();
+    }
+    _seenReturnedIds=currentSet;
+  }).catch(function(){});
 }
 
 /* Hook into renderMetrics — показва банера след като данните са заредени

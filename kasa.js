@@ -70,20 +70,14 @@ function loadKasa(){
   sbGet('kasa_reports',q).then(function(data){
     kasaReports=Array.isArray(data)?data:[];
     if(kasaView==='pos') renderKasa();
-    else if(kasaView==='glavna') renderGlavna();
-  }).catch(function(){if(kasaView==='pos')renderKasa();});
+    else renderGlavna();
+  }).catch(function(){renderKasa();});
   /* Главна каса за днес */
   var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
   sbGet('kasa_glavna',gq).then(function(data){
     kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
     if(kasaView==='glavna') renderGlavna();
   }).catch(function(){});
-  /* Равнение и Сторно имат собствени зареждания с отделни таблици —
-     иначе при връщане в Каса с активен последен подтаб 'zoborot'/'storno'
-     горното renderGlavna() никога не се вика за тях, а и без този явен
-     извик изгледът остава празен/стар додето потребителят не кликне таба. */
-  if(kasaView==='zoborot') loadZoborot();
-  else if(kasaView==='storno') loadStorno();
 }
 
 /* ─── TABS ──────────────────────────────────────────────────── */
@@ -1420,7 +1414,20 @@ function printZoborot(){
 var kasaStorno = [];
 var kasaStornoEditId = null;
 
-function stornoIndicator(returnedSum, newSum) {
+/* Кодове, при които сравнението "сума на нов ≥ сума на върнат" няма смисъл —
+   Капаро и Ваучер са финансови транзакции без реален заменящ артикул. */
+var STORNO_EXEMPT_CODES = ['900001','900009'];
+
+function stornoIsExempt(articlesStr){
+  if(!articlesStr) return false;
+  var codes=String(articlesStr).split('/').map(function(s){return s.trim();});
+  return codes.some(function(c){return STORNO_EXEMPT_CODES.indexOf(c)>=0;});
+}
+
+function stornoIndicator(returnedSum, newSum, articlesStr) {
+  if(stornoIsExempt(articlesStr)){
+    return { flagged:false, exempt:true, label:'➖ Капаро/Ваучер', color:'#64748b', bg:null, diff:0 };
+  }
   var ret = parseFloat(returnedSum) || 0;
   var nw  = parseFloat(newSum) || 0;
   var diff = Math.round((nw - ret) * 100) / 100;
@@ -1429,10 +1436,24 @@ function stornoIndicator(returnedSum, newSum) {
   return          { flagged: false, label: '✅ РАВНО',      color: '#16a34a', bg: '#f0fdf4', diff: diff };
 }
 
+/* Директен скок към Каса > Сторно бележки — ползва се от банера при вход,
+   когато сторно бележка е върната за коментар на самия магазин. */
+function goToStornoTab(){
+  showModule('kasa');
+  kasaTab('storno');
+}
+
+/* Приоритет за сортиране: върнатите за коментар излизат най-отгоре,
+   после изпратените отново, после всичко останало по дата. */
+function stornoSortPriority(r){
+  return r.status==='returned'?0:(r.status==='resubmitted'?1:2);
+}
+
 function loadStorno(){
   var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&order=storno_date.desc,created_at.desc';
   sbGet('kasa_storno',q).then(function(data){
     kasaStorno=Array.isArray(data)?data:[];
+    kasaStorno.sort(function(a,b){return stornoSortPriority(a)-stornoSortPriority(b);});
     renderStorno();
   }).catch(function(){kasaStorno=[];renderStorno();});
 }
@@ -1440,7 +1461,9 @@ function loadStorno(){
 function renderStorno(){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
   var canEdit=['manager','admin','kasa'].indexOf(currentUser.role)>=0;
-  var flaggedCount=kasaStorno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum).flagged;}).length;
+  var canReturn=['admin','accounting'].indexOf(currentUser.role)>=0;
+  var flaggedCount=kasaStorno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum,r.articles).flagged;}).length;
+  var returnedCount=kasaStorno.filter(function(r){return r.status==='returned';}).length;
 
   var html='<div class="page">'+
     '<div class="pg-title">💰 Каса</div>'+
@@ -1449,6 +1472,7 @@ function renderStorno(){
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
       '<div style="font-size:13px;color:var(--muted);">Общо: <b>'+kasaStorno.length+'</b> бележки'+
         (flaggedCount?' &nbsp;|&nbsp; <b style="color:#dc2626;">⚠️ '+flaggedCount+'</b> с по-малка сума на новата покупка':'')+
+        (returnedCount?' &nbsp;|&nbsp; <b style="color:#d97706;">↩ '+returnedCount+'</b> върнати за коментар':'')+
       '</div>'+
       (canEdit?'<button class="btn btn-green" onclick="openStornoForm(null)">+ Нова сторно бележка</button>':'')+
     '</div>';
@@ -1463,11 +1487,16 @@ function renderStorno(){
     '<thead><tr>'+
       '<th>Дата сторно</th><th>Дата бон</th><th>Артикул/и</th><th>Име</th>'+
       '<th>Сума върнат</th><th>Причина</th><th>Реална замяна</th><th>Сума нов</th>'+
-      '<th>Индикация</th>'+(canEdit?'<th></th>':'')+
+      '<th>Индикация</th><th>Статус</th>'+(canEdit||canReturn?'<th></th>':'')+
     '</tr></thead><tbody>'+
     kasaStorno.map(function(r){
-      var ind=stornoIndicator(r.returned_sum,r.new_sum);
-      return '<tr'+(ind.flagged?' style="background:'+ind.bg+';"':'')+'>'+
+      var ind=stornoIndicator(r.returned_sum,r.new_sum,r.articles);
+      var rowBg=ind.flagged?ind.bg:(r.status==='returned'?'#fffbeb':(r.status==='resubmitted'?'#eff6ff':null));
+      var statusBadge=
+        r.status==='returned'   ? '<span style="background:#fed7aa;color:#9a3412;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">↩ Върнат</span>' :
+        r.status==='resubmitted'? '<span style="background:#dbeafe;color:#1e40af;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">🔄 Изпратен отново</span>' :
+        '';
+      var row='<tr'+(rowBg?' style="background:'+rowBg+';"':'')+'>'+
         '<td>'+fmtDate(r.storno_date)+'</td>'+
         '<td>'+fmtDate(r.original_receipt_date)+'</td>'+
         '<td style="font-family:DM Mono,monospace;font-size:11px;">'+esc(r.articles||'')+'</td>'+
@@ -1478,15 +1507,81 @@ function renderStorno(){
           (r.replacement_article_name?'<br><b>'+esc(r.replacement_article_name)+'</b>':'')+'</td>'+
         '<td style="font-family:DM Mono,monospace;">'+fmtMoney(r.new_sum)+'</td>'+
         '<td><span style="font-weight:700;color:'+ind.color+';font-size:12px;">'+ind.label+'</span></td>'+
-        (canEdit?'<td style="white-space:nowrap;">'+
-          '<button onclick="openStornoForm(\''+r.id+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px;">✏️</button>'+
-          '<button onclick="deleteStornoEntry(\''+r.id+'\')" style="border:1px solid #dc2626;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🗑</button>'+
+        '<td>'+statusBadge+'</td>'+
+        (canEdit||canReturn?'<td style="white-space:nowrap;">'+
+          (canEdit?'<button onclick="openStornoForm(\''+r.id+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px;">✏️</button>'+
+          '<button onclick="deleteStornoEntry(\''+r.id+'\')" style="border:1px solid #dc2626;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px;">🗑</button>':'')+
+          (canReturn?'<button onclick="returnStornoForComment(\''+r.id+'\')" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">↩ Върни за коментар</button>':'')+
         '</td>':'')+
       '</tr>';
+
+      /* Разширен ред — причина за връщане + поле за коментар от магазина (само когато е върнат) */
+      if(r.status==='returned'){
+        row+='<tr'+(rowBg?' style="background:'+rowBg+';"':'')+'>'+
+          '<td colspan="11" style="padding:10px 14px;border-top:none;">'+
+            '<div style="font-size:12px;color:#9a3412;margin-bottom:6px;"><b>Причина за връщане:</b> '+esc(r.return_reason||'')+
+              ' &nbsp;·&nbsp; върнато от '+esc(r.returned_by||'')+(r.returned_at?' на '+fmtDate(r.returned_at.slice(0,10)):'')+'</div>'+
+            (canEdit?
+              '<textarea id="sc-'+r.id+'" placeholder="Напиши пояснение защо е така, преди да потвърдиш..." style="width:100%;min-height:60px;border:1px solid #fdba74;border-radius:6px;padding:8px;font-size:12px;font-family:inherit;resize:vertical;">'+escVal(r.store_comment)+'</textarea>'+
+              '<div style="margin-top:6px;"><button onclick="resubmitStorno(\''+r.id+'\')" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">✅ Потвърди с коментар</button></div>'
+            :'')+
+          '</td></tr>';
+      } else if(r.status==='resubmitted'&&r.store_comment){
+        row+='<tr'+(rowBg?' style="background:'+rowBg+';"':'')+'>'+
+          '<td colspan="11" style="padding:10px 14px;border-top:none;">'+
+            '<div style="font-size:12px;color:#1e40af;"><b>Пояснение от магазина:</b> '+esc(r.store_comment)+
+              ' &nbsp;·&nbsp; от '+esc(r.resubmitted_by||'')+(r.resubmitted_at?' на '+fmtDate(r.resubmitted_at.slice(0,10)):'')+'</div>'+
+          '</td></tr>';
+      }
+      return row;
     }).join('')+
     '</tbody></table></div></div></div>';
 
   wrap.innerHTML=html;
+}
+
+/* ─── ВЪРНИ ЗА КОМЕНТАР (само admin/accounting — контролинг) ──── */
+function returnStornoForComment(id){
+  var reason=prompt('Причина за връщане на сторно бележката за коментар:');
+  if(!reason) return;
+  var by=currentUser.display_name||currentUser.email;
+  sbPatch('kasa_storno','id=eq.'+id,{
+    status:'returned',
+    return_reason:reason,
+    returned_by:by,
+    returned_at:new Date().toISOString(),
+    store_comment:null
+  }).then(function(res){
+    if(!res.ok){toast('Грешка при връщане','#dc2626');return;}
+    toast('↩ Сторно бележката е върната за коментар','#d97706');
+    if(typeof kasaView!=='undefined'&&kasaView==='storno') loadStorno();
+    if(typeof loadHistory==='function'&&document.getElementById('mod-history')&&document.getElementById('mod-history').style.display!=='none') loadHistory();
+  });
+}
+
+/* ─── МАГАЗИНЪТ ПОТВЪРЖДАВА С ПОЯСНЕНИЕ ────────────────────── */
+function resubmitStorno(id){
+  var ta=document.getElementById('sc-'+id);
+  var comment=(ta&&ta.value||'').trim();
+  if(!comment){toast('Напиши пояснение преди да потвърдиш','#dc2626');return;}
+  var by=currentUser.display_name||currentUser.email;
+  sbPatch('kasa_storno','id=eq.'+id,{
+    status:'resubmitted',
+    store_comment:comment,
+    resubmitted_by:by,
+    resubmitted_at:new Date().toISOString()
+  }).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    toast('✅ Изпратено отново за преглед');
+    var rec=kasaStorno.find(function(x){return x.id===id;});
+    if(typeof pushToRole==='function'){
+      var title='🔄 Сторно бележка — пояснение получено';
+      var msg=(rec?rec.store_name+': ':'')+comment.slice(0,120);
+      pushToRole('admin',title,msg);
+      pushToRole('accounting',title,msg);
+    }
+    loadStorno();
+  });
 }
 
 function openStornoForm(id){
@@ -1511,7 +1606,7 @@ function openStornoForm(id){
 
     '<div class="card" style="margin-bottom:14px;"><div class="card-title">Върнат артикул</div>'+
     '<div class="form-grid">'+
-      '<div><label class="fl">Артикул/и (SAP код, при повече от 1 — разделени с /)</label><input class="fi" id="sf-articles" value="'+escVal(r.articles)+'" onblur="stornoLookupCatalog(\'articles\')"></div>'+
+      '<div><label class="fl">Артикул/и (SAP код, при повече от 1 — разделени с /)</label><input class="fi" id="sf-articles" value="'+escVal(r.articles)+'" oninput="stornoLiveCalc()" onblur="stornoLookupCatalog(\'articles\')"></div>'+
       '<div><label class="fl">Име</label><input class="fi" id="sf-article_name" value="'+escVal(r.article_name)+'"></div>'+
       '<div><label class="fl">Сума на върнат артикул/и (EUR)</label><input type="number" step="0.01" class="fi" id="sf-returned_sum" value="'+(r.returned_sum||'')+'" oninput="stornoLiveCalc()" placeholder="0.00"></div>'+
       '<div><label class="fl">Причина</label><input class="fi" id="sf-reason" value="'+escVal(r.reason)+'"></div>'+
@@ -1527,7 +1622,7 @@ function openStornoForm(id){
     '<div class="card" id="sf-indicator-box" style="background:#f8fafc;text-align:center;padding:16px;">'+
       '<div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Индикация</div>'+
       '<div id="sf-indicator" style="font-size:18px;font-weight:700;">—</div>'+
-      '<div style="font-size:11px;color:#94a3b8;margin-top:4px;">Сумата на новата покупка трябва да е равна или по-голяма от сумата на върнатия артикул.</div>'+
+      '<div style="font-size:11px;color:#94a3b8;margin-top:4px;">Сумата на новата покупка трябва да е равна или по-голяма от сумата на върнатия артикул. Изключение: артикули 900001 (Капаро) и 900009 (Ваучер) не се проверяват.</div>'+
     '</div>'+
   '</div>';
 
@@ -1561,7 +1656,8 @@ function stornoLookupCatalog(kind){
 function stornoLiveCalc(){
   var ret=parseFloat((document.getElementById('sf-returned_sum')||{}).value)||0;
   var nw =parseFloat((document.getElementById('sf-new_sum')||{}).value)||0;
-  var ind=stornoIndicator(ret,nw);
+  var articles=(document.getElementById('sf-articles')||{}).value||'';
+  var ind=stornoIndicator(ret,nw,articles);
   var el=document.getElementById('sf-indicator');
   var box=document.getElementById('sf-indicator-box');
   if(el){
@@ -1597,7 +1693,7 @@ function submitStornoForm(){
   req.then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     toast('💾 Сторно бележката е запазена!');
-    if(stornoIndicator(p.returned_sum,p.new_sum).flagged) notifyStornoDiscrepancy(p);
+    if(stornoIndicator(p.returned_sum,p.new_sum,p.articles).flagged) notifyStornoDiscrepancy(p);
     kasaStornoEditId=null;kasaView='storno';loadStorno();
   });
 }
