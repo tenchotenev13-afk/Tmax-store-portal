@@ -63,8 +63,8 @@ function collectDailyReportData(cb){
         }).map(function(u){ return u.store_name; });
 
         var comps = [];
-        regComps.forEach(function(c){ comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment }); });
-        recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment }); });
+        regComps.forEach(function(c){ comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
+        recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
 
         cb(reportBuildSummary(items, comps, stores, recurringNoDue.length));
       }).catch(function(){ cb(null); });
@@ -102,11 +102,19 @@ function reportBuildSummary(items, comps, stores, noDueCount){
     var it = items.find(function(x){ return x.id===c.item_id && x.kind===c.kind; });
     return { title: it ? it.title : '(неизвестна задача)', store: c.store_name, comment: c.comment || '' };
   });
+  /* Изпълнени задачи С коментар/снимка - иначе съдържанието е невидимо в
+     репорта, освен ако не отвориш конкретната задача в Бюлетин. */
+  var commentedList = doneComps.filter(function(c){
+    return c.comment || (c.photos && c.photos.length);
+  }).map(function(c){
+    var it = items.find(function(x){ return x.id===c.item_id && x.kind===c.kind; });
+    return { title: it ? it.title : '(неизвестна задача)', store: c.store_name, comment: c.comment || '', photos: c.photos || [] };
+  });
   return {
     overallPct: overallPct, totalDone: totalDone, totalAll: totalAll,
     laggards: laggards, storeCount: stores.length, rows: rows,
     top3: byPct.slice(0,3), bottom3: byPct.slice(-3).reverse(),
-    noDueCount: noDueCount || 0, postponedList: postponedList
+    noDueCount: noDueCount || 0, postponedList: postponedList, commentedList: commentedList
   };
 }
 
@@ -169,6 +177,30 @@ function reportPostponedSectionHtml(postponedList){
     '</div>';
 }
 
+/* Изпълнени задачи с коментар/снимка - за "вид задача с коментар/снимка" да
+   се преглежда съдържанието директно в репорта, без да се отваря Бюлетин. */
+function reportCommentedSectionHtml(commentedList){
+  if (!commentedList || !commentedList.length) return '';
+  var rows = commentedList.map(function(p){
+    var h = '<div style="padding:8px 10px;border-bottom:1px solid #BBF7D0;">' +
+      '<div style="font-size:12.5px;font-weight:700;color:#14532d;">'+esc(p.title)+' <span style="font-weight:500;color:#166534;">— '+esc(p.store)+'</span></div>';
+    if (p.comment) h += '<div style="font-size:11.5px;color:#166534;margin-top:2px;">💬 '+esc(p.comment)+'</div>';
+    if (p.photos && p.photos.length) {
+      h += '<div style="margin-top:5px;">';
+      p.photos.forEach(function(ph){
+        h += '<img src="'+ph.url+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #bbf7d0;margin-right:5px;">';
+      });
+      h += '</div>';
+    }
+    h += '</div>';
+    return h;
+  }).join('');
+  return '<div style="margin-top:14px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">💬 Изпълнени с коментар/снимка ('+commentedList.length+')</div>' +
+    '<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;overflow:hidden;">'+rows+'</div>' +
+    '</div>';
+}
+
 function buildDailyReportHtml(data){
   var body = '<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:6px;margin-bottom:6px;"><tr>' +
     reportStatCell(data.overallPct+'%','изпълнение за деня', data.overallPct===100?'#2F9E5C':data.overallPct>=50?'#1E2761':'#C0392B') +
@@ -180,6 +212,7 @@ function buildDailyReportHtml(data){
   body += data.rows.map(reportStoreRow).join('');
   body += reportTopBottomTable(data.top3, data.bottom3);
   body += reportPostponedSectionHtml(data.postponedList);
+  body += reportCommentedSectionHtml(data.commentedList);
   if (data.noDueCount > 0) {
     body += '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:11.5px;color:#8A5A12;">'+
       '📋 '+data.noDueCount+' постоянни задачи без конкретен срок чакат преглед (не участват в % по-горе) — виж ги в таб „Днес".</div>';
@@ -246,8 +279,8 @@ function collectWeeklyReportData(cb){
         }).map(function(u){ return u.store_name; });
 
         var comps = [];
-        regComps.forEach(function(c){ comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment }); });
-        recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment }); });
+        regComps.forEach(function(c){ comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
+        recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
 
         var summary = reportBuildSummary(items, comps, stores, noDueCount);
         summary.weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
@@ -268,6 +301,7 @@ function buildWeeklyReportHtml(data){
   body += data.rows.map(reportStoreRow).join('');
   body += reportTopBottomTable(data.top3, data.bottom3);
   body += reportPostponedSectionHtml(data.postponedList);
+  body += reportCommentedSectionHtml(data.commentedList);
   if (data.noDueCount > 0) {
     body += '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:11.5px;color:#8A5A12;">'+
       '📋 '+data.noDueCount+' постоянни задачи без конкретен срок не участват в тази статистика.</div>';
