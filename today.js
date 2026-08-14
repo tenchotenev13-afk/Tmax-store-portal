@@ -53,7 +53,7 @@ function loadTodayDashboard(){
 
     bulTasksPromise.then(function(tasksRaw){
       var allBulTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
-      var regularToday = allBulTasks.filter(function(t){ return t.due_date && String(t.due_date).slice(0,10)===todayISO; });
+      var regularToday = allBulTasks.filter(function(t){ return taskIsDueOnDate(t, todayISO); });
 
       /* обединяваме двата типа задачи в общ формат за таблото - пазим
          target_stores, за да не броим задача в знаменателя на магазин, за
@@ -90,9 +90,12 @@ function loadTodayDashboard(){
         /* нормализираме completion-ите в общ формат: {item_id, kind, store_name}
            - взимаме само status='done', за да не броим отложените (postponed)
            задачи като изпълнени в процента; пазим comment/photos, за да
-           могат да се преглеждат директно тук, без да се отваря Бюлетин */
+           могат да се преглеждат директно тук, без да се отваря Бюлетин.
+           За обикновени задачи филтрираме и по completion_date===днес -
+           многодневна задача (Пон+Ср) не бива изпълнението от Понеделник
+           да се показва като "изпълнено" и в сряда. */
         var comps = [];
-        regComps.forEach(function(c){ if(c.status==='done') comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, comment:c.comment, photos:c.photos }); });
+        regComps.forEach(function(c){ if(c.status==='done' && (c.completion_date||null)===todayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, comment:c.comment, photos:c.photos }); });
         recComps.forEach(function(c){ if(c.status==='done') comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, comment:c.comment, photos:c.photos }); });
 
         todayCache = { items:items, noDueItems:noDueItems, comps:comps, stores:stores };

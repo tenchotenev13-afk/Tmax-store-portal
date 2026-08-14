@@ -39,7 +39,7 @@ function collectDailyReportData(cb){
 
     bulTasksPromise.then(function(tasksRaw){
       var allBulTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
-      var regularToday = allBulTasks.filter(function(t){ return t.due_date && String(t.due_date).slice(0,10)===todayISO; });
+      var regularToday = allBulTasks.filter(function(t){ return taskIsDueOnDate(t, todayISO); });
 
       var items = [];
       regularToday.forEach(function(t){ items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null }); });
@@ -63,7 +63,10 @@ function collectDailyReportData(cb){
         }).map(function(u){ return u.store_name; });
 
         var comps = [];
-        regComps.forEach(function(c){ comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
+        /* Само completion-и от ТОЗИ ден за обикновени задачи - многодневна
+           задача (Пон+Ср) не бива изпълнението от Понеделник да се показва
+           като "изпълнено" (или "отложено") и в сряда. */
+        regComps.forEach(function(c){ if((c.completion_date||null)===todayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
         recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
 
         var summary = reportBuildSummary(items, comps, stores, recurringNoDue.length);
@@ -108,10 +111,17 @@ function reportTrendHtml(currentPct, snapshot, label){
   return '<div style="text-align:center;font-size:12px;color:'+color+';font-weight:700;margin:6px 0 0;">'+arrow+' '+sign+diff+'% '+label+'</div>';
 }
 
-/* items:[{id,kind,title}] comps:[{item_id,kind,store_name,status,comment}] →
+/* items:[{id,kind,title,date?}] comps:[{item_id,kind,store_name,status,comment,completion_date?}] →
    обобщена статистика, споделена между дневния и седмичния builder.
    Само status='done' се брои за изпълнено; 'postponed' се извежда отделно
-   в postponedList (за секцията "Отложени" в репорта), не участва в %. */
+   в postponedList (за секцията "Отложени" в репорта), не участва в %.
+   Ако елемент носи .date (многодневна задача, разгъната на под-елементи по
+   ден), сравнението изисква и completion_date да съвпада с точно този ден. */
+function reportItemMatchesComp(it, c){
+  if (it.id!==c.item_id || it.kind!==c.kind) return false;
+  if (it.date) return (c.completion_date||null)===it.date;
+  return true;
+}
 function reportBuildSummary(items, comps, stores, noDueCount){
   var totalDone=0, totalAll=0, laggards=0;
   var doneComps = comps.filter(function(c){ return c.status==='done'; });
@@ -124,7 +134,7 @@ function reportBuildSummary(items, comps, stores, noDueCount){
     });
     var total = scoped.length;
     var done = scoped.filter(function(it){
-      return doneComps.some(function(c){ return c.item_id===it.id && c.kind===it.kind && c.store_name===s; });
+      return doneComps.some(function(c){ return c.store_name===s && reportItemMatchesComp(it,c); });
     }).length;
     var pct = total ? Math.round(done/total*100) : 0;
     totalDone += done; totalAll += total;
@@ -135,7 +145,7 @@ function reportBuildSummary(items, comps, stores, noDueCount){
   var overallPct = totalAll ? Math.round(totalDone/totalAll*100) : 0;
   var byPct = rows.slice().sort(function(a,b){ return b.pct - a.pct; });
   var postponedList = postponedComps.map(function(c){
-    var it = items.find(function(x){ return x.id===c.item_id && x.kind===c.kind; });
+    var it = items.find(function(x){ return reportItemMatchesComp(x,c); }) || items.find(function(x){ return x.id===c.item_id && x.kind===c.kind; });
     return { title: it ? it.title : '(неизвестна задача)', store: c.store_name, comment: c.comment || '' };
   });
   /* Изпълнени задачи С коментар/снимка - иначе съдържанието е невидимо в
@@ -143,7 +153,7 @@ function reportBuildSummary(items, comps, stores, noDueCount){
   var commentedList = doneComps.filter(function(c){
     return c.comment || (c.photos && c.photos.length);
   }).map(function(c){
-    var it = items.find(function(x){ return x.id===c.item_id && x.kind===c.kind; });
+    var it = items.find(function(x){ return reportItemMatchesComp(x,c); }) || items.find(function(x){ return x.id===c.item_id && x.kind===c.kind; });
     return { title: it ? it.title : '(неизвестна задача)', store: c.store_name, comment: c.comment || '', photos: c.photos || [] };
   });
   return {
@@ -295,7 +305,22 @@ function collectWeeklyReportData(cb){
       var allBulTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
 
       var items = [];
-      allBulTasks.forEach(function(t){ items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null }); });
+      /* Многодневна задача (Пон+Ср) се разгъва на ОТДЕЛЕН елемент за всеки
+         ден - реално отразява обема работа (2 отделни отмятания = 2 единици
+         в седмичната статистика, не 1). За еднодневна задача .date просто
+         съвпада с единствения ѝ due_date - работи еднакво с новата
+         completion_date логика навсякъде другаде. */
+      allBulTasks.forEach(function(t){
+        var dates = taskDueDates(t);
+        if (dates.length > 1) {
+          dates.forEach(function(d){
+            var dLabel = new Date(d+'T00:00:00').toLocaleDateString('bg-BG',{day:'numeric',month:'numeric'});
+            items.push({ id:t.id, kind:'regular', title:t.title+' ('+dLabel+')', target_stores:t.target_stores||null, date:d });
+          });
+        } else {
+          items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null, date: dates[0]||null });
+        }
+      });
       recurringScheduled.forEach(function(t){ items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null }); });
 
       var regIds = allBulTasks.map(function(t){ return t.id; });
