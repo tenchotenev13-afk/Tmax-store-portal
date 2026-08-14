@@ -52,7 +52,7 @@ function loadTodayDashboard(){
          който изобщо не важи (recurring нямат target_stores - важат за всички) */
       var items = [];
       regularToday.forEach(function(t){ items.push({ id:t.id, title:t.title, department:t.department, kind:'regular', target_stores:t.target_stores||null }); });
-      recurringToday.forEach(function(t){ items.push({ id:t.id, title:t.title, department:t.department, kind:'recurring', target_stores:null }); });
+      recurringToday.forEach(function(t){ items.push({ id:t.id, title:t.title, department:t.department, kind:'recurring', target_stores:t.target_stores||null }); });
 
       var noDueItems = recurringNoDue.map(function(t){ return { id:t.id, title:t.title, department:t.department, kind:'recurring' }; });
 

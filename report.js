@@ -43,7 +43,7 @@ function collectDailyReportData(cb){
 
       var items = [];
       regularToday.forEach(function(t){ items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null }); });
-      recurringToday.forEach(function(t){ items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:null }); });
+      recurringToday.forEach(function(t){ items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null }); });
 
       var regIds = regularToday.map(function(t){ return t.id; });
       var recIds = recurringToday.map(function(t){ return t.id; });
@@ -226,7 +226,7 @@ function collectWeeklyReportData(cb){
 
       var items = [];
       allBulTasks.forEach(function(t){ items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null }); });
-      recurringScheduled.forEach(function(t){ items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:null }); });
+      recurringScheduled.forEach(function(t){ items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null }); });
 
       var regIds = allBulTasks.map(function(t){ return t.id; });
       var recIds = recurringScheduled.map(function(t){ return t.id; });
@@ -304,28 +304,40 @@ function sendWeeklyReportTest(toEmail){
 /* Събира само задачите с зададени report_groups от текущия публикуван
    бюлетин + completion-ите им + accounting потребителите (за 'regional'). */
 function collectWeeklyRoutingData(cb){
-  sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1').then(function(bulRes){
-    var bul = (Array.isArray(bulRes) && bulRes.length) ? bulRes[0] : null;
-    if (!bul) { cb({ bul:null, tasks:[], comps:[], stores:[], accountingUsers:[] }); return; }
-    sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id).then(function(tasksRaw){
+  Promise.all([
+    sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1'),
+    sbGet('recurring_tasks','active=eq.true')
+  ]).then(function(results){
+    var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
+    var allRecurring = Array.isArray(results[1]) ? results[1] : [];
+    var routedRecurring = allRecurring.filter(function(t){ return t.report_groups && t.report_groups.length; });
+
+    var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
+    bulTasksPromise.then(function(tasksRaw){
       var allTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
-      var routedTasks = allTasks.filter(function(t){ return t.report_groups && t.report_groups.length; });
+      var routedRegular = allTasks.filter(function(t){ return t.report_groups && t.report_groups.length; });
+      var routedTasks = routedRegular.map(function(t){ t.kind='regular'; return t; })
+        .concat(routedRecurring.map(function(t){ t.kind='recurring'; return t; }));
       if (!routedTasks.length) { cb({ bul:bul, tasks:[], comps:[], stores:[], accountingUsers:[] }); return; }
-      var ids = routedTasks.map(function(t){ return t.id; });
+      var regIds = routedRegular.map(function(t){ return t.id; });
+      var recIds = routedRecurring.map(function(t){ return t.id; });
       Promise.all([
-        sbGet('task_completions','task_id=in.('+ids.join(',')+')'),
+        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')') : Promise.resolve([]),
+        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')') : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name'),
         sbGet('users','role=eq.accounting&select=email,display_name,assigned_stores')
       ]).then(function(r2){
-        var compsRaw = Array.isArray(r2[0]) ? r2[0] : [];
-        var users = Array.isArray(r2[1]) ? r2[1] : [];
-        var accountingUsers = Array.isArray(r2[2]) ? r2[2] : [];
+        var regCompsRaw = Array.isArray(r2[0]) ? r2[0] : [];
+        var recCompsRaw = Array.isArray(r2[1]) ? r2[1] : [];
+        var users = Array.isArray(r2[2]) ? r2[2] : [];
+        var accountingUsers = Array.isArray(r2[3]) ? r2[3] : [];
         var seen = {};
         var stores = users.filter(function(u){
           if (!u.store_name || u.store_name==='Централен офис' || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
-        var comps = compsRaw.map(function(c){ return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment }; });
+        var comps = regCompsRaw.map(function(c){ return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment }; })
+          .concat(recCompsRaw.map(function(c){ return { item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment }; }));
         cb({ bul:bul, tasks:routedTasks, comps:comps, stores:stores, accountingUsers:accountingUsers });
       }).catch(function(){ cb(null); });
     }).catch(function(){ cb(null); });
@@ -359,13 +371,15 @@ function resolveRecipientsForTask(task, accountingUsers){
 }
 
 /* Обединява всички задачи по получател (email) - дедуплицирано по email,
-   натрупва списък със задачи, за които точно този човек е адресат. */
+   натрупва списък със задачи, за които точно този човек е адресат.
+   Сравнява id+kind заедно, за да не се бъркат обикновена и постоянна задача
+   с case теоретично съвпадащ id. */
 function buildRecipientMap(tasks, accountingUsers){
   var map = {};
   tasks.forEach(function(t){
     resolveRecipientsForTask(t, accountingUsers).forEach(function(r){
       if (!map[r.email]) map[r.email] = { name:r.name, tasks:[] };
-      var already = map[r.email].tasks.some(function(x){ return x.id===t.id; });
+      var already = map[r.email].tasks.some(function(x){ return x.id===t.id && x.kind===t.kind; });
       if (!already) map[r.email].tasks.push(t);
     });
   });
@@ -373,12 +387,15 @@ function buildRecipientMap(tasks, accountingUsers){
 }
 
 /* За една задача - кои обекти (от нейния target_stores, или всички обекти
-   ако е за всички) са изпълнили/отложили/все още чакат. */
+   ако е за всички) са изпълнили/отложили/все още чакат. Сравнява item_id+kind
+   заедно - обикновена и постоянна задача пазят completion-ите си в една и
+   съща таблица с различни ID колони, но теоретично биха могли да съвпаднат. */
 function taskStoreBreakdown(task, comps, allStores){
   var scope = (task.target_stores && task.target_stores.length) ? task.target_stores : allStores;
   var done=[], postponed=[], pending=[];
+  var taskKind = task.kind||'regular';
   scope.forEach(function(s){
-    var c = comps.find(function(x){ return x.item_id===task.id && x.store_name===s; });
+    var c = comps.find(function(x){ return x.item_id===task.id && x.kind===taskKind && x.store_name===s; });
     if (c && c.status==='done') done.push(s);
     else if (c && c.status==='postponed') postponed.push({ store:s, comment:c.comment||'' });
     else pending.push(s);
@@ -388,8 +405,9 @@ function taskStoreBreakdown(task, comps, allStores){
 
 function personalizedTaskCardHtml(task, comps, allStores){
   var bd = taskStoreBreakdown(task, comps, allStores);
+  var srcIcon = (task.kind==='recurring') ? '🔁 ' : '';
   var h = '<div style="background:#F9FAFC;border-radius:8px;padding:12px 14px;margin-bottom:8px;">';
-  h += '<div style="font-size:13px;font-weight:700;color:#1F2937;">'+esc(task.title)+'</div>';
+  h += '<div style="font-size:13px;font-weight:700;color:#1F2937;">'+srcIcon+esc(task.title)+'</div>';
   h += '<div style="font-size:11px;color:#6B7280;margin-top:2px;">'+bd.done.length+' от '+bd.scope.length+' обекта изпълнили</div>';
   if (bd.postponed.length) {
     h += '<div style="margin-top:6px;">';
