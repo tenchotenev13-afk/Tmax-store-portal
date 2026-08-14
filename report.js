@@ -66,10 +66,46 @@ function collectDailyReportData(cb){
         regComps.forEach(function(c){ comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
         recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
 
-        cb(reportBuildSummary(items, comps, stores, recurringNoDue.length));
+        var summary = reportBuildSummary(items, comps, stores, recurringNoDue.length);
+        var todayKey = toLocalISO(new Date());
+        var yesterday = new Date(); yesterday.setDate(yesterday.getDate()-1);
+        var yKey = toLocalISO(yesterday);
+        reportSaveSnapshot('daily', todayKey, summary.overallPct, summary.totalDone, summary.totalAll);
+        reportFetchSnapshot('daily', yKey, function(snap){
+          summary.trendYesterday = snap;
+          cb(summary);
+        });
       }).catch(function(){ cb(null); });
     }).catch(function(){ cb(null); });
   }).catch(function(){ cb(null); });
+}
+
+/* Записва тих snapshot (upsert по period_type+period_key) - захранва
+   тенденцията на следващия ден/седмица. Не блокира и не гърми грешки -
+   ако не мине, просто няма да има тенденция следващия път, не е критично. */
+function reportSaveSnapshot(periodType, periodKey, overallPct, totalDone, totalAll){
+  sbGet('report_snapshots','period_type=eq.'+periodType+'&period_key=eq.'+periodKey).then(function(rows){
+    var existing = Array.isArray(rows) && rows.length ? rows[0] : null;
+    var payload = { overall_pct: overallPct, total_done: totalDone, total_all: totalAll };
+    if (existing) sbPatch('report_snapshots','id=eq.'+existing.id, payload);
+    else {
+      payload.period_type = periodType; payload.period_key = periodKey;
+      sbPost('report_snapshots', payload);
+    }
+  }).catch(function(){});
+}
+function reportFetchSnapshot(periodType, periodKey, cb){
+  sbGet('report_snapshots','period_type=eq.'+periodType+'&period_key=eq.'+periodKey).then(function(rows){
+    cb(Array.isArray(rows) && rows.length ? rows[0] : null);
+  }).catch(function(){ cb(null); });
+}
+function reportTrendHtml(currentPct, snapshot, label){
+  if (!snapshot) return '';
+  var diff = currentPct - snapshot.overall_pct;
+  var arrow = diff > 0 ? '↑' : diff < 0 ? '↓' : '→';
+  var color = diff > 0 ? '#2F9E5C' : diff < 0 ? '#C0392B' : '#94a3b8';
+  var sign = diff > 0 ? '+' : '';
+  return '<div style="text-align:center;font-size:12px;color:'+color+';font-weight:700;margin:6px 0 0;">'+arrow+' '+sign+diff+'% '+label+'</div>';
 }
 
 /* items:[{id,kind,title}] comps:[{item_id,kind,store_name,status,comment}] →
@@ -208,6 +244,7 @@ function buildDailyReportHtml(data){
     reportStatCell(String(data.laggards),'обекта без напредък', data.laggards>0?'#C0392B':'#2F9E5C') +
     reportStatCell(String(data.storeCount),'обекта общо','#1E2761') +
     '</tr></table>';
+  body += reportTrendHtml(data.overallPct, data.trendYesterday, 'спрямо вчера');
   body += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin:14px 0 8px;">По обекти — изоставащите най-отгоре</div>';
   body += data.rows.map(reportStoreRow).join('');
   body += reportTopBottomTable(data.top3, data.bottom3);
@@ -284,7 +321,20 @@ function collectWeeklyReportData(cb){
 
         var summary = reportBuildSummary(items, comps, stores, noDueCount);
         summary.weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
-        cb(summary);
+        if (bul) {
+          var thisKey = bul.year + '-W' + String(bul.week_number).padStart(2,'0');
+          /* Опростено "предходна седмица" - не пресича година в edge-case
+             седмица 1 (там просто няма да намери snapshot, деградира тихо
+             до "без тенденция", не гърми). */
+          var prevKey = bul.year + '-W' + String(bul.week_number-1).padStart(2,'0');
+          reportSaveSnapshot('weekly', thisKey, summary.overallPct, summary.totalDone, summary.totalAll);
+          reportFetchSnapshot('weekly', prevKey, function(snap){
+            summary.trendPrevWeek = snap;
+            cb(summary);
+          });
+        } else {
+          cb(summary);
+        }
       }).catch(function(){ cb(null); });
     }).catch(function(){ cb(null); });
   }).catch(function(){ cb(null); });
@@ -297,6 +347,7 @@ function buildWeeklyReportHtml(data){
     reportStatCell(String(data.laggards),'обекта под 50%', data.laggards>0?'#C0392B':'#2F9E5C') +
     reportStatCell(String(data.storeCount),'обекта общо','#1E2761') +
     '</tr></table>';
+  body += reportTrendHtml(data.overallPct, data.trendPrevWeek, 'спрямо предходната седмица');
   body += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin:14px 0 8px;">По обекти за седмицата — изоставащите най-отгоре</div>';
   body += data.rows.map(reportStoreRow).join('');
   body += reportTopBottomTable(data.top3, data.bottom3);

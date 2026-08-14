@@ -13,6 +13,8 @@
 var todayCache = null;        /* {items, noDueItems, comps, stores} — за филтриране без нова заявка */
 var todayFilterStore = 'all'; /* избран магазин от филтъра, 'all' = всички */
 var todayExpandedStore = null; /* кой магазин е разгънат в момента (accordion) - null = никой */
+var todayYesterdaySnapshot = null; /* вчерашният snapshot, за тенденцията */
+var todayTrendFetched = false;     /* пазим само 1 fetch на тенденцията на зареждане, не при всеки re-render */
 
 function loadTodayDashboard(){
   var wrap = document.getElementById('mod-today');
@@ -20,6 +22,8 @@ function loadTodayDashboard(){
   wrap.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:300px;color:#94a3b8;font-size:15px;">⏳ Зареждане...</div>';
   todayCache = null;
   todayFilterStore = 'all';
+  todayTrendFetched = false;
+  todayYesterdaySnapshot = null;
   /* Deep-link от имейл: ?store=Име%20магазин -> автоматично разгъва точно
      този магазин, за да не се налага търсене след клик от репорта. */
   try {
@@ -146,10 +150,45 @@ function todayStoreStats(store, items, comps){
 function todayDotColor(p){ return p===100 ? '#16a34a' : p>=50 ? '#e0a425' : '#dc2626'; }
 function todayPctColor(p){ return p===100 ? '#16a34a' : p>=50 ? '#b6841e' : '#dc2626'; }
 
-function todayStatCard(num, label, color){
+function todayStatCard(num, label, color, extraHtml){
   return '<div style="background:#fff;border:1px solid #eef1f6;border-radius:10px;padding:16px;text-align:center;">' +
     '<div style="font-size:26px;font-weight:800;color:' + color + ';">' + num + '</div>' +
-    '<div style="font-size:11.5px;color:#64748b;margin-top:4px;">' + label + '</div></div>';
+    '<div style="font-size:11.5px;color:#64748b;margin-top:4px;">' + label + '</div>' +
+    (extraHtml || '') + '</div>';
+}
+
+/* Тенденция спрямо вчера — стрелка + delta в проценти */
+function todayTrendHtml(currentPct, snapshot){
+  if (!snapshot) return '';
+  var diff = currentPct - snapshot.overall_pct;
+  var arrow = diff > 0 ? '↑' : diff < 0 ? '↓' : '→';
+  var color = diff > 0 ? '#16a34a' : diff < 0 ? '#dc2626' : '#94a3b8';
+  var sign = diff > 0 ? '+' : '';
+  return '<div style="font-size:10px;color:' + color + ';margin-top:4px;font-weight:600;">' + arrow + ' ' + sign + diff + '% спрямо вчера</div>';
+}
+
+/* Записва тих snapshot на днешните числа (upsert по period_type+period_key) -
+   захранва утрешната тенденция. Не блокира и не показва грешки на потребителя
+   - ако не мине, просто няма да има тенденция утре, не е критично. */
+function todaySaveSnapshot(overallPct, totalDone, totalAll){
+  var todayKey = toLocalISO(new Date());
+  sbGet('report_snapshots','period_type=eq.daily&period_key=eq.'+todayKey).then(function(rows){
+    var existing = Array.isArray(rows) && rows.length ? rows[0] : null;
+    var payload = { overall_pct: overallPct, total_done: totalDone, total_all: totalAll };
+    if (existing) sbPatch('report_snapshots','id=eq.'+existing.id, payload);
+    else {
+      payload.period_type = 'daily'; payload.period_key = todayKey;
+      sbPost('report_snapshots', payload);
+    }
+  }).catch(function(){});
+}
+/* Взима вчерашния snapshot, за да изчислим тенденцията днес. */
+function todayFetchYesterdaySnapshot(cb){
+  var y = new Date(); y.setDate(y.getDate()-1);
+  var yKey = toLocalISO(y);
+  sbGet('report_snapshots','period_type=eq.daily&period_key=eq.'+yKey).then(function(rows){
+    cb(Array.isArray(rows) && rows.length ? rows[0] : null);
+  }).catch(function(){ cb(null); });
 }
 
 function todayStoreFilterHtml(stores, selected){
@@ -223,6 +262,17 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
   storeStatsArr.sort(function(a,b){ return a.st.pct - b.st.pct; }); /* изоставащите най-отгоре */
   var overallPct = totalAll ? Math.round(totalDone/totalAll*100) : 0;
 
+  /* Тих snapshot + fetch на тенденцията - само веднъж на зареждане, не при
+     всеки re-render (filter/expand toggle). */
+  if (!todayTrendFetched) {
+    todayTrendFetched = true;
+    todaySaveSnapshot(overallPct, totalDone, totalAll);
+    todayFetchYesterdaySnapshot(function(snap){
+      todayYesterdaySnapshot = snap;
+      renderTodayDashboard(wrap, items, noDueItems, comps, stores);
+    });
+  }
+
   var visibleRows = todayFilterStore==='all' ? storeStatsArr : storeStatsArr.filter(function(r){ return r.name===todayFilterStore; });
 
   var h = '<div style="padding:20px;max-width:980px;margin:0 auto;">';
@@ -237,7 +287,7 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
 
   /* STAT CARDS — винаги за всички обекти, за контекст, независимо от филтъра */
   h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 22px;">';
-  h += todayStatCard(overallPct + '%', 'изпълнение за деня', overallPct===100?'#16a34a':overallPct>=50?'#0f172a':'#dc2626');
+  h += todayStatCard(overallPct + '%', 'изпълнение за деня', overallPct===100?'#16a34a':overallPct>=50?'#0f172a':'#dc2626', todayTrendHtml(overallPct, todayYesterdaySnapshot));
   h += todayStatCard(totalDone + '/' + totalAll, 'изпълнени задачи', '#0f172a');
   h += todayStatCard(String(laggards), 'обекта без напредък', laggards>0?'#dc2626':'#16a34a');
   h += todayStatCard(String(stores.length), 'обекта общо', '#0f172a');
