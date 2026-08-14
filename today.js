@@ -15,6 +15,8 @@ var todayFilterStore = 'all'; /* избран магазин от филтъра
 var todayExpandedStore = null; /* кой магазин е разгънат в момента (accordion) - null = никой */
 var todayYesterdaySnapshot = null; /* вчерашният snapshot, за тенденцията */
 var todayTrendFetched = false;     /* пазим само 1 fetch на тенденцията на зареждане, не при всеки re-render */
+var todayPhotosExpanded = false;   /* дали е разгъната секцията "Снимки за преглед" */
+var todayPhotosCache = null;       /* заредените снимки - lazy, само при първо разгъване */
 
 function loadTodayDashboard(){
   var wrap = document.getElementById('mod-today');
@@ -24,6 +26,8 @@ function loadTodayDashboard(){
   todayFilterStore = 'all';
   todayTrendFetched = false;
   todayYesterdaySnapshot = null;
+  todayPhotosExpanded = false;
+  todayPhotosCache = null;
   /* Deep-link от имейл: ?store=Име%20магазин -> автоматично разгъва точно
      този магазин, за да не се налага търсене след клик от репорта. */
   try {
@@ -233,6 +237,86 @@ function todayCompletionExtras(compObj){
   return h;
 }
 
+/* ═══ СНИМКИ ЗА ПРЕГЛЕД — bulk изглед на всички качени снимки тази седмица,
+   за да не се налага отваряне на всяка задача поотделно. Lazy-loaded - само
+   при първо разгъване на секцията, не при всяко зареждане на "Днес". ═══ */
+function todayLoadPhotoQueue(cb){
+  sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1').then(function(bulRes){
+    var bul = (Array.isArray(bulRes) && bulRes.length) ? bulRes[0] : null;
+    var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
+    Promise.all([bulTasksPromise, sbGet('recurring_tasks','active=eq.true')]).then(function(r2){
+      var regTasks = Array.isArray(r2[0]) ? r2[0] : [];
+      var recTasks = Array.isArray(r2[1]) ? r2[1] : [];
+      var titleMap = {};
+      regTasks.forEach(function(t){ titleMap['regular:'+t.id] = t.title; });
+      recTasks.forEach(function(t){ titleMap['recurring:'+t.id] = t.title; });
+      var regIds = regTasks.map(function(t){ return t.id; });
+      var recIds = recTasks.map(function(t){ return t.id; });
+      Promise.all([
+        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')&photos=not.is.null') : Promise.resolve([]),
+        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')&photos=not.is.null') : Promise.resolve([])
+      ]).then(function(r3){
+        var regComps = Array.isArray(r3[0]) ? r3[0] : [];
+        var recComps = Array.isArray(r3[1]) ? r3[1] : [];
+        var entries = [];
+        regComps.forEach(function(c){
+          if (c.photos && c.photos.length) entries.push({ title: titleMap['regular:'+c.task_id]||'(неизвестна задача)', store:c.store_name, comment:c.comment, photos:c.photos, completedAt:c.completed_at });
+        });
+        recComps.forEach(function(c){
+          if (c.photos && c.photos.length) entries.push({ title: titleMap['recurring:'+c.recurring_task_id]||'(неизвестна задача)', store:c.store_name, comment:c.comment, photos:c.photos, completedAt:c.completed_at });
+        });
+        entries.sort(function(a,b){ return new Date(b.completedAt) - new Date(a.completedAt); }); /* най-новите отгоре */
+        cb(entries);
+      }).catch(function(){ cb([]); });
+    }).catch(function(){ cb([]); });
+  }).catch(function(){ cb([]); });
+}
+function todayPhotoQueueHtml(entries){
+  if (!entries.length) return '<div style="padding:20px;color:#94a3b8;font-size:12.5px;text-align:center;">Няма качени снимки тази седмица.</div>';
+  var h = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:6px 18px 16px;">';
+  entries.forEach(function(e){
+    e.photos.forEach(function(p){
+      h += '<a href="' + p.url + '" target="_blank" style="display:block;text-decoration:none;color:inherit;">';
+      h += '<div style="border:1px solid #eef1f6;border-radius:8px;overflow:hidden;background:#fff;">';
+      h += '<img src="' + p.url + '" style="width:100%;height:100px;object-fit:cover;display:block;">';
+      h += '<div style="padding:6px 8px;">';
+      h += '<div style="font-size:11px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(e.title) + '</div>';
+      h += '<div style="font-size:10px;color:#94a3b8;">' + esc(e.store) + '</div>';
+      h += '</div></div></a>';
+    });
+  });
+  h += '</div>';
+  return h;
+}
+/* Разгъва/свива секцията; при първо разгъване извиква зареждането веднъж
+   (todayPhotosCache===null означава "още не е зареждано"). */
+function todayTogglePhotoQueue(){
+  todayPhotosExpanded = !todayPhotosExpanded;
+  var wrap = document.getElementById('mod-today');
+  if (todayPhotosExpanded && todayPhotosCache===null) {
+    todayLoadPhotoQueue(function(entries){
+      todayPhotosCache = entries;
+      if (wrap && todayCache) renderTodayDashboard(wrap, todayCache.items, todayCache.noDueItems, todayCache.comps, todayCache.stores);
+    });
+  }
+  if (wrap && todayCache) renderTodayDashboard(wrap, todayCache.items, todayCache.noDueItems, todayCache.comps, todayCache.stores);
+}
+function todayPhotoQueueSectionHtml(){
+  var photoCount = todayPhotosCache ? todayPhotosCache.reduce(function(s,e){ return s + e.photos.length; }, 0) : null;
+  var h = '<div style="background:#fff;border:1px solid #eef1f6;border-radius:12px;margin-top:12px;overflow:hidden;">';
+  h += '<div onclick="todayTogglePhotoQueue()" style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;cursor:pointer;">';
+  h += '<div style="font-size:14px;font-weight:700;">📷 Снимки за преглед' + (photoCount!==null ? ' (' + photoCount + ')' : '') + '</div>';
+  h += '<span style="font-size:12px;color:#94a3b8;transform:rotate(' + (todayPhotosExpanded?'180deg':'0deg') + ');transition:transform .15s;">▾</span>';
+  h += '</div>';
+  if (todayPhotosExpanded) {
+    h += todayPhotosCache===null
+      ? '<div style="padding:24px;text-align:center;color:#94a3b8;">⏳ Зареждане...</div>'
+      : todayPhotoQueueHtml(todayPhotosCache);
+  }
+  h += '</div>';
+  return h;
+}
+
 function todayNoDueRowsHtml(noDueItems, comps, storeName){
   if (!noDueItems.length) return '';
   var h = '<div style="border-top:1px solid #f1f5f9;padding:10px 18px 12px;background:#fafbfc;">';
@@ -354,6 +438,8 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
     bottom3.forEach(function(s,i){ h += '<div style="font-size:12.5px;color:#1f2937;margin-bottom:4px;">' + (i+1) + '. ' + esc(s.name) + ' — ' + s.st.pct + '%</div>'; });
     h += '</div></div>';
   }
+
+  h += todayPhotoQueueSectionHtml();
 
   h += '</div>';
   wrap.innerHTML = h;
