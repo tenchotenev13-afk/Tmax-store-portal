@@ -49,22 +49,6 @@ function showLoginBanner(){
     }
   }).catch(function(){});
 
-  /* Сторно бележка е върната за коментар — банер за самия магазин (не за admin/accounting) */
-  sbGet('kasa_storno','store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&status=eq.returned&select=return_reason,returned_by').then(function(retS){
-    if(Array.isArray(retS)&&retS.length){
-      var rs=retS[0];
-      var el=document.getElementById('notif-banner');
-      if(el){
-        var card='<div class="notif-card urgent"><div class="notif-icon">🧾</div><div class="notif-text">'+
-          '<div class="notif-title">'+(retS.length>1?retS.length+' сторно бележки са върнати за коментар!':'Сторно бележка е върната за коментар!')+'</div>'+
-          '<div class="notif-sub">Причина: '+esc(rs.return_reason||'')+'&nbsp;·&nbsp;Върнато от: '+esc(rs.returned_by||'')+'</div>'+
-          '</div><button onclick="goToStornoTab()" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Виж →</button>'+
-          '<span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
-        el.innerHTML=card+el.innerHTML;el.style.display='block';
-      }
-    }
-  }).catch(function(){});
-
   /* Сторно бележки с разминаване (нова сума < върната) — само за admin/accounting,
      последните 30 дни, за да не се налага да влизат в История, за да разберат. */
   if(['admin','accounting'].indexOf(currentUser.role)>=0){
@@ -87,6 +71,65 @@ function showLoginBanner(){
 
   if(!od.length&&!td.length&&!tm.length) html='<div class="notif-card success"><div class="notif-icon">✅</div><div class="notif-text"><div class="notif-title">Всичко е наред!</div><div class="notif-sub">Няма просрочени или спешни заявки.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   banner.innerHTML=html;banner.style.display='block';
+
+  /* Нови задачи от Бюлетин през последните 3 дни, все още неотметнати от
+     този магазин — само за store роли (не и за офиса, който сам ги пише). */
+  if(!isGlobal() && currentUser.store_name) checkNewBulletinTasksBanner();
+}
+
+/* Показва карта за нови задачи (последните 3 дни) от Бюлетин И постоянни
+   задачи, които този магазин още не е отбелязал (нито изпълнени, нито
+   отложени). Самостоятелна заявка - не разчита bulTasks/bulComps/
+   recurringTasks да са заредени (Бюлетин табът може изобщо да не е
+   отварян тази сесия). Постоянните задачи нямат target_stores - важат
+   винаги за всички магазини. */
+function checkNewBulletinTasksBanner(){
+  var store=currentUser.store_name;
+  var cutoff=new Date();cutoff.setDate(cutoff.getDate()-3);
+  var cutoffISO=cutoff.toISOString();
+
+  var bulTasksPromise=sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1').then(function(bulRes){
+    var bul=(Array.isArray(bulRes)&&bulRes.length)?bulRes[0]:null;
+    if(!bul)return [];
+    return sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id+'&created_at=gte.'+cutoffISO).then(function(tasksRaw){
+      var tasks=Array.isArray(tasksRaw)?tasksRaw:[];
+      return tasks.filter(function(t){
+        return !t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0;
+      }).map(function(t){return {id:t.id,title:t.title,kind:'regular'};});
+    });
+  }).catch(function(){return [];});
+
+  var recTasksPromise=sbGet('recurring_tasks','active=eq.true&created_at=gte.'+cutoffISO).then(function(rtRaw){
+    var rt=Array.isArray(rtRaw)?rtRaw:[];
+    return rt.map(function(t){return {id:t.id,title:t.title,kind:'recurring'};});
+  }).catch(function(){return [];});
+
+  Promise.all([bulTasksPromise,recTasksPromise]).then(function(results){
+    var relevant=results[0].concat(results[1]);
+    if(!relevant.length)return;
+    var regIds=results[0].map(function(t){return t.id;});
+    var recIds=results[1].map(function(t){return t.id;});
+    Promise.all([
+      regIds.length?sbGet('task_completions','task_id=in.('+regIds.join(',')+')&store_name=eq.'+encodeURIComponent(store)):Promise.resolve([]),
+      recIds.length?sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')&store_name=eq.'+encodeURIComponent(store)):Promise.resolve([])
+    ]).then(function(compsResults){
+      var regComps=Array.isArray(compsResults[0])?compsResults[0]:[];
+      var recComps=Array.isArray(compsResults[1])?compsResults[1]:[];
+      var pending=relevant.filter(function(t){
+        if(t.kind==='regular')return !regComps.some(function(c){return c.task_id===t.id;});
+        return !recComps.some(function(c){return c.recurring_task_id===t.id;});
+      });
+      if(!pending.length)return;
+      var el=document.getElementById('notif-banner');if(!el)return;
+      var titles=pending.slice(0,3).map(function(t){return (t.kind==='recurring'?'🔁 ':'')+esc(t.title);}).join(', ')+(pending.length>3?'...':'');
+      var card='<div class="notif-card info"><div class="notif-icon">✅</div><div class="notif-text">'+
+        '<div class="notif-title">'+pending.length+' нов'+(pending.length===1?'а задача':'и задачи')+' от Бюлетин</div>'+
+        '<div class="notif-sub">'+titles+'</div>'+
+        '</div><button onclick="showModule(\'bulletin\')" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Виж →</button>'+
+        '<span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
+      el.innerHTML=card+el.innerHTML;el.style.display='block';
+    }).catch(function(){});
+  });
 }
 function dismissCard(el){
   var card=el.closest('.notif-card');
@@ -149,44 +192,7 @@ function checkNewOrders(){
 function startPolling(){
   if(_poll)clearInterval(_poll);
   _seenIds=null; /* нулираме при всеки нов старт, за да хванем правилния базов snapshot */
-  _seenReturnedIds=null;
-  _poll=setInterval(function(){checkNewOrders();checkReturnedItems();},30000);
-}
-
-/* Банерът (showLoginBanner) се показва само веднъж — веднага след вход. Ако Цветелина/admin
-   върне касов отчет или сторно бележка, докато магазинът вече е в портала, той няма да разбере
-   без тази проверка на всеки 30 сек — засича НОВО върнати записи и известява веднага. */
-var _seenReturnedIds=null;
-function checkReturnedItems(){
-  if(!currentUser||isGlobal())return; /* само за магазински роли — admin/accounting нямат store_name */
-  var enc=encodeURIComponent(currentUser.store_name);
-  Promise.all([
-    sbGet('kasa_reports','store_name=eq.'+enc+'&status=eq.returned&select=id'),
-    sbGet('kasa_storno','store_name=eq.'+enc+'&status=eq.returned&select=id')
-  ]).then(function(r){
-    var ids=[];
-    if(Array.isArray(r[0])) r[0].forEach(function(x){ids.push('kr_'+x.id);});
-    if(Array.isArray(r[1])) r[1].forEach(function(x){ids.push('ks_'+x.id);});
-    var currentSet={}; ids.forEach(function(id){currentSet[id]=1;});
-
-    if(_seenReturnedIds===null){
-      /* Първо извикване — само базов snapshot, без известяване */
-      _seenReturnedIds=currentSet;
-      return;
-    }
-
-    var newOnes=ids.filter(function(id){return !_seenReturnedIds[id];});
-    if(newOnes.length>0){
-      var hasKasa=newOnes.some(function(id){return id.indexOf('kr_')===0;});
-      var hasStorno=newOnes.some(function(id){return id.indexOf('ks_')===0;});
-      var msg=hasKasa&&hasStorno?'Касов отчет и сторно бележка са върнати за корекция!':
-              hasStorno?'Сторно бележка е върната за коментар!':'Касов отчет е върнат за корекция!';
-      playSound();
-      toast('↩ '+msg,'#dc2626');
-      if(typeof showLoginBanner==='function')showLoginBanner();
-    }
-    _seenReturnedIds=currentSet;
-  }).catch(function(){});
+  _poll=setInterval(checkNewOrders,30000);
 }
 
 /* Hook into renderMetrics — показва банера след като данните са заредени

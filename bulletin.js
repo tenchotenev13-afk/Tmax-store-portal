@@ -23,8 +23,108 @@ var DEPTS = {
   admin:     {label:'Администрация',  icon:'⚙️', color:'#4c1d95', bg:'#f5f3ff', bdr:'#ddd6fe', hdr:'#5b21b6'}
 };
 var DCOLS  = ['trade','warehouse','admin'];
-var DNAMES = ['Понеделник','Вторник','Сряда','Четвъртък','Петък'];
-var DKEYS  = ['mon','tue','wed','thu','fri'];
+
+/* ВИДОВЕ ЗАДАЧА — определят какво трябва магазинът, за да отбележи
+   задачата изпълнена, и производен приоритет (само за визуализация,
+   не се пази отделно в базата — извежда се от task_type). */
+var TASK_TYPES = {
+  info:          {label:'Информативна',           short:'Инфо',        needsPhoto:false, needsComment:false, priority:'Нисък',     color:'#64748b', bg:'#f1f5f9', bdr:'#e2e8f0'},
+  photo:         {label:'Потвърждение със снимка', short:'📷 Снимка',   needsPhoto:true,  needsComment:false, priority:'Среден',    color:'#b6841e', bg:'#fffbeb', bdr:'#fde68a'},
+  comment:       {label:'Потвърждение с коментар', short:'💬 Коментар', needsPhoto:false, needsComment:true,  priority:'Висок',     color:'#c2410c', bg:'#fff7ed', bdr:'#fed7aa'},
+  photo_comment: {label:'Коментар и снимка',       short:'💬📷 И двете', needsPhoto:true,  needsComment:true,  priority:'Най-висок', color:'#b91c1c', bg:'#fef2f2', bdr:'#fecaca'}
+};
+function taskTypeOptsHtml(selected){
+  return Object.keys(TASK_TYPES).map(function(k){
+    var tt=TASK_TYPES[k];
+    return '<option value="'+k+'"'+(k===(selected||'info')?' selected':'')+'>'+tt.label+' — приоритет: '+tt.priority+'</option>';
+  }).join('');
+}
+function taskTypeBadgeHtml(taskType){
+  var tt=TASK_TYPES[taskType||'info'];
+  if(!tt||taskType==='info')return '';
+  return '<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:'+tt.bg+';color:'+tt.color+';border:1px solid '+tt.bdr+';white-space:nowrap;">'+tt.short+'</span>';
+}
+
+/* ГРУПИ ЗА ДОКЛАДВАНЕ — до кого отива известие/седмичен репорт за дадена
+   задача, избрано при създаването й (multi-select). "regional" няма фиксирани
+   хора - извежда се динамично при изпращане на репорт, по assigned_stores
+   на accounting потребителите спрямо target_stores на задачата. */
+var REPORT_GROUPS = {
+  co:          {label:'Ц.О (Жеко, Васка)',        people:[{name:'Жеко Желязков',   email:'j.jeliazkov@temax.bg'},{name:'Василка Шикова',  email:'v.shikova@temax.bg'}]},
+  controlling: {label:'Контролинг (Меги, Цвети)',  people:[{name:'Миглена Павлова', email:'m.pavlova@temax.bg'},{name:'Цветелина Тенева', email:'c.teneva@temax.bg'}]},
+  regional:    {label:'Регионален (по магазин)',   dynamic:true},
+  owner:       {label:'Т.Тенев',                   people:[{name:'Теодор Тенев',    email:'t.tenev@temax.bg'}]}
+};
+function reportGroupsCheckboxesHtml(selId, selectedArr){
+  selectedArr = selectedArr || [];
+  return '<div id="'+selId+'" style="display:flex;flex-direction:column;gap:5px;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;">' +
+    Object.keys(REPORT_GROUPS).map(function(k){
+      var g=REPORT_GROUPS[k];
+      return '<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#374151;cursor:pointer;">' +
+        '<input type="checkbox" value="'+k+'"'+(selectedArr.indexOf(k)>=0?' checked':'')+' style="width:14px;height:14px;cursor:pointer;">' + esc(g.label) +
+        '</label>';
+    }).join('') +
+    '</div>';
+}
+function readReportGroupsCheckboxes(selId){
+  var wrap = document.getElementById(selId);
+  if (!wrap) return [];
+  return Array.prototype.slice.call(wrap.querySelectorAll('input[type=checkbox]:checked')).map(function(cb){ return cb.value; });
+}
+
+/* СВЪРЗАН ТАБ — динамичен бутон в седмичния календар, водещ директно към
+   модула, за който се отнася задачата (напр. "Отчитане на каса" -> Каса). */
+var LINKED_MODULES = [
+  { value:'', label:'— Няма —' },
+  { value:'kasa', label:'🧾 Каса' },
+  { value:'transit', label:'🚚 Стока на път' },
+  { value:'transport', label:'📦 Транспорт' },
+  { value:'client', label:'🛒 Клиентски поръчки' },
+  { value:'stock-diff', label:'⚖️ Разлики' },
+  { value:'stock-returns', label:'📥 За връщане' },
+  { value:'contacts', label:'📇 Контакти' },
+  { value:'reference', label:'🛡️ Гаранции' },
+  { value:'history', label:'📊 История' },
+  { value:'pallets', label:'🟫 Палети' }
+];
+function linkedModuleOptsHtml(selected){
+  return LINKED_MODULES.map(function(m){
+    return '<option value="'+m.value+'"'+(m.value===(selected||'')?' selected':'')+'>'+m.label+'</option>';
+  }).join('');
+}
+function linkedModuleLabel(value){
+  var m = LINKED_MODULES.find(function(x){ return x.value===value; });
+  return m ? m.label : null;
+}
+
+/* Живи бройки/статус за елемент в седмичния календар.
+   isGlobal() -> "X/Y обекта" (обхватът е target_stores на задачата, или
+   allStoresCache ако е за всички и кешът е зареден).
+   Магазин -> малка цветна точка за СОБСТВЕНИЯ му статус (зелено=изпълнена,
+   оранжево=отложена, сиво=чака). Постоянните задачи ползват recurringComps
+   (recurring_task_id), обикновените — bulComps (task_id). */
+function calItemStatusHtml(itemId,kind,targetStores){
+  var compsArr = kind==='recurring' ? recurringComps : bulComps;
+  var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
+  if(isGlobal()){
+    var scope = (targetStores&&targetStores.length) ? targetStores
+      : ((typeof allStoresCache!=='undefined'&&allStoresCache&&allStoresCache.length) ? allStoresCache : null);
+    if(!scope) return '';
+    var done = scope.filter(function(s){
+      return compsArr.some(function(c){ return c[idField]===itemId && c.store_name===s && (c.status||'done')==='done'; });
+    }).length;
+    return '<span style="font-size:11px;font-weight:700;color:'+(done===scope.length&&scope.length?'#16a34a':'#94a3b8')+';margin-left:4px;white-space:nowrap;">'+done+'/'+scope.length+'</span>';
+  }
+  var store = currentUser && currentUser.store_name;
+  if(!store) return '';
+  var mine = compsArr.find(function(c){ return c[idField]===itemId && c.store_name===store; });
+  if(!mine) return '<span style="width:6px;height:6px;border-radius:50%;background:#cbd5e1;display:inline-block;margin-left:4px;flex-shrink:0;margin-top:4px;"></span>';
+  var color = mine.status==='postponed' ? '#d97706' : '#16a34a';
+  return '<span style="width:6px;height:6px;border-radius:50%;background:'+color+';display:inline-block;margin-left:4px;flex-shrink:0;margin-top:4px;"></span>';
+}
+
+var DNAMES = ['Понеделник','Вторник','Сряда','Четвъртък','Петък','Събота','Неделя'];
+var DKEYS  = ['mon','tue','wed','thu','fri','sat','sun'];
 
 function myDept(){
   var m={manager:'trade',sklad:'warehouse',kasa:'admin',accounting:'admin',logistics:'admin',admin:'admin',info:'trade'};
@@ -270,7 +370,7 @@ function weekNum(d){
 function weekDays(wk,yr){
   var s=new Date(yr,0,1+7*(wk-1));
   var d=s.getDay(); if(d<=4)s.setDate(s.getDate()-d+1); else s.setDate(s.getDate()+8-d);
-  return [0,1,2,3,4].map(function(i){var x=new Date(s);x.setDate(s.getDate()+i);return x;});
+  return [0,1,2,3,4,5,6].map(function(i){var x=new Date(s);x.setDate(s.getDate()+i);return x;});
 }
 function fmtD(d){return d.getDate()+'.'+(d.getMonth()<9?'0':'')+(d.getMonth()+1);}
 /* Локален YYYY-MM-DD без UTC конверсия - toISOString() бута датата с 1 ден назад за UTC+2/+3 (България) */
@@ -306,6 +406,11 @@ function selectBulletin(id){
 function loadBulletin(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:300px;color:#94a3b8;font-size:15px;">⏳ Зареждане...</div>';
+  /* allStoresCache трябва да е зареден за живите бройки в календара
+     (calItemStatusHtml) - другите модули го зареждат при отваряне, но
+     Бюлетин може да е първият таб, който потребителят отваря. Ако кешът
+     вече е топъл, loadAllStores() връща веднага без нова заявка. */
+  if(!allStoresCache)loadAllStores().then(function(){ if(curBul)renderBulletin(); });
   var q=bulSelectedId?'id=eq.'+bulSelectedId:(canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1');
   /* Зареждаме бюлетина ПЪРВО (за да знаем неговата седмица/година), после промоциите
      филтрирани спрямо ТАЗИ седмица - за да са "автономни" за всяка седмица, не спрямо
@@ -491,35 +596,102 @@ function renderBulView(){
   html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
   html+='<div style="font-size:14px;font-weight:600;">📅 Седмичен календар — С'+wk+' · '+yr+'</div>';
   if(canEdit())html+='<button onclick="openCalModal(null)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">+ Добави събитие</button>';
-  html+='</div><div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;">';
+  html+='</div><div style="display:grid;grid-template-columns:repeat(7,minmax(155px,1fr));gap:8px;overflow-x:auto;">';
   DKEYS.forEach(function(key,i){
     var isToday=toLocalISO(days[i])===today();
     var dateStr=toLocalISO(days[i]);
-    var dTasks=bulTasks.filter(function(t){return t.due_date&&t.due_date.slice(0,10)===dateStr;});
-    var manual=c.calendar[key]||[];
-    html+='<div style="border:1px solid '+(isToday?'#2563eb':'#e2e8f0')+';border-radius:7px;padding:10px 12px;min-height:90px;background:'+(isToday?'#eff6ff':'#fff')+'">';
-    html+='<div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#94a3b8;">'+DNAMES[i]+'</div>';
-    html+='<div style="font-family:DM Mono,monospace;font-size:19px;font-weight:500;color:'+(isToday?'#2563eb':'#0f172a')+';margin-bottom:6px;">'+fmtD(days[i])+'</div>';
-    dTasks.forEach(function(t){
-      var dc=(DEPTS[t.department]||{color:'#94a3b8'}).color;
-      html+='<div style="display:flex;gap:4px;padding:2px 0;align-items:flex-start;"><span style="width:6px;height:6px;border-radius:50%;background:'+dc+';flex-shrink:0;margin-top:4px;"></span><span style="font-size:11px;font-weight:500;">'+esc(t.title||'')+'</span></div>';
+    var store=currentUser&&currentUser.store_name;
+    /* Обикновени задачи за деня - зачитаме target_stores, точно както в
+       главния списък: магазин вижда само своите/общите, офисът вижда всичко. */
+    var regularForDay=bulTasks.filter(function(t){
+      if(!t.due_date||t.due_date.slice(0,10)!==dateStr)return false;
+      return isGlobal()||!t.target_stores||!t.target_stores.length||(store&&t.target_stores.indexOf(store)>=0);
     });
-    manual.forEach(function(e,ei){
-      var dc=({trade:'#166534',warehouse:'#1e40af',admin:'#5b21b6',general:'#64748b'}[e.dept])||'#64748b';
-      html+='<div style="padding:2px 0;">';
-      html+='<div style="display:flex;gap:4px;align-items:flex-start;">';
-      html+='<span style="width:6px;height:6px;border-radius:50%;background:'+dc+';flex-shrink:0;margin-top:4px;"></span>';
-      html+='<span style="font-size:11px;flex:1;">'+esc(e.title||'')+'</span>';
-      if(canEdit())html+='<button data-key="'+key+'" data-idx="'+ei+'" onclick="bulRmCal(this)" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:11px;padding:0;line-height:1;">✕</button>';
-      html+='</div>';
-      html+=renderCalEntryAttachments(e,key,ei);
+    /* Постоянни задачи, важащи за ТОЗИ ден от седмицата (не само "днес") */
+    var recurringForDay=recurringTasks.filter(function(t){return recurringIsDueOnWeekday(t,i);});
+    var manualAll=(c.calendar[key]||[]).map(function(e,ei){return {e:e,idx:ei};});
+
+    html+='<div style="border:1px solid '+(isToday?'#2563eb':'#e2e8f0')+';border-radius:8px;padding:12px 14px;min-height:100px;background:'+(isToday?'#eff6ff':'#fff')+'">';
+    html+='<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#94a3b8;letter-spacing:.02em;">'+DNAMES[i]+'</div>';
+    html+='<div style="font-family:DM Mono,monospace;font-size:23px;font-weight:600;color:'+(isToday?'#2563eb':'#0f172a')+';margin-bottom:8px;">'+fmtD(days[i])+'</div>';
+
+    var hasAnything=false;
+    DCOLS.forEach(function(dk){
+      var dept=DEPTS[dk];
+      var regItems=regularForDay.filter(function(t){return t.department===dk;});
+      var recItems=recurringForDay.filter(function(t){return t.department===dk;});
+      var manItems=manualAll.filter(function(mi){return mi.e.dept===dk;});
+      if(!regItems.length&&!recItems.length&&!manItems.length)return;
+      hasAnything=true;
+      html+='<div style="margin-bottom:8px;">';
+      html+='<div style="font-size:10.5px;font-weight:800;text-transform:uppercase;color:'+dept.color+';letter-spacing:.03em;margin-bottom:4px;">'+dept.icon+' '+dept.label+'</div>';
+      regItems.forEach(function(t){
+        html+='<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
+        if(isGlobal()){
+          html+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Бюлетин">📰</span>';
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;">'+esc(t.title||'')+'</span>';
+          html+=calItemStatusHtml(t.id,'regular',t.target_stores);
+        } else {
+          var doneReg=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done';});
+          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" onchange="bulCheckboxChanged(this)" style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';">';
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
+        }
+        html+='</div>';
+        if(isGlobal()&&t.linked_module){
+          var lbl=linkedModuleLabel(t.linked_module);
+          if(lbl)html+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lbl)+' →</button>';
+        }
+      });
+      recItems.forEach(function(t){
+        html+='<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
+        if(isGlobal()){
+          html+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Постоянна задача">🔁</span>';
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;">'+esc(t.title||'')+'</span>';
+          html+=calItemStatusHtml(t.id,'recurring',null);
+        } else {
+          var doneRec=store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store;});
+          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" onchange="bulToggleRecurring(this)" style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';">';
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
+        }
+        html+='</div>';
+      });
+      manItems.forEach(function(mi){
+        var e=mi.e,ei=mi.idx;
+        html+='<div style="padding:3px 0;">';
+        html+='<div style="display:flex;gap:5px;align-items:flex-start;">';
+        html+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Друг модул">🚚</span>';
+        html+='<span style="font-size:13px;flex:1;line-height:1.35;">'+esc(e.title||'')+'</span>';
+        if(canEdit())html+='<button data-key="'+key+'" data-idx="'+ei+'" onclick="bulRmCal(this)" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;padding:0;line-height:1;">✕</button>';
+        html+='</div>';
+        html+=renderCalEntryAttachments(e,key,ei);
+        html+='</div>';
+      });
       html+='</div>';
     });
-    if(!dTasks.length&&!manual.length)html+='<div style="font-size:11px;color:#cbd5e1;font-style:italic;margin-top:4px;">Свободен</div>';
-    if(canEdit())html+='<button data-key="'+key+'" onclick="bulOpenCal(this)" style="width:100%;margin-top:5px;padding:3px;border:1px dashed #cbd5e1;border-radius:4px;background:none;color:#94a3b8;font-size:10px;cursor:pointer;font-family:inherit;">+ Добави</button>';
+
+    /* Ръчни събития без конкретен отдел ("general") - отделен блок, както досега */
+    var generalItems=manualAll.filter(function(mi){return DCOLS.indexOf(mi.e.dept)<0;});
+    if(generalItems.length){
+      hasAnything=true;
+      generalItems.forEach(function(mi){
+        var e=mi.e,ei=mi.idx;
+        html+='<div style="padding:3px 0;">';
+        html+='<div style="display:flex;gap:5px;align-items:flex-start;">';
+        html+='<span style="width:7px;height:7px;border-radius:50%;background:#64748b;flex-shrink:0;margin-top:5px;"></span>';
+        html+='<span style="font-size:13px;flex:1;line-height:1.35;">'+esc(e.title||'')+'</span>';
+        if(canEdit())html+='<button data-key="'+key+'" data-idx="'+ei+'" onclick="bulRmCal(this)" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;padding:0;line-height:1;">✕</button>';
+        html+='</div>';
+        html+=renderCalEntryAttachments(e,key,ei);
+        html+='</div>';
+      });
+    }
+
+    if(!hasAnything)html+='<div style="font-size:12.5px;color:#cbd5e1;font-style:italic;margin-top:4px;">Свободен</div>';
+    if(canEdit())html+='<button data-key="'+key+'" onclick="bulOpenCal(this)" style="width:100%;margin-top:6px;padding:4px;border:1px dashed #cbd5e1;border-radius:5px;background:none;color:#94a3b8;font-size:11.5px;cursor:pointer;font-family:inherit;">+ Добави</button>';
     html+='</div>';
   });
   html+='</div></div>';
+
 
   /* Задачи панел */
   html += renderTasksPanel();
@@ -554,6 +726,15 @@ function renderBulView(){
     var dept=DEPTS[dk];
     var blocks=(c.columns[dk]||[]).filter(function(b){return b.type!=='task'&&b.type!=='important';});
     var dTasks=bulTasks.filter(function(t){return t.department===dk;});
+    /* Магазин вижда само задачи БЕЗ target_stores (= за всички) или такива,
+       в които изрично е посочен; глобалните роли (admin/accounting/logistics)
+       виждат винаги всичко, за да могат да управляват. */
+    (function(){
+      var storeForFilter=currentUser&&currentUser.store_name;
+      dTasks=dTasks.filter(function(t){
+        return isGlobal() || !t.target_stores || !t.target_stores.length || (storeForFilter && t.target_stores.indexOf(storeForFilter)>=0);
+      });
+    })();
     var isMyDept=!isGlobal()&&myDept()===dk;
     var isAct=dk===bulActiveDept;
     html+='<div id="dept-panel-'+dk+'" style="display:'+(isAct?'block':'none')+';">';
@@ -564,7 +745,9 @@ function renderBulView(){
       html+='<div style="font-size:12px;font-weight:700;color:'+dept.color+';text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">✅ Задачи</div>';
       var store=currentUser&&currentUser.store_name;
       dTasks.forEach(function(t){
-        var done=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store;});
+        var done=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done';});
+        var postponed=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='postponed';});
+        var compObj=store&&bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===store;});
         var due=t.due_date?new Date(t.due_date):null;
         var today=new Date();today.setHours(0,0,0,0);
         var diff=due?Math.ceil((due-today)/86400000):null;
@@ -572,6 +755,7 @@ function renderBulView(){
         var deptTasksForNav=bulTasks.filter(function(x){return x.department===t.department;});
         var taskIdxInDept=deptTasksForNav.findIndex(function(x){return String(x.id)===String(t.id);});
         var isFirstTask=taskIdxInDept===0, isLastTask=taskIdxInDept===deptTasksForNav.length-1;
+        var titleColor=done?'#94a3b8':postponed?'#b45309':'#0f172a';
         html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;"'+(canEdit()?' draggable="true" data-tid="'+t.id+'" ondragstart="taskDragStart(event,this)" ondragend="taskDragEnd(this)"':'')+'>';
         if(canEdit()){
           html+='<div style="display:flex;flex-direction:column;gap:1px;flex-shrink:0;margin-top:1px;">'+
@@ -579,13 +763,22 @@ function renderBulView(){
             '<button data-task-id="'+t.id+'" onclick="taskMoveDown(this.dataset.taskId)" '+(isLastTask?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isLastTask?'#f8fafc':'#fff')+';color:'+(isLastTask?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isLastTask?'default':'pointer')+';padding:0;">▼</button>'+
             '</div>';
         }
-        html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" onchange="bulToggleTask(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;">';
-        html+='<div style="flex:1;"><div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
+        html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" onchange="bulCheckboxChanged(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;">';
+        html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
         if(t.description)html+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         if(due)html+='<div style="font-size:10px;color:'+dueColor+';margin-top:2px;">📅 Срок: '+due.toLocaleDateString('bg-BG')+(diff<0?' ⚠️':diff===0?' (Днес!)':diff<=2?' ('+diff+' дни)':'')+"</div>";
+        if(isGlobal()&&t.target_stores&&t.target_stores.length)html+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🏬 Само за: '+t.target_stores.map(esc).join(', ')+'</div>';
+        if(isGlobal()&&t.created_by)html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">👤 Поставена от: '+esc(t.created_by)+'</div>';
+        if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))html+=renderCompletionExtras(compObj);
         html+=renderTaskAttachments(t);
         html+=renderSubtasks(t.id, dk);
         html+='</div>';
+        if(!isGlobal()&&!done){
+          html+='<div style="flex-shrink:0;">';
+          if(postponed)html+='<button data-task-id="'+t.id+'" onclick="cancelPostpone(this.dataset.taskId)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
+          else html+='<button data-task-id="'+t.id+'" onclick="openPostponeModal(this.dataset.taskId)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+          html+='</div>';
+        }
         if(canEdit()){html+='<div style="display:flex;gap:4px;flex-shrink:0;">'
           +'<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>'
           +'<button data-task-id="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'task\',this.dataset.taskId,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#d97706;">🔔</button>'
@@ -1065,11 +1258,35 @@ function taskModalHtml(){
     '<label class="fl">Заглавие *</label><input class="fi" id="tk-title" placeholder="напр. Провери наличностите">' +
     '<label class="fl">Описание</label><input class="fi" id="tk-desc" placeholder="Допълнителна информация">' +
     '<label class="fl">Отдел</label><select class="fi" id="tk-dept"><option value="trade">🛒 Търговска</option><option value="warehouse">📦 Склад/Приемане</option><option value="admin">⚙️ Администрация</option></select>' +
+    '<label class="fl">Вид задача</label><select class="fi" id="tk-type">'+taskTypeOptsHtml('info')+'</select>' +
     '<label class="fl">Срок — ден от седмицата</label><select class="fi" id="tk-due">'+opts+'</select>' +
+    '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
+    '<select class="fi" id="tk-stores" multiple size="6" style="height:120px;"></select>' +
+    '<label class="fl">Групи за докладване (получават известие/седмичен репорт)</label>' +
+    reportGroupsCheckboxesHtml('tk-report-groups', []) +
+    '<label class="fl">Свързан таб (по избор — бутон в календара към него)</label>' +
+    '<select class="fi" id="tk-linked-module">'+linkedModuleOptsHtml('')+'</select>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
     '<button onclick="closeTk()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button onclick="submitTask()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Добави задача</button>' +
     '</div></div></div>';
+}
+/* Пълни multi-select с всички магазини (кеширани в allStoresCache от shared.js);
+   зарежда кеша, ако още не е зареден. selectedArr - вече избраните (за редакция). */
+function bulFillStoreMultiSelect(selId, selectedArr){
+  selectedArr = selectedArr || [];
+  loadAllStores().then(function(names){
+    var sel = document.getElementById(selId);
+    if (!sel) return;
+    sel.innerHTML = names.map(function(name){
+      return '<option value="'+esc(name)+'"'+(selectedArr.indexOf(name)>=0?' selected':'')+'>'+esc(name)+'</option>';
+    }).join('');
+  });
+}
+function bulReadStoreMultiSelect(selId){
+  var sel = document.getElementById(selId);
+  if (!sel) return [];
+  return Array.prototype.slice.call(sel.selectedOptions||[]).map(function(o){ return o.value; });
 }
 function openTaskModalForDept(dk){
   openTaskModal();
@@ -1109,13 +1326,22 @@ function openEditTaskModal(taskId) {
       '<option value="warehouse"'+(t.department==='warehouse'?' selected':'')+'>📦 Склад/Приемане</option>' +
       '<option value="admin"'+(t.department==='admin'?' selected':'')+'>⚙️ Администрация</option>' +
     '</select>' +
+    '<label class="fl">Вид задача</label><select class="fi" id="etk-type">'+taskTypeOptsHtml(t.task_type)+'</select>' +
     '<label class="fl">Срок — ден от седмицата</label>' +
     '<select class="fi" id="etk-due">'+dueOpts+'</select>' +
+    '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
+    '<select class="fi" id="etk-stores" multiple size="6" style="height:120px;"></select>' +
+    '<label class="fl">Групи за докладване (получават известие/седмичен репорт)</label>' +
+    reportGroupsCheckboxesHtml('etk-report-groups', t.report_groups||[]) +
+    '<label class="fl">Свързан таб (по избор — бутон в календара към него)</label>' +
+    '<select class="fi" id="etk-linked-module">'+linkedModuleOptsHtml(t.linked_module||'')+'</select>' +
+    (t.created_by ? '<div style="font-size:11px;color:#94a3b8;margin-top:8px;">Поставена от: '+esc(t.created_by)+'</div>' : '') +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
     '<button onclick="var e=document.getElementById(&#39;edit-tk-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button data-task-id="'+taskId+'" onclick="submitEditTask(this.dataset.taskId)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>' +
     '</div></div>';
   document.body.appendChild(ov);
+  bulFillStoreMultiSelect('etk-stores', t.target_stores||[]);
   setTimeout(function(){ var el=document.getElementById('etk-title'); if(el)el.focus(); }, 80);
 }
 
@@ -1124,9 +1350,13 @@ function submitEditTask(taskId) {
   var title = (document.getElementById('etk-title').value||'').trim();
   if (!title) { toast('Въведи заглавие','#dc2626'); return; }
   var dept = document.getElementById('etk-dept').value;
+  var taskType = document.getElementById('etk-type').value||'info';
   var desc = document.getElementById('etk-desc').value||'';
   var due  = document.getElementById('etk-due').value||null;
-  sbPatch('bulletin_tasks','id=eq.'+taskId,{title:title,description:desc,department:dept,due_date:due}).then(function(r){
+  var stores = bulReadStoreMultiSelect('etk-stores');
+  var reportGroups = readReportGroupsCheckboxes('etk-report-groups');
+  var linkedModule = (document.getElementById('etk-linked-module')||{}).value||null;
+  sbPatch('bulletin_tasks','id=eq.'+taskId,{title:title,description:desc,department:dept,due_date:due,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
     if (!r.ok) { toast('Грешка при запис','#dc2626'); return; }
     var el = document.getElementById('edit-tk-ov');
     if (el) el.remove();
@@ -1194,16 +1424,25 @@ function deleteRecurring(taskId) {
   });
 }
 
-function openTaskModal(){document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';}
+function openTaskModal(){document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);}
 function closeTk(){document.getElementById('tk-ov').classList.remove('open');}
 function submitTask(){
   var title=(document.getElementById('tk-title').value||'').trim();
   if(!title){toast('Въведи заглавие','#dc2626');return;}
   var dept=document.getElementById('tk-dept').value;
+  var taskType=document.getElementById('tk-type').value||'info';
   var maxOrder=bulTasks.filter(function(t){return t.department===dept;}).reduce(function(m,t){return Math.max(m,t.sort_order||0);},0);
-  sbPost('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:document.getElementById('tk-due').value||null,sort_order:maxOrder+1}).then(function(r){
+  var stores=bulReadStoreMultiSelect('tk-stores');
+  var reportGroups=readReportGroupsCheckboxes('tk-report-groups');
+  var linkedModule=(document.getElementById('tk-linked-module')||{}).value||null;
+  sbPost('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:document.getElementById('tk-due').value||null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     closeTk(); toast('✅ Задачата е добавена!'); loadBulletin();
+    /* Push само ако бюлетинът вече е публикуван - иначе магазините още не
+       виждат задачата и известието би било подвеждащо. */
+    if(curBul.status==='published' && typeof pushNewBulletinTask==='function'){
+      pushNewBulletinTask(title, stores.length?stores:null);
+    }
   });
 }
 
@@ -1687,7 +1926,7 @@ function printSection(what){
     '.imp-title{font-size:14pt;font-weight:700;margin-bottom:1mm;}' +
     '.imp-sub{font-size:12pt;opacity:.8;}' +
     /* Calendar */
-    '.cal-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:3mm;margin-bottom:5mm;}' +
+    '.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3mm;margin-bottom:5mm;}' +
     '.cal-day{border:1pt solid #e2e8f0;border-radius:2mm;padding:3mm 4mm;min-height:35mm;}' +
     '.cal-day-name{font-size:9.5pt;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-bottom:1mm;}' +
     '.cal-date{font-family:monospace;font-size:19pt;font-weight:700;color:#0f172a;margin-bottom:2mm;}' +
@@ -1781,7 +2020,6 @@ function printSection(what){
   }
 
   function pCal(){
-    var DNAMES2=['Понеделник','Вторник','Сряда','Четвъртък','Петък'];
     var dotC={trade:'#14532d',warehouse:'#1e40af',admin:'#5b21b6',general:'#64748b'};
     var s='<h2>📅 Седмичен календар — Седмица '+wk+' · '+yr+'</h2>';
     s+='<div class="cal-grid">';
@@ -1790,7 +2028,7 @@ function printSection(what){
       var dt=bulTasks.filter(function(t){return t.due_date&&t.due_date.slice(0,10)===ds;});
       var mn=c.calendar[key]||[];
       s+='<div class="cal-day">';
-      s+='<div class="cal-day-name">'+DNAMES2[i]+'</div>';
+      s+='<div class="cal-day-name">'+DNAMES[i]+'</div>';
       s+='<div class="cal-date">'+fmtD(days[i])+'</div>';
       dt.forEach(function(t){
         var dc=dotC[t.department]||'#64748b';
@@ -1905,10 +2143,16 @@ function renderTasksPanel() {
 
     depts.forEach(function(dk) {
       var dTasks = bulTasks.filter(function(t){ return t.department===dk; });
+      /* Същият филтър по target_stores като в основния изглед по-горе —
+         тази функция рендира отделен, паралелен "мобилен" панел за същите
+         задачи и трябва да остане консистентна с него. */
+      dTasks = dTasks.filter(function(t){
+        return !t.target_stores || !t.target_stores.length || (store && t.target_stores.indexOf(store)>=0);
+      });
       if (!dTasks.length) return;
       var d = DEPT[dk];
       var done = dTasks.filter(function(t){
-        return bulComps.some(function(c){return c.task_id===t.id && c.store_name===store;});
+        return bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='done';});
       }).length;
       var pct = Math.round(done/dTasks.length*100);
 
@@ -1923,13 +2167,14 @@ function renderTasksPanel() {
       h += '<div style="padding:8px 14px;">';
 
       dTasks.forEach(function(t) {
-        var isDone = bulComps.some(function(c){return c.task_id===t.id && c.store_name===store;});
-        var compInfo = isDone ? bulComps.find(function(c){return c.task_id===t.id && c.store_name===store;}) : null;
+        var isDone = bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='done';});
+        var isPostponed = bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='postponed';});
+        var compInfo = bulComps.find(function(c){return c.task_id===t.id && c.store_name===store;}) || null;
         h += '<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
-        h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" onchange="bulToggleTask(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';">' ;
+        h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" onchange="bulCheckboxChanged(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';">' ;
         h += '<div style="flex:1;">';
-        h += '<div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
-        h += esc(t.title||'')+'</div>';
+        h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':isPostponed?'#b45309':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
+        h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type)+(isPostponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
         if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         h += renderTaskAttachments(t);
         if (t.due_date) {
@@ -1942,9 +2187,14 @@ function renderTasksPanel() {
         if (isDone && compInfo) {
           h += '<div style="font-size:10px;color:#16a34a;margin-top:2px;">✓ '+esc(compInfo.completed_by||'')+'</div>';
         }
+        if (compInfo && (compInfo.comment||(compInfo.photos&&compInfo.photos.length))) h += renderCompletionExtras(compInfo);
         h += renderSubtasks(t.id, dk);
         h += '</div>';
         h += '<div style="display:flex;gap:4px;flex-shrink:0;">';
+        if (!isGlobal() && !isDone) {
+          if (isPostponed) h += '<button data-task-id="'+t.id+'" onclick="cancelPostpone(this.dataset.taskId)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
+          else h += '<button data-task-id="'+t.id+'" onclick="openPostponeModal(this.dataset.taskId)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+        }
         if (canEdit()) {
           h += '<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>';
           h += '<button data-task-id="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'task\',this.dataset.taskId,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#d97706;">🔔</button>';
@@ -1970,20 +2220,31 @@ function renderTasksPanel() {
 
 
 /* toggleTask — отбелязване/разотбелязване на задача */
-function toggleTask(taskId, checked) {
+function toggleTask(taskId, checked, extra) {
   var store = currentUser && currentUser.store_name;
   if (!store) { toast('Грешка: няма магазин','#dc2626'); return; }
   if (checked) {
-    sbPost('task_completions',{
-      task_id: taskId,
-      bulletin_id: curBul ? curBul.id : null,
-      store_name: store,
-      completed_by: currentUser.display_name || currentUser.email,
-      completed_at: new Date().toISOString()
-    }).then(function(r){
+    extra = extra || {};
+    /* Ако вече има запис за тази задача+магазин (напр. беше отложена),
+       трябва UPDATE, не INSERT — task_completions има UNIQUE(task_id,
+       store_name) и втори INSERT би гръмнал с конфликт. */
+    var existing = bulComps.find(function(c){ return c.task_id===taskId && c.store_name===store; });
+    var completedBy = currentUser.display_name || currentUser.email;
+    var basePayload = {
+      completed_by: completedBy,
+      completed_at: new Date().toISOString(),
+      status: 'done',
+      comment: extra.comment || null,
+      photos: (extra.photos && extra.photos.length) ? extra.photos : null
+    };
+    var req = existing
+      ? sbPatch('task_completions','task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store), basePayload)
+      : sbPost('task_completions', Object.assign({task_id:taskId, bulletin_id: curBul?curBul.id:null, store_name:store}, basePayload));
+    req.then(function(r){
       if (!r.ok) { toast('Грешка','#dc2626'); return; }
       toast('✅ Задачата е отбелязана!');
-      bulComps.push({task_id: taskId, store_name: store, completed_by: currentUser.display_name||currentUser.email});
+      bulComps = bulComps.filter(function(c){ return !(c.task_id===taskId && c.store_name===store); });
+      bulComps.push(Object.assign({task_id: taskId, store_name: store, completed_by: completedBy, status:'done'}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}));
       renderBulletin();
     });
   } else {
@@ -1996,6 +2257,155 @@ function toggleTask(taskId, checked) {
 }
 
 function bulToggleTask(cb){toggleTask(cb.dataset.tid, cb.checked);}
+
+/* Маршрутизира чекбокса според вида на задачата: 'info' -> директно отбелязване
+   (както досега); 'photo'/'comment'/'photo_comment' -> отваря модал, който
+   събира изисканото, преди да се запише изпълнението. Разотбелязване (uncheck)
+   винаги е директно - не се пита повторно за коментар/снимка. */
+function bulCheckboxChanged(cb){
+  var taskId = cb.dataset.tid;
+  if (!cb.checked) { toggleTask(taskId, false); return; }
+  var t = bulTasks.find(function(x){ return String(x.id)===String(taskId); });
+  var tt = TASK_TYPES[(t&&t.task_type)||'info'];
+  if (!tt || (!tt.needsPhoto && !tt.needsComment)) { toggleTask(taskId, true); return; }
+  cb.checked = false; /* до потвърждение от модала */
+  openTaskCompletionModal(taskId);
+}
+
+function renderCompletionExtras(compInfo){
+  var h = '<div style="margin-top:4px;padding:6px 9px;background:#f8fafc;border-radius:6px;border:1px solid #f1f5f9;">';
+  if (compInfo.comment) h += '<div style="font-size:11px;color:#475569;">💬 '+esc(compInfo.comment)+'</div>';
+  if (compInfo.photos && compInfo.photos.length) {
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:'+(compInfo.comment?'5px':'0')+';">';
+    compInfo.photos.forEach(function(p){
+      h += '<a href="'+p.url+'" target="_blank"><img src="'+p.url+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0;"></a>';
+    });
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
+/* ─── МОДАЛ ЗА ЗАВЪРШВАНЕ (коментар и/или снимка) ─────────── */
+var tcPendingPhotos = []; /* качени снимки за текущия отворен модал, преди запис */
+function openTaskCompletionModal(taskId){
+  var t = bulTasks.find(function(x){ return String(x.id)===String(taskId); });
+  if (!t) return;
+  var tt = TASK_TYPES[t.task_type||'info'];
+  tcPendingPhotos = [];
+  var existing = document.getElementById('tc-modal-ov');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.className = 'bov open';
+  ov.id = 'tc-modal-ov';
+  var body = '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">✅ Отбележи като изпълнена</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(t.title||'')+'</div>';
+  if (tt.needsComment) {
+    body += '<label class="fl">Коментар *</label><textarea class="fi" id="tc-comment" rows="3" placeholder="Опиши какво е свършено / защо не е..."></textarea>';
+  }
+  if (tt.needsPhoto) {
+    body += '<label class="fl">Снимка *</label>' +
+      '<div id="tc-photos-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>' +
+      '<label style="display:inline-flex;align-items:center;gap:4px;border:1px dashed #cbd5e1;border-radius:5px;padding:5px 10px;font-size:12px;color:#475569;cursor:pointer;">' +
+      '📷 + Добави снимка<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp" style="display:none;" onchange="tcUploadPhoto(this)"></label>';
+  }
+  body += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+    '<button onclick="var e=document.getElementById(&#39;tc-modal-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button data-task-id="'+taskId+'" onclick="submitTaskCompletion(this.dataset.taskId)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✓ Потвърди</button>' +
+    '</div>';
+  ov.innerHTML = '<div class="bmod" style="width:420px;">'+body+'</div>';
+  document.body.appendChild(ov);
+}
+function tcUploadPhoto(input){
+  var file = input.files[0]; if (!file) return;
+  var ext = (file.name.split('.').pop()||'jpg').toLowerCase();
+  var fname = 'completion_'+Date.now()+'.'+ext;
+  var path = 'task-completions/'+fname;
+  showBulToast('⏳ Качване...');
+  var reader = new FileReader();
+  reader.onload = function(e){
+    fetch(BUL_SB+'/storage/v1/object/'+BUL_BKT+'/'+path,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+BUL_KEY,'Content-Type':file.type||'application/octet-stream','x-upsert':'true'},
+      body:e.target.result
+    }).then(function(r){return r.ok;}).then(function(ok){
+      if (!ok) { toast('Грешка при качване','#dc2626'); return; }
+      var pub = BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path;
+      tcPendingPhotos.push({url:pub, filename:file.name});
+      var prev = document.getElementById('tc-photos-preview');
+      if (prev) prev.innerHTML = tcPendingPhotos.map(function(p){ return '<img src="'+p.url+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0;">'; }).join('');
+      toast('✅ Снимката е качена');
+    }).catch(function(){ toast('Грешка при качване','#dc2626'); });
+  };
+  reader.readAsArrayBuffer(file);
+}
+function submitTaskCompletion(taskId){
+  var t = bulTasks.find(function(x){ return String(x.id)===String(taskId); });
+  if (!t) return;
+  var tt = TASK_TYPES[t.task_type||'info'];
+  var comment = tt.needsComment ? (document.getElementById('tc-comment').value||'').trim() : '';
+  if (tt.needsComment && !comment) { toast('Въведи коментар','#dc2626'); return; }
+  if (tt.needsPhoto && !tcPendingPhotos.length) { toast('Добави поне 1 снимка','#dc2626'); return; }
+  var el = document.getElementById('tc-modal-ov');
+  if (el) el.remove();
+  toggleTask(taskId, true, { comment: comment, photos: tcPendingPhotos.slice() });
+  tcPendingPhotos = [];
+}
+
+/* ─── ОТЛАГАНЕ НА ЗАДАЧА (изисква коментар, вижда се в седмичния репорт) ─── */
+function openPostponeModal(taskId){
+  var t = bulTasks.find(function(x){ return String(x.id)===String(taskId); });
+  if (!t) return;
+  var existing = document.getElementById('pp-modal-ov');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.className = 'bov open';
+  ov.id = 'pp-modal-ov';
+  ov.innerHTML = '<div class="bmod" style="width:400px;">' +
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">⏱ Отложи задачата</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(t.title||'')+'</div>' +
+    '<label class="fl">Причина за отлагане *</label>' +
+    '<textarea class="fi" id="pp-comment" rows="3" placeholder="Защо не може да се изпълни сега..."></textarea>' +
+    '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Ще се вижда в седмичния репорт до офиса.</div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+    '<button onclick="var e=document.getElementById(&#39;pp-modal-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button data-task-id="'+taskId+'" onclick="submitPostpone(this.dataset.taskId)" style="border:none;background:#d97706;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">⏱ Отложи</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){ var el=document.getElementById('pp-comment'); if(el)el.focus(); }, 80);
+}
+function submitPostpone(taskId){
+  var comment = (document.getElementById('pp-comment').value||'').trim();
+  if (!comment) { toast('Въведи причина за отлагането','#dc2626'); return; }
+  var store = currentUser && currentUser.store_name;
+  if (!store) { toast('Грешка: няма магазин','#dc2626'); return; }
+  sbPost('task_completions',{
+    task_id: taskId,
+    bulletin_id: curBul ? curBul.id : null,
+    store_name: store,
+    completed_by: currentUser.display_name || currentUser.email,
+    completed_at: new Date().toISOString(),
+    status: 'postponed',
+    comment: comment
+  }).then(function(r){
+    if (!r.ok) { toast('Грешка','#dc2626'); return; }
+    var el = document.getElementById('pp-modal-ov');
+    if (el) el.remove();
+    toast('⏱ Задачата е отложена');
+    bulComps.push({task_id: taskId, store_name: store, completed_by: currentUser.display_name||currentUser.email, status:'postponed', comment: comment});
+    renderBulletin();
+  });
+}
+function cancelPostpone(taskId){
+  var store = currentUser && currentUser.store_name;
+  if (!store) return;
+  sbDelete('task_completions','task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)).then(function(){
+    toast('↩ Отлагането е отменено');
+    bulComps = bulComps.filter(function(c){return !(c.task_id===taskId && c.store_name===store);});
+    renderBulletin();
+  });
+}
+
 function loadTasksStats() {
   var wrap = document.getElementById('tasks-stat-wrap');
   if (!wrap || !bulTasks.length) return;
@@ -2026,7 +2436,7 @@ function loadTasksStats() {
       depts.forEach(function(dk){
         var dTasks = bulTasks.filter(function(t){return t.department===dk;});
         var done = dTasks.filter(function(t){
-          return bulComps.some(function(c){return c.task_id===t.id&&c.store_name===store;});
+          return bulComps.some(function(c){return c.task_id===t.id&&c.store_name===store&&c.status==='done';});
         }).length;
         totalDone+=done; totalAll+=dTasks.length;
         var pct = dTasks.length ? Math.round(done/dTasks.length*100) : null;
@@ -2234,8 +2644,17 @@ function recurringIsDueToday(t){
     return !!t.due_time; /* "всеки ден" със зададен час -> винаги важи за днес */
   }
   var jsDay=new Date().getDay(); /* 0=Нед,1=Пон...6=Съб */
-  var idx=jsDay===0?null:jsDay-1; /* превръщаме в 0=Пон..4=Пет, съб/нед -> null */
+  var idx=jsDay===0?6:jsDay-1; /* превръщаме в 0=Пон..5=Съб,6=Нед */
   return idx===t.due_weekday;
+}
+/* Като recurringIsDueToday, но за произволен ден от делничната седмица
+   (weekdayIdx: 0=Пон..4=Пет) - за седмичния календар, който показва цялата
+   седмица наведнъж, не само днес. */
+function recurringIsDueOnWeekday(t,weekdayIdx){
+  if(t.due_weekday===null||t.due_weekday===undefined){
+    return !!t.due_time; /* "всеки ден" - важи за всеки делничен ден */
+  }
+  return t.due_weekday===weekdayIdx;
 }
 
 function submitRecurring(dk) {
@@ -2250,6 +2669,13 @@ function submitRecurring(dk) {
     var el = document.getElementById('rec-modal-ov');
     if (el) el.remove();
     toast('✅ Постоянната задача е добавена!');
+    /* Постоянните задачи не са част от чернова/публикуван цикъл на бюлетина -
+       веднага след създаване са видими за всички магазини, затова push-ът
+       тръгва без чакане за публикуване (за разлика от обикновените задачи).
+       Нямат target_stores -> винаги за всички обекти. */
+    if(typeof pushNewBulletinTask==='function'){
+      pushNewBulletinTask(title, null);
+    }
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').then(function(rt){
       recurringTasks = Array.isArray(rt) ? rt : [];
       renderBulletin();

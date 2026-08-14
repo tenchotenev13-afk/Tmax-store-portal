@@ -229,6 +229,7 @@ OneSignalDeferred.push(async function(OneSignal) {
       <button id="tab-reference" class="nav-tab" onclick="showModule('reference')" style="display:none;"><span class="ti">📘</span><span class="tl">Рекламации</span></button>
       <button id="tab-kasa" class="nav-tab" onclick="showModule('kasa')" style="display:none;"><span class="ti">💰</span><span class="tl">Каса</span></button>
       <button id="tab-history" class="nav-tab" onclick="showModule('history')" style="display:none;"><span class="ti">📈</span><span class="tl">История</span></button>
+      <button id="tab-today" class="nav-tab" onclick="showModule('today')" style="display:none;"><span class="ti">📊</span><span class="tl">Днес</span></button>
       <button id="tab-docs" class="nav-tab" onclick="showModule('docs')"><span class="ti">📁</span><span class="tl">Инструкции</span></button>
       <div class="tab-sep" id="sep-admin" style="display:none;"></div>
       <!-- Група: Администрация (лилаво) -->
@@ -395,6 +396,9 @@ OneSignalDeferred.push(async function(OneSignal) {
 
   <!-- HISTORY -->
   <div id="mod-history" style="display:none;"></div>
+
+  <!-- TODAY -->
+  <div id="mod-today" style="display:none;"></div>
 
   <!-- PRINT -->
   <div id="mod-print" style="display:none;"></div>
@@ -640,6 +644,7 @@ function loadTabOrder(){
 <script src="client-orders.js"></script>
 <script src="docs.js"></script>
 <script src="bulletin.js"></script>
+<script src="today.js"></script>
 <script src="kasa.js"></script>
 <script src="kasa-docs.js"></script>
 <script src="admin.js"></script>
@@ -651,6 +656,7 @@ function loadTabOrder(){
 <script src="stock-differences.js"></script>
 <script src="push.js"></script>
 <script src="email.js"></script>
+<script src="report.js"></script>
 <script src="notifications.js"></script>
 <script src="reference.js"></script>
 <script src="handbook.js?v=20260707a"></script>

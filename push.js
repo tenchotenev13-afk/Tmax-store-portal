@@ -87,6 +87,15 @@ function pushToRole(role, title, message) {
 
 /* ═══════ БЮЛЕТИН НОТИФИКАЦИИ ════════════════════════════ */
 
+/* При добавяне на нова задача (от submitTask в bulletin.js) — до конкретните
+   магазини, ако е таргетирана, иначе до всички. Не показва toast за успех/
+   грешка тук - извикващият код (submitTask) вече показва свой toast. */
+function pushNewBulletinTask(taskTitle, targetStores) {
+  var title = '✅ Нова задача';
+  var msg = taskTitle;
+  return pushToStores(targetStores && targetStores.length ? targetStores : null, title, msg);
+}
+
 /* При публикуване на бюлетина */
 function pushBulletinPublished(wk, yr, taskCount) {
   var title = '📰 Т-Бюлетин С' + wk + ' · ' + yr + ' е публикуван';

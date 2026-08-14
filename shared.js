@@ -340,18 +340,8 @@ function openCorrection(id,table){
   document.getElementById('edt-fromstore-wrap').style.display=isClient?'':'none';
   document.getElementById('edt-fulfiller-wrap').style.display=isClient?'':'none';
   if(isClient){
-    var myStores=assignedStores();
-    var efs=document.getElementById('edt-from-store');
-    if(efs){
-      if(myStores && myStores.length===1){
-        efs.outerHTML='<div class="fi" style="background:#f8fafc;font-weight:500;border:1px solid #e2e8f0;">🏪 '+esc(rec.from_store||myStores[0])+'</div><input type="hidden" id="edt-from-store" value="'+esc(rec.from_store||myStores[0])+'">';
-      } else if(efs.tagName!=='SELECT'){
-        efs.outerHTML='<select class="fi" id="edt-from-store"></select>';
-      }
-    }
     loadAllStores().then(function(){
-      var el=document.getElementById('edt-from-store');
-      if(el && el.tagName==='SELECT') fillStoreSelect(el,rec.from_store||'');
+      fillStoreSelect(document.getElementById('edt-from-store'),rec.from_store||'');
       fillStoreSelect(document.getElementById('edt-fulfiller'),rec.fulfiller||'');
     });
   } else {
@@ -463,6 +453,12 @@ function startApp(){
   loadAll();
   /* Покажи подходящ таб според роля */
   var startTab=currentUser.role==='kasa'?'kasa':currentUser.role==='info'?'client':'transport';
+  /* Deep-link от имейл репорт (?store=Име) - отвежда директно на "Днес",
+     ако ролята изобщо има достъп до този таб (isGlobal). today.js сам чете
+     същия параметър, за да разгъне точно този магазин. */
+  try {
+    if (new URLSearchParams(window.location.search).get('store') && isGlobal()) startTab='today';
+  } catch(e){}
   showModule(startTab);
 }
 function setupTabsForRole(){
@@ -475,6 +471,9 @@ function setupTabsForRole(){
   /* Таб Администрация — само за admin */
   var histTab=document.getElementById('tab-history');
   if(histTab)histTab.style.display=isGlobal()?'flex':'none';
+  /* Таб Днес — живо табло с изпълнението по обекти, само за глобални роли (admin/accounting/logistics) */
+  var todayTab=document.getElementById('tab-today');
+  if(todayTab)todayTab.style.display=isGlobal()?'flex':'none';
   /* Табове Контакти и Стока на път — за всички */
   var contactsTab=document.getElementById('tab-contacts');
   if(contactsTab)contactsTab.style.display='';
@@ -501,7 +500,7 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','today'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -531,6 +530,7 @@ function showModule(mod){
   if(mod==='docs')loadDocs();
   if(mod==='kasa')loadKasa();
   if(mod==='history')loadHistory();
+  if(mod==='today')loadTodayDashboard();
   if(mod==='contacts')loadContacts();
   if(mod==='transit')loadTransit();
   if(mod==='calendar')loadCalendar();
