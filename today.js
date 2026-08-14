@@ -81,10 +81,11 @@ function loadTodayDashboard(){
 
         /* нормализираме completion-ите в общ формат: {item_id, kind, store_name}
            - взимаме само status='done', за да не броим отложените (postponed)
-           задачи като изпълнени в процента */
+           задачи като изпълнени в процента; пазим comment/photos, за да
+           могат да се преглеждат директно тук, без да се отваря Бюлетин */
         var comps = [];
-        regComps.forEach(function(c){ if(c.status==='done') comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name }); });
-        recComps.forEach(function(c){ if(c.status==='done') comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name }); });
+        regComps.forEach(function(c){ if(c.status==='done') comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, comment:c.comment, photos:c.photos }); });
+        recComps.forEach(function(c){ if(c.status==='done') comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, comment:c.comment, photos:c.photos }); });
 
         todayCache = { items:items, noDueItems:noDueItems, comps:comps, stores:stores };
         renderTodayDashboard(wrap, items, noDueItems, comps, stores);
@@ -176,6 +177,23 @@ function todayReportTestBarHtml(){
 }
 
 /* Рендира задачите без срок за конкретен обект — визуално отделени, не участват в % */
+/* Показва коментар/снимки на вече изпълнена задача - за да не се налага
+   отваряне на Бюлетин, за да се прегледа съдържанието на "вид задача с
+   коментар/снимка". */
+function todayCompletionExtras(compObj){
+  var h = '<div style="margin:6px 0 0 32px;padding:8px 10px;background:#f8fafc;border-radius:7px;border:1px solid #f1f5f9;">';
+  if (compObj.comment) h += '<div style="font-size:12px;color:#475569;">💬 ' + esc(compObj.comment) + '</div>';
+  if (compObj.photos && compObj.photos.length) {
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:' + (compObj.comment ? '6px' : '0') + ';">';
+    compObj.photos.forEach(function(p){
+      h += '<a href="' + p.url + '" target="_blank"><img src="' + p.url + '" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
+    });
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
 function todayNoDueRowsHtml(noDueItems, comps, storeName){
   if (!noDueItems.length) return '';
   var h = '<div style="border-top:1px solid #f1f5f9;padding:10px 18px 12px;background:#fafbfc;">';
@@ -253,13 +271,17 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
         return !it.target_stores || !it.target_stores.length || it.target_stores.indexOf(row.name)>=0;
       });
       scopedItems.forEach(function(it){
-        var isDone = comps.some(function(c){ return c.item_id===it.id && c.kind===it.kind && c.store_name===row.name; });
+        var compObj = comps.find(function(c){ return c.item_id===it.id && c.kind===it.kind && c.store_name===row.name; });
+        var isDone = !!compObj;
         var d = DEPTS[it.department] || DEPTS.trade;
         var srcIcon = it.kind==='recurring' ? '🔁 ' : '';
-        h += '<div style="display:flex;align-items:center;gap:12px;padding:8px 0;border-bottom:1px solid #f8fafc;">';
+        h += '<div style="padding:8px 0;border-bottom:1px solid #f8fafc;">';
+        h += '<div style="display:flex;align-items:center;gap:12px;">';
         h += '<div style="width:20px;height:20px;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;' + (isDone ? 'background:#dcfce7;color:#16a34a;' : 'background:#f1f5f9;color:transparent;border:1.5px dashed #cbd5e1;') + '">' + (isDone ? '✓' : '') + '</div>';
         h += '<div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:600;' + (isDone ? 'color:#94a3b8;text-decoration:line-through;' : '') + '">' + srcIcon + esc(it.title) + '</div></div>';
         h += '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:' + d.bg + ';color:' + d.hdr + ';white-space:nowrap;">' + d.icon + ' ' + d.label + '</span>';
+        h += '</div>';
+        if (compObj && (compObj.comment || (compObj.photos && compObj.photos.length))) h += todayCompletionExtras(compObj);
         h += '</div>';
       });
       h += '</div>';
