@@ -1432,14 +1432,29 @@ function submitEditRecurring(taskId) {
 }
 
 function deleteRecurring(taskId) {
-  if (!confirm('Изтрий постоянната задача завинаги?')) return;
-  sbDelete('recurring_tasks','id=eq.'+taskId).then(function(r){
-    if (!r.ok) { toast('Грешка при изтриване','#dc2626'); return; }
-    toast('🗑 Постоянната задача е изтрита');
-    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').then(function(rt){
-      recurringTasks = Array.isArray(rt) ? rt : [];
-      renderBulletin();
+  /* Проверяваме първо дали има история на изпълнение - FK-то към
+     task_completions няма CASCADE, затова директно изтриване на задача с
+     история гърми 409 Conflict. Питаме изрично, преди да трием и двете. */
+  sbGet('task_completions','recurring_task_id=eq.'+taskId+'&select=id').then(function(comps){
+    var compCount = Array.isArray(comps) ? comps.length : 0;
+    var msg = compCount > 0
+      ? 'Тази задача има '+compCount+' запис'+(compCount===1?'':'a')+' за изпълнение от магазините. Изтриването ще изтрие ЗАВИНАГИ и тях (кой, кога, от кой магазин). Продължи?'
+      : 'Изтрий постоянната задача завинаги?';
+    if (!confirm(msg)) return;
+    var delCompsPromise = compCount > 0 ? sbDelete('task_completions','recurring_task_id=eq.'+taskId) : Promise.resolve({ok:true});
+    delCompsPromise.then(function(delCompRes){
+      if (compCount > 0 && !delCompRes.ok) { toast('Грешка при изтриване на историята','#dc2626'); return; }
+      sbDelete('recurring_tasks','id=eq.'+taskId).then(function(r){
+        if (!r.ok) { toast('Грешка при изтриване','#dc2626'); return; }
+        toast('🗑 Постоянната задача'+(compCount>0?' и историята ѝ':'')+' са изтрити');
+        sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').then(function(rt){
+          recurringTasks = Array.isArray(rt) ? rt : [];
+          renderBulletin();
+        });
+      });
     });
+  }).catch(function(){
+    toast('Грешка при проверка на историята','#dc2626');
   });
 }
 
