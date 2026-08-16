@@ -96,7 +96,10 @@ function loadTodayDashboard(){
            да се показва като "изпълнено" и в сряда. */
         var comps = [];
         regComps.forEach(function(c){ if(c.status==='done' && (c.completion_date||null)===todayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, comment:c.comment, photos:c.photos }); });
-        recComps.forEach(function(c){ if(c.status==='done') comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, comment:c.comment, photos:c.photos }); });
+        /* completion_date=null (стара постоянна задача - персистира завинаги)
+           или съвпада с ДНЕС (нова многодневна постоянна задача - само
+           днешното ѝ отмятане се брои за днес). */
+        recComps.forEach(function(c){ if(c.status==='done' && (!c.completion_date || c.completion_date===todayISO)) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, comment:c.comment, photos:c.photos }); });
 
         todayCache = { items:items, noDueItems:noDueItems, comps:comps, stores:stores };
         renderTodayDashboard(wrap, items, noDueItems, comps, stores);

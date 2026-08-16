@@ -67,7 +67,9 @@ function collectDailyReportData(cb){
            задача (Пон+Ср) не бива изпълнението от Понеделник да се показва
            като "изпълнено" (или "отложено") и в сряда. */
         regComps.forEach(function(c){ if((c.completion_date||null)===todayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
-        recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
+        /* Постоянна задача: completion_date=null (стара - персистира
+           завинаги) или съвпада с ДНЕС (нова многодневна - само днешното). */
+        recComps.forEach(function(c){ if(!c.completion_date || c.completion_date===todayISO) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
 
         var summary = reportBuildSummary(items, comps, stores, recurringNoDue.length);
         var todayKey = toLocalISO(new Date());
@@ -321,7 +323,24 @@ function collectWeeklyReportData(cb){
           items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null, date: dates[0]||null });
         }
       });
-      recurringScheduled.forEach(function(t){ items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null }); });
+      /* Многодневна постоянна задача (Пон+Ср+Пет) - огледално на
+         многодневните обикновени задачи по-горе: разгъва се на отделен
+         елемент за всеки ден, с конкретна дата от ТАЗИ седмица, за да
+         работи completion_date филтрирането коректно. Старите постоянни
+         задачи (1 ден/всеки ден) остават без .date - изпълнението им
+         продължава да важи завинаги, както досега. */
+      recurringScheduled.forEach(function(t){
+        if (recurringIsMultiDay(t) && bul) {
+          var wDays = weekDays(bul.week_number, bul.year);
+          t.due_weekdays.forEach(function(idx){
+            var d = toLocalISO(wDays[idx]);
+            var dLabel = new Date(d+'T00:00:00').toLocaleDateString('bg-BG',{day:'numeric',month:'numeric'});
+            items.push({ id:t.id, kind:'recurring', title:t.title+' ('+dLabel+')', target_stores:t.target_stores||null, date:d });
+          });
+        } else {
+          items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null });
+        }
+      });
 
       var regIds = allBulTasks.map(function(t){ return t.id; });
       var recIds = recurringScheduled.map(function(t){ return t.id; });

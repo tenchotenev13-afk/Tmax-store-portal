@@ -106,9 +106,11 @@ function linkedModuleLabel(value){
 function calItemStatusHtml(itemId,kind,targetStores,dateStr){
   var compsArr = kind==='recurring' ? recurringComps : bulComps;
   var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
-  /* За обикновени задачи с конкретен ден - completion_date трябва да съвпада
-     с ТОЗИ ден, иначе многодневна задача би обединила всички дни в 1 бройка. */
-  var dateMatches = function(c){ return kind==='recurring' || !dateStr || (c.completion_date||null)===dateStr; };
+  /* Ако извикващият подаде dateStr - completion_date трябва да съвпада с
+     ТОЗИ ден (многодневна задача, обикновена или постоянна). Ако не подаде
+     dateStr (стара постоянна задача - 1 ден/всеки ден) - без филтър по дата,
+     изпълнението остава завинаги, както досега. */
+  var dateMatches = function(c){ return !dateStr || (c.completion_date||null)===dateStr; };
   if(isGlobal()){
     var scope = (targetStores&&targetStores.length) ? targetStores
       : ((typeof allStoresCache!=='undefined'&&allStoresCache&&allStoresCache.length) ? allStoresCache : null);
@@ -169,6 +171,42 @@ function readDueDatesCheckboxes(selId){
   var wrap = document.getElementById(selId);
   if (!wrap) return [];
   return Array.prototype.slice.call(wrap.querySelectorAll('input[type=checkbox]:checked')).map(function(cb){ return cb.value; });
+}
+
+/* ═══ МНОГОДНЕВНИ ПОСТОЯННИ ЗАДАЧИ — постоянна задача може да важи за
+   НЯКОЛКО дни от седмицата (напр. Пон+Ср+Пет), не само 1/всеки ден. Ново
+   поле due_weekdays (масив от 0-6) с fallback към старото due_weekday
+   (единично) или "всеки ден" (due_time зададен, без due_weekday).
+   За разлика от единичните постоянни задачи (изпълнението им е БЕЗ дата,
+   веднъж завинаги), многодневна постоянна задача се отмята ОТДЕЛНО всеки
+   ден ВСЯКА седмица - completion_date сочи КОНКРЕТНАТА календарна дата на
+   тазседмичното Пон/Ср/Пет, затова нулирането следващата седмица идва
+   естествено (нова дата), без нужда от отделна reset логика. */
+function recTaskWeekdays(t){
+  if(t.due_weekdays && t.due_weekdays.length) return t.due_weekdays.slice();
+  if(t.due_weekday!==null && t.due_weekday!==undefined) return [t.due_weekday];
+  return []; /* "всеки ден" (due_time) или без срок - без конкретни дни */
+}
+function recTaskIsMultiDay(t){ return recTaskWeekdays(t).length > 1; }
+/* Multi-select checkbox списък за избор на дни от седмицата (не конкретни
+   дати - постоянната задача важи за същите дни всяка седмица). */
+function recWeekdaysCheckboxesHtml(selId, selectedIdxs){
+  selectedIdxs = selectedIdxs || [];
+  var h = '<div id="'+selId+'" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;">';
+  DNAMES.forEach(function(name,i){
+    var checked = selectedIdxs.indexOf(i)>=0;
+    h += '<label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:#374151;cursor:pointer;">' +
+      '<input type="checkbox" value="'+i+'"'+(checked?' checked':'')+' style="width:13px;height:13px;cursor:pointer;">' + name.slice(0,3) +
+      '</label>';
+  });
+  h += '<div style="grid-column:1/-1;font-size:10px;color:#94a3b8;margin-top:2px;">Остави без избор → "Всеки ден" (ако е зададен час) или без конкретен ден</div>';
+  h += '</div>';
+  return h;
+}
+function readRecWeekdaysCheckboxes(selId){
+  var wrap = document.getElementById(selId);
+  if (!wrap) return [];
+  return Array.prototype.slice.call(wrap.querySelectorAll('input[type=checkbox]:checked')).map(function(cb){ return parseInt(cb.value,10); });
 }
 
 function myDept(){
@@ -691,14 +729,16 @@ function renderBulView(){
         }
       });
       recItems.forEach(function(t){
+        var recDateScoped=recurringIsDateScoped(t);
+        var recCdate=recDateScoped?dateStr:null;
         html+='<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
         if(isGlobal()){
           html+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Постоянна задача">🔁</span>';
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;">'+esc(t.title||'')+'</span>';
-          html+=calItemStatusHtml(t.id,'recurring',t.target_stores);
+          html+=calItemStatusHtml(t.id,'recurring',t.target_stores,recCdate);
         } else {
-          var doneRec=store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store&&cc.status==='done';});
-          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" onchange="bulRecurringCheckboxChanged(this)" style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';">';
+          var doneRec=store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===recCdate;});
+          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" onchange="bulRecurringCheckboxChanged(this)" style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';">';
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
         }
         html+='</div>';
@@ -1444,10 +1484,9 @@ function openEditRecurringModal(taskId) {
     '<input class="fi" id="erec-title" value="'+esc(t.title||'')+'">' +
     '<label class="fl">Описание</label>' +
     '<input class="fi" id="erec-desc" value="'+esc(t.description||'')+'">' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
-    '<div><label class="fl">Повтарящ се ден</label><select class="fi" id="erec-weekday">'+recWeekdayOpts(t.due_weekday)+'</select></div>' +
-    '<div><label class="fl">Час (по избор)</label><input type="time" class="fi" id="erec-time" value="'+esc(t.due_time||'')+'"></div>' +
-    '</div>' +
+    '<label class="fl">Повтарящи се дни (по избор)</label>' +
+    recWeekdaysCheckboxesHtml('erec-weekdays', t.due_weekdays||(t.due_weekday!==null&&t.due_weekday!==undefined?[t.due_weekday]:[])) +
+    '<label class="fl">Час (по избор)</label><input type="time" class="fi" id="erec-time" value="'+esc(t.due_time||'')+'">' +
     '<label class="fl">Вид задача</label><select class="fi" id="erec-type">'+taskTypeOptsHtml(t.task_type)+'</select>' +
     '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
     '<select class="fi" id="erec-stores" multiple size="6" style="height:120px;"></select>' +
@@ -1468,14 +1507,14 @@ function submitEditRecurring(taskId) {
   var title = (document.getElementById('erec-title').value||'').trim();
   if (!title) { toast('Въведи заглавие','#dc2626'); return; }
   var desc = document.getElementById('erec-desc').value||'';
-  var wdRaw = document.getElementById('erec-weekday').value;
-  var due_weekday = wdRaw==='' ? null : parseInt(wdRaw,10);
+  var weekdays = readRecWeekdaysCheckboxes('erec-weekdays');
+  var due_weekday = weekdays.length ? weekdays[0] : null;
   var due_time = document.getElementById('erec-time').value || null;
   var taskType = document.getElementById('erec-type').value||'info';
   var stores = bulReadStoreMultiSelect('erec-stores');
   var reportGroups = readReportGroupsCheckboxes('erec-report-groups');
   var linkedModule = (document.getElementById('erec-linked-module')||{}).value||null;
-  sbPatch('recurring_tasks','id=eq.'+taskId,{title:title,description:desc,due_weekday:due_weekday,due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
+  sbPatch('recurring_tasks','id=eq.'+taskId,{title:title,description:desc,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
     if (!r.ok) { toast('Грешка при запис','#dc2626'); return; }
     var el = document.getElementById('edit-rec-ov');
     if (el) el.remove();
@@ -2197,16 +2236,22 @@ function printSection(what){
     if(rdt.length){
       s+='<div class="tasks-hdr">🔁 Постоянни задачи</div>';
       rdt.forEach(function(t){
-        var rComp=printStore&&recurringComps.find(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===printStore;});
+        var isMultiRecPrint = recurringIsMultiDay(t);
+        var singleRecDatePrint = (recurringIsDateScoped(t) && !isMultiRecPrint) ? toLocalISO(days[t.due_weekdays[0]]) : null;
+        var rComp=(!isMultiRecPrint&&printStore)?recurringComps.find(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===printStore&&(cc.completion_date||null)===singleRecDatePrint;}):null;
         var rDone=!!rComp;
         s+='<div class="task-row">';
-        s+='<div class="task-cb" style="'+(rDone?'background:#16a34a;border-color:#16a34a;':'')+'">'+
-          (rDone?'<div style="color:#fff;font-size:9pt;text-align:center;line-height:13pt;">✓</div>':'')+'</div>';
+        if(isMultiRecPrint){
+          s+='<div class="task-cb" style="display:flex;align-items:center;justify-content:center;font-size:9pt;">📅</div>';
+        } else {
+          s+='<div class="task-cb" style="'+(rDone?'background:#16a34a;border-color:#16a34a;':'')+'">'+
+            (rDone?'<div style="color:#fff;font-size:9pt;text-align:center;line-height:13pt;">✓</div>':'')+'</div>';
+        }
         s+='<div style="flex:1;">';
         s+='<div class="task-title">'+esc(t.title||'')+'</div>';
         if(t.description)s+='<div class="task-desc">'+linkify(t.description)+'</div>';
         var dueLbl=recurringDueLabel(t);
-        if(dueLbl)s+='<div class="task-due">🔁 '+esc(dueLbl)+'</div>';
+        if(dueLbl)s+='<div class="task-due">🔁 '+esc(dueLbl)+(isMultiRecPrint?' (виж бройки по дни в календара по-горе)':'')+'</div>';
         s+=pTaskAttachments(t);
         s+='</div></div>';
       });
@@ -2491,7 +2536,7 @@ function submitTaskCompletion(taskId, kind, completionDate){
   if (tt.needsPhoto && !tcPendingPhotos.length) { toast('Добави поне 1 снимка','#dc2626'); return; }
   var el = document.getElementById('tc-modal-ov');
   if (el) el.remove();
-  if (kind==='recurring') toggleRecurringTask(taskId, true, { comment: comment, photos: tcPendingPhotos.slice() });
+  if (kind==='recurring') toggleRecurringTask(taskId, true, { comment: comment, photos: tcPendingPhotos.slice() }, completionDate);
   else toggleTask(taskId, true, { comment: comment, photos: tcPendingPhotos.slice() }, completionDate);
   tcPendingPhotos = [];
 }
@@ -2657,6 +2702,14 @@ function renderRecurringTasks(dk) {
   });
   if (!dTasks.length && !canEdit()) return '';
   var d = DEPTS[dk];
+  /* За многодневни (due_weekdays) постоянни задачи трябва конкретната дата
+     ОТ ТАЗИ седмица за всеки избран ден от седмицата, за да работи
+     completion_date проверката коректно (същия механизъм като обикновените
+     многодневни задачи). */
+  var wkNum = curBul ? curBul.week_number : weekNum(new Date());
+  var wkYr = curBul ? curBul.year : new Date().getFullYear();
+  var weekDaysArr = weekDays(wkNum, wkYr);
+  function weekdayIdxToDate(idx){ return toLocalISO(weekDaysArr[idx]); }
 
   var h = '<div style="background:#fff;border:1px solid ' + d.bdr + ';border-left:4px solid ' + d.hdr + ';border-radius:8px;margin-bottom:12px;overflow:hidden;">';
   h += '<div style="background:' + d.bg + ';padding:8px 14px;display:flex;justify-content:space-between;align-items:center;">';
@@ -2669,7 +2722,9 @@ function renderRecurringTasks(dk) {
   if (dTasks.length) {
     h += '<div style="padding:8px 14px;">';
     dTasks.forEach(function(t,recIdxInDept) {
-      var compObj = store && recurringComps.find(function(c){return c.recurring_task_id===t.id && c.store_name===store;});
+      var isMultiRec = recurringIsMultiDay(t);
+      var singleRecDate = (recurringIsDateScoped(t) && !isMultiRec) ? weekdayIdxToDate(t.due_weekdays[0]) : null;
+      var compObj = store && !isMultiRec && recurringComps.find(function(c){return c.recurring_task_id===t.id && c.store_name===store && (c.completion_date||null)===singleRecDate;});
       var done = !!compObj && compObj.status==='done';
       var postponed = !!compObj && compObj.status==='postponed';
       var dueToday = recurringIsDueToday(t);
@@ -2682,19 +2737,36 @@ function renderRecurringTasks(dk) {
           '<button data-rtid2="'+t.id+'" onclick="recMoveDown(this.dataset.rtid2)" '+(isLastRec?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isLastRec?'#f8fafc':'#fff')+';color:'+(isLastRec?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isLastRec?'default':'pointer')+';padding:0;">▼</button>'+
           '</div>';
       }
-      h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" onchange="bulRecurringCheckboxChanged(this)" ' +
-        'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;">';
+      if (isMultiRec) {
+        h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
+      } else {
+        h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" data-cdate="'+(singleRecDate||'')+'" onchange="bulRecurringCheckboxChanged(this)" ' +
+          'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;">';
+      }
       h += '<div style="flex:1;">';
       h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
       if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">' + linkify(t.description) + '</div>';
       var dueLbl = recurringDueLabel(t);
-      if (dueLbl) h += '<div style="font-size:10px;color:'+(dueToday&&!done?'#d97706':'#94a3b8')+';margin-top:2px;">🔁 '+dueLbl+(dueToday&&!done?' (днес!)':'')+'</div>';
+      if (isMultiRec) {
+        h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🔁 Дни: '+dueLbl+'</div>';
+        if (!isGlobal() && store) {
+          var doneDaysCountRec = t.due_weekdays.filter(function(idx){
+            var d2 = weekdayIdxToDate(idx);
+            return recurringComps.some(function(c){return c.recurring_task_id===t.id&&c.store_name===store&&c.status==='done'&&(c.completion_date||null)===d2;});
+          }).length;
+          h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">✅ '+doneDaysCountRec+'/'+t.due_weekdays.length+' дни отметнати тази седмица — отмятай в 📅 Седмичен календар по-горе</div>';
+        } else if (isGlobal()) {
+          h += '<div style="font-size:10px;color:#94a3b8;margin-top:2px;">Живи бройки по дни виж в 📅 Седмичен календар по-горе</div>';
+        }
+      } else if (dueLbl) {
+        h += '<div style="font-size:10px;color:'+(dueToday&&!done?'#d97706':'#94a3b8')+';margin-top:2px;">🔁 '+dueLbl+(dueToday&&!done?' (днес!)':'')+'</div>';
+      }
       if(isGlobal()&&t.target_stores&&t.target_stores.length)h+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🏬 Само за: '+t.target_stores.map(esc).join(', ')+'</div>';
       if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))h+=renderCompletionExtras(compObj);
       h += renderRecurringAttachments(t);
       h += '</div>';
       var showBtns='';
-      if(!isGlobal()&&!done){
+      if(!isGlobal()&&!isMultiRec&&!done){
         if(postponed)showBtns+='<button data-task-id="'+t.id+'" onclick="cancelPostpone(this.dataset.taskId,\'recurring\')" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
         else showBtns+='<button data-task-id="'+t.id+'" onclick="openPostponeModal(this.dataset.taskId,\'recurring\')" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
       }
@@ -2737,36 +2809,41 @@ function moveRecInDept(id,dir){
   recurringTasks.sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
   Promise.all(patches).then(function(){ renderBulletin(); });
 }
-function toggleRecurringTask(taskId, checked, extra) {
+function toggleRecurringTask(taskId, checked, extra, completionDate) {
   var store = currentUser && currentUser.store_name;
   if (!store) { toast('Грешка: няма магазин','#dc2626'); return; }
+  completionDate = completionDate || null; /* null = стара постоянна задача (1 ден/всеки ден) - изпълнението остава завинаги, както досега */
   if (checked) {
     extra = extra || {};
-    /* Upsert - ако вече има запис (напр. беше отложена), UPDATE вместо
-       INSERT, заради UNIQUE(recurring_task_id,store_name) в базата. */
-    var existing = recurringComps.find(function(c){ return c.recurring_task_id===taskId && c.store_name===store; });
+    /* Upsert - ако вече има запис за СЪЩИЯ ден, UPDATE вместо INSERT. За
+       многодневна (due_weekdays) постоянна задача всеки ден си има
+       собствен ред, затова completion_date участва в проверката. */
+    var existing = recurringComps.find(function(c){ return c.recurring_task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate; });
     var completedBy = currentUser.display_name || currentUser.email;
     var basePayload = {
       completed_by: completedBy,
       completed_at: new Date().toISOString(),
       status: 'done',
       comment: extra.comment || null,
-      photos: (extra.photos && extra.photos.length) ? extra.photos : null
+      photos: (extra.photos && extra.photos.length) ? extra.photos : null,
+      completion_date: completionDate
     };
+    var matchQuery = 'recurring_task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+(completionDate?'&completion_date=eq.'+completionDate:'&completion_date=is.null');
     var req = existing
-      ? sbPatch('task_completions','recurring_task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store), basePayload)
+      ? sbPatch('task_completions', matchQuery, basePayload)
       : sbPost('task_completions', Object.assign({recurring_task_id:taskId, store_name:store}, basePayload));
     req.then(function(r){
       if (!r.ok) { toast('Грешка','#dc2626'); return; }
       toast('✅ Отбелязана!');
-      recurringComps = recurringComps.filter(function(c){ return !(c.recurring_task_id===taskId && c.store_name===store); });
-      recurringComps.push(Object.assign({recurring_task_id: taskId, store_name: store, completed_by: completedBy, status:'done'}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}));
+      recurringComps = recurringComps.filter(function(c){ return !(c.recurring_task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate); });
+      recurringComps.push(Object.assign({recurring_task_id: taskId, store_name: store, completed_by: completedBy, status:'done', completion_date: completionDate}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}));
       renderBulletin();
     });
   } else {
-    sbDelete('task_completions','recurring_task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)).then(function(){
+    var delQuery = 'recurring_task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+(completionDate?'&completion_date=eq.'+completionDate:'&completion_date=is.null');
+    sbDelete('task_completions', delQuery).then(function(){
       toast('↩ Отбелязана като неизпълнена');
-      recurringComps = recurringComps.filter(function(c){return !(c.recurring_task_id===taskId && c.store_name===store);});
+      recurringComps = recurringComps.filter(function(c){return !(c.recurring_task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate);});
       renderBulletin();
     });
   }
@@ -2775,12 +2852,13 @@ function toggleRecurringTask(taskId, checked, extra) {
    bulCheckboxChanged() за обикновените задачи. */
 function bulRecurringCheckboxChanged(cb){
   var taskId = cb.dataset.rtid;
-  if (!cb.checked) { toggleRecurringTask(taskId, false); return; }
+  var completionDate = cb.dataset.cdate || null;
+  if (!cb.checked) { toggleRecurringTask(taskId, false, null, completionDate); return; }
   var t = recurringTasks.find(function(x){ return String(x.id)===String(taskId); });
   var tt = TASK_TYPES[(t&&t.task_type)||'info'];
-  if (!tt || (!tt.needsPhoto && !tt.needsComment)) { toggleRecurringTask(taskId, true); return; }
+  if (!tt || (!tt.needsPhoto && !tt.needsComment)) { toggleRecurringTask(taskId, true, null, completionDate); return; }
   cb.checked = false;
-  openTaskCompletionModal(taskId, 'recurring');
+  openTaskCompletionModal(taskId, 'recurring', completionDate);
 }
 
 function toggleRecurringActive(id, active) {
@@ -2804,10 +2882,9 @@ function openRecurringModal(dk) {
     '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">🔁 Нова постоянна задача — ' + d.label + '</div>' +
     '<label class="fl">Заглавие *</label><input class="fi" id="rec-title" placeholder="напр. Провери наличностите">' +
     '<label class="fl">Описание</label><input class="fi" id="rec-desc" placeholder="Допълнителна информация">' +
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
-    '<div><label class="fl">Повтарящ се ден</label><select class="fi" id="rec-weekday">'+recWeekdayOpts()+'</select></div>' +
-    '<div><label class="fl">Час (по избор)</label><input type="time" class="fi" id="rec-time"></div>' +
-    '</div>' +
+    '<label class="fl">Повтарящи се дни (по избор)</label>' +
+    recWeekdaysCheckboxesHtml('rec-weekdays', []) +
+    '<label class="fl">Час (по избор)</label><input type="time" class="fi" id="rec-time">' +
     '<label class="fl">Вид задача</label><select class="fi" id="rec-type">'+taskTypeOptsHtml('info')+'</select>' +
     '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
     '<select class="fi" id="rec-stores" multiple size="6" style="height:120px;"></select>' +
@@ -2824,12 +2901,33 @@ function openRecurringModal(dk) {
   setTimeout(function(){ var el=document.getElementById('rec-title'); if(el)el.focus(); }, 100);
 }
 /* Опции за dropdown "повтарящ се ден" — value="" означава "всеки ден" (due_weekday=null) */
-function recWeekdayOpts(sel){
-  var h='<option value=""'+(sel===null||sel===undefined?' selected':'')+'>Всеки ден</option>';
-  DNAMES.forEach(function(n,i){ h+='<option value="'+i+'"'+(String(sel)===String(i)?' selected':'')+'>'+n+'</option>'; });
+/* Multi-select checkbox списък за избор на НЯКОЛКО дни от седмицата (за
+   постоянна задача - напр. винаги Пон+Сряд+Пет). selectedIdxs: масив от
+   индекси 0=Пон..6=Нед. Празен избор = старото поведение ("Всеки ден", ако
+   има час, иначе без конкретен ден) - due_weekdays е ЧИСТО ДОПЪЛНЕНИЕ. */
+function recWeekdaysCheckboxesHtml(selId, selectedIdxs){
+  selectedIdxs = selectedIdxs || [];
+  var h = '<div id="'+selId+'" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;">';
+  DNAMES.forEach(function(name,i){
+    var checked = selectedIdxs.indexOf(i)>=0;
+    h += '<label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:#374151;cursor:pointer;">' +
+      '<input type="checkbox" value="'+i+'"'+(checked?' checked':'')+' style="width:13px;height:13px;cursor:pointer;">' + name.slice(0,3) +
+      '</label>';
+  });
+  h += '<div style="grid-column:1/-1;font-size:10px;color:#94a3b8;margin-top:2px;">Остави без избор = всеки ден (ако е зададен час)</div>';
+  h += '</div>';
   return h;
 }
+function readRecWeekdaysCheckboxes(selId){
+  var wrap = document.getElementById(selId);
+  if (!wrap) return [];
+  return Array.prototype.slice.call(wrap.querySelectorAll('input[type=checkbox]:checked')).map(function(cb){ return parseInt(cb.value,10); });
+}
 function recurringDueLabel(t){
+  if(t.due_weekdays && t.due_weekdays.length){
+    var names = t.due_weekdays.slice().sort(function(a,b){return a-b;}).map(function(i){return DNAMES[i].slice(0,3);}).join('+');
+    return names + (t.due_time ? (' до '+t.due_time) : '');
+  }
   var hasWeekday = t.due_weekday!==null && t.due_weekday!==undefined;
   if(!hasWeekday){
     return t.due_time ? ('Всеки ден до '+t.due_time) : '';
@@ -2837,36 +2935,37 @@ function recurringDueLabel(t){
   var dayName = DNAMES[t.due_weekday]||'';
   return dayName + (t.due_time ? (' до '+t.due_time) : '');
 }
-function recurringIsDueToday(t){
-  if(t.due_weekday===null||t.due_weekday===undefined){
-    return !!t.due_time; /* "всеки ден" със зададен час -> винаги важи за днес */
-  }
-  var jsDay=new Date().getDay(); /* 0=Нед,1=Пон...6=Съб */
-  var idx=jsDay===0?6:jsDay-1; /* превръщаме в 0=Пон..5=Съб,6=Нед */
-  return idx===t.due_weekday;
-}
-/* Като recurringIsDueToday, но за произволен ден от делничната седмица
-   (weekdayIdx: 0=Пон..4=Пет) - за седмичния календар, който показва цялата
-   седмица наведнъж, не само днес. */
+/* Постоянна задача с НЯКОЛКО избрани дни (due_weekdays) - изпълнението е
+   истински обвързано с конкретния ден/седмица (completion_date), огледално
+   на многодневните обикновени задачи - за разлика от старите постоянни
+   задачи (1 ден или "всеки ден"), чието изпълнение остава завинаги. */
+function recurringIsMultiDay(t){ return !!(t.due_weekdays && t.due_weekdays.length>1); }
+function recurringIsDateScoped(t){ return !!(t.due_weekdays && t.due_weekdays.length); }
 function recurringIsDueOnWeekday(t,weekdayIdx){
+  if(t.due_weekdays && t.due_weekdays.length) return t.due_weekdays.indexOf(weekdayIdx)>=0;
   if(t.due_weekday===null||t.due_weekday===undefined){
     return !!t.due_time; /* "всеки ден" - важи за всеки делничен ден */
   }
   return t.due_weekday===weekdayIdx;
+}
+function recurringIsDueToday(t){
+  var jsDay=new Date().getDay(); /* 0=Нед,1=Пон...6=Съб */
+  var idx=jsDay===0?6:jsDay-1; /* превръщаме в 0=Пон..5=Съб,6=Нед */
+  return recurringIsDueOnWeekday(t, idx);
 }
 
 function submitRecurring(dk) {
   var title = (document.getElementById('rec-title').value||'').trim();
   if (!title) { toast('Въведи заглавие','#dc2626'); return; }
   var desc = document.getElementById('rec-desc').value||'';
-  var wdRaw = document.getElementById('rec-weekday').value;
-  var due_weekday = wdRaw==='' ? null : parseInt(wdRaw,10);
+  var weekdays = readRecWeekdaysCheckboxes('rec-weekdays');
+  var due_weekday = weekdays.length ? weekdays[0] : null; /* първия избран - обратна съвместимост */
   var due_time = document.getElementById('rec-time').value || null;
   var taskType = document.getElementById('rec-type').value||'info';
   var stores = bulReadStoreMultiSelect('rec-stores');
   var reportGroups = readReportGroupsCheckboxes('rec-report-groups');
   var linkedModule = (document.getElementById('rec-linked-module')||{}).value||null;
-  sbPost('recurring_tasks',{department:dk,title:title,description:desc,active:true,sort_order:recurringTasks.length,due_weekday:due_weekday,due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
+  sbPost('recurring_tasks',{department:dk,title:title,description:desc,active:true,sort_order:recurringTasks.length,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
     if (!r.ok) { toast('Грешка','#dc2626'); return; }
     var el = document.getElementById('rec-modal-ov');
     if (el) el.remove();
