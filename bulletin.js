@@ -39,10 +39,24 @@ function taskTypeOptsHtml(selected){
     return '<option value="'+k+'"'+(k===(selected||'info')?' selected':'')+'>'+tt.label+' — приоритет: '+tt.priority+'</option>';
   }).join('');
 }
-function taskTypeBadgeHtml(taskType){
+function taskTypeBadgeHtml(taskType,taskId,kind,clickable,completionDate){
   var tt=TASK_TYPES[taskType||'info'];
   if(!tt||taskType==='info')return '';
+  if(clickable&&taskId){
+    return '<span data-task-id="'+taskId+'" data-kind="'+(kind||'regular')+'" data-cdate="'+(completionDate||'')+'" onclick="taskTypeBadgeClick(this)" style="cursor:pointer;font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:'+tt.bg+';color:'+tt.color+';border:1px solid '+tt.bdr+';white-space:nowrap;">'+tt.short+'</span>';
+  }
   return '<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:'+tt.bg+';color:'+tt.color+';border:1px solid '+tt.bdr+';white-space:nowrap;">'+tt.short+'</span>';
+}
+/* Клик направо върху баджа "💬 Коментар"/"📷 Снимка" - пряк път към модала за
+   изпълнение, вместо да се минава задължително през чекбокса. Само за
+   store роли, само за незавършени еднодневни задачи (баджът не е кликаем
+   за admin/офиса, за вече изпълнени, или за многодневни - там няма единен
+   "ден" контекст в главния списък). Подава СЪЩИЯ completion_date, който
+   чекбоксът до него използва - иначе клик на бадж vs. чекбокс биха
+   създали ДВА различни записа за една и съща задача, разсинхронизирани
+   помежду си и с календара. */
+function taskTypeBadgeClick(el){
+  openTaskCompletionModal(el.dataset.taskId, el.dataset.kind, el.dataset.cdate||null);
 }
 
 /* ГРУПИ ЗА ДОКЛАДВАНЕ — до кого отива известие/седмичен репорт за дадена
@@ -862,7 +876,7 @@ function renderBulView(){
         } else {
           html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" onchange="bulCheckboxChanged(this)" style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;">';
         }
-        html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
+        html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done,singleDate)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
         if(t.description)html+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         if(isMulti){
           var multiDates=taskDueDates(t);
@@ -1009,8 +1023,8 @@ function bulRemoveBlockFile(col,id){
 function editBlock(b,dk,i){
   var tl={text:'📝 Текст',alert:'🚨 Алерт',list:'📋 Списък',image:'📷 Снимка',file:'📎 Файл',divider:'— Разделител',important:'⭐ Важно'}[b.type]||b.type;
   var isEditing=canEdit()&&bulMode==='edit';
-  var h='<div class="blk" id="eb-'+b.id+'" draggable="true" data-col="'+dk+'" data-idx="'+i+'" ondragstart="bulDragStart(this)" ondragover="bulDragOver(this)" ondragleave="bulDragLeave(this)" ondrop="bulDropBlock(this)">';
-  h+='<button class="blk-del" data-col="'+dk+'" data-id="'+b.id+'" onclick="bulDelBlock(this)">✕</button>';
+  var h='<div class="blk" id="eb-'+b.id+'" '+(isEditing?'draggable="true" ':'')+'data-col="'+dk+'" data-idx="'+i+'"'+(isEditing?' ondragstart="bulDragStart(this)" ondragover="bulDragOver(this)" ondragleave="bulDragLeave(this)" ondrop="bulDropBlock(this)"':'')+'>';
+  if(canEdit())h+='<button class="blk-del" data-col="'+dk+'" data-id="'+b.id+'" onclick="bulDelBlock(this)">✕</button>';
   h+='<div class="blk-type">'+tl+'</div>';
 
   if(b.type==='text'){
@@ -1048,40 +1062,61 @@ function editBlock(b,dk,i){
     }
     h+=renderBlockExtras(b,dk);
   }else if(b.type==='important'){
-    var uOpts=[['ok','✅ OK'],['warn','⚠️ Предупреждение'],['urgent','🔴 Спешно'],['info','ℹ️ Инфо']];
-    h+='<select data-col="'+dk+'" data-id="'+b.id+'" data-field="urgency" onchange="bulSetBlk(this)" style="font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 6px;margin-bottom:5px;background:#f8fafc;width:100%;">';
-    uOpts.forEach(function(o){h+='<option value="'+o[0]+'"'+(b.urgency===o[0]?' selected':'')+'>'+o[1]+'</option>';});
-    h+='</select><br>';
-    h+='<input placeholder="Заглавие *" value="'+esc(b.title||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="title" oninput="bulSetBlk(this)" style="width:100%;font-size:13px;font-weight:600;border:1px solid #e2e8f0;border-radius:5px;padding:5px 7px;margin-bottom:4px;font-family:inherit;box-sizing:border-box;"><br>';
-    h+='<input placeholder="Подзаглавие (по избор)" value="'+esc(b.sub||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="sub" oninput="bulSetBlk(this)" style="width:100%;font-size:12px;border:1px solid #e2e8f0;border-radius:5px;padding:4px 7px;font-family:inherit;box-sizing:border-box;"><br>';
-    h+='<div style="font-size:10px;color:#f59e0b;margin-top:4px;">⭐ → показва се в секция Важно</div>';
-  }else if(b.type==='image'){
-    var sizes=[['33','1/3'],['50','1/2'],['66','2/3'],['100','Пълна']];
-    h+='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;">';
-    sizes.forEach(function(s){
-      var active=String(b.width||100)===s[0];
-      h+='<button data-col="'+dk+'" data-id="'+b.id+'" data-w="'+s[0]+'" onclick="bulSetWidth(this)" style="border:1px solid '+(active?'#2563eb':'#e2e8f0')+';background:'+(active?'#eff6ff':'#fff')+';color:'+(active?'#2563eb':'#64748b')+';border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">'+s[1]+'</button>';
-    });
-    h+='</div>';
-    if(b.url){
-      h+='<img src="'+b.url+'" style="width:'+(b.width||100)+'%;border-radius:7px;display:block;margin-bottom:4px;" onerror="bulImgErr(this)">'; 
-      h+='<input placeholder="Подпис (по избор)" value="'+esc(b.caption||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="caption" oninput="bulSetBlk(this)" style="width:100%;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-family:inherit;box-sizing:border-box;"><br>';
-      h+='<button data-col="'+dk+'" data-id="'+b.id+'" onclick="bulClearImg(this)" style="margin-top:4px;border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">✕ Смени снимката</button>';
+    if(isEditing){
+      var uOpts=[['ok','✅ OK'],['warn','⚠️ Предупреждение'],['urgent','🔴 Спешно'],['info','ℹ️ Инфо']];
+      h+='<select data-col="'+dk+'" data-id="'+b.id+'" data-field="urgency" onchange="bulSetBlk(this)" style="font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 6px;margin-bottom:5px;background:#f8fafc;width:100%;">';
+      uOpts.forEach(function(o){h+='<option value="'+o[0]+'"'+(b.urgency===o[0]?' selected':'')+'>'+o[1]+'</option>';});
+      h+='</select><br>';
+      h+='<input placeholder="Заглавие *" value="'+esc(b.title||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="title" oninput="bulSetBlk(this)" style="width:100%;font-size:13px;font-weight:600;border:1px solid #e2e8f0;border-radius:5px;padding:5px 7px;margin-bottom:4px;font-family:inherit;box-sizing:border-box;"><br>';
+      h+='<input placeholder="Подзаглавие (по избор)" value="'+esc(b.sub||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="sub" oninput="bulSetBlk(this)" style="width:100%;font-size:12px;border:1px solid #e2e8f0;border-radius:5px;padding:4px 7px;font-family:inherit;box-sizing:border-box;"><br>';
+      h+='<div style="font-size:10px;color:#f59e0b;margin-top:4px;">⭐ → показва се в секция Важно</div>';
     }else{
-      h+='<label style="display:flex;flex-direction:column;align-items:center;padding:18px;border:1.5px dashed #cbd5e1;border-radius:7px;cursor:pointer;color:#64748b;font-size:12px;">';
-      h+='<span style="font-size:30px;margin-bottom:6px;">📷</span>Избери снимка (JPG / PNG / GIF)';
-      h+='<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp" style="display:none;" data-col="'+dk+'" data-id="'+b.id+'" onchange="bulUploadImg(this)">';
-      h+='</label>';
+      var uC={ok:'#f0fdf4:#16a34a:#14532d',warn:'#fffbeb:#f59e0b:#92400e',urgent:'#fff1f2:#dc2626:#991b1b',info:'#eff6ff:#2563eb:#1e40af'}[b.urgency||'info']||'#eff6ff:#2563eb:#1e40af';
+      var uC2=uC.split(':');
+      h+='<div style="background:'+uC2[0]+';border-left:3px solid '+uC2[1]+';color:'+uC2[2]+';border-radius:0 6px 6px 0;padding:8px 12px;">'+
+         '<div style="font-size:13px;font-weight:700;">'+esc(b.title||'')+'</div>'+
+         (b.sub?'<div style="font-size:12px;margin-top:2px;">'+esc(b.sub)+'</div>':'')+'</div>';
+    }
+  }else if(b.type==='image'){
+    if(isEditing){
+      var sizes=[['33','1/3'],['50','1/2'],['66','2/3'],['100','Пълна']];
+      h+='<div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px;">';
+      sizes.forEach(function(s){
+        var active=String(b.width||100)===s[0];
+        h+='<button data-col="'+dk+'" data-id="'+b.id+'" data-w="'+s[0]+'" onclick="bulSetWidth(this)" style="border:1px solid '+(active?'#2563eb':'#e2e8f0')+';background:'+(active?'#eff6ff':'#fff')+';color:'+(active?'#2563eb':'#64748b')+';border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">'+s[1]+'</button>';
+      });
+      h+='</div>';
+      if(b.url){
+        h+='<img src="'+b.url+'" style="width:'+(b.width||100)+'%;border-radius:7px;display:block;margin-bottom:4px;" onerror="bulImgErr(this)">'; 
+        h+='<input placeholder="Подпис (по избор)" value="'+esc(b.caption||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="caption" oninput="bulSetBlk(this)" style="width:100%;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-family:inherit;box-sizing:border-box;"><br>';
+        h+='<button data-col="'+dk+'" data-id="'+b.id+'" onclick="bulClearImg(this)" style="margin-top:4px;border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">✕ Смени снимката</button>';
+      }else{
+        h+='<label style="display:flex;flex-direction:column;align-items:center;padding:18px;border:1.5px dashed #cbd5e1;border-radius:7px;cursor:pointer;color:#64748b;font-size:12px;">';
+        h+='<span style="font-size:30px;margin-bottom:6px;">📷</span>Избери снимка (JPG / PNG / GIF)';
+        h+='<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp" style="display:none;" data-col="'+dk+'" data-id="'+b.id+'" onchange="bulUploadImg(this)">';
+        h+='</label>';
+      }
+    }else{
+      if(b.url){
+        h+='<img src="'+b.url+'" style="width:'+(b.width||100)+'%;border-radius:7px;display:block;margin-bottom:4px;" onerror="bulImgErr(this)">';
+        if(b.caption)h+='<div style="font-size:11px;color:#64748b;">'+esc(b.caption)+'</div>';
+      }
     }
   }else if(b.type==='file'){
-    if(b.url){
-      h+='<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f8fafc;border-radius:6px;"><span style="font-size:20px;">📎</span><div style="flex:1;"><div style="font-size:12px;font-weight:500;">'+esc(b.filename||'Файл')+'</div><a href="'+b.url+'" target="_blank" style="font-size:11px;color:#2563eb;">Изтегли</a></div>';
-      h+='<button data-col="'+dk+'" data-id="'+b.id+'" onclick="bulClearFile(this)" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">✕</button></div>';
+    if(isEditing){
+      if(b.url){
+        h+='<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f8fafc;border-radius:6px;"><span style="font-size:20px;">📎</span><div style="flex:1;"><div style="font-size:12px;font-weight:500;">'+esc(b.filename||'Файл')+'</div><a href="'+b.url+'" target="_blank" style="font-size:11px;color:#2563eb;">Изтегли</a></div>';
+        h+='<button data-col="'+dk+'" data-id="'+b.id+'" onclick="bulClearFile(this)" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">✕</button></div>';
+      }else{
+        h+='<label style="display:flex;flex-direction:column;align-items:center;padding:18px;border:1.5px dashed #cbd5e1;border-radius:7px;cursor:pointer;color:#64748b;font-size:12px;">';
+        h+='<span style="font-size:30px;margin-bottom:6px;">📎</span>Избери файл (PDF / Word / Excel)';
+        h+='<input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display:none;" data-col="'+dk+'" data-id="'+b.id+'" onchange="bulUploadFile(this)">';
+        h+='</label>';
+      }
     }else{
-      h+='<label style="display:flex;flex-direction:column;align-items:center;padding:18px;border:1.5px dashed #cbd5e1;border-radius:7px;cursor:pointer;color:#64748b;font-size:12px;">';
-      h+='<span style="font-size:30px;margin-bottom:6px;">📎</span>Избери файл (PDF / Word / Excel)';
-      h+='<input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display:none;" data-col="'+dk+'" data-id="'+b.id+'" onchange="bulUploadFile(this)">';
-      h+='</label>';
+      if(b.url){
+        h+='<div style="display:flex;align-items:center;gap:8px;padding:8px;background:#f8fafc;border-radius:6px;"><span style="font-size:20px;">📎</span><div style="flex:1;"><div style="font-size:12px;font-weight:500;">'+esc(b.filename||'Файл')+'</div><a href="'+b.url+'" target="_blank" style="font-size:11px;color:#2563eb;">Изтегли</a></div></div>';
+      }
     }
   }
   h+='</div>';
@@ -2351,7 +2386,7 @@ function renderTasksPanel() {
         }
         h += '<div style="flex:1;">';
         h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':isPostponed?'#b45309':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
-        h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type)+(isPostponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
+        h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!isDone,singleDate)+(isPostponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
         if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         h += renderTaskAttachments(t);
         if (isMulti) {
@@ -2634,7 +2669,14 @@ function loadTasksStats() {
       h += '<tr style="border-bottom:1px solid #f1f5f9;">';
       h += '<td style="padding:7px 12px;font-weight:500;">'+esc(store)+'</td>';
       depts.forEach(function(dk){
-        var dTasks = bulTasks.filter(function(t){return t.department===dk;});
+        /* Само задачите, за които този магазин е в обхват (target_stores
+           празно/null = всички, или изрично включен) - иначе магазин без
+           достъп до дадена задача пак се брои в знаменателя ѝ, изкуствено
+           занижавайки % му. Същият модел като в today.js/report.js. */
+        var dTasks = bulTasks.filter(function(t){
+          if(t.department!==dk)return false;
+          return !t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0;
+        });
         var done = dTasks.filter(function(t){
           return bulComps.some(function(c){return c.task_id===t.id&&c.store_name===store&&c.status==='done';});
         }).length;
@@ -2744,7 +2786,7 @@ function renderRecurringTasks(dk) {
           'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;">';
       }
       h += '<div style="flex:1;">';
-      h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
+      h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done,singleRecDate)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
       if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">' + linkify(t.description) + '</div>';
       var dueLbl = recurringDueLabel(t);
       if (isMultiRec) {
