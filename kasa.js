@@ -1449,6 +1449,44 @@ function stornoExceedsOneMonth(origStr, stornoStr){
   return stornoDate.getTime() > limitDate.getTime();
 }
 
+/* ─── Споделени помощници за артикулите по редове (kasa_storno_items) ───
+   Ползват се от renderStorno() тук И от history.js за админ изгледа. */
+var stornoItemsById = {}; /* { [storno_id]: { returned:[{sap_code,article_name}], replacement:[...] } } */
+
+function stornoLoadItemsFor(ids){
+  var uniq=[]; (ids||[]).forEach(function(id){ if(id && uniq.indexOf(id)<0) uniq.push(id); });
+  if(!uniq.length){ stornoItemsById={}; return Promise.resolve(); }
+  var q='storno_id=in.('+uniq.map(encodeURIComponent).join(',')+')&order=kind.asc,line_no.asc';
+  return sbGet('kasa_storno_items',q).then(function(data){
+    var map={};
+    (Array.isArray(data)?data:[]).forEach(function(row){
+      if(!map[row.storno_id]) map[row.storno_id]={returned:[],replacement:[]};
+      if(map[row.storno_id][row.kind]) map[row.storno_id][row.kind].push(row);
+    });
+    stornoItemsById=map;
+  }).catch(function(){ stornoItemsById={}; });
+}
+
+/* Компактен номериран списък "SAP код — име" за клетка в таблица, вместо
+   едно огромно опънато /-разделено поле. Пада обратно към старите текстови
+   полета (за записи отпреди миграцията, ако по някаква причина липсват items). */
+function stornoItemsListHtml(r, kind){
+  var rec=stornoItemsById[r.id];
+  var items = rec ? rec[kind] : null;
+  if(items && items.length){
+    return '<ol style="margin:0;padding-left:15px;font-size:11px;">'+
+      items.map(function(it){
+        return '<li style="margin-bottom:2px;"><span style="font-family:DM Mono,monospace;">'+esc(it.sap_code||'')+'</span>'+
+          (it.article_name?' — '+esc(it.article_name):'')+'</li>';
+      }).join('')+
+    '</ol>';
+  }
+  var codes = kind==='returned' ? r.articles : r.replacement_articles;
+  var name  = kind==='returned' ? r.article_name : r.replacement_article_name;
+  if(!codes) return '<span style="color:#94a3b8;">—</span>';
+  return '<span style="font-family:DM Mono,monospace;font-size:11px;">'+esc(codes)+'</span>'+(name?'<br>'+esc(name):'');
+}
+
 /* Директен скок към Каса > Сторно бележки — ползва се от банера при вход,
    когато сторно бележка е върната за коментар на самия магазин. */
 function goToStornoTab(){
@@ -1467,6 +1505,8 @@ function loadStorno(){
   sbGet('kasa_storno',q).then(function(data){
     kasaStorno=Array.isArray(data)?data:[];
     kasaStorno.sort(function(a,b){return stornoSortPriority(a)-stornoSortPriority(b);});
+    return stornoLoadItemsFor(kasaStorno.map(function(r){return r.id;}));
+  }).then(function(){
     renderStorno();
   }).catch(function(){kasaStorno=[];renderStorno();});
 }
@@ -1498,9 +1538,11 @@ function renderStorno(){
 
   html+='<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr>'+
-      '<th>Дата сторно</th><th>Дата бон</th><th>Артикул/и</th><th>Име</th>'+
-      '<th>Сума върнат</th><th>Причина</th><th>Реална замяна</th><th>Сума нов</th>'+
-      '<th>Индикация</th><th>Статус</th>'+(canEdit||canReturn?'<th></th>':'')+
+      '<th style="width:8%;white-space:nowrap;">Дата сторно</th><th style="width:8%;white-space:nowrap;">Дата бон</th>'+
+      '<th style="width:16%;">Артикул/и</th>'+
+      '<th style="width:8%;white-space:nowrap;">Сума върнат</th><th style="width:14%;">Причина</th>'+
+      '<th style="width:16%;">Реална замяна</th><th style="width:8%;white-space:nowrap;">Сума нов</th>'+
+      '<th style="width:9%;white-space:nowrap;">Индикация</th><th style="width:9%;white-space:nowrap;">Статус</th>'+(canEdit||canReturn?'<th></th>':'')+
     '</tr></thead><tbody>'+
     kasaStorno.map(function(r){
       var ind=stornoIndicator(r.returned_sum,r.new_sum,r.articles);
@@ -1510,16 +1552,14 @@ function renderStorno(){
         r.status==='resubmitted'? '<span style="background:#dbeafe;color:#1e40af;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">🔄 Изпратен отново</span>' :
         '';
       var row='<tr'+(rowBg?' style="background:'+rowBg+';"':'')+'>'+
-        '<td>'+fmtDate(r.storno_date)+'</td>'+
-        '<td>'+fmtDate(r.original_receipt_date)+'</td>'+
-        '<td style="font-family:DM Mono,monospace;font-size:11px;">'+esc(r.articles||'')+'</td>'+
-        '<td>'+esc(r.article_name||'')+'</td>'+
-        '<td style="font-family:DM Mono,monospace;">'+fmtMoney(r.returned_sum)+'</td>'+
+        '<td style="white-space:nowrap;">'+fmtDate(r.storno_date)+'</td>'+
+        '<td style="white-space:nowrap;">'+fmtDate(r.original_receipt_date)+'</td>'+
+        '<td>'+stornoItemsListHtml(r,'returned')+'</td>'+
+        '<td style="font-family:DM Mono,monospace;white-space:nowrap;">'+fmtMoney(r.returned_sum)+'</td>'+
         '<td style="font-size:12px;">'+esc(r.reason||'')+'</td>'+
-        '<td style="font-size:12px;"><span style="font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.replacement_articles||'')+'</span>'+
-          (r.replacement_article_name?'<br><b>'+esc(r.replacement_article_name)+'</b>':'')+'</td>'+
-        '<td style="font-family:DM Mono,monospace;">'+fmtMoney(r.new_sum)+'</td>'+
-        '<td><span style="font-weight:700;color:'+ind.color+';font-size:12px;">'+ind.label+'</span></td>'+
+        '<td>'+stornoItemsListHtml(r,'replacement')+'</td>'+
+        '<td style="font-family:DM Mono,monospace;white-space:nowrap;">'+fmtMoney(r.new_sum)+'</td>'+
+        '<td style="white-space:nowrap;"><span style="font-weight:700;color:'+ind.color+';font-size:12px;">'+ind.label+'</span></td>'+
         '<td>'+statusBadge+'</td>'+
         (canEdit||canReturn?'<td style="white-space:nowrap;">'+
           (canEdit?'<button onclick="openStornoForm(\''+r.id+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px;">✏️</button>'+
@@ -1531,7 +1571,7 @@ function renderStorno(){
       /* Разширен ред — причина за връщане + поле за коментар от магазина (само когато е върнат) */
       if(r.status==='returned'){
         row+='<tr'+(rowBg?' style="background:'+rowBg+';"':'')+'>'+
-          '<td colspan="11" style="padding:10px 14px;border-top:none;">'+
+          '<td colspan="'+(canEdit||canReturn?10:9)+'" style="padding:10px 14px;border-top:none;">'+
             '<div style="font-size:12px;color:#9a3412;margin-bottom:6px;"><b>Причина за връщане:</b> '+esc(r.return_reason||'')+
               ' &nbsp;·&nbsp; върнато от '+esc(r.returned_by||'')+(r.returned_at?' на '+fmtDate(r.returned_at.slice(0,10)):'')+'</div>'+
             (canEdit?
@@ -1541,7 +1581,7 @@ function renderStorno(){
           '</td></tr>';
       } else if(r.status==='resubmitted'&&r.store_comment){
         row+='<tr'+(rowBg?' style="background:'+rowBg+';"':'')+'>'+
-          '<td colspan="11" style="padding:10px 14px;border-top:none;">'+
+          '<td colspan="'+(canEdit||canReturn?10:9)+'" style="padding:10px 14px;border-top:none;">'+
             '<div style="font-size:12px;color:#1e40af;"><b>Пояснение от магазина:</b> '+esc(r.store_comment)+
               ' &nbsp;·&nbsp; от '+esc(r.resubmitted_by||'')+(r.resubmitted_at?' на '+fmtDate(r.resubmitted_at.slice(0,10)):'')+'</div>'+
           '</td></tr>';
@@ -1597,9 +1637,35 @@ function resubmitStorno(id){
   });
 }
 
+var stornoFormReturned = [];      /* [{sap_code, article_name}] — линии върнати артикули в текущата форма */
+var stornoFormReplacement = [];   /* същото за заменящите артикули */
+
 function openStornoForm(id){
   kasaStornoEditId=id||null;
   var r=id?(kasaStorno.find(function(x){return x.id===id;})||{}):{};
+
+  if(id){
+    sbGet('kasa_storno_items','storno_id=eq.'+id+'&order=kind.asc,line_no.asc').then(function(data){
+      var items=Array.isArray(data)?data:[];
+      stornoFormReturned=items.filter(function(x){return x.kind==='returned';})
+        .map(function(x){return {sap_code:x.sap_code||'',article_name:x.article_name||''};});
+      stornoFormReplacement=items.filter(function(x){return x.kind==='replacement';})
+        .map(function(x){return {sap_code:x.sap_code||'',article_name:x.article_name||''};});
+      if(!stornoFormReturned.length) stornoFormReturned=[{sap_code:'',article_name:''}];
+      renderStornoForm(r);
+    }).catch(function(){
+      stornoFormReturned=[{sap_code:'',article_name:''}];
+      stornoFormReplacement=[];
+      renderStornoForm(r);
+    });
+  } else {
+    stornoFormReturned=[{sap_code:'',article_name:''}];
+    stornoFormReplacement=[];
+    renderStornoForm(r);
+  }
+}
+
+function renderStornoForm(r){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
 
   var html='<div style="max-width:640px;margin:0 auto;padding:20px 16px 60px;">'+
@@ -1619,20 +1685,20 @@ function openStornoForm(id){
     '<div style="font-size:11px;color:#94a3b8;margin-top:8px;">Сторно не се допуска на бон по-стар от 1 месец спрямо датата на сторно'+(['admin','accounting'].indexOf(currentUser.role)>=0?' (за твоята роля няма ограничение).':'.')+'</div>'+
     '</div>'+
 
-    '<div class="card" style="margin-bottom:14px;"><div class="card-title">Върнат артикул</div>'+
-    '<div class="form-grid">'+
-      '<div><label class="fl">Артикул/и (SAP код, при повече от 1 — разделени с /)</label><input class="fi" id="sf-articles" value="'+escVal(r.articles)+'" oninput="stornoLiveCalc()" onblur="stornoLookupCatalog(\'articles\')"></div>'+
-      '<div><label class="fl">Име</label><input class="fi" id="sf-article_name" value="'+escVal(r.article_name)+'"></div>'+
-      '<div><label class="fl">Сума на върнат артикул/и (EUR)</label><input type="number" step="0.01" class="fi" id="sf-returned_sum" value="'+(r.returned_sum||'')+'" oninput="stornoLiveCalc()" placeholder="0.00"></div>'+
-      '<div><label class="fl">Причина</label><input class="fi" id="sf-reason" value="'+escVal(r.reason)+'"></div>'+
-    '</div></div>'+
+    '<div class="card" style="margin-bottom:14px;"><div class="card-title">Върнати артикули</div>'+
+      '<div id="sf-items-returned"></div>'+
+      '<button type="button" onclick="stornoAddItemRow(\'returned\')" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;margin-bottom:12px;">+ Добави артикул</button>'+
+      '<div class="form-grid">'+
+        '<div><label class="fl">Обща сума на върнати артикули (EUR)</label><input type="number" step="0.01" class="fi" id="sf-returned_sum" value="'+(r.returned_sum||'')+'" oninput="stornoLiveCalc()" placeholder="0.00"></div>'+
+        '<div><label class="fl">Причина</label><input class="fi" id="sf-reason" value="'+escVal(r.reason)+'"></div>'+
+      '</div></div>'+
 
-    '<div class="card" style="margin-bottom:14px;"><div class="card-title">Нов/заменящ артикул</div>'+
-    '<div class="form-grid">'+
-      '<div><label class="fl">Заменен артикул/и (SAP код/ове)</label><input class="fi" id="sf-replacement_articles" value="'+escVal(r.replacement_articles)+'" onblur="stornoLookupCatalog(\'replacement\')"></div>'+
-      '<div><label class="fl">Име на нов артикул <span style="font-weight:400;color:#94a3b8;">(автоматично от SAP каталога)</span></label><input class="fi" id="sf-replacement_article_name" value="'+escVal(r.replacement_article_name)+'"></div>'+
-      '<div><label class="fl">Сума на нов артикул/и (EUR)</label><input type="number" step="0.01" class="fi" id="sf-new_sum" value="'+(r.new_sum||'')+'" oninput="stornoLiveCalc()" placeholder="0.00"></div>'+
-    '</div></div>'+
+    '<div class="card" style="margin-bottom:14px;"><div class="card-title">Нови/заменящи артикули</div>'+
+      '<div id="sf-items-replacement"></div>'+
+      '<button type="button" onclick="stornoAddItemRow(\'replacement\')" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;margin-bottom:12px;">+ Добави заменящ артикул</button>'+
+      '<div class="form-grid">'+
+        '<div><label class="fl">Обща сума на нови артикули (EUR)</label><input type="number" step="0.01" class="fi" id="sf-new_sum" value="'+(r.new_sum||'')+'" oninput="stornoLiveCalc()" placeholder="0.00"></div>'+
+      '</div></div>'+
 
     '<div class="card" id="sf-indicator-box" style="background:#f8fafc;text-align:center;padding:16px;">'+
       '<div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">Индикация</div>'+
@@ -1642,11 +1708,81 @@ function openStornoForm(id){
   '</div>';
 
   wrap.innerHTML=html;
+  renderStornoItemRows('returned');
+  renderStornoItemRows('replacement');
   stornoLiveCalc();
 }
 
+/* ─── Динамични редове за артикули (върнати / заменящи) ──── */
+function stornoItemRowHtml(kind, idx, item){
+  var prefix = kind==='returned' ? 'ret' : 'rep';
+  return '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px;">'+
+    '<div style="flex:0 0 120px;"><label class="fl">SAP код</label><input class="fi" id="sf-'+prefix+'-code-'+idx+'" value="'+escVal(item.sap_code)+'" onblur="stornoLookupItem(\''+kind+'\','+idx+')" placeholder="напр. 12345"></div>'+
+    '<div style="flex:1;"><label class="fl">Име</label><input class="fi" id="sf-'+prefix+'-name-'+idx+'" value="'+escVal(item.article_name)+'"></div>'+
+    '<button type="button" onclick="stornoRemoveItemRow(\''+kind+'\','+idx+')" title="Премахни" style="border:1px solid #dc2626;background:#fef2f2;color:#dc2626;border-radius:6px;padding:8px 10px;font-size:12px;cursor:pointer;height:38px;">✕</button>'+
+  '</div>';
+}
+
+function renderStornoItemRows(kind){
+  var arr = kind==='returned' ? stornoFormReturned : stornoFormReplacement;
+  var el = document.getElementById(kind==='returned'?'sf-items-returned':'sf-items-replacement');
+  if(!el) return;
+  el.innerHTML = arr.length
+    ? arr.map(function(item,idx){return stornoItemRowHtml(kind,idx,item);}).join('')
+    : '<div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">Няма добавени артикули.</div>';
+}
+
+/* Прехвърля текущите стойности от DOM обратно в масивите преди add/remove/submit,
+   за да не се губи вече въведеното при пренареждане на редовете. */
+function stornoSyncItemsFromDOM(){
+  [['returned','ret',stornoFormReturned],['replacement','rep',stornoFormReplacement]].forEach(function(cfg){
+    var prefix=cfg[1], arr=cfg[2];
+    arr.forEach(function(item,idx){
+      var codeEl=document.getElementById('sf-'+prefix+'-code-'+idx);
+      var nameEl=document.getElementById('sf-'+prefix+'-name-'+idx);
+      if(codeEl) item.sap_code=codeEl.value;
+      if(nameEl) item.article_name=nameEl.value;
+    });
+  });
+}
+
+function stornoAddItemRow(kind){
+  stornoSyncItemsFromDOM();
+  var arr = kind==='returned' ? stornoFormReturned : stornoFormReplacement;
+  arr.push({sap_code:'',article_name:''});
+  renderStornoItemRows(kind);
+}
+
+function stornoRemoveItemRow(kind, idx){
+  stornoSyncItemsFromDOM();
+  var arr = kind==='returned' ? stornoFormReturned : stornoFormReplacement;
+  arr.splice(idx,1);
+  renderStornoItemRows(kind);
+  stornoLiveCalc();
+}
+
+/* Автоматично търсене на име по SAP код за конкретен ред — не презаписва ръчно въведено име. */
+function stornoLookupItem(kind, idx){
+  stornoSyncItemsFromDOM();
+  var arr = kind==='returned' ? stornoFormReturned : stornoFormReplacement;
+  var item = arr[idx];
+  if(!item) return;
+  var code=(item.sap_code||'').trim();
+  if(!code || (item.article_name||'').trim()) return;
+  sbGet('product_catalog','sap_code=eq.'+encodeURIComponent(code)+'&select=product_name').then(function(data){
+    if(Array.isArray(data)&&data.length&&data[0].product_name){
+      item.article_name=data[0].product_name;
+      var prefix=kind==='returned'?'ret':'rep';
+      var nameEl=document.getElementById('sf-'+prefix+'-name-'+idx);
+      if(nameEl) nameEl.value=item.article_name;
+    }
+  }).catch(function(){});
+}
+
 /* Търсене на наименование по SAP код/ове в product_catalog — поддържа няколко кода,
-   разделени с "/" (напр. "93357/88304"), и ги обединява в едно показвано име. */
+   разделени с "/" (напр. "93357/88304"), и ги обединява в едно показвано име.
+   ЗАБЕЛЕЖКА: остава непроменена за съвместимост, но вече не се извиква от формата —
+   заменена е от stornoLookupItem() (търсене на ниво отделен ред). */
 function stornoLookupCatalog(kind){
   var srcId  = kind==='replacement' ? 'sf-replacement_articles' : 'sf-articles';
   var destId = kind==='replacement' ? 'sf-replacement_article_name' : 'sf-article_name';
@@ -1668,11 +1804,13 @@ function stornoLookupCatalog(kind){
   }).catch(function(){});
 }
 
+
+
 function stornoLiveCalc(){
   var ret=parseFloat((document.getElementById('sf-returned_sum')||{}).value)||0;
   var nw =parseFloat((document.getElementById('sf-new_sum')||{}).value)||0;
-  var articles=(document.getElementById('sf-articles')||{}).value||'';
-  var ind=stornoIndicator(ret,nw,articles);
+  var codes=stornoFormReturned.map(function(x){return (x.sap_code||'').trim();}).filter(Boolean).join('/');
+  var ind=stornoIndicator(ret,nw,codes);
   var el=document.getElementById('sf-indicator');
   var box=document.getElementById('sf-indicator-box');
   if(el){
@@ -1682,12 +1820,24 @@ function stornoLiveCalc(){
   if(box) box.style.background=ind.bg;
 }
 
+/* Прост UUIDv4 генератор (ES5, без зависимости) — ползва се, за да знаем id-то на
+   новата сторно бележка ПРЕДИ да я запишем, и да можем веднага след това да
+   запишем свързаните редове в kasa_storno_items със същия storno_id. */
+function genUUID(){
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){
+    var r=Math.random()*16|0, v=c==='x'?r:(r&0x3|0x8);
+    return v.toString(16);
+  });
+}
+
 function submitStornoForm(){
-  var articles=(document.getElementById('sf-articles')||{}).value||'';
+  stornoSyncItemsFromDOM();
+  var returnedItems=stornoFormReturned.filter(function(x){return (x.sap_code||'').trim();});
+  var replacementItems=stornoFormReplacement.filter(function(x){return (x.sap_code||'').trim();});
   var returnedSum=parseFloat((document.getElementById('sf-returned_sum')||{}).value)||0;
   var stornoDate=(document.getElementById('sf-storno_date')||{}).value||today();
   var origReceiptDate=(document.getElementById('sf-original_receipt_date')||{}).value||'';
-  if(!articles.trim()){toast('Въведи артикул/и','#dc2626');return;}
+  if(!returnedItems.length){toast('Добави поне 1 върнат артикул','#dc2626');return;}
   if(!returnedSum){toast('Въведи сума на върнатия артикул','#dc2626');return;}
   if(!origReceiptDate){toast('Въведи дата на оригинален касов бон','#dc2626');return;}
   var canBypassAgeLimit=['admin','accounting'].indexOf(currentUser.role)>=0;
@@ -1696,29 +1846,58 @@ function submitStornoForm(){
     return;
   }
 
+  /* Старите текстови полета (articles/article_name/replacement_articles/replacement_article_name)
+     продължават да се пълнят автоматично от новите редове — за обратна съвместимост,
+     докато Excel износът (следваща стъпка) не бъде обновен да чете от kasa_storno_items. */
+  var articlesStr=returnedItems.map(function(x){return x.sap_code.trim();}).join('/');
+  var articleNameStr=returnedItems.map(function(x){return (x.article_name||'').trim();}).filter(Boolean).join(' / ');
+  var replArticlesStr=replacementItems.map(function(x){return x.sap_code.trim();}).join('/');
+  var replNameStr=replacementItems.map(function(x){return (x.article_name||'').trim();}).filter(Boolean).join(' / ');
+
+  var stornoId=kasaStornoEditId||genUUID();
+
   var p={
     store_name:currentUser.store_name,
     storno_date:stornoDate,
     original_receipt_date:origReceiptDate,
-    articles:articles.trim(),
-    article_name:((document.getElementById('sf-article_name')||{}).value||'').trim(),
+    articles:articlesStr,
+    article_name:articleNameStr,
     returned_sum:returnedSum,
     reason:((document.getElementById('sf-reason')||{}).value||'').trim(),
-    replacement_articles:((document.getElementById('sf-replacement_articles')||{}).value||'').trim(),
-    replacement_article_name:((document.getElementById('sf-replacement_article_name')||{}).value||'').trim(),
+    replacement_articles:replArticlesStr,
+    replacement_article_name:replNameStr,
     new_sum:parseFloat((document.getElementById('sf-new_sum')||{}).value)||0,
     updated_by:currentUser.display_name||currentUser.email,
     updated_at:new Date().toISOString()
   };
-  if(!kasaStornoEditId) p.created_by=currentUser.display_name||currentUser.email;
+  if(!kasaStornoEditId){ p.id=stornoId; p.created_by=currentUser.display_name||currentUser.email; }
 
   var req=kasaStornoEditId?sbPatch('kasa_storno','id=eq.'+kasaStornoEditId,p):sbPost('kasa_storno',p);
   req.then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    toast('💾 Сторно бележката е запазена!');
-    if(stornoIndicator(p.returned_sum,p.new_sum,p.articles).flagged) notifyStornoDiscrepancy(p);
-    kasaStornoEditId=null;kasaView='storno';loadStorno();
+    return stornoSaveItems(stornoId, returnedItems, replacementItems).then(function(itemsOk){
+      if(itemsOk===false){toast('⚠️ Бележката е запазена, но артикулите не се записаха коректно','#d97706');}
+      else toast('💾 Сторно бележката е запазена!');
+      if(stornoIndicator(p.returned_sum,p.new_sum,p.articles).flagged) notifyStornoDiscrepancy(p);
+      kasaStornoEditId=null;kasaView='storno';loadStorno();
+    });
   });
+}
+
+/* Записва редовете с артикули за дадена сторно бележка: изтрива старите (ако има, при
+   редакция) и записва наново текущия списък — просто и предвидимо, без diff логика. */
+function stornoSaveItems(stornoId, returnedItems, replacementItems){
+  return sbDelete('kasa_storno_items','storno_id=eq.'+stornoId).then(function(){
+    var rows=[];
+    returnedItems.forEach(function(x,i){
+      rows.push({storno_id:stornoId,kind:'returned',sap_code:x.sap_code.trim(),article_name:(x.article_name||'').trim()||null,line_no:i+1});
+    });
+    replacementItems.forEach(function(x,i){
+      rows.push({storno_id:stornoId,kind:'replacement',sap_code:x.sap_code.trim(),article_name:(x.article_name||'').trim()||null,line_no:i+1});
+    });
+    if(!rows.length) return true;
+    return sbPost('kasa_storno_items',rows).then(function(r){return r.ok;});
+  }).catch(function(){return false;});
 }
 
 /* Push нотификация до admin+accounting при разминаване (нова сума < върната) —
