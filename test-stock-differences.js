@@ -407,6 +407,73 @@ function runRest() {
     ok('2 магазина -> чиповете се показват', (two.doc.getElementById('mod-stock-diff').innerHTML.match(/data-store=/g) || []).length === 3);
   }
 
+  /* ══════════ 8б. Нагледност: прогрес + затихване на решените ══════════ */
+  section('8б. Прогрес по бланката и затихване на решените редове');
+  {
+    /* бланка с 3 реда, 1 вече решен -> "в процес" */
+    const reps = [Object.assign({}, REPORTS[0])];
+    const lns = [
+      Object.assign({}, LINES[0], { id: 'p1', type: null }),
+      Object.assign({}, LINES[0], { id: 'p2', material_name: 'ВТОРИ АРТИКУЛ', type: 'writein' }),
+      Object.assign({}, LINES[0], { id: 'p3', material_name: 'ТРЕТИ АРТИКУЛ', type: null })
+    ];
+    const { w, doc } = boot(ADMIN, { reports: reps, lines: lns });
+    w.renderStockDiff();
+    let h = doc.getElementById('mod-stock-diff').innerHTML;
+    ok('баджът показва "1/3 решени"', h.indexOf('1/3 решени') >= 0);
+    ok('има лента на прогреса', /width:33%/.test(h));
+    ok('решеният ред е затихнал в зелено', h.indexOf('background:#f0fdf4') >= 0);
+    ok('решеният ред показва чип с избора, не 3 бутона', h.indexOf('✓ 📥 Заприх.') >= 0);
+    ok('решеният ред има линк "смени"', h.indexOf('смени') >= 0);
+    /* нерешените пазят трите бутона */
+    const p1btns = allBtns(doc).filter(b => b.dataset && b.dataset.id === 'p1'
+      && (b.getAttribute('onclick') || '').indexOf('resolveDiffLine') >= 0);
+    ok('нерешеният ред пази трите бутона', p1btns.length === 3, 'намерени: ' + p1btns.length);
+    const p2btns = allBtns(doc).filter(b => b.dataset && b.dataset.id === 'p2'
+      && (b.getAttribute('onclick') || '').indexOf('resolveDiffLine') >= 0);
+    ok('решеният ред НЯМА трите бутона', p2btns.length === 0, 'намерени: ' + p2btns.length);
+
+    /* "смени" реално разгъва обратно трите бутона (истински клик) */
+    const smeni = allBtns(doc).find(b => b.dataset && b.dataset.id === 'p2'
+      && (b.getAttribute('onclick') || '').indexOf('sdToggleResolveEdit') >= 0);
+    ok('бутонът "смени" съществува', !!smeni);
+    realClick(w, smeni);
+    const p2after = allBtns(doc).filter(b => b.dataset && b.dataset.id === 'p2'
+      && (b.getAttribute('onclick') || '').indexOf('resolveDiffLine') >= 0);
+    ok('след "смени" трите бутона се появяват', p2after.length === 3, 'намерени: ' + p2after.length);
+    ok('текущият избор е откроен с ✓', p2after.some(b => (b.textContent || '').indexOf('✓') >= 0));
+    /* и се свива обратно */
+    const zatvori = allBtns(doc).find(b => b.dataset && b.dataset.id === 'p2'
+      && (b.getAttribute('onclick') || '').indexOf('sdToggleResolveEdit') >= 0);
+    realClick(w, zatvori);
+    ok('затваря се обратно до чип', allBtns(doc).filter(b => b.dataset && b.dataset.id === 'p2'
+      && (b.getAttribute('onclick') || '').indexOf('resolveDiffLine') >= 0).length === 0);
+
+    /* недокосната бланка */
+    const untouched = boot(ADMIN, { reports: reps, lines: [Object.assign({}, LINES[0], { type: null })] });
+    untouched.w.renderStockDiff();
+    const hu = untouched.doc.getElementById('mod-stock-diff').innerHTML;
+    ok('недокосната бланка го казва изрично', hu.indexOf('0/1 — недокосната') >= 0);
+    ok('недокосната бланка НЯМА лента на прогреса', !/height:4px/.test(hu));
+
+    /* корекцията от магазина има приоритет над зеленото */
+    const corrected = boot(ADMIN, {
+      reports: reps,
+      lines: [Object.assign({}, LINES[0], { type: 'missing', store_corrected_at: '2026-08-17T10:00:00Z' })]
+    });
+    corrected.w.renderStockDiff();
+    const hc = corrected.doc.getElementById('mod-stock-diff').innerHTML;
+    ok('коригиран+решен ред остава жълт, не зелен', hc.indexOf('background:#fffbeb') >= 0);
+    ok('баджът КОРИГИРАНА се пази', hc.indexOf('КОРИГИРАНА') >= 0);
+
+    /* магазинът и складът не виждат нищо ново/чупливо */
+    const st = boot(STORE, { reports: reps, lines: lns });
+    st.w.renderStockDiff();
+    const hst = st.doc.getElementById('mod-stock-diff').innerHTML;
+    ok('магазин: вижда прогреса', hst.indexOf('1/3 решени') >= 0);
+    ok('магазин: няма бутон "смени"', hst.indexOf('sdToggleResolveEdit') < 0);
+  }
+
   /* ══════════ 9. Интеграция със stock-returns.js ══════════ */
   section('9. Интеграция: двата модула заредени заедно');
   {

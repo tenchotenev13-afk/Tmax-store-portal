@@ -7,6 +7,9 @@ var sdDirTab = 'supplier'; /* 'supplier' | 'interstore' - разделя И но
 var sdEditId = null;
 var sdSearch = '';
 var sdStoreFilter = ''; /* точен филтър по магазин (чипове), отделен от свободното търсене */
+/* Кои вече решени редове са с разгънати бутони за смяна на решението.
+   По подразбиране решеният ред показва само спокоен чип с избора. */
+var sdExpandedResolve = {};
 
 /* ── Запазване на позицията при пре-рендиране ──
    renderStockDiff() пре-строява целия модул с innerHTML, което връщаше
@@ -391,17 +394,37 @@ function diffLineResolveButtons(l){
     if(l.type) return '<span style="color:#16a34a;font-weight:600;">✓ '+(TYPE_LABELS[l.type]||l.type)+'</span>';
     return '<span style="color:#94a3b8;">чака преглед</span>';
   }
+  var TYPE_COLORS={writein:'#2563eb',return:'#7c3aed',missing:'#dc2626'};
+  /* Вече решен ред - трите бутона се свиват до един спокоен чип с избора.
+     Така нерешените редове изпъкват от само себе си при преглед на дълга
+     бланка, вместо навсякъде да стоят по три еднакво тежки бутона. */
+  if(l.type && !sdExpandedResolve[l.id]){
+    var c=TYPE_COLORS[l.type]||'#16a34a';
+    return '<div style="display:flex;align-items:center;gap:5px;white-space:nowrap;">'+
+      '<span style="background:'+c+'1a;color:'+c+';border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:700;">✓ '+(TYPE_LABELS[l.type]||l.type)+'</span>'+
+      '<button data-id="'+l.id+'" onclick="sdToggleResolveEdit(this.dataset.id)" title="Смени решението" style="border:none;background:none;color:#94a3b8;font-size:10.5px;cursor:pointer;text-decoration:underline;padding:0;">смени</button>'+
+    '</div>';
+  }
   /* Бутоните остават кликаеми и СЛЕД избор - текущият избор е открояван,
      но може да се коригира директно с 1 клик, ако е избран грешен тип. */
   var mk=function(type,label,color){
     var active=l.type===type;
     return '<button data-id="'+l.id+'" onclick="resolveDiffLine(this.dataset.id,\''+type+'\')" title="'+(active?'Текущ избор — кликни друг бутон, за да коригираш':'Кликни, за да избереш')+'" style="border:none;background:'+(active?color:color+'1a')+';color:'+(active?'#fff':color)+';border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">'+(active?'✓ ':'')+label+'</button>';
   };
-  return '<div style="display:flex;gap:3px;flex-wrap:wrap;">'+
+  return '<div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;">'+
     mk('writein','📥 Заприх.','#2563eb')+
     mk('return','↩️ Връщане','#7c3aed')+
     mk('missing','❓ Липса','#dc2626')+
+    (l.type?'<button data-id="'+l.id+'" onclick="sdToggleResolveEdit(this.dataset.id)" title="Затвори" style="border:none;background:none;color:#94a3b8;font-size:12px;cursor:pointer;padding:0 2px;">✕</button>':'')+
   '</div>';
+}
+/* Разгъва/свива трите бутона за вече решен ред (виж diffLineResolveButtons) */
+function sdToggleResolveEdit(lineId){
+  var line=sdData.find(function(x){return String(x.id)===String(lineId);});
+  sdKeepScroll(line?line.report_id:null);
+  if(sdExpandedResolve[lineId]) delete sdExpandedResolve[lineId];
+  else sdExpandedResolve[lineId]=true;
+  renderStockDiff();
 }
 /* Решение на ЛОГИСТИЧНИЯ СКЛАД (отделно от решението на Цветелина) - само за
    междускладови разлики, при които складът е насрещна страна (counterpart).
@@ -926,11 +949,18 @@ function renderDiffReportsSection(){
   unreviewed.forEach(function(rep){
     var lines = sdData.filter(function(x){return x.report_id===rep.id;});
     var wasCorrected = lines.some(function(l){return !!l.store_corrected_at;});
+    /* Прогрес по бланката - колко реда вече са решени от Цвети. Без това
+       трябваше да се изчете всеки ред, за да се разбере докъде е стигнала. */
+    var doneCount = lines.filter(function(l){return !!l.type;}).length;
+    var totalCount = lines.length;
+    var inProgress = doneCount > 0 && doneCount < totalCount;
+    var pct = totalCount ? Math.round(doneCount*100/totalCount) : 0;
     /* id-то е котвата, към която се връщаме след пре-рендиране (виж sdKeepScroll) */
-    h+='<div id="diff-rep-'+rep.id+'" style="background:#fff;border:1px solid '+(wasCorrected?'#fbbf24':'#e9d5ff')+';border-radius:8px;padding:12px;margin-bottom:8px;'+(wasCorrected?'box-shadow:0 0 0 1px #fde68a;':'')+'">';
+    h+='<div id="diff-rep-'+rep.id+'" style="background:#fff;border:1px solid '+(wasCorrected?'#fbbf24':(inProgress?'#a7f3d0':'#e9d5ff'))+';border-left:4px solid '+(wasCorrected?'#f59e0b':(inProgress?'#10b981':'#c4b5fd'))+';border-radius:8px;padding:12px;margin-bottom:8px;'+(wasCorrected?'box-shadow:0 0 0 1px #fde68a;':'')+'">';
     h+='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">';
     h+='<div><span style="font-weight:700;">🏪 '+esc(rep.store_name||'')+'</span>'+
        (wasCorrected?' <span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">✏️ КОРИГИРАНА</span>':'')+
+       (totalCount?' <span title="Решени редове от тази бланка" style="background:'+(inProgress?'#ecfdf5':'#f5f3ff')+';color:'+(inProgress?'#047857':'#6d28d9')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(doneCount?'⏳ '+doneCount+'/'+totalCount+' решени':'⬜ 0/'+totalCount+' — недокосната')+'</span>':'')+
        '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+(rep.direction==='supplier'?'📦 Доставчик':'🔄 Междускладов')+' — '+esc(rep.counterpart||'')+'</span></div>'+
        '<div style="display:flex;align-items:center;gap:8px;">'+
        '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</span>'+
@@ -938,6 +968,13 @@ function renderDiffReportsSection(){
        (canSendDiffEmail()?'<button data-rid="'+rep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✉️ Изпрати имейл</button>':'')+
        '</div>';
     h+='</div>';
+    /* Лента на прогреса - показва се само докато бланката е започната, но
+       незавършена (при 0 решени няма какво да покаже, при 100% бланката вече
+       е маркирана като прегледана и изчезва от тази секция). */
+    if(inProgress){
+      h+='<div title="'+doneCount+' от '+totalCount+' реда са решени" style="height:4px;background:#e2e8f0;border-radius:4px;overflow:hidden;margin:-2px 0 8px;">'+
+         '<div style="width:'+pct+'%;height:100%;background:#10b981;"></div></div>';
+    }
     if(lines.length){
       var repIsSupplier=rep.direction==='supplier';
       h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
@@ -945,7 +982,10 @@ function renderDiffReportsSection(){
         (repIsSupplier?'<th style="padding:3px 6px;text-align:right;">По стокова</th>':'')+
         '<th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар (магазин)</th><th style="padding:3px 6px;">Коментар (Цвети)</th><th style="padding:3px 6px;">Решение (Цвети)</th><th style="padding:3px 6px;">Отговор на склада</th></tr>';
       lines.forEach(function(l){
-        h+='<tr style="border-top:1px solid #f1f5f9;'+(l.store_corrected_at?'background:#fffbeb;':'')+'">'+
+        /* Решените редове затихват в зелено, за да изпъкват НЕрешените -
+           корекцията от магазина (жълто) има приоритет, тя е по-спешна. */
+        var rowBg = l.store_corrected_at ? 'background:#fffbeb;' : (l.type ? 'background:#f0fdf4;color:#64748b;' : '');
+        h+='<tr style="border-top:1px solid #f1f5f9;'+rowBg+'">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
           '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+'</td>'+
           '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
