@@ -1436,6 +1436,19 @@ function stornoIndicator(returnedSum, newSum, articlesStr) {
   return          { flagged: false, label: '✅ РАВНО',      color: '#16a34a', bg: '#f0fdf4', diff: diff };
 }
 
+/* Проверка дали датата на сторно е повече от 1 календарен месец след датата на
+   оригиналния бон. Датите се подават като 'YYYY-MM-DD' стрингове от <input type=date>
+   и се разбиват ръчно на компоненти — не се ползва new Date(isoString)/.toISOString(),
+   за да няма UTC отместване спрямо българската часова зона (виж проектните бележки). */
+function stornoExceedsOneMonth(origStr, stornoStr){
+  if(!origStr || !stornoStr) return false;
+  var o=origStr.split('-').map(Number), s=stornoStr.split('-').map(Number);
+  if(o.length!==3||s.length!==3) return false;
+  var stornoDate=new Date(s[0],s[1]-1,s[2]);
+  var limitDate =new Date(o[0],o[1],o[2]); /* оригинална дата + 1 месец, JS сам нормализира преливането */
+  return stornoDate.getTime() > limitDate.getTime();
+}
+
 /* Директен скок към Каса > Сторно бележки — ползва се от банера при вход,
    когато сторно бележка е върната за коментар на самия магазин. */
 function goToStornoTab(){
@@ -1601,8 +1614,10 @@ function openStornoForm(id){
     '<div class="card" style="margin-bottom:14px;"><div class="card-title">Дати</div>'+
     '<div class="form-grid">'+
       '<div><label class="fl">Дата на сторно</label><input type="date" class="fi" id="sf-storno_date" value="'+(r.storno_date||today())+'"></div>'+
-      '<div><label class="fl">Дата на оригинален касов бон</label><input type="date" class="fi" id="sf-original_receipt_date" value="'+(r.original_receipt_date||'')+'"></div>'+
-    '</div></div>'+
+      '<div><label class="fl">Дата на оригинален касов бон *</label><input type="date" class="fi" id="sf-original_receipt_date" value="'+(r.original_receipt_date||'')+'"></div>'+
+    '</div>'+
+    '<div style="font-size:11px;color:#94a3b8;margin-top:8px;">Сторно не се допуска на бон по-стар от 1 месец спрямо датата на сторно'+(['admin','accounting'].indexOf(currentUser.role)>=0?' (за твоята роля няма ограничение).':'.')+'</div>'+
+    '</div>'+
 
     '<div class="card" style="margin-bottom:14px;"><div class="card-title">Върнат артикул</div>'+
     '<div class="form-grid">'+
@@ -1670,13 +1685,21 @@ function stornoLiveCalc(){
 function submitStornoForm(){
   var articles=(document.getElementById('sf-articles')||{}).value||'';
   var returnedSum=parseFloat((document.getElementById('sf-returned_sum')||{}).value)||0;
+  var stornoDate=(document.getElementById('sf-storno_date')||{}).value||today();
+  var origReceiptDate=(document.getElementById('sf-original_receipt_date')||{}).value||'';
   if(!articles.trim()){toast('Въведи артикул/и','#dc2626');return;}
   if(!returnedSum){toast('Въведи сума на върнатия артикул','#dc2626');return;}
+  if(!origReceiptDate){toast('Въведи дата на оригинален касов бон','#dc2626');return;}
+  var canBypassAgeLimit=['admin','accounting'].indexOf(currentUser.role)>=0;
+  if(!canBypassAgeLimit && stornoExceedsOneMonth(origReceiptDate,stornoDate)){
+    toast('⛔ Бонът е от '+fmtDate(origReceiptDate)+' — сторно не се допуска на бон по-стар от 1 месец. За изключение се свържете с Цветелина/админ.','#dc2626');
+    return;
+  }
 
   var p={
     store_name:currentUser.store_name,
-    storno_date:(document.getElementById('sf-storno_date')||{}).value||today(),
-    original_receipt_date:(document.getElementById('sf-original_receipt_date')||{}).value||null,
+    storno_date:stornoDate,
+    original_receipt_date:origReceiptDate,
     articles:articles.trim(),
     article_name:((document.getElementById('sf-article_name')||{}).value||'').trim(),
     returned_sum:returnedSum,
