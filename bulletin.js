@@ -2272,7 +2272,7 @@ function printSection(what){
       s+='<div class="tasks-hdr">🔁 Постоянни задачи</div>';
       rdt.forEach(function(t){
         var isMultiRecPrint = recurringIsMultiDay(t);
-        var singleRecDatePrint = (recurringIsDateScoped(t) && !isMultiRecPrint) ? toLocalISO(days[recTaskWeekdays(t)[0]]) : null;
+        var singleRecDatePrint = isMultiRecPrint ? null : (recTaskWeekdays(t).length ? toLocalISO(days[recTaskWeekdays(t)[0]]) : toLocalISO(new Date()));
         var rComp=(!isMultiRecPrint&&printStore)?recurringComps.find(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===printStore&&(cc.completion_date||null)===singleRecDatePrint;}):null;
         var rDone=!!rComp;
         s+='<div class="task-row">';
@@ -2765,7 +2765,7 @@ function renderRecurringTasks(dk) {
     h += '<div style="padding:8px 14px;">';
     dTasks.forEach(function(t,recIdxInDept) {
       var isMultiRec = recurringIsMultiDay(t);
-      var singleRecDate = (recurringIsDateScoped(t) && !isMultiRec) ? weekdayIdxToDate(recTaskWeekdays(t)[0]) : null;
+      var singleRecDate = isMultiRec ? null : (recTaskWeekdays(t).length ? weekdayIdxToDate(recTaskWeekdays(t)[0]) : toLocalISO(new Date()));
       var compObj = store && !isMultiRec && recurringComps.find(function(c){return c.recurring_task_id===t.id && c.store_name===store && (c.completion_date||null)===singleRecDate;});
       var done = !!compObj && compObj.status==='done';
       var postponed = !!compObj && compObj.status==='postponed';
@@ -2979,10 +2979,13 @@ function recurringDueLabel(t){
 }
 /* Постоянна задача с НЯКОЛКО избрани дни (due_weekdays) - изпълнението е
    истински обвързано с конкретния ден/седмица (completion_date), огледално
-   на многодневните обикновени задачи - за разлика от старите постоянни
-   задачи (1 ден или "всеки ден"), чието изпълнение остава завинаги. */
+   на многодневните обикновени задачи.
+   ВСЯКА постоянна задача е date-scoped, вкл. единично-дневните (старо поле
+   due_weekday) и "всеки ден" (без due_weekday/due_weekdays) - иначе
+   изпълнението се записва с completion_date=null и задачата остава
+   "изпълнена" завинаги, вместо да се нулира на всяко следващо явяване. */
 function recurringIsMultiDay(t){ return recTaskWeekdays(t).length>1; }
-function recurringIsDateScoped(t){ return recTaskWeekdays(t).length>0; }
+function recurringIsDateScoped(t){ return true; }
 function recurringIsDueOnWeekday(t,weekdayIdx){
   if(t.due_weekdays && t.due_weekdays.length) return t.due_weekdays.indexOf(weekdayIdx)>=0;
   if(t.due_weekday===null||t.due_weekday===undefined){
