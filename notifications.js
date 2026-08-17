@@ -81,8 +81,9 @@ function showLoginBanner(){
    задачи, които този магазин още не е отбелязал (нито изпълнени, нито
    отложени). Самостоятелна заявка - не разчита bulTasks/bulComps/
    recurringTasks да са заредени (Бюлетин табът може изобщо да не е
-   отварян тази сесия). Постоянните задачи нямат target_stores - важат
-   винаги за всички магазини. */
+   отварян тази сесия). И двата вида задачи се филтрират по target_stores -
+   постоянните също го имат (submitRecurring() го записва), макар че по-стар
+   коментар тук твърдеше обратното. */
 
 /* Датите, за които се брои отмятането на постоянна задача - огледално на
    renderRecurringTasks() в bulletin.js (след 17fdc7d ВСЯКА постоянна задача
@@ -113,6 +114,14 @@ function notifRecurringDueDates(t){
     return toLocalISO(new Date(mon.getFullYear(),mon.getMonth(),mon.getDate()+idx));
   });
 }
+/* Важи ли задачата за този магазин - същото условие като bulletin.js
+   (recurringForDay ~708-711) и за двата вида задачи тук. ПРАЗНО/липсващо
+   target_stores = "за всички магазини", НЕ "за никой". Банерът се показва
+   само на store роли (вика се под !isGlobal()), затова офис клаузата
+   (isGlobal()||...) от bulletin.js не е нужна. */
+function notifTaskForStore(t,store){
+  return !t.target_stores || !t.target_stores.length || t.target_stores.indexOf(store)>=0;
+}
 /* Чакаща е постоянна задача, на която поне един от дните ѝ за тази седмица
    няма отбелязване. Запис БЕЗ completion_date важи винаги и я маха от
    чакащите - такива са старите отметки отпреди date-scoping И всяко
@@ -135,15 +144,15 @@ function checkNewBulletinTasksBanner(){
     if(!bul)return [];
     return sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id+'&created_at=gte.'+cutoffISO).then(function(tasksRaw){
       var tasks=Array.isArray(tasksRaw)?tasksRaw:[];
-      return tasks.filter(function(t){
-        return !t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0;
-      }).map(function(t){return {id:t.id,title:t.title,kind:'regular'};});
+      return tasks.filter(function(t){return notifTaskForStore(t,store);})
+                  .map(function(t){return {id:t.id,title:t.title,kind:'regular'};});
     });
   }).catch(function(){return [];});
 
   var recTasksPromise=sbGet('recurring_tasks','active=eq.true&created_at=gte.'+cutoffISO).then(function(rtRaw){
     var rt=Array.isArray(rtRaw)?rtRaw:[];
-    return rt.map(function(t){return {id:t.id,title:t.title,kind:'recurring',dueDates:notifRecurringDueDates(t)};});
+    return rt.filter(function(t){return notifTaskForStore(t,store);})
+             .map(function(t){return {id:t.id,title:t.title,kind:'recurring',dueDates:notifRecurringDueDates(t)};});
   }).catch(function(){return [];});
 
   Promise.all([bulTasksPromise,recTasksPromise]).then(function(results){
