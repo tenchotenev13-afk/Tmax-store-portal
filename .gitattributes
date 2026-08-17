@@ -1,0 +1,24 @@
+# Един и същ край на реда в целия репозиторий, независимо от машината.
+# Без това файл, записан от Windows с CRLF, влиза в git като цял пренаписан
+# файл (~880 реда за history.js в комит 3e349da) и затрупва git blame и code review.
+# С eol=lf няма значение как файлът стои на диска — git го привежда сам при add/checkout.
+
+* text=auto eol=lf
+
+*.js     text eol=lf
+*.html   text eol=lf
+*.css    text eol=lf
+*.json   text eol=lf
+*.md     text eol=lf
+*.sql    text eol=lf
+*.ps1    text eol=lf
+
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.gif    binary
+*.webp   binary
+*.ico    binary
+*.pdf    binary
+*.docx   binary
+*.xlsx   binary

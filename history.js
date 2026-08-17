@@ -881,4 +881,4 @@ function previewKasaDoc(path){
       toast('Грешка: '+(d.error||JSON.stringify(d)),'#dc2626');
     }
   }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
-}
+}
