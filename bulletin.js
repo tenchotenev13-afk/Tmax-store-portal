@@ -2610,15 +2610,28 @@ function submitPostpone(taskId, kind){
     renderBulletin();
   });
 }
+/* Маха САМО реда за отлагане. Досега филтърът беше само task+store, тоест
+   изтриваше ВСИЧКИ completion-и за задачата в този магазин - включително
+   легитимни "done" отмятания за други дни. При многодневна задача с отметнат
+   вторник отмяната на отлагане отнасяше и вторника.
+   submitPostpone() записва status='postponed', затова разграничаването е по
+   статус. Той НЕ записва completion_date (за разлика от toggleTask()/
+   toggleRecurringTask()), значи всички редове за отлагане са с null дата и
+   статусът е достатъчен - ако отлагането някога започне да носи дата,
+   филтърът тук трябва да включи и нея. */
 function cancelPostpone(taskId, kind){
   kind = kind || 'regular';
   var store = currentUser && currentUser.store_name;
   if (!store) return;
   var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
-  sbDelete('task_completions', idField+'=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)).then(function(){
+  sbDelete('task_completions', idField+'=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+'&status=eq.postponed').then(function(){
     toast('↩ Отлагането е отменено');
-    if (kind==='recurring') recurringComps = recurringComps.filter(function(c){return !(c.recurring_task_id===taskId && c.store_name===store);});
-    else bulComps = bulComps.filter(function(c){return !(c.task_id===taskId && c.store_name===store);});
+    /* String()===String() - taskId идва като низ от this.dataset.taskId, а
+       PostgREST връща id-тата като числа; със === локалният масив никога не
+       се чистеше и UI-ът показваше "Отложена" до презареждане, макар редът
+       вече да е изтрит. Същият идиом като при recurringTasks.find() по-долу. */
+    if (kind==='recurring') recurringComps = recurringComps.filter(function(c){return !(String(c.recurring_task_id)===String(taskId) && c.store_name===store && c.status==='postponed');});
+    else bulComps = bulComps.filter(function(c){return !(String(c.task_id)===String(taskId) && c.store_name===store && c.status==='postponed');});
     renderBulletin();
   });
 }
