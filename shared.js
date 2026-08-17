@@ -65,6 +65,21 @@ function today(){return new Date().toISOString().slice(0,10);}
 function fmtDate(d){if(!d||d==='—')return'—';var p=String(d).split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:d;}
 function v(id){var el=document.getElementById(id);return el?(el.value||'').trim():'';}
 function closeModal(id){var el=document.getElementById(id);if(el)el.classList.remove('open');}
+/* UUID v4 — нужен е, за да свържем клиентска заявка и транспортна заявка ЕДНА С ДРУГА
+   в момента на записа. sbPost() не връща създадения ред (Prefer: return=minimal),
+   затова генерираме id-то от клиента и го подаваме и на двата INSERT-а. */
+function uuid4(){
+  if(window.crypto&&crypto.randomUUID)return crypto.randomUUID();
+  if(window.crypto&&crypto.getRandomValues){
+    var b=new Uint8Array(16);crypto.getRandomValues(b);
+    b[6]=(b[6]&0x0f)|0x40;b[8]=(b[8]&0x3f)|0x80;
+    var h=[];for(var i=0;i<16;i++)h.push(('0'+b[i].toString(16)).slice(-2));
+    return h.slice(0,4).join('')+'-'+h.slice(4,6).join('')+'-'+h.slice(6,8).join('')+'-'+h.slice(8,10).join('')+'-'+h.slice(10,16).join('');
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){
+    var r=Math.random()*16|0,vv=c==='x'?r:(r&0x3|0x8);return vv.toString(16);
+  });
+}
 function toast(msg,col){var t=document.getElementById('toast');t.textContent=msg;t.style.background=col||'#16a34a';t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2500);}
 
 var TODAY=new Date();TODAY.setHours(0,0,0,0);
@@ -87,6 +102,9 @@ function statusBadge(s){
     approved:{l:'✓ Одобрена',bg:'#dbeafe',c:'#1e3a5f'},
     sent:{l:'📤 Изпратена',bg:'#ede9fe',c:'#5b21b6'},
     arrived:{l:'📦 Пристигнала в магазина',bg:'#e0f2fe',c:'#0369a1'},
+    /* Транспорт, създаден от клиентска заявка, чиято стока още не е пристигнала —
+       НЕ трябва да се брои за просрочен, защото срокът се води по клиентската заявка. */
+    awaiting:{l:'⏳ Чака стока',bg:'#fef9c3',c:'#854d0e'},
     done:{l:'✅ Изпълнена',bg:'#dcfce7',c:'#14532d'},refused:{l:'✕ Отказана',bg:'#fee2e2',c:'#991b1b'},
     postponed:{l:'⏱ Отложена',bg:'#f3e8ff',c:'#4c1d95'}};
   var x=m[s]||m.pending;
@@ -299,8 +317,10 @@ function openStatus(id,table){
 }
 function setStatus(status){
   if(!statusTargetId)return;
-  sbPatch(statusTargetTable,'id=eq.'+statusTargetId,{status:status}).then(function(res){
+  var id=statusTargetId,table=statusTargetTable;
+  sbPatch(table,'id=eq.'+id,{status:status}).then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
+    if(table==='client_orders'&&typeof syncLinkedTransport==='function')syncLinkedTransport(id,status);
     closeModal('status-modal');toast('✓ Статусът е обновен');loadAll();
   });
 }
@@ -313,7 +333,10 @@ function revertStatus(id,table){
     var prevMap={done:'arrived',arrived:'sent',sent:'pending'};
     target=prevMap[rec.status]||'pending';
   }
-  sbPatch(table,'id=eq.'+id,{status:target}).then(function(){toast('↩ Върнато');loadAll();});
+  sbPatch(table,'id=eq.'+id,{status:target}).then(function(){
+    if(table==='client_orders'&&typeof syncLinkedTransport==='function')syncLinkedTransport(id,target);
+    toast('↩ Върнато');loadAll();
+  });
 }
 
 /* КОРЕКЦИЯ на съществуваща заявка (клиентска или транспортна).

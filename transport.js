@@ -47,7 +47,13 @@ function loadTransport(){
   var q='order=created_at.desc'+storeQ();
   sbGet('transport_orders',q).then(function(data){
     transportOrders=Array.isArray(data)?data:[];
-    transportOrders.forEach(function(o){o._status=calcStatus(o.delivery,o.status);});
+    transportOrders.forEach(function(o){
+      var st=calcStatus(o.delivery,o.status);
+      /* Транспорт, създаден от клиентска заявка, чиято стока още не е пристигнала:
+         срокът се води по клиентската заявка (доставка от склад/друг магазин = по-дълъг
+         срок), затова НЕ го показваме като просрочен и не влиза в броячите/банерите. */
+      o._status=(o.awaiting_stock&&['done','refused','postponed'].indexOf(o.status)<0)?'awaiting':st;
+    });
     trBuildMonthOptions();
     /* Зареди от stores таблица за евентуални допълнителни магазини */
     sbGet('stores','select=name,addr,phone').then(function(sd){
@@ -73,6 +79,9 @@ function renderTransport(){
       if((o.phone||'').indexOf(search)>=0)return true;
       if((o.bon||'').toLowerCase().indexOf(search)>=0)return true;
       if((o.address||'').toLowerCase().indexOf(search)>=0)return true;
+      /* Номерът на свързаната клиентска заявка също е търсим — така транспортът
+         се намира по номера на клиентската заявка и обратното. */
+      if((o.client_order_num||'').toLowerCase().indexOf(search)>=0)return true;
       /* Проверяваме ВСИЧКИ артикули на заявката (не само първия) — resolveItems()
          връща o.items ако има, иначе fallback към старите единични полета */
       var items=resolveItems(o);
@@ -86,13 +95,16 @@ function renderTransport(){
   var body=document.getElementById('tr-body');if(!body)return;
   if(!list.length){body.innerHTML='<tr><td colspan="11" style="text-align:center;padding:30px;color:#94a3b8;">Няма транспортни заявки.</td></tr>';return;}
   body.innerHTML=list.map(function(o){
-    var bdrColor={overdue:'#dc2626',today:'#2563eb',tomorrow:'#d97706'}[o._status]||'transparent';
+    var bdrColor={overdue:'#dc2626',today:'#2563eb',tomorrow:'#d97706',awaiting:'#eab308'}[o._status]||'transparent';
     var anim='';
-    if(o._status==='overdue'||o._status==='today') anim='animation:rowPulse 1.8s infinite;';
+    /* "Чака стока" никога не пулсира — не е просрочен, чака клиентската заявка. */
+    if(o._status==='awaiting') anim='';
+    else if(o._status==='overdue'||o._status==='today') anim='animation:rowPulse 1.8s infinite;';
     else if(o._status==='tomorrow') anim='animation:rowPulseSoft 2.5s infinite;';
-    return '<tr style="border-left:3px solid '+bdrColor+';'+anim+'">'+
+    var hl=(window._trHighlightId&&String(window._trHighlightId)===String(o.id))?'background:#fef9c3;':'';
+    return '<tr id="tr-row-'+esc(o.id)+'" style="border-left:3px solid '+bdrColor+';'+anim+hl+'">'+
       '<td style="font-size:11px;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
-      '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small></td>'+
+      '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small>'+coLinkBadge(o)+'</td>'+
       '<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>'+
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
       '<td style="font-size:12px;">'+esc(o.address||'')+'</td>'+
@@ -103,6 +115,29 @@ function renderTransport(){
       '<td>'+esc(o.store_name||'')+'</td>'+
       '<td>'+actionBtns(o.id,'transport_orders',o._status,o.store_name)+'</td></tr>';
   }).join('');
+  /* Подсветка + скрол към реда, отворен от бутона 🚚 в Клиентски заявки */
+  if(window._trHighlightId){
+    var row=document.getElementById('tr-row-'+window._trHighlightId);
+    if(row&&row.scrollIntoView)row.scrollIntoView({block:'center'});
+    window._trHighlightId=null;
+  }
+}
+
+/* Бадж "по клиентска заявка №XXXX" — прави връзката видима и в двата таба,
+   за да не се пропусне транспорт, който виси към клиентска заявка. */
+function coLinkBadge(o){
+  if(!o.client_order_id&&!o.client_order_num)return '';
+  var num=o.client_order_num?'№'+esc(o.client_order_num):'';
+  return '<div style="margin-top:3px;">'+
+    '<span onclick="gotoLinkedClientOrder(\''+esc(o.client_order_id||'')+'\')" title="Отвори свързаната клиентска заявка" '+
+    'style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;background:#eff6ff;color:#1d4ed8;cursor:pointer;">📋 Клиентска заявка '+num+'</span></div>';
+}
+function gotoLinkedClientOrder(coId){
+  window._coHighlightId=coId||null;
+  /* Нулираме филтъра, за да не се окаже, че редът е скрит и изглежда сякаш нищо не става */
+  var b=document.querySelector('#co-filters .filter-btn');
+  if(b&&typeof filterOrders==='function')filterOrders('all',b);
+  showModule('client');
 }
 
 function filterTransport(f,btn){
@@ -297,6 +332,7 @@ function renderTransportPrint(o){
       '</div>'+
       '<table class="p-table">'+
         '<tr><td>Изискване за транспорт от дата:</td><td>'+esc(fmtDate(o.date||today()))+'</td></tr>'+
+        (o.client_order_num?'<tr><td>По клиентска заявка №:</td><td>'+esc(o.client_order_num)+'</td></tr>':'')+
         '<tr><td>Касов бон:</td><td>'+esc(o.bon||'—')+'</td></tr>'+
         '<tr><td>Клиент:</td><td>'+esc(o.customer_name||'')+'</td></tr>'+
         '<tr><td>Адрес:</td><td>'+esc(o.address||'')+'</td></tr>'+

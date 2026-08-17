@@ -202,11 +202,13 @@ function renderHistoryResults(){
         return '<tr>'+
           '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
           '<td>'+esc(o.store_name||'')+'</td>'+
-          '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">'+esc(o.phone||'')+'</small></td>'+
+          '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">'+esc(o.phone||'')+'</small>'+
+            (o.client_order_num?'<br><small style="color:#1d4ed8;">📋 Клиентска заявка №'+esc(o.client_order_num)+'</small>':'')+'</td>'+
           '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+(o.sap?'SAP: '+esc(o.sap):'')+'</small></td>'+
           '<td style="font-size:11px;">'+esc(o.address||'')+'</td>'+
           '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
-          '<td>'+statusBadge(calcStatus(o.delivery,o.status))+'</td>'+
+          /* Същото правило като в таб Транспорт — чакащ стока транспорт не е просрочен */
+          '<td>'+statusBadge((o.awaiting_stock&&['done','refused','postponed'].indexOf(o.status)<0)?'awaiting':calcStatus(o.delivery,o.status))+'</td>'+
         '</tr>';
       }).join('')+
       '</tbody></table></div></div>';
@@ -879,4 +881,4 @@ function previewKasaDoc(path){
       toast('Грешка: '+(d.error||JSON.stringify(d)),'#dc2626');
     }
   }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
-}
+}

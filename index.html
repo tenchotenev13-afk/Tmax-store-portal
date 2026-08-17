@@ -269,6 +269,7 @@ OneSignalDeferred.push(async function(OneSignal) {
         <button class="filter-btn" onclick="filterTransport('today',this)">🔵 Днес</button>
         <button class="filter-btn" onclick="filterTransport('tomorrow',this)">🟡 Утре</button>
         <button class="filter-btn" onclick="filterTransport('pending',this)">Изчаква</button>
+        <button class="filter-btn" onclick="filterTransport('awaiting',this)">⏳ Чака стока</button>
         <button class="filter-btn" onclick="filterTransport('postponed',this)">Отложена</button>
         <button class="filter-btn" onclick="filterTransport('done',this)">Изпълнена</button>
         <button class="filter-btn" onclick="filterTransport('refused',this)">Отказана</button>
@@ -292,6 +293,7 @@ OneSignalDeferred.push(async function(OneSignal) {
   <div id="mod-client" class="page" style="display:none;">
     <div class="pg-title">📋 Клиентски заявки</div>
     <div class="pg-sub">Поръчки за стока от клиенти с дата на доставка.</div>
+    <div id="co-sap-banner"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
       <div id="co-filters" class="filter-bar" style="margin:0;">
         <button class="filter-btn active" onclick="filterOrders('all',this)">Всички</button>
@@ -451,6 +453,21 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div><label class="fl">★ Дата на доставка</label><input type="date" class="fi" id="c-delivery"></div>
     <div><label class="fl">Агент / Изготвил</label><input class="fi" id="c-agent"></div>
     <div class="full"><label class="fl">Забележка</label><input class="fi" id="c-note" placeholder="Допълнителна информация..."></div>
+    <!-- ПЛАТЕН ТРАНСПОРТ — при отметка се създава и свързана заявка в таб Транспорт -->
+    <div class="full" style="border:1px solid #e2e8f0;border-radius:9px;padding:10px 12px;background:#f8fafc;">
+      <label style="display:flex;align-items:center;gap:9px;cursor:pointer;font-size:13.5px;font-weight:600;color:#334155;">
+        <input type="checkbox" id="c-paid-transport" onchange="toggleClientPT()" style="width:17px;height:17px;cursor:pointer;">
+        🚚 Платен транспорт (създай и транспортна заявка)
+      </label>
+      <div id="c-pt-wrap" style="display:none;margin-top:10px;">
+        <label class="fl">Адрес за доставка *</label>
+        <input class="fi" id="c-pt-addr" placeholder="гр. Варна, ул. Примерна 1, ет. 3, ап. 5" style="margin-bottom:8px;">
+        <label class="fl">Час за доставка</label>
+        <select class="fi" id="c-pt-hour"><option>08:00</option><option>09:00</option><option selected>10:00</option><option>11:00</option><option>12:00</option><option>13:00</option><option>14:00</option><option>15:00</option><option>16:00</option><option>17:00</option><option>18:00</option><option>19:00</option></select>
+        <div style="font-size:11.5px;color:#854d0e;background:#fef9c3;border-radius:6px;padding:7px 10px;margin-top:9px;">
+          ⏳ Транспортът се създава веднага и се вижда в таб <b>Транспорт</b> със статус „Чака стока" — <b>не се брои за просрочен</b>, докато не маркираш заявката като „📦 Пристигнала". Датата за доставка се взима от полето ★ по-горе.</div>
+      </div>
+    </div>
   </div>
   <div class="modal-actions">
     <button class="btn btn-ghost" onclick="closeModal('client-modal')">Откажи</button>

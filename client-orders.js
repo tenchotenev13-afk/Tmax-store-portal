@@ -40,8 +40,220 @@ function coBuildMonthOptions(){
   if (sorted.indexOf(cur)>=0) sel.value=cur;
 }
 
+/* ═══════════════════════════════════════════════════════════
+   ПЛАТЕН ТРАНСПОРТ — клиентска заявка ⇄ транспортна заявка
+   Връзката е двупосочна и се пази в БАЗАТА, а не се извежда по име/телефон:
+     client_orders.paid_transport (bool) + client_orders.transport_id (uuid)
+     transport_orders.client_order_id (uuid) + client_order_num (текст, за търсене)
+     transport_orders.awaiting_stock (bool) — докато стоката не е пристигнала
+   Така транспортът не може да се "загуби" от свързаната клиентска заявка.
+═══════════════════════════════════════════════════════════ */
+
+/* Създава транспортна заявка, вързана за клиентска заявка.
+   ВАЖНО: грешките НЕ се поглъщат тихо — ако POST-ът се провали, transport_id
+   остава празен и на реда излиза червено предупреждение, за да не се стигне до
+   ситуация "клиентът е платил транспорт, а заявка няма". */
+function createLinkedTransport(co,addr,hour,deliveryDate,cb){
+  if(!co||!co.id){toast('Липсва клиентската заявка','#dc2626');if(cb)cb(false);return;}
+  if(!addr){toast('Адресът за доставка е задължителен','#dc2626');if(cb)cb(false);return;}
+  var trId=uuid4();
+  var items=resolveItems(co);
+  var first=items[0]||{};
+  var deliv=deliveryDate||co.delivery||null;
+  var arrived=['arrived','done'].indexOf(co.status)>=0;
+  var noteParts=['Платен транспорт по клиентска заявка №'+(co.in_num||'—')];
+  if(co.fulfiller&&co.fulfiller!==co.store_name)noteParts.push('изпълнява: '+co.fulfiller);
+  if(co.note)noteParts.push(co.note);
+  sbPost('transport_orders',{
+    id:trId,
+    store_name:co.store_name,
+    date:co.date||today(),
+    hour:hour||co.hour||'10:00',
+    bon:co.bon||null,
+    customer_name:co.customer_name,
+    phone:co.phone,
+    address:addr,
+    product:first.product,color:first.color,sap:first.sap,qty:first.qty,unit:first.unit,
+    items:items,
+    agent:co.agent||(currentUser&&currentUser.display_name)||null,
+    notes:noteParts.join(' — '),
+    delivery:deliv,
+    status:'pending',
+    client_order_id:co.id,
+    client_order_num:co.in_num||null,
+    awaiting_stock:!arrived
+  }).then(function(res){
+    if(!res.ok){
+      console.error('createLinkedTransport: транспортът НЕ е създаден:',res.error);
+      toast('⚠️ Транспортът НЕ е създаден! Натисни 🚚 на реда, за да опиташ пак.','#dc2626');
+      if(cb)cb(false);
+      return;
+    }
+    sbPatch('client_orders','id=eq.'+co.id,{paid_transport:true,transport_id:trId}).then(function(r2){
+      if(!r2.ok){
+        console.error('createLinkedTransport: транспортът е създаден, но връзката в клиентската заявка не се записа');
+        toast('⚠️ Транспортът е създаден, но връзката не се записа — провери в таб Транспорт','#d97706');
+      }
+      if(cb)cb(!!r2.ok);
+    });
+  });
+}
+
+/* Синхронизира свързания транспорт при смяна на статуса на клиентската заявка.
+   Извиква се от setClientStatus() тук, както и от setStatus()/revertStatus() в shared.js. */
+function syncLinkedTransport(id,status){
+  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+  if(!o||!o.paid_transport||!o.transport_id)return;
+  var patch=null;
+  if(status==='arrived'||status==='done')      patch={awaiting_stock:false};
+  else if(status==='refused')                  patch={status:'refused',awaiting_stock:false};
+  else if(status==='pending'||status==='sent') patch={awaiting_stock:true};
+  if(!patch)return; /* postponed — транспортът остава както е */
+  sbPatch('transport_orders','id=eq.'+o.transport_id,patch).then(function(r){
+    if(!r.ok){
+      console.error('syncLinkedTransport: неуспешно обновяване на транспорт',o.transport_id);
+      toast('⚠️ Свързаният транспорт не се обнови — провери в таб Транспорт','#d97706');
+    }
+  });
+}
+
+/* Отваря таб Транспорт и подсветва свързания ред */
+function gotoLinkedTransport(trId){
+  window._trHighlightId=trId;
+  /* Нулираме филтъра — иначе редът може да е скрит и да изглежда, че бутонът не работи */
+  var b=document.querySelector('#tr-filters .filter-btn');
+  if(b&&typeof filterTransport==='function')filterTransport('all',b);
+  showModule('transport');
+}
+
+/* ── Модал "Платен транспорт" за вече съществуваща клиентска заявка ── */
+function openPaidTransportModal(id){
+  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+  if(!o){toast('Заявката не е намерена','#dc2626');return;}
+  if(o.transport_id){gotoLinkedTransport(o.transport_id);return;}
+  var hours=['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00','19:00'];
+  var hourOpts=hours.map(function(h){return '<option'+(h===(o.hour||'10:00')?' selected':'')+'>'+h+'</option>';}).join('');
+  var html='<div class="bov" id="pt-ov"><div class="bmod" style="width:460px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">'+
+      '<div style="font-size:15px;font-weight:600;">🚚 Платен транспорт</div>'+
+      '<button onclick="closePaidTransportModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">Клиентска заявка №'+esc(o.in_num||'—')+' · '+esc(o.customer_name||'')+' · '+esc(o.phone||'')+'</div>'+
+    '<label class="fl">Адрес за доставка *</label>'+
+    '<input class="fi" id="pt-addr" placeholder="гр. Варна, ул. Примерна 1, ет. 3, ап. 5" style="margin-bottom:10px;">'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px;">'+
+      '<div><label class="fl">★ Дата на доставка</label><input type="date" class="fi" id="pt-delivery" value="'+escVal(o.delivery)+'"></div>'+
+      '<div><label class="fl">Час</label><select class="fi" id="pt-hour">'+hourOpts+'</select></div>'+
+    '</div>'+
+    '<div style="font-size:11.5px;color:#854d0e;background:#fef9c3;border-radius:6px;padding:7px 10px;margin-bottom:14px;">'+
+      '⏳ Транспортът излиза веднага в таб <b>Транспорт</b> със статус „Чака стока" и <b>не се брои за просрочен</b>, докато не маркираш заявката като „📦 Пристигнала".</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
+      '<button onclick="closePaidTransportModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+      '<button id="pt-submit" data-id="'+esc(o.id)+'" onclick="submitPaidTransport(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✓ Създай транспорт</button>'+
+    '</div></div></div>';
+  var ex=document.getElementById('pt-ov');if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('pt-ov').classList.add('open');
+}
+function closePaidTransportModal(){var el=document.getElementById('pt-ov');if(el)el.remove();}
+function submitPaidTransport(id){
+  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+  if(!o){toast('Заявката не е намерена','#dc2626');return;}
+  var addr=v('pt-addr');
+  if(!addr){toast('Адресът за доставка е задължителен','#dc2626');return;}
+  var btn=document.getElementById('pt-submit');
+  if(btn){btn.disabled=true;btn.textContent='Записване...';}
+  createLinkedTransport(o,addr,v('pt-hour'),v('pt-delivery')||null,function(ok){
+    if(!ok){if(btn){btn.disabled=false;btn.textContent='✓ Създай транспорт';}return;}
+    closePaidTransportModal();
+    toast('✓ Транспортната заявка е създадена и свързана');
+    loadClientOrders();
+  });
+}
+
+/* ── Отметка в модала за НОВА клиентска заявка ── */
+function toggleClientPT(){
+  var cb=document.getElementById('c-paid-transport');
+  var wrap=document.getElementById('c-pt-wrap');
+  if(wrap)wrap.style.display=(cb&&cb.checked)?'':'none';
+}
+
+/* ═══ SAP НАПОМНЯНЕ ═══
+   Текстът НЕ се дублира — чете се от Наръчника (handbook.js: HB_SAP/HB_PROC),
+   за да има едно място за поддръжка. */
+function sapClientEntries(){
+  var out=[];
+  try{
+    var pool=(typeof HB_SAP!=='undefined'?HB_SAP:[]).concat(typeof HB_PROC!=='undefined'?HB_PROC:[]);
+    ['kl-poruchki','proc-kl-poruchki'].forEach(function(id){
+      var it=pool.filter(function(x){return x.id===id;})[0];
+      if(it)out.push(it);
+    });
+  }catch(e){console.warn('sapClientEntries:',e);}
+  return out;
+}
+function sapEntryHtml(it){
+  var steps=(it.steps||[]).map(function(s,i){
+    return '<div style="display:flex;gap:8px;padding:4px 0;">'+
+      '<div style="flex:0 0 18px;height:18px;border-radius:50%;background:#1e293b;color:#fff;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;">'+(i+1)+'</div>'+
+      '<div style="font-size:12px;line-height:1.45;"><b>'+esc(s.t||'')+'</b><br><span style="color:#475569;">'+(s.d||'')+'</span></div></div>';
+  }).join('');
+  return '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:8px;">'+
+    '<div style="font-size:12.5px;font-weight:700;margin-bottom:2px;">'+esc(it.code||'')+' — '+esc(it.name||'')+'</div>'+
+    (it.desc?'<div style="font-size:11.5px;color:#64748b;margin-bottom:6px;">'+esc(it.desc)+'</div>':'')+
+    steps+
+    (it.warn?'<div style="margin-top:7px;font-size:11.5px;color:#991b1b;background:#fee2e2;border-radius:6px;padding:6px 9px;">⚠ '+esc(it.warn)+'</div>':'')+
+  '</div>';
+}
+function showSapReminder(inNum){
+  var entries=sapClientEntries();
+  var body=entries.length
+    ? entries.map(sapEntryHtml).join('')
+    : '<div style="font-size:12.5px;color:#475569;">Виж <b>Наръчник → Клиентски</b>: MIGO 951 (заприхождаване) → ZSTOCK / ZSTR тип 1 → MIGO 952 при доставка → проверка в MB51.</div>';
+  var html='<div class="bov" id="sap-ov"><div class="bmod" style="width:560px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;">'+
+      '<div><div style="font-size:15.5px;font-weight:700;color:#92400e;">⚠️ Не забравяй заявката и в SAP!</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-top:2px;">След всяка клиентска заявка се пуска и заявка през SAP.'+(inNum?' (Заявка №'+esc(inNum)+')':'')+'</div></div>'+
+      '<button onclick="closeSapReminder()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    body+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">'+
+      '<button onclick="closeSapReminder();openHandbookClientOrders();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer;">📖 Отвори в Наръчника</button>'+
+      '<button onclick="closeSapReminder()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 18px;font-size:13px;font-weight:600;cursor:pointer;">Разбрах</button>'+
+    '</div></div></div>';
+  var ex=document.getElementById('sap-ov');if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('sap-ov').classList.add('open');
+}
+function closeSapReminder(){var el=document.getElementById('sap-ov');if(el)el.remove();}
+function openHandbookClientOrders(){
+  if(typeof hbState!=='undefined'){
+    hbState.search='';hbState.type='all';hbState.cat='Клиентски';
+    hbState.openCards={'kl-poruchki':true,'proc-kl-poruchki':true};
+  }
+  showModule('handbook');
+}
+
+/* Постоянен банер в таба (сгъваем; по подразбиране отворен) */
+var coSapBannerOpen=true;
+function toggleCoSapBanner(){coSapBannerOpen=!coSapBannerOpen;renderCoSapBanner();}
+function renderCoSapBanner(){
+  var el=document.getElementById('co-sap-banner');if(!el)return;
+  var entries=sapClientEntries();
+  el.innerHTML='<div style="border:1px solid #fde68a;background:#fffbeb;border-radius:10px;padding:10px 13px;margin-bottom:12px;">'+
+    '<div onclick="toggleCoSapBanner()" style="display:flex;align-items:center;gap:8px;cursor:pointer;">'+
+      '<span style="font-size:15px;">⚠️</span>'+
+      '<div style="flex:1;font-size:13px;font-weight:600;color:#92400e;">След всяка клиентска заявка се пуска заявка и през SAP (MIGO 951/952 · ZSTOCK / ZSTR тип 1 · MB51)</div>'+
+      '<span style="font-size:12px;color:#a16207;">'+(coSapBannerOpen?'▲ скрий':'▼ покажи')+'</span>'+
+    '</div>'+
+    (coSapBannerOpen?'<div style="margin-top:10px;">'+
+      (entries.length?entries.map(sapEntryHtml).join(''):'<div style="font-size:12.5px;color:#475569;">Виж Наръчник → Клиентски.</div>')+
+      '<button onclick="openHandbookClientOrders()" style="border:1px solid #e2e8f0;background:#fff;border-radius:7px;padding:5px 12px;font-size:12px;cursor:pointer;">📖 Отвори в Наръчника</button>'+
+    '</div>':'')+
+  '</div>';
+}
+
 function loadClientOrders(){
   loadOrderRestrictions();
+  renderCoSapBanner();
   var q='order=created_at.desc';
   var stores=assignedStores();
   if(!stores){
@@ -134,12 +346,24 @@ function renderClientOrders(){
     if(done&&canCorrectRecord(o,'client_orders')){
       btns+='<button data-id="'+o.id+'" onclick="openCorrection(this.dataset.id,&apos;client_orders&apos;)" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Корекция</button>';
     }
+    /* ПЛАТЕН ТРАНСПОРТ — бутонът стои винаги (не се крие според данните):
+       без транспорт → създай; с транспорт → отвори свързания ред в таб Транспорт;
+       отметнат, но без transport_id → червено предупреждение (POST-ът се е провалил). */
+    var ptBroken=o.paid_transport&&!o.transport_id;
+    if(o.transport_id){
+      btns+='<button data-id="'+esc(o.transport_id)+'" onclick="gotoLinkedTransport(this.dataset.id)" title="Отвори свързаната транспортна заявка" style="border:1px solid #16a34a;background:#f0fdf4;color:#15803d;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🚚 Транспорт →</button>';
+    } else if(ptBroken){
+      btns+='<button data-id="'+o.id+'" onclick="openPaidTransportModal(this.dataset.id)" title="Отметнат е платен транспорт, но заявка НЯМА" style="border:1px solid #dc2626;background:#fee2e2;color:#991b1b;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;">⚠️ Липсва транспорт</button>';
+    } else if(!done){
+      btns+='<button data-id="'+o.id+'" onclick="openPaidTransportModal(this.dataset.id)" title="Създай транспортна заявка към тази клиентска заявка" style="border:1px solid #94a3b8;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🚚 Платен транспорт</button>';
+    }
     btns+='<button data-id="'+o.id+'" onclick="loadPrint(this.dataset.id)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🖨 Бланка</button>';
     if(isAdmin){
       btns+='<button data-id="'+o.id+'" onclick="deleteClientOrder(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button>';
     }
     btns+='</div>';
-    return '<tr style="'+rowStyle+'">'+
+    if(window._coHighlightId&&String(window._coHighlightId)===String(o.id))rowStyle+='background:#fef9c3;';
+    return '<tr id="co-row-'+esc(o.id)+'" style="'+rowStyle+'">'+
       '<td style="font-size:11px;color:#94a3b8;font-family:monospace;">'+esc(o.in_num||'—')+'</td>'+
       '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
       '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small></td>'+
@@ -150,10 +374,23 @@ function renderClientOrders(){
       '<td>'+esc(o.from_store||'')+'</td>'+
       '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
       '<td>'+elapsedBadge(o._days,o.status)+'</td>'+
-      '<td>'+statusBadge(o._status)+'</td>'+
+      '<td>'+statusBadge(o._status)+ptBadge(o)+'</td>'+
       '<td style="font-size:11px;">'+storeCell+'</td>'+
       '<td>'+btns+'</td></tr>';
   }).join('');
+  /* Подсветка + скрол към реда, отворен от бадж 📋 в таб Транспорт */
+  if(window._coHighlightId){
+    var row=document.getElementById('co-row-'+window._coHighlightId);
+    if(row&&row.scrollIntoView)row.scrollIntoView({block:'center'});
+    window._coHighlightId=null;
+  }
+}
+
+/* Малък бадж под статуса — веднага се вижда, че заявката е с платен транспорт */
+function ptBadge(o){
+  if(!o.paid_transport)return '';
+  if(!o.transport_id)return '<div style="margin-top:3px;"><span style="font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;background:#fee2e2;color:#991b1b;">⚠️ Транспорт липсва</span></div>';
+  return '<div style="margin-top:3px;"><span style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;background:#dcfce7;color:#15803d;">🚚 Платен транспорт</span></div>';
 }
 
 function filterOrders(f,btn){
@@ -165,21 +402,37 @@ function filterOrders(f,btn){
 function setClientStatus(id,status){
   sbPatch('client_orders','id=eq.'+id,{status:status}).then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
+    syncLinkedTransport(id,status);
     toast('✓ Статусът е обновен');loadClientOrders();
   });
 }
 
 function deleteClientOrder(id){
-  if(!confirm('Изтрий тази заявка?'))return;
-  sbDelete('client_orders','id=eq.'+id).then(function(){
+  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+  var trId=o&&o.transport_id;
+  if(!confirm(trId?'Изтрий тази заявка ЗАЕДНО със свързаната транспортна заявка?':'Изтрий тази заявка?'))return;
+  var step=trId
+    ? sbDelete('transport_orders','id=eq.'+trId).then(function(r){
+        if(!r.ok)console.error('deleteClientOrder: свързаният транспорт не беше изтрит',trId);
+        return r;
+      })
+    : Promise.resolve({ok:true});
+  step.then(function(){
+    return sbDelete('client_orders','id=eq.'+id);
+  }).then(function(){
     toast('✓ Заявката е изтрита');loadClientOrders();
+    if(trId&&typeof loadTransport==='function')loadTransport();
   });
 }
 
 function openClientModal(){
-  ['c-bon','c-name','c-phone','c-agent','c-note'].forEach(function(id){
+  ['c-bon','c-name','c-phone','c-agent','c-note','c-pt-addr'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.value='';
   });
+  /* Платен транспорт — винаги стартира изчистен */
+  var ptCb=document.getElementById('c-paid-transport');if(ptCb)ptCb.checked=false;
+  var ptHour=document.getElementById('c-pt-hour');if(ptHour)ptHour.value='10:00';
+  toggleClientPT();
   document.getElementById('c-date').value=today();
   document.getElementById('c-hour').value='10:00';
   document.getElementById('c-delivery').value='';
@@ -216,10 +469,15 @@ function submitClientOrder(){
     return;
   }
   if(!items.length){toast('Добави поне един артикул с продукт','#dc2626');return;}
+  var paidTransport=!!(document.getElementById('c-paid-transport')||{}).checked;
+  var ptAddr=v('c-pt-addr');
+  if(paidTransport&&!ptAddr){toast('При платен транспорт адресът за доставка е задължителен','#dc2626');return;}
   var first=items[0];
   var delivery=v('c-delivery')||null;
   var num=String(clientOrders.length+1).padStart(4,'0');
-  sbPost('client_orders',{
+  var coId=uuid4();
+  var rec={
+    id:coId,
     in_num:num,store_name:currentUser.store_name,
     date:v('c-date'),hour:v('c-hour'),bon:v('c-bon'),
     customer_name:name,phone:phone,
@@ -227,10 +485,22 @@ function submitClientOrder(){
     items:items,
     from_store:v('c-from-store'),fulfiller:v('c-fulfiller'),
     agent:v('c-agent')||currentUser.display_name,
-    delivery:delivery,status:'pending',note:v('c-note')
-  }).then(function(res){
+    delivery:delivery,status:'pending',note:v('c-note'),
+    paid_transport:paidTransport
+  };
+  sbPost('client_orders',rec).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    closeModal('client-modal');toast('✓ Заявката е записана!');loadClientOrders();
+    var finish=function(){
+      closeModal('client-modal');
+      loadClientOrders();
+      if(typeof loadTransport==='function'&&paidTransport)loadTransport();
+      showSapReminder(num);
+    };
+    if(!paidTransport){toast('✓ Заявката е записана!');finish();return;}
+    createLinkedTransport(rec,ptAddr,v('c-pt-hour'),delivery,function(ok){
+      if(ok)toast('✓ Заявката е записана + транспортна заявка е създадена!');
+      finish();
+    });
   });
 }
 
