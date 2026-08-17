@@ -2661,6 +2661,26 @@ function loadTasksStats() {
 
     if (!stores.length) { wrap.innerHTML=''; return; }
 
+    /* Датите от бюлетинската седмица, в които всяка постоянна задача е
+       дължима - същият принцип като report.js:reportRecurringWeekDates() и
+       като седмичния календар по-горе (recurringForDay, ~690): всеки дължим
+       ден получава СОБСТВЕН чекбокс, тоест е отделна единица работа и влиза
+       като ОТДЕЛЕН елемент в знаменателя, а не 1 на задача. Задача "без
+       срок" (без ден И без час) дава 0 дати и не участва никъде - точно
+       както report.js я изважда от recurringScheduled в noDueCount.
+       Двойката (wk,yr) идва от самия бюлетин, за да няма разминаване между
+       ISO седмица и календарна година (капанът около Нова година).
+       Смята се ВЕДНЪЖ, не наново за всеки магазин × отдел. */
+    var statWk = curBul ? curBul.week_number : weekNum(new Date());
+    var statYr = curBul ? curBul.year : new Date().getFullYear();
+    var statWeekDays = weekDays(statWk, statYr).map(function(d){ return toLocalISO(d); });
+    var statRecDates = {};
+    recurringTasks.forEach(function(t){
+      var out = [];
+      statWeekDays.forEach(function(iso, idx){ if (recurringIsDueOnWeekday(t, idx)) out.push(iso); });
+      statRecDates[t.id] = out;
+    });
+
     var depts = ['trade','warehouse','admin'];
     var h = '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;">';
     h += '<thead><tr style="background:#f8fafc;">';
@@ -2687,12 +2707,29 @@ function loadTasksStats() {
         var done = dTasks.filter(function(t){
           return bulComps.some(function(c){return c.task_id===t.id&&c.store_name===store&&c.status==='done';});
         }).length;
-        totalDone+=done; totalAll+=dTasks.length;
-        var pct = dTasks.length ? Math.round(done/dTasks.length*100) : null;
+        /* Постоянните задачи също влизат в таблицата - иначе отдел, в който
+           тази седмица има САМО постоянни задачи (напр. Администрация),
+           показва "—" за всички магазини, все едно там няма никаква работа.
+           Обхватът по target_stores е същият модел като при обикновените
+           по-горе и в notifications.js/report.js. */
+        var dRec = recurringTasks.filter(function(t){
+          if(t.department!==dk)return false;
+          return !t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0;
+        });
+        var recAll=0, recDone=0;
+        dRec.forEach(function(t){
+          (statRecDates[t.id]||[]).forEach(function(iso){
+            recAll++;
+            if (recurringComps.some(function(c){return c.recurring_task_id===t.id&&c.store_name===store&&c.status==='done'&&(c.completion_date||null)===iso;})) recDone++;
+          });
+        });
+        var doneCnt = done + recDone, allCnt = dTasks.length + recAll;
+        totalDone+=doneCnt; totalAll+=allCnt;
+        var pct = allCnt ? Math.round(doneCnt/allCnt*100) : null;
         var bg = pct===null?'#f8fafc':pct===100?'#f0fdf4':pct>50?'#fffbeb':'#fff5f5';
         var color = pct===null?'#94a3b8':pct===100?'#16a34a':pct>50?'#d97706':'#dc2626';
         h += '<td style="text-align:center;padding:7px 12px;background:'+bg+';">';
-        if (pct !== null) h += '<span style="color:'+color+';font-weight:600;">'+done+'/'+dTasks.length+'</span>';
+        if (pct !== null) h += '<span style="color:'+color+';font-weight:600;">'+doneCnt+'/'+allCnt+'</span>';
         else h += '<span style="color:#cbd5e1;">—</span>';
         h += '</td>';
       });
