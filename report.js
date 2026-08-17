@@ -365,6 +365,12 @@ function collectWeeklyReportData(cb){
 
         var summary = reportBuildSummary(items, comps, stores, noDueCount);
         summary.weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
+        var finish = function(){
+          collectCrossModuleWeeklySummary(function(cross){
+            summary.cross = cross; /* null при грешка - секцията просто не се показва, не гърми */
+            cb(summary);
+          });
+        };
         if (bul) {
           var thisKey = bul.year + '-W' + String(bul.week_number).padStart(2,'0');
           /* Опростено "предходна седмица" - не пресича година в edge-case
@@ -374,14 +380,157 @@ function collectWeeklyReportData(cb){
           reportSaveSnapshot('weekly', thisKey, summary.overallPct, summary.totalDone, summary.totalAll);
           reportFetchSnapshot('weekly', prevKey, function(snap){
             summary.trendPrevWeek = snap;
-            cb(summary);
+            finish();
           });
         } else {
-          cb(summary);
+          finish();
         }
       }).catch(function(){ cb(null); });
     }).catch(function(){ cb(null); });
   }).catch(function(){ cb(null); });
+}
+
+/* ═══════ КРОСМОДУЛНО ОБОБЩЕНИЕ ЗА СЕДМИЦАТА ═══════════════════
+   Добавя към седмичния репорт "какво е свършено/не е" в останалите
+   табове извън Бюлетин. Обхват (потвърден с потребителя):
+   - Разлики: САМО ниво доклад (differences_reports.reviewed) - не и
+     отделните артикули в stock_differences.
+   - За връщане: текущо отворени (pending/taken) vs приключени (completed) -
+     моментна снимка, не "тази седмица", защото приключването не носи
+     собствена дата в схемата.
+   - Каса Сторно: нови тази седмица + разбивка по статус.
+   - Каса Равнение: колко обекта НЕ са потвърдили равнение тази седмица
+     (draft) от общо подадените.
+   - Стока на път: САМО "застояли" pending по-стари от 7 дни (изрично
+     предпочетено пред "промяна тази седмица").
+   - Палети: "без данни" + "остарели >7 дни" - огледално на
+     palletsStaleness()/renderPalletsAdmin() логиката в pallets.js (7-дневен
+     праг вече е установена конвенция в проекта, не нов избор).
+   - Гаранции/Рекламации: НЕ участва - reference.js е статичен справочник,
+     няма работен процес "свършено/несвършено" в схемата.
+   cb(data|null) - при грешка cb(null), buildWeeklyReportHtml пропуска
+   секцията мълчаливо (сравнено с "data.cross &&" преди рендиране). */
+function collectCrossModuleWeeklySummary(cb){
+  var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
+  var weekAgoISO = toLocalISO(weekAgo);
+  var weekAgoStamp = weekAgo.toISOString();
+
+  Promise.all([
+    sbGet('differences_reports','created_at=gte.'+weekAgoStamp+'&select=reviewed'),
+    sbGet('stock_returns','select=status'),
+    sbGet('kasa_storno','created_at=gte.'+weekAgoStamp+'&select=status'),
+    sbGet('kasa_zoborot','date=gte.'+weekAgoISO+'&select=status'),
+    sbGet('goods_transit','status=eq.pending&created_at=lt.'+weekAgoStamp+'&select=id'),
+    sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
+    sbGet('users','select=store_name&order=store_name')
+  ]).then(function(r){
+    var diffReports = Array.isArray(r[0]) ? r[0] : [];
+    var returns = Array.isArray(r[1]) ? r[1] : [];
+    var storno = Array.isArray(r[2]) ? r[2] : [];
+    var zoborot = Array.isArray(r[3]) ? r[3] : [];
+    var stalePending = Array.isArray(r[4]) ? r[4] : [];
+    var palletsRows = Array.isArray(r[5]) ? r[5] : [];
+    var allUsers = Array.isArray(r[6]) ? r[6] : [];
+
+    var seenS = {};
+    var storeNames = allUsers.filter(function(u){
+      if (!u.store_name || u.store_name==='Централен офис' || seenS[u.store_name]) return false;
+      seenS[u.store_name] = 1; return true;
+    }).map(function(u){ return u.store_name; });
+
+    var diffs = {
+      total: diffReports.length,
+      reviewed: diffReports.filter(function(x){ return x.reviewed===true; }).length,
+      unreviewed: diffReports.filter(function(x){ return x.reviewed!==true; }).length
+    };
+    var ret = {
+      open: returns.filter(function(x){ return x.status!=='completed'; }).length,
+      completed: returns.filter(function(x){ return x.status==='completed'; }).length
+    };
+    var stornoSummary = {
+      total: storno.length,
+      draft: storno.filter(function(x){ return x.status==='draft'; }).length,
+      returned: storno.filter(function(x){ return x.status==='returned'; }).length,
+      resubmitted: storno.filter(function(x){ return x.status==='resubmitted'; }).length,
+      confirmed: storno.filter(function(x){ return x.status==='confirmed'; }).length
+    };
+    var zoborotSummary = {
+      total: zoborot.length,
+      draft: zoborot.filter(function(x){ return x.status==='draft'; }).length,
+      confirmed: zoborot.filter(function(x){ return x.status==='confirmed'; }).length
+    };
+
+    /* Палети: последен report_date на всеки обект спрямо днес (>7 дни =
+       остарели; изобщо няма запис = без данни) - огледално на pallets.js. */
+    var latestByStore = {};
+    palletsRows.forEach(function(p){
+      if (!latestByStore[p.store_name]) latestByStore[p.store_name] = p.report_date;
+    });
+    var todayD = new Date();
+    var palletsMissing = 0, palletsStale = 0;
+    storeNames.forEach(function(s){
+      var d = latestByStore[s];
+      if (!d) { palletsMissing++; return; }
+      var diffDays = Math.floor((todayD - new Date(d+'T00:00:00')) / 86400000);
+      if (diffDays > 7) palletsStale++;
+    });
+
+    cb({
+      diffs: diffs, returns: ret, storno: stornoSummary, zoborot: zoborotSummary,
+      transitStale: stalePending.length,
+      pallets: { missing: palletsMissing, stale: palletsStale, total: storeNames.length }
+    });
+  }).catch(function(){ cb(null); });
+}
+
+/* Компактна карта за 1 метрика в кросмодулната секция - число + етикет,
+   опционален "изисква внимание" акцент (червено outline) ако warn=true. */
+function crossMetricCard(num, label, warn){
+  return '<div style="flex:1;min-width:110px;background:'+(warn?'#FDEEEA':'#F9FAFC')+';border:1px solid '+(warn?'#F3C6BA':'#eef1f6')+';border-radius:8px;padding:10px 12px;text-align:center;">' +
+    '<div style="font-size:18px;font-weight:800;color:'+(warn?'#C0392B':'#1E2761')+';">'+num+'</div>' +
+    '<div style="font-size:10px;color:#6B7280;margin-top:2px;line-height:1.3;">'+label+'</div></div>';
+}
+function crossModuleRow(icon, title, cardsHtml){
+  return '<div style="margin-top:12px;">' +
+    '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:6px;">'+icon+' '+title+'</div>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+cardsHtml+'</div>' +
+    '</div>';
+}
+function buildCrossModuleSectionHtml(cross){
+  if (!cross) return '';
+  var h = '<div style="margin-top:18px;padding-top:14px;border-top:2px solid #eef1f6;">';
+  h += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">🗂 Друго от седмицата — по табове</div>';
+
+  h += crossModuleRow('📋','Разлики (нови доклади тази седмица)',
+    crossMetricCard(cross.diffs.total,'нови доклада') +
+    crossMetricCard(cross.diffs.reviewed,'прегледани',false) +
+    crossMetricCard(cross.diffs.unreviewed,'непрегледани', cross.diffs.unreviewed>0));
+
+  h += crossModuleRow('📥','За връщане (текущо състояние)',
+    crossMetricCard(cross.returns.open,'отворени (чакат/взети)', cross.returns.open>0) +
+    crossMetricCard(cross.returns.completed,'приключени'));
+
+  h += crossModuleRow('💳','Каса — Сторно бележки (нови тази седмица)',
+    crossMetricCard(cross.storno.total,'общо нови') +
+    crossMetricCard(cross.storno.draft,'чакат счетоводство', cross.storno.draft>0) +
+    crossMetricCard(cross.storno.returned,'върнати за коментар', cross.storno.returned>0) +
+    crossMetricCard(cross.storno.confirmed,'приключени'));
+
+  h += crossModuleRow('🧾','Каса — Равнение (тази седмица)',
+    crossMetricCard(cross.zoborot.total,'общо записа') +
+    crossMetricCard(cross.zoborot.draft,'непотвърдени от обект', cross.zoborot.draft>0) +
+    crossMetricCard(cross.zoborot.confirmed,'потвърдени'));
+
+  h += crossModuleRow('🚚','Стока на път',
+    crossMetricCard(cross.transitStale,'застояли pending (>7 дни)', cross.transitStale>0));
+
+  h += crossModuleRow('📦','Палети',
+    crossMetricCard(cross.pallets.missing,'обекта без данни', cross.pallets.missing>0) +
+    crossMetricCard(cross.pallets.stale,'остарели (>7 дни)', cross.pallets.stale>0) +
+    crossMetricCard(cross.pallets.total,'обекта общо'));
+
+  h += '</div>';
+  return h;
 }
 
 function buildWeeklyReportHtml(data){
@@ -402,6 +551,7 @@ function buildWeeklyReportHtml(data){
       '📋 '+data.noDueCount+' постоянни задачи без конкретен срок не участват в тази статистика.</div>';
   }
   body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: статусът на постоянните задачи не се "нулира" в началото на седмицата — веднъж отметната задача остава отметната, докато някой не я отметне обратно.</div>';
+  body += buildCrossModuleSectionHtml(data.cross);
   return reportEmailShell('📊 Седмичен репорт — ' + (data.weekLabel||''), 'Обобщение за седмицата', body,
     'Автоматичен репорт · ТеМАХ Портал');
 }
