@@ -7,11 +7,11 @@
    Function). Използва DEPTS, toLocalISO, recurringIsDueToday от bulletin.js.
    Зарежда се СЛЕД bulletin.js и email.js в index.html.
 
-   Важна особеност на данните: completion-ите на постоянните задачи
-   (recurring_tasks) НЯМАТ дата — веднъж отметната постоянна задача остава
-   отметната, докато някой не я отметне обратно (не се "нулира" всеки ден).
-   Затова за постоянните задачи текстът в репорта casually казва "текущ
-   статус", не "изпълнени днес". */
+   Важна особеност на данните: completion-ите на постоянните задачи вече
+   НОСЯТ дата (completion_date) — след 17fdc7d всяка постоянна задача е
+   date-scoped и се нулира на всяко следващо явяване. Стари записи отпреди
+   това (и всяко "Отложи", което не пише дата) имат completion_date=null и
+   се третират отделно на всяко място, където се четат. */
 
 /* Базов адрес на живия портал — за deep-link редовете на магазините
    (?store=Име) и бутона "Отвори в портала". today.js/shared.js четат
@@ -123,6 +123,21 @@ function reportItemMatchesComp(it, c){
   if (it.id!==c.item_id || it.kind!==c.kind) return false;
   if (it.date) return (c.completion_date||null)===it.date;
   return true;
+}
+/* Датите от една седмица, в които постоянна задача е дължима - огледално на
+   recurringForDay в седмичния календар (bulletin.js ~708), където всеки такъв
+   ден получава собствен чекбокс с data-cdate, тоест е отделна единица работа:
+     - няколко избрани дни (due_weekdays) -> точно тези дни
+     - един ден (due_weekdays с 1 елемент или старото due_weekday) -> само той
+     - "всеки ден" (due_time без избран ден) -> и седемте дни от седмицата
+   Двойката (wk, yr) идва от самия бюлетин, затова тук няма разминаване между
+   ISO седмица и календарна година (капанът около Нова година). */
+function reportRecurringWeekDates(t, wk, yr){
+  var out = [];
+  weekDays(wk, yr).forEach(function(d, idx){
+    if (recurringIsDueOnWeekday(t, idx)) out.push(toLocalISO(d));
+  });
+  return out;
 }
 function reportBuildSummary(items, comps, stores, noDueCount){
   var totalDone=0, totalAll=0, laggards=0;
@@ -323,22 +338,25 @@ function collectWeeklyReportData(cb){
           items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null, date: dates[0]||null });
         }
       });
-      /* Многодневна постоянна задача (Пон+Ср+Пет) - огледално на
-         многодневните обикновени задачи по-горе: разгъва се на отделен
-         елемент за всеки ден, с конкретна дата от ТАЗИ седмица, за да
-         работи completion_date филтрирането коректно. Старите постоянни
-         задачи (1 ден/всеки ден) остават без .date - изпълнението им
-         продължава да важи завинаги, както досега. */
+      /* Постоянна задача се разгъва на ОТДЕЛЕН елемент за всяко свое явяване
+         през седмицата, с конкретна дата - точно както многодневните
+         обикновени задачи по-горе и както седмичният календар в bulletin.js
+         (recurringForDay, ~708), където всеки дължим ден получава СОБСТВЕН
+         чекбокс с data-cdate. Затова .date се попълва и при едно явяване:
+         иначе reportItemMatchesComp() приема кой да е completion и задача,
+         отметната някога, се брои за изпълнена завинаги - и следващата
+         седмица. Без публикуван бюлетин няма от коя седмица да смятаме дати,
+         затова тогава елементът остава без .date (старото поведение), за да
+         не изчезне от репорта. */
       recurringScheduled.forEach(function(t){
-        if (recurringIsMultiDay(t) && bul) {
-          var wDays = weekDays(bul.week_number, bul.year);
-          t.due_weekdays.forEach(function(idx){
-            var d = toLocalISO(wDays[idx]);
+        var occDates = bul ? reportRecurringWeekDates(t, bul.week_number, bul.year) : [];
+        if (occDates.length > 1) {
+          occDates.forEach(function(d){
             var dLabel = new Date(d+'T00:00:00').toLocaleDateString('bg-BG',{day:'numeric',month:'numeric'});
             items.push({ id:t.id, kind:'recurring', title:t.title+' ('+dLabel+')', target_stores:t.target_stores||null, date:d });
           });
         } else {
-          items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null });
+          items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null, date: occDates[0]||null });
         }
       });
 
@@ -359,9 +377,13 @@ function collectWeeklyReportData(cb){
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
 
+        /* completion_date ЗАДЪЛЖИТЕЛНО минава нататък - reportItemMatchesComp()
+           сравнява точно него срещу .date на елемента. Без него всеки елемент
+           с дата (а тук вече всички имат) не намираше нито един completion и
+           се броеше за неизпълнен, колкото и отмятания да има. */
         var comps = [];
-        regComps.forEach(function(c){ comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
-        recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
+        regComps.forEach(function(c){ comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, completion_date:c.completion_date||null }); });
+        recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, completion_date:c.completion_date||null }); });
 
         var summary = reportBuildSummary(items, comps, stores, noDueCount);
         summary.weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
@@ -550,7 +572,7 @@ function buildWeeklyReportHtml(data){
     body += '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:11.5px;color:#8A5A12;">'+
       '📋 '+data.noDueCount+' постоянни задачи без конкретен срок не участват в тази статистика.</div>';
   }
-  body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: статусът на постоянните задачи не се "нулира" в началото на седмицата — веднъж отметната задача остава отметната, докато някой не я отметне обратно.</div>';
+  body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: постоянните задачи участват с по едно явяване за всеки ден, в който са дължими през седмицата (задача „всеки ден" = 7 явявания) — точно както се отмятат в Седмичния календар. Отметка от предишна седмица не се брои за текущата.</div>';
   body += buildCrossModuleSectionHtml(data.cross);
   return reportEmailShell('📊 Седмичен репорт — ' + (data.weekLabel||''), 'Обобщение за седмицата', body,
     'Автоматичен репорт · ТеМАХ Портал');
