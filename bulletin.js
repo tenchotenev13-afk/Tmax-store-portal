@@ -202,26 +202,8 @@ function recTaskWeekdays(t){
   return []; /* "всеки ден" (due_time) или без срок - без конкретни дни */
 }
 function recTaskIsMultiDay(t){ return recTaskWeekdays(t).length > 1; }
-/* Multi-select checkbox списък за избор на дни от седмицата (не конкретни
-   дати - постоянната задача важи за същите дни всяка седмица). */
-function recWeekdaysCheckboxesHtml(selId, selectedIdxs){
-  selectedIdxs = selectedIdxs || [];
-  var h = '<div id="'+selId+'" style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;">';
-  DNAMES.forEach(function(name,i){
-    var checked = selectedIdxs.indexOf(i)>=0;
-    h += '<label style="display:flex;align-items:center;gap:5px;font-size:11.5px;color:#374151;cursor:pointer;">' +
-      '<input type="checkbox" value="'+i+'"'+(checked?' checked':'')+' style="width:13px;height:13px;cursor:pointer;">' + name.slice(0,3) +
-      '</label>';
-  });
-  h += '<div style="grid-column:1/-1;font-size:10px;color:#94a3b8;margin-top:2px;">Остави без избор → "Всеки ден" (ако е зададен час) или без конкретен ден</div>';
-  h += '</div>';
-  return h;
-}
-function readRecWeekdaysCheckboxes(selId){
-  var wrap = document.getElementById(selId);
-  if (!wrap) return [];
-  return Array.prototype.slice.call(wrap.querySelectorAll('input[type=checkbox]:checked')).map(function(cb){ return parseInt(cb.value,10); });
-}
+/* recWeekdaysCheckboxesHtml() / readRecWeekdaysCheckboxes() са дефинирани
+   по-долу, до openRecurringModal() - виж там. */
 
 function myDept(){
   var m={manager:'trade',sklad:'warehouse',kasa:'admin',accounting:'admin',logistics:'admin',admin:'admin',info:'trade'};
