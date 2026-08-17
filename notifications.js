@@ -83,6 +83,48 @@ function showLoginBanner(){
    recurringTasks да са заредени (Бюлетин табът може изобщо да не е
    отварян тази сесия). Постоянните задачи нямат target_stores - важат
    винаги за всички магазини. */
+
+/* Датите, за които се брои отмятането на постоянна задача - огледално на
+   renderRecurringTasks() в bulletin.js (след 17fdc7d ВСЯКА постоянна задача
+   е date-scoped):
+     - няколко избрани дни (due_weekdays) -> всеки от тези дни от ТАЗИ седмица;
+     - един ден (due_weekdays с 1 елемент или старото due_weekday) -> датата
+       на този ден от ТАЗИ седмица (затова отметка от понеделник важи цялата
+       седмица, а не само в понеделник);
+     - "всеки ден" / без избран ден -> днешната дата (нулира се ежедневно).
+   Датите са ЛОКАЛНИ (toLocalISO от bulletin.js, зареден ПРЕДИ този файл),
+   НЕ today() от shared.js - toISOString() бута датата ден назад в ранните
+   сутрешни часове по българско време (UTC+2/+3).
+   Седмицата е текущата календарна, не curBul - банерът се показва при login,
+   когато Бюлетин табът още може изобщо да не е зареждан.
+   Понеделникът се смята директно от локалната дата, а НЕ през
+   weekDays(weekNum(now), now.getFullYear()) - weekNum() връща ISO седмица
+   (напр. 53 от 2026 за 01.01.2027), а getFullYear() дава календарната
+   година; двойката се разминава около Нова година и връща дата от съвсем
+   друга седмица. */
+function notifRecurringDueDates(t){
+  var now=new Date();
+  var wds=recTaskWeekdays(t);
+  if(!wds.length) return [toLocalISO(now)];
+  var jsDay=now.getDay();                 /* 0=Нед,1=Пон...6=Съб */
+  var idxToday=jsDay===0?6:jsDay-1;       /* 0=Пон..6=Нед - както DNAMES/due_weekdays */
+  var mon=new Date(now.getFullYear(),now.getMonth(),now.getDate()-idxToday);
+  return wds.map(function(idx){
+    return toLocalISO(new Date(mon.getFullYear(),mon.getMonth(),mon.getDate()+idx));
+  });
+}
+/* Чакаща е постоянна задача, на която поне един от дните ѝ за тази седмица
+   няма отбелязване. Запис БЕЗ completion_date важи винаги и я маха от
+   чакащите - такива са старите отметки отпреди date-scoping И всяко
+   "⏱ Отложи" (submitPostpone не записва дата). Същото условие като
+   report.js:72 и today.js:106. */
+function notifRecurringPending(taskId,dueDates,recComps){
+  var mine=recComps.filter(function(c){return c.recurring_task_id===taskId;});
+  if(mine.some(function(c){return !c.completion_date;})) return false;
+  return dueDates.some(function(d){
+    return !mine.some(function(c){return c.completion_date===d;});
+  });
+}
 function checkNewBulletinTasksBanner(){
   var store=currentUser.store_name;
   var cutoff=new Date();cutoff.setDate(cutoff.getDate()-3);
@@ -101,7 +143,7 @@ function checkNewBulletinTasksBanner(){
 
   var recTasksPromise=sbGet('recurring_tasks','active=eq.true&created_at=gte.'+cutoffISO).then(function(rtRaw){
     var rt=Array.isArray(rtRaw)?rtRaw:[];
-    return rt.map(function(t){return {id:t.id,title:t.title,kind:'recurring'};});
+    return rt.map(function(t){return {id:t.id,title:t.title,kind:'recurring',dueDates:notifRecurringDueDates(t)};});
   }).catch(function(){return [];});
 
   Promise.all([bulTasksPromise,recTasksPromise]).then(function(results){
@@ -117,7 +159,7 @@ function checkNewBulletinTasksBanner(){
       var recComps=Array.isArray(compsResults[1])?compsResults[1]:[];
       var pending=relevant.filter(function(t){
         if(t.kind==='regular')return !regComps.some(function(c){return c.task_id===t.id;});
-        return !recComps.some(function(c){return c.recurring_task_id===t.id;});
+        return notifRecurringPending(t.id,t.dueDates,recComps);
       });
       if(!pending.length)return;
       var el=document.getElementById('notif-banner');if(!el)return;
