@@ -880,8 +880,8 @@ function renderBulView(){
         html+='</div>';
         if(!isGlobal()&&!isMulti&&!done){
           html+='<div style="flex-shrink:0;">';
-          if(postponed)html+='<button data-task-id="'+t.id+'" onclick="cancelPostpone(this.dataset.taskId)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
-          else html+='<button data-task-id="'+t.id+'" onclick="openPostponeModal(this.dataset.taskId)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+          if(postponed)html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
+          else html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
           html+='</div>';
         }
         if(canEdit()){html+='<div style="display:flex;gap:4px;flex-shrink:0;">'
@@ -2388,8 +2388,8 @@ function renderTasksPanel() {
         h += '</div>';
         h += '<div style="display:flex;gap:4px;flex-shrink:0;">';
         if (!isGlobal() && !isMulti && !isDone) {
-          if (isPostponed) h += '<button data-task-id="'+t.id+'" onclick="cancelPostpone(this.dataset.taskId)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
-          else h += '<button data-task-id="'+t.id+'" onclick="openPostponeModal(this.dataset.taskId)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+          if (isPostponed) h += '<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
+          else h += '<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
         }
         if (canEdit()) {
           h += '<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>';
@@ -2561,7 +2561,14 @@ function submitTaskCompletion(taskId, kind, completionDate){
 /* ─── ОТЛАГАНЕ НА ЗАДАЧА (изисква коментар, вижда се в седмичния репорт) ───
    kind: 'regular' (по подразбиране) или 'recurring' - работи еднакво и за
    двата вида, за да могат постоянните задачи да се отлагат както обикновените. */
-function openPostponeModal(taskId, kind){
+/* completionDate = датата на явяването, за което се отлага - СЪЩАТА, която
+   compObj съпоставянето очаква (singleDate за обикновена задача ~840,
+   singleRecDate за постоянна ~2764). Без нея редът се записваше с null и
+   след 17fdc7d (recurringIsDateScoped() винаги true, значи singleRecDate
+   никога не е null) вече не съвпадаше с нищо - значката "⏱ Отложена" не се
+   появяваше и бутонът оставаше "Отложи". Същото важи и за обикновена задача
+   с дата. Носи се през dataset, точно както data-cdate на чекбокса. */
+function openPostponeModal(taskId, kind, completionDate){
   kind = kind || 'regular';
   var t = (kind==='recurring' ? recurringTasks : bulTasks).find(function(x){ return String(x.id)===String(taskId); });
   if (!t) return;
@@ -2578,13 +2585,14 @@ function openPostponeModal(taskId, kind){
     '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Ще се вижда в седмичния репорт до офиса.</div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
     '<button onclick="var e=document.getElementById(&#39;pp-modal-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
-    '<button data-task-id="'+taskId+'" data-kind="'+kind+'" onclick="submitPostpone(this.dataset.taskId,this.dataset.kind)" style="border:none;background:#d97706;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">⏱ Отложи</button>' +
+    '<button data-task-id="'+taskId+'" data-kind="'+kind+'" data-cdate="'+(completionDate||'')+'" onclick="submitPostpone(this.dataset.taskId,this.dataset.kind,this.dataset.cdate||null)" style="border:none;background:#d97706;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">⏱ Отложи</button>' +
     '</div></div>';
   document.body.appendChild(ov);
   setTimeout(function(){ var el=document.getElementById('pp-comment'); if(el)el.focus(); }, 80);
 }
-function submitPostpone(taskId, kind){
+function submitPostpone(taskId, kind, completionDate){
   kind = kind || 'regular';
+  completionDate = completionDate || null;
   var comment = (document.getElementById('pp-comment').value||'').trim();
   if (!comment) { toast('Въведи причина за отлагането','#dc2626'); return; }
   var store = currentUser && currentUser.store_name;
@@ -2595,7 +2603,8 @@ function submitPostpone(taskId, kind){
     completed_by: currentUser.display_name || currentUser.email,
     completed_at: new Date().toISOString(),
     status: 'postponed',
-    comment: comment
+    comment: comment,
+    completion_date: completionDate
   };
   payload[idField] = taskId;
   if (kind!=='recurring') payload.bulletin_id = curBul ? curBul.id : null;
@@ -2604,7 +2613,9 @@ function submitPostpone(taskId, kind){
     var el = document.getElementById('pp-modal-ov');
     if (el) el.remove();
     toast('⏱ Задачата е отложена');
-    var pushObj = { store_name: store, completed_by: currentUser.display_name||currentUser.email, status:'postponed', comment: comment };
+    /* completion_date и в локалния обект - иначе renderBulletin() веднага
+       след това пак не намира съвпадение и значката не се появява до reload */
+    var pushObj = { store_name: store, completed_by: currentUser.display_name||currentUser.email, status:'postponed', comment: comment, completion_date: completionDate };
     pushObj[idField] = taskId;
     if (kind==='recurring') recurringComps.push(pushObj); else bulComps.push(pushObj);
     renderBulletin();
@@ -2614,24 +2625,25 @@ function submitPostpone(taskId, kind){
    изтриваше ВСИЧКИ completion-и за задачата в този магазин - включително
    легитимни "done" отмятания за други дни. При многодневна задача с отметнат
    вторник отмяната на отлагане отнасяше и вторника.
-   submitPostpone() записва status='postponed', затова разграничаването е по
-   статус. Той НЕ записва completion_date (за разлика от toggleTask()/
-   toggleRecurringTask()), значи всички редове за отлагане са с null дата и
-   статусът е достатъчен - ако отлагането някога започне да носи дата,
-   филтърът тук трябва да включи и нея. */
-function cancelPostpone(taskId, kind){
+   submitPostpone() записва status='postponed' И completion_date на явяването,
+   затова филтърът е по двете - точно както toggleTask()/toggleRecurringTask()
+   скопират своя INSERT/DELETE. Стар ред отпреди датата има completion_date=
+   null и се хваща от completion_date=is.null клона. */
+function cancelPostpone(taskId, kind, completionDate){
   kind = kind || 'regular';
+  completionDate = completionDate || null;
   var store = currentUser && currentUser.store_name;
   if (!store) return;
   var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
-  sbDelete('task_completions', idField+'=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+'&status=eq.postponed').then(function(){
+  var dateQ = completionDate ? '&completion_date=eq.'+completionDate : '&completion_date=is.null';
+  sbDelete('task_completions', idField+'=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+'&status=eq.postponed'+dateQ).then(function(){
     toast('↩ Отлагането е отменено');
-    /* String()===String() - taskId идва като низ от this.dataset.taskId, а
-       PostgREST връща id-тата като числа; със === локалният масив никога не
-       се чистеше и UI-ът показваше "Отложена" до презареждане, макар редът
-       вече да е изтрит. Същият идиом като при recurringTasks.find() по-долу. */
-    if (kind==='recurring') recurringComps = recurringComps.filter(function(c){return !(String(c.recurring_task_id)===String(taskId) && c.store_name===store && c.status==='postponed');});
-    else bulComps = bulComps.filter(function(c){return !(String(c.task_id)===String(taskId) && c.store_name===store && c.status==='postponed');});
+    /* String()===String() е само защитно. id-тата в схемата са uuid, значи
+       и dataset низът, и стойността от PostgREST са низове и обикновеното
+       === работи - по-ранен коментар тук твърдеше, че не работи, което беше
+       грешка. Оставено за симетрия с recurringTasks.find() по-долу. */
+    if (kind==='recurring') recurringComps = recurringComps.filter(function(c){return !(String(c.recurring_task_id)===String(taskId) && c.store_name===store && c.status==='postponed' && (c.completion_date||null)===completionDate);});
+    else bulComps = bulComps.filter(function(c){return !(String(c.task_id)===String(taskId) && c.store_name===store && c.status==='postponed' && (c.completion_date||null)===completionDate);});
     renderBulletin();
   });
 }
@@ -2804,8 +2816,8 @@ function renderRecurringTasks(dk) {
       h += '</div>';
       var showBtns='';
       if(!isGlobal()&&!isMultiRec&&!done){
-        if(postponed)showBtns+='<button data-task-id="'+t.id+'" onclick="cancelPostpone(this.dataset.taskId,\'recurring\')" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
-        else showBtns+='<button data-task-id="'+t.id+'" onclick="openPostponeModal(this.dataset.taskId,\'recurring\')" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+        if(postponed)showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
+        else showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
       }
       if (showBtns) h += '<div style="flex-shrink:0;align-self:flex-start;">'+showBtns+'</div>';
       if (canEdit()) {
