@@ -541,8 +541,8 @@ function loadBulletin(){
         var storeF=isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name);
         sbGet('subtask_completions','select=*'+storeF).then(function(sc){
           subtaskComps=Array.isArray(sc)?sc:[];
-          var rq='bulletin_id=eq.'+curBul.id+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
-          fetch(API+'/task_completions?'+rq+'&task_id=is.null',{headers:H}).then(function(r){
+          var rq='recurring_task_id=not.is.null'+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
+          fetch(API+'/task_completions?'+rq,{headers:H}).then(function(r){
             if(!r.ok){
               return r.text().then(function(errText){
                 console.error('task_completions (recurring) GET грешка:', errText);
@@ -2272,7 +2272,7 @@ function printSection(what){
       s+='<div class="tasks-hdr">🔁 Постоянни задачи</div>';
       rdt.forEach(function(t){
         var isMultiRecPrint = recurringIsMultiDay(t);
-        var singleRecDatePrint = (recurringIsDateScoped(t) && !isMultiRecPrint) ? toLocalISO(days[t.due_weekdays[0]]) : null;
+        var singleRecDatePrint = (recurringIsDateScoped(t) && !isMultiRecPrint) ? toLocalISO(days[recTaskWeekdays(t)[0]]) : null;
         var rComp=(!isMultiRecPrint&&printStore)?recurringComps.find(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===printStore&&(cc.completion_date||null)===singleRecDatePrint;}):null;
         var rDone=!!rComp;
         s+='<div class="task-row">';
@@ -2765,7 +2765,7 @@ function renderRecurringTasks(dk) {
     h += '<div style="padding:8px 14px;">';
     dTasks.forEach(function(t,recIdxInDept) {
       var isMultiRec = recurringIsMultiDay(t);
-      var singleRecDate = (recurringIsDateScoped(t) && !isMultiRec) ? weekdayIdxToDate(t.due_weekdays[0]) : null;
+      var singleRecDate = (recurringIsDateScoped(t) && !isMultiRec) ? weekdayIdxToDate(recTaskWeekdays(t)[0]) : null;
       var compObj = store && !isMultiRec && recurringComps.find(function(c){return c.recurring_task_id===t.id && c.store_name===store && (c.completion_date||null)===singleRecDate;});
       var done = !!compObj && compObj.status==='done';
       var postponed = !!compObj && compObj.status==='postponed';
@@ -2981,8 +2981,8 @@ function recurringDueLabel(t){
    истински обвързано с конкретния ден/седмица (completion_date), огледално
    на многодневните обикновени задачи - за разлика от старите постоянни
    задачи (1 ден или "всеки ден"), чието изпълнение остава завинаги. */
-function recurringIsMultiDay(t){ return !!(t.due_weekdays && t.due_weekdays.length>1); }
-function recurringIsDateScoped(t){ return !!(t.due_weekdays && t.due_weekdays.length); }
+function recurringIsMultiDay(t){ return recTaskWeekdays(t).length>1; }
+function recurringIsDateScoped(t){ return recTaskWeekdays(t).length>0; }
 function recurringIsDueOnWeekday(t,weekdayIdx){
   if(t.due_weekdays && t.due_weekdays.length) return t.due_weekdays.indexOf(weekdayIdx)>=0;
   if(t.due_weekday===null||t.due_weekday===undefined){
