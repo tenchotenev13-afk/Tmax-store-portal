@@ -17,6 +17,8 @@ var todayYesterdaySnapshot = null; /* вчерашният snapshot, за тен
 var todayTrendFetched = false;     /* пазим само 1 fetch на тенденцията на зареждане, не при всеки re-render */
 var todayPhotosExpanded = false;   /* дали е разгъната секцията "Снимки за преглед" */
 var todayPhotosCache = null;       /* заредените снимки - lazy, само при първо разгъване */
+var todayRecipientsCache = null;   /* report_recipients - lazy, зарежда се само веднъж на зареждане */
+var todayRecipientsFetched = false;
 
 function loadTodayDashboard(){
   var wrap = document.getElementById('mod-today');
@@ -28,6 +30,8 @@ function loadTodayDashboard(){
   todayYesterdaySnapshot = null;
   todayPhotosExpanded = false;
   todayPhotosCache = null;
+  todayRecipientsCache = null;
+  todayRecipientsFetched = false;
   /* Deep-link от имейл: ?store=Име%20магазин -> автоматично разгъва точно
      този магазин, за да не се налага търсене след клик от репорта. */
   try {
@@ -225,6 +229,82 @@ function todayReportTestBarHtml(){
     '</div>';
 }
 
+/* Зарежда списъка получатели (report_recipients) - веднъж на зареждане на
+   таба (todayRecipientsFetched guard), после наново при всяко добавяне/триене. */
+function todayLoadRecipients(){
+  if (typeof loadReportRecipients !== 'function') return; /* report.js не е зареден */
+  loadReportRecipients(function(rows){
+    todayRecipientsCache = rows;
+    var wrap = document.getElementById('mod-today');
+    if (wrap && todayCache) renderTodayDashboard(wrap, todayCache.items, todayCache.noDueItems, todayCache.comps, todayCache.stores);
+  });
+}
+function todayAddRecipient(){
+  var nameEl = document.getElementById('today-rcpt-name');
+  var emailEl = document.getElementById('today-rcpt-email');
+  var dailyEl = document.getElementById('today-rcpt-daily');
+  var weeklyEl = document.getElementById('today-rcpt-weekly');
+  if (!emailEl) return;
+  var email = emailEl.value.trim();
+  if (!email) { toast('Въведи имейл','#dc2626'); return; }
+  addReportRecipient(nameEl.value.trim(), email, dailyEl.checked, weeklyEl.checked, function(ok){
+    if (ok) { toast('✅ Добавен получател'); todayLoadRecipients(); }
+    else toast('❌ Грешка при добавяне','#dc2626');
+  });
+}
+function todayDeleteRecipient(id){
+  deleteReportRecipient(id, function(ok){
+    if (ok) { toast('Изтрит получател'); todayLoadRecipients(); }
+    else toast('❌ Грешка при триене','#dc2626');
+  });
+}
+
+/* Панел за управление на получателите на ОБЩИЯ репорт (report_recipients) +
+   бутони за реално изпращане сега до целия списък. Само за admin/accounting
+   (canEdit), както и останалите репорт контроли по-горе. */
+function todayReportRecipientsHtml(){
+  if (typeof canEdit !== 'function' || !canEdit()) return '';
+  if (typeof loadReportRecipients !== 'function') return ''; /* report.js не е зареден */
+  if (!todayRecipientsFetched) { todayRecipientsFetched = true; todayLoadRecipients(); }
+
+  var h = '<div style="background:#f8fafc;border:1px solid #eef1f6;border-radius:10px;padding:12px 14px;margin:0 0 14px;">';
+  h += '<div style="font-size:11.5px;font-weight:800;color:#0f172a;margin-bottom:8px;">📧 Получатели на общия репорт</div>';
+
+  var list = todayRecipientsCache;
+  if (list === null) {
+    h += '<div style="font-size:11.5px;color:#94a3b8;margin-bottom:8px;">⏳ Зареждане...</div>';
+  } else if (!list.length) {
+    h += '<div style="font-size:11.5px;color:#94a3b8;margin-bottom:8px;">Няма добавени получатели.</div>';
+  } else {
+    h += '<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;">';
+    list.forEach(function(r){
+      h += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#334155;background:#fff;border:1px solid #eef1f6;border-radius:7px;padding:5px 9px;">';
+      h += '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(r.name||r.email) + ' <span style="color:#94a3b8;">(' + esc(r.email) + ')</span></span>';
+      h += '<span style="font-size:10px;color:#64748b;white-space:nowrap;">' + (r.daily?'📋':'') + (r.weekly?'📊':'') + '</span>';
+      h += '<button onclick="todayDeleteRecipient(\'' + r.id + '\')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;line-height:1;">✕</button>';
+      h += '</div>';
+    });
+    h += '</div>';
+  }
+
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">';
+  h += '<input id="today-rcpt-name" placeholder="име" style="width:100px;font-size:11.5px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;">';
+  h += '<input id="today-rcpt-email" placeholder="имейл" style="flex:1;min-width:140px;font-size:11.5px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;">';
+  h += '<label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:3px;"><input id="today-rcpt-daily" type="checkbox" checked style="margin:0;">дневен</label>';
+  h += '<label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:3px;"><input id="today-rcpt-weekly" type="checkbox" checked style="margin:0;">седмичен</label>';
+  h += '<button onclick="todayAddRecipient()" style="border:none;background:#1E2761;color:#fff;border-radius:6px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">+ Добави</button>';
+  h += '</div>';
+
+  if (typeof sendDailyReportToRecipients==='function' && list && list.length) {
+    h += '<div style="display:flex;gap:8px;margin-top:10px;border-top:1px solid #e5e9f1;padding-top:10px;flex-wrap:wrap;">';
+    h += '<button onclick="sendDailyReportToRecipients()" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати сега — Дневен</button>';
+    h += '<button onclick="sendWeeklyReportToRecipients()" style="border:none;background:#0369a1;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати сега — Седмичен</button>';
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
+
 /* Рендира задачите без срок за конкретен обект — визуално отделени, не участват в % */
 /* Показва коментар/снимки на вече изпълнена задача - за да не се налага
    отваряне на Бюлетин, за да се прегледа съдържанието на "вид задача с
@@ -373,7 +453,7 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
   h += '</div>';
 
   h += todayReportTestBarHtml();
-
+  h += todayReportRecipientsHtml();
 
   /* STAT CARDS — винаги за всички обекти, за контекст, независимо от филтъра */
   h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 22px;">';

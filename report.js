@@ -447,19 +447,21 @@ function collectWeeklyRoutingData(cb){
       var routedRegular = allTasks.filter(function(t){ return t.report_groups && t.report_groups.length; });
       var routedTasks = routedRegular.map(function(t){ t.kind='regular'; return t; })
         .concat(routedRecurring.map(function(t){ t.kind='recurring'; return t; }));
-      if (!routedTasks.length) { cb({ bul:bul, tasks:[], comps:[], stores:[], accountingUsers:[] }); return; }
+      if (!routedTasks.length) { cb({ bul:bul, tasks:[], comps:[], stores:[], accountingUsers:[], creatorMap:{} }); return; }
       var regIds = routedRegular.map(function(t){ return t.id; });
       var recIds = routedRecurring.map(function(t){ return t.id; });
       Promise.all([
         regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')') : Promise.resolve([]),
         recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')') : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name'),
-        sbGet('users','role=eq.accounting&select=email,display_name,assigned_stores')
+        sbGet('users','role=eq.accounting&select=email,display_name,assigned_stores'),
+        sbGet('users','select=display_name,email') /* за резолвиране на created_by (display_name) -> email на създателя */
       ]).then(function(r2){
         var regCompsRaw = Array.isArray(r2[0]) ? r2[0] : [];
         var recCompsRaw = Array.isArray(r2[1]) ? r2[1] : [];
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var accountingUsers = Array.isArray(r2[3]) ? r2[3] : [];
+        var allUsers = Array.isArray(r2[4]) ? r2[4] : [];
         var seen = {};
         var stores = users.filter(function(u){
           if (!u.store_name || u.store_name==='Централен офис' || seen[u.store_name]) return false;
@@ -467,7 +469,9 @@ function collectWeeklyRoutingData(cb){
         }).map(function(u){ return u.store_name; });
         var comps = regCompsRaw.map(function(c){ return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment }; })
           .concat(recCompsRaw.map(function(c){ return { item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment }; }));
-        cb({ bul:bul, tasks:routedTasks, comps:comps, stores:stores, accountingUsers:accountingUsers });
+        var creatorMap = {};
+        allUsers.forEach(function(u){ if (u.display_name && u.email) creatorMap[u.display_name] = u.email; });
+        cb({ bul:bul, tasks:routedTasks, comps:comps, stores:stores, accountingUsers:accountingUsers, creatorMap:creatorMap });
       }).catch(function(){ cb(null); });
     }).catch(function(){ cb(null); });
   }).catch(function(){ cb(null); });
@@ -477,8 +481,11 @@ function collectWeeklyRoutingData(cb){
    'owner' са фиксирани хора; 'regional' се извежда динамично от accounting
    потребителите, чиито assigned_stores пресичат target_stores на задачата
    (ако задачата е за ВСИЧКИ магазини — включва всички accounting с назначени
-   обекти). */
-function resolveRecipientsForTask(task, accountingUsers){
+   обекти). Освен избраните report_groups, СЪЗДАТЕЛЯТ на задачата (created_by,
+   само за обикновени bulletin_tasks - recurring_tasks нямат това поле)
+   винаги се добавя автоматично като получател, ако имейлът му може да бъде
+   резолвнат през creatorMap (display_name -> email от users). */
+function resolveRecipientsForTask(task, accountingUsers, creatorMap){
   var out = [];
   (task.report_groups||[]).forEach(function(g){
     var grp = REPORT_GROUPS[g];
@@ -496,6 +503,9 @@ function resolveRecipientsForTask(task, accountingUsers){
       grp.people.forEach(function(p){ out.push({ name:p.name, email:p.email }); });
     }
   });
+  if (task.created_by && creatorMap && creatorMap[task.created_by]) {
+    out.push({ name:task.created_by, email:creatorMap[task.created_by] });
+  }
   return out;
 }
 
@@ -503,10 +513,10 @@ function resolveRecipientsForTask(task, accountingUsers){
    натрупва списък със задачи, за които точно този човек е адресат.
    Сравнява id+kind заедно, за да не се бъркат обикновена и постоянна задача
    с case теоретично съвпадащ id. */
-function buildRecipientMap(tasks, accountingUsers){
+function buildRecipientMap(tasks, accountingUsers, creatorMap){
   var map = {};
   tasks.forEach(function(t){
-    resolveRecipientsForTask(t, accountingUsers).forEach(function(r){
+    resolveRecipientsForTask(t, accountingUsers, creatorMap).forEach(function(r){
       if (!map[r.email]) map[r.email] = { name:r.name, tasks:[] };
       var already = map[r.email].tasks.some(function(x){ return x.id===t.id && x.kind===t.kind; });
       if (!already) map[r.email].tasks.push(t);
@@ -566,7 +576,7 @@ function sendWeeklyReportRouted(testEmail){
   collectWeeklyRoutingData(function(data){
     if (!data) { toast('Грешка при зареждане','#dc2626'); return; }
     if (!data.tasks.length) { toast('Няма задачи с зададени групи за докладване тази седмица'); return; }
-    var map = buildRecipientMap(data.tasks, data.accountingUsers);
+    var map = buildRecipientMap(data.tasks, data.accountingUsers, data.creatorMap);
     var emails = Object.keys(map);
     if (!emails.length) { toast('Няма разрешени получатели — провери групите на задачите','#dc2626'); return; }
     var sent = 0, total = emails.length;
@@ -579,6 +589,64 @@ function sendWeeklyReportRouted(testEmail){
         sent++;
         if (!res.ok) { toast('❌ Грешка за '+rec.name,'#dc2626'); }
         if (sent===total) toast('✅ '+total+' тестови репорта изпратени на '+testEmail);
+      });
+    });
+  });
+}
+
+/* ═══════ ПОЛУЧАТЕЛИ НА ОБЩИЯ РЕПОРТ (report_recipients) ═══════════
+   Редактируем списък (name/email/daily/weekly флагове) - управлява се от
+   UI-то в таб "Днес" (виж today.js). Използва се от sendDailyReportToRecipients/
+   sendWeeklyReportToRecipients по-долу за РЕАЛНО ръчно изпращане до целия
+   списък наведнъж, докато не минем към pg_cron автоматика (Фаза 2) - тогава
+   същата таблица ще захранва и автоматичния Edge Function репорт. */
+function loadReportRecipients(cb){
+  sbGet('report_recipients','active=eq.true&order=created_at.asc').then(function(rows){
+    cb(Array.isArray(rows) ? rows : []);
+  }).catch(function(){ cb([]); });
+}
+function addReportRecipient(name, email, daily, weekly, cb){
+  if (!email) { cb(false); return; }
+  sbPost('report_recipients', { name: name||null, email: email, daily: !!daily, weekly: !!weekly }).then(function(res){
+    cb(!!res.ok);
+  }).catch(function(){ cb(false); });
+}
+function deleteReportRecipient(id, cb){
+  sbDelete('report_recipients','id=eq.'+id).then(function(res){ cb(!!res.ok); }).catch(function(){ cb(false); });
+}
+
+/* РЕАЛНО изпращане (не тест) - до всички активни получатели с daily=true.
+   Едно писмо, всички в общо поле "to" (вътрешен екип, не е проблем да се
+   виждат взаимно). */
+function sendDailyReportToRecipients(){
+  loadReportRecipients(function(recipients){
+    var targets = recipients.filter(function(r){ return r.daily; });
+    if (!targets.length) { toast('Няма получатели с включен дневен репорт','#dc2626'); return; }
+    toast('⏳ Подготвям и изпращам дневния репорт...');
+    collectDailyReportData(function(data){
+      if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
+      var html = buildDailyReportHtml(data);
+      var emails = targets.map(function(r){ return r.email; });
+      sendEmail(emails, '📋 ТеМАХ — Дневен репорт', html).then(function(res){
+        if (res.ok) toast('✅ Дневен репорт изпратен на ' + emails.length + ' получатели');
+        else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
+      });
+    });
+  });
+}
+/* РЕАЛНО изпращане на седмичния репорт - до всички активни получатели с weekly=true. */
+function sendWeeklyReportToRecipients(){
+  loadReportRecipients(function(recipients){
+    var targets = recipients.filter(function(r){ return r.weekly; });
+    if (!targets.length) { toast('Няма получатели с включен седмичен репорт','#dc2626'); return; }
+    toast('⏳ Подготвям и изпращам седмичния репорт...');
+    collectWeeklyReportData(function(data){
+      if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
+      var html = buildWeeklyReportHtml(data);
+      var emails = targets.map(function(r){ return r.email; });
+      sendEmail(emails, '📊 ТеМАХ — Седмичен репорт', html).then(function(res){
+        if (res.ok) toast('✅ Седмичен репорт изпратен на ' + emails.length + ' получатели');
+        else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
       });
     });
   });
