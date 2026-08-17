@@ -378,14 +378,27 @@ function runRest() {
   /* ══════════ 8. Гранични случаи ══════════ */
   section('8. Гранични случаи');
   {
-    /* 1 магазин в таба -> чиповете не се рендират (само заемат място) */
+    /* 1 магазин в таба -> чиповете ПАК се показват (филтър, който изчезва
+       според данните, изглежда като счупен - виж sdStoreChipsHtml) */
     const one = boot(ADMIN, {
       reports: [REPORTS[0]],
       lines: [LINES[0]]
     });
     one.w.renderStockDiff();
     const h = one.doc.getElementById('mod-stock-diff').innerHTML;
-    ok('1 магазин -> няма чипове', (h.match(/data-store=/g) || []).length === 0);
+    ok('1 магазин -> чиповете пак се показват', (h.match(/data-store=/g) || []).length === 2,
+      'намерени: ' + (h.match(/data-store=/g) || []).length);
+    ok('1 магазин -> има чип "Всички" и чип за самия магазин',
+      h.indexOf('🏪 Всички (1)') >= 0 && h.indexOf('data-store="Враца"') >= 0);
+    /* таб само с решени редове и един магазин (реалният случай, който изглеждаше
+       като изчезнал филтър: таб "Доставчици" само с Раднево) */
+    const onlyResolved = boot(ADMIN, {
+      reports: [REPORTS[3]],
+      lines: [LINES[3]]
+    });
+    onlyResolved.w.renderStockDiff();
+    const hor = onlyResolved.doc.getElementById('mod-stock-diff').innerHTML;
+    ok('таб само с решени редове -> чиповете са налични', hor.indexOf('data-store="Севлиево"') >= 0);
 
     /* празни данни изобщо */
     const empty = boot(ADMIN, { reports: [], lines: [] });

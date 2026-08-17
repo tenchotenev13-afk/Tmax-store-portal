@@ -368,7 +368,11 @@ function sdStoreCount(store){
 }
 function sdStoreChipsHtml(){
   var stores = sdStoresInCurrentTab();
-  if(stores.length < 2) return ''; /* 1 магазин (или 0) - чиповете само заемат място */
+  /* Показваме чиповете при ПОНЕ 1 магазин. По-рано се криеха при един-единствен
+     магазин ("само заемат място") - но контрол, който ту го има, ту го няма
+     според данните, изглежда като счупен филтър. Предсказуемостта е по-важна
+     от спестения ред. */
+  if(!stores.length) return '';
   var total = stores.reduce(function(m,s){ return m + sdStoreCount(s); }, 0);
   var h = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">';
   h += '<button data-store="" onclick="setSDStoreFilter(this.dataset.store)" style="border:1px solid '+(!sdStoreFilter?'#2563eb':'#e2e8f0')+';background:'+(!sdStoreFilter?'#eff6ff':'#fff')+';color:'+(!sdStoreFilter?'#2563eb':'#64748b')+';border-radius:20px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">🏪 Всички ('+total+')</button>';
