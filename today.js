@@ -19,6 +19,8 @@ var todayPhotosExpanded = false;   /* дали е разгъната секци�
 var todayPhotosCache = null;       /* заредените снимки - lazy, само при първо разгъване */
 var todayRecipientsCache = null;   /* report_recipients - lazy, зарежда се само веднъж на зареждане */
 var todayRecipientsFetched = false;
+var todayCrossCache = null;        /* кросмодулно обобщение (Разлики/Каса/Стока на път/Палети) - lazy */
+var todayCrossFetched = false;
 
 function loadTodayDashboard(){
   var wrap = document.getElementById('mod-today');
@@ -32,6 +34,8 @@ function loadTodayDashboard(){
   todayPhotosCache = null;
   todayRecipientsCache = null;
   todayRecipientsFetched = false;
+  todayCrossCache = null;
+  todayCrossFetched = false;
   /* Deep-link от имейл: ?store=Име%20магазин -> автоматично разгъва точно
      този магазин, за да не се налага търсене след клик от репорта. */
   try {
@@ -305,6 +309,37 @@ function todayReportRecipientsHtml(){
   return h;
 }
 
+/* Зарежда кросмодулното обобщение (Разлики/За връщане/Каса/Стока на път/
+   Палети) - същата функция, която захранва и седмичния имейл репорт
+   (report.js), само че тук се показва живо в самия таб, не само веднъж
+   седмично по имейл. */
+function todayLoadCross(){
+  if (typeof collectCrossModuleWeeklySummary !== 'function') return; /* report.js не е зареден */
+  collectCrossModuleWeeklySummary(function(cross){
+    todayCrossCache = cross;
+    var wrap = document.getElementById('mod-today');
+    if (wrap && todayCache) renderTodayDashboard(wrap, todayCache.items, todayCache.noDueItems, todayCache.comps, todayCache.stores);
+  });
+}
+
+/* Обвивка около buildCrossModuleSectionHtml (report.js) с бяла картова
+   рамка, съгласувана с останалите секции в "Днес" - само admin/accounting
+   (canEdit), защото включва счетоводни данни (Сторно/Равнение), и само в
+   общия изглед (без филтър по 1 обект), защото е компания-wide обобщение. */
+function todayCrossModuleWrapperHtml(){
+  if (typeof canEdit !== 'function' || !canEdit()) return '';
+  if (typeof collectCrossModuleWeeklySummary !== 'function' || typeof buildCrossModuleSectionHtml !== 'function') return '';
+  if (todayFilterStore !== 'all') return '';
+  if (!todayCrossFetched) { todayCrossFetched = true; todayLoadCross(); }
+
+  if (todayCrossCache === null) {
+    return '<div style="background:#fff;border:1px solid #eef1f6;border-radius:12px;padding:16px 18px;margin-top:14px;font-size:12px;color:#94a3b8;">⏳ Зареждане на обобщението от другите табове...</div>';
+  }
+  var inner = buildCrossModuleSectionHtml(todayCrossCache);
+  if (!inner) return '';
+  return '<div style="background:#fff;border:1px solid #eef1f6;border-radius:12px;padding:16px 18px 4px;margin-top:14px;">' + inner + '</div>';
+}
+
 /* Рендира задачите без срок за конкретен обект — визуално отделени, не участват в % */
 /* Показва коментар/снимки на вече изпълнена задача - за да не се налага
    отваряне на Бюлетин, за да се прегледа съдържанието на "вид задача с
@@ -526,6 +561,7 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
   }
 
   h += todayPhotoQueueSectionHtml();
+  h += todayCrossModuleWrapperHtml();
 
   h += '</div>';
   wrap.innerHTML = h;
