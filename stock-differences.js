@@ -3,9 +3,32 @@
 var sdData   = [];
 var sdFilter = 'pending';
 var sdTypeFilter = 'all';
-var sdDirTab = 'supplier'; /* 'supplier' | 'interstore' - главната таблица за Цвети */
+var sdDirTab = 'supplier'; /* 'supplier' | 'interstore' - разделя И новите бланки, И главната таблица */
 var sdEditId = null;
 var sdSearch = '';
+var sdStoreFilter = ''; /* точен филтър по магазин (чипове), отделен от свободното търсене */
+
+/* ── Запазване на позицията при пре-рендиране ──
+   renderStockDiff() пре-строява целия модул с innerHTML, което връщаше
+   потребителя най-отгоре при всяко решение по разлика. Пазим или точна
+   котва към бланката, по която се работи, или скрол позицията. */
+var sdScrollY = null, sdScrollAnchor = null;
+function sdKeepScroll(anchorReportId){
+  if(anchorReportId) sdScrollAnchor = anchorReportId;
+  if(sdScrollY == null) sdScrollY = window.pageYOffset || document.documentElement.scrollTop || 0;
+}
+function sdRestoreScroll(){
+  var y = sdScrollY, a = sdScrollAnchor;
+  sdScrollY = null; sdScrollAnchor = null;
+  if(y == null && !a) return;
+  var apply = function(){
+    var el = a ? document.getElementById('diff-rep-'+a) : null;
+    if(el && el.scrollIntoView){ el.scrollIntoView({block:'center'}); }
+    else if(y != null){ window.scrollTo(0, y); }
+  };
+  if(typeof requestAnimationFrame === 'function') requestAnimationFrame(apply);
+  else apply();
+}
 
 function canEditSD() {
   return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
@@ -47,7 +70,12 @@ var diffPendingPhotos = []; /* снимки, качени в текущо отв
 
 function loadStockDiff() {
   var wrap = document.getElementById('mod-stock-diff');
-  if (wrap) wrap.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
+  sdKeepScroll();
+  /* Показваме "Зареждане..." САМО при първо отваряне. При опресняване след
+     действие (напр. решение по разлика) старото съдържание остава на екрана -
+     иначе височината на страницата се срива до 200px и браузърът сам изтрива
+     скрол позицията, преди да успеем да я върнем. */
+  if (wrap && !wrap.innerHTML.trim()) wrap.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
   Promise.all([
     sbGet('stock_differences', 'order=created_at.desc.nullslast' + storeQ()),
     sbGet('differences_reports', 'order=created_at.desc' + storeQ())
@@ -88,6 +116,9 @@ function renderStockDiff() {
     if (sdTypeFilter !== 'all' && r.type !== sdTypeFilter) return false;
     if (sdFilter === 'pending') { if (r.status !== 'pending') return false; }
     else if (sdFilter === 'taken') { if (r.status !== 'taken') return false; }
+    /* Точен филтър по магазин (чиповете) - ОТДЕЛЕН от свободното търсене
+       по-долу, за да не се влияе от текст в коментари, споменаващ друг обект. */
+    if (sdStoreFilter && r.store_name !== sdStoreFilter) return false;
     if (sdSearch) {
       var q = sdSearch.toLowerCase();
       var hay = [r.store_name,r.supplier,r.material_name,r.material_code,r.order_number,r.comment].join(' ').toLowerCase();
@@ -117,26 +148,40 @@ function renderStockDiff() {
     '⚠️ ЗАПРИХОЖДАВАТЕ САМО АКО СТОКАТА Е ПРИ ВАС И Е В ДОБЪР ТЪРГОВСКИ ВИД!'+
     '</div>';
 
-  /* Новоподадени бланки - чакат преглед от Цветелина */
-  h += renderDiffReportsSection();
-
-  /* Подтабове по посока - разделят главната (резолвирана) таблица, за да не
-     се смесват доставчиковите разлики (грижа на Цвети) с междускладовите
-     (грижа на логистичните складове). Не важи за самите складове - тяхната
-     видимост вече е ограничена другояче (само собствените им насрещни). */
-  if(!isLogisticsWarehouseUser()){
+  /* Подтабове по посока - разделят И новоподадените бланки, И главната
+     (резолвирана) таблица, за да не се смесват доставчиковите разлики
+     (грижа на Цвети) с междускладовите (грижа на логистичните складове).
+     Не важи за самите складове - тяхната видимост вече е ограничена
+     другояче (само собствените им насрещни). */
+  if(sdDirTabsActive()){
     var dirCounts = {supplier:0, interstore:0};
     sdData.forEach(function(r){
       if(!r.type) return;
-      var rp = diffReports.find(function(x){return x.id===r.report_id;});
-      var d = rp ? rp.direction : 'supplier';
-      if(dirCounts.hasOwnProperty(d)) dirCounts[d]++;
+      if(dirCounts.hasOwnProperty(sdLineDirection(r))) dirCounts[sdLineDirection(r)]++;
     });
-    h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
-    h += '<button onclick="setSDDirTab(\'supplier\')" style="border:1px solid '+(sdDirTab==='supplier'?'#0f172a':'#e2e8f0')+';padding:6px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:'+(sdDirTab==='supplier'?'#0f172a':'#fff')+';color:'+(sdDirTab==='supplier'?'#fff':'#64748b')+';">📦 Разлики от доставчици ('+dirCounts.supplier+')</button>';
-    h += '<button onclick="setSDDirTab(\'interstore\')" style="border:1px solid '+(sdDirTab==='interstore'?'#0f172a':'#e2e8f0')+';padding:6px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:'+(sdDirTab==='interstore'?'#0f172a':'#fff')+';color:'+(sdDirTab==='interstore'?'#fff':'#64748b')+';">🔄 Разлики от междускладови трансфери ('+dirCounts.interstore+')</button>';
+    /* Брой НОВИ (непрегледани) бланки по посока - за да се вижда още от таба,
+       че от другата страна чака нещо, без да се превключва. */
+    var dirNew = {supplier:0, interstore:0};
+    sdVisibleUnreviewedReports().forEach(function(rep){
+      var d = rep.direction || 'supplier';
+      if(dirNew.hasOwnProperty(d)) dirNew[d]++;
+    });
+    h += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
+    [['supplier','📦 Разлики от доставчици'],['interstore','🔄 Разлики от междускладови трансфери']].forEach(function(t){
+      var a = sdDirTab===t[0];
+      h += '<button data-dir="'+t[0]+'" onclick="setSDDirTab(this.dataset.dir)" style="border:1px solid '+(a?'#0f172a':'#e2e8f0')+';padding:6px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:'+(a?'#0f172a':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+t[1]+' ('+dirCounts[t[0]]+')'+
+        (dirNew[t[0]]?'<span style="margin-left:6px;background:#dc2626;color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;">🆕 '+dirNew[t[0]]+'</span>':'')+'</button>';
+    });
     h += '</div>';
   }
+
+  /* Търсене + чипове по магазин - филтрират И новите бланки, И таблицата
+     (както в таб "За връщане") */
+  h += '<input id="sd-search-input" value="'+escVal(sdSearch)+'" oninput="setSDSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик/изпращач, артикул, SAP, документ, поръчка..." style="width:100%;max-width:520px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
+  h += sdStoreChipsHtml();
+
+  /* Новоподадени бланки - чакат преглед от Цветелина */
+  h += renderDiffReportsSection();
 
   /* Карти */
   h += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;max-width:400px;">';
@@ -154,9 +199,6 @@ function renderStockDiff() {
   });
   h += '</div>';
 
-  /* Търсене */
-  h += '<input id="sd-search-input" value="'+escVal(sdSearch)+'" oninput="setSDSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик, артикул, SAP, поръчка..." style="width:100%;max-width:420px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
-
   /* Филтри */
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
   [['all','Всички ('+sdData.length+')'],['pending','⏳ Невзета ('+pending+')'],['taken','✅ Взета ('+taken+')']].forEach(function(f){
@@ -172,7 +214,7 @@ function renderStockDiff() {
     h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">';
     h += '<thead><tr style="background:#f8fafc;">';
-    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Кредитно','Коментар','Коментар Контролер','Отговор на склада',''].forEach(function(c){
+    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Кредитно','Снимки','Коментар','Коментар Контролер','Отговор на склада',''].forEach(function(c){
       h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
     });
     h += '</tr></thead><tbody>';
@@ -206,6 +248,11 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.confirmed_date)+'</td>'+
         '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
         '<td style="padding:7px 10px;white-space:nowrap;">'+creditCell+'</td>'+
+        /* Снимките са прикачени на ниво БЛАНКА (differences_reports.photos), не
+           на реда - затова не се виждаха тук, след като редът бъде решен и
+           излезе от секцията "Нови подадени бланки" (напр. при директно
+           решение "Липса" без коментар). */
+        '<td style="padding:7px 10px;">'+diffReportPhotoThumbs(r.report_id)+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.comment||'')+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.resolution_comment||'')+(normSDAttachments(r.attachments).length?' 📎'+normSDAttachments(r.attachments).length:'')+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
@@ -230,6 +277,104 @@ function renderStockDiff() {
   h += '</div>';
   h += sdModalHtml();
   wrap.innerHTML = h;
+  sdRestoreScroll();
+  sdUpdateTabBadgeFromData();
+}
+
+/* ── Помощни функции за посока / видимост / снимки ── */
+/* Посоката на един ред идва от родителската бланка; ръчно добавените редове
+   (без report_id) се третират като доставчикови - там винаги са били. */
+function sdLineDirection(line){
+  var rp = diffReports.find(function(x){return x.id===line.report_id;});
+  return (rp && rp.direction) ? rp.direction : 'supplier';
+}
+/* Логистичните складове не виждат подтабовете по посока - тяхната видимост
+   вече е ограничена до собствените им насрещни (винаги междускладови). */
+function sdDirTabsActive(){ return !isLogisticsWarehouseUser(); }
+/* Непрегледаните бланки, които ТОЗИ потребител изобщо има право да види -
+   без филтрите по посока/магазин/търсене (те са за екрана, не за броячите). */
+function sdVisibleUnreviewedReports(){
+  var list = diffReports.filter(function(r){ return !r.reviewed; });
+  if(isLogisticsWarehouseUser()){
+    list = list.filter(function(r){ return r.counterpart === currentUser.store_name; });
+  }
+  return list;
+}
+/* Миниатюри на снимките, качени от МАГАЗИНА към бланката. Показват се и в
+   главната таблица, и в модала - независимо дали редът е още непрегледан,
+   или Цвети вече го е решила (напр. като "Липса"). */
+function diffReportPhotoThumbs(reportId, size){
+  if(!reportId) return '<span style="color:#cbd5e1;">—</span>';
+  var rep = diffReports.find(function(x){return x.id===reportId;});
+  var photos = (rep && Array.isArray(rep.photos)) ? rep.photos : [];
+  if(!photos.length) return '<span style="color:#cbd5e1;">—</span>';
+  var px = size || 30;
+  var h = '<div style="display:flex;flex-wrap:wrap;gap:3px;">';
+  photos.forEach(function(p){
+    if(!p || !p.url) return;
+    /* Не всичко, качено през "Снимай сега/Избери от галерия", реално е снимка -
+       служителите понякога прикачват сканирани PDF документи, които <img> не
+       може да покаже вградено. */
+    var isImg = /\.(jpe?g|png|gif|webp)(\?|$)/i.test(p.url);
+    if(isImg){
+      h += '<a href="'+esc(p.url)+'" target="_blank" title="'+esc(p.name||'Снимка')+'"><img src="'+esc(p.url)+'" style="width:'+px+'px;height:'+px+'px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0;"></a>';
+    } else {
+      h += '<a href="'+esc(p.url)+'" target="_blank" title="'+esc(p.name||'Файл')+'" style="display:inline-flex;align-items:center;justify-content:center;width:'+px+'px;height:'+px+'px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;font-size:13px;text-decoration:none;">📄</a>';
+    }
+  });
+  h += '</div>';
+  return h;
+}
+
+/* ── Чипове за филтриране по магазин (както в таб "За връщане") ── */
+/* Списъкът се гради от магазините, реално налични в текущата посока - и от
+   непрегледаните бланки, и от вече решените редове, за да не изчезва чипът
+   на магазин точно след като бланката му бъде прегледана. */
+function sdStoresInCurrentTab(){
+  var seen = {}, out = [];
+  var add = function(s){ if(s && !seen[s]){ seen[s]=1; out.push(s); } };
+  sdVisibleUnreviewedReports().forEach(function(rep){
+    if(sdDirTabsActive() && (rep.direction||'supplier') !== sdDirTab) return;
+    add(rep.store_name);
+  });
+  sdData.forEach(function(r){
+    if(!r.type) return;
+    if(isLogisticsWarehouseUser()){
+      var rp = diffReports.find(function(x){return x.id===r.report_id;});
+      if(!rp || rp.counterpart !== currentUser.store_name) return;
+    } else if(sdLineDirection(r) !== sdDirTab) return;
+    add(r.store_name);
+  });
+  return out.sort();
+}
+function sdStoreCount(store){
+  var n = 0;
+  sdVisibleUnreviewedReports().forEach(function(rep){
+    if(sdDirTabsActive() && (rep.direction||'supplier') !== sdDirTab) return;
+    if(rep.store_name === store) n++;
+  });
+  sdData.forEach(function(r){
+    if(!r.type) return;
+    if(isLogisticsWarehouseUser()){
+      var rp = diffReports.find(function(x){return x.id===r.report_id;});
+      if(!rp || rp.counterpart !== currentUser.store_name) return;
+    } else if(sdLineDirection(r) !== sdDirTab) return;
+    if(r.store_name === store) n++;
+  });
+  return n;
+}
+function sdStoreChipsHtml(){
+  var stores = sdStoresInCurrentTab();
+  if(stores.length < 2) return ''; /* 1 магазин (или 0) - чиповете само заемат място */
+  var total = stores.reduce(function(m,s){ return m + sdStoreCount(s); }, 0);
+  var h = '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">';
+  h += '<button data-store="" onclick="setSDStoreFilter(this.dataset.store)" style="border:1px solid '+(!sdStoreFilter?'#2563eb':'#e2e8f0')+';background:'+(!sdStoreFilter?'#eff6ff':'#fff')+';color:'+(!sdStoreFilter?'#2563eb':'#64748b')+';border-radius:20px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">🏪 Всички ('+total+')</button>';
+  stores.forEach(function(s){
+    var a = sdStoreFilter===s;
+    h += '<button data-store="'+esc(s)+'" onclick="setSDStoreFilter(this.dataset.store)" style="border:1px solid '+(a?'#2563eb':'#e2e8f0')+';background:'+(a?'#eff6ff':'#fff')+';color:'+(a?'#2563eb':'#64748b')+';border-radius:20px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">'+esc(s)+' ('+sdStoreCount(s)+')</button>';
+  });
+  h += '</div>';
+  return h;
 }
 
 /* ── Бутони за решение по ред (само canReviewDiff) ── */
@@ -303,6 +448,8 @@ function openWarehouseResponseModal(lineId,val){
 }
 function submitWarehouseResponse(lineId,val){
   var commentEl = document.getElementById('whr-comment');
+  var whLine = sdData.find(function(x){return String(x.id)===String(lineId);});
+  sdKeepScroll(whLine?whLine.report_id:null);
   sbPatch('stock_differences','id=eq.'+lineId,{warehouse_response:val,warehouse_comment:commentEl?commentEl.value:''}).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     var el=document.getElementById('whr-ov'); if(el)el.remove();
@@ -335,6 +482,9 @@ function resolveDiffLine(id,type){
   if(!canReviewDiff()){toast('Нямаш права за това действие','#dc2626');return;}
   var line=sdData.find(function(x){return String(x.id)===String(id);});
   if(!line)return;
+  /* Котва към бланката, по която се работи - след пре-рендирането оставаме на
+     нея, вместо да ни връща най-отгоре на списъка. */
+  sdKeepScroll(line.report_id);
   sbPatch('stock_differences','id=eq.'+id,{type:type,status:'pending'}).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     line.type=type; line.status='pending'; /* локално, за незабавна проверка по-долу без чакане на reload */
@@ -361,7 +511,11 @@ function resolveDiffLine(id,type){
 
 function setSDFilter(f) { sdFilter=f; renderStockDiff(); }
 function setSDTypeFilter(f) { sdTypeFilter=f; renderStockDiff(); }
-function setSDDirTab(t) { sdDirTab=t; renderStockDiff(); }
+/* Смяната на посока нулира филтъра по магазин - магазините в двата таба са
+   различни набори и запазен чип от другия таб би дал празен екран. */
+function setSDDirTab(t) { sdDirTab=t; sdStoreFilter=''; renderStockDiff(); }
+function setSDStoreFilter(s) { sdStoreFilter=s||''; renderStockDiff(); }
+function sdClearFilters(){ sdStoreFilter=''; sdSearch=''; renderStockDiff(); }
 /* Пре-рендира при търсене, но запазва фокуса/позицията на курсора в полето -
    иначе всяко натискане на клавиш би "изритвало" потребителя от полето. */
 function setSDSearch(val){
@@ -494,6 +648,20 @@ function sdModalHtml() {
 
     '<label class="fl">Коментар</label>'+
     '<input class="fi" id="sd-comment" value="'+esc(r.comment||'')+'" placeholder="напр. ЗАПРИХОДЕТЕ С РЕВИЗИЯ / ЧАКАМЕ">';
+
+  /* Снимките, качени от магазина към бланката - само за преглед. Показваме ги
+     и тук, за да не се налага Цвети да търси бланката отделно, докато пише
+     решението/коментара си. */
+  if(isEdit && r.report_id){
+    var repPhotos = (function(){
+      var rep = diffReports.find(function(x){return x.id===r.report_id;});
+      return (rep && Array.isArray(rep.photos)) ? rep.photos : [];
+    })();
+    if(repPhotos.length){
+      h += '<label class="fl">Снимки от магазина ('+repPhotos.length+')</label>'+
+        '<div style="margin-bottom:8px;">'+diffReportPhotoThumbs(r.report_id,56)+'</div>';
+    }
+  }
 
   /* Коментар Контролер + прикачване на документ - само за Цвети/admin/logistics */
   if(canReview){
@@ -697,11 +865,38 @@ function diffCategoryLabel(v){
 
 /* ── Секция с подадени бланки (чакат преглед) ── */
 function renderDiffReportsSection(){
-  var unreviewed = diffReports.filter(function(r){return !r.reviewed;});
-  if(isLogisticsWarehouseUser()){
-    unreviewed = unreviewed.filter(function(r){return r.counterpart===currentUser.store_name;});
+  var allVisible = sdVisibleUnreviewedReports();
+  var unreviewed = allVisible.slice();
+  /* Подтаб по посока - Доставчик / Междускладов трансфер (искане на Цвети:
+     двата потока да не се смесват в един списък). */
+  if(sdDirTabsActive()){
+    unreviewed = unreviewed.filter(function(r){ return (r.direction||'supplier') === sdDirTab; });
   }
-  if(!unreviewed.length) return '';
+  /* Чип по магазин + свободно търсене - същите контроли като за таблицата
+     по-долу, за да не се търси на две различни места. */
+  if(sdStoreFilter){
+    unreviewed = unreviewed.filter(function(r){ return r.store_name === sdStoreFilter; });
+  }
+  if(sdSearch){
+    var qRep = sdSearch.toLowerCase();
+    unreviewed = unreviewed.filter(function(r){
+      var lines = sdData.filter(function(x){return x.report_id===r.id;});
+      var hay = [r.store_name,r.counterpart,r.document_number,r.general_comment,r.submitted_by]
+        .concat(lines.map(function(l){ return [l.material_code,l.material_name,l.comment,l.resolution_comment].join(' '); }))
+        .join(' ').toLowerCase();
+      return hay.indexOf(qRep) !== -1;
+    });
+  }
+  if(!unreviewed.length){
+    /* Има непрегледани бланки, но текущите филтри ги крият - казваме го явно,
+       вместо секцията просто да изчезне и да изглежда, че няма нищо за преглед. */
+    if(allVisible.length && (sdStoreFilter || sdSearch)){
+      return '<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#5b21b6;">'+
+        '🆕 Има '+allVisible.length+' непрегледан'+(allVisible.length===1?'а бланка':'и бланки')+', но нито една не отговаря на текущия филтър. '+
+        '<button onclick="sdClearFilters()" style="border:none;background:#7c3aed;color:#fff;border-radius:6px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;margin-left:6px;">Изчисти филтъра</button></div>';
+    }
+    return '';
+  }
   /* Бланки с наскоро коригиран от магазина ред изскачат най-отгоре -
      иначе биха останали "погребани" в дъното на списъка. */
   /* Бланка, на която складът вече е отговорил напълно (всички редове имат
@@ -726,11 +921,13 @@ function renderDiffReportsSection(){
     return 0; /* иначе пази оригиналния ред */
   });
   var h='<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:14px;">';
-  h+='<div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:10px;">🆕 Нови подадени бланки — чакат преглед ('+unreviewed.length+')</div>';
+  h+='<div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:10px;">🆕 Нови подадени бланки — чакат преглед ('+unreviewed.length+(unreviewed.length!==allVisible.length?' от '+allVisible.length:'')+')'+
+     (sdDirTabsActive()?' <span style="font-weight:500;color:#7c3aed;">· '+(sdDirTab==='supplier'?'📦 Доставчик':'🔄 Междускладов трансфер')+'</span>':'')+'</div>';
   unreviewed.forEach(function(rep){
     var lines = sdData.filter(function(x){return x.report_id===rep.id;});
     var wasCorrected = lines.some(function(l){return !!l.store_corrected_at;});
-    h+='<div style="background:#fff;border:1px solid '+(wasCorrected?'#fbbf24':'#e9d5ff')+';border-radius:8px;padding:12px;margin-bottom:8px;'+(wasCorrected?'box-shadow:0 0 0 1px #fde68a;':'')+'">';
+    /* id-то е котвата, към която се връщаме след пре-рендиране (виж sdKeepScroll) */
+    h+='<div id="diff-rep-'+rep.id+'" style="background:#fff;border:1px solid '+(wasCorrected?'#fbbf24':'#e9d5ff')+';border-radius:8px;padding:12px;margin-bottom:8px;'+(wasCorrected?'box-shadow:0 0 0 1px #fde68a;':'')+'">';
     h+='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">';
     h+='<div><span style="font-weight:700;">🏪 '+esc(rep.store_name||'')+'</span>'+
        (wasCorrected?' <span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">✏️ КОРИГИРАНА</span>':'')+
@@ -838,6 +1035,7 @@ function submitSDCorrection(){
     comment: commentEl.value,
     store_corrected_at: new Date().toISOString()
   };
+  sdKeepScroll(current?current.report_id:null);
   sbPatch('stock_differences','id=eq.'+sdCorrectLineId,data).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     var el=document.getElementById('sdc-ov'); if(el)el.remove();
@@ -1363,4 +1561,105 @@ function sendDiffEmail(reportId){
     toast('Грешка: '+(err.message||err),'#dc2626');
     if(btn){btn.disabled=false;btn.textContent='✉️ Изпрати';}
   });
+}
+
+/* ══════════════════════════════════════════
+   БРОЯЧ-НОТИФИКАЦИЯ ВЪРХУ ТАБ "РАЗЛИКИ"
+   Червено балонче с брой върху самия таб, за да се види нова подадена
+   разлика, без табът да е отворен. Броят е РАЗЛИЧЕН според ролята:
+     · Цвети / ЦО (admin, accounting, logistics) - всички непрегледани бланки
+     · логистичен склад - само бланките, при които той е насрещна страна
+       и още не е отговорил по всички редове
+     · магазин - собствените му непрегледани бланки
+   Елементът се създава динамично - index.html не се пипа.
+══════════════════════════════════════════ */
+var SD_BADGE_POLL_MS = 60000;
+var _sdBadgePoll = null;
+
+function sdTabBadgeEl(){
+  var tab = document.getElementById('tab-stock-diff');
+  if(!tab) return null;
+  var b = document.getElementById('badge-stock-diff');
+  if(!b){
+    if(!tab.style.position) tab.style.position = 'relative';
+    b = document.createElement('span');
+    b.id = 'badge-stock-diff';
+    b.style.cssText = 'position:absolute;top:2px;right:4px;min-width:16px;height:16px;padding:0 4px;'+
+      'background:#dc2626;color:#fff;border-radius:20px;font-size:10px;font-weight:700;line-height:16px;'+
+      'text-align:center;display:none;pointer-events:none;box-shadow:0 0 0 2px #0f172a;';
+    tab.appendChild(b);
+  }
+  return b;
+}
+function sdSetTabBadge(n){
+  var b = sdTabBadgeEl();
+  if(!b) return;
+  if(n > 0){ b.textContent = n > 99 ? '99+' : String(n); b.style.display = 'block'; }
+  else { b.style.display = 'none'; }
+}
+/* Брои от вече заредените в паметта данни - използва се след всеки рендер,
+   за да не изостава балончето спрямо това, което потребителят вижда. */
+function sdUnreviewedCountFor(reports, lines){
+  if(!currentUser) return 0;
+  var unrev = (reports||[]).filter(function(r){ return !r.reviewed; });
+  if(isLogisticsWarehouseUser()){
+    return unrev.filter(function(r){
+      if(r.counterpart !== currentUser.store_name) return false;
+      /* Бланка, по която складът вече е отговорил на ВСИЧКИ редове, вече не
+         чака него - не бива да виси като спешна на таба. */
+      var repLines = (lines||[]).filter(function(x){ return x.report_id===r.id; });
+      if(!repLines.length) return true;
+      return !repLines.every(function(l){ return !!l.warehouse_response; });
+    }).length;
+  }
+  if(canReviewDiff()) return unrev.length;
+  /* Магазин - само своите (сървърната заявка вече е ограничена по store_name,
+     но филтрираме и тук, за да е коректно и при няколко назначени обекта). */
+  var mine = assignedStores();
+  if(!mine) return unrev.length;
+  return unrev.filter(function(r){ return mine.indexOf(r.store_name) >= 0; }).length;
+}
+function sdUpdateTabBadgeFromData(){
+  sdSetTabBadge(sdUnreviewedCountFor(diffReports, sdData));
+}
+/* Самостоятелна лека заявка - работи и когато табът "Разлики" изобщо не е
+   отварян тази сесия (тогава diffReports/sdData са празни). */
+function sdRefreshTabBadge(){
+  if(!currentUser) return;
+  var q = 'select=id,store_name,counterpart,reviewed&reviewed=eq.false';
+  var qLines = 'select=report_id,warehouse_response';
+  if(isLogisticsWarehouseUser()){
+    q += '&counterpart=eq.' + encodeURIComponent(currentUser.store_name);
+  } else if(!canReviewDiff()){
+    q += storeQ();
+  }
+  sbGet('differences_reports', q).then(function(reports){
+    if(!Array.isArray(reports)){ return; }
+    if(!isLogisticsWarehouseUser()){
+      sdSetTabBadge(sdUnreviewedCountFor(reports, []));
+      return;
+    }
+    /* Само за складовете ни трябват и редовете (за да пропуснем бланките,
+       на които вече са отговорили изцяло). */
+    if(!reports.length){ sdSetTabBadge(0); return; }
+    sbGet('stock_differences', qLines + '&report_id=in.(' + reports.map(function(r){return r.id;}).join(',') + ')')
+      .then(function(lines){
+        sdSetTabBadge(sdUnreviewedCountFor(reports, Array.isArray(lines)?lines:[]));
+      }).catch(function(){ sdSetTabBadge(reports.length); });
+  }).catch(function(){});
+}
+function startSDBadgePolling(){
+  if(_sdBadgePoll) clearInterval(_sdBadgePoll);
+  sdRefreshTabBadge();
+  _sdBadgePoll = setInterval(sdRefreshTabBadge, SD_BADGE_POLL_MS);
+}
+/* Закачаме се за startApp (както прави notifications.js) - стартира се след
+   логин, за всяка роля. Този файл се зарежда ПРЕДИ notifications.js, така че
+   веригата от обвивки остава коректна. */
+if(typeof startApp === 'function'){
+  var _sdOrigStartApp = startApp;
+  startApp = function(){
+    _sdOrigStartApp();
+    setTimeout(startSDBadgePolling, 2500);
+  };
 }
