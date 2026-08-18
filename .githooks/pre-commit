@@ -1,0 +1,62 @@
+#!/bin/sh
+# Автоматична проверка преди всеки commit.
+# Включва се веднъж с:  git config core.hooksPath .githooks
+#
+# Прескача се при нужда с:  git commit --no-verify
+
+REPO=$(git rev-parse --show-toplevel)
+cd "$REPO" || exit 1
+
+# Само JS файлове от корена на репото, които влизат в този commit.
+STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^[^/]+\.js$')
+
+[ -z "$STAGED" ] && exit 0
+
+echo ""
+echo "── проверка преди commit ──────────────────────"
+
+FAIL=0
+
+# 1. Синтаксис на всеки променен файл
+for f in $STAGED; do
+  if node --check "$f" 2>/tmp/nodecheck.err; then
+    echo "  ok    $f"
+  else
+    echo "  ГРЕШКА  $f"
+    grep -v '^\s*$' /tmp/nodecheck.err | grep -v '^\s*at ' | head -4 | sed 's/^/          /'
+    FAIL=1
+  fi
+done
+rm -f /tmp/nodecheck.err
+
+# 2. Всички модули заредени заедно (само ако jsdom го има)
+if [ -d node_modules/jsdom ]; then
+  if node .claude/skills/tmax-jsdom-test/smoke.js . >/tmp/smoke.out 2>&1; then
+    echo "  ok    всички модули се зареждат чисто"
+  else
+    echo ""
+    echo "  smoke.js се провали:"
+    if grep -qE '❌|⚠️' /tmp/smoke.out; then
+      grep -E '❌|⚠️|   · ' /tmp/smoke.out | sed 's/^/    /'
+    else
+      tail -8 /tmp/smoke.out | sed 's/^/    /'
+    fi
+    FAIL=1
+  fi
+  rm -f /tmp/smoke.out
+else
+  echo "  (jsdom липсва — smoke.js прескочен; 'npm i -D jsdom')"
+fi
+
+echo "───────────────────────────────────────────────"
+
+if [ "$FAIL" -ne 0 ]; then
+  echo ""
+  echo "Commit-ът е спрян. Поправи горното или, ако знаеш какво правиш:"
+  echo "  git commit --no-verify"
+  echo ""
+  exit 1
+fi
+
+echo ""
+exit 0
