@@ -1,0 +1,22 @@
+name: test
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install --no-audit --no-fund
+      - name: Синтаксис на всички модули
+        run: |
+          for f in *.js tests/*.js; do node --check "$f" || exit 1; done
+      - name: Smoke — всички модули заедно
+        run: node .claude/skills/tmax-jsdom-test/smoke.js .
+      - name: Функционални тестове
+        run: npm test
