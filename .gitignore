@@ -1,6 +1,5 @@
 # Локални dev зависимости (jsdom тестове) — не влизат в GitHub Pages deploy
 node_modules/
-package-lock.json
 npm-debug.log*
 
 # Редакторски / OS файлове
