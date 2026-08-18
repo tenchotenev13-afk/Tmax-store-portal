@@ -8,3 +8,7 @@ npm-debug.log*
 .idea/
 Thumbs.db
 desktop.ini
+
+# Claude Code — временни worktree-и (пълни копия на репото).
+# .claude/skills/ НЕ се игнорира: skill-овете пътуват с репото нарочно.
+.claude/worktrees/
