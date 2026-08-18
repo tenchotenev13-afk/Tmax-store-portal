@@ -45,20 +45,27 @@ node .claude/skills/tmax-jsdom-test/smoke.js .
 
 ### Стъпка 2 — функционален тест
 
-Копирай `example.test.js` в корена на репото като `test-<фийчър>.js` и пренапиши
-секциите. Не забравяй да оправиш пътя на require:
+Копирай `example.test.js` като `tests/<фийчър>.test.js` и пренапиши
+секциите. Не забравяй да оправиш пътя на require — тестът живее в `tests/`,
+затова е с `../`:
 
 ```js
-const H = require('./.claude/skills/tmax-jsdom-test/harness');
+const H = require('../.claude/skills/tmax-jsdom-test/harness');
 ```
+
+Добави името на новия файл в списъка `TESTS` в `tests/run-all.js` (ред 16).
+Списъкът е изричен — папката НЕ се сканира, така че нерегистриран тест
+никога не се пуска и мълчи, вместо да пада.
 
 Пускане:
 
 ```bash
-node test-<фийчър>.js .
+npm test                        # целият пакет през tests/run-all.js
+node tests/<фийчър>.test.js .   # само този тест
 ```
 
-Exit code 1 при поне една паднала проверка.
+Exit code 1 при поне една паднала проверка. `run-all.js` спира при първия
+провал и не пуска останалите.
 
 ## API на harness.js
 
@@ -181,7 +188,8 @@ await ticks();   // 3 макро-таска — след клик, който п
 
 - [ ] `node --check <файл>.js`
 - [ ] `node .claude/skills/tmax-jsdom-test/smoke.js .` → 0
-- [ ] `node test-<фийчър>.js .` → 0
+- [ ] `npm test` → 0 (не само отделният тест — целият пакет)
+- [ ] новият тест е добавен в `TESTS` в `tests/run-all.js`
 - [ ] нов запис И редакция на съществуващ — тествани и двата пътя
 - [ ] празни/липсващи данни — fallback тестван
 - [ ] граничен случай точно на лимита — тестван явно
