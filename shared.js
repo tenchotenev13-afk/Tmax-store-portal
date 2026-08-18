@@ -4,7 +4,39 @@
 var SB_URL='https://xiwkdiqqplgdcrkewgtv.supabase.co',SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',API=SB_URL+'/rest/v1';
 var H={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'application/json','Prefer':'return=minimal'};
 
-function sbGet(t,q){return fetch(API+'/'+t+(q?'?'+q:''),{headers:H}).then(function(r){return r.json();});}
+/* sbGet резолвва ВИНАГИ с масив — никога не хвърля и никога не връща обект.
+   Преди: `.then(r.json())` хвърляше при 401 с празно тяло (промисът се
+   отхвърляше, а 103 от 166 извиквания нямат .catch → нищо не се показваше
+   никъде), а при грешка с тяло връщаше обекта на грешката, който 162-те
+   `Array.isArray(x)?x:[]` проверки третираха като празен списък — тихо
+   празен екран без съобщение.
+   Сега всяка грешка е видима (toast) и проследима (console.error с URL-а),
+   а извикващите получават това, което вече очакват — масив. */
+function sbGet(t,q){
+  var url=API+'/'+t+(q?'?'+q:'');
+  function fail(status,d){
+    var msg=(d&&(d.message||d.hint))||('HTTP '+(status||'—'));
+    try{console.error('sbGet '+url+' → '+(status||'мрежов срив')+': '+msg);}catch(e){}
+    /* toast пипа DOM — ако #toast липсва, това не бива да върне грешката
+       обратно във веригата, която току-що обезопасихме. */
+    try{toast('Грешка при зареждане: '+msg,'#dc2626');}catch(e){}
+    return [];
+  }
+  return fetch(url,{headers:H}).then(function(r){
+    /* .catch около json() — празното тяло при 401 хвърля SyntaxError.
+       Същият шаблон като в sbPostReturn по-долу. */
+    return r.json().catch(function(){return null;}).then(function(d){
+      /* GET към PostgREST връща масив при успех и обект при грешка;
+         обект (или нищо) значи, че заявката не е минала. */
+      if(Array.isArray(d))return d;
+      return fail(r.status,d);
+    });
+  }).catch(function(e){
+    /* Мрежов срив: fetch отхвърля, преди изобщо да има отговор. Без този
+       клон 103-те вериги без .catch пак биха мълчали при офлайн. */
+    return fail(0,{message:String((e&&e.message)||e)});
+  });
+}
 function sbPost(t,b){return fetch(API+'/'+t,{method:'POST',headers:H,body:JSON.stringify(b)}).then(function(r){return r.ok?{ok:true}:r.json().then(function(e){return{ok:false,error:e};});});}
 /* Като sbPost, но връща и създадения ред. Нужно е, когато базата попълва поле
    при записа (номерът на клиентската заявка се раздава от тригер по обект) и
