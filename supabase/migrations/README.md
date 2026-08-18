@@ -1,7 +1,21 @@
 # Миграции
 
-Пълната история на схемата на проекта `xiwkdiqqplgdcrkewgtv`, изтеглена от
+Историята на схемата на проекта `xiwkdiqqplgdcrkewgtv`, изтеглена от
 Supabase на **18.08.2026** — 28 миграции, от `20260730123224` нататък.
+
+**Тази история не е пълна.** Част от схемата е приложена, преди папката да
+съществува, и няма миграция зад себе си. База, пресъздадена само от файловете
+тук, ще излезе без следните колони — а кодът ги ползва:
+
+| Живо в базата, без миграция | Единственият запис |
+|---|---|
+| `bulletin_tasks.attachments` — jsonb, данни в 31 от 41 задачи | `legacy-notes/bulletin-task-attachments-schema.sql` |
+| `stock_differences.warehouse_response`, `warehouse_comment` — text, ползвани от `stock-differences.js` | `legacy-notes/stock-differences-warehouse-response-schema.sql` |
+| `warranty_brands.card_template_file` — text, NULL в 123-те реда и неползвана в кода | `legacy-notes/warranty-brand-template-priority.sql` |
+
+Списъкът е от сверяване на 18.08.2026 между `legacy-notes/`, миграциите и
+живата база. Той покрива само проверените места и не е гаранция, че друго
+не липсва.
 
 Имената са същите като в Supabase: `<версия>_<име>.sql`. Не ги преименувай —
 версията е и подредбата, и връзката с реда в `supabase_migrations.schema_migrations`.
@@ -60,5 +74,21 @@ Supabase на **18.08.2026** — 28 миграции, от `20260730123224` на
 `supabase/legacy-notes/` съдържа седем по-стари `.sql` файла от корена на
 репото. Те са **бележки, не миграции** — писани са на ръка успоредно с
 прилагането и не са част от историята на Supabase. Не ги местѝ тук и не ги
-пускай с `apply_migration`; част от тях описват промени, които вече са
-приложени под друго име в тази папка.
+пускай с `apply_migration`.
+
+Всеки от седемте започва с маркер дали е покрит от миграция. Разпределението
+към 18.08.2026 е четири към три:
+
+| Бележка | Състояние |
+|---|---|
+| `client-order-groups-schema.sql` | покрита — `20260818060806_client_orders_group_id` |
+| `client-order-numbering-schema.sql` | покрита — `20260818071737_client_order_numbering_per_store` |
+| `co-processed-schema.sql` | покрита — `20260818054941_co_processed_client_orders` |
+| `paid-transport-schema.sql` | покрита — `20260817205509_paid_transport_link_client_orders` |
+| `bulletin-task-attachments-schema.sql` | **без миграция**, жива схема |
+| `stock-differences-warehouse-response-schema.sql` | **без миграция**, жива схема |
+| `warranty-brand-template-priority.sql` | **без миграция**; фийчърът е върнат назад, колоната е мъртва |
+
+Първите четири са история и могат да се четат само като контекст. Последните
+три са единственият запис на жива схема — докато не им се напише миграция,
+изтриването им е загуба на информация.
