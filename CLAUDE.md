@@ -126,11 +126,15 @@ node test-<фийчър>.js .                           # функционалн
 ## Инструменти
 
 - **Supabase MCP** — `apply_migration` за DDL, `execute_sql` за inspection/DML,
-  `get_logs` с `service: "storage"` за egress диагностика
-- **Edge Functions** — 9 на брой, включително `auth-login` и
-  `auth-set-password`. Изходният код в момента **не е в репото** — само в
-  Supabase. Не предлагам промяна в тях, без изрично да отбележа, че няма
-  история и rollback.
+  `query_logs` за диагностика по логовете (ClickHouse SQL срещу таблица `logs`,
+  филтър по `source` — напр. `edge_logs`, `postgres_logs`, `function_edge_logs`;
+  прозорецът е максимум 24 часа)
+- **Edge Functions** — 9 на брой. Изходният код е в `supabase/functions/`
+  (описание на всяка — в README-то там). **Репото е записът, не механизмът за
+  деплой** — промяна във файловете НЕ стига до Supabase, няма CI стъпка за това.
+  Деплойът е ръчен през Supabase. Затова преди редакция сверявам файла с живата
+  версия (`get_edge_function`) — иначе рискувам да презапиша промяна, направена
+  директно в Dashboard-а. След ръчен деплой обновявам и файла тук.
 - **SheetJS (xlsx)** — Excel import/export
 - **OneSignal** — push нотификации
 - **pg_cron + Edge Functions** — server-side notification scheduling
