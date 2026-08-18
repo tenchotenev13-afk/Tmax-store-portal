@@ -301,6 +301,8 @@ OneSignalDeferred.push(async function(OneSignal) {
         <button class="filter-btn" onclick="filterOrders('today',this)">🔵 Днес</button>
         <button class="filter-btn" onclick="filterOrders('tomorrow',this)">🟡 Утре</button>
         <button class="filter-btn" onclick="filterOrders('pending',this)">Изчаква</button>
+        <button class="filter-btn" onclick="filterOrders('processed',this)">✅ Обработена от ЦО</button>
+        <button class="filter-btn" onclick="filterOrders('sent',this)">📤 Изпратена</button>
         <button class="filter-btn" onclick="filterOrders('postponed',this)">Отложена</button>
         <button class="filter-btn" onclick="filterOrders('done',this)">Изпълнена</button>
         <button class="filter-btn" onclick="filterOrders('refused',this)">Отказана</button>
@@ -309,6 +311,7 @@ OneSignalDeferred.push(async function(OneSignal) {
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
       <input id="co-search" placeholder="🔍 Търси клиент/продукт/SAP/бон/телефон..." oninput="renderClientOrders()" style="flex:1;min-width:220px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 14px;font-size:13px;font-family:inherit;outline:none;">
+      <select id="co-fulfiller-filter" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:180px;"><option value="">Изпълнява: всички</option></select>
       <select id="co-month" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
     </div>
     <div class="tbl-wrap co-sticky-actions"><table>
@@ -481,6 +484,7 @@ OneSignalDeferred.push(async function(OneSignal) {
   <div class="modal-sub" id="status-info"></div>
   <div class="status-grid">
     <button class="btn" style="background:#fef3c7;color:#92400e;" onclick="setStatus('pending')">⏳ Изчаква</button>
+    <button class="btn" id="status-btn-processed" style="background:#ecfdf5;color:#047857;" onclick="openCoProcessedFromStatusModal()">✅ Обработена от ЦО</button>
     <button class="btn" id="status-btn-sent" style="background:#ede9fe;color:#5b21b6;" onclick="setStatus('sent')">📤 Изпратена</button>
     <button class="btn" id="status-btn-arrived" style="background:#e0f2fe;color:#0369a1;" onclick="setStatus('arrived')">📦 Пристигнала в магазина</button>
     <button class="btn btn-green" onclick="setStatus('done')">✅ Изпълнена</button>

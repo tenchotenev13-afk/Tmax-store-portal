@@ -36,6 +36,19 @@ function isGlobal(){
   return ['admin','accounting','logistics'].indexOf(currentUser.role)>=0;
 }
 
+/* Централен офис — обработва заявките, които магазините пускат към доставчици.
+   Сравнява се без регистър и без интервали, защото в базата има стари записи
+   с различно изписване ("ЦЕНТРАЛЕН ОФИС", " Централен офис"). */
+var CENTRAL_OFFICE='Централен офис';
+function isCentralOffice(name){
+  if(!name)return false;
+  return String(name).trim().toLowerCase()===CENTRAL_OFFICE.toLowerCase();
+}
+/* Текущият потребител работи в ЦО (независимо от ролята: supply, accounting, admin...) */
+function isCentralOfficeUser(){
+  return !!currentUser&&isCentralOffice(currentUser.store_name);
+}
+
 /* Списък магазини за потребителя: null = всички, [] = само своя, [...] = назначени */
 function assignedStores(){
   if(!currentUser)return null;
@@ -90,7 +103,7 @@ function refreshToday(){ TODAY=new Date(); TODAY.setHours(0,0,0,0); }
 setInterval(refreshToday, 5*60*1000); /* на всеки 5 минути */
 document.addEventListener('visibilitychange', function(){ if(!document.hidden) refreshToday(); });
 function calcStatus(delivery,status){
-  if(['done','refused','postponed','approved','arrived','sent'].indexOf(status)>=0)return status;
+  if(['done','refused','postponed','approved','arrived','sent','processed'].indexOf(status)>=0)return status;
   if(!delivery)return'pending';
   var d=new Date(delivery);d.setHours(0,0,0,0);
   var diff=Math.round((d-TODAY)/86400000);
@@ -100,6 +113,9 @@ function statusBadge(s){
   var m={overdue:{l:'🔴 Просрочена',bg:'#fee2e2',c:'#991b1b'},today:{l:'🔵 Днес',bg:'#dbeafe',c:'#1e3a5f'},
     tomorrow:{l:'🟡 Утре',bg:'#fef3c7',c:'#92400e'},pending:{l:'⏳ Изчаква',bg:'#f3f4f6',c:'#374151'},
     approved:{l:'✓ Одобрена',bg:'#dbeafe',c:'#1e3a5f'},
+    /* Централен офис е обработил заявката и я е пуснал към доставчика.
+       НЕ е същото като "Изпратена" — там стоката вече пътува към магазина. */
+    processed:{l:'✅ Обработена от ЦО',bg:'#ecfdf5',c:'#047857'},
     sent:{l:'📤 Изпратена',bg:'#ede9fe',c:'#5b21b6'},
     arrived:{l:'📦 Пристигнала в магазина',bg:'#e0f2fe',c:'#0369a1'},
     /* Транспорт, създаден от клиентска заявка, чиято стока още не е пристигнала —
@@ -109,6 +125,25 @@ function statusBadge(s){
     postponed:{l:'⏱ Отложена',bg:'#f3e8ff',c:'#4c1d95'}};
   var x=m[s]||m.pending;
   return '<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;display:inline-flex;align-items:center;background:'+x.bg+';color:'+x.c+'">'+x.l+'</span>';
+}
+/* Само текстът на статуса, без стилове — за печат и износ, където досега
+   излизаше суровата английска стойност ("pending", "processed"). */
+function statusLabel(s){
+  var m={overdue:'Просрочена',today:'Доставка днес',tomorrow:'Доставка утре',pending:'Изчаква',
+    approved:'Одобрена',processed:'Обработена от ЦО',sent:'Изпратена',
+    arrived:'Пристигнала в магазина',awaiting:'Чака стока',
+    done:'Изпълнена',refused:'Отказана',postponed:'Отложена'};
+  return m[s]||s||'';
+}
+/* Заявка, която Централен офис вече е обработил и която чака доставчика:
+   докато очакваната дата не е минала, тя НЕ бива да ескалира като закъсняла —
+   срокът се води по доставчика, не по датата на подаване. Щом очакваната дата
+   мине, ескалацията се връща (тогава закъснението е реално). */
+function coWaitingSupplier(o){
+  if(!o||o.status!=='processed')return false;
+  if(!o.co_eta)return false;
+  var d=new Date(o.co_eta);d.setHours(0,0,0,0);
+  return d>=TODAY;
 }
 /* ===== МНОЖЕСТВО АРТИКУЛИ (items[]) - споделено между клиентски и транспортни заявки ===== */
 function unitOptionsHtml(sel){
@@ -313,6 +348,10 @@ function openStatus(id,table){
   if(sentBtn)sentBtn.style.display=(table==='client_orders')?'':'none';
   var arrivedBtn=document.getElementById('status-btn-arrived');
   if(arrivedBtn)arrivedBtn.style.display=(table==='client_orders')?'':'none';
+  /* "Обработена от ЦО" е стъпка на Централен офис — показва се само на хора от ЦО
+     и само за заявки, които реално са насочени към ЦО. */
+  var coBtn=document.getElementById('status-btn-processed');
+  if(coBtn)coBtn.style.display=(table==='client_orders'&&rec&&isCentralOffice(rec.fulfiller)&&isCentralOfficeUser())?'':'none';
   document.getElementById('status-modal').classList.add('open');
 }
 function setStatus(status){
@@ -330,10 +369,16 @@ function revertStatus(id,table){
   if(!rec)return;
   var target='pending';
   if(table==='client_orders'){
-    var prevMap={done:'arrived',arrived:'sent',sent:'pending'};
+    /* "Обработена от ЦО" се връща директно в "Изчаква" — стъпката не е задължителна
+       за всички заявки (само за тези към ЦО), затова "Изпратена" не се връща в нея. */
+    var prevMap={done:'arrived',arrived:'sent',sent:'pending',processed:'pending'};
     target=prevMap[rec.status]||'pending';
   }
-  sbPatch(table,'id=eq.'+id,{status:target}).then(function(){
+  var patch={status:target};
+  /* При връщане от "Обработена от ЦО" изчистваме и данните от ЦО — иначе на
+     заявка със статус "Изчаква" остава да виси стара очаквана дата и подвежда. */
+  if(table==='client_orders'&&rec.status==='processed'){patch.co_eta=null;patch.co_note=null;}
+  sbPatch(table,'id=eq.'+id,patch).then(function(){
     if(table==='client_orders'&&typeof syncLinkedTransport==='function')syncLinkedTransport(id,target);
     toast('↩ Върнато');loadAll();
   });

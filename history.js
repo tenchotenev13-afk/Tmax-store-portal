@@ -228,7 +228,10 @@ function renderHistoryResults(){
           '<td>'+esc(o.store_name||'')+'</td>'+
           '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">'+esc(o.phone||'')+'</small></td>'+
           '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+(o.sap?'SAP: '+esc(o.sap):'')+'</small></td>'+
-          '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
+          /* Ориентировъчната дата от ЦО се търси и в История, не само в живия таб */
+          '<td><b>'+fmtDate(o.delivery)+'</b>'+
+            (o.co_eta?'<br><small style="color:#047857;">🏭 ЦО: '+fmtDate(o.co_eta)+'</small>':'')+
+            (o.co_note?'<br><small style="color:#94a3b8;">'+esc(o.co_note)+'</small>':'')+'</td>'+
           '<td>'+statusBadge(calcStatus(o.delivery,o.status))+'</td>'+
         '</tr>';
       }).join('')+
@@ -451,8 +454,10 @@ function printHistoryReport(){
       '<td>'+esc(o.customer_name||'')+'</td>'+
       '<td>'+esc(o.phone||'')+'</td>'+
       '<td>'+(o.sap?esc(o.sap)+' — ':'')+esc(o.product||'')+'</td>'+
-      '<td>'+fmtDate(o.delivery)+'</td>'+
-      '<td>'+esc(o.status||'')+'</td>'+
+      '<td>'+fmtDate(o.delivery)+(o.co_eta?'<br>ЦО: '+fmtDate(o.co_eta):'')+'</td>'+
+      /* Досега тук излизаше суровата стойност ("pending", "done") — в печатна
+         справка за ръководството това няма как да е на английски. */
+      '<td>'+esc(statusLabel(o.status))+'</td>'+
     '</tr>';
   }).join('');
 

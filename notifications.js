@@ -19,6 +19,9 @@ function showLoginBanner(){
   var now2=new Date();now2.setHours(0,0,0,0);
   var od=all.filter(function(o){
     if(o._status==='overdue') return true;
+    /* Заявка, която ЦО е обработил и която още е в срока на доставчика, не е
+       "без отговор" — отговорът е даден, чака се стоката. */
+    if(typeof coWaitingSupplier==='function'&&coWaitingSupplier(o)) return false;
     var days=o.created_at?Math.floor((now2-new Date(o.created_at))/86400000):0;
     return days>=7&&['done','refused','postponed'].indexOf(o._status)<0&&o._isFulfiller;
   });
@@ -26,6 +29,7 @@ function showLoginBanner(){
   var tm=all.filter(function(o){return o._status==='tomorrow';});
   /* Клиентски заявки >5 дни (предупреждение) */
   var oldOrders=clientOrders.filter(function(o){
+    if(typeof coWaitingSupplier==='function'&&coWaitingSupplier(o)) return false;
     var days=o.created_at?Math.floor((now2-new Date(o.created_at))/86400000):0;
     return days>=5&&days<7&&['done','refused','postponed'].indexOf(o._status)<0&&o._isFulfiller;
   });

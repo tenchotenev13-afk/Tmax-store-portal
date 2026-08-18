@@ -6,17 +6,24 @@ function calcElapsed(createdAt){
   return Math.floor((TODAY-created)/86400000);
 }
 
-function elapsedBadge(days, status){
+function elapsedBadge(days, status, order){
   /* Не показваме за финални статуси */
   if(['done','refused','postponed'].indexOf(status)>=0) return '';
+  /* Обработена от ЦО и все още в срока на доставчика — броячът остава спокоен и
+     показва какво чакаме. Иначе заявка с доставчик за 3 седмици светва червено
+     на 10-ия ден без никой да е закъснял. */
+  if(typeof coWaitingSupplier==='function'&&coWaitingSupplier(order)){
+    return '<span style="font-size:11px;font-weight:600;color:#047857;background:#ecfdf5;padding:2px 7px;border-radius:20px;" title="Обработена от ЦО — чака доставчика">🏭 до '+fmtDate(order.co_eta)+'</span>';
+  }
   if(days<5) return '<span style="font-size:11px;color:#94a3b8;">'+days+' дни</span>';
   if(days<7)  return '<span style="font-size:11px;font-weight:600;color:#d97706;background:#fef3c7;padding:2px 7px;border-radius:20px;">⚠️ '+days+' дни</span>';
   if(days<10) return '<span style="font-size:11px;font-weight:600;color:#ea580c;background:#fff7ed;padding:2px 7px;border-radius:20px;">🔶 '+days+' дни</span>';
   return '<span style="font-size:11px;font-weight:600;color:#dc2626;background:#fee2e2;padding:2px 7px;border-radius:20px;animation:rowPulse 1.5s infinite;">🔴 '+days+' дни!</span>';
 }
 
-function elapsedRowStyle(days, baseStatus){
+function elapsedRowStyle(days, baseStatus, order){
   if(['done','refused','postponed'].indexOf(baseStatus)>=0) return '';
+  if(typeof coWaitingSupplier==='function'&&coWaitingSupplier(order)) return '';
   if(days>=10) return 'background:rgba(220,38,38,.04);animation:rowPulse 1.8s infinite;';
   if(days>=7)  return 'background:rgba(234,88,12,.03);';
   if(days>=5)  return 'background:rgba(217,119,6,.03);';
@@ -170,6 +177,72 @@ function submitPaidTransport(id){
   });
 }
 
+/* ═══ ОБРАБОТКА ОТ ЦЕНТРАЛЕН ОФИС ═══
+   ЦО получава заявките, свързва се с доставчика и отбелязва, че е поръчал.
+   Отделен статус, защото "Изпратена" значи друго — стоката вече пътува
+   към магазина. Тук стоката още не съществува, само е поръчана. */
+function openCoProcessedModal(id){
+  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+  if(!o){toast('Заявката не е намерена','#dc2626');return;}
+  if(!isCentralOfficeUser()){toast('Само Централен офис може да маркира този статус','#dc2626');return;}
+  if(!isCentralOffice(o.fulfiller)){toast('Тази заявка не е насочена към Централен офис','#dc2626');return;}
+  var isEdit=o.status==='processed';
+  var items=resolveItems(o).map(function(it){
+    return (it.sap?esc(it.sap)+' — ':'')+esc(it.product||'')+' × '+esc(String(it.qty||1))+' '+esc(it.unit||'бр.');
+  }).join('<br>');
+  var html='<div class="bov" id="cop-ov"><div class="bmod" style="width:480px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">'+
+      '<div style="font-size:15px;font-weight:600;color:#047857;">'+(isEdit?'✏️ Данни от ЦО':'✅ Обработена от ЦО')+'</div>'+
+      '<button onclick="closeCoProcessedModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">Заявка №'+esc(o.in_num||'—')+' · '+esc(o.store_name||'')+' · '+esc(o.customer_name||'')+'</div>'+
+    '<div style="font-size:11.5px;color:#475569;background:#f8fafc;border-radius:6px;padding:7px 10px;margin-bottom:12px;">'+items+'</div>'+
+    '<label class="fl">Ориентировъчна дата за получаване в обекта</label>'+
+    '<input type="date" class="fi" id="cop-eta" value="'+escVal(o.co_eta)+'" style="margin-bottom:10px;">'+
+    '<label class="fl">Коментар от ЦО (доставчик, № на поръчка...)</label>'+
+    '<input class="fi" id="cop-note" value="'+escVal(o.co_note)+'" placeholder="напр. ТЕСИ, поръчка 4500123" style="margin-bottom:12px;">'+
+    '<div style="font-size:11.5px;color:#047857;background:#ecfdf5;border-radius:6px;padding:7px 10px;margin-bottom:14px;">'+
+      'Докато очакваната дата не мине, заявката <b>няма да се брои за закъсняла</b> — броячът „Изминало" изчаква доставчика. След тази дата пак започва да алармира.</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
+      '<button onclick="closeCoProcessedModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+      '<button id="cop-submit" data-id="'+esc(o.id)+'" onclick="submitCoProcessed(this.dataset.id)" style="border:none;background:#047857;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">'+(isEdit?'✓ Запази':'✅ Отбележи като обработена')+'</button>'+
+    '</div></div></div>';
+  var ex=document.getElementById('cop-ov');if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('cop-ov').classList.add('open');
+}
+function closeCoProcessedModal(){var el=document.getElementById('cop-ov');if(el)el.remove();}
+/* Извиква се от бутона в модала "Статус" — там id-то стои в statusTargetId. */
+function openCoProcessedFromStatusModal(){
+  var id=statusTargetId;
+  closeModal('status-modal');
+  if(id)openCoProcessedModal(id);
+}
+function submitCoProcessed(id){
+  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+  if(!o){toast('Заявката не е намерена','#dc2626');return;}
+  var eta=v('cop-eta')||null;
+  var btn=document.getElementById('cop-submit');
+  if(btn){btn.disabled=true;btn.textContent='Записване...';}
+  var patch={
+    status:'processed',
+    co_eta:eta,
+    co_note:v('cop-note')||null,
+    co_processed_at:new Date().toISOString(),
+    co_processed_by:(currentUser&&currentUser.display_name)||null
+  };
+  sbPatch('client_orders','id=eq.'+id,patch).then(function(res){
+    if(!res.ok){
+      console.error('submitCoProcessed: неуспешен запис',id);
+      toast('Грешка при запис','#dc2626');
+      if(btn){btn.disabled=false;btn.textContent='✅ Отбележи като обработена';}
+      return;
+    }
+    closeCoProcessedModal();
+    toast(eta?'✓ Обработена от ЦО — очаквана '+fmtDate(eta):'✓ Обработена от ЦО');
+    loadClientOrders();
+  });
+}
+
 /* ── Отметка в модала за НОВА клиентска заявка ── */
 function toggleClientPT(){
   var cb=document.getElementById('c-paid-transport');
@@ -251,6 +324,39 @@ function renderCoSapBanner(){
   '</div>';
 }
 
+/* Падащо меню "Изпълнява" — за да може ЦО (и складовете) да види само своите заявки.
+
+   В базата един и същ обект е изписан по няколко начина ("Троян" / "ТРОЯН",
+   "Централен офис" / "ЦЕНТРАЛЕН ОФИС"). Ако ги сложим като отделни опции, филтърът
+   ще крие част от заявките, без потребителят да разбере — затова групираме по
+   нормализирано име, а показваме най-четливото изписване. */
+function coNormName(n){ return String(n||'').trim().toLowerCase(); }
+function coBuildFulfillerOptions(){
+  var sel=document.getElementById('co-fulfiller-filter'); if(!sel) return;
+  var cur=sel.value;
+  var groups={};
+  clientOrders.forEach(function(o){
+    if(!o.fulfiller) return;
+    var k=coNormName(o.fulfiller); if(!k) return;
+    var label=String(o.fulfiller).trim();
+    if(!groups[k]){ groups[k]={label:label,n:0}; }
+    groups[k].n++;
+    /* Предпочитаме варианта, който НЕ е изцяло с главни букви */
+    var curAllCaps=groups[k].label===groups[k].label.toUpperCase();
+    var newAllCaps=label===label.toUpperCase();
+    if(curAllCaps&&!newAllCaps) groups[k].label=label;
+  });
+  var keys=Object.keys(groups).sort(function(a,b){
+    if(isCentralOffice(a)&&!isCentralOffice(b))return -1;
+    if(isCentralOffice(b)&&!isCentralOffice(a))return 1;
+    return groups[a].label.localeCompare(groups[b].label,'bg');
+  });
+  sel.innerHTML='<option value="">Изпълнява: всички</option>'+keys.map(function(k){
+    return '<option value="'+esc(k)+'"'+(k===cur?' selected':'')+'>'+esc(groups[k].label)+' ('+groups[k].n+')</option>';
+  }).join('');
+  if(keys.indexOf(cur)>=0)sel.value=cur;
+}
+
 function loadClientOrders(){
   loadOrderRestrictions();
   renderCoSapBanner();
@@ -274,6 +380,7 @@ function loadClientOrders(){
       o._isFulfiller=!isGlobal()&&o.fulfiller===currentUser.store_name&&o.store_name!==currentUser.store_name;
     });
     coBuildMonthOptions();
+    coBuildFulfillerOptions();
     renderClientOrders();renderMetrics();updateBadges();
   }).catch(function(e){console.warn('client_orders:',e);});
 }
@@ -285,6 +392,9 @@ function renderClientOrders(){
     return orderFilter==='all'||o._status===orderFilter||o.status===orderFilter;
   });
   if (month) list=list.filter(function(o){ return o.date && o.date.slice(0,7)===month; });
+  var fulf=(document.getElementById('co-fulfiller-filter')||{}).value||'';
+  /* Сравнява се нормализирано, за да не изпадат старите записи с главни букви */
+  if (fulf) list=list.filter(function(o){ return coNormName(o.fulfiller)===fulf; });
   if (search) {
     list=list.filter(function(o){
       if((o.customer_name||'').toLowerCase().indexOf(search)>=0)return true;
@@ -315,15 +425,24 @@ function renderClientOrders(){
     var done=o._status==='done'||o._status==='refused'||o.status==='done'||o.status==='refused';
     var isRequester=isAdmin||!o.fulfiller||o.store_name===myStore||isGlobal();
     var isFulfiller=o.fulfiller&&o.fulfiller===myStore&&!isRequester;
+    /* Централен офис обработва заявките към доставчици. Бутонът се показва на
+       всеки от ЦО (supply, accounting, admin...) и само за заявки, насочени към ЦО —
+       независимо дали този човек иначе се води "заявител" или "изпълнител". */
+    var isCoJob=isCentralOffice(o.fulfiller)&&isCentralOfficeUser();
     var btns='<div style="display:flex;gap:4px;flex-wrap:wrap;">';
     if(!done){
+      if(isCoJob&&['pending','postponed'].indexOf(rawStatus)>=0){
+        btns+='<button data-id="'+o.id+'" onclick="openCoProcessedModal(this.dataset.id)" title="ЦО е обработил заявката и я е пуснал към доставчик" style="border:1px solid #047857;background:#ecfdf5;color:#047857;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;">✅ Обработена от ЦО</button>';
+      } else if(isCoJob&&rawStatus==='processed'){
+        btns+='<button data-id="'+o.id+'" onclick="openCoProcessedModal(this.dataset.id)" title="Промени очакваната дата или коментара" style="border:1px solid #94a3b8;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Дата от ЦО</button>';
+      }
       /* Изпълнителят маркира "Изпратена", когато физически изпрати стоката
          към заявителя. След това вече чака заявителя — няма повече действия. */
-      if(isFulfiller){
-        if(rawStatus==='pending'||rawStatus==='postponed'){
+      if(isFulfiller||isCoJob){
+        if(['pending','postponed','processed'].indexOf(rawStatus)>=0){
           btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;sent&apos;)" style="border:1px solid #5b21b6;background:#ede9fe;color:#5b21b6;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📤 Изпратена</button>';
           btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;refused&apos;)" style="border:1px solid #dc2626;background:#fff1f2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕ Откаже</button>';
-        } else {
+        } else if(isFulfiller){
           btns+='<span style="font-size:10px;color:#94a3b8;white-space:nowrap;">⏳ чака '+esc(o.store_name||'заявителя')+'</span>';
         }
       }
@@ -372,8 +491,8 @@ function renderClientOrders(){
       '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
       '<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>'+
       '<td>'+esc(o.from_store||'')+'</td>'+
-      '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
-      '<td>'+elapsedBadge(o._days,o.status)+'</td>'+
+      '<td><b>'+fmtDate(o.delivery)+'</b>'+coEtaCell(o)+'</td>'+
+      '<td>'+elapsedBadge(o._days,o.status,o)+'</td>'+
       '<td>'+statusBadge(o._status)+ptBadge(o)+'</td>'+
       '<td style="font-size:11px;">'+storeCell+'</td>'+
       '<td>'+btns+'</td></tr>';
@@ -384,6 +503,19 @@ function renderClientOrders(){
     if(row&&row.scrollIntoView)row.scrollIntoView({block:'center'});
     window._coHighlightId=null;
   }
+}
+
+/* Ориентировъчната дата от ЦО стои под датата за доставка — там я търси магазинът.
+   Ако датата е минала, а заявката още е "Обработена", се оцветява червено:
+   доставчикът е закъснял и някой трябва да се обади. */
+function coEtaCell(o){
+  if(!o.co_eta)return '';
+  var late=o.status==='processed'&&!coWaitingSupplier(o);
+  var col=late?'#dc2626':'#047857';
+  return '<div style="font-size:10px;color:'+col+';margin-top:2px;white-space:nowrap;" title="'+
+    (o.co_note?esc(o.co_note):'Ориентировъчна дата за получаване в обекта')+'">'+
+    (late?'🏭 просрочена от ':'🏭 очаквана ')+fmtDate(o.co_eta)+'</div>'+
+    (o.co_note?'<div style="font-size:10px;color:#94a3b8;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(o.co_note)+'</div>':'');
 }
 
 /* Малък бадж под статуса — веднага се вижда, че заявката е с платен транспорт */
