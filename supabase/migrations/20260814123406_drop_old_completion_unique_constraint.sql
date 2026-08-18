@@ -1,0 +1,1 @@
+alter table task_completions drop constraint task_completions_task_id_store_name_key;
