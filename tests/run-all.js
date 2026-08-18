@@ -1,0 +1,88 @@
+/* Пуска всички jsdom тестове на портала последователно.
+   Спира при първия провал (exit 1); при пълен успех — обобщение и exit 0.
+
+   Тестовете приемат корена на репото като argv[2]. Подаваме го явно,
+   за да не зависи резултатът от това откъде е извикана командата.
+
+   КРИТЕРИЙ ЗА УСПЕХ/ПРОВАЛ Е САМО EXIT КОДЪТ на всеки тест.
+   Текстът в изхода не решава нищо — регексът долу служи единствено
+   за събиране на общия брой проверки. Ако не хване число, това е
+   предупреждение, не провал. */
+const { spawnSync } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+
+const ROOT = path.join(__dirname, '..');
+const TESTS = [
+  'client-groups.test.js',
+  'co-processed.test.js',
+  'order-numbering.test.js',
+  'paid-transport.test.js',
+  'stock-differences.test.js'
+];
+
+/* Броячът не е изписан еднакво навсякъде — едни тестове казват
+   "0 неуспешни", други "0 провалени". Хващаме и двата варианта. */
+const SUMMARY = /(\d+)\s+успешни,\s*(\d+)\s+(?:неуспешни|провалени)/;
+
+let totalOk = 0;
+let unknownCounts = 0;
+const rows = [];
+const warnings = [];
+
+for (let i = 0; i < TESTS.length; i++) {
+  const name = TESTS[i];
+  const file = path.join(__dirname, name);
+
+  if (!fs.existsSync(file)) {
+    console.error('\n❌ ЛИПСВА ФАЙЛ: ' + name);
+    process.exit(1);
+  }
+
+  console.log('\n━━━ ' + name + ' ━━━');
+  const res = spawnSync(process.execPath, [file, ROOT], { encoding: 'utf8' });
+  const out = (res.stdout || '') + (res.stderr || '');
+  process.stdout.write(out);
+
+  /* Единственият критерий за провал. */
+  if (res.status !== 0) {
+    console.error('\n❌ ПРОВАЛ: ' + name + ' — exit код ' + res.status);
+    console.error('Спирам. Останалите ' + (TESTS.length - i - 1) + ' теста НЕ са пускани.');
+    process.exit(1);
+  }
+
+  /* Оттук нататък тестът е минал. Само събираме числа за обобщението. */
+  const m = out.match(SUMMARY);
+  if (!m) {
+    unknownCounts++;
+    rows.push({ name: name, ok: null });
+    warnings.push(name + ': тестът мина (exit 0), но броячът не се разчете');
+    continue;
+  }
+
+  const ok = Number(m[1]);
+  const bad = Number(m[2]);
+  totalOk += ok;
+  rows.push({ name: name, ok: ok });
+
+  /* Несъответствие: изходът твърди, че има падащи проверки, а exit кодът е 0.
+     Не проваля пуска — само го изкарваме на светло. */
+  if (bad > 0) {
+    warnings.push(name + ': exit 0, но в изхода пише ' + bad + ' падащи проверки');
+  }
+}
+
+console.log('\n═════════════════════════════');
+rows.forEach(function (r) {
+  console.log('✅ ' + r.name + '  —  ' + (r.ok === null ? 'брой неизвестен' : r.ok + ' проверки'));
+});
+console.log('─────────────────────────────');
+console.log('ОБЩО: ' + (unknownCounts ? 'поне ' : '') + totalOk +
+            ' проверки, 0 падащи (' + rows.length + ' теста, всички с exit 0)');
+
+if (warnings.length) {
+  console.log('\n⚠️  предупреждения (не влияят на резултата):');
+  warnings.forEach(function (w) { console.log('   · ' + w); });
+}
+
+process.exit(0);

@@ -9,7 +9,7 @@
 */
 const fs = require('fs');
 const { JSDOM } = require('jsdom');
-const DIR = process.argv[2] ? process.argv[2].replace(/\/*$/, '/') : __dirname + '/';
+const DIR = process.argv[2] ? process.argv[2].replace(/\/*$/, '/') : __dirname + '/../';
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra) {
