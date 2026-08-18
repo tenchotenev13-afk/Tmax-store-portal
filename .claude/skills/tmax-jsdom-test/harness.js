@@ -110,8 +110,21 @@ function tableOf(url) {
                  (подреждат се автоматично по реда от index.html)
      user      — обектът currentUser
      data      — { table: [редове] } или { table: fn(url) } за GET отговорите
-     fail      — { POST: /regex или true, PATCH: ..., DELETE: ..., GET: ... }
-                 симулира провалена заявка (res.ok === false)
+     fail      — { GET|POST|PATCH|DELETE: правило } — симулира провалена
+                 заявка (res.ok === false). Правилото може да е:
+                   true            — всяка заявка с този метод пада (500,
+                                     тяло {message:'boom'})
+                   /regex/         — падат само URL-ите, които съвпадат
+                   fn(url)         — пада, ако върне истина; може да върне
+                                     и обект-спецификация (виж долу)
+                   { status, body, url } — точен контрол:
+                     status  HTTP кодът (по подразбиране 500)
+                     body    тялото на отговора; ЛИПСВАЩО, null или ''
+                             значи ПРАЗНО тяло — тогава json() ХВЪРЛЯ
+                             SyntaxError, точно както прави браузърът
+                             (така се симулира 401 без тяло от PostgREST)
+                     url     по избор — /regex/ или fn(url), за да падне
+                             само част от заявките с този метод
      confirm   — true (по подразбиране) / false / fn(msg)
      html      — 'index' (по подразбиране, реалният index.html) или собствен HTML
      globals   — { име: стойност } зададени СЛЕД зареждането на скриптовете
@@ -158,32 +171,68 @@ function boot(opts) {
   const data = Object.assign({}, opts.data);
   const failSpec = opts.fail || {};
 
-  function shouldFail(method, url) {
+  /* Старата форма (true / regex / fn) значи точно каквото значеше преди:
+     500 с тяло {message:'boom'}. Новата обектна форма дава статус и тяло. */
+  const LEGACY_FAIL = { status: 500, body: { message: 'boom' }, empty: false };
+
+  function normalizeFail(spec) {
+    if (spec === true) return LEGACY_FAIL;
+    if (!spec || typeof spec !== 'object') return null;
+    const has = Object.prototype.hasOwnProperty.call(spec, 'body') &&
+                spec.body !== null && spec.body !== undefined && spec.body !== '';
+    return { status: spec.status || 500, body: has ? spec.body : null, empty: !has };
+  }
+
+  /* Връща null (заявката минава) или { status, body, empty }. */
+  function failureFor(method, url) {
     const rule = failSpec[method];
-    if (!rule) return false;
-    if (rule === true) return true;
-    if (rule instanceof RegExp) return rule.test(url);
-    if (typeof rule === 'function') return !!rule(url);
-    return false;
+    if (!rule) return null;
+    if (rule === true) return LEGACY_FAIL;
+    if (rule instanceof RegExp) return rule.test(url) ? LEGACY_FAIL : null;
+    if (typeof rule === 'function') {
+      const out = rule(url);
+      if (!out) return null;
+      return out === true ? LEGACY_FAIL : normalizeFail(out);
+    }
+    if (typeof rule === 'object') {
+      if (rule.url instanceof RegExp && !rule.url.test(url)) return null;
+      if (typeof rule.url === 'function' && !rule.url(url)) return null;
+      return normalizeFail(rule);
+    }
+    return null;
+  }
+
+  /* Един и същ строеж на отговора за GET и за пишещите методи.
+     text() връща реалното тяло, а не празен низ — stub, чийто text() лъже,
+     вече веднъж скри разлика между теста и браузъра. */
+  function mkRes(f, okBody) {
+    if (!f) return {
+      ok: true, status: 200,
+      json: () => Promise.resolve(okBody),
+      text: () => Promise.resolve(JSON.stringify(okBody))
+    };
+    return {
+      ok: false, status: f.status,
+      json: () => f.empty
+        ? Promise.reject(new SyntaxError('Unexpected end of JSON input'))
+        : Promise.resolve(f.body),
+      text: () => Promise.resolve(f.empty ? '' : JSON.stringify(f.body))
+    };
   }
 
   w.fetch = function (url, init) {
     init = init || {};
     const method = (init.method || 'GET').toUpperCase();
     const table = tableOf(url);
-    const failThis = shouldFail(method, url);
+    const failThis = failureFor(method, url);
 
     if (method === 'GET') {
       calls.get.push(url);
       let body = data[table];
       if (typeof body === 'function') body = body(url);
       body = body ? JSON.parse(JSON.stringify(body)) : [];
-      if (failThis) calls.notOk.push({ method, url });
-      return Promise.resolve({
-        ok: !failThis, status: failThis ? 500 : 200,
-        json: () => Promise.resolve(failThis ? { message: 'boom' } : body),
-        text: () => Promise.resolve('')
-      });
+      if (failThis) calls.notOk.push({ method, url, status: failThis.status });
+      return Promise.resolve(mkRes(failThis, body));
     }
 
     let parsed = null;
@@ -192,13 +241,9 @@ function boot(opts) {
     if (method === 'POST') calls.post.push(rec);
     else if (method === 'PATCH') calls.patch.push(rec);
     else if (method === 'DELETE') calls.del.push(url);
-    if (failThis) calls.notOk.push({ method, url });
+    if (failThis) calls.notOk.push({ method, url, status: failThis.status });
 
-    return Promise.resolve({
-      ok: !failThis, status: failThis ? 500 : 200,
-      json: () => Promise.resolve(failThis ? { message: 'boom' } : {}),
-      text: () => Promise.resolve('')
-    });
+    return Promise.resolve(mkRes(failThis, {}));
   };
 
   /* ── Зареждане на файловете в реалния ред ── */

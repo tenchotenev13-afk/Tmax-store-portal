@@ -20,7 +20,8 @@ const TESTS = [
   'co-processed.test.js',
   'order-numbering.test.js',
   'paid-transport.test.js',
-  'stock-differences.test.js'
+  'stock-differences.test.js',
+  'sbget-errors.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

@@ -76,7 +76,7 @@ const h = boot({
   modules: ['transport.js', 'client-orders.js'],  // shared.js се добавя сам
   user:    { email:'sn@temax.bg', role:'supply', store_name:'Централен офис' },
   data:    { client_orders: ORDERS, transport_orders: [] },
-  fail:    { POST: /transport_orders/ },          // симулира провалена заявка
+  fail:    { POST: /transport_orders/ },          // симулира провалена заявка (виж долу)
   confirm: true,                                  // отговорът на window.confirm
   globals: { someGlobal: 42 }                     // задават се СЛЕД зареждането
 });
@@ -91,8 +91,33 @@ const h = boot({
   и добави файла.
 - `data` е рутиране по име на таблица от Supabase URL-а (`/rest/v1/<table>`).
   Стойността може да е масив или `fn(url)`.
+- `fail` приема правило за всеки метод (`GET`, `POST`, `PATCH`, `DELETE`):
+
+  | Правило | Значение |
+  |---|---|
+  | `true` | всяка заявка с този метод пада — 500, тяло `{message:'boom'}` |
+  | `/regex/` | падат само URL-ите, които съвпадат (същият 500) |
+  | `fn(url)` | пада при истина; може да върне и обект-спецификация |
+  | `{ status, body, url }` | точен контрол |
+
+  В обектната форма: `status` е HTTP кодът (по подразбиране 500), `url` по
+  избор стеснява кои заявки падат (`/regex/` или `fn`), а `body` е тялото на
+  отговора. **Липсващо `body`, `null` или `''` значи ПРАЗНО тяло — тогава
+  `json()` хвърля `SyntaxError`, точно както прави браузърът.**
+
+  ```js
+  fail: { GET: { status: 401, body: { message: 'Invalid API key' } } }
+  fail: { GET: { status: 401 } }                       // празно тяло → json() хвърля
+  fail: { GET: { status: 404, url: /stores/ } }        // пада само заявката към stores
+  ```
+
+  Празното тяло не е екзотика — точно това връща Supabase при 401 без
+  `apikey` хедър, и точно този случай `sbGet` вече поема, без да хвърля.
+  Мрежов срив (`fetch` отхвърля, преди да има отговор) НЕ се симулира през
+  `fail` — подмени `w.fetch` директно в теста.
 - `calls` събира: `get`, `post`, `patch`, `del` (всяко с `{url, table, body}`),
   плюс `toast`, `confirm`, `alert`, `scrollTo`, `scrollIntoView` и `notOk`
+  (`{method, url, status}` за всяка провалена заявка)
   (заявки, върнали `ok:false` — полезно срещу тихите грешки).
 
 Модулните файлове държат данните си в глобални масиви (`clientOrders`,
