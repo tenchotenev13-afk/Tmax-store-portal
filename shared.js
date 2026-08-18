@@ -6,6 +6,21 @@ var H={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'applicat
 
 function sbGet(t,q){return fetch(API+'/'+t+(q?'?'+q:''),{headers:H}).then(function(r){return r.json();});}
 function sbPost(t,b){return fetch(API+'/'+t,{method:'POST',headers:H,body:JSON.stringify(b)}).then(function(r){return r.ok?{ok:true}:r.json().then(function(e){return{ok:false,error:e};});});}
+/* Като sbPost, но връща и създадения ред. Нужно е, когато базата попълва поле
+   при записа (номерът на клиентската заявка се раздава от тригер по обект) и
+   клиентът няма как да го знае предварително. */
+function sbPostReturn(t,b){
+  return fetch(API+'/'+t,{
+    method:'POST',
+    headers:Object.assign({},H,{'Prefer':'return=representation'}),
+    body:JSON.stringify(b)
+  }).then(function(r){
+    return r.json().catch(function(){return null;}).then(function(d){
+      if(!r.ok)return {ok:false,error:d};
+      return {ok:true,row:(Array.isArray(d)?d[0]:d)||null};
+    });
+  });
+}
 function sbPatch(t,f,b){return fetch(API+'/'+t+'?'+f,{method:'PATCH',headers:Object.assign({},H,{'Prefer':'return=minimal'}),body:JSON.stringify(b)}).then(function(r){return{ok:r.ok};});}
 function sbDelete(t,f){return fetch(API+'/'+t+'?'+f,{method:'DELETE',headers:H}).then(function(r){return{ok:r.ok};});}
 

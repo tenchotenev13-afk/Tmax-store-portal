@@ -79,12 +79,26 @@ function boot(opts) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(body), text: () => Promise.resolve('') });
     }
     const failThis = opts.failPostTransport && method === 'POST' && /\/transport_orders/.test(url);
-    if (method === 'POST') calls.post.push({ url, body: JSON.parse(init.body) });
+    let created = null;
+    if (method === 'POST') {
+      const parsed = JSON.parse(init.body);
+      calls.post.push({ url, body: parsed });
+      /* Тригерът в базата раздава in_num по обект — стъбът го имитира,
+         защото клиентът вече НЕ го изпраща, а го чете от отговора. */
+      if (/\/client_orders/.test(url)) {
+        w.__seq = (w.__seq || 0) + 1;
+        created = Object.assign({}, parsed, {
+          in_num: (parsed.store_name || 'Обект') + '-' + String(w.__seq).padStart(4, '0')
+        });
+      } else {
+        created = parsed;
+      }
+    }
     if (method === 'PATCH') calls.patch.push({ url, body: JSON.parse(init.body) });
     if (method === 'DELETE') calls.del.push(url);
     return Promise.resolve({
       ok: !failThis,
-      json: () => Promise.resolve(failThis ? { message: 'boom' } : {}),
+      json: () => Promise.resolve(failThis ? { message: 'boom' } : (created ? [created] : {})),
       text: () => Promise.resolve('')
     });
   };
@@ -222,14 +236,15 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     ok('направени са 2 POST-а', calls.post.length === 2, JSON.stringify(calls.post.map(p => p.url)));
     ok('клиентската заявка е с paid_transport=true', coPost && coPost.body.paid_transport === true);
     ok('транспортът сочи към клиентската заявка', trPost && trPost.body.client_order_id === coPost.body.id);
-    ok('транспортът пази номера на заявката', trPost && trPost.body.client_order_num === coPost.body.in_num);
+    ok('клиентът НЕ изпраща номер (раздава го базата)', coPost && !('in_num' in coPost.body));
+    ok('транспортът пази номера, върнат от базата', trPost && /^Враца-\d{4}$/.test(trPost.body.client_order_num || ''), trPost && trPost.body.client_order_num);
     ok('транспортът е awaiting_stock=true', trPost && trPost.body.awaiting_stock === true);
     ok('адресът е записан в транспорта', trPost && trPost.body.address === 'гр. Враца, ул. Тестова 7, ет. 2');
     ok('часът е записан в транспорта', trPost && trPost.body.hour === '14:00');
     ok('датата за доставка е взета от клиентската заявка', trPost && trPost.body.delivery === '2026-08-30');
     ok('артикулите са пренесени', trPost && trPost.body.items && trPost.body.items[0].product === 'ДИВАН');
     ok('бонът е пренесен', trPost && trPost.body.bon === '000999');
-    ok('бележката сочи номера на заявката', trPost && /№0/.test(trPost.body.notes || ''));
+    ok('бележката сочи номера на заявката', trPost && /№Враца-\d{4}/.test(trPost.body.notes || ''), trPost && trPost.body.notes);
 
     const patch = calls.patch.find(p => /client_orders/.test(p.url));
     ok('клиентската заявка е обновена с transport_id', patch && patch.body.transport_id === trPost.body.id);

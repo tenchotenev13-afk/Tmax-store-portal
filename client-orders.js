@@ -632,6 +632,8 @@ function renderClientOrders(){
       if((o.customer_name||'').toLowerCase().indexOf(search)>=0)return true;
       if((o.phone||'').indexOf(search)>=0)return true;
       if((o.bon||'').toLowerCase().indexOf(search)>=0)return true;
+      /* Номерът на заявката вече е уникален по обект — търси се и по него */
+      if((o.in_num||'').toLowerCase().indexOf(search)>=0)return true;
       /* Проверяваме ВСИЧКИ артикули на заявката (не само първия) — resolveItems()
          връща o.items ако има, иначе fallback към старите единични полета */
       var items=resolveItems(o);
@@ -715,7 +717,9 @@ function renderClientOrders(){
     btns+='</div>';
     if(window._coHighlightId&&String(window._coHighlightId)===String(o.id))rowStyle+='background:#fef9c3;';
     return '<tr id="co-row-'+esc(o.id)+'" style="'+rowStyle+'">'+
-      '<td style="font-size:11px;color:#94a3b8;font-family:monospace;">'+esc(o.in_num||'—')+'</td>'+
+      /* Номерът вече съдържа и обекта ("Троян-0042") — пуска се на нов ред,
+         вместо да реже колоната */
+      '<td style="font-size:11px;color:#94a3b8;font-family:monospace;word-break:break-word;line-height:1.3;">'+esc(o.in_num||'—')+'</td>'+
       '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
       /* Името на клиента отваря панела с всички негови заявки — там е и бутонът
          за още една заявка. Така не се налага още един бутон в реда. */
@@ -866,11 +870,14 @@ function submitClientOrder(){
   if(paidTransport&&!ptAddr){toast('При платен транспорт адресът за доставка е задължителен','#dc2626');return;}
   var first=items[0];
   var delivery=v('c-delivery')||null;
-  var num=String(clientOrders.length+1).padStart(4,'0');
+  /* Номерът НЕ се смята тук. Досега беше clientOrders.length+1 — бройката
+     заявки, които ТОЗИ потребител вижда — затова всеки обект броеше от 1 и
+     883 от 908 заявки излязоха с дублиран номер. Сега го раздава тригер в
+     базата, пореден по обект ("Троян-0042"), и го четем от отговора. */
   var coId=uuid4();
   var rec={
     id:coId,
-    in_num:num,store_name:currentUser.store_name,
+    store_name:currentUser.store_name,
     date:v('c-date'),hour:v('c-hour'),bon:v('c-bon'),
     customer_name:name,phone:phone,
     product:first.product,color:first.color,sap:first.sap,qty:first.qty,unit:first.unit,
@@ -882,9 +889,16 @@ function submitClientOrder(){
     group_id:coPendingGroupId||null
   };
   var wasGrouped=!!coPendingGroupId;
-  sbPost('client_orders',rec).then(function(res){
-    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+  sbPostReturn('client_orders',rec).then(function(res){
+    if(!res.ok){
+      console.error('submitClientOrder: неуспешен запис',res.error);
+      toast('Грешка при запис','#dc2626');return;
+    }
     coPendingGroupId=null;
+    /* Номерът идва от базата. Ако по някаква причина отговорът е празен,
+       не измисляме номер — работим без него, вместо да покажем грешен. */
+    var num=(res.row&&res.row.in_num)||null;
+    if(res.row&&res.row.in_num)rec.in_num=res.row.in_num;
     var finish=function(){
       closeModal('client-modal');
       loadClientOrders();
@@ -948,7 +962,7 @@ function renderPrint(o){
           '<div style="font-size:9px;color:rgba(255,255,255,.38);margin-top:1px;">'+esc(o.store_name||'')+'</div></div>'+
         '<div style="padding:6px 10px;text-align:right;display:flex;flex-direction:column;justify-content:center;border-left:1px solid rgba(255,255,255,.1);">'+
           '<div style="font-size:8px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;">Заявка №</div>'+
-          '<div style="font-size:13px;font-weight:700;color:#fff;margin:1px 0;">'+esc(o.in_num||'0001')+'</div>'+
+          '<div style="font-size:13px;font-weight:700;color:#fff;margin:1px 0;">'+esc(o.in_num||'—')+'</div>'+
           '<div style="font-size:9px;color:rgba(255,255,255,.45);">'+esc(o.date||'')+'</div></div>'+
       '</div>'+
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px;border-bottom:1px solid #eee;">'+

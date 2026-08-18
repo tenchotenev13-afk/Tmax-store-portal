@@ -82,10 +82,20 @@ function boot(opts) {
       return Promise.resolve({ ok: true, json: () => Promise.resolve(body), text: () => Promise.resolve('') });
     }
     const failThis = !!opts.failPatch && method === 'PATCH';
-    if (method === 'POST') calls.post.push({ url, body: JSON.parse(init.body) });
+    let created = null;
+    if (method === 'POST') {
+      const parsed = JSON.parse(init.body);
+      calls.post.push({ url, body: parsed });
+      if (/\/client_orders/.test(url)) {
+        w.__seq = (w.__seq || 0) + 1;
+        created = Object.assign({}, parsed, {
+          in_num: (parsed.store_name || 'Обект') + '-' + String(w.__seq).padStart(4, '0')
+        });
+      } else { created = parsed; }
+    }
     if (method === 'PATCH') calls.patch.push({ url, body: JSON.parse(init.body) });
     if (method === 'DELETE') calls.del.push(url);
-    return Promise.resolve({ ok: !failThis, json: () => Promise.resolve({}), text: () => Promise.resolve('') });
+    return Promise.resolve({ ok: !failThis, json: () => Promise.resolve(created ? [created] : {}), text: () => Promise.resolve('') });
   };
   const load = f => w.eval(fs.readFileSync(DIR + f, 'utf8'));
   load('shared.js'); load('transport.js'); load('client-orders.js');
