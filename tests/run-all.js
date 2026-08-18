@@ -16,6 +16,7 @@ const ROOT = path.join(__dirname, '..');
 const TESTS = [
   'client-groups.test.js',
   'contacts-id-collision.test.js',
+  'id-collisions.test.js',
   'co-processed.test.js',
   'order-numbering.test.js',
   'paid-transport.test.js',
