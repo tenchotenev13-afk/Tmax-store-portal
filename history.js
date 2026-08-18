@@ -226,7 +226,7 @@ function renderHistoryResults(){
           '<td style="font-family:monospace;font-size:11px;">'+esc(o.in_num||'—')+'</td>'+
           '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
           '<td>'+esc(o.store_name||'')+'</td>'+
-          '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">'+esc(o.phone||'')+'</small></td>'+
+          '<td><b>'+esc(o.customer_name||'')+'</b>'+histGroupBadge(o)+'<br><small style="color:#94a3b8;">'+esc(o.phone||'')+'</small></td>'+
           '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+(o.sap?'SAP: '+esc(o.sap):'')+'</small></td>'+
           /* Ориентировъчната дата от ЦО се търси и в История, не само в живия таб */
           '<td><b>'+fmtDate(o.delivery)+'</b>'+
@@ -374,6 +374,19 @@ function renderHistoryResults(){
   }
 
   wrap.innerHTML=html;
+}
+
+/* "👥 2 от 3" и в История — групата се брои в рамките на заредения период.
+   Ако част от общата поръчка е извън избрания диапазон, броят е по-малък;
+   затова показваме и подсказка при задържане на мишката. */
+function histGroupBadge(o){
+  if(!o||!o.group_id)return '';
+  var m=(histData.client||[]).filter(function(x){return x.group_id===o.group_id;})
+    .sort(function(a,b){return String(a.in_num||'').localeCompare(String(b.in_num||''));});
+  if(m.length<2)return '<span title="Част от обща поръчка — останалите заявки са извън избрания период" style="margin-left:5px;font-size:10px;font-weight:600;padding:2px 6px;border-radius:20px;background:#f1f5f9;color:#64748b;">👥 обща поръчка</span>';
+  var pos=1;
+  for(var i=0;i<m.length;i++) if(String(m[i].id)===String(o.id)) pos=i+1;
+  return '<span title="Част от обща поръчка на този клиент" style="margin-left:5px;font-size:10px;font-weight:700;padding:2px 6px;border-radius:20px;background:#e0e7ff;color:#3730a3;">👥 '+pos+' от '+m.length+'</span>';
 }
 
 function metricCard(label,val,sub,col){

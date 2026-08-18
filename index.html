@@ -440,6 +440,8 @@ OneSignalDeferred.push(async function(OneSignal) {
 <div class="modal-bg" id="client-modal"><div class="modal">
   <h3>📋 Нова клиентска заявка</h3>
   <div class="modal-sub">Полетата с * са задължителни.</div>
+  <!-- Показва се само когато заявката се прави от "➕ Още една заявка за същия клиент" -->
+  <div id="c-group-hint" style="display:none;font-size:12.5px;color:#3730a3;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;padding:8px 11px;margin-bottom:10px;"></div>
   <div class="form-grid">
     <div><label class="fl">Дата *</label><input type="date" class="fi" id="c-date"></div>
     <div><label class="fl">Час</label><select class="fi" id="c-hour"><option>08:00</option><option>09:00</option><option selected>10:00</option><option>11:00</option><option>12:00</option><option>13:00</option><option>14:00</option><option>15:00</option><option>16:00</option><option>17:00</option><option>18:00</option><option>19:00</option></select></div>

@@ -36,6 +36,15 @@ function isGlobal(){
   return ['admin','accounting','logistics'].indexOf(currentUser.role)>=0;
 }
 
+/* Нормализиран телефон — само цифри, +359/359 се свежда до 0.
+   В базата един и същ номер е въвеждан по няколко начина ("0888 12 34 56",
+   "+359888123456"), затова сравненията между заявки минават оттук. */
+function normPhone(p){
+  var d=String(p||'').replace(/\D/g,'');
+  if(d.indexOf('359')===0&&d.length>9) d='0'+d.slice(3);
+  return d;
+}
+
 /* Централен офис — обработва заявките, които магазините пускат към доставчици.
    Сравнява се без регистър и без интервали, защото в базата има стари записи
    с различно изписване ("ЦЕНТРАЛЕН ОФИС", " Централен офис"). */
@@ -357,11 +366,21 @@ function openStatus(id,table){
 function setStatus(status){
   if(!statusTargetId)return;
   var id=statusTargetId,table=statusTargetTable;
-  sbPatch(table,'id=eq.'+id,{status:status}).then(function(res){
-    if(!res.ok){toast('Грешка','#dc2626');return;}
-    if(table==='client_orders'&&typeof syncLinkedTransport==='function')syncLinkedTransport(id,status);
-    closeModal('status-modal');toast('✓ Статусът е обновен');loadAll();
-  });
+  var apply=function(){
+    sbPatch(table,'id=eq.'+id,{status:status}).then(function(res){
+      if(!res.ok){toast('Грешка','#dc2626');return;}
+      if(table==='client_orders'&&typeof syncLinkedTransport==='function')syncLinkedTransport(id,status);
+      closeModal('status-modal');toast('✓ Статусът е обновен');loadAll();
+    });
+  };
+  /* Същата проверка като от бутона на реда: не затваряме една заявка от обща
+     поръчка, без да предупредим за останалите. */
+  if(status==='done'&&table==='client_orders'&&typeof coConfirmGroupDone==='function'){
+    closeModal('status-modal');
+    coConfirmGroupDone(id,apply);
+    return;
+  }
+  apply();
 }
 function revertStatus(id,table){
   var list=table==='transport_orders'?transportOrders:clientOrders;

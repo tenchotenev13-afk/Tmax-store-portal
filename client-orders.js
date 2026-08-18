@@ -177,6 +177,238 @@ function submitPaidTransport(id){
   });
 }
 
+/* ═══════════════════════════════════════════════════════════
+   СВЪРЗАНИ ЗАЯВКИ НА ЕДИН КЛИЕНТ
+   Един клиент често иска няколко артикула, които идват от различни обекти —
+   магазинът пуска отделна заявка към всеки изпълнител. Ако не са свързани,
+   колегата вижда "готово" по едната и вика клиента за половината стока.
+
+   Връзката е ИЗРИЧНА (client_orders.group_id), а не изведена по телефон:
+   в базата има телефони с по няколко различни клиента (служебни/семейни),
+   а имената на един и същ човек са изписвани различно. Телефонът се ползва
+   само за ПРЕДЛОЖЕНИЕ, което човек потвърждава.
+═══════════════════════════════════════════════════════════ */
+
+/* Активна ли е заявката (още не е приключила по един или друг начин) */
+function coIsOpen(o){ return ['done','refused'].indexOf(o.status)<0; }
+
+/* Всички заявки от групата (включително подадената), подредени по номер */
+function coGroupMembers(o){
+  if(!o||!o.group_id)return [o].filter(Boolean);
+  return clientOrders.filter(function(x){return x.group_id===o.group_id;})
+    .sort(function(a,b){return String(a.in_num||'').localeCompare(String(b.in_num||''));});
+}
+/* Позиция на заявката в групата — "2 от 3" */
+function coGroupPos(o){
+  var m=coGroupMembers(o);
+  for(var i=0;i<m.length;i++) if(String(m[i].id)===String(o.id)) return i+1;
+  return 1;
+}
+/* Други АКТИВНИ заявки със същия телефон, които още не са в тази група.
+   Само предложение — не се свързват автоматично. */
+function coSameCustomerCandidates(o){
+  var ph=normPhone(o&&o.phone);
+  if(!ph||ph.length<6)return [];
+  return clientOrders.filter(function(x){
+    if(String(x.id)===String(o.id))return false;
+    if(!coIsOpen(x))return false;
+    if(o.group_id&&x.group_id===o.group_id)return false;
+    return normPhone(x.phone)===ph;
+  });
+}
+
+/* Бадж до името на клиента */
+function coGroupBadge(o){
+  if(o.group_id){
+    var m=coGroupMembers(o);
+    var openLeft=m.filter(function(x){return coIsOpen(x);}).length;
+    var allDone=openLeft===0;
+    return '<span data-id="'+o.id+'" onclick="openCustomerOrders(this.dataset.id)" title="Заявката е част от обща поръчка — виж всички" '+
+      'style="display:inline-block;margin-left:5px;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;cursor:pointer;'+
+      (allDone?'background:#dcfce7;color:#15803d;':'background:#e0e7ff;color:#3730a3;')+'">👥 '+coGroupPos(o)+' от '+m.length+'</span>';
+  }
+  /* Намек за свързване има смисъл само докато заявката е жива — на приключена
+     заявка той е чист шум. */
+  if(!coIsOpen(o))return '';
+  var cand=coSameCustomerCandidates(o);
+  if(!cand.length)return '';
+  return '<span data-id="'+o.id+'" onclick="openCustomerOrders(this.dataset.id)" title="Същият телефон има още активни заявки — провери дали са една поръчка" '+
+    'style="display:inline-block;margin-left:5px;font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;cursor:pointer;background:#f1f5f9;color:#64748b;">👥 още '+cand.length+'?</span>';
+}
+
+/* ── Панел "Заявки на клиента" ── */
+function coOrderLine(x,isCurrent){
+  var items=resolveItems(x).map(function(it){return esc(it.product||'');}).join(', ');
+  return '<div style="display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid '+(isCurrent?'#3730a3':'#e2e8f0')+';border-radius:7px;margin-bottom:6px;background:'+(isCurrent?'#eef2ff':'#fff')+';">'+
+    '<div style="flex:1;min-width:0;">'+
+      '<div style="font-size:12px;font-weight:600;">№'+esc(x.in_num||'—')+' · '+esc(x.store_name||'')+
+        (x.fulfiller&&x.fulfiller!==x.store_name?' → <span style="color:#2563eb;">'+esc(x.fulfiller)+'</span>':'')+'</div>'+
+      '<div style="font-size:11px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+items+'</div>'+
+    '</div>'+
+    '<div style="flex-shrink:0;">'+statusBadge(calcStatus(x.delivery,x.status))+'</div>'+
+  '</div>';
+}
+function openCustomerOrders(id){
+  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+  if(!o){toast('Заявката не е намерена','#dc2626');return;}
+  var members=o.group_id?coGroupMembers(o):[o];
+  var cand=coSameCustomerCandidates(o);
+  var openLeft=members.filter(function(x){return coIsOpen(x);}).length;
+  var html='<div class="bov" id="cust-ov"><div class="bmod" style="width:520px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">'+
+      '<div><div style="font-size:15px;font-weight:600;">👥 Заявки на клиента</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-top:2px;">'+esc(o.customer_name||'')+' · '+esc(o.phone||'')+'</div></div>'+
+      '<button onclick="closeCustomerOrders()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    (o.group_id
+      ? '<div style="font-size:12px;font-weight:600;color:#3730a3;margin:12px 0 7px;">Обща поръчка — '+members.length+' заявки'+
+        (openLeft?' · <span style="color:#b45309;">'+openLeft+' още не са готови</span>':' · <span style="color:#15803d;">всички са готови</span>')+'</div>'
+      : '<div style="font-size:12px;font-weight:600;color:#334155;margin:12px 0 7px;">Тази заявка</div>')+
+    members.map(function(x){return coOrderLine(x,String(x.id)===String(o.id));}).join('')+
+    (cand.length
+      ? '<div style="font-size:12px;font-weight:600;color:#64748b;margin:12px 0 7px;">Същият телефон, но НЕ са свързани ('+cand.length+')</div>'+
+        cand.map(function(x){return coOrderLine(x,false);}).join('')+
+        '<div style="font-size:11.5px;color:#64748b;margin-bottom:10px;">Провери имената — един телефон понякога се ползва от различни хора.</div>'+
+        '<button data-id="'+o.id+'" onclick="coLinkCandidates(this.dataset.id)" style="border:1px solid #3730a3;background:#eef2ff;color:#3730a3;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;margin-bottom:10px;">🔗 Свържи ги като една поръчка</button>'
+      : '')+
+    '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:12px;">'+
+      '<button data-id="'+o.id+'" onclick="coAddAnotherForCustomer(this.dataset.id)" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer;">➕ Още една заявка за същия клиент</button>'+
+      '<button onclick="closeCustomerOrders()" style="border:1px solid #e2e8f0;background:#fff;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Затвори</button>'+
+    '</div></div></div>';
+  var ex=document.getElementById('cust-ov');if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('cust-ov').classList.add('open');
+}
+function closeCustomerOrders(){var el=document.getElementById('cust-ov');if(el)el.remove();}
+
+/* Свързва заявката с всички активни заявки на същия телефон.
+   Приема id ИЛИ самия обект — при предложението веднага след запис новата
+   заявка още не е в clientOrders (масивът се презарежда след това). */
+function coLinkCandidates(idOrOrder){
+  var o=(idOrOrder&&typeof idOrOrder==='object')
+    ? idOrOrder
+    : clientOrders.find(function(x){return String(x.id)===String(idOrOrder);});
+  if(!o){toast('Заявката не е намерена','#dc2626');return;}
+  var cand=coSameCustomerCandidates(o);
+  if(!cand.length){toast('Няма какво да се свърже','#d97706');return;}
+  var parts=[o].concat(cand);
+  /* Ако някой от участниците вече е в група, ПОЛЗВАМЕ нея вместо да правим нова —
+     иначе вече приключилите членове на старата група остават закачени за
+     изоставен group_id и се откъсват от поръчката. При няколко различни групи
+     ги сливаме в първата, като влачим и техните останали членове. */
+  var gids=[];
+  parts.forEach(function(x){ if(x.group_id&&gids.indexOf(x.group_id)<0)gids.push(x.group_id); });
+  var gid=gids[0]||uuid4();
+  var idMap={};
+  parts.forEach(function(x){ idMap[x.id]=1; });
+  if(gids.length){
+    clientOrders.forEach(function(x){ if(x.group_id&&gids.indexOf(x.group_id)>=0) idMap[x.id]=1; });
+  }
+  var ids=Object.keys(idMap);
+  var q='id=in.('+ids.map(encodeURIComponent).join(',')+')';
+  sbPatch('client_orders',q,{group_id:gid}).then(function(res){
+    if(!res.ok){
+      console.error('coLinkCandidates: свързването се провали',ids);
+      toast('Грешка при свързване','#dc2626');
+      return;
+    }
+    closeCustomerOrders();
+    toast('✓ '+ids.length+' заявки са свързани като една поръчка');
+    loadClientOrders();
+  });
+}
+
+/* Отваря модала за нова заявка с попълнени данни на клиента и обща група */
+function coAddAnotherForCustomer(id){
+  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+  if(!o)return;
+  closeCustomerOrders();
+  closeSapReminder();
+  var gid=o.group_id;
+  if(!gid){
+    /* Първата заявка още няма група — създаваме я сега и я записваме и на нея,
+       за да не остане новата заявка сама в група от 1. */
+    gid=uuid4();
+    sbPatch('client_orders','id=eq.'+o.id,{group_id:gid}).then(function(res){
+      if(!res.ok){console.error('coAddAnotherForCustomer: групата не се записа на изходната заявка',o.id);
+        toast('⚠️ Групата не се записа — свържи ги ръчно след това','#d97706');}
+    });
+  }
+  openClientModal({customer_name:o.customer_name,phone:o.phone,bon:o.bon,
+    delivery:o.delivery,from_store:o.from_store,group_id:gid});
+}
+
+/* Предложение веднага след запис на нова заявка */
+function coSuggestLink(newOrder,onDone){
+  var cand=coSameCustomerCandidates(newOrder);
+  if(!cand.length){if(onDone)onDone();return;}
+  var rows=cand.map(function(x){return coOrderLine(x,false);}).join('');
+  var html='<div class="bov" id="link-ov"><div class="bmod" style="width:520px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">'+
+      '<div><div style="font-size:15px;font-weight:600;">👥 Този клиент има още заявки</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-top:2px;">'+esc(newOrder.customer_name||'')+' · '+esc(newOrder.phone||'')+'</div></div>'+
+      '<button onclick="coSkipLink()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<div style="font-size:12.5px;color:#334155;margin:12px 0 8px;">Със същия телефон има още '+cand.length+' активн'+(cand.length===1?'а заявка':'и заявки')+':</div>'+
+    rows+
+    '<div style="font-size:11.5px;color:#64748b;margin:8px 0 14px;">Ако това е една поръчка, свържи ги — така при „Изпълнена" системата ще предупреди, че останалата стока още не е дошла. <b>Провери имената</b>, ако телефонът е служебен.</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
+      '<button onclick="coSkipLink()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Не, отделни са</button>'+
+      '<button id="link-yes" onclick="coConfirmLink()" style="border:none;background:#3730a3;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">🔗 Свържи ги</button>'+
+    '</div></div></div>';
+  var ex=document.getElementById('link-ov');if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('link-ov').classList.add('open');
+  window._coLinkDone=onDone||null;
+  window._coLinkOrder=newOrder;
+}
+function coSkipLink(){
+  var el=document.getElementById('link-ov');if(el)el.remove();
+  window._coLinkOrder=null;
+  var cb=window._coLinkDone;window._coLinkDone=null;if(cb)cb();
+}
+function coConfirmLink(){
+  var el=document.getElementById('link-ov');if(el)el.remove();
+  var o=window._coLinkOrder;window._coLinkOrder=null;
+  var cb=window._coLinkDone;window._coLinkDone=null;
+  if(o)coLinkCandidates(o);
+  if(cb)cb();
+}
+
+/* Преди "Изпълнена": ако другите заявки от групата не са готови, спираме и питаме.
+   Точно тук се къса процесът — клиентът бива извикан за половината стока. */
+function coConfirmGroupDone(id,proceed){
+  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+  if(!o||!o.group_id){proceed();return;}
+  var others=coGroupMembers(o).filter(function(x){
+    return String(x.id)!==String(o.id)&&coIsOpen(x);
+  });
+  if(!others.length){proceed();return;}
+  var rows=others.map(function(x){return coOrderLine(x,false);}).join('');
+  var html='<div class="bov" id="gdone-ov"><div class="bmod" style="width:520px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">'+
+      '<div style="font-size:15px;font-weight:600;color:#b45309;">⚠️ Останалата стока още не е готова</div>'+
+      '<button onclick="coCloseGroupDone()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<div style="font-size:12.5px;color:#334155;margin:10px 0 8px;">'+esc(o.customer_name||'')+' има още '+others.length+' незавършен'+(others.length===1?'а заявка':'и заявки')+' от същата поръчка:</div>'+
+    rows+
+    '<div style="font-size:11.5px;color:#64748b;margin:8px 0 14px;">Ако извикаш клиента сега, ще получи само част от поръчката.</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
+      '<button onclick="coCloseGroupDone()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Отказ, ще изчакам</button>'+
+      '<button id="gdone-yes" data-id="'+o.id+'" onclick="coProceedGroupDone(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Въпреки това — Изпълнена</button>'+
+    '</div></div></div>';
+  var ex=document.getElementById('gdone-ov');if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('gdone-ov').classList.add('open');
+  window._coGroupDoneProceed=proceed;
+}
+function coCloseGroupDone(){
+  var el=document.getElementById('gdone-ov');if(el)el.remove();
+  window._coGroupDoneProceed=null;
+}
+function coProceedGroupDone(){
+  var el=document.getElementById('gdone-ov');if(el)el.remove();
+  var fn=window._coGroupDoneProceed;window._coGroupDoneProceed=null;
+  if(fn)fn();
+}
+
 /* ═══ ОБРАБОТКА ОТ ЦЕНТРАЛЕН ОФИС ═══
    ЦО получава заявките, свързва се с доставчика и отбелязва, че е поръчал.
    Отделен статус, защото "Изпратена" значи друго — стоката вече пътува
@@ -485,7 +717,10 @@ function renderClientOrders(){
     return '<tr id="co-row-'+esc(o.id)+'" style="'+rowStyle+'">'+
       '<td style="font-size:11px;color:#94a3b8;font-family:monospace;">'+esc(o.in_num||'—')+'</td>'+
       '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
-      '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small></td>'+
+      /* Името на клиента отваря панела с всички негови заявки — там е и бутонът
+         за още една заявка. Така не се налага още един бутон в реда. */
+      '<td><b data-id="'+o.id+'" onclick="openCustomerOrders(this.dataset.id)" title="Виж всички заявки на този клиент" style="cursor:pointer;border-bottom:1px dotted #94a3b8;">'+esc(o.customer_name||'')+'</b>'+coGroupBadge(o)+
+        '<br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small></td>'+
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
       '<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>'+
       '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
@@ -532,11 +767,16 @@ function filterOrders(f,btn){
 }
 
 function setClientStatus(id,status){
-  sbPatch('client_orders','id=eq.'+id,{status:status}).then(function(res){
-    if(!res.ok){toast('Грешка','#dc2626');return;}
-    syncLinkedTransport(id,status);
-    toast('✓ Статусът е обновен');loadClientOrders();
-  });
+  var apply=function(){
+    sbPatch('client_orders','id=eq.'+id,{status:status}).then(function(res){
+      if(!res.ok){toast('Грешка','#dc2626');return;}
+      syncLinkedTransport(id,status);
+      toast('✓ Статусът е обновен');loadClientOrders();
+    });
+  };
+  /* "Изпълнена" при свързана поръчка минава през проверка на останалите заявки */
+  if(status==='done'){coConfirmGroupDone(id,apply);return;}
+  apply();
 }
 
 function deleteClientOrder(id){
@@ -557,7 +797,13 @@ function deleteClientOrder(id){
   });
 }
 
-function openClientModal(){
+/* Група, към която ще се запише следващата нова заявка (задава се от
+   "➕ Още една заявка за същия клиент"). Изчиства се при всяко отваряне. */
+var coPendingGroupId=null;
+
+function openClientModal(prefill){
+  prefill=prefill||{};
+  coPendingGroupId=prefill.group_id||null;
   ['c-bon','c-name','c-phone','c-agent','c-note','c-pt-addr'].forEach(function(id){
     var el=document.getElementById(id);if(el)el.value='';
   });
@@ -587,6 +833,20 @@ function openClientModal(){
     fillStoreSelect(document.getElementById('c-fulfiller'),currentUser.store_name);
   });
   renderItemRows('c-items',[{}]);
+  /* Данни на клиента, пренесени от предишната заявка — само те, артикулите
+     са различни (затова е отделна заявка). */
+  if(prefill.customer_name){var n1=document.getElementById('c-name');if(n1)n1.value=prefill.customer_name;}
+  if(prefill.phone){var p1=document.getElementById('c-phone');if(p1)p1.value=prefill.phone;}
+  if(prefill.bon){var b1=document.getElementById('c-bon');if(b1)b1.value=prefill.bon;}
+  if(prefill.delivery){var d1=document.getElementById('c-delivery');if(d1)d1.value=prefill.delivery;}
+  /* Видимо е, че заявката ще влезе в обща поръчка — иначе изглежда като обикновена нова */
+  var gh=document.getElementById('c-group-hint');
+  if(gh){
+    gh.style.display=coPendingGroupId?'':'none';
+    gh.innerHTML=coPendingGroupId
+      ? '👥 Тази заявка ще се свърже с останалите заявки на <b>'+esc(prefill.customer_name||'клиента')+'</b> като една обща поръчка.'
+      : '';
+  }
   document.getElementById('client-modal').classList.add('open');
 }
 
@@ -618,15 +878,24 @@ function submitClientOrder(){
     from_store:v('c-from-store'),fulfiller:v('c-fulfiller'),
     agent:v('c-agent')||currentUser.display_name,
     delivery:delivery,status:'pending',note:v('c-note'),
-    paid_transport:paidTransport
+    paid_transport:paidTransport,
+    group_id:coPendingGroupId||null
   };
+  var wasGrouped=!!coPendingGroupId;
   sbPost('client_orders',rec).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    coPendingGroupId=null;
     var finish=function(){
       closeModal('client-modal');
       loadClientOrders();
       if(typeof loadTransport==='function'&&paidTransport)loadTransport();
-      showSapReminder(num);
+      /* Ако заявката вече е част от обща поръчка, няма какво да предлагаме.
+         Иначе първо питаме за свързване, и чак после SAP напомнянето — за да
+         не се отворят два прозореца един върху друг. */
+      if(wasGrouped){showSapReminder(num);return;}
+      var probe=rec;
+      /* clientOrders още не е презаредена, затова търсим по вече заредените */
+      coSuggestLink(probe,function(){showSapReminder(num);});
     };
     if(!paidTransport){toast('✓ Заявката е записана!');finish();return;}
     createLinkedTransport(rec,ptAddr,v('c-pt-hour'),delivery,function(ok){
@@ -692,6 +961,11 @@ function renderPrint(o){
           '<div style="background:#fff8e1;border:1px solid #f0c940;border-radius:5px;padding:4px 8px;grid-column:1/-1;">'+
             '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">★ Дата на доставка</div>'+
             '<div style="font-size:12px;font-weight:700;color:#dc2626;">'+fmtDate(o.delivery)+'</div></div>'+
+          /* Клиентът трябва да знае, че поръчката му е разделена на няколко заявки —
+             иначе идва с една бланка и очаква цялата стока. */
+          (o.group_id&&coGroupMembers(o).length>1
+            ? '<div style="background:#eef2ff;border:1px solid #c7d2fe;border-radius:5px;padding:4px 8px;grid-column:1/-1;"><div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">Обща поръчка</div><div style="font-size:11px;font-weight:700;">Заявка '+coGroupPos(o)+' от '+coGroupMembers(o).length+' — стоката пристига на части</div></div>'
+            : '')+
           (o.note?'<div style="background:#f9f8f6;border-radius:5px;padding:4px 8px;grid-column:1/-1;"><div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">Забележка</div><div style="font-size:10.5px;">'+esc(o.note)+'</div></div>':'')+
         '</div>'+
         '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px;padding-bottom:2px;border-bottom:1px solid #f0ede8;">Данни за клиента</div>'+
