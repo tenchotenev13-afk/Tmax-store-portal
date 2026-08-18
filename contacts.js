@@ -167,12 +167,12 @@ function contactModalHtml() {
     '<label style="font-size:12px;color:#2563eb;cursor:pointer;font-weight:600;">📷 Избери снимка' +
     '<input type="file" id="contact-photo-input" accept=".jpg,.jpeg,.png,.webp" style="display:none;" onchange="previewContactPhoto(this)"></label>' +
     '</div>' +
-    '<label class="fl">Име *</label><input class="fi" id="c-name" value="'+esc(c.name||'')+'" placeholder="Пълно име">' +
+    '<label class="fl">Име *</label><input class="fi" id="ct-name" value="'+esc(c.name||'')+'" placeholder="Пълно име">' +
     '<label class="fl">Длъжност / Роля</label><input class="fi" id="c-role" value="'+esc(c.role_title||'')+'" placeholder="напр. Управител">' +
     '<label class="fl">Отдел / Категория</label>' +
     '<select class="fi" id="c-cat">'+catOpts.map(function(o){return '<option'+(c.category===o?' selected':'')+'>'+o+'</option>';}).join('')+'</select>' +
     (contactsTab==='contact'?'<label class="fl">Магазин</label><input class="fi" id="c-store" value="'+esc(c.store_name||'')+'" placeholder="напр. Кърджали">':'<input type="hidden" id="c-store" value="">') +
-    '<label class="fl">Телефон</label><input class="fi" id="c-phone" value="'+esc(c.phone||'')+'" placeholder="0888 ...">'+
+    '<label class="fl">Телефон</label><input class="fi" id="ct-phone" value="'+esc(c.phone||'')+'" placeholder="0888 ...">'+
     '<label class="fl">Имейл</label><input class="fi" id="c-email" value="'+esc(c.email||'')+'" placeholder="name@temax.bg">'+
     '<label class="fl">Бележки / Групи</label><textarea class="fi" id="c-notes" rows="2" style="resize:none;">'+esc(c.notes||'')+'</textarea>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
@@ -201,14 +201,14 @@ function previewContactPhoto(input) {
 }
 
 function submitContact() {
-  var name=(document.getElementById('c-name').value||'').trim();
+  var name=(document.getElementById('ct-name').value||'').trim();
   if(!name){toast('Въведи име','#dc2626');return;}
   var data={
     name:name, type:contactsTab,
     role_title:document.getElementById('c-role').value,
     category:document.getElementById('c-cat').value,
     store_name:(document.getElementById('c-store')||{}).value||'',
-    phone:document.getElementById('c-phone').value,
+    phone:document.getElementById('ct-phone').value,
     email:document.getElementById('c-email').value,
     notes:document.getElementById('c-notes').value
   };
