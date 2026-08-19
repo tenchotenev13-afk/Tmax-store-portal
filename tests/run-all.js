@@ -25,7 +25,8 @@ const TESTS = [
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',
   'stock-diff-capitalized-counter.test.js',
-  'stock-diff-chip-counts.test.js'
+  'stock-diff-chip-counts.test.js',
+  'shared-write-errors.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

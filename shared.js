@@ -37,24 +37,63 @@ function sbGet(t,q){
     return fail(0,{message:String((e&&e.message)||e)});
   });
 }
-function sbPost(t,b){return fetch(API+'/'+t,{method:'POST',headers:H,body:JSON.stringify(b)}).then(function(r){return r.ok?{ok:true}:r.json().then(function(e){return{ok:false,error:e};});});}
+function sbPost(t,b){
+  var url=API+'/'+t;
+  return fetch(url,{method:'POST',headers:H,body:JSON.stringify(b)})
+    .then(function(r){return sbWriteResult('sbPost',url,r);})
+    .catch(sbNetFail('sbPost',url));
+}
 /* Като sbPost, но връща и създадения ред. Нужно е, когато базата попълва поле
    при записа (номерът на клиентската заявка се раздава от тригер по обект) и
    клиентът няма как да го знае предварително. */
 function sbPostReturn(t,b){
-  return fetch(API+'/'+t,{
+  var url=API+'/'+t;
+  return fetch(url,{
     method:'POST',
     headers:Object.assign({},H,{'Prefer':'return=representation'}),
     body:JSON.stringify(b)
   }).then(function(r){
     return r.json().catch(function(){return null;}).then(function(d){
-      if(!r.ok)return {ok:false,error:d};
+      if(!r.ok)return sbWriteFail('sbPostReturn',url,r.status,d);
       return {ok:true,row:(Array.isArray(d)?d[0]:d)||null};
     });
+  }).catch(sbNetFail('sbPostReturn',url));
+}
+/* Общ провал за пишещите заявки. Три неща наведнъж:
+   - причината от PostgREST стига до извикващия в .error (преди се губеше и
+     call site-овете можеха да покажат само думата "Грешка" без съдържание);
+   - редът в конзолата е същият като на sbGet — URL, статус, причина;
+   - връща се ОБЕКТ, не отхвърляне, за да не мълчат веригите без .catch.
+   Тук нарочно НЯМА toast: за разлика от четенето, при запис всеки call site
+   вече показва свое съобщение и второ би било двойно. */
+function sbWriteFail(fn,url,status,d){
+  var msg=(d&&(d.message||d.hint))||('HTTP '+(status||'—'));
+  try{console.error(fn+' '+url+' → '+(status||'мрежов срив')+': '+msg);}catch(e){}
+  return {ok:false,status:status||0,error:(d||{message:msg})};
+}
+/* .json() може да хвърли (празно тяло при 401) — затова се минава през
+   .catch, преди тялото да стигне до sbWriteFail. */
+function sbWriteResult(fn,url,r){
+  if(r.ok)return {ok:true};
+  return r.json().catch(function(){return null;}).then(function(d){
+    return sbWriteFail(fn,url,r.status,d);
   });
 }
-function sbPatch(t,f,b){return fetch(API+'/'+t+'?'+f,{method:'PATCH',headers:Object.assign({},H,{'Prefer':'return=minimal'}),body:JSON.stringify(b)}).then(function(r){return{ok:r.ok};});}
-function sbDelete(t,f){return fetch(API+'/'+t+'?'+f,{method:'DELETE',headers:H}).then(function(r){return{ok:r.ok};});}
+function sbNetFail(fn,url){
+  return function(e){ return sbWriteFail(fn,url,0,{message:String((e&&e.message)||e)}); };
+}
+function sbPatch(t,f,b){
+  var url=API+'/'+t+'?'+f;
+  return fetch(url,{method:'PATCH',headers:Object.assign({},H,{'Prefer':'return=minimal'}),body:JSON.stringify(b)})
+    .then(function(r){return sbWriteResult('sbPatch',url,r);})
+    .catch(sbNetFail('sbPatch',url));
+}
+function sbDelete(t,f){
+  var url=API+'/'+t+'?'+f;
+  return fetch(url,{method:'DELETE',headers:H})
+    .then(function(r){return sbWriteResult('sbDelete',url,r);})
+    .catch(sbNetFail('sbDelete',url));
+}
 
 /* ОДИТ ЛОГ — тих запис (никога не блокира и не чупи основния поток при грешка) */
 function logAudit(event,extra){
