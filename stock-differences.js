@@ -466,7 +466,7 @@ function openWarehouseResponseModal(lineId,val){
     '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">'+(WH_RESPONSE_LABELS[val]||val)+'</div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(l.material_name||'')+'</div>'+
     '<label class="fl">Коментар към магазина (по избор)</label>'+
-    '<input class="fi" id="whr-comment" value="'+esc(l.warehouse_comment||'')+'" placeholder="напр. Ще стигне до вторник с редовния курс">'+
+    '<input class="fi" id="whr-comment" value="'+escVal(l.warehouse_comment)+'" placeholder="напр. Ще стигне до вторник с редовния курс">'+
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
     '<button onclick="document.getElementById(\'whr-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
     '<button data-lid="'+lineId+'" data-val="'+val+'" onclick="submitWarehouseResponse(this.dataset.lid,this.dataset.val)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>'+
@@ -600,10 +600,13 @@ function sdModalHtml() {
   /* Помощна функция - поле, което става само за четене (не input), ако
      магазинът вече не може да го пипа. */
   function coreField(label, id, val, placeholder, type){
+    /* 0 е валидна стойност за количество - val||'' (както и escVal(0)) би я
+       превърнало в празно поле и после в null при запис. */
+    var sv = (val===null||val===undefined)?'':String(val);
     if(storeLocked){
-      return '<div><label class="fl">'+label+'</label><div class="fi" style="background:#f8fafc;color:#64748b;">'+esc(val||'—')+'</div><input type="hidden" id="'+id+'" value="'+esc(val||'')+'"></div>';
+      return '<div><label class="fl">'+label+'</label><div class="fi" style="background:#f8fafc;color:#64748b;">'+esc(sv||'—')+'</div><input type="hidden" id="'+id+'" value="'+escVal(sv)+'"></div>';
     }
-    return '<div><label class="fl">'+label+'</label><input'+(type?' type="'+type+'"':'')+(type==='number'?' step="0.01"':'')+' class="fi" id="'+id+'" value="'+esc(val||'')+'" placeholder="'+(placeholder||'')+'"></div>';
+    return '<div><label class="fl">'+label+'</label><input'+(type?' type="'+type+'"':'')+(type==='number'?' step="0.01"':'')+' class="fi" id="'+id+'" value="'+escVal(sv)+'" placeholder="'+(placeholder||'')+'"></div>';
   }
 
   var h = '<div class="bov" id="sd-ov"><div class="bmod" style="width:540px;max-height:88vh;overflow-y:auto;">'+
@@ -633,8 +636,8 @@ function sdModalHtml() {
 
     '<label class="fl">Наименование *</label>'+
     (storeLocked
-      ? '<div class="fi" style="background:#f8fafc;color:#64748b;">'+esc(r.material_name||'—')+'</div><input type="hidden" id="sd-name" value="'+esc(r.material_name||'')+'">'
-      : '<input class="fi" id="sd-name" value="'+esc(r.material_name||'')+'" placeholder="напр. ЩУЦЕР ЗА МАРКУЧ МЕТАЛЕН С РЕЗБА 1&quot; ПРАВ">')+
+      ? '<div class="fi" style="background:#f8fafc;color:#64748b;">'+esc(r.material_name||'—')+'</div><input type="hidden" id="sd-name" value="'+escVal(r.material_name)+'">'
+      : '<input class="fi" id="sd-name" value="'+escVal(r.material_name)+'" placeholder="напр. ЩУЦЕР ЗА МАРКУЧ МЕТАЛЕН С РЕЗБА 1&quot; ПРАВ">')+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
     coreField('Поръчка','sd-order',r.order_number,'напр. 4100135756')+
@@ -655,7 +658,7 @@ function sdModalHtml() {
     var typeLabels={writein:'📥 Заприхождаване',return:'↩️ Връщане',missing:'❓ Липса'};
     h += '<label class="fl">Тип на решение</label>'+
       '<div class="fi" style="background:#f8fafc;color:#64748b;">'+(r.type?typeLabels[r.type]||r.type:'⏳ Още не е решено от Цветелина')+'</div>'+
-      '<input type="hidden" id="sd-type" value="'+esc(r.type||'')+'">';
+      '<input type="hidden" id="sd-type" value="'+escVal(r.type)+'">';
   }
 
   /* Статус - опциите са контекстни спрямо типа на решение на Цвети, за да не
@@ -674,7 +677,7 @@ function sdModalHtml() {
     '</select>'+
 
     '<label class="fl">Коментар</label>'+
-    '<input class="fi" id="sd-comment" value="'+esc(r.comment||'')+'" placeholder="напр. ЗАПРИХОДЕТЕ С РЕВИЗИЯ / ЧАКАМЕ">';
+    '<input class="fi" id="sd-comment" value="'+escVal(r.comment)+'" placeholder="напр. ЗАПРИХОДЕТЕ С РЕВИЗИЯ / ЧАКАМЕ">';
 
   /* Снимките, качени от магазина към бланката - само за преглед. Показваме ги
      и тук, за да не се налага Цвети да търси бланката отделно, докато пише
@@ -693,7 +696,7 @@ function sdModalHtml() {
   /* Коментар Контролер + прикачване на документ - само за Цвети/admin/logistics */
   if(canReview){
     h += '<label class="fl">Коментар Контролер (Цветелина)</label>'+
-      '<input class="fi" id="sd-ctrl-comment" value="'+esc(r.resolution_comment||'')+'" placeholder="напр. Изчаква се кредитно от доставчика">';
+      '<input class="fi" id="sd-ctrl-comment" value="'+escVal(r.resolution_comment)+'" placeholder="напр. Изчаква се кредитно от доставчика">';
     h += '<label class="fl">Прикачени документи</label>';
     var atts = normSDAttachments(r.attachments);
     if(atts.length){
@@ -714,7 +717,7 @@ function sdModalHtml() {
     h += '<label style="display:inline-flex;align-items:center;gap:4px;border:1px dashed #cbd5e1;border-radius:5px;padding:3px 10px;font-size:11px;color:#94a3b8;cursor:pointer;">'+
       '📎 + Прикачи документ<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx" style="display:none;" onchange="sdUploadAttachment(this)"></label>';
   } else {
-    h += '<input type="hidden" id="sd-ctrl-comment" value="'+esc(r.resolution_comment||'')+'">';
+    h += '<input type="hidden" id="sd-ctrl-comment" value="'+escVal(r.resolution_comment)+'">';
   }
 
   h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
@@ -823,6 +826,26 @@ function closeSDModal() {
   sdEditId=null;
 }
 
+/* esc() връща '—' за празна стойност (shared.js) - тирето е САМО за показване.
+   Ако попадне в payload-а, PostgREST връща 400:
+   invalid input syntax for type date: "—". Затова непосредствено преди
+   изпращане датите и количествата се нормализират: празно или '—' -> null. */
+var SD_NULLABLE = ['confirmed_date','withdrawal_date','quantity','quantity_received','quantity_supplier_doc'];
+function sdIsBlank(val){
+  return val===null||val===undefined||String(val).trim()===''||String(val).trim()==='—';
+}
+function sdCleanPayload(data){
+  SD_NULLABLE.forEach(function(k){
+    if(!data.hasOwnProperty(k))return;
+    if(sdIsBlank(data[k])){data[k]=null;return;}
+    if(k.indexOf('quantity')===0){
+      var n=parseFloat(data[k]);
+      data[k]=isNaN(n)?null:n;
+    }
+  });
+  return data;
+}
+
 function submitSD() {
   var store=(document.getElementById('sd-store').value||'').trim();
   var name=(document.getElementById('sd-name').value||'').trim();
@@ -834,9 +857,9 @@ function submitSD() {
     supplier:       document.getElementById('sd-supplier').value,
     material_code:  document.getElementById('sd-mat').value,
     material_name:  name,
-    quantity:       parseFloat(document.getElementById('sd-qty').value)||null,
+    quantity:       document.getElementById('sd-qty').value,
     order_number:   document.getElementById('sd-order').value,
-    confirmed_date: document.getElementById('sd-cdate').value||null,
+    confirmed_date: document.getElementById('sd-cdate').value,
     type:           document.getElementById('sd-type').value||null,
     status:         document.getElementById('sd-status').value,
     comment:        document.getElementById('sd-comment').value,
@@ -849,6 +872,7 @@ function submitSD() {
   if(sdEditId && !canReviewDiff() && origRecord && !origRecord.type){
     data.store_corrected_at = new Date().toISOString();
   }
+  sdCleanPayload(data);
   var p = sdEditId
     ? sbPatch('stock_differences','id=eq.'+sdEditId,data)
     : sbPost('stock_differences',data);
@@ -1043,15 +1067,15 @@ function openSDCorrectModal(lineId){
     '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">✏️ Коригирай подадената разлика</div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">Ако сте открили стоката или сте сгрешили бройка/код при подаването.</div>'+
     '<div style="display:grid;grid-template-columns:1fr 2fr;gap:8px;">'+
-    '<div><label class="fl">SAP код</label><input class="fi" id="sdc-sap" value="'+esc(l.material_code||'')+'"></div>'+
-    '<div><label class="fl">Наименование</label><input class="fi" id="sdc-name" value="'+esc(l.material_name||'')+'"></div>'+
+    '<div><label class="fl">SAP код</label><input class="fi" id="sdc-sap" value="'+escVal(l.material_code)+'"></div>'+
+    '<div><label class="fl">Наименование</label><input class="fi" id="sdc-name" value="'+escVal(l.material_name)+'"></div>'+
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
     '<div><label class="fl">По документ</label><input type="number" step="0.001" class="fi" id="sdc-qty" value="'+(l.quantity!=null?l.quantity:'')+'"></div>'+
     '<div><label class="fl">Реално получено</label><input type="number" step="0.001" class="fi" id="sdc-qty-real" value="'+(l.quantity_received!=null?l.quantity_received:'')+'"></div>'+
     '</div>'+
     '<label class="fl">Коментар (по избор)</label>'+
-    '<input class="fi" id="sdc-comment" value="'+esc(l.comment||'')+'" placeholder="напр. Намерена в склада при ревизия">'+
+    '<input class="fi" id="sdc-comment" value="'+escVal(l.comment)+'" placeholder="напр. Намерена в склада при ревизия">'+
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
     '<button onclick="document.getElementById(\'sdc-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
     '<button onclick="submitSDCorrection()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази корекцията</button>'+
@@ -1074,11 +1098,12 @@ function submitSDCorrection(){
   var data={
     material_code: sapEl.value,
     material_name: name,
-    quantity: qtyEl.value!==''?parseFloat(qtyEl.value):null,
-    quantity_received: qtyRealEl.value!==''?parseFloat(qtyRealEl.value):null,
+    quantity: qtyEl.value,
+    quantity_received: qtyRealEl.value,
     comment: commentEl.value,
     store_corrected_at: new Date().toISOString()
   };
+  sdCleanPayload(data);
   sdKeepScroll(current?current.report_id:null);
   sbPatch('stock_differences','id=eq.'+sdCorrectLineId,data).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
