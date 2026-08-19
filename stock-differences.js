@@ -100,46 +100,21 @@ function renderStockDiff() {
   var canEdit = canEditSD();
   var canAdd  = canAddSD();
 
-  var list = sdData.filter(function(r) {
-    if (!r.type) return false; /* още не е прегледан от Цветелина - показва се само в секцията "За преглед" */
-    /* Логистичен склад - вижда само собствените си насрещни разлики.
-       counterpart живее в differences_reports, не директно в реда - търсим
-       през report_id. */
-    if (isLogisticsWarehouseUser()) {
-      var parentRep = diffReports.find(function(x){return x.id===r.report_id;});
-      if (!parentRep || parentRep.counterpart !== currentUser.store_name) return false;
-    } else {
-      /* За всички останали - подтабовете "Доставчици"/"Междускладови" разделят
-         главната таблица, за по-ясно разграничение (най-вече за Цвети, която
-         управлява доставчиковите; междускладовите вече минават през склада). */
-      var rp = diffReports.find(function(x){return x.id===r.report_id;});
-      var rDir = rp ? rp.direction : 'supplier';
-      if (rDir !== sdDirTab) return false;
-    }
-    if (sdTypeFilter !== 'all' && r.type !== sdTypeFilter) return false;
-    if (sdFilter === 'pending') { if (r.status !== 'pending') return false; }
-    else if (sdFilter === 'taken') { if (!sdIsTaken(r)) return false; }
-    /* Точен филтър по магазин (чиповете) - ОТДЕЛЕН от свободното търсене
-       по-долу, за да не се влияе от текст в коментари, споменаващ друг обект. */
-    if (sdStoreFilter && r.store_name !== sdStoreFilter) return false;
-    if (sdSearch) {
-      var q = sdSearch.toLowerCase();
-      var hay = [r.store_name,r.supplier,r.material_name,r.material_code,r.order_number,r.comment].join(' ').toLowerCase();
-      if (hay.indexOf(q) === -1) return false;
-    }
-    return true;
-  });
+  var list = sdTableRows();
 
   var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса' };
   var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626' };
 
-  /* Обхватът на броячите следва филтъра по тип - иначе етикетът казва
+  /* Обхватът на КАРТИТЕ следва филтъра по тип - иначе етикетът казва
      "Заприходена", а числото брои и връщанията. При "Всички типове" остават
      сборни (там и думите са неутрални). Другите филтри (магазин, търсене,
-     посока, статус) НЕ стесняват броячите - те са за таблицата. */
-  var counted = sdTypeFilter==='all'
-    ? sdData
-    : sdData.filter(function(r){ return r.type===sdTypeFilter; });
+     посока, статус) НЕ стесняват картите - те са преглед на модула, не на
+     текущия изглед. Редовете без тип обаче отпадат и тук: те стоят в "За
+     преглед" и не могат да се появят в таблицата при никой филтър. */
+  var counted = sdData.filter(function(r){
+    if (!r.type) return false;
+    return sdTypeFilter==='all' || r.type===sdTypeFilter;
+  });
   var pending = counted.filter(function(r){ return r.status==='pending'; }).length;
   var taken   = counted.filter(sdIsTaken).length;
 
@@ -200,9 +175,14 @@ function renderStockDiff() {
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #16a34a;"><div style="font-size:11px;color:#64748b;">'+cw.tIcon+' '+cw.taken+'</div><div style="font-size:28px;font-weight:700;color:#16a34a;font-family:DM Mono,monospace;">'+taken+'</div></div>';
   h += '</div>';
 
-  /* Филтър по тип */
-  var typeCounts = { writein:0, 'return':0, missing:0 };
-  sdData.forEach(function(r){ if(r.type && typeCounts.hasOwnProperty(r.type)) typeCounts[r.type]++; });
+  /* Филтър по тип. Числото е "колко реда ще видиш при клик" - затова минава
+     през sdTableRows със заменен само типа, а активният филтър по статус,
+     магазин, търсене и посока остава. */
+  var typeCounts = {
+    writein:  sdTableRows({type:'writein'}).length,
+    'return': sdTableRows({type:'return'}).length,
+    missing:  sdTableRows({type:'missing'}).length
+  };
   h += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">';
   [['all','Всички типове'],['writein','📥 Заприхождаване ('+typeCounts.writein+')'],['return','↩️ Връщане ('+typeCounts['return']+')'],['missing','❓ Липса ('+typeCounts.missing+')']].forEach(function(f){
     var a = sdTypeFilter===f[0];
@@ -210,9 +190,13 @@ function renderStockDiff() {
   });
   h += '</div>';
 
-  /* Филтри */
+  /* Филтри по статус. Същият критерий - числото е броят редове след клика,
+     не общият брой в модула (за това са картите отгоре). */
+  var chipAll     = sdTableRows({status:'all'}).length;
+  var chipPending = sdTableRows({status:'pending'}).length;
+  var chipTaken   = sdTableRows({status:'taken'}).length;
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
-  [['all','Всички ('+counted.length+')'],['pending',cw.pIcon+' '+cw.pending+' ('+pending+')'],['taken',cw.tIcon+' '+cw.taken+' ('+taken+')']].forEach(function(f){
+  [['all','Всички ('+chipAll+')'],['pending',cw.pIcon+' '+cw.pending+' ('+chipPending+')'],['taken',cw.tIcon+' '+cw.taken+' ('+chipTaken+')']].forEach(function(f){
     var a = sdFilter===f[0];
     h += '<button data-f="'+f[0]+'" onclick="setSDFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
   });
@@ -291,6 +275,50 @@ function renderStockDiff() {
    баджът, броячите и филтърът. Докато баджът я четеше, а броячът не, редът се
    показваше като ЗАПРИХОДЕНА, но не влизаше в нито едно число. */
 function sdIsTaken(r){ return r.status==='taken' || r.status==='capitalized'; }
+
+/* ЕДИН критерий за това кои редове влизат в главната таблица. Ползва се и от
+   таблицата, и от числата по чиповете - иначе числото обещава едно, а кликът
+   показва друго (чипът "Всички" броеше целия sdData, включително редовете без
+   тип, които стоят в секцията "За преглед" и никога не влизат тук).
+
+   `over` подменя ЕДИНСТВЕНО измерението, което самият чип управлява. Без това
+   чипът "Липса" щеше да се брои през вече включения филтър "Заприхождаване" и
+   винаги да показва 0. Останалите филтри (магазин, търсене, посока) остават
+   активни нарочно - те стесняват и таблицата, значи стесняват и числото. */
+function sdTableRows(over){
+  over = over || {};
+  var typeF   = over.hasOwnProperty('type')   ? over.type   : sdTypeFilter;
+  var statusF = over.hasOwnProperty('status') ? over.status : sdFilter;
+  return sdData.filter(function(r) {
+    if (!r.type) return false; /* още не е прегледан от Цветелина - показва се само в секцията "За преглед" */
+    /* Логистичен склад - вижда само собствените си насрещни разлики.
+       counterpart живее в differences_reports, не директно в реда - търсим
+       през report_id. */
+    if (isLogisticsWarehouseUser()) {
+      var parentRep = diffReports.find(function(x){return x.id===r.report_id;});
+      if (!parentRep || parentRep.counterpart !== currentUser.store_name) return false;
+    } else {
+      /* За всички останали - подтабовете "Доставчици"/"Междускладови" разделят
+         главната таблица, за по-ясно разграничение (най-вече за Цвети, която
+         управлява доставчиковите; междускладовите вече минават през склада). */
+      var rp = diffReports.find(function(x){return x.id===r.report_id;});
+      var rDir = rp ? rp.direction : 'supplier';
+      if (rDir !== sdDirTab) return false;
+    }
+    if (typeF !== 'all' && r.type !== typeF) return false;
+    if (statusF === 'pending') { if (r.status !== 'pending') return false; }
+    else if (statusF === 'taken') { if (!sdIsTaken(r)) return false; }
+    /* Точен филтър по магазин (чиповете) - ОТДЕЛЕН от свободното търсене
+       по-долу, за да не се влияе от текст в коментари, споменаващ друг обект. */
+    if (sdStoreFilter && r.store_name !== sdStoreFilter) return false;
+    if (sdSearch) {
+      var q = sdSearch.toLowerCase();
+      var hay = [r.store_name,r.supplier,r.material_name,r.material_code,r.order_number,r.comment].join(' ').toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+}
 
 /* Едно и също състояние в схемата (status='pending'/'taken') се казва различно
    според типа на решението: при връщане куриерът ВЗИМА стоката, при
