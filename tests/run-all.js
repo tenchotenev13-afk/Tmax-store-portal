@@ -28,6 +28,7 @@ const TESTS = [
   'diff-submit-validation.test.js',
   'stock-diff-capitalized-counter.test.js',
   'stock-diff-chip-counts.test.js',
+  'stock-diff-responsibility.test.js',
   'shared-write-errors.test.js',
   'admin-user-create-select.test.js'
 ];
