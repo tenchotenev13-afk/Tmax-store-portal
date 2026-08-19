@@ -50,6 +50,18 @@ function canReviewDiff() {
 /* Кой извършва действието - едно място за начина, по който се записва авторът
    в resolved_by/completed_by. Същият израз се ползва и за created_by. */
 function sdActor(){ return currentUser.display_name || currentUser.email; }
+/* fmtDate() в shared.js разчита, че стойността е чиста дата - прави split('-')
+   и слепва частите наобратно. Подаден timestamptz ('2026-08-19T12:13:19+00:00')
+   излиза като "19T12:13:19+00:00.08.2026". Затова колоните от тип timestamptz
+   (created_at, email_sent_at, resolved_at, completed_at) минават оттук:
+   отрязваме часа и чак тогава форматираме. fmtDate не се пипа - него го ползват
+   десетки места с реални date колони. */
+function sdFmtDateTime(val){
+  if(val===null||val===undefined||val==='') return '—';
+  var s=String(val);
+  var t=s.indexOf('T');
+  return fmtDate(t>=0?s.slice(0,t):s);
+}
 /* Логистични складове - отделни физически обекти (не роля), чиито служители
    влизат с обичайните си профили, но с store_name = точно името на склада.
    Те виждат само разликите, при които ТЕ са насрещната страна (counterpart)
@@ -1105,7 +1117,7 @@ function renderDiffReportsSection(){
        '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+(rep.direction==='supplier'?'📦 Доставчик':'🔄 Междускладов')+' — '+esc(rep.counterpart||'')+'</span></div>'+
        '<div style="display:flex;align-items:center;gap:8px;">'+
        '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</span>'+
-       (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+fmtDate(rep.email_sent_at)+'</span>':'')+
+       (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+sdFmtDateTime(rep.email_sent_at)+'</span>':'')+
        '<button data-rid="'+rep.id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
        (canSendDiffEmail()?'<button data-rid="'+rep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✉️ Изпрати имейл</button>':'')+
        '</div>';
@@ -1844,7 +1856,7 @@ function renderDiffPrint(rep){
   /* "Кой + кога" в една клетка: името горе, датата отдолу с дребен шрифт. */
   var whoWhen = function(who,when){
     if(!who) return '—';
-    return esc(who)+(when?'<div class="p-sub">'+fmtDate(when)+'</div>':'');
+    return esc(who)+(when?'<div class="p-sub">'+sdFmtDateTime(when)+'</div>':'');
   };
 
   var PRINT_CSS =
@@ -1866,8 +1878,11 @@ function renderDiffPrint(rep){
     '.dp-meta td:first-child{width:42mm;font-weight:600;}'+
     '.dp-note{border:1px solid #bbb;border-radius:1.5mm;padding:2mm 2.5mm;font-size:8.5pt;margin-bottom:3.5mm;}'+
     '.dp-tbl{width:100%;border-collapse:collapse;margin-bottom:4mm;table-layout:fixed;}'+
-    '.dp-tbl th{border:1px solid #999;padding:1.2mm 1mm;font-size:7.5pt;text-align:left;background:#eee;font-weight:700;}'+
-    '.dp-tbl td{border:1px solid #bbb;padding:1.2mm 1mm;font-size:8pt;vertical-align:top;word-wrap:break-word;}'+
+    /* overflow-wrap:break-word чупи ПО ДУМИ и слиза до буквите само когато една
+       дума сама по себе си не се побира. word-break:break-all би нарязал всяко
+       наименование по средата на думата. */
+    '.dp-tbl th{border:1px solid #999;padding:1.2mm 1.6mm;font-size:7.5pt;text-align:left;background:#eee;font-weight:700;word-break:normal;overflow-wrap:break-word;}'+
+    '.dp-tbl td{border:1px solid #bbb;padding:1.2mm 1.6mm;font-size:8pt;vertical-align:top;word-break:normal;overflow-wrap:break-word;}'+
     '.dp-num{text-align:right;}'+
     '.p-sub{font-size:7pt;color:#555;}'+
     '.dp-sec{font-size:9.5pt;font-weight:700;margin:0 0 2mm;}'+
@@ -1920,21 +1935,24 @@ function renderDiffPrint(rep){
           '<tr><td>Документ №:</td><td>'+esc(rep.document_number||'—')+'</td></tr>'+
           '<tr><td>Дата на документа:</td><td>'+fmtDate(rep.doc_date)+'</td></tr>'+
           '<tr><td>Подал:</td><td>'+esc(rep.submitted_by||'—')+'</td></tr>'+
-          '<tr><td>Дата на подаване:</td><td>'+fmtDate(rep.created_at)+'</td></tr>'+
+          '<tr><td>Дата на подаване:</td><td>'+sdFmtDateTime(rep.created_at)+'</td></tr>'+
         '</table>'+
         (genComment?'<div class="dp-note"><b>Общ коментар:</b> '+esc(genComment)+'</div>':'')+
         '<table class="dp-tbl">'+
+          /* Фиксирани ширини, сума точно 190mm (= полезната ширина на A4 при
+             10mm полета). С table-layout:fixed браузърът ги спазва дословно,
+             вместо да преразпределя колоните според съдържанието. */
           '<thead><tr>'+
-            '<th style="width:7mm;">№</th>'+
-            '<th style="width:16mm;">SAP</th>'+
-            '<th>Наименование</th>'+
+            '<th style="width:8mm;">№</th>'+
+            '<th style="width:20mm;">SAP</th>'+
+            '<th style="width:46mm;">Наименование</th>'+
             '<th style="width:12mm;">Кол.</th>'+
             '<th style="width:14mm;">Получено</th>'+
             '<th style="width:24mm;">Тип на решение</th>'+
-            '<th style="width:24mm;">Статус</th>'+
-            '<th style="width:22mm;">Решил</th>'+
-            '<th style="width:22mm;">Изпълнил</th>'+
-            '<th style="width:30mm;">Коментар</th>'+
+            '<th style="width:22mm;">Статус</th>'+
+            '<th style="width:16mm;">Решил</th>'+
+            '<th style="width:16mm;">Изпълнил</th>'+
+            '<th style="width:12mm;">Коментар</th>'+
           '</tr></thead>'+
           '<tbody>'+(rowsHtml||'<tr><td colspan="10" style="text-align:center;color:#666;">Няма редове по тази бланка.</td></tr>')+'</tbody>'+
         '</table>'+

@@ -91,6 +91,17 @@ const printTxt = doc => (printEl(doc).textContent || '');
 const imgsWithSrc = (doc, src) =>
   doc.querySelectorAll('#mod-print img[src="' + src + '"]').length;
 
+/* Стойността срещу даден етикет в шапката — по-точно от търсене в целия
+   текст, където „—" се среща и в клетките на таблицата. */
+function metaVal(doc, label) {
+  const rows = doc.querySelectorAll('#mod-print .dp-meta tr');
+  for (let i = 0; i < rows.length; i++) {
+    const tds = rows[i].querySelectorAll('td');
+    if (tds[0] && tds[0].textContent.trim() === label) return tds[1].textContent.trim();
+  }
+  return null;
+}
+
 (async function run() {
 
   section('0. Средата се вдига с ДВАТА файла заедно');
@@ -250,6 +261,174 @@ const imgsWithSrc = (doc, src) =>
       const pr = btn(doc, '🖨 Принтирай');
       ok('бутонът за печат сочи window.print()', !!pr &&
         /window\.print\(\)/.test(pr.getAttribute('onclick') || ''));
+    }
+  }
+
+  section('8. ДАТИ: timestamptz не изтича в документа като "19T12:13:19+00:00.08.2026"');
+  {
+    /* fmtDate() в shared.js прави split("-") и слепва частите наобратно —
+       подаден timestamptz дава каша. Затова колоните от този тип минават през
+       sdFmtDateTime(). Стойността е дословно от базата. */
+    const TS = '2026-08-19T12:13:19.170399+00:00';
+    const { w, doc } = env([LINE_NEW],
+      [Object.assign({}, REP_NEW, { created_at: TS, doc_date: '2026-08-19' })]);
+
+    ok('sdFmtDateTime съществува', typeof w.sdFmtDateTime === 'function');
+    ok('sdFmtDateTime реже часа', w.sdFmtDateTime(TS) === '19.08.2026', w.sdFmtDateTime(TS));
+    ok('sdFmtDateTime не пипа чиста дата',
+      w.sdFmtDateTime('2026-08-19') === '19.08.2026', w.sdFmtDateTime('2026-08-19'));
+    ok('fmtDate в shared.js НЕ е пипан (още се чупи от timestamptz)',
+      w.fmtDate(TS) !== '19.08.2026', w.fmtDate(TS));
+
+    if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
+      realClick(w, btn(doc, '🖨 Печат'));
+      await ticks();
+
+      ok('документът съдържа "19.08.2026"', printTxt(doc).indexOf('19.08.2026') >= 0);
+      ok('документът НЕ съдържа "T12:13"', printTxt(doc).indexOf('T12:13') < 0);
+      ok('никъде не е изтекла суровата стойност',
+        printTxt(doc).indexOf('170399') < 0 && printTxt(doc).indexOf('+00:00') < 0);
+      ok('редът „Дата на подаване" е форматиран',
+        metaVal(doc, 'Дата на подаване:') === '19.08.2026',
+        JSON.stringify(metaVal(doc, 'Дата на подаване:')));
+      /* КОНТРОЛА: doc_date е чиста date колона и минава по стария път. */
+      ok('КОНТРОЛА: „Дата на документа" (date) пак е 19.08.2026',
+        metaVal(doc, 'Дата на документа:') === '19.08.2026',
+        JSON.stringify(metaVal(doc, 'Дата на документа:')));
+    }
+  }
+
+  section('9. ДАТИ: празно created_at дава „—", без изключение');
+  {
+    const { w, doc } = env([LINE_NEW], [Object.assign({}, REP_NEW, { created_at: '' })]);
+
+    ok('sdFmtDateTime("") е „—"', w.sdFmtDateTime('') === '—');
+    ok('sdFmtDateTime(null) е „—"', w.sdFmtDateTime(null) === '—');
+    ok('sdFmtDateTime(undefined) е „—"', w.sdFmtDateTime(undefined) === '—');
+
+    if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
+      if (guard('печатът не хвърля при празна дата', () => {
+        realClick(w, btn(doc, '🖨 Печат'));
+      })) {
+        ok('редът „Дата на подаване" е „—"',
+          metaVal(doc, 'Дата на подаване:') === '—',
+          JSON.stringify(metaVal(doc, 'Дата на подаване:')));
+        ok('документът пак е рендиран', printTxt(doc).indexOf('БЛАНКА ЗА РАЗЛИКИ') >= 0);
+      }
+    }
+  }
+
+  section('10. ДАТИ: „✉️ Изпратен" в картата на новите бланки — същата поправка');
+  {
+    const TS = '2026-08-19T12:13:19.170399+00:00';
+    const { w, doc } = env([LINE_NEW],
+      [Object.assign({}, REP_NEW, { email_sent_at: TS })]);
+
+    if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
+      const card = doc.getElementById('diff-rep-rep-a');
+      if (ok('картата на бланката е рендирана', !!card)) {
+        const t = card.textContent;
+        ok('показва „✉️ Изпратен 19.08.2026"', t.indexOf('✉️ Изпратен 19.08.2026') >= 0,
+          t.replace(/\s+/g, ' ').slice(0, 200));
+        ok('НЕ показва "T12:13"', t.indexOf('T12:13') < 0);
+        ok('НЕ показва суровата стойност', t.indexOf('170399') < 0);
+      }
+    }
+  }
+
+  section('11. ЛЕЙАУТ: 10 колони с фиксирани ширини, сума точно 190mm');
+  {
+    const { w, doc } = env([LINE_DONE], [REP_DONE], 'interstore');
+
+    if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
+      realClick(w, btn(doc, '🖨'));
+      await ticks();
+
+      const ths = doc.querySelectorAll('#mod-print .dp-tbl thead th');
+      if (ok('заглавният ред има 10 колони', ths.length === 10, String(ths.length))) {
+        let sum = 0, missing = 0;
+        Array.prototype.forEach.call(ths, th => {
+          const m = (th.getAttribute('style') || '').match(/width:(\d+(?:\.\d+)?)mm/);
+          if (m) sum += parseFloat(m[1]); else missing++;
+        });
+        ok('всяка колона има фиксирана ширина', missing === 0, String(missing));
+        ok('сумата е точно 190mm (полезната ширина на A4)', sum === 190, sum + 'mm');
+        ok('„Наименование" е най-широката колона',
+          /width:46mm/.test(ths[2].getAttribute('style') || ''),
+          ths[2].getAttribute('style'));
+      }
+      /* Чупене по думи, не по букви — break-all би нарязал наименованията. */
+      const css = printEl(doc).querySelector('style').textContent;
+      ok('ползва се overflow-wrap:break-word', css.indexOf('overflow-wrap:break-word') >= 0);
+      ok('НЕ се ползва word-break:break-all', css.indexOf('break-all') < 0);
+    }
+  }
+
+  section('12. ДАТИ: resolved_at / completed_at в клетките „Решил" и „Изпълнил"');
+  {
+    /* Същият бъг като при created_at, но на ниво РЕД — тези две колони също са
+       timestamptz и също минаваха през fmtDate(). Стойностите са дословно от
+       базата. */
+    const TS = '2026-08-19T12:13:19.170399+00:00';
+    const LINE_TS = row({
+      id: 'l-ts', report_id: 'rep-b', type: 'return', status: 'taken',
+      material_name: 'АРТИКУЛ С ДАТИ',
+      resolved_by: 'Цветелина Тенева', resolved_at: TS,
+      completed_by: 'Склад Раднево', completed_at: TS
+    });
+    const { w, doc } = env([LINE_TS], [REP_DONE], 'interstore');
+
+    if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
+      realClick(w, btn(doc, '🖨'));
+      await ticks();
+
+      const cells = doc.querySelectorAll('#mod-print .dp-tbl tbody tr td');
+      if (ok('редът е рендиран', cells.length >= 10, String(cells.length))) {
+        const solved = cells[7].textContent;
+        const doneBy = cells[8].textContent;
+
+        ok('„Решил" показва името', solved.indexOf('Цветелина Тенева') >= 0, solved);
+        ok('„Решил" показва 19.08.2026', solved.indexOf('19.08.2026') >= 0, solved);
+        ok('„Решил" НЕ показва "T12:13"', solved.indexOf('T12:13') < 0, solved);
+
+        ok('„Изпълнил" показва името', doneBy.indexOf('Склад Раднево') >= 0, doneBy);
+        ok('„Изпълнил" показва 19.08.2026', doneBy.indexOf('19.08.2026') >= 0, doneBy);
+        ok('„Изпълнил" НЕ показва "T12:13"', doneBy.indexOf('T12:13') < 0, doneBy);
+      }
+
+      ok('никъде в документа не е изтекла суровата стойност',
+        printTxt(doc).indexOf('170399') < 0 && printTxt(doc).indexOf('+00:00') < 0);
+      /* Точният вид на счупването, ако някой върне fmtDate обратно. */
+      ok('няма следа от старото счупване "19T12:13"',
+        printTxt(doc).indexOf('19T12:13') < 0);
+    }
+  }
+
+  section('13. ДАТИ: име без дата и дата без име — нито едно не чупи клетката');
+  {
+    const LINE_HALF = row({
+      id: 'l-half', report_id: 'rep-b', type: 'return', status: 'taken',
+      material_name: 'ПОЛОВИНЧАТ',
+      resolved_by: 'Цветелина Тенева', resolved_at: null,
+      completed_by: null, completed_at: '2026-08-19T12:13:19.170399+00:00'
+    });
+    const { w, doc } = env([LINE_HALF], [REP_DONE], 'interstore');
+
+    if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
+      realClick(w, btn(doc, '🖨'));
+      await ticks();
+
+      const cells = doc.querySelectorAll('#mod-print .dp-tbl tbody tr td');
+      if (ok('редът е рендиран', cells.length >= 10, String(cells.length))) {
+        ok('име без дата → само името, без празен ред',
+          cells[7].textContent.trim() === 'Цветелина Тенева',
+          JSON.stringify(cells[7].textContent.trim()));
+        /* Дата без име е безсмислена — клетката е „—", датата не се показва. */
+        ok('дата без име → „—"', cells[8].textContent.trim() === '—',
+          JSON.stringify(cells[8].textContent.trim()));
+        ok('изоставената дата не изтича в документа',
+          printTxt(doc).indexOf('T12:13') < 0);
+      }
     }
   }
 
