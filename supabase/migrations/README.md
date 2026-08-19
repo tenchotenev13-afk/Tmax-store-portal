@@ -100,13 +100,13 @@ Supabase на **18.08.2026** — 28 миграции, от `20260730123224` на
 
 ## Какво НЕ е тук
 
-`supabase/legacy-notes/` съдържа седем по-стари `.sql` файла от корена на
+`supabase/legacy-notes/` съдържа осем по-стари `.sql` файла от корена на
 репото. Те са **бележки, не миграции** — писани са на ръка успоредно с
 прилагането и не са част от историята на Supabase. Не ги местѝ тук и не ги
 пускай с `apply_migration`.
 
-Всеки от седемте започва с маркер дали е покрит от миграция. Разпределението
-към 19.08.2026 е шест към една:
+Всеки от осемте започва с маркер дали е покрит от миграция. Разпределението
+към 19.08.2026 е седем към една:
 
 | Бележка | Състояние |
 |---|---|
@@ -116,15 +116,27 @@ Supabase на **18.08.2026** — 28 миграции, от `20260730123224` на
 | `paid-transport-schema.sql` | покрита — `20260817205509_paid_transport_link_client_orders` |
 | `bulletin-task-attachments-schema.sql` | покрита — `20260819125223_add_attachments_to_bulletin_tasks` |
 | `stock-differences-warehouse-response-schema.sql` | покрита — `20260819125224_…_warehouse_response` и `20260819125225_…_warehouse_comment` |
+| `stock-differences-responsibility-schema.sql` | покрита — `20260819123733_stock_differences_responsibility_fields` |
 | `warranty-brand-template-priority.sql` | **без миграция**; фийчърът е върнат назад, колоната е мъртва |
 
-Шестте покрити са история и могат да се четат само като контекст — двете
-последно покрити спряха да бъдат единственият запис на жива схема на
-19.08.2026. Седмата, `warranty-brand-template-priority.sql`, остава без
-миграция нарочно: колоната `warranty_brands.card_template_file` е мъртва и не
-се описва, а се решава отделно дали да падне.
+Седемте покрити са история и могат да се четат само като контекст. Осмата,
+`warranty-brand-template-priority.sql`, остава без миграция нарочно: колоната
+`warranty_brands.card_template_file` е мъртва и не се описва, а се решава
+отделно дали да падне.
 
-Маркерът в началото на `bulletin-task-attachments-schema.sql` и
-`stock-differences-warehouse-response-schema.sql` е сменен на „ПОКРИТА ОТ
+Маркерът в началото на `bulletin-task-attachments-schema.sql`,
+`stock-differences-warehouse-response-schema.sql` и
+`stock-differences-responsibility-schema.sql` е сменен на „ПОКРИТА ОТ
 МИГРАЦИЯ" по същия образец като първите четири. Самият SQL под маркера не е
 пипан — той е историческият запис.
+
+### Бележката за отговорността дойде по друг път
+
+Първите седем бележки са от корена на репото отпреди папката с миграции.
+`stock-differences-responsibility-schema.sql` е от **19.08.2026** и описва
+миграция, приложена същия ден директно в Supabase, без файл в тази папка —
+тоест правило 2 („първо файлът, после `apply_migration`") е било прескочено и
+после наваксано. Миграцията тук е изтеглена от
+`supabase_migrations.schema_migrations` и сверена дума по дума с приложеното.
+Отбелязва се, защото това е същата пътека, по която се стигна до 28 миграции
+в базата и нула в репото.

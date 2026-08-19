@@ -47,6 +47,9 @@ function canSubmitDiff() {
 function canReviewDiff() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
+/* Кой извършва действието - едно място за начина, по който се записва авторът
+   в resolved_by/completed_by. Същият израз се ползва и за created_by. */
+function sdActor(){ return currentUser.display_name || currentUser.email; }
 /* Логистични складове - отделни физически обекти (не роля), чиито служители
    влизат с обичайните си профили, но с store_name = точно името на склада.
    Те виждат само разликите, при които ТЕ са насрещната страна (counterpart)
@@ -579,9 +582,10 @@ function resolveDiffLine(id,type){
   /* Котва към бланката, по която се работи - след пре-рендирането оставаме на
      нея, вместо да ни връща най-отгоре на списъка. */
   sdKeepScroll(line.report_id);
-  sbPatch('stock_differences','id=eq.'+id,{type:type,status:'pending'}).then(function(res){
+  var resolvedAt=new Date().toISOString();
+  sbPatch('stock_differences','id=eq.'+id,{type:type,status:'pending',resolved_by:sdActor(),resolved_at:resolvedAt}).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    line.type=type; line.status='pending'; /* локално, за незабавна проверка по-долу без чакане на reload */
+    line.type=type; line.status='pending'; line.resolved_by=sdActor(); line.resolved_at=resolvedAt; /* локално, за незабавна проверка по-долу без чакане на reload */
     var finish=function(){
       var siblingLines=sdData.filter(function(x){return x.report_id===line.report_id;});
       var allResolved = siblingLines.length>0 && siblingLines.every(function(x){return !!x.type;});
@@ -637,7 +641,7 @@ function sdToggleCreditNote(id){
 }
 function sdMarkTaken(id) {
   if (!confirm('Маркирай стоката като ВЗЕТА?')) return;
-  sbPatch('stock_differences','id=eq.'+id,{status:'taken'}).then(function(r){
+  sbPatch('stock_differences','id=eq.'+id,{status:'taken',completed_by:sdActor(),completed_at:new Date().toISOString()}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     toast('✅ Маркирана като взета!'); loadStockDiff();
   });
@@ -940,6 +944,27 @@ function submitSD() {
      момента на корекция, за да изскочи най-отгоре в списъка. */
   if(sdEditId && !canReviewDiff() && origRecord && !origRecord.type){
     data.store_corrected_at = new Date().toISOString();
+  }
+  /* Кой определи типа на решението. Записва се при нов запис с непразен тип и
+     при РЕАЛНА смяна на типа - редакция, която не пипа типа (напр. само
+     коментар), запазва първоначалния автор и час. */
+  if(data.type && (!origRecord || data.type !== origRecord.type)){
+    data.resolved_by = sdActor();
+    data.resolved_at = new Date().toISOString();
+  }
+  /* Кой изпълни - пише се само при пресичане на границата приключен/неприключен,
+     в двете посоки. Вътре в едно и също състояние не се пипа, за да не се
+     презаписва изпълнителят при редакция на коментар.
+     'capitalized' е заварена стойност за СЪЩОТО състояние като 'taken', затова
+     старото състояние минава през sdIsTaken, не през сравнение на низа. */
+  var isNowCompleted = data.status==='taken' || data.status==='capitalized';
+  var wasCompleted = !!origRecord && sdIsTaken(origRecord);
+  if(isNowCompleted && !wasCompleted){
+    data.completed_by = sdActor();
+    data.completed_at = new Date().toISOString();
+  } else if(!isNowCompleted && wasCompleted){
+    data.completed_by = null;
+    data.completed_at = null;
   }
   sdCleanPayload(data);
   var p = sdEditId
