@@ -9,13 +9,42 @@ Supabase на **18.08.2026** — 28 миграции, от `20260730123224` на
 
 | Живо в базата, без миграция | Единственият запис |
 |---|---|
-| `bulletin_tasks.attachments` — jsonb, данни в 31 от 41 задачи | `legacy-notes/bulletin-task-attachments-schema.sql` |
-| `stock_differences.warehouse_response`, `warehouse_comment` — text, ползвани от `stock-differences.js` | `legacy-notes/stock-differences-warehouse-response-schema.sql` |
 | `warranty_brands.card_template_file` — text, NULL в 123-те реда и неползвана в кода | `legacy-notes/warranty-brand-template-priority.sql` |
 
 Списъкът е от сверяване на 18.08.2026 между `legacy-notes/`, миграциите и
 живата база. Той покрива само проверените места и не е гаранция, че друго
 не липсва.
+
+### Три миграции описват заварено състояние
+
+На 19.08.2026 три от колоните в горния списък получиха миграция и затова
+излязоха от него:
+
+| Миграция | Колона |
+|---|---|
+| `20260819125223_add_attachments_to_bulletin_tasks` | `bulletin_tasks.attachments` |
+| `20260819125224_add_warehouse_response_to_stock_differences` | `stock_differences.warehouse_response` |
+| `20260819125225_add_warehouse_comment_to_stock_differences` | `stock_differences.warehouse_comment` |
+
+**Те не са промяна на схемата.** И трите колони са живи в базата отпреди тази
+папка да съществува; миграциите само ги записват, за да може базата да се
+пресъздаде от нулата. В базата не е приложено нищо — типовете са прочетени от
+`information_schema` и преписани както са заварени, включително
+`default '[]'::jsonb` при `attachments` и липсата на CHECK върху
+`warehouse_response`.
+
+Следствия, които трябва да се знаят:
+
+- Версията в името казва кога миграцията е **записана**, не кога колоната се е
+  появила. Хронологията им е фиктивна и това е неизбежно при документиране на
+  заварено състояние.
+- И трите са `add column if not exists`, тоест върху живата база са no-op.
+  Обратната страна: ако някъде колоната съществува с **друг** default,
+  `if not exists` мълчи и различието остава незабелязано.
+- `_down.sql` файловете им са разрушителни по различен начин. При
+  `attachments` rollback-ът трие прикачените файлове на 31 от 41 задачи и
+  връзката към Storage е невъзстановима. При другите две днес няма данни за
+  губене (0 от 42 реда), но липсата на колоната спира модула „Разлики".
 
 Имената са същите като в Supabase: `<версия>_<име>.sql`. Не ги преименувай —
 версията е и подредбата, и връзката с реда в `supabase_migrations.schema_migrations`.
@@ -77,7 +106,7 @@ Supabase на **18.08.2026** — 28 миграции, от `20260730123224` на
 пускай с `apply_migration`.
 
 Всеки от седемте започва с маркер дали е покрит от миграция. Разпределението
-към 18.08.2026 е четири към три:
+към 19.08.2026 е шест към една:
 
 | Бележка | Състояние |
 |---|---|
@@ -85,10 +114,16 @@ Supabase на **18.08.2026** — 28 миграции, от `20260730123224` на
 | `client-order-numbering-schema.sql` | покрита — `20260818071737_client_order_numbering_per_store` |
 | `co-processed-schema.sql` | покрита — `20260818054941_co_processed_client_orders` |
 | `paid-transport-schema.sql` | покрита — `20260817205509_paid_transport_link_client_orders` |
-| `bulletin-task-attachments-schema.sql` | **без миграция**, жива схема |
-| `stock-differences-warehouse-response-schema.sql` | **без миграция**, жива схема |
+| `bulletin-task-attachments-schema.sql` | покрита — `20260819125223_add_attachments_to_bulletin_tasks` |
+| `stock-differences-warehouse-response-schema.sql` | покрита — `20260819125224_…_warehouse_response` и `20260819125225_…_warehouse_comment` |
 | `warranty-brand-template-priority.sql` | **без миграция**; фийчърът е върнат назад, колоната е мъртва |
 
-Първите четири са история и могат да се четат само като контекст. Последните
-три са единственият запис на жива схема — докато не им се напише миграция,
-изтриването им е загуба на информация.
+Шестте покрити са история и могат да се четат само като контекст — двете
+последно покрити спряха да бъдат единственият запис на жива схема на
+19.08.2026. Седмата, `warranty-brand-template-priority.sql`, остава без
+миграция нарочно: колоната `warranty_brands.card_template_file` е мъртва и не
+се описва, а се решава отделно дали да падне.
+
+Маркерът в началото на самите файлове на `bulletin-task-attachments-schema.sql`
+и `stock-differences-warehouse-response-schema.sql` още казва „без миграция" —
+не е пипан, защото файловете в `legacy-notes/` са исторически запис.
