@@ -741,13 +741,27 @@ function sdModalHtml() {
      стойност 'capitalized', която броячите и чиповете не филтрират, така че
      редът изчезваше от всички изгледи. Стар ред с 'capitalized' се показва
      избран тук и се нормализира до 'taken' при първия запис. */
+  /* 'new' е статусът, с който редът пристига от подадена бланка, но досега го
+     нямаше сред опциите. Браузърът тогава избираше първата ('pending') и
+     всяко отваряне на модала - включително само за да се добави коментар през
+     бутона 💬 - тихо преобръщаше реда на "чакащ". Затова 'new' се показва като
+     истинска опция, а докато няма тип на решение, селектът е заключен:
+     статусът се движи чак след като Цвети реши какво става с реда. */
   var sw = sdStatusWords(r.type);
+  var sdStatusIsNew = r.status === 'new';
+  var sdNoTypeYet = isEdit && !r.type;
   h += '<label class="fl">Статус</label>'+
-    '<select class="fi" id="sd-status">'+
+    '<select class="fi" id="sd-status"'+(sdNoTypeYet?' disabled':'')+'>'+
+    (sdNoTypeYet||sdStatusIsNew
+      ? '<option value="new"'+(sdStatusIsNew?' selected':'')+'>🆕 ПОДАДЕНА, НЕПРЕГЛЕДАНА</option>'
+      : '')+
     '<option value="pending"'+(r.status==='pending'||!r.status?' selected':'')+'>'+sw.pIcon+' '+sw.pending.toUpperCase()+'</option>'+
     '<option value="taken"'+(r.status==='taken'||r.status==='capitalized'?' selected':'')+'>'+sw.tIcon+' '+sw.taken.toUpperCase()+'</option>'+
     '<option value="received"'+(r.status==='received'?' selected':'')+'>📬 ПРИЕТА</option>'+
     '</select>'+
+    (sdNoTypeYet
+      ? '<div style="font-size:11px;color:#94a3b8;margin-top:-6px;margin-bottom:8px;">Статусът се отключва, след като бъде зададен тип на решение.</div>'
+      : '')+
 
     '<label class="fl">Коментар</label>'+
     '<input class="fi" id="sd-comment" value="'+escVal(r.comment)+'" placeholder="напр. ЗАПРИХОДЕТЕ С РЕВИЗИЯ / ЧАКАМЕ">';

@@ -29,6 +29,7 @@ const TESTS = [
   'stock-diff-capitalized-counter.test.js',
   'stock-diff-chip-counts.test.js',
   'stock-diff-responsibility.test.js',
+  'stock-diff-status-new.test.js',
   'shared-write-errors.test.js',
   'admin-user-create-select.test.js'
 ];
