@@ -311,8 +311,12 @@ function submitUserModal(){
       } else afterPassword();
     });
   } else {
-    /* Prefer: return=representation, за да получим id-то на новосъздадения ред (за паролата) */
-    fetch(API+'/users',{
+    /* Prefer: return=representation, за да получим id-то на новосъздадения ред (за паролата).
+       ?select=id е задължителен, не козметика: без него PostgREST прави
+       RETURNING users.*, а Postgres иска SELECT право върху ВСЯКА върната
+       колона. В мига, в който anon загуби правото върху password_hash,
+       създаването на потребител би връщало 403. Кодът и без това чете само id. */
+    fetch(API+'/users?select=id',{
       method:'POST',
       headers:Object.assign({},H,{'Prefer':'return=representation'}),
       body:JSON.stringify(Object.assign({email:email},data))
