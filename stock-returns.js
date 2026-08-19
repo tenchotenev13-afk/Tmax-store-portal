@@ -164,11 +164,7 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
   h += '</tr></thead><tbody>';
   list.forEach(function(r) {
     var isTaken = r.status === 'taken';
-    var statusBadge = r.status==='completed'
-      ? '<span style="background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">🏁 ПРИКЛЮЧЕНА</span>'
-      : isTaken
-      ? '<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ ВЗЕТА</span>'
-      : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
+    var statusBadge = srStatusBadge(r);
     h += '<tr style="border-bottom:1px solid #f1f5f9;'+(r.diff_line_id?'background:#f5f3ff;':'')+'">' +
       '<td style="padding:7px 10px;max-width:180px;">'+esc(r.product_name||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.sap_code||'')+'</td>'+
@@ -202,11 +198,7 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
   h += '</tr></thead><tbody>';
   list.forEach(function(r) {
     var isTaken = r.status === 'taken';
-    var statusBadge = r.status==='completed'
-      ? '<span style="background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">🏁 ПРИКЛЮЧЕНА</span>'
-      : isTaken
-      ? '<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ ВЗЕТА</span>'
-      : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
+    var statusBadge = srStatusBadge(r);
     h += '<tr style="border-bottom:1px solid #f1f5f9;">' +
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.purchase_order||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.id_euro||'')+'</td>'+
@@ -221,6 +213,24 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;white-space:nowrap;position:sticky;right:0;background:#fff;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
   });
   h += '</tbody></table></div>';
+  return h;
+}
+
+/* Бадж за статус + маркер "без документ" - споделен от двете таблици.
+   Маркерът е чисто информативен: показва редовете, отчетени като взети/приключени
+   без прикачена товарителница. При спор с доставчик за тях нямаме доказателство.
+   Не блокира нищо и не изчезва при редакция - заварените записи си остават
+   каквито са, маркерът само ги прави видими. */
+function srStatusBadge(r){
+  var h = r.status==='completed'
+    ? '<span style="background:#ede9fe;color:#5b21b6;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">🏁 ПРИКЛЮЧЕНА</span>'
+    : r.status==='taken'
+    ? '<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ ВЗЕТА</span>'
+    : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
+  var proven = Array.isArray(r.photos) && r.photos.length>0;
+  if((r.status==='taken'||r.status==='completed') && !proven){
+    h += '<span title="Няма прикачена товарителница — при спор с доставчика нямаме доказателство" style="background:#fffbeb;color:#92400e;padding:2px 6px;border-radius:20px;font-size:10px;font-weight:600;margin-left:4px;white-space:nowrap;">⚠️ без документ</span>';
+  }
   return h;
 }
 
@@ -340,7 +350,7 @@ function srModalHtml() {
     '<label class="fl">Изтеглена от/с куриер (номер на товарителница)</label>'+
     '<input class="fi" id="sr-courier" value="'+esc(r.courier_info||'')+'" placeholder="напр. по буса на Кърджали към Сливен / Еконт 5300...">'+
 
-    '<div id="sr-photo-hint" style="display:'+(r.status==='taken'?'block':'none')+';background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11.5px;color:#92400e;">📸 <b>Прикачи снимка на товарителницата</b> при изпращане на стоката.</div>'+
+    '<div id="sr-photo-hint" style="display:'+((r.status==='taken'||r.status==='completed')?'block':'none')+';background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11.5px;color:#92400e;">📸 <b>Задължително:</b> снимка на товарителницата, дата на изтегляне и куриер.</div>'+
     '<label class="fl">Снимка на товарителница/документ</label>'+
     '<div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">'+
       '<label style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">'+
@@ -459,13 +469,14 @@ function srUploadPhoto(input){
   });
   input.value='';
 }
-/* Показва/скрива подсказката за снимка на товарителница според избрания статус -
-   изисква я само когато записът се маркира като "Взета/Изпратена" */
+/* Показва/скрива изискването за товарителница според избрания статус - и за
+   "Взета", и за "Приключена" ("Приключена" се задава директно и може да
+   прескочи "Взета", а доказателство трябва и в двата случая). */
 function updateSRPhotoHint(){
   var statusEl=document.getElementById('sr-status');
   var hintEl=document.getElementById('sr-photo-hint');
   if(!statusEl||!hintEl)return;
-  hintEl.style.display = statusEl.value==='taken' ? 'block' : 'none';
+  hintEl.style.display = (statusEl.value==='taken'||statusEl.value==='completed') ? 'block' : 'none';
 }
 function closeSRModal() {
   var ov=document.getElementById('sr-ov'); if(ov)ov.classList.remove('open');
@@ -751,6 +762,31 @@ function submitSR() {
     created_by:     currentUser.display_name||currentUser.email
   };
   if(!lockStatus) data.status = document.getElementById('sr-status').value;
+  /* Доказателство при ИЗЛИЗАНЕ ОТ "Невзета". Без товарителница доставчикът
+     оспорва, че е получил стоката, и сумата по разликата не се възстановява -
+     затова снимка, дата и куриер са задължителни, а не подсказка.
+     Вързано е към прехода, не към самия статус: "Приключена" се задава директно
+     и може да прескочи "Взета", иначе прескачането би заобиколило проверката.
+     wasProven пази заварените записи - маркираните преди тази промяна не се
+     блокират при следваща редакция (същият модел като isNowCompleted &&
+     !wasCompleted в submitSD). При lockStatus статусът изобщо не се изпраща,
+     значи няма преход и не се проверява нищо. Важи за двата таба - модалът е общ. */
+  if(!lockStatus && (data.status==='taken' || data.status==='completed')){
+    var wasProven = !!origRecord && (origRecord.status==='taken' || origRecord.status==='completed');
+    if(!wasProven){
+      var missing=[];
+      if(!(Array.isArray(srPendingPhotos) && srPendingPhotos.length)) missing.push('снимка на товарителницата');
+      if(!data.withdrawal_date) missing.push('дата на изтегляне');
+      var courier=(data.courier_info||'').trim();
+      /* "—" и "-" не са куриер - махаме тиретата и празното място и проверяваме
+         дали изобщо е останало нещо. */
+      if(courier.length<3 || !courier.replace(/[—–\-\s]/g,'')) missing.push('изтеглена от/с куриер');
+      if(missing.length){
+        toast('Липсва товарителница — '+missing.join(', '),'#dc2626');
+        return;
+      }
+    }
+  }
   if (tab==='complaint') {
     var expEl=document.getElementById('sr-expiry'), reasonEl=document.getElementById('sr-reason');
     data.expiry_date = expEl?(expEl.value||null):null;

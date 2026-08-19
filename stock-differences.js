@@ -998,14 +998,39 @@ function submitSD() {
     data.completed_at = null;
   }
   sdCleanPayload(data);
+  /* Тип "Връщане" трябва да породи запис в "За връщане" и когато решението е
+     взето през модала, а не само през бутоните на реда (resolveDiffLine).
+     Условието е САМО за крайния тип, БЕЗ сравнение с предишния: така всяка
+     редакция на осиротял ред (маркиран за връщане, но без създадено връщане)
+     го самолекува. Дублиране няма - autoCreateReturnFromDiff проверява по
+     diff_line_id преди да пише. Нов ред минава през sbPostReturn, защото
+     sbPost не връща id, а то е нужно за връзката. */
+  var needsReturn = data.type==='return';
   var p = sdEditId
     ? sbPatch('stock_differences','id=eq.'+sdEditId,data)
-    : sbPost('stock_differences',data);
+    : (needsReturn ? sbPostReturn('stock_differences',data) : sbPost('stock_differences',data));
   p.then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
-    closeSDModal();
-    toast('✅ '+(sdEditId?'Записано!':'Добавено!'));
-    loadStockDiff();
+    var finish=function(){
+      closeSDModal();
+      toast('✅ '+(sdEditId?'Записано!':'Добавено!'));
+      loadStockDiff();
+    };
+    var lineId = sdEditId || (res.row && res.row.id);
+    if(needsReturn && lineId){
+      /* Наследява поведението на autoCreateReturnFromDiff: тя поглъща
+         собствените си грешки тихо и вика cb() при всякакъв изход. */
+      autoCreateReturnFromDiff({
+        id:            lineId,
+        store_name:    data.store_name,
+        supplier:      data.supplier,
+        material_name: data.material_name,
+        material_code: data.material_code,
+        quantity:      data.quantity
+      },finish);
+      return;
+    }
+    finish();
   });
 }
 

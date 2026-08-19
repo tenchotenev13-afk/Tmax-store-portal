@@ -32,7 +32,8 @@ const TESTS = [
   'stock-diff-status-new.test.js',
   'stock-diff-print.test.js',
   'shared-write-errors.test.js',
-  'admin-user-create-select.test.js'
+  'admin-user-create-select.test.js',
+  'return-proof.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
