@@ -14,3 +14,11 @@ comment on column public.stock_differences.completed_by is 'Кой маркир�
 comment on column public.stock_differences.completed_at is 'Кога е маркиран като взет/заприходен. Изчиства се при връщане към pending.';
 
 -- Без backfill: за 7-те вече решени реда авторът не е записан никъде.
+
+-- ── ROLLBACK ──
+-- alter table public.stock_differences
+--   drop column if exists resolved_by,
+--   drop column if exists resolved_at,
+--   drop column if exists completed_by,
+--   drop column if exists completed_at;
+-- Внимание: rollback изтрива записаните имена и дати безвъзвратно.
