@@ -1195,6 +1195,8 @@ function diffItemRowHtml(item,direction){
       '<input class="fi di-sap" placeholder="SAP №" value="'+escVal(item.sap)+'" onblur="lookupCatalogBySap(this)">'+
       '<input class="fi di-name" placeholder="Наименование на артикула *" value="'+escVal(item.name)+'">'+
     '</div>'+
+    /* Бележка от търсенето в каталога - пълни се от lookupCatalogBySap() */
+    '<div class="di-lookup-hint"></div>'+
     '<div style="display:grid;grid-template-columns:'+(direction==='supplier'?'1fr 1fr 1fr 1fr':'1fr 1fr 1fr')+';gap:6px;margin-bottom:6px;">'+
       '<input type="number" step="0.001" class="fi di-qty" placeholder="По вх. доставка" value="'+(item.qty!=null?item.qty:'')+'">'+
       (direction==='supplier'?'<input type="number" step="0.001" class="fi di-qty-supdoc" placeholder="По стокова на дост." value="'+(item.qtySupplierDoc!=null?item.qtySupplierDoc:'')+'">':'')+
@@ -1264,6 +1266,37 @@ function collectDiffItemsForRedraw(){
     });
   });
   return items.length?items:[{}];
+}
+/* Редове, в които потребителят е въвел нещо, но е пропуснал наименованието.
+   Номерата са 1-базирани, както ги брои потребителят на екрана.
+   Нужни са, защото collectDiffItems() изхвърля такъв ред тихо - при една
+   бланка с един ред това даваше "Добави поне един артикул", докато на екрана
+   стои попълнен ред. */
+function diffRowsMissingName(){
+  var rows=document.querySelectorAll('#diff-items .diff-item-row');
+  var out=[];
+  rows.forEach(function(row,i){
+    if((row.querySelector('.di-name').value||'').trim())return;
+    var supDocEl=row.querySelector('.di-qty-supdoc');
+    var filled=[
+      row.querySelector('.di-sap').value,
+      row.querySelector('.di-qty').value,
+      supDocEl?supDocEl.value:'',
+      row.querySelector('.di-qty-real').value,
+      row.querySelector('.di-cat').value,
+      row.querySelector('.di-comment').value
+    ];
+    for(var k=0;k<filled.length;k++){
+      if((filled[k]||'').trim()){ out.push(i+1); return; }
+    }
+  });
+  return out;
+}
+/* Фокус в полето за наименование на посочения (1-базиран) ред. */
+function diffFocusRowName(idx){
+  var rows=document.querySelectorAll('#diff-items .diff-item-row');
+  var row=rows[idx-1]; if(!row)return;
+  var el=row.querySelector('.di-name'); if(el)el.focus();
 }
 function collectDiffItems(){
   var rows=document.querySelectorAll('#diff-items .diff-item-row');
@@ -1476,6 +1509,14 @@ function submitDiffReport(){
   var counterpart=document.getElementById('diff-counterpart').value.trim();
   var items=collectDiffItems();
   if(!store){toast('Избери магазин','#dc2626');return;}
+  /* Започнат ред без наименование спира подаването и се посочва поименно -
+     иначе се губеше тихо (collectDiffItems го изхвърля). */
+  var missingName=diffRowsMissingName();
+  if(missingName.length){
+    toast((missingName.length===1?'Ред ':'Редове ')+missingName.join(', ')+': впиши наименование на артикула','#dc2626');
+    diffFocusRowName(missingName[0]);
+    return;
+  }
   if(!items.length){toast('Добави поне един артикул с наименование','#dc2626');return;}
 
   /* Реална проверка за задължителни снимки (не само текстова подсказка) -

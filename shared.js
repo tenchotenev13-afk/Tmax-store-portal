@@ -366,26 +366,91 @@ function loadAllSuppliers(){
 
 /* ── Автоматично зареждане на наименование/мярка по SAP код от каталога (product_catalog) ──
    Работи и с редовете от Клиентски/Транспорт (.item-row) и с тези от Разлики (.diff-item-row) */
+/* Бележка към реда за артикул. Елементът .di-lookup-hint го има само формата за
+   разлики; в клиентски заявки/транспорт няма такъв и функцията мълчи, за да не
+   им се променя видът. */
+function setCatalogHint(row,kind,html){
+  var el=row.querySelector('.di-lookup-hint');
+  if(!el)return;
+  if(!html){el.innerHTML='';return;}
+  var c=kind==='warn'
+    ? {bg:'#fffbeb',br:'#fde68a',fg:'#92400e'}
+    : {bg:'#eff6ff',br:'#bfdbfe',fg:'#1e40af'};
+  el.innerHTML='<div style="background:'+c.bg+';border:1px solid '+c.br+';border-radius:5px;padding:5px 8px;font-size:11px;color:'+c.fg+';margin:-2px 0 6px;">'+html+'</div>';
+}
+
+/* Търси артикул в каталога по въведеното в полето SAP.
+   Работи и с редовете от Клиентски/Транспорт (.item-row), и с тези от Разлики
+   (.diff-item-row).
+
+   При нов артикул магазините често пишат БАРКОДА в полето SAP, затова при
+   несполука по sap_code се пробва и ean_code. Ако артикулът се намери по
+   баркод, полето се заменя с истинския sap_code - иначе в material_code влиза
+   баркод за артикул, който има валиден SAP.
+
+   ean_code НЕ е уникален (около 105 дублирани стойности при 89 588 попълнени),
+   затова при повече от един РАЗЛИЧЕН sap_code не се гадае: полето остава както
+   е въведено и потребителят получава бележка с намерените кодове. Мълчаливо
+   попълване с грешен артикул е по-скъпо от едно ръчно въвеждане. */
 function lookupCatalogBySap(inputEl){
-  var sap=inputEl.value.trim();
-  if(!sap)return;
+  var code=inputEl.value.trim();
+  if(!code)return;
   var row=inputEl.closest('.item-row')||inputEl.closest('.diff-item-row');
   if(!row)return;
   var nameEl=row.querySelector('.item-product')||row.querySelector('.di-name');
   var unitEl=row.querySelector('.item-unit')||row.querySelector('.di-unit');
-  fetch(API+'/product_catalog?sap_code=eq.'+encodeURIComponent(sap)+'&limit=1',{headers:H}).then(function(res){
-    if(!res.ok){
-      return res.text().then(function(errText){
-        console.error('product_catalog GET грешка (SAP '+sap+'):',errText);
-      });
+
+  /* Никога не презаписва вече въведено от потребителя име. */
+  function fill(item){
+    if(nameEl && !nameEl.value.trim() && item.product_name) nameEl.value=item.product_name;
+    if(unitEl && item.default_unit){
+      var opts=[].map.call(unitEl.options,function(o){return o.value;});
+      if(opts.indexOf(item.default_unit)>=0) unitEl.value=item.default_unit;
     }
-    return res.json().then(function(data){
-      var item=Array.isArray(data)&&data[0]?data[0]:null;
-      if(!item){console.log('SAP '+sap+' не е намерен в каталога.');return;}
-      if(nameEl && !nameEl.value.trim()) nameEl.value=item.product_name;
-      if(unitEl && item.default_unit){
-        var opts=[].map.call(unitEl.options,function(o){return o.value;});
-        if(opts.indexOf(item.default_unit)>=0) unitEl.value=item.default_unit;
+  }
+  function askManual(msg){
+    setCatalogHint(row,'warn',msg);
+    if(nameEl && !nameEl.value.trim() && row.querySelector('.di-lookup-hint')) nameEl.focus();
+  }
+  /* null = заявката се провали (вече логната); масив = резултат */
+  function catalogGet(q){
+    return fetch(API+'/product_catalog?'+q,{headers:H}).then(function(res){
+      if(!res.ok){
+        return res.text().then(function(t){
+          console.error('product_catalog GET грешка ('+q+'):',t);
+          return null;
+        });
+      }
+      return res.json().then(function(d){return Array.isArray(d)?d:[];});
+    });
+  }
+
+  return catalogGet('sap_code=eq.'+encodeURIComponent(code)+'&limit=1').then(function(bySap){
+    if(bySap===null)return;
+    if(bySap.length){ setCatalogHint(row,'',''); fill(bySap[0]); return; }
+    /* Не е SAP код - пробваме баркод. limit=5 стига, за да различим
+       "един артикул, дублиран ред" от "две различни стоки с един баркод". */
+    return catalogGet('ean_code=eq.'+encodeURIComponent(code)+'&limit=5').then(function(byEan){
+      if(byEan===null)return;
+      if(!byEan.length){
+        askManual('❗ Артикулът не е в каталога - нито по SAP, нито по баркод. Впиши наименованието ръчно; кодът остава както си го въвел.');
+        return;
+      }
+      var codes=[],i;
+      for(i=0;i<byEan.length;i++){
+        if(byEan[i].sap_code && codes.indexOf(byEan[i].sap_code)<0) codes.push(byEan[i].sap_code);
+      }
+      if(codes.length>1){
+        askManual('⚠️ Баркод '+esc(code)+' сочи към '+codes.length+' различни артикула (SAP '+esc(codes.join(', '))+'). Въведи верния SAP код и наименованието ръчно.');
+        return;
+      }
+      fill(byEan[0]);
+      if(codes.length===1){
+        inputEl.value=codes[0];
+        setCatalogHint(row,'info','ℹ️ Разпознат по баркод '+esc(code)+' - SAP кодът е попълнен автоматично: <b>'+esc(codes[0])+'</b>');
+      } else {
+        /* намерен по баркод, но без sap_code в каталога - кодът остава баркод */
+        askManual('ℹ️ Артикулът е намерен по баркод, но няма SAP код в каталога. Провери кода, преди да подадеш.');
       }
     });
   }).catch(function(err){console.error('product_catalog заявка неуспешна:',err);});

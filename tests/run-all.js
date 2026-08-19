@@ -24,6 +24,8 @@ const TESTS = [
   'sbget-errors.test.js',
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',
+  'catalog-lookup.test.js',
+  'diff-submit-validation.test.js',
   'stock-diff-capitalized-counter.test.js',
   'stock-diff-chip-counts.test.js',
   'shared-write-errors.test.js'
