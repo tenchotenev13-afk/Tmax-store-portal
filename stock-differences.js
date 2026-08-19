@@ -257,6 +257,11 @@ function renderStockDiff() {
       if (canEdit) {
         h += '<button data-id="'+r.id+'" onclick="openSDModal(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">✏️</button>';
       }
+      /* Печат само за редове, дошли от бланка - ръчно добавените нямат
+         report_id, тоест няма какво да се разпечата. */
+      if (r.report_id) {
+        h += '<button data-rid="'+r.report_id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #e2e8f0;background:#fff;color:#475569;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">🖨</button>';
+      }
       if (isAdmin) {
         h += '<button data-id="'+r.id+'" onclick="sdDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✕</button>';
       }
@@ -1101,6 +1106,7 @@ function renderDiffReportsSection(){
        '<div style="display:flex;align-items:center;gap:8px;">'+
        '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</span>'+
        (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+fmtDate(rep.email_sent_at)+'</span>':'')+
+       '<button data-rid="'+rep.id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
        (canSendDiffEmail()?'<button data-rid="'+rep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✉️ Изпрати имейл</button>':'')+
        '</div>';
     h+='</div>';
@@ -1791,6 +1797,180 @@ function sendDiffEmail(reportId){
      · магазин - собствените му непрегледани бланки
    Елементът се създава динамично - index.html не се пипа.
 ══════════════════════════════════════════ */
+
+/* ══════════════════════════════════════════
+   ПЕЧАТ НА БЛАНКА ЗА РАЗЛИКИ
+   По образеца на renderTransportPrint() в transport.js - същият in-page модел
+   (пише в #mod-print и вика showModule('print')), без window.open и без
+   библиотека. "Запази като PDF" е диалогът на самия браузър.
+══════════════════════════════════════════ */
+
+/* Логото е копие на низа от transport.js. Дублирано нарочно: вграденото
+   base64 не зависи от мрежата, а външен <img src> към Pages може да не се
+   дозареди преди диалога за печат и бланката излиза без лого. */
+var DIFF_PRINT_LOGO = 'data:image/png;base64,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';
+/* Същият израз като в diffReportPhotoThumbs - не всичко, качено през "Снимай
+   сега", е изображение; служителите прикачват и сканирани PDF-и. */
+var DIFF_IMG_RE = /\.(jpe?g|png|gif|webp)(\?|$)/i;
+
+function loadDiffPrint(reportId){
+  var rep = diffReports.find(function(x){return String(x.id)===String(reportId);});
+  if(!rep){ toast('Бланката не е намерена','#dc2626'); return; }
+  renderDiffPrint(rep);
+  showModule('print');
+}
+
+function renderDiffPrint(rep){
+  var wrap = document.getElementById('mod-print');
+  if(!wrap) return;
+  var lines = sdData.filter(function(x){ return x.report_id===rep.id; });
+  var si = getStoreInfo(rep.store_name) || {};
+  var isSupplier = rep.direction==='supplier';
+  var photos = Array.isArray(rep.photos) ? rep.photos : [];
+  var imgs  = photos.filter(function(p){ return p && p.url && DIFF_IMG_RE.test(p.url); });
+  var files = photos.filter(function(p){ return p && p.url && !DIFF_IMG_RE.test(p.url); });
+  /* general_comment е празен НИЗ, не NULL, във всичките заварени бланки -
+     затова проверката е по trim(), не по истинност. */
+  var genComment = (rep.general_comment||'').trim();
+
+  var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса' };
+  /* Същата логика като sdRowStatusBadge, но без цветната таблетка - на хартия
+     остава само думата. */
+  var statusText = function(r){
+    if(r.status==='received') return '📬 ПРИЕТА';
+    var w = sdStatusWords(r.type);
+    return sdIsTaken(r) ? (w.tIcon+' '+w.taken.toUpperCase()) : (w.pIcon+' '+w.pending.toUpperCase());
+  };
+  /* "Кой + кога" в една клетка: името горе, датата отдолу с дребен шрифт. */
+  var whoWhen = function(who,when){
+    if(!who) return '—';
+    return esc(who)+(when?'<div class="p-sub">'+fmtDate(when)+'</div>':'');
+  };
+
+  var PRINT_CSS =
+    '@media print{'+
+      '@page{size:A4 portrait;margin:10mm;}'+
+      '.no-print{display:none!important;}'+
+      'body{margin:0;padding:0;}'+
+      '.dp-row{page-break-inside:avoid;}'+
+    '}'+
+    '.dp-wrap{font-family:Arial,Helvetica,sans-serif;font-size:9pt;color:#111;width:190mm;max-width:190mm;margin:0 auto;}'+
+    '.dp-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3mm;}'+
+    '.dp-store-name{font-size:12pt;font-weight:700;margin-bottom:1mm;}'+
+    '.dp-store-addr{font-size:8.5pt;color:#444;}'+
+    '.dp-logo{height:24pt;width:auto;flex-shrink:0;margin-left:8mm;}'+
+    '.dp-title{font-size:13pt;font-weight:700;text-align:center;letter-spacing:.04em;margin:2mm 0 1mm;}'+
+    '.dp-sub{font-size:9pt;text-align:center;color:#444;margin-bottom:4mm;}'+
+    '.dp-meta{width:100%;border-collapse:collapse;margin-bottom:3.5mm;}'+
+    '.dp-meta td{padding:.6mm 0;font-size:9pt;vertical-align:top;line-height:1.35;}'+
+    '.dp-meta td:first-child{width:42mm;font-weight:600;}'+
+    '.dp-note{border:1px solid #bbb;border-radius:1.5mm;padding:2mm 2.5mm;font-size:8.5pt;margin-bottom:3.5mm;}'+
+    '.dp-tbl{width:100%;border-collapse:collapse;margin-bottom:4mm;table-layout:fixed;}'+
+    '.dp-tbl th{border:1px solid #999;padding:1.2mm 1mm;font-size:7.5pt;text-align:left;background:#eee;font-weight:700;}'+
+    '.dp-tbl td{border:1px solid #bbb;padding:1.2mm 1mm;font-size:8pt;vertical-align:top;word-wrap:break-word;}'+
+    '.dp-num{text-align:right;}'+
+    '.p-sub{font-size:7pt;color:#555;}'+
+    '.dp-sec{font-size:9.5pt;font-weight:700;margin:0 0 2mm;}'+
+    '.dp-photos{display:flex;flex-wrap:wrap;gap:3mm;margin-bottom:4mm;}'+
+    '.dp-photos img{width:40mm;height:auto;border:1px solid #ccc;}'+
+    '.dp-files{font-size:8.5pt;margin-bottom:4mm;}'+
+    '.dp-sign{display:flex;flex-wrap:wrap;gap:6mm;border-top:1px dotted #999;padding-top:3mm;margin-top:2mm;}'+
+    '.dp-sign-item{flex:1 1 40mm;font-size:8.5pt;}'+
+    '.dp-dots{border-bottom:1px dotted #555;height:6mm;margin-bottom:1mm;}';
+
+  var rowsHtml = lines.map(function(l,i){
+    var att = normSDAttachments(l.attachments).length;
+    return '<tr class="dp-row">'+
+      '<td class="dp-num">'+(i+1)+'</td>'+
+      '<td>'+esc(l.material_code||'')+'</td>'+
+      '<td>'+esc(l.material_name||'')+'</td>'+
+      '<td class="dp-num">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
+      '<td class="dp-num">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
+      '<td>'+(l.type?(TYPE_LABELS[l.type]||l.type):'—')+'</td>'+
+      '<td>'+statusText(l)+'</td>'+
+      '<td>'+whoWhen(l.resolved_by,l.resolved_at)+'</td>'+
+      '<td>'+whoWhen(l.completed_by,l.completed_at)+'</td>'+
+      '<td>'+esc(l.comment||'')+(att?' 📎'+att:'')+'</td>'+
+    '</tr>';
+  }).join('');
+
+  wrap.innerHTML =
+    '<style>'+PRINT_CSS+'</style>'+
+    '<div style="max-width:820px;margin:0 auto;padding:16px 16px 40px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;" class="no-print">'+
+        '<div style="font-size:18px;font-weight:600;">🖨 Бланка за разлики</div>'+
+        '<div style="display:flex;gap:8px;align-items:center;">'+
+          '<span id="dp-imgwait" style="font-size:12px;color:#d97706;">⏳ Снимките още се зареждат</span>'+
+          '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>'+
+          '<button onclick="showModule(\'stock-diff\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Обратно</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="dp-wrap">'+
+        '<div class="dp-head">'+
+          '<div>'+
+            '<div class="dp-store-name">'+esc(rep.store_name||'')+'</div>'+
+            (si.addr?'<div class="dp-store-addr">'+esc(si.addr)+(si.phone?' &nbsp;&nbsp; '+esc(si.phone):'')+'</div>':'')+
+          '</div>'+
+          '<img src="'+DIFF_PRINT_LOGO+'" class="dp-logo" alt="TeMAX">'+
+        '</div>'+
+        '<div class="dp-title">БЛАНКА ЗА РАЗЛИКИ</div>'+
+        '<div class="dp-sub">'+(isSupplier?'Разлика при приемане на доставка от доставчик':'Разлика при междускладов трансфер')+'</div>'+
+        '<table class="dp-meta">'+
+          '<tr><td>'+(isSupplier?'Доставчик:':'Обект изпращач:')+'</td><td>'+esc(rep.counterpart||'—')+'</td></tr>'+
+          '<tr><td>Документ №:</td><td>'+esc(rep.document_number||'—')+'</td></tr>'+
+          '<tr><td>Дата на документа:</td><td>'+fmtDate(rep.doc_date)+'</td></tr>'+
+          '<tr><td>Подал:</td><td>'+esc(rep.submitted_by||'—')+'</td></tr>'+
+          '<tr><td>Дата на подаване:</td><td>'+fmtDate(rep.created_at)+'</td></tr>'+
+        '</table>'+
+        (genComment?'<div class="dp-note"><b>Общ коментар:</b> '+esc(genComment)+'</div>':'')+
+        '<table class="dp-tbl">'+
+          '<thead><tr>'+
+            '<th style="width:7mm;">№</th>'+
+            '<th style="width:16mm;">SAP</th>'+
+            '<th>Наименование</th>'+
+            '<th style="width:12mm;">Кол.</th>'+
+            '<th style="width:14mm;">Получено</th>'+
+            '<th style="width:24mm;">Тип на решение</th>'+
+            '<th style="width:24mm;">Статус</th>'+
+            '<th style="width:22mm;">Решил</th>'+
+            '<th style="width:22mm;">Изпълнил</th>'+
+            '<th style="width:30mm;">Коментар</th>'+
+          '</tr></thead>'+
+          '<tbody>'+(rowsHtml||'<tr><td colspan="10" style="text-align:center;color:#666;">Няма редове по тази бланка.</td></tr>')+'</tbody>'+
+        '</table>'+
+        (imgs.length?'<div class="dp-sec">Снимки към бланката ('+imgs.length+')</div>'+
+          '<div class="dp-photos" id="dp-photos">'+imgs.map(function(p){
+            return '<img src="'+esc(p.url)+'" alt="'+esc(p.name||'снимка')+'">';
+          }).join('')+'</div>':'')+
+        (files.length?'<div class="dp-sec">Прикачени документи ('+files.length+')</div>'+
+          '<div class="dp-files">'+files.map(function(p,i){
+            return (i+1)+'. '+esc(p.name||p.url);
+          }).join('<br>')+'</div>':'')+
+        /* Пунктирът е за подпис на ръка - имената от базата вече са в
+           таблицата, тук не се дублират. */
+        '<div class="dp-sign">'+
+          ['Подал','Решил','Изпълнил','Приел'].map(function(role){
+            return '<div class="dp-sign-item"><div class="dp-dots"></div>'+role+': ......................<br>Дата: ....................</div>';
+          }).join('')+
+        '</div>'+
+      '</div>'+
+    '</div>';
+
+  /* Индикаторът изчезва чак когато и последната снимка е дошла (или е паднала -
+     иначе един счупен URL го оставя да виси завинаги). Ако снимки няма, се
+     маха веднага. */
+  var note = document.getElementById('dp-imgwait');
+  if(!note) return;
+  var imgEls = wrap.querySelectorAll('#dp-photos img');
+  var pending = imgEls.length;
+  if(!pending){ note.style.display='none'; return; }
+  var done = function(){ pending--; if(pending<=0) note.style.display='none'; };
+  Array.prototype.forEach.call(imgEls, function(im){
+    if(im.complete){ done(); return; }
+    im.onload = done; im.onerror = done;
+  });
+}
+
 var SD_BADGE_POLL_MS = 60000;
 var _sdBadgePoll = null;
 
