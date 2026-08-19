@@ -133,8 +133,15 @@ function renderStockDiff() {
   var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса' };
   var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626' };
 
-  var pending = sdData.filter(function(r){ return r.status==='pending'; }).length;
-  var taken   = sdData.filter(function(r){ return r.status==='taken'; }).length;
+  /* Обхватът на броячите следва филтъра по тип - иначе етикетът казва
+     "Заприходена", а числото брои и връщанията. При "Всички типове" остават
+     сборни (там и думите са неутрални). Другите филтри (магазин, търсене,
+     посока, статус) НЕ стесняват броячите - те са за таблицата. */
+  var counted = sdTypeFilter==='all'
+    ? sdData
+    : sdData.filter(function(r){ return r.type===sdTypeFilter; });
+  var pending = counted.filter(function(r){ return r.status==='pending'; }).length;
+  var taken   = counted.filter(function(r){ return r.status==='taken'; }).length;
 
   var h = '<div style="max-width:1400px;margin:0 auto;padding:16px;">';
 
@@ -188,8 +195,9 @@ function renderStockDiff() {
 
   /* Карти */
   h += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;max-width:400px;">';
-  h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #f59e0b;"><div style="font-size:11px;color:#64748b;">⏳ Невзета</div><div style="font-size:28px;font-weight:700;color:#f59e0b;font-family:DM Mono,monospace;">'+pending+'</div></div>';
-  h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #16a34a;"><div style="font-size:11px;color:#64748b;">✅ Взета</div><div style="font-size:28px;font-weight:700;color:#16a34a;font-family:DM Mono,monospace;">'+taken+'</div></div>';
+  var cw = sdCounterWords(sdTypeFilter);
+  h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #f59e0b;"><div style="font-size:11px;color:#64748b;">'+cw.pIcon+' '+cw.pending+'</div><div style="font-size:28px;font-weight:700;color:#f59e0b;font-family:DM Mono,monospace;">'+pending+'</div></div>';
+  h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #16a34a;"><div style="font-size:11px;color:#64748b;">'+cw.tIcon+' '+cw.taken+'</div><div style="font-size:28px;font-weight:700;color:#16a34a;font-family:DM Mono,monospace;">'+taken+'</div></div>';
   h += '</div>';
 
   /* Филтър по тип */
@@ -204,7 +212,7 @@ function renderStockDiff() {
 
   /* Филтри */
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
-  [['all','Всички ('+sdData.length+')'],['pending','⏳ Невзета ('+pending+')'],['taken','✅ Взета ('+taken+')']].forEach(function(f){
+  [['all','Всички ('+counted.length+')'],['pending',cw.pIcon+' '+cw.pending+' ('+pending+')'],['taken',cw.tIcon+' '+cw.taken+' ('+taken+')']].forEach(function(f){
     var a = sdFilter===f[0];
     h += '<button data-f="'+f[0]+'" onclick="setSDFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
   });
@@ -224,13 +232,7 @@ function renderStockDiff() {
 
     list.forEach(function(r) {
       var isTaken = r.status === 'taken';
-      var statusBadge = r.status==='received'
-        ? '<span style="background:#f0fdfa;color:#0d9488;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📬 ПРИЕТА</span>'
-        : r.status==='capitalized'
-        ? '<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📥 ЗАПРИХОДЕНА</span>'
-        : isTaken
-        ? '<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ ВЗЕТА</span>'
-        : '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>';
+      var statusBadge = sdRowStatusBadge(r);
       /* Кредитно известие - релевантно само за тип "Липса" (доставчикът не ни е
          доставил артикула, трябва финансово да ни компенсира) */
       var creditCell = '—';
@@ -262,7 +264,7 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;white-space:nowrap;">';
 
       if (canEdit && !isTaken) {
-        var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : '✅ Приета';
+        var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : '✅ Приета';
         h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
       }
       if (canEdit) {
@@ -282,6 +284,39 @@ function renderStockDiff() {
   wrap.innerHTML = h;
   sdRestoreScroll();
   sdUpdateTabBadgeFromData();
+}
+
+/* Едно и също състояние в схемата (status='pending'/'taken') се казва различно
+   според типа на решението: при връщане куриерът ВЗИМА стоката, при
+   заприхождаване магазинът я ЗАПРИХОЖДАВА. Базата не се пипа - сменя се само
+   думата. */
+function sdStatusWords(type){
+  if(type==='writein') return {pending:'Незаприходена', taken:'Заприходена', pIcon:'⏳', tIcon:'📥'};
+  return {pending:'Невзета', taken:'Взета', pIcon:'⏳', tIcon:'✅'};
+}
+/* За сборните карти и чипове, където изгледът смесва типове ("Всички типове"
+   или "Липса"), нито "Взета", нито "Заприходена" е вярно за всички редове -
+   там думите са неутрални. */
+function sdCounterWords(typeFilter){
+  if(typeFilter==='writein') return sdStatusWords('writein');
+  if(typeFilter==='return')  return sdStatusWords('return');
+  return {pending:'Чакащи', taken:'Приключени', pIcon:'⏳', tIcon:'✅'};
+}
+/* Баджът в реда знае типа на самия ред, затова там думата е точна винаги. */
+function sdRowStatusBadge(r){
+  function badge(bg,fg,txt){
+    return '<span style="background:'+bg+';color:'+fg+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+txt+'</span>';
+  }
+  if(r.status==='received') return badge('#f0fdfa','#0d9488','📬 ПРИЕТА');
+  var w = sdStatusWords(r.type);
+  /* 'capitalized' е историческа стойност - select-ът вече записва 'taken'
+     (виж sdModalHtml). Клонът остава, за да се вижда стар ред, ако изникне. */
+  if(r.status==='taken'||r.status==='capitalized'){
+    return r.type==='writein'
+      ? badge('#eff6ff','#1e40af', w.tIcon+' '+w.taken.toUpperCase())
+      : badge('#f0fdf4','#16a34a', w.tIcon+' '+w.taken.toUpperCase());
+  }
+  return badge('#fffbeb','#92400e', w.pIcon+' '+w.pending.toUpperCase());
 }
 
 /* ── Помощни функции за посока / видимост / снимки ── */
@@ -661,18 +696,20 @@ function sdModalHtml() {
       '<input type="hidden" id="sd-type" value="'+escVal(r.type)+'">';
   }
 
-  /* Статус - опциите са контекстни спрямо типа на решение на Цвети, за да не
-     се бърка магазинът: при "Заприхождане" единствената смислена завършваща
-     стойност е "Заприходена" (не "Взета" - това е за куриер, който взима
-     стока за връщане); при "Връщане" - обратното. "Приета" е за отделния
-     поток на междускладовите (логистичен склад), винаги достъпна. */
-  var showTaken = r.type!=='writein' || r.status==='taken';
-  var showCapitalized = r.type!=='return' || r.status==='capitalized';
+  /* Статус - думата зависи от типа на решението, за да не се бърка магазинът:
+     при "Заприхождаване" завършващото състояние е "Заприходена", при "Връщане"
+     е "Взета" (куриерът взима стоката). "Приета" е за отделния поток на
+     междускладовите (логистичен склад), винаги достъпна.
+     "ВЗЕТА" и "ЗАПРИХОДЕНА" са ЕДНО И СЪЩО състояние в схемата - status='taken';
+     разликата е само в думата според типа. Преди тук се записваше отделна
+     стойност 'capitalized', която броячите и чиповете не филтрират, така че
+     редът изчезваше от всички изгледи. Стар ред с 'capitalized' се показва
+     избран тук и се нормализира до 'taken' при първия запис. */
+  var sw = sdStatusWords(r.type);
   h += '<label class="fl">Статус</label>'+
     '<select class="fi" id="sd-status">'+
-    '<option value="pending"'+(r.status==='pending'||!r.status?' selected':'')+'>⏳ НЕВЗЕТА</option>'+
-    (showTaken?'<option value="taken"'+(r.status==='taken'?' selected':'')+'>✅ ВЗЕТА</option>':'')+
-    (showCapitalized?'<option value="capitalized"'+(r.status==='capitalized'?' selected':'')+'>📥 ЗАПРИХОДЕНА</option>':'')+
+    '<option value="pending"'+(r.status==='pending'||!r.status?' selected':'')+'>'+sw.pIcon+' '+sw.pending.toUpperCase()+'</option>'+
+    '<option value="taken"'+(r.status==='taken'||r.status==='capitalized'?' selected':'')+'>'+sw.tIcon+' '+sw.taken.toUpperCase()+'</option>'+
     '<option value="received"'+(r.status==='received'?' selected':'')+'>📬 ПРИЕТА</option>'+
     '</select>'+
 

@@ -22,7 +22,8 @@ const TESTS = [
   'paid-transport.test.js',
   'stock-differences.test.js',
   'sbget-errors.test.js',
-  'stock-diff-null-payload.test.js'
+  'stock-diff-null-payload.test.js',
+  'stock-diff-status-labels.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
