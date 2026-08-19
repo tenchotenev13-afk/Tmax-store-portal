@@ -118,7 +118,7 @@ function renderStockDiff() {
     }
     if (sdTypeFilter !== 'all' && r.type !== sdTypeFilter) return false;
     if (sdFilter === 'pending') { if (r.status !== 'pending') return false; }
-    else if (sdFilter === 'taken') { if (r.status !== 'taken') return false; }
+    else if (sdFilter === 'taken') { if (!sdIsTaken(r)) return false; }
     /* Точен филтър по магазин (чиповете) - ОТДЕЛЕН от свободното търсене
        по-долу, за да не се влияе от текст в коментари, споменаващ друг обект. */
     if (sdStoreFilter && r.store_name !== sdStoreFilter) return false;
@@ -141,7 +141,7 @@ function renderStockDiff() {
     ? sdData
     : sdData.filter(function(r){ return r.type===sdTypeFilter; });
   var pending = counted.filter(function(r){ return r.status==='pending'; }).length;
-  var taken   = counted.filter(function(r){ return r.status==='taken'; }).length;
+  var taken   = counted.filter(sdIsTaken).length;
 
   var h = '<div style="max-width:1400px;margin:0 auto;padding:16px;">';
 
@@ -286,6 +286,12 @@ function renderStockDiff() {
   sdUpdateTabBadgeFromData();
 }
 
+/* 'capitalized' е историческа стойност за СЪЩОТО състояние като 'taken' (виж
+   sdModalHtml). Всяко място, което пита "приключен ли е редът", минава оттук -
+   баджът, броячите и филтърът. Докато баджът я четеше, а броячът не, редът се
+   показваше като ЗАПРИХОДЕНА, но не влизаше в нито едно число. */
+function sdIsTaken(r){ return r.status==='taken' || r.status==='capitalized'; }
+
 /* Едно и също състояние в схемата (status='pending'/'taken') се казва различно
    според типа на решението: при връщане куриерът ВЗИМА стоката, при
    заприхождаване магазинът я ЗАПРИХОЖДАВА. Базата не се пипа - сменя се само
@@ -309,9 +315,7 @@ function sdRowStatusBadge(r){
   }
   if(r.status==='received') return badge('#f0fdfa','#0d9488','📬 ПРИЕТА');
   var w = sdStatusWords(r.type);
-  /* 'capitalized' е историческа стойност - select-ът вече записва 'taken'
-     (виж sdModalHtml). Клонът остава, за да се вижда стар ред, ако изникне. */
-  if(r.status==='taken'||r.status==='capitalized'){
+  if(sdIsTaken(r)){
     return r.type==='writein'
       ? badge('#eff6ff','#1e40af', w.tIcon+' '+w.taken.toUpperCase())
       : badge('#f0fdf4','#16a34a', w.tIcon+' '+w.taken.toUpperCase());
