@@ -124,6 +124,7 @@ Supabase на **18.08.2026** — 28 миграции, от `20260730123224` на
 миграция нарочно: колоната `warranty_brands.card_template_file` е мъртва и не
 се описва, а се решава отделно дали да падне.
 
-Маркерът в началото на самите файлове на `bulletin-task-attachments-schema.sql`
-и `stock-differences-warehouse-response-schema.sql` още казва „без миграция" —
-не е пипан, защото файловете в `legacy-notes/` са исторически запис.
+Маркерът в началото на `bulletin-task-attachments-schema.sql` и
+`stock-differences-warehouse-response-schema.sql` е сменен на „ПОКРИТА ОТ
+МИГРАЦИЯ" по същия образец като първите четири. Самият SQL под маркера не е
+пипан — той е историческият запис.
