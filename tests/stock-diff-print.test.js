@@ -366,6 +366,16 @@ function metaVal(doc, label) {
         /\.dp-tbl th\{[^}]*box-sizing:border-box/.test(css));
       ok('.dp-tbl td е с box-sizing:border-box',
         /\.dp-tbl td\{[^}]*box-sizing:border-box/.test(css));
+      /* Печатът се рендира В страницата и наследява index.html:67
+         th{white-space:nowrap} — без изрично normal заглавията не се пречупват
+         и излизат извън клетките си. Глобалното правило остава непокътнато. */
+      ok('.dp-tbl th е с white-space:normal (бие глобалното nowrap)',
+        /\.dp-tbl th\{[^}]*white-space:normal/.test(css));
+      /* index.html:69 tr:last-child td{border-bottom:none} бие ".dp-tbl td" по
+         специфичност и оставя таблицата отворена отдолу. Възстановяваме я с
+         правило от същата специфичност, но по-късно в реда. */
+      ok('.dp-tbl tr:last-child td връща долната граница',
+        /\.dp-tbl tr:last-child td\{[^}]*border-bottom:1px solid #bbb/.test(css));
       /* Чупене по думи, не по букви — break-all би нарязал наименованията. */
       ok('ползва се overflow-wrap:break-word', css.indexOf('overflow-wrap:break-word') >= 0);
       ok('НЕ се ползва word-break:break-all', css.indexOf('break-all') < 0);

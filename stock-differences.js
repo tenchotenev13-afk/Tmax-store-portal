@@ -1884,8 +1884,18 @@ function renderDiffPrint(rep){
        box-sizing:border-box е задължително при table-layout:fixed - без него
        padding-ът се ДОБАВЯ върху зададената ширина и десетте колони излизат
        32mm извън листа (10 × 3.2mm), тоест последната се отрязва. */
-    '.dp-tbl th{box-sizing:border-box;border:1px solid #999;padding:1.2mm 1.6mm;font-size:7.5pt;text-align:left;background:#eee;font-weight:700;word-break:normal;overflow-wrap:break-word;}'+
+    /* white-space:normal бие глобалното th{white-space:nowrap} от index.html
+       (ред 67). Печатът се рендира В страницата, тоест наследява целия ѝ CSS -
+       без това заглавия като "Тип на решение" отказват да се пречупят и
+       изпъпват извън клетките си. Глобалното правило не се пипа: то обслужва
+       всички останали таблици в портала. */
+    '.dp-tbl th{box-sizing:border-box;border:1px solid #999;padding:1.2mm 1.6mm;font-size:7.5pt;text-align:left;background:#eee;font-weight:700;white-space:normal;word-break:normal;overflow-wrap:break-word;}'+
     '.dp-tbl td{box-sizing:border-box;border:1px solid #bbb;padding:1.2mm 1.6mm;font-size:8pt;vertical-align:top;word-break:normal;overflow-wrap:break-word;}'+
+    /* Възстановява долната граница на последния ред. index.html:69 има
+       tr:last-child td{border-bottom:none}, което бие ".dp-tbl td" по
+       специфичност (0,1,2 срещу 0,1,1) и оставя рамката на таблицата отворена
+       отдолу. Тук специфичността е изравнена, а правилото идва по-късно. */
+    '.dp-tbl tr:last-child td{border-bottom:1px solid #bbb;}'+
     '.dp-num{text-align:right;}'+
     '.p-sub{font-size:7pt;color:#555;}'+
     '.dp-sec{font-size:9.5pt;font-weight:700;margin:0 0 2mm;}'+
