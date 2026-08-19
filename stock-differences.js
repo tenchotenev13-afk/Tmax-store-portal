@@ -1880,9 +1880,12 @@ function renderDiffPrint(rep){
     '.dp-tbl{width:100%;border-collapse:collapse;margin-bottom:4mm;table-layout:fixed;}'+
     /* overflow-wrap:break-word чупи ПО ДУМИ и слиза до буквите само когато една
        дума сама по себе си не се побира. word-break:break-all би нарязал всяко
-       наименование по средата на думата. */
-    '.dp-tbl th{border:1px solid #999;padding:1.2mm 1.6mm;font-size:7.5pt;text-align:left;background:#eee;font-weight:700;word-break:normal;overflow-wrap:break-word;}'+
-    '.dp-tbl td{border:1px solid #bbb;padding:1.2mm 1.6mm;font-size:8pt;vertical-align:top;word-break:normal;overflow-wrap:break-word;}'+
+       наименование по средата на думата.
+       box-sizing:border-box е задължително при table-layout:fixed - без него
+       padding-ът се ДОБАВЯ върху зададената ширина и десетте колони излизат
+       32mm извън листа (10 × 3.2mm), тоест последната се отрязва. */
+    '.dp-tbl th{box-sizing:border-box;border:1px solid #999;padding:1.2mm 1.6mm;font-size:7.5pt;text-align:left;background:#eee;font-weight:700;word-break:normal;overflow-wrap:break-word;}'+
+    '.dp-tbl td{box-sizing:border-box;border:1px solid #bbb;padding:1.2mm 1.6mm;font-size:8pt;vertical-align:top;word-break:normal;overflow-wrap:break-word;}'+
     '.dp-num{text-align:right;}'+
     '.p-sub{font-size:7pt;color:#555;}'+
     '.dp-sec{font-size:9.5pt;font-weight:700;margin:0 0 2mm;}'+
@@ -1941,18 +1944,20 @@ function renderDiffPrint(rep){
         '<table class="dp-tbl">'+
           /* Фиксирани ширини, сума точно 190mm (= полезната ширина на A4 при
              10mm полета). С table-layout:fixed браузърът ги спазва дословно,
-             вместо да преразпределя колоните според съдържанието. */
+             вместо да преразпределя колоните според съдържанието - но само
+             защото клетките са с box-sizing:border-box (виж PRINT_CSS).
+             Без него сумата тук е подвеждаща: реалната ширина беше 222mm. */
           '<thead><tr>'+
             '<th style="width:8mm;">№</th>'+
-            '<th style="width:20mm;">SAP</th>'+
-            '<th style="width:46mm;">Наименование</th>'+
-            '<th style="width:12mm;">Кол.</th>'+
-            '<th style="width:14mm;">Получено</th>'+
-            '<th style="width:24mm;">Тип на решение</th>'+
-            '<th style="width:22mm;">Статус</th>'+
-            '<th style="width:16mm;">Решил</th>'+
-            '<th style="width:16mm;">Изпълнил</th>'+
-            '<th style="width:12mm;">Коментар</th>'+
+            '<th style="width:18mm;">SAP</th>'+
+            '<th style="width:44mm;">Наименование</th>'+
+            '<th style="width:11mm;">Кол.</th>'+
+            '<th style="width:13mm;">Получено</th>'+
+            '<th style="width:22mm;">Тип на решение</th>'+
+            '<th style="width:20mm;">Статус</th>'+
+            '<th style="width:15mm;">Решил</th>'+
+            '<th style="width:15mm;">Изпълнил</th>'+
+            '<th style="width:24mm;">Коментар</th>'+
           '</tr></thead>'+
           '<tbody>'+(rowsHtml||'<tr><td colspan="10" style="text-align:center;color:#666;">Няма редове по тази бланка.</td></tr>')+'</tbody>'+
         '</table>'+

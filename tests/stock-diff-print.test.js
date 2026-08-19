@@ -354,11 +354,19 @@ function metaVal(doc, label) {
         ok('всяка колона има фиксирана ширина', missing === 0, String(missing));
         ok('сумата е точно 190mm (полезната ширина на A4)', sum === 190, sum + 'mm');
         ok('„Наименование" е най-широката колона',
-          /width:46mm/.test(ths[2].getAttribute('style') || ''),
+          /width:44mm/.test(ths[2].getAttribute('style') || ''),
           ths[2].getAttribute('style'));
       }
-      /* Чупене по думи, не по букви — break-all би нарязал наименованията. */
       const css = printEl(doc).querySelector('style').textContent;
+      /* СЪЩИНСКАТА поправка. При table-layout:fixed без box-sizing:border-box
+         padding-ът се добавя ВЪРХУ ширината: 10 колони × 3.2mm = 32mm извън
+         листа и последната колона се отрязва. Сумата 190mm по-горе лъже,
+         докато този ред го няма — затова двете проверки вървят заедно. */
+      ok('.dp-tbl th е с box-sizing:border-box',
+        /\.dp-tbl th\{[^}]*box-sizing:border-box/.test(css));
+      ok('.dp-tbl td е с box-sizing:border-box',
+        /\.dp-tbl td\{[^}]*box-sizing:border-box/.test(css));
+      /* Чупене по думи, не по букви — break-all би нарязал наименованията. */
       ok('ползва се overflow-wrap:break-word', css.indexOf('overflow-wrap:break-word') >= 0);
       ok('НЕ се ползва word-break:break-all', css.indexOf('break-all') < 0);
     }
