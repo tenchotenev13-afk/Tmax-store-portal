@@ -2031,6 +2031,7 @@ function renderDiffPrint(rep){
 
 var SD_BADGE_POLL_MS = 60000;
 var _sdBadgePoll = null;
+var _sdVisBound = false;
 
 function sdTabBadgeEl(){
   var tab = document.getElementById('tab-stock-diff');
@@ -2082,6 +2083,12 @@ function sdUpdateTabBadgeFromData(){
    отварян тази сесия (тогава diffReports/sdData са празни). */
 function sdRefreshTabBadge(){
   if(!currentUser) return;
+  /* Скрит таб (друг раздел или минимизиран прозорец) - не питаме сървъра.
+     Пулсът е на 60 сек и тече във всяка отворена сесия, така че фоновите
+     раздели дават основната част от трафика към differences_reports.
+     Слушателят в startSDBadgePolling() опреснява веднага щом табът стане
+     видим, затова балончето не изостава. */
+  if(document.hidden) return;
   var q = 'select=id,store_name,counterpart,reviewed&reviewed=eq.false';
   var qLines = 'select=report_id,warehouse_response';
   if(isLogisticsWarehouseUser()){
@@ -2108,6 +2115,15 @@ function startSDBadgePolling(){
   if(_sdBadgePoll) clearInterval(_sdBadgePoll);
   sdRefreshTabBadge();
   _sdBadgePoll = setInterval(sdRefreshTabBadge, SD_BADGE_POLL_MS);
+  /* Закача се само веднъж. startSDBadgePolling() може да се извика повторно
+     (нов логин без презареждане на страницата), а втори слушател би значел по
+     две заявки при всяко връщане към таба - точно обратното на целта. */
+  if(!_sdVisBound){
+    _sdVisBound = true;
+    document.addEventListener('visibilitychange', function(){
+      if(!document.hidden) sdRefreshTabBadge();
+    });
+  }
 }
 /* Закачаме се за startApp (както прави notifications.js) - стартира се след
    логин, за всяка роля. Този файл се зарежда ПРЕДИ notifications.js, така че

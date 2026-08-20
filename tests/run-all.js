@@ -33,7 +33,8 @@ const TESTS = [
   'stock-diff-print.test.js',
   'shared-write-errors.test.js',
   'admin-user-create-select.test.js',
-  'return-proof.test.js'
+  'return-proof.test.js',
+  'sd-badge-hidden-tab.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
