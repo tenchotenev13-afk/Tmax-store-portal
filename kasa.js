@@ -1887,7 +1887,14 @@ function submitStornoForm(){
 /* Записва редовете с артикули за дадена сторно бележка: изтрива старите (ако има, при
    редакция) и записва наново текущия списък — просто и предвидимо, без diff логика. */
 function stornoSaveItems(stornoId, returnedItems, replacementItems){
-  return sbDelete('kasa_storno_items','storno_id=eq.'+stornoId).then(function(){
+  return sbDelete('kasa_storno_items','storno_id=eq.'+stornoId).then(function(delRes){
+    /* Провалилото се изтриване НЕ бива да продължи към записа — иначе старите
+       редове остават и новите се добавят върху тях, тоест сторното се удвоява.
+       count===0 обаче е нормално: при НОВА бележка няма какво да се трие. */
+    if(!delRes.ok){
+      console.error('stornoSaveItems: старите редове НЕ бяха изтрити',stornoId,delRes.error);
+      return false;
+    }
     var rows=[];
     returnedItems.forEach(function(x,i){
       rows.push({storno_id:stornoId,kind:'returned',sap_code:x.sap_code.trim(),article_name:(x.article_name||'').trim()||null,line_no:i+1});

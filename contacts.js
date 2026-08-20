@@ -142,7 +142,13 @@ function contactCard(c, isAdmin) {
 function doDeleteContact(id){
   if(!confirm('Изтрий записа?'))return;
   var wasSupplier = allContacts.some(function(c){return c.id===id && c.type==='supplier';});
-  sbDelete('contacts','id=eq.'+id).then(function(){
+  sbDelete('contacts','id=eq.'+id).then(function(res){
+    if(!res.ok){
+      console.error('doDeleteContact: записът НЕ беше изтрит',id,res.error);
+      toast('⚠️ Записът НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
+      loadContacts(); return;
+    }
+    if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadContacts(); return; }
     if(wasSupplier) invalidateSuppliersCache();
     toast('✓ Изтрит');loadContacts();
   });

@@ -280,7 +280,15 @@ function srMarkTaken(id) {
 
 function srDelete(id) {
   if (!confirm('Изтрий записа?')) return;
-  sbDelete('stock_returns','id=eq.'+id).then(function(){ toast('✓ Изтрит'); loadStockReturns(); });
+  sbDelete('stock_returns','id=eq.'+id).then(function(res){
+    if(!res.ok){
+      console.error('srDelete: записът НЕ беше изтрит',id,res.error);
+      toast('⚠️ Записът НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
+      loadStockReturns(); return;
+    }
+    if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadStockReturns(); return; }
+    toast('✓ Изтрит'); loadStockReturns();
+  });
 }
 
 /* ── МОДАЛ ── */

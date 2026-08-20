@@ -36,7 +36,16 @@ function renderDocs(){
 function docsOpen(el){var url=el.getAttribute('data-url');if(url)window.open(url,'_blank');}
 function docsDelete(btn){
   if(!confirm('Изтрий документа?'))return;
-  sbDelete('documents','id=eq.'+btn.getAttribute('data-id')).then(function(){toast('✓ Изтрит');loadDocs();});
+  var docId=btn.getAttribute('data-id');
+  sbDelete('documents','id=eq.'+docId).then(function(res){
+    if(!res.ok){
+      console.error('docsDelete: документът НЕ беше изтрит',docId,res.error);
+      toast('⚠️ Документът НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
+      loadDocs(); return;
+    }
+    if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadDocs(); return; }
+    toast('✓ Изтрит');loadDocs();
+  });
 }
 
 function filterDocs(f,btn){

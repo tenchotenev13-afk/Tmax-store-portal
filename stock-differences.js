@@ -666,7 +666,15 @@ function sdMarkTaken(id) {
 
 function sdDelete(id) {
   if (!confirm('Изтрий записа?')) return;
-  sbDelete('stock_differences','id=eq.'+id).then(function(){ toast('✓ Изтрит'); loadStockDiff(); });
+  sbDelete('stock_differences','id=eq.'+id).then(function(res){
+    if(!res.ok){
+      console.error('sdDelete: записът НЕ беше изтрит',id,res.error);
+      toast('⚠️ Записът НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
+      loadStockDiff(); return;
+    }
+    if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadStockDiff(); return; }
+    toast('✓ Изтрит'); loadStockDiff();
+  });
 }
 
 /* ── МОДАЛ ── */

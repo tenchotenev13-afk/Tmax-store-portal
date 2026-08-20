@@ -795,7 +795,16 @@ function deleteClientOrder(id){
     : Promise.resolve({ok:true});
   step.then(function(){
     return sbDelete('client_orders','id=eq.'+id);
-  }).then(function(){
+  }).then(function(res){
+    if(!res.ok){
+      console.error('deleteClientOrder: заявката НЕ беше изтрита',id,res.error);
+      toast('⚠️ Заявката НЕ беше изтрита: '+sbErrMsg(res),'#dc2626');
+      loadClientOrders(); return;
+    }
+    if(res.count===0){
+      toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b');
+      loadClientOrders(); return;
+    }
     toast('✓ Заявката е изтрита');loadClientOrders();
     if(trId&&typeof loadTransport==='function')loadTransport();
   });

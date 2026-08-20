@@ -88,10 +88,42 @@ function sbPatch(t,f,b){
     .then(function(r){return sbWriteResult('sbPatch',url,r);})
     .catch(sbNetFail('sbPatch',url));
 }
+/* Готово съобщение за потребителя от провалила се пишеща заявка. Причината
+   от PostgREST, ако я има; иначе поне статусът. */
+function sbErrMsg(res){
+  var e = res && res.error;
+  return (e && (e.message || e.hint)) || ('HTTP ' + ((res && res.status) || '—'));
+}
+/* PostgREST връща броя засегнати редове в Content-Range — низ, който завършва
+   с наклонена черта и числото (при нула изтрити последните два символа са
+   "/0") — САМО при Prefer: count=exact. Хедърът е в
+   access-control-expose-headers, тоест браузърът има право да го чете.
+   Връща null, ако броят не може да се определи — тогава извикващият НЕ бива
+   да твърди "нищо не съвпадна". */
+function sbCountFromRange(r){
+  var cr = null;
+  try { cr = r && r.headers && r.headers.get ? r.headers.get('Content-Range') : null; } catch(e){}
+  if(!cr) return null;
+  var m = /\/(\d+)\s*$/.exec(cr);
+  return m ? parseInt(m[1],10) : null;
+}
+/* DELETE има ТРИ различими изхода, не два:
+     {ok:false, …}          — отказано (401/403/409, мрежов срив)
+     {ok:true, count:0}     — минало е, но НИЩО не е съвпаднало
+     {ok:true, count:>0}    — реално изтрито
+   Без count=exact вторият и третият са неразличими: PostgREST връща 204 и
+   когато не е изтрил нищо, тоест RLS отказ или вече изтрит ред изглеждат
+   като успех. count:null значи "не можах да разбера" (напр. хедърът е
+   отрязан от прокси) — тогава се приема успех, не се измисля нула.
+   НЕ се ползва return=representation: то иска SELECT право върху всяка
+   върната колона и би гръмнало с 403 при колонни права. */
 function sbDelete(t,f){
   var url=API+'/'+t+'?'+f;
-  return fetch(url,{method:'DELETE',headers:H})
-    .then(function(r){return sbWriteResult('sbDelete',url,r);})
+  return fetch(url,{method:'DELETE',headers:Object.assign({},H,{'Prefer':'count=exact'})})
+    .then(function(r){
+      if(!r.ok) return sbWriteResult('sbDelete',url,r);
+      return {ok:true, count:sbCountFromRange(r)};
+    })
     .catch(sbNetFail('sbDelete',url));
 }
 

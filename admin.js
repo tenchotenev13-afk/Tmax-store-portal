@@ -47,7 +47,20 @@ function addStore(){
 
 function deleteStore(id,name){
   if(!confirm('Изтрий магазина?'))return;
-  sbDelete('stores','id=eq.'+id).then(function(){
+  sbDelete('stores','id=eq.'+id).then(function(res){
+    if(!res.ok){
+      console.error('deleteStore: магазинът НЕ беше изтрит',id,res.error);
+      toast('⚠️ Магазинът НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
+      loadStoresAdmin(); return;
+    }
+    /* count===0 значи, че заявката е минала, но не е засегнала нито един ред
+       (двойно кликване, вече изтрит от друг). Не е грешка. */
+    if(res.count===0){
+      toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b');
+      loadStoresAdmin(); return;
+    }
+    /* Одитът се пише САМО след потвърдено изтриване — иначе логът твърди
+       "магазинът е изтрит" за нещо, което не е станало. */
     logAudit('store_deleted',{details:{id:id,name:name}});
     invalidateStoresCache();
     toast('✓ Изтрит');loadStoresAdmin();
@@ -171,7 +184,19 @@ function submitAssigned(){
 
 function deleteUser(id, email){
   if(!confirm('Изтрий потребител:\n'+email+'\n\nТова действие е необратимо!'))return;
-  sbDelete('users','id=eq.'+id).then(function(){
+  sbDelete('users','id=eq.'+id).then(function(res){
+    if(!res.ok){
+      console.error('deleteUser: потребителят НЕ беше изтрит',id,email,res.error);
+      toast('⚠️ Потребителят НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
+      loadUsersAdmin(); return;
+    }
+    /* Точно тук е капанът с RLS: ако някой включи RLS върху users без DELETE
+       политика, PostgREST връща 204 с нула изтрити реда и старият код казваше
+       "изтрит". Виж docs/PATTERNS.md, "Спящи RLS политики". */
+    if(res.count===0){
+      toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b');
+      loadUsersAdmin(); return;
+    }
     logAudit('user_deleted',{details:{target_user_id:id,target_email:email}});
     toast('✓ Потребителят е изтрит');
     loadUsersAdmin();

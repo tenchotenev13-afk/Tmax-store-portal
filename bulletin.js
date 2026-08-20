@@ -1136,7 +1136,15 @@ function bulDelTask(btn){
   if(!canEdit()){toast('Нямаш права за това действие','#dc2626');return;}
   var id=btn.getAttribute('data-task-id');
   if(!confirm('Изтрий задачата?'))return;
-  sbDelete('bulletin_tasks','id=eq.'+id).then(function(){toast('Изтрита');loadBulletin();});
+  sbDelete('bulletin_tasks','id=eq.'+id).then(function(res){
+    if(!res.ok){
+      console.error('изтриване на задача: НЕ беше изтрита',id,res.error);
+      toast('⚠️ Задачата НЕ беше изтрита: '+sbErrMsg(res),'#dc2626');
+      loadBulletin(); return;
+    }
+    if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadBulletin(); return; }
+    toast('Изтрита');loadBulletin();
+  });
 }
 function bulRmCal(btn){
   var key=btn.getAttribute('data-key'), idx=parseInt(btn.getAttribute('data-idx'));
@@ -2448,7 +2456,15 @@ function toggleTask(taskId, checked, extra, completionDate) {
     });
   } else {
     var delQuery = 'task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+(completionDate?'&completion_date=eq.'+completionDate:'&completion_date=is.null');
-    sbDelete('task_completions', delQuery).then(function(){
+    sbDelete('task_completions', delQuery).then(function(res){
+      /* Локалното почистване на bulComps СТАВА САМО при успех — иначе екранът
+         показва "неизпълнена", а базата пази отмятането до следващия reload. */
+      if(!res.ok){
+        console.error('отмяна на изпълнение: НЕ беше изтрито',taskId,store,res.error);
+        toast('⚠️ Отмяната НЕ мина: '+sbErrMsg(res),'#dc2626');
+        loadBulletin(); return;
+      }
+      if(res.count===0){ toast('Нямаше какво да се отмени — обновено','#64748b'); loadBulletin(); return; }
       toast('↩ Отбелязана като неизпълнена');
       bulComps = bulComps.filter(function(c){return !(c.task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate);});
       renderBulletin();
@@ -2636,7 +2652,13 @@ function cancelPostpone(taskId, kind, completionDate){
   if (!store) return;
   var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
   var dateQ = completionDate ? '&completion_date=eq.'+completionDate : '&completion_date=is.null';
-  sbDelete('task_completions', idField+'=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+'&status=eq.postponed'+dateQ).then(function(){
+  sbDelete('task_completions', idField+'=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+'&status=eq.postponed'+dateQ).then(function(res){
+    if(!res.ok){
+      console.error('отмяна на отлагане: НЕ беше изтрито',taskId,store,res.error);
+      toast('⚠️ Отмяната НЕ мина: '+sbErrMsg(res),'#dc2626');
+      loadBulletin(); return;
+    }
+    if(res.count===0){ toast('Нямаше отлагане за отмяна — обновено','#64748b'); loadBulletin(); return; }
     toast('↩ Отлагането е отменено');
     /* String()===String() е само защитно. id-тата в схемата са uuid, значи
        и dataset низът, и стойността от PostgREST са низове и обикновеното
@@ -2927,7 +2949,13 @@ function toggleRecurringTask(taskId, checked, extra, completionDate) {
     });
   } else {
     var delQuery = 'recurring_task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+(completionDate?'&completion_date=eq.'+completionDate:'&completion_date=is.null');
-    sbDelete('task_completions', delQuery).then(function(){
+    sbDelete('task_completions', delQuery).then(function(res){
+      if(!res.ok){
+        console.error('отмяна на изпълнение (постоянна): НЕ беше изтрито',taskId,store,res.error);
+        toast('⚠️ Отмяната НЕ мина: '+sbErrMsg(res),'#dc2626');
+        loadBulletin(); return;
+      }
+      if(res.count===0){ toast('Нямаше какво да се отмени — обновено','#64748b'); loadBulletin(); return; }
       toast('↩ Отбелязана като неизпълнена');
       recurringComps = recurringComps.filter(function(c){return !(c.recurring_task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate);});
       renderBulletin();
@@ -3133,7 +3161,13 @@ function bulToggleSubtask(cb) {
       toast('✅ Под-задачата е отбелязана!');
     });
   } else {
-    sbDelete('subtask_completions','subtask_id=eq.'+stid+'&store_name=eq.'+encodeURIComponent(store)).then(function(){
+    sbDelete('subtask_completions','subtask_id=eq.'+stid+'&store_name=eq.'+encodeURIComponent(store)).then(function(res){
+      if(!res.ok){
+        console.error('отмяна на подзадача: НЕ беше изтрито',stid,store,res.error);
+        toast('⚠️ Отмяната НЕ мина: '+sbErrMsg(res),'#dc2626');
+        return;
+      }
+      if(res.count===0){ toast('Нямаше какво да се отмени','#64748b'); return; }
       subtaskComps = subtaskComps.filter(function(c){return !(c.subtask_id===stid&&c.store_name===store);});
       toast('↩ Отбелязана като неизпълнена');
     });
@@ -3184,7 +3218,13 @@ function submitSubtask(taskId, dept) {
 
 function deleteSubtask(stId, taskId, dept) {
   if (!confirm('Изтрий под-задачата?')) return;
-  sbDelete('task_subtasks','id=eq.'+stId).then(function(){
+  sbDelete('task_subtasks','id=eq.'+stId).then(function(res){
+    if(!res.ok){
+      console.error('deleteSubtask: под-задачата НЕ беше изтрита',stId,res.error);
+      toast('⚠️ Под-задачата НЕ беше изтрита: '+sbErrMsg(res),'#dc2626');
+      renderSubtasks(taskId, dept); return;
+    }
+    if(res.count===0){ toast('Нямаше какво да се изтрие — обновено','#64748b'); renderSubtasks(taskId, dept); return; }
     toast('Изтрита');
     renderSubtasks(taskId, dept);
   });

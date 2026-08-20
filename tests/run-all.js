@@ -34,7 +34,8 @@ const TESTS = [
   'shared-write-errors.test.js',
   'admin-user-create-select.test.js',
   'return-proof.test.js',
-  'sd-badge-hidden-tab.test.js'
+  'sd-badge-hidden-tab.test.js',
+  'delete-three-states.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

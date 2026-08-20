@@ -453,7 +453,15 @@ function tMarkStatus(id,status){
 /* ── ИЗТРИЙ РЕД ── */
 function tDelete(id){
   if(!confirm('Изтрий този ред?'))return;
-  sbDelete('goods_transit','id=eq.'+id).then(function(){ toast('✓ Изтрит'); loadTransit(); });
+  sbDelete('goods_transit','id=eq.'+id).then(function(res){
+    if(!res.ok){
+      console.error('tDelete: редът НЕ беше изтрит',id,res.error);
+      toast('⚠️ Редът НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
+      loadTransit(); return;
+    }
+    if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadTransit(); return; }
+    toast('✓ Изтрит'); loadTransit();
+  });
 }
 
 /* ── ИЗЧИСТИ ВСИЧКИ (admin) ── */

@@ -319,7 +319,15 @@ function submitCalRoute() {
 
 function deleteCalRoute(id) {
   if(!confirm('Изтрий маршрута?'))return;
-  sbDelete('bus_routes','id=eq.'+id).then(function(){ toast('✓ Изтрит'); loadCalendar(); });
+  sbDelete('bus_routes','id=eq.'+id).then(function(res){
+    if(!res.ok){
+      console.error('deleteCalRoute: маршрутът НЕ беше изтрит',id,res.error);
+      toast('⚠️ Маршрутът НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
+      loadCalendar(); return;
+    }
+    if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadCalendar(); return; }
+    toast('✓ Изтрит'); loadCalendar();
+  });
 }
 
 /* ═══════ РОТАЦИОНЕН ГРАФИК — ШАБЛОНИ ═══════════════════ */
