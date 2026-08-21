@@ -322,12 +322,64 @@ function buildDailyReportHtml(data){
     'Автоматичен репорт · ТеМАХ Портал');
 }
 
+/* ── Коя седмица обобщава седмичният отчет ──
+   ПРИКЛЮЧИЛАТА, не текущата. Преди тук се взимаше просто последният
+   публикуван бюлетин (order=created_at.desc&limit=1), а той се публикува
+   ПРЕДВАРИТЕЛНО за идващата седмица. Следствие: всяко явяване имаше дата в
+   бъдещето, reportItemMatchesComp не намираше нито едно съвпадение и всеки
+   понеделнишки отчет излизаше 9-11% - не защото обектите не работят, а
+   защото седмицата тъкмо започва. При пускане в петък същият дефект дава
+   чисто 0%.
+   Сега: в понеделник 24.08 отчетът покрива 17-23.08. */
+
+/* Понеделникът на ПРЕДХОДНАТА седмица спрямо подадената дата. */
+function reportPrevWeekMonday(now){
+  var d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var js = d.getDay();                 /* 0=неделя */
+  var idx = js === 0 ? 6 : js - 1;     /* 0=понеделник */
+  d.setDate(d.getDate() - idx - 7);
+  return d;
+}
+/* Номерът на седмицата за даден понеделник. Търси се през СЪЩАТА weekDays(),
+   която после разгъва бюлетина на дати - иначе двете броения могат да се
+   разминат в началото на годината.
+   Редът на годините НЕ е произволен: по-късната се пробва ПЪРВА. Един и същи
+   понеделник може да съвпадне с два номера - 29.12.2025 е и „седмица 53 на
+   2025" (преливане на формулата), и седмица 1 на 2026. Бюлетините се номерират
+   по второто, затова печели по-късната година. */
+function reportWeekOfMonday(monday){
+  var target = toLocalISO(monday);
+  var yr = monday.getFullYear();
+  var years = [yr + 1, yr, yr - 1];
+  for (var i = 0; i < years.length; i++) {
+    for (var w = 1; w <= 53; w++) {
+      if (toLocalISO(weekDays(w, years[i])[0]) === target) return { week: w, year: years[i] };
+    }
+  }
+  return null;
+}
+/* Бюлетинът за отчетната седмица. Точно съвпадение, ако го има; иначе
+   най-новият публикуван, който НЕ е след нея - никога бюлетин за бъдеща
+   седмица, защото точно това чупеше отчета. */
+function reportPickWeeklyBulletin(list, target){
+  if (!target || !Array.isArray(list)) return null;
+  var exact = list.find(function(b){
+    return b.year === target.year && b.week_number === target.week;
+  });
+  if (exact) return exact;
+  return list.find(function(b){
+    return b.year < target.year || (b.year === target.year && b.week_number <= target.week);
+  }) || null;
+}
+
 function collectWeeklyReportData(cb){
+  var target = reportWeekOfMonday(reportPrevWeekMonday(new Date()));
   Promise.all([
-    sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1'),
+    /* Списък, не limit=1 - изборът на правилната седмица става по-долу. */
+    sbGet('bulletins','status=eq.published&order=year.desc,week_number.desc&limit=20'),
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
   ]).then(function(results){
-    var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
+    var bul = reportPickWeeklyBulletin(results[0], target);
     var allRecurring = Array.isArray(results[1]) ? results[1] : [];
     var recurringScheduled = allRecurring.filter(function(t){
       return (t.due_weekday!==null && t.due_weekday!==undefined) || !!t.due_time;

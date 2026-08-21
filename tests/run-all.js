@@ -41,7 +41,8 @@ const TESTS = [
   'bulletin-week-default.test.js',
   'wrong-receipt-tab.test.js',
   'today-wrong-receipt-row.test.js',
-  'notifications-poll.test.js'
+  'notifications-poll.test.js',
+  'weekly-report-window.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
