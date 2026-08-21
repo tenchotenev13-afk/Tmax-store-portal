@@ -38,7 +38,8 @@ const TESTS = [
   'delete-three-states.test.js',
   'storno-embed-no-in-list.test.js',
   'linked-module-buttons.test.js',
-  'bulletin-week-default.test.js'
+  'bulletin-week-default.test.js',
+  'wrong-receipt-tab.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
