@@ -36,7 +36,8 @@ const TESTS = [
   'return-proof.test.js',
   'sd-badge-hidden-tab.test.js',
   'delete-three-states.test.js',
-  'storno-embed-no-in-list.test.js'
+  'storno-embed-no-in-list.test.js',
+  'linked-module-buttons.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

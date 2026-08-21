@@ -110,6 +110,16 @@ function linkedModuleLabel(value){
   var m = LINKED_MODULES.find(function(x){ return x.value===value; });
   return m ? m.label : null;
 }
+/* Бутонът "свързан модул" се показва само ако ролята изобщо вижда този таб.
+   Огледало на setupTabsForRole() в shared.js: История = само isGlobal(),
+   Каса = kasa/admin/manager, останалите модули са видими за всички
+   (Палети е под-таб на Транспорт и не се ограничава). */
+function linkedModuleAllowed(value){
+  if(!value) return false;
+  if(value==='history') return isGlobal();
+  if(value==='kasa') return ['kasa','admin','manager'].indexOf(currentUser&&currentUser.role)>=0;
+  return true;
+}
 
 /* Живи бройки/статус за елемент в седмичния календар.
    isGlobal() -> "X/Y обекта" (обхватът е target_stores на задачата, или
@@ -719,7 +729,7 @@ function renderBulView(){
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
         }
         html+='</div>';
-        if(isGlobal()&&t.linked_module){
+        if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
           var lbl=linkedModuleLabel(t.linked_module);
           if(lbl)html+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lbl)+' →</button>';
         }
@@ -738,7 +748,7 @@ function renderBulView(){
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
         }
         html+='</div>';
-        if(isGlobal()&&t.linked_module){
+        if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
           var lblRec=linkedModuleLabel(t.linked_module);
           if(lblRec)html+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lblRec)+' →</button>';
         }
