@@ -122,6 +122,15 @@ function reportTrendHtml(currentPct, snapshot, label){
 function reportItemMatchesComp(it, c){
   if (it.id!==c.item_id || it.kind!==c.kind) return false;
   if (it.date) return (c.completion_date||null)===it.date;
+  /* Явяване за цяла седмица (задача от бюлетина без собствен срок) - брои се
+     отмятане ВЪТРЕ в диапазона, не кое да е. Отмятане без дата не може да се
+     отнесе към седмица, затова не съвпада. */
+  if (it.dateFrom) {
+    var d = c.completion_date || null;
+    return !!d && d >= it.dateFrom && d <= it.dateTo;
+  }
+  /* Нито дата, нито диапазон - дневният репорт, чиито явявания нямат дата,
+     защото самият той вече е стеснил comps до днешния ден в JS. */
   return true;
 }
 /* Датите от една седмица, в които постоянна задача е дължима - огледално на
@@ -388,6 +397,10 @@ function collectWeeklyReportData(cb){
     bulTasksPromise.then(function(tasksRaw){
       var allBulTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
 
+      /* Датите на отчетната седмица - нужни са и при СТРОЕНЕТО на явяванията
+         (по-долу), не само за прозореца на заявката. */
+      var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
+
       var items = [];
       /* Многодневна задача (Пон+Ср) се разгъва на ОТДЕЛЕН елемент за всеки
          ден - реално отразява обема работа (2 отделни отмятания = 2 единици
@@ -402,7 +415,16 @@ function collectWeeklyReportData(cb){
             items.push({ id:t.id, kind:'regular', title:t.title+' ('+dLabel+')', target_stores:t.target_stores||null, date:d });
           });
         } else {
-          items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null, date: dates[0]||null });
+          /* 30 от 43 задачи в бюлетините НЯМАТ собствен срок - те важат за
+             седмицата като цяло, не за конкретен ден. Такова явяване получава
+             ДИАПАЗОН вместо дата: изпълнено е, ако има отмятане някъде в
+             седмицата. Преди тук оставаше само date:null и
+             reportItemMatchesComp приемаше кое да е отмятане на задачата,
+             включително от други седмици. */
+          var d0 = dates[0] || null;
+          var reg = { id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null, date: d0 };
+          if (!d0 && wkDates) { reg.dateFrom = wkDates[0]; reg.dateTo = wkDates[6]; }
+          items.push(reg);
         }
       });
       /* Постоянна задача се разгъва на ОТДЕЛЕН елемент за всяко свое явяване
@@ -415,20 +437,30 @@ function collectWeeklyReportData(cb){
          седмица. Без публикуван бюлетин няма от коя седмица да смятаме дати,
          затова тогава елементът остава без .date (старото поведение), за да
          не изчезне от репорта. */
+      var recWithOcc = [];
       recurringScheduled.forEach(function(t){
         var occDates = bul ? reportRecurringWeekDates(t, bul.week_number, bul.year) : [];
+        /* НЯМА явяване тази седмица - задачата изобщо не влиза в набора.
+           Преди тук се добавяше елемент с date:null, който едновременно
+           надуваше знаменателя (задача, която не е дължима) и през
+           reportItemMatchesComp приемаше кое да е отмятане на същата задача.
+           Оттам идваха „изпълнените" в стария snapshot. */
+        if (!occDates.length) return;
+        recWithOcc.push(t.id);
         if (occDates.length > 1) {
           occDates.forEach(function(d){
             var dLabel = new Date(d+'T00:00:00').toLocaleDateString('bg-BG',{day:'numeric',month:'numeric'});
             items.push({ id:t.id, kind:'recurring', title:t.title+' ('+dLabel+')', target_stores:t.target_stores||null, date:d });
           });
         } else {
-          items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null, date: occDates[0]||null });
+          items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null, date: occDates[0] });
         }
       });
 
       var regIds = allBulTasks.map(function(t){ return t.id; });
-      var recIds = recurringScheduled.map(function(t){ return t.id; });
+      /* Само задачите, които РЕАЛНО имат явяване тази седмица - няма смисъл
+         да се теглят отмятания за задачи, които не са в набора. */
+      var recIds = recWithOcc;
 
       /* Прозорец и на самата ЗАЯВКА, не само в JS. Без него за 10-те
          постоянни задачи се теглеше всяко отмятане, правено някога - и като
@@ -436,8 +468,8 @@ function collectWeeklyReportData(cb){
          всичките под заглавие за една седмица.
          Отмятанията с completion_date=NULL отпадат нарочно: те не могат да
          бъдат отнесени към коя да е седмица (184 такива в базата, всичките
-         отпреди полето да се пълни). */
-      var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
+         отпреди полето да се пълни).
+         wkDates е сметнато по-горе - ползва се и при строенето на явяванията. */
       var dateQ = wkDates
         ? '&completion_date=gte.' + wkDates[0] + '&completion_date=lte.' + wkDates[6]
         : '';
