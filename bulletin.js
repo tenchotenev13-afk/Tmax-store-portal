@@ -486,6 +486,53 @@ function bulletinSwitcherHtml(){
   }).join('');
   return '<select onchange="selectBulletin(this.value)" style="border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:11px;background:#1e293b;color:#e2e8f0;">'+opts+'</select>';
 }
+
+/* Лента за контекст над тялото на бюлетина. Подразбиращият се бюлетин вече е
+   този за ДНЕШНАТА седмица (виж loadBulletin), затова следващият трябва да се
+   обади сам - в петък по него върви оперативката. Обратно: когато гледаш чужда
+   седмица, лентата казва къде са отметките за днес.
+   Само обяснява контекста - НЕ заключва и не скрива чекбоксчета.
+   Връща '' , когато няма какво да се каже. */
+function bulWeekBannerHtml(){
+  if(!curBul||!curBul.week_number||!curBul.year)return '';
+  var nowWk=weekNum(new Date()), nowYr=new Date().getFullYear();
+  var cmp=(curBul.year-nowYr)||(curBul.week_number-nowWk); /* <0 минала, 0 текуща, >0 бъдеща */
+  var BLUE=['#eff6ff','#bfdbfe','#1e40af'], AMBER=['#fffbeb','#fde68a','#92400e'];
+  /* Диапазонът на седмицата - същите weekDays()/fmtD() като календара. */
+  var range=function(wk,yr){ var d=weekDays(wk,yr); return fmtD(d[0])+' – '+fmtD(d[6]); };
+  var box=function(cl,txt,btn){
+    return '<div style="background:'+cl[0]+';border:1px solid '+cl[1]+';border-radius:8px;padding:9px 13px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">'+
+      '<span style="font-size:12.5px;color:'+cl[2]+';">'+txt+'</span>'+(btn||'')+'</div>';
+  };
+  var goBtn=function(id,label,cl){
+    return '<button onclick="selectBulletin(\''+id+'\')" style="border:1px solid '+cl[1]+';background:#fff;color:'+cl[2]+';border-radius:6px;padding:3px 11px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;">'+label+'</button>';
+  };
+
+  if(cmp===0){
+    /* А) Гледаш текущата, но вече има публикуван по-нов. Взимаме най-БЛИЗКИЯ
+       напред, не най-далечния - петъчната оперативка е по следващата седмица. */
+    var newer=bulListCache.filter(function(b){
+      return b.status==='published'&&((b.year-nowYr)||(b.week_number-nowWk))>0;
+    }).sort(function(a,b){ return (a.year-b.year)||(a.week_number-b.week_number); })[0];
+    if(!newer)return '';
+    return box(BLUE,'📢 Публикуван е нов бюлетин за С'+newer.week_number+' ('+range(newer.week_number,newer.year)+') — за оперативката.',
+      goBtn(newer.id,'Отвори →',BLUE));
+  }
+
+  /* Бюлетинът за текущата седмица - целта на "← Към текущата".
+     Липсва ли в кеша, лентата остава, но без бутон - няма къде да води. */
+  var curWeek=bulListCache.filter(function(b){
+    return b.week_number===nowWk&&b.year===nowYr&&(canEdit()||b.status==='published');
+  })[0];
+  var back=curWeek?goBtn(curWeek.id,'← Към текущата',AMBER):'';
+
+  if(cmp>0){
+    /* Б) Бъдеща седмица. */
+    return box(AMBER,'📅 Гледаш следваща седмица ('+range(curBul.week_number,curBul.year)+'). Отметките за днес са в С'+nowWk+'.',back);
+  }
+  /* В) Минала седмица. */
+  return box(AMBER,'📅 Гледаш минала седмица ('+range(curBul.week_number,curBul.year)+').',back);
+}
 function selectBulletin(id){
   bulSelectedId=id;
   loadBulletin();
@@ -500,11 +547,28 @@ function loadBulletin(){
      Бюлетин може да е първият таб, който потребителят отваря. Ако кешът
      вече е топъл, loadAllStores() връща веднага без нова заявка. */
   if(!allStoresCache)loadAllStores().then(function(){ if(curBul)renderBulletin(); });
-  var q=bulSelectedId?'id=eq.'+bulSelectedId:(canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1');
   /* Зареждаме бюлетина ПЪРВО (за да знаем неговата седмица/година), после промоциите
      филтрирани спрямо ТАЗИ седмица - за да са "автономни" за всяка седмица, не спрямо
      реалната дата днес. Рекъринг задачите вървят паралелно, не зависят от седмицата. */
   loadBulletinList().then(function(){
+    /* q се сглобява ТУК, не преди loadBulletinList() - bulListCache се пълни
+       точно в неговия .then, така че по-рано кешът е празен (първо отваряне)
+       или от предишното зареждане. */
+    var q;
+    if(bulSelectedId){
+      q='id=eq.'+bulSelectedId;
+    } else {
+      /* Подразбиращият се бюлетин е този, който покрива ДНЕШНАТА дата - управителят
+         отваря това, по което работи днес, а не последния публикуван. */
+      var nowWk=weekNum(new Date()), nowYr=new Date().getFullYear();
+      var curWeek=bulListCache.filter(function(b){
+        return b.week_number===nowWk&&b.year===nowYr&&(canEdit()||b.status==='published');
+      })[0];
+      /* Резерва: няма бюлетин за текущата седмица - последният по created_at,
+         точно както беше досега. */
+      q=curWeek?('id=eq.'+curWeek.id)
+        :(canEdit()?'order=created_at.desc&limit=1':'status=eq.published&order=created_at.desc&limit=1');
+    }
     return sbGet('bulletins',q);
   }).then(function(data){
     curBul=(Array.isArray(data)&&data.length)?data[0]:null;
@@ -660,6 +724,7 @@ function renderBulView(){
   var days=weekDays(wk,yr);
   var isDraft=curBul.status==='draft';
   var html=bulHdr(isDraft)+BULCSS+'<div style="max-width:1320px;margin:0 auto;padding:16px 16px 60px;" id="bul-body">';
+  html+=bulWeekBannerHtml();
 
   /* Important */
   var imp=[];
