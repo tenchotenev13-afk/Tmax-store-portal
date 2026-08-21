@@ -89,7 +89,7 @@ function loadTodayDashboard(){
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var seen = {};
         var stores = users.filter(function(u){
-          if (!u.store_name || u.store_name==='Централен офис' || seen[u.store_name]) return false;
+          if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
 

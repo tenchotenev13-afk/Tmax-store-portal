@@ -96,8 +96,10 @@ function sdFmtDateTime(val){
    влизат с обичайните си профили, но с store_name = точно името на склада.
    Те виждат само разликите, при които ТЕ са насрещната страна (counterpart)
    на междускладов трансфер - Цвети се грижи за доставчиците, складовете се
-   разбират директно с магазините получатели. */
-var LOGISTICS_WAREHOUSES = ['Логистичен склад Добрич','Логистичен склад Търговище'];
+   разбират директно с магазините получатели.
+   Самият списък LOGISTICS_WAREHOUSES живее в shared.js (зарежда се пръв),
+   защото го ползват и отчетите през isReportableStore - две копия щяха да
+   се разминат при следващия нов склад. */
 function isLogisticsWarehouseUser(){
   return currentUser && LOGISTICS_WAREHOUSES.indexOf(currentUser.store_name) >= 0;
 }

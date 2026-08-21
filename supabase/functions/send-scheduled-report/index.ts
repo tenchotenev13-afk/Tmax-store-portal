@@ -83,6 +83,19 @@ function weekDays(wk: number, yr: number){
   return [0,1,2,3,4,5,6].map(function(i){var x=new Date(s);x.setDate(s.getDate()+i);return x;});
 }
 
+/* Обекти, които НЕ участват в статистиките по магазини. Копие на
+   REPORT_EXCLUDED_STORES / isReportableStore от shared.js.
+   Логистичните складове не влизат в седмичния бюлетин - нямат нито едно
+   отмятане в task_completions - и стояха на 0% завинаги, теглейки надолу
+   „обекта под 50%". Централният офис никога не е бил обект.
+   ЕДНА проверка: преди условието `store_name!=='Централен офис'` стоеше
+   преписано на 8 места в двата файла. */
+var LOGISTICS_WAREHOUSES = ['Логистичен склад Добрич','Логистичен склад Търговище'];
+var REPORT_EXCLUDED_STORES = ['Централен офис'].concat(LOGISTICS_WAREHOUSES);
+function isReportableStore(name){
+  return !!name && REPORT_EXCLUDED_STORES.indexOf(name) < 0;
+}
+
 /* ═══════ РЕПОРТ ЛОГИКА — ТОЧНО копие от report.js ═══════════════════ */
 var PORTAL_URL = 'https://tenchotenev13-afk.github.io/Tmax-store-portal/';
 
@@ -122,7 +135,7 @@ function collectDailyReportData(cb){
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var seen = {};
         var stores = users.filter(function(u){
-          if (!u.store_name || u.store_name==='Централен офис' || seen[u.store_name]) return false;
+          if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
 
@@ -487,7 +500,7 @@ function collectWeeklyReportData(cb){
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var seen = {};
         var stores = users.filter(function(u){
-          if (!u.store_name || u.store_name==='Централен офис' || seen[u.store_name]) return false;
+          if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
 
@@ -546,7 +559,7 @@ function collectCrossModuleWeeklySummary(cb){
 
     var seenS = {};
     var storeNames = allUsers.filter(function(u){
-      if (!u.store_name || u.store_name==='Централен офис' || seenS[u.store_name]) return false;
+      if (!isReportableStore(u.store_name) || seenS[u.store_name]) return false;
       seenS[u.store_name] = 1; return true;
     }).map(function(u){ return u.store_name; });
 

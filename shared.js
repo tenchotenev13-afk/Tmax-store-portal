@@ -176,6 +176,23 @@ function isCentralOfficeUser(){
   return !!currentUser&&isCentralOffice(currentUser.store_name);
 }
 
+/* Логистични складове — отделни физически обекти (не роля), чиито служители
+   влизат с обичайните си профили, но с store_name = точно името на склада.
+   Списъкът живее ТУК, а не в модул, защото го ползват две различни неща:
+   Разлики (isLogisticsWarehouseUser) и отчетите (isReportableStore). */
+var LOGISTICS_WAREHOUSES=['Логистичен склад Добрич','Логистичен склад Търговище'];
+
+/* Обекти, които НЕ участват в статистиките по магазини (дневен/седмичен
+   репорт, таб „Днес"). Складовете не влизат в седмичния бюлетин — нямат
+   нито едно отмятане в task_completions — и стояха на 0% завинаги, теглейки
+   надолу „обекта под 50%". Централният офис никога не е бил обект.
+   ЕДНА проверка на едно място: преди условието `store_name!=='Централен офис'`
+   стоеше преписано на 8 места и всяко можеше да се размине с другите. */
+var REPORT_EXCLUDED_STORES=[CENTRAL_OFFICE].concat(LOGISTICS_WAREHOUSES);
+function isReportableStore(name){
+  return !!name && REPORT_EXCLUDED_STORES.indexOf(name)<0;
+}
+
 /* Списък магазини за потребителя: null = всички, [] = само своя, [...] = назначени */
 function assignedStores(){
   if(!currentUser)return null;

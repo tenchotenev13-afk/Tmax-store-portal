@@ -58,7 +58,7 @@ function collectDailyReportData(cb){
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var seen = {};
         var stores = users.filter(function(u){
-          if (!u.store_name || u.store_name==='Централен офис' || seen[u.store_name]) return false;
+          if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
 
@@ -484,7 +484,7 @@ function collectWeeklyReportData(cb){
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var seen = {};
         var stores = users.filter(function(u){
-          if (!u.store_name || u.store_name==='Централен офис' || seen[u.store_name]) return false;
+          if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
 
@@ -570,7 +570,7 @@ function collectCrossModuleWeeklySummary(cb){
 
     var seenS = {};
     var storeNames = allUsers.filter(function(u){
-      if (!u.store_name || u.store_name==='Централен офис' || seenS[u.store_name]) return false;
+      if (!isReportableStore(u.store_name) || seenS[u.store_name]) return false;
       seenS[u.store_name] = 1; return true;
     }).map(function(u){ return u.store_name; });
 
@@ -801,7 +801,7 @@ function collectWeeklyRoutingData(cb){
         var allUsers = Array.isArray(r2[4]) ? r2[4] : [];
         var seen = {};
         var stores = users.filter(function(u){
-          if (!u.store_name || u.store_name==='Централен офис' || seen[u.store_name]) return false;
+          if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
         var comps = regCompsRaw.map(function(c){ return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment }; })
