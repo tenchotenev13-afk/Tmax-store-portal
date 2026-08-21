@@ -46,7 +46,8 @@ const TESTS = [
   'weekly-report-lists-window.test.js',
   'weekly-report-item-dates.test.js',
   'report-store-list.test.js',
-  'report-email-shell.test.js'
+  'report-email-shell.test.js',
+  'weekly-cross-window.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

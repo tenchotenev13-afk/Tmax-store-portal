@@ -499,10 +499,15 @@ function collectWeeklyReportData(cb){
         var summary = reportBuildSummary(items, comps, stores, noDueCount);
         summary.weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
         var finish = function(){
+          /* ЕДИН прозорец за целия имейл: същите wkDates, които стесняват
+             задачите и заявките за task_completions по-горе, стесняват и
+             кросмодулните броячи. Без бюлетин wkDates е null и секцията
+             пада обратно на подвижни 7 дни - тогава и шапката пише
+             "Няма публикуван бюлетин", тоест няма с какво да се разминат. */
           collectCrossModuleWeeklySummary(function(cross){
             summary.cross = cross; /* null при грешка - секцията просто не се показва, не гърми */
             cb(summary);
-          });
+          }, wkDates ? { from: wkDates[0], to: wkDates[6] } : null);
         };
         if (bul) {
           var thisKey = bul.year + '-W' + String(bul.week_number).padStart(2,'0');
@@ -543,20 +548,64 @@ function collectWeeklyReportData(cb){
      няма работен процес "свършено/несвършено" в схемата.
    cb(data|null) - при грешка cb(null), buildWeeklyReportHtml пропуска
    секцията мълчаливо (сравнено с "data.cross &&" преди рендиране). */
-function collectCrossModuleWeeklySummary(cb){
-  var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate()-7);
-  var weekAgoISO = toLocalISO(weekAgo);
-  var weekAgoStamp = weekAgo.toISOString();
+
+/* ── Прозорецът на кросмодулната секция ──
+   Два различни повикващи, два законни прозореца:
+
+   win = {from,to} (локални ISO дати, понеделник и неделя) - СЕДМИЧНИЯТ
+     отчет. Той носи шапка "Седмица 34 · 2026" и всеки ред пише "нови за
+     периода", затова числата под шапката трябва да са за СЪЩАТА календарна
+     седмица. Досега тук минаваха подвижни 7 дни назад от момента на
+     пускането: в едно и също писмо за седмица 33 процентът по обекти
+     покриваше 17-23.08, а кросмодулните броячи - 14-21.08. Ръчно пуснат
+     отчет в сряда мереше съвсем трети интервал.
+
+   win = null - таб ДНЕС и дневният отчет. Там подвижните 7 дни са ВЕРНИЯТ
+     прозорец: няма шапка с номер на седмица, а въпросът е "какво се е
+     случило напоследък". Не се пипат.
+
+   Горната граница е ИЗКЛЮЧВАЩА (< понеделник 00:00 на следващата седмица),
+   за да влезе цялата неделя - `lte.` върху дата на timestamptz отрязва
+   всичко след неделя 00:00:00. */
+function reportCrossWindow(win){
+  if (win && win.from && win.to) {
+    var end = new Date(win.to + 'T00:00:00');
+    end.setDate(end.getDate() + 1);
+    return {
+      fromISO: win.from, toISO: win.to,
+      fromStamp: new Date(win.from + 'T00:00:00').toISOString(),
+      toStamp: end.toISOString()
+    };
+  }
+  var weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7);
+  return {
+    fromISO: toLocalISO(weekAgo), toISO: null,
+    fromStamp: weekAgo.toISOString(), toStamp: null
+  };
+}
+
+function collectCrossModuleWeeklySummary(cb, win){
+  var W = reportCrossWindow(win);
+  var upStamp = W.toStamp ? '&created_at=lt.' + W.toStamp : '';
+  var upDate = W.toISO ? '&date=lte.' + W.toISO : '';
+
+  /* "Застояли" и "остарели" НЕ следват прозореца - те са моментна снимка
+     спрямо ДНЕС ("pending от повече от 7 дни"), а не "случило се през
+     седмицата". Затова прагът им се смята отделно и остава подвижен и в
+     двата режима. Същото важи за stock_returns и transport_pallets, които
+     изобщо нямат филтър по дата. */
+  var staleAgo = new Date(); staleAgo.setDate(staleAgo.getDate() - 7);
+  var staleStamp = staleAgo.toISOString();
 
   Promise.all([
     /* store_name и direction са нужни, за да се отдели сторната по грешен
        прием от другите две посоки и да се разбие по обект. Само reviewed
        не стигаше - разбивка по магазин беше физически невъзможна. */
-    sbGet('differences_reports','created_at=gte.'+weekAgoStamp+'&select=store_name,direction,reviewed'),
+    sbGet('differences_reports','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,direction,reviewed'),
     sbGet('stock_returns','select=status'),
-    sbGet('kasa_storno','created_at=gte.'+weekAgoStamp+'&select=status'),
-    sbGet('kasa_zoborot','date=gte.'+weekAgoISO+'&select=status'),
-    sbGet('goods_transit','status=eq.pending&created_at=lt.'+weekAgoStamp+'&select=id'),
+    sbGet('kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=status'),
+    sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=status'),
+    sbGet('goods_transit','status=eq.pending&created_at=lt.'+staleStamp+'&select=id'),
     sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
     sbGet('users','select=store_name&order=store_name')
   ]).then(function(r){
@@ -638,7 +687,10 @@ function collectCrossModuleWeeklySummary(cb){
       diffs: diffs, wrongReceipt: wrongReceipt,
       returns: ret, storno: stornoSummary, zoborot: zoborotSummary,
       transitStale: stalePending.length,
-      pallets: { missing: palletsMissing, stale: palletsStale, total: storeNames.length }
+      pallets: { missing: palletsMissing, stale: palletsStale, total: storeNames.length },
+      /* Прозорецът пътува заедно с числата, за да го изпише заглавието -
+         иначе читателят няма как да разбере кой интервал са мерили. */
+      window: { from: W.fromISO, to: W.toISO }
     });
   }).catch(function(){ cb(null); });
 }
@@ -669,7 +721,7 @@ function crossModuleRow(icon, title, cardsHtml){
 function buildWrongReceiptRowHtml(wr){
   if (!wr) return '';
   if (!wr.total) {
-    return crossModuleRow('🧾','Сторна по грешен прием (нови тази седмица)',
+    return crossModuleRow('🧾','Сторна по грешен прием (нови за периода)',
       crossMetricCard(0,'няма нови'));
   }
   var cards = crossMetricCard(wr.total,'общо нови') +
@@ -677,16 +729,26 @@ function buildWrongReceiptRowHtml(wr){
   cards += wr.byStore.map(function(s){
     return crossMetricCard(s.count, esc(s.store), true);
   }).join('');
-  return crossModuleRow('🧾','Сторна по грешен прием (нови тази седмица)', cards);
+  return crossModuleRow('🧾','Сторна по грешен прием (нови за периода)', cards);
+}
+/* "17.08 – 23.08" за затворен прозорец; "последните 7 дни" за подвижния.
+   Датите се изписват, защото един и същ HTML отива на две места с два
+   различни прозореца - без тях "за периода" в редовете не значи нищо. */
+function reportCrossWindowLabel(win){
+  if (!win || !win.to) return 'последните 7 дни';
+  var f = function(d){
+    return new Date(d + 'T00:00:00').toLocaleDateString('bg-BG', { day:'numeric', month:'numeric' });
+  };
+  return f(win.from) + ' – ' + f(win.to);
 }
 function buildCrossModuleSectionHtml(cross){
   if (!cross) return '';
   var h = '<div style="margin-top:18px;padding-top:14px;border-top:2px solid #eef1f6;">';
-  h += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">🗂 Друго от седмицата — по табове</div>';
+  h += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">🗂 Друго от периода ('+reportCrossWindowLabel(cross.window)+') — по табове</div>';
 
   /* Числата тук са БЕЗ сторната по грешен прием - тя има собствен ред
      по-долу и иначе би се броила два пъти. */
-  h += crossModuleRow('📋','Разлики от доставчици и междускладови (нови тази седмица)',
+  h += crossModuleRow('📋','Разлики от доставчици и междускладови (нови за периода)',
     crossMetricCard(cross.diffs.total,'нови доклада') +
     crossMetricCard(cross.diffs.reviewed,'прегледани',false) +
     crossMetricCard(cross.diffs.unreviewed,'непрегледани', cross.diffs.unreviewed>0));
@@ -697,13 +759,13 @@ function buildCrossModuleSectionHtml(cross){
     crossMetricCard(cross.returns.open,'отворени (чакат/взети)', cross.returns.open>0) +
     crossMetricCard(cross.returns.completed,'приключени'));
 
-  h += crossModuleRow('💳','Каса — Сторно бележки (нови тази седмица)',
+  h += crossModuleRow('💳','Каса — Сторно бележки (нови за периода)',
     crossMetricCard(cross.storno.total,'общо нови') +
     crossMetricCard(cross.storno.draft,'чакат счетоводство', cross.storno.draft>0) +
     crossMetricCard(cross.storno.returned,'върнати за коментар', cross.storno.returned>0) +
     crossMetricCard(cross.storno.confirmed,'приключени'));
 
-  h += crossModuleRow('🧾','Каса — Равнение (тази седмица)',
+  h += crossModuleRow('🧾','Каса — Равнение (за периода)',
     crossMetricCard(cross.zoborot.total,'общо записа') +
     crossMetricCard(cross.zoborot.draft,'непотвърдени от обект', cross.zoborot.draft>0) +
     crossMetricCard(cross.zoborot.confirmed,'потвърдени'));
