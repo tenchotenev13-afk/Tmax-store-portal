@@ -130,11 +130,23 @@ function diffDirMeta(dir){
   var f = DIFF_DIRECTIONS.find(function(d){ return d[0] === dir; });
   return f || DIFF_DIRECTIONS[0];
 }
-function diffDirTabLabel(dir){ return diffDirMeta(dir)[1]; }
 function diffDirShortLabel(dir){ return diffDirMeta(dir)[2]; }
 function diffDirPrintSub(dir){ return diffDirMeta(dir)[3]; }
 function diffDirCounterpartLabel(dir){ return diffDirMeta(dir)[4]; }
 function diffDirEmailPhrase(dir){ return diffDirMeta(dir)[5]; }
+/* Падежите на насрещната страна в модала за имейл. Стоят ОТДЕЛНО от [4],
+   защото българският иска две различни форми на едно и също нещо:
+     заглавие  "Изпрати имейл до изпращач"     - нечленувана
+     поле "До" "(имейл на доставчика)"          - членувана, родителен
+   Обединяването им в един етикет ги изравни към именителен и даде
+   "имейл на доставчик" / "имейл до обект изпращач". */
+var DIFF_EMAIL_CASES = {
+  supplier:      {to:'доставчик', of:'доставчика'},
+  interstore:    {to:'изпращач',  of:'обекта изпращач'},
+  wrong_receipt: {to:'доставчик', of:'доставчика'}
+};
+function diffDirEmailTo(dir){ return (DIFF_EMAIL_CASES[dir]||DIFF_EMAIL_CASES.supplier).to; }
+function diffDirEmailOf(dir){ return (DIFF_EMAIL_CASES[dir]||DIFF_EMAIL_CASES.supplier).of; }
 /* Заглавия на двете количествени колони. Схемата не се пипа - quantity и
    quantity_received носят различен СМИСЪЛ според посоката: при сторната по
    грешен прием сравнението е фактура ↔ заприходено, не доставка ↔ получено.
@@ -1904,10 +1916,10 @@ function diffEmailModalHtml(rep,lines){
   var subject=(rep.document_number?rep.document_number+' - ':'')+'РАЗЛИКИ ('+esc(rep.store_name||'')+')';
   return '<div class="bov" id="diff-email-ov"><div class="bmod" style="width:680px;max-height:90vh;overflow-y:auto;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
-    '<div style="font-size:16px;font-weight:700;">✉️ Изпрати имейл до '+diffDirCounterpartLabel(rep.direction).toLowerCase()+'</div>'+
+    '<div style="font-size:16px;font-weight:700;">✉️ Изпрати имейл до '+diffDirEmailTo(rep.direction)+'</div>'+
     '<button onclick="closeDiffEmailModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
 
-    '<label class="fl">До (имейл на '+diffDirCounterpartLabel(rep.direction).toLowerCase()+') *</label>'+
+    '<label class="fl">До (имейл на '+diffDirEmailOf(rep.direction)+') *</label>'+
     '<input class="fi" id="de-to" list="de-supplier-list" placeholder="name@supplier.bg">'+
     '<datalist id="de-supplier-list"></datalist>'+
 
