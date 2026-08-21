@@ -201,15 +201,30 @@ function reportBuildSummary(items, comps, stores, noDueCount){
   rows.sort(function(a,b){ return a.pct - b.pct; });
   var overallPct = totalAll ? Math.round(totalDone/totalAll*100) : 0;
   var byPct = rows.slice().sort(function(a,b){ return b.pct - a.pct; });
-  var postponedList = postponedComps.map(function(c){
+  /* Прозорецът на СПИСЪЦИТЕ е същият като на процента.
+     Досега двата списъка нямаха никакъв филтър по дата: процентът минаваше
+     през reportItemMatchesComp (точно съвпадение на completion_date с датата
+     на явяването), а списъците взимаха всяко отмятане, което заявката е
+     върнала - тоест цялата история. Оттам идваше противоречието: „0 от 27"
+     по обекти и 213 изброени коментара в едно и също писмо за една седмица.
+     Един и същи предикат за трите места, за да не се разминат отново. */
+  var inWindow = function(c){
+    return items.some(function(it){ return reportItemMatchesComp(it, c); });
+  };
+  /* След филтъра find() винаги намира явяването, тоест „(неизвестна задача)"
+     става недостижимо - точно записите, които го показваха, бяха тези извън
+     прозореца. Пазим го като предпазител, не като очакван изход. */
+  var titleOf = function(c){
     var it = items.find(function(x){ return reportItemMatchesComp(x,c); }) || items.find(function(x){ return x.id===c.item_id && x.kind===c.kind; });
-    return { title: it ? it.title : '(неизвестна задача)', store: c.store_name, comment: c.comment || '' };
+    return it ? it.title : '(неизвестна задача)';
+  };
+  var postponedList = postponedComps.filter(inWindow).map(function(c){
+    return { title: titleOf(c), store: c.store_name, comment: c.comment || '' };
   });
-  var commentedList = doneComps.filter(function(c){
+  var commentedList = doneComps.filter(inWindow).filter(function(c){
     return c.comment || (c.photos && c.photos.length);
   }).map(function(c){
-    var it = items.find(function(x){ return reportItemMatchesComp(x,c); }) || items.find(function(x){ return x.id===c.item_id && x.kind===c.kind; });
-    return { title: it ? it.title : '(неизвестна задача)', store: c.store_name, comment: c.comment || '', photos: c.photos || [] };
+    return { title: titleOf(c), store: c.store_name, comment: c.comment || '', photos: c.photos || [] };
   });
   return {
     overallPct: overallPct, totalDone: totalDone, totalAll: totalAll,
@@ -418,9 +433,21 @@ function collectWeeklyReportData(cb){
       var regIds = allBulTasks.map(function(t){ return t.id; });
       var recIds = recurringScheduled.map(function(t){ return t.id; });
 
+      /* Прозорец и на самата ЗАЯВКА, не само в JS. Без него за 10-те
+         постоянни задачи се теглеше всяко отмятане, правено някога - и като
+         трафик, и като материал за списъците, които после ги изброяваха
+         всичките под заглавие за една седмица.
+         Отмятанията с completion_date=NULL отпадат нарочно: те не могат да
+         бъдат отнесени към коя да е седмица (184 такива в базата, всичките
+         отпреди полето да се пълни). */
+      var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
+      var dateQ = wkDates
+        ? '&completion_date=gte.' + wkDates[0] + '&completion_date=lte.' + wkDates[6]
+        : '';
+
       Promise.all([
-        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')') : Promise.resolve([]),
-        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')') : Promise.resolve([]),
+        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+dateQ) : Promise.resolve([]),
+        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+dateQ) : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name')
       ]).then(function(r2){
         var regComps = Array.isArray(r2[0]) ? r2[0] : [];
