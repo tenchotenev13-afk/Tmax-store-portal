@@ -223,13 +223,46 @@ function reportStoreRow(r){
     '<div style="display:table-cell;vertical-align:middle;text-align:right;width:80px;"><span style="font-size:15px;font-weight:800;color:'+pc+';">'+r.pct+'%</span><span style="font-size:10px;color:#9CA3AF;margin-left:4px;">→</span></div>' +
     '</a>';
 }
+/* Класация има смисъл само когато има какво да се класира. При еднакъв
+   процент за ВСИЧКИ обекти двете кутии показват едни и същи числа под
+   заглавия „🏆 ТОП 3" и „⚠️ ИЗИСКВАТ ВНИМАНИЕ" - три случайни обекта се
+   оказват похвалени, други три посочени, без нищо да ги отличава. Точно
+   това се случваше всеки понеделник, докато седмичният прозорец беше
+   сбъркан и всички излизаха на 0%.
+
+   top3 е подредено по низходящ процент, bottom3 - по възходящ (виж
+   reportBuildSummary), тоест top3[0] е най-добрият, а bottom3[0] -
+   най-слабият. Равни ли са тези двама, равни са всички. Празен списък
+   обекти също не е класация. */
+function reportRankingIsMeaningful(top3, bottom3){
+  if (!top3 || !bottom3 || !top3.length || !bottom3.length) return false;
+  return top3[0].pct !== bottom3[0].pct;
+}
 function reportTopBottomTable(top3, bottom3){
+  if (!reportRankingIsMeaningful(top3, bottom3)) return '';
   var goodRows = top3.map(function(s,i){ return '<div style="font-size:13px;color:#1f2937;margin-bottom:4px;">'+(i+1)+'. '+esc(s.name)+' — '+s.pct+'%</div>'; }).join('');
   var badRows = bottom3.map(function(s,i){ return '<div style="font-size:13px;color:#1f2937;margin-bottom:4px;">'+(i+1)+'. '+esc(s.name)+' — '+s.pct+'%</div>'; }).join('');
   return '<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px 0;margin-top:6px;"><tr>' +
     '<td style="width:50%;background:#E9F5EF;border-radius:8px;padding:12px 14px;vertical-align:top;"><div style="font-size:11px;font-weight:800;color:#2F7D5C;margin-bottom:8px;">🏆 ТОП 3</div>'+goodRows+'</td>' +
     '<td style="width:50%;background:#FDEEEA;border-radius:8px;padding:12px 14px;vertical-align:top;"><div style="font-size:11px;font-weight:800;color:#B4442E;margin-bottom:8px;">⚠️ ИЗИСКВАТ ВНИМАНИЕ</div>'+badRows+'</td>' +
     '</tr></table>';
+}
+
+/* Бележката за постоянните задачи без срок. Числото управлява прилагателното,
+   съществителното, глагола И местоимението наведнъж - „1 постоянни задачи
+   без конкретен срок чакат преглед ... виж ги" беше сгрешено на четири места
+   в едно изречение. Затова двата варианта се пишат цели, а не със слепени
+   окончания. weekly сменя само втората половина на изречението. */
+function reportNoDueNoticeHtml(n, weekly){
+  if (!n || n < 1) return '';
+  var txt = weekly
+    ? (n === 1
+        ? '1 постоянна задача без конкретен срок не участва в тази статистика.'
+        : n + ' постоянни задачи без конкретен срок не участват в тази статистика.')
+    : (n === 1
+        ? '1 постоянна задача без конкретен срок чака преглед (не участва в % по-горе) — виж я в таб „Днес".'
+        : n + ' постоянни задачи без конкретен срок чакат преглед (не участват в % по-горе) — виж ги в таб „Днес".');
+  return '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:12px;color:#8A5A12;">📋 '+txt+'</div>';
 }
 
 function reportEmailShell(headerTitle, headerSub, bodyHtml, footerText){
@@ -301,10 +334,7 @@ function buildDailyReportHtml(data){
   body += reportTopBottomTable(data.top3, data.bottom3);
   body += reportPostponedSectionHtml(data.postponedList);
   body += reportCommentedSectionHtml(data.commentedList);
-  if (data.noDueCount > 0) {
-    body += '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:12px;color:#8A5A12;">'+
-      '📋 '+data.noDueCount+' постоянни задачи без конкретен срок чакат преглед (не участват в % по-горе) — виж ги в таб „Днес".</div>';
-  }
+  body += reportNoDueNoticeHtml(data.noDueCount, false);
   var dateStr = new Date().toLocaleDateString('bg-BG', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   return reportEmailShell('📋 Дневен репорт — Задачи', dateStr, body,
     'Автоматичен репорт · ТеМАХ Портал');
@@ -795,10 +825,7 @@ function buildWeeklyReportHtml(data){
   body += reportTopBottomTable(data.top3, data.bottom3);
   body += reportPostponedSectionHtml(data.postponedList);
   body += reportCommentedSectionHtml(data.commentedList);
-  if (data.noDueCount > 0) {
-    body += '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:12px;color:#8A5A12;">'+
-      '📋 '+data.noDueCount+' постоянни задачи без конкретен срок не участват в тази статистика.</div>';
-  }
+  body += reportNoDueNoticeHtml(data.noDueCount, true);
   body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: постоянните задачи участват с по едно явяване за всеки ден, в който са дължими през седмицата (задача „всеки ден" = 7 явявания) — точно както се отмятат в Седмичния календар. Отметка от предишна седмица не се брои за текущата.</div>';
   body += buildCrossModuleSectionHtml(data.cross);
   return reportEmailShell('📊 Седмичен репорт — ' + (data.weekLabel||''), 'Обобщение за седмицата', body,
