@@ -438,7 +438,10 @@ function collectCrossModuleWeeklySummary(cb){
   var weekAgoStamp = weekAgo.toISOString();
 
   Promise.all([
-    sbGet('differences_reports','created_at=gte.'+weekAgoStamp+'&select=reviewed'),
+    /* store_name и direction са нужни, за да се отдели сторната по грешен
+       прием от другите две посоки и да се разбие по обект. Само reviewed
+       не стигаше - разбивка по магазин беше физически невъзможна. */
+    sbGet('differences_reports','created_at=gte.'+weekAgoStamp+'&select=store_name,direction,reviewed'),
     sbGet('stock_returns','select=status'),
     sbGet('kasa_storno','created_at=gte.'+weekAgoStamp+'&select=status'),
     sbGet('kasa_zoborot','date=gte.'+weekAgoISO+'&select=status'),
@@ -460,10 +463,33 @@ function collectCrossModuleWeeklySummary(cb){
       seenS[u.store_name] = 1; return true;
     }).map(function(u){ return u.store_name; });
 
+    /* Сторната по грешен прием ИЗЛИЗА от числата за другите две посоки -
+       иначе всяка бланка се брои по два пъти: веднъж в "Разлики" и втори
+       път в собствения си ред. Липсваща посока пада на 'supplier', както
+       навсякъде другаде (виж sdLineDirection в stock-differences.js). */
+    var wrReports = diffReports.filter(function(x){ return x.direction==='wrong_receipt'; });
+    var otherReports = diffReports.filter(function(x){ return x.direction!=='wrong_receipt'; });
+
     var diffs = {
-      total: diffReports.length,
-      reviewed: diffReports.filter(function(x){ return x.reviewed===true; }).length,
-      unreviewed: diffReports.filter(function(x){ return x.reviewed!==true; }).length
+      total: otherReports.length,
+      reviewed: otherReports.filter(function(x){ return x.reviewed===true; }).length,
+      unreviewed: otherReports.filter(function(x){ return x.reviewed!==true; }).length
+    };
+    /* Разбивка по обект - само обектите с поне една бланка, подредени по
+       брой (най-натоварените отгоре), при равен брой по азбучен ред. */
+    var wrByStore = {};
+    wrReports.forEach(function(x){
+      var s = x.store_name || '—';
+      wrByStore[s] = (wrByStore[s] || 0) + 1;
+    });
+    var wrongReceipt = {
+      total: wrReports.length,
+      unreviewed: wrReports.filter(function(x){ return x.reviewed!==true; }).length,
+      byStore: Object.keys(wrByStore).map(function(s){
+        return { store: s, count: wrByStore[s] };
+      }).sort(function(a,b){
+        return b.count - a.count || a.store.localeCompare(b.store);
+      })
     };
     var ret = {
       open: returns.filter(function(x){ return x.status!=='completed'; }).length,
@@ -498,7 +524,8 @@ function collectCrossModuleWeeklySummary(cb){
     });
 
     cb({
-      diffs: diffs, returns: ret, storno: stornoSummary, zoborot: zoborotSummary,
+      diffs: diffs, wrongReceipt: wrongReceipt,
+      returns: ret, storno: stornoSummary, zoborot: zoborotSummary,
       transitStale: stalePending.length,
       pallets: { missing: palletsMissing, stale: palletsStale, total: storeNames.length }
     });
@@ -518,15 +545,42 @@ function crossModuleRow(icon, title, cardsHtml){
     '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+cardsHtml+'</div>' +
     '</div>';
 }
+/* Ред "Сторна по грешен прием" - единственият с разбивка ПО МАГАЗИН.
+   От тези бланки излизат глоби (удръжки от гъвкавата част на обекта),
+   затова е важно кой обект колко има, не само общото число.
+   Показват се САМО обектите с поне една бланка - празните редове само
+   биха разредили таблото.
+   Ползва същите примитиви (crossModuleRow/crossMetricCard) като другите
+   редове, защото същият HTML отива и в седмичния имейл, където сложен
+   лейаут не се рендира надеждно.
+   Старо cross без това поле (напр. кеширано от предишен зареден таб) не
+   бива да чупи секцията - тогава редът просто отпада. */
+function buildWrongReceiptRowHtml(wr){
+  if (!wr) return '';
+  if (!wr.total) {
+    return crossModuleRow('🧾','Сторна по грешен прием (нови тази седмица)',
+      crossMetricCard(0,'няма нови'));
+  }
+  var cards = crossMetricCard(wr.total,'общо нови') +
+              crossMetricCard(wr.unreviewed,'непрегледани', wr.unreviewed>0);
+  cards += wr.byStore.map(function(s){
+    return crossMetricCard(s.count, esc(s.store), true);
+  }).join('');
+  return crossModuleRow('🧾','Сторна по грешен прием (нови тази седмица)', cards);
+}
 function buildCrossModuleSectionHtml(cross){
   if (!cross) return '';
   var h = '<div style="margin-top:18px;padding-top:14px;border-top:2px solid #eef1f6;">';
   h += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">🗂 Друго от седмицата — по табове</div>';
 
-  h += crossModuleRow('📋','Разлики (нови доклади тази седмица)',
+  /* Числата тук са БЕЗ сторната по грешен прием - тя има собствен ред
+     по-долу и иначе би се броила два пъти. */
+  h += crossModuleRow('📋','Разлики от доставчици и междускладови (нови тази седмица)',
     crossMetricCard(cross.diffs.total,'нови доклада') +
     crossMetricCard(cross.diffs.reviewed,'прегледани',false) +
     crossMetricCard(cross.diffs.unreviewed,'непрегледани', cross.diffs.unreviewed>0));
+
+  h += buildWrongReceiptRowHtml(cross.wrongReceipt);
 
   h += crossModuleRow('📥','За връщане (текущо състояние)',
     crossMetricCard(cross.returns.open,'отворени (чакат/взети)', cross.returns.open>0) +
