@@ -273,6 +273,23 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
     ok('доставчиковият печат е непроменен',
       p.indexOf('Разлика при приемане на доставка от доставчик') >= 0);
     ok('и пази късото „Кол." в тясната колона', p.indexOf('Кол.') >= 0);
+
+    /* Падежите в модала за имейл. Веднъж вече бяха изравнени към именителен
+       при обединяването на етикетите („имейл на доставчик", „до обект
+       изпращач") — затова и двете форми се заковават тук поотделно. */
+    const mSup = w.diffEmailModalHtml(w.diffReports.find(r => r.id === 'rep-sup'), []);
+    ok('supplier: заглавието е „до доставчик"', mSup.indexOf('имейл до доставчик<') >= 0);
+    ok('supplier: полето е „имейл на доставчика"', mSup.indexOf('имейл на доставчика)') >= 0);
+
+    const mInt = w.diffEmailModalHtml(w.diffReports.find(r => r.id === 'rep-int'), []);
+    ok('interstore: заглавието е „до изпращач", не „до обект изпращач"',
+      mInt.indexOf('имейл до изпращач<') >= 0);
+    ok('interstore: полето е „имейл на обекта изпращач"',
+      mInt.indexOf('имейл на обекта изпращач)') >= 0);
+
+    const mWr = w.diffEmailModalHtml(w.diffReports.find(r => r.id === 'rep-wr'), []);
+    ok('wrong_receipt: върви по формите на доставчика',
+      mWr.indexOf('имейл до доставчик<') >= 0 && mWr.indexOf('имейл на доставчика)') >= 0);
   }
 
   section('5. Категориите за новата посока НЕ са празни');
