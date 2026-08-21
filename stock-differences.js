@@ -33,8 +33,14 @@ function sdRestoreScroll(){
   else apply();
 }
 
-function canEditSD() {
-  return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
+/* line (по избор) — ред от посока 'wrong_receipt' е САМО ЗА ЧЕТЕНЕ за магазина.
+   От тези редове излизат глоби (удръжки от гъвкавата част на обекта), затова
+   обектът ги вижда и ги проследява, но не пипа количествата им. Без аргумент
+   функцията се държи както преди — общ въпрос "тази роля пипа ли изобщо". */
+function canEditSD(line) {
+  if (!currentUser) return false;
+  if (isWrongReceiptReadOnly(line)) return false;
+  return ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
 }
 function canAddSD() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
@@ -46,6 +52,30 @@ function canSubmitDiff() {
 /* Решение по разликата (Заприхождаване/Връщане/Липса) - само централен офис */
 function canReviewDiff() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
+}
+/* Подаване на бланка в посока "Сторна по грешен прием" - САМО централен офис.
+   Оперативните счетоводители по обекти са accounting профили с разпределение в
+   users.assigned_stores (store_name им е "Централен офис"), затова ролята стига
+   и нова роля не е нужна. Магазинските роли (manager/sklad/info) виждат тези
+   бланки, но не ги създават - от тях излизат глоби. */
+function canSubmitWrongReceipt(){
+  return currentUser && ['admin','accounting'].indexOf(currentUser.role) >= 0;
+}
+/* Един израз за "този ред е сторна по грешен прием и аз съм магазинът".
+   Ползва се от canEditSD, от модала за корекция и от модала за редакция -
+   за да не се разминат трите места. */
+function isWrongReceiptReadOnly(line){
+  return !!line && sdLineDirection(line) === 'wrong_receipt' && !canReviewDiff();
+}
+/* Прикачване на снимка/документ към КОНКРЕТЕН ред: централният офис навсякъде,
+   магазинът - само по своите редове. Обектът трябва да може да докаже какво е
+   заприходил, без да може да пипне количествата. */
+function canAttachSDLine(line){
+  if (!currentUser || !line) return false;
+  if (['admin','accounting'].indexOf(currentUser.role) >= 0) return true;
+  var mine = assignedStores();
+  if (!mine) return false; /* глобален профил без разпределение - не е "магазин" */
+  return mine.indexOf(line.store_name) >= 0;
 }
 /* Кой извършва действието - едно място за начина, по който се записва авторът
    в resolved_by/completed_by. Същият израз се ползва и за created_by. */
@@ -72,6 +102,56 @@ function isLogisticsWarehouseUser(){
   return currentUser && LOGISTICS_WAREHOUSES.indexOf(currentUser.store_name) >= 0;
 }
 var WH_RESPONSE_LABELS = {sent:'📤 Изпратено',will_send:'⏳ Ще се изпрати','return':'↩️ Обратно движение'};
+
+/* ══ Регистър на посоките ══
+   ЕДИН източник за подтабовете, броячите и всеки етикет по посока. Преди трета
+   посока беше невъзможна тихо: броячите бяха литерали {supplier:0,interstore:0}
+   (с hasOwnProperty guard, тоест нов ключ се брои като 0), а всеки етикет беше
+   тернар `direction==='supplier' ? A : 'Междускладов'`, тоест всичко непознато
+   се показваше като междускладово.
+     [0] ключ = differences_reports.direction
+     [1] етикет на подтаба
+     [2] кратък етикет до бланката в списъка
+     [3] подзаглавие на печатната бланка
+     [4] как се казва насрещната страна (етикет на полето и в имейла)
+     [5] "Установени са разлики при ___" в имейла */
+var DIFF_DIRECTIONS = [
+  ['supplier','📦 Разлики от доставчици','📦 Доставчик',
+   'Разлика при приемане на доставка от доставчик','Доставчик','приемане на доставка'],
+  ['interstore','🔄 Разлики от междускладови трансфери','🔄 Междускладов',
+   'Разлика при междускладов трансфер','Обект изпращач','междускладов трансфер'],
+  ['wrong_receipt','🧾 Сторна по грешен прием','🧾 Сторна по грешен прием',
+   'Сторно по грешен прием — разлика между фактура и заприходена стока','Доставчик','сторно по грешен прием']
+];
+function diffDirKeys(){ return DIFF_DIRECTIONS.map(function(d){ return d[0]; }); }
+/* Липсваща/непозната посока пада на "Доставчик" - същият fallback, който
+   sdLineDirection ползва за ръчно добавените редове без report_id. */
+function diffDirMeta(dir){
+  var f = DIFF_DIRECTIONS.find(function(d){ return d[0] === dir; });
+  return f || DIFF_DIRECTIONS[0];
+}
+function diffDirTabLabel(dir){ return diffDirMeta(dir)[1]; }
+function diffDirShortLabel(dir){ return diffDirMeta(dir)[2]; }
+function diffDirPrintSub(dir){ return diffDirMeta(dir)[3]; }
+function diffDirCounterpartLabel(dir){ return diffDirMeta(dir)[4]; }
+function diffDirEmailPhrase(dir){ return diffDirMeta(dir)[5]; }
+/* Заглавия на двете количествени колони. Схемата не се пипа - quantity и
+   quantity_received носят различен СМИСЪЛ според посоката: при сторната по
+   грешен прием сравнението е фактура ↔ заприходено, не доставка ↔ получено.
+   Знакът носи вида на разликата: заприходено > фактура = приета нефактурирана;
+   заприходено < фактура = фактурирана неприета.
+   doc/real     - пълните етикети (форма за подаване, имейл)
+   docShort/... - за тесните таблици на екрана
+   printDoc/... - за печата, където колоните са 11mm и 13mm; там думите остават
+                  възможно най-къси, за да не се пречупват на три реда. */
+function diffQtyLabels(dir){
+  if (dir === 'wrong_receipt') return {doc:'По фактура',      docShort:'По фактура',
+                                       real:'Реално заприходено', realShort:'Заприходено',
+                                       printDoc:'По фактура',  printReal:'Заприх.'};
+  return {doc:'По вх. доставка', docShort:'По вх. дост.',
+          real:'Реално получено', realShort:'Реално',
+          printDoc:'Кол.',        printReal:'Получено'};
+}
 /* Изпращане на имейл до доставчик - Цветелина Тенева + admin (за тестване/подпомагане) */
 function canSendDiffEmail() {
   if (!currentUser) return false;
@@ -112,7 +192,6 @@ function renderStockDiff() {
   var wrap = document.getElementById('mod-stock-diff');
   if (!wrap) return;
   var isAdmin = currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
-  var canEdit = canEditSD();
   var canAdd  = canAddSD();
 
   var list = sdTableRows();
@@ -154,20 +233,22 @@ function renderStockDiff() {
      Не важи за самите складове - тяхната видимост вече е ограничена
      другояче (само собствените им насрещни). */
   if(sdDirTabsActive()){
-    var dirCounts = {supplier:0, interstore:0};
+    /* Броячите се СТРОЯТ от регистъра, а не са литерали - иначе всяка нова
+       посока би се броила като 0, без нищо да се счупи видимо. */
+    var dirCounts = {}, dirNew = {};
+    diffDirKeys().forEach(function(k){ dirCounts[k]=0; dirNew[k]=0; });
     sdData.forEach(function(r){
       if(!r.type) return;
       if(dirCounts.hasOwnProperty(sdLineDirection(r))) dirCounts[sdLineDirection(r)]++;
     });
     /* Брой НОВИ (непрегледани) бланки по посока - за да се вижда още от таба,
        че от другата страна чака нещо, без да се превключва. */
-    var dirNew = {supplier:0, interstore:0};
     sdVisibleUnreviewedReports().forEach(function(rep){
       var d = rep.direction || 'supplier';
       if(dirNew.hasOwnProperty(d)) dirNew[d]++;
     });
     h += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
-    [['supplier','📦 Разлики от доставчици'],['interstore','🔄 Разлики от междускладови трансфери']].forEach(function(t){
+    DIFF_DIRECTIONS.forEach(function(t){
       var a = sdDirTab===t[0];
       h += '<button data-dir="'+t[0]+'" onclick="setSDDirTab(this.dataset.dir)" style="border:1px solid '+(a?'#0f172a':'#e2e8f0')+';padding:6px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:'+(a?'#0f172a':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+t[1]+' ('+dirCounts[t[0]]+')'+
         (dirNew[t[0]]?'<span style="margin-left:6px;background:#dc2626;color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;">🆕 '+dirNew[t[0]]+'</span>':'')+'</button>';
@@ -232,6 +313,10 @@ function renderStockDiff() {
     list.forEach(function(r) {
       var isTaken = r.status === 'taken';
       var statusBadge = sdRowStatusBadge(r);
+      /* Правата се смятат ПО РЕД, не веднъж за целия рендер - редовете от
+         "Сторна по грешен прием" са само за четене за магазина, а в един и същ
+         изглед може да има редове от повече от една посока. */
+      var canEdit = canEditSD(r);
       /* Кредитно известие - релевантно само за тип "Липса" (доставчикът не ни е
          доставил артикула, трябва финансово да ни компенсира) */
       var creditCell = '—';
@@ -255,8 +340,9 @@ function renderStockDiff() {
         /* Снимките са прикачени на ниво БЛАНКА (differences_reports.photos), не
            на реда - затова не се виждаха тук, след като редът бъде решен и
            излезе от секцията "Нови подадени бланки" (напр. при директно
-           решение "Липса" без коментар). */
-        '<td style="padding:7px 10px;">'+diffReportPhotoThumbs(r.report_id)+'</td>'+
+           решение "Липса" без коментар). Под тях стоят и прикачените към САМИЯ
+           РЕД файлове (attachments) - там живеят снимките по сторната. */
+        '<td style="padding:7px 10px;">'+diffReportPhotoThumbs(r.report_id)+sdLineAttachCell(r)+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.comment||'')+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.resolution_comment||'')+(normSDAttachments(r.attachments).length?' 📎'+normSDAttachments(r.attachments).length:'')+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
@@ -686,7 +772,10 @@ function sdModalHtml() {
      момент нататък магазинът вече не може да пипа количество/тип - само
      статус (Невзета/Взета/Заприходена). */
   var isResolved = isEdit && !!r.type;
-  var storeLocked = isResolved && !canReview;
+  /* Сторната по грешен прием е заключена за магазина ОТ САМОТО НАЧАЛО, не чак
+     след решение - количествата по нея пораждат глоба и не се коригират от
+     обекта, а само се проследяват. */
+  var storeLocked = (isResolved || (isEdit && isWrongReceiptReadOnly(r))) && !canReview;
   var storeOpts = '<option value="">-- Избери магазин --</option>';
   var stores = assignedStores();
   if (stores) {
@@ -858,6 +947,58 @@ function diffAttachmentThumbs(l){
   h+='</div>';
   return h;
 }
+/* Прикачените към САМИЯ РЕД файлове + бутон за качване, ако този потребител
+   има право. Ползва се и в главната таблица (колона "Снимки"), и в списъка с
+   непрегледани бланки - за да няма две различни места за едно и също нещо. */
+function sdLineAttachCell(l){
+  var thumbs = diffAttachmentThumbs(l);
+  if(!canAttachSDLine(l)) return thumbs;
+  return thumbs +
+    '<label title="Прикачи снимка или документ към този ред" style="display:inline-flex;align-items:center;gap:3px;margin-top:3px;border:1px dashed #cbd5e1;border-radius:5px;padding:1px 7px;font-size:10.5px;color:#94a3b8;cursor:pointer;">'+
+      '📎 +<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx" style="display:none;" data-lid="'+l.id+'" onchange="sdUploadLineAttachment(this,this.dataset.lid)">'+
+    '</label>';
+}
+/* Прикачване към конкретен ред, независимо от отворен модал. Пътят следва
+   sdUploadAttachment (същият bucket, същият шаблон на името), но с префикс по
+   посока и с компресия на изображенията - тези снимки идват от телефон в
+   магазина, не от сканер в офиса. Не-изображенията (сканирани PDF-и) минават
+   непроменени и се разпознават от DIFF_IMG_RE при показване, както досега. */
+function sdUploadLineAttachment(input,lineId){
+  var file=input.files[0]; if(!file)return;
+  input.value='';
+  var record=sdData.find(function(x){return String(x.id)===String(lineId);});
+  if(!record){toast('Редът не е намерен','#dc2626');return;}
+  if(!canAttachSDLine(record)){toast('Нямаш права да прикачваш към този ред','#dc2626');return;}
+  var isImg=!!file.type && file.type.indexOf('image/')===0;
+  var prefix=sdLineDirection(record)==='wrong_receipt' ? 'wrong-receipt/' : 'stock-differences/';
+  toast('⏳ Качване...','#2563eb');
+  diffCompressImage(file,1600,0.75).then(function(blob){
+    var ext=isImg?'jpg':((file.name.split('.').pop()||'bin').toLowerCase());
+    var ctype=isImg?'image/jpeg':(file.type||'application/octet-stream');
+    var path=prefix+'sd_'+record.id+'_'+Date.now()+'.'+ext;
+    var reader=new FileReader();
+    reader.onload=function(e){
+      fetch(DIFF_SB+'/storage/v1/object/'+DIFF_BKT+'/'+path,{
+        method:'POST',
+        headers:{'Authorization':'Bearer '+DIFF_KEY,'Content-Type':ctype,'x-upsert':'true'},
+        body:e.target.result
+      }).then(function(r){return r.ok;}).then(function(ok){
+        if(!ok){toast('Грешка при качване','#dc2626');return;}
+        var pub=DIFF_SB+'/storage/v1/object/public/'+DIFF_BKT+'/'+path;
+        var atts=normSDAttachments(record.attachments).slice();
+        atts.push({type:isImg?'image':'file',url:pub,filename:file.name});
+        sbPatch('stock_differences','id=eq.'+record.id,{attachments:atts}).then(function(res){
+          if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+          record.attachments=atts;
+          toast('✅ Прикачено!');
+          sdKeepScroll(record.report_id);
+          renderStockDiff();
+        });
+      }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');});
+    };
+    reader.readAsArrayBuffer(blob);
+  });
+}
 function sdUploadAttachment(input){
   var file=input.files[0]; if(!file)return;
   if(!sdEditId){toast('Запази записа първо, после прикачи документ','#dc2626');return;}
@@ -964,6 +1105,12 @@ function submitSD() {
   if(!store){toast('Избери магазин','#dc2626');return;}
   if(!name){toast('Въведи наименование','#dc2626');return;}
   var origRecord = sdEditId ? sdData.find(function(x){return x.id===sdEditId;}) : null;
+  /* Втора ключалка след скритите бутони: дори модалът да бъде отворен по друг
+     път, магазинът не може да запише промяна по ред от "Сторна по грешен прием". */
+  if(isWrongReceiptReadOnly(origRecord)){
+    toast('Редовете от „Сторна по грешен прием" се променят само от централния офис','#dc2626');
+    return;
+  }
   var data={
     store_name:     store,
     supplier:       document.getElementById('sd-supplier').value,
@@ -1054,7 +1201,13 @@ var DIFF_CATEGORIES = [
   ['pack_mismatch','📦 Разлика от фабрична опаковка', ['interstore'], true, 'm.pavlova@temax.bg'],
   ['damaged','💔 Увредена стока / липсват части', ['supplier','interstore'], true, null],
   ['wrong_barcode','🏷️ Грешен баркод / етикет / описание', ['supplier','interstore'], true, 'j.jeliazkov@temax.bg, m.pavlova@temax.bg'],
-  ['similar_item','🎨 Сходен артикул (различен цвят/размер)', ['interstore'], false, 'm.pavlova@temax.bg (за ZPACK корекция)']
+  ['similar_item','🎨 Сходен артикул (различен цвят/размер)', ['interstore'], false, 'm.pavlova@temax.bg (за ZPACK корекция)'],
+  /* Сторна по грешен прием - разликата е между ФАКТУРАТА и реално заприходеното
+     по нея, не между поръчка и доставка. Затова двете стойности са отделни от
+     undelivered/excess, макар да звучат близко: там мярката е входящата
+     доставка. Съществуващите седем не се пипат - filter по посока ги пази. */
+  ['unbilled_received','📥 Приета нефактурирана стока', ['wrong_receipt'], false, null],
+  ['billed_not_received','🧾 Фактурирана неприета стока', ['wrong_receipt'], false, null]
 ];
 function diffCatMeta(key){
   return DIFF_CATEGORIES.find(function(c){return c[0]===key;}) || null;
@@ -1131,7 +1284,7 @@ function renderDiffReportsSection(){
   });
   var h='<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:14px;">';
   h+='<div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:10px;">🆕 Нови подадени бланки — чакат преглед ('+unreviewed.length+(unreviewed.length!==allVisible.length?' от '+allVisible.length:'')+')'+
-     (sdDirTabsActive()?' <span style="font-weight:500;color:#7c3aed;">· '+(sdDirTab==='supplier'?'📦 Доставчик':'🔄 Междускладов трансфер')+'</span>':'')+'</div>';
+     (sdDirTabsActive()?' <span style="font-weight:500;color:#7c3aed;">· '+diffDirShortLabel(sdDirTab)+'</span>':'')+'</div>';
   unreviewed.forEach(function(rep){
     var lines = sdData.filter(function(x){return x.report_id===rep.id;});
     var wasCorrected = lines.some(function(l){return !!l.store_corrected_at;});
@@ -1147,7 +1300,7 @@ function renderDiffReportsSection(){
     h+='<div><span style="font-weight:700;">🏪 '+esc(rep.store_name||'')+'</span>'+
        (wasCorrected?' <span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">✏️ КОРИГИРАНА</span>':'')+
        (totalCount?' <span title="Решени редове от тази бланка" style="background:'+(inProgress?'#ecfdf5':'#f5f3ff')+';color:'+(inProgress?'#047857':'#6d28d9')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(doneCount?'⏳ '+doneCount+'/'+totalCount+' решени':'⬜ 0/'+totalCount+' — недокосната')+'</span>':'')+
-       '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+(rep.direction==='supplier'?'📦 Доставчик':'🔄 Междускладов')+' — '+esc(rep.counterpart||'')+'</span></div>'+
+       '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+diffDirShortLabel(rep.direction)+' — '+esc(rep.counterpart||'')+'</span></div>'+
        '<div style="display:flex;align-items:center;gap:8px;">'+
        '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</span>'+
        (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+sdFmtDateTime(rep.email_sent_at)+'</span>':'')+
@@ -1164,10 +1317,11 @@ function renderDiffReportsSection(){
     }
     if(lines.length){
       var repIsSupplier=rep.direction==='supplier';
+      var repQty=diffQtyLabels(rep.direction);
       h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
-      h+='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">По вх. дост.</th>'+
+      h+='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">'+repQty.docShort+'</th>'+
         (repIsSupplier?'<th style="padding:3px 6px;text-align:right;">По стокова</th>':'')+
-        '<th style="padding:3px 6px;text-align:right;">Реално</th><th style="padding:3px 6px;">Коментар (магазин)</th><th style="padding:3px 6px;">Коментар (Цвети)</th><th style="padding:3px 6px;">Решение (Цвети)</th><th style="padding:3px 6px;">Отговор на склада</th></tr>';
+        '<th style="padding:3px 6px;text-align:right;">'+repQty.realShort+'</th><th style="padding:3px 6px;">Коментар (магазин)</th><th style="padding:3px 6px;">Снимки</th><th style="padding:3px 6px;">Коментар (Цвети)</th><th style="padding:3px 6px;">Решение (Цвети)</th><th style="padding:3px 6px;">Отговор на склада</th></tr>';
       lines.forEach(function(l){
         /* Решените редове затихват в зелено, за да изпъкват НЕрешените -
            корекцията от магазина (жълто) има приоритет, тя е по-спешна. */
@@ -1180,10 +1334,14 @@ function renderDiffReportsSection(){
           (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
           '<td style="padding:3px 6px;text-align:right;">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
           '<td style="padding:3px 6px;color:#64748b;">'+esc(l.comment||'')+'</td>'+
-          '<td style="padding:3px 6px;color:#7c3aed;">'+esc(l.resolution_comment||'')+diffAttachmentThumbs(l)+'</td>'+
+          /* Снимките по РЕДА - тук магазинът доказва какво е заприходил, без да
+             може да пипне количествата. Колоната е отделна от коментара на
+             Цвети, защото качва и едната, и другата страна. */
+          '<td style="padding:3px 6px;">'+sdLineAttachCell(l)+'</td>'+
+          '<td style="padding:3px 6px;color:#7c3aed;">'+esc(l.resolution_comment||'')+'</td>'+
           '<td style="padding:3px 6px;white-space:nowrap;">'+diffLineResolveButtons(l)+
           (canReviewDiff()&&!isLogisticsWarehouseUser()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
-          (canEditSD()&&!l.type&&currentUser.store_name===rep.store_name?' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>':'')+
+          (canEditSD(l)&&!l.type&&currentUser.store_name===rep.store_name?' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>':'')+
           '</td>'+
           '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+'</td>'+
         '</tr>';
@@ -1220,6 +1378,12 @@ function openSDCorrectModal(lineId){
   sdCorrectLineId = lineId;
   var l = sdData.find(function(x){return String(x.id)===String(lineId);});
   if(!l)return;
+  /* Явен изход: количествата по сторна за грешен прием не се коригират от
+     обекта - те са основата на глобата. Магазинът вижда реда и го проследява. */
+  if(isWrongReceiptReadOnly(l)){
+    toast('Редът е от „Сторна по грешен прием" — количествата се коригират само от централния офис','#d97706');
+    return;
+  }
   var existing = document.getElementById('sdc-ov'); if(existing) existing.remove();
   var div = document.createElement('div');
   div.innerHTML = '<div class="bov open" id="sdc-ov"><div class="bmod" style="width:420px;">'+
@@ -1243,6 +1407,12 @@ function openSDCorrectModal(lineId){
 }
 function submitSDCorrection(){
   var current = sdData.find(function(x){return String(x.id)===String(sdCorrectLineId);});
+  /* Същата ключалка и на записа, не само на отварянето. */
+  if(isWrongReceiptReadOnly(current)){
+    toast('Редът е от „Сторна по грешен прием" — количествата се коригират само от централния офис','#d97706');
+    var elWr=document.getElementById('sdc-ov'); if(elWr)elWr.remove();
+    return;
+  }
   if(current && current.type){
     toast('⚠️ Цветелина вече е дала решение по този запис - корекция вече не е възможна.','#d97706');
     var elLocked=document.getElementById('sdc-ov'); if(elLocked)elLocked.remove();
@@ -1287,10 +1457,12 @@ function diffItemRowHtml(item,direction){
     '</div>'+
     /* Бележка от търсенето в каталога - пълни се от lookupCatalogBySap() */
     '<div class="di-lookup-hint"></div>'+
+    /* Колоните са същите (quantity / quantity_received), сменя се само думата:
+       при сторната сравнението е фактура ↔ заприходено. */
     '<div style="display:grid;grid-template-columns:'+(direction==='supplier'?'1fr 1fr 1fr 1fr':'1fr 1fr 1fr')+';gap:6px;margin-bottom:6px;">'+
-      '<input type="number" step="0.001" class="fi di-qty" placeholder="По вх. доставка" value="'+(item.qty!=null?item.qty:'')+'">'+
+      '<input type="number" step="0.001" class="fi di-qty" placeholder="'+diffQtyLabels(direction).doc+'" value="'+(item.qty!=null?item.qty:'')+'">'+
       (direction==='supplier'?'<input type="number" step="0.001" class="fi di-qty-supdoc" placeholder="По стокова на дост." value="'+(item.qtySupplierDoc!=null?item.qtySupplierDoc:'')+'">':'')+
-      '<input type="number" step="0.001" class="fi di-qty-real" placeholder="Реално получено" value="'+(item.qtyReal!=null?item.qtyReal:'')+'">'+
+      '<input type="number" step="0.001" class="fi di-qty-real" placeholder="'+diffQtyLabels(direction).real+'" value="'+(item.qtyReal!=null?item.qtyReal:'')+'">'+
       '<select class="fi di-unit">'+unitOptionsHtml(item.unit)+'</select>'+
     '</div>'+
     '<div style="margin-bottom:6px;"><select class="fi di-cat" style="width:100%;" onchange="updateDiffItemHint(this)">'+catOpts+'</select></div>'+
@@ -1503,9 +1675,13 @@ function diffSubmitModalHtml(){
     '<button onclick="closeDiffSubmitModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
+    /* "Сторна по грешен прием" се показва като опция само на ЦО - магазинската
+       роля не бива да може дори да я избере. Записът пак се проверява отделно
+       в submitDiffReport(), скритата опция сама по себе си не е защита. */
     '<div><label class="fl">Посока *</label><select class="fi" id="diff-direction" onchange="updateDiffCounterpartLabel()">'+
       '<option value="interstore">🔄 Междускладов трансфер</option>'+
       '<option value="supplier">📦 Доставчик</option>'+
+      (canSubmitWrongReceipt()?'<option value="wrong_receipt">🧾 Сторна по грешен прием</option>':'')+
     '</select></div>'+
     '<div><label class="fl">Магазин *</label>'+storeField+'</div>'+
     '</div>'+
@@ -1542,13 +1718,14 @@ function updateDiffCounterpartLabel(){
   var dir=document.getElementById('diff-direction').value;
   var lbl=document.getElementById('diff-counterpart-label');
   var sel=document.getElementById('diff-counterpart');
-  if(dir==='supplier'){
-    lbl.textContent='Доставчик';
+  lbl.textContent=diffDirCounterpartLabel(dir);
+  /* Сторната по грешен прием също тръгва от фактура на ДОСТАВЧИК - списъкът е
+     същият като при посока "Доставчик", не списъкът с обекти. */
+  if(dir==='supplier'||dir==='wrong_receipt'){
     loadAllSuppliers().then(function(list){
       sel.innerHTML='<option value="">-- Избери доставчик --</option>'+list.map(function(n){return '<option>'+esc(n)+'</option>';}).join('');
     });
   } else {
-    lbl.textContent='Обект изпращач';
     loadAllStores().then(function(){
       fillStoreSelect(sel,'');
     });
@@ -1599,6 +1776,12 @@ function submitDiffReport(){
   var counterpart=document.getElementById('diff-counterpart').value.trim();
   var items=collectDiffItems();
   if(!store){toast('Избери магазин','#dc2626');return;}
+  /* Твърдият гейт за посоката е ТУК, не само в скритата опция на селекта -
+     подаването ражда глоба и не бива да зависи от това какво е рендирано. */
+  if(direction==='wrong_receipt'&&!canSubmitWrongReceipt()){
+    toast('Бланка „Сторна по грешен прием" се подава само от централния офис','#dc2626');
+    return;
+  }
   /* Започнат ред без наименование спира подаването и се посочва поименно -
      иначе се губеше тихо (collectDiffItems го изхвърля). */
   var missingName=diffRowsMissingName();
@@ -1679,14 +1862,15 @@ function submitDiffReport(){
 function diffEmailBodyHtml(rep,lines,note){
   var h='<div style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;">';
   h+='<p>Здравейте,</p>';
-  h+='<p>Установени са разлики при '+(rep.direction==='supplier'?'приемане на доставка':'междускладов трансфер')+' — '+esc(rep.counterpart||'')+
+  h+='<p>Установени са разлики при '+diffDirEmailPhrase(rep.direction)+' — '+esc(rep.counterpart||'')+
      (rep.document_number?', документ №'+esc(rep.document_number):'')+
      (rep.doc_date?', дата '+fmtDate(rep.doc_date):'')+'.</p>';
   var isSupplier=rep.direction==='supplier';
   h+='<table style="width:100%;border-collapse:collapse;font-size:13px;margin:14px 0;">';
-  h+='<tr style="background:#f3f4f6;"><th style="border:1px solid #ccc;padding:6px;text-align:left;">SAP №</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Артикул</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Категория</th><th style="border:1px solid #ccc;padding:6px;text-align:right;">По вх. доставка</th>'+
+  var emQty=diffQtyLabels(rep.direction);
+  h+='<tr style="background:#f3f4f6;"><th style="border:1px solid #ccc;padding:6px;text-align:left;">SAP №</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Артикул</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Категория</th><th style="border:1px solid #ccc;padding:6px;text-align:right;">'+emQty.doc+'</th>'+
     (isSupplier?'<th style="border:1px solid #ccc;padding:6px;text-align:right;">По стокова на дост.</th>':'')+
-    '<th style="border:1px solid #ccc;padding:6px;text-align:right;">Реално</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Коментар</th></tr>';
+    '<th style="border:1px solid #ccc;padding:6px;text-align:right;">'+emQty.realShort+'</th><th style="border:1px solid #ccc;padding:6px;text-align:left;">Коментар</th></tr>';
   lines.forEach(function(l){
     h+='<tr><td style="border:1px solid #ccc;padding:6px;">'+esc(l.material_code||'')+'</td>'+
        '<td style="border:1px solid #ccc;padding:6px;">'+esc(l.material_name||'')+'</td>'+
@@ -1720,10 +1904,10 @@ function diffEmailModalHtml(rep,lines){
   var subject=(rep.document_number?rep.document_number+' - ':'')+'РАЗЛИКИ ('+esc(rep.store_name||'')+')';
   return '<div class="bov" id="diff-email-ov"><div class="bmod" style="width:680px;max-height:90vh;overflow-y:auto;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
-    '<div style="font-size:16px;font-weight:700;">✉️ Изпрати имейл до '+(rep.direction==='supplier'?'доставчик':'изпращач')+'</div>'+
+    '<div style="font-size:16px;font-weight:700;">✉️ Изпрати имейл до '+diffDirCounterpartLabel(rep.direction).toLowerCase()+'</div>'+
     '<button onclick="closeDiffEmailModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
 
-    '<label class="fl">До (имейл на '+(rep.direction==='supplier'?'доставчика':'обекта изпращач')+') *</label>'+
+    '<label class="fl">До (имейл на '+diffDirCounterpartLabel(rep.direction).toLowerCase()+') *</label>'+
     '<input class="fi" id="de-to" list="de-supplier-list" placeholder="name@supplier.bg">'+
     '<datalist id="de-supplier-list"></datalist>'+
 
@@ -1870,7 +2054,7 @@ function renderDiffPrint(rep){
   if(!wrap) return;
   var lines = sdData.filter(function(x){ return x.report_id===rep.id; });
   var si = getStoreInfo(rep.store_name) || {};
-  var isSupplier = rep.direction==='supplier';
+  var pQty = diffQtyLabels(rep.direction);
   var photos = Array.isArray(rep.photos) ? rep.photos : [];
   var imgs  = photos.filter(function(p){ return p && p.url && DIFF_IMG_RE.test(p.url); });
   var files = photos.filter(function(p){ return p && p.url && !DIFF_IMG_RE.test(p.url); });
@@ -1975,9 +2159,9 @@ function renderDiffPrint(rep){
           '<img src="'+DIFF_PRINT_LOGO+'" class="dp-logo" alt="TeMAX">'+
         '</div>'+
         '<div class="dp-title">БЛАНКА ЗА РАЗЛИКИ</div>'+
-        '<div class="dp-sub">'+(isSupplier?'Разлика при приемане на доставка от доставчик':'Разлика при междускладов трансфер')+'</div>'+
+        '<div class="dp-sub">'+diffDirPrintSub(rep.direction)+'</div>'+
         '<table class="dp-meta">'+
-          '<tr><td>'+(isSupplier?'Доставчик:':'Обект изпращач:')+'</td><td>'+esc(rep.counterpart||'—')+'</td></tr>'+
+          '<tr><td>'+diffDirCounterpartLabel(rep.direction)+':</td><td>'+esc(rep.counterpart||'—')+'</td></tr>'+
           '<tr><td>Документ №:</td><td>'+esc(rep.document_number||'—')+'</td></tr>'+
           '<tr><td>Дата на документа:</td><td>'+fmtDate(rep.doc_date)+'</td></tr>'+
           '<tr><td>Подал:</td><td>'+esc(rep.submitted_by||'—')+'</td></tr>'+
@@ -1994,8 +2178,11 @@ function renderDiffPrint(rep){
             '<th style="width:8mm;">№</th>'+
             '<th style="width:18mm;">SAP</th>'+
             '<th style="width:44mm;">Наименование</th>'+
-            '<th style="width:11mm;">Кол.</th>'+
-            '<th style="width:13mm;">Получено</th>'+
+            /* Ширините не се пипат (сумата е точно 190mm) - сменя се само
+               думата според посоката. th е с white-space:normal, така че
+               по-дългият етикет се пречупва вътре в клетката си. */
+            '<th style="width:11mm;">'+pQty.printDoc+'</th>'+
+            '<th style="width:13mm;">'+pQty.printReal+'</th>'+
             '<th style="width:22mm;">Тип на решение</th>'+
             '<th style="width:20mm;">Статус</th>'+
             '<th style="width:15mm;">Решил</th>'+
