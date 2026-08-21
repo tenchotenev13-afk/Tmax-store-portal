@@ -216,6 +216,11 @@ function storeQ(col){
 
 /* UTILS */
 function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'):'—';}
+/* esc() покрива & < > — достатъчно за ТЕКСТ между тагове, но НЕ за стойност
+   на атрибут: кавичка вътре в src="…" затваря атрибута и всичко след нея
+   се чете като markup. За стойности, които влизат в кавички (URL-и, имена
+   на файлове), се ползва това. */
+function escAttr(s){return esc(s).replace(/"/g,'&quot;');}
 /* За value="" на input/textarea полета - празно поле трябва да е ИСТИНСКИ празно, не тире (esc() връща тире за показване на данни, тук е грешно) */
 function escVal(s){return s?esc(s):'';}
 function today(){return new Date().toISOString().slice(0,10);}

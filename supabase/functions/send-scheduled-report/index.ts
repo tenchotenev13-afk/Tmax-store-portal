@@ -52,6 +52,10 @@ function sbPatch(t: string, f: string, b: any) {
 
 /* ═══════ ПОМОЩНИ ФУНКЦИИ — копие от bulletin.js/shared.js (чисти, без DOM) ═══════ */
 function esc(s: any){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : '—'; }
+/* esc() покрива & < > — достатъчно за ТЕКСТ между тагове, но НЕ за стойност
+   на атрибут: кавичка вътре в src="…" затваря атрибута и всичко след нея
+   се чете като markup. Копие на escAttr от shared.js. */
+function escAttr(s: any){ return esc(s).replace(/"/g,'&quot;'); }
 function toLocalISO(d: Date){
   var y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+day;
@@ -275,8 +279,8 @@ function reportStoreRow(r){
     '</a>';
 }
 function reportTopBottomTable(top3, bottom3){
-  var goodRows = top3.map(function(s,i){ return '<div style="font-size:12.5px;color:#1f2937;margin-bottom:4px;">'+(i+1)+'. '+esc(s.name)+' — '+s.pct+'%</div>'; }).join('');
-  var badRows = bottom3.map(function(s,i){ return '<div style="font-size:12.5px;color:#1f2937;margin-bottom:4px;">'+(i+1)+'. '+esc(s.name)+' — '+s.pct+'%</div>'; }).join('');
+  var goodRows = top3.map(function(s,i){ return '<div style="font-size:13px;color:#1f2937;margin-bottom:4px;">'+(i+1)+'. '+esc(s.name)+' — '+s.pct+'%</div>'; }).join('');
+  var badRows = bottom3.map(function(s,i){ return '<div style="font-size:13px;color:#1f2937;margin-bottom:4px;">'+(i+1)+'. '+esc(s.name)+' — '+s.pct+'%</div>'; }).join('');
   return '<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px 0;margin-top:6px;"><tr>' +
     '<td style="width:50%;background:#E9F5EF;border-radius:8px;padding:12px 14px;vertical-align:top;"><div style="font-size:11px;font-weight:800;color:#2F7D5C;margin-bottom:8px;">🏆 ТОП 3</div>'+goodRows+'</td>' +
     '<td style="width:50%;background:#FDEEEA;border-radius:8px;padding:12px 14px;vertical-align:top;"><div style="font-size:11px;font-weight:800;color:#B4442E;margin-bottom:8px;">⚠️ ИЗИСКВАТ ВНИМАНИЕ</div>'+badRows+'</td>' +
@@ -286,7 +290,7 @@ function reportTopBottomTable(top3, bottom3){
 function reportEmailShell(headerTitle, headerSub, bodyHtml, footerText){
   return '<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
-    '<body style="margin:0;padding:20px;background:#e8ecf3;font-family:-apple-system,\'Segoe UI\',Arial,sans-serif;">' +
+    '<body style="margin:0;padding:20px;background:#e8ecf3;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;font-family:-apple-system,\'Segoe UI\',Arial,sans-serif;">' +
     '<div style="max-width:600px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 18px rgba(30,39,97,.12);">' +
       '<div style="background:#1E2761;padding:26px 24px;">' +
         '<p style="color:#CADCFC;font-size:12px;letter-spacing:1px;text-transform:uppercase;margin:0 0 6px;">ТеМАХ Портал</p>' +
@@ -305,8 +309,8 @@ function reportPostponedSectionHtml(postponedList){
   if (!postponedList || !postponedList.length) return '';
   var rows = postponedList.map(function(p){
     return '<div style="padding:8px 10px;border-bottom:1px solid #FDE68A;">' +
-      '<div style="font-size:12.5px;font-weight:700;color:#78350f;">'+esc(p.title)+' <span style="font-weight:500;color:#92400e;">— '+esc(p.store)+'</span></div>' +
-      (p.comment ? '<div style="font-size:11.5px;color:#92400e;margin-top:2px;">💬 '+esc(p.comment)+'</div>' : '') +
+      '<div style="font-size:13px;font-weight:700;color:#78350f;">'+esc(p.title)+' <span style="font-weight:500;color:#92400e;">— '+esc(p.store)+'</span></div>' +
+      (p.comment ? '<div style="font-size:12px;color:#92400e;margin-top:2px;">💬 '+esc(p.comment)+'</div>' : '') +
       '</div>';
   }).join('');
   return '<div style="margin-top:14px;">' +
@@ -319,12 +323,12 @@ function reportCommentedSectionHtml(commentedList){
   if (!commentedList || !commentedList.length) return '';
   var rows = commentedList.map(function(p){
     var h = '<div style="padding:8px 10px;border-bottom:1px solid #BBF7D0;">' +
-      '<div style="font-size:12.5px;font-weight:700;color:#14532d;">'+esc(p.title)+' <span style="font-weight:500;color:#166534;">— '+esc(p.store)+'</span></div>';
-    if (p.comment) h += '<div style="font-size:11.5px;color:#166534;margin-top:2px;">💬 '+esc(p.comment)+'</div>';
+      '<div style="font-size:13px;font-weight:700;color:#14532d;">'+esc(p.title)+' <span style="font-weight:500;color:#166534;">— '+esc(p.store)+'</span></div>';
+    if (p.comment) h += '<div style="font-size:12px;color:#166534;margin-top:2px;">💬 '+esc(p.comment)+'</div>';
     if (p.photos && p.photos.length) {
       h += '<div style="margin-top:5px;">';
       p.photos.forEach(function(ph){
-        h += '<img src="'+ph.url+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #bbf7d0;margin-right:5px;">';
+        h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #bbf7d0;margin-right:5px;">';
       });
       h += '</div>';
     }
@@ -351,7 +355,7 @@ function buildDailyReportHtml(data){
   body += reportPostponedSectionHtml(data.postponedList);
   body += reportCommentedSectionHtml(data.commentedList);
   if (data.noDueCount > 0) {
-    body += '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:11.5px;color:#8A5A12;">'+
+    body += '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:12px;color:#8A5A12;">'+
       '📋 '+data.noDueCount+' постоянни задачи без конкретен срок чакат преглед (не участват в % по-горе) — виж ги в таб „Днес".</div>';
   }
   var dateStr = new Date().toLocaleDateString('bg-BG', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
@@ -719,7 +723,7 @@ function buildWeeklyReportHtml(data){
   body += reportPostponedSectionHtml(data.postponedList);
   body += reportCommentedSectionHtml(data.commentedList);
   if (data.noDueCount > 0) {
-    body += '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:11.5px;color:#8A5A12;">'+
+    body += '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:12px;color:#8A5A12;">'+
       '📋 '+data.noDueCount+' постоянни задачи без конкретен срок не участват в тази статистика.</div>';
   }
   body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: постоянните задачи участват с по едно явяване за всеки ден, в който са дължими през седмицата (задача „всеки ден“ = 7 явявания) — точно както се отмятат в Седмичния календар. Отметка от предишна седмица не се брои за текущата.</div>';
