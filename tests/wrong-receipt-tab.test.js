@@ -578,5 +578,67 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
       w.diffDirKeys().join(','));
   }
 
+  section('16. Баджът на статуса — нова дума САМО за сторната');
+  {
+    const { w } = env(ACCOUNTANT, 'wrong_receipt');
+
+    /* Петте различими изхода, снети от кода ПРЕДИ добавянето на посоката в
+       sdRowStatusBadge. Закотвени като цели низове нарочно: проверката е за
+       байт по байт съвпадение, не за „съдържа думата". */
+    const B = {
+      nevzeta:  '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕВЗЕТА</span>',
+      vzeta:    '<span style="background:#f0fdf4;color:#16a34a;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ ВЗЕТА</span>',
+      nezaprih: '<span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">⏳ НЕЗАПРИХОДЕНА</span>',
+      zaprih:   '<span style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📥 ЗАПРИХОДЕНА</span>',
+      prieta:   '<span style="background:#f0fdfa;color:#0d9488;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📬 ПРИЕТА</span>'
+    };
+    function expectedOld(type, status) {
+      if (status === 'received') return B.prieta;
+      const taken = status === 'taken' || status === 'capitalized';
+      if (type === 'writein') return taken ? B.zaprih : B.nezaprih;
+      return taken ? B.vzeta : B.nevzeta;
+    }
+
+    const TYPES = [null, 'writein', 'return', 'missing'];
+    const STATUSES = ['new', 'pending', 'taken', 'capitalized', 'received'];
+    const REP = { supplier: 'rep-sup', interstore: 'rep-int', wrong_receipt: 'rep-wr' };
+    const badge = (dir, t, s) =>
+      w.sdRowStatusBadge({ id: 'x', report_id: REP[dir], type: t, status: s });
+
+    /* ЯДРОТО: старите две посоки не мърдат — 20 комбинации всяка. */
+    ['supplier', 'interstore'].forEach(function (dir) {
+      const bad = [];
+      TYPES.forEach(t => STATUSES.forEach(s => {
+        if (badge(dir, t, s) !== expectedOld(t, s)) bad.push(t + '/' + s);
+      }));
+      ok(dir + ': всичките ' + (TYPES.length * STATUSES.length) +
+         ' комбинации са байт по байт същите', bad.length === 0, bad.join(', '));
+    });
+
+    /* И сторната наистина сменя думата — иначе проверката горе минава
+       тривиално, ако клонът изобщо не е стигнал дотук. */
+    ok('wrong_receipt/pending казва НЕИЗЧИСТЕНА',
+      badge('wrong_receipt', null, 'pending').indexOf('⏳ НЕИЗЧИСТЕНА') >= 0,
+      badge('wrong_receipt', null, 'pending'));
+    ok('wrong_receipt/taken казва ИЗЧИСТЕНА',
+      badge('wrong_receipt', 'return', 'taken').indexOf('✅ ИЗЧИСТЕНА') >= 0);
+    ok('старите думи не изтичат в сторната',
+      badge('wrong_receipt', null, 'pending').indexOf('НЕВЗЕТА') < 0 &&
+      badge('wrong_receipt', 'writein', 'pending').indexOf('НЕЗАПРИХОДЕНА') < 0);
+
+    /* Цветовете следват ТИПА, не посоката — не са пипани. */
+    ok('чакащият бадж пази същия кехлибарен фон като при доставчик',
+      badge('wrong_receipt', null, 'pending').indexOf('background:#fffbeb;color:#92400e') >= 0);
+    ok('приключеният — същото зелено',
+      badge('wrong_receipt', 'return', 'taken').indexOf('background:#f0fdf4;color:#16a34a') >= 0);
+    ok('„ПРИЕТА" остава непроменена и за трите посоки',
+      badge('wrong_receipt', null, 'received') === B.prieta);
+
+    /* Екранът и печатът вече казват едно и също. */
+    ok('баджът и печатът са съгласувани',
+      w.sdStatusWords(null, 'wrong_receipt').pending === 'Неизчистена' &&
+      w.sdStatusWords(null, 'wrong_receipt').taken === 'Изчистена');
+  }
+
   report();
 })();

@@ -467,7 +467,12 @@ function sdRowStatusBadge(r){
     return '<span style="background:'+bg+';color:'+fg+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+txt+'</span>';
   }
   if(r.status==='received') return badge('#f0fdfa','#0d9488','📬 ПРИЕТА');
-  var w = sdStatusWords(r.type);
+  /* Посоката влиза ЕДИНСТВЕНО за да смени думата при сторна по грешен прием
+     ("Неизчистена/Изчистена" вместо "Невзета/Взета") - вече го прави и
+     печатът. За всяка друга посока sdStatusWords пада на заварените си
+     клонове, тоест изходът тук е байт по байт същият. Цветовете не се
+     пипат: те следват ТИПА на решението, не посоката. */
+  var w = sdStatusWords(r.type, sdLineDirection(r));
   if(sdIsTaken(r)){
     return r.type==='writein'
       ? badge('#eff6ff','#1e40af', w.tIcon+' '+w.taken.toUpperCase())
