@@ -155,11 +155,13 @@ function diffDirEmailOf(dir){ return (DIFF_EMAIL_CASES[dir]||DIFF_EMAIL_CASES.su
    doc/real     - пълните етикети (форма за подаване, имейл)
    docShort/... - за тесните таблици на екрана
    printDoc/... - за печата, където колоните са 11mm и 13mm; там думите остават
-                  възможно най-къси, за да не се пречупват на три реда. */
+                  възможно най-къси, за да не се пречупват на три реда.
+                  „По фактура" в 11mm се пречупваше на три реда - в печата
+                  остава само „Фактура", колкото „Получено" в съседната. */
 function diffQtyLabels(dir){
   if (dir === 'wrong_receipt') return {doc:'По фактура',      docShort:'По фактура',
                                        real:'Реално заприходено', realShort:'Заприходено',
-                                       printDoc:'По фактура',  printReal:'Заприх.'};
+                                       printDoc:'Фактура',     printReal:'Заприх.'};
   return {doc:'По вх. доставка', docShort:'По вх. дост.',
           real:'Реално получено', realShort:'Реално',
           printDoc:'Кол.',        printReal:'Получено'};
@@ -442,7 +444,12 @@ function sdTableRows(over){
    според типа на решението: при връщане куриерът ВЗИМА стоката, при
    заприхождаване магазинът я ЗАПРИХОЖДАВА. Базата не се пипа - сменя се само
    думата. */
-function sdStatusWords(type){
+/* direction (по избор) - при сторна по грешен прием нито "Взета", нито
+   "Заприходена" значи нещо: никой не идва да взима стока и нищо не се
+   заприхождава наново. Там състоянието е "магазинът изчистил ли е реда".
+   Без втори аргумент функцията се държи както преди. */
+function sdStatusWords(type, direction){
+  if(direction==='wrong_receipt') return {pending:'Неизчистена', taken:'Изчистена', pIcon:'⏳', tIcon:'✅'};
   if(type==='writein') return {pending:'Незаприходена', taken:'Заприходена', pIcon:'⏳', tIcon:'📥'};
   return {pending:'Невзета', taken:'Взета', pIcon:'⏳', tIcon:'✅'};
 }
@@ -1206,21 +1213,35 @@ function submitSD() {
 ══════════════════════════════════════════ */
 
 var DIFF_CATEGORIES = [
-  /* [key, label, посоки[], снимки задължителни?, подсказка за доп. имейл] */
-  ['undelivered','📦 Недоставен артикул (липса)', ['supplier','interstore'], false, null],
-  ['excess','📈 Излишък (получен в повече)', ['supplier','interstore'], false, null],
-  ['wrong_item','❌ Грешен артикул (не е поръчван)', ['supplier'], false, null],
-  ['pack_mismatch','📦 Разлика от фабрична опаковка', ['interstore'], true, 'm.pavlova@temax.bg'],
-  ['damaged','💔 Увредена стока / липсват части', ['supplier','interstore'], true, null],
-  ['wrong_barcode','🏷️ Грешен баркод / етикет / описание', ['supplier','interstore'], true, 'j.jeliazkov@temax.bg, m.pavlova@temax.bg'],
-  ['similar_item','🎨 Сходен артикул (различен цвят/размер)', ['interstore'], false, 'm.pavlova@temax.bg (за ZPACK корекция)'],
+  /* [key, label, посоки[], снимки задължителни?, подсказка за доп. имейл,
+      кратко име за надписа под "Снимки"] */
+  ['undelivered','📦 Недоставен артикул (липса)', ['supplier','interstore'], false, null, 'липса'],
+  ['excess','📈 Излишък (получен в повече)', ['supplier','interstore'], false, null, 'излишък'],
+  ['wrong_item','❌ Грешен артикул (не е поръчван)', ['supplier'], false, null, 'грешен артикул'],
+  ['pack_mismatch','📦 Разлика от фабрична опаковка', ['interstore'], true, 'm.pavlova@temax.bg', 'разлика от опаковка'],
+  ['damaged','💔 Увредена стока / липсват части', ['supplier','interstore'], true, null, 'увредена стока'],
+  ['wrong_barcode','🏷️ Грешен баркод / етикет / описание', ['supplier','interstore'], true, 'j.jeliazkov@temax.bg, m.pavlova@temax.bg', 'грешен баркод'],
+  ['similar_item','🎨 Сходен артикул (различен цвят/размер)', ['interstore'], false, 'm.pavlova@temax.bg (за ZPACK корекция)', 'сходен артикул'],
   /* Сторна по грешен прием - разликата е между ФАКТУРАТА и реално заприходеното
      по нея, не между поръчка и доставка. Затова двете стойности са отделни от
      undelivered/excess, макар да звучат близко: там мярката е входящата
      доставка. Съществуващите седем не се пипат - filter по посока ги пази. */
-  ['unbilled_received','📥 Приета нефактурирана стока', ['wrong_receipt'], false, null],
-  ['billed_not_received','🧾 Фактурирана неприета стока', ['wrong_receipt'], false, null]
+  ['unbilled_received','📥 Приета нефактурирана стока', ['wrong_receipt'], false, null, 'приета нефактурирана'],
+  ['billed_not_received','🧾 Фактурирана неприета стока', ['wrong_receipt'], false, null, 'фактурирана неприета']
 ];
+/* Надписът под "Снимки" във формата за подаване. Смята се ОТ САМИТЕ категории
+   на текущата посока, а не се преписва на ръка - иначе обещава едно, а
+   submitDiffReport() проверява друго. Заварената редакция изброяваше и
+   "липса", която никога не е изисквала снимки (undelivered е с false).
+   При посока без нито една задължителна категория надписът казва какво
+   реално помага, вместо да изброява чужди случаи. */
+function diffPhotoHintText(direction){
+  var req = DIFF_CATEGORIES.filter(function(c){
+    return c[2].indexOf(direction) >= 0 && c[3];
+  }).map(function(c){ return c[5]; });
+  if(!req.length) return '(по избор — прикачете фактурата или снимка на приетото)';
+  return '(задължителни при: '+req.join(', ')+')';
+}
 function diffCatMeta(key){
   return DIFF_CATEGORIES.find(function(c){return c[0]===key;}) || null;
 }
@@ -1707,7 +1728,9 @@ function diffSubmitModalHtml(){
     '<div id="diff-items"></div>'+
     '<button type="button" onclick="addDiffItemRow()" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:6px 12px;font-size:12px;cursor:pointer;margin-bottom:12px;">+ Добави артикул</button>'+
 
-    '<label class="fl">Снимки <span style="color:#94a3b8;font-weight:400;">(задължителни при увредена стока, грешен баркод, разлика от опаковка, липса)</span></label>'+
+    /* Посоката по подразбиране в селекта по-горе е "interstore" - надписът
+       тръгва от нея и се пренастройва от updateDiffCounterpartLabel(). */
+    '<label class="fl">Снимки <span id="diff-photo-hint" style="color:#94a3b8;font-weight:400;">'+diffPhotoHintText('interstore')+'</span></label>'+
     '<div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">'+
       '<label style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">'+
         '📷 Снимай сега<input type="file" accept="image/*" capture="environment" onchange="diffUploadPhoto(this)" style="display:none;">'+
@@ -1731,6 +1754,10 @@ function updateDiffCounterpartLabel(){
   var lbl=document.getElementById('diff-counterpart-label');
   var sel=document.getElementById('diff-counterpart');
   lbl.textContent=diffDirCounterpartLabel(dir);
+  /* Надписът под "Снимки" също следва посоката - категориите се сменят
+     заедно с нея, значи и обещанието кои от тях искат снимка. */
+  var hintEl=document.getElementById('diff-photo-hint');
+  if(hintEl) hintEl.textContent=diffPhotoHintText(dir);
   /* Сторната по грешен прием също тръгва от фактура на ДОСТАВЧИК - списъкът е
      същият като при посока "Доставчик", не списъкът с обекти. */
   if(dir==='supplier'||dir==='wrong_receipt'){
@@ -2079,7 +2106,7 @@ function renderDiffPrint(rep){
      остава само думата. */
   var statusText = function(r){
     if(r.status==='received') return '📬 ПРИЕТА';
-    var w = sdStatusWords(r.type);
+    var w = sdStatusWords(r.type, rep.direction);
     return sdIsTaken(r) ? (w.tIcon+' '+w.taken.toUpperCase()) : (w.pIcon+' '+w.pending.toUpperCase());
   };
   /* "Кой + кога" в една клетка: името горе, датата отдолу с дребен шрифт. */
