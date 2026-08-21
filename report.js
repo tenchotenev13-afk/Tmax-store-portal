@@ -829,29 +829,103 @@ function sendWeeklyReportTest(toEmail){
    било предназначено. Истинско изпращане до тях е отделна, изрично
    потвърдена стъпка по-късно. */
 
-/* Събира само задачите с зададени report_groups от текущия публикуван
-   бюлетин + completion-ите им + accounting потребителите (за 'regional'). */
+/* Прозорецът на ЕДНА маршрутизирана задача.
+
+   Общият отчет разгъва всяка задача на по едно ЯВЯВАНЕ на ден (постоянна
+   задача „всеки ден" = 7 явявания). Личният имейл показва по една картичка
+   на ЗАДАЧА, не на явяване, затова тук прозорецът се свива до едно поле:
+     · един срок в седмицата   → точна дата
+     · няколко или никакъв     → диапазонът на седмицата
+     · няма бюлетин            → wildcard (старото поведение, за да не
+                                 остане имейлът празен без публикуван бюлетин)
+   И трите се разбират от reportItemMatchesComp - същата функция, която мери
+   процента в общия отчет.
+
+   null = задачата изобщо не влиза. Постоянна задача без нито едно явяване
+   тази седмица иначе получава картичка, в която ВСИЧКИ обекти са изброени
+   като „не изпълнили" за седмица, в която тя не е била дължима. */
+function reportRoutedTaskWindow(t, wkDates, bul){
+  if (!wkDates || !bul) return { date:null };
+  var dates = (t.kind === 'recurring')
+    ? reportRecurringWeekDates(t, bul.week_number, bul.year)
+    : taskDueDates(t);
+  if (t.kind === 'recurring' && !dates.length) return null;
+  if (dates.length === 1) return { date:dates[0], dateFrom:null, dateTo:null };
+  return { date:null, dateFrom:wkDates[0], dateTo:wkDates[6] };
+}
+
+/* Събира само задачите с зададени report_groups от бюлетина на ПРИКЛЮЧИЛАТА
+   седмица + отмятанията им от СЪЩАТА седмица + accounting потребителите
+   (за 'regional').
+
+   Прозорецът минава през същите функции като общия седмичен отчет -
+   reportPrevWeekMonday / reportWeekOfMonday / reportPickWeeklyBulletin за
+   избора на бюлетин, reportRecurringWeekDates за явяванията на постоянните
+   задачи, reportItemMatchesComp за съвпадението. Дотук личните имейли носеха
+   и трите дефекта, които общият отчет вече няма:
+
+     · взимаше се последният публикуван бюлетин (created_at.desc&limit=1), а
+       той се публикува ПРЕДВАРИТЕЛНО за идващата седмица - всяка картичка
+       описваше седмица, която още не е започнала, тоест нулеви резултати;
+     · task_completions се теглеха без филтър по дата - всяко отмятане,
+       правено някога, влизаше в набора;
+     · разбивката по обекти съвпадаше само по item_id+kind+store_name, без
+       никаква дата - обект, отметнал задачата преди месец, излизаше като
+       „изпълнил я" тази седмица.
+
+   Двата дефекта се компенсираха взаимно и точно затова имейлът изглеждаше
+   правдоподобен: грешната седмица дърпаше числата надолу, липсващият
+   прозорец ги дърпаше нагоре. */
 function collectWeeklyRoutingData(cb){
+  var target = reportWeekOfMonday(reportPrevWeekMonday(new Date()));
   Promise.all([
-    sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1'),
+    /* Списък, не limit=1 - изборът на правилната седмица е по-долу. */
+    sbGet('bulletins','status=eq.published&order=year.desc,week_number.desc&limit=20'),
     sbGet('recurring_tasks','active=eq.true')
   ]).then(function(results){
-    var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
+    var bul = reportPickWeeklyBulletin(results[0], target);
     var allRecurring = Array.isArray(results[1]) ? results[1] : [];
     var routedRecurring = allRecurring.filter(function(t){ return t.report_groups && t.report_groups.length; });
+    var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
+    var weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
 
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
     bulTasksPromise.then(function(tasksRaw){
       var allTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
       var routedRegular = allTasks.filter(function(t){ return t.report_groups && t.report_groups.length; });
-      var routedTasks = routedRegular.map(function(t){ t.kind='regular'; return t; })
-        .concat(routedRecurring.map(function(t){ t.kind='recurring'; return t; }));
-      if (!routedTasks.length) { cb({ bul:bul, tasks:[], comps:[], stores:[], accountingUsers:[], creatorMap:{} }); return; }
-      var regIds = routedRegular.map(function(t){ return t.id; });
-      var recIds = routedRecurring.map(function(t){ return t.id; });
+
+      /* Прозорецът се закача на самата задача - taskStoreBreakdown после го
+         подава на reportItemMatchesComp. */
+      var routedTasks = [];
+      var addRouted = function(t, kind){
+        t.kind = kind;
+        var win = reportRoutedTaskWindow(t, wkDates, bul);
+        if (!win) return;
+        t.date = win.date; t.dateFrom = win.dateFrom; t.dateTo = win.dateTo;
+        routedTasks.push(t);
+      };
+      routedRegular.forEach(function(t){ addRouted(t, 'regular'); });
+      routedRecurring.forEach(function(t){ addRouted(t, 'recurring'); });
+
+      if (!routedTasks.length) { cb({ bul:bul, weekLabel:weekLabel, tasks:[], comps:[], stores:[], accountingUsers:[], creatorMap:{} }); return; }
+
+      /* ID-тата идват от ФИЛТРИРАНИЯ набор, не от суровия - няма смисъл да
+         се теглят отмятания за задача, която не е дължима тази седмица. */
+      var regIds = [], recIds = [];
+      routedTasks.forEach(function(t){
+        if (t.kind === 'recurring') recIds.push(t.id); else regIds.push(t.id);
+      });
+
+      /* Прозорец и на самата ЗАЯВКА, не само при съвпадението. Отмятанията
+         с completion_date=NULL отпадат нарочно - те не могат да бъдат
+         отнесени към коя да е седмица. */
+      var dateQ = wkDates
+        ? '&completion_date=gte.' + wkDates[0] + '&completion_date=lte.' + wkDates[6]
+        : '';
+
       Promise.all([
-        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')') : Promise.resolve([]),
-        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')') : Promise.resolve([]),
+        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+dateQ) : Promise.resolve([]),
+        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+dateQ) : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name'),
         sbGet('users','role=eq.accounting&select=email,display_name,assigned_stores'),
         sbGet('users','select=display_name,email') /* за резолвиране на created_by (display_name) -> email на създателя */
@@ -866,11 +940,13 @@ function collectWeeklyRoutingData(cb){
           if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
-        var comps = regCompsRaw.map(function(c){ return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment }; })
-          .concat(recCompsRaw.map(function(c){ return { item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment }; }));
+        /* completion_date ЗАДЪЛЖИТЕЛНО минава нататък - reportItemMatchesComp
+           сравнява точно него срещу прозореца на задачата. */
+        var comps = regCompsRaw.map(function(c){ return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, completion_date:c.completion_date||null }; })
+          .concat(recCompsRaw.map(function(c){ return { item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, completion_date:c.completion_date||null }; }));
         var creatorMap = {};
         allUsers.forEach(function(u){ if (u.display_name && u.email) creatorMap[u.display_name] = u.email; });
-        cb({ bul:bul, tasks:routedTasks, comps:comps, stores:stores, accountingUsers:accountingUsers, creatorMap:creatorMap });
+        cb({ bul:bul, weekLabel:weekLabel, tasks:routedTasks, comps:comps, stores:stores, accountingUsers:accountingUsers, creatorMap:creatorMap });
       }).catch(function(){ cb(null); });
     }).catch(function(){ cb(null); });
   }).catch(function(){ cb(null); });
@@ -932,8 +1008,22 @@ function taskStoreBreakdown(task, comps, allStores){
   var scope = (task.target_stores && task.target_stores.length) ? task.target_stores : allStores;
   var done=[], postponed=[], pending=[];
   var taskKind = task.kind||'regular';
+  /* Същият предикат като процента в общия отчет. Дотук съвпадението беше
+     само item_id+kind+store_name - обект, отметнал задачата преди месец,
+     излизаше като „изпълнил я" тази седмица. Прозорецът се закача на
+     задачата в collectWeeklyRoutingData; ако липсва (стар повикващ), полетата
+     са null и reportItemMatchesComp се държи както преди. */
+  var matcher = { id:task.id, kind:taskKind, date:task.date||null,
+                  dateFrom:task.dateFrom||null, dateTo:task.dateTo||null };
   scope.forEach(function(s){
-    var c = comps.find(function(x){ return x.item_id===task.id && x.kind===taskKind && x.store_name===s; });
+    /* В диапазон един обект може да има повече от едно отмятане (отложил
+       във вторник, изпълнил в четвъртък). „Изпълнено" печели - същото,
+       което прави reportBuildSummary, като брои doneComps отделно. Без
+       този избор резултатът зависи от реда, в който PostgREST е върнал
+       редовете. */
+    var mine = comps.filter(function(x){ return x.store_name===s && reportItemMatchesComp(matcher, x); });
+    var c = mine.find(function(x){ return x.status==='done'; }) ||
+            mine.find(function(x){ return x.status==='postponed'; }) || mine[0];
     if (c && c.status==='done') done.push(s);
     else if (c && c.status==='postponed') postponed.push({ store:s, comment:c.comment||'' });
     else pending.push(s);
@@ -982,7 +1072,9 @@ function sendWeeklyReportRouted(testEmail){
     emails.forEach(function(email){
       var rec = map[email];
       var body = personalizedSectionHtml(rec.tasks, data.comps, data.stores);
-      var html = reportEmailShell('📬 Твоите задачи (ТЕСТ)', 'Предназначено за: '+rec.name+' ('+email+')', body,
+      /* Седмицата се изписва в шапката - иначе получателят няма как да
+         разбере кой период описват картичките, а точно това беше сбъркано. */
+      var html = reportEmailShell('📬 Твоите задачи — '+(data.weekLabel||'')+' (ТЕСТ)', 'Предназначено за: '+rec.name+' ('+email+')', body,
         'Тестов режим — реално изпратено до '+testEmail+', не до истинския получател');
       sendEmail(testEmail, '📬 [ТЕСТ за '+rec.name+'] Седмичен репорт по задачи', html).then(function(res){
         sent++;
