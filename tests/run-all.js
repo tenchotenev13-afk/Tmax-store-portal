@@ -40,7 +40,8 @@ const TESTS = [
   'linked-module-buttons.test.js',
   'bulletin-week-default.test.js',
   'wrong-receipt-tab.test.js',
-  'today-wrong-receipt-row.test.js'
+  'today-wrong-receipt-row.test.js',
+  'notifications-poll.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

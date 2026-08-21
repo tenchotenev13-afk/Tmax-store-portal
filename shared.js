@@ -12,14 +12,14 @@ var H={'apikey':SB_KEY,'Authorization':'Bearer '+SB_KEY,'Content-Type':'applicat
    празен екран без съобщение.
    Сега всяка грешка е видима (toast) и проследима (console.error с URL-а),
    а извикващите получават това, което вече очакват — масив. */
-function sbGet(t,q){
+function sbGet(t,q,silent){
   var url=API+'/'+t+(q?'?'+q:'');
   function fail(status,d){
     var msg=(d&&(d.message||d.hint))||('HTTP '+(status||'—'));
     try{console.error('sbGet '+url+' → '+(status||'мрежов срив')+': '+msg);}catch(e){}
     /* toast пипа DOM — ако #toast липсва, това не бива да върне грешката
        обратно във веригата, която току-що обезопасихме. */
-    try{toast('Грешка при зареждане: '+msg,'#dc2626');}catch(e){}
+    if(!silent){ try{toast('Грешка при зареждане: '+msg,'#dc2626');}catch(e){} }
     return [];
   }
   return fetch(url,{headers:H}).then(function(r){

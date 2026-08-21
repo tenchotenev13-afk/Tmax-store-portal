@@ -222,11 +222,19 @@ function checkNewOrders(){
       cq+='&or=('+orP+')';
     }
   }
-  Promise.all([sbGet('transport_orders',tq+'&select=id'),sbGet('client_orders',cq+'&select=id')]).then(function(r){
+  Promise.all([sbGet('transport_orders',tq+'&select=id',true),sbGet('client_orders',cq+'&select=id',true)]).then(function(r){
     var allIds=[];
     if(Array.isArray(r[0])) r[0].forEach(function(o){allIds.push('t_'+o.id);});
     if(Array.isArray(r[1])) r[1].forEach(function(o){allIds.push('c_'+o.id);});
     var currentSet={}; allIds.forEach(function(id){currentSet[id]=1;});
+
+    /* Празен резултат = мрежов срив (в базата винаги има заявки).
+       Пропускаме цикъла БЕЗ да пипаме _seenIds — иначе следващият
+       успешен цикъл обявява цялата таблица за „нова“.
+       Компромис: обект с НУЛА заявки няма да чуе звук за първата си
+       заявка (при нея _seenIds е още null → тих baseline). Съзнателно
+       избрано пред фалшива тревога с целия списък заявки. */
+    if(!allIds.length) return;
 
     if(_seenIds===null){
       /* Първо извикване — само записваме базовото състояние, без звук */
