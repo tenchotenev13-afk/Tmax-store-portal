@@ -1453,18 +1453,31 @@ function stornoExceedsOneMonth(origStr, stornoStr){
    Ползват се от renderStorno() тук И от history.js за админ изгледа. */
 var stornoItemsById = {}; /* { [storno_id]: { returned:[{sap_code,article_name}], replacement:[...] } } */
 
-function stornoLoadItemsFor(ids){
-  var uniq=[]; (ids||[]).forEach(function(id){ if(id && uniq.indexOf(id)<0) uniq.push(id); });
-  if(!uniq.length){ stornoItemsById={}; return Promise.resolve(); }
-  var q='storno_id=in.('+uniq.map(encodeURIComponent).join(',')+')&order=kind.asc,line_no.asc';
-  return sbGet('kasa_storno_items',q).then(function(data){
-    var map={};
-    (Array.isArray(data)?data:[]).forEach(function(row){
-      if(!map[row.storno_id]) map[row.storno_id]={returned:[],replacement:[]};
-      if(map[row.storno_id][row.kind]) map[row.storno_id][row.kind].push(row);
-    });
-    stornoItemsById=map;
-  }).catch(function(){ stornoItemsById={}; });
+/* Редовете идват ВЛОЖЕНИ в родителския запис (PostgREST embedding), не с втора
+   заявка. Старият вариант събираше id-тата и питаше kasa_storno_items със
+   storno_id=in.(...): при 763 бележки в История URL-ът ставаше ~30 KB и
+   гейтуеят го отхвърляше с 400, преди заявката изобщо да стигне до Postgres.
+   Същият select със същите филтри и къс списък връщаше 200 - тоест схемата
+   винаги е била наред, проблемът беше дължината на адреса.
+   Вложеното сортиране е отделен параметър - вътре в скобите PostgREST приема
+   само имена на колони. */
+var STORNO_SELECT = 'select=*,kasa_storno_items(kind,sap_code,article_name,line_no)' +
+                   '&kasa_storno_items.order=kind.asc,line_no.asc';
+
+/* Строи индекса от вече заредените родителски записи - без мрежа.
+   Бележка без редове НЕ получава запис в картата, за да остане в сила
+   fallback-ът към старите текстови полета в stornoItemsListHtml(). */
+function stornoIndexItems(rows){
+  var map={};
+  (Array.isArray(rows)?rows:[]).forEach(function(r){
+    if(!r || !r.id) return;
+    var items = Array.isArray(r.kasa_storno_items) ? r.kasa_storno_items : [];
+    if(!items.length) return;
+    var rec={returned:[],replacement:[]};
+    items.forEach(function(it){ if(rec[it.kind]) rec[it.kind].push(it); });
+    map[r.id]=rec;
+  });
+  stornoItemsById=map;
 }
 
 /* Компактен номериран списък "SAP код — име" за клетка в таблица, вместо
@@ -1501,14 +1514,13 @@ function stornoSortPriority(r){
 }
 
 function loadStorno(){
-  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&order=storno_date.desc,created_at.desc';
+  var q=STORNO_SELECT+'&store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&order=storno_date.desc,created_at.desc';
   sbGet('kasa_storno',q).then(function(data){
     kasaStorno=Array.isArray(data)?data:[];
     kasaStorno.sort(function(a,b){return stornoSortPriority(a)-stornoSortPriority(b);});
-    return stornoLoadItemsFor(kasaStorno.map(function(r){return r.id;}));
-  }).then(function(){
+    stornoIndexItems(kasaStorno);
     renderStorno();
-  }).catch(function(){kasaStorno=[];renderStorno();});
+  }).catch(function(){kasaStorno=[];stornoItemsById={};renderStorno();});
 }
 
 function renderStorno(){

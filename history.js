@@ -80,13 +80,12 @@ function runHistorySearch(){
   } else { histData.kasa=[]; }
 
   if(type==='all'||type==='storno'){
-    var q4='order=storno_date.desc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter;
+    var q4=STORNO_SELECT+'&order=storno_date.desc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter;
     promises.push(sbGet('kasa_storno',q4).then(function(d){histData.storno=Array.isArray(d)?d:[];}));
   } else { histData.storno=[]; }
 
   Promise.all(promises).then(function(){
-    return stornoLoadItemsFor(histData.storno.map(function(r){return r.id;}));
-  }).then(function(){
+    stornoIndexItems(histData.storno);
     renderHistoryResults();
   }).catch(function(e){
     document.getElementById('h-results').innerHTML=
@@ -548,16 +547,17 @@ function exportKasaToExcel(){
 
     var sFilter = store ? '&store_name=eq.'+encodeURIComponent(store) : storeQ();
 
-    /* Първо теглим сторно бележките (за да знаем storno_id-тата), после — паралелно —
-       останалите данни И редовете с артикули (kasa_storno_items) за тези бележки. */
-    sbGet('kasa_storno','order=storno_date.desc,store_name.asc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter).then(function(stornoRes){
+    /* Сторно бележките идват заедно с редовете си (STORNO_SELECT), затова тук
+       няма втора заявка за kasa_storno_items - останалите данни се теглят
+       паралелно веднага след това. */
+    sbGet('kasa_storno',STORNO_SELECT+'&order=storno_date.desc,store_name.asc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter).then(function(stornoRes){
       var stornoAll = Array.isArray(stornoRes) ? stornoRes : [];
+      stornoIndexItems(stornoAll);
 
       return Promise.all([
         sbGet('kasa_zoborot',  'order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
         sbGet('kasa_glavna',   'order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
-        sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
-        stornoLoadItemsFor(stornoAll.map(function(r){return r.id;}))
+        sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+from+'&date=lte.'+to+sFilter)
       ]).then(function(res){
       var zobAll   = Array.isArray(res[0]) ? res[0] : [];
       var glAll    = Array.isArray(res[1]) ? res[1] : [];
