@@ -50,7 +50,8 @@ const TESTS = [
   'weekly-cross-window.test.js',
   'weekly-routing-window.test.js',
   'report-ranking-plural.test.js',
-  'report-edge-sync.test.js'
+  'report-edge-sync.test.js',
+  'daily-turnover.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

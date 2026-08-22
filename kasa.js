@@ -83,7 +83,7 @@ function loadKasa(){
 /* ─── TABS ──────────────────────────────────────────────────── */
 function kasaTab(tab){
   kasaView=tab;
-  ['pos','glavna','zoborot','storno'].forEach(function(t){
+  ['pos','glavna','zoborot','storno','oborot'].forEach(function(t){
     var el=document.getElementById('ktab-'+t);
     if(el) el.style.background=t===tab?'#2f2f2f':'#fff',
             el.style.color=t===tab?'#fff':'#64748b';
@@ -105,6 +105,7 @@ function kasaTab(tab){
   }
   else if(tab==='zoborot'){loadZoborot();}
   else if(tab==='storno'){loadStorno();}
+  else if(tab==='oborot'){loadOborot();}
 }
 
 function kasaTabBar(){
@@ -119,6 +120,13 @@ function kasaTabBar(){
     '<button id="ktab-glavna" onclick="kasaTab(\'glavna\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;'+tabStyle('glavna')+'">🏦 Главна каса</button>'+
     '<button id="ktab-zoborot" onclick="kasaTab(\'zoborot\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;'+tabStyle('zoborot')+'">📊 Равнение</button>'+
     '<button id="ktab-storno" onclick="kasaTab(\'storno\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;'+tabStyle('storno')+'">🧾 Сторно бележки</button>'+
+  '</div>'+
+  /* Вечерният оборот НЕ е счетоводен отчет и стои извън рамката на другите
+     четири — залепен като пети равноправен бутон, се чете като още един
+     документ на касата, какъвто не е. Собствена рамка, по съдържание, не
+     flex:1. id-то остава ktab-oborot, за да го подсветява kasaTab(). */
+  '<div style="margin-top:10px;margin-bottom:18px;">'+
+    '<button id="ktab-oborot" onclick="kasaTab(\'oborot\')" style="padding:9px 16px;font-size:13px;font-weight:500;border:1px solid #e2e8f0;border-radius:8px;cursor:pointer;font-family:inherit;'+tabStyle('oborot')+'">&#128176; Вечерен оборот</button>'+
   '</div>';
 }
 
