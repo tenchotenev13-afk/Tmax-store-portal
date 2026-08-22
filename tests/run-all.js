@@ -51,7 +51,8 @@ const TESTS = [
   'weekly-routing-window.test.js',
   'report-ranking-plural.test.js',
   'report-edge-sync.test.js',
-  'daily-turnover.test.js'
+  'daily-turnover.test.js',
+  'kasa-tab-routing.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

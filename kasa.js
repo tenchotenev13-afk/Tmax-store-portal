@@ -69,13 +69,19 @@ function loadKasa(){
   var q='order=date.desc,pos_number.asc'+storeQ();
   sbGet('kasa_reports',q).then(function(data){
     kasaReports=Array.isArray(data)?data:[];
-    /* Оборотът има свой клон: без него влизане в Каса с kasaView==='oborot'
-       (напр. връщане от друг модул) пада в else-а и рендира Главна каса,
-       докато лентата подсветява Вечерен оборот — съдържание от един таб
-       под заглавието на друг. */
-    if(kasaView==='pos') renderKasa();
-    else if(kasaView==='oborot') loadOborot();
-    else renderGlavna();
+    /* Всеки таб има СВОЙ клон. Докато беше двоично (pos, иначе renderGlavna),
+       влизането в модула с активен Равнение/Сторно/Оборот — напр. връщане от
+       друг модул, защото showModule('kasa') вика точно тази функция —
+       рендираше Главна каса под чуждо подсветен бутон.
+       default е renderKasa(), не renderGlavna(): 'pos' е началната стойност
+       на kasaView и kasaTabBar() също смята празната стойност за 'pos'. */
+    switch(kasaView){
+      case 'glavna':  renderGlavna(); break;
+      case 'zoborot': loadZoborot();  break;
+      case 'storno':  loadStorno();   break;
+      case 'oborot':  loadOborot();   break;
+      default:        renderKasa();
+    }
   }).catch(function(){renderKasa();});
   /* Главна каса за днес */
   var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
