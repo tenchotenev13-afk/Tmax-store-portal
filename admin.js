@@ -380,7 +380,7 @@ function setUserPassword(userId,newPass,onDone){
 ═══════════════════════════════════════════════════════════════ */
 
 function loadBackupAdmin(){
-  sbGet('backup_snapshots','order=created_at.desc&limit=30').then(function(data){
+  sbGet('backup_snapshots','select=id,created_at,snapshot_type,total_rows,created_by&order=created_at.desc&limit=30').then(function(data){
     var list=Array.isArray(data)?data:[];
     var body=document.getElementById('backup-body');
     if(!body)return;
