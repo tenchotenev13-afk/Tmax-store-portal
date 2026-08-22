@@ -102,9 +102,17 @@ function oborotSetDate(d){
 }
 
 /* ─── РЕНДЕР ────────────────────────────────────────────────── */
+/* Обвивката .page + заглавие + подзаглавие е същата като на другите четири
+   рендера в kasa.js. Без нея отварянето на таба махаше надписа „Каса" от
+   страницата — оставаше само лентата, увиснала без заглавие над себе си. */
 function renderOborot(){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
-  wrap.innerHTML=kasaTabBar()+(isCentralOfficeUser()?dtCOView():dtStoreView());
+  wrap.innerHTML='<div class="page">'+
+    '<div class="pg-title">&#128176; Каса</div>'+
+    '<div class="pg-sub">'+esc(currentUser.store_name)+' — Вечерен оборот</div>'+
+    kasaTabBar()+
+    (isCentralOfficeUser()?dtCOView():dtStoreView())+
+  '</div>';
 }
 
 /* ── Изглед МАГАЗИН ── */
