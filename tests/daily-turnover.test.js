@@ -102,25 +102,39 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
 
   section('1. Достъп до подтаба');
   {
-    const { w } = env();
+    const { w, doc } = env();
     const bar = w.kasaTabBar();
     ok('kasaTabBar() съдържа бутона ktab-oborot', bar.indexOf('ktab-oborot') >= 0);
     ok('бутонът вика kasaTab(\'oborot\')', bar.indexOf("kasaTab('oborot')") >= 0);
     ok('етикетът е "Вечерен оборот"', bar.indexOf('Вечерен оборот') >= 0);
     ok('бутоните станаха пет', (bar.match(/id="ktab-/g) || []).length === 5);
 
-    /* Рамката на четирите счетоводни таба остава точно каквато беше преди
-       тази задача — без flex-wrap, защото вътре пак са четири, не пет. */
-    const frame = bar.slice(0, bar.indexOf('</div>'));
-    ok('рамката на четирите е без flex-wrap', frame.indexOf('flex-wrap') < 0);
-    ok('в рамката са само четирите счетоводни таба',
-      (frame.match(/id="ktab-/g) || []).length === 4);
-    ok('ktab-oborot е ИЗВЪН рамката', frame.indexOf('ktab-oborot') < 0);
     ok('Оборот не е разтегнат на flex:1',
       !/id="ktab-oborot"[^>]*flex:1/.test(bar));
     ok('Оборот има собствена рамка и заоблени ъгли',
       /id="ktab-oborot"[^>]*border:1px solid[^>]*border-radius:/.test(bar));
-    ok('има отстъп отгоре, за да не е залепен', /margin-top:10px/.test(bar));
+
+    /* Рамката се намира през DOM-а, не чрез рязане по първия </div> —
+       иначе проверката зависи от това КОЙ блок е първи и мълчаливо почва
+       да гледа друг контейнер, щом редът се размени. */
+    const box = doc.createElement('div');
+    box.innerHTML = bar;
+    const frame = box.querySelector('#ktab-storno').parentElement;
+    ok('рамката на четирите е без flex-wrap',
+      frame.getAttribute('style').indexOf('flex-wrap') < 0);
+    ok('в рамката са точно четирите счетоводни таба',
+      frame.querySelectorAll('button').length === 4);
+    ok('ktab-oborot е ИЗВЪН рамката', !frame.contains(box.querySelector('#ktab-oborot')));
+
+    /* Мястото на бутона: под надписа „Каса", НАД рамката. Под нея се четеше
+       като последна стъпка от касовите отчети, каквато не е. */
+    ok('Оборот стои ПРЕДИ рамката на четирите',
+      bar.indexOf('ktab-oborot') < bar.indexOf('ktab-pos'));
+    const order = box.querySelector('#ktab-oborot')
+      .compareDocumentPosition(frame) & 4; /* 4 = FOLLOWING */
+    ok('и в реда на документа рамката идва СЛЕД него', !!order);
+    ok('има отстъп горе и долу, за да не е залепен',
+      /margin:14px 0/.test(bar));
   }
   {
     const { w } = env({ user: CLERK_USER });
