@@ -5,7 +5,7 @@
 var kasaReports = [];
 var kasaGlavna  = null;
 var kasaEditId  = null;
-var kasaView    = 'pos'; /* 'pos' | 'glavna' */
+var kasaView    = 'pos'; /* 'pos' | 'glavna' | 'zoborot' | 'storno' | 'oborot' */
 
 /* ─── ДЕНОМИНАЦИИ ───────────────────────────────────────────── */
 var BILLS = [500,200,100,50,20,10,5,2,1];
@@ -69,7 +69,12 @@ function loadKasa(){
   var q='order=date.desc,pos_number.asc'+storeQ();
   sbGet('kasa_reports',q).then(function(data){
     kasaReports=Array.isArray(data)?data:[];
+    /* Оборотът има свой клон: без него влизане в Каса с kasaView==='oborot'
+       (напр. връщане от друг модул) пада в else-а и рендира Главна каса,
+       докато лентата подсветява Вечерен оборот — съдържание от един таб
+       под заглавието на друг. */
     if(kasaView==='pos') renderKasa();
+    else if(kasaView==='oborot') loadOborot();
     else renderGlavna();
   }).catch(function(){renderKasa();});
   /* Главна каса за днес */

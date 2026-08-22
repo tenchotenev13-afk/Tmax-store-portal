@@ -185,7 +185,39 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     }
   }
 
-  section('3. Истински клик по таба зарежда данните');
+  section('3. Връщане в Каса, докато Оборот е активен');
+  {
+    /* Сценарият от снимката на 22.08.2026: клик по Вечерен оборот, после
+       навигация към друг модул и обратно в Каса. showModule('kasa') вика
+       loadKasa(), чийто клон беше двоичен — pos или ВСИЧКО ОСТАНАЛО в
+       renderGlavna(). Резултат: съдържание на Главна каса под подсветен
+       Вечерен оборот. */
+    const h = env();
+    h.w.kasaView = 'oborot';
+    h.w.loadKasa();
+    await ticks();
+    await ticks();
+
+    const txt = h.doc.getElementById('mod-kasa').textContent;
+    ok('НЕ рендира Главна каса', txt.indexOf('Обобщение по купюри') < 0, txt.slice(0, 80));
+    ok('рендира изгледа на Оборот',
+      txt.indexOf('Оборот за днес') >= 0 || txt.indexOf('Оборот по обекти') >= 0);
+
+    const ob = h.doc.getElementById('ktab-oborot');
+    const gl = h.doc.getElementById('ktab-glavna');
+    if (ok('лентата е налична', !!ob && !!gl)) {
+      /* Тези две гледат само подсветката. Съвпадението със съдържанието го
+         носят проверките по-горе — подсветката е вярна и в счупения случай. */
+      ok('Вечерен оборот е подсветен',
+        /#2f2f2f|rgb\(47,\s*47,\s*47\)/.test(ob.style.background) ||
+        ob.getAttribute('style').indexOf('background:#2f2f2f') >= 0,
+        ob.getAttribute('style'));
+      ok('Главна каса НЕ е подсветена',
+        gl.getAttribute('style').indexOf('background:#2f2f2f') < 0);
+    }
+  }
+
+  section('4. Истински клик по таба зарежда данните');
   {
     const h = await view();
     const tabBtn = h.doc.getElementById('ktab-oborot');
@@ -201,7 +233,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     }
   }
 
-  section('4. Магазин без запис за днес → форма');
+  section('5. Магазин без запис за днес → форма');
   {
     const h = await view();
     ok('има поле "Общ оборот"', !!h.doc.getElementById('dt-total'));
@@ -213,7 +245,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     ok('формата няма избор на дата', !h.doc.getElementById('dt-date'));
   }
 
-  section('5. Валиден запис');
+  section('6. Валиден запис');
   {
     const h = await view();
     await submit(h, '100.00', '60.00', '40.00', '25', 'тест');
@@ -241,7 +273,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
       !!b && b.body.note === null);
   }
 
-  section('6. Сборът не съвпада → няма заявка');
+  section('7. Сборът не съвпада → няма заявка');
   {
     const h = await view();
     await submit(h, '102.00', '60.00', '40.00', '25');
@@ -255,7 +287,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
       posts(h).length === 1);
   }
 
-  section('7. Границата на толеранса — явно, от двете страни');
+  section('8. Границата на толеранса — явно, от двете страни');
   {
     const h = await view();
     await submit(h, '101.00', '50.00', '50.00', '10');
@@ -277,7 +309,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     ok('–1,01 лв. разлика НЕ минава', posts(h).length === 0);
   }
 
-  section('8. Празни и невалидни стойности');
+  section('9. Празни и невалидни стойности');
   {
     const h = await view();
     await submit(h, '100.00', '60.00', '40.00', '');
@@ -315,7 +347,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     ok('нулев ден (0 клиенти, 0 оборот) МИНАВА', posts(h).length === 1);
   }
 
-  section('9. Вече има запис за днес → формата не се рендира');
+  section('10. Вече има запис за днес → формата не се рендира');
   {
     const h = await view({
       data: {
@@ -343,7 +375,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     ok('показва потвърждение, че е записан', /записан/.test(txt));
   }
 
-  section('10. Таблицата за 7 дни — липсващите дни се виждат');
+  section('11. Таблицата за 7 дни — липсващите дни се виждат');
   {
     const h = await view({
       data: {
@@ -367,7 +399,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     }
   }
 
-  section('11. Централен офис — обобщение вместо форма');
+  section('12. Централен офис — обобщение вместо форма');
   {
     const h = await view({
       user: CO_USER,
@@ -402,7 +434,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
       !!h.doc.getElementById('dt-total'));
   }
 
-  section('12. Смяна на датата в изгледа на ЦО');
+  section('13. Смяна на датата в изгледа на ЦО');
   {
     const h = await view({
       user: CO_USER,
@@ -418,7 +450,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     }
   }
 
-  section('13. Грешките не се поглъщат тихо');
+  section('14. Грешките не се поглъщат тихо');
   {
     const h = await view({ fail: { POST: { status: 409, body: { message: 'duplicate key value violates unique constraint' } } } });
     await submit(h, '100.00', '60.00', '40.00', '25');
@@ -449,7 +481,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
       h.calls.toast.some(t => /Грешка при запис/.test(t)));
   }
 
-  section('14. Предупреждение при необичайно висок оборот');
+  section('15. Предупреждение при необичайно висок оборот');
   {
     const hist = [];
     for (let i = 1; i <= 5; i++) hist.push(rec({ id: 'h' + i, date: dayOffset(-i), total_turnover: 100, cash_turnover: 60, card_turnover: 40 }));
@@ -471,7 +503,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     ok('и записва', posts(h3).length === 1);
   }
 
-  section('15. Регресионни закотвяния в изходния код');
+  section('16. Регресионни закотвяния в изходния код');
   {
     const src = fs.readFileSync(path.join(ROOT, 'daily-turnover.js'), 'utf8');
     /* Коментарите падат преди проверката — в тях today() се СПОМЕНАВА нарочно,
@@ -498,7 +530,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
       html.indexOf('bulletin.js') < html.indexOf('daily-turnover.js'));
   }
 
-  section('16. MODULE_ORDER на harness.js огледало ли е на index.html');
+  section('17. MODULE_ORDER на harness.js огледало ли е на index.html');
   {
     /* Ако новият файл влезе в КРАЯ на MODULE_ORDER вместо на мястото си,
        тестовете пак минават, но зареждат друг ред от браузъра — тоест
