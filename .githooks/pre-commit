@@ -9,8 +9,10 @@ cd "$REPO" || exit 1
 
 # Само JS файлове от корена на репото, които влизат в този commit.
 STAGED=$(git diff --cached --name-only --diff-filter=ACM | grep -E '^[^/]+\.js$')
+# Нещо изобщо в commit-а? (за проверката на TESTS по-долу)
+ANY=$(git diff --cached --name-only --diff-filter=ACMR)
 
-[ -z "$STAGED" ] && exit 0
+[ -z "$STAGED" ] && [ -z "$ANY" ] && exit 0
 
 echo ""
 echo "── проверка преди commit ──────────────────────"
@@ -29,8 +31,36 @@ for f in $STAGED; do
 done
 rm -f /tmp/nodecheck.err
 
-# 2. Всички модули заредени заедно (само ако jsdom го има)
-if [ -d node_modules/jsdom ]; then
+# 1b. Всеки тест от списъка TESTS трябва да е В COMMIT-А, не само на диска.
+#
+# Точно това счупи CI на a4b28c9: tests/run-all.js влезе в commit-а с ред за
+# тестов файл, който остана некомитнат. Локално всичко минаваше — файлът си
+# стоеше в работното дърво — а CI падна с „❌ ЛИПСВА ФАЙЛ".
+#
+# `git ls-files` чете ИНДЕКСА, не диска: файл, добавен с git add, се брои;
+# непроследен файл — не. Точно разликата, която трябва да се хване.
+if git ls-files --error-unmatch tests/run-all.js >/dev/null 2>&1; then
+  MISSING=$(git show :tests/run-all.js 2>/dev/null \
+    | sed -n "s/^[[:space:]]*'\([A-Za-z0-9._-]*\.test\.js\)'.*/\1/p" \
+    | while read -r t; do
+        git ls-files --error-unmatch "tests/$t" >/dev/null 2>&1 || echo "$t"
+      done)
+  if [ -n "$MISSING" ]; then
+    echo "  ГРЕШКА  tests/run-all.js сочи към файлове извън commit-а:"
+    echo "$MISSING" | sed 's/^/            · /'
+    echo "            (git add tests/<файл> — иначе CI пада с „ЛИПСВА ФАЙЛ\")"
+    FAIL=1
+  else
+    echo "  ok    всеки тест от TESTS е в commit-а"
+  fi
+fi
+
+# 2. Всички модули заредени заедно (само ако има променен JS и jsdom го има)
+if [ -z "$STAGED" ]; then
+  : # няма променен модул в корена — няма какво да се зарежда
+elif [ ! -d node_modules/jsdom ]; then
+  echo "  (jsdom липсва — smoke.js прескочен; 'npm i -D jsdom')"
+else
   if node .claude/skills/tmax-jsdom-test/smoke.js . >/tmp/smoke.out 2>&1; then
     echo "  ok    всички модули се зареждат чисто"
   else
@@ -44,8 +74,6 @@ if [ -d node_modules/jsdom ]; then
     FAIL=1
   fi
   rm -f /tmp/smoke.out
-else
-  echo "  (jsdom липсва — smoke.js прескочен; 'npm i -D jsdom')"
 fi
 
 echo "───────────────────────────────────────────────"
