@@ -826,7 +826,7 @@ function buildWeeklyReportHtml(data){
   body += reportPostponedSectionHtml(data.postponedList);
   body += reportCommentedSectionHtml(data.commentedList);
   body += reportNoDueNoticeHtml(data.noDueCount, true);
-  body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: постоянните задачи участват с по едно явяване за всеки ден, в който са дължими през седмицата (задача „всеки ден“ = 7 явявания) — точно както се отмятат в Седмичния календар. Отметка от предишна седмица не се брои за текущата.</div>';
+  body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: постоянните задачи участват с по едно явяване за всеки ден, в който са дължими през седмицата (задача „всеки ден" = 7 явявания) — точно както се отмятат в Седмичния календар. Отметка от предишна седмица не се брои за текущата.</div>';
   body += buildCrossModuleSectionHtml(data.cross);
   return reportEmailShell('📊 Седмичен репорт — ' + (data.weekLabel||''), 'Обобщение за седмицата', body,
     'Автоматичен репорт · ТеМАХ Портал');
