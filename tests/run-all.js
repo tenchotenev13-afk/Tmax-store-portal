@@ -39,6 +39,7 @@ const TESTS = [
   'storno-embed-no-in-list.test.js',
   'linked-module-buttons.test.js',
   'bulletin-week-default.test.js',
+  'bulletin-completion-day-lock.test.js',
   'wrong-receipt-tab.test.js',
   'today-wrong-receipt-row.test.js',
   'notifications-poll.test.js',

@@ -281,7 +281,12 @@ function bannerBtns(doc) {
     }
   }
 
-  section('H. РЕГРЕСИЯ: чекбоксчетата за бъдеща седмица НЕ са заключени');
+  /* Историята на тази секция: доскоро тук се заковаваше, че чекбоксчетата за
+     бъдеща седмица НЕ са заключени — лентата беше само табела, а отмятането
+     минаваше въпреки нея. От 23.08.2026 отмятането е позволено само за днес и
+     за изминалите дни от ТЕКУЩАТА седмица (виж bulletin-completion-day-lock).
+     Лентата остава каквато е — заключва датата, не лентата. */
+  section('H. Чекбоксчетата за бъдеща седмица са заключени, но не изчезват');
   {
     const h = env({
       curBul: B35, cache: [B35, B34, B33],
@@ -297,8 +302,9 @@ function bannerBtns(doc) {
       const boxes = Array.prototype.slice.call(
         h.doc.querySelectorAll('#sec-calendar input[type=checkbox][data-tid]'));
       if (ok('чекбоксчето в календара съществува', boxes.length === 1, String(boxes.length))) {
-        ok('НЕ е disabled', boxes[0].disabled === false);
-        ok('няма readonly атрибут', !boxes[0].hasAttribute('readonly'));
+        ok('е disabled (25.08 още не е настъпил)', boxes[0].disabled === true);
+        ok('title обяснява защо', boxes[0].getAttribute('title') === 'Денят още не е настъпил',
+          boxes[0].getAttribute('title'));
         ok('запазва onchange handler-а',
           (boxes[0].getAttribute('onchange') || '').indexOf('bulCheckboxChanged') >= 0,
           boxes[0].getAttribute('onchange'));
@@ -306,8 +312,12 @@ function bannerBtns(doc) {
       const allBoxes = Array.prototype.slice.call(
         h.doc.querySelectorAll('#bul-body input[type=checkbox][data-tid]'));
       ok('има чекбоксчета и извън календара', allBoxes.length > 1, String(allBoxes.length));
-      ok('НИТО ЕДНО чекбоксче не е disabled',
-        allBoxes.every(b => b.disabled === false), String(allBoxes.length));
+      ok('ВСЯКО чекбоксче е disabled — на всяко място на рендиране',
+        allBoxes.every(b => b.disabled === true), String(allBoxes.length));
+      /* Контролата се заключва, но НЕ се крие — изчезваща контрола изглежда
+         като счупена. */
+      ok('нито едно не е скрито',
+        allBoxes.every(b => (b.getAttribute('style') || '').indexOf('display:none') < 0));
       ok('лентата за бъдеща седмица също е там',
         h.doc.getElementById('bul-body').textContent.indexOf('Гледаш следваща седмица') >= 0);
     }
