@@ -53,7 +53,8 @@ const TESTS = [
   'report-ranking-plural.test.js',
   'report-edge-sync.test.js',
   'daily-turnover.test.js',
-  'kasa-tab-routing.test.js'
+  'kasa-tab-routing.test.js',
+  'pallets-summary.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
