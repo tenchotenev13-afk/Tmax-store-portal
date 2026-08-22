@@ -81,8 +81,21 @@ function rec(id, weekdays, over) {
   }, over || {});
 }
 
+/* ISO week-year = годината на ЧЕТВЪРТЪКА от същата седмица. Не getFullYear()
+   на произволен ден: 29.12.2025 е в ISO седмица 1 на 2026, а 01.01.2027 — в
+   седмица 53 на 2026. Същото правило, по което работи weekNum() в
+   bulletin.js. Без него секция „минала седмица" гние веднъж годишно. */
+function isoWeekYear(d) {
+  const t = new Date(d.getTime());
+  t.setHours(0, 0, 0, 0);
+  t.setDate(t.getDate() + 3 - ((t.getDay() + 6) % 7));
+  return t.getFullYear();
+}
+
 /* boot + минималният набор глобални, които renderBulView() чете.
-   opts: { role, weekOffset } — weekOffset -1 показва миналата седмица. */
+   opts: { role, weekShiftDays } — weekShiftDays -7 показва миналата седмица.
+   Отместването е в ДНИ, а не изваждане от номера на седмицата: wk-1 дава 0
+   през първата седмица на годината. */
 function env(opts) {
   opts = opts || {};
   const h = boot({
@@ -93,13 +106,13 @@ function env(opts) {
   const w = h.w;
   freezeDate(w);
 
-  const now = new w.Date();
-  const wk = w.weekNum(now) + (opts.weekOffset || 0);
+  const ref = new Date(ANCHOR.getTime());
+  ref.setDate(ref.getDate() + (opts.weekShiftDays || 0));
   const cal = {};
   w.DKEYS.forEach(k => { cal[k] = []; });
 
   w.curBul = {
-    id: 'b-1', week_number: wk, year: now.getFullYear(), status: 'published',
+    id: 'b-1', week_number: w.weekNum(ref), year: isoWeekYear(ref), status: 'published',
     content: { calendar: cal, columns: { trade: [], warehouse: [], admin: [] } }
   };
   w.bulListCache = [];
@@ -163,7 +176,24 @@ const L_PAST   = 'Денят е приключил';
     ok('котвеният ден е петък', ANCHOR.getDay() === 5, 'getDay()=' + ANCHOR.getDay());
     ok('понеделникът е от същата седмица (4 дни назад)',
       new Date(TODAY + 'T00:00:00') - new Date(MON + 'T00:00:00') === 4 * 86400000);
-    ok('няма фиксирани календарни дати', /^\d{4}-\d{2}-\d{2}$/.test(TODAY), TODAY);
+    /* Котвата е изведена от реалния часовник, не написана на ръка — затова
+       е на по-малко от седмица от „сега" и се мести всяка седмица. */
+    ok('котвата идва от реалния часовник, не от литерал',
+      Math.abs(ANCHOR.getTime() - Date.now()) < 7 * 86400000, TODAY);
+    /* Секция 4 гледа предходната седмица. Отместването е в ДНИ, защото
+       weekNum(now)-1 дава 0 през първата седмица на годината. Литералите тук
+       са нарочни — тестват точно граничния случай, не „днес". */
+    {
+      const { w } = env();
+      const jan2 = new Date(2027, 0, 2);           /* събота от ISO седмица 53/2026 */
+      const prev = new Date(jan2); prev.setDate(prev.getDate() - 7);
+      ok('седмица преди 02.01.2027 е валидна (не 0)', w.weekNum(prev) >= 1, String(w.weekNum(prev)));
+      ok('ISO week-year e предходната година', isoWeekYear(prev) === 2026, String(isoWeekYear(prev)));
+      /* Контра-проверка: старата аритметика наистина би дала 0. */
+      const jan4 = new Date(2027, 0, 4);           /* понеделник от ISO седмица 1/2027 */
+      ok('старият подход (weekNum-1) би дал 0 на 04.01.2027',
+        w.weekNum(jan4) - 1 === 0, String(w.weekNum(jan4) - 1));
+    }
   }
 
   /* ═══ 1. Самото правило ═══════════════════════════════════════════════ */
@@ -279,7 +309,7 @@ const L_PAST   = 'Денят е приключил';
   /* ═══ 4. Календар на минала седмица — всеки ден е приключил ══════════ */
   section('4. Календар на минала седмица — всеки ден е заключен');
   {
-    const h = env({ weekOffset: -1 });
+    const h = env({ weekShiftDays: -7 });
     const { w, doc } = h;
     if (guard('renderBulView() за миналата седмица не хвърля', () => w.renderBulView())) {
       const cal = doc.querySelector('#sec-calendar');
@@ -410,6 +440,36 @@ const L_PAST   = 'Денят е приключил';
       ok('баджът за утре НЕ е кликаем', badge('b-tomo').length === 0, 'бр.: ' + badge('b-tomo').length);
     }
 
+    /* Некликаем НЕ значи изчезнал. Правило 11 в CLAUDE.md: контрола, която
+       се скрива според данните, изглежда като счупена. Проверката по-горе
+       (length === 0 за data-task-id) остава зелена и ако някой махне баджа
+       изцяло — затова тук държим и на самото му присъствие. */
+    const SHORT = w.TASK_TYPES.comment.short;
+    const lockedHtml = w.taskTypeBadgeHtml('comment', 'b-yest', 'regular', true, YESTERDAY);
+    const freeHtml   = w.taskTypeBadgeHtml('comment', 'b-today', 'regular', true, TODAY);
+    ok('баджът за заключен ден пак се рендира като span',
+      lockedHtml.indexOf('<span') === 0, lockedHtml.slice(0, 40));
+    ok('и пак носи етикета си', lockedHtml.indexOf(SHORT) >= 0, lockedHtml.slice(0, 40));
+    ok('но без onclick', lockedHtml.indexOf('onclick') < 0);
+    ok('и без data-task-id', lockedHtml.indexOf('data-task-id') < 0);
+    ok('за днес баджът има onclick',
+      freeHtml.indexOf('onclick="taskTypeBadgeClick') >= 0, freeHtml.slice(0, 60));
+
+    /* Същото, но в реалния DOM: рендерираме САМО заключената задача, за да
+       може всеки бадж да се припише еднозначно на нея. */
+    {
+      const h2 = env();
+      h2.w.bulTasks = [task('b-only', [YESTERDAY], { task_type: 'comment' })];
+      h2.w.recurringTasks = [];
+      if (guard('renderBulView() само със заключена задача не хвърля', () => h2.w.renderBulView())) {
+        const spans = Array.prototype.slice.call(h2.doc.querySelectorAll('span'))
+          .filter(s => (s.textContent || '').trim() === SHORT);
+        ok('баджът присъства в DOM-а и за заключен ден', spans.length >= 1, 'бр.: ' + spans.length);
+        ok('нито един не е кликаем',
+          spans.every(s => !s.getAttribute('onclick') && !s.getAttribute('data-task-id')));
+      }
+    }
+
     /* Дори при пряко извикване модалът не се отваря. */
     const tCount = calls.toast.length;
     guard('openTaskCompletionModal(вчера) не хвърля',
@@ -422,6 +482,47 @@ const L_PAST   = 'Денят е приключил';
     guard('openTaskCompletionModal(днес) не хвърля',
       () => w.openTaskCompletionModal('b-today', 'regular', TODAY));
     ok('за днес модалът СЕ отваря', !!doc.getElementById('tc-modal-ov'));
+  }
+
+  /* ═══ 8b. Вече съществуваща отметка за минал ден ══════════════════════ */
+  /* В task_completions има 89 записа, направени със задна дата ПРЕДИ това
+     заключване. Те не се трият. Заключването важи за нови отмятания — но ако
+     заключеният чекбокс се рендираше празен, магазините щяха да решат, че
+     свършената им работа е изтрита. Затова: checked И disabled едновременно. */
+  section('8b. Стара отметка за минал ден си остава видимо изпълнена');
+  {
+    const h = env();
+    const { w, doc } = h;
+    w.bulComps = [
+      { task_id: 't-yest', store_name: STORE, status: 'done', completion_date: YESTERDAY },
+      { task_id: 't-mon',  store_name: STORE, status: 'done', completion_date: MON }
+    ];
+    w.recurringComps = [
+      { recurring_task_id: 'r-mon', store_name: STORE, status: 'done', completion_date: MON }
+    ];
+    if (guard('renderBulView() със стари отметки не хвърля', () => w.renderBulView())) {
+      const yest = cbsFor(doc, 'data-tid', 't-yest');
+      const mon  = cbsFor(doc, 'data-tid', 't-mon');
+      const rMon = cbsFor(doc, 'data-rtid', 'r-mon');
+
+      ok('вчерашната отметка се рендира', yest.length >= 2, 'бр.: ' + yest.length);
+      ok('вчерашната отметка е ОТМЕТНАТА, не празна',
+        yest.every(c => c.checked === true), yest.map(c => c.checked).join(','));
+      ok('и същевременно заключена', allDisabled(yest));
+      ok('с надпис „Денят е приключил"', lockedAs(yest, L_PAST), titles(yest).join(' | '));
+
+      ok('понеделнишката отметка е ОТМЕТНАТА', mon.every(c => c.checked === true),
+        mon.map(c => c.checked).join(','));
+      ok('и заключена', allDisabled(mon));
+
+      ok('постоянната задача също е отметната', rMon.every(c => c.checked === true),
+        rMon.map(c => c.checked).join(','));
+      ok('и заключена', allDisabled(rMon));
+
+      /* Визуалният сигнал „изпълнена" (зачертан текст) също остава. */
+      ok('заглавието е зачертано',
+        doc.body.innerHTML.indexOf('text-decoration:line-through') >= 0);
+    }
   }
 
   /* ═══ 9. Централен офис — пътят с calItemStatusHtml не се чупи ════════ */
