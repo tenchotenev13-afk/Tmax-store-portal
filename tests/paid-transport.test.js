@@ -17,39 +17,56 @@ function ok(name, cond, extra) {
 }
 function section(t) { console.log('\n=== ' + t + ' ==='); }
 
+/* dayOffset()/tsOffset() от harness-а — ползват ЛОКАЛНИ getter-и, не
+   toISOString(). Файлът има собствен boot(), взима само датите. */
+const { dayOffset, tsOffset } = require('../.claude/skills/tmax-jsdom-test/harness');
+
+/* ── Дати спрямо ДНЕС ───────────────────────────────────────────────────────
+   calcStatus() сравнява delivery с днешната дата, затова фикстурите НЕ бива
+   да носят фиксирани календарни дати: 22.08.2026 беше бъдеще на 18.08,
+   на 23.08 вече е минало и броячът „Просрочени“ стана 2 вместо 1.
+   Отстоянията са от порядъка на седмица — с dayOffset(±1) тестът пада в
+   полунощ по същия начин. ── */
+const D_CO1_DELIVERY = dayOffset(8);    /* co-1 — бъдеща доставка → непросрочена */
+const D_CO2_DELIVERY = dayOffset(6);    /* co-2 — статус 'sent' бие датата */
+const D_CO3_DELIVERY = dayOffset(5);    /* co-3 — бъдеща доставка → непросрочена */
+const D_TR1_DELIVERY = dayOffset(-7);   /* tr-1 — минала: ЕДИНСТВЕНАТА просрочена */
+const D_TR2_DELIVERY = dayOffset(-9);   /* tr-2 — минала, но awaiting_stock → не брои */
+const D_NEW_DELIVERY = dayOffset(7);    /* дата, въвеждана ръчно в модалите */
+
 /* ── Данни ── */
 const CLIENT_ORDERS = [
-  { id: 'co-1', in_num: '0001', store_name: 'Враца', date: '2026-08-14', hour: '10:00', bon: '000111',
+  { id: 'co-1', in_num: '0001', store_name: 'Враца', date: dayOffset(-9), hour: '10:00', bon: '000111',
     customer_name: 'Иван Петров', phone: '0888111222', product: 'БОЙЛЕР 80Л', sap: '111', qty: 1, unit: 'бр.',
     items: [{ product: 'БОЙЛЕР 80Л', sap: '111', qty: 1, unit: 'бр.', color: '' }],
     from_store: 'Враца', fulfiller: 'Логистичен склад Добрич', agent: 'Управител Враца',
-    delivery: '2026-08-25', status: 'pending', note: '', created_at: '2026-08-14T09:00:00Z',
+    delivery: D_CO1_DELIVERY, status: 'pending', note: '', created_at: tsOffset(-9),
     paid_transport: false, transport_id: null },
   /* заявка с вече създаден платен транспорт */
-  { id: 'co-2', in_num: '0002', store_name: 'Враца', date: '2026-08-15', hour: '11:00', bon: '000222',
+  { id: 'co-2', in_num: '0002', store_name: 'Враца', date: dayOffset(-8), hour: '11:00', bon: '000222',
     customer_name: 'Мария Георгиева', phone: '0888333444', product: 'МИВКА', sap: '222', qty: 2, unit: 'бр.',
     items: [{ product: 'МИВКА', sap: '222', qty: 2, unit: 'бр.', color: 'бяла' }],
     from_store: 'Враца', fulfiller: '', agent: 'Управител Враца',
-    delivery: '2026-08-20', status: 'sent', note: '', created_at: '2026-08-15T09:00:00Z',
+    delivery: D_CO2_DELIVERY, status: 'sent', note: '', created_at: tsOffset(-8),
     paid_transport: true, transport_id: 'tr-2' },
   /* СЧУПЕН случай: отметнат платен транспорт, но POST-ът се е провалил */
-  { id: 'co-3', in_num: '0003', store_name: 'Враца', date: '2026-08-16', hour: '12:00', bon: '000333',
+  { id: 'co-3', in_num: '0003', store_name: 'Враца', date: dayOffset(-7), hour: '12:00', bon: '000333',
     customer_name: 'Петър Иванов', phone: '0888555666', product: 'ЛАМПА', sap: '333', qty: 1, unit: 'бр.',
     items: [{ product: 'ЛАМПА', sap: '333', qty: 1, unit: 'бр.' }],
     from_store: 'Враца', fulfiller: '', agent: 'Управител Враца',
-    delivery: '2026-08-22', status: 'pending', note: '', created_at: '2026-08-16T09:00:00Z',
+    delivery: D_CO3_DELIVERY, status: 'pending', note: '', created_at: tsOffset(-7),
     paid_transport: true, transport_id: null }
 ];
 const TRANSPORT_ORDERS = [
   /* обикновена транспортна заявка, просрочена -> ТРЯБВА да си остане просрочена */
-  { id: 'tr-1', store_name: 'Враца', date: '2026-08-10', hour: '09:00', customer_name: 'Стар Клиент',
+  { id: 'tr-1', store_name: 'Враца', date: dayOffset(-13), hour: '09:00', customer_name: 'Стар Клиент',
     phone: '0888000000', address: 'гр. Враца, ул. Стара 1', product: 'ВРАТА', sap: '999', qty: 1, unit: 'бр.',
-    delivery: '2026-08-12', status: 'pending', awaiting_stock: false, client_order_id: null, client_order_num: null },
+    delivery: D_TR1_DELIVERY, status: 'pending', awaiting_stock: false, client_order_id: null, client_order_num: null },
   /* транспорт от клиентска заявка, стоката още не е дошла -> "Чака стока", НЕ просрочен */
-  { id: 'tr-2', store_name: 'Враца', date: '2026-08-15', hour: '11:00', customer_name: 'Мария Георгиева',
+  { id: 'tr-2', store_name: 'Враца', date: dayOffset(-10), hour: '11:00', customer_name: 'Мария Георгиева',
     phone: '0888333444', address: 'гр. Враца, ул. Нова 5', product: 'МИВКА', sap: '222', qty: 2, unit: 'бр.',
     items: [{ product: 'МИВКА', sap: '222', qty: 2, unit: 'бр.', color: 'бяла' }],
-    delivery: '2026-08-01', status: 'pending', awaiting_stock: true,
+    delivery: D_TR2_DELIVERY, status: 'pending', awaiting_stock: true,
     client_order_id: 'co-2', client_order_num: '0002', notes: 'Платен транспорт по клиентска заявка №0002' }
 ];
 
@@ -186,7 +203,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     doc.getElementById('c-name').value = 'Нов Клиент';
     doc.getElementById('c-phone').value = '0899123456';
     doc.querySelector('#c-items .item-product').value = 'ТЕСТ ПРОДУКТ';
-    doc.getElementById('c-delivery').value = '2026-08-30';
+    doc.getElementById('c-delivery').value = D_NEW_DELIVERY;
     realClick(w, btnIn(doc.getElementById('client-modal'), '✓ Запази заявката'));
     await tick(); await tick();
     ok('точно 1 POST (само клиентска заявка)', calls.post.length === 1, JSON.stringify(calls.post.map(p => p.url)));
@@ -223,7 +240,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     doc.querySelector('#c-items .item-product').value = 'ДИВАН';
     doc.querySelector('#c-items .item-sap').value = '777';
     doc.querySelector('#c-items .item-qty').value = '1';
-    doc.getElementById('c-delivery').value = '2026-08-30';
+    doc.getElementById('c-delivery').value = D_NEW_DELIVERY;
     doc.getElementById('c-bon').value = '000999';
     const cb = doc.getElementById('c-paid-transport'); cb.checked = true; fireChange(w, cb);
     doc.getElementById('c-pt-addr').value = 'гр. Враца, ул. Тестова 7, ет. 2';
@@ -241,7 +258,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     ok('транспортът е awaiting_stock=true', trPost && trPost.body.awaiting_stock === true);
     ok('адресът е записан в транспорта', trPost && trPost.body.address === 'гр. Враца, ул. Тестова 7, ет. 2');
     ok('часът е записан в транспорта', trPost && trPost.body.hour === '14:00');
-    ok('датата за доставка е взета от клиентската заявка', trPost && trPost.body.delivery === '2026-08-30');
+    ok('датата за доставка е взета от клиентската заявка', trPost && trPost.body.delivery === D_NEW_DELIVERY);
     ok('артикулите са пренесени', trPost && trPost.body.items && trPost.body.items[0].product === 'ДИВАН');
     ok('бонът е пренесен', trPost && trPost.body.bon === '000999');
     ok('бележката сочи номера на заявката', trPost && /№Враца-\d{4}/.test(trPost.body.notes || ''), trPost && trPost.body.notes);
@@ -295,7 +312,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     const ov = doc.getElementById('pt-ov');
     ok('отваря се модал', !!ov);
     ok('модалът показва номера на заявката', ov.textContent.indexOf('№0001') >= 0);
-    ok('датата за доставка е предварително попълнена', doc.getElementById('pt-delivery').value === '2026-08-25');
+    ok('датата за доставка е предварително попълнена', doc.getElementById('pt-delivery').value === D_CO1_DELIVERY);
 
     /* първо: без адрес -> блокира */
     realClick(w, doc.getElementById('pt-submit'));
