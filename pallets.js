@@ -33,10 +33,18 @@ function loadPallets(){
   if(isGlobal()){
     Promise.all([
       sbGet('transport_pallets','report_date=gte.'+lookbackStr+'&order=report_date.desc'),
-      sbGet('stores','select=name&order=name')
+      /* Обектите идват от users, не от stores — същият източник и същият
+         филтър (isReportableStore) като в отчетите и таб „Днес". stores
+         държи и ЦО, складовете и обекти без потребители, затова матрицата
+         показваше редове, които никога не подават палети. */
+      sbGet('users','select=store_name&order=store_name')
     ]).then(function(res){
       var rows=Array.isArray(res[0])?res[0]:[];
-      var storeNames=Array.isArray(res[1])?res[1].map(function(s){return s.name;}):[];
+      var seenS={};
+      var storeNames=(Array.isArray(res[1])?res[1]:[]).filter(function(u){
+        if(!isReportableStore(u.store_name)||seenS[u.store_name])return false;
+        seenS[u.store_name]=1;return true;
+      }).map(function(u){return u.store_name;});
       var latestByStore={};
       rows.forEach(function(r){ if(!latestByStore[r.store_name]) latestByStore[r.store_name]=r; });
       renderPalletsAdmin(storeNames,latestByStore);
@@ -60,9 +68,25 @@ function renderPalletsAdmin(storeNames,latestByStore){
     var st=palletsStaleness(r.report_date);return st.days!==null&&st.days>7;
   }).length;
 
+  /* Сборът е САМО по обектите в storeNames. Запис за обект извън списъка
+     (склад, ЦО, закрит обект) не влиза, а обект без запис добавя 0 — не се
+     пропуска мълчаливо, иначе „ОБЩО" щеше да изглежда като пълен сбор. */
+  var withData=storeNames.filter(function(s){return !!latestByStore[s];}).length;
+  /* Горната граница стои на всяка клетка, а не на <tr> — при border-collapse
+     браузърът пропуска рамка, зададена на самия ред. */
+  var footBrd='border-top:2px solid #cbd5e1;';
+  var totals={};
+  PALLET_TYPES.forEach(function(t){
+    totals[t.key]=storeNames.reduce(function(sum,name){
+      var r=latestByStore[name];
+      return sum+(r?(parseInt(r[t.key])||0):0);
+    },0);
+  });
+
   var html='<div class="page">'+
     '<div class="pg-title">📦 Палети</div>'+
-    '<div class="pg-sub">Наличности на празни палети по обекти — обичайно се попълва всеки петък.</div>'+
+    '<div class="pg-sub">Наличности на празни палети по обекти — обичайно се попълва всеки петък. '+
+    'Показва се ПОСЛЕДНАТА подадена наличност за всеки обект, а не сбор от седмиците.</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">'+
       '<div style="font-size:13px;color:var(--muted);">Общо обекти: <b>'+storeNames.length+'</b>'+
       (missing?' &nbsp;|&nbsp; <b style="color:#dc2626;">⚠️ '+missing+'</b> без данни':'')+
@@ -86,7 +110,18 @@ function renderPalletsAdmin(storeNames,latestByStore){
         '<td style="font-weight:600;color:'+st.color+';font-size:12px;white-space:nowrap;">'+st.label+'</td>'+
       '</tr>';
     }).join('')+
-    '</tbody></table></div></div>'+
+    '</tbody>'+
+    '<tfoot><tr>'+
+      '<td style="'+footBrd+'font-weight:700;">ОБЩО'+
+        '<div style="font-size:11px;font-weight:400;color:var(--muted);">по данни от '+
+          withData+' от '+storeNames.length+' обекта</div></td>'+
+      PALLET_TYPES.map(function(t){
+        return '<td style="'+footBrd+'text-align:center;font-family:DM Mono,monospace;font-weight:700;">'+totals[t.key]+'</td>';
+      }).join('')+
+      '<td style="'+footBrd+'"></td>'+
+      '<td style="'+footBrd+'"></td>'+
+    '</tr></tfoot>'+
+    '</table></div></div>'+
   '</div>';
 
   wrap.innerHTML=html;
