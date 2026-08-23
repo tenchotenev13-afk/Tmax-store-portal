@@ -101,7 +101,9 @@ function env(opts) {
   const h = boot({
     modules: ['bulletin.js'],
     user: { email: 'u@temax.bg', display_name: 'Тест', role: opts.role || 'manager', store_name: STORE },
-    data: {}
+    /* users е нужен на loadReportableStores() — знаменателят на бройките в
+       календара за глобална роля (секция 9). Виж bulletin-store-denominator. */
+    data: { users: [{ store_name: STORE }, { store_name: 'Троян' }] }
   });
   const w = h.w;
   freezeDate(w);
@@ -530,6 +532,9 @@ const L_PAST   = 'Денят е приключил';
   {
     const h = env({ role: 'admin' });
     const { w, doc } = h;
+    /* Броячът чака reportableStoresCache — в живия портал го топли
+       loadBulletin() и пре-рендира. Тук го зареждаме явно. */
+    await w.loadReportableStores();
     if (guard('renderBulView() за admin не хвърля', () => w.renderBulView())) {
       const cal = doc.querySelector('#sec-calendar');
       if (ok('календарът се рендира', !!cal)) {

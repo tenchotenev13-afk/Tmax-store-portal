@@ -40,6 +40,7 @@ const TESTS = [
   'linked-module-buttons.test.js',
   'bulletin-week-default.test.js',
   'bulletin-completion-day-lock.test.js',
+  'bulletin-store-denominator.test.js',
   'wrong-receipt-tab.test.js',
   'today-wrong-receipt-row.test.js',
   'notifications-poll.test.js',

@@ -130,7 +130,7 @@ function linkedModuleAllowed(value){
 
 /* Живи бройки/статус за елемент в седмичния календар.
    isGlobal() -> "X/Y обекта" (обхватът е target_stores на задачата, или
-   allStoresCache ако е за всички и кешът е зареден).
+   reportableStoresCache ако е за всички и кешът е зареден).
    Магазин -> малка цветна точка за СОБСТВЕНИЯ му статус (зелено=изпълнена,
    оранжево=отложена, сиво=чака). Постоянните задачи ползват recurringComps
    (recurring_task_id), обикновените — bulComps (task_id). */
@@ -143,9 +143,19 @@ function calItemStatusHtml(itemId,kind,targetStores,dateStr){
      изпълнението остава завинаги, както досега. */
   var dateMatches = function(c){ return !dateStr || (c.completion_date||null)===dateStr; };
   if(isGlobal()){
-    var scope = (targetStores&&targetStores.length) ? targetStores
-      : ((typeof allStoresCache!=='undefined'&&allStoresCache&&allStoresCache.length) ? allStoresCache : null);
-    if(!scope) return '';
+    /* Знаменателят са обектите, които РЕАЛНО могат да отметнат — същият
+       източник като седмичния имейл (report.js). Преди тук стоеше
+       allStoresCache (таблицата stores, 23 записа): броеше Централен офис,
+       двата логистични склада и обекти без нито един акаунт, затова задача,
+       изпълнена от всичките 18, показваше 18/23 и никога не позеленяваше.
+       target_stores също минава през същия филтър — задача, насочена към
+       обект без акаунт, иначе пак би броила недостижим обект. */
+    var reach = (typeof reportableStoresCache!=='undefined'&&reportableStoresCache&&reportableStoresCache.length) ? reportableStoresCache : null;
+    if(!reach) return '';
+    var scope = (targetStores&&targetStores.length)
+      ? targetStores.filter(function(s){ return reach.indexOf(s)>=0; })
+      : reach;
+    if(!scope.length) return '';
     var done = scope.filter(function(s){
       return compsArr.some(function(c){ return c[idField]===itemId && c.store_name===s && dateMatches(c) && (c.status||'done')==='done'; });
     }).length;
@@ -608,11 +618,13 @@ function selectBulletin(id){
 function loadBulletin(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:300px;color:#94a3b8;font-size:15px;">⏳ Зареждане...</div>';
-  /* allStoresCache трябва да е зареден за живите бройки в календара
-     (calItemStatusHtml) - другите модули го зареждат при отваряне, но
-     Бюлетин може да е първият таб, който потребителят отваря. Ако кешът
-     вече е топъл, loadAllStores() връща веднага без нова заявка. */
+  /* Кешовете трябва да са заредени, преди да се рендира: allStoresCache за
+     multi-select-а при избор на магазини, reportableStoresCache за живите
+     бройки в календара (calItemStatusHtml). Другите модули ги зареждат при
+     отваряне, но Бюлетин може да е първият таб, който потребителят отваря.
+     Топъл кеш връща веднага, без нова заявка. */
   if(!allStoresCache)loadAllStores().then(function(){ if(curBul)renderBulletin(); });
+  if(!reportableStoresCache)loadReportableStores().then(function(){ if(curBul)renderBulletin(); });
   /* Зареждаме бюлетина ПЪРВО (за да знаем неговата седмица/година), после промоциите
      филтрирани спрямо ТАЗИ седмица - за да са "автономни" за всяка седмица, не спрямо
      реалната дата днес. Рекъринг задачите вървят паралелно, не зависят от седмицата. */
@@ -2821,13 +2833,10 @@ function loadTasksStats() {
   var wrap = document.getElementById('tasks-stat-wrap');
   if (!wrap || !bulTasks.length) return;
 
-  sbGet('users','select=store_name&order=store_name').then(function(users){
-    var seen={};
-    var stores = users ? users.filter(function(u){
-      if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
-      seen[u.store_name]=1;return true;
-    }).map(function(u){return u.store_name;}) : [];
-
+  /* Филтърът беше преписан тук с твърдо 'Централен офис' и пропускаше двата
+     логистични склада — 20 обекта вместо 18. Един източник за всички бройки
+     (виж loadReportableStores() в shared.js), не осмо копие на условието. */
+  loadReportableStores().then(function(stores){
     if (!stores.length) { wrap.innerHTML=''; return; }
 
     /* Датите от бюлетинската седмица, в които всяка постоянна задача е
@@ -2931,8 +2940,11 @@ function renderBulAnalysis(){
   html+='</div>';
   html+='<div class="bcard"><div style="font-size:13px;font-weight:600;margin-bottom:12px;">Задачи по магазини</div><div id="an-tbl"><div style="text-align:center;padding:20px;color:#94a3b8;">⏳ Зареждане...</div></div></div></div>';
   wrap.innerHTML=html;
-  sbGet('stores','select=name&order=name').then(function(sd){
-    var all=Array.isArray(sd)?sd.map(function(s){return s.name;}):[]; 
+  /* Знаменателят на процента е броят обекти, които реално могат да отметнат
+     — същият източник като календара и седмичния имейл. Таблицата stores
+     броеше и ЦО, двата склада и обектите без акаунт, тоест всеки процент
+     тук беше занижен. */
+  loadReportableStores().then(function(all){
     var tbl='<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Задача</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Отдел</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Срок</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Изпълнили</th><th style="text-align:right;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">%</th></tr></thead><tbody>';
     bulTasks.forEach(function(task){
       var comps=bulComps.filter(function(c){return c.task_id===task.id;});

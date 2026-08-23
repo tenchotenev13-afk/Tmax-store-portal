@@ -376,13 +376,35 @@ function itemsPrintBlock(o){
 var allStoresCache=null;
 /* Нулира кеша с магазини - извиква се от Администрация при добавяне/изтриване
    на магазин, за да се вижда веднага навсякъде, без презареждане на страницата. */
-function invalidateStoresCache(){ allStoresCache=null; }
+function invalidateStoresCache(){ allStoresCache=null; reportableStoresCache=null; }
 function loadAllStores(){
   if(allStoresCache)return Promise.resolve(allStoresCache);
   return sbGet('stores','select=name&order=name').then(function(data){
     allStoresCache=Array.isArray(data)?data.map(function(s){return s.name;}):[];
     return allStoresCache;
   }).catch(function(){allStoresCache=[];return allStoresCache;});
+}
+
+/* ── Обектите, които РЕАЛНО могат да отметнат/подадат нещо (кеширан) ──
+   Уникалните store_name от users, минус REPORT_EXCLUDED_STORES.
+   НЕ таблицата stores: тя брои и обекти без нито един акаунт (Пазарджик,
+   Сервиз Троян), тоест физически няма кой да отметне, и знаменателят никога
+   не се затваря — задача, изпълнена от всичките 18 обекта, показваше 18/23.
+   Този кеш НЕ замества allStoresCache и не го пипа: там пълните записи са
+   правилни (падащите менюта за избор на магазин). Двата живеят паралелно.
+   Същият списък се строеше inline на 6 места (report.js ×4, today.js,
+   pallets.js) — тук е, за да не стане седмо. */
+var reportableStoresCache=null;
+function loadReportableStores(){
+  if(reportableStoresCache)return Promise.resolve(reportableStoresCache);
+  return sbGet('users','select=store_name&order=store_name').then(function(data){
+    var seen={};
+    reportableStoresCache=Array.isArray(data)?data.filter(function(u){
+      if(!isReportableStore(u.store_name)||seen[u.store_name])return false;
+      seen[u.store_name]=1;return true;
+    }).map(function(u){return u.store_name;}):[];
+    return reportableStoresCache;
+  }).catch(function(){reportableStoresCache=[];return reportableStoresCache;});
 }
 function fillStoreSelect(selectEl,selectedValue){
   if(!selectEl||!allStoresCache)return;
