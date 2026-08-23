@@ -146,11 +146,22 @@ function base64Part(mimeType: string, text: string) {
    символи в тялото. Думите се съединяват с CRLF + интервал (сгъване на
    заглавие по RFC 5322); при разбора whitespace между съседни encoded words
    се изхвърля, тоест темата се сглобява обратно дословно. */
+/* Нарочно с цикъл, а не с регекс /[^\u0000-\u007f]/. Деплойът на Edge
+   Function минава през JSON, а там "\u0000" е escape и се превръща в СУРОВ
+   NUL байт в изходния файл. Работи, но е мина: файлът става нечетим за
+   редактори и се разминава с репото. Тук няма нито един escape. */
+function hasNonAscii(str: string): boolean {
+  for (var i = 0; i < str.length; i++) {
+    if (str.charCodeAt(i) > 127) { return true; }
+  }
+  return false;
+}
+
 function encodeSubject(subject: string): string {
   /* Чист ASCII минава без пипане - така темите на латиница (напр. тези на
      send-oborot-report) остават точно каквито са подадени. Изключение е тема,
      започваща с "=?", която иначе би била увита втори път. */
-  if (!/[^\u0000-\u007f]/.test(subject) && subject.indexOf('=?') !== 0) {
+  if (!hasNonAscii(subject) && subject.indexOf('=?') !== 0) {
     return subject;
   }
   var enc = new TextEncoder();

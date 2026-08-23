@@ -155,7 +155,10 @@ function calItemStatusHtml(itemId,kind,targetStores,dateStr){
     var scope = (targetStores&&targetStores.length)
       ? targetStores.filter(function(s){ return reach.indexOf(s)>=0; })
       : reach;
-    if(!scope.length) return '';
+    /* Обхватът се е изпразнил след филтъра — задачата е насочена само към
+       обекти без достъп. Не връщаме празно: изчезнала контрола изглежда като
+       счупен рендер (правило 11). Тире с обяснение казва истината. */
+    if(!scope.length) return '<span title="Няма обект с достъп до тази задача" style="font-size:11px;font-weight:700;color:#94a3b8;margin-left:4px;white-space:nowrap;cursor:help;">—</span>';
     var done = scope.filter(function(s){
       return compsArr.some(function(c){ return c[idField]===itemId && c.store_name===s && dateMatches(c) && (c.status||'done')==='done'; });
     }).length;
@@ -2162,11 +2165,15 @@ function sendPushOverdueNow(){
     if(!dates.length) return;
     var latestDue = new Date(dates[dates.length-1]);
     if(latestDue>=now)return;
-    sbGet('stores','select=name').then(function(stores){
+    /* Само обектите, които реално могат да отметнат — същият източник като
+       бройките в календара. Преди тук стоеше sbGet('stores'): Централният
+       офис (58 акаунта) и двата склада получаваха известие за чужда работа,
+       която не е тяхна и която нямат как да свършат. */
+    loadReportableStores().then(function(stores){
       if(!Array.isArray(stores))return;
-      stores.forEach(function(s){
-        var done=bulComps.some(function(c){return c.task_id===t.id&&c.store_name===s.name;});
-        if(!done){if(!overdue[s.name])overdue[s.name]=[];overdue[s.name].push(t.title);}
+      stores.forEach(function(name){
+        var done=bulComps.some(function(c){return c.task_id===t.id&&c.store_name===name;});
+        if(!done){if(!overdue[name])overdue[name]=[];overdue[name].push(t.title);}
       });
       if(Object.keys(overdue).length) pushOverdue(overdue,null);
       else toast('✅ Всички задачи са изпълнени!');

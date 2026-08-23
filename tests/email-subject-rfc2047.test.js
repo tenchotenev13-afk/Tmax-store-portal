@@ -59,7 +59,7 @@ function extractFn(name) {
   const js = src.slice(start, i + 1)
     .replace(/:\s*Record<[^>]*>/g, '')
     .replace(/:\s*(string|number)\[\]/g, '')
-    .replace(/:\s*string\b/g, '');
+    .replace(/:\s*(string|boolean)\b/g, '');
   if (/:\s*[A-Za-z]/.test(js.split('{')[0])) {
     throw new Error('останала TS анотация в сигнатурата на ' + name);
   }
@@ -68,8 +68,12 @@ function extractFn(name) {
 
 let encodeSubject, transliterate;
 try {
+  /* hasNonAscii() е нужна, защото encodeSubject() я вика. Нарочно е отделна
+     функция с цикъл вместо регекс с \u escape-и — деплойът минава през JSON,
+     където "\u0000" става СУРОВ NUL байт в изходния файл. */
   const factory = new Function(
-    extractFn('encodeSubject') + '\n' + extractFn('transliterate') +
+    extractFn('hasNonAscii') + '\n' + extractFn('encodeSubject') + '\n' +
+    extractFn('transliterate') +
     '\nreturn { encodeSubject: encodeSubject, transliterate: transliterate };');
   const m = factory();
   encodeSubject = m.encodeSubject;
@@ -265,6 +269,19 @@ const TEMI = [
     ok('коментарът обяснява защо стои', /НЕ СЕ ВИКА от 23\.08\.2026/.test(src));
     ok('тялото не е пипано — base64Part и mimeContent са на място',
       /function base64Part\(/.test(src) && /mimeContent:\s*\[/.test(src));
+    /* Деплойът минава през JSON. Напише ли някой "\u0000" в регекс тук,
+       живият файл получава СУРОВ NUL байт и се разминава с репото. Случи се
+       веднъж, на 23.08.2026 — затова се заковава. */
+    ok('няма сурови контролни байтове в изходния файл', (function () {
+      for (var i = 0; i < src.length; i++) {
+        var c = src.charCodeAt(i);
+        if (c < 9 || (c > 13 && c < 32) || c === 127) { return false; }
+      }
+      return true;
+    })());
+    ok('проверката за ASCII е с цикъл, не с регекс с escape-и',
+      /function hasNonAscii\(/.test(src) && /charCodeAt\(i\) > 127/.test(src));
+
     ok('push частта е непокътната',
       src.indexOf('https://api.onesignal.com/notifications') > 0 &&
       /headings:\s*\{\s*bg:\s*body\.title/.test(src));

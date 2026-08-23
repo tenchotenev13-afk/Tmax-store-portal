@@ -174,9 +174,16 @@ function countText(html) {
     ok('логистичен склад в target_stores също не влиза',
       countText(html2) === '3/3', String(countText(html2)));
 
-    /* Задача само към недостижим обект — нищо не се показва, а не „0/1". */
+    /* Задача само към недостижим обект. „0/1" би твърдяло, че има кой да я
+       свърши; празно би изглеждало като счупен рендер (правило 11). Показва
+       се тире с обяснение. */
     const html3 = w.calItemStatusHtml('t-1', 'regular', ['Пазарджик'], DUE);
-    ok('задача само към обект без акаунт не показва брояч', html3 === '', html3);
+    ok('задача само към обект без акаунт НЕ показва 0/1', countText(html3) === null, html3);
+    ok('но и не е празна', html3 !== '', JSON.stringify(html3));
+    ok('показва тире', html3.indexOf('>—<') >= 0, html3);
+    ok('с обяснение в title',
+      html3.indexOf('title="Няма обект с достъп до тази задача"') >= 0, html3);
+    ok('и не е скрита', html3.indexOf('display:none') < 0);
   }
 
   /* ═══ 5. Календарът в реалния DOM ════════════════════════════════════ */
@@ -247,6 +254,61 @@ function countText(html) {
         ok('няма обекти без акаунт', NO_ACCOUNT.every(n => txt.indexOf(n) < 0));
         ok('всичките 18 реални са там', REAL.every(n => txt.indexOf(n) >= 0));
       }
+    }
+  }
+
+  /* ═══ 9. Push за просрочени задачи ═══════════════════════════════════ */
+  section('9. sendPushOverdueNow(): известие само до 18-те обекта');
+  {
+    /* Просрочена задача — краят ѝ е отпреди 3 дни, никой не я е отметнал. */
+    const h = await env({ tasks: [task('t-late', { due_dates: [dayOffset(-3)] })], comps: [] });
+    const { w, calls } = h;
+
+    /* pushOverdue живее в push.js; тук ни трябва само какво му се подава. */
+    let sent = null;
+    w.pushOverdue = function (map) { sent = map; };
+
+    guard('sendPushOverdueNow() не хвърля', () => w.sendPushOverdueNow());
+    await ticks();
+
+    if (ok('изпратено е известие', !!sent, JSON.stringify(sent))) {
+      const targets = Object.keys(sent);
+      ok('получателите са 18', targets.length === 18, 'бр.: ' + targets.length);
+      ok('Централен офис НЕ получава (58 акаунта чужда работа)',
+        targets.indexOf('Централен офис') < 0);
+      ok('логистичните складове НЕ получават',
+        WAREHOUSES.every(n => targets.indexOf(n) < 0));
+      ok('обектите без акаунт НЕ получават',
+        NO_ACCOUNT.every(n => targets.indexOf(n) < 0));
+      ok('всичките 18 реални получават', REAL.every(n => targets.indexOf(n) >= 0));
+      ok('съобщението носи заглавието на задачата',
+        (sent['Троян'] || []).indexOf('Задача t-late') >= 0, JSON.stringify(sent['Троян']));
+    }
+    /* Единствената заявка към stores е загряването на allStoresCache в env().
+       Push-ът не тегли таблицата — списъкът идва от reportableStoresCache. */
+    /* ⚠️ calls.get пази голи URL низове, не {url,table,body} както пише в
+       SKILL.md — затова се търси в самия URL. */
+    ok('таблицата stores е теглена точно веднъж (само за allStoresCache)',
+      calls.get.filter(u => String(u).indexOf('/stores') >= 0).length === 1,
+      calls.get.join(' | '));
+  }
+
+  section('9б. Отметнала задачата не получава известие');
+  {
+    const h = await env({
+      tasks: [task('t-late', { due_dates: [dayOffset(-3)] })],
+      comps: comps('t-late', ['Троян', 'Враца'])
+    });
+    const { w } = h;
+    let sent = null;
+    w.pushOverdue = function (map) { sent = map; };
+    guard('sendPushOverdueNow() не хвърля', () => w.sendPushOverdueNow());
+    await ticks();
+    if (ok('изпратено е известие', !!sent)) {
+      const targets = Object.keys(sent);
+      ok('получателите са 16', targets.length === 16, 'бр.: ' + targets.length);
+      ok('Троян и Враца отпадат',
+        targets.indexOf('Троян') < 0 && targets.indexOf('Враца') < 0);
     }
   }
 
