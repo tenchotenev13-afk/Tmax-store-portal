@@ -56,7 +56,8 @@ const TESTS = [
   'daily-turnover.test.js',
   'kasa-tab-routing.test.js',
   'pallets-summary.test.js',
-  'oborot-bulletin-link.test.js'
+  'oborot-bulletin-link.test.js',
+  'admin-oborot-report.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

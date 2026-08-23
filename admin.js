@@ -72,10 +72,13 @@ function deleteStore(id,name){
 ══════════════════════════════════════════ */
 
 function loadUsersAdmin(){
-  sbGet('users','order=role,email&select=id,email,display_name,store_name,role,active,assigned_stores').then(function(data){
+  sbGet('users','order=role,email&select=id,email,display_name,store_name,role,active,assigned_stores,oborot_report').then(function(data){
     var body=document.getElementById('users-body');if(!body)return;
     var list=Array.isArray(data)?data:[];
-    if(!list.length){body.innerHTML='<tr><td colspan="5" style="text-align:center;padding:20px;color:#94a3b8;">Няма потребители.</td></tr>';return;}
+    /* colspan = броят клетки в РЕДА, не в заглавието: последната колона
+       (действията) е без <th>, затова 7, а не 6. Разминаване тук оставя
+       празната таблица със стеснен ред, който изглежда счупен. */
+    if(!list.length){body.innerHTML='<tr><td colspan="7" style="text-align:center;padding:20px;color:#94a3b8;">Няма потребители.</td></tr>';return;}
     var roleBg={manager:'#dbeafe',sklad:'#dcfce7',kasa:'#fef9c3',accounting:'#f3e8ff',admin:'#fee2e2',logistics:'#ffedd5',info:'#f1f5f9',supply:'#fce7f3',marketing:'#ecfdf5',user:'#f8fafc'};
     body.innerHTML=list.map(function(u){
       var stores=u.assigned_stores;
@@ -93,6 +96,10 @@ function loadUsersAdmin(){
             ? '<span style="color:'+(storesStr==='—'?'#16a34a':'#2563eb')+';">'+(storesStr==='—'?'Всички магазини':esc(storesStr))+'</span>'+
               ' <button onclick="editAssigned(\''+u.id+'\',\''+esc(u.display_name||u.email)+'\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;padding:1px 7px;font-size:10px;cursor:pointer;margin-left:4px;">✏️</button>'
             : esc(u.store_name||'—'))+
+        '</td>'+
+        '<td style="font-size:11px;color:#64748b;white-space:nowrap;">'+
+          '<span style="color:'+(u.oborot_report?'#2563eb':'#94a3b8')+';">'+oborotReportLabel(u.oborot_report)+'</span>'+
+          ' <button onclick="editOborotReport(\''+u.id+'\',\''+esc(u.display_name||u.email)+'\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;padding:1px 7px;font-size:10px;cursor:pointer;margin-left:4px;">✏️</button>'+
         '</td>'+
         '<td style="white-space:nowrap;">'+
           '<button onclick="openUserModal(\''+u.id+'\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px;">✏️</button>'+
@@ -178,6 +185,105 @@ function submitAssigned(){
     logAudit('user_assigned_stores_changed',{details:{target_user_id:_assignedEditUserId,target_user_name:_assignedEditUserName,wants_all:wantsAll,stores:selected}});
     toast(wantsAll ? '✅ Вижда всички магазини' : '✅ Назначени '+selected.length+' магазина');
     closeAssignedModal();
+    loadUsersAdmin();
+  });
+}
+
+/* ══════════════════════════════════════════
+   ВЕЧЕРЕН ОБОРОТ — ПОЛУЧАТЕЛИ НА ИМЕЙЛА
+   users.oborot_report: 'all' | 'assigned' | NULL
+   Чете се от Edge Function-а send-oborot-report (pg_cron, 20:45 софийско).
+══════════════════════════════════════════ */
+
+var _oborotEditUserId = null;
+var _oborotEditUserName = null;
+var _oborotEditAssigned = [];
+
+var OBOROT_REPORT_LABELS = {all:'Всички обекти', assigned:'Своите обекти'};
+function oborotReportLabel(v){ return OBOROT_REPORT_LABELS[v] || '—'; }
+
+/* assigned_stores идва ту като масив, ту като Postgres literal '{"А","Б"}' —
+   същият разбор като в editAssigned(). */
+function _oborotParseStores(raw){
+  if(Array.isArray(raw)) return raw;
+  if(typeof raw==='string' && raw.length>2){
+    try{ return raw.replace(/^{|}$/g,'').split(',').map(function(s){return s.trim().replace(/^"|"$/g,'');}); }catch(e){}
+  }
+  return [];
+}
+
+function editOborotReport(userId, userName){
+  _oborotEditUserId = userId;
+  _oborotEditUserName = userName;
+  /* Текущата стойност се чете наново, а не се взима от реда — таблицата може
+     да е отпреди чужда промяна. Заедно с нея идват и зачисленията, защото
+     от тях зависи предупреждението при 'assigned'. */
+  sbGet('users','id=eq.'+userId+'&select=oborot_report,assigned_stores').then(function(data){
+    var row = (Array.isArray(data)&&data[0]) ? data[0] : {};
+    _oborotEditAssigned = _oborotParseStores(row.assigned_stores);
+    _renderOborotModal(userName, row.oborot_report||'');
+  });
+}
+
+function _renderOborotModal(userName, current){
+  var old = document.getElementById('oborot-modal-ov');
+  if (old) old.remove();
+
+  var noAssigned = !_oborotEditAssigned.length;
+  function opt(val, title, sub){
+    return '<label style="display:flex;align-items:flex-start;gap:8px;padding:9px 10px;background:'+
+      (current===val?'#eff6ff':'#f8fafc')+';border:1px solid '+(current===val?'#2563eb':'#e2e8f0')+
+      ';border-radius:8px;margin-bottom:8px;cursor:pointer;font-size:13px;">'+
+      '<input type="radio" name="oborot-report-opt" value="'+val+'" '+(current===val?'checked':'')+' style="margin-top:2px;">'+
+      '<span><b>'+title+'</b><br><span style="font-size:11px;color:#64748b;">'+sub+'</span></span>'+
+      '</label>';
+  }
+
+  var html = '<div class="bov open" id="oborot-modal-ov" onclick="if(event.target===this)closeOborotModal()">' +
+    '<div class="bmod" style="width:420px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+    '<div style="font-size:15px;font-weight:700;">💰 Вечерен оборот — '+esc(userName)+'</div>' +
+    '<button onclick="closeOborotModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">Имейлът тръгва всеки ден в 20:45.</div>' +
+    opt('', 'Не получава', 'Не влиза в списъка с получатели.') +
+    opt('all', 'Всички обекти', 'Един имейл с оборота на всичките 18 обекта.') +
+    opt('assigned', 'Своите обекти', 'Един имейл само с обектите от „Назначени магазини".' +
+      (noAssigned ? ' <b style="color:#d97706;">Този потребител няма зачислени обекти.</b>' : '')) +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+    '<button onclick="closeOborotModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="submitOborotReport()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Запази</button>' +
+    '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeOborotModal(){
+  var ov = document.getElementById('oborot-modal-ov');
+  if (ov) ov.remove();
+  _oborotEditUserId = null;
+  _oborotEditUserName = null;
+  _oborotEditAssigned = [];
+}
+
+function submitOborotReport(){
+  var el = document.querySelector('input[name="oborot-report-opt"]:checked');
+  var val = el ? el.value : '';
+  /* ПРАЗЕН НИЗ НЕ СТАВА: users_oborot_report_chk допуска само NULL, 'all' или
+     'assigned' — '' би върнало 400 от базата. */
+  var payload = {oborot_report: val ? val : null};
+  var warn = (val==='assigned') && !_oborotEditAssigned.length;
+  var uid = _oborotEditUserId, uname = _oborotEditUserName;
+
+  sbPatch('users','id=eq.'+uid, payload).then(function(res){
+    if(!res.ok){ toast('Грешка при запис: '+sbErrMsg(res),'#dc2626'); return; }
+    /* Кой получава финансов отчет е промяна, която трябва да оставя следа. */
+    logAudit('user_oborot_report_changed',{details:{target_user_id:uid,target_user_name:uname,value:payload.oborot_report}});
+    closeOborotModal();
+    /* Предупреждението не блокира записа, но е ПОСЛЕДНОТО съобщение — иначе
+       зеленият toast го припокрива и човекът не разбира, че няма да получи
+       нищо (edge функцията го отчита като no_assigned_stores). */
+    if(warn) toast('Този потребител няма зачислени обекти и няма да получи имейл.','#d97706');
+    else toast('✅ '+(payload.oborot_report ? oborotReportLabel(payload.oborot_report) : 'Не получава оборота'));
     loadUsersAdmin();
   });
 }
