@@ -5,20 +5,36 @@
 // PUSH ЧАСТТА Е НАПЪЛНО НЕПОКЪТНАТА — само имейл частта е пренаписана да
 // изпраща през SMTP (mail.temax.bg), вместо през Resend API.
 //
-// FIX (17.08.2026): SMTPClient не задаваше изрично content_encoding, което
-// означава default 'quoted-printable' от denomailer. При дълги HTML редове с
-// много кирилица (напр. дневния/седмичния репорт с десетки записи в едно
-// продължение без нови редове), quoted-printable soft line-wrap-ването на
-// 76 символа понякога реже многобайтов UTF-8 символ по средата - резултат:
-// счупени кирилски букви (İ/replacement char) на случайни места в писмото,
-// понякога и вътре в style="" атрибути, което чупи и визуалния рендер
-// (наблюдавано: font-size атрибут не се прилага -> текст пада на огромен
-// default размер в Thunderbird). base64 работи на ниво чисти байтове на
-// фиксирани 3-байтови групи, напълно независимо от границите на UTF-8
-// символите - декодерът винаги възстановява точния оригинален байтов поток,
-// без значение къде са сложени редовете. Засяга ВСИЧКИ имейли от портала
-// (не само репортите) - доставчик-имейли от Разлики също минават през тази
-// функция.
+// FIX (23.08.2026): тялото на писмото вече НЕ минава през енкодера на
+// denomailer. Кодира се тук, на ръка, в base64 и се подава през `mimeContent`,
+// което библиотеката препредава дословно (config/mail/content.ts:18).
+//
+// Защо се наложи: поправката от 17.08.2026 беше без ефект. Опцията
+// `content_encoding: 'base64'` НЕ СЪЩЕСТВУВА в denomailer@1.6.0 - нито един
+// файл в библиотеката не я споменава, а resolveClientOptions()
+// (config/client.ts:117) чете само познатите ключове и я изхвърля мълчаливо.
+// `html` и `content` продължаваха да минават през quotedPrintableEncode(), с
+// transferEncoding зашит на "quoted-printable" в config/mail/content.ts:31,39.
+//
+// Двата реални дефекта, репродуцирани върху истинския HTML на вечерния оборот
+// (8588 символа / 9403 байта):
+//
+//  1. Липсва SMTP dot-stuffing (RFC 5321 §4.5.2). Енкодерът пренася на 74
+//     символа; падне ли прекъсването точно преди точка, редът започва с '.'
+//     и приемащият сървър я маха. Наблюдавано: "Оборот 19.08.2026 (сряда)"
+//     -> "Оборот 1908.2026 (сряда)", отстъп 623 символа / 642 байта.
+//  2. Цикълът за пренасяне отрязва 1-2 символа, когато границата падне вътре
+//     в "=XX" escape, и ги връща през `offset` в началото на следващия ред -
+//     но последното парче, `encodedData.slice(lines * 74)`, НЕ прилага offset
+//     и тези 1-2 символа изчезват безвъзвратно. Наблюдавано: "ТеМАХ Портал"
+//     -> "ТеМАХ Порта?b" в долния колонтитул, отстъп ~8555.
+//
+// 1.6.0 е последната публикувана версия; в main клона на библиотеката дефект 1
+// е поправен, дефект 2 стои. Затова заобикаляме енкодера изцяло. base64 е
+// имунизиран и срещу двете: азбуката му не съдържа точка, тоест никой ред не
+// може да започне с '.', а пренасянето тук е на кратно на 4, така че никога не
+// се цепи base64 група. Засяга ВСИЧКИ имейли от портала (не само репортите) -
+// доставчик-имейли от Разлики също минават оттук.
 //
 // Изисква следните Supabase Edge Function Secrets (Project Settings → Edge Functions):
 //   SMTP_HOST      - по подразбиране mail.temax.bg, ако не е зададен
@@ -78,6 +94,19 @@ function transliterate(str: string): string {
     Ш:"Sh",Щ:"Sht",Ъ:"A",Ь:"", Ю:"Yu",Я:"Ya"
   };
   return str.split('').map(function(ch){ return map[ch] !== undefined ? map[ch] : ch; }).join('');
+}
+
+/* Кодира една част от тялото в base64 и я връща готова за `mimeContent`.
+   Пренасяне на 76 символа: кратно на 4, тоест никога не се разцепва base64
+   група, и в границата, която RFC 2045 допуска на ред. */
+function base64Part(mimeType: string, text: string) {
+  var bytes = new TextEncoder().encode(text);
+  var bin = '';
+  for (var i = 0; i < bytes.length; i++) { bin += String.fromCharCode(bytes[i]); }
+  var b64 = btoa(bin);
+  var lines: string[] = [];
+  for (var j = 0; j < b64.length; j += 76) { lines.push(b64.slice(j, j + 76)); }
+  return { mimeType: mimeType, content: lines.join('\r\n'), transferEncoding: 'base64' };
 }
 
 function guessContentType(filename: string): string {
@@ -143,7 +172,8 @@ Deno.serve(async (req) => {
       }
 
       const client = new SMTPClient({
-        content_encoding: 'base64', /* FIX 17.08.2026 - виж коментара в началото на файла */
+        /* Тук нарочно НЯМА content_encoding - denomailer не познава такава
+           опция и я изхвърля. Кодирането на тялото е в base64Part(). */
         connection: {
           hostname: SMTP_HOST,
           port: SMTP_PORT,
@@ -159,8 +189,14 @@ Deno.serve(async (req) => {
           cc: cc ? (Array.isArray(cc) ? cc : [cc]) : undefined,
           replyTo: replyTo || undefined,
           subject: transliterate(subject),
-          content: htmlToPlainText(html),
-          html: html,
+          /* НЕ подаваме `content`/`html` - те минават през счупения
+             quoted-printable енкодер. `mimeContent` се препредава дословно.
+             Редът е важен: при multipart/alternative пощата показва
+             ПОСЛЕДНАТА част, която може да рендира, тоест HTML-ът е втори. */
+          mimeContent: [
+            base64Part('text/plain; charset="utf-8"', htmlToPlainText(html)),
+            base64Part('text/html; charset="utf-8"', html),
+          ],
           attachments: attachments.map(function (a: { filename: string; content: string }) {
             return {
               filename: a.filename || 'attachment',

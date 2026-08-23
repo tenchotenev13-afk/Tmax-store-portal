@@ -52,6 +52,7 @@ const TESTS = [
   'weekly-routing-window.test.js',
   'report-ranking-plural.test.js',
   'report-edge-sync.test.js',
+  'email-encoding.test.js',
   'daily-turnover.test.js',
   'kasa-tab-routing.test.js',
   'pallets-summary.test.js',
