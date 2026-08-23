@@ -312,5 +312,101 @@ function countText(html) {
     }
   }
 
+  /* ═══ 10. Първо отваряне на таба ════════════════════════════════════ */
+  /* Броячът вече чака reportableStoresCache. Ако кешът закъснее и никой не
+     пре-рендира, числата ще останат празни до ръчно превключване на таба —
+     точно това пита loadBulletin(). Има два възможни реда:
+       А) кешът пристига ПРЕДИ бюлетина -> първият рендер вече е с числа;
+       Б) бюлетинът пристига пръв -> първият рендер е без числа, но
+          .then на кеша прави втори рендер и те се появяват.
+     И двата се проверяват през истинския loadBulletin(), не през подмяна. */
+  section('10. loadBulletin(): числата се появяват сами при първо зареждане');
+
+  function bootFull(delayUsers) {
+    const now = new Date();
+    const p = n => String(n).padStart(2, '0');
+    const iso = now.getFullYear() + '-' + p(now.getMonth() + 1) + '-' + p(now.getDate());
+    const thu = new Date(now); thu.setHours(0, 0, 0, 0);
+    thu.setDate(thu.getDate() + 3 - ((thu.getDay() + 6) % 7));
+    const w1 = new Date(thu.getFullYear(), 0, 4);
+    const wk = 1 + Math.round(((thu - w1) / 86400000 - 3 + ((w1.getDay() + 6) % 7)) / 7);
+
+    const h = boot({
+      modules: ['bulletin.js'],
+      user: ADMIN,
+      data: {
+        users: USERS, stores: STORES_23,
+        bulletins: [{
+          id: 'b-1', week_number: wk, year: thu.getFullYear(), status: 'published',
+          created_at: iso,
+          content: { calendar: { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] },
+                     columns: { trade: [], warehouse: [], admin: [] } }
+        }],
+        bulletin_promotions: [], recurring_tasks: [], bulletin_subtasks: [],
+        recurring_task_completions: [], subtask_completions: [],
+        bulletin_tasks: [{
+          id: 't-1', title: 'Задача', department: 'trade', task_type: 'info',
+          due_dates: [iso], target_stores: null, bulletin_id: 'b-1'
+        }],
+        task_completions: REAL.map(s => ({
+          task_id: 't-1', store_name: s, status: 'done', completion_date: iso
+        }))
+      }
+    });
+    if (!h.doc.getElementById('mod-bulletin')) {
+      const el = h.doc.createElement('div'); el.id = 'mod-bulletin';
+      h.doc.body.appendChild(el);
+    }
+    if (delayUsers) {
+      /* Отговорът за users идва СЛЕД цялата верига на бюлетина. */
+      const real = h.w.fetch;
+      h.w.fetch = function (url, init) {
+        if (String(url).indexOf('/users') < 0) return real(url, init);
+        return new Promise(function (resolve) {
+          let n = 0;
+          (function tick() {
+            if (++n > 40) { real(url, init).then(resolve); return; }
+            setTimeout(tick, 0);
+          })();
+        });
+      };
+    }
+    return h;
+  }
+
+  function calCounts(doc) {
+    const cal = doc.querySelector('#sec-calendar');
+    return cal ? (cal.textContent.match(/\d+\/\d+/g) || []).join(' ') : null;
+  }
+
+  /* ── Път А: нормалният ред (кешът е по-бърз от веригата на бюлетина) ── */
+  {
+    const h = bootFull(false);
+    guard('loadBulletin() не хвърля', () => h.w.loadBulletin());
+    for (let i = 0; i < 12; i++) await ticks();
+    ok('[А] календарът се рендира', !!h.doc.querySelector('#sec-calendar'));
+    ok('[А] числата са налице веднага', calCounts(h.doc) === '18/18', String(calCounts(h.doc)));
+  }
+
+  /* ── Път Б: кешът закъснява след първия рендер ── */
+  {
+    const h = bootFull(true);
+    guard('loadBulletin() не хвърля', () => h.w.loadBulletin());
+    for (let i = 0; i < 12; i++) await ticks();
+    ok('[Б] първият рендер е минал', !!h.doc.querySelector('#sec-calendar'));
+    ok('[Б] кешът още го няма', !h.w.reportableStoresCache,
+      String(h.w.reportableStoresCache && h.w.reportableStoresCache.length));
+    ok('[Б] числата още липсват (очаквано)', calCounts(h.doc) === '',
+      String(calCounts(h.doc)));
+
+    /* Кешът пристига -> .then прави втори рендер. Никой не пипа таба. */
+    for (let i = 0; i < 80; i++) await ticks();
+    ok('[Б] кешът вече е зареден',
+      !!h.w.reportableStoresCache && h.w.reportableStoresCache.length === 18,
+      String(h.w.reportableStoresCache && h.w.reportableStoresCache.length));
+    ok('[Б] числата се появяват САМИ, без ръчно пре-рендиране',
+      calCounts(h.doc) === '18/18', String(calCounts(h.doc)));
+  }
+
   report();
 })();
