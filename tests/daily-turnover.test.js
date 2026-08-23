@@ -149,6 +149,45 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
       w.kasaTabBar() === '');
   }
 
+  section('1б. Валутата е EUR, не лв.');
+  {
+    /* От 01.01.2026 официалната валута е еврото. Числата в daily_turnover
+       СА в евро и не се конвертират — грешен беше само етикетът. */
+    const { w, doc } = env();
+    ok('dtMoney(5847.65) завършва на EUR',
+      /EUR$/.test(w.dtMoney(5847.65)), w.dtMoney(5847.65));
+    ok('и стойността е непроменена, само етикетът',
+      w.dtMoney(5847.65) === '5847.65 EUR', w.dtMoney(5847.65));
+    ok('нула също', w.dtMoney(0) === '0.00 EUR', w.dtMoney(0));
+    ok('никъде не остава „лв."', w.dtMoney(1).indexOf('лв') < 0);
+
+    /* Един и същ вид в двата таба на Каса — kasa.js ползва fmtMoney().
+       ⚠️ fmtMoney е известна колизия (KNOWN_COLLISIONS в smoke.js): kasa.js
+       дава ' EUR' с интервал, history.js — 'EUR' без. В браузъра печели
+       history.js по ред на зареждане. Тук history.js НЕ е зареден, затова
+       w.fmtMoney е версията на kasa.js — с нея се сравняваме, както е
+       указано. Ако някой ден двете се уеднаквят, тази проверка не се чупи. */
+    ok('форматът съвпада с fmtMoney() от kasa.js',
+      w.dtMoney(1234.5) === w.fmtMoney(1234.5), w.dtMoney(1234.5) + ' / ' + w.fmtMoney(1234.5));
+
+    /* И в рендерирания изглед, не само във функцията. */
+    const box = doc.createElement('div');
+    box.innerHTML = w.dtInpRow('Общ оборот', 'dt-total', 'EUR');
+    ok('наставката до полето е EUR', box.textContent.indexOf('EUR') >= 0);
+    ok('и не е лв.', box.textContent.indexOf('лв') < 0);
+  }
+  {
+    const h = await view({
+      data: {
+        daily_turnover: [rec({ id: 'e1', date: dayOffset(0), total_turnover: 5847.65, cash_turnover: 3847.65, card_turnover: 2000, customers: 100 })],
+        stores: STORES
+      }
+    });
+    const txt = h.doc.getElementById('mod-kasa').textContent;
+    ok('записаният оборот се показва в EUR', txt.indexOf('5847.65 EUR') >= 0);
+    ok('в целия изглед няма „лв."', txt.indexOf('лв.') < 0);
+  }
+
   section('2. Оборот е отделен от рамката на счетоводните табове');
   {
     const h = await view();
@@ -294,13 +333,13 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
   {
     const h = await view();
     await submit(h, '102.00', '60.00', '40.00', '25');
-    ok('разлика 2 лв. → НЕ тръгва POST', posts(h).length === 0);
+    ok('разлика 2 EUR → НЕ тръгва POST', posts(h).length === 0);
     ok('казва защо', h.calls.toast.some(t => /не съвпада със сбора/.test(t)));
   }
   {
     const h = await view();
     await submit(h, '100.05', '50.00', '50.00', '25');
-    ok('разлика 0,05 лв. минава (закръгляне на фискалното устройство)',
+    ok('разлика 0,05 EUR минава (закръгляне на фискалното устройство)',
       posts(h).length === 1);
   }
 
@@ -308,22 +347,22 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
   {
     const h = await view();
     await submit(h, '101.00', '50.00', '50.00', '10');
-    ok('точно 1,00 лв. разлика МИНАВА', posts(h).length === 1);
+    ok('точно 1,00 EUR разлика МИНАВА', posts(h).length === 1);
   }
   {
     const h = await view();
     await submit(h, '101.01', '50.00', '50.00', '10');
-    ok('1,01 лв. разлика НЕ минава', posts(h).length === 0);
+    ok('1,01 EUR разлика НЕ минава', posts(h).length === 0);
   }
   {
     const h = await view();
     await submit(h, '99.00', '50.00', '50.00', '10');
-    ok('–1,00 лв. разлика МИНАВА (толерансът е двупосочен)', posts(h).length === 1);
+    ok('–1,00 EUR разлика МИНАВА (толерансът е двупосочен)', posts(h).length === 1);
   }
   {
     const h = await view();
     await submit(h, '98.99', '50.00', '50.00', '10');
-    ok('–1,01 лв. разлика НЕ минава', posts(h).length === 0);
+    ok('–1,01 EUR разлика НЕ минава', posts(h).length === 0);
   }
 
   section('10. Празни и невалидни стойности');

@@ -36,7 +36,15 @@ var oborotTaskWarn=false;  /* оборотът е записан, но отмя�
 function dtToday(){return toLocalISO(new Date());}
 function dtDay(n){var d=new Date();d.setDate(d.getDate()-n);return toLocalISO(d);}
 function dtPad(n){return (n<10?'0':'')+n;}
-function dtMoney(n){return (parseFloat(n)||0).toFixed(2)+' лв.';}
+/* EUR, не лв. — от 01.01.2026 това е официалната валута. Числата в
+   daily_turnover открай време са в евро; грешен беше само етикетът.
+   Самостоятелна е нарочно, не ползва fmtMoney(): fmtMoney е дефинирана
+   ДВА пъти — kasa.js:31 със ' EUR' (интервал) и history.js:399 с 'EUR'
+   (без). В браузъра печели history.js, защото се зарежда след kasa.js.
+   Следствие: Вечерен оборот показва ' EUR' с интервал, а Каса и История —
+   без. Козметично разминаване, което съществува и днес между Каса и
+   История; поправя се, като двете fmtMoney се уеднаквят, не оттук. */
+function dtMoney(n){return (parseFloat(n)||0).toFixed(2)+' EUR';}
 /* Запетаята като десетичен знак е рефлекс на българската клавиатура.
    При type="number" браузърът връща празно, тоест проверката за празно
    поле я хваща — това тук е за случаите, в които стойността все пак стигне. */
@@ -197,9 +205,9 @@ function dtTodayBlock(){
   return '<div class="card" style="margin-bottom:18px;">'+
     '<div class="card-title">&#128176; Оборот за днес — '+fmtDate(dtToday())+'</div>'+
     '<table style="width:100%;font-size:13px;">'+
-      dtInpRow('Общ оборот','dt-total','лв.')+
-      dtInpRow('В брой','dt-cash','лв.')+
-      dtInpRow('С карта','dt-card','лв.')+
+      dtInpRow('Общ оборот','dt-total','EUR')+
+      dtInpRow('В брой','dt-cash','EUR')+
+      dtInpRow('С карта','dt-card','EUR')+
       dtInpRow('Брой клиенти','dt-customers','',true)+
       '<tr><td style="padding:6px 4px;color:#64748b;">Забележка</td>'+
         '<td style="padding:6px 4px;">'+
@@ -440,7 +448,7 @@ function submitOborot(){
     toast('Броят клиенти трябва да е цяло число, не по-малко от нула','#dc2626');return;
   }
 
-  /* 3) Толеранс 1 лв. заради закръгляния на фискалното устройство.
+  /* 3) Толеранс 1 EUR заради закръгляния на фискалното устройство.
         Закръглянето до стотинки е ПРЕДИ сравнението, защото в плаваща
         запетая 100.05-50-50 дава 0.049999999999997 — без него граничните
         случаи се решават от двоичния шум, не от правилото. */
