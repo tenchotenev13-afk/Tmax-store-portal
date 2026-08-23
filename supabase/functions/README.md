@@ -30,7 +30,7 @@ Entrypoint-ът се взима от `get_edge_function` и при два от �
 | `kasa-access-check` | `index.ts` | ✅ |
 | `set-history-pin` | `index.ts` | ✅ |
 | `portal-push` | `index.ts` | ✅ |
-| `resend-email` | **`send-email.ts`** | ❌ **не** |
+| `resend-email` | **`send-email.ts`** | ✅ (от 23.08.2026 — v53) |
 | `send-scheduled-report` | `index.ts` | ✅ |
 | `swift-handler` | **`rm-push-index.ts`** | ✅ |
 | `dynamic-responder` | `index.ts` | ✅ |
