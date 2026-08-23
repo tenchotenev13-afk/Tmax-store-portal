@@ -39,6 +39,7 @@ const TESTS = [
   'delete-three-states.test.js',
   'storno-embed-no-in-list.test.js',
   'linked-module-buttons.test.js',
+  'recurring-edit-department.test.js',
   'bulletin-week-default.test.js',
   'bulletin-completion-day-lock.test.js',
   'bulletin-store-denominator.test.js',

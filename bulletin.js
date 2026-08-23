@@ -23,6 +23,16 @@ var DEPTS = {
   admin:     {label:'Администрация',  icon:'⚙️', color:'#4c1d95', bg:'#f5f3ff', bdr:'#ddd6fe', hdr:'#5b21b6'}
 };
 var DCOLS  = ['trade','warehouse','admin'];
+/* <option>-и за отдел — по същия модел като taskTypeOptsHtml() и
+   linkedModuleOptsHtml() по-долу. Списъкът е DCOLS/DEPTS, за да не се
+   разминат при бъдеща промяна. Нарочно БЕЗ стойност по подразбиране:
+   при празно `selected` браузърът показва първата опция, точно както
+   беше в модала за промоция, откъдето този ред е изнесен. */
+function deptOptsHtml(selected){
+  return DCOLS.map(function(dk){
+    return '<option value="'+dk+'"'+(dk===selected?' selected':'')+'>'+DEPTS[dk].label+'</option>';
+  }).join('');
+}
 
 /* ВИДОВЕ ЗАДАЧА — определят какво трябва магазинът, за да отбележи
    задачата изпълнена, и производен приоритет (само за визуализация,
@@ -344,7 +354,7 @@ function openPromoModal(id){
     '<label class="fl">Описание</label><input class="fi" id="pm-desc" value="'+esc(p?p.description||'':'')+'" placeholder="Допълнителна информация, линк и т.н.">'+
     '<label class="fl">Отдел</label><select class="fi" id="pm-dept">'+
       '<option value="all"'+(!p||p.department==='all'?' selected':'')+'>Всички</option>'+
-      DCOLS.map(function(dk){return '<option value="'+dk+'"'+(p&&p.department===dk?' selected':'')+'>'+DEPTS[dk].label+'</option>';}).join('')+
+      deptOptsHtml(p&&p.department)+
     '</select>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
     '<div><label class="fl">Начална дата *</label><input type="date" class="fi" id="pm-start" value="'+(p?String(p.start_date).slice(0,10):today())+'"></div>'+
@@ -1669,6 +1679,12 @@ function openEditRecurringModal(taskId) {
     recWeekdaysCheckboxesHtml('erec-weekdays', t.due_weekdays||(t.due_weekday!==null&&t.due_weekday!==undefined?[t.due_weekday]:[])) +
     '<label class="fl">Час (по избор)</label><input type="time" class="fi" id="erec-time" value="'+esc(t.due_time||'')+'">' +
     '<label class="fl">Вид задача</label><select class="fi" id="erec-type">'+taskTypeOptsHtml(t.task_type)+'</select>' +
+    /* Отделът се задава при създаване от блока, в който е натиснат бутонът.
+       Сгрешеният отдел досега можеше да се поправи само с ръчен SQL — а
+       календарът групира по отдел (DCOLS) и стрелките ▲▼ местят само в
+       рамките на отдела, тоест задачата не можеше да стигне до мястото си
+       по никакъв начин от екрана. */
+    '<label class="fl">Отдел</label><select class="fi" id="erec-dept">'+deptOptsHtml(t.department)+'</select>' +
     '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
     '<select class="fi" id="erec-stores" multiple size="6" style="height:120px;"></select>' +
     '<label class="fl">Групи за докладване</label>' +
@@ -1695,7 +1711,20 @@ function submitEditRecurring(taskId) {
   var stores = bulReadStoreMultiSelect('erec-stores');
   var reportGroups = readReportGroupsCheckboxes('erec-report-groups');
   var linkedModule = (document.getElementById('erec-linked-module')||{}).value||null;
-  sbPatch('recurring_tasks','id=eq.'+taskId,{title:title,description:desc,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
+  var cur = recurringTasks.find(function(x){ return String(x.id)===String(taskId); });
+  var dept = (document.getElementById('erec-dept')||{}).value || (cur&&cur.department) || DCOLS[0];
+  var payload = {title:title,description:desc,department:dept,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null};
+  /* Смяна на отдел -> задачата отива на ДЪНОТО на новия. sort_order е
+     глобален, а moveRecInDept() преномерира 1..N в рамките на отдела, тоест
+     числата се повтарят между отделите: днес „Администрация" заема 1–11, а
+     единствената задача в „Склад" е с 9. Без това преместената задача би се
+     появила по средата на чуждия списък, без потребителят да разбере защо.
+     Взима се max, не броят — гарантира последно място и при дупки. */
+  if (cur && cur.department !== dept) {
+    payload.sort_order = recurringTasks.filter(function(x){ return x.department===dept; })
+      .reduce(function(m,x){ return Math.max(m, x.sort_order||0); }, 0) + 1;
+  }
+  sbPatch('recurring_tasks','id=eq.'+taskId,payload).then(function(r){
     if (!r.ok) { toast('Грешка при запис','#dc2626'); return; }
     var el = document.getElementById('edit-rec-ov');
     if (el) el.remove();
