@@ -54,6 +54,7 @@ const TESTS = [
   'report-ranking-plural.test.js',
   'report-edge-sync.test.js',
   'email-encoding.test.js',
+  'email-subject-rfc2047.test.js',
   'daily-turnover.test.js',
   'kasa-tab-routing.test.js',
   'pallets-summary.test.js',

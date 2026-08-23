@@ -353,8 +353,15 @@ const CASES = [
     ok('push частта е непокътната — OneSignal се вика както преди',
       src.indexOf('https://api.onesignal.com/notifications') > 0 &&
       /headings:\s*\{\s*bg:\s*body\.title/.test(src));
-    ok('transliterate() за темата е непокътната',
-      /subject:\s*transliterate\(subject\)/.test(src));
+    /* Кодирането на ТЕМАТА се смени на 23.08.2026 (encodeSubject, RFC 2047) и
+       се покрива от tests/email-subject-rfc2047.test.js. Тук проверяваме само
+       това, което засяга ТЯЛОТО: че двата пътя не са се слели — темата има
+       свои правила (75 символа на encoded word) и base64Part(), която реже на
+       76, би дала невалидно заглавие. */
+    ok('темата НЕ се строи с помощниците на тялото',
+      !/subject:\s*base64Part\(/.test(src));
+    ok('темата минава през своята функция',
+      /subject:\s*encodeSubject\(subject\)/.test(src));
     ok('прикачените файлове остават base64 с encoding: base64',
       /encoding:\s*'base64'/.test(src));
   }

@@ -77,15 +77,11 @@ function htmlToPlainText(html: string): string {
     .trim();
 }
 
-/* Транслитерира кирилица към латиница за темата на писмото. denomailer има
-   неотстраним бъг в собственото си RFC 2047 кодиране на кирилица в Subject -
-   изпробвани са 3 различни подхода (собствено base64 кодиране, транслитерация,
-   и директно ползване на вградената quotedPrintableEncode() с ръчно "сгъване"),
-   всички без успех освен транслитерацията. Тялото на писмото е защитено от
-   аналогичен клас бъгове по друг начин - base64Part() по-долу заобикаля
-   енкодера на denomailer изцяло. За темата това не става: denomailer винаги
-   я прекарва през quotedPrintableEncodeInline() и няма поле, което да се
-   препредава дословно. Смяната на темите е отделно решение. */
+/* Транслитерира кирилица към латиница за темата на писмото.
+   НЕ СЕ ВИКА от 23.08.2026 - темата вече минава през encodeSubject() по-долу
+   и излиза на кирилица. Функцията остава нарочно: ако новият подход се спъне
+   в някой пощенски сървър, връщането е смяна на един ред (subject: ...) и
+   нищо друго. Не я трий. */
 function transliterate(str: string): string {
   var map: Record<string, string> = {
     а:"a",б:"b",в:"v",г:"g",д:"d",е:"e",ж:"zh",з:"z",и:"i",й:"y",к:"k",л:"l",
@@ -109,6 +105,72 @@ function base64Part(mimeType: string, text: string) {
   var lines: string[] = [];
   for (var j = 0; j < b64.length; j += 76) { lines.push(b64.slice(j, j + 76)); }
   return { mimeType: mimeType, content: lines.join('\r\n'), transferEncoding: 'base64' };
+}
+
+/* Кодира темата по RFC 2047 в base64 encoded words: =?UTF-8?B?<base64>?=
+   Заменя transliterate(), тоест темите вече излизат на кирилица.
+
+   ЗАЩО СОБСТВЕНА ФУНКЦИЯ, А НЕ ВГРАДЕНАТА
+   denomailer прекарва всяка тема през quotedPrintableEncodeInline()
+   (config/mail/mod.ts:94) - за нея НЯМА поле като mimeContent, което да я
+   препредава дословно. Резултатът от вградената е негоден по ТРИ независими
+   причини наведнъж (проверено върху "ТеМАХ — Оборот" и "ТеМАХ — Седмичен
+   репорт"):
+     1. литерален интервал ВЪТРЕ в encoded word - quotedPrintableEncode
+        пропуска код 32 непокътнат, а по RFC 2047 интервалът ПРЕКРАТЯВА
+        encoded word-а. Това само по себе си чупи дори кратка тема;
+     2. меко пренасяне "=\r\n" вътре в encoded word - също забранено;
+     3. дължина 92 и 141 символа при допустими 75.
+   Тоест записаното по-рано "неотстраним бъг" е било вярно като наблюдение,
+   но не и като диагноза - вградената функция просто ползва енкодера за ТЯЛО
+   на място, където правилата са други.
+
+   ЗАЩО РАБОТИ ЗАОБИКАЛЯНЕТО
+   quotedPrintableEncodeInline() връща низа НЕПОКЪТНАТ, ако той е чист ASCII
+   и не започва с "=?" (config/mail/encoding.ts:77). Готовият encoded word е
+   чист ASCII, но започва точно с "=?" - затова слагаме един интервал отпред.
+   Интервалът е folding whitespace и се отхвърля при разбора на заглавието.
+
+   РАЗМЕРИ
+   RFC 2047 дава таван 75 символа на encoded word, което само по себе си би
+   позволило 45 байта на дума. Ползваме 39, защото стягащото ограничение е
+   друго - дължината на ПЪРВИЯ ред. Отгоре му седят 11 символа, не 10:
+   writeCmd("Subject: ", subject) слепва аргументите с интервал
+   (client/basic/connection.ts:114), тоест "Subject: " (9) + слепващият
+   интервал (1) + нашият водещ интервал (1). За ред <= 78 остават 67 за
+   думата; 67 - 12 за обвивката = 55 за base64; най-голямото кратно на 4 под
+   55 е 52, тоест 39 байта. Резултат: дума от 64, първи ред 75.
+   (78 е препоръка на RFC 5322, твърдият таван е 998 - тоест дори да се
+   сбъркат няколко символа, писмото не се чупи.)
+   Режем на границите на КОДОВИ ТОЧКИ, не на байтове - точно това изяждаше
+   символи в тялото. Думите се съединяват с CRLF + интервал (сгъване на
+   заглавие по RFC 5322); при разбора whitespace между съседни encoded words
+   се изхвърля, тоест темата се сглобява обратно дословно. */
+function encodeSubject(subject: string): string {
+  /* Чист ASCII минава без пипане - така темите на латиница (напр. тези на
+     send-oborot-report) остават точно каквито са подадени. Изключение е тема,
+     започваща с "=?", която иначе би била увита втори път. */
+  if (!/[^\u0000-\u007f]/.test(subject) && subject.indexOf('=?') !== 0) {
+    return subject;
+  }
+  var enc = new TextEncoder();
+  var chars = Array.from(subject); /* пази сурогатните двойки цели */
+  var words: string[] = [];
+  var buf: number[] = [];
+  var flush = function () {
+    if (!buf.length) { return; }
+    var bin = '';
+    for (var k = 0; k < buf.length; k++) { bin += String.fromCharCode(buf[k]); }
+    words.push('=?UTF-8?B?' + btoa(bin) + '?=');
+    buf = [];
+  };
+  for (var i = 0; i < chars.length; i++) {
+    var b = enc.encode(chars[i]);
+    if (buf.length + b.length > 39) { flush(); }
+    for (var j = 0; j < b.length; j++) { buf.push(b[j]); }
+  }
+  flush();
+  return ' ' + words.join('\r\n ');
 }
 
 function guessContentType(filename: string): string {
@@ -190,7 +252,7 @@ Deno.serve(async (req) => {
           to: Array.isArray(to) ? to : [to],
           cc: cc ? (Array.isArray(cc) ? cc : [cc]) : undefined,
           replyTo: replyTo || undefined,
-          subject: transliterate(subject),
+          subject: encodeSubject(subject),
           /* НЕ подаваме `content`/`html` - те минават през счупения
              quoted-printable енкодер. `mimeContent` се препредава дословно.
              Редът е важен: при multipart/alternative пощата показва
