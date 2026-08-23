@@ -40,7 +40,7 @@ function addStore(){
     document.getElementById('new-store-name').value='';
     document.getElementById('new-store-city').value='';
     logAudit('store_added',{details:{name:name,city:city}});
-    invalidateStoresCache();
+    invalidateStoreCaches();
     toast('✓ Магазинът е добавен');loadStoresAdmin();
   });
 }
@@ -62,7 +62,7 @@ function deleteStore(id,name){
     /* Одитът се пише САМО след потвърдено изтриване — иначе логът твърди
        "магазинът е изтрит" за нещо, което не е станало. */
     logAudit('store_deleted',{details:{id:id,name:name}});
-    invalidateStoresCache();
+    invalidateStoreCaches();
     toast('✓ Изтрит');loadStoresAdmin();
   });
 }
@@ -304,6 +304,10 @@ function deleteUser(id, email){
       loadUsersAdmin(); return;
     }
     logAudit('user_deleted',{details:{target_user_id:id,target_email:email}});
+    /* reportableStoresCache се строи от users — ако това е бил последният
+       акаунт на даден обект, знаменателят на бройките в Бюлетина трябва да
+       падне веднага, а не при следващото презареждане на страницата. */
+    invalidateStoreCaches();
     toast('✓ Потребителят е изтрит');
     loadUsersAdmin();
   });
@@ -424,6 +428,12 @@ function submitUserModal(){
   var editingId=_userEditId; /* запазваме преди closeUserModal() да го нулира */
 
   function afterPassword(){
+    /* И при създаване, и при редакция: reportableStoresCache се строи от
+       users, тоест първият акаунт за обект без такъв (напр. Пазарджик) го
+       добавя към знаменателя в Бюлетина, а смяна на store_name може да го
+       извади. Без това числата остават стари до презареждане на страницата
+       и изглежда, че „новият обект не се брои". */
+    invalidateStoreCaches();
     toast('✅ '+(editingId?'Записано!':'Колегата е добавен!'));
     closeUserModal();
     loadUsersAdmin();

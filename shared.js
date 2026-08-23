@@ -374,9 +374,14 @@ function itemsPrintBlock(o){
    за transport_orders - само собствения магазин или глобална роля (admin/accounting/logistics). */
 /* ── Списък на всички магазини/складове (кеширан) - за dropdown полета вместо свободен текст ── */
 var allStoresCache=null;
-/* Нулира кеша с магазини - извиква се от Администрация при добавяне/изтриване
-   на магазин, за да се вижда веднага навсякъде, без презареждане на страницата. */
-function invalidateStoresCache(){ allStoresCache=null; reportableStoresCache=null; }
+/* Нулира ДВАТА кеша с обекти - извиква се от Администрация при промяна на
+   магазин (добавяне/изтриване) И на потребител (създаване/редакция/изтриване),
+   за да се вижда веднага навсякъде, без презареждане на страницата.
+   Потребителите също са в списъка нарочно: reportableStoresCache се строи от
+   users, затова първият акаунт за обект без такъв мени знаменателя на
+   бройките в Бюлетина. Затова и името е "StoreCaches", не "StoresCache" —
+   вторият кеш не идва от таблицата stores. */
+function invalidateStoreCaches(){ allStoresCache=null; reportableStoresCache=null; }
 function loadAllStores(){
   if(allStoresCache)return Promise.resolve(allStoresCache);
   return sbGet('stores','select=name&order=name').then(function(data){

@@ -33,6 +33,7 @@ const TESTS = [
   'stock-diff-print.test.js',
   'shared-write-errors.test.js',
   'admin-user-create-select.test.js',
+  'store-cache-invalidation.test.js',
   'return-proof.test.js',
   'sd-badge-hidden-tab.test.js',
   'delete-three-states.test.js',

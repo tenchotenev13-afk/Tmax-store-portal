@@ -120,7 +120,7 @@ function env(user, dirTab, rows, reports) {
   h.w.sdSearch = '';
   h.w.sdDirTab = dirTab || 'supplier';
   /* Кешовете в shared.js са модулни — нулират се, за да не текат между env-ове. */
-  h.w.invalidateStoresCache();
+  h.w.invalidateStoreCaches();
   h.w.invalidateSuppliersCache();
   return h;
 }
