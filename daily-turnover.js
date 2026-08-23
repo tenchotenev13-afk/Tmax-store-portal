@@ -24,6 +24,7 @@ var oborotCORows=[];       /* редовете за избраната дата 
 var oborotCOStores=[];     /* имената на всички обекти — изглед ЦО */
 var oborotCODate=null;     /* избраната дата в изгледа ЦО */
 var oborotSubmitting=false;/* пази от двоен клик, докато POST-ът е във въздуха */
+var oborotTaskWarn=false;  /* оборотът е записан, но отмятането в Бюлетина не мина */
 
 /* ─── HELPERS ───────────────────────────────────────────────── */
 /* toLocalISO() живее в bulletin.js:466 и НЕ се предефинира тук.
@@ -64,8 +65,53 @@ function dtAvg30(){
   return n?sum/n:0;
 }
 
+/* ─── ПРАВО НА ДОСТЪП ───────────────────────────────────────── */
+/* Същият списък като в linkedModuleAllowed() (bulletin.js) и същият, по който
+   kasaTabBar() решава дали изобщо да върне лента. Проверката стои и ТУК, а не
+   само на входа: loadOborot() е глобална и се вика от kasaTab(), от loadKasa()
+   и от конзолата. Скрит бутон не е защита — точно както disabled в markup-а на
+   чекбокса не спира прякото извикване на обработчика. */
+/* Кой ПОДАВА оборот — от обект. Същият списък като в linkedModuleAllowed()
+   (bulletin.js) и същият, по който kasaTabBar() решава дали да върне лента. */
+var OBOROT_ROLES=['kasa','admin','manager'];
+/* Кой ВИЖДА справката по цялата верига — от Централен офис.
+   Нарочно по-тесен от „всички в ЦО": там има 58 активни потребителя (проверено
+   23.08.2026 — 20 accounting, 15 supply, 12 admin, 9 marketing, 2 user), а
+   оборотът на веригата досега стигаше до трима души по имейл. Отваряне на
+   справката за целия офис би било тихо разширяване на достъпа, а не следствие
+   от тази задача. */
+var OBOROT_CO_ROLES=['admin','accounting'];
+
+function oborotCanSubmit(){
+  return !!currentUser&&OBOROT_ROLES.indexOf(currentUser.role)>=0;
+}
+/* Двата случая са РАЗЛИЧНИ права, не едно с изключение: обект подава, ЦО чете.
+   Затова и списъците са два — 'kasa' подава, но не чете чуждите обороти;
+   'accounting' чете, но не подава. */
+function oborotAllowed(){
+  if(!currentUser) return false;
+  return isCentralOfficeUser()
+    ? OBOROT_CO_ROLES.indexOf(currentUser.role)>=0
+    : oborotCanSubmit();
+}
+/* Празен екран изглежда като счупен. Казва се кой подава оборота и какво да
+   направи този, който смята, че трябва да има достъп. */
+function dtNoAccessBlock(){
+  return '<div class="card">'+
+    '<div style="display:flex;align-items:center;gap:8px;background:#f8fafc;'+
+      'border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;'+
+      'font-size:13px;color:#64748b;">'+
+      '<span>&#128274;</span>'+
+      '<span>Вечерният оборот се подава от управител, каса или администратор. '+
+      'Ако смяташ, че трябва да имаш достъп, обади се в офиса.</span>'+
+    '</div>'+
+  '</div>';
+}
+
 /* ─── ЗАРЕЖДАНЕ ─────────────────────────────────────────────── */
 function loadOborot(){
+  /* Без право не се пращат и заявки — не само формата не се рендира. */
+  if(!oborotAllowed()){ renderOborot(); return; }
   if(isCentralOfficeUser()){
     /* Датата се решава при отваряне, не при зареждане на файла — таб,
        оставен отворен през полунощ, иначе би питал за вчера. */
@@ -111,13 +157,17 @@ function renderOborot(){
     '<div class="pg-title">&#128176; Каса</div>'+
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — Вечерен оборот</div>'+
     kasaTabBar()+
-    (isCentralOfficeUser()?dtCOView():dtStoreView())+
+    /* Втора проверка на същото място, където се произвежда формата. Дори
+       renderOborot() да бъде извикана директно, поле за въвеждане не излиза. */
+    (oborotAllowed()?(isCentralOfficeUser()?dtCOView():dtStoreView()):dtNoAccessBlock())+
   '</div>';
 }
 
 /* ── Изглед МАГАЗИН ── */
+/* Предупреждението е НАД картата, не вътре в нея: то важи и когато записът
+   още не се е върнал от базата и долу пак се вижда формата. */
 function dtStoreView(){
-  return dtTodayBlock()+dtLast7Block();
+  return dtTaskWarnBand()+dtTodayBlock()+dtLast7Block();
 }
 
 function dtTodayBlock(){
@@ -162,6 +212,17 @@ function dtTodayBlock(){
       '<button onclick="submitOborot()" class="btn btn-green">Запиши оборота</button>'+
     '</div>'+
   '</div>';
+}
+
+/* Toast-ът живее 2.5 секунди; разминаването между Бюлетина и оборота живее до
+   ръчна намеса. Затова остава и написано в изгледа. */
+function dtTaskWarnBand(){
+  if(!oborotTaskWarn) return '';
+  return '<div id="dt-task-warn" style="display:flex;align-items:center;gap:8px;background:#fffbeb;'+
+    'border:1px solid #d97706;border-radius:8px;padding:10px 12px;margin-bottom:14px;'+
+    'color:#d97706;font-size:13px;">'+
+    '<span>&#9888;</span><span>Оборотът е записан, но задачата в Бюлетина не се отметна. '+
+    'Обади се в офиса — тя не се отмята ръчно.</span></div>';
 }
 
 function dtRoRow(label,val,strong){
@@ -307,9 +368,62 @@ function dtCOView(){
   '</div>';
 }
 
+/* ─── АВТОМАТИЧНО ОТМЯТАНЕ В БЮЛЕТИНА ──────────────────────── */
+/* Изпълнението на задачата идва от ДАННИТЕ, не от твърдение: щом оборотът е
+   записан, задачата се затваря сама и ръчен чекбокс няма (виж bulAutoLocked()
+   в bulletin.js). Така статистиката в Бюлетина и списъкът „кой не е подал" в
+   имейла броят едно и също, защото четат един източник.
+
+   Липсваща или неактивна задача НЕ е грешка — оборотът е записан, просто няма
+   какво да се отмята. Затова тихо излизане, без toast.
+
+   Ограничение, което си струва да се знае: sbGet резолвва с [] и при успех без
+   редове, и при провал на заявката. Двете не се различават оттук. Провалът
+   обаче не е ням — самият sbGet показва червен toast и пише в конзолата,
+   затова не добавяме второ съобщение. Виж „Тихи откази при sbGet" в
+   docs/PATTERNS.md. */
+function dtMarkBulletinTask(){
+  var store=currentUser.store_name, day=dtToday();
+  return sbGet('recurring_tasks','select=id&linked_module=eq.oborot&active=is.true')
+    .then(function(rows){
+      var list=Array.isArray(rows)?rows:[];
+      if(!list.length) return;
+      var rid=list[0].id;
+      /* Второ отмятане за същия ден би дало дублиран ред — Бюлетинът брои
+         редове, не уникални обекти. */
+      var q='select=id&recurring_task_id=eq.'+encodeURIComponent(rid)+
+            '&store_name=eq.'+encodeURIComponent(store)+
+            '&completion_date=eq.'+day;
+      return sbGet('task_completions',q).then(function(done){
+        if(Array.isArray(done)&&done.length) return;
+        return sbPost('task_completions',{
+          recurring_task_id:rid,
+          task_id:null,
+          store_name:store,
+          completed_by:currentUser.display_name,
+          completion_date:day,
+          status:'done'
+        }).then(function(res){
+          if(res&&res.ok) return;
+          /* Оборотът е по-важният запис и НЕ се връща назад заради това. Но
+             мълчанието тук значи Бюлетин и имейл да броят различно, затова
+             се казва — и остава видимо в изгледа, не само за 2.5 секунди. */
+          oborotTaskWarn=true;
+          var msg=(res&&res.error&&(res.error.message||res.error.hint))||('HTTP '+((res&&res.status)||'—'));
+          try{console.error('dtMarkBulletinTask task_completions → '+msg);}catch(e){}
+          toast('Оборотът е записан, но задачата в Бюлетина не се отметна','#d97706');
+        });
+      });
+    });
+}
+
 /* ─── ЗАПИС ─────────────────────────────────────────────────── */
 function submitOborot(){
   if(oborotSubmitting)return;
+  /* Третата проверка е в самия обработчик. Формата вече не се рендира без
+     право, но submitOborot() е глобална — липсващи полета не са защита. */
+  if(!oborotCanSubmit()){ toast('Нямаш право да подаваш оборот','#dc2626'); return; }
+  oborotTaskWarn=false;
 
   /* 1) Всички задължителни полета са попълнени. */
   var sTotal=v('dt-total'),sCash=v('dt-cash'),sCard=v('dt-card'),sCust=v('dt-customers');
@@ -358,7 +472,9 @@ function submitOborot(){
     oborotSubmitting=false;
     if(res&&res.ok){
       toast('Оборотът е записан');
-      loadOborot();
+      /* Отмятането е СЛЕД зеления toast и преди презареждането, за да е
+         маркерът вече вдигнат, когато изгледът се рендира наново. */
+      dtMarkBulletinTask().then(function(){loadOborot();});
       return;
     }
     var status=res&&res.status;

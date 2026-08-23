@@ -792,6 +792,15 @@ function setupTabsForRole(){
   });
 }
 function showModule(mod){
+  /* 'oborot' НЕ е самостоятелен модул — няма контейнер mod-oborot и затова
+     не влиза в списъка по-долу. Той е подтаб на Каса, така че показваме
+     Каса и подсказваме кой подтаб да отвори. loadKasa() има switch по
+     kasaView с клон за 'oborot', тоест зареждането не се дублира. */
+  if(mod==='oborot'){
+    if(typeof kasaView!=='undefined') kasaView='oborot';
+    showModule('kasa');
+    return;
+  }
   ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','today'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });

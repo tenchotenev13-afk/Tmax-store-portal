@@ -100,7 +100,10 @@ var LINKED_MODULES = [
   { value:'contacts', label:'📇 Контакти' },
   { value:'reference', label:'🛡️ Гаранции' },
   { value:'history', label:'📊 История' },
-  { value:'pallets', label:'🟫 Палети' }
+  { value:'pallets', label:'🟫 Палети' },
+  /* Не е самостоятелен модул, а подтаб на Каса. showModule() го пренасочва —
+     виж клона за 'oborot' там. */
+  { value:'oborot', label:'💰 Вечерен оборот' }
 ];
 function linkedModuleOptsHtml(selected){
   return LINKED_MODULES.map(function(m){
@@ -118,7 +121,10 @@ function linkedModuleLabel(value){
 function linkedModuleAllowed(value){
   if(!value) return false;
   if(value==='history') return isGlobal();
-  if(value==='kasa') return ['kasa','admin','manager'].indexOf(currentUser&&currentUser.role)>=0;
+  /* 'oborot' е подтаб на Каса и се пуска по същото право като нея. Без този
+     ред бутонът в календара би бил път до формата за роли, които през самия
+     таб Каса не стигат до нея — kasaTabBar() връща празна лента за тях. */
+  if(value==='kasa'||value==='oborot') return ['kasa','admin','manager'].indexOf(currentUser&&currentUser.role)>=0;
   return true;
 }
 
@@ -490,24 +496,38 @@ function bulDateLockReason(cdate){
   if(cdate===t) return null;
   return cdate>t ? 'future' : 'past';
 }
+/* Втора причина за заключване, независима от датата: задача, чието изпълнение
+   се доказва от данни, а не от твърдение. Вечерният оборот се отмята сам при
+   записа в daily_turnover, затова ръчният чекбокс е затворен и за днешния ден
+   — иначе обект може да се отметне, без да е подал оборот, и Бюлетинът ще
+   брои друго число от имейла. */
+function bulAutoLocked(linkedModule){ return linkedModule==='oborot'; }
+/* Автоматичното бие датата: за такава задача чекбоксът е заключен винаги,
+   независимо кой ден се гледа. */
+function bulLockReason(cdate,linkedModule){
+  if(bulAutoLocked(linkedModule)) return 'auto';
+  return bulDateLockReason(cdate);
+}
 function bulLockLabel(reason){
+  if(reason==='auto') return 'Отмята се автоматично при запис на оборота';
   return reason==='future' ? 'Денят още не е настъпил' : 'Денят е приключил';
 }
 /* Заключената контрола НЕ се крие — стои видима, само не се натиска.
    Контрола, която изчезва според данните, изглежда като счупена. */
-function bulLockAttr(cdate){
-  var r=bulDateLockReason(cdate);
+function bulLockAttr(cdate,linkedModule){
+  var r=bulLockReason(cdate,linkedModule);
   return r ? ' disabled title="'+bulLockLabel(r)+'"' : '';
 }
-function bulLockStyle(cdate){
-  return bulDateLockReason(cdate) ? 'opacity:.45;cursor:not-allowed;' : '';
+function bulLockStyle(cdate,linkedModule){
+  return bulLockReason(cdate,linkedModule) ? 'opacity:.45;cursor:not-allowed;' : '';
 }
 /* Втора защита в обработчиците: disabled в markup-а не спира извикване от
    конзолата и не предпазва, ако функцията бъде преизползвана отдругаде.
    Връща true, ако кликът е отхвърлен, и връща чекбокса в състоянието му
    отпреди клика (важи и за отмятане, и за разотмятане). */
 function bulLockRejected(cb){
-  var r=bulDateLockReason((cb&&cb.dataset&&cb.dataset.cdate)||null);
+  var ds=(cb&&cb.dataset)||{};
+  var r=bulLockReason(ds.cdate||null,ds.linked||null);
   if(!r) return false;
   cb.checked=!cb.checked;
   toast(bulLockLabel(r),'#d97706');
@@ -836,7 +856,7 @@ function renderBulView(){
           html+=calItemStatusHtml(t.id,'regular',t.target_stores,dateStr);
         } else {
           var doneReg=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===dateStr;});
-          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+dateStr+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(dateStr)+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(dateStr)+'">';
+          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+dateStr+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(dateStr,t.linked_module)+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(dateStr,t.linked_module)+'">';
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
         }
         html+='</div>';
@@ -855,7 +875,7 @@ function renderBulView(){
           html+=calItemStatusHtml(t.id,'recurring',t.target_stores,recCdate);
         } else {
           var doneRec=store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===recCdate;});
-          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+bulLockAttr(recCdate)+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(recCdate)+'">';
+          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+bulLockAttr(recCdate,t.linked_module)+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(recCdate,t.linked_module)+'">';
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
         }
         html+='</div>';
@@ -977,7 +997,7 @@ function renderBulView(){
         if(isMulti){
           html+='<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
-          html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+bulLockStyle(singleDate)+'">';
+          html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,t.linked_module)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+bulLockStyle(singleDate,t.linked_module)+'">';
         }
         html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done,singleDate)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
         if(t.description)html+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
@@ -2493,7 +2513,7 @@ function renderTasksPanel() {
         if (isMulti) {
           h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
-          h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+bulLockStyle(singleDate)+'">' ;
+          h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,t.linked_module)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+bulLockStyle(singleDate,t.linked_module)+'">' ;
         }
         h += '<div style="flex:1;">';
         h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':isPostponed?'#b45309':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
@@ -2975,8 +2995,8 @@ function renderRecurringTasks(dk) {
       if (isMultiRec) {
         h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
       } else {
-        h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" data-cdate="'+(singleRecDate||'')+'" onchange="bulRecurringCheckboxChanged(this)"' + bulLockAttr(singleRecDate) + ' ' +
-          'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + bulLockStyle(singleRecDate) + '">';
+        h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" data-cdate="'+(singleRecDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"' + bulLockAttr(singleRecDate,t.linked_module) + ' ' +
+          'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + bulLockStyle(singleRecDate,t.linked_module) + '">';
       }
       h += '<div style="flex:1;">';
       h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done,singleRecDate)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';

@@ -54,7 +54,8 @@ const TESTS = [
   'report-edge-sync.test.js',
   'daily-turnover.test.js',
   'kasa-tab-routing.test.js',
-  'pallets-summary.test.js'
+  'pallets-summary.test.js',
+  'oborot-bulletin-link.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
