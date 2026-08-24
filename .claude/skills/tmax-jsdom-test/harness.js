@@ -149,7 +149,6 @@ function boot(opts) {
     get: [], post: [], patch: [], del: [],
     toast: [], confirm: [], alert: [],
     scrollTo: [], scrollIntoView: [],
-    errors: [],      /* хванати изключения от истински кликове */
     notOk: []        /* заявки, върнали ok:false — за "тихите" грешки */
   };
 
