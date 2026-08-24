@@ -593,7 +593,7 @@ function sendDailyReportTest(toEmail){
   collectDailyReportData(function(data){
     if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
     var html = buildDailyReportHtml(data);
-    sendEmail(toEmail, '📋 ТеМАХ — Дневен репорт (тест)', html).then(function(res){
+    sendEmail(toEmail, reportDailySubject(data.reportDate) + ' (тест)', html).then(function(res){
       if (res.ok) toast('✅ Дневен репорт изпратен на ' + toEmail);
       else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
     });
@@ -1068,8 +1068,43 @@ function buildCrossModuleSectionHtml(cross){
 function reportWeekRangeLabel(wkDates){
   if (!wkDates || wkDates.length < 7) return 'Обобщение за седмицата';
   var a = new Date(wkDates[0]+'T00:00:00'), b = new Date(wkDates[6]+'T00:00:00');
-  var f = function(d){ return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0'); };
-  return 'Обобщение за ' + f(a) + ' – ' + f(b) + '.' + b.getFullYear();
+  return 'Обобщение за ' + reportDayMonth(a) + ' – ' + reportDayMonth(b) + '.' + b.getFullYear();
+}
+
+/* „23.08" — един формат на едно място. Ползва се и от подзаглавието, и от
+   темите на писмата; разминат ли се, същата седмица излиза записана по два
+   различни начина в едно и също писмо. */
+function reportDayMonth(d){
+  return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0');
+}
+
+/* ═══════ ТЕМИТЕ НА ПИСМАТА ═══════════════════════════════════════════
+   Досега всяко дневно писмо носеше една и съща тема и в пощата се
+   превръщаха в неразличима поредица — не можеш да отвориш „онзи от
+   вторник", нито да видиш дали днешният изобщо е дошъл.
+
+   След като отчетът описва ПРИКЛЮЧИЛИЯ ден, темата без дата е и
+   подвеждаща: писмото идва сутринта на 24-ти, а е за 23-ти.
+
+   Датата идва от ДАННИТЕ (същия reportDate/weekDates, които пълнят
+   шапката), не от часовника на изпращането — иначе темата и шапката ще
+   се разминават при всяко забавено изпращане.
+
+   Липсват или са счупени данните — темата пада на старата. По-добре без
+   дата, отколкото „NaN.NaN" в темата на писмо до управители.
+
+   Бележка: resend-email прекарва темата през transliterate() и тя излиза
+   на латиница. Цифрите оцеляват — точно те носят смисъла тук. */
+function reportDailySubject(reportDate){
+  var d = reportDate ? new Date(reportDate+'T00:00:00') : null;
+  if (!d || isNaN(d.getTime())) return '📋 ТеМАХ — Дневен репорт';
+  return '📋 ТеМАХ — Дневен репорт ' + reportDayMonth(d) + '.' + d.getFullYear();
+}
+function reportWeeklySubject(wkDates){
+  if (!wkDates || wkDates.length < 7) return '📊 ТеМАХ — Седмичен репорт';
+  var a = new Date(wkDates[0]+'T00:00:00'), b = new Date(wkDates[6]+'T00:00:00');
+  if (isNaN(a.getTime()) || isNaN(b.getTime())) return '📊 ТеМАХ — Седмичен репорт';
+  return '📊 ТеМАХ — Седмичен репорт ' + reportDayMonth(a) + ' – ' + reportDayMonth(b) + '.' + b.getFullYear();
 }
 
 function buildWeeklyReportHtml(data){
@@ -1103,7 +1138,7 @@ function sendWeeklyReportTest(toEmail){
   collectWeeklyReportData(function(data){
     if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
     var html = buildWeeklyReportHtml(data);
-    sendEmail(toEmail, '📊 ТеМАХ — Седмичен репорт (тест)', html).then(function(res){
+    sendEmail(toEmail, reportWeeklySubject(data.weekDates) + ' (тест)', html).then(function(res){
       if (res.ok) toast('✅ Седмичен репорт изпратен на ' + toEmail);
       else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
     });
@@ -1410,7 +1445,7 @@ function sendDailyReportToRecipients(){
       if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
       var html = buildDailyReportHtml(data);
       var emails = targets.map(function(r){ return r.email; });
-      sendEmail(emails, '📋 ТеМАХ — Дневен репорт', html).then(function(res){
+      sendEmail(emails, reportDailySubject(data.reportDate), html).then(function(res){
         if (res.ok) toast('✅ Дневен репорт изпратен на ' + emails.length + ' получатели');
         else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
       });
@@ -1427,7 +1462,7 @@ function sendWeeklyReportToRecipients(){
       if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
       var html = buildWeeklyReportHtml(data);
       var emails = targets.map(function(r){ return r.email; });
-      sendEmail(emails, '📊 ТеМАХ — Седмичен репорт', html).then(function(res){
+      sendEmail(emails, reportWeeklySubject(data.weekDates), html).then(function(res){
         if (res.ok) toast('✅ Седмичен репорт изпратен на ' + emails.length + ' получатели');
         else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
       });
