@@ -57,6 +57,7 @@ const TESTS = [
   'report-ranking-plural.test.js',
   'report-edge-sync.test.js',
   'report-daily-date.test.js',
+  'report-grid.test.js',
   'email-encoding.test.js',
   'email-subject-rfc2047.test.js',
   'daily-turnover.test.js',

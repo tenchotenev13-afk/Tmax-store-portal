@@ -32,10 +32,14 @@ function data(rows, over) {
     rows: rows.slice().sort((a, b) => a.pct - b.pct),
     top3: byPct.slice(0, 3), bottom3: byPct.slice(-3).reverse(),
     noDueCount: 0, postponedList: [], commentedList: [],
+    /* Дневният вече рисува решетка „обект × задача" — тя чете items и
+       cells. Без тях дневното писмо остава без нито едно име на обект. */
+    items: [{ id: 'i1', kind: 'recurring', title: 'Обща задача' }],
     weekLabel: 'Седмица 34 · 2026', cross: null
   }, over || {});
 }
-const st = (name, pct) => ({ name, done: pct ? 1 : 0, total: 1, pct });
+const st = (name, pct) => ({ name, done: pct ? 1 : 0, total: 1, pct,
+                             cells: [pct ? 'done' : 'missing'] });
 
 (async function () {
 
@@ -119,14 +123,19 @@ const st = (name, pct) => ({ name, done: pct ? 1 : 0, total: 1, pct });
 
     const daily = w.buildDailyReportHtml(flat);
     ok('дневният няма ТОП 3', daily.indexOf('ТОП 3') < 0);
+    /* Обектите вече идват от решетката, не от списъка с редове. */
     ok('дневният също пази обектите', daily.indexOf('Раднево') >= 0);
 
-    /* При разлика двата пак я показват. */
+    /* При разлика седмичният пак я показва. */
     const mixed = data([st('Раднево', 100), st('Габрово', 0), st('Троян', 50)]);
     ok('седмичният я връща при разлика',
       w.buildWeeklyReportHtml(mixed).indexOf('ТОП 3') >= 0);
-    ok('дневният също',
-      w.buildDailyReportHtml(mixed).indexOf('ТОП 3') >= 0);
+    /* Дневният — НЕ, и това вече не зависи от reportRankingIsMeaningful:
+       кутиите отпаднаха от него изцяло (24.08.2026). През един ден
+       класацията само преповтаряше краищата на списъка точно над нея.
+       Остава само в седмичния, където обобщава цяла седмица. */
+    ok('дневният няма ТОП 3 дори при разлика — кутиите отпаднаха от него',
+      w.buildDailyReportHtml(mixed).indexOf('ТОП 3') < 0);
   }
 
   section('5. ЯДРОТО: членуване при единица');

@@ -175,19 +175,34 @@ function reportBuildSummary(items, comps, stores, noDueCount){
   var doneComps = comps.filter(function(c){ return c.status==='done'; });
   var postponedComps = comps.filter(function(c){ return c.status==='postponed'; });
   var rows = stores.map(function(s){
-    /* само задачите, за които s е в обхват (target_stores празно/null = всички,
-       или изрично включен), влизат в знаменателя на ТОЗИ магазин */
-    var scoped = items.filter(function(it){
-      return !it.target_stores || !it.target_stores.length || it.target_stores.indexOf(s)>=0;
+    /* По една клетка за всяко явяване, в реда на items. Решетката в дневния
+       имейл чете точно този масив по редове, а срезът „по задачи" - по
+       колони, тоест двата изгледа не могат да се разминат.
+
+       Състоянията са ЧЕТИРИ, защото „не важи за този обект" не е същото
+       като „неизпълнена": задача с target_stores извън обхвата не влиза
+       нито в числителя, нито в знаменателя на ТОЗИ обект. Само задачите в
+       обхват се броят - същото правило като преди, само че вече се вижда
+       и клетка по клетка, не само в сбора. */
+    var cells = items.map(function(it){
+      var inScope = !it.target_stores || !it.target_stores.length || it.target_stores.indexOf(s)>=0;
+      if (!inScope) return 'na';
+      if (doneComps.some(function(c){ return c.store_name===s && reportItemMatchesComp(it,c); })) return 'done';
+      if (postponedComps.some(function(c){ return c.store_name===s && reportItemMatchesComp(it,c); })) return 'postponed';
+      return 'missing';
     });
-    var total = scoped.length;
-    var done = scoped.filter(function(it){
-      return doneComps.some(function(c){ return c.store_name===s && reportItemMatchesComp(it,c); });
-    }).length;
+    /* Отложената задача НЕ се брои за изпълнена, но остава в знаменателя -
+       точно както досега (в процента влизаше само status='done'). */
+    var total = 0, done = 0;
+    cells.forEach(function(st){
+      if (st === 'na') return;
+      total++;
+      if (st === 'done') done++;
+    });
     var pct = total ? Math.round(done/total*100) : 0;
     totalDone += done; totalAll += total;
     if (pct < 50) laggards++;
-    return { name:s, done:done, total:total, pct:pct };
+    return { name:s, done:done, total:total, pct:pct, cells:cells };
   });
   rows.sort(function(a,b){ return a.pct - b.pct; }); /* изоставащите най-отгоре */
   var overallPct = totalAll ? Math.round(totalDone/totalAll*100) : 0;
@@ -222,6 +237,10 @@ function reportBuildSummary(items, comps, stores, noDueCount){
   return {
     overallPct: overallPct, totalDone: totalDone, totalAll: totalAll,
     laggards: laggards, storeCount: stores.length, rows: rows,
+    /* Легендата на решетката и заглавията в среза „по задачи" - в СЪЩИЯ
+       ред, в който са клетките на всеки ред. Номерът на колоната е просто
+       индексът тук + 1. */
+    items: items,
     top3: byPct.slice(0,3), bottom3: byPct.slice(-3).reverse(),
     noDueCount: noDueCount || 0, postponedList: postponedList, commentedList: commentedList
   };
@@ -319,28 +338,225 @@ function reportPostponedSectionHtml(postponedList){
     '</div>';
 }
 
-/* Изпълнени задачи с коментар/снимка - за "вид задача с коментар/снимка" да
-   се преглежда съдържанието директно в репорта, без да се отваря Бюлетин. */
-function reportCommentedSectionHtml(commentedList){
-  if (!commentedList || !commentedList.length) return '';
-  var rows = commentedList.map(function(p){
-    var h = '<div style="padding:8px 10px;border-bottom:1px solid #BBF7D0;">' +
-      '<div style="font-size:13px;font-weight:700;color:#14532d;">'+esc(p.title)+' <span style="font-weight:500;color:#166534;">— '+esc(p.store)+'</span></div>';
-    if (p.comment) h += '<div style="font-size:12px;color:#166534;margin-top:2px;">💬 '+esc(p.comment)+'</div>';
-    if (p.photos && p.photos.length) {
-      h += '<div style="margin-top:5px;">';
-      p.photos.forEach(function(ph){
-        h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #bbf7d0;margin-right:5px;">';
-      });
-      h += '</div>';
-    }
-    h += '</div>';
-    return h;
+/* ═══════ РЕШЕТКА „ОБЕКТ × ЗАДАЧА" (дневен) ═══════════════════════════
+   Досега дневният имейл казваше КОЛКО, но не и КАКВО: ред „Добрич — 0 от 6
+   задачи" не показва кои са тези шест, тоест писмото носеше тревога без
+   материал и всеки път трябваше да се отваря порталът.
+
+   Ширини при 600px обвивка: reportEmailShell слага padding:20px около
+   тялото, значи полезното е 560px. 110px за името на обекта (най-дългото
+   отчетно име е „Гоце Делчев" - складовете и ЦО падат в isReportableStore)
+   + 44px за „X/N" оставят 406px за колоните. При 12 колони това е ~34px на
+   клетка, което стига за номер и икона. */
+var REPORT_GRID_MAX_COLS = 12;
+
+/* Заглавията на задачите са дълги и в колона не се събират, затова в
+   решетката стоят само номера, а пълните имена - в легендата над нея. */
+function reportGridLegendHtml(items){
+  var rows = items.map(function(it, i){
+    return '<div style="font-size:11px;color:#4B5563;margin-bottom:3px;">' +
+      '<b style="color:#1F2937;">'+(i+1)+'.</b> '+esc(it.title)+'</div>';
   }).join('');
+  return '<div style="background:#F4F6FB;border-radius:8px;padding:10px 12px;margin-bottom:10px;">'+rows+'</div>';
+}
+
+/* Четирите състояния на клетката. Сивата точка значи „задачата не важи за
+   този обект" - показва се нарочно, защото иначе различният знаменател
+   („4/5" до „5/5") се чете като бъг в отчета. */
+function reportGridCellHtml(state){
+  var glyph = state==='done' ? '✓' : state==='missing' ? '✖' : state==='postponed' ? '⏳' : '·';
+  var color = state==='done' ? '#2F9E5C' : state==='missing' ? '#C0392B' : state==='postponed' ? '#B6841E' : '#C7CDD6';
+  return '<td align="center" style="padding:7px 2px;border-bottom:1px solid #EEF1F6;font-size:13px;color:'+color+';">'+glyph+'</td>';
+}
+
+/* Линк към обекта. ?store= е ЕДИНСТВЕНИЯТ параметър, който порталът
+   разбира (shared.js/today.js) - затова имената остават кликаеми и в
+   решетката, и в зеления ред. */
+function reportStoreLinkHtml(name, color){
+  return '<a href="'+escAttr(PORTAL_URL + '?store=' + encodeURIComponent(name))+'" ' +
+    'style="color:'+color+';text-decoration:none;font-weight:700;">'+esc(name)+'</a>';
+}
+
+function reportGridHtml(data){
+  var items = data.items || [];
+  var rows = data.rows || [];
+  if (!items.length || !rows.length) return '';
+  /* Резервният вариант се проверява на ВСЯКО пускане, не еднократно: броят
+     дължими задачи се мени от ден на ден. Над прага решетката отпада и
+     остава само срезът „по задачи". */
+  if (items.length > REPORT_GRID_MAX_COLS) return '';
+
+  var behind = rows.filter(function(r){ return r.pct < 100; });
+  var perfect = rows.filter(function(r){ return r.pct === 100; })
+    .map(function(r){ return r.name; }).sort();
+
+  var h = '';
+  if (behind.length) {
+    h += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin:14px 0 8px;">По обекти и задачи — изоставащите най-отгоре</div>';
+    h += reportGridLegendHtml(items);
+    h += '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">';
+    h += '<tr><td width="110" style="padding:4px 6px;font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;">Обект</td>';
+    items.forEach(function(it, i){
+      h += '<td align="center" style="padding:4px 2px;font-size:11px;font-weight:700;color:#94a3b8;">'+(i+1)+'</td>';
+    });
+    h += '<td width="44" align="right" style="padding:4px 6px;font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;">Общо</td></tr>';
+    behind.forEach(function(r){
+      h += '<tr><td width="110" style="padding:7px 6px;border-bottom:1px solid #EEF1F6;font-size:12px;">' +
+        reportStoreLinkHtml(r.name, '#1F2937') + '</td>';
+      (r.cells || []).forEach(function(st){ h += reportGridCellHtml(st); });
+      h += '<td width="44" align="right" style="padding:7px 6px;border-bottom:1px solid #EEF1F6;font-size:12px;font-weight:800;color:'+reportPctColor(r.pct)+';">' +
+        r.done+'/'+r.total+'</td></tr>';
+    });
+    h += '</table>';
+  }
+  if (perfect.length) {
+    /* Стопроцентовите се свиват в един ред, но имената им остават линкове -
+       иначе добре работещите обекти щяха да са единствените, до които не се
+       стига с клик от писмото. */
+    var names = perfect.map(function(n){ return reportStoreLinkHtml(n, '#14532d'); }).join(', ');
+    h += '<div style="margin-top:10px;padding:10px 14px;background:#E9F5EF;border-radius:8px;font-size:12px;color:#14532d;">' +
+      '✅ 100%: '+names+'</div>';
+  }
+  return h;
+}
+
+/* ═══════ „ПО ЗАДАЧИ" - обратният срез ═══════════════════════════════
+   Решетката отговаря „кой изостава". Тази секция отговаря „коя задача
+   изостава" - случаят, в който цяла задача е пропусната навсякъде и
+   проблемът е в самата задача или в срока ѝ, не в обектите.
+   weekly сменя мярката: в дневния мери пропуски, в седмичния - процент
+   изпълнение през цялата седмица. */
+function reportByTaskHtml(data, weekly){
+  var items = data.items || [];
+  var rows = data.rows || [];
+  if (!items.length || !rows.length) return '';
+  /* В седмичния една задача е разгъната на по едно явяване за всеки ден, в
+     който е дължима („Каса (17.8)", „Каса (18.8)" …) - 31 явявания за 12
+     задачи. Тук те се СЪБИРАТ обратно по задача, защото въпросът на
+     секцията е „коя задача системно не се изпълнява", а не „кой ден".
+     Дневният няма какво да събира: там всяка задача е точно едно явяване,
+     тоест групирането по id+kind е тъждествено. */
+  var groups = [], byKey = {};
+  items.forEach(function(it, i){
+    var key = it.kind + '|' + it.id;
+    if (!byKey[key]) {
+      byKey[key] = { title: it.baseTitle || it.title, scope: 0, done: 0 };
+      groups.push(byKey[key]);
+    }
+    var g = byKey[key];
+    rows.forEach(function(r){
+      var st = (r.cells || [])[i];
+      if (!st || st === 'na') return;   /* извън обхват - не влиза в знаменателя */
+      g.scope++;
+      if (st === 'done') g.done++;
+    });
+  });
+  var stats = groups.map(function(g){
+    return { title: g.title, scope: g.scope, done: g.done,
+             missing: g.scope - g.done,
+             pct: g.scope ? Math.round(g.done/g.scope*100) : 0 };
+  }).filter(function(s){
+    /* Дневният показва само задачите с поне един пропуск - пълните редове
+       вече ги има в решетката. Седмичният показва всички, защото там
+       въпросът е коя задача системно куца, не коя куца днес. */
+    return s.scope > 0 && (weekly || s.missing > 0);
+  });
+  if (!stats.length) return '';
+  stats.sort(function(a,b){ return weekly ? (a.pct - b.pct) : (b.missing - a.missing); });
+
+  var body = stats.map(function(s){
+    var right = weekly
+      ? '<span style="font-weight:800;color:'+reportPctColor(s.pct)+';">'+s.pct+'%</span>' +
+        '<span style="color:#9CA3AF;margin-left:5px;">'+s.done+'/'+s.scope+'</span>'
+      : '<span style="font-weight:700;color:#C0392B;">липсва при '+s.missing+' от '+s.scope+' обекта</span>';
+    return '<tr><td style="padding:7px 10px;border-bottom:1px solid #EEF1F6;font-size:12px;color:#1F2937;">' +
+      esc(s.title) + '</td>' +
+      '<td align="right" style="padding:7px 10px;border-bottom:1px solid #EEF1F6;font-size:12px;white-space:nowrap;">' +
+      right + '</td></tr>';
+  }).join('');
+
   return '<div style="margin-top:14px;">' +
-    '<div style="font-size:11px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">💬 Изпълнени с коментар/снимка ('+commentedList.length+')</div>' +
-    '<div style="background:#F0FDF4;border:1px solid #BBF7D0;border-radius:8px;overflow:hidden;">'+rows+'</div>' +
+    '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">' +
+    (weekly ? 'По задачи за седмицата — най-слабата най-отгоре' : 'По задачи — най-пропусканата най-отгоре') + '</div>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">' +
+    body + '</table></div>';
+}
+
+/* ═══════ КОМЕНТАРИ ПО ОБЕКТИ ═══════════════════════════════════════
+   Заварено: редовете бяха „Заглавие на задачата — Магазин", тоест три
+   коментара от Добрич по три задачи излизаха на три различни места и
+   обектът никога не се събираше на едно.
+
+   Отложените влизат в СЪЩИЯ блок, отбелязани като отложени - те са
+   съобщение от обекта точно както коментарът, само с друг статус. */
+function reportCommentsByStoreHtml(data){
+  var entries = [];
+  (data.commentedList || []).forEach(function(c){
+    entries.push({ store:c.store, title:c.title, comment:c.comment||'', photos:c.photos||[], postponed:false });
+  });
+  (data.postponedList || []).forEach(function(p){
+    entries.push({ store:p.store, title:p.title, comment:p.comment||'', photos:[], postponed:true });
+  });
+  if (!entries.length) return '';
+
+  /* Редът: изоставащите както в решетката, после стопроцентовите по азбучен
+     ред. Правилото е нужно, защото решетката НЕ показва стопроцентовите -
+     а точно те имат всичките си задачи изпълнени, тоест най-много редове
+     тук (commentedList се строи от изпълнените отмятания). */
+  var rows = data.rows || [];
+  var order = rows.filter(function(r){ return r.pct < 100; }).map(function(r){ return r.name; })
+    .concat(rows.filter(function(r){ return r.pct === 100; }).map(function(r){ return r.name; }).sort());
+  var rank = {};
+  order.forEach(function(n, i){ rank[n] = i; });
+
+  var byStore = {}, seen = [];
+  entries.forEach(function(e){
+    if (!byStore[e.store]) { byStore[e.store] = []; seen.push(e.store); }
+    byStore[e.store].push(e);
+  });
+  /* Обект извън rows (не бива да се случва) отива най-отзад, вместо
+     съдържанието му да изчезне. */
+  seen.sort(function(a,b){
+    var ra = rank[a]===undefined ? 9999 : rank[a];
+    var rb = rank[b]===undefined ? 9999 : rank[b];
+    return ra - rb;
+  });
+
+  var blocks = seen.map(function(store){
+    var lines = byStore[store].map(function(e){
+      var h = '<div style="padding:6px 0 0;">' +
+        '<div style="font-size:12px;color:#374151;">' +
+        (e.postponed ? '<span style="color:#B45309;font-weight:700;">⏳ отложена · </span>' : '') +
+        '<b>'+esc(e.title)+'</b></div>';
+      if (e.comment) h += '<div style="font-size:12px;color:#4B5563;margin-top:2px;">💬 '+esc(e.comment)+'</div>';
+      if (e.photos.length) {
+        h += '<div style="margin-top:5px;">';
+        e.photos.forEach(function(ph){
+          h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #D8DEE9;margin-right:5px;">';
+        });
+        h += '</div>';
+      }
+      return h + '</div>';
+    }).join('');
+    return '<div style="padding:10px 12px;border-bottom:1px solid #E5E9F0;">' +
+      '<div style="font-size:13px;">'+reportStoreLinkHtml(store, '#1E2761')+'</div>' + lines + '</div>';
+  }).join('');
+
+  return '<div style="margin-top:14px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">💬 Коментари по обекти ('+entries.length+')</div>' +
+    '<div style="background:#F9FAFC;border:1px solid #E5E9F0;border-radius:8px;overflow:hidden;">'+blocks+'</div>' +
     '</div>';
+}
+
+/* Седмичният не изброява коментарите - 187 реда за седмица 34 са
+   неизползваеми в имейл. Остава числото и пътят до тях. */
+function reportCommentsCountHtml(commentedList){
+  var n = (commentedList || []).length;
+  if (!n) return '';
+  var txt = n === 1
+    ? '1 отмятане с коментар или снимка през седмицата — виж го в портала.'
+    : n + ' отмятания с коментар или снимка през седмицата — виж ги в портала.';
+  return '<div style="margin-top:14px;padding:10px 14px;background:#F4F6FB;border-radius:8px;font-size:12px;color:#4B5563;">💬 '+txt+'</div>';
 }
 
 function buildDailyReportHtml(data){
@@ -351,11 +567,16 @@ function buildDailyReportHtml(data){
     reportStatCell(String(data.storeCount),'обекта общо','#1E2761') +
     '</tr></table>';
   body += reportTrendHtml(data.overallPct, data.trendYesterday, 'спрямо предходния ден');
-  body += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin:14px 0 8px;">По обекти — изоставащите най-отгоре</div>';
-  body += data.rows.map(reportStoreRow).join('');
-  body += reportTopBottomTable(data.top3, data.bottom3);
-  body += reportPostponedSectionHtml(data.postponedList);
-  body += reportCommentedSectionHtml(data.commentedList);
+  /* Решетката поглъща стария списък от 18 реда „X от Y задачи" - той
+     повтаряше числата, без да казва кои задачи липсват. Отпадат и кутиите
+     ТОП 3 / ИЗИСКВАТ ВНИМАНИЕ: те преповтаряха краищата на списък, който и
+     без това беше подреден изоставащите отгоре. През един ден класация
+     няма самостоятелна стойност - остава само в седмичния.
+     Отложените задачи вече са вътре в „Коментари по обекти", отбелязани
+     като отложени, вместо в собствена секция. */
+  body += reportGridHtml(data);
+  body += reportByTaskHtml(data, false);
+  body += reportCommentsByStoreHtml(data);
   body += reportNoDueNoticeHtml(data.noDueCount, false);
   /* Датата идва от ДАННИТЕ, не от часовника: писмото се пише в 8:00 на
      следващия ден и трябва да носи датата на деня, който описва. Fallback-ът
@@ -468,7 +689,7 @@ function collectWeeklyReportData(cb){
         if (dates.length > 1) {
           dates.forEach(function(d){
             var dLabel = new Date(d+'T00:00:00').toLocaleDateString('bg-BG',{day:'numeric',month:'numeric'});
-            items.push({ id:t.id, kind:'regular', title:t.title+' ('+dLabel+')', target_stores:t.target_stores||null, date:d });
+            items.push({ id:t.id, kind:'regular', title:t.title+' ('+dLabel+')', baseTitle:t.title, target_stores:t.target_stores||null, date:d });
           });
         } else {
           /* 30 от 43 задачи в бюлетините НЯМАТ собствен срок - те важат за
@@ -506,7 +727,7 @@ function collectWeeklyReportData(cb){
         if (occDates.length > 1) {
           occDates.forEach(function(d){
             var dLabel = new Date(d+'T00:00:00').toLocaleDateString('bg-BG',{day:'numeric',month:'numeric'});
-            items.push({ id:t.id, kind:'recurring', title:t.title+' ('+dLabel+')', target_stores:t.target_stores||null, date:d });
+            items.push({ id:t.id, kind:'recurring', title:t.title+' ('+dLabel+')', baseTitle:t.title, target_stores:t.target_stores||null, date:d });
           });
         } else {
           items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null, date: occDates[0] });
@@ -861,9 +1082,14 @@ function buildWeeklyReportHtml(data){
   body += reportTrendHtml(data.overallPct, data.trendPrevWeek, 'спрямо предходната седмица');
   body += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin:14px 0 8px;">По обекти за седмицата — изоставащите най-отгоре</div>';
   body += data.rows.map(reportStoreRow).join('');
+  /* Решетка не става за седмица - 31 явявания са твърде широки за 600px.
+     Затова двата среза стоят поотделно: по обекти (горе) и по задачи
+     (тук). Вторият липсваше изцяло, тоест не се виждаше коя задача
+     системно не се изпълнява. */
+  body += reportByTaskHtml(data, true);
   body += reportTopBottomTable(data.top3, data.bottom3);
   body += reportPostponedSectionHtml(data.postponedList);
-  body += reportCommentedSectionHtml(data.commentedList);
+  body += reportCommentsCountHtml(data.commentedList);
   body += reportNoDueNoticeHtml(data.noDueCount, true);
   body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: постоянните задачи участват с по едно явяване за всеки ден, в който са дължими през седмицата (задача „всеки ден" = 7 явявания) — точно както се отмятат в Седмичния календар. Отметка от предишна седмица не се брои за текущата.</div>';
   body += buildCrossModuleSectionHtml(data.cross);

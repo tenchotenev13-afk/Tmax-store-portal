@@ -59,7 +59,11 @@ const SHARED_FNS = [
   'reportEmailShell', 'reportTrendHtml', 'reportDotColor', 'reportPctColor',
   'reportStatCell', 'reportStoreRow', 'reportTopBottomTable',
   'reportNoDueNoticeHtml', 'reportPostponedSectionHtml', 'reportWeekRangeLabel',
-  'reportCommentedSectionHtml', 'crossMetricCard', 'crossModuleRow',
+  /* решетка „обект × задача" и двата ѝ среза */
+  'reportGridLegendHtml', 'reportGridCellHtml', 'reportStoreLinkHtml',
+  'reportGridHtml', 'reportByTaskHtml', 'reportCommentsByStoreHtml',
+  'reportCommentsCountHtml',
+  'crossMetricCard', 'crossModuleRow',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',
   'buildCrossModuleSectionHtml', 'buildDailyReportHtml', 'buildWeeklyReportHtml'
 ];
@@ -104,18 +108,13 @@ const EDGE_ONLY = ['sbGet', 'sbPost', 'sbPatch'];  /* SERVICE ROLE, не shared.
    Промъкне ли се втора разлика в същата функция, тестът пада.
 
    Всеки запис трябва и РЕАЛНО да се различава: изчезне ли разликата,
-   тестът иска записът да падне оттук, за да не остане да лъже. */
-const ACCEPTED_DRIFT = [
-  {
-    fn: 'buildWeeklyReportHtml',
-    note: 'затварящата кавичка в „задача „всеки ден…" — ASCII " (U+0022) в ' +
-          'report.js, U+201C в живата v10. ASCII е ОРИГИНАЛЪТ: редът влиза в ' +
-          'report.js на 37bcd06 и още стои така на fd2adf6, когато едж файлът ' +
-          'се появява вече с U+201C — тоест копието се е разминало, не клиентът. ' +
-          'Изравнява се едж файлът при следващия деплой по същина.',
-    patch: s => s.replace('задача „всеки ден“', 'задача „всеки ден"')
-  }
-];
+   тестът иска записът да падне оттук, за да не остане да лъже.
+
+   Записът за buildWeeklyReportHtml (U+201C вместо ASCII " в „задача „всеки
+   ден…") падна оттук на 24.08.2026: точно както предвиждаше самият запис,
+   едж файлът се изравни при първия деплой по същина — преработката на
+   отчета, която и без това пренаписва тази функция. */
+const ACCEPTED_DRIFT = [];
 
 /* ── Разбор ─────────────────────────────────────────────────────────────
    Функциите се търсят на най-горно ниво (колона 0) и се затварят по БРОЯЧ

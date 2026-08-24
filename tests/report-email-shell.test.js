@@ -100,12 +100,21 @@ function env() {
   section('4. ЯДРОТО: URL на снимка минава през escAttr()');
   {
     const { w, doc } = env();
+    /* Секцията вече е „Коментари по обекти" и приема целия обект, не
+       списък — заради подредбата по обекти ѝ трябват и rows. Проверката
+       обаче е същата и стои: снимките са единственото място в имейла,
+       където чужд низ влиза в СТОЙНОСТ НА АТРИБУТ. */
+    const one = function (photos) {
+      return w.reportCommentsByStoreHtml({
+        rows: [{ name: 'Раднево', pct: 0 }],
+        commentedList: [{ title: 'Каса', store: 'Раднево', comment: '', photos: photos }],
+        postponedList: []
+      });
+    };
     /* Кавичка в URL-а е достатъчна, за да излезе от атрибута.
        esc() САМ НЕ СТИГА — той покрива само & < >, не и кавичка. */
     const evil = 'https://x/a.jpg" onerror="alert(1)';
-    const html = w.reportCommentedSectionHtml([
-      { title: 'Каса', store: 'Раднево', comment: '', photos: [{ url: evil }] }
-    ]);
+    const html = one([{ url: evil }]);
     ok('кавичката е екранирана в изхода',
       html.indexOf('a.jpg" onerror=') < 0, html.slice(0, 400));
 
@@ -124,31 +133,49 @@ function env() {
     }
 
     /* Обикновен URL продължава да работи — esc() пипа само & < >. */
-    const plain = w.reportCommentedSectionHtml([
-      { title: 'Каса', store: 'Раднево', comment: '', photos: [{ url: 'https://x/b.jpg' }] }
-    ]);
+    const plain = one([{ url: 'https://x/b.jpg' }]);
     ok('нормален URL остава непроменен',
       plain.indexOf('src="https://x/b.jpg"') >= 0, plain.slice(0, 300));
 
     /* Амперсанд в URL (query низ) се екранира коректно за HTML атрибут. */
-    const amp = w.reportCommentedSectionHtml([
-      { title: 'Каса', store: 'Раднево', comment: '', photos: [{ url: 'https://x/c.jpg?a=1&b=2' }] }
-    ]);
+    const amp = one([{ url: 'https://x/c.jpg?a=1&b=2' }]);
     ok('амперсандът става &amp;', amp.indexOf('c.jpg?a=1&amp;b=2') >= 0,
       amp.slice(0, 300));
+
+    /* И името на обекта влиза в href на линка — същият клас проблем. */
+    const badStore = w.reportCommentsByStoreHtml({
+      rows: [{ name: 'Ра"дне<во', pct: 0 }],
+      commentedList: [{ title: 'Каса', store: 'Ра"дне<во', comment: 'x', photos: [] }],
+      postponedList: []
+    });
+    const box2 = doc.createElement('div');
+    box2.innerHTML = badStore;
+    const a = box2.querySelector('a');
+    if (ok('има линк към обекта', !!a, badStore.slice(0, 300))) {
+      ok('кавичката не е счупила href',
+        a.getAttribute('href').indexOf('?store=') > 0 &&
+        a.getAttribute('href').indexOf('"') < 0, a.getAttribute('href'));
+      ok('името се чете цяло в текста', a.textContent === 'Ра"дне<во', a.textContent);
+    }
   }
 
   section('5. Празни/липсващи данни не чупят секциите');
   {
     const { w } = env();
-    ok('празен списък коментари → празен низ',
-      w.reportCommentedSectionHtml([]) === '');
-    ok('null → празен низ', w.reportCommentedSectionHtml(null) === '');
+    const empty = { rows: [], commentedList: [], postponedList: [] };
+    ok('празни списъци → празен низ', w.reportCommentsByStoreHtml(empty) === '');
+    ok('липсващи полета → празен низ', w.reportCommentsByStoreHtml({}) === '');
     ok('коментар без снимки не хвърля',
-      w.reportCommentedSectionHtml([{ title: 'x', store: 'y', comment: 'z', photos: [] }])
-        .indexOf('<img') < 0);
+      w.reportCommentsByStoreHtml({
+        rows: [{ name: 'y', pct: 0 }],
+        commentedList: [{ title: 'x', store: 'y', comment: 'z', photos: [] }],
+        postponedList: []
+      }).indexOf('<img') < 0);
     ok('празен списък отложени → празен низ',
       w.reportPostponedSectionHtml([]) === '');
+    /* Броячът в седмичния: нула коментара не бива да дава празна кутия. */
+    ok('нула коментара → празен низ', w.reportCommentsCountHtml([]) === '');
+    ok('null → празен низ', w.reportCommentsCountHtml(null) === '');
   }
 
   report();
