@@ -300,7 +300,19 @@ function collectDailyReportData(cb){
         }).map(function(u){ return u.store_name; });
 
         var comps = [];
+        /* Само completion-и от ОТЧЕТНИЯ ден за обикновени задачи - многодневна
+           задача (Пон+Ср) не бива изпълнението от Понеделник да се показва
+           като "изпълнено" (или "отложено") и в сряда. */
         regComps.forEach(function(c){ if((c.completion_date||null)===dayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
+        /* Постоянна задача: отмятането трябва да носи ОТЧЕТНИЯ ден.
+           Дотук `!c.completion_date ||` пускаше и старите записи без дата -
+           184 такива в базата, всичките отпреди полето да се пълни. Те се
+           броят за изпълнени всеки ден завинаги: за неделя 23.08 от 21
+           „изпълнени" в писмото 15 бяха реални и 6 фантоми, тоест 39%
+           вместо верните 28%. Седмичният ги изключва нарочно още от v3
+           („не могат да бъдат отнесени към коя да е седмица") - тук важи
+           същото, само че за ден.
+           Прозоречната задача и без това изисква реална дата. */
         recComps.forEach(function(c){
           var win = recWinDates[c.recurring_task_id];
           var hit = win ? (!!c.completion_date && win.indexOf(c.completion_date)>=0)
