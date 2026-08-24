@@ -1713,7 +1713,7 @@ function renderStornoForm(r){
       '<div><label class="fl">Дата на сторно</label><input type="date" class="fi" id="sf-storno_date" value="'+(r.storno_date||today())+'"></div>'+
       '<div><label class="fl">Дата на оригинален касов бон *</label><input type="date" class="fi" id="sf-original_receipt_date" value="'+(r.original_receipt_date||'')+'"></div>'+
     '</div>'+
-    '<div style="font-size:11px;color:#94a3b8;margin-top:8px;">Сторно не се допуска на бон по-стар от 1 месец спрямо датата на сторно'+(['admin','accounting'].indexOf(currentUser.role)>=0?' (за твоята роля няма ограничение).':'.')+'</div>'+
+    '<div style="font-size:11px;color:#94a3b8;margin-top:8px;">Сторно не се допуска на бон по-стар от 1 месец спрямо датата на сторно'+(['admin','accounting'].indexOf(currentUser.role)>=0?' (за твоята роля няма ограничение).':'.')+' Капаро (900001) и Ваучер (900009) не подлежат на това ограничение.</div>'+
     '</div>'+
 
     '<div class="card" style="margin-bottom:14px;"><div class="card-title">Върнати артикули</div>'+
@@ -1871,8 +1871,12 @@ function submitStornoForm(){
   if(!returnedItems.length){toast('Добави поне 1 върнат артикул','#dc2626');return;}
   if(!returnedSum){toast('Въведи сума на върнатия артикул','#dc2626');return;}
   if(!origReceiptDate){toast('Въведи дата на оригинален касов бон','#dc2626');return;}
+  /* Кодовете на върнатите артикули се сглобяват тук, ПРЕДИ проверката за възраст —
+     Капаро (900001) и Ваучер (900009) не подлежат на 1-месечното ограничение.
+     Същата променлива после отива в полето articles, не се сглобява втори път. */
+  var articlesStr=returnedItems.map(function(x){return x.sap_code.trim();}).join('/');
   var canBypassAgeLimit=['admin','accounting'].indexOf(currentUser.role)>=0;
-  if(!canBypassAgeLimit && stornoExceedsOneMonth(origReceiptDate,stornoDate)){
+  if(!canBypassAgeLimit && !stornoIsExempt(articlesStr) && stornoExceedsOneMonth(origReceiptDate,stornoDate)){
     toast('⛔ Бонът е от '+fmtDate(origReceiptDate)+' — сторно не се допуска на бон по-стар от 1 месец. За изключение се свържете с Цветелина/админ.','#dc2626');
     return;
   }
@@ -1880,7 +1884,6 @@ function submitStornoForm(){
   /* Старите текстови полета (articles/article_name/replacement_articles/replacement_article_name)
      продължават да се пълнят автоматично от новите редове — за обратна съвместимост,
      докато Excel износът (следваща стъпка) не бъде обновен да чете от kasa_storno_items. */
-  var articlesStr=returnedItems.map(function(x){return x.sap_code.trim();}).join('/');
   var articleNameStr=returnedItems.map(function(x){return (x.article_name||'').trim();}).filter(Boolean).join(' / ');
   var replArticlesStr=replacementItems.map(function(x){return x.sap_code.trim();}).join('/');
   var replNameStr=replacementItems.map(function(x){return (x.article_name||'').trim();}).filter(Boolean).join(' / ');

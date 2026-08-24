@@ -38,6 +38,7 @@ const TESTS = [
   'sd-badge-hidden-tab.test.js',
   'delete-three-states.test.js',
   'storno-embed-no-in-list.test.js',
+  'storno-age-limit-exempt.test.js',
   'linked-module-buttons.test.js',
   'recurring-edit-department.test.js',
   'bulletin-week-default.test.js',
