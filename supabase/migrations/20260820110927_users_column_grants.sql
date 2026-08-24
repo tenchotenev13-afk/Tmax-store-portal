@@ -26,26 +26,35 @@ revoke all privileges on table public.users from authenticated;
 --    id/email/role са нужни и за филтрите и order= в PostgREST
 --    (admin.js: order=role,email и id=eq.…). created_at не се ползва от
 --    клиента, но се ползва от огледалото (sync-mirror.ps1).
+--    oborot_report е добавена към users СЛЕД първото писане на тази
+--    миграция (20.08.2026) и отначало липсваше тук. admin.js я чете на две
+--    места (списъка с потребители и модала за оборота), а огледалото я
+--    тегли като девета колона — без този грант и двете дават 403.
 grant select (id, email, display_name, store_name, role, active,
-              assigned_stores, created_at)
+              assigned_stores, created_at, oborot_report)
   on public.users to anon;
 grant select (id, email, display_name, store_name, role, active,
-              assigned_stores, created_at)
+              assigned_stores, created_at, oborot_report)
   on public.users to authenticated;
 
 -- 3) INSERT — admin.js подава точно тези пет колони.
 --    id, created_at, active и role имат DEFAULT.
+--    oborot_report НЕ е тук нарочно: при създаване на потребител admin.js не
+--    подава колоната, стойността се задава после през editOborotReport() с
+--    PATCH. Тоест на INSERT правото ѝ би било мъртво.
 grant insert (email, display_name, store_name, role, active)
   on public.users to anon;
 grant insert (email, display_name, store_name, role, active)
   on public.users to authenticated;
 
--- 4) UPDATE — редакция на колега и назначени магазини.
+-- 4) UPDATE — редакция на колега, назначени магазини и оборотът.
 --    Никой клиентски път не пише в password/password_hash/history_pin_hash —
 --    това минава само през Edge Functions със service_role.
-grant update (display_name, store_name, role, active, assigned_stores)
+grant update (display_name, store_name, role, active, assigned_stores,
+              oborot_report)
   on public.users to anon;
-grant update (display_name, store_name, role, active, assigned_stores)
+grant update (display_name, store_name, role, active, assigned_stores,
+              oborot_report)
   on public.users to authenticated;
 
 -- 5) DELETE остава на ниво таблица. DELETE няма колонен вариант в PostgreSQL,

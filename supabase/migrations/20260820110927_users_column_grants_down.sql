@@ -1,7 +1,7 @@
 -- 20260820110927_users_column_grants_down.sql
 --
 -- Връща ТОЧНО заварените права, проверени преди прилагането на 20.08.2026:
---   pg_attribute.attacl = NULL за всичките 11 колони (нула колонни грантове)
+--   pg_attribute.attacl = NULL за всичките 12 колони (нула колонни грантове)
 --   pg_class.relacl     = {postgres=arwdDxtm/postgres, anon=arwdDxtm/postgres,
 --                          authenticated=arwdDxtm/postgres,
 --                          service_role=arwdDxtm/postgres}
@@ -19,11 +19,11 @@ begin;
 --    е идентично на заварените права, а само функционално еквивалентно.
 revoke all privileges (id, email, password, store_name, role, display_name,
                        active, created_at, assigned_stores, password_hash,
-                       history_pin_hash)
+                       history_pin_hash, oborot_report)
   on public.users from anon;
 revoke all privileges (id, email, password, store_name, role, display_name,
                        active, created_at, assigned_stores, password_hash,
-                       history_pin_hash)
+                       history_pin_hash, oborot_report)
   on public.users from authenticated;
 
 -- 2) Табличните права обратно, точно както бяха.
@@ -32,7 +32,7 @@ grant all privileges on table public.users to authenticated;
 
 commit;
 
--- Проверка след rollback — трябва да върне attacl NULL за всичките 11 колони
+-- Проверка след rollback — трябва да върне attacl NULL за всичките 12 колони
 -- и arwdDxtm за двете роли:
 --   select attname, attacl::text from pg_attribute
 --    where attrelid = 'public.users'::regclass and attnum > 0
