@@ -73,7 +73,10 @@ function taskTypeBadgeClick(el){
 /* ГРУПИ ЗА ДОКЛАДВАНЕ — до кого отива известие/седмичен репорт за дадена
    задача, избрано при създаването й (multi-select). "regional" няма фиксирани
    хора - извежда се динамично при изпращане на репорт, по assigned_stores
-   на accounting потребителите спрямо target_stores на задачата. */
+   на потребителите с users.is_regional=true спрямо target_stores на
+   задачата. Признакът е отделна колона, а НЕ ролята accounting: тя се носи
+   и от счетоводството, което не е регионално, а В. Филев е регионален с
+   роля admin. Отбелязва се от Администрация → Потребители. */
 var REPORT_GROUPS = {
   co:          {label:'Ц.О (Жеко, Васка)',        people:[{name:'Жеко Желязков',   email:'j.jeliazkov@temax.bg'},{name:'Василка Шикова',  email:'v.shikova@temax.bg'}]},
   controlling: {label:'Контролинг (Меги, Цвети)',  people:[{name:'Миглена Павлова', email:'m.pavlova@temax.bg'},{name:'Цветелина Тенева', email:'c.teneva@temax.bg'}]},

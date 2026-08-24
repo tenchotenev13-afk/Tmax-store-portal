@@ -155,8 +155,12 @@ function fillModal(doc, o) {
         ok('няма POST към users',
            !h.postUrls.some(u => u.indexOf('/users') >= 0), h.postUrls.join(' | '));
         const keys = Object.keys(h.calls.patch[0].body).sort().join(',');
+        /* is_regional се добави на 24.08.2026 (признакът „регионален
+           мениджър"). Влиза САМО тук, в PATCH — при създаване anon няма
+           INSERT грант върху колоната, затова секция 3 по-горе продължава
+           да иска тяло без нея. */
         ok('PATCH праща само разрешените колони',
-           keys === 'active,display_name,role,store_name', keys);
+           keys === 'active,display_name,is_regional,role,store_name', keys);
       }
     }
   }

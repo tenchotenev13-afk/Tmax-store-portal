@@ -72,7 +72,7 @@ function deleteStore(id,name){
 ══════════════════════════════════════════ */
 
 function loadUsersAdmin(){
-  sbGet('users','order=role,email&select=id,email,display_name,store_name,role,active,assigned_stores,oborot_report').then(function(data){
+  sbGet('users','order=role,email&select=id,email,display_name,store_name,role,active,assigned_stores,oborot_report,is_regional').then(function(data){
     var body=document.getElementById('users-body');if(!body)return;
     var list=Array.isArray(data)?data:[];
     /* colspan = броят клетки в РЕДА, не в заглавието: последната колона
@@ -90,7 +90,13 @@ function loadUsersAdmin(){
         '<td>'+esc(u.email)+'</td>'+
         '<td>'+esc(u.display_name||'')+'</td>'+
         '<td>'+esc(u.store_name||'')+'</td>'+
-        '<td><span style="background:'+(roleBg[u.role]||'#f3f4f6')+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+esc(u.role)+'</span></td>'+
+        /* Баджът „РЕГ." стои ДО ролята нарочно: is_regional не се извежда от
+           нея (В. Филев е admin и регионален; счетоводството не е), а колоната
+           „оборот имейл" отдясно е трето, независимо нещо. Трите се четат
+           наведнъж, за да не се бъркат. */
+        '<td style="white-space:nowrap;"><span style="background:'+(roleBg[u.role]||'#f3f4f6')+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+esc(u.role)+'</span>'+
+          (u.is_regional?'<span title="Регионален мениджър" style="background:#e0f2fe;color:#0369a1;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;margin-left:4px;">РЕГ.</span>':'')+
+        '</td>'+
         '<td style="font-size:11px;color:#64748b;">'+
           (isGlobalRole
             ? '<span style="color:'+(storesStr==='—'?'#16a34a':'#2563eb')+';">'+(storesStr==='—'?'Всички магазини':esc(storesStr))+'</span>'+
@@ -323,7 +329,7 @@ function openUserModal(id){
   _userEditId = id || null;
   /* Зареди данните ако е редактиране */
   if(_userEditId){
-    sbGet('users','id=eq.'+_userEditId+'&select=id,email,display_name,store_name,role,active').then(function(data){
+    sbGet('users','id=eq.'+_userEditId+'&select=id,email,display_name,store_name,role,active,is_regional').then(function(data){
       var u=Array.isArray(data)&&data[0]?data[0]:{};
       _renderUserModal(u);
     });
@@ -363,6 +369,21 @@ function _renderUserModal(u){
         return '<option value="'+r+'"'+(u.role===r?' selected':'')+'>'+r+'</option>';
       }).join('')+
     '</select>'+
+
+    /* Признакът за длъжност стои ДО ролята, защото дълго време се
+       подразбираше от нея — групата „Регионален (по магазин)" в Бюлетина се
+       пълнеше от role=accounting и грешеше в двете посоки. Отметката е
+       независима: регионален може да е с всяка роля.
+       Показва се САМО при редакция. При създаване anon няма INSERT право
+       върху колоната (виж users-is-regional-schema.sql), тоест отметка тук
+       би се загубила мълчаливо — по-честно е да я няма и админът да отвори
+       новия колега за редакция. */
+    (isEdit
+      ? '<div style="display:flex;align-items:center;gap:8px;margin-top:10px;">'+
+        '<input type="checkbox" id="um-regional" '+(u.is_regional?'checked':'')+' style="width:16px;height:16px;cursor:pointer;">'+
+        '<label for="um-regional" style="font-size:13px;color:#475569;cursor:pointer;">Регионален мениджър</label>'+
+        '</div>'
+      : '')+
 
     '<label class="fl">Магазин / Офис</label>'+
     '<select class="fi" id="um-store">'+
@@ -424,6 +445,13 @@ function submitUserModal(){
     active: active
   };
   if(!_userEditId) data.email=email;
+  /* Само при редакция: колоната е без INSERT грант за anon, а и полето го
+     няма в модала за нов колега. Четем от DOM-а, за да не се подава при
+     създаване дори ако някой добави чекбокса там. */
+  if(_userEditId){
+    var regEl=document.getElementById('um-regional');
+    if(regEl) data.is_regional=!!regEl.checked;
+  }
 
   var editingId=_userEditId; /* запазваме преди closeUserModal() да го нулира */
 
@@ -442,7 +470,7 @@ function submitUserModal(){
   if(editingId){
     sbPatch('users','id=eq.'+editingId, data).then(function(res){
       if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-      logAudit('user_edited',{details:{target_user_id:editingId,target_email:email,role:role,store_name:store,active:active}});
+      logAudit('user_edited',{details:{target_user_id:editingId,target_email:email,role:role,store_name:store,active:active,is_regional:data.is_regional}});
       if(pass){
         setUserPassword(editingId,pass,function(ok,msg){
           if(ok) logAudit('user_password_changed_by_admin',{details:{target_user_id:editingId,target_email:email}});

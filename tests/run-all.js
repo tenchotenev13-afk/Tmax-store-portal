@@ -67,7 +67,8 @@ const TESTS = [
   'kasa-tab-routing.test.js',
   'pallets-summary.test.js',
   'oborot-bulletin-link.test.js',
-  'admin-oborot-report.test.js'
+  'admin-oborot-report.test.js',
+  'regional-flag.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
