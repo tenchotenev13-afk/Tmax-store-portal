@@ -1665,8 +1665,19 @@ function submitEditTask(taskId) {
   var stores = bulReadStoreMultiSelect('etk-stores');
   var reportGroups = readReportGroupsCheckboxes('etk-report-groups');
   var linkedModule = (document.getElementById('etk-linked-module')||{}).value||null;
-  sbPatch('bulletin_tasks','id=eq.'+taskId,{title:title,description:desc,department:dept,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
+  var body = {title:title,description:desc,department:dept,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null};
+  /* sort_order влиза САМО при истинска смяна на отдела - иначе всяко
+     отваряне и запазване на задачата би я хвърлило най-отдолу. */
+  var t = bulTasks.find(function(x){ return String(x.id) === String(taskId); });
+  var newOrder = null;
+  if (t && t.department !== dept) {
+    var maxOrder = bulTasks.filter(function(x){return x.department===dept;}).reduce(function(m,x){return Math.max(m,x.sort_order||0);},0);
+    newOrder = maxOrder+1;
+    body.sort_order = newOrder;
+  }
+  sbPatch('bulletin_tasks','id=eq.'+taskId,body).then(function(r){
     if (!r.ok) { toast('Грешка при запис','#dc2626'); return; }
+    if (t && newOrder !== null) { t.department = dept; t.sort_order = newOrder; }
     var el = document.getElementById('edit-tk-ov');
     if (el) el.remove();
     toast('✅ Задачата е обновена!');
@@ -2023,9 +2034,12 @@ function taskTabDrop(e,btn){
   var newDept=btn.getAttribute('data-dk');
   var t=bulTasks.find(function(x){return String(x.id)===String(tid);});
   if(!t||t.department===newDept)return;
-  sbPatch('bulletin_tasks','id=eq.'+tid,{department:newDept}).then(function(res){
+  /* Задачата отива най-отдолу в новия отдел. Старият sort_order е от
+     подредбата на СТАРИЯ отдел и в новия я хвърля на случайно място. */
+  var maxOrder=bulTasks.filter(function(x){return x.department===newDept;}).reduce(function(m,x){return Math.max(m,x.sort_order||0);},0);
+  sbPatch('bulletin_tasks','id=eq.'+tid,{department:newDept,sort_order:maxOrder+1}).then(function(res){
     if(!res.ok){toast('Грешка при преместване','#dc2626');return;}
-    t.department=newDept; renderBulletin();
+    t.department=newDept; t.sort_order=maxOrder+1; renderBulletin();
     toast('✅ Преместено в '+((DEPTS[newDept]||{}).label||newDept));
   });
 }

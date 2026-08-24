@@ -68,7 +68,8 @@ const TESTS = [
   'pallets-summary.test.js',
   'oborot-bulletin-link.test.js',
   'admin-oborot-report.test.js',
-  'regional-flag.test.js'
+  'regional-flag.test.js',
+  'bulletin-dept-move-order.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
