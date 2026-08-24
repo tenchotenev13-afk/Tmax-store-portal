@@ -118,24 +118,47 @@ function isReportableStore(name){
 /* ═══════ РЕПОРТ ЛОГИКА — ТОЧНО копие от report.js ═══════════════════ */
 var PORTAL_URL = 'https://tenchotenev13-afk.github.io/Tmax-store-portal/';
 
+/* Денят, който дневният отчет ОПИСВА - приключилият вчерашен, не текущият.
+   Кронът "daily-report-8am" пуска функцията в 05:00 UTC = 08:00 българско.
+   В 8 сутринта задачите за ТЕКУЩИЯ ден още не са отметнати, тоест писмото
+   излизаше с почти нули и с днешната дата в шапката - тревога без покритие.
+   Един ден за ВСИЧКО: дължими задачи, прозорец на отмятанията, ключ на
+   snapshot-а и датата в шапката. Разминат ли се, писмото пак ще лъже, само
+   по-тихо.
+   now се подава като аргумент, за да е тестваемо без пипане на часовника. */
+function reportDailyTargetDate(now){
+  var d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  d.setDate(d.getDate() - 1);
+  return d;
+}
+/* JS getDay() (0=Нед) -> индекса на портала (0=Пон..6=Нед). Същото
+   преобразуване като в recurringIsDueToday(), но за ПРОИЗВОЛНА дата -
+   дневният отчет пита за вчерашния делник, не за днешния. */
+function reportWeekdayIdx(d){
+  var js = d.getDay();
+  return js === 0 ? 6 : js - 1;
+}
+
 function collectDailyReportData(cb){
+  var reportDay = reportDailyTargetDate(new Date());
+  var dayISO = toLocalISO(reportDay);
+  var dayIdx = reportWeekdayIdx(reportDay);
   Promise.all([
     sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1'),
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
   ]).then(function(results){
     var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
     var allRecurring = Array.isArray(results[1]) ? results[1] : [];
-    var recurringToday = allRecurring.filter(function(t){ return recurringIsDueToday(t); });
+    var recurringToday = allRecurring.filter(function(t){ return recurringIsDueOnWeekday(t, dayIdx); });
     var recurringNoDue = allRecurring.filter(function(t){
       return (t.due_weekday===null || t.due_weekday===undefined) && !t.due_time;
     });
 
-    var todayISO = toLocalISO(new Date());
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
 
     bulTasksPromise.then(function(tasksRaw){
       var allBulTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
-      var regularToday = allBulTasks.filter(function(t){ return taskIsDueOnDate(t, todayISO); });
+      var regularToday = allBulTasks.filter(function(t){ return taskIsDueOnDate(t, dayISO); });
 
       var items = [];
       regularToday.forEach(function(t){ items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null }); });
@@ -159,15 +182,14 @@ function collectDailyReportData(cb){
         }).map(function(u){ return u.store_name; });
 
         var comps = [];
-        regComps.forEach(function(c){ if((c.completion_date||null)===todayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
-        recComps.forEach(function(c){ if(!c.completion_date || c.completion_date===todayISO) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
+        regComps.forEach(function(c){ if((c.completion_date||null)===dayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
+        recComps.forEach(function(c){ if(!c.completion_date || c.completion_date===dayISO) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
 
         var summary = reportBuildSummary(items, comps, stores, recurringNoDue.length);
-        var todayKey = toLocalISO(new Date());
-        var yesterday = new Date(); yesterday.setDate(yesterday.getDate()-1);
-        var yKey = toLocalISO(yesterday);
-        reportSaveSnapshot('daily', todayKey, summary.overallPct, summary.totalDone, summary.totalAll);
-        reportFetchSnapshot('daily', yKey, function(snap){
+        summary.reportDate = dayISO;
+        var prevISO = toLocalISO(reportDailyTargetDate(reportDay));
+        reportSaveSnapshot('daily', dayISO, summary.overallPct, summary.totalDone, summary.totalAll);
+        reportFetchSnapshot('daily', prevISO, function(snap){
           summary.trendYesterday = snap;
           cb(summary);
         });
@@ -394,14 +416,18 @@ function buildDailyReportHtml(data){
     reportStatCell(String(data.laggards),'обекта без напредък', data.laggards>0?'#C0392B':'#2F9E5C') +
     reportStatCell(String(data.storeCount),'обекта общо','#1E2761') +
     '</tr></table>';
-  body += reportTrendHtml(data.overallPct, data.trendYesterday, 'спрямо вчера');
+  body += reportTrendHtml(data.overallPct, data.trendYesterday, 'спрямо предходния ден');
   body += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin:14px 0 8px;">По обекти — изоставащите най-отгоре</div>';
   body += data.rows.map(reportStoreRow).join('');
   body += reportTopBottomTable(data.top3, data.bottom3);
   body += reportPostponedSectionHtml(data.postponedList);
   body += reportCommentedSectionHtml(data.commentedList);
   body += reportNoDueNoticeHtml(data.noDueCount, false);
-  var dateStr = new Date().toLocaleDateString('bg-BG', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  /* Датата идва от ДАННИТЕ, не от часовника: писмото се пише в 8:00 на
+     следващия ден и трябва да носи датата на деня, който описва. Fallback-ът
+     към часовника пази само ръчно повикване със стар обект без reportDate. */
+  var reportD = data.reportDate ? new Date(data.reportDate+'T00:00:00') : new Date();
+  var dateStr = reportD.toLocaleDateString('bg-BG', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   return reportEmailShell('📋 Дневен репорт — Задачи', dateStr, body,
     'Автоматичен репорт · ТеМАХ Портал');
 }
@@ -557,6 +583,7 @@ function collectWeeklyReportData(cb){
 
         var summary = reportBuildSummary(items, comps, stores, noDueCount);
         summary.weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
+        summary.weekDates = wkDates; /* същите дати, които стесняват задачите - в шапката */
         var finish = function(){
           /* ЕДИН прозорец за целия имейл: същите wkDates, които стесняват
              задачите и заявките за task_completions по-горе, стесняват и
@@ -805,6 +832,18 @@ function buildCrossModuleSectionHtml(cross){
   return h;
 }
 
+/* Подзаглавието на седмичния отчет - „Обобщение за 17.08 – 23.08.2026".
+   Само „Обобщение за седмицата" не казваше КОЯ седмица. Номерът стои в
+   заглавието, но отчетите не се четат по номер на седмица, а по дати.
+   Без бюлетин wkDates е null и се пада обратно на общия текст - тогава
+   заглавието и без това пише „Няма публикуван бюлетин". */
+function reportWeekRangeLabel(wkDates){
+  if (!wkDates || wkDates.length < 7) return 'Обобщение за седмицата';
+  var a = new Date(wkDates[0]+'T00:00:00'), b = new Date(wkDates[6]+'T00:00:00');
+  var f = function(d){ return String(d.getDate()).padStart(2,'0')+'.'+String(d.getMonth()+1).padStart(2,'0'); };
+  return 'Обобщение за ' + f(a) + ' – ' + f(b) + '.' + b.getFullYear();
+}
+
 function buildWeeklyReportHtml(data){
   var body = '<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:6px;margin-bottom:6px;"><tr>' +
     reportStatCell(data.overallPct+'%','изпълнение за седмицата', data.overallPct===100?'#2F9E5C':data.overallPct>=50?'#1E2761':'#C0392B') +
@@ -821,7 +860,7 @@ function buildWeeklyReportHtml(data){
   body += reportNoDueNoticeHtml(data.noDueCount, true);
   body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: постоянните задачи участват с по едно явяване за всеки ден, в който са дължими през седмицата (задача „всеки ден“ = 7 явявания) — точно както се отмятат в Седмичния календар. Отметка от предишна седмица не се брои за текущата.</div>';
   body += buildCrossModuleSectionHtml(data.cross);
-  return reportEmailShell('📊 Седмичен репорт — ' + (data.weekLabel||''), 'Обобщение за седмицата', body,
+  return reportEmailShell('📊 Седмичен репорт — ' + (data.weekLabel||''), reportWeekRangeLabel(data.weekDates), body,
     'Автоматичен репорт · ТеМАХ Портал');
 }
 

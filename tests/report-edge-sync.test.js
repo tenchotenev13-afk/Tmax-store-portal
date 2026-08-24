@@ -51,13 +51,14 @@ const SHARED_FNS = [
   /* прозорци и избор на седмица */
   'reportPrevWeekMonday', 'reportWeekOfMonday', 'reportPickWeeklyBulletin',
   'reportItemMatchesComp', 'reportRecurringWeekDates', 'reportCrossWindow',
+  'reportDailyTargetDate', 'reportWeekdayIdx',
   /* обобщение */
   'reportBuildSummary', 'reportSaveSnapshot', 'reportFetchSnapshot',
   'reportRankingIsMeaningful',
   /* HTML */
   'reportEmailShell', 'reportTrendHtml', 'reportDotColor', 'reportPctColor',
   'reportStatCell', 'reportStoreRow', 'reportTopBottomTable',
-  'reportNoDueNoticeHtml', 'reportPostponedSectionHtml',
+  'reportNoDueNoticeHtml', 'reportPostponedSectionHtml', 'reportWeekRangeLabel',
   'reportCommentedSectionHtml', 'crossMetricCard', 'crossModuleRow',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',
   'buildCrossModuleSectionHtml', 'buildDailyReportHtml', 'buildWeeklyReportHtml'
