@@ -53,7 +53,14 @@ function collectDailyReportData(cb){
   ]).then(function(results){
     var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
     var allRecurring = Array.isArray(results[1]) ? results[1] : [];
-    var recurringToday = allRecurring.filter(function(t){ return recurringIsDueOnWeekday(t, dayIdx); });
+    /* Прозоречната задача се явява ВЕДНЪЖ — в деня на срока. Иначе обект,
+       свършил я в понеделник, излиза неизпълнил във вторник и в сряда, и се
+       брои три пъти. */
+    var recurringToday = allRecurring.filter(function(t){ return recurringReportDueOnWeekday(t, dayIdx); });
+    /* Прозорците за отчетния ден — отмятане от кой да е техен ден затваря
+       задачата. Смятат се от самата дата, не през weekNum/година. */
+    var recWinDates = {};
+    recurringToday.forEach(function(t){ if(recurringIsWindow(t)) recWinDates[t.id]=recurringWindowDatesForDate(t, reportDay); });
     var recurringNoDue = allRecurring.filter(function(t){
       return (t.due_weekday===null || t.due_weekday===undefined) && !t.due_time;
     });
@@ -92,7 +99,12 @@ function collectDailyReportData(cb){
         regComps.forEach(function(c){ if((c.completion_date||null)===dayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
         /* Постоянна задача: completion_date=null (стара - персистира
            завинаги) или съвпада с ОТЧЕТНИЯ ден (нова многодневна). */
-        recComps.forEach(function(c){ if(!c.completion_date || c.completion_date===dayISO) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
+        recComps.forEach(function(c){
+          var win = recWinDates[c.recurring_task_id];
+          var hit = win ? (!!c.completion_date && win.indexOf(c.completion_date)>=0)
+                        : (!c.completion_date || c.completion_date===dayISO);
+          if(hit) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos });
+        });
 
         var summary = reportBuildSummary(items, comps, stores, recurringNoDue.length);
         summary.reportDate = dayISO;
@@ -724,6 +736,17 @@ function collectWeeklyReportData(cb){
            Оттам идваха „изпълнените" в стария snapshot. */
         if (!occDates.length) return;
         recWithOcc.push(t.id);
+        /* Прозорец: ЕДИН елемент за седмицата, с ДИАПАЗОН вместо дата.
+           reportItemMatchesComp() вече брои отмятане вътре в dateFrom..dateTo
+           (същият механизъм като задачите от бюлетина без собствен срок),
+           затова тук НЕ се разгъва на под-елементи по ден: иначе задача
+           "до сряда" влиза три пъти в знаменателя, а свършена в понеделник
+           излиза изпълнена само за понеделник. */
+        if (recurringIsWindow(t)) {
+          items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null,
+                       dateFrom: occDates[0], dateTo: occDates[occDates.length-1] });
+          return;
+        }
         if (occDates.length > 1) {
           occDates.forEach(function(d){
             var dLabel = new Date(d+'T00:00:00').toLocaleDateString('bg-BG',{day:'numeric',month:'numeric'});

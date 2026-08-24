@@ -41,6 +41,8 @@ const TESTS = [
   'storno-age-limit-exempt.test.js',
   'linked-module-buttons.test.js',
   'recurring-edit-department.test.js',
+  'recurring-due-window.test.js',
+  'recurring-window-report.test.js',
   'bulletin-week-default.test.js',
   'bulletin-completion-day-lock.test.js',
   'bulletin-store-denominator.test.js',

@@ -144,14 +144,20 @@ function linkedModuleAllowed(value){
    Магазин -> малка цветна точка за СОБСТВЕНИЯ му статус (зелено=изпълнена,
    оранжево=отложена, сиво=чака). Постоянните задачи ползват recurringComps
    (recurring_task_id), обикновените — bulComps (task_id). */
-function calItemStatusHtml(itemId,kind,targetStores,dateStr){
+function calItemStatusHtml(itemId,kind,targetStores,dateStr,windowDates){
   var compsArr = kind==='recurring' ? recurringComps : bulComps;
   var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
   /* Ако извикващият подаде dateStr - completion_date трябва да съвпада с
      ТОЗИ ден (многодневна задача, обикновена или постоянна). Ако не подаде
      dateStr (стара постоянна задача - 1 ден/всеки ден) - без филтър по дата,
-     изпълнението остава завинаги, както досега. */
-  var dateMatches = function(c){ return !dateStr || (c.completion_date||null)===dateStr; };
+     изпълнението остава завинаги, както досега.
+     windowDates (задача с прозорец) бие dateStr: отметка на кой да е ден от
+     прозореца брои за целия — иначе офисът вижда 3 различни числа за една и
+     съща единица работа, по едно на ден от прозореца. */
+  var dateMatches = function(c){
+    if(windowDates&&windowDates.length) return windowDates.indexOf(c.completion_date||'')>=0;
+    return !dateStr || (c.completion_date||null)===dateStr;
+  };
   if(isGlobal()){
     /* Знаменателят са обектите, които РЕАЛНО могат да отметнат — същият
        източник като седмичния имейл (report.js). Преди тук стоеше
@@ -893,14 +899,20 @@ function renderBulView(){
       recItems.forEach(function(t){
         var recDateScoped=recurringIsDateScoped(t);
         var recCdate=recDateScoped?dateStr:null;
+        /* Прозорец: отметка на КОЙ ДА Е ден от прозореца затваря задачата за
+           цялата седмица. Чекбоксът не се крие на останалите дни (правило
+           11) — показва се отметнат и заключен, с датата на реалното
+           изпълнение. Няма ли отметка, дните се държат както досега:
+           отключен е само днешният, през bulDateLockReason(). */
+        var recWinComp=recurringWindowComp(t,store,days);
         html+='<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
         if(isGlobal()){
           html+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Постоянна задача">🔁</span>';
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;">'+esc(t.title||'')+'</span>';
-          html+=calItemStatusHtml(t.id,'recurring',t.target_stores,recCdate);
+          html+=calItemStatusHtml(t.id,'recurring',t.target_stores,recCdate,recurringIsWindow(t)?recurringWindowDatesInWeek(t,days):null);
         } else {
-          var doneRec=store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===recCdate;});
-          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+bulLockAttr(recCdate,t.linked_module)+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(recCdate,t.linked_module)+'">';
+          var doneRec=recWinComp?true:(store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===recCdate;}));
+          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(recWinComp?recurringWindowDoneAttr(recWinComp):bulLockAttr(recCdate,t.linked_module))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(recWinComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(recCdate,t.linked_module))+'">';
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
         }
         html+='</div>';
@@ -1677,6 +1689,7 @@ function openEditRecurringModal(taskId) {
     '<input class="fi" id="erec-desc" value="'+esc(t.description||'')+'">' +
     '<label class="fl">Повтарящи се дни (по избор)</label>' +
     recWeekdaysCheckboxesHtml('erec-weekdays', t.due_weekdays||(t.due_weekday!==null&&t.due_weekday!==undefined?[t.due_weekday]:[])) +
+    recWindowToggleHtml('erec-window','erec-weekdays', !!t.due_window, (t.due_weekdays||[]).length) +
     '<label class="fl">Час (по избор)</label><input type="time" class="fi" id="erec-time" value="'+esc(t.due_time||'')+'">' +
     '<label class="fl">Вид задача</label><select class="fi" id="erec-type">'+taskTypeOptsHtml(t.task_type)+'</select>' +
     /* Отделът се задава при създаване от блока, в който е натиснат бутонът.
@@ -1697,6 +1710,7 @@ function openEditRecurringModal(taskId) {
     '</div></div>';
   document.body.appendChild(ov);
   bulFillStoreMultiSelect('erec-stores', t.target_stores||[]);
+  recWindowBindDays('erec-weekdays','erec-window');
   setTimeout(function(){ var el=document.getElementById('erec-title'); if(el)el.focus(); }, 80);
 }
 
@@ -1713,7 +1727,7 @@ function submitEditRecurring(taskId) {
   var linkedModule = (document.getElementById('erec-linked-module')||{}).value||null;
   var cur = recurringTasks.find(function(x){ return String(x.id)===String(taskId); });
   var dept = (document.getElementById('erec-dept')||{}).value || (cur&&cur.department) || DCOLS[0];
-  var payload = {title:title,description:desc,department:dept,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null};
+  var payload = {title:title,description:desc,department:dept,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_window:readRecWindow('erec-window','erec-weekdays'),due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null};
   /* Смяна на отдел -> задачата отива на ДЪНОТО на новия. sort_order е
      глобален, а moveRecInDept() преномерира 1..N в рамките на отдела, тоест
      числата се повтарят между отделите: днес „Администрация" заема 1–11, а
@@ -2888,10 +2902,15 @@ function loadTasksStats() {
     var statWk = curBul ? curBul.week_number : weekNum(new Date());
     var statYr = curBul ? curBul.year : new Date().getFullYear();
     var statWeekDays = weekDays(statWk, statYr).map(function(d){ return toLocalISO(d); });
-    var statRecDates = {};
+    var statRecDates = {}, statRecWindow = {};
     recurringTasks.forEach(function(t){
       var out = [];
-      statWeekDays.forEach(function(iso, idx){ if (recurringIsDueOnWeekday(t, idx)) out.push(iso); });
+      /* Прозоречната задача е ЕДНА единица работа за седмицата, не N —
+         затова тук се явява веднъж, в деня на срока. Отмятането обаче може
+         да е на кой да е ден от прозореца, затова съпоставянето по-долу
+         минава през целия прозорец. */
+      statWeekDays.forEach(function(iso, idx){ if (recurringReportDueOnWeekday(t, idx)) out.push(iso); });
+      if (recurringIsWindow(t)) statRecWindow[t.id] = recurringWindowDatesInWeek(t, weekDays(statWk, statYr));
       statRecDates[t.id] = out;
     });
 
@@ -2932,9 +2951,16 @@ function loadTasksStats() {
         });
         var recAll=0, recDone=0;
         dRec.forEach(function(t){
+          var winDates = statRecWindow[t.id] || null;
           (statRecDates[t.id]||[]).forEach(function(iso){
             recAll++;
-            if (recurringComps.some(function(c){return c.recurring_task_id===t.id&&c.store_name===store&&c.status==='done'&&(c.completion_date||null)===iso;})) recDone++;
+            /* Прозорец: брои се отмятане на КОЙ ДА Е ден от прозореца, не само
+               в деня на срока — иначе задача, свършена по-рано, излиза
+               неизпълнена. */
+            if (recurringComps.some(function(c){
+              if(c.recurring_task_id!==t.id||c.store_name!==store||c.status!=='done')return false;
+              return winDates ? winDates.indexOf(c.completion_date||'')>=0 : (c.completion_date||null)===iso;
+            })) recDone++;
           });
         });
         var doneCnt = done + recDone, allCnt = dTasks.length + recAll;
@@ -3026,8 +3052,16 @@ function renderRecurringTasks(dk) {
     h += '<div style="padding:8px 14px;">';
     dTasks.forEach(function(t,recIdxInDept) {
       var isMultiRec = recurringIsMultiDay(t);
-      var singleRecDate = isMultiRec ? null : (recTaskWeekdays(t).length ? weekdayIdxToDate(recTaskWeekdays(t)[0]) : toLocalISO(new Date()));
-      var compObj = store && !isMultiRec && recurringComps.find(function(c){return c.recurring_task_id===t.id && c.store_name===store && (c.completion_date||null)===singleRecDate;});
+      /* Прозоречната задача има ЕДНО състояние, затова минава по
+         единично-дневния път. Датата ѝ е днешната, ако днес е в прозореца
+         (тогава чекбоксът е отключен), иначе срокът — така заключването само
+         казва „още не е настъпил"/„приключил". */
+      var isWinRec = recurringIsWindow(t);
+      var winComp = isWinRec ? recurringWindowComp(t,store,weekDaysArr) : null;
+      var singleRecDate = isMultiRec ? null
+        : (isWinRec ? recurringWindowCheckDate(t,weekDaysArr)
+          : (recTaskWeekdays(t).length ? weekdayIdxToDate(recTaskWeekdays(t)[0]) : toLocalISO(new Date())));
+      var compObj = winComp || (store && !isMultiRec && recurringComps.find(function(c){return c.recurring_task_id===t.id && c.store_name===store && (c.completion_date||null)===singleRecDate;}));
       var done = !!compObj && compObj.status==='done';
       var postponed = !!compObj && compObj.status==='postponed';
       var dueToday = recurringIsDueToday(t);
@@ -3043,8 +3077,8 @@ function renderRecurringTasks(dk) {
       if (isMultiRec) {
         h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
       } else {
-        h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" data-cdate="'+(singleRecDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"' + bulLockAttr(singleRecDate,t.linked_module) + ' ' +
-          'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + bulLockStyle(singleRecDate,t.linked_module) + '">';
+        h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" data-cdate="'+(singleRecDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"' + (winComp?recurringWindowDoneAttr(winComp):bulLockAttr(singleRecDate,t.linked_module)) + ' ' +
+          'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + (winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleRecDate,t.linked_module)) + '">';
       }
       h += '<div style="flex:1;">';
       h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done,singleRecDate)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
@@ -3194,6 +3228,7 @@ function openRecurringModal(dk) {
     '<label class="fl">Описание</label><input class="fi" id="rec-desc" placeholder="Допълнителна информация">' +
     '<label class="fl">Повтарящи се дни (по избор)</label>' +
     recWeekdaysCheckboxesHtml('rec-weekdays', []) +
+    recWindowToggleHtml('rec-window','rec-weekdays', false, 0) +
     '<label class="fl">Час (по избор)</label><input type="time" class="fi" id="rec-time">' +
     '<label class="fl">Вид задача</label><select class="fi" id="rec-type">'+taskTypeOptsHtml('info')+'</select>' +
     '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
@@ -3208,6 +3243,7 @@ function openRecurringModal(dk) {
     '</div></div>';
   document.body.appendChild(ov);
   bulFillStoreMultiSelect('rec-stores', []);
+  recWindowBindDays('rec-weekdays','rec-window');
   setTimeout(function(){ var el=document.getElementById('rec-title'); if(el)el.focus(); }, 100);
 }
 /* Опции за dropdown "повтарящ се ден" — value="" означава "всеки ден" (due_weekday=null) */
@@ -3233,7 +3269,55 @@ function readRecWeekdaysCheckboxes(selId){
   if (!wrap) return [];
   return Array.prototype.slice.call(wrap.querySelectorAll('input[type=checkbox]:checked')).map(function(cb){ return parseInt(cb.value,10); });
 }
+/* Превключвателят „прозорец" виси на избора на дни: смисъл има само при
+   2..6 избрани. Контролата НЕ се крие — стои видима и disabled, с
+   обяснение защо (правило 11). */
+function recWindowToggleHtml(selId, daysId, checked, dayCount){
+  var usable = dayCount>1 && dayCount<7;
+  return '<label id="'+selId+'-wrap" style="display:flex;align-items:center;gap:7px;font-size:12.5px;margin-top:6px;'+(usable?'color:#374151;cursor:pointer;':'color:#94a3b8;cursor:not-allowed;opacity:.6;')+'"'+
+    (usable?'':' title="Изисква между 2 и 6 избрани дни"')+'>'+
+    '<input type="checkbox" id="'+selId+'" data-days="'+daysId+'"'+((checked&&usable)?' checked':'')+(usable?'':' disabled')+
+    ' onchange="recWindowToggleChanged(this)" style="width:14px;height:14px;cursor:inherit;">'+
+    'Прозорец до последния ден (една отметка за цялата седмица)</label>';
+}
+/* Преоценява достъпността след всяка промяна по дните. Излиза ли изборът от
+   2..6, превключвателят се изключва И се размаркира — иначе би останал
+   включен с невалидна стойност, която клиентът и без това игнорира. */
+function recWindowSyncToggle(selId, daysId){
+  var cb = document.getElementById(selId), wrap = document.getElementById(selId+'-wrap');
+  if(!cb||!wrap) return;
+  var n = readRecWeekdaysCheckboxes(daysId).length;
+  var usable = n>1 && n<7;
+  cb.disabled = !usable;
+  if(!usable) cb.checked = false;
+  wrap.style.color = usable ? '#374151' : '#94a3b8';
+  wrap.style.cursor = usable ? 'pointer' : 'not-allowed';
+  wrap.style.opacity = usable ? '1' : '.6';
+  if(usable) wrap.removeAttribute('title'); else wrap.setAttribute('title','Изисква между 2 и 6 избрани дни');
+}
+function recWindowToggleChanged(cb){ recWindowSyncToggle(cb.id, cb.dataset.days); }
+/* Закача се на контейнера с дните, за да не се пише onchange на седем места. */
+function recWindowBindDays(daysId, selId){
+  var wrap = document.getElementById(daysId);
+  if(!wrap) return;
+  wrap.addEventListener('change', function(){ recWindowSyncToggle(selId, daysId); });
+  recWindowSyncToggle(selId, daysId);
+}
+/* Стойността за запис. Връща false, ако изборът на дни не позволява прозорец
+   — така невалидна комбинация не стига до базата. */
+function readRecWindow(selId, daysId){
+  var cb = document.getElementById(selId);
+  if(!cb||!cb.checked) return false;
+  var n = readRecWeekdaysCheckboxes(daysId).length;
+  return n>1 && n<7;
+}
 function recurringDueLabel(t){
+  /* Прозорец: „Пон–Сря до 16:00" — тире, не плюс. Плюсът чете като три
+     отделни задължения, а тук денят е един, с разрешено по-рано. */
+  if(recurringIsWindow(t)){
+    var w=recurringWindowIdxs(t);
+    return DNAMES[w[0]].slice(0,3)+'–'+DNAMES[w[w.length-1]].slice(0,3)+(t.due_time?(' до '+t.due_time):'');
+  }
   if(t.due_weekdays && t.due_weekdays.length){
     var names = t.due_weekdays.slice().sort(function(a,b){return a-b;}).map(function(i){return DNAMES[i].slice(0,3);}).join('+');
     return names + (t.due_time ? (' до '+t.due_time) : '');
@@ -3252,7 +3336,73 @@ function recurringDueLabel(t){
    due_weekday) и "всеки ден" (без due_weekday/due_weekdays) - иначе
    изпълнението се записва с completion_date=null и задачата остава
    "изпълнена" завинаги, вместо да се нулира на всяко следващо явяване. */
-function recurringIsMultiDay(t){ return recTaskWeekdays(t).length>1; }
+/* ─── ПРОЗОРЕЦ ЗА ИЗПЪЛНЕНИЕ ────────────────────────────────
+   due_window превключва смисъла на due_weekdays: последният ден е СРОК,
+   предходните са „разрешено по-рано", и ЕДНА отметка където и да е в
+   прозореца затваря задачата за цялата седмица — един елемент в
+   статистиката, не N. Без него [0,1,2] са три отделни задължения: три
+   чекбокса, три отмятания, три пъти в знаменателя. „Справка до сряда",
+   свършена в понеделник, е свършена.
+   Смисъл има само при 2..6 избрани дни: при 0 или 1 няма какво да е
+   „по-рано", а при всичките 7 задачата е „всеки ден" (така е зададен
+   „Вечерен оборот"). Извън този диапазон стойността се ИГНОРИРА, вместо
+   поведението да се промени мълчаливо. */
+function recurringIsWindow(t){
+  if(!t||!t.due_window) return false;
+  var d=(t.due_weekdays&&t.due_weekdays.length)?t.due_weekdays:[];
+  return d.length>1 && d.length<7;
+}
+function recurringWindowIdxs(t){
+  return ((t&&t.due_weekdays)||[]).slice().sort(function(a,b){return a-b;});
+}
+function recurringWindowDeadlineIdx(t){
+  var d=recurringWindowIdxs(t); return d.length?d[d.length-1]:null;
+}
+/* Датите на прозореца в подадената седмица. weekArr е [Пон..Нед]. */
+function recurringWindowDatesInWeek(t,weekArr){
+  if(!recurringIsWindow(t)||!weekArr) return [];
+  return recurringWindowIdxs(t).map(function(i){ return toLocalISO(weekArr[i]); });
+}
+/* Същото, но за седмицата на КОНКРЕТНА дата. Смята се от понеделника ѝ, не
+   през weekNum/година — така няма разминаване между ISO седмица и
+   календарна година около Нова година. */
+function recurringWindowDatesForDate(t,d){
+  if(!recurringIsWindow(t)) return [];
+  var mon=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  mon.setDate(mon.getDate()-((mon.getDay()+6)%7));
+  return recurringWindowIdxs(t).map(function(i){
+    var x=new Date(mon); x.setDate(mon.getDate()+i); return toLocalISO(x);
+  });
+}
+/* Отмятането, което затваря прозореца за тази седмица, или null. */
+function recurringWindowComp(t,store,weekArr){
+  if(!store||!recurringIsWindow(t)) return null;
+  var dates=recurringWindowDatesInWeek(t,weekArr), found=null;
+  recurringComps.forEach(function(c){
+    if(found)return;
+    if(c.recurring_task_id===t.id&&c.store_name===store&&c.status==='done'&&dates.indexOf(c.completion_date||'')>=0)found=c;
+  });
+  return found;
+}
+/* Датата, с която прозоречна задача се отмята от блока „Постоянни задачи":
+   днес, ако е В прозореца (тогава bulDateLockReason я отключва), иначе
+   срокът — така самото заключване казва „още не е настъпил"/„приключил",
+   вместо да отвори отмятане извън прозореца. */
+function recurringWindowCheckDate(t,weekArr){
+  var dates=recurringWindowDatesInWeek(t,weekArr);
+  if(!dates.length) return null;
+  var td=bulTodayISO();
+  return dates.indexOf(td)>=0 ? td : dates[dates.length-1];
+}
+/* Атрибути за вече затворен прозорец: отметнат и заключен на ВСЕКИ ден от
+   прозореца, с датата на реалното изпълнение в title. */
+function recurringWindowDoneAttr(comp){
+  return ' disabled title="Изпълнена на '+esc(fmtDate(comp.completion_date))+'"';
+}
+/* Постоянна задача с НЯКОЛКО избрани дни, които са ОТДЕЛНИ задължения.
+   Прозоречната задача НЕ е такава — тя има едно състояние и минава по
+   единично-дневния път навсякъде (календар, блок, печат). */
+function recurringIsMultiDay(t){ return !recurringIsWindow(t) && recTaskWeekdays(t).length>1; }
 function recurringIsDateScoped(t){ return true; }
 function recurringIsDueOnWeekday(t,weekdayIdx){
   if(t.due_weekdays && t.due_weekdays.length) return t.due_weekdays.indexOf(weekdayIdx)>=0;
@@ -3261,10 +3411,17 @@ function recurringIsDueOnWeekday(t,weekdayIdx){
   }
   return t.due_weekday===weekdayIdx;
 }
+/* За ОТЧЕТИТЕ: прозоречна задача се явява ВЕДНЪЖ — в деня на срока.
+   Календарът пази recurringIsDueOnWeekday(), защото там чекбоксът стои на
+   всеки ден от прозореца; отчетът брои единици работа, а те са една. */
+function recurringReportDueOnWeekday(t,weekdayIdx){
+  if(recurringIsWindow(t)) return weekdayIdx===recurringWindowDeadlineIdx(t);
+  return recurringIsDueOnWeekday(t,weekdayIdx);
+}
 function recurringIsDueToday(t){
   var jsDay=new Date().getDay(); /* 0=Нед,1=Пон...6=Съб */
   var idx=jsDay===0?6:jsDay-1; /* превръщаме в 0=Пон..5=Съб,6=Нед */
-  return recurringIsDueOnWeekday(t, idx);
+  return recurringReportDueOnWeekday(t, idx);
 }
 
 function submitRecurring(dk) {
@@ -3278,7 +3435,7 @@ function submitRecurring(dk) {
   var stores = bulReadStoreMultiSelect('rec-stores');
   var reportGroups = readReportGroupsCheckboxes('rec-report-groups');
   var linkedModule = (document.getElementById('rec-linked-module')||{}).value||null;
-  sbPost('recurring_tasks',{department:dk,title:title,description:desc,active:true,sort_order:recurringTasks.length,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
+  sbPost('recurring_tasks',{department:dk,title:title,description:desc,active:true,sort_order:recurringTasks.length,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_window:readRecWindow('rec-window','rec-weekdays'),due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
     if (!r.ok) { toast('Грешка','#dc2626'); return; }
     var el = document.getElementById('rec-modal-ov');
     if (el) el.remove();

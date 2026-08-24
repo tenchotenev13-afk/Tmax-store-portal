@@ -160,8 +160,12 @@ const OLD_KEYS = ['title', 'description', 'due_weekday', 'due_weekdays', 'due_ti
     const body = patchBody(calls);
     if (ok('PATCH е изпратен', !!body)) {
       const keys = Object.keys(body).sort();
-      ok('точно старите девет + department',
-        keys.join(',') === OLD_KEYS.concat(['department']).sort().join(','), keys.join(','));
+      /* due_window се добави с прозореца за изпълнение (миграция
+         recurring_tasks_due_window). Списъкът е изричен нарочно: ново поле в
+         PATCH-а трябва да мине през съзнателен ред тук, не да се промъкне. */
+      ok('точно старите девет + department + due_window',
+        keys.join(',') === OLD_KEYS.concat(['department','due_window']).sort().join(','), keys.join(','));
+      ok('due_window е булево, не undefined', typeof body.due_window === 'boolean', String(body.due_window));
       const src = TASKS.find(t => t.id === 'r-warehouse');
       ok('title непроменен', body.title === src.title, body.title);
       ok('description непроменено', body.description === src.description, body.description);
