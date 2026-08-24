@@ -49,7 +49,8 @@ const SHARED_FNS = [
   'collectDailyReportData', 'collectWeeklyReportData',
   'collectCrossModuleWeeklySummary',
   /* прозорци и избор на седмица */
-  'reportPrevWeekMonday', 'reportWeekOfMonday', 'reportPickWeeklyBulletin',
+  'reportMondayOfWeek', 'reportPrevWeekMonday', 'reportWeekOfMonday',
+  'reportPickWeeklyBulletin',
   'reportItemMatchesComp', 'reportRecurringWeekDates', 'reportCrossWindow',
   'reportDailyTargetDate', 'reportWeekdayIdx',
   /* обобщение */

@@ -47,11 +47,18 @@ function collectDailyReportData(cb){
   var reportDay = reportDailyTargetDate(new Date());
   var dayISO = toLocalISO(reportDay);
   var dayIdx = reportWeekdayIdx(reportDay);
+  /* Бюлетинът на СЕДМИЦАТА НА ОТЧЕТНИЯ ДЕН, не последният публикуван.
+     Бюлетините се публикуват предварително: в понеделник 24.08 най-новият
+     е за седмица 35 (24-30.08), а отчетът описва 23.08 - ден от седмица 34.
+     Оттам задачите на грешната седмица влизаха в дневния набор, а тези на
+     вярната липсваха. Същият избор като в седмичния (списък + точно
+     съвпадение, иначе най-новият, който НЕ е след отчетната седмица). */
+  var dayTarget = reportWeekOfMonday(reportMondayOfWeek(reportDay));
   Promise.all([
-    sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1'),
+    sbGet('bulletins','status=eq.published&order=year.desc,week_number.desc&limit=20'),
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
   ]).then(function(results){
-    var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
+    var bul = reportPickWeeklyBulletin(results[0], dayTarget);
     var allRecurring = Array.isArray(results[1]) ? results[1] : [];
     /* Прозоречната задача се явява ВЕДНЪЖ — в деня на срока. Иначе обект,
        свършил я в понеделник, излиза неизпълнил във вторник и в сряда, и се
@@ -97,12 +104,19 @@ function collectDailyReportData(cb){
            задача (Пон+Ср) не бива изпълнението от Понеделник да се показва
            като "изпълнено" (или "отложено") и в сряда. */
         regComps.forEach(function(c){ if((c.completion_date||null)===dayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
-        /* Постоянна задача: completion_date=null (стара - персистира
-           завинаги) или съвпада с ОТЧЕТНИЯ ден (нова многодневна). */
+        /* Постоянна задача: отмятането трябва да носи ОТЧЕТНИЯ ден.
+           Дотук `!c.completion_date ||` пускаше и старите записи без дата -
+           184 такива в базата, всичките отпреди полето да се пълни. Те се
+           броят за изпълнени всеки ден завинаги: за неделя 23.08 от 21
+           „изпълнени" в писмото 15 бяха реални и 6 фантоми, тоест 39%
+           вместо верните 28%. Седмичният ги изключва нарочно още от v3
+           („не могат да бъдат отнесени към коя да е седмица") - тук важи
+           същото, само че за ден.
+           Прозоречната задача и без това изисква реална дата. */
         recComps.forEach(function(c){
           var win = recWinDates[c.recurring_task_id];
           var hit = win ? (!!c.completion_date && win.indexOf(c.completion_date)>=0)
-                        : (!c.completion_date || c.completion_date===dayISO);
+                        : (c.completion_date === dayISO);
           if(hit) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos });
         });
 
@@ -624,12 +638,19 @@ function sendDailyReportTest(toEmail){
    чисто 0%.
    Сега: в понеделник 24.08 отчетът покрива 17-23.08. */
 
-/* Понеделникът на ПРЕДХОДНАТА седмица спрямо подадената дата. */
+/* Понеделникът на СОБСТВЕНАТА седмица на подадената дата.
+   Дневният отчет пита точно това: „от коя седмица е денят, който описвам" -
+   за да вземе бюлетина на ТАЗИ седмица, а не последния публикуван. */
+function reportMondayOfWeek(d){
+  var x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  x.setDate(x.getDate() - reportWeekdayIdx(x));
+  return x;
+}
+/* Понеделникът на ПРЕДХОДНАТА седмица спрямо подадената дата - седмичният
+   отчет обобщава приключилата, не текущата. */
 function reportPrevWeekMonday(now){
-  var d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  var js = d.getDay();                 /* 0=неделя */
-  var idx = js === 0 ? 6 : js - 1;     /* 0=понеделник */
-  d.setDate(d.getDate() - idx - 7);
+  var d = reportMondayOfWeek(now);
+  d.setDate(d.getDate() - 7);
   return d;
 }
 /* Номерът на седмицата за даден понеделник. Търси се през СЪЩАТА weekDays(),
