@@ -72,7 +72,8 @@ const TESTS = [
   'bulletin-dept-move-order.test.js',
   'co-role-filter.test.js',
   'late-flag.test.js',
-  'task-completion-files.test.js'
+  'task-completion-files.test.js',
+  'overdue-recipients.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

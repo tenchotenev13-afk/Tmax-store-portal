@@ -85,6 +85,36 @@ function pushToRole(role, title, message) {
   });
 }
 
+/* ─── ДО КОНКРЕТНИ ХОРА ─────────────────────────────────── */
+/* Адресът на устройството е тагът display_name — initPush() задава само
+   store_name, role и display_name, таг is_regional няма. Затова списъкът с
+   хора се чете от базата (users.is_regional), а тагът служи единствено за
+   адрес. Нов таг беше отхвърлен съзнателно: пише се чак при следващо влизане
+   на човека, тоест известията щяха да са грешни, докато всички не се
+   прелогнат, и щеше да се появи втори източник на истината до колоната.
+
+   ⚠️ При празен списък НЕ пада към pushToAll(), за разлика от pushToStores():
+   тук това би пратило известието до целия портал. */
+function pushToPeople(displayNames, title, message) {
+  var list = (Array.isArray(displayNames) ? displayNames : []).filter(function(n) {
+    return n && typeof n === 'string';
+  });
+  if (!list.length) {
+    return Promise.resolve({ ok: false, status: 0, data: { message: 'Няма получатели' } });
+  }
+  /* OneSignal filters: име1 OR име2 OR ... */
+  var filters = [];
+  list.forEach(function(name, i) {
+    if (i > 0) filters.push({ operator: 'OR' });
+    filters.push({ field: 'tag', key: 'display_name', relation: '=', value: name });
+  });
+  return osSend({
+    filters: filters,
+    headings: { bg: title, en: title },
+    contents: { bg: message, en: message }
+  });
+}
+
 /* ═══════ БЮЛЕТИН НОТИФИКАЦИИ ════════════════════════════ */
 
 /* При добавяне на нова задача (от submitTask в bulletin.js) — до конкретните
@@ -125,21 +155,72 @@ function pushTasksToday(store, tasks) {
 
 /* При просрочени задачи (петък) */
 function pushOverdue(overdueByStore, onDone) {
-  var stores = Object.keys(overdueByStore);
+  var stores = Object.keys(overdueByStore || {});
   if (!stores.length) {
     toast('✅ Всички задачи са изпълнени — няма нотификации.');
     if (onDone) onDone(); return;
   }
-  /* Нотификация до регионалните и контролинг */
   var storeList = stores.join(', ');
   var title = '⚠️ Незавършени задачи';
   var msg   = 'Магазини без изпълнение: ' + storeList;
-  var sent  = 0;
-  var total = 2; /* до logistics и accounting */
-  function checkDone() { sent++; if (sent >= total && onDone) onDone(); }
-  pushToRole('logistics', title, msg).then(checkDone);
-  pushToRole('accounting', title, msg).then(checkDone);
-  toast('🔔 Изпратено до регионалните и контролинг');
+
+  /* Получателите са регионалните по колоната users.is_regional — същият
+     източник като бюлетина (report.js), не ново определение. Ролите не
+     вършеха работа: 'logistics' са двата склада (общи акаунти, не хора),
+     'accounting' са 20 счетоводителки, а В. Филев е регионален с роля admin.
+     Контролингът, заради който е писана функцията, също е с роля admin и по
+     старата заявка не получаваше нито едно известие. */
+  sbGet('users', 'is_regional=eq.true&active=eq.true&select=email,display_name,assigned_stores')
+  .then(function(regs) {
+    /* sbGet НЕ отхвърля при грешка — при мрежов срив, 401 или счупена
+       политика връща [] (shared.js ред 23). Празен списък при седем
+       регионални в базата е СРИВ, не валидно състояние. Продължим ли,
+       известието тръгва само до контролинга, а toast-ът отчита успех —
+       същата поука като при autoCreateReturnFromDiff(). */
+    if (!Array.isArray(regs) || !regs.length) {
+      toast('❌ Списъкът с регионални не се зареди — известието НЕ е изпратено', '#dc2626');
+      if (onDone) onDone(); return;
+    }
+    var names = [];
+    regs.forEach(function(u) {
+      var mine = u.assigned_stores;
+      /* Регионален без зачисления или без пресичане — известието не го засяга. */
+      if (!Array.isArray(mine) || !mine.length || !u.display_name) return;
+      var hit = mine.some(function(s) { return stores.indexOf(s) >= 0; });
+      if (hit) names.push(u.display_name);
+    });
+    /* Контролингът няма зачислени обекти и получава винаги. Защитата е за
+       случая, в който тестов харнес зареди само push.js — в index.html
+       bulletin.js стои преди него, тоест константата е налична.
+
+       ⚠️ Адресът е тагът display_name, а имената идват от REPORT_GROUPS в
+       bulletin.js. Проверено на 25.08.2026 — съвпадат точно с
+       users.display_name в базата. Преименуване на човек от таб
+       Администрация спира push-а към него ТИХО, без грешка, докато
+       REPORT_GROUPS не бъде обновен. Регионалните не са засегнати —
+       техните имена идват от същата заявка към users. */
+    var ctl = (typeof REPORT_GROUPS === 'undefined' || !REPORT_GROUPS.controlling)
+      ? [] : (REPORT_GROUPS.controlling.people || []);
+    ctl.forEach(function(p) { if (p && p.name) names.push(p.name); });
+
+    var uniq = [];
+    names.forEach(function(n) { if (uniq.indexOf(n) < 0) uniq.push(n); });
+    if (!uniq.length) {
+      toast('Няма получатели за просрочени задачи', '#d97706');
+      if (onDone) onDone(); return;
+    }
+    /* Едно известие до всички получатели, не по едно на човек. */
+    return pushToPeople(uniq, title, msg).then(function(res) {
+      if (res && res.ok) {
+        toast('🔔 Изпратено до ' + uniq.length + (uniq.length === 1 ? ' получател' : ' получатели'));
+      } else {
+        var err = (res && res.data && (res.data.message || res.data.error)) || '';
+        toast('❌ Известието не тръгна' + (err ? ': ' + err : ''), '#dc2626');
+        console.error('Push overdue error:', res);
+      }
+      if (onDone) onDone();
+    });
+  });
 }
 
 /* ═══════ AUTO CHECK при влизане ═════════════════════════ */

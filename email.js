@@ -227,9 +227,20 @@ function sendOverdueAlerts(bulletin, tasks, completions, onDone) {
     return;
   }
 
-  /* Всички магазини */
-  sbGet('stores', 'select=name').then(function(stores) {
-    var allStores = Array.isArray(stores) ? stores.map(function(s) { return s.name; }) : [];
+  /* Само обектите, които реално могат да отметнат — същият източник като в
+     bulletin.js и в календара. Преди тук стоеше sbGet('stores'): 23 записа,
+     сред тях Централен офис, двата логистични склада, Пазарджик и Сервиз
+     Троян. Те нямат как да изпълнят задача, а излизаха в писмото начело на
+     списъка с неизпълнилите. */
+  loadReportableStores().then(function(stores) {
+    var allStores = Array.isArray(stores) ? stores.slice() : [];
+    /* И тя не отхвърля при грешка — връща [] (shared.js ред 453). Нула
+       обекта при осемнайсет в базата е срив: без тази защита нито един
+       ред не влиза в overdueItems и функцията отчита „Всички задачи са
+       изпълнени" върху празнота. */
+    if (!allStores.length) {
+      toast('❌ Списъкът с обекти не се зареди', '#dc2626'); return;
+    }
 
     /* За всеки просрочен task — кои магазини НЕ са го изпълнили */
     var overdueItems = [];
@@ -254,9 +265,59 @@ function sendOverdueAlerts(bulletin, tasks, completions, onDone) {
       if (onDone) onDone(); return;
     }
 
-    /* Вземи регионални (logistics) + контролинг (accounting) */
-    sbGet('users', 'role=in.(logistics,accounting)&active=eq.true&select=email,display_name,assigned_stores').then(function(recipients) {
-      if (!Array.isArray(recipients) || !recipients.length) {
+    /* Регионалните по колоната users.is_regional — същият източник като
+       бюлетина (report.js), не ново определение — плюс фиксирания контролинг.
+       Преди тук стоеше role=in.(logistics,accounting): 22 акаунта, от които 2
+       са складове (общи акаунти, не хора) и 20 счетоводителки, а Миглена и
+       Цветелина, заради които е писана функцията, са с роля admin и не
+       получаваха нищо. Същото важи и за В. Филев. */
+    sbGet('users', 'is_regional=eq.true&active=eq.true&select=email,display_name,assigned_stores').then(function(regs) {
+      /* Празен отговор е срив, не „няма регионални" — sbGet връща [] и при
+         мрежов срив (shared.js ред 23). Продължим ли, писмата тръгват само
+         до контролинга и никой не разбира, че седмината са изпуснати. */
+      if (!Array.isArray(regs) || !regs.length) {
+        toast('❌ Списъкът с регионални не се зареди — писмата НЕ са изпратени', '#dc2626');
+        return;
+      }
+
+      /* Всеки получател носи ПРОИЗХОДА си, защото празният assigned_stores
+         значи различни неща за двата произхода. За контролинга „няма
+         зачислени обекти" значи „целият списък" — филтърът долу не стеснява
+         нищо. За регионален значи „не са му зададени обекти" и той се
+         пропуска, точно както pushOverdue() го пропуска. Състоянието е
+         достижимо, не хипотетично: отметката „регионален" в Администрация
+         е независима от зачислените обекти, тоест човек може да я получи,
+         преди да му бъдат зададени магазини. */
+      var recipients = [];
+
+      /* Контролингът е ПЪРВИ, за да спечели при дедупликацията: човек, който
+         е и в двата списъка, трябва да получи целия списък, а не да бъде
+         стеснен мълчаливо до своите обекти. */
+      var ctl = (typeof REPORT_GROUPS === 'undefined' || !REPORT_GROUPS.controlling)
+        ? [] : (REPORT_GROUPS.controlling.people || []);
+      ctl.forEach(function(person) {
+        if (!person || !person.email) return;
+        recipients.push({ email: person.email, display_name: person.name,
+                          assigned_stores: null, source: 'controlling' });
+      });
+
+      (Array.isArray(regs) ? regs : []).forEach(function(u) {
+        if (!Array.isArray(u.assigned_stores) || !u.assigned_stores.length) return;
+        recipients.push({ email: u.email, display_name: u.display_name,
+                          assigned_stores: u.assigned_stores, source: 'regional' });
+      });
+
+      /* Дедупликация по ИМЕЙЛ — регионален, който е и в контролинга, получава
+         едно писмо, не две. */
+      var seen = {}, uniq = [];
+      recipients.forEach(function(u) {
+        var key = String(u.email || '').toLowerCase();
+        if (!key || seen[key]) return;
+        seen[key] = 1; uniq.push(u);
+      });
+      recipients = uniq;
+
+      if (!recipients.length) {
         toast('Няма получатели за просрочени задачи', '#d97706'); return;
       }
 
@@ -265,7 +326,9 @@ function sendOverdueAlerts(bulletin, tasks, completions, onDone) {
       recipients.forEach(function(u) {
         if (!u.email) { pending--; return; }
 
-        /* Филтрирай само магазините, за които отговаря */
+        /* Филтрирай само магазините, за които отговаря. Тук стига или
+           регионален с непразен списък, или контролинг с null — тоест
+           „целият списък" е решение на произхода, не на празното поле. */
         var myStores = u.assigned_stores;
         var myItems = overdueItems;
         if (Array.isArray(myStores) && myStores.length) {

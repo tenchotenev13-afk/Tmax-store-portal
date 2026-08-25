@@ -2272,27 +2272,41 @@ function autoCheckDailyDeadlines(){
 }
 
 function sendPushOverdueNow(){
-  var now=new Date(); var overdue={};
-  bulTasks.forEach(function(t){
-    var dates = taskDueDates(t);
-    if(!dates.length) return;
-    var latestDue = new Date(dates[dates.length-1]);
-    if(latestDue>=now)return;
-    /* Само обектите, които реално могат да отметнат — същият източник като
-       бройките в календара. Преди тук стоеше sbGet('stores'): Централният
-       офис (58 акаунта) и двата склада получаваха известие за чужда работа,
-       която не е тяхна и която нямат как да свършат. */
-    loadReportableStores().then(function(stores){
-      if(!Array.isArray(stores))return;
-      stores.forEach(function(name){
+  if(!bulTasks.length){toast('Няма задачи за проверка');return;}
+  var now=new Date();
+  /* Само обектите, които реално могат да отметнат — същият източник като
+     бройките в календара. Преди тук стоеше sbGet('stores'): Централният
+     офис (58 акаунта) и двата склада получаваха известие за чужда работа,
+     която не е тяхна и която нямат как да свършат.
+     Заявката е ВЪН от цикъла, а pushOverdue() се вика веднъж след него:
+     докато стояха вътре във forEach-а, пет просрочени задачи пращаха пет
+     отделни известия. */
+  loadReportableStores().then(function(stores){
+    /* Проверката тук беше `if(!Array.isArray(stores))return;` — мъртва,
+       защото функцията винаги връща масив, включително [] при срив
+       (shared.js ред 453). Тихият return превръщаше срива в „нищо не се
+       случи". Нула обекта при осемнайсет в базата е срив. */
+    if(!stores||!stores.length){toast('❌ Списъкът с обекти не се зареди','#dc2626');return;}
+    var overdue={};
+    bulTasks.forEach(function(t){
+      var dates = taskDueDates(t);
+      if(!dates.length) return;
+      var latestDue = new Date(dates[dates.length-1]);
+      if(latestDue>=now)return;
+      /* Задача, насочена към конкретни обекти, важи само за тях — същото
+         правило като в главния списък и в календара. Иначе задача за три
+         обекта вдигаше известие за всичките 18. */
+      var scope=(t.target_stores&&t.target_stores.length)
+        ? stores.filter(function(name){return t.target_stores.indexOf(name)>=0;})
+        : stores;
+      scope.forEach(function(name){
         var done=bulComps.some(function(c){return c.task_id===t.id&&c.store_name===name;});
         if(!done){if(!overdue[name])overdue[name]=[];overdue[name].push(t.title);}
       });
-      if(Object.keys(overdue).length) pushOverdue(overdue,null);
-      else toast('✅ Всички задачи са изпълнени!');
     });
+    if(Object.keys(overdue).length) pushOverdue(overdue,null);
+    else toast('✅ Всички задачи са изпълнени!');
   });
-  if(!bulTasks.length)toast('Няма задачи за проверка');
 }
 
 function openEmailMenu(){document.getElementById('em-ov').classList.add('open');}
