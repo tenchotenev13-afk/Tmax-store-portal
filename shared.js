@@ -304,6 +304,37 @@ function coWaitingSupplier(o){
   var d=new Date(o.co_eta);d.setHours(0,0,0,0);
   return d>=TODAY;
 }
+/* "Закъсняла" е ПРИЗНАК на заявката, не статус — и затова стои отделно от
+   calcStatus(). calcStatus() връща статуса непроменен за
+   ['done','refused','postponed','approved','arrived','sent','processed'],
+   тоест щом заявката веднъж тръгне, тя вече НИКОГА не може да стане
+   'overdue'. Срокът към клиента обаче продължава да тече. Следствието се
+   виждаше в интерфейса: чипът "Просрочени" връщаше празна таблица дори
+   когато имаше заявки с изтекла дата на доставка.
+   isLate() гледа само датата и изключенията; статусът остава какъвто е. */
+function isLate(o){
+  if(!o||!o.delivery)return false;
+  /* Приключените и отложените нямат срок, който да тече. */
+  if(['done','refused','postponed'].indexOf(o.status)>=0)return false;
+  /* ЦО е обработил и доставчикът още е в срок — виж coWaitingSupplier(). */
+  if(coWaitingSupplier(o))return false;
+  /* Транспорт, чакащ стока по клиентска заявка: срокът се води по клиентската
+     заявка, не по транспорта (същото правило като '_status===awaiting' в
+     transport.js). Проверката за done/refused/postponed вече мина отгоре,
+     затова тук е достатъчно голото условие. */
+  if(o.awaiting_stock)return false;
+  var dl=new Date(o.delivery);dl.setHours(0,0,0,0);
+  return dl<TODAY;
+}
+/* Малък чип до статусния бадж. Не замества statusBadge() — двата стоят
+   един до друг, защото носят различна информация: докъде е стигнала
+   заявката и с колко е закъсняла. */
+function lateBadge(o){
+  if(!isLate(o))return '';
+  var dl=new Date(o.delivery);dl.setHours(0,0,0,0);
+  var days=Math.round((TODAY-dl)/86400000);
+  return '<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;display:inline-flex;align-items:center;background:#fee2e2;color:#991b1b;margin-left:4px;">🔴 +'+days+(days===1?' ден':' дни')+'</span>';
+}
 /* ===== МНОЖЕСТВО АРТИКУЛИ (items[]) - споделено между клиентски и транспортни заявки ===== */
 function unitOptionsHtml(sel){
   var opts=[['бр.','Бр.'],['кашон','Кашон'],['кв.м','Кв.м'],['л.м','Л.м'],['компл.','Компл.'],['пакет','Пакет'],['чифт','Чифт']];

@@ -70,7 +70,11 @@ function renderTransport(){
   var search=((document.getElementById('tr-search')||{}).value||'').trim().toLowerCase();
   var month=(document.getElementById('tr-month')||{}).value||'';
   var list=transportOrders.filter(function(o){
-    return transportFilter==='all'||o._status===transportFilter||o.status===transportFilter;
+    if(transportFilter==='all')return true;
+    /* Същото като в Клиентски заявки: "Просрочени" е признак, не статус —
+       виж isLate() в shared.js. */
+    if(transportFilter==='overdue')return isLate(o);
+    return o._status===transportFilter||o.status===transportFilter;
   });
   if (month) list=list.filter(function(o){ return o.date && o.date.slice(0,7)===month; });
   if (search) {
@@ -111,7 +115,7 @@ function renderTransport(){
       '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
       '<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>'+
       '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
-      '<td>'+statusBadge(o._status)+'</td>'+
+      '<td>'+statusBadge(o._status)+lateBadge(o)+'</td>'+
       '<td>'+esc(o.store_name||'')+'</td>'+
       '<td>'+actionBtns(o.id,'transport_orders',o._status,o.store_name)+'</td></tr>';
   }).join('');

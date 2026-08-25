@@ -672,7 +672,11 @@ function renderClientOrders(){
   var search=((document.getElementById('co-search')||{}).value||'').trim().toLowerCase();
   var month=(document.getElementById('co-month')||{}).value||'';
   var list=clientOrders.filter(function(o){
-    return orderFilter==='all'||o._status===orderFilter||o.status===orderFilter;
+    if(orderFilter==='all')return true;
+    /* "Просрочени" е признак, не статус — заявка в sent/arrived/processed
+       никога не получава _status==='overdue'. Виж isLate() в shared.js. */
+    if(orderFilter==='overdue')return isLate(o);
+    return o._status===orderFilter||o.status===orderFilter;
   });
   if (month) list=list.filter(function(o){ return o.date && o.date.slice(0,7)===month; });
   var role=(document.getElementById('co-role-filter')||{}).value||'';
@@ -788,7 +792,7 @@ function renderClientOrders(){
       '<td>'+esc(o.from_store||'')+'</td>'+
       '<td><b>'+fmtDate(o.delivery)+'</b>'+coEtaCell(o)+'</td>'+
       '<td>'+elapsedBadge(o._days,o.status,o)+'</td>'+
-      '<td>'+statusBadge(o._status)+ptBadge(o)+'</td>'+
+      '<td>'+statusBadge(o._status)+lateBadge(o)+ptBadge(o)+'</td>'+
       '<td style="font-size:11px;">'+storeCell+'</td>'+
       '<td>'+btns+'</td></tr>';
   }).join('');
