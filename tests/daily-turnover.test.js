@@ -351,40 +351,117 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
       !!b && b.body.note === null);
   }
 
-  section('8. Сборът не съвпада → няма заявка');
+  section('8. Разминаване под половината от оборота — минава с предупреждение');
+  {
+    /* Законен случай: клиент плаща по банка, касиерът маркира „в брой".
+       Разликата е реална и понякога голяма — блокирането я правеше
+       неподаваема. */
+    const h = await view();
+    await submit(h, '6732.00', '4732.00', '0', '250');
+    ok('разлика 2000 при оборот 6732 (29,7%) → записът МИНАВА', posts(h).length === 1);
+    ok('но не мълчаливо — жълт toast с размера',
+      h.calls.toast.some(t => /Сумите не се връзват с 2000.00 EUR/.test(t)),
+      JSON.stringify(h.calls.toast));
+    ok('toast-ът е ЖЪЛТ, не червен', AMBER.test(toastColor(h)), toastColor(h));
+    ok('и след записа разминаването пак се вижда',
+      /разминаване 2000.00 EUR/.test(h.calls.toast[h.calls.toast.length - 1]),
+      JSON.stringify(h.calls.toast));
+  }
   {
     const h = await view();
-    await submit(h, '102.00', '60.00', '40.00', '25');
-    ok('разлика 2 EUR → НЕ тръгва POST', posts(h).length === 0);
-    ok('казва защо', h.calls.toast.some(t => /не съвпада със сбора/.test(t)));
+    await submit(h, '100.50', '100.00', '0', '10');
+    ok('разлика 0,50 EUR минава МЪЛЧАЛИВО', posts(h).length === 1);
+    ok('без нито едно предупреждение',
+      !h.calls.toast.some(t => /не се връзват|разминаване/i.test(t)),
+      JSON.stringify(h.calls.toast));
+    ok('toast-ът за успех е зелен', GREEN.test(toastColor(h)), toastColor(h));
+  }
+
+  section('9. Над половината от оборота — блокира');
+  {
+    /* Изместена десетична точка: Раднево 768 125 при реални 7 681,25. */
+    const h = await view();
+    await submit(h, '768125.00', '7681.25', '0', '250');
+    ok('разминаване 99% → НЕ тръгва POST', posts(h).length === 0);
+    ok('червен toast с разбираема причина',
+      h.calls.toast.some(t => /над половината от оборота/.test(t)),
+      JSON.stringify(h.calls.toast));
+    ok('toast-ът е ЧЕРВЕН', RED.test(toastColor(h)), toastColor(h));
+  }
+  {
+    /* Границата е greatest(1, total*0.5) — точно както в базата. */
+    const h = await view();
+    await submit(h, '100.00', '50.00', '0', '10');
+    ok('точно 50% разминаване МИНАВА (на границата)', posts(h).length === 1);
+  }
+  {
+    const h = await view();
+    await submit(h, '100.00', '49.99', '0', '10');
+    ok('50,01% разминаване НЕ минава', posts(h).length === 0);
+  }
+  {
+    /* При малък оборот долната граница от 1 EUR държи, а не 50%. */
+    const h = await view();
+    await submit(h, '1.00', '0', '0', '1');
+    ok('оборот 1 EUR, разминаване 1 EUR → минава (долната граница е 1)',
+      posts(h).length === 1);
+  }
+  {
+    const h = await view();
+    await submit(h, '2.00', '0', '0', '1');
+    ok('оборот 2 EUR, разминаване 2 EUR → блокира (над 1 и над 50%)',
+      posts(h).length === 0);
   }
   {
     const h = await view();
     await submit(h, '100.05', '50.00', '50.00', '25');
-    ok('разлика 0,05 EUR минава (закръгляне на фискалното устройство)',
+    ok('разлика 0,05 EUR пак минава мълчаливо (закръгляне на ФУ)',
       posts(h).length === 1);
   }
 
-  section('9. Границата на толеранса — явно, от двете страни');
+  section('9б. Обектите с разминаване се различават в справката за ЦО');
   {
-    const h = await view();
-    await submit(h, '101.00', '50.00', '50.00', '10');
-    ok('точно 1,00 EUR разлика МИНАВА', posts(h).length === 1);
-  }
-  {
-    const h = await view();
-    await submit(h, '101.01', '50.00', '50.00', '10');
-    ok('1,01 EUR разлика НЕ минава', posts(h).length === 0);
-  }
-  {
-    const h = await view();
-    await submit(h, '99.00', '50.00', '50.00', '10');
-    ok('–1,00 EUR разлика МИНАВА (толерансът е двупосочен)', posts(h).length === 1);
-  }
-  {
-    const h = await view();
-    await submit(h, '98.99', '50.00', '50.00', '10');
-    ok('–1,01 EUR разлика НЕ минава', posts(h).length === 0);
+    const h = await view({
+      user: CO_USER,
+      data: {
+        stores: STORES_23, users: USERS_ROWS,
+        daily_turnover: [
+          /* Троян: 6732 = 4732 + 0 + 0 → разминаване 2000, законно */
+          rec({ id: 'a', store_name: 'Троян', date: dayOffset(0),
+            total_turnover: 6732, cash_turnover: 4732, card_turnover: 0, bank_turnover: 0, customers: 250 }),
+          /* Враца: връзва се точно */
+          rec({ id: 'b', store_name: 'Враца', date: dayOffset(0),
+            total_turnover: 1000, cash_turnover: 600, card_turnover: 400, bank_turnover: 0, customers: 50 }),
+          /* Габрово: 0,50 разминаване — под прага, не се маркира */
+          rec({ id: 'c', store_name: 'Габрово', date: dayOffset(0),
+            total_turnover: 1000.5, cash_turnover: 600, card_turnover: 400, bank_turnover: 0, customers: 50 })
+        ]
+      }
+    });
+    const tbl = h.doc.getElementById('dt-co-table');
+    const trs = Array.prototype.slice.call(tbl.querySelectorAll('tr'));
+    const rowOf = name => trs.find(t => {
+      const c = t.querySelector('td');
+      return c && c.textContent.trim().indexOf(name) === 0;
+    });
+    /* САМО <span class="dt-mismatch"> — проверка по текст би хванала и
+       обяснението в title атрибута на съседна клетка. */
+    const marked = n => { const r = rowOf(n); return !!(r && r.querySelector('span.dt-mismatch')); };
+
+    ok('Троян (разминаване 2000) е маркиран', marked('Троян'));
+    ok('Враца (връзва се) НЕ е маркирана', !marked('Враца'));
+    ok('Габрово (0,50 под прага) НЕ е маркирано', !marked('Габрово'));
+    ok('маркирани са точно толкова, колкото са разминатите',
+      tbl.querySelectorAll('span.dt-mismatch').length === 1,
+      'намерени: ' + tbl.querySelectorAll('span.dt-mismatch').length);
+
+    const mark = rowOf('Троян').querySelector('span.dt-mismatch');
+    ok('знакът казва колко е разминаването',
+      (mark.getAttribute('title') || '').indexOf('2000.00 EUR') >= 0,
+      mark.getAttribute('title'));
+    ok('знакът е жълт', /#d97706/.test(mark.getAttribute('style') || ''));
+    ok('името на обекта остава четимо',
+      rowOf('Троян').querySelector('td').textContent.indexOf('Троян') === 0);
   }
 
   section('10. Празни и невалидни стойности');
@@ -601,9 +678,9 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     h.doc.getElementById('dt-bank').value = '25.00';
     realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши');
     await ticks();
-    ok('разлика 2 EUR (с банка в сбора) → НЕ тръгва POST', posts(h).length === 0);
-    ok('съобщението споменава и трите',
-      h.calls.toast.some(t => /брой, карта и банка/.test(t)), JSON.stringify(h.calls.toast));
+    ok('разлика 2 EUR при оборот 102 (2%) → МИНАВА с предупреждение', posts(h).length === 1);
+    ok('банката влиза в сбора — иначе разликата щеше да е 27, не 2',
+      h.calls.toast.some(t => /2.00 EUR/.test(t)), JSON.stringify(h.calls.toast));
   }
   {
     const h = await view();
@@ -611,7 +688,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     h.doc.getElementById('dt-bank').value = '25.00';
     realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши');
     await ticks();
-    ok('точно 1,00 EUR разлика МИНАВА и с банка', posts(h).length === 1);
+    ok('1,00 EUR разлика минава мълчаливо и с банка', posts(h).length === 1);
   }
   {
     const h = await view();
@@ -619,7 +696,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     h.doc.getElementById('dt-bank').value = '25.00';
     realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши');
     await ticks();
-    ok('1,01 EUR разлика НЕ минава и с банка', posts(h).length === 0);
+    ok('1,01 EUR разлика минава с предупреждение и с банка', posts(h).length === 1);
   }
   {
     const h = await view();
@@ -674,8 +751,14 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     /* По КЛЕТКА, не по цял ред: средният чек „20.00 EUR" съдържа подниза
        „0.00 EUR" и проверка върху целия ред би паднала без причина. */
     const bankIdx = ths.indexOf('Банка');
+    /* Клетката с името може да носи и знака за разминаване (⚠), затова
+       съвпадението е по НАЧАЛОТО, не точно — иначе редовете с разминаване
+       просто не се намират и проверката пада без причина. */
     const cellsOf = name => {
-      const tr = trs.find(t => (t.querySelector('td') || {}).textContent === name);
+      const tr = trs.find(t => {
+        const first = t.querySelector('td');
+        return first && first.textContent.trim().indexOf(name) === 0;
+      });
       return tr ? Array.prototype.slice.call(tr.querySelectorAll('td')).map(c => c.textContent) : null;
     };
     const troyan = cellsOf('Троян'), vraca = cellsOf('Враца');

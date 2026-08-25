@@ -75,6 +75,22 @@ function dtBankCell(r){
   var b=dtBankOf(r);
   return b>0?dtMoney(b):'—';
 }
+/* Разминаване между общия оборот и сбора по начини на плащане. Законно е —
+   клиент плаща по банка, а касиерът маркира „в брой" — затова не блокира
+   записа. Но се вижда в справката, както се вижда и в имейла: иначе
+   Централният офис няма как да разбере кой обект да провери. */
+function dtDiffOf(r){
+  if(!r) return 0;
+  var t=parseFloat(r.total_turnover)||0;
+  return Math.round((t-(parseFloat(r.cash_turnover)||0)-(parseFloat(r.card_turnover)||0)-dtBankOf(r))*100)/100;
+}
+function dtMismatchMark(r){
+  var d=dtDiffOf(r);
+  if(Math.abs(d)<=1) return '';
+  return ' <span class="dt-mismatch" title="Разминаване '+dtMoney(Math.abs(d))+
+    ' между общия оборот и сбора по начини на плащане"'+
+    ' style="color:#d97706;font-weight:700;cursor:help;">&#9888;</span>';
+}
 
 /* Среден оборот за обекта от последните 30 дни, БЕЗ днешния запис.
    Служи само за предупреждението „необичайно високо" при запис. */
@@ -358,7 +374,7 @@ function dtCOView(){
     var bank=dtBankOf(r);
     tTotal+=tot; tCash+=cash; tCard+=card; tBank+=bank; tCust+=cust;
     rows+='<tr style="border-bottom:1px solid #f1f5f9;">'+
-      '<td style="padding:7px 4px;">'+esc(name)+'</td>'+
+      '<td style="padding:7px 4px;">'+esc(name)+dtMismatchMark(r)+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;font-weight:600;">'+dtMoney(tot)+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtMoney(cash)+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtMoney(card)+'</td>'+
@@ -495,13 +511,31 @@ function submitOborot(){
     toast('Броят клиенти трябва да е цяло число, не по-малко от нула','#dc2626');return;
   }
 
-  /* 3) Толеранс 1 EUR заради закръгляния на фискалното устройство.
-        Закръглянето до стотинки е ПРЕДИ сравнението, защото в плаваща
-        запетая 100.05-50-50 дава 0.049999999999997 — без него граничните
-        случаи се решават от двоичния шум, не от правилото. */
+  /* 3) Разминаването САМО ПО СЕБЕ СИ вече не блокира. Клиент може да плати по
+        банка, а касиерът да маркира продажбата „в брой" — тогава фискалният
+        отчет и реалното разпределение се разминават със законна, понякога
+        голяма сума, и старият праг от 1 EUR правеше подаването невъзможно.
+        Блокира се само разминаване над ПОЛОВИНАТА от оборота: това хваща
+        изместената десетична точка (Раднево — 768 125 при реални 7 681,25,
+        тоест 99%), а законните разлики минават.
+        Същото ограничение стои и в базата от 25.08.2026:
+          abs(total - cash - card - bank) <= greatest(1, total * 0.5)
+        Тук е дублирано нарочно: базата ще откаже така или иначе, но с
+        неразбираемо съобщение за нарушен CHECK.
+        Закръглянето до стотинки е ПРЕДИ сравнението, защото в плаваща запетая
+        100.05-50-50 дава 0.049999999999997 и границата иначе се решава от
+        двоичния шум, а не от правилото. */
   var diff=Math.round((total-cash-card-bank)*100)/100;
-  if(Math.abs(diff)>1){
-    toast('Общият оборот не съвпада със сбора от брой, карта и банка','#dc2626');return;
+  var hardLimit=Math.max(1,total*0.5);
+  if(Math.abs(diff)>hardLimit){
+    toast('Разминаването е над половината от оборота — провери числата','#dc2626');return;
+  }
+  /* Между 1 EUR и половината: минава, но НЕ мълчаливо. Под 1 EUR е закръгляне
+     на фискалното устройство и не заслужава съобщение. */
+  var softMismatch=Math.abs(diff)>1;
+  if(softMismatch){
+    toast('Сумите не се връзват с '+dtMoney(Math.abs(diff))+
+          '. Записът ще бъде подаден и разминаването ще се отрази в отчета.','#d97706');
   }
 
   /* 4) Предупреждение, не забрана — изместена запетая е най-честата грешка. */
@@ -527,7 +561,12 @@ function submitOborot(){
   sbPost('daily_turnover',body).then(function(res){
     oborotSubmitting=false;
     if(res&&res.ok){
-      toast('Оборотът е записан');
+      /* Разминаването влиза и в съобщението за успех. Предупреждението отпреди
+         записа живее 2.5 секунди и зеленият toast го припокрива — човекът
+         иначе остава с впечатление, че всичко се е вързало. */
+      if(softMismatch) toast('Оборотът е записан с разминаване '+dtMoney(Math.abs(diff))+
+                             ' — ще се отрази в отчета.','#d97706');
+      else toast('Оборотът е записан');
       /* Отмятането е СЛЕД зеления toast и преди презареждането, за да е
          маркерът вече вдигнат, когато изгледът се рендира наново. */
       dtMarkBulletinTask().then(function(){loadOborot();});
