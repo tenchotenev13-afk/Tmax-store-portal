@@ -39,6 +39,28 @@ const STORES = [
   { name: 'Централен офис' }, { name: 'Логистичен склад Добрич' }
 ];
 
+/* ── Двата списъка са НАРОЧНО различни ──────────────────────────────────────
+   Справката за ЦО се строи от users, не от таблицата stores. Ако тестът
+   подаде еднакви списъци на двата стъба, той минава и със стария източник,
+   тоест не доказва нищо. Затова:
+     stores → всичките 23 записа, включително два БЕЗ нито един акаунт
+     users  → само обектите, които реално имат хора
+   Пазарджик и Сервиз Троян нямат акаунт (проверено в базата 25.08.2026) и
+   затова липсват от users. „Сервиз Троян" е добавен в users в отделен случай
+   по-долу, за да се провери и вторият предпазител — REPORT_EXCLUDED_STORES. */
+const STORE_18 = ['Враца', 'Габрово', 'Гоце Делчев', 'Добрич', 'Дупница', 'Карлово',
+  'Козлодуй', 'Кърджали', 'Монтана', 'Петрич', 'Пирдоп', 'Раднево', 'Севлиево',
+  'Силистра', 'Сливен', 'Троян', 'Търговище', 'Шумен'];
+const NON_REPORTING = ['Пазарджик', 'Сервиз Троян', 'Централен офис',
+  'Логистичен склад Добрич', 'Логистичен склад Търговище'];
+
+const STORES_23 = STORE_18.concat(NON_REPORTING).map(n => ({ name: n }));
+/* ЦО и складовете ИМАТ акаунти в реалността — влизат в users, за да се види,
+   че ги маха isReportableStore(), а не липсата на редове. */
+const USERS_ROWS = STORE_18
+  .concat(['Централен офис', 'Логистичен склад Добрич', 'Логистичен склад Търговище'])
+  .map(n => ({ store_name: n }));
+
 function rec(over) {
   return Object.assign({
     id: 'dt-1', store_name: 'Троян', date: dayOffset(-1),
@@ -461,7 +483,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
       user: CO_USER,
       data: {
         daily_turnover: [rec({ id: 'c', store_name: 'Троян', date: dayOffset(0) })],
-        stores: STORES
+        stores: STORES_23, users: USERS_ROWS
       }
     });
     ok('НЯМА поле за въвеждане', !h.doc.getElementById('dt-total'));
@@ -475,7 +497,7 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
 
     const miss = h.doc.getElementById('dt-missing');
     if (ok('има изричен списък на неподалите', !!miss)) {
-      ok('Ловеч е в списъка на неподалите', miss.textContent.indexOf('Ловеч') >= 0);
+      ok('Враца е в списъка на неподалите', miss.textContent.indexOf('Враца') >= 0);
       ok('Централен офис НЕ се брои за неподал обект',
         miss.textContent.indexOf('Централен офис') < 0);
       ok('логистичният склад НЕ се брои за неподал обект',
@@ -483,11 +505,240 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
       ok('Троян не е сред неподалите', miss.textContent.indexOf('Троян') < 0);
     }
   }
+
+  section('13б. Списъкът с обекти идва от users, не от stores');
+  {
+    const h = await view({
+      user: CO_USER,
+      data: {
+        daily_turnover: [rec({ id: 'c', store_name: 'Троян', date: dayOffset(0) })],
+        stores: STORES_23, users: USERS_ROWS
+      }
+    });
+    const tbl = h.doc.getElementById('dt-co-table');
+    /* В таблицата влизат САМО подалите; останалите са в блока „Не са подали".
+       Обхватът е сборът от двете — точно това число трябва да е 18. */
+    const filed = Array.prototype.slice.call(tbl.querySelectorAll('tr')).slice(1, -1).length;
+    const missTxt = (h.doc.getElementById('dt-missing') || { textContent: '' }).textContent;
+    const missN = parseInt((missTxt.match(/\((\d+)\)/) || [0, '0'])[1], 10);
+    ok('обхватът е точно 18 обекта', filed + missN === 18,
+      'подали ' + filed + ' + неподали ' + missN);
+
+    const all = tbl.textContent + ' ' + (h.doc.getElementById('dt-missing') || {}).textContent;
+    NON_REPORTING.forEach(function (n) {
+      ok('„' + n + '" не се появява никъде', all.indexOf(n) < 0);
+    });
+
+    /* Заявката трябва да е към users, а таблицата stores изобщо да не се пипа. */
+    ok('чете се users', h.calls.get.some(u => /\/users\?/.test(u) && u.indexOf('store_name') >= 0));
+    ok('таблицата stores НЕ се чете за този списък',
+      !h.calls.get.some(u => /\/stores\?/.test(u)),
+      h.calls.get.filter(u => /\/stores\?/.test(u)).join(' | '));
+  }
+  {
+    /* Вторият предпазител: ако утре Сервиз Троян получи акаунт, той пак не
+       бива да изниква в „не са подали" — за това е REPORT_EXCLUDED_STORES. */
+    const h = await view({
+      user: CO_USER,
+      data: {
+        daily_turnover: [],
+        stores: STORES_23,
+        users: USERS_ROWS.concat([{ store_name: 'Сервиз Троян' }, { store_name: 'Пазарджик' }])
+      }
+    });
+    const all = h.doc.getElementById('dt-co-table').textContent + ' ' +
+      (h.doc.getElementById('dt-missing') || {}).textContent;
+    ok('Сервиз Троян с акаунт ПАК не се брои', all.indexOf('Сервиз Троян') < 0);
+    ok('Пазарджик с акаунт ПАК не се брои', all.indexOf('Пазарджик') < 0);
+    const missTxt2 = (h.doc.getElementById('dt-missing') || { textContent: '' }).textContent;
+    ok('и обхватът пак е 18',
+      parseInt((missTxt2.match(/\((\d+)\)/) || [0, '0'])[1], 10) === 18, missTxt2.slice(0, 60));
+  }
   {
     /* Критерият е ОБЕКТ, не роля: admin в магазин подава оборот. */
     const h = await view({ user: { email: 'a@temax.bg', display_name: 'Админ', role: 'admin', store_name: 'Троян' } });
     ok('admin в МАГАЗИН вижда формата (isGlobal() не решава тук)',
       !!h.doc.getElementById('dt-total'));
+  }
+
+  section('13в. Плащане по банка');
+  {
+    const h = await view();
+    ok('има поле „По банка"', !!h.doc.getElementById('dt-bank'));
+    ok('полето е <input>, не текст', (h.doc.getElementById('dt-bank') || {}).tagName === 'INPUT');
+    /* Четвърто по ред: след „С карта", преди „Брой клиенти". */
+    const ids = Array.prototype.slice.call(h.doc.querySelectorAll('#mod-kasa input[type=number]'))
+      .map(e => e.id);
+    ok('редът е total, cash, card, bank, customers',
+      ids.join(',') === 'dt-total,dt-cash,dt-card,dt-bank,dt-customers', ids.join(','));
+  }
+  {
+    const h = await view();
+    fill(h.doc, '100.00', '40.00', '35.00', '25');
+    h.doc.getElementById('dt-bank').value = '25.00';
+    realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши');
+    await ticks();
+    const b = posts(h)[0] && posts(h)[0].body;
+    if (ok('записът минава', !!b)) {
+      ok('bank_turnover е 25', b.bank_turnover === 25);
+      ok('и е ЧИСЛО, не низ', typeof b.bank_turnover === 'number');
+    }
+  }
+  {
+    /* Празно поле → 0. Колоната е not null, затова null би върнало 400. */
+    const h = await view();
+    await submit(h, '100.00', '60.00', '40.00', '25');
+    const b = posts(h)[0] && posts(h)[0].body;
+    if (ok('записът минава без банка', !!b)) {
+      ok('bank_turnover е 0, не null', b.bank_turnover === 0, JSON.stringify(b.bank_turnover));
+      ok('и не е празен низ', b.bank_turnover !== '');
+      ok('полето присъства в тялото', 'bank_turnover' in b);
+    }
+  }
+  {
+    const h = await view();
+    fill(h.doc, '102.00', '40.00', '35.00', '25');
+    h.doc.getElementById('dt-bank').value = '25.00';
+    realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши');
+    await ticks();
+    ok('разлика 2 EUR (с банка в сбора) → НЕ тръгва POST', posts(h).length === 0);
+    ok('съобщението споменава и трите',
+      h.calls.toast.some(t => /брой, карта и банка/.test(t)), JSON.stringify(h.calls.toast));
+  }
+  {
+    const h = await view();
+    fill(h.doc, '101.00', '40.00', '35.00', '10');
+    h.doc.getElementById('dt-bank').value = '25.00';
+    realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши');
+    await ticks();
+    ok('точно 1,00 EUR разлика МИНАВА и с банка', posts(h).length === 1);
+  }
+  {
+    const h = await view();
+    fill(h.doc, '101.01', '40.00', '35.00', '10');
+    h.doc.getElementById('dt-bank').value = '25.00';
+    realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши');
+    await ticks();
+    ok('1,01 EUR разлика НЕ минава и с банка', posts(h).length === 0);
+  }
+  {
+    const h = await view();
+    fill(h.doc, '100.00', '60.00', '40.00', '25');
+    h.doc.getElementById('dt-bank').value = '-5';
+    realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши');
+    await ticks();
+    ok('отрицателна банка → НЕ тръгва POST', posts(h).length === 0);
+    ok('казва защо', h.calls.toast.some(t => /не по-малки от нула/.test(t)));
+  }
+
+  section('13г. Колоната „Банка" се показва само когато има какво');
+  {
+    /* Обичаен ден: никой няма банка → колоната изобщо липсва. */
+    const h = await view({
+      user: CO_USER,
+      data: {
+        daily_turnover: [
+          rec({ id: 'a', store_name: 'Троян', date: dayOffset(0), bank_turnover: 0 }),
+          rec({ id: 'b', store_name: 'Враца', date: dayOffset(0), bank_turnover: 0 })
+        ],
+        stores: STORES_23, users: USERS_ROWS
+      }
+    });
+    const tbl = h.doc.getElementById('dt-co-table');
+    const ths = Array.prototype.slice.call(tbl.querySelectorAll('th')).map(t => t.textContent);
+    ok('няма колона „Банка"', ths.indexOf('Банка') < 0, ths.join(','));
+    ok('колоните са 7', ths.length === 7, 'брой: ' + ths.length);
+    const totalRow = tbl.querySelectorAll('tr')[tbl.querySelectorAll('tr').length - 1];
+    ok('редът „Общо" има същия брой клетки',
+      totalRow.querySelectorAll('td').length === 7,
+      'клетки: ' + totalRow.querySelectorAll('td').length);
+  }
+  {
+    /* Поне един обект с банка → колоната се появява, а другите показват тире. */
+    const h = await view({
+      user: CO_USER,
+      data: {
+        daily_turnover: [
+          rec({ id: 'a', store_name: 'Троян', date: dayOffset(0), bank_turnover: 250.5 }),
+          rec({ id: 'b', store_name: 'Враца', date: dayOffset(0), bank_turnover: 0 })
+        ],
+        stores: STORES_23, users: USERS_ROWS
+      }
+    });
+    const tbl = h.doc.getElementById('dt-co-table');
+    const ths = Array.prototype.slice.call(tbl.querySelectorAll('th')).map(t => t.textContent);
+    ok('колоната „Банка" се появява', ths.indexOf('Банка') >= 0, ths.join(','));
+    ok('колоните стават 8', ths.length === 8, 'брой: ' + ths.length);
+
+    const trs = Array.prototype.slice.call(tbl.querySelectorAll('tr'));
+    /* По КЛЕТКА, не по цял ред: средният чек „20.00 EUR" съдържа подниза
+       „0.00 EUR" и проверка върху целия ред би паднала без причина. */
+    const bankIdx = ths.indexOf('Банка');
+    const cellsOf = name => {
+      const tr = trs.find(t => (t.querySelector('td') || {}).textContent === name);
+      return tr ? Array.prototype.slice.call(tr.querySelectorAll('td')).map(c => c.textContent) : null;
+    };
+    const troyan = cellsOf('Троян'), vraca = cellsOf('Враца');
+    if (ok('двата реда се намират', !!troyan && !!vraca)) {
+      ok('обектът с банка показва сумата', troyan[bankIdx] === '250.50 EUR', troyan[bankIdx]);
+      ok('обектът без банка показва ТИРЕ, не 0.00', vraca[bankIdx] === '—', vraca[bankIdx]);
+    }
+
+    const totalRow = trs[trs.length - 1];
+    ok('редът „Общо" също има 8 клетки',
+      totalRow.querySelectorAll('td').length === 8,
+      'клетки: ' + totalRow.querySelectorAll('td').length);
+    ok('и сумира банката', totalRow.textContent.indexOf('250.50 EUR') >= 0);
+  }
+  {
+    /* Същото правило и в таблицата за 7 дни. */
+    const h = await view({
+      data: {
+        daily_turnover: [rec({ id: 'x', date: dayOffset(-1), bank_turnover: 0 })],
+        stores: STORES_23, users: USERS_ROWS
+      }
+    });
+    const t7 = h.doc.getElementById('dt-last7');
+    const ths = Array.prototype.slice.call(t7.querySelectorAll('th')).map(x => x.textContent);
+    ok('7 дни без банка → няма колона', ths.indexOf('Банка') < 0, ths.join(','));
+    const rows = Array.prototype.slice.call(t7.querySelectorAll('tr')).slice(1);
+    ok('всички редове са с 6 клетки',
+      rows.every(r => r.querySelectorAll('td').length === 6));
+  }
+  {
+    const h = await view({
+      data: {
+        daily_turnover: [
+          rec({ id: 'x', date: dayOffset(-1), bank_turnover: 40 }),
+          rec({ id: 'y', date: dayOffset(-2), bank_turnover: 0 })
+        ],
+        stores: STORES_23, users: USERS_ROWS
+      }
+    });
+    const t7 = h.doc.getElementById('dt-last7');
+    const ths = Array.prototype.slice.call(t7.querySelectorAll('th')).map(x => x.textContent);
+    ok('поне един ден с банка → колоната се появява', ths.indexOf('Банка') >= 0);
+    const rows = Array.prototype.slice.call(t7.querySelectorAll('tr')).slice(1);
+    ok('ВСИЧКИ редове стават 7 клетки, и празните',
+      rows.every(r => r.querySelectorAll('td').length === 7),
+      rows.map(r => r.querySelectorAll('td').length).join(','));
+    ok('денят с банка показва сумата', t7.textContent.indexOf('40.00 EUR') >= 0);
+  }
+  {
+    /* Записът за деня: редът „По банка" се появява само при ненулева. */
+    const h = await view({
+      data: { daily_turnover: [rec({ id: 'z', date: dayOffset(0), bank_turnover: 0 })], stores: STORES_23, users: USERS_ROWS }
+    });
+    ok('нулева банка → редът липсва в записа за деня',
+      h.doc.getElementById('mod-kasa').textContent.indexOf('По банка') < 0);
+  }
+  {
+    const h = await view({
+      data: { daily_turnover: [rec({ id: 'z', date: dayOffset(0), bank_turnover: 77.25 })], stores: STORES_23, users: USERS_ROWS }
+    });
+    const txt = h.doc.getElementById('mod-kasa').textContent;
+    ok('ненулева банка → редът се показва', txt.indexOf('По банка') >= 0);
+    ok('със сумата', txt.indexOf('77.25 EUR') >= 0);
   }
 
   section('14. Смяна на датата в изгледа на ЦО');

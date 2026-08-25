@@ -95,9 +95,13 @@ function storeList(w) {
     ok('LOGISTICS_WAREHOUSES съществува глобално',
       Array.isArray(w.LOGISTICS_WAREHOUSES) && w.LOGISTICS_WAREHOUSES.length === 2,
       JSON.stringify(w.LOGISTICS_WAREHOUSES));
-    ok('REPORT_EXCLUDED_STORES е ЦО + двата склада',
-      w.REPORT_EXCLUDED_STORES.length === 3 &&
-      w.REPORT_EXCLUDED_STORES.indexOf('Централен офис') >= 0,
+    /* От 25.08.2026: ЦО + двата склада + двата обекта без оборот за подаване
+       (Пазарджик, Сервиз Троян — нула акаунта в базата). Проверката е по
+       СЪДЪРЖАНИЕ, а не само по дължина: брой 5 би минал и с грешни имена. */
+    ok('REPORT_EXCLUDED_STORES е ЦО + двата склада + двата без оборот',
+      w.REPORT_EXCLUDED_STORES.length === 5 &&
+      ['Централен офис', 'Логистичен склад Добрич', 'Логистичен склад Търговище',
+        'Пазарджик', 'Сервиз Троян'].every(n => w.REPORT_EXCLUDED_STORES.indexOf(n) >= 0),
       JSON.stringify(w.REPORT_EXCLUDED_STORES));
     /* Разлики ползва СЪЩИЯ списък - ако някой добави трети склад, двете
        места се движат заедно. */

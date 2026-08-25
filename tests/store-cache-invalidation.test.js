@@ -3,10 +3,10 @@
    reportableStoresCache (shared.js) се строи от уникалните store_name в users
    и е знаменателят на бройките в Бюлетина. invalidateStoreCaches() обаче се
    викаше само от addStore() и deleteStore() — тоест от промени по таблицата
-   stores. Създаването на първия акаунт за обект без такъв (Пазарджик няма нито
-   един) не пипаше нищо: знаменателят оставаше 18 при 19 реални обекта, докато
-   някой не презареди страницата. Тихо разминаване, което после изглежда като
-   „новият обект не се брои".
+   stores. Създаването на първия акаунт за обект без такъв не пипаше нищо:
+   знаменателят оставаше 18 при 19 реални обекта, докато някой не презареди
+   страницата. Тихо разминаване, което после изглежда като „новият обект не
+   се брои".
 
    Затова функцията вече се вика и от submitUserModal() (създаване И редакция —
    смяна на store_name може и да извади обект от списъка) и от deleteUser()
@@ -22,16 +22,19 @@ const { boot, ok, guard, section, report, ticks, realClick, btn } = H;
 const ADMIN = { email: 'admin@temax.bg', display_name: 'Админ', role: 'admin',
                 store_name: 'Централен офис', assigned_stores: [] };
 
-/* 18-те реални обекта. Пазарджик е в stores, но НЯМА нито един акаунт. */
+/* 18-те реални обекта + един, който е в stores, но НЯМА нито един акаунт.
+   Нарочно е синтетично име, а не Пазарджик или Сервиз Троян: те влязоха в
+   REPORT_EXCLUDED_STORES на 25.08.2026 и вече не се броят дори с акаунт,
+   тоест не стават за пример на „обект, който се появява". */
 const REAL = [
   'Враца', 'Габрово', 'Гоце Делчев', 'Добрич', 'Дупница', 'Карлово', 'Козлодуй',
   'Кърджали', 'Монтана', 'Петрич', 'Пирдоп', 'Раднево', 'Севлиево', 'Силистра',
   'Сливен', 'Троян', 'Търговище', 'Шумен'
 ];
-const STORES = REAL.concat(['Пазарджик', 'Централен офис']).map((n, i) => ({ id: 's' + i, name: n }));
+const STORES = REAL.concat(['Нов обект', 'Централен офис']).map((n, i) => ({ id: 's' + i, name: n }));
 const USERS_18 = REAL.concat(['Централен офис']).map((n, i) => ({ id: 'u' + i, store_name: n }));
-/* Същото + първият акаунт за Пазарджик. */
-const USERS_19 = USERS_18.concat([{ id: 'u-nov', store_name: 'Пазарджик' }]);
+/* Същото + първият акаунт за Нов обект. */
+const USERS_19 = USERS_18.concat([{ id: 'u-nov', store_name: 'Нов обект' }]);
 
 function env(opts) {
   opts = opts || {};
@@ -95,7 +98,7 @@ function bothCleared(w) {
     const h = env();
     const { w } = h;
     ok('загрят кеш е 18 обекта', (await warm(w)) === 18, String(w.reportableStoresCache.length));
-    ok('allStoresCache е 20 (18 + Пазарджик + ЦО)', w.allStoresCache.length === 20,
+    ok('allStoresCache е 20 (18 + Нов обект + ЦО)', w.allStoresCache.length === 20,
       String(w.allStoresCache.length));
     w.invalidateStoreCaches();
     ok('и двата са нулирани', bothCleared(w),
@@ -114,8 +117,8 @@ function bothCleared(w) {
     ok('преди: 18 обекта', (await warm(w)) === 18, String(w.reportableStoresCache.length));
 
     if (guard('модалът се отваря', () => w.openUserModal(null))) {
-      fillModal(doc, { email: 'pz@temax.bg', name: 'Управител Пазарджик',
-                       role: 'manager', store: 'Пазарджик', pass: 'tajna123' });
+      fillModal(doc, { email: 'pz@temax.bg', name: 'Управител Нов обект',
+                       role: 'manager', store: 'Нов обект', pass: 'tajna123' });
       if (guard('клик по "Добави"', () => realClick(w, btn(modal(doc), 'Добави')))) {
         await ticks();
         ok('POST към users е изпратен', h.postUrls.length === 1, h.postUrls.join(' | '));
@@ -127,7 +130,7 @@ function bothCleared(w) {
         await w.loadReportableStores();
         ok('след: 19 обекта', w.reportableStoresCache.length === 19,
           String(w.reportableStoresCache.length));
-        ok('Пазарджик вече се брои', w.reportableStoresCache.indexOf('Пазарджик') >= 0);
+        ok('Нов обект вече се брои', w.reportableStoresCache.indexOf('Нов обект') >= 0);
 
         /* И знаменателят в Бюлетина го отразява веднага. */
         const html = w.calItemStatusHtml('t-1', 'regular', null, null);
@@ -145,7 +148,7 @@ function bothCleared(w) {
     /* Редакция: _userEditId е зададен, потокът минава през sbPatch. */
     if (guard('модалът се отваря за редакция', () => w.openUserModal('u0'))) {
       await ticks();
-      fillModal(doc, { email: 'vraca@temax.bg', role: 'manager', store: 'Пазарджик' });
+      fillModal(doc, { email: 'vraca@temax.bg', role: 'manager', store: 'Нов обект' });
       if (guard('клик по "Запази"', () => {
         const b = btn(modal(doc), 'Запази') || btn(modal(doc), 'Запиши');
         if (!b) throw new Error('бутонът за запис не е намерен');

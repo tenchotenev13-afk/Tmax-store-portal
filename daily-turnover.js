@@ -60,6 +60,22 @@ function dtTime(ts){
   if(isNaN(d.getTime()))return '';
   return dtPad(d.getHours())+':'+dtPad(d.getMinutes());
 }
+/* Банковото плащане е рядко: в обичаен ден всички обекти са на нула. Затова
+   колоната „Банка" се показва само когато има какво да покаже — колона, пълна
+   с тирета в 95% от дните, прави справката по-трудна за четене без полза.
+   Същият подход като в имейла. */
+function dtBankOf(r){ return parseFloat(r&&r.bank_turnover)||0; }
+function dtAnyBank(list){
+  for(var i=0;i<(list||[]).length;i++){ if(dtBankOf(list[i])>0) return true; }
+  return false;
+}
+/* Нула се показва като тире, не като 0.00 — за да личи, че няма банка,
+   а не че е въведена нула. */
+function dtBankCell(r){
+  var b=dtBankOf(r);
+  return b>0?dtMoney(b):'—';
+}
+
 /* Среден оборот за обекта от последните 30 дни, БЕЗ днешния запис.
    Служи само за предупреждението „необичайно високо" при запис. */
 function dtAvg30(){
@@ -124,12 +140,18 @@ function loadOborot(){
     /* Датата се решава при отваряне, не при зареждане на файла — таб,
        оставен отворен през полунощ, иначе би питал за вчера. */
     if(!oborotCODate) oborotCODate=dtToday();
+    /* Обектите идват от users, не от таблицата stores. stores има 23 записа,
+       сред които и такива без нито един акаунт (Пазарджик, Сервиз Троян) —
+       физически няма кой да подаде оборот от тяхно име, а справката ги броеше
+       като „не са подали" и показваше 20 срещу 18 в имейла за същия ден.
+       loadReportableStores() е същият източник, който ползват седмичният
+       отчет, таб „Днес" и Бюлетинът. allStoresCache НЕ се пипа — там пълните
+       23 записа са правилни за падащите менюта при избор на магазин. */
     Promise.all([
-      sbGet('stores','select=name&order=name'),
+      loadReportableStores(),
       sbGet('daily_turnover','date=eq.'+oborotCODate+'&order=store_name.asc')
     ]).then(function(res){
-      var st=Array.isArray(res[0])?res[0]:[];
-      oborotCOStores=st.map(function(s){return s.name;});
+      oborotCOStores=Array.isArray(res[0])?res[0]:[];
       oborotCORows=Array.isArray(res[1])?res[1]:[];
       renderOborot();
     }).catch(function(){renderOborot();});
@@ -195,6 +217,7 @@ function dtTodayBlock(){
         dtRoRow('Общ оборот',dtMoney(o.total_turnover),true)+
         dtRoRow('В брой',dtMoney(o.cash_turnover))+
         dtRoRow('С карта',dtMoney(o.card_turnover))+
+        (dtBankOf(o)>0?dtRoRow('По банка',dtMoney(o.bank_turnover)):'')+
         dtRoRow('Брой клиенти',String(parseInt(o.customers,10)||0))+
         dtRoRow('Среден чек',dtAvgCheck(o.total_turnover,o.customers))+
         (o.note?dtRoRow('Забележка',esc(o.note)):'')+
@@ -208,6 +231,10 @@ function dtTodayBlock(){
       dtInpRow('Общ оборот','dt-total','EUR')+
       dtInpRow('В брой','dt-cash','EUR')+
       dtInpRow('С карта','dt-card','EUR')+
+      /* Фирмени клиенти плащат и по банка. Сумата влиза в оборота за деня, в
+         който е ПОЛУЧЕНА, не в деня на продажбата. Полето не е задължително —
+         празно значи 0. */
+      dtInpRow('По банка','dt-bank','EUR')+
       dtInpRow('Брой клиенти','dt-customers','',true)+
       '<tr><td style="padding:6px 4px;color:#64748b;">Забележка</td>'+
         '<td style="padding:6px 4px;">'+
@@ -257,6 +284,12 @@ function dtLast7Block(){
   var byDate={};
   for(var i=0;i<oborotRecent.length;i++) byDate[oborotRecent[i].date]=oborotRecent[i];
 
+  /* Колоната „Банка" се решава ВЕДНЪЖ за целите 7 дни, а не за всеки ред —
+     иначе редовете щяха да имат различен брой клетки. */
+  var days=[];
+  for(var q=0;q<7;q++){ var kk=dtDay(q); if(byDate[kk]) days.push(byDate[kk]); }
+  var showBank=dtAnyBank(days);
+
   var rows='';
   for(var d=0;d<7;d++){
     var key=dtDay(d), r=byDate[key];
@@ -266,6 +299,7 @@ function dtLast7Block(){
         '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;font-weight:600;">'+dtMoney(r.total_turnover)+'</td>'+
         '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtMoney(r.cash_turnover)+'</td>'+
         '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtMoney(r.card_turnover)+'</td>'+
+        (showBank?'<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtBankCell(r)+'</td>':'')+
         '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+(parseInt(r.customers,10)||0)+'</td>'+
         '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtAvgCheck(r.total_turnover,r.customers)+'</td>'+
       '</tr>';
@@ -275,6 +309,7 @@ function dtLast7Block(){
         '<td style="text-align:right;padding:7px 4px;">—</td>'+
         '<td style="text-align:right;padding:7px 4px;">—</td>'+
         '<td style="text-align:right;padding:7px 4px;">—</td>'+
+        (showBank?'<td style="text-align:right;padding:7px 4px;">—</td>':'')+
         '<td style="text-align:right;padding:7px 4px;">—</td>'+
         '<td style="text-align:right;padding:7px 4px;">—</td>'+
       '</tr>';
@@ -289,6 +324,7 @@ function dtLast7Block(){
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">Общ</th>'+
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">В брой</th>'+
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">С карта</th>'+
+        (showBank?'<th style="text-align:right;padding:7px 4px;font-weight:500;">Банка</th>':'')+
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">Клиенти</th>'+
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">Среден чек</th>'+
       '</tr>'+rows+
@@ -309,19 +345,24 @@ function dtCOView(){
      проверка, която ползват седмичният отчет и табът „Днес". */
   var stores=oborotCOStores.filter(function(n){return isReportableStore(n);});
 
-  var rows='',missing=[],tTotal=0,tCash=0,tCard=0,tCust=0,filed=0;
+  /* Решава се ВЕДНЪЖ за целия ден: ако нито един обект няма банка,
+     колоната изобщо не се появява и таблицата изглежда както досега. */
+  var showBank=dtAnyBank(oborotCORows);
+  var rows='',missing=[],tTotal=0,tCash=0,tCard=0,tBank=0,tCust=0,filed=0;
   for(var s=0;s<stores.length;s++){
     var name=stores[s], r=byStore[name];
     if(!r){ missing.push(name); continue; }
     filed++;
     var tot=parseFloat(r.total_turnover)||0, cash=parseFloat(r.cash_turnover)||0;
     var card=parseFloat(r.card_turnover)||0, cust=parseInt(r.customers,10)||0;
-    tTotal+=tot; tCash+=cash; tCard+=card; tCust+=cust;
+    var bank=dtBankOf(r);
+    tTotal+=tot; tCash+=cash; tCard+=card; tBank+=bank; tCust+=cust;
     rows+='<tr style="border-bottom:1px solid #f1f5f9;">'+
       '<td style="padding:7px 4px;">'+esc(name)+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;font-weight:600;">'+dtMoney(tot)+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtMoney(cash)+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtMoney(card)+'</td>'+
+      (showBank?'<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtBankCell(r)+'</td>':'')+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+(tot>0?(card/tot*100).toFixed(1)+'%':'—')+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+cust+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtAvgCheck(tot,cust)+'</td>'+
@@ -333,6 +374,7 @@ function dtCOView(){
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+dtMoney(tTotal)+'</td>'+
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+dtMoney(tCash)+'</td>'+
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+dtMoney(tCard)+'</td>'+
+    (showBank?'<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+(tBank>0?dtMoney(tBank):'—')+'</td>':'')+
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+(tTotal>0?(tCard/tTotal*100).toFixed(1)+'%':'—')+'</td>'+
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+tCust+'</td>'+
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+dtAvgCheck(tTotal,tCust)+'</td>'+
@@ -367,6 +409,7 @@ function dtCOView(){
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">Общ</th>'+
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">В брой</th>'+
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">С карта</th>'+
+        (showBank?'<th style="text-align:right;padding:7px 4px;font-weight:500;">Банка</th>':'')+
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">% карта</th>'+
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">Клиенти</th>'+
         '<th style="text-align:right;padding:7px 4px;font-weight:500;">Среден чек</th>'+
@@ -435,13 +478,17 @@ function submitOborot(){
 
   /* 1) Всички задължителни полета са попълнени. */
   var sTotal=v('dt-total'),sCash=v('dt-cash'),sCard=v('dt-card'),sCust=v('dt-customers');
+  /* „По банка" НЕ е задължително: празно значи 0, не липсваща стойност.
+     Колоната е not null с default 0 — null никога не се праща. */
+  var sBank=v('dt-bank');
   if(!sTotal||!sCash||!sCard||!sCust){
     toast('Попълни всички полета','#dc2626');return;
   }
 
   /* 2) Числата са валидни и неотрицателни; клиентите са цяло число. */
   var total=dtNum(sTotal),cash=dtNum(sCash),card=dtNum(sCard),cust=dtNum(sCust);
-  if(isNaN(total)||isNaN(cash)||isNaN(card)||total<0||cash<0||card<0){
+  var bank=sBank?dtNum(sBank):0;
+  if(isNaN(total)||isNaN(cash)||isNaN(card)||isNaN(bank)||total<0||cash<0||card<0||bank<0){
     toast('Сумите трябва да са числа, не по-малки от нула','#dc2626');return;
   }
   if(isNaN(cust)||cust<0||Math.floor(cust)!==cust){
@@ -452,9 +499,9 @@ function submitOborot(){
         Закръглянето до стотинки е ПРЕДИ сравнението, защото в плаваща
         запетая 100.05-50-50 дава 0.049999999999997 — без него граничните
         случаи се решават от двоичния шум, не от правилото. */
-  var diff=Math.round((total-cash-card)*100)/100;
+  var diff=Math.round((total-cash-card-bank)*100)/100;
   if(Math.abs(diff)>1){
-    toast('Общият оборот не съвпада със сбора от брой и карта','#dc2626');return;
+    toast('Общият оборот не съвпада със сбора от брой, карта и банка','#dc2626');return;
   }
 
   /* 4) Предупреждение, не забрана — изместена запетая е най-честата грешка. */
@@ -470,6 +517,7 @@ function submitOborot(){
     total_turnover:total,
     cash_turnover:cash,
     card_turnover:card,
+    bank_turnover:bank,
     customers:cust,
     note:note||null,
     created_by:currentUser.display_name
