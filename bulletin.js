@@ -37,12 +37,65 @@ function deptOptsHtml(selected){
 /* ВИДОВЕ ЗАДАЧА — определят какво трябва магазинът, за да отбележи
    задачата изпълнена, и производен приоритет (само за визуализация,
    не се пази отделно в базата — извежда се от task_type). */
+/* needsFile е ТРЕТИ флаг, не разновидност на needsPhoto: документът се иска
+   отделно и се показва различно (връзка с име, не миниатюра).
+   Комбинация снимка + документ нарочно НЯМА — няма такъв случай, а всяка
+   комбинация удължава падащото меню. Ако потрябва, е един ред.
+   Старите четири ключа НЕ се преименуват: 55 задачи ги ползват. */
 var TASK_TYPES = {
-  info:          {label:'Информативна',           short:'Инфо',        needsPhoto:false, needsComment:false, priority:'Нисък',     color:'#64748b', bg:'#f1f5f9', bdr:'#e2e8f0'},
-  photo:         {label:'Потвърждение със снимка', short:'📷 Снимка',   needsPhoto:true,  needsComment:false, priority:'Среден',    color:'#b6841e', bg:'#fffbeb', bdr:'#fde68a'},
-  comment:       {label:'Потвърждение с коментар', short:'💬 Коментар', needsPhoto:false, needsComment:true,  priority:'Висок',     color:'#c2410c', bg:'#fff7ed', bdr:'#fed7aa'},
-  photo_comment: {label:'Коментар и снимка',       short:'💬📷 И двете', needsPhoto:true,  needsComment:true,  priority:'Най-висок', color:'#b91c1c', bg:'#fef2f2', bdr:'#fecaca'}
+  info:          {label:'Информативна',            short:'Инфо',        needsPhoto:false, needsFile:false, needsComment:false, priority:'Нисък',     color:'#64748b', bg:'#f1f5f9', bdr:'#e2e8f0'},
+  photo:         {label:'Потвърждение със снимка',  short:'📷 Снимка',   needsPhoto:true,  needsFile:false, needsComment:false, priority:'Среден',    color:'#b6841e', bg:'#fffbeb', bdr:'#fde68a'},
+  file:          {label:'Потвърждение с документ',  short:'📄 Документ', needsPhoto:false, needsFile:true,  needsComment:false, priority:'Среден',    color:'#b6841e', bg:'#fffbeb', bdr:'#fde68a'},
+  comment:       {label:'Потвърждение с коментар',  short:'💬 Коментар', needsPhoto:false, needsFile:false, needsComment:true,  priority:'Висок',     color:'#c2410c', bg:'#fff7ed', bdr:'#fed7aa'},
+  photo_comment: {label:'Коментар и снимка',        short:'💬📷 И двете', needsPhoto:true,  needsFile:false, needsComment:true,  priority:'Най-висок', color:'#b91c1c', bg:'#fef2f2', bdr:'#fecaca'},
+  file_comment:  {label:'Документ и коментар',      short:'📄💬 Документ+коментар', needsPhoto:false, needsFile:true, needsComment:true, priority:'Най-висок', color:'#b91c1c', bg:'#fef2f2', bdr:'#fecaca'}
 };
+
+/* ─── КАКЪВ ФАЙЛ Е ДОПУСТИМ ─────────────────────────────────
+   accept="" в <input type=file> е само подсказка към диалога за избор и
+   НЕ спира нищо — качва се каквото му подадеш. Затова проверката е тук,
+   в JavaScript, преди качването. Иначе .xlsx влиза в photos и после
+   излиза като счупена картинка в имейла (три такива записа в базата към
+   26.08.2026). */
+var TC_PHOTO_EXT = ['jpg','jpeg','png','gif','webp','heic','heif'];
+var TC_FILE_EXT  = ['pdf','doc','docx','xls','xlsx','csv','ppt','pptx'];
+function tcExtOf(name){
+  var p = String(name||'').split('.');
+  return p.length>1 ? p.pop().toLowerCase() : '';
+}
+function tcIsPhotoName(name){ return TC_PHOTO_EXT.indexOf(tcExtOf(name))>=0; }
+/* Един прикачен запис -> HTML. Снимка става миниатюра, всичко останало —
+   връзка с името на файла.
+   Проверката по разширение важи и за СТАРАТА колона photos: в нея лежат три
+   .xlsx отпреди отделната колона files и без нея излизат като счупени
+   картинки в имейла и в таб „Днес". Това е и защитата, ако някой пак качи
+   документ през полето за снимка. */
+function tcAttachHtml(a, px){
+  if (!a || !a.url) return '';
+  var nm = a.filename || a.name || '';
+  px = px || 44;
+  /* Без име не съдим — всичките 9 заварени записа с photos имат filename на
+     ВСЕКИ елемент, тоест липсващото име значи стар или чужд запис и старото
+     поведение (миниатюра) е по-безопасното. Разширението НЕ се чете от
+     URL-а: там може да има query низ или кавичка и вадене на разширение
+     оттам превръща проверката в гадаене. */
+  if (!nm || tcIsPhotoName(nm)) {
+    return '<a href="'+a.url+'" target="_blank"><img src="'+a.url+'" style="width:'+px+'px;height:'+px+'px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0;"></a>';
+  }
+  return '<a href="'+a.url+'" target="_blank" style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#2563eb;text-decoration:none;border:1px solid #e2e8f0;border-radius:5px;padding:3px 8px;background:#fff;">📄 '+esc(nm||'документ')+'</a>';
+}
+/* Прикаченото към едно отмятане: снимки + документи, в един ред. */
+function tcAttachListHtml(c, px){
+  return (((c&&c.photos)||[]).concat(((c&&c.files)||[])))
+    .map(function(a){ return tcAttachHtml(a, px); }).join('');
+}
+/* Съобщението казва КАКВО се очаква, не „невалиден файл": магазинът е на
+   смяна в 20 ч. и трябва да разбере какво да направи, не че е сгрешил. */
+function tcExtReject(name, allowed, what){
+  var ext = tcExtOf(name);
+  return 'Това е '+(ext?'.'+ext:'файл без разширение')+', а тук се качва '+what+
+         ' ('+allowed.map(function(e){return '.'+e;}).join(', ')+')';
+}
 function taskTypeOptsHtml(selected){
   return Object.keys(TASK_TYPES).map(function(k){
     var tt=TASK_TYPES[k];
@@ -2661,6 +2714,7 @@ function toggleTask(taskId, checked, extra, completionDate) {
       status: 'done',
       comment: extra.comment || null,
       photos: (extra.photos && extra.photos.length) ? extra.photos : null,
+      files: (extra.files && extra.files.length) ? extra.files : null,
       completion_date: completionDate
     };
     var matchQuery = 'task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+(completionDate?'&completion_date=eq.'+completionDate:'&completion_date=is.null');
@@ -2671,7 +2725,7 @@ function toggleTask(taskId, checked, extra, completionDate) {
       if (!r.ok) { toast('Грешка','#dc2626'); return; }
       toast('✅ Задачата е отбелязана!');
       bulComps = bulComps.filter(function(c){ return !(c.task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate); });
-      bulComps.push(Object.assign({task_id: taskId, store_name: store, completed_by: completedBy, status:'done', completion_date: completionDate}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}));
+      bulComps.push(Object.assign({task_id: taskId, store_name: store, completed_by: completedBy, status:'done', completion_date: completionDate}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}, (extra.files&&extra.files.length)?{files:extra.files}:{}));
       renderBulletin();
     });
   } else {
@@ -2713,19 +2767,17 @@ function bulCheckboxChanged(cb){
 function renderCompletionExtras(compInfo){
   var h = '<div style="margin-top:4px;padding:6px 9px;background:#f8fafc;border-radius:6px;border:1px solid #f1f5f9;">';
   if (compInfo.comment) h += '<div style="font-size:11px;color:#475569;">💬 '+esc(compInfo.comment)+'</div>';
-  if (compInfo.photos && compInfo.photos.length) {
-    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:'+(compInfo.comment?'5px':'0')+';">';
-    compInfo.photos.forEach(function(p){
-      h += '<a href="'+p.url+'" target="_blank"><img src="'+p.url+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0;"></a>';
-    });
-    h += '</div>';
+  var att = tcAttachListHtml(compInfo, 44);
+  if (att) {
+    h += '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:'+(compInfo.comment?'5px':'0')+';">'+att+'</div>';
   }
   h += '</div>';
   return h;
 }
 
-/* ─── МОДАЛ ЗА ЗАВЪРШВАНЕ (коментар и/или снимка) ─────────── */
+/* ─── МОДАЛ ЗА ЗАВЪРШВАНЕ (коментар, снимка и/или документ) ─────────── */
 var tcPendingPhotos = []; /* качени снимки за текущия отворен модал, преди запис */
+var tcPendingFiles  = []; /* качени документи — отделен буфер, отделна колона */
 function openTaskCompletionModal(taskId, kind, completionDate){
   kind = kind || 'regular';
   completionDate = completionDate || null;
@@ -2738,6 +2790,7 @@ function openTaskCompletionModal(taskId, kind, completionDate){
   var lockReason = bulDateLockReason(completionDate);
   if (lockReason) { toast(bulLockLabel(lockReason),'#d97706'); return; }
   tcPendingPhotos = [];
+  tcPendingFiles = [];
   var existing = document.getElementById('tc-modal-ov');
   if (existing) existing.remove();
   var ov = document.createElement('div');
@@ -2752,7 +2805,13 @@ function openTaskCompletionModal(taskId, kind, completionDate){
     body += '<label class="fl">Снимка *</label>' +
       '<div id="tc-photos-preview" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px;"></div>' +
       '<label style="display:inline-flex;align-items:center;gap:4px;border:1px dashed #cbd5e1;border-radius:5px;padding:5px 10px;font-size:12px;color:#475569;cursor:pointer;">' +
-      '📷 + Добави снимка<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp" style="display:none;" onchange="tcUploadPhoto(this)"></label>';
+      '📷 + Добави снимка<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.heic,.heif" style="display:none;" onchange="tcUploadPhoto(this)"></label>';
+  }
+  if (tt.needsFile) {
+    body += '<label class="fl">Документ *</label>' +
+      '<div id="tc-files-preview" style="display:flex;flex-direction:column;gap:4px;margin-bottom:6px;"></div>' +
+      '<label style="display:inline-flex;align-items:center;gap:4px;border:1px dashed #cbd5e1;border-radius:5px;padding:5px 10px;font-size:12px;color:#475569;cursor:pointer;">' +
+      '📄 + Добави документ<input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx" style="display:none;" onchange="tcUploadFile(this)"></label>';
   }
   body += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
     '<button onclick="var e=document.getElementById(&#39;tc-modal-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
@@ -2761,9 +2820,16 @@ function openTaskCompletionModal(taskId, kind, completionDate){
   ov.innerHTML = '<div class="bmod" style="width:420px;">'+body+'</div>';
   document.body.appendChild(ov);
 }
-function tcUploadPhoto(input){
+/* Общото качване. Разширението се проверява ПРЕДИ мрежата — accept не спира
+   нищо. buf/prevId/label различават двата вида, останалото е едно и също. */
+function tcUpload(input, allowed, what, buf, prevId, renderPrev, okMsg){
   var file = input.files[0]; if (!file) return;
-  var ext = (file.name.split('.').pop()||'jpg').toLowerCase();
+  if (allowed.indexOf(tcExtOf(file.name)) < 0) {
+    toast(tcExtReject(file.name, allowed, what), '#dc2626');
+    input.value = ''; /* иначе същият файл не може да се избере повторно */
+    return;
+  }
+  var ext = tcExtOf(file.name);
   var fname = 'completion_'+Date.now()+'.'+ext;
   var path = 'task-completions/'+fname;
   showBulToast('⏳ Качване...');
@@ -2775,14 +2841,23 @@ function tcUploadPhoto(input){
       body:e.target.result
     }).then(function(r){return r.ok;}).then(function(ok){
       if (!ok) { toast('Грешка при качване','#dc2626'); return; }
-      var pub = BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path;
-      tcPendingPhotos.push({url:pub, filename:file.name});
-      var prev = document.getElementById('tc-photos-preview');
-      if (prev) prev.innerHTML = tcPendingPhotos.map(function(p){ return '<img src="'+p.url+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0;">'; }).join('');
-      toast('✅ Снимката е качена');
+      buf.push({url:BUL_SB+'/storage/v1/object/public/'+BUL_BKT+'/'+path, filename:file.name});
+      var prev = document.getElementById(prevId);
+      if (prev) prev.innerHTML = buf.map(renderPrev).join('');
+      toast(okMsg);
     }).catch(function(){ toast('Грешка при качване','#dc2626'); });
   };
   reader.readAsArrayBuffer(file);
+}
+function tcUploadPhoto(input){
+  tcUpload(input, TC_PHOTO_EXT, 'снимка', tcPendingPhotos, 'tc-photos-preview',
+    function(p){ return '<img src="'+p.url+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0;">'; },
+    '✅ Снимката е качена');
+}
+function tcUploadFile(input){
+  tcUpload(input, TC_FILE_EXT, 'документ', tcPendingFiles, 'tc-files-preview',
+    function(f){ return '<div style="font-size:12px;color:#475569;">📄 '+esc(f.filename)+'</div>'; },
+    '✅ Документът е качен');
 }
 function submitTaskCompletion(taskId, kind, completionDate){
   kind = kind || 'regular';
@@ -2793,11 +2868,14 @@ function submitTaskCompletion(taskId, kind, completionDate){
   var comment = tt.needsComment ? (document.getElementById('tc-comment').value||'').trim() : '';
   if (tt.needsComment && !comment) { toast('Въведи коментар','#dc2626'); return; }
   if (tt.needsPhoto && !tcPendingPhotos.length) { toast('Добави поне 1 снимка','#dc2626'); return; }
+  if (tt.needsFile && !tcPendingFiles.length) { toast('Добави поне 1 документ','#dc2626'); return; }
   var el = document.getElementById('tc-modal-ov');
   if (el) el.remove();
-  if (kind==='recurring') toggleRecurringTask(taskId, true, { comment: comment, photos: tcPendingPhotos.slice() }, completionDate);
-  else toggleTask(taskId, true, { comment: comment, photos: tcPendingPhotos.slice() }, completionDate);
+  var extra = { comment: comment, photos: tcPendingPhotos.slice(), files: tcPendingFiles.slice() };
+  if (kind==='recurring') toggleRecurringTask(taskId, true, extra, completionDate);
+  else toggleTask(taskId, true, extra, completionDate);
   tcPendingPhotos = [];
+  tcPendingFiles = [];
 }
 
 /* ─── ОТЛАГАНЕ НА ЗАДАЧА (изисква коментар, вижда се в седмичния репорт) ───
@@ -3180,6 +3258,7 @@ function toggleRecurringTask(taskId, checked, extra, completionDate) {
       status: 'done',
       comment: extra.comment || null,
       photos: (extra.photos && extra.photos.length) ? extra.photos : null,
+      files: (extra.files && extra.files.length) ? extra.files : null,
       completion_date: completionDate
     };
     var matchQuery = 'recurring_task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+(completionDate?'&completion_date=eq.'+completionDate:'&completion_date=is.null');
@@ -3190,7 +3269,7 @@ function toggleRecurringTask(taskId, checked, extra, completionDate) {
       if (!r.ok) { toast('Грешка','#dc2626'); return; }
       toast('✅ Отбелязана!');
       recurringComps = recurringComps.filter(function(c){ return !(c.recurring_task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate); });
-      recurringComps.push(Object.assign({recurring_task_id: taskId, store_name: store, completed_by: completedBy, status:'done', completion_date: completionDate}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}));
+      recurringComps.push(Object.assign({recurring_task_id: taskId, store_name: store, completed_by: completedBy, status:'done', completion_date: completionDate}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}, (extra.files&&extra.files.length)?{files:extra.files}:{}));
       renderBulletin();
     });
   } else {

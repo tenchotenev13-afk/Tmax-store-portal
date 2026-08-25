@@ -103,11 +103,11 @@ function loadTodayDashboard(){
            многодневна задача (Пон+Ср) не бива изпълнението от Понеделник
            да се показва като "изпълнено" и в сряда. */
         var comps = [];
-        regComps.forEach(function(c){ if(c.status==='done' && (c.completion_date||null)===todayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, comment:c.comment, photos:c.photos }); });
+        regComps.forEach(function(c){ if(c.status==='done' && (c.completion_date||null)===todayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, comment:c.comment, photos:c.photos, files:c.files }); });
         /* completion_date=null (стара постоянна задача - персистира завинаги)
            или съвпада с ДНЕС (нова многодневна постоянна задача - само
            днешното ѝ отмятане се брои за днес). */
-        recComps.forEach(function(c){ if(c.status==='done' && (!c.completion_date || c.completion_date===todayISO)) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, comment:c.comment, photos:c.photos }); });
+        recComps.forEach(function(c){ if(c.status==='done' && (!c.completion_date || c.completion_date===todayISO)) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, comment:c.comment, photos:c.photos, files:c.files }); });
 
         todayCache = { items:items, noDueItems:noDueItems, comps:comps, stores:stores };
         renderTodayDashboard(wrap, items, noDueItems, comps, stores);
@@ -347,12 +347,11 @@ function todayCrossModuleWrapperHtml(){
 function todayCompletionExtras(compObj){
   var h = '<div style="margin:6px 0 0 32px;padding:8px 10px;background:#f8fafc;border-radius:7px;border:1px solid #f1f5f9;">';
   if (compObj.comment) h += '<div style="font-size:12px;color:#475569;">💬 ' + esc(compObj.comment) + '</div>';
-  if (compObj.photos && compObj.photos.length) {
-    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:' + (compObj.comment ? '6px' : '0') + ';">';
-    compObj.photos.forEach(function(p){
-      h += '<a href="' + p.url + '" target="_blank"><img src="' + p.url + '" style="width:52px;height:52px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;"></a>';
-    });
-    h += '</div>';
+  /* tcAttachHtml() (bulletin.js) решава по разширението: снимка -> миниатюра,
+     документ -> връзка с име. Важи и за старите .xlsx в photos. */
+  var att = tcAttachListHtml(compObj, 52);
+  if (att) {
+    h += '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:' + (compObj.comment ? '6px' : '0') + ';">' + att + '</div>';
   }
   h += '</div>';
   return h;
@@ -374,17 +373,19 @@ function todayLoadPhotoQueue(cb){
       var regIds = regTasks.map(function(t){ return t.id; });
       var recIds = recTasks.map(function(t){ return t.id; });
       Promise.all([
-        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')&photos=not.is.null') : Promise.resolve([]),
-        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')&photos=not.is.null') : Promise.resolve([])
+        /* or(...) вместо photos=not.is.null: отмятане само с документ няма
+           photos и иначе не влиза в опашката за преглед изобщо. */
+        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')&or=(photos.not.is.null,files.not.is.null)') : Promise.resolve([]),
+        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')&or=(photos.not.is.null,files.not.is.null)') : Promise.resolve([])
       ]).then(function(r3){
         var regComps = Array.isArray(r3[0]) ? r3[0] : [];
         var recComps = Array.isArray(r3[1]) ? r3[1] : [];
         var entries = [];
         regComps.forEach(function(c){
-          if (c.photos && c.photos.length) entries.push({ title: titleMap['regular:'+c.task_id]||'(неизвестна задача)', store:c.store_name, comment:c.comment, photos:c.photos, completedAt:c.completed_at });
+          if ((c.photos && c.photos.length) || (c.files && c.files.length)) entries.push({ title: titleMap['regular:'+c.task_id]||'(неизвестна задача)', store:c.store_name, comment:c.comment, photos:c.photos||[], files:c.files||[], completedAt:c.completed_at });
         });
         recComps.forEach(function(c){
-          if (c.photos && c.photos.length) entries.push({ title: titleMap['recurring:'+c.recurring_task_id]||'(неизвестна задача)', store:c.store_name, comment:c.comment, photos:c.photos, completedAt:c.completed_at });
+          if ((c.photos && c.photos.length) || (c.files && c.files.length)) entries.push({ title: titleMap['recurring:'+c.recurring_task_id]||'(неизвестна задача)', store:c.store_name, comment:c.comment, photos:c.photos||[], files:c.files||[], completedAt:c.completed_at });
         });
         entries.sort(function(a,b){ return new Date(b.completedAt) - new Date(a.completedAt); }); /* най-новите отгоре */
         cb(entries);
@@ -393,13 +394,21 @@ function todayLoadPhotoQueue(cb){
   }).catch(function(){ cb([]); });
 }
 function todayPhotoQueueHtml(entries){
-  if (!entries.length) return '<div style="padding:20px;color:#94a3b8;font-size:12.5px;text-align:center;">Няма качени снимки тази седмица.</div>';
+  if (!entries.length) return '<div style="padding:20px;color:#94a3b8;font-size:12.5px;text-align:center;">Няма качени файлове тази седмица.</div>';
   var h = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;padding:6px 18px 16px;">';
   entries.forEach(function(e){
-    e.photos.forEach(function(p){
+    /* Документите вървят заедно със снимките: и двете са „качено за
+       преглед". Плочката им обаче е иконка, не <img> — .xlsx като картинка
+       е точно счупеният вид, който се поправя тук. */
+    (e.photos||[]).concat(e.files||[]).forEach(function(p){
+      var isPhoto = tcIsPhotoName(p.filename||p.name||'');
       h += '<a href="' + p.url + '" target="_blank" style="display:block;text-decoration:none;color:inherit;">';
       h += '<div style="border:1px solid #eef1f6;border-radius:8px;overflow:hidden;background:#fff;">';
-      h += '<img src="' + p.url + '" style="width:100%;height:100px;object-fit:cover;display:block;">';
+      h += isPhoto
+        ? '<img src="' + p.url + '" style="width:100%;height:100px;object-fit:cover;display:block;">'
+        : '<div style="height:100px;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#f8fafc;gap:4px;">' +
+          '<div style="font-size:26px;">📄</div>' +
+          '<div style="font-size:10px;color:#64748b;padding:0 6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%;">' + esc(p.filename||p.name||'документ') + '</div></div>';
       h += '<div style="padding:6px 8px;">';
       h += '<div style="font-size:11px;font-weight:600;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(e.title) + '</div>';
       h += '<div style="font-size:10px;color:#94a3b8;">' + esc(e.store) + '</div>';
@@ -423,10 +432,10 @@ function todayTogglePhotoQueue(){
   if (wrap && todayCache) renderTodayDashboard(wrap, todayCache.items, todayCache.noDueItems, todayCache.comps, todayCache.stores);
 }
 function todayPhotoQueueSectionHtml(){
-  var photoCount = todayPhotosCache ? todayPhotosCache.reduce(function(s,e){ return s + e.photos.length; }, 0) : null;
+  var photoCount = todayPhotosCache ? todayPhotosCache.reduce(function(s,e){ return s + (e.photos||[]).length + (e.files||[]).length; }, 0) : null;
   var h = '<div style="background:#fff;border:1px solid #eef1f6;border-radius:12px;margin-top:12px;overflow:hidden;">';
   h += '<div onclick="todayTogglePhotoQueue()" style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;cursor:pointer;">';
-  h += '<div style="font-size:14px;font-weight:700;">📷 Снимки за преглед' + (photoCount!==null ? ' (' + photoCount + ')' : '') + '</div>';
+  h += '<div style="font-size:14px;font-weight:700;">📷 Качени за преглед' + (photoCount!==null ? ' (' + photoCount + ')' : '') + '</div>';
   h += '<span style="font-size:12px;color:#94a3b8;transform:rotate(' + (todayPhotosExpanded?'180deg':'0deg') + ');transition:transform .15s;">▾</span>';
   h += '</div>';
   if (todayPhotosExpanded) {
@@ -536,7 +545,7 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
         h += '<div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:600;' + (isDone ? 'color:#94a3b8;text-decoration:line-through;' : '') + '">' + srcIcon + esc(it.title) + '</div></div>';
         h += '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:' + d.bg + ';color:' + d.hdr + ';white-space:nowrap;">' + d.icon + ' ' + d.label + '</span>';
         h += '</div>';
-        if (compObj && (compObj.comment || (compObj.photos && compObj.photos.length))) h += todayCompletionExtras(compObj);
+        if (compObj && (compObj.comment || (compObj.photos && compObj.photos.length) || (compObj.files && compObj.files.length))) h += todayCompletionExtras(compObj);
         h += '</div>';
       });
       h += '</div>';

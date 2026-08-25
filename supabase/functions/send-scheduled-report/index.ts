@@ -303,7 +303,7 @@ function collectDailyReportData(cb){
         /* Само completion-и от ОТЧЕТНИЯ ден за обикновени задачи - многодневна
            задача (Пон+Ср) не бива изпълнението от Понеделник да се показва
            като "изпълнено" (или "отложено") и в сряда. */
-        regComps.forEach(function(c){ if((c.completion_date||null)===dayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos }); });
+        regComps.forEach(function(c){ if((c.completion_date||null)===dayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files }); });
         /* Постоянна задача: отмятането трябва да носи ОТЧЕТНИЯ ден.
            Дотук `!c.completion_date ||` пускаше и старите записи без дата -
            184 такива в базата, всичките отпреди полето да се пълни. Те се
@@ -317,7 +317,7 @@ function collectDailyReportData(cb){
           var win = recWinDates[c.recurring_task_id];
           var hit = win ? (!!c.completion_date && win.indexOf(c.completion_date)>=0)
                         : (c.completion_date === dayISO);
-          if(hit) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos });
+          if(hit) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files });
         });
 
         var summary = reportBuildSummary(items, comps, stores, recurringNoDue.length);
@@ -439,9 +439,9 @@ function reportBuildSummary(items, comps, stores, noDueCount){
   /* Изпълнени задачи С коментар/снимка - иначе съдържанието е невидимо в
      репорта, освен ако не отвориш конкретната задача в Бюлетин. */
   var commentedList = doneComps.filter(inWindow).filter(function(c){
-    return c.comment || (c.photos && c.photos.length);
+    return c.comment || (c.photos && c.photos.length) || (c.files && c.files.length);
   }).map(function(c){
-    return { title: titleOf(c), store: c.store_name, comment: c.comment || '', photos: c.photos || [] };
+    return { title: titleOf(c), store: c.store_name, comment: c.comment || '', photos: c.photos || [], files: c.files || [] };
   });
   return {
     overallPct: overallPct, totalDone: totalDone, totalAll: totalAll,
@@ -699,10 +699,10 @@ function reportByTaskHtml(data, weekly){
 function reportCommentsByStoreHtml(data){
   var entries = [];
   (data.commentedList || []).forEach(function(c){
-    entries.push({ store:c.store, title:c.title, comment:c.comment||'', photos:c.photos||[], postponed:false });
+    entries.push({ store:c.store, title:c.title, comment:c.comment||'', photos:c.photos||[], files:c.files||[], postponed:false });
   });
   (data.postponedList || []).forEach(function(p){
-    entries.push({ store:p.store, title:p.title, comment:p.comment||'', photos:[], postponed:true });
+    entries.push({ store:p.store, title:p.title, comment:p.comment||'', photos:[], files:[], postponed:true });
   });
   if (!entries.length) return '';
 
@@ -736,10 +736,22 @@ function reportCommentsByStoreHtml(data){
         (e.postponed ? '<span style="color:#B45309;font-weight:700;">⏳ отложена · </span>' : '') +
         '<b>'+esc(e.title)+'</b></div>';
       if (e.comment) h += '<div style="font-size:12px;color:#4B5563;margin-top:2px;">💬 '+esc(e.comment)+'</div>';
-      if (e.photos.length) {
+      /* Снимка -> миниатюра, документ -> връзка с името. Проверката по
+         разширение важи и за СТАРАТА колона photos: в нея лежат три .xlsx
+         отпреди отделната колона files и досега излизаха в писмото като
+         счупени картинки. */
+      var att = (e.photos||[]).concat(e.files||[]);
+      if (att.length) {
         h += '<div style="margin-top:5px;">';
-        e.photos.forEach(function(ph){
-          h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #D8DEE9;margin-right:5px;">';
+        att.forEach(function(ph){
+          var nm = ph.filename || ph.name || '';
+          var ext = nm.indexOf('.')>=0 ? nm.split('.').pop().toLowerCase() : '';
+          /* Без име не съдим — виж tcAttachHtml() в bulletin.js. */
+          if (!nm || ['jpg','jpeg','png','gif','webp','heic','heif'].indexOf(ext) >= 0) {
+            h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #D8DEE9;margin-right:5px;">';
+          } else {
+            h += '<a href="'+escAttr(ph.url)+'" style="display:inline-block;font-size:12px;color:#1E2761;text-decoration:none;border:1px solid #D8DEE9;border-radius:5px;padding:3px 8px;margin:0 5px 5px 0;">📄 '+esc(nm||'документ')+'</a>';
+          }
         });
         h += '</div>';
       }
@@ -958,8 +970,8 @@ function collectWeeklyReportData(cb){
         }).map(function(u){ return u.store_name; });
 
         var comps = [];
-        regComps.forEach(function(c){ comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, completion_date:c.completion_date||null }); });
-        recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, completion_date:c.completion_date||null }); });
+        regComps.forEach(function(c){ comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null }); });
+        recComps.forEach(function(c){ comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null }); });
 
         var summary = reportBuildSummary(items, comps, stores, noDueCount);
         summary.weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
