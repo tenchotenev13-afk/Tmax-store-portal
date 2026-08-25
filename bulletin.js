@@ -2273,7 +2273,10 @@ function autoCheckDailyDeadlines(){
 
 function sendPushOverdueNow(){
   if(!bulTasks.length){toast('Няма задачи за проверка');return;}
-  var now=new Date();
+  /* Същият източник за „днес", който заключва чекбокса — bulTodayISO() е
+     toLocalISO(new Date()). Така задача не може да е едновременно отметваема
+     и закъсняла. */
+  var todayISO=bulTodayISO();
   /* Само обектите, които реално могат да отметнат — същият източник като
      бройките в календара. Преди тук стоеше sbGet('stores'): Централният
      офис (58 акаунта) и двата склада получаваха известие за чужда работа,
@@ -2291,8 +2294,11 @@ function sendPushOverdueNow(){
     bulTasks.forEach(function(t){
       var dates = taskDueDates(t);
       if(!dates.length) return;
-      var latestDue = new Date(dates[dates.length-1]);
-      if(latestDue>=now)return;
+      /* Сравнение НИЗ с НИЗ, не през Date: new Date('2026-08-25') е UTC
+         полунощ = 03:00 наше време, тоест задача с последна дата днес
+         минаваше за просрочена от 03:00. 'YYYY-MM-DD' се подрежда
+         лексикографски и UTC не участва. */
+      if(dates[dates.length-1]>=todayISO)return;
       /* Задача, насочена към конкретни обекти, важи само за тях — същото
          правило като в главния списък и в календара. Иначе задача за три
          обекта вдигаше известие за всичките 18. */

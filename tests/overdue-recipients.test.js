@@ -123,6 +123,21 @@ function overdueTask(id, title, targetStores) {
            target_stores: targetStores || null, due_date: dayOffset(-5) };
 }
 
+/* Многодневна задача. Както в базата: due_dates носи целия прозорец, а
+   голото due_date е ПЪРВАТА дата — точно затова старото правило в email.js
+   я броеше за просрочена още в първия ден. */
+function windowTask(id, title, dates, targetStores) {
+  return { id: id, bulletin_id: 'b-1', title: title, department: 'Обект',
+           target_stores: targetStores || null,
+           due_dates: dates, due_date: dates[0] };
+}
+
+/* Еднодневна задача с произволна дата — пътят без due_dates. */
+function dayTask(id, title, date) {
+  return { id: id, bulletin_id: 'b-1', title: title, department: 'Обект',
+           target_stores: null, due_date: date };
+}
+
 const BULLETIN = { id: 'b-1', week_number: 34, year: 2026, status: 'published' };
 
 /* Стъбове за СРИВ. Нито sbGet, нито loadReportableStores отхвърлят при
@@ -142,9 +157,27 @@ function noStoresFixture(list) {
   };
 }
 
+/* Замразява часовника ВЪТРЕ в jsdom прозореца. Нужен е, защото „последна
+   дата днес" трябва да дава един и същ отговор в 00:30, в 04:00 и в 23:59 —
+   тест с реалното време би минавал сутрин и падал следобед, тоест точно
+   дефектът, който гоним, би останал невидим. Само `new Date()` без аргументи
+   се подменя; формите с аргумент остават истински. */
+function freezeClock(w, localDateTime) {
+  const Real = w.Date;
+  const fixedMs = new Real(localDateTime).getTime();
+  function Fake(...args) {
+    return args.length ? new Real(...args) : new Real(fixedMs);
+  }
+  Fake.prototype = Real.prototype;
+  Fake.now = () => fixedMs;
+  Fake.parse = Real.parse;
+  Fake.UTC = Real.UTC;
+  w.Date = Fake;
+}
+
 /* boot + шпиони. osSend и sendEmail са глобални ES5 функции — викат се по име
    от window в момента на извикването, затова подмяната СЛЕД boot() работи. */
-function env(users, fixture) {
+function env(users, fixture, clock) {
   const h = boot({
     modules: ['bulletin.js', 'push.js', 'email.js'],
     user: ADMIN,
@@ -155,6 +188,7 @@ function env(users, fixture) {
       recurring_tasks: []
     }
   });
+  if (clock) freezeClock(h.w, clock);
   const pushes = [], mails = [];
   h.w.osSend = function (payload) {
     pushes.push(payload);
@@ -183,8 +217,8 @@ function msgOf(payload) {
 }
 
 /* ── Push пътят: bulletin.js → push.js ── */
-async function runPush(tasks, comps, users, fixture) {
-  const e = env(users, fixture);
+async function runPush(tasks, comps, users, fixture, clock) {
+  const e = env(users, fixture, clock);
   e.h.w.bulTasks = tasks;
   e.h.w.bulComps = comps || [];
   const before = e.h.calls.get.length;
@@ -198,8 +232,8 @@ async function runPush(tasks, comps, users, fixture) {
 }
 
 /* ── Имейл пътят: email.js ── */
-async function runMail(tasks, comps, users, fixture) {
-  const e = env(users, fixture);
+async function runMail(tasks, comps, users, fixture, clock) {
+  const e = env(users, fixture, clock);
   const before = e.h.calls.get.length;
   guard('sendOverdueAlerts() не хвърля',
     () => e.h.w.sendOverdueAlerts(BULLETIN, tasks, comps || [], null));
@@ -538,6 +572,117 @@ function redToast(res, fragment) {
     const okRun = await runPush(TASK);
     ok('при здрави данни няма нито един toast за срив',
       !redToast(okRun, 'не се зареди'), okRun.toasts.join(' | '));
+  }
+
+  section('11. Просрочена = ПОСЛЕДНАТА дата от прозореца, не първата');
+  {
+    /* Реалният случай от 25.08.2026: „Зануляване" с due_dates
+       [24,25,26.08] и due_date 24.08. bulletin.js гледаше последната дата
+       и мълчеше; email.js четеше голото due_date и вече беше пратил писмо
+       на осем души за задача, чийто срок изтича утре.
+
+       Датите тук са ОТНОСИТЕЛНИ (dayOffset), не заковани в август 2026 —
+       иначе тестът гние след няколко дни. */
+    const openWin = windowTask('t-w1', 'Зануляване',
+      [dayOffset(-1), dayOffset(0), dayOffset(1)]);    /* тече до утре */
+    const pastWin = windowTask('t-w2', 'Зануляване',
+      [dayOffset(-3), dayOffset(-2), dayOffset(-1)]);  /* свърши вчера */
+
+    /* (1) прозорец, който още тече → НЕ е просрочена */
+    const a = await runMail([openWin]);
+    ok('отворен прозорец: sendEmail изобщо не е викан', a.mails.length === 0,
+      String(a.mails.length));
+    ok('и казва „Няма просрочени задачи"',
+      a.toasts.some(m => m.indexOf('Няма просрочени задачи') >= 0),
+      a.toasts.join(' | '));
+
+    /* (2) същата задача с изтекъл прозорец → Е просрочена */
+    const b = await runMail([pastWin]);
+    ok('изтекъл прозорец: писмата тръгват', b.mails.length === 4,
+      String(b.mails.length));
+
+    /* (3) задача само с due_date, без due_dates — пътят не се променя */
+    const c = await runMail([overdueTask('t-p', 'Само due_date')]);
+    ok('еднодневна просрочена задача: писмата тръгват', c.mails.length === 4,
+      String(c.mails.length));
+    const d = await runMail([dayTask('t-f', 'Само due_date, утре', dayOffset(1))]);
+    ok('еднодневна бъдеща задача: нищо не тръгва', d.mails.length === 0,
+      String(d.mails.length));
+    const e = await runMail([dayTask('t-n', 'Без никаква дата', null)]);
+    ok('задача без дати не е просрочена', e.mails.length === 0,
+      String(e.mails.length));
+
+    /* (4) датата В ПИСМОТО е последната от прозореца */
+    const fmt = (iso) => new Date(iso).toLocaleDateString('bg-BG');
+    const html = b.mails.length ? b.mails[0].html : '';
+    if (ok('има писмо за проверка', !!html)) {
+      ok('писмото показва последната дата от прозореца',
+        html.indexOf('Срок: ' + fmt(pastWin.due_dates[2])) >= 0,
+        'търсено: ' + fmt(pastWin.due_dates[2]));
+      ok('и НЕ първата',
+        html.indexOf('Срок: ' + fmt(pastWin.due_dates[0])) < 0,
+        'не трябва да го има: ' + fmt(pastWin.due_dates[0]));
+    }
+
+    /* (5) двата пътя отговарят ЕДНАКВО срещу една и съща фикстура —
+       включително на границата, когато прозорецът свършва днес. */
+    const cases = [
+      { t: openWin, label: 'прозорец до утре' },
+      { t: pastWin, label: 'прозорец, свършил вчера' },
+      { t: windowTask('t-w3', 'Свършва днес', [dayOffset(-1), dayOffset(0)]),
+        label: 'прозорец, свършващ днес' },
+      { t: overdueTask('t-w4', 'Еднодневна стара'), label: 'еднодневна отпреди 5 дни' }
+    ];
+    for (const cs of cases) {
+      const pp = await runPush([cs.t]);
+      const mm = await runMail([cs.t]);
+      ok('push и имейл се съгласяват — ' + cs.label,
+        (pp.pushes.length > 0) === (mm.mails.length > 0),
+        'push=' + pp.pushes.length + ' | mail=' + mm.mails.length);
+    }
+  }
+
+  section('12. Последна дата ДНЕС не е просрочена — по всяко време на деня');
+  {
+    /* Сравнението е по НИЗ, затова часът не бива да мени отговора. Часовникът
+       е замразен, а датите — фиксирани; двете вървят заедно и не гният.
+       04:00 е избран нарочно: това е моментът след 03:00 наше време, в който
+       new Date('YYYY-MM-DD') (UTC полунощ) започваше да изглежда като минало
+       и задача с последна дата ДНЕС се превръщаше в „просрочена", макар
+       bulDateLockReason() да държи чекбокса ѝ отключен целия ден. */
+    const HOURS = ['2026-08-25T00:30:00', '2026-08-25T04:00:00', '2026-08-25T23:59:00'];
+    const TODAY = '2026-08-25', YDAY = '2026-08-24', DBEFORE = '2026-08-23';
+
+    for (const at of HOURS) {
+      const hhmm = at.slice(11, 16);
+
+      const endsToday = windowTask('t-c1', 'Свършва днес', [DBEFORE, YDAY, TODAY]);
+      const p1 = await runPush([endsToday], [], null, null, at);
+      const m1 = await runMail([endsToday], [], null, null, at);
+      ok('push: последна дата ДНЕС → не праща (' + hhmm + ')',
+        p1.pushes.length === 0, String(p1.pushes.length));
+      ok('имейл: последна дата ДНЕС → не праща (' + hhmm + ')',
+        m1.mails.length === 0, String(m1.mails.length));
+
+      const endedYday = windowTask('t-c2', 'Свърши вчера', [DBEFORE, YDAY]);
+      const p2 = await runPush([endedYday], [], null, null, at);
+      const m2 = await runMail([endedYday], [], null, null, at);
+      ok('push: последна дата ВЧЕРА → праща (' + hhmm + ')',
+        p2.pushes.length === 1, String(p2.pushes.length));
+      ok('имейл: последна дата ВЧЕРА → праща (' + hhmm + ')',
+        m2.mails.length === 4, String(m2.mails.length));
+    }
+
+    /* Контрола на самия часовник: ако замразяването не работи, горните
+       проверки биха били за текущия ден и щяха да мълчат. */
+    const probe = env(null, null, '2026-08-25T04:00:00');
+    ok('часовникът наистина е замразен',
+      probe.h.w.toLocalISO(new probe.h.w.Date()) === '2026-08-25',
+      probe.h.w.toLocalISO(new probe.h.w.Date()));
+    ok('формата с аргумент остава истинска',
+      probe.h.w.toLocalISO(new probe.h.w.Date('2026-01-09T10:00:00')) === '2026-01-09',
+      probe.h.w.toLocalISO(new probe.h.w.Date('2026-01-09T10:00:00')));
+    probe.h.close();
   }
 
   report();

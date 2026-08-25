@@ -213,12 +213,43 @@ function sendWeeklyDigest(bulletin, tasks, onDone) {
   });
 }
 
+/* Последната дата от прозореца на задачата. ЕДИНСТВЕНИЯТ източник и за
+   „просрочена ли е", и за датата, която влиза в писмото — двете не бива да
+   се разминават. Голото due_date е ПЪРВАТА дата от прозореца: „Зануляване"
+   с due_dates [24,25,26.08] носи due_date 24.08, затова по старото правило
+   писмото тръгваше на 25-и за задача, която тече до 26-и, а push-ът мълчеше.
+   Защитата typeof е за харнес, който зарежда само email.js — в index.html
+   bulletin.js стои преди него, тоест taskDueDates() е налична. */
+function overdueLastDate(t) {
+  var dates = (typeof taskDueDates === 'function') ? taskDueDates(t)
+    : (t.due_dates && t.due_dates.length
+        ? t.due_dates.map(function(d) { return String(d).slice(0, 10); })
+        : (t.due_date ? [String(t.due_date).slice(0, 10)] : []));
+  return dates.length ? dates[dates.length - 1] : null;
+}
+
 /* ─── ИЗПРАТИ ПРОСРОЧЕНИ ЗАДАЧИ ────────────────────────── */
 function sendOverdueAlerts(bulletin, tasks, completions, onDone) {
-  /* Намери просрочени задачи */
-  var now = new Date(); now.setHours(0,0,0,0);
+  /* Просрочена = ПОСЛЕДНАТА дата от прозореца е СТРОГО преди днес. Точно
+     сравнението на sendPushOverdueNow() в bulletin.js, за да отговарят двата
+     пътя еднакво на един и същи въпрос. Задача без дати не е просрочена.
+
+     Сравнява се НИЗ с НИЗ. 'YYYY-MM-DD' се подрежда лексикографски, значи
+     UTC изобщо не участва. През Date не става: new Date('2026-08-25') е UTC
+     полунощ, тоест 03:00 наше време, и задача с последна дата ДНЕС се
+     превръщаше в „просрочена" от 03:00 нататък — докато
+     bulDateLockReason() държи чекбокса ѝ отключен целия ден. Не може да е
+     едновременно отметваема и закъсняла. */
+  var todayISO;
+  if (typeof toLocalISO === 'function') { todayISO = toLocalISO(new Date()); }
+  else {
+    var _n = new Date();
+    todayISO = _n.getFullYear() + '-' + String(_n.getMonth() + 1).padStart(2, '0') +
+               '-' + String(_n.getDate()).padStart(2, '0');
+  }
   var overdueTasks = tasks.filter(function(t) {
-    return t.due_date && new Date(t.due_date) < now;
+    var last = overdueLastDate(t);
+    return !!last && last < todayISO;
   });
 
   if (!overdueTasks.length) {
@@ -254,7 +285,9 @@ function sendOverdueAlerts(bulletin, tasks, completions, onDone) {
             storeName: store,
             taskTitle: task.title,
             dept: task.department,
-            due_date: task.due_date
+            /* Последната дата, не първата — иначе писмото пише „Срок: 24.08"
+               за задача, която тече до 26.08. Чете се в buildOverdueHtml. */
+            due_date: overdueLastDate(task)
           });
         }
       });
