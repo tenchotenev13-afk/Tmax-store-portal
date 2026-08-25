@@ -11,3 +11,7 @@ desktop.ini
 # Claude Code — временни worktree-и (пълни копия на репото).
 # .claude/skills/ НЕ се игнорира: skill-овете пътуват с репото нарочно.
 .claude/worktrees/
+
+# Контекстният пакет за чата се генерира при нужда (npm run brief),
+# за да сочи печатът за версия точно текущия HEAD.
+docs/BRIEF.md

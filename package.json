@@ -3,6 +3,7 @@
     "jsdom": "^30.0.1"
   },
   "scripts": {
-    "test": "node tests/run-all.js"
+    "test": "node tests/run-all.js",
+    "brief": "node tools/brief.js"
   }
 }
