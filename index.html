@@ -314,6 +314,7 @@ OneSignalDeferred.push(async function(OneSignal) {
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
       <input id="co-search" placeholder="🔍 Търси клиент/продукт/SAP/бон/телефон..." oninput="renderClientOrders()" style="flex:1;min-width:220px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 14px;font-size:13px;font-family:inherit;outline:none;">
+      <select id="co-role-filter" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:200px;"><option value="">Всички заявки</option></select>
       <select id="co-fulfiller-filter" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:180px;"><option value="">Изпълнява: всички</option></select>
       <select id="co-month" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
     </div>

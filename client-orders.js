@@ -589,6 +589,56 @@ function coBuildFulfillerOptions(){
   if(keys.indexOf(cur)>=0)sel.value=cur;
 }
 
+/* Падащо меню "моя роля" — разделя двата потока, които иначе се смесват в
+   един списък: заявки, по които АЗ съм изпълнителят и трябва да изпратя
+   стока навън, срещу заявки, които аз съм пуснал и чакам чужд обект да ми
+   ги изпрати.
+
+   Сравнението минава през coNormName() по същата причина като при
+   "Изпълнява": в базата един и същ обект стои и като "Троян", и като
+   "ТРОЯН". Със строго === филтърът би скрил част от заявките, без
+   потребителят да разбере — тоест точно бъгът, който филтърът уж решава.
+
+   Потребител с няколко обекта (регионален, склад) вижда всичките си обекти
+   като "мои" — заявка между два МОИ обекта не е нито изходяща, нито
+   входяща, защото и двете страни съм аз. */
+function coMyStoreSet(){
+  var stores=assignedStores()||[currentUser&&currentUser.store_name];
+  var set={};
+  (stores||[]).forEach(function(s){ var k=coNormName(s); if(k)set[k]=true; });
+  return set;
+}
+/* За изпращане: аз съм изпълнителят, заявителят е ДРУГ обект и заявката още
+   не е тръгнала (изпратената вече чака заявителя, не мен). */
+function coIsOutgoing(o,mine){
+  return mine[coNormName(o.fulfiller)]===true
+    && mine[coNormName(o.store_name)]!==true
+    && ['pending','postponed','processed'].indexOf(o.status||'pending')>=0;
+}
+/* За получаване: аз съм заявителят, изпълнява ДРУГ обект и заявката още е жива. */
+function coIsIncoming(o,mine){
+  return mine[coNormName(o.store_name)]===true
+    && !!o.fulfiller && mine[coNormName(o.fulfiller)]!==true
+    && o._status!=='done' && o._status!=='refused'
+    && o.status!=='done' && o.status!=='refused';
+}
+function coBuildRoleOptions(){
+  var sel=document.getElementById('co-role-filter'); if(!sel) return;
+  var cur=sel.value;
+  var mine=coMyStoreSet();
+  var nOut=0,nIn=0;
+  clientOrders.forEach(function(o){
+    if(coIsOutgoing(o,mine))nOut++;
+    if(coIsIncoming(o,mine))nIn++;
+  });
+  /* Опциите стоят и при брой 0. Скриването им би изглеждало като счупен
+     филтър точно когато няма какво да се покаже. */
+  sel.innerHTML='<option value="">Всички заявки</option>'+
+    '<option value="out"'+(cur==='out'?' selected':'')+'>За изпращане ('+nOut+')</option>'+
+    '<option value="in"'+(cur==='in'?' selected':'')+'>За получаване ('+nIn+')</option>';
+  if(cur==='out'||cur==='in')sel.value=cur;
+}
+
 function loadClientOrders(){
   loadOrderRestrictions();
   renderCoSapBanner();
@@ -613,6 +663,7 @@ function loadClientOrders(){
     });
     coBuildMonthOptions();
     coBuildFulfillerOptions();
+    coBuildRoleOptions();
     renderClientOrders();renderMetrics();updateBadges();
   }).catch(function(e){console.warn('client_orders:',e);});
 }
@@ -624,6 +675,11 @@ function renderClientOrders(){
     return orderFilter==='all'||o._status===orderFilter||o.status===orderFilter;
   });
   if (month) list=list.filter(function(o){ return o.date && o.date.slice(0,7)===month; });
+  var role=(document.getElementById('co-role-filter')||{}).value||'';
+  if (role){
+    var mine=coMyStoreSet();
+    list=list.filter(function(o){ return role==='out'?coIsOutgoing(o,mine):coIsIncoming(o,mine); });
+  }
   var fulf=(document.getElementById('co-fulfiller-filter')||{}).value||'';
   /* Сравнява се нормализирано, за да не изпадат старите записи с главни букви */
   if (fulf) list=list.filter(function(o){ return coNormName(o.fulfiller)===fulf; });
