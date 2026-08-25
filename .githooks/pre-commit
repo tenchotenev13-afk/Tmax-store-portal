@@ -76,6 +76,29 @@ else
   rm -f /tmp/smoke.out
 fi
 
+# 3. Контекстният пакет за чата — САМО предупреждение, не спира commit-а.
+#
+# Пакетът е инструмент за човека (какво се качва в чата), не гейт за кода.
+# Забравеният `npm run brief` е тих провал: чатът отговаря от стар контекст и
+# нищо не изглежда счупено. Затова се напомня тук, но commit-ът минава.
+BRIEFSRC=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '^(CLAUDE.md|docs/)')
+if [ -n "$BRIEFSRC" ]; then
+  if [ ! -f docs/BRIEF.md ]; then
+    echo "  !     docs/BRIEF.md още не е генериран — npm run brief преди качване в чата"
+  else
+    STALE=$(for f in $BRIEFSRC; do
+      [ -f "$f" ] && [ "$f" -nt docs/BRIEF.md ] && echo "$f"
+    done)
+    if [ -n "$STALE" ]; then
+      echo "  !     docs/BRIEF.md е по-стар от:"
+      echo "$STALE" | sed 's/^/            · /'
+      echo "            npm run brief преди качване в чата (commit-ът НЕ е спрян)"
+    else
+      echo "  ok    docs/BRIEF.md е по-нов от променения контекст"
+    fi
+  fi
+fi
+
 echo "───────────────────────────────────────────────"
 
 if [ "$FAIL" -ne 0 ]; then
