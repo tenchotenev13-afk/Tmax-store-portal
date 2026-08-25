@@ -39,15 +39,12 @@ create table if not exists public.daily_turnover (
   --   десетична точка и пропускаше по-малките грешки в преписването;
   --   законните разлики от начина на плащане остават под 10%.
   --
-  -- ⚠️ ЖИВАТА база към 26.08.2026 още пази 0.5 — този файл описва целта.
-  -- Смяната се прилага отделно от Тенчо:
-  --   alter table public.daily_turnover drop constraint daily_turnover_sum_chk;
-  --   alter table public.daily_turnover add constraint daily_turnover_sum_chk
-  --     check (abs(total_turnover - cash_turnover - card_turnover - bank_turnover)
-  --            <= greatest(1, total_turnover * 0.1));
-  -- Клиентът (daily-turnover.js) вече брои по 10%, тоест е ПО-СТРОГ от
-  -- базата. Това е безопасната посока: отказът идва с разбираемо съобщение
-  -- от интерфейса, вместо базата да върне „нарушен CHECK".
+  -- Приложено в живата база на 26.08.2026 (сверено с pg_get_constraintdef).
+  -- Клиентът (daily-turnover.js) брои по същото правило — дублирано нарочно:
+  -- базата отказва с „нарушен CHECK", което не значи нищо за касиера, а
+  -- интерфейсът казва колко е разминаването и докъде се допуска.
+  -- Ако прагът пак се мени, редът е клиент ПРЕДИ база: така по-строгата
+  -- страна е тази с разбираемото съобщение.
   constraint daily_turnover_sum_chk
     check (abs(total_turnover - cash_turnover - card_turnover - bank_turnover)
            <= greatest(1, total_turnover * 0.1)),
