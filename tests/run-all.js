@@ -76,7 +76,8 @@ const TESTS = [
   'overdue-recipients.test.js',
   'kasa-return-status.test.js',
   'kasa-return-editable.test.js',
-  'kasa-history-order.test.js'
+  'kasa-history-order.test.js',
+  'kasa-history-window.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

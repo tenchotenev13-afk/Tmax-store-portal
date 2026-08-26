@@ -149,6 +149,12 @@ function renderKasa(){
   var todayStr=today();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var histRep =kasaReports.filter(function(r){return r.date!==todayStr;});
+  /* Картата се показва при ВСЯКА история (histRep), а таблицата получава само
+     прозореца (histWin). Ако гейтът беше по histWin, магазин само със стари
+     записи не би видял картата изобщо — а с нея изчезва и филтърът по дата,
+     тоест единственият път до тези записи. */
+  var histWin =histRep.filter(histInWindow);
+  var histHidden=histRep.length-histWin.length;
   var canConfirm=['manager','admin','kasa'].indexOf(currentUser.role)>=0;
   var canUnlock=['admin','accounting'].indexOf(currentUser.role)>=0;
 
@@ -221,7 +227,9 @@ function renderKasa(){
   if(histRep.length){
     html+='<div class="card">';
     html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:8px;">';
-    html+='<div class="card-title" style="margin:0;">📜 История ('+histRep.length+')</div>';
+    /* Обхватът стои в заглавието. Скрито ограничение, което не се вижда, е
+       неразличимо от счупен екран (CLAUDE.md т.11). */
+    html+='<div class="card-title" style="margin:0;">📜 История (последните '+HIST_WINDOW_DAYS+' дни)</div>';
     html+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">';
     html+='<input type="date" id="hist-date-filter" style="border:1.5px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;">';
     html+='<select id="hist-status-filter" style="border:1.5px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;">';
@@ -233,7 +241,13 @@ function renderKasa(){
     html+='<button onclick="filterHistRep()" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:5px 14px;font-size:12px;cursor:pointer;">Търси</button>';
     html+='<button onclick="clearHistFilter()" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;">✕</button>';
     html+='</div></div>';
-    html+='<div id="hist-table-wrap">'+renderHistTable(histRep)+'</div>';
+    html+='<div id="hist-table-wrap">'+renderHistTable(histWin)+'</div>';
+    /* Изходът към скритото се казва изрично — иначе „няма ги" и „не се
+       показват" изглеждат еднакво. */
+    if(histHidden>0){
+      html+='<div style="font-size:12px;color:#94a3b8;padding:4px 0 0;">Още '+histHidden+
+        ' по-стари записа са скрити. Избери дата от филтъра, за да ги видиш.</div>';
+    }
     html+='</div>';
   }
   html+='<div id="docs-section-pos"></div>';
@@ -1118,6 +1132,35 @@ function unlockKasaReport(id){
 function histSortPriority(r){
   return r.status==='returned'?0:1;
 }
+
+/* Прозорец на История. Кърджали държи 118 записа и расте; магазинът работи
+   по вчерашния ден, счетоводството връща в рамките на ден-два, останалото е
+   шум, който се прескача всеки път.
+   ЗАЩО локална дата, а НЕ today(): today() от shared.js е UTC и рано сутрин
+   българско време (UTC+2/+3) връща ВЧЕРАШНА дата, тоест прозорецът тихо би
+   се изместил с ден. */
+var HIST_WINDOW_DAYS = 7;
+function histWindowStart(){
+  var d = new Date();
+  d.setDate(d.getDate() - HIST_WINDOW_DAYS);
+  /* Ред по ред същото като toLocalISO в bulletin.js, но нарочно НЕ се вика
+     оттам: kasa.js досега не зависи от bulletin.js по никакъв повод и не бива
+     да започне — двата файла ги държи заедно само редът в index.html, а това
+     е обща помощна функция, кацнала в чужд модул. Първият опит със заемането
+     ѝ счупи kasa-return-status.test.js, който зарежда kasa.js без bulletin.js:
+     зависимостта е реална, не теоретична. */
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+
+         String(d.getDate()).padStart(2,'0');
+}
+/* Върнатият отчет се показва ВИНАГИ, независимо от възрастта си: точно той е
+   предметът на работата, а изчезне ли от екрана, магазинът няма никакъв
+   признак, че съществува. Случаят с Дупница щеше да е точно такъв след
+   седмица. */
+function histInWindow(r){
+  if(!r) return false;
+  if(r.status==='returned') return true;
+  return (r.date||'') >= histWindowStart();
+}
 function renderHistTable(rows) {
   if (!rows.length) return '<div style="text-align:center;padding:20px;color:#94a3b8;">Няма записи.</div>';
   var canConfirm = ['manager','admin','kasa'].indexOf(currentUser.role) >= 0;
@@ -1173,6 +1216,10 @@ function filterHistRep() {
   var filtered = all.filter(function(r){
     if (dateVal && r.date !== dateVal) return false;
     if (statusVal !== 'all' && r.status !== statusVal) return false;
+    /* Избраната дата НАДДЕЛЯВА над прозореца. Без това избор на стара дата
+       връща празно и изглежда като липсващи данни, а не като действащо
+       ограничение. */
+    if (!dateVal && !histInWindow(r)) return false;
     return true;
   });
   var wrap = document.getElementById('hist-table-wrap');
