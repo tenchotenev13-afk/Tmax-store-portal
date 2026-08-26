@@ -77,7 +77,8 @@ const TESTS = [
   'kasa-return-status.test.js',
   'kasa-return-editable.test.js',
   'kasa-history-order.test.js',
-  'kasa-history-window.test.js'
+  'kasa-history-window.test.js',
+  'kasa-returned-in-reports.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

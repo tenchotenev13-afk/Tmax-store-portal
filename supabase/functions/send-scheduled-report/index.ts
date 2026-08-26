@@ -1,6 +1,18 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v14 (26.08.2026) — деплой с ЕДНО нещо: върнатото равнение в справката.
+
+   От поправката, с която връщането за корекция маркира kasa_zoborot със
+   status 'returned' вместо 'draft', обобщението на равнението броеше само
+   двете стари кофи. Върнатите изпадаха и от двете: draft+confirmed вече не
+   даваше total и никъде не личеше празнина.
+
+   Тук се променят две неща, и двете огледални на report.js (заковано от
+   tests/report-edge-sync.test.js):
+   - трета кофа returned в zoborotSummary, по образеца на stornoSummary;
+   - трета карта „върнати за корекция" с предупредителен цвят при > 0.
+
    v13 (26.08.2026) — деплой с ЕДНО нещо: документите при отмятане.
 
    Видовете задача бяха четири и нито един не искаше документ, затова
@@ -1143,6 +1155,11 @@ function collectCrossModuleWeeklySummary(cb, win){
     var zoborotSummary = {
       total: zoborot.length,
       draft: zoborot.filter(function(x){ return x.status==='draft'; }).length,
+      /* Трета кофа, по образеца на stornoSummary точно отгоре. От момента, в
+         който връщането за корекция маркира kasa_zoborot с 'returned' вместо
+         'draft', върнатите изпадаха и от двете кофи и тихо не се брояха
+         никъде: draft+confirmed вече не даваше total. */
+      returned: zoborot.filter(function(x){ return x.status==='returned'; }).length,
       confirmed: zoborot.filter(function(x){ return x.status==='confirmed'; }).length
     };
 
@@ -1239,6 +1256,7 @@ function buildCrossModuleSectionHtml(cross){
   h += crossModuleRow('🧾','Каса — Равнение (за периода)',
     crossMetricCard(cross.zoborot.total,'общо записа') +
     crossMetricCard(cross.zoborot.draft,'непотвърдени от обект', cross.zoborot.draft>0) +
+    crossMetricCard(cross.zoborot.returned,'върнати за корекция', cross.zoborot.returned>0) +
     crossMetricCard(cross.zoborot.confirmed,'потвърдени'));
 
   h += crossModuleRow('🚚','Стока на път',

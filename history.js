@@ -680,7 +680,9 @@ function exportKasaToExcel(){
           'Общо налични','Служебно въведени','Наличност SAP','Разлика','Статус'
         ]);
         storeGls.forEach(function(g){
-          var statusStr = g.status==='confirmed'?'Потвърдена':'Чернова';
+          /* Трети клон, както е за ПОС отчетите по-горе. Без него върнатата
+             Главна каса излизаше в Excel като „Чернова". */
+          var statusStr = g.status==='confirmed'?'Потвърдена':g.status==='returned'?'Върната':'Чернова';
           wsData.push([
             g.date||'',
             parseInt(g.bills_500)||0, parseInt(g.bills_200)||0, parseInt(g.bills_100)||0,
@@ -711,7 +713,8 @@ function exportKasaToExcel(){
           'Общо ФУ Нето','Разлика','Статус'
         ]);
         storeZobs.forEach(function(z){
-          var statusStr = z.status==='confirmed'?'Потвърдено':'Чернова';
+          /* Среден род: „Равнението е върнато", за разлика от Главна каса. */
+          var statusStr = z.status==='confirmed'?'Потвърдено':z.status==='returned'?'Върнато':'Чернова';
           wsData.push([
             z.date||'',
             parseFloat(z.cash_bgn)||0, parseFloat(z.cash_eur)||0,

@@ -999,6 +999,11 @@ function collectCrossModuleWeeklySummary(cb, win){
     var zoborotSummary = {
       total: zoborot.length,
       draft: zoborot.filter(function(x){ return x.status==='draft'; }).length,
+      /* Трета кофа, по образеца на stornoSummary точно отгоре. От момента, в
+         който връщането за корекция маркира kasa_zoborot с 'returned' вместо
+         'draft', върнатите изпадаха и от двете кофи и тихо не се брояха
+         никъде: draft+confirmed вече не даваше total. */
+      returned: zoborot.filter(function(x){ return x.status==='returned'; }).length,
       confirmed: zoborot.filter(function(x){ return x.status==='confirmed'; }).length
     };
 
@@ -1102,6 +1107,7 @@ function buildCrossModuleSectionHtml(cross){
   h += crossModuleRow('🧾','Каса — Равнение (за периода)',
     crossMetricCard(cross.zoborot.total,'общо записа') +
     crossMetricCard(cross.zoborot.draft,'непотвърдени от обект', cross.zoborot.draft>0) +
+    crossMetricCard(cross.zoborot.returned,'върнати за корекция', cross.zoborot.returned>0) +
     crossMetricCard(cross.zoborot.confirmed,'потвърдени'));
 
   h += crossModuleRow('🚚','Стока на път',
