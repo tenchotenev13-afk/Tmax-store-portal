@@ -73,7 +73,8 @@ const TESTS = [
   'co-role-filter.test.js',
   'late-flag.test.js',
   'task-completion-files.test.js',
-  'overdue-recipients.test.js'
+  'overdue-recipients.test.js',
+  'kasa-return-status.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

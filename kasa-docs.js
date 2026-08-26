@@ -209,7 +209,12 @@ function loadDailyOverview(dateOverride) {
     var zobs   = Array.isArray(res[1]) ? res[1] : [];
     var docs   = Array.isArray(res[2]) ? res[2] : [];
     var stores = Array.isArray(res[3]) ? res[3] : [];
-    var names  = stores.map(function(s) { return s.name; });
+    /* Складовете, ЦО, Пазарджик и Сервиз Троян не подават касов отчет. Без
+       този филтър знаменателят на картата „Подали отчет" е 23 вместо 18, а
+       в таблицата стоят пет реда с „⬜ Не е попълнено", които никога няма да
+       се попълнят. Същият филтър като в отчетите и таб „Днес". */
+    var names  = stores.map(function(s) { return s.name; })
+      .filter(function(n) { return isReportableStore(n); });
 
     var withRep = reps.reduce(function(acc,r) { acc[r.store_name]=true; return acc; },{});
     var readyCount = reps.filter(function(r) { return r.ready_at; })
@@ -237,16 +242,25 @@ function loadDailyOverview(dateOverride) {
       var rc  = raz===0?'#16a34a':raz<0?'#dc2626':'#d97706';
       var allOk = sr.length > 0 && sr.every(function(r) { return r.status==='confirmed'; });
       var rdy = sr.some(function(r) { return r.ready_at; });
+      /* Върнат за корекция. Сигналът е статусът на ПОС отчетите — връщането
+         пипа и трите документа наведнъж, затова не е нужна отделна заявка.
+         Преважда над „За проверка": ready_at може да е останал от предишно
+         подаване (нулира се от returnKasaForRevision, но стари редове го
+         пазят), а върнатият ден НЕ чака проверка. */
+      var isRet = sr.some(function(r) { return r.status==='returned'; });
       var st = !sr.length
         ? '<span style="background:#f3f4f6;color:#6b7280;padding:2px 8px;border-radius:20px;font-size:11px;">⬜ Не е попълнено</span>'
+        : isRet
+        ? '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">↩ Върнат за корекция</span>'
         : rdy
         ? '<span style="background:#dcfce7;color:#14532d;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">📤 За проверка</span>'
         : '<span style="background:#dbeafe;color:#1e3a5f;padding:2px 8px;border-radius:20px;font-size:11px;">✏️ В процес</span>';
+      var retMark = '<span style="color:#991b1b;font-weight:700;">↩</span>';
 
       html += '<tr>'
         + '<td style="font-weight:500;">'+esc(name)+'</td>'
-        + '<td style="text-align:center;font-size:12px;">'+(sr.length ? sr.length+'бр.'+(allOk?' ✅':' ✏️') : '—')+'</td>'
-        + '<td style="text-align:center;">'+(sz ? (sz.status==='confirmed'?'✅':'✏️') : '—')+'</td>'
+        + '<td style="text-align:center;font-size:12px;">'+(sr.length ? sr.length+'бр. '+(isRet?retMark:(allOk?'✅':'✏️')) : '—')+'</td>'
+        + '<td style="text-align:center;">'+(sz ? (isRet?retMark:(sz.status==='confirmed'?'✅':'✏️')) : '—')+'</td>'
         + '<td style="text-align:center;">'+(sd.length ? '📎 '+sd.length : '—')+'</td>'
         + '<td style="text-align:right;font-family:monospace;font-weight:700;color:'+rc+';">'+(sr.length?(raz<0?'–':'')+Math.abs(raz).toFixed(2):'—')+'</td>'
         + '<td style="text-align:center;">'+st+'</td>'
@@ -565,19 +579,49 @@ function returnKasaForRevision(storeName, date, reason) {
   /* Вземи всички отчети за тази дата+магазин */
   sbGet('kasa_reports', 'store_name=eq.' + enc + '&date=eq.' + date).then(function(reps) {
     if (!Array.isArray(reps) || !reps.length) { toast('Няма отчети за тази дата', '#dc2626'); return; }
-    var patches = reps.map(function(r) {
-      return sbPatch('kasa_reports', 'id=eq.' + r.id, {
+    /* ready_at/ready_by се нулират заедно със статуса. Иначе остават от
+       първото подаване и магазинът виси в графата „изпратили" на дневния
+       преглед през цялото време, докато отчетът е върнат. */
+    var jobs = reps.map(function(r) {
+      return { what: 'ПОС отчет', p: sbPatch('kasa_reports', 'id=eq.' + r.id, {
         status: 'returned',
         return_reason: reason,
         returned_by: by,
-        returned_at: now
-      });
+        returned_at: now,
+        ready_at: null,
+        ready_by: null
+      }) };
     });
-    /* Върни и Главна каса и Равнение към draft */
-    patches.push(sbPatch('kasa_glavna', 'store_name=eq.'+enc+'&date=eq.'+date, {status:'draft'}));
-    patches.push(sbPatch('kasa_zoborot', 'store_name=eq.'+enc+'&date=eq.'+date, {status:'draft'}));
-    Promise.all(patches).then(function() {
-      toast('↩ Отчетът е върнат за корекция на ' + storeName, '#d97706');
+    /* Главна каса и Равнение получават СЪЩИЯ статус 'returned', а не 'draft' —
+       иначе върнатият ден е неразличим от недовършен. Потвърждението отпада,
+       защото документът се пренаписва. */
+    jobs.push({ what: 'Главна каса', p: sbPatch('kasa_glavna', 'store_name=eq.'+enc+'&date=eq.'+date, {
+      status: 'returned',
+      return_reason: reason,
+      returned_by: by,
+      returned_at: now,
+      confirmed_at: null,
+      confirmed_by: null
+    }) });
+    /* ВНИМАНИЕ: kasa_zoborot има confirmed_by, но НЯМА confirmed_at.
+       Подаването ѝ би върнало 400 от PostgREST и цялото връщане пада. */
+    jobs.push({ what: 'Равнение', p: sbPatch('kasa_zoborot', 'store_name=eq.'+enc+'&date=eq.'+date, {
+      status: 'returned',
+      return_reason: reason,
+      returned_by: by,
+      returned_at: now,
+      confirmed_by: null
+    }) });
+    /* Резултатите се проверяват поотделно. Провали ли се един PATCH, трите
+       документа остават в разнобой — зелен toast върху такова състояние е
+       по-лош от липсата на съобщение. */
+    Promise.all(jobs.map(function(j) { return j.p; })).then(function(res) {
+      var bad = [];
+      res.forEach(function(r, i) {
+        if (!r || !r.ok) bad.push(jobs[i].what + ' (' + sbErrMsg(r) + ')');
+      });
+      if (bad.length) toast('⚠️ Връщането НЕ мина докрай: ' + bad.join('; '), '#dc2626');
+      else toast('↩ Отчетът е върнат за корекция на ' + storeName, '#d97706');
       if(typeof kasaSetDate==='function') kasaSetDate(date);
       if(typeof loadHistory==='function') loadHistory();
       if(typeof loadKasa==='function') loadKasa();
