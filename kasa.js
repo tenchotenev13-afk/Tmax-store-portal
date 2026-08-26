@@ -177,6 +177,11 @@ function renderKasa(){
       '<thead><tr><th>ПОС</th><th>Касиер</th><th>Оборот</th><th>В брой</th><th>Карти</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th><th></th></tr></thead><tbody>';
     todayRep.forEach(function(r){
       var draft=r.status==='draft';
+      /* Трето състояние. Досега върнатият отчет падаше в „не е чернова" и
+         излизаше със ЗЕЛЕН бадж „Потвърден" и без „Редактирай" — точно
+         обратното на истината. Образецът е renderHistTable(). */
+      var returned=r.status==='returned';
+      var editable=draft||returned;
       var inkaso=calcInkaso(r);
       html+='<tr>'+
         '<td><b>ПОС '+esc(String(r.pos_number||''))+'</b><br><small style="color:#94a3b8;">Каса '+esc(String(r.kasa_number||''))+'</small></td>'+
@@ -187,13 +192,15 @@ function renderKasa(){
         '<td>'+fmtMoney(inkaso)+'</td>'+
         '<td>'+fmtMoney(r.counted_cash)+'</td>'+
         '<td>'+moneyBadge(r.razlika)+'</td>'+
-        '<td>'+(draft?
+        '<td>'+(returned?
+          '<span style="background:#fee2e2;color:#991b1b;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">↩ Върнат</span>':
+          draft?
           '<span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✏️ Чернова</span>':
           '<span style="background:#dcfce7;color:#14532d;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ Потвърден</span>')+'</td>'+
         '<td><div style="display:flex;gap:4px;">'+
-          (draft?'<button onclick="editKasaReport(\''+r.id+'\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Редактирай</button>':'')+
+          (editable?'<button onclick="editKasaReport(\''+r.id+'\')" style="border:1px solid '+(returned?'#dc2626':'#e2e8f0')+';background:'+(returned?'#fee2e2':'#fff')+';'+(returned?'color:#dc2626;':'')+'border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Редактирай</button>':'')+
           (draft&&canConfirm?'<button onclick="confirmKasaReport(\''+r.id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Потвърди</button>':'')+
-          (!draft&&canUnlock?'<button onclick="unlockKasaReport(\''+r.id+'\')" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🔓 Разключи</button>':'')+
+          (!editable&&canUnlock?'<button onclick="unlockKasaReport(\''+r.id+'\')" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🔓 Разключи</button>':'')+
         '</div></td></tr>';
     });
     html+='<tr style="background:#f8fafc;font-weight:700;">'+
@@ -458,7 +465,6 @@ function submitKasaForm(){
   var razlika=Math.round((counted-(cash-storna-inkaso))*100)/100; /* В брой - Сторна - Инкасо */
 
   var p={
-    store_name:currentUser.store_name,
     date:(document.getElementById('kf-date')||{}).value||today(),
     pos_number:parseInt((document.getElementById('kf-pos')||{}).value)||1,
     cashier_name:cashier,
@@ -474,7 +480,19 @@ function submitKasaForm(){
   ALL_DENOM.forEach(function(v){ var key=DENOM_KEY[v]; var el=document.getElementById('kf-'+key); p[key]=el?parseInt(el.value)||0:0; });
   INKASO_DENOM.forEach(function(v){ var el=document.getElementById('kf-inkaso_'+v); p['inkaso_'+v]=el?parseInt(el.value)||0:0; });
 
-  var req=kasaEditId?sbPatch('kasa_reports','id=eq.'+kasaEditId,p):sbPost('kasa_reports',p);
+  /* store_name се праща САМО при нов запис. При PATCH колоната се пропуска и
+     PostgREST я оставя непроменена — иначе отваряне на чужд отчет от История
+     (ЦО отваря върнат отчет на Дупница) и натискане на „Запази" присвоява
+     записа на обекта на редактиращия. Случаят е възпроизведен и записът е
+     изтрит; поправката е тук, защото това е единственото място, което знае
+     дали е POST или PATCH. */
+  var req;
+  if(kasaEditId){
+    req=sbPatch('kasa_reports','id=eq.'+kasaEditId,p);
+  }else{
+    p.store_name=currentUser.store_name;
+    req=sbPost('kasa_reports',p);
+  }
   req.then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     kasaSetDate(p.date); /* гарантира, че Главна каса/Равнение показват СЪЩАТА дата, за която е отчетът */
@@ -487,6 +505,11 @@ function editKasaReport(id){
   var r=kasaReports.find(function(x){return x.id===id;});
   if(!r)return;
   if(r.status==='confirmed'){toast('Потвърденият отчет не може да се редактира','#dc2626');return;}
+  /* Само предупреждение, без забрана — admin има законни поводи да отвори
+     чужд отчет. Целта е да не се случи по невнимание от История. */
+  if(r.store_name&&r.store_name!==currentUser.store_name){
+    if(!confirm('Внимание: този отчет е на обект „'+r.store_name+'", а ти си в „'+currentUser.store_name+'".\n\nДа го отворя ли за редакция?'))return;
+  }
   kasaEditId=id;
   openKasaForm(r);
 }
@@ -502,6 +525,20 @@ function confirmKasaReport(id){
   });
 }
 
+/* Банер „върнат за корекция" над картите на Главна каса и Равнение.
+   Условието е СТАТУСЪТ, не наличието на return_reason: saveGlavna() и
+   saveZoborot() записват status:'draft', но оставят return_reason попълнено,
+   тоест по причината банерът би висял завинаги след първия запис. */
+function kasaReturnedBanner(o){
+  if(!o||o.status!=='returned')return '';
+  return '<div style="background:#fee2e2;border:2px solid #dc2626;border-radius:8px;padding:12px 14px;margin-bottom:14px;">'+
+    '<div style="font-size:13px;font-weight:700;color:#991b1b;margin-bottom:4px;">↩ Върнат за корекция</div>'+
+    '<div style="font-size:12px;color:#9a3412;"><b>Причина:</b> '+esc(o.return_reason||'')+
+      ' &nbsp;·&nbsp; върнато от '+esc(o.returned_by||'')+
+      (o.returned_at?' на '+fmtDate(String(o.returned_at).slice(0,10)):'')+'</div>'+
+    '</div>';
+}
+
 /* ═══════════════════════════════════════════════════════════════
    ГЛАВНА КАСА
 ═══════════════════════════════════════════════════════════════ */
@@ -510,7 +547,10 @@ function renderGlavna(){
   var todayStr=kasaActiveDate();
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
   var g=kasaGlavna||{};
-  var isDraft=!g.id||(g.status==='draft');
+  /* 'returned' е редактируем също като 'draft' — иначе връщането за корекция
+     ЗАКЛЮЧВА документа вместо да го отключва и магазинът остава без изход:
+     „Разключи" е само за admin/accounting. */
+  var isDraft=!g.id||(g.status==='draft')||(g.status==='returned');
   var canEdit=['kasa','manager','admin','accounting'].indexOf(currentUser.role)>=0;
   /* Manager/kasa/admin могат да пишат САМО докато Главна каса е чернова (незаключена) */
   var canInput=['kasa','manager','admin'].indexOf(currentUser.role)>=0 && isDraft;
@@ -550,6 +590,7 @@ function renderGlavna(){
     '<div class="pg-title">💰 Каса</div>'+
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — Главна каса</div>'+
     kasaTabBar()+
+    kasaReturnedBanner(g)+
 
     /* Сборна таблица деноминации */
     '<div class="card" style="margin-bottom:14px;">'+
@@ -1143,7 +1184,8 @@ function loadZoborot(){
 function renderZoborot(){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
   var z=zoborotData||{};
-  var isDraft=!z.id||(z.status==='draft');
+  /* Както при Главна каса: върнатото се редактира, иначе връщането заключва. */
+  var isDraft=!z.id||(z.status==='draft')||(z.status==='returned');
   var canConfirm=['manager','admin','accounting','kasa'].indexOf(currentUser.role)>=0;
   var canUnlockZoborot=['admin','accounting'].indexOf(currentUser.role)>=0;
 
@@ -1171,6 +1213,7 @@ function renderZoborot(){
     '<div class="pg-title">💰 Каса</div>'+
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — Равнение на оборота</div>'+
     kasaTabBar()+
+    kasaReturnedBanner(z)+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
       '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(kasaActiveDate())+'</b></div>'+
       '<div style="display:flex;gap:8px;">'+
