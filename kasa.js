@@ -1113,12 +1113,32 @@ function unlockKasaReport(id){
 
 
 /* ─── ИСТОРИЯ ФИЛТРИ ────────────────────────────────────────── */
+/* Ранг по статус, същият подход като stornoSortPriority() по-долу:
+   върнатото отива най-отгоре, защото точно по него се работи. */
+function histSortPriority(r){
+  return r.status==='returned'?0:1;
+}
 function renderHistTable(rows) {
   if (!rows.length) return '<div style="text-align:center;padding:20px;color:#94a3b8;">Няма записи.</div>';
   var canConfirm = ['manager','admin','kasa'].indexOf(currentUser.role) >= 0;
+  /* Сортирането е ТУК, а не в filterHistRep() или loadKasa(), за да важи и за
+     филтрирания, и за нефилтрирания изглед, независимо в какъв ред идва
+     масивът. kasaTab('glavna') прави kasaReports=other.concat(fresh) и залепя
+     отчетите за активната дата НАКРАЯ; при 118 записа двата върнати отчета на
+     Кърджали паднаха на позиции 117–118 и изчезнаха зад slice(0,60) — за
+     магазина изглеждаше, че отчетите му са изтрити (жив тест 26.08.2026).
+     Върху копие, защото rows идва от kasaReports и рендер не бива да
+     пренарежда чужд масив. */
+  var sorted = rows.slice().sort(function(a,b){
+    var pr = histSortPriority(a)-histSortPriority(b);
+    if (pr) return pr;
+    var da = a.date||'', db = b.date||'';
+    if (da !== db) return da < db ? 1 : -1;              /* дата низходящо */
+    return (parseInt(a.pos_number)||0)-(parseInt(b.pos_number)||0); /* ПОС възходящо */
+  });
   var h = '<div class="tbl-wrap"><table>'+
     '<thead><tr><th>Дата</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th><th></th></tr></thead><tbody>';
-  rows.slice(0,60).forEach(function(r){
+  sorted.slice(0,60).forEach(function(r){
     var canEdit = r.status==='draft' || r.status==='returned';
     var statusLabel = r.status==='confirmed'
       ? '<span style="background:#dcfce7;color:#14532d;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">✅ Потвърден</span>'
