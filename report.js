@@ -1210,7 +1210,8 @@ function sendWeeklyReportTest(toEmail){
 /* ═══════ МАРШРУТИЗАЦИЯ ПО ГРУПИ ЗА ДОКЛАДВАНЕ ═══════════════
    За разлика от sendWeeklyReportTest (общ репорт за целия бизнес), тук всеки
    човек получава ЛИЧЕН репорт само със задачите, за които е избран в
-   report_groups при създаването им ('co'/'controlling'/'regional'/'owner').
+   report_groups при създаването им ('co'/'controlling'/'regional'/'owner',
+   а от 26.08.2026 и 'user:<имейл>' — отделен човек от Централен офис).
 
    ФАЗА НА ТЕСТВАНЕ: reportGroups сочат към РЕАЛНИ хора (Жеко, Васка, Меги,
    Цвети, Теодор) — затова тук НИКОГА не изпращаме на техните истински
@@ -1359,8 +1360,29 @@ function collectWeeklyRoutingData(cb){
    винаги се добавя автоматично като получател, ако имейлът му може да бъде
    резолвнат през creatorMap (display_name -> email от users). */
 function resolveRecipientsForTask(task, regionalUsers, creatorMap){
-  var out = [];
+  var out = [], byEmail = {};
+  /* Дедупликацията е ПО ИМЕЙЛ. Дотук я вършеше само buildRecipientMap надолу;
+     тук е, защото след 'user:<имейл>' застъпването е нормален случай, а не
+     рядкост — човек може да е и в група, и отметнат поименно, и трябва да
+     получи ЕДНО писмо. Първото име печели, точно както в buildRecipientMap,
+     за да не зависи резултатът от реда на групите. */
+  var add = function(name, email){
+    if (!email || byEmail[email]) return;
+    byEmail[email] = 1;
+    out.push({ name:name||email, email:email });
+  };
   (task.report_groups||[]).forEach(function(g){
+    /* 'user:<имейл>' — отделен човек от Централен офис, отметнат поименно във
+       формата (reportGroupsCheckboxesHtml в bulletin.js). Клонът стои ПРЕДИ
+       проверката за REPORT_GROUPS, защото тя пропуска мълчаливо всичко, което
+       не е един от четирите ключа: без него седмичната маршрутизация би
+       подминала новите получатели без грешка и без следа.
+       Името идва от кеша с хората от ЦО, ако е зареден; иначе имейлът. */
+    if (typeof g==='string' && g.indexOf('user:')===0) {
+      var em = g.slice(5);
+      add(coPersonName(em), em);
+      return;
+    }
     var grp = REPORT_GROUPS[g];
     if (!grp) return;
     if (g==='regional') {
@@ -1370,14 +1392,14 @@ function resolveRecipientsForTask(task, regionalUsers, creatorMap){
         var as = Array.isArray(u.assigned_stores) ? u.assigned_stores : [];
         if (!as.length) return;
         var matches = (!scope || !scope.length) ? true : as.some(function(s){ return scope.indexOf(s)>=0; });
-        if (matches) out.push({ name:u.display_name||u.email, email:u.email });
+        if (matches) add(u.display_name||u.email, u.email);
       });
     } else if (grp.people) {
-      grp.people.forEach(function(p){ out.push({ name:p.name, email:p.email }); });
+      grp.people.forEach(function(p){ add(p.name, p.email); });
     }
   });
   if (task.created_by && creatorMap && creatorMap[task.created_by]) {
-    out.push({ name:task.created_by, email:creatorMap[task.created_by] });
+    add(task.created_by, creatorMap[task.created_by]);
   }
   return out;
 }

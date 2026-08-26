@@ -136,15 +136,71 @@ var REPORT_GROUPS = {
   regional:    {label:'Регионален (по магазин)',   dynamic:true},
   owner:       {label:'Т.Тенев',                   people:[{name:'Теодор Тенев',    email:'t.tenev@temax.bg'}]}
 };
+/* ХОРАТА ОТ ЦЕНТРАЛЕН ОФИС (кеширан) — втората половина на „Групи за
+   докладване". Бюлетинът го пише един човек, но задачите идват от снабдяване,
+   счетоводство, маркетинг, а отчетът за изпълнението можеше да отиде само при
+   четирите фиксирани групи — тоест възложителят не научаваше нищо за
+   собствената си задача. Нова колона не трябва: `report_groups` е text[] и
+   същото поле приема и стойност 'user:<имейл>'. Едно поле отговаря на един
+   въпрос: кой получава отчет за тази задача.
+
+   По образеца на reportableStoresCache (shared.js): зарежда веднъж, пази
+   резултата, при грешка остава ПРАЗЕН МАСИВ, а не null — тогава отметките за
+   хора просто не се рисуват, групите остават както са и формата не гърми.
+
+   Селектът е явен и само с безопасни колони — users никога не се чете със
+   `select=*` от клиента. */
+var coPeopleCache=null;
+function loadCentralOfficePeople(){
+  if(coPeopleCache)return Promise.resolve(coPeopleCache);
+  return sbGet('users','store_name=eq.'+encodeURIComponent(CENTRAL_OFFICE)+'&active=eq.true&select=email,display_name&order=display_name')
+    .then(function(data){
+      coPeopleCache=Array.isArray(data)?data.filter(function(u){return u&&u.email;}):[];
+      return coPeopleCache;
+    }).catch(function(){coPeopleCache=[];return coPeopleCache;});
+}
+/* Името за един имейл от кеша. Няма ли го (кешът не е зареден, човекът е
+   деактивиран или е сменил обект) — връща самия имейл, за да има винаги с
+   какво да се адресира писмото. Живее тук, а не в report.js, защото кешът е
+   тук; bulletin.js се зарежда преди report.js в index.html. */
+function coPersonName(email){
+  var list=coPeopleCache||[];
+  for(var i=0;i<list.length;i++){ if(list[i].email===email) return list[i].display_name||list[i].email; }
+  return email;
+}
 function reportGroupsCheckboxesHtml(selId, selectedArr){
   selectedArr = selectedArr || [];
-  return '<div id="'+selId+'" style="display:flex;flex-direction:column;gap:5px;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;">' +
-    Object.keys(REPORT_GROUPS).map(function(k){
-      var g=REPORT_GROUPS[k];
-      return '<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#374151;cursor:pointer;">' +
-        '<input type="checkbox" value="'+k+'"'+(selectedArr.indexOf(k)>=0?' checked':'')+' style="width:14px;height:14px;cursor:pointer;">' + esc(g.label) +
-        '</label>';
-    }).join('') +
+  var row=function(val,label,checked){
+    return '<label style="display:flex;align-items:center;gap:7px;font-size:12.5px;color:#374151;cursor:pointer;">' +
+      '<input type="checkbox" value="'+escAttr(val)+'"'+(checked?' checked':'')+' style="width:14px;height:14px;cursor:pointer;">' + esc(label) +
+      '</label>';
+  };
+  var groups = Object.keys(REPORT_GROUPS).map(function(k){
+    return row(k, REPORT_GROUPS[k].label, selectedArr.indexOf(k)>=0);
+  }).join('');
+  var people = (coPeopleCache||[]).filter(function(u){return u&&u.email;}).map(function(u){
+    return { val:'user:'+u.email, label:u.display_name||u.email };
+  });
+  /* Вече ЗАПИСАНА стойност, която я няма в кеша, НЕ се изхвърля — рисува се
+     отделно, отметната, с имейла за етикет. Иначе редакция на стара задача би
+     изтрила тихо получател, когото никой не е махал: човекът е деактивиран или
+     е сменил обект, а контрол, който изчезва според данните, изглежда като
+     счупен. Същата логика като fillStoreSelect() в shared.js. */
+  var seen={};
+  people.forEach(function(p){ seen[p.val]=1; });
+  selectedArr.forEach(function(v){
+    v=String(v);
+    if(v.indexOf('user:')!==0||seen[v])return;
+    seen[v]=1;
+    people.push({ val:v, label:v.slice(5) });
+  });
+  var peopleHtml = people.length ?
+    ('<div style="border-top:1px solid #e2e8f0;margin-top:3px;padding-top:6px;font-size:11px;font-weight:600;color:#64748b;">Отделни хора</div>' +
+     people.map(function(p){ return row(p.val, p.label, selectedArr.indexOf(p.val)>=0); }).join('')) : '';
+  /* max-height: групите са четири и си стоят, а хората в ЦО растат — без
+     собствен скрол списъкът избутва бутоните на всичките четири форми. */
+  return '<div id="'+selId+'" style="display:flex;flex-direction:column;gap:5px;border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;max-height:230px;overflow-y:auto;">' +
+    groups + peopleHtml +
     '</div>';
 }
 function readReportGroupsCheckboxes(selId){
@@ -700,6 +756,12 @@ function loadBulletin(){
      Топъл кеш връща веднага, без нова заявка. */
   if(!allStoresCache)loadAllStores().then(function(){ if(curBul)renderBulletin(); });
   if(!reportableStoresCache)loadReportableStores().then(function(){ if(curBul)renderBulletin(); });
+  /* Хората от ЦО за отметките „Отделни хора" във формите за задача. Без
+     renderBulletin() накрая — тези отметки живеят в модалите, не в тялото на
+     бюлетина, тоест се строят едва при отваряне на формата и дотогава кешът
+     отдавна е топъл. Празен кеш (мрежов срив) не чупи формата: рисуват се
+     само четирите групи. */
+  if(!coPeopleCache)loadCentralOfficePeople();
   /* Зареждаме бюлетина ПЪРВО (за да знаем неговата седмица/година), после промоциите
      филтрирани спрямо ТАЗИ седмица - за да са "автономни" за всяка седмица, не спрямо
      реалната дата днес. Рекъринг задачите вървят паралелно, не зависят от седмицата. */
