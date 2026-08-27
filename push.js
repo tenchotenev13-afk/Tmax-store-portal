@@ -153,125 +153,64 @@ function pushTasksToday(store, tasks) {
   return pushToStores([store], title, msg);
 }
 
-/* При просрочени задачи (петък) */
-function pushOverdue(overdueByStore, onDone) {
-  var stores = Object.keys(overdueByStore || {});
-  if (!stores.length) {
-    toast('✅ Всички задачи са изпълнени — няма нотификации.');
-    if (onDone) onDone(); return;
-  }
-  var storeList = stores.join(', ');
-  var title = '⚠️ Незавършени задачи';
-  var msg   = 'Магазини без изпълнение: ' + storeList;
+/* ═══════ ТЕМИ ОТ bulletin-notify ════════════════════════
+   Порталът НЕ смята сам кой е просрочен, кой получава и как изглежда
+   писмото. Това го прави едж функцията `bulletin-notify` (крон 15 я вика на
+   всеки 15 минути) и тя е ЕДИНСТВЕНИЯТ източник. Тук стояха pushOverdue(),
+   checkPushTriggers() и showPushPrompt() — втора реализация на същото в
+   браузъра. Разминат ли се двете, никой не забелязва: ръчното и
+   автоматичното просто започват да казват различни неща.
 
-  /* Получателите са регионалните по колоната users.is_regional — същият
-     източник като бюлетина (report.js), не ново определение. Ролите не
-     вършеха работа: 'logistics' са двата склада (общи акаунти, не хора),
-     'accounting' са 20 счетоводителки, а В. Филев е регионален с роля admin.
-     Контролингът, заради който е писана функцията, също е с роля admin и по
-     старата заявка не получаваше нито едно известие. */
-  sbGet('users', 'is_regional=eq.true&active=eq.true&select=email,display_name,assigned_stores')
-  .then(function(regs) {
-    /* sbGet НЕ отхвърля при грешка — при мрежов срив, 401 или счупена
-       политика връща [] (shared.js ред 23). Празен списък при седем
-       регионални в базата е СРИВ, не валидно състояние. Продължим ли,
-       известието тръгва само до контролинга, а toast-ът отчита успех —
-       същата поука като при autoCreateReturnFromDiff(). */
-    if (!Array.isArray(regs) || !regs.length) {
-      toast('❌ Списъкът с регионални не се зареди — известието НЕ е изпратено', '#dc2626');
-      if (onDone) onDone(); return;
-    }
-    var names = [];
-    regs.forEach(function(u) {
-      var mine = u.assigned_stores;
-      /* Регионален без зачисления или без пресичане — известието не го засяга. */
-      if (!Array.isArray(mine) || !mine.length || !u.display_name) return;
-      var hit = mine.some(function(s) { return stores.indexOf(s) >= 0; });
-      if (hit) names.push(u.display_name);
+   Функцията има вход точно за това: POST с тяло {"topic_key":"..."} пуска
+   темата НЕЗАБАВНО, независимо от часа и от `active`. ({"dry_run":true}
+   връща получателите, без да праща — не се ползва оттук.)
+
+   Отговорът при topic_key е {ok, mode:'manual', bg_date, result}, а result е
+   едно от трите:
+     · {skipped:'Няма просрочени задачи', recipients:0}   — няма какво
+     · {recipients, sent_emails, failed_emails, items}    — пратено
+     · при 404/500 идва {ok:false, error} със съответния HTTP код
+
+   Заглавните редове са същите като при auth-login (shared.js ред 771) и
+   auth-set-password (admin.js ред 512): verify_jwt е включен, затова без
+   Authorization функцията връща 401. */
+function runNotifyTopic(topicKey, onDone) {
+  toast('⏳ Изпращане...');
+  fetch(SB_URL + '/functions/v1/bulletin-notify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SB_KEY, 'apikey': SB_KEY },
+    body: JSON.stringify({ topic_key: topicKey })
+  }).then(function(r) {
+    /* Тялото се чете като текст и чак после се парсва — при 401 от gateway-я
+       отговорът не е JSON и .json() би хвърлил, вместо да покаже кода. */
+    return r.text().then(function(txt) {
+      var d; try { d = JSON.parse(txt); } catch (e) { d = { message: txt }; }
+      return { ok: r.ok, status: r.status, data: d };
     });
-    /* Контролингът няма зачислени обекти и получава винаги. Защитата е за
-       случая, в който тестов харнес зареди само push.js — в index.html
-       bulletin.js стои преди него, тоест константата е налична.
-
-       ⚠️ Адресът е тагът display_name, а имената идват от REPORT_GROUPS в
-       bulletin.js. Проверено на 25.08.2026 — съвпадат точно с
-       users.display_name в базата. Преименуване на човек от таб
-       Администрация спира push-а към него ТИХО, без грешка, докато
-       REPORT_GROUPS не бъде обновен. Регионалните не са засегнати —
-       техните имена идват от същата заявка към users. */
-    var ctl = (typeof REPORT_GROUPS === 'undefined' || !REPORT_GROUPS.controlling)
-      ? [] : (REPORT_GROUPS.controlling.people || []);
-    ctl.forEach(function(p) { if (p && p.name) names.push(p.name); });
-
-    var uniq = [];
-    names.forEach(function(n) { if (uniq.indexOf(n) < 0) uniq.push(n); });
-    if (!uniq.length) {
-      toast('Няма получатели за просрочени задачи', '#d97706');
-      if (onDone) onDone(); return;
+  }).then(function(res) {
+    var d = res.data || {};
+    if (!res.ok || d.ok === false) {
+      var err = d.error || d.message || ('HTTP ' + res.status);
+      toast('❌ Известието НЕ тръгна: ' + String(err).slice(0, 150), '#dc2626');
+      console.error('bulletin-notify error:', res);
+      return;
     }
-    /* Едно известие до всички получатели, не по едно на човек. */
-    return pushToPeople(uniq, title, msg).then(function(res) {
-      if (res && res.ok) {
-        toast('🔔 Изпратено до ' + uniq.length + (uniq.length === 1 ? ' получател' : ' получатели'));
-      } else {
-        var err = (res && res.data && (res.data.message || res.data.error)) || '';
-        toast('❌ Известието не тръгна' + (err ? ': ' + err : ''), '#dc2626');
-        console.error('Push overdue error:', res);
-      }
-      if (onDone) onDone();
-    });
+    var out = d.result || {};
+    /* „Няма просрочени задачи" НЕ е успех и НЕ е грешка — нищо не е тръгнало.
+       Затова toast-ът е неутрален и onDone не се вика: менюто остава
+       отворено, за да се види съобщението. */
+    if (out.skipped) { toast(String(out.skipped), '#64748b'); return; }
+    var n = out.recipients || 0;
+    var mails = out.sent_emails;
+    toast('🔔 Изпратено до ' + n + (n === 1 ? ' получател' : ' получатели') +
+          (typeof mails === 'number' ? ' (' + mails + ' писма)' : ''));
+    if (onDone) onDone();
+  }).catch(function(err) {
+    /* Мрежов срив — fetch отхвърля, преди да има отговор. Мълчанието тук
+       изглежда точно като успех, затова toast-ът е червен. */
+    toast('❌ Мрежова грешка: ' + err.message, '#dc2626');
+    console.error('bulletin-notify network error:', err);
   });
-}
-
-/* ═══════ AUTO CHECK при влизане ═════════════════════════ */
-function checkPushTriggers(bulletin, tasks, completions) {
-  if (!canEdit() || !bulletin || bulletin.status !== 'published') return;
-  var now    = new Date();
-  var dow    = now.getDay(); /* 1=Пон, 5=Петък */
-  var today  = now.toISOString().slice(0, 10);
-
-  /* Петък — просрочени */
-  if (dow === 5) {
-    var overdue = {};
-    tasks.forEach(function(t) {
-      if (!t.due_date || new Date(t.due_date) >= now) return;
-      /* Намери магазини без изпълнение */
-      sbGet('stores', 'select=name').then(function(stores) {
-        if (!Array.isArray(stores)) return;
-        stores.forEach(function(s) {
-          var done = completions.some(function(c) {
-            return c.task_id === t.id && c.store_name === s.name;
-          });
-          if (!done) {
-            if (!overdue[s.name]) overdue[s.name] = [];
-            overdue[s.name].push(t.title);
-          }
-        });
-        if (Object.keys(overdue).length) showPushPrompt('overdue', overdue);
-      });
-    });
-  }
-}
-
-function showPushPrompt(type, data) {
-  var body = document.getElementById('bul-body'); if (!body) return;
-  if (document.getElementById('push-prompt-banner')) return;
-  var banner = document.createElement('div');
-  banner.id = 'push-prompt-banner';
-  banner.style.cssText = 'background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;';
-  if (type === 'overdue') {
-    var count = Object.keys(data).length;
-    banner.innerHTML =
-      '<div style="font-size:13px;color:#856404;">⚠️ <b>' + count + ' магазина</b> имат незавършени задачи. Изпрати нотификация до регионалните?</div>' +
-      '<div style="display:flex;gap:8px;">' +
-      '<button id="push-send-btn" style="border:none;background:#dc3545;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">🔔 Изпрати</button>' +
-      '<button onclick="document.getElementById(\'push-prompt-banner\').remove()" style="border:1px solid #ccc;background:#fff;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;">Пропусни</button>' +
-      '</div>';
-    body.insertBefore(banner, body.firstChild);
-    document.getElementById('push-send-btn').onclick = function() {
-      pushOverdue(data, function() { banner.remove(); });
-    };
-  }
 }
 
 /* ═══════ НАПОМНЯЩИ НОТИФИКАЦИИ ЗА ЗАДАЧИ ════════════════ */

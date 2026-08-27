@@ -132,42 +132,18 @@ function buildWeeklyDigestHtml(storeName, tasks, wk, yr) {
   );
 }
 
-/* ─── ПРОСРОЧЕНИ ЗАДАЧИ (Петък) ────────────────────────── */
-function buildOverdueHtml(recipientName, overdueItems) {
-  /* overdueItems = [{storeName, taskTitle, dept, due_date}] */
-  var content = '<h2 style="color:#dc2626;margin:0 0 4px;">⚠️ Незавършени задачи</h2>' +
-    '<p style="color:#64748b;font-size:13px;margin:0 0 16px;">До <b>' + esc(recipientName) + '</b> — ' +
-    new Date().toLocaleDateString('bg-BG') + '</p>';
+/* ─── ПРОСРОЧЕНИ ЗАДАЧИ ─────────────────────────────────
+   Тук стояха buildOverdueHtml(), overdueLastDate() и sendOverdueAlerts() —
+   клиентското копие на цялата тема: кой е просрочен, кой го получава и как
+   изглежда писмото. От 26.08.2026 това е работа на едж функцията
+   `bulletin-notify` (тема overdue_tasks), която крон 15 вика на всеки 15
+   минути; тя има собствен overdueHtmlFor() и чете получателите от
+   notification_matrix / notification_overrides.
 
-  /* Групирай по магазин */
-  var byStore = {};
-  overdueItems.forEach(function(item) {
-    if (!byStore[item.storeName]) byStore[item.storeName] = [];
-    byStore[item.storeName].push(item);
-  });
-
-  var stores = Object.keys(byStore);
-  if (!stores.length) {
-    content += '<div style="text-align:center;padding:20px;color:#16a34a;font-size:15px;">✅ Всички задачи са изпълнени!</div>';
-  } else {
-    stores.forEach(function(store) {
-      content += '<div style="font-weight:600;color:#0f172a;margin:12px 0 6px;font-size:14px;">🏪 ' + esc(store) + '</div>';
-      byStore[store].forEach(function(item) {
-        content += '<div class="task task-over">' +
-          '<div class="task-title">🔴 ' + esc(item.taskTitle) + '</div>' +
-          '<div class="task-meta">Срок: ' + (item.due_date ? new Date(item.due_date).toLocaleDateString('bg-BG') : 'тази седмица') + '</div>' +
-          '</div>';
-      });
-    });
-    content += '<p style="font-size:12px;color:#94a3b8;margin-top:16px;">Моля свържете се с магазините за уточнение.</p>';
-  }
-
-  content += '<div style="text-align:center;"><a href="https://tenchotenev13-afk.github.io/Tmax-store-portal/" class="btn">Виж анализа →</a></div>';
-
-  return emailWrap(content,
-    'Изпратено от ТеМАХ Вътрешна платформа · Петък ' + new Date().toLocaleDateString('bg-BG')
-  );
-}
+   Двете реализации трябваше да отговарят еднакво на един и същи въпрос — а
+   разминат ли се, никой не забелязва: ръчното и автоматичното просто започват
+   да казват различни неща. Ръчното пускане минава през същата функция,
+   runNotifyTopic('overdue_tasks') в push.js. */
 
 /* ─── ИЗПРАТИ СЕДМИЧЕН ДАЙДЖЕСТ ────────────────────────── */
 function sendWeeklyDigest(bulletin, tasks, onDone) {
@@ -213,189 +189,6 @@ function sendWeeklyDigest(bulletin, tasks, onDone) {
   });
 }
 
-/* Последната дата от прозореца на задачата. ЕДИНСТВЕНИЯТ източник и за
-   „просрочена ли е", и за датата, която влиза в писмото — двете не бива да
-   се разминават. Голото due_date е ПЪРВАТА дата от прозореца: „Зануляване"
-   с due_dates [24,25,26.08] носи due_date 24.08, затова по старото правило
-   писмото тръгваше на 25-и за задача, която тече до 26-и, а push-ът мълчеше.
-   Защитата typeof е за харнес, който зарежда само email.js — в index.html
-   bulletin.js стои преди него, тоест taskDueDates() е налична. */
-function overdueLastDate(t) {
-  var dates = (typeof taskDueDates === 'function') ? taskDueDates(t)
-    : (t.due_dates && t.due_dates.length
-        ? t.due_dates.map(function(d) { return String(d).slice(0, 10); })
-        : (t.due_date ? [String(t.due_date).slice(0, 10)] : []));
-  return dates.length ? dates[dates.length - 1] : null;
-}
-
-/* ─── ИЗПРАТИ ПРОСРОЧЕНИ ЗАДАЧИ ────────────────────────── */
-function sendOverdueAlerts(bulletin, tasks, completions, onDone) {
-  /* Просрочена = ПОСЛЕДНАТА дата от прозореца е СТРОГО преди днес. Точно
-     сравнението на sendPushOverdueNow() в bulletin.js, за да отговарят двата
-     пътя еднакво на един и същи въпрос. Задача без дати не е просрочена.
-
-     Сравнява се НИЗ с НИЗ. 'YYYY-MM-DD' се подрежда лексикографски, значи
-     UTC изобщо не участва. През Date не става: new Date('2026-08-25') е UTC
-     полунощ, тоест 03:00 наше време, и задача с последна дата ДНЕС се
-     превръщаше в „просрочена" от 03:00 нататък — докато
-     bulDateLockReason() държи чекбокса ѝ отключен целия ден. Не може да е
-     едновременно отметваема и закъсняла. */
-  var todayISO;
-  if (typeof toLocalISO === 'function') { todayISO = toLocalISO(new Date()); }
-  else {
-    var _n = new Date();
-    todayISO = _n.getFullYear() + '-' + String(_n.getMonth() + 1).padStart(2, '0') +
-               '-' + String(_n.getDate()).padStart(2, '0');
-  }
-  var overdueTasks = tasks.filter(function(t) {
-    var last = overdueLastDate(t);
-    return !!last && last < todayISO;
-  });
-
-  if (!overdueTasks.length) {
-    toast('✅ Няма просрочени задачи!');
-    if (onDone) onDone();
-    return;
-  }
-
-  /* Само обектите, които реално могат да отметнат — същият източник като в
-     bulletin.js и в календара. Преди тук стоеше sbGet('stores'): 23 записа,
-     сред тях Централен офис, двата логистични склада, Пазарджик и Сервиз
-     Троян. Те нямат как да изпълнят задача, а излизаха в писмото начело на
-     списъка с неизпълнилите. */
-  loadReportableStores().then(function(stores) {
-    var allStores = Array.isArray(stores) ? stores.slice() : [];
-    /* И тя не отхвърля при грешка — връща [] (shared.js ред 453). Нула
-       обекта при осемнайсет в базата е срив: без тази защита нито един
-       ред не влиза в overdueItems и функцията отчита „Всички задачи са
-       изпълнени" върху празнота. */
-    if (!allStores.length) {
-      toast('❌ Списъкът с обекти не се зареди', '#dc2626'); return;
-    }
-
-    /* За всеки просрочен task — кои магазини НЕ са го изпълнили */
-    var overdueItems = [];
-    overdueTasks.forEach(function(task) {
-      allStores.forEach(function(store) {
-        var done = completions.some(function(c) {
-          return c.task_id === task.id && c.store_name === store;
-        });
-        if (!done) {
-          overdueItems.push({
-            storeName: store,
-            taskTitle: task.title,
-            dept: task.department,
-            /* Последната дата, не първата — иначе писмото пише „Срок: 24.08"
-               за задача, която тече до 26.08. Чете се в buildOverdueHtml. */
-            due_date: overdueLastDate(task)
-          });
-        }
-      });
-    });
-
-    if (!overdueItems.length) {
-      toast('✅ Всички задачи са изпълнени!');
-      if (onDone) onDone(); return;
-    }
-
-    /* Регионалните по колоната users.is_regional — същият източник като
-       бюлетина (report.js), не ново определение — плюс фиксирания контролинг.
-       Преди тук стоеше role=in.(logistics,accounting): 22 акаунта, от които 2
-       са складове (общи акаунти, не хора) и 20 счетоводителки, а Миглена и
-       Цветелина, заради които е писана функцията, са с роля admin и не
-       получаваха нищо. Същото важи и за В. Филев. */
-    sbGet('users', 'is_regional=eq.true&active=eq.true&select=email,display_name,assigned_stores').then(function(regs) {
-      /* Празен отговор е срив, не „няма регионални" — sbGet връща [] и при
-         мрежов срив (shared.js ред 23). Продължим ли, писмата тръгват само
-         до контролинга и никой не разбира, че седмината са изпуснати. */
-      if (!Array.isArray(regs) || !regs.length) {
-        toast('❌ Списъкът с регионални не се зареди — писмата НЕ са изпратени', '#dc2626');
-        return;
-      }
-
-      /* Всеки получател носи ПРОИЗХОДА си, защото празният assigned_stores
-         значи различни неща за двата произхода. За контролинга „няма
-         зачислени обекти" значи „целият списък" — филтърът долу не стеснява
-         нищо. За регионален значи „не са му зададени обекти" и той се
-         пропуска, точно както pushOverdue() го пропуска. Състоянието е
-         достижимо, не хипотетично: отметката „регионален" в Администрация
-         е независима от зачислените обекти, тоест човек може да я получи,
-         преди да му бъдат зададени магазини. */
-      var recipients = [];
-
-      /* Контролингът е ПЪРВИ, за да спечели при дедупликацията: човек, който
-         е и в двата списъка, трябва да получи целия списък, а не да бъде
-         стеснен мълчаливо до своите обекти. */
-      var ctl = (typeof REPORT_GROUPS === 'undefined' || !REPORT_GROUPS.controlling)
-        ? [] : (REPORT_GROUPS.controlling.people || []);
-      ctl.forEach(function(person) {
-        if (!person || !person.email) return;
-        recipients.push({ email: person.email, display_name: person.name,
-                          assigned_stores: null, source: 'controlling' });
-      });
-
-      (Array.isArray(regs) ? regs : []).forEach(function(u) {
-        if (!Array.isArray(u.assigned_stores) || !u.assigned_stores.length) return;
-        recipients.push({ email: u.email, display_name: u.display_name,
-                          assigned_stores: u.assigned_stores, source: 'regional' });
-      });
-
-      /* Дедупликация по ИМЕЙЛ — регионален, който е и в контролинга, получава
-         едно писмо, не две. */
-      var seen = {}, uniq = [];
-      recipients.forEach(function(u) {
-        var key = String(u.email || '').toLowerCase();
-        if (!key || seen[key]) return;
-        seen[key] = 1; uniq.push(u);
-      });
-      recipients = uniq;
-
-      if (!recipients.length) {
-        toast('Няма получатели за просрочени задачи', '#d97706'); return;
-      }
-
-      var sent = 0; var errors = 0; var pending = recipients.length;
-
-      recipients.forEach(function(u) {
-        if (!u.email) { pending--; return; }
-
-        /* Филтрирай само магазините, за които отговаря. Тук стига или
-           регионален с непразен списък, или контролинг с null — тоест
-           „целият списък" е решение на произхода, не на празното поле. */
-        var myStores = u.assigned_stores;
-        var myItems = overdueItems;
-        if (Array.isArray(myStores) && myStores.length) {
-          myItems = overdueItems.filter(function(i) {
-            return myStores.indexOf(i.storeName) >= 0;
-          });
-        }
-        if (!myItems.length) { pending--; return; }
-
-        var subject = '⚠️ Незавършени задачи — С' + bulletin.week_number + ' · ' + bulletin.year;
-        var html = buildOverdueHtml(u.display_name || u.email, myItems);
-
-        sendEmail(u.email, subject, html).then(function(res) {
-          if (res.ok) sent++; else errors++;
-          pending--;
-          if (pending <= 0) {
-            sbPatch('bulletins', 'id=eq.' + bulletin.id, {
-              overdue_sent_at: new Date().toISOString()
-            });
-            toast('📧 Изпратени: ' + sent + (errors ? ' | Грешки: ' + errors : ''));
-            if (onDone) onDone();
-          }
-        }).catch(function() {
-          errors++; pending--;
-          if (pending <= 0) {
-            toast('📧 ' + sent + ' изпратени', errors ? '#d97706' : undefined);
-            if (onDone) onDone();
-          }
-        });
-      });
-    });
-  });
-}
-
 /* ─── ТЕСТ ИМЕЙЛ ─────────────────────────────────────────── */
 function sendTestEmail(toEmail) {
   var html = emailWrap(
@@ -435,16 +228,29 @@ function checkBulletinEmailTriggers(bulletin, tasks, completions) {
     }
   }
 
-  /* Петък — покажи бутон ако не е изпратен днес */
-  if (dow === 5 && bulletin.status === 'published') {
-    var lastOver = bulletin.overdue_sent_at ? bulletin.overdue_sent_at.slice(0,10) : null;
-    if (lastOver !== todayStr) {
-      showEmailPrompt('friday', bulletin, tasks, completions);
-    }
-  }
+  /* Петъчният клон отпадна на 27.08.2026 — две независими причини:
+
+     1) Банерът се пазеше от повторение чрез bulletin.overdue_sent_at, а
+        редът, който пишеше това поле, си отиде заедно със sendOverdueAlerts().
+        Полето щеше да остане вечно старо, тоест банерът щеше да излиза ВСЕКИ
+        петък, дори секунди след като е бил натиснат — контрол, който не
+        помни, че е бил използван.
+     2) Питаше за нещо, което вече е свършено: темата overdue_tasks в
+        bulletin-notify тръгва сама всеки делник в 08:15.
+
+     Колоната bulletins.overdue_sent_at остава в базата — вече никой JS не я
+     чете и не я пише; какво става с нея е отделно решение. */
 }
 
+/* Единственият останал банер е понеделнишкият — седмичният дайджест до
+   магазините още е ръчен и sendWeeklyDigest() записва reminder_sent_at,
+   тоест повторението наистина се пази. Петъчният клон отпадна заедно с
+   клиентските просрочени (виж бележката в checkBulletinEmailTriggers).
+   Непознат type НЕ рисува нищо: преди тук стоеше `else`, което би направило
+   всяко друго повикване петъчен банер. */
 function showEmailPrompt(type, bulletin, tasks, completions) {
+  if (type !== 'monday') return;
+
   var existing = document.getElementById('email-prompt-banner');
   if (existing) return; /* вече показан */
 
@@ -455,19 +261,11 @@ function showEmailPrompt(type, bulletin, tasks, completions) {
   banner.id = 'email-prompt-banner';
   banner.style.cssText = 'background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 16px;margin-bottom:14px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;';
 
-  if (type === 'monday') {
-    banner.innerHTML = '<div style="font-size:13px;color:#92400e;">📧 <b>Понеделник</b> — Изпрати седмичен дайджест до всички магазини?</div>' +
-      '<div style="display:flex;gap:8px;">' +
-      '<button onclick="sendWeeklyDigest(curBul,bulTasks,function(){document.getElementById(\'email-prompt-banner\').remove();})" style="border:none;background:#f59e0b;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати</button>' +
-      '<button onclick="document.getElementById(\'email-prompt-banner\').remove()" style="border:1px solid #e2e8f0;background:#fff;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;">Пропусни</button>' +
-      '</div>';
-  } else {
-    banner.innerHTML = '<div style="font-size:13px;color:#92400e;">⚠️ <b>Петък</b> — Изпрати нотификации за незавършени задачи до регионалните?</div>' +
-      '<div style="display:flex;gap:8px;">' +
-      '<button onclick="sendOverdueAlerts(curBul,bulTasks,bulComps,function(){document.getElementById(\'email-prompt-banner\').remove();})" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати</button>' +
-      '<button onclick="document.getElementById(\'email-prompt-banner\').remove()" style="border:1px solid #e2e8f0;background:#fff;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;">Пропусни</button>' +
-      '</div>';
-  }
+  banner.innerHTML = '<div style="font-size:13px;color:#92400e;">📧 <b>Понеделник</b> — Изпрати седмичен дайджест до всички магазини?</div>' +
+    '<div style="display:flex;gap:8px;">' +
+    '<button onclick="sendWeeklyDigest(curBul,bulTasks,function(){document.getElementById(\'email-prompt-banner\').remove();})" style="border:none;background:#f59e0b;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати</button>' +
+    '<button onclick="document.getElementById(\'email-prompt-banner\').remove()" style="border:1px solid #e2e8f0;background:#fff;border-radius:6px;padding:6px 10px;font-size:12px;cursor:pointer;">Пропусни</button>' +
+    '</div>';
 
   bul_body.insertBefore(banner, bul_body.firstChild);
 }

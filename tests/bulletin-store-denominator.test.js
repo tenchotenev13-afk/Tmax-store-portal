@@ -257,60 +257,17 @@ function countText(html) {
     }
   }
 
-  /* ═══ 9. Push за просрочени задачи ═══════════════════════════════════ */
-  section('9. sendPushOverdueNow(): известие само до 18-те обекта');
-  {
-    /* Просрочена задача — краят ѝ е отпреди 3 дни, никой не я е отметнал. */
-    const h = await env({ tasks: [task('t-late', { due_dates: [dayOffset(-3)] })], comps: [] });
-    const { w, calls } = h;
+  /* ═══ 9. Push за просрочени задачи — ОТПАДНА ════════════════════════
+     Тук стояха две секции върху sendPushOverdueNow(): че известието отива
+     само до 18-те отчетни обекта (не до ЦО, складовете и обектите без
+     акаунт) и че отметналите отпадат от списъка. Функцията беше махната на
+     27.08.2026 — кой е просрочен и кой получава го решава едж функцията
+     bulletin-notify (тема overdue_tasks), която има СВОЙ reportableStores()
+     със същия списък изключени обекти.
 
-    /* pushOverdue живее в push.js; тук ни трябва само какво му се подава. */
-    let sent = null;
-    w.pushOverdue = function (map) { sent = map; };
-
-    guard('sendPushOverdueNow() не хвърля', () => w.sendPushOverdueNow());
-    await ticks();
-
-    if (ok('изпратено е известие', !!sent, JSON.stringify(sent))) {
-      const targets = Object.keys(sent);
-      ok('получателите са 18', targets.length === 18, 'бр.: ' + targets.length);
-      ok('Централен офис НЕ получава (58 акаунта чужда работа)',
-        targets.indexOf('Централен офис') < 0);
-      ok('логистичните складове НЕ получават',
-        WAREHOUSES.every(n => targets.indexOf(n) < 0));
-      ok('обектите без акаунт НЕ получават',
-        NO_ACCOUNT.every(n => targets.indexOf(n) < 0));
-      ok('всичките 18 реални получават', REAL.every(n => targets.indexOf(n) >= 0));
-      ok('съобщението носи заглавието на задачата',
-        (sent['Троян'] || []).indexOf('Задача t-late') >= 0, JSON.stringify(sent['Троян']));
-    }
-    /* Единствената заявка към stores е загряването на allStoresCache в env().
-       Push-ът не тегли таблицата — списъкът идва от reportableStoresCache. */
-    /* ⚠️ calls.get пази голи URL низове, не {url,table,body} както пише в
-       SKILL.md — затова се търси в самия URL. */
-    ok('таблицата stores е теглена точно веднъж (само за allStoresCache)',
-      calls.get.filter(u => String(u).indexOf('/stores') >= 0).length === 1,
-      calls.get.join(' | '));
-  }
-
-  section('9б. Отметнала задачата не получава известие');
-  {
-    const h = await env({
-      tasks: [task('t-late', { due_dates: [dayOffset(-3)] })],
-      comps: comps('t-late', ['Троян', 'Враца'])
-    });
-    const { w } = h;
-    let sent = null;
-    w.pushOverdue = function (map) { sent = map; };
-    guard('sendPushOverdueNow() не хвърля', () => w.sendPushOverdueNow());
-    await ticks();
-    if (ok('изпратено е известие', !!sent)) {
-      const targets = Object.keys(sent);
-      ok('получателите са 16', targets.length === 16, 'бр.: ' + targets.length);
-      ok('Троян и Враца отпадат',
-        targets.indexOf('Троян') < 0 && targets.indexOf('Враца') < 0);
-    }
-  }
+     Знаменателят от гледна точка на КЛИЕНТА е покрит от секции 1-8 по-горе
+     (календарът и бройките). Клиентската страна на бутона е в
+     tests/notify-topic-button.test.js. */
 
   /* ═══ 10. Първо отваряне на таба ════════════════════════════════════ */
   /* Броячът вече чака reportableStoresCache. Ако кешът закъснее и никой не

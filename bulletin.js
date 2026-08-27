@@ -2200,11 +2200,11 @@ function emailMenuHtml(){
       '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Изпраща задачите за седмицата до всички управители.</div>'+
       '<button onclick="sendWeeklyDigest(curBul,bulTasks,function(){closeEmailMenu();loadBulletin();})" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати до всички магазини</button>'+
     '</div>'+
-    '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
-      '<div style="font-size:13px;font-weight:600;margin-bottom:4px;">⚠️ Просрочени задачи</div>'+
-      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Изпраща до регионални и контролинг за неизпълнените задачи.</div>'+
-      '<button onclick="sendOverdueAlerts(curBul,bulTasks,bulComps,function(){closeEmailMenu();loadBulletin();})" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати нотификации</button>'+
-    '</div>'+
+    /* „⚠️ Просрочени задачи" стоеше тук като ВТОРИ бутон за същото — единият
+       пращаше само имейл, другият (в push менюто) само push. Едж функцията
+       праща по каналите от notification_matrix: контролингът получава и
+       двете, останалите имейл. Тоест двата бутона биха правили едно и също,
+       затова остана само онзи в „🔔 Нотификации". */
     '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
       '<div style="font-size:13px;font-weight:600;margin-bottom:4px;">🔬 Тестов имейл</div>'+
       '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Изпрати тест до твоя имейл за проверка.</div>'+
@@ -2230,8 +2230,8 @@ function pushMenuHtml(){
     '</div>'+
     '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
       '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">⚠️ Просрочени задачи</div>'+
-      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">До регионалните и контролинг.</div>'+
-      '<button onclick="sendPushOverdueNow();closePushMenu();" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">🔔 Изпрати нотификация</button>'+
+      '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Пуска темата в bulletin-notify — до контролинг, регионални, ЦО и автора на задачата, по каналите от матрицата.</div>'+
+      '<button onclick="runNotifyTopic(\'overdue_tasks\',function(){closePushMenu();loadBulletin();});" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">🔔 Изпрати за просрочени</button>'+
     '</div>'+
     '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
       '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">📅 Днешни срокове</div>'+
@@ -2328,49 +2328,11 @@ function sendDailyDeadlinesNotification(){
   });
 }
 
-function sendPushOverdueNow(){
-  if(!bulTasks.length){toast('Няма задачи за проверка');return;}
-  /* Същият източник за „днес", който заключва чекбокса — bulTodayISO() е
-     toLocalISO(new Date()). Така задача не може да е едновременно отметваема
-     и закъсняла. */
-  var todayISO=bulTodayISO();
-  /* Само обектите, които реално могат да отметнат — същият източник като
-     бройките в календара. Преди тук стоеше sbGet('stores'): Централният
-     офис (58 акаунта) и двата склада получаваха известие за чужда работа,
-     която не е тяхна и която нямат как да свършат.
-     Заявката е ВЪН от цикъла, а pushOverdue() се вика веднъж след него:
-     докато стояха вътре във forEach-а, пет просрочени задачи пращаха пет
-     отделни известия. */
-  loadReportableStores().then(function(stores){
-    /* Проверката тук беше `if(!Array.isArray(stores))return;` — мъртва,
-       защото функцията винаги връща масив, включително [] при срив
-       (shared.js ред 453). Тихият return превръщаше срива в „нищо не се
-       случи". Нула обекта при осемнайсет в базата е срив. */
-    if(!stores||!stores.length){toast('❌ Списъкът с обекти не се зареди','#dc2626');return;}
-    var overdue={};
-    bulTasks.forEach(function(t){
-      var dates = taskDueDates(t);
-      if(!dates.length) return;
-      /* Сравнение НИЗ с НИЗ, не през Date: new Date('2026-08-25') е UTC
-         полунощ = 03:00 наше време, тоест задача с последна дата днес
-         минаваше за просрочена от 03:00. 'YYYY-MM-DD' се подрежда
-         лексикографски и UTC не участва. */
-      if(dates[dates.length-1]>=todayISO)return;
-      /* Задача, насочена към конкретни обекти, важи само за тях — същото
-         правило като в главния списък и в календара. Иначе задача за три
-         обекта вдигаше известие за всичките 18. */
-      var scope=(t.target_stores&&t.target_stores.length)
-        ? stores.filter(function(name){return t.target_stores.indexOf(name)>=0;})
-        : stores;
-      scope.forEach(function(name){
-        var done=bulComps.some(function(c){return c.task_id===t.id&&c.store_name===name;});
-        if(!done){if(!overdue[name])overdue[name]=[];overdue[name].push(t.title);}
-      });
-    });
-    if(Object.keys(overdue).length) pushOverdue(overdue,null);
-    else toast('✅ Всички задачи са изпълнени!');
-  });
-}
+/* Тук стоеше sendPushOverdueNow() — клиентското копие на „кой е просрочен":
+   зареждаше обектите, сравняваше последната дата от прозореца с днес,
+   пресичаше target_stores и подаваше резултата на pushOverdue(). Цялата тази
+   логика живее в едж функцията bulletin-notify (тема overdue_tasks) от
+   26.08.2026. Бутонът вика runNotifyTopic() в push.js. */
 
 function openEmailMenu(){document.getElementById('em-ov').classList.add('open');}
 function closeEmailMenu(){document.getElementById('em-ov').classList.remove('open');}

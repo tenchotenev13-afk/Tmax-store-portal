@@ -73,14 +73,16 @@ const TESTS = [
   'co-role-filter.test.js',
   'late-flag.test.js',
   'task-completion-files.test.js',
-  'overdue-recipients.test.js',
+  /* overdue-recipients.test.js отпадна на 27.08.2026 заедно с логиката, която
+     проверяваше — наследникът му е notify-topic-button.test.js по-долу. */
   'kasa-return-status.test.js',
   'kasa-return-editable.test.js',
   'kasa-history-order.test.js',
   'kasa-history-window.test.js',
   'kasa-returned-in-reports.test.js',
   'report-groups-users.test.js',
-  'no-auto-push-on-load.test.js'
+  'no-auto-push-on-load.test.js',
+  'notify-topic-button.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
