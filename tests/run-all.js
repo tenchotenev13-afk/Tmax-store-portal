@@ -83,7 +83,8 @@ const TESTS = [
   'report-groups-users.test.js',
   'no-auto-push-on-load.test.js',
   'notify-topic-button.test.js',
-  'admin-notifications.test.js'
+  'admin-notifications.test.js',
+  'notify-schedule-stores.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

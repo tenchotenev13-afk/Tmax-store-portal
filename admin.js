@@ -1150,15 +1150,21 @@ function loadNotificationsAdmin(){
     sbGet('notification_matrix','order=topic_key,group_key'),
     sbGet('notification_overrides','order=user_email,topic_key'),
     /* Изричен select= — users никога не се чете със select=* от клиента. */
-    sbGet('users','active=eq.true&order=display_name,email&select=id,email,display_name,active')
+    sbGet('users','active=eq.true&order=display_name,email&select=id,email,display_name,active'),
+    sbGet('notification_schedules','order=created_at.desc')
   ]).then(function(res){
     adminNotifTopics    = Array.isArray(res[0]) ? res[0] : [];
     adminNotifMatrix    = Array.isArray(res[1]) ? res[1] : [];
     adminNotifOverrides = Array.isArray(res[2]) ? res[2] : [];
     adminNotifUsers     = Array.isArray(res[3]) ? res[3] : [];
+    adminNotifSchedules = Array.isArray(res[4]) ? res[4] : [];
     renderNotifTopics();
     renderNotifMatrix();
     renderNotifOverrides();
+    /* Заглавията са втора вълна заявки — стават ясни едва след като се знае
+       кои записи са насрочени. Рендерът се вика СЛЕД тях, защото без
+       заглавие всеки ред би твърдял „(изтрит запис)". */
+    loadNotifScheduleTitles(adminNotifSchedules).then(renderNotifSchedules);
   });
 }
 
@@ -1666,6 +1672,146 @@ function deleteNotifOverride(id){
     if(!res.ok){ toast('Грешка при изтриване: ' + sbErrMsg(res), '#dc2626'); return; }
     if (res.count === 0) { toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadNotificationsAdmin(); return; }
     logAudit('notif_override_deleted', { details: { id: id, user_email: o ? o.user_email : null, topic_key: o ? o.topic_key : null } });
+    toast('✅ Изтрито');
+    loadNotificationsAdmin();
+  });
+}
+
+/* ── Насрочени напомняния (notification_schedules) ─────────────────────────
+   Насрочват се от камбанката 🔔 на конкретен ред в Бюлетина, не оттук —
+   затова тук няма „ново". Тук са, защото ДОТУК насроченото се виждаше само
+   през камбанката на самия ред: шест реда от 10.08.2026 стояха месеци, без
+   никой да знае, че съществуват. Списък, който се вижда наведнъж, е цялата
+   разлика между „забравено" и „решено да остане". */
+
+var adminNotifSchedules = [];
+/* Заглавията на записите, по които са насрочени. Ключ: 'тип|id'. */
+var adminNotifEntityTitles = {};
+
+var NOTIF_ENTITY_TABLES = {
+  promotion:      'bulletin_promotions',
+  task:           'bulletin_tasks',
+  recurring_task: 'recurring_tasks',
+  subtask:        'task_subtasks'
+};
+var NOTIF_ENTITY_LABELS = {
+  promotion:      'Промоция',
+  task:           'Задача',
+  recurring_task: 'Постоянна задача',
+  subtask:        'Под-задача'
+};
+var NOTIF_SCHED_TYPE_LABELS = { once: 'Еднократно', daily: 'Всеки ден', weekly: 'Всяка седмица' };
+
+/* target_stores е text[]. PostgREST го връща като масив, но огледалото и стари
+   редове могат да дадат текстовия литерал '{Троян,Ловеч}' — същата засада като
+   при weekdays по-горе. Празно → връща се старата единична колона. */
+function notifSchedStores(s){
+  var a = s && s.target_stores;
+  var arr = [];
+  if (Array.isArray(a)) arr = a;
+  else if (typeof a === 'string' && a.length > 2) {
+    arr = a.replace(/^\{|\}$/g,'').split(',').map(function(x){ return x.replace(/^"|"$/g,''); });
+  }
+  arr = arr.filter(function(x){ return !!x; });
+  if (arr.length) return arr;
+  return (s && s.target_store) ? [s.target_store] : [];
+}
+
+/* Дата на човешки. Собствена, не fmtDate2 от bulletin.js: този екран трябва
+   да работи и когато admin.js е зареден сам (така го зареждат тестовете). */
+function notifSchedDateText(d){
+  if (!d) return '';
+  var p = String(d).slice(0,10).split('-');
+  return p.length === 3 ? p[2] + '.' + p[1] + '.' + p[0] : String(d);
+}
+
+/* Колоната „дата или ден" — според вида на разписанието. */
+function notifSchedWhenText(s){
+  if (!s) return '—';
+  if (s.schedule_type === 'once')   return notifSchedDateText(s.scheduled_date) || 'без дата';
+  if (s.schedule_type === 'weekly') return NOTIF_DOW_LABELS[s.day_of_week] || 'без ден';
+  return '—';
+}
+
+/* Заглавията се дърпат по entity_type/entity_id. sbGet НЕ отхвърля при грешка —
+   връща [], тоест разминат тип на id оставя заглавието празно и редът излиза
+   като „(изтрит запис)". Редът се ВИЖДА при всички случаи: точно такъв ред е
+   най-важно да не се скрие. */
+function loadNotifScheduleTitles(list){
+  adminNotifEntityTitles = {};
+  var byType = {};
+  (list || []).forEach(function(s){
+    if (!NOTIF_ENTITY_TABLES[s.entity_type] || !s.entity_id) return;
+    var ids = byType[s.entity_type] || (byType[s.entity_type] = []);
+    if (ids.indexOf(String(s.entity_id)) < 0) ids.push(String(s.entity_id));
+  });
+  var types = Object.keys(byType);
+  if (!types.length) return Promise.resolve();
+  return Promise.all(types.map(function(t){
+    var q = 'id=in.(' + byType[t].map(encodeURIComponent).join(',') + ')&select=id,title';
+    return sbGet(NOTIF_ENTITY_TABLES[t], q, true).then(function(rows){
+      (Array.isArray(rows) ? rows : []).forEach(function(r){
+        adminNotifEntityTitles[t + '|' + String(r.id)] = r.title;
+      });
+    });
+  }));
+}
+
+function renderNotifSchedules(){
+  var body = document.getElementById('notif-schedules-body'); if(!body) return;
+  var head = '<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;font-weight:700;margin:16px 0 6px;">Насрочени напомняния</div>' +
+    '<div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">Задават се от камбанката 🔔 на конкретната задача или промоция в Бюлетина — тук само се виждат, спират и трият. Ред без избрани обекти отива до ВСИЧКИ, включително ЦО.</div>';
+  if (!adminNotifSchedules.length) {
+    body.innerHTML = head + '<div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;">Няма насрочени напомняния.</div>';
+    return;
+  }
+  var rows = adminNotifSchedules.map(function(s){
+    var title = adminNotifEntityTitles[s.entity_type + '|' + String(s.entity_id)];
+    var gone  = !title;
+    var what  = '<div style="font-weight:500;font-size:12.5px;">' +
+      (gone ? '<span class="ntf-sched-gone" style="color:#991b1b;">(изтрит запис)</span>' : esc(title)) + '</div>' +
+      '<div style="font-size:10.5px;color:#94a3b8;">' + esc(NOTIF_ENTITY_LABELS[s.entity_type] || s.entity_type || '—') + '</div>';
+    var st = notifSchedStores(s);
+    var stores = st.length
+      ? esc(st.join(', '))
+      : '<span style="color:#b45309;font-weight:600;">до всички</span>';
+    return '<tr' + (gone ? ' style="background:#fef2f2;"' : '') + '>' +
+      '<td>' + what + '</td>' +
+      '<td style="font-size:12px;white-space:nowrap;">' + esc(NOTIF_SCHED_TYPE_LABELS[s.schedule_type] || s.schedule_type || '—') + '</td>' +
+      '<td style="font-size:12px;white-space:nowrap;">' + esc(notifSchedWhenText(s)) + '</td>' +
+      '<td style="font-size:12px;white-space:nowrap;">' + esc(String(s.scheduled_time || '').slice(0,5)) + '</td>' +
+      '<td style="font-size:12px;">' + stores + '</td>' +
+      '<td style="font-size:12px;">' + esc(s.created_by || '—') + '</td>' +
+      '<td style="font-size:12px;white-space:nowrap;">' + esc(s.last_sent_at ? notifLastRunText(s.last_sent_at) : 'никога') + '</td>' +
+      '<td><label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">' +
+        '<input type="checkbox" class="ntf-sched-cb" data-id="' + escAttr(s.id) + '" ' + (s.active ? 'checked' : '') +
+        ' onchange="toggleAdminNotifSchedule(\'' + esc(s.id) + '\',this.checked)">' +
+        (s.active ? 'вкл.' : 'спряно') + '</label></td>' +
+      '<td><button onclick="deleteAdminNotifSchedule(\'' + esc(s.id) + '\')" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button></td>' +
+    '</tr>';
+  }).join('');
+  body.innerHTML = head + '<div class="tbl-wrap"><table>' +
+    '<thead><tr><th>За какво</th><th>Вид</th><th>Кога</th><th>Час</th><th>Обекти</th><th>Създал</th><th>Последно изпратено</th><th>Включено</th><th></th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table></div>';
+}
+
+function toggleAdminNotifSchedule(id, active){
+  sbPatch('notification_schedules','id=eq.' + encodeURIComponent(id), { active: !!active }).then(function(res){
+    if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
+    logAudit('notif_schedule_toggled', { details: { id: id, active: !!active } });
+    toast(active ? '✅ Пуснато' : '⏸ Спряно');
+    loadNotificationsAdmin();
+  });
+}
+
+function deleteAdminNotifSchedule(id){
+  var s = adminNotifSchedules.filter(function(x){ return String(x.id) === String(id); })[0];
+  var title = s ? adminNotifEntityTitles[s.entity_type + '|' + String(s.entity_id)] : null;
+  if (!confirm('Изтрий насроченото напомняне' + (title ? ' за „' + title + '"' : '') + '? Действието е окончателно.')) return;
+  sbDelete('notification_schedules','id=eq.' + encodeURIComponent(id)).then(function(res){
+    if(!res.ok){ toast('Грешка при изтриване: ' + sbErrMsg(res), '#dc2626'); return; }
+    if (res.count === 0) { toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadNotificationsAdmin(); return; }
+    logAudit('notif_schedule_deleted', { details: { id: id, entity_type: s ? s.entity_type : null, entity_id: s ? s.entity_id : null } });
     toast('✅ Изтрито');
     loadNotificationsAdmin();
   });

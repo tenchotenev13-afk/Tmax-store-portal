@@ -9,8 +9,8 @@ const SEND_FN_URL = SB_URL + "/functions/v1/resend-email";
    Content-Type — без Authorization връща 401 UNAUTHORIZED_NO_AUTH_HEADER,
    тоест нито едно насрочено известие не би могло да тръгне, макар кронът
    да върви на всеки 15 минути и да отчита успех. Таблицата беше празна, затова
-   никой не го забеляза. Порталът има интерфейс за тези известия (bulletin.js
-   редове 3820-3879), тоест хората могат да ги насрочват. */
+   никой не го забеляза. Порталът има интерфейс за тези известия (камбанката
+   🔔 по редовете в bulletin.js), тоест хората могат да ги насрочват. */
 const SEND_HEADERS = {
   'Content-Type': 'application/json',
   'Authorization': 'Bearer ' + SB_SERVICE_KEY,
@@ -102,8 +102,24 @@ Deno.serve(async (req) => {
         title: 'ТеМАХ Бюлетин',
         message: title,
       };
-      if (s.target_store) {
-        pushBody.filters = [{ field: 'tag', key: 'store_name', relation: '=', value: s.target_store }];
+      /* Обектите се държат в ДВЕ колони, по историческа причина:
+           · target_store  (text)   — първоначалната, само ЕДИН обект;
+           · target_stores (text[]) — НОВАТА (27.08.2026), няколко обекта.
+         Камбанката в bulletin.js вече записва в новата, защото модалът дава
+         многоредов избор. Старата се чете само като резервен вариант, за да
+         НЕ се променя поведението на заварените редове.
+         Празни и двете → без филтър, тоест до всички, както досега. */
+      let stores: string[] = Array.isArray(s.target_stores)
+        ? s.target_stores.filter((x: unknown) => typeof x === 'string' && x !== '')
+        : [];
+      if (!stores.length && s.target_store) stores = [s.target_store];
+      if (stores.length) {
+        const filters: unknown[] = [];
+        stores.forEach((name, i) => {
+          if (i > 0) filters.push({ operator: 'OR' });
+          filters.push({ field: 'tag', key: 'store_name', relation: '=', value: name });
+        });
+        pushBody.filters = filters;
       }
 
       const res = await fetch(SEND_FN_URL, {

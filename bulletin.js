@@ -3792,7 +3792,16 @@ function subtaskRemoveAttachment(stId,idx,taskId){
    ГРАФИК ЗА НОТИФИКАЦИИ (ръчно зададени, изпращат се от сървъра)
 ══════════════════════════════════════════ */
 var DOW_LABELS={mon:'Понеделник',tue:'Вторник',wed:'Сряда',thu:'Четвъртък',fri:'Петък',sat:'Събота',sun:'Неделя'};
+var NS_ALL_STORES_TEXT='→ до ВСИЧКИ обекти (нищо не е избрано)';
 var notifyCurrentEntity=null;
+/* Обектите на един насрочен ред. target_stores (text[]) е новата колона —
+   камбанката пише в нея. target_store (единичен текст) е старата и се чете
+   само за заварените редове. Празни и двете значи „до всички". */
+function notifyRowStores(s){
+  var a=s&&s.target_stores;
+  if(Array.isArray(a)&&a.length)return a.filter(function(x){return !!x;});
+  return s&&s.target_store?[s.target_store]:[];
+}
 
 function openNotifyScheduleModal(entityType,entityId,entityTitle){
   notifyCurrentEntity={type:entityType,id:entityId,title:entityTitle};
@@ -3807,28 +3816,42 @@ function openNotifyScheduleModal(entityType,entityId,entityTitle){
     '<div style="font-size:12px;color:#94a3b8;margin-bottom:14px;">за: <b style="color:#374151;">'+esc(entityTitle||'')+'</b></div>'+
     '<div id="notify-list-wrap"><div style="text-align:center;padding:12px;color:#94a3b8;font-size:12px;">⏳ Зареждане...</div></div>'+
     '<div style="border-top:1px solid #e2e8f0;margin:16px 0;padding-top:14px;">'+
-    '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:8px;">+ Нов график</div>'+
-    '<select class="fi" id="ns-type" onchange="updateNotifyTypeFields()" style="margin-bottom:8px;">'+
-      '<option value="once">Еднократно</option>'+
-      '<option value="daily">Всеки ден</option>'+
-      '<option value="weekly">Всяка седмица</option>'+
-    '</select>'+
-    '<div id="ns-date-wrap" style="margin-bottom:8px;"><input type="date" class="fi" id="ns-date" value="'+today()+'"></div>'+
-    '<div id="ns-dow-wrap" style="margin-bottom:8px;display:none;"><select class="fi" id="ns-dow">'+
-      Object.keys(DOW_LABELS).map(function(k){return '<option value="'+k+'">'+DOW_LABELS[k]+'</option>';}).join('')+
-    '</select></div>'+
+    '<div style="font-size:12px;font-weight:700;color:#374151;margin-bottom:4px;">+ Ново напомняне (еднократно)</div>'+
+    '<div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">Повтарящите се известия се задават от таб Администрация → Известия, не оттук.</div>'+
+    '<div style="margin-bottom:8px;"><input type="date" class="fi" id="ns-date" value="'+bulTodayISO()+'"></div>'+
     '<input type="time" class="fi" id="ns-time" value="09:00" style="margin-bottom:8px;">'+
+    '<label class="fl">Обекти (задръж Ctrl за няколко)</label>'+
+    '<select class="fi" id="ns-stores" multiple size="6" style="height:120px;" onchange="updateNotifyStoresHint()"></select>'+
+    '<div id="ns-stores-hint" style="font-size:11.5px;font-weight:600;margin:4px 0 8px;color:#b45309;">'+NS_ALL_STORES_TEXT+'</div>'+
     '<input class="fi" id="ns-message" placeholder="Текст на нотификацията (по избор - иначе автоматично)" style="margin-bottom:8px;">'+
-    '<button onclick="submitNotifySchedule()" style="border:none;background:#d97706;color:#fff;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">+ Добави график</button>'+
+    '<button onclick="submitNotifySchedule()" style="border:none;background:#d97706;color:#fff;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;width:100%;">+ Насрочи напомняне</button>'+
     '</div>'+
     '</div>';
   document.body.appendChild(ov);
+  notifyFillStoreSelect('ns-stores');
   loadNotifySchedules();
 }
-function updateNotifyTypeFields(){
-  var type=document.getElementById('ns-type').value;
-  document.getElementById('ns-date-wrap').style.display=type==='once'?'':'none';
-  document.getElementById('ns-dow-wrap').style.display=type==='weekly'?'':'none';
+/* Обектите идват от loadReportableStores() (уникалните store_name от users),
+   НЕ от таблицата stores: тя брои и обекти без нито един акаунт, тоест
+   известието би било насочено към таг, който никой не носи. */
+function notifyFillStoreSelect(selId){
+  loadReportableStores().then(function(names){
+    var sel=document.getElementById(selId); if(!sel)return;
+    sel.innerHTML=(Array.isArray(names)?names:[]).map(function(name){
+      return '<option value="'+esc(name)+'">'+esc(name)+'</option>';
+    }).join('');
+    updateNotifyStoresHint();
+  });
+}
+/* Празният избор значи „до всички" и това ТРЯБВА да се вижда преди натискане
+   на бутона. Иначе „не съм избрал" и „избрах всички" изглеждат еднакво, а
+   разликата е между напомняне до един магазин и звънене на цялата верига. */
+function updateNotifyStoresHint(){
+  var hint=document.getElementById('ns-stores-hint'); if(!hint)return;
+  var sel=bulReadStoreMultiSelect('ns-stores');
+  if(!sel.length){ hint.style.color='#b45309'; hint.textContent=NS_ALL_STORES_TEXT; return; }
+  hint.style.color='#0f766e';
+  hint.textContent='→ само до '+sel.length+(sel.length===1?' обект: ':' обекта: ')+sel.join(', ');
 }
 function closeNotifyScheduleModal(){
   var ov=document.getElementById('notify-modal-ov'); if(ov)ov.remove();
@@ -3841,48 +3864,58 @@ function loadNotifySchedules(){
     var wrap=document.getElementById('notify-list-wrap'); if(!wrap)return;
     if(!list.length){wrap.innerHTML='<div style="text-align:center;padding:10px;color:#94a3b8;font-size:12px;">Няма зададени графици.</div>';return;}
     wrap.innerHTML=list.map(function(s){
+      /* Дневно и седмично отпадат от СЪЗДАВАНЕТО, не от показването: шестте
+         заварени реда от 10.08.2026 са точно такива и трябва да се виждат с
+         истинското си разписание, а не като „еднократно". */
       var typeLabel=s.schedule_type==='once'?('Еднократно · '+fmtDate2(s.scheduled_date))
         :s.schedule_type==='daily'?'Всеки ден'
-        :('Всяка седмица · '+(DOW_LABELS[s.day_of_week]||s.day_of_week));
+        :s.schedule_type==='weekly'?('Всяка седмица · '+(DOW_LABELS[s.day_of_week]||s.day_of_week||'без ден'))
+        :esc(String(s.schedule_type||'—'));
+      var st=notifyRowStores(s);
+      var storeLabel=st.length
+        ? '<span style="color:#0f766e;">🏪 '+esc(st.join(', '))+'</span>'
+        : '<span style="color:#b45309;">🏪 до всички</span>';
       var sentLabel=s.last_sent_at?('<span style="color:#16a34a;">✓ изпратено последно '+fmtDate2(s.last_sent_at)+'</span>'):'<span style="color:#94a3b8;">още не е изпратено</span>';
       return '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 10px;margin-bottom:6px;font-size:12px;'+(s.active?'':'opacity:.5;')+'">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;">'+
-        '<div><b>'+typeLabel+'</b> в '+esc(s.scheduled_time.slice(0,5))+'ч.</div>'+
+        '<div><b>'+typeLabel+'</b> в '+esc(String(s.scheduled_time||'').slice(0,5))+'ч.</div>'+
         '<div style="display:flex;gap:4px;">'+
         '<button data-id="'+s.id+'" data-active="'+(!s.active)+'" onclick="toggleNotifySchedule(this.dataset.id,this.dataset.active===\'true\')" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;">'+(s.active?'⏸':'▶')+'</button>'+
         '<button data-id="'+s.id+'" onclick="deleteNotifySchedule(this.dataset.id)" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;">✕</button>'+
         '</div></div>'+
+        '<div style="margin-top:3px;">'+storeLabel+'</div>'+
         (s.message?'<div style="color:#64748b;margin-top:3px;">💬 '+esc(s.message)+'</div>':'')+
         '<div style="margin-top:3px;font-size:10.5px;">'+sentLabel+'</div>'+
         '</div>';
     }).join('');
   });
 }
+/* САМО еднократно. Дневното и седмичното са правила, а правилата се задават
+   централно в Администрация → Известия, където се виждат наведнъж — точно
+   защото шестте реда от 10.08.2026 стояха тук незабелязани месеци. */
 function submitNotifySchedule(){
   if(!notifyCurrentEntity)return;
-  var type=document.getElementById('ns-type').value;
   var time=document.getElementById('ns-time').value;
   if(!time){toast('Задай час','#dc2626');return;}
+  var d=document.getElementById('ns-date').value;
+  if(!d){toast('Избери дата','#dc2626');return;}
+  var stores=bulReadStoreMultiSelect('ns-stores');
   var data={
     entity_type:notifyCurrentEntity.type,
     entity_id:String(notifyCurrentEntity.id),
-    schedule_type:type,
+    schedule_type:'once',
+    scheduled_date:d,
     scheduled_time:time,
     message:document.getElementById('ns-message').value.trim(),
+    /* Празно = без филтър в dynamic-responder, тоест до всички. Пише се null,
+       не [] — така старата и новата колона се четат по един и същи начин. */
+    target_stores:stores.length?stores:null,
     active:true,
     created_by:currentUser.display_name||currentUser.email
   };
-  if(type==='once'){
-    var d=document.getElementById('ns-date').value;
-    if(!d){toast('Избери дата','#dc2626');return;}
-    data.scheduled_date=d;
-  }
-  if(type==='weekly'){
-    data.day_of_week=document.getElementById('ns-dow').value;
-  }
   sbPost('notification_schedules',data).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    toast('✅ Графикът е зададен!');
+    toast('✅ Напомнянето е насрочено!');
     document.getElementById('ns-message').value='';
     loadNotifySchedules();
   });
