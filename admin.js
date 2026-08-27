@@ -5,6 +5,7 @@ function loadAdmin(){
   loadUsersAdmin();
   loadRestrictionsAdmin();
   loadCatalogAdmin();
+  loadNotificationsAdmin();
   /* Backup секция — само за admin */
   if(currentUser && currentUser.role==='admin'){
     var backupContainer=document.getElementById('backup-admin-section');
@@ -72,13 +73,13 @@ function deleteStore(id,name){
 ══════════════════════════════════════════ */
 
 function loadUsersAdmin(){
-  sbGet('users','order=role,email&select=id,email,display_name,store_name,role,active,assigned_stores,oborot_report,is_regional').then(function(data){
+  sbGet('users','order=role,email&select=id,email,display_name,store_name,role,active,assigned_stores,oborot_report,is_regional,notify_groups').then(function(data){
     var body=document.getElementById('users-body');if(!body)return;
     var list=Array.isArray(data)?data:[];
     /* colspan = броят клетки в РЕДА, не в заглавието: последната колона
-       (действията) е без <th>, затова 7, а не 6. Разминаване тук оставя
+       (действията) е без <th>, затова 8, а не 7. Разминаване тук оставя
        празната таблица със стеснен ред, който изглежда счупен. */
-    if(!list.length){body.innerHTML='<tr><td colspan="7" style="text-align:center;padding:20px;color:#94a3b8;">Няма потребители.</td></tr>';return;}
+    if(!list.length){body.innerHTML='<tr><td colspan="8" style="text-align:center;padding:20px;color:#94a3b8;">Няма потребители.</td></tr>';return;}
     var roleBg={manager:'#dbeafe',sklad:'#dcfce7',kasa:'#fef9c3',accounting:'#f3e8ff',admin:'#fee2e2',logistics:'#ffedd5',info:'#f1f5f9',supply:'#fce7f3',marketing:'#ecfdf5',user:'#f8fafc'};
     body.innerHTML=list.map(function(u){
       var stores=u.assigned_stores;
@@ -106,6 +107,10 @@ function loadUsersAdmin(){
         '<td style="font-size:11px;color:#64748b;white-space:nowrap;">'+
           '<span style="color:'+(u.oborot_report?'#2563eb':'#94a3b8')+';">'+oborotReportLabel(u.oborot_report)+'</span>'+
           ' <button onclick="editOborotReport(\''+u.id+'\',\''+esc(u.display_name||u.email)+'\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;padding:1px 7px;font-size:10px;cursor:pointer;margin-left:4px;">✏️</button>'+
+        '</td>'+
+        '<td style="font-size:11px;white-space:nowrap;">'+
+          notifyGroupsCell(u)+
+          ' <button onclick="editNotifyGroups(\''+u.id+'\',\''+esc(u.display_name||u.email)+'\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;padding:1px 7px;font-size:10px;cursor:pointer;margin-left:4px;">✏️</button>'+
         '</td>'+
         '<td style="white-space:nowrap;">'+
           '<button onclick="openUserModal(\''+u.id+'\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;margin-right:4px;">✏️</button>'+
@@ -1022,4 +1027,663 @@ function batchUpsertCatalog(rows,onProgress,onDone){
     });
   }
   next();
+}
+
+/* ══════════════════════════════════════════
+   ИЗВЕСТИЯ ОТ БЮЛЕТИНА — теми, матрица, изключения
+   Три таблици: notification_topics / notification_matrix /
+   notification_overrides. Кронът (на всеки 15 мин) ги чете и вика едж
+   функцията bulletin-notify — тя решава кой е просрочен, кой получава и
+   как изглежда писмото. Тук САМО се задава какво пише в тях.
+
+   Браузърът не праща известия и не смята получатели (CLAUDE.md т.14).
+   Затова тук няма бутон „изпрати" и няма бутон „нова тема": тема без
+   строител в edge функцията не прави нищо и би стояла мъртва в списъка.
+══════════════════════════════════════════ */
+
+var adminNotifTopics = [];
+var adminNotifMatrix = [];
+var adminNotifOverrides = [];
+var adminNotifUsers = [];
+
+var NOTIF_GROUPS = [
+  { key: 'co',          label: 'ЦО' },
+  { key: 'controlling', label: 'Контролинг' },
+  { key: 'regional',    label: 'Регионален' },
+  { key: 'owner',       label: 'Собственик' },
+  { key: 'store',       label: 'Магазин' }
+];
+var NOTIF_CHANNEL_LABELS = { none: '—', email: 'Имейл', push: 'Push', both: 'Имейл + Push' };
+var NOTIF_SCOPE_LABELS   = { all: 'всичко', own_stores: 'своите обекти', own_tasks: 'своите задачи' };
+var NOTIF_MODE_LABELS    = { include: 'включва', exclude: 'изключва' };
+var NOTIF_WEEKDAY_SHORT  = ['', 'пон', 'вт', 'ср', 'чет', 'пет', 'съб', 'нед'];
+var NOTIF_DOW_LABELS = { mon:'понеделник', tue:'вторник', wed:'сряда', thu:'четвъртък', fri:'петък', sat:'събота', sun:'неделя' };
+var NOTIF_DOW_ORDER  = ['mon','tue','wed','thu','fri','sat','sun'];
+
+function notifIsAdmin(){ return !!(currentUser && currentUser.role === 'admin'); }
+
+/* weekdays е int[] в базата. PostgREST го връща като масив, но огледалото и
+   стари редове могат да дадат текстовия литерал '{1,2,3,4,5}'. */
+function notifWeekdays(t){
+  var w = t && t.weekdays;
+  if (Array.isArray(w)) return w.map(Number).filter(function(n){ return n>=1 && n<=7; });
+  if (typeof w === 'string' && w.length > 2) {
+    return w.replace(/^{|}$/g,'').split(',').map(function(s){ return parseInt(s,10); })
+      .filter(function(n){ return n>=1 && n<=7; });
+  }
+  return [];
+}
+
+function notifTimeText(t){
+  var s = t && t.scheduled_time;
+  return s ? String(s).slice(0,5) : '';
+}
+
+/* Разписанието на човешки език. Суровият масив [1,2,3,4,5] не казва нищо на
+   човека, който трябва да реши дали темата тръгва в събота. */
+function notifScheduleText(t){
+  if (!t) return '—';
+  var hm = notifTimeText(t);
+  if (t.schedule_type === 'manual') return 'само ръчно';
+  if (t.schedule_type === 'weekly') {
+    var d = NOTIF_DOW_LABELS[t.day_of_week] || 'без зададен ден';
+    return hm ? d + ' ' + hm : d;
+  }
+  var days = notifWeekdays(t).sort(function(a,b){ return a-b; });
+  var part;
+  if (!days.length) part = 'без зададени дни';
+  else if (days.length === 7) part = 'всеки ден';
+  else if (days.join(',') === '1,2,3,4,5') part = 'всеки делник';
+  else part = days.map(function(n){ return NOTIF_WEEKDAY_SHORT[n]; }).join(', ');
+  return hm ? part + ' ' + hm : part;
+}
+
+/* „последно тръгнало". NULL е ВАЖЕН случай, не празнота: спряна или счупена
+   тема изглежда точно като работеща, докато не се види, че не е тръгвала. */
+function notifLastRunText(ts){
+  if (!ts) return 'никога';
+  var s = String(ts).replace(' ', 'T');
+  if (/[+-]\d{2}$/.test(s)) s += ':00';
+  var d = new Date(s);
+  if (isNaN(d.getTime())) return String(ts);
+  var p2 = function(n){ return (n < 10 ? '0' : '') + n; };
+  var hm = p2(d.getHours()) + ':' + p2(d.getMinutes());
+  var then = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  var now = new Date();
+  var t0 = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  var diff = Math.round((t0 - then) / 86400000);
+  if (diff === 0) return 'днес ' + hm;
+  if (diff === 1) return 'вчера ' + hm;
+  return p2(d.getDate()) + '.' + p2(d.getMonth()+1) + ' ' + hm;
+}
+
+function notifStatusIsError(s){ return !!s && String(s).indexOf('ГРЕШКА') === 0; }
+
+function notifTopicLabel(key){
+  var t = adminNotifTopics.filter(function(x){ return x.key === key; })[0];
+  return t ? t.label : key;
+}
+
+function loadNotificationsAdmin(){
+  var card = document.getElementById('notif-admin-card');
+  /* Целият екран е само за admin — същата проверка като при backup секцията
+     в loadAdmin(). При друга роля не се рендира нищо и базата не се пита. */
+  if (!notifIsAdmin()) { if (card) card.style.display = 'none'; return; }
+  if (card) card.style.display = '';
+  Promise.all([
+    sbGet('notification_topics','order=sort_order,key'),
+    sbGet('notification_matrix','order=topic_key,group_key'),
+    sbGet('notification_overrides','order=user_email,topic_key'),
+    /* Изричен select= — users никога не се чете със select=* от клиента. */
+    sbGet('users','active=eq.true&order=display_name,email&select=id,email,display_name,active')
+  ]).then(function(res){
+    adminNotifTopics    = Array.isArray(res[0]) ? res[0] : [];
+    adminNotifMatrix    = Array.isArray(res[1]) ? res[1] : [];
+    adminNotifOverrides = Array.isArray(res[2]) ? res[2] : [];
+    adminNotifUsers     = Array.isArray(res[3]) ? res[3] : [];
+    renderNotifTopics();
+    renderNotifMatrix();
+    renderNotifOverrides();
+  });
+}
+
+/* ── Теми ──────────────────────────────────────────────────────────────── */
+
+function renderNotifTopics(){
+  var body = document.getElementById('notif-topics-body'); if(!body) return;
+  var head = '<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;font-weight:700;margin:2px 0 6px;">Теми</div>';
+  if (!adminNotifTopics.length) {
+    body.innerHTML = head + '<div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;">Няма теми.</div>';
+    return;
+  }
+  var rows = adminNotifTopics.map(function(t){
+    var err = notifStatusIsError(t.last_status);
+    var badge = t.test_email
+      ? '<span title="Праща САМО на този адрес — хората не получават нищо" style="background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;margin-left:6px;white-space:nowrap;">ТЕСТОВ РЕЖИМ: ' + esc(t.test_email) + '</span>'
+      : '';
+    return '<tr' + (err ? ' style="background:#fef2f2;"' : '') + '>' +
+      '<td><div style="font-weight:500;font-size:12.5px;">' + esc(t.label) + badge + '</div>' +
+        '<div style="font-size:10.5px;color:#94a3b8;">' + esc(t.key) + '</div></td>' +
+      '<td style="font-size:12px;white-space:nowrap;">' + esc(notifScheduleText(t)) + '</td>' +
+      '<td><label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">' +
+        '<input type="checkbox" class="ntf-active-cb" data-key="' + escAttr(t.key) + '" ' + (t.active ? 'checked' : '') +
+        ' onchange="toggleNotifTopicActive(\'' + esc(t.key) + '\',this.checked)">' +
+        '<span style="color:' + (t.active ? '#16a34a' : '#94a3b8') + ';font-weight:600;">' + (t.active ? 'вкл.' : 'спряна') + '</span>' +
+      '</label></td>' +
+      '<td style="font-size:12px;white-space:nowrap;' + (t.last_run_at ? '' : 'color:#94a3b8;') + '">' +
+        esc(notifLastRunText(t.last_run_at)) + '</td>' +
+      '<td style="font-size:12px;text-align:center;">' +
+        (t.last_recipients === null || t.last_recipients === undefined ? '<span style="color:#94a3b8;">—</span>' : String(t.last_recipients)) + '</td>' +
+      '<td style="font-size:11px;' + (err ? 'color:#991b1b;font-weight:600;' : 'color:#64748b;') + '">' +
+        (t.last_status ? esc(t.last_status) : '<span style="color:#cbd5e1;">—</span>') + '</td>' +
+      '<td><button onclick="openNotifTopicModal(\'' + esc(t.key) + '\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️</button></td>' +
+    '</tr>';
+  }).join('');
+  body.innerHTML = head + '<div class="tbl-wrap"><table>' +
+    '<thead><tr><th>Тема</th><th>Разписание</th><th>Включена</th><th>Последно тръгнало</th><th>Души</th><th>Статус</th><th></th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table></div>';
+}
+
+/* Връща отметката на реда в положението, което базата още държи. Без това
+   екранът показва спряно, докато темата е включена — точно обратното на
+   това, което колоната „последно тръгнало" се опитва да направи видимо. */
+function _notifResetActiveCheckbox(key, value){
+  var cbs = document.querySelectorAll('.ntf-active-cb');
+  for (var i=0;i<cbs.length;i++){
+    if (cbs[i].getAttribute('data-key') === key) { cbs[i].checked = !!value; return; }
+  }
+}
+
+function toggleNotifTopicActive(key, active){
+  var topic = adminNotifTopics.filter(function(x){ return x.key === key; })[0];
+  /* Пита се САМО при спиране. Спряна тема не изглежда различно от работеща
+     отвън: известията просто спират и това се забелязва чак когато нещо не
+     е дошло (dynamic-responder мълча месеци). Включването връща нормалното
+     състояние и не крие нищо — то минава без въпрос. */
+  if (!active) {
+    var name = topic ? topic.label : key;
+    if (!confirm('Спираш „' + name + '". Известията по нея няма да тръгват, докато не я включиш пак. Продължаваш ли?')) {
+      _notifResetActiveCheckbox(key, true);
+      return;
+    }
+  }
+  sbPatch('notification_topics','key=eq.' + encodeURIComponent(key), { active: !!active }).then(function(res){
+    if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
+    var t = adminNotifTopics.filter(function(x){ return x.key === key; })[0];
+    if (t) t.active = !!active;
+    logAudit('notif_topic_active_changed', { details: { topic_key: key, active: !!active } });
+    toast(active ? '✅ Темата е включена' : '⏸ Темата е спряна');
+    renderNotifTopics();
+  });
+}
+
+var _notifTopicEditKey = null;
+
+function openNotifTopicModal(key){
+  var t = adminNotifTopics.filter(function(x){ return x.key === key; })[0];
+  if (!t) { toast('Темата не е намерена','#dc2626'); return; }
+  _notifTopicEditKey = key;
+  _renderNotifTopicModal(t);
+}
+
+function _renderNotifTopicModal(t){
+  var old = document.getElementById('notif-topic-modal-ov'); if(old) old.remove();
+  var type = t.schedule_type || 'manual';
+  var days = notifWeekdays(t);
+  var typeOpt = function(val,label){ return '<option value="' + val + '"' + (val===type?' selected':'') + '>' + label + '</option>'; };
+  var html = '<div class="bov open" id="notif-topic-modal-ov" onclick="if(event.target===this)closeNotifTopicModal()">' +
+    '<div class="bmod" style="width:460px;max-height:88vh;overflow-y:auto;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+    '<div style="font-size:15px;font-weight:700;">🔔 ' + esc(t.label) + '</div>' +
+    '<button onclick="closeNotifTopicModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<div style="background:#f8fafc;border-radius:8px;padding:8px 10px;margin-bottom:12px;font-size:11.5px;color:#64748b;">' +
+      '<div><b>' + esc(t.key) + '</b></div>' +
+      (t.description ? '<div style="margin-top:3px;">' + esc(t.description) + '</div>' : '') +
+      '<div style="margin-top:4px;color:#94a3b8;">Името, ключът и описанието не се редактират — ключът е връзката със строителя в bulletin-notify.</div>' +
+    '</div>' +
+    '<label class="fl">Вид разписание</label>' +
+    '<select class="fi" id="ntf-type" onchange="notifTopicTypeChange()" style="margin-bottom:10px;">' +
+      typeOpt('daily','Дневно — по дни от седмицата') +
+      typeOpt('weekly','Седмично — един ден') +
+      typeOpt('manual','Само ръчно') +
+    '</select>' +
+    '<div id="ntf-daily-box" style="display:' + (type==='daily'?'block':'none') + ';margin-bottom:10px;">' +
+      '<label class="fl">Дни</label>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;">' +
+        [1,2,3,4,5,6,7].map(function(n){
+          return '<label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;cursor:pointer;">' +
+            '<input type="checkbox" class="ntf-wd" value="' + n + '" ' + (days.indexOf(n)>=0?'checked':'') + '> ' +
+            NOTIF_WEEKDAY_SHORT[n] + '</label>';
+        }).join('') +
+      '</div>' +
+      '<div style="margin-top:6px;display:flex;gap:6px;">' +
+        '<button type="button" onclick="notifPickWeekdays(0)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">делници</button>' +
+        '<button type="button" onclick="notifPickWeekdays(1)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">всеки ден</button>' +
+      '</div>' +
+    '</div>' +
+    '<div id="ntf-weekly-box" style="display:' + (type==='weekly'?'block':'none') + ';margin-bottom:10px;">' +
+      '<label class="fl">Ден от седмицата</label>' +
+      '<select class="fi" id="ntf-dow">' +
+        NOTIF_DOW_ORDER.map(function(d){
+          return '<option value="' + d + '"' + (d===t.day_of_week?' selected':'') + '>' + NOTIF_DOW_LABELS[d] + '</option>';
+        }).join('') +
+      '</select>' +
+    '</div>' +
+    '<div id="ntf-time-box" style="display:' + (type==='manual'?'none':'block') + ';margin-bottom:10px;">' +
+      '<label class="fl">Час</label>' +
+      '<input type="time" class="fi" id="ntf-time" value="' + notifTimeText(t) + '">' +
+      '<div style="font-size:10.5px;color:#94a3b8;margin-top:3px;">Кронът се буди на всеки 15 минути — темата тръгва при първото събуждане след този час.</div>' +
+    '</div>' +
+    '<label class="fl">Тестов адрес</label>' +
+    '<input class="fi" id="ntf-test-email" placeholder="празно = праща на реалните получатели" value="' + (t.test_email ? escAttr(t.test_email) : '') + '">' +
+    '<div style="font-size:10.5px;color:#b45309;margin:3px 0 12px;">При попълнен адрес темата отива САМО там — хората не получават нищо.</div>' +
+    '<label style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f8fafc;border-radius:8px;margin-bottom:14px;cursor:pointer;font-size:13px;font-weight:600;">' +
+      '<input type="checkbox" id="ntf-active" ' + (t.active?'checked':'') + '> Темата е включена' +
+    '</label>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+    '<button onclick="closeNotifTopicModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="submitNotifTopic()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Запази</button>' +
+    '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function notifTopicTypeChange(){
+  var type = v('ntf-type');
+  var d = document.getElementById('ntf-daily-box');
+  var w = document.getElementById('ntf-weekly-box');
+  var tm = document.getElementById('ntf-time-box');
+  if (d)  d.style.display  = (type==='daily')  ? 'block' : 'none';
+  if (w)  w.style.display  = (type==='weekly') ? 'block' : 'none';
+  if (tm) tm.style.display = (type==='manual') ? 'none'  : 'block';
+}
+
+function notifPickWeekdays(all){
+  var cbs = document.querySelectorAll('.ntf-wd');
+  for (var i=0;i<cbs.length;i++){
+    var n = parseInt(cbs[i].value,10);
+    cbs[i].checked = all ? true : (n <= 5);
+  }
+}
+
+function closeNotifTopicModal(){
+  var ov = document.getElementById('notif-topic-modal-ov'); if(ov) ov.remove();
+  _notifTopicEditKey = null;
+}
+
+function submitNotifTopic(){
+  if (!_notifTopicEditKey) return;
+  var key = _notifTopicEditKey;
+  var type = v('ntf-type');
+  var time = v('ntf-time');
+  var testMail = v('ntf-test-email');
+  var activeEl = document.getElementById('ntf-active');
+  if (testMail && testMail.indexOf('@') < 0) { toast('Тестовият адрес не прилича на имейл','#dc2626'); return; }
+  var payload = { schedule_type: type, active: !!(activeEl && activeEl.checked), test_email: testMail || null };
+  if (type === 'daily') {
+    var days = [].map.call(document.querySelectorAll('.ntf-wd:checked'), function(cb){ return parseInt(cb.value,10); });
+    if (!days.length) { toast('Избери поне един ден','#dc2626'); return; }
+    if (!time) { toast('Задай час','#dc2626'); return; }
+    days.sort(function(a,b){ return a-b; });
+    payload.weekdays = days; payload.day_of_week = null; payload.scheduled_time = time;
+  } else if (type === 'weekly') {
+    var dow = v('ntf-dow');
+    if (!dow) { toast('Избери ден','#dc2626'); return; }
+    if (!time) { toast('Задай час','#dc2626'); return; }
+    payload.weekdays = null; payload.day_of_week = dow; payload.scheduled_time = time;
+  } else {
+    payload.weekdays = null; payload.day_of_week = null; payload.scheduled_time = null;
+  }
+  sbPatch('notification_topics','key=eq.' + encodeURIComponent(key), payload).then(function(res){
+    if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); return; }
+    logAudit('notif_topic_changed', { details: { topic_key: key, payload: payload } });
+    toast('✅ Записано');
+    closeNotifTopicModal();
+    loadNotificationsAdmin();
+  });
+}
+
+/* ── Матрица тема × група ──────────────────────────────────────────────── */
+
+function notifMatrixCell(topicKey, groupKey){
+  for (var i=0;i<adminNotifMatrix.length;i++){
+    var m = adminNotifMatrix[i];
+    if (m.topic_key === topicKey && m.group_key === groupKey) return m;
+  }
+  return null;
+}
+
+/* own_tasks няма смисъл за група „Магазин": там задачите са на обекта, не на
+   отделния човек — затова обхватът изобщо не се предлага. */
+function notifScopeOptions(groupKey, current){
+  var keys = (groupKey === 'store') ? ['all','own_stores'] : ['all','own_stores','own_tasks'];
+  return keys.map(function(k){
+    return '<option value="' + k + '"' + (k===current?' selected':'') + '>' + NOTIF_SCOPE_LABELS[k] + '</option>';
+  }).join('');
+}
+
+function renderNotifMatrix(){
+  var body = document.getElementById('notif-matrix-body'); if(!body) return;
+  var head = '<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;font-weight:700;margin:16px 0 6px;">Кой какво получава</div>';
+  if (!adminNotifTopics.length) {
+    body.innerHTML = head + '<div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;">Няма теми.</div>';
+    return;
+  }
+  var sel = 'style="padding:2px 4px;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;background:#fff;"';
+  var thead = '<thead><tr><th>Тема</th>' +
+    NOTIF_GROUPS.map(function(g){ return '<th>' + g.label + '</th>'; }).join('') + '</tr></thead>';
+  var rows = adminNotifTopics.map(function(t){
+    return '<tr><td style="font-weight:500;font-size:12px;">' + esc(t.label) + '</td>' +
+      NOTIF_GROUPS.map(function(g){
+        var m = notifMatrixCell(t.key, g.key);
+        var ch = (m && m.channel) || 'none';
+        var chSel = '<select ' + sel + ' onchange="notifMatrixChannel(this,\'' + esc(t.key) + '\',\'' + esc(g.key) + '\')">' +
+          ['none','email','push','both'].map(function(c){
+            return '<option value="' + c + '"' + (c===ch?' selected':'') + '>' + NOTIF_CHANNEL_LABELS[c] + '</option>';
+          }).join('') + '</select>';
+        /* Няма ред в базата (или каналът е none) → обхватът е безсмислен и
+           клетката показва „—". Редът се създава при първия избор на канал. */
+        var scopeHtml = (m && ch !== 'none')
+          ? '<select ' + sel + ' onchange="notifMatrixScope(this,\'' + esc(t.key) + '\',\'' + esc(g.key) + '\')">' +
+              notifScopeOptions(g.key, m.scope) + '</select>'
+          : '<span class="ntf-empty-cell" style="color:#cbd5e1;font-size:11px;">—</span>';
+        return '<td style="white-space:nowrap;">' + chSel + ' ' + scopeHtml + '</td>';
+      }).join('') + '</tr>';
+  }).join('');
+  var legend = '<div style="font-size:11px;color:#64748b;margin-top:8px;line-height:1.7;">' +
+    '<b>всичко</b> — човекът получава по темата за всички обекти.<br>' +
+    '<b>своите обекти</b> — само за обектите, които са му назначени (за група „Магазин" — неговият обект).<br>' +
+    '<b>своите задачи</b> — само редовете, на които той е отговорник.' +
+    '</div>';
+  body.innerHTML = head + '<div class="tbl-wrap"><table>' + thead + '<tbody>' + rows + '</tbody></table></div>' + legend;
+}
+
+function notifMatrixChannel(sel, topicKey, groupKey){
+  var ch = sel.value;
+  var m = notifMatrixCell(topicKey, groupKey);
+  var flt = 'topic_key=eq.' + encodeURIComponent(topicKey) + '&group_key=eq.' + encodeURIComponent(groupKey);
+  /* „none" е равносилно на празна клетка — редът се ТРИЕ, не се записва със
+     стойност 'none'. Иначе матрицата се пълни с редове, които не значат нищо,
+     а edge функцията ги чете при всяко събуждане. */
+  if (ch === 'none') {
+    if (!m) { renderNotifMatrix(); return; }
+    sbDelete('notification_matrix', flt).then(function(res){
+      if(!res.ok){ toast('Грешка при изтриване: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
+      adminNotifMatrix = adminNotifMatrix.filter(function(x){
+        return !(x.topic_key === topicKey && x.group_key === groupKey);
+      });
+      logAudit('notif_matrix_cleared', { details: { topic_key: topicKey, group_key: groupKey } });
+      toast('✅ Клетката е изчистена');
+      renderNotifMatrix();
+    });
+    return;
+  }
+  if (m) {
+    sbPatch('notification_matrix', flt, { channel: ch }).then(function(res){
+      if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
+      m.channel = ch;
+      logAudit('notif_matrix_changed', { details: { topic_key: topicKey, group_key: groupKey, channel: ch } });
+      toast('✅ Записано');
+      renderNotifMatrix();
+    });
+    return;
+  }
+  sbPost('notification_matrix', { topic_key: topicKey, group_key: groupKey, channel: ch, scope: 'all' }).then(function(res){
+    if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
+    adminNotifMatrix.push({ topic_key: topicKey, group_key: groupKey, channel: ch, scope: 'all' });
+    logAudit('notif_matrix_added', { details: { topic_key: topicKey, group_key: groupKey, channel: ch } });
+    toast('✅ Записано');
+    renderNotifMatrix();
+  });
+}
+
+function notifMatrixScope(sel, topicKey, groupKey){
+  var scope = sel.value;
+  var m = notifMatrixCell(topicKey, groupKey);
+  if (!m) { renderNotifMatrix(); return; }
+  var flt = 'topic_key=eq.' + encodeURIComponent(topicKey) + '&group_key=eq.' + encodeURIComponent(groupKey);
+  sbPatch('notification_matrix', flt, { scope: scope }).then(function(res){
+    if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
+    m.scope = scope;
+    logAudit('notif_matrix_changed', { details: { topic_key: topicKey, group_key: groupKey, scope: scope } });
+    toast('✅ Записано');
+    renderNotifMatrix();
+  });
+}
+
+/* ── Изключения по човек ───────────────────────────────────────────────── */
+
+function renderNotifOverrides(){
+  var body = document.getElementById('notif-overrides-body'); if(!body) return;
+  /* Стои непосредствено под матрицата нарочно: в матрицата не личи, че някой
+     има изключение за темата — двете се четат само едно до друго. */
+  var head = '<div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px;">' +
+    '<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;font-weight:700;">Изключения по човек</div>' +
+    '<button onclick="openNotifOverrideModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:6px;padding:4px 10px;font-size:11.5px;cursor:pointer;">+ Ново изключение</button>' +
+    '</div>' +
+    '<div style="font-size:11px;color:#94a3b8;margin-bottom:8px;">Изключението бие матрицата за конкретния човек: „включва" го добавя извън групите му, „изключва" го маха.</div>';
+  if (!adminNotifOverrides.length) {
+    body.innerHTML = head + '<div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;">Няма изключения.</div>';
+    return;
+  }
+  var rows = adminNotifOverrides.map(function(o){
+    var inc = o.mode === 'include';
+    return '<tr>' +
+      '<td style="font-size:12px;">' + esc(o.user_email) + '</td>' +
+      '<td style="font-size:12px;">' + esc(notifTopicLabel(o.topic_key)) + '</td>' +
+      '<td><span style="background:' + (inc?'#dcfce7':'#fee2e2') + ';color:' + (inc?'#166534':'#991b1b') + ';padding:2px 8px;border-radius:20px;font-size:10px;font-weight:700;">' +
+        (NOTIF_MODE_LABELS[o.mode] || esc(o.mode)) + '</span></td>' +
+      '<td style="font-size:12px;">' + (o.channel ? (NOTIF_CHANNEL_LABELS[o.channel] || esc(o.channel)) : '<span style="color:#cbd5e1;">—</span>') + '</td>' +
+      '<td style="font-size:12px;">' + (o.scope ? (NOTIF_SCOPE_LABELS[o.scope] || esc(o.scope)) : '<span style="color:#cbd5e1;">—</span>') + '</td>' +
+      '<td style="font-size:11px;color:#64748b;">' + (o.note ? esc(o.note) : '') + '</td>' +
+      '<td><button onclick="deleteNotifOverride(\'' + esc(o.id) + '\')" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button></td>' +
+    '</tr>';
+  }).join('');
+  body.innerHTML = head + '<div class="tbl-wrap"><table>' +
+    '<thead><tr><th>Човек</th><th>Тема</th><th>Режим</th><th>Канал</th><th>Обхват</th><th>Бележка</th><th></th></tr></thead>' +
+    '<tbody>' + rows + '</tbody></table></div>';
+}
+
+function openNotifOverrideModal(){
+  if (!adminNotifTopics.length) { toast('Темите не са заредени','#dc2626'); return; }
+  if (!adminNotifUsers.length) { toast('Списъкът с потребители не е зареден','#dc2626'); return; }
+  _renderNotifOverrideModal();
+}
+
+function _renderNotifOverrideModal(){
+  var old = document.getElementById('notif-ovr-modal-ov'); if(old) old.remove();
+  var html = '<div class="bov open" id="notif-ovr-modal-ov" onclick="if(event.target===this)closeNotifOverrideModal()">' +
+    '<div class="bmod" style="width:440px;max-height:88vh;overflow-y:auto;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+    '<div style="font-size:15px;font-weight:700;">👤 Ново изключение</div>' +
+    '<button onclick="closeNotifOverrideModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<label class="fl">Човек *</label>' +
+    '<select class="fi" id="ntf-ovr-user" style="margin-bottom:10px;">' +
+      adminNotifUsers.map(function(u){
+        return '<option value="' + escAttr(u.email) + '">' + esc((u.display_name || u.email) + ' · ' + u.email) + '</option>';
+      }).join('') +
+    '</select>' +
+    '<label class="fl">Тема *</label>' +
+    '<select class="fi" id="ntf-ovr-topic" style="margin-bottom:10px;">' +
+      adminNotifTopics.map(function(t){
+        return '<option value="' + escAttr(t.key) + '">' + esc(t.label) + '</option>';
+      }).join('') +
+    '</select>' +
+    '<label class="fl">Режим *</label>' +
+    '<select class="fi" id="ntf-ovr-mode" onchange="notifOverrideModeChange()" style="margin-bottom:10px;">' +
+      '<option value="include">включва — получава, макар групите му да не го дават</option>' +
+      '<option value="exclude">изключва — не получава, макар групите му да го дават</option>' +
+    '</select>' +
+    '<div id="ntf-ovr-chan-box">' +
+      '<label class="fl">Канал</label>' +
+      '<select class="fi" id="ntf-ovr-channel" style="margin-bottom:10px;">' +
+        ['email','push','both'].map(function(c){
+          return '<option value="' + c + '">' + NOTIF_CHANNEL_LABELS[c] + '</option>';
+        }).join('') +
+      '</select>' +
+      '<label class="fl">Обхват</label>' +
+      '<select class="fi" id="ntf-ovr-scope" style="margin-bottom:10px;">' +
+        ['all','own_stores','own_tasks'].map(function(s){
+          return '<option value="' + s + '">' + NOTIF_SCOPE_LABELS[s] + '</option>';
+        }).join('') +
+      '</select>' +
+    '</div>' +
+    '<label class="fl">Бележка</label>' +
+    '<input class="fi" id="ntf-ovr-note" placeholder="защо е направено изключението" style="margin-bottom:14px;">' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">' +
+    '<button onclick="closeNotifOverrideModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="submitNotifOverride()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Запази</button>' +
+    '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+/* При „изключва" канал и обхват не значат нищо — скриват се и се пишат NULL. */
+function notifOverrideModeChange(){
+  var box = document.getElementById('ntf-ovr-chan-box');
+  if (box) box.style.display = (v('ntf-ovr-mode') === 'exclude') ? 'none' : 'block';
+}
+
+function closeNotifOverrideModal(){
+  var ov = document.getElementById('notif-ovr-modal-ov'); if(ov) ov.remove();
+}
+
+function submitNotifOverride(){
+  var email = v('ntf-ovr-user');
+  var topic = v('ntf-ovr-topic');
+  var mode  = v('ntf-ovr-mode');
+  if (!email || !topic) { toast('Избери човек и тема','#dc2626'); return; }
+  /* Уникалността е (user_email, topic_key) в базата — 409 оттам е верният
+     отговор, но безполезен за човека. Затова се казва ПРЕДИ заявката. */
+  var dup = adminNotifOverrides.filter(function(o){
+    return o.user_email === email && o.topic_key === topic;
+  })[0];
+  if (dup) {
+    toast('⚠️ ' + email + ' вече има изключение за „' + notifTopicLabel(topic) + '" — изтрий старото първо.', '#dc2626');
+    return;
+  }
+  var isExclude = mode === 'exclude';
+  var payload = {
+    user_email: email,
+    topic_key: topic,
+    mode: mode,
+    channel: isExclude ? null : v('ntf-ovr-channel'),
+    scope:   isExclude ? null : v('ntf-ovr-scope'),
+    note: v('ntf-ovr-note') || null
+  };
+  sbPost('notification_overrides', payload).then(function(res){
+    if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); return; }
+    logAudit('notif_override_added', { details: payload });
+    toast('✅ Изключението е записано');
+    closeNotifOverrideModal();
+    loadNotificationsAdmin();
+  });
+}
+
+function deleteNotifOverride(id){
+  var o = adminNotifOverrides.filter(function(x){ return x.id === id; })[0];
+  if (!confirm('Изтрий изключението' + (o ? ' на ' + o.user_email : '') + '?')) return;
+  sbDelete('notification_overrides','id=eq.' + encodeURIComponent(id)).then(function(res){
+    if(!res.ok){ toast('Грешка при изтриване: ' + sbErrMsg(res), '#dc2626'); return; }
+    if (res.count === 0) { toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadNotificationsAdmin(); return; }
+    logAudit('notif_override_deleted', { details: { id: id, user_email: o ? o.user_email : null, topic_key: o ? o.topic_key : null } });
+    toast('✅ Изтрито');
+    loadNotificationsAdmin();
+  });
+}
+
+/* ── users.notify_groups — колоната „Групи" в списъка с потребители ─────── */
+
+var NOTIFY_GROUP_LABELS = { co: 'ЦО', controlling: 'Контролинг', regional: 'Регионален', owner: 'Собственик' };
+var NOTIFY_GROUP_ORDER  = ['co','controlling','regional','owner'];
+
+function notifyGroupsOf(u){
+  var g = u && u.notify_groups;
+  if (Array.isArray(g)) return g;
+  if (typeof g === 'string' && g.length > 2) {
+    return g.replace(/^{|}$/g,'').split(',')
+      .map(function(s){ return s.trim().replace(/^"|"$/g,''); })
+      .filter(Boolean);
+  }
+  return [];
+}
+
+/* is_regional и notify_groups са ДВЕ независими полета. report.js още чете
+   is_regional, затова тя не се пипа тук — обединяването им е отделна задача.
+   Разминаването само се показва: ⚠️ на реда, без автоматична поправка. */
+function notifyGroupsMismatch(u){
+  return (!!(u && u.is_regional)) !== (notifyGroupsOf(u).indexOf('regional') >= 0);
+}
+
+function notifyGroupsCell(u){
+  var g = notifyGroupsOf(u);
+  var badges = g.length
+    ? g.map(function(k){
+        return '<span style="background:#eef2ff;color:#3730a3;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;margin-right:3px;">' +
+          esc(NOTIFY_GROUP_LABELS[k] || k) + '</span>';
+      }).join('')
+    : '<span style="color:#94a3b8;">—</span>';
+  var warn = notifyGroupsMismatch(u)
+    ? '<span title="is_regional и notify_groups не съвпадат — проверѝ ръчно" style="color:#b45309;font-weight:700;margin-right:4px;">⚠️</span>'
+    : '';
+  return warn + badges;
+}
+
+var _notifyGroupsUserId = null;
+var _notifyGroupsUserName = null;
+
+function editNotifyGroups(userId, userName){
+  _notifyGroupsUserId = userId;
+  _notifyGroupsUserName = userName;
+  sbGet('users','id=eq.' + userId + '&select=notify_groups,is_regional').then(function(data){
+    var u = (Array.isArray(data) && data[0]) ? data[0] : {};
+    _renderNotifyGroupsModal(userName, notifyGroupsOf(u), !!u.is_regional);
+  });
+}
+
+function _renderNotifyGroupsModal(userName, currentList, isRegional){
+  var old = document.getElementById('notify-groups-modal-ov'); if(old) old.remove();
+  var mismatch = isRegional !== (currentList.indexOf('regional') >= 0);
+  var html = '<div class="bov open" id="notify-groups-modal-ov" onclick="if(event.target===this)closeNotifyGroupsModal()">' +
+    '<div class="bmod" style="width:400px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">' +
+    '<div style="font-size:15px;font-weight:700;">🔔 Групи за известия — ' + esc(userName) + '</div>' +
+    '<button onclick="closeNotifyGroupsModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<div style="font-size:11.5px;color:#64748b;margin-bottom:10px;">Групата решава кои теми стигат до човека — според матрицата в „🔔 Известия". Група „Магазин" не се задава тук: тя следва обекта на човека.</div>' +
+    (mismatch
+      ? '<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 10px;font-size:11.5px;margin-bottom:10px;">⚠️ is_regional = ' + (isRegional?'да':'не') + ', а групата „Регионален" ' + (isRegional?'липсва':'е сложена') + '. Двете полета се четат от различен код (report.js чете is_regional) — изравни ги съзнателно.</div>'
+      : '') +
+    '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px;">' +
+    NOTIFY_GROUP_ORDER.map(function(k){
+      return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;font-size:13px;cursor:pointer;">' +
+        '<input type="checkbox" class="ntf-grp-cb" value="' + k + '" ' + (currentList.indexOf(k)>=0?'checked':'') + '> ' +
+        esc(NOTIFY_GROUP_LABELS[k]) + '</label>';
+    }).join('') +
+    '</div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+    '<button onclick="closeNotifyGroupsModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button onclick="submitNotifyGroups()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Запази</button>' +
+    '</div></div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeNotifyGroupsModal(){
+  var ov = document.getElementById('notify-groups-modal-ov'); if(ov) ov.remove();
+  _notifyGroupsUserId = null;
+  _notifyGroupsUserName = null;
+}
+
+function submitNotifyGroups(){
+  /* Колоната е NOT NULL — при нула отметки се пише празен масив, не null. */
+  var sel = [].map.call(document.querySelectorAll('.ntf-grp-cb:checked'), function(cb){ return cb.value; });
+  sbPatch('users','id=eq.' + _notifyGroupsUserId, { notify_groups: sel }).then(function(res){
+    if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); return; }
+    logAudit('user_notify_groups_changed', {
+      details: { target_user_id: _notifyGroupsUserId, target_user_name: _notifyGroupsUserName, groups: sel }
+    });
+    toast('✅ Групите са записани');
+    closeNotifyGroupsModal();
+    loadUsersAdmin();
+  });
 }

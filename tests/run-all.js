@@ -82,7 +82,8 @@ const TESTS = [
   'kasa-returned-in-reports.test.js',
   'report-groups-users.test.js',
   'no-auto-push-on-load.test.js',
-  'notify-topic-button.test.js'
+  'notify-topic-button.test.js',
+  'admin-notifications.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

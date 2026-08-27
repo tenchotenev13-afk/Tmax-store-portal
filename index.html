@@ -372,9 +372,16 @@ OneSignalDeferred.push(async function(OneSignal) {
         <button onclick="openUserModal(null)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави колега</button>
       </div>
       <div class="tbl-wrap"><table>
-        <thead><tr><th>Имейл</th><th>Име</th><th>Магазин</th><th>Роля</th><th>Назначени магазини</th><th>Оборот имейл</th></tr></thead>
+        <thead><tr><th>Имейл</th><th>Име</th><th>Магазин</th><th>Роля</th><th>Назначени магазини</th><th>Оборот имейл</th><th>Групи</th></tr></thead>
         <tbody id="users-body"></tbody>
       </table></div>
+    </div>
+    <div class="card" id="notif-admin-card">
+      <div class="card-title">🔔 Известия</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:10px;">Управлява какво се праща, кога и на кого. Промяната важи от следващото събуждане на крона — той се буди на всеки 15 минути.</div>
+      <div id="notif-topics-body"><div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;">⏳ Зареждане...</div></div>
+      <div id="notif-matrix-body"><div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;">⏳ Зареждане...</div></div>
+      <div id="notif-overrides-body"><div style="text-align:center;padding:16px;color:#94a3b8;font-size:12px;">⏳ Зареждане...</div></div>
     </div>
     <div class="card">
       <div class="card-title">🏪 Магазини</div>

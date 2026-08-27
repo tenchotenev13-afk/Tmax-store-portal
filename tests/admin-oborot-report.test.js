@@ -119,8 +119,8 @@ async function save(h) {
       ok('null → клетката показва тире', !!obCell && obCell.textContent.indexOf('—') >= 0,
         obCell ? obCell.textContent.trim() : 'няма клетка');
       ok('всеки ред има молив за оборота', r.trs.every(tr => !!pencilIn(tr)));
-      ok('редът има 7 клетки (6 заглавни + действията)',
-        cells.length === 7, 'клетки: ' + cells.length);
+      ok('редът има 8 клетки (7 заглавни + действията)',
+        cells.length === 8, 'клетки: ' + cells.length);
     }
   }
   {
@@ -139,9 +139,9 @@ async function save(h) {
     const td = r.body.querySelector('td');
     if (ok('редът „Няма потребители." се рендира', !!td && td.textContent.indexOf('Няма потребители') >= 0)) {
       const cs = parseInt(td.getAttribute('colspan') || '0', 10);
-      /* Колоните в реда са 7; colspan под това оставя стеснен ред, който
+      /* Колоните в реда са 8; colspan под това оставя стеснен ред, който
          изглежда като счупена таблица. */
-      ok('colspan покрива всичките 7 колони', cs === 7, 'colspan=' + cs);
+      ok('colspan покрива всичките 8 колони', cs === 8, 'colspan=' + cs);
     }
   }
 
