@@ -576,24 +576,30 @@ function sendPromoExpiringNotification(){
     else toast('❌ Грешка при изпращане на нотификация','#dc2626');
   });
 }
-/* ═══════ АВТОМАТИЧНИ НОТИФИКАЦИИ (веднъж на ден, при зареждане) ══════
-   Забележка: dedup-ът е през localStorage на браузъра, не централизирано —
-   ако няколко админа заредят бюлетина в един и същ ден, е възможно нотификация
-   да се изпрати повече от веднъж (по 1 на устройство). За истинска гаранция за
-   еднократност е нужна сървърна (cron) задача — извън обхвата на клиентския код. */
-function autoCheckBulletinNotifications(){
-  if(!canEdit())return; /* само редактиращите роли инициират автоматични известия */
-  autoCheckPromoNotifications();
-  autoCheckDailyDeadlines();
-}
-function autoCheckPromoNotifications(){
-  var key='auto_promo_notif_'+today();
-  try{ if(localStorage.getItem(key))return; }catch(e){}
-  var m=composePromoExpiringMessage();
-  try{ localStorage.setItem(key,'1'); }catch(e){}
-  if(!m || typeof pushToAll!=='function')return;
-  pushToAll(m.title,m.msg);
-}
+/* ═══════ ИЗВЕСТИЯТА НЕ ТРЪГВАТ ОТ БРАУЗЪРА (от 27.08.2026) ═══════════
+   Тук стояха autoCheckBulletinNotifications / autoCheckPromoNotifications /
+   autoCheckDailyDeadlines — пращаха push при ЗАРЕЖДАНЕ на Бюлетина от админ,
+   а защитата срещу повторение беше localStorage на неговия браузър. Тоест
+   двама админи в един ден = две известия, а нула админи = нула известия.
+
+   На 27.08.2026 в 08:50 това сработи на живо: „📅 3 срока днес — Осчетоводяване
+   на минуси (08:30), СПРАВКА МИНУСИ (20:00), Вечерен оборот (20:00)" отиде до
+   ВСИЧКИ. Три отделни дефекта в едно съобщение: тръгна според това кой е
+   отворил портала; отиде до всички, а не до обекта, чиито са задачите; и
+   съобщи вечерни задачи в осем и половина сутринта.
+
+   Заместникът е едж функцията `bulletin-notify`, тема `today_deadlines`: крон,
+   два часа преди часа на задачата (най-рано 08:00), само неотметнатото и само
+   задачите на съответния обект. Два механизма за едно и също значеха по две
+   известия на ден — клиентският отпада.
+
+   Промоциите СЪЗНАТЕЛНО остават без автоматичен заместник: по-добре нищо,
+   отколкото известие, което тръгва според това кой е отворил портала. Ръчният
+   бутон при изтичащите промоции (sendPromoExpiringNotification) работи както
+   досега.
+
+   Ръчният бутон за днешните срокове (sendDailyDeadlinesNotification, менюто
+   „🔔 Нотификации") също остава — резерв, докато новата тема се докаже. */
 
 
 
@@ -803,7 +809,7 @@ function loadBulletin(){
       bulTasks=Array.isArray(t)?t:[];
       if(!bulTasks.length){
         bulComps=[];subtaskComps=[];recurringComps=[];
-        renderBulletin();autoCheckBulletinNotifications();return;
+        renderBulletin();return;
       }
       var ids=bulTasks.map(function(x){return x.id;}).join(',');
       var cq='task_id=in.('+ids+')'+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
@@ -818,17 +824,17 @@ function loadBulletin(){
               return r.text().then(function(errText){
                 console.error('task_completions (recurring) GET грешка:', errText);
                 toast('Грешка при постоянните задачи: '+errText.slice(0,150),'#dc2626');
-                recurringComps=[];renderBulletin();autoCheckBulletinNotifications();
+                recurringComps=[];renderBulletin();
               });
             }
             return r.json().then(function(rc){
               recurringComps=Array.isArray(rc)?rc:[];
-              renderBulletin();autoCheckBulletinNotifications();
+              renderBulletin();
             });
-          }).catch(function(){recurringComps=[];renderBulletin();autoCheckBulletinNotifications();});
-        }).catch(function(){subtaskComps=[];renderBulletin();autoCheckBulletinNotifications();});
-      }).catch(function(){bulComps=[];subtaskComps=[];recurringComps=[];renderBulletin();autoCheckBulletinNotifications();});
-    }).catch(function(){bulTasks=[];bulComps=[];renderBulletin();autoCheckBulletinNotifications();});
+          }).catch(function(){recurringComps=[];renderBulletin();});
+        }).catch(function(){subtaskComps=[];renderBulletin();});
+      }).catch(function(){bulComps=[];subtaskComps=[];recurringComps=[];renderBulletin();});
+    }).catch(function(){bulTasks=[];bulComps=[];renderBulletin();});
   }).catch(function(){
     var wrap=document.getElementById('mod-bulletin');
     if(wrap)wrap.innerHTML='<div style="color:#dc2626;padding:40px;text-align:center;">Грешка при зареждане.</div>';
@@ -2319,17 +2325,6 @@ function sendDailyDeadlinesNotification(){
       if(res && res.ok) showBulToast('🔔 Изпратена!');
       else showBulToast('❌ Грешка при изпращане');
     });
-  });
-}
-function autoCheckDailyDeadlines(){
-  var key='auto_deadlines_notif_'+today();
-  try{ if(localStorage.getItem(key))return; }catch(e){}
-  collectTodayDeadlineItems(function(items){
-    try{ localStorage.setItem(key,'1'); }catch(e){}
-    if(!items.length || typeof pushToAll!=='function')return;
-    var title = '📅 '+items.length+' срок'+(items.length===1?'':'а')+' днес';
-    var msg = formatDeadlinesMessage(items);
-    pushToAll(title,msg);
   });
 }
 
