@@ -126,6 +126,24 @@ function matrixCell(doc, label, group) {
   return tr ? tr.cells[1 + GROUP_COL[group]] : null;
 }
 const selectsIn = td => Array.prototype.slice.call(td.querySelectorAll('select'));
+/* Обхватът вече не е <select> в клетката, а кликаем текст под канала —
+   таблицата не се побираше при пет групи по два падащи списъка. */
+const scopeTxt  = td => td.querySelector('.ntf-scope-txt');
+const scopeOpts = doc => Array.prototype.slice.call(
+  doc.querySelectorAll('#notif-scope-modal-ov .ntf-scope-opt'));
+const scopeModal = doc => doc.getElementById('notif-scope-modal-ov');
+/* Отваря модала за обхват на дадена клетка. Връща true/false вместо да
+   хвърли: при счупен рендер (обхватът пак е <select>, тоест няма onclick)
+   провалът трябва да е ЕДНА паднала проверка, а не убит тест — иначе
+   всички следващи секции мълчат и не се научава нищо. */
+const openScope = (h, label, group) =>
+  guard('обхватът на „' + label + '" · ' + group + ' се отваря',
+    () => realClick(h.w, scopeTxt(matrixCell(h.doc, label, group))));
+
+/* Тема с/без строител в bulletin-notify — виж секции 15 и 16. */
+const cbOf = row => row.cells[TOPIC_COL.active].querySelector('input[type="checkbox"]');
+const withActive = (key, val) => TOPICS.map(
+  t => (t.key === key ? Object.assign({}, t, { active: val }) : t));
 
 const matrixPosts   = h => h.calls.post.filter(p => p.table === 'notification_matrix');
 const matrixPatches = h => h.calls.patch.filter(p => p.table === 'notification_matrix');
@@ -343,8 +361,7 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
     const td = matrixCell(h.doc, 'Просрочени задачи', 'co');
     if (ok('празната клетка съществува', !!td)) {
       ok('показва „—"', td.textContent.indexOf('—') >= 0, td.textContent);
-      ok('няма избор за обхват, докато няма ред', selectsIn(td).length === 1,
-        'селекти: ' + selectsIn(td).length);
+      ok('няма обхват, докато няма ред', !scopeTxt(td), td.innerHTML);
       ok('каналът стои на „—"', selectsIn(td)[0].value === 'none', selectsIn(td)[0].value);
 
       const chan = selectsIn(td)[0];
@@ -365,8 +382,10 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
         ok('обхватът по подразбиране е „all", не празно', b.scope === 'all', JSON.stringify(b));
       }
       const after = matrixCell(h.doc, 'Просрочени задачи', 'co');
-      ok('след записа се появява и изборът за обхват', selectsIn(after).length === 2,
-        'селекти: ' + selectsIn(after).length);
+      ok('след записа се появява и обхватът', !!scopeTxt(after), after.innerHTML);
+      ok('и той е „всичко" — стойността, която POST-ът записа',
+        scopeTxt(after) && scopeTxt(after).textContent.trim() === 'всичко',
+        scopeTxt(after) ? scopeTxt(after).textContent : '—');
     }
     h.close();
   }
@@ -376,8 +395,8 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
        и трупа дубликати. */
     const h = await loaded();
     const td = matrixCell(h.doc, 'Просрочени задачи', 'regional');
-    ok('КОНТРОЛ: пълната клетка НЕ показва „—" за обхвата', selectsIn(td).length === 2,
-      'селекти: ' + selectsIn(td).length);
+    ok('КОНТРОЛ: пълната клетка показва обхват, не „—"',
+      !!scopeTxt(td) && !td.querySelector('.ntf-empty-cell'), td.innerHTML);
     const chan = selectsIn(td)[0];
     chan.value = 'both';
     fire(h.w, chan, 'change');
@@ -386,22 +405,31 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
       matrixPatches(h).length === 1 && matrixPosts(h).length === 0,
       'patch=' + matrixPatches(h).length + ' post=' + matrixPosts(h).length);
 
-    /* И обхватът се пише отделно, на същия ред. */
-    const scope = selectsIn(matrixCell(h.doc, 'Просрочени задачи', 'regional'))[1];
-    scope.value = 'all';
-    fire(h.w, scope, 'change');
-    await ticks();
-    ok('КОНТРОЛ: смяната на обхват също е PATCH', matrixPatches(h).length === 2);
-    ok('КОНТРОЛ: с новата стойност', matrixPatches(h)[1].body.scope === 'all',
-      JSON.stringify(matrixPatches(h)[1].body));
+    /* И обхватът се пише отделно, на същия ред — вече през модала. */
+    if (openScope(h, 'Просрочени задачи', 'regional')) {
+      const optAll = scopeOpts(h.doc).find(b => b.getAttribute('data-scope') === 'all');
+      if (ok('КОНТРОЛ: модалът предлага „всичко"', !!optAll)) {
+        realClick(h.w, optAll);
+        await ticks();
+        const ps = matrixPatches(h);
+        ok('КОНТРОЛ: смяната на обхват също е PATCH', ps.length === 2,
+          JSON.stringify(ps.map(p => p.body)));
+        ok('КОНТРОЛ: с новата стойност', ps.length === 2 && ps[1].body.scope === 'all',
+          JSON.stringify(ps.map(p => p.body)));
+      }
+    }
 
     /* own_tasks няма смисъл за група „Магазин" — не се предлага изобщо. */
-    const storeTd = matrixCell(h.doc, 'Изтичащи промоции', 'store');
-    const opts = Array.prototype.slice.call(selectsIn(storeTd)[1].querySelectorAll('option')).map(o => o.value);
-    ok('за група „Магазин" няма обхват „своите задачи"', opts.indexOf('own_tasks') < 0, opts.join(','));
-    const coTd = matrixCell(h.doc, 'Просрочени задачи', 'controlling');
-    const coOpts = Array.prototype.slice.call(selectsIn(coTd)[1].querySelectorAll('option')).map(o => o.value);
-    ok('КОНТРОЛ: за другите групи го има', coOpts.indexOf('own_tasks') >= 0, coOpts.join(','));
+    if (openScope(h, 'Изтичащи промоции', 'store')) {
+      const opts = scopeOpts(h.doc).map(b => b.getAttribute('data-scope'));
+      ok('за група „Магазин" няма обхват „своите задачи"', opts.indexOf('own_tasks') < 0, opts.join(','));
+      h.w.closeNotifScopeModal();
+    }
+    if (openScope(h, 'Просрочени задачи', 'controlling')) {
+      const coOpts = scopeOpts(h.doc).map(b => b.getAttribute('data-scope'));
+      ok('КОНТРОЛ: за другите групи го има', coOpts.indexOf('own_tasks') >= 0, coOpts.join(','));
+      h.w.closeNotifScopeModal();
+    }
     h.close();
   }
 
@@ -476,8 +504,10 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
   /* ═══ 9. Превключвателят записва веднага ════════════════════════════ */
   section('9. „Включена" записва веднага');
   {
-    const h = await loaded();
-    const row = topicRow(h.doc, 'Задачите за седмицата');
+    /* Темата нарочно е СЪС строител — превключвателят на тема без строител е
+       заключен и този път не съществува (секция 15). */
+    const h = await loaded({ topics: withActive('today_deadlines', false) });
+    const row = topicRow(h.doc, 'Напомняне до обекта');
     const cb = row.cells[TOPIC_COL.active].querySelector('input[type="checkbox"]');
     if (ok('превключвателят съществува', !!cb)) {
       ok('спряната тема е с празна отметка', cb.checked === false);
@@ -489,9 +519,9 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
       ok('пише се само active', p.length === 1 && Object.keys(p[0].body).join(',') === 'active',
         p.length ? Object.keys(p[0].body).join(',') : '—');
       ok('със стойност true', p.length === 1 && p[0].body.active === true);
-      ok('филтърът сочи темата', p.length === 1 && p[0].url.indexOf('key=eq.weekly_digest') >= 0, p[0].url);
+      ok('филтърът сочи темата', p.length === 1 && p[0].url.indexOf('key=eq.today_deadlines') >= 0, p[0].url);
       ok('редът се пречертава като включен',
-        topicRow(h.doc, 'Задачите за седмицата').cells[TOPIC_COL.active].textContent.indexOf('вкл.') >= 0);
+        topicRow(h.doc, 'Напомняне до обекта').cells[TOPIC_COL.active].textContent.indexOf('вкл.') >= 0);
       ok('и е записан одит',
         h.calls.post.some(x => x.table === 'audit_log' && x.body.event === 'notif_topic_active_changed'));
       /* Включването НЕ пита — то връща нормалното състояние и не крие нищо. */
@@ -546,8 +576,8 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
   }
   {
     /* Провалът не бива да мълчи: редът не трябва да остане „включен". */
-    const h = await loaded({ fail: { PATCH: /notification_topics/ } });
-    const cb = topicRow(h.doc, 'Задачите за седмицата').cells[TOPIC_COL.active].querySelector('input');
+    const h = await loaded({ topics: withActive('today_deadlines', false), fail: { PATCH: /notification_topics/ } });
+    const cb = topicRow(h.doc, 'Напомняне до обекта').cells[TOPIC_COL.active].querySelector('input');
     cb.checked = true;
     fire(h.w, cb, 'change');
     await ticks();
@@ -793,6 +823,292 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
     ok('нито едж функцията директно',
       block.indexOf('functions/v1/') < 0 && block.indexOf('fetch(') < 0);
     ok('и не пипа users.is_regional при запис', !/notify_groups: sel[\s\S]{0,200}is_regional/.test(block));
+  }
+
+  /* ═══ 15. Теми без строител ═════════════════════════════════════════ */
+  /* Екранът показва осем теми, а строител в bulletin-notify имат три. Без
+     тази разлика „Дневен отчет · спряна" изглежда точно като тема, която
+     чака да я включиш — включваш я, чакаш отчета, а темата се събужда и
+     връща „Темата още не е реализирана в кода". */
+  section('15. Тема без строител — приглушена, заключена, назована');
+  {
+    const h = await loaded();
+    const impl   = topicRow(h.doc, 'Просрочени задачи');       /* overdue_tasks */
+    const noImpl = topicRow(h.doc, 'Задачите за седмицата');   /* weekly_digest */
+    if (ok('двата реда се рендират', !!impl && !!noImpl)) {
+      /* 1. Тема СЪС строител — превключвателят работи. */
+      ok('тема със строител — превключвателят НЕ е заключен',
+        cbOf(impl).disabled === false, 'disabled=' + cbOf(impl).disabled);
+      /* 2. Тема БЕЗ строител — заключен превключвател и бележка. */
+      ok('тема без строител — превключвателят е ЗАКЛЮЧЕН',
+        cbOf(noImpl).disabled === true, 'disabled=' + cbOf(noImpl).disabled);
+      ok('и редът носи бележката',
+        noImpl.cells[TOPIC_COL.name].textContent.indexOf('още не е свързана с код') >= 0,
+        noImpl.cells[TOPIC_COL.name].textContent);
+      ok('редът е приглушен',
+        (noImpl.getAttribute('style') || '').indexOf('color:#94a3b8') >= 0,
+        noImpl.getAttribute('style'));
+      /* Часът и дните може да се подготвят предварително — бутонът остава. */
+      const edit = btn(noImpl.cells[6], '✏️');
+      ok('бутонът за редакция си стои', !!edit, noImpl.cells[6].innerHTML);
+      ok('и НЕ е заключен', edit && edit.disabled === false);
+      if (edit && guard('редакцията се отваря и за тема без строител',
+        () => realClick(h.w, edit))) {
+        ok('модалът е на екрана', !!h.doc.getElementById('notif-topic-modal-ov'));
+        h.w.closeNotifTopicModal();
+      }
+    }
+    h.close();
+  }
+  {
+    /* Анти-тавтология за 2: „заключен + бележка" е безсмислено, ако важи за
+       всеки ред. Същите две проверки, обърнати, срещу тема СЪС строител. */
+    const h = await loaded();
+    const impl = topicRow(h.doc, 'Просрочени задачи');
+    ok('КОНТРОЛ: тема със строител НЯМА бележката',
+      impl.cells[TOPIC_COL.name].textContent.indexOf('още не е свързана с код') < 0,
+      impl.cells[TOPIC_COL.name].textContent);
+    ok('КОНТРОЛ: и редът ѝ не е приглушен',
+      (impl.getAttribute('style') || '').indexOf('color:#94a3b8') < 0,
+      impl.getAttribute('style'));
+    ok('КОНТРОЛ: бележката се среща точно веднъж — колкото са темите без строител',
+      h.doc.getElementById('notif-topics-body').textContent.split('още не е свързана с код').length - 1
+        === TOPICS.filter(t => h.w.NOTIF_IMPLEMENTED_TOPICS.indexOf(t.key) < 0).length,
+      'намерени ' + (h.doc.getElementById('notif-topics-body').textContent.split('още не е свързана с код').length - 1));
+    /* Заключването не е само в HTML-а: функцията е глобална и се вика по име
+       от inline onchange, тоест е достижима и при disabled вход. */
+    const before = h.calls.patch.length;
+    h.w.toggleNotifTopicActive('weekly_digest', true);
+    await ticks();
+    ok('КОНТРОЛ: викната по име, функцията пак отказва',
+      h.calls.patch.filter(x => x.table === 'notification_topics').length === 0,
+      'patch-ове: ' + (h.calls.patch.length - before));
+    h.close();
+  }
+  {
+    /* 3. Тема без строител, но active=true в базата — състояние, което не
+       бива да съществува. Вижда се, не се крие. */
+    const h = await loaded({ topics: withActive('weekly_digest', true) });
+    const row = topicRow(h.doc, 'Задачите за седмицата');
+    ok('предупредителният знак се показва',
+      row.cells[TOPIC_COL.name].textContent.indexOf('⚠️') >= 0,
+      row.cells[TOPIC_COL.name].textContent);
+    ok('и бележката остава',
+      row.cells[TOPIC_COL.name].textContent.indexOf('още не е свързана с код') >= 0);
+    ok('превключвателят пак е заключен', cbOf(row).disabled === true);
+    ok('КОНТРОЛ: същата тема, спряна — знак НЯМА',
+      (function () {
+        const row2 = topicRow(h.doc, 'Просрочени задачи');
+        return row2.cells[TOPIC_COL.name].textContent.indexOf('⚠️') < 0;
+      })());
+    h.close();
+  }
+  {
+    /* КОНТРОЛ: знакът не е залепен за темата, а за състоянието — същият ред
+       със същия ключ, но active=false, не го показва. */
+    const h = await loaded();
+    const row = topicRow(h.doc, 'Задачите за седмицата');
+    ok('КОНТРОЛ: тема без строител и БЕЗ active няма знак',
+      row.cells[TOPIC_COL.name].textContent.indexOf('⚠️') < 0,
+      row.cells[TOPIC_COL.name].textContent);
+    ok('КОНТРОЛ: нито един ред във фикстурата не носи знака',
+      h.doc.getElementById('notif-topics-body').textContent.indexOf('⚠️') < 0);
+    h.close();
+  }
+
+  /* ═══ 16. Стеснената матрица ════════════════════════════════════════ */
+  /* Пет групи по ДВА падащи списъка не се побират: таблицата тръгваше на
+     хоризонтален плъзгач и последната колона излизаше отрязана. */
+  section('16. В клетката остава само каналът; обхватът е текст + модал');
+  {
+    const h = await loaded();
+    const td = matrixCell(h.doc, 'Просрочени задачи', 'controlling');
+    if (ok('клетката съществува', !!td)) {
+      /* 4. Един <select>, не два. */
+      ok('клетката има ТОЧНО един <select>', selectsIn(td).length === 1,
+        'селекти: ' + selectsIn(td).length);
+      ok('и той е каналът, не обхватът',
+        selectsIn(td)[0].getAttribute('onchange').indexOf('notifMatrixChannel') >= 0,
+        selectsIn(td)[0].getAttribute('onchange'));
+      ok('обхватът е текст, не падащо меню', !!scopeTxt(td), td.innerHTML);
+      ok('и показва стойността от базата', scopeTxt(td).textContent.trim() === 'всичко',
+        scopeTxt(td).textContent);
+    }
+    h.close();
+  }
+  {
+    /* Анти-тавтология за 4: „един селект" минава и срещу клетка, в която е
+       останал само обхватът. Затова се брои и какво е в единствения селект,
+       и че никоя клетка в цялата таблица не носи втори. */
+    const h = await loaded();
+    const td = matrixCell(h.doc, 'Просрочени задачи', 'controlling');
+    const chanOpts = Array.prototype.slice.call(selectsIn(td)[0].querySelectorAll('option')).map(o => o.value);
+    ok('КОНТРОЛ: единственият селект носи четирите канала',
+      chanOpts.join(',') === 'none,email,push,both', chanOpts.join(','));
+    ok('КОНТРОЛ: и НЕ носи обхвати',
+      chanOpts.indexOf('own_stores') < 0 && chanOpts.indexOf('own_tasks') < 0, chanOpts.join(','));
+    /* Само клетките на групите — първата колона е името на темата. */
+    const cells = Array.prototype.slice.call(
+      h.doc.querySelectorAll('#notif-matrix-body tbody tr'))
+      .reduce((acc, tr) => acc.concat(Array.prototype.slice.call(tr.cells, 1)), []);
+    const many = cells.filter(c => selectsIn(c).length > 1);
+    ok('КОНТРОЛ: НИТО ЕДНА клетка в таблицата няма втори селект',
+      many.length === 0, 'клетки с 2+ селекта: ' + many.length);
+    ok('КОНТРОЛ: но селекти изобщо ИМА — таблицата не е празна',
+      cells.length === TOPICS.length * 5 &&
+      cells.every(c => selectsIn(c).length === 1),
+      'клетки: ' + cells.length + ', с точно един селект: ' +
+        cells.filter(c => selectsIn(c).length === 1).length);
+    ok('легендата под таблицата остава',
+      h.doc.getElementById('notif-matrix-body').textContent.indexOf('своите задачи') >= 0);
+    h.close();
+  }
+  {
+    /* 5. Клик по текста отваря модала; изборът праща PATCH със scope. */
+    const h = await loaded();
+    ok('преди клика модал НЯМА', !scopeModal(h.doc));
+    const td = matrixCell(h.doc, 'Просрочени задачи', 'regional');
+    ok('обхватът в базата е „своите обекти"', scopeTxt(td).textContent.trim() === 'своите обекти',
+      scopeTxt(td).textContent);
+    if (openScope(h, 'Просрочени задачи', 'regional')) {
+      ok('модалът се отвори', !!scopeModal(h.doc));
+      ok('и назовава темата и групата',
+        scopeModal(h.doc).textContent.indexOf('Просрочени задачи') >= 0 &&
+        scopeModal(h.doc).textContent.indexOf('Регионален') >= 0,
+        scopeModal(h.doc).textContent);
+      ok('КОНТРОЛ: самото отваряне НЕ пише нищо', matrixPatches(h).length === 0,
+        JSON.stringify(matrixPatches(h).map(p => p.body)));
+      const opt = scopeOpts(h.doc).find(b => b.getAttribute('data-scope') === 'own_tasks');
+      if (ok('възможността „своите задачи" я има', !!opt)) {
+        realClick(h.w, opt);
+        await ticks();
+        const p = matrixPatches(h);
+        ok('тръгнал е PATCH', p.length === 1, JSON.stringify(p.map(x => x.body)));
+        ok('със scope, и САМО със scope',
+          p.length === 1 && Object.keys(p[0].body).join(',') === 'scope',
+          p.length ? Object.keys(p[0].body).join(',') : '—');
+        ok('и с новата стойност, не със старата',
+          p.length === 1 && p[0].body.scope === 'own_tasks', JSON.stringify(p.map(x => x.body)));
+        ok('филтърът сочи точно тази клетка',
+          p.length === 1 && p[0].url.indexOf('topic_key=eq.overdue_tasks') >= 0 &&
+          p[0].url.indexOf('group_key=eq.regional') >= 0, p.length ? p[0].url : '—');
+        ok('модалът се затваря след записа', !scopeModal(h.doc));
+        ok('и текстът в клетката вече е новият',
+          scopeTxt(matrixCell(h.doc, 'Просрочени задачи', 'regional')).textContent.trim() === 'своите задачи',
+          scopeTxt(matrixCell(h.doc, 'Просрочени задачи', 'regional')).textContent);
+        ok('записан е одит',
+          h.calls.post.some(x => x.table === 'audit_log' && x.body.event === 'notif_matrix_changed'));
+      }
+    }
+    h.close();
+  }
+  {
+    /* Анти-тавтология за 5: „PATCH след клик" минава и срещу код, който пише
+       при всяко отваряне. Изборът на СЪЩИЯ обхват не бива да пише нищо. */
+    const h = await loaded();
+    if (openScope(h, 'Просрочени задачи', 'regional')) {
+      const same = scopeOpts(h.doc).find(b => b.getAttribute('data-scope') === 'own_stores');
+      ok('КОНТРОЛ: текущият обхват е отбелязан в модала',
+        !!same && same.textContent.indexOf('●') >= 0, same ? same.textContent : '—');
+      if (same) {
+        realClick(h.w, same);
+        await ticks();
+        ok('КОНТРОЛ: същата стойност НЕ праща PATCH', matrixPatches(h).length === 0,
+          JSON.stringify(matrixPatches(h).map(p => p.body)));
+        ok('КОНТРОЛ: и модалът пак се затваря', !scopeModal(h.doc));
+      }
+    }
+    h.close();
+  }
+  {
+    /* 6. Група „Магазин" — две възможности, не три. */
+    const h = await loaded();
+    if (openScope(h, 'Изтичащи промоции', 'store')) {
+      const storeOpts = scopeOpts(h.doc).map(b => b.getAttribute('data-scope'));
+      ok('за „Магазин" модалът предлага ДВЕ възможности', storeOpts.length === 2, storeOpts.join(','));
+      ok('и това са „всичко" и „своите обекти"',
+        storeOpts.join(',') === 'all,own_stores', storeOpts.join(','));
+      h.w.closeNotifScopeModal();
+    }
+    /* КОНТРОЛ: за другите групи са три — иначе „две" би минало и срещу код,
+       който навсякъде реже третата. */
+    if (openScope(h, 'Просрочени задачи', 'controlling')) {
+      const coOpts = scopeOpts(h.doc).map(b => b.getAttribute('data-scope'));
+      ok('КОНТРОЛ: за „Контролинг" са ТРИ', coOpts.length === 3, coOpts.join(','));
+      ok('КОНТРОЛ: и третата е „своите задачи"', coOpts.indexOf('own_tasks') >= 0, coOpts.join(','));
+      h.w.closeNotifScopeModal();
+    }
+    h.close();
+  }
+  {
+    /* Провалът при запис не бива да мълчи и не бива да остави стария текст
+       да изглежда като записан. */
+    const h = await loaded({ fail: { PATCH: /notification_matrix/ } });
+    if (openScope(h, 'Просрочени задачи', 'regional')) {
+      const opt = scopeOpts(h.doc).find(b => b.getAttribute('data-scope') === 'all');
+      if (ok('възможността „всичко" я има', !!opt)) {
+        realClick(h.w, opt);
+        await ticks();
+        const last = h.calls.toast[h.calls.toast.length - 1] || '';
+        ok('провалът се казва на човека', last.indexOf('Грешка') >= 0, last);
+        ok('при провал НЕ се пише одит',
+          !h.calls.post.some(x => x.table === 'audit_log' && x.body.event === 'notif_matrix_changed'));
+      }
+    }
+    h.close();
+  }
+
+  /* ═══ 17. Двата списъка с реализирани теми ══════════════════════════ */
+  /* Списъкът е ФАКТ ОТ КОДА и живее на две места: IMPLEMENTED_TOPICS в едж
+     функцията и NOTIF_IMPLEMENTED_TOPICS в admin.js. Порталът няма как да
+     прочете едж функцията по време на изпълнение — затова е копие, и затова
+     разминаването трябва да пада тук, а не да се види по празно известие. */
+  section('17. IMPLEMENTED_TOPICS (edge) === NOTIF_IMPLEMENTED_TOPICS (admin.js)');
+  {
+    const fs = require('fs');
+    const path = require('path');
+    const root = process.argv[2] || path.join(__dirname, '..');
+    const edge = fs.readFileSync(path.join(root, 'supabase/functions/bulletin-notify/index.ts'), 'utf8');
+    const adm  = fs.readFileSync(path.join(root, 'admin.js'), 'utf8');
+
+    const edgeBlock = (edge.match(/const IMPLEMENTED_TOPICS = \[([\s\S]*?)\n\];/) || [])[1];
+    const admBlock  = (adm.match(/var NOTIF_IMPLEMENTED_TOPICS = \[([^\]]*)\];/) || [])[1];
+
+    if (ok('IMPLEMENTED_TOPICS се намира в едж функцията', !!edgeBlock) &&
+        ok('NOTIF_IMPLEMENTED_TOPICS се намира в admin.js', !!admBlock)) {
+      const edgePairs = (edgeBlock.match(/key:\s*'([^']+)',\s*run:\s*(\w+)/g) || []).map(s => {
+        const m = s.match(/key:\s*'([^']+)',\s*run:\s*(\w+)/);
+        return { key: m[1], run: m[2] };
+      });
+      const edgeKeys = edgePairs.map(x => x.key);
+      const admKeys  = (admBlock.match(/'([^']+)'/g) || []).map(s => s.slice(1, -1));
+
+      ok('едж списъкът не е празен', edgeKeys.length > 0, edgeKeys.join(','));
+      ok('клиентският списък не е празен', admKeys.length > 0, admKeys.join(','));
+      ok('ДВАТА СПИСЪКА СЪВПАДАТ',
+        edgeKeys.slice().sort().join(',') === admKeys.slice().sort().join(','),
+        'edge: [' + edgeKeys.join(', ') + ']  ·  admin.js: [' + admKeys.join(', ') + ']');
+
+      /* Ключ без реален строител в същия файл е същото разминаване, само
+         на една крачка по-навътре. */
+      edgePairs.forEach(pr => {
+        ok('„' + pr.key + '" сочи съществуваща функция ' + pr.run + '()',
+          new RegExp('async function ' + pr.run + '\\s*\\(').test(edge));
+      });
+
+      /* Един източник, а не разпръснати условия. */
+      ok('runTopic чете от списъка', /IMPLEMENTED_TOPICS\.find\(/.test(edge));
+      ok('и вече няма верига от if-ове по topic.key',
+        !/if \(topic\.key === '/.test(edge));
+      ok('поведението при непозната тема е непроменено',
+        edge.indexOf("skipped: 'Темата още не е реализирана в кода'") >= 0);
+
+      /* И клиентският списък не е мъртва променлива. */
+      ok('admin.js чете своя списък', /NOTIF_IMPLEMENTED_TOPICS\.indexOf\(/.test(adm));
+      ok('и рендерът пита за строител', /notifTopicHasBuilder\(t\.key\)/.test(adm));
+      ok('коментарът сочи къде е оригиналът',
+        /supabase\/functions\/bulletin-notify\/index\.ts/.test(adm));
+    }
   }
 
   report();

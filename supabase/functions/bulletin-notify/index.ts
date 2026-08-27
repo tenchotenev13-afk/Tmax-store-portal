@@ -3,9 +3,10 @@
 // Два входа, един код: кронът (без topic_key) и порталът (с topic_key).
 // dry_run: true връща кой какво би получил, БЕЗ да праща нищо.
 //
-// Теми:
+// Теми (пълният списък с реализираните е IMPLEMENTED_TOPICS долу):
 //   overdue_tasks    — имейл/push до контролинг, регионални, ЦО, автора
 //   today_deadlines  — push до обекта, два часа преди часа на задачата
+//   promo_expiring   — имейл/push за промоции, изтичащи днес (и до 3 дни в пон.)
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -818,11 +819,29 @@ async function runPromoExpiring(supabase: any, topic: any, bg: any, dryRun: bool
   };
 }
 
+/* ЕДИНСТВЕНИЯТ списък с темите, които имат строител. notification_topics
+   държи осем реда; строители тук има за трите отдолу. Останалите са редове
+   в базата и нищо повече — събудят ли се, връщат skipped.
+
+   Списъкът е МАСИВ ОТ ДВОЙКИ ключ→строител нарочно: гол масив с ключове и
+   отделна верига от if-ове са два списъка, които се разминават мълчаливо.
+   Тук ключът и функцията стоят на един ред и не могат да се разделят.
+
+   Копие на този списък живее в admin.js (NOTIF_IMPLEMENTED_TOPICS) — екранът
+   приглушава темите без строител и заключва превключвателя им. Порталът няма
+   как да прочете този файл по време на изпълнение, затова е копие; двете се
+   менят ЗАЕДНО, а tests/admin-notifications.test.js чете и двата списъка от
+   файловете и пада, ако се разминат. */
+const IMPLEMENTED_TOPICS = [
+  { key: 'overdue_tasks',   run: runOverdueTasks },
+  { key: 'today_deadlines', run: runTodayDeadlines },
+  { key: 'promo_expiring',  run: runPromoExpiring },
+];
+
 async function runTopic(supabase: any, topic: any, bg: any, dryRun: boolean) {
-  if (topic.key === 'overdue_tasks') return await runOverdueTasks(supabase, topic, bg, dryRun);
-  if (topic.key === 'today_deadlines') return await runTodayDeadlines(supabase, topic, bg, dryRun);
-  if (topic.key === 'promo_expiring') return await runPromoExpiring(supabase, topic, bg, dryRun);
-  return { topic: topic.key, skipped: 'Темата още не е реализирана в кода' };
+  const impl = IMPLEMENTED_TOPICS.find((x) => x.key === topic.key);
+  if (!impl) return { topic: topic.key, skipped: 'Темата още не е реализирана в кода' };
+  return await impl.run(supabase, topic, bg, dryRun);
 }
 
 /* promo_expiring НЕ е тук нарочно — виж бележката в runPromoExpiring.

@@ -1060,6 +1060,21 @@ var NOTIF_WEEKDAY_SHORT  = ['', 'пон', 'вт', 'ср', 'чет', 'пет', '�
 var NOTIF_DOW_LABELS = { mon:'понеделник', tue:'вторник', wed:'сряда', thu:'четвъртък', fri:'петък', sat:'събота', sun:'неделя' };
 var NOTIF_DOW_ORDER  = ['mon','tue','wed','thu','fri','sat','sun'];
 
+/* КОПИЕ на IMPLEMENTED_TOPICS от supabase/functions/bulletin-notify/index.ts.
+   notification_topics държи осем реда, но строител в едж функцията има само за
+   тези три — останалите пет се събуждат и връщат „Темата още не е реализирана
+   в кода", тоест известието просто не излиза. Екранът трябва да го КАЗВА:
+   иначе „Дневен отчет · спряна" изглежда като тема, която чака да я включиш.
+
+   Това е трето копие на един и същи факт (след списъка с обектите) и се знае.
+   Порталът няма как да прочете едж функцията по време на изпълнение, а колона
+   в базата би се разминала със същия успех. Двата списъка се менят ЗАЕДНО —
+   tests/admin-notifications.test.js чете и двата от файловете и пада, ако се
+   разминат. */
+var NOTIF_IMPLEMENTED_TOPICS = ['overdue_tasks', 'today_deadlines', 'promo_expiring'];
+
+function notifTopicHasBuilder(key){ return NOTIF_IMPLEMENTED_TOPICS.indexOf(key) >= 0; }
+
 function notifIsAdmin(){ return !!(currentUser && currentUser.role === 'admin'); }
 
 /* weekdays е int[] в базата. PostgREST го връща като масив, но огледалото и
@@ -1158,17 +1173,32 @@ function renderNotifTopics(){
   }
   var rows = adminNotifTopics.map(function(t){
     var err = notifStatusIsError(t.last_status);
+    /* Тема без строител не е „още изключена" — тя няма какво да свърши. Редът
+       е приглушен, превключвателят е ЗАКЛЮЧЕН (не просто сив), а бутонът за
+       редакция остава активен: часът и дните може да се подготвят отсега. */
+    var impl = notifTopicHasBuilder(t.key);
+    /* Тема без строител, която стои active=true в базата — състояние, което не
+       бива да съществува. Показва се, не се крие: кронът я събужда всеки ден и
+       тя всеки ден не праща нищо. */
+    var warn = (!impl && t.active)
+      ? '<span title="Включена е, но няма строител в bulletin-notify — известие няма да излезе" style="margin-right:5px;">⚠️</span>'
+      : '';
+    var noBuilder = impl ? ''
+      : '<span class="ntf-no-builder" title="notification_topics има реда, bulletin-notify няма строител за него" style="margin-left:6px;font-size:10px;font-weight:600;color:#94a3b8;border:1px solid #e2e8f0;border-radius:20px;padding:2px 7px;white-space:nowrap;">още не е свързана с код</span>';
+    var trStyle = (err ? 'background:#fef2f2;' : (impl ? '' : 'background:#fcfcfd;')) + (impl ? '' : 'color:#94a3b8;');
     var badge = t.test_email
       ? '<span title="Праща САМО на този адрес — хората не получават нищо" style="background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;margin-left:6px;white-space:nowrap;">ТЕСТОВ РЕЖИМ: ' + esc(t.test_email) + '</span>'
       : '';
-    return '<tr' + (err ? ' style="background:#fef2f2;"' : '') + '>' +
-      '<td><div style="font-weight:500;font-size:12.5px;">' + esc(t.label) + badge + '</div>' +
+    return '<tr' + (trStyle ? ' style="' + trStyle + '"' : '') + '>' +
+      '<td><div style="font-weight:500;font-size:12.5px;">' + warn + esc(t.label) + noBuilder + badge + '</div>' +
         '<div style="font-size:10.5px;color:#94a3b8;">' + esc(t.key) + '</div></td>' +
       '<td style="font-size:12px;white-space:nowrap;">' + esc(notifScheduleText(t)) + '</td>' +
-      '<td><label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">' +
+      '<td><label' + (impl ? '' : ' title="Няма строител в bulletin-notify — няма какво да се включва"') +
+        ' style="display:inline-flex;align-items:center;gap:6px;font-size:11px;cursor:' + (impl ? 'pointer' : 'not-allowed') + ';">' +
         '<input type="checkbox" class="ntf-active-cb" data-key="' + escAttr(t.key) + '" ' + (t.active ? 'checked' : '') +
+        (impl ? '' : ' disabled') +
         ' onchange="toggleNotifTopicActive(\'' + esc(t.key) + '\',this.checked)">' +
-        '<span style="color:' + (t.active ? '#16a34a' : '#94a3b8') + ';font-weight:600;">' + (t.active ? 'вкл.' : 'спряна') + '</span>' +
+        '<span style="color:' + (!impl ? '#cbd5e1' : (t.active ? '#16a34a' : '#94a3b8')) + ';font-weight:600;">' + (t.active ? 'вкл.' : 'спряна') + '</span>' +
       '</label></td>' +
       '<td style="font-size:12px;white-space:nowrap;' + (t.last_run_at ? '' : 'color:#94a3b8;') + '">' +
         esc(notifLastRunText(t.last_run_at)) + '</td>' +
@@ -1196,6 +1226,13 @@ function _notifResetActiveCheckbox(key, value){
 
 function toggleNotifTopicActive(key, active){
   var topic = adminNotifTopics.filter(function(x){ return x.key === key; })[0];
+  /* Превключвателят на тема без строител е disabled, но функцията е глобална и
+     се вика по име от inline onchange — заключването не бива да е само в HTML-а. */
+  if (!notifTopicHasBuilder(key)) {
+    _notifResetActiveCheckbox(key, !!(topic && topic.active));
+    toast('„' + (topic ? topic.label : key) + '" още не е свързана с код — включването ѝ нищо не прави.', '#dc2626');
+    return;
+  }
   /* Пита се САМО при спиране. Спряна тема не изглежда различно от работеща
      отвън: известията просто спират и това се забелязва чак когато нещо не
      е дошло (dynamic-responder мълча месеци). Включването връща нормалното
@@ -1355,11 +1392,8 @@ function notifMatrixCell(topicKey, groupKey){
 
 /* own_tasks няма смисъл за група „Магазин": там задачите са на обекта, не на
    отделния човек — затова обхватът изобщо не се предлага. */
-function notifScopeOptions(groupKey, current){
-  var keys = (groupKey === 'store') ? ['all','own_stores'] : ['all','own_stores','own_tasks'];
-  return keys.map(function(k){
-    return '<option value="' + k + '"' + (k===current?' selected':'') + '>' + NOTIF_SCOPE_LABELS[k] + '</option>';
-  }).join('');
+function notifScopeKeys(groupKey){
+  return (groupKey === 'store') ? ['all','own_stores'] : ['all','own_stores','own_tasks'];
 }
 
 function renderNotifMatrix(){
@@ -1384,13 +1418,15 @@ function renderNotifMatrix(){
         /* Няма ред в базата (или каналът е none) → обхватът е безсмислен и
            клетката показва „—". Редът се създава при първия избор на канал. */
         var scopeHtml = (m && ch !== 'none')
-          ? '<select ' + sel + ' onchange="notifMatrixScope(this,\'' + esc(t.key) + '\',\'' + esc(g.key) + '\')">' +
-              notifScopeOptions(g.key, m.scope) + '</select>'
-          : '<span class="ntf-empty-cell" style="color:#cbd5e1;font-size:11px;">—</span>';
-        return '<td style="white-space:nowrap;">' + chSel + ' ' + scopeHtml + '</td>';
+          ? '<div class="ntf-scope-txt" title="Смени обхвата" onclick="openNotifScopeModal(\'' + esc(t.key) + '\',\'' + esc(g.key) + '\')"' +
+              ' style="margin-top:3px;font-size:10.5px;color:#2563eb;cursor:pointer;border-bottom:1px dotted #93c5fd;display:inline-block;">' +
+              esc(NOTIF_SCOPE_LABELS[m.scope] || m.scope || 'всичко') + '</div>'
+          : '<div class="ntf-empty-cell" style="margin-top:3px;color:#cbd5e1;font-size:10.5px;">—</div>';
+        return '<td style="white-space:nowrap;vertical-align:top;">' + chSel + scopeHtml + '</td>';
       }).join('') + '</tr>';
   }).join('');
   var legend = '<div style="font-size:11px;color:#64748b;margin-top:8px;line-height:1.7;">' +
+    'Обхватът е синият текст под канала — клик върху него го сменя.<br>' +
     '<b>всичко</b> — човекът получава по темата за всички обекти.<br>' +
     '<b>своите обекти</b> — само за обектите, които са му назначени (за група „Магазин" — неговият обект).<br>' +
     '<b>своите задачи</b> — само редовете, на които той е отговорник.' +
@@ -1437,16 +1473,59 @@ function notifMatrixChannel(sel, topicKey, groupKey){
   });
 }
 
-function notifMatrixScope(sel, topicKey, groupKey){
-  var scope = sel.value;
+/* Обхватът вече НЕ е второ падащо меню в клетката. Пет групи по два списъка
+   не се побират: таблицата тръгваше на хоризонтален плъзгач и последната
+   колона („Магазин") излизаше отрязана. В клетката остава само каналът, а
+   обхватът е кратък текст под него, който се кликва и отваря този модал. */
+var _notifScopeCell = null;
+
+function openNotifScopeModal(topicKey, groupKey){
   var m = notifMatrixCell(topicKey, groupKey);
+  /* Клетка без ред няма обхват — текстът дори не се рендира, но екранът може
+     да е остарял спрямо базата. */
   if (!m) { renderNotifMatrix(); return; }
+  _notifScopeCell = { topic: topicKey, group: groupKey };
+  var g = NOTIF_GROUPS.filter(function(x){ return x.key === groupKey; })[0];
+  var old = document.getElementById('notif-scope-modal-ov'); if(old) old.remove();
+  var html = '<div class="bov open" id="notif-scope-modal-ov" onclick="if(event.target===this)closeNotifScopeModal()">' +
+    '<div class="bmod" style="width:340px;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+      '<div style="font-size:15px;font-weight:700;">Обхват</div>' +
+      '<button onclick="closeNotifScopeModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>' +
+    '</div>' +
+    '<div style="font-size:11.5px;color:#64748b;margin-bottom:12px;">' +
+      esc(notifTopicLabel(topicKey)) + ' · група „' + esc(g ? g.label : groupKey) + '"</div>' +
+    notifScopeKeys(groupKey).map(function(k){
+      var cur = (m.scope === k);
+      return '<button class="ntf-scope-opt" data-scope="' + escAttr(k) + '" onclick="pickNotifScope(\'' + esc(k) + '\')"' +
+        ' style="display:block;width:100%;text-align:left;margin-bottom:6px;border:1px solid ' + (cur ? '#2563eb' : '#e2e8f0') +
+        ';background:' + (cur ? '#eff6ff' : '#fff') + ';border-radius:8px;padding:9px 11px;font-size:12.5px;cursor:pointer;">' +
+        (cur ? '● ' : '○ ') + esc(NOTIF_SCOPE_LABELS[k]) + '</button>';
+    }).join('') +
+    '</div></div>';
+  document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeNotifScopeModal(){
+  var ov = document.getElementById('notif-scope-modal-ov'); if(ov) ov.remove();
+  _notifScopeCell = null;
+}
+
+function pickNotifScope(scope){
+  if (!_notifScopeCell) return;
+  var topicKey = _notifScopeCell.topic, groupKey = _notifScopeCell.group;
+  var m = notifMatrixCell(topicKey, groupKey);
+  if (!m) { closeNotifScopeModal(); renderNotifMatrix(); return; }
+  /* Същият обхват — няма какво да се записва, само се затваря. Иначе всяко
+     отваряне-затваряне би оставяло ред в одита. */
+  if (m.scope === scope) { closeNotifScopeModal(); return; }
   var flt = 'topic_key=eq.' + encodeURIComponent(topicKey) + '&group_key=eq.' + encodeURIComponent(groupKey);
   sbPatch('notification_matrix', flt, { scope: scope }).then(function(res){
-    if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); loadNotificationsAdmin(); return; }
+    if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); closeNotifScopeModal(); loadNotificationsAdmin(); return; }
     m.scope = scope;
     logAudit('notif_matrix_changed', { details: { topic_key: topicKey, group_key: groupKey, scope: scope } });
     toast('✅ Записано');
+    closeNotifScopeModal();
     renderNotifMatrix();
   });
 }
