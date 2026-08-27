@@ -436,6 +436,121 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
   return { byStore: byStore, targets: targets, window: hhmm(nowMin) };
 }
 
+/* ──────────────── ТЕМА: ИЗТИЧАЩИ ПРОМОЦИИ ─────────────── */
+/* bulletin_promotions НЯМА target_stores — промоцията важи за цялата верига.
+   Затова стесняване по обект НЕ се прави: push-ът тръгва към всички отчетни
+   обекти наведнъж, с една OR-верига по таг store_name. pushToAll не върши
+   работа — той хваща и Централния офис, и складовете.
+
+   Два прозореца, нарочно с различна честота:
+   · изтичащи ДНЕС — всеки ден;
+   · изтичащи до 3 дни — САМО в понеделник. Промоция, която свършва в неделя,
+     иначе би звъняла в четвъртък, петък и събота за едно и също нещо. */
+
+/* n дни напред от гола дата 'YYYY-MM-DD', пак като низ. През UTC нарочно:
+   датата няма час, тоест часова зона не участва и няма как да се измести
+   с ден. Сравненията надолу са НИЗ с НИЗ — 'YYYY-MM-DD' се подрежда
+   лексикографски. */
+function plusDaysISO(iso: string, n: number): string {
+  const [y, m, d] = iso.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+}
+
+/* Заглавието на промоция за списъка. title е NOT NULL в схемата, но празен
+   низ минава — затова има подредба от три стъпки. Ред НЕ се пропуска мълчаливо:
+   по-добре „Промоция без заглавие" в известието, отколкото изчезнал ред, за
+   който никой не разбира. */
+function promoLabel(p: any): string {
+  const t = String(p.title || '').trim();
+  if (t) return t;
+  const d = String(p.description || '').trim();
+  if (d) return d.length > 60 ? d.slice(0, 60) + '…' : d;
+  return 'Промоция без заглавие';
+}
+
+function promoSort(a: any, b: any): number {
+  const ea = String(a.end_date || ''), eb = String(b.end_date || '');
+  if (ea !== eb) return ea.localeCompare(eb);
+  return promoLabel(a).localeCompare(promoLabel(b));
+}
+
+async function buildPromoExpiring(supabase: any, bg: ReturnType<typeof bgNow>) {
+  const { data: promos } = await supabase
+    .from('bulletin_promotions')
+    .select('id,title,description,department,start_date,end_date,active,created_by')
+    .eq('active', true);
+
+  const horizon = plusDaysISO(bg.dateStr, 3);
+  const today: any[] = [];
+  const soon: any[] = [];
+
+  for (const p of (promos || [])) {
+    const end = p.end_date ? String(p.end_date).slice(0, 10) : '';
+    if (!end) continue;
+    if (end === bg.dateStr) { today.push(p); continue; }
+    if (end > bg.dateStr && end <= horizon) soon.push(p);
+  }
+  today.sort(promoSort);
+  soon.sort(promoSort);
+
+  /* Списъкът „до 3 дни" влиза само в понеделник — виж бележката горе. */
+  const isMonday = bg.dow === 'mon';
+  const ahead = isMonday ? soon : [];
+
+  if (!today.length && !ahead.length) {
+    return {
+      skip: 'Няма промоции, изтичащи днес' +
+        (isMonday ? ' или до 3 дни' : ' (списъкът до 3 дни върви само в понеделник)'),
+    };
+  }
+
+  return { today: today, ahead: ahead, isMonday: isMonday, horizon: horizon };
+}
+
+/* Текстът за push — нов ред на промоция, без HTML. */
+function promoPushText(today: any[], ahead: any[]): string {
+  const lines: string[] = [];
+  if (today.length) {
+    lines.push('Изтичат ДНЕС:');
+    today.forEach((p) => lines.push('· ' + promoLabel(p)));
+  }
+  if (ahead.length) {
+    if (lines.length) lines.push('');
+    lines.push('До 3 дни:');
+    ahead.forEach((p) => lines.push('· ' + promoLabel(p) + ' (до ' + bgDate(String(p.end_date)) + ')'));
+  }
+  return lines.join('\n');
+}
+
+function promoHtmlFor(today: any[], ahead: any[], bg: any) {
+  const block = (heading: string, list: any[], color: string, withDate: boolean) => {
+    if (!list.length) return '';
+    return '<div style="margin-bottom:14px;border:1px solid #e5e7eb;border-radius:8px;padding:11px 13px;">'
+      + '<div style="font-weight:700;font-size:14.5px;color:' + color + ';margin-bottom:6px;">' + esc(heading) + '</div>'
+      + list.map((p) =>
+          '<div style="font-size:13px;line-height:1.8;">· ' + esc(promoLabel(p))
+          + (withDate ? ' <span style="color:#9ca3af;">до ' + esc(bgDate(String(p.end_date))) + '</span>' : '')
+          + (p.department ? ' <span style="color:#9ca3af;">· ' + esc(p.department) + '</span>' : '')
+          + '</div>').join('')
+      + '</div>';
+  };
+
+  return '<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:640px;">'
+    + '<h2 style="margin:0 0 4px;font-size:19px;color:#b45309;">Изтичащи промоции</h2>'
+    + '<div style="font-size:13px;color:#6b7280;margin-bottom:14px;">' + esc(bgDate(bg.dateStr))
+    + ' — промоции, чийто срок изтича.</div>'
+    + block('Изтичат днес', today, '#b91c1c', false)
+    + block('До 3 дни', ahead, '#b45309', true)
+    + '<div style="font-size:12px;color:#6b7280;margin-top:14px;">'
+    + 'Промоцията важи за цялата верига — списъкът не е стеснен по обект.</div>'
+    + '<div style="margin-top:12px;"><a href="' + PORTAL_URL + '" '
+    + 'style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;'
+    + 'font-size:13px;font-weight:600;padding:10px 18px;border-radius:6px;">Отвори портала</a></div>'
+    + '<div style="font-size:11px;color:#9ca3af;margin-top:18px;">ТеМАХ Портал</div></div>';
+}
+
 async function sendEmail(to: string, subject: string, html: string) {
   const res = await fetch(SEND_FN_URL, {
     method: 'POST', headers: SEND_HEADERS,
@@ -603,12 +718,118 @@ async function runTodayDeadlines(supabase: any, topic: any, bg: any, dryRun: boo
   return { topic: topic.key, sent: sent, failed: failed, already_sent: skipped, window: (built as any).window };
 }
 
+async function runPromoExpiring(supabase: any, topic: any, bg: any, dryRun: boolean) {
+  const built = await buildPromoExpiring(supabase, bg);
+  if ((built as any).skip) {
+    return { topic: topic.key, skipped: (built as any).skip, recipients: 0 };
+  }
+  const todayList: any[] = (built as any).today;
+  const aheadList: any[] = (built as any).ahead;
+
+  const title = '⚠️ Изтичащи промоции';
+  const subject = 'ТеМАХ — Изтичащи промоции (' + bgDate(bg.dateStr) + ')';
+  const pushText = promoPushText(todayList, aheadList);
+  const html = promoHtmlFor(todayList, aheadList, bg);
+
+  const stores = await reportableStores(supabase);
+  /* Само каналите с имейл — матрицата дава на store: push, на controlling:
+     email. Получател с 'both' влиза и в двете, затова е тук И в push-а. */
+  const all = await resolveRecipients(supabase, topic.key);
+  const mailTo = all.filter((r: Recipient) => r.channel === 'email' || r.channel === 'both');
+
+  if (dryRun) {
+    return {
+      topic: topic.key, dry_run: true, date: bg.dateStr,
+      dnes: todayList.length, do_3_dni: aheadList.length,
+      push_stores: stores.length, emails: mailTo.map((r: Recipient) => r.email),
+      recipients: stores.length + mailTo.length,
+    };
+  }
+
+  /* Тестов режим: всичко отива на един адрес и push НЕ тръгва — същото
+     правило като при today_deadlines. */
+  if (topic.test_email) {
+    const testHtml = '<div style="font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:12px;">'
+      + 'ТЕСТОВ РЕЖИМ — push щеше да тръгне до ' + stores.length + ' обекта, имейл до '
+      + esc(mailTo.map((r: Recipient) => r.email).join(', ') || '—') + '</div>' + html;
+    const ok = await sendEmail(topic.test_email, subject + ' (тест)', testHtml);
+    await supabase.from('notification_topics').update({
+      last_run_at: new Date().toISOString(),
+      last_recipients: stores.length + mailTo.length,
+      last_status: (ok ? 'ok (тест): ' : 'ГРЕШКА (тест): ') + todayList.length + ' днес, ' + aheadList.length + ' до 3 дни',
+    }).eq('key', topic.key);
+    return { topic: topic.key, test_email: topic.test_email, recipients: stores.length + mailTo.length, sent: ok ? 1 : 0 };
+  }
+
+  /* Дедупликация за целия ден — един ref_key, защото известието е ЕДНО за
+     цялата верига, не по обект както при today_deadlines. */
+  const refKey = bg.dateStr;
+  const ins = await supabase.from('notification_log')
+    .insert({ topic_key: topic.key, ref_key: refKey, detail: todayList.length + ' днес, ' + aheadList.length + ' до 3 дни' });
+  if (ins.error) {
+    return { topic: topic.key, skipped: 'Вече изпратено за ' + refKey, recipients: 0 };
+  }
+
+  let pushOk = false, sentMail = 0, failed = 0;
+
+  if (stores.length) {
+    /* Една OR-верига, едно известие — не по едно на обект. */
+    const filters: unknown[] = [];
+    stores.forEach((s: string, i: number) => {
+      if (i > 0) filters.push({ operator: 'OR' });
+      filters.push({ field: 'tag', key: 'store_name', relation: '=', value: s });
+    });
+    pushOk = await sendPushFilters(filters, title, pushText);
+    if (!pushOk) failed++;
+  }
+
+  for (const r of mailTo) {
+    const ok = await sendEmail(r.email, subject, html);
+    if (ok) { sentMail++; } else { failed++; }
+  }
+
+  /* Нищо не е излязло — редът в notification_log се маха, за да се опита пак.
+     И last_run_at НЕ се пише: за разлика от today_deadlines тази тема не е в
+     WINDOWED_TOPICS, тоест isDue() я спира за целия ден, щом веднъж има
+     днешна дата в last_run_at. Записан last_run_at при пълен провал би
+     обезсмислил изтриването на реда — следващото събуждане на крона в
+     прозореца 08:30-08:45 нямаше да опита изобщо. */
+  const anythingOut = pushOk || sentMail > 0;
+  if (!anythingOut) {
+    await supabase.from('notification_log').delete()
+      .eq('topic_key', topic.key).eq('ref_key', refKey);
+    await supabase.from('notification_topics').update({
+      last_status: 'ГРЕШКА: нищо не тръгна (' + failed + ' неуспешни) — ще се опита пак',
+    }).eq('key', topic.key);
+    return { topic: topic.key, sent_push: false, sent_emails: 0, failed: failed, retry: true };
+  }
+
+  await supabase.from('notification_topics').update({
+    last_run_at: new Date().toISOString(),
+    last_recipients: (pushOk ? stores.length : 0) + sentMail,
+    last_status: (failed ? 'ГРЕШКА: ' : 'ok: ') + (pushOk ? stores.length : 0) + ' обекта, '
+      + sentMail + ' писма, ' + failed + ' неуспешни',
+  }).eq('key', topic.key);
+
+  return {
+    topic: topic.key, sent_push: pushOk, push_stores: pushOk ? stores.length : 0,
+    sent_emails: sentMail, failed: failed,
+    dnes: todayList.length, do_3_dni: aheadList.length,
+  };
+}
+
 async function runTopic(supabase: any, topic: any, bg: any, dryRun: boolean) {
   if (topic.key === 'overdue_tasks') return await runOverdueTasks(supabase, topic, bg, dryRun);
   if (topic.key === 'today_deadlines') return await runTodayDeadlines(supabase, topic, bg, dryRun);
+  if (topic.key === 'promo_expiring') return await runPromoExpiring(supabase, topic, bg, dryRun);
   return { topic: topic.key, skipped: 'Темата още не е реализирана в кода' };
 }
 
+/* promo_expiring НЕ е тук нарочно — виж бележката в runPromoExpiring.
+   Темата е с фиксиран час 08:30 и стандартната логика на isDue я покрива;
+   вписването ѝ тук би махнало И проверката за час, И еднократността за деня,
+   тоест кронът щеше да я опитва на всеки 15 минути с единствена защита
+   notification_log. */
 const WINDOWED_TOPICS = ['today_deadlines'];
 
 function isDue(topic: any, bg: any): boolean {
