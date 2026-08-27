@@ -5,6 +5,17 @@ const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SEND_FN_URL = SB_URL + "/functions/v1/resend-email";
 
+/* resend-email е с verify_jwt: true. До 26.08.2026 тук се пращаше САМО
+   Content-Type — без Authorization връща 401 UNAUTHORIZED_NO_AUTH_HEADER,
+   тоест нито едно насрочено известие не би могло да тръгне, макар кронът
+   да върви на всеки 15 минути и да отчита успех. Таблицата беше празна, затова
+   никой не го забеляза. Порталът има интерфейс за тези известия (bulletin.js
+   редове 3820-3879), тоест хората могат да ги насрочват. */
+const SEND_HEADERS = {
+  'Content-Type': 'application/json',
+  'Authorization': 'Bearer ' + SB_SERVICE_KEY,
+};
+
 const CORS = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
@@ -97,14 +108,21 @@ Deno.serve(async (req) => {
 
       const res = await fetch(SEND_FN_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: SEND_HEADERS,
         body: JSON.stringify(pushBody),
       });
       const ok = res.ok;
+      if (!ok) { console.error('resend-email HTTP ' + res.status + ': ' + (await res.text())); }
 
-      await supabase.from('notification_schedules')
-        .update({ last_sent_at: now.toISOString() })
-        .eq('id', s.id);
+      /* last_sent_at се пише САМО при успех. Дотук се пишеше винаги,
+         тоест провалено изпращане се маркираше като свършено и не се опитваше
+         пак. Сега следващото събуждане на крона опитва отново, докато
+         15-минутният прозорец не се затвори. */
+      if (ok) {
+        await supabase.from('notification_schedules')
+          .update({ last_sent_at: now.toISOString() })
+          .eq('id', s.id);
+      }
 
       results.push({ id: s.id, ok });
     }
