@@ -332,6 +332,23 @@ function reportNoDueNoticeHtml(n, weekly){
   return '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:12px;color:#8A5A12;">📋 '+txt+'</div>';
 }
 
+/* Какъв период покрива дневният отчет — казано вътре в самия отчет.
+   Дневният излиза в 08:00 и брои САМО задачите със срок вчера; писмото за
+   просрочени в 08:15 гледа целия бюлетин назад. Двете пристигат едно след
+   друго и си противоречат наглед: на 28.08.2026 дневният за 27.08 показа
+   Севлиево в зеления списък със 100%, а четвърт час по-късно другото писмо
+   каза, че Севлиево не е изпълнило „Зануляване" със срок 26.08. И двете са
+   верни — просто броят различни неща. Затова отчетът си казва обхвата сам,
+   вместо получателят да го извежда.
+   Датата идва от ДАННИТЕ (reportDate), не от часовника — писмото се пише на
+   следващия ден. Липсва ли или е счупена, редът пропуска датата, вместо да
+   покаже „NaN.NaN" — същият избор като в reportDailySubject(). */
+function reportScopeNoticeHtml(reportDate){
+  var d = reportDate ? new Date(reportDate+'T00:00:00') : null;
+  var scope = (d && !isNaN(d.getTime())) ? 'със срок ' + reportDayMonth(d) : 'със срок за деня';
+  return '<div style="margin-top:14px;padding:10px 14px;background:#FDF3E3;border-radius:8px;font-size:12px;color:#8A5A12;">ℹ️ Този отчет покрива само задачите '+scope+'. Задачите с изтекъл срок от предишни дни идват в отделно писмо всеки делник в 08:15.</div>';
+}
+
 function reportEmailShell(headerTitle, headerSub, bodyHtml, footerText){
   return '<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
@@ -605,6 +622,7 @@ function buildDailyReportHtml(data){
     reportStatCell(String(data.storeCount),'обекта общо','#1E2761') +
     '</tr></table>';
   body += reportTrendHtml(data.overallPct, data.trendYesterday, 'спрямо предходния ден');
+  body += reportScopeNoticeHtml(data.reportDate);
   /* Решетката поглъща стария списък от 18 реда „X от Y задачи" - той
      повтаряше числата, без да казва кои задачи липсват. Отпадат и кутиите
      ТОП 3 / ИЗИСКВАТ ВНИМАНИЕ: те преповтаряха краищата на списък, който и

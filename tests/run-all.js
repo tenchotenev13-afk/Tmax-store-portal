@@ -57,6 +57,7 @@ const TESTS = [
   'weekly-cross-window.test.js',
   'weekly-routing-window.test.js',
   'report-ranking-plural.test.js',
+  'report-scope-notice.test.js',
   'report-edge-sync.test.js',
   'report-daily-date.test.js',
   'report-daily-scope.test.js',

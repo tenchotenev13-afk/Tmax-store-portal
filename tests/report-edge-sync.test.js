@@ -60,6 +60,7 @@ const SHARED_FNS = [
   'reportEmailShell', 'reportTrendHtml', 'reportDotColor', 'reportPctColor',
   'reportStatCell', 'reportStoreRow', 'reportTopBottomTable',
   'reportNoDueNoticeHtml', 'reportPostponedSectionHtml', 'reportWeekRangeLabel',
+  'reportScopeNoticeHtml',
   'reportDayMonth', 'reportDailySubject', 'reportWeeklySubject',
   /* решетка „обект × задача" и двата ѝ среза */
   'reportGridLegendHtml', 'reportGridCellHtml', 'reportStoreLinkHtml',
