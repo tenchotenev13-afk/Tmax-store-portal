@@ -530,10 +530,19 @@ function promoHtmlFor(today: any[], ahead: any[], bg: any) {
     if (!list.length) return '';
     return '<div style="margin-bottom:14px;border:1px solid #e5e7eb;border-radius:8px;padding:11px 13px;">'
       + '<div style="font-weight:700;font-size:14.5px;color:' + color + ';margin-bottom:6px;">' + esc(heading) + '</div>'
+      /* Отделът НЕ се показва на реда, и това е нарочно. В цялата база
+         bulletin_promotions.department има ЕДНА-ЕДИНСТВЕНА стойност — 'all'
+         за всичките 46 записа, нула NULL (проверено със SQL на 28.08.2026).
+         Тоест на всеки ред в писмото излизаше „· all": суров ключ, който не
+         различава нищо и само шуми.
+         Ако четеш това като „липсва информация за отдела" — липсва я в
+         ДАННИТЕ, не в кода, и връщането на реда не я добавя. Върни го чак
+         когато колоната наистина носи повече от една стойност.
+         Колоната не се пипа: ползва се другаде и махането ѝ е отделно
+         решение. Затова остава и в select= на buildPromoExpiring. */
       + list.map((p) =>
           '<div style="font-size:13px;line-height:1.8;">· ' + esc(promoLabel(p))
           + (withDate ? ' <span style="color:#9ca3af;">до ' + esc(bgDate(String(p.end_date))) + '</span>' : '')
-          + (p.department ? ' <span style="color:#9ca3af;">· ' + esc(p.department) + '</span>' : '')
           + '</div>').join('')
       + '</div>';
   };
