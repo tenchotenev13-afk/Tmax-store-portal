@@ -2049,16 +2049,20 @@ function diffEmailBodyHtml(rep,lines,note){
   var photos=Array.isArray(rep.photos)?rep.photos:[];
   if(photos.length) h+='<p>📎 Прикачени са '+photos.length+' снимк'+(photos.length===1?'а':'и')+' към този имейл.</p>';
   if(note) h+='<p>'+esc(note).replace(/\n/g,'<br>')+'</p>';
-  /* Коментар на Цветелина (resolution_comment) - полето е на ниво ред, не на
-     ниво бланка, затова събираме тези от всички редове с непразен коментар. */
-  var tsvetiComments = lines.filter(function(l){return l.resolution_comment;});
-  if(tsvetiComments.length){
-    h+='<p>💬 <strong>Коментар:</strong><br>';
-    tsvetiComments.forEach(function(l){
-      h+=esc(l.material_name||l.material_code||'')+' — '+esc(l.resolution_comment)+'<br>';
-    });
-    h+='</p>';
-  }
+  /* resolution_comment НЕ влиза в писмото. Той е вътрешният коментар на
+     счетоводството към МАГАЗИНА - реално изпратено писмо е носило „Няма
+     качена стокова на доставчика! 1 бр е изписан- 4200017186", което няма
+     работа при доставчика. Остава видим вътре в портала: таблицата в таба
+     (ред 370), картата на бланката (1499) и свободното търсене (1404).
+     В печатната бланка го няма и досега - там колоната „Коментар" е
+     l.comment, същото поле като в имейла.
+     Към доставчика тръгва само това, което е за него: l.comment в колоната
+     „Коментар" (пише го магазинът), rep.general_comment и свободният текст
+     от полето „Съдържание".
+     Не връщай блока и не го прави условен - функцията храни И
+     предварителния преглед, И самото изпращане, тоест преглед, различен от
+     изпратеното, е по-лошо от изтичането. Заковано в
+     tests/diff-email-internal-comment.test.js. */
   h+='<p>Поздрави,<br>'+esc(currentUser.display_name||currentUser.email)+'<br>ТеМАХ</p>';
   h+='</div>';
   return h;
@@ -2091,6 +2095,10 @@ function diffEmailModalHtml(rep,lines){
     '</div>'+
 
     '<div style="font-size:12px;color:#64748b;margin-top:8px;" id="de-photos-note">📎 Ще бъдат прикачени '+((rep.photos||[]).length)+' снимк'+((rep.photos||[]).length===1?'а':'и')+' от бланката.</div>'+
+    /* Явно казано, защото тихата липса подвежда точно колкото тихото
+       изпращане: без този ред Цвети пише вътрешния коментар и предполага,
+       че доставчикът го чете. */
+    '<div style="font-size:11.5px;color:#94a3b8;margin-top:4px;" id="de-internal-note">🔒 Вътрешните коментари по редовете не се изпращат на доставчика.</div>'+
 
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
     '<button onclick="closeDiffEmailModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 18px;font-size:13px;cursor:pointer;">Откажи</button>'+
