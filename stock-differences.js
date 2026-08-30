@@ -2023,6 +2023,143 @@ function submitDiffReport(){
    ИМЕЙЛ ДО ДОСТАВЧИК/ИЗПРАЩАЧ (само Цветелина Тенева)
 ══════════════════════════════════════════ */
 
+/* ── ПОЛУЧАТЕЛИ И ДОПЪЛНИТЕЛНИ ФАЙЛОВЕ ЗА ПИСМОТО ДО ДОСТАВЧИКА ──
+   Полето "До" приемаше един низ и го подаваше непокътнат: "a@x.bg, b@y.bg"
+   стигаше до SMTP като ЕДИН адрес със запетая вътре и писмото не тръгваше
+   доникъде. sendEmail() (email.js) от самото начало приема масив - грешката
+   беше само в извикващия, затова email.js не се пипа. */
+var DIFF_MAIL_MAX_BYTES = 15 * 1024 * 1024; /* общо за ВСИЧКИ прикачени */
+
+/* Разделя по запетая И точка-запетая (Outlook лепи с точка-запетая), trim-ва,
+   изхвърля празните и дедуплицира БЕЗ разлика в регистъра - "A@x.bg" и
+   "a@X.BG" са един и същи адрес и вторият само би дублирал писмото. */
+function sdSplitEmails(str){
+  var seen = {}, out = [];
+  String(str||'').split(/[,;]/).forEach(function(part){
+    var e = part.trim();
+    if(!e) return;
+    var k = e.toLowerCase();
+    if(seen[k]) return;
+    seen[k] = true;
+    out.push(e);
+  });
+  return out;
+}
+
+/* Груба проверка, НЕ RFC валидатор: има ли @, има ли точка след него с поне
+   един знак между двете, и не свършва ли на точка. Смисълът е да се хване
+   очевидната грешка ПРЕДИ изпращане - SMTP отказва ЦЯЛОТО писмо заради един
+   сгрешен адрес и не казва кой е, тоест Цвети вижда само "не се изпрати". */
+function sdInvalidEmails(arr){
+  return (arr||[]).filter(function(e){
+    var at = e.indexOf('@');
+    if(at < 1) return true;
+    if(/\s/.test(e)) return true;
+    var dot = e.indexOf('.', at);
+    if(dot < at + 2) return true;
+    return e.charAt(e.length-1) === '.';
+  });
+}
+
+/* Размерът, който РЕАЛНО тръгва по мрежата: дължината на base64 низовете,
+   както стоят в JSON payload-а. НЕ суровите байтове на файловете -
+   кодирането раздува с около 33% и проверка върху суровия размер пуска
+   комплект от 14 MB, който заминава като ~18.7 MB. SMTP го отрязва, след
+   като потребителят вече е видял зелено - тоест по-лошо, отколкото изобщо
+   да няма проверка. */
+function sdAttachPayloadBytes(atts){
+  return (atts||[]).reduce(function(sum,a){ return sum + String((a&&a.content)||'').length; }, 0);
+}
+function sdFmtSize(bytes){
+  var b = Number(bytes)||0;
+  if(b < 1024) return b + ' B';
+  if(b < 1024*1024) return (b/1024).toFixed(0) + ' KB';
+  return (b/1024/1024).toFixed(1) + ' MB';
+}
+
+/* Файловете, добавени РЪЧНО в текущо отвореното писмо. Държат се тук, а не в
+   DOM-а, защото минават през компресия и base64 четене, тоест не са готови в
+   момента на избора.
+   ИЗЧИСТВА СЕ и при отваряне, и при затваряне на модала. Без това файловете
+   от предишното писмо заминават със следващото - тихо и към ДРУГ доставчик. */
+var diffEmailExtraFiles = [];
+
+function diffEmailResetExtras(){
+  diffEmailExtraFiles = [];
+  var box = document.getElementById('de-extra-list');
+  if(box) box.innerHTML = '';
+  diffEmailUpdateCounts();
+}
+
+/* Броячът отразява ДВАТА източника - снимките от бланката и ръчно добавените.
+   Броят на снимките стои в data-photos на самия ред, за да не зависи функцията
+   от глобално състояние (и за да работи при пряко рендиране на модала). */
+function diffEmailUpdateCounts(){
+  var note = document.getElementById('de-photos-note');
+  if(!note) return;
+  var n = parseInt(note.getAttribute('data-photos')||'0',10) || 0;
+  var m = diffEmailExtraFiles.length;
+  note.textContent = '📎 Ще бъдат прикачени ' + n + ' снимк' + (n===1?'а':'и') + ' от бланката' +
+    (m ? ' и ' + m + ' допълнител' + (m===1?'ен файл':'ни файла') : '') + '.';
+}
+
+function diffEmailRenderExtras(){
+  var box = document.getElementById('de-extra-list');
+  if(box){
+    box.innerHTML = diffEmailExtraFiles.map(function(f){
+      return '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:3px 0;font-size:12px;">'+
+        '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+(f.pending?'⏳ ':'📄 ')+esc(f.name)+
+        ' <span style="color:#94a3b8;">'+sdFmtSize(f.size)+'</span></span>'+
+        '<button data-fid="'+esc(f.id)+'" onclick="diffEmailRemoveExtra(this.dataset.fid)" title="Махни файла" '+
+        'style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:1px 7px;font-size:11px;cursor:pointer;flex-shrink:0;">✕</button>'+
+      '</div>';
+    }).join('');
+  }
+  diffEmailUpdateCounts();
+}
+
+function diffEmailRemoveExtra(id){
+  diffEmailExtraFiles = diffEmailExtraFiles.filter(function(f){ return f.id !== id; });
+  diffEmailRenderExtras();
+}
+
+/* Изображенията минават през същата компресия като снимките към бланката
+   (diffUploadPhoto), останалите файлове се четат както са. */
+function diffEmailAddFiles(input){
+  var files = Array.prototype.slice.call((input && input.files) || []);
+  if(!files.length) return;
+  /* Нулира се, за да може СЪЩИЯТ файл да бъде избран пак, ако е бил махнат
+     с ✕ - иначе change не се вдига втори път. */
+  try{ input.value = ''; }catch(e){}
+  files.forEach(function(file){
+    var id = 'ef-' + Math.random().toString(36).slice(2,10);
+    var isImg = !!(file.type && file.type.indexOf('image/') === 0);
+    diffEmailExtraFiles.push({ id:id, name:file.name||'файл', size:file.size||0, content:'', pending:true });
+    diffEmailRenderExtras();
+    diffCompressImage(file, 1600, 0.75).then(function(blob){
+      return diffBlobToBase64(blob).then(function(b64){
+        var rec = diffEmailExtraFiles.find(function(x){ return x.id === id; });
+        if(!rec) return; /* махнат е с ✕, докато се е четял */
+        rec.content = b64;
+        rec.size = (blob && blob.size) || rec.size;
+        /* Разширението става .jpg САМО ако компресията наистина е върнала
+           jpeg - при неуспех diffCompressImage връща оригинала. */
+        if(isImg && blob && blob.type === 'image/jpeg') rec.name = diffEmailJpgName(file.name);
+        rec.pending = false;
+        diffEmailRenderExtras();
+      });
+    }).catch(function(){
+      diffEmailExtraFiles = diffEmailExtraFiles.filter(function(x){ return x.id !== id; });
+      toast('⚠️ Файлът не можа да се прочете: ' + (file.name||''), '#dc2626');
+      diffEmailRenderExtras();
+    });
+  });
+}
+
+function diffEmailJpgName(name){
+  return String(name||'снимка').replace(/\.[^.]+$/,'') + '.jpg';
+}
+
 function diffEmailBodyHtml(rep,lines,note){
   var h='<div style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;">';
   h+='<p>Здравейте,</p>';
@@ -2078,6 +2215,7 @@ function diffEmailModalHtml(rep,lines){
     '<label class="fl">До (имейл на '+diffDirEmailOf(rep.direction)+') *</label>'+
     '<input class="fi" id="de-to" list="de-supplier-list" placeholder="name@supplier.bg">'+
     '<datalist id="de-supplier-list"></datalist>'+
+    '<div style="font-size:11.5px;color:#94a3b8;margin-top:3px;" id="de-to-hint">Няколко адреса се разделят със запетая.</div>'+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;">'+
     '<div><label class="fl">Копие до (CC)</label><input class="fi" id="de-cc" value="'+esc(currentUser.email||'')+'"></div>'+
@@ -2094,7 +2232,13 @@ function diffEmailModalHtml(rep,lines){
     diffEmailBodyHtml(rep,lines)+
     '</div>'+
 
-    '<div style="font-size:12px;color:#64748b;margin-top:8px;" id="de-photos-note">📎 Ще бъдат прикачени '+((rep.photos||[]).length)+' снимк'+((rep.photos||[]).length===1?'а':'и')+' от бланката.</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-top:8px;" id="de-photos-note" data-photos="'+((rep.photos||[]).length)+'">📎 Ще бъдат прикачени '+((rep.photos||[]).length)+' снимк'+((rep.photos||[]).length===1?'а':'и')+' от бланката.</div>'+
+    /* Ръчно добавени файлове - отделни от снимките на бланката. Списъкът се
+       пълни от diffEmailAddFiles() и се ИЗЧИСТВА при всяко отваряне и
+       затваряне на модала. */
+    '<label class="fl" style="margin-top:8px;">Допълнителни файлове</label>'+
+    '<input type="file" id="de-extra-files" multiple onchange="diffEmailAddFiles(this)" style="font-size:12px;">'+
+    '<div id="de-extra-list" style="margin-top:4px;"></div>'+
     /* Явно казано, защото тихата липса подвежда точно колкото тихото
        изпращане: без този ред Цвети пише вътрешния коментар и предполага,
        че доставчикът го чете. */
@@ -2114,6 +2258,9 @@ function openDiffEmailModal(reportId){
   var old=document.getElementById('diff-email-ov'); if(old)old.remove();
   document.body.insertAdjacentHTML('beforeend',diffEmailModalHtml(rep,lines));
   document.getElementById('diff-email-ov').classList.add('open');
+  /* И при отваряне, и при затваряне: остатък от предишното писмо би заминал
+     към ДРУГ доставчик, без някой да го е избирал. */
+  diffEmailResetExtras();
   if(rep.counterpart) document.getElementById('de-to').value=''; /* оставяме празно - Цветелина избира от списъка или пише ръчно */
 
   /* Автоматично предлагане на имейл на доставчика от Контакти */
@@ -2134,26 +2281,37 @@ function openDiffEmailModal(reportId){
 }
 function closeDiffEmailModal(){
   var ov=document.getElementById('diff-email-ov'); if(ov)ov.remove();
+  diffEmailExtraFiles = [];
 }
 
-function diffUrlToBase64(url){
-  return fetch(url).then(function(r){return r.blob();}).then(function(blob){
-    return new Promise(function(resolve,reject){
-      var reader=new FileReader();
-      reader.onloadend=function(){ resolve(String(reader.result).split(',')[1]||''); };
-      reader.onerror=reject;
-      reader.readAsDataURL(blob);
-    });
+/* Blob/File -> base64 без префикса data:*;base64,. Изваден от
+   diffUrlToBase64, защото ръчно добавените файлове тръгват от File, не от
+   URL - двата пътя трябва да четат по един и същи начин. */
+function diffBlobToBase64(blob){
+  return new Promise(function(resolve,reject){
+    var reader=new FileReader();
+    reader.onloadend=function(){ resolve(String(reader.result).split(',')[1]||''); };
+    reader.onerror=reject;
+    reader.readAsDataURL(blob);
   });
+}
+function diffUrlToBase64(url){
+  return fetch(url).then(function(r){return r.blob();}).then(diffBlobToBase64);
 }
 
 function sendDiffEmail(reportId){
   if(!canSendDiffEmail()){toast('Нямаш права за това действие','#dc2626');return;}
   var rep=diffReports.find(function(r){return String(r.id)===String(reportId);});
   if(!rep){toast('Бланката не е намерена','#dc2626');return;}
-  var to=(document.getElementById('de-to').value||'').trim();
-  if(!to){toast('Въведи имейл на получателя','#dc2626');return;}
-  var cc=(document.getElementById('de-cc').value||'').trim();
+  /* Низ само от запетаи и интервали минаваше за валиден получател при
+     старата проверка if(!to) - затова критерият е БРОЯТ адреси. */
+  var toArr=sdSplitEmails(document.getElementById('de-to').value);
+  if(!toArr.length){toast('Въведи имейл на получателя','#dc2626');return;}
+  var ccArr=sdSplitEmails(document.getElementById('de-cc').value);
+  /* Един сгрешен адрес проваля ЦЯЛОТО писмо на ниво SMTP, без да се разбере
+     кой е. Затова се казва изрично и не се изпраща нищо. */
+  var bad=sdInvalidEmails(toArr.concat(ccArr));
+  if(bad.length){toast('⚠️ Невалиден адрес: '+bad.join(', '),'#dc2626');return;}
   var replyTo=(document.getElementById('de-reply').value||'').trim();
   var subject=(document.getElementById('de-subject').value||'').trim()||'РАЗЛИКИ';
   var note=(document.getElementById('de-body-note').value||'').trim();
@@ -2168,10 +2326,24 @@ function sendDiffEmail(reportId){
   Promise.all(photos.map(function(p){
     return diffUrlToBase64(p.url).then(function(b64){ return {filename:p.name||'снимка.jpg',content:b64}; }).catch(function(){ return null; });
   })).then(function(atts){
-    var attachments=atts.filter(Boolean);
+    var attachments=atts.filter(Boolean).concat(
+      diffEmailExtraFiles.filter(function(x){return x.content;})
+        .map(function(x){ return {filename:x.name,content:x.content}; })
+    );
+    /* Два независими източника на файлове - без общ лимит писмото пада на
+       ниво SMTP мълчаливо или с неясна грешка. Казваме реалния размер. */
+    var total=sdAttachPayloadBytes(attachments);
+    if(total>DIFF_MAIL_MAX_BYTES){
+      /* Изрично „след кодиране": числото е с ~33% над сбора на файловете в
+         списъка и иначе изглежда сгрешено. */
+      toast('⚠️ Прикачените файлове са '+sdFmtSize(total)+' след кодиране — лимитът е '+sdFmtSize(DIFF_MAIL_MAX_BYTES)+'. Махни някой файл.','#dc2626');
+      if(btn){btn.disabled=false;btn.textContent='✉️ Изпрати';}
+      return null;
+    }
     if(btn) btn.textContent='⏳ Изпращане...';
-    return sendEmail(to,subject,bodyHtml,{cc:cc||undefined,reply_to:replyTo||undefined,attachments:attachments});
+    return sendEmail(toArr,subject,bodyHtml,{cc:ccArr.length?ccArr:undefined,reply_to:replyTo||undefined,attachments:attachments});
   }).then(function(res){
+    if(res===null) return; /* спряно заради лимита - вече е казано */
     if(!res.ok){
       toast('Грешка при изпращане: '+(res.data&&res.data.message?res.data.message:'—'),'#dc2626');
       if(btn){btn.disabled=false;btn.textContent='✉️ Изпрати';}
