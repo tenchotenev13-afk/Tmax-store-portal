@@ -102,6 +102,16 @@ function metaVal(doc, label) {
   return null;
 }
 
+/* Индексът на колона по ЗАГЛАВИЕТО ѝ, не по число. Печатната таблица има
+   ДВА набора колони: при посока „доставчик" между „Кол." и „Получено" се
+   вмъква „Стокова" (quantity_supplier_doc), тоест всичко след нея се измества
+   с едно. Фиксираните числови индекси падаха при това добавяне, без нищо
+   да е счупено на хартия — тестът броеше колони, вместо да ги разпознава. */
+function colIdx(doc, label) {
+  const heads = Array.from(doc.querySelectorAll('#mod-print .dp-tbl thead th'));
+  return heads.findIndex(t => (t.textContent || '').trim() === label);
+}
+
 (async function run() {
 
   section('0. Средата се вдига с ДВАТА файла заедно');
@@ -169,10 +179,10 @@ function metaVal(doc, label) {
 
       const cells = doc.querySelectorAll('#mod-print .dp-tbl tbody tr td');
       if (ok('редът на бланката е рендиран', cells.length >= 10, String(cells.length))) {
-        ok('клетка „Решил" е „—"', cells[7].textContent.trim() === '—',
-          JSON.stringify(cells[7].textContent.trim()));
-        ok('клетка „Изпълнил" е „—"', cells[8].textContent.trim() === '—',
-          JSON.stringify(cells[8].textContent.trim()));
+        ok('клетка „Решил" е „—"', cells[colIdx(doc, 'Решил')].textContent.trim() === '—',
+          JSON.stringify(cells[colIdx(doc, 'Решил')].textContent.trim()));
+        ok('клетка „Изпълнил" е „—"', cells[colIdx(doc, 'Изпълнил')].textContent.trim() === '—',
+          JSON.stringify(cells[colIdx(doc, 'Изпълнил')].textContent.trim()));
       }
 
       const sign = doc.querySelector('#mod-print .dp-sign');
@@ -402,8 +412,8 @@ function metaVal(doc, label) {
 
       const cells = doc.querySelectorAll('#mod-print .dp-tbl tbody tr td');
       if (ok('редът е рендиран', cells.length >= 10, String(cells.length))) {
-        const solved = cells[7].textContent;
-        const doneBy = cells[8].textContent;
+        const solved = cells[colIdx(doc, 'Решил')].textContent;
+        const doneBy = cells[colIdx(doc, 'Изпълнил')].textContent;
 
         ok('„Решил" показва името', solved.indexOf('Цветелина Тенева') >= 0, solved);
         ok('„Решил" показва 19.08.2026', solved.indexOf('19.08.2026') >= 0, solved);
@@ -439,11 +449,11 @@ function metaVal(doc, label) {
       const cells = doc.querySelectorAll('#mod-print .dp-tbl tbody tr td');
       if (ok('редът е рендиран', cells.length >= 10, String(cells.length))) {
         ok('име без дата → само името, без празен ред',
-          cells[7].textContent.trim() === 'Цветелина Тенева',
-          JSON.stringify(cells[7].textContent.trim()));
+          cells[colIdx(doc, 'Решил')].textContent.trim() === 'Цветелина Тенева',
+          JSON.stringify(cells[colIdx(doc, 'Решил')].textContent.trim()));
         /* Дата без име е безсмислена — клетката е „—", датата не се показва. */
-        ok('дата без име → „—"', cells[8].textContent.trim() === '—',
-          JSON.stringify(cells[8].textContent.trim()));
+        ok('дата без име → „—"', cells[colIdx(doc, 'Изпълнил')].textContent.trim() === '—',
+          JSON.stringify(cells[colIdx(doc, 'Изпълнил')].textContent.trim()));
         ok('изоставената дата не изтича в документа',
           printTxt(doc).indexOf('T12:13') < 0);
       }

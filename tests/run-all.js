@@ -31,6 +31,7 @@ const TESTS = [
   'stock-diff-responsibility.test.js',
   'stock-diff-status-new.test.js',
   'stock-diff-print.test.js',
+  'diff-print-supplier-col.test.js',
   'diff-delete-report.test.js',
   'shared-write-errors.test.js',
   'admin-user-create-select.test.js',

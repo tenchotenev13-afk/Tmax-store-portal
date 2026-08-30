@@ -2212,6 +2212,12 @@ function renderDiffPrint(rep){
   var lines = sdData.filter(function(x){ return x.report_id===rep.id; });
   var si = getStoreInfo(rep.store_name) || {};
   var pQty = diffQtyLabels(rep.direction);
+  /* Количеството по стоковата разписка на доставчика има смисъл САМО при
+     посока 'доставчик'. При трансфер и при сторна по грешен прием колоната
+     изобщо не се рендира - празна колона на хартия се чете като липсващи
+     данни, не като неприложима. Същото условие като repIsSupplier в картата
+     и isSupplier в имейла. */
+  var printSupplierDoc = (rep.direction||'supplier') === 'supplier';
   var photos = Array.isArray(rep.photos) ? rep.photos : [];
   var imgs  = photos.filter(function(p){ return p && p.url && DIFF_IMG_RE.test(p.url); });
   var files = photos.filter(function(p){ return p && p.url && !DIFF_IMG_RE.test(p.url); });
@@ -2287,6 +2293,9 @@ function renderDiffPrint(rep){
       '<td>'+esc(l.material_code||'')+'</td>'+
       '<td>'+esc(l.material_name||'')+'</td>'+
       '<td class="dp-num">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
+      /* !=null, не истинност: 0 е валидно количество и трябва да се отпечата
+         като 0, а не да падне в тирето. */
+      (printSupplierDoc?'<td class="dp-num">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
       '<td class="dp-num">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
       '<td>'+(l.type?(TYPE_LABELS[l.type]||l.type):'—')+'</td>'+
       '<td>'+statusText(l)+'</td>'+
@@ -2330,23 +2339,33 @@ function renderDiffPrint(rep){
              10mm полета). С table-layout:fixed браузърът ги спазва дословно,
              вместо да преразпределя колоните според съдържанието - но само
              защото клетките са с box-sizing:border-box (виж PRINT_CSS).
-             Без него сумата тук е подвеждаща: реалната ширина беше 222mm. */
+             Без него сумата тук е подвеждаща: реалната ширина беше 222mm.
+             ДВА набора, според printSupplierDoc - и двата сумират 190mm:
+               10 колони:  8+18+44+11   +13+22+20+15+15+24 = 190
+               11 колони:  8+18+36+11+13+13+20+19+15+15+22 = 190
+             Загубените 13mm за новата колона са взети от Наименование (-8),
+             Тип на решение (-2), Статус (-1) и Коментар (-2), а не от една
+             колона - иначе тя става неизползваемо тясна. Надхвърляне на
+             190mm НЕ изглежда като грешка: последната колона просто се
+             отрязва тихо. Сумите са заковани в
+             tests/diff-print-supplier-col.test.js. */
           '<thead><tr>'+
             '<th style="width:8mm;">№</th>'+
             '<th style="width:18mm;">SAP</th>'+
-            '<th style="width:44mm;">Наименование</th>'+
-            /* Ширините не се пипат (сумата е точно 190mm) - сменя се само
-               думата според посоката. th е с white-space:normal, така че
-               по-дългият етикет се пречупва вътре в клетката си. */
+            '<th style="width:'+(printSupplierDoc?'36':'44')+'mm;">Наименование</th>'+
+            /* Думата се сменя според посоката (Кол./Фактура). th е с
+               white-space:normal, така че по-дългият етикет се пречупва
+               вътре в клетката си, вместо да изпъпва навън. */
             '<th style="width:11mm;">'+pQty.printDoc+'</th>'+
+            (printSupplierDoc?'<th style="width:13mm;">Стокова</th>':'')+
             '<th style="width:13mm;">'+pQty.printReal+'</th>'+
-            '<th style="width:22mm;">Тип на решение</th>'+
-            '<th style="width:20mm;">Статус</th>'+
+            '<th style="width:'+(printSupplierDoc?'20':'22')+'mm;">Тип на решение</th>'+
+            '<th style="width:'+(printSupplierDoc?'19':'20')+'mm;">Статус</th>'+
             '<th style="width:15mm;">Решил</th>'+
             '<th style="width:15mm;">Изпълнил</th>'+
-            '<th style="width:24mm;">Коментар</th>'+
+            '<th style="width:'+(printSupplierDoc?'22':'24')+'mm;">Коментар</th>'+
           '</tr></thead>'+
-          '<tbody>'+(rowsHtml||'<tr><td colspan="10" style="text-align:center;color:#666;">Няма редове по тази бланка.</td></tr>')+'</tbody>'+
+          '<tbody>'+(rowsHtml||'<tr><td colspan="'+(printSupplierDoc?11:10)+'" style="text-align:center;color:#666;">Няма редове по тази бланка.</td></tr>')+'</tbody>'+
         '</table>'+
         (imgs.length?'<div class="dp-sec">Снимки към бланката ('+imgs.length+')</div>'+
           '<div class="dp-photos" id="dp-photos">'+imgs.map(function(p){
