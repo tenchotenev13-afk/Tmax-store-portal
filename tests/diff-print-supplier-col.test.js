@@ -91,6 +91,16 @@ function widths(doc) {
 }
 const sum = a => a.reduce((x, y) => x + y, 0);
 
+/* Целият PRINT_CSS, както е стигнал до документа. Правилата се проверяват
+   със закотвен регекс срещу самия низ: jsdom НЕ смята лейаут, тоест няма как
+   да се провери, че „Стокова" се побира - може само да се закове CSS-ът,
+   който я побира, срещу тихо връщане назад. Визуалното потвърждение е ръчно,
+   на реален print preview. */
+const printCss = doc => {
+  const st = doc.querySelector('#mod-print style');
+  return st ? st.textContent : '';
+};
+
 /* Клетките на първия ред от тялото. */
 const tds = doc =>
   Array.from(doc.querySelectorAll('#mod-print .dp-tbl tbody tr td'))
@@ -103,6 +113,38 @@ const tds = doc =>
     const h = printFor('supplier');
     ok('renderDiffPrint съществува', typeof h.w.renderDiffPrint === 'function');
     ok('#mod-print съществува', !!h.w.document.getElementById('mod-print'));
+    h.close();
+  }
+
+  section('0б. CSS: страничен padding 0.8mm и неразчупваема дата');
+  {
+    /* Заглавията се режеха по средата на думата („Стоков|а", „Получ|ено",
+       „Изпълн|ил") заради padding:1.2mm 1.6mm. При box-sizing:border-box
+       страничният padding се ВАДИ от зададената ширина - 13mm колона оставаше
+       с 9.8mm, а „Стокова" при 7.5pt иска около 9.5mm. Нито една ширина не е
+       пипана; поправката е изцяло в CSS-а. */
+    const h = printFor('supplier');
+    const doc = h.w.document;
+    if (guard('renderDiffPrint() не хвърля', () => h.w.renderDiffPrint(h.rep))) {
+      const css = printCss(doc);
+      ok('PRINT_CSS е стигнал до документа', css.length > 0);
+      ok('.dp-tbl th е с padding:1.2mm 0.8mm',
+        /\.dp-tbl th\{[^}]*padding:1\.2mm 0\.8mm/.test(css));
+      ok('.dp-tbl td е с padding:1.2mm 0.8mm',
+        /\.dp-tbl td\{[^}]*padding:1\.2mm 0\.8mm/.test(css));
+      ok('старият padding 1.6mm го няма никъде в .dp-tbl',
+        !/\.dp-tbl t[hd]\{[^}]*padding:1\.2mm 1\.6mm/.test(css));
+      ok('.p-sub е с white-space:nowrap',
+        /\.p-sub\{[^}]*white-space:nowrap/.test(css));
+      /* Различен клас, различна работа - подзаглавието на бланката трябва да
+         може да се пречупва. */
+      ok('.dp-sub НЕ е пипнат с nowrap',
+        !/\.dp-sub\{[^}]*nowrap/.test(css));
+      /* Заглавията трябва да МОГАТ да се пречупват между думите - иначе
+         „Тип на решение" изпъпва извън клетката си (index.html:67). */
+      ok('.dp-tbl th пази white-space:normal',
+        /\.dp-tbl th\{[^}]*white-space:normal/.test(css));
+    }
     h.close();
   }
 

@@ -2262,22 +2262,35 @@ function renderDiffPrint(rep){
        дума сама по себе си не се побира. word-break:break-all би нарязал всяко
        наименование по средата на думата.
        box-sizing:border-box е задължително при table-layout:fixed - без него
-       padding-ът се ДОБАВЯ върху зададената ширина и десетте колони излизат
-       32mm извън листа (10 × 3.2mm), тоест последната се отрязва. */
+       padding-ът се ДОБАВЯ върху зададената ширина и колоните излизат извън
+       листа, тоест последната се отрязва. (Заварената грешка беше при
+       страничен padding 1.6mm: 10 × 3.2mm = 32mm надхвърляне. Сега padding-ът
+       е 0.8mm, значи 1.6mm на колона - числото се е сменило, изводът не.) */
     /* white-space:normal бие глобалното th{white-space:nowrap} от index.html
        (ред 67). Печатът се рендира В страницата, тоест наследява целия ѝ CSS -
        без това заглавия като "Тип на решение" отказват да се пречупят и
        изпъпват извън клетките си. Глобалното правило не се пипа: то обслужва
        всички останали таблици в портала. */
-    '.dp-tbl th{box-sizing:border-box;border:1px solid #999;padding:1.2mm 1.6mm;font-size:7.5pt;text-align:left;background:#eee;font-weight:700;white-space:normal;word-break:normal;overflow-wrap:break-word;}'+
-    '.dp-tbl td{box-sizing:border-box;border:1px solid #bbb;padding:1.2mm 1.6mm;font-size:8pt;vertical-align:top;word-break:normal;overflow-wrap:break-word;}'+
+    /* Страничният padding е 0.8mm, не 1.6mm. При box-sizing:border-box той се
+       ВАДИ от зададената ширина: 13mm колона оставаше с 9.8mm полезни, а
+       „Стокова" при 7.5pt иска ~9.5mm - overflow-wrap:break-word тогава реже
+       по средата на думата („Стоков|а", „Получ|ено", „Изпълн|ил"). 0.8mm
+       връща по 1.6mm на всяка колона, без да мести нито една ширина.
+       Вертикалният 1.2mm не се пипа - той не участва в тази сметка.
+       Потвърдено на реален print preview, не изчислено на теория. */
+    '.dp-tbl th{box-sizing:border-box;border:1px solid #999;padding:1.2mm 0.8mm;font-size:7.5pt;text-align:left;background:#eee;font-weight:700;white-space:normal;word-break:normal;overflow-wrap:break-word;}'+
+    '.dp-tbl td{box-sizing:border-box;border:1px solid #bbb;padding:1.2mm 0.8mm;font-size:8pt;vertical-align:top;word-break:normal;overflow-wrap:break-word;}'+
     /* Възстановява долната граница на последния ред. index.html:69 има
        tr:last-child td{border-bottom:none}, което бие ".dp-tbl td" по
        специфичност (0,1,2 срещу 0,1,1) и оставя рамката на таблицата отворена
        отдолу. Тук специфичността е изравнена, а правилото идва по-късно. */
     '.dp-tbl tr:last-child td{border-bottom:1px solid #bbb;}'+
     '.dp-num{text-align:right;}'+
-    '.p-sub{font-size:7pt;color:#555;}'+
+    /* Датата под името е ЕДНА стойност - „28.08.2026 14:32", счупена като
+       „28.08.202|6", не значи нищо. nowrap я оставя цяла или я реже накрая,
+       което поне се чете. Само този клас: .dp-sub (подзаглавието на цялата
+       бланка) е друго нещо и нарочно се пречупва. */
+    '.p-sub{font-size:7pt;color:#555;white-space:nowrap;}'+
     '.dp-sec{font-size:9.5pt;font-weight:700;margin:0 0 2mm;}'+
     '.dp-photos{display:flex;flex-wrap:wrap;gap:3mm;margin-bottom:4mm;}'+
     '.dp-photos img{width:40mm;height:auto;border:1px solid #ccc;}'+
