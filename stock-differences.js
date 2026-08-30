@@ -379,6 +379,12 @@ function renderStockDiff() {
       if (isAdmin) {
         h += '<button data-id="'+r.id+'" onclick="sdDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✕</button>';
       }
+      /* Триене на ЦЯЛАТА бланка — второ място нарочно: картата горе изчезва,
+         щом бланката бъде маркирана като прегледана (sdVisibleUnreviewedReports
+         филтрира !reviewed), тоест стара сгрешена бланка иначе е недостижима. */
+      if (r.report_id && sdCanDeleteReport()) {
+        h += '<button data-rid="'+r.report_id+'" onclick="sdDeleteReport(this.dataset.rid)" title="Изтрий ЦЯЛАТА бланка — редове и файлове, необратимо" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-left:2px;">🗑</button>';
+      }
       h += '</td></tr>';
     });
     h += '</tbody></table></div>';
@@ -786,6 +792,110 @@ function sdDelete(id) {
     }
     if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadStockDiff(); return; }
     toast('✓ Изтрит'); loadStockDiff();
+  });
+}
+
+/* ── ТРИЕНЕ НА ЦЯЛА БЛАНКА ──
+   Отделно право от sdDelete() на един ред: там isAdmin означава
+   admin+accounting+logistics (те решават разлики), тук е САМО роля 'admin'.
+   Бланката носи и файловете, и всичките си редове — това е необратимо. */
+function sdCanDeleteReport(){ return !!currentUser && currentUser.role === 'admin'; }
+
+/* Пътят вътре в bucket-а, извлечен от публичния URL. Връща '' при URL, който
+   не сочи към нашия bucket — тогава файлът се брои за неизтрит, вместо да
+   пратим DELETE към сглобен наслуки път. */
+function sdStoragePathFromUrl(url){
+  if(!url) return '';
+  var marker = '/storage/v1/object/public/' + DIFF_BKT + '/';
+  var s = String(url);
+  var i = s.indexOf(marker);
+  if(i < 0) return '';
+  return s.slice(i + marker.length).split('?')[0];
+}
+
+/* Всички файлове на бланката: снимките, качени от магазина към САМАТА бланка
+   (differences_reports.photos) + прикачените към отделните ѝ РЕДОВЕ
+   (stock_differences.attachments). Един и същи URL може да стои и на двете
+   места — затова се дедуплицира, иначе второто триене връща 404 и се брои
+   като провал. */
+function sdReportFileUrls(rep, lines){
+  var urls = [], seen = {};
+  function add(u){ if(u && !seen[u]){ seen[u] = true; urls.push(u); } }
+  (Array.isArray(rep && rep.photos) ? rep.photos : []).forEach(function(p){ if(p) add(p.url); });
+  (lines||[]).forEach(function(l){
+    normSDAttachments(l.attachments).forEach(function(a){ if(a) add(a.url); });
+  });
+  return urls;
+}
+
+function sdDeleteReport(reportId){
+  if(!sdCanDeleteReport()){ toast('⛔ Само администратор може да трие цяла бланка','#dc2626'); return; }
+  var rep = diffReports.find(function(x){ return String(x.id)===String(reportId); });
+  if(!rep){ toast('Бланката вече я няма — списъкът е опреснен','#64748b'); loadStockDiff(); return; }
+  var lines = sdData.filter(function(x){ return String(x.report_id)===String(reportId); });
+  var urls  = sdReportFileUrls(rep, lines);
+
+  /* Първото потвърждение показва РЕАЛНИТЕ числа — иначе „изтрий бланката" е
+     сляпо действие и никой не знае колко реда и файла отиват с нея. */
+  if(!confirm('ИЗТРИВАНЕ НА ЦЯЛА БЛАНКА\n\n'+
+    'Обект: '+(rep.store_name||'—')+'\n'+
+    'Доставчик/насрещна страна: '+(rep.counterpart||'—')+'\n'+
+    'Документ №: '+(rep.document_number||'—')+'\n'+
+    'Дата: '+fmtDate(rep.doc_date)+'\n'+
+    'Редове: '+lines.length+'\n'+
+    'Файлове: '+urls.length)) return;
+  if(!confirm('Действието е НЕОБРАТИМО. Файловете също се изтриват.')) return;
+
+  /* (а) Файловете. Провал по един файл НЕ спира процеса — файл-сирак в
+     Storage е безобиден, докато редове-сираци в базата не са. Броим ги и ги
+     казваме накрая, вместо да мълчим. */
+  var failedFiles = 0;
+  var fileJobs = urls.map(function(u){
+    var p = sdStoragePathFromUrl(u);
+    if(!p){
+      failedFiles++;
+      try{ console.error('sdDeleteReport: непознат URL, файлът НЕ беше изтрит: '+u); }catch(e){}
+      return Promise.resolve();
+    }
+    return fetch(DIFF_SB+'/storage/v1/object/'+DIFF_BKT+'/'+p, {
+      method:'DELETE',
+      headers:{'Authorization':'Bearer '+DIFF_KEY}
+    }).then(function(r){
+      if(!r.ok){
+        failedFiles++;
+        try{ console.error('sdDeleteReport: файлът НЕ беше изтрит: '+p+' → HTTP '+r.status); }catch(e){}
+      }
+    }).catch(function(e){
+      failedFiles++;
+      try{ console.error('sdDeleteReport: файлът НЕ беше изтрит: '+p+' → '+((e&&e.message)||e)); }catch(e2){}
+    });
+  });
+
+  Promise.all(fileJobs).then(function(){
+    /* (б) Редовете. count===0 е законен изход — бланка без редове. */
+    return sbDelete('stock_differences','report_id=eq.'+reportId);
+  }).then(function(res){
+    if(!res.ok){
+      try{ console.error('sdDeleteReport: редовете НЕ бяха изтрити',reportId,res.error); }catch(e){}
+      toast('⚠️ Редовете НЕ бяха изтрити: '+sbErrMsg(res)+' — бланката остава','#dc2626');
+      loadStockDiff();
+      return null; /* СПИРАМЕ: бланка без редове е по-малкото зло от редове-сираци */
+    }
+    /* (в) Самата бланка — само след успешно (б). */
+    return sbDelete('differences_reports','id=eq.'+reportId);
+  }).then(function(res){
+    if(res===null) return;
+    if(!res.ok){
+      try{ console.error('sdDeleteReport: бланката НЕ беше изтрита',reportId,res.error); }catch(e){}
+      toast('⚠️ Редовете са изтрити, но бланката НЕ: '+sbErrMsg(res),'#dc2626');
+      loadStockDiff();
+      return;
+    }
+    var tail = failedFiles
+      ? ' — '+(failedFiles===1 ? '1 файл не беше изтрит' : failedFiles+' файла не бяха изтрити')
+      : '';
+    toast('✓ Бланката е изтрита'+tail, failedFiles ? '#d97706' : '#16a34a');
+    loadStockDiff();
   });
 }
 
@@ -1346,6 +1456,7 @@ function renderDiffReportsSection(){
        (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+sdFmtDateTime(rep.email_sent_at)+'</span>':'')+
        '<button data-rid="'+rep.id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
        (canSendDiffEmail()?'<button data-rid="'+rep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✉️ Изпрати имейл</button>':'')+
+       (sdCanDeleteReport()?'<button data-rid="'+rep.id+'" onclick="sdDeleteReport(this.dataset.rid)" title="Изтрий ЦЯЛАТА бланка — редове и файлове, необратимо" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🗑 Изтрий бланката</button>':'')+
        '</div>';
     h+='</div>';
     /* Лента на прогреса - показва се само докато бланката е започната, но
