@@ -2,8 +2,9 @@
 
    Полето се показваше в картата на бланката (renderDiffReportsSection) и в
    имейла до доставчика (diffEmailBodyHtml), но НЕ и в печата: на хартия
-   стояха само „Кол." и „Получено". Разминаването е тихо — печатът изглежда
-   пълен, докато някой не сравни трите изгледа един до друг.
+   стояха само „Кол." и „Реално" (тогава още „Получено"). Разминаването е
+   тихо — печатът изглежда пълен, докато някой не сравни трите изгледа един
+   до друг.
 
    Колоната е само за посока „доставчик". При междускладов трансфер и при
    сторна по грешен прием стокова разписка на доставчик няма, тоест колоната
@@ -148,6 +149,82 @@ const tds = doc =>
     h.close();
   }
 
+  section('0в. Скъсени етикети: „Реално", „Изпълн.", имена на 7pt');
+  {
+    /* Втори кръг по същия print preview: padding-ът оправи „Стокова" и
+       датата, но „Получе|но", „Изпълни|л" и „Цветелин|а Тенева" още се
+       режеха. Ширините НЕ се пипат — 36mm за „Наименование" вече са на два
+       реда, тоест няма откъде да се вземе. Сменя се съдържанието. */
+    const hs = printFor('supplier');
+    const ds = hs.w.document;
+    if (guard('доставчик: renderDiffPrint() не хвърля', () => hs.w.renderDiffPrint(hs.rep))) {
+      const t = thText(ds);
+      /* „Реално" не е ново съкращение — realShort ползва СЪЩАТА дума за
+         същото поле (diffQtyLabels). Осем знака („Получено") не се побират
+         в 13mm при 7.5pt дори след padding:0.8mm. */
+      ok('доставчик: шестото заглавие е „Реално"', t[5] === 'Реално', String(t[5]));
+      ok('доставчик: „Получено" вече го няма', t.indexOf('Получено') < 0, t.join('|'));
+      ok('доставчик: заглавието е „Изпълн."', t.indexOf('Изпълн.') >= 0, t.join('|'));
+      ok('доставчик: пълното „Изпълнил" НЕ е в .dp-tbl',
+        t.indexOf('Изпълнил') < 0, t.join('|'));
+
+      /* Съкращението е САМО в таблицата. Подписният блок долу има място и
+         остава с пълната дума — двете не бива да се разминат мълчаливо. */
+      const sign = ds.querySelector('#mod-print .dp-sign');
+      if (ok('подписният блок съществува', !!sign)) {
+        ok('подписите пазят пълното „Изпълнил"',
+          (sign.textContent || '').indexOf('Изпълнил') >= 0);
+        ok('подписите НЕ ползват съкращението',
+          (sign.textContent || '').indexOf('Изпълн.:') < 0);
+      }
+
+      const css = printCss(ds);
+      ok('.dp-who е дефиниран на 7pt', /\.dp-who\{[^}]*font-size:7pt/.test(css));
+
+      /* Класът трябва да е върху клетките, които whoWhen() пълни — иначе
+         правилото стои в CSS-а и не хваща нищо. */
+      const who = ds.querySelectorAll('#mod-print .dp-tbl tbody td.dp-who');
+      ok('точно 2 клетки са с .dp-who (Решил и Изпълн.)', who.length === 2,
+        'реално ' + who.length);
+      const heads = thText(ds);
+      const cells = Array.from(ds.querySelectorAll('#mod-print .dp-tbl tbody tr td'));
+      ok('.dp-who е точно под „Решил"',
+        cells.indexOf(who[0]) === heads.indexOf('Решил'),
+        cells.indexOf(who[0]) + ' срещу ' + heads.indexOf('Решил'));
+      ok('.dp-who е точно под „Изпълн."',
+        cells.indexOf(who[1]) === heads.indexOf('Изпълн.'),
+        cells.indexOf(who[1]) + ' срещу ' + heads.indexOf('Изпълн.'));
+
+      /* Ширините са извън обхвата на тази поправка. */
+      ok('доставчик: сумата пак е 190mm', sum(widths(ds)) === 190, String(sum(widths(ds))));
+    }
+    hs.close();
+
+    const hi = printFor('interstore');
+    const di = hi.w.document;
+    if (guard('трансфер: renderDiffPrint() не хвърля', () => hi.w.renderDiffPrint(hi.rep))) {
+      const t = thText(di);
+      ok('трансфер: петото заглавие е „Реално"', t[4] === 'Реално', String(t[4]));
+      ok('трансфер: „Получено" вече го няма', t.indexOf('Получено') < 0, t.join('|'));
+      ok('трансфер: сумата пак е 190mm', sum(widths(di)) === 190, String(sum(widths(di))));
+      ok('трансфер: ширините са пак BASELINE_10',
+        widths(di).join(',') === BASELINE_10.join(','), widths(di).join(','));
+    }
+    hi.close();
+
+    const hw = printFor('wrong_receipt');
+    const dw = hw.w.document;
+    if (guard('грешен прием: renderDiffPrint() не хвърля', () => hw.w.renderDiffPrint(hw.rep))) {
+      const t = thText(dw);
+      /* Клонът wrong_receipt на diffQtyLabels НЕ е пипан — „Заприх." вече е
+         достатъчно късо и значи друго нещо от „Реално". */
+      ok('грешен прием: петото заглавие е „Заприх."', t[4] === 'Заприх.', String(t[4]));
+      ok('грешен прием: НЕ е „Реално"', t[4] !== 'Реално', String(t[4]));
+      ok('грешен прием: сумата пак е 190mm', sum(widths(dw)) === 190, String(sum(widths(dw))));
+    }
+    hw.close();
+  }
+
   section('1. Посока „доставчик" — 11 колони, „Стокова" е петата');
   {
     const h = printFor('supplier');
@@ -158,8 +235,8 @@ const tds = doc =>
       ok('11 заглавия в .dp-tbl', t.length === 11, 'реално ' + t.length + ': ' + t.join('|'));
       ok('петото заглавие е „Стокова"', t[4] === 'Стокова', String(t[4]));
       ok('единайсетото заглавие е „Коментар"', t[10] === 'Коментар', String(t[10]));
-      ok('редът е Кол. | Стокова | Получено',
-        t[3] === 'Кол.' && t[4] === 'Стокова' && t[5] === 'Получено',
+      ok('редът е Кол. | Стокова | Реално',
+        t[3] === 'Кол.' && t[4] === 'Стокова' && t[5] === 'Реално',
         t.slice(3, 6).join(' | '));
       ok('всяка колона има ширина в mm', wds.every(x => !isNaN(x)), wds.join(','));
       ok('сумата на ширините е точно 190mm', sum(wds) === 190,

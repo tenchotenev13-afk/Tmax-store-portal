@@ -103,13 +103,24 @@ function metaVal(doc, label) {
 }
 
 /* Индексът на колона по ЗАГЛАВИЕТО ѝ, не по число. Печатната таблица има
-   ДВА набора колони: при посока „доставчик" между „Кол." и „Получено" се
+   ДВА набора колони: при посока „доставчик" между „Кол." и „Реално" се
    вмъква „Стокова" (quantity_supplier_doc), тоест всичко след нея се измества
    с едно. Фиксираните числови индекси падаха при това добавяне, без нищо
    да е счупено на хартия — тестът броеше колони, вместо да ги разпознава. */
 function colIdx(doc, label) {
   const heads = Array.from(doc.querySelectorAll('#mod-print .dp-tbl thead th'));
   return heads.findIndex(t => (t.textContent || '').trim() === label);
+}
+
+/* Клетката под дадено заглавие. При липсващо заглавие връща ЗАМЕСТИТЕЛ, не
+   undefined: cells[-1].textContent хвърля TypeError, който убива процеса
+   ПРЕДИ report(), тоест изходът остава без нито едно ❌ и изглежда като
+   чист тест. Точно това стана при преименуването на „Изпълнил" на
+   „Изпълн." в печата. Заместителят проваля проверката и КАЗВА защо. */
+function cellOf(cells, doc, label) {
+  const i = colIdx(doc, label);
+  if (i < 0 || !cells[i]) return { textContent: '<няма колона "' + label + '">' };
+  return cells[i];
 }
 
 (async function run() {
@@ -179,10 +190,10 @@ function colIdx(doc, label) {
 
       const cells = doc.querySelectorAll('#mod-print .dp-tbl tbody tr td');
       if (ok('редът на бланката е рендиран', cells.length >= 10, String(cells.length))) {
-        ok('клетка „Решил" е „—"', cells[colIdx(doc, 'Решил')].textContent.trim() === '—',
-          JSON.stringify(cells[colIdx(doc, 'Решил')].textContent.trim()));
-        ok('клетка „Изпълнил" е „—"', cells[colIdx(doc, 'Изпълнил')].textContent.trim() === '—',
-          JSON.stringify(cells[colIdx(doc, 'Изпълнил')].textContent.trim()));
+        ok('клетка „Решил" е „—"', cellOf(cells, doc, 'Решил').textContent.trim() === '—',
+          JSON.stringify(cellOf(cells, doc, 'Решил').textContent.trim()));
+        ok('клетка „Изпълнил" е „—"', cellOf(cells, doc, 'Изпълн.').textContent.trim() === '—',
+          JSON.stringify(cellOf(cells, doc, 'Изпълн.').textContent.trim()));
       }
 
       const sign = doc.querySelector('#mod-print .dp-sign');
@@ -412,8 +423,8 @@ function colIdx(doc, label) {
 
       const cells = doc.querySelectorAll('#mod-print .dp-tbl tbody tr td');
       if (ok('редът е рендиран', cells.length >= 10, String(cells.length))) {
-        const solved = cells[colIdx(doc, 'Решил')].textContent;
-        const doneBy = cells[colIdx(doc, 'Изпълнил')].textContent;
+        const solved = cellOf(cells, doc, 'Решил').textContent;
+        const doneBy = cellOf(cells, doc, 'Изпълн.').textContent;
 
         ok('„Решил" показва името', solved.indexOf('Цветелина Тенева') >= 0, solved);
         ok('„Решил" показва 19.08.2026', solved.indexOf('19.08.2026') >= 0, solved);
@@ -449,11 +460,11 @@ function colIdx(doc, label) {
       const cells = doc.querySelectorAll('#mod-print .dp-tbl tbody tr td');
       if (ok('редът е рендиран', cells.length >= 10, String(cells.length))) {
         ok('име без дата → само името, без празен ред',
-          cells[colIdx(doc, 'Решил')].textContent.trim() === 'Цветелина Тенева',
-          JSON.stringify(cells[colIdx(doc, 'Решил')].textContent.trim()));
+          cellOf(cells, doc, 'Решил').textContent.trim() === 'Цветелина Тенева',
+          JSON.stringify(cellOf(cells, doc, 'Решил').textContent.trim()));
         /* Дата без име е безсмислена — клетката е „—", датата не се показва. */
-        ok('дата без име → „—"', cells[colIdx(doc, 'Изпълнил')].textContent.trim() === '—',
-          JSON.stringify(cells[colIdx(doc, 'Изпълнил')].textContent.trim()));
+        ok('дата без име → „—"', cellOf(cells, doc, 'Изпълн.').textContent.trim() === '—',
+          JSON.stringify(cellOf(cells, doc, 'Изпълн.').textContent.trim()));
         ok('изоставената дата не изтича в документа',
           printTxt(doc).indexOf('T12:13') < 0);
       }

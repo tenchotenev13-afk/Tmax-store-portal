@@ -159,14 +159,21 @@ function diffDirEmailOf(dir){ return (DIFF_EMAIL_CASES[dir]||DIFF_EMAIL_CASES.su
    printDoc/... - за печата, където колоните са 11mm и 13mm; там думите остават
                   възможно най-къси, за да не се пречупват на три реда.
                   „По фактура" в 11mm се пречупваше на три реда - в печата
-                  остава само „Фактура", колкото „Получено" в съседната. */
+                  остава само „Фактура".
+                  printReal е „Реално", не „Получено": на 30.08.2026 реален
+                  print preview показа „Получе|но" - осем знака не се побират
+                  в 13mm при 7.5pt, дори след като страничният padding падна
+                  на 0.8mm. „Реално" е СЪЩАТА дума, която realShort вече
+                  ползва за същото поле, не ново съкращение. Ширините не се
+                  пипат: 190mm са заковани в
+                  tests/diff-print-supplier-col.test.js. */
 function diffQtyLabels(dir){
   if (dir === 'wrong_receipt') return {doc:'По фактура',      docShort:'По фактура',
                                        real:'Реално заприходено', realShort:'Заприходено',
                                        printDoc:'Фактура',     printReal:'Заприх.'};
   return {doc:'По вх. доставка', docShort:'По вх. дост.',
           real:'Реално получено', realShort:'Реално',
-          printDoc:'Кол.',        printReal:'Получено'};
+          printDoc:'Кол.',        printReal:'Реално'};
 }
 /* Изпращане на имейл до доставчик - Цветелина Тенева + admin (за тестване/подпомагане) */
 function canSendDiffEmail() {
@@ -2291,6 +2298,11 @@ function renderDiffPrint(rep){
        което поне се чете. Само този клас: .dp-sub (подзаглавието на цялата
        бланка) е друго нещо и нарочно се пречупва. */
     '.p-sub{font-size:7pt;color:#555;white-space:nowrap;}'+
+    /* Имената в „Решил"/„Изпълн." са на 7pt, не на 8pt като останалите
+       клетки: при 8pt „Цветелина" иска повече от наличните 13.4mm и се
+       чупеше като „Цветелин|а". Датата отдолу вече е 7pt (.p-sub), тоест
+       двата реда сега са с един размер. */
+    '.dp-who{font-size:7pt;}'+
     '.dp-sec{font-size:9.5pt;font-weight:700;margin:0 0 2mm;}'+
     '.dp-photos{display:flex;flex-wrap:wrap;gap:3mm;margin-bottom:4mm;}'+
     '.dp-photos img{width:40mm;height:auto;border:1px solid #ccc;}'+
@@ -2312,8 +2324,8 @@ function renderDiffPrint(rep){
       '<td class="dp-num">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
       '<td>'+(l.type?(TYPE_LABELS[l.type]||l.type):'—')+'</td>'+
       '<td>'+statusText(l)+'</td>'+
-      '<td>'+whoWhen(l.resolved_by,l.resolved_at)+'</td>'+
-      '<td>'+whoWhen(l.completed_by,l.completed_at)+'</td>'+
+      '<td class="dp-who">'+whoWhen(l.resolved_by,l.resolved_at)+'</td>'+
+      '<td class="dp-who">'+whoWhen(l.completed_by,l.completed_at)+'</td>'+
       '<td>'+esc(l.comment||'')+(att?' 📎'+att:'')+'</td>'+
     '</tr>';
   }).join('');
@@ -2375,7 +2387,9 @@ function renderDiffPrint(rep){
             '<th style="width:'+(printSupplierDoc?'20':'22')+'mm;">Тип на решение</th>'+
             '<th style="width:'+(printSupplierDoc?'19':'20')+'mm;">Статус</th>'+
             '<th style="width:15mm;">Решил</th>'+
-            '<th style="width:15mm;">Изпълнил</th>'+
+            /* Съкратено САМО тук. Таблицата на екрана, имейлът и подписният
+               блок долу остават с пълната дума - там място има. */
+            '<th style="width:15mm;">Изпълн.</th>'+
             '<th style="width:'+(printSupplierDoc?'22':'24')+'mm;">Коментар</th>'+
           '</tr></thead>'+
           '<tbody>'+(rowsHtml||'<tr><td colspan="'+(printSupplierDoc?11:10)+'" style="text-align:center;color:#666;">Няма редове по тази бланка.</td></tr>')+'</tbody>'+
