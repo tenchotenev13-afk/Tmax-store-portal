@@ -1062,7 +1062,7 @@ var NOTIF_DOW_ORDER  = ['mon','tue','wed','thu','fri','sat','sun'];
 
 /* КОПИЕ на IMPLEMENTED_TOPICS от supabase/functions/bulletin-notify/index.ts.
    notification_topics държи осем реда, но строител в едж функцията има само за
-   тези три — останалите пет се събуждат и връщат „Темата още не е реализирана
+   тези четири — останалите се събуждат и връщат „Темата още не е реализирана
    в кода", тоест известието просто не излиза. Екранът трябва да го КАЗВА:
    иначе „Дневен отчет · спряна" изглежда като тема, която чака да я включиш.
 
@@ -1071,7 +1071,7 @@ var NOTIF_DOW_ORDER  = ['mon','tue','wed','thu','fri','sat','sun'];
    в базата би се разминала със същия успех. Двата списъка се менят ЗАЕДНО —
    tests/admin-notifications.test.js чете и двата от файловете и пада, ако се
    разминат. */
-var NOTIF_IMPLEMENTED_TOPICS = ['overdue_tasks', 'today_deadlines', 'promo_expiring'];
+var NOTIF_IMPLEMENTED_TOPICS = ['overdue_tasks', 'today_deadlines', 'promo_expiring', 'deadline_passed'];
 
 function notifTopicHasBuilder(key){ return NOTIF_IMPLEMENTED_TOPICS.indexOf(key) >= 0; }
 

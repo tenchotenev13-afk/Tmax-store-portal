@@ -7,6 +7,7 @@
 //   overdue_tasks    — имейл/push до контролинг, регионални, ЦО, автора
 //   today_deadlines  — push до обекта, два часа преди часа на задачата
 //   promo_expiring   — имейл/push за промоции, изтичащи днес (и до 3 дни в пон.)
+//   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -42,6 +43,12 @@ const EXCLUDED_STORES = [
    08:30, 10:00, 11:00, 16:00 и пет в 20:00. Задача без час влиза в 08:00. */
 const LEAD_MINUTES = 120;
 const EARLIEST_MINUTE = 8 * 60;
+
+/* Обратната сметка: НАПРЕД от часа на задачата. today_deadlines пита „кой
+   трябва да подаде", тази тема пита „кой подаде". Четвърт час е колкото да
+   се качи файл след звънеца, без писмото да закъснее толкова, че да няма
+   смисъл. */
+const GRACE_MINUTES = 15;
 
 const DOW = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
@@ -136,6 +143,12 @@ function esc(s: unknown): string {
     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
 }
+
+/* Копие от shared.js — нужно е дословно, защото attachmentsHtml по-долу е
+   пренесена буква по буква от send-scheduled-report и вика точно него.
+   Тукашният esc() и без това вече екранира кавичката, тоест второто минаване
+   не мени нищо; функцията стои, за да е копието наистина копие. */
+function escAttr(s: unknown): string { return esc(s).replace(/"/g, '&quot;'); }
 
 function bgDate(iso: string): string {
   if (!iso) return '';
@@ -437,6 +450,177 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
   return { byStore: byStore, targets: targets, window: hhmm(nowMin) };
 }
 
+/* ──────────────── ТЕМА: ИЗТЕКЪЛ СРОК ─────────────── */
+/* Огледало на today_deadlines, но сметката е НАПРЕД: там slotFor() вади
+   LEAD_MINUTES преди часа на задачата, тук се прибавя GRACE_MINUTES след него.
+   Прозорецът е същият (последните 15 минути), защото кронът бие на 15 минути
+   и задача, чийто слот е паднал между две събуждания, иначе се пропуска.
+
+   Разликата с today_deadlines не е само в знака:
+   · там получателят е ОБЕКТЪТ (push по таг store_name) — „ти трябва да
+     подадеш"; тук получателят е човекът, отметнат в report_groups на самата
+     задача — „ето кой подаде и кой не";
+   · там писмото е предупреждение, тук е отчет: носи коментарите и
+     прикачените файлове, за да не се отваря порталът за всяко подаване.
+
+   Само ПОСТОЯННИ задачи и само с due_time. Задача без час няма от какво да
+   се отмери четвърт час, а еднократните от бюлетина нямат собствен час
+   изобщо — за тях срокът е ден, не момент. */
+async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) {
+  const nowMin = bg.hours * 60 + bg.minutes;
+  const winStart = nowMin - 15;
+  const stores = await reportableStores(supabase);
+
+  const { data: recs } = await supabase
+    .from('recurring_tasks').select('*').eq('active', true);
+
+  const todayTasks = (recs || []).filter((t: any) =>
+    recurringDueOnWeekday(t, bg.weekdayIdx) && minutesOf(t.due_time) !== null);
+
+  const due: { t: any; slot: number }[] = [];
+  for (const t of todayTasks) {
+    const slot = (minutesOf(t.due_time) as number) + GRACE_MINUTES;
+    if (slot > winStart && slot <= nowMin) due.push({ t: t, slot: slot });
+  }
+  if (!due.length) {
+    return { skip: 'Няма задачи с изтекъл срок в този прозорец (' + hhmm(Math.max(0, winStart)) + '–' + hhmm(nowMin) + ')' };
+  }
+
+  const ids = due.map(d => d.t.id);
+  const { data: comps } = await supabase.from('task_completions')
+    .select('recurring_task_id,store_name,status,comment,photos,files')
+    .in('recurring_task_id', ids).eq('completion_date', bg.dateStr);
+
+  /* Подало = status 'done'. Отложената задача НЕ е подадена — тя е точно
+     обратното и мястото ѝ е в списъка „не са подали". */
+  const entries: any[] = [];
+  for (const d of due) {
+    const scope = (Array.isArray(d.t.target_stores) && d.t.target_stores.length)
+      ? stores.filter(s => d.t.target_stores.indexOf(s) >= 0)
+      : stores;
+    if (!scope.length) continue;
+    const submitted: any[] = [];
+    const missing: string[] = [];
+    for (const s of scope) {
+      const c = (comps || []).find((x: any) =>
+        x.recurring_task_id === d.t.id && x.store_name === s && x.status === 'done');
+      if (c) {
+        submitted.push({
+          store: s, comment: c.comment || '',
+          photos: Array.isArray(c.photos) ? c.photos : [],
+          files: Array.isArray(c.files) ? c.files : [],
+        });
+      } else {
+        missing.push(s);
+      }
+    }
+    entries.push({ task: d.t, slot: d.slot, submitted: submitted, missing: missing, total: scope.length });
+  }
+
+  if (!entries.length) return { skip: 'Никоя от задачите в прозореца няма обекти в обхвата си' };
+  return { entries: entries, window: hhmm(nowMin) };
+}
+
+/* Получателите на ТАЗИ тема идват от report_groups НА ЗАДАЧАТА, не от
+   notification_matrix. Матрицата описва кой получава тема, която важи за
+   цялата верига; тук адресатът е поименен и се сменя от човека, който
+   редактира задачата, без да пипа админския екран.
+
+   Огледално на resolveRecipientsForTask() в report.js: 'user:<имейл>' е
+   отделен човек, отметнат поименно във формата; всеки друг ключ е група и се
+   разгъва през users.notify_groups.
+
+   recurring_tasks НЯМАТ created_by (само bulletin_tasks имат), затова автор
+   не се добавя — за разлика от overdue_tasks. */
+function resolveTaskRecipients(task: any, users: any[]) {
+  const byEmail: Record<string, boolean> = {};
+  const out: { email: string; name: string }[] = [];
+  /* Дедупликация по имейл, малки букви, ПЪРВОТО име печели — за да не зависи
+     резултатът от реда на групите, когато човек е и в група, и поименно. */
+  const add = (name: string, email: string) => {
+    if (!email) return;
+    const key = String(email).toLowerCase();
+    if (byEmail[key]) return;
+    byEmail[key] = true;
+    out.push({ email: email, name: name || email });
+  };
+
+  for (const g of (Array.isArray(task.report_groups) ? task.report_groups : [])) {
+    if (typeof g === 'string' && g.indexOf('user:') === 0) {
+      const em = g.slice(5);
+      const u = users.find((x: any) => String(x.email || '').toLowerCase() === em.toLowerCase());
+      add(u ? (u.display_name || em) : em, em);
+      continue;
+    }
+    for (const u of users) {
+      const groups = Array.isArray(u.notify_groups) ? u.notify_groups : [];
+      if (groups.indexOf(g) >= 0) add(u.display_name || u.email, u.email);
+    }
+  }
+  return out;
+}
+
+/* ТРЕТО копие на същата преценка по разширение — след report.js и
+   send-scheduled-report. Пренесена ДОСЛОВНО (само името е сменено), а
+   идентичността на трите се заковава от tests/attachments-html-sync.test.js.
+   Не я поправяй тук — поправя се в report.js и се пренася. */
+function attachmentsHtml(photos, files){
+  var att = (photos||[]).concat(files||[]);
+  if (!att.length) return '';
+  var h = '<div style="margin-top:5px;">';
+  att.forEach(function(ph){
+    var nm = ph.filename || ph.name || '';
+    var ext = nm.indexOf('.')>=0 ? nm.split('.').pop().toLowerCase() : '';
+    /* Без име не съдим — виж tcAttachHtml() в bulletin.js. */
+    if (!nm || ['jpg','jpeg','png','gif','webp','heic','heif'].indexOf(ext) >= 0) {
+      h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #D8DEE9;margin-right:5px;">';
+    } else {
+      h += '<a href="'+escAttr(ph.url)+'" style="display:inline-block;font-size:12px;color:#1E2761;text-decoration:none;border:1px solid #D8DEE9;border-radius:5px;padding:3px 8px;margin:0 5px 5px 0;">📄 '+esc(nm||'документ')+'</a>';
+    }
+  });
+  return h + '</div>';
+}
+
+/* Едно писмо = една задача. Имената на обектите са ОБИКНОВЕН ТЕКСТ, без
+   линк към ?store= : порталът разбира този параметър само за глобални роли и
+   препраща към таб „Днес", тоест за регионален получател линкът мълчаливо не
+   прави нищо. По-добре без линк, отколкото линк, който не води доникъде.
+
+   dateStr е ПЕТИ параметър, а не поле на задачата: постоянната задача няма
+   собствена дата — тя се явява всяка седмица и датата идва от деня, в който
+   се смята (bg.dateStr). Четенето ѝ от глобална променлива би направило
+   функцията нетестваема. */
+function deadlinePassedHtmlFor(task: any, slot: number, submitted: any[], missing: string[], dateStr: string) {
+  const total = submitted.length + missing.length;
+  let h = '<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:640px;">'
+    + '<h2 style="margin:0 0 4px;font-size:18px;">' + esc(task.title) + '</h2>'
+    + '<div style="font-size:12px;color:#6b7280;margin-bottom:12px;">Срок ' + esc(String(task.due_time).slice(0, 5))
+    + ' · ' + esc(bgDate(dateStr)) + ' · проверено в ' + esc(hhmm(slot)) + '</div>'
+    + '<div style="font-size:14px;font-weight:700;margin-bottom:10px;">Подадени: ' + submitted.length + ' от ' + total + ' обекта</div>';
+
+  if (submitted.length) {
+    h += '<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;margin-bottom:12px;">';
+    for (const s of submitted) {
+      h += '<div style="padding:9px 12px;border-bottom:1px solid #f1f5f9;">'
+        + '<div style="font-size:13px;font-weight:700;color:#1E2761;">' + esc(s.store) + '</div>';
+      if (s.comment) h += '<div style="font-size:12px;color:#4B5563;margin-top:2px;">💬 ' + esc(s.comment) + '</div>';
+      h += attachmentsHtml(s.photos, s.files);
+      h += '</div>';
+    }
+    h += '</div>';
+  }
+
+  if (missing.length) {
+    h += '<div style="padding:10px 12px;background:#FDEEEA;border:1px solid #F3C6BA;border-radius:8px;">'
+      + '<div style="font-size:13px;font-weight:700;color:#B4442E;margin-bottom:4px;">Не са подали:</div>'
+      + '<div style="font-size:13px;color:#7f1d1d;line-height:1.6;">' + missing.map(esc).join('<br>') + '</div>'
+      + '</div>';
+  }
+
+  h += '<div style="margin-top:14px;font-size:11px;color:#9aa4b2;">Автоматично известие · ТеМАХ Портал</div>';
+  return h + '</div>';
+}
+
 /* ──────────────── ТЕМА: ИЗТИЧАЩИ ПРОМОЦИИ ─────────────── */
 /* bulletin_promotions НЯМА target_stores — промоцията важи за цялата верига.
    Затова стесняване по обект НЕ се прави: push-ът тръгва към всички отчетни
@@ -728,6 +912,77 @@ async function runTodayDeadlines(supabase: any, topic: any, bg: any, dryRun: boo
   return { topic: topic.key, sent: sent, failed: failed, already_sent: skipped, window: (built as any).window };
 }
 
+async function runDeadlinePassed(supabase: any, topic: any, bg: any, dryRun: boolean) {
+  const built = await buildDeadlinePassed(supabase, bg);
+  if ((built as any).skip) {
+    return { topic: topic.key, skipped: (built as any).skip, recipients: 0 };
+  }
+  const entries: any[] = (built as any).entries;
+
+  /* Един прочит на users за всички задачи в прозореца — resolveTaskRecipients
+     разгъва групите срещу този списък, а не срещу нова заявка на задача. */
+  const { data: users } = await supabase
+    .from('users').select('email,display_name,notify_groups').eq('active', true);
+
+  const planned: any[] = [];
+  for (const e of entries) {
+    const to = resolveTaskRecipients(e.task, users || []);
+    e.to = to;
+    if (!to.length) continue;
+    planned.push({
+      task: e.task.title, slot: hhmm(e.slot),
+      podadeni: e.submitted.length, ot: e.total,
+      ne_sa_podali: e.missing, poluchateli: to.map((r: any) => r.email),
+    });
+  }
+
+  if (dryRun) {
+    return {
+      topic: topic.key, dry_run: true, window: (built as any).window,
+      zadachi: entries.length, recipients: planned.length, planned: planned,
+    };
+  }
+
+  let sent = 0, failed = 0, skipped = 0;
+  for (const e of entries) {
+    if (!e.to.length) continue;
+    const subject = 'ТеМАХ — ' + e.task.title + ' (' + bgDate(bg.dateStr) + ')';
+    const refKey = bg.dateStr + ':' + e.task.id + ':' + hhmm(e.slot);
+    const ins = await supabase.from('notification_log')
+      .insert({ topic_key: topic.key, ref_key: refKey, detail: e.submitted.length + ' от ' + e.total + ' обекта' });
+    if (ins.error) { skipped++; continue; }
+
+    const body = deadlinePassedHtmlFor(e.task, e.slot, e.submitted, e.missing, bg.dateStr);
+    let okAny = false;
+    for (const r of e.to) {
+      const dest = topic.test_email ? topic.test_email : r.email;
+      const html = (topic.test_email
+        ? '<div style="font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:12px;">ТЕСТОВ РЕЖИМ — предназначено за ' + esc(r.name) + ' &lt;' + esc(r.email) + '&gt;</div>'
+        : '') + body;
+      const ok = await sendEmail(dest, subject, html);
+      if (ok) { sent++; okAny = true; } else { failed++; }
+    }
+
+    /* Нищо не е излязло за тази задача — редът се маха, за да се опита пак
+       при следващото събуждане на крона. Същото като в runTodayDeadlines. */
+    if (!okAny) {
+      await supabase.from('notification_log').delete()
+        .eq('topic_key', topic.key).eq('ref_key', refKey);
+    }
+  }
+
+  await supabase.from('notification_topics').update({
+    last_run_at: new Date().toISOString(),
+    last_recipients: sent,
+    last_status: (failed ? 'ГРЕШКА: ' : 'ok: ') + sent + ' писма, ' + failed + ' неуспешни, ' + skipped + ' вече пратени',
+  }).eq('key', topic.key);
+
+  return {
+    topic: topic.key, sent_emails: sent, failed_emails: failed, already_sent: skipped,
+    zadachi: entries.length, window: (built as any).window, test_email: topic.test_email || null,
+  };
+}
+
 async function runPromoExpiring(supabase: any, topic: any, bg: any, dryRun: boolean) {
   const built = await buildPromoExpiring(supabase, bg);
   if ((built as any).skip) {
@@ -829,7 +1084,7 @@ async function runPromoExpiring(supabase: any, topic: any, bg: any, dryRun: bool
 }
 
 /* ЕДИНСТВЕНИЯТ списък с темите, които имат строител. notification_topics
-   държи осем реда; строители тук има за трите отдолу. Останалите са редове
+   държи осем реда; строители тук има за четирите отдолу. Останалите са редове
    в базата и нищо повече — събудят ли се, връщат skipped.
 
    Списъкът е МАСИВ ОТ ДВОЙКИ ключ→строител нарочно: гол масив с ключове и
@@ -845,6 +1100,7 @@ const IMPLEMENTED_TOPICS = [
   { key: 'overdue_tasks',   run: runOverdueTasks },
   { key: 'today_deadlines', run: runTodayDeadlines },
   { key: 'promo_expiring',  run: runPromoExpiring },
+  { key: 'deadline_passed', run: runDeadlinePassed },
 ];
 
 async function runTopic(supabase: any, topic: any, bg: any, dryRun: boolean) {
@@ -853,12 +1109,18 @@ async function runTopic(supabase: any, topic: any, bg: any, dryRun: boolean) {
   return await impl.run(supabase, topic, bg, dryRun);
 }
 
-/* promo_expiring НЕ е тук нарочно — виж бележката в runPromoExpiring.
+/* deadline_passed е тук, защото часът е на ЗАДАЧАТА, не на темата:
+   scheduled_time на реда би бил един за всички задачи, а те са с часове
+   08:30, 10:00, 11:00, 16:00 и пет в 20:00. Еднократността за деня също не
+   върши работа — на ден има по няколко слота. Пази я notification_log, с
+   ref_key по дата+задача+слот.
+
+   promo_expiring НЕ е тук нарочно — виж бележката в runPromoExpiring.
    Темата е с фиксиран час 08:30 и стандартната логика на isDue я покрива;
    вписването ѝ тук би махнало И проверката за час, И еднократността за деня,
    тоест кронът щеше да я опитва на всеки 15 минути с единствена защита
    notification_log. */
-const WINDOWED_TOPICS = ['today_deadlines'];
+const WINDOWED_TOPICS = ['today_deadlines', 'deadline_passed'];
 
 function isDue(topic: any, bg: any): boolean {
   if (!topic.active) return false;
