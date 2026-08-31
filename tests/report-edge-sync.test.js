@@ -64,7 +64,8 @@ const SHARED_FNS = [
   'reportDayMonth', 'reportDailySubject', 'reportWeeklySubject',
   /* решетка „обект × задача" и двата ѝ среза */
   'reportGridLegendHtml', 'reportGridCellHtml', 'reportStoreLinkHtml',
-  'reportGridHtml', 'reportByTaskHtml', 'reportCommentsByStoreHtml',
+  'reportGridHtml', 'reportByTaskHtml', 'reportAttachmentsHtml',
+  'reportCommentsByStoreHtml',
   'reportCommentsCountHtml',
   'crossMetricCard', 'crossModuleRow',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',

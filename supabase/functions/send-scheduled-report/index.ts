@@ -757,6 +757,31 @@ function reportByTaskHtml(data, weekly){
     body + '</table></div>';
 }
 
+/* Прикачените към едно отмятане: снимка -> миниатюра, документ -> връзка с
+   името. Проверката по разширение важи и за СТАРАТА колона photos: в нея
+   лежат три .xlsx отпреди отделната колона files и досега излизаха в
+   писмото като счупени картинки.
+
+   Живее отделно, защото се ползва на ДВЕ места - коментарите по обекти в
+   общия отчет и личните картички по задачи. Остане ли вградена в едното,
+   другото се разминава при следващата промяна, без никой да забележи. */
+function reportAttachmentsHtml(photos, files){
+  var att = (photos||[]).concat(files||[]);
+  if (!att.length) return '';
+  var h = '<div style="margin-top:5px;">';
+  att.forEach(function(ph){
+    var nm = ph.filename || ph.name || '';
+    var ext = nm.indexOf('.')>=0 ? nm.split('.').pop().toLowerCase() : '';
+    /* Без име не съдим — виж tcAttachHtml() в bulletin.js. */
+    if (!nm || ['jpg','jpeg','png','gif','webp','heic','heif'].indexOf(ext) >= 0) {
+      h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #D8DEE9;margin-right:5px;">';
+    } else {
+      h += '<a href="'+escAttr(ph.url)+'" style="display:inline-block;font-size:12px;color:#1E2761;text-decoration:none;border:1px solid #D8DEE9;border-radius:5px;padding:3px 8px;margin:0 5px 5px 0;">📄 '+esc(nm||'документ')+'</a>';
+    }
+  });
+  return h + '</div>';
+}
+
 /* ═══════ КОМЕНТАРИ ПО ОБЕКТИ ═══════════════════════════════════════
    Заварено: редовете бяха „Заглавие на задачата — Магазин", тоест три
    коментара от Добрич по три задачи излизаха на три различни места и
@@ -804,25 +829,7 @@ function reportCommentsByStoreHtml(data){
         (e.postponed ? '<span style="color:#B45309;font-weight:700;">⏳ отложена · </span>' : '') +
         '<b>'+esc(e.title)+'</b></div>';
       if (e.comment) h += '<div style="font-size:12px;color:#4B5563;margin-top:2px;">💬 '+esc(e.comment)+'</div>';
-      /* Снимка -> миниатюра, документ -> връзка с името. Проверката по
-         разширение важи и за СТАРАТА колона photos: в нея лежат три .xlsx
-         отпреди отделната колона files и досега излизаха в писмото като
-         счупени картинки. */
-      var att = (e.photos||[]).concat(e.files||[]);
-      if (att.length) {
-        h += '<div style="margin-top:5px;">';
-        att.forEach(function(ph){
-          var nm = ph.filename || ph.name || '';
-          var ext = nm.indexOf('.')>=0 ? nm.split('.').pop().toLowerCase() : '';
-          /* Без име не съдим — виж tcAttachHtml() в bulletin.js. */
-          if (!nm || ['jpg','jpeg','png','gif','webp','heic','heif'].indexOf(ext) >= 0) {
-            h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #D8DEE9;margin-right:5px;">';
-          } else {
-            h += '<a href="'+escAttr(ph.url)+'" style="display:inline-block;font-size:12px;color:#1E2761;text-decoration:none;border:1px solid #D8DEE9;border-radius:5px;padding:3px 8px;margin:0 5px 5px 0;">📄 '+esc(nm||'документ')+'</a>';
-          }
-        });
-        h += '</div>';
-      }
+      h += reportAttachmentsHtml(e.photos, e.files);
       return h + '</div>';
     }).join('');
     return '<div style="padding:10px 12px;border-bottom:1px solid #E5E9F0;">' +

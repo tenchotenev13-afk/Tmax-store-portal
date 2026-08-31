@@ -22,6 +22,9 @@
    Пускане:  node tests/weekly-routing-window.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
+/* bd.done е масив от { store, comment, photos, files } — картичката показва
+   коментарите и прикачените на изпълнилите, не само имената им. */
+const doneNames = bd => bd.done.map(d => d.store);
 const { boot, ok, section, report, guard, ticks } = H;
 
 const ADMIN = { email: 'a@temax.bg', display_name: 'Админ', role: 'admin',
@@ -257,10 +260,10 @@ function urlsFor(calls, table) {
     if (ok('данните се събират', !!(data && data.tasks.length))) {
       const bd = h.w.taskStoreBreakdown(data.tasks[0], data.comps, data.stores);
       ok('изпълнил е само Раднево',
-        bd.done.length === 1 && bd.done[0] === 'Раднево', bd.done.join(', '));
+        bd.done.length === 1 && bd.done[0].store === 'Раднево', doneNames(bd).join(', '));
       ok('Габрово (отметка от януари) е в „чакащи", не в „изпълнили"',
-        bd.pending.indexOf('Габрово') >= 0 && bd.done.indexOf('Габрово') < 0,
-        'done=' + bd.done.join(',') + ' pending=' + bd.pending.join(','));
+        bd.pending.indexOf('Габрово') >= 0 && doneNames(bd).indexOf('Габрово') < 0,
+        'done=' + doneNames(bd).join(',') + ' pending=' + bd.pending.join(','));
       ok('Троян е отложил, с коментара си',
         bd.postponed.length === 1 && bd.postponed[0].store === 'Троян' &&
         bd.postponed[0].comment === 'няма стока', JSON.stringify(bd.postponed));
@@ -279,7 +282,7 @@ function urlsFor(calls, table) {
       const bd2 = h.w.taskStoreBreakdown(data.tasks[0], otherDay, ['Раднево']);
       ok('отмятане в друг ден от седмицата не покрива точен срок',
         bd2.pending.join(',') === 'Раднево',
-        'done=' + bd2.done.join(',') + ' pending=' + bd2.pending.join(','));
+        'done=' + doneNames(bd2).join(',') + ' pending=' + bd2.pending.join(','));
     }
     h.close();
   }
@@ -299,15 +302,15 @@ function urlsFor(calls, table) {
         comment: '', completion_date: '2026-08-20' }
     ];
     const bd = w.taskStoreBreakdown(task, comps, ['Раднево']);
-    ok('обектът излиза изпълнил', bd.done.join(',') === 'Раднево',
-      'done=' + bd.done.join(',') + ' postponed=' + JSON.stringify(bd.postponed));
+    ok('обектът излиза изпълнил', doneNames(bd).join(',') === 'Раднево',
+      'done=' + doneNames(bd).join(',') + ' postponed=' + JSON.stringify(bd.postponed));
     ok('и не се дублира в отложените', bd.postponed.length === 0);
 
     /* Обърнат ред на същите редове дава същия резултат. */
     const bd2 = w.taskStoreBreakdown(task, comps.slice().reverse(), ['Раднево']);
     ok('редът на редовете не променя резултата',
-      JSON.stringify(bd2.done) === JSON.stringify(bd.done),
-      JSON.stringify(bd2.done));
+      JSON.stringify(doneNames(bd2)) === JSON.stringify(doneNames(bd)),
+      JSON.stringify(doneNames(bd2)));
 
     /* Отмятане ИЗВЪН диапазона не се брои дори да е 'done'. */
     const outside = [{ item_id: 't-9', kind: 'regular', store_name: 'Раднево',

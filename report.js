@@ -525,6 +525,31 @@ function reportByTaskHtml(data, weekly){
     body + '</table></div>';
 }
 
+/* Прикачените към едно отмятане: снимка -> миниатюра, документ -> връзка с
+   името. Проверката по разширение важи и за СТАРАТА колона photos: в нея
+   лежат три .xlsx отпреди отделната колона files и досега излизаха в
+   писмото като счупени картинки.
+
+   Живее отделно, защото се ползва на ДВЕ места - коментарите по обекти в
+   общия отчет и личните картички по задачи. Остане ли вградена в едното,
+   другото се разминава при следващата промяна, без никой да забележи. */
+function reportAttachmentsHtml(photos, files){
+  var att = (photos||[]).concat(files||[]);
+  if (!att.length) return '';
+  var h = '<div style="margin-top:5px;">';
+  att.forEach(function(ph){
+    var nm = ph.filename || ph.name || '';
+    var ext = nm.indexOf('.')>=0 ? nm.split('.').pop().toLowerCase() : '';
+    /* Без име не съдим — виж tcAttachHtml() в bulletin.js. */
+    if (!nm || ['jpg','jpeg','png','gif','webp','heic','heif'].indexOf(ext) >= 0) {
+      h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #D8DEE9;margin-right:5px;">';
+    } else {
+      h += '<a href="'+escAttr(ph.url)+'" style="display:inline-block;font-size:12px;color:#1E2761;text-decoration:none;border:1px solid #D8DEE9;border-radius:5px;padding:3px 8px;margin:0 5px 5px 0;">📄 '+esc(nm||'документ')+'</a>';
+    }
+  });
+  return h + '</div>';
+}
+
 /* ═══════ КОМЕНТАРИ ПО ОБЕКТИ ═══════════════════════════════════════
    Заварено: редовете бяха „Заглавие на задачата — Магазин", тоест три
    коментара от Добрич по три задачи излизаха на три различни места и
@@ -572,25 +597,7 @@ function reportCommentsByStoreHtml(data){
         (e.postponed ? '<span style="color:#B45309;font-weight:700;">⏳ отложена · </span>' : '') +
         '<b>'+esc(e.title)+'</b></div>';
       if (e.comment) h += '<div style="font-size:12px;color:#4B5563;margin-top:2px;">💬 '+esc(e.comment)+'</div>';
-      /* Снимка -> миниатюра, документ -> връзка с името. Проверката по
-         разширение важи и за СТАРАТА колона photos: в нея лежат три .xlsx
-         отпреди отделната колона files и досега излизаха в писмото като
-         счупени картинки. */
-      var att = (e.photos||[]).concat(e.files||[]);
-      if (att.length) {
-        h += '<div style="margin-top:5px;">';
-        att.forEach(function(ph){
-          var nm = ph.filename || ph.name || '';
-          var ext = nm.indexOf('.')>=0 ? nm.split('.').pop().toLowerCase() : '';
-          /* Без име не съдим — виж tcAttachHtml() в bulletin.js. */
-          if (!nm || ['jpg','jpeg','png','gif','webp','heic','heif'].indexOf(ext) >= 0) {
-            h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #D8DEE9;margin-right:5px;">';
-          } else {
-            h += '<a href="'+escAttr(ph.url)+'" style="display:inline-block;font-size:12px;color:#1E2761;text-decoration:none;border:1px solid #D8DEE9;border-radius:5px;padding:3px 8px;margin:0 5px 5px 0;">📄 '+esc(nm||'документ')+'</a>';
-          }
-        });
-        h += '</div>';
-      }
+      h += reportAttachmentsHtml(e.photos, e.files);
       return h + '</div>';
     }).join('');
     return '<div style="padding:10px 12px;border-bottom:1px solid #E5E9F0;">' +
@@ -1350,8 +1357,11 @@ function collectWeeklyRoutingData(cb){
         }).map(function(u){ return u.store_name; });
         /* completion_date ЗАДЪЛЖИТЕЛНО минава нататък - reportItemMatchesComp
            сравнява точно него срещу прозореца на задачата. */
-        var comps = regCompsRaw.map(function(c){ return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, completion_date:c.completion_date||null }; })
-          .concat(recCompsRaw.map(function(c){ return { item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, completion_date:c.completion_date||null }; }));
+        /* photos/files минават нататък - личната картичка ги показва.
+           Дотук се изхвърляха точно тук, тоест задачите от тип photo/file
+           стигаха до получателя само като число. */
+        var comps = regCompsRaw.map(function(c){ return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null }; })
+          .concat(recCompsRaw.map(function(c){ return { item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null }; }));
         var creatorMap = {};
         allUsers.forEach(function(u){ if (u.display_name && u.email) creatorMap[u.display_name] = u.email; });
         cb({ bul:bul, weekLabel:weekLabel, tasks:routedTasks, comps:comps, stores:stores, regionalUsers:regionalUsers, creatorMap:creatorMap });
@@ -1462,7 +1472,7 @@ function taskStoreBreakdown(task, comps, allStores){
     var mine = comps.filter(function(x){ return x.store_name===s && reportItemMatchesComp(matcher, x); });
     var c = mine.find(function(x){ return x.status==='done'; }) ||
             mine.find(function(x){ return x.status==='postponed'; }) || mine[0];
-    if (c && c.status==='done') done.push(s);
+    if (c && c.status==='done') done.push({ store:s, comment:c.comment||'', photos:c.photos||[], files:c.files||[] });
     else if (c && c.status==='postponed') postponed.push({ store:s, comment:c.comment||'' });
     else pending.push(s);
   });
@@ -1475,10 +1485,35 @@ function personalizedTaskCardHtml(task, comps, allStores){
   var h = '<div style="background:#F9FAFC;border-radius:8px;padding:12px 14px;margin-bottom:8px;">';
   h += '<div style="font-size:13px;font-weight:700;color:#1F2937;">'+srcIcon+esc(task.title)+'</div>';
   h += '<div style="font-size:11px;color:#6B7280;margin-top:2px;">'+bd.done.length+' от '+bd.scope.length+' обекта изпълнили</div>';
+  /* Кой НЕ е изпълнил - точно това получателят търси първо, а дотук
+     картичката казваше само числото. Имената са обикновен текст, без
+     reportStoreLinkHtml: редът е изброяване, не покана да се отвори всеки
+     обект поотделно. */
+  if (bd.pending.length) {
+    h += '<div style="font-size:11px;color:#B91C1C;margin-top:4px;">Не са изпълнили: '+
+      bd.pending.map(function(s){ return esc(s); }).join(', ')+'</div>';
+  }
   if (bd.postponed.length) {
     h += '<div style="margin-top:6px;">';
     bd.postponed.forEach(function(p){
       h += '<div style="font-size:11px;color:#92400e;">⏱ '+esc(p.store)+(p.comment?': '+esc(p.comment):'')+'</div>';
+    });
+    h += '</div>';
+  }
+  /* Какво са казали и качили изпълнилите - смисълът на задачите от тип
+     photo/file. Без този блок писмото свежда снимката до единица в „X от Y".
+     Обект без коментар и без прикачени не заема ред. */
+  var withContent = bd.done.filter(function(d){
+    return d.comment || (d.photos && d.photos.length) || (d.files && d.files.length);
+  });
+  if (withContent.length) {
+    h += '<div style="margin-top:8px;">';
+    withContent.forEach(function(d){
+      h += '<div style="padding:6px 0 0;margin-top:6px;border-top:1px solid #E5E9F0;">' +
+        '<div style="font-size:12px;font-weight:600;color:#1F2937;">'+esc(d.store)+'</div>';
+      if (d.comment) h += '<div style="font-size:12px;color:#4B5563;margin-top:2px;">💬 '+esc(d.comment)+'</div>';
+      h += reportAttachmentsHtml(d.photos, d.files);
+      h += '</div>';
     });
     h += '</div>';
   }
