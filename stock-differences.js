@@ -77,6 +77,18 @@ function canAttachSDLine(line){
   if (!mine) return false; /* глобален профил без разпределение - не е "магазин" */
   return mine.indexOf(line.store_name) >= 0;
 }
+/* Прикачване на снимка/документ към ЦЯЛАТА бланка, след като тя вече е подадена.
+   Дотук снимките се пълнеха само при подаване (diffPendingPhotos), тоест
+   пропусната снимка нямаше как да догони бланката. Правата са същите като по
+   ред, но се броят по бланката: централният офис навсякъде, магазинът - само
+   по своята. canAttachSDLine НЕ се пипа - той решава друг въпрос. */
+function canAttachDiffReport(rep){
+  if (!currentUser || !rep) return false;
+  if (['admin','accounting'].indexOf(currentUser.role) >= 0) return true;
+  var mine = assignedStores();
+  if (!mine) return false; /* глобален профил без разпределение - не е "магазин" */
+  return mine.indexOf(rep.store_name) >= 0;
+}
 /* Кой извършва действието - едно място за начина, по който се записва авторът
    в resolved_by/completed_by. Същият израз се ползва и за created_by. */
 function sdActor(){ return currentUser.display_name || currentUser.email; }
@@ -1142,6 +1154,48 @@ function sdUploadLineAttachment(input,lineId){
     reader.readAsArrayBuffer(blob);
   });
 }
+/* Добавяне на пропусната снимка към ВЕЧЕ подадена бланка. Пътят е същият като
+   при diffUploadPhoto ('differences/' + време + случаен суфикс), за да стоят
+   всички снимки на бланки на едно място в bucket-а, а форматът на записа е
+   {url,name} - точно както submitDiffReport записва photos. НЕ е форматът
+   {type,url,filename} на attachments по ред: двете колони са различни. */
+function sdUploadReportPhoto(input,reportId){
+  var file=input.files[0]; if(!file)return;
+  input.value='';
+  var rep=diffReports.find(function(x){return String(x.id)===String(reportId);});
+  if(!rep){toast('Бланката не е намерена','#dc2626');return;}
+  if(!canAttachDiffReport(rep)){toast('Нямаш права да прикачваш към тази бланка','#dc2626');return;}
+  var isImg=!!file.type && file.type.indexOf('image/')===0;
+  toast('⏳ Качване...','#2563eb');
+  diffCompressImage(file,1600,0.75).then(function(blob){
+    var ext=isImg?'jpg':((file.name.split('.').pop()||'bin').toLowerCase());
+    var ctype=isImg?'image/jpeg':(file.type||'application/octet-stream');
+    var path='differences/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+ext;
+    var reader=new FileReader();
+    reader.onload=function(e){
+      fetch(DIFF_SB+'/storage/v1/object/'+DIFF_BKT+'/'+path,{
+        method:'POST',
+        headers:{'Authorization':'Bearer '+DIFF_KEY,'Content-Type':ctype,'x-upsert':'true'},
+        body:e.target.result
+      }).then(function(r){return r.ok;}).then(function(ok){
+        if(!ok){toast('Грешка при качване','#dc2626');return;}
+        var pub=DIFF_SB+'/storage/v1/object/public/'+DIFF_BKT+'/'+path;
+        /* Копие на съществуващия масив + новият елемент. Записване на масив с
+           един елемент би изтрило снимките от подаването. */
+        var arr=(Array.isArray(rep.photos)?rep.photos:[]).slice();
+        arr.push({url:pub,name:file.name});
+        sbPatch('differences_reports','id=eq.'+reportId,{photos:arr}).then(function(res){
+          if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+          rep.photos=arr;
+          toast('✅ Прикачено!');
+          sdKeepScroll(rep.id);
+          renderStockDiff();
+        });
+      }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');});
+    };
+    reader.readAsArrayBuffer(blob);
+  });
+}
 function sdUploadAttachment(input){
   var file=input.files[0]; if(!file)return;
   if(!sdEditId){toast('Запази записа първо, после прикачи документ','#dc2626');return;}
@@ -1508,8 +1562,13 @@ function renderDiffReportsSection(){
     }
     if(rep.general_comment) h+='<div style="font-size:12px;color:#374151;background:#f8fafc;border-radius:6px;padding:6px 8px;margin-bottom:6px;">💬 '+esc(rep.general_comment)+'</div>';
     var photos = Array.isArray(rep.photos)?rep.photos:[];
-    if(photos.length){
-      h+='<div style="display:flex;gap:6px;flex-wrap:wrap;">';
+    /* Контейнерът се рендира и при НУЛА снимки, стига този потребител да може
+       да прикачва - бланка, подадена без снимка, също трябва да може да получи
+       такава. Преди целият блок беше под if(photos.length) и точно тези бланки
+       оставаха без изход. */
+    var canAddPhoto = canAttachDiffReport(rep);
+    if(photos.length || canAddPhoto){
+      h+='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">';
       photos.forEach(function(p){
         /* Не всичко, качено през "Снимай сега/Избери от галерия", реално е
            снимка - служителите понякога прикачват сканирани PDF документи.
@@ -1522,6 +1581,13 @@ function renderDiffReportsSection(){
           h+='<a href="'+esc(p.url)+'" target="_blank" title="'+esc(p.name||'Файл')+'" style="display:flex;flex-direction:column;align-items:center;justify-content:center;width:56px;height:56px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;text-decoration:none;font-size:20px;">📄</a>';
         }
       });
+      /* Плътен бутон, не пунктираното квадратче с 📎 от sdLineAttachCell -
+         магазините не разпознаваха пунктира като бутон и не го натискаха. */
+      if(canAddPhoto){
+        h+='<label title="Добави пропусната снимка към бланката" data-add-photo-rid="'+rep.id+'" style="display:inline-flex;align-items:center;gap:5px;border:1px solid #c4b5fd;background:#f5f3ff;color:#5b21b6;border-radius:6px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer;">'+
+          '📷 Добави снимка<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx" style="display:none;" data-rid="'+rep.id+'" onchange="sdUploadReportPhoto(this,this.dataset.rid)">'+
+        '</label>';
+      }
       h+='</div>';
     }
     h+='</div>';
