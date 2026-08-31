@@ -2798,7 +2798,7 @@ function bulCheckboxChanged(cb){
   if (!cb.checked) { toggleTask(taskId, false, null, completionDate); return; }
   var t = bulTasks.find(function(x){ return String(x.id)===String(taskId); });
   var tt = TASK_TYPES[(t&&t.task_type)||'info'];
-  if (!tt || (!tt.needsPhoto && !tt.needsComment)) { toggleTask(taskId, true, null, completionDate); return; }
+  if (!tt || (!tt.needsPhoto && !tt.needsFile && !tt.needsComment)) { toggleTask(taskId, true, null, completionDate); return; }
   cb.checked = false; /* до потвърждение от модала */
   openTaskCompletionModal(taskId, 'regular', completionDate);
 }
@@ -3335,7 +3335,7 @@ function bulRecurringCheckboxChanged(cb){
   if (!cb.checked) { toggleRecurringTask(taskId, false, null, completionDate); return; }
   var t = recurringTasks.find(function(x){ return String(x.id)===String(taskId); });
   var tt = TASK_TYPES[(t&&t.task_type)||'info'];
-  if (!tt || (!tt.needsPhoto && !tt.needsComment)) { toggleRecurringTask(taskId, true, null, completionDate); return; }
+  if (!tt || (!tt.needsPhoto && !tt.needsFile && !tt.needsComment)) { toggleRecurringTask(taskId, true, null, completionDate); return; }
   cb.checked = false;
   openTaskCompletionModal(taskId, 'recurring', completionDate);
 }

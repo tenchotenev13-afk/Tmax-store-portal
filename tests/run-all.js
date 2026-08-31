@@ -80,6 +80,7 @@ const TESTS = [
   'co-role-filter.test.js',
   'late-flag.test.js',
   'task-completion-files.test.js',
+  'task-type-file-requires-doc.test.js',
   /* overdue-recipients.test.js отпадна на 27.08.2026 заедно с логиката, която
      проверяваше — наследникът му е notify-topic-button.test.js по-долу. */
   'kasa-return-status.test.js',
