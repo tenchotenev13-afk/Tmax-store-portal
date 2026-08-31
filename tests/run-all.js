@@ -92,6 +92,7 @@ const TESTS = [
   'no-auto-push-on-load.test.js',
   'notify-topic-button.test.js',
   'admin-notifications.test.js',
+  'attachments-html-sync.test.js',
   'notify-schedule-stores.test.js'
 ];
 
