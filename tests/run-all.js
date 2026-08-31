@@ -61,6 +61,7 @@ const TESTS = [
   'report-email-shell.test.js',
   'weekly-cross-window.test.js',
   'weekly-routing-window.test.js',
+  'routed-card-content.test.js',
   'report-ranking-plural.test.js',
   'report-scope-notice.test.js',
   'report-edge-sync.test.js',
