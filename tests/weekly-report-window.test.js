@@ -30,6 +30,43 @@ const BULLETINS = [
 const ADMIN = { email: 'a@temax.bg', display_name: 'Админ', role: 'admin',
                 store_name: 'Централен офис' };
 
+/* ── Заковаване на системната дата ──────────────────────────────────────── */
+
+/* Секции 3 и 4 подават датата ЯВНО като аргумент, затова не зависят от „сега".
+   Секция 5 обаче минава през collectWeeklyReportData(), който вика new Date()
+   вътре в себе си — значи датата се подменя на самия window (файловете са
+   заредени с w.eval() и виждат именно w.Date). Конструкторът с аргументи
+   остава истинският, иначе weekDays(wk,yr) и new Date(iso) биха се счупили.
+
+   Без това фикстурата гниеше с календара: BULLETINS има само седмици 33/34/35
+   на 2026, а на 31.08.2026 последната приключила седмица вече Е 35 — кодът
+   избираше b-35 напълно коректно, а проверката „не 35" падаше за нещо, което
+   не е бъг. Понеделник 24.08 връща смисъла, за който е писана: тогава 35 е
+   БЪДЕЩА седмица и не бива да се избира. */
+const FROZEN = '2026-08-24T08:00:00';   /* понеделник, часът на cron-а */
+
+function freezeDate(w) {
+  const RealDate = w.Date;
+  const fixedMs = new RealDate(FROZEN).getTime();
+  function FakeDate(a, b, c, d, e, f, g) {
+    switch (arguments.length) {
+      case 0: return new RealDate(fixedMs);
+      case 1: return new RealDate(a);
+      case 2: return new RealDate(a, b);
+      case 3: return new RealDate(a, b, c);
+      case 4: return new RealDate(a, b, c, d);
+      case 5: return new RealDate(a, b, c, d, e);
+      case 6: return new RealDate(a, b, c, d, e, f);
+      default: return new RealDate(a, b, c, d, e, f, g);
+    }
+  }
+  FakeDate.prototype = RealDate.prototype;
+  FakeDate.now = () => fixedMs;
+  FakeDate.parse = RealDate.parse;
+  FakeDate.UTC = RealDate.UTC;
+  w.Date = FakeDate;
+}
+
 function env(over) {
   return boot(Object.assign({
     modules: ['bulletin.js', 'report.js'],
@@ -158,9 +195,14 @@ function env(over) {
   section('5. Заявката вече не е limit=1 и колекторът тръгва');
   {
     const h = env();
+    freezeDate(h.w);   /* понеделник 24.08 → приключилата седмица е 34 */
     let data = null;
     h.w.collectWeeklyReportData(function (d) { data = d; });
     await ticks();
+
+    ok('датата е закотвена в понеделник 24.08.2026',
+      h.w.toLocalISO(new h.w.Date()) === '2026-08-24',
+      h.w.toLocalISO(new h.w.Date()));
 
     const q = h.calls.get.find(u => u.indexOf('/bulletins') >= 0);
     if (ok('има заявка към bulletins', !!q, h.calls.get.join('\n'))) {
