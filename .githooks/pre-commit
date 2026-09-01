@@ -55,6 +55,43 @@ if git ls-files --error-unmatch tests/run-all.js >/dev/null 2>&1; then
   fi
 fi
 
+# 1c. NUL байт в изходен файл — ТВЪРД ГЕЙТ.
+#
+# Втори път се случва. Първият беше tests/attachments-html-sync.test.js:
+# там git обяви файла за ДВОИЧЕН и това го издаде. Вторият — checklist.js
+# (c6a8da2, 2 байта на позиции 11645 и 17120) — мина напълно тихо: два NUL-а
+# в един файл от 17 KB не стигат git да го сметне за двоичен, затова diff-ът
+# изглеждаше нормален. И в двата случая NUL-ът беше на мястото на интервал
+# при програмно сглобяване на низ.
+#
+# Защо нищо друго не го хваща:
+#   · node --check го приема — NUL вътре в стрингов литерал е валиден JS;
+#   · smoke.js го приема — файлът се зарежда и работи;
+#   · тестовете го приемат — ключът е симетричен от двете страни, тоест
+#     търсенето в речника уцелва. 65 зелени проверки върху счупен байт.
+# Единственото, което остава, е да се преброят байтовете. Затова е тук.
+#
+# Чете се ИНДЕКСЪТ (git show :файл), не работното дърво — комитва се той.
+NULFILES=$(git diff --cached --name-only --diff-filter=ACMR \
+  | grep -viE '\.(png|jpg|jpeg|gif|ico|webp|svgz|woff2?|ttf|otf|eot|pdf|zip|gz|xlsx?|docx?|pptx?)$' \
+  | while read -r f; do
+      n=$(git show ":$f" 2>/dev/null | tr -cd '\000' | wc -c | tr -d ' ')
+      [ -n "$n" ] && [ "$n" -gt 0 ] && echo "$n  $f"
+    done)
+if [ -n "$NULFILES" ]; then
+  echo "  ГРЕШКА  NUL байт в изходен файл (брой, файл):"
+  echo "$NULFILES" | sed 's/^/            · /'
+  echo "            Намери позициите:"
+  echo "              node -e \"const b=require('fs').readFileSync('ФАЙЛ');\\"
+  echo "                for(let i=0;i<b.length;i++)if(b[i]===0)\\"
+  echo "                  console.log(i, JSON.stringify(b.slice(i-40,i+40).toString()))\""
+  echo "            Обикновено е изяден интервал/разделител. Провери какво е"
+  echo "            трябвало да стои там — НЕ трий байта наизуст."
+  FAIL=1
+else
+  echo "  ok    без NUL байтове"
+fi
+
 # 2. Всички модули заредени заедно (само ако има променен JS и jsdom го има)
 if [ -z "$STAGED" ]; then
   : # няма променен модул в корена — няма какво да се зарежда
