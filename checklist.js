@@ -164,7 +164,7 @@ function loadChecklist() {
 function checklistIndex() {
   var idx = {};
   checklistRows.forEach(function (r) {
-    idx[r.store_name + ' ' + r.metric_key] = r;
+    idx[r.store_name + ' ' + r.metric_key] = r;
   });
   return idx;
 }
@@ -266,7 +266,7 @@ function renderChecklist() {
     h += '<tr>' +
       '<td style="' + cellCss + 'text-align:left;font-weight:600;background:#fff;position:sticky;left:0;">' + escVal(store) + '</td>';
     checklistMetrics.forEach(function (m) {
-      h += '<td style="' + cellCss + '">' + checklistCellInner(m, idx[store + ' ' + m.key]) + '</td>';
+      h += '<td style="' + cellCss + '">' + checklistCellInner(m, idx[store + ' ' + m.key]) + '</td>';
     });
     h += '</tr>';
   });
