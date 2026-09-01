@@ -229,7 +229,14 @@ function todayReportTestBarHtml(){
     '<input id="today-report-email" placeholder="имейл за тест" value="ten.tenev@temax.bg" style="flex:1;min-width:180px;font-size:12px;border:1px solid #e2e8f0;border-radius:6px;padding:6px 9px;">' +
     '<button onclick="sendDailyReportTest(document.getElementById(\'today-report-email\').value)" style="border:none;background:#1E2761;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📋 Дневен</button>' +
     '<button onclick="sendWeeklyReportTest(document.getElementById(\'today-report-email\').value)" style="border:none;background:#4c1d95;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📊 Седмичен</button>' +
-    (typeof sendWeeklyReportRouted==='function' ? '<button onclick="sendWeeklyReportRouted(document.getElementById(\'today-report-email\').value)" style="border:none;background:#b45309;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;" title="Изчислява маршрутизацията по групи, но всичко се изпраща на тестовия имейл">📬 Маршрутизация (тест)</button>' : '') +
+    /* Тук стоеше трети бутон „📬 Маршрутизация (тест)", който викаше
+       sendWeeklyReportRouted(). Махнат на 02.09.2026: същите писма вече ги
+       праща едж функцията send-routed-report по крон (job 16, понеделник
+       08:10) — до истинските получатели. Бутонът пращаше ВСИЧКИ писма на
+       един адрес, с тема „[ТЕСТ за Х]", и не личеше какво прави: друг
+       администратор го натисна и получи девет писма наведнъж.
+       Не го връщай — тестовият режим на живата функция се управлява от
+       колоната test_email на реда weekly_routed в notification_topics. */
     '</div>';
 }
 
