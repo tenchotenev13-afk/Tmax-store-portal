@@ -1565,19 +1565,6 @@ function stornoIndicator(returnedSum, newSum, articlesStr) {
   return          { flagged: false, label: '✅ РАВНО',      color: '#16a34a', bg: '#f0fdf4', diff: diff };
 }
 
-/* Проверка дали датата на сторно е повече от 1 календарен месец след датата на
-   оригиналния бон. Датите се подават като 'YYYY-MM-DD' стрингове от <input type=date>
-   и се разбиват ръчно на компоненти — не се ползва new Date(isoString)/.toISOString(),
-   за да няма UTC отместване спрямо българската часова зона (виж проектните бележки). */
-function stornoExceedsOneMonth(origStr, stornoStr){
-  if(!origStr || !stornoStr) return false;
-  var o=origStr.split('-').map(Number), s=stornoStr.split('-').map(Number);
-  if(o.length!==3||s.length!==3) return false;
-  var stornoDate=new Date(s[0],s[1]-1,s[2]);
-  var limitDate =new Date(o[0],o[1],o[2]); /* оригинална дата + 1 месец, JS сам нормализира преливането */
-  return stornoDate.getTime() > limitDate.getTime();
-}
-
 /* ─── Споделени помощници за артикулите по редове (kasa_storno_items) ───
    Ползват се от renderStorno() тук И от history.js за админ изгледа. */
 var stornoItemsById = {}; /* { [storno_id]: { returned:[{sap_code,article_name}], replacement:[...] } } */
@@ -1823,7 +1810,6 @@ function renderStornoForm(r){
       '<div><label class="fl">Дата на сторно</label><input type="date" class="fi" id="sf-storno_date" value="'+(r.storno_date||today())+'"></div>'+
       '<div><label class="fl">Дата на оригинален касов бон *</label><input type="date" class="fi" id="sf-original_receipt_date" value="'+(r.original_receipt_date||'')+'"></div>'+
     '</div>'+
-    '<div style="font-size:11px;color:#94a3b8;margin-top:8px;">Сторно не се допуска на бон по-стар от 1 месец спрямо датата на сторно'+(['admin','accounting'].indexOf(currentUser.role)>=0?' (за твоята роля няма ограничение).':'.')+' Капаро (900001) и Ваучер (900009) не подлежат на това ограничение.</div>'+
     '</div>'+
 
     '<div class="card" style="margin-bottom:14px;"><div class="card-title">Върнати артикули</div>'+
@@ -1981,15 +1967,9 @@ function submitStornoForm(){
   if(!returnedItems.length){toast('Добави поне 1 върнат артикул','#dc2626');return;}
   if(!returnedSum){toast('Въведи сума на върнатия артикул','#dc2626');return;}
   if(!origReceiptDate){toast('Въведи дата на оригинален касов бон','#dc2626');return;}
-  /* Кодовете на върнатите артикули се сглобяват тук, ПРЕДИ проверката за възраст —
-     Капаро (900001) и Ваучер (900009) не подлежат на 1-месечното ограничение.
-     Същата променлива после отива в полето articles, не се сглобява втори път. */
+  /* Кодовете на върнатите артикули се сглобяват веднъж тук и отиват в полето
+     articles по-долу — не се сглобяват втори път. */
   var articlesStr=returnedItems.map(function(x){return x.sap_code.trim();}).join('/');
-  var canBypassAgeLimit=['admin','accounting'].indexOf(currentUser.role)>=0;
-  if(!canBypassAgeLimit && !stornoIsExempt(articlesStr) && stornoExceedsOneMonth(origReceiptDate,stornoDate)){
-    toast('⛔ Бонът е от '+fmtDate(origReceiptDate)+' — сторно не се допуска на бон по-стар от 1 месец. За изключение се свържете с Цветелина/админ.','#dc2626');
-    return;
-  }
 
   /* Старите текстови полета (articles/article_name/replacement_articles/replacement_article_name)
      продължават да се пълнят автоматично от новите редове — за обратна съвместимост,
