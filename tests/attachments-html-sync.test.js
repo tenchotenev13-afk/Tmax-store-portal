@@ -192,5 +192,93 @@ function normalize(src, fn) {
     });
   }
 
+  /* ═══ 6. Изпълнено, не прочетено ═══════════════════════════════════
+     Секции 1–5 четат ИЗХОДНИЯ КОД. Това хваща разминаване между копията, но
+     не казва нищо за резултата: четирите могат да са байт в байт еднакви и
+     четирите да рисуват грешен HTML. Затова тук всяко копие се ИЗПЪЛНЯВА
+     наистина, със същия вход, и се гледа изходът.
+
+     esc/escAttr идват от shared.js за всичките четири. Това е коректно,
+     защото секция 5 отгоре заковава, че всеки файл има собствен escAttr, а
+     report-edge-sync.test.js заковава, че копията съвпадат с оригинала —
+     тоест подменям функция със сверено нейно копие, не с приблизително
+     подобна. */
+  section('6. Изпълнение: снимката се отваря, документът не се обвива два пъти');
+  {
+    const sharedSrc = fs.readFileSync(path.join(ROOT, 'shared.js'), 'utf8');
+    const oneLiner = (name) => {
+      const m = sharedSrc.split(/\r?\n/).find(l =>
+        new RegExp('^function ' + name + '\\s*\\(').test(l));
+      if (!m) throw new Error('няма ' + name + ' в shared.js');
+      return m;
+    };
+
+    const SNIMKA = { url: 'https://cdn.test/vitrina.jpg', filename: 'vitrina.jpg' };
+    const XLSX   = { url: 'https://cdn.test/otchet.xlsx', filename: 'otchet.xlsx' };
+    const BEZIME = { url: 'https://cdn.test/staro-bez-ime' };
+    /* Кавичка вътре в URL-а — точно това чупи атрибута, ако някъде е пропуснат
+       escAttr. Проверява се и в href, и в src. */
+    const KAVICHKA = { url: 'https://cdn.test/a"b.jpg', filename: 'a.jpg' };
+
+    COPIES.forEach(function (c) {
+      let fn = null;
+      try {
+        fn = new Function(oneLiner('esc') + '\n' + oneLiner('escAttr') + '\n' +
+          found[c.label] + '\nreturn ' + c.fn + ';')();
+      } catch (e) {
+        ok(c.label + ': функцията се изпълнява', false, e.message);
+        return;
+      }
+      ok(c.label + ': функцията се изпълнява', true);
+
+      /* ── снимка → <img>, обвит във връзка ── */
+      const foto = fn([SNIMKA], []);
+      ok(c.label + ': снимката е обвита в <a href>',
+        /<a href="[^"]+" target="_blank"><img src="[^"]+"[^>]*><\/a>/.test(foto), foto);
+      const href = (foto.match(/<a href="([^"]*)"/) || [])[1];
+      const src  = (foto.match(/<img src="([^"]*)"/) || [])[1];
+      ok(c.label + ': href === src', !!href && href === src,
+        'href=' + href + '  src=' + src);
+      ok(c.label + ': и това е URL-ът на снимката', href === SNIMKA.url, href);
+      ok(c.label + ': target="_blank" — отваря се, не заменя писмото',
+        foto.indexOf('target="_blank"') >= 0, foto);
+      /* Размерът НЕ се пипа: по-голяма миниатюра разваля подредбата. */
+      ok(c.label + ': 44x44 остава', /width:44px;height:44px/.test(foto), foto);
+      ok(c.label + ': рамката и полето остават',
+        /border:1px solid #D8DEE9/.test(foto) && /margin-right:5px/.test(foto), foto);
+
+      /* ── документ → връзка с 📄, и НЕ втора обвивка ── */
+      const dok = fn([], [XLSX]);
+      ok(c.label + ': документът е връзка с 📄',
+        /<a href="[^"]*otchet\.xlsx"[^>]*>📄 otchet\.xlsx<\/a>/.test(dok), dok);
+      ok(c.label + ': документът НЕ е обвит втори път',
+        (dok.match(/<a /g) || []).length === 1, dok);
+      ok(c.label + ': документът няма <img>', dok.indexOf('<img') < 0, dok);
+      ok(c.label + ': документът няма target="_blank" (клонът не е пипан)',
+        dok.indexOf('target="_blank"') < 0, dok);
+
+      /* ── запис без име → третира се като снимка, и той с връзка ── */
+      const bezime = fn([BEZIME], []);
+      ok(c.label + ': записът без име е миниатюра (заварено поведение)',
+        bezime.indexOf('<img') >= 0 && bezime.indexOf('📄') < 0, bezime);
+      ok(c.label + ': и той е обвит във връзка',
+        /<a href="[^"]+" target="_blank"><img/.test(bezime), bezime);
+      const hrefB = (bezime.match(/<a href="([^"]*)"/) || [])[1];
+      ok(c.label + ': с неговия URL', hrefB === BEZIME.url, hrefB);
+
+      /* ── кавичка в URL-а не изпада от escAttr нито в href, нито в src ── */
+      const kav = fn([KAVICHKA], []);
+      ok(c.label + ': кавичката е екранирана и в двата атрибута',
+        (kav.match(/&quot;/g) || []).length === 2 && kav.indexOf('a"b') < 0, kav);
+
+      /* ── смесен вход: и снимка, и документ в един блок ── */
+      const mix = fn([SNIMKA], [XLSX]);
+      ok(c.label + ': смесеният блок носи и двете',
+        (mix.match(/<a /g) || []).length === 2 && (mix.match(/<img /g) || []).length === 1, mix);
+      ok(c.label + ': празен вход остава празен низ',
+        fn([], []) === '' && fn(null, undefined) === '');
+    });
+  }
+
   report();
 })();

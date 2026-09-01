@@ -540,9 +540,12 @@ function reportAttachmentsHtml(photos, files){
   att.forEach(function(ph){
     var nm = ph.filename || ph.name || '';
     var ext = nm.indexOf('.')>=0 ? nm.split('.').pop().toLowerCase() : '';
-    /* Без име не съдим — виж tcAttachHtml() в bulletin.js. */
+    /* Без име не съдим — виж tcAttachHtml() в bulletin.js.
+       Миниатюрата е ВРЪЗКА към същия URL: 44x44 в пощата е квадратче, по
+       което се вижда, че има снимка, но не се вижда самата снимка. Размерът
+       остава — по-голяма миниатюра разваля подредбата на писмото. */
     if (!nm || ['jpg','jpeg','png','gif','webp','heic','heif'].indexOf(ext) >= 0) {
-      h += '<img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #D8DEE9;margin-right:5px;">';
+      h += '<a href="'+escAttr(ph.url)+'" target="_blank"><img src="'+escAttr(ph.url)+'" style="width:44px;height:44px;object-fit:cover;border-radius:5px;border:1px solid #D8DEE9;margin-right:5px;"></a>';
     } else {
       h += '<a href="'+escAttr(ph.url)+'" style="display:inline-block;font-size:12px;color:#1E2761;text-decoration:none;border:1px solid #D8DEE9;border-radius:5px;padding:3px 8px;margin:0 5px 5px 0;">📄 '+esc(nm||'документ')+'</a>';
     }
