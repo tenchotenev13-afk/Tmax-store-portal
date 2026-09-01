@@ -22,7 +22,7 @@ const { JSDOM } = require('jsdom');
    Не се пренарежда — history.js разчита на storno helper-и от kasa.js и т.н. */
 const MODULE_ORDER = [
   'shared.js', 'transport.js', 'pallets.js', 'client-orders.js', 'docs.js',
-  'bulletin.js', 'today.js', 'kasa.js', 'kasa-docs.js', 'daily-turnover.js',
+  'bulletin.js', 'today.js', 'checklist.js', 'kasa.js', 'kasa-docs.js', 'daily-turnover.js',
   'admin.js', 'history.js',
   'contacts.js', 'transit.js', 'calendar.js', 'stock-returns.js',
   'stock-differences.js', 'push.js', 'email.js', 'report.js', 'notifications.js',
@@ -33,7 +33,7 @@ const MODULE_ORDER = [
    за да не гърми навигацията. */
 const LOADERS = [
   'loadTransport', 'loadPallets', 'loadClientOrders', 'loadDocs', 'loadBulletin',
-  'loadTodayDashboard', 'loadKasa', 'loadKasaDocs', 'loadAdmin', 'loadHistory',
+  'loadTodayDashboard', 'loadChecklist', 'loadKasa', 'loadKasaDocs', 'loadAdmin', 'loadHistory',
   'loadContacts', 'loadTransit', 'loadCalendar', 'loadStockReturns', 'loadStockDiff',
   'loadPush', 'loadEmail', 'loadReport', 'loadNotifications', 'loadReference',
   'loadHandbook'
