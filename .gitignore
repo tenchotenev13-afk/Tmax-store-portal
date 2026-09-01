@@ -15,3 +15,7 @@ desktop.ini
 # Контекстният пакет за чата се генерира при нужда (npm run brief),
 # за да сочи печатът за версия точно текущия HEAD.
 docs/BRIEF.md
+
+# Supabase CLI пише тук (cli-latest и подобни). Не е част от кода —
+# supabase/functions/ остава следена, тя е огледалото на едж функциите.
+supabase/.temp/
