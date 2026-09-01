@@ -1,21 +1,28 @@
-/* Трите копия на рендирането на прикачените файлове.
+/* Копията на рендирането на прикачените файлове.
 
    Една и съща преценка по разширение — снимка става миниатюра <img 44x44>,
-   всичко останало става връзка „📄 име" — живее на ТРИ места:
+   всичко останало става връзка „📄 име" — живее на ЧЕТИРИ места:
 
      · report.js                                   reportAttachmentsHtml
      · supabase/functions/send-scheduled-report    reportAttachmentsHtml
      · supabase/functions/bulletin-notify          attachmentsHtml
+     · supabase/functions/send-routed-report       reportAttachmentsHtml
 
-   Три копия не са небрежност, а следствие: Deno не може да import-не
-   браузърен файл, а двете едж функции не се виждат една друга. Копие обаче
-   се разминава мълчаливо — при второто вече имаше повод (трите заварени
-   .xlsx в колоната photos, които излизаха като счупени картинки), а при
-   третото никой няма да забележи, докато едно от писмата не се счупи.
+   Копията не са небрежност, а следствие: Deno не може да import-не браузърен
+   файл, а едж функциите не се виждат една друга. Копие обаче се разминава
+   мълчаливо — при второто вече имаше повод (трите заварени .xlsx в колоната
+   photos, които излизаха като счупени картинки), а при следващите никой няма
+   да забележи, докато едно от писмата не се счупи.
 
-   Затова: кодът на трите се сравнява НОРМАЛИЗИРАН — коментарите нарочно се
+   ЧЕТВЪРТОТО влезе с send-routed-report (личният седмичен отчет по задачи) и
+   е добавено тук СЪС самия файл. Точно това е капанът, който този тест пази:
+   списъкът е изричен, тоест ново копие не се хваща само — влезе ли файл, без
+   да влезе и ред тук, тестът минава и продължава да твърди, че всичко е
+   сверено. Добавяш ли пето копие, добави и ред.
+
+   Затова: кодът на всичките се сравнява НОРМАЛИЗИРАН — коментарите нарочно се
    различават (едж файловете носят собствени бележки), TS анотациите също,
-   а името на третата е друго. Всичко останало трябва да съвпада.
+   а името в bulletin-notify е друго. Всичко останало трябва да съвпада.
 
    Оригиналът е в report.js. Разминат ли се, поправя се КОПИЕТО, в посока
    към оригинала — не обратното.
@@ -30,12 +37,13 @@ const { ok, section, report } = H;
 
 const ROOT = process.argv[2] || path.join(__dirname, '..');
 
-/* Трите източника. `fn` е името в съответния файл — то е единственото, което
+/* Източниците. `fn` е името в съответния файл — то е единственото, което
    СМЕЕ да се различава. */
 const COPIES = [
   { label: 'report.js (оригинал)', file: 'report.js', fn: 'reportAttachmentsHtml' },
   { label: 'send-scheduled-report', file: 'supabase/functions/send-scheduled-report/index.ts', fn: 'reportAttachmentsHtml' },
   { label: 'bulletin-notify', file: 'supabase/functions/bulletin-notify/index.ts', fn: 'attachmentsHtml' },
+  { label: 'send-routed-report', file: 'supabase/functions/send-routed-report/index.ts', fn: 'reportAttachmentsHtml' },
 ];
 
 /* ── Разбор ──
@@ -99,8 +107,8 @@ function normalize(src, fn) {
 
 (function run() {
 
-  /* ═══ 1. И трите съществуват ═══════════════════════════════════════ */
-  section('1. Трите копия ги има');
+  /* ═══ 1. Всички съществуват ════════════════════════════════════════ */
+  section('1. Копията ги има');
   const found = {};
   COPIES.forEach(function (c) {
     const src = extract(c.file, c.fn);
@@ -112,7 +120,7 @@ function normalize(src, fn) {
   if (all.length !== COPIES.length) { report(); return; }
 
   /* ═══ 2. Ядрото: кодът е един и същ ════════════════════════════════ */
-  section('2. Нормализираният код на трите съвпада');
+  section('2. Нормализираният код на копията съвпада');
   {
     const base = COPIES[0];
     const baseN = normalize(found[base.label], base.fn);
@@ -135,7 +143,7 @@ function normalize(src, fn) {
   }
 
   /* ═══ 3. Същината, изрично ═════════════════════════════════════════ */
-  section('3. Правилото за разширението е и в трите');
+  section('3. Правилото за разширението е във всяко копие');
   {
     COPIES.forEach(function (c) {
       const s = found[c.label];
@@ -151,12 +159,15 @@ function normalize(src, fn) {
   }
 
   /* ═══ 4. Копието не е мъртво ═══════════════════════════════════════ */
-  section('4. И трите файла наистина я викат');
+  section('4. Всеки файл наистина я вика');
   {
     const calls = [
       { file: 'report.js', fn: 'reportAttachmentsHtml', min: 2 },
       { file: 'supabase/functions/send-scheduled-report/index.ts', fn: 'reportAttachmentsHtml', min: 1 },
       { file: 'supabase/functions/bulletin-notify/index.ts', fn: 'attachmentsHtml', min: 1 },
+      /* Тук е ЕДНО: маршрутизираният файл носи само личната картичка,
+         не и коментарите по обекти от общия отчет. */
+      { file: 'supabase/functions/send-routed-report/index.ts', fn: 'reportAttachmentsHtml', min: 1 },
     ];
     calls.forEach(function (c) {
       const src = fs.readFileSync(path.join(ROOT, c.file), 'utf8');
@@ -167,12 +178,13 @@ function normalize(src, fn) {
   }
 
   /* ═══ 5. escAttr съществува навсякъде, където се вика ══════════════ */
-  section('5. escAttr е налична и в трите файла');
+  section('5. escAttr е налична във всеки от файловете');
   {
     [
       { file: 'shared.js', why: 'оригиналът, ползван от report.js' },
       { file: 'supabase/functions/send-scheduled-report/index.ts', why: 'копие' },
       { file: 'supabase/functions/bulletin-notify/index.ts', why: 'копие' },
+      { file: 'supabase/functions/send-routed-report/index.ts', why: 'копие' },
     ].forEach(function (c) {
       const src = fs.readFileSync(path.join(ROOT, c.file), 'utf8');
       ok(c.file + ': function escAttr(…) е дефинирана (' + c.why + ')',

@@ -65,6 +65,7 @@ const TESTS = [
   'report-ranking-plural.test.js',
   'report-scope-notice.test.js',
   'report-edge-sync.test.js',
+  'routed-empty-recipient.test.js',
   'report-daily-date.test.js',
   'report-daily-scope.test.js',
   'report-grid.test.js',

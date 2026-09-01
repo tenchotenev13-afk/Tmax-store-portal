@@ -1,4 +1,6 @@
-/* Синхронът между report.js и едж функцията send-scheduled-report.
+/* Синхронът между report.js и ДВЕТЕ едж функции, които носят копие от нея:
+   send-scheduled-report (общият дневен/седмичен отчет) и send-routed-report
+   (личният седмичен отчет по задачи).
 
    Едж функцията носи ДУБЛИКАТ на репорт логиката от report.js — това е
    съзнателен избор (Deno не може да import-не браузърен файл), но е и
@@ -21,7 +23,13 @@
      3. нито една функция, извикана в едж файла, не липсва в него —
         точно това чупи деплоя, ако помощник бъде копиран само в report.js;
      4. функциите, които СЪЗНАТЕЛНО живеят само на едното място, са
-        изброени поименно, за да не се чуди никой дали е пропуск.
+        изброени поименно, за да не се чуди никой дали е пропуск;
+     5. същите четири неща и за send-routed-report — секции 7–9.
+
+   Двете едж функции носят различни СРЕЗОВЕ от report.js и това е нарочно:
+   общият отчет не знае нищо за маршрутизацията по report_groups, а личният
+   не строи решетката и класациите. Затова списъците са два, а не един общ —
+   общ списък би значел, че всяка функция трябва да е и в двата файла.
 
    Какво тестът НЕ прави: не кара репото да съвпадне с живото. Живата
    версия изостава между деплоите — това е нормално. Поправя се копието,
@@ -37,6 +45,7 @@ const { ok, section, report } = H;
 const ROOT = process.argv[2] || path.join(__dirname, '..');
 const CLIENT = path.join(ROOT, 'report.js');
 const EDGE = path.join(ROOT, 'supabase/functions/send-scheduled-report/index.ts');
+const ROUTED = path.join(ROOT, 'supabase/functions/send-routed-report/index.ts');
 const SHARED = path.join(ROOT, 'shared.js');
 const BULLETIN = path.join(ROOT, 'bulletin.js');
 
@@ -92,7 +101,11 @@ const COPIED_HELPERS = [
   { fn: 'isReportableStore', from: SHARED }
 ];
 
-/* Съзнателни разминавания — изброени, за да не изглеждат като пропуск. */
+/* Съзнателни разминавания — изброени, за да не изглеждат като пропуск.
+   ВНИМАНИЕ: списъкът значи „няма я в send-SCHEDULED-report", не „няма я
+   никъде". От 01.09.2026 маршрутизацията живее и в send-routed-report —
+   виж ROUTED_FNS. Двете, които са наистина само в браузъра, са отделно в
+   BROWSER_ONLY отдолу. */
 const CLIENT_ONLY = [
   'collectWeeklyRoutingData',    /* личните имейли се пращат само ръчно от портала */
   'reportRoutedTaskWindow',
@@ -101,6 +114,48 @@ const CLIENT_ONLY = [
   'sendWeeklyReportRouted', 'sendWeeklyReportTest'
 ];
 const EDGE_ONLY = ['sbGet', 'sbPost', 'sbPatch'];  /* SERVICE ROLE, не shared.js */
+
+/* ── send-routed-report ─────────────────────────────────────────────────
+   Личният седмичен отчет по задачи. Носи СРЕЗА на report.js около
+   маршрутизацията: кой получава писмо, за кои задачи, и как изглежда
+   картичката. Списъкът пак е ИЗРИЧЕН по същата причина. */
+const ROUTED_FNS = [
+  /* прозорец и избор на седмица — СЪЩИТЕ, които ползва общият отчет */
+  'reportWeekdayIdx', 'reportMondayOfWeek', 'reportPrevWeekMonday',
+  'reportWeekOfMonday', 'reportPickWeeklyBulletin', 'reportRecurringWeekDates',
+  'reportItemMatchesComp',
+  /* обвивка и общи парчета HTML */
+  'reportDayMonth', 'reportEmailShell', 'reportAttachmentsHtml',
+  /* самата маршрутизация */
+  'reportRoutedTaskWindow', 'collectWeeklyRoutingData',
+  'resolveRecipientsForTask', 'buildRecipientMap', 'taskStoreBreakdown',
+  'personalizedTaskCardHtml', 'personalizedSectionHtml'
+];
+
+/* Помощници, копирани в send-routed-report от shared.js / bulletin.js. */
+const ROUTED_COPIED = [
+  { fn: 'esc', from: SHARED },
+  { fn: 'escAttr', from: SHARED },
+  { fn: 'isReportableStore', from: SHARED },
+  { fn: 'toLocalISO', from: BULLETIN },
+  { fn: 'weekDays', from: BULLETIN },
+  { fn: 'taskDueDates', from: BULLETIN },
+  { fn: 'recurringIsDueOnWeekday', from: BULLETIN },
+  /* Кешът с хората от ЦО е браузърен, но самото четене от него не е —
+     обработчикът долу го пълни, преди да повика колектора. Копието
+     позволява resolveRecipientsForTask да остане дословно същата. */
+  { fn: 'coPersonName', from: BULLETIN }
+];
+
+/* Само в send-routed-report: PostgREST със service ключ и всичко около
+   самото изпращане — тема, тестова лента, кой получава. */
+const ROUTED_ONLY = ['sbGet', 'sbPatch', 'routedMailPlan',
+  'routedTestBannerHtml', 'routedWeeklySubject', 'routedSendEmail'];
+
+/* Наистина само в браузъра — ръчните бутони от портала. Няма ги в НИТО
+   ЕДНА от двете едж функции и това е смисълът на реда: изнасянето на
+   седмичния отчет в крон не бива да довлече и ръчното тестово изпращане. */
+const BROWSER_ONLY = ['sendWeeklyReportRouted', 'sendWeeklyReportTest'];
 
 /* ── ПРИЕТИ разминавания ────────────────────────────────────────────────
    Разлика, която ЗНАЕМ, че съществува, и която чака следващия деплой по
@@ -194,8 +249,57 @@ function normalize(s) {
   return t.replace(/ (\d+) /g, (_, i) => lits[+i]);
 }
 
+/* Имена, които СЕ ВИКАТ във файла, но не се дефинират никъде в него — точно
+   дефектът, който чупи деплой: копирано е извикването, но не и функцията.
+   Функция, а не преписан блок в секцията: двата едж файла минават през
+   ЕДИН детектор, иначе се разминават както всичко останало преписано. */
+function scanCalls(file) {
+  const src = fs.readFileSync(file, 'utf8');
+  /* Коментарите и стринговете отпадат ПЪРВИ — иначе текст като
+     „застояли pending (>7 дни)" минава за извикване на pending(). */
+  const code = src
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/\/\/[^\n]*/g, ' ')
+    .replace(/'(?:[^'\\]|\\.)*'/g, "''")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""');
+
+  const defined = new Set();
+  (src.match(/function\s+([A-Za-z0-9_$]+)/g) || [])
+    .forEach(m => defined.add(m.replace(/function\s+/, '')));
+  (src.match(/(?:var|let|const)\s+([A-Za-z0-9_$]+)/g) || [])
+    .forEach(m => defined.add(m.split(/\s+/)[1]));
+  /* Параметрите също са имена в обхват (cb, win, data …). */
+  (src.match(/function[^(]*\(([^)]*)\)/g) || []).forEach(function (m) {
+    m.match(/\(([^)]*)\)/)[1].split(',')
+      .map(x => x.trim().split(/[:\s=]/)[0]).filter(Boolean)
+      .forEach(x => defined.add(x));
+  });
+
+  const KEYWORDS = ['if', 'for', 'while', 'switch', 'catch', 'return', 'typeof',
+    'function', 'async', 'await', 'new', 'delete', 'void', 'in', 'of', 'do',
+    'else', 'try', 'throw'];
+  const GLOBALS = ['fetch', 'JSON', 'Promise', 'Array', 'Object', 'String',
+    'Number', 'Math', 'Date', 'Boolean', 'Response', 'Request', 'Error',
+    'Deno', 'decodeURIComponent', 'encodeURIComponent', 'parseInt',
+    'parseFloat', 'isNaN', 'Set', 'Map', 'RegExp', 'console'];
+
+  const called = new Set();
+  const re = /(^|[^.\w$])([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+  let m;
+  while ((m = re.exec(code))) called.add(m[2]);
+
+  return {
+    called: called,
+    unknown: [...called].filter(n =>
+      !defined.has(n) && KEYWORDS.indexOf(n) < 0 && GLOBALS.indexOf(n) < 0).sort()
+  };
+}
+function undefinedCalls(file) { return scanCalls(file).unknown; }
+function callCount(file) { return scanCalls(file).called.size; }
+
 const client = topLevelFns(CLIENT);
 const edge = topLevelFns(EDGE);
+const routed = fs.existsSync(ROUTED) ? topLevelFns(ROUTED) : {};
 
 (function () {
 
@@ -279,48 +383,11 @@ const edge = topLevelFns(EDGE);
 
   section('5. ЯДРОТО: едж функцията не вика нищо, което няма');
   {
-    const src = fs.readFileSync(EDGE, 'utf8');
-
-    /* Коментарите и стринговете отпадат ПЪРВИ — иначе текст като
-       „застояли pending (>7 дни)" минава за извикване на pending(). */
-    const code = src
-      .replace(/\/\*[\s\S]*?\*\//g, ' ')
-      .replace(/\/\/[^\n]*/g, ' ')
-      .replace(/'(?:[^'\\]|\\.)*'/g, "''")
-      .replace(/"(?:[^"\\]|\\.)*"/g, '""');
-
-    const defined = new Set();
-    (src.match(/function\s+([A-Za-z0-9_$]+)/g) || [])
-      .forEach(m => defined.add(m.replace(/function\s+/, '')));
-    (src.match(/(?:var|let|const)\s+([A-Za-z0-9_$]+)/g) || [])
-      .forEach(m => defined.add(m.split(/\s+/)[1]));
-    /* Параметрите също са имена в обхват (cb, win, data …). */
-    (src.match(/function[^(]*\(([^)]*)\)/g) || []).forEach(function (m) {
-      m.match(/\(([^)]*)\)/)[1].split(',')
-        .map(x => x.trim().split(/[:\s=]/)[0]).filter(Boolean)
-        .forEach(x => defined.add(x));
-    });
-
-    const KEYWORDS = ['if', 'for', 'while', 'switch', 'catch', 'return', 'typeof',
-      'function', 'async', 'await', 'new', 'delete', 'void', 'in', 'of', 'do',
-      'else', 'try', 'throw'];
-    const GLOBALS = ['fetch', 'JSON', 'Promise', 'Array', 'Object', 'String',
-      'Number', 'Math', 'Date', 'Boolean', 'Response', 'Request', 'Error',
-      'Deno', 'decodeURIComponent', 'encodeURIComponent', 'parseInt',
-      'parseFloat', 'isNaN', 'Set', 'Map', 'RegExp', 'console'];
-
-    const called = new Set();
-    const re = /(^|[^.\w$])([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
-    let m;
-    while ((m = re.exec(code))) called.add(m[2]);
-
-    const unknown = [...called].filter(n =>
-      !defined.has(n) && KEYWORDS.indexOf(n) < 0 && GLOBALS.indexOf(n) < 0).sort();
-
+    const unknown = undefinedCalls(EDGE);
     ok('всяко извикано име съществува в едж файла', unknown.length === 0,
       unknown.join(', ') + '  ← копирано е извикването, но не и функцията');
     ok('детекторът вижда достатъчно имена, за да значи нещо',
-      called.size > 30, String(called.size));
+      callCount(EDGE) > 30, String(callCount(EDGE)));
   }
 
   section('6. Съзнателните разминавания са точно тези');
@@ -345,6 +412,78 @@ const edge = topLevelFns(EDGE);
       COPIED_HELPERS.every(h => h.fn !== n));
     ok('няма функция в двата файла извън списъка', unlisted.length === 0,
       unlisted.join(', ') + '  ← добави я в SHARED_FNS');
+  }
+
+  section('7. send-routed-report: пренесените функции ги има и са същите');
+  {
+    if (!ok('файлът съществува', fs.existsSync(ROUTED), ROUTED)) { report(); return; }
+    ok('дава функции', Object.keys(routed).length > 20,
+      String(Object.keys(routed).length));
+    ok('списъкът ROUTED_FNS няма повторения',
+      ROUTED_FNS.length === new Set(ROUTED_FNS).size);
+
+    const missingClient = ROUTED_FNS.filter(n => !client[n]);
+    ok('нито една не липсва в report.js', missingClient.length === 0,
+      missingClient.join(', '));
+    const missingRouted = ROUTED_FNS.filter(n => !routed[n]);
+    ok('нито една не липсва в send-routed-report', missingRouted.length === 0,
+      missingRouted.join(', '));
+
+    /* ЯДРОТО: копието е дословно. Прието разминаване тук няма и не бива да
+       се завежда мълчаливо — файлът е нов, няма какво да е изостанало. */
+    const drift = ROUTED_FNS.filter(n =>
+      client[n] && routed[n] && codeOnly(client[n]) !== codeOnly(routed[n]));
+    ok('нула разминавания в кода', drift.length === 0,
+      drift.join(', ') + '  ← синхронизирай ги с report.js');
+
+    ROUTED_COPIED.forEach(function (h) {
+      const orig = topLevelFns(h.from)[h.fn];
+      const copy = routed[h.fn];
+      if (!ok(h.fn + ' я има в send-routed-report', !!copy)) return;
+      if (!ok(h.fn + ' я има в ' + path.basename(h.from), !!orig)) return;
+      ok(h.fn + ' съвпада с оригинала', normalize(orig) === normalize(copy),
+        '\n      оригинал: ' + normalize(orig) + '\n      копие:    ' + normalize(copy));
+    });
+  }
+
+  section('8. ЯДРОТО: send-routed-report не вика нищо, което няма');
+  {
+    /* Точно този дефект чупи деплоя: копирано е ИЗВИКВАНЕТО, но не и
+       функцията. Локално не личи — файлът никога не се изпълнява тук. */
+    const unknown = undefinedCalls(ROUTED);
+    ok('всяко извикано име съществува във файла', unknown.length === 0,
+      unknown.join(', ') + '  ← копирано е извикването, но не и функцията');
+  }
+
+  section('9. send-routed-report: съзнателните разминавания');
+  {
+    ok('sbGet/sbPatch и изпращането са само тук',
+      ROUTED_ONLY.every(n => routed[n] && !client[n]),
+      ROUTED_ONLY.filter(n => client[n]).join(', ') + ' ← има ги и в report.js');
+    ok('и наистина ги има във файла',
+      ROUTED_ONLY.every(n => routed[n]),
+      ROUTED_ONLY.filter(n => !routed[n]).join(', '));
+
+    /* Ръчните бутони на портала не бива да се пренасят в крон — човек,
+       който натиска бутон, е друго нещо от таб, който се отваря. */
+    ok('ръчните изпращания остават само в браузъра',
+      BROWSER_ONLY.every(n => client[n] && !edge[n] && !routed[n]),
+      BROWSER_ONLY.filter(n => edge[n] || routed[n]).join(', '));
+
+    /* Забравена функция в ДВАТА файла, необхваната от списъка. */
+    const unlisted = Object.keys(client).filter(n =>
+      routed[n] && ROUTED_FNS.indexOf(n) < 0 && ROUTED_ONLY.indexOf(n) < 0 &&
+      ROUTED_COPIED.every(h => h.fn !== n));
+    ok('няма функция в двата файла извън списъка', unlisted.length === 0,
+      unlisted.join(', ') + '  ← добави я в ROUTED_FNS');
+
+    /* Обратната посока: функция в routed файла, която не е нито пренесена,
+       нито копиран помощник, нито обявена за негова собствена. */
+    const stray = Object.keys(routed).filter(n =>
+      ROUTED_FNS.indexOf(n) < 0 && ROUTED_ONLY.indexOf(n) < 0 &&
+      ROUTED_COPIED.every(h => h.fn !== n));
+    ok('няма непризната функция в send-routed-report', stray.length === 0,
+      stray.join(', ') + '  ← обяви я в ROUTED_FNS или ROUTED_ONLY');
   }
 
   report();
