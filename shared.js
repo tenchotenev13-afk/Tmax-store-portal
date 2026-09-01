@@ -834,6 +834,14 @@ function setupTabsForRole(){
   /* Таб Днес — живо табло с изпълнението по обекти, само за глобални роли (admin/accounting/logistics) */
   var todayTab=document.getElementById('tab-today');
   if(todayTab)todayTab.style.display=isGlobal()?'flex':'none';
+  /* Таб Чек лист — седмичният контрол на контролинга. Правилото кой го вижда
+     (admin или notify_groups съдържа 'controlling') живее в checklist.js,
+     защото там е и парсването на notify_groups. Този файл се зарежда пръв,
+     затова проверката е с typeof — същият похват като initPush/initTabDrag
+     в startApp(). Към момента на извикването (след логин) всички файлове
+     са заредени. */
+  var clTab=document.getElementById('tab-checklist');
+  if(clTab)clTab.style.display=(typeof canSeeChecklist==='function'&&canSeeChecklist())?'flex':'none';
   /* Табове Контакти и Стока на път — за всички */
   var contactsTab=document.getElementById('tab-contacts');
   if(contactsTab)contactsTab.style.display='';
@@ -869,7 +877,7 @@ function showModule(mod){
     showModule('kasa');
     return;
   }
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','today'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','today','checklist'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -900,6 +908,7 @@ function showModule(mod){
   if(mod==='kasa')loadKasa();
   if(mod==='history')loadHistory();
   if(mod==='today')loadTodayDashboard();
+  if(mod==='checklist')loadChecklist();
   if(mod==='contacts')loadContacts();
   if(mod==='transit')loadTransit();
   if(mod==='calendar')loadCalendar();

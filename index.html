@@ -233,6 +233,7 @@ OneSignalDeferred.push(async function(OneSignal) {
       <button id="tab-kasa" class="nav-tab" onclick="showModule('kasa')" style="display:none;"><span class="ti">💰</span><span class="tl">Каса</span></button>
       <button id="tab-history" class="nav-tab" onclick="showModule('history')" style="display:none;"><span class="ti">📈</span><span class="tl">История</span></button>
       <button id="tab-today" class="nav-tab" onclick="showModule('today')" style="display:none;"><span class="ti">📊</span><span class="tl">Днес</span></button>
+      <button id="tab-checklist" class="nav-tab" onclick="showModule('checklist')" style="display:none;"><span class="ti">🗓️</span><span class="tl">Чек лист</span></button>
       <button id="tab-docs" class="nav-tab" onclick="showModule('docs')"><span class="ti">📁</span><span class="tl">Инструкции</span></button>
       <div class="tab-sep" id="sep-admin" style="display:none;"></div>
       <!-- Група: Администрация (лилаво) -->
@@ -416,6 +417,9 @@ OneSignalDeferred.push(async function(OneSignal) {
 
   <!-- TODAY -->
   <div id="mod-today" style="display:none;"></div>
+
+  <!-- ЧЕК ЛИСТ (контролинг) -->
+  <div id="mod-checklist" style="display:none;"></div>
 
   <!-- PRINT -->
   <div id="mod-print" style="display:none;"></div>
@@ -680,6 +684,9 @@ function loadTabOrder(){
 <script src="docs.js"></script>
 <script src="bulletin.js"></script>
 <script src="today.js"></script>
+<!-- checklist.js ползва weekNum/weekDays/fmtD от bulletin.js — затова е СЛЕД него.
+     Нищо преди този ред не е местено. -->
+<script src="checklist.js"></script>
 <script src="kasa.js"></script>
 <script src="kasa-docs.js"></script>
 <script src="daily-turnover.js"></script>
