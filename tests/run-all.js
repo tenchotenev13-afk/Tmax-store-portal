@@ -101,7 +101,8 @@ const TESTS = [
   'checklist-portal-value.test.js',
   'checklist-transit.test.js',
   'checklist-returns.test.js',
-  'checklist-email.test.js'
+  'checklist-email.test.js',
+  'checklist-send.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
