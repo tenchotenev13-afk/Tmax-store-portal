@@ -73,6 +73,17 @@ function cellOf(doc, store, metricKey) {
   if (i < 0) return null;
   return tr.querySelectorAll('td')[i + 1] || null;
 }
+/* ТЕКСТЪТ НА СТОЙНОСТТА, без балончето за коментар.
+   От 02.09.2026 всяка клетка носи и 💬 (винаги видимо), тоест textContent на
+   клетката е „да💬" и точното сравнение би мерило и иконката. Стойността е в
+   span.cl-val; липсва ли той, клетката наистина е празна — затова връща '',
+   а не null, и „празно" си остава проверимо. */
+function cellValText(doc, store, metricKey) {
+  const c = cellOf(doc, store, metricKey);
+  if (!c) return null;
+  const v = c.querySelector('.cl-val');
+  return v ? v.textContent.trim() : '';
+}
 
 (async function () {
 
@@ -121,7 +132,9 @@ function cellOf(doc, store, metricKey) {
 
     const c = cellOf(h.doc, 'Враца', 'revizia_953');
     if (ok('клетката съществува', !!c)) {
-      ok('текстът е празен', c.textContent.trim() === '', 'реално: „' + c.textContent.trim() + '"');
+      ok('текстът е празен', cellValText(h.doc, 'Враца', 'revizia_953') === '',
+         'реално: „' + cellValText(h.doc, 'Враца', 'revizia_953') + '"');
+      ok('няма изобщо span за стойност', !c.querySelector('.cl-val'), c.innerHTML);
       ok('няма „undefined"', c.innerHTML.indexOf('undefined') < 0, c.innerHTML);
       ok('няма „null"', c.innerHTML.indexOf('null') < 0, c.innerHTML);
       ok('няма измислено тире', c.textContent.indexOf('—') < 0, c.innerHTML);
@@ -209,10 +222,10 @@ function cellOf(doc, store, metricKey) {
     h.w.loadChecklist();
     await ticks();
 
-    ok('nyamat → „нямат"', (cellOf(h.doc, 'Враца', 'preocenka') || {}).textContent.trim() === 'нямат',
-       JSON.stringify((cellOf(h.doc, 'Враца', 'preocenka') || {}).textContent));
-    ok('da → „да"',  (cellOf(h.doc, 'Габрово', 'preocenka') || {}).textContent.trim() === 'да');
-    ok('ne → „не"',  (cellOf(h.doc, 'Добрич', 'preocenka') || {}).textContent.trim() === 'не');
+    ok('nyamat → „нямат"', cellValText(h.doc, 'Враца', 'preocenka') === 'нямат',
+       JSON.stringify(cellValText(h.doc, 'Враца', 'preocenka')));
+    ok('da → „да"',  cellValText(h.doc, 'Габрово', 'preocenka') === 'да');
+    ok('ne → „не"',  cellValText(h.doc, 'Добрич', 'preocenka') === 'не');
     ok('непозната стойност се показва сурова, не се губи',
        (cellOf(h.doc, 'Троян', 'preocenka') || {}).textContent.indexOf('chastichno') >= 0);
     h.close();
@@ -229,10 +242,10 @@ function cellOf(doc, store, metricKey) {
     h.w.loadChecklist();
     await ticks();
 
-    ok('7 се показва', (cellOf(h.doc, 'Враца', 'storna_priem') || {}).textContent.trim() === '7');
+    ok('7 се показва', cellValText(h.doc, 'Враца', 'storna_priem') === '7');
     ok('нулата се показва, не е празна клетка',
-       (cellOf(h.doc, 'Габрово', 'storna_priem') || {}).textContent.trim() === '0',
-       JSON.stringify((cellOf(h.doc, 'Габрово', 'storna_priem') || {}).textContent));
+       cellValText(h.doc, 'Габрово', 'storna_priem') === '0',
+       JSON.stringify(cellValText(h.doc, 'Габрово', 'storna_priem')));
     h.close();
   }
 
@@ -257,9 +270,29 @@ function cellOf(doc, store, metricKey) {
          !!span && span.getAttribute('title').indexOf('от 2 дни') >= 0,
          span ? span.getAttribute('title') : 'няма span с title');
     }
-    /* Клетка без коментар няма балонче — иначе проверката по-горе е тавтология. */
-    ok('клетка без коментар е без 💬',
-       (cellOf(h.doc, 'Габрово', 'revizia_953') || {}).textContent.indexOf('💬') < 0);
+    /* ПРОМЕНЕНО с редакцията (02.09.2026). Дотук тук стоеше „клетка без
+       коментар е без 💬" — балончето се появяваше само при коментар.
+       Сега е ВИНАГИ видимо (бледо), защото иначе няма как да добавиш ПЪРВИЯ
+       коментар на клетка: контролът се появява едва след като вече има
+       коментар. Проверката обаче трябва да остане анти-тавтологична, затова
+       мери РАЗЛИКАТА, не присъствието: празната клетка носи балонче, но НЕ
+       носи текста на коментара и е с другата непрозрачност. */
+    const empty = cellOf(h.doc, 'Габрово', 'revizia_953');
+    if (ok('празната клетка съществува', !!empty)) {
+      ok('и празната клетка има 💬', empty.textContent.indexOf('💬') >= 0, empty.innerHTML);
+      ok('но НЕ носи текста на чуждия коментар',
+         (empty.innerHTML || '').indexOf('закъснение') < 0, empty.innerHTML);
+      const eIc = empty.querySelector('.cl-cmt');
+      const fIc = c ? c.querySelector('.cl-cmt') : null;
+      ok('празното балонче е бледо, пълното — плътно',
+         !!eIc && !!fIc &&
+         (eIc.getAttribute('style') || '').indexOf('opacity:.25') >= 0 &&
+         (fIc.getAttribute('style') || '').indexOf('opacity:1') >= 0,
+         (eIc ? eIc.getAttribute('style') : 'няма') + ' || ' + (fIc ? fIc.getAttribute('style') : 'няма'));
+      ok('празното балонче кани да се добави коментар',
+         !!eIc && eIc.getAttribute('title') === 'Добави коментар',
+         eIc ? eIc.getAttribute('title') : 'няма');
+    }
     h.close();
   }
 

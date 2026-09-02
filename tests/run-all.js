@@ -95,7 +95,8 @@ const TESTS = [
   'admin-notifications.test.js',
   'attachments-html-sync.test.js',
   'notify-schedule-stores.test.js',
-  'checklist-view.test.js'
+  'checklist-view.test.js',
+  'checklist-edit.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
