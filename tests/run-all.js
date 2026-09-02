@@ -68,6 +68,7 @@ const TESTS = [
   'routed-empty-recipient.test.js',
   'report-daily-date.test.js',
   'report-daily-scope.test.js',
+  'report-store-scope.test.js',
   'report-grid.test.js',
   'email-encoding.test.js',
   'email-subject-rfc2047.test.js',
