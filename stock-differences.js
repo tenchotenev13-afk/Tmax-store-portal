@@ -383,7 +383,11 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
         '<td style="padding:7px 10px;white-space:nowrap;">';
 
-      if (canEdit && !isTaken) {
+      /* status='received' е КРАЯТ на междускладовия поток. Такъв ред няма
+         type, тоест етикетът по-долу пада на "✅ Приета" и един клик би
+         записал status='taken' върху потвърждението - тоест би изтрил края
+         на потока и би върнал реда в "чакащи". Затова бутон няма. */
+      if (canEdit && !isTaken && r.status !== 'received') {
         var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : '✅ Приета';
         h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
       }
@@ -437,7 +441,12 @@ function sdTableRows(over){
   var typeF   = over.hasOwnProperty('type')   ? over.type   : sdTypeFilter;
   var statusF = over.hasOwnProperty('status') ? over.status : sdFilter;
   return sdData.filter(function(r) {
-    if (!r.type) return false; /* още не е прегледан от Цветелина - показва се само в секцията "За преглед" */
+    /* Ред без тип още не е минал през Цветелина - мястото му е в секцията
+       "За преглед". Изключение: междускладов ред, потвърден от отсрещната
+       страна (status='received'). Там решение от Цвети няма и никога няма да
+       дойде - потокът свършва с потвърждението, а приключеният ред трябва да
+       е видим и след като бланката се затвори. */
+    if (!r.type && !(sdLineDirection(r)==='interstore' && r.status==='received')) return false;
     /* Логистичен склад - вижда само собствените си насрещни разлики.
        counterpart живее в differences_reports, не директно в реда - търсим
        през report_id. */
@@ -681,6 +690,41 @@ function diffWarehouseResolveButtons(l, rep){
   }
   return '<span style="color:#94a3b8;">чака склада</span>';
 }
+/* Кой потвърждава получаването по междускладов ред - стои ПОД отговора на
+   склада в същата колона, защото е следващата стъпка по същия ред.
+   Правилото е "потвърждава този, при когото стоката отива":
+     - "📤 Изпратено"        -> магазинът получател (rep.store_name);
+     - "↩️ Обратно движение" -> складът, който я приема обратно (rep.counterpart).
+   При "⏳ Ще се изпрати" още няма какво да се потвърждава - бутон не се
+   рендира, за да не се потвърди стока, която не е тръгнала. */
+function sdInterstoreConfirmButton(l, rep){
+  if(!rep || rep.direction!=='interstore') return '';
+  /* Вече потвърден ред - и двете страни виждат едно и също: кой и кога. */
+  if(l.status==='received'){
+    return '<div style="margin-top:3px;font-size:10.5px;color:#0d9488;font-weight:600;">📬 Получено'+
+      (l.completed_by?' · '+esc(l.completed_by):'')+
+      (l.completed_at?' · '+sdFmtDateTime(l.completed_at):'')+'</div>';
+  }
+  if(l.warehouse_response==='will_send'){
+    return '<div style="margin-top:3px;font-size:10.5px;color:#94a3b8;">чака изпращане</div>';
+  }
+  var mk = function(label,color){
+    return '<div style="margin-top:3px;"><button data-lid="'+l.id+'" onclick="sdConfirmInterstore(this.dataset.lid)" style="border:none;background:'+color+';color:#fff;border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">'+label+'</button></div>';
+  };
+  if(l.warehouse_response==='sent'){
+    /* Счетоводителят по обекти има store_name "Централен офис", а обектите му
+       са в assigned_stores - затова двете проверки, не само store_name. */
+    var mine = assignedStores() || [];
+    var isStoreSide = canEditSD(l) && !isLogisticsWarehouseUser() &&
+      (currentUser.store_name===rep.store_name || mine.indexOf(rep.store_name)>=0);
+    return isStoreSide ? mk('✅ Получено','#0d9488') : '';
+  }
+  if(l.warehouse_response==='return'){
+    var isMyWh = isLogisticsWarehouseUser() && rep.counterpart===currentUser.store_name;
+    return isMyWh ? mk('📬 Прието обратно','#7c3aed') : '';
+  }
+  return '';
+}
 function openWarehouseResponseModal(lineId,val){
   var l = sdData.find(function(x){return String(x.id)===String(lineId);});
   if(!l)return;
@@ -798,6 +842,41 @@ function sdMarkTaken(id) {
   sbPatch('stock_differences','id=eq.'+id,{status:'taken',completed_by:sdActor(),completed_at:new Date().toISOString()}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     toast('✅ Маркирана като взета!'); loadStockDiff();
+  });
+}
+
+/* ── Край на междускладовия поток: потвърждение от отсрещната страна ──
+   Доставковата разлика свършва с решение на Цвети (resolveDiffLine), която
+   пише reviewed=true на бланката. За междускладов трансфер такова решение
+   няма - затова досега всичките 24 бланки стояха reviewed=false завинаги,
+   макар складът да беше отговорил по 16 от тях. Тук потвърждава страната,
+   която РЕАЛНО е получила стоката: магазинът при "Изпратено", складът при
+   "Обратно движение". Схемата не се пипа - ползват се status='received',
+   completed_by и completed_at, същите колони като при sdMarkTaken. */
+function sdConfirmInterstore(lineId){
+  var line = sdData.find(function(x){return String(x.id)===String(lineId);});
+  if(!line) return;
+  if(!confirm('Потвърди, че стоката е получена и заприходена?')) return;
+  /* Котва към бланката - иначе пре-рендирането връща потребителя най-отгоре. */
+  sdKeepScroll(line.report_id);
+  var at = new Date().toISOString(), by = sdActor();
+  sbPatch('stock_differences','id=eq.'+lineId,{status:'received',completed_by:by,completed_at:at}).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    /* Локално ПРЕДИ проверката за останалите редове - точно както прави
+       resolveDiffLine(). Иначе последният ред се брои по стария си статус и
+       бланката никога не се затваря от самата себе си. */
+    line.status='received'; line.completed_by=by; line.completed_at=at;
+    var siblings = sdData.filter(function(x){return x.report_id===line.report_id;});
+    var allReceived = siblings.length>0 && siblings.every(function(x){return x.status==='received';});
+    if(allReceived && line.report_id){
+      sbPatch('differences_reports','id=eq.'+line.report_id,{reviewed:true}).then(function(){
+        toast('✅ Бланката е приключена');
+        loadStockDiff();
+      });
+    } else {
+      toast('✅ Записано');
+      loadStockDiff();
+    }
   });
 }
 
@@ -1501,7 +1580,14 @@ function renderDiffReportsSection(){
     var wasCorrected = lines.some(function(l){return !!l.store_corrected_at;});
     /* Прогрес по бланката - колко реда вече са решени от Цвети. Без това
        трябваше да се изчете всеки ред, за да се разбере докъде е стигнала. */
-    var doneCount = lines.filter(function(l){return !!l.type;}).length;
+    /* При междускладов трансфер решение от Цвети няма изобщо - прогресът там
+       е "колко реда е потвърдила отсрещната страна" (status='received').
+       Иначе картата вечно пишеше "⬜ 0/N — недокосната" за поток, който
+       върви и по който складът вече е отговорил. */
+    var repIsInterstore = (rep.direction==='interstore');
+    var doneCount = repIsInterstore
+      ? lines.filter(function(l){return l.status==='received';}).length
+      : lines.filter(function(l){return !!l.type;}).length;
     var totalCount = lines.length;
     var inProgress = doneCount > 0 && doneCount < totalCount;
     var pct = totalCount ? Math.round(doneCount*100/totalCount) : 0;
@@ -1510,7 +1596,7 @@ function renderDiffReportsSection(){
     h+='<div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px;">';
     h+='<div><span style="font-weight:700;">🏪 '+esc(rep.store_name||'')+'</span>'+
        (wasCorrected?' <span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">✏️ КОРИГИРАНА</span>':'')+
-       (totalCount?' <span title="Решени редове от тази бланка" style="background:'+(inProgress?'#ecfdf5':'#f5f3ff')+';color:'+(inProgress?'#047857':'#6d28d9')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(doneCount?'⏳ '+doneCount+'/'+totalCount+' решени':'⬜ 0/'+totalCount+' — недокосната')+'</span>':'')+
+       (totalCount?' <span title="'+(repIsInterstore?'Потвърдени редове от тази бланка':'Решени редове от тази бланка')+'" style="background:'+(inProgress?'#ecfdf5':'#f5f3ff')+';color:'+(inProgress?'#047857':'#6d28d9')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(repIsInterstore?'📬 '+doneCount+'/'+totalCount+' потвърдени':(doneCount?'⏳ '+doneCount+'/'+totalCount+' решени':'⬜ 0/'+totalCount+' — недокосната'))+'</span>':'')+
        '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+diffDirShortLabel(rep.direction)+' — '+esc(rep.counterpart||'')+'</span></div>'+
        '<div style="display:flex;align-items:center;gap:8px;">'+
        '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</span>'+
@@ -1555,7 +1641,7 @@ function renderDiffReportsSection(){
           (canReviewDiff()&&!isLogisticsWarehouseUser()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
           (canEditSD(l)&&!l.type&&currentUser.store_name===rep.store_name?' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>':'')+
           '</td>'+
-          '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+'</td>'+
+          '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+'</td>'+
         '</tr>';
       });
       h+='</table>';
