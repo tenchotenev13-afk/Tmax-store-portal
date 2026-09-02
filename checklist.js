@@ -173,10 +173,192 @@ function loadChecklist() {
     checklistMetrics = Array.isArray(res[0]) ? res[0] : [];
     checklistRows = Array.isArray(res[1]) ? res[1] : [];
     checklistStores = Array.isArray(res[2]) ? res[2] : [];
+    /* Рендерът е СЛЕД опита за попълване, не преди него — иначе мрежата
+       мигва веднъж празна и втори път пълна. checklistFillPortalValues()
+       никога не отхвърля: при провал сама вдига toast и не пипа редовете,
+       тоест долният ред рисува това, което РЕАЛНО е записано. */
+    return checklistFillPortalValues();
+  }).then(function () {
     renderChecklist();
   }).catch(function () {
     checklistMetrics = []; checklistRows = []; checklistStores = [];
     renderChecklist();
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   PORTAL_VALUE — какво казва порталът
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* КОИ показатели се пълнят автоматично и В КАКЪВ ВИД.
+   Ключът е metric.key, а НЕ uuid: uuid-тата се четат от source в
+   weekly_checklist_metrics и никъде тук не са заковани.
+
+   Защо режимът стои в кода, а дните — не:
+     · ДНИТЕ идват от recurring_tasks.due_weekdays на самата задача. Смени
+       ли се срокът в Бюлетина, чек листът го следва — това е желаното.
+     · РЕЖИМЪТ (да/не срещу брой) е формат на КОЛОНА от бланката на
+       контролинга, не свойство на задачата. Изведеше ли се например от
+       due_window, едно отмятане на превключвател в Бюлетина щеше тихо да
+       смени „4/5" на „да" в чужд документ.
+
+   Тук са ДВА ключа, а не три, макар три показателя да имат recurring:
+   източник — „Стока за връщане- ТАБЛИЦИ" (0a20f6e8…) е с due_weekdays NULL
+   и без договорено правило. Останалите четири остават празни нарочно. */
+var CHECKLIST_PORTAL_MODE = {
+  revizia_953:    'any',   /* има ли поне едно отмятане в прозореца → da/ne */
+  spravka_minusi: 'count'  /* колко РАЗЛИЧНИ дни са отметнати → „4/5" */
+};
+
+/* 'recurring:<uuid>' → '<uuid>'. Всичко друго ('module:kasa', 'manual',
+   празно) → null, тоест показателят не се пълни. */
+function checklistRecurringId(metric) {
+  var src = metric && metric.source;
+  if (typeof src !== 'string' || src.indexOf('recurring:') !== 0) return null;
+  var id = src.slice(10).trim();
+  return id || null;
+}
+
+function checklistAutoMetrics() {
+  return checklistMetrics.filter(function (m) {
+    return !!CHECKLIST_PORTAL_MODE[m.key] && !!checklistRecurringId(m);
+  });
+}
+
+/* Стойността за ЕДИН обект.
+   hits е множеството РАЗЛИЧНИ дати с отмятане — оттам „два записа в един ден
+   се броят за един". Denom е броят дни в срока на задачата, не заковано 5.
+
+   ЧАСЪТ НЕ СЕ ПРОВЕРЯВА И НЕ СЕ ПРАВИМ, ЧЕ СЕ ПРОВЕРЯВА. Задачата има час
+   (16:00 и 20:00), но task_completions пази completion_date — ДАТА, без
+   час. Отмятане в 23:50 е неразличимо от отмятане в 9:00. Ако някой ден
+   потрябва „в срок до часа", първо трябва да се пази часът. */
+function checklistPortalValueFor(mode, hits, denom) {
+  var n = hits ? Object.keys(hits).length : 0;
+  if (mode === 'count') return n + '/' + denom;
+  return n > 0 ? 'da' : 'ne';
+}
+
+/* Разбива отмятанията по обект и дата за ЕДИН показател.
+   Връща null, когато правилото не е известно (липсва задача или тя няма
+   due_weekdays) — тогава показателят не се пълни, вместо да се гадае. */
+function checklistPortalPlan(metric, task, comps, weekISO) {
+  var mode = CHECKLIST_PORTAL_MODE[metric.key];
+  var days = (task && Array.isArray(task.due_weekdays)) ? task.due_weekdays : null;
+  if (!mode || !days || !days.length) return null;
+
+  /* Само дните от срока на задачата, преведени в дати от ПОКАЗАНАТА
+     седмица. Отмятане в четвъртък по задача „Пон–Сря" не влиза. */
+  var allowed = {};
+  days.forEach(function (i) { if (weekISO[i]) allowed[weekISO[i]] = 1; });
+
+  var hits = {};
+  comps.forEach(function (c) {
+    /* status !== 'done' не се брои: 'postponed' е отложена, не свършена.
+       Липсваща completion_date също отпада — 19 такива записа стоят в
+       базата отпреди полето да се пълни и иначе биха се броили за всяка
+       седмица завинаги (същият фантом, който report.js вече изключва). */
+    if (!c || c.status !== 'done' || !c.completion_date) return;
+    if (!allowed[c.completion_date] || !c.store_name) return;
+    if (!hits[c.store_name]) hits[c.store_name] = {};
+    hits[c.store_name][c.completion_date] = 1;
+  });
+  return { mode: mode, denom: days.length, hits: hits };
+}
+
+/* Записва САМО portal_value. control_value, control_num и comment не влизат
+   в тялото — при resolution=merge-duplicates PostgREST обновява единствено
+   подадените колони, тоест отсъствието им е защитата на ръчната работа.
+   По същата причина тук НЯМА updated_by/updated_at: те описват кой и кога е
+   отметнал, а това не е отмятане на човек. */
+function checklistWritePortalValues(changes) {
+  var body = changes.map(function (ch) {
+    return {
+      year: checklistYear,
+      week_number: checklistWeek,
+      store_name: ch.store,
+      metric_key: ch.metric_key,
+      portal_value: ch.value
+    };
+  });
+  var url = API + '/weekly_checklist?on_conflict=year,week_number,store_name,metric_key';
+  return fetch(url, {
+    method: 'POST',
+    headers: Object.assign({}, H, { 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
+    body: JSON.stringify(body)
+  }).then(function (r) {
+    if (r.ok) return { ok: true };
+    return r.json().catch(function () { return null; }).then(function (d) {
+      return { ok: false, error: (d && (d.message || d.hint)) || ('HTTP ' + r.status) };
+    });
+  }).catch(function (e) {
+    return { ok: false, error: (e && e.message) || 'мрежов срив' };
+  });
+}
+
+/* Пълни portal_value за показателите с постоянна задача.
+   НИКОГА не отхвърля — извикващият рендира след него във всички случаи. */
+function checklistFillPortalValues() {
+  var autos = checklistAutoMetrics();
+  if (!autos.length || !checklistStores.length) return Promise.resolve();
+
+  var ids = autos.map(checklistRecurringId);
+  var weekISO = weekDays(checklistWeek, checklistYear).map(toLocalISO);
+
+  return Promise.all([
+    sbGet('recurring_tasks', 'id=in.(' + ids.join(',') + ')&select=id,due_weekdays'),
+    /* Прозорецът е самата показана седмица. Заявката вече изключва
+       записите без дата — PostgREST не връща NULL при gte/lte. */
+    sbGet('task_completions',
+      'recurring_task_id=in.(' + ids.join(',') + ')' +
+      '&completion_date=gte.' + weekISO[0] + '&completion_date=lte.' + weekISO[6] +
+      '&select=recurring_task_id,store_name,status,completion_date')
+  ]).then(function (r) {
+    var tasks = Array.isArray(r[0]) ? r[0] : [];
+    var comps = Array.isArray(r[1]) ? r[1] : [];
+    var taskById = {};
+    tasks.forEach(function (t) { taskById[t.id] = t; });
+
+    var idx = checklistIndex();
+    var changes = [];
+
+    autos.forEach(function (m) {
+      var id = checklistRecurringId(m);
+      var mine = comps.filter(function (c) { return c.recurring_task_id === id; });
+      var plan = checklistPortalPlan(m, taskById[id], mine, weekISO);
+      if (!plan) return;
+      checklistStores.forEach(function (store) {
+        var val = checklistPortalValueFor(plan.mode, plan.hits[store], plan.denom);
+        var row = idx[store + ' ' + m.key];
+        /* Нищо ново → нищо не се пише. Инак всяко отваряне на седмица би
+           било 36 записа в базата без нито една променена стойност. */
+        if (row && row.portal_value === val) return;
+        changes.push({ store: store, metric_key: m.key, value: val });
+      });
+    });
+
+    if (!changes.length) return;
+
+    return checklistWritePortalValues(changes).then(function (res) {
+      if (!res.ok) {
+        /* Нищо не се прилага местно: мрежата показва само това, което
+           РЕАЛНО е в базата. Полупопълнена таблица, която изглежда
+           записана, е по-лоша от празна. */
+        toast('Грешка при попълване от портала: ' + res.error, '#dc2626');
+        return;
+      }
+      changes.forEach(function (ch) {
+        var row = idx[ch.store + ' ' + ch.metric_key];
+        if (row) { row.portal_value = ch.value; return; }
+        checklistRows.push({
+          year: checklistYear, week_number: checklistWeek,
+          store_name: ch.store, metric_key: ch.metric_key,
+          portal_value: ch.value, control_value: null, control_num: null, comment: null
+        });
+      });
+    });
+  }).catch(function () {
+    toast('Грешка при попълване от портала', '#dc2626');
   });
 }
 
