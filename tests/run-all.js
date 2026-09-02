@@ -97,7 +97,8 @@ const TESTS = [
   'attachments-html-sync.test.js',
   'notify-schedule-stores.test.js',
   'checklist-view.test.js',
-  'checklist-edit.test.js'
+  'checklist-edit.test.js',
+  'checklist-portal-value.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
