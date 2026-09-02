@@ -421,6 +421,10 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
     /* Счетоводителят обслужва 2 обекта → полето е <select>, не заключен
        текст. Избираме обект явно, както го прави и потребителят. */
     doc.getElementById('diff-store').value = 'Раднево';
+    /* Доставчикът също се избира явно: списъкът тръгва от празна опция и
+       празен counterpart вече спира подаването
+       (tests/interstore-counterpart-select.test.js). */
+    cp.value = 'ТЕСИ ООД';
     doc.getElementById('diff-docnum').value = 'ФК-0007777';
     doc.querySelector('#diff-items .di-name').value = 'ЩУЦЕР МЕТАЛЕН';
     doc.querySelector('#diff-items .di-qty').value = '10';

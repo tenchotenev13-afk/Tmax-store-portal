@@ -26,7 +26,9 @@ function env() {
   h.w.sdData = []; h.w.diffReports = [];
   h.w.openDiffSubmitModal();
   h.doc.getElementById('diff-store').value = 'Враца';
-  h.doc.getElementById('diff-counterpart').value = 'ТЕСИ ООД';
+  /* Насрещната страна НЕ се избира тук: селектът се пълни асинхронно от
+     updateDiffCounterpartLabel(), значи присвояване в този момент не се
+     задържа. Избира се в submit(), след ticks(). */
   return h;
 }
 
@@ -40,6 +42,13 @@ function fillRow(doc, i, vals) {
   return row;
 }
 async function submit(h) {
+  /* Празен counterpart вече спира подаването (посоката междускладов тръгва
+     от празна опция) - избираме първия реален склад, както го прави и
+     потребителят. Проверката на самия гейт живее в
+     tests/interstore-counterpart-select.test.js. */
+  await ticks();
+  const cp = h.doc.getElementById('diff-counterpart');
+  if (cp && !cp.value && cp.options.length > 1) cp.selectedIndex = 1;
   const ov = h.doc.getElementById('diff-submit-ov');
   const b = btn(ov, 'Изпрати') || btn(ov, 'Подай');
   realClick(h.w, b);
