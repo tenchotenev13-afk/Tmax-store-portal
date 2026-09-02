@@ -43,7 +43,12 @@ function reportWeekdayIdx(d){
 
 /* Събира данните за дневния репорт — идентична логика на today.js, за да
    съвпадат числата между живото табло и имейла. cb(data|null) */
-function collectDailyReportData(cb){
+/* scope: масив с имена на обекти или null/празно = ЦЯЛАТА верига.
+   Обхватът се подава ОТВЪН, вместо да се извежда тук, защото един и същи
+   отчетен ден се строи по няколко пъти — веднъж за report_recipients (всички
+   обекти) и по веднъж за всеки регионален (неговите). Изведеше ли се вътре,
+   двата случая нямаше как да съществуват едновременно. */
+function collectDailyReportData(cb, scope){
   var reportDay = reportDailyTargetDate(new Date());
   var dayISO = toLocalISO(reportDay);
   var dayIdx = reportWeekdayIdx(reportDay);
@@ -98,6 +103,13 @@ function collectDailyReportData(cb){
           if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
+        /* Обхватът СРЯЗВА изведения списък, а не го замества. Така
+           assigned_stores, което съдържа склад или несъществуващ обект, не
+           може да вкара ред, какъвто пълният отчет никога не показва —
+           isReportableStore и дедупликацията важат и за регионалния. */
+        if (scope && scope.length) {
+          stores = stores.filter(function(s){ return scope.indexOf(s) >= 0; });
+        }
 
         var comps = [];
         /* Само completion-и от ОТЧЕТНИЯ ден за обикновени задачи - многодневна
@@ -122,6 +134,20 @@ function collectDailyReportData(cb){
 
         var summary = reportBuildSummary(items, comps, stores, recurringNoDue.length);
         summary.reportDate = dayISO;
+        summary.scoped = !!(scope && scope.length);
+        /* СНИМКАТА Е САМО ЗА ПЪЛНАТА ВЕРИГА.
+           report_snapshots има един ред за (daily, дата) и захранва
+           тенденцията „спрямо предходния ден". Запишеше ли я и срязаният
+           отчет, процентът на трима регионални обекта щеше да стане
+           „вчерашният" за цялата верига — и то според това кой е бил
+           последен в цикъла на изпращане. По същата причина срязаният отчет
+           не ЧЕТЕ тенденция: сравнение на 3 обекта срещу вчерашните 18 е
+           число без смисъл. reportTrendHtml връща празно при null. */
+        if (summary.scoped) {
+          summary.trendYesterday = null;
+          cb(summary);
+          return;
+        }
         var prevISO = toLocalISO(reportDailyTargetDate(reportDay));
         reportSaveSnapshot('daily', dayISO, summary.overallPct, summary.totalDone, summary.totalAll);
         reportFetchSnapshot('daily', prevISO, function(snap){
@@ -301,12 +327,19 @@ function reportStoreRow(r){
    reportBuildSummary), тоест top3[0] е най-добрият, а bottom3[0] -
    най-слабият. Равни ли са тези двама, равни са всички. Празен списък
    обекти също не е класация. */
-function reportRankingIsMeaningful(top3, bottom3){
+/* storeCount: колко обекта има В ОБХВАТА. При по-малко от 4 класация не се
+   показва изобщо — при трима „ТОП 3" и „ИЗИСКВАТ ВНИМАНИЕ" изброяват ЕДНИТЕ
+   И СЪЩИ обекти в двете кутии, само в обратен ред. Регионален с три обекта
+   получаваше и похвала, и забележка за един и същ обект в едно писмо.
+   Празен/липсващ storeCount пази старото поведение — правилото се прилага
+   само когато обхватът е известен. */
+function reportRankingIsMeaningful(top3, bottom3, storeCount){
   if (!top3 || !bottom3 || !top3.length || !bottom3.length) return false;
+  if (typeof storeCount === 'number' && storeCount < 4) return false;
   return top3[0].pct !== bottom3[0].pct;
 }
-function reportTopBottomTable(top3, bottom3){
-  if (!reportRankingIsMeaningful(top3, bottom3)) return '';
+function reportTopBottomTable(top3, bottom3, storeCount){
+  if (!reportRankingIsMeaningful(top3, bottom3, storeCount)) return '';
   var goodRows = top3.map(function(s,i){ return '<div style="font-size:13px;color:#1f2937;margin-bottom:4px;">'+(i+1)+'. '+esc(s.name)+' — '+s.pct+'%</div>'; }).join('');
   var badRows = bottom3.map(function(s,i){ return '<div style="font-size:13px;color:#1f2937;margin-bottom:4px;">'+(i+1)+'. '+esc(s.name)+' — '+s.pct+'%</div>'; }).join('');
   return '<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px 0;margin-top:6px;"><tr>' +
@@ -946,8 +979,19 @@ function reportCrossWindow(win){
   };
 }
 
-function collectCrossModuleWeeklySummary(cb, win){
+/* scope: масив с имена на обекти или null/празно = цялата верига.
+   Дневният отчет НЕ рендира тази секция (buildCrossModuleSectionHtml се вика
+   само от buildWeeklyReportHtml) — параметърът е тук, за да може срязаният
+   отчет да я получи, когато потрябва, без числата да се смятат втори път на
+   друго място. При липсващ обхват изходът е байт в байт същият като преди.
+
+   store_name влезе в четирите select-а, които дотук взимаха само status/id:
+   без него срязване по обект е физически невъзможно. Всичките шест таблици
+   имат колоната (проверено в information_schema на 02.09.2026). */
+function collectCrossModuleWeeklySummary(cb, win, scope){
   var W = reportCrossWindow(win);
+  var hasScope = !!(scope && scope.length);
+  var inScope = function(s){ return !hasScope || scope.indexOf(s) >= 0; };
   var upStamp = W.toStamp ? '&created_at=lt.' + W.toStamp : '';
   var upDate = W.toISO ? '&date=lte.' + W.toISO : '';
 
@@ -964,19 +1008,22 @@ function collectCrossModuleWeeklySummary(cb, win){
        прием от другите две посоки и да се разбие по обект. Само reviewed
        не стигаше - разбивка по магазин беше физически невъзможна. */
     sbGet('differences_reports','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,direction,reviewed'),
-    sbGet('stock_returns','select=status'),
-    sbGet('kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=status'),
-    sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=status'),
-    sbGet('goods_transit','status=eq.pending&created_at=lt.'+staleStamp+'&select=id'),
+    sbGet('stock_returns','select=store_name,status'),
+    sbGet('kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,status'),
+    sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
+    sbGet('goods_transit','status=eq.pending&created_at=lt.'+staleStamp+'&select=store_name'),
     sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
     sbGet('users','select=store_name&order=store_name')
   ]).then(function(r){
-    var diffReports = Array.isArray(r[0]) ? r[0] : [];
-    var returns = Array.isArray(r[1]) ? r[1] : [];
-    var storno = Array.isArray(r[2]) ? r[2] : [];
-    var zoborot = Array.isArray(r[3]) ? r[3] : [];
-    var stalePending = Array.isArray(r[4]) ? r[4] : [];
-    var palletsRows = Array.isArray(r[5]) ? r[5] : [];
+    /* Всеки набор минава през ЕДИН предикат. Отделни филтри на отделни места
+       се разминават — точно това правеше сторната по грешен прием да се брои
+       два пъти, преди да излезе в собствен ред. */
+    var diffReports = (Array.isArray(r[0]) ? r[0] : []).filter(function(x){ return inScope(x.store_name); });
+    var returns = (Array.isArray(r[1]) ? r[1] : []).filter(function(x){ return inScope(x.store_name); });
+    var storno = (Array.isArray(r[2]) ? r[2] : []).filter(function(x){ return inScope(x.store_name); });
+    var zoborot = (Array.isArray(r[3]) ? r[3] : []).filter(function(x){ return inScope(x.store_name); });
+    var stalePending = (Array.isArray(r[4]) ? r[4] : []).filter(function(x){ return inScope(x.store_name); });
+    var palletsRows = (Array.isArray(r[5]) ? r[5] : []).filter(function(x){ return inScope(x.store_name); });
     var allUsers = Array.isArray(r[6]) ? r[6] : [];
 
     var seenS = {};
@@ -984,6 +1031,9 @@ function collectCrossModuleWeeklySummary(cb, win){
       if (!isReportableStore(u.store_name) || seenS[u.store_name]) return false;
       seenS[u.store_name] = 1; return true;
     }).map(function(u){ return u.store_name; });
+    if (hasScope) {
+      storeNames = storeNames.filter(function(s){ return inScope(s); });
+    }
 
     /* Сторната по грешен прием ИЗЛИЗА от числата за другите две посоки -
        иначе всяка бланка се брои по два пъти: веднъж в "Разлики" и втори
@@ -1212,7 +1262,7 @@ function buildWeeklyReportHtml(data){
      (тук). Вторият липсваше изцяло, тоест не се виждаше коя задача
      системно не се изпълнява. */
   body += reportByTaskHtml(data, true);
-  body += reportTopBottomTable(data.top3, data.bottom3);
+  body += reportTopBottomTable(data.top3, data.bottom3, data.storeCount);
   body += reportPostponedSectionHtml(data.postponedList);
   body += reportCommentsCountHtml(data.commentedList);
   body += reportNoDueNoticeHtml(data.noDueCount, true);

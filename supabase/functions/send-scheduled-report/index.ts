@@ -302,7 +302,10 @@ function reportWeekdayIdx(d){
   return js === 0 ? 6 : js - 1;
 }
 
-function collectDailyReportData(cb){
+/* scope: масив с имена на обекти или null/празно = ЦЯЛАТА верига. Подава се
+   отвън, защото един отчетен ден се строи по няколко пъти — веднъж за
+   report_recipients и по веднъж за всеки регионален. */
+function collectDailyReportData(cb, scope){
   var reportDay = reportDailyTargetDate(new Date());
   var dayISO = toLocalISO(reportDay);
   var dayIdx = reportWeekdayIdx(reportDay);
@@ -357,6 +360,11 @@ function collectDailyReportData(cb){
           if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
+        /* Обхватът СРЯЗВА изведения списък, а не го замества — иначе склад
+           или несъществуващ обект в assigned_stores би вкарал ред. */
+        if (scope && scope.length) {
+          stores = stores.filter(function(s){ return scope.indexOf(s) >= 0; });
+        }
 
         var comps = [];
         /* Само completion-и от ОТЧЕТНИЯ ден за обикновени задачи - многодневна
@@ -381,6 +389,15 @@ function collectDailyReportData(cb){
 
         var summary = reportBuildSummary(items, comps, stores, recurringNoDue.length);
         summary.reportDate = dayISO;
+        summary.scoped = !!(scope && scope.length);
+        /* Снимката е САМО за пълната верига: report_snapshots има един ред за
+           (daily, дата) и срязаният отчет би презаписал тенденцията на
+           всички. Затова срязаният нито пише, нито чете тенденция. */
+        if (summary.scoped) {
+          summary.trendYesterday = null;
+          cb(summary);
+          return;
+        }
         var prevISO = toLocalISO(reportDailyTargetDate(reportDay));
         reportSaveSnapshot('daily', dayISO, summary.overallPct, summary.totalDone, summary.totalAll);
         reportFetchSnapshot('daily', prevISO, function(snap){
@@ -542,12 +559,15 @@ function reportStoreRow(r){
    top3 е подредено по низходящ процент, bottom3 - по възходящ, тоест
    top3[0] е най-добрият, а bottom3[0] - най-слабият. Равни ли са тези
    двама, равни са всички. */
-function reportRankingIsMeaningful(top3, bottom3){
+/* storeCount: колко обекта има В ОБХВАТА. При под 4 класация не се показва —
+   при трима двете кутии изброяват едни и същи обекти в обратен ред. */
+function reportRankingIsMeaningful(top3, bottom3, storeCount){
   if (!top3 || !bottom3 || !top3.length || !bottom3.length) return false;
+  if (typeof storeCount === 'number' && storeCount < 4) return false;
   return top3[0].pct !== bottom3[0].pct;
 }
-function reportTopBottomTable(top3, bottom3){
-  if (!reportRankingIsMeaningful(top3, bottom3)) return '';
+function reportTopBottomTable(top3, bottom3, storeCount){
+  if (!reportRankingIsMeaningful(top3, bottom3, storeCount)) return '';
   var goodRows = top3.map(function(s,i){ return '<div style="font-size:13px;color:#1f2937;margin-bottom:4px;">'+(i+1)+'. '+esc(s.name)+' — '+s.pct+'%</div>'; }).join('');
   var badRows = bottom3.map(function(s,i){ return '<div style="font-size:13px;color:#1f2937;margin-bottom:4px;">'+(i+1)+'. '+esc(s.name)+' — '+s.pct+'%</div>'; }).join('');
   return '<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:8px 0;margin-top:6px;"><tr>' +
@@ -1122,8 +1142,14 @@ function reportCrossWindow(win){
   };
 }
 
-function collectCrossModuleWeeklySummary(cb, win){
+/* scope: масив с обекти или null/празно = цялата верига. Дневният отчет не
+   рендира тази секция; параметърът е тук, за да не се смятат числата втори
+   път другаде. store_name влезе в четирите select-а, които взимаха само
+   status/id — без него срязване по обект е невъзможно. */
+function collectCrossModuleWeeklySummary(cb, win, scope){
   var W = reportCrossWindow(win);
+  var hasScope = !!(scope && scope.length);
+  var inScope = function(s){ return !hasScope || scope.indexOf(s) >= 0; };
   var upStamp = W.toStamp ? '&created_at=lt.' + W.toStamp : '';
   var upDate = W.toISO ? '&date=lte.' + W.toISO : '';
 
@@ -1138,19 +1164,21 @@ function collectCrossModuleWeeklySummary(cb, win){
        прием от другите две посоки и да се разбие по обект. Само reviewed
        не стигаше - разбивка по магазин беше физически невъзможна. */
     sbGet('differences_reports','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,direction,reviewed'),
-    sbGet('stock_returns','select=status'),
-    sbGet('kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=status'),
-    sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=status'),
-    sbGet('goods_transit','status=eq.pending&created_at=lt.'+staleStamp+'&select=id'),
+    sbGet('stock_returns','select=store_name,status'),
+    sbGet('kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,status'),
+    sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
+    sbGet('goods_transit','status=eq.pending&created_at=lt.'+staleStamp+'&select=store_name'),
     sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
     sbGet('users','select=store_name&order=store_name')
   ]).then(function(r){
-    var diffReports = Array.isArray(r[0]) ? r[0] : [];
-    var returns = Array.isArray(r[1]) ? r[1] : [];
-    var storno = Array.isArray(r[2]) ? r[2] : [];
-    var zoborot = Array.isArray(r[3]) ? r[3] : [];
-    var stalePending = Array.isArray(r[4]) ? r[4] : [];
-    var palletsRows = Array.isArray(r[5]) ? r[5] : [];
+    /* Всеки набор минава през ЕДИН предикат — отделни филтри на отделни
+       места се разминават. */
+    var diffReports = (Array.isArray(r[0]) ? r[0] : []).filter(function(x){ return inScope(x.store_name); });
+    var returns = (Array.isArray(r[1]) ? r[1] : []).filter(function(x){ return inScope(x.store_name); });
+    var storno = (Array.isArray(r[2]) ? r[2] : []).filter(function(x){ return inScope(x.store_name); });
+    var zoborot = (Array.isArray(r[3]) ? r[3] : []).filter(function(x){ return inScope(x.store_name); });
+    var stalePending = (Array.isArray(r[4]) ? r[4] : []).filter(function(x){ return inScope(x.store_name); });
+    var palletsRows = (Array.isArray(r[5]) ? r[5] : []).filter(function(x){ return inScope(x.store_name); });
     var allUsers = Array.isArray(r[6]) ? r[6] : [];
 
     var seenS = {};
@@ -1158,6 +1186,9 @@ function collectCrossModuleWeeklySummary(cb, win){
       if (!isReportableStore(u.store_name) || seenS[u.store_name]) return false;
       seenS[u.store_name] = 1; return true;
     }).map(function(u){ return u.store_name; });
+    if (hasScope) {
+      storeNames = storeNames.filter(function(s){ return inScope(s); });
+    }
 
     /* Сторната по грешен прием ИЗЛИЗА от числата за другите две посоки -
        иначе всяка бланка се брои по два пъти: веднъж в "Разлики" и втори
@@ -1379,7 +1410,7 @@ function buildWeeklyReportHtml(data){
      (тук). Вторият липсваше изцяло, тоест не се виждаше коя задача
      системно не се изпълнява. */
   body += reportByTaskHtml(data, true);
-  body += reportTopBottomTable(data.top3, data.bottom3);
+  body += reportTopBottomTable(data.top3, data.bottom3, data.storeCount);
   body += reportPostponedSectionHtml(data.postponedList);
   body += reportCommentsCountHtml(data.commentedList);
   body += reportNoDueNoticeHtml(data.noDueCount, true);
@@ -1412,21 +1443,73 @@ Deno.serve(async (req: Request) => {
     var recipients = Array.isArray(recipientsRes) ? recipientsRes : [];
     var emails = recipients.map(function(r: any){ return r.email; }).filter(Boolean);
 
-    if (!emails.length) {
+    var subject = type === 'weekly' ? reportWeeklySubject(data.weekDates) : reportDailySubject(data.reportDate);
+
+    /* ── СПИСЪК 1: report_recipients — отчет за ЦЯЛАТА верига ──────────────
+       Този път не е пипан: същият html от неразрязания collect, същата тема,
+       едно писмо до всички в общо поле "to". */
+    var emailOk = false;
+    var emailStatus = 0;
+    if (emails.length) {
+      var emailRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
+        body: JSON.stringify({ to: emails, subject: subject, html: html })
+      });
+      emailOk = emailRes.ok;
+      emailStatus = emailRes.status;
+    }
+
+    /* ── СПИСЪК 2: регионалните — отчет САМО за техните обекти ─────────────
+       Отделен списък, не разширение на първия: източникът е друг (users,
+       не report_recipients), обхватът е друг и писмото е ЛИЧНО, а не общо
+       поле "to" — иначе всеки би виждал чуждите обекти.
+
+       Само дневният. Седмичният си остава както е бил.
+
+       Образецът е send-oborot-report: is_regional се чете от базата, а
+       active и празният имейл се отсяват в кода (active !== false, за да
+       не изпадне потребител с NULL), assigned_stores се приема за масив.
+
+       ЦЕНАТА: по едно събиране на данни за всеки получател, тоест N+1
+       обхождания на базата. Съзнателно — кронът тече веднъж дневно за шест
+       души, а алтернативата (едно събиране и пресмятане наум за всеки
+       обхват) значи да се раздели събирането от агрегацията в код, който
+       се копира на ръка в две места. */
+    var regionalOut: any[] = [];
+    if (type === 'daily') {
+      var regRes: any = await sbGet('users', 'is_regional=eq.true&select=email,display_name,assigned_stores,active');
+      var regionals = (Array.isArray(regRes) ? regRes : []).filter(function(u: any){
+        return u.active !== false && u.email;
+      });
+      for (const u of regionals) {
+        var mine: string[] = Array.isArray(u.assigned_stores) ? u.assigned_stores : [];
+        /* Празен assigned_stores = НЯМА писмо. Празен отчет е по-лош от
+           липсващ: изглежда като „обектите ти нямат нито една задача". */
+        if (!mine.length) { regionalOut.push({ email:u.email, sent:false, reason:'no_assigned_stores' }); continue; }
+
+        var mineData: any = await new Promise(function(resolve){
+          collectDailyReportData(resolve, mine);
+        });
+        if (!mineData) { regionalOut.push({ email:u.email, sent:false, reason:'collect_failed' }); continue; }
+        /* Обхватът може да се изпразни и СЛЕД срязването — регионален само
+           със склад в assigned_stores. Пак без писмо. */
+        if (!mineData.storeCount) { regionalOut.push({ email:u.email, sent:false, reason:'no_reportable_stores' }); continue; }
+
+        var mineRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
+          body: JSON.stringify({ to: [u.email], subject: subject, html: buildDailyReportHtml(mineData) })
+        });
+        regionalOut.push({ email:u.email, stores:mineData.storeCount, sent:mineRes.ok, status:mineRes.status });
+      }
+    }
+
+    if (!emails.length && !regionalOut.length) {
       return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
     }
 
-    var subject = type === 'weekly' ? reportWeeklySubject(data.weekDates) : reportDailySubject(data.reportDate);
-
-    var emailRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
-      method: 'POST',
-      headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
-      body: JSON.stringify({ to: emails, subject: subject, html: html })
-    });
-    var emailOk = emailRes.ok;
-    var emailStatus = emailRes.status;
-
-    return new Response(JSON.stringify({ ok:true, sent:emailOk, email_status:emailStatus, recipients:emails.length, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+    return new Response(JSON.stringify({ ok:true, sent:emailOk, email_status:emailStatus, recipients:emails.length, regional:regionalOut, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
   } catch (e) {
     return new Response(JSON.stringify({ ok:false, error:String(e) }), { status:500, headers:{'Content-Type':'application/json'} });
   }
