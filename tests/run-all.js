@@ -99,7 +99,8 @@ const TESTS = [
   'checklist-view.test.js',
   'checklist-edit.test.js',
   'checklist-portal-value.test.js',
-  'checklist-transit.test.js'
+  'checklist-transit.test.js',
+  'checklist-returns.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
