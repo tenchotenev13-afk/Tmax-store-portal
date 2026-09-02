@@ -52,6 +52,8 @@ var checklistWeek = null;      /* номер на показаната седм�
 var checklistMetrics = [];     /* weekly_checklist_metrics, активните, по sort_order */
 var checklistRows = [];        /* weekly_checklist за показаната седмица */
 var checklistStores = [];      /* 18-те отчетни обекта */
+var checklistLastSend = null;  /* последният ред от weekly_checklist_sends за седмицата */
+var checklistSendBusy = false; /* тече изпращане — бутонът мълчи */
 
 /* Стойностите се пазят в базата на латиница, за да не зависи схемата от
    изписването. Превеждат се само тук, при показване. */
@@ -164,6 +166,14 @@ function loadChecklist() {
   Promise.all([
     sbGet('weekly_checklist_metrics', 'active=eq.true&order=sort_order'),
     sbGet('weekly_checklist', 'year=eq.' + checklistYear + '&week_number=eq.' + checklistWeek),
+    /* Последното изпращане за тази седмица — от него зависи надписът на
+       бутона („Изпрати" срещу „Изпрати поправка") и редът „Последно
+       изпратено" в прозорчето. Номерът на версията се чете ПАК при самото
+       изпращане, не оттук: между отварянето на таба и натискането на бутона
+       може да мине половин ден и друг да е пратил. */
+    sbGet('weekly_checklist_sends',
+      'year=eq.' + checklistYear + '&week_number=eq.' + checklistWeek +
+      '&order=version.desc&limit=1'),
     /* Обектите идват от users през общия филтър isReportableStore() — 18.
        НЕ таблицата stores: тя брои и ЦО, двата склада и обекти без нито
        един акаунт (23 реда), тоест мрежата би имала пет реда, които няма
@@ -172,7 +182,8 @@ function loadChecklist() {
   ]).then(function (res) {
     checklistMetrics = Array.isArray(res[0]) ? res[0] : [];
     checklistRows = Array.isArray(res[1]) ? res[1] : [];
-    checklistStores = Array.isArray(res[2]) ? res[2] : [];
+    checklistLastSend = (Array.isArray(res[2]) && res[2][0]) ? res[2][0] : null;
+    checklistStores = Array.isArray(res[3]) ? res[3] : [];
     /* Рендерът е СЛЕД опита за попълване, не преди него — иначе мрежата
        мигва веднъж празна и втори път пълна. checklistFillPortalValues()
        никога не отхвърля: при провал сама вдига toast и не пипа редовете,
@@ -182,6 +193,7 @@ function loadChecklist() {
     renderChecklist();
   }).catch(function () {
     checklistMetrics = []; checklistRows = []; checklistStores = [];
+    checklistLastSend = null;
     renderChecklist();
   });
 }
@@ -626,7 +638,23 @@ function checklistHeaderHtml() {
       '</span>' +
       '<button class="btn-sm" onclick="checklistShiftWeek(1)" title="Следваща седмица">→</button>' +
     '</div>' +
+    checklistSendButtonHtml() +
   '</div>';
+}
+
+/* Бутонът за изпращане. Вижда се при същото условие като редакцията —
+   изпращането Е действие на контролинга, не отделно право.
+   Надписът зависи от това дали седмицата вече е пращана: „Изпрати поправка"
+   казва на човека, че това няма да е първото писмо, ПРЕДИ да натисне. */
+function checklistSendButtonHtml() {
+  if (!canEditChecklist()) return '';
+  var again = !!(checklistLastSend && checklistLastSend.version);
+  return '<button id="cl-send-btn" class="btn-sm"' +
+    (checklistSendBusy ? ' disabled' : '') +
+    ' style="background:#1E2761;color:#fff;font-weight:600;' +
+    (checklistSendBusy ? 'opacity:.5;cursor:default;' : '') + '">' +
+    (checklistSendBusy ? '⏳ Изпращам…' : (again ? '✉️ Изпрати поправка' : '✉️ Изпрати')) +
+    '</button>';
 }
 
 /* Легендата ДОСЛОВНО от бланката, в ЕДИН източник за таба и за писмото.
@@ -708,6 +736,11 @@ function renderChecklist() {
 
   wrap.innerHTML = h;
   checklistWireCells();
+  /* Бутонът се закача със слушател, не с inline onclick — по същата причина
+     като клетките: inline onclick не се изпълнява при element.click() под
+     jsdom, тоест истинският клик не може да се тества. */
+  var sendBtn = document.getElementById('cl-send-btn');
+  if (sendBtn && !checklistSendBusy) sendBtn.addEventListener('click', openChecklistSendModal);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1145,4 +1178,238 @@ function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, no
         '<div style="font-size:11px;color:#9aa4b2;">Чек лист на контролинга · ТеМАХ</div>' +
       '</div>' +
     '</div></body></html>';
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ИЗПРАЩАНЕ
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+var checklistSendList = [];   /* [{store, email, checked}] за отвореното прозорче */
+
+/* ЕДИН адрес на обект. Обектите имат по 2–4 акаунта (управител, склад,
+   каса, инфо), а чек листът се праща на ОТГОВОРНИКА — управителя.
+
+   Правилото е нарочно детерминирано, за да не зависи от реда, в който
+   PostgREST е върнал редовете:
+     1. role = 'manager';
+     2. при няколко управителя — служебният адрес (@temax.bg) пред личния;
+     3. при още равенство — по азбучен ред.
+   Кърджали например има ДВА управителски акаунта, единият личен gmail.
+
+   Списъкът и без това се показва с отметки преди изпращане — човекът вижда
+   точно кой адрес ще получи писмо и може да го махне. */
+function checklistPickStoreEmail(users) {
+  var ok = users.filter(function (u) {
+    return u && u.email && u.active !== false;
+  });
+  if (!ok.length) return null;
+  var managers = ok.filter(function (u) { return u.role === 'manager'; });
+  var pool = managers.length ? managers : ok;
+  pool = pool.slice().sort(function (a, b) {
+    var at = a.email.indexOf('@temax.bg') >= 0 ? 0 : 1;
+    var bt = b.email.indexOf('@temax.bg') >= 0 ? 0 : 1;
+    return (at - bt) || a.email.localeCompare(b.email);
+  });
+  return pool[0].email;
+}
+
+/* Обектите с адресите им, в реда на мрежата. Обект без годен адрес НЕ влиза
+   в списъка — по-добре да липсва, отколкото да стои с празна отметка. */
+function checklistBuildSendList(users) {
+  var byStore = {};
+  (Array.isArray(users) ? users : []).forEach(function (u) {
+    if (!u || !u.store_name || !isReportableStore(u.store_name)) return;
+    if (!byStore[u.store_name]) byStore[u.store_name] = [];
+    byStore[u.store_name].push(u);
+  });
+  var out = [];
+  checklistStores.forEach(function (store) {
+    var email = checklistPickStoreEmail(byStore[store] || []);
+    if (!email) return;
+    out.push({ store: store, email: email, checked: true });
+  });
+  return out;
+}
+
+function checklistSendSubject(version) {
+  return 'Чек лист — Седмица ' + checklistWeek + ' · ' + checklistYear +
+    (version > 1 ? ' (поправка ' + version + ')' : '');
+}
+
+function openChecklistSendModal() {
+  if (!canEditChecklist() || checklistSendBusy) return;
+
+  sbGet('users', 'select=store_name,email,role,active&order=store_name').then(function (users) {
+    checklistSendList = checklistBuildSendList(users);
+    if (!checklistSendList.length) {
+      toast('Няма нито един обект с адрес — няма на кого да се прати', '#dc2626');
+      return;
+    }
+    _renderChecklistSendModal();
+  });
+}
+
+function _renderChecklistSendModal() {
+  var old = document.getElementById('cl-send-ov');
+  if (old) old.remove();
+
+  var last = checklistLastSend;
+  var isFix = !!(last && last.version);
+
+  var h = '<div style="background:#fff;border-radius:10px;padding:18px;width:min(520px,94vw);max-height:88vh;overflow:auto;">' +
+    '<div style="font-weight:700;font-size:15px;margin-bottom:2px;">✉️ Изпращане на чек листа</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">Седмица ' +
+      checklistWeek + ' · ' + checklistYear + '</div>';
+
+  /* Редът за предишното изпращане и полето за бележка ги има САМО при
+     поправка. При първо изпращане „версия 1" и празно поле „какво е
+     поправено" биха питали за нещо, което още не е станало. */
+  if (isFix) {
+    h += '<div id="cl-send-last" style="margin-bottom:12px;padding:10px 12px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;font-size:12px;color:#9A3412;">' +
+      'Последно изпратено: ' + escVal(fmtDate((last.sent_at || '').slice(0, 10))) +
+      ', версия ' + escVal(String(last.version)) +
+      ', от ' + escVal(last.sent_by || '—') + '</div>';
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:4px;">Какво е поправено</div>' +
+      '<textarea id="cl-send-note" rows="2" style="width:100%;box-sizing:border-box;font-size:13px;' +
+      'padding:8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical;margin-bottom:12px;"></textarea>';
+  }
+
+  h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px;">Кой ще получи (' +
+    checklistSendList.length + ')</div>' +
+    '<div style="border:1px solid #e2e8f0;border-radius:8px;max-height:260px;overflow:auto;">';
+  checklistSendList.forEach(function (r, i) {
+    h += '<label style="display:block;padding:7px 10px;border-bottom:1px solid #f1f5f9;font-size:12px;cursor:pointer;">' +
+      '<input type="checkbox" class="cl-send-cb" data-i="' + i + '"' + (r.checked ? ' checked' : '') +
+      ' style="margin-right:8px;vertical-align:middle;">' +
+      '<b>' + escVal(r.store) + '</b> · <span style="color:#64748b;">' + escVal(r.email) + '</span>' +
+      '</label>';
+  });
+  h += '</div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
+      '<button id="cl-send-cancel" class="btn-sm">Откажи</button>' +
+      '<button id="cl-send-go" class="btn-sm" style="background:#1E2761;color:#fff;font-weight:600;">Изпрати</button>' +
+    '</div></div>';
+
+  var ov = document.createElement('div');
+  ov.id = 'cl-send-ov';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;' +
+    'align-items:center;justify-content:center;z-index:9999;';
+  ov.innerHTML = h;
+  document.body.appendChild(ov);
+
+  var cbs = ov.querySelectorAll('.cl-send-cb');
+  for (var i = 0; i < cbs.length; i++) {
+    cbs[i].addEventListener('change', function () {
+      var idx = parseInt(this.getAttribute('data-i'), 10);
+      if (checklistSendList[idx]) checklistSendList[idx].checked = !!this.checked;
+    });
+  }
+  var go = document.getElementById('cl-send-go');
+  if (go) go.addEventListener('click', submitChecklistSend);
+  var cancel = document.getElementById('cl-send-cancel');
+  if (cancel) cancel.addEventListener('click', closeChecklistSendModal);
+}
+
+function closeChecklistSendModal() {
+  var ov = document.getElementById('cl-send-ov');
+  if (ov) ov.remove();
+}
+
+/* Номерът на версията се чете ПАК тук, не от заредения при отваряне на таба
+   ред: между двете може да е минал половин ден и друг да е пратил. Иначе
+   вторият изпращач получава 409 от уникалността (year, week_number, version)
+   и не разбира защо. */
+function checklistNextVersion() {
+  return sbGet('weekly_checklist_sends',
+    'year=eq.' + checklistYear + '&week_number=eq.' + checklistWeek +
+    '&order=version.desc&limit=1').then(function (rows) {
+    var last = (Array.isArray(rows) && rows[0]) ? rows[0] : null;
+    return (last && last.version ? last.version : 0) + 1;
+  });
+}
+
+function submitChecklistSend() {
+  if (checklistSendBusy) return;
+
+  var noteEl = document.getElementById('cl-send-note');
+  var note = noteEl ? (noteEl.value || '').trim() : '';
+  var targets = checklistSendList.filter(function (r) { return r.checked; });
+
+  if (!targets.length) {
+    toast('Не е избран нито един получател', '#dc2626');
+    return;
+  }
+
+  closeChecklistSendModal();
+  checklistSendBusy = true;
+  renderChecklist();
+
+  checklistNextVersion().then(function (version) {
+    var html = checklistEmailHtml(checklistYear, checklistWeek, version,
+      checklistRows, checklistMetrics, checklistStores, note || null);
+    var subject = checklistSendSubject(version);
+
+    /* ПО ЕДНО ПИСМО НА ПОЛУЧАТЕЛ, не едно с всички адреси в „До".
+       Обектите не бива да виждат чуждите адреси — това е и причината да не
+       се праща накуп, макар накуп да е една заявка вместо осемнайсет. */
+    return Promise.all(targets.map(function (r) {
+      if (typeof sendEmail !== 'function') {
+        return Promise.resolve({ email: r.email, ok: false });
+      }
+      return sendEmail([r.email], subject, html).then(function (res) {
+        return { email: r.email, ok: !!(res && res.ok) };
+      }).catch(function () {
+        return { email: r.email, ok: false };
+      });
+    })).then(function (results) {
+      var sent = results.filter(function (x) { return x.ok; }).map(function (x) { return x.email; });
+      var failed = results.length - sent.length;
+
+      /* НУЛА УСПЕЛИ → НЕ СЕ ЗАПИСВА РЕД. Запис на изпращане, което не е
+         станало, заема номер на версия и оставя следа за писмо, каквото
+         никой не е получил — по-лошо от липсваща следа. */
+      if (!sent.length) {
+        checklistSendBusy = false;
+        renderChecklist();
+        toast('Нито едно писмо не тръгна (' + results.length + ' опита)', '#dc2626');
+        return;
+      }
+
+      /* recipients = САМО успелите. Списъкът е записът кой Е получил, не
+         кой е бил избран. */
+      return sbPost('weekly_checklist_sends', {
+        year: checklistYear,
+        week_number: checklistWeek,
+        version: version,
+        sent_by: (currentUser && (currentUser.display_name || currentUser.email)) || '—',
+        recipients: sent,
+        note: note || null
+      }).then(function (res) {
+        checklistSendBusy = false;
+        if (res && res.ok) {
+          checklistLastSend = {
+            version: version, sent_at: new Date().toISOString(),
+            sent_by: (currentUser && (currentUser.display_name || currentUser.email)) || '—'
+          };
+        }
+        renderChecklist();
+
+        if (!res || !res.ok) {
+          toast('Писмата тръгнаха (' + sent.length + '), но изпращането НЕ се записа: ' +
+            sbErrMsg(res), '#dc2626');
+          return;
+        }
+        if (failed) {
+          toast('Изпратени ' + sent.length + ', провалени ' + failed +
+            ' — записани са само успелите', '#dc2626');
+          return;
+        }
+        toast('✅ Изпратено до ' + sent.length + ' обекта (версия ' + version + ')');
+      });
+    });
+  }).catch(function () {
+    checklistSendBusy = false;
+    renderChecklist();
+    toast('Грешка при изпращането', '#dc2626');
+  });
 }
