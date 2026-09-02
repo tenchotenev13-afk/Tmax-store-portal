@@ -304,13 +304,31 @@ function checklistModuleId(metric) {
   return id || null;
 }
 
-/* Показателят, който се пълни от goods_transit. Търси се по ИЗТОЧНИК, не по
-   ключ — така преименуван ключ не го изключва мълчаливо. */
-function checklistTransitMetric() {
-  return checklistMetrics.filter(function (m) {
-    return checklistModuleId(m) === 'transit';
-  })[0] || null;
-}
+/* МОДУЛНИТЕ ИЗТОЧНИЦИ.
+   Ключът е идентификаторът от source ('module:<id>'), не metric.key: така
+   преименуван показател не изключва мълчаливо пълненето, а нов показател от
+   вече познат модул работи без нито ред нов код.
+
+   Всеки запис казва само три неща — коя таблица, кои колони и как се смята
+   стойността за ЕДИН обект. Общият обход е един за всички (виж
+   checklistModuleChanges) и точно затова тук няма отделен клон за transit и
+   отделен за returns.
+
+   'module:kasa' СЪЗНАТЕЛНО го няма: показателят „Сторна по грешни приеми"
+   още няма договорено правило и остава празен, вместо да се гадае. Липсващ
+   запис тук значи „не се пълни", не грешка. */
+var CHECKLIST_MODULE_FILL = {
+  transit: {
+    table: 'goods_transit',
+    query: 'select=store_name,direction,status',
+    value: function (rows) { return checklistTransitValue(rows); }
+  },
+  returns: {
+    table: 'stock_returns',
+    query: 'select=store_name,status,confirmed_date',
+    value: function (rows) { return checklistReturnsValue(rows); }
+  }
+};
 
 /* Промените от постоянните задачи. Връща Promise с масив
    {store, metric_key, value} — само за клетките, чиято стойност се МЕНИ. */
@@ -373,33 +391,65 @@ function checklistTransitValue(rows) {
   return done.length + '/' + incoming.length;
 }
 
-function checklistTransitChanges(idx) {
-  var metric = checklistTransitMetric();
-  if (!metric) return Promise.resolve([]);
+/* Дялът обработени записи за връщане: „29/40".
+   ОБРАБОТЕН е записът, който обектът е поел по един от двата възможни
+   начина: взет от куриер (status='taken') ИЛИ проверен и още невзет
+   (confirmed_date е попълнена, статусът остава 'pending').
 
-  /* Цялата таблица, но само трите нужни колони. goods_transit не се
-     натрупва — тя е снимка на текущия месец, затова няма филтър по дата:
-     created_at е моментът на импорта и не казва нищо за записа. */
-  return sbGet('goods_transit', 'select=store_name,direction,status').then(function (r) {
-    var rows = Array.isArray(r) ? r : [];
-    var byStore = {};
-    rows.forEach(function (t) {
-      if (!t || !t.store_name) return;
-      if (!byStore[t.store_name]) byStore[t.store_name] = [];
-      byStore[t.store_name].push(t);
-    });
+   Второто условие НЕ Е излишно. Към 02.09.2026 65 pending записа носят
+   confirmed_date; без него Раднево излиза 22/40 вместо 29/40, тоест
+   обектът е наказан за работа, която е свършил.
 
-    var changes = [];
-    checklistStores.forEach(function (store) {
-      var val = checklistTransitValue(byStore[store] || []);
-      /* null значи „няма какво да се каже" — не се записва нищо, за да не
-         се появи стойност там, където клетката трябва да е празна. */
-      if (val === null) return;
-      var row = idx[store + ' ' + metric.key];
-      if (row && row.portal_value === val) return;
-      changes.push({ store: store, metric_key: metric.key, value: val });
-    });
-    return changes;
+   Обект без нито един запис → null, клетката остава празна. „0/0" се чете
+   като провал, а всъщност няма какво да се обработва — записите се
+   появяват при разлика, не по график. */
+function checklistReturnsValue(rows) {
+  if (!rows.length) return null;
+  var done = rows.filter(function (r) {
+    return r && (r.status === 'taken' || !!r.confirmed_date);
+  });
+  return done.length + '/' + rows.length;
+}
+
+/* ЕДИН обход за всички модулни показатели.
+   За всеки показател с познат module: източник се тегли неговата таблица и
+   се смята стойност за всеки обект. Ако два показателя сочат към един
+   модул, таблицата ще се дръпне два пъти — днес такъв случай няма и
+   кеширане би било сложност без повод. */
+function checklistModuleChanges(idx) {
+  var jobs = [];
+
+  checklistMetrics.forEach(function (m) {
+    var id = checklistModuleId(m);
+    var spec = id ? CHECKLIST_MODULE_FILL[id] : null;
+    if (!spec) return;
+
+    jobs.push(sbGet(spec.table, spec.query).then(function (r) {
+      var rows = Array.isArray(r) ? r : [];
+      var byStore = {};
+      rows.forEach(function (x) {
+        if (!x || !x.store_name) return;
+        if (!byStore[x.store_name]) byStore[x.store_name] = [];
+        byStore[x.store_name].push(x);
+      });
+
+      var changes = [];
+      checklistStores.forEach(function (store) {
+        var val = spec.value(byStore[store] || []);
+        /* null значи „няма какво да се каже" — не се записва нищо, за да не
+           се появи стойност там, където клетката трябва да е празна. */
+        if (val === null) return;
+        var row = idx[store + ' ' + m.key];
+        if (row && row.portal_value === val) return;
+        changes.push({ store: store, metric_key: m.key, value: val });
+      });
+      return changes;
+    }));
+  });
+
+  if (!jobs.length) return Promise.resolve([]);
+  return Promise.all(jobs).then(function (parts) {
+    return parts.reduce(function (a, b) { return a.concat(b); }, []);
   });
 }
 
@@ -414,7 +464,7 @@ function checklistFillPortalValues() {
 
   return Promise.all([
     checklistRecurringChanges(idx),
-    checklistTransitChanges(idx)
+    checklistModuleChanges(idx)
   ]).then(function (parts) {
     var changes = parts[0].concat(parts[1]);
     if (!changes.length) return;
