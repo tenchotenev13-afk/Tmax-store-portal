@@ -2,10 +2,8 @@
    Седмичният контрол на контролинга: ред на обект, колона на показател.
    Огледало на лист „общо" от бланката, която дотук се водеше в Excel.
 
-   ТАБЪТ САМО ЧЕТЕ. Няма редакция, няма запис, няма попълване на
-   portal_value, няма имейл и няма износ. Всичко това е отделна задача —
-   ако някой добави тук бутон „Запази", първо да прочете защо клетката има
-   ДВЕ стойности (по-долу), иначе ще ги слее в една.
+   ЧЕТЕ И РЕДАКТИРА control_value / control_num / comment. НЯМА попълване на
+   portal_value, няма имейл и няма износ — това са отделни задачи.
 
    ДВЕТЕ СТОЙНОСТИ НА КЛЕТКАТА
    portal_value е това, което казва порталът (пълни се автоматично, но
@@ -14,6 +12,24 @@
    иначе portal_value, но по-бледо и в курсив. Разликата във вида е
    съществена, не козметика: бледото е ПРЕДПОЛОЖЕНИЕ на портала, не
    потвърдена отметка, и не бива да се чете като свършена работа.
+
+   РЕДАКЦИЯТА НЕ ПИПА portal_value. Тялото на upsert-а нарочно НЕ съдържа
+   тази колона: PostgREST при resolution=merge-duplicates обновява само
+   подадените полета, тоест липсата ѝ в тялото е самата защита. Добави ли я
+   някой „за пълнота", отметката на контролинга ще започне да презаписва
+   това, което порталът твърди — и двете стойности стават една.
+
+   ЗАЩО СЛУШАТЕЛИ, А НЕ inline onclick
+   Клетките се закачат с addEventListener в checklistWireCells(), не с
+   onclick= в низа. Две причини, и втората е по-важната:
+     · имената на обектите влизат само в data-si/data-mi (индекси), тоест
+       апостроф в име на обект няма как да счупи handler — класическият бъг
+       на string-concat HTML в този проект;
+     · inline onclick НЕ се изпълнява при element.click() под
+       jsdom с runScripts:'outside-only' (проверено), тоест истинският
+       клик изобщо не може да се тества. harness.realClick() заобикаля това
+       с eval на атрибута, но тогава се тества атрибутът, не кликът.
+   Стрелките за седмица си остават с inline onclick — те не са пипани.
 
    ПРАЗНА КЛЕТКА
    Няма ли ред в weekly_checklist за (седмица, обект, показател), клетката е
@@ -79,6 +95,15 @@ function canSeeChecklist() {
   if (!currentUser) return false;
   if (currentUser.role === 'admin') return true;
   return checklistGroupsOf(currentUser).indexOf('controlling') >= 0;
+}
+
+/* Редакцията е за същите хора, които виждат таба. Отделна функция, а не
+   canSeeChecklist() на самото място, за да има ЕДНО място за промяна, ако
+   утре табът се отвори за роля само за четене — тогава се пипа само тук и
+   мрежата автоматично става read-only (клетките не се закачат и handler-ът
+   пази втори път). */
+function canEditChecklist() {
+  return canSeeChecklist();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -176,11 +201,24 @@ function checklistValueLabel(val) {
   return CHECKLIST_VALUE_LABELS[val] || String(val);
 }
 
-/* Съдържанието на една клетка. Връща само вътрешността на <td>. */
-function checklistCellInner(metric, row) {
-  if (!row) return '';
+/* Балончето за коментар. ВИНАГИ се рендира — плътно при коментар, бледо без.
+   Не се крие при празен коментар: контрол, който изчезва според данните,
+   изглежда като счупен, а и няма как да добавиш първия коментар на клетка,
+   чието балонче се появява само след като вече има коментар. */
+function checklistCommentIconHtml(row) {
+  var has = !!(row && row.comment);
+  return '<span class="cl-cmt"' +
+    ' title="' + (has ? escAttr(row.comment) : 'Добави коментар') + '"' +
+    ' style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;' +
+    'cursor:pointer;opacity:' + (has ? '1' : '.25') + ';">💬</span>';
+}
 
+/* Съдържанието на една клетка. Връща само вътрешността на <td>.
+   Празният ред НЕ връща рано: балончето се рендира и когато ред няма. */
+function checklistCellInner(metric, row) {
   var text = '', faint = false;
+
+  if (!row) return checklistCommentIconHtml(null);
 
   if (metric.value_type === 'number') {
     /* При числов показател водещото е control_num. control_value не се
@@ -201,13 +239,14 @@ function checklistCellInner(metric, row) {
 
   var out = '';
   if (text !== '') {
+    /* class="cl-val" отделя СТОЙНОСТТА от балончето за коментар в същата
+       клетка. Без него textContent на клетката е „да💬" и всяка проверка
+       за точна стойност би мерила и иконката. */
     out += faint
-      ? '<span title="Стойност от портала — не е потвърдена от контролинга" style="color:#94a3b8;font-style:italic;">' + escVal(text) + '</span>'
-      : '<span style="font-weight:600;color:#0f172a;">' + escVal(text) + '</span>';
+      ? '<span class="cl-val" title="Стойност от портала — не е потвърдена от контролинга" style="color:#94a3b8;font-style:italic;">' + escVal(text) + '</span>'
+      : '<span class="cl-val" style="font-weight:600;color:#0f172a;">' + escVal(text) + '</span>';
   }
-  if (row.comment) {
-    out += '<span title="' + escAttr(row.comment) + '" style="cursor:help;margin-left:4px;">💬</span>';
-  }
+  out += checklistCommentIconHtml(row);
   return out;
 }
 
@@ -262,11 +301,21 @@ function renderChecklist() {
   });
   h += '</tr></thead><tbody>';
 
-  checklistStores.forEach(function (store) {
+  var editable = canEditChecklist();
+
+  checklistStores.forEach(function (store, si) {
     h += '<tr>' +
       '<td style="' + cellCss + 'text-align:left;font-weight:600;background:#fff;position:sticky;left:0;">' + escVal(store) + '</td>';
-    checklistMetrics.forEach(function (m) {
-      h += '<td style="' + cellCss + '">' + checklistCellInner(m, idx[store + ' ' + m.key]) + '</td>';
+    checklistMetrics.forEach(function (m, mi) {
+      var busy = !!checklistSaving[store + ' ' + m.key];
+      /* Обектът и показателят влизат само като ИНДЕКСИ. Никакво име не се
+         вплита в атрибут-handler, тоест апостроф в име на обект е безопасен. */
+      h += '<td data-si="' + si + '" data-mi="' + mi + '"' +
+        (busy ? ' data-busy="1"' : '') +
+        ' style="' + cellCss + 'position:relative;' +
+        (editable ? 'cursor:pointer;' : '') +
+        (busy ? 'opacity:.45;' : '') + '">' +
+        checklistCellInner(m, idx[store + ' ' + m.key]) + '</td>';
     });
     h += '</tr>';
   });
@@ -276,4 +325,282 @@ function renderChecklist() {
   h += '</div>';
 
   wrap.innerHTML = h;
+  checklistWireCells();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   РЕДАКЦИЯ
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* Кръгът на стойностите. Празното е ЧАСТ от кръга, не изходна точка —
+   затова null стои в масива и последният клик се връща на него. */
+var CHECKLIST_CYCLES = {
+  yes_no:      [null, 'da', 'ne'],
+  yes_no_none: [null, 'da', 'ne', 'nyamat']
+};
+
+/* Клетки със запис в момента: ключ „обект метрика" -> true. */
+var checklistSaving = {};
+
+function checklistNextValue(valueType, cur) {
+  var cyc = CHECKLIST_CYCLES[valueType] || CHECKLIST_CYCLES.yes_no;
+  if (cur === undefined || cur === '') cur = null;
+  var i = cyc.indexOf(cur);
+  /* Стойност извън кръга (напр. останала от по-стар набор) се ИЗЧИСТВА при
+     следващия клик, вместо да се тълкува наум като някоя от валидните. */
+  if (i < 0) return null;
+  return cyc[(i + 1) % cyc.length];
+}
+
+function checklistWireCells() {
+  var tbl = document.getElementById('checklist-table');
+  if (!tbl) return;
+  var cells = tbl.querySelectorAll('td[data-si]');
+  for (var i = 0; i < cells.length; i++) {
+    var td = cells[i];
+    /* Балончето се закача ВИНАГИ при право на редакция — и на клетки без
+       ред в базата, там се създава нов запис само с коментара. */
+    if (canEditChecklist()) {
+      td.addEventListener('click', checklistCellClick);
+      var ic = td.querySelector('.cl-cmt');
+      if (ic) ic.addEventListener('click', checklistCommentIconClick);
+    }
+  }
+}
+
+/* Обект и показател по индексите от data-атрибутите. */
+function checklistCellCtx(td) {
+  var si = parseInt(td.getAttribute('data-si'), 10);
+  var mi = parseInt(td.getAttribute('data-mi'), 10);
+  var store = checklistStores[si];
+  var metric = checklistMetrics[mi];
+  if (!store || !metric) return null;
+  return { store: store, metric: metric, key: store + ' ' + metric.key };
+}
+
+function checklistCellClick(ev) {
+  /* Втора проверка, независима от закачането. Закачането решава при рендер,
+     тази — при самия клик; между двете currentUser може да се е сменил. */
+  if (!canEditChecklist()) return;
+  var td = this;
+  var ctx = checklistCellCtx(td);
+  if (!ctx) return;
+  if (checklistSaving[ctx.key]) return;         /* тече запис — клетката мълчи */
+  if (td.querySelector('input')) return;        /* отворено поле за число */
+
+  if (ctx.metric.value_type === 'number') {
+    checklistOpenNumberInput(td, ctx);
+    return;
+  }
+  var row = checklistIndex()[ctx.key];
+  var next = checklistNextValue(ctx.metric.value_type, row ? row.control_value : null);
+  checklistApply(ctx, { control_value: next });
+}
+
+/* Числовият показател не се върти в кръг — отваря малко поле.
+   Записва се при Enter или при напускане на полето; Escape отказва. */
+function checklistOpenNumberInput(td, ctx) {
+  var row = checklistIndex()[ctx.key];
+  var cur = (row && row.control_num !== null && row.control_num !== undefined) ? row.control_num : '';
+  td.innerHTML = '<input type="number" step="1" value="' + escAttr(String(cur)) + '"' +
+    ' style="width:56px;text-align:center;font-size:12px;padding:2px;border:1px solid #2563eb;border-radius:4px;">' +
+    checklistCommentIconHtml(row);
+  var inp = td.querySelector('input');
+  if (!inp) return;
+  var done = false;
+  function commit() {
+    if (done) return; done = true;
+    var raw = (inp.value || '').trim();
+    /* Празно поле значи „изчисти числото", не нула. Нулата е валиден отговор
+       (нула сторнирани поръчки) и не бива да се получава от празно поле. */
+    var num = raw === '' ? null : Number(raw);
+    if (num !== null && isNaN(num)) { renderChecklist(); return; }
+    var prev = (row && row.control_num !== null && row.control_num !== undefined) ? row.control_num : null;
+    if (num === prev) { renderChecklist(); return; }   /* нищо не се е променило — без заявка */
+    checklistApply(ctx, { control_num: num });
+  }
+  inp.addEventListener('blur', commit);
+  inp.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { commit(); }
+    else if (e.key === 'Escape') { done = true; renderChecklist(); }
+  });
+  try { inp.focus(); } catch (e) {}
+}
+
+function checklistCommentIconClick(ev) {
+  /* Без това кликът се качва до клетката и завърта стойността „в движение",
+     докато човекът само е искал да пише коментар. */
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  if (!canEditChecklist()) return;
+  var td = this.parentNode;
+  var ctx = checklistCellCtx(td);
+  if (!ctx) return;
+  if (checklistSaving[ctx.key]) return;
+  openChecklistCommentModal(ctx);
+}
+
+/* ── Прозорче за коментар ────────────────────────────────────────────────── */
+var checklistCommentCtx = null;
+
+function openChecklistCommentModal(ctx) {
+  checklistCommentCtx = ctx;
+  var row = checklistIndex()[ctx.key];
+  var old = document.getElementById('cl-cmt-ov');
+  if (old) old.remove();
+
+  var ov = document.createElement('div');
+  ov.id = 'cl-cmt-ov';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;' +
+    'align-items:center;justify-content:center;z-index:9999;';
+  ov.innerHTML = '<div style="background:#fff;border-radius:10px;padding:18px;width:min(420px,92vw);">' +
+    '<div style="font-weight:700;margin-bottom:4px;">💬 Коментар</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">' +
+      escVal(ctx.store) + ' · ' + escVal(ctx.metric.label) + '</div>' +
+    '<textarea id="cl-cmt-text" rows="4" style="width:100%;box-sizing:border-box;font-size:13px;' +
+      'padding:8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical;"></textarea>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">' +
+      '<button id="cl-cmt-cancel" class="btn-sm">Откажи</button>' +
+      '<button id="cl-cmt-save" class="btn-sm" style="background:#2563eb;color:#fff;">Запази</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+
+  /* Текстът се задава като .value, а не в HTML-а: така кавички и по-малко/
+     по-голямо в коментара нямат как да излязат от <textarea>. */
+  var ta = document.getElementById('cl-cmt-text');
+  if (ta) ta.value = (row && row.comment) || '';
+
+  var save = document.getElementById('cl-cmt-save');
+  if (save) save.addEventListener('click', submitChecklistComment);
+  var cancel = document.getElementById('cl-cmt-cancel');
+  if (cancel) cancel.addEventListener('click', closeChecklistCommentModal);
+}
+
+function closeChecklistCommentModal() {
+  var ov = document.getElementById('cl-cmt-ov');
+  if (ov) ov.remove();
+  checklistCommentCtx = null;
+}
+
+function submitChecklistComment() {
+  var ctx = checklistCommentCtx;
+  if (!ctx) return;
+  var ta = document.getElementById('cl-cmt-text');
+  var txt = ta ? (ta.value || '').trim() : '';
+  closeChecklistCommentModal();
+  /* Празен текст изчиства коментара (NULL), не записва празен низ — иначе
+     „има ли коментар" става различно от „не е null" на две места. */
+  checklistApply(ctx, { comment: txt === '' ? null : txt });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ЗАПИС
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* upsert по (year, week_number, store_name, metric_key).
+   on_conflict сочи УНИКАЛНОТО ОГРАНИЧЕНИЕ, не първичния ключ — без него
+   PostgREST търси конфликт по id и втори клик би връщал 409.
+   Проверено срещу живия PostgREST на 02.09.2026: първи POST → 201, втори със
+   същия ключ → 200, същият id, един ред в таблицата.
+
+   portal_value НЕ влиза в тялото. merge-duplicates обновява само подадените
+   колони, тоест отсъствието ѝ е защитата — виж бележката в началото. */
+function checklistUpsert(ctx, fields) {
+  var body = {
+    year: checklistYear,
+    week_number: checklistWeek,
+    store_name: ctx.store,
+    metric_key: ctx.metric.key,
+    updated_by: (currentUser && (currentUser.display_name || currentUser.email)) || null,
+    /* Таблицата няма тригер: default now() важи само при INSERT, а при
+       UPDATE стойността остава старата. Проверено на живо — вторият upsert
+       без това поле остави updated_at непроменен. Затова се подава явно. */
+    updated_at: new Date().toISOString()
+  };
+  Object.keys(fields).forEach(function (k) { body[k] = fields[k]; });
+
+  var url = API + '/weekly_checklist?on_conflict=year,week_number,store_name,metric_key';
+  return fetch(url, {
+    method: 'POST',
+    headers: Object.assign({}, H, { 'Prefer': 'resolution=merge-duplicates,return=representation' }),
+    body: JSON.stringify([body])
+  }).then(function (r) {
+    return r.json().catch(function () { return null; }).then(function (d) {
+      if (!r.ok) {
+        var msg = (d && (d.message || d.hint)) || ('HTTP ' + r.status);
+        try { console.error('checklistUpsert ' + url + ' → ' + r.status + ': ' + msg); } catch (e) {}
+        return { ok: false, error: msg };
+      }
+      return { ok: true, row: (Array.isArray(d) ? d[0] : d) || null };
+    });
+  }).catch(function (e) {
+    try { console.error('checklistUpsert ' + url + ' → мрежов срив'); } catch (x) {}
+    return { ok: false, error: (e && e.message) || 'мрежов срив' };
+  });
+}
+
+/* Оптимистична промяна + ВРЪЩАНЕ НАЗАД при провал.
+   Поуката е от autoCreateReturnFromDiff(): провалила се заявка, чийто
+   резултат остава на екрана, е по-лоша от липсваща функция — човекът вижда
+   отметка, базата не я знае и никой не разбира, докато не се сверят двете.
+   Затова при грешка редът се възстановява ТОЧНО както е бил (включително
+   пълното изчезване на реда, ако е бил създаден от този клик) и излиза
+   червен toast. */
+function checklistApply(ctx, fields) {
+  if (!canEditChecklist()) return;
+  if (checklistSaving[ctx.key]) return;
+  checklistSaving[ctx.key] = true;
+
+  var existing = checklistIndex()[ctx.key] || null;
+  /* Копие, не референция: долу мутираме същия обект, а „старото" трябва да
+     оцелее непроменено, за да има какво да се върне. */
+  var snapshot = existing ? JSON.parse(JSON.stringify(existing)) : null;
+
+  var row = existing;
+  if (!row) {
+    row = {
+      year: checklistYear, week_number: checklistWeek,
+      store_name: ctx.store, metric_key: ctx.metric.key,
+      portal_value: null, control_value: null, control_num: null, comment: null
+    };
+    checklistRows.push(row);
+  }
+  Object.keys(fields).forEach(function (k) { row[k] = fields[k]; });
+  renderChecklist();
+
+  checklistUpsert(ctx, fields).then(function (res) {
+    delete checklistSaving[ctx.key];
+
+    if (res.ok) {
+      /* Върнатият ред носи id и реалния updated_at — СЛИВА се в местния, не
+         го ЗАМЕСТВА. Замяната изглежда по-чиста, но при отговор без тяло
+         (Prefer се пренебрегва, прокси реже отговора, стъб в тест) res.row е
+         празен обект и замяната би изтрила store_name/metric_key на реда —
+         клетката се изпразва след успешен запис. Сливането на празен обект е
+         безобидно, а на пълен върши същата работа. */
+      if (res.row && typeof res.row === 'object') {
+        Object.keys(res.row).forEach(function (k) { row[k] = res.row[k]; });
+      }
+      renderChecklist();
+      return;
+    }
+
+    checklistRestore(ctx.key, snapshot);
+    renderChecklist();
+    toast('Грешка при запис: ' + res.error, '#dc2626');
+  });
+}
+
+/* Връща реда на предишното му състояние. snapshot === null значи, че ред не
+   е имало — тогава новосъздаденият се МАХА, а не се оставя празен: празен
+   ред в масива е ред в базата, какъвто там няма. */
+function checklistRestore(key, snapshot) {
+  var i = -1;
+  for (var j = 0; j < checklistRows.length; j++) {
+    if (checklistRows[j].store_name + ' ' + checklistRows[j].metric_key === key) { i = j; break; }
+  }
+  if (snapshot === null) {
+    if (i >= 0) checklistRows.splice(i, 1);
+    return;
+  }
+  if (i >= 0) checklistRows[i] = snapshot; else checklistRows.push(snapshot);
 }
