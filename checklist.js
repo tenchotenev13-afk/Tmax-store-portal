@@ -296,11 +296,27 @@ function checklistWritePortalValues(changes) {
   });
 }
 
-/* Пълни portal_value за показателите с постоянна задача.
-   НИКОГА не отхвърля — извикващият рендира след него във всички случаи. */
-function checklistFillPortalValues() {
+/* 'module:<id>' → '<id>'. Другите източници → null. */
+function checklistModuleId(metric) {
+  var src = metric && metric.source;
+  if (typeof src !== 'string' || src.indexOf('module:') !== 0) return null;
+  var id = src.slice(7).trim();
+  return id || null;
+}
+
+/* Показателят, който се пълни от goods_transit. Търси се по ИЗТОЧНИК, не по
+   ключ — така преименуван ключ не го изключва мълчаливо. */
+function checklistTransitMetric() {
+  return checklistMetrics.filter(function (m) {
+    return checklistModuleId(m) === 'transit';
+  })[0] || null;
+}
+
+/* Промените от постоянните задачи. Връща Promise с масив
+   {store, metric_key, value} — само за клетките, чиято стойност се МЕНИ. */
+function checklistRecurringChanges(idx) {
   var autos = checklistAutoMetrics();
-  if (!autos.length || !checklistStores.length) return Promise.resolve();
+  if (!autos.length) return Promise.resolve([]);
 
   var ids = autos.map(checklistRecurringId);
   var weekISO = weekDays(checklistWeek, checklistYear).map(toLocalISO);
@@ -319,9 +335,7 @@ function checklistFillPortalValues() {
     var taskById = {};
     tasks.forEach(function (t) { taskById[t.id] = t; });
 
-    var idx = checklistIndex();
     var changes = [];
-
     autos.forEach(function (m) {
       var id = checklistRecurringId(m);
       var mine = comps.filter(function (c) { return c.recurring_task_id === id; });
@@ -336,7 +350,73 @@ function checklistFillPortalValues() {
         changes.push({ store: store, metric_key: m.key, value: val });
       });
     });
+    return changes;
+  });
+}
 
+/* Дялът актуализирани ВХОДЯЩИ записи за един обект: „52/190".
+   Връща null, когато обектът няма нито един входящ запис — тогава клетката
+   остава празна. „0/0" би изглеждало като провал, а всъщност няма какво да
+   се актуализира.
+
+   ЗАЩО САМО incoming: при входящ запис обектът е ПОЛУЧАТЕЛЯТ и той
+   отговаря за актуализацията. При outgoing и transfer отговаря другата
+   страна, тоест влезли в знаменателя биха наказвали обекта за чужда
+   работа. Към 02.09.2026 това са 53 и 153 записа срещу 2063 входящи.
+
+   NULL статус се брои за НЕактуализиран — същото, което прави и
+   `status <> 'pending'` в SQL, където NULL не минава сравнението. */
+function checklistTransitValue(rows) {
+  var incoming = rows.filter(function (t) { return t && t.direction === 'incoming'; });
+  if (!incoming.length) return null;
+  var done = incoming.filter(function (t) { return !!t.status && t.status !== 'pending'; });
+  return done.length + '/' + incoming.length;
+}
+
+function checklistTransitChanges(idx) {
+  var metric = checklistTransitMetric();
+  if (!metric) return Promise.resolve([]);
+
+  /* Цялата таблица, но само трите нужни колони. goods_transit не се
+     натрупва — тя е снимка на текущия месец, затова няма филтър по дата:
+     created_at е моментът на импорта и не казва нищо за записа. */
+  return sbGet('goods_transit', 'select=store_name,direction,status').then(function (r) {
+    var rows = Array.isArray(r) ? r : [];
+    var byStore = {};
+    rows.forEach(function (t) {
+      if (!t || !t.store_name) return;
+      if (!byStore[t.store_name]) byStore[t.store_name] = [];
+      byStore[t.store_name].push(t);
+    });
+
+    var changes = [];
+    checklistStores.forEach(function (store) {
+      var val = checklistTransitValue(byStore[store] || []);
+      /* null значи „няма какво да се каже" — не се записва нищо, за да не
+         се появи стойност там, където клетката трябва да е празна. */
+      if (val === null) return;
+      var row = idx[store + ' ' + metric.key];
+      if (row && row.portal_value === val) return;
+      changes.push({ store: store, metric_key: metric.key, value: val });
+    });
+    return changes;
+  });
+}
+
+/* Пълни portal_value от всички автоматични източници.
+   ЕДИН запис и ЕДИН път за грешка за двата източника: две отделни заявки
+   значат две отделни половини успех, тоест таблица, попълнена наполовина,
+   без никой да е казал коя половина.
+   НИКОГА не отхвърля — извикващият рендира след него във всички случаи. */
+function checklistFillPortalValues() {
+  if (!checklistStores.length) return Promise.resolve();
+  var idx = checklistIndex();
+
+  return Promise.all([
+    checklistRecurringChanges(idx),
+    checklistTransitChanges(idx)
+  ]).then(function (parts) {
+    var changes = parts[0].concat(parts[1]);
     if (!changes.length) return;
 
     return checklistWritePortalValues(changes).then(function (res) {
@@ -383,6 +463,39 @@ function checklistValueLabel(val) {
   return CHECKLIST_VALUE_LABELS[val] || String(val);
 }
 
+/* ── „ОЩЕ РАНО" ──────────────────────────────────────────────────────────
+   Показател със срок в рамките на месеца (weekly_checklist_metrics.
+   deadline_day). До този ден ВКЛЮЧИТЕЛНО стойността е междинна, не оценка.
+
+   Прагът НЕ е закован в рендирането: тук няма нито дума „стока на път",
+   нито числото 10. Следващият показател със свой срок иска ред в базата,
+   не промяна по код. deadline_day = NULL значи „няма такъв срок", тоест
+   показателят никога не е „още рано" — така е за петте останали.
+
+   Сравнява се с ДНЕШНИЯ ден от месеца, не с показаната седмица: goods_transit
+   е снимка на текущия месец и не пази история, тоест числото описва днешното
+   състояние, независимо коя седмица е отворена. */
+function checklistDeadlineDay(metric) {
+  var d = metric && metric.deadline_day;
+  if (d === null || d === undefined || d === '') return null;
+  d = parseInt(d, 10);
+  return isNaN(d) ? null : d;
+}
+
+function checklistIsEarly(metric, now) {
+  var d = checklistDeadlineDay(metric);
+  if (!d) return false;
+  return (now || new Date()).getDate() <= d;
+}
+
+/* „10-то", „1-во", „2-ро", „7-мо". Само за текста в подсказката. */
+var CHECKLIST_ORD_SUFFIX = { 1: '-во', 2: '-ро', 7: '-мо', 8: '-мо' };
+function checklistDeadlineTitle(metric) {
+  var d = checklistDeadlineDay(metric);
+  if (!d) return '';
+  return 'Срокът изтича на ' + d + (CHECKLIST_ORD_SUFFIX[d] || '-то') + ' число';
+}
+
 /* Балончето за коментар. ВИНАГИ се рендира — плътно при коментар, бледо без.
    Не се крие при празен коментар: контрол, който изчезва според данните,
    изглежда като счупен, а и няма как да добавиш първия коментар на клетка,
@@ -397,7 +510,10 @@ function checklistCommentIconHtml(row) {
 
 /* Съдържанието на една клетка. Връща само вътрешността на <td>.
    Празният ред НЕ връща рано: балончето се рендира и когато ред няма. */
-function checklistCellInner(metric, row) {
+/* early/earlyTitle идват отгоре, от renderChecklist: смятат се ВЕДНЪЖ на
+   показател, не веднъж на клетка, и така рендирането не знае нищо за срокове
+   — то само рисува подадения флаг. */
+function checklistCellInner(metric, row, early, earlyTitle) {
   var text = '', faint = false;
 
   if (!row) return checklistCommentIconHtml(null);
@@ -423,10 +539,25 @@ function checklistCellInner(metric, row) {
   if (text !== '') {
     /* class="cl-val" отделя СТОЙНОСТТА от балончето за коментар в същата
        клетка. Без него textContent на клетката е „да💬" и всяка проверка
-       за точна стойност би мерила и иконката. */
-    out += faint
-      ? '<span class="cl-val" title="Стойност от портала — не е потвърдена от контролинга" style="color:#94a3b8;font-style:italic;">' + escVal(text) + '</span>'
-      : '<span class="cl-val" style="font-weight:600;color:#0f172a;">' + escVal(text) + '</span>';
+       за точна стойност би мерила и иконката.
+
+       „Още рано" важи САМО за стойност от портала (faint). Попълни ли
+       контролингът клетката, тя се рендира нормално: правилото „отметнатото
+       от контролинга бие портала" няма изключения — човекът е гледал и е
+       решил, независимо че срокът още тече. Затова условието е early И
+       faint, а не само early.
+
+       Класът е отделен (cl-early), а не просто faint, за да се вижда ЗАЩО
+       е бледо: „още не е оценка", а не „порталът предполага". */
+    if (early && faint) {
+      out += '<span class="cl-val cl-early" title="' + escAttr(earlyTitle) +
+        '" style="color:#94a3b8;font-style:italic;border-bottom:1px dotted #cbd5e1;">' +
+        escVal(text) + '</span>';
+    } else {
+      out += faint
+        ? '<span class="cl-val" title="Стойност от портала — не е потвърдена от контролинга" style="color:#94a3b8;font-style:italic;">' + escVal(text) + '</span>'
+        : '<span class="cl-val" style="font-weight:600;color:#0f172a;">' + escVal(text) + '</span>';
+    }
   }
   out += checklistCommentIconHtml(row);
   return out;
@@ -485,6 +616,17 @@ function renderChecklist() {
 
   var editable = canEditChecklist();
 
+  /* Срокът се смята ВЕДНЪЖ на показател — 18 обекта × 6 показателя иначе
+     значат 108 еднакви сметки за днешната дата. Един и същи „сега" за целия
+     рендер: инак таблица, рисувана в 23:59:59.9, може да смени състоянието
+     си по средата. */
+  var now = new Date();
+  var earlyBy = {}, earlyTitleBy = {};
+  checklistMetrics.forEach(function (m) {
+    earlyBy[m.key] = checklistIsEarly(m, now);
+    earlyTitleBy[m.key] = checklistDeadlineTitle(m);
+  });
+
   checklistStores.forEach(function (store, si) {
     h += '<tr>' +
       '<td style="' + cellCss + 'text-align:left;font-weight:600;background:#fff;position:sticky;left:0;">' + escVal(store) + '</td>';
@@ -497,7 +639,7 @@ function renderChecklist() {
         ' style="' + cellCss + 'position:relative;' +
         (editable ? 'cursor:pointer;' : '') +
         (busy ? 'opacity:.45;' : '') + '">' +
-        checklistCellInner(m, idx[store + ' ' + m.key]) + '</td>';
+        checklistCellInner(m, idx[store + ' ' + m.key], earlyBy[m.key], earlyTitleBy[m.key]) + '</td>';
     });
     h += '</tr>';
   });
