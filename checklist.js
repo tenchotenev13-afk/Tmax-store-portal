@@ -629,13 +629,21 @@ function checklistHeaderHtml() {
   '</div>';
 }
 
+/* Легендата ДОСЛОВНО от бланката, в ЕДИН източник за таба и за писмото.
+   Дублирана, двете формулировки рано или късно се разминават и контролингът
+   чете едно на екрана и друго в пощата. Не се преформулира — разликата
+   между „не" и „нямат" е целият смисъл на тези три реда. */
+var CHECKLIST_LEGEND_LINES = [
+  ['ДА', 'има изпратена преоценка.'],
+  ['НЕ', 'от магазина не са писали, че няма преоценка.'],
+  ['НЯМАТ', 'не са подавали, но магазинът е писал, че няма преоценка.']
+];
+
 function checklistLegendHtml() {
-  /* Дословно от бланката. Не се преформулира — контролингът чете тези три
-     реда точно така и разликата между „не" и „нямат" е целият им смисъл. */
   return '<div style="margin-top:14px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;color:#334155;line-height:1.7;">' +
-    '<div><b>ДА</b> — има изпратена преоценка.</div>' +
-    '<div><b>НЕ</b> — от магазина не са писали, че няма преоценка.</div>' +
-    '<div><b>НЯМАТ</b> — не са подавали, но магазинът е писал, че няма преоценка.</div>' +
+    CHECKLIST_LEGEND_LINES.map(function (l) {
+      return '<div><b>' + l[0] + '</b> — ' + l[1] + '</div>';
+    }).join('') +
   '</div>';
 }
 
@@ -977,4 +985,164 @@ function checklistRestore(key, snapshot) {
     return;
   }
   if (i >= 0) checklistRows[i] = snapshot; else checklistRows.push(snapshot);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ПИСМОТО
+   ═══════════════════════════════════════════════════════════════════════════
+
+   САМО СТРОИ. Нищо не праща, няма бутон и няма запис в
+   weekly_checklist_sends — това е отделна задача.
+
+   ПОЩЕНСКИТЕ ПРОГРАМИ НЕ РАЗБИРАТ ВЪНШЕН CSS.
+   Всичко е inline style="…", лейаутът е <table>, не flex и не grid.
+   Нито един class= в изхода: клас без таблица със стилове е просто невидим
+   атрибут, а <style> блок Gmail изрязва. Същият подход като reportGridHtml.
+
+   БЕЗ ЛИНКОВЕ КЪМ ПОРТАЛА. Затова тук НЕ се ползва reportEmailShell():
+   тя завършва с бутон „Отвори в портала →", а писмото отива до обектите,
+   които нямат достъп до таб „Чек лист". Линк, който води до отказан достъп,
+   е по-лош от липсващ. Оформлението е нейно, съдържанието не. */
+
+/* „17.08 – 23.08.2026" — по образеца на reportWeekRangeLabel. */
+function checklistEmailWeekRange(year, weekNumber) {
+  var d = weekDays(weekNumber, year);
+  return fmtD(d[0]) + ' – ' + fmtD(d[6]) + '.' + d[6].getFullYear();
+}
+
+/* Текстът на една клетка за писмото: control бие portal, преводът е същият
+   като в таба („da" → „да"), съотношенията остават както са.
+
+   Липсва ли стойност — ПРАЗЕН НИЗ. Не „—", не „undefined", не „null".
+   esc() в shared.js връща „—" за празно, затова навсякъде тук е escVal().
+
+   Писмото НЕ различава визуално ръчното от портальното. В таба бледото
+   значи „предположение на портала, не потвърдена отметка" и е адресирано до
+   контролинга. Тук получателят е обектът: за него значение има само какво
+   пише в клетката, а два нюанса сиво биха повдигнали въпрос, на който
+   писмото не отговаря. */
+function checklistEmailCellValue(metric, row) {
+  if (!row) return '';
+  if (metric.value_type === 'number') {
+    if (row.control_num !== null && row.control_num !== undefined && row.control_num !== '') {
+      return String(row.control_num);
+    }
+    return row.portal_value ? checklistValueLabel(row.portal_value) : '';
+  }
+  if (row.control_value !== null && row.control_value !== undefined && row.control_value !== '') {
+    return checklistValueLabel(row.control_value);
+  }
+  if (row.portal_value !== null && row.portal_value !== undefined && row.portal_value !== '') {
+    return checklistValueLabel(row.portal_value);
+  }
+  return '';
+}
+
+/* Лентата за поправена версия. При version = 1 НЯМА лента: първото
+   изпращане не е поправка и надпис „версия 1" само би объркал.
+   Датата е ДНЕШНАТА — функцията строи писмото сега и няма подадено sent_at.
+   Подаде ли се някога такова, тук е мястото му. */
+function checklistEmailVersionBanner(version, note) {
+  var v = parseInt(version, 10);
+  if (!(v > 1)) return '';
+  var today = fmtDate(toLocalISO(new Date()));
+  var h = '<div style="margin-bottom:14px;padding:11px 14px;background:#FFF7ED;border:1px solid #FED7AA;border-radius:8px;font-size:13px;color:#9A3412;">' +
+    '<b>Поправена версия ' + v + ' от ' + today + '</b>';
+  if (note) {
+    h += '<div style="margin-top:5px;font-size:12px;color:#7C2D12;">' + escVal(note) + '</div>';
+  }
+  return h + '</div>';
+}
+
+/* Списъкът с коментари. Само клетките с текст; нула коментари → секцията
+   отпада изцяло, вместо празна кутия със заглавие. Редът следва таблицата:
+   по обект, вътре по показател. */
+function checklistEmailCommentsHtml(rows, metrics, stores) {
+  var labelOf = {};
+  metrics.forEach(function (m) { labelOf[m.key] = m.label; });
+
+  var items = [];
+  stores.forEach(function (store) {
+    metrics.forEach(function (m) {
+      var row = rows.filter(function (r) {
+        return r.store_name === store && r.metric_key === m.key;
+      })[0];
+      if (row && row.comment) {
+        items.push({ store: store, metric: labelOf[m.key] || m.key, text: row.comment });
+      }
+    });
+  });
+  if (!items.length) return '';
+
+  return '<div style="margin-top:18px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">Коментари</div>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">' +
+    items.map(function (it) {
+      return '<tr><td style="padding:7px 10px;border-bottom:1px solid #E5E9F0;font-size:12px;color:#334155;">' +
+        '<b>' + escVal(it.store) + '</b> · ' + escVal(it.metric) + ': ' + escVal(it.text) +
+        '</td></tr>';
+    }).join('') +
+    '</table></div>';
+}
+
+/* Готовото писмо за една седмица. */
+function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, note) {
+  rows = Array.isArray(rows) ? rows : [];
+  metrics = Array.isArray(metrics) ? metrics : [];
+  stores = Array.isArray(stores) ? stores : [];
+
+  var idx = {};
+  rows.forEach(function (r) { idx[r.store_name + ' ' + r.metric_key] = r; });
+
+  var cellCss = 'padding:6px 8px;border:1px solid #E5E9F0;font-size:12px;';
+  var body = checklistEmailVersionBanner(version, note);
+
+  body += '<table role="presentation" cellpadding="0" cellspacing="0" border="0" ' +
+    'style="width:100%;border-collapse:collapse;">';
+
+  /* Шапка на две нива в ЕДНА клетка — label отгоре, sublabel по-дребно.
+     Не два реда с rowspan: rowspan е сред първите неща, които пощенските
+     програми рендират различно. */
+  body += '<thead><tr>' +
+    '<th align="left" style="' + cellCss + 'background:#F1F5F9;font-weight:700;color:#0f172a;">Обект</th>';
+  metrics.forEach(function (m) {
+    body += '<th align="center" style="' + cellCss + 'background:#F1F5F9;vertical-align:bottom;">' +
+      '<div style="font-weight:700;color:#0f172a;">' + escVal(m.label) + '</div>' +
+      (m.sublabel
+        ? '<div style="font-weight:400;font-size:10px;color:#64748b;margin-top:2px;">' + escVal(m.sublabel) + '</div>'
+        : '') +
+    '</th>';
+  });
+  body += '</tr></thead><tbody>';
+
+  stores.forEach(function (store) {
+    body += '<tr><td align="left" style="' + cellCss + 'font-weight:700;color:#1F2937;">' +
+      escVal(store) + '</td>';
+    metrics.forEach(function (m) {
+      var txt = checklistEmailCellValue(m, idx[store + ' ' + m.key]);
+      body += '<td align="center" style="' + cellCss + 'color:#0f172a;">' + escVal(txt) + '</td>';
+    });
+    body += '</tr>';
+  });
+  body += '</tbody></table>';
+
+  body += checklistEmailCommentsHtml(rows, metrics, stores);
+  body += checklistLegendHtml();
+
+  return '<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
+    '<body style="margin:0;padding:20px;background:#e8ecf3;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;font-family:-apple-system,\'Segoe UI\',Arial,sans-serif;">' +
+    '<div style="max-width:760px;margin:0 auto;background:#fff;border-radius:10px;overflow:hidden;box-shadow:0 2px 18px rgba(30,39,97,.12);">' +
+      '<div style="background:#1E2761;padding:26px 24px;">' +
+        '<p style="color:#CADCFC;font-size:12px;letter-spacing:1px;text-transform:uppercase;margin:0 0 6px;">ТеМАХ Портал</p>' +
+        '<h1 style="color:#fff;font-size:22px;margin:0 0 4px;font-weight:700;">Чек лист — Седмица ' +
+          weekNumber + ' · ' + year + '</h1>' +
+        '<p style="color:#9DB3E8;font-size:13px;margin:0;">' +
+          checklistEmailWeekRange(year, weekNumber) + '</p>' +
+      '</div>' +
+      '<div style="padding:20px;">' + body + '</div>' +
+      '<div style="padding:0 24px 26px;text-align:center;">' +
+        '<div style="font-size:11px;color:#9aa4b2;">Чек лист на контролинга · ТеМАХ</div>' +
+      '</div>' +
+    '</div></body></html>';
 }
