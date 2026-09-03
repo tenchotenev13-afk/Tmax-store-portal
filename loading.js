@@ -6,9 +6,13 @@
    тръгнало към него чак когато камионът дойде.
 
    Схемата (loading_lists + loading_list_items) е в loading-lists-schema.sql.
-   ТУК е само складовата страна. Магазинската (отмятане на получено) е
-   следваща стъпка — затова обектът вижда само „Няма товари за …", а подтабът
-   НЕ се крие: скрит таб не подсказва, че нещо предстои.
+   Файлът носи ДВЕТЕ страни: складът пише листа (llCanEdit), обектът отмята
+   полученото. Кой изглед се рендира решава llCanEdit() в renderLoadingLists().
+
+   ОТМЯТАНЕТО ЗАТВАРЯ И СТОКОВИЯ ДОКУМЕНТ. Когато всички палети по един
+   документ за един обект са получени, редът в „Стока на път" се маркира като
+   приет автоматично. Дотук това беше втора ръчна стъпка в друг таб и по
+   правило не се правеше — документите стояха pending с месеци.
 
    Всички глобални имена са с префикс ll* / LL_*.
 
@@ -35,6 +39,15 @@ var llStores = [];         /* обектите от users (isReportableStore) */
    преходен случай. Смисълът е човекът да ВИДИ, че записът е половинчат, а не
    да го научи, като преброи редовете. */
 var llIncompleteSaves = {};
+
+/* ── Магазинска страна ── */
+var llStoreLists = [];     /* изпратените/приключените листи с редове за мен */
+var llStoreItems = [];     /* МОИТЕ редове от тях (филтърът е в заявката) */
+var llCollapsed = {};      /* {listId:true} — свити карти */
+/* Редове, чийто палет Е получен, но стоковият документ НЕ се затвори.
+   Живее само в тази сесия: колона за това няма. Смисълът е човекът да ВИДИ
+   провала веднага, вместо да го открие след седмица в „Стока на път". */
+var llDocFailures = {};
 
 var LL_KINDS = [
   ['pallet', '📦 Палет'],
@@ -170,13 +183,7 @@ function loadLoadingLists(){
   if(!wrap.innerHTML.trim()){
     wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">⏳ Зареждане...</div>';
   }
-  /* Магазинската страна е следваща стъпка — дотогава обектът вижда явно, че
-     тук още няма нищо за него, вместо празен екран без обяснение. */
-  if(!llCanEdit()){
-    llView = 'list';
-    renderLoadingLists();
-    return;
-  }
+  if(!llCanEdit()){ llLoadStoreSide(); return; }
   var wh = llActiveWarehouse();
   if(!wh){ llView = 'list'; renderLoadingLists(); return; }
   sbGet('loading_lists','warehouse=eq.'+encodeURIComponent(wh)+'&order=list_date.desc,created_at.desc')
@@ -196,27 +203,245 @@ function loadLoadingLists(){
 function llItemsOf(listId){
   return llItems.filter(function(i){ return String(i.list_id) === String(listId); });
 }
+function llStoreItemsOf(listId){
+  return llStoreItems.filter(function(i){ return String(i.list_id) === String(listId); });
+}
+function llByPosition(a, b){ return (a.position || 0) - (b.position || 0); }
+
+/* ─── ЗАРЕЖДАНЕ: МАГАЗИНСКА СТРАНА ──────────────────────────
+   Тръгва се от РЕДОВЕТЕ, не от листите: обектът се интересува от своите
+   палети, а един лист обслужва няколко обекта. storeQ() дава филтъра —
+   един обект, няколко назначени или никакъв за глобален профил. */
+function llLoadStoreSide(){
+  sbGet('loading_list_items','order=position.asc'+storeQ()).then(function(items){
+    var mine = Array.isArray(items) ? items : [];
+    var ids = {}, keys = [];
+    mine.forEach(function(i){ if(i.list_id && !ids[i.list_id]){ ids[i.list_id] = 1; keys.push(i.list_id); } });
+    if(!keys.length){ llStoreItems = []; llStoreLists = []; renderLoadingLists(); return; }
+    /* status=in.(sent,done) е ГЕЙТЪТ: черновата е работен документ на склада
+       и обектът няма работа да я вижда — тя още се пренарежда. */
+    return sbGet('loading_lists','id=in.('+keys.join(',')+')&status=in.(sent,done)&order=list_date.desc,created_at.desc')
+      .then(function(rows){
+        llStoreLists = Array.isArray(rows) ? rows : [];
+        var ok = {};
+        llStoreLists.forEach(function(l){ ok[l.id] = 1; });
+        /* Втори филтър от СЪЩИЯ гейт: редовете дойдоха преди листите, тоест
+           сред тях има и такива от чернови. */
+        llStoreItems = mine.filter(function(i){ return ok[i.list_id]; });
+        /* Напълно полученият лист е история — свит по подразбиране. Пипне ли
+           го веднъж човек, изборът му се пази (llCollapsed вече има ключ). */
+        llStoreLists.forEach(function(l){
+          if(llCollapsed[l.id] !== undefined) return;
+          var it = llStoreItemsOf(l.id);
+          if(it.length && it.every(function(x){ return x.received; })) llCollapsed[l.id] = true;
+        });
+        renderLoadingLists();
+      });
+  });
+}
 
 /* ─── РЕНДЕР: ДИСПЕЧЕР ──────────────────────────────────────── */
 function renderLoadingLists(){
   var wrap = document.getElementById('mod-loading');
   if(!wrap) return;
   var h;
-  if(!llCanEdit())          h = llNoAccessHtml();
+  if(!llCanEdit())          h = llStoreHtml();
   else if(llView === 'edit') h = llEditorHtml();
   else if(llView === 'view') h = llViewHtml();
   else                       h = llListHtml();
   wrap.innerHTML = h;
 }
-function llNoAccessHtml(){
-  var store = (currentUser && currentUser.store_name) || 'вашия обект';
-  return '<div class="pg-title">🚛 Товарни листи</div>'+
-    '<div class="pg-sub">Какво е натоварено от логистичния склад към обекта.</div>'+
-    '<div style="text-align:center;padding:50px 20px;color:#94a3b8;background:#fff;border:1px solid #e2e8f0;border-radius:10px;">'+
+/* ─── ИЗГЛЕД ЗА ОБЕКТА ──────────────────────────────────────── */
+function llStoreHtml(){
+  var h = '<div class="pg-title">🚛 Товарни листи</div>'+
+    '<div class="pg-sub">Какво е натоварено от логистичния склад към обекта.</div>';
+  if(!llStoreLists.length){
+    var store = (currentUser && currentUser.store_name) || 'вашия обект';
+    return h + '<div style="text-align:center;padding:50px 20px;color:#94a3b8;background:#fff;border:1px solid #e2e8f0;border-radius:10px;">'+
       '<div style="font-size:40px;">🚛</div>'+
       '<div style="margin-top:8px;font-size:14px;">Няма товари за '+esc(store)+'.</div>'+
-      '<div style="margin-top:6px;font-size:12px;">Отмятането на получените палети предстои в следваща стъпка.</div>'+
     '</div>';
+  }
+  llStoreLists.forEach(function(l){ h += llStoreCardHtml(l); });
+  return h;
+}
+function llToggleCard(id){
+  llCollapsed[id] = !llCollapsed[id];
+  renderLoadingLists();
+}
+/* Отмята обектът получател. Глобалните профили също - те покриват обекти без
+   собствен акаунт, а иначе такъв палет не може да бъде отметнат от никого. */
+function llCanReceive(it){
+  if(!currentUser || !it) return false;
+  return currentUser.store_name === it.store_name || isGlobal();
+}
+function llStoreCardHtml(l){
+  var items = llStoreItemsOf(l.id).slice().sort(llByPosition);
+  if(!items.length) return '';
+  var got = items.filter(function(i){ return i.received; }).length;
+  var open = !llCollapsed[l.id];
+  var canAny = items.some(function(i){ return !i.received && llCanReceive(i); });
+
+  var h = '<div id="ll-card-'+l.id+'" style="background:#fff;border:1px solid '+(got===items.length?'#bbf7d0':'#e2e8f0')+';border-left:4px solid '+(got===items.length?'#16a34a':'#2563eb')+';border-radius:10px;padding:12px;margin-bottom:10px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'+
+      '<div style="font-size:13.5px;font-weight:700;">🚛 '+esc(l.warehouse||'')+' · '+fmtDate(l.list_date)+
+        ' <span style="background:'+(got===items.length?'#f0fdf4':'#eff6ff')+';color:'+(got===items.length?'#16a34a':'#1e40af')+';padding:2px 8px;border-radius:20px;font-size:10.5px;">получени '+got+'/'+items.length+'</span> '+
+        llStatusBadge(l.status)+'</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
+        (open && canAny ? '<button data-id="'+l.id+'" onclick="llMarkAllReceived(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">✅ Всичко получено</button>' : '')+
+        '<button data-id="'+l.id+'" onclick="llToggleCard(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 13px;font-size:12px;cursor:pointer;">'+(open?'▲ Свий':'▼ Разгъни')+'</button>'+
+      '</div>'+
+    '</div>';
+  if(l.comment) h += '<div style="font-size:11.5px;color:#374151;background:#f8fafc;border-radius:6px;padding:5px 8px;margin-top:8px;">💬 '+esc(l.comment)+'</div>';
+  if(!open) return h + '</div>';
+
+  h += '<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:760px;"><thead><tr style="background:#f8fafc;">';
+  ['Товарна единица','Стокова №','Изчиства','Коментар склад','Моят коментар','Получено'].forEach(function(c){
+    h += '<th style="text-align:left;padding:6px 9px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
+  });
+  h += '</tr></thead><tbody>';
+  items.forEach(function(it){
+    var failed = !!llDocFailures[it.id];
+    h += '<tr'+(failed?' data-doc-failed="1"':'')+' style="border-bottom:1px solid #f1f5f9;'+(it.received?'background:#f0fdf4;':'')+'">'+
+      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;">'+esc(llKindLabel(it))+'</td>'+
+      '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+'</td>'+
+      '<td style="padding:6px 9px;">'+(it.clears_doc?'изчиства '+esc(it.clears_doc):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
+      '<td style="padding:6px 9px;color:#64748b;">'+esc(it.warehouse_comment||'—')+'</td>'+
+      /* Коментарът на обекта остава редактируем и СЛЕД отмятането: разминаването
+         често се вижда чак при подреждане на стоката, не при разтоварването. */
+      '<td style="padding:6px 9px;">'+(llCanReceive(it)
+        ? '<input value="'+escVal(it.store_comment)+'" data-id="'+it.id+'" onchange="llSaveStoreComment(this.dataset.id,this.value)" placeholder="напр. кашонът е мокър" style="width:100%;min-width:130px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;">'
+        : esc(it.store_comment||'—'))+'</td>'+
+      '<td style="padding:6px 9px;white-space:nowrap;">'+(it.received
+        ? '<span style="color:#16a34a;font-weight:600;">✅ '+esc(it.received_by||'')+(it.received_at?' · '+llFmtStamp(it.received_at):'')+'</span>'
+        : (llCanReceive(it)
+          ? '<button data-id="'+it.id+'" onclick="llMarkReceived(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Получено</button>'
+          : '<span style="color:#cbd5e1;">—</span>'))+
+      (failed?'<div style="margin-top:3px;font-size:10px;color:#b45309;font-weight:600;">⚠️ документът не е затворен</div>':'')+
+      '</td></tr>';
+  });
+  h += '</tbody></table></div></div>';
+  return h;
+}
+
+/* ─── ОТМЯТАНЕ ──────────────────────────────────────────────── */
+function llSaveStoreComment(itemId, val){
+  sbPatch('loading_list_items','id=eq.'+itemId,{store_comment: val || null}).then(function(res){
+    if(!res.ok){ toast('Коментарът НЕ беше записан: '+sbErrMsg(res),'#dc2626'); return; }
+    var it = llStoreItems.find(function(x){ return String(x.id) === String(itemId); });
+    if(it) it.store_comment = val;
+    toast('✅ Записано');
+  });
+}
+function llMarkReceived(itemId){
+  var it = llStoreItems.find(function(x){ return String(x.id) === String(itemId); });
+  if(!it || it.received) return;
+  if(!llCanReceive(it)){ toast('Само обектът получател може да отмята','#dc2626'); return; }
+  var at = new Date().toISOString(), by = llActor();
+  sbPatch('loading_list_items','id=eq.'+itemId,{received:true, received_by:by, received_at:at}).then(function(res){
+    if(!res.ok){ toast('Грешка при отмятане: '+sbErrMsg(res),'#dc2626'); return; }
+    it.received = true; it.received_by = by; it.received_at = at;
+    toast('✅ Отмятено');
+    llAfterReceive([it]);
+  });
+}
+function llMarkAllReceived(listId){
+  /* САМО редовете на този обект. Един лист обслужва няколко обекта и бутонът
+     стои във всяка от картите им - без филтъра единият би отмятал за другия. */
+  var mine = llStoreItemsOf(listId).filter(function(i){ return !i.received && llCanReceive(i); });
+  if(!mine.length){ toast('Няма неполучени редове','#64748b'); return; }
+  if(!confirm('Маркирай всички '+mine.length+' реда като получени?')) return;
+  var at = new Date().toISOString(), by = llActor();
+  Promise.all(mine.map(function(it){
+    return sbPatch('loading_list_items','id=eq.'+it.id,{received:true, received_by:by, received_at:at})
+      .then(function(res){ return { it:it, res:res }; });
+  })).then(function(all){
+    var bad = all.filter(function(r){ return !r.res.ok; });
+    var good = all.filter(function(r){ return r.res.ok; });
+    good.forEach(function(r){ r.it.received = true; r.it.received_by = by; r.it.received_at = at; });
+    if(bad.length){
+      console.error('llMarkAllReceived: '+bad.length+' реда не бяха отметнати', bad[0].res.error);
+      toast('⚠️ '+bad.length+' реда НЕ бяха отметнати: '+sbErrMsg(bad[0].res),'#dc2626');
+    } else {
+      toast('✅ Всичко е отметнато');
+    }
+    llAfterReceive(good.map(function(r){ return r.it; }));
+  });
+}
+
+/* ─── СЛЕД ОТМЯТАНЕ: ДОКУМЕНТЪТ И ЛИСТЪТ ────────────────────
+   Документът, който редът изчиства, е clears_doc, ако е зададен - иначе
+   собствената му стокова. Точно затова полето съществува: палет по покупка А
+   понякога изчиства покупка Б. */
+function llItemDocKey(it){
+  return (it && (it.clears_doc || it.purchase_doc)) || null;
+}
+function llAfterReceive(items){
+  if(!items || !items.length){ renderLoadingLists(); return; }
+  var listId = items[0].list_id;
+  var seen = {}, docs = [];
+  items.forEach(function(it){
+    var doc = llItemDocKey(it);
+    if(!doc) return;                      /* ред без документ - няма какво да се затваря */
+    var k = JSON.stringify([doc, it.store_name || '']);
+    if(seen[k]) return;
+    seen[k] = 1;
+    docs.push({ doc:doc, store:it.store_name || '', listId:it.list_id });
+  });
+  Promise.all(docs.map(llAutoCloseDoc))
+    .then(function(){ return llAutoDoneList(listId); })
+    .then(function(){ renderLoadingLists(); });
+}
+function llAutoCloseDoc(d){
+  /* Документът се затваря чак когато ВСИЧКИ негови редове по този лист и за
+     този обект са получени. Един палет от пет не значи, че доставката е приета. */
+  var siblings = llStoreItemsOf(d.listId).filter(function(i){
+    return (i.store_name || '') === d.store && llItemDocKey(i) === d.doc;
+  });
+  if(!siblings.length || !siblings.every(function(i){ return i.received; })) return Promise.resolve();
+  var f = 'purchase_doc=eq.'+encodeURIComponent(d.doc)+
+          '&store_name=eq.'+encodeURIComponent(d.store)+'&status=eq.pending';
+  /* Първо ПИТАМЕ има ли какво да се затваря. sbPatch праща
+     Prefer: return=minimal без count=exact, тоест res.count е null и "нула
+     засегнати реда" е неразличимо от успех - а документ, който вече не е
+     pending, не бива да ражда съобщение. */
+  return sbGet('goods_transit', f+'&select=id&limit=1').then(function(rows){
+    if(!Array.isArray(rows) || !rows.length) return;   /* вече не е pending - тихо */
+    /* Същата конвенция като tSetStatus() в transit.js: status + updated_by +
+       updated_at. transit.js НЕ се пипа - само се следва. */
+    return sbPatch('goods_transit', f, {
+      status: 'received',
+      updated_by: llActor(),
+      updated_at: new Date().toISOString()
+    }).then(function(res){
+      if(!res.ok){
+        /* Палетът Е получен - това е факт и не се отменя заради провалил се
+           втори запис. Но документът стои отворен и човекът трябва да го ВИДИ. */
+        siblings.forEach(function(i){ llDocFailures[i.id] = true; });
+        console.error('llAutoCloseDoc: документът НЕ беше затворен', d.doc, res.error);
+        toast('⚠️ Документ '+d.doc+' НЕ беше затворен: '+sbErrMsg(res),'#dc2626');
+        return;
+      }
+      siblings.forEach(function(i){ delete llDocFailures[i.id]; });
+      toast('📦 Стоков документ '+d.doc+' е приет в Стока на път');
+    });
+  });
+}
+function llAutoDoneList(listId){
+  var l = llStoreLists.find(function(x){ return String(x.id) === String(listId); });
+  if(!l || l.status === 'done') return Promise.resolve();
+  /* Обектът вижда САМО своите редове, затова "всичко получено" се проверява
+     със заявка, не от llStoreItems: другите обекти на същия лист са невидими
+     тук и листът би се приключвал още на първия готов обект. */
+  return sbGet('loading_list_items','list_id=eq.'+listId+'&select=id,received').then(function(rows){
+    if(!Array.isArray(rows) || !rows.length) return;
+    if(!rows.every(function(r){ return r.received; })) return;
+    return sbPatch('loading_lists','id=eq.'+listId,{status:'done', done_at:new Date().toISOString()}).then(function(res){
+      if(!res.ok){ toast('⚠️ Листът НЕ беше приключен: '+sbErrMsg(res),'#dc2626'); return; }
+      l.status = 'done';
+      toast('✅ Товарният лист е приключен');
+    });
+  });
 }
 
 /* ─── ИЗБОР НА СКЛАД (само за admin/logistics) ──────────────── */
@@ -374,7 +599,16 @@ function llSetDocPallets(idx, val){
   var d = llPendingDocs[idx];
   if(!d || !llDraft) return;
   var n = parseInt(val, 10);
-  d.pallets = (isNaN(n) || n < 1) ? 1 : n;
+  n = (isNaN(n) || n < 1) ? 1 : n;
+  /* 25 вместо 2 е един сгрешен клавиш и ражда 25 реда, без нищо да попита.
+     Прагът ПИТА, а не ограничава: наистина големи пратки съществуват. При
+     отказ полето се връща на предишната стойност - тя идва от d.pallets,
+     затова е достатъчно да не я пипаме и да пре-рендираме. */
+  if(n > 20 && !confirm('Наистина ' + n + ' палета за един документ?')){
+    renderLoadingLists();
+    return;
+  }
+  d.pallets = n;
   if(d.checked){ llDropDocRows(d); llMaterializeDoc(d); }
   renderLoadingLists();
 }
