@@ -2147,7 +2147,19 @@ function updateDiffCounterpartLabel(){
   });
 }
 
-function openDiffSubmitModal(){
+/* prefill (по избор) — предварително попълнена бланка, подадена отвън:
+     {direction, counterpart, document_number, doc_date, comment,
+      items:[{sap,name,qty}]}
+   Днес единственият ѝ ползвател е бутонът „⚠️ Разлика" по неполучен палет в
+   Товарни листи (llOpenDiffForItem в loading.js): магазинът вече е описал
+   веднъж какво е получил и няма смисъл да преписва склада, документа и
+   артикулите на ръка.
+   БЕЗ аргумент функцията се държи точно както преди — това е заковано със
+   снимка на HTML-а на модала в tests/loading-diff-prefill.test.js.
+   Категорията на редовете НАРОЧНО остава празна: тя е преценка на магазина
+   (липса, излишък, увредена стока), а не нещо, което подателят може да знае.
+   Полето „Магазин" също не се пипа — то идва от самия потребител. */
+function openDiffSubmitModal(prefill){
   diffPendingPhotos=[];
   var old=document.getElementById('diff-submit-ov'); if(old)old.remove();
   document.body.insertAdjacentHTML('beforeend',diffSubmitModalHtml());
@@ -2155,6 +2167,27 @@ function openDiffSubmitModal(){
   var ov=document.getElementById('diff-submit-ov');
   ov.classList.add('open');
   updateDiffCounterpartLabel(); /* зарежда магазини (посоката по подразбиране е "Междускладов")*/
+
+  if(prefill){
+    var setVal=function(id,val){
+      var el=document.getElementById(id);
+      if(el && val!==undefined && val!==null && val!=='') el.value=val;
+    };
+    var dirEl=document.getElementById('diff-direction');
+    if(dirEl && prefill.direction && dirEl.value!==prefill.direction){
+      dirEl.value=prefill.direction;
+      /* Списъкът с насрещни страни зависи от посоката — при смяна се строи
+         наново, иначе counterpart-ът по-долу не намира опцията си. */
+      updateDiffCounterpartLabel();
+    }
+    setVal('diff-counterpart',prefill.counterpart);
+    setVal('diff-docnum',prefill.document_number);
+    setVal('diff-docdate',prefill.doc_date);
+    setVal('diff-comment',prefill.comment);
+    /* Редовете се рендират ПОСЛЕДНИ: updateDiffCounterpartLabel() по-горе сам
+       ги пре-рендира според посоката и би изтрил подадените. */
+    if(Array.isArray(prefill.items) && prefill.items.length) renderDiffItemRows(prefill.items);
+  }
 
   var myStores=assignedStores();
   if(!(myStores&&myStores.length)){

@@ -412,7 +412,10 @@ function llStoreCardHtml(l){
           (g.rows.some(function(r){ return r.partial; })?' '+llPartialBadge():'')+'</td>'+
         '<td style="padding:6px 9px;white-space:nowrap;">'+(gCan
           ? '<button data-id="'+l.id+'" data-p="'+g.pallet_no+'" onclick="llMarkPalletReceived(this.dataset.id,this.dataset.p)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Целият палет</button>'
-          : '')+'</td></tr>';
+          : '')+
+          /* Разлика по ЦЕЛИЯ палет само докато е недокоснат: започне ли да се
+             отмята по редове, въпросът вече е за конкретния ред. */
+          (gGot===0 && gCan ? llDiffBtn(g.rows[0].id) : '')+'</td></tr>';
     }
     g.rows.forEach(function(it){
     var failed = !!llDocFailures[it.id];
@@ -430,7 +433,7 @@ function llStoreCardHtml(l){
       '<td style="padding:6px 9px;white-space:nowrap;">'+(it.received
         ? '<span style="color:#16a34a;font-weight:600;">✅ '+esc(it.received_by||'')+(it.received_at?' · '+llFmtStamp(it.received_at):'')+'</span>'
         : (llCanReceive(it)
-          ? '<button data-id="'+it.id+'" onclick="llMarkReceived(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Получено</button>'
+          ? '<button data-id="'+it.id+'" onclick="llMarkReceived(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Получено</button>'+llDiffBtn(it.id)
           : '<span style="color:#cbd5e1;">—</span>'))+
       (failed?'<div style="margin-top:3px;font-size:10px;color:#b45309;font-weight:600;">⚠️ документът не е затворен</div>':'')+
       '</td></tr>';
@@ -438,6 +441,56 @@ function llStoreCardHtml(l){
   });
   h += '</tbody></table></div></div>';
   return h;
+}
+
+/* „⚠️ Разлика" по НЕПОЛУЧЕН палет — отваря бланката за разлики, попълнена от
+   товарния лист и от стоковия документ. Магазинът вече е описал веднъж какво
+   чака; преписването на склада, документа и артикулите на ръка е точно мястото,
+   където се греши.
+   Бутонът НЕ отмята реда и НЕ пише НИЩО в базата: „получих палета" и „имам
+   разлика по него" са две различни твърдения и не бива да се случват с един
+   клик. Магазинът подава бланката, после отмята — или обратно. */
+/* Едно определение на бутона: стои и на реда, и в заглавния ред на палета. */
+function llDiffBtn(itemId){
+  return ' <button data-id="'+itemId+'" onclick="llOpenDiffForItem(this.dataset.id)" title="Подай бланка за разлики — попълва се от товарния лист и стоковия документ" style="border:1px solid #fed7aa;background:#fff7ed;color:#c2410c;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">⚠️ Разлика</button>';
+}
+function llOpenDiffForItem(itemId){
+  var it = llStoreItems.find(function(x){ return String(x.id) === String(itemId); });
+  if(!it) return;
+  /* Разликите живеят в друг файл, който може изобщо да не е зареден. */
+  if(typeof openDiffSubmitModal !== 'function'){
+    toast('Модулът „Разлики" не е зареден — отвори таба и опитай пак','#dc2626');
+    return;
+  }
+  var l = llStoreLists.find(function(x){ return String(x.id) === String(it.list_id); });
+  var doc = llItemDocKey(it);
+  var where = (it.kind === 'pallet' && it.pallet_no != null)
+    ? 'палет ' + it.pallet_no + (it.pallet_total != null ? ' от ' + it.pallet_total : '')
+    : llKindLabel(it);
+  var comment = 'Товарен лист ' + ((l && l.warehouse) || '') + ' от ' + fmtDate(l && l.list_date) +
+    ', ' + where + ' (позиция ' + (it.position != null ? it.position : '—') + ')' +
+    ', стокова № ' + (doc || 'без документ') + '.';
+  if(it.warehouse_comment) comment += ' Коментар склад: ' + it.warehouse_comment;
+
+  var open = function(items){
+    openDiffSubmitModal({
+      direction: 'interstore',
+      counterpart: (l && l.warehouse) || '',
+      document_number: doc || '',
+      doc_date: (l && l.list_date) || '',
+      comment: comment,
+      items: items
+    });
+  };
+  /* Ред без документ няма откъде да вземе артикули — бланката тръгва празна. */
+  if(!doc){ open([]); return; }
+  sbGet('goods_transit','purchase_doc=eq.' + encodeURIComponent(doc) +
+    '&store_name=eq.' + encodeURIComponent(it.store_name || '') +
+    '&select=material_code,material_name,ordered_qty,unit&order=position').then(function(rows){
+    open((Array.isArray(rows) ? rows : []).map(function(r){
+      return { sap: r.material_code, name: r.material_name, qty: r.ordered_qty, unit: r.unit };
+    }));
+  }).catch(function(){ open([]); });
 }
 
 /* ─── ОТМЯТАНЕ ──────────────────────────────────────────────── */
