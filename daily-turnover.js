@@ -4,8 +4,25 @@
    НЕ е счетоводен запис. Истинската каса остава в kasa_reports /
    kasa_glavna / kasa_zoborot и се попълва на следващия ден. Тук се
    въвежда веднъж вечерта това, което магазините днес пращат по имейл.
-   Записът не се коригира, не се връща за преработка и няма статус —
-   при грешка истината идва от ПОС отчета на следващия ден.
+
+   ЗА МАГАЗИНА записът не се коригира, не се връща за преработка и няма
+   статус — само днешният ден, без бутон за редакция. Това правило не се
+   променя.
+
+   ЦЕНТРАЛНИЯТ ОФИС от 03.09.2026 може да въвежда за минал ден и да коригира
+   вече подаден запис за която и да е дата. Поводът са два реални случая от
+   25.08.2026: Дупница пропуснаха вечерния оборот за 24.08 и на следващата
+   сутрин го въведоха — формата приема само днешния ден, затова вчерашните
+   числа влязоха с ДНЕШНА дата и изглеждаха валидни. Поправката изискваше
+   ръчен SQL, което не е процедура.
+
+   ⚠️ КЛЮЧОВОТО РАЗДЕЛЯНЕ: записът от МАГАЗИН отмята задачата „Вечерен оборот"
+   в Бюлетина (изпълнението идва от данните, не от твърдение). Записът или
+   корекцията от ЦО НЕ създава и НЕ пипа отметка. Ако магазинът е пропуснал
+   задачата, ЦО покрива числото, но работата не е свършена от магазина —
+   отметка оттук би показала изпълнение, което не се е случило.
+   Критерият е КОЙ въвежда, не ЗА КОГА: ЦО не отмята и когато въвежда за
+   днешния ден. Заковано в dtAfterSave() и в tests/oborot-co-entry.test.js.
 
    Логиката е в отделен файл, а не в kasa.js, защото kasa.js е голям и
    се пипа от други сесии. В kasa.js влизат само три реда: името на
@@ -23,6 +40,8 @@ var oborotRecent=[];       /* моите записи за последните 
 var oborotCORows=[];       /* редовете за избраната дата — изглед ЦО */
 var oborotCOStores=[];     /* имената на всички обекти — изглед ЦО */
 var oborotCODate=null;     /* избраната дата в изгледа ЦО */
+var oborotCOStore='';      /* обектът, избран във формата за въвеждане от ЦО */
+var oborotEditRow=null;    /* редът, отворен в модала за корекция */
 var oborotSubmitting=false;/* пази от двоен клик, докато POST-ът е във въздуха */
 var oborotTaskWarn=false;  /* оборотът е записан, но отмятането в Бюлетина не мина */
 
@@ -92,6 +111,116 @@ function dtMismatchMark(r){
     ' style="color:#d97706;font-weight:700;cursor:help;">&#9888;</span>';
 }
 
+/* ─── СЛЕДА ОТ ЦО В ЗАБЕЛЕЖКАТА ─────────────────────────────── */
+/* Схемата не се пипа в тази задача, а колона „кой тип потребител е писал"
+   няма. Затова следата живее в note — полето, което ВЕЧЕ се показва в
+   имейла (send-oborot-report/index.ts:247). Това е нарочно: корекция без
+   следа е тихо презаписване, а следа, която не стига до отчета за онзи ден,
+   не е следа.
+
+   Оттук идва и баджът „ЦО" в справката (Част 4) — БЕЗ втора заявка: редът
+   вече носи note, а справката вече го е изтеглила. Алтернативата беше да се
+   чете ролята на created_by от users, тоест втори GET на всяко зареждане, при
+   положение че loadReportableStores() дърпа само store_name.
+
+   Редовете са РАЗДЕЛЕНИ с \n и се разпознават по началото си. Затова
+   регексът е закотвен в началото на реда — забележка на магазин, в която
+   случайно се среща думата „Коригирано", не се брои за следа. */
+var DT_CO_MARK='Въведено от ЦО на ';
+var DT_FIX_MARK='Коригирано ';
+var DT_TRAIL_RE=/^(?:Въведено от ЦО на|Коригирано) \d{2}\.\d{2}\.\d{4} /;
+/* Няколко корекции подред не бива да раздуват note безкрайно — пазят се
+   последните три реда следа, по-старите отпадат. */
+var DT_TRAIL_MAX=3;
+
+function dtTrailLines(note){
+  var out=[],lines=String(note||'').split('\n');
+  for(var i=0;i<lines.length;i++) if(DT_TRAIL_RE.test(lines[i])) out.push(lines[i]);
+  return out;
+}
+/* Собствената забележка на обекта, без редовете на следата. Точно тя се
+   зарежда в полето „Забележка" на модала за корекция — иначе ЦО би трябвало
+   да преписва наум чуждата следа. */
+function dtNoteBase(note){
+  var out=[],lines=String(note||'').split('\n');
+  for(var i=0;i<lines.length;i++){
+    if(!DT_TRAIL_RE.test(lines[i])&&lines[i]!=='') out.push(lines[i]);
+  }
+  return out.join('\n');
+}
+function dtBuildNote(oldNote,newBase,line){
+  var trail=dtTrailLines(oldNote);
+  if(line) trail.push(line);
+  while(trail.length>DT_TRAIL_MAX) trail.shift();
+  var all=[];
+  if(newBase) all.push(newBase);
+  all=all.concat(trail);
+  return all.length?all.join('\n'):null;
+}
+/* Записът е пипан от Централен офис, ако носи поне един ред следа. */
+function dtByCO(r){ return !!r&&dtTrailLines(r.note).length>0; }
+function dtCOBadge(r){
+  if(!dtByCO(r)) return '';
+  return ' <span class="dt-co-badge" title="Въведено или коригирано от Централен офис"'+
+    ' style="display:inline-block;background:#eef2ff;color:#4338ca;border:1px solid #c7d2fe;'+
+    'border-radius:6px;padding:0 5px;font-size:10px;font-weight:600;line-height:16px;'+
+    'vertical-align:middle;">ЦО</span>';
+}
+/* Какво точно е променено — влиза след двоеточието в реда на следата.
+   Само реално различните полета, за да не пише „общ 1000.00 → 1000.00". */
+function dtChangeSummary(oldRow,neu){
+  var parts=[];
+  function cents(x){ return Math.round((parseFloat(x)||0)*100); }
+  function money(lbl,a,b){ if(cents(a)!==cents(b)) parts.push(lbl+' '+dtMoney(a)+' → '+dtMoney(b)); }
+  money('общ',oldRow.total_turnover,neu.total_turnover);
+  money('в брой',oldRow.cash_turnover,neu.cash_turnover);
+  money('с карта',oldRow.card_turnover,neu.card_turnover);
+  money('по банка',dtBankOf(oldRow),neu.bank_turnover);
+  var oc=parseInt(oldRow.customers,10)||0;
+  if(oc!==neu.customers) parts.push('клиенти '+oc+' → '+neu.customers);
+  if(neu.date&&neu.date!==oldRow.date) parts.push('дата '+fmtDate(oldRow.date)+' → '+fmtDate(neu.date));
+  if(dtNoteBase(oldRow.note)!==String(neu.note||'')) parts.push('забележка');
+  return parts.length?parts.join(', '):'без промяна по числата';
+}
+function dtWho(){
+  return (currentUser&&(currentUser.display_name||currentUser.email))||'Централен офис';
+}
+
+/* ─── ОБЩА ПРОВЕРКА НА ЧИСЛАТА ──────────────────────────────── */
+/* ЕДНА проверка за трите пътя — магазин, въвеждане от ЦО, корекция от ЦО.
+   Втора проверка не се пише: разминат ли се двете, никой не забелязва, а
+   двата пътя просто започват да казват различни неща.
+   Не пипа DOM и не показва toast — само решава. Съобщенията се показват от
+   извикващия, за да остане еднакъв текстът навсякъде.
+
+   Прагът е този от 26.08.2026: блокира се разминаване над
+   greatest(1, total*0.1). Виж дългия коментар в submitOborot(). */
+function dtValidate(total,cash,card,bank,cust){
+  if(isNaN(total)||isNaN(cash)||isNaN(card)||isNaN(bank)||total<0||cash<0||card<0||bank<0){
+    return {ok:false,error:'Сумите трябва да са числа, не по-малки от нула'};
+  }
+  if(isNaN(cust)||cust<0||Math.floor(cust)!==cust){
+    return {ok:false,error:'Броят клиенти трябва да е цяло число, не по-малко от нула'};
+  }
+  /* Закръглянето до стотинки е ПРЕДИ сравнението: в плаваща запетая
+     100.05-50-50 дава 0.049999999999997 и границата иначе се решава от
+     двоичния шум, а не от правилото. */
+  var diff=Math.round((total-cash-card-bank)*100)/100;
+  var hardLimit=Math.round(Math.max(1,total*0.1)*100)/100;
+  if(Math.abs(diff)>hardLimit){
+    return {ok:false,diff:diff,
+      error:'Разминаването е '+dtMoney(Math.abs(diff))+', допустимо е до '+
+            dtMoney(hardLimit)+' (10% от оборота) — провери числата'};
+  }
+  /* Между 1 EUR и прага: минава, но НЕ мълчаливо. Под 1 EUR е закръгляне
+     на фискалното устройство и не заслужава съобщение. */
+  return {ok:true,diff:diff,soft:Math.abs(diff)>1};
+}
+function dtSoftToast(diff){
+  toast('Сумите не се връзват с '+dtMoney(Math.abs(diff))+
+        '. Записът ще бъде подаден и разминаването ще се отрази в отчета.','#d97706');
+}
+
 /* Среден оборот за обекта от последните 30 дни, БЕЗ днешния запис.
    Служи само за предупреждението „необичайно високо" при запис. */
 function dtAvg30(){
@@ -133,6 +262,13 @@ function oborotAllowed(){
   return isCentralOfficeUser()
     ? OBOROT_CO_ROLES.indexOf(currentUser.role)>=0
     : oborotCanSubmit();
+}
+/* Въвеждането за минал ден и корекцията са НОВИ права на ЦО, не разширение
+   на магазинското. Списъкът е същият като за четене на справката — задачата
+   дава двете права на Централния офис, а не на нова роля, и всяко тихо
+   разширяване тук би било решение, което никой не е вземал. */
+function oborotCOCanWrite(){
+  return !!currentUser&&isCentralOfficeUser()&&OBOROT_CO_ROLES.indexOf(currentUser.role)>=0;
 }
 /* Празен екран изглежда като счупен. Казва се кой подава оборота и какво да
    направи този, който смята, че трябва да има достъп. */
@@ -191,6 +327,12 @@ function loadOborot(){
 function oborotSetDate(d){
   oborotCODate=d||dtToday();
   loadOborot();
+}
+/* Смяната на обекта НЕ праща заявка: редовете за деня вече са изтеглени и
+   формата се решава от тях. */
+function oborotSetCOStore(name){
+  oborotCOStore=name||'';
+  renderOborot();
 }
 
 /* ─── РЕНДЕР ────────────────────────────────────────────────── */
@@ -374,7 +516,10 @@ function dtCOView(){
     var bank=dtBankOf(r);
     tTotal+=tot; tCash+=cash; tCard+=card; tBank+=bank; tCust+=cust;
     rows+='<tr style="border-bottom:1px solid #f1f5f9;">'+
-      '<td style="padding:7px 4px;">'+esc(name)+dtMismatchMark(r)+'</td>'+
+      /* Баджът и моливът влизат В СЪЩАТА клетка, а не в нов стълб: броят
+         колони се решава веднъж за целия ден (заради „Банка") и нов стълб би
+         разминал редовете. Името остава В НАЧАЛОТО на клетката. */
+      '<td style="padding:7px 4px;">'+esc(name)+dtCOBadge(r)+dtMismatchMark(r)+dtEditBtn(r)+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;font-weight:600;">'+dtMoney(tot)+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtMoney(cash)+'</td>'+
       '<td style="text-align:right;padding:7px 4px;font-family:DM Mono,monospace;">'+dtMoney(card)+'</td>'+
@@ -432,6 +577,104 @@ function dtCOView(){
       '</tr>'+rows+totalRow+
     '</table></div>'+
     missBlock+
+  '</div>'+
+  dtCOEntryBlock(byStore);
+}
+
+/* Молив за корекция — само за ЦО и само когато редът има id. */
+function dtEditBtn(r){
+  if(!oborotCOCanWrite()||!r||!r.id) return '';
+  return ' <button class="dt-edit" onclick="openOborotEdit(\''+escAttr(String(r.id))+'\')"'+
+    ' title="Коригирай записа"'+
+    ' style="background:none;border:none;cursor:pointer;padding:0 2px;font-size:13px;'+
+    'line-height:1;vertical-align:middle;">&#9999;&#65039;</button>';
+}
+
+/* ── ЧАСТ 1: ЦО въвежда за избраната дата ──
+   Формата работи за датата ГОРЕ (dt-co-date) — една дата за целия изглед, за
+   да няма два източника на истина за това „кой ден гледаме".
+   Магазинската форма не се пипа: тя си остава само за днес и без избор. */
+function dtCOEntryBlock(byStore){
+  if(!oborotCOCanWrite()) return '';
+  var date=oborotCODate||dtToday();
+  var stores=oborotCOStores.filter(function(n){return isReportableStore(n);});
+  if(!stores.length) return '';
+
+  var sel=(oborotCOStore&&stores.indexOf(oborotCOStore)>=0)?oborotCOStore:'';
+  var existing=sel?(byStore[sel]||null):null;
+  /* ISO датите се сравняват като низове — YYYY-MM-DD е лексикографски
+     подредена. Ползва се dtToday(), не today(): в ранните часове по
+     българско време toISOString() дава вчера. */
+  var future=date>dtToday();
+
+  var opts='<option value="">— избери обект —</option>';
+  for(var i=0;i<stores.length;i++){
+    opts+='<option value="'+escAttr(stores[i])+'"'+(stores[i]===sel?' selected':'')+'>'+
+      esc(stores[i])+'</option>';
+  }
+
+  var body;
+  if(!sel){
+    body='<div id="dtco-hint" style="font-size:13px;color:#64748b;">'+
+      'Избери обект, за да въведеш оборот за '+fmtDate(date)+'.</div>';
+  } else if(existing){
+    /* Има запис → не форма, а самият запис с бутон за корекция (Част 2).
+       Втори ред за същия обект и ден е невъзможен — уникално (store_name,date). */
+    body='<div id="dtco-existing">'+
+      '<div style="display:flex;align-items:center;gap:8px;background:#f0fdf4;border:1px solid #16a34a;'+
+        'border-radius:8px;padding:10px 12px;margin-bottom:12px;color:#16a34a;font-size:13px;">'+
+        '<span>&#9989;</span><span>'+esc(sel)+' вече е подал оборот за '+fmtDate(date)+
+        (existing.created_by?' — '+esc(existing.created_by):'')+'</span>'+
+      '</div>'+
+      '<table style="width:100%;font-size:13px;">'+
+        dtRoRow('Общ оборот',dtMoney(existing.total_turnover),true)+
+        dtRoRow('В брой',dtMoney(existing.cash_turnover))+
+        dtRoRow('С карта',dtMoney(existing.card_turnover))+
+        (dtBankOf(existing)>0?dtRoRow('По банка',dtMoney(existing.bank_turnover)):'')+
+        dtRoRow('Брой клиенти',String(parseInt(existing.customers,10)||0))+
+        (existing.note?dtRoRow('Забележка',esc(existing.note)):'')+
+      '</table>'+
+      '<div style="margin-top:12px;">'+
+        '<button onclick="openOborotEdit(\''+escAttr(String(existing.id))+'\')" class="btn">'+
+        '&#9999;&#65039; Коригирай записа</button>'+
+      '</div>'+
+    '</div>';
+  } else {
+    body='<table style="width:100%;font-size:13px;">'+
+      dtInpRow('Общ оборот','dtco-total','EUR')+
+      dtInpRow('В брой','dtco-cash','EUR')+
+      dtInpRow('С карта','dtco-card','EUR')+
+      dtInpRow('По банка','dtco-bank','EUR')+
+      dtInpRow('Брой клиенти','dtco-customers','',true)+
+      '<tr><td style="padding:6px 4px;color:#64748b;">Забележка</td>'+
+        '<td style="padding:6px 4px;">'+
+          '<input type="text" id="dtco-note" placeholder="по избор" '+
+          'style="width:100%;padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;'+
+          'font-family:inherit;font-size:13px;">'+
+        '</td><td></td></tr>'+
+    '</table>'+
+    '<div style="margin-top:14px;">'+
+      /* Бъдещ ден: бутонът е disabled и КАЗВА защо, а не изчезва — скрит
+         бутон оставя човека да гадае. Проверката се повтаря и в самия
+         обработчик: disabled в markup-а не спира пряко извикване. */
+      '<button onclick="submitOborotCO()" class="btn btn-green"'+
+        (future?' disabled title="Денят още не е настъпил"':'')+
+        '>Запиши оборота</button>'+
+      (future?'<span style="margin-left:10px;font-size:12px;color:#d97706;">'+
+        'Денят още не е настъпил.</span>':'')+
+    '</div>';
+  }
+
+  return '<div class="card" id="dtco-form" style="margin-top:18px;">'+
+    '<div class="card-title">&#9997;&#65039; Въвеждане от Централен офис</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+
+      'За '+fmtDate(date)+'. Записът от офиса НЕ отмята задачата в Бюлетина — '+
+      'работата остава неизпълнена от обекта.</div>'+
+    '<div style="margin-bottom:12px;font-size:13px;color:#64748b;">Обект: '+
+      '<select id="dtco-store" onchange="oborotSetCOStore(this.value)" '+
+      'style="padding:6px 9px;border:1px solid #e2e8f0;border-radius:8px;'+
+      'font-family:inherit;font-size:13px;">'+opts+'</select></div>'+
+    body+
   '</div>';
 }
 
@@ -484,6 +727,20 @@ function dtMarkBulletinTask(){
     });
 }
 
+/* ⚠️ ЕДИНСТВЕНОТО МЯСТО, където се решава дали задачата да се отметне.
+   Критерият е КОЙ въвежда (byCO), не за коя дата. ЦО не отмята и когато
+   въвежда за днешния ден: ако магазинът е пропуснал задачата, офисът покрива
+   числото, но работата не е свършена от магазина, а отметка оттук би дала
+   статистика за изпълнение, което не се е случило.
+
+   Махне ли се редът `if(byCO)`, tests/oborot-co-entry.test.js пада на
+   проверката „POST към task_completions НЕ тръгва" — това е контролът, че
+   тестът не е тавтологичен. */
+function dtAfterSave(byCO){
+  if(byCO){ loadOborot(); return; }
+  dtMarkBulletinTask().then(function(){loadOborot();});
+}
+
 /* ─── ЗАПИС ─────────────────────────────────────────────────── */
 function submitOborot(){
   if(oborotSubmitting)return;
@@ -501,15 +758,11 @@ function submitOborot(){
     toast('Попълни всички полета','#dc2626');return;
   }
 
-  /* 2) Числата са валидни и неотрицателни; клиентите са цяло число. */
+  /* 2) и 3) Числата и разминаването — през dtValidate(), общата проверка за
+        трите пътя (магазин, въвеждане от ЦО, корекция от ЦО). Правилото и
+        текстовете живеят на ЕДНО място. */
   var total=dtNum(sTotal),cash=dtNum(sCash),card=dtNum(sCard),cust=dtNum(sCust);
   var bank=sBank?dtNum(sBank):0;
-  if(isNaN(total)||isNaN(cash)||isNaN(card)||isNaN(bank)||total<0||cash<0||card<0||bank<0){
-    toast('Сумите трябва да са числа, не по-малки от нула','#dc2626');return;
-  }
-  if(isNaN(cust)||cust<0||Math.floor(cust)!==cust){
-    toast('Броят клиенти трябва да е цяло число, не по-малко от нула','#dc2626');return;
-  }
 
   /* 3) Разминаването САМО ПО СЕБЕ СИ не блокира. Клиент може да плати по
         банка, а касиерът да маркира продажбата „в брой" — тогава фискалният
@@ -530,21 +783,14 @@ function submitOborot(){
         Закръглянето до стотинки е ПРЕДИ сравнението, защото в плаваща запетая
         100.05-50-50 дава 0.049999999999997 и границата иначе се решава от
         двоичния шум, а не от правилото. */
-  var diff=Math.round((total-cash-card-bank)*100)/100;
-  var hardLimit=Math.round(Math.max(1,total*0.1)*100)/100;
-  if(Math.abs(diff)>hardLimit){
+  var chk=dtValidate(total,cash,card,bank,cust);
+  if(!chk.ok){
     /* Съобщението казва КОЛКО е и ДОКЪДЕ се допуска — иначе касиерът знае
        само че е сгрешил, не какво да провери. */
-    toast('Разминаването е '+dtMoney(Math.abs(diff))+', допустимо е до '+
-          dtMoney(hardLimit)+' (10% от оборота) — провери числата','#dc2626');return;
+    toast(chk.error,'#dc2626');return;
   }
-  /* Между 1 EUR и прага: минава, но НЕ мълчаливо. Под 1 EUR е закръгляне
-     на фискалното устройство и не заслужава съобщение. */
-  var softMismatch=Math.abs(diff)>1;
-  if(softMismatch){
-    toast('Сумите не се връзват с '+dtMoney(Math.abs(diff))+
-          '. Записът ще бъде подаден и разминаването ще се отрази в отчета.','#d97706');
-  }
+  var diff=chk.diff,softMismatch=chk.soft;
+  if(softMismatch) dtSoftToast(diff);
 
   /* 4) Предупреждение, не забрана — изместена запетая е най-честата грешка. */
   var avg=dtAvg30();
@@ -576,8 +822,9 @@ function submitOborot(){
                              ' — ще се отрази в отчета.','#d97706');
       else toast('Оборотът е записан');
       /* Отмятането е СЛЕД зеления toast и преди презареждането, за да е
-         маркерът вече вдигнат, когато изгледът се рендира наново. */
-      dtMarkBulletinTask().then(function(){loadOborot();});
+         маркерът вече вдигнат, когато изгледът се рендира наново.
+         false = въвежда МАГАЗИНЪТ, тоест задачата се отмята. */
+      dtAfterSave(false);
       return;
     }
     var status=res&&res.status;
@@ -593,5 +840,225 @@ function submitOborot(){
     var msg=(res&&res.error&&(res.error.message||res.error.hint))||('HTTP '+(status||'—'));
     try{console.error('submitOborot daily_turnover → '+(status||'мрежов срив')+': '+msg);}catch(e){}
     toast('Грешка при запис: '+msg,'#dc2626');
+  });
+}
+
+/* ─── ЧАСТ 1: ЗАПИС ОТ ЦЕНТРАЛЕН ОФИС ───────────────────────── */
+/* Същите проверки като при магазина (dtValidate), същият POST, но:
+   - датата е ИЗБРАНАТА в изгледа, не задължително днешната;
+   - обектът е избраният от падащото меню, не store_name на потребителя;
+   - ⚠️ БЕЗ отмятане в Бюлетина — dtAfterSave(true). */
+function submitOborotCO(){
+  if(oborotSubmitting)return;
+  /* Втора проверка в самия обработчик: submitOborotCO() е глобална и
+     disabled бутон не е защита. */
+  if(!oborotCOCanWrite()){ toast('Нямаш право да въвеждаш оборот','#dc2626'); return; }
+
+  var store=oborotCOStore||v('dtco-store');
+  if(!store){ toast('Избери обект','#dc2626'); return; }
+  if(!isReportableStore(store)){ toast('Този обект не подава оборот','#dc2626'); return; }
+
+  var date=oborotCODate||dtToday();
+  /* Бъдещ ден не се приема. Проверката е и тук, не само в markup-а. */
+  if(date>dtToday()){ toast('Денят още не е настъпил','#dc2626'); return; }
+
+  var sTotal=v('dtco-total'),sCash=v('dtco-cash'),sCard=v('dtco-card'),sCust=v('dtco-customers');
+  var sBank=v('dtco-bank');
+  if(!sTotal||!sCash||!sCard||!sCust){ toast('Попълни всички полета','#dc2626'); return; }
+
+  var total=dtNum(sTotal),cash=dtNum(sCash),card=dtNum(sCard),cust=dtNum(sCust);
+  var bank=sBank?dtNum(sBank):0;
+  var chk=dtValidate(total,cash,card,bank,cust);
+  if(!chk.ok){ toast(chk.error,'#dc2626'); return; }
+  if(chk.soft) dtSoftToast(chk.diff);
+
+  /* Следата казва, че числото идва от офиса, а не от обекта. Оттук се ражда
+     и баджът „ЦО" в справката, без втора заявка. */
+  var line=DT_CO_MARK+fmtDate(dtToday())+' от '+dtWho();
+  var body={
+    store_name:store,
+    date:date,
+    total_turnover:total,
+    cash_turnover:cash,
+    card_turnover:card,
+    bank_turnover:bank,
+    customers:cust,
+    note:dtBuildNote(null,v('dtco-note'),line),
+    created_by:dtWho()
+  };
+
+  oborotSubmitting=true;
+  sbPost('daily_turnover',body).then(function(res){
+    oborotSubmitting=false;
+    if(res&&res.ok){
+      if(chk.soft) toast('Оборотът е записан с разминаване '+dtMoney(Math.abs(chk.diff))+
+                         ' — ще се отрази в отчета.','#d97706');
+      else toast('Оборотът за '+esc(store)+' е записан');
+      /* true = въвежда ЦО → задачата в Бюлетина НЕ се отмята. */
+      dtAfterSave(true);
+      return;
+    }
+    var status=res&&res.status;
+    if(status===409){
+      toast('За тази дата вече има подаден оборот от този обект.','#d97706');
+      loadOborot();
+      return;
+    }
+    var msg=sbErrMsg(res);
+    try{console.error('submitOborotCO daily_turnover → '+(status||'мрежов срив')+': '+msg);}catch(e){}
+    toast('Грешка при запис: '+msg,'#dc2626');
+  });
+}
+
+/* ─── ЧАСТ 2 и 3: КОРЕКЦИЯ ОТ ЦЕНТРАЛЕН ОФИС ────────────────── */
+/* Модалът се строи в JS, а не в index.html — index.html не се пипа в тази
+   задача, а шаблонът е същият като на прозорчето за коментар в checklist.js.
+   Стойностите се задават през .value СЛЕД вмъкването, не в markup-а: кавичка
+   в забележката иначе излиза от атрибута. */
+function openOborotEdit(id){
+  if(!oborotCOCanWrite()){ toast('Нямаш право да коригираш оборот','#dc2626'); return; }
+  var r=null;
+  for(var i=0;i<oborotCORows.length;i++){
+    if(String(oborotCORows[i].id)===String(id)){ r=oborotCORows[i]; break; }
+  }
+  if(!r){ toast('Записът не е намерен — презареди справката','#dc2626'); return; }
+  oborotEditRow=r;
+  closeOborotEdit();
+
+  var ov=document.createElement('div');
+  ov.id='dt-edit-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;'+
+    'align-items:center;justify-content:center;z-index:9999;';
+  ov.innerHTML='<div style="background:#fff;border-radius:14px;padding:20px;'+
+      'width:min(480px,94vw);max-height:90vh;overflow-y:auto;">'+
+    '<div style="font-weight:700;margin-bottom:2px;">&#9999;&#65039; Корекция на оборот</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+
+      esc(r.store_name)+' &middot; '+fmtDate(r.date)+
+      '. Корекцията НЕ пипа отметката в Бюлетина.</div>'+
+    '<table style="width:100%;font-size:13px;">'+
+      dtInpRow('Общ оборот','dt-ed-total','EUR')+
+      dtInpRow('В брой','dt-ed-cash','EUR')+
+      dtInpRow('С карта','dt-ed-card','EUR')+
+      dtInpRow('По банка','dt-ed-bank','EUR')+
+      dtInpRow('Брой клиенти','dt-ed-customers','',true)+
+      '<tr style="border-bottom:1px solid #f1f5f9;">'+
+        '<td style="padding:6px 4px;color:#64748b;">Забележка</td>'+
+        '<td style="padding:6px 4px;" colspan="2">'+
+          '<input type="text" id="dt-ed-note" '+
+          'style="width:100%;padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;'+
+          'font-family:inherit;font-size:13px;"></td></tr>'+
+      /* ЧАСТ 3 — случаят с Дупница беше ГРЕШНА ДАТА, не грешни числа. */
+      '<tr><td style="padding:6px 4px;color:#64748b;">Дата</td>'+
+        '<td style="padding:6px 4px;" colspan="2">'+
+          '<input type="date" id="dt-ed-date" max="'+escAttr(dtToday())+'" '+
+          'style="width:100%;padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;'+
+          'font-family:inherit;font-size:13px;"></td></tr>'+
+    '</table>'+
+    '<div style="font-size:12px;color:#64748b;margin-top:10px;">'+
+      'Забележката ще носи следа „Коригирано …", която се вижда и в отчета за деня.</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">'+
+      '<button class="btn btn-ghost" onclick="closeOborotEdit()">Откажи</button>'+
+      '<button class="btn btn-green" onclick="submitOborotEdit()">Запиши корекцията</button>'+
+    '</div></div>';
+  document.body.appendChild(ov);
+
+  function set(elId,val){ var el=document.getElementById(elId); if(el) el.value=val; }
+  set('dt-ed-total',String(parseFloat(r.total_turnover)||0));
+  set('dt-ed-cash',String(parseFloat(r.cash_turnover)||0));
+  set('dt-ed-card',String(parseFloat(r.card_turnover)||0));
+  set('dt-ed-bank',String(dtBankOf(r)));
+  set('dt-ed-customers',String(parseInt(r.customers,10)||0));
+  /* Само собствената забележка на обекта — редовете на следата не се
+     редактират на ръка и не се преписват. */
+  set('dt-ed-note',dtNoteBase(r.note));
+  set('dt-ed-date',r.date);
+}
+
+function closeOborotEdit(){
+  var ov=document.getElementById('dt-edit-ov');
+  if(ov&&ov.parentNode) ov.parentNode.removeChild(ov);
+}
+
+function submitOborotEdit(){
+  if(oborotSubmitting)return;
+  if(!oborotCOCanWrite()){ toast('Нямаш право да коригираш оборот','#dc2626'); return; }
+  var r=oborotEditRow;
+  if(!r){ toast('Няма отворен запис за корекция','#dc2626'); return; }
+
+  var sTotal=v('dt-ed-total'),sCash=v('dt-ed-cash'),sCard=v('dt-ed-card'),sCust=v('dt-ed-customers');
+  var sBank=v('dt-ed-bank');
+  if(!sTotal||!sCash||!sCard||!sCust){ toast('Попълни всички полета','#dc2626'); return; }
+
+  var total=dtNum(sTotal),cash=dtNum(sCash),card=dtNum(sCard),cust=dtNum(sCust);
+  var bank=sBank?dtNum(sBank):0;
+  /* СЪЩАТА проверка като при въвеждане — не втора. */
+  var chk=dtValidate(total,cash,card,bank,cust);
+  if(!chk.ok){ toast(chk.error,'#dc2626'); return; }
+
+  var newDate=v('dt-ed-date')||r.date;
+  if(newDate>dtToday()){ toast('Денят още не е настъпил','#dc2626'); return; }
+
+  var base=v('dt-ed-note');
+  var summary=dtChangeSummary(r,{
+    total_turnover:total,cash_turnover:cash,card_turnover:card,
+    bank_turnover:bank,customers:cust,date:newDate,note:base
+  });
+  var body={
+    total_turnover:total,
+    cash_turnover:cash,
+    card_turnover:card,
+    bank_turnover:bank,
+    customers:cust,
+    /* Следата се ДОБАВЯ, старата забележка не се трие — корекция без следа е
+       тихо презаписване. Броят редове следа е ограничен (DT_TRAIL_MAX). */
+    note:dtBuildNote(r.note,base,DT_FIX_MARK+fmtDate(dtToday())+' от '+dtWho()+': '+summary)
+  };
+  if(newDate!==r.date) body.date=newDate;
+
+  if(chk.soft) dtSoftToast(chk.diff);
+
+  oborotSubmitting=true;
+  /* ЧАСТ 3 — предварителна проверка при смяна на датата. Уникалното
+     ограничение (store_name, date) би върнало сурово „duplicate key value
+     violates unique constraint", което не значи нищо за човека пред екрана.
+     Проверката е ПРЕДИ PATCH-а, за да не тръгне заявка, обречена да падне.
+     ⚠️ task_completions НЕ се пипа при никой път оттук: отметката не следва
+     датата автоматично и преместването ѝ, ако изобщо трябва, е отделно
+     решение на човек. */
+  var pre=(newDate!==r.date)
+    ? sbGet('daily_turnover','select=id&store_name=eq.'+encodeURIComponent(r.store_name)+
+        '&date=eq.'+encodeURIComponent(newDate))
+    : Promise.resolve([]);
+
+  pre.then(function(rows){
+    var taken=(Array.isArray(rows)?rows:[]).filter(function(x){
+      return String(x.id)!==String(r.id);
+    });
+    if(taken.length){
+      oborotSubmitting=false;
+      toast('За тази дата вече има подаден оборот от този обект.','#dc2626');
+      return;
+    }
+    return sbPatch('daily_turnover','id=eq.'+encodeURIComponent(r.id),body).then(function(res){
+      oborotSubmitting=false;
+      if(res&&res.ok){
+        closeOborotEdit();
+        oborotEditRow=null;
+        toast('Корекцията е записана');
+        /* true = пипа ЦО → отметката в Бюлетина остава каквато е. */
+        dtAfterSave(true);
+        return;
+      }
+      var status=res&&res.status;
+      /* 409 пак е възможен: някой е записал същия ден между проверката и
+         PATCH-а. Съобщението е същото, за да не се учи потребителят на две. */
+      if(status===409){
+        toast('За тази дата вече има подаден оборот от този обект.','#d97706');
+        return;
+      }
+      var msg=sbErrMsg(res);
+      try{console.error('submitOborotEdit daily_turnover → '+(status||'мрежов срив')+': '+msg);}catch(e){}
+      toast('Грешка при корекция: '+msg,'#dc2626');
+    });
   });
 }

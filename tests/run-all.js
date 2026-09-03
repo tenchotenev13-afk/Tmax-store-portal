@@ -83,6 +83,7 @@ const TESTS = [
   'kasa-tab-routing.test.js',
   'pallets-summary.test.js',
   'oborot-bulletin-link.test.js',
+  'oborot-co-entry.test.js',
   'admin-oborot-report.test.js',
   'regional-flag.test.js',
   'bulletin-dept-move-order.test.js',
