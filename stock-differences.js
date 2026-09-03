@@ -1515,6 +1515,86 @@ function diffCategoryLabel(v){
   return f?f[1]:(v||'—');
 }
 
+/* ══ Сигнал за възможна размяна на артикул при експедиция ══
+   Складът иска да види, когато ЕДИН И СЪЩ артикул е в междускладови бланки
+   от ДВА РАЗНИ магазина към него: най-вероятно пратките са разменени и
+   липсата на единия обект е излишъкът на другия. Смята се изцяло в браузъра
+   от вече заредените sdData и diffReports - нова колона няма, заявка няма.
+
+   Кодовете се сравняват НОРМАЛИЗИРАНО: в бланките един и същ SAP се пише и
+   като "000123", и като "123" (Excel яде водещите нули при импорт, хората ги
+   пишат както дойде). Сравнение "както е въведено" би пропуснало точно
+   двойката, заради която целият сигнал съществува. */
+/* Кандидатите за размяна на ЕДИН ред. Празен масив, ако редът няма код,
+   не е междускладов или вече е потвърден - потвърденият ред е приключен и
+   няма какво да се разменя по него. */
+function sdSwapCandidates(line){
+  /* Локална нарочно: и двете ѝ употреби са тук, а глобално име повече в
+     ES5 global scope означава още един кандидат за тиха колизия. */
+  var norm = function(code){
+    return String(code==null?'':code).trim().replace(/^0+/,'');
+  };
+  if(!line || line.status==='received') return [];
+  if(sdLineDirection(line)!=='interstore') return [];
+  var code = norm(line.material_code);
+  if(!code) return [];
+  var myRep = diffReports.find(function(x){return x.id===line.report_id;});
+  var myCp = myRep ? myRep.counterpart : null;
+  if(!myCp) return [];
+  var myTs = line.created_at ? Date.parse(line.created_at) : NaN;
+  if(isNaN(myTs)) return []; /* без дата прозорецът е непроверим - не гадаем */
+  var WINDOW = 14*24*60*60*1000;
+  var out = [];
+  sdData.forEach(function(other){
+    if(String(other.id)===String(line.id)) return;
+    if(other.store_name===line.store_name) return; /* същият обект - не е размяна */
+    if(other.status==='received') return;
+    if(norm(other.material_code)!==code) return;
+    if(sdLineDirection(other)!=='interstore') return;
+    var oRep = diffReports.find(function(x){return x.id===other.report_id;});
+    if(!oRep || oRep.counterpart!==myCp) return;
+    var oTs = other.created_at ? Date.parse(other.created_at) : NaN;
+    if(isNaN(oTs) || Math.abs(oTs-myTs) > WINDOW) return;
+    /* Плитко копие - флагът не бива да сяда върху самия ред в sdData. */
+    var c = {};
+    for(var k in other){ if(Object.prototype.hasOwnProperty.call(other,k)) c[k]=other[k]; }
+    /* "Обратната" двойка е същинският сигнал: липса срещу излишък. Две липси
+       по същия код са просто съвпадение и получават сивата бележка. */
+    c.opposite = other.difference_category !== line.difference_category &&
+      ['undelivered','excess'].indexOf(other.difference_category) >= 0 &&
+      ['undelivered','excess'].indexOf(line.difference_category) >= 0;
+    out.push(c);
+  });
+  return out;
+}
+/* Баджът под името на артикула. Вижда го САМО логистичният склад - това е
+   негов инструмент при експедиция, а не поредното червено на екрана на
+   магазина, който няма как да провери чуждата бланка. */
+function sdSwapBadge(line){
+  if(!isLogisticsWarehouseUser()) return '';
+  var cands = sdSwapCandidates(line);
+  if(!cands.length) return '';
+  var opp = cands.filter(function(c){return c.opposite;});
+  /* created_at е timestamptz - fmtDate() го реже наслуки и дава
+     "01T09:00:00.000Z.09.2026". Затова минава през sdFmtDateTime(), който
+     отрязва часа и чак тогава форматира (виж коментара при самата функция). */
+  var box = function(kind,bg,bd,fg,txt){
+    return '<div class="sd-swap" data-swap="'+kind+'" title="Същият артикул е и в бланка на друг обект към този склад. Проверете дали пратките не са разменени." '+
+      'style="margin-top:3px;display:inline-block;background:'+bg+';border:1px solid '+bd+';color:'+fg+';border-radius:6px;padding:2px 6px;font-size:10px;font-weight:600;line-height:1.35;white-space:normal;">'+txt+'</div>';
+  };
+  if(opp.length){
+    var parts = opp.map(function(c){
+      var qty = (c.quantity!=null) ? c.quantity : (c.quantity_received!=null ? c.quantity_received : '—');
+      return esc(c.store_name||'')+' ('+esc(diffCategoryLabel(c.difference_category))+', '+esc(String(qty))+' бр., '+esc(sdFmtDateTime(c.created_at))+')';
+    }).join(' · ');
+    return box('opposite','#fffbeb','#fde68a','#92400e','⚠️ Възможна размяна: '+parts);
+  }
+  var same = cands.map(function(c){
+    return esc(c.store_name||'')+' ('+esc(sdFmtDateTime(c.created_at))+')';
+  }).join(' · ');
+  return box('same','#f8fafc','#e2e8f0','#64748b','ℹ️ Същият артикул и в: '+same);
+}
+
 /* ── Секция с подадени бланки (чакат преглед) ── */
 function renderDiffReportsSection(){
   var allVisible = sdVisibleUnreviewedReports();
@@ -1626,7 +1706,10 @@ function renderDiffReportsSection(){
         var rowBg = l.store_corrected_at ? 'background:#fffbeb;' : (l.type ? 'background:#f0fdf4;color:#64748b;' : '');
         h+='<tr style="border-top:1px solid #f1f5f9;'+rowBg+'">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
-          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+'</td>'+
+          /* Сигналът за размяна стои под ИМЕТО на артикула, а не в колоната на
+             склада - там вече е отговорът плюс потвърждението, а въпросът
+             "този ли е артикулът" е за самия артикул. Вижда го само складът. */
+          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdSwapBadge(l)+'</td>'+
           '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
           '<td style="padding:3px 6px;text-align:right;">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
           (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
