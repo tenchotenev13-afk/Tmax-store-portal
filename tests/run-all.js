@@ -29,6 +29,7 @@ const TESTS = [
   'interstore-counterpart-select.test.js',
   'interstore-confirm-flow.test.js',
   'interstore-swap-signal.test.js',
+  'loading-lists-warehouse.test.js',
   'stock-diff-capitalized-counter.test.js',
   'stock-diff-chip-counts.test.js',
   'stock-diff-responsibility.test.js',

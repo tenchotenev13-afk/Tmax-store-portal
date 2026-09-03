@@ -25,7 +25,7 @@ const MODULE_ORDER = [
   'bulletin.js', 'today.js', 'checklist.js', 'kasa.js', 'kasa-docs.js', 'daily-turnover.js',
   'admin.js', 'history.js',
   'contacts.js', 'transit.js', 'calendar.js', 'stock-returns.js',
-  'stock-differences.js', 'push.js', 'email.js', 'report.js', 'notifications.js',
+  'stock-differences.js', 'push.js', 'email.js', 'report.js', 'loading.js', 'notifications.js',
   'reference.js', 'handbook.js'
 ];
 
@@ -35,7 +35,7 @@ const LOADERS = [
   'loadTransport', 'loadPallets', 'loadClientOrders', 'loadDocs', 'loadBulletin',
   'loadTodayDashboard', 'loadChecklist', 'loadKasa', 'loadKasaDocs', 'loadAdmin', 'loadHistory',
   'loadContacts', 'loadTransit', 'loadCalendar', 'loadStockReturns', 'loadStockDiff',
-  'loadPush', 'loadEmail', 'loadReport', 'loadNotifications', 'loadReference',
+  'loadPush', 'loadEmail', 'loadReport', 'loadLoadingLists', 'loadNotifications', 'loadReference',
   'loadHandbook'
 ];
 

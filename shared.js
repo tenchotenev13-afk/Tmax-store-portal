@@ -877,7 +877,7 @@ function showModule(mod){
     showModule('kasa');
     return;
   }
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','today','checklist'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','loading','today','checklist'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -894,12 +894,15 @@ function showModule(mod){
   /* "Транспорт" и "Палети" — под-таб в Транспорт (наличности на празни палети по обекти) */
   var tpSub=document.getElementById('transport-pallets-subnav');
   if(tpSub){
-    tpSub.style.display=(mod==='transport'||mod==='pallets')?'block':'none';
-    var btnT=document.getElementById('tps-transport'),btnP=document.getElementById('tps-pallets');
+    tpSub.style.display=(mod==='transport'||mod==='pallets'||mod==='loading')?'block':'none';
+    var btnT=document.getElementById('tps-transport'),btnP=document.getElementById('tps-pallets'),btnL=document.getElementById('tps-loading');
     if(btnT)btnT.classList.toggle('active',mod==='transport');
     if(btnP)btnP.classList.toggle('active',mod==='pallets');
+    if(btnL)btnL.classList.toggle('active',mod==='loading');
   }
-  if(mod==='pallets'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
+  /* Подтабовете на Транспорт държат главния таб активен - иначе навигацията
+     показва Транспорт като незает, докато си вътре в негов подтаб. */
+  if(mod==='pallets'||mod==='loading'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
   if(mod==='admin')loadAdmin();
   if(mod==='transport')loadTransport();
   if(mod==='client')loadClientOrders();
@@ -915,6 +918,7 @@ function showModule(mod){
   if(mod==='stock-returns')loadStockReturns();
   if(mod==='stock-diff')loadStockDiff();
   if(mod==='pallets')loadPallets();
+  if(mod==='loading')loadLoadingLists();
   if(mod==='reference')loadReference();
   if(mod==='handbook')loadHandbook();
 }
