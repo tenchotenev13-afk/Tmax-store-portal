@@ -133,7 +133,7 @@ function llGroupTransitDocs(rows){
         doc_date: r.doc_date || null,
         items: 0,
         checked: false,
-        pallets: 1
+        pallet_spec: '1'
       };
       out.push(byKey[key]);
     }
@@ -147,6 +147,92 @@ function llGroupTransitDocs(rows){
   return out;
 }
 
+/* ══ ПАЛЕТЪТ Е ФИЗИЧЕСКА ЕДИНИЦА, НЕ ДОКУМЕНТ ══
+   Проверка в базата на 03.09.2026: 1987 чакащи реда се събират в 563
+   документа (обект+документ), от които 324 — 58% — са с ЕДИН артикул.
+   Габрово чака 56 документа, Силистра и Дупница по 50. Никой не кара 56
+   палета до Габрово: тези документи се консолидират върху три-четири палета.
+   Тоест реалната връзка е МНОГО ДОКУМЕНТА → ЕДИН ПАЛЕТ, а не обратното.
+
+   Схемата не се пипа. Един палет е НЯКОЛКО реда в loading_list_items, които
+   споделят store_name + pallet_no; всеки ред носи своя стоков документ.
+   Обратната посока (голям документ върху няколко палета) е същите редове с
+   различни pallet_no. Интерфейсът групира и показва един палет.
+
+   Следствие, което трябва да се знае: „получено" е на ниво документ-в-палет,
+   не на физически палет. Така е нарочно — автозатварянето на стоковия
+   документ пита точно това, а бутонът „целия палет" отмята групата наведнъж. */
+function llPalletKey(it){
+  return JSON.stringify([String(it.store_name || ''), Number(it.pallet_no)]);
+}
+/* „2" → [2]; „1,3" → [1,3]; „1-3" → [1,2,3]. Едно поле за двете посоки:
+   документ на един палет (преобладаващият случай) и документ, разстлан върху
+   няколко. Празно или боклук → [1], защото документ без палет няма смисъл. */
+function llParsePalletSpec(spec){
+  var out = {};
+  String(spec == null ? '' : spec).split(',').forEach(function(part){
+    part = part.trim();
+    if(!part) return;
+    var m = /^(\d+)\s*-\s*(\d+)$/.exec(part);
+    if(m){
+      var a = parseInt(m[1], 10), b = parseInt(m[2], 10);
+      if(a < 1 || b < 1) return;
+      if(a > b){ var t = a; a = b; b = t; }
+      /* Таван срещу „1-9999" от изпуснат клавиш: това не е пратка, а авария. */
+      if(b - a > 99) b = a + 99;
+      for(var i = a; i <= b; i++) out[i] = true;
+      return;
+    }
+    var n = parseInt(part, 10);
+    if(!isNaN(n) && n >= 1) out[n] = true;
+  });
+  var nums = Object.keys(out).map(Number).sort(function(a, b){ return a - b; });
+  return nums.length ? nums : [1];
+}
+/* Редовете, събрани в товарни единици. Палетите се групират по (обект, №);
+   рулото и насипът са сами за себе си — там номерация няма. */
+function llPalletGroups(items){
+  var by = {}, order = [];
+  (items || []).forEach(function(it, i){
+    var key = (it.kind === 'pallet' && it.pallet_no != null)
+      ? llPalletKey(it)
+      : JSON.stringify(['single', it.id || ('#' + i)]);
+    if(!by[key]){
+      by[key] = { key:key, kind:it.kind, store_name:it.store_name,
+                  pallet_no:it.pallet_no, pallet_total:it.pallet_total, rows:[] };
+      order.push(key);
+    }
+    by[key].rows.push(it);
+  });
+  return order.map(function(k){ return by[k]; });
+}
+/* Плътно преномериране 1..K В РАМКИТЕ НА ОБЕКТА, при запис. „Палет 2 от 5" е
+   обещание към конкретния обект, не към целия курс. Въвел ли е складът 1, 2
+   и 5, палетите са три — иначе обектът чака пети палет, който не съществува. */
+function llRenumberPallets(items){
+  var byStore = {};
+  (items || []).forEach(function(it){
+    if(it.kind !== 'pallet' || it.pallet_no == null) return;
+    var s = it.store_name || '';
+    if(!byStore[s]) byStore[s] = {};
+    byStore[s][Number(it.pallet_no)] = true;
+  });
+  var map = {};
+  Object.keys(byStore).forEach(function(s){
+    var nums = Object.keys(byStore[s]).map(Number).sort(function(a, b){ return a - b; });
+    map[s] = { total: nums.length, at: {} };
+    nums.forEach(function(n, i){ map[s].at[n] = i + 1; });
+  });
+  (items || []).forEach(function(it){
+    if(it.kind !== 'pallet' || it.pallet_no == null) return;
+    var m = map[it.store_name || ''];
+    if(!m) return;
+    it.pallet_no = m.at[Number(it.pallet_no)];
+    it.pallet_total = m.total;
+  });
+  return items;
+}
+
 /* ─── ОБОБЩЕНИЯ (СМЯТАТ СЕ ОТ РЕДОВЕТЕ, НЕ СЕ ПАЗЯТ) ────────
    Броят палети/рула/насип НЕ е колона в заглавието нарочно: копие там се
    разминава при първата редакция на ред и не гърми — просто показва грешно
@@ -154,8 +240,12 @@ function llGroupTransitDocs(rows){
 function llCounts(items){
   var c = { pallet:0, roll:0, bulk:0, stores:0, received:0, total:0 };
   var seen = {};
+  /* Броят се ТОВАРНИТЕ ЕДИНИЦИ, не редовете: четири документа на един палет
+     са един палет. Преди консолидацията двете съвпадаха и това число лъжеше. */
+  llPalletGroups(items).forEach(function(g){
+    if(c.hasOwnProperty(g.kind)) c[g.kind]++;
+  });
   (items || []).forEach(function(it){
-    if(c.hasOwnProperty(it.kind)) c[it.kind]++;
     c.total++;
     if(it.received) c.received++;
     if(it.store_name && !seen[it.store_name]){ seen[it.store_name] = 1; c.stores++; }
@@ -165,12 +255,20 @@ function llCounts(items){
 /* Обобщение по ОБЕКТ — това гледа шофьорът, преди да тръгне. */
 function llSummaryByStore(items){
   var by = {}, order = [];
-  (items || []).forEach(function(it){
-    var s = it.store_name || '—';
+  var ensure = function(s){
     if(!by[s]){ by[s] = { store:s, pallet:0, roll:0, bulk:0, received:0, total:0 }; order.push(s); }
-    if(by[s].hasOwnProperty(it.kind)) by[s][it.kind]++;
-    by[s].total++;
-    if(it.received) by[s].received++;
+    return by[s];
+  };
+  /* Товарните единици — по същата причина като в llCounts(). */
+  llPalletGroups(items).forEach(function(g){
+    var e = ensure(g.store_name || '—');
+    if(e.hasOwnProperty(g.kind)) e[g.kind]++;
+  });
+  /* Отмятането обаче е по РЕД (документ-в-палет), затова знаменателят е такъв. */
+  (items || []).forEach(function(it){
+    var e = ensure(it.store_name || '—');
+    e.total++;
+    if(it.received) e.received++;
   });
   order.sort();
   return order.map(function(s){ return by[s]; });
@@ -300,11 +398,28 @@ function llStoreCardHtml(l){
     h += '<th style="text-align:left;padding:6px 9px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
   });
   h += '</tr></thead><tbody>';
-  items.forEach(function(it){
+  /* Палетът е една физическа единица с няколко документа — показва се като
+     заглавен ред с бутон „целия палет", а документите под него. Иначе човекът
+     на рампата вижда четири отделни „палет 2 от 5" и не разбира, че е един. */
+  llPalletGroups(items).forEach(function(g){
+    var multi = g.rows.length > 1;
+    if(multi){
+      var gGot = g.rows.filter(function(r){ return r.received; }).length;
+      var gCan = g.rows.some(function(r){ return !r.received && llCanReceive(r); });
+      h += '<tr data-pallet-group="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+
+        '<td colspan="5" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
+          esc(llKindLabel(g.rows[0]))+' · '+g.rows.length+' документа · получени '+gGot+'/'+g.rows.length+
+          (g.rows.some(function(r){ return r.partial; })?' '+llPartialBadge():'')+'</td>'+
+        '<td style="padding:6px 9px;white-space:nowrap;">'+(gCan
+          ? '<button data-id="'+l.id+'" data-p="'+g.pallet_no+'" onclick="llMarkPalletReceived(this.dataset.id,this.dataset.p)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Целият палет</button>'
+          : '')+'</td></tr>';
+    }
+    g.rows.forEach(function(it){
     var failed = !!llDocFailures[it.id];
     h += '<tr'+(failed?' data-doc-failed="1"':'')+' style="border-bottom:1px solid #f1f5f9;'+(it.received?'background:#f0fdf4;':'')+'">'+
-      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;">'+esc(llKindLabel(it))+'</td>'+
-      '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+'</td>'+
+      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+(multi?'padding-left:22px;color:#94a3b8;':'')+'">'+(multi?'↳':esc(llKindLabel(it)))+'</td>'+
+      '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
+        (it.partial?' '+llPartialBadge():'')+'</td>'+
       '<td style="padding:6px 9px;">'+(it.clears_doc?'изчиства '+esc(it.clears_doc):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
       '<td style="padding:6px 9px;color:#64748b;">'+esc(it.warehouse_comment||'—')+'</td>'+
       /* Коментарът на обекта остава редактируем и СЛЕД отмятането: разминаването
@@ -319,6 +434,7 @@ function llStoreCardHtml(l){
           : '<span style="color:#cbd5e1;">—</span>'))+
       (failed?'<div style="margin-top:3px;font-size:10px;color:#b45309;font-weight:600;">⚠️ документът не е затворен</div>':'')+
       '</td></tr>';
+    });
   });
   h += '</tbody></table></div></div>';
   return h;
@@ -345,14 +461,31 @@ function llMarkReceived(itemId){
     llAfterReceive([it]);
   });
 }
+/* Един физически палет носи няколко документа — човекът на рампата вижда ЕДИН
+   палет и го отмята веднъж. Записът обаче остава по документ, защото точно
+   това пита автозатварянето. */
+function llMarkPalletReceived(listId, palletNo){
+  var n = parseInt(palletNo, 10);
+  var mine = llStoreItemsOf(listId).filter(function(i){
+    return !i.received && i.kind === 'pallet' && Number(i.pallet_no) === n && llCanReceive(i);
+  });
+  if(!mine.length){ toast('Няма неполучени редове по този палет','#64748b'); return; }
+  llPatchReceived(mine, 'палета');
+}
 function llMarkAllReceived(listId){
   /* САМО редовете на този обект. Един лист обслужва няколко обекта и бутонът
      стои във всяка от картите им - без филтъра единият би отмятал за другия. */
   var mine = llStoreItemsOf(listId).filter(function(i){ return !i.received && llCanReceive(i); });
   if(!mine.length){ toast('Няма неполучени редове','#64748b'); return; }
-  if(!confirm('Маркирай всички '+mine.length+' реда като получени?')) return;
+  llPatchReceived(mine, 'листа');
+}
+/* Общото тяло на двата групови бутона („целия палет" и „всичко получено").
+   Едно място, защото провалът трябва да се докладва еднакво и на двете:
+   мълчаливо погълнат провал тук значи палет, който изглежда отметнат, но не е. */
+function llPatchReceived(rows, what){
+  if(!confirm('Маркирай '+rows.length+' реда от '+what+' като получени?')) return;
   var at = new Date().toISOString(), by = llActor();
-  Promise.all(mine.map(function(it){
+  Promise.all(rows.map(function(it){
     return sbPatch('loading_list_items','id=eq.'+it.id,{received:true, received_by:by, received_at:at})
       .then(function(res){ return { it:it, res:res }; });
   })).then(function(all){
@@ -360,10 +493,10 @@ function llMarkAllReceived(listId){
     var good = all.filter(function(r){ return r.res.ok; });
     good.forEach(function(r){ r.it.received = true; r.it.received_by = by; r.it.received_at = at; });
     if(bad.length){
-      console.error('llMarkAllReceived: '+bad.length+' реда не бяха отметнати', bad[0].res.error);
+      console.error('llPatchReceived: '+bad.length+' реда не бяха отметнати', bad[0].res.error);
       toast('⚠️ '+bad.length+' реда НЕ бяха отметнати: '+sbErrMsg(bad[0].res),'#dc2626');
     } else {
-      toast('✅ Всичко е отметнато');
+      toast('✅ Отметнато');
     }
     llAfterReceive(good.map(function(r){ return r.it; }));
   });
@@ -373,6 +506,11 @@ function llMarkAllReceived(listId){
    Документът, който редът изчиства, е clears_doc, ако е зададен - иначе
    собствената му стокова. Точно затова полето съществува: палет по покупка А
    понякога изчиства покупка Б. */
+/* Едно определение на маркера: показва се в реда на магазина, в заглавния
+   ред на палета и в прегледа на склада. Три копия щяха да се разминат. */
+function llPartialBadge(){
+  return '<span data-partial="1" title="Само част от документа тръгва с този товар — той остава чакащ в Стока на път" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;white-space:nowrap;">частично</span>';
+}
 function llItemDocKey(it){
   return (it && (it.clears_doc || it.purchase_doc)) || null;
 }
@@ -399,6 +537,14 @@ function llAutoCloseDoc(d){
     return (i.store_name || '') === d.store && llItemDocKey(i) === d.doc;
   });
   if(!siblings.length || !siblings.every(function(i){ return i.received; })) return Promise.resolve();
+  /* Частична пратка: получен е ПАЛЕТЪТ, не документът. Останалото още пътува,
+     затова редът в „Стока на път" стои чакащ. Проверката е по КОЙ ДА Е ред на
+     документа — складът отмята частичността на цялата пратка, но ред, дошъл от
+     по-ранна редакция, може да е останал без отметка. */
+  if(siblings.some(function(i){ return i.partial; })){
+    toast('📦 Палетът е приет; документ '+d.doc+' остава чакащ (частична пратка)','#d97706');
+    return Promise.resolve();
+  }
   var f = 'purchase_doc=eq.'+encodeURIComponent(d.doc)+
           '&store_name=eq.'+encodeURIComponent(d.store)+'&status=eq.pending';
   /* Първо ПИТАМЕ има ли какво да се затваря. sbPatch праща
@@ -554,7 +700,8 @@ function llOpenEdit(id){
       return {
         id: it.id, kind: it.kind, pallet_no: it.pallet_no, pallet_total: it.pallet_total,
         purchase_doc: it.purchase_doc, clears_doc: it.clears_doc,
-        store_name: it.store_name, warehouse_comment: it.warehouse_comment || ''
+        store_name: it.store_name, warehouse_comment: it.warehouse_comment || '',
+        partial: !!it.partial
       };
     })
   };
@@ -595,33 +742,37 @@ function llToggleDoc(idx){
   else llDropDocRows(d);
   renderLoadingLists();
 }
-function llSetDocPallets(idx, val){
+/* Полето е „на кой палет", не „колко палета". Два документа с еднакъв номер за
+   един обект са на ЕДИН палет — това е консолидацията. Приема и „1-3" за
+   документ, разстлан върху няколко палета. */
+function llSetDocPallet(idx, val){
   var d = llPendingDocs[idx];
   if(!d || !llDraft) return;
-  var n = parseInt(val, 10);
-  n = (isNaN(n) || n < 1) ? 1 : n;
-  /* 25 вместо 2 е един сгрешен клавиш и ражда 25 реда, без нищо да попита.
-     Прагът ПИТА, а не ограничава: наистина големи пратки съществуват. При
-     отказ полето се връща на предишната стойност - тя идва от d.pallets,
-     затова е достатъчно да не я пипаме и да пре-рендираме. */
-  if(n > 20 && !confirm('Наистина ' + n + ' палета за един документ?')){
+  var nums = llParsePalletSpec(val);
+  /* „1-25" от изпуснат клавиш ражда 25 реда, без нищо да попита. Прагът ПИТА,
+     а не ограничава: наистина големи пратки съществуват. При отказ полето се
+     връща на предишната стойност — тя идва от d.pallet_spec, затова е
+     достатъчно да не я пипаме и да пре-рендираме. */
+  if(nums.length > 20 && !confirm('Наистина ' + nums.length + ' палета за един документ?')){
     renderLoadingLists();
     return;
   }
-  d.pallets = n;
+  d.pallet_spec = String(val == null ? '' : val).trim() || '1';
   if(d.checked){ llDropDocRows(d); llMaterializeDoc(d); }
   renderLoadingLists();
 }
 function llMaterializeDoc(d){
-  var n = d.pallets < 1 ? 1 : d.pallets;
-  for(var i = 1; i <= n; i++){
+  /* pallet_total се оставя празно: то е „от колко" за ЦЕЛИЯ обект и се знае
+     чак когато всички документи са разпределени. Смята се при запис
+     (llRenumberPallets), а в редактора се показва от групирането. */
+  llParsePalletSpec(d.pallet_spec).forEach(function(n){
     llDraft.items.push({
-      id: null, kind: 'pallet', pallet_no: i, pallet_total: n,
+      id: null, kind: 'pallet', pallet_no: n, pallet_total: null,
       purchase_doc: d.purchase_doc, clears_doc: null,
-      store_name: d.store_name, warehouse_comment: '',
+      store_name: d.store_name, warehouse_comment: '', partial: false,
       _docKey: llDocKey(d)
     });
-  }
+  });
 }
 function llDropDocRows(d){
   var key = llDocKey(d);
@@ -642,7 +793,7 @@ function llAddFreeRow(){
   llDraft.items.push({
     id: null, kind: 'pallet', pallet_no: null, pallet_total: null,
     purchase_doc: null, clears_doc: null,
-    store_name: (llStores[0] || ''), warehouse_comment: '', _docKey: null
+    store_name: (llStores[0] || ''), warehouse_comment: '', partial: false, _docKey: null
   });
   renderLoadingLists();
 }
@@ -680,6 +831,21 @@ function llSetRowField(i, field, val){
   }
   it[field] = (val === '') ? null : val;
   if(field === 'store_name') renderLoadingLists(); /* сменя списъка „изчиства" */
+}
+/* Частичността е свойство на ПРАТКАТА по документа, не на отделния палет:
+   документ върху три палета тръгва или цял, или не. Затова отметката слиза на
+   всичките му редове наведнъж — иначе llAutoCloseDoc() би виждал един partial
+   и два не, а решението му е едно за целия документ. */
+function llSetRowPartial(i, checked){
+  if(!llDraft || !llDraft.items[i]) return;
+  var it = llDraft.items[i];
+  var doc = llItemDocKey(it);
+  if(!doc){ it.partial = !!checked; renderLoadingLists(); return; }
+  var store = it.store_name || '';
+  llDraft.items.forEach(function(x){
+    if(llItemDocKey(x) === doc && (x.store_name || '') === store) x.partial = !!checked;
+  });
+  renderLoadingLists();
 }
 function llSetDraftField(field, val){ if(llDraft) llDraft[field] = val; }
 
@@ -722,7 +888,7 @@ function llEditorHtml(){
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px;"><tr style="color:#7c3aed;text-align:left;">'+
       '<th style="padding:3px 6px;"></th><th style="padding:3px 6px;">Документ</th><th style="padding:3px 6px;">Обект</th>'+
       '<th style="padding:3px 6px;">Дата</th><th style="padding:3px 6px;text-align:right;">Артикули</th>'+
-      '<th style="padding:3px 6px;">Палети</th></tr>';
+      '<th style="padding:3px 6px;">Палет №</th></tr>';
     llPendingDocs.forEach(function(d, i){
       h += '<tr style="border-top:1px solid #ede9fe;">'+
         '<td style="padding:3px 6px;"><input type="checkbox" data-i="'+i+'" onchange="llToggleDoc(this.dataset.i)"'+(d.checked?' checked':'')+'></td>'+
@@ -730,11 +896,13 @@ function llEditorHtml(){
         '<td style="padding:3px 6px;">'+esc(d.store_name)+'</td>'+
         '<td style="padding:3px 6px;">'+fmtDate(d.doc_date)+'</td>'+
         '<td style="padding:3px 6px;text-align:right;">'+d.items+'</td>'+
-        '<td style="padding:3px 6px;"><input type="number" min="1" value="'+d.pallets+'" data-i="'+i+'" onchange="llSetDocPallets(this.dataset.i,this.value)" style="width:62px;border:1px solid #ddd6fe;border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
+        '<td style="padding:3px 6px;"><input value="'+escVal(d.pallet_spec)+'" data-i="'+i+'" onchange="llSetDocPallet(this.dataset.i,this.value)" title="На кой палет отива този документ. Еднакъв номер за един обект = един палет. Обхват (1-3) за документ върху няколко палета." style="width:62px;border:1px solid #ddd6fe;border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
         '</tr>';
     });
     h += '</table>';
-    h += '<div style="font-size:11px;color:#7c3aed;margin-top:6px;">Стоковата № не се пише на ръка — избира се оттук.</div>';
+    h += '<div style="font-size:11px;color:#7c3aed;margin-top:6px;">Стоковата № не се пише на ръка — избира се оттук. '+
+      '<b>Палет №</b> е <i>на кой палет</i>: еднакъв номер за един обект значи един палет с няколко документа. '+
+      'За документ върху няколко палета — обхват, напр. <code>1-3</code>.</div>';
   }
   h += '</div>';
 
@@ -751,9 +919,18 @@ function llEditorHtml(){
       '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">#</th><th style="padding:3px 6px;">Вид</th>'+
       '<th style="padding:3px 6px;">№ / от</th><th style="padding:3px 6px;">Стокова №</th>'+
       '<th style="padding:3px 6px;">Изчиства</th><th style="padding:3px 6px;">Обект</th>'+
-      '<th style="padding:3px 6px;">Коментар склад</th><th style="padding:3px 6px;"></th></tr>';
+      '<th style="padding:3px 6px;">Коментар склад</th>'+
+      '<th style="padding:3px 6px;" title="С този палет тръгва само част от документа">Частично</th>'+
+      '<th style="padding:3px 6px;"></th></tr>';
     llDraft.items.forEach(function(it, i){
       var isPallet = it.kind === 'pallet';
+      var docOf = llItemDocKey(it);
+      /* Отметката е на ДОКУМЕНТА, не на реда: документ върху три палета е
+         една пратка и е или частична, или не. Показва се на първия му ред,
+         останалите носят само знак, че следват него. */
+      var first = docOf ? llDraft.items.findIndex(function(x){
+        return llItemDocKey(x) === docOf && (x.store_name||'') === (it.store_name||'');
+      }) : -1;
       h += '<tr style="border-top:1px solid #f1f5f9;">'+
         '<td style="padding:3px 6px;color:#94a3b8;">'+(i+1)+'</td>'+
         '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'kind\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+
@@ -767,6 +944,11 @@ function llEditorHtml(){
         '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'clears_doc\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;max-width:150px;">'+llClearsOptions(it)+'</select></td>'+
         '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'store_name\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+llStoreOptions(it.store_name)+'</select></td>'+
         '<td style="padding:3px 6px;"><input value="'+escVal(it.warehouse_comment)+'" data-i="'+i+'" oninput="llSetRowField(this.dataset.i,\'warehouse_comment\',this.value)" style="width:100%;min-width:120px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
+        '<td style="padding:3px 6px;text-align:center;white-space:nowrap;">'+(!docOf
+          ? '<span style="color:#cbd5e1;" title="Ред без документ — няма какво да остане чакащо">—</span>'
+          : (first === i
+            ? '<input type="checkbox" data-i="'+i+'" onchange="llSetRowPartial(this.dataset.i,this.checked)"'+(it.partial?' checked':'')+' title="Само част от документа тръгва с този товар — отмятането няма да го затвори в Стока на път">'
+            : '<span style="color:#94a3b8;" title="Следва отметката на първия палет от същия документ">'+(it.partial?'✓':'↳')+'</span>'))+'</td>'+
         '<td style="padding:3px 6px;white-space:nowrap;">'+
           '<button data-i="'+i+'" onclick="llMoveRow(+this.dataset.i,-1)" title="Нагоре" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;">↑</button>'+
           '<button data-i="'+i+'" onclick="llMoveRow(+this.dataset.i,1)" title="Надолу" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">↓</button>'+
@@ -798,7 +980,8 @@ function llBuildItemRows(listId, items){
       purchase_doc: it.purchase_doc || null,
       clears_doc: it.clears_doc || null,
       store_name: it.store_name,
-      warehouse_comment: it.warehouse_comment || null
+      warehouse_comment: it.warehouse_comment || null,
+      partial: !!it.partial
     };
   });
 }
@@ -808,6 +991,9 @@ function llSaveDraft(){
   if(!llDraft.items.length){ toast('Добави поне един ред','#dc2626'); return; }
   var missing = llDraft.items.filter(function(it){ return !it.store_name; }).length;
   if(missing){ toast('Има ред без обект получател','#dc2626'); return; }
+  /* Палетите се преномерират плътно ПРЕДИ записа — иначе „палет 2 от 5"
+     обещава на обекта палет, който не съществува. */
+  llRenumberPallets(llDraft.items);
 
   var head = {
     warehouse: llActiveWarehouse(),
@@ -971,7 +1157,8 @@ function llViewHtml(){
     h += '<tr style="border-bottom:1px solid #f1f5f9;'+(it.received?'background:#f0fdf4;':'')+'">'+
       '<td style="padding:6px 9px;color:#94a3b8;">'+(it.position!=null?it.position:'—')+'</td>'+
       '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;">'+esc(llKindLabel(it))+'</td>'+
-      '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+'</td>'+
+      '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
+        (it.partial?' '+llPartialBadge():'')+'</td>'+
       '<td style="padding:6px 9px;">'+(it.clears_doc?'изчиства '+esc(it.clears_doc):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
       /* Единственото, което остава редактируемо след изпращане. */
       '<td style="padding:6px 9px;">'+(locked

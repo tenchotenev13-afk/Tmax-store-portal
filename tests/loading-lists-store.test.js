@@ -42,7 +42,7 @@ function it_(o) {
     id: 'i-x', list_id: 'L1', position: 1, kind: 'pallet',
     pallet_no: 1, pallet_total: 1, purchase_doc: null, clears_doc: null,
     store_name: 'Петрич', warehouse_comment: null, store_comment: null,
-    received: false, received_by: null, received_at: null,
+    partial: false, received: false, received_by: null, received_at: null,
     created_at: '2026-09-02T06:00:00.000Z'
   }, o);
 }
@@ -356,7 +356,130 @@ function patchesTo(h, table) { return h.calls.patch.filter(p => p.table === tabl
       JSON.stringify(ip.map(p => p.body.received_by)));
   }
 
-  section('и) Праг от 20 палета при създаване — отказът връща стойността');
+  section('и) Частична пратка — палетът е приет, документът остава чакащ');
+  {
+    /* Двата палета по документа са получени — единствената разлика спрямо
+       сценарий (в) е отметката „частично". */
+    const items = [
+      it_({ id: 'i1', list_id: 'L1', position: 1, pallet_no: 1, pallet_total: 2,
+            purchase_doc: 'D-100', partial: true, received: true,
+            received_by: 'Управител Петрич', received_at: '2026-09-02T10:00:00.000Z' }),
+      it_({ id: 'i2', list_id: 'L1', position: 2, pallet_no: 2, pallet_total: 2,
+            purchase_doc: 'D-100', partial: true })
+    ];
+    const h = env(STORE, items, [L_SENT],
+      [{ id: 't1', purchase_doc: 'D-100', store_name: 'Петрич', status: 'pending' }]);
+    h.w.loadLoadingLists();
+    await ticks(); await ticks();
+
+    const c = card(h.doc, 'L1');
+    ok('редът носи маркер „частично"',
+      c.querySelectorAll('[data-partial="1"]').length >= 1,
+      String(c.querySelectorAll('[data-partial]').length));
+
+    realClick(h.w, btnIn(c, '✅ Получено'));
+    await ticks(); await ticks(); await ticks();
+
+    ok('палетът Е отметнат',
+      patchesTo(h, 'loading_list_items').some(p => p.body.received === true),
+      JSON.stringify(h.calls.patch.map(p => p.table)));
+    ok('goods_transit НЕ е патчнат, макар всички палети да са получени',
+      patchesTo(h, 'goods_transit').length === 0,
+      JSON.stringify(h.calls.patch.map(p => p.table)));
+    ok('не се пита и със заявка — решението е локално',
+      !h.calls.get.some(u => /goods_transit/.test(u)), h.calls.get.join(' | '));
+    ok('съобщението обяснява защо',
+      h.calls.toast.some(t => /документ D-100 остава чакащ \(частична пратка\)/.test(String(t.msg || t))),
+      JSON.stringify(h.calls.toast));
+    ok('и НЕ казва, че документът е приет',
+      !h.calls.toast.some(t => /е приет в Стока на път/.test(String(t.msg || t))),
+      JSON.stringify(h.calls.toast));
+  }
+
+  section('й) Същите редове БЕЗ отметката — документът се затваря');
+  {
+    /* Огледалото на (й): единствената разлика е partial:false. Без този
+       сценарий проверката отгоре щеше да минава и срещу код, който изобщо
+       не затваря документи. */
+    const items = [
+      it_({ id: 'i1', list_id: 'L1', position: 1, pallet_no: 1, pallet_total: 2,
+            purchase_doc: 'D-100', partial: false, received: true,
+            received_by: 'Управител Петрич', received_at: '2026-09-02T10:00:00.000Z' }),
+      it_({ id: 'i2', list_id: 'L1', position: 2, pallet_no: 2, pallet_total: 2,
+            purchase_doc: 'D-100', partial: false })
+    ];
+    const h = env(STORE, items, [L_SENT],
+      [{ id: 't1', purchase_doc: 'D-100', store_name: 'Петрич', status: 'pending' }]);
+    h.w.loadLoadingLists();
+    await ticks(); await ticks();
+    ok('няма маркер „частично"',
+      card(h.doc, 'L1').querySelectorAll('[data-partial]').length === 0,
+      String(card(h.doc, 'L1').querySelectorAll('[data-partial]').length));
+
+    realClick(h.w, btnIn(card(h.doc, 'L1'), '✅ Получено'));
+    await ticks(); await ticks(); await ticks();
+
+    ok('goods_transit Е патчнат', patchesTo(h, 'goods_transit').length === 1,
+      JSON.stringify(h.calls.patch.map(p => p.table)));
+    ok('съобщението е за приет документ',
+      h.calls.toast.some(t => /📦 Стоков документ D-100 е приет/.test(String(t.msg || t))),
+      JSON.stringify(h.calls.toast));
+  }
+
+  section('к) Отметката е на ДОКУМЕНТА, не на реда (редактор на склада)');
+  {
+    const h = env(WAREHOUSE, [], [], []);
+    h.w.llStores = ['Петрич'];
+    h.w.llDraft = { list_date: '2026-09-03', executed_by: '', comment: '', items: [
+      { id: null, kind: 'pallet', pallet_no: 1, pallet_total: null, purchase_doc: 'D-1',
+        clears_doc: null, store_name: 'Петрич', warehouse_comment: '', partial: false, _docKey: 'k1' },
+      { id: null, kind: 'pallet', pallet_no: 2, pallet_total: null, purchase_doc: 'D-1',
+        clears_doc: null, store_name: 'Петрич', warehouse_comment: '', partial: false, _docKey: 'k1' },
+      { id: null, kind: 'pallet', pallet_no: 3, pallet_total: null, purchase_doc: 'D-2',
+        clears_doc: null, store_name: 'Петрич', warehouse_comment: '', partial: false, _docKey: 'k2' }
+    ]};
+    h.w.llPendingDocs = [];
+    h.w.llView = 'edit';
+    h.w.llSetRowPartial(0, true);
+    ok('и двата реда на D-1 станаха частични',
+      h.w.llDraft.items[0].partial === true && h.w.llDraft.items[1].partial === true,
+      JSON.stringify(h.w.llDraft.items.map(i => i.partial)));
+    ok('редът на ДРУГИЯ документ не е пипнат',
+      h.w.llDraft.items[2].partial === false,
+      JSON.stringify(h.w.llDraft.items.map(i => i.partial)));
+    h.w.llSetRowPartial(1, false);
+    ok('махането също важи за целия документ',
+      h.w.llDraft.items.every(i => i.partial === false),
+      JSON.stringify(h.w.llDraft.items.map(i => i.partial)));
+
+    /* И най-важното: отметката трябва да СТИГНЕ до базата. Без тази проверка
+       целият сценарий (и) минава и срещу код, който я забравя при записа —
+       щеше да работи до първото презареждане на страницата. */
+    h.w.llSetRowPartial(0, true);
+    const rows = h.w.llBuildItemRows('L-NEW', h.w.llDraft.items);
+    ok('llBuildItemRows() носи partial за отметнатия документ',
+      rows[0].partial === true && rows[1].partial === true,
+      JSON.stringify(rows.map(r => r.partial)));
+    ok('и false за другия', rows[2].partial === false,
+      JSON.stringify(rows.map(r => r.partial)));
+
+    /* И обратната посока: отметката трябва да се ЧЕТЕ при редакция. Забрави ли
+       се тук, складът отмята „частично", записва, отваря пак — квадратчето е
+       празно и следващият запис мълчаливо изтрива отметката. */
+    const saved = [
+      it_({ id: 's1', list_id: 'LD', position: 1, pallet_no: 1, purchase_doc: 'D-1', partial: true }),
+      it_({ id: 's2', list_id: 'LD', position: 2, pallet_no: 2, purchase_doc: 'D-2', partial: false })
+    ];
+    h.w.llLists = [{ id: 'LD', warehouse: WH, list_date: '2026-09-03', status: 'draft',
+                     executed_by: '', comment: '' }];
+    h.w.llItems = saved;
+    h.w.llOpenEdit('LD');
+    ok('редакцията чете partial от записания ред',
+      h.w.llDraft.items[0].partial === true && h.w.llDraft.items[1].partial === false,
+      JSON.stringify(h.w.llDraft.items.map(i => i.partial)));
+  }
+
+  section('л) Праг от 20 палета при създаване — отказът връща стойността');
   {
     const h = env(WAREHOUSE, [], [], [], { confirm: false });
     h.w.llView = 'edit';
@@ -364,27 +487,27 @@ function patchesTo(h, table) { return h.calls.patch.filter(p => p.table === tabl
     h.w.llStores = ['Петрич', 'Гоце Делчев'];
     h.w.llDraft = { list_date: '2026-09-03', executed_by: 'Иван', comment: '', items: [] };
     h.w.llPendingDocs = [{ purchase_doc: 'D-100', store_name: 'Петрич',
-                           doc_date: '2026-09-01', items: 28, checked: false, pallets: 2 }];
+                           doc_date: '2026-09-01', items: 28, checked: false, pallet_spec: '2' }];
 
-    if (guard('llSetDocPallets(25) при confirm=false не хвърля',
-      () => h.w.llSetDocPallets(0, '25'))) {
-      ok('стойността се връща на предишната', h.w.llPendingDocs[0].pallets === 2,
-        String(h.w.llPendingDocs[0].pallets));
+    if (guard('llSetDocPallet(1-25) при confirm=false не хвърля',
+      () => h.w.llSetDocPallet(0, '1-25'))) {
+      ok('стойността се връща на предишната', h.w.llPendingDocs[0].pallet_spec === '2',
+        String(h.w.llPendingDocs[0].pallet_spec));
       ok('нула редове са материализирани', h.w.llDraft.items.length === 0,
         String(h.w.llDraft.items.length));
     }
     /* Под прага изобщо не пита. */
-    h.w.llSetDocPallets(0, '5');
-    ok('5 палета минават без въпрос', h.w.llPendingDocs[0].pallets === 5,
-      String(h.w.llPendingDocs[0].pallets));
+    h.w.llSetDocPallet(0, '1-5');
+    ok('5 палета минават без въпрос', h.w.llPendingDocs[0].pallet_spec === '1-5',
+      String(h.w.llPendingDocs[0].pallet_spec));
 
     h.w.confirm = () => true;
-    h.w.llSetDocPallets(0, '25');
-    ok('с потвърждение 25 се приемат', h.w.llPendingDocs[0].pallets === 25,
-      String(h.w.llPendingDocs[0].pallets));
+    h.w.llSetDocPallet(0, '1-25');
+    ok('с потвърждение 25 се приемат', h.w.llPendingDocs[0].pallet_spec === '1-25',
+      String(h.w.llPendingDocs[0].pallet_spec));
   }
 
-  section('к) Складът вижда кой и кога е получил (колоната от стъпка 2)');
+  section('м) Складът вижда кой и кога е получил (колоната от стъпка 2)');
   {
     const items = [
       it_({ id: 'i1', list_id: 'L1', purchase_doc: 'D-100', received: true,

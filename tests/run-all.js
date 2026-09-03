@@ -31,6 +31,7 @@ const TESTS = [
   'interstore-swap-signal.test.js',
   'loading-lists-warehouse.test.js',
   'loading-lists-store.test.js',
+  'loading-lists-pallets.test.js',
   'stock-diff-capitalized-counter.test.js',
   'stock-diff-chip-counts.test.js',
   'stock-diff-responsibility.test.js',

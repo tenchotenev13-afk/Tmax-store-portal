@@ -124,6 +124,16 @@ create table if not exists public.loading_list_items (
   warehouse_comment text,
   store_comment     text,
 
+  -- Частична пратка: с този товар тръгва само ЧАСТ от стоковия документ.
+  -- Добавена на 03.09.2026, след като автозатварянето вече работеше.
+  -- Без нея отмятането на палета затваряше ЦЕЛИЯ документ в goods_transit и
+  -- обектът губеше следа какво още му се дължи — при 75 от 1987 чакащи реда
+  -- (проверка на същата дата) частичното приемане вече е факт, не хипотеза.
+  -- Стойността е на ПРАТКАТА по документа, не на отделния палет: документ
+  -- върху три палета тръгва или цял, или не, затова клиентът я слага на
+  -- всичките му редове наведнъж.
+  partial       boolean not null default false,
+
   -- Потвърждението от обекта. received_by/received_at се пълнят от клиента
   -- в момента на отмятането — тригер няма.
   received      boolean not null default false,
@@ -151,6 +161,8 @@ comment on column public.loading_list_items.position is
   'Подредбата, както я е въвел складът. created_at не върши работа — редовете се записват накуп.';
 comment on column public.loading_list_items.warehouse_comment is
   'Коментарът на СКЛАДА. Отделен от store_comment нарочно: обектът не бива да може да го презапише.';
+comment on column public.loading_list_items.partial is
+  'Частична пратка: с този палет тръгва само част от стоковия документ. Отмятането НЕ затваря документа в goods_transit.';
 comment on column public.loading_list_items.received is
   'Отметката на обекта. received_by/received_at се пълнят от клиента при отмятането — няма тригер.';
 

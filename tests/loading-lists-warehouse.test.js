@@ -131,7 +131,7 @@ function itemPosts(calls) {
       !!s.doc.getElementById('tps-loading'));
   }
 
-  section('б) 2 документа (3 и 1 палета) + 1 ред насип → точно 5 реда');
+  section('б) Документ върху 3 палета + документ на свой палет + насип → 5 реда');
   {
     const h = env(WAREHOUSE);
     h.w.llNewList();
@@ -147,7 +147,9 @@ function itemPosts(calls) {
     const iA = h.w.llPendingDocs.indexOf(docA);
     const iB = h.w.llPendingDocs.indexOf(
       h.w.llPendingDocs.find(d => d.purchase_doc === '4600179700'));
-    h.w.llSetDocPallets(iA, '3');
+    /* Документ A е голям и се разстила върху три палета - затова обхват.
+       Документ B е за ДРУГ обект, тоест собствената му номерация тръгва от 1. */
+    h.w.llSetDocPallet(iA, '1-3');
     h.w.llToggleDoc(iA);
     h.w.llToggleDoc(iB);
     h.w.llAddFreeRow();
