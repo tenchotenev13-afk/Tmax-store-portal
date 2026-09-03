@@ -32,6 +32,7 @@ const TESTS = [
   'loading-lists-warehouse.test.js',
   'loading-lists-store.test.js',
   'loading-lists-pallets.test.js',
+  'loading-lists-notify.test.js',
   'stock-diff-capitalized-counter.test.js',
   'stock-diff-chip-counts.test.js',
   'stock-diff-responsibility.test.js',

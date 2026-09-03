@@ -76,6 +76,22 @@ function showLoginBanner(){
   if(!od.length&&!td.length&&!tm.length) html='<div class="notif-card success"><div class="notif-icon">✅</div><div class="notif-text"><div class="notif-title">Всичко е наред!</div><div class="notif-sub">Няма просрочени или спешни заявки.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   banner.innerHTML=html;banner.style.display='block';
 
+  /* Товарни листи за получаване. Картата е ЗА ОБЕКТА: глобалният профил и
+     самият склад отпадат вътре в notifLoadingListsPending(). */
+  notifLoadingListsPending(function(lists){
+    if(!lists || !lists.length) return;
+    var el=document.getElementById('notif-banner'); if(!el) return;
+    var n=lists.length;
+    /* onclick е на цялата карта, затова ✕ спира разпространението — иначе
+       затварянето би отваряло таба. */
+    var card='<div class="notif-card info" data-notif="loading" onclick="showModule(\'loading\')" style="cursor:pointer;">'+
+      '<div class="notif-icon">🚛</div><div class="notif-text">'+
+      '<div class="notif-title">'+n+(n===1?' товарен лист':' товарни листа')+' за получаване</div>'+
+      '<div class="notif-sub">Отметни палетите в Транспорт → Товарни листи</div>'+
+      '</div><span class="notif-close" onclick="event.stopPropagation();dismissCard(this)">✕</span></div>';
+    el.innerHTML=card+el.innerHTML; el.style.display='block';
+  });
+
   /* Нови задачи от Бюлетин през последните 3 дни, все още неотметнати от
      този магазин — само за store роли (не и за офиса, който сам ги пише). */
   if(!isGlobal() && currentUser.store_name) checkNewBulletinTasksBanner();
@@ -205,6 +221,82 @@ function playSound(){
   }catch(e){}
 }
 var _seenIds=null; /* Set от id-та на вече видени заявки — избягва фалшиви звуци при простo презареждане */
+/* Воден знак (ISO низ) за товарните листи, НЕ множество от id-та: листите са
+   малко и се четат с limit=20, тоест множеството би „забравило" стар лист,
+   изпаднал от прозореца, и би го обявил за нов при следващото му появяване.
+   Времето не забравя. */
+var _llWatermark=null;
+
+/* Кой изобщо получава известия за товарни листи. Отделен предикат, защото и
+   помощната функция, и звънецът трябва да го знаят: звънецът пита ПРЕДИ да
+   сложи воден знак, за да не заковава баселайн на потребител, който така или
+   иначе няма да получи нищо.
+   Глобалният профил няма „свой" обект, а логистичният склад е ИЗПРАЩАЧЪТ — на
+   него не му трябва известие за собствения му лист. */
+function notifWantsLoadingLists(){
+  if(!currentUser) return false;
+  if(!assignedStores()) return false;
+  if(typeof isLogisticsWarehouseUser==='function' && isLogisticsWarehouseUser()) return false;
+  return true;
+}
+
+/* ── Изпратените товарни листи, по които обектът има НЕПОЛУЧЕН ред ──
+   Едно място, защото и звънецът (checkNewLoadingLists), и картата при вход
+   (showLoginBanner) питат точно това. Две копия щяха да се разминат при
+   първата промяна на филтъра.
+   cb(null) значи „нямаме информация" — мрежов срив или празен резултат. Викащият
+   НЕ бива да мести водния знак при null, иначе следващият успешен цикъл обявява
+   всичко за ново. cb([...]) е реален отговор. */
+function notifLoadingListsPending(cb){
+  if(!notifWantsLoadingLists()){ cb(null); return; }
+  Promise.all([
+    sbGet('loading_lists','status=eq.sent&order=sent_at.desc&limit=20&select=id,warehouse,sent_at',true),
+    sbGet('loading_list_items','received=eq.false&select=list_id'+storeQ(),true)
+  ]).then(function(r){
+    var lists=Array.isArray(r[0])?r[0]:[];
+    var items=Array.isArray(r[1])?r[1]:[];
+    if(!lists.length || !items.length){ cb(null); return; }
+    var need={}; items.forEach(function(i){ if(i.list_id) need[i.list_id]=1; });
+    cb(lists.filter(function(l){ return need[l.id]; }));
+  }).catch(function(){ cb(null); });
+}
+/* Звънецът за нов товарен лист. Отделен от логиката за заявки нарочно: там
+   критерият е множество от id-та, тук е време — вплитането им би значело едно
+   от двете да работи наполовина. */
+function checkNewLoadingLists(){
+  if(!notifWantsLoadingLists()) return;
+  notifLoadingListsPending(function(lists){
+    /* ПЪРВИЯТ цикъл ВИНАГИ слага воден знак — и при празен отговор, и при
+       мрежов срив. Баселайн „сега" е безопасен: стар лист никога не е по-нов
+       от него, а лист, изпратен след това, се хваща. Оставането на null би
+       значело, че обект без нито един лист не чува ПЪРВИЯ си — при него всеки
+       цикъл щеше да е базов. Ако точно първият цикъл е попаднал на срив,
+       заварените листи ги показва картата при вход. */
+    if(_llWatermark===null){
+      var base='';
+      if(lists) lists.forEach(function(l){ if(l.sent_at && l.sent_at>base) base=l.sent_at; });
+      _llWatermark = base || new Date().toISOString();
+      return;
+    }
+    /* СЛЕД баселайна празният отговор е срив и знакът не мърда — иначе
+       следващият успешен цикъл обявява всичко за ново. */
+    if(!lists || !lists.length) return;
+    var maxTs=lists.reduce(function(m,l){ return (l.sent_at && l.sent_at>m)?l.sent_at:m; },'');
+    if(!maxTs) maxTs=_llWatermark; /* листи без sent_at — знакът не се връща назад */
+    var fresh=lists.filter(function(l){ return l.sent_at && l.sent_at>_llWatermark; });
+    if(fresh.length){
+      playSound();
+      toast(fresh.length===1
+        ? '🚛 Нов товарен лист от '+(fresh[0].warehouse||'склада')
+        : '🚛 '+fresh.length+' нови товарни листа','#2563eb');
+      /* Отвореният таб се опреснява сам. Няма глобал за текущия модул, затова
+         се пита самият контейнер — showModule() крие останалите с display. */
+      var mod=document.getElementById('mod-loading');
+      if(mod && mod.style.display!=='none' && typeof loadLoadingLists==='function') loadLoadingLists();
+    }
+    _llWatermark=maxTs;
+  });
+}
 
 function checkNewOrders(){
   if(!currentUser)return;
@@ -251,10 +343,13 @@ function checkNewOrders(){
     }
     _seenIds=currentSet;
   }).catch(function(){});
+  /* Отделно от заявките и НЕ вплетено в тяхната логика. */
+  checkNewLoadingLists();
 }
 function startPolling(){
   if(_poll)clearInterval(_poll);
   _seenIds=null; /* нулираме при всеки нов старт, за да хванем правилния базов snapshot */
+  _llWatermark=null;
   _poll=setInterval(checkNewOrders,30000);
 }
 
