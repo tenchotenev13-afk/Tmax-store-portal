@@ -379,6 +379,12 @@ function llStoreCardHtml(l){
   var got = items.filter(function(i){ return i.received; }).length;
   var open = !llCollapsed[l.id];
   var canAny = items.some(function(i){ return !i.received && llCanReceive(i); });
+  /* Обектът на картата — за печата. При глобален профил в един лист може да
+     има няколко обекта; тогава филтър няма и се печата целият лист. */
+  var seenS = {}, onlyStore = '';
+  items.forEach(function(i){ seenS[i.store_name || ''] = 1; });
+  var sKeys = Object.keys(seenS);
+  if(sKeys.length === 1) onlyStore = sKeys[0];
 
   var h = '<div id="ll-card-'+l.id+'" style="background:#fff;border:1px solid '+(got===items.length?'#bbf7d0':'#e2e8f0')+';border-left:4px solid '+(got===items.length?'#16a34a':'#2563eb')+';border-radius:10px;padding:12px;margin-bottom:10px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'+
@@ -387,6 +393,7 @@ function llStoreCardHtml(l){
         llStatusBadge(l.status)+'</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
         (open && canAny ? '<button data-id="'+l.id+'" onclick="llMarkAllReceived(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">✅ Всичко получено</button>' : '')+
+        '<button data-id="'+l.id+'" data-s="'+escVal(onlyStore)+'" onclick="llPrint(this.dataset.id,this.dataset.s)" title="Печат само на моята част от листа" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
         '<button data-id="'+l.id+'" onclick="llToggleCard(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 13px;font-size:12px;cursor:pointer;">'+(open?'▲ Свий':'▼ Разгъни')+'</button>'+
       '</div>'+
     '</div>';
@@ -1172,6 +1179,7 @@ function llViewHtml(){
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llOpenEdit(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✏️ Редакция</button>':'')+
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llSendList(this.dataset.id)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">📤 Изпратен</button>':'')+
       (l.status==='sent'?'<button data-id="'+l.id+'" onclick="llDoneList(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✅ Приключен</button>':'')+
+      '<button data-id="'+l.id+'" onclick="llPrint(this.dataset.id)" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
       '<button onclick="llBackToList()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 14px;font-size:12.5px;cursor:pointer;">← Назад</button>'+
     '</div></div>';
 
@@ -1234,4 +1242,186 @@ function llFmtStamp(val){
   if(val === null || val === undefined || val === '') return '—';
   var s = String(val), t = s.indexOf('T');
   return fmtDate(t >= 0 ? s.slice(0, t) : s);
+}
+
+/* ══════════════════════════════════════════
+   ПЕЧАТ НА ТОВАРЕН ЛИСТ („Протокол за товарене")
+   По образеца на renderDiffPrint() в stock-differences.js — същият in-page
+   модел: пише в #mod-print и вика showModule('print'), без window.open и без
+   библиотека. „Запази като PDF" е диалогът на самия браузър.
+══════════════════════════════════════════ */
+
+/* Логото е КОПИЕ на низа, не референция към DIFF_PRINT_LOGO. Дублирано
+   нарочно на две основания: вграденото base64 не зависи от мрежата (външен
+   <img src> може да не се дозареди преди диалога за печат и бланката излиза
+   без лого), и печатът тук не бива да зависи от това дали
+   stock-differences.js изобщо е зареден. */
+var LL_PRINT_LOGO = 'data:image/png;base64,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';
+
+/* storeFilter (по избор) — печата САМО частта на този обект. Магазинът
+   получава своя лист, не чуждите редове от същия курс. */
+function llPrint(listId, storeFilter){
+  var l = llLists.find(function(x){ return String(x.id) === String(listId); }) ||
+          llStoreLists.find(function(x){ return String(x.id) === String(listId); });
+  if(!l){ toast('Товарният лист не е намерен','#dc2626'); return; }
+  /* Складът държи редовете в llItems, обектът — в llStoreItems. */
+  var items = llItemsOf(listId);
+  if(!items.length) items = llStoreItemsOf(listId);
+  llRenderPrint(l, items, storeFilter);
+  showModule('print');
+}
+
+function llRenderPrint(list, items, storeFilter){
+  var wrap = document.getElementById('mod-print');
+  if(!wrap) return;
+  var rows = (items || []).filter(function(i){
+    return !storeFilter || i.store_name === storeFilter;
+  });
+  /* Подредба: обект, после палет №, после позиция. Групирането по-долу пази
+     реда на входа, тоест сортирането ТУК е това, което подрежда листа. */
+  rows = rows.slice().sort(function(a, b){
+    var s = String(a.store_name || '').localeCompare(String(b.store_name || ''));
+    if(s) return s;
+    var an = a.pallet_no == null ? 9999 : Number(a.pallet_no);
+    var bn = b.pallet_no == null ? 9999 : Number(b.pallet_no);
+    if(an !== bn) return an - bn;
+    return (a.position || 0) - (b.position || 0);
+  });
+
+  var PRINT_CSS =
+    '@media print{'+
+      '@page{size:A4 portrait;margin:10mm;}'+
+      '.no-print{display:none!important;}'+
+      'body{margin:0;padding:0;}'+
+      '.lp-row{page-break-inside:avoid;}'+
+    '}'+
+    '.lp-wrap{font-family:Arial,Helvetica,sans-serif;font-size:9pt;color:#111;width:190mm;max-width:190mm;margin:0 auto;}'+
+    '.lp-head{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:3mm;}'+
+    '.lp-wh{font-size:12pt;font-weight:700;margin-bottom:1mm;}'+
+    '.lp-logo{height:24pt;width:auto;flex-shrink:0;margin-left:8mm;}'+
+    '.lp-title{font-size:13pt;font-weight:700;text-align:center;letter-spacing:.04em;margin:2mm 0 1mm;}'+
+    '.lp-sub{font-size:9pt;text-align:center;color:#444;margin-bottom:4mm;}'+
+    '.lp-meta{width:100%;border-collapse:collapse;margin-bottom:3.5mm;}'+
+    '.lp-meta td{padding:.6mm 0;font-size:9pt;vertical-align:top;line-height:1.35;}'+
+    '.lp-meta td:first-child{width:42mm;font-weight:600;}'+
+    '.lp-note{border:1px solid #bbb;border-radius:1.5mm;padding:2mm 2.5mm;font-size:8.5pt;margin-bottom:3.5mm;}'+
+    '.lp-sec{font-size:9.5pt;font-weight:700;margin:0 0 2mm;}'+
+    '.lp-tbl{width:100%;border-collapse:collapse;margin-bottom:4mm;table-layout:fixed;}'+
+    /* Трите правила долу са заради ГЛОБАЛНИЯ CSS на index.html — печатът се
+       рендира В страницата и наследява целия ѝ стил (CLAUDE.md т.12):
+       1) white-space:normal бие index.html:67 th{white-space:nowrap}; без него
+          заглавия като „Коментар склад" не се пречупват и излизат от клетките;
+       2) box-sizing:border-box е задължително при table-layout:fixed — иначе
+          padding-ът се ДОБАВЯ върху ширината и последната колона пада извън
+          листа;
+       3) долната рамка на последния ред се възстановява, защото index.html:69
+          tr:last-child td{border-bottom:none} бие „.lp-tbl td" по специфичност
+          (0,1,2 срещу 0,1,1) и оставя таблицата отворена отдолу. */
+    '.lp-tbl th{box-sizing:border-box;border:1px solid #999;padding:1.2mm 0.8mm;font-size:7.5pt;text-align:left;background:#eee;font-weight:700;white-space:normal;word-break:normal;overflow-wrap:break-word;}'+
+    '.lp-tbl td{box-sizing:border-box;border:1px solid #bbb;padding:1.2mm 0.8mm;font-size:8pt;vertical-align:top;word-break:normal;overflow-wrap:break-word;}'+
+    '.lp-tbl tr:last-child td{border-bottom:1px solid #bbb;}'+
+    '.lp-num{text-align:right;}'+
+    '.lp-kind{font-weight:700;}'+
+    '.lp-tag{font-size:7pt;color:#92400e;white-space:nowrap;}'+
+    '.lp-who{font-size:7pt;}'+
+    /* Празното каре за ръчна отметка — листът често се разписва на хартия. */
+    '.lp-box{display:inline-block;width:4mm;height:4mm;border:1px solid #555;}'+
+    '.lp-sign{display:flex;flex-wrap:wrap;gap:6mm;border-top:1px dotted #999;padding-top:3mm;margin-top:2mm;}'+
+    '.lp-sign-item{flex:1 1 60mm;font-size:8.5pt;}'+
+    '.lp-dots{border-bottom:1px dotted #555;height:6mm;margin-bottom:1mm;}'+
+    '.lp-foot{font-size:7.5pt;color:#555;margin-top:3mm;}';
+
+  /* Обобщение по обект — същата сметка като llSummaryByStore() на екрана. */
+  var sum = llSummaryByStore(rows);
+  var sumHtml = sum.length
+    ? sum.map(function(s){
+        return '<tr class="lp-row"><td>'+esc(s.store)+'</td>'+
+          '<td class="lp-num">'+s.pallet+'</td>'+
+          '<td class="lp-num">'+s.roll+'</td>'+
+          '<td class="lp-num">'+s.bulk+'</td>'+
+          '<td class="lp-num">'+s.received+'/'+s.total+'</td></tr>';
+      }).join('')
+    : '<tr class="lp-row"><td>—</td><td class="lp-num">0</td><td class="lp-num">0</td><td class="lp-num">0</td><td class="lp-num">0/0</td></tr>';
+
+  /* Таблицата по товарни единици. Документ върху няколко палета дава по един
+     ред във ВСЕКИ палет — точно както е в базата. Няколко документа на един
+     палет дават редове един под друг, а видът се изписва веднъж с rowspan. */
+  var n = 0;
+  var bodyHtml = llPalletGroups(rows).map(function(g){
+    return g.rows.map(function(it, k){
+      n++;
+      var doc = it.purchase_doc ? esc(it.purchase_doc) : '<span style="color:#777;">без</span>';
+      if(it.clears_doc) doc += '<div class="lp-tag">изчиства '+esc(it.clears_doc)+'</div>';
+      if(it.partial)    doc += '<div class="lp-tag">частично</div>';
+      return '<tr class="lp-row" data-store="'+escVal(it.store_name || '')+'">'+
+        '<td class="lp-num">'+n+'</td>'+
+        (k === 0 ? '<td class="lp-kind" rowspan="'+g.rows.length+'">'+esc(llKindLabel(g.rows[0]))+'</td>' : '')+
+        '<td>'+doc+'</td>'+
+        '<td>'+esc(it.store_name || '—')+'</td>'+
+        '<td>'+esc(it.warehouse_comment || '—')+'</td>'+
+        '<td>'+esc(it.store_comment || '—')+'</td>'+
+        '<td class="lp-who">'+(it.received
+          ? '✔ '+esc(it.received_by || '')+(it.received_at ? '<div class="lp-tag">'+llFmtStamp(it.received_at)+'</div>' : '')
+          : '<span class="lp-box"></span>')+'</td>'+
+      '</tr>';
+    }).join('');
+  }).join('');
+  if(!bodyHtml){
+    bodyHtml = '<tr class="lp-row"><td colspan="7" style="text-align:center;color:#777;">Няма редове</td></tr>';
+  }
+
+  var now = new Date();
+  var pad = function(x){ return (x < 10 ? '0' : '') + x; };
+  var stamp = pad(now.getDate())+'.'+pad(now.getMonth()+1)+'.'+now.getFullYear()+' '+
+              pad(now.getHours())+':'+pad(now.getMinutes());
+
+  wrap.innerHTML =
+    '<style>'+PRINT_CSS+'</style>'+
+    '<div style="max-width:820px;margin:0 auto;padding:16px 16px 40px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;" class="no-print">'+
+        '<div style="font-size:18px;font-weight:600;">🖨 Товарен лист</div>'+
+        '<div style="display:flex;gap:8px;align-items:center;">'+
+          '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>'+
+          '<button onclick="showModule(\'loading\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Назад</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="lp-wrap">'+
+        '<div class="lp-head">'+
+          '<div><div class="lp-wh">'+esc(list.warehouse || '')+'</div></div>'+
+          '<img src="'+LL_PRINT_LOGO+'" class="lp-logo" alt="TeMAX">'+
+        '</div>'+
+        '<div class="lp-title">ТОВАРЕН ЛИСТ'+(storeFilter ? ' — '+esc(storeFilter) : '')+'</div>'+
+        '<div class="lp-sub">Протокол за товарене</div>'+
+        '<table class="lp-meta">'+
+          '<tr><td>Склад изпращач:</td><td>'+esc(list.warehouse || '—')+'</td></tr>'+
+          '<tr><td>Дата на товарене:</td><td>'+fmtDate(list.list_date)+'</td></tr>'+
+          '<tr><td>Товарил:</td><td>'+esc(list.executed_by || '—')+'</td></tr>'+
+          '<tr><td>Статус:</td><td>'+esc(llStatusMeta(list.status)[1])+'</td></tr>'+
+          '<tr><td>Изпратен:</td><td>'+llFmtStamp(list.sent_at)+'</td></tr>'+
+          '<tr><td>Приключен:</td><td>'+llFmtStamp(list.done_at)+'</td></tr>'+
+        '</table>'+
+        (list.comment ? '<div class="lp-note"><b>Коментар:</b> '+esc(list.comment)+'</div>' : '')+
+        '<div class="lp-sec">Обобщение по обекти</div>'+
+        '<table class="lp-tbl">'+
+          '<colgroup><col style="width:70mm;"><col style="width:30mm;"><col style="width:30mm;"><col style="width:30mm;"><col style="width:30mm;"></colgroup>'+
+          '<tr><th>Обект</th><th>Палети</th><th>Рула</th><th>Насип</th><th>Получени</th></tr>'+
+          sumHtml+
+        '</table>'+
+        '<div class="lp-sec">Товарни единици</div>'+
+        '<table class="lp-tbl">'+
+          /* Фиксирани ширини, сума точно 190mm (полезната ширина на A4 при
+             10mm полета). Спазват се дословно само защото клетките са с
+             box-sizing:border-box — виж PRINT_CSS.
+             8+26+34+26+34+30+32 = 190 */
+          '<colgroup><col style="width:8mm;"><col style="width:26mm;"><col style="width:34mm;"><col style="width:26mm;"><col style="width:34mm;"><col style="width:30mm;"><col style="width:32mm;"></colgroup>'+
+          '<tr><th>№</th><th>Вид</th><th>Стокова №</th><th>Обект</th><th>Коментар склад</th><th>Коментар обект</th><th>Получено</th></tr>'+
+          bodyHtml+
+        '</table>'+
+        '<div class="lp-sign">'+
+          '<div class="lp-sign-item"><div class="lp-dots"></div>Товарил: име и подпис</div>'+
+          '<div class="lp-sign-item"><div class="lp-dots"></div>Приел: име и подпис</div>'+
+        '</div>'+
+        '<div class="lp-foot">Отпечатано '+esc(stamp)+' от '+esc(llActor())+'</div>'+
+      '</div>'+
+    '</div>';
 }
