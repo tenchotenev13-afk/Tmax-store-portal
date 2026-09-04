@@ -42,6 +42,7 @@ const TESTS = [
   'stock-diff-status-new.test.js',
   'stock-diff-print.test.js',
   'diff-print-supplier-col.test.js',
+  'print-transport-marker.test.js',
   'diff-delete-report.test.js',
   'diff-email-internal-comment.test.js',
   'diff-email-recipients-files.test.js',

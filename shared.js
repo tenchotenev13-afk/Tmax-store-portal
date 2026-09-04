@@ -394,7 +394,7 @@ function resolveItems(o){
 }
 function itemsPrintLine(o){
   return resolveItems(o).map(function(it){
-    return (it.sap?esc(it.sap)+' - ':'')+esc(it.product||'')+(it.color?' ('+esc(it.color)+')':'')+' — '+esc(String(it.qty||1))+' '+esc(it.unit||'бр.');
+    return (it.sap?'<b style="font-family:monospace;font-size:11pt;">'+esc(it.sap)+'</b> - ':'')+esc(it.product||'')+(it.color?' ('+esc(it.color)+')':'')+' — '+esc(String(it.qty||1))+' '+esc(it.unit||'бр.');
   }).join('<br>');
 }
 function itemsPrintBlock(o){
@@ -403,7 +403,7 @@ function itemsPrintBlock(o){
     return '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 9px;'+(i<items.length-1?'border-bottom:1px solid #eee;':'')+'">'+
       '<div><div style="font-size:12px;font-weight:700;">'+esc(it.product||'')+'</div>'+
       (it.color?'<div style="font-size:10px;color:#888;">'+esc(it.color)+'</div>':'')+
-      (it.sap?'<div style="font-size:9px;color:#aaa;">SAP: '+esc(it.sap)+'</div>':'')+'</div>'+
+      (it.sap?'<div style="font-size:12px;font-weight:700;font-family:monospace;color:#111;">SAP: '+esc(it.sap)+'</div>':'')+'</div>'+
       '<div style="font-size:12px;font-weight:700;white-space:nowrap;">'+esc(String(it.qty||1))+' '+esc(it.unit||'бр.')+'</div>'+
     '</div>';
   }).join('');
