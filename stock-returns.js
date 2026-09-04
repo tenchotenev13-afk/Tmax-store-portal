@@ -12,8 +12,14 @@ var srEditId = null;
 var srTab    = 'diff'; /* 'diff' = по разлики (автоматично) | 'complaint' = по рекламации/срок на годност */
 var srSearch = '';
 var srStoreFilter = '';
+/* Точен филтър по доставчик - в "По рекламации" доставчиците са 46, тоест
+   чипове като при магазините биха заели половин екран. Оттук и падащото меню. */
+var srSupplierFilter = '';
 function setSRStoreFilter(val){ srStoreFilter=val; renderStockReturns(); }
-function setSRTab(t){ srTab=t; srEditId=null; srStoreFilter=''; renderStockReturns(); }
+function setSRSupplierFilter(val){ srSupplierFilter=val||''; renderStockReturns(); }
+/* Двата подтаба са различни набори и доставчици, и магазини - запазен избор от
+   другия таб би дал празен екран. */
+function setSRTab(t){ srTab=t; srEditId=null; srStoreFilter=''; srSupplierFilter=''; renderStockReturns(); }
 /* Пре-рендира при търсене, но запазва фокуса/позицията на курсора в полето */
 function setSRSearch(val){
   srSearch=val;
@@ -53,6 +59,32 @@ function loadStockReturns() {
   });
 }
 
+/* Редовете, които в момента се виждат на екрана - активният подтаб плюс всички
+   филтри. Изнесено от renderStockReturns(), защото Excel износът трябва да дава
+   ТОЧНО видяното: два отделни списъка неминуемо се разминават, а разминаването
+   се забелязва чак когато доставчикът получи грешния файл. */
+function srFilteredList(){
+  var tabData = srData.filter(function(r){ return (r.source||'diff') === srTab; });
+  return tabData.filter(function(r) {
+    if (srFilter === 'pending')  { if (r.status !== 'pending') return false; }
+    else if (srFilter === 'taken') { if (r.status !== 'taken') return false; }
+    else if (srFilter === 'completed') { if (r.status !== 'completed') return false; }
+    /* Точните филтри по магазин и доставчик са ОТДЕЛНИ от свободното търсене
+       по-долу, за да не се влияят от текст в коментари/причини, споменаващи
+       друг магазин или друга фирма (напр. коментар "изпратено към ЛС
+       Търговище" не бива да кара запис на друг магазин да се показва при
+       филтър "Търговище"). */
+    if (srStoreFilter && r.store_name !== srStoreFilter) return false;
+    if (srSupplierFilter && r.supplier !== srSupplierFilter) return false;
+    if (srSearch) {
+      var q = srSearch.toLowerCase();
+      var hay = [r.store_name,r.supplier,r.product_name,r.sap_code,r.order_number,r.purchase_order,r.id_euro,r.reason,r.control_comment,r.controller_comment,r.courier_info].join(' ').toLowerCase();
+      if (hay.indexOf(q) === -1) return false;
+    }
+    return true;
+  });
+}
+
 function renderStockReturns() {
   var wrap = document.getElementById('mod-stock-returns');
   if (!wrap) return;
@@ -61,22 +93,7 @@ function renderStockReturns() {
   var canAdd  = canAddSR();
 
   var tabData = srData.filter(function(r){ return (r.source||'diff') === srTab; });
-  var list = tabData.filter(function(r) {
-    if (srFilter === 'pending')  { if (r.status !== 'pending') return false; }
-    else if (srFilter === 'taken') { if (r.status !== 'taken') return false; }
-    else if (srFilter === 'completed') { if (r.status !== 'completed') return false; }
-    /* Точен филтър по магазин - ОТДЕЛЕН от свободното търсене по-долу, за да
-       не се влияе от текст в коментари/причини, споменаващи друг магазин
-       (напр. коментар "изпратено към ЛС Търговище" не бива да кара запис на
-       друг магазин да се показва при филтър "Търговище"). */
-    if (srStoreFilter && r.store_name !== srStoreFilter) return false;
-    if (srSearch) {
-      var q = srSearch.toLowerCase();
-      var hay = [r.store_name,r.supplier,r.product_name,r.sap_code,r.order_number,r.purchase_order,r.id_euro,r.reason,r.control_comment,r.controller_comment,r.courier_info].join(' ').toLowerCase();
-      if (hay.indexOf(q) === -1) return false;
-    }
-    return true;
-  });
+  var list = srFilteredList();
 
   var pending = tabData.filter(function(r){ return r.status==='pending'; }).length;
   var taken   = tabData.filter(function(r){ return r.status==='taken'; }).length;
@@ -106,6 +123,22 @@ function renderStockReturns() {
     });
     h += '</div>';
 
+  /* Падащо меню по доставчик. В "По рекламации" доставчиците са 46 - чипове
+     като при магазините не стават. Празен доставчик не се предлага: опция
+     без стойност би изглеждала като втори "Всички". */
+  var suppliersInTab = tabData.map(function(r){ return r.supplier; })
+    .filter(function(sp,i,arr){ return sp && String(sp).trim() && arr.indexOf(sp)===i; })
+    .sort(function(a,b){ return String(a).localeCompare(String(b),'bg'); });
+  h += '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;">';
+  h += '<label for="sr-supplier-select" style="font-size:11.5px;font-weight:600;color:#64748b;">Доставчик</label>';
+  h += '<select id="sr-supplier-select" onchange="setSRSupplierFilter(this.value)" style="min-width:260px;max-width:420px;border:1px solid #e2e8f0;border-radius:8px;padding:6px 10px;font-size:12.5px;font-family:inherit;background:#fff;color:#0f172a;cursor:pointer;">';
+  h += '<option value=""'+(srSupplierFilter?'':' selected')+'>-- Всички доставчици --</option>';
+  suppliersInTab.forEach(function(sp){
+    var cnt = tabData.filter(function(r){ return r.supplier===sp; }).length;
+    h += '<option value="'+escAttr(sp)+'"'+(srSupplierFilter===sp?' selected':'')+'>'+esc(sp)+' ('+cnt+')</option>';
+  });
+  h += '</select></div>';
+
   /* Подтабове */
   h += '<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-width:560px;">';
   [['diff','🔄 По разлики'],['complaint','📋 По рекламации / срок на годност']].forEach(function(t){
@@ -133,6 +166,9 @@ function renderStockReturns() {
     var a = srFilter===f[0];
     h += '<button data-f="'+f[0]+'" onclick="setSRFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
   });
+  /* Показва се винаги, включително при празен списък - иначе изчезването на
+     бутона изглежда като счупен екран. Празният случай се хваща вътре. */
+  h += '<button onclick="exportSRExcel()" style="margin-left:auto;border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">📥 Excel</button>';
   h += '</div>';
 
   /* Таблица */
@@ -733,6 +769,108 @@ function parseComplaintReturnsSheet(wb,progEl){
       created_by:currentUser.display_name||currentUser.email
     };
   }).filter(function(x){return x.product_name;});
+}
+/* ── ЕКСПОРТ EXCEL ──
+   Цветелина праща на доставчика какво има да вземе при него; досега това
+   ставаше със скрийншот. Изнася се ТОЧНО текущо филтрираният списък
+   (srFilteredList), не целият подтаб - два отделни списъка неминуемо се
+   разминават, а разминаването се вижда чак когато доставчикът получи грешния
+   файл.
+
+   Двата подтаба имат НАРОЧНО различен формат:
+   · "По разлики" - заглавен блок с приложените филтри, файл за четене от човек;
+   · "По рекламации" - БЕЗ заглавен блок, ред 1 са заглавията, защото файлът
+     трябва да може да се върне обратно през импорта. parseComplaintReturnsSheet
+     чете първия ред като имена на колони (sheet_to_json), тоест заглавен блок
+     отгоре би направил кръга износ -> редакция -> импорт невъзможен.
+     Заглавията са ПЪРВИТЕ псевдоними от SR_IMPORT_COL_ALIASES - същият списък,
+     срещу който сверява самият вносител, вместо втори, който би се разминал. */
+function exportSRExcel(){
+  if(!window.XLSX){
+    var sc=document.createElement('script');
+    /* Същият CDN като при импорта (startReturnsImport) - един източник, за да
+       не се теглят две различни копия на SheetJS в една сесия. */
+    sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload=function(){ exportSRExcel(); };
+    sc.onerror=function(){ toast('Грешка при зареждане на SheetJS','#dc2626'); };
+    document.head.appendChild(sc);
+    return;
+  }
+  var list=srFilteredList();
+  if(!list.length){ toast('Няма редове за износ','#dc2626'); return; }
+
+  /* Етикети, не кодове: файлът отива при доставчика, "taken" не му говори. */
+  var ROW_STATUS={pending:'Невзета',taken:'Взета',completed:'Приключена'};
+  var FILTER_LABEL={all:'Всички',pending:'Невзета',taken:'Взета',completed:'Приключени'};
+  /* Празната дата излиза празна, не с тире: в "По рекламации" клетката се чете
+     обратно от импорта, а "—" там е боклук, не липсваща стойност. */
+  var fd=function(v){ return v?fmtDate(v):''; };
+  /* Локална транслитерация само за името на файла - "КАМ-04" става "kam-04".
+     Кирилица в име на файл оцелява през браузъра, но не и през всеки пощенски
+     клиент и споделена папка по пътя до доставчика. */
+  var translit=function(str){
+    var M={'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ж':'zh','з':'z','и':'i',
+           'й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s',
+           'т':'t','у':'u','ф':'f','х':'h','ц':'ts','ч':'ch','ш':'sh','щ':'sht',
+           'ъ':'a','ь':'y','ю':'yu','я':'ya'};
+    return String(str||'').toLowerCase().split('').map(function(ch){
+      return M.hasOwnProperty(ch)?M[ch]:ch;
+    }).join('').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+  };
+
+  var aoa, cols, sheetName;
+  if(srTab==='diff'){
+    aoa=[
+      ['ТеМАХ — Стока за връщане'],
+      ['Доставчик: '+(srSupplierFilter||'всички')],
+      ['Магазин: '+(srStoreFilter||'всички')],
+      ['Статус: '+(FILTER_LABEL[srFilter]||srFilter)],
+      ['Дата: '+fmtDate(today())],
+      [],
+      ['Продукт','SAP','Кол.','Поръчка','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик',
+       'Дата докум.','Завод','Статус','Дата изтегляне','Изтеглена с','Коментар']
+    ];
+    list.forEach(function(r){
+      aoa.push([
+        r.product_name||'', r.sap_code||'', (r.quantity!=null?r.quantity:''),
+        r.order_number||'', r.purchase_order||'', r.id_euro||'',
+        r.store_name||'', r.supplier||'', fd(r.doc_date), r.plant||'',
+        ROW_STATUS[r.status]||r.status||'', fd(r.withdrawal_date),
+        r.courier_info||'',
+        /* Същият низ, който стои в колоната "Коментар" на екрана. */
+        r.reason||r.control_comment||r.controller_comment||''
+      ]);
+    });
+    cols=[{wch:34},{wch:10},{wch:7},{wch:14},{wch:14},{wch:12},{wch:16},{wch:22},
+          {wch:12},{wch:8},{wch:12},{wch:14},{wch:18},{wch:26}];
+    sheetName='По разлики';
+  } else {
+    var AL=SR_IMPORT_COL_ALIASES;
+    aoa=[[AL.product[0],AL.sap[0],AL.qty[0],AL.store[0],AL.supplier[0],
+          AL.expiry[0],AL.reason[0],'Статус']];
+    list.forEach(function(r){
+      aoa.push([
+        r.product_name||'', r.sap_code||'', (r.quantity!=null?r.quantity:''),
+        r.store_name||'', r.supplier||'', fd(r.expiry_date),
+        /* Само reason: това е полето, което импортът пише в тази колона.
+           control_comment/controller_comment не са част от формата на импорта
+           и добавени тук биха се върнали обратно като "причина". */
+        r.reason||'',
+        ROW_STATUS[r.status]||r.status||''
+      ]);
+    });
+    cols=[{wch:34},{wch:10},{wch:7},{wch:16},{wch:22},{wch:14},{wch:26},{wch:12}];
+    sheetName='По рекламации';
+  }
+
+  var wb=window.XLSX.utils.book_new();
+  var ws=window.XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=cols;
+  window.XLSX.utils.book_append_sheet(wb,ws,sheetName);
+  var fname='za-vrashtane-'+(srTab==='diff'?'razliki':'reklamacii')+'-'+
+            (srSupplierFilter?translit(srSupplierFilter):'vsichki')+'-'+today()+'.xlsx';
+  window.XLSX.writeFile(wb,fname);
+  toast('✅ Excel изтеглен! ('+list.length+' реда)');
 }
 function srBatchImport(rows,onProgress,onDone){
   var BATCH=300;
