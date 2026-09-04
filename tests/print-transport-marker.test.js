@@ -123,6 +123,25 @@ section('1. Транспортна бланка: визуален маркер')
     ok('ширината 190mm е непроменена', /\.p-wrap\{[^}]*width:190mm/.test(html));
     ok('полето 10mm е непроменено', html.indexOf('@page{size:A4 portrait;margin:10mm;}') >= 0);
 
+    /* Обвивката около .p-wrap е max-width:680px + padding:16px и НЕ е
+       .no-print, тоест в печата свиваше съдържанието до 171.46mm, а
+       .p-wrap е твърдо 190mm — листът тръгваше от 9.27mm и свършваше на
+       199.27mm, значи логото вдясно падаше ИЗЦЯЛО извън печатната площ.
+       Мерено в браузър, jsdom не смята лейаут. Решението е по модела на
+       .cp-wrap в client-orders.js. */
+    const wrapper = root.querySelector('div.tp-wrap');
+    if (ok('обвивката има клас tp-wrap', !!wrapper)) {
+      ok('inline стилът за екрана е запазен', /max-width:680px/.test(wrapper.getAttribute('style')));
+      ok('.p-wrap е вътре в обвивката', !!wrapper.querySelector('.p-wrap'));
+    }
+
+    /* Правилото ТРЯБВА да е вътре в @media print — вън от него би разпънало
+       и екранния преглед. Срезът свършва на .p-wrap{, първото правило
+       СЛЕД затварянето на медия блока. */
+    const printBlock = html.slice(html.indexOf('@media print{'), html.indexOf('.p-wrap{'));
+    ok('.tp-wrap правилото е ВЪТРЕ в @media print',
+      printBlock.indexOf('.tp-wrap{max-width:none!important;padding:0!important;}') >= 0, printBlock);
+
     ok('логото TeMAX е останало', /class="p-logo"/.test(html));
     ok('името на магазина е останало', html.indexOf('Враца') >= 0);
   }

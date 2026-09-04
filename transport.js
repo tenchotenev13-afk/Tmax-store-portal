@@ -308,6 +308,7 @@ function renderTransportPrint(o){
       '@page{size:A4 portrait;margin:10mm;}'+
       '.no-print{display:none!important;}'+
       'body{margin:0;padding:0;}'+
+      '.tp-wrap{max-width:none!important;padding:0!important;}'+
     '}'+
     '.p-wrap{font-family:Arial,Helvetica,sans-serif;font-size:9.5pt;color:#111;width:190mm;max-width:190mm;margin:0 auto;}'+
     '.p-half{padding:5mm 0 4mm;}'+
@@ -365,7 +366,7 @@ function renderTransportPrint(o){
 
   wrap.innerHTML=
     '<style>'+PRINT_CSS+'</style>'+
-    '<div style="max-width:680px;margin:0 auto;padding:16px 16px 40px;">'+
+    '<div class="tp-wrap" style="max-width:680px;margin:0 auto;padding:16px 16px 40px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;" class="no-print">'+
         '<div style="font-size:18px;font-weight:600;">🖨 Бланка за шофьора</div>'+
         '<div style="display:flex;gap:8px;">'+
