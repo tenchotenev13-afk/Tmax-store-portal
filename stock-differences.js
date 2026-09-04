@@ -764,6 +764,10 @@ function autoCreateReturnFromDiff(line,cb){
       product_name:line.material_name,
       sap_code:line.material_code,
       quantity:line.quantity,
+      /* Номерът на поръчката пътува заедно с реда - без него в "За връщане"
+         не се вижда по коя поръчка е дошъл излишъкът и връзката се търси на
+         ръка обратно в "Разлики". '' от празно поле става null. */
+      order_number:line.order_number||null,
       reason:'Излишък от разлика'+(line.supplier?' — '+line.supplier:''),
       status:'pending',
       source:'diff',
@@ -1502,7 +1506,8 @@ function submitSD() {
         supplier:      data.supplier,
         material_name: data.material_name,
         material_code: data.material_code,
-        quantity:      data.quantity
+        quantity:      data.quantity,
+        order_number:  data.order_number
       },finish);
       return;
     }

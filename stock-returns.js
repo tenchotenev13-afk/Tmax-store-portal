@@ -72,7 +72,7 @@ function renderStockReturns() {
     if (srStoreFilter && r.store_name !== srStoreFilter) return false;
     if (srSearch) {
       var q = srSearch.toLowerCase();
-      var hay = [r.store_name,r.supplier,r.product_name,r.sap_code,r.purchase_order,r.id_euro,r.reason,r.control_comment,r.controller_comment,r.courier_info].join(' ').toLowerCase();
+      var hay = [r.store_name,r.supplier,r.product_name,r.sap_code,r.order_number,r.purchase_order,r.id_euro,r.reason,r.control_comment,r.controller_comment,r.courier_info].join(' ').toLowerCase();
       if (hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -95,7 +95,7 @@ function renderStockReturns() {
   /* Търсене + табове по магазин - вече еднакво и за двата подтаба */
   var storesInTab=tabData.map(function(r){return r.store_name;}).filter(function(s,i,arr){return s&&arr.indexOf(s)===i;}).sort();
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">';
-  h += '<input id="sr-search-input" value="'+escVal(srSearch)+'" oninput="setSRSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик, артикул, SAP, ПВ-ЕВР, ИД-ЕВРО..." style="flex:1;min-width:260px;max-width:460px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;">';
+  h += '<input id="sr-search-input" value="'+escVal(srSearch)+'" oninput="setSRSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик, артикул, SAP, поръчка, ПВ-ЕВР, ИД-ЕВРО..." style="flex:1;min-width:260px;max-width:460px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;">';
   h += '</div>';
   h += '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px;">';
   h += '<button onclick="setSRStoreFilter(\'\')" style="border:1px solid '+(!srStoreFilter?'#2563eb':'#e2e8f0')+';background:'+(!srStoreFilter?'#eff6ff':'#fff')+';color:'+(!srStoreFilter?'#2563eb':'#64748b')+';border-radius:20px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">🏪 Всички ('+tabData.length+')</button>';
@@ -157,7 +157,10 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
   var h = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1300px;">';
   h += '<thead><tr style="background:#f8fafc;">';
-  ['Продукт','SAP','Кол.','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Дата изтегляне','Изтеглена с','Коментар',''].forEach(function(c,ci,arr){
+  /* "Поръчка" е номерът на поръчката от изходната разлика (order_number) -
+     различно поле от "ПВ-ЕВР" (purchase_order), което е от стария ERP износ.
+     Само за показване: не се редактира от модала, попълва се автоматично. */
+  ['Продукт','SAP','Кол.','Поръчка','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Дата изтегляне','Изтеглена с','Коментар',''].forEach(function(c,ci,arr){
     var last=(ci===arr.length-1);
     h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
   });
@@ -169,6 +172,9 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;max-width:180px;">'+esc(r.product_name||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.sap_code||'')+'</td>'+
       '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+((r.quantity)||'')+'</td>'+
+      /* escVal, не esc: esc('') връща тире, а празната поръчка трябва да е
+         празна клетка. Съседната ПВ-ЕВР показва тире - разликата е нарочна. */
+      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+escVal(r.order_number)+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.purchase_order||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.id_euro||'')+'</td>'+
       '<td style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+

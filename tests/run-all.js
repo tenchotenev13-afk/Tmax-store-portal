@@ -50,6 +50,7 @@ const TESTS = [
   'admin-user-create-select.test.js',
   'store-cache-invalidation.test.js',
   'return-proof.test.js',
+  'stock-returns-order-number.test.js',
   'sd-badge-hidden-tab.test.js',
   'delete-three-states.test.js',
   'storno-embed-no-in-list.test.js',
