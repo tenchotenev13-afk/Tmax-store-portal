@@ -46,15 +46,15 @@ function diffRow(o) {
   }, o);
 }
 
-function diffEnv(rows) {
-  const h = boot({
+function diffEnv(rows, over) {
+  const h = boot(Object.assign({
     modules: ['stock-returns.js', 'stock-differences.js'],
     user: CVETI, confirm: true,
     data: {
       stock_differences: rows, differences_reports: [REPORT],
       stock_returns: [], users: [], sap_catalog: []
     }
-  });
+  }, over || {}));
   h.w.sdData = JSON.parse(JSON.stringify(rows));
   h.w.diffReports = JSON.parse(JSON.stringify([REPORT]));
   h.w.sdFilter = 'all';
@@ -64,6 +64,7 @@ function diffEnv(rows) {
 }
 
 const srPost = calls => calls.post.filter(x => x.table === 'stock_returns');
+const srPatch = calls => calls.patch.filter(x => /stock_returns/.test(x.url));
 
 /* Попълва полетата на модала „Разлики". Имената са id-тата от openSDModal. */
 function fillSD(doc, v) {
@@ -130,6 +131,13 @@ function headers(doc) {
   if (!table) return null;
   return Array.prototype.map.call(table.querySelectorAll('thead th'),
     th => th.textContent.trim());
+}
+/* jsdom нормализира style.background към rgb() — сравняваме по нормализирана
+   форма, за да не зависи проверката от начина на записване на цвета. */
+const RED = 'rgb(220, 38, 38)';   /* = #dc2626 */
+function toastBg(doc) {
+  const raw = (doc.getElementById('toast') || { style: {} }).style.background || '';
+  return raw === '#dc2626' ? RED : raw;
 }
 /* Клетките на първия ред с данни. */
 function cells(doc) {
@@ -276,12 +284,15 @@ function cells(doc) {
           ok('клетката „ПВ-ЕВР" показва СВОЯТА стойност, не поръчката',
             cs[iPv] === 'PV-777', JSON.stringify(cs[iPv]));
         }
-        /* Ред без поръчка — празна клетка, не тире. */
+        /* Ред без поръчка — тире, точно както съседната ПВ-ЕВР. Клетката
+           минава през esc(), а esc('') връща тире (shared.js). */
         const rows = doc.getElementById('mod-stock-returns').querySelectorAll('tbody tr');
         if (ok('вторият ред се рендира', rows.length === 2, 'редове: ' + rows.length)) {
           const c2 = Array.prototype.map.call(rows[1].querySelectorAll('td'),
             td => td.textContent.trim());
-          ok('ред без поръчка → празна клетка', c2[iOrd] === '', JSON.stringify(c2[iOrd]));
+          ok('ред без поръчка → тире', c2[iOrd] === '—', JSON.stringify(c2[iOrd]));
+          ok('същото като съседната празна ПВ-ЕВР', c2[iOrd] === c2[iPv],
+            JSON.stringify(c2[iOrd]) + ' срещу ' + JSON.stringify(c2[iPv]));
         }
       }
     }
@@ -336,6 +347,99 @@ function cells(doc) {
     if (guard('търсене на несъществуващ номер', () => w.setSRSearch('4100000000'))) {
       const rows = doc.getElementById('mod-stock-returns').querySelectorAll('tbody tr');
       ok('несъществуващ номер не връща редове', rows.length === 0, 'редове: ' + rows.length);
+    }
+  }
+
+  section('ж) Редакция на решена разлика → номерът стига до вече създаденото връщане');
+  {
+    /* Обичайният ред на работа: магазинът подава бланка БЕЗ номер (формата
+       submitDiffReport не пише order_number), Цвети решава "Връщане" с бутона
+       на реда, и чак после въвежда номера в модала. Дотук връщането вече
+       съществува, значи autoCreateReturnFromDiff излиза веднага — без този
+       PATCH номерът никога не би стигнал до "За връщане". */
+    const { w, doc, calls } = diffEnv([diffRow({
+      id: 'l-g', order_number: null, type: 'return', status: 'pending'
+    })]);
+    if (guard('модалът за редакция се отваря', () => w.openSDModal('l-g'))) {
+      doc.getElementById('sd-order').value = '4100135756';
+      realClick(w, btn(doc.getElementById('sd-ov'), 'Запази'));
+      await ticks();
+
+      ok('разликата пак се записва',
+        calls.patch.some(p => /stock_differences/.test(p.url)),
+        calls.patch.map(p => p.url).join(' | '));
+
+      const sp = srPatch(calls);
+      if (ok('има PATCH към stock_returns', sp.length === 1,
+        'брой: ' + sp.length + ' | ' + calls.patch.map(p => p.url).join(' | '))) {
+        ok('заявката е по diff_line_id на редактирания ред',
+          sp[0].url.indexOf('diff_line_id=eq.l-g') >= 0, sp[0].url);
+        ok('заявката е стеснена до source=eq.diff',
+          sp[0].url.indexOf('source=eq.diff') >= 0, sp[0].url);
+        ok('тялото носи новия номер', sp[0].body.order_number === '4100135756',
+          JSON.stringify(sp[0].body));
+        ok('тялото носи САМО order_number — нищо друго не се пипа',
+          Object.keys(sp[0].body).join(',') === 'order_number',
+          Object.keys(sp[0].body).join(','));
+      }
+      ok('няма червен toast при успех',
+        !calls.toast.some(t => String(t).indexOf('не е обновено') >= 0),
+        calls.toast.join(' | '));
+    }
+  }
+
+  section('з) Редакция с тип „Липса" → НЯМА PATCH към stock_returns');
+  {
+    const { w, doc, calls } = diffEnv([diffRow({
+      id: 'l-h', order_number: '4100135756', type: 'return', status: 'pending'
+    })]);
+    if (guard('модалът за редакция се отваря', () => w.openSDModal('l-h'))) {
+      doc.getElementById('sd-type').value = 'missing';
+      doc.getElementById('sd-order').value = '4100999000';
+      realClick(w, btn(doc.getElementById('sd-ov'), 'Запази'));
+      await ticks();
+      ok('разликата се записва', calls.patch.some(p => /stock_differences/.test(p.url)),
+        calls.patch.map(p => p.url).join(' | '));
+      ok('НЯМА PATCH към stock_returns', srPatch(calls).length === 0,
+        srPatch(calls).map(p => p.url).join(' | '));
+      ok('НЯМА и POST към stock_returns', srPost(calls).length === 0,
+        'брой: ' + srPost(calls).length);
+    }
+  }
+
+  section('и) Провален PATCH към stock_returns → червен toast, но записът минава');
+  {
+    /* Само заявките към stock_returns падат — PATCH-ът към stock_differences
+       трябва да мине, за да се види, че записът на разликата НЕ е отменен. */
+    const { w, doc, calls } = diffEnv([diffRow({
+      id: 'l-i', order_number: null, type: 'return', status: 'pending'
+    })], { fail: { PATCH: /stock_returns/ } });
+    if (guard('модалът за редакция се отваря', () => w.openSDModal('l-i'))) {
+      doc.getElementById('sd-order').value = '4100135756';
+      realClick(w, btn(doc.getElementById('sd-ov'), 'Запази'));
+      await ticks();
+
+      ok('опитът за обновяване е направен', srPatch(calls).length === 1,
+        'брой: ' + srPatch(calls).length);
+      ok('провалът е засечен', calls.notOk.some(n => /stock_returns/.test(n.url)),
+        JSON.stringify(calls.notOk));
+
+      /* finish() пак се вика: модалът се затваря и записът се потвърждава. */
+      ok('модалът е затворен', !doc.getElementById('sd-ov').classList.contains('open'));
+      /* Проверява се, че ИМА потвърждение за запис, не точната дума. При
+         редакция то гласи "Добавено!" вместо "Записано!" - заварен бъг в
+         submitSD, независим от тази промяна: closeSDModal() нулира sdEditId
+         точно преди тернарния оператор на следващия ред да го прочете. */
+      ok('записът на разликата е потвърден',
+        calls.toast.some(t => /^✅/.test(String(t))), calls.toast.join(' | '));
+      ok('показан е и червеният toast',
+        calls.toast.some(t => String(t) === 'Връщането не е обновено с номера на поръчката'),
+        calls.toast.join(' | '));
+      /* Червеното е ПОСЛЕДНО — иначе потвърждението за запис го изяжда. */
+      ok('червеният toast е последният показан',
+        String(calls.toast[calls.toast.length - 1]) === 'Връщането не е обновено с номера на поръчката',
+        calls.toast.join(' | '));
+      ok('цветът е червен', toastBg(doc) === RED, toastBg(doc));
     }
   }
 

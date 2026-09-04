@@ -172,9 +172,7 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;max-width:180px;">'+esc(r.product_name||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.sap_code||'')+'</td>'+
       '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+((r.quantity)||'')+'</td>'+
-      /* escVal, не esc: esc('') връща тире, а празната поръчка трябва да е
-         празна клетка. Съседната ПВ-ЕВР показва тире - разликата е нарочна. */
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+escVal(r.order_number)+'</td>'+
+      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.order_number||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.purchase_order||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.id_euro||'')+'</td>'+
       '<td style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+

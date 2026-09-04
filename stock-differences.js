@@ -1491,24 +1491,49 @@ function submitSD() {
     : (needsReturn ? sbPostReturn('stock_differences',data) : sbPost('stock_differences',data));
   p.then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
+    var returnSyncFailed = false;
     var finish=function(){
       closeSDModal();
       toast('✅ '+(sdEditId?'Записано!':'Добавено!'));
+      /* Червеното е ПОСЛЕДНО нарочно: toast() пише в един и същ елемент, значи
+         по-ранно предупреждение би било изядено от потвърждението за запис. */
+      if(returnSyncFailed) toast('Връщането не е обновено с номера на поръчката','#dc2626');
       loadStockDiff();
+    };
+    /* Номерът на поръчката се въвежда в модала СЛЕД като връщането вече е
+       създадено: магазинската бланка (submitDiffReport) не пише order_number,
+       а autoCreateReturnFromDiff излиза веднага при вече съществуващ ред по
+       същия diff_line_id. Без този PATCH номерът никога не стига до "За
+       връщане" при обичайния ред на работа (първо "↩️ Връщане" с бутона,
+       после номерът в модала). Винаги презаписва - колоната се пълни само от
+       разликата, ръчна стойност там няма и няма какво да се загуби.
+       Няма ли още връщане, заявката засяга 0 реда и
+       autoCreateReturnFromDiff по-долу го създава направо с номера. */
+    var syncReturnOrder=function(next){
+      if(!(sdEditId && data.type==='return')){ next(); return; }
+      sbPatch('stock_returns','diff_line_id=eq.'+sdEditId+'&source=eq.diff',
+              {order_number:data.order_number||null}).then(function(r){
+        /* Провалът не отменя записа на самата разлика, но и не се поглъща
+           тихо - иначе номерът просто липсва в другия модул без обяснение. */
+        if(!r.ok) returnSyncFailed = true;
+        next();
+      });
     };
     var lineId = sdEditId || (res.row && res.row.id);
     if(needsReturn && lineId){
       /* Наследява поведението на autoCreateReturnFromDiff: тя поглъща
          собствените си грешки тихо и вика cb() при всякакъв изход. */
-      autoCreateReturnFromDiff({
-        id:            lineId,
-        store_name:    data.store_name,
-        supplier:      data.supplier,
-        material_name: data.material_name,
-        material_code: data.material_code,
-        quantity:      data.quantity,
-        order_number:  data.order_number
-      },finish);
+      syncReturnOrder(function(){
+        autoCreateReturnFromDiff({
+          id:            lineId,
+          store_name:    data.store_name,
+          supplier:      data.supplier,
+          material_name: data.material_name,
+          material_code: data.material_code,
+          quantity:      data.quantity,
+          order_number:  data.order_number
+        },finish);
+      });
       return;
     }
     finish();
