@@ -80,7 +80,39 @@ section('1. Транспортна бланка: визуален маркер')
 
     ok('CSS-ът дефинира .p-van', /\.p-van\{[^}]*width:14mm/.test(html));
     ok('CSS-ът дефинира .p-title', /\.p-title\{[^}]*font-size:16pt/.test(html));
-    ok('.p-head има gap за иконата', /\.p-head\{[^}]*gap:5mm/.test(html));
+
+    /* Главата е ДВЕ деца: ляв блок (бус + текст) и логото. При три деца
+       space-between разпъваше текста в средата вместо да го държи вляво. */
+    const root  = doc.getElementById('mod-print');
+    const heads = root.querySelectorAll('.p-head');
+    const lefts = root.querySelectorAll('.p-head-left');
+    const all   = function (list, fn) { return Array.prototype.every.call(list, fn); };
+
+    /* ⚠ Два капана, хванати при обратната проверка срещу d20b312:
+       - every() върху ПРАЗЕН NodeList връща true, тоест проверка без
+         `.length === 2` минава и когато елементът изобщо го няма;
+       - `className` на SVG елемент е SVGAnimatedString, НЕ низ, тоест
+         `svg.className === 'p-van'` е винаги false и такова твърдение не
+         може да падне. Затова навсякъде долу е getAttribute('class'). */
+    const cls = function (el) { return el.getAttribute('class'); };
+
+    ok('има две глави (по една на половина)', heads.length === 2);
+    ok('.p-head има точно 2 деца', heads.length === 2 && all(heads, function (h) { return h.children.length === 2; }),
+      Array.prototype.map.call(heads, function (h) { return h.children.length; }).join(','));
+    ok('първото дете е .p-head-left', heads.length === 2 && all(heads, function (h) { return cls(h.children[0]) === 'p-head-left'; }));
+    ok('второто дете е логото', heads.length === 2 && all(heads, function (h) { return cls(h.children[1]) === 'p-logo'; }));
+
+    ok('.p-head-left е в двете половини', lefts.length === 2);
+    ok('бусът е ВЪТРЕ в .p-head-left', lefts.length === 2 && all(lefts, function (l) { return !!l.querySelector('svg.p-van'); }));
+    ok('.p-title е ВЪТРЕ в .p-head-left', lefts.length === 2 && all(lefts, function (l) { return !!l.querySelector('.p-title'); }));
+    ok('бусът вече НЕ е пряко дете на .p-head',
+      heads.length === 2 && all(heads, function (h) { return !Array.prototype.some.call(h.children, function (c) { return cls(c) === 'p-van'; }); }));
+
+    /* gap-ът слезе от .p-head в .p-head-left — там дели буса от текста.
+       Регексът иска литерална скоба след p-head, за да не хване p-head-left. */
+    ok('.p-head-left е flex ред', /\.p-head-left\{[^}]*display:flex/.test(html));
+    ok('.p-head-left има gap:5mm', /\.p-head-left\{[^}]*gap:5mm/.test(html));
+    ok('.p-head вече НЯМА gap', !/\.p-head\{[^}]*gap:/.test(html));
 
     /* Иконата е редом с текста във flex ред, не под него — иначе височината
        на половината расте и двете спират да се събират на един лист. */
