@@ -773,6 +773,29 @@ function autoCreateReturnFromDiff(line,cb){
     sbPost('stock_returns',data).then(function(){ cb(); }).catch(function(){ cb(); });
   }).catch(function(){ cb(); });
 }
+/* Празно ли е количествено поле - null, undefined или само интервали.
+   PostgREST връща числата като низове, а модалът пише '' за изчистено поле. */
+function sdBlankQty(v){ return v===null||v===undefined||String(v).trim()===''; }
+/* Реалното количество при решение "Липса"/"Връщане".
+   База е quantity_supplier_doc (количеството по документа на доставчика), а при
+   празна база се пада на quantity - при част от старите редове доставчиковото
+   количество изобщо не е попълвано, а само общото. Липса = документ - получено;
+   Връщане = получено - документ. PostgREST връща числата като низове, затова
+   parseFloat. Резултат 0 или отрицателен значи, че редът не е това, за което е
+   решен (или е грешно попълнен) - тогава връщаме null и количеството не се пипа.
+   Закръгляме до 3 знака, колкото е step-ът на полетата: 0.3-0.1 в двоична
+   плаваща запетая дава 0.19999999999999998 и точно това би отишло в базата. */
+function diffResolvedQty(line,type){
+  if(!line) return null;
+  if(type!=='missing'&&type!=='return') return null;
+  var baseRaw = sdBlankQty(line.quantity_supplier_doc) ? line.quantity : line.quantity_supplier_doc;
+  if(sdBlankQty(baseRaw)||sdBlankQty(line.quantity_received)) return null;
+  var base=parseFloat(baseRaw), rec=parseFloat(line.quantity_received);
+  if(isNaN(base)||isNaN(rec)) return null;
+  var q = (type==='missing') ? (base-rec) : (rec-base);
+  q = Math.round(q*1000)/1000;
+  return q>0 ? q : null;
+}
 function resolveDiffLine(id,type){
   if(!canReviewDiff()){toast('Нямаш права за това действие','#dc2626');return;}
   var line=sdData.find(function(x){return String(x.id)===String(id);});
@@ -781,19 +804,41 @@ function resolveDiffLine(id,type){
      нея, вместо да ни връща най-отгоре на списъка. */
   sdKeepScroll(line.report_id);
   var resolvedAt=new Date().toISOString();
-  sbPatch('stock_differences','id=eq.'+id,{type:type,status:'pending',resolved_by:sdActor(),resolved_at:resolvedAt}).then(function(res){
+  var payload={type:type,status:'pending',resolved_by:sdActor(),resolved_at:resolvedAt};
+  /* Липса/Връщане: количеството е РЕАЛНАТА разлика, не това по документ.
+     Досега Цветелина го пренаписваше на ръка след всяко решение. Останалите
+     типове (Заприхождаване и т.н.) не се пипат - там количеството по документ
+     си е количеството. Няма ли попълнено "Реално получено", формулата няма от
+     какво да смята: записът минава без quantity и човекът се предупреждава. */
+  var autoQty=null, qtyWarn='';
+  if(type==='missing'||type==='return'){
+    autoQty=diffResolvedQty(line,type);
+    if(autoQty!==null) payload.quantity=autoQty;
+    /* Двата случая без автоматично количество изглеждат еднакво в кода, но за
+       човека са различни: единият е непопълнена бланка (има какво да се
+       довърши), другият е бланка, по която просто няма разлика. */
+    else qtyWarn = sdBlankQty(line.quantity_received)
+      ? '⚠️ Реално получено не е попълнено — количеството остава по документ'
+      : '⚠️ По данни няма разлика (получено = по документ) — количеството остава по документ';
+  }
+  sbPatch('stock_differences','id=eq.'+id,payload).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     line.type=type; line.status='pending'; line.resolved_by=sdActor(); line.resolved_at=resolvedAt; /* локално, за незабавна проверка по-долу без чакане на reload */
+    /* ПРЕДИ autoCreateReturnFromDiff - тя чете line.quantity за stock_returns. */
+    if(autoQty!==null) line.quantity=autoQty;
+    /* Едно съобщение, не две: toast() презаписва един и същ елемент, затова
+       отделен предупредителен toast би изял потвърждението за запис. */
+    var say=function(msg){ toast(qtyWarn ? msg+' '+qtyWarn : msg, qtyWarn ? '#d97706' : null); };
     var finish=function(){
       var siblingLines=sdData.filter(function(x){return x.report_id===line.report_id;});
       var allResolved = siblingLines.length>0 && siblingLines.every(function(x){return !!x.type;});
       if(allResolved && line.report_id){
         sbPatch('differences_reports','id=eq.'+line.report_id,{reviewed:true}).then(function(){
-          toast('✅ Решено — бланката е напълно прегледана!');
+          say('✅ Решено — бланката е напълно прегледана!');
           loadStockDiff();
         });
       } else {
-        toast('✅ Записано!');
+        say('✅ Записано!');
         loadStockDiff();
       }
     };
