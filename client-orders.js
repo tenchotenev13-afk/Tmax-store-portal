@@ -956,6 +956,18 @@ function submitClientOrder(){
   };
   var first=items[0];
   var delivery=v('c-delivery')||null;
+  /* Заявката принадлежи на ОБЕКТА от „Поръчан от магазин", не на този, който
+     я въвежда. Досега беше currentUser.store_name и когато регионален или
+     админ пуснеше заявка за друг обект, тя излизаше като „Централен офис-0133":
+     тригерът assign_client_order_num() номерира по new.store_name, а
+     loadClientOrders() филтрира по store_name/fulfiller — from_store не
+     участва никъде освен като колона в реда. Резултат: магазинът не вижда
+     своята заявка, coSameCustomerCandidates() не я брои за дубликат и на
+     24.08 Пирдоп въведе Пирдоп-0141 три минути след Централен офис-0133 за
+     същия клиент. Щом store_name е магазинът, номерът, видимостта и
+     статистиките стават негови без промяна в базата.
+     agent остава въвелия — така се вижда кой от ЦО е пуснал заявката. */
+  var fromStore=v('c-from-store');
   /* Номерът НЕ се смята тук. Досега беше clientOrders.length+1 — бройката
      заявки, които ТОЗИ потребител вижда — затова всеки обект броеше от 1 и
      883 от 908 заявки излязоха с дублиран номер. Сега го раздава тригер в
@@ -963,7 +975,7 @@ function submitClientOrder(){
   var coId=uuid4();
   var rec={
     id:coId,
-    store_name:currentUser.store_name,
+    store_name:fromStore||currentUser.store_name,
     date:v('c-date'),hour:v('c-hour'),bon:v('c-bon'),
     customer_name:name,phone:phone,
     product:first.product,color:first.color,sap:first.sap,qty:first.qty,unit:first.unit,
