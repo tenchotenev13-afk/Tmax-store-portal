@@ -873,6 +873,13 @@ function deleteClientOrder(id){
 /* Група, към която ще се запише следващата нова заявка (задава се от
    "➕ Още една заявка за същия клиент"). Изчиства се при всяко отваряне. */
 var coPendingGroupId=null;
+/* Заявка в ход. От 13.08 в базата има десетки дублирани клиентски заявки
+   (Петрич-0170/0171/0172, Враца-0131/0132, Добрич-0053 два пъти) — записите
+   са на микросекунди до 150 ms един от друг, тоест второ натискане на
+   „Запази“, докато първият POST още пътува. Всяко натискане правеше нов
+   uuid4() и нов ред, затова базата няма как да ги отсее.
+   Моделът е същият като при submitPaidTransport/submitCoProcessed по-горе. */
+var coSubmitting=false;
 
 function openClientModal(prefill){
   prefill=prefill||{};
@@ -937,6 +944,16 @@ function submitClientOrder(){
   var paidTransport=!!(document.getElementById('c-paid-transport')||{}).checked;
   var ptAddr=v('c-pt-addr');
   if(paidTransport&&!ptAddr){toast('При платен транспорт адресът за доставка е задължителен','#dc2626');return;}
+  /* Чак ТУК, след всички валидации: при непопълнено поле бутонът трябва да
+     остане активен, за да може човек да поправи и да натисне пак. */
+  if(coSubmitting)return;
+  coSubmitting=true;
+  var coBtn=document.getElementById('co-submit');
+  if(coBtn){coBtn.disabled=true;coBtn.textContent='Записване...';}
+  var coRelease=function(){
+    coSubmitting=false;
+    if(coBtn){coBtn.disabled=false;coBtn.textContent='✓ Запази заявката';}
+  };
   var first=items[0];
   var delivery=v('c-delivery')||null;
   /* Номерът НЕ се смята тук. Досега беше clientOrders.length+1 — бройката
@@ -961,7 +978,7 @@ function submitClientOrder(){
   sbPostReturn('client_orders',rec).then(function(res){
     if(!res.ok){
       console.error('submitClientOrder: неуспешен запис',res.error);
-      toast('Грешка при запис','#dc2626');return;
+      toast('Грешка при запис','#dc2626');coRelease();return;
     }
     coPendingGroupId=null;
     /* Номерът идва от базата. Ако по някаква причина отговорът е празен,
@@ -970,6 +987,7 @@ function submitClientOrder(){
     if(res.row&&res.row.in_num)rec.in_num=res.row.in_num;
     var finish=function(){
       closeModal('client-modal');
+      coRelease();
       loadClientOrders();
       if(typeof loadTransport==='function'&&paidTransport)loadTransport();
       /* Ако заявката вече е част от обща поръчка, няма какво да предлагаме.
