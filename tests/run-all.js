@@ -17,6 +17,7 @@ const TESTS = [
   'client-groups.test.js',
   'client-order-double-submit.test.js',
   'client-order-from-store.test.js',
+  'client-order-store-sync.test.js',
   'contacts-id-collision.test.js',
   'id-collisions.test.js',
   'co-processed.test.js',

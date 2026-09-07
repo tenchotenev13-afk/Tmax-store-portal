@@ -732,6 +732,15 @@ function submitCorrection(){
       return;
     }
     patch.from_store=v('edt-from-store');
+    /* store_name следва „Поръчан от магазин" и при корекция. Дотук патчът
+       пишеше само from_store, а видимостта и статистиките вървят по
+       store_name — тоест поправеният обект се виждаше в реда, но заявката
+       оставаше на стария и магазинът ѝ пак не я виждаше. Същото разминаване,
+       което 1c614ca оправи при НОВ запис.
+       in_num НАРОЧНО не се пипа: номерът вече е изписан на бланката у
+       клиента, затова стара заявка може да се озове с номер по стария обект
+       и store_name по новия. Хартията бие подредбата. */
+    if(patch.from_store)patch.store_name=patch.from_store;
     patch.fulfiller=fulfillerVal;
     patch.note=v('edt-note');
   } else {

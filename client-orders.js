@@ -909,7 +909,20 @@ function openClientModal(prefill){
   }
   loadAllStores().then(function(){
     var el=document.getElementById('c-from-store');
-    if(el && el.tagName==='SELECT') fillStoreSelect(el,currentUser.store_name);
+    if(el && el.tagName==='SELECT'){
+      fillStoreSelect(el,currentUser.store_name);
+      /* „➕ Още една заявка за същия клиент" подава from_store на първата
+         заявка. Досега prefill.from_store се игнорираше тихо и менюто
+         оставаше преизбрано на магазина на ВЪВЕЖДАЩИЯ: човек от ЦО, който
+         добавя втора заявка към поръчка на Пирдоп, я пускаше на ЦО, ако не
+         забележи — тоест втората половина от поръчката се откъсваше от
+         първата. Задаваме го само ако опцията реално съществува, за да не
+         изпразним менюто заради изтрит или преименуван обект. */
+      if(prefill.from_store){
+        var hasOpt=Array.prototype.some.call(el.options,function(op){return op.value===prefill.from_store;});
+        if(hasOpt)el.value=prefill.from_store;
+      }
+    }
     fillStoreSelect(document.getElementById('c-fulfiller'),currentUser.store_name);
   });
   renderItemRows('c-items',[{}]);
