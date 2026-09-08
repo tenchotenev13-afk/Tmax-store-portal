@@ -628,7 +628,7 @@ function srParseExcelDate(v){
   return isNaN(d.getTime())?null:d.toISOString().slice(0,10);
 }
 function srImportModalHtml(){
-  var hint = 'Приема 2 формата: (1) Многолистов Excel (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Завод, статус ВЗЕТА/НЕВЗЕТА и т.н.; или (2) единичен лист с колони за продукт, SAP, количество, магазин, срок на годност, причина. Разпознава автоматично кой от двата е. При повторно качване на обновена версия — редове с вече съществуващ ПВ-ЕВР номер се пропускат автоматично (не се дублират), качват се само истински новите.';
+  var hint = 'Приема 2 формата: (1) Многолистов Excel (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Завод, статус ВЗЕТА/НЕВЗЕТА и т.н.; или (2) единичен лист с колони за продукт, SAP, количество, магазин, срок на годност, причина. Разпознава автоматично кой от двата е. При повторно качване на обновена версия на МНОГОЛИСТОВИЯ файл редовете със съществуващ ПВ-ЕВР номер се ОБНОВЯВАТ от файла (статус, дати, куриер, коментари); приключените в портала не се пипат; редове, които ги няма във файла, остават непроменени. При единичния лист редове със съществуващ ПВ-ЕВР се пропускат, както досега.';
   return '<div class="bov" id="sr-import-ov"><div class="bmod" style="width:460px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
     '<div style="font-size:15px;font-weight:700;">📤 Импорт от Excel — рекламации/срок на годност</div>'+
@@ -672,6 +672,11 @@ function startReturnsImport(){
          прехвърляме към единичния гъвкав лист. И в двата случая резултатът е
          за подтаб "Рекламации/срок на годност" - маркираме source изрично. */
       var mapped = parseDiffReturnsWorkbook(wb);
+      /* Кой от двата формата е — решава дали познат ПВ номер значи "обнови"
+         или "пропусни". Многолистовият идва от ERP-то със смислени статуси,
+         дати и куриери; единичният лист няма нито такива колони, нито ключ,
+         на който да се вярва при презапис. */
+      var isWorkbook = mapped.length > 0;
       if(!mapped.length){
         mapped = parseComplaintReturnsSheet(wb,progEl);
         if(mapped===null) return; /* грешката вече е показана вътре в парсъра */
@@ -681,11 +686,16 @@ function startReturnsImport(){
         progEl.innerHTML='<span style="color:#dc2626;">Няма разпознати редове за импорт.</span>';
         return;
       }
-      /* Де-дупликация по ПВ-ЕВР (purchase_order) - при повторно качване на
-         обновена версия на файла, редове с ВЕЧЕ СЪЩЕСТВУВАЩ номер се пропускат
-         (не се дублират), само истински новите (без съвпадение) се качват.
-         Редове без ПВ-ЕВР (празно поле) винаги се третират като нови - няма
-         срещу какво да се сравнят. */
+      /* Съпоставяне по ПВ-ЕВР (purchase_order). Редове без ПВ-ЕВР (празно
+         поле) винаги се третират като нови - няма срещу какво да се сравнят.
+         Познат номер значи различно нещо според формата:
+         · многолистов -> ОБНОВИ реда от файла. Цветелина качва същия файл
+           всяка седмица с обновени статуси, дати на изтегляне, куриери и
+           коментари; при старото поведение (пропусни) те не стигаха до
+           портала изобщо.
+         · единичен лист -> пропусни, както досега.
+         Приключените в портала (status='completed') не се пипат в нито един
+         случай: файлът не връща назад решение, взето тук. */
       progEl.textContent='⏳ Проверка за дублирани записи...';
       var posInFile=mapped.map(function(r){return r.purchase_order;}).filter(function(p){return p;});
       /* Проверката е на партиди по 200 ПВ-ЕВР номера наведнъж - при файл с
@@ -699,7 +709,8 @@ function startReturnsImport(){
       }
       var dedupCheck = dedupBatches.length
         ? Promise.all(dedupBatches.map(function(batchPos){
-            return sbGet('stock_returns','source=eq.complaint&select=purchase_order&purchase_order=in.('+batchPos.map(function(p){return encodeURIComponent(p);}).join(',')+')');
+            /* id-то трябва за PATCH, status-ът - за да се разпознае приключен ред. */
+            return sbGet('stock_returns','source=eq.complaint&select=id,purchase_order,status&purchase_order=in.('+batchPos.map(function(p){return encodeURIComponent(p);}).join(',')+')');
           })).then(function(results){
             var merged=[];
             results.forEach(function(r){ if(Array.isArray(r)) merged=merged.concat(r); });
@@ -707,25 +718,80 @@ function startReturnsImport(){
           })
         : Promise.resolve([]);
       dedupCheck.then(function(existing){
-        var existingSet={};
-        (Array.isArray(existing)?existing:[]).forEach(function(r){ if(r.purchase_order) existingSet[r.purchase_order]=true; });
-        var toImport = mapped.filter(function(r){ return !r.purchase_order || !existingSet[r.purchase_order]; });
-        var skipped = mapped.length - toImport.length;
-        if(!toImport.length){
-          progEl.innerHTML='<span style="color:#d97706;">⚠️ Всички '+skipped+' реда вече съществуват (по ПВ-ЕВР) - нищо ново за импорт.</span>';
+        var existingByPo={};
+        (Array.isArray(existing)?existing:[]).forEach(function(r){ if(r.purchase_order) existingByPo[r.purchase_order]=r; });
+
+        /* Празната клетка във файла ПРЕЗАПИСВА (null), а не пази старото:
+           многолистовият файл е авторитетен за тези колони, тоест изтрит
+           куриер в него значи "няма куриер", не "не знам". */
+        var nz=function(v){ return (v===''||v===undefined)?null:v; };
+        var updFromFile=function(r){
+          return {
+            supplier:            nz(r.supplier),
+            doc_date:            nz(r.doc_date),
+            plant:               nz(r.plant),
+            status:              r.status,
+            withdrawal_date:     nz(r.withdrawal_date),
+            courier_info:        nz(r.courier_info),
+            confirmed_date:      nz(r.confirmed_date),
+            control_comment:     nz(r.control_comment),
+            controller_comment:  nz(r.controller_comment),
+            id_euro:             nz(r.id_euro)
+          };
+        };
+
+        var toInsert=[], toUpdate=[], skippedCompleted=0, skippedDuplicate=0;
+        mapped.forEach(function(r){
+          var hit = r.purchase_order ? existingByPo[r.purchase_order] : null;
+          if(!hit){ toInsert.push(r); return; }
+          if(!isWorkbook){ skippedDuplicate++; return; }
+          if(hit.status==='completed'){ skippedCompleted++; return; }
+          toUpdate.push({ id:hit.id, purchase_order:r.purchase_order, data:updFromFile(r) });
+        });
+
+        if(!toInsert.length && !toUpdate.length){
+          progEl.innerHTML='<span style="color:#d97706;">⚠️ Няма какво да се промени - всички '+mapped.length+' реда съвпадат със съществуващи'+(skippedCompleted?' или са приключени':'')+'.</span>';
           return;
         }
-        progEl.textContent='⏳ Качване на 0 / '+toImport.length+'...'+(skipped?' ('+skipped+' пропуснати като дублирани)':'');
-        srBatchImport(toImport,function(done,total){
-          progEl.textContent='⏳ Качване на '+done+' / '+total+'...'+(skipped?' ('+skipped+' пропуснати като дублирани)':'');
-        },function(errorCount){
-          if(errorCount>0){
-            progEl.innerHTML='<span style="color:#dc2626;">⚠️ Завърши с '+errorCount+' грешки. Виж конзолата (F12).</span>';
-          } else {
-            progEl.innerHTML='<span style="color:#16a34a;">✅ Готово! Импортирани '+toImport.length+' нови записа.'+(skipped?' Пропуснати '+skipped+' вече съществуващи (по ПВ-ЕВР).':'')+'</span>';
-            toast('✅ Импортът приключи успешно!');
-          }
-          loadStockReturns();
+
+        /* Двата прохода вървят един след друг, за да не се блъскат в едни и
+           същи редове и прогресът да е четим. */
+        var runInserts=function(next){
+          if(!toInsert.length){ next(0); return; }
+          progEl.textContent='⏳ Качване на 0 / '+toInsert.length+'...';
+          srBatchImport(toInsert,function(done,total){
+            progEl.textContent='⏳ Качване на '+done+' / '+total+'...';
+          },next);
+        };
+        var runUpdates=function(next){
+          if(!toUpdate.length){ next([]); return; }
+          progEl.textContent='⏳ Обновяване на 0 / '+toUpdate.length+'...';
+          srBatchUpdate(toUpdate,function(done,total){
+            progEl.textContent='⏳ Обновяване на '+done+' / '+total+'...';
+          },next);
+        };
+
+        runInserts(function(insertErrors){
+          runUpdates(function(failedPos){
+            var updated = toUpdate.length - failedPos.length;
+            var h='<span style="color:#16a34a;">✅ Нови: '+toInsert.length+
+                  ' · Обновени: '+updated+
+                  ' · Пропуснати (приключени): '+skippedCompleted+'</span>';
+            if(skippedDuplicate){
+              h+='<div style="color:#64748b;">Пропуснати като дублирани: '+skippedDuplicate+'</div>';
+            }
+            /* Провалите излизат ПОИМЕННО, не като брой: "3 грешки" не казва
+               кой ред да се провери. */
+            if(failedPos.length){
+              h+='<div style="color:#dc2626;">⚠️ Не бяха обновени (ПВ-ЕВР): '+esc(failedPos.join(', '))+'</div>';
+            }
+            if(insertErrors>0){
+              h+='<div style="color:#dc2626;">⚠️ '+insertErrors+' партиди с нови записи не минаха. Виж конзолата (F12).</div>';
+            }
+            progEl.innerHTML=h;
+            if(!failedPos.length && !insertErrors) toast('✅ Импортът приключи успешно!');
+            loadStockReturns();
+          });
         });
       }).catch(function(err){
         progEl.innerHTML='<span style="color:#dc2626;">Грешка при проверка за дублирани: '+esc(err.message||String(err))+'</span>';
@@ -885,6 +951,32 @@ function srBatchImport(rows,onProgress,onDone){
       onProgress(Math.min(i,rows.length),rows.length);
       next();
     }).catch(function(){errorCount++;i+=BATCH;next();});
+  }
+  next();
+}
+
+/* Обновява съществуващи редове по id. За разлика от srBatchImport тук всеки
+   ред е ОТДЕЛНА заявка - PostgREST не приема различни тела в един PATCH -
+   затова вървят на групи по 20 успоредно, вместо всичките наведнъж.
+   Провалите се връщат ПОИМЕННО (ПВ-ЕВР номер), не като брой: числото "3
+   грешки" не казва кой ред да се провери на ръка. Един провален ред не спира
+   останалите. */
+function srBatchUpdate(updates,onProgress,onDone){
+  var BATCH=20;
+  var i=0;
+  var failed=[];
+  function next(){
+    if(i>=updates.length){onDone(failed);return;}
+    var batch=updates.slice(i,i+BATCH);
+    Promise.all(batch.map(function(u){
+      return sbPatch('stock_returns','id=eq.'+u.id,u.data).then(function(res){
+        if(!res.ok) failed.push(u.purchase_order||u.id);
+      });
+    })).then(function(){
+      i+=BATCH;
+      onProgress(Math.min(i,updates.length),updates.length);
+      next();
+    });
   }
   next();
 }

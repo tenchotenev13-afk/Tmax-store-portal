@@ -56,6 +56,7 @@ const TESTS = [
   'return-proof.test.js',
   'stock-returns-order-number.test.js',
   'stock-returns-supplier-export.test.js',
+  'stock-returns-import-update.test.js',
   'sd-badge-hidden-tab.test.js',
   'delete-three-states.test.js',
   'storno-embed-no-in-list.test.js',
