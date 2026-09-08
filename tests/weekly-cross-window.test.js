@@ -330,9 +330,14 @@ function urlFor(calls, table) {
       ok('и не съвпада с понеделника на седмицата',
         decodeURIComponent(stale) !== new Date(wk.dates[0] + 'T00:00:00').toISOString());
     }
+    /* created_at вече Е в select-а (от 08.09.2026 захранва списъка „невзета
+       стока по доставчик" — възрастта на всяко чакащо връщане). Затова
+       проверката гледа само ФИЛТРИТЕ: изрязва се select= и се търси остатък.
+       Иначе избраната колона щеше да мине за филтър и проверката щеше да
+       пада при промяна, която не я засяга. */
+    const srUrl = urlFor(h.calls, 'stock_returns');
     ok('За връщане остава без филтър по дата',
-      urlFor(h.calls, 'stock_returns').indexOf('created_at') < 0,
-      urlFor(h.calls, 'stock_returns'));
+      srUrl.replace(/select=[^&]*/, '').indexOf('created_at') < 0, srUrl);
     ok('Палети остават без филтър по дата',
       urlFor(h.calls, 'transport_pallets').indexOf('report_date=') < 0,
       urlFor(h.calls, 'transport_pallets'));

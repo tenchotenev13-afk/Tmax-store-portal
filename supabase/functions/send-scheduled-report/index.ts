@@ -1,6 +1,35 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v20 (08.09.2026) — деплой с ЕДНО нещо: списък „невзета стока" в седмичния.
+
+   Редът „За връщане (текущо състояние)" имаше само две карти — бройка без
+   адрес. Теодор поиска да се вижда КЪДЕ стои стоката и ОТКОГА. Сега под
+   картите (те остават) идва списък, групиран по обект+доставчик:
+   „обект — доставчик — N поз. · най-старата от X дни".
+
+   Невзета = stock_returns.status 'pending'. Възрастта е в ЦЕЛИ ДНИ между
+   две локални полунощи — иначе едно и също връщане излиза ту с 6, ту със 7
+   дни според часа, в който е тръгнал кронът. doc_date НЕ се ползва:
+   колоната е null във всичките 435 записа, тоест изглежда като дата, а не
+   е. Прагът „застояла" идва от app_settings, ключ 'returns_stale_days';
+   липсва → 7. Чете се в самия колектор, с една заявка.
+
+   ДВАТА РЕЖИМА СА РАЗЛИЧНИ и това е същината:
+     · срязан отчет (регионален, управител) — ВСИЧКИ групи; застоялите се
+       открояват със стил, но нищо не се крие. Списъкът му е работен.
+     · пълен отчет (цялата верига) — САМО застоялите. Към 08.09.2026 pending
+       групите са 248, от които 145 над 7 дни: пълен списък значи писмо,
+       което никой не отваря.
+   Затова buildCrossModuleSectionHtml приема втори аргумент scoped, който
+   идва от data.scoped на самото обобщение. Липсващ аргумент значи пълен
+   отчет — таб „Днес" в портала вика функцията с един аргумент и вижда само
+   застоялите, което е и правилното там.
+
+   reportReturnsListHtml и промените в collectCrossModuleWeeklySummary и
+   buildCrossModuleSectionHtml са споделени с report.js
+   (tests/report-edge-sync.test.js) — влизат и в двата файла, дословно.
+
    v19 (08.09.2026) — деплой с ЕДНО нещо: секция „Каса" в дневния отчет.
 
    Дневният носеше само задачи. Теодор поиска „грешна каса / върната каса";
@@ -1410,12 +1439,18 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        прием от другите две посоки и да се разбие по обект. Само reviewed
        не стигаше - разбивка по магазин беше физически невъзможна. */
     sbGet('differences_reports','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,direction,reviewed'),
-    sbGet('stock_returns','select=store_name,status'),
+    sbGet('stock_returns','select=store_name,status,supplier,created_at'),
     sbGet('kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,status'),
     sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
     sbGet('goods_transit','status=eq.pending&created_at=lt.'+staleStamp+'&select=store_name'),
     sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
-    sbGet('users','select=store_name&order=store_name')
+    sbGet('users','select=store_name&order=store_name'),
+    /* Прагът за „застояла" — една заявка вътре в колектора. Функцията се
+       вика по веднъж на получател, тоест прагът се чете по веднъж на
+       писмо; за нещо, което тече веднъж седмично, това е по-евтино от
+       трети аргумент, който трябва да мине през два файла и три
+       извикващи. */
+    sbGet('app_settings','key=eq.returns_stale_days&select=key,value&limit=1')
   ]).then(function(r){
     /* Всеки набор минава през ЕДИН предикат — отделни филтри на отделни
        места се разминават. */
@@ -1468,6 +1503,53 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       open: returns.filter(function(x){ return x.status!=='completed'; }).length,
       completed: returns.filter(function(x){ return x.status==='completed'; }).length
     };
+
+    /* НЕВЗЕТАТА СТОКА, групирана по обект+доставчик. Картите отгоре са
+       бройката; тук е кой обект колко време държи чия стока.
+       Невзета = status 'pending'. Филтърът е в JS, не в заявката: същият
+       набор захранва и двете карти отгоре и не бива да се реже два пъти
+       по различен начин.
+       Възрастта се мери в ЦЕЛИ ДНИ между две локални полунощи, не между
+       два часа — иначе едно и също връщане излиза ту с 6, ту със 7 дни
+       според това в колко часа е тръгнал кронът.
+       doc_date НАРОЧНО не се ползва: колоната е null във всичките 435
+       записа (проверено 08.09.2026), тоест изглежда като дата, а не е. */
+    var refD = new Date(toLocalISO(new Date())+'T00:00:00');
+    var rlMap = {};
+    var returnsList = [];
+    returns.forEach(function(x){
+      if (x.status !== 'pending') return;
+      var when = x.created_at ? new Date(x.created_at) : null;
+      if (!when || isNaN(when.getTime())) return;
+      var age = Math.max(0, Math.floor((refD - new Date(toLocalISO(when)+'T00:00:00')) / 86400000));
+      var sup = x.supplier || '—';
+      var key = x.store_name + '||' + sup;
+      var g = rlMap[key];
+      if (!g) {
+        g = { store: x.store_name, supplier: sup, count: 0, oldestDays: age, newestDays: age };
+        rlMap[key] = g; returnsList.push(g);
+      }
+      g.count++;
+      if (age > g.oldestDays) g.oldestDays = age;
+      if (age < g.newestDays) g.newestDays = age;
+    });
+    /* Най-дълго стоялото отгоре; при равни дни по обект, за да е стабилен
+       редът между две изпращания. */
+    returnsList.sort(function(a,b){
+      return b.oldestDays - a.oldestDays ||
+             String(a.store).localeCompare(String(b.store)) ||
+             String(a.supplier).localeCompare(String(b.supplier));
+    });
+
+    /* Ключът се сверява и в JS: PostgREST връща само търсения ред, но
+       един ден в app_settings ще има повече ключове и 'първият ред' спира
+       да значи каквото и да е. */
+    var returnsStaleDays = 7;
+    (Array.isArray(r[7]) ? r[7] : []).forEach(function(s){
+      if (!s || s.key !== 'returns_stale_days') return;
+      var v = Number(String(s.value == null ? '' : s.value).trim().replace(',', '.'));
+      if (isFinite(v) && v > 0) returnsStaleDays = v;
+    });
     var stornoSummary = {
       total: storno.length,
       draft: storno.filter(function(x){ return x.status==='draft'; }).length,
@@ -1502,6 +1584,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     cb({
       diffs: diffs, wrongReceipt: wrongReceipt,
       returns: ret, storno: stornoSummary, zoborot: zoborotSummary,
+      returnsList: returnsList, returnsStaleDays: returnsStaleDays,
       transitStale: stalePending.length,
       pallets: { missing: palletsMissing, stale: palletsStale, total: storeNames.length },
       /* Прозорецът пътува заедно с числата, за да го изпише заглавието. */
@@ -1552,7 +1635,53 @@ function reportCrossWindowLabel(win){
   };
   return f(win.from) + ' – ' + f(win.to);
 }
-function buildCrossModuleSectionHtml(cross){
+/* Списъкът „невзета стока по доставчик" под картите на реда „За връщане".
+   Картите остават — те са бройката; списъкът казва КЪДЕ стои и ОТКОГА.
+
+   Двата режима са различни НАРОЧНО:
+   · scoped (регионален, управител) — ВСИЧКИ групи. Обхватът му е няколко
+     обекта и списъкът е негов работен списък, не сводка; застоялите се
+     открояват със стил, но нищо не се крие.
+   · пълен (цялата верига) — САМО застоялите. Към 08.09.2026 pending
+     групите са 248, от които 145 над 7 дни: пълен списък значи писмо,
+     което никой не чете. Прагът е това, което го прави четимо, затова и
+     стои в базата, а не в кода.
+
+   Прагът влиза и в заглавието на пълния режим — иначе читателят няма как
+   да знае защо едни редове ги има, а други не. */
+function reportReturnsListHtml(cross, scoped){
+  if (!cross) return '';
+  var all = cross.returnsList || [];
+  var thr = (cross.returnsStaleDays === null || cross.returnsStaleDays === undefined)
+    ? 7 : cross.returnsStaleDays;
+  var rows = scoped ? all : all.filter(function(g){ return g.oldestDays >= thr; });
+  if (!rows.length) return '';
+
+  var body = rows.map(function(g){
+    var warn = g.oldestDays >= thr;
+    return '<div style="padding:7px 10px;border-bottom:1px solid '+(warn?'#FECACA':'#eef1f6')+';font-size:12px;">' +
+      reportStoreLinkHtml(g.store, warn ? '#7f1d1d' : '#374151') +
+      '<span style="color:'+(warn?'#b91c1c':'#6B7280')+';"> — '+esc(g.supplier)+'</span>' +
+      '<span style="float:right;color:'+(warn?'#C0392B':'#6B7280')+';font-weight:'+(warn?'700':'500')+';">' +
+      g.count+' поз. · най-старата от '+g.oldestDays+' дни</span>' +
+      '</div>';
+  }).join('');
+
+  var title = scoped
+    ? '⏳ Невзета стока по доставчик'
+    : '⏳ Невзета стока по доставчик (над '+esc(String(thr))+' дни)';
+
+  return '<div style="margin-top:8px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#6B7280;margin-bottom:6px;">'+title+'</div>' +
+    '<div style="background:#FFFFFF;border:1px solid #eef1f6;border-radius:8px;overflow:hidden;">'+body+'</div>' +
+    '</div>';
+}
+
+/* scoped казва ЧИЙ е отчетът: срязан (регионален, управител) или за
+   цялата верига. Само списъкът с невзетата стока го ползва — виж
+   reportReturnsListHtml. Липсващ аргумент значи пълен отчет, тоест
+   таб „Днес" и старите извиквания не се променят. */
+function buildCrossModuleSectionHtml(cross, scoped){
   if (!cross) return '';
   var h = '<div style="margin-top:18px;padding-top:14px;border-top:2px solid #eef1f6;">';
   h += '<div style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px;">🗂 Друго от периода ('+reportCrossWindowLabel(cross.window)+') — по табове</div>';
@@ -1569,6 +1698,7 @@ function buildCrossModuleSectionHtml(cross){
   h += crossModuleRow('📥','За връщане (текущо състояние)',
     crossMetricCard(cross.returns.open,'отворени (чакат/взети)', cross.returns.open>0) +
     crossMetricCard(cross.returns.completed,'приключени'));
+  h += reportReturnsListHtml(cross, scoped);
 
   h += crossModuleRow('💳','Каса — Сторно бележки (нови за периода)',
     crossMetricCard(cross.storno.total,'общо нови') +
@@ -1661,7 +1791,7 @@ function buildWeeklyReportHtml(data){
   body += reportCommentsCountHtml(data.commentedList);
   body += reportNoDueNoticeHtml(data.noDueCount, true);
   body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: постоянните задачи участват с по едно явяване за всеки ден, в който са дължими през седмицата (задача „всеки ден" = 7 явявания) — точно както се отмятат в Седмичния календар. Отметка от предишна седмица не се брои за текущата.</div>';
-  body += buildCrossModuleSectionHtml(data.cross);
+  body += buildCrossModuleSectionHtml(data.cross, data.scoped);
   return reportEmailShell('📊 Седмичен репорт — ' + (data.weekLabel||''), reportWeekRangeLabel(data.weekDates), body,
     'Автоматичен репорт · ТеМАХ Портал');
 }
