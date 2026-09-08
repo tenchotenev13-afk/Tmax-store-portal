@@ -62,6 +62,7 @@ const SHARED_FNS = [
   'reportMondayOfWeek', 'reportPrevWeekMonday', 'reportWeekOfMonday',
   'reportPickWeeklyBulletin',
   'reportItemMatchesComp', 'reportRecurringWeekDates', 'reportCrossWindow',
+  'reportIsLate', 'reportLateDays',
   'reportDailyTargetDate', 'reportWeekdayIdx',
   /* обобщение */
   'reportBuildSummary', 'reportSaveSnapshot', 'reportFetchSnapshot',
@@ -78,6 +79,7 @@ const SHARED_FNS = [
   'reportCommentsByStoreHtml',
   'reportCommentsCountHtml',
   'crossMetricCard', 'crossModuleRow', 'reportReturnsListHtml',
+  'reportLateSectionHtml',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',
   'buildCrossModuleSectionHtml', 'buildDailyReportHtml', 'buildWeeklyReportHtml'
 ];

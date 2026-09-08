@@ -1,6 +1,32 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v21 (08.09.2026) — деплой с ЕДНО нещо: секция „Закъснения" в седмичния.
+
+   Два списъка под едно заглавие, защото са едно и също питане („кой срок е
+   изтекъл") към два различни таба — Клиентски заявки и Транспорт. Стоят
+   ПРЕДИ реда „Каса — Сторно бележки".
+
+   Правилото „закъсняла" е дословно копие на isLate() от shared.js, но с
+   опорна дата като аргумент (reportIsLate/reportLateDays): едж функцията
+   няма достъп до shared.js, а два различни кода за едно правило се
+   разминават мълчаливо. Тестът сверява, че копието дава СЪЩИЯ отговор като
+   оригинала върху осем гранични случая.
+
+   Режимите са като на невзетата стока:
+     · срязан отчет — клиентските заявки ред по ред (№, клиент, кой
+       изпълнява);
+     · пълен отчет — по ОБЕКТ. Към 08.09.2026 закъснелите са 92 в 10 обекта;
+       ред по ред значи писмо, което никой не отваря.
+   Транспортът е ред по ред и в двата режима — той е пет записа общо.
+   При 0 и в двата списъка секцията отпада изцяло.
+
+   ВНИМАНИЕ ЗА transport_orders.from_store: колоната е празна във ВСИЧКИТЕ
+   1529 записа — съществува, но нищо не я пълни (transport.js дори не я
+   споменава; тя се ползва само в клиентските заявки). Затова редът рисува
+   „от → до" САМО ако наистина има от какво, иначе пада на името на клиента.
+   Почне ли колоната да се пълни, редът се оправя сам.
+
    v20 (08.09.2026) — деплой с ЕДНО нещо: списък „невзета стока" в седмичния.
 
    Редът „За връщане (текущо състояние)" имаше само две карти — бройка без
@@ -516,6 +542,43 @@ function collectDailyReportData(cb, scope, kasaThreshold){
       }).catch(function(){ cb(null); });
     }).catch(function(){ cb(null); });
   }).catch(function(){ cb(null); });
+}
+
+/* „Закъсняла" е ПРИЗНАК, не статус — копие на isLate() от shared.js, но с
+   ОПОРНА ДАТА като аргумент вместо глобалното TODAY. Едж функцията няма
+   достъп до shared.js, а report.js не бива да вика два различни кода за
+   едно и също правило: затова копието влиза и в двата файла под едно име и
+   тестът сверява, че reportIsLate дава СЪЩИЯ отговор като isLate върху
+   набор гранични случаи (tests/report-late-section.test.js).
+
+   Правилото, дума по дума както в оригинала:
+   · няма delivery → не закъснява;
+   · приключените и отложените нямат срок, който да тече;
+   · клиентска заявка, обработена от ЦО, чийто доставчик още е в срок
+     (status='processed' и co_eta >= опорния ден) — виж coWaitingSupplier();
+   · транспорт, чакащ стока по клиентска заявка (awaiting_stock): срокът се
+     води по клиентската заявка, не по транспорта;
+   · иначе закъснява, ако delivery е ПРЕДИ опорния ден.
+
+   coWaitingSupplier() е вградена тук, а не пренесена като отделна функция:
+   тя е три реда и единственият ѝ повикващ е този. */
+function reportIsLate(o, refD){
+  if (!o || !o.delivery) return false;
+  if (['done','refused','postponed'].indexOf(o.status) >= 0) return false;
+  if (o.status === 'processed' && o.co_eta) {
+    var eta = new Date(o.co_eta); eta.setHours(0,0,0,0);
+    if (eta >= refD) return false;
+  }
+  if (o.awaiting_stock) return false;
+  var dl = new Date(o.delivery); dl.setHours(0,0,0,0);
+  return dl < refD;
+}
+/* С колко дни. Същата аритметика като lateBadge() в shared.js — Math.round,
+   не floor: през преминаването към лятно/зимно часово време денонощието не е
+   86400000 мс и floor би отчитал един ден по-малко. */
+function reportLateDays(o, refD){
+  var dl = new Date(o.delivery); dl.setHours(0,0,0,0);
+  return Math.round((refD - dl) / 86400000);
 }
 
 /* Прагът за „разминаване" — app_settings, ключ 'kasa_diff_threshold'.
@@ -1450,7 +1513,14 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        писмо; за нещо, което тече веднъж седмично, това е по-евтино от
        трети аргумент, който трябва да мине през два файла и три
        извикващи. */
-    sbGet('app_settings','key=eq.returns_stale_days&select=key,value&limit=1')
+    sbGet('app_settings','key=eq.returns_stale_days&select=key,value&limit=1'),
+    /* Закъсненията са текущо СЪСТОЯНИЕ, не събитие от седмицата: срокът е
+       изтекъл и тече, докато заявката не се затвори. Затова нито една от
+       двете няма прозорец по дата — само отсяване на статусите, които
+       нямат срок. Филтърът се повтаря и в JS през reportIsLate(), защото
+       той е този, който наистина решава. */
+    sbGet('client_orders','status=not.in.(done,refused,postponed)&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,created_at'),
+    sbGet('transport_orders','status=not.in.(done,refused,postponed)&select=id,store_name,from_store,customer_name,delivery,status,awaiting_stock')
   ]).then(function(r){
     /* Всеки набор минава през ЕДИН предикат — отделни филтри на отделни
        места се разминават. */
@@ -1550,6 +1620,50 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       var v = Number(String(s.value == null ? '' : s.value).trim().replace(',', '.'));
       if (isFinite(v) && v > 0) returnsStaleDays = v;
     });
+
+    /* ЗАКЪСНЕНИЯТА. Опорната дата е refD (днес), същата като на невзетата
+       стока — и двете са текущо състояние, не срез от седмицата.
+       reportIsLate() носи правилото дума по дума от isLate() в shared.js;
+       статусите се отсяват пак тук, а не само в заявката, защото заявката
+       пести трафик, а решава JS-ът. */
+    var byDaysDesc = function(a,b){
+      return b.days - a.days || String(a.store).localeCompare(String(b.store));
+    };
+    var lateOrders = [];
+    (Array.isArray(r[8]) ? r[8] : []).forEach(function(o){
+      if (!inScope(o.store_name) || !reportIsLate(o, refD)) return;
+      lateOrders.push({
+        store: o.store_name, in_num: o.in_num || '', customer: o.customer_name || '',
+        fulfiller: o.fulfiller || '', days: reportLateDays(o, refD)
+      });
+    });
+    lateOrders.sort(byDaysDesc);
+
+    var lateTransport = [];
+    (Array.isArray(r[9]) ? r[9] : []).forEach(function(o){
+      if (!inScope(o.store_name) || !reportIsLate(o, refD)) return;
+      lateTransport.push({
+        store: o.store_name, from: o.from_store || '', to: o.store_name,
+        customer: o.customer_name || '', days: reportLateDays(o, refD)
+      });
+    });
+    lateTransport.sort(byDaysDesc);
+
+    /* Разбивка по обект за ПЪЛНИЯ отчет: 92 закъснели заявки в 10 обекта
+       (08.09.2026) не се четат ред по ред. Най-натоварените отгоре; при
+       равен брой — този с най-старата заявка. */
+    var loMap = {};
+    var lateOrdersByStore = [];
+    lateOrders.forEach(function(x){
+      var g = loMap[x.store];
+      if (!g) { g = { store: x.store, count: 0, maxDays: 0 }; loMap[x.store] = g; lateOrdersByStore.push(g); }
+      g.count++;
+      if (x.days > g.maxDays) g.maxDays = x.days;
+    });
+    lateOrdersByStore.sort(function(a,b){
+      return b.count - a.count || b.maxDays - a.maxDays ||
+             String(a.store).localeCompare(String(b.store));
+    });
     var stornoSummary = {
       total: storno.length,
       draft: storno.filter(function(x){ return x.status==='draft'; }).length,
@@ -1585,6 +1699,8 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       diffs: diffs, wrongReceipt: wrongReceipt,
       returns: ret, storno: stornoSummary, zoborot: zoborotSummary,
       returnsList: returnsList, returnsStaleDays: returnsStaleDays,
+      lateOrders: lateOrders, lateOrdersByStore: lateOrdersByStore,
+      lateTransport: lateTransport,
       transitStale: stalePending.length,
       pallets: { missing: palletsMissing, stale: palletsStale, total: storeNames.length },
       /* Прозорецът пътува заедно с числата, за да го изпише заглавието. */
@@ -1677,6 +1793,80 @@ function reportReturnsListHtml(cross, scoped){
     '</div>';
 }
 
+/* Секция „Закъснения" — два списъка под едно заглавие, защото са едно и
+   също питане („кой срок е изтекъл") към два различни таба.
+
+   Клиентските заявки се държат като списъка с невзетата стока:
+   · scoped (регионален, управител) — ред по ред, с номер, клиент и кой
+     изпълнява; това е работен списък и има кого да подсети;
+   · пълен (цялата верига) — по ОБЕКТ. Към 08.09.2026 закъснелите са 92 в
+     10 обекта: ред по ред значи писмо, което никой не отваря, а разбивката
+     по обект казва същото с 10 реда.
+   Транспортът е ред по ред и в двата режима — той е пет записа общо, не
+   деветдесет, и обобщение по обект не би спестило нищо.
+
+   from_store НА ТРАНСПОРТА е празен във ВСИЧКИТЕ 1529 записа (проверено
+   08.09.2026): колоната съществува, но нищо не я пълни — transport.js дори
+   не я споменава, тя се ползва само в клиентските заявки. Затова стрелката
+   „от → до" се рисува САМО ако наистина има от какво; иначе редът пада на
+   клиента, който е попълнен навсякъде. Полето остава в данните — почне ли
+   да се пълни, редът се оправя сам, без промяна тук. */
+function reportLateSectionHtml(cross, scoped){
+  if (!cross) return '';
+  var orders = cross.lateOrders || [];
+  var byStore = cross.lateOrdersByStore || [];
+  var transport = cross.lateTransport || [];
+  if (!orders.length && !transport.length) return '';
+
+  var dayWord = function(d){ return d === 1 ? ' ден' : ' дни'; };
+  var box = function(inner){
+    return '<div style="background:#FFFFFF;border:1px solid #FECACA;border-radius:8px;overflow:hidden;">'+inner+'</div>';
+  };
+  var head = function(t){
+    return '<div style="font-size:11px;font-weight:700;color:#b91c1c;margin-bottom:6px;">'+t+'</div>';
+  };
+  var age = function(d){
+    return '<span style="float:right;font-weight:700;color:#C0392B;">+'+d+dayWord(d)+'</span>';
+  };
+  var row = function(inner){
+    return '<div style="padding:7px 10px;border-bottom:1px solid #FECACA;font-size:12px;">'+inner+'</div>';
+  };
+
+  var out = '';
+
+  if (orders.length) {
+    var body;
+    if (scoped) {
+      body = orders.map(function(o){
+        return row(reportStoreLinkHtml(o.store, '#7f1d1d') +
+          '<span style="color:#b91c1c;"> — '+
+          (o.in_num ? '№ '+esc(o.in_num)+' · ' : '')+esc(o.customer || '—')+
+          (o.fulfiller ? ' — изпълнява '+esc(o.fulfiller) : '')+'</span>' + age(o.days));
+      }).join('');
+    } else {
+      body = byStore.map(function(g){
+        return row(reportStoreLinkHtml(g.store, '#7f1d1d') +
+          '<span style="color:#b91c1c;"> — '+g.count+(g.count === 1 ? ' заявка' : ' заявки')+'</span>' +
+          '<span style="float:right;font-weight:700;color:#C0392B;">най-старата +'+g.maxDays+dayWord(g.maxDays)+'</span>');
+      }).join('');
+    }
+    out += '<div style="margin-top:12px;">' +
+      head('🔴 Закъснели клиентски заявки ('+orders.length+')') + box(body) + '</div>';
+  }
+
+  if (transport.length) {
+    var trBody = transport.map(function(t){
+      var where = t.from ? esc(t.from)+' → '+esc(t.store) : esc(t.customer || '—');
+      return row(reportStoreLinkHtml(t.store, '#7f1d1d') +
+        '<span style="color:#b91c1c;"> — '+where+'</span>' + age(t.days));
+    }).join('');
+    out += '<div style="margin-top:12px;">' +
+      head('🔴 Закъснял транспорт ('+transport.length+')') + box(trBody) + '</div>';
+  }
+
+  return out;
+}
+
 /* scoped казва ЧИЙ е отчетът: срязан (регионален, управител) или за
    цялата верига. Само списъкът с невзетата стока го ползва — виж
    reportReturnsListHtml. Липсващ аргумент значи пълен отчет, тоест
@@ -1699,6 +1889,8 @@ function buildCrossModuleSectionHtml(cross, scoped){
     crossMetricCard(cross.returns.open,'отворени (чакат/взети)', cross.returns.open>0) +
     crossMetricCard(cross.returns.completed,'приключени'));
   h += reportReturnsListHtml(cross, scoped);
+
+  h += reportLateSectionHtml(cross, scoped);
 
   h += crossModuleRow('💳','Каса — Сторно бележки (нови за периода)',
     crossMetricCard(cross.storno.total,'общо нови') +
