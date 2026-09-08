@@ -1559,14 +1559,25 @@ function reportCrossWindowLabel(win){
 /* Списъкът „невзета стока по доставчик" под картите на реда „За връщане".
    Картите остават — те са бройката; списъкът казва КЪДЕ стои и ОТКОГА.
 
+   РЕД = ОБЕКТ, не двойка обект+доставчик. Дотук всяка двойка имаше свой
+   ред и на живо това бяха десетки почти еднакви „X — Доставчик — 1 поз. ·
+   най-старата от 11 дни": формално вярно, но не е справка — окото няма за
+   какво да се хване. Сега обектът е един ред с два текстови реда: числата
+   отгоре, доставчиците отдолу с по-дребен сив шрифт. Обектите са 18 по
+   природа, тоест списъкът е ограничен сам по себе си и няма нужда от лимит.
+
+   ДАННИТЕ НЕ СЕ ПИПАТ: cross.returnsList си остават групи обект+доставчик
+   както ги връща колекторът. Тук се сменя само подредбата им в писмото.
+
    Двата режима са различни НАРОЧНО:
-   · scoped (регионален, управител) — ВСИЧКИ групи. Обхватът му е няколко
-     обекта и списъкът е негов работен списък, не сводка; застоялите се
-     открояват със стил, но нищо не се крие.
-   · пълен (цялата верига) — САМО застоялите. Към 08.09.2026 pending
-     групите са 248, от които 145 над 7 дни: пълен списък значи писмо,
-     което никой не чете. Прагът е това, което го прави четимо, затова и
-     стои в базата, а не в кода.
+   · scoped (регионален, управител) — ВСИЧКИ обекти в обхвата и ВСИЧКИ
+     доставчици. Обхватът му е няколко обекта и списъкът е негов работен
+     списък, не сводка; застоялите се открояват, но нищо не се крие.
+   · пълен (цялата верига) — само обектите с ПОНЕ ЕДИН доставчик над прага,
+     и в долния ред само тези доставчици. Към 08.09.2026 pending групите са
+     248, от които 145 над 7 дни: без прага писмото не се чете. Следствие:
+     броят позиции в горния ред е сборът на ПОКАЗАНИТЕ доставчици, не на
+     всички — иначе числото отгоре не отговаря на списъка отдолу.
 
    Прагът влиза и в заглавието на пълния режим — иначе читателят няма как
    да знае защо едни редове ги има, а други не. */
@@ -1575,16 +1586,49 @@ function reportReturnsListHtml(cross, scoped){
   var all = cross.returnsList || [];
   var thr = (cross.returnsStaleDays === null || cross.returnsStaleDays === undefined)
     ? 7 : cross.returnsStaleDays;
-  var rows = scoped ? all : all.filter(function(g){ return g.oldestDays >= thr; });
-  if (!rows.length) return '';
+  if (!all.length) return '';
 
-  var body = rows.map(function(g){
-    var warn = g.oldestDays >= thr;
-    return '<div style="padding:7px 10px;border-bottom:1px solid '+(warn?'#FECACA':'#eef1f6')+';font-size:12px;">' +
-      reportStoreLinkHtml(g.store, warn ? '#7f1d1d' : '#374151') +
-      '<span style="color:'+(warn?'#b91c1c':'#6B7280')+';"> — '+esc(g.supplier)+'</span>' +
-      '<span style="float:right;color:'+(warn?'#C0392B':'#6B7280')+';font-weight:'+(warn?'700':'500')+';">' +
-      g.count+' поз. · най-старата от '+g.oldestDays+' дни</span>' +
+  var byStore = {};
+  var stores = [];
+  all.forEach(function(g){
+    if (!scoped && g.oldestDays < thr) return;
+    var s = byStore[g.store];
+    if (!s) {
+      s = { store: g.store, count: 0, oldestDays: 0, sup: [] };
+      byStore[g.store] = s; stores.push(s);
+    }
+    s.count += g.count;
+    if (g.oldestDays > s.oldestDays) s.oldestDays = g.oldestDays;
+    s.sup.push(g);
+  });
+  if (!stores.length) return '';
+  /* Най-дълго чакащият обект отгоре; при равни дни по име, за да е стабилен
+     редът между две изпращания. */
+  stores.sort(function(a,b){
+    return b.oldestDays - a.oldestDays || String(a.store).localeCompare(String(b.store));
+  });
+
+  var body = stores.map(function(s){
+    var warn = s.oldestDays >= thr;
+    /* Доставчиците по азбучен ред — четат се като списък, не като класация.
+       Броят се изписва само когато е повече от една позиция; застоялите се
+       удебеляват, за да личат вътре в реда. */
+    var supText = s.sup.slice().sort(function(a,b){
+      return String(a.supplier).localeCompare(String(b.supplier));
+    }).map(function(g){
+      var name = esc(g.supplier) + (g.count > 1 ? ' ('+g.count+')' : '');
+      return g.oldestDays >= thr ? '<b>'+name+'</b>' : name;
+    }).join(', ');
+
+    return '<div style="padding:7px 10px;border-bottom:1px solid '+(warn?'#FECACA':'#eef1f6')+';">' +
+      '<div style="font-size:12px;">' +
+        reportStoreLinkHtml(s.store, warn ? '#7f1d1d' : '#374151') +
+        '<span style="color:'+(warn?'#b91c1c':'#6B7280')+';"> — '+s.count+' поз. при '+
+        s.sup.length+(s.sup.length === 1 ? ' доставчик' : ' доставчика')+'</span>' +
+        '<span style="float:right;color:'+(warn?'#C0392B':'#6B7280')+';font-weight:'+(warn?'700':'500')+';">' +
+        'най-старата от '+s.oldestDays+' дни</span>' +
+      '</div>' +
+      '<div style="font-size:11px;color:#9CA3AF;margin-top:2px;">'+supText+'</div>' +
       '</div>';
   }).join('');
 
