@@ -55,6 +55,15 @@ function env(data) {
 }
 
 /* Една постоянна задача, дължима в отчетния ден, плюс отмятания по избор. */
+/* Достатъчно стара позиция, за да е „застояла" (прагът е 7 дни по
+   doc_date спрямо деня на отчета). */
+const TRANSIT_OLD = (function () {
+  const d = new Date();
+  d.setDate(d.getDate() - 20);
+  const p = function (x) { return String(x).padStart(2, '0'); };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
+})();
+
 function dayEnv(doneStores) {
   const probe = env();
   const reportDay = probe.w.reportDailyTargetDate(new Date());
@@ -183,8 +192,14 @@ function snapshotPosts(h) {
         { store_name: 'Дупница', status: 'confirmed' },
         { store_name: 'Троян', status: 'draft' }
       ],
+      /* doc_date и status са ЗАДЪЛЖИТЕЛНИ от 08.09.2026: „застояла" вече се
+         смята в JS по възрастта на документа, а не се филтрира в заявката по
+         created_at. Ред без doc_date е с възраст 0, тоест не застоял — и
+         проверката за обхвата по-долу щеше да мери нула срещу нула. */
       goods_transit: [
-        { store_name: 'Петрич' }, { store_name: 'Монтана' }, { store_name: 'Монтана' }
+        { store_name: 'Петрич', status: 'pending', doc_date: TRANSIT_OLD },
+        { store_name: 'Монтана', status: 'pending', doc_date: TRANSIT_OLD },
+        { store_name: 'Монтана', status: 'pending', doc_date: TRANSIT_OLD }
       ],
       transport_pallets: []
     });

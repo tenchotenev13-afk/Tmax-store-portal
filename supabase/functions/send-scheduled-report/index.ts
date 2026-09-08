@@ -1,6 +1,22 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v22 (08.09.2026) — деплой с ТРИ неща в „Стока на път" и клиентските
+   заявки, изброени поотделно, защото бележката описва ЦЕЛИЯ деплой:
+     1. Поправен броячът „застояли". Той филтрираше pending с
+        created_at < -7d, а created_at е датата на SAP импорта, не възрастта
+        на позицията: към 08.09.2026 всичките 835 отворени носят 01.09,
+        тоест числото беше или всички, или нула. Възрастта вече е дни от
+        doc_date до деня на отчета; отворена позиция = pending или sent.
+     2. Нов списък „Стока на път" по ОБЕКТ (reportTransitListHtml) веднага
+        под реда с картите. По обект, не по позиция - около 900 отворени
+        позиции не се четат ред по ред. Пълният отчет показва само обекти
+        със застояли, срязаният - всички от обхвата с отворени.
+     3. Нова секция „Необработени от логистичен склад"
+        (reportWarehousePendingHtml) след „Закъснения": клиентски заявки в
+        pending, чийто fulfiller е логистичен склад. Нарочно се припокрива
+        със закъсненията - двете отговарят на различни въпроси.
+
    v21 (08.09.2026) — деплой с ЕДНО нещо: секция „Закъснения" в седмичния.
 
    Два списъка под едно заглавие, защото са едно и също питане („кой срок е
@@ -1492,10 +1508,10 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
   var upDate = W.toISO ? '&date=lte.' + W.toISO : '';
 
   /* "Застояли" и "остарели" НЕ следват прозореца - те са моментна снимка
-     спрямо ДНЕС ("pending от повече от 7 дни"), не "случило се през
-     седмицата". Затова прагът им се смята отделно и остава подвижен. */
-  var staleAgo = new Date(); staleAgo.setDate(staleAgo.getDate() - 7);
-  var staleStamp = staleAgo.toISOString();
+     спрямо ДНЕС ("отворено от повече от 7 дни"), не "случило се през
+     седмицата". Затова се смятат отделно и остават подвижни.
+     Прагът за стоката на път вече се прилага в JS върху doc_date, а не в
+     заявката върху created_at - затова тук няма отметка на времето. */
 
   Promise.all([
     /* store_name и direction са нужни, за да се отдели сторната по грешен
@@ -1505,7 +1521,9 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     sbGet('stock_returns','select=store_name,status,supplier,created_at'),
     sbGet('kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,status'),
     sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
-    sbGet('goods_transit','status=eq.pending&created_at=lt.'+staleStamp+'&select=store_name'),
+    /* Отворените позиции, БЕЗ филтър по created_at - той е датата на SAP
+       импорта, не възрастта на позицията (виж пресмятането по-долу). */
+    sbGet('goods_transit','status=in.(pending,sent)&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name'),
     sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
     sbGet('users','select=store_name&order=store_name'),
     /* Прагът за „застояла" — една заявка вътре в колектора. Функцията се
@@ -1528,7 +1546,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     var returns = (Array.isArray(r[1]) ? r[1] : []).filter(function(x){ return inScope(x.store_name); });
     var storno = (Array.isArray(r[2]) ? r[2] : []).filter(function(x){ return inScope(x.store_name); });
     var zoborot = (Array.isArray(r[3]) ? r[3] : []).filter(function(x){ return inScope(x.store_name); });
-    var stalePending = (Array.isArray(r[4]) ? r[4] : []).filter(function(x){ return inScope(x.store_name); });
+    var transitOpen = (Array.isArray(r[4]) ? r[4] : []).filter(function(x){ return inScope(x.store_name); });
     var palletsRows = (Array.isArray(r[5]) ? r[5] : []).filter(function(x){ return inScope(x.store_name); });
     var allUsers = Array.isArray(r[6]) ? r[6] : [];
 
@@ -1664,6 +1682,80 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       return b.count - a.count || b.maxDays - a.maxDays ||
              String(a.store).localeCompare(String(b.store));
     });
+
+    /* СТОКА НА ПЪТ. Възрастта е дни от doc_date до деня на отчета, НЕ от
+       created_at: created_at е датата на SAP импорта, тоест към 08.09.2026
+       всичките 835 отворени позиции носят 01.09 и „по-стари от 7 дни" беше
+       или всички, или никой. Точно това чупеше стария брояч — заявката
+       филтрираше created_at<-7d и връщаше целия набор.
+       Отворена позиция = pending или sent; received/rejected са приключени. */
+    var TRANSIT_STALE_DAYS = 7;
+    var transitAge = function(row){
+      if (!row.doc_date) return 0;
+      var d = new Date(String(row.doc_date).slice(0,10)+'T00:00:00');
+      if (isNaN(d.getTime())) return 0;
+      return Math.round((refD - d) / 86400000);
+    };
+    var transitStale = 0;
+    var trMap = {};
+    var transitByStore = [];
+    transitOpen.forEach(function(x){
+      var s = x.store_name || '—';
+      var age = transitAge(x);
+      var g = trMap[s];
+      if (!g) { g = { store: s, open: 0, stale: 0, oldestDays: 0 }; trMap[s] = g; transitByStore.push(g); }
+      g.open++;
+      if (age > TRANSIT_STALE_DAYS) { g.stale++; transitStale++; }
+      if (age > g.oldestDays) g.oldestDays = age;
+    });
+    transitByStore.sort(function(a,b){
+      return b.stale - a.stale || b.oldestDays - a.oldestDays ||
+             String(a.store).localeCompare(String(b.store));
+    });
+
+    /* НЕОБРАБОТЕНИ ОТ ЛОГИСТИЧЕН СКЛАД. Същият набор client_orders като
+       закъсненията - втора заявка за същите редове би струвала още едно
+       обикаляне и би могла да върне различна снимка.
+       „Чака" се мери от created_at (кога е подадена заявката), а
+       просрочието - от delivery през reportLateDays, тоест двете числа
+       отговарят на два различни въпроса и не се смесват. */
+    var daysSince = function(stamp){
+      if (!stamp) return 0;
+      var d = new Date(stamp);
+      if (isNaN(d.getTime())) return 0;
+      d.setHours(0,0,0,0);
+      return Math.round((refD - d) / 86400000);
+    };
+    var warehousePending = [];
+    (Array.isArray(r[8]) ? r[8] : []).forEach(function(o){
+      if (o.status !== 'pending') return;
+      if (LOGISTICS_WAREHOUSES.indexOf(o.fulfiller || '') < 0) return;
+      if (!inScope(o.store_name)) return;
+      warehousePending.push({
+        store: o.store_name, in_num: o.in_num || '',
+        customer: o.customer_name || '', warehouse: o.fulfiller || '',
+        waitDays: daysSince(o.created_at),
+        lateDays: reportIsLate(o, refD) ? reportLateDays(o, refD) : 0
+      });
+    });
+    warehousePending.sort(function(a,b){
+      return b.lateDays - a.lateDays || b.waitDays - a.waitDays ||
+             String(a.store).localeCompare(String(b.store));
+    });
+    var whMap = {};
+    var warehousePendingByStore = [];
+    warehousePending.forEach(function(x){
+      var g = whMap[x.store];
+      if (!g) { g = { store: x.store, count: 0, late: 0, oldestWait: 0 }; whMap[x.store] = g; warehousePendingByStore.push(g); }
+      g.count++;
+      if (x.lateDays > 0) g.late++;
+      if (x.waitDays > g.oldestWait) g.oldestWait = x.waitDays;
+    });
+    warehousePendingByStore.sort(function(a,b){
+      return b.count - a.count || b.late - a.late || b.oldestWait - a.oldestWait ||
+             String(a.store).localeCompare(String(b.store));
+    });
+
     var stornoSummary = {
       total: storno.length,
       draft: storno.filter(function(x){ return x.status==='draft'; }).length,
@@ -1701,7 +1793,9 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       returnsList: returnsList, returnsStaleDays: returnsStaleDays,
       lateOrders: lateOrders, lateOrdersByStore: lateOrdersByStore,
       lateTransport: lateTransport,
-      transitStale: stalePending.length,
+      transitStale: transitStale, transitByStore: transitByStore,
+      warehousePending: warehousePending,
+      warehousePendingByStore: warehousePendingByStore,
       pallets: { missing: palletsMissing, stale: palletsStale, total: storeNames.length },
       /* Прозорецът пътува заедно с числата, за да го изпише заглавието. */
       window: { from: W.fromISO, to: W.toISO }
@@ -1867,6 +1961,71 @@ function reportLateSectionHtml(cross, scoped){
   return out;
 }
 
+/* Списък „Стока на път" по ОБЕКТ, не по позиция: към 08.09.2026 отворените
+   позиции (pending+sent) са около 900 и ред по ред е нечетимо в писмо.
+   Затова и двата режима групират — разликата е кои обекти влизат.
+   Пълният отчет показва само обектите СЪС застояли: иначе списъкът е цялата
+   верига и не насочва вниманието никъде. Срязаният показва всеки обект от
+   обхвата с отворени позиции, защото там обектите са един-два и „нула
+   застояли" също е отговор, който управителят иска да види. */
+function reportTransitListHtml(cross, scoped){
+  if (!cross) return '';
+  var rows = cross.transitByStore || [];
+  var list = rows.filter(function(g){ return scoped ? g.open > 0 : g.stale > 0; });
+  if (!list.length) return '';
+  var dayWord = function(d){ return d === 1 ? ' ден' : ' дни'; };
+  var openWord = function(n){ return n === 1 ? ' отворена' : ' отворени'; };
+  var body = list.map(function(g){
+    return '<div style="padding:7px 10px;border-bottom:1px solid #e5e7eb;font-size:12px;">' +
+      reportStoreLinkHtml(g.store, '#374151') +
+      '<span style="color:#4b5563;"> — '+g.open+openWord(g.open)+' · '+
+      '<b style="color:'+(g.stale>0?'#C0392B':'#4b5563')+';">'+g.stale+' над 7 дни</b> · '+
+      'най-старата от '+g.oldestDays+dayWord(g.oldestDays)+'</span></div>';
+  }).join('');
+  return '<div style="margin-top:8px;background:#FFFFFF;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">'+body+'</div>';
+}
+
+/* Клиентски заявки, които чакат ЛОГИСТИЧЕН СКЛАД да ги обработи.
+   Нарочно СЕ ПРИПОКРИВА със „Закъснели клиентски заявки" отгоре: там
+   въпросът е „кой срок е изтекъл", тук е „кой чака склада". Една и съща
+   заявка може да е и двете и това не е дублиране — вадене на едната от
+   другата би скрило точно най-важните редове.
+   Просрочието се показва само когато го има: заявка отпреди два дни със
+   срок утре чака склада, но не е закъсняла. */
+function reportWarehousePendingHtml(cross, scoped){
+  if (!cross) return '';
+  var items = cross.warehousePending || [];
+  if (!items.length) return '';
+  var byStore = cross.warehousePendingByStore || [];
+  var dayWord = function(d){ return d === 1 ? ' ден' : ' дни'; };
+  var row = function(inner){
+    return '<div style="padding:7px 10px;border-bottom:1px solid #FDE68A;font-size:12px;">'+inner+'</div>';
+  };
+  var body;
+  if (scoped) {
+    body = items.map(function(o){
+      return row(reportStoreLinkHtml(o.store, '#78350f') +
+        '<span style="color:#92400e;"> — '+
+        (o.in_num ? '№ '+esc(o.in_num)+' · ' : '')+esc(o.customer || '—')+
+        ' — '+esc(o.warehouse)+
+        ' — чака '+o.waitDays+dayWord(o.waitDays)+
+        (o.lateDays > 0 ? ' · <b style="color:#C0392B;">+'+o.lateDays+' просрочие</b>' : '')+
+        '</span>');
+    }).join('');
+  } else {
+    body = byStore.map(function(g){
+      return row(reportStoreLinkHtml(g.store, '#78350f') +
+        '<span style="color:#92400e;"> — '+g.count+(g.count === 1 ? ' заявка' : ' заявки')+
+        (g.late ? ' · <b style="color:#C0392B;">'+g.late+' просрочени</b>' : '')+
+        ' · най-дълго чака '+g.oldestWait+dayWord(g.oldestWait)+'</span>');
+    }).join('');
+  }
+  return '<div style="margin-top:12px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:6px;">📦 Необработени от логистичен склад ('+items.length+')</div>' +
+    '<div style="background:#FFFFFF;border:1px solid #FDE68A;border-radius:8px;overflow:hidden;">'+body+'</div>' +
+    '</div>';
+}
+
 /* scoped казва ЧИЙ е отчетът: срязан (регионален, управител) или за
    цялата верига. Само списъкът с невзетата стока го ползва — виж
    reportReturnsListHtml. Липсващ аргумент значи пълен отчет, тоест
@@ -1891,6 +2050,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
   h += reportReturnsListHtml(cross, scoped);
 
   h += reportLateSectionHtml(cross, scoped);
+  h += reportWarehousePendingHtml(cross, scoped);
 
   h += crossModuleRow('💳','Каса — Сторно бележки (нови за периода)',
     crossMetricCard(cross.storno.total,'общо нови') +
@@ -1905,7 +2065,8 @@ function buildCrossModuleSectionHtml(cross, scoped){
     crossMetricCard(cross.zoborot.confirmed,'потвърдени'));
 
   h += crossModuleRow('🚚','Стока на път',
-    crossMetricCard(cross.transitStale,'застояли pending (>7 дни)', cross.transitStale>0));
+    crossMetricCard(cross.transitStale,'застояли (>7 дни по документ)', cross.transitStale>0));
+  h += reportTransitListHtml(cross, scoped);
 
   h += crossModuleRow('📦','Палети',
     crossMetricCard(cross.pallets.missing,'обекта без данни', cross.pallets.missing>0) +

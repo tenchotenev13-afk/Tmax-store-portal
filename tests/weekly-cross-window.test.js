@@ -321,15 +321,31 @@ function urlFor(calls, table) {
     h.w.collectWeeklyReportData(function (s) { summary = s; });
     await ticks();
 
+    /* Стоката на път ПАК не следва прозореца, но по друга причина от преди.
+       До 08.09.2026 заявката носеше праг created_at=lt.<днес-7д> и тестът
+       мереше него. Оттогава прагът изобщо не е в заявката: created_at е
+       датата на SAP импорта, не възрастта на позицията (всичките 835
+       отворени носеха 01.09), тоест филтърът връщаше или всичко, или нищо.
+       Възрастта се смята в JS по doc_date спрямо ДНЕС.
+       Затова проверката е обърната и е ПО-СИЛНА от предишната: заявката няма
+       НИКАКЪВ филтър по дата, значи по построение не може да следва
+       прозореца на седмицата — няма какво да се разминe. */
     const transitUrl = urlFor(h.calls, 'goods_transit');
-    const stale = (transitUrl.match(/created_at=lt\.([^&]+)/) || [])[1];
-    if (ok('Стока на път носи праг', !!stale, transitUrl)) {
-      const daysBack = Math.round((Date.now() - new Date(decodeURIComponent(stale))) / 86400000);
-      ok('прагът е 7 дни преди ДНЕС, не границата на седмицата',
-        daysBack === 7, String(daysBack) + ' дни · ' + stale);
-      ok('и не съвпада с понеделника на седмицата',
-        decodeURIComponent(stale) !== new Date(wk.dates[0] + 'T00:00:00').toISOString());
-    }
+    const transitFilters = transitUrl.replace(/select=[^&]*/, '');
+    ok('Стока на път: няма филтър по created_at',
+      transitFilters.indexOf('created_at') < 0, transitUrl);
+    ok('нито по doc_date', transitFilters.indexOf('doc_date=') < 0, transitUrl);
+    /* Единственият останал филтър е по статус. Ако утре някой върне граница
+       по дата, тя ще носи gte./lte./lt./gt. и това ще я хване. */
+    const noStatus = transitFilters.replace(/status=in\.\([^)]*\)/, '');
+    ok('нито каквато и да е друга граница по дата',
+      !/(gte|lte|lt|gt)\./.test(noStatus), transitUrl);
+    ok('а тегли отворените позиции (pending и sent)',
+      transitUrl.indexOf('status=in.(pending,sent)') >= 0, transitUrl);
+    /* Понеделникът на седмицата не се появява никъде в заявката — това
+       беше същината и на старата проверка. */
+    ok('понеделникът на седмицата не е в заявката',
+      transitUrl.indexOf(wk.dates[0]) < 0, transitUrl);
     /* created_at вече Е в select-а (от 08.09.2026 захранва списъка „невзета
        стока по доставчик" — възрастта на всяко чакащо връщане). Затова
        проверката гледа само ФИЛТРИТЕ: изрязва се select= и се търси остатък.

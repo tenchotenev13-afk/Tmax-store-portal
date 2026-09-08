@@ -91,6 +91,7 @@ const TESTS = [
   'report-kasa-section.test.js',
   'report-returns-list.test.js',
   'report-late-section.test.js',
+  'report-transit-warehouse.test.js',
   'report-grid.test.js',
   'email-encoding.test.js',
   'email-subject-rfc2047.test.js',
