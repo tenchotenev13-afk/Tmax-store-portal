@@ -37,6 +37,7 @@ const TESTS = [
   'loading-lists-pallets.test.js',
   'loading-lists-notify.test.js',
   'loading-diff-prefill.test.js',
+  'transit-store-scope.test.js',
   'loading-lists-print.test.js',
   'stock-diff-capitalized-counter.test.js',
   'stock-diff-chip-counts.test.js',
