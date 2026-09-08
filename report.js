@@ -761,7 +761,7 @@ function reportPickWeeklyBulletin(list, target){
 /* За разлика от дневния, седмичният взима ВСИЧКИ задачи на бюлетина за
    приключилата седмица (не само днешните) + всички постоянни задачи, които
    имат ден ИЛИ час зададен (т.е. не са от "без срок" групата). */
-function collectWeeklyReportData(cb){
+function collectWeeklyReportData(cb, scope){
   var target = reportWeekOfMonday(reportPrevWeekMonday(new Date()));
   Promise.all([
     /* Списък, не limit=1 - изборът на правилната седмица става по-долу. */
@@ -882,6 +882,13 @@ function collectWeeklyReportData(cb){
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
 
+        /* Обхватът СРЯЗВА изведения списък, а не го замества — иначе склад
+           или несъществуващ обект в assigned_stores би вкарал ред, какъвто
+           пълният отчет никога не показва. Същото както в дневния. */
+        if (scope && scope.length) {
+          stores = stores.filter(function(s){ return scope.indexOf(s) >= 0; });
+        }
+
         /* completion_date ЗАДЪЛЖИТЕЛНО минава нататък - reportItemMatchesComp()
            сравнява точно него срещу .date на елемента. Без него всеки елемент
            с дата (а тук вече всички имат) не намираше нито един completion и
@@ -892,6 +899,7 @@ function collectWeeklyReportData(cb){
 
         var summary = reportBuildSummary(items, comps, stores, noDueCount);
         summary.weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
+        summary.scoped = !!(scope && scope.length);
         summary.weekDates = wkDates; /* същите дати, които стесняват задачите - в шапката */
         var finish = function(){
           /* ЕДИН прозорец за целия имейл: същите wkDates, които стесняват
@@ -902,9 +910,16 @@ function collectWeeklyReportData(cb){
           collectCrossModuleWeeklySummary(function(cross){
             summary.cross = cross; /* null при грешка - секцията просто не се показва, не гърми */
             cb(summary);
-          }, wkDates ? { from: wkDates[0], to: wkDates[6] } : null);
+          }, wkDates ? { from: wkDates[0], to: wkDates[6] } : null, scope);
         };
-        if (bul) {
+        /* Срязаният отчет НИТО пише, НИТО чете тенденция — същото решение
+           като при дневния: report_snapshots има ЕДИН ред за (weekly,
+           седмица) и личното писмо би презаписало тенденцията на цялата
+           верига с числата на четири обекта. */
+        if (summary.scoped) {
+          summary.trendPrevWeek = null;
+          finish();
+        } else if (bul) {
           var thisKey = bul.year + '-W' + String(bul.week_number).padStart(2,'0');
           /* Опростено "предходна седмица" - не пресича година в edge-case
              седмица 1 (там просто няма да намери snapshot, деградира тихо
