@@ -1,6 +1,27 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v17 (08.09.2026) — деплой с ЕДНО нещо: кой получава дневния отчет.
+
+   Дневният имаше два списъка — report_recipients (пълният отчет, общо "to")
+   и регионалните (личен отчет за assigned_stores). Сега личните са ТРИ
+   източника в един цикъл:
+     · регионалните — както досега;
+     · получател от report_recipients с непразен scope_stores (новата колона
+       text[]): NULL/празно = пълният отчет както досега, непразно = човекът
+       излиза от общото "to" и получава личен отчет само за тези обекти.
+       Оттам идва искането на Теодор — дневния на един регионален;
+     · управителите (role='manager', 19 души), всеки за своя обект, зад
+       шалтер в базата: app_settings['daily_report_managers'] = 'on'.
+       Липсващ ключ = ИЗКЛЮЧЕНО, тоест списъкът се пуска, когато Теодор
+       потвърди, БЕЗ нов деплой.
+   Дедупликация по имейл: един и същ човек в два източника получава ЕДНО
+   писмо с обединения обхват. В отговора regionalOut стана personalOut и
+   всеки ред носи source: 'regional' | 'recipient' | 'manager'.
+   Обхватът важи само за дневния — при седмичния scope_stores се пренебрегва
+   и получателят си остава в общото писмо.
+   Миграцията за колоната е в report-recipients-scope-schema.sql.
+
    v16 (31.08.2026) — деплой БЕЗ промяна в поведението.
    Рендирането на прикачените е изнесено в reportAttachmentsHtml(), защото
    се ползва на две места: коментарите по обекти тук и личните картички по
@@ -1439,9 +1460,19 @@ Deno.serve(async (req: Request) => {
     var html = type === 'weekly' ? buildWeeklyReportHtml(data) : buildDailyReportHtml(data);
 
     var flagFilter = type === 'weekly' ? 'weekly=eq.true' : 'daily=eq.true';
-    var recipientsRes: any = await sbGet('report_recipients', 'active=eq.true&' + flagFilter);
+    var recipientsRes: any = await sbGet('report_recipients', 'active=eq.true&' + flagFilter + '&select=email,name,scope_stores');
     var recipients = Array.isArray(recipientsRes) ? recipientsRes : [];
-    var emails = recipients.map(function(r: any){ return r.email; }).filter(Boolean);
+    /* scope_stores: NULL/празен = пълният отчет както досега; непразен масив =
+       ЛИЧЕН отчет само за тези обекти, тоест човекът излиза от общото "to" и
+       влиза в личния цикъл по-долу. Обхватът важи САМО за дневния — при
+       седмичния колоната се пренебрегва и получателят си остава в общото
+       писмо, вместо мълчаливо да изпадне и оттам. */
+    function recipientScope(r: any): string[] {
+      if (type !== 'daily') return [];
+      return (Array.isArray(r.scope_stores) ? r.scope_stores : []).filter(Boolean);
+    }
+    var emails = recipients.filter(function(r: any){ return !recipientScope(r).length; })
+                           .map(function(r: any){ return r.email; }).filter(Boolean);
 
     var subject = type === 'weekly' ? reportWeeklySubject(data.weekDates) : reportDailySubject(data.reportDate);
 
@@ -1460,56 +1491,122 @@ Deno.serve(async (req: Request) => {
       emailStatus = emailRes.status;
     }
 
-    /* ── СПИСЪК 2: регионалните — отчет САМО за техните обекти ─────────────
-       Отделен списък, не разширение на първия: източникът е друг (users,
-       не report_recipients), обхватът е друг и писмото е ЛИЧНО, а не общо
-       поле "to" — иначе всеки би виждал чуждите обекти.
+    /* ── ЛИЧНИТЕ ОТЧЕТИ: три източника, един цикъл ────────────────────────
+       Отделен път, не разширение на първия: обхватът е различен за всеки
+       човек и затова "to" е винаги с ЕДИН адрес — иначе всеки би виждал
+       чуждите обекти. Само дневният. Седмичният си остава както е бил.
 
-       Само дневният. Седмичният си остава както е бил.
+       Източниците са три и се внасят В ТОЗИ РЕД:
+         1. регионалните — users.is_regional, обхват assigned_stores;
+         2. получателите с обхват — report_recipients.scope_stores;
+         3. управителите — users.role='manager', обхват собственият обект,
+            зад шалтер в базата: app_settings['daily_report_managers']='on'.
+       Образецът за 1 и 3 е send-oborot-report: признакът се чете от базата,
+       а active и празният имейл се отсяват в кода (active !== false, за да
+       не изпадне потребител с NULL), обхватът се приема за масив.
 
-       Образецът е send-oborot-report: is_regional се чете от базата, а
-       active и празният имейл се отсяват в кода (active !== false, за да
-       не изпадне потребител с NULL), assigned_stores се приема за масив.
+       Дедупликация по имейл с малки букви: един и същ човек може да е и
+       регионален, и получател с обхват. Тогава получава ЕДНО писмо с
+       обединения обхват, а source остава на източника, който го е внесъл
+       ПРЪВ — тоест по реда отгоре.
 
        ЦЕНАТА: по едно събиране на данни за всеки получател, тоест N+1
-       обхождания на базата. Съзнателно — кронът тече веднъж дневно за шест
-       души, а алтернативата (едно събиране и пресмятане наум за всеки
-       обхват) значи да се раздели събирането от агрегацията в код, който
-       се копира на ръка в две места. */
-    var regionalOut: any[] = [];
+       обхождания на базата. Съзнателно — кронът тече веднъж дневно, а
+       алтернативата (едно събиране и пресмятане наум за всеки обхват) значи
+       да се раздели събирането от агрегацията в код, който се копира на
+       ръка в две места. Бяха шест събирания за шестимата регионални; с
+       включени управители стават до около 25 на сутрин. Приемливо за нещо,
+       което тече веднъж на ден — не рефакторирай събирането заради това. */
+    var personalOut: any[] = [];
+    var personal: any[] = [];
+    var personalSeen: any = {};
+    function addPersonal(email: any, name: any, stores: any, source: string) {
+      var key = String(email || '').trim().toLowerCase();
+      if (!key) return;
+      var list = (Array.isArray(stores) ? stores : []).filter(Boolean);
+      var cur = personalSeen[key];
+      if (cur) {
+        list.forEach(function(s: any){ if (cur.stores.indexOf(s) < 0) cur.stores.push(s); });
+        if (!cur.name && name) cur.name = name;
+        return;
+      }
+      cur = { email: email, name: name || '', stores: list, source: source };
+      personalSeen[key] = cur;
+      personal.push(cur);
+    }
+
     if (type === 'daily') {
+      /* Източник 1 — регионалните, обхват assigned_stores. */
       var regRes: any = await sbGet('users', 'is_regional=eq.true&select=email,display_name,assigned_stores,active');
-      var regionals = (Array.isArray(regRes) ? regRes : []).filter(function(u: any){
-        return u.active !== false && u.email;
+      (Array.isArray(regRes) ? regRes : []).forEach(function(u: any){
+        if (u.active === false || !u.email) return;
+        addPersonal(u.email, u.display_name, u.assigned_stores, 'regional');
       });
-      for (const u of regionals) {
-        var mine: string[] = Array.isArray(u.assigned_stores) ? u.assigned_stores : [];
-        /* Празен assigned_stores = НЯМА писмо. Празен отчет е по-лош от
-           липсващ: изглежда като „обектите ти нямат нито една задача". */
-        if (!mine.length) { regionalOut.push({ email:u.email, sent:false, reason:'no_assigned_stores' }); continue; }
+
+      /* Източник 2 — получателите с непразен scope_stores. Списъкът вече е
+         прочетен по-горе; тези хора са извадени от общото "to". */
+      recipients.forEach(function(r: any){
+        var sc = recipientScope(r);
+        if (sc.length) addPersonal(r.email, r.name, sc, 'recipient');
+      });
+
+      /* Източник 3 — управителите, всеки САМО за своя обект. Шалтерът стои
+         в базата: app_settings с ключ 'daily_report_managers' и стойност
+         'on'. Липсващ ключ или каквато и да е друга стойност = ИЗКЛЮЧЕНО,
+         тоест списъкът се пуска и спира без нов деплой.
+         Двете четения са в свой try/catch нарочно: нова функционалност не
+         бива да събори писмата на регионалните, ако app_settings или users
+         отговорят с грешка. Отказът се вижда в отговора вместо да изяде
+         целия цикъл. */
+      var managersOn = false;
+      try {
+        var setRes: any = await sbGet('app_settings', 'key=eq.daily_report_managers&select=value&limit=1');
+        var setRow = Array.isArray(setRes) ? setRes[0] : null;
+        managersOn = !!setRow && String(setRow.value == null ? '' : setRow.value).trim().toLowerCase() === 'on';
+      } catch (e) {
+        managersOn = false;
+      }
+      if (managersOn) {
+        try {
+          var mgrRes: any = await sbGet('users', 'role=eq.manager&select=email,display_name,store_name,active');
+          (Array.isArray(mgrRes) ? mgrRes : []).forEach(function(u: any){
+            if (u.active === false || !u.email) return;
+            addPersonal(u.email, u.display_name, u.store_name ? [u.store_name] : [], 'manager');
+          });
+        } catch (e) {
+          personalOut.push({ email:null, source:'manager', sent:false, reason:'managers_query_failed' });
+        }
+      }
+
+      for (const u of personal) {
+        var mine: string[] = Array.isArray(u.stores) ? u.stores : [];
+        /* Празен обхват = НЯМА писмо. Празен отчет е по-лош от липсващ:
+           изглежда като „обектите ти нямат нито една задача". */
+        if (!mine.length) { personalOut.push({ email:u.email, source:u.source, sent:false, reason:'no_assigned_stores' }); continue; }
 
         var mineData: any = await new Promise(function(resolve){
           collectDailyReportData(resolve, mine);
         });
-        if (!mineData) { regionalOut.push({ email:u.email, sent:false, reason:'collect_failed' }); continue; }
+        if (!mineData) { personalOut.push({ email:u.email, source:u.source, sent:false, reason:'collect_failed' }); continue; }
         /* Обхватът може да се изпразни и СЛЕД срязването — регионален само
-           със склад в assigned_stores. Пак без писмо. */
-        if (!mineData.storeCount) { regionalOut.push({ email:u.email, sent:false, reason:'no_reportable_stores' }); continue; }
+           със склад в assigned_stores, или управител на обект, който не влиза
+           в отчета. Пак без писмо. */
+        if (!mineData.storeCount) { personalOut.push({ email:u.email, source:u.source, sent:false, reason:'no_reportable_stores' }); continue; }
 
         var mineRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
           method: 'POST',
           headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
           body: JSON.stringify({ to: [u.email], subject: subject, html: buildDailyReportHtml(mineData) })
         });
-        regionalOut.push({ email:u.email, stores:mineData.storeCount, sent:mineRes.ok, status:mineRes.status });
+        personalOut.push({ email:u.email, source:u.source, stores:mineData.storeCount, sent:mineRes.ok, status:mineRes.status });
       }
     }
 
-    if (!emails.length && !regionalOut.length) {
+    if (!emails.length && !personalOut.length) {
       return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
     }
 
-    return new Response(JSON.stringify({ ok:true, sent:emailOk, email_status:emailStatus, recipients:emails.length, regional:regionalOut, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+    return new Response(JSON.stringify({ ok:true, sent:emailOk, email_status:emailStatus, recipients:emails.length, personal:personalOut, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
   } catch (e) {
     return new Response(JSON.stringify({ ok:false, error:String(e) }), { status:500, headers:{'Content-Type':'application/json'} });
   }
