@@ -12,6 +12,10 @@ var srEditId = null;
 var srTab    = 'diff'; /* 'diff' = по разлики (автоматично) | 'complaint' = по рекламации/срок на годност */
 var srSearch = '';
 var srStoreFilter = '';
+/* Приключил ли е импорт в отворения в момента модал. Държи се извън него,
+   защото затварянето може да стане по няколко пътя, а презареждането трябва
+   да се случи по всеки от тях - и точно веднъж. */
+var srImportFinished = false;
 /* Точен филтър по доставчик - в "По рекламации" доставчиците са 46, тоест
    чипове като при магазините биха заели половин екран. Оттук и падащото меню. */
 var srSupplierFilter = '';
@@ -557,9 +561,14 @@ function srParseFlexibleDate(v){
   if(m3) return m3[1]+'-'+m3[2].padStart(2,'0')+'-'+m3[3].padStart(2,'0');
   return null; /* неразпознат текст (напр. свободен коментар в дата клетка) - пропускаме тихо */
 }
-/* Импорт на многолистовия ERP формат "Обобщен списък - стока за връщане" за
-   подтаб "По разлики". Позиционно четене на колоните (не по заглавие), защото
-   файлът има 2 колони с ИДЕНТИЧНО заглавие "коментар Контролер". */
+/* Импорт на многолистовия ERP формат "Обобщен списък - стока за връщане".
+   Редовете отиват в подтаб "По рекламации / срок на годност", НЕ в "По
+   разлики": startReturnsImport презаписва source на 'complaint' веднага след
+   парсването, за двата формата еднакво. Полето source:'diff' по-долу е
+   заварено и няма ефект - живее до първия ред след връщането оттук.
+   ("По разлики" се пълни само автоматично, от решение на разлика.)
+   Позиционно четене на колоните (не по заглавие), защото файлът има 2 колони
+   с ИДЕНТИЧНО заглавие "коментар Контролер". */
 function parseDiffReturnsWorkbook(wb){
   var rows=[];
   wb.SheetNames.forEach(function(sheetName){
@@ -636,18 +645,37 @@ function srImportModalHtml(){
     '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+hint+'</div>'+
     '<input type="file" id="sr-import-file" accept=".xlsx,.xls" style="margin-bottom:14px;">'+
     '<div id="sr-import-progress" style="font-size:12px;color:#94a3b8;"></div>'+
-    '<button onclick="startReturnsImport()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;width:100%;margin-top:8px;">Започни импорт</button>'+
+    '<button id="sr-import-btn" onclick="startReturnsImport()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer;width:100%;margin-top:8px;">Започни импорт</button>'+
     '</div></div>';
 }
 function openReturnsImportModal(){
   var ov=document.getElementById('sr-import-ov');
   if(ov) ov.classList.add('open');
 }
+/* Затварянето е и моментът на презареждане. Досега loadStockReturns() се
+   викаше веднага след импорта, а тя подменя целия модул - заедно с модала и
+   с обобщението в него. Тоест резултатът (и особено червеният ред с ПВ
+   номерата на непреминалите) мигваше за колкото трае GET-ът и изчезваше,
+   преди Цветелина да го е прочела. Сега таблицата се опреснява чак когато
+   човекът затвори прозореца. */
 function closeReturnsImportModal(){
   var ov=document.getElementById('sr-import-ov');
   if(ov) ov.classList.remove('open');
   var prog=document.getElementById('sr-import-progress');
   if(prog) prog.innerHTML='';
+  var btnEl=document.getElementById('sr-import-btn');
+  if(btnEl){ btnEl.textContent='Започни импорт'; btnEl.setAttribute('onclick','startReturnsImport()'); }
+  if(srImportFinished){
+    srImportFinished=false;
+    loadStockReturns();
+  }
+}
+/* Превключва бутона на "Затвори" и вдига флага - вика се в края на импорта,
+   независимо дали е минал чисто. */
+function srImportFinish(){
+  srImportFinished=true;
+  var btnEl=document.getElementById('sr-import-btn');
+  if(btnEl){ btnEl.textContent='Затвори'; btnEl.setAttribute('onclick','closeReturnsImportModal()'); }
 }
 function startReturnsImport(){
   var fileInp=document.getElementById('sr-import-file');
@@ -790,7 +818,8 @@ function startReturnsImport(){
             }
             progEl.innerHTML=h;
             if(!failedPos.length && !insertErrors) toast('✅ Импортът приключи успешно!');
-            loadStockReturns();
+            /* Без loadStockReturns() тук - виж closeReturnsImportModal(). */
+            srImportFinish();
           });
         });
       }).catch(function(err){

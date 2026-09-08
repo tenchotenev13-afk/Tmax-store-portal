@@ -91,17 +91,13 @@ function env(aoaRows, over) {
     };
   };
 
-  /* Обобщението се пише в progEl, след което кодът вика loadStockReturns() —
-     а тя презарежда ЦЕЛИЯ модул, тоест изтрива модала заедно със съобщението.
-     Това е заварено поведение (старият текст „✅ Готово! Импортирани N…" се
-     държеше по същия начин), не нещо, което тази промяна въвежда. За да
-     тества съобщението, а не колко бързо изчезва, снимаме progEl точно преди
-     презареждането — тоест точно каквото кодът е показал. */
-  h.finalProg = { html: '' };
+  /* loadStockReturns() презарежда целия модул и подменя модала заедно с
+     обобщението в него. Точно затова вече НЕ се вика в края на импорта, а при
+     затваряне на прозореца — броим я, за да се види разликата. */
+  h.loadCalls = { n: 0 };
   const realLoad = h.w.loadStockReturns;
   h.w.loadStockReturns = function () {
-    const el = h.w.document.getElementById('sr-import-progress');
-    h.finalProg.html = el ? el.innerHTML : '';
+    h.loadCalls.n++;
     return realLoad.apply(this, arguments);
   };
   return h;
@@ -111,6 +107,7 @@ function env(aoaRows, over) {
    през onclick, не директно извикване. */
 function runImport(w, doc) {
   w.renderStockReturns();
+  w.openReturnsImportModal();
   const inp = doc.getElementById('sr-import-file');
   Object.defineProperty(inp, 'files', { value: [{ name: 'obobshten.xlsx' }], configurable: true });
   const b = btn(doc, 'Започни импорт');
@@ -240,8 +237,8 @@ const ROW_EMPTY = ['PV-EMPTY', '', 'БУЛ', '', '', 'НЕВЗЕТА', '', '', '
   {
     /* Пада само редът на db-1; db-3 трябва да мине — иначе „останалите
        продължават" не е доказано, а само твърдяно. */
-    const h = env([ROW_NEW, ROW_UPD, ROW_EMPTY], { fail: { PATCH: /id=eq\.db-1/ } });
-    const { w, doc, calls } = h;
+    const { w, doc, calls } = env([ROW_NEW, ROW_UPD, ROW_EMPTY],
+      { fail: { PATCH: /id=eq\.db-1/ } });
     if (guard('импортът тръгва', () => runImport(w, doc))) {
       await settle();
       ok('и двата PATCH-а са изпратени', srPatches(calls).length === 2,
@@ -249,7 +246,7 @@ const ROW_EMPTY = ['PV-EMPTY', '', 'БУЛ', '', '', 'НЕВЗЕТА', '', '', '
       ok('провалът е засечен', calls.notOk.some(n => /id=eq\.db-1/.test(n.url)),
         JSON.stringify(calls.notOk));
 
-      const html = h.finalProg.html;
+      const html = prog(doc);
       ok('прогресът показва ПВ номера на провалилия се ред',
         html.indexOf('PV-UPD') >= 0, html);
       ok('и то в червено', /color:#dc2626/.test(html), html);
@@ -262,16 +259,84 @@ const ROW_EMPTY = ['PV-EMPTY', '', 'БУЛ', '', '', 'НЕВЗЕТА', '', '', '
 
   section('е) Обобщението „Нови / Обновени / Пропуснати" е с верните числа');
   {
-    const h = env([ROW_NEW, ROW_UPD, ROW_EMPTY, ROW_DONE]);
-    const { w, doc } = h;
+    const { w, doc } = env([ROW_NEW, ROW_UPD, ROW_EMPTY, ROW_DONE]);
     if (guard('импортът тръгва', () => runImport(w, doc))) {
       await settle();
-      const html = h.finalProg.html;
+      const html = prog(doc);
       ok('1 нов', /Нови: 1/.test(html), html);
       ok('2 обновени', /Обновени: 2/.test(html), html);
       ok('1 пропуснат приключен', /Пропуснати \(приключени\): 1/.test(html), html);
       ok('няма червено при чист импорт', html.indexOf('#dc2626') < 0, html);
       ok('редът е зелен', html.indexOf('#16a34a') >= 0, html);
+    }
+  }
+
+  section('ж) Модалът остава отворен след импорт; презарежда се при затваряне');
+  {
+    const h = env([ROW_NEW, ROW_UPD, ROW_DONE]);
+    const { w, doc } = h;
+    if (guard('импортът тръгва', () => runImport(w, doc))) {
+      await settle();
+
+      /* Същината: обобщението е още на екрана, а таблицата НЕ е презаредена.
+         Досега loadStockReturns() тръгваше веднага и отнасяше модала заедно
+         със съобщението — червеният ред с ПВ номерата мигваше и изчезваше. */
+      const html = prog(doc);
+      ok('обобщението още стои в progEl', /Нови: 1/.test(html) && /Обновени: 1/.test(html), html);
+      ok('loadStockReturns() НЕ е викана', h.loadCalls.n === 0, 'брой: ' + h.loadCalls.n);
+      ok('модалът е още отворен',
+        doc.getElementById('sr-import-ov').classList.contains('open'));
+
+      const b = doc.getElementById('sr-import-btn');
+      if (ok('бутонът съществува', !!b)) {
+        ok('текстът му вече е „Затвори"', b.textContent.trim() === 'Затвори', b.textContent.trim());
+        ok('onclick-ът му вече затваря, не импортира',
+          /closeReturnsImportModal/.test(b.getAttribute('onclick') || ''), b.getAttribute('onclick'));
+
+        realClick(w, b);
+        ok('след „Затвори" loadStockReturns() е викана точно веднъж',
+          h.loadCalls.n === 1, 'брой: ' + h.loadCalls.n);
+        /* loadStockReturns() веднага слага спинера в целия модул, тоест
+           модалът изчезва от DOM-а до следващия рендер — и двете състояния
+           значат „не се вижда". */
+        const ov = doc.getElementById('sr-import-ov');
+        ok('модалът вече не се вижда', !ov || !ov.classList.contains('open'),
+          ov ? ov.className : '(няма го в DOM-а)');
+        ok('обобщението е изчистено', prog(doc) === '', prog(doc));
+
+        /* Второ затваряне не бива да презарежда пак — флагът се сваля.
+           Бутонът вече го няма (спинерът е подменил модула), затова се вика
+           направо функцията, която ✕ и „Затвори" биха извикали. */
+        w.closeReturnsImportModal();
+        ok('повторно затваряне не презарежда втори път',
+          h.loadCalls.n === 1, 'брой: ' + h.loadCalls.n);
+      }
+    }
+
+    /* Другият път на затваряне — ✕ в заглавната лента. Той трябва да
+       презарежда също, иначе таблицата остава стара след импорт. */
+    const h2 = env([ROW_NEW]);
+    if (guard('втори импорт тръгва', () => runImport(h2.w, h2.doc))) {
+      await settle();
+      ok('пак не е презаредено веднага', h2.loadCalls.n === 0, 'брой: ' + h2.loadCalls.n);
+      /* На страницата има ДВА бутона „✕" — този на модала за редакция стои
+         преди този на импорта, а btn() връща първия. Търсенето е стеснено до
+         самия модал за импорт, иначе се кликa чужд бутон и проверката минава
+         срещу нищо. */
+      const x = btn(h2.doc.getElementById('sr-import-ov'), '✕');
+      if (ok('бутонът „✕" на модала за импорт е на екрана', !!x,
+        (x && x.getAttribute('onclick')) || '')) {
+        realClick(h2.w, x);
+        ok('затварянето с „✕" също презарежда', h2.loadCalls.n === 1, 'брой: ' + h2.loadCalls.n);
+      }
+    }
+
+    /* Затваряне БЕЗ импорт не бива да презарежда нищо. */
+    const h3 = env([ROW_NEW]);
+    h3.w.renderStockReturns();
+    h3.w.openReturnsImportModal();
+    if (guard('затваряне без импорт', () => h3.w.closeReturnsImportModal())) {
+      ok('без импорт няма презареждане', h3.loadCalls.n === 0, 'брой: ' + h3.loadCalls.n);
     }
   }
 
