@@ -57,6 +57,7 @@ const SHARED_FNS = [
   /* събиране на данни */
   'collectDailyReportData', 'collectWeeklyReportData',
   'collectCrossModuleWeeklySummary',
+  'collectDailyKasaSection', 'reportKasaThreshold',
   /* прозорци и избор на седмица */
   'reportMondayOfWeek', 'reportPrevWeekMonday', 'reportWeekOfMonday',
   'reportPickWeeklyBulletin',
@@ -69,7 +70,7 @@ const SHARED_FNS = [
   'reportEmailShell', 'reportTrendHtml', 'reportDotColor', 'reportPctColor',
   'reportStatCell', 'reportStoreRow', 'reportTopBottomTable',
   'reportNoDueNoticeHtml', 'reportPostponedSectionHtml', 'reportWeekRangeLabel',
-  'reportScopeNoticeHtml',
+  'reportScopeNoticeHtml', 'reportKasaSectionHtml',
   'reportDayMonth', 'reportDailySubject', 'reportWeeklySubject',
   /* решетка „обект × задача" и двата ѝ среза */
   'reportGridLegendHtml', 'reportGridCellHtml', 'reportStoreLinkHtml',

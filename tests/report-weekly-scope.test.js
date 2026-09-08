@@ -263,15 +263,18 @@ function snapshotWrites(h) {
       path.join(ROOT, 'supabase/functions/send-scheduled-report/index.ts'), 'utf8');
 
     /* До v17 източниците стояха зад пазач `if (type === 'daily')`. Махането
-       му Е промяната — оттам и проверката е за ОТСЪСТВИЕ. */
-    ok('личните източници вече не са зад пазач само за дневния',
-       edge.indexOf("if (type === 'daily') {") < 0);
+       му Е промяната. Проверката е по ОТСТЪПА, а не по отсъствието на самия
+       низ: от v19 такъв клон пак съществува, но чете само прага за секцията
+       „Каса". На върхово ниво в обработчика отстъпът е 4 интервала; вкарат
+       ли се източниците обратно в клон, става 6. */
+    ok('личните източници се четат на върхово ниво, не в клон за дневния',
+       /\n    var regRes: any = await sbGet\('users', 'is_regional=eq\.true/.test(edge));
     ok('регионалните се четат за двата вида отчет',
        edge.indexOf('is_regional=eq.true') >= 0);
 
     ok('събирачът се избира по вида на отчета',
        edge.indexOf("if (type === 'weekly') collectWeeklyReportData(resolve, mine);") >= 0 &&
-       edge.indexOf('else collectDailyReportData(resolve, mine);') >= 0);
+       edge.indexOf('else collectDailyReportData(resolve, mine, kasaThreshold);') >= 0);
     ok('строителят на HTML също се избира по вида',
        /html: type === 'weekly' \? buildWeeklyReportHtml\(mineData\) : buildDailyReportHtml\(mineData\)/.test(edge));
     ok('писмото до личния получател е ЛИЧНО (to: [един имейл])',

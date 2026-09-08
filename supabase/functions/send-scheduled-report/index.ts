@@ -1,6 +1,34 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v19 (08.09.2026) — деплой с ЕДНО нещо: секция „Каса" в дневния отчет.
+
+   Дневният носеше само задачи. Теодор поиска „грешна каса / върната каса";
+   потвърдената дефиниция е ДВЕ различни неща, затова и секцията е с две
+   подсекции, а не с една обща:
+     · 🧾 Върнати от счетоводството — ВСИЧКИ записи със status='returned' от
+       kasa_reports и kasa_zoborot, без ограничение по дата. Това е текущо
+       СЪСТОЯНИЕ: записът стои върнат, докато обектът не го преподаде, и
+       ограничение по ден би го скрило точно когато е най-важен. Всеки ред
+       носи от колко дни стои върнат.
+     · ⚠️ Разминаване над T — записите ЗА ОТЧЕТНИЯ ДЕН, невърнати, с
+       abs(razlika) >= праг. Прагът идва от app_settings, ключ
+       'kasa_diff_threshold'; липсва → 10 лв. Без праг секцията е нечитаема:
+       90% от потвърдените ПОС отчети имат ненулева razlika (средно 4.49).
+       ВНИМАНИЕ: 10 е ВРЕМЕННО, не е потвърдено от Теодор.
+   Празни ли са и двете — секцията изчезва изцяло от писмото.
+
+   Прагът се чете ВЕДНЪЖ на изпълнение и се подава на всеки получател през
+   третия аргумент на collectDailyReportData; подаден null значи „прочети го
+   сам" — това е пътят на ръчното изпращане от портала, където извикването е
+   едно. Самото събиране е ВЪТРЕ в колектора, а не тук в обработчика, точно
+   за да мине и през ръчното изпращане от таб „Днес": две места значеше
+   разминаване, въпрос само на време.
+
+   collectDailyKasaSection, reportKasaThreshold и reportKasaSectionHtml са
+   споделени с report.js (tests/report-edge-sync.test.js) — влизат и в двата
+   файла, дословно.
+
    v18 (08.09.2026) — деплой с ЕДНО нещо: обхват и за СЕДМИЧНИЯ отчет.
 
    Дневният вече имаше личен цикъл; седмичният беше само общото писмо.
@@ -347,7 +375,7 @@ function reportWeekdayIdx(d){
 /* scope: масив с имена на обекти или null/празно = ЦЯЛАТА верига. Подава се
    отвън, защото един отчетен ден се строи по няколко пъти — веднъж за
    report_recipients и по веднъж за всеки регионален. */
-function collectDailyReportData(cb, scope){
+function collectDailyReportData(cb, scope, kasaThreshold){
   var reportDay = reportDailyTargetDate(new Date());
   var dayISO = toLocalISO(reportDay);
   var dayIdx = reportWeekdayIdx(reportDay);
@@ -432,23 +460,127 @@ function collectDailyReportData(cb, scope){
         var summary = reportBuildSummary(items, comps, stores, recurringNoDue.length);
         summary.reportDate = dayISO;
         summary.scoped = !!(scope && scope.length);
+        /* Каса: събира се ТУК, вътре в колектора, а не в обработчика на
+           крона — така секцията стига и до ръчното изпращане от таб „Днес",
+           което минава през същия колектор. Две места значи разминаване,
+           въпрос само на време. */
+        var finish = function(){
+          collectDailyKasaSection(function(kasa){
+            summary.kasa = kasa;
+            cb(summary);
+          }, dayISO, scope, kasaThreshold);
+        };
         /* Снимката е САМО за пълната верига: report_snapshots има един ред за
            (daily, дата) и срязаният отчет би презаписал тенденцията на
            всички. Затова срязаният нито пише, нито чете тенденция. */
         if (summary.scoped) {
           summary.trendYesterday = null;
-          cb(summary);
+          finish();
           return;
         }
         var prevISO = toLocalISO(reportDailyTargetDate(reportDay));
         reportSaveSnapshot('daily', dayISO, summary.overallPct, summary.totalDone, summary.totalAll);
         reportFetchSnapshot('daily', prevISO, function(snap){
           summary.trendYesterday = snap;
-          cb(summary);
+          finish();
         });
       }).catch(function(){ cb(null); });
     }).catch(function(){ cb(null); });
   }).catch(function(){ cb(null); });
+}
+
+/* Прагът за „разминаване" — app_settings, ключ 'kasa_diff_threshold'.
+   Стойността е ТЕКСТ (таблицата е key/value от text), затова минава през
+   Number(); запетаята се приема за десетичен знак, защото е това, което
+   човек пише. Липсващ ключ, празна или нечислова стойност → 10.
+
+   ВНИМАНИЕ: 10 лв е ВРЕМЕННО и НЕ е потвърдено от Теодор. Стои като
+   fallback, за да работи секцията от първия ден; истинската стойност се
+   записва в базата и оттам нататък кодът не се пипа. */
+function reportKasaThreshold(cb){
+  sbGet('app_settings','key=eq.kasa_diff_threshold&select=value&limit=1').then(function(rows){
+    var row = Array.isArray(rows) && rows.length ? rows[0] : null;
+    var raw = row && row.value != null ? String(row.value).trim().replace(',', '.') : '';
+    var n = raw ? Number(raw) : NaN;
+    cb(isFinite(n) && n > 0 ? n : 10);
+  }).catch(function(){ cb(10); });
+}
+
+/* Каса в дневния отчет: „грешна каса / върната каса" са ДВЕ различни неща
+   в една секция и се четат по различен начин.
+
+   1. ВЪРНАТИТЕ ОТ СЧЕТОВОДСТВОТО са текущо СЪСТОЯНИЕ, не събитие от деня:
+      записът стои със status='returned', докато обектът не го преподаде.
+      Затова се четат БЕЗ ограничение по дата — иначе върнат преди три дни
+      и още непреподаден отчет изчезва от писмото точно когато е най-важен.
+      Оттам и полето days: колко дни стои върнат към отчетния ден.
+   2. РАЗМИНАВАНИЯТА са събитие ОТ ОТЧЕТНИЯ ДЕН и се режат по праг. Без
+      праг секцията е нечитаема: 90% от потвърдените ПОС отчети имат
+      ненулева razlika (средно 4.49 лв), тоест почти всеки ред влиза.
+      Върнатите се изключват оттук — те вече са в списък 1 и иначе биха се
+      броили два пъти.
+
+   Филтрите по status и по дата стоят И В ЗАЯВКАТА, И В JS. Заявката пести
+   трафик; JS-ът е този, който наистина решава — и е това, което тестът
+   може да мери. Махне ли се вторият, D-1 влиза в разминаванията.
+
+   scope реже по обект както навсякъде другаде. threshold се подава отвън,
+   за да го чете кронът ВЕДНЪЖ за всички получатели; подаден null/undefined
+   значи „прочети го сам" — това е пътят на ръчното изпращане от таб „Днес",
+   където извикването е едно. */
+function collectDailyKasaSection(cb, dayISO, scope, threshold){
+  var hasScope = !!(scope && scope.length);
+  var inScope = function(s){ return !hasScope || scope.indexOf(s) >= 0; };
+  var posLabel = function(x){ return 'ПОС № ' + (x.pos_number == null ? '?' : x.pos_number); };
+
+  var go = function(thr){
+    Promise.all([
+      sbGet('kasa_reports','status=eq.returned&select=store_name,date,pos_number,razlika,status,return_reason,returned_at'),
+      sbGet('kasa_zoborot','status=eq.returned&select=store_name,date,razlika,status,return_reason,returned_at'),
+      sbGet('kasa_reports','date=eq.'+dayISO+'&select=store_name,date,pos_number,razlika,status'),
+      sbGet('kasa_zoborot','date=eq.'+dayISO+'&select=store_name,date,razlika,status')
+    ]).then(function(r){
+      var dayD = new Date(dayISO+'T00:00:00');
+
+      var returned = [];
+      var pushReturned = function(x, type){
+        if (x.status !== 'returned' || !inScope(x.store_name)) return;
+        var at = x.returned_at ? new Date(x.returned_at) : null;
+        var days = (at && !isNaN(at.getTime()))
+          ? Math.max(0, Math.round((dayD - new Date(toLocalISO(at)+'T00:00:00')) / 86400000))
+          : null;
+        returned.push({ store: x.store_name, type: type, date: x.date || null,
+                        razlika: Number(x.razlika) || 0,
+                        return_reason: x.return_reason || '', days: days });
+      };
+      (Array.isArray(r[0]) ? r[0] : []).forEach(function(x){ pushReturned(x, posLabel(x)); });
+      (Array.isArray(r[1]) ? r[1] : []).forEach(function(x){ pushReturned(x, 'Равнение'); });
+      /* Най-старото върнато отгоре — то е и най-спешното. При равни дни по
+         обект, за да е стабилен редът между две изпращания. */
+      returned.sort(function(a,b){
+        return (b.days || 0) - (a.days || 0) || String(a.store).localeCompare(String(b.store));
+      });
+
+      var over = [];
+      var pushOver = function(x, type){
+        if (x.status === 'returned' || !inScope(x.store_name)) return;
+        if ((x.date || null) !== dayISO) return;
+        var v = Number(x.razlika) || 0;
+        if (Math.abs(v) < thr) return;
+        over.push({ store: x.store_name, type: type, razlika: v });
+      };
+      (Array.isArray(r[2]) ? r[2] : []).forEach(function(x){ pushOver(x, posLabel(x)); });
+      (Array.isArray(r[3]) ? r[3] : []).forEach(function(x){ pushOver(x, 'Равнение'); });
+      over.sort(function(a,b){
+        return Math.abs(b.razlika) - Math.abs(a.razlika) || String(a.store).localeCompare(String(b.store));
+      });
+
+      cb({ returned: returned, overThreshold: over, threshold: thr });
+    }).catch(function(){ cb({ returned: [], overThreshold: [], threshold: thr }); });
+  };
+
+  if (threshold === null || threshold === undefined) reportKasaThreshold(go);
+  else go(threshold);
 }
 
 function reportSaveSnapshot(periodType, periodKey, overallPct, totalDone, totalAll){
@@ -926,6 +1058,62 @@ function reportCommentsCountHtml(commentedList){
   return '<div style="margin-top:14px;padding:10px 14px;background:#F4F6FB;border-radius:8px;font-size:12px;color:#4B5563;">💬 '+txt+'</div>';
 }
 
+/* Двете подсекции на „Каса". Празни ли са и двете — връща празен низ и
+   секцията изчезва изцяло от писмото, вместо да стои като празна кутия.
+   Примитивите са същите като на останалите секции (reportStoreLinkHtml,
+   esc), за да не се появи трети стил в едно и също писмо. */
+function reportKasaSectionHtml(kasa){
+  if (!kasa) return '';
+  var ret = kasa.returned || [];
+  var over = kasa.overThreshold || [];
+  if (!ret.length && !over.length) return '';
+
+  var money = function(v){ return (v > 0 ? '+' : '') + v.toFixed(2) + ' лв'; };
+  var ageLabel = function(d){
+    if (d === null || d === undefined) return '';
+    if (d <= 0) return 'днес';
+    if (d === 1) return 'от вчера';
+    return 'от ' + d + ' дни';
+  };
+  var out = '';
+
+  if (ret.length) {
+    var rows = ret.map(function(x){
+      var age = ageLabel(x.days);
+      return '<div style="padding:8px 10px;border-bottom:1px solid #FDE68A;">' +
+        '<div style="font-size:13px;font-weight:700;color:#78350f;">' +
+        reportStoreLinkHtml(x.store, '#78350f') +
+        '<span style="font-weight:500;color:#92400e;"> — '+esc(x.type)+(x.date ? ' · '+esc(x.date) : '')+'</span>' +
+        (age ? '<span style="font-weight:500;color:#b45309;"> ('+esc(age)+')</span>' : '') +
+        '</div>' +
+        (x.return_reason ? '<div style="font-size:12px;color:#92400e;margin-top:2px;">💬 '+esc(x.return_reason)+'</div>' : '') +
+        '</div>';
+    }).join('');
+    out += '<div style="margin-top:14px;">' +
+      '<div style="font-size:11px;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">🧾 Върнати от счетоводството ('+ret.length+')</div>' +
+      '<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;overflow:hidden;">'+rows+'</div>' +
+      '</div>';
+  }
+
+  if (over.length) {
+    var rows2 = over.map(function(x){
+      return '<div style="padding:8px 10px;border-bottom:1px solid #FECACA;">' +
+        '<div style="font-size:13px;font-weight:700;color:#7f1d1d;">' +
+        reportStoreLinkHtml(x.store, '#7f1d1d') +
+        '<span style="font-weight:500;color:#b91c1c;"> — '+esc(x.type)+'</span>' +
+        '<span style="float:right;font-weight:700;color:#C0392B;">'+esc(money(x.razlika))+'</span>' +
+        '</div>' +
+        '</div>';
+    }).join('');
+    out += '<div style="margin-top:14px;">' +
+      '<div style="font-size:11px;font-weight:700;color:#b91c1c;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">⚠️ Разминаване над '+esc(String(kasa.threshold))+' лв ('+over.length+')</div>' +
+      '<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;overflow:hidden;">'+rows2+'</div>' +
+      '</div>';
+  }
+
+  return out;
+}
+
 function buildDailyReportHtml(data){
   var body = '<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:6px;margin-bottom:6px;"><tr>' +
     reportStatCell(data.overallPct+'%','изпълнение за деня', data.overallPct===100?'#2F9E5C':data.overallPct>=50?'#1E2761':'#C0392B') +
@@ -944,6 +1132,7 @@ function buildDailyReportHtml(data){
      като отложени, вместо в собствена секция. */
   body += reportGridHtml(data);
   body += reportByTaskHtml(data, false);
+  body += reportKasaSectionHtml(data.kasa);
   body += reportCommentsByStoreHtml(data);
   body += reportNoDueNoticeHtml(data.noDueCount, false);
   /* Датата идва от ДАННИТЕ, не от часовника: писмото се пише в 8:00 на
@@ -1484,9 +1673,21 @@ Deno.serve(async (req: Request) => {
     try { body = await req.json(); } catch(e) {}
     var type = body && body.type === 'weekly' ? 'weekly' : 'daily';
 
+    /* Прагът за секцията „Каса" се чете ВЕДНЪЖ на изпълнение и се подава на
+       всяко събиране надолу. Иначе същият ключ би се четял по веднъж за всеки
+       получател — при включени управители това са 25 излишни заявки на
+       сутрин за едно число, което не се мени между писмата.
+       Само дневният го ползва; при седмичния остава null и не струва нищо.
+       Колекторът приема null като „прочети го сам" — това е пътят на ръчното
+       изпращане от портала, където извикването е едно. */
+    var kasaThreshold: any = null;
+    if (type === 'daily') {
+      kasaThreshold = await new Promise(function(resolve){ reportKasaThreshold(resolve); });
+    }
+
     var data: any = await new Promise(function(resolve){
       if (type === 'weekly') collectWeeklyReportData(resolve);
-      else collectDailyReportData(resolve);
+      else collectDailyReportData(resolve, null, kasaThreshold);
     });
 
     if (!data) {
@@ -1635,7 +1836,7 @@ Deno.serve(async (req: Request) => {
 
       var mineData: any = await new Promise(function(resolve){
         if (type === 'weekly') collectWeeklyReportData(resolve, mine);
-        else collectDailyReportData(resolve, mine);
+        else collectDailyReportData(resolve, mine, kasaThreshold);
       });
       if (!mineData) { personalOut.push({ email:u.email, source:u.source, sent:false, reason:'collect_failed' }); continue; }
       /* Обхватът може да се изпразни и СЛЕД срязването — регионален само със
