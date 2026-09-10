@@ -130,7 +130,8 @@ const TESTS = [
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',
-  'today-window-task.test.js'
+  'today-window-task.test.js',
+  'task-completion-duplicates.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

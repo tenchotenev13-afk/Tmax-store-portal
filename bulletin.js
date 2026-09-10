@@ -2794,6 +2794,49 @@ function renderTasksPanel() {
 }
 
 
+/* ═══ ЕДНА ОТМЕТКА НА (ЗАДАЧА, ОБЕКТ, ДЕН) ═══════════════════════════════
+   Миграция 20260910231103 слага два ЧАСТИЧНИ уникални индекса върху
+   task_completions — по (task_id, store_name, completion_date) и по
+   (recurring_task_id, store_name, completion_date), и двата само когато
+   датата НЕ е NULL.
+
+   Дотук toggleTask()/toggleRecurringTask() избираха PATCH или POST според
+   bulComps В ПАМЕТТА. Отворен отдавна таб, друго устройство или втори човек
+   на същия обект значи стар bulComps: клиентът не вижда съществуващия ред и
+   POST-ва втори. Към 10.09.2026 така се бяха натрупали 34 групи с общо 53
+   излишни реда — 19 групи с над ЧАС разлика между двата, 7 от двама
+   различни потребители. Тоест не е двойно натискане и не се лекува с
+   заключване на бутона.
+
+   Сега: POST, и САМО при 409 (нарушен уникален индекс) → PATCH със същия
+   payload. Ред вече има, значи отмятането е успяло — това не е грешка за
+   потребителя и не бива да вдига червен toast.
+
+   ЗАЩО POST-пръв, а не PATCH-пръв с fallback към POST:
+     · първото отмятане е преобладаващият случай и минава с ЕДНА заявка;
+       PATCH-пръв би струвал две при всяко първо натискане, на таблет в
+       магазин, по мобилен интернет;
+     · sbPatch() не връща брой засегнати редове (само {ok}), тоест
+       PATCH-пръв изисква и нов вариант на помощника, който чете
+       Content-Range — повече нов код на пътя, по който минава всяка отметка;
+     · 409 идва точно и само в положението, което поправяме.
+
+   ЦЕНАТА, записана нарочно: при completion_date = NULL индексите не важат,
+   409 няма и този помощник се държи като обикновен POST. Такива са старите
+   задачи без срок; техните 16 групи дубликати миграцията също не пипа.
+   Затова проверката по bulComps ОСТАВА като първи избор — за NULL датите тя
+   е единственото, което ги ограничава, и махането ѝ би било регресия.
+
+   Всяка друга грешка (401, 403, мрежов срив) минава непокътната към
+   извикващия и си остава червен toast. */
+function tcUpsert(matchQuery, insertBody, patchBody){
+  return sbPost('task_completions', insertBody).then(function(r){
+    if (r.ok || r.status !== 409) return r;
+    /* 409 = редът вече съществува. Дописваме го вместо да се оплакваме. */
+    return sbPatch('task_completions', matchQuery, patchBody);
+  });
+}
+
 /* toggleTask — отбелязване/разотбелязване на задача */
 function toggleTask(taskId, checked, extra, completionDate) {
   var store = currentUser && currentUser.store_name;
@@ -2816,11 +2859,14 @@ function toggleTask(taskId, checked, extra, completionDate) {
       completion_date: completionDate
     };
     var matchQuery = 'task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+(completionDate?'&completion_date=eq.'+completionDate:'&completion_date=is.null');
+    /* existing идва от bulComps В ПАМЕТТА и може да е остарял — точно оттам
+       идваха дубликатите. Затова POST-ът вече не е сляп: tcUpsert() поема
+       409 от уникалния индекс и минава в PATCH. */
     var req = existing
       ? sbPatch('task_completions', matchQuery, basePayload)
-      : sbPost('task_completions', Object.assign({task_id:taskId, bulletin_id: curBul?curBul.id:null, store_name:store}, basePayload));
+      : tcUpsert(matchQuery, Object.assign({task_id:taskId, bulletin_id: curBul?curBul.id:null, store_name:store}, basePayload), basePayload);
     req.then(function(r){
-      if (!r.ok) { toast('Грешка','#dc2626'); return; }
+      if (!r.ok) { toast('Грешка: '+sbErrMsg(r),'#dc2626'); return; }
       toast('✅ Задачата е отбелязана!');
       bulComps = bulComps.filter(function(c){ return !(c.task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate); });
       bulComps.push(Object.assign({task_id: taskId, store_name: store, completed_by: completedBy, status:'done', completion_date: completionDate}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}, (extra.files&&extra.files.length)?{files:extra.files}:{}));
@@ -3026,8 +3072,23 @@ function submitPostpone(taskId, kind, completionDate){
   };
   payload[idField] = taskId;
   if (kind!=='recurring') payload.bulletin_id = curBul ? curBul.id : null;
-  sbPost('task_completions', payload).then(function(r){
-    if (!r.ok) { toast('Грешка','#dc2626'); return; }
+  /* Тази функция POST-ваше БЕЗУСЛОВНО — без дори да поглежда bulComps.
+     Отлагане върху вече отметнат ден създаваше втори ред при всяко
+     натискане. Сега 409 води до PATCH: статусът става 'postponed', а
+     причината заменя стария коментар — един ред на ден, както навсякъде.
+     matchQuery повтаря филтъра на toggleTask()/cancelPostpone(): по id на
+     задачата, обект и ден, с is.null клона за старите записи без дата. */
+  var ppMatch = idField+'=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+
+                (completionDate ? '&completion_date=eq.'+completionDate : '&completion_date=is.null');
+  var ppPatch = {
+    completed_by: payload.completed_by,
+    completed_at: payload.completed_at,
+    status: 'postponed',
+    comment: comment,
+    completion_date: completionDate
+  };
+  tcUpsert(ppMatch, payload, ppPatch).then(function(r){
+    if (!r.ok) { toast('Грешка: '+sbErrMsg(r),'#dc2626'); return; }
     var el = document.getElementById('pp-modal-ov');
     if (el) el.remove();
     toast('⏱ Задачата е отложена');
@@ -3368,11 +3429,12 @@ function toggleRecurringTask(taskId, checked, extra, completionDate) {
       completion_date: completionDate
     };
     var matchQuery = 'recurring_task_id=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+(completionDate?'&completion_date=eq.'+completionDate:'&completion_date=is.null');
+    /* Същото като в toggleTask() — виж tcUpsert(). */
     var req = existing
       ? sbPatch('task_completions', matchQuery, basePayload)
-      : sbPost('task_completions', Object.assign({recurring_task_id:taskId, store_name:store}, basePayload));
+      : tcUpsert(matchQuery, Object.assign({recurring_task_id:taskId, store_name:store}, basePayload), basePayload);
     req.then(function(r){
-      if (!r.ok) { toast('Грешка','#dc2626'); return; }
+      if (!r.ok) { toast('Грешка: '+sbErrMsg(r),'#dc2626'); return; }
       toast('✅ Отбелязана!');
       recurringComps = recurringComps.filter(function(c){ return !(c.recurring_task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate); });
       recurringComps.push(Object.assign({recurring_task_id: taskId, store_name: store, completed_by: completedBy, status:'done', completion_date: completionDate}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}, (extra.files&&extra.files.length)?{files:extra.files}:{}));
