@@ -9,6 +9,18 @@
 //   promo_expiring   — имейл/push за промоции, изтичащи днес (и до 3 дни в пон.)
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
 //
+// v3 (10.09.2026) — постоянните задачи влизат в „Незавършени задачи".
+//   Дотук buildOverdueTasks четеше ЕДИНСТВЕНО bulletin_tasks. Постоянните
+//   задачи не се проверяваха никога: в лога от 10.09 08:15 заявката е
+//   task_id=in.(2 id-та) и нищо друго. На 09.09 „Ревизии 953" беше
+//   пропусната от 12 обекта, „Ревизия групи" от Троян, и не тръгна писмо.
+//   Прозорецът за постоянните е ЕДИН ДЕН назад (вчера по българско време),
+//   не целият бюлетин: те се явяват всяка седмица и „назад докъдето стигне"
+//   би повтаряло едно и също всеки ден. Прозоречната задача влиза само в
+//   деня на срока си, но отмятането ѝ се търси в целия прозорец.
+//   Съботата не се докладва — в неделя няма крон. Прието, не компенсирано.
+//   buildTodayDeadlines и buildDeadlinePassed НЕ са пипани.
+//
 // v2 (10.09.2026) — нов вид задача „Само за информация" (task_type='notice').
 //   Показва се като текст в Седмичния календар и няма чекбокс, значи няма и
 //   task_completions. Без филтър и ТРИТЕ теми по-горе биха я обявявали за
@@ -127,6 +139,21 @@ function recurringDueOnWeekday(t: any, idx: number): boolean {
   if (Array.isArray(t.due_weekdays) && t.due_weekdays.length) return t.due_weekdays.indexOf(idx) >= 0;
   if (t.due_weekday === null || t.due_weekday === undefined) return !!t.due_time;
   return t.due_weekday === idx;
+}
+
+/* Датите на прозореца за седмицата, в която пада подадената дата.
+   ISO-низовата форма на recurringWindowDatesForDate() от bulletin.js
+   (ред ~3526): там сметката минава през new Date(y,m,d) и локалния часовой
+   пояс, тук — само през plusDaysISO(). Причината не е стил: Deno върви на
+   UTC, България е UTC+2/+3, и всяка сметка през Date рискува да върне
+   съседния ден. wdIdx е индексът (0=Пон..6=Нед) на самата дата и се подава,
+   вместо да се извежда наново — извикващият вече го има. */
+function recurringWindowDatesForISO(t: any, iso: string, wdIdx: number): string[] {
+  if (!recurringIsWindow(t)) return [];
+  const monday = plusDaysISO(iso, -wdIdx);
+  return ((t.due_weekdays || []) as number[]).slice()
+    .sort((a: number, b: number) => a - b)
+    .map((i: number) => plusDaysISO(monday, i));
 }
 
 function minutesOf(hhmmStr: unknown): number | null {
@@ -286,46 +313,132 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
   const { data: tasks } = await supabase
     .from('bulletin_tasks').select('*').eq('bulletin_id', bulletinId);
 
-  if (!tasks || !tasks.length) return { skip: 'Бюлетинът няма еднократни задачи' };
-
-  const overdueTasks = tasks.filter((t: any) => {
+  const overdueTasks = (tasks || []).filter((t: any) => {
     if (taskIsNotice(t)) return false;
     const last = lastDueDate(t);
     return !!last && last < bg.dateStr;
   });
-  if (!overdueTasks.length) return { skip: 'Няма просрочени задачи' };
 
-  const ids = overdueTasks.map((t: any) => t.id);
-  const { data: comps } = await supabase
-    .from('task_completions').select('task_id,store_name').in('task_id', ids);
+  /* ═══ ПОСТОЯННИТЕ ЗАДАЧИ — САМО ВЧЕРА ═══════════════════════════════
+     Дотук темата четеше ЕДИНСТВЕНО bulletin_tasks и постоянните задачи не
+     се проверяваха никога. На 09.09.2026 „Ревизии 953" беше пропусната от
+     12 обекта, „Ревизия групи" от Троян — и не тръгна нито едно писмо.
+
+     Прозорецът е ЕДИН ДЕН назад, не целият бюлетин както при обикновените.
+     Постоянната задача се явява всяка седмица; „назад докъдето стигне" би
+     значело едно и също нещо да се докладва всеки ден до безкрай. Кронът
+     бие всеки делник, значи вчерашният ден се докладва точно веднъж.
+
+     Следствие, което е ПРИЕТО, не пропуснато: в неделя няма крон, затова
+     съботата не се докладва никога. Понеделник докладва неделята.
+
+     Прозоречната задача (due_window) влиза САМО в деня на срока си — това
+     вече го прави recurringDueOnWeekday(), която за такава задача връща
+     true единствено за последния ден от прозореца. Отмятането обаче се
+     търси в ЦЕЛИЯ прозорец: свършена в понеделник е свършена.
+
+     Задача без ден и без час отпада сама — recurringDueOnWeekday() връща
+     !!t.due_time за due_weekday=null, тоест false. */
+  const yISO = plusDaysISO(bg.dateStr, -1);
+  const yIdx = (bg.weekdayIdx + 6) % 7;   /* вчерашният ден: 0=Пон..6=Нед */
+
+  const { data: recsRaw } = await supabase
+    .from('recurring_tasks').select('*').eq('active', true);
+  const recDue = (recsRaw || []).filter((t: any) =>
+    !taskIsNotice(t) && recurringDueOnWeekday(t, yIdx));
+
+  if (!overdueTasks.length && !recDue.length) {
+    return { skip: 'Няма просрочени задачи (нито от бюлетина, нито постоянни за ' + yISO + ')' };
+  }
+
+  let comps: any[] = [];
+  if (overdueTasks.length) {
+    const ids = overdueTasks.map((t: any) => t.id);
+    const { data } = await supabase
+      .from('task_completions').select('task_id,store_name').in('task_id', ids);
+    comps = data || [];
+  }
+
+  /* Прозорците се смятат ВЕДНЪЖ — ползват се и за долната граница на
+     заявката, и за съпоставянето по-надолу. */
+  const recWin: Record<string, string[]> = {};
+  let recLo = yISO;
+  for (const t of recDue) {
+    if (!recurringIsWindow(t)) continue;
+    const w = recurringWindowDatesForISO(t, yISO, yIdx);
+    recWin[t.id] = w;
+    for (const d of w) if (d < recLo) recLo = d;
+  }
+
+  /* Дата и в самата ЗАЯВКА. Без нея тук се теглеше всяко отмятане на
+     постоянна задача, правено някога — 1595 реда към 10.09.2026, при таван
+     1000 на PostgREST и без order, тоест отрязват се точно най-новите.
+     Виж бележката v24 в send-scheduled-report за същия дефект в отчета. */
+  let recComps: any[] = [];
+  if (recDue.length) {
+    const rids = recDue.map((t: any) => t.id);
+    const { data } = await supabase
+      .from('task_completions')
+      .select('recurring_task_id,store_name,status,completion_date')
+      .in('recurring_task_id', rids)
+      .gte('completion_date', recLo)
+      .lte('completion_date', yISO);
+    recComps = data || [];
+  }
 
   const stores = await reportableStores(supabase);
 
-  const items: { taskId: string; store: string; title: string; due: string; groups: string[] }[] = [];
+  const items: { taskId: string; kind: string; store: string; title: string; due: string; groups: string[] }[] = [];
   const taskStats: Record<string, any> = {};
 
-  for (const t of overdueTasks) {
+  /* Един път за двата вида. Разликите са точно три и се подават отвън: кой
+     е „изпълнил", коя дата е срокът, и има ли автор (recurring_tasks нямат
+     created_by). Две отделни копия на този цикъл значеха две места, които
+     се разминават при следващата промяна.
+     Ключът на taskStats е KIND+ID, не голото id: двете таблици имат
+     собствени uuid пространства и байтово съвпадение е малко вероятно, но
+     ключ, който зависи от това, е ключ, който чака да сгреши. */
+  const addTask = (t: any, kind: string, dueISO: string, isDone: (s: string) => boolean) => {
     const scope = (Array.isArray(t.target_stores) && t.target_stores.length)
       ? stores.filter(s => t.target_stores.indexOf(s) >= 0)
       : stores;
     const groups = ((Array.isArray(t.report_groups) && t.report_groups.length)
       ? t.report_groups : ['controlling']).slice();
-    if (t.created_by) groups.push('creator:' + t.created_by);
+    if (kind === 'regular' && t.created_by) groups.push('creator:' + t.created_by);
     const missing: string[] = [];
     for (const s of scope) {
-      const done = (comps || []).some((c: any) => c.task_id === t.id && c.store_name === s);
-      if (done) continue;
+      if (isDone(s)) continue;
       missing.push(s);
-      items.push({ taskId: t.id, store: s, title: t.title, due: lastDueDate(t) || '', groups: groups });
+      items.push({ taskId: t.id, kind: kind, store: s, title: t.title, due: dueISO, groups: groups });
     }
     if (missing.length) {
-      taskStats[t.id] = {
-        title: t.title, due: lastDueDate(t) || '', groups: groups,
-        createdBy: t.created_by || null,
+      taskStats[kind + ':' + t.id] = {
+        title: t.title, kind: kind, due: dueISO, groups: groups,
+        createdBy: (kind === 'regular' ? (t.created_by || null) : null),
         total: scope.length, missing: missing.length,
       };
     }
+  };
+
+  /* Обикновените остават както бяха: целият бюлетин назад, всяко отмятане
+     брои за изпълнение (без проверка на status). Нарочно не се променя в
+     същата стъпка. */
+  for (const t of overdueTasks) {
+    addTask(t, 'regular', lastDueDate(t) || '',
+      (s) => comps.some((c: any) => c.task_id === t.id && c.store_name === s));
   }
+
+  /* Постоянните: само status='done' брои. Отложената задача НЕ е подадена —
+     същата уговорка като в buildDeadlinePassed(). */
+  for (const t of recDue) {
+    const win = recWin[t.id] || null;
+    addTask(t, 'recurring', yISO, (s) => recComps.some((c: any) => {
+      if (c.recurring_task_id !== t.id || c.store_name !== s || c.status !== 'done') return false;
+      return win ? win.indexOf(c.completion_date || '') >= 0
+                 : (c.completion_date || null) === yISO;
+    }));
+  }
+
   if (!items.length) return { skip: 'Всички просрочени задачи са отметнати' };
 
   return { items: items, bulletin: bulletins[0], taskStats: taskStats };
@@ -335,8 +448,13 @@ function overdueHtmlFor(items: any[], bulletin: any, taskStats: any, narrowed: b
   const byTask: Record<string, any[]> = {};
   const order: string[] = [];
   for (const it of items) {
-    if (!byTask[it.taskId]) { byTask[it.taskId] = []; order.push(it.taskId); }
-    byTask[it.taskId].push(it);
+    /* Ключът е KIND+ID, същият като в taskStats. Обикновените и постоянните
+       задачи живеят в различни таблици със собствени uuid пространства —
+       голото id ги смесва само при съвпадение, но точно затова дефектът би
+       се появил веднъж на сто години и никой не би го намерил. */
+    const key = (it.kind || 'regular') + ':' + it.taskId;
+    if (!byTask[key]) { byTask[key] = []; order.push(key); }
+    byTask[key].push(it);
   }
   order.sort((a, b) => String(taskStats[a].due).localeCompare(String(taskStats[b].due)));
 
@@ -350,7 +468,8 @@ function overdueHtmlFor(items: any[], bulletin: any, taskStats: any, narrowed: b
     const st = taskStats[tid];
     const mine = byTask[tid].map((x: any) => x.store).sort();
     html += '<div style="margin-bottom:14px;border:1px solid #e5e7eb;border-radius:8px;padding:11px 13px;">'
-      + '<div style="display:block;font-weight:700;font-size:14.5px;margin-bottom:2px;">' + esc(st.title) + '</div>'
+      + '<div style="display:block;font-weight:700;font-size:14.5px;margin-bottom:2px;">'
+      + (st.kind === 'recurring' ? '🔁 ' : '') + esc(st.title) + '</div>'
       + '<div style="font-size:12px;color:#9ca3af;margin-bottom:8px;">срок ' + esc(bgDate(st.due))
       + (st.createdBy ? ' · зададена от ' + esc(st.createdBy) : '') + '</div>'
       + '<div style="font-size:13px;color:#b91c1c;font-weight:600;margin-bottom:4px;">Не са изпълнили: '
