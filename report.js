@@ -64,7 +64,11 @@ function collectDailyReportData(cb, scope, kasaThreshold){
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], dayTarget);
-    var allRecurring = Array.isArray(results[1]) ? results[1] : [];
+    /* Задачите „Само за информация" отпадат ТУК, на входа: те нямат
+       task_completions и влизат и в числителя, и в знаменателя като вечно
+       неизпълнени. Един филтър вместо условие във всяко броене надолу —
+       виж taskIsNotice(). */
+    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
     /* Прозоречната задача се явява ВЕДНЪЖ — в деня на срока. Иначе обект,
        свършил я в понеделник, излиза неизпълнил във вторник и в сряда, и се
        брои три пъти. */
@@ -80,7 +84,7 @@ function collectDailyReportData(cb, scope, kasaThreshold){
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
 
     bulTasksPromise.then(function(tasksRaw){
-      var allBulTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
+      var allBulTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
       var regularToday = allBulTasks.filter(function(t){ return taskIsDueOnDate(t, dayISO); });
 
       var items = [];
@@ -988,7 +992,11 @@ function collectWeeklyReportData(cb, scope){
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], target);
-    var allRecurring = Array.isArray(results[1]) ? results[1] : [];
+    /* Задачите „Само за информация" отпадат ТУК, на входа: те нямат
+       task_completions и влизат и в числителя, и в знаменателя като вечно
+       неизпълнени. Един филтър вместо условие във всяко броене надолу —
+       виж taskIsNotice(). */
+    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
     var recurringScheduled = allRecurring.filter(function(t){
       return (t.due_weekday!==null && t.due_weekday!==undefined) || !!t.due_time;
     });
@@ -997,7 +1005,7 @@ function collectWeeklyReportData(cb, scope){
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
 
     bulTasksPromise.then(function(tasksRaw){
-      var allBulTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
+      var allBulTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
 
       /* Датите на отчетната седмица - нужни са и при СТРОЕНЕТО на явяванията
          (по-долу), не само за прозореца на заявката. */
@@ -2005,14 +2013,18 @@ function collectWeeklyRoutingData(cb){
     sbGet('recurring_tasks','active=eq.true')
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], target);
-    var allRecurring = Array.isArray(results[1]) ? results[1] : [];
+    /* Задачите „Само за информация" отпадат ТУК, на входа: те нямат
+       task_completions и влизат и в числителя, и в знаменателя като вечно
+       неизпълнени. Един филтър вместо условие във всяко броене надолу —
+       виж taskIsNotice(). */
+    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
     var routedRecurring = allRecurring.filter(function(t){ return t.report_groups && t.report_groups.length; });
     var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
     var weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
 
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
     bulTasksPromise.then(function(tasksRaw){
-      var allTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
+      var allTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
       var routedRegular = allTasks.filter(function(t){ return t.report_groups && t.report_groups.length; });
 
       /* Прозорецът се закача на самата задача - taskStoreBreakdown после го

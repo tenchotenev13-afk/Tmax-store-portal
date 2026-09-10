@@ -8,6 +8,15 @@
 //   today_deadlines  — push до обекта, два часа преди часа на задачата
 //   promo_expiring   — имейл/push за промоции, изтичащи днес (и до 3 дни в пон.)
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
+//
+// v2 (10.09.2026) — нов вид задача „Само за информация" (task_type='notice').
+//   Показва се като текст в Седмичния календар и няма чекбокс, значи няма и
+//   task_completions. Без филтър и ТРИТЕ теми по-горе биха я обявявали за
+//   просрочена или неподадена всеки ден, до всички получатели — задача, която
+//   няма как да бъде изпълнена, изглежда точно като пропусната.
+//   Затова buildOverdueTasks, buildTodayDeadlines и buildDeadlinePassed
+//   отсяват notice на входа, през taskIsNotice() — копие от shared.js.
+//   (Файлът няма vN конвенция като send-scheduled-report; това е първата.)
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
@@ -96,6 +105,12 @@ function dueDatesOf(t: Record<string, unknown>): string[] {
     : (t.due_date ? [String(t.due_date).slice(0, 10)] : []);
 }
 
+/* Копие от shared.js — Deno не може да import-не браузърен файл.
+   Задача „Само за информация" (task_type='notice') се показва само в
+   Седмичния календар на Бюлетина. Тя няма отмятания, значи никога не е
+   „подадена" и всяка от трите теми отдолу би я обявявала за просрочена
+   всеки ден, до всички. Затова филтърът е на входа и на трите. */
+function taskIsNotice(t: any): boolean { return !!t && t.task_type === 'notice'; }
 /* Копие на recurringIsDueOnWeekday / recurringIsWindow /
    recurringReportDueOnWeekday от bulletin.js (редове 3528-3598).
    Прозоречна задача се напомня в ДЕНЯ НА СРОКА. */
@@ -274,6 +289,7 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
   if (!tasks || !tasks.length) return { skip: 'Бюлетинът няма еднократни задачи' };
 
   const overdueTasks = tasks.filter((t: any) => {
+    if (taskIsNotice(t)) return false;
     const last = lastDueDate(t);
     return !!last && last < bg.dateStr;
   });
@@ -388,12 +404,12 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
   if (bulletins && bulletins.length) {
     const { data: tasks } = await supabase
       .from('bulletin_tasks').select('*').eq('bulletin_id', bulletins[0].id);
-    oneTime = (tasks || []).filter((t: any) => dueDatesOf(t).indexOf(bg.dateStr) >= 0);
+    oneTime = (tasks || []).filter((t: any) => !taskIsNotice(t) && dueDatesOf(t).indexOf(bg.dateStr) >= 0);
   }
 
   const { data: recs } = await supabase
     .from('recurring_tasks').select('*').eq('active', true);
-  const recToday = (recs || []).filter((t: any) => recurringDueOnWeekday(t, bg.weekdayIdx));
+  const recToday = (recs || []).filter((t: any) => !taskIsNotice(t) && recurringDueOnWeekday(t, bg.weekdayIdx));
 
   const inWindow = (t: any, isRec: boolean) => {
     const slot = slotFor(isRec ? minutesOf(t.due_time) : null);
@@ -475,7 +491,7 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
     .from('recurring_tasks').select('*').eq('active', true);
 
   const todayTasks = (recs || []).filter((t: any) =>
-    recurringDueOnWeekday(t, bg.weekdayIdx) && minutesOf(t.due_time) !== null);
+    !taskIsNotice(t) && recurringDueOnWeekday(t, bg.weekdayIdx) && minutesOf(t.due_time) !== null);
 
   const due: { t: any; slot: number }[] = [];
   for (const t of todayTasks) {

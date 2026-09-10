@@ -149,6 +149,11 @@ function buildWeeklyDigestHtml(storeName, tasks, wk, yr) {
 function sendWeeklyDigest(bulletin, tasks, onDone) {
   var wk = bulletin.week_number;
   var yr = bulletin.year;
+  /* Задачите „Само за информация" отпадат на входа, не при рендера: дайджестът
+     е списък с работа за седмицата, а notice не е работа. Филтърът е ТУК, а не
+     в извикващия (bulletin.js), защото функцията се вика от две места — менюто
+     „Имейл" и понеделнишкият банер. Виж taskIsNotice() в shared.js. */
+  tasks = (Array.isArray(tasks) ? tasks : []).filter(function(t){ return !taskIsNotice(t); });
 
   /* Вземи всички manager потребители */
   sbGet('users', 'role=eq.manager&active=eq.true&select=email,display_name,store_name').then(function(users) {
@@ -214,6 +219,9 @@ function sendTestEmail(toEmail) {
 
 /* ─── AUTO CHECK (при зареждане на бюлетин) ─────────────── */
 function checkBulletinEmailTriggers(bulletin, tasks, completions) {
+  /* Същият филтър като в sendWeeklyDigest: банерът предлага изпращане на
+     дайджеста и не бива да изскача заради задачи, които няма да влязат в него. */
+  tasks = (Array.isArray(tasks) ? tasks : []).filter(function(t){ return !taskIsNotice(t); });
   if (!canEdit() || !bulletin) return;
 
   var now = new Date();

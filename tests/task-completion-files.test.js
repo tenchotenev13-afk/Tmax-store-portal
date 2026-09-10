@@ -98,14 +98,23 @@ function fileInput(doc, kind) {
 (async function run() {
 
   /* ═══ 1. Видовете задача ═════════════════════════════════════════════ */
-  section('1. TASK_TYPES: шест вида, трети флаг needsFile');
+  section('1. TASK_TYPES: седем вида, трети флаг needsFile');
   {
     const { w } = env();
     const T = w.TASK_TYPES;
-    ok('видовете са шест', Object.keys(T).length === 6, Object.keys(T).join(','));
+    /* Броят се вдигна от шест на седем на 10.09.2026 с 'notice'
+       („Само за информация" — текст в календара, без чекбокс). Числото
+       нарочно си остава ЗАКОВАНО: смисълът на реда е тих нов или изчезнал
+       вид да не мине незабелязано, а не да следва каквото има във файла. */
+    ok('видовете са седем', Object.keys(T).length === 7, Object.keys(T).join(','));
     ok('старите четири ключа са непроменени',
       ['info', 'photo', 'comment', 'photo_comment'].every(k => !!T[k]));
     ok('нови са file и file_comment', !!T.file && !!T.file_comment);
+    ok('и notice', !!T.notice);
+    /* notice не иска НИЩО — тя изобщо не се отмята. */
+    ok('notice не иска нито снимка, нито документ, нито коментар',
+      T.notice.needsPhoto === false && T.notice.needsFile === false &&
+      T.notice.needsComment === false);
 
     ok('file иска документ, не снимка',
       T.file.needsFile === true && T.file.needsPhoto === false && T.file.needsComment === false);
@@ -125,7 +134,7 @@ function fileInput(doc, kind) {
     const opts = w.taskTypeOptsHtml('info');
     ok('падащото меню поема новите видове само',
       opts.indexOf('value="file"') >= 0 && opts.indexOf('value="file_comment"') >= 0, opts);
-    ok('и всичките шест са вътре',
+    ok('и всичките седем са вътре',
       Object.keys(T).every(k => opts.indexOf('value="' + k + '"') >= 0));
     ok('баджът за file носи 📄',
       w.taskTypeBadgeHtml('file', 't1', 'regular', false, TODAY).indexOf('📄') >= 0);

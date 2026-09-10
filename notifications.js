@@ -163,14 +163,16 @@ function checkNewBulletinTasksBanner(){
     var bul=(Array.isArray(bulRes)&&bulRes.length)?bulRes[0]:null;
     if(!bul)return [];
     return sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id+'&created_at=gte.'+cutoffISO).then(function(tasksRaw){
-      var tasks=Array.isArray(tasksRaw)?tasksRaw:[];
+      /* notice не е задача за вършене — банерът „N нови задачи" не бива да я
+         брои, нито да я показва като чакаща. Виж taskIsNotice() в shared.js. */
+      var tasks=(Array.isArray(tasksRaw)?tasksRaw:[]).filter(function(t){return !taskIsNotice(t);});
       return tasks.filter(function(t){return notifTaskForStore(t,store);})
                   .map(function(t){return {id:t.id,title:t.title,kind:'regular'};});
     });
   }).catch(function(){return [];});
 
   var recTasksPromise=sbGet('recurring_tasks','active=eq.true&created_at=gte.'+cutoffISO).then(function(rtRaw){
-    var rt=Array.isArray(rtRaw)?rtRaw:[];
+    var rt=(Array.isArray(rtRaw)?rtRaw:[]).filter(function(t){return !taskIsNotice(t);});
     return rt.filter(function(t){return notifTaskForStore(t,store);})
              .map(function(t){return {id:t.id,title:t.title,kind:'recurring',dueDates:notifRecurringDueDates(t)};});
   }).catch(function(){return [];});

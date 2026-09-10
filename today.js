@@ -48,7 +48,10 @@ function loadTodayDashboard(){
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
   ]).then(function(results){
     var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
-    var allRecurring = Array.isArray(results[1]) ? results[1] : [];
+    /* Задачите „Само за информация" отпадат ТУК, на входа — таблото ги брои
+       и в числителя, и в знаменателя, а те нямат отмятания и нямат как да се
+       изпълнят. Виж taskIsNotice() в shared.js за пълния обхват. */
+    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
     var recurringToday = allRecurring.filter(function(t){ return recurringIsDueToday(t); });
     /* "Текущи/без срок" — нямат нито ден, нито час; recurringIsDueToday() ги връща false,
        затова наборите са естествено разделени, без припокриване */
@@ -60,7 +63,7 @@ function loadTodayDashboard(){
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
 
     bulTasksPromise.then(function(tasksRaw){
-      var allBulTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
+      var allBulTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
       var regularToday = allBulTasks.filter(function(t){ return taskIsDueOnDate(t, todayISO); });
 
       /* обединяваме двата типа задачи в общ формат за таблото - пазим

@@ -1,5 +1,20 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v2 (10.09.2026) — деплой с ЕДНО нещо: нов вид задача „Само за информация".
+
+   Задача „Само за информация" (task_type='notice') се показва като текст в
+   Седмичния календар на Бюлетина и няма чекбокс, значи няма и
+   task_completions. Влезе ли в който и да е набор тук, тя е вечно
+   неизпълнена: надува знаменателя и излиза като пропусната работа за обект,
+   който няма как да я свърши.
+   Тук ефектът е по-личен от другаде: писмото е адресирано до конкретен човек
+   от report_groups на задачата и би му изброявало обекти, „пропуснали" нещо,
+   което изобщо не е работа.
+
+   collectWeeklyRoutingData отсява notice на входа, за двата набора
+   (bulletin_tasks и recurring_tasks). Предикатът taskIsNotice() е копие от
+   shared.js — tests/report-edge-sync.test.js го сверява.
+
    v1 (01.09.2026) — първи файл, БЕЗ деплой и БЕЗ крон.
 
    Какво прави: в понеделник сутрин всеки, отметнат в report_groups на дадена
@@ -90,6 +105,10 @@ function recurringIsDueOnWeekday(t,weekdayIdx){
 }
 var LOGISTICS_WAREHOUSES = ['Логистичен склад Добрич','Логистичен склад Търговище'];
 var REPORT_EXCLUDED_STORES = ['Централен офис'].concat(LOGISTICS_WAREHOUSES);
+/* Копие от shared.js — Deno не може да import-не браузърен файл.
+   Задача „Само за информация": показва се само в Седмичния календар на
+   Бюлетина и не влиза в нито един отчет, брояч или известие. */
+function taskIsNotice(t){ return !!t && t.task_type === 'notice'; }
 function isReportableStore(name){
   return !!name && REPORT_EXCLUDED_STORES.indexOf(name) < 0;
 }
@@ -322,14 +341,18 @@ function collectWeeklyRoutingData(cb){
     sbGet('recurring_tasks','active=eq.true')
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], target);
-    var allRecurring = Array.isArray(results[1]) ? results[1] : [];
+    /* Задачите „Само за информация" отпадат ТУК, на входа: те нямат
+       task_completions и влизат и в числителя, и в знаменателя като вечно
+       неизпълнени. Един филтър вместо условие във всяко броене надолу —
+       виж taskIsNotice(). */
+    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
     var routedRecurring = allRecurring.filter(function(t){ return t.report_groups && t.report_groups.length; });
     var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
     var weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
 
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
     bulTasksPromise.then(function(tasksRaw){
-      var allTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
+      var allTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
       var routedRegular = allTasks.filter(function(t){ return t.report_groups && t.report_groups.length; });
 
       /* Прозорецът се закача на самата задача - taskStoreBreakdown после го

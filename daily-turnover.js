@@ -694,9 +694,15 @@ function dtCOEntryBlock(byStore){
    docs/PATTERNS.md. */
 function dtMarkBulletinTask(){
   var store=currentUser.store_name, day=dtToday();
-  return sbGet('recurring_tasks','select=id&linked_module=eq.oborot&active=is.true')
+  return sbGet('recurring_tasks','select=id,task_type&linked_module=eq.oborot&active=is.true')
     .then(function(rows){
-      var list=Array.isArray(rows)?rows:[];
+      /* Стане ли свързаната задача „Само за информация", тя няма отмятания и
+         никой не ги брои — записът тук би трупал редове, които нищо не чете,
+         а провалът му би вдигал предупреждение за несъществуващо разминаване.
+         Затова се излиза МЪЛЧАЛИВО: notice не е пропусната работа.
+         task_type идва от заявката — иначе taskIsNotice() гледа undefined и
+         винаги връща false, тоест предпазителят би бил тавтологичен. */
+      var list=(Array.isArray(rows)?rows:[]).filter(function(t){ return !taskIsNotice(t); });
       if(!list.length) return;
       var rid=list[0].id;
       /* Второ отмятане за същия ден би дало дублиран ред — Бюлетинът брои

@@ -127,7 +127,8 @@ const TESTS = [
   'checklist-returns.test.js',
   'checklist-email.test.js',
   'checklist-send.test.js',
-  'task-completions-row-cap.test.js'
+  'task-completions-row-cap.test.js',
+  'task-type-notice.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

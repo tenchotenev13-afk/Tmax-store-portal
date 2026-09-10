@@ -1,6 +1,21 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v26 (10.09.2026) — деплой с ЕДНО нещо: нов вид задача „Само за информация".
+
+   Задача „Само за информация" (task_type='notice') се показва като текст в
+   Седмичния календар на Бюлетина и няма чекбокс, значи няма и
+   task_completions. Влезе ли в който и да е набор тук, тя е вечно
+   неизпълнена: надува знаменателя и излиза като пропусната работа за обект,
+   който няма как да я свърши.
+
+   Затова и двата колектора (collectDailyReportData и collectWeeklyReportData)
+   отсяват такива задачи НА ВХОДА — един филтър, вместо условие във всяко
+   броене надолу. Предикатът taskIsNotice() е копие от shared.js;
+   tests/report-edge-sync.test.js заковава, че копието не се е разминало.
+
+   Останалото в отчета не е пипано.
+
    v25 (10.09.2026) — деплой с ЕДНО нещо: смяна на ЕТИКЕТ в дневния отчет.
 
    Картата броеше обектите с pct < 50, но пишеше „обекта без напредък".
@@ -468,6 +483,10 @@ function weekDays(wk: number, yr: number){
    преписано на 8 места в двата файла. */
 var LOGISTICS_WAREHOUSES = ['Логистичен склад Добрич','Логистичен склад Търговище'];
 var REPORT_EXCLUDED_STORES = ['Централен офис'].concat(LOGISTICS_WAREHOUSES);
+/* Копие от shared.js — Deno не може да import-не браузърен файл.
+   Задача „Само за информация": показва се само в Седмичния календар на
+   Бюлетина и не влиза в нито един отчет, брояч или известие. */
+function taskIsNotice(t){ return !!t && t.task_type === 'notice'; }
 function isReportableStore(name){
   return !!name && REPORT_EXCLUDED_STORES.indexOf(name) < 0;
 }
@@ -515,7 +534,11 @@ function collectDailyReportData(cb, scope, kasaThreshold){
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], dayTarget);
-    var allRecurring = Array.isArray(results[1]) ? results[1] : [];
+    /* Задачите „Само за информация" отпадат ТУК, на входа: те нямат
+       task_completions и влизат и в числителя, и в знаменателя като вечно
+       неизпълнени. Един филтър вместо условие във всяко броене надолу —
+       виж taskIsNotice(). */
+    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
     /* Прозоречната задача се явява ВЕДНЪЖ — в деня на срока. Иначе обект,
        свършил я в понеделник, излиза неизпълнил във вторник и в сряда, и се
        брои три пъти. */
@@ -531,7 +554,7 @@ function collectDailyReportData(cb, scope, kasaThreshold){
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
 
     bulTasksPromise.then(function(tasksRaw){
-      var allBulTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
+      var allBulTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
       var regularToday = allBulTasks.filter(function(t){ return taskIsDueOnDate(t, dayISO); });
 
       var items = [];
@@ -1391,7 +1414,11 @@ function collectWeeklyReportData(cb, scope){
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], target);
-    var allRecurring = Array.isArray(results[1]) ? results[1] : [];
+    /* Задачите „Само за информация" отпадат ТУК, на входа: те нямат
+       task_completions и влизат и в числителя, и в знаменателя като вечно
+       неизпълнени. Един филтър вместо условие във всяко броене надолу —
+       виж taskIsNotice(). */
+    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
     var recurringScheduled = allRecurring.filter(function(t){
       return (t.due_weekday!==null && t.due_weekday!==undefined) || !!t.due_time;
     });
@@ -1400,7 +1427,7 @@ function collectWeeklyReportData(cb, scope){
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
 
     bulTasksPromise.then(function(tasksRaw){
-      var allBulTasks = Array.isArray(tasksRaw) ? tasksRaw : [];
+      var allBulTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
 
       /* Датите на отчетната седмица - нужни са и при СТРОЕНЕТО на явяванията
          (по-долу), не само за прозореца на заявката. */

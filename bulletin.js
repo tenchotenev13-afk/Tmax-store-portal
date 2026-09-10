@@ -43,12 +43,18 @@ function deptOptsHtml(selected){
    комбинация удължава падащото меню. Ако потрябва, е един ред.
    Старите четири ключа НЕ се преименуват: 55 задачи ги ползват. */
 var TASK_TYPES = {
-  info:          {label:'Информативна',            short:'Инфо',        needsPhoto:false, needsFile:false, needsComment:false, priority:'Нисък',     color:'#64748b', bg:'#f1f5f9', bdr:'#e2e8f0'},
+  info:          {label:'Обикновена (без снимка/коментар)', short:'Обикн.', needsPhoto:false, needsFile:false, needsComment:false, priority:'Нисък',     color:'#64748b', bg:'#f1f5f9', bdr:'#e2e8f0'},
   photo:         {label:'Потвърждение със снимка',  short:'📷 Снимка',   needsPhoto:true,  needsFile:false, needsComment:false, priority:'Среден',    color:'#b6841e', bg:'#fffbeb', bdr:'#fde68a'},
   file:          {label:'Потвърждение с документ',  short:'📄 Документ', needsPhoto:false, needsFile:true,  needsComment:false, priority:'Среден',    color:'#b6841e', bg:'#fffbeb', bdr:'#fde68a'},
   comment:       {label:'Потвърждение с коментар',  short:'💬 Коментар', needsPhoto:false, needsFile:false, needsComment:true,  priority:'Висок',     color:'#c2410c', bg:'#fff7ed', bdr:'#fed7aa'},
   photo_comment: {label:'Коментар и снимка',        short:'💬📷 И двете', needsPhoto:true,  needsFile:false, needsComment:true,  priority:'Най-висок', color:'#b91c1c', bg:'#fef2f2', bdr:'#fecaca'},
-  file_comment:  {label:'Документ и коментар',      short:'📄💬 Документ+коментар', needsPhoto:false, needsFile:true, needsComment:true, priority:'Най-висок', color:'#b91c1c', bg:'#fef2f2', bdr:'#fecaca'}
+  file_comment:  {label:'Документ и коментар',      short:'📄💬 Документ+коментар', needsPhoto:false, needsFile:true, needsComment:true, priority:'Най-висок', color:'#b91c1c', bg:'#fef2f2', bdr:'#fecaca'},
+  /* notice НЕ Е разновидност на info: info е работа, която обектът отмята без
+     доказателство, а notice изобщо не е работа — няма чекбокс и няма
+     task_completions. Затова priority е null: приоритет на съобщение няма
+     смисъл, а taskTypeOptsHtml по-долу пропуска наставката вместо да изпише
+     тире. Пълният обхват на изключването е в taskIsNotice() в shared.js. */
+  notice:        {label:'Само за информация',       short:'Инфо',        needsPhoto:false, needsFile:false, needsComment:false, priority:null,        color:'#1e40af', bg:'#eff6ff', bdr:'#bfdbfe'}
 };
 
 /* ─── КАКЪВ ФАЙЛ Е ДОПУСТИМ ─────────────────────────────────
@@ -99,14 +105,17 @@ function tcExtReject(name, allowed, what){
 function taskTypeOptsHtml(selected){
   return Object.keys(TASK_TYPES).map(function(k){
     var tt=TASK_TYPES[k];
-    return '<option value="'+k+'"'+(k===(selected||'info')?' selected':'')+'>'+tt.label+' — приоритет: '+tt.priority+'</option>';
+    return '<option value="'+k+'"'+(k===(selected||'info')?' selected':'')+'>'+tt.label+(tt.priority?' — приоритет: '+tt.priority:'')+'</option>';
   }).join('');
 }
 function taskTypeBadgeHtml(taskType,taskId,kind,clickable,completionDate){
   var tt=TASK_TYPES[taskType||'info'];
   if(!tt||taskType==='info')return '';
   /* Заключен ден -> баджът не е пряк път към модала (иначе заобикаля чекбокса) */
-  if(clickable&&taskId&&!bulDateLockReason(completionDate||null)){
+  /* notice няма изпълнение, значи баджът му не бива да отваря модала за
+     отмятане — иначе остава единствената контрола, през която се стига
+     дотам за задача, която не се отмята. */
+  if(clickable&&taskId&&taskType!=='notice'&&!bulDateLockReason(completionDate||null)){
     return '<span data-task-id="'+taskId+'" data-kind="'+(kind||'regular')+'" data-cdate="'+(completionDate||'')+'" onclick="taskTypeBadgeClick(this)" style="cursor:pointer;font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:'+tt.bg+';color:'+tt.color+';border:1px solid '+tt.bdr+';white-space:nowrap;">'+tt.short+'</span>';
   }
   return '<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:'+tt.bg+';color:'+tt.color+';border:1px solid '+tt.bdr+';white-space:nowrap;">'+tt.short+'</span>';
@@ -256,6 +265,24 @@ function linkedModuleAllowed(value){
    Магазин -> малка цветна точка за СОБСТВЕНИЯ му статус (зелено=изпълнена,
    оранжево=отложена, сиво=чака). Постоянните задачи ползват recurringComps
    (recurring_task_id), обикновените — bulComps (task_id). */
+/* Ред в СЕДМИЧНИЯ КАЛЕНДАР за задача „Само за информация".
+   Текст, без чекбокс и без брояча X/18 отдясно: notice няма
+   task_completions, значи няма какво да се брои, а чекбокс, който не води
+   доникъде, е по-лош от липсващ (правило 11 важи за контроли, които СЕ
+   ползват — тази не съществува, вместо да е скрита).
+   Описанието се показва ТУК, за разлика от останалите редове в календара:
+   при notice то е самото съдържание, а не пояснение към работа.
+   Баджът се вика без taskId, тоест не е кликаем — иначе би отворил модала
+   за отмятане на задача, която не се отмята. */
+function calNoticeRowHtml(t,kind){
+  var isRec = kind==='recurring';
+  var h='<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
+  h+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="'+(isRec?'Постоянна задача — само за информация':'Бюлетин — само за информация')+'">'+(isRec?'🔁':'📰')+'</span>';
+  h+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;color:#334155;">'+esc(t.title||'')+' '+taskTypeBadgeHtml('notice')+'</span>';
+  h+='</div>';
+  if(t.description)h+='<div style="font-size:11px;color:#64748b;margin:0 0 4px 16px;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
+  return h;
+}
 function calItemStatusHtml(itemId,kind,targetStores,dateStr,windowDates){
   var compsArr = kind==='recurring' ? recurringComps : bulComps;
   var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
@@ -1026,6 +1053,10 @@ function renderBulView(){
       html+='<div style="margin-bottom:8px;">';
       html+='<div style="font-size:10.5px;font-weight:800;text-transform:uppercase;color:'+dept.color+';letter-spacing:.03em;margin-bottom:4px;">'+dept.icon+' '+dept.label+'</div>';
       regItems.forEach(function(t){
+        /* Календарът е ЕДИНСТВЕНОТО място, където notice се показва — тук
+           филтърът е обратен на всички останали: не изхвърляне, а собствен
+           ред. Ранният return минава и покрай брояча, и покрай чекбокса. */
+        if(taskIsNotice(t)){ html+=calNoticeRowHtml(t,'regular'); return; }
         html+='<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
         if(isGlobal()){
           html+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Бюлетин">📰</span>';
@@ -1043,6 +1074,7 @@ function renderBulView(){
         }
       });
       recItems.forEach(function(t){
+        if(taskIsNotice(t)){ html+=calNoticeRowHtml(t,'recurring'); return; }
         var recDateScoped=recurringIsDateScoped(t);
         var recCdate=recDateScoped?dateStr:null;
         /* Прозорец: отметка на КОЙ ДА Е ден от прозореца затваря задачата за
@@ -1137,7 +1169,8 @@ function renderBulView(){
   DCOLS.forEach(function(dk){
     var dept=DEPTS[dk];
     var blocks=(c.columns[dk]||[]).filter(function(b){return b.type!=='task'&&b.type!=='important';});
-    var dTasks=bulTasks.filter(function(t){return t.department===dk;});
+    /* notice се показва САМО в Седмичния календар — виж taskIsNotice() в shared.js. */
+    var dTasks=bulTasks.filter(function(t){return t.department===dk&&!taskIsNotice(t);});
     /* Магазин вижда само задачи БЕЗ target_stores (= за всички) или такива,
        в които изрично е посочен; глобалните роли (admin/accounting/logistics)
        виждат винаги всичко, за да могат да управляват. */
@@ -1166,7 +1199,7 @@ function renderBulView(){
         var today=new Date();today.setHours(0,0,0,0);
         var diff=due?Math.ceil((due-today)/86400000):null;
         var dueColor=diff===null?'#94a3b8':diff<0?'#dc2626':diff<=2?'#d97706':'#94a3b8';
-        var deptTasksForNav=bulTasks.filter(function(x){return x.department===t.department;});
+        var deptTasksForNav=bulTasks.filter(function(x){return x.department===t.department&&!taskIsNotice(x);});
         var taskIdxInDept=deptTasksForNav.findIndex(function(x){return String(x.id)===String(t.id);});
         var isFirstTask=taskIdxInDept===0, isLastTask=taskIdxInDept===deptTasksForNav.length-1;
         var titleColor=done?'#94a3b8':postponed?'#b45309':'#0f172a';
@@ -2149,7 +2182,7 @@ function moveTaskInDept(id,dir){
   var task=bulTasks.find(function(t){return String(t.id)===String(id);});
   if(!task)return;
   var dept=task.department;
-  var deptTasks=bulTasks.filter(function(t){return t.department===dept;});
+  var deptTasks=bulTasks.filter(function(t){return t.department===dept&&!taskIsNotice(t);});
   var idx=deptTasks.findIndex(function(t){return String(t.id)===String(id);});
   var newIdx=idx+dir;
   if(newIdx<0||newIdx>=deptTasks.length)return; /* вече е на края */
@@ -2294,8 +2327,9 @@ function closePushMenu(){document.getElementById('pm2-ov').classList.remove('ope
    cb(items) се вика винаги (items може да е празен масив). */
 function collectTodayDeadlineItems(cb){
   var todayStr = today();
-  var mainTasks = bulTasks.filter(function(t){ return taskIsDueOnDate(t, todayStr); });
-  var recTasks = recurringTasks.filter(function(t){ return recurringIsDueToday(t); });
+  /* notice няма срок за спазване — push за нея е известие за нищо. */
+  var mainTasks = bulTasks.filter(function(t){ return !taskIsNotice(t) && taskIsDueOnDate(t, todayStr); });
+  var recTasks = recurringTasks.filter(function(t){ return !taskIsNotice(t) && recurringIsDueToday(t); });
   sbGet('task_subtasks','due_date=eq.'+todayStr).then(function(subs){
     var subTasks = Array.isArray(subs) ? subs : [];
     /* Всеки елемент носи отдел + час (ако има), вместо голо заглавие -
@@ -2519,10 +2553,11 @@ function printSection(what){
     DKEYS.forEach(function(key,i){
       var ds=toLocalISO(days[i]);
       var dt=bulTasks.filter(function(t){
+        if(taskIsNotice(t))return false;
         if(!taskIsDueOnDate(t,ds))return false;
         return isGlobal()||!t.target_stores||!t.target_stores.length||(printStore&&t.target_stores.indexOf(printStore)>=0);
       });
-      var rdt=recurringTasks.filter(function(t){return recurringIsDueOnWeekday(t,i);});
+      var rdt=recurringTasks.filter(function(t){return !taskIsNotice(t)&&recurringIsDueOnWeekday(t,i);});
       var mn=c.calendar[key]||[];
       s+='<div class="cal-day">';
       s+='<div class="cal-day-name">'+DNAMES[i]+'</div>';
@@ -2554,7 +2589,7 @@ function printSection(what){
     /* Печатаме само задачите, видими за печатащия - същия target_stores
        филтър като навсякъде другаде (офисът вижда всичко). */
     var dt=bulTasks.filter(function(t){
-      if(t.department!==dk)return false;
+      if(t.department!==dk||taskIsNotice(t))return false;
       return isGlobal()||!t.target_stores||!t.target_stores.length||(printStore&&t.target_stores.indexOf(printStore)>=0);
     });
     var bdg={trade:'badge-trade',warehouse:'badge-wh',admin:'badge-admin'}[dk]||'badge-admin';
@@ -2591,7 +2626,7 @@ function printSection(what){
         s+='</div></div>';
       });
     }
-    var rdt=recurringTasks.filter(function(t){return t.department===dk;});
+    var rdt=recurringTasks.filter(function(t){return t.department===dk&&!taskIsNotice(t);});
     if(rdt.length){
       s+='<div class="tasks-hdr">🔁 Постоянни задачи</div>';
       rdt.forEach(function(t){
@@ -2672,7 +2707,9 @@ function renderTasksPanel() {
     var depts = ['trade','warehouse','admin'];
 
     depts.forEach(function(dk) {
-      var dTasks = bulTasks.filter(function(t){ return t.department===dk; });
+      /* notice се показва САМО в Седмичния календар — иначе би влязло и в
+         знаменателя на брояча done/dTasks.length по-долу. */
+      var dTasks = bulTasks.filter(function(t){ return t.department===dk && !taskIsNotice(t); });
       /* Същият филтър по target_stores като в основния изглед по-горе —
          тази функция рендира отделен, паралелен "мобилен" панел за същите
          задачи и трябва да остане консистентна с него. */
@@ -3037,7 +3074,11 @@ function cancelPostpone(taskId, kind, completionDate){
 
 function loadTasksStats() {
   var wrap = document.getElementById('tasks-stat-wrap');
-  if (!wrap || !bulTasks.length) return;
+  /* notice няма отмятания и не бива да влиза в нито един знаменател тук —
+     филтърът е на входа, а не в трите места, където се брои по-долу. */
+  var statTasks = bulTasks.filter(function(t){ return !taskIsNotice(t); });
+  var statRecurring = recurringTasks.filter(function(t){ return !taskIsNotice(t); });
+  if (!wrap || !statTasks.length) return;
 
   /* Филтърът беше преписан тук с твърдо 'Централен офис' и пропускаше двата
      логистични склада — 20 обекта вместо 18. Един източник за всички бройки
@@ -3059,7 +3100,7 @@ function loadTasksStats() {
     var statYr = curBul ? curBul.year : new Date().getFullYear();
     var statWeekDays = weekDays(statWk, statYr).map(function(d){ return toLocalISO(d); });
     var statRecDates = {}, statRecWindow = {};
-    recurringTasks.forEach(function(t){
+    statRecurring.forEach(function(t){
       var out = [];
       /* Прозоречната задача е ЕДНА единица работа за седмицата, не N —
          затова тук се явява веднъж, в деня на срока. Отмятането обаче може
@@ -3089,7 +3130,7 @@ function loadTasksStats() {
            празно/null = всички, или изрично включен) - иначе магазин без
            достъп до дадена задача пак се брои в знаменателя ѝ, изкуствено
            занижавайки % му. Същият модел като в today.js/report.js. */
-        var dTasks = bulTasks.filter(function(t){
+        var dTasks = statTasks.filter(function(t){
           if(t.department!==dk)return false;
           return !t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0;
         });
@@ -3101,7 +3142,7 @@ function loadTasksStats() {
            показва "—" за всички магазини, все едно там няма никаква работа.
            Обхватът по target_stores е същият модел като при обикновените
            по-горе и в notifications.js/report.js. */
-        var dRec = recurringTasks.filter(function(t){
+        var dRec = statRecurring.filter(function(t){
           if(t.department!==dk)return false;
           return !t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0;
         });
@@ -3146,11 +3187,14 @@ function renderBulAnalysis(){
   var wk=curBul?curBul.week_number:weekNum(new Date());
   var html=bulHdr(curBul&&curBul.status==='draft')+BULCSS+'<div style="max-width:1320px;margin:0 auto;padding:16px 16px 60px;">';
   html+='<div style="font-size:18px;font-weight:600;margin-bottom:16px;">📊 Анализ — Седмица '+wk+'</div>';
-  if(!bulTasks.length){html+='<div class="bcard" style="text-align:center;padding:30px;color:#94a3b8;">Няма задачи.</div>';wrap.innerHTML=html+'</div>';return;}
+  /* notice няма отмятания — влезе ли тук, стои вечно на 0% и надува
+     „Просрочени". Един филтър на входа, вместо условие във всяка карта. */
+  var anTasks=bulTasks.filter(function(t){return !taskIsNotice(t);});
+  if(!anTasks.length){html+='<div class="bcard" style="text-align:center;padding:30px;color:#94a3b8;">Няма задачи.</div>';wrap.innerHTML=html+'</div>';return;}
   var ds={};bulComps.forEach(function(c){ds[c.task_id]=1;});
-  var done=Object.keys(ds).length; var tot=bulTasks.length;
+  var done=Object.keys(ds).length; var tot=anTasks.length;
   var ss={};bulComps.forEach(function(c){ss[c.store_name]=1;});
-  var over=bulTasks.filter(function(t){var dts=taskDueDates(t);return dts.length&&new Date(dts[dts.length-1])<new Date()&&!ds[t.id];}).length;
+  var over=anTasks.filter(function(t){var dts=taskDueDates(t);return dts.length&&new Date(dts[dts.length-1])<new Date()&&!ds[t.id];}).length;
   html+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">';
   [['📋 Задачи',tot,'общо','#2563eb'],['✅ Изпълнени',done,'задачи','#16a34a'],['🔴 Просрочени',over,'без изпълнение','#dc2626'],['🏪 Магазини',Object.keys(ss).length,'са отметнали','#d97706']].forEach(function(card){
     html+='<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;border-top:3px solid '+card[3]+';"><div style="font-size:11px;color:#64748b;margin-bottom:4px;">'+card[0]+'</div><div style="font-size:26px;font-weight:700;color:'+card[3]+';font-family:DM Mono,monospace;">'+card[1]+'</div><div style="font-size:11px;color:#94a3b8;">'+card[2]+'</div></div>';
@@ -3164,7 +3208,7 @@ function renderBulAnalysis(){
      тук беше занижен. */
   loadReportableStores().then(function(all){
     var tbl='<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Задача</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Отдел</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Срок</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Изпълнили</th><th style="text-align:right;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">%</th></tr></thead><tbody>';
-    bulTasks.forEach(function(task){
+    anTasks.forEach(function(task){
       var comps=bulComps.filter(function(c){return c.task_id===task.id;});
       var pct=all.length?Math.round(comps.length/all.length*100):0;
       var isOv=(function(){var dts=taskDueDates(task);return dts.length&&new Date(dts[dts.length-1])<new Date()&&!ds[task.id];})();
@@ -3179,7 +3223,8 @@ function renderBulAnalysis(){
 /* ═══════ ПОСТОЯННИ ЗАДАЧИ ════════════════════════════════════ */
 function renderRecurringTasks(dk) {
   var store = currentUser && currentUser.store_name;
-  var dTasksAll = recurringTasks.filter(function(t){return t.department===dk;});
+  /* notice се показва САМО в Седмичния календар — виж taskIsNotice() в shared.js. */
+  var dTasksAll = recurringTasks.filter(function(t){return t.department===dk&&!taskIsNotice(t);});
   /* Магазин вижда само постоянни задачи БЕЗ target_stores (= всички) или
      изрично таргетирани към него - огледално на обикновените задачи. */
   var dTasks = dTasksAll.filter(function(t){
@@ -3290,7 +3335,7 @@ function moveRecInDept(id,dir){
   var task=recurringTasks.find(function(t){return String(t.id)===String(id);});
   if(!task)return;
   var dept=task.department;
-  var deptTasks=recurringTasks.filter(function(t){return t.department===dept;});
+  var deptTasks=recurringTasks.filter(function(t){return t.department===dept&&!taskIsNotice(t);});
   var idx=deptTasks.findIndex(function(t){return String(t.id)===String(id);});
   var newIdx=idx+dir;
   if(newIdx<0||newIdx>=deptTasks.length)return;
