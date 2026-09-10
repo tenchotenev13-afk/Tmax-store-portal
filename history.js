@@ -223,10 +223,12 @@ function renderHistoryResults(){
       histData.client.map(function(o){
         return '<tr>'+
           '<td style="font-family:monospace;font-size:11px;">'+esc(o.in_num||'—')+'</td>'+
-          '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
+          /* Същият модал като в живия таб — openClientOrderDetail() търси реда
+             и в histData.client, затова тук няма копие на логиката. */
+          '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="cursor:pointer;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
           '<td>'+esc(o.store_name||'')+'</td>'+
           '<td><b>'+esc(o.customer_name||'')+'</b>'+histGroupBadge(o)+'<br><small style="color:#94a3b8;">'+esc(o.phone||'')+'</small></td>'+
-          '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+(o.sap?'SAP: '+esc(o.sap):'')+'</small></td>'+
+          '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="cursor:pointer;">'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+(o.sap?'SAP: '+esc(o.sap):'')+'</small></td>'+
           /* Ориентировъчната дата от ЦО се търси и в История, не само в живия таб */
           '<td><b>'+fmtDate(o.delivery)+'</b>'+
             (o.co_eta?'<br><small style="color:#047857;">🏭 ЦО: '+fmtDate(o.co_eta)+'</small>':'')+

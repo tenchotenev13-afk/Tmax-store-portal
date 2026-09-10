@@ -489,6 +489,167 @@ function submitCoProcessed(id){
   });
 }
 
+/* ═══ МОДАЛ „ПЪЛНИ ДАННИ ЗА ЗАЯВКАТА" (само за четене) ═══
+   Редът в таблицата показва само част от полетата — останалото се четеше
+   единствено от печатната бланка или от базата. Този модал не записва нищо:
+   бутоните за действие остават в реда, за да не се получат два пътя за една
+   и съща промяна.
+
+   Отваря се И от таб „Клиентски заявки", И от История. Затова търсенето на
+   реда е в coFindOrder(), а не срещу clientOrders направо — двата таба държат
+   данните в различни масиви (clientOrders срещу histData.client) и копие на
+   модала в history.js би се разминало при първата промяна (CLAUDE.md т.7). */
+var coDetailEscHandler=null;
+
+/* Търси в двата масива. histData живее в history.js, който се зарежда СЛЕД
+   този файл — затова проверката е typeof, а не просто истинност: при клик
+   вече е дефиниран, при зареждане още не е. */
+function coFindOrder(id){
+  var hit=null;
+  if(typeof clientOrders!=='undefined'&&clientOrders&&clientOrders.length){
+    hit=clientOrders.find(function(x){return String(x.id)===String(id);});
+  }
+  if(!hit&&typeof histData!=='undefined'&&histData&&histData.client&&histData.client.length){
+    hit=histData.client.find(function(x){return String(x.id)===String(id);});
+  }
+  return hit||null;
+}
+
+/* created_at е timestamptz — fmtDate() го реже наслуки и дава безсмислица
+   (същата бележка стои и в stock-differences.js). Тук трябват дата И час.
+   Ръчен padding, не padStart — останалият код в портала е ES5. */
+function coFmtStamp(ts){
+  if(!ts)return '—';
+  var d=new Date(ts);
+  if(isNaN(d.getTime()))return esc(String(ts));
+  var p=function(n){return (n<10?'0':'')+n;};
+  return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
+
+/* val е ГОТОВ html — подателят решава дали минава през esc() или носи
+   собствен markup (линк, бадж, бутон). Всяко извикване с потребителски текст
+   подава esc(...), иначе note с <script> би влязъл суров.
+   white-space:pre-wrap пази редовете на note и co_note — цялата идея е
+   текстът да се вижда ЦЯЛ, без отрязване. */
+function coDetailRow(label,val){
+  return '<div style="display:flex;gap:10px;padding:4px 0;border-bottom:1px solid #f1f5f9;">'+
+    '<div style="flex:0 0 134px;font-size:11.5px;color:#94a3b8;">'+esc(label)+'</div>'+
+    '<div style="flex:1;min-width:0;font-size:12.5px;color:#1e293b;word-break:break-word;white-space:pre-wrap;">'+val+'</div></div>';
+}
+function coDetailSection(title,rows){
+  if(!rows)return '';
+  return '<div style="font-size:12px;font-weight:700;color:#334155;margin:13px 0 3px;">'+esc(title)+'</div>'+rows;
+}
+
+function openClientOrderDetail(id){
+  var o=coFindOrder(id);
+  if(!o){toast('Заявката не е намерена','#dc2626');return;}
+
+  /* Артикулите: ПЪЛНИЯТ списък, не само първият. resolveItems() (shared.js)
+     носи и fallback-а към product/color/sap/qty/unit — 22 записа в базата са
+     с items NULL (последният от 14.07.2026), тоест не е теоретичен случай. */
+  var its=resolveItems(o);
+  var hasItems=!!(o.items&&o.items.length);
+  var thS='text-align:left;padding:3px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#94a3b8;font-weight:600;';
+  var tdS='padding:3px 6px;border-bottom:1px solid #f1f5f9;';
+  var itemsHtml='<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
+    '<thead><tr><th style="'+thS+'">SAP</th><th style="'+thS+'">Продукт</th>'+
+    '<th style="'+thS+'">Цвят</th><th style="'+thS+'text-align:right;">Кол.</th></tr></thead><tbody>'+
+    its.map(function(it){
+      return '<tr>'+
+        '<td style="'+tdS+'font-family:monospace;font-size:11px;">'+esc(it.sap||'')+'</td>'+
+        '<td style="'+tdS+'">'+esc(it.product||'')+'</td>'+
+        '<td style="'+tdS+'color:#64748b;">'+esc(it.color||'')+'</td>'+
+        '<td style="'+tdS+'text-align:right;white-space:nowrap;">'+esc(String(it.qty||1))+' '+esc(it.unit||'бр.')+'</td>'+
+      '</tr>';
+    }).join('')+'</tbody></table>'+
+    (hasItems?'':'<div style="font-size:11px;color:#b45309;margin-top:4px;">Стар запис без списък с артикули — показани са полетата от самата заявка.</div>');
+
+  /* Телефонът е кликаем — на телефон това е единственото, което човек иска
+     от този модал. Само цифри и + в href, за да не влезе нищо друго в URL-а. */
+  var telRaw=String(o.phone||'').replace(/[^\d+]/g,'');
+  var phoneHtml=telRaw
+    ? '<a href="tel:'+escAttr(telRaw)+'" style="color:#2563eb;text-decoration:none;font-family:monospace;">'+esc(o.phone||'')+'</a>'
+    : '—';
+
+  var btnS='border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:6px;padding:3px 9px;font-size:11.5px;cursor:pointer;';
+
+  var zayavka=coDetailRow('Номер',esc(o.in_num||''))+
+    coDetailRow('Дата / Час',esc(o.date||'')+(o.hour?' · '+esc(o.hour):''))+
+    coDetailRow('Бон',esc(o.bon||''))+
+    coDetailRow('Обект',esc(o.store_name||''))+
+    coDetailRow('Въвел',esc(o.agent||''))+
+    coDetailRow('Създадена',coFmtStamp(o.created_at));
+
+  var klient=coDetailRow('Клиент',esc(o.customer_name||''))+
+    coDetailRow('Телефон',phoneHtml);
+
+  var logistika=coDetailRow('Поръчан от',esc(o.from_store||''))+
+    coDetailRow('Изпълнител',esc(o.fulfiller||''))+
+    coDetailRow('Доставка',fmtDate(o.delivery))+
+    coDetailRow('Платен транспорт',o.paid_transport
+      ? 'Да'+(o.transport_id
+          ? ' · <button data-tr="'+escAttr(o.transport_id)+'" onclick="closeClientOrderDetail();gotoLinkedTransport(this.dataset.tr)" style="'+btnS+'">🚚 Виж транспорта</button>'
+          : '')
+      : 'Не');
+  if(o.group_id){
+    logistika+=coDetailRow('Обща поръчка',
+      '<button data-id="'+escAttr(o.id)+'" onclick="closeClientOrderDetail();openCustomerOrders(this.dataset.id)" style="'+btnS+'">👥 Заявките на клиента</button>');
+  }
+
+  /* Секцията на ЦО я има САМО ако ЦО наистина е пипал заявката — иначе четири
+     празни реда отвличат от това, което има значение. */
+  var co='';
+  if(o.co_eta||o.co_note||o.co_processed_at||o.co_processed_by){
+    co=coDetailRow('Очаквана дата',o.co_eta?fmtDate(o.co_eta):'—')+
+      coDetailRow('Коментар от ЦО',esc(o.co_note||''))+
+      coDetailRow('Обработена на',coFmtStamp(o.co_processed_at))+
+      coDetailRow('Обработена от',esc(o.co_processed_by||''));
+  }
+
+  /* В История _status/_days не са сметнати (изчисляват се в loadClientOrders),
+     затова тук се смятат на място вместо да се разчита на полето. */
+  var st=o._status||calcStatus(o.delivery,o.status);
+  var days=calcElapsed(o.created_at,o.date);
+  var badge=elapsedBadge(days,o.status,o);
+  var statusHtml=coDetailRow('Статус',statusBadge(st)+lateBadge(o)+ptBadge(o))+
+    coDetailRow('Изминало',esc(String(days))+' дни'+(badge?' · '+badge:''));
+
+  var html='<div class="bov" id="cod-ov"><div class="bmod" style="width:560px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px;">'+
+      '<div><div style="font-size:15px;font-weight:600;">📋 Заявка №'+esc(o.in_num||'—')+'</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-top:2px;">'+esc(o.store_name||'')+' · '+esc(o.customer_name||'')+'</div></div>'+
+      '<button onclick="closeClientOrderDetail()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    coDetailSection('Заявка',zayavka)+
+    coDetailSection('Клиент',klient)+
+    '<div style="font-size:12px;font-weight:700;color:#334155;margin:13px 0 3px;">Артикули ('+its.length+')</div>'+itemsHtml+
+    coDetailSection('Логистика',logistika)+
+    coDetailSection('От Централен офис',co)+
+    coDetailSection('Забележка',o.note?coDetailRow('Текст',esc(o.note)):'')+
+    coDetailSection('Статус',statusHtml)+
+    '<div style="display:flex;justify-content:flex-end;margin-top:16px;">'+
+      '<button onclick="closeClientOrderDetail()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Затвори</button>'+
+    '</div></div></div>';
+
+  var ex=document.getElementById('cod-ov');if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('cod-ov').classList.add('open');
+  /* Escape затваря. Слушателят се маха в closeClientOrderDetail() — иначе при
+     всяко отваряне се трупа по един и Escape започва да затваря модали,
+     които вече не съществуват. */
+  if(coDetailEscHandler)document.removeEventListener('keydown',coDetailEscHandler);
+  coDetailEscHandler=function(e){if(e.key==='Escape')closeClientOrderDetail();};
+  document.addEventListener('keydown',coDetailEscHandler);
+}
+
+function closeClientOrderDetail(){
+  var el=document.getElementById('cod-ov');if(el)el.remove();
+  if(coDetailEscHandler){
+    document.removeEventListener('keydown',coDetailEscHandler);
+    coDetailEscHandler=null;
+  }
+}
+
 /* ── Отметка в модала за НОВА клиентска заявка ── */
 function toggleClientPT(){
   var cb=document.getElementById('c-paid-transport');
@@ -794,14 +955,16 @@ function renderClientOrders(){
       /* Номерът вече съдържа и обекта ("Троян-0042") — пуска се на нов ред,
          вместо да реже колоната */
       '<td style="font-size:11px;color:#94a3b8;font-family:monospace;word-break:break-word;line-height:1.3;">'+esc(o.in_num||'—')+'</td>'+
-      '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
+      '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="cursor:pointer;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
       /* Името на клиента отваря панела с всички негови заявки — там е и бутонът
          за още една заявка. Така не се налага още един бутон в реда. */
       '<td><b data-id="'+o.id+'" onclick="openCustomerOrders(this.dataset.id)" title="Виж всички заявки на този клиент" style="cursor:pointer;border-bottom:1px dotted #94a3b8;">'+esc(o.customer_name||'')+'</b>'+coGroupBadge(o)+
         '<br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small></td>'+
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
-      '<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>'+
-      '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
+      /* Клетката отваря пълните данни, но вътрешният title с ЦЕЛИЯ SAP код
+         остава — колоната реже текста и това е единственият начин да се види. */
+      '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="font-family:monospace;font-size:11px;cursor:pointer;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escAttr(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>'+
+      '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="cursor:pointer;">'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
       '<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>'+
       '<td>'+esc(o.from_store||'')+'</td>'+
       '<td><b>'+fmtDate(o.delivery)+'</b>'+coEtaCell(o)+'</td>'+
