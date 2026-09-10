@@ -818,7 +818,29 @@ function loadBulletin(){
         var storeF=isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name);
         sbGet('subtask_completions','select=*'+storeF).then(function(sc){
           subtaskComps=Array.isArray(sc)?sc:[];
-          var rq='recurring_task_id=not.is.null'+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
+          /* Дата и в самата ЗАЯВКА. Глобалният клон (без store_name) теглеше
+             ВСЯКО отмятане на постоянна задача, правено някога - 1595 реда на
+             10.09.2026. PostgREST реже на 1000 (Content-Range: 0-999/1595) и
+             понеже няма order, отрязаните са точно НАЙ-НОВИТЕ: седмичният
+             календар и решетката показваха 0/18 за постоянните задачи.
+             Обхватът е седмицата на ТЕКУЩИЯ бюлетин - всичко, което рендерът
+             съпоставя, е дата от нея (weekDaysArr, statRecDates,
+             statRecWindow, календарният dateStr).
+             ЕДНО изключение, затова е `or`, а не прост диапазон: постоянна
+             задача БЕЗ ден от седмицата (recTaskWeekdays() дава []) се
+             съпоставя с ДНЕШНАТА дата - виж fallback-а toLocalISO(new Date())
+             в recurringSectionHtml и в печата. Такива има две активни
+             („Осчетоводяване на минуси", „Отчет за ръчни отстъпки"). Гледаш
+             ли чужда седмица, днешната дата е ИЗВЪН нея и чекбоксът им би
+             излязъл празен. Прост min/max диапазон вместо `or` също не става:
+             превключвателят стига 20 бюлетина назад, тоест ~20 седмици по
+             ~420 реда - пак над хилядата. */
+          var bulWkArr=weekDays(curBul.week_number,curBul.year);
+          var bulWkLo=toLocalISO(bulWkArr[0]), bulWkHi=toLocalISO(bulWkArr[6]), bulTd=bulTodayISO();
+          var recDateQ=(bulTd>=bulWkLo&&bulTd<=bulWkHi)
+            ? '&completion_date=gte.'+bulWkLo+'&completion_date=lte.'+bulWkHi
+            : '&or=(and(completion_date.gte.'+bulWkLo+',completion_date.lte.'+bulWkHi+'),completion_date.eq.'+bulTd+')';
+          var rq='recurring_task_id=not.is.null'+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name))+recDateQ;
           fetch(API+'/task_completions?'+rq,{headers:H}).then(function(r){
             if(!r.ok){
               return r.text().then(function(errText){

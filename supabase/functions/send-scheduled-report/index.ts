@@ -1,6 +1,25 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v24 (10.09.2026) — деплой с ЕДНО нещо: филтър по ДАТА в двете заявки към
+   task_completions в collectDailyReportData().
+
+   Дневният отчет за 09.09.2026 излезе 0/18 за всичките осем постоянни
+   задачи, при реални 18/18 в базата. Заявката
+   `task_completions?recurring_task_id=in.(...)` нямаше филтър по дата: 1345
+   реда, PostgREST реже на 1000 (в лога от 08:00 стои Content-Range 0-999),
+   а понеже няма `order`, отрязаните са точно НАЙ-НОВИТЕ. Прагът е прекрачен
+   между 08.09 (86%) и 09.09 (30%) — дотогава заявката се събираше под
+   хилядата и дефектът стоеше невидим.
+
+   Сега обикновените задачи се теглят с `completion_date=eq.<отчетния ден>`,
+   а постоянните — с диапазон gte/lte по обхвата на прозорците (прозоречна
+   задача може да е отметната в друг ден от прозореца си). Броенето долу не
+   е пипано: JS филтърът си остава същият и пресява точното съответствие.
+
+   Същата поправка влезе и в report.js, today.js и bulletin.js в портала —
+   заковано в tests/task-completions-row-cap.test.js.
+
    v23 (08.09.2026) — деплой с ЕДНО нещо: „Невзета стока" става четима.
 
    Списъкът рендираше по ред за всяка двойка обект+доставчик. На живо това
@@ -508,9 +527,30 @@ function collectDailyReportData(cb, scope, kasaThreshold){
       var regIds = regularToday.map(function(t){ return t.id; });
       var recIds = recurringToday.map(function(t){ return t.id; });
 
+      /* Прозорец и на самата ЗАЯВКА, не само в JS - същият шаблон като в
+         седмичния (collectWeeklyReportData). Без него за постоянните задачи
+         се теглеше ВСЯКО отмятане, правено някога: на 09.09.2026 това бяха
+         1345 реда, PostgREST върна първите 1000 (Content-Range 0-999, без
+         общ брой, защото заявката не иска count), а
+         понеже заявката няма order, отрязаните бяха точно НАЙ-НОВИТЕ.
+         Дневният отчет за 09.09 показа 0/18 за всичките осем постоянни
+         задачи, при реални 18/18 в базата. Прагът е прекрачен между
+         08.09 (86%) и 09.09 (30%) - дотогава същата заявка се събираше
+         под хилядата и дефектът не личеше.
+         Обикновените се затварят в самия ден (JS филтърът долу е eq.dayISO).
+         Постоянните - в ОБХВАТА на прозорците: прозоречна задача може да е
+         отметната в друг ден от прозореца си, а тесният JS филтър долу
+         остава непроменен и пресява точното съответствие. */
+      var recLo = dayISO, recHi = dayISO;
+      recIds.forEach(function(id){
+        (recWinDates[id]||[]).forEach(function(d){ if(d<recLo)recLo=d; if(d>recHi)recHi=d; });
+      });
+      var regDateQ = '&completion_date=eq.'+dayISO;
+      var recDateQ = '&completion_date=gte.'+recLo+'&completion_date=lte.'+recHi;
+
       Promise.all([
-        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')') : Promise.resolve([]),
-        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')') : Promise.resolve([]),
+        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+regDateQ) : Promise.resolve([]),
+        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+recDateQ) : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name')
       ]).then(function(r2){
         var regComps = Array.isArray(r2[0]) ? r2[0] : [];

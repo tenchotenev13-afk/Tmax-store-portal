@@ -90,9 +90,30 @@ function collectDailyReportData(cb, scope, kasaThreshold){
       var regIds = regularToday.map(function(t){ return t.id; });
       var recIds = recurringToday.map(function(t){ return t.id; });
 
+      /* Прозорец и на самата ЗАЯВКА, не само в JS - същият шаблон като в
+         седмичния (collectWeeklyReportData). Без него за постоянните задачи
+         се теглеше ВСЯКО отмятане, правено някога: на 09.09.2026 това бяха
+         1345 реда, PostgREST върна първите 1000 (Content-Range 0-999, без
+         общ брой, защото заявката не иска count), а
+         понеже заявката няма order, отрязаните бяха точно НАЙ-НОВИТЕ.
+         Дневният отчет за 09.09 показа 0/18 за всичките осем постоянни
+         задачи, при реални 18/18 в базата. Прагът е прекрачен между
+         08.09 (86%) и 09.09 (30%) - дотогава същата заявка се събираше
+         под хилядата и дефектът не личеше.
+         Обикновените се затварят в самия ден (JS филтърът долу е eq.dayISO).
+         Постоянните - в ОБХВАТА на прозорците: прозоречна задача може да е
+         отметната в друг ден от прозореца си, а тесният JS филтър долу
+         остава непроменен и пресява точното съответствие. */
+      var recLo = dayISO, recHi = dayISO;
+      recIds.forEach(function(id){
+        (recWinDates[id]||[]).forEach(function(d){ if(d<recLo)recLo=d; if(d>recHi)recHi=d; });
+      });
+      var regDateQ = '&completion_date=eq.'+dayISO;
+      var recDateQ = '&completion_date=gte.'+recLo+'&completion_date=lte.'+recHi;
+
       Promise.all([
-        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')') : Promise.resolve([]),
-        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')') : Promise.resolve([]),
+        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+regDateQ) : Promise.resolve([]),
+        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+recDateQ) : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name')
       ]).then(function(r2){
         var regComps = Array.isArray(r2[0]) ? r2[0] : [];
