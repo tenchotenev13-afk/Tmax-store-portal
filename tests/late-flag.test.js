@@ -85,14 +85,14 @@ function env(over) {
   h.w.clientOrders = JSON.parse(JSON.stringify(over.orders || ORDERS));
   h.w.clientOrders.forEach(o => {
     o._status = h.w.calcStatus(o.delivery, o.status);
-    o._days = h.w.calcElapsed(o.created_at);
+    o._days = h.w.calcElapsed(o.created_at, o.date);
     o._isFulfiller = false;
   });
   h.w.transportOrders = JSON.parse(JSON.stringify(over.transport || TRANSPORT));
   h.w.transportOrders.forEach(o => {
     const st = h.w.calcStatus(o.delivery, o.status);
     o._status = (o.awaiting_stock && ['done', 'refused', 'postponed'].indexOf(o.status) < 0) ? 'awaiting' : st;
-    o._days = h.w.calcElapsed(o.created_at);
+    o._days = h.w.calcElapsed(o.created_at, o.date);
   });
   return h;
 }

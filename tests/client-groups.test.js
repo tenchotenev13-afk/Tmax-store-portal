@@ -108,7 +108,7 @@ function boot(opts) {
   w.clientOrders = JSON.parse(JSON.stringify(opts.co || ORDERS));
   w.clientOrders.forEach(o => {
     o._status = w.calcStatus(o.delivery, o.status);
-    o._days = w.calcElapsed(o.created_at);
+    o._days = w.calcElapsed(o.created_at, o.date);
     o._isFulfiller = false;
   });
   const origToast = w.toast;

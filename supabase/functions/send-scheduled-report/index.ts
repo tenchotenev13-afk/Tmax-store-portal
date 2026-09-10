@@ -1638,7 +1638,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        двете няма прозорец по дата — само отсяване на статусите, които
        нямат срок. Филтърът се повтаря и в JS през reportIsLate(), защото
        той е този, който наистина решава. */
-    sbGet('client_orders','status=not.in.(done,refused,postponed)&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,created_at'),
+    sbGet('client_orders','status=not.in.(done,refused,postponed)&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,created_at,date'),
     sbGet('transport_orders','status=not.in.(done,refused,postponed)&select=id,store_name,from_store,customer_name,delivery,status,awaiting_stock')
   ]).then(function(r){
     /* Всеки набор минава през ЕДИН предикат — отделни филтри на отделни
@@ -1817,14 +1817,23 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     /* НЕОБРАБОТЕНИ ОТ ЛОГИСТИЧЕН СКЛАД. Същият набор client_orders като
        закъсненията - втора заявка за същите редове би струвала още едно
        обикаляне и би могла да върне различна снимка.
-       „Чака" се мери от created_at (кога е подадена заявката), а
-       просрочието - от delivery през reportLateDays, тоест двете числа
-       отговарят на два различни въпроса и не се смесват. */
-    var daysSince = function(stamp){
+       „Чака" се мери от ПО-РАННАТА от created_at и date - същата начална
+       точка като calcElapsed() в client-orders.js. Само created_at значеше, че
+       заявка, въведена със задна дата, чака 0 дни (09.09.2026, Петрич: заявка
+       от 06.09). Просрочието пък се мери от delivery през reportLateDays,
+       тоест двете числа отговарят на два различни въпроса и не се смесват. */
+    var daysSince = function(stamp, orderDate){
       if (!stamp) return 0;
       var d = new Date(stamp);
       if (isNaN(d.getTime())) return 0;
       d.setHours(0,0,0,0);
+      if (orderDate) {
+        var od = new Date(orderDate);
+        if (!isNaN(od.getTime())) {
+          od.setHours(0,0,0,0);
+          if (od < d) d = od;
+        }
+      }
       return Math.round((refD - d) / 86400000);
     };
     var warehousePending = [];
@@ -1835,7 +1844,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       warehousePending.push({
         store: o.store_name, in_num: o.in_num || '',
         customer: o.customer_name || '', warehouse: o.fulfiller || '',
-        waitDays: daysSince(o.created_at),
+        waitDays: daysSince(o.created_at, o.date),
         lateDays: reportIsLate(o, refD) ? reportLateDays(o, refD) : 0
       });
     });

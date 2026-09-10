@@ -131,7 +131,8 @@ const TESTS = [
   'task-type-notice.test.js',
   'overdue-recurring.test.js',
   'today-window-task.test.js',
-  'task-completion-duplicates.test.js'
+  'task-completion-duplicates.test.js',
+  'co-elapsed-backdated.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

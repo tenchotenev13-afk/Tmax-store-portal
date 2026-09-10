@@ -137,7 +137,7 @@ function boot(opts) {
   w.currentUser = opts.user || STORE_USER;
   w.clientOrders = JSON.parse(JSON.stringify(opts.co || CLIENT_ORDERS));
   w.transportOrders = JSON.parse(JSON.stringify(opts.tr || TRANSPORT_ORDERS));
-  w.clientOrders.forEach(o => { o._status = w.calcStatus(o.delivery, o.status); o._days = w.calcElapsed(o.created_at); });
+  w.clientOrders.forEach(o => { o._status = w.calcStatus(o.delivery, o.status); o._days = w.calcElapsed(o.created_at, o.date); });
   w.transportOrders.forEach(o => {
     const st = w.calcStatus(o.delivery, o.status);
     o._status = (o.awaiting_stock && ['done', 'refused', 'postponed'].indexOf(o.status) < 0) ? 'awaiting' : st;

@@ -1,9 +1,23 @@
 /* client-orders.js — Клиентски заявки + бланка за клиента */
 
-function calcElapsed(createdAt){
+function calcElapsed(createdAt, orderDate){
   if(!createdAt) return 0;
   var created=new Date(createdAt); created.setHours(0,0,0,0);
-  return Math.floor((TODAY-created)/86400000);
+  var start=created;
+  /* Началната точка е ПО-РАННАТА от created_at и date. Заявка, въведена със
+     задна дата, трябва да тръгне от датата на самата заявка, не от часа на
+     въвеждането: на 09.09.2026 Петрич въведе заявка от 06.09 и „Изминало"
+     показа 0 дни, тоест закъснялото въвеждане нулира ескалацията.
+     Взима се по-ранната, не просто date — бъдеща дата на заявката не бива да
+     прави брояча отрицателен. Липсваща или невалидна date → както досега. */
+  if(orderDate){
+    var od=new Date(orderDate);
+    if(!isNaN(od.getTime())){
+      od.setHours(0,0,0,0);
+      if(od<start) start=od;
+    }
+  }
+  return Math.floor((TODAY-start)/86400000);
 }
 
 function elapsedBadge(days, status, order){
@@ -657,7 +671,7 @@ function loadClientOrders(){
     clientOrders=Array.isArray(data)?data:[];
     clientOrders.forEach(function(o){
       o._status=calcStatus(o.delivery,o.status);
-      o._days=calcElapsed(o.created_at);
+      o._days=calcElapsed(o.created_at,o.date);
       /* Маркираме дали текущия магазин е изпълнителят */
       o._isFulfiller=!isGlobal()&&o.fulfiller===currentUser.store_name&&o.store_name!==currentUser.store_name;
     });
@@ -957,6 +971,19 @@ function submitClientOrder(){
   var paidTransport=!!(document.getElementById('c-paid-transport')||{}).checked;
   var ptAddr=v('c-pt-addr');
   if(paidTransport&&!ptAddr){toast('При платен транспорт адресът за доставка е задължителен','#dc2626');return;}
+  /* Задна дата НЕ се забранява — отложеното въвеждане е законно. Но откакто
+     calcElapsed() тръгва от по-ранната от created_at и date, заявка с дата
+     отпреди днес се ражда с ненулев брояч, евентуално вече оцветен. Човекът
+     трябва да го види ПРЕДИ записа, не след това. Проверката стои преди
+     ключалката coSubmitting — при отказ бутонът трябва да остане активен. */
+  var cDateVal=v('c-date');
+  if(cDateVal){
+    var cDateD=new Date(cDateVal);
+    if(!isNaN(cDateD.getTime())){
+      cDateD.setHours(0,0,0,0);
+      if(cDateD<TODAY&&!confirm('Датата на заявката е преди днес. Броячът „Изминало" ще се смята от тази дата. Продължаваш ли?')) return;
+    }
+  }
   /* Чак ТУК, след всички валидации: при непопълнено поле бутонът трябва да
      остане активен, за да може човек да поправи и да натисне пак. */
   if(coSubmitting)return;

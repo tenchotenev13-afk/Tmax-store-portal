@@ -17,8 +17,14 @@ function ok(name, cond, extra) {
 }
 function section(t) { console.log('\n=== ' + t + ' ==='); }
 
-/* Дати спрямо днес, за да не гният тестовете */
-const d = n => { const x = new Date(); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() + n); return x.toISOString().slice(0, 10); };
+/* Дати спрямо днес, за да не гният тестовете.
+   ЛОКАЛНИ getter-и, не toISOString(): България е UTC+2/+3, затова локалната
+   полунощ става 21:00/22:00 UTC от ПРЕДНИЯ ден и d(0) връщаше ВЧЕРА. Целият
+   фикстур беше изместен с един ден — не се виждаше, защото всички сравнения
+   бяха със същото d(). Излезе наяве чак когато calcElapsed() започна да чете
+   и o.date: o-1 беше date=10 дни назад при created_at=9 дни назад. */
+const d = n => { const x = new Date(); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() + n);
+  return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
 const daysAgoISO = n => { const x = new Date(); x.setDate(x.getDate() - n); return x.toISOString(); };
 
 const CO = 'Централен офис';
@@ -105,7 +111,7 @@ function boot(opts) {
   w.clientOrders = JSON.parse(JSON.stringify(opts.co || ORDERS));
   w.clientOrders.forEach(o => {
     o._status = w.calcStatus(o.delivery, o.status);
-    o._days = w.calcElapsed(o.created_at);
+    o._days = w.calcElapsed(o.created_at, o.date);
     o._isFulfiller = !w.isGlobal() && o.fulfiller === w.currentUser.store_name && o.store_name !== w.currentUser.store_name;
   });
   const origToast = w.toast;

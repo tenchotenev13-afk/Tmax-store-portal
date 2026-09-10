@@ -89,7 +89,7 @@ function boot(opts) {
   w.currentUser = opts.user || USER;
   w.transportOrders = [];
   w.clientOrders = JSON.parse(JSON.stringify(opts.co || ORDERS));
-  w.clientOrders.forEach(o => { o._status = w.calcStatus(o.delivery, o.status); o._days = w.calcElapsed(o.created_at); o._isFulfiller = false; });
+  w.clientOrders.forEach(o => { o._status = w.calcStatus(o.delivery, o.status); o._days = w.calcElapsed(o.created_at, o.date); o._isFulfiller = false; });
   const origToast = w.toast;
   w.toast = (m, c) => { calls.toast.push(m); try { origToast(m, c); } catch (e) {} };
   return { w, calls, doc: w.document };
