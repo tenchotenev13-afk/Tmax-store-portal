@@ -190,80 +190,119 @@ function env(over) {
     }
   }
 
-  /* ══════════ 5. submitClientOrder — предупреждение при задна дата ══════════ */
+  /* ══════════ 5. submitClientOrder — предупреждение при задна дата ══════════
+     Часовникът се ЗАДАВА, не се чака. Порталът има два различни часовника:
+     today() е toISOString() (UTC), а TODAY е локална полунощ — между 00:00 и
+     03:00 местно време (UTC+3) се разминават с един ден. c-date се попълва от
+     today(), затова проверката трябва да сверява със today(); срещу TODAY
+     всяка нова заявка, въведена нощем, получаваше предупреждението без никой
+     да е въвеждал задна дата.
+
+     Ако тестът разчиташе на реалния час, щеше да е зелен 21 часа в денонощието
+     и червен три — тоест щеше да „минава" точно когато не трябва. Затова
+     today() се подменя с фиксирана стойност и двата случая се задават изрично:
+     часовник, който съвпада с локалния ден, и часовник с един ден назад
+     (прозорецът 00:00–03:00). Очакваното поведение е ЕДНО И СЪЩО за двата. */
   section('5. Запис със задна дата — confirm() пита, отказът НЕ записва');
 
-  function fillForm(w, doc, dateVal) {
-    w.openClientModal();
-    doc.getElementById('c-name').value = 'Нов Клиент';
-    doc.getElementById('c-phone').value = '0899123456';
-    doc.querySelector('#c-items .item-product').value = 'ТЕСТ ПРОДУКТ';
-    doc.querySelector('#c-items .item-qty').value = '1';
-    doc.getElementById('c-date').value = dateVal;
-  }
   const BACKDATE_MSG = 'Датата на заявката е преди днес';
 
-  {
-    /* 5а. вчера + отказ → нищо не се записва */
-    const { w, doc, calls } = env({ confirm: false });
-    fillForm(w, doc, dayOffset(-1));
-    realClick(w, btnExact(doc.getElementById('client-modal'), '✓ Запази заявката'));
-    await ticks();
-    ok('при дата вчера confirm() се вика',
-      calls.confirm.some(m => String(m).indexOf(BACKDATE_MSG) >= 0),
-      JSON.stringify(calls.confirm));
-    ok('при отказ НЯМА POST към client_orders',
-      !calls.post.some(p => /client_orders/.test(p.url)),
-      JSON.stringify(calls.post.map(p => p.url)));
-    ok('модалът остава отворен, за да може датата да се поправи',
-      doc.getElementById('client-modal').classList.contains('open'));
+  /* Ден ± n върху 'YYYY-MM-DD' през UTC — никаква локална зона не участва,
+     затова помощникът дава същия резултат в който и да е час. */
+  function shiftISO(iso, n) {
+    const d = new Date(iso + 'T00:00:00Z');
+    d.setUTCDate(d.getUTCDate() + n);
+    return d.toISOString().slice(0, 10);
   }
-  {
-    /* 5б. вчера + потвърждение → записва се, задната дата НЕ е забранена */
-    const { w, doc, calls } = env({ confirm: true });
-    const y = dayOffset(-1);
-    fillForm(w, doc, y);
-    realClick(w, btnExact(doc.getElementById('client-modal'), '✓ Запази заявката'));
-    await ticks();
-    const post = calls.post.find(p => /client_orders/.test(p.url));
-    ok('при потвърждение заявката се записва', !!post);
-    ok('задната дата стига до базата непроменена', !!post && post.body.date === y,
-      post && String(post.body.date));
+
+  /* Подменя today() ПРЕДИ openClientModal() — модалът попълва c-date с него. */
+  function formWithClock(over, clock, dateVal) {
+    const h = env(over);
+    h.w.today = function () { return clock; };
+    h.w.openClientModal();
+    if (dateVal !== undefined) h.doc.getElementById('c-date').value = dateVal;
+    h.doc.getElementById('c-name').value = 'Нов Клиент';
+    h.doc.getElementById('c-phone').value = '0899123456';
+    h.doc.querySelector('#c-items .item-product').value = 'ТЕСТ ПРОДУКТ';
+    h.doc.querySelector('#c-items .item-qty').value = '1';
+    return h;
   }
-  {
-    /* 5в. днес → не пита изобщо */
-    const { w, doc, calls } = env({ confirm: false });
-    fillForm(w, doc, w.today());
-    realClick(w, btnExact(doc.getElementById('client-modal'), '✓ Запази заявката'));
-    await ticks();
-    ok('при днешна дата confirm() за задна дата НЕ се вика',
-      !calls.confirm.some(m => String(m).indexOf(BACKDATE_MSG) >= 0),
-      JSON.stringify(calls.confirm));
-    ok('и заявката се записва без питане',
-      calls.post.some(p => /client_orders/.test(p.url)),
-      JSON.stringify(calls.post.map(p => p.url)));
+  function submit(h) {
+    realClick(h.w, btnExact(h.doc.getElementById('client-modal'), '✓ Запази заявката'));
   }
-  {
-    /* 5г. БЪДЕЩА дата → също не пита (проверката е „преди днес", не „различна от днес") */
-    const { w, doc, calls } = env({ confirm: false });
-    fillForm(w, doc, dayOffset(3));
-    realClick(w, btnExact(doc.getElementById('client-modal'), '✓ Запази заявката'));
-    await ticks();
-    ok('при бъдеща дата confirm() за задна дата НЕ се вика',
-      !calls.confirm.some(m => String(m).indexOf(BACKDATE_MSG) >= 0),
-      JSON.stringify(calls.confirm));
-  }
-  {
-    /* 5д. празна дата → не пита и не гърми */
-    const { w, doc, calls } = env({ confirm: false });
-    fillForm(w, doc, '');
-    realClick(w, btnExact(doc.getElementById('client-modal'), '✓ Запази заявката'));
-    await ticks();
-    ok('при празна дата confirm() за задна дата НЕ се вика',
-      !calls.confirm.some(m => String(m).indexOf(BACKDATE_MSG) >= 0),
-      JSON.stringify(calls.confirm));
-    ok('записът минава и без дата',
-      calls.post.some(p => /client_orders/.test(p.url)));
+  const asked = calls => calls.confirm.some(m => String(m).indexOf(BACKDATE_MSG) >= 0);
+  const posted = calls => calls.post.some(p => /client_orders/.test(p.url));
+
+  /* Двата часовника. „Нощният" е с един ден НАЗАД спрямо локалната дата —
+     точно каквото връща toISOString() между 00:00 и 03:00 при UTC+3. */
+  const CLOCKS = [
+    { ime: 'часовник = локалният ден',               clock: dayOffset(0) },
+    { ime: 'часовник с ден назад (00:00–03:00 UTC)', clock: dayOffset(-1) }
+  ];
+
+  for (const C of CLOCKS) {
+    section('5. ' + C.ime + ' (today() = ' + C.clock + ')');
+
+    {
+      /* Датата, с която модалът САМ се попълва → НЕ пита. Тук беше регресията:
+         срещу TODAY вторият часовник питаше на празно място. */
+      const h = formWithClock({ confirm: false }, C.clock, undefined);
+      ok('c-date е попълнена от today()',
+        h.doc.getElementById('c-date').value === C.clock,
+        h.doc.getElementById('c-date').value);
+      submit(h);
+      await ticks();
+      ok('непипната дата → confirm() НЕ се вика', !asked(h.calls),
+        JSON.stringify(h.calls.confirm));
+      ok('и заявката се записва без питане', posted(h.calls));
+    }
+    {
+      /* ден преди часовника → пита; при отказ нищо не се записва */
+      const h = formWithClock({ confirm: false }, C.clock, shiftISO(C.clock, -1));
+      submit(h);
+      await ticks();
+      ok('ден назад → confirm() се вика', asked(h.calls), JSON.stringify(h.calls.confirm));
+      ok('при отказ НЯМА POST към client_orders', !posted(h.calls),
+        JSON.stringify(h.calls.post.map(p => p.url)));
+      ok('модалът остава отворен, за да може датата да се поправи',
+        h.doc.getElementById('client-modal').classList.contains('open'));
+    }
+    {
+      /* ден преди часовника + потвърждение → записва се; задната дата НЕ е забранена */
+      const back = shiftISO(C.clock, -1);
+      const h = formWithClock({ confirm: true }, C.clock, back);
+      submit(h);
+      await ticks();
+      const post = h.calls.post.find(p => /client_orders/.test(p.url));
+      ok('при потвърждение заявката се записва', !!post);
+      ok('задната дата стига до базата непроменена', !!post && post.body.date === back,
+        post && String(post.body.date));
+    }
+    {
+      /* бъдеща дата → не пита (правилото е „преди днес", не „различна от днес") */
+      const h = formWithClock({ confirm: false }, C.clock, shiftISO(C.clock, 3));
+      submit(h);
+      await ticks();
+      ok('бъдеща дата → confirm() НЕ се вика', !asked(h.calls),
+        JSON.stringify(h.calls.confirm));
+    }
+    {
+      /* празна дата → не пита и не спира записа */
+      const h = formWithClock({ confirm: false }, C.clock, '');
+      submit(h);
+      await ticks();
+      ok('празна дата → confirm() НЕ се вика', !asked(h.calls),
+        JSON.stringify(h.calls.confirm));
+      ok('записът минава и без дата', posted(h.calls));
+    }
+    {
+      /* невалидна стойност в полето → не пита и не гърми */
+      const h = formWithClock({ confirm: false }, C.clock, 'не-дата');
+      submit(h);
+      await ticks();
+      ok('невалидна дата → confirm() НЕ се вика', !asked(h.calls),
+        JSON.stringify(h.calls.confirm));
+    }
   }
 
   report();
