@@ -341,7 +341,13 @@ const compUrls = h => h.calls.get.filter(u => u.indexOf('/task_completions') >= 
       await ticks(); await ticks();
       const u = compUrls(h).filter(x => x.indexOf('recurring_task_id=in.') >= 0)[0];
       if (ok('има заявка за постоянните отмятания', !!u, compUrls(h).join('\n'))) {
-        ok('носи completion_date=eq.<днес>', u.indexOf('completion_date=eq.' + TUE) >= 0, u);
+        /* От 10.09.2026 обхватът е gte/lte, не eq: прозоречната задача може
+           да е отметната в друг ден от прозореца си (виж
+           tests/today-window-task.test.js). За тази задача — СПРАВКА МИНУСИ,
+           due_window=false — двете граници се свиват до днес, тоест защитата
+           срещу хилядата е същата. */
+        ok('носи долна граница = днес', u.indexOf('completion_date=gte.' + TUE) >= 0, u);
+        ok('и горна граница = днес', u.indexOf('completion_date=lte.' + TUE) >= 0, u);
       }
       const c = h.w.todayCache;
       if (ok('таблото се напълни', !!c)) {

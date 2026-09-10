@@ -82,19 +82,41 @@ function loadTodayDashboard(){
       var noDueIds = recurringNoDue.map(function(t){ return t.id; });
       var allRecIds = recIds.concat(noDueIds); /* completion-и за двата recurring набора взимаме заедно */
 
-      /* Дата и в самата ЗАЯВКА, не само в JS филтъра долу. Без нея за
+      /* ПРОЗОРЕЧНИТЕ ЗАДАЧИ (due_window) — същият модел като в report.js.
+         В НАБОРА задачата влиза само в деня на срока и това вече работи:
+         recurringIsDueToday() минава през recurringReportDueOnWeekday(),
+         която за прозоречна връща true единствено за последния ден. Тук се
+         поправя ВТОРАТА половина — съпоставянето на отметката.
+         Дотук и заявката, и филтърът долу искаха completion_date=ДНЕС, тоест
+         обект, свършил „Ревизии 953" в понеделник, излизаше неизпълнил в
+         сряда и висеше в знаменателя си. Прозорецът се смята веднъж и се
+         ползва и от заявката, и от филтъра — разминат ли се двете, редът
+         просто не се вижда и никой не разбира защо. */
+      var recWinDates = {};
+      recurringToday.forEach(function(t){
+        if (recurringIsWindow(t)) recWinDates[t.id] = recurringWindowDatesForDate(t, new Date());
+      });
+
+      /* Дата и в самите ЗАЯВКИ, не само в JS филтъра долу. Без нея за
          постоянните задачи се теглеше ВСЯКО отмятане, правено някога -
          1595 реда на 10.09.2026. PostgREST реже на 1000 (Content-Range:
          0-999/1595) и понеже няма order, отрязаните са точно НАЙ-НОВИТЕ,
          тоест днешните. Същият дефект удари и дневния отчет (report.js) -
          09.09 излезе 0/18 за всичките осем постоянни задачи.
-         Обхватът е ТОЧНО този, който JS филтърът долу пропуска (днес), за
-         да няма мълчалива разлика между заявка и филтър. */
-      var compDateQ = '&completion_date=eq.'+todayISO;
+         Обикновените се затварят в самия ден. Постоянните - в обхвата на
+         прозорците: всички дни от прозореца са <= днес, защото задачата
+         влиза в набора само в деня на срока, тоест горната граница остава
+         днешната дата. */
+      var recLo = todayISO;
+      allRecIds.forEach(function(id){
+        (recWinDates[id]||[]).forEach(function(d){ if (d < recLo) recLo = d; });
+      });
+      var regDateQ = '&completion_date=eq.'+todayISO;
+      var recDateQ = '&completion_date=gte.'+recLo+'&completion_date=lte.'+todayISO;
 
       Promise.all([
-        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+compDateQ) : Promise.resolve([]),
-        allRecIds.length ? sbGet('task_completions','recurring_task_id=in.('+allRecIds.join(',')+')'+compDateQ) : Promise.resolve([]),
+        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+regDateQ) : Promise.resolve([]),
+        allRecIds.length ? sbGet('task_completions','recurring_task_id=in.('+allRecIds.join(',')+')'+recDateQ) : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name')
       ]).then(function(r2){
         var regComps = Array.isArray(r2[0]) ? r2[0] : [];
@@ -117,7 +139,10 @@ function loadTodayDashboard(){
            да се показва като "изпълнено" и в сряда. */
         var comps = [];
         regComps.forEach(function(c){ if(c.status==='done' && (c.completion_date||null)===todayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, comment:c.comment, photos:c.photos, files:c.files }); });
-        /* Постоянна задача: брои се САМО отмятане с ДНЕШНАТА дата.
+        /* Постоянна задача: отмятането трябва да носи ДНЕШНАТА дата, а при
+           прозоречна - кой да е ден от нейния прозорец (свършена в
+           понеделник е свършена, макар срокът да е сряда). Дословно същият
+           предикат като в report.js:collectDailyReportData.
            Дотук `!c.completion_date ||` пускаше и старите записи без дата -
            90 такива в базата, всичките отпреди полето да се пълни. Те се
            броят за изпълнени всеки ден завинаги: на 10.09.2026 даваха 15
@@ -125,8 +150,15 @@ function loadTodayDashboard(){
            и таблото показваше 18/90 при реални 5.
            report.js изключва NULL нарочно още отпреди (виж коментара
            „184 фантома" в collectDailyReportData); таб „Днес" трябва да
-           казва същото като писмото, което го огледалва. */
-        recComps.forEach(function(c){ if(c.status==='done' && c.completion_date===todayISO) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, comment:c.comment, photos:c.photos, files:c.files }); });
+           казва същото като писмото, което го огледалва. Прозоречната и без
+           това изисква реална дата - NULL не е в нито един прозорец. */
+        recComps.forEach(function(c){
+          if (c.status !== 'done') return;
+          var win = recWinDates[c.recurring_task_id];
+          var hit = win ? (!!c.completion_date && win.indexOf(c.completion_date) >= 0)
+                        : (c.completion_date === todayISO);
+          if (hit) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, comment:c.comment, photos:c.photos, files:c.files });
+        });
 
         todayCache = { items:items, noDueItems:noDueItems, comps:comps, stores:stores };
         renderTodayDashboard(wrap, items, noDueItems, comps, stores);
@@ -383,9 +415,14 @@ function todayCompletionExtras(compObj){
   return h;
 }
 
-/* ═══ СНИМКИ ЗА ПРЕГЛЕД — bulk изглед на всички качени снимки тази седмица,
-   за да не се налага отваряне на всяка задача поотделно. Lazy-loaded - само
-   при първо разгъване на секцията, не при всяко зареждане на "Днес". ═══ */
+/* ═══ СНИМКИ ЗА ПРЕГЛЕД — bulk изглед на всички отмятания със снимка или
+   документ по задачите от ТЕКУЩИЯ БЮЛЕТИН, БЕЗ филтър по дата, за да не се
+   налага отваряне на всяка задача поотделно. Lazy-loaded - само при първо
+   разгъване на секцията, не при всяко зареждане на "Днес".
+   Дотук тук пишеше „снимки тази седмица", а заявките долу нямат никакво
+   ограничение по дата — описание, което не отговаря на кода, е по-лошо от
+   липсващо: следващият го чете и не проверява. Обхватът е по ЗАДАЧИ
+   (задачите на бюлетина + всички активни постоянни), не по период. ═══ */
 function todayLoadPhotoQueue(cb){
   sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1').then(function(bulRes){
     var bul = (Array.isArray(bulRes) && bulRes.length) ? bulRes[0] : null;

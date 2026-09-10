@@ -129,7 +129,8 @@ const TESTS = [
   'checklist-send.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
-  'overdue-recurring.test.js'
+  'overdue-recurring.test.js',
+  'today-window-task.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
