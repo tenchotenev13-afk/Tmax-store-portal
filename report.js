@@ -879,7 +879,7 @@ function buildDailyReportHtml(data){
   var body = '<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:6px;margin-bottom:6px;"><tr>' +
     reportStatCell(data.overallPct+'%','изпълнение за деня', data.overallPct===100?'#2F9E5C':data.overallPct>=50?'#1E2761':'#C0392B') +
     reportStatCell(data.totalDone+'/'+data.totalAll,'изпълнени задачи','#1E2761') +
-    reportStatCell(String(data.laggards),'обекта без напредък', data.laggards>0?'#C0392B':'#2F9E5C') +
+    reportStatCell(String(data.laggards),'обекта под 50%', data.laggards>0?'#C0392B':'#2F9E5C') +
     reportStatCell(String(data.storeCount),'обекта общо','#1E2761') +
     '</tr></table>';
   body += reportTrendHtml(data.overallPct, data.trendYesterday, 'спрямо предходния ден');

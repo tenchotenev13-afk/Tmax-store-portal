@@ -526,7 +526,7 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
   h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 22px;">';
   h += todayStatCard(overallPct + '%', 'изпълнение за деня', overallPct===100?'#16a34a':overallPct>=50?'#0f172a':'#dc2626', todayTrendHtml(overallPct, todayYesterdaySnapshot));
   h += todayStatCard(totalDone + '/' + totalAll, 'изпълнени задачи', '#0f172a');
-  h += todayStatCard(String(laggards), 'обекта без напредък', laggards>0?'#dc2626':'#16a34a');
+  h += todayStatCard(String(laggards), 'обекта под 50%', laggards>0?'#dc2626':'#16a34a');
   h += todayStatCard(String(stores.length), 'обекта общо', '#0f172a');
   h += '</div>';
 

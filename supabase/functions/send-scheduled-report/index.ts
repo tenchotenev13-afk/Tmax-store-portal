@@ -1,6 +1,20 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v25 (10.09.2026) — деплой с ЕДНО нещо: смяна на ЕТИКЕТ в дневния отчет.
+
+   Картата броеше обектите с pct < 50, но пишеше „обекта без напредък".
+   На 09.09.2026, когато всичките 18 обекта бяха на 3/12 (25%), писмото
+   каза „18 обекта без напредък" — формално вярно по своя праг, но подвежда:
+   напредък имаше, просто под половината. Седмичният отчет отдавна нарича
+   същото число „обекта под 50%" (buildWeeklyReportHtml, същият помощник
+   reportStatCell) — сега двете писма казват едно и също.
+
+   ЛОГИКАТА НЕ Е ПИПАНА: reportBuildSummary() брои по същия праг pct < 50,
+   цветовете са същите, останалите карти също. Сменя се само низът.
+
+   Същата смяна влезе и в report.js и today.js в портала.
+
    v24 (10.09.2026) — деплой с ЕДНО нещо: филтър по ДАТА в двете заявки към
    task_completions в collectDailyReportData().
 
@@ -1286,7 +1300,7 @@ function buildDailyReportHtml(data){
   var body = '<table role="presentation" style="width:100%;border-collapse:separate;border-spacing:6px;margin-bottom:6px;"><tr>' +
     reportStatCell(data.overallPct+'%','изпълнение за деня', data.overallPct===100?'#2F9E5C':data.overallPct>=50?'#1E2761':'#C0392B') +
     reportStatCell(data.totalDone+'/'+data.totalAll,'изпълнени задачи','#1E2761') +
-    reportStatCell(String(data.laggards),'обекта без напредък', data.laggards>0?'#C0392B':'#2F9E5C') +
+    reportStatCell(String(data.laggards),'обекта под 50%', data.laggards>0?'#C0392B':'#2F9E5C') +
     reportStatCell(String(data.storeCount),'обекта общо','#1E2761') +
     '</tr></table>';
   body += reportTrendHtml(data.overallPct, data.trendYesterday, 'спрямо предходния ден');
