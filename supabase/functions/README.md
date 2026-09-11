@@ -36,7 +36,7 @@
 | `auth-set-password` | 16 | `index.ts` | Смяна/ресет на парола (мин. 4 символа) | портал — `shared.js`, `admin.js` | ✅ |
 | `resend-email` | 56 | **`send-email.ts`** | Праща И имейл (SMTP `mail.temax.bg`), И push — по поле `type` | портал — `email.js`, `push.js`; и четирите крон функции по-долу | ✅ |
 | `portal-push` | 24 | `index.ts` | Push през OneSignal — до всички или по таг `store_name` | портал — `push.js` (`osSend`) | ✅ |
-| `bulletin-notify` | 7 | `index.ts` | Известията от Бюлетина: теми `overdue_tasks` и `today_deadlines` | **крон 15** (`*/15 * * * *`) + портал — `push.js` (`runNotifyTopic`) | ✅ |
+| `bulletin-notify` | 15 | `index.ts` | Известията от Бюлетина: теми `overdue_tasks`, `today_deadlines`, `deadline_passed`, `promo_expiring` | **крон 15** (`*/15 * * * *`) + портал — `push.js` (`runNotifyTopic`) | ✅ |
 | `send-scheduled-report` | 34 | `index.ts` | Дневен и седмичен репорт по имейл | **крон 12** (`0 5 * * *`, дневен) и **крон 13** (`0 5 * * 1`, седмичен) | ✅ |
 | `send-oborot-report` | 9 | `index.ts` | Вечерният имейл с оборота от `daily_turnover` | **крон 14** (`45 17 * * *`) | ✅ |
 | `send-routed-report` | 4 | `index.ts` | Личният седмичен отчет по задачи (`report_groups` → отделно писмо на човек) | **крон 16** (`10 5 * * 1`, понеделник); тема `weekly_routed` | ✅ |

@@ -9,6 +9,20 @@
 //   promo_expiring   — имейл/push за промоции, изтичащи днес (и до 3 дни в пон.)
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
 //
+// v4 (11.09.2026) — постоянна задача, изключена за седмица (нова таблица
+//   recurring_task_skips, миграция 20260911080537). Ред там значи „тази
+//   седмица задачата не се изисква" — за всички (store_name NULL) или за
+//   един обект. И трите теми с постоянни задачи го уважават:
+//     · overdue_tasks   — ключът е седмицата на ВЧЕРА (isoWeekOf(yISO)):
+//                          в понеделник вчера е неделя от миналата седмица;
+//     · today_deadlines — седмицата на днес;
+//     · deadline_passed — седмицата на днес.
+//   Изключена за всички → задачата не влиза в темата. Изключена за обект →
+//   обектът излиза от обхвата ѝ (не получава push, не е „не са подали",
+//   не влиза в total). recurringIsSkipped()/recurringSkipStores() са копия
+//   от shared.js; tests/recurring-task-skips-notify.test.js ги сверява.
+//   promo_expiring не е пипана.
+//
 // v3 (10.09.2026) — постоянните задачи влизат в „Незавършени задачи".
 //   Дотук buildOverdueTasks четеше ЕДИНСТВЕНО bulletin_tasks. Постоянните
 //   задачи не се проверяваха никога: в лога от 10.09 08:15 заявката е
@@ -123,6 +137,32 @@ function dueDatesOf(t: Record<string, unknown>): string[] {
    „подадена" и всяка от трите теми отдолу би я обявявала за просрочена
    всеки ден, до всички. Затова филтърът е на входа и на трите. */
 function taskIsNotice(t: any): boolean { return !!t && t.task_type === 'notice'; }
+/* Копие от shared.js — постоянна задача, изключена за седмица
+   (recurring_task_skips). store=null пита само за изключване ЗА ВСИЧКИ.
+   tests/recurring-task-skips-notify.test.js сверява копието с оригинала. */
+function recurringIsSkipped(taskId, store, skips){
+  if(!Array.isArray(skips)||!skips.length) return false;
+  var id=String(taskId);
+  return skips.some(function(s){
+    if(!s||String(s.recurring_task_id)!==id) return false;
+    return s.store_name===null||s.store_name===undefined||(!!store&&s.store_name===store);
+  });
+}
+function recurringSkipStores(taskId, skips){
+  if(!Array.isArray(skips)) return [];
+  var id=String(taskId);
+  return skips.filter(function(s){
+    return !!s&&String(s.recurring_task_id)===id&&s.store_name!==null&&s.store_name!==undefined;
+  }).map(function(s){ return s.store_name; });
+}
+/* Изключванията за ЕДНА ISO седмица ({week, year} от isoWeekOf). Провал на
+   заявката → [] → темата се държи както преди изключванията: известие в
+   повече е по-малкото зло от пропуснато. */
+async function loadSkipsForWeek(supabase: any, wk: { week: number; year: number }): Promise<any[]> {
+  const { data } = await supabase.from('recurring_task_skips')
+    .select('recurring_task_id,store_name').eq('year', wk.year).eq('week_number', wk.week);
+  return Array.isArray(data) ? data : [];
+}
 /* Копие на recurringIsDueOnWeekday / recurringIsWindow /
    recurringReportDueOnWeekday от bulletin.js (редове 3528-3598).
    Прозоречна задача се напомня в ДЕНЯ НА СРОКА. */
@@ -342,10 +382,15 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
   const yISO = plusDaysISO(bg.dateStr, -1);
   const yIdx = (bg.weekdayIdx + 6) % 7;   /* вчерашният ден: 0=Пон..6=Нед */
 
+  /* Изключванията за СЕДМИЦАТА НА ВЧЕРА, не на днес: в понеделник вчера е
+     неделя от миналата седмица и нейните изключвания решават. Изключена за
+     всички → не влиза; за обект → обектът излиза от обхвата в addTask(). */
+  const ySkips = await loadSkipsForWeek(supabase, isoWeekOf(yISO));
+
   const { data: recsRaw } = await supabase
     .from('recurring_tasks').select('*').eq('active', true);
   const recDue = (recsRaw || []).filter((t: any) =>
-    !taskIsNotice(t) && recurringDueOnWeekday(t, yIdx));
+    !taskIsNotice(t) && recurringDueOnWeekday(t, yIdx) && !recurringIsSkipped(t.id, null, ySkips));
 
   if (!overdueTasks.length && !recDue.length) {
     return { skip: 'Няма просрочени задачи (нито от бюлетина, нито постоянни за ' + yISO + ')' };
@@ -398,10 +443,12 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
      Ключът на taskStats е KIND+ID, не голото id: двете таблици имат
      собствени uuid пространства и байтово съвпадение е малко вероятно, но
      ключ, който зависи от това, е ключ, който чака да сгреши. */
-  const addTask = (t: any, kind: string, dueISO: string, isDone: (s: string) => boolean) => {
-    const scope = (Array.isArray(t.target_stores) && t.target_stores.length)
+  const addTask = (t: any, kind: string, dueISO: string, isDone: (s: string) => boolean, skipStores?: string[]) => {
+    /* skipStores — обектите, изключени за седмицата (само постоянни): не са
+       дължими, тоест не са нито „пропуснали", нито част от total. */
+    const scope = ((Array.isArray(t.target_stores) && t.target_stores.length)
       ? stores.filter(s => t.target_stores.indexOf(s) >= 0)
-      : stores;
+      : stores).filter(s => !skipStores || skipStores.indexOf(s) < 0);
     const groups = ((Array.isArray(t.report_groups) && t.report_groups.length)
       ? t.report_groups : ['controlling']).slice();
     if (kind === 'regular' && t.created_by) groups.push('creator:' + t.created_by);
@@ -436,7 +483,7 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
       if (c.recurring_task_id !== t.id || c.store_name !== s || c.status !== 'done') return false;
       return win ? win.indexOf(c.completion_date || '') >= 0
                  : (c.completion_date || null) === yISO;
-    }));
+    }), recurringSkipStores(t.id, ySkips));
   }
 
   if (!items.length) return { skip: 'Всички просрочени задачи са отметнати' };
@@ -526,9 +573,14 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
     oneTime = (tasks || []).filter((t: any) => !taskIsNotice(t) && dueDatesOf(t).indexOf(bg.dateStr) >= 0);
   }
 
+  /* Изключванията за СЕДМИЦАТА НА ДНЕС. Изключена за всички → няма push;
+     за обект → този обект не получава напомняне (виж цикъла по byStore). */
+  const skips = await loadSkipsForWeek(supabase, iso);
+
   const { data: recs } = await supabase
     .from('recurring_tasks').select('*').eq('active', true);
-  const recToday = (recs || []).filter((t: any) => !taskIsNotice(t) && recurringDueOnWeekday(t, bg.weekdayIdx));
+  const recToday = (recs || []).filter((t: any) =>
+    !taskIsNotice(t) && recurringDueOnWeekday(t, bg.weekdayIdx) && !recurringIsSkipped(t.id, null, skips));
 
   const inWindow = (t: any, isRec: boolean) => {
     const slot = slotFor(isRec ? minutesOf(t.due_time) : null);
@@ -573,6 +625,7 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
       ? stores.filter(s => d.t.target_stores.indexOf(s) >= 0)
       : stores;
     for (const s of scope) {
+      if (d.isRec && recurringIsSkipped(d.t.id, s, skips)) continue;
       if (doneFor(d, s)) continue;
       if (!byStore[s]) byStore[s] = { slot: d.slot, lines: [] };
       byStore[s].lines.push(d.t.title + (d.isRec && d.t.due_time ? ' (до ' + String(d.t.due_time).slice(0, 5) + ')' : ''));
@@ -606,11 +659,16 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
   const winStart = nowMin - 15;
   const stores = await reportableStores(supabase);
 
+  /* Изключванията за СЕДМИЦАТА НА ДНЕС. Изключена за всички → няма писмо;
+     за обект → обектът не е нито „подал", нито „не е подал" (виж scope). */
+  const skips = await loadSkipsForWeek(supabase, isoWeekOf(bg.dateStr));
+
   const { data: recs } = await supabase
     .from('recurring_tasks').select('*').eq('active', true);
 
   const todayTasks = (recs || []).filter((t: any) =>
-    !taskIsNotice(t) && recurringDueOnWeekday(t, bg.weekdayIdx) && minutesOf(t.due_time) !== null);
+    !taskIsNotice(t) && recurringDueOnWeekday(t, bg.weekdayIdx) && minutesOf(t.due_time) !== null
+    && !recurringIsSkipped(t.id, null, skips));
 
   const due: { t: any; slot: number }[] = [];
   for (const t of todayTasks) {
@@ -630,9 +688,11 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
      обратното и мястото ѝ е в списъка „не са подали". */
   const entries: any[] = [];
   for (const d of due) {
-    const scope = (Array.isArray(d.t.target_stores) && d.t.target_stores.length)
+    /* Изключените за седмицата обекти излизат от обхвата. Изключени ли са
+       ВСИЧКИ в обхвата — scope е празен и писмо за задачата няма. */
+    const scope = ((Array.isArray(d.t.target_stores) && d.t.target_stores.length)
       ? stores.filter(s => d.t.target_stores.indexOf(s) >= 0)
-      : stores;
+      : stores).filter(s => !recurringIsSkipped(d.t.id, s, skips));
     if (!scope.length) continue;
     const submitted: any[] = [];
     const missing: string[] = [];
