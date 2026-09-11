@@ -11,6 +11,7 @@ var BUL_PUB = BUL_SB + '/storage/v1/object/public/' + BUL_BKT + '/';
 var bulActiveDept = 'trade';
 var curBul = null; var bulTasks = []; var bulComps = [];
 var recurringTasks = []; var recurringComps = []; var subtaskComps = [];
+var bulSkips = []; /* recurring_task_skips за седмицата на curBul — виж bulSkipWeek() */
 var bulPromotions = [];
 var bulMode = 'view'; var bulSaveT = null; var dragInfo = null;
 var bulSelectedId = null; /* избран ръчно бюлетин (превключвател) - null = автоматично поведение (последен) */
@@ -283,6 +284,212 @@ function calNoticeRowHtml(t,kind){
   if(t.description)h+='<div style="font-size:11px;color:#64748b;margin:0 0 4px 16px;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
   return h;
 }
+/* ─── ПОСТОЯННА ЗАДАЧА, ИЗКЛЮЧЕНА ЗА СЕДМИЦАТА ─────────────────
+   Седмицата е тази на ПОКАЗАНИЯ бюлетин, не днешната: админ, превключил на
+   минала седмица, вижда изключванията на минала седмица. Ключът минава през
+   понеделника на curBul, за да е същият, който смятат „Днес", банерът и
+   едж функциите от дата (виж recurringSkipWeekOf() в shared.js).
+   Изключената задача НЕ се крие (правило 11): за обекта е сив ред без
+   чекбокс, с бадж. Глобалният изглед я сивее само при глобално изключване;
+   магазинното вади обекта от брояча X/18, но задачата си остава. */
+function bulSkipWeek(){
+  return recurringSkipWeekOf(curBul ? weekDays(curBul.week_number,curBul.year)[0] : new Date());
+}
+/* Обектът, спрямо който се гледа: null в глобален изглед. */
+function bulSkipViewStore(){
+  if(isGlobal()) return null;
+  return (currentUser&&currentUser.store_name)||null;
+}
+/* Текстът на баджа или ''. store=null е глобалният изглед: при глобално
+   изключване „тази седмица", иначе списъкът с изключените обекти. */
+function recSkipLabel(taskId,store){
+  if(recurringIsSkipped(taskId,store,bulSkips)) return 'Не се изисква тази седмица';
+  if(store) return '';
+  var ss=recurringSkipStores(taskId,bulSkips);
+  return ss.length ? 'Не се изисква: '+ss.join(', ') : '';
+}
+/* Причината и кой е изключил — в title, за да не удължава реда. Обектът
+   вижда само редовете, които го засягат; глобалният изглед — всички. */
+function recSkipReasonTitle(taskId,store){
+  var id=String(taskId);
+  return bulSkips.filter(function(s){
+    if(!s||String(s.recurring_task_id)!==id) return false;
+    return !store||s.store_name===null||s.store_name===undefined||s.store_name===store;
+  }).map(function(s){
+    var who=(s.store_name===null||s.store_name===undefined)?'Всички обекти':s.store_name;
+    return who+(s.reason?': '+s.reason:'')+(s.created_by?' ('+s.created_by+')':'');
+  }).join('\n');
+}
+function recSkipBadgeHtml(taskId,store){
+  var lbl=recSkipLabel(taskId,store);
+  if(!lbl) return '';
+  return '<span class="rec-skip-badge" title="'+escAttr(recSkipReasonTitle(taskId,store))+'" style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1;white-space:nowrap;">⏸ '+esc(lbl)+'</span>';
+}
+/* Ред в СЕДМИЧНИЯ КАЛЕНДАР за изключена задача — по модела на
+   calNoticeRowHtml: без чекбокс и без брояч, защото за този обект (или за
+   никого) няма какво да се отмята тази седмица. */
+function calSkippedRowHtml(t,store){
+  var h='<div class="rec-skip-row" style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
+  h+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Постоянна задача — не се изисква тази седмица">🔁</span>';
+  h+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;color:#94a3b8;">'+esc(t.title||'')+' '+recSkipBadgeHtml(t.id,store)+'</span>';
+  h+='</div>';
+  return h;
+}
+
+/* ─── ИЗКЛЮЧВАНЕ / ВРЪЩАНЕ (само canEdit) ──────────────────────
+   Баджът за редактора е с КОНТРОЛИ: при магазинно изключване всеки обект
+   има ✕, който трие САМО своя ред; при глобално — един „Върни". Двете
+   съжителстват, ако някой изключи задачата глобално, след като вече е
+   имало магазинни редове — тогава се виждат и двете, нищо не се крие.
+   След всеки запис/триене изключванията се ТЕГЛЯТ наново от базата
+   (bulReloadSkips), не се кърпят в паметта: иначе отворен отдавна таб или
+   втори админ виждат различно от базата — точно механизмът зад дублираните
+   отметки от 10.09.2026. */
+function recSkipEditBadgeHtml(t){
+  var h='';
+  var btnCss='border:none;background:none;color:#dc2626;cursor:pointer;font-size:11px;font-weight:700;padding:0 0 0 3px;line-height:1;';
+  var pill='font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#f1f5f9;color:#64748b;border:1px solid #cbd5e1;white-space:nowrap;';
+  if(recurringIsSkipped(t.id,null,bulSkips)){
+    h+='<span class="rec-skip-badge" title="'+escAttr(recSkipReasonTitle(t.id,null))+'" style="'+pill+'">⏸ Не се изисква тази седмица</span>';
+    h+='<button class="rec-unskip-all" data-rid="'+escAttr(t.id)+'" onclick="unskipRecurring(this.dataset.rid,null,this)" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Върни</button>';
+  }
+  var ss=recurringSkipStores(t.id,bulSkips);
+  if(ss.length){
+    h+='<span class="rec-skip-badge rec-skip-stores" title="'+escAttr(recSkipReasonTitle(t.id,null))+'" style="'+pill+'">⏸ Не се изисква: '+ss.map(function(s){
+      return '<span class="rec-skip-store">'+esc(s)+'<button class="rec-unskip-store" data-rid="'+escAttr(t.id)+'" data-store="'+escAttr(s)+'" title="Върни за '+escAttr(s)+'" onclick="unskipRecurring(this.dataset.rid,this.dataset.store,this)" style="'+btnCss+'">✕</button></span>';
+    }).join(', ')+'</span>';
+  }
+  return h;
+}
+/* Презарежда изключванията за показаната седмица и прерисува. */
+function bulReloadSkips(){
+  return loadRecurringSkips(bulSkipWeek()).then(function(rows){
+    bulSkips=Array.isArray(rows)?rows:[];
+    renderBulletin();
+  });
+}
+function closeRecurringSkipModal(){ var e=document.getElementById('rsk-modal-ov'); if(e)e.remove(); }
+function openRecurringSkipModal(taskId){
+  if(!canEdit()||!curBul) return;
+  var t=recurringTasks.find(function(x){ return String(x.id)===String(taskId); });
+  if(!t) return;
+  if(recurringIsSkipped(t.id,null,bulSkips)){ toast('Задачата вече е изключена за всички обекти тази седмица','#d97706'); return; }
+  /* Същият източник на обекти като брояча X/18 — reportableStoresCache,
+     стеснен до target_stores на задачата, ако тя не е за всички. */
+  loadReportableStores().then(function(reach){
+    var scope=(t.target_stores&&t.target_stores.length)
+      ? t.target_stores.filter(function(s){ return reach.indexOf(s)>=0; })
+      : reach.slice();
+    var already=recurringSkipStores(t.id,bulSkips);
+    var wkDays=weekDays(curBul.week_number,curBul.year);
+    var chips=scope.map(function(s){
+      var was=already.indexOf(s)>=0;
+      return '<button type="button" class="rsk-chip" data-store="'+escAttr(s)+'" data-on="0"'+(was?' disabled title="Вече е изключен за тази седмица"':'')+' onclick="recSkipChipToggle(this)" style="border:1px solid '+(was?'#e2e8f0':'#cbd5e1')+';background:'+(was?'#f1f5f9':'#fff')+';color:'+(was?'#94a3b8':'#475569')+';border-radius:20px;padding:4px 11px;font-size:12px;cursor:'+(was?'default':'pointer')+';">'+(was?'✓ ':'')+esc(s)+'</button>';
+    }).join('');
+    var existing=document.getElementById('rsk-modal-ov'); if(existing) existing.remove();
+    var ov=document.createElement('div');
+    ov.className='bov open'; ov.id='rsk-modal-ov';
+    ov.innerHTML='<div class="bmod" style="width:460px;">'+
+      '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">⏸ Не за тази седмица</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(t.title||'')+' · Седмица '+curBul.week_number+' ('+fmtD(wkDays[0])+'–'+fmtD(wkDays[6])+')</div>'+
+      '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:6px;cursor:pointer;"><input type="radio" name="rsk-mode" id="rsk-mode-all" value="all" checked> Всички обекти</label>'+
+      '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:8px;cursor:pointer;"><input type="radio" name="rsk-mode" id="rsk-mode-stores" value="stores"> Само избраните обекти</label>'+
+      '<div id="rsk-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">'+(chips||'<span style="font-size:12px;color:#94a3b8;">Няма обекти в обхвата на задачата.</span>')+'</div>'+
+      '<label class="fl">Причина (по избор)</label>'+
+      '<textarea class="fi" id="rsk-reason" rows="2" placeholder="Напр. инвентаризация, ремонт..."></textarea>'+
+      '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Задачата остава активна. Следващата седмица важи отново.</div>'+
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+        '<button onclick="closeRecurringSkipModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+        '<button id="rsk-save" data-rid="'+escAttr(t.id)+'" onclick="submitRecurringSkip(this.dataset.rid)" style="border:none;background:#475569;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Запиши</button>'+
+      '</div></div>';
+    document.body.appendChild(ov);
+  });
+}
+/* Чип за обект. Избор на чип превключва и режима на „Само избраните" —
+   иначе човек отбелязва обекти, а записът тръгва за всички. */
+function recSkipChipToggle(btn){
+  if(btn.disabled) return;
+  var on=btn.getAttribute('data-on')!=='1';
+  btn.setAttribute('data-on',on?'1':'0');
+  btn.style.background=on?'#eff6ff':'#fff';
+  btn.style.borderColor=on?'#2563eb':'#cbd5e1';
+  btn.style.color=on?'#1e40af':'#475569';
+  btn.style.fontWeight=on?'700':'400';
+  if(on){ var r=document.getElementById('rsk-mode-stores'); if(r) r.checked=true; }
+}
+function submitRecurringSkip(taskId){
+  var btn=document.getElementById('rsk-save');
+  if(!btn||btn.disabled||!curBul) return;
+  var allR=document.getElementById('rsk-mode-all');
+  var isAll=!!(allR&&allR.checked);
+  var picked=Array.prototype.slice.call(document.querySelectorAll('#rsk-chips .rsk-chip[data-on="1"]'))
+    .filter(function(c){ return !c.disabled; })
+    .map(function(c){ return c.getAttribute('data-store'); });
+  if(!isAll&&!picked.length){ toast('Избери поне един обект или „Всички обекти"','#d97706'); return; }
+  var reasonEl=document.getElementById('rsk-reason');
+  var reason=reasonEl?(reasonEl.value||'').trim():'';
+  var wk=bulSkipWeek();
+  var wkDays=weekDays(curBul.week_number,curBul.year);
+  var lo=toLocalISO(wkDays[0]), hi=toLocalISO(wkDays[6]);
+  var label=btn.textContent;
+  var unlock=function(){ btn.disabled=false; btn.textContent=label; };
+  /* Заключено ПРЕДИ първата заявка — двоен клик иначе праща два POST-а,
+     а вторият се връща с 409 и изглежда като грешка. */
+  btn.disabled=true; btn.textContent='⏳ Записване...';
+  /* Отметките за седмицата — ПРЯСНО от базата, не recurringComps: той е за
+     показаната седмица, но може да е остарял (друг таб, друго устройство).
+     Отметките НЕ се трият — само се казва, че ще спрат да се броят. */
+  sbGet('task_completions','recurring_task_id=eq.'+taskId+'&status=eq.done&completion_date=gte.'+lo+'&completion_date=lte.'+hi+'&select=store_name,completion_date').then(function(rows){
+    var hit=(Array.isArray(rows)?rows:[]).filter(function(c){ return isAll||picked.indexOf(c.store_name)>=0; });
+    if(hit.length){
+      var per={}; hit.forEach(function(c){ per[c.store_name]=(per[c.store_name]||0)+1; });
+      var list=Object.keys(per).map(function(s){ return s+(per[s]>1?' ×'+per[s]:''); }).join(', ');
+      if(!confirm('Вече има '+hit.length+(hit.length===1?' отметка':' отметки')+' за тази седмица: '+list+'.\n\nОтметките остават в базата, но няма да се броят, докато задачата е изключена. Да продължа ли?')){ unlock(); return; }
+    }
+    var who=currentUser.display_name||currentUser.email;
+    var base={recurring_task_id:taskId, year:wk.year, week_number:wk.week, reason:reason||null, created_by:who};
+    var body=isAll ? [Object.assign({store_name:null},base)]
+                   : picked.map(function(s){ return Object.assign({store_name:s},base); });
+    return sbPost('recurring_task_skips',body).then(function(res){
+      if(res&&res.ok){
+        closeRecurringSkipModal();
+        toast(isAll?'⏸ Изключена за всички обекти тази седмица':'⏸ Изключена за: '+picked.join(', '));
+        return bulReloadSkips();
+      }
+      /* 409 = частичните уникални индекси: някой друг вече е изключил
+         (задачата, седмицата[, обекта]). Целият масив се отхвърля заедно,
+         затова се презарежда и човек вижда реалното състояние. */
+      if(res&&res.status===409){
+        closeRecurringSkipModal();
+        toast('Вече е изключена от друг — показвам актуалното състояние','#d97706');
+        return bulReloadSkips();
+      }
+      unlock();
+      toast('Грешка при изключването: '+sbErrMsg(res),'#dc2626');
+    });
+  });
+}
+/* store=null → глобалният ред; иначе САМО редът на този обект. Трие по
+   (задача, седмица[, обект]) — не по id, за да не зависи от това колко
+   стар е bulSkips в паметта. */
+function unskipRecurring(taskId,store,btn){
+  if(!canEdit()||!curBul) return;
+  if(btn){ if(btn.disabled) return; btn.disabled=true; }
+  var wk=bulSkipWeek();
+  var q='recurring_task_id=eq.'+taskId+'&year=eq.'+wk.year+'&week_number=eq.'+wk.week+
+        (store?'&store_name=eq.'+encodeURIComponent(store):'&store_name=is.null');
+  return sbDelete('recurring_task_skips',q).then(function(res){
+    if(!res||!res.ok){
+      if(btn) btn.disabled=false;
+      toast('Грешка при връщането: '+sbErrMsg(res),'#dc2626');
+      return;
+    }
+    /* count 0 = вече е върната от друг. Не е грешка — презареждането
+       показва истината. count null = броят е неизвестен, не „нищо". */
+    toast(res.count===0 ? 'Вече е върната — обновявам' : (store?'↩ Върната за '+store:'↩ Върната за всички обекти'), res.count===0?'#d97706':undefined);
+    return bulReloadSkips();
+  });
+}
 function calItemStatusHtml(itemId,kind,targetStores,dateStr,windowDates){
   var compsArr = kind==='recurring' ? recurringComps : bulComps;
   var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
@@ -314,6 +521,14 @@ function calItemStatusHtml(itemId,kind,targetStores,dateStr,windowDates){
        обекти без достъп. Не връщаме празно: изчезнала контрола изглежда като
        счупен рендер (правило 11). Тире с обяснение казва истината. */
     if(!scope.length) return '<span title="Няма обект с достъп до тази задача" style="font-size:11px;font-weight:700;color:#94a3b8;margin-left:4px;white-space:nowrap;cursor:help;">—</span>';
+    /* Изключен за седмицата обект не е дължим — излиза от ЗНАМЕНАТЕЛЯ си,
+       не остава като вечно „неизпълнил". Отделно от проверката горе, защото
+       причината е друга и заслужава друго обяснение, ако не остане никой. */
+    if(kind==='recurring'){
+      var skipped=recurringSkipStores(itemId,bulSkips);
+      if(skipped.length) scope=scope.filter(function(s){ return skipped.indexOf(s)<0; });
+      if(!scope.length) return '<span title="Не се изисква от нито един обект тази седмица" style="font-size:11px;font-weight:700;color:#94a3b8;margin-left:4px;white-space:nowrap;cursor:help;">⏸</span>';
+    }
     var done = scope.filter(function(s){
       return compsArr.some(function(c){ return c[idField]===itemId && c.store_name===s && dateMatches(c) && (c.status||'done')==='done'; });
     }).length;
@@ -826,12 +1041,14 @@ function loadBulletin(){
     var promoQ=promoQueryForCurBul();
     return Promise.all([
       sbGet('bulletin_promotions',promoQ).catch(function(){return [];}),
-      sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').catch(function(){return [];})
+      sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').catch(function(){return [];}),
+      loadRecurringSkips(bulSkipWeek()).catch(function(){return [];})
     ]);
   }).then(function(results){
     if(!results)return; /* curBul беше null - вече показахме renderBulEmpty() по-горе */
     bulPromotions=Array.isArray(results[0])?results[0]:[];
     recurringTasks=Array.isArray(results[1])?results[1]:[];
+    bulSkips=Array.isArray(results[2])?results[2]:[];
     sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=sort_order.asc,due_date.asc').then(function(t){
       bulTasks=Array.isArray(t)?t:[];
       if(!bulTasks.length){
@@ -1075,6 +1292,10 @@ function renderBulView(){
       });
       recItems.forEach(function(t){
         if(taskIsNotice(t)){ html+=calNoticeRowHtml(t,'recurring'); return; }
+        /* Изключена за седмицата — за ТОЗИ обект, а в глобален изглед само
+           ако е изключена за всички. Ранният return минава покрай чекбокса
+           и брояча, точно както при notice. */
+        if(recurringIsSkipped(t.id,bulSkipViewStore(),bulSkips)){ html+=calSkippedRowHtml(t,bulSkipViewStore()); return; }
         var recDateScoped=recurringIsDateScoped(t);
         var recCdate=recDateScoped?dateStr:null;
         /* Прозорец: отметка на КОЙ ДА Е ден от прозореца затваря задачата за
@@ -2330,7 +2551,16 @@ function collectTodayDeadlineItems(cb){
   /* notice няма срок за спазване — push за нея е известие за нищо. */
   var mainTasks = bulTasks.filter(function(t){ return !taskIsNotice(t) && taskIsDueOnDate(t, todayStr); });
   var recTasks = recurringTasks.filter(function(t){ return !taskIsNotice(t) && recurringIsDueToday(t); });
-  sbGet('task_subtasks','due_date=eq.'+todayStr).then(function(subs){
+  /* Изключванията за ДНЕШНАТА седмица, не за показания бюлетин (bulSkips) —
+     админ може да гледа друга седмица, а известието е за днес. Махат се
+     само ГЛОБАЛНИТЕ: известието отива до всички, тоест „не за Кърджали"
+     няма как да се изрази в него. */
+  Promise.all([
+    sbGet('task_subtasks','due_date=eq.'+todayStr),
+    loadRecurringSkips(recurringSkipWeekOf(new Date()))
+  ]).then(function(res){
+    var subs = res[0], todaySkips = Array.isArray(res[1]) ? res[1] : [];
+    recTasks = recTasks.filter(function(t){ return !recurringIsSkipped(t.id, null, todaySkips); });
     var subTasks = Array.isArray(subs) ? subs : [];
     /* Всеки елемент носи отдел + час (ако има), вместо голо заглавие -
        за да можем да групираме по отдел и подредим по спешност/час,
@@ -2568,7 +2798,10 @@ function printSection(what){
       });
       rdt.forEach(function(t){
         var dc=dotC[t.department]||'#64748b';
-        s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span style="font-weight:600;">🔁 '+esc(t.title||'')+'</span></div>';
+        /* Изключената остава на хартията (както на екрана), но сива и с
+           етикет — печатът е чеклист, по който обектът работи. */
+        var pSkip=recurringIsSkipped(t.id,bulSkipViewStore(),bulSkips);
+        s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span style="font-weight:600;'+(pSkip?'color:#94a3b8;':'')+'">🔁 '+esc(t.title||'')+(pSkip?' <span class="p-skip" style="font-weight:400;font-size:10pt;">(⏸ не се изисква)</span>':'')+'</span></div>';
       });
       mn.forEach(function(e){
         var dc=dotC[e.dept]||'#64748b';
@@ -2634,15 +2867,22 @@ function printSection(what){
         var singleRecDatePrint = isMultiRecPrint ? null : (recTaskWeekdays(t).length ? toLocalISO(days[recTaskWeekdays(t)[0]]) : toLocalISO(new Date()));
         var rComp=(!isMultiRecPrint&&printStore)?recurringComps.find(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===printStore&&(cc.completion_date||null)===singleRecDatePrint;}):null;
         var rDone=!!rComp;
+        /* Същото правило като на екрана: квадратче за отмятане няма, щом
+           задачата не се изисква от печатащия (в глобален печат — от никого).
+           Глобалният печат носи и списъка с изключените обекти. */
+        var rSkip=recurringIsSkipped(t.id,bulSkipViewStore(),bulSkips);
+        var rSkipLbl=recSkipLabel(t.id,bulSkipViewStore());
         s+='<div class="task-row">';
-        if(isMultiRecPrint){
+        if(rSkip){
+          s+='<div class="task-cb" style="display:flex;align-items:center;justify-content:center;font-size:9pt;border-style:dashed;color:#94a3b8;">⏸</div>';
+        } else if(isMultiRecPrint){
           s+='<div class="task-cb" style="display:flex;align-items:center;justify-content:center;font-size:9pt;">📅</div>';
         } else {
           s+='<div class="task-cb" style="'+(rDone?'background:#16a34a;border-color:#16a34a;':'')+'">'+
             (rDone?'<div style="color:#fff;font-size:9pt;text-align:center;line-height:13pt;">✓</div>':'')+'</div>';
         }
         s+='<div style="flex:1;">';
-        s+='<div class="task-title">'+esc(t.title||'')+'</div>';
+        s+='<div class="task-title"'+(rSkip?' style="color:#94a3b8;"':'')+'>'+esc(t.title||'')+(rSkipLbl?' <span class="p-skip" style="font-size:9pt;font-weight:700;padding:1pt 5pt;border-radius:8pt;background:#f1f5f9;color:#64748b;border:0.5pt solid #cbd5e1;">⏸ '+esc(rSkipLbl)+'</span>':'')+'</div>';
         if(t.description)s+='<div class="task-desc">'+linkify(t.description)+'</div>';
         var dueLbl=recurringDueLabel(t);
         if(dueLbl)s+='<div class="task-due">🔁 '+esc(dueLbl)+(isMultiRecPrint?' (виж бройки по дни в календара по-горе)':'')+'</div>';
@@ -3205,6 +3445,10 @@ function loadTasksStats() {
            по-горе и в notifications.js/report.js. */
         var dRec = statRecurring.filter(function(t){
           if(t.department!==dk)return false;
+          /* Изключена за седмицата за ТОЗИ обект (или за всички) — не е
+             дължима и не влиза в знаменателя му. Останалите обекти не се
+             пипат: филтърът е по обект, не по задача. */
+          if(recurringIsSkipped(t.id,store,bulSkips))return false;
           return !t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0;
         });
         var recAll=0, recDone=0;
@@ -3327,28 +3571,34 @@ function renderRecurringTasks(dk) {
       var done = !!compObj && compObj.status==='done';
       var postponed = !!compObj && compObj.status==='postponed';
       var dueToday = recurringIsDueToday(t);
+      /* Изключена за седмицата: за обекта — сив ред без чекбокс и без
+         „Отложи"; в глобален изглед сивее само глобалното изключване, а
+         магазинното е само бадж със списъка. Виж bulSkipWeek(). */
+      var skipView = recurringIsSkipped(t.id,bulSkipViewStore(),bulSkips);
       var isFirstRec=recIdxInDept===0, isLastRec=recIdxInDept===dTasks.length-1;
-      var titleColor = done?'#94a3b8':postponed?'#b45309':'#0f172a';
-      h += '<div class="rec-task-row" style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
+      var titleColor = (done||skipView)?'#94a3b8':postponed?'#b45309':'#0f172a';
+      h += '<div class="rec-task-row" data-rec-row="'+t.id+'" style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
       if (canEdit()) {
         h += '<div style="display:flex;flex-direction:column;gap:1px;flex-shrink:0;margin-top:1px;">'+
           '<button data-rtid2="'+t.id+'" onclick="recMoveUp(this.dataset.rtid2)" '+(isFirstRec?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isFirstRec?'#f8fafc':'#fff')+';color:'+(isFirstRec?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isFirstRec?'default':'pointer')+';padding:0;">▲</button>'+
           '<button data-rtid2="'+t.id+'" onclick="recMoveDown(this.dataset.rtid2)" '+(isLastRec?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isLastRec?'#f8fafc':'#fff')+';color:'+(isLastRec?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isLastRec?'default':'pointer')+';padding:0;">▼</button>'+
           '</div>';
       }
-      if (isMultiRec) {
+      if (skipView) {
+        h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;color:#94a3b8;" title="Не се изисква тази седмица">⏸</div>';
+      } else if (isMultiRec) {
         h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
       } else {
         h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" data-cdate="'+(singleRecDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"' + (winComp?recurringWindowDoneAttr(winComp):bulLockAttr(singleRecDate,t.linked_module)) + ' ' +
           'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + (winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleRecDate,t.linked_module)) + '">';
       }
       h += '<div style="flex:1;">';
-      h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done,singleRecDate)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
+      h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done&&!skipView,singleRecDate)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+'</div>';
       if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">' + linkify(t.description) + '</div>';
       var dueLbl = recurringDueLabel(t);
       if (isMultiRec) {
         h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🔁 Дни: '+dueLbl+'</div>';
-        if (!isGlobal() && store) {
+        if (!isGlobal() && store && !skipView) {
           var doneDaysCountRec = t.due_weekdays.filter(function(idx){
             var d2 = weekdayIdxToDate(idx);
             return recurringComps.some(function(c){return c.recurring_task_id===t.id&&c.store_name===store&&c.status==='done'&&(c.completion_date||null)===d2;});
@@ -3358,14 +3608,14 @@ function renderRecurringTasks(dk) {
           h += '<div style="font-size:10px;color:#94a3b8;margin-top:2px;">Живи бройки по дни виж в 📅 Седмичен календар по-горе</div>';
         }
       } else if (dueLbl) {
-        h += '<div style="font-size:10px;color:'+(dueToday&&!done?'#d97706':'#94a3b8')+';margin-top:2px;">🔁 '+dueLbl+(dueToday&&!done?' (днес!)':'')+'</div>';
+        h += '<div style="font-size:10px;color:'+(dueToday&&!done&&!skipView?'#d97706':'#94a3b8')+';margin-top:2px;">🔁 '+dueLbl+(dueToday&&!done&&!skipView?' (днес!)':'')+'</div>';
       }
       if(isGlobal()&&t.target_stores&&t.target_stores.length)h+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🏬 Само за: '+t.target_stores.map(esc).join(', ')+'</div>';
       if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))h+=renderCompletionExtras(compObj);
       h += renderRecurringAttachments(t);
       h += '</div>';
       var showBtns='';
-      if(!isGlobal()&&!isMultiRec&&!done){
+      if(!isGlobal()&&!isMultiRec&&!done&&!skipView){
         if(postponed)showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
         else showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
       }
@@ -3373,6 +3623,10 @@ function renderRecurringTasks(dk) {
       if (canEdit()) {
         h += '<div style="display:flex;gap:4px;">';
         h += '<button onclick="openEditRecurringModal(\'' + t.id + '\')" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#2563eb;">✏️</button>';
+        /* Само за ТАЗИ седмица — различно от „⏸ Спри" до него, което
+           деактивира задачата изобщо. Скрит е при глобално изключване: там
+           няма какво повече да се изключи, а връщането е с „Върни". */
+        if (!recurringIsSkipped(t.id,null,bulSkips)) h += '<button class="rec-skip-open" data-rid="'+t.id+'" onclick="openRecurringSkipModal(this.dataset.rid)" title="Задачата не се изисква тази седмица — за всички или за избрани обекти" style="border:1px solid #cbd5e1;background:#f8fafc;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#475569;white-space:nowrap;">Не за тази седмица</button>';
         h += '<button data-rid="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'recurring_task\',this.dataset.rid,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#d97706;">🔔</button>';
         h += '<button onclick="toggleRecurringActive(\'' + t.id + '\',' + (!t.active) + ')" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#64748b;">' + (t.active?'⏸ Спри':'▶ Активирай') + '</button>';
         h += '<button onclick="deleteRecurring(\'' + t.id + '\')" style="border:1px solid #fecaca;background:#fff5f5;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#dc2626;">✕</button>';

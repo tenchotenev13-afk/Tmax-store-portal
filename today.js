@@ -45,13 +45,19 @@ function loadTodayDashboard(){
 
   Promise.all([
     sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1'),
-    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
+    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc'),
+    loadRecurringSkips(recurringSkipWeekOf(new Date()))
   ]).then(function(results){
     var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
+    /* Изключванията за ТЕКУЩАТА седмица (recurring_task_skips). Глобалното
+       маха задачата още на входа — както notice долу. Магазинното минава
+       нататък като skip_stores на елемента и изважда САМО този обект от
+       знаменателя му (todayItemInScope). */
+    var todaySkips = Array.isArray(results[2]) ? results[2] : [];
     /* Задачите „Само за информация" отпадат ТУК, на входа — таблото ги брои
        и в числителя, и в знаменателя, а те нямат отмятания и нямат как да се
        изпълнят. Виж taskIsNotice() в shared.js за пълния обхват. */
-    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
+    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t) && !recurringIsSkipped(t.id, null, todaySkips); });
     var recurringToday = allRecurring.filter(function(t){ return recurringIsDueToday(t); });
     /* "Текущи/без срок" — нямат нито ден, нито час; recurringIsDueToday() ги връща false,
        затова наборите са естествено разделени, без припокриване */
@@ -71,9 +77,9 @@ function loadTodayDashboard(){
          който изобщо не важи (recurring нямат target_stores - важат за всички) */
       var items = [];
       regularToday.forEach(function(t){ items.push({ id:t.id, title:t.title, department:t.department, kind:'regular', target_stores:t.target_stores||null }); });
-      recurringToday.forEach(function(t){ items.push({ id:t.id, title:t.title, department:t.department, kind:'recurring', target_stores:t.target_stores||null }); });
+      recurringToday.forEach(function(t){ items.push({ id:t.id, title:t.title, department:t.department, kind:'recurring', target_stores:t.target_stores||null, skip_stores:recurringSkipStores(t.id, todaySkips) }); });
 
-      var noDueItems = recurringNoDue.map(function(t){ return { id:t.id, title:t.title, department:t.department, kind:'recurring' }; });
+      var noDueItems = recurringNoDue.map(function(t){ return { id:t.id, title:t.title, department:t.department, kind:'recurring', skip_stores:recurringSkipStores(t.id, todaySkips) }; });
 
       if (!items.length && !noDueItems.length) { wrap.innerHTML = todayEmptyHtml('Няма задачи (нито от Бюлетин, нито постоянни).'); return; }
 
@@ -205,10 +211,15 @@ function todayEmptyHtml(msg){
    comps: [{item_id, kind, store_name}]
    Само задачите, за които store е в обхват (target_stores празно/null = всички,
    или store е изрично включен), влизат в знаменателя на конкретния магазин. */
+/* Важи ли елементът за обекта днес: в обхвата на target_stores И не е
+   изключен за седмицата за него (skip_stores — само постоянни задачи).
+   Едно условие за процента и за разгънатия списък, за да не се разминат. */
+function todayItemInScope(it, store){
+  if (it.skip_stores && it.skip_stores.indexOf(store) >= 0) return false;
+  return !it.target_stores || !it.target_stores.length || it.target_stores.indexOf(store)>=0;
+}
 function todayStoreStats(store, items, comps){
-  var scoped = items.filter(function(it){
-    return !it.target_stores || !it.target_stores.length || it.target_stores.indexOf(store)>=0;
-  });
+  var scoped = items.filter(function(it){ return todayItemInScope(it, store); });
   var total = scoped.length;
   var done = scoped.filter(function(it){
     return comps.some(function(c){ return c.item_id===it.id && c.kind===it.kind && c.store_name===store; });
@@ -511,6 +522,8 @@ function todayPhotoQueueSectionHtml(){
 }
 
 function todayNoDueRowsHtml(noDueItems, comps, storeName){
+  /* Изключената за седмицата за ТОЗИ обект не е „текуща" за него. */
+  noDueItems = noDueItems.filter(function(it){ return !(it.skip_stores && it.skip_stores.indexOf(storeName) >= 0); });
   if (!noDueItems.length) return '';
   var h = '<div style="border-top:1px solid #f1f5f9;padding:10px 18px 12px;background:#fafbfc;">';
   h += '<div style="font-size:10.5px;font-weight:800;color:#94a3b8;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;">📋 Текущи / без срок — не участват в %</div>';
@@ -594,9 +607,7 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
 
     if (isExpanded) {
       h += '<div style="border-top:1px solid #f1f5f9;padding:6px 18px 14px;">';
-      var scopedItems = items.filter(function(it){
-        return !it.target_stores || !it.target_stores.length || it.target_stores.indexOf(row.name)>=0;
-      });
+      var scopedItems = items.filter(function(it){ return todayItemInScope(it, row.name); });
       scopedItems.forEach(function(it){
         var compObj = comps.find(function(c){ return c.item_id===it.id && c.kind===it.kind && c.store_name===row.name; });
         var isDone = !!compObj;

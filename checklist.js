@@ -358,10 +358,14 @@ function checklistRecurringChanges(idx) {
     sbGet('task_completions',
       'recurring_task_id=in.(' + ids.join(',') + ')' +
       '&completion_date=gte.' + weekISO[0] + '&completion_date=lte.' + weekISO[6] +
-      '&select=recurring_task_id,store_name,status,completion_date')
+      '&select=recurring_task_id,store_name,status,completion_date'),
+    /* Изключванията за ПОКАЗАНАТА седмица — ключът е от понеделника ѝ, по
+       същия начин като в Бюлетина (recurringSkipWeekOf в shared.js). */
+    loadRecurringSkips(recurringSkipWeekOf(weekDays(checklistWeek, checklistYear)[0]))
   ]).then(function (r) {
     var tasks = Array.isArray(r[0]) ? r[0] : [];
     var comps = Array.isArray(r[1]) ? r[1] : [];
+    var skips = Array.isArray(r[2]) ? r[2] : [];
     var taskById = {};
     tasks.forEach(function (t) { taskById[t.id] = t; });
 
@@ -372,11 +376,22 @@ function checklistRecurringChanges(idx) {
       var plan = checklistPortalPlan(m, taskById[id], mine, weekISO);
       if (!plan) return;
       checklistStores.forEach(function (store) {
-        var val = checklistPortalValueFor(plan.mode, plan.hits[store], plan.denom);
+        /* Задачата не се изисква от обекта тази седмица (recurring_task_skips,
+           за всички или само за него) → клетката е ПРАЗНА, не „не"/„0/5".
+           Иначе контролингът получава провал за работа, която не е искана.
+           Празно, а не пропуснато: ако вече е записано „не" отпреди
+           изключването, то трябва да изчезне. control_value и коментарът не
+           се пипат — те не влизат в тялото на записа изобщо. */
+        var val = recurringIsSkipped(id, store, skips) ? null
+          : checklistPortalValueFor(plan.mode, plan.hits[store], plan.denom);
         var row = idx[store + ' ' + m.key];
         /* Нищо ново → нищо не се пише. Инак всяко отваряне на седмица би
            било 36 записа в базата без нито една променена стойност. */
-        if (row && row.portal_value === val) return;
+        if (val === null) {
+          /* Липсващ ред или вече празна клетка — няма какво да се чисти, а
+             нов ред само с празно portal_value е шум в базата. */
+          if (!row || row.portal_value === null || row.portal_value === undefined || row.portal_value === '') return;
+        } else if (row && row.portal_value === val) return;
         changes.push({ store: store, metric_key: m.key, value: val });
       });
     });

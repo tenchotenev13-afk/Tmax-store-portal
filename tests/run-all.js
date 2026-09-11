@@ -134,7 +134,9 @@ const TESTS = [
   'task-completion-duplicates.test.js',
   'co-elapsed-backdated.test.js',
   'co-detail-modal.test.js',
-  'co-new-for-fulfiller.test.js'
+  'co-new-for-fulfiller.test.js',
+  'recurring-task-skips.test.js',
+  'recurring-task-skips-consumers.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

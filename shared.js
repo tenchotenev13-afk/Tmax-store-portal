@@ -227,6 +227,57 @@ function isReportableStore(name){
    тук за първите две. */
 function taskIsNotice(t){ return !!t && t.task_type === 'notice'; }
 
+/* ПОСТОЯННА ЗАДАЧА, ИЗКЛЮЧЕНА ЗА СЕДМИЦА (recurring_task_skips)
+   ─────────────────────────────────────────────────────────────
+   Ред в таблицата значи „тази седмица задачата не се изисква" — за всички
+   обекти (store_name NULL) или само за посочения. Задачата остава активна.
+   Изключеният обект излиза от СОБСТВЕНИЯ си знаменател и от известията;
+   останалите обекти не се пипат.
+
+   КЛЮЧЪТ ЗА СЕДМИЦА се смята от ДАТА, по един и същ начин навсякъде: ISO
+   седмица, а годината е тази на ЧЕТВЪРТЪКА от седмицата. Не
+   new Date().getFullYear() — около Нова година двете се разминават:
+   01.01.2027 е седмица 53 на 2026, а 29.12.2025 е седмица 1 на 2026.
+   Бюлетинът подава понеделника на curBul и за всеки валиден бюлетин
+   получава точно (curBul.year, curBul.week_number) — weekDays() в
+   bulletin.js е ISO.
+   Формулата е тази на weekNum() от bulletin.js, с тази разлика, че връща и
+   годината, спрямо която е смятана седмицата. */
+function recurringSkipWeekOf(d){
+  var x=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  x.setDate(x.getDate()+3-((x.getDay()+6)%7)); /* четвъртъкът на седмицата */
+  var y=x.getFullYear(), w1=new Date(y,0,4);
+  return {year:y, week:1+Math.round(((x-w1)/86400000-3+((w1.getDay()+6)%7))/7)};
+}
+/* skips е масивът за ЕДНА седмица, зареден от викащия. store=null (или
+   празно) пита само за глобално изключване — така глобалният изглед на
+   календара крие задачата единствено когато тя не важи за никого. */
+function recurringIsSkipped(taskId, store, skips){
+  if(!Array.isArray(skips)||!skips.length) return false;
+  var id=String(taskId);
+  return skips.some(function(s){
+    if(!s||String(s.recurring_task_id)!==id) return false;
+    return s.store_name===null||s.store_name===undefined||(!!store&&s.store_name===store);
+  });
+}
+/* Обектите с МАГАЗИННО изключване на задачата — за баджа „Не се изисква:
+   Кърджали, Раднево" и за изваждането им от знаменателите. Глобалният ред не
+   е обект и не влиза тук; за него е recurringIsSkipped(id, null, skips). */
+function recurringSkipStores(taskId, skips){
+  if(!Array.isArray(skips)) return [];
+  var id=String(taskId);
+  return skips.filter(function(s){
+    return !!s&&String(s.recurring_task_id)===id&&s.store_name!==null&&s.store_name!==undefined;
+  }).map(function(s){ return s.store_name; });
+}
+/* Изключванията за ЕДНА седмица — wk е резултатът от recurringSkipWeekOf().
+   Една заявка, за да не се разминат четирите файла, които я ползват.
+   Провал на заявката: sbGet показва червен toast и връща [], тоест всичко
+   се брои като преди изключванията — губи се функционалност, не данни. */
+function loadRecurringSkips(wk){
+  return sbGet('recurring_task_skips','year=eq.'+wk.year+'&week_number=eq.'+wk.week+'&select=id,recurring_task_id,store_name,reason,created_by');
+}
+
 /* Списък магазини за потребителя: null = всички, [] = само своя, [...] = назначени */
 function assignedStores(){
   if(!currentUser)return null;

@@ -290,10 +290,18 @@ function checkNewBulletinTasksBanner(){
     });
   }).catch(function(){return [];});
 
+  /* Изключената за ТЕКУЩАТА седмица за този обект (или за всички) не е
+     чакаща — банерът не бива да я предлага. Седмицата е от днешната дата,
+     по същия ключ като Бюлетина (recurringSkipWeekOf в shared.js).
+     Изключванията се теглят САМО ако има нова постоянна задача за обекта —
+     банерът тече при всеки вход, а обикновено няма какво да филтрира. */
   var recTasksPromise=sbGet('recurring_tasks','active=eq.true&created_at=gte.'+cutoffISO).then(function(rtRaw){
-    var rt=(Array.isArray(rtRaw)?rtRaw:[]).filter(function(t){return !taskIsNotice(t);});
-    return rt.filter(function(t){return notifTaskForStore(t,store);})
-             .map(function(t){return {id:t.id,title:t.title,kind:'recurring',dueDates:notifRecurringDueDates(t)};});
+    var rt=(Array.isArray(rtRaw)?rtRaw:[]).filter(function(t){return !taskIsNotice(t)&&notifTaskForStore(t,store);});
+    if(!rt.length)return [];
+    return loadRecurringSkips(recurringSkipWeekOf(new Date())).then(function(skips){
+      return rt.filter(function(t){return !recurringIsSkipped(t.id,store,skips);})
+               .map(function(t){return {id:t.id,title:t.title,kind:'recurring',dueDates:notifRecurringDueDates(t)};});
+    });
   }).catch(function(){return [];});
 
   Promise.all([bulTasksPromise,recTasksPromise]).then(function(results){
