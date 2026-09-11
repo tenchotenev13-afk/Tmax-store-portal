@@ -939,14 +939,19 @@ function bulLockRejected(cb){
 function bulDoneComp(taskId,store,dateISO){
   return bulComps.find(function(c){return c.task_id===taskId&&c.store_name===store&&c.status==='done'&&(c.completion_date||null)===dateISO;})||null;
 }
+/* Отметнато СЛЕД деня на срока — по ЛОКАЛНАТА дата на completed_at. Общо за
+   задачите (task_completions) и подзадачите (subtask_completions). */
+function bulDoneLate(comp,dueISO){
+  var at=comp&&comp.completed_at?new Date(comp.completed_at):null;
+  return !!at&&!isNaN(at.getTime())&&toLocalISO(at)>dueISO;
+}
 function bulDueLineHtml(dueISO,doneComp,overdueTxt){
   var due=new Date(dueISO+'T00:00:00');
   var t0=new Date(); t0.setHours(0,0,0,0);
   var diff=Math.ceil((due-t0)/86400000);
   var suffix, color;
   if(doneComp){
-    var at=doneComp.completed_at?new Date(doneComp.completed_at):null;
-    suffix=(at&&!isNaN(at.getTime())&&toLocalISO(at)>dueISO)?' ✓ със закъснение':'';
+    suffix=bulDoneLate(doneComp,dueISO)?' ✓ със закъснение':'';
     color='#94a3b8';
   } else {
     suffix=diff<0?overdueTxt:diff===0?' (Днес!)':diff<=2?' ('+diff+' дни)':'';
@@ -1485,7 +1490,7 @@ function renderBulView(){
         if(isGlobal()&&t.created_by)html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">👤 Поставена от: '+esc(t.created_by)+'</div>';
         if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))html+=renderCompletionExtras(compObj);
         html+=renderTaskAttachments(t);
-        html+=renderSubtasks(t.id, dk);
+        html+=renderSubtasks(t.id, dk, 'dept');
         html+='</div>';
         if(!isGlobal()&&!isMulti&&!done){
           html+='<div style="flex-shrink:0;">';
@@ -3028,7 +3033,7 @@ function renderTasksPanel() {
           h += '<div style="font-size:10px;color:#16a34a;margin-top:2px;">✓ '+esc(compInfo.completed_by||'')+'</div>';
         }
         if (compInfo && (compInfo.comment||(compInfo.photos&&compInfo.photos.length))) h += renderCompletionExtras(compInfo);
-        h += renderSubtasks(t.id, dk);
+        h += renderSubtasks(t.id, dk, 'panel');
         h += '</div>';
         h += '<div style="display:flex;gap:4px;flex-shrink:0;">';
         if (!isGlobal() && !isMulti && !isDone) {
@@ -4061,38 +4066,47 @@ function submitRecurring(dk) {
 }
 
 /* ═══════ ПОД-ЗАДАЧИ ══════════════════════════════════════════ */
-function renderSubtasks(taskId, dept) {
+/* Подзадачите на една задача се рисуват на ДВЕ места: блокът по отдел
+   (where='dept') и панелът „Задачи за седмицата" на обекта (where='panel').
+   Всеки контейнер има свое id (sub-<задача>-<where>) и общ data-sub-task, а
+   попълването минава по ВСИЧКИ контейнери на задачата. До 11.09.2026 id-то
+   беше едно (sub-<задача>) и getElementById пълнеше само първия — в панела
+   подзадачите не се виждаха изобщо. Извикване без where (след запис) само
+   презарежда вече нарисуваните контейнери; върнатият низ се пренебрегва. */
+function renderSubtasks(taskId, dept, where) {
   var store = currentUser && currentUser.store_name;
   var d = DEPTS[dept] || DEPTS.trade;
-  var containerId = 'sub-' + taskId;
   setTimeout(function(){
     sbGet('task_subtasks','task_id=eq.'+taskId+'&order=sort_order.asc').then(function(subs){
-      var el = document.getElementById(containerId);
-      if (!el) return;
+      var boxes = document.querySelectorAll('[data-sub-task="'+taskId+'"]');
+      if (!boxes.length) return;
+      var h;
       if (!Array.isArray(subs) || !subs.length) {
-        if (canEdit()) {
-          var addBtn = document.createElement('button');
-          addBtn.style.cssText = 'border:1px dashed #cbd5e1;background:none;color:#94a3b8;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;margin-top:4px;';
-          addBtn.textContent = '+ Добави под-задача';
-          addBtn.setAttribute('data-tid', taskId);
-          addBtn.setAttribute('data-dept', dept);
-          addBtn.onclick = function(){ openSubtaskModal(this.getAttribute('data-tid'), this.getAttribute('data-dept')); };
-          el.appendChild(addBtn);
-        }
+        /* innerHTML, не appendChild: след изтриване на последната подзадача
+           старият списък иначе оставаше под бутона. */
+        h = canEdit() ? '<button data-tid="'+taskId+'" data-dept="'+dept+'" onclick="openSubtaskModal(this.dataset.tid,this.dataset.dept)" style="border:1px dashed #cbd5e1;background:none;color:#94a3b8;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;margin-top:4px;">+ Добави под-задача</button>' : '';
+        Array.prototype.forEach.call(boxes, function(b){ b.innerHTML = h; });
         return;
       }
-      var h = '<div style="padding:4px 0 4px 20px;border-left:2px solid '+d.bdr+';margin-top:4px;">';
+      h = '<div style="padding:4px 0 4px 20px;border-left:2px solid '+d.bdr+';margin-top:4px;">';
       subs.forEach(function(s){
-        var done = store && subtaskComps.some(function(c){return c.subtask_id===s.id && c.store_name===store;});
-        var due = s.due_date ? new Date(s.due_date) : null;
+        /* subtask_completions няма status — всеки ред е изпълнение. */
+        var subComp = store ? (subtaskComps.find(function(c){return c.subtask_id===s.id && c.store_name===store;}) || null) : null;
+        var done = !!subComp;
+        /* +'T00:00:00' — локална полунощ. new Date('YYYY-MM-DD') е полунощ по
+           UTC и в София смяташе вчерашния срок за diff=0: ⚠️ идваше ден късно. */
+        var due = s.due_date ? new Date(String(s.due_date).slice(0,10)+'T00:00:00') : null;
         var t0 = new Date(); t0.setHours(0,0,0,0);
         var diff = due ? Math.ceil((due-t0)/86400000) : null;
         var dueColor = diff===null?'#94a3b8':diff<0?'#dc2626':diff<=1?'#d97706':'#94a3b8';
         h += '<div style="padding:4px 0;">';
         h += '<div style="display:flex;align-items:center;gap:8px;">';
-        h += '<input type="checkbox" '+(done?'checked ':'')+' data-stid="'+s.id+'" onchange="bulToggleSubtask(this)" style="width:13px;height:13px;cursor:pointer;accent-color:'+d.color+';">';
+        h += '<input type="checkbox" '+(done?'checked ':'')+' data-stid="'+s.id+'" data-tid="'+taskId+'" data-dept="'+dept+'" onchange="bulToggleSubtask(this)" style="width:13px;height:13px;cursor:pointer;accent-color:'+d.color+';">';
         h += '<span style="font-size:12px;color:'+(done?'#94a3b8':'#374151')+';'+(done?'text-decoration:line-through;':'')+'">' + esc(s.title) + '</span>';
-        if(due) h += '<span style="font-size:10px;color:'+dueColor+';">📅 '+fmtDate2(s.due_date)+(diff<0?' ⚠️':'')+'</span>';
+        /* Изпълнена → сиво, без ⚠️; отметната след срока → „✓ със закъснение".
+           Същото правило като bulDueLineHtml() при задачите. */
+        if(due&&done) h += '<span style="font-size:10px;color:#94a3b8;">📅 '+fmtDate2(s.due_date)+(bulDoneLate(subComp,String(s.due_date).slice(0,10))?' ✓ със закъснение':'')+'</span>';
+        else if(due) h += '<span style="font-size:10px;color:'+dueColor+';">📅 '+fmtDate2(s.due_date)+(diff<0?' ⚠️':'')+'</span>';
         if (canEdit()) h += '<button data-stid="'+s.id+'" data-etitle="'+esc(s.title)+'" onclick="openNotifyScheduleModal(\'subtask\',this.dataset.stid,this.dataset.etitle)" style="border:none;background:none;color:#d97706;font-size:10px;cursor:pointer;padding:0;line-height:1;">🔔</button>';
         if (canEdit()) h += '<button data-stid="'+s.id+'" data-tid="'+taskId+'" data-dept="'+dept+'" onclick="deleteSubtask(this.dataset.stid,this.dataset.tid,this.dataset.dept)" style="border:none;background:none;color:#dc2626;font-size:10px;cursor:pointer;padding:0;line-height:1;">✕</button>';
         h += '</div>';
@@ -4104,10 +4118,10 @@ function renderSubtasks(taskId, dept) {
         h += '<button data-tid="'+taskId+'" data-dept="'+dept+'" onclick="openSubtaskModal(this.dataset.tid,this.dataset.dept)" style="border:1px dashed #cbd5e1;background:none;color:#94a3b8;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;margin-top:4px;">+ Добави под-задача</button>';
       }
       h += '</div>';
-      el.innerHTML = h;
+      Array.prototype.forEach.call(boxes, function(b){ b.innerHTML = h; });
     });
   }, 50);
-  return '<div id="' + containerId + '"></div>';
+  return '<div id="sub-' + taskId + '-' + (where || 'dept') + '" data-sub-task="' + taskId + '"></div>';
 }
 
 function bulToggleSubtask(cb) {
@@ -4115,10 +4129,14 @@ function bulToggleSubtask(cb) {
   var store = currentUser && currentUser.store_name;
   if (!store) return;
   if (cb.checked) {
-    sbPost('subtask_completions',{subtask_id:stid,store_name:store,completed_by:currentUser.display_name||currentUser.email,completed_at:new Date().toISOString()}).then(function(r){
+    var subAt = new Date().toISOString();
+    sbPost('subtask_completions',{subtask_id:stid,store_name:store,completed_by:currentUser.display_name||currentUser.email,completed_at:subAt}).then(function(r){
       if (!r.ok) { toast('Грешка','#dc2626'); cb.checked=false; return; }
-      subtaskComps.push({subtask_id:stid,store_name:store});
+      /* С completed_at — иначе следващото прерисуване не знае дали е със закъснение. */
+      subtaskComps.push({subtask_id:stid,store_name:store,completed_at:subAt});
       toast('✅ Под-задачата е отбелязана!');
+      /* Същата подзадача стои и в другия контейнер (отдел/панел). */
+      if (cb.dataset.tid) renderSubtasks(cb.dataset.tid, cb.dataset.dept);
     });
   } else {
     sbDelete('subtask_completions','subtask_id=eq.'+stid+'&store_name=eq.'+encodeURIComponent(store)).then(function(res){
@@ -4130,6 +4148,7 @@ function bulToggleSubtask(cb) {
       if(res.count===0){ toast('Нямаше какво да се отмени','#64748b'); return; }
       subtaskComps = subtaskComps.filter(function(c){return !(c.subtask_id===stid&&c.store_name===store);});
       toast('↩ Отбелязана като неизпълнена');
+      if (cb.dataset.tid) renderSubtasks(cb.dataset.tid, cb.dataset.dept);
     });
   }
 }
