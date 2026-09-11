@@ -12,6 +12,11 @@ var bulActiveDept = 'trade';
 var curBul = null; var bulTasks = []; var bulComps = [];
 var recurringTasks = []; var recurringComps = []; var subtaskComps = [];
 var bulSkips = []; /* recurring_task_skips за седмицата на curBul — виж bulSkipWeek() */
+/* Спрените постоянни задачи (active=false) — САМО за canEdit() и САМО за
+   секцията „Спрени (N)" в renderRecurringTasks(). Нарочно отделно от
+   recurringTasks: календарът, loadTasksStats, отчетите, „Днес" и едж
+   функциите четат само активните. Виж bulLoadStopped(). */
+var recurringStopped = []; var bulStoppedOpen = {}; /* отдел → разгъната ли е секцията */
 var bulPromotions = [];
 var bulMode = 'view'; var bulSaveT = null; var dragInfo = null;
 var bulSelectedId = null; /* избран ръчно бюлетин (превключвател) - null = автоматично поведение (последен) */
@@ -1042,13 +1047,15 @@ function loadBulletin(){
     return Promise.all([
       sbGet('bulletin_promotions',promoQ).catch(function(){return [];}),
       sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').catch(function(){return [];}),
-      loadRecurringSkips(bulSkipWeek()).catch(function(){return [];})
+      loadRecurringSkips(bulSkipWeek()).catch(function(){return [];}),
+      bulLoadStopped()
     ]);
   }).then(function(results){
     if(!results)return; /* curBul беше null - вече показахме renderBulEmpty() по-горе */
     bulPromotions=Array.isArray(results[0])?results[0]:[];
     recurringTasks=Array.isArray(results[1])?results[1]:[];
     bulSkips=Array.isArray(results[2])?results[2]:[];
+    recurringStopped=Array.isArray(results[3])?results[3]:[];
     sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=sort_order.asc,due_date.asc').then(function(t){
       bulTasks=Array.isArray(t)?t:[];
       if(!bulTasks.length){
@@ -2178,10 +2185,8 @@ function deleteRecurring(taskId) {
       sbDelete('recurring_tasks','id=eq.'+taskId).then(function(r){
         if (!r.ok) { toast('Грешка при изтриване','#dc2626'); return; }
         toast('🗑 Постоянната задача'+(compCount>0?' и историята ѝ':'')+' са изтрити');
-        sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').then(function(rt){
-          recurringTasks = Array.isArray(rt) ? rt : [];
-          renderBulletin();
-        });
+        /* И спрените — ✕ стои и в секцията „Спрени (N)". */
+        bulReloadRecurring();
       });
     });
   }).catch(function(){
@@ -3648,6 +3653,30 @@ function renderRecurringTasks(dk) {
   } else if (canEdit()) {
     h += '<div style="padding:12px 14px;color:#94a3b8;font-size:12px;font-style:italic;">Няма постоянни задачи. Добави с бутона горе.</div>';
   }
+  /* ── Спрени (active=false) — само за canEdit(), сгънати по подразбиране.
+     „⏸ Спри" вади задачата от recurringTasks (всяко зареждане е
+     active=eq.true), затова без тази секция спряна задача се връщаше само
+     през SQL (11.09.2026, „Преоценка-задължителна"). Сиви, без чекбокс,
+     „Отложи", „Не за тази седмица" и 🔔 — само „▶ Активирай" и ✕. */
+  var stopped = canEdit() ? recurringStopped.filter(function(t){ return t.department===dk; }) : [];
+  if (stopped.length) {
+    var stOpen = !!bulStoppedOpen[dk];
+    h += '<div style="border-top:1px dashed #e2e8f0;padding:6px 14px 8px;">';
+    h += '<button class="rec-stopped-toggle" data-dk="'+dk+'" onclick="bulToggleStopped(this)" style="border:none;background:none;padding:2px 0;font-size:11px;font-weight:600;color:#64748b;cursor:pointer;"><span class="rec-stopped-arrow">'+(stOpen?'▾':'▸')+'</span> Спрени ('+stopped.length+')</button>';
+    h += '<div id="rec-stopped-'+dk+'"'+(stOpen?'':' hidden')+'>';
+    stopped.forEach(function(t){
+      var stLbl = recurringDueLabel(t);
+      h += '<div class="rec-stopped-row" data-rec-stopped="'+t.id+'" style="display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-bottom:1px solid #f1f5f9;">';
+      h += '<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:#94a3b8;">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type)+'</div>';
+      if (stLbl) h += '<div style="font-size:10px;color:#94a3b8;margin-top:2px;">🔁 '+stLbl+'</div>';
+      h += '</div>';
+      h += '<div style="display:flex;gap:4px;">';
+      h += '<button data-rid="'+t.id+'" onclick="toggleRecurringActive(this.dataset.rid,true)" style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#15803d;white-space:nowrap;">▶ Активирай</button>';
+      h += '<button data-rid="'+t.id+'" onclick="deleteRecurring(this.dataset.rid)" style="border:1px solid #fecaca;background:#fff5f5;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#dc2626;">✕</button>';
+      h += '</div></div>';
+    });
+    h += '</div></div>';
+  }
   h += '</div>';
   return h;
 }
@@ -3736,13 +3765,42 @@ function bulRecurringCheckboxChanged(cb){
 }
 
 function toggleRecurringActive(id, active) {
-  sbPatch('recurring_tasks','id=eq.'+id,{active:active}).then(function(){
+  sbPatch('recurring_tasks','id=eq.'+id,{active:active}).then(function(r){
+    /* Досега тостът „Активирана/Спряна" излизаше и при провален PATCH. */
+    if (r && r.ok === false) { toast('Грешка при запис: '+sbErrMsg(r),'#dc2626'); return; }
     toast(active ? '▶ Активирана' : '⏸ Спряна');
-    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc').then(function(rt){
-      recurringTasks = Array.isArray(rt) ? rt : [];
-      renderBulletin();
-    });
+    bulReloadRecurring();
   });
+}
+
+/* Спрените (active=false) — отделна заявка САМО за canEdit(); управителят не
+   праща нищо. sbGet при грешка връща [] и сам показва тост. */
+function bulLoadStopped() {
+  if (!canEdit()) return Promise.resolve([]);
+  return sbGet('recurring_tasks','active=eq.false&order=sort_order.asc')
+    .then(function(r){ return Array.isArray(r) ? r : []; })
+    .catch(function(){ return []; });
+}
+/* След „⏸ Спри" / „▶ Активирай" / ✕ задачата сменя масива — теглят се и двата. */
+function bulReloadRecurring() {
+  return Promise.all([
+    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc'),
+    bulLoadStopped()
+  ]).then(function(res){
+    recurringTasks = Array.isArray(res[0]) ? res[0] : [];
+    recurringStopped = res[1];
+    renderBulletin();
+  });
+}
+/* Сгъването е само в DOM-а — без renderBulletin(); състоянието се пази по
+   отдел, за да оцелее следващото прерисуване. */
+function bulToggleStopped(btn) {
+  var dk = btn.getAttribute('data-dk');
+  bulStoppedOpen[dk] = !bulStoppedOpen[dk];
+  var body = document.getElementById('rec-stopped-'+dk);
+  if (body) body.hidden = !bulStoppedOpen[dk];
+  var ar = btn.querySelector('.rec-stopped-arrow');
+  if (ar) ar.textContent = bulStoppedOpen[dk] ? '▾' : '▸';
 }
 
 function openRecurringModal(dk) {
