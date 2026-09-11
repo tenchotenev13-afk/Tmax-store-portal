@@ -115,6 +115,42 @@ function pushToPeople(displayNames, title, message) {
   });
 }
 
+/* ═══════ НОВА КЛИЕНТСКА ЗАЯВКА → ИЗПЪЛНИТЕЛЯ ═══════════════
+   Вика се от submitClientOrder() след успешен запис. Звънецът в портала
+   (checkNewOrders) хваща новата заявка само ако изпълнителят е отворил
+   портала; push стига и до затворен браузър.
+
+   Кой получава:
+   · изпълнител = Централен офис → pushToRole('supply'). Снабдяването е
+     ролята, която обработва заявките към ЦО; всичките 15 потребители с тази
+     роля са с обект ЦО. pushToRole досега се ползваше само за admin и
+     accounting (kasa.js) — supply е нова цел. Звънецът, картата и баджът в
+     портала са със СЪЩИЯ обхват (coMyFulfillerNames в client-orders.js).
+   · всеки друг изпълнител (магазин или логистичен склад) → pushToStores(),
+     по тага store_name, който initPush() слага при вход.
+
+   ⚠️ pushToStores() при празен списък ПАДА КЪМ pushToAll() — известието би
+   отишло до целия портал. Затова празен изпълнител се спира ТУК, преди
+   извикването, а не се разчита на pushToStores. Същото и за заявка, в която
+   обектът е сам изпълнител: той сам е натиснал бутона.
+
+   Стигне ли известието до някого, зависи от това дали човекът е разрешил
+   известия в браузъра си — това се вижда само в таблото на OneSignal, не и
+   от базата. Тагът се слага на всеки при вход; абонаментът — не. */
+function pushNewClientOrder(o) {
+  var none = function(msg) { return Promise.resolve({ ok: false, status: 0, data: { message: msg } }); };
+  if (!o) return none('Няма заявка');
+  var f = String(o.fulfiller || '').trim();
+  if (!f) return none('Няма изпълнител');
+  if (f === String(o.store_name || '').trim()) return none('Обектът е сам изпълнител');
+  var title = '🔔 Нова заявка' + (o.in_num ? ' ' + o.in_num : '');
+  var msg = (o.customer_name || 'Клиент') + ' · от ' + (o.store_name || '—');
+  if (typeof isCentralOffice === 'function' && isCentralOffice(f)) {
+    return pushToRole('supply', title, msg);
+  }
+  return pushToStores([f], title, msg);
+}
+
 /* ═══════ БЮЛЕТИН НОТИФИКАЦИИ ════════════════════════════ */
 
 /* При добавяне на нова задача (от submitTask в bulletin.js) — до конкретните

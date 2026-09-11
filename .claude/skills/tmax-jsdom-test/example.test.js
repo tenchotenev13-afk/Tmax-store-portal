@@ -61,9 +61,8 @@ function env(over) {
   h.w.clientOrders.forEach(o => {
     o._status = h.w.calcStatus(o.delivery, o.status);
     o._days = h.w.calcElapsed(o.created_at, o.date);
-    o._isFulfiller = !h.w.isGlobal() &&
-      o.fulfiller === h.w.currentUser.store_name &&
-      o.store_name !== h.w.currentUser.store_name;
+    /* Същият предикат като loadClientOrders() — не собствено копие на правилото */
+    o._isFulfiller = h.w.coIsMineToFulfill(o);
   });
   return h;
 }

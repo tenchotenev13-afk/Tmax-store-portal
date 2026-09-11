@@ -512,6 +512,13 @@ function coFindOrder(id){
   if(!hit&&typeof histData!=='undefined'&&histData&&histData.client&&histData.client.length){
     hit=histData.client.find(function(x){return String(x.id)===String(id);});
   }
+  /* Звънецът (checkNewOrders) тегли пълния ред на всяка нова заявка. Така
+     кликът по известието отваря модала дори ако заявката още не е в
+     заредения списък — кликът може да изпревари loadAll(), който звънецът
+     пуска веднага след обявяването. */
+  if(!hit&&typeof _coNotifyRows!=='undefined'&&_coNotifyRows&&_coNotifyRows[id]){
+    hit=_coNotifyRows[id];
+  }
   return hit||null;
 }
 
@@ -814,6 +821,47 @@ function coBuildRoleOptions(){
   if(cur==='out'||cur==='in')sel.value=cur;
 }
 
+/* ═══ „ЗАЯВКИ, КОИТО АЗ ТРЯБВА ДА ИЗПЪЛНЯ" — ЕДИН предикат ═══
+   Ползват го и _isFulfiller (банерът при вход, ≥7 и 5–7 дни), и звънецът за
+   нови заявки, и баджът на таба. Преди беше изписан само в loadClientOrders()
+   като !isGlobal() && fulfiller===store_name, тоест за глобалните профили
+   НИКОГА не беше истина — а точно глобални са двата склада (роля logistics)
+   и ЦО администраторите и счетоводството. Две дефиниции на едно понятие се
+   разминават при първата промяна, затова е една.
+
+   Изпълнителят се разпознава така, в този ред:
+   · Централен офис — isCentralOfficeUser() И роля supply: fulfiller =
+     'Централен офис'. Снабдяването обработва заявките към ЦО; обектът ЦО има
+     ~61 души в пет роли (admin, accounting, marketing, user, supply), и
+     останалите ~46 не изпълняват нищо. Същият обхват като push-а в
+     pushNewClientOrder() — звънецът и известието стигат до едни и същи хора.
+     Следствие и за банера при вход (≥7 и 5–7 дни): под старото правило
+     marketing и user в ЦО (не-глобални) също го получаваха — вече не.
+   · логистичен склад — isLogisticsWarehouseUser(): fulfiller = собственият
+     склад. Нужен е отделен клон, защото складовете са с assigned_stores='{}'
+     и assignedStores() за тях връща null (глобален профил).
+   · магазин — fulfiller ∈ assignedStores().
+   · всеки друг глобален профил не изпълнява нищо.
+   Сравнението е ТОЧНО (===), както във filter-а на loadClientOrders() и в
+   заявката на checkNewOrders() — иначе баджът и звънецът биха броили различно.
+   В базата има стари ръчно въведени варианти („Лог.Добрич", „ТЪРГОВИЩЕ"…),
+   които не съвпадат; новите заявки идват от <select> и са чисти. */
+function coMyFulfillerNames(){
+  if(!currentUser)return [];
+  if(isCentralOfficeUser())return currentUser.role==='supply'?[CENTRAL_OFFICE]:[];
+  if(typeof isLogisticsWarehouseUser==='function'&&isLogisticsWarehouseUser())return [currentUser.store_name];
+  if(!isGlobal()){var s=assignedStores();return s?s.slice():[];}
+  return [];
+}
+/* Своите заявки не са „нови за мен": обект, който е и поръчващ, и изпълнител,
+   сам е натиснал бутона. names може да се подаде отвън, за да не се смята
+   наново за всеки ред в цикъл. */
+function coIsMineToFulfill(o,names){
+  names=names||coMyFulfillerNames();
+  if(!o||!names.length)return false;
+  return names.indexOf(o.fulfiller)>=0&&names.indexOf(o.store_name)<0;
+}
+
 function loadClientOrders(){
   loadOrderRestrictions();
   renderCoSapBanner();
@@ -830,11 +878,12 @@ function loadClientOrders(){
   }
   sbGet('client_orders',q).then(function(data){
     clientOrders=Array.isArray(data)?data:[];
+    var mine=coMyFulfillerNames();
     clientOrders.forEach(function(o){
       o._status=calcStatus(o.delivery,o.status);
       o._days=calcElapsed(o.created_at,o.date);
-      /* Маркираме дали текущия магазин е изпълнителят */
-      o._isFulfiller=!isGlobal()&&o.fulfiller===currentUser.store_name&&o.store_name!==currentUser.store_name;
+      /* Изпълнител съм ли — през ЕДИНИЯ предикат (виж coMyFulfillerNames) */
+      o._isFulfiller=coIsMineToFulfill(o,mine);
     });
     coBuildMonthOptions();
     coBuildFulfillerOptions();
@@ -1205,6 +1254,11 @@ function submitClientOrder(){
        не измисляме номер — работим без него, вместо да покажем грешен. */
     var num=(res.row&&res.row.in_num)||null;
     if(res.row&&res.row.in_num)rec.in_num=res.row.in_num;
+    /* Push към изпълнителя — след номера, за да го носи. Пуска се и забравя:
+       неуспешен push не бива да спира записа, който вече е минал. */
+    if(typeof pushNewClientOrder==='function'){
+      try{pushNewClientOrder(rec).catch(function(){});}catch(e){}
+    }
     var finish=function(){
       closeModal('client-modal');
       coRelease();

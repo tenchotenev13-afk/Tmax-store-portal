@@ -133,7 +133,8 @@ const TESTS = [
   'today-window-task.test.js',
   'task-completion-duplicates.test.js',
   'co-elapsed-backdated.test.js',
-  'co-detail-modal.test.js'
+  'co-detail-modal.test.js',
+  'co-new-for-fulfiller.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

@@ -121,8 +121,11 @@ async function cycle() {
      JSON.stringify(calls.toast));
   ok('baseline пак е 4 id-та', seenCount() === 4, 'seen=' + seenCount());
 
-  section('4. Четвърти цикъл — една истински нова заявка');
-  cIds = [10, 11, 12];
+  /* Новата заявка е ТРАНСПОРТНА: общото toast() остана само за транспорта.
+     Новата клиентска заявка вече казва какво е дошло в собствено кликаемо
+     известие (#co-toast) — виж 4б и tests/co-new-for-fulfiller.test.js. */
+  section('4. Четвърти цикъл — една истински нова (транспортна) заявка');
+  tIds = [1, 2, 3];
   await cycle();
   ok('loadAll() е викан точно веднъж', loads === 1, 'loads=' + loads);
   ok('звукът се пуска', sounds === 1, 'sounds=' + sounds);
@@ -132,6 +135,19 @@ async function cycle() {
      t.length === 1 && t[0].indexOf('Нова заявка е постъпила!') >= 0,
      JSON.stringify(t));
   ok('baseline вече е 5 id-та', seenCount() === 5, 'seen=' + seenCount());
+
+  section('4б. Нова КЛИЕНТСКА заявка — собствено известие, не общото toast()');
+  const genericBefore = newOrderToasts().length;
+  cIds = [10, 11, 12];
+  await cycle();
+  ok('звукът се пуска и за клиентската', sounds === 2, 'sounds=' + sounds);
+  ok('общото toast() НЕ се ползва за клиентска заявка',
+     newOrderToasts().length === genericBefore, JSON.stringify(calls.toast));
+  const ct = h.doc.getElementById('co-toast');
+  ok('показано е кликаемото известие #co-toast', !!ct && ct.style.display === 'block');
+  ok('и то казва „Нова заявка"', !!ct && ct.textContent.indexOf('Нова заявка') >= 0,
+     ct && ct.textContent);
+  ok('baseline вече е 6 id-та', seenCount() === 6, 'seen=' + seenCount());
 
   section('5. silent не е протекъл глобално');
   mode = 'down';
