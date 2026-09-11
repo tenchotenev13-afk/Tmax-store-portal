@@ -372,6 +372,10 @@ function calBoxes(doc, id) { return doc.querySelectorAll('#sec-calendar input[da
     const h = env({ role: 'admin', store_name: 'Централен офис' });
     const w = h.w;
     w.recurringTasks = RECS.slice();
+    /* Известието чете ВСИЧКИ задачи + периодите за днешната седмица (не
+       recurringTasks на показания бюлетин). Без периоди важи кешът active. */
+    w.recurringAll = RECS.slice();
+    w.recurringPeriods = [];
     w.bulTasks = [];
     /* Админът гледа СЛЕДВАЩАТА седмица и bulSkips е нейният — известието е
        за днес и трябва да тегли собствените си изключвания. */

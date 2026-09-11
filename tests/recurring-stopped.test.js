@@ -7,7 +7,8 @@
    случай: „Преоценка-задължителна").
 
    Какво заковава тестът:
-     1. админ: отделна заявка active=eq.false; секцията „Спрени (1)" е в
+     1. админ: спрените = БЕЗ отворен период (recurring_task_periods), без
+        отделна заявка (от 11.09.2026); секцията „Спрени (1)" е в
         блока на отдела, СГЪНАТА по подразбиране; редът е сив, без чекбокс,
         „Отложи", „Не за тази седмица", 🔔, ✏️ — само „▶ Активирай" и ✕;
         задачата я няма в основния списък;
@@ -20,7 +21,7 @@
      4б. ✕ в секцията трие и секцията се тегли наново;
      5. провален PATCH → тост за грешка, без „Активирана", задачата остава
         в секцията;
-     6. управител: нито заявка active=eq.false, нито секция.
+     6. управител: нито секция, нито заявка active=eq.false.
 
    ⚠️ Дати: котвата е сряда от текущата реална седмица, замразена на w.Date.
 
@@ -160,6 +161,8 @@ function blockRow(doc, id) {
   return Array.prototype.find.call(doc.querySelectorAll('[data-rec-row="' + id + '"]'),
     r => !r.closest('#sec-calendar')) || null;
 }
+/* Основният списък: /recurring_tasks? без active= (периодите решават седмицата). */
+const allList = u => u.indexOf('/recurring_tasks?') >= 0 && u.indexOf('active=') < 0;
 const stoppedRow = (doc, id) => doc.querySelector('[data-rec-stopped="' + id + '"]');
 const toggleBtn = doc => doc.querySelector('.rec-stopped-toggle');
 const calText = doc => txt(doc.getElementById('sec-calendar'));
@@ -186,13 +189,16 @@ async function loaded(h) {
 (async function () {
 
   /* ═══ 1. Админ: заявка и секция ════════════════════════════════════════ */
-  section('1. Админ: active=eq.false се тегли отделно; „Спрени (1)" — сгъната');
+  section('1. Админ: спрените се извеждат от всички задачи + периодите; „Спрени (1)" — сгъната');
   const ha = env(ADMIN);
   if (await loaded(ha)) {
     const doc = ha.doc, w = ha.w;
     const qs = ha.calls.get.filter(u => u.indexOf('/recurring_tasks') >= 0);
-    ok('заявка active=eq.true', qs.some(u => u.indexOf('active=eq.true') >= 0), qs.join(' | '));
-    ok('ОТДЕЛНА заявка active=eq.false', qs.some(u => u.indexOf('active=eq.false') >= 0), qs.join(' | '));
+    /* От 11.09.2026 (recurring_task_periods) основният списък е ВСИЧКИ задачи —
+       без active филтър; кои важат за седмицата решават периодите. */
+    ok('заявка за ВСИЧКИ задачи (без active филтър)', qs.some(allList), qs.join(' | '));
+    ok('БЕЗ отделна заявка active=eq.false (спрените идват от същия списък)', !qs.some(u => u.indexOf('active=eq.false') >= 0), qs.join(' | '));
+    ok('заявка за периодите', ha.calls.get.some(u => u.indexOf('/recurring_task_periods') >= 0));
     ok('recurringTasks = само активните', w.recurringTasks.length === 1 && w.recurringTasks[0].id === 'r-act',
       w.recurringTasks.map(t => t.id).join(','));
     ok('recurringStopped = спряната', Array.isArray(w.recurringStopped) && w.recurringStopped.length === 1 &&
@@ -268,8 +274,8 @@ async function loaded(h) {
         ok('тяло {active:true}', JSON.stringify(p[0].body) === '{"active":true}', JSON.stringify(p[0].body));
       }
       const after = ha.calls.get.slice(getsBefore).filter(u => u.indexOf('/recurring_tasks') >= 0);
-      ok('теглят се НАНОВО и двата списъка', after.some(u => u.indexOf('active=eq.true') >= 0) &&
-        after.some(u => u.indexOf('active=eq.false') >= 0), after.join(' | '));
+      ok('теглят се НАНОВО всички задачи и периодите', after.some(allList) &&
+        ha.calls.get.slice(getsBefore).some(u => u.indexOf('/recurring_task_periods') >= 0), after.join(' | '));
       ok('тост „▶ Активирана"', ha.calls.toast.some(t => String(t).indexOf('Активирана') >= 0));
       ok('задачата е в основния списък', !!blockRow(doc, 'r-stop'));
       const br = blockRow(doc, 'r-stop');
@@ -328,14 +334,14 @@ async function loaded(h) {
   }
 
   /* ═══ 6. Управител ═════════════════════════════════════════════════════ */
-  section('6. Управител: нито заявка active=eq.false, нито секция');
+  section('6. Управител: нито секция, нито заявка active=eq.false');
   {
     const h = env(MANAGER);
     if (await loaded(h)) {
       const doc = h.doc;
       const qs = h.calls.get.filter(u => u.indexOf('/recurring_tasks') >= 0);
       ok('нула заявки active=eq.false', !qs.some(u => u.indexOf('active=eq.false') >= 0), qs.join(' | '));
-      ok('заявката за активните е там (контрола)', qs.some(u => u.indexOf('active=eq.true') >= 0));
+      ok('заявката за всички задачи е там (контрола)', qs.some(allList));
       ok('няма бутон „Спрени"', !toggleBtn(doc));
       ok('няма ред на спряната', !stoppedRow(doc, 'r-stop'));
       ok('заглавието ѝ го няма никъде', txt(doc.getElementById('mod-bulletin')).indexOf(STOP_TITLE) < 0);

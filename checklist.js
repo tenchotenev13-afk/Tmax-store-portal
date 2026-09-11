@@ -361,11 +361,16 @@ function checklistRecurringChanges(idx) {
       '&select=recurring_task_id,store_name,status,completion_date'),
     /* Изключванията за ПОКАЗАНАТА седмица — ключът е от понеделника ѝ, по
        същия начин като в Бюлетина (recurringSkipWeekOf в shared.js). */
-    loadRecurringSkips(recurringSkipWeekOf(weekDays(checklistWeek, checklistYear)[0]))
+    loadRecurringSkips(recurringSkipWeekOf(weekDays(checklistWeek, checklistYear)[0])),
+    /* Периодите (recurring_task_periods) — важи ли задачата за ПОКАЗАНАТА
+       седмица. Спряна след нея или активирана преди нея не бива да променя
+       миналия чек лист. */
+    sbGet('recurring_task_periods', 'recurring_task_id=in.(' + ids.join(',') + ')&select=recurring_task_id,from_monday,to_monday')
   ]).then(function (r) {
     var tasks = Array.isArray(r[0]) ? r[0] : [];
     var comps = Array.isArray(r[1]) ? r[1] : [];
     var skips = Array.isArray(r[2]) ? r[2] : [];
+    var periods = Array.isArray(r[3]) ? r[3] : [];
     var taskById = {};
     tasks.forEach(function (t) { taskById[t.id] = t; });
 
@@ -375,6 +380,12 @@ function checklistRecurringChanges(idx) {
       var mine = comps.filter(function (c) { return c.recurring_task_id === id; });
       var plan = checklistPortalPlan(m, taskById[id], mine, weekISO);
       if (!plan) return;
+      /* Задачата НЕ ВАЖИ за показаната седмица (recurring_task_periods) →
+         празна клетка за всички обекти, както при изключване за всички.
+         Само ако задачата ИМА периоди: без нито един (периодите не са се
+         заредили) клетката не се пипа — провалена заявка не чисти данни. */
+      var hasPeriods = periods.some(function (p) { return p && String(p.recurring_task_id) === String(id); });
+      var offWeek = hasPeriods && !recurringValidForWeek(id, weekISO[0], periods);
       checklistStores.forEach(function (store) {
         /* Задачата не се изисква от обекта тази седмица (recurring_task_skips,
            за всички или само за него) → клетката е ПРАЗНА, не „не"/„0/5".
@@ -382,7 +393,7 @@ function checklistRecurringChanges(idx) {
            Празно, а не пропуснато: ако вече е записано „не" отпреди
            изключването, то трябва да изчезне. control_value и коментарът не
            се пипат — те не влизат в тялото на записа изобщо. */
-        var val = recurringIsSkipped(id, store, skips) ? null
+        var val = (offWeek || recurringIsSkipped(id, store, skips)) ? null
           : checklistPortalValueFor(plan.mode, plan.hits[store], plan.denom);
         var row = idx[store + ' ' + m.key];
         /* Нищо ново → нищо не се пише. Инак всяко отваряне на седмица би

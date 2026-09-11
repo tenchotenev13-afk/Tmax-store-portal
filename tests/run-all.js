@@ -143,7 +143,9 @@ const TESTS = [
   'recurring-notice-block.test.js',
   'recurring-stopped.test.js',
   'bulletin-due-done.test.js',
-  'subtask-due-done.test.js'
+  'subtask-due-done.test.js',
+  'recurring-periods.test.js',
+  'recurring-periods-write.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

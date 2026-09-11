@@ -281,6 +281,51 @@ function loadRecurringSkips(wk){
   return sbGet('recurring_task_skips','year=eq.'+wk.year+'&week_number=eq.'+wk.week+'&select=id,recurring_task_id,store_name,reason,created_by');
 }
 
+/* ПОСТОЯННА ЗАДАЧА ПО СЕДМИЦИ (recurring_task_periods)
+   ─────────────────────────────────────────────────────────────
+   Миграция 20260911204550. Задачата важи за седмица W, ако има период
+     from_monday <= W.monday  и  (to_monday null  или  to_monday >= W.monday).
+   Границите са ПОНЕДЕЛНИЦИ ('YYYY-MM-DD'), включително — затова сравнението
+   е низово и не зависи от часова зона.
+
+   recurring_tasks.active е кеш „има отворен период". Консуматорите на
+   ТЕКУЩАТА седмица (today.js, notifications.js, daily-turnover.js) ползват
+   него; тези на КОНКРЕТНА седмица (Бюлетинът, чек листът, отчетите) —
+   периодите. Спиране/активиране пипат само бъдещето; старите бюлетини не
+   се променят. recurring_task_skips е независимо: изключване за седмица, в
+   която задачата не важи, е безобидно. */
+function recurringMondayOf(d){
+  var x=new Date(d.getFullYear(),d.getMonth(),d.getDate());
+  x.setDate(x.getDate()-((x.getDay()+6)%7));
+  return x.getFullYear()+'-'+String(x.getMonth()+1).padStart(2,'0')+'-'+String(x.getDate()).padStart(2,'0');
+}
+function recurringValidForWeek(taskId, mondayISO, periods){
+  if(!Array.isArray(periods)||!mondayISO) return false;
+  var id=String(taskId);
+  return periods.some(function(p){
+    return !!p&&String(p.recurring_task_id)===id&&p.from_monday<=mondayISO&&
+      (p.to_monday===null||p.to_monday===undefined||p.to_monday>=mondayISO);
+  });
+}
+/* Задачите, валидни за седмицата, в реда на tasks. Задача БЕЗ нито един
+   период се води по кеша active: така я е създал кеширан стар клиент, или
+   периодите не са се заредили (sbGet при грешка връща []) — провалена
+   заявка не бива да изпразни бюлетина. Спряна в първата си седмица задача
+   няма период и е active=false → не важи никъде, както трябва. */
+function recurringTasksForWeek(tasks, periods, mondayISO){
+  var has={};
+  (Array.isArray(periods)?periods:[]).forEach(function(p){ if(p) has[String(p.recurring_task_id)]=1; });
+  return (Array.isArray(tasks)?tasks:[]).filter(function(t){
+    if(!t) return false;
+    return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
+  });
+}
+/* Всички периоди — таблицата е малка (по един-два на задача), а Бюлетинът
+   ги ползва и за показаната седмица, и за днешната. */
+function loadRecurringPeriods(){
+  return sbGet('recurring_task_periods','select=id,recurring_task_id,from_monday,to_monday&order=from_monday.asc');
+}
+
 /* Списък магазини за потребителя: null = всички, [] = само своя, [...] = назначени */
 function assignedStores(){
   if(!currentUser)return null;
