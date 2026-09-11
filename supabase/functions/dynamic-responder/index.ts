@@ -43,6 +43,64 @@ function getBulgariaLocalParts(d: Date) {
   };
 }
 
+/* ═══ ПОСТОЯННА ЗАДАЧА, ИЗКЛЮЧЕНА ЗА СЕДМИЦАТА (11.09.2026) ══════════════
+   recurring_task_skips (миграция 20260911080537): ред там значи „тази
+   седмица задачата не се изисква" — за всички (store_name NULL) или за един
+   обект. Насрочено напомняне по такава задача НЕ тръгва:
+     · изключена за всички → никакво напомняне;
+     · изключена за обект  → този обект излиза от адресатите; не остане ли
+       нито един — напомняне няма.
+   Напомняне БЕЗ адресати (до всички) остава до всички: магазинното
+   изключване няма как да се изрази в push без филтър, а изброяване на
+   всички обекти би сменило аудиторията (pushToAll стига и до ЦО).
+   Ключът е седмицата на ДНЕС (денят на напомнянето), ISO — същата
+   сметка като isoWeekOf() в bulletin-notify и recurringSkipWeekOf() в
+   shared.js; tests/recurring-task-skips-responder.test.js ги сверява. */
+function isoWeekOf(dateStr: string) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const day = dt.getUTCDay() || 7;
+  dt.setUTCDate(dt.getUTCDate() + 4 - day);
+  const yearStart = new Date(Date.UTC(dt.getUTCFullYear(), 0, 1));
+  const week = Math.ceil(((dt.getTime() - yearStart.getTime()) / 86400000 + 1) / 7);
+  return { week: week, year: dt.getUTCFullYear() };
+}
+/* Копия от shared.js — дословно. */
+function recurringIsSkipped(taskId, store, skips){
+  if(!Array.isArray(skips)||!skips.length) return false;
+  var id=String(taskId);
+  return skips.some(function(s){
+    if(!s||String(s.recurring_task_id)!==id) return false;
+    return s.store_name===null||s.store_name===undefined||(!!store&&s.store_name===store);
+  });
+}
+function recurringSkipStores(taskId, skips){
+  if(!Array.isArray(skips)) return [];
+  var id=String(taskId);
+  return skips.filter(function(s){
+    return !!s&&String(s.recurring_task_id)===id&&s.store_name!==null&&s.store_name!==undefined;
+  }).map(function(s){ return s.store_name; });
+}
+/* { stores } — към кои обекти да тръгне (празно = до всички, както досега);
+   { skip }   — напомнянето не тръгва. Изключванията се теглят ВЕДНЪЖ на
+   събуждане на крона (cache), и само ако има напомняне по постоянна задача.
+   Провал на заявката → [] → напомнянето тръгва както преди изключванията. */
+async function recurringScheduleGate(supabase: any, s: any, stores: string[], todayStr: string, cache: { skips: any[] | null }) {
+  if (s.entity_type !== 'recurring_task') return { stores: stores };
+  if (cache.skips === null) {
+    const wk = isoWeekOf(todayStr);
+    const { data } = await supabase.from('recurring_task_skips')
+      .select('recurring_task_id,store_name').eq('year', wk.year).eq('week_number', wk.week);
+    cache.skips = Array.isArray(data) ? data : [];
+  }
+  if (recurringIsSkipped(s.entity_id, null, cache.skips)) return { skip: 'изключена за седмицата (за всички обекти)' };
+  if (!stores.length) return { stores: stores };
+  const off = recurringSkipStores(s.entity_id, cache.skips);
+  const left = stores.filter((n) => off.indexOf(n) < 0);
+  if (!left.length) return { skip: 'изключена за седмицата за всички адресирани обекти' };
+  return { stores: left };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { status: 200, headers: CORS });
 
@@ -86,6 +144,8 @@ Deno.serve(async (req) => {
     });
 
     const results = [];
+    const skipped: any[] = [];
+    const skipCache: { skips: any[] | null } = { skips: null };
     for (const s of due) {
       let title = s.message || '';
       if (!title) {
@@ -113,6 +173,11 @@ Deno.serve(async (req) => {
         ? s.target_stores.filter((x: unknown) => typeof x === 'string' && x !== '')
         : [];
       if (!stores.length && s.target_store) stores = [s.target_store];
+      /* Постоянна задача, изключена за седмицата — виж recurringScheduleGate.
+         Пропуснатото НЕ пише last_sent_at: нищо не е изпратено. */
+      const gate: any = await recurringScheduleGate(supabase, s, stores, todayStr, skipCache);
+      if (gate.skip) { skipped.push({ id: s.id, reason: gate.skip }); continue; }
+      stores = gate.stores;
       if (stores.length) {
         const filters: unknown[] = [];
         stores.forEach((name, i) => {
@@ -143,7 +208,7 @@ Deno.serve(async (req) => {
       results.push({ id: s.id, ok });
     }
 
-    return Response.json({ ok: true, checked: schedules?.length || 0, sent: results.length, results, debug_bg_time: nowHHMM, debug_bg_date: todayStr }, { headers: CORS });
+    return Response.json({ ok: true, checked: schedules?.length || 0, sent: results.length, results, skipped, debug_bg_time: nowHHMM, debug_bg_date: todayStr }, { headers: CORS });
   } catch (e) {
     const err = e as Error;
     return Response.json({ ok: false, error: err.message }, { headers: CORS, status: 500 });
