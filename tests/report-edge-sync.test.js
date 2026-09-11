@@ -111,7 +111,12 @@ const COPIED_HELPERS = [
      Разминае ли се копието, изключеният обект остава в знаменателя на
      автоматичния имейл, докато порталът вече не го брои. */
   { fn: 'recurringIsSkipped', from: SHARED },
-  { fn: 'recurringSkipStores', from: SHARED }
+  { fn: 'recurringSkipStores', from: SHARED },
+  /* Постоянна задача по седмици (recurring_task_periods). Разминае ли се
+     копието, автоматичният имейл брои задача за седмица, в която тя не е
+     важала — или пропуска такава, която е важала. */
+  { fn: 'recurringValidForWeek', from: SHARED },
+  { fn: 'recurringTasksForWeek', from: SHARED }
 ];
 
 /* Съзнателни разминавания — изброени, за да не изглеждат като пропуск.
@@ -158,6 +163,11 @@ const ROUTED_COPIED = [
   /* Изключване за седмица — вижда се в taskStoreBreakdown като skip_stores. */
   { fn: 'recurringIsSkipped', from: SHARED },
   { fn: 'recurringSkipStores', from: SHARED },
+  /* Постоянна задача по седмици (recurring_task_periods). Разминае ли се
+     копието, автоматичният имейл брои задача за седмица, в която тя не е
+     важала — или пропуска такава, която е важала. */
+  { fn: 'recurringValidForWeek', from: SHARED },
+  { fn: 'recurringTasksForWeek', from: SHARED },
   /* Кешът с хората от ЦО е браузърен, но самото четене от него не е —
      обработчикът долу го пълни, преди да повика колектора. Копието
      позволява resolveRecipientsForTask да остане дословно същата. */

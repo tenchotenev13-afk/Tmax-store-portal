@@ -1,6 +1,20 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v29 (12.09.2026) — деплой с ЕДНО нещо: постоянните задачи важат ПО СЕДМИЦИ
+   (нова таблица recurring_task_periods, миграция 20260911204550).
+
+   Задачата важи за седмица W, ако има период from_monday <= W.понеделник и
+   (to_monday NULL или >= W.понеделник). recurring_tasks.active е само кеш
+   „има отворен период", тоест описва ТЕКУЩАТА седмица — а двата колектора
+   тук описват МИНАЛА: дневният — седмицата на отчетния ден, седмичният —
+   седмицата на бюлетина. Затова заявката вече е без active=eq.true и
+   наборът минава през recurringTasksForWeek() (копие от shared.js).
+   Следствие: задача, спряна днес, си остава в отчета за миналата седмица,
+   а активирана днес не се появява в него.
+   Задача БЕЗ нито един период (стар кеширан клиент) и отчет без публикуван
+   бюлетин се решават пак по active — поведението отпреди периодите.
+
    v28 (11.09.2026) — деплой с ЕДНО нещо: постоянна задача, изключена за
    седмица (нова таблица recurring_task_skips, миграция 20260911080537).
 
@@ -526,6 +540,25 @@ function recurringSkipStores(taskId, skips){
     return !!s&&String(s.recurring_task_id)===id&&s.store_name!==null&&s.store_name!==undefined;
   }).map(function(s){ return s.store_name; });
 }
+/* Копия от shared.js — постоянна задача по седмици (recurring_task_periods).
+   tests/report-edge-sync.test.js сверява копията. */
+function recurringValidForWeek(taskId, mondayISO, periods){
+  if(!Array.isArray(periods)||!mondayISO) return false;
+  var id=String(taskId);
+  return periods.some(function(p){
+    return !!p&&String(p.recurring_task_id)===id&&p.from_monday<=mondayISO&&
+      (p.to_monday===null||p.to_monday===undefined||p.to_monday>=mondayISO);
+  });
+}
+function recurringTasksForWeek(tasks, periods, mondayISO){
+  if(!mondayISO) return (Array.isArray(tasks)?tasks:[]).filter(function(t){ return !!t&&!!t.active; });
+  var has={};
+  (Array.isArray(periods)?periods:[]).forEach(function(p){ if(p) has[String(p.recurring_task_id)]=1; });
+  return (Array.isArray(tasks)?tasks:[]).filter(function(t){
+    if(!t) return false;
+    return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
+  });
+}
 function isReportableStore(name){
   return !!name && REPORT_EXCLUDED_STORES.indexOf(name) < 0;
 }
@@ -570,21 +603,28 @@ function collectDailyReportData(cb, scope, kasaThreshold){
   var dayTarget = reportWeekOfMonday(reportMondayOfWeek(reportDay));
   Promise.all([
     sbGet('bulletins','status=eq.published&order=year.desc,week_number.desc&limit=20'),
-    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc'),
+    /* ВСИЧКИ задачи, без active=eq.true: отчетът за минал ден описва
+       седмицата на ТОЗИ ден, а active е „важи тази седмица". Кои са важали
+       решават периодите (recurring_task_periods) — иначе задача, спряна
+       днес, изчезва от вчерашния отчет, а новата се появява в стар ден. */
+    sbGet('recurring_tasks','order=sort_order.asc'),
     /* Изключванията (recurring_task_skips) за седмицата на ОТЧЕТНИЯ ден —
        dayTarget е ISO двойката от понеделника му, същият ключ, който
        Бюлетинът записва. */
-    dayTarget ? sbGet('recurring_task_skips','year=eq.'+dayTarget.year+'&week_number=eq.'+dayTarget.week+'&select=recurring_task_id,store_name') : Promise.resolve([])
+    dayTarget ? sbGet('recurring_task_skips','year=eq.'+dayTarget.year+'&week_number=eq.'+dayTarget.week+'&select=recurring_task_id,store_name') : Promise.resolve([]),
+    sbGet('recurring_task_periods','select=recurring_task_id,from_monday,to_monday')
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], dayTarget);
     var recSkips = Array.isArray(results[2]) ? results[2] : [];
+    /* Понеделникът на седмицата на отчетния ден — ключът за периодите. */
+    var dayMonday = toLocalISO(reportMondayOfWeek(reportDay));
     /* Задачите „Само за информация" отпадат ТУК, на входа: те нямат
        task_completions и влизат и в числителя, и в знаменателя като вечно
        неизпълнени. Един филтър вместо условие във всяко броене надолу —
        виж taskIsNotice(). Същото за изключените за седмицата ЗА ВСИЧКИ;
        изключените за отделен обект минават като skip_stores на елемента и
        излизат само от неговия знаменател (reportBuildSummary). */
-    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t) && !recurringIsSkipped(t.id, null, recSkips); });
+    var allRecurring = recurringTasksForWeek(results[1], results[3], dayMonday).filter(function(t){ return !taskIsNotice(t) && !recurringIsSkipped(t.id, null, recSkips); });
     /* Прозоречната задача се явява ВЕДНЪЖ — в деня на срока. Иначе обект,
        свършил я в понеделник, излиза неизпълнил във вторник и в сряда, и се
        брои три пъти. */
@@ -1466,14 +1506,18 @@ function collectWeeklyReportData(cb, scope){
   Promise.all([
     /* Списък, не limit=1 - изборът на правилната седмица става по-долу. */
     sbGet('bulletins','status=eq.published&order=year.desc,week_number.desc&limit=20'),
-    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
+    /* ВСИЧКИ задачи + периодите: отчетът е за ПРИКЛЮЧИЛАТА седмица, а active
+       описва текущата. Виж recurringTasksForWeek() в shared.js. */
+    sbGet('recurring_tasks','order=sort_order.asc'),
+    sbGet('recurring_task_periods','select=recurring_task_id,from_monday,to_monday')
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], target);
+    var wkMonday = bul ? toLocalISO(weekDays(bul.week_number, bul.year)[0]) : null;
     /* Задачите „Само за информация" отпадат ТУК, на входа: те нямат
        task_completions и влизат и в числителя, и в знаменателя като вечно
        неизпълнени. Един филтър вместо условие във всяко броене надолу —
        виж taskIsNotice(). */
-    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
+    var allRecurring = recurringTasksForWeek(results[1], results[2], wkMonday).filter(function(t){ return !taskIsNotice(t); });
     var recurringScheduled = allRecurring.filter(function(t){
       return (t.due_weekday!==null && t.due_weekday!==undefined) || !!t.due_time;
     });

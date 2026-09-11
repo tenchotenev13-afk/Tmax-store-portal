@@ -1,5 +1,13 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v4 (12.09.2026) — деплой с ЕДНО нещо: постоянните задачи важат ПО СЕДМИЦИ
+   (нова таблица recurring_task_periods, миграция 20260911204550).
+
+   collectWeeklyRoutingData взима задачите, валидни за седмицата на бюлетина
+   (recurringTasksForWeek — копие от shared.js), вместо active=eq.true:
+   отчетът е за приключилата седмица, а active описва текущата. Спряна днес
+   задача още получава картичка за миналата седмица; активирана днес — не.
+
    v3 (11.09.2026) — деплой с ЕДНО нещо: постоянна задача, изключена за
    седмица (нова таблица recurring_task_skips, миграция 20260911080537).
 
@@ -136,6 +144,25 @@ function recurringSkipStores(taskId, skips){
   return skips.filter(function(s){
     return !!s&&String(s.recurring_task_id)===id&&s.store_name!==null&&s.store_name!==undefined;
   }).map(function(s){ return s.store_name; });
+}
+/* Копия от shared.js — постоянна задача по седмици (recurring_task_periods).
+   tests/report-edge-sync.test.js сверява копията. */
+function recurringValidForWeek(taskId, mondayISO, periods){
+  if(!Array.isArray(periods)||!mondayISO) return false;
+  var id=String(taskId);
+  return periods.some(function(p){
+    return !!p&&String(p.recurring_task_id)===id&&p.from_monday<=mondayISO&&
+      (p.to_monday===null||p.to_monday===undefined||p.to_monday>=mondayISO);
+  });
+}
+function recurringTasksForWeek(tasks, periods, mondayISO){
+  if(!mondayISO) return (Array.isArray(tasks)?tasks:[]).filter(function(t){ return !!t&&!!t.active; });
+  var has={};
+  (Array.isArray(periods)?periods:[]).forEach(function(p){ if(p) has[String(p.recurring_task_id)]=1; });
+  return (Array.isArray(tasks)?tasks:[]).filter(function(t){
+    if(!t) return false;
+    return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
+  });
 }
 function isReportableStore(name){
   return !!name && REPORT_EXCLUDED_STORES.indexOf(name) < 0;
@@ -366,16 +393,18 @@ function collectWeeklyRoutingData(cb){
   Promise.all([
     /* Списък, не limit=1 - изборът на правилната седмица е по-долу. */
     sbGet('bulletins','status=eq.published&order=year.desc,week_number.desc&limit=20'),
-    sbGet('recurring_tasks','active=eq.true')
+    /* ВСИЧКИ задачи + периодите — отчетът е за приключилата седмица. */
+    sbGet('recurring_tasks'),
+    sbGet('recurring_task_periods','select=recurring_task_id,from_monday,to_monday')
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], target);
+    var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
     /* Задачите „Само за информация" отпадат ТУК, на входа: те нямат
        task_completions и влизат и в числителя, и в знаменателя като вечно
        неизпълнени. Един филтър вместо условие във всяко броене надолу —
        виж taskIsNotice(). */
-    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
+    var allRecurring = recurringTasksForWeek(results[1], results[2], wkDates ? wkDates[0] : null).filter(function(t){ return !taskIsNotice(t); });
     var routedRecurring = allRecurring.filter(function(t){ return t.report_groups && t.report_groups.length; });
-    var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
     var weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
 
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);

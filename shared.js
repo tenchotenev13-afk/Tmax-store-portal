@@ -311,8 +311,11 @@ function recurringValidForWeek(taskId, mondayISO, periods){
    период се води по кеша active: така я е създал кеширан стар клиент, или
    периодите не са се заредили (sbGet при грешка връща []) — провалена
    заявка не бива да изпразни бюлетина. Спряна в първата си седмица задача
-   няма период и е active=false → не важи никъде, както трябва. */
+   няма период и е active=false → не важи никъде, както трябва.
+   Без mondayISO (отчет без публикуван бюлетин — няма седмица, към която да
+   се отнесе) решава пак кешът active, тоест поведението отпреди периодите. */
 function recurringTasksForWeek(tasks, periods, mondayISO){
+  if(!mondayISO) return (Array.isArray(tasks)?tasks:[]).filter(function(t){ return !!t&&!!t.active; });
   var has={};
   (Array.isArray(periods)?periods:[]).forEach(function(p){ if(p) has[String(p.recurring_task_id)]=1; });
   return (Array.isArray(tasks)?tasks:[]).filter(function(t){
