@@ -16,7 +16,9 @@
      3. личният седмичен отчет (collectWeeklyRoutingData) също;
      4. таб „Днес": задачата не се появява;
      5. Седмичният календар: РЕД има, но БЕЗ <input type=checkbox> и без
-        брояча X/18 — това е единственото място, където notice се вижда;
+        брояча X/18 — единственото място, където ЕДНОКРАТНА notice се вижда
+        (постоянната е и в блока „Постоянни задачи", заради ✏️ — виж
+        tests/recurring-notice-block.test.js);
      6. редакторът на задачи и на постоянни задачи предлагат вида и записват
         task_type='notice';
      7. новите етикети на info („Обикновена…", „Обикн.");
@@ -319,9 +321,13 @@ const weekly = h => new Promise(res => { h.w.collectWeeklyReportData(res); });
     }
   }
 
-  section('6в. Извън календара notice я няма никъде в Бюлетина');
+  section('6в. Извън календара ЕДНОКРАТНАТА notice я няма; постоянната — само в своя ред в блока');
   {
-    const h = env({ at: 2, user: MANAGER });
+    /* От 11.09.2026 постоянната notice е и в блока „Постоянни задачи" (там е
+       ✏️ — tests/recurring-notice-block.test.js). Затова двете получават
+       различни заглавия: еднократната пак не бива да излиза извън календара. */
+    const REC_NOTICE_TITLE = 'Постоянна бележка за проверка';
+    const h = env({ at: 2, user: MANAGER, recurring: [recTask(), noticeRec({ title: REC_NOTICE_TITLE })] });
     if (guard('loadBulletin() не хвърля', () => h.w.loadBulletin())) {
       await ticks(); await ticks(); await ticks();
       const wrap = h.doc.getElementById('mod-bulletin');
@@ -329,10 +335,17 @@ const weekly = h => new Promise(res => { h.w.collectWeeklyReportData(res); });
       if (ok('изгледът се рендира', !!wrap && !!cal)) {
         /* Целият модул минус календара: списъкът по отдел, панелът, всичко. */
         const outside = wrap.innerHTML.split(cal.innerHTML).join('');
-        ok('notice я няма извън календара',
+        ok('еднократната notice я няма извън календара',
           outside.indexOf(NOTICE_TITLE) < 0);
         ok('работната задача Е извън календара (контрола)',
           outside.indexOf(WORK_TITLE) >= 0);
+        /* Постоянната: извън календара е САМО в реда на блока. */
+        const rows = Array.prototype.slice.call(wrap.querySelectorAll('[data-rec-row="r-notice"]'))
+          .filter(r => !cal.contains(r));
+        let rest = outside;
+        rows.forEach(r => { rest = rest.split(r.outerHTML).join(''); });
+        ok('постоянната notice има ред в блока', rows.length >= 1, String(rows.length));
+        ok('и извън този ред я няма', rest.indexOf(REC_NOTICE_TITLE) < 0);
       }
     }
   }

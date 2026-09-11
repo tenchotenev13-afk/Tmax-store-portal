@@ -1270,7 +1270,8 @@ function renderBulView(){
       html+='<div style="margin-bottom:8px;">';
       html+='<div style="font-size:10.5px;font-weight:800;text-transform:uppercase;color:'+dept.color+';letter-spacing:.03em;margin-bottom:4px;">'+dept.icon+' '+dept.label+'</div>';
       regItems.forEach(function(t){
-        /* Календарът е ЕДИНСТВЕНОТО място, където notice се показва — тук
+        /* Календарът е ЕДИНСТВЕНОТО място, където еднократна notice се
+           показва (постоянната е и в блока „Постоянни задачи", заради ✏️) — тук
            филтърът е обратен на всички останали: не изхвърляне, а собствен
            ред. Ранният return минава и покрай брояча, и покрай чекбокса. */
         if(taskIsNotice(t)){ html+=calNoticeRowHtml(t,'regular'); return; }
@@ -3528,8 +3529,11 @@ function renderBulAnalysis(){
 /* ═══════ ПОСТОЯННИ ЗАДАЧИ ════════════════════════════════════ */
 function renderRecurringTasks(dk) {
   var store = currentUser && currentUser.store_name;
-  /* notice се показва САМО в Седмичния календар — виж taskIsNotice() в shared.js. */
-  var dTasksAll = recurringTasks.filter(function(t){return t.department===dk&&!taskIsNotice(t);});
+  /* notice ОСТАВА в блока (11.09.2026): тук е единственият ✏️ / „⏸ Спри" / ✕
+     за постоянна задача, а без него notice не можеше да се пипне от екрана.
+     Редът ѝ е сив, без чекбокс и без „Отложи" — виж isNotice по-долу. Броенето
+     (loadTasksStats, отчетите, „Днес") си филтрира notice само. */
+  var dTasksAll = recurringTasks.filter(function(t){return t.department===dk;});
   /* Магазин вижда само постоянни задачи БЕЗ target_stores (= всички) или
      изрично таргетирани към него - огледално на обикновените задачи. */
   var dTasks = dTasksAll.filter(function(t){
@@ -3557,26 +3561,30 @@ function renderRecurringTasks(dk) {
   if (dTasks.length) {
     h += '<div style="padding:8px 14px;">';
     dTasks.forEach(function(t,recIdxInDept) {
-      var isMultiRec = recurringIsMultiDay(t);
+      /* „Само за информация": няма отмятания — нито чекбокс, нито „Отложи",
+         нито „(днес!)". Минава по еднодневния път без дата, за да не стигне
+         до многодневния брояч „X/Y дни отметнати". */
+      var isNotice = taskIsNotice(t);
+      var isMultiRec = !isNotice && recurringIsMultiDay(t);
       /* Прозоречната задача има ЕДНО състояние, затова минава по
          единично-дневния път. Датата ѝ е днешната, ако днес е в прозореца
          (тогава чекбоксът е отключен), иначе срокът — така заключването само
          казва „още не е настъпил"/„приключил". */
-      var isWinRec = recurringIsWindow(t);
+      var isWinRec = !isNotice && recurringIsWindow(t);
       var winComp = isWinRec ? recurringWindowComp(t,store,weekDaysArr) : null;
       var singleRecDate = isMultiRec ? null
         : (isWinRec ? recurringWindowCheckDate(t,weekDaysArr)
           : (recTaskWeekdays(t).length ? weekdayIdxToDate(recTaskWeekdays(t)[0]) : toLocalISO(new Date())));
-      var compObj = winComp || (store && !isMultiRec && recurringComps.find(function(c){return c.recurring_task_id===t.id && c.store_name===store && (c.completion_date||null)===singleRecDate;}));
+      var compObj = !isNotice && (winComp || (store && !isMultiRec && recurringComps.find(function(c){return c.recurring_task_id===t.id && c.store_name===store && (c.completion_date||null)===singleRecDate;})));
       var done = !!compObj && compObj.status==='done';
       var postponed = !!compObj && compObj.status==='postponed';
-      var dueToday = recurringIsDueToday(t);
+      var dueToday = !isNotice && recurringIsDueToday(t);
       /* Изключена за седмицата: за обекта — сив ред без чекбокс и без
          „Отложи"; в глобален изглед сивее само глобалното изключване, а
          магазинното е само бадж със списъка. Виж bulSkipWeek(). */
       var skipView = recurringIsSkipped(t.id,bulSkipViewStore(),bulSkips);
       var isFirstRec=recIdxInDept===0, isLastRec=recIdxInDept===dTasks.length-1;
-      var titleColor = (done||skipView)?'#94a3b8':postponed?'#b45309':'#0f172a';
+      var titleColor = (done||skipView||isNotice)?'#94a3b8':postponed?'#b45309':'#0f172a';
       h += '<div class="rec-task-row" data-rec-row="'+t.id+'" style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
       if (canEdit()) {
         h += '<div style="display:flex;flex-direction:column;gap:1px;flex-shrink:0;margin-top:1px;">'+
@@ -3586,6 +3594,8 @@ function renderRecurringTasks(dk) {
       }
       if (skipView) {
         h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;color:#94a3b8;" title="Не се изисква тази седмица">⏸</div>';
+      } else if (isNotice) {
+        h += '<div style="width:16px;flex-shrink:0;" title="Само за информация — не се отмята"></div>';
       } else if (isMultiRec) {
         h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
       } else {
@@ -3615,7 +3625,7 @@ function renderRecurringTasks(dk) {
       h += renderRecurringAttachments(t);
       h += '</div>';
       var showBtns='';
-      if(!isGlobal()&&!isMultiRec&&!done&&!skipView){
+      if(!isGlobal()&&!isMultiRec&&!done&&!skipView&&!isNotice){
         if(postponed)showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
         else showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
       }
@@ -3650,7 +3660,9 @@ function moveRecInDept(id,dir){
   var task=recurringTasks.find(function(t){return String(t.id)===String(id);});
   if(!task)return;
   var dept=task.department;
-  var deptTasks=recurringTasks.filter(function(t){return t.department===dept&&!taskIsNotice(t);});
+  /* Същият набор като dTasksAll в renderRecurringTasks() — notice вече е в
+     блока и има ▲▼. Разминат ли се, стрелката на notice дава idx=-1. */
+  var deptTasks=recurringTasks.filter(function(t){return t.department===dept;});
   var idx=deptTasks.findIndex(function(t){return String(t.id)===String(id);});
   var newIdx=idx+dir;
   if(newIdx<0||newIdx>=deptTasks.length)return;
