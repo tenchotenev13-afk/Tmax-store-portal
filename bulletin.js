@@ -928,6 +928,33 @@ function bulLockRejected(cb){
   return true;
 }
 
+/* ─── „📅 Срок" НА ЕДНОДНЕВНА ЗАДАЧА ──────────────────────────────────
+   Изпълнената задача не е просрочена: сиво, без „Просрочено"/„(Днес!)"/
+   „(N дни)". Отметната СЛЕД срока → „✓ със закъснение", пак сиво.
+   Денят на отмятането е completed_at (локално), НЕ completion_date — той е
+   ключът по деня на срока и при еднодневна задача е равен на него винаги.
+   Отложената (status 'postponed') не е изпълнена и се държи както досега.
+   overdueTxt: двата изгледа пишат просрочената различно — ' ⚠️' в блока по
+   отдел, ' ⚠️ Просрочено' в панела на обекта. */
+function bulDoneComp(taskId,store,dateISO){
+  return bulComps.find(function(c){return c.task_id===taskId&&c.store_name===store&&c.status==='done'&&(c.completion_date||null)===dateISO;})||null;
+}
+function bulDueLineHtml(dueISO,doneComp,overdueTxt){
+  var due=new Date(dueISO+'T00:00:00');
+  var t0=new Date(); t0.setHours(0,0,0,0);
+  var diff=Math.ceil((due-t0)/86400000);
+  var suffix, color;
+  if(doneComp){
+    var at=doneComp.completed_at?new Date(doneComp.completed_at):null;
+    suffix=(at&&!isNaN(at.getTime())&&toLocalISO(at)>dueISO)?' ✓ със закъснение':'';
+    color='#94a3b8';
+  } else {
+    suffix=diff<0?overdueTxt:diff===0?' (Днес!)':diff<=2?' ('+diff+' дни)':'';
+    color=diff<0?'#dc2626':diff<=2?'#d97706':'#94a3b8';
+  }
+  return '<div style="font-size:10px;color:'+color+';margin-top:2px;">📅 Срок: '+due.toLocaleDateString('bg-BG')+suffix+'</div>';
+}
+
 /* ─── ПРЕВКЛЮЧВАТЕЛ МЕЖДУ БЮЛЕТИНИ (само admin/accounting) ─── */
 function loadBulletinList(){
   var q='select=id,week_number,year,status,created_at&order=created_at.desc&limit=20';
@@ -1424,10 +1451,6 @@ function renderBulView(){
         var done=store&&!isMulti&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===singleDate;});
         var postponed=store&&!isMulti&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='postponed'&&(cc.completion_date||null)===singleDate;});
         var compObj=store&&!isMulti&&bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===store&&(cc.completion_date||null)===singleDate;});
-        var due=singleDate?new Date(singleDate+'T00:00:00'):null;
-        var today=new Date();today.setHours(0,0,0,0);
-        var diff=due?Math.ceil((due-today)/86400000):null;
-        var dueColor=diff===null?'#94a3b8':diff<0?'#dc2626':diff<=2?'#d97706':'#94a3b8';
         var deptTasksForNav=bulTasks.filter(function(x){return x.department===t.department&&!taskIsNotice(x);});
         var taskIdxInDept=deptTasksForNav.findIndex(function(x){return String(x.id)===String(t.id);});
         var isFirstTask=taskIdxInDept===0, isLastTask=taskIdxInDept===deptTasksForNav.length-1;
@@ -1455,8 +1478,8 @@ function renderBulView(){
           } else if(isGlobal()){
             html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">Живи бройки по дни виж в 📅 Седмичен календар по-горе</div>';
           }
-        } else if(due){
-          html+='<div style="font-size:10px;color:'+dueColor+';margin-top:2px;">📅 Срок: '+due.toLocaleDateString('bg-BG')+(diff<0?' ⚠️':diff===0?' (Днес!)':diff<=2?' ('+diff+' дни)':'')+"</div>";
+        } else if(singleDate){
+          html+=bulDueLineHtml(singleDate,done?bulDoneComp(t.id,store,singleDate):null,' ⚠️');
         }
         if(isGlobal()&&t.target_stores&&t.target_stores.length)html+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🏬 Само за: '+t.target_stores.map(esc).join(', ')+'</div>';
         if(isGlobal()&&t.created_by)html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">👤 Поставена от: '+esc(t.created_by)+'</div>';
@@ -2999,11 +3022,7 @@ function renderTasksPanel() {
         if (isMulti) {
           h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">📅 Дни: '+taskDueLabel(t)+' — отмятай в 📅 Седмичен календар</div>';
         } else if (singleDate) {
-          var due = new Date(singleDate+'T00:00:00');
-          var today = new Date(); today.setHours(0,0,0,0);
-          var diff = Math.ceil((due-today)/86400000);
-          var dueColor = diff < 0 ? '#dc2626' : diff <= 2 ? '#d97706' : '#94a3b8';
-          h += '<div style="font-size:10px;color:'+dueColor+';margin-top:2px;">📅 Срок: '+due.toLocaleDateString("bg-BG")+(diff<0?' ⚠️ Просрочено':diff===0?' (Днес!)':diff<=2?' ('+diff+' дни)':'')+'</div>';
+          h += bulDueLineHtml(singleDate, isDone ? bulDoneComp(t.id,store,singleDate) : null, ' ⚠️ Просрочено');
         }
         if (isDone && compInfo) {
           h += '<div style="font-size:10px;color:#16a34a;margin-top:2px;">✓ '+esc(compInfo.completed_by||'')+'</div>';
