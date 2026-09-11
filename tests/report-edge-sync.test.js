@@ -106,7 +106,12 @@ const COPIED_HELPERS = [
   /* Предикатът за задача „Само за информация". Разминае ли се копието,
      notice влиза в знаменателя на автоматичния имейл, но не и в портала —
      тоест писмото казва едно, екранът друго, и никой не гледа кода. */
-  { fn: 'taskIsNotice', from: SHARED }
+  { fn: 'taskIsNotice', from: SHARED },
+  /* Изключване на постоянна задача за седмица (recurring_task_skips).
+     Разминае ли се копието, изключеният обект остава в знаменателя на
+     автоматичния имейл, докато порталът вече не го брои. */
+  { fn: 'recurringIsSkipped', from: SHARED },
+  { fn: 'recurringSkipStores', from: SHARED }
 ];
 
 /* Съзнателни разминавания — изброени, за да не изглеждат като пропуск.
@@ -150,6 +155,9 @@ const ROUTED_COPIED = [
   { fn: 'taskDueDates', from: BULLETIN },
   { fn: 'recurringIsDueOnWeekday', from: BULLETIN },
   { fn: 'taskIsNotice', from: SHARED },
+  /* Изключване за седмица — вижда се в taskStoreBreakdown като skip_stores. */
+  { fn: 'recurringIsSkipped', from: SHARED },
+  { fn: 'recurringSkipStores', from: SHARED },
   /* Кешът с хората от ЦО е браузърен, но самото четене от него не е —
      обработчикът долу го пълни, преди да повика колектора. Копието
      позволява resolveRecipientsForTask да остане дословно същата. */

@@ -136,7 +136,8 @@ const TESTS = [
   'co-detail-modal.test.js',
   'co-new-for-fulfiller.test.js',
   'recurring-task-skips.test.js',
-  'recurring-task-skips-consumers.test.js'
+  'recurring-task-skips-consumers.test.js',
+  'recurring-task-skips-report.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

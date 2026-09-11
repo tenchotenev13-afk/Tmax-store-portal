@@ -1,5 +1,16 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v3 (11.09.2026) — деплой с ЕДНО нещо: постоянна задача, изключена за
+   седмица (нова таблица recurring_task_skips, миграция 20260911080537).
+
+   collectWeeklyRoutingData тегли изключванията за седмицата на бюлетина.
+   Изключена за всички → картичка няма. Изключена за отделни обекти →
+   skip_stores на задачата; taskStoreBreakdown ги вади от обхвата, тоест не
+   ги изброява нито като изпълнили, нито като „Не са изпълнили". Насочена
+   задача, чиито обекти са изключени до един, също няма картичка („0 от 0").
+   recurringIsSkipped() и recurringSkipStores() са копия от shared.js;
+   tests/report-edge-sync.test.js ги сверява.
+
    v2 (10.09.2026) — деплой с ЕДНО нещо: нов вид задача „Само за информация".
 
    Задача „Само за информация" (task_type='notice') се показва като текст в
@@ -109,6 +120,23 @@ var REPORT_EXCLUDED_STORES = ['Централен офис'].concat(LOGISTICS_WA
    Задача „Само за информация": показва се само в Седмичния календар на
    Бюлетина и не влиза в нито един отчет, брояч или известие. */
 function taskIsNotice(t){ return !!t && t.task_type === 'notice'; }
+/* Копие от shared.js — изключване на постоянна задача за седмица
+   (recurring_task_skips). tests/report-edge-sync.test.js сверява копието. */
+function recurringIsSkipped(taskId, store, skips){
+  if(!Array.isArray(skips)||!skips.length) return false;
+  var id=String(taskId);
+  return skips.some(function(s){
+    if(!s||String(s.recurring_task_id)!==id) return false;
+    return s.store_name===null||s.store_name===undefined||(!!store&&s.store_name===store);
+  });
+}
+function recurringSkipStores(taskId, skips){
+  if(!Array.isArray(skips)) return [];
+  var id=String(taskId);
+  return skips.filter(function(s){
+    return !!s&&String(s.recurring_task_id)===id&&s.store_name!==null&&s.store_name!==undefined;
+  }).map(function(s){ return s.store_name; });
+}
 function isReportableStore(name){
   return !!name && REPORT_EXCLUDED_STORES.indexOf(name) < 0;
 }
@@ -351,7 +379,12 @@ function collectWeeklyRoutingData(cb){
     var weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
 
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
-    bulTasksPromise.then(function(tasksRaw){
+    /* Изключванията за седмицата на бюлетина — същият ключ и същата
+       заявка като в общия седмичен отчет (collectWeeklyReportData). */
+    var skipsPromise = bul ? sbGet('recurring_task_skips','year=eq.'+bul.year+'&week_number=eq.'+bul.week_number+'&select=recurring_task_id,store_name') : Promise.resolve([]);
+    Promise.all([bulTasksPromise, skipsPromise]).then(function(pre){
+      var tasksRaw = pre[0];
+      var recSkips = Array.isArray(pre[1]) ? pre[1] : [];
       var allTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
       var routedRegular = allTasks.filter(function(t){ return t.report_groups && t.report_groups.length; });
 
@@ -360,6 +393,17 @@ function collectWeeklyRoutingData(cb){
       var routedTasks = [];
       var addRouted = function(t, kind){
         t.kind = kind;
+        /* Постоянна задача, изключена за седмицата ЗА ВСИЧКИ — картичка
+           няма. За отделни обекти — skip_stores, който taskStoreBreakdown
+           вади от обхвата, за да не ги изброи като „не са изпълнили". */
+        if (kind === 'recurring') {
+          if (recurringIsSkipped(t.id, null, recSkips)) return;
+          t.skip_stores = recurringSkipStores(t.id, recSkips);
+          /* Насочена задача, чиито обекти са изключени до един — картичка
+             „0 от 0" не казва нищо; същото като при изключване за всички. */
+          if (t.target_stores && t.target_stores.length &&
+              t.target_stores.every(function(s){ return t.skip_stores.indexOf(s) >= 0; })) return;
+        }
         var win = reportRoutedTaskWindow(t, wkDates, bul);
         if (!win) return;
         t.date = win.date; t.dateFrom = win.dateFrom; t.dateTo = win.dateTo;
@@ -500,6 +544,11 @@ function buildRecipientMap(tasks, regionalUsers, creatorMap){
    съща таблица с различни ID колони, но теоретично биха могли да съвпаднат. */
 function taskStoreBreakdown(task, comps, allStores){
   var scope = (task.target_stores && task.target_stores.length) ? task.target_stores : allStores;
+  /* Изключените за седмицата обекти не са в обхвата — нито „изпълнили",
+     нито „не са изпълнили". Същото правило като 'na' в reportBuildSummary. */
+  if (task.skip_stores && task.skip_stores.length) {
+    scope = scope.filter(function(s){ return task.skip_stores.indexOf(s) < 0; });
+  }
   var done=[], postponed=[], pending=[];
   var taskKind = task.kind||'regular';
   /* Същият предикат като процента в общия отчет. Дотук съвпадението беше

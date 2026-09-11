@@ -1,6 +1,25 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v28 (11.09.2026) — деплой с ЕДНО нещо: постоянна задача, изключена за
+   седмица (нова таблица recurring_task_skips, миграция 20260911080537).
+
+   Ред в таблицата значи „тази седмица задачата не се изисква" — за всички
+   обекти (store_name NULL) или за един. И двата колектора теглят
+   изключванията за СЪЩАТА седмица, която броят: дневният — за седмицата
+   на отчетния ден (dayTarget), седмичният — за седмицата на бюлетина (bul).
+     · изключена за всички → задачата не влиза в набора;
+     · изключена за обект  → skip_stores на елемента; reportBuildSummary
+       дава 'na' за този обект — извън неговия числител и знаменател, без
+       да пипа процента на останалите. Същият обект не се изрежда и в
+       списъците „Отложени" / „Коментари" под решетката;
+     · „без срок" (noDueCount) в седмичния също не брои изключените за
+       всички — както дневният, който ги маха на входа.
+   recurringIsSkipped() и recurringSkipStores() са копия от shared.js;
+   tests/report-edge-sync.test.js сверява и тях, и колекторите.
+
+   Останалото в отчета не е пипано.
+
    v27 (10.09.2026): waitDays се смята от по-ранната от date/created_at
    (синхрон с client-orders.js calcElapsed); date добавена в select.
 
@@ -490,6 +509,23 @@ var REPORT_EXCLUDED_STORES = ['Централен офис'].concat(LOGISTICS_WA
    Задача „Само за информация": показва се само в Седмичния календар на
    Бюлетина и не влиза в нито един отчет, брояч или известие. */
 function taskIsNotice(t){ return !!t && t.task_type === 'notice'; }
+/* Копие от shared.js — изключване на постоянна задача за седмица
+   (recurring_task_skips). tests/report-edge-sync.test.js сверява копието. */
+function recurringIsSkipped(taskId, store, skips){
+  if(!Array.isArray(skips)||!skips.length) return false;
+  var id=String(taskId);
+  return skips.some(function(s){
+    if(!s||String(s.recurring_task_id)!==id) return false;
+    return s.store_name===null||s.store_name===undefined||(!!store&&s.store_name===store);
+  });
+}
+function recurringSkipStores(taskId, skips){
+  if(!Array.isArray(skips)) return [];
+  var id=String(taskId);
+  return skips.filter(function(s){
+    return !!s&&String(s.recurring_task_id)===id&&s.store_name!==null&&s.store_name!==undefined;
+  }).map(function(s){ return s.store_name; });
+}
 function isReportableStore(name){
   return !!name && REPORT_EXCLUDED_STORES.indexOf(name) < 0;
 }
@@ -534,14 +570,21 @@ function collectDailyReportData(cb, scope, kasaThreshold){
   var dayTarget = reportWeekOfMonday(reportMondayOfWeek(reportDay));
   Promise.all([
     sbGet('bulletins','status=eq.published&order=year.desc,week_number.desc&limit=20'),
-    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc')
+    sbGet('recurring_tasks','active=eq.true&order=sort_order.asc'),
+    /* Изключванията (recurring_task_skips) за седмицата на ОТЧЕТНИЯ ден —
+       dayTarget е ISO двойката от понеделника му, същият ключ, който
+       Бюлетинът записва. */
+    dayTarget ? sbGet('recurring_task_skips','year=eq.'+dayTarget.year+'&week_number=eq.'+dayTarget.week+'&select=recurring_task_id,store_name') : Promise.resolve([])
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], dayTarget);
+    var recSkips = Array.isArray(results[2]) ? results[2] : [];
     /* Задачите „Само за информация" отпадат ТУК, на входа: те нямат
        task_completions и влизат и в числителя, и в знаменателя като вечно
        неизпълнени. Един филтър вместо условие във всяко броене надолу —
-       виж taskIsNotice(). */
-    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t); });
+       виж taskIsNotice(). Същото за изключените за седмицата ЗА ВСИЧКИ;
+       изключените за отделен обект минават като skip_stores на елемента и
+       излизат само от неговия знаменател (reportBuildSummary). */
+    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t) && !recurringIsSkipped(t.id, null, recSkips); });
     /* Прозоречната задача се явява ВЕДНЪЖ — в деня на срока. Иначе обект,
        свършил я в понеделник, излиза неизпълнил във вторник и в сряда, и се
        брои три пъти. */
@@ -562,7 +605,7 @@ function collectDailyReportData(cb, scope, kasaThreshold){
 
       var items = [];
       regularToday.forEach(function(t){ items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null }); });
-      recurringToday.forEach(function(t){ items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null }); });
+      recurringToday.forEach(function(t){ items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null, skip_stores:recurringSkipStores(t.id, recSkips) }); });
 
       var regIds = regularToday.map(function(t){ return t.id; });
       var recIds = recurringToday.map(function(t){ return t.id; });
@@ -854,6 +897,10 @@ function reportBuildSummary(items, comps, stores, noDueCount){
     var cells = items.map(function(it){
       var inScope = !it.target_stores || !it.target_stores.length || it.target_stores.indexOf(s)>=0;
       if (!inScope) return 'na';
+      /* Изключена за седмицата за ТОЗИ обект (recurring_task_skips) — също
+         „не важи": извън числителя и знаменателя му, без да пипа другите
+         обекти. Отметка отпреди изключването не я прави изпълнена. */
+      if (it.skip_stores && it.skip_stores.indexOf(s)>=0) return 'na';
       if (doneComps.some(function(c){ return c.store_name===s && reportItemMatchesComp(it,c); })) return 'done';
       if (postponedComps.some(function(c){ return c.store_name===s && reportItemMatchesComp(it,c); })) return 'postponed';
       return 'missing';
@@ -881,8 +928,13 @@ function reportBuildSummary(items, comps, stores, noDueCount){
      върнала - тоест цялата история. Оттам идваше противоречието: „0 от 27"
      по обекти и 213 изброени коментара в едно и също писмо за една седмица.
      Един и същи предикат за трите места, за да не се разминат отново. */
+  /* Изключеният за седмицата обект е 'na' в решетката — тогава и списъците
+     под нея не бива да го изреждат като „отложил" или „коментирал" същата
+     задача (отметка или отлагане отпреди изключването). */
   var inWindow = function(c){
-    return items.some(function(it){ return reportItemMatchesComp(it, c); });
+    return items.some(function(it){
+      return reportItemMatchesComp(it, c) && !(it.skip_stores && it.skip_stores.indexOf(c.store_name)>=0);
+    });
   };
   /* След филтъра find() винаги намира явяването, тоест „(неизвестна задача)"
      става недостижимо - точно записите, които го показваха, бяха тези извън
@@ -1428,8 +1480,16 @@ function collectWeeklyReportData(cb, scope){
     var noDueCount = allRecurring.length - recurringScheduled.length;
 
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
+    /* Изключванията за СЕДМИЦАТА НА БЮЛЕТИНА — от нея се строят и датите
+       на явяванията долу, тоест ключът е същата седмица, която се брои. */
+    var skipsPromise = bul ? sbGet('recurring_task_skips','year=eq.'+bul.year+'&week_number=eq.'+bul.week_number+'&select=recurring_task_id,store_name') : Promise.resolve([]);
 
-    bulTasksPromise.then(function(tasksRaw){
+    Promise.all([bulTasksPromise, skipsPromise]).then(function(pre){
+      var tasksRaw = pre[0];
+      var recSkips = Array.isArray(pre[1]) ? pre[1] : [];
+      /* „Без срок" също без изключените за всички — иначе дневният (който ги
+         маха на входа) и седмичният дават различно число за същата седмица. */
+      noDueCount = allRecurring.filter(function(t){ return recurringScheduled.indexOf(t) < 0 && !recurringIsSkipped(t.id, null, recSkips); }).length;
       var allBulTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
 
       /* Датите на отчетната седмица - нужни са и при СТРОЕНЕТО на явяванията
@@ -1466,6 +1526,10 @@ function collectWeeklyReportData(cb, scope){
            reportItemMatchesComp приемаше кое да е отмятане на същата задача.
            Оттам идваха „изпълнените" в стария snapshot. */
         if (!occDates.length) return;
+        /* Изключена за седмицата ЗА ВСИЧКИ — не е дължима, не влиза в
+           набора. За отделни обекти — skip_stores на всеки елемент. */
+        if (recurringIsSkipped(t.id, null, recSkips)) return;
+        var skipSt = recurringSkipStores(t.id, recSkips);
         recWithOcc.push(t.id);
         /* Прозорец: ЕДИН елемент за седмицата, с ДИАПАЗОН вместо дата.
            reportItemMatchesComp() вече брои отмятане вътре в dateFrom..dateTo
@@ -1475,16 +1539,16 @@ function collectWeeklyReportData(cb, scope){
            излиза изпълнена само за понеделник. */
         if (recurringIsWindow(t)) {
           items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null,
-                       dateFrom: occDates[0], dateTo: occDates[occDates.length-1] });
+                       dateFrom: occDates[0], dateTo: occDates[occDates.length-1], skip_stores:skipSt });
           return;
         }
         if (occDates.length > 1) {
           occDates.forEach(function(d){
             var dLabel = new Date(d+'T00:00:00').toLocaleDateString('bg-BG',{day:'numeric',month:'numeric'});
-            items.push({ id:t.id, kind:'recurring', title:t.title+' ('+dLabel+')', baseTitle:t.title, target_stores:t.target_stores||null, date:d });
+            items.push({ id:t.id, kind:'recurring', title:t.title+' ('+dLabel+')', baseTitle:t.title, target_stores:t.target_stores||null, date:d, skip_stores:skipSt });
           });
         } else {
-          items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null, date: occDates[0] });
+          items.push({ id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null, date: occDates[0], skip_stores:skipSt });
         }
       });
 
