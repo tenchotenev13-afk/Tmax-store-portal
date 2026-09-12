@@ -201,15 +201,26 @@ function urlsFor(calls, table) {
     h.w.collectWeeklyRoutingData(function (d) { data = d; });
     await ticks();
 
+    /* От 12.09.2026 заявките са ЧЕТИРИ: по две за обикновени и постоянни —
+       по completion_date (явяванията на седмицата) и по postponed_to
+       (пренесените В нея). Вторите носят другата колона, затова прозорецът се
+       проверява по групи, а не с едно условие за всички. */
     const compUrls = urlsFor(h.calls, 'task_completions');
-    ok('има две заявки за отмятания (обикновени + постоянни)',
-      compUrls.length === 2, String(compUrls.length));
-    const missing = compUrls.filter(u =>
+    const byDate = compUrls.filter(u => u.indexOf('completion_date=') >= 0);
+    const byCarry = compUrls.filter(u => u.indexOf('postponed_to=') >= 0);
+    ok('има четири заявки за отмятания', compUrls.length === 4, String(compUrls.length));
+    ok('две по completion_date, две по postponed_to',
+      byDate.length === 2 && byCarry.length === 2, byDate.length + '/' + byCarry.length);
+    const missing = byDate.filter(u =>
       u.indexOf('completion_date=gte.' + wk.dates[0]) < 0 ||
       u.indexOf('completion_date=lte.' + wk.dates[6]) < 0);
-    ok('и двете носят прозореца на седмицата', missing.length === 0,
+    ok('и двете по дата носят прозореца на седмицата', missing.length === 0,
       missing.join(' | '));
-
+    const missCarry = byCarry.filter(u =>
+      u.indexOf('postponed_to=gte.' + wk.dates[0]) < 0 ||
+      u.indexOf('postponed_to=lte.' + wk.dates[6]) < 0);
+    ok('и двете за пренесените носят СЪЩИЯ прозорец', missCarry.length === 0,
+      missCarry.join(' | '));
     if (ok('данните се събират', !!data)) {
       const ids = data.tasks.map(t => t.id).sort();
       ok('r-2 не влиза в набора (няма явяване тази седмица)',

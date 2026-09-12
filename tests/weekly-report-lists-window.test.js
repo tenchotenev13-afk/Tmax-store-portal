@@ -175,10 +175,16 @@ function comp(o) {
     const qs = h.calls.get.filter(u => u.indexOf('/task_completions') >= 0);
     if (ok('има заявки към task_completions (' + qs.length + ')', qs.length >= 1,
         h.calls.get.join('\n'))) {
+      /* От 12.09.2026 една от заявките е по ДРУГАТА колона — postponed_to
+         (пренесените В седмицата). Прозорецът е същият, затова проверката е
+         „всяка заявка носи прозорец по една от двете дати", а не „всички по
+         completion_date": второто би било невярно, без нищо да е счупено. */
       const withWindow = qs.filter(u =>
-        u.indexOf('completion_date=gte.') >= 0 && u.indexOf('completion_date=lte.') >= 0);
-      ok('ВСИЧКИ носят completion_date прозорец',
-        withWindow.length === qs.length, qs.join('\n'));
+        (u.indexOf('completion_date=gte.') >= 0 && u.indexOf('completion_date=lte.') >= 0) ||
+        (u.indexOf('postponed_to=gte.') >= 0 && u.indexOf('postponed_to=lte.') >= 0));
+      ok('ВСИЧКИ носят прозорец по дата', withWindow.length === qs.length, qs.join('\n'));
+      ok('точно една е по postponed_to (пренесените)',
+        qs.filter(u => u.indexOf('postponed_to=') >= 0).length === 1, qs.join('\n'));
       ok('прозорецът е точно седмицата на бюлетина (' + days[0] + ' — ' + days[6] + ')',
         qs.every(u => u.indexOf('gte.' + days[0]) >= 0 && u.indexOf('lte.' + days[6]) >= 0),
         qs.join('\n'));

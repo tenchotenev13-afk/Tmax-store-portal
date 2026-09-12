@@ -1,5 +1,16 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v5 (12.09.2026) — деплой с ЕДНО нещо: ОТЛАГАНЕ С ТОЧНА ДАТА
+   (нова колона task_completions.postponed_to, миграция 20260912152519).
+
+   taskStoreBreakdown решава пренесеното спрямо СЕДМИЦАТА на отчета, не
+   спрямо срока на задачата (картичката е за седмица): пренесено извън нея →
+   обектът излиза от обхвата, както при изключване, вместо да се изброява
+   като „не изпълнил"; пренесено вътре в нея → остава тук, отметнат или
+   отложен, а редът „⏱ обект" носи „→ дд.мм". Колекторът тегли и пренесените
+   В седмицата (втора заявка по postponed_to за същите задачи).
+   taskDueDateFor() е дословно копие от shared.js.
+
    v4 (12.09.2026) — деплой с ЕДНО нещо: постоянните задачи важат ПО СЕДМИЦИ
    (нова таблица recurring_task_periods, миграция 20260911204550).
 
@@ -164,6 +175,18 @@ function recurringTasksForWeek(tasks, periods, mondayISO){
     return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
   });
 }
+/* Копия от shared.js — отлагане с точна дата (task_completions.postponed_to).
+   Денят на задачата е postponed_to, ако редът е пренесен; completion_date
+   остава първоначалният срок. tests/report-edge-sync.test.js сверява копията:
+   разминае ли се, писмото брои деня, на който задачата вече не се очаква. */
+function taskDueDateFor(dueISO, comp){
+  var orig = dueISO ? String(dueISO).slice(0,10) : null;
+  if (!comp || !comp.postponed_to) return orig;
+  return String(comp.postponed_to).slice(0,10);
+}
+function taskIsMovedAway(comp){
+  return !!(comp && comp.postponed_to);
+}
 function isReportableStore(name){
   return !!name && REPORT_EXCLUDED_STORES.indexOf(name) < 0;
 }
@@ -273,15 +296,43 @@ function reportRecurringWeekDates(t, wk, yr){
    в postponedList (за секцията "Отложени" в репорта), не участва в %.
    Ако елемент носи .date (многодневна задача, разгъната на под-елементи по
    ден), сравнението изисква и completion_date да съвпада с точно този ден. */
+/* ═══ ПРЕНЕСЕНИ ЯВЯВАНИЯ (task_completions.postponed_to, 12.09.2026) ═════
+   Денят на едно отмятане е РЕАЛНИЯТ ден на задачата: за пренесен ред това е
+   postponed_to, а не completion_date (той остава първоначалния срок, защото
+   е ключът на записа). Затова съпоставянето по-долу минава през
+   taskDueDateFor() — дословно копие от shared.js в двете едж функции.
+   Следствията са две и двете са нарочни:
+     · пренесеното явяване се съпоставя с НОВИЯ си ден, тоест там е дължимо;
+     · първоначалният ден остава БЕЗ съвпадение и получава собствено
+       състояние 'moved' (стрелка в решетката) — виж reportCompMovedOff(). */
+function reportDM(iso){
+  var p = String(iso||'').slice(0,10).split('-');
+  return p.length===3 ? p[2]+'.'+p[1] : String(iso||'');
+}
+/* Пренесено ли е явяването НЯКЪДЕ другаде: редът е на ТОВА явяване по
+   първоначалния си ден, но реалният му ден вече не е в него. Пренесеното
+   ВЪТРЕ в диапазона на седмично явяване не е пренесено — за него денят е без
+   значение. Самото пренесено явяване (carried_to) никога не е „изнесено". */
+function reportCompMovedOff(it, c){
+  if (!taskIsMovedAway(c) || it.carried_to) return false;
+  if (it.id!==c.item_id || it.kind!==c.kind) return false;
+  var d = c.completion_date || null;
+  var onThis = it.date ? (d===it.date)
+             : (it.dateFrom ? (!!d && d>=it.dateFrom && d<=it.dateTo) : true);
+  if (!onThis) return false;
+  return !reportItemMatchesComp(it, c);
+}
+
 function reportItemMatchesComp(it, c){
   if (it.id!==c.item_id || it.kind!==c.kind) return false;
-  if (it.date) return (c.completion_date||null)===it.date;
+  /* Реалният ден на задачата, не ключът на записа — виж коментара горе. */
+  var cd = taskDueDateFor(c.completion_date, c);
+  if (it.date) return cd===it.date;
   /* Явяване за цяла седмица (задача от бюлетина без собствен срок) - брои се
      отмятане ВЪТРЕ в диапазона, не кое да е. Отмятане без дата не може да се
      отнесе към седмица, затова не съвпада. */
   if (it.dateFrom) {
-    var d = c.completion_date || null;
-    return !!d && d >= it.dateFrom && d <= it.dateTo;
+    return !!cd && cd >= it.dateFrom && cd <= it.dateTo;
   }
   /* Нито дата, нито диапазон - дневният репорт, чиито явявания нямат дата,
      защото самият той вече е стеснил comps до днешния ден в JS. */
@@ -436,6 +487,10 @@ function collectWeeklyRoutingData(cb){
         var win = reportRoutedTaskWindow(t, wkDates, bul);
         if (!win) return;
         t.date = win.date; t.dateFrom = win.dateFrom; t.dateTo = win.dateTo;
+        /* Самата СЕДМИЦА, отделно от прозореца на явяването: по нея
+           taskStoreBreakdown решава дали пренесеното е още тук, или е за
+           друга седмица. */
+        t.weekFrom = wkDates ? wkDates[0] : null; t.weekTo = wkDates ? wkDates[6] : null;
         routedTasks.push(t);
       };
       routedRegular.forEach(function(t){ addRouted(t, 'regular'); });
@@ -457,12 +512,21 @@ function collectWeeklyRoutingData(cb){
         ? '&completion_date=gte.' + wkDates[0] + '&completion_date=lte.' + wkDates[6]
         : '';
 
+      /* Пренесените В отчетната седмица за СЪЩИТЕ задачи: редът им носи в
+         completion_date ден от друга седмица и заявките по-горе не го виждат,
+         тоест обектът излизаше „не изпълнил" в новата седмица. Обхватът е по
+         postponed_to; задачата вече е в набора, затова филтърът е по id. */
+      var carryQ = wkDates
+        ? '&postponed_to=gte.' + wkDates[0] + '&postponed_to=lte.' + wkDates[6]
+        : '';
       Promise.all([
         regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+dateQ) : Promise.resolve([]),
         recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+dateQ) : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name'),
         sbGet('users','is_regional=eq.true&select=email,display_name,assigned_stores'),
-        sbGet('users','select=display_name,email') /* за резолвиране на created_by (display_name) -> email на създателя */
+        sbGet('users','select=display_name,email'), /* за резолвиране на created_by (display_name) -> email на създателя */
+        (carryQ && regIds.length) ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+carryQ) : Promise.resolve([]),
+        (carryQ && recIds.length) ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+carryQ) : Promise.resolve([])
       ]).then(function(r2){
         var regCompsRaw = Array.isArray(r2[0]) ? r2[0] : [];
         var recCompsRaw = Array.isArray(r2[1]) ? r2[1] : [];
@@ -479,8 +543,25 @@ function collectWeeklyRoutingData(cb){
         /* photos/files минават нататък - личната картичка ги показва.
            Дотук се изхвърляха точно тук, тоест задачите от тип photo/file
            стигаха до получателя само като число. */
-        var comps = regCompsRaw.map(function(c){ return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null }; })
-          .concat(recCompsRaw.map(function(c){ return { item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null }; }));
+        /* postponed_to минава нататък: по него taskStoreBreakdown решава
+           пренесено ли е явяването извън прозореца (обектът излиза от
+           обхвата) и накъде сочи стрелката в списъка „Отложени".
+           Обединяването по id е нужно, защото отлагане ВЪТРЕ в седмицата
+           връща един и същи ред по двата пътя. */
+        var carrySeen = {};
+        var mapComp = function(c, kind, id){
+          return { item_id:id, kind:kind, store_name:c.store_name, status:c.status, comment:c.comment,
+                   photos:c.photos, files:c.files, completion_date:c.completion_date||null,
+                   postponed_to:c.postponed_to||null };
+        };
+        regCompsRaw = regCompsRaw.concat(Array.isArray(r2[5]) ? r2[5] : []).filter(function(c){
+          if (!c.id) return true; if (carrySeen['r'+c.id]) return false; carrySeen['r'+c.id]=1; return true;
+        });
+        recCompsRaw = recCompsRaw.concat(Array.isArray(r2[6]) ? r2[6] : []).filter(function(c){
+          if (!c.id) return true; if (carrySeen['c'+c.id]) return false; carrySeen['c'+c.id]=1; return true;
+        });
+        var comps = regCompsRaw.map(function(c){ return mapComp(c, 'regular', c.task_id); })
+          .concat(recCompsRaw.map(function(c){ return mapComp(c, 'recurring', c.recurring_task_id); }));
         var creatorMap = {};
         allUsers.forEach(function(u){ if (u.display_name && u.email) creatorMap[u.display_name] = u.email; });
         cb({ bul:bul, weekLabel:weekLabel, tasks:routedTasks, comps:comps, stores:stores, regionalUsers:regionalUsers, creatorMap:creatorMap });
@@ -578,7 +659,7 @@ function taskStoreBreakdown(task, comps, allStores){
   if (task.skip_stores && task.skip_stores.length) {
     scope = scope.filter(function(s){ return task.skip_stores.indexOf(s) < 0; });
   }
-  var done=[], postponed=[], pending=[];
+  var done=[], postponed=[], pending=[], movedAway=[];
   var taskKind = task.kind||'regular';
   /* Същият предикат като процента в общия отчет. Дотук съвпадението беше
      само item_id+kind+store_name - обект, отметнал задачата преди месец,
@@ -593,14 +674,36 @@ function taskStoreBreakdown(task, comps, allStores){
        което прави reportBuildSummary, като брои doneComps отделно. Без
        този избор резултатът зависи от реда, в който PostgREST е върнал
        редовете. */
+    /* Пренесено ИЗВЪН прозореца на задачата: явяването е в друга седмица,
+       тоест обектът не е нито изпълнил, нито чакащ — излиза от обхвата,
+       както при изключване за седмицата. Проверката е ПРЕДИ съвпадението,
+       защото отметнатото пренесено явяване пази status='done'. */
+    /* ПРЕНЕСЕНО явяване. Картичката е за цяла СЕДМИЦА, затова решава новата
+       дата спрямо нея, а не спрямо срока на задачата:
+         · извън седмицата → обектът излиза от обхвата, както при изключване
+           (броенето му е в другата седмица);
+         · вътре в седмицата → остава тук, отметнат или отложен, със стрелка
+           накъде е преместен.
+       Проверката е ПРЕДИ съвпадението, защото пренесеният ред не съвпада с
+       прозореца на собственото си явяване (денят му вече е друг). */
+    var movedRow = comps.filter(function(x){ return x.store_name===s && reportCompMovedOff(matcher, x); })[0];
+    if (movedRow) {
+      var movedTo = String(movedRow.postponed_to).slice(0,10);
+      var stillHere = !!task.weekFrom && !!task.weekTo && movedTo>=task.weekFrom && movedTo<=task.weekTo;
+      if (!stillHere) { movedAway.push(s); return; }
+      if (movedRow.status==='done') done.push({ store:s, comment:movedRow.comment||'', photos:movedRow.photos||[], files:movedRow.files||[] });
+      else postponed.push({ store:s, comment:movedRow.comment||'', to:movedTo });
+      return;
+    }
     var mine = comps.filter(function(x){ return x.store_name===s && reportItemMatchesComp(matcher, x); });
     var c = mine.find(function(x){ return x.status==='done'; }) ||
             mine.find(function(x){ return x.status==='postponed'; }) || mine[0];
     if (c && c.status==='done') done.push({ store:s, comment:c.comment||'', photos:c.photos||[], files:c.files||[] });
-    else if (c && c.status==='postponed') postponed.push({ store:s, comment:c.comment||'' });
+    else if (c && c.status==='postponed') postponed.push({ store:s, comment:c.comment||'', to:(c.postponed_to?String(c.postponed_to).slice(0,10):null) });
     else pending.push(s);
   });
-  return { done:done, postponed:postponed, pending:pending, scope:scope };
+  if (movedAway.length) scope = scope.filter(function(s){ return movedAway.indexOf(s) < 0; });
+  return { done:done, postponed:postponed, pending:pending, scope:scope, movedAway:movedAway };
 }
 
 function personalizedTaskCardHtml(task, comps, allStores){
@@ -620,7 +723,7 @@ function personalizedTaskCardHtml(task, comps, allStores){
   if (bd.postponed.length) {
     h += '<div style="margin-top:6px;">';
     bd.postponed.forEach(function(p){
-      h += '<div style="font-size:11px;color:#92400e;">⏱ '+esc(p.store)+(p.comment?': '+esc(p.comment):'')+'</div>';
+      h += '<div style="font-size:11px;color:#92400e;">⏱ '+esc(p.store)+(p.to?' → '+esc(reportDM(p.to)):'')+(p.comment?': '+esc(p.comment):'')+'</div>';
     });
     h += '</div>';
   }

@@ -149,7 +149,8 @@ const TESTS = [
   'recurring-periods-report.test.js',
   'recurring-periods-notify.test.js',
   'postpone-date.test.js',
-  'postpone-date-consumers.test.js'
+  'postpone-date-consumers.test.js',
+  'postpone-date-report.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

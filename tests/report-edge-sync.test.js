@@ -62,6 +62,10 @@ const SHARED_FNS = [
   'reportMondayOfWeek', 'reportPrevWeekMonday', 'reportWeekOfMonday',
   'reportPickWeeklyBulletin',
   'reportItemMatchesComp', 'reportRecurringWeekDates', 'reportCrossWindow',
+  /* Отлагане с точна дата (postponed_to): денят на явяването, пренесено ли е
+     другаде и явяванията, пренесени В прозореца. Разминае ли се копието,
+     писмото брои деня, на който задачата вече не се очаква. */
+  'reportDM', 'reportCompMovedOff', 'reportCarriedItems',
   'reportIsLate', 'reportLateDays',
   'reportDailyTargetDate', 'reportWeekdayIdx',
   /* обобщение */
@@ -116,7 +120,12 @@ const COPIED_HELPERS = [
      копието, автоматичният имейл брои задача за седмица, в която тя не е
      важала — или пропуска такава, която е важала. */
   { fn: 'recurringValidForWeek', from: SHARED },
-  { fn: 'recurringTasksForWeek', from: SHARED }
+  { fn: 'recurringTasksForWeek', from: SHARED },
+  /* Отлагане с точна дата (task_completions.postponed_to). Разминае ли се
+     копието, отчетът мери задачата срещу първоначалния ѝ срок, докато
+     порталът вече я очаква на новата дата. */
+  { fn: 'taskDueDateFor', from: SHARED },
+  { fn: 'taskIsMovedAway', from: SHARED }
 ];
 
 /* Съзнателни разминавания — изброени, за да не изглеждат като пропуск.
@@ -142,6 +151,10 @@ const ROUTED_FNS = [
   'reportWeekdayIdx', 'reportMondayOfWeek', 'reportPrevWeekMonday',
   'reportWeekOfMonday', 'reportPickWeeklyBulletin', 'reportRecurringWeekDates',
   'reportItemMatchesComp',
+  /* отлагане с точна дата — само двете, които маршрутизацията ползва:
+     картичката е по ЗАДАЧА, не по явяване, тоест reportCarriedItems няма
+     какво да строи тук. */
+  'reportDM', 'reportCompMovedOff',
   /* обвивка и общи парчета HTML */
   'reportDayMonth', 'reportEmailShell', 'reportAttachmentsHtml',
   /* самата маршрутизация */
@@ -171,7 +184,10 @@ const ROUTED_COPIED = [
   /* Кешът с хората от ЦО е браузърен, но самото четене от него не е —
      обработчикът долу го пълни, преди да повика колектора. Копието
      позволява resolveRecipientsForTask да остане дословно същата. */
-  { fn: 'coPersonName', from: BULLETIN }
+  { fn: 'coPersonName', from: BULLETIN },
+  /* Отлагане с точна дата — виж COPIED_HELPERS по-горе. */
+  { fn: 'taskDueDateFor', from: SHARED },
+  { fn: 'taskIsMovedAway', from: SHARED }
 ];
 
 /* Само в send-routed-report: PostgREST със service ключ и всичко около

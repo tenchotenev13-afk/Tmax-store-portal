@@ -160,13 +160,27 @@ function urlFor(calls, table) {
 
       /* Другата половина на писмото — процентът по обекти. Ако двата
          прозореца се разминат, писмото пак ще си противоречи. */
-      const compUrl = h.calls.get.filter(function (u) {
+      /* От 12.09.2026 към task_completions има и заявка по postponed_to
+         (пренесените В седмицата). Прозорецът трябва да е СЪЩИЯТ и за нея —
+         иначе двете половини на писмото пак се разминават, само че по
+         другата колона. Затова тук се проверяват и двете, а не „първата
+         заявка", каквато вече е пренесената. */
+      const compUrls = h.calls.get.filter(function (u) {
         return u.indexOf('/task_completions?') >= 0;
+      });
+      const compUrl = compUrls.filter(function (u) {
+        return u.indexOf('completion_date=gte.') >= 0;
+      })[0] || '';
+      const carryUrl = compUrls.filter(function (u) {
+        return u.indexOf('postponed_to=gte.') >= 0;
       })[0] || '';
       ok('task_completions ползва СЪЩИЯ понеделник',
         compUrl.indexOf('completion_date=gte.' + wk.dates[0]) >= 0, compUrl);
       ok('и СЪЩАТА неделя',
         compUrl.indexOf('completion_date=lte.' + wk.dates[6]) >= 0, compUrl);
+      ok('пренесените се търсят в СЪЩИЯ прозорец',
+        carryUrl.indexOf('postponed_to=gte.' + wk.dates[0]) >= 0 &&
+        carryUrl.indexOf('postponed_to=lte.' + wk.dates[6]) >= 0, carryUrl);
 
       if (ok('кросмодулната секция е налице', !!summary.cross)) {
         ok('прозорецът пътува с числата — from е понеделникът',
