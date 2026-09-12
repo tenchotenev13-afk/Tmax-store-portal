@@ -329,6 +329,32 @@ function loadRecurringPeriods(){
   return sbGet('recurring_task_periods','select=id,recurring_task_id,from_monday,to_monday&order=from_monday.asc');
 }
 
+/* ═══ ОТЛАГАНЕ С ТОЧНА ДАТА (task_completions.postponed_to, 12.09.2026) ═══
+   Отложеният ред носи ТРИ дати наведнъж и трите значат различно:
+     · completion_date — ПЪРВОНАЧАЛНОТО явяване; ключът, по който всяко
+       отмятане се съпоставя. НЕ се мени при отлагане.
+     · postponed_to    — денят, за който е уговорена задачата.
+     · completed_at    — кога е натиснато (за „✓ със закъснение").
+   taskDueDateFor() дава деня, на който задачата РЕАЛНО се очаква: това е
+   единственото място, което решава „кой ден е този на задачата", и затова
+   е ДОСЛОВНО копирано в send-scheduled-report и send-routed-report
+   (заковано в tests/report-edge-sync).
+   comp може да е null (няма отлагане), ред 'postponed' без дата (старите три
+   реда от преди 12.09.2026 — държат се както досега, на първоначалния ден)
+   или ред с postponed_to (включително вече отметнат: денят на задачата си
+   остава новият, за да се мери закъснението срещу него). */
+function taskDueDateFor(dueISO, comp){
+  var orig = dueISO ? String(dueISO).slice(0,10) : null;
+  if (!comp || !comp.postponed_to) return orig;
+  return String(comp.postponed_to).slice(0,10);
+}
+/* Пренесено ли е явяването (задача, обект, ден) НЯКЪДЕ другаде. Оригиналният
+   ден показва значка със стрелка и НЕ влиза в знаменателя — броенето му е на
+   новия ден. Важи и след отмятане: редът става 'done', но си остава пренесен. */
+function taskIsMovedAway(comp){
+  return !!(comp && comp.postponed_to);
+}
+
 /* Списък магазини за потребителя: null = всички, [] = само своя, [...] = назначени */
 function assignedStores(){
   if(!currentUser)return null;

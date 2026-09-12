@@ -233,7 +233,12 @@ const red = h => h.calls.toast.filter(t => /Грешка|⚠️|НЕ мина/.t
     const st = fakeUnique(h, { seed: ['t-1|-|' + STORE + '|' + TODAY] });
     const ov = h.doc.createElement('div');
     ov.id = 'pp-modal-ov';
-    ov.innerHTML = '<textarea id="pp-comment">няма ток</textarea>';
+    /* От 12.09.2026 отлагането изисква и ДАТА (task_completions.postponed_to)
+       — модалът има поле pp-date и submitPostpone() без него отказва още
+       преди заявката. Затова фалшивият модал го носи; иначе тестът мери
+       „нищо не е пратено", а не пътя през 409. */
+    ov.innerHTML = '<textarea id="pp-comment">няма ток</textarea>' +
+      '<input type="date" id="pp-date" value="' + isoOffset(1) + '">';
     h.doc.body.appendChild(ov);
     if (guard('submitPostpone() не хвърля', () => h.w.submitPostpone('t-1', 'regular', TODAY))) {
       await ticks();
@@ -241,6 +246,8 @@ const red = h => h.calls.toast.filter(t => /Грешка|⚠️|НЕ мина/.t
       ok('после PATCH', st.patch.length === 1, String(st.patch.length));
       if (st.patch.length) {
         ok('status е postponed', st.patch[0].body.status === 'postponed', String(st.patch[0].body.status));
+        ok('носи и датата, за която е отложена', st.patch[0].body.postponed_to === isoOffset(1),
+          String(st.patch[0].body.postponed_to));
         ok('причината влиза като коментар', st.patch[0].body.comment === 'няма ток',
           String(st.patch[0].body.comment));
         ok('PATCH-ът е по правилния ден',

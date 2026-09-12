@@ -12,6 +12,11 @@ var bulActiveDept = 'trade';
 var curBul = null; var bulTasks = []; var bulComps = [];
 var recurringTasks = []; var recurringComps = []; var subtaskComps = [];
 var bulSkips = []; /* recurring_task_skips за седмицата на curBul — виж bulSkipWeek() */
+/* Пренесени в показаната седмица: task_completions с postponed_to в нея.
+   Отделна заявка, защото такъв ред може да е от ДРУГ бюлетин — по task_id той
+   не влиза в bulComps, а по седмица не влиза в нищо. bulCarriedTasks са
+   задачите зад тези редове, когато ги няма в bulTasks. */
+var bulCarried = []; var bulCarriedTasks = [];
 /* Спрените постоянни задачи = БЕЗ отворен период (recurring_task_periods) —
    само за секцията „Спрени (N)" в renderRecurringTasks() (canEdit()).
    Извеждат се в bulSetRecurring() от recurringAll + recurringPeriods, без
@@ -539,6 +544,18 @@ function calItemStatusHtml(itemId,kind,targetStores,dateStr,windowDates){
       if(skipped.length) scope=scope.filter(function(s){ return skipped.indexOf(s)<0; });
       if(!scope.length) return '<span title="Не се изисква от нито един обект тази седмица" style="font-size:11px;font-weight:700;color:#94a3b8;margin-left:4px;white-space:nowrap;cursor:help;">⏸</span>';
     }
+    /* Обект, ПРЕНЕСЪЛ явяването си за друг ден (postponed_to), излиза от
+       знаменателя на ТОЗИ ден — броенето му е на новия, където се показва със
+       собствен ред „⏱ … 🏬 обект". Иначе денят го чака вечно като неизпълнил,
+       а новият го брои втори път. Старите отложени редове без дата нямат
+       postponed_to и се държат както досега: остават в знаменателя. */
+    var movedAway = scope.filter(function(s){
+      return compsArr.some(function(c){ return c[idField]===itemId && c.store_name===s && dateMatches(c) && !!c.postponed_to; });
+    });
+    if(movedAway.length){
+      scope = scope.filter(function(s){ return movedAway.indexOf(s)<0; });
+      if(!scope.length) return '<span title="Пренесена за друг ден от всички обекти" style="font-size:11px;font-weight:700;color:#7c3aed;margin-left:4px;white-space:nowrap;cursor:help;">⏱</span>';
+    }
     var done = scope.filter(function(s){
       return compsArr.some(function(c){ return c[idField]===itemId && c.store_name===s && dateMatches(c) && (c.status||'done')==='done'; });
     }).length;
@@ -965,6 +982,204 @@ function bulDueLineHtml(dueISO,doneComp,overdueTxt){
   return '<div style="font-size:10px;color:'+color+';margin-top:2px;">📅 Срок: '+due.toLocaleDateString('bg-BG')+suffix+'</div>';
 }
 
+/* ═══ ОТЛАГАНЕ С ТОЧНА ДАТА — ПРЕНЕСЕНИ ЯВЯВАНИЯ (12.09.2026) ═════════════
+   Отложената задача вече не изчезва до края на света: редът носи
+   postponed_to и задачата се ПОЯВЯВА пак на този ден — в календара, в блока
+   по отдел, в панела на обекта и в печата.
+   Едно явяване има два края и двата се рисуват:
+     · ПЪРВОНАЧАЛНИЯ ден — редът си остава на мястото си, сив, със значка
+       „⏱ Отложена → 15.09". Не се брои тук (броенето е на новия ден) и няма
+       чекбокс.
+     · НОВИЯ ден — „пренесено" явяване със значка „⏱ Пренесена от 11.09" и
+       чекбокс, отключен САМО на самия ден (решение 6).
+   Отмятането пише в ПЪРВОНАЧАЛНИЯ ред (completion_date не се мени — той е
+   ключът на всички отчети), само статусът става 'done'.
+   Изключение „слят ред": ако на новия ден задачата и без това е дължима
+   (постоянна задача, пренесена в неин ден), не се рисуват два реда, а един,
+   с добавена значка. Тогава отмятането пише ДВА реда — своя за новия ден и
+   първоначалния — защото това са две отделни явявания (решение 5). */
+function bulDM(iso){
+  var p=String(iso||'').slice(0,10).split('-');
+  return p.length===3 ? p[2]+'.'+p[1] : String(iso||'');
+}
+function bulShiftISO(iso,days){
+  var d=new Date(String(iso).slice(0,10)+'T00:00:00');
+  d.setDate(d.getDate()+days);
+  return toLocalISO(d);
+}
+/* Долна граница на избора: УТРЕ. Отлагане за днес е безсмислено, за вчера —
+   невъзможно; същото казва и postponed_to_after_chk в базата. */
+function bulPostponeMin(){ return bulShiftISO(bulTodayISO(),1); }
+/* Горна граница: НЕДЕЛЯТА на СЛЕДВАЩАТА седмица — най-много 13 дни напред
+   (решение 3). Бюлетинът за нея може още да не е публикуван; това е ок,
+   задачата ще се появи, щом излезе. По-далеч е вече не отлагане, а нова
+   задача. */
+function bulPostponeMax(){
+  var t=bulTodayISO();
+  var d=new Date(t+'T00:00:00');
+  var toSun=6-((d.getDay()+6)%7); /* 0 = днес е неделя */
+  return bulShiftISO(t,toSun+7);
+}
+/* Редът на явяването, който заслужава значка „⏱ Отложена": или още е отложен
+   (status), или е ПРЕНЕСЕН (postponed_to) — второто важи и след отмятане, за
+   да остане видимо, че този ден не е бил негов. Заменя четирите почти
+   еднакви .some() проверки из рендера. */
+function bulPostponedCompOf(kind,taskId,store,dateISO){
+  if(!store) return null;
+  var arr=kind==='recurring'?recurringComps:bulComps;
+  var f=kind==='recurring'?'recurring_task_id':'task_id';
+  return arr.find(function(c){
+    return String(c[f])===String(taskId)&&c.store_name===store&&
+      (c.status==='postponed'||!!c.postponed_to)&&(c.completion_date||null)===dateISO;
+  })||null;
+}
+/* Собствено явяване на задачата в този ден — за обикновена по дните на срока,
+   за постоянна по деня от седмицата. Решава дали редът е „слят". */
+function bulOwnAppearance(kind,t,dateISO){
+  if(!t) return false;
+  if(kind==='recurring'){
+    var d=new Date(String(dateISO).slice(0,10)+'T00:00:00');
+    return recurringIsDueOnWeekday(t,(d.getDay()+6)%7);
+  }
+  return taskIsDueOnDate(t,dateISO);
+}
+/* Задачата зад пренесен ред. Обикновената може да е от ДРУГ бюлетин (отложена
+   от миналата седмица) — тогава идва от bulCarriedTasks. */
+function bulCarriedTaskOf(c){
+  var id=c.recurring_task_id||c.task_id;
+  var arr=c.recurring_task_id?(recurringAll.length?recurringAll:recurringTasks):bulTasks.concat(bulCarriedTasks);
+  return arr.find(function(x){return String(x.id)===String(id);})||null;
+}
+/* Пренесените В този ден, за този обект. merged=true значи, че задачата и без
+   това е дължима на деня — тогава НЕ се рисува отделен ред, а значка на
+   собствения. Notice няма отмятане и не се отлага. */
+function bulCarriedRows(dateISO,store){
+  var out=[];
+  bulCarried.forEach(function(c){
+    if(store&&c.store_name!==store) return;
+    if(String(c.postponed_to||'').slice(0,10)!==dateISO) return;
+    var kind=c.recurring_task_id?'recurring':'regular';
+    var t=bulCarriedTaskOf(c);
+    if(!t||taskIsNotice(t)) return;
+    out.push({kind:kind,t:t,comp:c,merged:bulOwnAppearance(kind,t,dateISO),
+              from:String(c.completion_date||'').slice(0,10)});
+  });
+  return out;
+}
+/* Пренесеното в (задача, ден) — за значката върху собствения ред и за
+   data-carried на чекбокса му. */
+function bulCarriedInto(kind,taskId,store,dateISO){
+  if(!store) return null; /* глобален изглед: пренесеното е на обект, не „на всички" */
+  var rows=bulCarriedRows(dateISO,store);
+  for(var i=0;i<rows.length;i++){
+    if(rows[i].kind===kind&&String(rows[i].t.id)===String(taskId)) return rows[i];
+  }
+  return null;
+}
+/* Значката на ПЪРВОНАЧАЛНИЯ ден. Стрелката е същината на промяната от
+   12.09.2026: „Отложена" без дата не казваше нищо на никого, а старите три
+   реда (postponed_to = NULL) си остават без нея. */
+function bulPostponedBadgeHtml(comp){
+  if(!comp) return '';
+  var arrow = comp.postponed_to ? ' → '+bulDM(comp.postponed_to) : '';
+  return '<span title="'+esc(comp.comment||'')+'" style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;cursor:help;">⏱ Отложена'+arrow+'</span>';
+}
+/* Пренесените в седмицата задачи, които НЯМАТ собствен ред в блока/панела —
+   на практика обикновена задача, отложена от ДРУГ бюлетин. Постоянните имат
+   свой блок, а задачите от този бюлетин носят значката върху собствения си
+   ред; втори ред за тях щеше да е дубликат. */
+function bulCarriedExtraRows(dept,store){
+  if(!store) return [];
+  var out=[];
+  bulCarried.forEach(function(c){
+    if(c.store_name!==store||!c.task_id) return;
+    if(bulTasks.some(function(t){return String(t.id)===String(c.task_id);})) return;
+    var t=bulCarriedTaskOf(c);
+    if(!t||taskIsNotice(t)||t.department!==dept) return;
+    out.push({kind:'regular',t:t,comp:c,merged:false,from:String(c.completion_date||'').slice(0,10)});
+  });
+  return out;
+}
+/* Компактният вариант за седмичния календар — там редът е един ред текст с
+   чекбокс, без описание и без бутони. */
+function bulCarriedCalRowHtml(row,color){
+  var t=row.t, to=String(row.comp.postponed_to||'').slice(0,10), done=row.comp.status==='done';
+  var h='<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
+  h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="'+row.kind+'" data-orig="'+(row.from||'')+'" data-cdate="'+to+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(to,t.linked_module)+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+color+';'+bulLockStyle(to,t.linked_module)+'">';
+  h+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(done?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+bulCarriedMiniHtml(row)+'</span>';
+  h+='</div>';
+  return h;
+}
+/* Същият ред за офиса: там няма чекбокс, а обектът трябва да се изпише — за
+   него пренесеното е работа на ЕДИН обект, а не на всички. */
+function bulCarriedCalGlobalHtml(row){
+  var done=row.comp.status==='done';
+  return '<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">'+
+    '<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Пренесена задача">⏱</span>'+
+    '<span style="font-size:12.5px;flex:1;line-height:1.35;'+(done?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(row.t.title||'')+
+      '<span title="'+esc(row.comp.comment||'')+'" style="font-size:9px;color:#7c3aed;font-weight:700;cursor:help;"> 🏬 '+esc(row.comp.store_name||'')+' · от '+bulDM(row.from)+'</span></span>'+
+    '<span style="font-size:11px;font-weight:700;color:'+(done?'#16a34a':'#94a3b8')+';margin-left:4px;white-space:nowrap;">'+(done?'1/1':'0/1')+'</span>'+
+    '</div>';
+}
+/* Малката лилава добавка след заглавието — и за самостоятелния пренесен ред,
+   и за слетия (там задачата и без това е дължима в този ден). */
+function bulCarriedMiniHtml(row){
+  return '<span title="'+esc(row.comp.comment||'')+'" style="font-size:9px;color:#7c3aed;font-weight:700;cursor:help;white-space:nowrap;"> ⏱ '+(row.merged?'+ от ':'от ')+bulDM(row.from)+'</span>';
+}
+/* Ред за ПРЕНЕСЕНО явяване — еднакъв в блока по отдел и в панела на обекта.
+   Няма ▲▼ (мястото на задачата е в собствения ѝ ден), няма „⏱ Отложи"
+   (второ отлагане не се допуска, решение 7), няма подзадачи и няма админски
+   бутони: това е второ ЯВЯВАНЕ на същата задача, не втора задача. */
+function bulCarriedRowHtml(row,color){
+  var t=row.t, to=String(row.comp.postponed_to||'').slice(0,10);
+  var done=row.comp.status==='done';
+  var h='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
+  h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="'+row.kind+'" data-orig="'+(row.from||'')+'" data-cdate="'+to+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(to,t.linked_module)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+color+';flex-shrink:0;'+bulLockStyle(to,t.linked_module)+'">';
+  h+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
+  h+='<div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
+  h+=(row.kind==='recurring'?'<span title="Постоянна задача" style="font-size:11px;">🔁</span>':'')+bulCarriedBadgeHtml(row)+'</div>';
+  if(t.description)h+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
+  h+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">📅 Пренесена за '+fmtDate2(to)+(row.comp.comment?' · '+esc(row.comp.comment):'')+'</div>';
+  h+='</div></div>';
+  return h;
+}
+function bulCarriedBadgeHtml(row){
+  var lbl=(row.merged?'⏱ + пренесена от ':'⏱ Пренесена от ')+bulDM(row.from);
+  return '<span title="'+esc(row.comp.comment||'')+'" style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#f5f3ff;color:#7c3aed;border:1px solid #ddd6fe;white-space:nowrap;cursor:help;">'+lbl+'</span>';
+}
+/* Редовете, пренесени в показаната седмица. Обхватът е по postponed_to, а не
+   по бюлетин: отложеното от миналата седмица няма нищо общо с този бюлетин и
+   идва само оттук. Магазинът тегли своите, офисът — всички. */
+function bulCarriedQuery(){
+  var arr=weekDays(curBul.week_number,curBul.year);
+  return 'postponed_to=gte.'+toLocalISO(arr[0])+'&postponed_to=lte.'+toLocalISO(arr[6])+
+         (isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
+}
+function bulLoadCarried(){
+  if(!curBul) return Promise.resolve([]);
+  return sbGet('task_completions',bulCarriedQuery()).then(function(rows){
+    return Array.isArray(rows)?rows:[];
+  }).catch(function(){ return []; });
+}
+/* Задачите зад пренесените редове, които ги няма в ТОЗИ бюлетин. Тегли се само
+   липсващото и само при попадение се пререндира — първият рендер е минал без
+   тях. Празен списък значи нула заявки, тоест обичайният случай (отлагане в
+   рамките на седмицата) не струва нищо. */
+function bulFetchCarriedTasks(){
+  var have={}; bulTasks.forEach(function(t){ have[String(t.id)]=1; });
+  var need=[];
+  bulCarried.forEach(function(c){
+    if(!c.task_id) return;
+    var id=String(c.task_id);
+    if(!have[id]&&need.indexOf(id)<0) need.push(id);
+  });
+  if(!need.length){ bulCarriedTasks=[]; return; }
+  sbGet('bulletin_tasks','id=in.('+need.join(',')+')').then(function(rows){
+    bulCarriedTasks=Array.isArray(rows)?rows:[];
+    if(bulCarriedTasks.length) renderBulletin();
+  }).catch(function(){ bulCarriedTasks=[]; });
+}
+
 /* ─── ПРЕВКЛЮЧВАТЕЛ МЕЖДУ БЮЛЕТИНИ (само admin/accounting) ─── */
 function loadBulletinList(){
   var q='select=id,week_number,year,status,created_at&order=created_at.desc&limit=20';
@@ -1087,15 +1302,18 @@ function loadBulletin(){
          след седмицата му. Кои важат — решават периодите (bulSetRecurring). */
       sbGet('recurring_tasks','order=sort_order.asc').catch(function(){return [];}),
       loadRecurringSkips(bulSkipWeek()).catch(function(){return [];}),
-      loadRecurringPeriods().catch(function(){return [];})
+      loadRecurringPeriods().catch(function(){return [];}),
+      bulLoadCarried()
     ]);
   }).then(function(results){
     if(!results)return; /* curBul беше null - вече показахме renderBulEmpty() по-горе */
     bulPromotions=Array.isArray(results[0])?results[0]:[];
     bulSetRecurring(results[1], results[3]);
     bulSkips=Array.isArray(results[2])?results[2]:[];
+    bulCarried=Array.isArray(results[4])?results[4]:[];
     sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=sort_order.asc,due_date.asc').then(function(t){
       bulTasks=Array.isArray(t)?t:[];
+      bulFetchCarriedTasks();
       if(!bulTasks.length){
         bulComps=[];subtaskComps=[];recurringComps=[];
         renderBulletin();return;
@@ -1310,7 +1528,13 @@ function renderBulView(){
       var regItems=regularForDay.filter(function(t){return t.department===dk;});
       var recItems=recurringForDay.filter(function(t){return t.department===dk;});
       var manItems=manualAll.filter(function(mi){return mi.e.dept===dk;});
-      if(!regItems.length&&!recItems.length&&!manItems.length)return;
+      /* Пренесените В този ден. Слетите (merged) не се рисуват отделно — те
+         са значка върху собствения ред на задачата по-долу. */
+      /* Офисът вижда и слетите: за него това е втора единица работа на друг
+         обект, а не значка върху собствения му ред (той няма собствен ред). */
+      var carItems=bulCarriedRows(dateStr,isGlobal()?null:store)
+        .filter(function(r){return r.t.department===dk&&(isGlobal()||!r.merged);});
+      if(!regItems.length&&!recItems.length&&!manItems.length&&!carItems.length)return;
       hasAnything=true;
       html+='<div style="margin-bottom:8px;">';
       html+='<div style="font-size:10.5px;font-weight:800;text-transform:uppercase;color:'+dept.color+';letter-spacing:.03em;margin-bottom:4px;">'+dept.icon+' '+dept.label+'</div>';
@@ -1328,7 +1552,8 @@ function renderBulView(){
         } else {
           var doneReg=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===dateStr;});
           html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+dateStr+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(dateStr,t.linked_module)+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(dateStr,t.linked_module)+'">';
-          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
+          var carReg=bulCarriedInto('regular',t.id,store,dateStr);
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carReg?bulCarriedMiniHtml(carReg):'')+'</span>';
         }
         html+='</div>';
         if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
@@ -1358,7 +1583,8 @@ function renderBulView(){
         } else {
           var doneRec=recWinComp?true:(store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===recCdate;}));
           html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(recWinComp?recurringWindowDoneAttr(recWinComp):bulLockAttr(recCdate,t.linked_module))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(recWinComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(recCdate,t.linked_module))+'">';
-          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
+          var carRec=bulCarriedInto('recurring',t.id,store,recCdate||dateStr);
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carRec?bulCarriedMiniHtml(carRec):'')+'</span>';
         }
         html+='</div>';
         if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
@@ -1366,6 +1592,7 @@ function renderBulView(){
           if(lblRec)html+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lblRec)+' →</button>';
         }
       });
+      carItems.forEach(function(r){ html+=isGlobal()?bulCarriedCalGlobalHtml(r):bulCarriedCalRowHtml(r,dept.color); });
       manItems.forEach(function(mi){
         var e=mi.e,ei=mi.idx;
         html+='<div style="padding:3px 0;">';
@@ -1460,7 +1687,8 @@ function renderBulView(){
         var isMulti=taskIsMultiDay(t);
         var singleDate=isMulti?null:(taskDueDates(t)[0]||null);
         var done=store&&!isMulti&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===singleDate;});
-        var postponed=store&&!isMulti&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='postponed'&&(cc.completion_date||null)===singleDate;});
+        var ppComp=(store&&!isMulti)?bulPostponedCompOf('regular',t.id,store,singleDate):null;
+        var postponed=!!ppComp;
         var compObj=store&&!isMulti&&bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===store&&(cc.completion_date||null)===singleDate;});
         var deptTasksForNav=bulTasks.filter(function(x){return x.department===t.department&&!taskIsNotice(x);});
         var taskIdxInDept=deptTasksForNav.findIndex(function(x){return String(x.id)===String(t.id);});
@@ -1478,7 +1706,7 @@ function renderBulView(){
         } else {
           html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,t.linked_module)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+bulLockStyle(singleDate,t.linked_module)+'">';
         }
-        html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done,singleDate)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
+        html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done,singleDate)+bulPostponedBadgeHtml(ppComp)+'</div>';
         if(t.description)html+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         if(isMulti){
           var multiDates=taskDueDates(t);
@@ -1513,6 +1741,17 @@ function renderBulView(){
       });
       html+='</div>';
     }
+    /* Пренесени от ДРУГ бюлетин (bulCarriedExtraRows). Отделен блок, защото
+       се показват и когато отделът няма свои задачи тази седмица — иначе
+       задача, отложена от миналата седмица, няма къде да се появи. */
+    (function(){
+      var cRows=isGlobal()?[]:bulCarriedExtraRows(dk,currentUser&&currentUser.store_name);
+      if(!cRows.length) return;
+      html+='<div style="margin-bottom:14px;">';
+      html+='<div style="font-size:12px;font-weight:700;color:#7c3aed;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">⏱ Пренесени за тази седмица</div>';
+      cRows.forEach(function(r){ html+=bulCarriedRowHtml(r,dept.color); });
+      html+='</div>';
+    })();
     /* Постоянни задачи в dept panel */
     html += renderRecurringTasks(dk);
     /* Блокове */
@@ -2850,7 +3089,14 @@ function printSection(what){
         var dc=dotC[e.dept]||'#64748b';
         s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span>'+esc(e.title||'')+'</span></div>';
       });
-      if(!dt.length&&!rdt.length&&!mn.length)s+='<div class="cal-empty">Свободен</div>';
+      /* Пренесените за този ден — печатът е чеклистът, по който обектът
+         работи, и точно този ден е новият ѝ срок. Слетите не се дублират. */
+      var pCar=bulCarriedRows(ds,isGlobal()?null:printStore).filter(function(r){return isGlobal()||!r.merged;});
+      pCar.forEach(function(r){
+        var dc=dotC[r.t.department]||'#64748b';
+        s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span style="font-weight:600;">⏱ '+esc(r.t.title||'')+' <span style="font-weight:400;font-size:10pt;color:#7c3aed;">(пренесена от '+bulDM(r.from)+(isGlobal()?' · '+esc(r.comp.store_name||''):'')+')</span></span></div>';
+      });
+      if(!dt.length&&!rdt.length&&!mn.length&&!pCar.length)s+='<div class="cal-empty">Свободен</div>';
       s+='</div>';
     });
     s+='</div>';
@@ -2882,7 +3128,7 @@ function printSection(what){
            обобщение вместо чекмарк). status==='done' изрично - отложена
            задача не бива да излиза с ✓. */
         var comp=(!isMulti&&printStore)?bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===printStore&&cc.status==='done'&&(cc.completion_date||null)===singleDate;}):null;
-        var postponedComp=(!isMulti&&printStore)?bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===printStore&&cc.status==='postponed'&&(cc.completion_date||null)===singleDate;}):null;
+        var postponedComp=(!isMulti&&printStore)?bulPostponedCompOf('regular',t.id,printStore,singleDate):null;
         var isDone=!!comp;
         s+='<div class="task-row">';
         if(isMulti){
@@ -2892,13 +3138,27 @@ function printSection(what){
             (isDone?'<div style="color:#fff;font-size:9pt;text-align:center;line-height:13pt;">✓</div>':'')+'</div>';
         }
         s+='<div style="flex:1;">';
-        s+='<div class="task-title">'+esc(t.title||'')+' '+taskTypeBadgeHtml(t.task_type)+(postponedComp?'<span style="font-size:8pt;font-weight:700;padding:1pt 5pt;border-radius:8pt;background:#fff7ed;color:#b45309;border:0.5pt solid #fed7aa;">⏱ Отложена</span>':'')+'</div>';
+        s+='<div class="task-title">'+esc(t.title||'')+' '+taskTypeBadgeHtml(t.task_type)+(postponedComp?'<span style="font-size:8pt;font-weight:700;padding:1pt 5pt;border-radius:8pt;background:#fff7ed;color:#b45309;border:0.5pt solid #fed7aa;">⏱ Отложена'+(postponedComp.postponed_to?' → '+bulDM(postponedComp.postponed_to):'')+'</span>':'')+'</div>';
         if(t.description)s+='<div class="task-desc">'+linkify(t.description)+'</div>';
         if(isMulti)s+='<div class="task-due">📅 Дни: '+taskDueLabel(t)+' (виж бройки по дни в календара по-горе)</div>';
         else if(singleDate)s+='<div class="task-due">📅 Срок: '+new Date(singleDate+'T00:00:00').toLocaleDateString('bg-BG')+(isDone&&comp?' &nbsp; ✅ '+esc(comp.completed_by||''):'')+'</div>';
         if(comp&&(comp.comment||(comp.photos&&comp.photos.length)))s+=renderCompletionExtras(comp);
         if(postponedComp&&postponedComp.comment)s+='<div class="task-desc" style="color:#b45309;">⏱ '+esc(postponedComp.comment)+'</div>';
         s+=pTaskAttachments(t);
+        s+='</div></div>';
+      });
+    }
+    /* Пренесените от ДРУГ бюлетин — на хартията са част от седмицата, иначе
+       обектът работи по чеклист, в който ги няма. */
+    var pcar=isGlobal()?[]:bulCarriedExtraRows(dk,printStore);
+    if(pcar.length){
+      s+='<div class="tasks-hdr">⏱ Пренесени за тази седмица</div>';
+      pcar.forEach(function(r){
+        var rDone=r.comp.status==='done';
+        s+='<div class="task-row">';
+        s+='<div class="task-cb" style="'+(rDone?'background:#16a34a;border-color:#16a34a;':'')+'">'+(rDone?'<div style="color:#fff;font-size:9pt;text-align:center;line-height:13pt;">✓</div>':'')+'</div>';
+        s+='<div style="flex:1;"><div class="task-title">'+esc(r.t.title||'')+'</div>';
+        s+='<div class="task-due" style="color:#7c3aed;">⏱ Пренесена от '+fmtDate2(r.from)+' за '+fmtDate2(String(r.comp.postponed_to||'').slice(0,10))+(r.comp.comment?' · '+esc(r.comp.comment):'')+'</div>';
         s+='</div></div>';
       });
     }
@@ -2999,18 +3259,23 @@ function renderTasksPanel() {
       dTasks = dTasks.filter(function(t){
         return !t.target_stores || !t.target_stores.length || (store && t.target_stores.indexOf(store)>=0);
       });
-      if (!dTasks.length) return;
+      /* Пренесените от друг бюлетин влизат и в БРОЯЧА: тази седмица наистина
+         се очакват от обекта. Отложените в рамките на седмицата не се броят
+         два пъти — те си имат ред в dTasks и не влизат тук. */
+      var cRows = bulCarriedExtraRows(dk, store);
+      if (!dTasks.length && !cRows.length) return;
       var d = DEPT[dk];
       var done = dTasks.filter(function(t){
         return bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='done';});
-      }).length;
-      var pct = Math.round(done/dTasks.length*100);
+      }).length + cRows.filter(function(r){ return r.comp.status==='done'; }).length;
+      var total = dTasks.length + cRows.length;
+      var pct = Math.round(done/total*100);
 
       h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;overflow:hidden;">';
       h += '<div style="background:'+d.hdr+';padding:8px 14px;display:flex;justify-content:space-between;align-items:center;">';
       h += '<div style="font-size:13px;font-weight:600;color:#fff;">'+d.icon+' '+d.label+'</div>';
       h += '<div style="display:flex;align-items:center;gap:8px;">';
-      h += '<div style="font-size:11px;color:rgba(255,255,255,.7);">'+done+'/'+dTasks.length+'</div>';
+      h += '<div style="font-size:11px;color:rgba(255,255,255,.7);">'+done+'/'+total+'</div>';
       h += '<div style="background:rgba(255,255,255,.2);border-radius:20px;width:80px;height:6px;">';
       h += '<div style="background:'+(pct===100?'#4ade80':'#fff')+';width:'+pct+'%;height:6px;border-radius:20px;transition:.3s;"></div>';
       h += '</div></div></div>';
@@ -3020,7 +3285,8 @@ function renderTasksPanel() {
         var isMulti = taskIsMultiDay(t);
         var singleDate = isMulti ? null : (taskDueDates(t)[0]||null);
         var isDone = !isMulti && bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='done' && (c.completion_date||null)===singleDate;});
-        var isPostponed = !isMulti && bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='postponed' && (c.completion_date||null)===singleDate;});
+        var ppComp = isMulti ? null : bulPostponedCompOf('regular',t.id,store,singleDate);
+        var isPostponed = !!ppComp;
         var compInfo = !isMulti && (bulComps.find(function(c){return c.task_id===t.id && c.store_name===store && (c.completion_date||null)===singleDate;}) || null);
         h += '<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
         if (isMulti) {
@@ -3030,7 +3296,7 @@ function renderTasksPanel() {
         }
         h += '<div style="flex:1;">';
         h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':isPostponed?'#b45309':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
-        h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!isDone,singleDate)+(isPostponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+'</div>';
+        h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!isDone,singleDate)+bulPostponedBadgeHtml(ppComp)+'</div>';
         if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         h += renderTaskAttachments(t);
         if (isMulti) {
@@ -3057,6 +3323,7 @@ function renderTasksPanel() {
         h += '</div>';
         h += '</div>';
       });
+      cRows.forEach(function(r){ h += bulCarriedRowHtml(r, d.color); });
       /* Постоянни задачи за отдела */
       h += renderRecurringTasks(dk);
       h += '</div></div>';
@@ -3147,6 +3414,7 @@ function toggleTask(taskId, checked, extra, completionDate) {
     req.then(function(r){
       if (!r.ok) { toast('Грешка: '+sbErrMsg(r),'#dc2626'); return; }
       toast('✅ Задачата е отбелязана!');
+      bulCarriedAlso('regular', taskId, completionDate, true);
       bulComps = bulComps.filter(function(c){ return !(c.task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate); });
       bulComps.push(Object.assign({task_id: taskId, store_name: store, completed_by: completedBy, status:'done', completion_date: completionDate}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}, (extra.files&&extra.files.length)?{files:extra.files}:{}));
       renderBulletin();
@@ -3163,6 +3431,7 @@ function toggleTask(taskId, checked, extra, completionDate) {
       }
       if(res.count===0){ toast('Нямаше какво да се отмени — обновено','#64748b'); loadBulletin(); return; }
       toast('↩ Отбелязана като неизпълнена');
+      bulCarriedAlso('regular', taskId, completionDate, false);
       bulComps = bulComps.filter(function(c){return !(c.task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate);});
       renderBulletin();
     });
@@ -3311,18 +3580,34 @@ function submitTaskCompletion(taskId, kind, completionDate){
    никога не е null) вече не съвпадаше с нищо - значката "⏱ Отложена" не се
    появяваше и бутонът оставаше "Отложи". Същото важи и за обикновена задача
    с дата. Носи се през dataset, точно както data-cdate на чекбокса. */
+/* Границите на датата: от УТРЕ (или от деня след първоначалния срок, ако той
+   е напред — иначе postponed_to_after_chk в базата връща 400) до неделята на
+   следващата седмица. Смятат се тук, за да ги носи и самият <input> — иначе
+   браузърът пуска всякаква дата и единствената защита остава проверката в
+   базата, тоест червен toast вместо спрян бутон. */
+function bulPostponeBounds(completionDate){
+  var lo=bulPostponeMin();
+  if(completionDate&&completionDate>=lo) lo=bulShiftISO(completionDate,1);
+  var hi=bulPostponeMax();
+  if(hi<lo) hi=lo;
+  return {lo:lo,hi:hi};
+}
 function openPostponeModal(taskId, kind, completionDate){
   kind = kind || 'regular';
   var t = (kind==='recurring' ? recurringTasks : bulTasks).find(function(x){ return String(x.id)===String(taskId); });
   if (!t) return;
   var existing = document.getElementById('pp-modal-ov');
   if (existing) existing.remove();
+  var bnd = bulPostponeBounds(completionDate||null);
   var ov = document.createElement('div');
   ov.className = 'bov open';
   ov.id = 'pp-modal-ov';
   ov.innerHTML = '<div class="bmod" style="width:400px;">' +
     '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">⏱ Отложи задачата</div>' +
     '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(t.title||'')+'</div>' +
+    '<label class="fl">За кога? *</label>' +
+    '<input type="date" class="fi" id="pp-date" value="'+bnd.lo+'" min="'+bnd.lo+'" max="'+bnd.hi+'">' +
+    '<div style="font-size:11px;color:#94a3b8;margin:6px 0 12px;">Задачата ще се появи пак на този ден — в календара и в блока. Най-късно до '+bulDM(bnd.hi)+'.</div>' +
     '<label class="fl">Причина за отлагане *</label>' +
     '<textarea class="fi" id="pp-comment" rows="3" placeholder="Защо не може да се изпълни сега..."></textarea>' +
     '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Ще се вижда в седмичния репорт до офиса.</div>' +
@@ -3338,6 +3623,16 @@ function submitPostpone(taskId, kind, completionDate){
   completionDate = completionDate || null;
   var comment = (document.getElementById('pp-comment').value||'').trim();
   if (!comment) { toast('Въведи причина за отлагането','#dc2626'); return; }
+  /* Датата е задължителна и се проверява ТУК, не само от <input min/max>:
+     полето се пълни и от клавиатурата, а браузърът не спира стойност извън
+     границите при програмен submit. Долната граница пази и от 400-ката на
+     postponed_to_after_chk. */
+  var dEl = document.getElementById('pp-date');
+  var toDate = ((dEl&&dEl.value)||'').slice(0,10);
+  var bnd = bulPostponeBounds(completionDate);
+  if (!toDate) { toast('Избери за кога се отлага','#dc2626'); return; }
+  if (toDate < bnd.lo) { toast('Най-рано '+bulDM(bnd.lo),'#dc2626'); return; }
+  if (toDate > bnd.hi) { toast('Най-късно '+bulDM(bnd.hi)+' — за по-далеч се поставя нова задача','#dc2626'); return; }
   var store = currentUser && currentUser.store_name;
   if (!store) { toast('Грешка: няма магазин','#dc2626'); return; }
   var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
@@ -3347,7 +3642,8 @@ function submitPostpone(taskId, kind, completionDate){
     completed_at: new Date().toISOString(),
     status: 'postponed',
     comment: comment,
-    completion_date: completionDate
+    completion_date: completionDate,
+    postponed_to: toDate
   };
   payload[idField] = taskId;
   if (kind!=='recurring') payload.bulletin_id = curBul ? curBul.id : null;
@@ -3364,7 +3660,8 @@ function submitPostpone(taskId, kind, completionDate){
     completed_at: payload.completed_at,
     status: 'postponed',
     comment: comment,
-    completion_date: completionDate
+    completion_date: completionDate,
+    postponed_to: toDate
   };
   tcUpsert(ppMatch, payload, ppPatch).then(function(r){
     if (!r.ok) { toast('Грешка: '+sbErrMsg(r),'#dc2626'); return; }
@@ -3373,9 +3670,13 @@ function submitPostpone(taskId, kind, completionDate){
     toast('⏱ Задачата е отложена');
     /* completion_date и в локалния обект - иначе renderBulletin() веднага
        след това пак не намира съвпадение и значката не се появява до reload */
-    var pushObj = { store_name: store, completed_by: currentUser.display_name||currentUser.email, status:'postponed', comment: comment, completion_date: completionDate };
+    var pushObj = { store_name: store, completed_by: currentUser.display_name||currentUser.email, status:'postponed', comment: comment, completion_date: completionDate, postponed_to: toDate };
     pushObj[idField] = taskId;
     if (kind==='recurring') recurringComps.push(pushObj); else bulComps.push(pushObj);
+    /* И в списъка на пренесените — иначе новият ден остава празен до следващо
+       зареждане, а точно той е смисълът на отлагането. Ако е извън показаната
+       седмица, редът просто не се съпоставя с никой ден и не пречи. */
+    bulCarried.push(pushObj);
     renderBulletin();
   });
 }
@@ -3408,8 +3709,73 @@ function cancelPostpone(taskId, kind, completionDate){
        грешка. Оставено за симетрия с recurringTasks.find() по-долу. */
     if (kind==='recurring') recurringComps = recurringComps.filter(function(c){return !(String(c.recurring_task_id)===String(taskId) && c.store_name===store && c.status==='postponed' && (c.completion_date||null)===completionDate);});
     else bulComps = bulComps.filter(function(c){return !(String(c.task_id)===String(taskId) && c.store_name===store && c.status==='postponed' && (c.completion_date||null)===completionDate);});
+    /* И от пренесените — иначе редът остава да виси на новия си ден, макар
+       отлагането да е изтрито. */
+    var cancelField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
+    bulCarried = bulCarried.filter(function(c){return !(String(c[cancelField])===String(taskId) && c.store_name===store && (c.completion_date||null)===completionDate);});
     renderBulletin();
   });
+}
+
+/* ─── ОТМЯТАНЕ НА ПРЕНЕСЕНО ЯВЯВАНЕ ──────────────────────────────────────
+   Пише в ПЪРВОНАЧАЛНИЯ ред: completion_date остава денят на срока, защото по
+   него се съпоставя всичко — решетката на отчета, брояча в календара,
+   „Днес". Нов ред за новия ден НЕ се създава: денят не е на задачата и не
+   бива да я брои в знаменателя си.
+   Разотмятането връща 'postponed' — редът пак си е отложен, не изтрит.
+   postponed_to не се пипа в нито едната посока: пренесеното си остава
+   пренесено и след отмятане (оттам „✓ със закъснение" мери срещу новия ден). */
+function bulCarriedPatch(kind, taskId, origDate, checked){
+  var store = currentUser && currentUser.store_name;
+  if (!store) return Promise.resolve({ok:false});
+  var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
+  var match = idField+'=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+
+              (origDate ? '&completion_date=eq.'+origDate : '&completion_date=is.null');
+  var at = new Date().toISOString();
+  var body = checked
+    ? { status:'done', completed_by: currentUser.display_name||currentUser.email, completed_at: at }
+    : { status:'postponed' };
+  return sbPatch('task_completions', match, body).then(function(r){
+    if (!r.ok) { toast('Грешка при пренесената задача: '+sbErrMsg(r),'#dc2626'); loadBulletin(); return r; }
+    /* Един и същи ред стои в ДВА локални списъка (bulComps/recurringComps по
+       задача и bulCarried по седмица) и това са различни обекти — заявките са
+       различни. Обновяват се и двата, иначе значката на единия край се мени, а
+       на другия не. */
+    var lists = [kind==='recurring' ? recurringComps : bulComps, bulCarried];
+    lists.forEach(function(list){
+      list.forEach(function(c){
+        if (String(c[idField])===String(taskId) && c.store_name===store && (c.completion_date||null)===origDate){
+          c.status = body.status;
+          if (checked){ c.completed_at = at; c.completed_by = body.completed_by; }
+        }
+      });
+    });
+    return r;
+  });
+}
+/* Чекбоксът на самостоятелен пренесен ред. Заключването минава през същия
+   bulLockRejected() — data-cdate е денят, на който редът се показва, тоест
+   postponed_to. Отключен е само в самия ден (решение 6). */
+function bulCarriedCheckboxChanged(cb){
+  if (bulLockRejected(cb)) return;
+  var kind = cb.dataset.kind || 'regular';
+  bulCarriedPatch(kind, cb.dataset.tid, cb.dataset.orig || null, cb.checked).then(function(){
+    toast(cb.checked ? '✓ Отметната' : '↩ Върната като отложена');
+    renderBulletin();
+  });
+}
+/* СЛЯТ ред (решение 5): в този ден задачата има и собствено явяване, и
+   пренесено. Рисува се един чекбокс, но явяванията са две и всяко има свой
+   ред в базата — затова отмятането на собственото повлича и първоначалния ред
+   на пренесеното. Извиква се от toggleTask()/toggleRecurringTask(), а не от
+   обработчика на чекбокса: пътят през модала за задача със снимка/файл минава
+   покрай обработчика и иначе пренесеният край щеше да остане неотметнат. */
+function bulCarriedAlso(kind, taskId, completionDate, checked){
+  var store = currentUser && currentUser.store_name;
+  if (!store || !completionDate) return;
+  var row = bulCarriedInto(kind, taskId, store, completionDate);
+  if (!row || !row.merged) return;
+  bulCarriedPatch(kind, taskId, row.from, checked);
 }
 
 function loadTasksStats() {
@@ -3620,7 +3986,8 @@ function renderRecurringTasks(dk) {
           : (recTaskWeekdays(t).length ? weekdayIdxToDate(recTaskWeekdays(t)[0]) : toLocalISO(new Date())));
       var compObj = !isNotice && (winComp || (store && !isMultiRec && recurringComps.find(function(c){return c.recurring_task_id===t.id && c.store_name===store && (c.completion_date||null)===singleRecDate;})));
       var done = !!compObj && compObj.status==='done';
-      var postponed = !!compObj && compObj.status==='postponed';
+      var ppComp = (!isNotice && !isMultiRec) ? bulPostponedCompOf('recurring',t.id,store,singleRecDate) : null;
+      var postponed = !!ppComp;
       var dueToday = !isNotice && recurringIsDueToday(t);
       /* Изключена за седмицата: за обекта — сив ред без чекбокс и без
          „Отложи"; в глобален изглед сивее само глобалното изключване, а
@@ -3646,7 +4013,7 @@ function renderRecurringTasks(dk) {
           'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + (winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleRecDate,t.linked_module)) + '">';
       }
       h += '<div style="flex:1;">';
-      h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done&&!skipView,singleRecDate)+(postponed?'<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fff7ed;color:#b45309;border:1px solid #fed7aa;white-space:nowrap;">⏱ Отложена</span>':'')+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+'</div>';
+      h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done&&!skipView,singleRecDate)+bulPostponedBadgeHtml(ppComp)+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+'</div>';
       if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">' + linkify(t.description) + '</div>';
       var dueLbl = recurringDueLabel(t);
       if (isMultiRec) {
@@ -3772,6 +4139,7 @@ function toggleRecurringTask(taskId, checked, extra, completionDate) {
     req.then(function(r){
       if (!r.ok) { toast('Грешка: '+sbErrMsg(r),'#dc2626'); return; }
       toast('✅ Отбелязана!');
+      bulCarriedAlso('recurring', taskId, completionDate, true);
       recurringComps = recurringComps.filter(function(c){ return !(c.recurring_task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate); });
       recurringComps.push(Object.assign({recurring_task_id: taskId, store_name: store, completed_by: completedBy, status:'done', completion_date: completionDate}, extra.comment?{comment:extra.comment}:{}, (extra.photos&&extra.photos.length)?{photos:extra.photos}:{}, (extra.files&&extra.files.length)?{files:extra.files}:{}));
       renderBulletin();
@@ -3786,6 +4154,7 @@ function toggleRecurringTask(taskId, checked, extra, completionDate) {
       }
       if(res.count===0){ toast('Нямаше какво да се отмени — обновено','#64748b'); loadBulletin(); return; }
       toast('↩ Отбелязана като неизпълнена');
+      bulCarriedAlso('recurring', taskId, completionDate, false);
       recurringComps = recurringComps.filter(function(c){return !(c.recurring_task_id===taskId && c.store_name===store && (c.completion_date||null)===completionDate);});
       renderBulletin();
     });

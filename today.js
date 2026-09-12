@@ -46,7 +46,12 @@ function loadTodayDashboard(){
   Promise.all([
     sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1'),
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc'),
-    loadRecurringSkips(recurringSkipWeekOf(new Date()))
+    loadRecurringSkips(recurringSkipWeekOf(new Date())),
+    /* Пренесените ЗА ДНЕС (postponed_to = днес). Отделна заявка, защото редът
+       носи в completion_date ПЪРВОНАЧАЛНИЯ срок — по дата не влиза в нито
+       една от двете заявки за отмятания по-долу, а по задача може да е от
+       съвсем друг бюлетин. */
+    sbGet('task_completions','postponed_to=eq.'+toLocalISO(new Date())).catch(function(){ return []; })
   ]).then(function(results){
     var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
     /* Изключванията за ТЕКУЩАТА седмица (recurring_task_skips). Глобалното
@@ -54,6 +59,10 @@ function loadTodayDashboard(){
        нататък като skip_stores на елемента и изважда САМО този обект от
        знаменателя му (todayItemInScope). */
     var todaySkips = Array.isArray(results[2]) ? results[2] : [];
+    /* Пренесените за днес. Знаменателят се мести на ДВЕ места наведнъж:
+       обектът излиза от днешния ден на ПЪРВОНАЧАЛНАТА задача (moved_stores) и
+       влиза като собствен елемент на новия ден (carried_from по-долу). */
+    var carriedRaw = (Array.isArray(results[3]) ? results[3] : []).filter(function(c){ return !!c.postponed_to; });
     /* Задачите „Само за информация" отпадат ТУК, на входа — таблото ги брои
        и в числителя, и в знаменателя, а те нямат отмятания и нямат как да се
        изпълнят. Виж taskIsNotice() в shared.js за пълния обхват. */
@@ -81,7 +90,7 @@ function loadTodayDashboard(){
 
       var noDueItems = recurringNoDue.map(function(t){ return { id:t.id, title:t.title, department:t.department, kind:'recurring', skip_stores:recurringSkipStores(t.id, todaySkips) }; });
 
-      if (!items.length && !noDueItems.length) { wrap.innerHTML = todayEmptyHtml('Няма задачи (нито от Бюлетин, нито постоянни).'); return; }
+      if (!items.length && !noDueItems.length && !carriedRaw.length) { wrap.innerHTML = todayEmptyHtml('Няма задачи (нито от Бюлетин, нито постоянни).'); return; }
 
       var regIds = regularToday.map(function(t){ return t.id; });
       var recIds = recurringToday.map(function(t){ return t.id; });
@@ -120,14 +129,23 @@ function loadTodayDashboard(){
       var regDateQ = '&completion_date=eq.'+todayISO;
       var recDateQ = '&completion_date=gte.'+recLo+'&completion_date=lte.'+todayISO;
 
+      /* Задачите зад пренесените редове, които ги няма в заредените набори:
+         обикновена от по-стар бюлетин, постоянна, спряна междувременно.
+         Празен списък = нула заявки, тоест обичайният ден не струва нищо. */
+      var carryNeedReg = todayMissingIds(carriedRaw,'task_id',allBulTasks);
+      var carryNeedRec = todayMissingIds(carriedRaw,'recurring_task_id',allRecurring);
       Promise.all([
         regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+regDateQ) : Promise.resolve([]),
         allRecIds.length ? sbGet('task_completions','recurring_task_id=in.('+allRecIds.join(',')+')'+recDateQ) : Promise.resolve([]),
-        sbGet('users','select=store_name&order=store_name')
+        sbGet('users','select=store_name&order=store_name'),
+        carryNeedReg.length ? sbGet('bulletin_tasks','id=in.('+carryNeedReg.join(',')+')').catch(function(){return [];}) : Promise.resolve([]),
+        carryNeedRec.length ? sbGet('recurring_tasks','id=in.('+carryNeedRec.join(',')+')').catch(function(){return [];}) : Promise.resolve([])
       ]).then(function(r2){
         var regComps = Array.isArray(r2[0]) ? r2[0] : [];
         var recComps = Array.isArray(r2[1]) ? r2[1] : [];
         var users = Array.isArray(r2[2]) ? r2[2] : [];
+        var carryExtraReg = Array.isArray(r2[3]) ? r2[3] : [];
+        var carryExtraRec = Array.isArray(r2[4]) ? r2[4] : [];
         var seen = {};
         var stores = users.filter(function(u){
           if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
@@ -166,6 +184,31 @@ function loadTodayDashboard(){
           if (hit) comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, comment:c.comment, photos:c.photos, files:c.files });
         });
 
+        /* ═══ ОТЛОЖЕНИТЕ С ДАТА (postponed_to) ═══════════════════════════
+           Днешното явяване на обект, който го е пренесъл за друг ден, излиза
+           от знаменателя МУ (не на всички) — работата не е отменена, а
+           преместена. Редовете вече са изтеглени: те са със completion_date =
+           днес и status 'postponed', тоест стоят в regComps/recComps. */
+        items.forEach(function(it){
+          var src = it.kind==='recurring' ? recComps : regComps;
+          var f = it.kind==='recurring' ? 'recurring_task_id' : 'task_id';
+          it.moved_stores = src.filter(function(c){
+            return String(c[f])===String(it.id) && !!c.postponed_to && (c.completion_date||null)===todayISO;
+          }).map(function(c){ return c.store_name; });
+        });
+        /* Обратната посока: пренесените В днес стават собствени елементи, по
+           един на обект (target_stores), защото задачата се очаква точно от
+           него. Отметката им е в ПЪРВОНАЧАЛНИЯ ред, затова comps се пълни от
+           самия пренесен ред, а не от заявките по днешна дата. */
+        carriedRaw.forEach(function(c){
+          var kind = c.recurring_task_id ? 'recurring' : 'regular';
+          var id = c.recurring_task_id || c.task_id;
+          var t = todayCarriedTask(kind, id, allBulTasks, allRecurring, carryExtraReg, carryExtraRec);
+          if (!t || taskIsNotice(t)) return;
+          items.push({ id:id, title:t.title, department:t.department, kind:kind,
+                       target_stores:[c.store_name], carried_from:(c.completion_date||null) });
+          if (c.status === 'done') comps.push({ item_id:id, kind:kind, store_name:c.store_name, comment:c.comment, photos:c.photos, files:c.files });
+        });
         todayCache = { items:items, noDueItems:noDueItems, comps:comps, stores:stores };
         renderTodayDashboard(wrap, items, noDueItems, comps, stores);
       }).catch(function(){
@@ -211,11 +254,37 @@ function todayEmptyHtml(msg){
    comps: [{item_id, kind, store_name}]
    Само задачите, за които store е в обхват (target_stores празно/null = всички,
    или store е изрично включен), влизат в знаменателя на конкретния магазин. */
+/* ─── ПРЕНЕСЕНИ ЗАДАЧИ (task_completions.postponed_to) ──────────────────
+   Кои id-та от пренесените редове ги няма в заредения набор. */
+function todayMissingIds(carried, field, pool){
+  var out = [];
+  (carried||[]).forEach(function(c){
+    if (!c[field]) return;
+    var id = String(c[field]);
+    if ((pool||[]).some(function(x){ return String(x.id)===id; })) return;
+    if (out.indexOf(id) < 0) out.push(id);
+  });
+  return out;
+}
+/* Задачата зад пренесен ред: първо от заредените (днешният бюлетин, активните
+   постоянни), после от доизтеглените по id. */
+function todayCarriedTask(kind, id, bulArr, recArr, extraReg, extraRec){
+  var pools = kind==='recurring' ? [recArr, extraRec] : [bulArr, extraReg];
+  for (var i=0;i<pools.length;i++){
+    var hit = (pools[i]||[]).find(function(x){ return String(x.id)===String(id); });
+    if (hit) return hit;
+  }
+  return null;
+}
 /* Важи ли елементът за обекта днес: в обхвата на target_stores И не е
    изключен за седмицата за него (skip_stores — само постоянни задачи).
    Едно условие за процента и за разгънатия списък, за да не се разминат. */
 function todayItemInScope(it, store){
   if (it.skip_stores && it.skip_stores.indexOf(store) >= 0) return false;
+  /* Обект, ПРЕНЕСЪЛ задачата за друг ден (task_completions.postponed_to) —
+     днес не я дължи и излиза от знаменателя си. Броенето му е на новия ден,
+     където същата задача влиза като отделен елемент само за него. */
+  if (it.moved_stores && it.moved_stores.indexOf(store) >= 0) return false;
   return !it.target_stores || !it.target_stores.length || it.target_stores.indexOf(store)>=0;
 }
 function todayStoreStats(store, items, comps){
@@ -616,7 +685,10 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
         h += '<div style="padding:8px 0;border-bottom:1px solid #f8fafc;">';
         h += '<div style="display:flex;align-items:center;gap:12px;">';
         h += '<div style="width:20px;height:20px;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;' + (isDone ? 'background:#dcfce7;color:#16a34a;' : 'background:#f1f5f9;color:transparent;border:1.5px dashed #cbd5e1;') + '">' + (isDone ? '✓' : '') + '</div>';
-        h += '<div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:600;' + (isDone ? 'color:#94a3b8;text-decoration:line-through;' : '') + '">' + srcIcon + esc(it.title) + '</div></div>';
+        /* Пренесената задача се вижда като такава — иначе обектът я чете като
+           нова и не разбира защо днес му се иска нещо от миналата седмица. */
+        var carLbl = it.carried_from ? '<span style="font-size:9.5px;font-weight:700;color:#7c3aed;white-space:nowrap;"> ⏱ пренесена от ' + esc(fmtDate2(it.carried_from)) + '</span>' : '';
+        h += '<div style="flex:1;min-width:0;"><div style="font-size:13px;font-weight:600;' + (isDone ? 'color:#94a3b8;text-decoration:line-through;' : '') + '">' + srcIcon + esc(it.title) + carLbl + '</div></div>';
         h += '<span style="font-size:10px;font-weight:700;padding:2px 8px;border-radius:20px;background:' + d.bg + ';color:' + d.hdr + ';white-space:nowrap;">' + d.icon + ' ' + d.label + '</span>';
         h += '</div>';
         if (compObj && (compObj.comment || (compObj.photos && compObj.photos.length) || (compObj.files && compObj.files.length))) h += todayCompletionExtras(compObj);

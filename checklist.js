@@ -239,7 +239,8 @@ function checklistAutoMetrics() {
 
 /* Стойността за ЕДИН обект.
    hits е множеството РАЗЛИЧНИ дати с отмятане — оттам „два записа в един ден
-   се броят за един". Denom е броят дни в срока на задачата, не заковано 5.
+   се броят за един". Denom е броят дни в срока на задачата, не заковано 5,
+   и от 12.09.2026 е РАЗЛИЧЕН ЗА РАЗЛИЧНИТЕ ОБЕКТИ — виж checklistPortalPlan().
 
    ЧАСЪТ НЕ СЕ ПРОВЕРЯВА И НЕ СЕ ПРАВИМ, ЧЕ СЕ ПРОВЕРЯВА. Задачата има час
    (16:00 и 20:00), но task_completions пази completion_date — ДАТА, без
@@ -253,7 +254,31 @@ function checklistPortalValueFor(mode, hits, denom) {
 
 /* Разбива отмятанията по обект и дата за ЕДИН показател.
    Връща null, когато правилото не е известно (липсва задача или тя няма
-   due_weekdays) — тогава показателят не се пълни, вместо да се гадае. */
+   due_weekdays) — тогава показателят не се пълни, вместо да се гадае.
+
+   ═══ ОТЛАГАНЕ С ДАТА (task_completions.postponed_to, 12.09.2026) ═══════
+   Явяването се брои там, където РЕАЛНО се очаква — по postponed_to, не по
+   completion_date. Същото правило като в седмичния отчет:
+     · пренесено в ДРУГА седмица → излиза и от числителя, И от знаменателя
+       на старата седмица (работата не е отменена, а преместена) и влиза в
+       седмицата на postponed_to;
+     · пренесено в рамките на СЪЩАТА седмица → брои се веднъж, по НОВАТА
+       дата. Тя може да е извън due_weekdays (петък→събота) — денят на
+       задачата вече е събота и отмятането там е в срок;
+     · стар ред с postponed_to NULL → както досега, на първоначалния си ден.
+   Затова знаменателят е ПО ОБЕКТ: два обекта в една седмица могат да
+   дължат различен брой явявания. denomFor(store) го дава; `denom` остава
+   базата (дните от срока) за четимост и за съобщения.
+
+   Едно уточнение за ДАТАТА на попадението. Пренесеното в ден, в който
+   задачата и без това е дължима (пон→ср при срок Пон–Пет), се записва на
+   ПЪРВОНАЧАЛНАТА си дата: слятият ред при отмятане пише done и за двата дни,
+   тоест покрити са и двете явявания. По новата дата двете щяха да се слеят в
+   едно попадение и обектът щеше да губи ден, който е отработил — 4/5 при
+   свършени пет. Пренесеното в НЕдължим ден (петък→събота) се брои по новата
+   дата, защото денят на задачата вече е събота; две явявания, пренесени в
+   един и същи недължим ден, покриват ЕДИН ден и множеството ги слива
+   нарочно. */
 function checklistPortalPlan(metric, task, comps, weekISO) {
   var mode = CHECKLIST_PORTAL_MODE[metric.key];
   var days = (task && Array.isArray(task.due_weekdays)) ? task.due_weekdays : null;
@@ -263,19 +288,44 @@ function checklistPortalPlan(metric, task, comps, weekISO) {
      седмица. Отмятане в четвъртък по задача „Пон–Сря" не влиза. */
   var allowed = {};
   days.forEach(function (i) { if (weekISO[i]) allowed[weekISO[i]] = 1; });
+  var wkLo = weekISO[0], wkHi = weekISO[6];
 
-  var hits = {};
+  var hits = {}, delta = {}, seen = {};
   comps.forEach(function (c) {
-    /* status !== 'done' не се брои: 'postponed' е отложена, не свършена.
-       Липсваща completion_date също отпада — 19 такива записа стоят в
-       базата отпреди полето да се пълни и иначе биха се броили за всяка
-       седмица завинаги (същият фантом, който report.js вече изключва). */
-    if (!c || c.status !== 'done' || !c.completion_date) return;
-    if (!allowed[c.completion_date] || !c.store_name) return;
+    /* Липсваща completion_date отпада — 19 такива записа стоят в базата
+       отпреди полето да се пълни и иначе биха се броили за всяка седмица
+       завинаги (същият фантом, който report.js вече изключва). */
+    if (!c || !c.completion_date || !c.store_name) return;
+    /* Двете заявки (по completion_date и по postponed_to) се ЗАСТЪПВАТ при
+       отлагане в рамките на седмицата — един и същи ред идва два пъти. */
+    if (c.id) { if (seen[c.id]) return; seen[c.id] = 1; }
+    var orig = String(c.completion_date).slice(0, 10);
+    var eff = taskDueDateFor(orig, c);
+    var effInWeek = eff >= wkLo && eff <= wkHi;
+    var origIsDue = !!allowed[orig];
+    /* Знаменателят мърда САМО при пренесено явяване и само в двете посоки:
+       изнесено от седмицата (−1) и внесено в нея (+1). Пренесено вътре в
+       седмицата не мени нищо. */
+    if (c.postponed_to) {
+      if (origIsDue && !effInWeek) delta[c.store_name] = (delta[c.store_name] || 0) - 1;
+      else if (!origIsDue && effInWeek) delta[c.store_name] = (delta[c.store_name] || 0) + 1;
+    }
+    /* Принадлежи ли явяването на ТАЗИ седмица: пренесеното — по новата си
+       дата, всичко останало — по дължимия ден. */
+    var belongs = c.postponed_to ? effInWeek : origIsDue;
+    /* status !== 'done' не се брои: 'postponed' е отложена, не свършена. */
+    if (!belongs || c.status !== 'done') return;
+    /* Датата на попадението — виж уточнението в коментара на функцията:
+       пренесено в ДЪЛЖИМ ден → първоначалната дата (двете явявания остават
+       две); пренесено в недължим ден → новата. */
+    var key = (c.postponed_to && allowed[eff]) ? orig : eff;
     if (!hits[c.store_name]) hits[c.store_name] = {};
-    hits[c.store_name][c.completion_date] = 1;
+    hits[c.store_name][key] = 1;
   });
-  return { mode: mode, denom: days.length, hits: hits };
+  return {
+    mode: mode, denom: days.length, hits: hits,
+    denomFor: function (store) { return days.length + (delta[store] || 0); }
+  };
 }
 
 /* Записва САМО portal_value. control_value, control_num и comment не влизат
@@ -354,21 +404,32 @@ function checklistRecurringChanges(idx) {
   return Promise.all([
     sbGet('recurring_tasks', 'id=in.(' + ids.join(',') + ')&select=id,due_weekdays'),
     /* Прозорецът е самата показана седмица. Заявката вече изключва
-       записите без дата — PostgREST не връща NULL при gte/lte. */
+       записите без дата — PostgREST не връща NULL при gte/lte.
+       id влиза в select-а заради обединяването с четвъртата заявка: при
+       отлагане в рамките на седмицата един и същи ред идва по двата пътя. */
     sbGet('task_completions',
       'recurring_task_id=in.(' + ids.join(',') + ')' +
       '&completion_date=gte.' + weekISO[0] + '&completion_date=lte.' + weekISO[6] +
-      '&select=recurring_task_id,store_name,status,completion_date'),
+      '&select=id,recurring_task_id,store_name,status,completion_date,postponed_to'),
     /* Изключванията за ПОКАЗАНАТА седмица — ключът е от понеделника ѝ, по
        същия начин като в Бюлетина (recurringSkipWeekOf в shared.js). */
     loadRecurringSkips(recurringSkipWeekOf(weekDays(checklistWeek, checklistYear)[0])),
     /* Периодите (recurring_task_periods) — важи ли задачата за ПОКАЗАНАТА
        седмица. Спряна след нея или активирана преди нея не бива да променя
        миналия чек лист. */
-    sbGet('recurring_task_periods', 'recurring_task_id=in.(' + ids.join(',') + ')&select=recurring_task_id,from_monday,to_monday')
+    sbGet('recurring_task_periods', 'recurring_task_id=in.(' + ids.join(',') + ')&select=recurring_task_id,from_monday,to_monday'),
+    /* Пренесените В показаната седмица (task_completions.postponed_to).
+       Редът им носи в completion_date ден от ДРУГА седмица и затова не влиза
+       в заявката по-горе — по нея явяването просто изчезва и от двете
+       седмици. Отделна заявка, същият обхват, но по другата колона. */
+    sbGet('task_completions',
+      'recurring_task_id=in.(' + ids.join(',') + ')' +
+      '&postponed_to=gte.' + weekISO[0] + '&postponed_to=lte.' + weekISO[6] +
+      '&select=id,recurring_task_id,store_name,status,completion_date,postponed_to')
+      .catch(function () { return []; })
   ]).then(function (r) {
     var tasks = Array.isArray(r[0]) ? r[0] : [];
-    var comps = Array.isArray(r[1]) ? r[1] : [];
+    var comps = (Array.isArray(r[1]) ? r[1] : []).concat(Array.isArray(r[4]) ? r[4] : []);
     var skips = Array.isArray(r[2]) ? r[2] : [];
     var periods = Array.isArray(r[3]) ? r[3] : [];
     var taskById = {};
@@ -393,8 +454,13 @@ function checklistRecurringChanges(idx) {
            Празно, а не пропуснато: ако вече е записано „не" отпреди
            изключването, то трябва да изчезне. control_value и коментарът не
            се пипат — те не влизат в тялото на записа изобщо. */
-        var val = (offWeek || recurringIsSkipped(id, store, skips)) ? null
-          : checklistPortalValueFor(plan.mode, plan.hits[store], plan.denom);
+        /* Знаменателят е по ОБЕКТ: пренесъл ли е явявания извън седмицата,
+           дължи по-малко; внесъл ли е — повече. Стигне ли до нула, за него
+           тази седмица няма какво да се иска и клетката е ПРАЗНА, не „0/0"
+           или „не" — същото решение като при изключена задача. */
+        var dn = plan.denomFor(store);
+        var val = (offWeek || recurringIsSkipped(id, store, skips) || dn <= 0) ? null
+          : checklistPortalValueFor(plan.mode, plan.hits[store], dn);
         var row = idx[store + ' ' + m.key];
         /* Нищо ново → нищо не се пише. Инак всяко отваряне на седмица би
            било 36 записа в базата без нито една променена стойност. */

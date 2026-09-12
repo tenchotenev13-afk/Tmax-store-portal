@@ -454,9 +454,18 @@ async function fillAndSubmit(h) {
     const bl = fs.readFileSync(path.join(root, 'bulletin.js'), 'utf8');
     ok('bulletin.js заключва през общия механизъм, не паралелен',
       /function bulLockReason/.test(bl) && /bulAutoLocked/.test(bl));
-    ok('всички пет чекбокса носят data-linked',
-      (bl.match(/data-linked=/g) || []).length === 5,
-      'намерени: ' + (bl.match(/data-linked=/g) || []).length);
+    /* Всеки чекбокс, обвързан с ДЕН (data-cdate), минава през bulLockAttr() и
+       затова трябва да носи и data-linked — иначе „Вечерен оборот" остава
+       отключен точно там. Правилото е по СЪОТНОШЕНИЕ, не по число: на
+       12.09.2026 фиксираната бройка 5 падна заради двата нови чекбокса на
+       пренесените явявания (postponed_to), макар и двата да носят data-linked.
+       Твърдо число превръща всеки нов чекбокс в провал, без да проверява
+       нищо ново. */
+    const cbLines = bl.split('\n').filter(l => /type="checkbox"/.test(l) && /data-cdate=/.test(l));
+    const without = cbLines.filter(l => !/data-linked=/.test(l));
+    ok('има чекбокси, обвързани с ден', cbLines.length >= 5, 'намерени: ' + cbLines.length);
+    ok('всеки чекбокс с data-cdate носи и data-linked', without.length === 0,
+      'без data-linked: ' + without.length);
   }
 
   report();
