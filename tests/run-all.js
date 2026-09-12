@@ -42,6 +42,7 @@ const TESTS = [
   'stock-diff-capitalized-counter.test.js',
   'stock-diff-chip-counts.test.js',
   'stock-diff-store-chips-bottom.test.js',
+  'stock-diff-not-invoiced.test.js',
   'stock-diff-responsibility.test.js',
   'stock-diff-resolve-qty.test.js',
   'stock-diff-status-new.test.js',

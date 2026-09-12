@@ -241,7 +241,9 @@ section('4. Не връща най-отгоре при работа по раз�
      (не по първия попаднал — той е "Заприх.") */
   const resolveBtns = allBtns(doc).filter(b => b.dataset && b.dataset.id === 'l1'
     && (b.getAttribute('onclick') || '').indexOf('resolveDiffLine') >= 0);
-  ok('трите бутона за решение на ред l1 са налични', resolveBtns.length === 3, 'намерени: ' + resolveBtns.length);
+  /* Четири от 13.09.2026: към Заприх./Връщане/Липса се добави „Не са
+     фактурирани" - само при посока доставчик, каквато е бланката на l1. */
+  ok('четирите бутона за решение на ред l1 са налични', resolveBtns.length === 4, 'намерени: ' + resolveBtns.length);
   const resolveBtn = resolveBtns.find(b => (b.getAttribute('onclick') || '').indexOf("'missing'") >= 0);
   ok('бутонът "Липса" за ред l1 съществува', !!resolveBtn);
   realClick(w, resolveBtn);
@@ -445,7 +447,7 @@ function runRest() {
     /* нерешените пазят трите бутона */
     const p1btns = allBtns(doc).filter(b => b.dataset && b.dataset.id === 'p1'
       && (b.getAttribute('onclick') || '').indexOf('resolveDiffLine') >= 0);
-    ok('нерешеният ред пази трите бутона', p1btns.length === 3, 'намерени: ' + p1btns.length);
+    ok('нерешеният ред пази четирите бутона', p1btns.length === 4, 'намерени: ' + p1btns.length);
     const p2btns = allBtns(doc).filter(b => b.dataset && b.dataset.id === 'p2'
       && (b.getAttribute('onclick') || '').indexOf('resolveDiffLine') >= 0);
     ok('решеният ред НЯМА трите бутона', p2btns.length === 0, 'намерени: ' + p2btns.length);
@@ -457,7 +459,7 @@ function runRest() {
     realClick(w, smeni);
     const p2after = allBtns(doc).filter(b => b.dataset && b.dataset.id === 'p2'
       && (b.getAttribute('onclick') || '').indexOf('resolveDiffLine') >= 0);
-    ok('след "смени" трите бутона се появяват', p2after.length === 3, 'намерени: ' + p2after.length);
+    ok('след "смени" четирите бутона се появяват', p2after.length === 4, 'намерени: ' + p2after.length);
     ok('текущият избор е откроен с ✓', p2after.some(b => (b.textContent || '').indexOf('✓') >= 0));
     /* и се свива обратно */
     const zatvori = allBtns(doc).find(b => b.dataset && b.dataset.id === 'p2'

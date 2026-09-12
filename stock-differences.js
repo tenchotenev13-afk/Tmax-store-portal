@@ -231,8 +231,8 @@ function renderStockDiff() {
 
   var list = sdTableRows();
 
-  var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса' };
-  var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626' };
+  var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса', not_invoiced:'🧾 Не са фактурирани' };
+  var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626', not_invoiced:'#64748b' };
 
   /* Обхватът на КАРТИТЕ следва филтъра по тип - иначе етикетът казва
      "Заприходена", а числото брои и връщанията. При "Всички типове" остават
@@ -312,7 +312,8 @@ function renderStockDiff() {
   var typeCounts = {
     writein:  sdTableRows({type:'writein'}).length,
     'return': sdTableRows({type:'return'}).length,
-    missing:  sdTableRows({type:'missing'}).length
+    missing:  sdTableRows({type:'missing'}).length,
+    not_invoiced: sdTableRows({type:'not_invoiced'}).length
   };
   /* Втори ред чипове по магазин, точно над филтрите на долната таблица.
      Филтърът sdStoreFilter важи и за нея, но горният ред е екрани по-нагоре
@@ -322,7 +323,7 @@ function renderStockDiff() {
      функцията връща '' и двата реда изчезват заедно. */
   h += sdStoreChipsHtml();
   h += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">';
-  [['all','Всички типове'],['writein','📥 Заприхождаване ('+typeCounts.writein+')'],['return','↩️ Връщане ('+typeCounts['return']+')'],['missing','❓ Липса ('+typeCounts.missing+')']].forEach(function(f){
+  [['all','Всички типове'],['writein','📥 Заприхождаване ('+typeCounts.writein+')'],['return','↩️ Връщане ('+typeCounts['return']+')'],['missing','❓ Липса ('+typeCounts.missing+')'],['not_invoiced','🧾 Не са фактурирани ('+typeCounts.not_invoiced+')']].forEach(function(f){
     var a = sdTypeFilter===f[0];
     h += '<button data-f="'+f[0]+'" onclick="setSDTypeFilter(this.dataset.f)" style="border:1px solid '+(a?'#0f172a':'#e2e8f0')+';padding:4px 12px;border-radius:40px;font-size:11.5px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
   });
@@ -395,7 +396,7 @@ function renderStockDiff() {
          записал status='taken' върху потвърждението - тоест би изтрил края
          на потока и би върнал реда в "чакащи". Затова бутон няма. */
       if (canEdit && !isTaken && r.status !== 'received') {
-        var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : '✅ Приета';
+        var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : r.type==='not_invoiced' ? '🧾 Приключена' : '✅ Приета';
         h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
       }
       if (canEdit) {
@@ -494,6 +495,9 @@ function sdTableRows(over){
 function sdStatusWords(type, direction){
   if(direction==='wrong_receipt') return {pending:'Неизчистена', taken:'Изчистена', pIcon:'⏳', tIcon:'✅'};
   if(type==='writein') return {pending:'Незаприходена', taken:'Заприходена', pIcon:'⏳', tIcon:'📥'};
+  /* "Не са фактурирани" - няма стока за движение, тоест нито "Взета", нито
+     "Заприходена" значи нещо; редът просто е отворен или приключен. */
+  if(type==='not_invoiced') return {pending:'Отворена', taken:'Приключена', pIcon:'⏳', tIcon:'🧾'};
   return {pending:'Невзета', taken:'Взета', pIcon:'⏳', tIcon:'✅'};
 }
 /* За сборните карти и чипове, където изгледът смесва типове ("Всички типове"
@@ -502,6 +506,7 @@ function sdStatusWords(type, direction){
 function sdCounterWords(typeFilter){
   if(typeFilter==='writein') return sdStatusWords('writein');
   if(typeFilter==='return')  return sdStatusWords('return');
+  if(typeFilter==='not_invoiced') return sdStatusWords('not_invoiced');
   return {pending:'Чакащи', taken:'Приключени', pIcon:'⏳', tIcon:'✅'};
 }
 /* Баджът в реда знае типа на самия ред, затова там думата е точна винаги. */
@@ -517,6 +522,7 @@ function sdRowStatusBadge(r){
      пипат: те следват ТИПА на решението, не посоката. */
   var w = sdStatusWords(r.type, sdLineDirection(r));
   if(sdIsTaken(r)){
+    if(r.type==='not_invoiced') return badge('#f1f5f9','#475569', w.tIcon+' '+w.taken.toUpperCase());
     return r.type==='writein'
       ? badge('#eff6ff','#1e40af', w.tIcon+' '+w.taken.toUpperCase())
       : badge('#f0fdf4','#16a34a', w.tIcon+' '+w.taken.toUpperCase());
@@ -626,7 +632,7 @@ function sdStoreChipsHtml(){
 
 /* ── Бутони за решение по ред (само canReviewDiff) ── */
 function diffLineResolveButtons(l){
-  var TYPE_LABELS={writein:'📥 Заприх.',return:'↩️ Връщане',missing:'❓ Липса'};
+  var TYPE_LABELS={writein:'📥 Заприх.',return:'↩️ Връщане',missing:'❓ Липса',not_invoiced:'🧾 Не са фактурирани'};
   /* Логистичните складове НИКОГА не виждат/пипат решението на Цвети - то е
      само за разлики с доставчици, независимо каква роля има складовият
      профил технически (напр. 'logistics'). */
@@ -638,7 +644,7 @@ function diffLineResolveButtons(l){
     if(l.type) return '<span style="color:#16a34a;font-weight:600;">✓ '+(TYPE_LABELS[l.type]||l.type)+'</span>';
     return '<span style="color:#94a3b8;">чака преглед</span>';
   }
-  var TYPE_COLORS={writein:'#2563eb',return:'#7c3aed',missing:'#dc2626'};
+  var TYPE_COLORS={writein:'#2563eb',return:'#7c3aed',missing:'#dc2626',not_invoiced:'#64748b'};
   /* Вече решен ред - трите бутона се свиват до един спокоен чип с избора.
      Така нерешените редове изпъкват от само себе си при преглед на дълга
      бланка, вместо навсякъде да стоят по три еднакво тежки бутона. */
@@ -659,6 +665,10 @@ function diffLineResolveButtons(l){
     mk('writein','📥 Заприх.','#2563eb')+
     mk('return','↩️ Връщане','#7c3aed')+
     mk('missing','❓ Липса','#dc2626')+
+    /* "Не са фактурирани" има смисъл само срещу доставчик: артикул в стоковата,
+       който нито е доставен, нито фактуриран. Между складове и при сторна по
+       грешен прием фактура няма, затова и бутон няма. */
+    (sdLineDirection(l)==='supplier' ? mk('not_invoiced','🧾 Не са фактурирани','#64748b') : '')+
     (l.type?'<button data-id="'+l.id+'" onclick="sdToggleResolveEdit(this.dataset.id)" title="Затвори" style="border:none;background:none;color:#94a3b8;font-size:12px;cursor:pointer;padding:0 2px;">✕</button>':'')+
   '</div>';
 }
@@ -815,7 +825,10 @@ function resolveDiffLine(id,type){
      нея, вместо да ни връща най-отгоре на списъка. */
   sdKeepScroll(line.report_id);
   var resolvedAt=new Date().toISOString();
-  var payload={type:type,status:'pending',resolved_by:sdActor(),resolved_at:resolvedAt};
+  /* "Не са фактурирани" се ПРИКЛЮЧВА с решението: няма стока за движение и
+     никой не чака нищо, тоест 'pending' би оставил реда висящ завинаги. */
+  var resolvedStatus = type==='not_invoiced' ? 'taken' : 'pending';
+  var payload={type:type,status:resolvedStatus,resolved_by:sdActor(),resolved_at:resolvedAt};
   /* Липса/Връщане: количеството е РЕАЛНАТА разлика, не това по документ.
      Досега Цветелина го пренаписваше на ръка след всяко решение. Останалите
      типове (Заприхождаване и т.н.) не се пипат - там количеството по документ
@@ -834,7 +847,7 @@ function resolveDiffLine(id,type){
   }
   sbPatch('stock_differences','id=eq.'+id,payload).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    line.type=type; line.status='pending'; line.resolved_by=sdActor(); line.resolved_at=resolvedAt; /* локално, за незабавна проверка по-долу без чакане на reload */
+    line.type=type; line.status=resolvedStatus; line.resolved_by=sdActor(); line.resolved_at=resolvedAt; /* локално, за незабавна проверка по-долу без чакане на reload */
     /* ПРЕДИ autoCreateReturnFromDiff - тя чете line.quantity за stock_returns. */
     if(autoQty!==null) line.quantity=autoQty;
     /* Едно съобщение, не две: toast() презаписва един и същ елемент, затова
@@ -1128,9 +1141,10 @@ function sdModalHtml() {
       '<option value="writein"'+((r.type==='writein'||!isEdit)?' selected':'')+'>📥 Заприхождаване</option>'+
       '<option value="return"'+(r.type==='return'?' selected':'')+'>↩️ Връщане</option>'+
       '<option value="missing"'+(r.type==='missing'?' selected':'')+'>❓ Липса</option>'+
+      '<option value="not_invoiced"'+(r.type==='not_invoiced'?' selected':'')+'>🧾 Не са фактурирани</option>'+
       '</select>';
   } else {
-    var typeLabels={writein:'📥 Заприхождаване',return:'↩️ Връщане',missing:'❓ Липса'};
+    var typeLabels={writein:'📥 Заприхождаване',return:'↩️ Връщане',missing:'❓ Липса',not_invoiced:'🧾 Не са фактурирани'};
     h += '<label class="fl">Тип на решение</label>'+
       '<div class="fi" style="background:#f8fafc;color:#64748b;">'+(r.type?typeLabels[r.type]||r.type:'⏳ Още не е решено от Цветелина')+'</div>'+
       '<input type="hidden" id="sd-type" value="'+escVal(r.type)+'">';
@@ -2778,7 +2792,7 @@ function renderDiffPrint(rep){
      затова проверката е по trim(), не по истинност. */
   var genComment = (rep.general_comment||'').trim();
 
-  var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса' };
+  var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса', not_invoiced:'🧾 Не са фактурирани' };
   /* Същата логика като sdRowStatusBadge, но без цветната таблетка - на хартия
      остава само думата. */
   var statusText = function(r){
