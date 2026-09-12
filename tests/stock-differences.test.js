@@ -386,7 +386,10 @@ function runRest() {
     });
     one.w.renderStockDiff();
     const h = one.doc.getElementById('mod-stock-diff').innerHTML;
-    ok('1 магазин -> чиповете пак се показват', (h.match(/data-store=/g) || []).length === 2,
+    /* Чиповете по магазин се рисуват в ДВА реда - над новите бланки и над
+       долната таблица (виж stock-diff-store-chips-bottom.test.js). Затова
+       бройката е 2 x ("Всички" + магазина), а не 2. */
+    ok('1 магазин -> чиповете пак се показват', (h.match(/data-store=/g) || []).length === 4,
       'намерени: ' + (h.match(/data-store=/g) || []).length);
     ok('1 магазин -> има чип "Всички" и чип за самия магазин',
       h.indexOf('🏪 Всички (1)') >= 0 && h.indexOf('data-store="Враца"') >= 0);
@@ -417,7 +420,8 @@ function runRest() {
     /* точно на границата: 2 магазина -> чиповете СЕ показват */
     const two = boot(ADMIN, { reports: [REPORTS[0], REPORTS[1]], lines: [LINES[0], LINES[1]] });
     two.w.renderStockDiff();
-    ok('2 магазина -> чиповете се показват', (two.doc.getElementById('mod-stock-diff').innerHTML.match(/data-store=/g) || []).length === 3);
+    /* 2 реда x ("Всички" + 2 магазина) = 6 */
+    ok('2 магазина -> чиповете се показват', (two.doc.getElementById('mod-stock-diff').innerHTML.match(/data-store=/g) || []).length === 6);
   }
 
   /* ══════════ 8б. Нагледност: прогрес + затихване на решените ══════════ */

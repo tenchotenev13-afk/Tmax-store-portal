@@ -314,6 +314,13 @@ function renderStockDiff() {
     'return': sdTableRows({type:'return'}).length,
     missing:  sdTableRows({type:'missing'}).length
   };
+  /* Втори ред чипове по магазин, точно над филтрите на долната таблица.
+     Филтърът sdStoreFilter важи и за нея, но горният ред е екрани по-нагоре
+     (над непрегледаните бланки) и оттук не се вижда. Същата функция - един
+     филтър, едни бройки; кликът на който и да е от двата реда пренарисува
+     целия модул, тоест маркирането винаги е еднакво и в двата. При 0 магазина
+     функцията връща '' и двата реда изчезват заедно. */
+  h += sdStoreChipsHtml();
   h += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">';
   [['all','Всички типове'],['writein','📥 Заприхождаване ('+typeCounts.writein+')'],['return','↩️ Връщане ('+typeCounts['return']+')'],['missing','❓ Липса ('+typeCounts.missing+')']].forEach(function(f){
     var a = sdTypeFilter===f[0];
