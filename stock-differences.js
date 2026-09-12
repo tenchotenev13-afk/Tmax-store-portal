@@ -829,6 +829,10 @@ function resolveDiffLine(id,type){
      никой не чака нищо, тоест 'pending' би оставил реда висящ завинаги. */
   var resolvedStatus = type==='not_invoiced' ? 'taken' : 'pending';
   var payload={type:type,status:resolvedStatus,resolved_by:sdActor(),resolved_at:resolvedAt};
+  /* Приключен ред трябва да казва кой и кога го е приключил - както при
+     "✅ Взета" (sdMarkTaken). Тук решението И приключването са едно действие,
+     затова лицето и часът са същите като на решението. */
+  if(type==='not_invoiced'){ payload.completed_by=sdActor(); payload.completed_at=resolvedAt; }
   /* Липса/Връщане: количеството е РЕАЛНАТА разлика, не това по документ.
      Досега Цветелина го пренаписваше на ръка след всяко решение. Останалите
      типове (Заприхождаване и т.н.) не се пипат - там количеството по документ
@@ -847,7 +851,8 @@ function resolveDiffLine(id,type){
   }
   sbPatch('stock_differences','id=eq.'+id,payload).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    line.type=type; line.status=resolvedStatus; line.resolved_by=sdActor(); line.resolved_at=resolvedAt; /* локално, за незабавна проверка по-долу без чакане на reload */
+    line.type=type; line.status=resolvedStatus; line.resolved_by=sdActor(); line.resolved_at=resolvedAt;
+    if(type==='not_invoiced'){ line.completed_by=sdActor(); line.completed_at=resolvedAt; } /* локално, за незабавна проверка по-долу без чакане на reload */
     /* ПРЕДИ autoCreateReturnFromDiff - тя чете line.quantity за stock_returns. */
     if(autoQty!==null) line.quantity=autoQty;
     /* Едно съобщение, не две: toast() презаписва един и същ елемент, затова
@@ -1489,6 +1494,15 @@ function submitSD() {
      презаписва изпълнителят при редакция на коментар.
      'capitalized' е заварена стойност за СЪЩОТО състояние като 'taken', затова
      старото състояние минава през sdIsTaken, не през сравнение на низа. */
+  /* "Не са фактурирани" приключва реда и когато решението е взето през модала,
+     не само през бутона (resolveDiffLine). Стои ПРЕДИ проверката за преход
+     неприключен -> приключен долу, за да я задейства: completed_by/at ги пише
+     тя, без втори код за същото. Само ако редът още НЕ е приключен - вече
+     приключен не се пипа. Обратното не се прави: смени ли Цвети типа на друг,
+     статусът не се връща сам, това е ръчно решение. */
+  if(sdEditId && data.type==='not_invoiced' && origRecord && !sdIsTaken(origRecord)){
+    data.status = 'taken';
+  }
   var isNowCompleted = data.status==='taken' || data.status==='capitalized';
   var wasCompleted = !!origRecord && sdIsTaken(origRecord);
   if(isNowCompleted && !wasCompleted){

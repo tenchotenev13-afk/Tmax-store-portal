@@ -14,7 +14,7 @@
    Пускане:  node tests/stock-diff-not-invoiced.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, ok, section, report, guard, realClick, ticks } = H;
+const { boot, ok, section, report, guard, realClick, ticks, btn } = H;
 
 const CVETI = {
   email: 'c.teneva@temax.bg', display_name: 'Цветелина Тенева',
@@ -229,6 +229,86 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
     if (ok('има PATCH към differences_reports', !!rp, h.calls.patch.map(p => p.url).join(' | '))) {
       ok('по id на бланката', rp.url.indexOf('id=eq.rep-s') >= 0, rp.url);
       ok('тялото е reviewed:true', rp.body.reviewed === true, JSON.stringify(rp.body));
+    }
+  }
+
+  section('е) PATCH-ът от бутона носи и кой/кога приключи реда');
+  {
+    const h = env([rep()], [line()], 'supplier');
+    guard('рендер', () => h.w.renderStockDiff());
+    realClick(h.w, notInvoicedBtn(h.doc));
+    await ticks();
+    const p = sdPatch(h.calls)[0];
+    if (ok('има PATCH към stock_differences', !!p)) {
+      ok('completed_by е записан', p.body.completed_by === 'Цветелина Тенева',
+        JSON.stringify(p.body.completed_by));
+      ok('completed_at е ISO timestamp', /^\d{4}-\d{2}-\d{2}T/.test(p.body.completed_at || ''),
+        JSON.stringify(p.body.completed_at));
+      /* Решението и приключването са едно действие — един и същ час. */
+      ok('completed_at е същият час като resolved_at', p.body.completed_at === p.body.resolved_at,
+        JSON.stringify([p.body.completed_at, p.body.resolved_at]));
+    }
+  }
+
+  section('ж) Редакция през модала с избор „Не са фактурирани" → status taken');
+  {
+    /* Редът е решен като „Липса" и чака; Цвети сменя решението през модала. */
+    const h = env([rep()], [line({ type: 'missing', status: 'pending',
+      resolved_by: 'Цветелина Тенева', resolved_at: '2026-09-10T08:00:00.000Z' })], 'supplier');
+    if (guard('openSDModal не хвърля', () => h.w.openSDModal('l-s'))) {
+      h.doc.getElementById('sd-type').value = 'not_invoiced';
+      realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'Запази'));
+      await ticks();
+      const p = sdPatch(h.calls)[0];
+      if (ok('има PATCH към stock_differences', !!p, h.calls.toast.join(' | '))) {
+        ok('type е not_invoiced', p.body.type === 'not_invoiced', JSON.stringify(p.body.type));
+        ok('status е taken — в СЪЩИЯ PATCH', p.body.status === 'taken', JSON.stringify(p.body.status));
+        ok('completed_by е записан', p.body.completed_by === 'Цветелина Тенева',
+          JSON.stringify(p.body.completed_by));
+        ok('completed_at е записан', /^\d{4}-\d{2}-\d{2}T/.test(p.body.completed_at || ''),
+          JSON.stringify(p.body.completed_at));
+      }
+      ok('няма POST към stock_returns', !h.calls.post.some(x => x.table === 'stock_returns'));
+    }
+  }
+
+  section('з) Редакция на вече приключен ред — не дублира; смяна на типа не връща статуса');
+  {
+    const DONE = { type: 'not_invoiced', status: 'taken',
+      resolved_by: 'Първи човек', resolved_at: '2026-09-01T08:00:00.000Z',
+      completed_by: 'Първи човек', completed_at: '2026-09-01T08:00:00.000Z' };
+
+    /* з.1 — само коментар върху вече приключен ред: кой/кога не се презаписват. */
+    const h = env([rep()], [line(DONE)], 'supplier');
+    if (guard('openSDModal не хвърля', () => h.w.openSDModal('l-s'))) {
+      h.doc.getElementById('sd-comment').value = 'допълнителна бележка';
+      realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'Запази'));
+      await ticks();
+      const p = sdPatch(h.calls)[0];
+      if (ok('има PATCH', !!p, h.calls.toast.join(' | '))) {
+        ok('status остава taken', p.body.status === 'taken', JSON.stringify(p.body.status));
+        ok('completed_by НЕ е в PATCH-а (не се презаписва)', !('completed_by' in p.body),
+          Object.keys(p.body).join(','));
+        ok('completed_at НЕ е в PATCH-а', !('completed_at' in p.body), Object.keys(p.body).join(','));
+        ok('resolved_by не се презаписва (типът не е сменен)', !('resolved_by' in p.body),
+          Object.keys(p.body).join(','));
+      }
+    }
+
+    /* з.2 — смяна на типа обратно на друг: статусът НЕ се връща сам. */
+    const h2 = env([rep()], [line(DONE)], 'supplier');
+    if (guard('openSDModal не хвърля (смяна на тип)', () => h2.w.openSDModal('l-s'))) {
+      h2.doc.getElementById('sd-type').value = 'missing';
+      realClick(h2.w, btn(h2.doc.getElementById('sd-ov'), 'Запази'));
+      await ticks();
+      const p2 = sdPatch(h2.calls)[0];
+      if (ok('има PATCH', !!p2, h2.calls.toast.join(' | '))) {
+        ok('типът е сменен на missing', p2.body.type === 'missing', JSON.stringify(p2.body.type));
+        ok('статусът остава taken — не се гадае обратно', p2.body.status === 'taken',
+          JSON.stringify(p2.body.status));
+        ok('кой/кога приключи не се трие', !('completed_by' in p2.body) || p2.body.completed_by !== null,
+          JSON.stringify(p2.body.completed_by));
+      }
     }
   }
 
