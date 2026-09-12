@@ -9,6 +9,23 @@
 //   promo_expiring   — имейл/push за промоции, изтичащи днес (и до 3 дни в пон.)
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
 //
+// v6 (12.09.2026) — ОТЛАГАНЕ С ТОЧНА ДАТА (нова колона
+//   task_completions.postponed_to, миграция 20260912152519). Денят на задачата
+//   е postponed_to, ако редът е пренесен; completion_date остава
+//   първоначалният срок. taskDueDateFor()/taskIsMovedAway() са копия от
+//   shared.js. Пипнати са трите теми със задачи:
+//     · today_deadlines — днешното явяване, пренесено ДРУГАДЕ, не се напомня;
+//       пренесеното ЗА ДНЕС се напомня само на отложилия обект, дори задачата
+//       да е от друг бюлетин (дотегля се по id). Слято явяване — един ред.
+//     · deadline_passed — пренеслият обект излиза от обхвата на днешния ден;
+//       пренесеното за днес влиза с отметката от самия пренесен ред.
+//     · overdue_tasks   — обикновена задача е просрочена СЛЕД postponed_to,
+//       не след срока; пренесените от друг бюлетин се теглят по дата.
+//       Постоянна: вчерашното явяване, пренесено другаде, не е просрочено;
+//       пренесеното ЗА ВЧЕРА и неотметнато е.
+//   Стар отложен ред без дата се държи както досега във всяка тема.
+//   promo_expiring не е пипана.
+//
 // v5 (12.09.2026) — постоянните задачи важат ПО СЕДМИЦИ (нова таблица
 //   recurring_task_periods, миграция 20260911204550). Пипната е САМО темата
 //   overdue_tasks: тя докладва ВЧЕРАШНИЯ ден, а recurring_tasks.active е кеш
@@ -199,6 +216,34 @@ async function loadSkipsForWeek(supabase: any, wk: { week: number; year: number 
 async function loadRecurringPeriods(supabase: any): Promise<any[]> {
   const { data } = await supabase.from('recurring_task_periods')
     .select('recurring_task_id,from_monday,to_monday');
+  return Array.isArray(data) ? data : [];
+}
+/* Копия от shared.js — отлагане с точна дата (task_completions.postponed_to).
+   Денят на задачата е postponed_to, ако редът е пренесен; completion_date
+   остава първоначалният срок. tests/postpone-date-notify.test.js сверява
+   копията байт по байт. */
+function taskDueDateFor(dueISO, comp){
+  var orig = dueISO ? String(dueISO).slice(0,10) : null;
+  if (!comp || !comp.postponed_to) return orig;
+  return String(comp.postponed_to).slice(0,10);
+}
+function taskIsMovedAway(comp){
+  return !!(comp && comp.postponed_to);
+}
+/* Редовете, ПРЕНЕСЕНИ към даден ден. Без филтър по задача: пренесеното може
+   да е от бюлетин, който темата не зарежда (отложено от миналата седмица).
+   comment/photos/files — за deadline_passed, чието писмо ги показва. */
+async function loadCarriedTo(supabase: any, dateISO: string): Promise<any[]> {
+  const { data } = await supabase.from('task_completions')
+    .select('task_id,recurring_task_id,store_name,status,completion_date,postponed_to,comment,photos,files')
+    .eq('postponed_to', dateISO);
+  return Array.isArray(data) ? data : [];
+}
+/* Задачите зад пренесените редове, по id. БЕЗ active=eq.true: задача, спряна
+   след отлагането, пак е уговорена за този ден. Празен списък = нула заявки. */
+async function loadTasksByIds(supabase: any, table: string, ids: string[]): Promise<any[]> {
+  if (!ids.length) return [];
+  const { data } = await supabase.from(table).select('*').in('id', ids);
   return Array.isArray(data) ? data : [];
 }
 /* Копие на recurringIsDueOnWeekday / recurringIsWindow /
@@ -437,7 +482,29 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
   const recDue = recurringTasksForWeek(recsRaw, recPeriods, yMonday).filter((t: any) =>
     !taskIsNotice(t) && recurringDueOnWeekday(t, yIdx) && !recurringIsSkipped(t.id, null, ySkips));
 
-  if (!overdueTasks.length && !recDue.length) {
+  /* ═══ ОТЛАГАНЕ С ТОЧНА ДАТА (task_completions.postponed_to) ═══════════
+     Пренесеното е просрочено СЛЕД новата си дата, не след срока. Две групи
+     тук не стигат по заявките по-долу:
+       · обикновена задача, пренесена в тази седмица и неотметната, чиято
+         нова дата вече е минала — ако не е в overdueTasks (от друг бюлетин,
+         или срокът ѝ още не е минал), иначе никой не я вижда;
+       · постоянна задача, пренесена ЗА ВЧЕРА и неотметната — ако вчера не е
+         неин ден, recDue не я съдържа.
+     Обхватът за обикновените е седмицата на днес — същата, чийто бюлетин
+     темата чете; за постоянните — точно вчера, както recDue. */
+  const wkMonday = plusDaysISO(bg.dateStr, -bg.weekdayIdx);
+  const { data: lateRegRaw } = await supabase.from('task_completions')
+    .select('task_id,recurring_task_id,store_name,status,completion_date,postponed_to')
+    .eq('status', 'postponed').gte('postponed_to', wkMonday).lte('postponed_to', yISO);
+  const overdueIds = overdueTasks.map((t: any) => t.id);
+  const lateReg = (lateRegRaw || []).filter((c: any) => !!c.task_id && overdueIds.indexOf(c.task_id) < 0);
+  const lateRegTasks = await loadTasksByIds(supabase, 'bulletin_tasks',
+    lateReg.map((c: any) => c.task_id).filter((id: string, i: number, a: string[]) => a.indexOf(id) === i));
+  const recDueIds = recDue.map((t: any) => t.id);
+  const lateRec = (await loadCarriedTo(supabase, yISO)).filter((c: any) =>
+    !!c.recurring_task_id && c.status !== 'done' && recDueIds.indexOf(c.recurring_task_id) < 0);
+
+  if (!overdueTasks.length && !recDue.length && !lateReg.length && !lateRec.length) {
     return { skip: 'Няма просрочени задачи (нито от бюлетина, нито постоянни за ' + yISO + ')' };
   }
 
@@ -445,7 +512,7 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
   if (overdueTasks.length) {
     const ids = overdueTasks.map((t: any) => t.id);
     const { data } = await supabase
-      .from('task_completions').select('task_id,store_name').in('task_id', ids);
+      .from('task_completions').select('task_id,store_name,status,completion_date,postponed_to').in('task_id', ids);
     comps = data || [];
   }
 
@@ -469,7 +536,7 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
     const rids = recDue.map((t: any) => t.id);
     const { data } = await supabase
       .from('task_completions')
-      .select('recurring_task_id,store_name,status,completion_date')
+      .select('recurring_task_id,store_name,status,completion_date,postponed_to')
       .in('recurring_task_id', rids)
       .gte('completion_date', recLo)
       .lte('completion_date', yISO);
@@ -488,12 +555,17 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
      Ключът на taskStats е KIND+ID, не голото id: двете таблици имат
      собствени uuid пространства и байтово съвпадение е малко вероятно, но
      ключ, който зависи от това, е ключ, който чака да сгреши. */
-  const addTask = (t: any, kind: string, dueISO: string, isDone: (s: string) => boolean, skipStores?: string[]) => {
+  const addTask = (t: any, kind: string, dueISO: string, isDone: (s: string) => boolean, skipStores?: string[],
+                   dueOf?: (s: string) => string | null, onlyStores?: string[]) => {
     /* skipStores — обектите, изключени за седмицата (само постоянни): не са
-       дължими, тоест не са нито „пропуснали", нито част от total. */
+       дължими, тоест не са нито „пропуснали", нито част от total.
+       onlyStores — пренесено явяване: дължимо е САМО за обектите, които са го
+       отложили. dueOf — срокът на обекта, когато е различен от този на
+       задачата (пренесеното е просрочено от postponed_to). */
     const scope = ((Array.isArray(t.target_stores) && t.target_stores.length)
       ? stores.filter(s => t.target_stores.indexOf(s) >= 0)
-      : stores).filter(s => !skipStores || skipStores.indexOf(s) < 0);
+      : stores).filter(s => (!skipStores || skipStores.indexOf(s) < 0) &&
+                            (!onlyStores || onlyStores.indexOf(s) >= 0));
     const groups = ((Array.isArray(t.report_groups) && t.report_groups.length)
       ? t.report_groups : ['controlling']).slice();
     if (kind === 'regular' && t.created_by) groups.push('creator:' + t.created_by);
@@ -501,7 +573,7 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
     for (const s of scope) {
       if (isDone(s)) continue;
       missing.push(s);
-      items.push({ taskId: t.id, kind: kind, store: s, title: t.title, due: dueISO, groups: groups });
+      items.push({ taskId: t.id, kind: kind, store: s, title: t.title, due: (dueOf && dueOf(s)) || dueISO, groups: groups });
     }
     if (missing.length) {
       taskStats[kind + ':' + t.id] = {
@@ -516,19 +588,59 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
      брои за изпълнение (без проверка на status). Нарочно не се променя в
      същата стъпка. */
   for (const t of overdueTasks) {
+    /* Пренесен ред брои за „не е просрочено" само ако е отметнат или новата
+       му дата още не е минала. Всеки друг ред брои както досега — включително
+       старият отложен ред без дата. Просроченото пренесено се докладва със
+       срок postponed_to. */
     addTask(t, 'regular', lastDueDate(t) || '',
-      (s) => comps.some((c: any) => c.task_id === t.id && c.store_name === s));
+      (s) => comps.some((c: any) => c.task_id === t.id && c.store_name === s &&
+        (!taskIsMovedAway(c) || c.status === 'done' || String(c.postponed_to).slice(0, 10) >= bg.dateStr)),
+      undefined,
+      (s) => {
+        const m = comps.find((c: any) => c.task_id === t.id && c.store_name === s &&
+          taskIsMovedAway(c) && c.status !== 'done' && String(c.postponed_to).slice(0, 10) < bg.dateStr);
+        return m ? String(m.postponed_to).slice(0, 10) : null;
+      });
+  }
+  /* Пренесените, които не са в overdueTasks: само за отложилия обект, със
+     срок новата дата. */
+  for (const t of lateRegTasks) {
+    if (taskIsNotice(t)) continue;
+    const rows = lateReg.filter((c: any) => c.task_id === t.id);
+    if (!rows.length) continue;
+    addTask(t, 'regular', String(rows[0].postponed_to).slice(0, 10), () => false, undefined,
+      (s) => { const m = rows.find((c: any) => c.store_name === s); return m ? String(m.postponed_to).slice(0, 10) : null; },
+      rows.map((c: any) => c.store_name));
   }
 
   /* Постоянните: само status='done' брои. Отложената задача НЕ е подадена —
      същата уговорка като в buildDeadlinePassed(). */
   for (const t of recDue) {
     const win = recWin[t.id] || null;
+    const onThis = (c: any) => win ? win.indexOf(c.completion_date || '') >= 0
+                                   : (c.completion_date || null) === yISO;
+    /* Вчерашното явяване, ПРЕНЕСЕНО другаде: вчера не е било дължимо за този
+       обект — излиза от обхвата, както при изключване, вместо да се изброи
+       като пропуснал. Броенето му е в деня на postponed_to. */
+    const movedAway = recComps.filter((c: any) => c.recurring_task_id === t.id && taskIsMovedAway(c) && onThis(c) &&
+      (win ? win.indexOf(taskDueDateFor(c.completion_date, c) || '') < 0
+           : taskDueDateFor(c.completion_date, c) !== yISO)).map((c: any) => c.store_name);
     addTask(t, 'recurring', yISO, (s) => recComps.some((c: any) => {
       if (c.recurring_task_id !== t.id || c.store_name !== s || c.status !== 'done') return false;
-      return win ? win.indexOf(c.completion_date || '') >= 0
-                 : (c.completion_date || null) === yISO;
-    }), recurringSkipStores(t.id, ySkips));
+      return onThis(c);
+    }), recurringSkipStores(t.id, ySkips).concat(movedAway));
+  }
+  /* Пренесените ЗА ВЧЕРА, които вчера не са били в собствения си ден —
+     просрочени само за отложилия обект. Задачата идва от recsRaw: там са
+     ВСИЧКИ, без active, тоест и спряна междувременно. */
+  const lateRecByTask: Record<string, string[]> = {};
+  for (const c of lateRec) {
+    (lateRecByTask[c.recurring_task_id] = lateRecByTask[c.recurring_task_id] || []).push(c.store_name);
+  }
+  for (const id of Object.keys(lateRecByTask)) {
+    const t = (recsRaw || []).find((x: any) => x.id === id);
+    if (!t || taskIsNotice(t)) continue;
+    addTask(t, 'recurring', yISO, () => false, recurringSkipStores(t.id, ySkips), undefined, lateRecByTask[id]);
   }
 
   if (!items.length) return { skip: 'Всички просрочени задачи са отметнати' };
@@ -612,10 +724,12 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
     .from('bulletins').select('id').eq('week_number', iso.week).eq('year', iso.year).limit(1);
 
   let oneTime: any[] = [];
+  let bulAll: any[] = [];
   if (bulletins && bulletins.length) {
     const { data: tasks } = await supabase
       .from('bulletin_tasks').select('*').eq('bulletin_id', bulletins[0].id);
-    oneTime = (tasks || []).filter((t: any) => !taskIsNotice(t) && dueDatesOf(t).indexOf(bg.dateStr) >= 0);
+    bulAll = tasks || [];
+    oneTime = bulAll.filter((t: any) => !taskIsNotice(t) && dueDatesOf(t).indexOf(bg.dateStr) >= 0);
   }
 
   /* Изключванията за СЕДМИЦАТА НА ДНЕС. Изключена за всички → няма push;
@@ -632,30 +746,67 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
     return slot > winStart && slot <= nowMin ? slot : null;
   };
 
-  const due: { t: any; isRec: boolean; slot: number }[] = [];
+  const due: { t: any; isRec: boolean; slot: number; carried?: any[] }[] = [];
   for (const t of oneTime) { const s = inWindow(t, false); if (s !== null) due.push({ t, isRec: false, slot: s }); }
   for (const t of recToday) { const s = inWindow(t, true); if (s !== null) due.push({ t, isRec: true, slot: s }); }
+
+  /* ═══ ПРЕНЕСЕНИТЕ ЗА ДНЕС (task_completions.postponed_to = днес) ═══════
+     Дължими са днес САМО за обекта, който ги е отложил — дори задачата да е
+     от друг бюлетин или днес да не е неин ден от седмицата. Отметнатите
+     отпадат още тук: отметката им е в самия пренесен ред.
+     Слято явяване (решение 5): задачата и без това е дължима днес — има свой
+     ред, втори ред в същото напомняне е шум. */
+  const carriedOpen = (await loadCarriedTo(supabase, bg.dateStr)).filter((c: any) => c.status !== 'done');
+  const uniq = (a: string[]) => a.filter((x, i) => !!x && a.indexOf(x) === i);
+  const needReg = uniq(carriedOpen.map((c: any) => c.task_id)).filter(id => !bulAll.some((t: any) => t.id === id));
+  const needRec = uniq(carriedOpen.map((c: any) => c.recurring_task_id)).filter(id => !(recs || []).some((t: any) => t.id === id));
+  const poolReg = bulAll.concat(await loadTasksByIds(supabase, 'bulletin_tasks', needReg));
+  const poolRec = (recs || []).concat(await loadTasksByIds(supabase, 'recurring_tasks', needRec));
+  const carriedByTask: Record<string, { t: any; isRec: boolean; rows: any[] }> = {};
+  for (const c of carriedOpen) {
+    const isRec = !!c.recurring_task_id;
+    const id = isRec ? c.recurring_task_id : c.task_id;
+    if (!id) continue;
+    if ((isRec ? recToday : oneTime).some((x: any) => x.id === id)) continue;
+    const t = (isRec ? poolRec : poolReg).find((x: any) => x.id === id);
+    if (!t || taskIsNotice(t)) continue;
+    if (isRec && recurringIsSkipped(t.id, null, skips)) continue;
+    const k = (isRec ? 'r:' : 't:') + id;
+    if (!carriedByTask[k]) carriedByTask[k] = { t: t, isRec: isRec, rows: [] };
+    carriedByTask[k].rows.push(c);
+  }
+  for (const k of Object.keys(carriedByTask)) {
+    const e = carriedByTask[k];
+    const slot = inWindow(e.t, e.isRec);
+    if (slot !== null) due.push({ t: e.t, isRec: e.isRec, slot: slot, carried: e.rows });
+  }
 
   if (!due.length) {
     return { skip: 'Няма задачи в този прозорец (' + hhmm(Math.max(0, winStart)) + '–' + hhmm(nowMin) + ')' };
   }
 
-  const oneIds = due.filter(d => !d.isRec).map(d => d.t.id);
-  const recIds = due.filter(d => d.isRec).map(d => d.t.id);
+  const oneIds = due.filter(d => !d.isRec && !d.carried).map(d => d.t.id);
+  const recIds = due.filter(d => d.isRec && !d.carried).map(d => d.t.id);
 
   let comps: any[] = [];
   if (oneIds.length) {
     const { data } = await supabase.from('task_completions')
-      .select('task_id,store_name,completion_date').in('task_id', oneIds);
+      .select('task_id,store_name,completion_date,status,postponed_to').in('task_id', oneIds);
     comps = comps.concat(data || []);
   }
   if (recIds.length) {
     const { data } = await supabase.from('task_completions')
-      .select('recurring_task_id,store_name,completion_date')
+      .select('recurring_task_id,store_name,completion_date,status,postponed_to')
       .in('recurring_task_id', recIds).eq('completion_date', bg.dateStr);
     comps = comps.concat(data || []);
   }
 
+  /* „Свършено" тук е ВСЕКИ ред с днешна дата, без значение от статуса — така
+     е било и преди отлагането с дата. Затова днешното явяване, пренесено
+     ДРУГАДЕ, не се напомня без отделна проверка: пренесеният ред пази
+     completion_date = днес и doneFor го брои. Отделна проверка по
+     postponed_to би била мъртъв код (мутацията, която я изключва, не
+     променя нищо — 12.09.2026). */
   const doneFor = (d: any, store: string) => {
     if (d.isRec) {
       return comps.some((c: any) => c.recurring_task_id === d.t.id && c.store_name === store);
@@ -666,14 +817,18 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
 
   const byStore: Record<string, { slot: number; lines: string[] }> = {};
   for (const d of due) {
-    const scope = (Array.isArray(d.t.target_stores) && d.t.target_stores.length)
-      ? stores.filter(s => d.t.target_stores.indexOf(s) >= 0)
-      : stores;
+    /* Пренесеното е дължимо САМО за обектите, които са го отложили. */
+    const scope = d.carried
+      ? stores.filter(s => d.carried!.some((c: any) => c.store_name === s))
+      : (Array.isArray(d.t.target_stores) && d.t.target_stores.length)
+        ? stores.filter(s => d.t.target_stores.indexOf(s) >= 0)
+        : stores;
     for (const s of scope) {
       if (d.isRec && recurringIsSkipped(d.t.id, s, skips)) continue;
-      if (doneFor(d, s)) continue;
+      if (!d.carried && doneFor(d, s)) continue;
       if (!byStore[s]) byStore[s] = { slot: d.slot, lines: [] };
-      byStore[s].lines.push(d.t.title + (d.isRec && d.t.due_time ? ' (до ' + String(d.t.due_time).slice(0, 5) + ')' : ''));
+      byStore[s].lines.push(d.t.title + (d.isRec && d.t.due_time ? ' (до ' + String(d.t.due_time).slice(0, 5) + ')' : '') +
+        (d.carried ? ' ⏱ пренесена' : ''));
     }
   }
 
@@ -715,19 +870,42 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
     !taskIsNotice(t) && recurringDueOnWeekday(t, bg.weekdayIdx) && minutesOf(t.due_time) !== null
     && !recurringIsSkipped(t.id, null, skips));
 
-  const due: { t: any; slot: number }[] = [];
+  const due: { t: any; slot: number; carried?: any[] }[] = [];
   for (const t of todayTasks) {
     const slot = (minutesOf(t.due_time) as number) + GRACE_MINUTES;
     if (slot > winStart && slot <= nowMin) due.push({ t: t, slot: slot });
+  }
+
+  /* ═══ ПРЕНЕСЕНИТЕ ЗА ДНЕС (task_completions.postponed_to = днес) ═══════
+     Постоянна задача, пренесена за днес, но днес не е неин ден: влиза с
+     обхват САМО отложилите обекти. Отметката ѝ е в самия пренесен ред.
+     Днес ли е и неин ден — собственото ѝ явяване вече я покрива (решение 5). */
+  const carried = (await loadCarriedTo(supabase, bg.dateStr)).filter((c: any) => !!c.recurring_task_id);
+  const carriedIds = carried.map((c: any) => c.recurring_task_id)
+    .filter((id: string, i: number, a: string[]) => a.indexOf(id) === i)
+    .filter((id: string) => !todayTasks.some((t: any) => t.id === id));
+  const poolRec = (recs || []).concat(await loadTasksByIds(supabase, 'recurring_tasks',
+    carriedIds.filter((id: string) => !(recs || []).some((t: any) => t.id === id))));
+  for (const id of carriedIds) {
+    const t = poolRec.find((x: any) => x.id === id);
+    if (!t || taskIsNotice(t) || minutesOf(t.due_time) === null || recurringIsSkipped(t.id, null, skips)) continue;
+    const slot = (minutesOf(t.due_time) as number) + GRACE_MINUTES;
+    if (slot > winStart && slot <= nowMin) {
+      due.push({ t: t, slot: slot, carried: carried.filter((c: any) => c.recurring_task_id === id) });
+    }
   }
   if (!due.length) {
     return { skip: 'Няма задачи с изтекъл срок в този прозорец (' + hhmm(Math.max(0, winStart)) + '–' + hhmm(nowMin) + ')' };
   }
 
-  const ids = due.map(d => d.t.id);
-  const { data: comps } = await supabase.from('task_completions')
-    .select('recurring_task_id,store_name,status,comment,photos,files')
-    .in('recurring_task_id', ids).eq('completion_date', bg.dateStr);
+  const ids = due.filter(d => !d.carried).map(d => d.t.id);
+  let comps: any[] = [];
+  if (ids.length) {
+    const { data } = await supabase.from('task_completions')
+      .select('recurring_task_id,store_name,status,comment,photos,files,postponed_to')
+      .in('recurring_task_id', ids).eq('completion_date', bg.dateStr);
+    comps = data || [];
+  }
 
   /* Подало = status 'done'. Отложената задача НЕ е подадена — тя е точно
      обратното и мястото ѝ е в списъка „не са подали". */
@@ -735,14 +913,22 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
   for (const d of due) {
     /* Изключените за седмицата обекти излизат от обхвата. Изключени ли са
        ВСИЧКИ в обхвата — scope е празен и писмо за задачата няма. */
-    const scope = ((Array.isArray(d.t.target_stores) && d.t.target_stores.length)
-      ? stores.filter(s => d.t.target_stores.indexOf(s) >= 0)
-      : stores).filter(s => !recurringIsSkipped(d.t.id, s, skips));
+    /* Пренесеното — само отложилите обекти. Днешното явяване, пренесено
+       ДРУГАДЕ — обектът излиза от обхвата: не е „не са подали", денят му е
+       друг. */
+    const scope = (d.carried
+      ? stores.filter(s => d.carried!.some((c: any) => c.store_name === s))
+      : ((Array.isArray(d.t.target_stores) && d.t.target_stores.length)
+          ? stores.filter(s => d.t.target_stores.indexOf(s) >= 0)
+          : stores).filter(s => !(comps || []).some((x: any) =>
+              x.recurring_task_id === d.t.id && x.store_name === s && taskIsMovedAway(x))))
+      .filter(s => !recurringIsSkipped(d.t.id, s, skips));
     if (!scope.length) continue;
     const submitted: any[] = [];
     const missing: string[] = [];
     for (const s of scope) {
-      const c = (comps || []).find((x: any) =>
+      /* Отметката на пренесеното е в самия пренесен ред, не в ред с днешна дата. */
+      const c = (d.carried || comps || []).find((x: any) =>
         x.recurring_task_id === d.t.id && x.store_name === s && x.status === 'done');
       if (c) {
         submitted.push({
