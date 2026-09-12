@@ -9,6 +9,17 @@
 //   promo_expiring   — имейл/push за промоции, изтичащи днес (и до 3 дни в пон.)
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
 //
+// v5 (12.09.2026) — постоянните задачи важат ПО СЕДМИЦИ (нова таблица
+//   recurring_task_periods, миграция 20260911204550). Пипната е САМО темата
+//   overdue_tasks: тя докладва ВЧЕРАШНИЯ ден, а recurring_tasks.active е кеш
+//   „важи ТАЗИ седмица". В понеделник вчера е неделя от миналата седмица —
+//   задача, спряна тази седмица, още е била дължима вчера, а активирана тази
+//   седмица не е била. Затова наборът е recurringTasksForWeek() (копие от
+//   shared.js) за понеделника на седмицата на вчера, а заявката е без
+//   active=eq.true. Задача без нито един период се решава пак по active —
+//   резервата е в самата функция. today_deadlines, deadline_passed и
+//   promo_expiring са за ДНЕС и НЕ са пипани.
+//
 // v4 (11.09.2026) — постоянна задача, изключена за седмица (нова таблица
 //   recurring_task_skips, миграция 20260911080537). Ред там значи „тази
 //   седмица задачата не се изисква" — за всички (store_name NULL) или за
@@ -155,12 +166,39 @@ function recurringSkipStores(taskId, skips){
     return !!s&&String(s.recurring_task_id)===id&&s.store_name!==null&&s.store_name!==undefined;
   }).map(function(s){ return s.store_name; });
 }
+/* Копия от shared.js — постоянна задача по седмици (recurring_task_periods).
+   Ползват се САМО от overdue_tasks: тя докладва ВЧЕРА, а active е кеш
+   „важи тази седмица". tests/recurring-periods-notify.test.js ги сверява. */
+function recurringValidForWeek(taskId, mondayISO, periods){
+  if(!Array.isArray(periods)||!mondayISO) return false;
+  var id=String(taskId);
+  return periods.some(function(p){
+    return !!p&&String(p.recurring_task_id)===id&&p.from_monday<=mondayISO&&
+      (p.to_monday===null||p.to_monday===undefined||p.to_monday>=mondayISO);
+  });
+}
+function recurringTasksForWeek(tasks, periods, mondayISO){
+  if(!mondayISO) return (Array.isArray(tasks)?tasks:[]).filter(function(t){ return !!t&&!!t.active; });
+  var has={};
+  (Array.isArray(periods)?periods:[]).forEach(function(p){ if(p) has[String(p.recurring_task_id)]=1; });
+  return (Array.isArray(tasks)?tasks:[]).filter(function(t){
+    if(!t) return false;
+    return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
+  });
+}
 /* Изключванията за ЕДНА ISO седмица ({week, year} от isoWeekOf). Провал на
    заявката → [] → темата се държи както преди изключванията: известие в
    повече е по-малкото зло от пропуснато. */
 async function loadSkipsForWeek(supabase: any, wk: { week: number; year: number }): Promise<any[]> {
   const { data } = await supabase.from('recurring_task_skips')
     .select('recurring_task_id,store_name').eq('year', wk.year).eq('week_number', wk.week);
+  return Array.isArray(data) ? data : [];
+}
+/* Периодите на постоянните задачи. Провал → [] → recurringTasksForWeek()
+   решава по кеша active, тоест поведението отпреди периодите. */
+async function loadRecurringPeriods(supabase: any): Promise<any[]> {
+  const { data } = await supabase.from('recurring_task_periods')
+    .select('recurring_task_id,from_monday,to_monday');
   return Array.isArray(data) ? data : [];
 }
 /* Копие на recurringIsDueOnWeekday / recurringIsWindow /
@@ -387,9 +425,16 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
      всички → не влиза; за обект → обектът излиза от обхвата в addTask(). */
   const ySkips = await loadSkipsForWeek(supabase, isoWeekOf(yISO));
 
-  const { data: recsRaw } = await supabase
-    .from('recurring_tasks').select('*').eq('active', true);
-  const recDue = (recsRaw || []).filter((t: any) =>
+  /* ВСИЧКИ задачи + периодите (recurring_task_periods), не active=true:
+     темата докладва ВЧЕРА, а active е кеш „важи ТАЗИ седмица". В понеделник
+     вчера е неделя от МИНАЛАТА седмица — спряна днес задача още е била
+     дължима вчера, а активирана днес не е била. Ключът е понеделникът на
+     седмицата на вчера: yIdx е 0=Пон..6=Нед, тоест yISO − yIdx.
+     Другите три теми са за ДНЕС и си остават на active=true. */
+  const yMonday = plusDaysISO(yISO, -yIdx);
+  const { data: recsRaw } = await supabase.from('recurring_tasks').select('*');
+  const recPeriods = await loadRecurringPeriods(supabase);
+  const recDue = recurringTasksForWeek(recsRaw, recPeriods, yMonday).filter((t: any) =>
     !taskIsNotice(t) && recurringDueOnWeekday(t, yIdx) && !recurringIsSkipped(t.id, null, ySkips));
 
   if (!overdueTasks.length && !recDue.length) {

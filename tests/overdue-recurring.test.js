@@ -375,8 +375,12 @@ const recItems = b => (b.items || []).filter(i => i.kind === 'recurring');
     const r = await run({ at: 2, recurring: [rec()] });
     const q = r.log.filter(x => x.table === 'recurring_tasks')[0];
     if (ok('има заявка към recurring_tasks', !!q, JSON.stringify(r.log.map(x => x.table)))) {
-      ok('само активните', q.filters.some(f => f[0] === 'eq' && f[1] === 'active' && f[2] === true),
-        JSON.stringify(q.filters));
+      /* От 12.09.2026 (recurring_task_periods) темата НЕ филтрира по active:
+         тя докладва ВЧЕРА, а active е кеш за ТЕКУЩАТА седмица. Кои задачи са
+         важали вчера решават периодите — tests/recurring-periods-notify. */
+      ok('БЕЗ филтър по active', !q.filters.some(f => f[1] === 'active'), JSON.stringify(q.filters));
+      ok('вместо него се теглят периодите',
+        r.log.some(x => x.table === 'recurring_task_periods'), JSON.stringify(r.log.map(x => x.table)));
     }
   }
 
