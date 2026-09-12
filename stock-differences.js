@@ -1790,7 +1790,9 @@ function renderDiffReportsSection(){
     h+='<div><span style="font-weight:700;">🏪 '+esc(rep.store_name||'')+'</span>'+
        (wasCorrected?' <span style="background:#fffbeb;color:#92400e;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">✏️ КОРИГИРАНА</span>':'')+
        (totalCount?' <span title="'+(repIsInterstore?'Потвърдени редове от тази бланка':'Решени редове от тази бланка')+'" style="background:'+(inProgress?'#ecfdf5':'#f5f3ff')+';color:'+(inProgress?'#047857':'#6d28d9')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(repIsInterstore?'📬 '+doneCount+'/'+totalCount+' потвърдени':(doneCount?'⏳ '+doneCount+'/'+totalCount+' решени':'⬜ 0/'+totalCount+' — недокосната'))+'</span>':'')+
-       '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+diffDirShortLabel(rep.direction)+' — '+esc(rep.counterpart||'')+'</span></div>'+
+       '<span style="color:#94a3b8;font-size:12px;margin-left:8px;">'+diffDirShortLabel(rep.direction)+' — '+esc(rep.counterpart||'')+'</span>'+
+       (rep.no_document?'<span style="margin-left:6px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:600;">📄 Без документ</span>':'')+
+       '</div>'+
        '<div style="display:flex;align-items:center;gap:8px;">'+
        '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</span>'+
        (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+sdFmtDateTime(rep.email_sent_at)+'</span>':'')+
@@ -2195,6 +2197,10 @@ function diffSubmitModalHtml(){
     '<div><label class="fl" id="diff-counterpart-label">Обект изпращач</label><select class="fi" id="diff-counterpart"></select></div>'+
     '<div><label class="fl">Документ №</label><input class="fi" id="diff-docnum" placeholder="напр. 4600179694"></div>'+
     '</div>'+
+    /* Отметката "без документ" се рисува тук от updateDiffCounterpartLabel() -
+       само при посока доставчик. Празен контейнер значи, че при останалите
+       посоки <input> изобщо не съществува, а не просто е скрит. */
+    '<div id="diff-no-doc-wrap"></div>'+
     '<div style="margin-bottom:12px;"><label class="fl">Дата на получаване/доставка</label><input type="date" class="fi" id="diff-docdate" value="'+today()+'" style="max-width:200px;"></div>'+
 
     '<label class="fl">Артикули с разлика *</label>'+
@@ -2231,6 +2237,20 @@ function updateDiffCounterpartLabel(){
      заедно с нея, значи и обещанието кои от тях искат снимка. */
   var hintEl=document.getElementById('diff-photo-hint');
   if(hintEl) hintEl.textContent=diffPhotoHintText(dir);
+  /* Стоката понякога идва без документ - тогава няма какво да се снима.
+     Отметката отменя САМО задължителните снимки; наименованието остава
+     задължително. Има смисъл само срещу доставчик: при междускладов трансфер
+     и при сторна по грешен прием документ винаги има. При смяна на посоката
+     контейнерът се пренарисува, тоест отметката тръгва изключена, а надписът
+     под "Снимки" вече е върнат от реда отгоре. */
+  var noDocWrap=document.getElementById('diff-no-doc-wrap');
+  if(noDocWrap){
+    noDocWrap.innerHTML = dir==='supplier'
+      ? '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:-2px 0 10px;cursor:pointer;">'+
+          '<input type="checkbox" id="diff-no-doc" onchange="var h=document.getElementById(\'diff-photo-hint\');if(h)h.textContent=this.checked?\'(без документ — по избор)\':diffPhotoHintText(\'supplier\');">'+
+          ' 📄 Стоката е без документ (снимки не са задължителни)</label>'
+      : '';
+  }
   /* Сторната по грешен прием също тръгва от фактура на ДОСТАВЧИК - списъкът е
      същият като при посока "Доставчик", не списъкът с обекти. */
   if(dir==='supplier'||dir==='wrong_receipt'){
@@ -2356,7 +2376,11 @@ function submitDiffReport(){
     var meta=it.category?diffCatMeta(it.category):null;
     return meta&&meta[3];
   });
-  if(needsPhotos&&!diffPendingPhotos.length){
+  /* "Без документ" важи само при посока доставчик - при другите посоки
+     отметката не се рисува, но проверката е и тук, за да не зависи от DOM-а. */
+  var noDocEl=document.getElementById('diff-no-doc');
+  var noDocument = direction==='supplier' && !!(noDocEl && noDocEl.checked);
+  if(needsPhotos&&!noDocument&&!diffPendingPhotos.length){
     var catsNeeding=items.filter(function(it){var m=it.category?diffCatMeta(it.category):null;return m&&m[3];})
       .map(function(it){return diffCategoryLabel(it.category);})
       .filter(function(v,i,arr){return arr.indexOf(v)===i;});
@@ -2373,6 +2397,8 @@ function submitDiffReport(){
     submitted_by:currentUser.display_name||currentUser.email,
     general_comment:document.getElementById('diff-comment').value.trim(),
     photos:diffPendingPhotos,
+    /* Винаги булев - false, а не липсващ ключ, когато отметката е изключена. */
+    no_document:noDocument,
     reviewed:false
   };
 
@@ -2558,7 +2584,7 @@ function diffEmailBodyHtml(rep,lines,note){
   var h='<div style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;">';
   h+='<p>Здравейте,</p>';
   h+='<p>Установени са разлики при '+diffDirEmailPhrase(rep.direction)+' — '+esc(rep.counterpart||'')+
-     (rep.document_number?', документ №'+esc(rep.document_number):'')+
+     (rep.no_document?', документ: няма (стока без документ)':(rep.document_number?', документ №'+esc(rep.document_number):''))+
      (rep.doc_date?', дата '+fmtDate(rep.doc_date):'')+'.</p>';
   var isSupplier=rep.direction==='supplier';
   h+='<table style="width:100%;border-collapse:collapse;font-size:13px;margin:14px 0;">';
@@ -2927,7 +2953,7 @@ function renderDiffPrint(rep){
         '<div class="dp-sub">'+diffDirPrintSub(rep.direction)+'</div>'+
         '<table class="dp-meta">'+
           '<tr><td>'+diffDirCounterpartLabel(rep.direction)+':</td><td>'+esc(rep.counterpart||'—')+'</td></tr>'+
-          '<tr><td>Документ №:</td><td>'+esc(rep.document_number||'—')+'</td></tr>'+
+          '<tr><td>Документ №:</td><td>'+(rep.no_document?'няма (стока без документ)':esc(rep.document_number||'—'))+'</td></tr>'+
           '<tr><td>Дата на документа:</td><td>'+fmtDate(rep.doc_date)+'</td></tr>'+
           '<tr><td>Подал:</td><td>'+esc(rep.submitted_by||'—')+'</td></tr>'+
           '<tr><td>Дата на подаване:</td><td>'+sdFmtDateTime(rep.created_at)+'</td></tr>'+
