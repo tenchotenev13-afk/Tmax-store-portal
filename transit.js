@@ -246,10 +246,13 @@ function renderTransit(){
   h+='</div></div>';
 
   /* Stat карти */
-  /* OUTGOING картата е скрита — с текущия SAP формат "Завод" никога не е
-     изпращащ-тип код, затова direction='outgoing' е винаги 0 на практика.
-     Логиката отдолу (parseTransitRows, tMarkStatus) остава непокътната
-     за в случай, че някога дойде различен тип SAP извлечение. */
+  /* OUTGOING картата е скрита. SAP подава и "Завод" с изпращащ-тип код
+     (напр. 6512 Търговище), но parseTransitRows дава 'outgoing' САМО когато
+     доставчикът НЕ е реален магазин (склад/сервиз/администрация/непознат);
+     при реален магазин е 'transfer'. Всичките 51 'outgoing' реда в базата
+     към 13.09.2026 са с реален магазин доставчик — тоест грешно записани
+     трансфери отпреди поправката, не истински outgoing. Логиката (tMarkStatus)
+     остава непокътната за редовете, които реално излизат outgoing. */
   h+='<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px;">';
   h+=tStatCard('📦 Incoming',counts.incCount,'#2563eb');
   h+=tStatCard('🔄 Трансфери',counts.transferCount,'#c2410c');
@@ -850,8 +853,10 @@ function parseTransitRows(rows, forceFmt){
   var parsed=dataRows.map(function(row){
     if(!row[0])return null;
     var plant=String(row[0]||'').trim();
-    /* Заводът определя КОЙ ПОЛУЧАВА стоката (потвърдено от реалния SAP файл:
-       колоната "Завод" винаги е с "получаващ"-тип код в този вид импорт) */
+    /* Заводът определя КОЙ ПОЛУЧАВА стоката. Обикновено е с "получаващ"-тип
+       код, но SAP подава и "изпращащ" (напр. 6512 Търговище ← 6516 Добрич,
+       документ 4600185282 от 14.08.2026) — затова кодът на завода НЕ решава
+       сам посоката, виж по-долу. */
     var plantIsOutgoingType = !PLANT_INCOMING[plant] && !!PLANT_OUTGOING[plant];
     var store=PLANT_INCOMING[plant]||PLANT_OUTGOING[plant]||null;
     if(!store)return null; /* Непознат завод */
@@ -861,18 +866,20 @@ function parseTransitRows(rows, forceFmt){
     var supplierResolvedName = PLANT_ALL[supplierFirstCode]||null;
 
     var direction;
-    if(plantIsOutgoingType){
-      /* Заводът сам е с "изпращащ" код — рядък случай (различен тип SAP
-         извлечение), магазинът докладва собствена изходяща пратка. */
-      direction='outgoing';
-    }else if(supplierResolvedName && REAL_STORE_NAMES[supplierResolvedName] && supplierResolvedName!==store){
+    if(supplierResolvedName && REAL_STORE_NAMES[supplierResolvedName] && supplierResolvedName!==store){
       /* Доставчикът е РЕАЛЕН магазин (не склад/сервиз/администрация),
          различен от получателя — истински трансфер между два магазина,
          независимо дали кодът му е от "получаващ" или "изпращащ" тип
          (SAP го записва различно според документа). Изисква двустъпково
          потвърждение: подателят маркира "Изпратена", после получателят —
-         "Прието". */
+         "Прието". Проверява се ПРЕДИ изпращащия код на завода: иначе
+         6512 Търговище ← 6516 Добрич ставаше 'outgoing' и получателят
+         нямаше бутон "Прието". */
       direction='transfer';
+    }else if(plantIsOutgoingType){
+      /* Заводът е с "изпращащ" код, а доставчикът НЕ е реален магазин
+         (склад/сервиз/администрация или непознат код). */
+      direction='outgoing';
     }else{
       direction='incoming';
     }

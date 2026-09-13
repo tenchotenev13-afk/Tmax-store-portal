@@ -41,6 +41,7 @@ const TESTS = [
   'loading-lists-notify.test.js',
   'loading-diff-prefill.test.js',
   'transit-store-scope.test.js',
+  'transit-direction-transfer.test.js',
   'loading-lists-print.test.js',
   'stock-diff-capitalized-counter.test.js',
   'stock-diff-chip-counts.test.js',
