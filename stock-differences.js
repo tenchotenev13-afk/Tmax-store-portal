@@ -837,6 +837,13 @@ function resolveDiffLine(id,type){
   if(!canReviewDiff()){toast('Нямаш права за това действие','#dc2626');return;}
   var line=sdData.find(function(x){return String(x.id)===String(id);});
   if(!line)return;
+  /* Номер на документ в количеството: решение върху такъв ред пише глупост -
+     Липса = 180486328 - получено отива в stock_differences, а при Връщане и в
+     „За връщане". Нищо не се записва, докато количеството не се поправи. */
+  if(diffQtyLooksLikeDocNum(line.quantity)||diffQtyLooksLikeDocNum(line.quantity_received)){
+    toast('Количеството прилича на номер на документ — коригирай го през ✏️ преди решение','#dc2626');
+    return;
+  }
   /* Котва към бланката, по която се работи - след пре-рендирането оставаме на
      нея, вместо да ни връща най-отгоре на списъка. */
   sdKeepScroll(line.report_id);
@@ -1471,6 +1478,18 @@ function submitSD() {
      път, магазинът не може да запише промяна по ред от "Сторна по грешен прием". */
   if(isWrongReceiptReadOnly(origRecord)){
     toast('Редовете от „Сторна по грешен прием" се променят само от централния офис','#dc2626');
+    return;
+  }
+  /* Модалът на Цвети е пътят, по който се поправят старите редове с номер на
+     документ в количеството - затова съобщението казва какво да се напише.
+     Проверява се само РЕДАКТИРУЕМО поле: на заключен ред магазинът вижда
+     количеството като текст (hidden input), няма как да го поправи, а
+     записът му пази стойността непроменена. */
+  var sdQtyEl=document.getElementById('sd-qty');
+  if(sdQtyEl && sdQtyEl.type!=='hidden' && diffQtyLooksLikeDocNum(sdQtyEl.value)){
+    var qtyMsg=diffQtyDocNumMsg(sdQtyEl.value);
+    toast(qtyMsg.charAt(0).toUpperCase()+qtyMsg.slice(1)+' в „Количество"','#dc2626');
+    sdQtyEl.focus();
     return;
   }
   var data={

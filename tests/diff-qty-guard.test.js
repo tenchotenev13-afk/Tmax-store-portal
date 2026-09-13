@@ -257,5 +257,123 @@ function mainCell(doc, name) {
     }
   }
 
+  const RESOLVE_MSG = 'Количеството прилича на номер на документ — коригирай го през ✏️ преди решение';
+  function resolveBtn(doc, name, type) {
+    const tr = Array.from(doc.querySelectorAll('#mod-stock-diff tr'))
+      .find(r => r.children[1] && r.children[1].textContent.indexOf(name) === 0);
+    if (!tr) return null;
+    return Array.from(tr.querySelectorAll('button')).find(b => {
+      const oc = b.getAttribute('onclick') || '';
+      return oc.indexOf('resolveDiffLine') >= 0 && oc.indexOf("'" + type + "'") >= 0;
+    }) || null;
+  }
+  function cvetiView() {
+    const h = env(CVETI);
+    h.w.sdData = JSON.parse(JSON.stringify(LINES));
+    h.w.diffReports = JSON.parse(JSON.stringify(REPS));
+    h.w.renderStockDiff();
+    return h;
+  }
+
+  section('ж) Решение върху ред с номер на документ → toast, нищо не се записва');
+  {
+    const h = cvetiView();
+    const b = resolveBtn(h.doc, 'ОТВОРЕН ВД НОМЕР', 'missing');
+    if (ok('бутонът „❓ Липса" на реда с 180493275 е на екрана', !!b)) {
+      realClick(h.w, b);
+      await ticks(); await ticks(); await ticks();
+      ok('червен toast „' + RESOLVE_MSG + '"', h.calls.toast.length === 1 && h.calls.toast[0] === RESOLVE_MSG,
+        h.calls.toast.join(' | '));
+      ok('НЯМА PATCH', h.calls.patch.length === 0, JSON.stringify(h.calls.patch.map(p => p.table + ' ' + JSON.stringify(p.body))));
+      ok('НЯМА POST', h.calls.post.length === 0, JSON.stringify(h.calls.post.map(p => p.table)));
+      /* Без пазача записът минава и loadStockDiff() презарежда sdData - редът може да го няма. */
+      const ob = h.w.sdData.find(x => x.id === 'o-big');
+      ok('редът в паметта остава нерешен', !!ob && ob.type === null, ob ? JSON.stringify(ob.type) : 'няма го');
+    }
+  }
+  {
+    /* „Реално получено" = номер на документ; при Връщане иначе щеше да тръгне и POST към stock_returns */
+    const h = cvetiView();
+    const b = resolveBtn(h.doc, 'ОТВОРЕН ВД В РЕАЛНО', 'return');
+    if (ok('бутонът „↩️ Връщане" на реда с 180486328 в „Реално" е на екрана', !!b)) {
+      realClick(h.w, b);
+      await ticks(); await ticks(); await ticks();
+      ok('toast-ът е същият', h.calls.toast[0] === RESOLVE_MSG, h.calls.toast.join(' | '));
+      ok('без PATCH и без POST', h.calls.patch.length === 0 && h.calls.post.length === 0,
+        h.calls.patch.length + ' / ' + h.calls.post.length);
+    }
+  }
+  {
+    /* решен ред от долната таблица - същата функция */
+    const h = cvetiView();
+    h.w.resolveDiffLine('d-big', 'writein');
+    await ticks(); await ticks();
+    ok('решен ред с „180493275" (низ) → пак без PATCH', h.calls.patch.length === 0 && h.calls.toast[0] === RESOLVE_MSG,
+      h.calls.toast.join(' | '));
+  }
+  {
+    /* контрол: същият клик върху нормален ред ЗАПИСВА - иначе горните проверки не доказват нищо */
+    const h = cvetiView();
+    const b = resolveBtn(h.doc, 'ОТВОРЕН НОРМАЛЕН', 'missing');
+    if (ok('контрол: „❓ Липса" на реда с 12 е на екрана', !!b)) {
+      realClick(h.w, b);
+      await ticks(); await ticks(); await ticks();
+      const p = h.calls.patch.find(x => x.table === 'stock_differences');
+      ok('контрол: PATCH към stock_differences с type missing', !!p && p.body.type === 'missing',
+        h.calls.toast.join(' | '));
+      ok('контрол: без toast за номер на документ', h.calls.toast.indexOf(RESOLVE_MSG) < 0);
+    }
+  }
+
+  section('з) Модалът на Цвети (submitSD): 180493275 → без PATCH; 12 → PATCH');
+  {
+    const h = env(CVETI);
+    h.w.sdData = JSON.parse(JSON.stringify(LINES));
+    h.w.diffReports = JSON.parse(JSON.stringify(REPS));
+    if (guard('openSDModal("o-big") не хвърля', () => h.w.openSDModal('o-big'))) {
+      const q = h.doc.getElementById('sd-qty');
+      ok('„Количество" е редактируемо поле с 180493275', !!q && q.type === 'number' && q.value === '180493275',
+        q ? q.outerHTML : 'няма');
+      realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'Запази'));
+      await ticks(); await ticks();
+      const t = qtyToasts(h.calls);
+      ok('toast: „Количеството прилича на номер на документ (180493275), напиши брой в „Количество""',
+        t.length === 1 && t[0] === 'Количеството прилича на номер на документ (180493275), напиши брой в „Количество"',
+        h.calls.toast.join(' | '));
+      ok('НЯМА PATCH', h.calls.patch.length === 0, JSON.stringify(h.calls.patch.map(p => p.body)));
+      /* sd-ov стои в DOM и след затваряне (closeSDModal маха само класа open),
+         а след успешен запис renderStockDiff го рисува наново като „Добави" -
+         затова се проверяват класът и бутонът „Запази", не самото съществуване. */
+      const sdOv = h.doc.getElementById('sd-ov');
+      if (ok('модалът остава отворен', !!sdOv && sdOv.classList.contains('open') &&
+            Array.from(sdOv.querySelectorAll('button')).some(b => b.textContent === 'Запази'))) {
+        h.doc.getElementById('sd-qty').value = '12';
+        realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'Запази'));
+        await ticks(); await ticks();
+        const p = h.calls.patch.find(x => x.table === 'stock_differences');
+        if (ok('12 → PATCH към stock_differences', !!p, h.calls.toast.join(' | '))) {
+          ok('quantity е 12', Number(p.body.quantity) === 12, JSON.stringify(p.body.quantity));
+        }
+      }
+    }
+  }
+  {
+    /* Магазинът на решен ред вижда количеството като текст и не може да го
+       поправи - статусът му („Взета") не бива да се спира заради него. */
+    const h = env(STORE);
+    h.w.sdData = JSON.parse(JSON.stringify(LINES));
+    h.w.diffReports = JSON.parse(JSON.stringify(REPS));
+    if (guard('магазин: openSDModal("d-big") не хвърля', () => h.w.openSDModal('d-big'))) {
+      const q = h.doc.getElementById('sd-qty');
+      ok('магазин: „Количество" е заключено (hidden)', !!q && q.type === 'hidden', q ? q.outerHTML : 'няма');
+      realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'Запази'));
+      await ticks(); await ticks();
+      const p = h.calls.patch.find(x => x.table === 'stock_differences');
+      ok('магазин: записът минава (PATCH)', !!p, h.calls.toast.join(' | '));
+      ok('магазин: без toast за номер на документ', qtyToasts(h.calls).length === 0, h.calls.toast.join(' | '));
+      if (p) ok('магазин: количеството не е пипнато', String(p.body.quantity) === '180493275', JSON.stringify(p.body.quantity));
+    }
+  }
+
   report();
 })();
