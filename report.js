@@ -1034,6 +1034,11 @@ function reportKasaSectionHtml(kasa){
 
   /* Старият дълг — компактно, по ред на обект, без razlika и причина. */
   if (backlog.length) {
+    /* Без върнати през деня блокът нямаше над себе си никакво заглавие и се
+       четеше като продължение на задачите — тогава картата носи „🧾 Каса". */
+    if (!ret.length) {
+      out += '<div style="margin-top:14px;font-size:11px;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:.4px;">🧾 Каса</div>';
+    }
     var rows3 = backlog.map(function(x){
       return '<div style="padding:5px 10px;border-bottom:1px solid #E5E7EB;font-size:12px;color:#4B5563;">' +
         reportStoreLinkHtml(x.store, '#374151') +
@@ -1397,7 +1402,30 @@ function collectWeeklyReportData(cb, scope){
              "Няма публикуван бюлетин", тоест няма с какво да се разминат. */
           collectCrossModuleWeeklySummary(function(cross){
             summary.cross = cross; /* null при грешка - секцията просто не се показва, не гърми */
-            cb(summary);
+            /* Чек лист (контролинг) за ОТЧЕТНАТА седмица (target) — само тук, в
+               седмичния колектор. Таб „Днес" вика кросмодулния колектор направо и
+               секцията не се смята. Грешка → без секция, писмото тръгва. */
+            if (!cross || !target) { cb(summary); return; }
+            Promise.all([
+              sbGet('weekly_checklist_metrics','active=eq.true&order=sort_order&select=key,label,value_type,sort_order,active'),
+              sbGet('weekly_checklist','year=eq.'+target.year+'&week_number=eq.'+target.week+'&select=year,week_number,store_name,metric_key,portal_value,control_value,control_num,comment,updated_at')
+            ]).then(function(cl){
+              var clMetrics = (Array.isArray(cl[0]) ? cl[0] : []).filter(function(m){ return m && m.active === true; });
+              clMetrics.sort(function(a,b){ return (a.sort_order || 0) - (b.sort_order || 0); });
+              var clRows = (Array.isArray(cl[1]) ? cl[1] : []).filter(function(x){
+                return x && Number(x.year) === target.year && Number(x.week_number) === target.week &&
+                       stores.indexOf(x.store_name) >= 0;
+              });
+              var clLast = null;
+              clRows.forEach(function(x){
+                var t = x.updated_at ? new Date(x.updated_at).getTime() : NaN;
+                if (!isNaN(t) && (clLast === null || t > clLast)) clLast = t;
+              });
+              cross.checklist = { year: target.year, week: target.week, metrics: clMetrics,
+                                  stores: stores.slice(), rows: clRows,
+                                  updatedAt: clLast === null ? null : new Date(clLast).toISOString() };
+              cb(summary);
+            }).catch(function(){ cb(summary); });
           }, wkDates ? { from: wkDates[0], to: wkDates[6] } : null, scope);
         };
         /* Срязаният отчет НИТО пише, НИТО чете тенденция — същото решение
@@ -2149,6 +2177,78 @@ function reportSmallStornoHtml(cross){
     '</div>';
 }
 
+/* Текстът на една клетка от чек листа — СЪЩОТО правило като
+   checklistEmailCellValue() в checklist.js: control бие portal; при number
+   control_num бие portal_value; da/ne/nyamat → да/не/нямат, всичко друго
+   (напр. „13/20") както е в базата; липсващ ред или стойност → ''. */
+function reportChecklistCellValue(metric, row){
+  var labels = { da: 'да', ne: 'не', nyamat: 'нямат' };
+  var label = function(v){
+    if (v === null || v === undefined || v === '') return '';
+    return labels[v] || String(v);
+  };
+  var filled = function(v){ return v !== null && v !== undefined && v !== ''; };
+  if (!row) return '';
+  if (metric && metric.value_type === 'number') {
+    if (filled(row.control_num)) return String(row.control_num);
+    return row.portal_value ? label(row.portal_value) : '';
+  }
+  if (filled(row.control_value)) return label(row.control_value);
+  if (filled(row.portal_value)) return label(row.portal_value);
+  return '';
+}
+
+/* „Чек лист (контролинг) — седмица N": обект × показатели за обектите на
+   получателя, по ред на всеки обект дори без записи. Клетка от control_* е
+   потвърдена (нормален текст); само от portal_value — сив курсив, както в
+   модула. Коментарите не се изписват — само 💬. Празна клетка остава празна:
+   esc('') дава „—", затова празното не минава през esc. Часът под таблицата
+   е в Europe/Sofia изрично — едж функцията тече в UTC. */
+function reportChecklistSectionHtml(cross){
+  var cl = cross && cross.checklist;
+  if (!cl) return '';
+  var metrics = cl.metrics || [], stores = cl.stores || [];
+  var filled = function(v){ return v !== null && v !== undefined && v !== ''; };
+  var idx = {};
+  (cl.rows || []).forEach(function(x){ idx[x.store_name + ' | ' + x.metric_key] = x; });
+  var thStyle = 'padding:5px 6px;font-size:10px;font-weight:700;color:#475569;border-bottom:2px solid #e2e8f0;';
+  var tdStyle = 'padding:5px 6px;font-size:11px;border-bottom:1px solid #eef1f6;';
+
+  var head = '<tr><th style="' + thStyle + 'text-align:left;">Обект</th>' +
+    metrics.map(function(m){ return '<th style="' + thStyle + 'text-align:center;">' + esc(m.label) + '</th>'; }).join('') +
+    '</tr>';
+  var body = stores.map(function(s){
+    return '<tr><td style="' + tdStyle + 'text-align:left;">' + reportStoreLinkHtml(s, '#1E2761') + '</td>' +
+      metrics.map(function(m){
+        var row = idx[s + ' | ' + m.key] || null;
+        var val = reportChecklistCellValue(m, row);
+        var confirmed = !!row && (m.value_type === 'number' ? filled(row.control_num) : filled(row.control_value));
+        var txt = !val ? '' : (confirmed
+          ? '<span style="color:#1f2937;">' + esc(val) + '</span>'
+          : '<span style="color:#94a3b8;font-style:italic;">' + esc(val) + '</span>');
+        return '<td style="' + tdStyle + 'text-align:center;">' + txt + (row && row.comment ? ' 💬' : '') + '</td>';
+      }).join('') + '</tr>';
+  }).join('');
+
+  var stamp = '';
+  var d = cl.updatedAt ? new Date(cl.updatedAt) : null;
+  if (d && !isNaN(d.getTime())) {
+    var p = {};
+    new Intl.DateTimeFormat('bg-BG', { timeZone: 'Europe/Sofia', day: '2-digit', month: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d).forEach(function(x){ p[x.type] = x.value; });
+    stamp = p.day + '.' + p.month + ' ' + p.hour + ':' + p.minute;
+  }
+
+  return '<div style="margin-top:12px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:2px;">Чек лист (контролинг) — седмица ' + esc(String(cl.week)) + '</div>' +
+    '<div style="font-size:10px;color:#64748b;margin-bottom:6px;">нормален = отметка на контролинга · сив курсив = по данни на портала</div>' +
+    '<div style="overflow-x:auto;background:#FFFFFF;border:1px solid #e2e8f0;border-radius:8px;">' +
+    '<table role="presentation" style="width:100%;border-collapse:collapse;">' + head + body + '</table></div>' +
+    '<div style="margin-top:4px;font-size:11px;color:#94a3b8;">' +
+    (stamp ? 'Данни на контролинга към ' + stamp : 'няма записи за седмицата') + '</div>' +
+    '</div>';
+}
+
 /* scoped казва ЧИЙ е отчетът: срязан (регионален, управител) или за
    цялата верига. Само списъкът с невзетата стока го ползва — виж
    reportReturnsListHtml. Липсващ аргумент значи пълен отчет, тоест
@@ -2181,6 +2281,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
     crossMetricCard(cross.storno.returned,'върнати за коментар', cross.storno.returned>0) +
     crossMetricCard(cross.storno.confirmed,'приключени'));
   h += reportSmallStornoHtml(cross);
+  h += reportChecklistSectionHtml(cross);
 
   h += crossModuleRow('🧾','Каса — Равнение (за периода)',
     crossMetricCard(cross.zoborot.total,'общо записа') +

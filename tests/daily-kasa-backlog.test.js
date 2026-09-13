@@ -196,6 +196,22 @@ const names = function (arr) { return (arr || []).map(function (x) { return x.st
        onlyBacklog.indexOf('>Търговище</a> — 9, най-старият от 03.07') >= 0 &&
        onlyBacklog.indexOf('Върнати от счетоводството') < 0 &&
        onlyBacklog.indexOf('Разминаване над') < 0, onlyBacklog);
+
+    /* 0 върнати + 0 разминавания + дълг: блокът висеше без заглавие след
+       задачите и се четеше като част от тях. */
+    ok('0 върнати + 0 разминавания + дълг → заглавието „🧾 Каса" присъства',
+       /">🧾 Каса<\/div>/.test(onlyBacklog), onlyBacklog.slice(0, 300));
+    ok('и стои ПРЕДИ блока „Непоправени от по-рано"',
+       onlyBacklog.indexOf('🧾 Каса') >= 0 &&
+       onlyBacklog.indexOf('🧾 Каса') < onlyBacklog.indexOf('Непоправени от по-рано'));
+    const backlogAndOver = h.w.reportKasaSectionHtml({ returned: [], threshold: 10,
+      returnedBacklog: [{ store: 'Търговище', count: 9, oldestDate: '2026-07-03' }],
+      overThreshold: [{ store: 'Габрово', type: 'ПОС № 1', razlika: 25 }] });
+    ok('0 върнати + разминавания + дълг → „🧾 Каса" пак е над дълга',
+       backlogAndOver.indexOf('🧾 Каса') >= 0 &&
+       backlogAndOver.indexOf('🧾 Каса') < backlogAndOver.indexOf('Непоправени от по-рано'));
+    ok('при върнати през деня няма второ заглавие — остава „🧾 Върнати от счетоводството"',
+       html.indexOf('🧾 Каса') < 0 && html.indexOf('🧾 Върнати от счетоводството') >= 0);
     h.close();
   }
 
