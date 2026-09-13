@@ -1,6 +1,17 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v33 (13.09.2026) — нов отчет „Палети за прибиране" (body {"type":"pallets"},
+   кронът — петък 21:00): по обект от transport_pallets — попълнил е
+   най-новият ред от понеделника до отчетния ден (с дата в името, ако не е
+   от самия ден); непопълнилите със сивия си последен ред отпреди
+   понеделника, извън „Общо". Получатели: регионалните за
+   своите обекти и report_recipients с weekly=true (scope_stores важи);
+   без управители и без snapshot. Ранен клон в обработчика — пътят на
+   дневния/седмичния не е пипан. collectPalletsReportData,
+   reportPalletsHtml, reportPalletsSubject и reportPalletsRecipients са
+   споделени с report.js.
+
    v32 (13.09.2026) — отчетите минават от сутрин на 21:00: дневният описва
    ДНЕШНИЯ ден (reportDailyTargetDate без −1; тенденцията сравнява изрично с
    вчерашния snapshot), седмичният — ТЕКУЩАТА седмица през
@@ -2669,12 +2680,233 @@ function buildWeeklyReportHtml(data){
     'Автоматичен репорт · ТеМАХ Портал');
 }
 
+/* ═══════ ПАЛЕТИ ЗА ПРИБИРАНЕ ═══════════════════════════════
+   Петъчен отчет по обект: колко празни палети чакат, за да се организира
+   транспортът към складовете. Кронът го пуска в петък 21:00 с body
+   {"type":"pallets"}; обектите попълват transport_pallets по един ред за
+   петъка (pallets.js).
+
+   Отчетен ден = reportDailyTargetDate(new Date()). „Попълнил" = най-новият
+   ред на обекта с report_date от понеделника на същата седмица до отчетния
+   ден (обект, попълнил в четвъртък, е попълнил). Непопълнил обект се
+   показва със сивия си последен ред отпреди понеделника (ако има).
+   Редът „Общо" събира САМО попълнените за седмицата: старите числа са за
+   ориентир, не за транспорта. Без snapshot и без тенденция.
+
+   По-старите редове се теглят с order=report_date.desc: таванът на
+   PostgREST (1000) реже НАЙ-СТАРИТЕ, а за всеки обект трябва най-новият. */
+function collectPalletsReportData(scope, cb){
+  var reportDay = reportDailyTargetDate(new Date());
+  var dayISO = toLocalISO(reportDay);
+  var monISO = toLocalISO(reportMondayOfWeek(reportDay));
+  var cols = ['euro_pallets','small_pallets','nonstandard_pallets','grate_pallets','bilka_pallets'];
+  var sel = 'select=store_name,report_date,' + cols.join(',') + ',sent_note,updated_at';
+  Promise.all([
+    sbGet('users','select=store_name&order=store_name'),
+    sbGet('transport_pallets', sel + '&report_date=gte.' + monISO + '&report_date=lte.' + dayISO + '&order=report_date.desc'),
+    sbGet('transport_pallets', sel + '&report_date=lt.' + monISO + '&order=report_date.desc&limit=1000')
+  ]).then(function(r){
+    var users = Array.isArray(r[0]) ? r[0] : [];
+    var seen = {};
+    var stores = users.filter(function(u){
+      if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
+      seen[u.store_name] = 1; return true;
+    }).map(function(u){ return u.store_name; });
+    if (scope && scope.length) {
+      stores = stores.filter(function(s){ return scope.indexOf(s) >= 0; });
+    }
+
+    /* Датите се проверяват и тук, не само в заявката — JS решава. */
+    var weekRows = {}, lastRows = {};
+    var keepNewest = function(map, x){
+      var cur = map[x.store_name];
+      if (!cur || x.report_date > cur.report_date) map[x.store_name] = x;
+    };
+    (Array.isArray(r[1]) ? r[1] : []).forEach(function(x){
+      if (x && x.report_date && x.report_date >= monISO && x.report_date <= dayISO) keepNewest(weekRows, x);
+    });
+    (Array.isArray(r[2]) ? r[2] : []).forEach(function(x){
+      if (x && x.report_date && x.report_date < monISO) keepNewest(lastRows, x);
+    });
+
+    var rowOf = function(store, x){
+      var out = { store: store, reportDate: x.report_date, note: x.sent_note || '', total: 0 };
+      cols.forEach(function(c){ var v = Number(x[c]) || 0; out[c] = v; out.total += v; });
+      return out;
+    };
+    var filled = [], missing = [];
+    var totals = { total: 0 };
+    cols.forEach(function(c){ totals[c] = 0; });
+    stores.forEach(function(s){
+      if (weekRows[s]) {
+        var row = rowOf(s, weekRows[s]);
+        filled.push(row);
+        cols.forEach(function(c){ totals[c] += row[c]; });
+        totals.total += row.total;
+      } else {
+        missing.push({ store: s, last: lastRows[s] ? rowOf(s, lastRows[s]) : null });
+      }
+    });
+    filled.sort(function(a,b){
+      return b.total - a.total || String(a.store).localeCompare(String(b.store));
+    });
+    missing.sort(function(a,b){ return String(a.store).localeCompare(String(b.store)); });
+
+    cb({ reportDate: dayISO, storeCount: stores.length, filled: filled, missing: missing,
+         totals: totals, scoped: !!(scope && scope.length) });
+  }).catch(function(){ cb(null); });
+}
+
+function reportPalletsSubject(reportDate){
+  var d = reportDate ? new Date(reportDate+'T00:00:00') : null;
+  if (!d || isNaN(d.getTime())) return 'Палети за прибиране';
+  return 'Палети за прибиране — ' + reportDayMonth(d) + '.' + d.getFullYear();
+}
+
+function reportPalletsHtml(data){
+  var cols = ['euro_pallets','small_pallets','nonstandard_pallets','grate_pallets','bilka_pallets'];
+  var filled = (data && data.filled) || [];
+  var missing = (data && data.missing) || [];
+  var tot = (data && data.totals) || {};
+  var th = function(t, right){
+    return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:'+(right?'right':'left')+';border-bottom:2px solid #e2e8f0;">'+t+'</th>';
+  };
+  var td = function(html, color, right, bold){
+    return '<td style="padding:6px;font-size:12px;color:'+color+';text-align:'+(right?'right':'left')+';border-bottom:1px solid #eef1f6;'+(bold?'font-weight:700;':'')+'">'+html+'</td>';
+  };
+
+  var body = '<div style="font-size:13px;font-weight:700;color:#1E2761;margin-bottom:6px;">Попълнили ' +
+    filled.length + ' от ' + ((data && data.storeCount) || 0) + ' обекта</div>';
+  if (missing.length) {
+    body += '<div style="font-size:12px;font-weight:600;color:#c2410c;margin-bottom:10px;">Не са попълнили: ' +
+      esc(missing.map(function(m){ return m.store; }).join(', ')) + '</div>';
+  }
+
+  var dayShort = ['пн','вт','ср','чт','пт','сб','нд'];
+  var rows = filled.map(function(x){
+    /* Датата — само ако редът е от друг ден на седмицата, не от отчетния. */
+    var when = (x.reportDate && x.reportDate !== (data && data.reportDate))
+      ? ' <span style="font-weight:400;font-size:11px;color:#64748b;">(' +
+        dayShort[reportWeekdayIdx(new Date(x.reportDate+'T00:00:00'))] + ' ' + esc(reportDM(x.reportDate)) + ')</span>'
+      : '';
+    return '<tr>' + td(reportStoreLinkHtml(x.store, '#1E2761') + when, '#1E2761') +
+      cols.map(function(c){ return td(String(x[c]), '#1f2937', true); }).join('') +
+      td(String(x.total), '#1E2761', true, true) + td(esc(x.note), '#475569') + '</tr>';
+  }).join('');
+  /* Сивите — последният ред на непопълнилите, с датата му. */
+  rows += missing.filter(function(m){ return !!m.last; }).map(function(m){
+    var g = '#94a3b8';
+    return '<tr>' + td(esc(m.store) + ' <span style="font-size:11px;">(последно ' + esc(reportDM(m.last.reportDate)) + ')</span>', g) +
+      cols.map(function(c){ return td(String(m.last[c]), g, true); }).join('') +
+      td(String(m.last.total), g, true) + td(esc(m.last.note), g) + '</tr>';
+  }).join('');
+
+  if (rows) {
+    body += '<div style="overflow-x:auto;"><table role="presentation" style="width:100%;border-collapse:collapse;">' +
+      '<tr>' + th('Обект') + th('Евро', true) + th('Малки', true) + th('Нестанд.', true) +
+      th('Скари', true) + th('Билка', true) + th('Общо', true) + th('Бележка') + '</tr>' +
+      rows +
+      '<tr style="background:#f8fafc;">' + td('Общо', '#1E2761', false, true) +
+      cols.map(function(c){ return td(String(tot[c] || 0), '#1E2761', true, true); }).join('') +
+      td(String(tot.total || 0), '#1E2761', true, true) + td('', '#1E2761') + '</tr>' +
+      '</table></div>';
+  } else {
+    body += '<div style="font-size:12px;color:#94a3b8;">Няма данни за палети.</div>';
+  }
+
+  var d = data && data.reportDate ? new Date(data.reportDate+'T00:00:00') : new Date();
+  var dateStr = d.toLocaleDateString('bg-BG', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  return reportEmailShell('🚚 Палети за прибиране', dateStr, body, 'Автоматичен репорт · ТеМАХ Портал');
+}
+
+/* Кой получава „Палети" — чиста функция, за да се тества и в jsdom.
+   · регионалните (is_regional, active) → личен отчет за assigned_stores;
+   · report_recipients (active, weekly=true): празен scope_stores → общото
+     писмо (all); непразен → личен отчет само за тези обекти;
+   · управителите НЕ получават този отчет.
+   Личните се дедуплицират по имейл с малки букви и обединяват обхвата —
+   същото правило като addPersonal() при дневния/седмичния, в същия ред. */
+function reportPalletsRecipients(recipientRows, userRows){
+  var all = [], allSeen = {}, personal = [], seen = {};
+  var addPersonal = function(email, name, stores){
+    var key = String(email || '').trim().toLowerCase();
+    if (!key) return;
+    var list = (Array.isArray(stores) ? stores : []).filter(Boolean);
+    var cur = seen[key];
+    if (cur) {
+      list.forEach(function(s){ if (cur.stores.indexOf(s) < 0) cur.stores.push(s); });
+      if (!cur.name && name) cur.name = name;
+      return;
+    }
+    cur = { email: email, name: name || '', stores: list };
+    seen[key] = cur;
+    personal.push(cur);
+  };
+  (Array.isArray(userRows) ? userRows : []).forEach(function(u){
+    if (!u || u.is_regional !== true || u.active === false || !u.email) return;
+    addPersonal(u.email, u.display_name, u.assigned_stores);
+  });
+  (Array.isArray(recipientRows) ? recipientRows : []).forEach(function(r){
+    if (!r || r.active === false || r.weekly !== true || !r.email) return;
+    var sc = (Array.isArray(r.scope_stores) ? r.scope_stores : []).filter(Boolean);
+    if (sc.length) { addPersonal(r.email, r.name, sc); return; }
+    var key = String(r.email).trim().toLowerCase();
+    if (!allSeen[key]) { allSeen[key] = 1; all.push(r.email); }
+  });
+  return { all: all, personal: personal };
+}
+
 
 Deno.serve(async (req: Request) => {
   try {
     var body: any = {};
     try { body = await req.json(); } catch(e) {}
-    var type = body && body.type === 'weekly' ? 'weekly' : 'daily';
+    var type = body && (body.type === 'weekly' || body.type === 'pallets') ? body.type : 'daily';
+
+    /* v33 — „Палети": отделен, по-кратък път. Без праг за каса, без
+       snapshot, без управители; връща отговор тук и не стига до
+       daily/weekly. Изборът кой получава е в reportPalletsRecipients(). */
+    if (type === 'pallets') {
+      var pData: any = await new Promise(function(resolve){ collectPalletsReportData(null, resolve); });
+      if (!pData) {
+        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{'Content-Type':'application/json'} });
+      }
+      var pSubject = reportPalletsSubject(pData.reportDate);
+      var pRecRes: any = await sbGet('report_recipients', 'active=eq.true&weekly=eq.true&select=email,name,scope_stores,active,weekly');
+      var pRegRes: any = await sbGet('users', 'is_regional=eq.true&select=email,display_name,assigned_stores,active,is_regional');
+      var pPlan: any = reportPalletsRecipients(pRecRes, pRegRes);
+
+      var pOk = false;
+      var pStatus = 0;
+      if (pPlan.all.length) {
+        var pRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
+          body: JSON.stringify({ to: pPlan.all, subject: pSubject, html: reportPalletsHtml(pData) })
+        });
+        pOk = pRes.ok;
+        pStatus = pRes.status;
+      }
+
+      var pPersonal: any[] = [];
+      for (const u of pPlan.personal) {
+        if (!u.stores.length) { pPersonal.push({ email:u.email, sent:false, reason:'no_assigned_stores' }); continue; }
+        var uData: any = await new Promise(function(resolve){ collectPalletsReportData(u.stores, resolve); });
+        if (!uData) { pPersonal.push({ email:u.email, sent:false, reason:'collect_failed' }); continue; }
+        if (!uData.storeCount) { pPersonal.push({ email:u.email, sent:false, reason:'no_reportable_stores' }); continue; }
+        var uRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
+          body: JSON.stringify({ to: [u.email], subject: pSubject, html: reportPalletsHtml(uData) })
+        });
+        pPersonal.push({ email:u.email, stores:uData.storeCount, sent:uRes.ok, status:uRes.status });
+      }
+
+      if (!pPlan.all.length && !pPersonal.length) {
+        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      }
+      return new Response(JSON.stringify({ ok:true, sent:pOk, email_status:pStatus, recipients:pPlan.all.length, personal:pPersonal, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+    }
 
     /* Прагът за секцията „Каса" се чете ВЕДНЪЖ на изпълнение и се подава на
        всяко събиране надолу. Иначе същият ключ би се четял по веднъж за всеки

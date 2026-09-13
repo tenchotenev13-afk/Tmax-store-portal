@@ -58,6 +58,9 @@ const SHARED_FNS = [
   'collectDailyReportData', 'collectWeeklyReportData',
   'collectCrossModuleWeeklySummary',
   'collectDailyKasaSection', 'reportKasaThreshold',
+  /* „Палети за прибиране" (v33) — колектор, рендер, тема и получатели */
+  'collectPalletsReportData', 'reportPalletsHtml', 'reportPalletsSubject',
+  'reportPalletsRecipients',
   /* прозорци и избор на седмица */
   'reportMondayOfWeek', 'reportTargetWeekMonday', 'reportWeekOfMonday',
   'reportPickWeeklyBulletin',
