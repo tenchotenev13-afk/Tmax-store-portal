@@ -321,11 +321,15 @@ function reportKasaThreshold(cb){
 /* Каса в дневния отчет: „грешна каса / върната каса" са ДВЕ различни неща
    в една секция и се четат по различен начин.
 
-   1. ВЪРНАТИТЕ ОТ СЧЕТОВОДСТВОТО са текущо СЪСТОЯНИЕ, не събитие от деня:
-      записът стои със status='returned', докато обектът не го преподаде.
-      Затова се четат БЕЗ ограничение по дата — иначе върнат преди три дни
-      и още непреподаден отчет изчезва от писмото точно когато е най-важен.
-      Оттам и полето days: колко дни стои върнат към отчетния ден.
+   1. ВЪРНАТИТЕ ОТ СЧЕТОВОДСТВОТО: подробно (returned) влизат САМО върнатите
+      ПРЕЗ отчетния ден — toLocalISO(returned_at) === dayISO. Всички по-стари,
+      още непоправени, отиват в returnedBacklog: по един ред на обект
+      { store, count, oldestDate }, където oldestDate е най-старата date на
+      самия отчет. Без това всеки дневен носеше целия исторически дълг
+      (13.09.2026: 10 от 03.07–10.08 и 18 от 26.08–10.09) и Теодор го четеше
+      като „стари отчети в дневния". Заявките остават без филтър по дата —
+      дългът се смята тук. returned_at СЛЕД отчетния ден (ръчно изпращане за
+      минал ден) не влиза никъде; липсващ returned_at отива в дълга.
    2. РАЗМИНАВАНИЯТА са събитие ОТ ОТЧЕТНИЯ ДЕН и се режат по праг. Без
       праг секцията е нечитаема: 90% от потвърдените ПОС отчети имат
       ненулева razlika (средно 4.49 лв), тоест почти всеки ред влиза.
@@ -355,9 +359,19 @@ function collectDailyKasaSection(cb, dayISO, scope, threshold){
       var dayD = new Date(dayISO+'T00:00:00');
 
       var returned = [];
+      var backlogBy = {};
       var pushReturned = function(x, type){
         if (x.status !== 'returned' || !inScope(x.store_name)) return;
         var at = x.returned_at ? new Date(x.returned_at) : null;
+        var atISO = (at && !isNaN(at.getTime())) ? toLocalISO(at) : null;
+        if (atISO && atISO > dayISO) return;
+        if (atISO !== dayISO) {
+          var b = backlogBy[x.store_name] ||
+            (backlogBy[x.store_name] = { store: x.store_name, count: 0, oldestDate: null });
+          b.count++;
+          if (x.date && (!b.oldestDate || x.date < b.oldestDate)) b.oldestDate = x.date;
+          return;
+        }
         var days = (at && !isNaN(at.getTime()))
           ? Math.max(0, Math.round((dayD - new Date(toLocalISO(at)+'T00:00:00')) / 86400000))
           : null;
@@ -371,6 +385,10 @@ function collectDailyKasaSection(cb, dayISO, scope, threshold){
          обект, за да е стабилен редът между две изпращания. */
       returned.sort(function(a,b){
         return (b.days || 0) - (a.days || 0) || String(a.store).localeCompare(String(b.store));
+      });
+      var backlog = Object.keys(backlogBy).map(function(k){ return backlogBy[k]; });
+      backlog.sort(function(a,b){
+        return b.count - a.count || String(a.store).localeCompare(String(b.store));
       });
 
       var over = [];
@@ -387,8 +405,8 @@ function collectDailyKasaSection(cb, dayISO, scope, threshold){
         return Math.abs(b.razlika) - Math.abs(a.razlika) || String(a.store).localeCompare(String(b.store));
       });
 
-      cb({ returned: returned, overThreshold: over, threshold: thr });
-    }).catch(function(){ cb({ returned: [], overThreshold: [], threshold: thr }); });
+      cb({ returned: returned, returnedBacklog: backlog, overThreshold: over, threshold: thr });
+    }).catch(function(){ cb({ returned: [], returnedBacklog: [], overThreshold: [], threshold: thr }); });
   };
 
   if (threshold === null || threshold === undefined) reportKasaThreshold(go);
@@ -984,10 +1002,11 @@ function reportCommentsCountHtml(commentedList){
 function reportKasaSectionHtml(kasa){
   if (!kasa) return '';
   var ret = kasa.returned || [];
+  var backlog = kasa.returnedBacklog || [];
   var over = kasa.overThreshold || [];
-  if (!ret.length && !over.length) return '';
+  if (!ret.length && !backlog.length && !over.length) return '';
 
-  var money = function(v){ return (v > 0 ? '+' : '') + v.toFixed(2) + ' лв'; };
+  var money = function(v){ return (v > 0 ? '+' : '') + v.toFixed(2) + ' €'; };
   var ageLabel = function(d){
     if (d === null || d === undefined) return '';
     if (d <= 0) return 'днес';
@@ -1014,6 +1033,20 @@ function reportKasaSectionHtml(kasa){
       '</div>';
   }
 
+  /* Старият дълг — компактно, по ред на обект, без razlika и причина. */
+  if (backlog.length) {
+    var rows3 = backlog.map(function(x){
+      return '<div style="padding:5px 10px;border-bottom:1px solid #E5E7EB;font-size:12px;color:#4B5563;">' +
+        reportStoreLinkHtml(x.store, '#374151') +
+        ' — '+esc(String(x.count))+(x.oldestDate ? ', най-старият от '+esc(reportDM(x.oldestDate)) : '') +
+        '</div>';
+    }).join('');
+    out += '<div style="margin-top:10px;">' +
+      '<div style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;">Непоправени от по-рано</div>' +
+      '<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;">'+rows3+'</div>' +
+      '</div>';
+  }
+
   if (over.length) {
     var rows2 = over.map(function(x){
       return '<div style="padding:8px 10px;border-bottom:1px solid #FECACA;">' +
@@ -1025,7 +1058,7 @@ function reportKasaSectionHtml(kasa){
         '</div>';
     }).join('');
     out += '<div style="margin-top:14px;">' +
-      '<div style="font-size:11px;font-weight:700;color:#b91c1c;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">⚠️ Разминаване над '+esc(String(kasa.threshold))+' лв ('+over.length+')</div>' +
+      '<div style="font-size:11px;font-weight:700;color:#b91c1c;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">⚠️ Разминаване над '+esc(String(kasa.threshold))+' € ('+over.length+')</div>' +
       '<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;overflow:hidden;">'+rows2+'</div>' +
       '</div>';
   }
