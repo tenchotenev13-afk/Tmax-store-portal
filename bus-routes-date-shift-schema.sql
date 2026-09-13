@@ -52,7 +52,7 @@ alter table bus_routes_backup_20260913 enable row level security;
 
 -- ─── shift ───────────────────────────────────────────────────────────────
 update bus_routes set route_date = route_date + 1
-  where created_at < '<ЧАС_НА_МИГРАЦИЯТА>';
+  where created_at < '2026-09-13 09:52:19+00';   -- приложено в този момент
 
 -- ─── проверка СЛЕД (очаквано: 0 за dow 0 и 6; петъци вече има) ──────────
 -- select extract(dow from route_date) as dow, count(*) from bus_routes group by 1 order by 1;
