@@ -1531,7 +1531,16 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        нямат срок. Филтърът се повтаря и в JS през reportIsLate(), защото
        той е този, който наистина решава. */
     sbGet('client_orders','status=not.in.(done,refused,postponed)&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,created_at,date'),
-    sbGet('transport_orders','status=not.in.(done,refused,postponed)&select=id,store_name,from_store,customer_name,delivery,status,awaiting_stock')
+    sbGet('transport_orders','status=not.in.(done,refused,postponed)&select=id,store_name,from_store,customer_name,delivery,status,awaiting_stock'),
+    /* Прагът за „Сторна под N €" — отделен ключ, по образеца на
+       kasa_diff_threshold. В края на списъка, за да не се местят индексите. */
+    sbGet('app_settings','key=eq.storno_small_threshold&select=key,value&limit=1'),
+    /* „Сторна под N €" — ОТДЕЛНА заявка по storno_date за седмицата, не по
+       created_at: бележка, въведена седмици по-късно, пак принадлежи на
+       седмицата на сторното. Подвижен прозорец (таб „Днес") няма седмица. */
+    W.toISO
+      ? sbGet('kasa_storno','storno_date=gte.'+W.fromISO+'&storno_date=lte.'+W.toISO+'&select=store_name,storno_date,returned_sum,created_by,article_name')
+      : Promise.resolve([])
   ]).then(function(r){
     /* Всеки набор минава през ЕДИН предикат. Отделни филтри на отделни места
        се разминават — точно това правеше сторната по грешен прием да се брои
@@ -1766,6 +1775,40 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       resubmitted: storno.filter(function(x){ return x.status==='resubmitted'; }).length,
       confirmed: storno.filter(function(x){ return x.status==='confirmed'; }).length
     };
+
+    /* Сторна под прага за СЕДМИЦАТА — само при затворен прозорец (седмичният
+       отчет). Редовете са от отделната заявка по storno_date (r[11]), тоест
+       седмицата е отсята в заявката — включително бележки, въведени седмици
+       по-късно. Таб „Днес" няма седмица и не получава секцията. Без филтър
+       по reason и по status. */
+    var smallStorno = null;
+    if (W.toISO) {
+      var ssRow = (Array.isArray(r[10]) ? r[10] : []).find(function(x){ return x && x.key === 'storno_small_threshold'; });
+      var ssRaw = ssRow && ssRow.value != null ? String(ssRow.value).trim().replace(',', '.') : '';
+      var ssNum = ssRaw ? Number(ssRaw) : NaN;
+      var ssThr = Number.isFinite(ssNum) && ssNum > 0 ? ssNum : 5;
+      var ssRound = function(n){ return Math.round(n * 100) / 100; };
+      var ssMap = {}, ssByStore = [], ssTotal = 0, ssSum = 0;
+      (Array.isArray(r[11]) ? r[11] : []).filter(function(x){ return inScope(x.store_name); }).forEach(function(x){
+        var v = Number(x.returned_sum);
+        if (!Number.isFinite(v) || v >= ssThr) return;
+        var g = ssMap[x.store_name];
+        if (!g) { g = { store: x.store_name, count: 0, sum: 0, byUser: [], userMap: {} }; ssMap[x.store_name] = g; ssByStore.push(g); }
+        var who = x.created_by || '(без име)';
+        var u = g.userMap[who];
+        if (!u) { u = { user: who, count: 0, sum: 0 }; g.userMap[who] = u; g.byUser.push(u); }
+        g.count++; g.sum += v; u.count++; u.sum += v;
+        ssTotal++; ssSum += v;
+      });
+      ssByStore.forEach(function(g){
+        delete g.userMap;
+        g.sum = ssRound(g.sum);
+        g.byUser.forEach(function(u){ u.sum = ssRound(u.sum); });
+        g.byUser.sort(function(a,b){ return b.count - a.count || String(a.user).localeCompare(String(b.user)); });
+      });
+      ssByStore.sort(function(a,b){ return b.count - a.count || String(a.store).localeCompare(String(b.store)); });
+      smallStorno = { threshold: ssThr, total: ssTotal, sum: ssRound(ssSum), byStore: ssByStore };
+    }
     var zoborotSummary = {
       total: zoborot.length,
       draft: zoborot.filter(function(x){ return x.status==='draft'; }).length,
@@ -1794,7 +1837,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
 
     cb({
       diffs: diffs, wrongReceipt: wrongReceipt,
-      returns: ret, storno: stornoSummary, zoborot: zoborotSummary,
+      returns: ret, storno: stornoSummary, smallStorno: smallStorno, zoborot: zoborotSummary,
       returnsList: returnsList, returnsStaleDays: returnsStaleDays,
       lateOrders: lateOrders, lateOrdersByStore: lateOrdersByStore,
       lateTransport: lateTransport,
@@ -2080,6 +2123,32 @@ function reportWarehousePendingHtml(cross, scoped){
     '</div>';
 }
 
+/* „Сторна под N €" за седмицата — ред на обект, касиерите в реда (най-много
+   4, останалите „+K други"). Прагът и числата идват от колектора; при
+   подвижен прозорец (таб „Днес") smallStorno е null и нищо не се рендира. */
+function reportSmallStornoHtml(cross){
+  var ss = cross && cross.smallStorno;
+  if (!ss) return '';
+  var money = function(v){ return (Number(v) || 0).toFixed(2) + ' €'; };
+  var thr = esc(String(ss.threshold));
+  if (!ss.total) {
+    return '<div style="margin-top:10px;font-size:12px;color:#94a3b8;">Няма сторна под ' + thr + ' € тази седмица</div>';
+  }
+  var rows = (ss.byStore || []).map(function(g){
+    var users = g.byUser || [];
+    var shown = users.slice(0, 4).map(function(u){ return esc(u.user) + ' ' + u.count; });
+    if (users.length > 4) shown.push('+' + (users.length - 4) + ' други');
+    return '<div style="padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;">' +
+      reportStoreLinkHtml(g.store, '#1E2761') +
+      '<span style="color:#475569;"> — ' + g.count + ' бр., ' + money(g.sum) +
+      (shown.length ? ' · ' + shown.join(', ') : '') + '</span></div>';
+  }).join('');
+  return '<div style="margin-top:12px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:6px;">Сторна под ' + thr + ' € (' + ss.total + ' бр., ' + money(ss.sum) + ')</div>' +
+    '<div style="background:#FFFFFF;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">' + rows + '</div>' +
+    '</div>';
+}
+
 /* scoped казва ЧИЙ е отчетът: срязан (регионален, управител) или за
    цялата верига. Само списъкът с невзетата стока го ползва — виж
    reportReturnsListHtml. Липсващ аргумент значи пълен отчет, тоест
@@ -2111,6 +2180,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
     crossMetricCard(cross.storno.draft,'чакат счетоводство', cross.storno.draft>0) +
     crossMetricCard(cross.storno.returned,'върнати за коментар', cross.storno.returned>0) +
     crossMetricCard(cross.storno.confirmed,'приключени'));
+  h += reportSmallStornoHtml(cross);
 
   h += crossModuleRow('🧾','Каса — Равнение (за периода)',
     crossMetricCard(cross.zoborot.total,'общо записа') +

@@ -86,7 +86,7 @@ const SHARED_FNS = [
   'reportCommentsByStoreHtml',
   'reportCommentsCountHtml',
   'crossMetricCard', 'crossModuleRow', 'reportReturnsListHtml',
-  'reportLateSectionHtml',
+  'reportLateSectionHtml', 'reportSmallStornoHtml',
   'reportTransitListHtml', 'reportWarehousePendingHtml',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',
   'buildCrossModuleSectionHtml', 'buildDailyReportHtml', 'buildWeeklyReportHtml'
