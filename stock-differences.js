@@ -395,7 +395,16 @@ function renderStockDiff() {
          type, тоест етикетът по-долу пада на "✅ Приета" и един клик би
          записал status='taken' върху потвърждението - тоест би изтрил края
          на потока и би върнал реда в "чакащи". Затова бутон няма. */
-      if (canEdit && !isTaken && r.status !== 'received') {
+      /* "Не са фактурирани" чака крайно решение. Вместо бутона за приключване
+         (той би го направил 'taken' без решение) редът предлага двете крайни
+         решения - същият resolveDiffLine като бутоните в новите бланки, тоест
+         сменя типа, при "Връщане" създава запис в "За връщане" и прилага
+         автоматичното количество. Само за който има право да решава. */
+      if (r.type==='not_invoiced' && !isTaken && canReviewDiff() && !isLogisticsWarehouseUser()) {
+        h += '<button data-id="'+r.id+'" onclick="resolveDiffLine(this.dataset.id,\'writein\')" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">📥 Заприх.</button>';
+        h += '<button data-id="'+r.id+'" onclick="resolveDiffLine(this.dataset.id,\'return\')" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">↩️ Връщане</button>';
+      }
+      if (canEdit && !isTaken && r.status !== 'received' && r.type !== 'not_invoiced') {
         var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : r.type==='not_invoiced' ? '🧾 Приключена' : '✅ Приета';
         h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
       }
@@ -495,9 +504,11 @@ function sdTableRows(over){
 function sdStatusWords(type, direction){
   if(direction==='wrong_receipt') return {pending:'Неизчистена', taken:'Изчистена', pIcon:'⏳', tIcon:'✅'};
   if(type==='writein') return {pending:'Незаприходена', taken:'Заприходена', pIcon:'⏳', tIcon:'📥'};
-  /* "Не са фактурирани" - няма стока за движение, тоест нито "Взета", нито
-     "Заприходена" значи нещо; редът просто е отворен или приключен. */
-  if(type==='not_invoiced') return {pending:'Отворена', taken:'Приключена', pIcon:'⏳', tIcon:'🧾'};
+  /* "Не са фактурирани" е междинно състояние - редът чака крайно решение
+     (заприхождаване или връщане), тоест нито "Невзета", нито "Незаприходена"
+     казва истината. 'taken' е недостижимо по нормалния път; думата стои само
+     за да не излиза "Взета", ако такъв ред все пак се появи. */
+  if(type==='not_invoiced') return {pending:'Чака решение', taken:'Приключена', pIcon:'⏳', tIcon:'🧾'};
   return {pending:'Невзета', taken:'Взета', pIcon:'⏳', tIcon:'✅'};
 }
 /* За сборните карти и чипове, където изгледът смесва типове ("Всички типове"
@@ -825,14 +836,10 @@ function resolveDiffLine(id,type){
      нея, вместо да ни връща най-отгоре на списъка. */
   sdKeepScroll(line.report_id);
   var resolvedAt=new Date().toISOString();
-  /* "Не са фактурирани" се ПРИКЛЮЧВА с решението: няма стока за движение и
-     никой не чака нищо, тоест 'pending' би оставил реда висящ завинаги. */
-  var resolvedStatus = type==='not_invoiced' ? 'taken' : 'pending';
-  var payload={type:type,status:resolvedStatus,resolved_by:sdActor(),resolved_at:resolvedAt};
-  /* Приключен ред трябва да казва кой и кога го е приключил - както при
-     "✅ Взета" (sdMarkTaken). Тук решението И приключването са едно действие,
-     затова лицето и часът са същите като на решението. */
-  if(type==='not_invoiced'){ payload.completed_by=sdActor(); payload.completed_at=resolvedAt; }
+  /* "Не са фактурирани" НЕ приключва реда - то е междинно състояние, което чака
+     крайно решение (заприхождаване или връщане). Затова статусът е 'pending'
+     както при другите типове и completed_* не се пишат. */
+  var payload={type:type,status:'pending',resolved_by:sdActor(),resolved_at:resolvedAt};
   /* Липса/Връщане: количеството е РЕАЛНАТА разлика, не това по документ.
      Досега Цветелина го пренаписваше на ръка след всяко решение. Останалите
      типове (Заприхождаване и т.н.) не се пипат - там количеството по документ
@@ -851,8 +858,7 @@ function resolveDiffLine(id,type){
   }
   sbPatch('stock_differences','id=eq.'+id,payload).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    line.type=type; line.status=resolvedStatus; line.resolved_by=sdActor(); line.resolved_at=resolvedAt;
-    if(type==='not_invoiced'){ line.completed_by=sdActor(); line.completed_at=resolvedAt; } /* локално, за незабавна проверка по-долу без чакане на reload */
+    line.type=type; line.status='pending'; line.resolved_by=sdActor(); line.resolved_at=resolvedAt; /* локално, за незабавна проверка по-долу без чакане на reload */
     /* ПРЕДИ autoCreateReturnFromDiff - тя чете line.quantity за stock_returns. */
     if(autoQty!==null) line.quantity=autoQty;
     /* Едно съобщение, не две: toast() презаписва един и същ елемент, затова
@@ -1494,15 +1500,6 @@ function submitSD() {
      презаписва изпълнителят при редакция на коментар.
      'capitalized' е заварена стойност за СЪЩОТО състояние като 'taken', затова
      старото състояние минава през sdIsTaken, не през сравнение на низа. */
-  /* "Не са фактурирани" приключва реда и когато решението е взето през модала,
-     не само през бутона (resolveDiffLine). Стои ПРЕДИ проверката за преход
-     неприключен -> приключен долу, за да я задейства: completed_by/at ги пише
-     тя, без втори код за същото. Само ако редът още НЕ е приключен - вече
-     приключен не се пипа. Обратното не се прави: смени ли Цвети типа на друг,
-     статусът не се връща сам, това е ръчно решение. */
-  if(sdEditId && data.type==='not_invoiced' && origRecord && !sdIsTaken(origRecord)){
-    data.status = 'taken';
-  }
   var isNowCompleted = data.status==='taken' || data.status==='capitalized';
   var wasCompleted = !!origRecord && sdIsTaken(origRecord);
   if(isNowCompleted && !wasCompleted){

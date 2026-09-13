@@ -8,8 +8,9 @@
    constraint — проверено със SQL на 13.09.2026). Две неща го отличават:
      · бутонът е САМО при посока доставчик — между складове и при сторна по
        грешен прием фактура няма;
-     · редът се ПРИКЛЮЧВА с решението (status='taken', не 'pending'): няма
-       стока за движение и никой не чака нищо.
+     · решението е МЕЖДИННО, не приключване: status остава 'pending', без
+       completed_*. Редът чака крайно решение и в долната таблица предлага
+       „📥 Заприх." и „↩️ Връщане" — същият resolveDiffLine, който сменя типа.
 
    Пускане:  node tests/stock-diff-not-invoiced.test.js .
 */
@@ -131,7 +132,7 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
     }
   }
 
-  section('б) Клик → PATCH с not_invoiced и status taken; без връщане и без количество');
+  section('б) Клик → PATCH с not_invoiced и status PENDING; без completed_*, без връщане');
   {
     const h = env([rep()], [line()], 'supplier');
     guard('рендер', () => h.w.renderStockDiff());
@@ -142,8 +143,10 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
       const p = sdPatch(h.calls)[0];
       if (ok('има PATCH към stock_differences', !!p, h.calls.toast.join(' | '))) {
         ok('type е not_invoiced', p.body.type === 'not_invoiced', JSON.stringify(p.body.type));
-        ok('status е taken', p.body.status === 'taken', JSON.stringify(p.body.status));
-        ok('status НЕ е pending', p.body.status !== 'pending', JSON.stringify(p.body.status));
+        ok('status е pending', p.body.status === 'pending', JSON.stringify(p.body.status));
+        ok('status НЕ е taken', p.body.status !== 'taken', JSON.stringify(p.body.status));
+        ok('БЕЗ completed_by', !('completed_by' in p.body), Object.keys(p.body).join(','));
+        ok('БЕЗ completed_at', !('completed_at' in p.body), Object.keys(p.body).join(','));
         ok('resolved_by и resolved_at са записани',
           p.body.resolved_by === 'Цветелина Тенева' && /^\d{4}-\d{2}-\d{2}T/.test(p.body.resolved_at || ''),
           JSON.stringify([p.body.resolved_by, p.body.resolved_at]));
@@ -151,12 +154,10 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
       }
       ok('НЯМА POST към stock_returns',
         !h.calls.post.some(x => x.table === 'stock_returns'), JSON.stringify(h.calls.post.map(x => x.table)));
-      ok('няма предупредителен toast за количество',
-        !h.calls.toast.some(t => String(t).indexOf('⚠️') >= 0), h.calls.toast.join(' | '));
     }
   }
 
-  section('в) След клика редът е приключен: карта, филтър, бадж, чип');
+  section('в) След клика редът ЧАКА: карта, филтър, бадж „ЧАКА РЕШЕНИЕ", чип');
   {
     const h = env([rep()], [line()], 'supplier');
     guard('рендер', () => h.w.renderStockDiff());
@@ -164,29 +165,28 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
     await ticks();
     if (guard('прилагане на PATCH-овете и пренарисуване', () => applyPatchesAndRender(h))) {
       const txt = mod(h.doc).textContent;
-      /* Картата „Приключени" при „Всички типове" — думите за 'all' не се пипат. */
-      ok('картата „Приключени" брои 1', /Приключени\s*1/.test(txt), txt.slice(0, 300));
-      ok('картата „Чакащи" брои 0', /Чакащи\s*0/.test(txt), txt.slice(0, 300));
+      /* Картите при „Всички типове" — думите за 'all' не се пипат. */
+      ok('картата „Чакащи" брои 1', /Чакащи\s*1/.test(txt), txt.slice(0, 300));
+      ok('картата „Приключени" брои 0', /Приключени\s*0/.test(txt), txt.slice(0, 300));
 
-      const taken = chipByF(h.doc, 'taken', 'setSDFilter');
-      if (ok('чипът за приключени е на екрана', !!taken)) {
-        ok('чипът за приключени казва (1)', /\(1\)/.test(taken.textContent), taken.textContent);
-        realClick(h.w, taken);
-        ok('филтърът „приключени" показва реда', mainTableRows(h.doc).length === 1,
-          'редове: ' + mainTableRows(h.doc).length);
-      }
       const pending = chipByF(h.doc, 'pending', 'setSDFilter');
       if (ok('чипът за чакащи е на екрана', !!pending)) {
+        ok('чипът за чакащи казва (1)', /\(1\)/.test(pending.textContent), pending.textContent);
         realClick(h.w, pending);
-        ok('филтърът „чакащи" НЕ показва реда', mainTableRows(h.doc).length === 0,
+        ok('филтърът „чакащи" показва реда', mainTableRows(h.doc).length === 1,
+          'редове: ' + mainTableRows(h.doc).length);
+      }
+      const taken = chipByF(h.doc, 'taken', 'setSDFilter');
+      if (ok('чипът за приключени е на екрана', !!taken)) {
+        realClick(h.w, taken);
+        ok('филтърът „приключени" НЕ показва реда', mainTableRows(h.doc).length === 0,
           'редове: ' + mainTableRows(h.doc).length);
       }
 
       realClick(h.w, chipByF(h.doc, 'all', 'setSDFilter'));
       const rowTxt = mainTableRows(h.doc).map(r => r.textContent).join(' | ');
-      /* Баджовете в портала са с главни букви („📥 ЗАПРИХОДЕНА") — проверката е
-         без значение на регистъра, за да мери думата, не конвенцията. */
-      ok('баджът на реда е „🧾 Приключена"', /🧾\s*приключена/i.test(rowTxt), rowTxt);
+      ok('баджът на реда е „⏳ ЧАКА РЕШЕНИЕ"', rowTxt.indexOf('⏳ ЧАКА РЕШЕНИЕ') >= 0, rowTxt);
+      ok('баджът НЕ е „Приключена"', !/приключена/i.test(rowTxt), rowTxt);
       ok('етикетът на типа в таблицата е „🧾 Не са фактурирани"', rowTxt.indexOf('🧾 Не са фактурирани') >= 0, rowTxt);
 
       const chip = chipByF(h.doc, 'not_invoiced', 'setSDTypeFilter');
@@ -195,15 +195,15 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
           JSON.stringify(chip.textContent.trim()));
         realClick(h.w, chip);
         const txt2 = mod(h.doc).textContent;
-        ok('при филтър по типа картата казва „Приключена"', /Приключена\s*1/.test(txt2), txt2.slice(0, 300));
-        ok('и „Отворена" за другата карта', /Отворена\s*0/.test(txt2), txt2.slice(0, 300));
+        ok('при филтър по типа картата казва „Чака решение 1"', /Чака решение\s*1/.test(txt2), txt2.slice(0, 300));
+        ok('и „Приключена 0"', /Приключена\s*0/.test(txt2), txt2.slice(0, 300));
       }
     }
   }
 
   section('г) Модалът за редакция показва типа избран');
   {
-    const h = env([rep()], [line({ type: 'not_invoiced', status: 'taken' })], 'supplier');
+    const h = env([rep()], [line({ type: 'not_invoiced', status: 'pending' })], 'supplier');
     if (guard('openSDModal не хвърля', () => h.w.openSDModal('l-s'))) {
       const sel = h.doc.getElementById('sd-type');
       if (ok('<select id="sd-type"> съществува', !!sel && sel.tagName === 'SELECT')) {
@@ -213,9 +213,7 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
           (sel.querySelector('option[value="not_invoiced"]') || {}).textContent === '🧾 Не са фактурирани');
       }
       const st = h.doc.getElementById('sd-status');
-      ok('статусът в модала казва „Приключена"',
-        !!st && /приключена/i.test((st.options[st.selectedIndex] || {}).textContent || ''),
-        st ? (st.options[st.selectedIndex] || {}).textContent : 'няма select');
+      ok('статусът в модала е pending', !!st && st.value === 'pending', st ? st.value : 'няма select');
     }
   }
 
@@ -232,27 +230,90 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
     }
   }
 
-  section('е) PATCH-ът от бутона носи и кой/кога приключи реда');
+  section('е) На чакащия ред в таблицата: „📥 Заприх." и „↩️ Връщане" довършват решението');
   {
-    const h = env([rep()], [line()], 'supplier');
-    guard('рендер', () => h.w.renderStockDiff());
-    realClick(h.w, notInvoicedBtn(h.doc));
-    await ticks();
-    const p = sdPatch(h.calls)[0];
-    if (ok('има PATCH към stock_differences', !!p)) {
-      ok('completed_by е записан', p.body.completed_by === 'Цветелина Тенева',
-        JSON.stringify(p.body.completed_by));
-      ok('completed_at е ISO timestamp', /^\d{4}-\d{2}-\d{2}T/.test(p.body.completed_at || ''),
-        JSON.stringify(p.body.completed_at));
-      /* Решението и приключването са едно действие — един и същ час. */
-      ok('completed_at е същият час като resolved_at', p.body.completed_at === p.body.resolved_at,
-        JSON.stringify([p.body.completed_at, p.body.resolved_at]));
+    /* Бланката вече е прегледана, редът е „не са фактурирани" и чака — тоест е
+       в долната таблица. Реално получено 7 срещу 5 по документ: при „Връщане"
+       автоматичното количество е 2. */
+    const REV = rep({ reviewed: true });
+    const WAIT = line({ type: 'not_invoiced', status: 'pending', order_number: '4100135756',
+      quantity_supplier_doc: '5', quantity_received: '7',
+      resolved_by: 'Цветелина Тенева', resolved_at: '2026-09-12T08:00:00.000Z' });
+    const finalBtn = (doc, t) => Array.prototype.find.call(
+      mainTableRows(doc).reduce((a, r) => a.concat(Array.prototype.slice.call(r.querySelectorAll('button'))), []),
+      b => new RegExp("resolveDiffLine\\(this\\.dataset\\.id,'" + t + "'\\)").test(b.getAttribute('onclick') || ''));
+    const markTakenBtn = doc => mainTableRows(doc).some(r =>
+      Array.prototype.some.call(r.querySelectorAll('button'), b => /sdMarkTaken/.test(b.getAttribute('onclick') || '')));
+
+    const h = env([REV], [WAIT], 'supplier');
+    if (guard('рендер', () => h.w.renderStockDiff())) {
+      ok('редът е в долната таблица', mainTableRows(h.doc).length === 1, 'редове: ' + mainTableRows(h.doc).length);
+      const bW = finalBtn(h.doc, 'writein'), bR = finalBtn(h.doc, 'return');
+      ok('има бутон „📥 Заприх."', !!bW && bW.textContent.trim() === '📥 Заприх.', bW ? bW.textContent : 'няма');
+      ok('има бутон „↩️ Връщане"', !!bR && bR.textContent.trim() === '↩️ Връщане', bR ? bR.textContent : 'няма');
+      ok('НЯМА бутон за приключване (sdMarkTaken) — taken е недостижимо', !markTakenBtn(h.doc));
+
+      if (bR) {
+        realClick(h.w, bR);
+        await ticks();
+        const p = sdPatch(h.calls)[0];
+        if (ok('„Връщане": има PATCH', !!p, h.calls.toast.join(' | '))) {
+          ok('„Връщане": type става return', p.body.type === 'return', JSON.stringify(p.body.type));
+          ok('„Връщане": status остава pending', p.body.status === 'pending', JSON.stringify(p.body.status));
+          ok('„Връщане": автоматичното количество е 2', p.body.quantity === 2, JSON.stringify(p.body.quantity));
+        }
+        const post = h.calls.post.filter(x => x.table === 'stock_returns');
+        if (ok('„Връщане": има POST към stock_returns', post.length === 1, 'брой: ' + post.length)) {
+          ok('„Връщане": POST носи order_number', post[0].body.order_number === '4100135756',
+            JSON.stringify(post[0].body.order_number));
+          ok('„Връщане": POST носи diff_line_id на реда', post[0].body.diff_line_id === 'l-s',
+            JSON.stringify(post[0].body.diff_line_id));
+          ok('„Връщане": POST носи количество 2', post[0].body.quantity === 2, JSON.stringify(post[0].body.quantity));
+        }
+        if (guard('„Връщане": пренарисуване след PATCH-а', () => applyPatchesAndRender(h))) {
+          const rowTxt = mainTableRows(h.doc).map(r => r.textContent).join(' | ');
+          ok('„Връщане": редът вече е „↩️ Връщане"', rowTxt.indexOf('↩️ Връщане') >= 0, rowTxt);
+          ok('„Връщане": двата бутона изчезват', !finalBtn(h.doc, 'writein') && !finalBtn(h.doc, 'return'));
+        }
+      }
+    }
+
+    const h2 = env([REV], [WAIT], 'supplier');
+    guard('рендер (заприх.)', () => h2.w.renderStockDiff());
+    const bW2 = finalBtn(h2.doc, 'writein');
+    if (ok('„Заприх.": бутонът е на екрана', !!bW2)) {
+      realClick(h2.w, bW2);
+      await ticks();
+      const p = sdPatch(h2.calls)[0];
+      if (ok('„Заприх.": има PATCH', !!p, h2.calls.toast.join(' | '))) {
+        ok('„Заприх.": type става writein', p.body.type === 'writein', JSON.stringify(p.body.type));
+        ok('„Заприх.": status остава pending', p.body.status === 'pending', JSON.stringify(p.body.status));
+      }
+      ok('„Заприх.": НЯМА POST към stock_returns', !h2.calls.post.some(x => x.table === 'stock_returns'),
+        JSON.stringify(h2.calls.post.map(x => x.table)));
+    }
+
+    /* Магазинът вижда реда, но не решава — бутоните са само за който има право. */
+    const STORE = { email: 'radnevo@temax.bg', display_name: 'Управител Раднево',
+                    role: 'manager', store_name: 'Раднево' };
+    const hs = boot({
+      modules: ['stock-returns.js', 'stock-differences.js'],
+      user: STORE, confirm: true,
+      data: { stock_differences: [WAIT], differences_reports: [REV], stock_returns: [], users: [] }
+    });
+    hs.w.sdData = [JSON.parse(JSON.stringify(WAIT))];
+    hs.w.diffReports = [JSON.parse(JSON.stringify(REV))];
+    hs.w.sdFilter = 'all'; hs.w.sdTypeFilter = 'all'; hs.w.sdStoreFilter = ''; hs.w.sdSearch = '';
+    hs.w.sdDirTab = 'supplier';
+    if (guard('рендер (магазин)', () => hs.w.renderStockDiff())) {
+      ok('магазин: редът се вижда', mainTableRows(hs.doc).length === 1, 'редове: ' + mainTableRows(hs.doc).length);
+      ok('магазин: НЯМА бутоните за крайно решение', !finalBtn(hs.doc, 'writein') && !finalBtn(hs.doc, 'return'));
     }
   }
 
-  section('ж) Редакция през модала с избор „Не са фактурирани" → status taken');
+  section('ж) Редакция през модала оставя статуса както е — не се форсира taken');
   {
-    /* Редът е решен като „Липса" и чака; Цвети сменя решението през модала. */
+    /* ж.1 — от „Липса" към „Не са фактурирани": статусът остава pending. */
     const h = env([rep()], [line({ type: 'missing', status: 'pending',
       resolved_by: 'Цветелина Тенева', resolved_at: '2026-09-10T08:00:00.000Z' })], 'supplier');
     if (guard('openSDModal не хвърля', () => h.w.openSDModal('l-s'))) {
@@ -262,52 +323,23 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
       const p = sdPatch(h.calls)[0];
       if (ok('има PATCH към stock_differences', !!p, h.calls.toast.join(' | '))) {
         ok('type е not_invoiced', p.body.type === 'not_invoiced', JSON.stringify(p.body.type));
-        ok('status е taken — в СЪЩИЯ PATCH', p.body.status === 'taken', JSON.stringify(p.body.status));
-        ok('completed_by е записан', p.body.completed_by === 'Цветелина Тенева',
-          JSON.stringify(p.body.completed_by));
-        ok('completed_at е записан', /^\d{4}-\d{2}-\d{2}T/.test(p.body.completed_at || ''),
-          JSON.stringify(p.body.completed_at));
-      }
-      ok('няма POST към stock_returns', !h.calls.post.some(x => x.table === 'stock_returns'));
-    }
-  }
-
-  section('з) Редакция на вече приключен ред — не дублира; смяна на типа не връща статуса');
-  {
-    const DONE = { type: 'not_invoiced', status: 'taken',
-      resolved_by: 'Първи човек', resolved_at: '2026-09-01T08:00:00.000Z',
-      completed_by: 'Първи човек', completed_at: '2026-09-01T08:00:00.000Z' };
-
-    /* з.1 — само коментар върху вече приключен ред: кой/кога не се презаписват. */
-    const h = env([rep()], [line(DONE)], 'supplier');
-    if (guard('openSDModal не хвърля', () => h.w.openSDModal('l-s'))) {
-      h.doc.getElementById('sd-comment').value = 'допълнителна бележка';
-      realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'Запази'));
-      await ticks();
-      const p = sdPatch(h.calls)[0];
-      if (ok('има PATCH', !!p, h.calls.toast.join(' | '))) {
-        ok('status остава taken', p.body.status === 'taken', JSON.stringify(p.body.status));
-        ok('completed_by НЕ е в PATCH-а (не се презаписва)', !('completed_by' in p.body),
-          Object.keys(p.body).join(','));
-        ok('completed_at НЕ е в PATCH-а', !('completed_at' in p.body), Object.keys(p.body).join(','));
-        ok('resolved_by не се презаписва (типът не е сменен)', !('resolved_by' in p.body),
-          Object.keys(p.body).join(','));
+        ok('status остава pending', p.body.status === 'pending', JSON.stringify(p.body.status));
+        ok('БЕЗ completed_by', !('completed_by' in p.body), Object.keys(p.body).join(','));
       }
     }
 
-    /* з.2 — смяна на типа обратно на друг: статусът НЕ се връща сам. */
-    const h2 = env([rep()], [line(DONE)], 'supplier');
-    if (guard('openSDModal не хвърля (смяна на тип)', () => h2.w.openSDModal('l-s'))) {
-      h2.doc.getElementById('sd-type').value = 'missing';
+    /* ж.2 — само коментар върху чакащ ред „не са фактурирани": статусът не се мести. */
+    const h2 = env([rep()], [line({ type: 'not_invoiced', status: 'pending',
+      resolved_by: 'Цветелина Тенева', resolved_at: '2026-09-10T08:00:00.000Z' })], 'supplier');
+    if (guard('openSDModal не хвърля (коментар)', () => h2.w.openSDModal('l-s'))) {
+      h2.doc.getElementById('sd-comment').value = 'чакаме фактура';
       realClick(h2.w, btn(h2.doc.getElementById('sd-ov'), 'Запази'));
       await ticks();
       const p2 = sdPatch(h2.calls)[0];
       if (ok('има PATCH', !!p2, h2.calls.toast.join(' | '))) {
-        ok('типът е сменен на missing', p2.body.type === 'missing', JSON.stringify(p2.body.type));
-        ok('статусът остава taken — не се гадае обратно', p2.body.status === 'taken',
-          JSON.stringify(p2.body.status));
-        ok('кой/кога приключи не се трие', !('completed_by' in p2.body) || p2.body.completed_by !== null,
-          JSON.stringify(p2.body.completed_by));
+        ok('status остава pending', p2.body.status === 'pending', JSON.stringify(p2.body.status));
+        ok('БЕЗ completed_*', !('completed_by' in p2.body) && !('completed_at' in p2.body),
+          Object.keys(p2.body).join(','));
       }
     }
   }
