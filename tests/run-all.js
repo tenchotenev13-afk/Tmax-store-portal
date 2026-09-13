@@ -117,6 +117,7 @@ const TESTS = [
   'kasa-history-order.test.js',
   'kasa-history-window.test.js',
   'local-date.test.js',
+  'calendar-local-dates.test.js',
   'kasa-returned-in-reports.test.js',
   'report-groups-users.test.js',
   'no-auto-push-on-load.test.js',

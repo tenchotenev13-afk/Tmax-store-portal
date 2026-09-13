@@ -44,8 +44,13 @@ function loadCalendar() {
   var wrap = document.getElementById('mod-calendar');
   if (wrap) wrap.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
   var days = getWeekDates(calWeekOffset);
-  var from = days[0].toISOString().slice(0,10);
-  var to   = days[6].toISOString().slice(0,10);
+  /* localDateISO, НЕ toISOString(): getWeekDates() връща МЕСТНА полунощ, а в UTC
+     това е предният ден — ПО ЦЯЛ ДЕН, не само нощем. До 13.09.2026 седмицата
+     се питаше неделя–събота вместо понеделник–неделя, маршрутите се записваха
+     с ден по-рано, а транспортните и клиентските заявки (с истински дати)
+     излизаха в колоната на следващия ден. Виж bus-routes-date-shift-schema.sql. */
+  var from = localDateISO(days[0]);
+  var to   = localDateISO(days[6]);
 
   Promise.all([
     sbGet('bus_routes', 'route_date=gte.'+from+'&route_date=lte.'+to+'&order=route_date.asc'+storeQ()),
@@ -67,7 +72,7 @@ function loadCalendar() {
       /* Ротационен шаблон (четна/нечетна седмица) — прескачаме, ако не е неговата седмица */
       if (t.week_parity && t.week_parity !== 'any' && t.week_parity !== weekParity) return;
       var d = days2[di];
-      var dateStr = d.toISOString().slice(0,10);
+      var dateStr = localDateISO(d);
       /* Не добавяй ако вече има ръчен запис за същия магазин/ден */
       var exists = calRoutes.some(function(r) {
         return r.route_date===dateStr && r.store_name===t.store_name && r._fromTemplate;
@@ -131,7 +136,7 @@ function renderCalendar() {
   /* Календарна решетка — 7 дни */
   h += '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:8px;">';
   days.forEach(function(day, i) {
-    var dateStr  = day.toISOString().slice(0,10);
+    var dateStr  = localDateISO(day);
     var isToday  = day.getTime() === today.getTime();
     var isWeekend = i >= 5;
 
@@ -239,7 +244,7 @@ function getWeekNumber(d) {
 /* ── МОДАЛ ── */
 function calRouteModalHtml(days) {
   var dayOpts = days.slice(0,5).map(function(d,i){
-    return '<option value="'+d.toISOString().slice(0,10)+'">'+DAY_NAMES[i]+' ('+fmtDMY(d)+')</option>';
+    return '<option value="'+localDateISO(d)+'">'+DAY_NAMES[i]+' ('+fmtDMY(d)+')</option>';
   }).join('');
   var purposeOpts = Object.keys(PURPOSE).map(function(k){
     return '<option value="'+k+'">'+PURPOSE[k].label+'</option>';
