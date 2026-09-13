@@ -355,7 +355,11 @@ function srModalHtml() {
 
   h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
     '<div><label class="fl">Магазин *</label>'+storeSelectHtml+'</div>'+
-    '<div><label class="fl">Доставчик</label><input class="fi" id="sr-supplier" value="'+esc(r.supplier||'')+'" placeholder="напр. ДЕНИ-А 8583 ООД"></div>'+
+    /* list="sr-supplier-list": подсказки от справочника (openSRModal ги пълни) -
+       точното име вместо нов вариант на ръка, свободен текст остава възможен.
+       escVal, НЕ esc: esc('') връща "—", тоест новият запис тръгваше със
+       стойност "—" - datalist-ът филтрира по написаното и не показваше нищо. */
+    '<div><label class="fl">Доставчик</label><input class="fi" id="sr-supplier" list="sr-supplier-list" value="'+escVal(r.supplier)+'" placeholder="напр. ДЕНИ-А 8583 ООД"><datalist id="sr-supplier-list"></datalist></div>'+
     '</div>';
 
   if (tab!=='complaint') {
@@ -378,7 +382,13 @@ function srModalHtml() {
       '<div><label class="fl">Завод</label><input class="fi" id="sr-plant" value="'+escVal(r.plant)+'"></div>'+
       '</div>';
   } else {
-    h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
+    /* "Поръчка" (order_number). При ред от разлика (diff_line_id) номерът идва
+       оттам и се синхронизира от submitSD - тук е само за четене, за да няма
+       два пътя за една стойност. Ръчният ред няма друг източник. */
+    var orderFromDiff = !!r.diff_line_id;
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;">'+
+      '<div><label class="fl">Поръчка</label><input class="fi" id="sr-order" value="'+escVal(r.order_number)+'" placeholder="напр. 4100196440"'+
+        (orderFromDiff?' readonly title="Идва от разликата — редактира се в Разлики" style="background:#f8fafc;color:#64748b;"':'')+'></div>'+
       '<div><label class="fl">НОВА ПВ-ЕВР</label><input class="fi" id="sr-po" value="'+escVal(r.purchase_order)+'" placeholder="напр. 4200014948"></div>'+
       '<div><label class="fl">НОВА ИД-ЕВРО</label><input class="fi" id="sr-ie" value="'+escVal(r.id_euro)+'" placeholder="напр. 80413769"></div>'+
       '<div><label class="fl">Завод</label><input class="fi" id="sr-plant" value="'+(r.plant||'5521')+'" placeholder="5521"></div>'+
@@ -461,6 +471,13 @@ function openSRModal(id) {
     }
   }
     ov.classList.add('open');
+  /* Опциите се строят през DOM (o.value), не с низ - в имената има кавички. */
+  loadAllSuppliers().then(function(list){
+    var dl=document.getElementById('sr-supplier-list');
+    if(!dl)return;
+    dl.innerHTML='';
+    list.forEach(function(name){ var o=document.createElement('option'); o.value=name; dl.appendChild(o); });
+  });
 }
 function srCompressImage(file,maxDim,quality){
   return new Promise(function(resolve){
@@ -1080,6 +1097,13 @@ function submitSR() {
     data.plant = plantEl?(plantEl.value||'5521'):'5521';
     data.doc_date = docdateEl?(docdateEl.value||null):null;
     data.controller_comment = ctrlEl?ctrlEl.value:'';
+    /* Само за ръчен ред. При ред от разлика не се праща изобщо - там номерът
+       го пише submitSD. Решава записът (diff_line_id), не атрибутът readonly:
+       той е за човека, а не защита. */
+    var orderEl=document.getElementById('sr-order');
+    if(orderEl && !(origRecord && origRecord.diff_line_id)){
+      data.order_number = (orderEl.value||'').trim()||null;
+    }
   }
   var p = srEditId
     ? sbPatch('stock_returns','id=eq.'+srEditId,data)

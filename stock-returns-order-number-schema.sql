@@ -50,9 +50,16 @@ update stock_returns sr set order_number = d.order_number
 -- нея и номерът на поръчката няма да има бекъп.
 
 -- ─── ROLLBACK ────────────────────────────────────────────────────────────
--- Обратима БЕЗ загуба на данни, които ги няма другаде: order_number е
--- препис от stock_differences.order_number и се възстановява със същия
--- update по-горе. Клиентът чете r.order_number като falsy, ако колоната
--- липсва - колоната "Поръчка" просто излиза празна.
+-- ⚠️ От 13.09.2026 ВЕЧЕ НЕ Е БЕЗ ЗАГУБА. Модалът в „За връщане" позволява
+-- номер на поръчка на РЪЧЕН ред (без diff_line_id) - такъв номер съществува
+-- само тук и drop column го изтрива. Към 13.09.2026 в „По разлики" има 120
+-- ръчни реда с номер. Преди rollback: изнеси ги
+--   select id, order_number from stock_returns
+--     where diff_line_id is null and order_number is not null;
+-- Номерата на редовете ОТ разлика са препис от stock_differences.order_number
+-- и се възстановяват със update-а по-горе. Коментарът на колоната в базата
+-- („попълва се автоматично при source=diff") описва само тях.
+-- Клиентът чете r.order_number като falsy, ако колоната липсва - колоната
+-- "Поръчка" просто излиза празна.
 --
 --   alter table stock_returns drop column if exists order_number;

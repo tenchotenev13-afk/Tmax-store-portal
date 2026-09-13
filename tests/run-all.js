@@ -31,6 +31,7 @@ const TESTS = [
   'diff-submit-validation.test.js',
   'diff-report-no-document.test.js',
   'diff-qty-guard.test.js',
+  'stock-returns-manual-order.test.js',
   'interstore-counterpart-select.test.js',
   'interstore-confirm-flow.test.js',
   'interstore-swap-signal.test.js',
