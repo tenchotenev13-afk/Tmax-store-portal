@@ -13,13 +13,16 @@
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
 const { boot, ok, section, report, guard, ticks } = H;
 
-/* Датите се смятат от СЪЩАТА база като today() в shared.js — UTC срезът на
-   днешния ден — а не от локалния календар. Помощникът за дати в harness-а е
-   локален и се разминава с today() с един ден, когато тестът тръгне след
-   полунощ местно време (България е UTC+2/+3). Точно граничният случай
-   „7 срещу 8 дни" пада именно на това разминаване. */
+/* Датите се смятат от СЪЩАТА база като today() в shared.js — местният ден
+   (localDateISO). Разликата се смята през UTC полунощ на тази дата, точно
+   както palletsStaleness(): new Date('YYYY-MM-DD') е UTC полунощ, тоест
+   аритметиката е в цели дни, без лятно/зимно време. Граничният случай „7
+   срещу 8 дни" пада на всяко разминаване в базата. (До 13.09.2026 today()
+   беше UTC и базата тук беше UTC срезът.) */
 function daysAgo(n) {
-  const x = new Date(new Date().toISOString().slice(0, 10) + 'T00:00:00Z');
+  const t = new Date();
+  const base = t.getFullYear() + '-' + String(t.getMonth() + 1).padStart(2, '0') + '-' + String(t.getDate()).padStart(2, '0');
+  const x = new Date(base + 'T00:00:00Z');
   x.setUTCDate(x.getUTCDate() - n);
   return x.toISOString().slice(0, 10);
 }

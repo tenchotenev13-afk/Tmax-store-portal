@@ -49,9 +49,10 @@ var oborotTaskWarn=false;  /* оборотът е записан, но отмя�
 /* toLocalISO() живее в bulletin.js:466 и НЕ се предефинира тук.
    Вика се по време на действие, не при зареждане на файла, така че
    редът на скриптовете не е проблем.
-   today() от shared.js нарочно не се ползва — той е
-   toISOString().slice(0,10) и в ранните часове по българско време
-   (UTC+2/+3) дава вчерашна дата. Виж „Дати и часови зони" в PATTERNS.md. */
+   dtToday() е писан, когато today() от shared.js беше toISOString().slice(0,10)
+   и в ранните часове по българско време (UTC+2/+3) даваше вчерашна дата. От
+   13.09.2026 today() е местна (localDateISO) и dtToday() дава същото — остава.
+   Виж „Дати и часови зони" в PATTERNS.md. */
 function dtToday(){return toLocalISO(new Date());}
 function dtDay(n){var d=new Date();d.setDate(d.getDate()-n);return toLocalISO(d);}
 function dtPad(n){return (n<10?'0':'')+n;}
@@ -603,8 +604,7 @@ function dtCOEntryBlock(byStore){
   var sel=(oborotCOStore&&stores.indexOf(oborotCOStore)>=0)?oborotCOStore:'';
   var existing=sel?(byStore[sel]||null):null;
   /* ISO датите се сравняват като низове — YYYY-MM-DD е лексикографски
-     подредена. Ползва се dtToday(), не today(): в ранните часове по
-     българско време toISOString() дава вчера. */
+     подредена. dtToday() е местна дата; от 13.09.2026 today() дава същото. */
   var future=date>dtToday();
 
   var opts='<option value="">— избери обект —</option>';

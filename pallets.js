@@ -28,7 +28,7 @@ function loadPallets(){
   wrap.innerHTML='<div class="page"><div style="text-align:center;padding:30px;color:#94a3b8;">⏳ Зареждане...</div></div>';
 
   var lookback=new Date();lookback.setDate(lookback.getDate()-90);
-  var lookbackStr=lookback.toISOString().slice(0,10);
+  var lookbackStr=localDateISO(lookback);
 
   if(isGlobal()){
     Promise.all([

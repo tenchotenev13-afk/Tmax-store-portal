@@ -77,10 +77,10 @@ function llActiveWarehouse(){
   return llWarehouse || '';
 }
 function llActor(){ return currentUser ? (currentUser.display_name || currentUser.email) : ''; }
-/* НЕ today() от shared.js: то е new Date().toISOString().slice(0,10), тоест
-   UTC. В ранните часове по българско време (UTC+2/+3) UTC още е вчера и
-   новият товарен лист би тръгвал с вчерашна дата. Същата причина, поради
-   която Бюлетинът ползва toLocalISO (виж bulTodayISO там). */
+/* Местна дата за новия товарен лист. Писано, когато today() от shared.js беше
+   new Date().toISOString().slice(0,10) (UTC) и в ранните часове по българско
+   време (UTC+2/+3) листът тръгваше с вчерашна дата. От 13.09.2026 today() е
+   местна (localDateISO) и дава същото — llTodayISO() остава. */
 function llTodayISO(){ return toLocalISO(new Date()); }
 
 function llKindLabel(it){

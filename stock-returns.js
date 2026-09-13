@@ -316,7 +316,7 @@ function srMarkTaken(id) {
       if (el) el.value = 'taken';
       updateSRPhotoHint(); /* JS value промяна не тригерира onchange - извикваме ръчно */
       var ed = document.getElementById('sr-wdate');
-      if (ed) ed.value = new Date().toISOString().slice(0,10);
+      if (ed) ed.value = localDateISO();
     }
     ov.classList.add('open');
   }

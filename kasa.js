@@ -22,7 +22,7 @@ var kasaSelectedDate = null;
 
 function yesterday(){
   var d=new Date(); d.setDate(d.getDate()-1);
-  return d.toISOString().slice(0,10);
+  return localDateISO(d); /* местна, не UTC — виж localDateISO в shared.js */
 }
 function kasaActiveDate(){ return kasaSelectedDate || yesterday(); }
 function kasaSetDate(d){ kasaSelectedDate=d||null; }
@@ -1136,9 +1136,11 @@ function histSortPriority(r){
 /* Прозорец на История. Кърджали държи 118 записа и расте; магазинът работи
    по вчерашния ден, счетоводството връща в рамките на ден-два, останалото е
    шум, който се прескача всеки път.
-   ЗАЩО локална дата, а НЕ today(): today() от shared.js е UTC и рано сутрин
-   българско време (UTC+2/+3) връща ВЧЕРАШНА дата, тоест прозорецът тихо би
-   се изместил с ден. */
+   Смята се от местна дата, самостоятелно. Писано, когато today() от shared.js
+   беше UTC и рано сутрин българско време (UTC+2/+3) връщаше ВЧЕРАШНА дата,
+   тоест прозорецът тихо би се изместил с ден. От 13.09.2026 today() е местна
+   (localDateISO) и histWindowStart() дава същото като днес минус 7 през нея —
+   остава, за да не се пипа работещ код. */
 var HIST_WINDOW_DAYS = 7;
 function histWindowStart(){
   var d = new Date();

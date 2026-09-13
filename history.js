@@ -26,8 +26,8 @@ function goToStornoHistory(){
   var now=new Date();
   var from=new Date(now); from.setDate(from.getDate()-30);
   var fEl=document.getElementById('h-from'), tEl=document.getElementById('h-to'), typeEl=document.getElementById('h-type');
-  if(fEl) fEl.value=from.toISOString().slice(0,10);
-  if(tEl) tEl.value=now.toISOString().slice(0,10);
+  if(fEl) fEl.value=localDateISO(from);
+  if(tEl) tEl.value=localDateISO(now);
   if(typeEl) typeEl.value='storno';
   runHistorySearch();
 }
@@ -98,8 +98,11 @@ function renderHistoryShell(){
   var wrap=document.getElementById('mod-history');if(!wrap)return;
   /* Default period: current month */
   var now=new Date();
-  var firstDay=new Date(now.getFullYear(),now.getMonth(),1).toISOString().slice(0,10);
-  var lastDay =new Date(now.getFullYear(),now.getMonth()+1,0).toISOString().slice(0,10);
+  /* localDateISO, НЕ toISOString(): new Date(г,м,д) е МЕСТНА полунощ, а в UTC
+     това е предният ден — периодът излизаше 31.08–29.09 вместо 01.09–30.09,
+     и то по цял ден, не само нощем. */
+  var firstDay=localDateISO(new Date(now.getFullYear(),now.getMonth(),1));
+  var lastDay =localDateISO(new Date(now.getFullYear(),now.getMonth()+1,0));
 
   wrap.innerHTML='<div class="page">'+
     '<div class="pg-title">📊 История & Търсене</div>'+

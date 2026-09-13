@@ -385,7 +385,19 @@ function esc(s){return s?String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').re
 function escAttr(s){return esc(s).replace(/"/g,'&quot;');}
 /* За value="" на input/textarea полета - празно поле трябва да е ИСТИНСКИ празно, не тире (esc() връща тире за показване на данни, тук е грешно) */
 function escVal(s){return s?esc(s):'';}
-function today(){return new Date().toISOString().slice(0,10);}
+/* Местна календарна дата 'YYYY-MM-DD' — без параметър = сега.
+   НЕ toISOString(): той връща UTC, а България е UTC+2/+3, тоест между 00:00 и
+   03:00 местно време (зимно до 02:00) UTC още е вчера. Порталът мисли в местни
+   дни — касови отчети, палети, заявки, ограничения, срокове — затова всички
+   дати „за днес/вчера" минават оттук. Изключение е сравнение с поле, което
+   САМО е UTC срез (email.js срещу reminder_sent_at): там UTC е вярното. */
+function localDateISO(d){
+  d=d||new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+/* До 13.09.2026 беше new Date().toISOString().slice(0,10), тоест UTC — рано
+   сутрин българско време връщаше вчерашна дата. Заковано в tests/local-date.test.js. */
+function today(){return localDateISO();}
 function fmtDate(d){if(!d||d==='—')return'—';var p=String(d).split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:d;}
 function v(id){var el=document.getElementById(id);return el?(el.value||'').trim():'';}
 function closeModal(id){var el=document.getElementById(id);if(el)el.classList.remove('open');}

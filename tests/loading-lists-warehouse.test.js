@@ -345,18 +345,20 @@ function itemPosts(calls) {
   section('ж) Датата по подразбиране е ЛОКАЛНА, не UTC');
   {
     const h = env(WAREHOUSE);
-    /* 04.09.2026 22:30 UTC = 05.09.2026 01:30 в София. today() (UTC) казва
-       04-и, локалната дата — 05-и. Точно в този прозорец новият лист тръгваше
-       с вчерашна дата. */
+    /* 04.09.2026 22:30 UTC = 05.09.2026 01:30 в София. UTC срезът казва 04-и,
+       локалната дата — 05-и. Точно в този прозорец новият лист тръгваше с
+       вчерашна дата. До 13.09.2026 и today() беше UTC; вече е местна и трябва
+       да дава същото като llTodayISO(). */
     const RealDate = h.w.Date;
     const FIXED = new RealDate('2026-09-04T22:30:00.000Z').getTime();
     h.w.Date = class extends RealDate {
       constructor(...a) { if (a.length === 0) super(FIXED); else super(...a); }
       static now() { return FIXED; }
     };
-    ok('UTC датата наистина е предният ден', h.w.today() === '2026-09-04', h.w.today());
+    const utcCut = new h.w.Date().toISOString().slice(0, 10);
+    ok('UTC срезът наистина е предният ден — прозорецът е реален', utcCut === '2026-09-04', utcCut);
     ok('llTodayISO() дава локалния ден', h.w.llTodayISO() === '2026-09-05', h.w.llTodayISO());
-    ok('и двете НЕ съвпадат — прозорецът е реален', h.w.today() !== h.w.llTodayISO());
+    ok('today() вече дава същия локален ден', h.w.today() === '2026-09-05', h.w.today());
 
     h.w.llNewList();
     await ticks(); await ticks();

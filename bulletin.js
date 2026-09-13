@@ -885,7 +885,8 @@ function weekDays(wk,yr){
   return [0,1,2,3,4,5,6].map(function(i){var x=new Date(s);x.setDate(s.getDate()+i);return x;});
 }
 function fmtD(d){return d.getDate()+'.'+(d.getMonth()<9?'0':'')+(d.getMonth()+1);}
-/* Локален YYYY-MM-DD без UTC конверсия - toISOString() бута датата с 1 ден назад за UTC+2/+3 (България) */
+/* Локален YYYY-MM-DD без UTC конверсия - toISOString() бута датата с 1 ден назад за UTC+2/+3 (България).
+   От 13.09.2026 дава същото като localDateISO(d) в shared.js (през нея минава и today()); остава. */
 function toLocalISO(d){
   var y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+day;
@@ -898,10 +899,11 @@ function toLocalISO(d){
    Ако в петък може да се отметне понеделник, отметката значи „твърдя, че съм
    го свършил", а не „свърших го тогава" — проверка, която се попълва със
    задна дата, престава да е проверка.
-   Защо НЕ today() от shared.js: то е new Date().toISOString().slice(0,10),
-   тоест UTC. В ранните часове по българско време (UTC+3 лятно) UTC още е вчера
-   и магазинът би губил първите часове от работния ден. Клетките на календара
-   се строят с toLocalISO(), затова и сравнението е с него.
+   Датата е местна. Писано, когато today() от shared.js беше UTC и в ранните
+   часове по българско време (UTC+3 лятно) връщаше вчера — магазинът би губил
+   първите часове от работния ден. От 13.09.2026 today() също е местна
+   (localDateISO) и дава същото; сравнението остава с toLocalISO(), защото
+   клетките на календара се строят с него.
    completion_date === null (стари постоянни задачи) НЕ се заключва — тези
    отмятания персистират завинаги по съществуващия дизайн. */
 function bulTodayISO(){ return toLocalISO(new Date()); }

@@ -301,7 +301,7 @@ function checkTaskReminders(tasks, completions, storeName) {
 /* Понеделник сутрин — напомни за всички задачи */
 function sendWeeklyTasksReminder(tasks, storeName) {
   if (!tasks || !tasks.length) return;
-  var lastKey = 'weekly_reminder_' + new Date().toISOString().slice(0,10);
+  var lastKey = 'weekly_reminder_' + localDateISO();
   if (localStorage.getItem(lastKey)) return;
 
   var title = '📋 ' + tasks.length + ' задачи за седмицата — ' + storeName;

@@ -176,7 +176,7 @@ function showLoginBanner(){
      последните 30 дни, за да не се налага да влизат в История, за да разберат. */
   if(['admin','accounting'].indexOf(currentUser.role)>=0){
     var stFrom=new Date();stFrom.setDate(stFrom.getDate()-30);
-    sbGet('kasa_storno','storno_date=gte.'+stFrom.toISOString().slice(0,10)+'&select=store_name,returned_sum,new_sum').then(function(rows){
+    sbGet('kasa_storno','storno_date=gte.'+localDateISO(stFrom)+'&select=store_name,returned_sum,new_sum').then(function(rows){
       if(!Array.isArray(rows)||!rows.length) return;
       var flagged=rows.filter(function(r){return (parseFloat(r.new_sum)||0)<(parseFloat(r.returned_sum)||0);});
       if(!flagged.length) return;
@@ -232,9 +232,10 @@ function showLoginBanner(){
        на този ден от ТАЗИ седмица (затова отметка от понеделник важи цялата
        седмица, а не само в понеделник);
      - "всеки ден" / без избран ден -> днешната дата (нулира се ежедневно).
-   Датите са ЛОКАЛНИ (toLocalISO от bulletin.js, зареден ПРЕДИ този файл),
-   НЕ today() от shared.js - toISOString() бута датата ден назад в ранните
-   сутрешни часове по българско време (UTC+2/+3).
+   Датите са ЛОКАЛНИ (toLocalISO от bulletin.js, зареден ПРЕДИ този файл).
+   Писано, когато today() от shared.js беше toISOString() и буташе датата ден
+   назад в ранните часове по българско време (UTC+2/+3); от 13.09.2026 today()
+   е местна (localDateISO) и дава същото.
    Седмицата е текущата календарна, не curBul - банерът се показва при login,
    когато Бюлетин табът още може изобщо да не е зареждан.
    Понеделникът се смята директно от локалната дата, а НЕ през

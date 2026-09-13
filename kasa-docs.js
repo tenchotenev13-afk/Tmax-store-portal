@@ -181,7 +181,7 @@ function markReady() {
 
 /* Дневен преглед */
 var dailyOverviewDate = null;
-function dailyActiveDate(){ return dailyOverviewDate || (function(){ var d=new Date(); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })(); }
+function dailyActiveDate(){ return dailyOverviewDate || (function(){ var d=new Date(); d.setDate(d.getDate()-1); return localDateISO(d); })(); }
 
 function loadDailyOverview(dateOverride) {
   if(dateOverride) dailyOverviewDate = dateOverride;
@@ -189,7 +189,8 @@ function loadDailyOverview(dateOverride) {
   if (!wrap) return;
 
   var activeDate = dailyActiveDate();
-  var days = [1,2,3].map(function(i){ var d=new Date(); d.setDate(d.getDate()-i); return d.toISOString().slice(0,10); });
+  /* Местни дни (localDateISO), не UTC — иначе между 00:00 и 03:00 „Вчера" е завчера. */
+  var days = [1,2,3].map(function(i){ var d=new Date(); d.setDate(d.getDate()-i); return localDateISO(d); });
   var labels = ['Вчера','Завчера','По-завчера'];
 
   var pickerHtml = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">'
