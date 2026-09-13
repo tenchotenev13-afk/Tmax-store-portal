@@ -178,13 +178,18 @@ function diffDirEmailOf(dir){ return (DIFF_EMAIL_CASES[dir]||DIFF_EMAIL_CASES.su
                   на 0.8mm. „Реално" е СЪЩАТА дума, която realShort вече
                   ползва за същото поле, не ново съкращение. Ширините не се
                   пипат: 190mm са заковани в
-                  tests/diff-print-supplier-col.test.js. */
+                  tests/diff-print-supplier-col.test.js.
+   „Количество … (бр.)", а не „По вх. доставка": към 13.09.2026 в
+   stock_differences стояха 21 реда с quantity = номер на входяща доставка
+   (1804…/8046…) - подсказката се четеше като „впиши вх. доставка". „(бр.)"
+   казва, че тук се пише БРОЙ. При сторна по грешен прием смисълът остава
+   фактура ↔ заприходено, затова там думите са други. Печатът не се пипа. */
 function diffQtyLabels(dir){
-  if (dir === 'wrong_receipt') return {doc:'По фактура',      docShort:'По фактура',
-                                       real:'Реално заприходено', realShort:'Заприходено',
+  if (dir === 'wrong_receipt') return {doc:'Количество по фактура (бр.)', docShort:'Кол. по фактура',
+                                       real:'Реално заприходено (бр.)',  realShort:'Заприходено',
                                        printDoc:'Фактура',     printReal:'Заприх.'};
-  return {doc:'По вх. доставка', docShort:'По вх. дост.',
-          real:'Реално получено', realShort:'Реално',
+  return {doc:'Количество по документ (бр.)', docShort:'Кол. по док.',
+          real:'Реално получено (бр.)',        realShort:'Реално',
           printDoc:'Кол.',        printReal:'Реално'};
 }
 /* Изпращане на имейл до доставчик - Цветелина Тенева + admin (за тестване/подпомагане) */
@@ -375,7 +380,7 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;font-size:11px;color:#64748b;">'+esc(r.supplier||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.material_code||'')+'</td>'+
         '<td style="padding:7px 10px;max-width:200px;">'+esc(r.material_name||'')+'</td>'+
-        '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+((r.quantity)||'')+'</td>'+
+        '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+sdQtyCell(r.quantity,(r.quantity)||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.order_number||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.confirmed_date)+'</td>'+
         '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
@@ -1823,9 +1828,9 @@ function renderDiffReportsSection(){
              "този ли е артикулът" е за самия артикул. Вижда го само складът. */
           '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdSwapBadge(l)+'</td>'+
           '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
-          '<td style="padding:3px 6px;text-align:right;">'+(l.quantity!=null?l.quantity:'—')+'</td>'+
+          '<td style="padding:3px 6px;text-align:right;">'+sdQtyCell(l.quantity,(l.quantity!=null?l.quantity:'—'))+'</td>'+
           (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
-          '<td style="padding:3px 6px;text-align:right;">'+(l.quantity_received!=null?l.quantity_received:'—')+'</td>'+
+          '<td style="padding:3px 6px;text-align:right;">'+sdQtyCell(l.quantity_received,(l.quantity_received!=null?l.quantity_received:'—'))+'</td>'+
           '<td style="padding:3px 6px;color:#64748b;">'+esc(l.comment||'')+'</td>'+
           /* Снимките по РЕДА - тук магазинът доказва какво е заприходил, без да
              може да пипне количествата. Колоната е отделна от коментара на
@@ -1890,6 +1895,7 @@ function openSDCorrectModal(lineId){
     return;
   }
   var existing = document.getElementById('sdc-ov'); if(existing) existing.remove();
+  var sdcQty = diffQtyLabels(sdLineDirection(l));
   var div = document.createElement('div');
   div.innerHTML = '<div class="bov open" id="sdc-ov"><div class="bmod" style="width:420px;">'+
     '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">✏️ Коригирай подадената разлика</div>'+
@@ -1899,8 +1905,8 @@ function openSDCorrectModal(lineId){
     '<div><label class="fl">Наименование</label><input class="fi" id="sdc-name" value="'+escVal(l.material_name)+'"></div>'+
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
-    '<div><label class="fl">По документ</label><input type="number" step="0.001" class="fi" id="sdc-qty" value="'+(l.quantity!=null?l.quantity:'')+'"></div>'+
-    '<div><label class="fl">Реално получено</label><input type="number" step="0.001" class="fi" id="sdc-qty-real" value="'+(l.quantity_received!=null?l.quantity_received:'')+'"></div>'+
+    '<div><label class="fl">'+sdcQty.doc+'</label><input type="number" step="0.001" class="fi" id="sdc-qty" value="'+(l.quantity!=null?l.quantity:'')+'"></div>'+
+    '<div><label class="fl">'+sdcQty.real+'</label><input type="number" step="0.001" class="fi" id="sdc-qty-real" value="'+(l.quantity_received!=null?l.quantity_received:'')+'"></div>'+
     '</div>'+
     '<label class="fl">Коментар (по избор)</label>'+
     '<input class="fi" id="sdc-comment" value="'+escVal(l.comment)+'" placeholder="напр. Намерена в склада при ревизия">'+
@@ -1929,6 +1935,12 @@ function submitSDCorrection(){
       commentEl=document.getElementById('sdc-comment');
   var name=(nameEl.value||'').trim();
   if(!name){toast('Наименованието не може да е празно','#dc2626');return;}
+  var qtyBad=[qtyEl,qtyRealEl].filter(function(el){ return diffQtyLooksLikeDocNum(el.value); })[0];
+  if(qtyBad){
+    toast('Корекция: '+diffQtyDocNumMsg(qtyBad.value),'#dc2626');
+    qtyBad.focus();
+    return;
+  }
   var data={
     material_code: sapEl.value,
     material_name: name,
@@ -2065,6 +2077,38 @@ function diffFocusRowName(idx){
   var row=rows[idx-1]; if(!row)return;
   var el=row.querySelector('.di-name'); if(el)el.focus();
 }
+/* Количество над 99999 не е бройка, а номер на документ, вписан в грешното
+   поле: вх. доставките са 9 цифри (180486328), документите - 10 (4600179694).
+   Към 13.09.2026 най-голямото истинско количество в базата е 600, а между
+   1000 и 99999 няма нито един ред. parseFloat - PostgREST връща числата като
+   низове, а полетата на формата са низове по природа. */
+var DIFF_QTY_MAX = 99999;
+function diffQtyLooksLikeDocNum(v){
+  if(sdBlankQty(v)) return false;
+  var n=parseFloat(v);
+  return !isNaN(n) && n>DIFF_QTY_MAX;
+}
+function diffQtyDocNumMsg(value){ return 'количеството прилича на номер на документ ('+String(value).trim()+'), напиши брой'; }
+/* Първият ред на формата с такова количество: {row (1-базиран, както на
+   екрана), value, el}. „По стокова на доставчика" НЕ се проверява - то е
+   полето на централния офис. */
+function diffRowQtyLikeDocNum(){
+  var rows=document.querySelectorAll('#diff-items .diff-item-row');
+  for(var i=0;i<rows.length;i++){
+    var els=[rows[i].querySelector('.di-qty'),rows[i].querySelector('.di-qty-real')];
+    for(var j=0;j<els.length;j++){
+      if(els[j]&&diffQtyLooksLikeDocNum(els[j].value)) return {row:i+1,value:els[j].value,el:els[j]};
+    }
+  }
+  return null;
+}
+/* Клетка с количество в изгледа на Цвети. Старите редове в базата НЕ се
+   пипат - вместо 180486328 бройки клетката казва какво вероятно е това, а
+   пълната стойност стои в title. fallback е досегашното съдържание. */
+function sdQtyCell(v,fallback){
+  if(!diffQtyLooksLikeDocNum(v)) return fallback;
+  return '<span title="'+escVal(String(v))+'" style="color:#d97706;font-weight:600;white-space:nowrap;">⚠️ номер на документ?</span>';
+}
 function collectDiffItems(){
   var rows=document.querySelectorAll('#diff-items .diff-item-row');
   var items=[];
@@ -2192,7 +2236,7 @@ function diffSubmitModalHtml(){
     '</div>'+
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
     '<div><label class="fl" id="diff-counterpart-label">Обект изпращач</label><select class="fi" id="diff-counterpart"></select></div>'+
-    '<div><label class="fl">Документ №</label><input class="fi" id="diff-docnum" placeholder="напр. 4600179694"></div>'+
+    '<div><label class="fl">Документ №</label><input class="fi" id="diff-docnum" placeholder="вх. доставка 180486328 или документ 4600179694"></div>'+
     '</div>'+
     /* Отметката "без документ" се рисува тук от updateDiffCounterpartLabel() -
        само при посока доставчик. Празен контейнер значи, че при останалите
@@ -2366,6 +2410,14 @@ function submitDiffReport(){
     return;
   }
   if(!items.length){toast('Добави поне един артикул с наименование','#dc2626');return;}
+  /* Номер на документ в количеството спира подаването ПРЕДИ качването на
+     снимките и POST-а - иначе стига до базата като 180486328 бройки. */
+  var qtyDocNum=diffRowQtyLikeDocNum();
+  if(qtyDocNum){
+    toast('Ред '+qtyDocNum.row+': '+diffQtyDocNumMsg(qtyDocNum.value),'#dc2626');
+    qtyDocNum.el.focus();
+    return;
+  }
 
   /* Реална проверка за задължителни снимки (не само текстова подсказка) -
      ако поне 1 артикул е с категория, изискваща снимки, а няма качена нито 1 */

@@ -401,9 +401,12 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
     ok('и списъкът е с ДОСТАВЧИЦИ, не с обекти',
       cp.innerHTML.indexOf('ТЕСИ ООД') >= 0 && cp.innerHTML.indexOf('Гоце Делчев') < 0,
       cp.innerHTML);
-    ok('количествените полета казват "По фактура" / "Реално заприходено"',
-      doc.querySelector('#diff-items .di-qty').getAttribute('placeholder') === 'По фактура' &&
-      doc.querySelector('#diff-items .di-qty-real').getAttribute('placeholder') === 'Реално заприходено');
+    /* От 13.09.2026 подсказките казват „(бр.)" - иначе полето се чете като
+       място за номер (tests/diff-qty-guard.test.js). Смисълът при сторна
+       остава фактура ↔ заприходено. */
+    ok('количествените полета казват "Количество по фактура (бр.)" / "Реално заприходено (бр.)"',
+      doc.querySelector('#diff-items .di-qty').getAttribute('placeholder') === 'Количество по фактура (бр.)' &&
+      doc.querySelector('#diff-items .di-qty-real').getAttribute('placeholder') === 'Реално заприходено (бр.)');
     ok('полето "По стокова на дост." остава скрито',
       !doc.querySelector('#diff-items .di-qty-supdoc'));
 
