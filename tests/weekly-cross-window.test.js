@@ -429,5 +429,49 @@ function urlFor(calls, table) {
     }
   }
 
+  section('7. Сторно картите: въведени / върнати за коментар / поправени от обекта');
+  {
+    /* Счетоводството не приключва сторна (0 confirmed от август 2026) —
+       червеното „чакат счетоводство" беше фалшива тревога. Картите са три;
+       draft и confirmed остават в данните, но не се показват. */
+    const { w } = env();
+    const mk = function (storno) {
+      return {
+        diffs: { total: 0, reviewed: 0, unreviewed: 0 },
+        wrongReceipt: { total: 0, unreviewed: 0, byStore: [] },
+        returns: { open: 0, completed: 0 },
+        storno: storno,
+        zoborot: { total: 0, draft: 0, returned: 0, confirmed: 0 },
+        transitStale: 0, pallets: { missing: 0, stale: 0, total: 18 },
+        window: { from: '2026-08-17', to: '2026-08-23' }
+      };
+    };
+    /* Редът на сторната — от заглавието му до заглавието на Равнението. */
+    const stornoRow = function (html) {
+      const i = html.indexOf('Каса — Сторно бележки');
+      return i < 0 ? '' : html.slice(i, html.indexOf('Каса — Равнение', i));
+    };
+
+    const html = w.buildCrossModuleSectionHtml(mk({ total: 12, draft: 9, returned: 2, resubmitted: 1, confirmed: 0 }));
+    const row = stornoRow(html);
+    const labels = (row.match(/<div style="font-size:10px;[^"]*">([^<]*)<\/div><\/div>/g) || [])
+      .map(s => s.replace(/<[^>]+>/g, ''));
+    ok('точно три карти', (row.match(/font-size:18px/g) || []).length === 3, row.slice(0, 400));
+    ok('с етикети „въведени", „върнати за коментар", „поправени от обекта" — в този ред',
+      labels.join('|') === 'въведени|върнати за коментар|поправени от обекта', labels.join('|'));
+    ok('няма карта без етикет (празна четвърта клетка)', labels.length === 3 && labels.every(l => l.trim()));
+    ok('„чакат счетоводство" отсъства от целия HTML', html.indexOf('чакат счетоводство') < 0);
+    ok('„приключени" отсъства от реда на сторната', row.indexOf('приключени') < 0);
+    ok('„въведени" = total, без оцветяване', /color:#1E2761;">12<\/div><div[^>]*>въведени<\/div>/.test(row));
+    ok('„върнати за коментар" = returned, червено при > 0',
+      /background:#FDEEEA;[^"]*"><div style="[^"]*color:#C0392B;">2<\/div><div[^>]*>върнати за коментар<\/div>/.test(row));
+    ok('„поправени от обекта" = resubmitted, без оцветяване',
+      /background:#F9FAFC;[^"]*"><div style="[^"]*color:#1E2761;">1<\/div><div[^>]*>поправени от обекта<\/div>/.test(row));
+    ok('draft (9) не се показва като число в реда', row.indexOf('>9<') < 0);
+
+    const calm = stornoRow(w.buildCrossModuleSectionHtml(mk({ total: 5, draft: 5, returned: 0, resubmitted: 0, confirmed: 0 })));
+    ok('returned = 0 → без червено в реда', calm.indexOf('#C0392B') < 0 && calm.indexOf('#FDEEEA') < 0, calm.slice(0, 300));
+  }
+
   report();
 })();

@@ -1064,7 +1064,8 @@ function reportKasaSectionHtml(kasa){
         '</div>';
     }).join('');
     out += '<div style="margin-top:10px;">' +
-      '<div style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;margin-bottom:6px;">Непоправени от по-рано</div>' +
+      '<div style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;margin-bottom:2px;">Непоправени от по-рано</div>' +
+      '<div style="font-size:11px;color:#94a3b8;margin-bottom:6px;">Касови отчети, върнати от счетоводството за корекция и още неподадени отново от обекта</div>' +
       '<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;">'+rows3+'</div>' +
       '</div>';
   }
@@ -2279,11 +2280,13 @@ function buildCrossModuleSectionHtml(cross, scoped){
   h += reportLateSectionHtml(cross, scoped);
   h += reportWarehousePendingHtml(cross, scoped);
 
+  /* Счетоводството не приключва сторна (0 confirmed от август 2026), тоест
+     червеното „чакат счетоводство" беше вечна фалшива тревога. draft и
+     confirmed остават в stornoSummary — само не се показват. */
   h += crossModuleRow('💳','Каса — Сторно бележки (нови за периода)',
-    crossMetricCard(cross.storno.total,'общо нови') +
-    crossMetricCard(cross.storno.draft,'чакат счетоводство', cross.storno.draft>0) +
+    crossMetricCard(cross.storno.total,'въведени') +
     crossMetricCard(cross.storno.returned,'върнати за коментар', cross.storno.returned>0) +
-    crossMetricCard(cross.storno.confirmed,'приключени'));
+    crossMetricCard(cross.storno.resubmitted,'поправени от обекта'));
   h += reportSmallStornoHtml(cross);
   h += reportChecklistSectionHtml(cross);
 

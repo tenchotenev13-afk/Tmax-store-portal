@@ -212,6 +212,19 @@ const names = function (arr) { return (arr || []).map(function (x) { return x.st
        backlogAndOver.indexOf('🧾 Каса') < backlogAndOver.indexOf('Непоправени от по-рано'));
     ok('при върнати през деня няма второ заглавие — остава „🧾 Върнати от счетоводството"',
        html.indexOf('🧾 Каса') < 0 && html.indexOf('🧾 Върнати от счетоводството') >= 0);
+
+    /* Сивият подред под „Непоправени от по-рано" — какво всъщност са тези
+       редове. Само когато блокът се показва. */
+    const SUB = 'Касови отчети, върнати от счетоводството за корекция и още неподадени отново от обекта';
+    ok('подредът присъства при дълг (с върнати през деня)', html.indexOf(SUB) >= 0);
+    ok('подредът присъства при дълг (само дълг)', onlyBacklog.indexOf(SUB) >= 0);
+    ok('и е веднага след заглавието „Непоправени от по-рано", в сив 11px',
+       new RegExp('>Непоправени от по-рано</div><div style="font-size:11px;color:#94a3b8;[^"]*">' + SUB + '</div>').test(onlyBacklog));
+    const noBacklog = h.w.reportKasaSectionHtml({ threshold: 10, returnedBacklog: [],
+      returned: [{ store: 'Силистра', type: 'ПОС № 1', date: DAY.m1, razlika: 3, return_reason: '', days: 0 }],
+      overThreshold: [{ store: 'Габрово', type: 'ПОС № 1', razlika: 25 }] });
+    ok('без дълг подредът липсва', noBacklog.length > 0 && noBacklog.indexOf(SUB) < 0 &&
+       noBacklog.indexOf('Непоправени от по-рано') < 0);
     h.close();
   }
 
