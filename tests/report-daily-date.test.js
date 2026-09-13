@@ -50,39 +50,39 @@ function weekly(over) {
 
 (async function () {
 
-  section('1. ЯДРОТО: reportDailyTargetDate връща предходния ден');
+  section('1. ЯДРОТО: reportDailyTargetDate връща самия ден (кронът е 21:00)');
   {
     const { w } = env();
     const iso = function (d) { return w.toLocalISO(d); };
 
-    ok('обикновен ден: 24.08 → 23.08',
-      iso(w.reportDailyTargetDate(new Date(2026, 7, 24))) === '2026-08-23',
+    ok('обикновен ден: 24.08 → 24.08',
+      iso(w.reportDailyTargetDate(new Date(2026, 7, 24))) === '2026-08-24',
       iso(w.reportDailyTargetDate(new Date(2026, 7, 24))));
 
-    /* Границата на месеца — първият ден сочи към последния на предходния. */
-    ok('1-ви на месеца: 01.09 → 31.08',
-      iso(w.reportDailyTargetDate(new Date(2026, 8, 1))) === '2026-08-31',
+    /* Границата на месеца — първият ден остава в своя месец. */
+    ok('1-ви на месеца: 01.09 → 01.09',
+      iso(w.reportDailyTargetDate(new Date(2026, 8, 1))) === '2026-09-01',
       iso(w.reportDailyTargetDate(new Date(2026, 8, 1))));
 
-    ok('след къс месец: 01.03.2026 → 28.02.2026',
-      iso(w.reportDailyTargetDate(new Date(2026, 2, 1))) === '2026-02-28',
+    ok('след къс месец: 01.03.2026 → 01.03.2026',
+      iso(w.reportDailyTargetDate(new Date(2026, 2, 1))) === '2026-03-01',
       iso(w.reportDailyTargetDate(new Date(2026, 2, 1))));
 
-    /* 2028 е високосна: 01.03 сочи към 29.02, не към 28.02. */
-    ok('високосна: 01.03.2028 → 29.02.2028',
-      iso(w.reportDailyTargetDate(new Date(2028, 2, 1))) === '2028-02-29',
-      iso(w.reportDailyTargetDate(new Date(2028, 2, 1))));
+    /* 2028 е високосна: 29.02 си остава 29.02. */
+    ok('високосна: 29.02.2028 → 29.02.2028',
+      iso(w.reportDailyTargetDate(new Date(2028, 1, 29))) === '2028-02-29',
+      iso(w.reportDailyTargetDate(new Date(2028, 1, 29))));
 
-    ok('границата на годината: 01.01.2027 → 31.12.2026',
-      iso(w.reportDailyTargetDate(new Date(2027, 0, 1))) === '2026-12-31',
-      iso(w.reportDailyTargetDate(new Date(2027, 0, 1))));
+    ok('границата на годината: 31.12.2026 → 31.12.2026',
+      iso(w.reportDailyTargetDate(new Date(2026, 11, 31))) === '2026-12-31',
+      iso(w.reportDailyTargetDate(new Date(2026, 11, 31))));
 
-    /* Часът в подадения момент не бива да влияе — кронът бие в 08:00, но
+    /* Часът в подадения момент не бива да влияе — кронът бие в 21:00, но
        ръчното пускане от портала може да е по всяко време на деня. */
     const early = iso(w.reportDailyTargetDate(new Date(2026, 7, 24, 0, 5)));
     const late = iso(w.reportDailyTargetDate(new Date(2026, 7, 24, 23, 55)));
     ok('часът не влияе: 00:05 и 23:55 дават същия ден',
-      early === late && early === '2026-08-23', early + ' / ' + late);
+      early === late && early === '2026-08-24', early + ' / ' + late);
   }
 
   section('2. reportWeekdayIdx: 0=Пон … 6=Нед');
@@ -189,37 +189,39 @@ function weekly(over) {
       noBul.indexOf('Обобщение за седмицата') >= 0);
   }
 
-  section('7. ЯДРОТО: самият колектор гледа ВЧЕРАШНИЯ прозорец');
+  section('7. ЯДРОТО: самият колектор гледа прозореца на ОТЧЕТНИЯ (днешния) ден');
   {
     /* Дотук се тестваха помощниците и буилдърите. Те минаваха и когато
        вътре в collectDailyReportData стоеше втора, засенчваща променлива
-       със стойност ДНЕС — прозорецът си оставаше днешният, мълчаливо.
-       Затова тук колекторът се пуска наистина, със засети данни. */
+       с друга стойност — прозорецът си оставаше чуждият, мълчаливо.
+       Затова тук колекторът се пуска наистина, със засети данни.
+       Отчетният ден вече е ДНЕС (кронът е 21:00); смущението е ВЧЕРА —
+       точно прозорецът на стария сутрешен отчет. */
     const probe = env();
-    const yDate = probe.w.reportDailyTargetDate(new Date());
-    const yISO = probe.w.toLocalISO(yDate);
-    const tISO = probe.w.toLocalISO(new Date());
-    const yIdx = probe.w.reportWeekdayIdx(yDate);
-    const tIdx = probe.w.reportWeekdayIdx(new Date());
+    const dDate = probe.w.reportDailyTargetDate(new Date());
+    const dISO = probe.w.toLocalISO(dDate);
+    const oDate = new Date(dDate.getFullYear(), dDate.getMonth(), dDate.getDate() - 1);
+    const oISO = probe.w.toLocalISO(oDate);
+    const dIdx = probe.w.reportWeekdayIdx(dDate);
+    const oIdx = probe.w.reportWeekdayIdx(oDate);
 
     const h = env({
       users: [{ store_name: 'Враца' }, { store_name: 'Троян' }],
       bulletins: [{ id: 'b-1', week_number: 34, year: 2026, status: 'published' }],
       recurring_tasks: [
-        { id: 'r-y', active: true, due_weekdays: [yIdx], title: 'Вчерашна постоянна' },
-        { id: 'r-t', active: true, due_weekdays: [tIdx], title: 'Днешна постоянна' }
+        { id: 'r-d', active: true, due_weekdays: [dIdx], title: 'Днешна постоянна' },
+        { id: 'r-o', active: true, due_weekdays: [oIdx], title: 'Вчерашна постоянна' }
       ],
       bulletin_tasks: [
-        { id: 'b-y', bulletin_id: 'b-1', title: 'Вчерашна от бюлетина', due_date: yISO },
-        { id: 'b-t', bulletin_id: 'b-1', title: 'Днешна от бюлетина', due_date: tISO }
+        { id: 'b-d', bulletin_id: 'b-1', title: 'Днешна от бюлетина', due_date: dISO },
+        { id: 'b-o', bulletin_id: 'b-1', title: 'Вчерашна от бюлетина', due_date: oISO }
       ],
       task_completions: [
-        /* Враца е свършила и двете вчерашни — трябва да излезе на 100%. */
-        { recurring_task_id: 'r-y', store_name: 'Враца', status: 'done', completion_date: yISO },
-        { task_id: 'b-y', store_name: 'Враца', status: 'done', completion_date: yISO },
-        /* Троян е отметнал СЪЩАТА задача, но ДНЕС — извън отчетния ден.
-           Точно това броене правеше сутрешния отчет безсмислен. */
-        { recurring_task_id: 'r-y', store_name: 'Троян', status: 'done', completion_date: tISO }
+        /* Враца е свършила и двете днешни — трябва да излезе на 100%. */
+        { recurring_task_id: 'r-d', store_name: 'Враца', status: 'done', completion_date: dISO },
+        { task_id: 'b-d', store_name: 'Враца', status: 'done', completion_date: dISO },
+        /* Троян е отметнал СЪЩАТА задача, но ВЧЕРА — извън отчетния ден. */
+        { recurring_task_id: 'r-d', store_name: 'Троян', status: 'done', completion_date: oISO }
       ]
     });
 
@@ -228,27 +230,27 @@ function weekly(over) {
     await ticks();
 
     if (ok('колекторът връща обобщение', !!daily)) {
-      ok('reportDate е вчерашният ден', daily.reportDate === yISO,
-        daily.reportDate + ' вместо ' + yISO);
+      ok('reportDate е днешният ден', daily.reportDate === dISO,
+        daily.reportDate + ' вместо ' + dISO);
 
-      /* 2 вчерашни задачи × 2 обекта = 4. Влезеха ли и днешните, ще е 8. */
-      ok('знаменателят брои само вчерашните задачи', daily.totalAll === 4,
-        'totalAll=' + daily.totalAll + ' (днешните не бива да влизат)');
-      ok('числителят брои само отмятанията от вчера', daily.totalDone === 2,
+      /* 2 днешни задачи × 2 обекта = 4. Влезеха ли и вчерашните, ще е 8. */
+      ok('знаменателят брои само днешните задачи', daily.totalAll === 4,
+        'totalAll=' + daily.totalAll + ' (вчерашните не бива да влизат)');
+      ok('числителят брои само отмятанията от днес', daily.totalDone === 2,
         'totalDone=' + daily.totalDone);
 
       const vraca = daily.rows.filter(r => r.name === 'Враца')[0];
       const troyan = daily.rows.filter(r => r.name === 'Троян')[0];
       ok('Враца е на 100%', vraca && vraca.pct === 100,
         vraca ? String(vraca.pct) : 'липсва ред');
-      ok('Троян е на 0% — днешното му отмятане не се брои за вчера',
+      ok('Троян е на 0% — вчерашното му отмятане не се брои за днес',
         troyan && troyan.pct === 0, troyan ? String(troyan.pct) : 'липсва ред');
 
-      /* И шапката, пресметната от същите данни, носи вчерашната дата. */
+      /* И шапката, пресметната от същите данни, носи датата на отчетния ден. */
       const html = h.w.buildDailyReportHtml(daily);
-      const wanted = new Date(yISO + 'T00:00:00').toLocaleDateString('bg-BG',
+      const wanted = new Date(dISO + 'T00:00:00').toLocaleDateString('bg-BG',
         { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-      ok('шапката носи вчерашната дата', html.indexOf(wanted) >= 0, wanted);
+      ok('шапката носи датата на отчетния ден', html.indexOf(wanted) >= 0, wanted);
     }
   }
 

@@ -202,7 +202,7 @@ function item(o) {
        completion_date тя не влиза в нито една заявка на този отчет — идва
        само от заявката по postponed_to, а заглавието ѝ се дотегля по id. */
     const probe = env();
-    const target = probe.w.reportWeekOfMonday(probe.w.reportPrevWeekMonday(new Date()));
+    const target = probe.w.reportWeekOfMonday(probe.w.reportTargetWeekMonday(new Date()));
     const days = probe.w.weekDays(target.week, target.year).map(probe.w.toLocalISO);
     probe.close();
     const prevThu = shiftISO(days[0], -4);

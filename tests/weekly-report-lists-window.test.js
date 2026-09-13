@@ -158,7 +158,7 @@ function comp(o) {
     /* Целевата седмица зависи от ДНЕШНАТА дата, затова се смята от същите
        помощни функции, а не се зашива — иначе тестът изгнива идната седмица. */
     const probe = env();
-    const target = probe.w.reportWeekOfMonday(probe.w.reportPrevWeekMonday(new Date()));
+    const target = probe.w.reportWeekOfMonday(probe.w.reportTargetWeekMonday(new Date()));
     const days = probe.w.weekDays(target.week, target.year).map(probe.w.toLocalISO);
 
     const h = env({
@@ -196,7 +196,7 @@ function comp(o) {
     /* Само бъдещ бюлетин → reportPickWeeklyBulletin връща null. Тогава няма
        седмица, значи няма и прозорец — но нищо не бива да хвърли. */
     const probe = env();
-    const target = probe.w.reportWeekOfMonday(probe.w.reportPrevWeekMonday(new Date()));
+    const target = probe.w.reportWeekOfMonday(probe.w.reportTargetWeekMonday(new Date()));
     const h = env({
       bulletins: [{ id: 'b-future', week_number: target.week + 2, year: target.year, status: 'published' }],
       recurring_tasks: [{ id: 'r-1', active: true, due_weekday: 1, title: 'Каса' }],

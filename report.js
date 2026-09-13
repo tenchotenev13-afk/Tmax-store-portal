@@ -20,22 +20,19 @@ var PORTAL_URL = 'https://tenchotenev13-afk.github.io/Tmax-store-portal/';
 
 /* ═══════ ДНЕВЕН РЕПОРТ ═══════════════════════════════════ */
 
-/* Денят, който дневният отчет ОПИСВА - приключилият вчерашен, не текущият.
-   Кронът "daily-report-8am" пуска функцията в 05:00 UTC = 08:00 българско.
-   В 8 сутринта задачите за ТЕКУЩИЯ ден още не са отметнати, тоест писмото
-   излизаше с почти нули и с днешната дата в шапката - тревога без покритие.
+/* Денят, който дневният отчет ОПИСВА - самият ден на now (полунощ локално).
+   От 13.09.2026 кронът пуска отчета в 21:00 българско, когато денят вече е
+   приключил; дотогава беше 08:00 и тук стоеше -1 (вчерашният ден).
    Един ден за ВСИЧКО: дължими задачи, прозорец на отмятанията, ключ на
    snapshot-а и датата в шапката. Разминат ли се, писмото пак ще лъже, само
    по-тихо.
    now се подава като аргумент, за да е тестваемо без пипане на часовника. */
 function reportDailyTargetDate(now){
-  var d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  d.setDate(d.getDate() - 1);
-  return d;
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate());
 }
 /* JS getDay() (0=Нед) -> индекса на портала (0=Пон..6=Нед). Същото
    преобразуване като в recurringIsDueToday(), но за ПРОИЗВОЛНА дата -
-   дневният отчет пита за вчерашния делник, не за днешния. */
+   дневният отчет пита за делника на отчетния ден. */
 function reportWeekdayIdx(d){
   var js = d.getDay();
   return js === 0 ? 6 : js - 1;
@@ -253,7 +250,9 @@ function collectDailyReportData(cb, scope, kasaThreshold){
           finish();
           return;
         }
-        var prevISO = toLocalISO(reportDailyTargetDate(reportDay));
+        /* Тенденцията сравнява с ВЧЕРАШНИЯ snapshot - изрично -1, защото
+           reportDailyTargetDate(reportDay) вече връща същия ден. */
+        var prevISO = toLocalISO(new Date(reportDay.getFullYear(), reportDay.getMonth(), reportDay.getDate() - 1));
         reportSaveSnapshot('daily', dayISO, summary.overallPct, summary.totalDone, summary.totalAll);
         reportFetchSnapshot('daily', prevISO, function(snap){
           summary.trendYesterday = snap;
@@ -703,7 +702,7 @@ function reportNoDueNoticeHtml(n, weekly){
 }
 
 /* Какъв период покрива дневният отчет — казано вътре в самия отчет.
-   Дневният излиза в 08:00 и брои САМО задачите със срок вчера; писмото за
+   Дневният излиза в 21:00 и брои САМО задачите със срок за отчетния ден; писмото за
    просрочени в 08:15 гледа целия бюлетин назад. Двете пристигат едно след
    друго и си противоречат наглед: на 28.08.2026 дневният за 27.08 показа
    Севлиево в зеления списък със 100%, а четвърт час по-късно другото писмо
@@ -1119,7 +1118,8 @@ function sendDailyReportTest(toEmail){
    понеделнишки отчет излизаше 9-11% - не защото обектите не работят, а
    защото седмицата тъкмо започва. При пускане в петък същият дефект дава
    чисто 0%.
-   Сега: в понеделник 24.08 отчетът покрива 17-23.08. */
+   От 13.09.2026 отчетът излиза в неделя 21:00 и обобщава ТЕКУЩАТА седмица,
+   която тогава вече е приключила: в неделя 13.09 покрива 07-13.09. */
 
 /* Понеделникът на СОБСТВЕНАТА седмица на подадената дата.
    Дневният отчет пита точно това: „от коя седмица е денят, който описвам" -
@@ -1129,12 +1129,18 @@ function reportMondayOfWeek(d){
   x.setDate(x.getDate() - reportWeekdayIdx(x));
   return x;
 }
-/* Понеделникът на ПРЕДХОДНАТА седмица спрямо подадената дата - седмичният
-   отчет обобщава приключилата, не текущата. */
+/* Понеделникът на ПРЕДХОДНАТА седмица спрямо подадената дата. Ползва я само
+   личният седмичен (collectWeeklyRoutingData) - send-routed-report още
+   излиза в понеделник сутрин и обобщава приключилата седмица. */
 function reportPrevWeekMonday(now){
   var d = reportMondayOfWeek(now);
   d.setDate(d.getDate() - 7);
   return d;
+}
+/* Понеделникът на седмицата, която обобщава общият седмичен отчет - тази, в
+   която е now. Кронът го пуска в неделя 21:00, когато седмицата е приключила. */
+function reportTargetWeekMonday(now){
+  return reportMondayOfWeek(now);
 }
 /* Номерът на седмицата за даден понеделник. Търси се през СЪЩАТА weekDays(),
    която после разгъва бюлетина на дати - иначе двете броения могат да се
@@ -1172,7 +1178,7 @@ function reportPickWeeklyBulletin(list, target){
    приключилата седмица (не само днешните) + всички постоянни задачи, които
    имат ден ИЛИ час зададен (т.е. не са от "без срок" групата). */
 function collectWeeklyReportData(cb, scope){
-  var target = reportWeekOfMonday(reportPrevWeekMonday(new Date()));
+  var target = reportWeekOfMonday(reportTargetWeekMonday(new Date()));
   Promise.all([
     /* Списък, не limit=1 - изборът на правилната седмица става по-долу. */
     sbGet('bulletins','status=eq.published&order=year.desc,week_number.desc&limit=20'),

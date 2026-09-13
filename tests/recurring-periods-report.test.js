@@ -145,7 +145,7 @@ const T = id => 'Постоянна ' + id;
   section('1. Дневен отчет (сряда от седмицата на котвата): спряната след нея ОЩЕ е в набора');
   {
     const WED = isoAt(2);
-    const h = env(3, [done('r-stop', A, WED)]);
+    const h = env(2, [done('r-stop', A, WED)]);
     const d = await collect(h, 'collectDailyReportData');
     if (ok('отчетът се събира', !!d)) {
       ok('отчетният ден е сряда', d.reportDate === WED, d.reportDate);
@@ -166,7 +166,7 @@ const T = id => 'Постоянна ' + id;
   /* ═══ 2. Дневен отчет за ден от СЛЕДВАЩАТА седмица ════════════════════ */
   section('2. Дневен отчет (понеделник от следващата седмица): огледалният набор');
   {
-    const h = env(8, []);
+    const h = env(7, []);
     const d = await collect(h, 'collectDailyReportData');
     if (ok('отчетът се събира', !!d)) {
       ok('отчетният ден е следващият понеделник', d.reportDate === isoAt(7), d.reportDate);
@@ -179,9 +179,9 @@ const T = id => 'Постоянна ' + id;
   }
 
   /* ═══ 3. Седмичен отчет ═══════════════════════════════════════════════ */
-  section('3. Седмичен отчет (седмицата на котвата, гледан в следващия понеделник)');
+  section('3. Седмичен отчет (седмицата на котвата, гледан в неделята ѝ)');
   {
-    const h = env(7, [done('r-stop', A, isoAt(1)), done('r-live', B, isoAt(1))]);
+    const h = env(6, [done('r-stop', A, isoAt(1)), done('r-live', B, isoAt(1))]);
     const d = await collect(h, 'collectWeeklyReportData');
     if (ok('отчетът се събира', !!d)) {
       ok('заявката е БЕЗ active=eq.true', h.calls.get.filter(u => u.indexOf('/recurring_tasks') >= 0).every(u => u.indexOf('active=eq.true') < 0));

@@ -277,11 +277,11 @@ const compUrl = h => h.calls.get.filter(u =>
   /* ═══ 4. „Днес" и дневният отчет казват едно и също ══════════════════ */
   section('4. Таблото и collectDailyReportData дават еднакъв резултат');
   {
-    /* Дневният отчет описва ВЧЕРА, затова часовникът е в четвъртък, а
-       наборът и на двете пада върху сряда — деня на срока. */
+    /* Дневният отчет описва ДНЕС (кронът е 21:00), затова часовникът е в
+       сряда и за двете, а наборът пада върху сряда — деня на срока. */
     const comps = [comp('Троян', MON), comp('Ловеч', TUE)];
 
-    const hR = env({ at: 3, comps: comps });
+    const hR = env({ at: 2, comps: comps });
     const d = await new Promise(res => { hR.w.collectDailyReportData(res); });
 
     const hT = env({ at: 2, comps: comps });

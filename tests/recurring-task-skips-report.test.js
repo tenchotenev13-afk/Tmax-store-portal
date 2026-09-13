@@ -185,7 +185,7 @@ const pick = r => r ? { done: r.done, total: r.total, pct: r.pct, cells: r.cells
   section('2. Дневен отчет (отчетен ден = сряда от седмицата на котвата)');
   {
     const WED = isoAt(2);
-    const h = env(3, [done('r-b', A, WED), done('r-b', B, WED)]);
+    const h = env(2, [done('r-b', A, WED), done('r-b', B, WED)]);
     const d = await collect(h, 'collectDailyReportData');
     if (ok('отчетът се събира', !!d)) {
       ok('отчетният ден е сряда', d.reportDate === WED, d.reportDate);
@@ -204,7 +204,7 @@ const pick = r => r ? { done: r.done, total: r.total, pct: r.pct, cells: r.cells
 
   section('2б. Дневен отчет за понеделника на СЛЕДВАЩАТА седмица — нейните изключвания');
   {
-    const h = env(8, []);    /* днес = следващият вторник → отчет за следващия понеделник */
+    const h = env(7, []);    /* днес = следващият понеделник → отчет за него */
     const d = await collect(h, 'collectDailyReportData');
     if (ok('отчетът се събира', !!d)) {
       ok('отчетният ден е следващият понеделник', d.reportDate === isoAt(7), d.reportDate);
@@ -218,9 +218,9 @@ const pick = r => r ? { done: r.done, total: r.total, pct: r.pct, cells: r.cells
   }
 
   /* ═══ 3. Седмичен отчет ═══════════════════════════════════════════════ */
-  section('3. Седмичен отчет (седмицата на котвата, гледана в следващия понеделник)');
+  section('3. Седмичен отчет (седмицата на котвата, гледана в неделята ѝ)');
   {
-    const h = env(7, [done('r-b', A, isoAt(1)), done('r-b', B, isoAt(1))]);
+    const h = env(6, [done('r-b', A, isoAt(1)), done('r-b', B, isoAt(1))]);
     const d = await collect(h, 'collectWeeklyReportData');
     if (ok('отчетът се събира', !!d)) {
       const q = skipGets(h);
@@ -246,14 +246,14 @@ const pick = r => r ? { done: r.done, total: r.total, pct: r.pct, cells: r.cells
       h.setData('recurring_tasks', [rec('r-a'), rec('r-b'), rec('r-c'),
         rec('r-n1', { due_time: null }), rec('r-n2', { due_time: null })]);
     };
-    const hw = env(7, []);
+    const hw = env(6, []);
     addNoDue(hw);
     hw.setData('recurring_task_skips', skipsRoute({ rows: [
       { id: 'n1', recurring_task_id: 'r-n1', year: hw.k.year, week_number: hw.k.week, store_name: null }
     ] }));
     const dw = await collect(hw, 'collectWeeklyReportData');
     ok('седмичен: noDueCount = 1 (r-n2), не 2', !!dw && dw.noDueCount === 1, dw && String(dw.noDueCount));
-    const hd = env(3, []);
+    const hd = env(2, []);
     addNoDue(hd);
     hd.setData('recurring_task_skips', skipsRoute({ rows: [
       { id: 'n1', recurring_task_id: 'r-n1', year: hd.k.year, week_number: hd.k.week, store_name: null }
@@ -264,7 +264,7 @@ const pick = r => r ? { done: r.done, total: r.total, pct: r.pct, cells: r.cells
 
   section('3б. Седмичен отчет: провал на заявката → отчетът тръгва без изключвания');
   {
-    const h = env(7, []);
+    const h = env(6, []);
     h.setData('recurring_task_skips', () => ({ message: 'relation does not exist' })); /* не масив — както върне PostgREST грешка */
     const d = await collect(h, 'collectWeeklyReportData');
     ok('отчетът се събира', !!d);

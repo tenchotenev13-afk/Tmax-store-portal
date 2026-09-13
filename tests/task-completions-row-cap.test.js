@@ -235,14 +235,14 @@ const compUrls = h => h.calls.get.filter(u => u.indexOf('/task_completions') >= 
     ok('наборът наистина прелива над хилядата', rows.length > CAP, rows.length + ' реда');
 
     /* КОНТРОЛА: същият набор, но заявката „сляпа" за датата = старият код. */
-    const hOld = env({ at: 2, comps: rows, pg: { ignoreDates: true } });
+    const hOld = env({ at: 1, comps: rows, pg: { ignoreDates: true } });
     const dOld = await daily(hOld);
     ok('стар код (заявка без дата) наистина дава 0 изпълнени',
       !!dOld && dOld.totalDone === 0 && dOld.totalAll === N_STORES,
       dOld ? dOld.totalDone + '/' + dOld.totalAll : 'null');
 
     /* НОВИЯТ код срещу СЪЩИЯ набор. */
-    const h = env({ at: 2, comps: rows });
+    const h = env({ at: 1, comps: rows });
     const d = await daily(h);
     if (ok('отчетът се събира', !!d, String(d))) {
       ok('отчетният ден е вторник', d.reportDate === TUE, String(d.reportDate));
@@ -267,7 +267,7 @@ const compUrls = h => h.calls.get.filter(u => u.indexOf('/task_completions') >= 
     const rows = oldTail(1400, 'task_id', REG_ID)
       .concat(todaysRows('task_id', REG_ID, TUE));
 
-    const h = env({ at: 2, tasks: [], bulTasks: [bulTask], comps: rows });
+    const h = env({ at: 1, tasks: [], bulTasks: [bulTask], comps: rows });
     const d = await daily(h);
     if (ok('отчетът се събира', !!d, String(d))) {
       ok('18 от 18', d.totalAll === N_STORES && d.totalDone === N_STORES,
@@ -292,7 +292,7 @@ const compUrls = h => h.calls.get.filter(u => u.indexOf('/task_completions') >= 
     const rows = oldTail(1400, 'recurring_task_id', 'r-win')
       .concat(todaysRows('recurring_task_id', 'r-win', MON));
 
-    const h = env({ at: 3, tasks: [win], comps: rows });   /* днес=четвъртък → отчет за сряда */
+    const h = env({ at: 2, tasks: [win], comps: rows });   /* днес=сряда → отчет за сряда */
     const d = await daily(h);
     if (ok('отчетът се събира', !!d, String(d))) {
       ok('отчетният ден е сряда', d.reportDate === WED, String(d.reportDate));

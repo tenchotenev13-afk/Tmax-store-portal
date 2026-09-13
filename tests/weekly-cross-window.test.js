@@ -30,7 +30,7 @@ const ADMIN = { email: 'a@temax.bg', display_name: 'Админ', role: 'admin',
    същите функции, които ползва и продукционният код, за да не изгние
    следващия понеделник. */
 function weekUnderTest(w) {
-  const target = w.reportWeekOfMonday(w.reportPrevWeekMonday(new Date()));
+  const target = w.reportWeekOfMonday(w.reportTargetWeekMonday(new Date()));
   return { target: target, dates: w.weekDays(target.week, target.year).map(w.toLocalISO) };
 }
 
@@ -200,25 +200,39 @@ function urlFor(calls, table) {
     const wk = weekUnderTest(probe.w);
     probe.close();
 
-    const todayISO = probe.w.toLocalISO(new Date());
+    /* От 13.09.2026 седмичният описва ТЕКУЩАТА седмица (кронът е неделя
+       21:00), тоест „днес" вече е ВЪТРЕ в нея. Затова часовникът се
+       замразява в момента на крона, а смущаващият ред е в неделята ПРЕДИ
+       седмицата, 23:00 — вътре в подвижните 7 дни назад от неделя 21:00 и
+       извън отчетната седмица, независимо кой ден се пуска тестът. */
+    const freezeAt = (w, iso) => {
+      const Real = w.Date, fixedMs = new Real(iso).getTime();
+      class Frozen extends Real {
+        constructor(...a) { if (a.length === 0) super(fixedMs); else super(...a); }
+        static now() { return fixedMs; }
+      }
+      w.Date = Frozen;
+    };
+    const CRON_AT = wk.dates[6] + 'T21:00:00';
+    const m0 = new Date(wk.dates[0] + 'T00:00:00');
+    const outsideISO = probe.w.toLocalISO(new Date(m0.getFullYear(), m0.getMonth(), m0.getDate() - 1));
     const ROWS = [
       /* Четвъртък и събота от отчетната седмица — трябва да влязат. */
       { store_name: 'Раднево', direction: 'supplier', reviewed: false,
         created_at: stampOn(wk.dates[3], 10) },
       { store_name: 'Севлиево', direction: 'supplier', reviewed: true,
         created_at: stampOn(wk.dates[5], 14) },
-      /* ДНЕС — винаги вътре в подвижните 7 дни и винаги ИЗВЪН приключилата
-         седмица, независимо кой ден се пуска тестът. Точно този ред е
-         причината двете числа да не съвпадаха. */
+      /* Предната неделя 23:00 — вътре в подвижните 7 дни и ИЗВЪН отчетната
+         седмица. Точно този ред е причината двете числа да не съвпадаха. */
       { store_name: 'Габрово', direction: 'supplier', reviewed: false,
-        created_at: stampOn(todayISO, 10) },
+        created_at: stampOn(outsideISO, 23) },
       /* Сторната по грешен прием е отделен ред, но ползва същия прозорец.
          Тя носи и разбивка по обект — оттам се вижда КОЙ ред е минал, не
          само колко са. */
       { store_name: 'Троян', direction: 'wrong_receipt', reviewed: false,
         created_at: stampOn(wk.dates[1], 9) },
       { store_name: 'Габрово', direction: 'wrong_receipt', reviewed: false,
-        created_at: stampOn(todayISO, 11) }
+        created_at: stampOn(outsideISO, 23) }
     ];
 
     const h = env({
@@ -233,6 +247,7 @@ function urlFor(calls, table) {
         goods_transit: [], transport_pallets: []
       }
     });
+    freezeAt(h.w, CRON_AT);
 
     let summary = null;
     h.w.collectWeeklyReportData(function (s) { summary = s; });
@@ -241,7 +256,7 @@ function urlFor(calls, table) {
     let weekStores = '';
     if (ok('обобщението се събира', !!(summary && summary.cross))) {
       const c = summary.cross;
-      ok('Разлики броят двете от седмицата, не днешната',
+      ok('Разлики броят двете от седмицата, не тази от предната неделя',
         c.diffs.total === 2, String(c.diffs.total));
       ok('и прегледаните/непрегледаните се разделят вътре в прозореца',
         c.diffs.reviewed === 1 && c.diffs.unreviewed === 1,
@@ -252,7 +267,7 @@ function urlFor(calls, table) {
       ok('и е на Троян (бланката от вторник)',
         c.wrongReceipt.byStore.length === 1 && c.wrongReceipt.byStore[0].store === 'Троян',
         weekStores);
-      ok('Габрово (днешната) НЕ се появява в разбивката',
+      ok('Габрово (от предната неделя) НЕ се появява в разбивката',
         weekStores.indexOf('Габрово') < 0, weekStores);
     }
     h.close();
@@ -260,10 +275,9 @@ function urlFor(calls, table) {
     /* Контра-проверка: СЪЩИТЕ редове през подвижния прозорец дават ДРУГИЯ
        обект. Без нея „Габрово го няма" би минало и ако фикстурата просто не
        различава двата прозореца — тогава проверката отгоре не доказва нищо.
-       Сравняват се обектите, не броевете: в зависимост от деня на пускане
-       двата прозореца може да се препокриват частично и броевете да съвпаднат
-       по случайност, но „днешната бланка" е винаги вън от приключилата
-       седмица и винаги вътре в подвижните 7 дни. */
+       Сравняват се обектите, не броевете. Часовникът е същият момент на
+       крона, затова бланката от предната неделя 23:00 е вътре в подвижните
+       7 дни и вън от седмицата. */
     const h2 = env({
       data: {
         bulletins: [], recurring_tasks: [], bulletin_tasks: [],
@@ -274,12 +288,13 @@ function urlFor(calls, table) {
         goods_transit: [], transport_pallets: []
       }
     });
+    freezeAt(h2.w, CRON_AT);
     let rolling = null;
     h2.w.collectCrossModuleWeeklySummary(function (c) { rolling = c; });
     await ticks();
     if (ok('подвижният прозорец връща обобщение', !!rolling)) {
       const rollStores = JSON.stringify(rolling.wrongReceipt.byStore);
-      ok('подвижният ВИЖДА днешната бланка (Габрово)',
+      ok('подвижният ВИЖДА бланката от предната неделя (Габрово)',
         rollStores.indexOf('Габрово') >= 0, rollStores);
       ok('двата прозореца дават различни обекти — фикстурата ги различава',
         rollStores !== weekStores, rollStores + '  vs  ' + weekStores);

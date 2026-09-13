@@ -101,11 +101,11 @@ function daily(h) {
 (async function run() {
 
   /* ═══ 1. Седмичен отчет ══════════════════════════════════════════════ */
-  /* collectWeeklyReportData() гледа ПРЕДХОДНАТА седмица, затова „днес" е
-     замразено в следващия понеделник, а бюлетинът е за седмицата на котвата. */
+  /* collectWeeklyReportData() гледа ТЕКУЩАТА седмица (кронът е неделя 21:00),
+     затова „днес" е замразено в неделята ѝ, а бюлетинът е за седмицата на котвата. */
   section('1. Седмичен отчет: ЕДНО явяване, не три');
   {
-    const h = env({ at: 7, comps: [comp(MON)] });
+    const h = env({ at: 6,comps: [comp(MON)] });
     const d = await weekly(h);
     if (ok('отчетът се събира', !!d, String(d))) {
       ok('знаменателят е 1, не 3', d.totalAll === 1, String(d.totalAll));
@@ -116,7 +116,7 @@ function daily(h) {
 
   section('1б. Отметка във ВТОРНИК (среда на прозореца) също затваря');
   {
-    const h = env({ at: 7, comps: [comp(TUE)] });
+    const h = env({ at: 6,comps: [comp(TUE)] });
     const d = await weekly(h);
     ok('пак 1/1', !!d && d.totalAll === 1 && d.totalDone === 1,
       d ? d.totalDone + '/' + d.totalAll : 'null');
@@ -124,7 +124,7 @@ function daily(h) {
 
   section('1в. Без отметка: 0 от 1, не 0 от 3');
   {
-    const h = env({ at: 7, comps: [] });
+    const h = env({ at: 6,comps: [] });
     const d = await weekly(h);
     ok('знаменателят пак е 1', !!d && d.totalAll === 1, d ? String(d.totalAll) : 'null');
     ok('и нищо не е изпълнено', !!d && d.totalDone === 0, d ? String(d.totalDone) : 'null');
@@ -132,7 +132,7 @@ function daily(h) {
 
   section('1г. Отметка ИЗВЪН прозореца (четвъртък) не се брои');
   {
-    const h = env({ at: 7, comps: [comp(isoAt(3))] });
+    const h = env({ at: 6,comps: [comp(isoAt(3))] });
     const d = await weekly(h);
     ok('0 от 1', !!d && d.totalAll === 1 && d.totalDone === 0,
       d ? d.totalDone + '/' + d.totalAll : 'null');
@@ -140,7 +140,7 @@ function daily(h) {
 
   section('1д. КОНТРОЛА: същата задача без флага -> старите три явявания');
   {
-    const h = env({ at: 7, task: winTask({ due_window: false }), comps: [comp(MON)] });
+    const h = env({ at: 6,task: winTask({ due_window: false }), comps: [comp(MON)] });
     const d = await weekly(h);
     if (ok('отчетът се събира', !!d)) {
       ok('знаменателят е 3', d.totalAll === 3, String(d.totalAll));
@@ -150,11 +150,11 @@ function daily(h) {
   }
 
   /* ═══ 2. Дневен отчет ════════════════════════════════════════════════ */
-  /* collectDailyReportData() описва ВЧЕРАШНИЯ ден, затова „днес" се замразява
-     един ден след деня, който ни интересува. */
+  /* collectDailyReportData() описва ДНЕШНИЯ ден (кронът е 21:00), затова
+     „днес" се замразява в самия ден, който ни интересува. */
   section('2. Дневен отчет във ВТОРНИК: задачата не участва');
   {
-    const h = env({ at: 2, comps: [comp(MON)] });   /* днес=сряда -> отчет за вторник */
+    const h = env({ at: 1, comps: [comp(MON)] });   /* днес=вторник -> отчет за вторник */
     const d = await daily(h);
     if (ok('отчетът се събира', !!d, String(d))) {
       ok('отчетният ден е вторник', d.reportDate === TUE, String(d.reportDate));
@@ -164,7 +164,7 @@ function daily(h) {
 
   section('2б. Дневен отчет в СРЯДА (денят на срока): участва и е изпълнена');
   {
-    const h = env({ at: 3, comps: [comp(MON)] });   /* днес=четвъртък -> отчет за сряда */
+    const h = env({ at: 2, comps: [comp(MON)] });   /* днес=сряда -> отчет за сряда */
     const d = await daily(h);
     if (ok('отчетът се събира', !!d)) {
       ok('отчетният ден е сряда', d.reportDate === WED, String(d.reportDate));
@@ -175,7 +175,7 @@ function daily(h) {
 
   section('2в. Дневен отчет в сряда, без отметка: неизпълнена');
   {
-    const h = env({ at: 3, comps: [] });
+    const h = env({ at: 2, comps: [] });
     const d = await daily(h);
     ok('0 от 1', !!d && d.totalAll === 1 && d.totalDone === 0,
       d ? d.totalDone + '/' + d.totalAll : 'null');
@@ -183,11 +183,11 @@ function daily(h) {
 
   section('2г. КОНТРОЛА: без флага задачата участва и в понеделник, и във вторник');
   {
-    const h1 = env({ at: 1, task: winTask({ due_window: false }), comps: [comp(MON)] });
+    const h1 = env({ at: 0, task: winTask({ due_window: false }), comps: [comp(MON)] });
     const d1 = await daily(h1);   /* отчет за понеделник */
     ok('понеделник: 1 явяване, изпълнено', !!d1 && d1.totalAll === 1 && d1.totalDone === 1,
       d1 ? d1.totalDone + '/' + d1.totalAll : 'null');
-    const h2 = env({ at: 2, task: winTask({ due_window: false }), comps: [comp(MON)] });
+    const h2 = env({ at: 1, task: winTask({ due_window: false }), comps: [comp(MON)] });
     const d2 = await daily(h2);   /* отчет за вторник */
     ok('вторник: пак 1 явяване, но НЕизпълнено (третото броене)',
       !!d2 && d2.totalAll === 1 && d2.totalDone === 0,

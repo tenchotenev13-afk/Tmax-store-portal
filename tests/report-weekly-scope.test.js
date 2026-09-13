@@ -63,12 +63,12 @@ function env(data) {
   });
 }
 
-/* Отчетната седмица е ПРЕДХОДНАЯТ понеделник — същият избор като в
+/* Отчетната седмица е ТЕКУЩАТА (кронът е неделя 21:00) — същият избор като в
    колектора. Смята се с истинските функции, не наум, за да не се разминат
    тестът и кодът при смяна на година. */
 function weekTarget() {
   const probe = env();
-  const t = probe.w.reportWeekOfMonday(probe.w.reportPrevWeekMonday(new Date()));
+  const t = probe.w.reportWeekOfMonday(probe.w.reportTargetWeekMonday(new Date()));
   const dates = probe.w.weekDays(t.week, t.year).map(probe.w.toLocalISO);
   probe.close();
   return { week: t.week, year: t.year, dates: dates };

@@ -77,7 +77,7 @@ function env(data) {
   section('4. Постоянна задача БЕЗ явяване не влиза в набора');
   {
     const probe = env();
-    const target = probe.w.reportWeekOfMonday(probe.w.reportPrevWeekMonday(new Date()));
+    const target = probe.w.reportWeekOfMonday(probe.w.reportTargetWeekMonday(new Date()));
     const days = probe.w.weekDays(target.week, target.year).map(probe.w.toLocalISO);
 
     const h = env({
@@ -112,7 +112,7 @@ function env(data) {
   section('5. Задача от бюлетина БЕЗ срок се брои по диапазона');
   {
     const probe = env();
-    const target = probe.w.reportWeekOfMonday(probe.w.reportPrevWeekMonday(new Date()));
+    const target = probe.w.reportWeekOfMonday(probe.w.reportTargetWeekMonday(new Date()));
     const days = probe.w.weekDays(target.week, target.year).map(probe.w.toLocalISO);
     const beforeWeek = probe.w.toLocalISO(
       new Date(new Date(days[0] + 'T00:00:00').getTime() - 86400000));
@@ -153,7 +153,7 @@ function env(data) {
   section('6. Граница: без бюлетин нищо не се строи и нищо не гърми');
   {
     const probe = env();
-    const target = probe.w.reportWeekOfMonday(probe.w.reportPrevWeekMonday(new Date()));
+    const target = probe.w.reportWeekOfMonday(probe.w.reportTargetWeekMonday(new Date()));
     const h = env({
       /* Само бъдещ бюлетин → reportPickWeeklyBulletin връща null. */
       bulletins: [{ id: 'b-f', week_number: target.week + 3, year: target.year, status: 'published' }],

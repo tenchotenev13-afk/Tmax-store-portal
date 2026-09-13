@@ -59,7 +59,7 @@ const SHARED_FNS = [
   'collectCrossModuleWeeklySummary',
   'collectDailyKasaSection', 'reportKasaThreshold',
   /* прозорци и избор на седмица */
-  'reportMondayOfWeek', 'reportPrevWeekMonday', 'reportWeekOfMonday',
+  'reportMondayOfWeek', 'reportTargetWeekMonday', 'reportWeekOfMonday',
   'reportPickWeeklyBulletin',
   'reportItemMatchesComp', 'reportRecurringWeekDates', 'reportCrossWindow',
   /* Отлагане с точна дата (postponed_to): денят на явяването, пренесено ли е

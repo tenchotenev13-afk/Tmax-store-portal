@@ -43,7 +43,9 @@ const ADMIN = { email: 'a@temax.bg', display_name: 'Админ', role: 'admin',
    избираше b-35 напълно коректно, а проверката „не 35" падаше за нещо, което
    не е бъг. Понеделник 24.08 връща смисъла, за който е писана: тогава 35 е
    БЪДЕЩА седмица и не бива да се избира. */
-const FROZEN = '2026-08-24T08:00:00';   /* понеделник, часът на cron-а */
+/* От 13.09.2026 кронът е неделя 21:00 и отчетът обобщава ТЕКУЩАТА седмица —
+   неделя 23.08 вечерта дава същата седмица 34, при която 35 е бъдеща. */
+const FROZEN = '2026-08-23T21:00:00';   /* неделя, часът на cron-а */
 
 function freezeDate(w) {
   const RealDate = w.Date;
@@ -195,13 +197,13 @@ function env(over) {
   section('5. Заявката вече не е limit=1 и колекторът тръгва');
   {
     const h = env();
-    freezeDate(h.w);   /* понеделник 24.08 → приключилата седмица е 34 */
+    freezeDate(h.w);   /* неделя 23.08 21:00 → текущата (приключила) седмица е 34 */
     let data = null;
     h.w.collectWeeklyReportData(function (d) { data = d; });
     await ticks();
 
-    ok('датата е закотвена в понеделник 24.08.2026',
-      h.w.toLocalISO(new h.w.Date()) === '2026-08-24',
+    ok('датата е закотвена в неделя 23.08.2026',
+      h.w.toLocalISO(new h.w.Date()) === '2026-08-23',
       h.w.toLocalISO(new h.w.Date()));
 
     const q = h.calls.get.find(u => u.indexOf('/bulletins') >= 0);

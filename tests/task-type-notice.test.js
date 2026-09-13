@@ -184,11 +184,11 @@ const weekly = h => new Promise(res => { h.w.collectWeeklyReportData(res); });
   /* ═══ 2. Дневен отчет ════════════════════════════════════════════════ */
   section('2. Дневен отчет: notice не влиза нито в числителя, нито в знаменателя');
   {
-    /* Отчетът е за ВТОРНИК (днес=сряда). Работната постоянна задача е дължима
+    /* Отчетът е за ВТОРНИК (днес=вторник). Работната постоянна задача е дължима
        и е отметната от трите обекта; обикновената също. Ако notice влезе,
        знаменателят става 12 вместо 6 и процентът пада на 50. */
     const h = env({
-      at: 2,
+      at: 1,
       comps: comps('recurring_task_id', 'r-work', TUE).concat(comps('task_id', 't-work', TUE))
     });
     const d = await daily(h);
@@ -208,7 +208,7 @@ const weekly = h => new Promise(res => { h.w.collectWeeklyReportData(res); });
     /* Постоянна задача БЕЗ ден и БЕЗ час отива в recurringNoDue и се
        показва като отделна бележка в писмото. notice не бива и там. */
     const h = env({
-      at: 2,
+      at: 1,
       recurring: [recTask(), noticeRec({ due_weekday: null, due_weekdays: null, due_time: null })],
       comps: comps('recurring_task_id', 'r-work', TUE).concat(comps('task_id', 't-work', TUE))
     });
@@ -219,9 +219,9 @@ const weekly = h => new Promise(res => { h.w.collectWeeklyReportData(res); });
   /* ═══ 3. Седмичен отчет ══════════════════════════════════════════════ */
   section('3. Седмичен отчет: същото');
   {
-    /* collectWeeklyReportData гледа ПРЕДХОДНАТА седмица → „днес" в следващия
-       понеделник, а бюлетинът е за седмицата на котвата. */
-    const h = env({ at: 7, comps: comps('recurring_task_id', 'r-work', MON) });
+    /* collectWeeklyReportData гледа ТЕКУЩАТА седмица (кронът е неделя 21:00)
+       → „днес" в неделята ѝ, а бюлетинът е за седмицата на котвата. */
+    const h = env({ at: 6, comps: comps('recurring_task_id', 'r-work', MON) });
     const d = await weekly(h);
     if (ok('отчетът се събира', !!d, String(d))) {
       const titles = (d.items || []).map(i => i.title);

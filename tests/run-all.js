@@ -90,6 +90,7 @@ const TESTS = [
   'report-edge-sync.test.js',
   'routed-empty-recipient.test.js',
   'report-daily-date.test.js',
+  'report-target-day-week.test.js',
   'report-daily-scope.test.js',
   'report-store-scope.test.js',
   'report-weekly-scope.test.js',

@@ -167,7 +167,7 @@ function env(data) {
     const reportDay = probe.w.reportDailyTargetDate(new Date());
     const dayIdx = probe.w.reportWeekdayIdx(reportDay);
     /* Ден преди отчетния — реална дата, но не тази на отчета. */
-    const other = probe.w.toLocalISO(probe.w.reportDailyTargetDate(reportDay));
+    const other = probe.w.toLocalISO(new Date(reportDay.getFullYear(), reportDay.getMonth(), reportDay.getDate() - 1));
 
     const h = env({
       users: [{ store_name: 'Враца' }],
