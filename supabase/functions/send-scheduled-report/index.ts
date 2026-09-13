@@ -1,6 +1,16 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v36 (13.09.2026) — нов отчет „Логистичен склад — необработени заявки"
+   (body {"type":"warehouse"}, кронът — неделя 21:00): всеки активен users с
+   role='logistics' и имейл получава писмо САМО за client_orders pending с
+   fulfiller = неговия store_name — по обект, по заявка, с „чака N дни" и
+   „+N просрочие"; при 0 заявки писмото пак тръгва. Ранен клон в
+   обработчика. „Чака" е изнесено в reportWaitDays и кросмодулният колектор
+   вече го вика — поведението му не е променено. collectWarehouseReportData,
+   reportWarehouseHtml, reportWarehouseSubject, reportWarehouseRecipients и
+   reportWaitDays са споделени с report.js.
+
    v35 (13.09.2026) — седмичният: нова секция „Чек лист (контролинг) —
    седмица N" след „Сторна под N €" — обект × активните показатели
    (weekly_checklist_metrics) за (year, week) на отчетната седмица, само за
@@ -905,6 +915,24 @@ function reportIsLate(o, refD){
 function reportLateDays(o, refD){
   var dl = new Date(o.delivery); dl.setHours(0,0,0,0);
   return Math.round((refD - dl) / 86400000);
+}
+/* Колко дни ЧАКА заявката — от ПО-РАННАТА от created_at и date, същата
+   начална точка като calcElapsed() в client-orders.js. Изнесена от
+   кросмодулния колектор, за да я ползва и отчетът на складовете — две копия
+   на „чака" се разминават като всичко останало преписано. */
+function reportWaitDays(o, refD){
+  if (!o || !o.created_at) return 0;
+  var d = new Date(o.created_at);
+  if (isNaN(d.getTime())) return 0;
+  d.setHours(0,0,0,0);
+  if (o.date) {
+    var od = new Date(o.date);
+    if (!isNaN(od.getTime())) {
+      od.setHours(0,0,0,0);
+      if (od < d) d = od;
+    }
+  }
+  return Math.round((refD - d) / 86400000);
 }
 
 /* Прагът за „разминаване" — app_settings, ключ 'kasa_diff_threshold'.
@@ -2256,20 +2284,6 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        заявка, въведена със задна дата, чака 0 дни (09.09.2026, Петрич: заявка
        от 06.09). Просрочието пък се мери от delivery през reportLateDays,
        тоест двете числа отговарят на два различни въпроса и не се смесват. */
-    var daysSince = function(stamp, orderDate){
-      if (!stamp) return 0;
-      var d = new Date(stamp);
-      if (isNaN(d.getTime())) return 0;
-      d.setHours(0,0,0,0);
-      if (orderDate) {
-        var od = new Date(orderDate);
-        if (!isNaN(od.getTime())) {
-          od.setHours(0,0,0,0);
-          if (od < d) d = od;
-        }
-      }
-      return Math.round((refD - d) / 86400000);
-    };
     var warehousePending = [];
     (Array.isArray(r[8]) ? r[8] : []).forEach(function(o){
       if (o.status !== 'pending') return;
@@ -2278,7 +2292,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       warehousePending.push({
         store: o.store_name, in_num: o.in_num || '',
         customer: o.customer_name || '', warehouse: o.fulfiller || '',
-        waitDays: daysSince(o.created_at, o.date),
+        waitDays: reportWaitDays(o, refD),
         lateDays: reportIsLate(o, refD) ? reportLateDays(o, refD) : 0
       });
     });
@@ -3047,12 +3061,113 @@ function reportPalletsRecipients(recipientRows, userRows){
   return { all: all, personal: personal };
 }
 
+/* ═══════ ЛОГИСТИЧЕН СКЛАД — НЕОБРАБОТЕНИ ЗАЯВКИ ═══════════════
+   Неделя 21:00, body {"type":"warehouse"}: всеки склад (users.role =
+   'logistics') получава писмо САМО за client_orders със status='pending' и
+   fulfiller = неговия store_name. Същият критерий като секцията
+   „Необработени от логистичен склад" в седмичния, но за самия склад, по
+   заявка. Просрочието — reportIsLate/reportLateDays; „чака" —
+   reportWaitDays. Писмото се праща и при 0: складът трябва да знае, че е чист.
+   Сравнението по fulfiller е ТОЧНО — стойности като „логистичен Добрич" не
+   влизат (както и в седмичния). */
+function collectWarehouseReportData(fulfiller, cb){
+  var refD = reportDailyTargetDate(new Date());
+  sbGet('client_orders','status=eq.pending&fulfiller=eq.' + encodeURIComponent(fulfiller) +
+    '&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,created_at,date,awaiting_stock').then(function(rows){
+    var items = (Array.isArray(rows) ? rows : []).filter(function(o){
+      return !!o && o.status === 'pending' && (o.fulfiller || '') === fulfiller;
+    }).map(function(o){
+      return { store: o.store_name || '—', in_num: o.in_num || '', customer: o.customer_name || '',
+               date: o.date || (o.created_at ? toLocalISO(new Date(o.created_at)) : null),
+               waitDays: reportWaitDays(o, refD),
+               lateDays: reportIsLate(o, refD) ? reportLateDays(o, refD) : 0 };
+    });
+    var map = {}, groups = [];
+    items.forEach(function(x){
+      var g = map[x.store];
+      if (!g) { g = { store: x.store, count: 0, late: 0, items: [] }; map[x.store] = g; groups.push(g); }
+      g.count++;
+      if (x.lateDays > 0) g.late++;
+      g.items.push(x);
+    });
+    groups.forEach(function(g){
+      g.items.sort(function(a,b){ return b.waitDays - a.waitDays || String(a.in_num).localeCompare(String(b.in_num)); });
+    });
+    groups.sort(function(a,b){
+      return b.late - a.late || b.count - a.count || String(a.store).localeCompare(String(b.store));
+    });
+    cb({ warehouse: fulfiller, reportDate: toLocalISO(refD), total: items.length, stores: groups.length,
+         late: items.filter(function(x){ return x.lateDays > 0; }).length,
+         oldestWait: items.reduce(function(m, x){ return Math.max(m, x.waitDays); }, 0),
+         groups: groups });
+  }).catch(function(){ cb(null); });
+}
+
+function reportWarehouseSubject(data){
+  var base = 'Необработени заявки — ' + ((data && data.warehouse) || 'Логистичен склад');
+  var d = data && data.reportDate ? new Date(data.reportDate+'T00:00:00') : null;
+  if (!d || isNaN(d.getTime())) return base;
+  return base + ' — ' + reportDayMonth(d) + '.' + d.getFullYear();
+}
+
+function reportWarehouseHtml(data){
+  var dayWord = function(n){ return n === 1 ? ' ден' : ' дни'; };
+  var total = (data && data.total) || 0;
+  var body;
+  if (!total) {
+    body = '<div style="font-size:13px;color:#94a3b8;">Няма необработени заявки</div>';
+  } else {
+    body = '<div style="font-size:13px;font-weight:700;color:#1E2761;margin-bottom:4px;">' +
+      total + (total === 1 ? ' необработена заявка' : ' необработени заявки') +
+      ' от ' + data.stores + (data.stores === 1 ? ' обект' : ' обекта') +
+      ' · ' + data.late + (data.late === 1 ? ' просрочена' : ' просрочени') +
+      ' · най-старата чака ' + data.oldestWait + dayWord(data.oldestWait) + '</div>';
+    body += (data.groups || []).map(function(g){
+      var rows = g.items.map(function(x){
+        return '<div style="padding:6px 10px;border-bottom:1px solid #eef1f6;font-size:12px;color:#334155;">' +
+          (x.in_num ? '№ ' + esc(x.in_num) + ' · ' : '') + (x.customer ? esc(x.customer) : 'без клиент') +
+          (x.date ? ' · ' + esc(reportDM(x.date)) + '.' + esc(String(x.date).slice(0, 4)) : '') +
+          ' · чака ' + x.waitDays + dayWord(x.waitDays) +
+          (x.lateDays > 0 ? ' · <b style="color:#C0392B;">+' + x.lateDays + ' просрочие</b>' : '') +
+          '</div>';
+      }).join('');
+      return '<div style="margin-top:12px;">' +
+        '<div style="font-size:12px;font-weight:700;color:#1E2761;margin-bottom:6px;">' +
+        reportStoreLinkHtml(g.store, '#1E2761') +
+        '<span style="font-weight:500;color:#64748b;"> — ' + g.count + (g.count === 1 ? ' заявка' : ' заявки') +
+        (g.late ? ' · <b style="color:#C0392B;">' + g.late + (g.late === 1 ? ' просрочена' : ' просрочени') + '</b>' : '') +
+        '</span></div>' +
+        '<div style="background:#FFFFFF;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">' + rows + '</div>' +
+        '</div>';
+    }).join('');
+  }
+  var d = data && data.reportDate ? new Date(data.reportDate+'T00:00:00') : new Date();
+  var dateStr = d.toLocaleDateString('bg-BG', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  return reportEmailShell('📦 ' + esc((data && data.warehouse) || 'Логистичен склад') + ' — необработени заявки',
+    dateStr, body, 'Автоматичен репорт · ТеМАХ Портал');
+}
+
+/* Кой получава — чиста функция, за да се тества в jsdom. Всеки активен
+   потребител с role='logistics', имейл и store_name — едно писмо за СВОЯ
+   склад. Никой друг: Теодор и регионалните виждат това в седмичния. */
+function reportWarehouseRecipients(users){
+  var out = [], seen = {};
+  (Array.isArray(users) ? users : []).forEach(function(u){
+    if (!u || u.role !== 'logistics' || u.active === false || !u.email || !u.store_name) return;
+    var key = String(u.email).trim().toLowerCase() + ' | ' + u.store_name;
+    if (seen[key]) return;
+    seen[key] = 1;
+    out.push({ email: u.email, name: u.display_name || '', warehouse: u.store_name });
+  });
+  return out;
+}
+
 
 Deno.serve(async (req: Request) => {
   try {
     var body: any = {};
     try { body = await req.json(); } catch(e) {}
-    var type = body && (body.type === 'weekly' || body.type === 'pallets') ? body.type : 'daily';
+    var type = body && (body.type === 'weekly' || body.type === 'pallets' || body.type === 'warehouse') ? body.type : 'daily';
 
     /* v33 — „Палети": отделен, по-кратък път. Без праг за каса, без
        snapshot, без управители; връща отговор тук и не стига до
@@ -3097,6 +3212,29 @@ Deno.serve(async (req: Request) => {
         return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
       }
       return new Response(JSON.stringify({ ok:true, sent:pOk, email_status:pStatus, recipients:pPlan.all.length, personal:pPersonal, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+    }
+
+    /* v36 — „Логистичен склад — необработени заявки": писмо до всеки склад
+       (users.role='logistics') САМО за неговите заявки. Праща се и при 0.
+       Ранен клон като „Палети" — daily/weekly не се докосват. */
+    if (type === 'warehouse') {
+      var wUsersRes: any = await sbGet('users', 'role=eq.logistics&select=email,display_name,store_name,role,active');
+      var wPlan: any[] = reportWarehouseRecipients(wUsersRes);
+      var wOut: any[] = [];
+      for (const u of wPlan) {
+        var wData: any = await new Promise(function(resolve){ collectWarehouseReportData(u.warehouse, resolve); });
+        if (!wData) { wOut.push({ email:u.email, warehouse:u.warehouse, sent:false, reason:'collect_failed' }); continue; }
+        var wRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
+          body: JSON.stringify({ to: [u.email], subject: reportWarehouseSubject(wData), html: reportWarehouseHtml(wData) })
+        });
+        wOut.push({ email:u.email, warehouse:u.warehouse, orders:wData.total, sent:wRes.ok, status:wRes.status });
+      }
+      if (!wPlan.length) {
+        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      }
+      return new Response(JSON.stringify({ ok:true, personal:wOut, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
     }
 
     /* Прагът за секцията „Каса" се чете ВЕДНЪЖ на изпълнение и се подава на

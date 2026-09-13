@@ -61,6 +61,9 @@ const SHARED_FNS = [
   /* „Палети за прибиране" (v33) — колектор, рендер, тема и получатели */
   'collectPalletsReportData', 'reportPalletsHtml', 'reportPalletsSubject',
   'reportPalletsRecipients',
+  /* „Логистичен склад — необработени заявки" (v36) + общото „чака N дни" */
+  'collectWarehouseReportData', 'reportWarehouseHtml', 'reportWarehouseSubject',
+  'reportWarehouseRecipients', 'reportWaitDays',
   /* прозорци и избор на седмица */
   'reportMondayOfWeek', 'reportTargetWeekMonday', 'reportWeekOfMonday',
   'reportPickWeeklyBulletin',
