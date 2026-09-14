@@ -17,6 +17,16 @@
       weekly_checklist_metrics.deadline_day, НЕ е закован в рендирането:
       в checklist.js няма нито „стока на път", нито числото 10.
 
+   3. СТРАНИЦИТЕ (14.09.2026). PostgREST реже на 1000 реда, а goods_transit
+      има 2269. Без страниране Троян излизаше 10/20 при реални 130/159.
+      Фалшивият PostgREST тук реже ТОЧНО както истинският — иначе заявка без
+      страниране би получила всичко и тестът би минал срещу стария код.
+      Провал на страница → нищо не се записва (частично ≠ стойност).
+
+   4. ПРОВЕРЕНО = ОБРАБОТЕНО. Ред с reviewed_at („👁 проверено, не е
+      пристигнало") се брои като обработен — същото правило като тригера
+      transit_store_done, който отмята задачата в Бюлетина.
+
    Пускане:  node tests/checklist-transit.test.js .
 */
 const fs = require('fs');
@@ -392,6 +402,105 @@ function freezeDay(h, day) {
     h.w.loadChecklist();
     await ticks();
     ok('нула записа', writes(h).length === 0, 'реално: ' + writes(h).length);
+    h.close();
+  }
+
+  /* Фалшив PostgREST: limit/offset като истинския, а БЕЗ limit реже на 1000
+     (db-max-rows). Редовете са подредени по id, както order=id.asc. */
+  function pgRoute(rows) {
+    return function (url) {
+      const lim = /[?&]limit=(\d+)/.exec(url), off = /[?&]offset=(\d+)/.exec(url);
+      const o = off ? +off[1] : 0, l = Math.min(lim ? +lim[1] : 1000, 1000);
+      return rows.slice(o, o + l);
+    };
+  }
+  /* 2500 реда: първите 1000 носят само 20 от входящите на Севлиево (10
+     обработени) — точно разпределението, което даде 10/20 на Троян. */
+  function bigTransit() {
+    const rows = [];
+    let id = 0;
+    const push = r => { rows.push(Object.assign({ id: ++id }, r)); };
+    for (let i = 0; i < 980; i++) push(tr('Сливен', i % 2 ? 'outgoing' : 'transfer', 'sent'));
+    for (let i = 0; i < 20; i++)  push(tr('Севлиево', 'incoming', i < 10 ? 'received' : 'pending'));
+    for (let i = 0; i < 700; i++) push(tr('Враца', 'incoming', 'received'));
+    for (let i = 0; i < 139; i++) push(tr('Севлиево', 'incoming', i < 120 ? 'received' : 'pending'));
+    for (let i = 0; i < 661; i++) push(tr('Сливен', 'transfer', 'received'));
+    return rows;   /* Севлиево: 159 входящи, 130 обработени */
+  }
+
+  /* ── 10. Страниците ──────────────────────────────────────────────────── */
+  section('10. 2500 реда → всички страници, не първите 1000');
+  {
+    const rows = bigTransit();
+    const h = env({ transit: pgRoute(rows) });
+    freezeDay(h, 15);
+    h.w.loadChecklist();
+    for (let i = 0; i < 8; i++) await ticks();
+
+    const w = written(h, 'Севлиево', 'stoka_na_pat');
+    ok('Севлиево 130/159 (не 10/20 от първата страница)', !!w && w.portal_value === '130/159', JSON.stringify(w));
+    const gets = h.calls.get.filter(u => /goods_transit/.test(u));
+    ok('три страници: offset 0, 1000, 2000', gets.length === 3 &&
+       [0, 1000, 2000].every((o, i) => gets[i].indexOf('offset=' + o) >= 0), gets.join(' | '));
+    ok('всяка страница е с order=id.asc и limit=1000',
+       gets.every(u => u.indexOf('order=id.asc') >= 0 && u.indexOf('limit=1000') >= 0), gets.join(' | '));
+    ok('тегли се и reviewed_at', gets.every(u => /select=[^&]*reviewed_at/.test(u)), gets[0]);
+    ok('Враца 700/700', (written(h, 'Враца', 'stoka_na_pat') || {}).portal_value === '700/700',
+       JSON.stringify(written(h, 'Враца', 'stoka_na_pat')));
+    h.close();
+  }
+  {
+    /* Граничен случай: ТОЧНО 1000 реда — пълна страница значи „може да има
+       още", тоест втора заявка, която връща празно, и край. */
+    const rows = many('Севлиево', 'incoming', 'received', 1000).map((r, i) => Object.assign({ id: i + 1 }, r));
+    const h = env({ transit: pgRoute(rows) });
+    freezeDay(h, 15);
+    h.w.loadChecklist();
+    for (let i = 0; i < 6; i++) await ticks();
+    const gets = h.calls.get.filter(u => /goods_transit/.test(u));
+    ok('точно 1000 реда → 2 заявки (втората празна)', gets.length === 2, gets.join(' | '));
+    ok('1000/1000', (written(h, 'Севлиево', 'stoka_na_pat') || {}).portal_value === '1000/1000',
+       JSON.stringify(written(h, 'Севлиево', 'stoka_na_pat')));
+    h.close();
+  }
+
+  /* ── 11. Провал на страница ──────────────────────────────────────────── */
+  section('11. Пропаднала втора страница → нищо не се записва');
+  {
+    const h = env({
+      transit: pgRoute(bigTransit()),
+      fail: { GET: { status: 500, body: { message: 'страницата падна' }, url: /goods_transit.*offset=1000/ } }
+    });
+    freezeDay(h, 15);
+    h.w.loadChecklist();
+    for (let i = 0; i < 8; i++) await ticks();
+    ok('Севлиево НЕ е записано (частичното 10/20 не става стойност)',
+       written(h, 'Севлиево', 'stoka_na_pat') === null, JSON.stringify(written(h, 'Севлиево', 'stoka_na_pat')));
+    ok('казва кое е паднало', h.calls.toast.some(t => String(t.msg || t).indexOf('goods_transit') >= 0 &&
+       String(t.msg || t).indexOf('страницата падна') >= 0), JSON.stringify(h.calls.toast));
+    ok('таблицата пак се рендира', !!h.doc.getElementById('checklist-table'));
+    h.close();
+  }
+
+  /* ── 12. Проверено = обработено ──────────────────────────────────────── */
+  section('12. „👁 проверено" се брои за обработено');
+  {
+    const at = '2026-09-10T09:00:00Z';
+    const h = env({ transit: [
+      Object.assign(tr('Севлиево', 'incoming', 'pending'), { reviewed_at: at }),
+      Object.assign(tr('Севлиево', 'incoming', 'pending'), { reviewed_at: at }),
+      tr('Севлиево', 'incoming', 'pending'),                          /* необработен */
+      tr('Севлиево', 'incoming', 'received'),
+      Object.assign(tr('Севлиево', 'transfer', 'pending'), { reviewed_at: at })   /* трансфер не влиза */
+    ]});
+    freezeDay(h, 15);
+    h.w.loadChecklist();
+    await ticks();
+    ok('3/4: двата проверени + приетият', (written(h, 'Севлиево', 'stoka_na_pat') || {}).portal_value === '3/4',
+       JSON.stringify(written(h, 'Севлиево', 'stoka_na_pat')));
+    ok('пряко: непроверен pending не се брои', h.w.checklistTransitValue([tr('X', 'incoming', 'pending')]) === '0/1');
+    ok('пряко: проверен pending се брои',
+       h.w.checklistTransitValue([Object.assign(tr('X', 'incoming', 'pending'), { reviewed_at: at })]) === '1/1');
     h.close();
   }
 

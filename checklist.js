@@ -382,7 +382,7 @@ function checklistModuleId(metric) {
 var CHECKLIST_MODULE_FILL = {
   transit: {
     table: 'goods_transit',
-    query: 'select=store_name,direction,status',
+    query: 'select=store_name,direction,status,reviewed_at',
     value: function (rows) { return checklistTransitValue(rows); }
   },
   returns: {
@@ -488,10 +488,17 @@ function checklistRecurringChanges(idx) {
 
    NULL статус се брои за НЕактуализиран — същото, което прави и
    `status <> 'pending'` в SQL, където NULL не минава сравнението. */
+/* ПРОВЕРЕНО = ОБРАБОТЕНО (решено 14.09.2026). Ред с reviewed_at е изрично
+   твърдение на обекта „гледах го, стоката още я няма" — работата по реда е
+   свършена. Иначе обект с всичко проверено излиза 0/29 в чек листа, докато
+   Стока на път показва „необработени 0", а тригерът transit_store_done вече е
+   отметнал задачата в Бюлетина. Правилото е същото като там. */
 function checklistTransitValue(rows) {
   var incoming = rows.filter(function (t) { return t && t.direction === 'incoming'; });
   if (!incoming.length) return null;
-  var done = incoming.filter(function (t) { return !!t.status && t.status !== 'pending'; });
+  var done = incoming.filter(function (t) {
+    return (!!t.status && t.status !== 'pending') || !!t.reviewed_at;
+  });
   return done.length + '/' + incoming.length;
 }
 
@@ -515,6 +522,33 @@ function checklistReturnsValue(rows) {
   return done.length + '/' + rows.length;
 }
 
+/* ВСИЧКИ редове на таблица, на страници по CHECKLIST_PAGE_SIZE.
+   PostgREST реже всеки отговор на 1000 реда. goods_transit има 2269 (месечен
+   импорт) и чек листът смяташе „стока на път" само от първите 1000: Троян
+   излизаше 10/20 при реални 130/159, Шумен 31/84, Севлиево 90/149 — С35–С38,
+   открито 14.09.2026. order=id прави страниците стабилни.
+   НАРОЧНО не минава през sbGet: той връща [] и при провал, тоест пропаднала
+   втора страница би изглеждала като „край на данните" и би се записало
+   ЧАСТИЧНО преброяване като истина. Тук провалът отхвърля и показателят не
+   се пише изобщо. */
+var CHECKLIST_PAGE_SIZE = 1000;
+function checklistGetAll(table, query) {
+  var all = [];
+  function page(offset) {
+    var url = API + '/' + table + '?' + query + '&order=id.asc&limit=' + CHECKLIST_PAGE_SIZE + '&offset=' + offset;
+    return fetch(url, { headers: H }).then(function (r) {
+      return r.json().catch(function () { return null; }).then(function (d) {
+        if (!r.ok || !Array.isArray(d)) {
+          throw new Error((d && (d.message || d.hint)) || ('HTTP ' + r.status));
+        }
+        all = all.concat(d);
+        return d.length === CHECKLIST_PAGE_SIZE ? page(offset + CHECKLIST_PAGE_SIZE) : all;
+      });
+    });
+  }
+  return page(0);
+}
+
 /* ЕДИН обход за всички модулни показатели.
    За всеки показател с познат module: източник се тегли неговата таблица и
    се смята стойност за всеки обект. Ако два показателя сочат към един
@@ -528,8 +562,7 @@ function checklistModuleChanges(idx) {
     var spec = id ? CHECKLIST_MODULE_FILL[id] : null;
     if (!spec) return;
 
-    jobs.push(sbGet(spec.table, spec.query).then(function (r) {
-      var rows = Array.isArray(r) ? r : [];
+    jobs.push(checklistGetAll(spec.table, spec.query).then(function (rows) {
       var byStore = {};
       rows.forEach(function (x) {
         if (!x || !x.store_name) return;
@@ -548,6 +581,10 @@ function checklistModuleChanges(idx) {
         changes.push({ store: store, metric_key: m.key, value: val });
       });
       return changes;
+    }, function (err) {
+      /* Непълни данни не стават стойност — клетките остават каквито са. */
+      toast('Грешка при зареждане на ' + spec.table + ': ' + ((err && err.message) || err), '#dc2626');
+      return [];
     }));
   });
 
