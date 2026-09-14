@@ -919,15 +919,83 @@ function bulDateLockReason(cdate){
    записа в daily_turnover, затова ръчният чекбокс е затворен и за днешния ден
    — иначе обект може да се отметне, без да е подал оборот, и Бюлетинът ще
    брои друго число от имейла. */
-function bulAutoLocked(linkedModule){ return linkedModule==='oborot'; }
+function bulAutoLocked(linkedModule){ return linkedModule==='oborot'||linkedModule==='transit-auto'; }
+/* Ключът за заключване на задача. Автоматичната „Стока на път" (linked_module
+   'transit' + auto_complete) се отмята от тригера в базата
+   (transit-reviewed-schema.sql), затова носи собствен ключ. 'transit' без
+   auto_complete остава ръчна — така са старите задачи от С36/С37. Същият
+   ключ пътува в data-linked до обработчиците. */
+function bulTaskLinkKey(t){
+  if(!t) return '';
+  if(t.linked_module==='transit'&&t.auto_complete) return 'transit-auto';
+  return t.linked_module||'';
+}
+/* Броят необработени входящи редове на обекта в Стока на път — САМО за
+   надписа до автоматичната задача. Не решава нищо: отметката идва от тригера.
+   null = не е зареден (офис, няма такава задача, заявката още тече). */
+var bulTransitPending = null;
+function bulLoadTransitPending(){
+  bulTransitPending=null;
+  if(isGlobal()||!currentUser||!currentUser.store_name) return;
+  if(!bulTasks.some(function(t){return bulTaskLinkKey(t)==='transit-auto';})) return;
+  sbGet('goods_transit','store_name=eq.'+encodeURIComponent(currentUser.store_name)+
+        /* NULL статус е „необработен" — както coalesce(status,'pending') в
+           transit_store_done и броячът в transit.js. */
+        '&direction=eq.incoming&or=(status.eq.pending,status.is.null)&reviewed_at=is.null&select=id').then(function(rows){
+    if(!Array.isArray(rows)) return;
+    bulTransitPending=rows.length;
+    renderBulletin();
+  });
+}
+/* Надписът до автоматичната „Стока на път" за обекта. 0 не се изписва като
+   число: sbGet връща [] и при провал, тоест „0 необработени" при неотметната
+   задача би било твърдение без основание. */
+function bulAutoTransitNoteHtml(t, done){
+  if(bulTaskLinkKey(t)!=='transit-auto'||isGlobal()) return '';
+  var n=bulTransitPending, txt;
+  if(done) txt='✓ от Стока на път';
+  else if(typeof n==='number'&&n>0) txt='⏳ '+n+(n===1?' необработен ред':' необработени реда');
+  else txt='⏳ отмята се от Стока на път';
+  return '<span class="bul-auto-transit" style="display:block;font-size:10px;font-weight:600;color:'+(done?'#16a34a':'#b45309')+';margin-top:2px;">'+txt+'</span>';
+}
+/* completed_by на автоматичната отметка е служебен низ, не име на човек. */
+function bulCompletedByLabel(v){ return v==='auto:transit' ? 'автоматично от Стока на път' : (v||''); }
+/* Полето „Отмята се автоматично" във формите за задача. Стои в DOM-а винаги
+   и само се крие, когато свързаният таб не е Стока на път — смяна напред-назад
+   не губи отметката. prefix: 'tk' (нова) / 'etk' (редакция). */
+function bulAutoCompleteFieldHtml(prefix, checked, linked){
+  return '<label id="'+prefix+'-auto-wrap" style="display:'+(linked==='transit'?'flex':'none')+';align-items:center;gap:6px;font-size:12px;color:#374151;margin-top:8px;cursor:pointer;">'+
+    '<input type="checkbox" id="'+prefix+'-auto-complete"'+(checked?' checked':'')+' style="width:14px;height:14px;cursor:pointer;">'+
+    'Отмята се автоматично от Стока на път (само един ден срок)</label>';
+}
+function bulAutoCompleteToggle(prefix){
+  var sel=document.getElementById(prefix+'-linked-module'), wrap=document.getElementById(prefix+'-auto-wrap');
+  if(wrap) wrap.style.display=(sel&&sel.value==='transit')?'flex':'none';
+}
+function bulAutoCompleteRead(prefix, linkedModule){
+  var cb=document.getElementById(prefix+'-auto-complete');
+  return linkedModule==='transit'&&!!(cb&&cb.checked);
+}
+/* Автоматичната задача е ЕДНОДНЕВНА: тригерът пише отметка за срока и не
+   отгатва кой от няколко дни е „денят" (cardinality(due_dates) <= 1 в
+   transit_sync_completions). Без срок няма какво да се отметне. */
+function bulAutoCompleteValid(auto, dueDates){
+  if(!auto) return true;
+  if(dueDates.length===1) return true;
+  toast(dueDates.length>1
+    ? 'Автоматичната задача е с ЕДИН ден срок — махни останалите дни'
+    : 'Автоматичната задача трябва да има срок — един ден', '#dc2626');
+  return false;
+}
 /* Автоматичното бие датата: за такава задача чекбоксът е заключен винаги,
    независимо кой ден се гледа. */
 function bulLockReason(cdate,linkedModule){
-  if(bulAutoLocked(linkedModule)) return 'auto';
+  if(bulAutoLocked(linkedModule)) return linkedModule==='transit-auto' ? 'auto-transit' : 'auto';
   return bulDateLockReason(cdate);
 }
 function bulLockLabel(reason){
   if(reason==='auto') return 'Отмята се автоматично при запис на оборота';
+  if(reason==='auto-transit') return 'Отмята се автоматично от Стока на път';
   return reason==='future' ? 'Денят още не е настъпил' : 'Денят е приключил';
 }
 /* Заключената контрола НЕ се крие — стои видима, само не се натиска.
@@ -1107,7 +1175,7 @@ function bulCarriedExtraRows(dept,store){
 function bulCarriedCalRowHtml(row,color){
   var t=row.t, to=String(row.comp.postponed_to||'').slice(0,10), done=row.comp.status==='done';
   var h='<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
-  h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="'+row.kind+'" data-orig="'+(row.from||'')+'" data-cdate="'+to+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(to,t.linked_module)+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+color+';'+bulLockStyle(to,t.linked_module)+'">';
+  h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="'+row.kind+'" data-orig="'+(row.from||'')+'" data-cdate="'+to+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(to,bulTaskLinkKey(t))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+color+';'+bulLockStyle(to,bulTaskLinkKey(t))+'">';
   h+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(done?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+bulCarriedMiniHtml(row)+'</span>';
   h+='</div>';
   return h;
@@ -1136,7 +1204,7 @@ function bulCarriedRowHtml(row,color){
   var t=row.t, to=String(row.comp.postponed_to||'').slice(0,10);
   var done=row.comp.status==='done';
   var h='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
-  h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="'+row.kind+'" data-orig="'+(row.from||'')+'" data-cdate="'+to+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(to,t.linked_module)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+color+';flex-shrink:0;'+bulLockStyle(to,t.linked_module)+'">';
+  h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="'+row.kind+'" data-orig="'+(row.from||'')+'" data-cdate="'+to+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(to,bulTaskLinkKey(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+color+';flex-shrink:0;'+bulLockStyle(to,bulTaskLinkKey(t))+'">';
   h+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
   h+='<div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
   h+=(row.kind==='recurring'?'<span title="Постоянна задача" style="font-size:11px;">🔁</span>':'')+bulCarriedBadgeHtml(row)+'</div>';
@@ -1316,6 +1384,7 @@ function loadBulletin(){
     sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=sort_order.asc,due_date.asc').then(function(t){
       bulTasks=Array.isArray(t)?t:[];
       bulFetchCarriedTasks();
+      bulLoadTransitPending();
       /* Дата и в самата ЗАЯВКА. Глобалният клон (без store_name) теглеше
          ВСЯКО отмятане на постоянна задача, правено някога - 1595 реда на
          10.09.2026. PostgREST реже на 1000 (Content-Range: 0-999/1595) и
@@ -1562,9 +1631,9 @@ function renderBulView(){
           html+=calItemStatusHtml(t.id,'regular',t.target_stores,dateStr);
         } else {
           var doneReg=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===dateStr;});
-          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+dateStr+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(dateStr,t.linked_module)+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(dateStr,t.linked_module)+'">';
+          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+dateStr+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(dateStr,bulTaskLinkKey(t))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(dateStr,bulTaskLinkKey(t))+'">';
           var carReg=bulCarriedInto('regular',t.id,store,dateStr);
-          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carReg?bulCarriedMiniHtml(carReg):'')+'</span>';
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carReg?bulCarriedMiniHtml(carReg):'')+bulAutoTransitNoteHtml(t,doneReg)+'</span>';
         }
         html+='</div>';
         if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
@@ -1715,10 +1784,11 @@ function renderBulView(){
         if(isMulti){
           html+='<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
-          html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,t.linked_module)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+bulLockStyle(singleDate,t.linked_module)+'">';
+          html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,bulTaskLinkKey(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+bulLockStyle(singleDate,bulTaskLinkKey(t))+'">';
         }
         html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done,singleDate)+bulPostponedBadgeHtml(ppComp)+'</div>';
         if(t.description)html+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
+        html+=bulAutoTransitNoteHtml(t,done);
         if(isMulti){
           var multiDates=taskDueDates(t);
           html+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">📅 Дни: '+taskDueLabel(t)+'</div>';
@@ -1740,7 +1810,11 @@ function renderBulView(){
         if(!isGlobal()&&!isMulti&&!done){
           html+='<div style="flex-shrink:0;">';
           if(postponed)html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
-          else html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+          /* Задача, която се отмята сама (oborot, автоматична Стока на път), не
+             се отлага: обектът не може да я отметне, а тригерът пак ще я
+             направи done. „↩ Отмени" остава — вече отложеното трябва да може
+             да се върне. */
+          else if(!bulAutoLocked(bulTaskLinkKey(t)))html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
           html+='</div>';
         }
         if(canEdit()){html+='<div style="display:flex;gap:4px;flex-shrink:0;">'
@@ -2269,7 +2343,8 @@ function taskModalHtml(){
     '<label class="fl">Групи за докладване (получават известие/седмичен репорт)</label>' +
     reportGroupsCheckboxesHtml('tk-report-groups', []) +
     '<label class="fl">Свързан таб (по избор — бутон в календара към него)</label>' +
-    '<select class="fi" id="tk-linked-module">'+linkedModuleOptsHtml('')+'</select>' +
+    '<select class="fi" id="tk-linked-module" onchange="bulAutoCompleteToggle(\'tk\')">'+linkedModuleOptsHtml('')+'</select>' +
+    bulAutoCompleteFieldHtml('tk', false, '') +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
     '<button onclick="closeTk()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button onclick="submitTask()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Добави задача</button>' +
@@ -2332,7 +2407,8 @@ function openEditTaskModal(taskId) {
     '<label class="fl">Групи за докладване (получават известие/седмичен репорт)</label>' +
     reportGroupsCheckboxesHtml('etk-report-groups', t.report_groups||[]) +
     '<label class="fl">Свързан таб (по избор — бутон в календара към него)</label>' +
-    '<select class="fi" id="etk-linked-module">'+linkedModuleOptsHtml(t.linked_module||'')+'</select>' +
+    '<select class="fi" id="etk-linked-module" onchange="bulAutoCompleteToggle(\'etk\')">'+linkedModuleOptsHtml(t.linked_module||'')+'</select>' +
+    bulAutoCompleteFieldHtml('etk', !!t.auto_complete, t.linked_module||'') +
     (t.created_by ? '<div style="font-size:11px;color:#94a3b8;margin-top:8px;">Поставена от: '+esc(t.created_by)+'</div>' : '') +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
     '<button onclick="var e=document.getElementById(&#39;edit-tk-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
@@ -2354,7 +2430,9 @@ function submitEditTask(taskId) {
   var stores = bulReadStoreMultiSelect('etk-stores');
   var reportGroups = readReportGroupsCheckboxes('etk-report-groups');
   var linkedModule = (document.getElementById('etk-linked-module')||{}).value||null;
-  var body = {title:title,description:desc,department:dept,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null};
+  var autoComplete = bulAutoCompleteRead('etk', linkedModule);
+  if (!bulAutoCompleteValid(autoComplete, dueDates)) return;
+  var body = {title:title,description:desc,department:dept,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete};
   /* sort_order влиза САМО при истинска смяна на отдела - иначе всяко
      отваряне и запазване на задачата би я хвърлило най-отдолу. */
   var t = bulTasks.find(function(x){ return String(x.id) === String(taskId); });
@@ -2478,7 +2556,7 @@ function deleteRecurring(taskId) {
   });
 }
 
-function openTaskModal(){document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);}
+function openTaskModal(){document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');}
 function closeTk(){document.getElementById('tk-ov').classList.remove('open');}
 function submitTask(){
   var title=(document.getElementById('tk-title').value||'').trim();
@@ -2490,7 +2568,9 @@ function submitTask(){
   var reportGroups=readReportGroupsCheckboxes('tk-report-groups');
   var linkedModule=(document.getElementById('tk-linked-module')||{}).value||null;
   var dueDates=readDueDatesCheckboxes('tk-due-dates');
-  sbPost('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
+  var autoComplete=bulAutoCompleteRead('tk',linkedModule);
+  if(!bulAutoCompleteValid(autoComplete,dueDates))return;
+  sbPost('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     closeTk(); toast('✅ Задачата е добавена!'); loadBulletin();
     /* Push само ако бюлетинът вече е публикуван - иначе магазините още не
@@ -3152,7 +3232,7 @@ function printSection(what){
         s+='<div class="task-title">'+esc(t.title||'')+' '+taskTypeBadgeHtml(t.task_type)+(postponedComp?'<span style="font-size:8pt;font-weight:700;padding:1pt 5pt;border-radius:8pt;background:#fff7ed;color:#b45309;border:0.5pt solid #fed7aa;">⏱ Отложена'+(postponedComp.postponed_to?' → '+bulDM(postponedComp.postponed_to):'')+'</span>':'')+'</div>';
         if(t.description)s+='<div class="task-desc">'+linkify(t.description)+'</div>';
         if(isMulti)s+='<div class="task-due">📅 Дни: '+taskDueLabel(t)+' (виж бройки по дни в календара по-горе)</div>';
-        else if(singleDate)s+='<div class="task-due">📅 Срок: '+new Date(singleDate+'T00:00:00').toLocaleDateString('bg-BG')+(isDone&&comp?' &nbsp; ✅ '+esc(comp.completed_by||''):'')+'</div>';
+        else if(singleDate)s+='<div class="task-due">📅 Срок: '+new Date(singleDate+'T00:00:00').toLocaleDateString('bg-BG')+(isDone&&comp?' &nbsp; ✅ '+esc(bulCompletedByLabel(comp.completed_by)):'')+'</div>';
         if(comp&&(comp.comment||(comp.photos&&comp.photos.length)))s+=renderCompletionExtras(comp);
         if(postponedComp&&postponedComp.comment)s+='<div class="task-desc" style="color:#b45309;">⏱ '+esc(postponedComp.comment)+'</div>';
         s+=pTaskAttachments(t);
@@ -3313,20 +3393,21 @@ function renderTasksPanel() {
         if (isMulti) {
           h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
-          h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,t.linked_module)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+bulLockStyle(singleDate,t.linked_module)+'">' ;
+          h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,bulTaskLinkKey(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+bulLockStyle(singleDate,bulTaskLinkKey(t))+'">' ;
         }
         h += '<div style="flex:1;">';
         h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':isPostponed?'#b45309':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
         h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!isDone,singleDate)+bulPostponedBadgeHtml(ppComp)+'</div>';
         if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         h += renderTaskAttachments(t);
+        h += bulAutoTransitNoteHtml(t, isDone);
         if (isMulti) {
           h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">📅 Дни: '+taskDueLabel(t)+' — отмятай в 📅 Седмичен календар</div>';
         } else if (singleDate) {
           h += bulDueLineHtml(singleDate, isDone ? bulDoneComp(t.id,store,singleDate) : null, ' ⚠️ Просрочено');
         }
         if (isDone && compInfo) {
-          h += '<div style="font-size:10px;color:#16a34a;margin-top:2px;">✓ '+esc(compInfo.completed_by||'')+'</div>';
+          h += '<div style="font-size:10px;color:#16a34a;margin-top:2px;">✓ '+esc(bulCompletedByLabel(compInfo.completed_by))+'</div>';
         }
         if (compInfo && (compInfo.comment||(compInfo.photos&&compInfo.photos.length))) h += renderCompletionExtras(compInfo);
         h += renderSubtasks(t.id, dk, 'panel');
@@ -3334,7 +3415,7 @@ function renderTasksPanel() {
         h += '<div style="display:flex;gap:4px;flex-shrink:0;">';
         if (!isGlobal() && !isMulti && !isDone) {
           if (isPostponed) h += '<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
-          else h += '<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+          else if (!bulAutoLocked(bulTaskLinkKey(t))) h += '<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
         }
         if (canEdit()) {
           h += '<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>';
@@ -3500,7 +3581,7 @@ function openTaskCompletionModal(taskId, kind, completionDate){
   /* Трета защита: единственият вход към модала, който не минава през чекбокс,
      е клик върху баджа (taskTypeBadgeClick). Проверката е тук, за да покрие и
      него, и всяко бъдещо извикване отдругаде. */
-  var lockReason = bulDateLockReason(completionDate);
+  var lockReason = (kind!=='recurring' && bulTaskLinkKey(t)==='transit-auto') ? 'auto-transit' : bulDateLockReason(completionDate);
   if (lockReason) { toast(bulLockLabel(lockReason),'#d97706'); return; }
   tcPendingPhotos = [];
   tcPendingFiles = [];
@@ -4061,7 +4142,7 @@ function renderRecurringTasks(dk) {
       var showBtns='';
       if(!isGlobal()&&!isMultiRec&&!done&&!skipView&&!isNotice){
         if(postponed)showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
-        else showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+        else if(!bulAutoLocked(t.linked_module||''))showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
       }
       if (showBtns) h += '<div style="flex-shrink:0;align-self:flex-start;">'+showBtns+'</div>';
       if (canEdit()) {

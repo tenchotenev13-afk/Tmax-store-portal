@@ -9,6 +9,7 @@ var transitMonthFilter = ''; /* 'YYYY-MM' за филтър по месец */
 var transitSearch = ''; /* търсене по документ / SAP код / описание */
 var _transitPendingScrollY = null; /* мост между loadTransit() и renderTransit() за запазване на скрола */
 var _transitSearchTimer = null;
+var _transitVisible = []; /* показаният списък след филтрите — за „Провери всички чакащи" */
 
 /* ── PLANT MAPPING ── */
 var PLANT_INCOMING = {
@@ -310,6 +311,9 @@ function renderTransit(){
   }
   h+='</div>';
 
+  _transitVisible=list;
+  h+=tReviewCounterHtml(list);
+
   /* Таблица */
   if(!list.length){
     h+='<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📦</div><div style="margin-top:8px;">Няма записи.</div></div>';
@@ -355,6 +359,7 @@ function renderTransit(){
         '<td style="padding:7px 8px;font-family:DM Mono,monospace;font-size:11px;overflow:hidden;white-space:nowrap;">'+fmtDate(r.transfer_date)+'</td>'+
         '<td style="padding:7px 8px;overflow:hidden;">'+
           '<span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">'+st.label+'</span>'+
+          tReviewedBadgeHtml(r)+
           (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.comment)+'">'+esc(r.comment)+'</div>':'')+
         '</td>'+
         '<td style="padding:6px 6px;position:sticky;right:0;background:'+((isOver?'#fffbeb':(isOut?'#faf9ff':(isTransfer?'#fffaf5':'#fff'))))+';box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">';
@@ -391,6 +396,9 @@ function renderTransit(){
           h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'received\')" style="border:none;background:#16a34a;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✅ Прието</button>';
         }
         h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✕ Неприето</button>';
+        if(tCanReview(r)&&!r.reviewed_at){
+          h+='<button data-id="'+r.id+'" onclick="tMarkReviewed(this.dataset.id)" style="border:1px solid #0369a1;background:#f0f9ff;color:#0369a1;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">👁 Проверено, не е пристигнало</button>';
+        }
       }
       if(canEdit&&!isTransfer&&r.status!=='pending'){
         h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">↩ Върни</button>';
@@ -460,8 +468,106 @@ function tMarkStatus(id,status){
       return;
     }
   }
-  sbPatch('goods_transit','id=eq.'+id,{status:status,updated_by:currentUser.display_name||currentUser.email,updated_at:new Date().toISOString()})
+  var body={status:status,updated_by:currentUser.display_name||currentUser.email,updated_at:new Date().toISOString()};
+  /* Прието/неприето затваря реда — „проверено, не е пристигнало" вече не
+     описва нищо. Иначе при „↩ Върни" редът би се върнал като проверен. */
+  if(status==='received'||status==='rejected'){ body.reviewed_at=null; body.reviewed_by=null; }
+  sbPatch('goods_transit','id=eq.'+id,body)
   .then(function(){ loadTransit(); }).catch(function(){ toast('Грешка','#dc2626'); });
+}
+
+/* ── „ПРОВЕРЕНО, НЕ Е ПРИСТИГНАЛО" ──
+   Изричното твърдение на обекта, че е гледал реда и стоката още я няма.
+   Статусът остава pending; reviewed_at е отделна колона. Входящ ред без
+   нито статус, нито reviewed_at е „необработен" — по него тригерът в базата
+   решава дали задачата „Стока на път" е изпълнена (transit_store_done в
+   transit-reviewed-schema.sql). Проверява получателят (или офисът). */
+function tCanReview(r){
+  return !!r&&canEditTransit()&&r.direction==='incoming'&&(r.status||'pending')==='pending'&&
+         (isGlobal()||transitIsReceiverOf(r));
+}
+function tReviewedBadgeHtml(r){
+  if(!r||!r.reviewed_at||(r.status||'pending')!=='pending') return '';
+  var d=new Date(r.reviewed_at);
+  if(isNaN(d.getTime())) return '';
+  var p=function(n){return (n<10?'0':'')+n;};
+  return '<div class="t-reviewed" title="'+esc(r.reviewed_by||'')+'" style="font-size:10px;color:#0369a1;font-weight:600;margin-top:2px;white-space:nowrap;">👁 проверено '+p(d.getDate())+'.'+p(d.getMonth()+1)+'</div>';
+}
+/* Колоната „Проверено" в Excel: „дд.мм.гггг ЧЧ:ММ · кой". Само за чакащ ред —
+   същото условие като баджа; затворен ред с останала стара стойност е празен. */
+function tReviewedExcel(r){
+  if(!r||!r.reviewed_at||(r.status||'pending')!=='pending') return '';
+  var d=new Date(r.reviewed_at);
+  if(isNaN(d.getTime())) return '';
+  var p=function(n){return (n<10?'0':'')+n;};
+  return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes())+
+         (r.reviewed_by?' · '+r.reviewed_by:'');
+}
+function tMarkReviewed(id){
+  var r=transitData.find(function(x){return String(x.id)===String(id);});
+  if(!tCanReview(r)) return;
+  var who=currentUser.display_name||currentUser.email, at=new Date().toISOString();
+  sbPatch('goods_transit','id=eq.'+id,{reviewed_at:at,reviewed_by:who,updated_by:who,updated_at:at}).then(function(res){
+    if(res&&res.ok===false){ toast('Грешка при запис','#dc2626'); return; }
+    toast('👁 Отбелязано: проверено, не е пристигнало');
+    loadTransit();
+  });
+}
+/* Всички ПОКАЗАНИ чакащи редове, които потребителят има право да провери.
+   Пакети по 100 id — адресът на PATCH-а не бива да расте без край (офисът
+   може да гледа стотици редове). Всеки пакет е една заявка, тоест тригерът
+   тръгва веднъж на обект на пакет. */
+function tReviewAllPending(){
+  var todo=(_transitVisible||[]).filter(function(r){return tCanReview(r)&&!r.reviewed_at;});
+  if(!todo.length){ toast('Няма чакащи редове за проверка','#64748b'); return; }
+  if(!confirm('Отбележи '+todo.length+' чакащи реда като „Проверено, не е пристигнало"?\n\nПотвърждаваш, че си ги проверил и стоката още я няма.')) return;
+  var who=currentUser.display_name||currentUser.email, at=new Date().toISOString();
+  var ids=todo.map(function(r){return r.id;}), chunks=[];
+  for(var i=0;i<ids.length;i+=100) chunks.push(ids.slice(i,i+100));
+  var failed=0;
+  function next(k){
+    if(k>=chunks.length){
+      if(failed) toast('Част от редовете не се записаха ('+failed+' от '+chunks.length+' пакета)','#dc2626');
+      else toast('👁 Проверени: '+ids.length);
+      loadTransit();
+      return;
+    }
+    sbPatch('goods_transit','id=in.('+chunks[k].join(',')+')',{reviewed_at:at,reviewed_by:who,updated_by:who,updated_at:at}).then(function(res){
+      if(res&&res.ok===false) failed++;
+      next(k+1);
+    });
+  }
+  next(0);
+}
+/* „Обработени X / проверени Y / необработени Z" за входящите редове на
+   обекта — собственият за магазин, избраният във филтъра за офиса; без обект
+   броячът не се показва. Числата са за ЦЕЛИЯ обект, не за филтрирания
+   изглед: точно по тях тригерът решава за задачата. Бутонът „Провери всички
+   чакащи" работи върху ПОКАЗАНИЯ списък. */
+function tReviewCounterHtml(list){
+  var store=isGlobal()?transitStore:(currentUser&&currentUser.store_name);
+  var inner='';
+  if(store){
+    var done=0,rev=0,open=0;
+    transitData.forEach(function(r){
+      if(r.store_name!==store||r.direction!=='incoming') return;
+      if(r.status&&r.status!=='pending') done++;
+      else if(r.reviewed_at) rev++;
+      else open++;
+    });
+    if(done+rev+open){
+      inner+='<div id="t-review-counter" style="font-size:12.5px;color:#334155;">📦 '+esc(store)+': '+
+        '<b style="color:#16a34a;">Обработени '+done+'</b> / '+
+        '<b style="color:#0369a1;">проверени '+rev+'</b> / '+
+        '<b style="color:'+(open?'#dc2626':'#16a34a')+';">необработени '+open+'</b></div>';
+    }
+  }
+  var todo=(list||[]).filter(function(r){return tCanReview(r)&&!r.reviewed_at;});
+  if(todo.length){
+    inner+='<button id="t-review-all" onclick="tReviewAllPending()" style="border:1px solid #0369a1;background:#f0f9ff;color:#0369a1;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">👁 Провери всички чакащи ('+todo.length+')</button>';
+  }
+  if(!inner) return '';
+  return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;margin-bottom:12px;">'+inner+'</div>';
 }
 
 /* ── ИЗТРИЙ РЕД ── */
@@ -507,7 +613,7 @@ function exportTransitExcel(){
   }
   var wb=window.XLSX.utils.book_new();
   var rows=[['Посока','Магазин','Доставчик/Склад','Документ','Позиция','Дата',
-    'Материал','Описание','Кол.','МЕ','Остатък','Дата трансфер','Статус','Коментар',
+    'Материал','Описание','Кол.','МЕ','Остатък','Дата трансфер','Статус','Проверено','Коментар',
     'Обновен от','Обновен на']];
   transitData.forEach(function(r){
     rows.push([
@@ -517,12 +623,13 @@ function exportTransitExcel(){
       r.ordered_qty||'',r.unit||'',r.remaining_qty||'',
       r.transfer_date||'',
       r.status==='received'?'Прието':r.status==='rejected'?'Неприето':'Не доставена',
+      tReviewedExcel(r),
       r.comment||'',r.updated_by||'',r.updated_at?r.updated_at.slice(0,16).replace('T',' '):''
     ]);
   });
   var ws=window.XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:14},{wch:16},{wch:22},{wch:14},{wch:8},{wch:12},{wch:10},{wch:30},
-    {wch:8},{wch:6},{wch:8},{wch:14},{wch:12},{wch:20},{wch:16},{wch:18}];
+    {wch:8},{wch:6},{wch:8},{wch:14},{wch:12},{wch:26},{wch:20},{wch:16},{wch:18}];
   window.XLSX.utils.book_append_sheet(wb,ws,'Стока на път');
   var fname='ТеМАХ_Стока_на_път_'+today()+'.xlsx';
   window.XLSX.writeFile(wb,fname);
@@ -690,6 +797,8 @@ function submitTransit(){
     updated_by:currentUser.display_name||currentUser.email,
     updated_at:new Date().toISOString()
   };
+  /* Същото правило като в tMarkStatus: затворен ред не е „проверен, чака". */
+  if(statusVal!=='pending'){ data.reviewed_at=null; data.reviewed_by=null; }
   var req=transitEditId?
     sbPatch('goods_transit','id=eq.'+transitEditId,data):
     sbPost('goods_transit',data);

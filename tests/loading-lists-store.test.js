@@ -199,6 +199,10 @@ function patchesTo(h, table) { return h.calls.patch.filter(p => p.table === tabl
       ok('updated_by по конвенцията на transit.js',
         gp[0].body.updated_by === 'Управител Петрич', JSON.stringify(gp[0].body.updated_by));
       ok('updated_at е попълнено', !!gp[0].body.updated_at);
+      /* Прието затваря реда — „👁 проверено, не е пристигнало" се чисти, както в
+         tMarkStatus() на transit.js. Иначе след „↩ Върни" редът излиза проверен. */
+      ok('reviewed_at → null', 'reviewed_at' in gp[0].body && gp[0].body.reviewed_at === null, JSON.stringify(gp[0].body));
+      ok('reviewed_by → null', 'reviewed_by' in gp[0].body && gp[0].body.reviewed_by === null, JSON.stringify(gp[0].body));
     }
     ok('съобщението сочи документа',
       h.calls.toast.some(t => /📦 Стоков документ D-100 е приет/.test(String(t.msg || t))),

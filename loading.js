@@ -615,8 +615,12 @@ function llAutoCloseDoc(d){
     if(!Array.isArray(rows) || !rows.length) return;   /* вече не е pending - тихо */
     /* Същата конвенция като tSetStatus() в transit.js: status + updated_by +
        updated_at. transit.js НЕ се пипа - само се следва. */
+    /* Прието затваря реда, тоест „проверено, не е пристигнало" вече не
+       описва нищо — същото правило като tMarkStatus() в transit.js. */
     return sbPatch('goods_transit', f, {
       status: 'received',
+      reviewed_at: null,
+      reviewed_by: null,
       updated_by: llActor(),
       updated_at: new Date().toISOString()
     }).then(function(res){
