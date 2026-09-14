@@ -1316,9 +1316,53 @@ function loadBulletin(){
     sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=sort_order.asc,due_date.asc').then(function(t){
       bulTasks=Array.isArray(t)?t:[];
       bulFetchCarriedTasks();
+      /* Дата и в самата ЗАЯВКА. Глобалният клон (без store_name) теглеше
+         ВСЯКО отмятане на постоянна задача, правено някога - 1595 реда на
+         10.09.2026. PostgREST реже на 1000 (Content-Range: 0-999/1595) и
+         понеже няма order, отрязаните са точно НАЙ-НОВИТЕ: седмичният
+         календар и решетката показваха 0/18 за постоянните задачи.
+         Обхватът е седмицата на ТЕКУЩИЯ бюлетин - всичко, което рендерът
+         съпоставя, е дата от нея (weekDaysArr, statRecDates,
+         statRecWindow, календарният dateStr).
+         ЕДНО изключение, затова е `or`, а не прост диапазон: постоянна
+         задача БЕЗ ден от седмицата (recTaskWeekdays() дава []) се
+         съпоставя с ДНЕШНАТА дата - виж fallback-а toLocalISO(new Date())
+         в recurringSectionHtml и в печата. Такива има две активни
+         („Осчетоводяване на минуси", „Отчет за ръчни отстъпки"). Гледаш
+         ли чужда седмица, днешната дата е ИЗВЪН нея и чекбоксът им би
+         излязъл празен. Прост min/max диапазон вместо `or` също не става:
+         превключвателят стига 20 бюлетина назад, тоест ~20 седмици по
+         ~420 реда - пак над хилядата. */
+      var loadRecurringComps=function(){
+        var bulWkArr=weekDays(curBul.week_number,curBul.year);
+        var bulWkLo=toLocalISO(bulWkArr[0]), bulWkHi=toLocalISO(bulWkArr[6]), bulTd=bulTodayISO();
+        var recDateQ=(bulTd>=bulWkLo&&bulTd<=bulWkHi)
+          ? '&completion_date=gte.'+bulWkLo+'&completion_date=lte.'+bulWkHi
+          : '&or=(and(completion_date.gte.'+bulWkLo+',completion_date.lte.'+bulWkHi+'),completion_date.eq.'+bulTd+')';
+        var rq='recurring_task_id=not.is.null'+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name))+recDateQ;
+        fetch(API+'/task_completions?'+rq,{headers:H}).then(function(r){
+          if(!r.ok){
+            return r.text().then(function(errText){
+              console.error('task_completions (recurring) GET грешка:', errText);
+              toast('Грешка при постоянните задачи: '+errText.slice(0,150),'#dc2626');
+              recurringComps=[];renderBulletin();
+            });
+          }
+          return r.json().then(function(rc){
+            recurringComps=Array.isArray(rc)?rc:[];
+            renderBulletin();
+          });
+        }).catch(function(){recurringComps=[];renderBulletin();});
+      };
+      /* Бюлетин без обикновени задачи НЕ е бюлетин без постоянни. Ранният
+         изход нулираше и recurringComps, без да ги чете: в С38/2026 (0
+         обикновени задачи) всяка отметка на постоянна задача изглеждаше
+         неотметната при следващото влизане, а повторното отмятане минаваше
+         през 409 → PATCH върху същия ред (Карлово, 14.09.2026). Пропускат се
+         само заявките по task_id; пренесените (bulCarried) вече са заредени. */
       if(!bulTasks.length){
-        bulComps=[];subtaskComps=[];recurringComps=[];
-        renderBulletin();return;
+        bulComps=[];subtaskComps=[];
+        loadRecurringComps();return;
       }
       var ids=bulTasks.map(function(x){return x.id;}).join(',');
       var cq='task_id=in.('+ids+')'+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name));
@@ -1327,42 +1371,7 @@ function loadBulletin(){
         var storeF=isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name);
         sbGet('subtask_completions','select=*'+storeF).then(function(sc){
           subtaskComps=Array.isArray(sc)?sc:[];
-          /* Дата и в самата ЗАЯВКА. Глобалният клон (без store_name) теглеше
-             ВСЯКО отмятане на постоянна задача, правено някога - 1595 реда на
-             10.09.2026. PostgREST реже на 1000 (Content-Range: 0-999/1595) и
-             понеже няма order, отрязаните са точно НАЙ-НОВИТЕ: седмичният
-             календар и решетката показваха 0/18 за постоянните задачи.
-             Обхватът е седмицата на ТЕКУЩИЯ бюлетин - всичко, което рендерът
-             съпоставя, е дата от нея (weekDaysArr, statRecDates,
-             statRecWindow, календарният dateStr).
-             ЕДНО изключение, затова е `or`, а не прост диапазон: постоянна
-             задача БЕЗ ден от седмицата (recTaskWeekdays() дава []) се
-             съпоставя с ДНЕШНАТА дата - виж fallback-а toLocalISO(new Date())
-             в recurringSectionHtml и в печата. Такива има две активни
-             („Осчетоводяване на минуси", „Отчет за ръчни отстъпки"). Гледаш
-             ли чужда седмица, днешната дата е ИЗВЪН нея и чекбоксът им би
-             излязъл празен. Прост min/max диапазон вместо `or` също не става:
-             превключвателят стига 20 бюлетина назад, тоест ~20 седмици по
-             ~420 реда - пак над хилядата. */
-          var bulWkArr=weekDays(curBul.week_number,curBul.year);
-          var bulWkLo=toLocalISO(bulWkArr[0]), bulWkHi=toLocalISO(bulWkArr[6]), bulTd=bulTodayISO();
-          var recDateQ=(bulTd>=bulWkLo&&bulTd<=bulWkHi)
-            ? '&completion_date=gte.'+bulWkLo+'&completion_date=lte.'+bulWkHi
-            : '&or=(and(completion_date.gte.'+bulWkLo+',completion_date.lte.'+bulWkHi+'),completion_date.eq.'+bulTd+')';
-          var rq='recurring_task_id=not.is.null'+(isGlobal()?'':'&store_name=eq.'+encodeURIComponent(currentUser.store_name))+recDateQ;
-          fetch(API+'/task_completions?'+rq,{headers:H}).then(function(r){
-            if(!r.ok){
-              return r.text().then(function(errText){
-                console.error('task_completions (recurring) GET грешка:', errText);
-                toast('Грешка при постоянните задачи: '+errText.slice(0,150),'#dc2626');
-                recurringComps=[];renderBulletin();
-              });
-            }
-            return r.json().then(function(rc){
-              recurringComps=Array.isArray(rc)?rc:[];
-              renderBulletin();
-            });
-          }).catch(function(){recurringComps=[];renderBulletin();});
+          loadRecurringComps();
         }).catch(function(){subtaskComps=[];renderBulletin();});
       }).catch(function(){bulComps=[];subtaskComps=[];recurringComps=[];renderBulletin();});
     }).catch(function(){bulTasks=[];bulComps=[];renderBulletin();});
@@ -3786,7 +3795,9 @@ function loadTasksStats() {
      филтърът е на входа, а не в трите места, където се брои по-долу. */
   var statTasks = bulTasks.filter(function(t){ return !taskIsNotice(t); });
   var statRecurring = recurringTasks.filter(function(t){ return !taskIsNotice(t); });
-  if (!wrap || !statTasks.length) return;
+  /* Излиза само ако няма НИТО обикновени, НИТО постоянни задачи — бюлетин без
+     обикновени (С38/2026) иначе оставяше таблицата на „⏳ Зареждане". */
+  if (!wrap || (!statTasks.length && !statRecurring.length)) return;
 
   /* Филтърът беше преписан тук с твърдо 'Централен офис' и пропускаше двата
      логистични склада — 20 обекта вместо 18. Един източник за всички бройки
