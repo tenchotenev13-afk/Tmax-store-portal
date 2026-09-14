@@ -329,7 +329,13 @@ function calBoxes(doc, id) { return doc.querySelectorAll('#sec-calendar input[da
       { recurring_task_id: 'r-b', store_name: KA, status: 'done', completion_date: TODAY },
       { recurring_task_id: 'r-b', store_name: RA, status: 'done', completion_date: TODAY }
     ];
-    const wrap = doc.createElement('div'); wrap.id = 'tasks-stat-wrap'; doc.body.appendChild(wrap);
+    /* Бюлетин без обикновени задачи вече рисува панела и с него
+       tasks-stat-wrap — втори елемент със същото id би останал празен, защото
+       getElementById връща първия. Ползва се наличният, ако го има. */
+    let wrap = doc.getElementById('tasks-stat-wrap');
+    const ownWrap = !wrap;
+    if (ownWrap) { wrap = doc.createElement('div'); wrap.id = 'tasks-stat-wrap'; doc.body.appendChild(wrap); }
+    wrap.innerHTML = '';
     if (guard('loadTasksStats() не хвърля', () => w.loadTasksStats())) {
       await settle(() => wrap.querySelector('table'));
       const cell = (store, col) => {
@@ -341,7 +347,7 @@ function calBoxes(doc, id) { return doc.querySelectorAll('#sec-calendar input[da
       ok('Раднево: r-b + r-d = 1/14 (r-a, r-c извън; отметката му се брои)', cell(RA, 1) === '1/14', cell(RA, 1));
       ok('Троян: r-b + r-c + r-d = 0/21 (само глобалното извън)', cell(TR, 1) === '0/21', cell(TR, 1));
     }
-    wrap.remove();
+    if (ownWrap) wrap.remove();
   }
 
   /* ═══ 7. Съседна седмица ═════════════════════════════════════════════ */

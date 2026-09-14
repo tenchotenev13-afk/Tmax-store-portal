@@ -95,6 +95,13 @@ Netlify се ползва само за тестване/staging.
    diff <(git cat-file blob HEAD:ФАЙЛ.js) /tmp/live.js && echo "АКТУАЛЕН"
    ```
 
+   - **Файлът за сравнение е ИЗВЪН репото** — `/tmp/live.js` в Git Bash, а в
+     PowerShell `curl.exe … -o "$env:TEMP\live.js"`. Никога `-o live.js` без
+     път: пише в корена, а тестовете сканират РАБОТНОТО ДЪРВО, не индекса.
+     На 14.09.2026 такъв `live.js` (байт по байт `transit.js`) събори
+     `id-collisions.test.js` с 19 „дублирани" id-та и с него целия
+     `npm test`. `live.js` е в `.gitignore`, но това пази само от случаен
+     комит — не и от провала на теста.
    - **`git cat-file blob`, не `git show`.** `git show HEAD:ФАЙЛ` минава през
      checkout конверсията (`core.autocrlf=true`) и може да покаже разлика,
      каквато в блоба няма — виж т.1б. Тук грешката е по-коварна, отколкото

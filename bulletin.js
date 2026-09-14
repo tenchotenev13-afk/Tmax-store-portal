@@ -3250,7 +3250,9 @@ function renderTasksPanel() {
   var isAdmin = canEdit();
   var DEPT = DEPTS;
 
-  if (!bulTasks.length) return '';
+  /* Бюлетин без обикновени задачи (С38/2026) още има постоянни — и панелът на
+     обекта, и статистиката на офиса (tasks-stat-wrap) живеят тук. */
+  if (!bulTasks.length && !recurringTasks.length) return '';
 
   var h = '<div style="margin-bottom:20px;">';
   h += '<div style="font-size:15px;font-weight:600;color:#0f172a;margin-bottom:12px;">✅ Задачи за седмицата</div>';
@@ -3274,22 +3276,30 @@ function renderTasksPanel() {
          се очакват от обекта. Отложените в рамките на седмицата не се броят
          два пъти — те си имат ред в dTasks и не влизат тук. */
       var cRows = bulCarriedExtraRows(dk, store);
-      if (!dTasks.length && !cRows.length) return;
+      /* Постоянните се рисуват ПРЕДИ проверката: отдел само с тях (празен
+         бюлетин, С38/2026) иначе изчезваше от панела заедно с чекбоксовете. */
+      var recHtml = renderRecurringTasks(dk);
+      if (!dTasks.length && !cRows.length && !recHtml) return;
       var d = DEPT[dk];
       var done = dTasks.filter(function(t){
         return bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='done';});
       }).length + cRows.filter(function(r){ return r.comp.status==='done'; }).length;
       var total = dTasks.length + cRows.length;
-      var pct = Math.round(done/total*100);
+      var pct = total ? Math.round(done/total*100) : 0;
 
       h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;overflow:hidden;">';
       h += '<div style="background:'+d.hdr+';padding:8px 14px;display:flex;justify-content:space-between;align-items:center;">';
       h += '<div style="font-size:13px;font-weight:600;color:#fff;">'+d.icon+' '+d.label+'</div>';
-      h += '<div style="display:flex;align-items:center;gap:8px;">';
-      h += '<div style="font-size:11px;color:rgba(255,255,255,.7);">'+done+'/'+total+'</div>';
-      h += '<div style="background:rgba(255,255,255,.2);border-radius:20px;width:80px;height:6px;">';
-      h += '<div style="background:'+(pct===100?'#4ade80':'#fff')+';width:'+pct+'%;height:6px;border-radius:20px;transition:.3s;"></div>';
-      h += '</div></div></div>';
+      /* Броячът е за обикновените + пренесените. Отдел само с постоянни няма
+         какво да брои тук — без „0/0" и празна лента. */
+      if (total) {
+        h += '<div style="display:flex;align-items:center;gap:8px;">';
+        h += '<div style="font-size:11px;color:rgba(255,255,255,.7);">'+done+'/'+total+'</div>';
+        h += '<div style="background:rgba(255,255,255,.2);border-radius:20px;width:80px;height:6px;">';
+        h += '<div style="background:'+(pct===100?'#4ade80':'#fff')+';width:'+pct+'%;height:6px;border-radius:20px;transition:.3s;"></div>';
+        h += '</div></div>';
+      }
+      h += '</div>';
       h += '<div style="padding:8px 14px;">';
 
       dTasks.forEach(function(t) {
@@ -3336,7 +3346,7 @@ function renderTasksPanel() {
       });
       cRows.forEach(function(r){ h += bulCarriedRowHtml(r, d.color); });
       /* Постоянни задачи за отдела */
-      h += renderRecurringTasks(dk);
+      h += recHtml;
       h += '</div></div>';
     });
 
@@ -3795,8 +3805,9 @@ function loadTasksStats() {
      филтърът е на входа, а не в трите места, където се брои по-долу. */
   var statTasks = bulTasks.filter(function(t){ return !taskIsNotice(t); });
   var statRecurring = recurringTasks.filter(function(t){ return !taskIsNotice(t); });
-  /* Излиза само ако няма НИТО обикновени, НИТО постоянни задачи — бюлетин без
-     обикновени (С38/2026) иначе оставяше таблицата на „⏳ Зареждане". */
+  /* Излиза само ако няма НИТО обикновени, НИТО постоянни задачи — иначе бюлетин
+     без обикновени (С38/2026) не броеше постоянните. Самата обвивка идва от
+     renderTasksPanel(), която при празен bulTasks също не бива да излиза. */
   if (!wrap || (!statTasks.length && !statRecurring.length)) return;
 
   /* Филтърът беше преписан тук с твърдо 'Централен офис' и пропускаше двата

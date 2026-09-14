@@ -13,13 +13,21 @@
         днес → след loadBulletin() чекбоксът Е отметнат; неотметнатата остава
         празна (контрола); заявката по task_id НЕ се пуска; пренесените
         (postponed_to за седмицата) се показват;
-     2. офис: loadTasksStats() брои постоянните — Склад 1/2;
+     2. офис, през ИСТИНСКИЯ рендер: renderTasksPanel() рисува обвивката на
+        статистиката, а таймерът ѝ вика loadTasksStats() — Склад 1/2. Не
+        директен вик: на 14.09.2026 директният вик минаваше, докато на
+        екрана таблица изобщо нямаше (renderTasksPanel връщаше '');
      3. печат (истински клик в менюто „Само Склад"): отметнатата е с ✓,
-        неотметнатата — без.
+        неотметнатата — без;
+     4. обект, панелът „✅ Задачи за седмицата": отделите само с постоянни
+        задачи се рисуват, отметнатата е отметната, отдел без нищо — не,
+        брояч „0/0" — не.
 
    Мутации, с които тестът ТРЯБВА да падне:
      М1: старият ранен изход в loadBulletin (recurringComps=[]; renderBulletin())
      М2: старото `if (!wrap || !statTasks.length) return;` в loadTasksStats
+     М3: старото `if (!bulTasks.length) return '';` в renderTasksPanel
+     М4: старото `if (!dTasks.length && !cRows.length) return;` по отдел
 
    ⚠️ Дати: котвата е ДНЕС 12:00 местно, замразена на w.Date — без календарни
    литерали и без нощен флейк около полунощ.
@@ -137,6 +145,12 @@ async function settle(cond, max) {
   for (let i = 0; i < (max || 80); i++) { if (cond()) return true; await ticks(); }
   return cond();
 }
+/* Реално време — renderTasksPanel() пуска loadTasksStats със setTimeout(…,100). */
+async function waitReal(cond, ms) {
+  const end = Date.now() + ms;
+  while (Date.now() < end) { if (cond()) return true; await new Promise(r => setTimeout(r, 20)); }
+  return cond();
+}
 const txt = el => (el ? el.textContent.replace(/\s+/g, ' ').trim() : '');
 const cbs = (doc, id) => Array.prototype.slice.call(doc.querySelectorAll('input[type=checkbox][data-rtid="' + id + '"]'));
 const tcGets = h => h.calls.get.filter(u => u.indexOf('/task_completions') >= 0);
@@ -191,23 +205,23 @@ const recGet = h => tcGets(h).filter(u => u.indexOf('recurring_task_id=not.is.nu
   }
 
   /* ═══ 2. Статистика ═════════════════════════════════════════════════════ */
-  section('2. Офис: loadTasksStats() брои постоянните и без обикновени задачи');
+  section('2. Офис, истински рендер: таблицата на статистиката се появява и брои постоянните');
   {
     const h = env(ADMIN);
     const doc = h.doc;
     if (guard('loadBulletin() не хвърля', () => h.w.loadBulletin())) {
-      await settle(() => recGet(h).length > 0 && h.w.recurringComps.length > 0, 120);
+      /* Нито един ръчен вик и нито една ръчно създадена обвивка — само това,
+         което рендерът и таймерът му правят сами. */
+      const statRow = () => { const wr = doc.getElementById('tasks-stat-wrap'); return wr && wr.querySelector('tbody tr'); };
+      await waitReal(() => recGet(h).length > 0 && !!statRow(), 4000);
       ok('офисът тегли постоянните отметки (без store филтър)',
         recGet(h).length === 1 && recGet(h)[0].indexOf('store_name=') < 0, JSON.stringify(recGet(h)));
-      let wrap = doc.getElementById('tasks-stat-wrap');
-      if (!wrap) { wrap = doc.createElement('div'); wrap.id = 'tasks-stat-wrap'; doc.body.appendChild(wrap); }
-      wrap.innerHTML = '';
-      if (guard('loadTasksStats() не хвърля', () => h.w.loadTasksStats())) {
-        await settle(() => !!wrap.querySelector('tbody tr'));
+      const wrap = doc.getElementById('tasks-stat-wrap');
+      if (ok('обвивката на статистиката е изрисувана от renderTasksPanel()', !!wrap)) {
         const heads = Array.prototype.map.call(wrap.querySelectorAll('thead th'), th => txt(th));
         const col = heads.findIndex(t => t.indexOf(h.w.DEPTS.warehouse.label) >= 0);
         const row = wrap.querySelector('tbody tr');
-        ok('таблицата е изрисувана', !!row && col >= 0, wrap.innerHTML.slice(0, 200));
+        ok('таблицата е изрисувана (не „⏳ Зареждане")', !!row && col >= 0, txt(wrap).slice(0, 120));
         if (row && col >= 0) {
           ok('редът е за Карлово', txt(row.children[0]) === KR, txt(row.children[0]));
           ok('Склад: 1/2 (отметнатата се брои, неотметнатата — не)', txt(row.children[col]) === '1/2', txt(row.children[col]));
@@ -236,6 +250,31 @@ const recGet = h => tcGets(h).filter(u => u.indexOf('recurring_task_id=not.is.nu
       if (ok('КОНТРОЛА: неотметнатата е в печата', !!openRow)) {
         ok('КОНТРОЛА: …без ✓', openRow.split('task-title')[0].indexOf('✓') < 0, openRow.slice(0, 200));
       }
+    }
+  }
+
+  /* ═══ 4. Панелът за обекта ══════════════════════════════════════════════ */
+  section('4. Обект: панелът „✅ Задачи за седмицата" рисува отделите само с постоянни');
+  {
+    const doc = hs.doc, DEPTS = hs.w.DEPTS;
+    const title = Array.prototype.find.call(doc.querySelectorAll('#mod-bulletin div'),
+      el => el.children.length === 0 && txt(el) === '✅ Задачи за седмицата');
+    const panel = title && title.parentElement;
+    if (ok('панелът е изрисуван', !!panel)) {
+      const pt = txt(panel);
+      ok('отдел Склад е в панела', pt.indexOf(DEPTS.warehouse.label) >= 0, pt.slice(0, 200));
+      ok('отдел Търговска е в панела (постоянната „Пренесена търговска")', pt.indexOf(DEPTS.trade.label) >= 0, pt.slice(0, 200));
+      ok('КОНТРОЛА: отдел Администрация НЕ е (няма нищо за него)', pt.indexOf(DEPTS.admin.label) < 0, pt.slice(0, 200));
+      const kol = Array.prototype.filter.call(panel.querySelectorAll('input[type=checkbox][data-rtid="r-kol"]'),
+        c => c.getAttribute('data-cdate') === TODAY);
+      if (ok('чекбоксът на „ЗАРЕЖДАНЕ КОЛОРАНТИ" е в панела', kol.length === 1, kol.length)) {
+        ok('…и е отметнат', kol[0].checked);
+      }
+      const open = panel.querySelectorAll('input[type=checkbox][data-rtid="r-open"]');
+      if (ok('КОНТРОЛА: неотметнатата е в панела', open.length === 1, open.length)) {
+        ok('КОНТРОЛА: …празна', !open[0].checked);
+      }
+      ok('без брояч „0/0" в заглавията на отделите', pt.indexOf('0/0') < 0, pt.slice(0, 200));
     }
   }
 
