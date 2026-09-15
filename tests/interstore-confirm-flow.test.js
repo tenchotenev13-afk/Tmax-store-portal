@@ -92,7 +92,9 @@ function mainTable(doc) {
   }
   return null;
 }
-const CONFIRM = '✅ Получено';
+/* От 15.09.2026 бутонът на магазина е "✅ ПРИЕТО" (същото действие + store_response).
+   Текстът на вече потвърден ред остава "📬 Получено · кой · кога". */
+const CONFIRM = '✅ ПРИЕТО';
 const BACK = '📬 Прието обратно';
 
 (async function () {
@@ -179,7 +181,10 @@ const BACK = '📬 Прието обратно';
 
   section('d) Обратно движение — потвърждава СКЛАДЪТ, не магазинът');
   {
-    const wh = env(WAREHOUSE, [line({ id: 'l-1', warehouse_response: 'return' })]);
+    /* Складът приема обратно едва след като магазинът е пуснал движението в
+       SAP (store_response='sap_done') - без него бутон няма. Покрито в
+       sd-store-response.test.js. */
+    const wh = env(WAREHOUSE, [line({ id: 'l-1', warehouse_response: 'return', store_response: 'sap_done' })]);
     wh.w.renderStockDiff();
     const cw = card(wh.doc, 'rep-int');
     ok('складът вижда "' + BACK + '"', !!btn(cw, BACK), cw && cw.textContent.slice(0, 200));

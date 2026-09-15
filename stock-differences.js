@@ -658,6 +658,9 @@ function diffLineResolveButtons(l){
   }
   if(!canReviewDiff()){
     if(l.type) return '<span style="color:#16a34a;font-weight:600;">✓ '+(TYPE_LABELS[l.type]||l.type)+'</span>';
+    /* Междускладов ред: Цвети не решава изобщо - "чака преглед" караше
+       магазина да чака решение, което никога няма да дойде. */
+    if(sdLineDirection(l)==='interstore') return '<span style="color:#cbd5e1;">—</span>';
     return '<span style="color:#94a3b8;">чака преглед</span>';
   }
   var TYPE_COLORS={writein:'#2563eb',return:'#7c3aed',missing:'#dc2626',not_invoiced:'#64748b'};
@@ -718,7 +721,9 @@ function diffWarehouseResolveButtons(l, rep){
   /* Цвети/admin/обикновени потребители - само за оглед, не могат да пипат */
   if(l.warehouse_response){
     var h2='<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[l.warehouse_response]||l.warehouse_response)+'</span>';
-    if(l.warehouse_comment) h2+='<div style="font-size:10px;color:#64748b;">💬 '+esc(l.warehouse_comment)+'</div>';
+    /* Коментарът на склада е за магазина - на 10px в сиво не го четеше никой.
+       white-space:normal, защото клетката е nowrap и дълъг текст излизаше навън. */
+    if(l.warehouse_comment) h2+='<div style="margin-top:3px;font-size:11px;color:#1e293b;border:1px solid #cbd5e1;background:#f8fafc;border-radius:5px;padding:3px 6px;white-space:normal;">💬 '+esc(l.warehouse_comment)+'</div>';
     return h2;
   }
   return '<span style="color:#94a3b8;">чака склада</span>';
@@ -741,22 +746,97 @@ function sdInterstoreConfirmButton(l, rep){
   if(l.warehouse_response==='will_send'){
     return '<div style="margin-top:3px;font-size:10.5px;color:#94a3b8;">чака изпращане</div>';
   }
-  var mk = function(label,color){
-    return '<div style="margin-top:3px;"><button data-lid="'+l.id+'" onclick="sdConfirmInterstore(this.dataset.lid)" style="border:none;background:'+color+';color:#fff;border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">'+label+'</button></div>';
+  /* as: 'store' = ПРИЕТО от магазина (записва и store_response), 'warehouse' =
+     "Прието обратно" от склада (store_response не се пипа - той е на магазина). */
+  var mk = function(label,color,as){
+    return '<div style="margin-top:3px;"><button data-lid="'+l.id+'" data-as="'+as+'" onclick="sdConfirmInterstore(this.dataset.lid,this.dataset.as)" style="border:none;background:'+color+';color:#fff;border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">'+label+'</button></div>';
   };
+  var isStoreSide = sdIsInterstoreStoreSide(l, rep);
   if(l.warehouse_response==='sent'){
-    /* Счетоводителят по обекти има store_name "Централен офис", а обектите му
-       са в assigned_stores - затова двете проверки, не само store_name. */
-    var mine = assignedStores() || [];
-    var isStoreSide = canEditSD(l) && !isLogisticsWarehouseUser() &&
-      (currentUser.store_name===rep.store_name || mine.indexOf(rep.store_name)>=0);
-    return isStoreSide ? mk('✅ Получено','#0d9488') : '';
+    return isStoreSide ? mk('✅ ПРИЕТО','#0d9488','store') : sdStoreResponseLabel(l);
   }
+  /* Обратно движение: магазинът първо пуска движението в SAP (или казва, че
+     не може - няма наличност в логистика), и чак тогава складът приема
+     стоката обратно. Двата бутона на магазина остават кликаеми и след избор -
+     "няма наличност" става "пуснато", когато складът оправи наличността. */
   if(l.warehouse_response==='return'){
+    if(isStoreSide){
+      var sb = function(val,label,color,onclick){
+        var active = l.store_response===val;
+        return '<button data-lid="'+l.id+'" onclick="'+onclick+'" style="border:none;background:'+(active?color:color+'1a')+';color:'+(active?'#fff':color)+';border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">'+(active?'✓ ':'')+label+'</button>';
+      };
+      var hs = '<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap;">'+
+        sb('sap_done','📄 ПУСНАТО В SAP','#7c3aed',"sdSetStoreResponse(this.dataset.lid,'sap_done')")+
+        sb('no_stock','⛔ НЯМА НАЛИЧНОСТ В ЛОГИСТИКА','#dc2626','openStoreNoStockModal(this.dataset.lid)')+
+        '</div>';
+      if(l.store_response==='no_stock' && l.store_response_comment){
+        hs += '<div style="margin-top:3px;font-size:11px;color:#1e293b;white-space:normal;">💬 '+esc(l.store_response_comment)+'</div>';
+      }
+      return hs;
+    }
     var isMyWh = isLogisticsWarehouseUser() && rep.counterpart===currentUser.store_name;
-    return isMyWh ? mk('📬 Прието обратно','#7c3aed') : '';
+    var lbl = sdStoreResponseLabel(l);
+    return (isMyWh && l.store_response==='sap_done') ? lbl+mk('📬 Прието обратно','#7c3aed','warehouse') : lbl;
   }
   return '';
+}
+/* "Магазинът" по междускладов ред - същата проверка, която стоеше само при
+   "Получено". Счетоводителят по обекти има store_name "Централен офис", а
+   обектите му са в assigned_stores - затова двете проверки, не само store_name. */
+function sdIsInterstoreStoreSide(l, rep){
+  var mine = assignedStores() || [];
+  return canEditSD(l) && !isLogisticsWarehouseUser() &&
+    (currentUser.store_name===rep.store_name || mine.indexOf(rep.store_name)>=0);
+}
+/* Отговорът на магазина като текст - за склада и за всички, които не са
+   магазинът (Цвети/admin). Без бутони. */
+function sdStoreResponseLabel(l){
+  if(l.store_response==='no_stock'){
+    return '<div style="margin-top:3px;font-size:10.5px;color:#dc2626;font-weight:700;">⛔ Няма наличност в логистика</div>'+
+      (l.store_response_comment?'<div style="margin-top:2px;font-size:11px;color:#1e293b;white-space:normal;">💬 '+esc(l.store_response_comment)+'</div>':'');
+  }
+  if(l.store_response==='sap_done' || l.store_response==='accepted'){
+    return '<div style="margin-top:3px;font-size:10.5px;color:#7c3aed;font-weight:600;">'+
+      (l.store_response==='sap_done'?'📄 Пуснато в SAP':'✅ Прието')+
+      (l.store_response_by?' · '+esc(l.store_response_by):'')+
+      (l.store_response_at?' · '+sdFmtDateTime(l.store_response_at):'')+'</div>';
+  }
+  return '<div style="margin-top:3px;font-size:10.5px;color:#94a3b8;">чака магазина</div>';
+}
+function openStoreNoStockModal(lineId){
+  var l = sdData.find(function(x){return String(x.id)===String(lineId);});
+  if(!l)return;
+  var existing = document.getElementById('sdnostock-ov'); if(existing) existing.remove();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="sdnostock-ov"><div class="bmod" style="width:380px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">⛔ Няма наличност в логистика</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(l.material_name||'')+'</div>'+
+    '<label class="fl">Коментар към склада (по избор)</label>'+
+    '<input class="fi" id="sdnostock-comment" value="'+escVal(l.store_response_comment)+'" placeholder="напр. SAP отказва движението - наличност 0">'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="document.getElementById(\'sdnostock-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button data-lid="'+lineId+'" onclick="sdSetStoreResponse(this.dataset.lid,\'no_stock\',document.getElementById(\'sdnostock-comment\').value)" style="border:none;background:#dc2626;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>'+
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+/* Записва отговора на магазина. status НЕ се пипа - редът остава 'new', докато
+   складът не приеме стоката обратно. Коментарът е на "няма наличност": при
+   "пуснато в SAP" не се трие (остава за история), просто не се показва. */
+function sdSetStoreResponse(lineId,val,comment){
+  var line = sdData.find(function(x){return String(x.id)===String(lineId);});
+  if(!line) return;
+  sdKeepScroll(line.report_id);
+  var at = new Date().toISOString(), by = sdActor();
+  var data = {store_response:val,store_response_by:by,store_response_at:at};
+  if(val==='no_stock') data.store_response_comment = String(comment||'').trim() || null;
+  sbPatch('stock_differences','id=eq.'+lineId,data).then(function(res){
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    line.store_response=val; line.store_response_by=by; line.store_response_at=at;
+    if(val==='no_stock') line.store_response_comment=data.store_response_comment;
+    var ov=document.getElementById('sdnostock-ov'); if(ov) ov.remove();
+    toast('✅ Записано');
+    loadStockDiff();
+  });
 }
 function openWarehouseResponseModal(lineId,val){
   var l = sdData.find(function(x){return String(x.id)===String(lineId);});
@@ -945,19 +1025,24 @@ function sdMarkTaken(id) {
    която РЕАЛНО е получила стоката: магазинът при "Изпратено", складът при
    "Обратно движение". Схемата не се пипа - ползват се status='received',
    completed_by и completed_at, същите колони като при sdMarkTaken. */
-function sdConfirmInterstore(lineId){
+function sdConfirmInterstore(lineId, as){
   var line = sdData.find(function(x){return String(x.id)===String(lineId);});
   if(!line) return;
   if(!confirm('Потвърди, че стоката е получена и заприходена?')) return;
   /* Котва към бланката - иначе пре-рендирането връща потребителя най-отгоре. */
   sdKeepScroll(line.report_id);
   var at = new Date().toISOString(), by = sdActor();
-  sbPatch('stock_differences','id=eq.'+lineId,{status:'received',completed_by:by,completed_at:at}).then(function(res){
+  var data = {status:'received',completed_by:by,completed_at:at};
+  /* ✅ ПРИЕТО на магазина е и неговият отговор по реда. "Прието обратно" на
+     склада НЕ пише store_response - там отговорът вече е sap_done. */
+  if(as==='store'){ data.store_response='accepted'; data.store_response_by=by; data.store_response_at=at; }
+  sbPatch('stock_differences','id=eq.'+lineId,data).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     /* Локално ПРЕДИ проверката за останалите редове - точно както прави
        resolveDiffLine(). Иначе последният ред се брои по стария си статус и
        бланката никога не се затваря от самата себе си. */
     line.status='received'; line.completed_by=by; line.completed_at=at;
+    if(as==='store'){ line.store_response='accepted'; line.store_response_by=by; line.store_response_at=at; }
     var siblings = sdData.filter(function(x){return x.report_id===line.report_id;});
     var allReceived = siblings.length>0 && siblings.every(function(x){return x.status==='received';});
     if(allReceived && line.report_id){
@@ -1840,8 +1925,12 @@ function renderDiffReportsSection(){
         '<th style="padding:3px 6px;text-align:right;">'+repQty.realShort+'</th><th style="padding:3px 6px;">Коментар (магазин)</th><th style="padding:3px 6px;">Снимки</th><th style="padding:3px 6px;">Коментар (Цвети)</th><th style="padding:3px 6px;">Решение (Цвети)</th><th style="padding:3px 6px;">Отговор на склада</th></tr>';
       lines.forEach(function(l){
         /* Решените редове затихват в зелено, за да изпъкват НЕрешените -
-           корекцията от магазина (жълто) има приоритет, тя е по-спешна. */
-        var rowBg = l.store_corrected_at ? 'background:#fffbeb;' : (l.type ? 'background:#f0fdf4;color:#64748b;' : '');
+           корекцията от магазина (жълто) има приоритет, тя е по-спешна.
+           Над двете стои червеното: магазинът не може да пусне обратното
+           движение (няма наличност в логистика) - ходът е на склада. При
+           status='received' редът е приключен и червеното отпада. */
+        var rowBg = (l.store_response==='no_stock' && l.status!=='received') ? 'background:#fef2f2;' :
+          (l.store_corrected_at ? 'background:#fffbeb;' : (l.type ? 'background:#f0fdf4;color:#64748b;' : ''));
         h+='<tr style="border-top:1px solid #f1f5f9;'+rowBg+'">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
           /* Сигналът за размяна стои под ИМЕТО на артикула, а не в колоната на
@@ -3130,11 +3219,16 @@ function sdUnreviewedCountFor(reports, lines){
   if(isLogisticsWarehouseUser()){
     return unrev.filter(function(r){
       if(r.counterpart !== currentUser.store_name) return false;
-      /* Бланка, по която складът вече е отговорил на ВСИЧКИ редове, вече не
-         чака него - не бива да виси като спешна на таба. */
+      /* Бланката чака склада, ако има ред без отговор от него ИЛИ ред, по
+         който магазинът вече е отговорил на обратното движение (пуснато в SAP
+         -> складът да приеме; няма наличност -> складът да оправи
+         наличността) и редът още не е приключен. */
       var repLines = (lines||[]).filter(function(x){ return x.report_id===r.id; });
       if(!repLines.length) return true;
-      return !repLines.every(function(l){ return !!l.warehouse_response; });
+      return repLines.some(function(l){
+        if(!l.warehouse_response) return true;
+        return (l.store_response==='sap_done' || l.store_response==='no_stock') && l.status!=='received';
+      });
     }).length;
   }
   if(canReviewDiff()) return unrev.length;
@@ -3158,7 +3252,7 @@ function sdRefreshTabBadge(){
      видим, затова балончето не изостава. */
   if(document.hidden) return;
   var q = 'select=id,store_name,counterpart,reviewed&reviewed=eq.false';
-  var qLines = 'select=report_id,warehouse_response';
+  var qLines = 'select=report_id,warehouse_response,store_response,status';
   if(isLogisticsWarehouseUser()){
     q += '&counterpart=eq.' + encodeURIComponent(currentUser.store_name);
   } else if(!canReviewDiff()){

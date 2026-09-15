@@ -34,6 +34,7 @@ const TESTS = [
   'stock-returns-manual-order.test.js',
   'interstore-counterpart-select.test.js',
   'interstore-confirm-flow.test.js',
+  'sd-store-response.test.js',
   'interstore-swap-signal.test.js',
   'loading-lists-warehouse.test.js',
   'loading-lists-store.test.js',
