@@ -1,6 +1,8 @@
-/* admin.js — Администрация (само за роля admin) */
+/* admin.js — Администрация (admin; accounting — само картата „Известия") */
 
 function loadAdmin(){
+  adminApplyRoleView();
+  if(!notifIsAdmin()){ loadNotificationsAdmin(); return; } /* accounting: само „Известия" */
   loadStoresAdmin();
   loadUsersAdmin();
   loadRestrictionsAdmin();
@@ -12,6 +14,21 @@ function loadAdmin(){
     if(backupContainer) backupContainer.innerHTML=renderBackupSection();
     setTimeout(loadBackupAdmin, 500);
   }
+}
+
+/* Кои карти вижда ролята. Табът е за admin и accounting (setupTabsForRole в
+   shared.js); accounting вижда само картата „Известия", а заявките за
+   потребители, магазини, забрани и каталог изобщо не тръгват (loadAdmin
+   излиза преди тях). Друга роля, стигнала дотук през конзолата, не вижда
+   нито една карта. */
+function adminApplyRoleView(){
+  var mod = document.getElementById('mod-admin'); if(!mod) return;
+  var admin = notifIsAdmin(), canNotif = notifCanSee();
+  Array.prototype.forEach.call(mod.querySelectorAll('.card'), function(c){
+    c.style.display = (admin || (canNotif && c.id === 'notif-admin-card')) ? '' : 'none';
+  });
+  var sub = mod.querySelector('.pg-sub');
+  if(sub) sub.textContent = admin ? 'Управление на магазини и потребители.' : 'Известия и общи отчети.';
 }
 
 /* ══════════════════════════════════════════
@@ -1076,6 +1093,8 @@ var NOTIF_IMPLEMENTED_TOPICS = ['overdue_tasks', 'today_deadlines', 'promo_expir
 function notifTopicHasBuilder(key){ return NOTIF_IMPLEMENTED_TOPICS.indexOf(key) >= 0; }
 
 function notifIsAdmin(){ return !!(currentUser && currentUser.role === 'admin'); }
+/* Картата „Известия" — admin и accounting (същият списък като таба в shared.js). */
+function notifCanSee(){ return !!(currentUser && ['admin','accounting'].indexOf(currentUser.role) >= 0); }
 
 /* weekdays е int[] в базата. PostgREST го връща като масив, но огледалото и
    стари редове могат да дадат текстовия литерал '{1,2,3,4,5}'. */
@@ -1141,20 +1160,25 @@ function notifTopicLabel(key){
 
 function loadNotificationsAdmin(){
   var card = document.getElementById('notif-admin-card');
-  /* Темите, матрицата, изключенията и насрочените са само за admin — същата
-     проверка като при backup секцията в loadAdmin(). Изключение е „📧 Общи
-     отчети": тя е за canEdit (admin и accounting). При accounting картата
-     показва само нея и базата не се пита за известията.
-     ВНИМАНИЕ: самият таб „Администрация" е само за admin (setupTabsForRole в
-     shared.js), тоест днес accounting не стига дотук. Клонът е готов, ако
-     табът (или картата) се отвори и за accounting — решение, не пропуск. */
-  var reportsOnly = !notifIsAdmin() && adminReportsCanSee();
-  if (!notifIsAdmin() && !reportsOnly) { if (card) card.style.display = 'none'; return; }
+  /* Картата е за admin и accounting. Accounting вижда матрицата и „📧 Общи
+     отчети" (без „Изпрати сега"); темите, изключенията и насрочените са само
+     за admin и за тях базата не се пита. Друга роля — нищо, без заявки. */
+  if (!notifCanSee()) { if (card) card.style.display = 'none'; return; }
   if (card) card.style.display = '';
+  var admin = notifIsAdmin();
+  ['notif-topics-body','notif-overrides-body','notif-schedules-body'].forEach(function(id){
+    var el = document.getElementById(id); if (el) el.style.display = admin ? '' : 'none';
+  });
   loadReportsAdmin();
-  if (reportsOnly) {
-    ['notif-topics-body','notif-matrix-body','notif-overrides-body','notif-schedules-body'].forEach(function(id){
-      var el = document.getElementById(id); if (el) el.style.display = 'none';
+  if (!admin) {
+    /* Темите трябват само за редовете на матрицата — таблицата им не се рисува. */
+    Promise.all([
+      sbGet('notification_topics','order=sort_order,key'),
+      sbGet('notification_matrix','order=topic_key,group_key')
+    ]).then(function(res){
+      adminNotifTopics = Array.isArray(res[0]) ? res[0] : [];
+      adminNotifMatrix = Array.isArray(res[1]) ? res[1] : [];
+      renderNotifMatrix();
     });
     return;
   }
@@ -1210,7 +1234,7 @@ var ADMIN_REPORTS = [
   { kind: 'warehouse', label: '📦 Склад',    schedule: 'неделя 21:00',    test: 'sendWarehouseReportTest', send: null }
 ];
 
-function adminReportsCanSee(){ return typeof canEdit === 'function' && !!canEdit(); }
+function adminReportsCanSee(){ return notifCanSee(); }
 
 function adminReportDef(kind){
   return ADMIN_REPORTS.filter(function(r){ return r.kind === kind; })[0] || null;

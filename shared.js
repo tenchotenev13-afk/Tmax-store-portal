@@ -995,8 +995,6 @@ function startApp(){
   showModule(startTab);
 }
 function setupTabsForRole(){
-  /* Покажи Admin секцията само за admin */
-
   /* Таб Каса — само за kasa, manager, admin, accounting */
   var kasaRoles=['kasa','admin','manager']; /* kasa, управители и администратори */
   var kasaTab=document.getElementById('tab-kasa');
@@ -1028,10 +1026,14 @@ function setupTabsForRole(){
   if(srTab)srTab.style.display='';
   var sdTab=document.getElementById('tab-stock-diff');
   if(sdTab)sdTab.style.display='';
+  /* Таб Администрация — admin и accounting. Accounting вижда вътре САМО
+     картата „Известия" (матрицата и „📧 Общи отчети") — решава loadAdmin() в
+     admin.js; потребители, магазини и останалото са само за admin. */
+  var adminTabRoles=['admin','accounting'];
   var adminTab=document.getElementById('tab-admin');
-  if(adminTab)adminTab.style.display=currentUser.role==='admin'?'':'none';
+  if(adminTab)adminTab.style.display=adminTabRoles.indexOf(currentUser.role)>=0?'':'none';
   var sepAdmin=document.getElementById('sep-admin');
-  if(sepAdmin)sepAdmin.style.display=currentUser.role==='admin'?'':'none';
+  if(sepAdmin)sepAdmin.style.display=adminTabRoles.indexOf(currentUser.role)>=0?'':'none';
 
   /* Покажи .adm елементи (напр. бутон + Добави в Инструкции) за admin */
   var admRoles=['admin','accounting'];

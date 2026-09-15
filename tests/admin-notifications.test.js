@@ -153,27 +153,47 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
 (async function run() {
 
   /* ═══ 1. Права ═══════════════════════════════════════════════════════ */
-  section('1. Секцията е само за admin');
+  section('1. Права: admin — всичко, accounting — матрицата, друга роля — нищо');
   {
+    /* accounting (от 15.09.2026): картата се вижда, но само с матрицата и
+       „📧 Общи отчети". Темите, изключенията и насрочените не се рисуват и за
+       тях базата не се пита. */
     const h = env({ user: NOT_ADMIN });
-    if (guard('loadNotificationsAdmin() не хвърля при друга роля', () => h.w.loadNotificationsAdmin())) {
+    if (guard('loadNotificationsAdmin() не хвърля при accounting', () => h.w.loadNotificationsAdmin())) {
       await ticks();
       const card = h.doc.getElementById('notif-admin-card');
       ok('картата съществува в index.html', !!card);
-      ok('картата е скрита', !!card && card.style.display === 'none', card ? card.style.display : '—');
-      ok('базата НЕ е питана за темите',
-        !h.calls.get.some(u => u.indexOf('notification_topics') >= 0),
-        h.calls.get.join('\n'));
-      ok('базата НЕ е питана за матрицата',
-        !h.calls.get.some(u => u.indexOf('notification_matrix') >= 0));
-      ok('базата НЕ е питана за изключенията',
-        !h.calls.get.some(u => u.indexOf('notification_overrides') >= 0));
-      ok('нищо не е рендирано — индикаторът стои',
-        h.doc.getElementById('notif-topics-body').textContent.indexOf('Зареждане') >= 0);
-      ok('няма редове с теми',
+      ok('accounting: картата е видима', !!card && card.style.display !== 'none', card ? card.style.display : '—');
+      ok('accounting: матрицата е нарисувана',
+        h.doc.querySelectorAll('#notif-matrix-body tbody tr').length === TOPICS.length,
+        h.doc.querySelectorAll('#notif-matrix-body tbody tr').length);
+      ok('accounting: темите са скрити и без редове',
+        h.doc.getElementById('notif-topics-body').style.display === 'none' &&
         h.doc.querySelectorAll('#notif-topics-body tbody tr').length === 0);
+      ok('accounting: изключенията и насрочените са скрити',
+        h.doc.getElementById('notif-overrides-body').style.display === 'none' &&
+        h.doc.getElementById('notif-schedules-body').style.display === 'none');
+      ok('accounting: базата НЕ е питана за изключенията',
+        !h.calls.get.some(u => u.indexOf('notification_overrides') >= 0), h.calls.get.join('\n'));
+      ok('accounting: базата НЕ е питана за насрочените',
+        !h.calls.get.some(u => u.indexOf('notification_schedules') >= 0));
+      ok('accounting: базата НЕ е питана за потребителите',
+        !h.calls.get.some(u => u.indexOf('/users') >= 0));
     }
     h.close();
+
+    const s = env({ user: { id: 'u-mgr', email: 'mgr@temax.bg', display_name: 'Управител', role: 'manager', store_name: 'Троян' } });
+    if (guard('loadNotificationsAdmin() не хвърля при manager', () => s.w.loadNotificationsAdmin())) {
+      await ticks();
+      const card = s.doc.getElementById('notif-admin-card');
+      ok('manager: картата е скрита', !!card && card.style.display === 'none', card ? card.style.display : '—');
+      ok('manager: базата НЕ е питана за нито една notification_ таблица',
+        !s.calls.get.some(u => u.indexOf('notification_') >= 0), s.calls.get.join('\n'));
+      ok('manager: нищо не е рендирано — индикаторът стои',
+        s.doc.getElementById('notif-topics-body').textContent.indexOf('Зареждане') >= 0 &&
+        s.doc.getElementById('notif-matrix-body').textContent.indexOf('Зареждане') >= 0);
+    }
+    s.close();
 
     /* Контрол: същите проверки срещу admin трябва да дадат обратното —
        иначе „не се рендира" би минавало и защото кодът изобщо не работи. */

@@ -10,9 +10,8 @@
      1. admin: 4 реда (Дневен/Седмичен/Палети/Склад) с разписание и брой
         получатели; „📤 Изпрати сега" само на Дневен и Седмичен; сивият текст;
         users се чете с изричен select=;
-     2. accounting (canEdit) вижда секцията БЕЗ „Изпрати сега" и без темите/
-        матрицата; manager не вижда нищо и базата не се пита. Самият таб
-        „Администрация" обаче е само за admin — заковано като известно;
+     2. accounting вижда секцията БЕЗ „Изпрати сега", матрицата — да, темите —
+        не; manager не вижда нищо и базата не се пита;
      3. „Тест до мен" праща на currentUser.email (не на написаното в
         полетата), двоен клик = една заявка, заключено до края; без имейл в
         профила → нула заявки; заключването е по вид отчет;
@@ -129,22 +128,16 @@ const sendBtns = h => Array.prototype.filter.call(h.doc.querySelectorAll('#notif
     ok('accounting: секцията е нарисувана (4 реда)', h.doc.querySelectorAll('#notif-reports-body tr[id^="report-row-"]').length === 4);
     ok('accounting: 4 × „Тест до мен"', ['daily', 'weekly', 'pallets', 'warehouse'].every(k => !!rowBtn(h, k, 'Тест до мен')));
     ok('accounting: НЯМА „Изпрати сега"', sendBtns(h).length === 0, sendBtns(h).length);
-    ok('accounting: темите и матрицата са скрити',
+    ok('accounting: темите са скрити, матрицата — не',
       h.doc.getElementById('notif-topics-body').style.display === 'none' &&
-      h.doc.getElementById('notif-matrix-body').style.display === 'none');
-    ok('accounting: базата не е питана за темите', !h.calls.get.some(u => u.indexOf('notification_topics') >= 0));
+      h.doc.getElementById('notif-matrix-body').style.display !== 'none');
+    ok('accounting: базата не е питана за изключенията и насрочените',
+      !h.calls.get.some(u => u.indexOf('notification_overrides') >= 0 || u.indexOf('notification_schedules') >= 0));
     const before = h.calls.confirm.length;
     guard('accounting: пряко извикване на adminReportSendClick', () => h.w.adminReportSendClick(null, 'daily'));
     await settle();
     ok('accounting: пряко извикване → нито confirm, нито заявка',
       h.calls.confirm.length === before && mails(h).length === 0 && h.collected.daily === 0);
-    /* Горното вика loadNotificationsAdmin() направо. В портала табът
-       „Администрация" е само за admin — заковано тук, за да не изглежда, че
-       accounting реално вижда секцията. Промени ли се правото, тази проверка
-       пада и отчетът трябва да се обнови. */
-    guard('setupTabsForRole при accounting', () => h.w.setupTabsForRole());
-    ok('ИЗВЕСТНО: таб „Администрация" е скрит за accounting',
-      h.doc.getElementById('tab-admin').style.display === 'none', h.doc.getElementById('tab-admin').style.display);
     h.close();
   }
   {
