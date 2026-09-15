@@ -17,8 +17,6 @@ var todayYesterdaySnapshot = null; /* вчерашният snapshot, за тен
 var todayTrendFetched = false;     /* пазим само 1 fetch на тенденцията на зареждане, не при всеки re-render */
 var todayPhotosExpanded = false;   /* дали е разгъната секцията "Снимки за преглед" */
 var todayPhotosCache = null;       /* заредените снимки - lazy, само при първо разгъване */
-var todayRecipientsCache = null;   /* report_recipients - lazy, зарежда се само веднъж на зареждане */
-var todayRecipientsFetched = false;
 var todayCrossCache = null;        /* кросмодулно обобщение (Разлики/Каса/Стока на път/Палети) - lazy */
 var todayCrossFetched = false;
 
@@ -32,8 +30,6 @@ function loadTodayDashboard(){
   todayYesterdaySnapshot = null;
   todayPhotosExpanded = false;
   todayPhotosCache = null;
-  todayRecipientsCache = null;
-  todayRecipientsFetched = false;
   todayCrossCache = null;
   todayCrossFetched = false;
   /* Deep-link от имейл: ?store=Име%20магазин -> автоматично разгъва точно
@@ -350,137 +346,6 @@ function todayStoreFilterHtml(stores, selected){
   return h;
 }
 
-/* Тестова лента за ръчно изпращане на дневен/седмичен репорт — само за
-   admin/accounting (canEdit), докато не минем към pg_cron автоматика */
-function todayReportTestBarHtml(){
-  if (typeof canEdit !== 'function' || !canEdit()) return '';
-  if (typeof sendDailyReportTest !== 'function') return ''; /* report.js не е зареден */
-  /* Адресът е на НАТИСНАЛИЯ. Досега тук стоеше фиксиран ten.tenev@temax.bg и
-     всеки admin/accounting, който натисне, пращаше на Тенчо — на 15.09.2026 в
-     08:33 това изглеждаше като счупен крон. Без имейл полето остава празно и
-     todayReportTestClick() не праща. */
-  var me = (typeof currentUser !== 'undefined' && currentUser && currentUser.email) ? String(currentUser.email) : '';
-  return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#f8fafc;border:1px solid #eef1f6;border-radius:10px;padding:10px 14px;margin:14px 0;">' +
-    '<span style="font-size:12px;color:#64748b;">✉️ Тест на автоматичния репорт:</span>' +
-    '<input id="today-report-email" placeholder="имейл за тест" value="' + (me ? esc(me) : '') + '" style="flex:1;min-width:180px;font-size:12px;border:1px solid #e2e8f0;border-radius:6px;padding:6px 9px;">' +
-    '<button onclick="todayReportTestClick(this,\'daily\')" style="border:none;background:#1E2761;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📋 Дневен</button>' +
-    '<button onclick="todayReportTestClick(this,\'weekly\')" style="border:none;background:#4c1d95;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📊 Седмичен</button>' +
-    '<button onclick="todayReportTestClick(this,\'pallets\')" style="border:none;background:#b45309;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">Палети (тест до мен)</button>' +
-    '<button onclick="todayReportTestClick(this,\'warehouse\')" style="border:none;background:#0f766e;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">Склад (тест до мен)</button>' +
-    '<div id="today-report-test-note" style="flex-basis:100%;font-size:11px;color:#94a3b8;">Тестът праща днешния дневен / текущата седмица с данните към момента — не е редовният отчет (21:00)</div>' +
-    /* Тук стоеше трети бутон „📬 Маршрутизация (тест)", който викаше
-       sendWeeklyReportRouted(). Махнат на 02.09.2026: същите писма вече ги
-       праща едж функцията send-routed-report по крон (job 16, понеделник
-       08:10) — до истинските получатели. Бутонът пращаше ВСИЧКИ писма на
-       един адрес, с тема „[ТЕСТ за Х]", и не личеше какво прави: друг
-       администратор го натисна и получи девет писма наведнъж.
-       Не го връщай — тестовият режим на живата функция се управлява от
-       колоната test_email на реда weekly_routed в notification_topics. */
-    '</div>';
-}
-
-/* Един клик = едно писмо. На 15.09.2026 в 08:33 дневният тръгна два пъти за
-   секунда: бутонът не се заключваше, а събирането на данните трае секунди.
-   Флагът е по вид отчет и живее ИЗВЪН DOM-а — пренарисуван таб по време на
-   заявката дава нов, отключен бутон, но флагът пак спира второто писмо.
-   Отключва се от done(), който send*ReportTest вика на всеки изход. */
-var todayReportTestBusy = {};
-function todayReportTestClick(btn, kind){
-  var names = { daily: 'sendDailyReportTest', weekly: 'sendWeeklyReportTest',
-                pallets: 'sendPalletsReportTest', warehouse: 'sendWarehouseReportTest' };
-  var fn = window[names[kind]];
-  if (typeof fn !== 'function' || todayReportTestBusy[kind]) return;
-  var inp = document.getElementById('today-report-email');
-  var to = inp ? String(inp.value || '').trim() : '';
-  if (!to) { toast('Въведи имейл','#dc2626'); return; }
-  todayReportTestBusy[kind] = true;
-  if (btn) btn.disabled = true;
-  var released = false;
-  function done(){
-    if (released) return;
-    released = true;
-    todayReportTestBusy[kind] = false;
-    if (btn) btn.disabled = false;
-  }
-  try { fn(to, done); } catch (e) { done(); throw e; }
-}
-
-/* Зарежда списъка получатели (report_recipients) - веднъж на зареждане на
-   таба (todayRecipientsFetched guard), после наново при всяко добавяне/триене. */
-function todayLoadRecipients(){
-  if (typeof loadReportRecipients !== 'function') return; /* report.js не е зареден */
-  loadReportRecipients(function(rows){
-    todayRecipientsCache = rows;
-    var wrap = document.getElementById('mod-today');
-    if (wrap && todayCache) renderTodayDashboard(wrap, todayCache.items, todayCache.noDueItems, todayCache.comps, todayCache.stores);
-  });
-}
-function todayAddRecipient(){
-  var nameEl = document.getElementById('today-rcpt-name');
-  var emailEl = document.getElementById('today-rcpt-email');
-  var dailyEl = document.getElementById('today-rcpt-daily');
-  var weeklyEl = document.getElementById('today-rcpt-weekly');
-  if (!emailEl) return;
-  var email = emailEl.value.trim();
-  if (!email) { toast('Въведи имейл','#dc2626'); return; }
-  addReportRecipient(nameEl.value.trim(), email, dailyEl.checked, weeklyEl.checked, function(ok){
-    if (ok) { toast('✅ Добавен получател'); todayLoadRecipients(); }
-    else toast('❌ Грешка при добавяне','#dc2626');
-  });
-}
-function todayDeleteRecipient(id){
-  deleteReportRecipient(id, function(ok){
-    if (ok) { toast('Изтрит получател'); todayLoadRecipients(); }
-    else toast('❌ Грешка при триене','#dc2626');
-  });
-}
-
-/* Панел за управление на получателите на ОБЩИЯ репорт (report_recipients) +
-   бутони за реално изпращане сега до целия списък. Само за admin/accounting
-   (canEdit), както и останалите репорт контроли по-горе. */
-function todayReportRecipientsHtml(){
-  if (typeof canEdit !== 'function' || !canEdit()) return '';
-  if (typeof loadReportRecipients !== 'function') return ''; /* report.js не е зареден */
-  if (!todayRecipientsFetched) { todayRecipientsFetched = true; todayLoadRecipients(); }
-
-  var h = '<div style="background:#f8fafc;border:1px solid #eef1f6;border-radius:10px;padding:12px 14px;margin:0 0 14px;">';
-  h += '<div style="font-size:11.5px;font-weight:800;color:#0f172a;margin-bottom:8px;">📧 Получатели на общия репорт</div>';
-
-  var list = todayRecipientsCache;
-  if (list === null) {
-    h += '<div style="font-size:11.5px;color:#94a3b8;margin-bottom:8px;">⏳ Зареждане...</div>';
-  } else if (!list.length) {
-    h += '<div style="font-size:11.5px;color:#94a3b8;margin-bottom:8px;">Няма добавени получатели.</div>';
-  } else {
-    h += '<div style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;">';
-    list.forEach(function(r){
-      h += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;color:#334155;background:#fff;border:1px solid #eef1f6;border-radius:7px;padding:5px 9px;">';
-      h += '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(r.name||r.email) + ' <span style="color:#94a3b8;">(' + esc(r.email) + ')</span></span>';
-      h += '<span style="font-size:10px;color:#64748b;white-space:nowrap;">' + (r.daily?'📋':'') + (r.weekly?'📊':'') + '</span>';
-      h += '<button onclick="todayDeleteRecipient(\'' + r.id + '\')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;line-height:1;">✕</button>';
-      h += '</div>';
-    });
-    h += '</div>';
-  }
-
-  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">';
-  h += '<input id="today-rcpt-name" placeholder="име" style="width:100px;font-size:11.5px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;">';
-  h += '<input id="today-rcpt-email" placeholder="имейл" style="flex:1;min-width:140px;font-size:11.5px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;">';
-  h += '<label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:3px;"><input id="today-rcpt-daily" type="checkbox" checked style="margin:0;">дневен</label>';
-  h += '<label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:3px;"><input id="today-rcpt-weekly" type="checkbox" checked style="margin:0;">седмичен</label>';
-  h += '<button onclick="todayAddRecipient()" style="border:none;background:#1E2761;color:#fff;border-radius:6px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">+ Добави</button>';
-  h += '</div>';
-
-  if (typeof sendDailyReportToRecipients==='function' && list && list.length) {
-    h += '<div style="display:flex;gap:8px;margin-top:10px;border-top:1px solid #e5e9f1;padding-top:10px;flex-wrap:wrap;">';
-    h += '<button onclick="sendDailyReportToRecipients()" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати сега — Дневен</button>';
-    h += '<button onclick="sendWeeklyReportToRecipients()" style="border:none;background:#0369a1;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати сега — Седмичен</button>';
-    h += '</div>';
-  }
-  h += '</div>';
-  return h;
-}
-
 /* Зарежда кросмодулното обобщение (Разлики/За връщане/Каса/Стока на път/
    Палети) - същата функция, която захранва и седмичния имейл репорт
    (report.js), само че тук се показва живо в самия таб, не само веднъж
@@ -675,8 +540,9 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
   h += todayStoreFilterHtml(stores, todayFilterStore);
   h += '</div>';
 
-  h += todayReportTestBarHtml();
-  h += todayReportRecipientsHtml();
+  /* Тук стояха лентата „✉️ Тест на автоматичния репорт" и панелът „📧
+     Получатели на общия репорт". От 15.09.2026 са в Администрация → Известия
+     → „📧 Общи отчети" (admin.js). Днес е само за преглед — не ги връщай. */
 
   /* STAT CARDS — винаги за всички обекти, за контекст, независимо от филтъра */
   h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:16px 0 22px;">';

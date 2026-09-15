@@ -16,7 +16,8 @@
      f) получатели: logistics с имейл → да; без имейл / неактивен → не;
         manager / регионален → не
      g) темата носи името на склада и датата
-     h) истински клик по бутона „Склад (тест до мен)" в таб „Днес"
+     h) истински клик по „Тест до мен" на реда „Склад" в Администрация →
+        Известия → „📧 Общи отчети" (до 15.09.2026 — лента в таб „Днес")
 
    Стъбът връща ЦЯЛАТА таблица независимо от query низа — a) и b) доказват JS
    филтъра. Часовникът е замразен в неделя 13.09.2026 21:00.
@@ -195,25 +196,26 @@ const rowOf = (html, num) => {
     h.close();
   }
 
-  section('h) истински клик по „Склад (тест до мен)" в таб „Днес"');
+  section('h) истински клик по „Тест до мен" на реда „Склад" в Администрация → Известия');
   {
-    const h = env(ORDERS, ['bulletin.js', 'email.js', 'today.js', 'report.js']);
+    const h = env(ORDERS, ['bulletin.js', 'email.js', 'admin.js', 'report.js']);
     const sent = [];
     h.w.sendEmail = function (to, subject, html) {
       sent.push({ to: to, subject: subject, html: html });
       return Promise.resolve({ ok: true, status: 200 });
     };
-    h.doc.body.insertAdjacentHTML('beforeend', h.w.todayReportTestBarHtml());
-    const btn = Array.from(h.doc.querySelectorAll('button')).find(b => b.textContent.trim() === 'Склад (тест до мен)');
-    if (ok('бутонът „Склад (тест до мен)" е в лентата', !!btn)) {
-      ok('до „Палети (тест до мен)"', Array.from(h.doc.querySelectorAll('button'))
-        .some(b => b.textContent.trim() === 'Палети (тест до мен)'));
-      h.doc.getElementById('today-report-email').value = 'test@temax.bg';
-      realClick(h.w, btn, 'Склад (тест до мен)');
+    h.w.loadReportsAdmin();
+    await ticks(); await ticks(); await ticks();
+    const row = h.doc.getElementById('report-row-warehouse');
+    const btn = row && Array.from(row.querySelectorAll('button')).find(b => b.textContent.trim() === 'Тест до мен');
+    if (ok('редът „Склад" има бутон „Тест до мен"', !!btn)) {
+      ok('разписанието е неделя 21:00', row.textContent.indexOf('неделя 21:00') >= 0, row.textContent);
+      ok('без „Изпрати сега" (ръчен път до получателите няма)', row.textContent.indexOf('Изпрати сега') < 0);
+      realClick(h.w, btn, 'Склад: Тест до мен');
       await ticks(); await ticks();
       ok('кликът праща точно едно писмо', sent.length === 1, String(sent.length));
       const m = sent[0] || {};
-      ok('до въведения имейл', m.to === 'test@temax.bg', String(m.to));
+      ok('до имейла на натисналия', m.to === ADMIN.email, String(m.to));
       ok('за Търговище, с „(тест)"',
         m.subject === 'Необработени заявки — Логистичен склад Търговище — 13.09.2026 (тест)', String(m.subject));
       ok('и в писмото са заявките на Търговище, не на Добрич',

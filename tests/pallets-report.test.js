@@ -19,7 +19,8 @@
      g) получатели: регионален само за своите; report_recipients weekly=true
         и scope_stores=null → всички 18; управител не е в списъка
 
-   Плюс: истински клик по бутона „Палети (тест до мен)" в таб „Днес" и нула
+   Плюс: истински клик по „Тест до мен" на реда „Палети" в Администрация →
+   Известия → „📧 Общи отчети" (до 15.09.2026 — лента в таб „Днес") и нула
    заявки към report_snapshots.
 
    Часовникът е замразен в петък 18.09.2026 21:00 — момента на крона.
@@ -274,26 +275,27 @@ const names = arr => (arr || []).map(x => x.store);
     h.close();
   }
 
-  section('Без snapshot и ръчният бутон в таб „Днес"');
+  section('Без snapshot и „Тест до мен" в Администрация → Известия');
   {
-    const h = env(['bulletin.js', 'email.js', 'today.js', 'report.js']);
+    const h = env(['bulletin.js', 'email.js', 'admin.js', 'report.js']);
     const sent = [];
     h.w.sendEmail = function (to, subject, html) {
       sent.push({ to: to, subject: subject, html: html });
       return Promise.resolve({ ok: true, status: 200 });
     };
-    h.doc.body.insertAdjacentHTML('beforeend', h.w.todayReportTestBarHtml());
-    const btn = Array.from(h.doc.querySelectorAll('button'))
-      .find(b => b.textContent.trim() === 'Палети (тест до мен)');
-    if (ok('бутонът „Палети (тест до мен)" е в лентата', !!btn)) {
-      ok('до „Дневен" и „Седмичен"', Array.from(h.doc.querySelectorAll('button'))
-        .some(b => b.textContent.indexOf('Седмичен') >= 0));
-      h.doc.getElementById('today-report-email').value = 'test@temax.bg';
-      realClick(h.w, btn, 'Палети (тест до мен)');
+    h.w.loadReportsAdmin();
+    await ticks(); await ticks(); await ticks();
+    const row = h.doc.getElementById('report-row-pallets');
+    const btn = row && Array.from(row.querySelectorAll('button'))
+      .find(b => b.textContent.trim() === 'Тест до мен');
+    if (ok('редът „Палети" има бутон „Тест до мен"', !!btn)) {
+      ok('разписанието е петък 21:00', row.textContent.indexOf('петък 21:00') >= 0, row.textContent);
+      ok('без „Изпрати сега" (ръчен път до получателите няма)', row.textContent.indexOf('Изпрати сега') < 0);
+      realClick(h.w, btn, 'Палети: Тест до мен');
       await ticks(); await ticks();
       ok('кликът праща точно едно писмо', sent.length === 1, String(sent.length));
       const m = sent[0] || {};
-      ok('до въведения имейл', m.to === 'test@temax.bg', String(m.to));
+      ok('до имейла на натисналия', m.to === ADMIN.email, String(m.to));
       ok('с темата на палетите + „(тест)"', m.subject === 'Палети за прибиране — 18.09.2026 (тест)', String(m.subject));
       ok('и таблицата вътре (всички 18)', !!m.html && m.html.indexOf('от 18 обекта') >= 0);
     }

@@ -1119,9 +1119,9 @@ function buildDailyReportHtml(data){
     'Автоматичен репорт · ТеМАХ Портал');
 }
 
-/* done (по избор) се вика на ВСЕКИ изход — по него лентата в таб „Днес"
-   отключва бутона (todayReportTestClick в today.js). Същото и в останалите
-   три send*ReportTest. */
+/* done (по избор) се вика на ВСЕКИ изход — по него „Тест до мен" в
+   Администрация → Известия отключва бутона (adminReportTestClick в admin.js).
+   Същото и в останалите три send*ReportTest. */
 function sendDailyReportTest(toEmail, done){
   var fin = typeof done === 'function' ? done : function(){};
   if (!toEmail) { toast('Въведи имейл','#dc2626'); fin(); return; }
@@ -3087,7 +3087,7 @@ function personalizedSectionHtml(tasks, comps, allStores){
 }
 
 /* НЕ СЕ ВИКА ОТ ИНТЕРФЕЙСА. Бутонът „📬 Маршрутизация (тест)" в таб Днес
-   беше махнат на 02.09.2026 (виж todayReportTestBarHtml в today.js) —
+   беше махнат на 02.09.2026 (виж бележката при ADMIN_REPORTS в admin.js) —
    истинското изпращане го върши едж функцията send-routed-report по крон.
 
    Функцията остава нарочно, като ИЗТОЧНИК: send-routed-report носи копие
@@ -3128,10 +3128,10 @@ function sendWeeklyReportRouted(testEmail){
 
 /* ═══════ ПОЛУЧАТЕЛИ НА ОБЩИЯ РЕПОРТ (report_recipients) ═══════════
    Редактируем списък (name/email/daily/weekly флагове) - управлява се от
-   UI-то в таб "Днес" (виж today.js). Използва се от sendDailyReportToRecipients/
+   Администрация → Известия → „📧 Общи отчети" (loadReportsAdmin в admin.js;
+   до 15.09.2026 беше в таб "Днес"). Използва се от sendDailyReportToRecipients/
    sendWeeklyReportToRecipients по-долу за РЕАЛНО ръчно изпращане до целия
-   списък наведнъж, докато не минем към pg_cron автоматика (Фаза 2) - тогава
-   същата таблица ще захранва и автоматичния Edge Function репорт. */
+   списък наведнъж, а send-scheduled-report го чете по крон. */
 function loadReportRecipients(cb){
   sbGet('report_recipients','active=eq.true&order=created_at.asc').then(function(rows){
     cb(Array.isArray(rows) ? rows : []);
@@ -3149,37 +3149,47 @@ function deleteReportRecipient(id, cb){
 
 /* РЕАЛНО изпращане (не тест) - до всички активни получатели с daily=true.
    Едно писмо, всички в общо поле "to" (вътрешен екип, не е проблем да се
-   виждат взаимно). */
-function sendDailyReportToRecipients(){
+   виждат взаимно).
+   done (по избор) се вика на ВСЕКИ изход — по него „📤 Изпрати сега" в
+   Администрация → Известия отключва бутона (adminReportSendClick в admin.js). */
+function sendDailyReportToRecipients(done){
+  var fin = typeof done === 'function' ? done : function(){};
   loadReportRecipients(function(recipients){
     var targets = recipients.filter(function(r){ return r.daily; });
-    if (!targets.length) { toast('Няма получатели с включен дневен репорт','#dc2626'); return; }
+    if (!targets.length) { toast('Няма получатели с включен дневен репорт','#dc2626'); fin(); return; }
     toast('⏳ Подготвям и изпращам дневния репорт...');
     collectDailyReportData(function(data){
-      if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
-      var html = buildDailyReportHtml(data);
-      var emails = targets.map(function(r){ return r.email; });
-      sendEmail(emails, reportDailySubject(data.reportDate), html).then(function(res){
-        if (res.ok) toast('✅ Дневен репорт изпратен на ' + emails.length + ' получатели');
-        else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
-      });
+      if (!data) { toast('Грешка при събиране на данните','#dc2626'); fin(); return; }
+      try {
+        var html = buildDailyReportHtml(data);
+        var emails = targets.map(function(r){ return r.email; });
+        sendEmail(emails, reportDailySubject(data.reportDate), html).then(function(res){
+          if (res.ok) toast('✅ Дневен репорт изпратен на ' + emails.length + ' получатели');
+          else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
+          fin();
+        });
+      } catch (e) { fin(); throw e; }
     });
   });
 }
 /* РЕАЛНО изпращане на седмичния репорт - до всички активни получатели с weekly=true. */
-function sendWeeklyReportToRecipients(){
+function sendWeeklyReportToRecipients(done){
+  var fin = typeof done === 'function' ? done : function(){};
   loadReportRecipients(function(recipients){
     var targets = recipients.filter(function(r){ return r.weekly; });
-    if (!targets.length) { toast('Няма получатели с включен седмичен репорт','#dc2626'); return; }
+    if (!targets.length) { toast('Няма получатели с включен седмичен репорт','#dc2626'); fin(); return; }
     toast('⏳ Подготвям и изпращам седмичния репорт...');
     collectWeeklyReportData(function(data){
-      if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
-      var html = buildWeeklyReportHtml(data);
-      var emails = targets.map(function(r){ return r.email; });
-      sendEmail(emails, reportWeeklySubject(data.weekDates), html).then(function(res){
-        if (res.ok) toast('✅ Седмичен репорт изпратен на ' + emails.length + ' получатели');
-        else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
-      });
+      if (!data) { toast('Грешка при събиране на данните','#dc2626'); fin(); return; }
+      try {
+        var html = buildWeeklyReportHtml(data);
+        var emails = targets.map(function(r){ return r.email; });
+        sendEmail(emails, reportWeeklySubject(data.weekDates), html).then(function(res){
+          if (res.ok) toast('✅ Седмичен репорт изпратен на ' + emails.length + ' получатели');
+          else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
+          fin();
+        });
+      } catch (e) { fin(); throw e; }
     });
   });
 }

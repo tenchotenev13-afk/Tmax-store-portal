@@ -1141,10 +1141,23 @@ function notifTopicLabel(key){
 
 function loadNotificationsAdmin(){
   var card = document.getElementById('notif-admin-card');
-  /* Целият екран е само за admin — същата проверка като при backup секцията
-     в loadAdmin(). При друга роля не се рендира нищо и базата не се пита. */
-  if (!notifIsAdmin()) { if (card) card.style.display = 'none'; return; }
+  /* Темите, матрицата, изключенията и насрочените са само за admin — същата
+     проверка като при backup секцията в loadAdmin(). Изключение е „📧 Общи
+     отчети": тя е за canEdit (admin и accounting). При accounting картата
+     показва само нея и базата не се пита за известията.
+     ВНИМАНИЕ: самият таб „Администрация" е само за admin (setupTabsForRole в
+     shared.js), тоест днес accounting не стига дотук. Клонът е готов, ако
+     табът (или картата) се отвори и за accounting — решение, не пропуск. */
+  var reportsOnly = !notifIsAdmin() && adminReportsCanSee();
+  if (!notifIsAdmin() && !reportsOnly) { if (card) card.style.display = 'none'; return; }
   if (card) card.style.display = '';
+  loadReportsAdmin();
+  if (reportsOnly) {
+    ['notif-topics-body','notif-matrix-body','notif-overrides-body','notif-schedules-body'].forEach(function(id){
+      var el = document.getElementById(id); if (el) el.style.display = 'none';
+    });
+    return;
+  }
   Promise.all([
     sbGet('notification_topics','order=sort_order,key'),
     sbGet('notification_matrix','order=topic_key,group_key'),
@@ -1166,6 +1179,197 @@ function loadNotificationsAdmin(){
        заглавие всеки ред би твърдял „(изтрит запис)". */
     loadNotifScheduleTitles(adminNotifSchedules).then(renderNotifSchedules);
   });
+}
+
+/* ── Общи отчети (report_recipients) ─────────────────────────────────────
+   Преместено от таб „Днес" на 15.09.2026: там стояха лентата „✉️ Тест на
+   автоматичния репорт" (поле за имейл + 4 бутона) и панелът „📧 Получатели
+   на общия репорт". Днес е табло за преглед; кой какво получава се решава тук,
+   до матрицата.
+
+   „Тест до мен" праща на currentUser.email — без поле за адрес. Преди полето
+   беше с фиксиран ten.tenev@temax.bg и всеки натиснал пращаше на Тенчо.
+   „📤 Изпрати сега" е само за admin и минава по съществуващия ръчен път
+   (sendDaily/WeeklyReportToRecipients в report.js → resend-email). За Палети и
+   Склад такъв път няма — там праща само кронът (send-scheduled-report), затова
+   бутонът не се показва. Не го добавяй с POST към send-scheduled-report от
+   браузъра: функцията няма проверка за часа (тя е в SQL на крона) и праща и
+   на регионалните — това е нов път, не бутон.
+
+   Бутонът „📬 Маршрутизация (тест)" (sendWeeklyReportRouted) беше махнат на
+   02.09.2026 и не се връща — send-routed-report го върши по крон 16. */
+var adminReportRecipients = null;   /* report_recipients (active) */
+var adminReportRegional = [];       /* users.is_regional — за броя при Палети */
+var adminReportLogistics = [];      /* users.role=logistics — за броя при Склад */
+var adminReportBusy = {};           /* 'test:daily' / 'send:weekly' → true, докато заявката тече */
+
+var ADMIN_REPORTS = [
+  { kind: 'daily',     label: '📋 Дневен',   schedule: 'всеки ден 21:00', test: 'sendDailyReportTest',     send: 'sendDailyReportToRecipients' },
+  { kind: 'weekly',    label: '📊 Седмичен', schedule: 'неделя 21:00',    test: 'sendWeeklyReportTest',    send: 'sendWeeklyReportToRecipients' },
+  { kind: 'pallets',   label: '🟫 Палети',   schedule: 'петък 21:00',     test: 'sendPalletsReportTest',   send: null },
+  { kind: 'warehouse', label: '📦 Склад',    schedule: 'неделя 21:00',    test: 'sendWarehouseReportTest', send: null }
+];
+
+function adminReportsCanSee(){ return typeof canEdit === 'function' && !!canEdit(); }
+
+function adminReportDef(kind){
+  return ADMIN_REPORTS.filter(function(r){ return r.kind === kind; })[0] || null;
+}
+
+function loadReportsAdmin(){
+  var body = document.getElementById('notif-reports-body'); if (!body) return;
+  if (!adminReportsCanSee() || typeof loadReportRecipients !== 'function') {
+    body.innerHTML = ''; body.style.display = 'none'; return;
+  }
+  body.style.display = '';
+  Promise.all([
+    new Promise(function(resolve){ loadReportRecipients(resolve); }),
+    /* Изричен select= — users никога не се чете със select=* от клиента.
+       Колоните са тези, които ползват reportPalletsRecipients и
+       reportWarehouseRecipients (и send-scheduled-report). */
+    sbGet('users','is_regional=eq.true&select=email,display_name,assigned_stores,active,is_regional'),
+    sbGet('users','role=eq.logistics&select=email,display_name,store_name,role,active')
+  ]).then(function(res){
+    adminReportRecipients = Array.isArray(res[0]) ? res[0] : [];
+    adminReportRegional   = Array.isArray(res[1]) ? res[1] : [];
+    adminReportLogistics  = Array.isArray(res[2]) ? res[2] : [];
+    renderReportsAdmin();
+  });
+}
+
+/* Броят е на същите хора, до които праща съответният път:
+   Дневен/Седмичен — редовете с daily/weekly (до тях праща „Изпрати сега");
+   Палети — reportPalletsRecipients (списъкът weekly + регионалните);
+   Склад — reportWarehouseRecipients (роля logistics). */
+function adminReportCount(kind){
+  var rc = adminReportRecipients || [];
+  if (kind === 'daily')  return rc.filter(function(r){ return r.daily; }).length;
+  if (kind === 'weekly') return rc.filter(function(r){ return r.weekly; }).length;
+  if (kind === 'pallets') {
+    if (typeof reportPalletsRecipients !== 'function') return 0;
+    var p = reportPalletsRecipients(rc, adminReportRegional);
+    return p.all.length + p.personal.length;
+  }
+  if (kind === 'warehouse') {
+    return typeof reportWarehouseRecipients === 'function' ? reportWarehouseRecipients(adminReportLogistics).length : 0;
+  }
+  return 0;
+}
+
+function renderReportsAdmin(){
+  var body = document.getElementById('notif-reports-body'); if (!body) return;
+  if (!adminReportsCanSee()) { body.innerHTML = ''; body.style.display = 'none'; return; }
+  var h = '<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;font-weight:700;margin:16px 0 6px;">📧 Общи отчети</div>';
+  h += '<div id="notif-reports-note" style="font-size:12px;color:#94a3b8;margin-bottom:8px;">Кой получава известията за задачи — матрицата по-горе. Кой получава общите отчети — този списък.</div>';
+
+  var admin = notifIsAdmin();
+  h += '<div class="tbl-wrap"><table><thead><tr><th>Отчет</th><th>Разписание</th><th>Получатели</th><th></th></tr></thead><tbody>';
+  ADMIN_REPORTS.forEach(function(r){
+    var n = adminReportRecipients === null ? '…' : String(adminReportCount(r.kind));
+    h += '<tr id="report-row-' + r.kind + '">' +
+      '<td style="font-weight:500;font-size:12px;">' + r.label + '</td>' +
+      '<td style="font-size:12px;">' + r.schedule + '</td>' +
+      '<td style="font-size:12px;" class="report-count">' + n + '</td>' +
+      '<td style="white-space:nowrap;">' +
+        '<button onclick="adminReportTestClick(this,\'' + r.kind + '\')" style="border:1px solid #cbd5e1;background:#fff;color:#1E2761;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;">Тест до мен</button>' +
+        (admin && r.send
+          ? ' <button onclick="adminReportSendClick(this,\'' + r.kind + '\')" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;">📤 Изпрати сега</button>'
+          : '') +
+      '</td></tr>';
+  });
+  h += '</tbody></table></div>';
+  h += '<div style="font-size:11px;color:#64748b;margin:6px 0 12px;line-height:1.7;">' +
+    '„Тест до мен" праща на твоя имейл с „(тест)" в темата — данните към момента, не редовния отчет.<br>' +
+    'Палети: списъкът (седмичен) + регионалните. Склад: всеки потребител с роля „logistics". Тях ги праща само кронът.' +
+    '</div>';
+
+  /* Списъкът получатели — кодът е преместен от today.js без промяна в
+     поведението (добавяне и ✕ без потвърждение, както беше). */
+  var list = adminReportRecipients;
+  h += '<div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:6px;">Получатели на общия отчет</div>';
+  if (list === null) {
+    h += '<div style="font-size:11.5px;color:#94a3b8;margin-bottom:8px;">⏳ Зареждане...</div>';
+  } else if (!list.length) {
+    h += '<div style="font-size:11.5px;color:#94a3b8;margin-bottom:8px;">Няма добавени получатели.</div>';
+  } else {
+    h += '<div id="report-recipients-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;">';
+    list.forEach(function(r){
+      h += '<div class="report-recipient" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#334155;background:#fff;border:1px solid #eef1f6;border-radius:7px;padding:5px 9px;">';
+      h += '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(r.name||r.email) + ' <span style="color:#94a3b8;">(' + esc(r.email) + ')</span></span>';
+      h += '<span style="font-size:10px;color:#64748b;white-space:nowrap;">' + (r.daily?'📋':'') + (r.weekly?'📊':'') + '</span>';
+      h += '<button onclick="adminDeleteReportRecipient(\'' + esc(r.id) + '\')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;line-height:1;">✕</button>';
+      h += '</div>';
+    });
+    h += '</div>';
+  }
+  h += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">';
+  h += '<input id="admin-rcpt-name" placeholder="име" style="width:100px;font-size:11.5px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;">';
+  h += '<input id="admin-rcpt-email" placeholder="имейл" style="flex:1;min-width:140px;font-size:11.5px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;">';
+  h += '<label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:3px;"><input id="admin-rcpt-daily" type="checkbox" checked style="margin:0;">дневен</label>';
+  h += '<label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:3px;"><input id="admin-rcpt-weekly" type="checkbox" checked style="margin:0;">седмичен</label>';
+  h += '<button onclick="adminAddReportRecipient()" style="border:none;background:#1E2761;color:#fff;border-radius:6px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">+ Добави</button>';
+  h += '</div>';
+  body.innerHTML = h;
+}
+
+function adminAddReportRecipient(){
+  var nameEl = document.getElementById('admin-rcpt-name');
+  var emailEl = document.getElementById('admin-rcpt-email');
+  var dailyEl = document.getElementById('admin-rcpt-daily');
+  var weeklyEl = document.getElementById('admin-rcpt-weekly');
+  if (!emailEl) return;
+  var email = emailEl.value.trim();
+  if (!email) { toast('Въведи имейл','#dc2626'); return; }
+  addReportRecipient(nameEl.value.trim(), email, dailyEl.checked, weeklyEl.checked, function(ok){
+    if (ok) { toast('✅ Добавен получател'); loadReportsAdmin(); }
+    else toast('❌ Грешка при добавяне','#dc2626');
+  });
+}
+function adminDeleteReportRecipient(id){
+  deleteReportRecipient(id, function(ok){
+    if (ok) { toast('Изтрит получател'); loadReportsAdmin(); }
+    else toast('❌ Грешка при триене','#dc2626');
+  });
+}
+
+/* Един клик = една заявка. Флагът е по бутон и вид отчет и живее ИЗВЪН
+   DOM-а — пренарисувана секция по време на заявката дава нов, отключен бутон,
+   но флагът пак спира втората. Отключва се от done(), който report.js вика
+   на всеки изход. */
+function adminReportLock(key, btn){
+  adminReportBusy[key] = true;
+  if (btn) btn.disabled = true;
+  var released = false;
+  return function(){
+    if (released) return;
+    released = true;
+    adminReportBusy[key] = false;
+    if (btn) btn.disabled = false;
+  };
+}
+
+function adminReportTestClick(btn, kind){
+  var r = adminReportDef(kind);
+  var fn = r && window[r.test];
+  var key = 'test:' + kind;
+  if (typeof fn !== 'function' || adminReportBusy[key]) return;
+  var me = (currentUser && currentUser.email) ? String(currentUser.email).trim() : '';
+  if (!me) { toast('Профилът ти няма имейл','#dc2626'); return; }
+  var done = adminReportLock(key, btn);
+  try { fn(me, done); } catch (e) { done(); throw e; }
+}
+
+function adminReportSendClick(btn, kind){
+  if (!notifIsAdmin()) return;
+  var r = adminReportDef(kind);
+  var fn = r && r.send && window[r.send];
+  var key = 'send:' + kind;
+  if (typeof fn !== 'function' || adminReportBusy[key]) return;
+  var n = adminReportCount(kind);
+  if (!n) { toast('Няма получатели за този отчет','#dc2626'); return; }
+  if (!confirm('Ще се изпрати до ' + n + ' получатели — сигурен ли си?')) return;
+  var done = adminReportLock(key, btn);
+  try { fn(done); } catch (e) { done(); throw e; }
 }
 
 /* ── Теми ──────────────────────────────────────────────────────────────── */
