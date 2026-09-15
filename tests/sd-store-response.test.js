@@ -446,5 +446,42 @@ const OLD = '✅ Получено';
     ok('локалният store_response остава null', h.w.sdData[0].store_response === null, JSON.stringify(h.w.sdData[0].store_response));
   }
 
+  section('12. Главната таблица — отговорът на магазина под отговора на склада в затворен ред');
+  {
+    const h = env(CVETI, [
+      line({ id: 'l-1', status: 'received', warehouse_response: 'return',
+        store_response: 'sap_done', store_response_by: 'Управител Петрич',
+        completed_by: 'Склад Търговище', completed_at: '2026-09-14T10:00:00.000Z' }),
+      line({ id: 'l-2', material_name: 'КРАН', status: 'received', warehouse_response: 'return',
+        store_response: 'no_stock', store_response_comment: 'наличност 0',
+        completed_by: 'Склад Търговище', completed_at: '2026-09-14T11:00:00.000Z' }),
+      /* старите 25: приключен ред без store_response */
+      line({ id: 'l-3', material_name: 'ВЕНТИЛ', status: 'received', warehouse_response: 'sent',
+        completed_by: 'Управител Петрич', completed_at: '2026-09-01T10:00:00.000Z' })
+    ]);
+    h.w.sdFilter = 'all';
+    h.w.renderStockDiff();
+    /* Главната таблица се разпознава по заглавието "Кредитно" - само нейно е. */
+    const t = Array.prototype.find.call(h.doc.querySelectorAll('#mod-stock-diff table'),
+      x => x.querySelector('thead') && x.querySelector('thead').textContent.indexOf('Кредитно') >= 0);
+    if (ok('главната таблица съществува', !!t)) {
+      /* Клетката на склада по реда - тази с етикета на отговора му. */
+      const whCell = (name, label) => {
+        const row = Array.prototype.find.call(t.querySelectorAll('tbody tr'), r => r.textContent.indexOf(name) >= 0);
+        return row && Array.prototype.find.call(row.cells, td => td.textContent.indexOf(label) === 0);
+      };
+      const c1 = whCell('ЩУЦЕР МЕТАЛЕН', '↩️ Обратно движение');
+      const c2 = whCell('КРАН', '↩️ Обратно движение');
+      const c3 = whCell('ВЕНТИЛ', '📤 Изпратено');
+      ok('sap_done се вижда в затворен ред, под отговора на склада',
+        !!c1 && c1.textContent.indexOf('📄 Пуснато в SAP · Управител Петрич') >= 0, c1 && c1.textContent);
+      ok('no_stock се вижда в затворен ред, с коментара',
+        !!c2 && c2.textContent.indexOf('⛔ Няма наличност в логистика') >= 0 &&
+        c2.textContent.indexOf('наличност 0') >= 0, c2 && c2.textContent);
+      ok('ред без store_response НЕ пише "чака магазина"',
+        !!c3 && c3.textContent.indexOf('чака магазина') < 0, c3 && c3.textContent);
+    }
+  }
+
   report();
 })();

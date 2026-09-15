@@ -393,7 +393,10 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;">'+diffReportPhotoThumbs(r.report_id)+sdLineAttachCell(r)+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.comment||'')+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.resolution_comment||'')+(normSDAttachments(r.attachments).length?' 📎'+normSDAttachments(r.attachments).length:'')+'</td>'+
-        '<td style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
+        /* Под отговора на склада - отговорът на магазина. Само при зададен
+           store_response: без него sdStoreResponseLabel казва "чака магазина",
+           а тук стоят доставчикови и вече приключени редове. */
+        '<td style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+'</td>'+
         '<td style="padding:7px 10px;white-space:nowrap;">';
 
       /* status='received' е КРАЯТ на междускладовия поток. Такъв ред няма
