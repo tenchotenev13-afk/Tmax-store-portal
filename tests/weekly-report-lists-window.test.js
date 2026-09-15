@@ -214,20 +214,69 @@ function comp(o) {
     }
   }
 
-  section('7. Дневният колектор НЕ е пипан');
+  /* ── 7. Дневният колектор: прозорецът е ТОЧНО отчетният ден ──────────────
+     Досега тук стоеше „дневните заявки остават без completion_date филтър"
+     срещу истинския часовник. Дневният отдавна филтрира по дата (report.js,
+     collectDailyReportData: regDateQ/recDateQ — без това 09.09.2026 излезе
+     0/18 заради тавана от 1000 реда). Проверката минаваше само защото
+     постоянната задача НЕ е дължима в повечето дни и заявка изобщо не
+     тръгваше; всеки вторник (due_weekday 1) тя тръгва и тестът падаше —
+     15.09.2026 спря целия npm test.
+     Сега денят е замразен и се проверява реалното поведение за двата случая. */
+  function freezeAt(w, d) {
+    const Real = w.Date, fixedMs = d.getTime();
+    class Frozen extends Real {
+      constructor(...a) { if (a.length === 0) super(fixedMs); else super(...a); }
+      static now() { return fixedMs; }
+    }
+    w.Date = Frozen;
+  }
+  const isoOf = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+  /* Вторникът и сърдата от текущата реална седмица, 12:00 — без литерали. */
+  const TUE = (function () { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() + (1 - ((d.getDay() + 6) % 7))); return d; })();
+  const WED = new Date(TUE.getTime()); WED.setDate(WED.getDate() + 1);
+  const dailyEnv = () => env({
+    bulletins: [{ id: 'b-34', week_number: 34, year: 2026, status: 'published' }],
+    recurring_tasks: [{ id: 'r-1', active: true, due_weekday: 1, title: 'Каса' }],   /* 1 = вторник */
+    recurring_task_periods: [], recurring_task_skips: [],
+    bulletin_tasks: [], task_completions: [], users: [{ store_name: 'Раднево' }],
+    report_snapshots: []
+  });
+  const dateValues = u => (u.match(/completion_date=[a-z]+\.[0-9-]+/g) || []);
+
+  section('7. Дневният колектор: в ден, в който постоянна задача е дължима, филтърът е точно денят');
   {
-    const h = env({
-      bulletins: [{ id: 'b-34', week_number: 34, year: 2026, status: 'published' }],
-      recurring_tasks: [{ id: 'r-1', active: true, due_weekday: 1, title: 'Каса' }],
-      bulletin_tasks: [], task_completions: [], users: [{ store_name: 'Раднево' }],
-      report_snapshots: []
-    });
+    const h = dailyEnv();
+    freezeAt(h.w, TUE);
+    const day = isoOf(TUE);
     h.w.collectDailyReportData(function () {});
-    await ticks();
+    for (let i = 0; i < 4; i++) await ticks();
     const qs = h.calls.get.filter(u => u.indexOf('/task_completions') >= 0);
-    ok('дневните заявки остават без completion_date филтър',
-      qs.every(u => u.indexOf('completion_date=') < 0),
-      qs.join('\n'));
+    const rec = qs.filter(u => u.indexOf('recurring_task_id=in.(r-1)') >= 0);
+    ok('вторник: заявка за отмятанията на постоянната задача', rec.length === 1, qs.join('\n'));
+    if (rec.length) {
+      ok('филтърът е completion_date gte = lte = отчетния ден (не седмица)',
+        JSON.stringify(dateValues(rec[0])) === JSON.stringify(['completion_date=gte.' + day, 'completion_date=lte.' + day]),
+        rec[0]);
+    }
+    ok('нито една заявка не пипа друга дата освен отчетния ден',
+      qs.every(u => dateValues(u).every(v => v.slice(-10) === day)), qs.join('\n'));
+    ok('пренесените са за същия ден', qs.some(u => u.indexOf('postponed_to=eq.' + day) >= 0), qs.join('\n'));
+  }
+
+  section('7б. Дневният колектор: в ден без дължими задачи заявка за отмятания няма');
+  {
+    const h = dailyEnv();
+    freezeAt(h.w, WED);
+    const day = isoOf(WED);
+    h.w.collectDailyReportData(function () {});
+    for (let i = 0; i < 4; i++) await ticks();
+    const qs = h.calls.get.filter(u => u.indexOf('/task_completions') >= 0);
+    ok('сряда: няма заявка за отмятания на постоянната задача',
+      !qs.some(u => u.indexOf('recurring_task_id=') >= 0), qs.join('\n'));
+    ok('сряда: completion_date филтър няма (няма какво да се тегли)',
+      qs.every(u => u.indexOf('completion_date=') < 0), qs.join('\n'));
+    ok('КОНТРОЛА: пренесените за сряда пак се теглят', qs.some(u => u.indexOf('postponed_to=eq.' + day) >= 0), qs.join('\n'));
   }
 
   report();
