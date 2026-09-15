@@ -365,6 +365,26 @@ process.on('unhandledRejection', () => { unhandled++; });
       JSON.stringify(notes));
   }
   {
+    /* Истинският coNotifyToast (не подменен): hover "Отвори Разлики" и клик,
+       който превключва на таба, а не само скрива известието. */
+    const state = { reports: [], lines: [] };
+    const h = env(STORE, [], { data: {
+      differences_reports: () => state.reports, stock_differences: () => state.lines } });
+    Object.defineProperty(h.doc, 'hidden', { configurable: true, get: () => false });
+    h.w.playSound = () => {};
+    const shown = [];
+    h.w.showModule = (m) => { shown.push(m); };
+    h.w.startSDBadgePolling(); await settle();
+    state.reports = [{ id: 't1', store_name: 'Петрич', counterpart: WH_NAME, reviewed: false }];
+    state.lines = [{ report_id: 't1', warehouse_response: 'sent', store_response: null, status: 'new' }];
+    h.w.sdRefreshTabBadge(); await settle();
+    const t = h.doc.getElementById('co-toast');
+    if (t) t.click();
+    ok('известието: hover "Отвори Разлики", клик → showModule("stock-diff") и се скрива',
+      !!t && t.title === 'Отвори Разлики' && JSON.stringify(shown) === '["stock-diff"]' && t.style.display === 'none',
+      JSON.stringify({ title: t && t.title, shown: shown, display: t && t.style.display }));
+  }
+  {
     /* Без notifications.js - coNotifyToast/playSound липсват, пулсът не гърми. */
     const state = { reports: [], lines: [] };
     const h = env(STORE, [], { modules: ['transport.js', 'stock-returns.js', 'stock-differences.js', 'push.js'],

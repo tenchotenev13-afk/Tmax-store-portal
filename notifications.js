@@ -105,8 +105,12 @@ function coDismissNewForMe(){
 
 /* Кликаемо известие за нова заявка. НЕ е toast() от shared.js: онзи е общ за
    целия портал, само текст и изчезва след 2,5 сек — кликът би се закачил за
-   следващото, чуждо съобщение. Този е собствен елемент и стои 8 сек. */
-function coNotifyToast(text,id){
+   следващото, чуждо съобщение. Този е собствен елемент и стои 8 сек.
+   hover и onClick са по избор - без тях поведението е това за клиентските
+   заявки ("Отвори заявката" -> openClientOrderDetail). Разлики подава свои:
+   друг текст и превключване на таба. onclick се задава наново при всяко
+   извикване, тоест следващото известие за заявка си връща стандартния клик. */
+function coNotifyToast(text,id,hover,onClick){
   var t=document.getElementById('co-toast');
   if(!t){
     t=document.createElement('div');
@@ -118,10 +122,11 @@ function coNotifyToast(text,id){
   }
   t.textContent=text;
   t.setAttribute('data-id',id||'');
-  t.title='Отвори заявката';
+  t.title=hover||'Отвори заявката';
   t.onclick=function(){
     var oid=t.getAttribute('data-id');
     t.style.display='none';
+    if(typeof onClick==='function'){onClick();return;}
     if(oid&&typeof openClientOrderDetail==='function')openClientOrderDetail(oid);
   };
   t.style.display='block';

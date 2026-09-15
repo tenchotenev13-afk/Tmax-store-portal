@@ -3284,7 +3284,10 @@ function sdBadgePulse(n){
   var prev = _sdPulseCount;
   _sdPulseCount = n;
   if(prev===null || n<=prev) return;
-  if(typeof coNotifyToast==='function') coNotifyToast('🔔 Разлики: '+n+(n===1?' бланка чака':' бланки чакат')+' вашата реакция');
+  if(typeof coNotifyToast==='function'){
+    coNotifyToast('🔔 Разлики: '+n+(n===1?' бланка чака':' бланки чакат')+' вашата реакция', '', 'Отвори Разлики',
+      function(){ if(typeof showModule==='function') showModule('stock-diff'); });
+  }
   if(typeof playSound==='function') playSound();
 }
 /* Самостоятелна лека заявка - работи и когато табът "Разлики" изобщо не е
