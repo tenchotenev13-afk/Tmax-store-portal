@@ -306,10 +306,19 @@ function runRest() {
     ok('ЦО вижда всички 3 непрегледани бланки', badge.textContent === '3', 'текст=' + (badge && badge.textContent));
     ok('балончето е видимо', badge.style.display === 'block');
 
+    /* От 15.09.2026 баджът на магазина е "чака МОЕТО действие": складът е
+       отговорил (sent/return), а магазинът още не. Враца има доставчикова
+       бланка (чака Цвети) и междускладова без отговор от склада -> нищо. */
     const s = boot(STORE);
     s.w.renderStockDiff();
-    ok('магазин Враца вижда само своите 2', s.doc.getElementById('badge-stock-diff').textContent === '2',
+    ok('магазин Враца: нищо не чака неговото действие -> скрито', s.doc.getElementById('badge-stock-diff').style.display === 'none',
       'текст=' + s.doc.getElementById('badge-stock-diff').textContent);
+    const linesS = JSON.parse(JSON.stringify(LINES));
+    linesS.find(l => l.id === 'l3').warehouse_response = 'sent';
+    const s2 = boot(STORE, { lines: linesS });
+    s2.w.renderStockDiff();
+    ok('магазин Враца: складът изпрати -> 1', s2.doc.getElementById('badge-stock-diff').textContent === '1',
+      'текст=' + s2.doc.getElementById('badge-stock-diff').textContent);
 
     const wh = boot(WH);
     wh.w.renderStockDiff();

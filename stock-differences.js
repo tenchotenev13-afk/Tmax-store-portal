@@ -783,6 +783,13 @@ function sdInterstoreConfirmButton(l, rep){
   }
   return '';
 }
+/* Push до отсрещната страна по междускладов ред. Fire-and-forget: вика се
+   след успешен запис и след toast-а на действието, не се чака, грешка в него
+   не стига до записа. push.js се зарежда СЛЕД този файл - затова typeof. */
+function sdNotifyInterstore(target, title, msg){
+  if(typeof pushInterstoreDiff!=='function') return;
+  try{ pushInterstoreDiff(target, title, msg).catch(function(){}); }catch(e){}
+}
 /* "Магазинът" по междускладов ред - същата проверка, която стоеше само при
    "Получено". Счетоводителят по обекти има store_name "Централен офис", а
    обектите му са в assigned_stores - затова двете проверки, не само store_name. */
@@ -838,6 +845,10 @@ function sdSetStoreResponse(lineId,val,comment){
     if(val==='no_stock') line.store_response_comment=data.store_response_comment;
     var ov=document.getElementById('sdnostock-ov'); if(ov) ov.remove();
     toast('✅ Записано');
+    var rep = diffReports.find(function(x){return x.id===line.report_id;}) || {};
+    var art = line.material_name||'';
+    if(val==='sap_done') sdNotifyInterstore(rep.counterpart, '📄 Разлика: пуснато в SAP', (rep.store_name||'')+': '+art+' — приемете обратно');
+    else if(val==='no_stock') sdNotifyInterstore(rep.counterpart, '⛔ Разлика: няма наличност в логистика', (rep.store_name||'')+': '+art);
     loadStockDiff();
   });
 }
@@ -865,6 +876,10 @@ function submitWarehouseResponse(lineId,val){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     var el=document.getElementById('whr-ov'); if(el)el.remove();
     toast('✅ Отговорът е запазен!');
+    /* И "Ще се изпрати" е отговор - магазинът научава и за него. */
+    var whRep = (whLine && diffReports.find(function(x){return x.id===whLine.report_id;})) || {};
+    sdNotifyInterstore(whRep.store_name, '📦 Разлика: отговор от склада',
+      (whRep.counterpart||'')+': '+(WH_RESPONSE_LABELS[val]||val)+' · '+((whLine&&whLine.material_name)||''));
     loadStockDiff();
   });
 }
@@ -1046,6 +1061,9 @@ function sdConfirmInterstore(lineId, as){
        бланката никога не се затваря от самата себе си. */
     line.status='received'; line.completed_by=by; line.completed_at=at;
     if(as==='store'){ line.store_response='accepted'; line.store_response_by=by; line.store_response_at=at; }
+    var cRep = diffReports.find(function(x){return x.id===line.report_id;}) || {};
+    if(as==='store') sdNotifyInterstore(cRep.counterpart, '✅ Разлика: прието в '+(cRep.store_name||''), line.material_name||'');
+    else if(as==='warehouse') sdNotifyInterstore(cRep.store_name, '📬 Разлика: прието обратно в '+(cRep.counterpart||''), line.material_name||'');
     var siblings = sdData.filter(function(x){return x.report_id===line.report_id;});
     var allReceived = siblings.length>0 && siblings.every(function(x){return x.status==='received';});
     if(allReceived && line.report_id){
@@ -3192,6 +3210,7 @@ function renderDiffPrint(rep){
 var SD_BADGE_POLL_MS = 60000;
 var _sdBadgePoll = null;
 var _sdVisBound = false;
+var _sdPulseCount = null; /* броят от последния пулс; null = още няма пулс след логин (виж sdBadgePulse) */
 
 function sdTabBadgeEl(){
   var tab = document.getElementById('tab-stock-diff');
@@ -3235,14 +3254,38 @@ function sdUnreviewedCountFor(reports, lines){
     }).length;
   }
   if(canReviewDiff()) return unrev.length;
-  /* Магазин - само своите (сървърната заявка вече е ограничена по store_name,
-     но филтрираме и тук, за да е коректно и при няколко назначени обекта). */
+  /* Магазин - "чака МОЕТО действие", не "всички мои неприключени" (това беше
+     постоянен шум). Бланка се брои, ако има ред, по който складът е отговорил
+     с изпратено/обратно движение, а магазинът още не (store_response null) и
+     редът не е приключен. no_stock не се брои - там магазинът чака склада;
+     will_send също - стоката още не е тръгнала. Доставчиковите бланки чакат
+     Цвети. Само своите обекти: сървърната заявка е по store_name, но при
+     няколко назначени обекта филтрираме и тук. */
   var mine = assignedStores();
-  if(!mine) return unrev.length;
-  return unrev.filter(function(r){ return mine.indexOf(r.store_name) >= 0; }).length;
+  return unrev.filter(function(r){
+    if(mine && mine.indexOf(r.store_name) < 0) return false;
+    return (lines||[]).some(function(l){
+      return l.report_id===r.id && (l.warehouse_response==='sent' || l.warehouse_response==='return') &&
+        !l.store_response && l.status!=='received';
+    });
+  }).length;
 }
 function sdUpdateTabBadgeFromData(){
   sdSetTabBadge(sdUnreviewedCountFor(diffReports, sdData));
+}
+/* Пулсът задава балончето и известява, ако броят е ПОРАСНАЛ спрямо предишния
+   пулс. Първият пулс след логин (_sdPulseCount===null) само запомня - иначе
+   всяко влизане би звъняло за вече известните бланки. Спад или равен брой -
+   тихо. Паметта е само в тази сесия, нарочно не в localStorage.
+   Рендерът (sdUpdateTabBadgeFromData) не пипа паметта - сравнението е пулс
+   срещу пулс, за да не звъни от собствения клик на потребителя. */
+function sdBadgePulse(n){
+  sdSetTabBadge(n);
+  var prev = _sdPulseCount;
+  _sdPulseCount = n;
+  if(prev===null || n<=prev) return;
+  if(typeof coNotifyToast==='function') coNotifyToast('🔔 Разлики: '+n+(n===1?' бланка чака':' бланки чакат')+' вашата реакция');
+  if(typeof playSound==='function') playSound();
 }
 /* Самостоятелна лека заявка - работи и когато табът "Разлики" изобщо не е
    отварян тази сесия (тогава diffReports/sdData са празни). */
@@ -3263,21 +3306,23 @@ function sdRefreshTabBadge(){
   }
   sbGet('differences_reports', q).then(function(reports){
     if(!Array.isArray(reports)){ return; }
-    if(!isLogisticsWarehouseUser()){
-      sdSetTabBadge(sdUnreviewedCountFor(reports, []));
+    /* Цвети/admin броят бланки - редовете не им трябват. */
+    if(canReviewDiff() && !isLogisticsWarehouseUser()){
+      sdBadgePulse(sdUnreviewedCountFor(reports, []));
       return;
     }
-    /* Само за складовете ни трябват и редовете (за да пропуснем бланките,
-       на които вече са отговорили изцяло). */
-    if(!reports.length){ sdSetTabBadge(0); return; }
+    /* Складът и магазинът броят "чака моето действие" - трябват и редовете. */
+    if(!reports.length){ sdBadgePulse(0); return; }
     sbGet('stock_differences', qLines + '&report_id=in.(' + reports.map(function(r){return r.id;}).join(',') + ')')
       .then(function(lines){
-        sdSetTabBadge(sdUnreviewedCountFor(reports, Array.isArray(lines)?lines:[]));
+        sdBadgePulse(sdUnreviewedCountFor(reports, Array.isArray(lines)?lines:[]));
       }).catch(function(){ sdSetTabBadge(reports.length); });
   }).catch(function(){});
 }
 function startSDBadgePolling(){
   if(_sdBadgePoll) clearInterval(_sdBadgePoll);
+  /* Нов логин (и без презареждане) - първият пулс пак само запомня. */
+  _sdPulseCount = null;
   sdRefreshTabBadge();
   _sdBadgePoll = setInterval(sdRefreshTabBadge, SD_BADGE_POLL_MS);
   /* Закача се само веднъж. startSDBadgePolling() може да се извика повторно

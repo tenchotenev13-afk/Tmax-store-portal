@@ -151,6 +151,22 @@ function pushNewClientOrder(o) {
   return pushToStores([f], title, msg);
 }
 
+/* ═══════ РАЗЛИКИ (МЕЖДУСКЛАДОВИ) → ОТСРЕЩНАТА СТРАНА ════════
+   Вика се от stock-differences.js след успешен запис по междускладов ред:
+   складът отговаря/приема обратно -> магазина (rep.store_name); магазинът
+   пуска в SAP / казва "няма наличност" / приема -> склада (rep.counterpart).
+   Адресът е тагът store_name, същият като при pushNewClientOrder.
+
+   ⚠️ pushToStores() при празен списък ПАДА КЪМ pushToAll(). Празен обект се
+   спира ТУК, преди извикването - иначе бланка без counterpart би разпратила
+   известието до целия портал. */
+function pushInterstoreDiff(targetStore, title, msg) {
+  var none = function(m) { return Promise.resolve({ ok: false, status: 0, data: { message: m } }); };
+  var t = String(targetStore || '').trim();
+  if (!t) return none('Няма получател');
+  return pushToStores([t], title, msg);
+}
+
 /* ═══════ БЮЛЕТИН НОТИФИКАЦИИ ════════════════════════════ */
 
 /* При добавяне на нова задача (от submitTask в bulletin.js) — до конкретните
