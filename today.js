@@ -355,13 +355,19 @@ function todayStoreFilterHtml(stores, selected){
 function todayReportTestBarHtml(){
   if (typeof canEdit !== 'function' || !canEdit()) return '';
   if (typeof sendDailyReportTest !== 'function') return ''; /* report.js не е зареден */
+  /* Адресът е на НАТИСНАЛИЯ. Досега тук стоеше фиксиран ten.tenev@temax.bg и
+     всеки admin/accounting, който натисне, пращаше на Тенчо — на 15.09.2026 в
+     08:33 това изглеждаше като счупен крон. Без имейл полето остава празно и
+     todayReportTestClick() не праща. */
+  var me = (typeof currentUser !== 'undefined' && currentUser && currentUser.email) ? String(currentUser.email) : '';
   return '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#f8fafc;border:1px solid #eef1f6;border-radius:10px;padding:10px 14px;margin:14px 0;">' +
     '<span style="font-size:12px;color:#64748b;">✉️ Тест на автоматичния репорт:</span>' +
-    '<input id="today-report-email" placeholder="имейл за тест" value="ten.tenev@temax.bg" style="flex:1;min-width:180px;font-size:12px;border:1px solid #e2e8f0;border-radius:6px;padding:6px 9px;">' +
-    '<button onclick="sendDailyReportTest(document.getElementById(\'today-report-email\').value)" style="border:none;background:#1E2761;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📋 Дневен</button>' +
-    '<button onclick="sendWeeklyReportTest(document.getElementById(\'today-report-email\').value)" style="border:none;background:#4c1d95;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📊 Седмичен</button>' +
-    '<button onclick="sendPalletsReportTest(document.getElementById(\'today-report-email\').value)" style="border:none;background:#b45309;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">Палети (тест до мен)</button>' +
-    '<button onclick="sendWarehouseReportTest(document.getElementById(\'today-report-email\').value)" style="border:none;background:#0f766e;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">Склад (тест до мен)</button>' +
+    '<input id="today-report-email" placeholder="имейл за тест" value="' + (me ? esc(me) : '') + '" style="flex:1;min-width:180px;font-size:12px;border:1px solid #e2e8f0;border-radius:6px;padding:6px 9px;">' +
+    '<button onclick="todayReportTestClick(this,\'daily\')" style="border:none;background:#1E2761;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📋 Дневен</button>' +
+    '<button onclick="todayReportTestClick(this,\'weekly\')" style="border:none;background:#4c1d95;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">📊 Седмичен</button>' +
+    '<button onclick="todayReportTestClick(this,\'pallets\')" style="border:none;background:#b45309;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">Палети (тест до мен)</button>' +
+    '<button onclick="todayReportTestClick(this,\'warehouse\')" style="border:none;background:#0f766e;color:#fff;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;">Склад (тест до мен)</button>' +
+    '<div id="today-report-test-note" style="flex-basis:100%;font-size:11px;color:#94a3b8;">Тестът праща днешния дневен / текущата седмица с данните към момента — не е редовният отчет (21:00)</div>' +
     /* Тук стоеше трети бутон „📬 Маршрутизация (тест)", който викаше
        sendWeeklyReportRouted(). Махнат на 02.09.2026: същите писма вече ги
        праща едж функцията send-routed-report по крон (job 16, понеделник
@@ -371,6 +377,32 @@ function todayReportTestBarHtml(){
        Не го връщай — тестовият режим на живата функция се управлява от
        колоната test_email на реда weekly_routed в notification_topics. */
     '</div>';
+}
+
+/* Един клик = едно писмо. На 15.09.2026 в 08:33 дневният тръгна два пъти за
+   секунда: бутонът не се заключваше, а събирането на данните трае секунди.
+   Флагът е по вид отчет и живее ИЗВЪН DOM-а — пренарисуван таб по време на
+   заявката дава нов, отключен бутон, но флагът пак спира второто писмо.
+   Отключва се от done(), който send*ReportTest вика на всеки изход. */
+var todayReportTestBusy = {};
+function todayReportTestClick(btn, kind){
+  var names = { daily: 'sendDailyReportTest', weekly: 'sendWeeklyReportTest',
+                pallets: 'sendPalletsReportTest', warehouse: 'sendWarehouseReportTest' };
+  var fn = window[names[kind]];
+  if (typeof fn !== 'function' || todayReportTestBusy[kind]) return;
+  var inp = document.getElementById('today-report-email');
+  var to = inp ? String(inp.value || '').trim() : '';
+  if (!to) { toast('Въведи имейл','#dc2626'); return; }
+  todayReportTestBusy[kind] = true;
+  if (btn) btn.disabled = true;
+  var released = false;
+  function done(){
+    if (released) return;
+    released = true;
+    todayReportTestBusy[kind] = false;
+    if (btn) btn.disabled = false;
+  }
+  try { fn(to, done); } catch (e) { done(); throw e; }
 }
 
 /* Зарежда списъка получатели (report_recipients) - веднъж на зареждане на

@@ -167,7 +167,8 @@ const TESTS = [
   'postpone-date-report.test.js',
   'postpone-date-notify.test.js',
   'bulletin-empty-recurring.test.js',
-  'transit-auto-complete.test.js'
+  'transit-auto-complete.test.js',
+  'today-report-test-bar.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

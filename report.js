@@ -1119,16 +1119,23 @@ function buildDailyReportHtml(data){
     'Автоматичен репорт · ТеМАХ Портал');
 }
 
-function sendDailyReportTest(toEmail){
-  if (!toEmail) { toast('Въведи имейл','#dc2626'); return; }
+/* done (по избор) се вика на ВСЕКИ изход — по него лентата в таб „Днес"
+   отключва бутона (todayReportTestClick в today.js). Същото и в останалите
+   три send*ReportTest. */
+function sendDailyReportTest(toEmail, done){
+  var fin = typeof done === 'function' ? done : function(){};
+  if (!toEmail) { toast('Въведи имейл','#dc2626'); fin(); return; }
   toast('⏳ Подготвям дневния репорт...');
   collectDailyReportData(function(data){
-    if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
-    var html = buildDailyReportHtml(data);
-    sendEmail(toEmail, reportDailySubject(data.reportDate) + ' (тест)', html).then(function(res){
-      if (res.ok) toast('✅ Дневен репорт изпратен на ' + toEmail);
-      else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
-    });
+    if (!data) { toast('Грешка при събиране на данните','#dc2626'); fin(); return; }
+    try {
+      var html = buildDailyReportHtml(data);
+      sendEmail(toEmail, reportDailySubject(data.reportDate) + ' (тест)', html).then(function(res){
+        if (res.ok) toast('✅ Дневен репорт изпратен на ' + toEmail);
+        else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
+        fin();
+      });
+    } catch (e) { fin(); throw e; }
   });
 }
 
@@ -2381,16 +2388,20 @@ function buildWeeklyReportHtml(data){
     'Автоматичен репорт · ТеМАХ Портал');
 }
 
-function sendWeeklyReportTest(toEmail){
-  if (!toEmail) { toast('Въведи имейл','#dc2626'); return; }
+function sendWeeklyReportTest(toEmail, done){
+  var fin = typeof done === 'function' ? done : function(){};
+  if (!toEmail) { toast('Въведи имейл','#dc2626'); fin(); return; }
   toast('⏳ Подготвям седмичния репорт...');
   collectWeeklyReportData(function(data){
-    if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
-    var html = buildWeeklyReportHtml(data);
-    sendEmail(toEmail, reportWeeklySubject(data.weekDates) + ' (тест)', html).then(function(res){
-      if (res.ok) toast('✅ Седмичен репорт изпратен на ' + toEmail);
-      else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
-    });
+    if (!data) { toast('Грешка при събиране на данните','#dc2626'); fin(); return; }
+    try {
+      var html = buildWeeklyReportHtml(data);
+      sendEmail(toEmail, reportWeeklySubject(data.weekDates) + ' (тест)', html).then(function(res){
+        if (res.ok) toast('✅ Седмичен репорт изпратен на ' + toEmail);
+        else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
+        fin();
+      });
+    } catch (e) { fin(); throw e; }
   });
 }
 
@@ -2570,15 +2581,19 @@ function reportPalletsRecipients(recipientRows, userRows){
   return { all: all, personal: personal };
 }
 
-function sendPalletsReportTest(toEmail){
-  if (!toEmail) { toast('Въведи имейл','#dc2626'); return; }
+function sendPalletsReportTest(toEmail, done){
+  var fin = typeof done === 'function' ? done : function(){};
+  if (!toEmail) { toast('Въведи имейл','#dc2626'); fin(); return; }
   toast('⏳ Подготвям отчета за палетите...');
   collectPalletsReportData(null, function(data){
-    if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
-    sendEmail(toEmail, reportPalletsSubject(data.reportDate) + ' (тест)', reportPalletsHtml(data)).then(function(res){
-      if (res.ok) toast('✅ Отчетът за палетите е изпратен на ' + toEmail);
-      else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
-    });
+    if (!data) { toast('Грешка при събиране на данните','#dc2626'); fin(); return; }
+    try {
+      sendEmail(toEmail, reportPalletsSubject(data.reportDate) + ' (тест)', reportPalletsHtml(data)).then(function(res){
+        if (res.ok) toast('✅ Отчетът за палетите е изпратен на ' + toEmail);
+        else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
+        fin();
+      });
+    } catch (e) { fin(); throw e; }
   });
 }
 
@@ -2683,16 +2698,20 @@ function reportWarehouseRecipients(users){
   return out;
 }
 
-function sendWarehouseReportTest(toEmail){
-  if (!toEmail) { toast('Въведи имейл','#dc2626'); return; }
+function sendWarehouseReportTest(toEmail, done){
+  var fin = typeof done === 'function' ? done : function(){};
+  if (!toEmail) { toast('Въведи имейл','#dc2626'); fin(); return; }
   var wh = 'Логистичен склад Търговище';
   toast('⏳ Подготвям отчета за ' + wh + '...');
   collectWarehouseReportData(wh, function(data){
-    if (!data) { toast('Грешка при събиране на данните','#dc2626'); return; }
-    sendEmail(toEmail, reportWarehouseSubject(data) + ' (тест)', reportWarehouseHtml(data)).then(function(res){
-      if (res.ok) toast('✅ Отчетът за склада е изпратен на ' + toEmail);
-      else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
-    });
+    if (!data) { toast('Грешка при събиране на данните','#dc2626'); fin(); return; }
+    try {
+      sendEmail(toEmail, reportWarehouseSubject(data) + ' (тест)', reportWarehouseHtml(data)).then(function(res){
+        if (res.ok) toast('✅ Отчетът за склада е изпратен на ' + toEmail);
+        else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
+        fin();
+      });
+    } catch (e) { fin(); throw e; }
   });
 }
 
