@@ -1,4 +1,4 @@
-/* Транспорт > 🎨 Зареждане (supply.js), Етап 1.
+/* Транспорт > 🎨 Зареждане (supply.js), Етапи 1–2.
 
    Какво се заковава:
    - формата за обект: шаблонът се показва само ако обектът е в target_stores
@@ -9,7 +9,9 @@
    - провал на кой да е от записите (тук: вторият PATCH) -> червен toast и
      НИКАКВО „Запазено" (правило 13);
    - навигацията: бутонът в под-нав на Транспорт, активен таб Транспорт;
-   - ЦО/admin: само списък ✅/⬜ кой е попълнил седмицата;
+   - ЦО/admin: списък ✅/⬜ кой е попълнил седмицата (Етап 1) и матрица
+     артикули × обекти с избор на седмица, чипове по доставчик, скриване на
+     празните редове и пълен Excel износ (Етап 2);
    - supplyWeekStart(): понеделникът на ISO седмицата, неделя -> предишния.
 
    Пускане: node tests/supply.test.js .
@@ -224,7 +226,7 @@ const RED = /^(#dc2626|rgb\(220,38,38\))$/;
     }
   }
 
-  section('10. ЦО/admin: само ✅/⬜ по target_stores');
+  section('10. ЦО/admin: ✅/⬜ по target_stores над матрицата');
   {
     const h = env(ADMIN);
     const wk = h.w.supplyWeekStart();
@@ -234,7 +236,7 @@ const RED = /^(#dc2626|rgb\(220,38,38\))$/;
     ]);
     h.w.loadSupply(); await ticks(6);
     const m = mod(h);
-    ok('надпис за следващ етап', m.textContent.indexOf('Обобщението по магазини е в следващ етап.') >= 0);
+    ok('placeholder-ът „следващ етап" го няма', m.textContent.indexOf('следващ етап') < 0);
     const spans = Array.from(m.querySelectorAll('.sup-ov-store')).map(s => s.textContent.trim());
     ok('3 обекта от target_stores', spans.length === 3, spans.join(' | '));
     ok('✅ Сливен', spans.indexOf('✅ Сливен') >= 0, spans.join(' | '));
@@ -242,6 +244,238 @@ const RED = /^(#dc2626|rgb\(220,38,38\))$/;
     ok('⬜ Кърджали', spans.indexOf('⬜ Кърджали') >= 0);
     ok('„попълнили 1 от 3"', m.textContent.indexOf('попълнили 1 от 3') >= 0);
     ok('няма форма и бутон „Запази"', !h.doc.getElementById('sup-q1-it-a') && !btn(m, 'Запази'));
+  }
+
+  section('11. Матрица: 2 обекта × 2 артикула, празна клетка и Общо само от наличните');
+  {
+    const tpl = Object.assign({}, TPL, { target_stores: ['Сливен', 'Петрич'] });
+    const h = env(ADMIN);
+    h.setData('supply_templates', [tpl]);
+    const wk = h.w.supplyWeekStart();
+    h.setData('supply_entries', () => [
+      { id: '1', template_id: 'tpl-col', item_id: 'it-a', store_name: 'Сливен', week_start: wk, qty1: 5, qty2: null },
+      { id: '2', template_id: 'tpl-col', item_id: 'it-b', store_name: 'Сливен', week_start: wk, qty1: 0, qty2: null },
+      { id: '3', template_id: 'tpl-col', item_id: 'it-a', store_name: 'Петрич', week_start: wk, qty1: 3, qty2: null }
+      /* Петрич няма запис за it-b */
+    ]);
+    h.w.loadSupply(); await ticks(8);
+    const m = mod(h);
+    const heads = Array.from(m.querySelectorAll('table.sup-matrix thead th')).map(th => th.textContent.trim());
+    ok('колоните: САП | Име | Доставчик | Петрич | Сливен | Общо', heads.join('|') === 'САП|Име|Доставчик|Петрич|Сливен|Общо', heads.join('|'));
+    const rowA = m.querySelector('tr[data-item="it-a"]'), rowB = m.querySelector('tr[data-item="it-b"]');
+    const cellsOf = tr => tr ? Array.from(tr.querySelectorAll('td.sup-cell,td.sup-total')).map(td => td.textContent) : [];
+    ok('ред A: Петрич 3, Сливен 5, Общо 8', cellsOf(rowA).join('|') === '3|5|8', cellsOf(rowA).join('|'));
+    ok('ред B: Петрич ПРАЗНО (не 0), Сливен 0, Общо 0', cellsOf(rowB).join('|') === '|0|0', JSON.stringify(cellsOf(rowB)));
+    ok('редовете са по sort_order', Array.from(m.querySelectorAll('tbody tr[data-item]')).map(tr => tr.getAttribute('data-item')).join(',') === 'it-a,it-b');
+    const wrap = m.querySelector('.sup-matrix-wrap');
+    ok('таблицата е в контейнер с overflow-x:auto', !!wrap && /overflow-x:\s*auto/.test(wrap.getAttribute('style') || ''));
+    ok('„попълнили 2 от 2" остава', m.textContent.indexOf('Колоранти — попълнили 2 от 2') >= 0);
+    const wrapIdx = m.innerHTML.indexOf('sup-matrix-wrap'), rosterIdx = m.innerHTML.indexOf('sup-ov-store');
+    ok('списъкът ✅/⬜ е ПРЕДИ таблицата', rosterIdx >= 0 && rosterIdx < wrapIdx);
+    ok('заявката за записите е по седмица и е страницирана',
+      h.calls.get.some(u => /supply_entries\?/.test(u) && u.indexOf('week_start=eq.' + wk) >= 0 && /limit=1000&offset=0/.test(u)), h.calls.get.join('\n'));
+
+    const all = Object.assign({}, TPL, { target_stores: null, id: 'tpl-all', slug: 'all' });
+    const h2 = env(ADMIN);
+    h2.setData('supply_templates', [all]);
+    h2.setData('supply_template_items', ITEMS.map(i => Object.assign({}, i, { template_id: 'tpl-all' })));
+    h2.setData('supply_entries', () => [
+      { id: '9', template_id: 'tpl-all', item_id: 'it-a', store_name: 'Габрово', week_start: h2.w.supplyWeekStart(), qty1: 1, qty2: null }
+    ]);
+    h2.w.loadSupply(); await ticks(8);
+    const heads2 = Array.from(mod(h2).querySelectorAll('table.sup-matrix thead th')).map(th => th.textContent.trim());
+    ok('target_stores=null -> колони само за обектите със записи', heads2.join('|') === 'САП|Име|Доставчик|Габрово|Общо', heads2.join('|'));
+  }
+
+  section('12. Шаблон с col2_label -> двойни колони');
+  {
+    const tpl = Object.assign({}, TPL, { target_stores: ['Сливен', 'Петрич'], col2_label: 'Наличност' });
+    const h = env(ADMIN);
+    h.setData('supply_templates', [tpl]);
+    const wk = h.w.supplyWeekStart();
+    h.setData('supply_entries', () => [
+      { id: '1', template_id: 'tpl-col', item_id: 'it-a', store_name: 'Сливен', week_start: wk, qty1: 5, qty2: 11 },
+      { id: '2', template_id: 'tpl-col', item_id: 'it-a', store_name: 'Петрич', week_start: wk, qty1: 2, qty2: null }
+    ]);
+    h.w.loadSupply(); await ticks(8);
+    const m = mod(h);
+    const trs = m.querySelectorAll('table.sup-matrix thead tr');
+    ok('заглавието е на два реда', trs.length === 2, String(trs.length));
+    const top = trs[0] ? Array.from(trs[0].children).map(th => th.textContent.trim() + '/' + (th.getAttribute('colspan') || '1')) : [];
+    ok('горен ред: Петрич, Сливен и Общо с colspan=2', top.slice(3).join('|') === 'Петрич/2|Сливен/2|Общо/2', top.join('|'));
+    const sub = trs[1] ? Array.from(trs[1].children).map(th => th.textContent.trim()) : [];
+    ok('долен ред: 3 × (Брой за поръчка, Наличност)', sub.join('|') === 'Брой за поръчка|Наличност|Брой за поръчка|Наличност|Брой за поръчка|Наличност', sub.join('|'));
+    const rowA = m.querySelector('tr[data-item="it-a"]');
+    const vals = rowA ? Array.from(rowA.querySelectorAll('td.sup-cell,td.sup-total')).map(td => td.textContent) : [];
+    ok('ред A: Петрич 2/празно, Сливен 5/11, Общо 7/11', vals.join('|') === '2||5|11|7|11', JSON.stringify(vals));
+    const rowB = m.querySelector('tr[data-item="it-b"]');
+    const valsB = rowB ? Array.from(rowB.querySelectorAll('td.sup-cell,td.sup-total')).map(td => td.textContent) : [];
+    ok('ред B без записи: 6 празни клетки, Общо също празно', valsB.length === 6 && valsB.every(x => x === ''), JSON.stringify(valsB));
+  }
+
+  const ITEM_C = { id: 'it-c', template_id: 'tpl-col', sap_code: '63223', name: 'КОЛОРАНТ KRAFT 01 ЯРКО ЖЪЛТ 1Л', supplier: 'ДФХ БЪЛГАРИЯ ЕООД', active: true, sort_order: 3 };
+  function ovEnv() {
+    const h = env(ADMIN);
+    const wk = h.w.supplyWeekStart();
+    h.setData('supply_templates', [Object.assign({}, TPL, { target_stores: ['Сливен', 'Петрич'] })]);
+    h.setData('supply_template_items', ITEMS.concat([ITEM_C]));
+    const rows = [
+      { id: '1', template_id: 'tpl-col', item_id: 'it-a', store_name: 'Сливен', week_start: wk, qty1: 5, qty2: null },
+      { id: '2', template_id: 'tpl-col', item_id: 'it-b', store_name: 'Петрич', week_start: wk, qty1: 4, qty2: null }
+      /* it-c: без нито един запис -> празен ред */
+    ];
+    h.setData('supply_entries', () => rows);
+    return h;
+  }
+  const visibleItems = h => Array.from(mod(h).querySelectorAll('table.sup-matrix tbody tr[data-item]')).map(tr => tr.getAttribute('data-item')).join(',');
+  const chips = h => Array.from(mod(h).querySelectorAll('.sup-chip'));
+  const chipNames = h => chips(h).map(c => c.textContent.trim()).join('|');
+  const chipBy = (h, name) => chips(h).find(c => c.textContent.trim() === name);
+  function setHide(h, on) {
+    const box = mod(h).querySelector('.sup-hide-empty');
+    box.checked = on;
+    H.fire(h.w, box, 'change');
+  }
+
+  section('13. Чип по доставчик и „Скрий празните редове"');
+  {
+    const h = ovEnv();
+    h.w.loadSupply(); await ticks(8);
+    ok('чипове: Всички + 3 доставчика', chipNames(h) === 'Всички|ВАМКО ООД|ОРГАХИМ ЕАД|ДФХ БЪЛГАРИЯ ЕООД', chipNames(h));
+    ok('„Всички" е активен по подразбиране', chips(h)[0].classList.contains('active'));
+    ok('по подразбиране: всичките 3 реда, включително празния', visibleItems(h) === 'it-a,it-b,it-c', visibleItems(h));
+    const cb = mod(h).querySelector('.sup-hide-empty');
+    ok('чекбоксът е изключен по подразбиране', !!cb && !cb.checked);
+
+    realClick(h.w, chipBy(h, 'ОРГАХИМ ЕАД'));
+    ok('чип ОРГАХИМ: остава само it-b', visibleItems(h) === 'it-b', visibleItems(h));
+    ok('чипът ОРГАХИМ е активен, „Всички" не е', chipBy(h, 'ОРГАХИМ ЕАД').classList.contains('active') && !chips(h)[0].classList.contains('active'));
+    realClick(h.w, chipBy(h, 'ДФХ БЪЛГАРИЯ ЕООД'));
+    ok('чип ДФХ: само празният it-c', visibleItems(h) === 'it-c', visibleItems(h));
+    setHide(h, true);
+    ok('ДФХ + скрий празните: нула реда и съобщение', visibleItems(h) === '' && mod(h).textContent.indexOf('Няма редове за показване.') >= 0, visibleItems(h));
+    realClick(h.w, chipBy(h, 'Всички'));
+    ok('„Всички" + скрий празните: it-a,it-b', visibleItems(h) === 'it-a,it-b', visibleItems(h));
+    ok('чекбоксът остава отметнат след ново рендиране', mod(h).querySelector('.sup-hide-empty').checked);
+    setHide(h, false);
+    ok('изключен чекбокс: празният ред се връща', visibleItems(h) === 'it-a,it-b,it-c', visibleItems(h));
+
+    const h1 = env(ADMIN);
+    h1.setData('supply_template_items', [ITEMS[0]]);
+    h1.w.loadSupply(); await ticks(8);
+    ok('при 1 доставчик чиповете НЕ се крият (Всички + ВАМКО)', chipNames(h1) === 'Всички|ВАМКО ООД', chipNames(h1));
+  }
+
+  section('14. ◀ мести седмицата 7 дни назад и презарежда');
+  {
+    const h = env(ADMIN);
+    const wk = h.w.supplyWeekStart();
+    const prev = h.w.supplyAddDays(wk, -7);
+    h.setData('supply_templates', [Object.assign({}, TPL, { target_stores: ['Сливен'] })]);
+    h.setData('supply_entries', url => [
+      { id: 'n', template_id: 'tpl-col', item_id: 'it-a', store_name: 'Сливен', week_start: wk, qty1: 1, qty2: null },
+      { id: 'p', template_id: 'tpl-col', item_id: 'it-a', store_name: 'Сливен', week_start: prev, qty1: 42, qty2: null }
+    ].filter(e => url.indexOf('week_start=eq.' + e.week_start) >= 0));
+    h.w.loadSupply(); await ticks(8);
+    const lbl = () => (h.doc.getElementById('sup-week-label') || {}).textContent;
+    const cellA = () => { const td = mod(h).querySelector('tr[data-item="it-a"] td.sup-cell'); return td ? td.textContent : null; };
+    ok('по подразбиране текущата седмица', lbl() === 'Седмица от ' + h.w.fmtDate(wk), lbl());
+    ok('▶ е изключен на текущата седмица', h.doc.getElementById('sup-week-next').disabled);
+    ok('стойност от текущата седмица: 1', cellA() === '1', cellA());
+    const getsBefore = h.calls.get.length;
+    realClick(h.w, h.doc.getElementById('sup-week-prev'));
+    await ticks(8);
+    ok('етикетът показва седмицата 7 дни по-рано', lbl() === 'Седмица от ' + h.w.fmtDate(prev), lbl());
+    const newGets = h.calls.get.slice(getsBefore);
+    ok('нов GET към supply_entries за предишната седмица', newGets.some(u => /supply_entries\?/.test(u) && u.indexOf('week_start=eq.' + prev) >= 0), newGets.join('\n'));
+    ok('матрицата е презаредена: 42', cellA() === '42', cellA());
+    ok('▶ вече е активен', !h.doc.getElementById('sup-week-next').disabled);
+    realClick(h.w, h.doc.getElementById('sup-week-next'));
+    await ticks(8);
+    ok('▶ връща към текущата', lbl() === 'Седмица от ' + h.w.fmtDate(wk) && cellA() === '1', lbl() + ' / ' + cellA());
+    h.w.loadSupply(); await ticks(8);
+    realClick(h.w, h.doc.getElementById('sup-week-prev')); await ticks(8);
+    h.w.loadSupply(); await ticks(8);
+    ok('ново отваряне на таба връща текущата седмица', lbl() === 'Седмица от ' + h.w.fmtDate(wk), lbl());
+  }
+
+  section('15. Excel: пълен износ, без филтъра по доставчик');
+  {
+    const h = ovEnv();
+    h.w.loadSupply(); await ticks(8);
+    const wk = h.w.supplyWeekStart();
+    const x = { sheets: [], aoa: null, file: null };
+    h.w.XLSX = {
+      utils: {
+        book_new: () => ({ SheetNames: [] }),
+        aoa_to_sheet: aoa => { x.aoa = aoa; return {}; },
+        book_append_sheet: (wb, ws, name) => { x.sheets.push(name); }
+      },
+      writeFile: (wb, name) => { x.file = name; }
+    };
+    /* включваме филтър и скриване — износът трябва да ги игнорира */
+    realClick(h.w, chipBy(h, 'ОРГАХИМ ЕАД'));
+    setHide(h, true);
+    ok('преди износа на екрана е само it-b', visibleItems(h) === 'it-b', visibleItems(h));
+    const b = mod(h).querySelector('.sup-excel');
+    ok('бутон „📥 Excel" над таблицата', !!b && b.textContent.indexOf('📥 Excel') >= 0 &&
+      mod(h).innerHTML.indexOf('sup-excel') < mod(h).innerHTML.indexOf('sup-matrix-wrap'));
+    realClick(h.w, b);
+    await ticks(2);
+    const aoa = x.aoa || [];
+    ok('заглавен ред като в матрицата', (aoa[0] || []).join('|') === 'САП|Име|Доставчик|Петрич|Сливен|Общо', (aoa[0] || []).join('|'));
+    ok('заглавен + по 1 ред на артикул (3), въпреки филтъра', aoa.length === 4, String(aoa.length));
+    ok('редовете: it-a, it-b и ПРАЗНИЯТ it-c', aoa.slice(1).map(r => r[0]).join(',') === '39801,62960,63223', aoa.slice(1).map(r => r[0]).join(','));
+    ok('ред it-a: [39801, име, ВАМКО, null, 5, 5]', JSON.stringify(aoa[1]) === JSON.stringify(['39801', 'КОЛОРАНТ WB1 BLUE 1Л', 'ВАМКО ООД', null, 5, 5]), JSON.stringify(aoa[1]));
+    ok('празните клетки са null, не 0', !!aoa[3] && aoa[3].slice(3).every(v => v === null), JSON.stringify(aoa[3]));
+    ok('един лист с име „Колоранти"', x.sheets.join('|') === 'Колоранти', x.sheets.join('|'));
+    ok('файл zarezhdane_colorants_<week_start>.xlsx', x.file === 'zarezhdane_colorants_' + wk + '.xlsx', x.file);
+    ok('при наличен window.XLSX не се зарежда скрипт', !h.doc.querySelector('script[src*="xlsx"]'));
+    ok('екранът не е пипнат от износа (пак само it-b)', visibleItems(h) === 'it-b', visibleItems(h));
+
+    const longName = 'Колоранти/Бои: [тест]*? дълго име над трийсет и един знака';
+    const sn = h.w.supplySheetName(longName);
+    ok('име на лист: без \\ / ? * [ ] : и до 31 знака', sn.length <= 31 && !/[\\\/?*\[\]:]/.test(sn), sn + ' (' + sn.length + ')');
+
+    const h2 = ovEnv();
+    h2.w.loadSupply(); await ticks(8);
+    delete h2.w.XLSX;
+    realClick(h2.w, mod(h2).querySelector('.sup-excel'));
+    const sc = h2.doc.querySelector('script[src*="xlsx"]');
+    ok('без window.XLSX: зарежда cdnjs xlsx 0.18.5', !!sc && sc.getAttribute('src') === 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js', sc && sc.getAttribute('src'));
+  }
+
+  section('16. Над 1000 записа: втора страница; провал -> грешка, не непълна матрица');
+  {
+    const h = env(ADMIN);
+    const wk = h.w.supplyWeekStart();
+    h.setData('supply_templates', [Object.assign({}, TPL, { target_stores: ['Сливен'] })]);
+    const filler = [];
+    for (let i = 0; i < 1000; i++) filler.push({ id: 'f' + i, template_id: 'tpl-col', item_id: 'it-a', store_name: 'Сливен', week_start: wk, qty1: 1, qty2: null });
+    h.setData('supply_entries', url => /offset=0(&|$)/.test(url) ? filler
+      : [{ id: 'last', template_id: 'tpl-col', item_id: 'it-b', store_name: 'Сливен', week_start: wk, qty1: 9, qty2: null }]);
+    h.w.loadSupply(); await ticks(10);
+    ok('има заявка с offset=1000', h.calls.get.some(u => /supply_entries\?.*offset=1000/.test(u)), h.calls.get.join('\n'));
+    const c = mod(h).querySelector('tr[data-item="it-b"] td.sup-cell');
+    ok('записът от втората страница е в матрицата (9)', !!c && c.textContent === '9', c && c.textContent);
+
+    const h2 = env(ADMIN, null, { fail: { GET: /supply_entries/ } });
+    h2.w.loadSupply(); await ticks(10);
+    ok('при провал няма матрица', !mod(h2).querySelector('table.sup-matrix'));
+    ok('при провал има съобщение за грешка', mod(h2).textContent.indexOf('Грешка при зареждане на записите') >= 0, mod(h2).textContent.slice(0, 160));
+  }
+
+  section('17. ЦО с роля извън isGlobal() вижда обобщението; обектът — не');
+  {
+    const h = env({ email: 'sn@temax.bg', display_name: 'Снабдяване', role: 'supply', store_name: 'Централен офис' });
+    h.w.loadSupply(); await ticks(8);
+    ok('ЦО (role=supply) вижда матрицата', !!mod(h).querySelector('table.sup-matrix'));
+    ok('и няма форма', !h.doc.getElementById('sup-q1-it-a'));
+    const h2 = env(STORE);
+    h2.w.loadSupply(); await ticks(8);
+    ok('обектът няма матрица, чипове, ◀ ▶ и Excel', !mod(h2).querySelector('table.sup-matrix') && !mod(h2).querySelector('.sup-chip') &&
+      !h2.doc.getElementById('sup-week-prev') && !mod(h2).querySelector('.sup-excel'));
+    ok('формата на обекта си е на мястото', !!h2.doc.getElementById('sup-q1-it-a'));
   }
 
   report();
