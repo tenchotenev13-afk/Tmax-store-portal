@@ -204,6 +204,7 @@ var DIFF_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 var DIFF_BKT = 'bulletin-files'; /* преизползваме съществуващия bucket, отделен префикс на пътя */
 
 var diffReports = [];       /* differences_reports - заредени бланки */
+var sdSwaps = [];           /* stock_diff_swaps - размените, в които участват заредените междускладови редове */
 var diffPendingPhotos = []; /* снимки, качени в текущо отворената форма за подаване, преди submit */
 
 function loadStockDiff() {
@@ -220,6 +221,10 @@ function loadStockDiff() {
   ]).then(function(res){
     sdData = Array.isArray(res[0]) ? res[0] : [];
     diffReports = Array.isArray(res[1]) ? res[1] : [];
+    /* Размените зависят от id-тата на вече заредените редове - затова
+       след Promise.all, не в него. */
+    return sdLoadSwaps();
+  }).then(function(){
     renderStockDiff();
   }).catch(function(err) {
     var w = document.getElementById('mod-stock-diff');
@@ -396,7 +401,7 @@ function renderStockDiff() {
         /* Под отговора на склада - отговорът на магазина. Само при зададен
            store_response: без него sdStoreResponseLabel казва "чака магазина",
            а тук стоят доставчикови и вече приключени редове. */
-        '<td style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+'</td>'+
+        '<td style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+sdSwapSummary(r)+'</td>'+
         '<td style="padding:7px 10px;white-space:nowrap;">';
 
       /* status='received' е КРАЯТ на междускладовия поток. Такъв ред няма
@@ -746,6 +751,9 @@ function sdInterstoreConfirmButton(l, rep){
       (l.completed_by?' · '+esc(l.completed_by):'')+
       (l.completed_at?' · '+sdFmtDateTime(l.completed_at):'')+'</div>';
   }
+  /* Отворена размяна замества пътя "приет / пуснато в SAP / прието обратно" -
+     стоката отива в друг магазин, а размяната се води в sdSwapPanel. */
+  if(sdSwapsForLine(l).some(function(s){ return s.status!=='closed'; })) return '';
   if(l.warehouse_response==='will_send'){
     return '<div style="margin-top:3px;font-size:10.5px;color:#94a3b8;">чака изпращане</div>';
   }
@@ -1829,12 +1837,307 @@ function sdSwapBadge(line){
       var qty = (c.quantity!=null) ? c.quantity : (c.quantity_received!=null ? c.quantity_received : '—');
       return esc(c.store_name||'')+' ('+esc(diffCategoryLabel(c.difference_category))+', '+esc(String(qty))+' бр., '+esc(sdFmtDateTime(c.created_at))+')';
     }).join(' · ');
-    return box('opposite','#fffbeb','#fde68a','#92400e','⚠️ Възможна размяна: '+parts);
+    /* Бутоните стоят ИЗВЪН кутията на сигнала - тя е текст за оглед, а
+       бутонът е действие по конкретна двойка. */
+    var linkBtns = opp.map(function(c){
+      var ex = line.difference_category==='excess' ? line : c;
+      var sh = ex===line ? c : line;
+      if(!sdSwapLinkState(ex, sh)) return '';
+      return '<button data-ex="'+esc(String(ex.id))+'" data-sh="'+esc(String(sh.id))+'" onclick="openSwapLinkModal(this.dataset.ex,this.dataset.sh)" '+
+        'style="margin:3px 4px 0 0;border:1px solid #fcd34d;background:#fffbeb;color:#92400e;border-radius:6px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">🔗 Свържи с '+esc(c.store_name||'')+'</button>';
+    }).join('');
+    return box('opposite','#fffbeb','#fde68a','#92400e','⚠️ Възможна размяна: '+parts)+
+      (linkBtns ? '<div>'+linkBtns+'</div>' : '');
   }
   var same = cands.map(function(c){
     return esc(c.store_name||'')+' ('+esc(sdFmtDateTime(c.created_at))+')';
   }).join(' · ');
   return box('same','#f8fafc','#e2e8f0','#64748b','ℹ️ Същият артикул и в: '+same);
+}
+
+/* ══ Размяна между магазини (stock_diff_swaps) ══
+   from = редът с ИЗЛИШЪК (магазинът изпраща), to = редът с ЛИПСА (получава).
+   Една липса се покрива от една отворена размяна (partial unique по
+   to_line_id); един излишък може да захрани няколко. stock_differences.swap_id
+   се пише САМО на реда с липсата. Стъпка 2: складът свързва/развързва/
+   приключва; магазинските действия (sent/received) са стъпка 3. */
+
+/* Излишък и липса по реда - ЕДИН източник за модала, панела и стъпка 3.
+   И двете количества зададени: излишък = реално - по док., липса = по док. -
+   реално (отрицателното става 0). Само едното зададено: и двете са то.
+   Нищо: null. suspect = количество над 100000 - на 16.09.2026 в базата стоеше
+   номер на документ (80464309) в полето за количество. */
+function sdLineDelta(line){
+  var num = function(v){
+    if(v===null || v===undefined || v==='') return null;
+    var n = Number(v);
+    return isFinite(n) ? n : null;
+  };
+  var doc = num(line && line.quantity), real = num(line && line.quantity_received);
+  var suspect = (doc!==null && doc>100000) || (real!==null && real>100000);
+  if(doc!==null && real!==null){
+    return {excess:Math.max(0, real-doc), shortage:Math.max(0, doc-real), suspect:suspect};
+  }
+  var one = doc!==null ? doc : real;
+  return {excess:one, shortage:one, suspect:suspect};
+}
+/* Една заявка за размените на заредените междускладови редове (и отворени, и
+   затворени). sbGet не отхвърля - при грешка връща []. */
+function sdLoadSwaps(){
+  var ids = sdData.filter(function(l){ return sdLineDirection(l)==='interstore'; })
+    .map(function(l){ return l.id; });
+  if(!ids.length){ sdSwaps = []; return Promise.resolve(); }
+  var inList = '('+ids.join(',')+')';
+  return sbGet('stock_diff_swaps', 'or=(from_line_id.in.'+inList+',to_line_id.in.'+inList+')&order=created_at.asc')
+    .then(function(rows){ sdSwaps = Array.isArray(rows) ? rows : []; });
+}
+/* Всички размени, в които редът е from или to - отворени и затворени. */
+function sdSwapsForLine(line){
+  if(!line) return [];
+  var id = String(line.id);
+  return sdSwaps.filter(function(s){ return String(s.from_line_id)===id || String(s.to_line_id)===id; });
+}
+/* Може ли складът да свърже двойката излишък -> липса:
+     'new'   - няма отворена размяна по липсата, двата реда не са приключени;
+     'retry' - двойката ВЕЧЕ е записана, но липсата не е маркирана (swap_id) -
+               кликът прави само PATCH-а, без нов INSERT;
+     null    - бутон няма. */
+function sdSwapLinkState(ex, sh){
+  if(!ex || !sh || ex.status==='received' || sh.status==='received') return null;
+  var open = sdSwaps.filter(function(s){ return s.status!=='closed' && String(s.to_line_id)===String(sh.id); });
+  if(!open.length) return 'new';
+  var pair = open.filter(function(s){ return String(s.from_line_id)===String(ex.id); })[0];
+  if(pair && String(sh.swap_id||'')!==String(pair.id)) return 'retry';
+  return null;
+}
+/* Числата за модала и за проверката при запис - едно място, за да не се
+   разминат показаното и валидираното. */
+function sdSwapLinkInfo(ex, sh){
+  var dEx = sdLineDelta(ex), dSh = sdLineDelta(sh);
+  var openSum = sdSwaps.filter(function(s){
+    return s.status!=='closed' && String(s.from_line_id)===String(ex.id);
+  }).reduce(function(sum, s){ return sum + (Number(s.qty)||0); }, 0);
+  var available = (dEx.excess===null ? 0 : dEx.excess) - openSum;
+  return {excess:dEx.excess, shortage:dSh.shortage, openSum:openSum, available:available,
+          suspect:dEx.suspect || dSh.suspect};
+}
+function openSwapLinkModal(excessLineId, shortageLineId){
+  if(!isLogisticsWarehouseUser()) return;
+  var find = function(id){ return sdData.find(function(x){ return String(x.id)===String(id); }); };
+  var ex = find(excessLineId), sh = find(shortageLineId);
+  if(!ex || !sh) return;
+  var state = sdSwapLinkState(ex, sh);
+  if(!state) return;
+  if(state==='retry'){
+    var pair = sdSwaps.filter(function(s){
+      return s.status!=='closed' && String(s.from_line_id)===String(ex.id) && String(s.to_line_id)===String(sh.id);
+    })[0];
+    sdMarkSwapLine(pair, sh);
+    return;
+  }
+  var info = sdSwapLinkInfo(ex, sh);
+  var fmtN = function(v){ return v===null ? '—' : String(v); };
+  var side = function(l, title){
+    var rp = diffReports.find(function(x){ return x.id===l.report_id; }) || {};
+    var q = diffQtyLabels(rp.direction);
+    return '<div style="flex:1 1 160px;border:1px solid #e2e8f0;border-radius:8px;padding:8px;font-size:12px;">'+
+      '<div style="font-weight:700;margin-bottom:4px;">'+title+'</div>'+
+      '<div>🏪 '+esc(l.store_name||'')+'</div>'+
+      '<div>'+esc(diffCategoryLabel(l.difference_category))+'</div>'+
+      '<div>'+esc(q.docShort)+': '+fmtN(l.quantity)+' · '+esc(q.realShort)+': '+fmtN(l.quantity_received)+'</div>'+
+      (l.comment ? '<div style="color:#64748b;white-space:normal;">💬 '+esc(l.comment)+'</div>' : '')+
+    '</div>';
+  };
+  var canLink = info.available > 0;
+  var defQty = (!info.suspect && canLink && info.shortage!==null && info.shortage>0) ? Math.min(info.available, info.shortage) : '';
+  var existing = document.getElementById('sdswap-ov'); if(existing) existing.remove();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="sdswap-ov"><div class="bmod" style="width:460px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">🔗 Размяна между магазини</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">'+esc(ex.material_code||'')+' · '+esc(ex.material_name||sh.material_name||'')+'</div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:8px;">'+side(ex,'Излишък (изпраща)')+side(sh,'Липса (получава)')+'</div>'+
+    '<div style="font-size:12px;margin-bottom:6px;">Посока: <b>'+esc(ex.store_name||'')+'</b> → <b>'+esc(sh.store_name||'')+'</b></div>'+
+    '<div id="sdswap-nums" style="font-size:12px;margin-bottom:8px;">Излишък: '+fmtN(info.excess)+' · Липса: '+fmtN(info.shortage)+
+      ' · В отворени размени: '+info.openSum+' · <b>Налично за размяна: '+info.available+'</b></div>'+
+    (info.suspect ? '<div id="sdswap-suspect" style="color:#dc2626;font-weight:700;font-size:12px;margin-bottom:8px;">Проверете количеството по документ</div>' : '')+
+    (!canLink ? '<div id="sdswap-why" style="color:#dc2626;font-size:12px;margin-bottom:8px;">Няма налично за размяна: излишък '+fmtN(info.excess)+', вече в отворени размени '+info.openSum+'.</div>' : '')+
+    '<label class="fl">Количество</label>'+
+    '<input class="fi" id="sdswap-qty" type="number" min="0" step="any" value="'+defQty+'">'+
+    '<label class="fl">Бележка (по избор)</label>'+
+    '<input class="fi" id="sdswap-note" value="">'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="document.getElementById(\'sdswap-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button data-ex="'+esc(String(ex.id))+'" data-sh="'+esc(String(sh.id))+'" onclick="submitSwapLink(this.dataset.ex,this.dataset.sh)"'+(canLink?'':' disabled')+
+      ' style="border:none;background:'+(canLink?'#2563eb':'#94a3b8')+';color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:'+(canLink?'pointer':'not-allowed')+';">🔗 Свържи</button>'+
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+/* Запис в два хода (правило 13): 1) INSERT на размяната, 2) swap_id на
+   липсата. Падне ли вторият, размяната остава в sdSwaps локално, панелът
+   показва ⚠, а бутонът "Свържи" за същата двойка прави само PATCH-а. */
+function submitSwapLink(excessLineId, shortageLineId){
+  var find = function(id){ return sdData.find(function(x){ return String(x.id)===String(id); }); };
+  var ex = find(excessLineId), sh = find(shortageLineId);
+  if(!ex || !sh || sdSwapLinkState(ex, sh)!=='new') return;
+  var info = sdSwapLinkInfo(ex, sh);
+  var qEl = document.getElementById('sdswap-qty'), nEl = document.getElementById('sdswap-note');
+  var qty = Number(String(qEl ? qEl.value : '').replace(',', '.'));
+  if(!(qty > 0)){ toast('Въведете количество, по-голямо от 0','#dc2626'); return; }
+  if(qty > info.available){ toast('Количеството е над наличното за размяна ('+info.available+')','#dc2626'); return; }
+  if(info.shortage!==null && qty > info.shortage){ toast('Количеството е над липсата ('+info.shortage+')','#dc2626'); return; }
+  var repEx = diffReports.find(function(x){ return x.id===ex.report_id; }) || {};
+  sdKeepScroll(sh.report_id);
+  sbPostReturn('stock_diff_swaps', {
+    from_line_id: ex.id, to_line_id: sh.id,
+    from_store: ex.store_name, to_store: sh.store_name,
+    warehouse: repEx.counterpart || (currentUser && currentUser.store_name) || '',
+    material_code: ex.material_code || sh.material_code || null,
+    material_name: ex.material_name || sh.material_name || null,
+    qty: qty, note: (nEl && nEl.value.trim()) || null,
+    created_by: sdActor(), status: 'linked'
+  }).then(function(res){
+    if(!res.ok){ toast('Размяната НЕ е записана: '+sbErrMsg(res),'#dc2626'); return; }
+    var ov = document.getElementById('sdswap-ov'); if(ov) ov.remove();
+    if(!res.row || !res.row.id){
+      toast('Размяната е записана, но отговорът е без id — презаредете','#dc2626');
+      loadStockDiff();
+      return;
+    }
+    sdSwaps.push(res.row);
+    sdMarkSwapLine(res.row, sh);
+  });
+}
+/* Вторият ход на свързването - swap_id на реда с липсата. */
+function sdMarkSwapLine(swap, sh){
+  if(!swap || !sh) return;
+  sdKeepScroll(sh.report_id);
+  sbPatch('stock_differences', 'id=eq.'+sh.id, {swap_id: swap.id}).then(function(res){
+    if(!res.ok){
+      toast('Размяната е записана, но редът не е маркиран — натиснете отново','#dc2626');
+      /* renderStockDiff, НЕ loadStockDiff - презареждането не бива да губи
+         локалната размяна, докато потребителят не натисне отново. */
+      renderStockDiff();
+      return;
+    }
+    sh.swap_id = swap.id;
+    toast('🔗 Размяната е свързана');
+    loadStockDiff();
+  });
+}
+/* Обратен ред спрямо свързването: първо swap_id=null, после DELETE - иначе
+   при провал на DELETE-а би останал swap_id към изтрита размяна. */
+function sdUnlinkSwap(swapId){
+  var s = sdSwaps.find(function(x){ return String(x.id)===String(swapId); });
+  if(!s || s.status!=='linked' || !isLogisticsWarehouseUser()) return;
+  if(!confirm('Развържи размяната '+s.from_store+' → '+s.to_store+'?')) return;
+  var sh = sdData.find(function(x){ return String(x.id)===String(s.to_line_id); });
+  sdKeepScroll(sh ? sh.report_id : null);
+  sbPatch('stock_differences', 'id=eq.'+s.to_line_id+'&swap_id=eq.'+s.id, {swap_id: null}).then(function(res){
+    if(!res.ok){ toast('Развързването НЕ мина — редът не е размаркиран: '+sbErrMsg(res),'#dc2626'); return null; }
+    if(sh && String(sh.swap_id||'')===String(s.id)) sh.swap_id = null;
+    return sbDelete('stock_diff_swaps', 'id=eq.'+s.id);
+  }).then(function(res){
+    if(!res) return;
+    if(!res.ok){ toast('Редът е размаркиран, но размяната НЕ е изтрита — натиснете отново: '+sbErrMsg(res),'#dc2626'); renderStockDiff(); return; }
+    sdSwaps = sdSwaps.filter(function(x){ return x.id!==s.id; });
+    toast('✖ Размяната е развързана');
+    loadStockDiff();
+  });
+}
+/* Приключване от склада, само при received: размяната -> closed, после двата
+   реда -> received (като "Прието обратно"; store_response не се пипа).
+   Всеки провал спира веригата с червен toast, който казва КОЙ запис падна.
+   Ред с излишък, който захранва и друга отворена размяна, остава отворен.
+   Бланка, чиито редове са вече всички received, се затваря (reviewed) -
+   същото правило като sdConfirmInterstore. */
+function sdCloseSwap(swapId){
+  var s = sdSwaps.find(function(x){ return String(x.id)===String(swapId); });
+  if(!s || s.status!=='received' || !isLogisticsWarehouseUser()) return;
+  if(!confirm('Приключи размяната '+s.from_store+' → '+s.to_store+'? И двата реда стават приключени.')) return;
+  var find = function(id){ return sdData.find(function(x){ return String(x.id)===String(id); }); };
+  var fromL = find(s.from_line_id), toL = find(s.to_line_id);
+  sdKeepScroll(toL ? toL.report_id : null);
+  var at = new Date().toISOString(), by = sdActor();
+  var STOP = {};
+  var fail = function(msg, res){ toast(msg+': '+sbErrMsg(res),'#dc2626'); renderStockDiff(); throw STOP; };
+  var markLine = function(id, l, store){
+    return sbPatch('stock_differences', 'id=eq.'+id, {status:'received', completed_by:by, completed_at:at}).then(function(res){
+      if(!res.ok) fail('Размяната е приключена, но редът на '+store+' НЕ е', res);
+      if(l){ l.status='received'; l.completed_by=by; l.completed_at=at; }
+    });
+  };
+  sbPatch('stock_diff_swaps', 'id=eq.'+s.id, {status:'closed', closed_by:by, closed_at:at}).then(function(res){
+    if(!res.ok) fail('Размяната НЕ е приключена', res);
+    s.status='closed'; s.closed_by=by; s.closed_at=at;
+    var otherOpen = sdSwaps.some(function(x){
+      return x.id!==s.id && x.status!=='closed' && String(x.from_line_id)===String(s.from_line_id);
+    });
+    return otherOpen ? null : markLine(s.from_line_id, fromL, s.from_store);
+  }).then(function(){
+    return markLine(s.to_line_id, toL, s.to_store);
+  }).then(function(){
+    var repIds = [fromL && fromL.report_id, toL && toL.report_id].filter(function(x, i, a){ return x && a.indexOf(x)===i; });
+    return Promise.all(repIds.map(function(rid){
+      var sib = sdData.filter(function(x){ return x.report_id===rid; });
+      if(!sib.length || !sib.every(function(x){ return x.status==='received'; })) return {ok:true};
+      return sbPatch('differences_reports', 'id=eq.'+rid, {reviewed:true});
+    }));
+  }).then(function(results){
+    if(results.some(function(r){ return !r.ok; })) toast('Размяната е приключена, но бланката НЕ е затворена','#dc2626');
+    else toast('🏁 Размяната е приключена');
+    loadStockDiff();
+  }).catch(function(e){ if(e!==STOP) toast('Грешка при приключване: '+e,'#dc2626'); });
+}
+/* "🔗 Размяна: A → B · qty бр. · статус" - един ред, общ за панела, главната
+   таблица и стъпка 3. */
+function sdSwapHeadline(s){
+  var TR = {van:'бус', truck:'камион'};
+  var st = s.status==='linked' ? 'чака изпращане от '+s.from_store :
+           s.status==='sent' ? 'изпратено'+(s.transport_mode ? ' ('+(TR[s.transport_mode]||s.transport_mode)+')' : '') :
+           s.status==='received' ? 'прието в '+s.to_store :
+           s.status==='closed' ? 'приключена' : String(s.status||'');
+  return '🔗 Размяна: '+esc(s.from_store||'')+' → '+esc(s.to_store||'')+' · '+esc(String(s.qty))+' бр. · '+esc(st);
+}
+/* Панелът на реда в колона "Отговор на склада". Складът (своята размяна):
+   "✖ Развържи" при linked, "🏁 Приключи размяната" при received. Магазините и
+   Цвети/admin - само за четене. */
+function sdSwapPanel(line){
+  var list = sdSwapsForLine(line);
+  if(!list.length) return '';
+  var TR = {van:'бус', truck:'камион'};
+  return list.map(function(s){
+    var h = '<div data-sdswap="'+esc(String(s.id))+'" style="margin-top:4px;border:1px solid #fde68a;background:#fffbeb;border-radius:6px;padding:4px 6px;font-size:10.5px;color:#92400e;white-space:normal;">'+
+      '<div style="font-weight:700;">'+sdSwapHeadline(s)+'</div>';
+    if(s.status==='sent' || s.status==='received'){
+      var when = s.status==='sent' ? s.sent_at : s.received_at;
+      var bits = [];
+      if(s.transport_mode) bits.push('превоз: '+(TR[s.transport_mode]||esc(s.transport_mode)));
+      if(when) bits.push(sdFmtDateTime(when));
+      if(s.sap_doc_num) bits.push('SAP '+esc(s.sap_doc_num));
+      if(bits.length) h += '<div>'+bits.join(' · ')+'</div>';
+    }
+    /* ⚠: размяната е записана, но редът с липсата не носи swap_id (вторият
+       ход на свързването е паднал). Виждат го само тези, при които редът с
+       липсата е зареден. */
+    var toL = sdData.find(function(x){ return String(x.id)===String(s.to_line_id); });
+    if(s.status!=='closed' && toL && String(toL.swap_id||'')!==String(s.id)){
+      h += '<div data-sdswap-warn="1" style="color:#dc2626;font-weight:700;">⚠ Редът с липсата не е маркиран</div>';
+    }
+    var mine = isLogisticsWarehouseUser() && s.warehouse===currentUser.store_name;
+    if(mine && s.status==='linked'){
+      h += '<button data-sid="'+esc(String(s.id))+'" onclick="sdUnlinkSwap(this.dataset.sid)" style="margin-top:3px;border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">✖ Развържи</button>';
+    }
+    if(mine && s.status==='received'){
+      h += '<button data-sid="'+esc(String(s.id))+'" onclick="sdCloseSwap(this.dataset.sid)" style="margin-top:3px;border:none;background:#16a34a;color:#fff;border-radius:5px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">🏁 Приключи размяната</button>';
+    }
+    return h + '</div>';
+  }).join('');
+}
+/* Главната таблица: само текстов ред за всяка размяна, без бутони. */
+function sdSwapSummary(line){
+  return sdSwapsForLine(line).map(function(s){
+    return '<div style="margin-top:3px;font-size:10.5px;color:#92400e;font-weight:600;white-space:normal;">'+sdSwapHeadline(s)+'</div>';
+  }).join('');
 }
 
 /* ── Секция с подадени бланки (чакат преглед) ── */
@@ -1972,7 +2275,7 @@ function renderDiffReportsSection(){
           (canReviewDiff()&&!isLogisticsWarehouseUser()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
           (canEditSD(l)&&!l.type&&currentUser.store_name===rep.store_name?' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>':'')+
           '</td>'+
-          '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+'</td>'+
+          '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+sdSwapPanel(l)+'</td>'+
         '</tr>';
       });
       h+='</table>';

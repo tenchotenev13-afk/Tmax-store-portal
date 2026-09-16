@@ -36,6 +36,7 @@ const TESTS = [
   'interstore-confirm-flow.test.js',
   'sd-store-response.test.js',
   'sd-notify.test.js',
+  'sd-swap-link.test.js',
   'interstore-swap-signal.test.js',
   'loading-lists-warehouse.test.js',
   'loading-lists-store.test.js',
