@@ -21,7 +21,7 @@ const { JSDOM } = require('jsdom');
 /* Реалният ред на <script> таговете в index.html.
    Не се пренарежда — history.js разчита на storno helper-и от kasa.js и т.н. */
 const MODULE_ORDER = [
-  'shared.js', 'transport.js', 'pallets.js', 'client-orders.js', 'docs.js',
+  'shared.js', 'transport.js', 'pallets.js', 'supply.js', 'client-orders.js', 'docs.js',
   'bulletin.js', 'today.js', 'checklist.js', 'kasa.js', 'kasa-docs.js', 'daily-turnover.js',
   'admin.js', 'history.js',
   'contacts.js', 'transit.js', 'calendar.js', 'stock-returns.js',
@@ -32,7 +32,7 @@ const MODULE_ORDER = [
 /* Функции, които showModule() вика; ако модулът им не е зареден, се stub-ват,
    за да не гърми навигацията. */
 const LOADERS = [
-  'loadTransport', 'loadPallets', 'loadClientOrders', 'loadDocs', 'loadBulletin',
+  'loadTransport', 'loadPallets', 'loadSupply', 'loadClientOrders', 'loadDocs', 'loadBulletin',
   'loadTodayDashboard', 'loadChecklist', 'loadKasa', 'loadKasaDocs', 'loadAdmin', 'loadHistory',
   'loadContacts', 'loadTransit', 'loadCalendar', 'loadStockReturns', 'loadStockDiff',
   'loadPush', 'loadEmail', 'loadReport', 'loadLoadingLists', 'loadNotifications', 'loadReference',

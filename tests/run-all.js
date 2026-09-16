@@ -113,6 +113,7 @@ const TESTS = [
   'daily-turnover.test.js',
   'kasa-tab-routing.test.js',
   'pallets-summary.test.js',
+  'supply.test.js',
   'oborot-bulletin-link.test.js',
   'oborot-co-entry.test.js',
   'admin-oborot-report.test.js',

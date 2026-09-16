@@ -259,6 +259,7 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div style="display:flex;gap:8px;">
       <button id="tps-transport" class="filter-btn" onclick="showModule('transport')">🚚 Заявки</button>
       <button id="tps-pallets" class="filter-btn" onclick="showModule('pallets')">📦 Палети</button>
+      <button id="tps-supply" class="filter-btn" onclick="showModule('supply')">🎨 Зареждане</button>
       <button id="tps-loading" class="filter-btn" onclick="showModule('loading')">🚛 Товарни листи</button>
     </div>
   </div>
@@ -293,6 +294,9 @@ OneSignalDeferred.push(async function(OneSignal) {
 
   <!-- PALLETS -->
   <div id="mod-pallets" class="page" style="display:none;"></div>
+
+  <!-- SUPPLY (Зареждане) -->
+  <div id="mod-supply" class="page" style="display:none;"></div>
 
   <!-- LOADING LISTS -->
   <div id="mod-loading" class="page" style="display:none;"></div>
@@ -685,6 +689,7 @@ function loadTabOrder(){
 <script src="shared.js"></script>
 <script src="transport.js"></script>
 <script src="pallets.js"></script>
+<script src="supply.js"></script>
 <script src="client-orders.js"></script>
 <script src="docs.js"></script>
 <script src="bulletin.js"></script>
