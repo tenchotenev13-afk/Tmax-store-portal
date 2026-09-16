@@ -48,9 +48,11 @@
 -- един излишък може да захрани няколко (qty > 0 на размяна поема дялбата).
 -- Индекс по from_line_id нарочно НЯМА.
 --
--- stock_differences.swap_id сочи отворената размяна, в която редът е ЛИПСА
--- (to_line_id). Ред с излишък може да участва в няколко размени и една
--- колона не може да ги побере - те се търсят през stock_diff_swaps.from_line_id.
+-- stock_differences.swap_id сочи размяната, в която редът е ЛИПСА (to_line_id)
+-- - последната, отворена или затворена. След приключване НЕ се чисти: остава
+-- като история (решение 16.09.2026, миграция comment_swap_id). Ред с излишък
+-- може да участва в няколко размени и една колона не може да ги побере - те
+-- се търсят през stock_diff_swaps.from_line_id.
 --
 -- ═══ RLS — ИЗРИЧЕН КОМПРОМИС ═══════════════════════════════════════════
 -- Режимът е ТОЧНО като на stock_differences (проверено 16.09.2026):
@@ -97,7 +99,10 @@ alter table public.stock_differences add column swap_id uuid
 comment on table public.stock_diff_swaps is 'Размяна на артикул между два магазина през логистичния склад: from = магазинът с излишък (изпраща), to = магазинът с липса (получава).';
 comment on column public.stock_diff_swaps.status is 'linked = складът е свързал двата реда; sent = изпращащият магазин е изпратил (van/truck, sap_doc_num); received = получаващият е приел физически; closed = складът е приключил и двата реда.';
 comment on column public.stock_diff_swaps.transport_mode is 'Как е изпратено при sent: van = бус, truck = камион.';
-comment on column public.stock_differences.swap_id is 'Отворената размяна, в която редът е ЛИПСА (to_line_id). Ред с излишък може да захрани няколко размени - те се търсят през stock_diff_swaps.from_line_id.';
+comment on column public.stock_differences.swap_id is 'размяната, в която редът е липса — последната; отворена или затворена';
+-- ↑ текстът от миграция comment_swap_id (16.09.2026). Първоначалният (в
+--   20260916090050_stock_diff_swaps) казваше "Отворената размяна, в която
+--   редът е ЛИПСА (to_line_id)..." - върнат е в _down на comment_swap_id.
 
 -- RLS: като stock_differences - изключен, пълни права, неактивна anon политика.
 alter table public.stock_diff_swaps disable row level security;
