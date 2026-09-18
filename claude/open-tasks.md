@@ -175,3 +175,31 @@ if (pct < 50) laggards++;
 - същото правило в `today.js`, иначе таблото и имейлът се разминават;
 - промяната е в `reportBuildSummary` → задължително синхронно и в
   `send-scheduled-report` (tests/report-edge-sync.test.js) и деплой.
+
+---
+
+## Един източник за „Регионален"
+
+**Приоритет:** нисък. **Състояние:** отворена. Намерена на 18.09.2026 при
+преминаването на личния отчет към `users.notify_groups` (`ec4d463`).
+
+**Какво е:** групата „Регионален" се чете от две различни полета.
+
+| къде | по какво решава |
+|---|---|
+| `send-routed-report` / `report.js` (`reportGroupMembers`) | `users.is_regional` + `assigned_stores` |
+| `bulletin-notify` (`resolveTaskRecipients`, ред ~978; заявката ~1371 дори не взима `is_regional`) | `users.notify_groups @> ['regional']` |
+
+Коментарът при `resolveTaskRecipients` твърди, че е „огледално на
+resolveRecipientsForTask()" — за `regional` не е.
+
+**Какво чупи:** днес нищо — на 18.09.2026 двете полета съвпадат при
+всичките 6 души. Разминат ли се (някой сложи групата, без да вдигне
+признака, или обратното), `deadline_passed` и седмичният личен отчет тръгват
+до РАЗЛИЧНИ хора, без грешка. Админът показва ⚠️ на реда при разминаване
+(`notifyGroupsMismatch` в `admin.js`), но нищо не го спира.
+
+**Посока:** едно поле. Или `bulletin-notify` да чете `is_regional` (и
+обхвата по обекти) като личния отчет, или `is_regional` да се изведе от
+`notify_groups` и колоната да остане само кеш. Засяга деплой на
+`bulletin-notify` и `tests/report-edge-sync.test.js`, ако логиката стане обща.
