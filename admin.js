@@ -1226,6 +1226,7 @@ var adminReportRecipients = null;   /* report_recipients (active) */
 var adminReportRegional = [];       /* users.is_regional — за броя при Палети */
 var adminReportLogistics = [];      /* users.role=logistics — за броя при Склад */
 var adminReportBusy = {};           /* 'test:daily' / 'send:weekly' → true, докато заявката тече */
+var adminReportCron = null;         /* kind → ред от rpc/report_cron_schedule; null = не е прочетено */
 
 /* Флаговете на получател — по един на отчет (report_recipients, 18.09.2026:
    pallets и warehouse до daily и weekly). Иконата в списъка е бутон, който
@@ -1237,6 +1238,9 @@ var ADMIN_RCPT_FLAGS = [
   { flag: 'warehouse', icon: '📦', label: 'склад',    def: false }
 ];
 
+/* schedule е РЕЗЕРВА: колоната „Разписание" се чете от cron.job през
+   rpc/report_cron_schedule (само четене, 18.09.2026). Текстът тук се
+   показва, само ако заявката се провали — с пояснение в title. */
 var ADMIN_REPORTS = [
   { kind: 'daily',     label: '📋 Дневен',   schedule: 'всеки ден 21:00', test: 'sendDailyReportTest',     send: 'sendDailyReportToRecipients' },
   { kind: 'weekly',    label: '📊 Седмичен', schedule: 'неделя 21:00',    test: 'sendWeeklyReportTest',    send: 'sendWeeklyReportToRecipients' },
@@ -1262,11 +1266,16 @@ function loadReportsAdmin(){
        Колоните са тези, които ползват reportPalletsRecipients и
        reportWarehouseRecipients (и send-scheduled-report). */
     sbGet('users','is_regional=eq.true&select=email,display_name,assigned_stores,active,is_regional'),
-    sbGet('users','role=eq.logistics&select=email,display_name,store_name,role,active')
+    sbGet('users','role=eq.logistics&select=email,display_name,store_name,role,active'),
+    /* silent: провал → резервният текст, не червен toast. */
+    sbGet('rpc/report_cron_schedule','',true)
   ]).then(function(res){
     adminReportRecipients = Array.isArray(res[0]) ? res[0] : [];
     adminReportRegional   = Array.isArray(res[1]) ? res[1] : [];
     adminReportLogistics  = Array.isArray(res[2]) ? res[2] : [];
+    var cron = Array.isArray(res[3]) ? res[3] : [];
+    adminReportCron = {};
+    cron.forEach(function(c){ if (c && c.kind) adminReportCron[c.kind] = c; });
     renderReportsAdmin();
   });
 }
@@ -1295,6 +1304,18 @@ function adminReportCount(kind){
   return 0;
 }
 
+/* Ред от report_cron_schedule → „петък 18:00". dow е петото поле на cron:
+   '*' = всеки ден, '0'..'6' (0 = неделя); друго (диапазон, списък) се
+   показва сурово, вместо да се гадае. Спряното задание го казва. */
+var ADMIN_CRON_DOW = ['неделя','понеделник','вторник','сряда','четвъртък','петък','събота'];
+function adminCronLabel(c){
+  if (!c || c.hour_sofia === null || c.hour_sofia === undefined) return null;
+  var d = String(c.dow);
+  var day = d === '*' ? 'всеки ден' : (/^[0-6]$/.test(d) ? ADMIN_CRON_DOW[+d] : 'cron „' + d + '"');
+  var mm = (c.minute === null || c.minute === undefined) ? '??' : String(c.minute).padStart(2, '0');
+  return day + ' ' + String(c.hour_sofia).padStart(2, '0') + ':' + mm + (c.active === false ? ' (спряно)' : '');
+}
+
 function renderReportsAdmin(){
   var body = document.getElementById('notif-reports-body'); if (!body) return;
   if (!adminReportsCanSee()) { body.innerHTML = ''; body.style.display = 'none'; return; }
@@ -1307,7 +1328,12 @@ function renderReportsAdmin(){
     var n = adminReportRecipients === null ? '…' : String(adminReportCount(r.kind));
     h += '<tr id="report-row-' + r.kind + '">' +
       '<td style="font-weight:500;font-size:12px;">' + r.label + '</td>' +
-      '<td style="font-size:12px;">' + r.schedule + '</td>' +
+      (function(){
+        var live = adminReportCron ? adminCronLabel(adminReportCron[r.kind]) : null;
+        return live
+          ? '<td style="font-size:12px;" class="report-schedule" data-src="cron" title="От сървъра (cron.job), час по София">' + esc(live) + '</td>'
+          : '<td style="font-size:12px;color:#94a3b8;" class="report-schedule" data-src="static" title="Не е прочетено от сървъра — показан е очакваният час">' + r.schedule + '</td>';
+      })() +
       '<td style="font-size:12px;" class="report-count">' + n + '</td>' +
       '<td style="white-space:nowrap;">' +
         '<button onclick="adminReportTestClick(this,\'' + r.kind + '\')" style="border:1px solid #cbd5e1;background:#fff;color:#1E2761;border-radius:6px;padding:4px 10px;font-size:11.5px;font-weight:600;cursor:pointer;">Тест до мен</button>' +
@@ -1320,6 +1346,7 @@ function renderReportsAdmin(){
   h += '<div style="font-size:11px;color:#64748b;margin:6px 0 12px;line-height:1.7;">' +
     '„Тест до мен" праща на твоя имейл с „(тест)" в темата — данните към момента, не редовния отчет.<br>' +
     'Палети: отметнатите 🟫 + регионалните (за своите обекти). Склад: отметнатите 📦 (по писмо за всеки склад) + всеки потребител с роля „logistics" (за своя склад). Тях ги праща само кронът.<br>' +
+    'Разписанието е от сървъра (час по София). Смяна — само през Claude Code: от браузъра сървърът не може да провери, че викащият е admin.<br>' +
     'В списъка долу: 📋 дневен · 📊 седмичен · 🟫 палети · 📦 склад — натисни иконата, за да включиш или спреш отчета за този човек.' +
     '</div>';
 
