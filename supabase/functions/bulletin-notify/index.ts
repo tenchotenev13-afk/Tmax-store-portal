@@ -9,6 +9,19 @@
 //   promo_expiring   — имейл/push за промоции, изтичащи днес (и до 3 дни в пон.)
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
 //
+// v7 (18.09.2026) — задачи от НЕПУБЛИКУВАН бюлетин не влизат. overdue_tasks и
+//   today_deadlines намираха бюлетина на седмицата само по week_number/year,
+//   тоест чернова (status=draft) пращаше известия за задачи, които магазините
+//   още не виждат.
+//     · overdue_tasks   — чете status; при чернова НЕ тегли bulletin_tasks,
+//                          но постоянните минават. Без бюлетин изобщо — skip,
+//                          както досега.
+//     · today_deadlines — търси само status=published; няма такъв → минава
+//                          само с постоянните.
+//   Пренесените по id (postponed_to) не са филтрирани: обект може да отложи
+//   само задача, която е видял. deadline_passed чете само постоянните — не е
+//   пипана; promo_expiring също.
+//
 // v6 (12.09.2026) — ОТЛАГАНЕ С ТОЧНА ДАТА (нова колона
 //   task_completions.postponed_to, миграция 20260912152519). Денят на задачата
 //   е postponed_to, ако редът е пренесен; completion_date остава
@@ -425,7 +438,7 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
   const iso = isoWeekOf(bg.dateStr);
 
   const { data: bulletins } = await supabase
-    .from('bulletins').select('id,week_number,year')
+    .from('bulletins').select('id,week_number,year,status')
     .eq('week_number', iso.week).eq('year', iso.year).limit(1);
 
   if (!bulletins || !bulletins.length) {
@@ -433,8 +446,11 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
   }
   const bulletinId = bulletins[0].id;
 
-  const { data: tasks } = await supabase
-    .from('bulletin_tasks').select('*').eq('bulletin_id', bulletinId);
+  /* Чернова (v7): задачите ѝ магазините още не виждат — не се теглят.
+     Постоянните по-долу не зависят от публикуването и минават. */
+  const { data: tasks } = bulletins[0].status === 'published'
+    ? await supabase.from('bulletin_tasks').select('*').eq('bulletin_id', bulletinId)
+    : { data: [] };
 
   const overdueTasks = (tasks || []).filter((t: any) => {
     if (taskIsNotice(t)) return false;
@@ -721,7 +737,8 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
   const iso = isoWeekOf(bg.dateStr);
 
   const { data: bulletins } = await supabase
-    .from('bulletins').select('id').eq('week_number', iso.week).eq('year', iso.year).limit(1);
+    .from('bulletins').select('id').eq('week_number', iso.week).eq('year', iso.year)
+    .eq('status', 'published').limit(1);
 
   let oneTime: any[] = [];
   let bulAll: any[] = [];

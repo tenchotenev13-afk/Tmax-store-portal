@@ -171,7 +171,7 @@ function skip(id, taskId, k, store) {
 const thisWk = isoKey(dateAt(0)), prevWk = isoKey(dateAt(-7));
 function dataFor(skips) {
   return {
-    bulletins: [{ id: 'b-1', week_number: thisWk.week, year: thisWk.year }],
+    bulletins: [{ id: 'b-1', week_number: thisWk.week, year: thisWk.year, status: 'published' }],
     bulletin_tasks: [],
     recurring_tasks: RECS,
     task_completions: [],

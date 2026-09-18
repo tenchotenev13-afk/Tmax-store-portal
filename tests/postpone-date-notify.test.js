@@ -175,7 +175,7 @@ const COMPS = [
 function data() {
   const wk = isoKey(dateAt(0));
   return {
-    bulletins: [{ id: 'b-1', week_number: wk.week, year: wk.year }],
+    bulletins: [{ id: 'b-1', week_number: wk.week, year: wk.year, status: 'published' }],
     bulletin_tasks: [task('t-wed', 'b-1', [WED]), task('t-mon', 'b-1', [MON]), task('t-old', 'b-0', [PREV_THU])],
     recurring_tasks: [rec('r-mon', [0]), rec('r-wed', [2])],
     recurring_task_periods: [],
@@ -251,6 +251,22 @@ let mod = null;
     ok('никой не получава r-mon', !hasLine(b, TR, 'r-mon') && !hasLine(b, LO, 'r-mon'));
   }
 
+  /* v7: чернова не праща известия за задачите си. Постоянните не зависят
+     от публикуването и минават. */
+  section('2в. today_deadlines: бюлетинът на седмицата е ЧЕРНОВА');
+  {
+    const d = data(); d.task_completions = []; d.bulletins[0].status = 'draft';
+    const log = [];
+    const b = await mod.buildTodayDeadlines(fakeSb(d, log), mkBg(2, 8, 0));
+    ok('никой не получава t-wed от черновата',
+      !hasLine(b, TR, 't-wed') && !hasLine(b, LO, 't-wed') && !hasLine(b, SE, 't-wed'), JSON.stringify(b && b.byStore));
+    ok('постоянната r-wed минава', hasLine(b, TR, 'r-wed'), JSON.stringify(linesOf(b, TR)));
+    const bq = log.filter(q => q.table === 'bulletins');
+    ok('заявката към bulletins носи status=published',
+      bq.length === 1 && bq[0].filters.some(f => f[0] === 'eq' && f[1] === 'status' && f[2] === 'published'),
+      JSON.stringify(bq.map(q => q.filters)));
+  }
+
   /* ═══ deadline_passed — сряда 10:15 ═══════════════════════════════════ */
   section('3. deadline_passed (сряда 10:15)');
   {
@@ -320,6 +336,27 @@ let mod = null;
       JSON.stringify(itemsOf(b, 't-mon')));
     ok('r-wed: и тримата', storesOf(b, 'r-wed').length === 3, JSON.stringify(storesOf(b, 'r-wed')));
     ok('r-mon и t-old ги няма', itemsOf(b, 'r-mon').length === 0 && itemsOf(b, 't-old').length === 0);
+  }
+
+  section('4в. overdue_tasks: бюлетинът на седмицата е ЧЕРНОВА');
+  {
+    const d = data(); d.task_completions = []; d.bulletins[0].status = 'draft';
+    const log = [];
+    const b = await mod.buildOverdueTasks(fakeSb(d, log), mkBg(3, 8, 15));
+    ok('темата НЕ е пропусната — постоянните минават', !!(b && b.items), JSON.stringify(b && b.skip));
+    ok('t-mon и t-wed от черновата ги няма',
+      itemsOf(b, 't-mon').length === 0 && itemsOf(b, 't-wed').length === 0, JSON.stringify((b && b.items || []).map(i => i.taskId)));
+    ok('r-wed: и тримата', storesOf(b, 'r-wed').length === 3, JSON.stringify(storesOf(b, 'r-wed')));
+    ok('bulletin_tasks на черновата изобщо не се теглят',
+      !log.some(q => q.table === 'bulletin_tasks' && q.filters.some(f => f[1] === 'bulletin_id')),
+      JSON.stringify(log.filter(q => q.table === 'bulletin_tasks').map(q => q.filters)));
+  }
+
+  section('4г. overdue_tasks: без бюлетин за седмицата — skip, както досега');
+  {
+    const d = data(); d.task_completions = []; d.bulletins = [];
+    const b = await mod.buildOverdueTasks(fakeSb(d, []), mkBg(3, 8, 15));
+    ok('skip „Няма бюлетин"', !!(b && b.skip) && /Няма бюлетин/.test(b.skip), JSON.stringify(b && b.skip));
   }
 
   report();

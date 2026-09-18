@@ -168,7 +168,7 @@ const PERIODS = [
 function data() {
   return {
     /* Бюлетин за седмицата на котвата — иначе темата излиза още в началото. */
-    bulletins: [{ id: 'b-1', week_number: isoKey(dateAt(0)).week, year: isoKey(dateAt(0)).year }],
+    bulletins: [{ id: 'b-1', week_number: isoKey(dateAt(0)).week, year: isoKey(dateAt(0)).year, status: 'published' }],
     bulletin_tasks: [],
     recurring_tasks: RECS,
     recurring_task_periods: PERIODS,

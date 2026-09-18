@@ -169,7 +169,7 @@ function fakeSb(data, log) {
 /* ── Данни ───────────────────────────────────────────────────────────────── */
 const STORES = ['Троян', 'Ловеч', 'Севлиево'];
 const users = STORES.map(s => ({ store_name: s, active: true }));
-const BUL = { id: 'b-1', week_number: 99, year: 2026 };
+const BUL = { id: 'b-1', week_number: 99, year: 2026, status: 'published' };
 
 function rec(over) {
   return Object.assign({

@@ -2556,6 +2556,13 @@ function deleteRecurring(taskId) {
   });
 }
 
+/* Публикуван ли е показаният бюлетин. Автоматичният push „нова задача" тръгва
+   САМО тогава — в чернова магазините още не виждат задачата, а при
+   „Публикувай" ръчният push „📰 Бюлетин публикуван" покрива всичко. Ръчните
+   известия, които зависят от бюлетина, остават, но питат при чернова. */
+function bulIsPublished(){ return !!curBul && curBul.status==='published'; }
+function bulConfirmUnpublished(){ return bulIsPublished() || confirm('Бюлетинът не е публикуван — изпращам?'); }
+
 function openTaskModal(){document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');}
 function closeTk(){document.getElementById('tk-ov').classList.remove('open');}
 function submitTask(){
@@ -2575,7 +2582,7 @@ function submitTask(){
     closeTk(); toast('✅ Задачата е добавена!'); loadBulletin();
     /* Push само ако бюлетинът вече е публикуван - иначе магазините още не
        виждат задачата и известието би било подвеждащо. */
-    if(curBul.status==='published' && typeof pushNewBulletinTask==='function'){
+    if(bulIsPublished() && typeof pushNewBulletinTask==='function'){
       pushNewBulletinTask(title, stores.length?stores:null);
     }
   });
@@ -2844,7 +2851,7 @@ function emailMenuHtml(){
     '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
       '<div style="font-size:13px;font-weight:600;margin-bottom:4px;">📋 Седмичен дайджест</div>'+
       '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Изпраща задачите за седмицата до всички управители.</div>'+
-      '<button onclick="sendWeeklyDigest(curBul,bulTasks,function(){closeEmailMenu();loadBulletin();})" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати до всички магазини</button>'+
+      '<button onclick="if(bulConfirmUnpublished())sendWeeklyDigest(curBul,bulTasks,function(){closeEmailMenu();loadBulletin();})" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати до всички магазини</button>'+
     '</div>'+
     /* „⚠️ Просрочени задачи" стоеше тук като ВТОРИ бутон за същото — единият
        пращаше само имейл, другият (в push менюто) само push. Едж функцията
@@ -2872,7 +2879,7 @@ function pushMenuHtml(){
     '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
       '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">📰 Бюлетин публикуван</div>'+
       '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">До всички потребители на портала.</div>'+
-      '<button onclick="pushBulletinPublished(curBul.week_number,curBul.year,bulTasks.length);closePushMenu();" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати до всички</button>'+
+      '<button onclick="if(bulConfirmUnpublished()){pushBulletinPublished(curBul.week_number,curBul.year,bulTasks.length);closePushMenu();}" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати до всички</button>'+
     '</div>'+
     '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
       '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">⚠️ Просрочени задачи</div>'+
@@ -2975,6 +2982,8 @@ function formatDeadlinesMessage(items){
   return lines.join('\n');
 }
 function sendDailyDeadlinesNotification(){
+  /* Задачите идват от показания бюлетин (bulTasks) — при чернова пита. */
+  if(!bulConfirmUnpublished())return;
   collectTodayDeadlineItems(function(items){
     if(!items.length){ showBulToast('Няма задачи със срок днес.'); return; }
     var title = '📅 '+items.length+' срок'+(items.length===1?'':'а')+' днес';
@@ -4664,10 +4673,11 @@ function submitRecurring(dk, btn) {
     });
   });
   function finishNewRecurring() {
-    /* Постоянните задачи не са част от чернова/публикуван цикъл на бюлетина -
-       веднага след създаване са видими за таргетираните магазини, затова
-       push-ът тръгва без чакане за публикуване (за разлика от обикновените). */
-    if(typeof pushNewBulletinTask==='function'){
+    /* Push само ако бюлетинът, от който е добавена, е публикуван И периодът
+       ѝ вече е започнал. Бъдещ период (from > текущия понеделник) — без push:
+       задачата още не важи, а при публикуване на бюлетина ѝ ръчният push
+       „📰 Бюлетин публикуван" покрива всичко. */
+    if(bulIsPublished() && from<=cur && typeof pushNewBulletinTask==='function'){
       pushNewBulletinTask(title, stores.length?stores:null);
     }
     bulFetchRecurring().then(renderBulletin);
@@ -4999,6 +5009,10 @@ function submitNotifySchedule(){
   if(!time){toast('Задай час','#dc2626');return;}
   var d=document.getElementById('ns-date').value;
   if(!d){toast('Избери дата','#dc2626');return;}
+  /* Задача и под-задача са от показания бюлетин — при чернова пита.
+     Постоянна задача и промоция не минават през публикуване. */
+  var fromBul=notifyCurrentEntity.type==='task'||notifyCurrentEntity.type==='subtask';
+  if(fromBul&&!bulConfirmUnpublished())return;
   var stores=bulReadStoreMultiSelect('ns-stores');
   var data={
     entity_type:notifyCurrentEntity.type,
