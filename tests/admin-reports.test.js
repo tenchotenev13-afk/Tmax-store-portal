@@ -38,9 +38,9 @@ const ACC_NOMAIL = { id: 'u-nm', email: '', display_name: 'Без имейл', r
 const MANAGER = { id: 'u-mgr', email: 's@temax.bg', display_name: 'Управител', role: 'manager', store_name: 'Троян' };
 
 const RECIPIENTS = [
-  { id: 'r1', name: 'Тенчо', email: 't@temax.bg', daily: true, weekly: true, active: true, scope_stores: null },
-  { id: 'r2', name: 'Юлиана', email: 'j@temax.bg', daily: true, weekly: false, active: true, scope_stores: null },
-  { id: 'r3', name: '', email: 'w@temax.bg', daily: false, weekly: true, active: true, scope_stores: null }
+  { id: 'r1', name: 'Тенчо', email: 't@temax.bg', daily: true, weekly: true, pallets: true, warehouse: false, active: true, scope_stores: null },
+  { id: 'r2', name: 'Юлиана', email: 'j@temax.bg', daily: true, weekly: false, pallets: false, warehouse: true, active: true, scope_stores: null },
+  { id: 'r3', name: '', email: 'w@temax.bg', daily: false, weekly: true, pallets: true, warehouse: false, active: true, scope_stores: null }
 ];
 function usersFor(url) {
   if (url.indexOf('is_regional') >= 0) return [
@@ -98,7 +98,7 @@ const sendBtns = h => Array.prototype.filter.call(h.doc.querySelectorAll('#notif
       'Кой получава известията за задачи — матрицата по-горе. Кой получава общите отчети — този списък.',
       note && note.textContent);
     const expect = { daily: ['Дневен', 'всеки ден 21:00', '2'], weekly: ['Седмичен', 'неделя 21:00', '2'],
-                     pallets: ['Палети', 'петък 18:00', '3'], warehouse: ['Склад', 'неделя 21:00', '2'] };
+                     pallets: ['Палети', 'петък 18:00', '3'], warehouse: ['Склад', 'неделя 21:00', '3'] };
     Object.keys(expect).forEach(function (k) {
       const row = h.doc.getElementById('report-row-' + k);
       if (ok('ред „' + expect[k][0] + '"', !!row)) {
@@ -112,7 +112,7 @@ const sendBtns = h => Array.prototype.filter.call(h.doc.querySelectorAll('#notif
     ok('и никъде другаде (2 общо)', sendBtns(h).length === 2, sendBtns(h).length);
     ok('списъкът получатели е тук (3 реда)', b.querySelectorAll('.report-recipient').length === 3);
     ok('няма поле за адрес на теста', !h.doc.getElementById('today-report-email') &&
-      b.querySelectorAll('input').length === 4 /* само формата за добавяне */, b.querySelectorAll('input').length);
+      b.querySelectorAll('input').length === 6 /* само формата за добавяне: име, имейл, 4 отметки */, b.querySelectorAll('input').length);
     const userGets = h.calls.get.filter(u => u.indexOf('/users') >= 0);
     ok('users с изричен select=, никога select=* или хеш',
       userGets.length > 0 && userGets.every(u => u.indexOf('select=') >= 0 && u.indexOf('select=*') < 0 && u.indexOf('hash') < 0),
@@ -257,7 +257,7 @@ const sendBtns = h => Array.prototype.filter.call(h.doc.querySelectorAll('#notif
     const posts = h.calls.post.filter(p => p.table === 'report_recipients');
     ok('POST към report_recipients', posts.length === 1, posts.length);
     ok('с име, имейл и флаговете', !!posts[0] && JSON.stringify(posts[0].body) ===
-      JSON.stringify({ name: 'Нов', email: 'nov@temax.bg', daily: true, weekly: false }), posts[0] && JSON.stringify(posts[0].body));
+      JSON.stringify({ name: 'Нов', email: 'nov@temax.bg', daily: true, weekly: false, pallets: false, warehouse: false }), posts[0] && JSON.stringify(posts[0].body));
     ok('toast „✅ Добавен получател"', h.calls.toast.indexOf('✅ Добавен получател') >= 0);
     ok('списъкът се презарежда', h.calls.get.filter(u => u.indexOf('report_recipients') >= 0).length > getsBefore);
 

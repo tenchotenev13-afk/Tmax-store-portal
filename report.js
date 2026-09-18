@@ -2607,8 +2607,9 @@ function reportPalletsHtml(data){
 
 /* Кой получава „Палети" — чиста функция, за да се тества и в jsdom.
    · регионалните (is_regional, active) → личен отчет за assigned_stores;
-   · report_recipients (active, weekly=true): празен scope_stores → общото
-     писмо (all); непразен → личен отчет само за тези обекти;
+   · report_recipients (active, pallets=true — собствен флаг от 18.09.2026,
+     дотогава weekly): празен scope_stores → общото писмо (all); непразен →
+     личен отчет само за тези обекти;
    · управителите НЕ получават този отчет.
    Личните се дедуплицират по имейл с малки букви и обединяват обхвата —
    същото правило като addPersonal() при дневния/седмичния, в същия ред. */
@@ -2633,7 +2634,7 @@ function reportPalletsRecipients(recipientRows, userRows){
     addPersonal(u.email, u.display_name, u.assigned_stores);
   });
   (Array.isArray(recipientRows) ? recipientRows : []).forEach(function(r){
-    if (!r || r.active === false || r.weekly !== true || !r.email) return;
+    if (!r || r.active === false || r.pallets !== true || !r.email) return;
     var sc = (Array.isArray(r.scope_stores) ? r.scope_stores : []).filter(Boolean);
     if (sc.length) { addPersonal(r.email, r.name, sc); return; }
     var key = String(r.email).trim().toLowerCase();
@@ -2744,17 +2745,31 @@ function reportWarehouseHtml(data){
     dateStr, body, 'Автоматичен репорт · ТеМАХ Портал');
 }
 
-/* Кой получава — чиста функция, за да се тества в jsdom. Всеки активен
-   потребител с role='logistics', имейл и store_name — едно писмо за СВОЯ
-   склад. Никой друг: Теодор и регионалните виждат това в седмичния. */
-function reportWarehouseRecipients(users){
-  var out = [], seen = {};
-  (Array.isArray(users) ? users : []).forEach(function(u){
-    if (!u || u.role !== 'logistics' || u.active === false || !u.email || !u.store_name) return;
-    var key = String(u.email).trim().toLowerCase() + ' | ' + u.store_name;
+/* Кой получава — чиста функция, за да се тества в jsdom. Един запис =
+   едно писмо за ЕДИН склад:
+   · всеки активен потребител с role='logistics', имейл и store_name — за
+     СВОЯ склад;
+   · всеки активен ред от report_recipients с warehouse=true (от 18.09.2026)
+     — за ВСЕКИ склад, т.е. по едно писмо на склад. Складовете са
+     store_name на активните logistics потребители — друг списък няма.
+   Регионалните НЕ получават (виждат го в седмичния). Дедупликация по имейл
+   (малки букви) + склад. */
+function reportWarehouseRecipients(users, recipientRows){
+  var out = [], seen = {}, warehouses = [];
+  var add = function(email, name, wh){
+    var key = String(email).trim().toLowerCase() + ' | ' + wh;
     if (seen[key]) return;
     seen[key] = 1;
-    out.push({ email: u.email, name: u.display_name || '', warehouse: u.store_name });
+    out.push({ email: email, name: name || '', warehouse: wh });
+  };
+  (Array.isArray(users) ? users : []).forEach(function(u){
+    if (!u || u.role !== 'logistics' || u.active === false || !u.store_name) return;
+    if (warehouses.indexOf(u.store_name) < 0) warehouses.push(u.store_name);
+    if (u.email) add(u.email, u.display_name, u.store_name);
+  });
+  (Array.isArray(recipientRows) ? recipientRows : []).forEach(function(r){
+    if (!r || r.active === false || r.warehouse !== true || !r.email) return;
+    warehouses.forEach(function(wh){ add(r.email, r.name, wh); });
   });
   return out;
 }
@@ -3188,7 +3203,7 @@ function sendWeeklyReportRouted(testEmail){
 }
 
 /* ═══════ ПОЛУЧАТЕЛИ НА ОБЩИЯ РЕПОРТ (report_recipients) ═══════════
-   Редактируем списък (name/email/daily/weekly флагове) - управлява се от
+   Редактируем списък (name/email + флагове daily/weekly/pallets/warehouse) - управлява се от
    Администрация → Известия → „📧 Общи отчети" (loadReportsAdmin в admin.js;
    до 15.09.2026 беше в таб "Днес"). Използва се от sendDailyReportToRecipients/
    sendWeeklyReportToRecipients по-долу за РЕАЛНО ръчно изпращане до целия
@@ -3198,10 +3213,22 @@ function loadReportRecipients(cb){
     cb(Array.isArray(rows) ? rows : []);
   }).catch(function(){ cb([]); });
 }
-function addReportRecipient(name, email, daily, weekly, cb){
+/* flags: { daily, weekly, pallets, warehouse } — всеки флаг е отделен отчет. */
+var REPORT_RECIPIENT_FLAGS = ['daily', 'weekly', 'pallets', 'warehouse'];
+function addReportRecipient(name, email, flags, cb){
   if (!email) { cb(false); return; }
-  sbPost('report_recipients', { name: name||null, email: email, daily: !!daily, weekly: !!weekly }).then(function(res){
+  var row = { name: name||null, email: email };
+  REPORT_RECIPIENT_FLAGS.forEach(function(f){ row[f] = !!(flags && flags[f]); });
+  sbPost('report_recipients', row).then(function(res){
     cb(!!res.ok);
+  }).catch(function(){ cb(false); });
+}
+/* Превключва ЕДИН флаг на съществуващ ред — PATCH само с него. */
+function setReportRecipientFlag(id, flag, value, cb){
+  if (!id || REPORT_RECIPIENT_FLAGS.indexOf(flag) < 0) { cb(false); return; }
+  var patch = {}; patch[flag] = !!value;
+  sbPatch('report_recipients', 'id=eq.' + id, patch).then(function(res){
+    cb(!!(res && res.ok));
   }).catch(function(){ cb(false); });
 }
 function deleteReportRecipient(id, cb){

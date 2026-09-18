@@ -16,7 +16,8 @@
      d) извън scope                      → никъде
      e) ред „Общо" = сума по колони (само попълнените за седмицата)
      f) темата носи датата в bg формат
-     g) получатели: регионален само за своите; report_recipients weekly=true
+     g) получатели: регионален само за своите; report_recipients pallets=true
+        (собствен флаг от 18.09.2026 — weekly вече НЕ решава)
         и scope_stores=null → всички 18; управител не е в списъка
 
    Плюс: истински клик по „Тест до мен" на реда „Палети" в Администрация →
@@ -242,10 +243,13 @@ const names = arr => (arr || []).map(x => x.store);
   {
     const h = env();
     const recipients = [
-      { email: 'owner@temax.bg', name: 'Собственик', active: true, weekly: true, scope_stores: null },
-      { email: 'daily-only@temax.bg', active: true, weekly: false, scope_stores: null },
-      { email: 'off@temax.bg', active: false, weekly: true, scope_stores: null },
-      { email: 'Reg@Temax.bg', name: 'Колева', active: true, weekly: true, scope_stores: ['Сливен'] }
+      { email: 'owner@temax.bg', name: 'Собственик', active: true, weekly: true, pallets: true, scope_stores: null },
+      { email: 'daily-only@temax.bg', active: true, weekly: false, pallets: false, scope_stores: null },
+      { email: 'off@temax.bg', active: false, weekly: true, pallets: true, scope_stores: null },
+      { email: 'Reg@Temax.bg', name: 'Колева', active: true, weekly: true, pallets: true, scope_stores: ['Сливен'] },
+      /* Двата случая, в които weekly и pallets се разминават — решава pallets. */
+      { email: 'weekly-only@temax.bg', active: true, weekly: true, pallets: false, scope_stores: null },
+      { email: 'pallets-only@temax.bg', active: true, weekly: false, pallets: true, scope_stores: null }
     ];
     const users = [
       { email: 'reg@temax.bg', display_name: 'Колева', is_regional: true, active: true, assigned_stores: SCOPE },
@@ -256,8 +260,9 @@ const names = arr => (arr || []).map(x => x.store);
     const allEmails = plan.all.join('|');
     const persEmails = plan.personal.map(p => String(p.email).toLowerCase()).join('|');
 
-    ok('общото писмо: само owner (weekly=true, без обхват)', allEmails === 'owner@temax.bg', allEmails);
-    ok('weekly=false и неактивният не получават', allEmails.indexOf('daily-only') < 0 && allEmails.indexOf('off@') < 0);
+    ok('общото писмо: owner и pallets-only (pallets=true, без обхват)', allEmails === 'owner@temax.bg|pallets-only@temax.bg', allEmails);
+    ok('weekly=true, pallets=false НЕ получава', allEmails.indexOf('weekly-only') < 0 && persEmails.indexOf('weekly-only') < 0);
+    ok('pallets=false и неактивният не получават', allEmails.indexOf('daily-only') < 0 && allEmails.indexOf('off@') < 0);
     ok('управителят не е никъде', allEmails.indexOf('mgr@') < 0 && persEmails.indexOf('mgr@') < 0,
       allEmails + ' / ' + persEmails);
     ok('един личен запис за регионалния (дедупликация по имейл)', plan.personal.length === 1, persEmails);

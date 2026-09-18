@@ -1,6 +1,15 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v39 (18.09.2026) — отделни получатели за Палети и Склад (нови колони
+   report_recipients.pallets / warehouse, миграция 20260918114902):
+     · Палети: report_recipients.pallets=true (досега weekly=true) +
+       регионалните, както досега; scope_stores важи;
+     · Склад: role=logistics — за своя склад, както досега; ПЛЮС
+       report_recipients.warehouse=true — по едно писмо за всеки склад.
+       reportWarehouseRecipients(users, recipientRows) — нов втори аргумент.
+     · дневният и седмичният не са пипани (daily / weekly).
+
    v38 (18.09.2026) — „Палети за прибиране" сравнява с предходното подаване:
      · collectPalletsReportData: за всеки попълнил prev (най-новият ред
        отпреди понеделника) и delta по тип и общо; без prev — без делти;
@@ -3111,8 +3120,9 @@ function reportPalletsHtml(data){
 
 /* Кой получава „Палети" — чиста функция, за да се тества и в jsdom.
    · регионалните (is_regional, active) → личен отчет за assigned_stores;
-   · report_recipients (active, weekly=true): празен scope_stores → общото
-     писмо (all); непразен → личен отчет само за тези обекти;
+   · report_recipients (active, pallets=true — собствен флаг от 18.09.2026,
+     дотогава weekly): празен scope_stores → общото писмо (all); непразен →
+     личен отчет само за тези обекти;
    · управителите НЕ получават този отчет.
    Личните се дедуплицират по имейл с малки букви и обединяват обхвата —
    същото правило като addPersonal() при дневния/седмичния, в същия ред. */
@@ -3137,7 +3147,7 @@ function reportPalletsRecipients(recipientRows, userRows){
     addPersonal(u.email, u.display_name, u.assigned_stores);
   });
   (Array.isArray(recipientRows) ? recipientRows : []).forEach(function(r){
-    if (!r || r.active === false || r.weekly !== true || !r.email) return;
+    if (!r || r.active === false || r.pallets !== true || !r.email) return;
     var sc = (Array.isArray(r.scope_stores) ? r.scope_stores : []).filter(Boolean);
     if (sc.length) { addPersonal(r.email, r.name, sc); return; }
     var key = String(r.email).trim().toLowerCase();
@@ -3232,17 +3242,31 @@ function reportWarehouseHtml(data){
     dateStr, body, 'Автоматичен репорт · ТеМАХ Портал');
 }
 
-/* Кой получава — чиста функция, за да се тества в jsdom. Всеки активен
-   потребител с role='logistics', имейл и store_name — едно писмо за СВОЯ
-   склад. Никой друг: Теодор и регионалните виждат това в седмичния. */
-function reportWarehouseRecipients(users){
-  var out = [], seen = {};
-  (Array.isArray(users) ? users : []).forEach(function(u){
-    if (!u || u.role !== 'logistics' || u.active === false || !u.email || !u.store_name) return;
-    var key = String(u.email).trim().toLowerCase() + ' | ' + u.store_name;
+/* Кой получава — чиста функция, за да се тества в jsdom. Един запис =
+   едно писмо за ЕДИН склад:
+   · всеки активен потребител с role='logistics', имейл и store_name — за
+     СВОЯ склад;
+   · всеки активен ред от report_recipients с warehouse=true (от 18.09.2026)
+     — за ВСЕКИ склад, т.е. по едно писмо на склад. Складовете са
+     store_name на активните logistics потребители — друг списък няма.
+   Регионалните НЕ получават (виждат го в седмичния). Дедупликация по имейл
+   (малки букви) + склад. */
+function reportWarehouseRecipients(users, recipientRows){
+  var out = [], seen = {}, warehouses = [];
+  var add = function(email, name, wh){
+    var key = String(email).trim().toLowerCase() + ' | ' + wh;
     if (seen[key]) return;
     seen[key] = 1;
-    out.push({ email: u.email, name: u.display_name || '', warehouse: u.store_name });
+    out.push({ email: email, name: name || '', warehouse: wh });
+  };
+  (Array.isArray(users) ? users : []).forEach(function(u){
+    if (!u || u.role !== 'logistics' || u.active === false || !u.store_name) return;
+    if (warehouses.indexOf(u.store_name) < 0) warehouses.push(u.store_name);
+    if (u.email) add(u.email, u.display_name, u.store_name);
+  });
+  (Array.isArray(recipientRows) ? recipientRows : []).forEach(function(r){
+    if (!r || r.active === false || r.warehouse !== true || !r.email) return;
+    warehouses.forEach(function(wh){ add(r.email, r.name, wh); });
   });
   return out;
 }
@@ -3263,7 +3287,7 @@ Deno.serve(async (req: Request) => {
         return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{'Content-Type':'application/json'} });
       }
       var pSubject = reportPalletsSubject(pData.reportDate);
-      var pRecRes: any = await sbGet('report_recipients', 'active=eq.true&weekly=eq.true&select=email,name,scope_stores,active,weekly');
+      var pRecRes: any = await sbGet('report_recipients', 'active=eq.true&pallets=eq.true&select=email,name,scope_stores,active,pallets');
       var pRegRes: any = await sbGet('users', 'is_regional=eq.true&select=email,display_name,assigned_stores,active,is_regional');
       var pPlan: any = reportPalletsRecipients(pRecRes, pRegRes);
 
@@ -3304,7 +3328,8 @@ Deno.serve(async (req: Request) => {
        Ранен клон като „Палети" — daily/weekly не се докосват. */
     if (type === 'warehouse') {
       var wUsersRes: any = await sbGet('users', 'role=eq.logistics&select=email,display_name,store_name,role,active');
-      var wPlan: any[] = reportWarehouseRecipients(wUsersRes);
+      var wRecRes: any = await sbGet('report_recipients', 'active=eq.true&warehouse=eq.true&select=email,name,active,warehouse');
+      var wPlan: any[] = reportWarehouseRecipients(wUsersRes, wRecRes);
       var wOut: any[] = [];
       for (const u of wPlan) {
         var wData: any = await new Promise(function(resolve){ collectWarehouseReportData(u.warehouse, resolve); });

@@ -1227,6 +1227,16 @@ var adminReportRegional = [];       /* users.is_regional — за броя пр�
 var adminReportLogistics = [];      /* users.role=logistics — за броя при Склад */
 var adminReportBusy = {};           /* 'test:daily' / 'send:weekly' → true, докато заявката тече */
 
+/* Флаговете на получател — по един на отчет (report_recipients, 18.09.2026:
+   pallets и warehouse до daily и weekly). Иконата в списъка е бутон, който
+   превключва флага с PATCH; при добавяне — отметки. */
+var ADMIN_RCPT_FLAGS = [
+  { flag: 'daily',     icon: '📋', label: 'дневен',   def: true },
+  { flag: 'weekly',    icon: '📊', label: 'седмичен', def: true },
+  { flag: 'pallets',   icon: '🟫', label: 'палети',   def: false },
+  { flag: 'warehouse', icon: '📦', label: 'склад',    def: false }
+];
+
 var ADMIN_REPORTS = [
   { kind: 'daily',     label: '📋 Дневен',   schedule: 'всеки ден 21:00', test: 'sendDailyReportTest',     send: 'sendDailyReportToRecipients' },
   { kind: 'weekly',    label: '📊 Седмичен', schedule: 'неделя 21:00',    test: 'sendWeeklyReportTest',    send: 'sendWeeklyReportToRecipients' },
@@ -1263,8 +1273,10 @@ function loadReportsAdmin(){
 
 /* Броят е на същите хора, до които праща съответният път:
    Дневен/Седмичен — редовете с daily/weekly (до тях праща „Изпрати сега");
-   Палети — reportPalletsRecipients (списъкът weekly + регионалните);
-   Склад — reportWarehouseRecipients (роля logistics). */
+   Палети — reportPalletsRecipients (флаг pallets + регионалните);
+   Склад — reportWarehouseRecipients (роля logistics + флаг warehouse),
+   броят е на ХОРАТА (различни имейли), не на писмата — получател с флага
+   получава по едно писмо за всеки склад. */
 function adminReportCount(kind){
   var rc = adminReportRecipients || [];
   if (kind === 'daily')  return rc.filter(function(r){ return r.daily; }).length;
@@ -1275,7 +1287,10 @@ function adminReportCount(kind){
     return p.all.length + p.personal.length;
   }
   if (kind === 'warehouse') {
-    return typeof reportWarehouseRecipients === 'function' ? reportWarehouseRecipients(adminReportLogistics).length : 0;
+    if (typeof reportWarehouseRecipients !== 'function') return 0;
+    var seenW = {};
+    reportWarehouseRecipients(adminReportLogistics, rc).forEach(function(x){ seenW[String(x.email).trim().toLowerCase()] = 1; });
+    return Object.keys(seenW).length;
   }
   return 0;
 }
@@ -1304,7 +1319,8 @@ function renderReportsAdmin(){
   h += '</tbody></table></div>';
   h += '<div style="font-size:11px;color:#64748b;margin:6px 0 12px;line-height:1.7;">' +
     '„Тест до мен" праща на твоя имейл с „(тест)" в темата — данните към момента, не редовния отчет.<br>' +
-    'Палети: списъкът (седмичен) + регионалните. Склад: всеки потребител с роля „logistics". Тях ги праща само кронът.' +
+    'Палети: отметнатите 🟫 + регионалните (за своите обекти). Склад: отметнатите 📦 (по писмо за всеки склад) + всеки потребител с роля „logistics" (за своя склад). Тях ги праща само кронът.<br>' +
+    'В списъка долу: 📋 дневен · 📊 седмичен · 🟫 палети · 📦 склад — натисни иконата, за да включиш или спреш отчета за този човек.' +
     '</div>';
 
   /* Списъкът получатели — кодът е преместен от today.js без промяна в
@@ -1320,7 +1336,15 @@ function renderReportsAdmin(){
     list.forEach(function(r){
       h += '<div class="report-recipient" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#334155;background:#fff;border:1px solid #eef1f6;border-radius:7px;padding:5px 9px;">';
       h += '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(r.name||r.email) + ' <span style="color:#94a3b8;">(' + esc(r.email) + ')</span></span>';
-      h += '<span style="font-size:10px;color:#64748b;white-space:nowrap;">' + (r.daily?'📋':'') + (r.weekly?'📊':'') + '</span>';
+      h += '<span style="white-space:nowrap;">' + ADMIN_RCPT_FLAGS.map(function(f){
+        var on = !!r[f.flag];
+        return '<button class="rcpt-flag" data-id="' + esc(r.id) + '" data-flag="' + f.flag + '" data-on="' + (on ? '1' : '0') + '"' +
+          ' aria-pressed="' + (on ? 'true' : 'false') + '"' +
+          ' title="' + f.label + ': ' + (on ? 'получава — натисни, за да спреш' : 'не получава — натисни, за да включиш') + '"' +
+          ' onclick="adminToggleReportRecipientFlag(this.dataset.id,this.dataset.flag,this.dataset.on!=1)"' +
+          ' style="border:none;background:none;cursor:pointer;font-size:13px;padding:0 2px;line-height:1;' +
+          (on ? '' : 'opacity:.25;filter:grayscale(1);') + '">' + f.icon + '</button>';
+      }).join('') + '</span>';
       h += '<button onclick="adminDeleteReportRecipient(\'' + esc(r.id) + '\')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;line-height:1;">✕</button>';
       h += '</div>';
     });
@@ -1329,8 +1353,9 @@ function renderReportsAdmin(){
   h += '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">';
   h += '<input id="admin-rcpt-name" placeholder="име" style="width:100px;font-size:11.5px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;">';
   h += '<input id="admin-rcpt-email" placeholder="имейл" style="flex:1;min-width:140px;font-size:11.5px;border:1px solid #e2e8f0;border-radius:6px;padding:5px 8px;">';
-  h += '<label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:3px;"><input id="admin-rcpt-daily" type="checkbox" checked style="margin:0;">дневен</label>';
-  h += '<label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:3px;"><input id="admin-rcpt-weekly" type="checkbox" checked style="margin:0;">седмичен</label>';
+  ADMIN_RCPT_FLAGS.forEach(function(f){
+    h += '<label style="font-size:11px;color:#64748b;display:flex;align-items:center;gap:3px;"><input id="admin-rcpt-' + f.flag + '" type="checkbox"' + (f.def ? ' checked' : '') + ' style="margin:0;">' + f.label + '</label>';
+  });
   h += '<button onclick="adminAddReportRecipient()" style="border:none;background:#1E2761;color:#fff;border-radius:6px;padding:5px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">+ Добави</button>';
   h += '</div>';
   body.innerHTML = h;
@@ -1339,14 +1364,28 @@ function renderReportsAdmin(){
 function adminAddReportRecipient(){
   var nameEl = document.getElementById('admin-rcpt-name');
   var emailEl = document.getElementById('admin-rcpt-email');
-  var dailyEl = document.getElementById('admin-rcpt-daily');
-  var weeklyEl = document.getElementById('admin-rcpt-weekly');
   if (!emailEl) return;
   var email = emailEl.value.trim();
   if (!email) { toast('Въведи имейл','#dc2626'); return; }
-  addReportRecipient(nameEl.value.trim(), email, dailyEl.checked, weeklyEl.checked, function(ok){
+  var flags = {};
+  ADMIN_RCPT_FLAGS.forEach(function(f){ var el = document.getElementById('admin-rcpt-' + f.flag); flags[f.flag] = !!(el && el.checked); });
+  addReportRecipient(nameEl.value.trim(), email, flags, function(ok){
     if (ok) { toast('✅ Добавен получател'); loadReportsAdmin(); }
     else toast('❌ Грешка при добавяне','#dc2626');
+  });
+}
+/* Клик върху иконата на флаг — един PATCH само с този флаг. Докато тече,
+   второ натискане на същата икона не праща втора заявка. */
+function adminToggleReportRecipientFlag(id, flag, value){
+  var key = 'flag:' + id + ':' + flag;
+  if (adminReportBusy[key] || typeof setReportRecipientFlag !== 'function') return;
+  var def = ADMIN_RCPT_FLAGS.filter(function(f){ return f.flag === flag; })[0];
+  if (!def) return;
+  adminReportBusy[key] = true;
+  setReportRecipientFlag(id, flag, value, function(ok){
+    adminReportBusy[key] = false;
+    if (ok) { toast(def.icon + ' ' + def.label + ': ' + (value ? 'включен' : 'спрян')); loadReportsAdmin(); }
+    else toast('❌ Грешка при запис','#dc2626');
   });
 }
 function adminDeleteReportRecipient(id){
