@@ -101,6 +101,76 @@ async function recurringScheduleGate(supabase: any, s: any, stores: string[], to
   return { stores: left };
 }
 
+/* ═══ НЕПУБЛИКУВАН БЮЛЕТИН / НЕЗАПОЧНАЛ ПЕРИОД (18.09.2026) ═════════════
+   Камбанката пита „Бюлетинът не е публикуван — изпращам?" само в момента
+   на насрочването. Тук се проверява в момента на ИЗПРАЩАНЕТО:
+     · задача / под-задача → бюлетинът ѝ трябва да е status='published';
+       чернова (или върната в чернова) → напомняне няма;
+     · постоянна задача → трябва да важи за седмицата на напомнянето
+       (recurring_task_periods; задача без период — по active, резервата на
+       recurringTasksForWeek). Бъдещ или приключил период → напомняне няма;
+     · изтрита задача / под-задача / постоянна → напомняне няма;
+     · промоция → без проверка.
+   Провал на заявка → напомнянето тръгва (както при изключванията); при
+   постоянна провалът на периодите пада към active. Пропуснатото НЕ пише
+   last_sent_at. */
+function mondayOfISO(dateStr: string) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() - ((dt.getUTCDay() + 6) % 7));
+  return dt.toISOString().slice(0, 10);
+}
+/* Копия от shared.js — дословно. */
+function recurringValidForWeek(taskId, mondayISO, periods){
+  if(!Array.isArray(periods)||!mondayISO) return false;
+  var id=String(taskId);
+  return periods.some(function(p){
+    return !!p&&String(p.recurring_task_id)===id&&p.from_monday<=mondayISO&&
+      (p.to_monday===null||p.to_monday===undefined||p.to_monday>=mondayISO);
+  });
+}
+function recurringTasksForWeek(tasks, periods, mondayISO){
+  if(!mondayISO) return (Array.isArray(tasks)?tasks:[]).filter(function(t){ return !!t&&!!t.active; });
+  var has={};
+  (Array.isArray(periods)?periods:[]).forEach(function(p){ if(p) has[String(p.recurring_task_id)]=1; });
+  return (Array.isArray(tasks)?tasks:[]).filter(function(t){
+    if(!t) return false;
+    return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
+  });
+}
+async function publicationScheduleGate(supabase: any, s: any, todayStr: string) {
+  if (s.entity_type === 'task' || s.entity_type === 'subtask') {
+    let taskId = s.entity_id;
+    if (s.entity_type === 'subtask') {
+      const { data: sub, error } = await supabase.from('task_subtasks')
+        .select('task_id').eq('id', s.entity_id).maybeSingle();
+      if (error) return {};
+      if (!sub) return { skip: 'под-задачата не е намерена' };
+      taskId = sub.task_id;
+    }
+    const { data: t, error: te } = await supabase.from('bulletin_tasks')
+      .select('bulletin_id').eq('id', taskId).maybeSingle();
+    if (te) return {};
+    if (!t) return { skip: 'задачата не е намерена' };
+    const { data: b, error: be } = await supabase.from('bulletins')
+      .select('status').eq('id', t.bulletin_id).maybeSingle();
+    if (be) return {};
+    if (!b || b.status !== 'published') return { skip: 'бюлетинът не е публикуван' };
+    return {};
+  }
+  if (s.entity_type === 'recurring_task') {
+    const { data: t, error } = await supabase.from('recurring_tasks')
+      .select('id,active').eq('id', s.entity_id).maybeSingle();
+    if (error) return {};
+    if (!t) return { skip: 'постоянната задача не е намерена' };
+    const { data: periods } = await supabase.from('recurring_task_periods')
+      .select('recurring_task_id,from_monday,to_monday').eq('recurring_task_id', s.entity_id);
+    const valid = recurringTasksForWeek([t], Array.isArray(periods) ? periods : [], mondayOfISO(todayStr)).length > 0;
+    return valid ? {} : { skip: 'постоянната задача не важи за седмицата (периодът не е започнал или е приключил)' };
+  }
+  return {};
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { status: 200, headers: CORS });
 
@@ -147,6 +217,9 @@ Deno.serve(async (req) => {
     const skipped: any[] = [];
     const skipCache: { skips: any[] | null } = { skips: null };
     for (const s of due) {
+      /* Непубликуван бюлетин / незапочнал период — виж publicationScheduleGate. */
+      const pub: any = await publicationScheduleGate(supabase, s, todayStr);
+      if (pub.skip) { skipped.push({ id: s.id, reason: pub.skip }); continue; }
       let title = s.message || '';
       if (!title) {
         const table = s.entity_type === 'subtask' ? 'task_subtasks'

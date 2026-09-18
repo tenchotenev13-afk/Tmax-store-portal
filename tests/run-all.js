@@ -136,6 +136,7 @@ const TESTS = [
   'report-groups-users.test.js',
   'no-auto-push-on-load.test.js',
   'bulletin-unpublished-push.test.js',
+  'responder-publication-gate.test.js',
   'notify-topic-button.test.js',
   'admin-notifications.test.js',
   'attachments-html-sync.test.js',
