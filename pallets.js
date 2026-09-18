@@ -5,6 +5,10 @@
 
 var palletsData = [];      /* за store изглед: история на записите на текущия магазин */
 var palletsEditId = null;
+/* За admin изгледа — за експорта: всички редове от прозореца (90 дни) на
+   обектите от матрицата, и самите обекти. Матрицата показва само последния. */
+var palletsAdminRows = [];
+var palletsAdminStores = [];
 
 var PALLET_TYPES = [
   { key:'euro_pallets',        label:'Европалет 120*80' },
@@ -47,8 +51,10 @@ function loadPallets(){
       }).map(function(u){return u.store_name;});
       var latestByStore={};
       rows.forEach(function(r){ if(!latestByStore[r.store_name]) latestByStore[r.store_name]=r; });
+      palletsAdminStores=storeNames;
+      palletsAdminRows=rows.filter(function(r){return storeNames.indexOf(r.store_name)>=0;});
       renderPalletsAdmin(storeNames,latestByStore);
-    }).catch(function(){renderPalletsAdmin([],{});});
+    }).catch(function(){palletsAdminStores=[];palletsAdminRows=[];renderPalletsAdmin([],{});});
   } else {
     sbGet('transport_pallets','store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&report_date=gte.'+lookbackStr+'&order=report_date.desc').then(function(rows){
       palletsData=Array.isArray(rows)?rows:[];
@@ -92,6 +98,7 @@ function renderPalletsAdmin(storeNames,latestByStore){
       (missing?' &nbsp;|&nbsp; <b style="color:#dc2626;">⚠️ '+missing+'</b> без данни':'')+
       (stale?' &nbsp;|&nbsp; <b style="color:#d97706;">🕓 '+stale+'</b> с остарели данни (>7 дни)':'')+
       '</div>'+
+      '<button id="pallets-export-btn" onclick="exportPalletsExcel()" style="margin-left:auto;'+PALLETS_EXPORT_BTN_CSS+'">📊 Експорт Excel</button>'+
     '</div>'+
     '<div class="card"><div class="tbl-wrap"><table>'+
     '<thead><tr><th>Магазин</th>'+
@@ -154,6 +161,7 @@ function renderPalletsStore(){
   var html='<div class="page">'+
     '<div class="pg-title">📦 Палети</div>'+
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — наличности на празни палети (попълва се до петък 17:00)</div>'+
+    '<div style="margin-bottom:12px;"><button id="pallets-export-btn" onclick="exportPalletsExcel()" style="'+PALLETS_EXPORT_BTN_CSS+'">📊 Експорт Excel</button></div>'+
 
     '<div class="card" style="margin-bottom:14px;">'+
       '<div class="card-title">Въведи наличности</div>'+
@@ -229,4 +237,85 @@ function submitPalletsForm(){
       loadPallets();
     });
   }).catch(function(){toast('Грешка при запис','#dc2626');});
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   ЕКСПОРТ EXCEL — каквото вижда потребителят: admin/accounting/logistics
+   (isGlobal) — всички обекти от матрицата; магазин — само своя. Прозорецът е
+   този на таба (90 дни), затова и старите подавания над него не влизат.
+   Лист „Палети" — всеки ред, по обект и дата низходящо; „Предходно" и „Δ" са
+   общо спрямо предходното подаване на СЪЩИЯ обект (както в петъчния имейл,
+   но ред по ред). Лист „Обобщение" — последното по обект; без данни и
+   остарели (>7 дни, palletsStaleness) отгоре.
+══════════════════════════════════════════════════════════════ */
+var PALLETS_EXPORT_BTN_CSS='border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;';
+var PALLETS_XLSX_SRC='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+var palletsXlsxLoading=false;
+
+function palletsRowTotal(r){
+  return PALLET_TYPES.reduce(function(s,t){return s+(parseInt(r[t.key])||0);},0);
+}
+/* Редовете и обектите, които потребителят има право да види. */
+function palletsExportSource(){
+  if(isGlobal()) return { rows:palletsAdminRows.slice(), stores:palletsAdminStores.slice() };
+  var mine=currentUser.store_name;
+  return { rows:palletsData.filter(function(r){return r.store_name===mine;}), stores:[mine] };
+}
+/* Чиста — строи workbook-а с подадения XLSX. Тестът я вика с фалшив. */
+function palletsBuildWorkbook(X){
+  var src=palletsExportSource();
+  var rows=src.rows.slice().sort(function(a,b){
+    return String(a.store_name).localeCompare(String(b.store_name),'bg') ||
+      (a.report_date<b.report_date?1:a.report_date>b.report_date?-1:0);
+  });
+  var head=['Обект','Дата на подаване','Подал'].concat(PALLET_TYPES.map(function(t){return t.label;}))
+    .concat(['Общо','Предходно (общо)','Δ','Изпратени с камион / коментар']);
+  var aoa=[head];
+  rows.forEach(function(r,i){
+    var prev=rows[i+1]&&rows[i+1].store_name===r.store_name?rows[i+1]:null;
+    var tot=palletsRowTotal(r), prevTot=prev?palletsRowTotal(prev):null;
+    aoa.push([r.store_name||'',r.report_date||'',r.updated_by||r.created_by||'']
+      .concat(PALLET_TYPES.map(function(t){return parseInt(r[t.key])||0;}))
+      .concat([tot,prevTot===null?'':prevTot,prevTot===null?'':tot-prevTot,r.sent_note||'']));
+  });
+  var wb=X.utils.book_new();
+  var ws=X.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:22},{wch:14},{wch:20}].concat(PALLET_TYPES.map(function(){return {wch:12};}))
+    .concat([{wch:8},{wch:10},{wch:6},{wch:36}]);
+  X.utils.book_append_sheet(wb,ws,'Палети');
+
+  /* Обобщение: първо без данни, после остарели, после актуални; по име. */
+  var latest={};
+  rows.forEach(function(r){ if(!latest[r.store_name]) latest[r.store_name]=r; });
+  var rank=function(s){var r=latest[s];if(!r)return 0;var st=palletsStaleness(r.report_date);return st.days!==null&&st.days>7?1:2;};
+  var stores=src.stores.slice().sort(function(a,b){return rank(a)-rank(b)||String(a).localeCompare(String(b),'bg');});
+  var sum=[['Обект','Състояние','Последно подаване','Дни']
+    .concat(PALLET_TYPES.map(function(t){return t.label;})).concat(['Общо','Изпратени с камион / коментар'])];
+  stores.forEach(function(s){
+    var r=latest[s];
+    if(!r){ sum.push([s,'Няма данни','','' ].concat(PALLET_TYPES.map(function(){return '';})).concat(['',''])); return; }
+    var st=palletsStaleness(r.report_date);
+    sum.push([s,st.days>7?'Остаряло (>7 дни)':'Актуално',r.report_date,st.days]
+      .concat(PALLET_TYPES.map(function(t){return parseInt(r[t.key])||0;})).concat([palletsRowTotal(r),r.sent_note||'']));
+  });
+  var ws2=X.utils.aoa_to_sheet(sum);
+  ws2['!cols']=[{wch:22},{wch:18},{wch:16},{wch:6}].concat(PALLET_TYPES.map(function(){return {wch:12};}))
+    .concat([{wch:8},{wch:36}]);
+  X.utils.book_append_sheet(wb,ws2,'Обобщение');
+  return { wb:wb, rows:rows.length, stores:stores.length };
+}
+function exportPalletsExcel(){
+  if(!window.XLSX){
+    /* Второ натискане, докато се зарежда — не добавя втори <script>. */
+    if(palletsXlsxLoading){toast('⏳ Зарежда се SheetJS...');return;}
+    palletsXlsxLoading=true;
+    var s=document.createElement('script');
+    s.src=PALLETS_XLSX_SRC;
+    s.onload=function(){palletsXlsxLoading=false;exportPalletsExcel();};
+    s.onerror=function(){palletsXlsxLoading=false;toast('Грешка при зареждане на SheetJS','#dc2626');};
+    document.head.appendChild(s);return;
+  }
+  var out=palletsBuildWorkbook(window.XLSX);
+  window.XLSX.writeFile(out.wb,'ТеМАХ_Палети_'+today()+'.xlsx');
+  toast('✅ Excel изтеглен! ('+out.rows+' подавания, '+out.stores+' обекта)');
 }
