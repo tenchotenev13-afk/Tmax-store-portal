@@ -4062,13 +4062,15 @@ function renderRecurringTasks(dk) {
   var h = '<div style="background:#fff;border:1px solid ' + d.bdr + ';border-left:4px solid ' + d.hdr + ';border-radius:8px;margin-bottom:12px;overflow:hidden;">';
   h += '<div style="background:' + d.bg + ';padding:8px 14px;display:flex;justify-content:space-between;align-items:center;">';
   h += '<div style="font-size:12px;font-weight:700;color:' + d.color + ';text-transform:uppercase;letter-spacing:.06em;">🔁 Постоянни задачи</div>';
-  /* Спри / Активирай / Добави — само в текущата седмица (bulIsCurrentWeek):
-     в стар или бъдещ бюлетин би пренаписало историята. */
+  /* Добави / Активирай — в текущата И в бъдещ бюлетин (периодът тръгва от
+     показаната седмица); Спри — само в текущата. Минал бюлетин — нищо: би
+     пренаписало историята. */
   var recCanChange = canEdit() && bulIsCurrentWeek();
-  if (recCanChange) {
+  var recCanAdd = canEdit() && bulIsCurrentOrFuture();
+  if (recCanAdd) {
     h += '<button onclick="openRecurringModal(\'' + dk + '\')" style="border:1px solid ' + d.hdr + ';background:#fff;color:' + d.color + ';border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;">+ Добави</button>';
   } else if (canEdit()) {
-    h += '<div class="rec-only-current" style="font-size:10.5px;color:#94a3b8;">Промени по постоянните задачи — само от текущата седмица</div>';
+    h += '<div class="rec-only-current" style="font-size:10.5px;color:#94a3b8;">Промени по постоянните задачи — само от текущата и бъдещите седмици</div>';
   }
   h += '</div>';
 
@@ -4118,7 +4120,7 @@ function renderRecurringTasks(dk) {
           'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + (winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleRecDate,t.linked_module)) + '">';
       }
       h += '<div style="flex:1;">';
-      h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done&&!skipView,singleRecDate)+bulPostponedBadgeHtml(ppComp)+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+'</div>';
+      h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done&&!skipView,singleRecDate)+bulPostponedBadgeHtml(ppComp)+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+bulFromBadgeHtml(t)+'</div>';
       if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">' + linkify(t.description) + '</div>';
       var dueLbl = recurringDueLabel(t);
       if (isMultiRec) {
@@ -4162,16 +4164,16 @@ function renderRecurringTasks(dk) {
     });
     h += '</div>';
   } else if (canEdit()) {
-    h += '<div style="padding:12px 14px;color:#94a3b8;font-size:12px;font-style:italic;">' + (recCanChange ? 'Няма постоянни задачи. Добави с бутона горе.' : 'Няма постоянни задачи за тази седмица.') + '</div>';
+    h += '<div style="padding:12px 14px;color:#94a3b8;font-size:12px;font-style:italic;">' + (recCanAdd ? 'Няма постоянни задачи. Добави с бутона горе.' : 'Няма постоянни задачи за тази седмица.') + '</div>';
   }
   /* ── Спрени = БЕЗ отворен период — само за canEdit(), сгънати по
      подразбиране. Без тази секция спряна задача се връщаше само през SQL
      (11.09.2026, „Преоценка-задължителна"). Сиви, без чекбокс, „Отложи",
      „Не за тази седмица" и 🔔 — само „▶ Активирай" и ✕.
-     САМО в текущата седмица: в стар бюлетин задача, спряна по-късно, още
-     важи и стои в основния списък — да е и в „Спрени" би я показало два
+     В текущата и в бъдещ бюлетин; не в стар: там задача, спряна по-късно,
+     още важи и стои в основния списък — да е и в „Спрени" би я показало два
      пъти и би приканило към промяна на историята. */
-  var stopped = recCanChange ? recurringStopped.filter(function(t){ return t.department===dk; }) : [];
+  var stopped = recCanAdd ? recurringStopped.filter(function(t){ return t.department===dk; }) : [];
   if (stopped.length) {
     var stOpen = !!bulStoppedOpen[dk];
     h += '<div style="border-top:1px dashed #e2e8f0;padding:6px 14px 8px;">';
@@ -4184,7 +4186,7 @@ function renderRecurringTasks(dk) {
       if (stLbl) h += '<div style="font-size:10px;color:#94a3b8;margin-top:2px;">🔁 '+stLbl+'</div>';
       h += '</div>';
       h += '<div style="display:flex;gap:4px;">';
-      if (recCanChange) h += '<button data-rid="'+t.id+'" onclick="toggleRecurringActive(this.dataset.rid,true,this)" style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#15803d;white-space:nowrap;">▶ Активирай</button>';
+      if (recCanAdd) h += '<button data-rid="'+t.id+'" onclick="toggleRecurringActive(this.dataset.rid,true,this)" style="border:1px solid #bbf7d0;background:#f0fdf4;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#15803d;white-space:nowrap;">▶ Активирай</button>';
       h += '<button data-rid="'+t.id+'" onclick="deleteRecurring(this.dataset.rid)" style="border:1px solid #fecaca;background:#fff5f5;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#dc2626;">✕</button>';
       h += '</div></div>';
     });
@@ -4280,17 +4282,22 @@ function bulRecurringCheckboxChanged(cb){
 }
 
 /* ─── „⏸ Спри" / „▶ Активирай" ПО СЕДМИЦИ (recurring_task_periods) ───────
-   Само от бюлетина на ТЕКУЩАТА седмица W (bulIsCurrentWeek()):
+   Спри — само от бюлетина на ТЕКУЩАТА седмица W (bulIsCurrentWeek());
+   Активирай — от текущата или бъдеща W (bulIsCurrentOrFuture()):
      Спри      → отвореният период получава to_monday = W−7 (W и нататък не
                  се изисква; W−1 и по-старите я имат); започнал ли е в самата
                  W — периодът се трие. После active=false.
      Активирай → нов период from_monday = W; старият затворен остава —
-                 празнината се пази. После active=true.
+                 празнината се пази. После active = (W <= текущия
+                 понеделник): бъдеща W остава false, докато кронът
+                 recurring_tasks_refresh_active() не я вдигне в понеделник.
    Две заявки: периодът, после кешът active. Провали ли се ВТОРАТА — червен
    тост и презареждане: периодът вече е записан и екранът не бива да казва
    друго. Бутонът е заключен през цялото време. */
 function toggleRecurringActive(id, active, btn) {
-  if (!bulIsCurrentWeek()) { toast('Промени по постоянните задачи — само от текущата седмица','#d97706'); return; }
+  if (active ? !bulIsCurrentOrFuture() : !bulIsCurrentWeek()) {
+    toast(active ? 'Активиране — само от текущата и бъдещите седмици' : 'Спиране — само от текущата седмица','#d97706'); return;
+  }
   var t = recurringAll.find(function(x){ return String(x.id)===String(id); });
   if (!t) { toast('Задачата не е намерена','#dc2626'); return; }
   if (btn) btn.disabled = true;
@@ -4300,7 +4307,7 @@ function toggleRecurringActive(id, active, btn) {
       toast('Грешка при запис на периода: '+sbErrMsg(r)+' — нищо не е променено','#dc2626');
       return bulReloadRecurring();
     }
-    return sbPatch('recurring_tasks','id=eq.'+id,{active:active}).then(function(r2){
+    return sbPatch('recurring_tasks','id=eq.'+id,{active:active && bulActiveFrom(W)}).then(function(r2){
       if (r2 && r2.ok === false) {
         toast('Грешка при запис на active (периодът Е записан): '+sbErrMsg(r2)+' — обновено','#dc2626');
         return bulReloadRecurring();
@@ -4351,11 +4358,33 @@ function bulOpenPeriodFrom(t, W) {
 function bulWeekMonday() {
   return curBul ? toLocalISO(weekDays(curBul.week_number, curBul.year)[0]) : recurringMondayOf(new Date());
 }
-/* Спри / Активирай / Добави — само от бюлетина на ТЕКУЩАТА седмица. Така
-   recurring_tasks.active остава точно „важи тази седмица" (виж shared.js),
-   а стар или бъдещ бюлетин не пренаписва историята. */
+/* Спри — само от бюлетина на ТЕКУЩАТА седмица; Добави / Активирай — и от
+   бъдещ. Стар бюлетин не пренаписва историята. recurring_tasks.active
+   остава точно „важи тази седмица" (виж shared.js): период от бъдеща
+   седмица се записва с active=false (bulActiveFrom) и кронът
+   recurring_tasks_refresh_active() го вдига в понеделник 00:05. */
 function bulIsCurrentWeek() {
   return !!curBul && bulWeekMonday() === recurringMondayOf(new Date());
+}
+function bulIsCurrentOrFuture() {
+  return !!curBul && bulWeekMonday() >= recurringMondayOf(new Date());
+}
+/* active за период от понеделника fromMonday: важи ли ВЕЧЕ. */
+function bulActiveFrom(fromMonday) {
+  return fromMonday <= recurringMondayOf(new Date());
+}
+/* Бадж „от 21.09" — периодът, по който задачата важи в показаната седмица,
+   още не е започнал (бъдещ бюлетин). В текуща и минала седмица валидният
+   период винаги е започнал, затова там баджът го няма. */
+function bulFromBadgeHtml(t) {
+  var W = bulWeekMonday(), cur = recurringMondayOf(new Date());
+  if (W <= cur) return '';
+  var p = bulTaskPeriods(t.id).filter(function(x){
+    return x.from_monday <= W && (bulIsOpen(x) || x.to_monday >= W);
+  })[0];
+  if (!p || p.from_monday <= cur) return '';
+  var f = String(p.from_monday).split('-');
+  return '<span class="rec-from-badge" title="Постоянната задача започва от тази седмица" style="font-size:10px;font-weight:600;color:#0369a1;background:#e0f2fe;border:1px solid #bae6fd;border-radius:4px;padding:0 5px;">от '+f[2]+'.'+f[1]+'</span>';
 }
 /* Единственото място, което пише recurringTasks от сървърни данни:
    валидните за седмицата на curBul, по recurring_task_periods. Тук се
@@ -4601,9 +4630,9 @@ function recurringIsDueToday(t){
 function submitRecurring(dk, btn) {
   var title = (document.getElementById('rec-title').value||'').trim();
   if (!title) { toast('Въведи заглавие','#dc2626'); return; }
-  /* „+ Добави" се показва само в текущата седмица; тази проверка е за
-     извикване отдругаде. */
-  if (!bulIsCurrentWeek()) { toast('Промени по постоянните задачи — само от текущата седмица','#d97706'); return; }
+  /* „+ Добави" се показва само в текущата и бъдещ бюлетин; тази проверка е
+     за извикване отдругаде. */
+  if (!bulIsCurrentOrFuture()) { toast('Промени по постоянните задачи — само от текущата и бъдещите седмици','#d97706'); return; }
   var desc = document.getElementById('rec-desc').value||'';
   var weekdays = readRecWeekdaysCheckboxes('rec-weekdays');
   var due_weekday = weekdays.length ? weekdays[0] : null; /* първия избран - обратна съвместимост */
@@ -4613,17 +4642,17 @@ function submitRecurring(dk, btn) {
   var reportGroups = readReportGroupsCheckboxes('rec-report-groups');
   var linkedModule = (document.getElementById('rec-linked-module')||{}).value||null;
   if (btn) btn.disabled = true;
+  /* Периодът — от max(показаната, текущата) седмица. active=true само ако
+     вече е започнал; бъдещ → false до понеделника (крон). */
+  var cur = recurringMondayOf(new Date()), shown = bulWeekMonday();
+  var from = shown > cur ? shown : cur;
   /* sbPostReturn — трябва id-то за периода. */
-  sbPostReturn('recurring_tasks',{department:dk,title:title,description:desc,active:true,sort_order:recurringTasks.length,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_window:readRecWindow('rec-window','rec-weekdays'),due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
+  sbPostReturn('recurring_tasks',{department:dk,title:title,description:desc,active:bulActiveFrom(from),sort_order:recurringTasks.length,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_window:readRecWindow('rec-window','rec-weekdays'),due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null}).then(function(r){
     if (!r.ok) { toast('Грешка','#dc2626'); if (btn) btn.disabled = false; return; }
     var el = document.getElementById('rec-modal-ov');
     if (el) el.remove();
-    /* Периодът — от max(показаната, текущата) седмица; бутонът е само в
-       текущата, тоест двете съвпадат. Задача без период се води по кеша
-       active и би се появила във ВСЯКА стара седмица — затова провалът тук
-       е червен, не тих. */
-    var cur = recurringMondayOf(new Date()), shown = bulWeekMonday();
-    var from = shown > cur ? shown : cur;
+    /* Задача без период се води по кеша active и би се появила във ВСЯКА
+       стара седмица — затова провалът тук е червен, не тих. */
     var newId = r.row && r.row.id;
     var periodP = newId
       ? sbPost('recurring_task_periods',{recurring_task_id:newId,from_monday:from,to_monday:null,created_by:bulActor()})

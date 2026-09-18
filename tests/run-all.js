@@ -165,6 +165,7 @@ const TESTS = [
   'subtask-due-done.test.js',
   'recurring-periods.test.js',
   'recurring-periods-write.test.js',
+  'recurring-future-week.test.js',
   'recurring-periods-report.test.js',
   'recurring-periods-notify.test.js',
   'postpone-date.test.js',
