@@ -155,12 +155,33 @@ function taskTypeBadgeClick(el){
    задачата. Признакът е отделна колона, а НЕ ролята accounting: тя се носи
    и от счетоводството, което не е регионално, а В. Филев е регионален с
    роля admin. Отбелязва се от Администрация → Потребители. */
-var REPORT_GROUPS = {
-  co:          {label:'Ц.О (Жеко, Васка)',        people:[{name:'Жеко Желязков',   email:'j.jeliazkov@temax.bg'},{name:'Василка Шикова',  email:'v.shikova@temax.bg'}]},
-  controlling: {label:'Контролинг (Меги, Цвети)',  people:[{name:'Миглена Павлова', email:'m.pavlova@temax.bg'},{name:'Цветелина Тенева', email:'c.teneva@temax.bg'}]},
-  regional:    {label:'Регионален (по магазин)',   dynamic:true},
-  owner:       {label:'Т.Тенев',                   people:[{name:'Теодор Тенев',    email:'t.tenev@temax.bg'}]}
-};
+/* От 18.09.2026 КОЙ е в групата решава users.notify_groups (Администрация →
+   Потребители → „🔔 Групи"), не твърд списък тук — виж reportGroupMembers()
+   в report.js и send-routed-report. Тук остават само ключовете и етикетите;
+   етикетите са същите като NOTIFY_GROUP_LABELS в admin.js, а имената в
+   скобите идват от reportGroupPeopleCache. */
+var REPORT_GROUP_KEYS = ['co','controlling','regional','owner'];
+var REPORT_GROUP_LABELS = { co:'ЦО', controlling:'Контролинг', regional:'Регионален', owner:'Собственик' };
+/* Активните хора с поне една група — за имената в етикета. Същата схема като
+   coPeopleCache: при грешка ПРАЗЕН МАСИВ, етикетът остава само с групата. */
+var reportGroupPeopleCache=null;
+function loadReportGroupPeople(){
+  if(reportGroupPeopleCache)return Promise.resolve(reportGroupPeopleCache);
+  return sbGet('users','active=eq.true&select=email,display_name,notify_groups&order=display_name')
+    .then(function(data){
+      reportGroupPeopleCache=Array.isArray(data)?data.filter(function(u){return u&&u.email;}):[];
+      return reportGroupPeopleCache;
+    }).catch(function(){reportGroupPeopleCache=[];return reportGroupPeopleCache;});
+}
+function reportGroupLabel(k){
+  var base=REPORT_GROUP_LABELS[k]||k;
+  if(k==='regional')return base+' (по магазин)';
+  if(!reportGroupPeopleCache)return base;
+  var names=reportGroupPeopleCache.filter(function(u){
+    return typeof reportNotifyGroupsOf==='function' && reportNotifyGroupsOf(u).indexOf(k)>=0;
+  }).map(function(u){return u.display_name||u.email;});
+  return base+' ('+(names.length?names.join(', '):'няма хора')+')';
+}
 /* ХОРАТА ОТ ЦЕНТРАЛЕН ОФИС (кеширан) — втората половина на „Групи за
    докладване". Бюлетинът го пише един човек, но задачите идват от снабдяване,
    счетоводство, маркетинг, а отчетът за изпълнението можеше да отиде само при
@@ -200,8 +221,8 @@ function reportGroupsCheckboxesHtml(selId, selectedArr){
       '<input type="checkbox" value="'+escAttr(val)+'"'+(checked?' checked':'')+' style="width:14px;height:14px;cursor:pointer;">' + esc(label) +
       '</label>';
   };
-  var groups = Object.keys(REPORT_GROUPS).map(function(k){
-    return row(k, REPORT_GROUPS[k].label, selectedArr.indexOf(k)>=0);
+  var groups = REPORT_GROUP_KEYS.map(function(k){
+    return row(k, reportGroupLabel(k), selectedArr.indexOf(k)>=0);
   }).join('');
   var people = (coPeopleCache||[]).filter(function(u){return u&&u.email;}).map(function(u){
     return { val:'user:'+u.email, label:u.display_name||u.email };
@@ -1337,6 +1358,8 @@ function loadBulletin(){
      отдавна е топъл. Празен кеш (мрежов срив) не чупи формата: рисуват се
      само четирите групи. */
   if(!coPeopleCache)loadCentralOfficePeople();
+  /* Имената в етикетите на групите — по същата причина, без изчакване. */
+  if(!reportGroupPeopleCache)loadReportGroupPeople();
   /* Зареждаме бюлетина ПЪРВО (за да знаем неговата седмица/година), после промоциите
      филтрирани спрямо ТАЗИ седмица - за да са "автономни" за всяка седмица, не спрямо
      реалната дата днес. Рекъринг задачите вървят паралелно, не зависят от седмицата. */

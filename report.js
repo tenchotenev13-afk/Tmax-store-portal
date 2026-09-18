@@ -2797,8 +2797,8 @@ function sendWarehouseReportTest(toEmail, done){
    report_groups при създаването им ('co'/'controlling'/'regional'/'owner',
    а от 26.08.2026 и 'user:<имейл>' — отделен човек от Централен офис).
 
-   ФАЗА НА ТЕСТВАНЕ: reportGroups сочат към РЕАЛНИ хора (Жеко, Васка, Меги,
-   Цвети, Теодор) — затова тук НИКОГА не изпращаме на техните истински
+   ФАЗА НА ТЕСТВАНЕ: reportGroups сочат към РЕАЛНИ хора (членовете на
+   групите в users.notify_groups) — затова тук НИКОГА не изпращаме на истинските
    имейли. Всичко отива на подадения тестов адрес, ясно надписано за кого е
    било предназначено. Истинско изпращане до тях е отделна, изрично
    потвърдена стъпка по-късно. */
@@ -2907,7 +2907,7 @@ function collectWeeklyRoutingData(cb){
       routedRegular.forEach(function(t){ addRouted(t, 'regular'); });
       routedRecurring.forEach(function(t){ addRouted(t, 'recurring'); });
 
-      if (!routedTasks.length) { cb({ bul:bul, weekLabel:weekLabel, tasks:[], comps:[], stores:[], regionalUsers:[], creatorMap:{} }); return; }
+      if (!routedTasks.length) { cb({ bul:bul, weekLabel:weekLabel, tasks:[], comps:[], stores:[], groupUsers:[], creatorMap:{} }); return; }
 
       /* ID-тата идват от ФИЛТРИРАНИЯ набор, не от суровия - няма смисъл да
          се теглят отмятания за задача, която не е дължима тази седмица. */
@@ -2934,7 +2934,8 @@ function collectWeeklyRoutingData(cb){
         regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+dateQ) : Promise.resolve([]),
         recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+dateQ) : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name'),
-        sbGet('users','is_regional=eq.true&select=email,display_name,assigned_stores'),
+        /* Членовете на групите (reportGroupMembers) — активни, с имейл. */
+        sbGet('users','active=eq.true&email=not.is.null&select=email,display_name,assigned_stores,is_regional,notify_groups&order=display_name'),
         sbGet('users','select=display_name,email'), /* за резолвиране на created_by (display_name) -> email на създателя */
         (carryQ && regIds.length) ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+carryQ) : Promise.resolve([]),
         (carryQ && recIds.length) ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+carryQ) : Promise.resolve([])
@@ -2942,7 +2943,7 @@ function collectWeeklyRoutingData(cb){
         var regCompsRaw = Array.isArray(r2[0]) ? r2[0] : [];
         var recCompsRaw = Array.isArray(r2[1]) ? r2[1] : [];
         var users = Array.isArray(r2[2]) ? r2[2] : [];
-        var regionalUsers = Array.isArray(r2[3]) ? r2[3] : [];
+        var groupUsers = Array.isArray(r2[3]) ? r2[3] : [];
         var allUsers = Array.isArray(r2[4]) ? r2[4] : [];
         var seen = {};
         var stores = users.filter(function(u){
@@ -2975,17 +2976,47 @@ function collectWeeklyRoutingData(cb){
           .concat(recCompsRaw.map(function(c){ return mapComp(c, 'recurring', c.recurring_task_id); }));
         var creatorMap = {};
         allUsers.forEach(function(u){ if (u.display_name && u.email) creatorMap[u.display_name] = u.email; });
-        cb({ bul:bul, weekLabel:weekLabel, tasks:routedTasks, comps:comps, stores:stores, regionalUsers:regionalUsers, creatorMap:creatorMap });
+        cb({ bul:bul, weekLabel:weekLabel, tasks:routedTasks, comps:comps, stores:stores, groupUsers:groupUsers, creatorMap:creatorMap });
       }).catch(function(){ cb(null); });
     }).catch(function(){ cb(null); });
   }).catch(function(){ cb(null); });
 }
 
+/* КОЙ Е В ГРУПАТА — от users, не от кода (18.09.2026).
+   Дотук co / controlling / owner бяха твърд списък с имена в кода
+   (REPORT_GROUPS) и смяна на човек искаше деплой. Сега член на група е
+   активен потребител с имейл и notify_groups, съдържащ групата — същото поле,
+   което управлява матрицата на известията и таба „Чек лист" (Администрация →
+   Потребители → „🔔 Групи"). 'regional' остава по users.is_regional.
+   PostgREST връща масива като масив; низовият вид '{a,b}' се разчита за
+   всеки случай — същото като notifyGroupsOf() в admin.js. */
+function reportNotifyGroupsOf(u){
+  var g = u && u.notify_groups;
+  if (Array.isArray(g)) return g;
+  if (typeof g === 'string' && g.length > 2) {
+    return g.replace(/^{|}$/g,'').split(',').map(function(s){ return s.trim().replace(/^"|"$/g,''); }).filter(Boolean);
+  }
+  return [];
+}
+function reportGroupMembers(g, groupUsers){
+  return (Array.isArray(groupUsers) ? groupUsers : []).filter(function(u){
+    if (!u || !u.email || u.active === false) return false;
+    return g === 'regional' ? !!u.is_regional : reportNotifyGroupsOf(u).indexOf(g) >= 0;
+  });
+}
+
 /* За една задача връща кой получава известие за нея — 'co'/'controlling'/
-   'owner' са фиксирани хора; 'regional' се извежда динамично от
+   'owner' са хората с тази група в users.notify_groups (reportGroupMembers);
+   'regional' се извежда динамично от
    потребителите с users.is_regional=true, чиито assigned_stores пресичат
    target_stores на задачата (ако задачата е за ВСИЧКИ магазини — включва
    всички регионални с назначени обекти).
+
+   Група БЕЗ нито един член не спира картичката — тя отива до останалите
+   получатели на задачата (другите групи, отметнатите поименно, автора).
+   Празната група отива в warnings (ако е подаден масив), за да я види
+   обработчикът: тих пропуск тук значи човек, който чака отчет и не получава
+   нищо, без никъде да личи защо.
 
    Признакът е ОТДЕЛНА колона, не роля: дотук списъкът идваше от
    role=eq.accounting и грешеше в двете посоки — 9 счетоводителки получаваха
@@ -2998,7 +3029,7 @@ function collectWeeklyRoutingData(cb){
    само за обикновени bulletin_tasks - recurring_tasks нямат това поле)
    винаги се добавя автоматично като получател, ако имейлът му може да бъде
    резолвнат през creatorMap (display_name -> email от users). */
-function resolveRecipientsForTask(task, regionalUsers, creatorMap){
+function resolveRecipientsForTask(task, groupUsers, creatorMap, warnings){
   var out = [], byEmail = {};
   /* Дедупликацията е ПО ИМЕЙЛ. Дотук я вършеше само buildRecipientMap надолу;
      тук е, защото след 'user:<имейл>' застъпването е нормален случай, а не
@@ -3013,7 +3044,7 @@ function resolveRecipientsForTask(task, regionalUsers, creatorMap){
   (task.report_groups||[]).forEach(function(g){
     /* 'user:<имейл>' — отделен човек от Централен офис, отметнат поименно във
        формата (reportGroupsCheckboxesHtml в bulletin.js). Клонът стои ПРЕДИ
-       проверката за REPORT_GROUPS, защото тя пропуска мълчаливо всичко, което
+       проверката за REPORT_GROUP_KEYS, защото тя пропуска мълчаливо всичко, което
        не е един от четирите ключа: без него седмичната маршрутизация би
        подминала новите получатели без грешка и без следа.
        Името идва от кеша с хората от ЦО, ако е зареден; иначе имейлът. */
@@ -3022,19 +3053,24 @@ function resolveRecipientsForTask(task, regionalUsers, creatorMap){
       add(coPersonName(em), em);
       return;
     }
-    var grp = REPORT_GROUPS[g];
-    if (!grp) return;
+    /* Непозната стойност (не е от четирите ключа) се пропуска, както досега. */
+    if (REPORT_GROUP_KEYS.indexOf(g) < 0) return;
+    var members = reportGroupMembers(g, groupUsers);
+    if (!members.length) {
+      if (Array.isArray(warnings)) warnings.push({ group:g, task_id:task.id, title:task.title||'' });
+      return;
+    }
     if (g==='regional') {
       var scope = task.target_stores;
-      regionalUsers.forEach(function(u){
+      members.forEach(function(u){
         if (!u.email) return;
         var as = Array.isArray(u.assigned_stores) ? u.assigned_stores : [];
         if (!as.length) return;
         var matches = (!scope || !scope.length) ? true : as.some(function(s){ return scope.indexOf(s)>=0; });
         if (matches) add(u.display_name||u.email, u.email);
       });
-    } else if (grp.people) {
-      grp.people.forEach(function(p){ add(p.name, p.email); });
+    } else {
+      members.forEach(function(u){ add(u.display_name||u.email, u.email); });
     }
   });
   if (task.created_by && creatorMap && creatorMap[task.created_by]) {
@@ -3047,10 +3083,10 @@ function resolveRecipientsForTask(task, regionalUsers, creatorMap){
    натрупва списък със задачи, за които точно този човек е адресат.
    Сравнява id+kind заедно, за да не се бъркат обикновена и постоянна задача
    с case теоретично съвпадащ id. */
-function buildRecipientMap(tasks, regionalUsers, creatorMap){
+function buildRecipientMap(tasks, groupUsers, creatorMap, warnings){
   var map = {};
   tasks.forEach(function(t){
-    resolveRecipientsForTask(t, regionalUsers, creatorMap).forEach(function(r){
+    resolveRecipientsForTask(t, groupUsers, creatorMap, warnings).forEach(function(r){
       if (!map[r.email]) map[r.email] = { name:r.name, tasks:[] };
       var already = map[r.email].tasks.some(function(x){ return x.id===t.id && x.kind===t.kind; });
       if (!already) map[r.email].tasks.push(t);
@@ -3182,7 +3218,7 @@ function sendWeeklyReportRouted(testEmail){
   collectWeeklyRoutingData(function(data){
     if (!data) { toast('Грешка при зареждане','#dc2626'); return; }
     if (!data.tasks.length) { toast('Няма задачи с зададени групи за докладване тази седмица'); return; }
-    var map = buildRecipientMap(data.tasks, data.regionalUsers, data.creatorMap);
+    var map = buildRecipientMap(data.tasks, data.groupUsers, data.creatorMap);
     var emails = Object.keys(map);
     if (!emails.length) { toast('Няма разрешени получатели — провери групите на задачите','#dc2626'); return; }
     var sent = 0, total = emails.length;

@@ -137,6 +137,7 @@ const TESTS = [
   'calendar-local-dates.test.js',
   'kasa-returned-in-reports.test.js',
   'report-groups-users.test.js',
+  'report-groups-from-users.test.js',
   'no-auto-push-on-load.test.js',
   'bulletin-unpublished-push.test.js',
   'responder-publication-gate.test.js',

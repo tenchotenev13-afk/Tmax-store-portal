@@ -86,11 +86,13 @@ function usersFixture(list) {
     if (id) rows = rows.filter(r => r.id === id);
     const role = eq('role');
     if (role) rows = rows.filter(r => r.role === role);
+    const act = eq('active');
+    if (act !== null) rows = rows.filter(r => !!r.active === (act === 'true'));
     const isReg = eq('is_regional');
     if (isReg !== null) rows = rows.filter(r => !!r.is_regional === (isReg === 'true'));
     /* Заявката за знаменателя иска само обектите — тя няма филтър и
        трябва да върне редовете с store_name на реалните магазини. */
-    if (!id && !role && isReg === null && /select=store_name/.test(u)) {
+    if (!id && !role && isReg === null && act === null && /select=store_name/.test(u)) {
       return STORE_ROWS;
     }
     return rows;
@@ -142,7 +144,7 @@ async function recipients(targetStores) {
   h.w.collectWeeklyRoutingData(function (d) { data = d; });
   await ticks();
   if (!data) { h.close(); return null; }
-  const map = h.w.buildRecipientMap(data.tasks, data.regionalUsers, data.creatorMap);
+  const map = h.w.buildRecipientMap(data.tasks, data.groupUsers, data.creatorMap);
   const emails = Object.keys(map).sort();
   const urls = h.calls.get.filter(u => u.indexOf('/users?') >= 0);
   h.close();
@@ -165,8 +167,12 @@ function adminEnv() {
     const r = await recipients(null);
     if (ok('маршрутизацията връща данни', !!r)) {
       const joined = r.urls.join(' ');
-      ok('заявката за получатели пита is_regional=eq.true',
-        joined.indexOf('is_regional=eq.true') >= 0, joined);
+      /* От 18.09.2026 заявката тегли ВСИЧКИ активни с имейл (членовете на
+         групите); признакът is_regional се чете в reportGroupMembers(), не
+         в URL-а. Колоната трябва да е в select-а — без нея никой не е
+         регионален и секция 2 пада. */
+      ok('заявката за получатели иска колоната is_regional (активните, с имейл)',
+        /users\?active=eq\.true&email=not\.is\.null&select=[^&]*\bis_regional\b/.test(joined), joined);
       ok('и вече НЕ пита role=eq.accounting',
         joined.indexOf('role=eq.accounting') < 0, joined);
       /* Колоните остават същите — резолвърът ползва и трите. */
@@ -207,7 +213,10 @@ function adminEnv() {
     const { h } = routingEnv(null);
     await ticks();
 
-    const oldWay = USERS.filter(u => u.role === 'accounting');
+    /* Старият източник, както го е виждал резолверът: всеки от
+       role=accounting е бил „регионален". Флагът се вдига изрично, защото
+       reportGroupMembers() вече филтрира по is_regional сама. */
+    const oldWay = USERS.filter(u => u.role === 'accounting').map(u => Object.assign({}, u, { is_regional: true }));
     const newWay = USERS.filter(u => u.is_regional);
 
     const resolve = (list) => h.w.resolveRecipientsForTask(

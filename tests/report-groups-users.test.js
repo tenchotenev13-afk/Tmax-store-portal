@@ -41,6 +41,17 @@ const CO_PEOPLE = [
   { email: 'y.koycheva@temax.bg', display_name: 'Юлиана Койчева' }
 ];
 
+/* Членовете на групите, каквито ги тегли колекторът от users (18.09.2026 —
+   групите вече не са твърд списък в кода). Същите хора, които бяха в
+   REPORT_GROUPS, за да пазят проверките надолу смисъла си. */
+const GROUP_USERS = [
+  { email: 'j.jeliazkov@temax.bg', display_name: 'Жеко Желязков', notify_groups: ['co'] },
+  { email: 'v.shikova@temax.bg', display_name: 'Василка Шикова', notify_groups: ['co'] },
+  { email: 'm.pavlova@temax.bg', display_name: 'Миглена Павлова', notify_groups: ['controlling'] },
+  { email: 'c.teneva@temax.bg', display_name: 'Цветелина Тенева', notify_groups: ['controlling'] },
+  { email: 't.tenev@temax.bg', display_name: 'Теодор Тенев', notify_groups: ['owner'] }
+];
+
 function env(over) {
   return boot(Object.assign({
     modules: ['bulletin.js', 'report.js'],
@@ -183,7 +194,7 @@ function boxes(wrap) {
     h.w.coPeopleCache = CO_PEOPLE.slice();
     const task = { id: 't-1', kind: 'regular', report_groups: ['user:x@temax.bg'],
                    target_stores: [], created_by: null };
-    const got = h.w.resolveRecipientsForTask(task, [], {});
+    const got = h.w.resolveRecipientsForTask(task, GROUP_USERS, {});
     ok('точно един получател', got.length === 1, JSON.stringify(got));
     if (got.length) {
       ok('с имейла от стойността', got[0].email === 'x@temax.bg', got[0].email);
@@ -195,7 +206,7 @@ function boxes(wrap) {
     /* Същото, но човекът Е в кеша → взима се display_name. */
     const known = h.w.resolveRecipientsForTask(
       { id: 't-2', kind: 'regular', report_groups: ['user:y.koycheva@temax.bg'],
-        target_stores: [], created_by: null }, [], {});
+        target_stores: [], created_by: null }, GROUP_USERS, {});
     if (ok('и за човек от кеша — един получател', known.length === 1, JSON.stringify(known))) {
       ok('името идва от кеша', known[0].name === 'Юлиана Койчева', known[0].name);
       ok('имейлът е правилният', known[0].email === 'y.koycheva@temax.bg', known[0].email);
@@ -206,7 +217,7 @@ function boxes(wrap) {
     h.w.coPeopleCache = null;
     const cold = h.w.resolveRecipientsForTask(
       { id: 't-3', kind: 'regular', report_groups: ['user:y.koycheva@temax.bg'],
-        target_stores: [], created_by: null }, [], {});
+        target_stores: [], created_by: null }, GROUP_USERS, {});
     if (ok('при празен кеш пак има получател', cold.length === 1, JSON.stringify(cold))) {
       ok('с имейл за име', cold[0].name === 'y.koycheva@temax.bg' &&
         cold[0].email === 'y.koycheva@temax.bg', JSON.stringify(cold[0]));
@@ -230,13 +241,13 @@ function boxes(wrap) {
        вместо 3). Чак тогава дедупликацията долу значи нещо. */
     const mixed = h.w.resolveRecipientsForTask(
       Object.assign({}, task, { report_groups: ['controlling', 'user:x@temax.bg'] }),
-      [], {});
+      GROUP_USERS, {});
     ok('смесен запис: групата + отделният човек дават трима',
       mixed.length === 3, mixed.map(r => r.email).join(','));
     ok('отделният човек наистина е в списъка',
       mixed.some(r => r.email === 'x@temax.bg'), mixed.map(r => r.email).join(','));
 
-    const got = h.w.resolveRecipientsForTask(task, [], {});
+    const got = h.w.resolveRecipientsForTask(task, GROUP_USERS, {});
     const megi = got.filter(r => r.email === 'm.pavlova@temax.bg');
     ok('Миглена е ВЕДНЪЖ, не два пъти', megi.length === 1,
       got.map(r => r.email).join(','));
@@ -249,7 +260,7 @@ function boxes(wrap) {
       megi[0].name === 'Миглена Павлова', megi[0].name);
 
     /* И надолу през buildRecipientMap — там е реалният път към имейла. */
-    const map = h.w.buildRecipientMap([task], [], {});
+    const map = h.w.buildRecipientMap([task], GROUP_USERS, {});
     ok('buildRecipientMap също дава един запис за Миглена',
       !!map['m.pavlova@temax.bg'] && Object.keys(map).length === 2,
       Object.keys(map).join(','));
@@ -258,7 +269,7 @@ function boxes(wrap) {
        от подредбата на отметките. */
     const rev = h.w.resolveRecipientsForTask(
       Object.assign({}, task, { report_groups: ['user:m.pavlova@temax.bg', 'controlling'] }),
-      [], {});
+      GROUP_USERS, {});
     ok('обратният ред дава пак двама', rev.length === 2, rev.map(r => r.email).join(','));
     ok('и пак една Миглена',
       rev.filter(r => r.email === 'm.pavlova@temax.bg').length === 1);
@@ -273,14 +284,14 @@ function boxes(wrap) {
     const got = h.w.resolveRecipientsForTask(
       { id: 't-5', kind: 'regular',
         report_groups: ['glupost', 'marketing', 'user', 'users:x@temax.bg', ''],
-        target_stores: [], created_by: null }, [], {});
+        target_stores: [], created_by: null }, GROUP_USERS, {});
     ok('нито един получател', got.length === 0, JSON.stringify(got));
 
     /* Смесено: боклукът се пропуска, валидните минават. */
     const mixed = h.w.resolveRecipientsForTask(
       { id: 't-6', kind: 'regular',
         report_groups: ['glupost', 'owner', 'user:x@temax.bg'],
-        target_stores: [], created_by: null }, [], {});
+        target_stores: [], created_by: null }, GROUP_USERS, {});
     const em = mixed.map(r => r.email).sort().join(',');
     ok('минават само owner + отделният човек',
       em === 't.tenev@temax.bg,x@temax.bg', em);
@@ -289,13 +300,13 @@ function boxes(wrap) {
        адрес — писмо до "" е тиха грешка чак при изпращането. */
     const empty = h.w.resolveRecipientsForTask(
       { id: 't-7', kind: 'regular', report_groups: ['user:'],
-        target_stores: [], created_by: null }, [], {});
+        target_stores: [], created_by: null }, GROUP_USERS, {});
     ok('„user:" без имейл не дава получател', empty.length === 0, JSON.stringify(empty));
 
     /* Четирите фиксирани групи продължават да работят както преди. */
     const co = h.w.resolveRecipientsForTask(
       { id: 't-8', kind: 'regular', report_groups: ['co'],
-        target_stores: [], created_by: null }, [], {});
+        target_stores: [], created_by: null }, GROUP_USERS, {});
     ok('групата „co" още дава двамата си човека', co.length === 2,
       co.map(r => r.email).join(','));
     h.close && h.close();

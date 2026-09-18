@@ -164,6 +164,8 @@ const ROUTED_FNS = [
   'reportDM', 'reportCompMovedOff',
   /* обвивка и общи парчета HTML */
   'reportDayMonth', 'reportEmailShell', 'reportAttachmentsHtml',
+  /* кой е в групата — users.notify_groups / is_regional (18.09.2026) */
+  'reportNotifyGroupsOf', 'reportGroupMembers',
   /* самата маршрутизация */
   'reportRoutedTaskWindow', 'collectWeeklyRoutingData',
   'resolveRecipientsForTask', 'buildRecipientMap', 'taskStoreBreakdown',
@@ -199,7 +201,7 @@ const ROUTED_COPIED = [
 
 /* Само в send-routed-report: PostgREST със service ключ и всичко около
    самото изпращане — тема, тестова лента, кой получава. */
-const ROUTED_ONLY = ['sbGet', 'sbPatch', 'routedMailPlan',
+const ROUTED_ONLY = ['sbGet', 'sbPatch', 'routedMailPlan', 'routedEmptyGroups',
   'routedTestBannerHtml', 'routedWeeklySubject', 'routedSendEmail'];
 
 /* Наистина само в браузъра — ръчните бутони от портала. Няма ги в НИТО

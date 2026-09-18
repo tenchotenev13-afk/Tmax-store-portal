@@ -2127,8 +2127,10 @@ function notifyGroupsOf(u){
   return [];
 }
 
-/* is_regional и notify_groups са ДВЕ независими полета. report.js още чете
-   is_regional, затова тя не се пипа тук — обединяването им е отделна задача.
+/* is_regional и notify_groups са ДВЕ независими полета. Личният отчет по
+   задачи (report.js / send-routed-report) чете групата „Регионален" от
+   is_regional, а ЦО / Контролинг / Собственик — от notify_groups (от
+   18.09.2026). Затова is_regional не се пипа тук — обединяването е отделна задача.
    Разминаването само се показва: ⚠️ на реда, без автоматична поправка. */
 function notifyGroupsMismatch(u){
   return (!!(u && u.is_regional)) !== (notifyGroupsOf(u).indexOf('regional') >= 0);
@@ -2169,9 +2171,9 @@ function _renderNotifyGroupsModal(userName, currentList, isRegional){
     '<div style="font-size:15px;font-weight:700;">🔔 Групи за известия — ' + esc(userName) + '</div>' +
     '<button onclick="closeNotifyGroupsModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>' +
     '</div>' +
-    '<div style="font-size:11.5px;color:#64748b;margin-bottom:10px;">Групата решава кои теми стигат до човека — според матрицата в „🔔 Известия". Група „Магазин" не се задава тук: тя следва обекта на човека.</div>' +
+    '<div style="font-size:11.5px;color:#64748b;margin-bottom:10px;">Групата решава кои теми стигат до човека — според матрицата в „🔔 Известия" — и кой получава личния отчет за задачите, отметнали групата в бюлетина. Група „Магазин" не се задава тук: тя следва обекта на човека.</div>' +
     (mismatch
-      ? '<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 10px;font-size:11.5px;margin-bottom:10px;">⚠️ is_regional = ' + (isRegional?'да':'не') + ', а групата „Регионален" ' + (isRegional?'липсва':'е сложена') + '. Двете полета се четат от различен код (report.js чете is_regional) — изравни ги съзнателно.</div>'
+      ? '<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 10px;font-size:11.5px;margin-bottom:10px;">⚠️ is_regional = ' + (isRegional?'да':'не') + ', а групата „Регионален" ' + (isRegional?'липсва':'е сложена') + '. Двете полета се четат от различен код (личният отчет по задачи чете is_regional за „Регионален") — изравни ги съзнателно.</div>'
       : '') +
     '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px;">' +
     NOTIFY_GROUP_ORDER.map(function(k){

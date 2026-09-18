@@ -69,11 +69,12 @@ function extract(name) {
 let M = null;
 try {
   M = new Function(
-    ['esc', 'REPORT_GROUPS', 'coPeopleCache', 'coPersonName',
+    ['esc', 'REPORT_GROUP_KEYS', 'reportNotifyGroupsOf', 'reportGroupMembers',
+     'coPeopleCache', 'coPersonName',
      'resolveRecipientsForTask', 'buildRecipientMap', 'routedMailPlan',
      'routedTestBannerHtml', 'reportDayMonth', 'routedWeeklySubject']
       .map(extract).join('\n') +
-    '\nreturn { REPORT_GROUPS, coPersonName, resolveRecipientsForTask,' +
+    '\nreturn { REPORT_GROUP_KEYS, coPersonName, resolveRecipientsForTask,' +
     ' buildRecipientMap, routedMailPlan, routedTestBannerHtml,' +
     ' routedWeeklySubject, setCoPeople: function(v){ coPeopleCache = v; } };')();
 } catch (e) {
@@ -82,6 +83,11 @@ try {
 }
 
 const OWNER = { name: 'Теодор Тенев', email: 't.tenev@temax.bg' };
+/* Членовете на групите — от users.notify_groups (18.09.2026), не от кода. */
+const USERS = [
+  { email: OWNER.email, display_name: OWNER.name, notify_groups: ['owner'] },
+  { email: 'm.pavlova@temax.bg', display_name: 'Миглена Павлова', notify_groups: ['controlling'] }
+];
 
 (function () {
 
@@ -140,7 +146,7 @@ const OWNER = { name: 'Теодор Тенев', email: 't.tenev@temax.bg' };
       { id: 't-2', kind: 'regular', title: 'Ревизия', report_groups: ['user:k.ivanova@temax.bg'] },
       { id: 't-3', kind: 'regular', title: 'Отчет',   report_groups: ['owner'] }
     ];
-    const map = M.buildRecipientMap(tasks, [], {});
+    const map = M.buildRecipientMap(tasks, USERS, {});
     const plan = M.routedMailPlan(map);
 
     ok('двама получатели, не трима', plan.length === 2,
@@ -157,16 +163,17 @@ const OWNER = { name: 'Теодор Тенев', email: 't.tenev@temax.bg' };
     ok('и излиза с ИМЕТО си, не с имейла',
       !!co && co.name === 'Красимира Иванова', co && co.name);
 
-    /* Ядрото на правилото в реален вид: човек, който е в REPORT_GROUPS, но
-       не е отметнат на НИТО ЕДНА задача тази седмица, изобщо не се появява. */
-    const notAddressed = M.REPORT_GROUPS.controlling.people[0].email;
+    /* Ядрото на правилото в реален вид: човек, който е в група
+       (notify_groups), но групата му не е отметната на НИТО ЕДНА задача тази
+       седмица, изобщо не се появява. */
+    const notAddressed = 'm.pavlova@temax.bg';
     ok('човек, неотметнат на нито една задача, не е в плана',
       plan.every(p => p.email !== notAddressed), notAddressed);
     ok('и го няма дори в картата', !map[notAddressed]);
 
     /* Нула маршрутизирани задачи → нула писма, не едно празно до всеки. */
     ok('без задачи изобщо няма получатели',
-      M.routedMailPlan(M.buildRecipientMap([], [], {})).length === 0);
+      M.routedMailPlan(M.buildRecipientMap([], USERS, {})).length === 0);
   }
 
   section('4. Обработчикът минава ПРЕЗ routedMailPlan, не покрай него');
