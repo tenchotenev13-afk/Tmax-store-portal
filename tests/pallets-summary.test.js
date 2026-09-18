@@ -349,6 +349,15 @@ function coverage(doc) {
         transport_pallets: [palletRow('Враца', daysAgo(1), [10, 2, 1, 3, 4])]
       }
     });
+    /* Сряда по обед — извън прозореца пт 17:00 – нд 23:59, иначе бутонът
+       „Запази" зависи от деня, в който тече тестът (pallets-drop-lock.test.js). */
+    {
+      const Real = h.w.Date, fixedMs = new Real(2026, 8, 16, 12, 0).getTime();
+      h.w.Date = class extends Real {
+        constructor(...a) { if (a.length === 0) super(fixedMs); else super(...a); }
+        static now() { return fixedMs; }
+      };
+    }
     if (guard('loadPallets() за магазин не хвърля', () => h.w.loadPallets())) {
       await ticks();
       const html = modHtml(h.doc);

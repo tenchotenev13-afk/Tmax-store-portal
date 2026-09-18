@@ -1230,7 +1230,7 @@ var adminReportBusy = {};           /* 'test:daily' / 'send:weekly' → true, д
 var ADMIN_REPORTS = [
   { kind: 'daily',     label: '📋 Дневен',   schedule: 'всеки ден 21:00', test: 'sendDailyReportTest',     send: 'sendDailyReportToRecipients' },
   { kind: 'weekly',    label: '📊 Седмичен', schedule: 'неделя 21:00',    test: 'sendWeeklyReportTest',    send: 'sendWeeklyReportToRecipients' },
-  { kind: 'pallets',   label: '🟫 Палети',   schedule: 'петък 21:00',     test: 'sendPalletsReportTest',   send: null },
+  { kind: 'pallets',   label: '🟫 Палети',   schedule: 'петък 18:00',     test: 'sendPalletsReportTest',   send: null },
   { kind: 'warehouse', label: '📦 Склад',    schedule: 'неделя 21:00',    test: 'sendWarehouseReportTest', send: null }
 ];
 

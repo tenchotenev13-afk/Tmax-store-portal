@@ -1,4 +1,4 @@
-/* ОТЧЕТ „ПАЛЕТИ ЗА ПРИБИРАНЕ" — петък 21:00, по обект.
+/* ОТЧЕТ „ПАЛЕТИ ЗА ПРИБИРАНЕ" — петък 18:00, по обект.
 
    collectPalletsReportData(scope, cb) + reportPalletsHtml(data) +
    reportPalletsSubject(reportDate) + reportPalletsRecipients(recipients, users),
@@ -23,7 +23,7 @@
    Известия → „📧 Общи отчети" (до 15.09.2026 — лента в таб „Днес") и нула
    заявки към report_snapshots.
 
-   Часовникът е замразен в петък 18.09.2026 21:00 — момента на крона.
+   Часовникът е замразен в петък 18.09.2026 18:00 — момента на крона.
 
    Пускане:  node tests/pallets-report.test.js .
 */
@@ -84,7 +84,7 @@ function env(modules) {
     user: ADMIN,
     data: { users: ALL_USERS, transport_pallets: PALLETS, report_snapshots: [] }
   });
-  freezeAt(h.w, DAY + 'T21:00:00');
+  freezeAt(h.w, DAY + 'T18:00:00');
   return h;
 }
 const collect = (h, scope) => new Promise(res => { h.w.collectPalletsReportData(scope, res); });
@@ -178,7 +178,7 @@ const names = arr => (arr || []).map(x => x.store);
       data: { users: ALL_USERS, report_snapshots: [],
               transport_pallets: PALLETS.filter(p => !(p.store_name === 'Троян' && p.report_date === SUN)) }
     });
-    freezeAt(h.w, DAY + 'T21:00:00');
+    freezeAt(h.w, DAY + 'T18:00:00');
     const d = await collect(h, SCOPE);
     const tr = d.missing.find(x => x.store === 'Троян') || {};
     ok('Троян е непопълнил с реда от миналия петък', !!tr.last && tr.last.reportDate === PREV,
@@ -289,7 +289,7 @@ const names = arr => (arr || []).map(x => x.store);
     const btn = row && Array.from(row.querySelectorAll('button'))
       .find(b => b.textContent.trim() === 'Тест до мен');
     if (ok('редът „Палети" има бутон „Тест до мен"', !!btn)) {
-      ok('разписанието е петък 21:00', row.textContent.indexOf('петък 21:00') >= 0, row.textContent);
+      ok('разписанието е петък 18:00', row.textContent.indexOf('петък 18:00') >= 0, row.textContent);
       ok('без „Изпрати сега" (ръчен път до получателите няма)', row.textContent.indexOf('Изпрати сега') < 0);
       realClick(h.w, btn, 'Палети: Тест до мен');
       await ticks(); await ticks();

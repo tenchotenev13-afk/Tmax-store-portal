@@ -1,6 +1,19 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v38 (18.09.2026) — „Палети за прибиране" сравнява с предходното подаване:
+     · collectPalletsReportData: за всеки попълнил prev (най-новият ред
+       отпреди понеделника) и delta по тип и общо; без prev — без делти;
+     · по-старите редове — само 56 дни преди понеделника (вместо цялата
+       история с limit=1000);
+     · праг app_settings 'pallets_drop_threshold' (липсва/невалиден → 10);
+       drops = всеки тип с delta <= −праг, най-големият спад най-отгоре;
+     · reportPalletsHtml: секция „⚠️ Спад за проверка (N)" над таблицата
+       (липсва при нула спадове), делта под всяко число и под „Общо",
+       сив ред с обяснение под таблицата. sent_note не се парсва.
+     · кронът за {"type":"pallets"} е вече петък 18:00 (сменен в базата);
+       формата на обекта се затваря в петък 17:00 (pallets.js).
+
    v37 (13.09.2026) — само текстове, данните не са пипани:
      · дневният: под „Непоправени от по-рано" сив ред с обяснение какво са;
      · седмичният: сторно картите са „въведени" (total), „върнати за
@@ -2898,29 +2911,41 @@ function buildWeeklyReportHtml(data){
 
 /* ═══════ ПАЛЕТИ ЗА ПРИБИРАНЕ ═══════════════════════════════
    Петъчен отчет по обект: колко празни палети чакат, за да се организира
-   транспортът към складовете. Кронът го пуска в петък 21:00 с body
+   транспортът към складовете. Кронът го пуска в петък 18:00 с body
    {"type":"pallets"}; обектите попълват transport_pallets по един ред за
-   петъка (pallets.js).
+   петъка (pallets.js), а формата се затваря в петък 17:00.
 
    Отчетен ден = reportDailyTargetDate(new Date()). „Попълнил" = най-новият
    ред на обекта с report_date от понеделника на същата седмица до отчетния
    ден (обект, попълнил в четвъртък, е попълнил). Непопълнил обект се
    показва със сивия си последен ред отпреди понеделника (ако има).
    Редът „Общо" събира САМО попълнените за седмицата: старите числа са за
-   ориентир, не за транспорта. Без snapshot и без тенденция.
+   ориентир, не за транспорта. Без snapshot.
 
-   По-старите редове се теглят с order=report_date.desc: таванът на
-   PostgREST (1000) реже НАЙ-СТАРИТЕ, а за всеки обект трябва най-новият. */
+   Сравнение: за всеки попълнил prev = най-новият му ред отпреди
+   понеделника (същият lastRows, от който идват сивите редове) и delta по
+   тип и общо; без prev — без делти. drops = всеки тип с delta <= −праг
+   (app_settings 'pallets_drop_threshold', липсва/невалиден → 10), най-големият
+   спад най-отгоре. sent_note НЕ се парсва — само се показва до спада.
+
+   По-старите редове се теглят само за 56 дни преди понеделника и с
+   order=report_date.desc: таванът на PostgREST (1000) реже НАЙ-СТАРИТЕ, а
+   за всеки обект трябва най-новият. Обект без ред в тези 8 седмици остава
+   само в „не са попълнили", без сив ред. */
 function collectPalletsReportData(scope, cb){
   var reportDay = reportDailyTargetDate(new Date());
   var dayISO = toLocalISO(reportDay);
   var monISO = toLocalISO(reportMondayOfWeek(reportDay));
   var cols = ['euro_pallets','small_pallets','nonstandard_pallets','grate_pallets','bilka_pallets'];
   var sel = 'select=store_name,report_date,' + cols.join(',') + ',sent_note,updated_at';
+  var oldFrom = reportMondayOfWeek(reportDay);
+  oldFrom.setDate(oldFrom.getDate() - 56);
+  var oldISO = toLocalISO(oldFrom);
   Promise.all([
     sbGet('users','select=store_name&order=store_name'),
     sbGet('transport_pallets', sel + '&report_date=gte.' + monISO + '&report_date=lte.' + dayISO + '&order=report_date.desc'),
-    sbGet('transport_pallets', sel + '&report_date=lt.' + monISO + '&order=report_date.desc&limit=1000')
+    sbGet('transport_pallets', sel + '&report_date=gte.' + oldISO + '&report_date=lt.' + monISO + '&order=report_date.desc'),
+    sbGet('app_settings','key=eq.pallets_drop_threshold&select=key,value&limit=1')
   ]).then(function(r){
     var users = Array.isArray(r[0]) ? r[0] : [];
     var seen = {};
@@ -2942,20 +2967,38 @@ function collectPalletsReportData(scope, cb){
       if (x && x.report_date && x.report_date >= monISO && x.report_date <= dayISO) keepNewest(weekRows, x);
     });
     (Array.isArray(r[2]) ? r[2] : []).forEach(function(x){
-      if (x && x.report_date && x.report_date < monISO) keepNewest(lastRows, x);
+      if (x && x.report_date && x.report_date >= oldISO && x.report_date < monISO) keepNewest(lastRows, x);
     });
+
+    /* Прагът — същият път като storno_small_threshold. */
+    var thRow = (Array.isArray(r[3]) ? r[3] : []).find(function(x){ return x && x.key === 'pallets_drop_threshold'; });
+    var thRaw = thRow && thRow.value != null ? String(thRow.value).trim().replace(',', '.') : '';
+    var thNum = thRaw ? Number(thRaw) : NaN;
+    var threshold = Number.isFinite(thNum) && thNum > 0 ? thNum : 10;
 
     var rowOf = function(store, x){
       var out = { store: store, reportDate: x.report_date, note: x.sent_note || '', total: 0 };
       cols.forEach(function(c){ var v = Number(x[c]) || 0; out[c] = v; out.total += v; });
       return out;
     };
-    var filled = [], missing = [];
+    var filled = [], missing = [], drops = [];
     var totals = { total: 0 };
     cols.forEach(function(c){ totals[c] = 0; });
     stores.forEach(function(s){
       if (weekRows[s]) {
         var row = rowOf(s, weekRows[s]);
+        row.prev = lastRows[s] ? rowOf(s, lastRows[s]) : null;
+        row.delta = null;
+        if (row.prev) {
+          row.delta = { total: row.total - row.prev.total };
+          cols.forEach(function(c){
+            row.delta[c] = row[c] - row.prev[c];
+            if (row.delta[c] <= -threshold) {
+              drops.push({ store: s, type: c, prev: row.prev[c], cur: row[c], delta: row.delta[c],
+                           prevDate: row.prev.reportDate, note: row.note });
+            }
+          });
+        }
         filled.push(row);
         cols.forEach(function(c){ totals[c] += row[c]; });
         totals.total += row.total;
@@ -2967,9 +3010,13 @@ function collectPalletsReportData(scope, cb){
       return b.total - a.total || String(a.store).localeCompare(String(b.store));
     });
     missing.sort(function(a,b){ return String(a.store).localeCompare(String(b.store)); });
+    drops.sort(function(a,b){
+      return a.delta - b.delta || String(a.store).localeCompare(String(b.store)) ||
+        cols.indexOf(a.type) - cols.indexOf(b.type);
+    });
 
     cb({ reportDate: dayISO, storeCount: stores.length, filled: filled, missing: missing,
-         totals: totals, scoped: !!(scope && scope.length) });
+         totals: totals, threshold: threshold, drops: drops, scoped: !!(scope && scope.length) });
   }).catch(function(){ cb(null); });
 }
 
@@ -2983,7 +3030,20 @@ function reportPalletsHtml(data){
   var cols = ['euro_pallets','small_pallets','nonstandard_pallets','grate_pallets','bilka_pallets'];
   var filled = (data && data.filled) || [];
   var missing = (data && data.missing) || [];
+  var drops = (data && data.drops) || [];
+  var thr = (data && data.threshold) || 10;
   var tot = (data && data.totals) || {};
+  var colName = { euro_pallets:'Евро', small_pallets:'Малки', nonstandard_pallets:'Нестанд.',
+                  grate_pallets:'Скари', bilka_pallets:'Билка' };
+  var signed = function(n){ return (n > 0 ? '+' : '−') + Math.abs(n); };
+  /* Малкият ред под числото: спад >= прага — червено и удебелено, друга
+     промяна — сиво, 0 или без prev — нищо. */
+  var deltaLine = function(n){
+    if (n == null || n === 0) return '';
+    var red = n <= -thr;
+    return '<div style="font-size:10px;line-height:1.2;color:' + (red ? '#dc2626' : '#94a3b8') + ';' +
+      (red ? 'font-weight:700;' : 'font-weight:400;') + '">' + signed(n) + '</div>';
+  };
   var th = function(t, right){
     return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:'+(right?'right':'left')+';border-bottom:2px solid #e2e8f0;">'+t+'</th>';
   };
@@ -2998,6 +3058,18 @@ function reportPalletsHtml(data){
       esc(missing.map(function(m){ return m.store; }).join(', ')) + '</div>';
   }
 
+  if (drops.length) {
+    body += '<div style="margin:0 0 12px;padding:8px 10px;border:1px solid #fecaca;background:#fef2f2;border-radius:6px;">' +
+      '<div style="font-size:13px;font-weight:700;color:#b91c1c;margin-bottom:4px;">⚠️ Спад за проверка (' + drops.length + ')</div>' +
+      drops.map(function(x){
+        return '<div style="font-size:12px;color:#1f2937;padding:2px 0;">' + esc(x.store) + ' · ' +
+          esc(colName[x.type] || x.type) + ' · ' + x.prev + ' → ' + x.cur +
+          ' <b style="color:#dc2626;">(' + signed(x.delta) + ')</b> · спрямо ' + esc(reportDM(x.prevDate)) + ' · ' +
+          (x.note ? '<span style="color:#475569;">' + esc(x.note) + '</span>'
+                  : '<span style="color:#dc2626;font-weight:600;">без бележка</span>') + '</div>';
+      }).join('') + '</div>';
+  }
+
   var dayShort = ['пн','вт','ср','чт','пт','сб','нд'];
   var rows = filled.map(function(x){
     /* Датата — само ако редът е от друг ден на седмицата, не от отчетния. */
@@ -3006,8 +3078,8 @@ function reportPalletsHtml(data){
         dayShort[reportWeekdayIdx(new Date(x.reportDate+'T00:00:00'))] + ' ' + esc(reportDM(x.reportDate)) + ')</span>'
       : '';
     return '<tr>' + td(reportStoreLinkHtml(x.store, '#1E2761') + when, '#1E2761') +
-      cols.map(function(c){ return td(String(x[c]), '#1f2937', true); }).join('') +
-      td(String(x.total), '#1E2761', true, true) + td(esc(x.note), '#475569') + '</tr>';
+      cols.map(function(c){ return td(String(x[c]) + deltaLine(x.delta && x.delta[c]), '#1f2937', true); }).join('') +
+      td(String(x.total) + deltaLine(x.delta && x.delta.total), '#1E2761', true, true) + td(esc(x.note), '#475569') + '</tr>';
   }).join('');
   /* Сивите — последният ред на непопълнилите, с датата му. */
   rows += missing.filter(function(m){ return !!m.last; }).map(function(m){
@@ -3025,7 +3097,9 @@ function reportPalletsHtml(data){
       '<tr style="background:#f8fafc;">' + td('Общо', '#1E2761', false, true) +
       cols.map(function(c){ return td(String(tot[c] || 0), '#1E2761', true, true); }).join('') +
       td(String(tot.total || 0), '#1E2761', true, true) + td('', '#1E2761') + '</tr>' +
-      '</table></div>';
+      '</table></div>' +
+      '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Сравнението е спрямо предходното подаване на обекта. ' +
+      'Червено = спад от ' + thr + ' или повече палета от един тип.</div>';
   } else {
     body += '<div style="font-size:12px;color:#94a3b8;">Няма данни за палети.</div>';
   }

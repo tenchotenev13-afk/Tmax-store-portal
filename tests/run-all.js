@@ -101,6 +101,7 @@ const TESTS = [
   'report-kasa-section.test.js',
   'daily-kasa-backlog.test.js',
   'pallets-report.test.js',
+  'pallets-drop-lock.test.js',
   'weekly-small-storno.test.js',
   'weekly-checklist-section.test.js',
   'warehouse-report.test.js',

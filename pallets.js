@@ -130,11 +130,22 @@ function renderPalletsAdmin(storeNames,latestByStore){
 /* ═══════════════════════════════════════════════════════════════
    МАГАЗИНСКИ ИЗГЛЕД — форма за въвеждане + история
 ══════════════════════════════════════════════════════════════ */
+/* Подаването е затворено от петък 17:00 до неделя 23:59 по часовника на
+   устройството — отчетът тръгва в петък 18:00 и сравнява с предходното
+   подаване, затова числата не бива да се менят след него. */
+var PALLETS_LOCKED_MSG='Подаването за седмицата е затворено в петък 17:00. Отваря се отново в понеделник.';
+function palletsIsLocked(now){
+  var d=now||new Date();
+  var wd=d.getDay();
+  return wd===6||wd===0||(wd===5&&d.getHours()>=17);
+}
+
 function renderPalletsStore(){
   var wrap=document.getElementById('mod-pallets');if(!wrap)return;
   var latest=palletsData.length?palletsData[0]:null;
   var todays=palletsData.find(function(r){return r.report_date===today();})||null;
   var r=todays||{};
+  var locked=palletsIsLocked(new Date());
 
   function numField(id,val){
     return '<input type="number" min="0" class="fi" id="'+id+'" value="'+(val||0)+'" style="text-align:center;">';
@@ -142,13 +153,12 @@ function renderPalletsStore(){
 
   var html='<div class="page">'+
     '<div class="pg-title">📦 Палети</div>'+
-    '<div class="pg-sub">'+esc(currentUser.store_name)+' — наличности на празни палети (попълва се всеки петък)</div>'+
+    '<div class="pg-sub">'+esc(currentUser.store_name)+' — наличности на празни палети (попълва се до петък 17:00)</div>'+
 
     '<div class="card" style="margin-bottom:14px;">'+
       '<div class="card-title">Въведи наличности</div>'+
-      '<div class="form-grid" style="grid-template-columns:1fr 1fr;margin-bottom:10px;">'+
-        '<div><label class="fl">Дата</label><input type="date" class="fi" id="pf-date" value="'+(r.report_date||today())+'"></div>'+
-      '</div>'+
+      /* Датата е винаги днешната — без поле, за да не се пренаписва минала седмица. */
+      '<div style="font-size:13px;color:var(--muted);margin-bottom:10px;">Дата: <b id="pf-date-text">'+fmtDate(today())+'</b></div>'+
       '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px;">'+
         PALLET_TYPES.map(function(t){
           return '<div><label class="fl">'+t.label+'</label>'+numField('pf-'+t.key,r[t.key])+'</div>';
@@ -156,7 +166,9 @@ function renderPalletsStore(){
       '</div>'+
       '<label class="fl">Изпратени с камион (ако вече има изпратени палети)</label>'+
       '<input class="fi" id="pf-sent_note" value="'+escVal(r.sent_note)+'" placeholder="напр. 20 европалета изпратени на 05.08 към ЦО">'+
-      '<div style="margin-top:14px;"><button class="btn btn-green" onclick="submitPalletsForm()">💾 Запази</button></div>'+
+      (locked
+        ?'<div id="pf-locked" style="margin-top:14px;padding:10px 12px;border-radius:8px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:13px;font-weight:600;">🔒 '+PALLETS_LOCKED_MSG+'</div>'
+        :'<div style="margin-top:14px;"><button class="btn btn-green" onclick="submitPalletsForm()">💾 Запази</button></div>')+
     '</div>'+
 
     (latest?
@@ -192,7 +204,9 @@ function renderPalletsStore(){
 
 /* ─── SUBMIT ────────────────────────────────────────────────── */
 function submitPalletsForm(){
-  var date=(document.getElementById('pf-date')||{}).value||today();
+  /* Таб, отворен преди 17:00, още показва бутона — проверката е и тук. */
+  if(palletsIsLocked(new Date())){toast(PALLETS_LOCKED_MSG,'#dc2626');return;}
+  var date=today();
   var p={
     store_name:currentUser.store_name,
     report_date:date,

@@ -98,7 +98,7 @@ const sendBtns = h => Array.prototype.filter.call(h.doc.querySelectorAll('#notif
       'Кой получава известията за задачи — матрицата по-горе. Кой получава общите отчети — този списък.',
       note && note.textContent);
     const expect = { daily: ['Дневен', 'всеки ден 21:00', '2'], weekly: ['Седмичен', 'неделя 21:00', '2'],
-                     pallets: ['Палети', 'петък 21:00', '3'], warehouse: ['Склад', 'неделя 21:00', '2'] };
+                     pallets: ['Палети', 'петък 18:00', '3'], warehouse: ['Склад', 'неделя 21:00', '2'] };
     Object.keys(expect).forEach(function (k) {
       const row = h.doc.getElementById('report-row-' + k);
       if (ok('ред „' + expect[k][0] + '"', !!row)) {
