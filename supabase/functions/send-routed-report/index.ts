@@ -1,5 +1,41 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v11 (19.09.2026) — деплой с ЕДНО нещо: отчет по задача и за ПОСТОЯННА
+   задача (recurring_tasks). Само режим task_report; седмичният е непроменен.
+
+   МОДЕЛЪТ — без нова колона. notification_schedules остава
+   entity_type='task_report', entity_id сочи ИЛИ bulletin_tasks.id, ИЛИ
+   recurring_tasks.id; разграничението е в коя таблица е id-то. Защо така, а
+   не entity_kind: и двете id-та са uuid с default gen_random_uuid() (на
+   19.09.2026: 0 общи стойности), тоест id-то само по себе си еднозначно
+   казва коя е задачата; търсенето е по първичен ключ — една допълнителна
+   индексирана заявка и то САМО когато задачата не е обикновена. Колона би
+   значела миграция, промяна в огледалото (Живко) и второ място, което може
+   да се размине с id-то (entity_kind='recurring' за id от bulletin_tasks) —
+   нов клас грешка срещу нула спечелена яснота. dynamic-responder прави
+   същото в publicationScheduleGate.
+
+   collectTaskReportData: id-то първо в bulletin_tasks (поведението до v10,
+   прозорецът е бюлетинът); няма ли го — collectRecurringTaskReportData():
+     · прозорецът е СЕДМИЦАТА на run_date (reportMondayOfWeek →
+       reportWeekOfMonday → weekDays), не бюлетин — постоянната задача няма
+       бюлетин;
+     · изтрита → skipped „задачата не е намерена" (както досега); не важи за
+       седмицата (recurring_task_periods, без период — по active; същото като
+       recurringTasksForWeek в седмичния отчет) → skipped; изключена за
+       седмицата за всички (recurring_task_skips) → skipped, за отделни обекти
+       → skip_stores (както v3); „Само за информация" → skipped;
+     · явяванията — reportRecurringWeekDates(); нито едно в седмицата →
+       skipped „задачата не е дължима тази седмица" + console.warn;
+     · task_completions по recurring_task_id за седмицата (+ postponed_to в
+       нея), kind='recurring' → картичката носи 🔁 пред заглавието, както в
+       седмичния отчет;
+     · секцията „Зареждане" (v10) чете linked_module от recurring_tasks, а
+       week_start е понеделникът на същия прозорец.
+   Заявките за отметките и хората са изнесени в taskReportCompsAndPeople() —
+   една и съща за двата вида, различава се само колоната (task_id /
+   recurring_task_id).
+
    v10 (19.09.2026) — деплой с ЕДНО нещо: секция „Зареждане" в отчета по
    задача. Само в режим task_report и само когато bulletin_tasks.linked_module
    е 'supply': под картичката се добавя supplyReportSectionHtml() — бланките
@@ -1048,10 +1084,11 @@ function routedTaskReportRecipients(task, recipients, groupUsers, idUsers, warni
 /* Данните за картичката. {missing} — задачата я няма; {draft} — бюлетинът
    ѝ не е публикуван; иначе задачата с прозореца на нейния бюлетин,
    отметките в него (плюс пренесените в него), обектите и хората. */
-async function collectTaskReportData(taskId, recipients){
+async function collectTaskReportData(taskId, recipients, runDate){
   var tr: any = await sbGet('bulletin_tasks', 'id=eq.' + encodeURIComponent(taskId) + '&limit=1');
   var t: any = Array.isArray(tr) && tr.length ? tr[0] : null;
-  if (!t) return { missing:true };
+  /* Не е обикновена → постоянна (v11). Няма я и там → missing, както досега. */
+  if (!t) return await collectRecurringTaskReportData(taskId, recipients, runDate);
   var br: any = await sbGet('bulletins', 'id=eq.' + t.bulletin_id + '&select=id,status,week_number,year&limit=1');
   var bul: any = Array.isArray(br) && br.length ? br[0] : null;
   if (!bul || bul.status !== 'published') return { draft:true, task:t };
@@ -1060,11 +1097,20 @@ async function collectTaskReportData(taskId, recipients){
   var win = reportRoutedTaskWindow(t, wkDates, bul) || { date:null, dateFrom:wkDates[0], dateTo:wkDates[6] };
   t.date = win.date; t.dateFrom = win.dateFrom; t.dateTo = win.dateTo;
   t.weekFrom = wkDates[0]; t.weekTo = wkDates[6];
+  var cp: any = await taskReportCompsAndPeople(t, wkDates, recipients);
+  return { task:t, bul:bul, comps:cp.comps, stores:cp.stores, groupUsers:cp.groupUsers, idUsers:cp.idUsers };
+}
+/* Отметките на задачата в прозореца (+ пренесените в него) и хората —
+   общо за обикновена и постоянна (v11). Колоната е task_id или
+   recurring_task_id според t.kind; item_id на отметката е същото id. */
+async function taskReportCompsAndPeople(t: any, wkDates: any, recipients: any){
+  var kind = t.kind === 'recurring' ? 'recurring' : 'regular';
+  var col = kind === 'recurring' ? 'recurring_task_id' : 'task_id';
   var ids = (recipients && Array.isArray(recipients.user_ids) ? recipients.user_ids : [])
     .map(function(x: any){ return String(x); }).filter(function(x: any){ return /^[0-9a-f-]{8,}$/i.test(x); });
   var res: any[] = await Promise.all([
-    sbGet('task_completions', 'task_id=eq.' + t.id + '&completion_date=gte.' + wkDates[0] + '&completion_date=lte.' + wkDates[6]),
-    sbGet('task_completions', 'task_id=eq.' + t.id + '&postponed_to=gte.' + wkDates[0] + '&postponed_to=lte.' + wkDates[6]),
+    sbGet('task_completions', col + '=eq.' + t.id + '&completion_date=gte.' + wkDates[0] + '&completion_date=lte.' + wkDates[6]),
+    sbGet('task_completions', col + '=eq.' + t.id + '&postponed_to=gte.' + wkDates[0] + '&postponed_to=lte.' + wkDates[6]),
     sbGet('users', 'select=store_name&order=store_name'),
     sbGet('users', 'active=eq.true&email=not.is.null&select=email,display_name,assigned_stores,is_regional,notify_groups&order=display_name'),
     ids.length ? sbGet('users', 'id=in.(' + ids.join(',') + ')&select=id,email,display_name,active') : Promise.resolve([])
@@ -1073,7 +1119,7 @@ async function collectTaskReportData(taskId, recipients){
   var comps = (Array.isArray(res[0]) ? res[0] : []).concat(Array.isArray(res[1]) ? res[1] : []).filter(function(c: any){
     if (!c.id) return true; if (seenC[c.id]) return false; seenC[c.id] = 1; return true;
   }).map(function(c: any){
-    return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment,
+    return { item_id:c[col], kind:kind, store_name:c.store_name, status:c.status, comment:c.comment,
              photos:c.photos, files:c.files, completion_date:c.completion_date||null, postponed_to:c.postponed_to||null };
   });
   var seenS: any = {};
@@ -1081,13 +1127,50 @@ async function collectTaskReportData(taskId, recipients){
     if (!isReportableStore(u.store_name) || seenS[u.store_name]) return false;
     seenS[u.store_name] = 1; return true;
   }).map(function(u: any){ return u.store_name; });
-  return { task:t, bul:bul, comps:comps, stores:stores,
+  return { comps:comps, stores:stores,
            groupUsers: Array.isArray(res[3]) ? res[3] : [], idUsers: Array.isArray(res[4]) ? res[4] : [] };
+}
+/* Седмицата на run_date като {week_number, year} в номерацията на
+   бюлетините (reportWeekOfMonday — същата, по която са recurring_task_skips).
+   Без валидна дата — седмицата на днес. */
+function taskReportWeekOf(runDate: any){
+  var p = String(runDate || '').slice(0,10).split('-');
+  var d = (p.length === 3 && /^\d{4}$/.test(p[0])) ? new Date(+p[0], +p[1] - 1, +p[2]) : new Date();
+  var wy: any = reportWeekOfMonday(reportMondayOfWeek(d));
+  return wy ? { week_number: wy.week, year: wy.year } : null;
+}
+/* Отчет по ПОСТОЯННА задача (v11) — виж шапката. {missing} / {skipped} /
+   данните за картичката. */
+async function collectRecurringTaskReportData(taskId: any, recipients: any, runDate: any){
+  var rr: any = await sbGet('recurring_tasks', 'id=eq.' + encodeURIComponent(taskId) + '&limit=1');
+  var t: any = Array.isArray(rr) && rr.length ? rr[0] : null;
+  if (!t) return { missing:true };
+  var wk: any = taskReportWeekOf(runDate);
+  if (!wk) return { skipped:'седмицата на отчета не може да се определи', task:t };
+  var wkDates = weekDays(wk.week_number, wk.year).map(toLocalISO);
+  var pre: any[] = await Promise.all([
+    sbGet('recurring_task_periods', 'recurring_task_id=eq.' + t.id + '&select=recurring_task_id,from_monday,to_monday'),
+    sbGet('recurring_task_skips', 'recurring_task_id=eq.' + t.id + '&year=eq.' + wk.year + '&week_number=eq.' + wk.week_number + '&select=recurring_task_id,store_name')
+  ]);
+  if (!recurringTasksForWeek([t], Array.isArray(pre[0]) ? pre[0] : [], wkDates[0]).length) {
+    return { skipped:'постоянната задача не важи за седмицата', task:t };
+  }
+  if (taskIsNotice(t)) return { skipped:'задачата е само за информация', task:t };
+  var skips = Array.isArray(pre[1]) ? pre[1] : [];
+  if (recurringIsSkipped(t.id, null, skips)) return { skipped:'изключена за седмицата (за всички обекти)', task:t };
+  t.kind = 'recurring';
+  t.skip_stores = recurringSkipStores(t.id, skips);
+  var win = reportRoutedTaskWindow(t, wkDates, wk);
+  if (!win) return { skipped:'задачата не е дължима тази седмица', task:t };
+  t.date = win.date; t.dateFrom = win.dateFrom; t.dateTo = win.dateTo;
+  t.weekFrom = wkDates[0]; t.weekTo = wkDates[6];
+  var cp: any = await taskReportCompsAndPeople(t, wkDates, recipients);
+  return { task:t, bul:wk, comps:cp.comps, stores:cp.stores, groupUsers:cp.groupUsers, idUsers:cp.idUsers };
 }
 async function routedTaskReportResponse(body: any, dryRun: boolean, testEmail: any){
   var json = function(o: any, st?: number){ return new Response(JSON.stringify(o), { status: st || 200, headers:{'Content-Type':'application/json'} }); };
   var taskId = String(body.task_id);
-  var data: any = await collectTaskReportData(taskId, body.recipients);
+  var data: any = await collectTaskReportData(taskId, body.recipients, body.run_date);
   if (data.missing) {
     console.warn('send-routed-report: отчет по задача ' + taskId + ' — задачата не е намерена (изтрита?); нищо не е пратено');
     return json({ ok:true, mode:'task_report', task_id:taskId, skipped:'задачата не е намерена', sent:0 });
@@ -1095,6 +1178,11 @@ async function routedTaskReportResponse(body: any, dryRun: boolean, testEmail: a
   if (data.draft) {
     console.warn('send-routed-report: отчет по задача ' + taskId + ' — бюлетинът не е публикуван; нищо не е пратено');
     return json({ ok:true, mode:'task_report', task_id:taskId, skipped:'бюлетинът не е публикуван', sent:0 });
+  }
+  /* Постоянна задача, която не е за тази седмица (v11) — не мълчи. */
+  if (data.skipped) {
+    console.warn('send-routed-report: отчет по постоянна задача „' + ((data.task && data.task.title) || taskId) + '" — ' + data.skipped + '; нищо не е пратено');
+    return json({ ok:true, mode:'task_report', task_id:taskId, kind:'recurring', skipped:data.skipped, sent:0 });
   }
   var t = data.task;
   var warnings: any[] = [];

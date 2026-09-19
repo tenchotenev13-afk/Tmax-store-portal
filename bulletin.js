@@ -2500,6 +2500,8 @@ function openEditRecurringModal(taskId) {
   if (!t) { toast('Задачата не е намерена','#dc2626'); return; }
   var existing = document.getElementById('edit-rec-ov');
   if (existing) existing.remove();
+  trEditTaskId = taskId; trDrafts.erec = [];
+  if (!reportGroupPeopleCache) loadReportGroupPeople();
   var ov = document.createElement('div');
   ov.className = 'bov open';
   ov.id = 'edit-rec-ov';
@@ -2525,6 +2527,7 @@ function openEditRecurringModal(taskId) {
     '<select class="fi" id="erec-stores" multiple size="6" style="height:120px;"></select>' +
     '<label class="fl">Групи за докладване</label>' +
     reportGroupsCheckboxesHtml('erec-report-groups', t.report_groups||[]) +
+    trSectionHtml('erec', t) +
     '<label class="fl">Свързан таб (по избор)</label>' +
     '<select class="fi" id="erec-linked-module">'+linkedModuleOptsHtml(t.linked_module||'')+'</select>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">' +
@@ -2548,6 +2551,8 @@ function submitEditRecurring(taskId) {
   var stores = bulReadStoreMultiSelect('erec-stores');
   var reportGroups = readReportGroupsCheckboxes('erec-report-groups');
   var linkedModule = (document.getElementById('erec-linked-module')||{}).value||null;
+  var trc = trCollect('erec');
+  if (trc.error) { toast(trc.error,'#dc2626'); return; }
   var cur = recurringTasks.find(function(x){ return String(x.id)===String(taskId); });
   var dept = (document.getElementById('erec-dept')||{}).value || (cur&&cur.department) || DCOLS[0];
   var payload = {title:title,description:desc,department:dept,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_window:readRecWindow('erec-window','erec-weekdays'),due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null};
@@ -2563,10 +2568,13 @@ function submitEditRecurring(taskId) {
   }
   sbPatch('recurring_tasks','id=eq.'+taskId,payload).then(function(r){
     if (!r.ok) { toast('Грешка при запис','#dc2626'); return; }
-    var el = document.getElementById('edit-rec-ov');
-    if (el) el.remove();
-    toast('✅ Задачата е обновена!');
-    bulFetchRecurring().then(renderBulletin);
+    return trSaveReports(taskId, trc.list).then(function(okRep){
+      var el = document.getElementById('edit-rec-ov');
+      if (el) el.remove();
+      trDrafts.erec = [];
+      if (okRep) toast('✅ Задачата е обновена!'+(trc.list.length?' Насрочени отчети: '+trc.list.length:''));
+      bulFetchRecurring().then(function(){ renderBulletin(); if (trc.list.length) bulLoadTaskReports(); });
+    });
   });
 }
 
@@ -2613,9 +2621,13 @@ function bulConfirmUnpublished(){ return bulIsPublished() || confirm('Бюлет
    Изпраща dynamic-responder → send-routed-report (една картичка) в часа;
    чернова към часа → нищо не тръгва (публикационният гейт там).
    Членовете на групите се решават В МОМЕНТА на изпращането — тук се пазят
-   само ключовете. Авторът е отметнат по подразбиране. */
-var bulTaskReports = [];   /* редовете за задачите на curBul (само canEdit) */
-var trDrafts = {};         /* 'tk' | 'etk' → [{date,time,groups,user_ids}] още незаписани */
+   само ключовете. Авторът е отметнат по подразбиране.
+   От 19.09.2026 и за ПОСТОЯННА задача (prefix 'erec' — редакцията ѝ):
+   entity_id е recurring_tasks.id, без нова колона; send-routed-report (v11)
+   различава по таблицата, в която е id-то, и взима за прозорец седмицата на
+   избрания ден, не бюлетина. */
+var bulTaskReports = [];   /* редовете за задачите на curBul и постоянните (само canEdit) */
+var trDrafts = {};         /* 'tk' | 'etk' | 'erec' → [{date,time,groups,user_ids}] още незаписани */
 
 function trPad(n){ return String(n).padStart(2,'0'); }
 /* По подразбиране: последният ден от срока в 18:00; без срок — сега + 1 ч,
@@ -2661,8 +2673,9 @@ function trRowsForTask(taskId){
    обектите не ги виждат. Пренарисува, щом дойдат (както bulLoadTransitPending). */
 function bulLoadTaskReports(){
   bulTaskReports = [];
-  if (!canEdit() || !bulTasks.length) return;
-  var ids = bulTasks.map(function(t){ return t.id; }).join(',');
+  var all = bulTasks.concat(Array.isArray(recurringTasks) ? recurringTasks : []);
+  if (!canEdit() || !all.length) return;
+  var ids = all.map(function(t){ return t.id; }).join(',');
   sbGet('notification_schedules','entity_type=eq.task_report&entity_id=in.('+ids+')&active=eq.true&select=id,entity_id,scheduled_date,scheduled_time,target_recipients,last_sent_at,created_by').then(function(rows){
     if (!Array.isArray(rows) || !rows.length) return;
     bulTaskReports = rows;
@@ -2691,6 +2704,7 @@ function trDeleteReport(id){
     toast('✅ Отчетът е махнат');
     renderBulletin();
     trRefreshSection('etk');
+    trRefreshSection('erec');
   });
 }
 /* Секцията във формата. prefix 'tk' (нова) или 'etk' (редакция). */
@@ -2702,7 +2716,9 @@ function trSectionHtml(prefix, task){
       '<button type="button" class="tr-open" data-prefix="'+prefix+'" onclick="trToggleEditor(this.dataset.prefix)" style="border:1px solid #bae6fd;background:#fff;color:#0369a1;border-radius:5px;padding:2px 9px;font-size:11px;cursor:pointer;">+ Насрочи</button>' +
     '</div>' +
     '<div style="font-size:10.5px;color:#64748b;margin-top:3px;">Картичка с изпълнилите / неизпълнилите, коментарите и файловете — до избраните, в избрания час.' +
-      (bulIsPublished() ? '' : ' <b style="color:#b45309;">Бюлетинът е чернова — отчетът тръгва само ако е публикуван към часа.</b>') + '</div>' +
+      (prefix==='erec'
+        ? ' За постоянна задача — седмицата на избрания ден; ако задачата не е дължима тогава, отчет не тръгва.'
+        : (bulIsPublished() ? '' : ' <b style="color:#b45309;">Бюлетинът е чернова — отчетът тръгва само ако е публикуван към часа.</b>')) + '</div>' +
     '<div id="'+prefix+'-tr-list">'+trListHtml(prefix, existing)+'</div>' +
     '<div id="'+prefix+'-tr-editor" hidden></div>' +
     '</div>';
@@ -2724,7 +2740,7 @@ function trListHtml(prefix, existing){
 function trRefreshSection(prefix){
   var el = document.getElementById(prefix+'-tr-list');
   if (!el) return;
-  var tid = prefix==='etk' ? trEditTaskId : null;
+  var tid = (prefix==='etk'||prefix==='erec') ? trEditTaskId : null;
   el.innerHTML = trListHtml(prefix, tid ? trRowsForTask(tid) : []);
 }
 var trEditTaskId = null;
@@ -2756,7 +2772,8 @@ function trToggleEditor(prefix){
   var ed = document.getElementById(prefix+'-tr-editor');
   if (!ed) return;
   if (ed.hidden) {
-    var task = prefix==='etk' ? bulTasks.find(function(x){ return String(x.id)===String(trEditTaskId); }) : null;
+    var task = prefix==='etk' ? bulTasks.find(function(x){ return String(x.id)===String(trEditTaskId); })
+      : prefix==='erec' ? recurringTasks.find(function(x){ return String(x.id)===String(trEditTaskId); }) : null;
     ed.innerHTML = trEditorHtml(prefix, task);
     ed.hidden = false;
   } else { ed.hidden = true; ed.innerHTML = ''; }
@@ -4411,6 +4428,7 @@ function renderRecurringTasks(dk) {
       if(isGlobal()&&t.target_stores&&t.target_stores.length)h+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🏬 Само за: '+t.target_stores.map(esc).join(', ')+'</div>';
       if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))h+=renderCompletionExtras(compObj);
       h += renderRecurringAttachments(t);
+      h += trTaskReportsListHtml(t);
       h += '</div>';
       var showBtns='';
       if(!isGlobal()&&!isMultiRec&&!done&&!skipView&&!isNotice){

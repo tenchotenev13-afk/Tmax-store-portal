@@ -22,7 +22,11 @@
      7. под задачата в блока — списъкът с ✕ за админ, нищо за обекта;
      8. чернова: предупреждение в секцията, редът пак се записва (гейтът е
         при изпращането);
-     9. без отворена секция задачата се записва както преди — без ред.
+     9. без отворена секция задачата се записва както преди — без ред;
+    10. ПОСТОЯННА задача (19.09.2026): реален клик ✏️ в блока → секцията е
+        в редакцията; „Запази" → PATCH на recurring_tasks и ред с
+        entity_id=recurring_tasks.id; заварените ѝ отчети — в списъка и под
+        задачата в блока, ✕ трие точно реда; без чернова-предупреждение.
 
    Пускане: node tests/task-report-schedule.test.js . */
 'use strict';
@@ -66,7 +70,7 @@ function env(opts) {
     user: opts.user || ADMIN,
     fail: opts.fail,
     data: {
-      users: USERS, recurring_tasks: [], recurring_task_periods: [], recurring_task_skips: [],
+      users: USERS, recurring_tasks: opts.recurring || [], recurring_task_periods: opts.periods || [], recurring_task_skips: [],
       bulletins: () => [h.bul], bulletin_tasks: () => db.tasks, task_completions: [],
       subtask_completions: [], task_subtasks: [], bulletin_promotions: [],
       notification_schedules: url => db.reports.filter(r => url.indexOf('entity_type=eq.task_report') >= 0)
@@ -349,6 +353,81 @@ const submitNew = h => realClick(h.w, H.btnExact($(h, 'tk-ov'), 'Добави з
       h.w.trDrafts.tk = [{ date: FRI, time: '12:00', groups: ['co'], user_ids: [] }];
       h.w.openTaskModalForDept('admin');
       ok('нова форма → без стари чернови', h.doc.querySelectorAll('#tk-tr-list .tr-draft').length === 0);
+    }
+  }
+
+  section('10. Постоянна задача: ✏️ → секцията; запис → ред с id-то на постоянната');
+  {
+    const RT = { id: 'r-zar', title: 'ЗАРЕЖДАНЕ', department: 'admin', task_type: 'check', active: true, sort_order: 1,
+                 due_weekdays: [4], due_weekday: 4, due_time: null, report_groups: null, target_stores: null,
+                 linked_module: 'supply', created_by: 'Миглена Павлова' };
+    const PER = [{ recurring_task_id: 'r-zar', from_monday: '2020-01-06', to_monday: null }];
+    const R = { id: 'n-rec', entity_type: 'task_report', entity_id: 'r-zar', schedule_type: 'once', scheduled_date: FRI, scheduled_time: '12:00:00',
+                target_recipients: { groups: ['co'], user_ids: [] }, active: true, last_sent_at: null };
+    const h = env({ recurring: [RT], periods: PER, reports: [R], status: 'draft' });
+    if (await loaded(h)) {
+      await peopleLoaded(h);
+      await settle(() => h.w.bulTaskReports.length === 1);
+      ok('отчетите на постоянната се зареждат (entity_id в заявката)',
+        h.calls.get.some(u => /notification_schedules\?entity_type=eq\.task_report&entity_id=in\.\([^)]*r-zar/.test(decodeURIComponent(u))), h.calls.get.filter(u => /notification_schedules/.test(u)).join(' | '));
+      await settle(() => !!h.doc.querySelector('.tr-task-list[data-tr-task="r-zar"]'));
+      ok('под постоянната задача в блока — заварения отчет със ✕',
+        !!h.doc.querySelector('.tr-task-list[data-tr-task="r-zar"] .tr-del[data-tr-id="n-rec"]'));
+      const edit = Array.prototype.find.call(h.doc.querySelectorAll('button'), b => /openEditRecurringModal\('r-zar'\)/.test(b.getAttribute('onclick') || ''));
+      if (ok('бутонът ✏️ на постоянната задача', !!edit)) {
+        realClick(h.w, edit, '✏️ постоянна');
+        ok('формата „Редактирай постоянна задача" е отворена', !!$(h, 'edit-rec-ov'));
+        ok('секцията „📨 Отчет за изпълнението" е в нея', !!h.doc.querySelector('#erec-tr .tr-open'));
+        ok('без предупреждение за чернова (постоянната няма бюлетин)', $(h, 'erec-tr').textContent.indexOf('Бюлетинът е чернова') < 0);
+        ok('обяснява, че важи седмицата на избрания ден', $(h, 'erec-tr').textContent.indexOf('седмицата на избрания ден') >= 0);
+        const rows = h.doc.querySelectorAll('#erec-tr-list .tr-row');
+        ok('завареният отчет е в списъка на формата', rows.length === 1 && /12:00/.test(rows[0].textContent), rows.length && rows[0].textContent);
+        openEditor(h, 'erec');
+        ok('редакторът се отваря (дата, час, хора)', !!$(h, 'erec-tr-date') && !!$(h, 'erec-tr-time') && !!$(h, 'erec-tr-users'));
+        const sel = Array.prototype.filter.call($(h, 'erec-tr-users').options, o => o.selected).map(o => o.value);
+        ok('авторът на постоянната задача е отметнат (Миглена)', sel.join(',') === 'u-mp', sel.join(','));
+        $(h, 'erec-tr-date').value = FRI; $(h, 'erec-tr-time').value = '18:00';
+        check(h, '#erec-tr-groups', ['co']);
+        realClick(h.w, H.btn($(h, 'edit-rec-ov'), 'Запази'), 'Запази постоянна');
+        await settle(() => reportPosts(h).length > 0);
+        const pat = h.calls.patch.filter(x => x.table === 'recurring_tasks');
+        ok('PATCH на recurring_tasks?id=eq.r-zar', pat.length === 1 && /recurring_tasks\?id=eq\.r-zar$/.test(pat[0].url), pat.map(x => x.url).join(' | '));
+        const rp = reportPosts(h);
+        ok('ЕДИН нов ред в notification_schedules', rp.length === 1, String(rp.length));
+        const b = (rp[0] || {}).body || {};
+        ok('entity_type=task_report, entity_id=r-zar (id-то на постоянната)', b.entity_type === 'task_report' && b.entity_id === 'r-zar', JSON.stringify(b));
+        ok('schedule_type=once, ' + FRI + ' 18:00, група co + Миглена', b.schedule_type === 'once' && b.scheduled_date === FRI && b.scheduled_time === '18:00' &&
+          JSON.stringify(b.target_recipients) === JSON.stringify({ groups: ['co'], user_ids: ['u-mp'] }), JSON.stringify(b));
+        ok('БЕЗ нова колона в тялото (entity_kind и т.н.)', !('entity_kind' in b));
+        ok('нищо не е записано в bulletin_tasks', taskPosts(h).length === 0 && h.calls.patch.every(x => x.table !== 'bulletin_tasks'));
+        await settle(() => !$(h, 'edit-rec-ov'));
+        ok('формата се затваря, зелен тост с „Насрочени отчети: 1"', !$(h, 'edit-rec-ov') && h.calls.toast.some(t => /Насрочени отчети: 1/.test(String(t))), JSON.stringify(h.calls.toast));
+        /* ✕ на заварения — от формата на постоянната */
+        await settle(() => h.w.recurringTasks.some(x => x.id === 'r-zar'));
+        guard('пак отваряне', () => h.w.openEditRecurringModal('r-zar'));
+        const del = h.doc.querySelector('#erec-tr-list .tr-del[data-tr-id="n-rec"]');
+        if (ok('✕ на заварения във формата на постоянната', !!del)) {
+          realClick(h.w, del, '✕');
+          await settle(() => h.calls.del.length > 0);
+          ok('DELETE точно на n-rec (и само task_report)', h.calls.del.length === 1 && /id=eq\.n-rec/.test(h.calls.del[0]) && /entity_type=eq\.task_report/.test(h.calls.del[0]), h.calls.del.join(' | '));
+          await settle(() => !h.doc.querySelector('#erec-tr-list .tr-del[data-tr-id="n-rec"]'));
+          ok('изчезва от списъка във формата', !h.doc.querySelector('#erec-tr-list .tr-del[data-tr-id="n-rec"]'));
+        }
+      }
+    }
+    const hs = env({ user: STORE, recurring: [RT], periods: PER, reports: [R] });
+    if (await loaded(hs)) {
+      for (let i = 0; i < 10; i++) await ticks();
+      ok('обектът не вижда отчетите под постоянната задача', !hs.doc.querySelector('.tr-task-list[data-tr-task="r-zar"]'));
+    }
+    const hn = env({ recurring: [RT], periods: PER });
+    if (await loaded(hn)) {
+      const edit = Array.prototype.find.call(hn.doc.querySelectorAll('button'), b => /openEditRecurringModal\('r-zar'\)/.test(b.getAttribute('onclick') || ''));
+      realClick(hn.w, edit, '✏️');
+      realClick(hn.w, H.btn($(hn, 'edit-rec-ov'), 'Запази'), 'Запази без отчет');
+      await settle(() => hn.calls.patch.some(x => x.table === 'recurring_tasks'));
+      for (let i = 0; i < 5; i++) await ticks();
+      ok('без отворена секция — само PATCH, нито един ред за отчет', reportPosts(hn).length === 0 && hn.calls.patch.some(x => x.table === 'recurring_tasks'));
     }
   }
 

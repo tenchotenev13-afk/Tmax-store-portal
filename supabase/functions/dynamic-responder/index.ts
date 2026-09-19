@@ -1,6 +1,18 @@
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
+/* dynamic-responder — насрочените редове от notification_schedules.
+
+   19.09.2026 (деплой след v22) — ЕДНО нещо: отчет по задача и за ПОСТОЯННА
+   задача. entity_type остава 'task_report', entity_id може да сочи и
+   recurring_tasks.id (без нова колона — виж шапката на send-routed-report,
+   v11). publicationScheduleGate: id-то се търси първо в bulletin_tasks
+   (публикуван бюлетин), после в recurring_tasks — там важи същата проверка
+   като при напомняне по постоянна задача (recurringPeriodGate: период за
+   седмицата на днес, без период — по active). Не е в нито една → пропуск.
+   Заявката към send-routed-report е същата — {task_id, recipients,
+   run_date, run_time}; какъв е id-ът решава send-routed-report. */
+
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SEND_FN_URL = SB_URL + "/functions/v1/resend-email";
@@ -141,6 +153,19 @@ function recurringTasksForWeek(tasks, periods, mondayISO){
     return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
   });
 }
+/* Постоянна задача: съществува ли и важи ли за седмицата на днес. Общо за
+   напомняне по постоянна задача и за отчет по постоянна задача — едно
+   правило, не две. notFound — текстът, ако я няма. */
+async function recurringPeriodGate(supabase: any, id: any, todayStr: string, notFound: string) {
+  const { data: t, error } = await supabase.from('recurring_tasks')
+    .select('id,active').eq('id', id).maybeSingle();
+  if (error) return {};
+  if (!t) return { skip: notFound };
+  const { data: periods } = await supabase.from('recurring_task_periods')
+    .select('recurring_task_id,from_monday,to_monday').eq('recurring_task_id', id);
+  const valid = recurringTasksForWeek([t], Array.isArray(periods) ? periods : [], mondayOfISO(todayStr)).length > 0;
+  return valid ? {} : { skip: 'постоянната задача не важи за седмицата (периодът не е започнал или е приключил)' };
+}
 async function publicationScheduleGate(supabase: any, s: any, todayStr: string) {
   /* task_report — отчет по задача: същото правило като напомняне по задача
      (изтрита → не; чернова → не). */
@@ -156,6 +181,10 @@ async function publicationScheduleGate(supabase: any, s: any, todayStr: string) 
     const { data: t, error: te } = await supabase.from('bulletin_tasks')
       .select('bulletin_id').eq('id', taskId).maybeSingle();
     if (te) return {};
+    /* Отчет по ПОСТОЯННА задача: id-то не е в bulletin_tasks, а в
+       recurring_tasks. Тогава важи правилото за постоянна задача, не за
+       бюлетин (19.09.2026). */
+    if (!t && s.entity_type === 'task_report') return await recurringPeriodGate(supabase, s.entity_id, todayStr, 'задачата не е намерена');
     if (!t) return { skip: 'задачата не е намерена' };
     const { data: b, error: be } = await supabase.from('bulletins')
       .select('status').eq('id', t.bulletin_id).maybeSingle();
@@ -164,14 +193,7 @@ async function publicationScheduleGate(supabase: any, s: any, todayStr: string) 
     return {};
   }
   if (s.entity_type === 'recurring_task') {
-    const { data: t, error } = await supabase.from('recurring_tasks')
-      .select('id,active').eq('id', s.entity_id).maybeSingle();
-    if (error) return {};
-    if (!t) return { skip: 'постоянната задача не е намерена' };
-    const { data: periods } = await supabase.from('recurring_task_periods')
-      .select('recurring_task_id,from_monday,to_monday').eq('recurring_task_id', s.entity_id);
-    const valid = recurringTasksForWeek([t], Array.isArray(periods) ? periods : [], mondayOfISO(todayStr)).length > 0;
-    return valid ? {} : { skip: 'постоянната задача не важи за седмицата (периодът не е започнал или е приключил)' };
+    return await recurringPeriodGate(supabase, s.entity_id, todayStr, 'постоянната задача не е намерена');
   }
   return {};
 }

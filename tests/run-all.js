@@ -141,6 +141,7 @@ const TESTS = [
   'task-report-schedule.test.js',
   'task-report-responder.test.js',
   'task-report-supply.test.js',
+  'task-report-recurring.test.js',
   'no-auto-push-on-load.test.js',
   'bulletin-unpublished-push.test.js',
   'responder-publication-gate.test.js',

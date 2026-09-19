@@ -204,6 +204,8 @@ const ROUTED_COPIED = [
 const ROUTED_ONLY = ['sbGet', 'sbPatch', 'routedMailPlan', 'routedEmptyGroups',
   /* режим „отчет по задача" (19.09.2026) — само в едж функцията */
   'routedTaskReportSubject', 'routedTaskReportRecipients', 'collectTaskReportData', 'routedTaskReportResponse',
+  /* отчет по ПОСТОЯННА задача (v11, 19.09.2026) — само в едж функцията */
+  'taskReportCompsAndPeople', 'taskReportWeekOf', 'collectRecurringTaskReportData',
   /* секция „Зареждане" в отчета по задача (v10, 19.09.2026) — само тук;
      браузърът показва същите данни през supply.js, не през report.js */
   'supplyRest', 'supplyRestAll', 'supplyHasVal', 'supplyNum', 'collectSupplyReport', 'supplyReportSectionHtml', 'supplyReportSummary',
