@@ -214,7 +214,9 @@ const sent = g => !g.r.skip;
   {
     const src = fs.readFileSync(SRC, 'utf8');
     const serve = src.slice(src.indexOf('Deno.serve('));
-    const call = serve.search(/const pub: any = await publicationScheduleGate\(supabase, s, todayStr\);\s*\n\s*if \(pub\.skip\) \{ skipped\.push\(\{ id: s\.id, reason: pub\.skip \}\); continue; \}/);
+    /* От 19.09.2026 блокът носи и console.warn за task_report — важи, че
+       пропускът пак е skipped.push + continue, без нищо друго между тях. */
+    const call = serve.search(/const pub: any = await publicationScheduleGate\(supabase, s, todayStr\);\s*\n\s*if \(pub\.skip\) \{(?:\s*if \(s\.entity_type === 'task_report'\) console\.warn\([^;]*\);)?\s*skipped\.push\(\{ id: s\.id, reason: pub\.skip \}\);\s*continue;\s*\}/);
     const send = serve.indexOf('await fetch(SEND_FN_URL');
     const stamp = serve.indexOf('last_sent_at: now.toISOString()');
     ok('извикването и continue са в Deno.serve', call >= 0);

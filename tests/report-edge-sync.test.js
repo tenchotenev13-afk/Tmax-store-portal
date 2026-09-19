@@ -202,6 +202,8 @@ const ROUTED_COPIED = [
 /* Само в send-routed-report: PostgREST със service ключ и всичко около
    самото изпращане — тема, тестова лента, кой получава. */
 const ROUTED_ONLY = ['sbGet', 'sbPatch', 'routedMailPlan', 'routedEmptyGroups',
+  /* режим „отчет по задача" (19.09.2026) — само в едж функцията */
+  'routedTaskReportSubject', 'routedTaskReportRecipients', 'collectTaskReportData', 'routedTaskReportResponse',
   'routedTestBannerHtml', 'routedWeeklySubject', 'routedSendEmail'];
 
 /* Наистина само в браузъра — ръчните бутони от портала. Няма ги в НИТО
@@ -244,7 +246,9 @@ function topLevelFns(file) {
   const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/);
   const out = {};
   for (let i = 0; i < lines.length; i++) {
-    const m = lines[i].match(/^function ([A-Za-z0-9_$]+)\s*\(/);
+    /* `async function` също — иначе е невидима за „непризната функция"
+       (collectTaskReportData, 19.09.2026). */
+    const m = lines[i].match(/^(?:async )?function ([A-Za-z0-9_$]+)\s*\(/);
     if (!m) continue;
     const body = [];
     let depth = 0, started = false;

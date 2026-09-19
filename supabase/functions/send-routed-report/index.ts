@@ -1,5 +1,17 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v8 (19.09.2026) — деплой с ЕДНО нещо: режим „отчет по задача".
+   Вход {task_id, recipients:{groups[], user_ids[]}, run_date, run_time} —
+   вика го dynamic-responder за ред в notification_schedules с
+   entity_type='task_report'. Една картичка (същият personalizedTaskCardHtml
+   като в седмичния отчет) за ТАЗИ задача, с прозореца на нейния бюлетин и
+   отметките към момента, до получателите от реда: групите се решават сега
+   (users.notify_groups / is_regional), user_ids — по users.id. Тема
+   „Отчет: <заглавие> — <дд.мм.гггг чч:мм>". Изтрита задача или чернова →
+   пропуск + console.warn, нищо не се праща. Темата weekly_routed важи и
+   тук: изключена → нищо; test_email → всичко към него с лента. Седмичният
+   режим (без task_id) е непроменен.
+
    v7 (18.09.2026) — деплой с ЕДНО нещо: групите co / controlling / owner
    идват от users.notify_groups, не от твърдия списък REPORT_GROUPS (махнат).
    Член = active=true, с имейл, notify_groups @> [група]; 'regional' остава
@@ -841,6 +853,122 @@ function routedWeeklySubject(wkDates){
   return '📬 ТеМАХ — Личен седмичен отчет ' + reportDayMonth(a) + ' – ' + reportDayMonth(b) + '.' + b.getFullYear();
 }
 
+/* ═══ РЕЖИМ „ОТЧЕТ ПО ЗАДАЧА" (19.09.2026) ═══════════════════════════════
+   Една картичка за ЕДНА задача до получателите от реда в
+   notification_schedules (entity_type='task_report'). Същият builder като
+   седмичния личен отчет; разликата е кой получава и кой прозорец.
+
+   Тема: „Отчет: <заглавие> — <дд.мм.гггг чч:мм>" — денят и часът са на
+   РЕДА (кога е насрочен), не на часовника на изпращането. */
+function routedTaskReportSubject(title, runDate, runTime){
+  var base = 'Отчет: ' + (title || 'задача');
+  var p = String(runDate || '').slice(0,10).split('-');
+  if (p.length !== 3 || !/^\d{4}$/.test(p[0])) return base;
+  var t = String(runTime || '').slice(0,5);
+  return base + ' — ' + p[2] + '.' + p[1] + '.' + p[0] + (/^\d\d:\d\d$/.test(t) ? ' ' + t : '');
+}
+/* Получателите на отчета: групите през resolveRecipientsForTask (СЪЩОТО
+   правило като седмичния отчет, с обхвата на задачата за 'regional'), после
+   конкретните хора по users.id — активни, с имейл. Дедупликация по имейл.
+   Авторът НЕ се добавя сам: той е в user_ids, ако е отметнат във формата. */
+function routedTaskReportRecipients(task, recipients, groupUsers, idUsers, warnings){
+  var rc = recipients || {};
+  var groups = Array.isArray(rc.groups) ? rc.groups : [];
+  var ids = (Array.isArray(rc.user_ids) ? rc.user_ids : []).map(function(x){ return String(x); });
+  var out = resolveRecipientsForTask({ id:task.id, title:task.title, report_groups:groups,
+    target_stores:task.target_stores, created_by:null }, groupUsers, {}, warnings);
+  var seen = {};
+  out.forEach(function(x){ seen[x.email] = 1; });
+  (Array.isArray(idUsers) ? idUsers : []).forEach(function(u){
+    if (!u || !u.email || u.active === false) return;
+    if (ids.indexOf(String(u.id)) < 0 || seen[u.email]) return;
+    seen[u.email] = 1;
+    out.push({ name:u.display_name||u.email, email:u.email });
+  });
+  return out;
+}
+/* Данните за картичката. {missing} — задачата я няма; {draft} — бюлетинът
+   ѝ не е публикуван; иначе задачата с прозореца на нейния бюлетин,
+   отметките в него (плюс пренесените в него), обектите и хората. */
+async function collectTaskReportData(taskId, recipients){
+  var tr: any = await sbGet('bulletin_tasks', 'id=eq.' + encodeURIComponent(taskId) + '&limit=1');
+  var t: any = Array.isArray(tr) && tr.length ? tr[0] : null;
+  if (!t) return { missing:true };
+  var br: any = await sbGet('bulletins', 'id=eq.' + t.bulletin_id + '&select=id,status,week_number,year&limit=1');
+  var bul: any = Array.isArray(br) && br.length ? br[0] : null;
+  if (!bul || bul.status !== 'published') return { draft:true, task:t };
+  var wkDates = weekDays(bul.week_number, bul.year).map(toLocalISO);
+  t.kind = 'regular';
+  var win = reportRoutedTaskWindow(t, wkDates, bul) || { date:null, dateFrom:wkDates[0], dateTo:wkDates[6] };
+  t.date = win.date; t.dateFrom = win.dateFrom; t.dateTo = win.dateTo;
+  t.weekFrom = wkDates[0]; t.weekTo = wkDates[6];
+  var ids = (recipients && Array.isArray(recipients.user_ids) ? recipients.user_ids : [])
+    .map(function(x: any){ return String(x); }).filter(function(x: any){ return /^[0-9a-f-]{8,}$/i.test(x); });
+  var res: any[] = await Promise.all([
+    sbGet('task_completions', 'task_id=eq.' + t.id + '&completion_date=gte.' + wkDates[0] + '&completion_date=lte.' + wkDates[6]),
+    sbGet('task_completions', 'task_id=eq.' + t.id + '&postponed_to=gte.' + wkDates[0] + '&postponed_to=lte.' + wkDates[6]),
+    sbGet('users', 'select=store_name&order=store_name'),
+    sbGet('users', 'active=eq.true&email=not.is.null&select=email,display_name,assigned_stores,is_regional,notify_groups&order=display_name'),
+    ids.length ? sbGet('users', 'id=in.(' + ids.join(',') + ')&select=id,email,display_name,active') : Promise.resolve([])
+  ]);
+  var seenC: any = {};
+  var comps = (Array.isArray(res[0]) ? res[0] : []).concat(Array.isArray(res[1]) ? res[1] : []).filter(function(c: any){
+    if (!c.id) return true; if (seenC[c.id]) return false; seenC[c.id] = 1; return true;
+  }).map(function(c: any){
+    return { item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment,
+             photos:c.photos, files:c.files, completion_date:c.completion_date||null, postponed_to:c.postponed_to||null };
+  });
+  var seenS: any = {};
+  var stores = (Array.isArray(res[2]) ? res[2] : []).filter(function(u: any){
+    if (!isReportableStore(u.store_name) || seenS[u.store_name]) return false;
+    seenS[u.store_name] = 1; return true;
+  }).map(function(u: any){ return u.store_name; });
+  return { task:t, bul:bul, comps:comps, stores:stores,
+           groupUsers: Array.isArray(res[3]) ? res[3] : [], idUsers: Array.isArray(res[4]) ? res[4] : [] };
+}
+async function routedTaskReportResponse(body: any, dryRun: boolean, testEmail: any){
+  var json = function(o: any, st?: number){ return new Response(JSON.stringify(o), { status: st || 200, headers:{'Content-Type':'application/json'} }); };
+  var taskId = String(body.task_id);
+  var data: any = await collectTaskReportData(taskId, body.recipients);
+  if (data.missing) {
+    console.warn('send-routed-report: отчет по задача ' + taskId + ' — задачата не е намерена (изтрита?); нищо не е пратено');
+    return json({ ok:true, mode:'task_report', task_id:taskId, skipped:'задачата не е намерена', sent:0 });
+  }
+  if (data.draft) {
+    console.warn('send-routed-report: отчет по задача ' + taskId + ' — бюлетинът не е публикуван; нищо не е пратено');
+    return json({ ok:true, mode:'task_report', task_id:taskId, skipped:'бюлетинът не е публикуван', sent:0 });
+  }
+  var t = data.task;
+  var warnings: any[] = [];
+  var to = routedTaskReportRecipients(t, body.recipients, data.groupUsers, data.idUsers, warnings);
+  var emptyGroups = routedEmptyGroups(warnings);
+  emptyGroups.forEach(function(w: any){
+    console.warn('send-routed-report: отчет по задача „' + (t.title||'') + '" — групата „' + w.group + '" няма нито един активен потребител с имейл');
+  });
+  var subject = routedTaskReportSubject(t.title, body.run_date, body.run_time);
+  if (!to.length) {
+    console.warn('send-routed-report: отчет по задача „' + (t.title||'') + '" — 0 получатели; нищо не е пратено');
+    return json({ ok:true, mode:'task_report', task_id:taskId, subject:subject, recipients:0, sent:0, skipped:'няма получатели', empty_groups:emptyGroups });
+  }
+  if (dryRun) {
+    return json({ ok:true, dry_run:true, mode:'task_report', task_id:taskId, subject:subject, test_email:testEmail,
+      recipients:to.length, planned:to, empty_groups:emptyGroups });
+  }
+  var sent = 0, failed = 0;
+  for (var i = 0; i < to.length; i++) {
+    var rcp: any = to[i];
+    var bodyHtml = (testEmail ? routedTestBannerHtml(rcp.name, rcp.email) : '') +
+      personalizedSectionHtml([t], data.comps, data.stores);
+    var html = reportEmailShell('📨 Отчет: ' + esc(t.title),
+      'Изпълнение към ' + esc(subject.split(' — ')[1] || ''), bodyHtml,
+      testEmail ? ('Тестов режим — реално изпратено до ' + testEmail) : 'Насрочен отчет · ТеМАХ Портал');
+    var okOne = await routedSendEmail(testEmail || rcp.email, subject, html);
+    if (okOne) { sent++; } else { failed++; }
+  }
+  return json({ ok:true, mode:'task_report', task_id:taskId, subject:subject, recipients:to.length,
+    sent:sent, failed:failed, test_email:testEmail, empty_groups:emptyGroups });
+}
+
 /* Предупрежденията от resolveRecipientsForTask, събрани по група — едно
    на група, с броя и заглавията на засегнатите задачи. */
 function routedEmptyGroups(warnings){
@@ -890,6 +1018,11 @@ Deno.serve(async (req: Request) => {
     var coRes: any = await sbGet('users', 'store_name=eq.' + encodeURIComponent('Централен офис') +
       '&active=eq.true&select=email,display_name&order=display_name');
     coPeopleCache = Array.isArray(coRes) ? coRes.filter(function(u: any){ return u && u.email; }) : [];
+
+    /* ═══ Режим „отчет по задача" (dynamic-responder, task_report) ═══ */
+    if (body && body.task_id) {
+      return await routedTaskReportResponse(body, dryRun, testEmail);
+    }
 
     /* ═══ 3. Данните за приключилата седмица ═══ */
     var data: any = await new Promise(function(resolve){ collectWeeklyRoutingData(resolve); });

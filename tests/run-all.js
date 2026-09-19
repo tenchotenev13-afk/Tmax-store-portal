@@ -139,6 +139,7 @@ const TESTS = [
   'report-groups-users.test.js',
   'report-groups-from-users.test.js',
   'task-report-schedule.test.js',
+  'task-report-responder.test.js',
   'no-auto-push-on-load.test.js',
   'bulletin-unpublished-push.test.js',
   'responder-publication-gate.test.js',

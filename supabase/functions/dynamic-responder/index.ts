@@ -4,6 +4,9 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 const SB_URL = Deno.env.get("SUPABASE_URL")!;
 const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const SEND_FN_URL = SB_URL + "/functions/v1/resend-email";
+/* Отчет по задача (entity_type='task_report', 19.09.2026) — не push, а
+   писмо: send-routed-report строи картичката и я праща. */
+const ROUTED_FN_URL = SB_URL + "/functions/v1/send-routed-report";
 
 /* resend-email е с verify_jwt: true. До 26.08.2026 тук се пращаше САМО
    Content-Type — без Authorization връща 401 UNAUTHORIZED_NO_AUTH_HEADER,
@@ -139,7 +142,9 @@ function recurringTasksForWeek(tasks, periods, mondayISO){
   });
 }
 async function publicationScheduleGate(supabase: any, s: any, todayStr: string) {
-  if (s.entity_type === 'task' || s.entity_type === 'subtask') {
+  /* task_report — отчет по задача: същото правило като напомняне по задача
+     (изтрита → не; чернова → не). */
+  if (s.entity_type === 'task' || s.entity_type === 'subtask' || s.entity_type === 'task_report') {
     let taskId = s.entity_id;
     if (s.entity_type === 'subtask') {
       const { data: sub, error } = await supabase.from('task_subtasks')
@@ -171,6 +176,70 @@ async function publicationScheduleGate(supabase: any, s: any, todayStr: string) 
   return {};
 }
 
+/* Дошъл ли е редът: до 15 минути след часа, еднократният — само в деня си и
+   само ако не е пратен. Изнесено от обработчика без промяна на логиката —
+   за да се тества пряко (tests/task-report-responder.test.js). */
+function scheduleIsDue(s: any, bg: any, todayStr: string, todayDow: string) {
+  const [h, m] = s.scheduled_time.split(':').map(Number);
+  const schedMinutes = h * 60 + m;
+  const nowMinutes = bg.hours * 60 + bg.minutes;
+  if (nowMinutes < schedMinutes || nowMinutes - schedMinutes > 15) return false;
+
+  if (s.schedule_type === 'once') {
+    if (s.scheduled_date !== todayStr) return false;
+    if (s.last_sent_at) return false;
+    return true;
+  }
+  if (s.schedule_type === 'daily') {
+    if (s.last_sent_at && s.last_sent_at.slice(0,10) === todayStr) return false;
+    return true;
+  }
+  if (s.schedule_type === 'weekly') {
+    if (s.day_of_week !== todayDow) return false;
+    if (s.last_sent_at && s.last_sent_at.slice(0,10) === todayStr) return false;
+    return true;
+  }
+  return false;
+}
+
+/* ═══ ОТЧЕТ ПО ЗАДАЧА (entity_type='task_report', 19.09.2026) ══════════
+   Вместо push — ЕДНА заявка към send-routed-report с {task_id, recipients}
+   (recipients = target_recipients на реда: {groups[], user_ids[]}). Там се
+   решават членовете на групите, строи се картичката и се праща писмото.
+   Успех = HTTP ok, ok:true И поне едно изпратено писмо — само тогава
+   last_sent_at; иначе следващото събуждане в 15-минутния прозорец опитва
+   пак. Изтрита задача / чернова се спират по-рано, в
+   publicationScheduleGate. */
+function taskReportRequestBody(s: any, todayStr: string) {
+  const rc = (s && s.target_recipients && typeof s.target_recipients === 'object') ? s.target_recipients : {};
+  return {
+    task_id: String(s.entity_id),
+    recipients: {
+      groups: Array.isArray(rc.groups) ? rc.groups : [],
+      user_ids: Array.isArray(rc.user_ids) ? rc.user_ids : [],
+    },
+    run_date: s.scheduled_date || todayStr,
+    run_time: String(s.scheduled_time || '').slice(0, 5),
+  };
+}
+async function sendTaskReport(s: any, todayStr: string, fetchFn: any) {
+  let res: any, j: any = null;
+  try {
+    res = await fetchFn(ROUTED_FN_URL, {
+      method: 'POST',
+      headers: SEND_HEADERS,
+      body: JSON.stringify(taskReportRequestBody(s, todayStr)),
+    });
+    try { j = await res.json(); } catch (_e) { j = null; }
+  } catch (e) {
+    console.error('send-routed-report (task_report ' + s.entity_id + '): ' + String(e));
+    return { ok: false, detail: String(e) };
+  }
+  const ok = !!res && res.ok && !!j && j.ok === true && (j.sent || 0) > 0;
+  if (!ok) console.warn('dynamic-responder: отчет по задача ' + s.entity_id + ' не е пратен: HTTP ' + (res && res.status) + ' ' + JSON.stringify(j));
+  return { ok: ok, detail: j };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { status: 200, headers: CORS });
 
@@ -190,28 +259,7 @@ Deno.serve(async (req) => {
 
     if (error) throw error;
 
-    const due = (schedules || []).filter((s: any) => {
-      const [h, m] = s.scheduled_time.split(':').map(Number);
-      const schedMinutes = h * 60 + m;
-      const nowMinutes = bg.hours * 60 + bg.minutes;
-      if (nowMinutes < schedMinutes || nowMinutes - schedMinutes > 15) return false;
-
-      if (s.schedule_type === 'once') {
-        if (s.scheduled_date !== todayStr) return false;
-        if (s.last_sent_at) return false;
-        return true;
-      }
-      if (s.schedule_type === 'daily') {
-        if (s.last_sent_at && s.last_sent_at.slice(0,10) === todayStr) return false;
-        return true;
-      }
-      if (s.schedule_type === 'weekly') {
-        if (s.day_of_week !== todayDow) return false;
-        if (s.last_sent_at && s.last_sent_at.slice(0,10) === todayStr) return false;
-        return true;
-      }
-      return false;
-    });
+    const due = (schedules || []).filter((s: any) => scheduleIsDue(s, bg, todayStr, todayDow));
 
     const results = [];
     const skipped: any[] = [];
@@ -219,7 +267,22 @@ Deno.serve(async (req) => {
     for (const s of due) {
       /* Непубликуван бюлетин / незапочнал период — виж publicationScheduleGate. */
       const pub: any = await publicationScheduleGate(supabase, s, todayStr);
-      if (pub.skip) { skipped.push({ id: s.id, reason: pub.skip }); continue; }
+      if (pub.skip) {
+        if (s.entity_type === 'task_report') console.warn('dynamic-responder: отчет по задача ' + s.entity_id + ' пропуснат: ' + pub.skip);
+        skipped.push({ id: s.id, reason: pub.skip });
+        continue;
+      }
+      /* Отчет по задача — писмо през send-routed-report, не push. */
+      if (s.entity_type === 'task_report') {
+        const tr: any = await sendTaskReport(s, todayStr, fetch);
+        if (tr.ok) {
+          await supabase.from('notification_schedules')
+            .update({ last_sent_at: now.toISOString() })
+            .eq('id', s.id);
+        }
+        results.push({ id: s.id, ok: tr.ok, task_report: true, detail: tr.detail });
+        continue;
+      }
       let title = s.message || '';
       if (!title) {
         const table = s.entity_type === 'subtask' ? 'task_subtasks'
