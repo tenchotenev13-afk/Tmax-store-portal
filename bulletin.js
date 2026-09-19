@@ -167,7 +167,7 @@ var REPORT_GROUP_LABELS = { co:'ЦО', controlling:'Контролинг', regio
 var reportGroupPeopleCache=null;
 function loadReportGroupPeople(){
   if(reportGroupPeopleCache)return Promise.resolve(reportGroupPeopleCache);
-  return sbGet('users','active=eq.true&select=email,display_name,notify_groups&order=display_name')
+  return sbGet('users','active=eq.true&select=id,email,display_name,notify_groups&order=display_name')
     .then(function(data){
       reportGroupPeopleCache=Array.isArray(data)?data.filter(function(u){return u&&u.email;}):[];
       return reportGroupPeopleCache;
@@ -177,8 +177,12 @@ function reportGroupLabel(k){
   var base=REPORT_GROUP_LABELS[k]||k;
   if(k==='regional')return base+' (по магазин)';
   if(!reportGroupPeopleCache)return base;
+  /* Разчита се тук, без reportNotifyGroupsOf() от report.js: той се зарежда
+     по-късно и без него етикетите тихо ставаха „няма хора". */
   var names=reportGroupPeopleCache.filter(function(u){
-    return typeof reportNotifyGroupsOf==='function' && reportNotifyGroupsOf(u).indexOf(k)>=0;
+    var g=u&&u.notify_groups;
+    if(!Array.isArray(g))g=String(g||'').replace(/^{|}$/g,'').split(',').map(function(s){return s.trim().replace(/^"|"$/g,'');});
+    return g.indexOf(k)>=0;
   }).map(function(u){return u.display_name||u.email;});
   return base+' ('+(names.length?names.join(', '):'няма хора')+')';
 }
@@ -1408,6 +1412,7 @@ function loadBulletin(){
       bulTasks=Array.isArray(t)?t:[];
       bulFetchCarriedTasks();
       bulLoadTransitPending();
+      bulLoadTaskReports();
       /* Дата и в самата ЗАЯВКА. Глобалният клон (без store_name) теглеше
          ВСЯКО отмятане на постоянна задача, правено някога - 1595 реда на
          10.09.2026. PostgREST реже на 1000 (Content-Range: 0-999/1595) и
@@ -1828,6 +1833,7 @@ function renderBulView(){
         if(isGlobal()&&t.created_by)html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">👤 Поставена от: '+esc(t.created_by)+'</div>';
         if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))html+=renderCompletionExtras(compObj);
         html+=renderTaskAttachments(t);
+        html+=trTaskReportsListHtml(t);
         html+=renderSubtasks(t.id, dk, 'dept');
         html+='</div>';
         if(!isGlobal()&&!isMulti&&!done){
@@ -2365,6 +2371,7 @@ function taskModalHtml(){
     '<select class="fi" id="tk-stores" multiple size="6" style="height:120px;"></select>' +
     '<label class="fl">Групи за докладване (получават известие/седмичен репорт)</label>' +
     reportGroupsCheckboxesHtml('tk-report-groups', []) +
+    '<div id="tk-tr-wrap"></div>' +
     '<label class="fl">Свързан таб (по избор — бутон в календара към него)</label>' +
     '<select class="fi" id="tk-linked-module" onchange="bulAutoCompleteToggle(\'tk\')">'+linkedModuleOptsHtml('')+'</select>' +
     bulAutoCompleteFieldHtml('tk', false, '') +
@@ -2406,6 +2413,8 @@ function openEditTaskModal(taskId) {
   var days = weekDays(wk, yr);
   var existing = document.getElementById('edit-tk-ov');
   if (existing) existing.remove();
+  trEditTaskId = taskId; trDrafts.etk = [];
+  if (!reportGroupPeopleCache) loadReportGroupPeople();
   var ov = document.createElement('div');
   ov.className = 'bov open';
   ov.id = 'edit-tk-ov';
@@ -2429,6 +2438,7 @@ function openEditTaskModal(taskId) {
     '<select class="fi" id="etk-stores" multiple size="6" style="height:120px;"></select>' +
     '<label class="fl">Групи за докладване (получават известие/седмичен репорт)</label>' +
     reportGroupsCheckboxesHtml('etk-report-groups', t.report_groups||[]) +
+    trSectionHtml('etk', t) +
     '<label class="fl">Свързан таб (по избор — бутон в календара към него)</label>' +
     '<select class="fi" id="etk-linked-module" onchange="bulAutoCompleteToggle(\'etk\')">'+linkedModuleOptsHtml(t.linked_module||'')+'</select>' +
     bulAutoCompleteFieldHtml('etk', !!t.auto_complete, t.linked_module||'') +
@@ -2455,6 +2465,8 @@ function submitEditTask(taskId) {
   var linkedModule = (document.getElementById('etk-linked-module')||{}).value||null;
   var autoComplete = bulAutoCompleteRead('etk', linkedModule);
   if (!bulAutoCompleteValid(autoComplete, dueDates)) return;
+  var trc = trCollect('etk');
+  if (trc.error) { toast(trc.error,'#dc2626'); return; }
   var body = {title:title,description:desc,department:dept,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete};
   /* sort_order влиза САМО при истинска смяна на отдела - иначе всяко
      отваряне и запазване на задачата би я хвърлило най-отдолу. */
@@ -2468,10 +2480,13 @@ function submitEditTask(taskId) {
   sbPatch('bulletin_tasks','id=eq.'+taskId,body).then(function(r){
     if (!r.ok) { toast('Грешка при запис','#dc2626'); return; }
     if (t && newOrder !== null) { t.department = dept; t.sort_order = newOrder; }
-    var el = document.getElementById('edit-tk-ov');
-    if (el) el.remove();
-    toast('✅ Задачата е обновена!');
-    loadBulletin();
+    return trSaveReports(taskId, trc.list).then(function(okRep){
+      var el = document.getElementById('edit-tk-ov');
+      if (el) el.remove();
+      trDrafts.etk = [];
+      if (okRep) toast('✅ Задачата е обновена!'+(trc.list.length?' Насрочени отчети: '+trc.list.length:''));
+      loadBulletin();
+    });
   });
 }
 
@@ -2586,7 +2601,217 @@ function deleteRecurring(taskId) {
 function bulIsPublished(){ return !!curBul && curBul.status==='published'; }
 function bulConfirmUnpublished(){ return bulIsPublished() || confirm('Бюлетинът не е публикуван — изпращам?'); }
 
-function openTaskModal(){document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');}
+/* ═══ ОТЧЕТ ЗА ИЗПЪЛНЕНИЕТО В ИЗБРАН ДЕН/ЧАС (18.09.2026) ═══════════════
+   Секция във формата за задача (нова и редакция). Всеки насрочен отчет е ред
+   в notification_schedules: entity_type='task_report', entity_id=задачата,
+   schedule_type='once', scheduled_date + scheduled_time, target_recipients =
+   {groups:[...], user_ids:[users.id]}. Една задача може да има няколко.
+   Изпраща dynamic-responder → send-routed-report (една картичка) в часа;
+   чернова към часа → нищо не тръгва (публикационният гейт там).
+   Членовете на групите се решават В МОМЕНТА на изпращането — тук се пазят
+   само ключовете. Авторът е отметнат по подразбиране. */
+var bulTaskReports = [];   /* редовете за задачите на curBul (само canEdit) */
+var trDrafts = {};         /* 'tk' | 'etk' → [{date,time,groups,user_ids}] още незаписани */
+
+function trPad(n){ return String(n).padStart(2,'0'); }
+/* По подразбиране: последният ден от срока в 18:00; без срок — сега + 1 ч,
+   закръглено НАГОРЕ до 15 мин (14:07 → 15:15). now — за теста. */
+function trDefaultWhen(dueDates, now){
+  var ds = (dueDates||[]).map(function(d){ return String(d).slice(0,10); }).filter(Boolean).sort();
+  if (ds.length) return { date: ds[ds.length-1], time: '18:00' };
+  var d = now ? new Date(now.getTime()) : new Date();
+  d.setSeconds(0,0);
+  d.setHours(d.getHours()+1);
+  var m = d.getMinutes(), up = Math.ceil(m/15)*15;
+  d.setMinutes(up);                       /* 60 → следващия час сам */
+  return { date: toLocalISO(d), time: trPad(d.getHours())+':'+trPad(d.getMinutes()) };
+}
+/* users.id на автора: новата задача — текущият потребител; редакция —
+   created_by (display_name) през кеша, иначе текущият. */
+function trAuthorId(task){
+  if (task && task.created_by && reportGroupPeopleCache) {
+    var u = reportGroupPeopleCache.filter(function(x){ return x.display_name===task.created_by; })[0];
+    if (u && u.id) return String(u.id);
+  }
+  return (currentUser && currentUser.id) ? String(currentUser.id) : null;
+}
+function trUserName(id){
+  var u = (reportGroupPeopleCache||[]).filter(function(x){ return String(x.id)===String(id); })[0];
+  return u ? (u.display_name||u.email) : 'потребител';
+}
+function trRecipientsLabel(tr){
+  tr = tr || {};
+  var parts = (tr.groups||[]).map(function(g){ return REPORT_GROUP_LABELS[g]||g; })
+    .concat((tr.user_ids||[]).map(trUserName));
+  return parts.length ? parts.join(', ') : '— няма получатели —';
+}
+function trWhenLabel(date, time){
+  var p = String(date||'').split('-');
+  return (p.length===3 ? p[2]+'.'+p[1] : String(date||'')) + ' ' + String(time||'').slice(0,5);
+}
+function trRowsForTask(taskId){
+  return bulTaskReports.filter(function(r){ return String(r.entity_id)===String(taskId); })
+    .sort(function(a,b){ return (a.scheduled_date+a.scheduled_time) < (b.scheduled_date+b.scheduled_time) ? -1 : 1; });
+}
+/* Зарежда редовете за задачите на показания бюлетин — само за canEdit(),
+   обектите не ги виждат. Пренарисува, щом дойдат (както bulLoadTransitPending). */
+function bulLoadTaskReports(){
+  bulTaskReports = [];
+  if (!canEdit() || !bulTasks.length) return;
+  var ids = bulTasks.map(function(t){ return t.id; }).join(',');
+  sbGet('notification_schedules','entity_type=eq.task_report&entity_id=in.('+ids+')&active=eq.true&select=id,entity_id,scheduled_date,scheduled_time,target_recipients,last_sent_at,created_by').then(function(rows){
+    if (!Array.isArray(rows) || !rows.length) return;
+    bulTaskReports = rows;
+    renderBulletin();
+  });
+}
+/* Под задачата в блока — списък с ✕ (само canEdit). */
+function trTaskReportsListHtml(t){
+  if (!canEdit()) return '';
+  var rows = trRowsForTask(t.id);
+  if (!rows.length) return '';
+  return '<div class="tr-task-list" data-tr-task="'+t.id+'" style="margin-top:4px;">' + rows.map(function(r){
+    var sent = !!r.last_sent_at;
+    return '<div class="tr-row" data-tr-id="'+r.id+'" style="display:flex;align-items:center;gap:6px;font-size:10.5px;color:'+(sent?'#94a3b8':'#0369a1')+';margin-top:2px;">' +
+      '<span>📨 Отчет '+esc(trWhenLabel(r.scheduled_date, r.scheduled_time))+(sent?' ✓ изпратен':'')+' → '+esc(trRecipientsLabel(r.target_recipients))+'</span>' +
+      '<button class="tr-del" data-tr-id="'+r.id+'" onclick="trDeleteReport(this.dataset.trId)" title="Махни насрочения отчет" style="border:none;background:none;color:#dc2626;font-size:10px;cursor:pointer;padding:0;line-height:1;">✕</button>' +
+      '</div>';
+  }).join('') + '</div>';
+}
+function trDeleteReport(id){
+  if (!canEdit()) return;
+  if (!confirm('Да махна насрочения отчет?')) return;
+  sbDelete('notification_schedules','id=eq.'+id+'&entity_type=eq.task_report').then(function(res){
+    if (!res || res.ok === false) { toast('Грешка при изтриване: '+sbErrMsg(res),'#dc2626'); return; }
+    bulTaskReports = bulTaskReports.filter(function(r){ return String(r.id)!==String(id); });
+    toast('✅ Отчетът е махнат');
+    renderBulletin();
+    trRefreshSection('etk');
+  });
+}
+/* Секцията във формата. prefix 'tk' (нова) или 'etk' (редакция). */
+function trSectionHtml(prefix, task){
+  var existing = task ? trRowsForTask(task.id) : [];
+  return '<div id="'+prefix+'-tr" class="tr-section" style="border:1px dashed #bae6fd;border-radius:8px;padding:8px 10px;margin-top:10px;background:#f8fdff;">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;">' +
+      '<div style="font-size:12.5px;font-weight:600;color:#0369a1;">📨 Отчет за изпълнението</div>' +
+      '<button type="button" class="tr-open" data-prefix="'+prefix+'" onclick="trToggleEditor(this.dataset.prefix)" style="border:1px solid #bae6fd;background:#fff;color:#0369a1;border-radius:5px;padding:2px 9px;font-size:11px;cursor:pointer;">+ Насрочи</button>' +
+    '</div>' +
+    '<div style="font-size:10.5px;color:#64748b;margin-top:3px;">Картичка с изпълнилите / неизпълнилите, коментарите и файловете — до избраните, в избрания час.' +
+      (bulIsPublished() ? '' : ' <b style="color:#b45309;">Бюлетинът е чернова — отчетът тръгва само ако е публикуван към часа.</b>') + '</div>' +
+    '<div id="'+prefix+'-tr-list">'+trListHtml(prefix, existing)+'</div>' +
+    '<div id="'+prefix+'-tr-editor" hidden></div>' +
+    '</div>';
+}
+function trListHtml(prefix, existing){
+  var h = '';
+  (existing||[]).forEach(function(r){
+    h += '<div class="tr-row" data-tr-id="'+r.id+'" style="display:flex;justify-content:space-between;gap:6px;font-size:11.5px;color:#0f172a;padding:3px 0;border-bottom:1px solid #e0f2fe;">' +
+      '<span>📨 '+esc(trWhenLabel(r.scheduled_date, r.scheduled_time))+(r.last_sent_at?' ✓':'')+' → '+esc(trRecipientsLabel(r.target_recipients))+'</span>' +
+      '<button type="button" class="tr-del" data-tr-id="'+r.id+'" onclick="trDeleteReport(this.dataset.trId)" style="border:none;background:none;color:#dc2626;font-size:11px;cursor:pointer;">✕</button></div>';
+  });
+  (trDrafts[prefix]||[]).forEach(function(d, i){
+    h += '<div class="tr-draft" style="display:flex;justify-content:space-between;gap:6px;font-size:11.5px;color:#0369a1;padding:3px 0;border-bottom:1px solid #e0f2fe;">' +
+      '<span>🕒 '+esc(trWhenLabel(d.date, d.time))+' → '+esc(trRecipientsLabel(d))+' <i style="color:#94a3b8;">(записва се със задачата)</i></span>' +
+      '<button type="button" class="tr-draft-del" data-prefix="'+prefix+'" data-i="'+i+'" onclick="trRemoveDraft(this.dataset.prefix,+this.dataset.i)" style="border:none;background:none;color:#dc2626;font-size:11px;cursor:pointer;">✕</button></div>';
+  });
+  return h;
+}
+function trRefreshSection(prefix){
+  var el = document.getElementById(prefix+'-tr-list');
+  if (!el) return;
+  var tid = prefix==='etk' ? trEditTaskId : null;
+  el.innerHTML = trListHtml(prefix, tid ? trRowsForTask(tid) : []);
+}
+var trEditTaskId = null;
+function trEditorHtml(prefix, task){
+  var dueIds = prefix+'-due-dates';
+  var when = trDefaultWhen(typeof readDueDatesCheckboxes==='function' && document.getElementById(dueIds) ? readDueDatesCheckboxes(dueIds) : (task ? taskDueDates(task) : []));
+  var author = trAuthorId(task);
+  var users = (reportGroupPeopleCache||[]).filter(function(u){ return u && u.email && u.id; });
+  if (author && !users.some(function(u){ return String(u.id)===author; })) users = [{ id:author, email:'', display_name:(currentUser&&currentUser.display_name)||'Аз' }].concat(users);
+  return '<div style="display:flex;gap:8px;margin-top:8px;">' +
+      '<div style="flex:1;"><label class="fl">Дата</label><input class="fi" type="date" id="'+prefix+'-tr-date" value="'+when.date+'"></div>' +
+      '<div style="width:110px;"><label class="fl">Час</label><input class="fi" type="time" step="900" id="'+prefix+'-tr-time" value="'+when.time+'"></div>' +
+    '</div>' +
+    '<label class="fl">Групи</label>' +
+    '<div id="'+prefix+'-tr-groups" style="display:flex;flex-wrap:wrap;gap:6px;">' +
+      REPORT_GROUP_KEYS.map(function(k){
+        return '<label style="display:inline-flex;align-items:center;gap:4px;border:1px solid #cbd5e1;border-radius:14px;padding:2px 9px;font-size:11.5px;cursor:pointer;background:#fff;"><input type="checkbox" value="'+k+'" style="width:13px;height:13px;">'+esc(reportGroupLabel(k))+'</label>';
+      }).join('') +
+    '</div>' +
+    '<label class="fl">Конкретни хора (Ctrl/Cmd за няколко)</label>' +
+    '<select class="fi" id="'+prefix+'-tr-users" multiple size="5" style="height:96px;">' +
+      users.map(function(u){
+        return '<option value="'+escAttr(String(u.id))+'"'+(String(u.id)===author?' selected':'')+'>'+esc(u.display_name||u.email)+(String(u.id)===author?' (автор)':'')+'</option>';
+      }).join('') +
+    '</select>' +
+    '<div style="display:flex;justify-content:flex-end;margin-top:6px;"><button type="button" class="tr-add" data-prefix="'+prefix+'" onclick="trAddDraft(this.dataset.prefix)" style="border:1px solid #bae6fd;background:#fff;color:#0369a1;border-radius:5px;padding:3px 10px;font-size:11px;cursor:pointer;">+ Добави още един час</button></div>';
+}
+function trToggleEditor(prefix){
+  var ed = document.getElementById(prefix+'-tr-editor');
+  if (!ed) return;
+  if (ed.hidden) {
+    var task = prefix==='etk' ? bulTasks.find(function(x){ return String(x.id)===String(trEditTaskId); }) : null;
+    ed.innerHTML = trEditorHtml(prefix, task);
+    ed.hidden = false;
+  } else { ed.hidden = true; ed.innerHTML = ''; }
+}
+/* Чете отворения редактор. null — затворен; {error} — непълен. */
+function trReadEditor(prefix){
+  var ed = document.getElementById(prefix+'-tr-editor');
+  if (!ed || ed.hidden || !ed.innerHTML) return null;
+  var date = (document.getElementById(prefix+'-tr-date')||{}).value||'';
+  var time = ((document.getElementById(prefix+'-tr-time')||{}).value||'').slice(0,5);
+  var groups = Array.prototype.map.call(document.querySelectorAll('#'+prefix+'-tr-groups input:checked'), function(c){ return c.value; });
+  var sel = document.getElementById(prefix+'-tr-users');
+  var ids = sel ? Array.prototype.map.call(sel.selectedOptions||[], function(o){ return o.value; }) : [];
+  if (!date || !/^\d\d:\d\d$/.test(time)) return { error:'Отчет за изпълнението: избери дата и час' };
+  if (!groups.length && !ids.length) return { error:'Отчет за изпълнението: избери поне една група или човек' };
+  var at = new Date(date+'T'+time+':00');
+  if (!(at.getTime() > Date.now())) return { error:'Отчет за изпълнението: часът '+trWhenLabel(date,time)+' вече е минал' };
+  return { date:date, time:time, groups:groups, user_ids:ids };
+}
+function trAddDraft(prefix){
+  var d = trReadEditor(prefix);
+  if (!d) return;
+  if (d.error) { toast(d.error,'#dc2626'); return; }
+  (trDrafts[prefix] = trDrafts[prefix]||[]).push(d);
+  trRefreshSection(prefix);
+  var ed = document.getElementById(prefix+'-tr-editor');
+  if (ed) { ed.hidden = true; ed.innerHTML = ''; }
+}
+function trRemoveDraft(prefix, i){
+  (trDrafts[prefix]||[]).splice(i,1);
+  trRefreshSection(prefix);
+}
+/* Всичко за записване: черновите + отвореният редактор. {error} спира
+   записа на задачата ПРЕДИ да е тръгнал. */
+function trCollect(prefix){
+  var list = (trDrafts[prefix]||[]).slice();
+  var cur = trReadEditor(prefix);
+  if (cur && cur.error) return { error: cur.error };
+  if (cur) list.push(cur);
+  return { list: list };
+}
+/* Записва отчетите за задачата. Провал → червен тост; задачата остава. */
+function trSaveReports(taskId, list){
+  if (!list || !list.length) return Promise.resolve(true);
+  var who = bulActor();
+  return Promise.all(list.map(function(d){
+    return sbPost('notification_schedules', {
+      entity_type:'task_report', entity_id:String(taskId), schedule_type:'once',
+      scheduled_date:d.date, scheduled_time:d.time, message:null, active:true,
+      created_by:who, target_recipients:{ groups:d.groups, user_ids:d.user_ids }
+    });
+  })).then(function(res){
+    var bad = res.filter(function(r){ return !r || r.ok===false; });
+    if (bad.length) { toast('Задачата е записана, но '+bad.length+' от '+list.length+' отчета НЕ са насрочени: '+sbErrMsg(bad[0]),'#dc2626'); return false; }
+    return true;
+  });
+}
+
+function openTaskModal(){trDrafts.tk=[];var trw=document.getElementById('tk-tr-wrap');if(trw)trw.innerHTML=trSectionHtml('tk',null);if(!reportGroupPeopleCache)loadReportGroupPeople();document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');}
 function closeTk(){document.getElementById('tk-ov').classList.remove('open');}
 function submitTask(){
   var title=(document.getElementById('tk-title').value||'').trim();
@@ -2600,9 +2825,19 @@ function submitTask(){
   var dueDates=readDueDatesCheckboxes('tk-due-dates');
   var autoComplete=bulAutoCompleteRead('tk',linkedModule);
   if(!bulAutoCompleteValid(autoComplete,dueDates))return;
-  sbPost('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
+  var trc=trCollect('tk');
+  if(trc.error){toast(trc.error,'#dc2626');return;}
+  /* sbPostReturn — id-то на задачата трябва за насрочените отчети. */
+  sbPostReturn('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
-    closeTk(); toast('✅ Задачата е добавена!'); loadBulletin();
+    var newId=r.row&&r.row.id;
+    var repP=trc.list.length
+      ? (newId ? trSaveReports(newId,trc.list) : Promise.resolve(false).then(function(){toast('Задачата е добавена, но отчетите НЕ са насрочени: сървърът не върна id','#dc2626');return false;}))
+      : Promise.resolve(true);
+    repP.then(function(okRep){
+      trDrafts.tk=[];
+      closeTk(); if(okRep)toast('✅ Задачата е добавена!'+(trc.list.length?' Насрочени отчети: '+trc.list.length:'')); loadBulletin();
+    });
     /* Push само ако бюлетинът вече е публикуван - иначе магазините още не
        виждат задачата и известието би било подвеждащо. */
     if(bulIsPublished() && typeof pushNewBulletinTask==='function'){

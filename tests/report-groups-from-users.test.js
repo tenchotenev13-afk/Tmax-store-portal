@@ -220,7 +220,7 @@ const serve = (SRC.match(/Deno\.serve\([\s\S]*$/) || [''])[0];
     guard('loadReportGroupPeople() не хвърля', () => { w.loadReportGroupPeople().then(r => { loaded = r; }); });
     for (let i = 0; i < 20 && !loaded; i++) await ticks();
     const q = h.calls.get.filter(x => x.indexOf('/users?') >= 0);
-    ok('заявката е с явен select=email,display_name,notify_groups', q.some(x => x.indexOf('select=email,display_name,notify_groups') >= 0), q.join(' | '));
+    ok('заявката е с явен select=id,email,display_name,notify_groups', q.some(x => x.indexOf('select=id,email,display_name,notify_groups') >= 0), q.join(' | '));
     ok('и само активните', q.some(x => x.indexOf('active=eq.true') >= 0));
     const L = lbl();
     ok('ЦО (Жеко Желязков, Василка Шикова)', L[0] === 'ЦО (Жеко Желязков, Василка Шикова)', L[0]);

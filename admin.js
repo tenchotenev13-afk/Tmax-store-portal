@@ -1986,13 +1986,15 @@ var NOTIF_ENTITY_TABLES = {
   promotion:      'bulletin_promotions',
   task:           'bulletin_tasks',
   recurring_task: 'recurring_tasks',
-  subtask:        'task_subtasks'
+  subtask:        'task_subtasks',
+  task_report:    'bulletin_tasks'
 };
 var NOTIF_ENTITY_LABELS = {
   promotion:      'Промоция',
   task:           'Задача',
   recurring_task: 'Постоянна задача',
-  subtask:        'Под-задача'
+  subtask:        'Под-задача',
+  task_report:    '📨 Отчет по задача'
 };
 var NOTIF_SCHED_TYPE_LABELS = { once: 'Еднократно', daily: 'Всеки ден', weekly: 'Всяка седмица' };
 
