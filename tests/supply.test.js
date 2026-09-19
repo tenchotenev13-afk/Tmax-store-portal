@@ -12,7 +12,14 @@
    - ЦО/admin: списък ✅/⬜ кой е попълнил седмицата (Етап 1) и матрица
      артикули × обекти с избор на седмица, чипове по доставчик, скриване на
      празните редове и пълен Excel износ (Етап 2);
-   - supplyWeekStart(): понеделникът на ISO седмицата, неделя -> предишния.
+   - supplyWeekStart(): понеделникът на ISO седмицата, неделя -> предишния;
+   - снимки-подсказки (supply_templates.photos) под указанията: href,
+     target=_blank, rel=noopener; без снимки — без контейнер;
+   - колоната САП се скрива при бланка без нито един код (floor-lm) във
+     формата и в матрицата, а в Excel остава празна;
+   - бланка без нито един доставчик: в матрицата няма ред с чипове и колона
+     „Доставчик"; в Excel колоната остава празна. При ЕДИН доставчик
+     чиповете си стоят (секция 13).
 
    Пускане: node tests/supply.test.js .
 */
@@ -476,6 +483,150 @@ const RED = /^(#dc2626|rgb\(220,38,38\))$/;
     ok('обектът няма матрица, чипове, ◀ ▶ и Excel', !mod(h2).querySelector('table.sup-matrix') && !mod(h2).querySelector('.sup-chip') &&
       !h2.doc.getElementById('sup-week-prev') && !mod(h2).querySelector('.sup-excel'));
     ok('формата на обекта си е на мястото', !!h2.doc.getElementById('sup-q1-it-a'));
+  }
+
+  /* ── Бланки от 19.09.2026: снимки-подсказки и шаблон без САП кодове ── */
+  const PH = n => 'https://tenchotenev13-afk.github.io/Tmax-store-portal/img/supply/cable-reel-' + n + '.jpg';
+  const CABLES = {
+    id: 'tpl-cab', name: 'Кабели на макара', slug: 'cables-reels', col1_label: 'Налична макара', col2_label: null,
+    target_stores: null, active: true, sort_order: 2, photos: [PH(1), PH(2), PH(3)],
+    instructions: 'Попълваме само брой макари. Ако нямате — пишете 0.'
+  };
+  const CABLE_ITEMS = [
+    { id: 'c-1', template_id: 'tpl-cab', sap_code: '23237', name: 'ПВВ-МБ1 2X1', supplier: null, active: true, sort_order: 1 },
+    { id: 'c-2', template_id: 'tpl-cab', sap_code: '23238', name: 'ПВВ-МБ1 2X1.5', supplier: null, active: true, sort_order: 2 }
+  ];
+  const FLOOR = {
+    id: 'tpl-floor', name: 'Подови настилки (линейни метри)', slug: 'floor-lm',
+    col1_label: 'Общ брой места в търговска зала', col2_label: 'Брой за трансфер/поръчка ОБЩО (зала и склад)',
+    target_stores: null, active: true, sort_order: 1, photos: null,
+    instructions: 'Първата колона е броят места за ролки в търговската зала.'
+  };
+  const FLOOR_ITEMS = [
+    { id: 'f-1', template_id: 'tpl-floor', sap_code: null, name: 'Балатум 4м.', supplier: null, active: true, sort_order: 1 },
+    { id: 'f-2', template_id: 'tpl-floor', sap_code: null, name: 'Балатум 3м.', supplier: null, active: true, sort_order: 2 }
+  ];
+  function tplEnv(user, tpls, items, entries) {
+    const h = env(user);
+    h.setData('supply_templates', tpls);
+    h.setData('supply_template_items', items);
+    h.setData('supply_entries', () => entries || []);
+    return h;
+  }
+  const card = (h, id) => h.doc.getElementById(id);
+
+  section('18. Снимки-подсказки под указанията');
+  {
+    const withBad = Object.assign({}, CABLES, { photos: CABLES.photos.concat(['javascript:alert(1)', '']) });
+    const h = tplEnv(STORE, [withBad], CABLE_ITEMS);
+    h.w.loadSupply(); await ticks(6);
+    const c = card(h, 'sup-card-tpl-cab');
+    const box = c && c.querySelector('.sup-photos');
+    ok('има контейнер .sup-photos', !!box);
+    const links = box ? Array.from(box.querySelectorAll('a')) : [];
+    ok('точно 3 снимки (javascript: и празният низ са отхвърлени)', links.length === 3, String(links.length));
+    ok('href-овете са трите URL-а по ред', links.map(a => a.getAttribute('href')).join('|') === [PH(1), PH(2), PH(3)].join('|'),
+      links.map(a => a.getAttribute('href')).join('|'));
+    ok('всяка връзка е target=_blank', links.length === 3 && links.every(a => a.getAttribute('target') === '_blank'));
+    ok('всяка връзка е rel=noopener', links.length === 3 && links.every(a => /\bnoopener\b/.test(a.getAttribute('rel') || '')));
+    const imgs = box ? Array.from(box.querySelectorAll('img')) : [];
+    ok('миниатюрите сочат същите URL-и', imgs.map(i => i.getAttribute('src')).join('|') === [PH(1), PH(2), PH(3)].join('|'));
+    ok('височина 90px', imgs.length === 3 && imgs.every(i => /height:\s*90px/.test(i.getAttribute('style') || '')));
+    ok('контейнерът е flex, wrap, gap 8px', !!box && /display:\s*flex/.test(box.getAttribute('style')) &&
+      /flex-wrap:\s*wrap/.test(box.getAttribute('style')) && /gap:\s*8px/.test(box.getAttribute('style')));
+    const html = c ? c.innerHTML : '';
+    ok('снимките са ПОД указанията и НАД таблицата',
+      html.indexOf('Ако нямате — пишете 0.') < html.indexOf('sup-photos') && html.indexOf('sup-photos') < html.indexOf('<table'));
+
+    const h2 = tplEnv(STORE, [Object.assign({}, CABLES, { id: 'tpl-null', photos: null }), Object.assign({}, CABLES, { id: 'tpl-empty', slug: 'e', photos: [] })],
+      CABLE_ITEMS.concat(CABLE_ITEMS.map(i => Object.assign({}, i, { id: i.id + 'e', template_id: 'tpl-empty' }))).map(i => i.template_id === 'tpl-cab' ? Object.assign({}, i, { template_id: 'tpl-null' }) : i));
+    h2.w.loadSupply(); await ticks(6);
+    ok('photos=null: няма контейнер', !!card(h2, 'sup-card-tpl-null') && !card(h2, 'sup-card-tpl-null').querySelector('.sup-photos'));
+    ok('photos=[]: няма контейнер', !!card(h2, 'sup-card-tpl-empty') && !card(h2, 'sup-card-tpl-empty').querySelector('.sup-photos'));
+    ok('в целия модул няма нито една .sup-photos', !mod(h2).querySelector('.sup-photos'));
+  }
+
+  section('19. Обект: floor-lm без САП колона и с две колони; кабелите със САП');
+  {
+    const h = tplEnv(STORE, [FLOOR, CABLES], FLOOR_ITEMS.concat(CABLE_ITEMS));
+    h.w.loadSupply(); await ticks(6);
+    const fc = card(h, 'sup-card-tpl-floor'), cc = card(h, 'sup-card-tpl-cab');
+    const fHeads = fc ? Array.from(fc.querySelectorAll('thead th')).map(th => th.textContent.trim()) : [];
+    ok('floor-lm: колони Име | Доставчик | col1 | col2 | Миналата седмица (без САП)',
+      fHeads.join('|') === 'Име|Доставчик|Общ брой места в търговска зала|Брой за трансфер/поръчка ОБЩО (зала и склад)|Миналата седмица', fHeads.join('|'));
+    const fRow = fc ? fc.querySelector('tbody tr') : null;
+    ok('floor-lm: всеки ред има 5 клетки (колкото заглавията)', !!fRow && fRow.children.length === 5, fRow && String(fRow.children.length));
+    ok('floor-lm: първата клетка е името, не празен САП', !!fRow && fRow.children[0].textContent.trim() === 'Балатум 4м.');
+    ok('floor-lm: две полета за вход на ред', !!h.doc.getElementById('sup-q1-f-1') && !!h.doc.getElementById('sup-q2-f-1'));
+    ok('floor-lm (photos=null): без снимки', !!fc && !fc.querySelector('.sup-photos'));
+    const cHeads = cc ? Array.from(cc.querySelectorAll('thead th')).map(th => th.textContent.trim()) : [];
+    ok('кабели: САП е първа колона', cHeads[0] === 'САП', cHeads.join('|'));
+    ok('кабели: снимките са там', !!cc && cc.querySelectorAll('.sup-photos a').length === 3);
+
+    h.doc.getElementById('sup-q1-f-1').value = '6';
+    h.doc.getElementById('sup-q2-f-1').value = '14';
+    realClick(h.w, btn(fc, 'Запази'));
+    await ticks(8);
+    const p = (h.calls.post[0] || {}).body || {};
+    ok('floor-lm запис: един POST с qty1=6 и qty2=14', h.calls.post.length === 1 && p.item_id === 'f-1' && p.qty1 === 6 && p.qty2 === 14, JSON.stringify(p));
+  }
+
+  section('20. ЦО: floor-lm матрица без САП, двойни колони; Excel пази САП празна');
+  {
+    const wkH = env(ADMIN); const wk = wkH.w.supplyWeekStart();
+    const h = tplEnv(ADMIN, [FLOOR, CABLES], FLOOR_ITEMS.concat(CABLE_ITEMS), [
+      { id: 'e1', template_id: 'tpl-floor', item_id: 'f-1', store_name: 'Сливен', week_start: wk, qty1: 6, qty2: 14 },
+      { id: 'e2', template_id: 'tpl-floor', item_id: 'f-1', store_name: 'Габрово', week_start: wk, qty1: 3, qty2: null },
+      { id: 'e3', template_id: 'tpl-cab', item_id: 'c-1', store_name: 'Сливен', week_start: wk, qty1: 2, qty2: null }
+    ]);
+    h.w.loadSupply(); await ticks(8);
+    const fo = card(h, 'sup-ov-tpl-floor'), co = card(h, 'sup-ov-tpl-cab');
+    const trs = fo ? fo.querySelectorAll('table.sup-matrix thead tr') : [];
+    const top = trs[0] ? Array.from(trs[0].children).map(th => th.textContent.trim() + '/' + (th.getAttribute('colspan') || '1')) : [];
+    ok('floor-lm горен ред: Име | Габрово×2 | Сливен×2 | Общо×2 (без САП и Доставчик)',
+      top.join('|') === 'Име/1|Габрово/2|Сливен/2|Общо/2', top.join('|'));
+    const sub = trs[1] ? Array.from(trs[1].children).map(th => th.textContent.trim()) : [];
+    ok('floor-lm долен ред: 3 × (col1, col2)', sub.length === 6 && sub[0] === FLOOR.col1_label && sub[1] === FLOOR.col2_label, sub.join('|'));
+    const r1 = fo ? fo.querySelector('tr[data-item="f-1"]') : null;
+    ok('floor-lm ред: 1 + 6 клетки (без САП и Доставчик)', !!r1 && r1.children.length === 7, r1 && String(r1.children.length));
+    const vals = r1 ? Array.from(r1.querySelectorAll('td.sup-cell,td.sup-total')).map(td => td.textContent) : [];
+    ok('floor-lm стойности: Габрово 3/празно, Сливен 6/14, Общо 9/14', vals.join('|') === '3||6|14|9|14', JSON.stringify(vals));
+    ok('floor-lm: първата клетка е името', !!r1 && r1.children[0].textContent.trim() === 'Балатум 4м.');
+    const cHead = co ? co.querySelector('table.sup-matrix thead th') : null;
+    ok('кабели в матрицата: САП остава', !!cHead && cHead.textContent.trim() === 'САП');
+    ok('без нито един доставчик: няма ред с чипове', !!fo && !fo.querySelector('.sup-chips') && !fo.querySelector('.sup-chip'));
+    ok('без нито един доставчик: няма колона „Доставчик"', !!fo && Array.from(fo.querySelectorAll('thead th')).every(th => th.textContent.trim() !== 'Доставчик'));
+    ok('чекбоксът и Excel бутонът си стоят', !!fo && !!fo.querySelector('.sup-hide-empty') && !!fo.querySelector('.sup-excel'));
+    const r2 = fo ? fo.querySelector('tr[data-item="f-2"]') : null;
+    ok('празен ред: клетки 7', !!r2 && r2.children.length === 7);
+    const hE = tplEnv(ADMIN, [Object.assign({}, FLOOR, { target_stores: ['Сливен', 'Габрово'] })], FLOOR_ITEMS, []);
+    hE.w.loadSupply(); await ticks(8);
+    setHide(hE, true);
+    const emptyTd = card(hE, 'sup-ov-tpl-floor') && card(hE, 'sup-ov-tpl-floor').querySelector('tbody td[colspan]');
+    ok('„Няма редове" с colspan = листовите колони без Доставчик (1 + 3×2 = 7)',
+      !!emptyTd && emptyTd.getAttribute('colspan') === '7', emptyTd && emptyTd.getAttribute('colspan'));
+    const co2 = card(h, 'sup-ov-tpl-cab');
+    ok('кабели (също без доставчик): няма чипове и колона „Доставчик", САП остава',
+      !!co2 && !co2.querySelector('.sup-chips') &&
+      Array.from(co2.querySelectorAll('thead th')).map(th => th.textContent.trim()).slice(0, 2).join('|') === 'САП|Име');
+
+    const x = { aoa: null, file: null };
+    h.w.XLSX = { utils: { book_new: () => ({}), aoa_to_sheet: a => { x.aoa = a; return {}; }, book_append_sheet: () => {} },
+      writeFile: (wb, n) => { x.file = n; } };
+    realClick(h.w, fo.querySelector('.sup-excel'));
+    await ticks(2);
+    const aoa = x.aoa || [];
+    ok('Excel floor-lm: първата заглавка е САП', (aoa[0] || [])[0] === 'САП', (aoa[0] || []).join('|'));
+    ok('Excel floor-lm: заглавки с двойни колони',
+      (aoa[0] || []).slice(3).join('|') === ['Габрово — ' + FLOOR.col1_label, 'Габрово — ' + FLOOR.col2_label, 'Сливен — ' + FLOOR.col1_label,
+        'Сливен — ' + FLOOR.col2_label, 'Общо — ' + FLOOR.col1_label, 'Общо — ' + FLOOR.col2_label].join('|'), (aoa[0] || []).slice(3).join('|'));
+    ok('Excel floor-lm: 1 + 2 реда', aoa.length === 3, String(aoa.length));
+    ok('Excel floor-lm: заглавки САП | Име | Доставчик остават', (aoa[0] || []).slice(0, 3).join('|') === 'САП|Име|Доставчик', (aoa[0] || []).slice(0, 3).join('|'));
+    ok('Excel floor-lm: клетките „Доставчик" са празни', aoa.slice(1).every(r => r[2] === ''), JSON.stringify(aoa.slice(1).map(r => r[2])));
+    ok('Excel floor-lm: САП клетките са празни', aoa.slice(1).every(r => r[0] === ''), JSON.stringify(aoa.slice(1).map(r => r[0])));
+    ok('Excel floor-lm ред 1: [\'\', Балатум 4м., \'\', 3, null, 6, 14, 9, 14]',
+      JSON.stringify(aoa[1]) === JSON.stringify(['', 'Балатум 4м.', '', 3, null, 6, 14, 9, 14]), JSON.stringify(aoa[1]));
+    ok('Excel файл: zarezhdane_floor-lm_<week>.xlsx', x.file === 'zarezhdane_floor-lm_' + wk + '.xlsx', x.file);
   }
 
   report();

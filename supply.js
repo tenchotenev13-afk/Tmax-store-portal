@@ -56,6 +56,34 @@ function supplyFmtStamp(ts){
   return fmtDate(localDateISO(d)) + ' ' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
 }
 
+/* Колоната САП се показва само ако поне един артикул на бланката има код.
+   Бланки като „Подови настилки" нямат кодове изобщо и колоната би стояла
+   празна. В Excel колоната остава винаги (supplyOvHeaderRow). */
+function supplyHasSap(items){
+  return items.some(function(i){ return i.sap_code !== null && i.sap_code !== undefined && String(i.sap_code).trim() !== ''; });
+}
+/* Има ли поне един артикул с доставчик. Ако няма — в матрицата за ЦО
+   чиповете и колоната „Доставчик" не се рендират: и двете биха показвали
+   само „Без доставчик". В Excel колоната остава (supplyOvHeaderRow). */
+function supplyHasSupplier(items){
+  return items.some(function(i){ return i.supplier !== null && i.supplier !== undefined && String(i.supplier).trim() !== ''; });
+}
+/* Миниатюри на снимките-подсказки (supply_templates.photos). Празен или
+   липсващ масив -> празен низ, без контейнер. Допускат се само http(s)
+   адреси — стойността отива в href. */
+function supplyPhotosHtml(t){
+  var urls = (Array.isArray(t.photos) ? t.photos : []).filter(function(u){
+    return typeof u === 'string' && /^https?:\/\//i.test(u.trim());
+  });
+  if(!urls.length) return '';
+  return '<div class="sup-photos" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;">' +
+    urls.map(function(u, n){
+      return '<a href="' + escAttr(u.trim()) + '" target="_blank" rel="noopener">' +
+        '<img src="' + escAttr(u.trim()) + '" alt="Снимка ' + (n + 1) + '" loading="lazy" ' +
+        'style="height:90px;width:auto;border-radius:6px;border:1px solid #e2e8f0;display:block;"></a>';
+    }).join('') + '</div>';
+}
+
 /* ─── LOAD ──────────────────────────────────────────────────── */
 function loadSupply(){
   var wrap = document.getElementById('mod-supply'); if(!wrap) return;
@@ -110,6 +138,7 @@ function renderSupplyStore(){
     supplyEntries.forEach(function(e){ byItem[e.item_id] = e; });
     supplyPrevEntries.forEach(function(e){ prevByItem[e.item_id] = e; });
     var two = !!t.col2_label;
+    var sap = supplyHasSap(items);
 
     /* „Последно запазено" — най-новият запис на обекта за седмицата по тази бланка. */
     var last = null;
@@ -122,9 +151,10 @@ function renderSupplyStore(){
     html += '<div class="card" id="sup-card-' + escAttr(t.id) + '" style="margin-bottom:14px;">' +
       '<div class="card-title">' + esc(t.name) + '</div>' +
       (t.instructions ? '<div style="font-size:13px;color:var(--muted);margin-bottom:10px;white-space:pre-line;">' + esc(t.instructions) + '</div>' : '') +
+      supplyPhotosHtml(t) +
       (last ? '<div class="sup-last" style="font-size:12px;color:#16a34a;margin-bottom:8px;">Последно запазено: ' + supplyFmtStamp(last.ts) + ' от ' + esc(last.by) + '</div>' : '') +
       '<div class="tbl-wrap"><table><thead><tr>' +
-        '<th>САП</th><th>Име</th><th>Доставчик</th>' +
+        (sap ? '<th>САП</th>' : '') + '<th>Име</th><th>Доставчик</th>' +
         '<th style="text-align:center;">' + esc(t.col1_label) + '</th>' +
         (two ? '<th style="text-align:center;">' + esc(t.col2_label) + '</th>' : '') +
         '<th style="text-align:center;">Миналата седмица</th>' +
@@ -137,7 +167,7 @@ function renderSupplyStore(){
             (val === null || val === undefined ? '' : String(val)) + '" style="text-align:center;max-width:110px;padding:5px 8px;">';
         }
         return '<tr>' +
-          '<td style="font-family:DM Mono,monospace;">' + esc(i.sap_code) + '</td>' +
+          (sap ? '<td style="font-family:DM Mono,monospace;">' + esc(i.sap_code) + '</td>' : '') +
           '<td>' + esc(i.name) + '</td>' +
           '<td style="font-size:12px;">' + esc(i.supplier) + '</td>' +
           '<td style="text-align:center;">' + inp(1, e.qty1) + '</td>' +
@@ -417,18 +447,21 @@ function renderSupplyOverview(){
     }
     function num(v){ return v === null ? '' : String(v); }
     var tdNum = 'text-align:center;font-family:DM Mono,monospace;';
-    var colCount = 3 + (m.stores.length + 1) * (m.two ? 2 : 1);
+    var rowItems = m.rows.map(function(r){ return r.item; });
+    var sap = supplyHasSap(rowItems);
+    var hasSup = supplyHasSupplier(rowItems);
+    var colCount = 1 + (sap ? 1 : 0) + (hasSup ? 1 : 0) + (m.stores.length + 1) * (m.two ? 2 : 1);
 
     var thead;
     if(m.two){
-      thead = '<tr><th rowspan="2">САП</th><th rowspan="2">Име</th><th rowspan="2">Доставчик</th>' +
+      thead = '<tr>' + (sap ? '<th rowspan="2">САП</th>' : '') + '<th rowspan="2">Име</th>' + (hasSup ? '<th rowspan="2">Доставчик</th>' : '') +
         m.stores.map(function(s){ return '<th colspan="2" style="text-align:center;">' + esc(s) + '</th>'; }).join('') +
         '<th colspan="2" style="text-align:center;">Общо</th></tr><tr>' +
         m.stores.concat(['Общо']).map(function(){
           return '<th style="text-align:center;">' + esc(t.col1_label) + '</th><th style="text-align:center;">' + esc(t.col2_label) + '</th>';
         }).join('') + '</tr>';
     } else {
-      thead = '<tr><th>САП</th><th>Име</th><th>Доставчик</th>' +
+      thead = '<tr>' + (sap ? '<th>САП</th>' : '') + '<th>Име</th>' + (hasSup ? '<th>Доставчик</th>' : '') +
         m.stores.map(function(s){ return '<th style="text-align:center;">' + esc(s) + '</th>'; }).join('') +
         '<th style="text-align:center;">Общо</th></tr>';
     }
@@ -441,9 +474,9 @@ function renderSupplyOverview(){
         return '<span class="sup-ov-store" data-filled="' + (ok ? '1' : '0') + '">' + (ok ? '✅' : '⬜') + ' ' + esc(s) + '</span>';
       }).join('') +
       '</div>' +
-      '<div class="filter-bar sup-chips" style="margin-bottom:8px;">' +
+      (hasSup ? '<div class="filter-bar sup-chips" style="margin-bottom:8px;">' +
         chip(-1, 'Всички') + sups.map(function(s, i){ return chip(i, s || 'Без доставчик'); }).join('') +
-      '</div>' +
+      '</div>' : '') +
       '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">' +
         '<label style="font-size:13px;display:flex;align-items:center;gap:6px;cursor:pointer;">' +
           '<input type="checkbox" class="sup-hide-empty"' + (hide ? ' checked' : '') +
@@ -453,9 +486,9 @@ function renderSupplyOverview(){
       '<div class="sup-matrix-wrap" style="overflow-x:auto;"><table class="sup-matrix"><thead>' + thead + '</thead><tbody>' +
       (visible.length ? visible.map(function(r){
         return '<tr data-item="' + escAttr(r.item.id) + '">' +
-          '<td style="font-family:DM Mono,monospace;">' + esc(r.item.sap_code) + '</td>' +
+          (sap ? '<td style="font-family:DM Mono,monospace;">' + esc(r.item.sap_code) + '</td>' : '') +
           '<td style="white-space:nowrap;">' + esc(r.item.name) + '</td>' +
-          '<td style="font-size:12px;white-space:nowrap;">' + esc(r.item.supplier) + '</td>' +
+          (hasSup ? '<td style="font-size:12px;white-space:nowrap;">' + esc(r.item.supplier) + '</td>' : '') +
           r.cells.map(function(v){ return '<td class="sup-cell" style="' + tdNum + '">' + num(v) + '</td>'; }).join('') +
           r.totals.map(function(v){ return '<td class="sup-total" style="' + tdNum + 'font-weight:700;">' + num(v) + '</td>'; }).join('') +
         '</tr>';
