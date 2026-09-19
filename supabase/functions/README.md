@@ -39,8 +39,8 @@
 | `bulletin-notify` | 15 | `index.ts` | Известията от Бюлетина: теми `overdue_tasks`, `today_deadlines`, `deadline_passed`, `promo_expiring` | **крон 15** (`*/15 * * * *`) + портал — `push.js` (`runNotifyTopic`) | ✅ |
 | `send-scheduled-report` | 34 | `index.ts` | Дневен (днешният ден) и седмичен (текущата седмица) репорт по имейл; по `type` в тялото и „Палети" (петък) и „Логистичен склад" (неделя) | **крон 19** `daily-report-21h` (`0 18,19 * * *`, `{"type":"daily"}`), **крон 20** `weekly-report-sun-21h` (`0 18,19 * * 0`, неделя, `weekly`), **крон 17** `pallets-report-friday-21` (`0 15,16 * * 5`, петък, `pallets`, условие час в София = **18** — името на заданието е останало от 21:00), **крон 18** (`0 18,19 * * 0`, неделя, `warehouse`) — останалите с условие час в София = 21 | ✅ |
 | `send-oborot-report` | 9 | `index.ts` | Вечерният имейл с оборота от `daily_turnover` | **крон 14** (`45 17 * * *`) | ✅ |
-| `send-routed-report` | 10 | `index.ts` | Личният седмичен отчет по задачи (`report_groups` → отделно писмо на човек); от 19.09.2026 и **отчет по задача** — вход `{task_id, recipients}`, една картичка; при `linked_module='supply'` под нея и секция „Зареждане“ (v10) | **крон 16** (`10 5 * * 1`, понеделник); тема `weekly_routed`; `dynamic-responder` (`task_report`) | ✅ |
-| `dynamic-responder` | 22 | `index.ts` | Насрочените напомняния от `notification_schedules`; `task_report` → писмо през `send-routed-report`, не push | **крон 11** (`*/15 * * * *`) | ✅ |
+| `send-routed-report` | 11 | `index.ts` | Личният седмичен отчет по задачи (`report_groups` → отделно писмо на човек); от 19.09.2026 и **отчет по задача** — вход `{task_id, recipients}`, една картичка; при `linked_module='supply'` под нея и секция „Зареждане“ (v10); и за постоянна задача — прозорец по седмицата на `run_date` (v11) | **крон 16** (`10 5 * * 1`, понеделник); тема `weekly_routed`; `dynamic-responder` (`task_report`) | ✅ |
+| `dynamic-responder` | 23 | `index.ts` | Насрочените напомняния от `notification_schedules`; `task_report` → писмо през `send-routed-report`, не push (и за постоянна задача) | **крон 11** (`*/15 * * * *`) | ✅ |
 | `kasa-access-check` | 7 | `index.ts` | Проверка на индивидуален PIN за таб История | **никой** — няма клиентска част | ✅ |
 | `set-history-pin` | 6 | `index.ts` | Админ задава/ресетва PIN (4–6 цифри) | **никой** — няма клиентска част | ✅ |
 | `swift-handler` | 41 | **`rm-push-index.ts`** | ⚠️ **НЕ Е ЗА ТОЗИ ПОРТАЛ** — напомняния към **RM-app** | **крон 4, 5, 6** (`0 5`, `0 11`, `0 14`, делник) | ✅ |
@@ -126,8 +126,14 @@ Entrypoint-ът се взима от `get_edge_function` и при два от �
 картичката секция „Зареждане“ (v10, 19.09.2026): бланките от Транспорт ›
 Зареждане за седмицата на бюлетина — кой е попълнил, кой не, стойностите по
 обекти и общо. Провал на заявка → червен ред в писмото, картичката остава.
-`tests/task-report-supply.test.js`. Само обикновени задачи — постоянните
-(`recurring_tasks`) нямат отчет по задача.
+`tests/task-report-supply.test.js`.
+
+От v11 отчетът по задача работи и за **постоянна** задача: `entity_id` в
+`notification_schedules` сочи `recurring_tasks.id` (без нова колона —
+id-то се търси първо в `bulletin_tasks`, после в `recurring_tasks`).
+Прозорецът е седмицата на `run_date`, не бюлетин; картичката е с 🔁;
+не е дължима тази седмица / не важи / изключена → нищо, с `console.warn`.
+`tests/task-report-recurring.test.js`.
 
 ### Викат се от портала
 
@@ -191,7 +197,9 @@ denomailer@1.6.0 реже символи и чупи SMTP dot-stuffing; тема
 (отчет по задача, насрочен от формата в Бюлетина) не е push: една заявка към
 `send-routed-report` с `{task_id, recipients}` (от `target_recipients`);
 `last_sent_at` само ако е тръгнало поне едно писмо. Чернова / изтрита задача →
-пропуск + `console.warn`.
+пропуск + `console.warn`. Постоянна задача (id от `recurring_tasks`, от v23) →
+правилото за период като при напомняне по постоянна задача
+(`recurringPeriodGate`).
 
 ### Готови на сървъра, но без клиентска част
 
