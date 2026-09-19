@@ -273,6 +273,10 @@ var LINKED_MODULES = [
   { value:'reference', label:'🛡️ Гаранции' },
   { value:'history', label:'📊 История' },
   { value:'pallets', label:'🟫 Палети' },
+  /* Подтаб на Транспорт като Палети — linkedModuleAllowed() го пуска за
+     всички. send-routed-report добавя секция „Зареждане" в отчета по задача
+     с този linked_module. */
+  { value:'supply', label:'🎨 Зареждане' },
   /* Не е самостоятелен модул, а подтаб на Каса. showModule() го пренасочва —
      виж клона за 'oborot' там. */
   { value:'oborot', label:'💰 Вечерен оборот' }

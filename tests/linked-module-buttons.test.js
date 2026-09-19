@@ -203,5 +203,38 @@ function renderOk(h, name) {
     }
   }
 
+  section('H. linked_module=supply (🎨 Зареждане, подтаб на Транспорт)');
+  {
+    const h0 = env({ regular: 'supply' });
+    const L = h0.w.LINKED_MODULES.map(m => m.value);
+    ok('supply е в LINKED_MODULES веднага след pallets', L.indexOf('supply') === L.indexOf('pallets') + 1, L.join(','));
+    ok('етикетът е „🎨 Зареждане"', h0.w.linkedModuleLabel('supply') === '🎨 Зареждане');
+    ['manager', 'user', 'kasa', 'admin', 'accounting', 'logistics'].forEach(role => {
+      const hr = env({ role: role, regular: 'supply' });
+      ok('linkedModuleAllowed(supply) = true за ' + role, hr.w.linkedModuleAllowed('supply') === true);
+    });
+    ok('изборът във формата го предлага', /<option value="supply"[^>]*>🎨 Зареждане<\/option>/.test(h0.w.linkedModuleOptsHtml('')));
+
+    const h = env({ regular: 'supply' });
+    if (renderOk(h, 'рендерът минава')) {
+      const b = modBtn(h.doc, 'supply');
+      if (ok('бутонът data-mod="supply" СЪЩЕСТВУВА за магазин', !!b)) {
+        ok('носи етикета „🎨 Зареждане →"', b.textContent.indexOf('🎨 Зареждане') >= 0, b.textContent);
+        /* РЕАЛНИЯТ showModule от shared.js — не подменен. */
+        realClick(h.w, b, 'Зареждане');
+        const sub = h.doc.getElementById('transport-pallets-subnav');
+        ok('#mod-supply е видим', h.doc.getElementById('mod-supply').style.display === 'block');
+        ok('под-навигацията на Транспорт е видима', !!sub && sub.style.display === 'block');
+        ok('бутонът „🎨 Зареждане" в нея е активен', h.doc.getElementById('tps-supply').classList.contains('active'));
+        const tt = h.doc.getElementById('tab-transport');
+        ok('табът Транспорт е активен', !tt || tt.classList.contains('active'));
+      }
+    }
+    const hr = env({ recurring: 'supply' });
+    if (renderOk(hr, 'рендерът минава (постоянна)')) {
+      ok('и за постоянна задача бутонът е там', !!modBtn(hr.doc, 'supply'));
+    }
+  }
+
   report();
 })();

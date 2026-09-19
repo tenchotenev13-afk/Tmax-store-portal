@@ -1,5 +1,16 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v10 (19.09.2026) — деплой с ЕДНО нещо: секция „Зареждане" в отчета по
+   задача. Само в режим task_report и само когато bulletin_tasks.linked_module
+   е 'supply': под картичката се добавя supplyReportSectionHtml() — бланките
+   от Транспорт › Зареждане за седмицата на бюлетина на задачата (wkDates[0]):
+   „Попълнили N от M" (M = target_stores ∩ отчитащите се обекти, или всички
+   отчитащи се), „Без данни: …", таблица артикул | „Обект N · Обект M" (при
+   col2_label „N/M" с легенда), „Общо". supply_entries на страници по 1000.
+   Провал на заявка → червен ред „Данните за Зареждане не можаха да се
+   заредят", картичката остава. dry_run връща и резюме в полето supply.
+   Седмичният режим и задачите без linked_module='supply' са непроменени.
+
    v8 (19.09.2026) — деплой с ЕДНО нещо: режим „отчет по задача".
    Вход {task_id, recipients:{groups[], user_ids[]}, run_date, run_time} —
    вика го dynamic-responder за ред в notification_schedules с
@@ -853,6 +864,153 @@ function routedWeeklySubject(wkDates){
   return '📬 ТеМАХ — Личен седмичен отчет ' + reportDayMonth(a) + ' – ' + reportDayMonth(b) + '.' + b.getFullYear();
 }
 
+/* ═══ СЕКЦИЯ „ЗАРЕЖДАНЕ" В ОТЧЕТА ПО ЗАДАЧА (v10, 19.09.2026) ═════════════
+   Задача с linked_module='supply' получава под картичката обобщение на
+   бланките от Транспорт › Зареждане (supply.js) за седмицата на бюлетина ѝ.
+
+   Четенето НЕ минава през sbGet по-горе: той връща тялото на отговора и при
+   грешка, тоест провал би изглеждал като „няма данни" и писмото би казало,
+   че никой не е попълнил. Тук всяка заявка проверява r.ok и масива и
+   хвърля; секцията тогава казва в червено, че данните не са заредени, а
+   картичката за отметките остава (правило 13 — не мълчи, не лъже).
+
+   supply_entries се тегли на страници по 1000, както supplyGetAll() в
+   supply.js: 25 артикула × 18 обекта и 12 × 18 × 2 бланки минават тавана на
+   PostgREST за една седмица, а отрязаният край би изглеждал като „Без данни". */
+var SUPPLY_PAGE = 1000;
+function supplyRest(t: string, q: string){
+  return fetch(REST + t + '?' + q, {
+    headers: { 'apikey': SERVICE_KEY, 'Authorization': 'Bearer ' + SERVICE_KEY }
+  }).then(function(r: any){
+    return r.json().catch(function(){ return null; }).then(function(d: any){
+      if (!r.ok || !Array.isArray(d)) throw new Error(t + ': ' + ((d && (d.message || d.hint)) || ('HTTP ' + r.status)));
+      return d;
+    });
+  });
+}
+function supplyRestAll(t: string, q: string){
+  var all: any[] = [];
+  function page(offset: number): any {
+    return supplyRest(t, q + '&order=id.asc&limit=' + SUPPLY_PAGE + '&offset=' + offset).then(function(d: any){
+      all = all.concat(d);
+      return d.length === SUPPLY_PAGE ? page(offset + SUPPLY_PAGE) : all;
+    });
+  }
+  return page(0);
+}
+function supplyHasVal(v: any){ return v !== null && v !== undefined && v !== ''; }
+function supplyNum(v: any){ return supplyHasVal(v) ? Number(v) : null; }
+
+/* Данните за секцията. weekStart = понеделникът на седмицата на бюлетина
+   (wkDates[0]); reportable = обектите от users (isReportableStore), същият
+   списък като в картичката. Връща {ok:true, week, blocks} или {ok:false, error}. */
+async function collectSupplyReport(weekStart: string, reportable: any[]){
+  try {
+    var tpls: any[] = await supplyRest('supply_templates', 'active=eq.true&order=sort_order.asc,name.asc&select=id,name,slug,col1_label,col2_label,target_stores,sort_order');
+    tpls = tpls.filter(function(t: any){ return t && t.active !== false; });
+    if (!tpls.length) return { ok:true, week:weekStart, blocks:[] };
+    var ids = tpls.map(function(t: any){ return t.id; });
+    var res: any[] = await Promise.all([
+      supplyRest('supply_template_items', 'active=eq.true&template_id=in.(' + ids.join(',') + ')&order=sort_order.asc&select=id,template_id,sap_code,name,active,sort_order'),
+      supplyRestAll('supply_entries', 'week_start=eq.' + weekStart + '&template_id=in.(' + ids.join(',') + ')&select=id,template_id,item_id,store_name,week_start,qty1,qty2')
+    ]);
+    var items = res[0].filter(function(i: any){ return i.active !== false; });
+    var entries = res[1].filter(function(e: any){ return String(e.week_start).slice(0,10) === weekStart; });
+    var rep = (Array.isArray(reportable) ? reportable : []).slice();
+    var blocks = tpls.map(function(t: any){
+      var two = !!t.col2_label;
+      /* M: обектите от target_stores, които се отчитат; при null — всички отчитащи се. */
+      var scope = (Array.isArray(t.target_stores) ? t.target_stores.filter(function(s: any){ return rep.indexOf(s) >= 0; }) : rep).slice()
+        .sort(function(a: any, b: any){ return String(a).localeCompare(String(b), 'bg'); });
+      var byKey: any = {}, filled: any = {};
+      entries.forEach(function(e: any){
+        if (e.template_id !== t.id || scope.indexOf(e.store_name) < 0) return;
+        byKey[e.item_id + '|' + e.store_name] = e;
+        if (supplyHasVal(e.qty1) || (two && supplyHasVal(e.qty2))) filled[e.store_name] = true;
+      });
+      var rows: any[] = [];
+      items.filter(function(i: any){ return i.template_id === t.id; })
+        .sort(function(a: any, b: any){ return (a.sort_order||0) - (b.sort_order||0); })
+        .forEach(function(i: any){
+          var parts: any[] = [], tot1: any = null, tot2: any = null;
+          scope.forEach(function(s: any){
+            var e = byKey[i.id + '|' + s]; if (!e) return;
+            var a = supplyNum(e.qty1), b = two ? supplyNum(e.qty2) : null;
+            if (a === null && b === null) return;
+            if (a !== null) tot1 = (tot1 || 0) + a;
+            if (b !== null) tot2 = (tot2 || 0) + b;
+            parts.push({ store:s, a:a, b:b });
+          });
+          if (!parts.length) return;
+          var sap = supplyHasVal(i.sap_code) ? String(i.sap_code).trim() : '';
+          rows.push({ sap:sap, name:i.name || '', parts:parts, tot1:tot1, tot2:tot2 });
+        });
+      return { name:t.name, col1:t.col1_label, col2:t.col2_label || null, two:two,
+        scope:scope, filled:scope.filter(function(s: any){ return filled[s]; }),
+        missing:scope.filter(function(s: any){ return !filled[s]; }), rows:rows };
+    });
+    return { ok:true, week:weekStart, blocks:blocks };
+  } catch (e: any) {
+    console.error('send-routed-report: секция „Зареждане" за седмица ' + weekStart + ' — ' + String((e && e.message) || e));
+    return { ok:false, week:weekStart, error:String((e && e.message) || e) };
+  }
+}
+
+/* HTML на секцията — чиста функция от резултата на collectSupplyReport. */
+function supplyReportSectionHtml(rep: any){
+  var q = function(v: any){ return v === null || v === undefined ? '—' : String(v); };
+  var h = '<div style="margin-top:14px;border-top:2px solid #E5E9F0;padding-top:12px;">';
+  h += '<div style="font-size:14px;font-weight:700;color:#1E2761;margin-bottom:6px;">🎨 Зареждане' +
+    (rep && rep.week ? ' — седмица от ' + esc(reportDM(rep.week)) + '.' + esc(String(rep.week).slice(0,4)) : '') + '</div>';
+  if (!rep || !rep.ok) {
+    h += '<div style="font-size:12px;color:#B91C1C;font-weight:600;">Данните за Зареждане не можаха да се заредят</div>';
+  } else if (!rep.blocks.length) {
+    h += '<div style="font-size:12px;color:#6B7280;">Няма активни бланки.</div>';
+  } else {
+    rep.blocks.forEach(function(b: any){
+      h += '<div style="background:#F9FAFC;border-radius:8px;padding:10px 12px;margin-bottom:8px;">';
+      h += '<div style="font-size:13px;font-weight:700;color:#1F2937;">' + esc(b.name) + '</div>';
+      h += '<div style="font-size:12px;color:#6B7280;margin-top:2px;">Попълнили ' + b.filled.length + ' от ' + b.scope.length + '</div>';
+      if (b.missing.length) {
+        h += '<div style="font-size:12px;color:#B91C1C;margin-top:2px;">Без данни: ' +
+          b.missing.map(function(s: any){ return esc(s); }).join(', ') + '</div>';
+      }
+      if (!b.rows.length) {
+        h += '<div style="font-size:12px;color:#6B7280;margin-top:6px;">Няма попълнени данни за седмицата</div>';
+      } else {
+        if (b.two) h += '<div style="font-size:11px;color:#6B7280;margin-top:6px;">' + esc(b.col1) + ' / ' + esc(b.col2) + '</div>';
+        h += '<table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:12px;">';
+        b.rows.forEach(function(r: any){
+          var vals = r.parts.map(function(p: any){
+            return esc(p.store) + ' ' + (b.two ? q(p.a) + '/' + q(p.b) : q(p.a));
+          }).join(' · ');
+          h += '<tr>' +
+            '<td style="padding:4px 6px;border-bottom:1px solid #E5E9F0;color:#1F2937;vertical-align:top;">' +
+              (r.sap ? '<span style="font-family:monospace;color:#6B7280;">' + esc(r.sap) + '</span> ' : '') + esc(r.name) + '</td>' +
+            '<td style="padding:4px 6px;border-bottom:1px solid #E5E9F0;color:#374151;vertical-align:top;">' + vals + '</td>' +
+          '</tr>';
+        });
+        var t1 = b.rows.reduce(function(s: any, r: any){ return r.tot1 === null ? s : (s || 0) + r.tot1; }, null);
+        var t2 = b.rows.reduce(function(s: any, r: any){ return r.tot2 === null ? s : (s || 0) + r.tot2; }, null);
+        h += '</table>';
+        h += '<div style="font-size:12px;font-weight:700;color:#1F2937;margin-top:6px;">Общо: ' +
+          (b.two ? q(t1) + ' / ' + q(t2) : q(t1)) + '</div>';
+      }
+      h += '</div>';
+    });
+  }
+  h += '<div style="font-size:12px;margin-top:4px;"><a href="' + PORTAL_URL + '" style="color:#1E2761;">Пълна матрица и Excel → Портал › Транспорт › Зареждане</a></div>';
+  h += '</div>';
+  return h;
+}
+/* За dry_run: какво би излязло в секцията, без HTML. */
+function supplyReportSummary(rep: any){
+  if (!rep || !rep.ok) return { ok:false, week:rep && rep.week, error:rep && rep.error };
+  return { ok:true, week:rep.week, templates: rep.blocks.map(function(b: any){
+    return { name:b.name, filled:b.filled.length, of:b.scope.length, missing:b.missing, rows:b.rows.length };
+  }) };
+}
+
 /* ═══ РЕЖИМ „ОТЧЕТ ПО ЗАДАЧА" (19.09.2026) ═══════════════════════════════
    Една картичка за ЕДНА задача до получателите от реда в
    notification_schedules (entity_type='task_report'). Същият builder като
@@ -950,15 +1108,20 @@ async function routedTaskReportResponse(body: any, dryRun: boolean, testEmail: a
     console.warn('send-routed-report: отчет по задача „' + (t.title||'') + '" — 0 получатели; нищо не е пратено');
     return json({ ok:true, mode:'task_report', task_id:taskId, subject:subject, recipients:0, sent:0, skipped:'няма получатели', empty_groups:emptyGroups });
   }
+  /* Секцията „Зареждане" — веднъж за всички получатели: данните не зависят
+     от това кой чете писмото. */
+  var supplyRep: any = t.linked_module === 'supply' ? await collectSupplyReport(t.weekFrom, data.stores) : null;
   if (dryRun) {
     return json({ ok:true, dry_run:true, mode:'task_report', task_id:taskId, subject:subject, test_email:testEmail,
-      recipients:to.length, planned:to, empty_groups:emptyGroups });
+      recipients:to.length, planned:to, empty_groups:emptyGroups,
+      supply: supplyRep ? supplyReportSummary(supplyRep) : null });
   }
   var sent = 0, failed = 0;
   for (var i = 0; i < to.length; i++) {
     var rcp: any = to[i];
     var bodyHtml = (testEmail ? routedTestBannerHtml(rcp.name, rcp.email) : '') +
-      personalizedSectionHtml([t], data.comps, data.stores);
+      personalizedSectionHtml([t], data.comps, data.stores) +
+      (supplyRep ? supplyReportSectionHtml(supplyRep) : '');
     var html = reportEmailShell('📨 Отчет: ' + esc(t.title),
       'Изпълнение към ' + esc(subject.split(' — ')[1] || ''), bodyHtml,
       testEmail ? ('Тестов режим — реално изпратено до ' + testEmail) : 'Насрочен отчет · ТеМАХ Портал');
