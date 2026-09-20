@@ -362,19 +362,33 @@ const OLD = '✅ Получено';
     }
   }
 
-  section('9. Колоната "Решение (Цвети)" за магазина: "—" при междускладов, "чака преглед" при доставчик');
+  section('9. Колоните на Цвети: липсват при междускладов, остават при доставчик');
   {
+    /* До 20.09.2026 колоната стоеше и при междускладова бланка, празна, и
+       казваше „—". Сега я НЯМА изобщо — Цвети не решава по този поток.
+       Проверява се и в двете посоки: при доставчикова бланка колоната и
+       текстът „чака преглед" си остават непроменени. */
     const h = env(STORE, [line({ id: 'l-1', warehouse_response: 'sent' })]);
     h.w.renderStockDiff();
-    const r = lineRow(card(h.doc));
-    /* колоните при междускладов: SAP, Артикул, Категория, Док, Реално, Коментар, Снимки, Коментар (Цвети), Решение (Цвети), Склад */
-    const decision = r.cells[r.cells.length - 2];
-    ok('междускладов: "—"', decision.textContent.trim().indexOf('—') === 0, decision.textContent);
-    ok('междускладов: без "чака преглед"', decision.textContent.indexOf('чака преглед') < 0, decision.textContent);
+    const c = card(h.doc);
+    const r = lineRow(c);
+    const ths = Array.prototype.map.call(c.querySelectorAll('th'), x => x.textContent);
+    ok('междускладов: няма <th> „Коментар (Цвети)"', ths.indexOf('Коментар (Цвети)') < 0, ths.join('|'));
+    ok('междускладов: няма <th> „Решение (Цвети)"', ths.indexOf('Решение (Цвети)') < 0, ths.join('|'));
+    ok('междускладов: броят <td> съвпада с броя <th>', r.cells.length === ths.length,
+      'td=' + r.cells.length + ' th=' + ths.length);
+    ok('междускладов: никъде не пише „чака преглед"', c.textContent.indexOf('чака преглед') < 0, c.textContent);
+    /* Последната колона си е отговорът на склада — редът не се е разместил. */
+    ok('междускладов: последната колона е „Отговор на склада"',
+      ths[ths.length - 1] === 'Отговор на склада', ths.join('|'));
 
     const hs = env(STORE, [line({ id: 'l-9', report_id: 'rep-sup', supplier: 'ТЕСИ ООД' })], { dirTab: 'supplier' });
     hs.w.renderStockDiff();
-    const rs = lineRow(card(hs.doc, 'rep-sup'));
+    const cs = card(hs.doc, 'rep-sup');
+    const rs = lineRow(cs);
+    const thsS = Array.prototype.map.call(cs.querySelectorAll('th'), x => x.textContent);
+    ok('доставчик: двете колони са на място',
+      thsS.indexOf('Коментар (Цвети)') >= 0 && thsS.indexOf('Решение (Цвети)') >= 0, thsS.join('|'));
     ok('доставчик: "чака преглед" остава', rs.cells[rs.cells.length - 2].textContent.indexOf('чака преглед') >= 0,
       rs.cells[rs.cells.length - 2].textContent);
   }

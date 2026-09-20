@@ -123,12 +123,20 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
     const i = env([rep({ id: 'rep-i', direction: 'interstore', counterpart: 'Троян' })],
       [line({ id: 'l-i', report_id: 'rep-i' })], 'interstore');
     if (guard('рендер (междускладов) не хвърля', () => i.w.renderStockDiff())) {
-      /* Контролна проверка, че междускладовият ред изобщо е нарисуван с бутони —
-         иначе „няма бутон" би минало и срещу празен екран. */
-      ok('междускладовият ред има бутони за решение',
-        Array.prototype.some.call(mod(i.doc).querySelectorAll('button'),
-          x => /resolveDiffLine\(this\.dataset\.id,'writein'\)/.test(x.getAttribute('onclick') || '')));
+      /* Контролна проверка, че междускладовият ред изобщо е нарисуван — иначе
+         „няма бутон" би минало и срещу празен екран. До 20.09.2026 контролата
+         беше „редът има бутони за решение"; оттогава колоната „Решение
+         (Цвети)" я няма при междускладова бланка изобщо, затова контролата е
+         по самия ред. */
+      ok('междускладовият ред е нарисуван',
+        mod(i.doc).textContent.indexOf('АРТИКУЛ БЕЗ ФАКТУРА') >= 0,
+        mod(i.doc).textContent.slice(0, 200));
       ok('НЯМА <button> „Не са фактурирани" при междускладов ред', !notInvoicedBtn(i.doc));
+      /* Новото правило, в неговата собствена формулировка: при междускладова
+         бланка НИТО ЕДИН бутон за решение на Цвети не се рендира. */
+      ok('и нула бутона resolveDiffLine при междускладов ред',
+        Array.prototype.filter.call(mod(i.doc).querySelectorAll('button'),
+          x => /resolveDiffLine\(/.test(x.getAttribute('onclick') || '')).length === 0);
     }
   }
 

@@ -2455,10 +2455,20 @@ function renderDiffReportsSection(){
     if(lines.length){
       var repIsSupplier=rep.direction==='supplier';
       var repQty=diffQtyLabels(rep.direction);
+      /* Цвети НЕ решава междускладови разлики — те се разбират директно между
+         магазина и логистичния склад. Досега двете ѝ колони („Коментар" и
+         „Решение") стояха празни през цялата бланка и само стесняваха
+         останалите; при canReviewDiff дори показваха трите бутона
+         Заприх./Връщане/Липса, които по този поток не бива да се натискат.
+         Скриват се по същия начин, по който „По стокова" се показва само за
+         доставчикова бланка. */
+      var repShowResolve=rep.direction!=='interstore';
       h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
       var headRow='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">'+repQty.docShort+'</th>'+
         (repIsSupplier?'<th style="padding:3px 6px;text-align:right;">По стокова</th>':'')+
-        '<th style="padding:3px 6px;text-align:right;">'+repQty.realShort+'</th><th style="padding:3px 6px;">Коментар (магазин)</th><th style="padding:3px 6px;">Снимки</th><th style="padding:3px 6px;">Коментар (Цвети)</th><th style="padding:3px 6px;">Решение (Цвети)</th><th style="padding:3px 6px;">Отговор на склада</th></tr>';
+        '<th style="padding:3px 6px;text-align:right;">'+repQty.realShort+'</th><th style="padding:3px 6px;">Коментар (магазин)</th><th style="padding:3px 6px;">Снимки</th>'+
+        (repShowResolve?'<th style="padding:3px 6px;">Коментар (Цвети)</th><th style="padding:3px 6px;">Решение (Цвети)</th>':'')+
+        '<th style="padding:3px 6px;">Отговор на склада</th></tr>';
       h+=headRow;
       /* Приключените редове се свиват, за да изпъкне това, по което още се
          работи. ДВЕ условия, и второто е по-важното: бланка, в която ВСИЧКО е
@@ -2488,12 +2498,19 @@ function renderDiffReportsSection(){
            status='received' редът е приключен и червеното отпада. */
         var rowBg = (l.store_response==='no_stock' && l.status!=='received') ? 'background:#fef2f2;' :
           (l.store_corrected_at ? 'background:#fffbeb;' : (l.type ? 'background:#f0fdf4;color:#64748b;' : ''));
+        /* Бутонът за корекция е на МАГАЗИНА, не на Цвети — само че досега
+           живееше в нейната клетка. Скрие ли се колоната, той се мести при
+           артикула, чието количество и SAP код коригира. Без това
+           междускладовата бланка оставаше без никакъв път за поправка. */
+        var correctBtn = (canEditSD(l)&&!l.type&&currentUser.store_name===rep.store_name)
+          ? ' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>'
+          : '';
         h+='<tr style="border-top:1px solid #f1f5f9;'+rowBg+'">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
           /* Сигналът за размяна стои под ИМЕТО на артикула, а не в колоната на
              склада - там вече е отговорът плюс потвърждението, а въпросът
              "този ли е артикулът" е за самия артикул. Вижда го само складът. */
-          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdSwapBadge(l)+'</td>'+
+          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdSwapBadge(l)+(repShowResolve?'':correctBtn)+'</td>'+
           '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
           '<td style="padding:3px 6px;text-align:right;">'+sdQtyCell(l.quantity,(l.quantity!=null?l.quantity:'—'))+'</td>'+
           (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
@@ -2503,11 +2520,12 @@ function renderDiffReportsSection(){
              може да пипне количествата. Колоната е отделна от коментара на
              Цвети, защото качва и едната, и другата страна. */
           '<td style="padding:3px 6px;">'+sdLineAttachCell(l)+'</td>'+
+          (repShowResolve?
           '<td style="padding:3px 6px;color:#7c3aed;">'+esc(l.resolution_comment||'')+'</td>'+
           '<td style="padding:3px 6px;white-space:nowrap;">'+diffLineResolveButtons(l)+
           (canReviewDiff()&&!isLogisticsWarehouseUser()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
-          (canEditSD(l)&&!l.type&&currentUser.store_name===rep.store_name?' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>':'')+
-          '</td>'+
+          correctBtn+
+          '</td>':'')+
           '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+sdSwapPanel(l)+'</td>'+
         '</tr>';
       });
