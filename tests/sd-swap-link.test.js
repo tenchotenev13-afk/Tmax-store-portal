@@ -317,11 +317,14 @@ const settle = async () => { await ticks(); await ticks(); await ticks(); };
     ok('linked: няма "Приключи"', !btn(h.doc, 'Приключи'));
   }
   {
-    const rec = swap({ status: 'received', transport_mode: 'van', received_at: '2026-09-14T10:00:00.000Z', sap_doc_num: '4900123' });
+    /* transport_mode има смисъл само при физическа размяна — при doc превоз
+       няма. Форматът на ред 2 се смени на 20.09.2026: иконка превоз · дата ·
+       „док. N" за physical, „док. N · дата" за doc. */
+    const rec = swap({ status: 'received', kind: 'physical', transport_mode: 'van', received_at: '2026-09-14T10:00:00.000Z', sap_doc_num: '4900123' });
     const h = env(WAREHOUSE, { lines: [L_EX, line(Object.assign({}, L_SH, { swap_id: 'sw-1' })), L_EX2, L_SH2], swaps: [rec] });
     h.w.renderStockDiff();
     const b = btn(lastCell(rowOf(h, 'l-sh')), '🏁 Приключи размяната');
-    ok('received: панелът показва превоз, дата и SAP', lastCell(rowOf(h, 'l-sh')).textContent.indexOf('превоз: бус · 14.09.2026 · SAP 4900123') >= 0,
+    ok('received: панелът показва превоз, дата и документ', lastCell(rowOf(h, 'l-sh')).textContent.indexOf('🚐 бус · 14.09.2026 · док. 4900123') >= 0,
       lastCell(rowOf(h, 'l-sh')).textContent);
     ok('received: няма "Развържи"', !btn(h.doc, 'Развържи'));
     if (ok('received: има "🏁 Приключи размяната"', !!b)) {
@@ -387,11 +390,14 @@ const settle = async () => { await ticks(); await ticks(); await ticks(); };
     ok('с отворена размяна: магазинът няма "ПРИЕТО"', !btn(rowOf(store, 'l-sh'), 'ПРИЕТО'));
   }
 
-  section('10. Магазините и Цвети виждат панела без бутони');
+  section('10. Панелът при sent: получателят има бутон, изпращачът и Цвети — не');
   {
+    /* До 20.09.2026 магазините бяха само за четене. От стъпка 3 ПОЛУЧАТЕЛЯТ
+       (to_store) приема размяната от своя панел — затова „нула бутони" вече
+       важи само за изпращача и за Цвети. Заглавният ред е същият за всички. */
     const rec = swap({ status: 'sent', kind: 'physical', transport_mode: 'truck', sent_at: '2026-09-13T08:00:00.000Z' });
     const lines = [L_EX, line(Object.assign({}, L_SH, { swap_id: 'sw-1' })), L_EX2, L_SH2];
-    [['Петрич (to)', PETRICH, 'l-sh'], ['Гоце Делчев (from)', GOTSE, 'l-ex'], ['Цвети', CVETI, 'l-sh']].forEach(function (c) {
+    [['Петрич (to)', PETRICH, 'l-sh', 1], ['Гоце Делчев (from)', GOTSE, 'l-ex', 0], ['Цвети', CVETI, 'l-sh', 0]].forEach(function (c) {
       const h = env(c[1], { lines: lines, swaps: [rec] });
       h.w.renderStockDiff();
       const tr = rowOf(h, c[2]);
@@ -399,7 +405,8 @@ const settle = async () => { await ticks(); await ticks(); await ticks(); };
       if (ok(c[0] + ': панелът е на реда', !!panel, tr && lastCell(tr).textContent)) {
         ok(c[0] + ': "… · 20 бр. · 🚚 физическа · изпратено (камион)"',
           panel.textContent.indexOf('🔗 Размяна: Гоце Делчев → Петрич · 20 бр. · 🚚 физическа · изпратено (камион)') >= 0, panel.textContent);
-        ok(c[0] + ': нула бутони в панела', panel.querySelectorAll('button').length === 0);
+        ok(c[0] + ': ' + c[3] + ' бутона в панела', panel.querySelectorAll('button').length === c[3],
+          'реално: ' + panel.querySelectorAll('button').length);
       }
     });
   }

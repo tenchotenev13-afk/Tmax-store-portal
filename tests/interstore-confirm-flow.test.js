@@ -70,6 +70,12 @@ function env(user, lines, opts) {
   });
   h.w.sdData = JSON.parse(JSON.stringify(lines));
   h.w.diffReports = JSON.parse(JSON.stringify(opts.reports || [REP_INT, REP_SUP]));
+  /* От 20.09.2026 приключените редове (status='received') се свиват по
+     подразбиране, когато в бланката има и неприключени (sdShowDone). Този
+     тест мери самото потвърждаване и текста на потвърдения ред, не свиването
+     — затова тук бланките влизат РАЗГЪНАТИ. Проверките остават същите. */
+  h.w.sdShowDone = {};
+  (opts.reports || [REP_INT, REP_SUP]).forEach(function (r) { h.w.sdShowDone[r.id] = true; });
   h.w.transportOrders = [];
   h.w.sdFilter = opts.filter || 'pending';
   h.w.sdTypeFilter = 'all';

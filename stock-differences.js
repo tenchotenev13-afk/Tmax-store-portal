@@ -206,6 +206,16 @@ var DIFF_BKT = 'bulletin-files'; /* преизползваме съществу�
 var diffReports = [];       /* differences_reports - заредени бланки */
 var sdSwaps = [];           /* stock_diff_swaps - размените, в които участват заредените междускладови редове */
 var diffPendingPhotos = []; /* снимки, качени в текущо отворената форма за подаване, преди submit */
+/* Разгънати ли са приключените редове на дадена бланка — по report_id, само
+   за тази сесия (нарочно не в localStorage: изборът е за текущата работа, не
+   е настройка). Празно = свити. */
+var sdShowDone = {};
+function sdToggleDone(repId){
+  if(!repId) return;
+  sdShowDone[repId] = !sdShowDone[repId];
+  sdKeepScroll(repId);
+  renderStockDiff();
+}
 
 function loadStockDiff() {
   var wrap = document.getElementById('mod-stock-diff');
@@ -2122,23 +2132,176 @@ function sdSwapHeadline(s){
   var kd = SD_SWAP_KIND[s.kind] || SD_SWAP_KIND.doc;
   return '🔗 Размяна: '+esc(s.from_store||'')+' → '+esc(s.to_store||'')+' · '+esc(String(s.qty))+' бр. · '+esc(kd)+' · '+esc(st);
 }
-/* Панелът на реда в колона "Отговор на склада". Складът (своята размяна):
-   "✖ Развържи" при linked, "🏁 Приключи размяната" при received. Магазините и
-   Цвети/admin - само за четене. */
+/* Страната на МАГАЗИНА по размяна — огледало на sdIsInterstoreStoreSide(), но
+   спрямо from_store / to_store на самата размяна, а не спрямо бланката: при
+   размяна двата магазина са от РАЗНИ бланки и редът, по който се рендира
+   панелът, може да е чуждият.
+   canSubmitDiff() носи същия списък роли като canEditSD() — тук няма ред, на
+   който да се подаде, а проверката за „сторна по грешен прием" (единствената
+   разлика между двете) не важи за междускладова размяна.
+   Цвети/admin отпада сама: store_name е „Централен офис", а assignedStores()
+   за глобален потребител връща null. */
+function sdIsSwapStoreSide(s, side){
+  if(!s || !currentUser) return false;
+  if(isLogisticsWarehouseUser() || !canSubmitDiff()) return false;
+  var store = side==='from' ? s.from_store : s.to_store;
+  if(!store) return false;
+  var mine = assignedStores() || [];
+  return currentUser.store_name===store || mine.indexOf(store)>=0;
+}
+
+/* Закъсняла размяна: изпратена е, но никой не я е приел от повече от
+   SD_SWAP_LATE_DAYS дни. Важи за ДВАТА вида — документалната също засяда,
+   само че в SAP, а не на рампата.
+   Границата е СТРОГА: точно 5 дни още не е закъснение, 5 дни и час е. */
+var SD_SWAP_LATE_DAYS = 5;
+function sdSwapLateDays(s){
+  if(!s || !s.sent_at) return null;
+  var t = new Date(s.sent_at);
+  if(isNaN(t.getTime())) return null;
+  return Math.floor((Date.now() - t.getTime()) / 86400000);
+}
+function sdSwapIsLate(s){
+  if(!s || s.status!=='sent') return false;
+  var d = sdSwapLateDays(s);
+  return d !== null && d > SD_SWAP_LATE_DAYS;
+}
+
+/* Един модал за двата вида — полетата за превоз и дата се рендират САМО при
+   physical. Два модала биха значели две места, на които се пише едно и също
+   тяло на PATCH-а, и разминаването е въпрос на време. */
+var SD_SWAP_TRANSPORT = {van:'🚐 бус', truck:'🚚 камион'};
+function openSwapSentModal(swapId){
+  var s = sdSwaps.find(function(x){ return String(x.id)===String(swapId); });
+  if(!s || s.status!=='linked' || !sdIsSwapStoreSide(s,'from')) return;
+  var isPhys = s.kind==='physical';
+  var existing = document.getElementById('sdsent-ov'); if(existing) existing.remove();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="sdsent-ov"><div class="bmod" style="width:400px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">'+(isPhys?'🚚 Изпращане към '+esc(s.to_store||''):'📄 Пускане в SAP')+'</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">'+esc(s.material_code||'')+' · '+esc(s.material_name||'')+' · '+esc(String(s.qty))+' бр.</div>'+
+    (isPhys
+      ? '<label class="fl">Превоз</label>'+
+        '<div id="sdsent-mode-wrap" style="display:flex;gap:16px;margin-bottom:8px;font-size:12.5px;">'+
+          '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="radio" name="sdsent-mode" value="van"> 🚐 Бус</label>'+
+          '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="radio" name="sdsent-mode" value="truck"> 🚚 Камион</label>'+
+        '</div>'+
+        '<label class="fl">Дата на изпращане</label>'+
+        '<input class="fi" id="sdsent-date" type="date" value="'+esc(today())+'">'
+      : '<div style="font-size:11.5px;color:#64748b;margin-bottom:8px;">Стоката не пътува — само трансферът в SAP.</div>')+
+    '<label class="fl">'+(isPhys?'SAP номер на документа':'SAP номер на трансфера')+'</label>'+
+    '<input class="fi" id="sdsent-sap" value="">'+
+    '<label class="fl">Бележка (по избор)</label>'+
+    '<input class="fi" id="sdsent-note" value="">'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="document.getElementById(\'sdsent-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button data-sid="'+esc(String(s.id))+'" onclick="submitSwapSent(this.dataset.sid)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">'+(isPhys?'🚚 Изпратено':'📄 Пуснато в SAP')+'</button>'+
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+/* PATCH-ът е ЕДИН, но тялото се различава: при doc transport_mode изобщо НЕ
+   влиза в обекта (не се праща null) — стоката не пътува и няма превоз, който
+   да се опише. Проверката е закована в теста с „ключът липсва", не със
+   „стойността е null".
+   sent_at при physical е ОБЯД по избраната дата, не полунощ: изпращането е
+   дата, не момент, а обяд оцелява и при часови пояс, и при смяна на лятно
+   време, без да се измести денят при обратното четене. */
+function submitSwapSent(swapId){
+  var s = sdSwaps.find(function(x){ return String(x.id)===String(swapId); });
+  if(!s || s.status!=='linked' || !sdIsSwapStoreSide(s,'from')) return;
+  var isPhys = s.kind==='physical';
+  var sapEl = document.getElementById('sdsent-sap');
+  var sap = String(sapEl ? sapEl.value : '').trim();
+  var mode = null;
+  if(isPhys){
+    var mEl = document.querySelector('#sdsent-ov input[name="sdsent-mode"]:checked');
+    mode = mEl ? mEl.value : null;
+    if(!mode){ toast('Изберете превоз — бус или камион','#dc2626'); return; }
+  }
+  if(!sap){ toast('Въведете SAP номер на документа','#dc2626'); return; }
+  var sentAt;
+  if(isPhys){
+    var dEl = document.getElementById('sdsent-date');
+    var d = String(dEl ? dEl.value : '').trim() || today();
+    var when = new Date(d+'T12:00:00');
+    sentAt = isNaN(when.getTime()) ? new Date().toISOString() : when.toISOString();
+  } else {
+    sentAt = new Date().toISOString();
+  }
+  var body = {status:'sent', sap_doc_num:sap, sent_by:sdActor(), sent_at:sentAt};
+  if(isPhys) body.transport_mode = mode;
+  /* Бележката се ДОПИСВА към тази от свързването — складът е писал защо е
+     свързал двойката, магазинът добавя как е изпратил. Празно поле не пипа
+     колоната изобщо. */
+  var nEl = document.getElementById('sdsent-note');
+  var txt = String(nEl ? nEl.value : '').trim();
+  if(txt) body.note = s.note ? (s.note+' · '+txt) : txt;
+  var toL = sdData.find(function(x){ return String(x.id)===String(s.to_line_id); });
+  var fromL = sdData.find(function(x){ return String(x.id)===String(s.from_line_id); });
+  sdKeepScroll(fromL ? fromL.report_id : (toL ? toL.report_id : null));
+  sbPatch('stock_diff_swaps', 'id=eq.'+s.id, body).then(function(res){
+    if(!res.ok){ toast('Изпращането НЕ е записано: '+sbErrMsg(res),'#dc2626'); return; }
+    var ov = document.getElementById('sdsent-ov'); if(ov) ov.remove();
+    toast(isPhys ? '🚚 Изпратено към '+s.to_store : '📄 Пуснато в SAP');
+    loadStockDiff();
+  });
+}
+/* Приемането е едно и също действие за двата вида — различава се само
+   етикетът на бутона. */
+function sdReceiveSwap(swapId){
+  var s = sdSwaps.find(function(x){ return String(x.id)===String(swapId); });
+  if(!s || s.status!=='sent' || !sdIsSwapStoreSide(s,'to')) return;
+  var q = s.kind==='physical'
+    ? 'Потвърди, че стоката от '+s.from_store+' е получена?'
+    : 'Потвърди, че трансферът от '+s.from_store+' е приет в SAP?';
+  if(!confirm(q)) return;
+  var toL = sdData.find(function(x){ return String(x.id)===String(s.to_line_id); });
+  sdKeepScroll(toL ? toL.report_id : null);
+  sbPatch('stock_diff_swaps', 'id=eq.'+s.id,
+    {status:'received', received_by:sdActor(), received_at:new Date().toISOString()}).then(function(res){
+    if(!res.ok){ toast('Приемането НЕ е записано: '+sbErrMsg(res),'#dc2626'); return; }
+    toast('📬 Прието в '+s.to_store);
+    loadStockDiff();
+  });
+}
+/* Панелът на реда в колона "Отговор на склада".
+   Магазините действат по СВОЯТА страна и според вида на размяната:
+     linked, изпращачът  → „📄 ПУСНАТО В SAP" / „🚚 ИЗПРАТЕНО КЪМ X";
+     sent, получателят   → „📄 ПРИЕТО В SAP" / „📬 ПРИЕТО ОТ X";
+     sent, изпращачът    → текст „чака X";
+     received, и двамата → „чака приключване от склада".
+   Складът (своята размяна): „✖ Развържи" при linked, „🏁 Приключи" при
+   received — както досега. Цвети/admin — само четене.
+   Закъснялата размяна изнася целия панел в червено, за ВСИЧКИ роли: това е
+   сигнал, не бутон, и трябва да го вижда и този, който не може да го оправи. */
 function sdSwapPanel(line){
   var list = sdSwapsForLine(line);
   if(!list.length) return '';
   var TR = {van:'бус', truck:'камион'};
   return list.map(function(s){
-    var h = '<div data-sdswap="'+esc(String(s.id))+'" style="margin-top:4px;border:1px solid #fde68a;background:#fffbeb;border-radius:6px;padding:4px 6px;font-size:10.5px;color:#92400e;white-space:normal;">'+
+    var late = sdSwapIsLate(s);
+    var h = '<div data-sdswap="'+esc(String(s.id))+'"'+(late?' data-sdswap-late="1"':'')+
+      ' style="margin-top:4px;border:1px solid '+(late?'#fca5a5':'#fde68a')+';background:'+(late?'#fef2f2':'#fffbeb')+
+      ';border-radius:6px;padding:4px 6px;font-size:10.5px;color:'+(late?'#991b1b':'#92400e')+';white-space:normal;">'+
       '<div style="font-weight:700;">'+sdSwapHeadline(s)+'</div>';
+    if(late){
+      h += '<div style="color:#dc2626;font-weight:700;">⚠ изпратено преди '+sdSwapLateDays(s)+' дни, не е прието</div>';
+    }
+    /* Ред 2: подробностите по изпращането. При doc няма превоз, който да се
+       покаже — остават документът и датата. */
     if(s.status==='sent' || s.status==='received'){
       var when = s.status==='sent' ? s.sent_at : s.received_at;
       var bits = [];
-      if(s.transport_mode) bits.push('превоз: '+(TR[s.transport_mode]||esc(s.transport_mode)));
-      if(when) bits.push(sdFmtDateTime(when));
-      if(s.sap_doc_num) bits.push('SAP '+esc(s.sap_doc_num));
+      if(s.kind==='physical' && s.transport_mode) bits.push(SD_SWAP_TRANSPORT[s.transport_mode]||esc(s.transport_mode));
+      if(s.kind==='physical'){
+        if(when) bits.push(sdFmtDateTime(when));
+        if(s.sap_doc_num) bits.push('док. '+esc(s.sap_doc_num));
+      } else {
+        if(s.sap_doc_num) bits.push('док. '+esc(s.sap_doc_num));
+        if(when) bits.push(sdFmtDateTime(when));
+      }
       if(bits.length) h += '<div>'+bits.join(' · ')+'</div>';
+      if(s.note) h += '<div style="color:#1e293b;">💬 '+esc(s.note)+'</div>';
     }
     /* ⚠: размяната е записана, но редът с липсата не носи swap_id (вторият
        ход на свързването е паднал). Виждат го само тези, при които редът с
@@ -2146,6 +2309,34 @@ function sdSwapPanel(line){
     var toL = sdData.find(function(x){ return String(x.id)===String(s.to_line_id); });
     if(s.status!=='closed' && toL && String(toL.swap_id||'')!==String(s.id)){
       h += '<div data-sdswap-warn="1" style="color:#dc2626;font-weight:700;">⚠ Редът с липсата не е маркиран</div>';
+    }
+    var isPhys = s.kind==='physical';
+    var isFrom = sdIsSwapStoreSide(s,'from');
+    var isTo   = sdIsSwapStoreSide(s,'to');
+    var mkBtn = function(label,color,onclick){
+      return '<div style="margin-top:3px;"><button data-sid="'+esc(String(s.id))+'" onclick="'+onclick+
+        '" style="border:none;background:'+color+';color:#fff;border-radius:5px;padding:3px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">'+label+'</button></div>';
+    };
+    var note = function(txt){ return '<div style="margin-top:3px;color:#94a3b8;">'+txt+'</div>'; };
+    if(s.status==='linked' && isFrom){
+      h += isPhys
+        ? mkBtn('🚚 ИЗПРАТЕНО КЪМ '+esc(String(s.to_store||'').toUpperCase()),'#2563eb','openSwapSentModal(this.dataset.sid)')
+        : mkBtn('📄 ПУСНАТО В SAP','#7c3aed','openSwapSentModal(this.dataset.sid)');
+    }
+    if(s.status==='sent' && isTo){
+      h += isPhys
+        ? mkBtn('📬 ПРИЕТО ОТ '+esc(String(s.from_store||'').toUpperCase()),'#0d9488','sdReceiveSwap(this.dataset.sid)')
+        : mkBtn('📄 ПРИЕТО В SAP','#7c3aed','sdReceiveSwap(this.dataset.sid)');
+    }
+    if(s.status==='sent' && isFrom){
+      var det = [];
+      if(isPhys && s.transport_mode) det.push(TR[s.transport_mode]||esc(s.transport_mode));
+      if(s.sent_at) det.push(sdFmtDateTime(s.sent_at));
+      if(s.sap_doc_num) det.push('док. '+esc(s.sap_doc_num));
+      h += note((isPhys?'изпратено':'пуснато в SAP')+(det.length?' ('+det.join(', ')+')':'')+' · чака '+esc(s.to_store||''));
+    }
+    if(s.status==='received' && (isFrom || isTo)){
+      h += note('прието в '+esc(s.to_store||'')+' · чака приключване от склада');
     }
     var mine = isLogisticsWarehouseUser() && s.warehouse===currentUser.store_name;
     if(mine && s.status==='linked'){
@@ -2268,10 +2459,31 @@ function renderDiffReportsSection(){
       var repIsSupplier=rep.direction==='supplier';
       var repQty=diffQtyLabels(rep.direction);
       h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
-      h+='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">'+repQty.docShort+'</th>'+
+      var headRow='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">'+repQty.docShort+'</th>'+
         (repIsSupplier?'<th style="padding:3px 6px;text-align:right;">По стокова</th>':'')+
         '<th style="padding:3px 6px;text-align:right;">'+repQty.realShort+'</th><th style="padding:3px 6px;">Коментар (магазин)</th><th style="padding:3px 6px;">Снимки</th><th style="padding:3px 6px;">Коментар (Цвети)</th><th style="padding:3px 6px;">Решение (Цвети)</th><th style="padding:3px 6px;">Отговор на склада</th></tr>';
-      lines.forEach(function(l){
+      h+=headRow;
+      /* Приключените редове се свиват, за да изпъкне това, по което още се
+         работи. ДВЕ условия, и второто е по-важното: бланка, в която ВСИЧКО е
+         приключено, се показва ЦЯЛА — иначе картата би излязла празна и
+         човекът не би имал какво да отвори.
+         Превключвателят се рендира при К≥1 ВИНАГИ, включително разгънато
+         (правило 11) — иначе разгъването е еднопосочно.
+         colspan се БРОИ от самия заглавен ред: посоката „доставчик" има
+         колона повече и заковано число би се разминало тихо при следваща
+         колона. */
+      var doneLines=lines.filter(function(l){return l.status==='received';});
+      var openLines=lines.filter(function(l){return l.status!=='received';});
+      var canCollapse=doneLines.length>0 && openLines.length>0;
+      var shown=(canCollapse && !sdShowDone[rep.id]) ? openLines : lines;
+      if(canCollapse){
+        var thCount=headRow.split('<th').length-1;
+        h+='<tr class="sd-done-toggle"><td colspan="'+thCount+'" style="padding:3px 6px;color:#94a3b8;font-size:11px;">'+
+          '✓ '+doneLines.length+' приключени реда — '+
+          '<button data-rid="'+rep.id+'" onclick="sdToggleDone(this.dataset.rid)" style="border:1px solid #e2e8f0;background:#fff;color:#475569;border-radius:5px;padding:1px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">'+
+          (sdShowDone[rep.id]?'скрий':'покажи')+'</button></td></tr>';
+      }
+      shown.forEach(function(l){
         /* Решените редове затихват в зелено, за да изпъкват НЕрешените -
            корекцията от магазина (жълто) има приоритет, тя е по-спешна.
            Над двете стои червеното: магазинът не може да пусне обратното
@@ -3562,10 +3774,21 @@ function sdSetTabBadge(n){
 }
 /* Брои от вече заредените в паметта данни - използва се след всеки рендер,
    за да не изостава балончето спрямо това, което потребителят вижда. */
-function sdUnreviewedCountFor(reports, lines){
+/* swaps е ТРЕТИ аргумент, а не глобалният sdSwaps, нарочно: пулсът на баджа
+   тече на 60 секунди и чете САМО status=sent за своя склад, при това с три
+   колони. Запишеше ли този срез в глобалния sdSwaps, следващият рендер на
+   модула би останал с осакатени размени — без id, без status, без чуждите.
+   Подаден null/undefined значи „ползвай sdSwaps", което е верният източник по
+   пътя на рендера (sdUpdateTabBadgeFromData). */
+function sdUnreviewedCountFor(reports, lines, swaps){
   if(!currentUser) return 0;
+  var sw = swaps || sdSwaps || [];
   var unrev = (reports||[]).filter(function(r){ return !r.reviewed; });
   if(isLogisticsWarehouseUser()){
+    /* Закъсняла размяна по ред от бланката чака склада дори когато всички
+       редове са отговорени: някой трябва да се обади на двата магазина. */
+    var lateTo = {};
+    sw.forEach(function(s){ if(sdSwapIsLate(s)) lateTo[String(s.to_line_id)] = true; });
     return unrev.filter(function(r){
       if(r.counterpart !== currentUser.store_name) return false;
       /* Бланката чака склада, ако има ред без отговор от него ИЛИ ред, по
@@ -3574,6 +3797,7 @@ function sdUnreviewedCountFor(reports, lines){
          наличността) и редът още не е приключен. */
       var repLines = (lines||[]).filter(function(x){ return x.report_id===r.id; });
       if(!repLines.length) return true;
+      if(repLines.some(function(l){ return lateTo[String(l.id)]; })) return true;
       return repLines.some(function(l){
         if(!l.warehouse_response) return true;
         return (l.store_response==='sap_done' || l.store_response==='no_stock') && l.status!=='received';
@@ -3651,7 +3875,15 @@ function sdRefreshTabBadge(){
     if(!reports.length){ sdBadgePulse(0); return; }
     sbGet('stock_differences', qLines + '&report_id=in.(' + reports.map(function(r){return r.id;}).join(',') + ')')
       .then(function(lines){
-        sdBadgePulse(sdUnreviewedCountFor(reports, Array.isArray(lines)?lines:[]));
+        lines = Array.isArray(lines)?lines:[];
+        /* Само складът: закъснелите размени по неговите редове. Третият
+           аргумент пази глобалния sdSwaps — виж бележката при функцията. */
+        if(!isLogisticsWarehouseUser()){ sdBadgePulse(sdUnreviewedCountFor(reports, lines)); return; }
+        sbGet('stock_diff_swaps', 'status=eq.sent&warehouse=eq.'+encodeURIComponent(currentUser.store_name)+'&select=to_line_id,sent_at')
+          .then(function(sw){
+            sdBadgePulse(sdUnreviewedCountFor(reports, lines,
+              (Array.isArray(sw)?sw:[]).map(function(x){ return {status:'sent', to_line_id:x.to_line_id, sent_at:x.sent_at}; })));
+          }).catch(function(){ sdBadgePulse(sdUnreviewedCountFor(reports, lines, [])); });
       }).catch(function(){ sdSetTabBadge(reports.length); });
   }).catch(function(){});
 }
