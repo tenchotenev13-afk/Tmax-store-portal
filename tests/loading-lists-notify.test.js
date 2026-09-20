@@ -53,6 +53,15 @@ function env(user, state) {
   h.w.playSound = function () { h.sounds++; };
   return h;
 }
+/* Текстът на известието вече НЕ е в toast(): от 20.09.2026 пулсът вика
+   coNotifyToast(), която строи собствен елемент #co-toast — балонче, което
+   стои 8 секунди и е БУТОН към таба. Виж tests/loading-lists-notify-live.test.js
+   за пълното покритие на новото поведение; тук се сверява само текстът. */
+const notifyText = doc => {
+  const t = doc.getElementById('co-toast');
+  return t ? t.textContent : null;
+};
+
 /* Ред от loading_list_items — за обекта и НЕполучен, освен ако не е казано друго. */
 const row = (list_id, o) => Object.assign({ list_id: list_id, store_name: 'Петрич', received: false }, o);
 
@@ -68,7 +77,9 @@ const row = (list_id, o) => Object.assign({ list_id: list_id, store_name: 'Пе�
     await ticks();
 
     ok('нула звуци', h.sounds === 0, String(h.sounds));
-    ok('нула toast-ове', h.calls.toast.length === 0, JSON.stringify(h.calls.toast));
+    ok('нула съобщения (и по двата канала)',
+          h.calls.toast.length === 0 && notifyText(h.doc) === null,
+          JSON.stringify(h.calls.toast) + ' | co-toast: ' + JSON.stringify(notifyText(h.doc)));
     ok('водният знак е max(sent_at)', h.w._llWatermark === L2.sent_at, String(h.w._llWatermark));
   }
 
@@ -85,7 +96,9 @@ const row = (list_id, o) => Object.assign({ list_id: list_id, store_name: 'Пе�
     ok('водният знак НЕ е null', mark !== null, String(mark));
     ok('и е ISO низ', typeof mark === 'string' && /^\d{4}-\d{2}-\d{2}T/.test(mark), String(mark));
     ok('без звук', h.sounds === 0, String(h.sounds));
-    ok('без toast', h.calls.toast.length === 0, JSON.stringify(h.calls.toast));
+    ok('без съобщение (и по двата канала)',
+          h.calls.toast.length === 0 && notifyText(h.doc) === null,
+          JSON.stringify(h.calls.toast) + ' | co-toast: ' + JSON.stringify(notifyText(h.doc)));
 
     /* Първият лист на обекта пристига СЛЕД баселайна — часът се смята от него,
        за да не зависи тестът от реалния часовник на машината.
@@ -101,8 +114,7 @@ const row = (list_id, o) => Object.assign({ list_id: list_id, store_name: 'Пе�
 
     ok('първият лист СЕ чува', h.sounds === 1, String(h.sounds));
     ok('и носи името на склада',
-      h.calls.toast.some(t => String(t.msg || t) === '🚛 Нов товарен лист от ' + WH),
-      JSON.stringify(h.calls.toast));
+      notifyText(h.doc) === '🚛 Нов товарен лист от ' + WH, notifyText(h.doc));
     ok('водният знак се мести на него', h.w._llWatermark === FIRST.sent_at,
       String(h.w._llWatermark));
   }
@@ -122,7 +134,9 @@ const row = (list_id, o) => Object.assign({ list_id: list_id, store_name: 'Пе�
     h.w.checkNewLoadingLists();
     await ticks();
     ok('старите листи не се обявяват за нови', h.sounds === 0, String(h.sounds));
-    ok('нула toast-ове', h.calls.toast.length === 0, JSON.stringify(h.calls.toast));
+    ok('нула съобщения (и по двата канала)',
+          h.calls.toast.length === 0 && notifyText(h.doc) === null,
+          JSON.stringify(h.calls.toast) + ' | co-toast: ' + JSON.stringify(notifyText(h.doc)));
   }
 
   section('б) Нов лист след водния знак — звук и съобщение с името на склада');
@@ -139,8 +153,7 @@ const row = (list_id, o) => Object.assign({ list_id: list_id, store_name: 'Пе�
 
     ok('един звук', h.sounds === 1, String(h.sounds));
     ok('съобщението носи името на склада',
-      h.calls.toast.some(t => String(t.msg || t) === '🚛 Нов товарен лист от ' + WH),
-      JSON.stringify(h.calls.toast));
+      notifyText(h.doc) === '🚛 Нов товарен лист от ' + WH, notifyText(h.doc));
     ok('водният знак се мести напред', h.w._llWatermark === L3.sent_at, String(h.w._llWatermark));
   }
 
@@ -159,7 +172,9 @@ const row = (list_id, o) => Object.assign({ list_id: list_id, store_name: 'Пе�
     await ticks();
 
     ok('нула звуци', h.sounds === 0, String(h.sounds));
-    ok('нула toast-ове', h.calls.toast.length === 0, JSON.stringify(h.calls.toast));
+    ok('нула съобщения (и по двата канала)',
+          h.calls.toast.length === 0 && notifyText(h.doc) === null,
+          JSON.stringify(h.calls.toast) + ' | co-toast: ' + JSON.stringify(notifyText(h.doc)));
     ok('водният знак не мърда', h.w._llWatermark === mark, String(h.w._llWatermark));
   }
 
@@ -185,8 +200,9 @@ const row = (list_id, o) => Object.assign({ list_id: list_id, store_name: 'Пе�
     h.w.checkNewLoadingLists();
     await ticks();
     ok('след възстановяване старите листи НЕ се обявяват за нови',
-      h.sounds === 0 && h.calls.toast.length === 0,
-      h.sounds + ' звука, toast: ' + JSON.stringify(h.calls.toast));
+      h.sounds === 0 && h.calls.toast.length === 0 && notifyText(h.doc) === null,
+      h.sounds + ' звука, toast: ' + JSON.stringify(h.calls.toast) +
+      ' | co-toast: ' + JSON.stringify(notifyText(h.doc)));
 
     /* И празен списък РЕДОВЕ е същият случай. */
     st.items = () => [];

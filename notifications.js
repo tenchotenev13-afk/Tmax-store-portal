@@ -205,15 +205,8 @@ function showLoginBanner(){
   notifLoadingListsPending(function(lists){
     if(!lists || !lists.length) return;
     var el=document.getElementById('notif-banner'); if(!el) return;
-    var n=lists.length;
-    /* onclick е на цялата карта, затова ✕ спира разпространението — иначе
-       затварянето би отваряло таба. */
-    var card='<div class="notif-card info" data-notif="loading" onclick="showModule(\'loading\')" style="cursor:pointer;">'+
-      '<div class="notif-icon">🚛</div><div class="notif-text">'+
-      '<div class="notif-title">'+n+(n===1?' товарен лист':' товарни листа')+' за получаване</div>'+
-      '<div class="notif-sub">Отметни палетите в Транспорт → Товарни листи</div>'+
-      '</div><span class="notif-close" onclick="event.stopPropagation();dismissCard(this)">✕</span></div>';
-    el.innerHTML=card+el.innerHTML; el.style.display='block';
+    el.insertAdjacentHTML('afterbegin', notifLoadingCardHtml(lists.length));
+    el.style.display='block';
   });
 
   /* Нови задачи от Бюлетин през последните 3 дни, все още неотметнати от
@@ -400,6 +393,45 @@ function notifLoadingListsPending(cb){
     cb(lists.filter(function(l){ return need[l.id]; }));
   }).catch(function(){ cb(null); });
 }
+/* Картата „товарни листи за получаване" в банера. ЕДНО определение, ползвано
+   и от showLoginBanner() (при вход), и от checkNewLoadingLists() (пулсът
+   хвана нов лист насред сесията). Две копия щяха да се разминат при първата
+   промяна на текста — и то невидимо: човек вижда едната или другата според
+   това дали листът е дошъл преди или след като е влязъл.
+
+   onclick е на ЦЯЛАТА карта, затова ✕ спира разпространението — иначе
+   затварянето би отваряло таба. */
+function notifLoadingCardTitle(n){
+  return n+(n===1?' товарен лист':' товарни листа')+' за получаване';
+}
+function notifLoadingCardHtml(n){
+  return '<div class="notif-card info" data-notif="loading" onclick="showModule(\'loading\')" style="cursor:pointer;">'+
+    '<div class="notif-icon">🚛</div><div class="notif-text">'+
+    '<div class="notif-title">'+notifLoadingCardTitle(n)+'</div>'+
+    '<div class="notif-sub">Отметни палетите в Транспорт → Товарни листи</div>'+
+    '</div><span class="notif-close" onclick="event.stopPropagation();dismissCard(this)">✕</span></div>';
+}
+/* Слага картата, ако я няма; ако я има — само обновява БРОЯ. Второ копие на
+   картата значи два реда за едно и също нещо, а изтриването и повторното
+   слагане би върнало карта, която човекът току-що е затворил с ✕.
+   Заглавието минава през notifLoadingCardTitle(), за да не се разминат
+   построяването и обновяването. */
+function notifUpsertLoadingCard(n){
+  var el=document.getElementById('notif-banner');
+  if(!el || !n) return;
+  var card=el.querySelector('[data-notif="loading"]');
+  if(card){
+    var t=card.querySelector('.notif-title');
+    if(t) t.textContent=notifLoadingCardTitle(n);
+  } else {
+    /* insertAdjacentHTML, а не innerHTML=card+innerHTML: второто пре-парсва
+       целия банер и би изхвърлило състоянието на вече показаните карти
+       (напр. анимацията на току-що затворена). */
+    el.insertAdjacentHTML('afterbegin', notifLoadingCardHtml(n));
+  }
+  el.style.display='block';
+}
+
 /* Звънецът за нов товарен лист. Отделен от логиката за заявки нарочно: там
    критерият е множество от id-та, тук е време — вплитането им би значело едно
    от двете да работи наполовина. */
@@ -426,9 +458,23 @@ function checkNewLoadingLists(){
     var fresh=lists.filter(function(l){ return l.sent_at && l.sent_at>_llWatermark; });
     if(fresh.length){
       playSound();
-      toast(fresh.length===1
-        ? '🚛 Нов товарен лист от '+(fresh[0].warehouse||'склада')
-        : '🚛 '+fresh.length+' нови товарни листа','#2563eb');
+      /* toast() изчезва след 2.5 секунди и не води НИКЪДЕ. Човек на рампата
+         гледа стоката, не екрана — дотук известието за нов товарен лист беше
+         видимо само ако случайно е гледал портала в точната секунда.
+         coNotifyToast() стои 8 секунди И е бутон: същият модел като при
+         Разлики (sdBadgePulse в stock-differences.js). */
+      if(typeof coNotifyToast==='function'){
+        coNotifyToast(fresh.length===1
+          ? '🚛 Нов товарен лист от '+(fresh[0].warehouse||'склада')
+          : '🚛 '+fresh.length+' нови товарни листа',
+          '', 'Отвори Товарни листи',
+          function(){ if(typeof showModule==='function') showModule('loading'); });
+      }
+      /* И ТРАЙНАТА следа: балончето си отива, картата в банера остава, докато
+         не бъде затворена или палетите — отметнати. Броят е на ЧАКАЩИТЕ
+         листи (lists), не на новите (fresh) — картата казва колко има за
+         правене, а не колко са дошли в последната минута. */
+      notifUpsertLoadingCard(lists.length);
       /* Отвореният таб се опреснява сам. Няма глобал за текущия модул, затова
          се пита самият контейнер — showModule() крие останалите с display. */
       var mod=document.getElementById('mod-loading');
