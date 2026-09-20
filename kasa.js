@@ -64,6 +64,53 @@ function calcRazlika(r){
   return Math.round((counted-(cash-storna-inkaso))*100)/100; /* В брой - Сторна - Инкасо */
 }
 
+/* ─── ЗАЩИТА СРЕЩУ ДУБЛИКАТИ ────────────────────────────────── */
+/* Четири механизма правеха дублирани редове (проверено в базата на
+   20.09.2026, вече почистено):
+     1. двойно натискане на „Запази" — два реда в рамките на една минута
+        (kasa_zoborot Габрово 20.08, kasa_reports Търговище 11.08);
+     2. НОВ ПОС отчет вместо поправка на върнатия (Добрич 15.09) — върнатият
+        остава да виси в „Непоправени от по-рано" завинаги;
+     3. повторно въвеждане на същия отчет (Сливен 12.08, Раднево 30.07);
+     4. празен отчет с нулев оборот, потвърден от счетоводството
+        (Севлиево 05.08).
+
+   ВНИМАНИЕ: два ПОС отчета за ЕДИН ПОС в ЕДИН ден са ЛЕГИТИМНИ — смени и по
+   два Z-отчета, 35 такива случая в базата. Затова по ПОС+ден няма ЗАБРАНА, а
+   ВЪПРОС; блокира се само върнатият отчет, който си има свой път за поправка. */
+
+/* In-flight ключалка. ФЛАГЪТ, не disabled атрибутът, е истинската защита:
+   докато заявката пътува, вторият клик не влиза изобщо. disabled е за окото
+   на човека — бутонът често и без това изчезва при пре-рендера след отговора,
+   затова kasaUnlock() не се сърди на липсващ елемент. */
+var kasaInFlight={};
+function kasaLock(op,btnId){
+  if(kasaInFlight[op])return false;
+  kasaInFlight[op]=true;
+  var b=btnId?document.getElementById(btnId):null;
+  if(b){b.disabled=true;b.style.opacity='0.6';b.style.cursor='progress';}
+  return true;
+}
+function kasaUnlock(op,btnId){
+  delete kasaInFlight[op];
+  var b=btnId?document.getElementById(btnId):null;
+  if(b){b.disabled=false;b.style.opacity='';b.style.cursor='pointer';}
+}
+
+/* POST, който поема 409 от уникалния индекс и минава в PATCH — по образеца на
+   tcUpsert() в bulletin.js (10.09.2026). kasa_glavna и kasa_zoborot имат
+   уникален индекс по (store_name, date): удари ли се POST-ът в него, редът
+   ВЕЧЕ съществува и правилното нещо е да се допише, а не да се хвърли грешка
+   в лицето на човек, който просто е натиснал два пъти. Ключалката отгоре пази
+   от втория клик в СЪЩИЯ браузър; тази тук — от втория таб и от заявка,
+   тръгнала преди да се е върнал отговорът на първата. */
+function kasaUpsert(table,matchQuery,body){
+  return sbPost(table,body).then(function(r){
+    if(r.ok||r.status!==409)return r;
+    return sbPatch(table,matchQuery,body);
+  });
+}
+
 /* ─── LOAD ──────────────────────────────────────────────────── */
 function loadKasa(){
   var q='order=date.desc,pos_number.asc'+storeQ();
@@ -205,7 +252,7 @@ function renderKasa(){
           '<span style="background:#dcfce7;color:#14532d;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">✅ Потвърден</span>')+'</td>'+
         '<td><div style="display:flex;gap:4px;">'+
           (editable?'<button onclick="editKasaReport(\''+r.id+'\')" style="border:1px solid '+(returned?'#dc2626':'#e2e8f0')+';background:'+(returned?'#fee2e2':'#fff')+';'+(returned?'color:#dc2626;':'')+'border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Редактирай</button>':'')+
-          (draft&&canConfirm?'<button onclick="confirmKasaReport(\''+r.id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Потвърди</button>':'')+
+          (draft&&canConfirm?'<button id="k-btn-pos-confirm-'+r.id+'" onclick="confirmKasaReport(\''+r.id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Потвърди</button>':'')+
           (!editable&&canUnlock?'<button onclick="unlockKasaReport(\''+r.id+'\')" style="border:1px solid #d97706;background:#fffbeb;color:#d97706;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🔓 Разключи</button>':'')+
         '</div></td></tr>';
     });
@@ -296,7 +343,7 @@ function openKasaForm(report){
     '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:18px;">'+
       '<div style="font-size:18px;font-weight:600;">'+(kasaEditId?'✏️ Редактирай':'+ Нов')+' ПОС отчет</div>'+
       '<div style="display:flex;gap:8px;">'+
-        '<button onclick="submitKasaForm()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази чернова</button>'+
+        '<button id="k-btn-pos-save" onclick="submitKasaForm()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази чернова</button>'+
         '<button onclick="kasaView=\'pos\';loadKasa();" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Обратно</button>'+
       '</div>'+
     '</div>'+
@@ -500,18 +547,62 @@ function submitKasaForm(){
      записа на обекта на редактиращия. Случаят е възпроизведен и записът е
      изтрит; поправката е тук, защото това е единственото място, което знае
      дали е POST или PATCH. */
-  var req;
-  if(kasaEditId){
-    req=sbPatch('kasa_reports','id=eq.'+kasaEditId,p);
-  }else{
-    p.store_name=currentUser.store_name;
-    req=sbPost('kasa_reports',p);
-  }
-  req.then(function(res){
-    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    kasaSetDate(p.date); /* гарантира, че Главна каса/Равнение показват СЪЩАТА дата, за която е отчетът */
-    toast('💾 Черновата е запазена!');
-    kasaEditId=null;kasaView='pos';loadKasa();
+  var LOCK='pos-save', BTN='k-btn-pos-save';
+  /* Вторият клик пада ТУК и не стига до мрежата. Ключалката се взима СЛЕД
+     валидацията на касиера — иначе празното поле би я заключило завинаги. */
+  if(!kasaLock(LOCK,BTN))return;
+  var stop=function(msg){ kasaUnlock(LOCK,BTN); if(msg)toast(msg,'#dc2626'); };
+
+  var send=function(){
+    var req;
+    if(kasaEditId){
+      req=sbPatch('kasa_reports','id=eq.'+kasaEditId,p);
+    }else{
+      p.store_name=currentUser.store_name;
+      req=sbPost('kasa_reports',p);
+    }
+    req.then(function(res){
+      kasaUnlock(LOCK,BTN);
+      if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+      kasaSetDate(p.date); /* гарантира, че Главна каса/Равнение показват СЪЩАТА дата, за която е отчетът */
+      toast('💾 Черновата е запазена!');
+      kasaEditId=null;kasaView='pos';loadKasa();
+    });
+  };
+
+  /* РЕДАКЦИЯТА минава направо. Проверките долу са само за НОВ запис — иначе
+     поправката на върнат отчет би се спъвала в самата себе си. */
+  if(kasaEditId){send();return;}
+
+  /* Проверката чете ОТ БАЗАТА, не от kasaReports: масивът изостава между
+     табовете (kasaTab('glavna') подменя само среза за активната дата) и точно
+     на него се крепеше илюзията, че такъв отчет няма.
+     Провалила се заявка → sbGet връща [] и сам казва защо; записът пак минава.
+     Отказът да се запише заради мрежов проблем е по-лош от дубликат. */
+  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+
+        '&date=eq.'+p.date+'&pos_number=eq.'+p.pos_number+
+        '&select=id,status,cashier_name';
+  sbGet('kasa_reports',q).then(function(rows){
+    rows=Array.isArray(rows)?rows:[];
+    /* Върнатият отчет си има свой път — „✏️ Редактирай". Нов ред на негово
+       място оставя върнатия да виси в „Непоправени от по-рано" завинаги
+       (Добрич 15.09.2026). Това е ЕДИНСТВЕНАТА забрана тук. */
+    var ret=rows.filter(function(x){return x.status==='returned';});
+    if(ret.length){
+      stop('Има върнат отчет за ПОС '+p.pos_number+' — поправи него (✏️ Редактирай)');
+      return;
+    }
+    /* Същият касиер на същия ПОС за същия ден — ВЪПРОС, не забрана: две смени
+       на един касиер са възможни. Сравнението е нормализирано, защото името се
+       пише на ръка и „Мария Иванова" ≠ „мария иванова " само за машината. */
+    var norm=function(x){return String(x||'').trim().toLowerCase();};
+    var same=rows.filter(function(x){return norm(x.cashier_name)===norm(p.cashier_name);});
+    if(same.length&&!confirm('Вече има отчет на '+p.cashier_name+' за ПОС '+p.pos_number+
+        ' на тази дата.\n\nНов отчет (втора смяна) или грешка?')){
+      stop(null);
+      return;
+    }
+    send();
   });
 }
 
@@ -528,15 +619,27 @@ function editKasaReport(id){
   openKasaForm(r);
 }
 function confirmKasaReport(id){
+  var rep=kasaReports.filter(function(x){return x.id===id;})[0];
+  /* Празният отчет не се потвърждава. Севлиево 05.08.2026: нулев оборот,
+     потвърден от счетоводството и заключен така — после само „Разключи" го
+     отваря. Трите числа идват от kasaReports, защото това са ЧИСЛАТА НА
+     ЕКРАНА, които човекът гледа в мига на клика; липсващ ред ПРОПУСКА
+     проверката, вместо да блокира — фалшива забрана тук е по-скъпа от
+     пропуснат нулев отчет. */
+  if(rep&&!parseFloat(rep.total_turnover)&&!parseFloat(rep.counted_cash)&&!parseFloat(rep.cash_turnover)){
+    toast('Празен отчет не може да се потвърди','#dc2626');return;
+  }
   if(!confirm('Потвърди отчета? След потвърждението не може да се редактира.'))return;
+  var LOCK='pos-confirm:'+id, BTN='k-btn-pos-confirm-'+id;
+  if(!kasaLock(LOCK,BTN))return;
   var by=currentUser.display_name||currentUser.email;
   var at=new Date().toISOString();
-  var rep=kasaReports.filter(function(x){return x.id===id;})[0];
   sbPatch('kasa_reports','id=eq.'+id,{
     status:'confirmed',
     confirmed_at:at,
     confirmed_by:by
   }).then(function(res){
+    kasaUnlock(LOCK,BTN);
     if(!res.ok){toast('Грешка','#dc2626');return;}
     toast('✅ Отчетът е потвърден и заключен!');
     kasaCloseReturnedDay(rep?rep.store_name:currentUser.store_name,
@@ -755,8 +858,8 @@ function renderGlavna(){
       '<div style="display:flex;flex-direction:column;justify-content:flex-end;gap:6px;">'+
         (canInput?
           '<div style="display:flex;gap:6px;">'+
-            '<button onclick="saveGlavna()" class="btn btn-green" style="margin-top:20px;">💾 Запази</button>'+
-            (g.id&&canConfirmGlavna?'<button onclick="confirmGlavna()" style="margin-top:20px;border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">✅ Потвърди</button>':'')+
+            '<button id="k-btn-glavna-save" onclick="saveGlavna()" class="btn btn-green" style="margin-top:20px;">💾 Запази</button>'+
+            (g.id&&canConfirmGlavna?'<button id="k-btn-glavna-confirm" onclick="confirmGlavna()" style="margin-top:20px;border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">✅ Потвърди</button>':'')+
           '</div>':
           '<div style="display:flex;align-items:center;gap:8px;margin-top:20px;">'+
             '<span style="font-size:12px;color:#16a34a;font-weight:600;">✅ Потвърдена — заключена</span>'+
@@ -845,14 +948,20 @@ function saveGlavna(){
   p.sap_balance=sapEl?parseFloat(sapEl.value)||0:0;
   p.razlika=Math.round((p.counted_cash+p.slujebno-p.sap_balance)*100)/100;
 
+  var LOCK='glavna-save', BTN='k-btn-glavna-save';
+  if(!kasaLock(LOCK,BTN))return;
+  var gq='store_name=eq.'+encodeURIComponent(p.store_name)+'&date=eq.'+p.date;
+  /* kasaUpsert, не sbPost: уникалният индекс (store_name, date) връща 409 при
+     втори запис и без него човекът вижда „Грешка при запис" върху съвсем
+     редовно действие. */
   var req=kasaGlavna?
     sbPatch('kasa_glavna','id=eq.'+kasaGlavna.id,p):
-    sbPost('kasa_glavna',p);
+    kasaUpsert('kasa_glavna',gq,p);
   req.then(function(res){
+    kasaUnlock(LOCK,BTN);
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     toast('💾 Главна каса е запазена!');
     /* Reload */
-    var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
     sbGet('kasa_glavna',gq).then(function(data){
       kasaGlavna=(Array.isArray(data)&&data.length)?data[0]:null;
       renderGlavna();
@@ -864,11 +973,14 @@ function confirmGlavna(){
   if(!kasaGlavna||!kasaGlavna.id){toast('Първо запази Главна каса','#dc2626');return;}
   if(kasaGlavna.status==='confirmed'){toast('Вече е потвърдена','#d97706');return;}
   if(!confirm('Потвърди Главна каса? След потвърждението не може да се редактира.'))return;
+  var LOCK='glavna-confirm', BTN='k-btn-glavna-confirm';
+  if(!kasaLock(LOCK,BTN))return;
   sbPatch('kasa_glavna','id=eq.'+kasaGlavna.id,{
     status:'confirmed',
     confirmed_at:new Date().toISOString(),
     confirmed_by:currentUser.display_name||currentUser.email
   }).then(function(res){
+    kasaUnlock(LOCK,BTN);
     if(!res.ok){toast('Грешка при потвърждаване','#dc2626');return;}
     toast('✅ Главна каса е потвърдена и заключена!');
     var gq='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate();
@@ -1266,7 +1378,7 @@ function renderHistTable(rows) {
       '<td>'+statusLabel+'</td>'+
       '<td><div style="display:flex;gap:4px;">'+
         (canEdit?'<button onclick="editKasaReport(\''+r.id+'\')" style="border:1px solid #dc2626;background:#fee2e2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Редактирай</button>':'')+
-        (r.status==='draft'&&canConfirm?'<button onclick="confirmKasaReport(\''+r.id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Потвърди</button>':'')+
+        (r.status==='draft'&&canConfirm?'<button id="k-btn-pos-confirm-'+r.id+'" onclick="confirmKasaReport(\''+r.id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Потвърди</button>':'')+
       '</div></td>'+
     '</tr>';
   });
@@ -1351,8 +1463,8 @@ function renderZoborot(){
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
       '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(kasaActiveDate())+'</b></div>'+
       '<div style="display:flex;gap:8px;">'+
-        (isDraft&&canConfirm?'<button onclick="saveZoborot()" class="btn btn-green">💾 Запази</button>':'')+
-        (isDraft&&canConfirm&&z.id?'<button onclick="confirmZoborot()" class="btn" style="background:#2563eb;color:#fff;">✅ Потвърди</button>':'')+
+        (isDraft&&canConfirm?'<button id="k-btn-zoborot-save" onclick="saveZoborot()" class="btn btn-green">💾 Запази</button>':'')+
+        (isDraft&&canConfirm&&z.id?'<button id="k-btn-zoborot-confirm" onclick="confirmZoborot()" class="btn" style="background:#2563eb;color:#fff;">✅ Потвърди</button>':'')+
         (!isDraft&&canUnlockZoborot?'<button onclick="unlockZoborot()" class="btn" style="background:#fffbeb;color:#d97706;border:1px solid #d97706;">🔓 Разключи</button>':'')+
         '<button onclick="printZoborot()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:13px;cursor:pointer;">🖨 Разпечатай</button>'+
       '</div>'+
@@ -1497,8 +1609,15 @@ function saveZoborot(){
     pos_no_bank:posNoBank,fu_total_net:fuTotal,
     razlika:raz,voucheri:vouch,status:'draft'
   };
-  var req=zoborotData?sbPatch('kasa_zoborot','id=eq.'+zoborotData.id,p):sbPost('kasa_zoborot',p);
+  var LOCK='zoborot-save', BTN='k-btn-zoborot-save';
+  if(!kasaLock(LOCK,BTN))return;
+  /* kasa_zoborot вече има уникален индекс (store_name, date) — както
+     kasa_glavna. Габрово 20.08.2026 имаше два реда в една минута точно преди
+     той да влезе; оттук нататък вторият POST се връща като 409 и става PATCH. */
+  var zq='store_name=eq.'+encodeURIComponent(p.store_name)+'&date=eq.'+p.date;
+  var req=zoborotData?sbPatch('kasa_zoborot','id=eq.'+zoborotData.id,p):kasaUpsert('kasa_zoborot',zq,p);
   req.then(function(res){
+    kasaUnlock(LOCK,BTN);
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     toast('💾 Равнението е запазено!');
     loadZoborot();
@@ -1507,11 +1626,14 @@ function saveZoborot(){
 function confirmZoborot(){
   if(!confirm('Потвърди равнението? След потвърждение не може да се редактира.'))return;
   if(!zoborotData){saveZoborot();return;}
+  var LOCK='zoborot-confirm', BTN='k-btn-zoborot-confirm';
+  if(!kasaLock(LOCK,BTN))return;
   fetch(API+'/kasa_zoborot?id=eq.'+zoborotData.id,{
     method:'PATCH',
     headers:Object.assign({},H,{'Prefer':'return=minimal'}),
     body:JSON.stringify({status:'confirmed',confirmed_by:currentUser.display_name||currentUser.email})
   }).then(function(res){
+    kasaUnlock(LOCK,BTN);
     if(!res.ok){
       res.text().then(function(errText){
         console.error('kasa_zoborot PATCH грешка:', errText);
@@ -1520,7 +1642,7 @@ function confirmZoborot(){
       return;
     }
     toast('✅ Равнението е потвърдено!');loadZoborot();
-  });
+  }).catch(function(){ kasaUnlock(LOCK,BTN); });
 }
 function unlockZoborot(){
   if(!zoborotData)return;

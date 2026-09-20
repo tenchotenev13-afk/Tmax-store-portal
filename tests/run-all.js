@@ -132,6 +132,7 @@ const TESTS = [
   'kasa-return-status.test.js',
   'kasa-return-editable.test.js',
   'kasa-returned-day-close.test.js',
+  'kasa-dedup.test.js',
   'kasa-history-order.test.js',
   'kasa-history-window.test.js',
   'local-date.test.js',
