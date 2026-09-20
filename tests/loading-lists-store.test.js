@@ -126,8 +126,9 @@ function patchesTo(h, table) { return h.calls.patch.filter(p => p.table === tabl
     ok('заявката носи филтъра по обект',
       h.calls.get.some(u => /loading_list_items/.test(u) && /store_name=eq\./.test(u)),
       h.calls.get.filter(u => /loading_list_items/.test(u)).join(' | '));
-    ok('заявката за листите иска само sent/done',
-      h.calls.get.some(u => /loading_lists/.test(u) && /status=in\.\(sent,done\)/.test(u)),
+    ok('заявката за листите иска sent/done/partial, но НЕ и draft',
+      h.calls.get.some(u => /loading_lists/.test(u) && /status=in\.\(sent,done,partial\)/.test(u)) &&
+      !h.calls.get.some(u => /loading_lists/.test(u) && /status=in\.\([^)]*draft/.test(u)),
       h.calls.get.filter(u => /loading_lists/.test(u)).join(' | '));
 
     const wrap = h.doc.getElementById('mod-loading');
@@ -136,7 +137,8 @@ function patchesTo(h, table) { return h.calls.patch.filter(p => p.table === tabl
     ok('редът от черновата го няма', wrap.innerHTML.indexOf('D-300') < 0);
     ok('чуждият ред го няма', wrap.innerHTML.indexOf('D-200') < 0);
     ok('моят ред е тук', wrap.innerHTML.indexOf('D-100') >= 0);
-    ok('броячът е получени 0/1', wrap.textContent.indexOf('получени 0/1') >= 0,
+    ok('броячът е „получени 0 · неполучени 0 / 1"',
+      wrap.textContent.indexOf('получени 0 · неполучени 0 / 1') >= 0,
       wrap.textContent.slice(0, 200));
   }
 
@@ -353,7 +355,7 @@ function patchesTo(h, table) { return h.calls.patch.filter(p => p.table === tabl
     ok('и нито един не е на ред от ДРУГИЯ лист',
       !ip.some(p => /id=eq\.i7/.test(p.url)), JSON.stringify(ip.map(p => p.url)));
     ok('другата карта е налице и още е неполучена',
-      !!card(h.doc, 'L3') && card(h.doc, 'L3').textContent.indexOf('получени 0/1') >= 0,
+      !!card(h.doc, 'L3') && card(h.doc, 'L3').textContent.indexOf('получени 0 · неполучени 0 / 1') >= 0,
       card(h.doc, 'L3') && card(h.doc, 'L3').textContent.slice(0, 160));
     ok('received_by е този потребител',
       ip.every(p => p.body.received_by === 'Управител Гоце Делчев'),

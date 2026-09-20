@@ -386,7 +386,12 @@ function notifLoadingListsPending(cb){
   if(!notifWantsLoadingLists()){ cb(null); return; }
   Promise.all([
     sbGet('loading_lists','status=eq.sent&order=sent_at.desc&limit=20&select=id,warehouse,sent_at',true),
-    sbGet('loading_list_items','received=eq.false&select=list_id'+storeQ(),true)
+    /* „Чакащо" е САМО неотметнатото. Ред, по който обектът вече е заявил
+       липса (missing=true), е РЕШЕН въпрос — камионът няма да го донесе и
+       картата „N товарни листа за получаване" няма какво да го подкани да
+       направи. Без &missing=eq.false банерът щеше да виси, докато складът
+       не пипне листа, тоест точно там, където никой не гледа. */
+    sbGet('loading_list_items','received=eq.false&missing=eq.false&select=list_id'+storeQ(),true)
   ]).then(function(r){
     var lists=Array.isArray(r[0])?r[0]:[];
     var items=Array.isArray(r[1])?r[1]:[];

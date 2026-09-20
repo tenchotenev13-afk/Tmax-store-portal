@@ -59,7 +59,11 @@ var LL_KINDS = [
 var LL_STATUSES = [
   ['draft', '📝 Чернова',   '#92400e', '#fffbeb'],
   ['sent',  '📤 Изпратен',  '#1e40af', '#eff6ff'],
-  ['done',  '✅ Приключен', '#16a34a', '#f0fdf4']
+  ['done',  '✅ Приключен', '#16a34a', '#f0fdf4'],
+  /* Листът е обработен докрай, но поне един ред е отбелязан „неполучен".
+     Отделен статус, а не done с бележка: складът търси точно тези листи,
+     а в done те биха се смесили с приетите без забележка. */
+  ['partial', '⛔ Частично приключен', '#dc2626', '#fef2f2']
 ];
 
 /* ─── ПРАВА И КОНТЕКСТ ──────────────────────────────────────── */
@@ -238,7 +242,7 @@ function llRenumberPallets(items){
    разминава при първата редакция на ред и не гърми — просто показва грешно
    число, докато някой не го забележи. */
 function llCounts(items){
-  var c = { pallet:0, roll:0, bulk:0, stores:0, received:0, total:0 };
+  var c = { pallet:0, roll:0, bulk:0, stores:0, received:0, missing:0, total:0 };
   var seen = {};
   /* Броят се ТОВАРНИТЕ ЕДИНИЦИ, не редовете: четири документа на един палет
      са един палет. Преди консолидацията двете съвпадаха и това число лъжеше. */
@@ -248,6 +252,7 @@ function llCounts(items){
   (items || []).forEach(function(it){
     c.total++;
     if(it.received) c.received++;
+    if(it.missing)  c.missing++;
     if(it.store_name && !seen[it.store_name]){ seen[it.store_name] = 1; c.stores++; }
   });
   return c;
@@ -256,7 +261,7 @@ function llCounts(items){
 function llSummaryByStore(items){
   var by = {}, order = [];
   var ensure = function(s){
-    if(!by[s]){ by[s] = { store:s, pallet:0, roll:0, bulk:0, received:0, total:0 }; order.push(s); }
+    if(!by[s]){ by[s] = { store:s, pallet:0, roll:0, bulk:0, received:0, missing:0, total:0 }; order.push(s); }
     return by[s];
   };
   /* Товарните единици — по същата причина като в llCounts(). */
@@ -269,6 +274,7 @@ function llSummaryByStore(items){
     var e = ensure(it.store_name || '—');
     e.total++;
     if(it.received) e.received++;
+    if(it.missing)  e.missing++;
   });
   order.sort();
   return order.map(function(s){ return by[s]; });
@@ -316,9 +322,12 @@ function llLoadStoreSide(){
     var ids = {}, keys = [];
     mine.forEach(function(i){ if(i.list_id && !ids[i.list_id]){ ids[i.list_id] = 1; keys.push(i.list_id); } });
     if(!keys.length){ llStoreItems = []; llStoreLists = []; renderLoadingLists(); return; }
-    /* status=in.(sent,done) е ГЕЙТЪТ: черновата е работен документ на склада
-       и обектът няма работа да я вижда — тя още се пренарежда. */
-    return sbGet('loading_lists','id=in.('+keys.join(',')+')&status=in.(sent,done)&order=list_date.desc,created_at.desc')
+    /* status=in.(sent,done,partial) е ГЕЙТЪТ: черновата е работен документ на
+       склада и обектът няма работа да я вижда — тя още се пренарежда.
+       'partial' ВЛИЗА в списъка: приключеният с липси лист е точно този, който
+       обектът после търси, за да покаже кога и какво е заявил като липсващо.
+       Изпадне ли оттук, собствената му карта изчезва в мига на приключването. */
+    return sbGet('loading_lists','id=in.('+keys.join(',')+')&status=in.(sent,done,partial)&order=list_date.desc,created_at.desc')
       .then(function(rows){
         llStoreLists = Array.isArray(rows) ? rows : [];
         var ok = {};
@@ -326,12 +335,18 @@ function llLoadStoreSide(){
         /* Втори филтър от СЪЩИЯ гейт: редовете дойдоха преди листите, тоест
            сред тях има и такива от чернови. */
         llStoreItems = mine.filter(function(i){ return ok[i.list_id]; });
-        /* Напълно полученият лист е история — свит по подразбиране. Пипне ли
-           го веднъж човек, изборът му се пази (llCollapsed вече има ключ). */
+        /* Приключеният лист е история — свит по подразбиране. Пипне ли го
+           веднъж човек, изборът му се пази (llCollapsed вече има ключ).
+           „Приключен" е по СТАТУСА на листа, не по редовете на този обект:
+           лист, по който всеки ред е обработен, но който още чака „🏁 Приключи
+           приемането", има какво да се прави в него — свиването го скрива
+           заедно с единствения бутон, който го придвижва. Дотук условието
+           беше „всички received" и точно този случай не съществуваше. */
         llStoreLists.forEach(function(l){
           if(llCollapsed[l.id] !== undefined) return;
+          if(l.status !== 'done' && l.status !== 'partial') return;
           var it = llStoreItemsOf(l.id);
-          if(it.length && it.every(function(x){ return x.received; })) llCollapsed[l.id] = true;
+          if(it.length && it.every(function(x){ return x.received || x.missing; })) llCollapsed[l.id] = true;
         });
         renderLoadingLists();
       });
@@ -373,12 +388,24 @@ function llCanReceive(it){
   if(!currentUser || !it) return false;
   return currentUser.store_name === it.store_name || isGlobal();
 }
+/* Редът е „обработен", когато обектът се е произнесъл по него — получено ИЛИ
+   неполучено. Неотметнатият ред НЕ е трето състояние: той е чакащ. Две от
+   местата долу (броячът и „Приключи приемането") питат точно това. */
+function llHandled(it){ return !!(it && (it.received || it.missing)); }
+/* Може ли обектът още да се произнесе по този ред. Едно определение — иначе
+   бутоните на реда и гейтът на „Приключи приемането" се разминават и
+   бутонът остава сив при нула видими действия. */
+function llOpenForStore(it){ return !llHandled(it) && llCanReceive(it); }
 function llStoreCardHtml(l){
   var items = llStoreItemsOf(l.id).slice().sort(llByPosition);
   if(!items.length) return '';
-  var got = items.filter(function(i){ return i.received; }).length;
+  var got  = items.filter(function(i){ return i.received; }).length;
+  var miss = items.filter(function(i){ return i.missing; }).length;
   var open = !llCollapsed[l.id];
-  var canAny = items.some(function(i){ return !i.received && llCanReceive(i); });
+  var canAny = items.some(llOpenForStore);
+  /* Гейтът на „Приключи приемането": нито един ред без произнасяне. */
+  var pending = items.filter(function(i){ return !llHandled(i); }).length;
+  var allDone = pending === 0;
   /* Обектът на картата — за печата. При глобален профил в един лист може да
      има няколко обекта; тогава филтър няма и се печата целият лист. */
   var seenS = {}, onlyStore = '';
@@ -386,13 +413,25 @@ function llStoreCardHtml(l){
   var sKeys = Object.keys(seenS);
   if(sKeys.length === 1) onlyStore = sKeys[0];
 
-  var h = '<div id="ll-card-'+l.id+'" style="background:#fff;border:1px solid '+(got===items.length?'#bbf7d0':'#e2e8f0')+';border-left:4px solid '+(got===items.length?'#16a34a':'#2563eb')+';border-radius:10px;padding:12px;margin-bottom:10px;">'+
+  /* Три състояния на картата: чака (синьо), приета изцяло (зелено), приета
+     с липси (червено). Липсата не бива да изглежда като приключено наред. */
+  var edge = !allDone ? ['#e2e8f0','#2563eb','#eff6ff','#1e40af']
+           : (miss    ? ['#fecaca','#dc2626','#fef2f2','#dc2626']
+                      : ['#bbf7d0','#16a34a','#f0fdf4','#16a34a']);
+  var h = '<div id="ll-card-'+l.id+'" style="background:#fff;border:1px solid '+edge[0]+';border-left:4px solid '+edge[1]+';border-radius:10px;padding:12px;margin-bottom:10px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'+
       '<div style="font-size:13.5px;font-weight:700;">🚛 '+esc(l.warehouse||'')+' · '+fmtDate(l.list_date)+
-        ' <span style="background:'+(got===items.length?'#f0fdf4':'#eff6ff')+';color:'+(got===items.length?'#16a34a':'#1e40af')+';padding:2px 8px;border-radius:20px;font-size:10.5px;">получени '+got+'/'+items.length+'</span> '+
+        ' <span style="background:'+edge[2]+';color:'+edge[3]+';padding:2px 8px;border-radius:20px;font-size:10.5px;">получени '+got+' · неполучени '+miss+' / '+items.length+'</span> '+
         llStatusBadge(l.status)+'</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
         (open && canAny ? '<button data-id="'+l.id+'" onclick="llMarkAllReceived(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">✅ Всичко получено</button>' : '')+
+        /* Приемането се приключва ЯВНО от обекта. Дотук листът се затваряше
+           сам, чак когато всеки ред на всеки обект е получен — с липси този
+           момент просто не настъпваше и листът висеше „изпратен" завинаги. */
+        (open && l.status === 'sent'
+          ? '<button data-id="'+l.id+'"'+(allDone?'':' disabled title="Отметни всеки ред като получен или неполучен"')+
+            ' onclick="llFinishReceiving(this.dataset.id)" style="border:none;background:'+(allDone?'#0f172a':'#e2e8f0')+';color:'+(allDone?'#fff':'#94a3b8')+';border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:'+(allDone?'pointer':'not-allowed')+';">🏁 Приключи приемането</button>'
+          : '')+
         '<button data-id="'+l.id+'" data-s="'+escVal(onlyStore)+'" onclick="llPrint(this.dataset.id,this.dataset.s)" title="Печат само на моята част от листа" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
         '<button data-id="'+l.id+'" onclick="llToggleCard(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 13px;font-size:12px;cursor:pointer;">'+(open?'▲ Свий':'▼ Разгъни')+'</button>'+
       '</div>'+
@@ -411,22 +450,33 @@ function llStoreCardHtml(l){
   llPalletGroups(items).forEach(function(g){
     var multi = g.rows.length > 1;
     if(multi){
-      var gGot = g.rows.filter(function(r){ return r.received; }).length;
-      var gCan = g.rows.some(function(r){ return !r.received && llCanReceive(r); });
+      var gGot  = g.rows.filter(function(r){ return r.received; }).length;
+      var gMiss = g.rows.filter(function(r){ return r.missing; }).length;
+      var gCan  = g.rows.some(llOpenForStore);
       h += '<tr data-pallet-group="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+
         '<td colspan="5" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
-          esc(llKindLabel(g.rows[0]))+' · '+g.rows.length+' документа · получени '+gGot+'/'+g.rows.length+
-          (g.rows.some(function(r){ return r.partial; })?' '+llPartialBadge():'')+'</td>'+
+          esc(llKindLabel(g.rows[0]))+' · '+g.rows.length+' документа · получени '+gGot+
+          (gMiss?' · неполучени '+gMiss:'')+'/'+g.rows.length+
+          (g.rows.some(function(r){ return r.partial; })?' '+llPartialBadge():'')+
+          /* Коментарът на ЦЕЛИЯ палет. Стои тук, а не в prompt(): обяснението
+             какво липсва се пише веднъж и се записва във всеки ред на палета,
+             а полето остава на екрана, докато човекът го дописва. */
+          (gCan?'<div style="margin-top:5px;font-weight:400;"><input id="ll-pc-'+l.id+'-'+g.pallet_no+'" placeholder="какво липсва — задължително за „Неполучен целия палет“" style="width:100%;max-width:420px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-size:11.5px;"></div>':'')+
+        '</td>'+
         '<td style="padding:6px 9px;white-space:nowrap;">'+(gCan
-          ? '<button data-id="'+l.id+'" data-p="'+g.pallet_no+'" onclick="llMarkPalletReceived(this.dataset.id,this.dataset.p)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Целият палет</button>'
+          ? '<button data-id="'+l.id+'" data-p="'+g.pallet_no+'" onclick="llMarkPalletReceived(this.dataset.id,this.dataset.p)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Целият палет</button>'+
+            ' <button data-id="'+l.id+'" data-p="'+g.pallet_no+'" onclick="llMarkPalletMissing(this.dataset.id,this.dataset.p)" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">⛔ Неполучен целия палет</button>'
           : '')+
           /* Разлика по ЦЕЛИЯ палет само докато е недокоснат: започне ли да се
              отмята по редове, въпросът вече е за конкретния ред. */
-          (gGot===0 && gCan ? llDiffBtn(g.rows[0].id) : '')+'</td></tr>';
+          (gGot===0 && gMiss===0 && gCan ? llDiffBtn(g.rows[0].id) : '')+'</td></tr>';
     }
     g.rows.forEach(function(it){
     var failed = !!llDocFailures[it.id];
-    h += '<tr'+(failed?' data-doc-failed="1"':'')+' style="border-bottom:1px solid #f1f5f9;'+(it.received?'background:#f0fdf4;':'')+'">'+
+    /* Три фона, защото трите състояния трябва да се различават от два метра:
+       зелен = получено, червен = обектът е заявил липса, бял = още чака. */
+    var bg = it.received ? 'background:#f0fdf4;' : (it.missing ? 'background:#fef2f2;' : '');
+    h += '<tr'+(failed?' data-doc-failed="1"':'')+(it.missing?' data-missing="1"':'')+' style="border-bottom:1px solid #f1f5f9;'+bg+'">'+
       '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+(multi?'padding-left:22px;color:#94a3b8;':'')+'">'+(multi?'↳':esc(llKindLabel(it)))+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
         (it.partial?' '+llPartialBadge():'')+'</td>'+
@@ -434,14 +484,22 @@ function llStoreCardHtml(l){
       '<td style="padding:6px 9px;color:#64748b;">'+esc(it.warehouse_comment||'—')+'</td>'+
       /* Коментарът на обекта остава редактируем и СЛЕД отмятането: разминаването
          често се вижда чак при подреждане на стоката, не при разтоварването. */
+      /* id-то е за llMarkMissing(): бутонът чете ТОЗИ input, а не it.store_comment.
+         Кликът по бутона blur-ва полето и onchange се задейства пръв само в
+         истински браузър; текстът трябва да се хване и когато не е. */
       '<td style="padding:6px 9px;">'+(llCanReceive(it)
-        ? '<input value="'+escVal(it.store_comment)+'" data-id="'+it.id+'" onchange="llSaveStoreComment(this.dataset.id,this.value)" placeholder="напр. кашонът е мокър" style="width:100%;min-width:130px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;">'
+        ? '<input id="ll-sc-'+it.id+'" value="'+escVal(it.store_comment)+'" data-id="'+it.id+'" onchange="llSaveStoreComment(this.dataset.id,this.value)" placeholder="напр. кашонът е мокър" style="width:100%;min-width:130px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;">'
         : esc(it.store_comment||'—'))+'</td>'+
       '<td style="padding:6px 9px;white-space:nowrap;">'+(it.received
         ? '<span style="color:#16a34a;font-weight:600;">✅ '+esc(it.received_by||'')+(it.received_at?' · '+llFmtStamp(it.received_at):'')+'</span>'
-        : (llCanReceive(it)
-          ? '<button data-id="'+it.id+'" onclick="llMarkReceived(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Получено</button>'+llDiffBtn(it.id)
-          : '<span style="color:#cbd5e1;">—</span>'))+
+        : (it.missing
+          ? '<span style="color:#dc2626;font-weight:600;">⛔ '+esc(it.missing_by||'')+(it.missing_at?' · '+llFmtStamp(it.missing_at):'')+'</span>'+
+            /* Отмяната е за сгрешен клик и за стока, която е дошла по-късно. */
+            (llCanReceive(it)?' <button data-id="'+it.id+'" onclick="llUnmarkMissing(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">↩ Отмени</button>':'')
+          : (llCanReceive(it)
+            ? '<button data-id="'+it.id+'" onclick="llMarkReceived(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Получено</button>'+
+              ' <button data-id="'+it.id+'" onclick="llMarkMissing(this.dataset.id)" title="Редът НЕ е пристигнал — описва се в „Моят коментар“" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">⛔ Неполучено</button>'+llDiffBtn(it.id)
+            : '<span style="color:#cbd5e1;">—</span>')))+
       (failed?'<div style="margin-top:3px;font-size:10px;color:#b45309;font-weight:600;">⚠️ документът не е затворен</div>':'')+
       '</td></tr>';
     });
@@ -512,6 +570,10 @@ function llSaveStoreComment(itemId, val){
 function llMarkReceived(itemId){
   var it = llStoreItems.find(function(x){ return String(x.id) === String(itemId); });
   if(!it || it.received) return;
+  /* „Получено" и „неполучено" са взаимно изключващи се. Базата НЕ го налага
+     (виж миграцията loading_missing — check няма заради огледалото), значи
+     единственото място, където правилото живее, е тук. */
+  if(it.missing){ toast('Редът е отбелязан като неполучен — отмени го първо','#d97706'); return; }
   if(!llCanReceive(it)){ toast('Само обектът получател може да отмята','#dc2626'); return; }
   var at = new Date().toISOString(), by = llActor();
   sbPatch('loading_list_items','id=eq.'+itemId,{received:true, received_by:by, received_at:at}).then(function(res){
@@ -527,7 +589,7 @@ function llMarkReceived(itemId){
 function llMarkPalletReceived(listId, palletNo){
   var n = parseInt(palletNo, 10);
   var mine = llStoreItemsOf(listId).filter(function(i){
-    return !i.received && i.kind === 'pallet' && Number(i.pallet_no) === n && llCanReceive(i);
+    return llOpenForStore(i) && i.kind === 'pallet' && Number(i.pallet_no) === n;
   });
   if(!mine.length){ toast('Няма неполучени редове по този палет','#64748b'); return; }
   llPatchReceived(mine, 'палета');
@@ -535,8 +597,8 @@ function llMarkPalletReceived(listId, palletNo){
 function llMarkAllReceived(listId){
   /* САМО редовете на този обект. Един лист обслужва няколко обекта и бутонът
      стои във всяка от картите им - без филтъра единият би отмятал за другия. */
-  var mine = llStoreItemsOf(listId).filter(function(i){ return !i.received && llCanReceive(i); });
-  if(!mine.length){ toast('Няма неполучени редове','#64748b'); return; }
+  var mine = llStoreItemsOf(listId).filter(llOpenForStore);
+  if(!mine.length){ toast('Няма неотметнати редове','#64748b'); return; }
   llPatchReceived(mine, 'листа');
 }
 /* Общото тяло на двата групови бутона („целия палет" и „всичко получено").
@@ -559,6 +621,126 @@ function llPatchReceived(rows, what){
       toast('✅ Отметнато');
     }
     llAfterReceive(good.map(function(r){ return r.it; }));
+  });
+}
+
+
+/* ═══ „НЕПОЛУЧЕНО" ═══════════════════════════════════════════
+   Досега редът имаше само received true/false и неотметнатият ред значеше
+   „още не е дошъл". Обектът нямаше как да каже „това НЕ дойде" — значи и
+   нямаше как да приключи приемането си с липси, а листът ставаше done само
+   когато ВСИЧКИ редове на ВСИЧКИ обекти са получени. На практика лист с
+   липсващ палет висеше „изпратен" завинаги и никой не научаваше нищо.
+
+   Липсата е ТВЪРДЕНИЕ, не отсъствие на отметка, затова иска обяснение:
+   „неполучено" без коментар е точно толкова безполезно, колкото и празен ред.
+   Оттам и единственото условие долу — непразен store_comment.
+
+   И трите функции НЕ викат llAutoCloseDoc(): документът в „Стока на път"
+   остава чакащ. Точно това означава липса. */
+
+/* Полето „Моят коментар" на реда — ТЕКУЩАТА му стойност на екрана, а не
+   записаната. Кликът по бутона blur-ва input-а и onchange го записва пръв,
+   но това е поведение на истинския браузър; тук не се разчита на него. */
+function llStoreCommentInput(itemId){
+  return document.getElementById('ll-sc-' + itemId);
+}
+function llMarkMissing(itemId){
+  var it = llStoreItems.find(function(x){ return String(x.id) === String(itemId); });
+  if(!it || it.missing) return;
+  if(it.received){ toast('Редът вече е отметнат като получен','#d97706'); return; }
+  if(!llCanReceive(it)){ toast('Само обектът получател може да отмята','#dc2626'); return; }
+
+  var inp = llStoreCommentInput(itemId);
+  var txt = inp ? String(inp.value == null ? '' : inp.value).trim()
+                : String(it.store_comment == null ? '' : it.store_comment).trim();
+  if(!txt){
+    toast('Опиши какво липсва в коментара','#dc2626');
+    if(inp && inp.focus) inp.focus();
+    return;                                  /* НИЩО не се записва */
+  }
+  var at = new Date().toISOString(), by = llActor();
+  /* Коментарът влиза в СЪЩИЯ PATCH, ако още не е записан. Два записа биха
+     значели, че липсата може да се запише, а обяснението ѝ — не. */
+  var body = { missing:true, missing_by:by, missing_at:at };
+  if(txt !== String(it.store_comment == null ? '' : it.store_comment)) body.store_comment = txt;
+  sbPatch('loading_list_items','id=eq.'+itemId, body).then(function(res){
+    if(!res.ok){ toast('Грешка при отмятане: '+sbErrMsg(res),'#dc2626'); return; }
+    it.missing = true; it.missing_by = by; it.missing_at = at;
+    if(body.store_comment !== undefined) it.store_comment = txt;
+    toast('⛔ Отбелязано като неполучено','#dc2626');
+    renderLoadingLists();
+  });
+}
+/* Целият палет наведнъж — човекът на рампата вижда ЕДНА липсваща единица,
+   не четири документа. Коментарът е ЕДИН и отива във всичките ѝ редове:
+   иначе същото изречение се преписва толкова пъти, колкото са документите. */
+function llMarkPalletMissing(listId, palletNo){
+  var n = parseInt(palletNo, 10);
+  var mine = llStoreItemsOf(listId).filter(function(i){
+    return llOpenForStore(i) && i.kind === 'pallet' && Number(i.pallet_no) === n;
+  });
+  if(!mine.length){ toast('Няма неотметнати редове по този палет','#64748b'); return; }
+  var inp = document.getElementById('ll-pc-' + listId + '-' + n);
+  var txt = inp ? String(inp.value == null ? '' : inp.value).trim() : '';
+  if(!txt){
+    toast('Опиши какво липсва в коментара','#dc2626');
+    if(inp && inp.focus) inp.focus();
+    return;
+  }
+  if(!confirm('Отбележи '+mine.length+' реда от палета като НЕполучени?')) return;
+  var at = new Date().toISOString(), by = llActor();
+  Promise.all(mine.map(function(it){
+    return sbPatch('loading_list_items','id=eq.'+it.id,
+      { missing:true, missing_by:by, missing_at:at, store_comment:txt })
+      .then(function(res){ return { it:it, res:res }; });
+  })).then(function(all){
+    var bad = all.filter(function(r){ return !r.res.ok; });
+    all.filter(function(r){ return r.res.ok; }).forEach(function(r){
+      r.it.missing = true; r.it.missing_by = by; r.it.missing_at = at; r.it.store_comment = txt;
+    });
+    if(bad.length){
+      console.error('llMarkPalletMissing: '+bad.length+' реда не бяха отбелязани', bad[0].res.error);
+      toast('⚠️ '+bad.length+' реда НЕ бяха отбелязани: '+sbErrMsg(bad[0].res),'#dc2626');
+    } else {
+      toast('⛔ Палетът е отбелязан като неполучен','#dc2626');
+    }
+    renderLoadingLists();
+  });
+}
+/* Отмяна — сгрешен клик или стока, дошла с по-късен курс. Връща реда в
+   изходно състояние, тоест пак „чакащ", а не „получен". */
+function llUnmarkMissing(itemId){
+  var it = llStoreItems.find(function(x){ return String(x.id) === String(itemId); });
+  if(!it || !it.missing) return;
+  if(!llCanReceive(it)){ toast('Само обектът получател може да отмята','#dc2626'); return; }
+  sbPatch('loading_list_items','id=eq.'+itemId,
+    { missing:false, missing_by:null, missing_at:null }).then(function(res){
+    if(!res.ok){ toast('Отмяната НЕ беше записана: '+sbErrMsg(res),'#dc2626'); return; }
+    it.missing = false; it.missing_by = null; it.missing_at = null;
+    toast('↩ Върнато в изчакване');
+    renderLoadingLists();
+  });
+}
+/* Обектът приключва СВОЕТО приемане. Листът се затваря само ако и другите
+   обекти по него са приключили — това решава llAutoDoneList() със заявка,
+   не от llStoreItems (чуждите редове са невидими тук). */
+function llFinishReceiving(listId){
+  var mine = llStoreItemsOf(listId);
+  if(!mine.length) return;
+  var left = mine.filter(function(i){ return !llHandled(i); }).length;
+  if(left){ toast('Отметни всеки ред като получен или неполучен','#d97706'); return; }
+  var l = llStoreLists.find(function(x){ return String(x.id) === String(listId); });
+  var was = l && l.status;
+  llAutoDoneList(listId).then(function(){
+    /* Листът обслужва няколко обекта. Приключи ли този пръв, статусът не се
+       мести — llAutoDoneList мълчи, защото няма какво да запише. Без реда
+       долу човекът натиска бутон и НИЩО не се случва на екрана, тоест
+       натиска пак. Съобщението е единственото, което го различава от провал. */
+    if(l && l.status === was){
+      toast('Готово за този обект. Листът чака и останалите обекти.','#2563eb');
+    }
+    renderLoadingLists();
   });
 }
 
@@ -637,19 +819,34 @@ function llAutoCloseDoc(d){
     });
   });
 }
+/* Листът се затваря, когато ВСЕКИ ред на ВСИЧКИ обекти е ОБРАБОТЕН — получен
+   ИЛИ неполучен. Дотук условието беше „всички received" и лист с една липса
+   не настъпваше никога.
+
+   Има ли поне една липса, статусът е 'partial', не 'done': складът търси
+   точно тези листи, а done би ги скрил сред приетите без забележка.
+
+   Желаният статус се СМЯТА и се сравнява с текущия, вместо да има изход
+   „вече е приключен". Иначе „↩ Отмени" върху липса по вече partial лист би
+   оставил статуса partial завинаги — редът се получава по-късно, липси вече
+   няма, а листът продължава да твърди обратното. */
 function llAutoDoneList(listId){
   var l = llStoreLists.find(function(x){ return String(x.id) === String(listId); });
-  if(!l || l.status === 'done') return Promise.resolve();
-  /* Обектът вижда САМО своите редове, затова "всичко получено" се проверява
-     със заявка, не от llStoreItems: другите обекти на същия лист са невидими
-     тук и листът би се приключвал още на първия готов обект. */
-  return sbGet('loading_list_items','list_id=eq.'+listId+'&select=id,received').then(function(rows){
+  if(!l) return Promise.resolve();
+  /* Обектът вижда САМО своите редове, затова проверката е със заявка, не от
+     llStoreItems: другите обекти на същия лист са невидими тук и листът би
+     се приключвал още на първия готов обект. */
+  return sbGet('loading_list_items','list_id=eq.'+listId+'&select=id,received,missing').then(function(rows){
     if(!Array.isArray(rows) || !rows.length) return;
-    if(!rows.every(function(r){ return r.received; })) return;
-    return sbPatch('loading_lists','id=eq.'+listId,{status:'done', done_at:new Date().toISOString()}).then(function(res){
+    if(!rows.every(function(r){ return r.received || r.missing; })) return;
+    var want = rows.some(function(r){ return r.missing; }) ? 'partial' : 'done';
+    if(l.status === want) return;
+    return sbPatch('loading_lists','id=eq.'+listId,{status:want, done_at:new Date().toISOString()}).then(function(res){
       if(!res.ok){ toast('⚠️ Листът НЕ беше приключен: '+sbErrMsg(res),'#dc2626'); return; }
-      l.status = 'done';
-      toast('✅ Товарният лист е приключен');
+      l.status = want;
+      toast(want === 'partial'
+        ? '⛔ Товарният лист е приключен с липси'
+        : '✅ Товарният лист е приключен');
     });
   });
 }
@@ -677,6 +874,10 @@ function llVisibleLists(){
     /* По подразбиране „Чернови + Изпратени": приключените са история и само
        биха удължавали списъка на човека, който товари днес. */
     if(llStatusFilter === 'open') return l.status === 'draft' || l.status === 'sent';
+    /* „Приключени" показва и частично приключените: за склада и двете значат
+       „обектът приключи с този лист". Разликата е ВИДИМА (бадж + отделен
+       филтър), но не бива да я СКРИВА от общия изглед. */
+    if(llStatusFilter === 'done') return l.status === 'done' || l.status === 'partial';
     return l.status === llStatusFilter;
   });
 }
@@ -697,7 +898,7 @@ function llListHtml(){
     return h + '<div style="text-align:center;padding:50px;color:#94a3b8;background:#fff;border:1px solid #e2e8f0;border-radius:10px;">Избери склад, за да видиш товарните листи.</div>';
   }
 
-  var counts = { open:0, draft:0, sent:0, done:0, all:llLists.length };
+  var counts = { open:0, draft:0, sent:0, done:0, partial:0, all:llLists.length };
   llLists.forEach(function(l){
     if(counts.hasOwnProperty(l.status)) counts[l.status]++;
     if(l.status === 'draft' || l.status === 'sent') counts.open++;
@@ -706,7 +907,9 @@ function llListHtml(){
   [['open','Текущи ('+counts.open+')'],
    ['draft','📝 Чернови ('+counts.draft+')'],
    ['sent','📤 Изпратени ('+counts.sent+')'],
-   ['done','✅ Приключени ('+counts.done+')'],
+   /* Броячът съвпада с това, което филтърът показва — done + partial. */
+   ['done','✅ Приключени ('+(counts.done+counts.partial)+')'],
+   ['partial','⛔ Частично ('+counts.partial+')'],
    ['all','Всички ('+counts.all+')']].forEach(function(f){
     var a = llStatusFilter === f[0];
     h += '<button data-f="'+f[0]+'" onclick="llSetStatusFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
@@ -1143,14 +1346,21 @@ function llSendList(id){
     loadLoadingLists();
   });
 }
+/* Ръчното приключване от склада следва СЪЩОТО правило като автоматичното:
+   има ли поне един ред, заявен като неполучен, статусът е 'partial'. Иначе
+   натискането на бутона би изтрило разликата между „прието наред" и „прието
+   с липси" — и то точно от страната, която липсата засяга. */
 function llDoneList(id){
   if(!llCanEdit()){ toast('Нямаш права за това действие','#dc2626'); return; }
   if(!confirm('Приключи товарния лист?')) return;
-  sbPatch('loading_lists','id=eq.'+id,{status:'done', done_at:new Date().toISOString()}).then(function(res){
+  var miss = llItemsOf(id).some(function(i){ return i.missing; });
+  var want = miss ? 'partial' : 'done';
+  sbPatch('loading_lists','id=eq.'+id,{status:want, done_at:new Date().toISOString()}).then(function(res){
     if(!res.ok){ toast('Грешка при приключване: '+sbErrMsg(res),'#dc2626'); return; }
-    toast('✅ Товарният лист е приключен');
+    toast(miss ? '⛔ Товарният лист е приключен с липси' : '✅ Товарният лист е приключен',
+      miss ? '#dc2626' : undefined);
     var l = llLists.find(function(x){ return String(x.id) === String(id); });
-    if(l) l.status = 'done';
+    if(l) l.status = want;
     loadLoadingLists();
   });
 }
@@ -1196,15 +1406,19 @@ function llViewHtml(){
   /* Обобщението по обект — СМЯТА СЕ от редовете, не от заглавието. */
   var sum = llSummaryByStore(items);
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:12px;">'+
-    '<div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📊 По обекти ('+c.stores+' обекта · '+c.pallet+' палета · '+c.roll+' рула · '+c.bulk+' насип)</div>'+
+    '<div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📊 По обекти ('+c.stores+' обекта · '+c.pallet+' палета · '+c.roll+' рула · '+c.bulk+' насип'+
+      (c.missing?' · <span style="color:#dc2626;">'+c.missing+' неполучени</span>':'')+')</div>'+
     '<table id="ll-summary" style="width:100%;border-collapse:collapse;font-size:12px;">'+
-    '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;text-align:right;">Палети</th><th style="padding:3px 6px;text-align:right;">Рула</th><th style="padding:3px 6px;text-align:right;">Насип</th><th style="padding:3px 6px;text-align:right;">Получени</th></tr>';
+    '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;text-align:right;">Палети</th><th style="padding:3px 6px;text-align:right;">Рула</th><th style="padding:3px 6px;text-align:right;">Насип</th><th style="padding:3px 6px;text-align:right;">Получени</th><th style="padding:3px 6px;text-align:right;">Неполучени</th></tr>';
   sum.forEach(function(s){
     h += '<tr style="border-top:1px solid #f1f5f9;"><td style="padding:3px 6px;font-weight:600;">'+esc(s.store)+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.pallet+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.roll+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.bulk+'</td>'+
-      '<td style="padding:3px 6px;text-align:right;">'+s.received+'/'+s.total+'</td></tr>';
+      '<td style="padding:3px 6px;text-align:right;">'+s.received+'/'+s.total+'</td>'+
+      /* Нулата остава сива — червено число, което значи „няма липси", е точно
+         толкова подвеждащо, колкото липсващата колона. */
+      '<td style="padding:3px 6px;text-align:right;'+(s.missing?'color:#dc2626;font-weight:700;':'color:#cbd5e1;')+'">'+s.missing+'</td></tr>';
   });
   h += '</table></div>';
 
@@ -1219,7 +1433,8 @@ function llViewHtml(){
   });
   h += '</tr></thead><tbody>';
   items.forEach(function(it){
-    h += '<tr style="border-bottom:1px solid #f1f5f9;'+(it.received?'background:#f0fdf4;':'')+'">'+
+    h += '<tr'+(it.missing?' data-missing="1"':'')+' style="border-bottom:1px solid #f1f5f9;'+
+      (it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':''))+'">'+
       '<td style="padding:6px 9px;color:#94a3b8;">'+(it.position!=null?it.position:'—')+'</td>'+
       '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;">'+esc(llKindLabel(it))+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
@@ -1230,10 +1445,15 @@ function llViewHtml(){
         ? '<input value="'+escVal(it.warehouse_comment)+'" data-id="'+it.id+'" onchange="llSaveWarehouseComment(this.dataset.id,this.value)" style="width:100%;min-width:120px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;">'
         : esc(it.warehouse_comment||'—'))+'</td>'+
       '<td style="padding:6px 9px;font-weight:500;">'+esc(it.store_name||'')+'</td>'+
-      '<td style="padding:6px 9px;color:#64748b;">'+esc(it.store_comment||'—')+'</td>'+
+      /* Коментарът на обекта е ОБЯСНЕНИЕТО на липсата — при missing той не е
+         бележка встрани, а самото съдържание на реда, затова е откроен. */
+      '<td style="padding:6px 9px;'+(it.missing?'color:#b91c1c;font-weight:600;':'color:#64748b;')+'">'+esc(it.store_comment||'—')+'</td>'+
       '<td style="padding:6px 9px;white-space:nowrap;">'+(it.received
         ? '<span style="color:#16a34a;font-weight:600;">✔ '+esc(it.received_by||'')+(it.received_at?' · '+llFmtStamp(it.received_at):'')+'</span>'
-        : '<span style="color:#cbd5e1;">—</span>')+'</td>'+
+        : (it.missing
+          ? '<span style="color:#dc2626;font-weight:700;">⛔ Неполучено'+
+            (it.missing_by?' · '+esc(it.missing_by):'')+(it.missing_at?' · '+llFmtStamp(it.missing_at):'')+'</span>'
+          : '<span style="color:#cbd5e1;">—</span>'))+'</td>'+
       '</tr>';
   });
   h += '</tbody></table></div>';
@@ -1327,6 +1547,10 @@ function llRenderPrint(list, items, storeFilter){
     '.lp-num{text-align:right;}'+
     '.lp-kind{font-weight:700;}'+
     '.lp-tag{font-size:7pt;color:#92400e;white-space:nowrap;}'+
+    '.lp-mtag{font-size:7pt;color:#111;white-space:normal;overflow-wrap:break-word;}'+
+    /* Черно на сиво, не цветно: бланката се печата и на черно-бял принтер,
+       а там светлочервен текст става почти невидим. */
+    '.lp-miss{font-size:7.5pt;font-weight:700;color:#000;background:#ddd;border:1px solid #666;padding:0 1mm;white-space:nowrap;}'+
     '.lp-who{font-size:7pt;}'+
     /* Празното каре за ръчна отметка — листът често се разписва на хартия. */
     '.lp-box{display:inline-block;width:4mm;height:4mm;border:1px solid #555;}'+
@@ -1364,9 +1588,16 @@ function llRenderPrint(list, items, storeFilter){
         '<td>'+esc(it.store_name || '—')+'</td>'+
         '<td>'+esc(it.warehouse_comment || '—')+'</td>'+
         '<td>'+esc(it.store_comment || '—')+'</td>'+
+        /* Празното каре значи „още не е разписано". Заявената липса НЕ е
+           празно каре — тя е попълнен ред и на хартия трябва да се чете така,
+           иначе разпечатката твърди, че палетът просто не е проверен. */
         '<td class="lp-who">'+(it.received
           ? '✔ '+esc(it.received_by || '')+(it.received_at ? '<div class="lp-tag">'+llFmtStamp(it.received_at)+'</div>' : '')
-          : '<span class="lp-box"></span>')+'</td>'+
+          : (it.missing
+            ? '<span class="lp-miss">НЕПОЛУЧЕНО</span>'+
+              (it.store_comment ? '<div class="lp-mtag">'+esc(it.store_comment)+'</div>' : '')+
+              (it.missing_at ? '<div class="lp-tag">'+llFmtStamp(it.missing_at)+'</div>' : '')
+            : '<span class="lp-box"></span>'))+'</td>'+
       '</tr>';
     }).join('');
   }).join('');
