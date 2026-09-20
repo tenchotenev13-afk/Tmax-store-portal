@@ -2277,7 +2277,6 @@ function sdReceiveSwap(swapId){
 function sdSwapPanel(line){
   var list = sdSwapsForLine(line);
   if(!list.length) return '';
-  var TR = {van:'бус', truck:'камион'};
   return list.map(function(s){
     var late = sdSwapIsLate(s);
     var h = '<div data-sdswap="'+esc(String(s.id))+'"'+(late?' data-sdswap-late="1"':'')+
@@ -2328,12 +2327,10 @@ function sdSwapPanel(line){
         ? mkBtn('📬 ПРИЕТО ОТ '+esc(String(s.from_store||'').toUpperCase()),'#0d9488','sdReceiveSwap(this.dataset.sid)')
         : mkBtn('📄 ПРИЕТО В SAP','#7c3aed','sdReceiveSwap(this.dataset.sid)');
     }
+    /* Само КОГО чака. Превозът, датата и документът стоят на ред 2 малко
+       по-горе — изписани и тук, даваха три реда за едно и също. */
     if(s.status==='sent' && isFrom){
-      var det = [];
-      if(isPhys && s.transport_mode) det.push(TR[s.transport_mode]||esc(s.transport_mode));
-      if(s.sent_at) det.push(sdFmtDateTime(s.sent_at));
-      if(s.sap_doc_num) det.push('док. '+esc(s.sap_doc_num));
-      h += note((isPhys?'изпратено':'пуснато в SAP')+(det.length?' ('+det.join(', ')+')':'')+' · чака '+esc(s.to_store||''));
+      h += note('чака '+esc(s.to_store||''));
     }
     if(s.status==='received' && (isFrom || isTo)){
       h += note('прието в '+esc(s.to_store||'')+' · чака приключване от склада');

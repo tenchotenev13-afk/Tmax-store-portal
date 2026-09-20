@@ -314,7 +314,18 @@ const PHYS_BTN = '🚚 ИЗПРАТЕНО КЪМ ГОЦЕ ДЕЛЧЕВ';
       const pf = panelOf(hFrom, 'l-ex');
       ok(c[0] + ': изпращачът НЯМА бутон', allBtns(pf, 'ПРИЕТО').length === 0 && pf.querySelectorAll('button').length === 0,
         'реално: ' + pf.querySelectorAll('button').length);
-      ok(c[0] + ': изпращачът чете „чака Петрич"', pf.textContent.indexOf('чака Петрич') >= 0, pf.textContent);
+      /* Третият ред е САМО „чака X" (20.09.2026): документът, датата и
+         превозът вече са на ред 2 и не се повтарят.
+         Мери се САМИЯТ ред, не целият панел — „панелът съдържа чака Петрич"
+         беше вярно и за стария текст „пуснато в SAP (дата, док. N) · чака
+         Петрич", тоест минаваше и срещу непоправен код. */
+      const lastLine = pf.children[pf.children.length - 1];
+      ok(c[0] + ': последният ред е ТОЧНО „чака Петрич"',
+        !!lastLine && lastLine.textContent === 'чака Петрич',
+        JSON.stringify(lastLine && lastLine.textContent));
+      ok(c[0] + ': третият ред не повтаря документа',
+        !!lastLine && lastLine.textContent.indexOf('4900333') < 0,
+        JSON.stringify(lastLine && lastLine.textContent));
       hFrom.close();
     });
   }
