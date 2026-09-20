@@ -3,14 +3,27 @@
 Изходният код на **дванайсетте** Edge Functions на проекта
 `xiwkdiqqplgdcrkewgtv`. Сверен с живите версии на **27.08.2026** през
 `get_edge_function`; `send-scheduled-report` и `send-routed-report` —
-отново на **11.09.2026**. И дванайсетте са деплойнати.
+отново на **11.09.2026**; `bulletin-notify` — на **20.09.2026** през
+`supabase functions download --use-api` (обратно четене след деплой,
+байт в байт срещу `git cat-file blob HEAD:`). И дванайсетте са деплойнати.
 
 ## ⚠️ Репото е ОГЛЕДАЛО, не източник
 
-**Деплоят е РЪЧЕН през Supabase.** Няма CI стъпка, няма
-`supabase functions deploy` в GitHub Action, а `supabase` CLI не е инсталиран
-на машината за разработка. Следствието е в двете посоки и трябва да се чете
-буквално:
+**Деплоят е РЪЧЕН.** Няма CI стъпка и няма `supabase functions deploy` в
+GitHub Action. **От 18.09.2026 `supabase` CLI е инсталиран и логнат** на
+машината на Тенчо и е предпочитаният път — той качва файла ОТ ДИСКА, тоест
+нищо не минава през изхода на сесията и няма как payload-ът да се скъса:
+
+```bash
+supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
+```
+
+Деплойва РАБОТНОТО ДЪРВО, не комита — затова преди деплоя
+`git diff --quiet HEAD -- supabase/functions/` трябва да мине. Обратното
+четене е `supabase functions download ИМЕ --use-api --workdir <папка>`.
+
+Че деплоят е ръчен, не се променя. Следствието е в двете посоки и трябва да
+се чете буквално:
 
 - **Промяна в тази папка НЕ стига до живо.** Файлът тук може да е поправен,
   докато сървърът продължава да върти старото — редакцията не е деплой.
@@ -36,7 +49,7 @@
 | `auth-set-password` | 16 | `index.ts` | Смяна/ресет на парола (мин. 4 символа) | портал — `shared.js`, `admin.js` | ✅ |
 | `resend-email` | 56 | **`send-email.ts`** | Праща И имейл (SMTP `mail.temax.bg`), И push — по поле `type` | портал — `email.js`, `push.js`; и четирите крон функции по-долу | ✅ |
 | `portal-push` | 24 | `index.ts` | Push през OneSignal — до всички или по таг `store_name` | портал — `push.js` (`osSend`) | ✅ |
-| `bulletin-notify` | 15 | `index.ts` | Известията от Бюлетина: теми `overdue_tasks`, `today_deadlines`, `deadline_passed`, `promo_expiring` | **крон 15** (`*/15 * * * *`) + портал — `push.js` (`runNotifyTopic`) | ✅ |
+| `bulletin-notify` | 19 | `index.ts` | Известията от Бюлетина: теми `overdue_tasks`, `today_deadlines`, `deadline_passed`, `promo_expiring`; от 20.09.2026 и `loading_lists_pending` — товарен лист, изпратен преди 48 ч и още неотметнат (v8) | **крон 15** (`*/15 * * * *`) + портал — `push.js` (`runNotifyTopic`) | ✅ |
 | `send-scheduled-report` | 46 | `index.ts` | Дневен (днешният ден) и седмичен (текущата седмица) репорт по имейл; по `type` в тялото и „Палети" (петък) и „Логистичен склад" (неделя); от 20.09.2026 върнато Равнение не влиза в „Непоправени от по-рано", ако всички ПОС отчети за обекта и деня са потвърдени (v40) | **крон 19** `daily-report-21h` (`0 18,19 * * *`, `{"type":"daily"}`), **крон 20** `weekly-report-sun-21h` (`0 18,19 * * 0`, неделя, `weekly`), **крон 17** `pallets-report-friday-21` (`0 15,16 * * 5`, петък, `pallets`, условие час в София = **18** — името на заданието е останало от 21:00), **крон 18** (`0 18,19 * * 0`, неделя, `warehouse`) — останалите с условие час в София = 21 | ✅ |
 | `send-oborot-report` | 9 | `index.ts` | Вечерният имейл с оборота от `daily_turnover` | **крон 14** (`45 17 * * *`) | ✅ |
 | `send-routed-report` | 11 | `index.ts` | Личният седмичен отчет по задачи (`report_groups` → отделно писмо на човек); от 19.09.2026 и **отчет по задача** — вход `{task_id, recipients}`, една картичка; при `linked_module='supply'` под нея и секция „Зареждане“ (v10); и за постоянна задача — прозорец по седмицата на `run_date` (v11) | **крон 16** (`10 5 * * 1`, понеделник); тема `weekly_routed`; `dynamic-responder` (`task_report`) | ✅ |
@@ -159,6 +172,19 @@ denomailer@1.6.0 реже символи и чупи SMTP dot-stuffing; тема
 `POST {"topic_key":"..."}` пуска тема незабавно (така порталът пуска ръчно
 просрочените); без `topic_key` кронът минава през активните теми.
 `{"dry_run":true}` връща получателите, без да праща.
+
+Строител има за **пет** теми (`IMPLEMENTED_TOPICS`); `notification_topics`
+държи единайсет реда — останалите се събуждат и връщат „Темата още не е
+реализирана в кода". Копие на списъка живее в `admin.js`
+(`NOTIF_IMPLEMENTED_TOPICS`) и `tests/admin-notifications.test.js` пада, ако
+двата се разминат.
+
+`loading_lists_pending` (20.09.2026) е **единствената тема за товарните листи,
+която живее тук.** Изпращането и приключването на лист се известяват
+от БРАУЗЪРА (`loading.js`, `llNotifySent` / `llNotifyClosed`) — зад тях стои
+човешко действие, тоест CLAUDE.md т.14 не ги засяга. Напомнянето няма такова
+и затова е в крона. Дедупликацията му е `notification_log` с
+`ref_key = list_id|store_name`: едно напомняне на лист на обект, не всеки ден.
 
 ### Викат се по график (pg_cron)
 
