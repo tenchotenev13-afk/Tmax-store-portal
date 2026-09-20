@@ -270,7 +270,7 @@ function itemPosts(calls) {
     }
   }
 
-  section('д) „Изпратен" → PATCH sent + sent_at; редовете стават readonly');
+  section('д) „Изпрати към обектите" → PATCH sent + sent_at; редовете стават readonly');
   {
     const lists = [{ id: 'L1', warehouse: WH_TG, list_date: '2026-09-02', status: 'draft',
                      executed_by: 'Склад' }];
@@ -282,10 +282,10 @@ function itemPosts(calls) {
     h.w.loadLoadingLists();
     await ticks(); await ticks();
     h.w.llOpenView('L1');
-    ok('черновата има бутон „Изпратен"', hasBtn(h.doc, 'Изпратен'),
+    ok('черновата има бутон „Изпрати към обектите"', hasBtn(h.doc, 'Изпрати към обектите'),
       mod(h.doc).textContent.slice(0, 200));
 
-    realClick(h.w, btn(mod(h.doc), 'Изпратен'));
+    realClick(h.w, btn(mod(h.doc), 'Изпрати към обектите'));
     await ticks(); await ticks();
     const pt = h.calls.patch.filter(p => /loading_lists/.test(p.url));
     if (ok('листът е patch-нат', pt.length === 1, JSON.stringify(h.calls.patch.map(p => p.url)))) {
@@ -301,8 +301,8 @@ function itemPosts(calls) {
     h.w.llView = 'view'; h.w.llCurrentId = 'L1';
     h.w.renderLoadingLists();
     ok('няма бутон „Редакция"', !hasBtn(h.doc, 'Редакция'));
-    ok('няма бутон „Изпратен" втори път', !hasBtn(h.doc, 'Изпратен'));
-    ok('появява се „Приключен"', hasBtn(h.doc, 'Приключен'));
+    ok('няма бутон „Изпрати към обектите" втори път', !hasBtn(h.doc, 'Изпрати към обектите'));
+    ok('появява се „Приключи"', hasBtn(h.doc, 'Приключи'));
     ok('няма бутони за местене/триене на ред',
       !hasBtn(h.doc, '↑') && !hasBtn(h.doc, '↓') && !hasBtn(h.doc, '✕'));
     const inputs = mod(h.doc).querySelectorAll('input');

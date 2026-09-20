@@ -545,7 +545,7 @@ const btnIn = (root, text) => (root ? btn(root, text) : null);
     await ticks(); await ticks();
     h.w.llOpenView('L1');
 
-    realClick(h.w, btn(h.doc.getElementById('mod-loading'), '✅ Приключен'));
+    realClick(h.w, btn(h.doc.getElementById('mod-loading'), '✅ Приключи'));
     await ticks(); await ticks();
     const lp = patchesTo(h, 'loading_lists');
     if (ok('листът е patch-нат', lp.length === 1,
@@ -563,7 +563,7 @@ const btnIn = (root, text) => (root ? btn(root, text) : null);
     h.w.loadLoadingLists();
     await ticks(); await ticks();
     h.w.llOpenView('L1');
-    realClick(h.w, btn(h.doc.getElementById('mod-loading'), '✅ Приключен'));
+    realClick(h.w, btn(h.doc.getElementById('mod-loading'), '✅ Приключи'));
     await ticks(); await ticks();
     const lp = patchesTo(h, 'loading_lists');
     if (ok('листът е patch-нат', lp.length === 1)) {

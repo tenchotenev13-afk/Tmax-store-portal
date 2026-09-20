@@ -22,8 +22,10 @@
                             loadReportableStores, isReportableStore
      bulletin.js          - toLocalISO()
      stock-differences.js - isLogisticsWarehouseUser()
-   Трите стоят ПРЕДИ loading.js (позиции 1, 6 и 19 срещу 21). Тестът ги
-   зарежда явно по същата причина. */
+     push.js              - pushToStores()
+     email.js             - sendEmail(), emailWrap()
+   Петте стоят ПРЕДИ loading.js (позиции 1, 7, 19, 20 и 21 срещу 23). Тестът
+   ги зарежда явно по същата причина. */
 
 var llLists = [];          /* заглавията на листите (loading_lists) */
 var llItems = [];          /* редовете на ОТВОРЕНИЯ лист (loading_list_items) */
@@ -847,7 +849,282 @@ function llAutoDoneList(listId){
       toast(want === 'partial'
         ? '⛔ Товарният лист е приключен с липси'
         : '✅ Товарният лист е приключен');
+      /* Тук смяната Е реална: горе има изход при l.status === want. */
+      llNotifyClosed(l);
     });
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
+   ИЗВЕСТИЯ ПО ТОВАРНИТЕ ЛИСТИ
+
+   Дотук листът тръгваше мълчаливо: обектът разбираше, че има товар, само ако
+   сам отвореше таба, а складът разбираше как е минало приемането — никога.
+   Моментите, в които има какво да се каже, са точно два: изпращането и
+   приключването.
+
+   ЗАЩО ОТ БРАУЗЪРА, А НЕ ОТ bulletin-notify (CLAUDE.md т.14)
+   Правилото там забранява известие, което тръгва „защото някой е отворил
+   таб" — такова зависи от това кой е влязъл, отива до всички и не знае колко
+   е часът. Тук нито едно от трите не важи: тръгва от ЧОВЕШКО ДЕЙСТВИЕ
+   (натиснат бутон или отметнат последен ред), получателят е изведен от самия
+   лист, а моментът е самото събитие. Човек, който натиска бутон, е съвсем
+   различно нещо от таб, който се отваря.
+   Периодичното напомняне — „листът стои неприет 48 часа" — НЕ е тук: зад него
+   няма човешко действие и живее в bulletin-notify, тема loading_lists_pending.
+
+   ПРОВАЛЪТ НЕ ВРЪЩА СТАТУСА НАЗАД. Листът Е изпратен/приключен — това е факт
+   и не се отменя, защото второ, независимо действие не е минало. Жълт toast
+   и console.error: човекът трябва да ВИДИ, че известието не е тръгнало, и да
+   вдигне телефона. Същото решение като при llAutoCloseDoc() в Пакет А. */
+
+/* Копие на низа от push.js (OS_PORTAL) нарочно: сглобяването на ЛИНК в писмо
+   не бива да зависи от това дали push.js е зареден. */
+var LL_PORTAL_URL = 'https://tenchotenev13-afk.github.io/Tmax-store-portal/';
+
+/* Редовете, групирани по обект получател. Един лист адресира РАЗНИ обекти и
+   всеки получава СВОЯТА част — чужди редове в чуждо писмо са изтичане на
+   информация между обекти, не просто шум. */
+function llRowsByStore(items){
+  var by = {}, order = [];
+  (items || []).forEach(function(it){
+    var st = it.store_name || '';
+    if(!st) return;
+    if(!by[st]){ by[st] = { store: st, rows: [] }; order.push(st); }
+    by[st].rows.push(it);
+  });
+  order.sort();
+  return order.map(function(k){ return by[k]; });
+}
+
+/* Имейлите на активните потребители на изброените обекти, групирани по обект.
+   Един обект може да има няколко акаунта (управител + заместник) — всички
+   получават. Обект без нито един акаунт връща празен масив и писмо не тръгва. */
+function llStoreEmails(stores){
+  var list = (stores || []).filter(function(s){ return !!s; });
+  if(!list.length) return Promise.resolve({});
+  return sbGet('users','active=eq.true&select=email,store_name&store_name=in.('+
+      list.map(encodeURIComponent).join(',')+')').then(function(rows){
+    var by = {};
+    (Array.isArray(rows) ? rows : []).forEach(function(u){
+      if(!u.email || !u.store_name) return;
+      if(!by[u.store_name]) by[u.store_name] = [];
+      if(by[u.store_name].indexOf(u.email) < 0) by[u.store_name].push(u.email);
+    });
+    return by;
+  }).catch(function(){ return {}; });
+}
+
+/* ⚠️ pushToStores() при ПРАЗЕН списък пада към pushToAll() — известието би
+   отишло до целия портал. Същият капан е описан в push.js при
+   pushNewClientOrder/pushInterstoreDiff. Затова празният получател се спира
+   ТУК, преди извикването, а не се разчита на pushToStores. */
+function llPushTo(store, title, msg){
+  var t = String(store || '').trim();
+  if(!t) return Promise.resolve({ ok:false, status:0, data:{ message:'Няма получател' } });
+  if(typeof pushToStores !== 'function'){
+    return Promise.resolve({ ok:false, status:0, data:{ message:'push.js не е зареден' } });
+  }
+  return pushToStores([t], title, msg);
+}
+/* „Няма имейл" е ОТДЕЛНО от провал — виж llNotifySent(). Низът се сверява по
+   стойност, затова се пипа само заедно с проверката там.
+
+   htmlFn е ФУНКЦИЯ, не готов низ: сглобяването минава през emailWrap() от
+   email.js и няма смисъл да се прави, преди да е ясно, че изобщо има кому да
+   се прати. Така обект без акаунт не плаща за таблица, която никой няма да
+   види, а липсващ email.js връща подреден отговор вместо ReferenceError по
+   средата на известието. */
+function llMailTo(emails, subject, htmlFn){
+  var to = (emails || []).filter(function(e){ return !!e; });
+  if(!to.length) return Promise.resolve({ ok:false, status:0, data:{ message:'Няма имейл' } });
+  if(typeof sendEmail !== 'function' || typeof emailWrap !== 'function'){
+    return Promise.resolve({ ok:false, status:0, data:{ message:'email.js не е зареден' } });
+  }
+  return sendEmail(to, subject, htmlFn());
+}
+
+/* ─── HTML на писмата ───────────────────────────────────────
+   emailWrap() идва от email.js и дава рамката (заглавка, footer, стилове).
+   Таблиците долу са inline-стилизирани: имейл клиентите режат <style> блока
+   в <head> при препращане, а бланка без рамки е нечетима. */
+var LL_MAIL_TH = 'style="text-align:left;padding:5px 7px;font-size:11px;font-weight:700;color:#475569;background:#f1f5f9;border:1px solid #e2e8f0;"';
+var LL_MAIL_TD = 'style="padding:5px 7px;font-size:12px;border:1px solid #e2e8f0;vertical-align:top;"';
+
+function llMailMeta(list){
+  var row = function(k, v){
+    return '<tr><td style="padding:2px 10px 2px 0;font-size:12px;color:#64748b;">'+k+'</td>'+
+           '<td style="padding:2px 0;font-size:12px;font-weight:600;">'+v+'</td></tr>';
+  };
+  var h = '<table style="border-collapse:collapse;margin-bottom:14px;">'+
+    row('Склад:', esc(list.warehouse || '—'))+
+    row('Дата на товарене:', fmtDate(list.list_date))+
+    row('Товарил:', esc(list.executed_by || '—'))+
+    '</table>';
+  if(list.comment){
+    h += '<div style="background:#f8fafc;border-left:3px solid #2563eb;padding:8px 12px;'+
+      'border-radius:0 6px 6px 0;font-size:12.5px;margin-bottom:14px;">&#128172; '+esc(list.comment)+'</div>';
+  }
+  return h;
+}
+function llMailBtn(){
+  return '<div style="text-align:center;margin-top:18px;">'+
+    '<a href="'+LL_PORTAL_URL+'" style="display:inline-block;background:#2563eb;color:#fff;'+
+    'padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;">'+
+    'Отвори портала &rarr;</a></div>';
+}
+
+/* Писмото ДО ОБЕКТА при изпращане — САМО неговите редове. */
+function llSentHtmlFor(list, store, rows){
+  var body = '<h2 style="color:#0f172a;margin:0 0 4px;font-size:19px;">🚛 Нов товарен лист</h2>'+
+    '<p style="color:#64748b;font-size:13px;margin:0 0 16px;">За <b>'+esc(store)+'</b> · '+
+      llPalletGroups(rows).length+' товарни единици ('+rows.length+' реда)</p>'+
+    llMailMeta(list);
+  body += '<table style="width:100%;border-collapse:collapse;"><tr>'+
+    '<th '+LL_MAIL_TH+'>Товарна единица</th><th '+LL_MAIL_TH+'>Стокова №</th>'+
+    '<th '+LL_MAIL_TH+'>Изчиства</th><th '+LL_MAIL_TH+'>Коментар склад</th></tr>';
+  rows.slice().sort(llByPosition).forEach(function(it){
+    body += '<tr>'+
+      '<td '+LL_MAIL_TD+'><b>'+esc(llKindLabel(it))+'</b></td>'+
+      '<td '+LL_MAIL_TD+'>'+(it.purchase_doc ? esc(it.purchase_doc) : 'без')+
+        (it.partial ? '<div style="font-size:10px;color:#92400e;">частично</div>' : '')+'</td>'+
+      '<td '+LL_MAIL_TD+'>'+(it.clears_doc ? esc(it.clears_doc) : '—')+'</td>'+
+      '<td '+LL_MAIL_TD+'>'+esc(it.warehouse_comment || '—')+'</td></tr>';
+  });
+  body += '</table>'+llMailBtn();
+  return emailWrap(body, 'Товарен лист · ТеМАХ Вътрешна платформа');
+}
+
+/* Писмото ДО СКЛАДА при приключване — ВСИЧКИ редове, по обекти. Складът е
+   изпращачът: за него въпросът не е „какво получих", а „как мина курсът". */
+function llClosedHtmlFor(list, items){
+  var c = llCounts(items);
+  var miss = c.missing > 0;
+  var body = '<h2 style="color:'+(miss?'#b91c1c':'#16a34a')+';margin:0 0 4px;font-size:19px;">'+
+      (miss ? '⛔ Товарен лист — приключен с липси' : '✅ Товарен лист — приключен')+'</h2>'+
+    '<p style="color:#64748b;font-size:13px;margin:0 0 16px;">получени <b>'+c.received+
+      '</b> · неполучени <b style="color:'+(miss?'#b91c1c':'#64748b')+';">'+c.missing+
+      '</b> от '+c.total+' реда</p>'+
+    llMailMeta(list);
+  body += '<table style="width:100%;border-collapse:collapse;"><tr>'+
+    '<th '+LL_MAIL_TH+'>Товарна единица</th><th '+LL_MAIL_TH+'>Стокова №</th>'+
+    '<th '+LL_MAIL_TH+'>Обект</th><th '+LL_MAIL_TH+'>Резултат</th>'+
+    '<th '+LL_MAIL_TH+'>Коментар обект</th></tr>';
+  llRowsByStore(items).forEach(function(g){
+    g.rows.slice().sort(llByPosition).forEach(function(it){
+      /* Червеният ред е СЪДЪРЖАНИЕ, не украса: писмото се чете по диагонал и
+         липсата трябва да се хване от първия поглед. */
+      var bg = it.missing ? ' style="background:#fef2f2;"' : '';
+      var res = it.received
+        ? '<span style="color:#16a34a;font-weight:600;">✅ получено</span>'
+        : (it.missing
+          ? '<span style="color:#dc2626;font-weight:700;">⛔ НЕПОЛУЧЕНО</span>'
+          : '<span style="color:#94a3b8;">не е отметнато</span>');
+      var who = it.received ? it.received_by : (it.missing ? it.missing_by : null);
+      var when = it.received ? it.received_at : (it.missing ? it.missing_at : null);
+      if(who || when){
+        res += '<div style="font-size:10.5px;color:#64748b;">'+esc(who || '—')+
+          (when ? ' · '+llFmtStamp(when) : '')+'</div>';
+      }
+      body += '<tr'+bg+'>'+
+        '<td '+LL_MAIL_TD+'><b>'+esc(llKindLabel(it))+'</b></td>'+
+        '<td '+LL_MAIL_TD+'>'+(it.purchase_doc ? esc(it.purchase_doc) : 'без')+'</td>'+
+        '<td '+LL_MAIL_TD+'>'+esc(it.store_name || '—')+'</td>'+
+        '<td '+LL_MAIL_TD+'>'+res+'</td>'+
+        '<td '+LL_MAIL_TD+'>'+esc(it.store_comment || '—')+'</td></tr>';
+    });
+  });
+  body += '</table>'+llMailBtn();
+  return emailWrap(body, 'Товарен лист · ТеМАХ Вътрешна платформа');
+}
+
+/* ─── ПРИ ИЗПРАЩАНЕ ────────────────────────────────────────
+   Вика се СЛЕД успешния PATCH. Не блокира екрана: бутонът вече е свършил
+   работата си, а чакането на push + имейл по обект би замразило интерфейса
+   за секунди при лист с десет обекта. */
+function llNotifySent(list, items){
+  var groups = llRowsByStore(items);
+  if(!groups.length) return Promise.resolve([]);
+  var dateTxt = fmtDate(list.list_date);
+  var wh = list.warehouse || '';
+  return llStoreEmails(groups.map(function(g){ return g.store; })).then(function(byStore){
+    return Promise.all(groups.map(function(g){
+      var units = llPalletGroups(g.rows).length;
+      var title = '🚛 Нов товарен лист от ' + wh;
+      var msg = units + ' товарни единици · ' + dateTxt +
+        '. Отвори Транспорт → Товарни листи.';
+      var subject = 'Товарен лист от ' + wh + ' · ' + dateTxt;
+      return Promise.all([
+        llPushTo(g.store, title, msg),
+        llMailTo(byStore[g.store] || [], subject, function(){
+          return llSentHtmlFor(list, g.store, g.rows);
+        })
+      ]).then(function(r){
+        return { store: g.store, push: r[0], mail: r[1] };
+      });
+    }));
+  }).then(function(all){
+    /* Обект без нито един активен акаунт НЕ е провал на известието — няма кому
+       да се прати. Брои се отделно, за да не вдига тревога за нещо, което се
+       оправя в Администрация, а не по телефона. */
+    var noMail = function(r){ return (r.mail.data || {}).message === 'Няма имейл'; };
+    var bad = all.filter(function(r){ return !r.push.ok && !r.mail.ok && !noMail(r); });
+    var missing = all.filter(noMail);
+    if(bad.length){
+      console.error('llNotifySent: известието не тръгна', bad);
+      toast('⚠️ Листът е изпратен, но известието до ' +
+        bad.map(function(r){ return r.store; }).join(', ') + ' не тръгна', '#d97706');
+    } else if(missing.length){
+      toast('⚠️ Листът е изпратен. Без имейл акаунт: ' +
+        missing.map(function(r){ return r.store; }).join(', '), '#d97706');
+    }
+    return all;
+  });
+}
+
+/* ─── ПРИ ПРИКЛЮЧВАНЕ ──────────────────────────────────────
+   ЕДИН helper за двата пътя — автоматичния (последният ред на последния
+   обект) и ръчния бутон на склада. Две копия щяха да се разминат при първата
+   промяна на текста, а разминаването тук не гърми: складът просто получава
+   различно писмо според това кой е затворил листа.
+
+   Вика се САМО когато статусът РЕАЛНО е сменен. Извикване „за всеки случай"
+   би пращало писмо при всяко отмятане по вече приключен лист.
+
+   Редовете се ТЕГЛЯТ, не се подават: от магазинската страна llStoreItems
+   съдържа само моите редове, а писмото до склада е за целия курс. */
+function llNotifyClosed(list){
+  if(!list || !list.id) return Promise.resolve(null);
+  var wh = list.warehouse || '';
+  var failed = function(){
+    toast('⚠️ Листът е приключен, но известието до ' + (wh || 'склада') + ' не тръгна', '#d97706');
+  };
+  return sbGet('loading_list_items','list_id=eq.'+list.id+'&order=position.asc').then(function(rows){
+    var items = Array.isArray(rows) ? rows : [];
+    var c = llCounts(items);
+    var miss = c.missing > 0;
+    var dateTxt = fmtDate(list.list_date);
+    var title = miss
+      ? '⛔ Товарен лист ' + dateTxt + ' — с липси'
+      : '✅ Товарен лист ' + dateTxt + ' приключен';
+    var msg = 'получени ' + c.received + ' · неполучени ' + c.missing + ' от ' + c.total;
+    var subject = (miss ? 'Товарен лист с ЛИПСИ · ' : 'Товарен лист приключен · ') + dateTxt;
+    return llStoreEmails([wh]).then(function(byStore){
+      return Promise.all([
+        llPushTo(wh, title, msg),
+        llMailTo(byStore[wh] || [], subject, function(){ return llClosedHtmlFor(list, items); })
+      ]);
+    }).then(function(r){
+      if(!r[0].ok && !r[1].ok){
+        console.error('llNotifyClosed: известието до склада не тръгна', wh, r);
+        failed();
+      }
+      return { push: r[0], mail: r[1] };
+    });
+  }).catch(function(err){
+    console.error('llNotifyClosed: грешка', err);
+    failed();
+    return null;
   });
 }
 
@@ -1338,11 +1615,17 @@ function llFinishSave(listId){
 function llSendList(id){
   if(!llCanEdit()){ toast('Нямаш права за това действие','#dc2626'); return; }
   if(!confirm('Изпрати товарния лист към обектите?')) return;
+  /* Редовете се снимат ПРЕДИ PATCH-а: loadLoadingLists() по-долу презарежда
+     llItems асинхронно и известието би тръгнало срещу празен масив, ако ги
+     четеше след това. */
+  var rows = llItemsOf(id).slice();
   sbPatch('loading_lists','id=eq.'+id,{status:'sent', sent_at:new Date().toISOString()}).then(function(res){
     if(!res.ok){ toast('Грешка при изпращане: '+sbErrMsg(res),'#dc2626'); return; }
     toast('📤 Товарният лист е изпратен');
     var l = llLists.find(function(x){ return String(x.id) === String(id); });
     if(l) l.status = 'sent';
+    /* Fire-and-forget: провалът не връща листа в draft — той ВЕЧЕ е изпратен. */
+    if(l) llNotifySent(l, rows);
     loadLoadingLists();
   });
 }
@@ -1355,12 +1638,17 @@ function llDoneList(id){
   if(!confirm('Приключи товарния лист?')) return;
   var miss = llItemsOf(id).some(function(i){ return i.missing; });
   var want = miss ? 'partial' : 'done';
+  var l0 = llLists.find(function(x){ return String(x.id) === String(id); });
+  /* Листът вече е в търсения статус — PATCH-ът минава, но НИЩО не се сменя.
+     Известие тук би значело второ писмо за едно и също приключване. */
+  var changed = !l0 || l0.status !== want;
   sbPatch('loading_lists','id=eq.'+id,{status:want, done_at:new Date().toISOString()}).then(function(res){
     if(!res.ok){ toast('Грешка при приключване: '+sbErrMsg(res),'#dc2626'); return; }
     toast(miss ? '⛔ Товарният лист е приключен с липси' : '✅ Товарният лист е приключен',
       miss ? '#dc2626' : undefined);
     var l = llLists.find(function(x){ return String(x.id) === String(id); });
     if(l) l.status = want;
+    if(changed) llNotifyClosed(l || { id:id, warehouse:llActiveWarehouse() });
     loadLoadingLists();
   });
 }
@@ -1391,8 +1679,8 @@ function llViewHtml(){
     '<div class="pg-title" style="margin:0;">🚛 Товарен лист · '+fmtDate(l.list_date)+' '+llStatusBadge(l.status)+'</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llOpenEdit(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✏️ Редакция</button>':'')+
-      (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llSendList(this.dataset.id)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">📤 Изпратен</button>':'')+
-      (l.status==='sent'?'<button data-id="'+l.id+'" onclick="llDoneList(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✅ Приключен</button>':'')+
+      (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llSendList(this.dataset.id)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">📤 Изпрати към обектите</button>':'')+
+      (l.status==='sent'?'<button data-id="'+l.id+'" onclick="llDoneList(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✅ Приключи</button>':'')+
       '<button data-id="'+l.id+'" onclick="llPrint(this.dataset.id)" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
       '<button onclick="llBackToList()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 14px;font-size:12.5px;cursor:pointer;">← Назад</button>'+
     '</div></div>';

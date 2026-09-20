@@ -48,6 +48,8 @@ const TESTS = [
   'loading-lists-pallets.test.js',
   'loading-lists-notify.test.js',
   'loading-lists-missing.test.js',
+  'loading-lists-notify-send.test.js',
+  'loading-lists-notify-closed.test.js',
   'loading-diff-prefill.test.js',
   'transit-store-scope.test.js',
   'transit-direction-transfer.test.js',

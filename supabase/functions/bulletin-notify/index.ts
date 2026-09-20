@@ -8,6 +8,18 @@
 //   today_deadlines  — push до обекта, два часа преди часа на задачата
 //   promo_expiring   — имейл/push за промоции, изтичащи днес (и до 3 дни в пон.)
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
+//   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
+//
+// v8 (20.09.2026) — НОВА ТЕМА loading_lists_pending: товарен лист със
+//   status='sent', изпратен преди повече от 48 часа, по който обектът има
+//   поне един ред с received=false И missing=false. Групира се по (лист,
+//   обект); ref_key в notification_log е list_id|store_name, тоест едно
+//   напомняне на лист на обект, а не всеки ден.
+//   Колоната missing е от 20.09.2026 (миграция 20260920142158_loading_missing):
+//   ред, по който обектът ВЕЧЕ е заявил липса, е решен въпрос и НЕ се напомня.
+//   Изпращането и приключването на лист се известяват от браузъра (loading.js)
+//   — зад тях стои човешко действие. Тук няма, затова е в крона.
+//   Останалите четири теми не са пипани.
 //
 // v7 (18.09.2026) — задачи от НЕПУБЛИКУВАН бюлетин не влизат. overdue_tasks и
 //   today_deadlines намираха бюлетина на седмицата само по week_number/year,
@@ -1529,8 +1541,260 @@ async function runPromoExpiring(supabase: any, topic: any, bg: any, dryRun: bool
   };
 }
 
+/* ─────── ТЕМА: ТОВАРНИ ЛИСТИ, НЕПРИЕТИ 48 ЧАСА ────────────
+   Пакет Б по товарните листи. Изпращането и приключването се известяват от
+   БРАУЗЪРА (loading.js) — зад тях стои човешко действие. Това тук е другият
+   случай: лист, който стои изпратен и НИКОЙ не го е пипнал. Няма събитие, на
+   което да се закачи, значи мястото му е в крона.
+
+   КРИТЕРИЙ: status='sent' И sent_at по-старо от 48 часа И поне един ред за
+   обекта, който е received=false И missing=false.
+
+   Защо и двете условия по реда: „неполучен" НЕ е същото като „чакащ".
+   Обектът, който е заявил липса, вече се е произнесъл — камионът няма да я
+   донесе и напомнянето не иска нищо от него. Само `received=false` би
+   напомняло вечно за редове, по които въпросът е решен. Същата разлика като
+   в notifLoadingListsPending() (notifications.js).
+
+   ЕДНО НАПОМНЯНЕ НА ЛИСТ НА ОБЕКТ, не всеки ден: ref_key е
+   list_id + '|' + store_name. Без това кронът би удрял всеки ден, докато
+   листът не бъде приет — а лист, забравен за две седмици, е един проблем,
+   не четиринайсет. Дублирането се пази от unique (topic_key, ref_key) в
+   notification_log; insert-ът се прави ПРЕДИ изпращането и се ТРИЕ, ако
+   нищо не е излязло — същият ред като в runTodayDeadlines. */
+
+const LOADING_PENDING_HOURS = 48;
+
+async function buildLoadingListsPending(supabase: any, bg: ReturnType<typeof bgNow>) {
+  const cutoff = new Date(Date.now() - LOADING_PENDING_HOURS * 3600 * 1000).toISOString();
+
+  const { data: lists } = await supabase
+    .from('loading_lists')
+    .select('id,warehouse,list_date,sent_at,executed_by')
+    .eq('status', 'sent')
+    .lt('sent_at', cutoff);
+
+  if (!lists || !lists.length) {
+    return { skip: 'Няма изпратени товарни листи по-стари от ' + LOADING_PENDING_HOURS + ' часа' };
+  }
+
+  const ids = lists.map((l: any) => l.id);
+  const { data: rows } = await supabase
+    .from('loading_list_items')
+    .select('id,list_id,store_name,kind,pallet_no,pallet_total,purchase_doc,position')
+    .in('list_id', ids)
+    .eq('received', false)
+    .eq('missing', false);
+
+  if (!rows || !rows.length) {
+    return { skip: 'Няма неприети редове по тези листи' };
+  }
+
+  const byList: Record<string, any> = {};
+  for (const l of lists) byList[l.id] = l;
+
+  /* Един запис на ДВОЙКАТА лист+обект: напомнянето е за „твоята част от този
+     лист", а не за листа като цяло — обектите по него са различни хора. */
+  const byKey: Record<string, any> = {};
+  for (const r of rows) {
+    const store = r.store_name || '';
+    if (!store) continue;
+    const l = byList[r.list_id];
+    if (!l) continue;
+    const key = r.list_id + '|' + store;
+    if (!byKey[key]) {
+      byKey[key] = {
+        ref_key: key, list_id: r.list_id, store: store,
+        warehouse: l.warehouse || '', list_date: l.list_date,
+        sent_at: l.sent_at, executed_by: l.executed_by || '', rows: [],
+        groups: [] as string[],
+      };
+    }
+    byKey[key].rows.push(r);
+  }
+
+  const entries = Object.keys(byKey).map(k => byKey[k]);
+  if (!entries.length) return { skip: 'Няма неприети редове по тези листи' };
+
+  /* Най-старите отгоре — това е редът, по който човек ги подкарва. */
+  entries.sort((a, b) => String(a.sent_at || '').localeCompare(String(b.sent_at || '')));
+  for (const e of entries) e.rows.sort((a: any, b: any) => (a.position || 0) - (b.position || 0));
+
+  return { entries: entries, cutoff: cutoff, lists: lists.length };
+}
+
+function loadingUnitLabel(r: any): string {
+  if (r.kind === 'pallet') {
+    return (r.pallet_no && r.pallet_total)
+      ? 'палет ' + r.pallet_no + ' от ' + r.pallet_total
+      : 'палет';
+  }
+  if (r.kind === 'roll') return 'рула';
+  if (r.kind === 'bulk') return 'насип';
+  return String(r.kind || '—');
+}
+
+function daysSince(iso: string): number {
+  if (!iso) return 0;
+  const then = new Date(iso).getTime();
+  return Math.max(0, Math.floor((Date.now() - then) / 86400000));
+}
+
+function loadingPendingHtmlFor(entries: any[], bg: ReturnType<typeof bgNow>) {
+  let h = '<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:640px;">'
+    + '<h2 style="margin:0 0 4px;font-size:19px;color:#b45309;">Неприети товарни листи</h2>'
+    + '<div style="font-size:13px;color:#6b7280;margin-bottom:14px;">'
+    + esc(bgDate(bg.dateStr)) + ' — изпратени преди повече от ' + LOADING_PENDING_HOURS
+    + ' часа и още неотметнати. Ред, отбелязан като „неполучен", НЕ влиза тук.</div>';
+
+  for (const e of entries) {
+    const d = daysSince(e.sent_at);
+    h += '<div style="margin-bottom:12px;border:1px solid #e5e7eb;border-left:3px solid #d97706;'
+      + 'border-radius:8px;padding:9px 12px;">'
+      + '<div style="font-weight:700;font-size:14px;">' + esc(e.store)
+      + ' — ' + esc(e.warehouse) + ' · ' + esc(bgDate(String(e.list_date || '')))
+      + '</div>'
+      + '<div style="font-size:11.5px;color:#6b7280;margin-bottom:5px;">изпратен преди '
+      + d + (d === 1 ? ' ден' : ' дни') + ' · ' + e.rows.length
+      + (e.rows.length === 1 ? ' неотметнат ред' : ' неотметнати реда') + '</div>'
+      + '<div style="font-size:12.5px;line-height:1.55;">';
+    for (const r of e.rows) {
+      h += '• ' + esc(loadingUnitLabel(r))
+        + (r.purchase_doc ? ' · стокова ' + esc(r.purchase_doc) : '') + '<br>';
+    }
+    h += '</div></div>';
+  }
+
+  h += '<div style="font-size:12px;color:#6b7280;margin-top:14px;">'
+    + 'Отметни ги в Транспорт → Товарни листи: „✅ Получено" или „⛔ Неполучено".</div>'
+    + '<div style="margin-top:12px;"><a href="' + PORTAL_URL + '" '
+    + 'style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;'
+    + 'font-size:13px;font-weight:600;padding:10px 18px;border-radius:6px;">Отвори портала</a></div>'
+    + '<div style="font-size:11px;color:#9ca3af;margin-top:18px;">ТеМАХ Портал</div></div>';
+  return h;
+}
+
+/* Получателите са ДВА слоя:
+   1) самият обект — активните му потребители, изведени от реда. Те получават
+      винаги; напомнянето е адресирано до тях и матрица за това не се чака.
+   2) матрицата през resolveRecipients() — контролинг, регионални, ЦО. Така
+      наблюдаващите се включват от Администрация → Известия, без код.
+   Слой 2 се стеснява по scope: „own_stores" вижда само своите обекти. */
+function loadingScopeFilter(r: Recipient, entries: any[]) {
+  if (r.scope === 'all') return entries;
+  /* own_tasks няма смисъл за товарен лист — той няма автор-задача. Държи се
+     като own_stores, вместо да отреже човека до нула редове мълчаливо. */
+  return entries.filter(e => r.stores.length && r.stores.indexOf(e.store) >= 0);
+}
+
+async function runLoadingListsPending(supabase: any, topic: any, bg: any, dryRun: boolean) {
+  const built = await buildLoadingListsPending(supabase, bg);
+  if ((built as any).skip) {
+    return { topic: topic.key, skipped: (built as any).skip, recipients: 0 };
+  }
+  const entries: any[] = (built as any).entries;
+
+  const stores = entries.map(e => e.store).filter((s, i, a) => a.indexOf(s) === i);
+  const { data: storeUsers } = await supabase
+    .from('users').select('email,display_name,store_name')
+    .eq('active', true).in('store_name', stores);
+
+  const emailsOf = (store: string) => (storeUsers || [])
+    .filter((u: any) => u.store_name === store && u.email)
+    .map((u: any) => u.email);
+
+  const watchers = await resolveRecipients(supabase, topic.key);
+
+  const planned = entries.map(e => ({
+    obekt: e.store, sklad: e.warehouse, list_id: e.list_id,
+    izpraten: String(e.sent_at || '').slice(0, 10),
+    redove: e.rows.length, ref_key: e.ref_key,
+    do: emailsOf(e.store),
+  }));
+  const plannedWatchers = watchers
+    .map((r: Recipient) => ({ email: r.email, name: r.name, channel: r.channel, scope: r.scope,
+                              redove: loadingScopeFilter(r, entries).length }))
+    .filter((x: any) => x.redove > 0);
+
+  if (dryRun) {
+    return {
+      topic: topic.key, dry_run: true, cutoff: (built as any).cutoff,
+      listi: (built as any).lists, recipients: planned.length,
+      planned: planned, nabljudavashti: plannedWatchers,
+    };
+  }
+
+  let sent = 0, failed = 0, skipped = 0;
+  const done: any[] = [];
+  for (const e of entries) {
+    /* Редът в notification_log е ЗАЯВКАТА за право да се прати. Insert-ът
+       пада при дубликат — значи вече е пратено и се минава нататък. */
+    const ins = await supabase.from('notification_log')
+      .insert({ topic_key: topic.key, ref_key: e.ref_key, detail: e.rows.length + ' реда · ' + e.store });
+    if (ins.error) { skipped++; continue; }
+
+    const subject = 'ТеМАХ — неприет товарен лист · ' + e.store;
+    const html = loadingPendingHtmlFor([e], bg);
+    let okAny = false;
+
+    for (const addr of emailsOf(e.store)) {
+      const dest = topic.test_email ? topic.test_email : addr;
+      const body = (topic.test_email
+        ? '<div style="font-family:Arial;background:#fef3c7;padding:8px 10px;border-radius:6px;margin-bottom:10px;font-size:12px;">ТЕСТОВ РЕЖИМ — предназначено за ' + esc(addr) + '</div>'
+        : '') + html;
+      const ok = await sendEmail(dest, subject, body);
+      if (ok) { sent++; okAny = true; } else { failed++; }
+    }
+
+    if (!topic.test_email) {
+      const pushOk = await sendPushFilters(
+        [{ field: 'tag', key: 'store_name', relation: '=', value: e.store }],
+        '🚛 Неприет товарен лист',
+        e.rows.length + (e.rows.length === 1 ? ' ред чака' : ' реда чакат') +
+        ' отмятане · ' + e.warehouse + ' · ' + bgDate(String(e.list_date || '')));
+      if (pushOk) okAny = true;
+    }
+
+    /* Нищо не е излязло за тази двойка — редът се маха, за да се опита пак
+       при следващото събуждане. Същото като в runTodayDeadlines. */
+    if (!okAny) {
+      await supabase.from('notification_log').delete()
+        .eq('topic_key', topic.key).eq('ref_key', e.ref_key);
+    } else {
+      done.push(e);
+    }
+  }
+
+  /* Наблюдаващите получават ЕДНО обобщено писмо, не по едно на обект: те
+     гледат картината, не отделния палет. Прати се само за двойките, които
+     наистина са напомнени сега — иначе писмото изброява неща, за които
+     обектът вече е бил подсетен преди дни. */
+  if (done.length && !topic.test_email) {
+    for (const r of watchers) {
+      if (r.channel !== 'email' && r.channel !== 'both') continue;
+      const mine = loadingScopeFilter(r, done);
+      if (!mine.length) continue;
+      const ok = await sendEmail(r.email, 'ТеМАХ — неприети товарни листи (' + bgDate(bg.dateStr) + ')',
+        loadingPendingHtmlFor(mine, bg));
+      if (ok) { sent++; } else { failed++; }
+    }
+  }
+
+  await supabase.from('notification_topics').update({
+    last_run_at: new Date().toISOString(),
+    last_recipients: done.length,
+    last_status: (failed ? 'ГРЕШКА: ' : 'ok: ') + done.length + ' обекта, '
+      + sent + ' писма, ' + failed + ' неуспешни, ' + skipped + ' вече пратени',
+  }).eq('key', topic.key);
+
+  return {
+    topic: topic.key, obekti: done.length, sent_emails: sent, failed_emails: failed,
+    already_sent: skipped, listi: (built as any).lists, test_email: topic.test_email || null,
+  };
+}
+
 /* ЕДИНСТВЕНИЯТ списък с темите, които имат строител. notification_topics
-   държи осем реда; строители тук има за четирите отдолу. Останалите са редове
+   държи единайсет реда; строители тук има за петте отдолу. Останалите са редове
    в базата и нищо повече — събудят ли се, връщат skipped.
 
    Списъкът е МАСИВ ОТ ДВОЙКИ ключ→строител нарочно: гол масив с ключове и
@@ -1547,6 +1811,7 @@ const IMPLEMENTED_TOPICS = [
   { key: 'today_deadlines', run: runTodayDeadlines },
   { key: 'promo_expiring',  run: runPromoExpiring },
   { key: 'deadline_passed', run: runDeadlinePassed },
+  { key: 'loading_lists_pending', run: runLoadingListsPending },
 ];
 
 async function runTopic(supabase: any, topic: any, bg: any, dryRun: boolean) {
