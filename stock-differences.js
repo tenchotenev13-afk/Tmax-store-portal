@@ -316,6 +316,10 @@ function renderStockDiff() {
   h += '<input id="sd-search-input" value="'+escVal(sdSearch)+'" oninput="setSDSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик/изпращач, артикул, SAP, документ, поръчка..." style="width:100%;max-width:520px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
   h += sdStoreChipsHtml();
 
+  /* Действията на магазините — само за логистичния склад, над бланките.
+     За всички останали sdActionsCard() връща празен низ. */
+  h += sdActionsCard();
+
   /* Новоподадени бланки - чакат преглед от Цветелина */
   h += renderDiffReportsSection();
 
@@ -2033,9 +2037,62 @@ function submitSwapLink(excessLineId, shortageLineId){
       return;
     }
     sdSwaps.push(res.row);
+    /* Известието тръгва СЛЕД успешния запис на размяната и не чака втория
+       ход (swap_id на реда): размяната вече съществува и двата магазина имат
+       какво да правят по нея. Fire-and-forget — падне ли push-ът, записът си
+       остава и toast-ът не се променя. */
+    sdNotifySwapLinked(res.row);
     sdMarkSwapLine(res.row, sh);
   });
 }
+/* ══ Известия по размяната (стъпка 4) ══
+   Всички минават през sdNotifyInterstore, тоест са fire-and-forget: викат се
+   СЛЕД успешния запис, не блокират нищо и провалът им не сменя toast-а.
+   Празен получател се отсява от pushInterstoreDiff ("Няма получател").
+
+   Кой какво получава е по едно правило: известява се СРЕЩУПОЛОЖНАТА страна
+   плюс складът, когато действието е на магазин; при действие на склада —
+   двата магазина. Никой не получава собственото си действие обратно. */
+function sdSwapNote(s){
+  return String(s && s.material_name || '');
+}
+function sdNotifySwapLinked(s){
+  if(!s) return;
+  var title = '🔗 Разлика: размяна '+(s.from_store||'')+' → '+(s.to_store||'');
+  var msg = String(s.qty)+' бр. '+sdSwapNote(s)+' · '+(SD_SWAP_KIND[s.kind]||SD_SWAP_KIND.doc);
+  sdNotifyInterstore(s.from_store, title, msg);
+  sdNotifyInterstore(s.to_store, title, msg);
+}
+function sdNotifySwapSent(s){
+  if(!s) return;
+  var isPhys = s.kind==='physical';
+  var TR = {van:'бус', truck:'камион'};
+  var title = isPhys ? '🚚 Размяна: изпратено от '+(s.from_store||'')
+                     : '📄 Размяна: пуснато в SAP от '+(s.from_store||'');
+  var msg = isPhys ? sdSwapNote(s)+' · '+(TR[s.transport_mode]||s.transport_mode||'')
+                   : sdSwapNote(s)+' · док. '+(s.sap_doc_num||'');
+  sdNotifyInterstore(s.to_store, title, msg);
+  sdNotifyInterstore(s.warehouse, title, msg);
+}
+function sdNotifySwapReceived(s){
+  if(!s) return;
+  var title = '📬 Размяна: прието в '+(s.to_store||'');
+  sdNotifyInterstore(s.from_store, title, sdSwapNote(s));
+  sdNotifyInterstore(s.warehouse, title, sdSwapNote(s));
+}
+function sdNotifySwapClosed(s){
+  if(!s) return;
+  var title = '🏁 Размяна приключена: '+(s.from_store||'')+' → '+(s.to_store||'');
+  sdNotifyInterstore(s.from_store, title, sdSwapNote(s));
+  sdNotifyInterstore(s.to_store, title, sdSwapNote(s));
+}
+function sdNotifySwapUnlinked(s){
+  if(!s) return;
+  var title = '✖ Размяна отменена: '+(s.from_store||'')+' → '+(s.to_store||'');
+  sdNotifyInterstore(s.from_store, title, sdSwapNote(s));
+  sdNotifyInterstore(s.to_store, title, sdSwapNote(s));
+}
+
 /* Вторият ход на свързването - swap_id на реда с липсата. */
 function sdMarkSwapLine(swap, sh){
   if(!swap || !sh) return;
@@ -2070,6 +2127,7 @@ function sdUnlinkSwap(swapId){
     if(!res.ok){ toast('Редът е размаркиран, но размяната НЕ е изтрита — натиснете отново: '+sbErrMsg(res),'#dc2626'); renderStockDiff(); return; }
     sdSwaps = sdSwaps.filter(function(x){ return x.id!==s.id; });
     toast('✖ Размяната е развързана');
+    sdNotifySwapUnlinked(s);
     loadStockDiff();
   });
 }
@@ -2105,6 +2163,10 @@ function sdCloseSwap(swapId){
   }).then(function(){
     return markLine(s.to_line_id, toL, s.to_store);
   }).then(function(){
+    /* ЕДВА ТУК: трите PATCH-а (размяната + двата реда) са минали. Падне ли
+       някой от тях, fail() хвърля STOP и дотук изобщо не се стига — тоест
+       „приключена" не се известява за нещо, което е останало наполовина. */
+    sdNotifySwapClosed(s);
     var repIds = [fromL && fromL.report_id, toL && toL.report_id].filter(function(x, i, a){ return x && a.indexOf(x)===i; });
     return Promise.all(repIds.map(function(rid){
       var sib = sdData.filter(function(x){ return x.report_id===rid; });
@@ -2243,6 +2305,11 @@ function submitSwapSent(swapId){
     if(!res.ok){ toast('Изпращането НЕ е записано: '+sbErrMsg(res),'#dc2626'); return; }
     var ov = document.getElementById('sdsent-ov'); if(ov) ov.remove();
     toast(isPhys ? '🚚 Изпратено към '+s.to_store : '📄 Пуснато в SAP');
+    /* Локалното копие носи новите стойности — известието трябва да каже с
+       какво е изпратено и с кой документ, а не какво е било преди PATCH-а. */
+    s.status='sent'; s.sap_doc_num=sap; s.sent_by=body.sent_by; s.sent_at=sentAt;
+    if(isPhys) s.transport_mode=mode;
+    sdNotifySwapSent(s);
     loadStockDiff();
   });
 }
@@ -2261,6 +2328,8 @@ function sdReceiveSwap(swapId){
     {status:'received', received_by:sdActor(), received_at:new Date().toISOString()}).then(function(res){
     if(!res.ok){ toast('Приемането НЕ е записано: '+sbErrMsg(res),'#dc2626'); return; }
     toast('📬 Прието в '+s.to_store);
+    s.status='received';
+    sdNotifySwapReceived(s);
     loadStockDiff();
   });
 }
@@ -2350,6 +2419,130 @@ function sdSwapSummary(line){
   return sdSwapsForLine(line).map(function(s){
     return '<div style="margin-top:3px;font-size:10.5px;color:#92400e;font-weight:600;white-space:normal;">'+sdSwapHeadline(s)+'</div>';
   }).join('');
+}
+
+/* ══ „Действия на магазините" — работен изглед САМО за логистичния склад ══
+
+   Складът досега трябваше да обходи всяка бланка, за да види какво се е
+   случило по нея. Тази карта събира събитията от ВЕЧЕ ЗАРЕДЕНИТЕ данни
+   (sdData / diffReports / sdSwaps) и ги подрежда по време, най-новото отгоре.
+   НУЛА нови заявки — това е пренареждане на наличното, не нов източник.
+
+   ОГРАНИЧЕНИЕТО, което идва оттам: показва се само каквото е заредено за
+   ТЕКУЩИЯ sdFilter. Бланка, паднала в „приключени" при филтър „чакащи", няма
+   да даде събитие. Прието е съзнателно — алтернативата е отделна заявка на
+   всеки рендер за изглед, който се отваря рядко.
+
+   Не влиза нито в главната таблица, нито в печата: това е работен изглед за
+   един човек, не документ.
+
+   Периодът е чип (правило 11: чиповете се рендират ВИНАГИ, включително при
+   нула събития — иначе от „няма нищо" не може да се излезе към по-широк
+   прозорец). */
+var SD_ACTIONS_DAYS = [[1,'Днес'],[3,'3 дни'],[7,'7 дни']];
+var sdActionsDays = 3;
+var sdActionsOpen = true;
+function sdSetActionsDays(n){
+  sdActionsDays = parseInt(n,10) || 3;
+  sdKeepScroll();
+  renderStockDiff();
+}
+function sdToggleActions(){
+  sdActionsOpen = !sdActionsOpen;
+  sdKeepScroll();
+  renderStockDiff();
+}
+/* Скок до бланката — през СЪЩЕСТВУВАЩАТА котва (sdKeepScroll + sdRestoreScroll
+   в края на renderStockDiff), а не нов механизъм за скрол. */
+function sdActionsGoto(repId){
+  if(!repId) return;
+  sdKeepScroll(repId);
+  renderStockDiff();
+}
+/* Събитията към МОЯ склад, подредени по време низходящо. Всяко носи
+   { at, repId, who, what, red }. */
+function sdCollectActions(){
+  if(!isLogisticsWarehouseUser()) return [];
+  var me = currentUser.store_name;
+  var cut = Date.now() - sdActionsDays*86400000;
+  var out = [];
+  var repOf = function(id){ return diffReports.find(function(x){ return x.id===id; }); };
+  var mineRep = function(rp){ return rp && rp.direction==='interstore' && rp.counterpart===me; };
+  var add = function(at, repId, who, what, red){
+    if(!at) return;
+    var t = new Date(at);
+    if(isNaN(t.getTime()) || t.getTime() < cut) return;
+    out.push({at:at, ms:t.getTime(), repId:repId, who:who, what:what, red:!!red});
+  };
+  var SR = {accepted:'✅ ПРИЕТО', sap_done:'📄 Пуснато в SAP', no_stock:'⛔ Няма наличност в логистика'};
+  sdData.forEach(function(l){
+    var rp = repOf(l.report_id);
+    if(!mineRep(rp)) return;
+    var art = l.material_name || l.material_code || '';
+    if(l.store_response && l.store_response_at){
+      add(l.store_response_at, l.report_id, rp.store_name,
+          (SR[l.store_response]||l.store_response)+' · '+art+(l.store_response_by?' · '+l.store_response_by:''),
+          l.store_response==='no_stock');
+    }
+    /* „Приел е МАГАЗИНЪТ" — не складът. Разпознава се по данните, които има:
+       приемането от магазина пише store_response='accepted' (и то вече е
+       събитие по-горе), а „Прието обратно" от склада оставя store_response
+       ='sap_done'. Остава третият случай — ред, приключен БЕЗ store_response:
+       или стар запис отпреди колоната, или затваряне на размяна от самия
+       склад. Второто се отсява по наличието на размяна по реда. */
+    if(l.status==='received' && l.completed_at && !l.store_response && !sdSwapsForLine(l).length){
+      add(l.completed_at, l.report_id, rp.store_name, '✅ ПРИЕТО · '+art, false);
+    }
+    if(l.store_corrected_at){
+      add(l.store_corrected_at, l.report_id, rp.store_name, '✏️ коригира количество/код · '+art, false);
+    }
+  });
+  var TR = {van:'бус', truck:'камион'};
+  sdSwaps.forEach(function(sw){
+    if(sw.warehouse !== me) return;
+    var art = sw.material_name || sw.material_code || '';
+    var fromL = sdData.find(function(x){ return String(x.id)===String(sw.from_line_id); });
+    var toL   = sdData.find(function(x){ return String(x.id)===String(sw.to_line_id); });
+    if(sw.sent_at){
+      var how = sw.kind==='physical'
+        ? 'изпратено'+(sw.transport_mode?' ('+(TR[sw.transport_mode]||sw.transport_mode)+')':'')
+        : 'пуснато в SAP';
+      add(sw.sent_at, fromL?fromL.report_id:(toL?toL.report_id:null), sw.from_store,
+          '🔗 '+how+' → '+sw.to_store+' · '+art, false);
+    }
+    if(sw.received_at){
+      add(sw.received_at, toL?toL.report_id:(fromL?fromL.report_id:null), sw.to_store,
+          '🔗 прието от '+sw.from_store+' · '+art, false);
+    }
+  });
+  out.sort(function(a,b){ return b.ms - a.ms; });
+  return out;
+}
+function sdActionsCard(){
+  if(!isLogisticsWarehouseUser()) return '';
+  var items = sdCollectActions();
+  var chips = SD_ACTIONS_DAYS.map(function(d){
+    var a = sdActionsDays===d[0];
+    return '<button data-d="'+d[0]+'" onclick="sdSetActionsDays(this.dataset.d)" style="border:1px solid '+(a?'#2563eb':'#e2e8f0')+';background:'+(a?'#eff6ff':'#fff')+';color:'+(a?'#2563eb':'#64748b')+';border-radius:20px;padding:3px 11px;font-size:11px;font-weight:600;cursor:pointer;">'+d[1]+'</button>';
+  }).join('');
+  var h = '<div id="sd-actions-card" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:14px;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'+
+      '<div style="font-size:14px;font-weight:700;color:#334155;">📋 Действия на магазините ('+items.length+')</div>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+chips+
+        '<button onclick="sdToggleActions()" style="border:1px solid #e2e8f0;background:#fff;color:#475569;border-radius:5px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;">'+(sdActionsOpen?'скрий':'покажи')+'</button>'+
+      '</div>'+
+    '</div>';
+  if(!sdActionsOpen) return h+'</div>';
+  if(!items.length){
+    return h+'<div style="margin-top:8px;font-size:12px;color:#94a3b8;">Няма действия за периода</div></div>';
+  }
+  h += '<div style="margin-top:8px;display:flex;flex-direction:column;gap:3px;">';
+  items.forEach(function(it){
+    h += '<button data-rid="'+esc(String(it.repId||''))+'" onclick="sdActionsGoto(this.dataset.rid)" style="text-align:left;border:1px solid #e2e8f0;background:#fff;border-radius:6px;padding:5px 8px;font-size:11.5px;cursor:pointer;color:'+(it.red?'#dc2626':'#334155')+';'+(it.red?'font-weight:600;':'')+'">'+
+      '<b>'+esc(it.who||'')+'</b> · '+esc(it.what||'')+
+      ' <span style="color:#94a3b8;font-weight:400;">· '+sdFmtDateTime(it.at)+'</span></button>';
+  });
+  return h+'</div></div>';
 }
 
 /* ── Секция с подадени бланки (чакат преглед) ── */
@@ -3828,10 +4021,25 @@ function sdUnreviewedCountFor(reports, lines, swaps){
      Цвети. Само своите обекти: сървърната заявка е по store_name, но при
      няколко назначени обекта филтрираме и тук. */
   var mine = assignedStores();
+  /* ПЛЮС размените: ходът е мой, ако съм ИЗПРАЩАЧ по още неизпратена (linked)
+     или ПОЛУЧАТЕЛ по изпратена (sent). Обратното НЕ се брои — изпращачът по
+     вече изпратена размяна чака отсрещния магазин, не себе си.
+     Ключът е по РЕД (from_line_id / to_line_id), защото бланката се разпознава
+     по своите редове. */
+  var myStore = function(name){
+    return name===currentUser.store_name || (mine && mine.indexOf(name)>=0);
+  };
+  var myMove = {};
+  sw.forEach(function(x){
+    if(x.status==='linked' && myStore(x.from_store)) myMove[String(x.from_line_id)] = true;
+    if(x.status==='sent' && myStore(x.to_store)) myMove[String(x.to_line_id)] = true;
+  });
   return unrev.filter(function(r){
     if(mine && mine.indexOf(r.store_name) < 0) return false;
-    return (lines||[]).some(function(l){
-      return l.report_id===r.id && (l.warehouse_response==='sent' || l.warehouse_response==='return') &&
+    var repLines = (lines||[]).filter(function(l){ return l.report_id===r.id; });
+    if(repLines.some(function(l){ return myMove[String(l.id)]; })) return true;
+    return repLines.some(function(l){
+      return (l.warehouse_response==='sent' || l.warehouse_response==='return') &&
         !l.store_response && l.status!=='received';
     });
   }).length;
@@ -3891,13 +4099,22 @@ function sdRefreshTabBadge(){
     sbGet('stock_differences', qLines + '&report_id=in.(' + reports.map(function(r){return r.id;}).join(',') + ')')
       .then(function(lines){
         lines = Array.isArray(lines)?lines:[];
-        /* Само складът: закъснелите размени по неговите редове. Третият
-           аргумент пази глобалния sdSwaps — виж бележката при функцията. */
-        if(!isLogisticsWarehouseUser()){ sdBadgePulse(sdUnreviewedCountFor(reports, lines)); return; }
-        sbGet('stock_diff_swaps', 'status=eq.sent&warehouse=eq.'+encodeURIComponent(currentUser.store_name)+'&select=to_line_id,sent_at')
+        /* Размените се четат с ОТДЕЛНА лека заявка и се подават като ТРЕТИ
+           аргумент. Глобалният sdSwaps НЕ се пипа: този срез е тесен (малко
+           колони, само моите) и записан в него би осакатил следващия рендер.
+           Двата среза са различни, защото двете роли чакат различни неща:
+           складът — закъснелите, магазинът — своя ход. */
+        var me = encodeURIComponent(currentUser.store_name);
+        var q2 = isLogisticsWarehouseUser()
+          ? 'status=eq.sent&warehouse=eq.'+me+'&select=to_line_id,sent_at'
+          : 'status=in.(linked,sent)&or=(from_store.eq.'+me+',to_store.eq.'+me+')&select=from_line_id,to_line_id,from_store,to_store,status';
+        sbGet('stock_diff_swaps', q2)
           .then(function(sw){
+            sw = Array.isArray(sw)?sw:[];
             sdBadgePulse(sdUnreviewedCountFor(reports, lines,
-              (Array.isArray(sw)?sw:[]).map(function(x){ return {status:'sent', to_line_id:x.to_line_id, sent_at:x.sent_at}; })));
+              isLogisticsWarehouseUser()
+                ? sw.map(function(x){ return {status:'sent', to_line_id:x.to_line_id, sent_at:x.sent_at}; })
+                : sw));
           }).catch(function(){ sdBadgePulse(sdUnreviewedCountFor(reports, lines, [])); });
       }).catch(function(){ sdSetTabBadge(reports.length); });
   }).catch(function(){});
