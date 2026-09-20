@@ -41,6 +41,27 @@
 --   99450   Троян     10/— (бл. 4600185299)  Кърджали 10/60            10.0
 --   (*) quantity=80464309 е номер на документ, въведен в полето за количество.
 --
+-- ═══ ВИД НА РАЗМЯНАТА — kind (20.09.2026, миграция swaps_kind) ══════════
+-- doc      = само по документи: трансфер магазин→магазин в SAP, стоката НЕ
+--            пътува. Това е НАЙ-ЧЕСТИЯТ случай и затова е default-ът.
+-- physical = стоката пътува с бус или камион; тогава transport_mode се
+--            попълва при изпращането.
+-- При doc transport_mode остава null.
+--
+-- Правило 9: при прилагането таблицата беше ПРАЗНА (0 реда, 0 с
+-- transport_mode), тоест not null default 'doc' не направи нито един заварен
+-- ред невалиден.
+--
+-- НЕ се налага от базата: редът kind='doc', transport_mode='van' минава и
+-- двата check-а. Инвариантът се пази само от UI-а. Отделен check
+-- (kind <> 'doc' or transport_mode is null) е възможен, но засяга и потока
+-- status='sent', който още не е написан в клиента — отделно решение.
+--
+-- UI: openSwapLinkModal() в stock-differences.js дава избор с два radio-а
+-- („📄 Документална" по подразбиране / „🚚 Физическа") и слага kind в POST-а;
+-- sdSwapHeadline() показва вида ПРЕДИ статуса, защото „чака изпращане" значи
+-- различно нещо при двата вида. Заковано в tests/sd-swap-link.test.js.
+--
 -- ═══ РЕШЕНИЕ ЗА ИНДЕКСИТЕ (16.09.2026) ══════════════════════════════════
 -- 4 реда с излишък стоят срещу ПО ДВЕ липси (8 от 16-те двойки): Търговище
 -- 27738, Раднево 94150, Раднево 94152, Кърджали 99450. Затова partial unique
@@ -67,6 +88,8 @@
 -- $TableColumns в sync-mirror.ps1.
 -- Миграция: supabase/migrations/20260916090050_stock_diff_swaps.sql
 -- Rollback: supabase/migrations/20260916090050_stock_diff_swaps_down.sql
+-- Миграция (kind): supabase/migrations/20260920122602_swaps_kind.sql
+-- Rollback (kind): supabase/migrations/20260920122602_swaps_kind_down.sql
 
 create table public.stock_diff_swaps (
   id uuid primary key default gen_random_uuid(),
@@ -80,6 +103,8 @@ create table public.stock_diff_swaps (
   qty numeric not null check (qty > 0),
   status text not null default 'linked'
     check (status in ('linked','sent','received','closed')),
+  kind text not null default 'doc'
+    check (kind in ('doc','physical')),   -- миграция swaps_kind, 20.09.2026
   transport_mode text check (transport_mode in ('van','truck')),
   sap_doc_num text,
   note text,
@@ -98,6 +123,7 @@ alter table public.stock_differences add column swap_id uuid
 
 comment on table public.stock_diff_swaps is 'Размяна на артикул между два магазина през логистичния склад: from = магазинът с излишък (изпраща), to = магазинът с липса (получава).';
 comment on column public.stock_diff_swaps.status is 'linked = складът е свързал двата реда; sent = изпращащият магазин е изпратил (van/truck, sap_doc_num); received = получаващият е приел физически; closed = складът е приключил и двата реда.';
+comment on column public.stock_diff_swaps.kind is 'doc = само по документи (трансфер магазин→магазин в SAP, стоката не пътува; най-честият случай); physical = стоката пътува с бус/камион. При doc transport_mode остава null.';
 comment on column public.stock_diff_swaps.transport_mode is 'Как е изпратено при sent: van = бус, truck = камион.';
 comment on column public.stock_differences.swap_id is 'размяната, в която редът е липса — последната; отворена или затворена';
 -- ↑ текстът от миграция comment_swap_id (16.09.2026). Първоначалният (в

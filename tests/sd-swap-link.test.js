@@ -56,7 +56,7 @@ function swap(o) {
   return Object.assign({
     id: 'sw-1', from_line_id: 'l-ex', to_line_id: 'l-sh', from_store: 'Гоце Делчев', to_store: 'Петрич',
     warehouse: WH, material_code: '123', material_name: 'ЩУЦЕР МЕТАЛЕН', qty: 20, status: 'linked',
-    transport_mode: null, sap_doc_num: null, note: null, created_by: 'Склад Търговище',
+    kind: 'doc', transport_mode: null, sap_doc_num: null, note: null, created_by: 'Склад Търговище',
     created_at: '2026-09-12T09:00:00.000Z', sent_by: null, sent_at: null,
     received_by: null, received_at: null, closed_by: null, closed_at: null
   }, o);
@@ -389,7 +389,7 @@ const settle = async () => { await ticks(); await ticks(); await ticks(); };
 
   section('10. Магазините и Цвети виждат панела без бутони');
   {
-    const rec = swap({ status: 'sent', transport_mode: 'truck', sent_at: '2026-09-13T08:00:00.000Z' });
+    const rec = swap({ status: 'sent', kind: 'physical', transport_mode: 'truck', sent_at: '2026-09-13T08:00:00.000Z' });
     const lines = [L_EX, line(Object.assign({}, L_SH, { swap_id: 'sw-1' })), L_EX2, L_SH2];
     [['Петрич (to)', PETRICH, 'l-sh'], ['Гоце Делчев (from)', GOTSE, 'l-ex'], ['Цвети', CVETI, 'l-sh']].forEach(function (c) {
       const h = env(c[1], { lines: lines, swaps: [rec] });
@@ -397,8 +397,8 @@ const settle = async () => { await ticks(); await ticks(); await ticks(); };
       const tr = rowOf(h, c[2]);
       const panel = tr && tr.querySelector('[data-sdswap]');
       if (ok(c[0] + ': панелът е на реда', !!panel, tr && lastCell(tr).textContent)) {
-        ok(c[0] + ': "🔗 Размяна: Гоце Делчев → Петрич · 20 бр. · изпратено (камион)"',
-          panel.textContent.indexOf('🔗 Размяна: Гоце Делчев → Петрич · 20 бр. · изпратено (камион)') >= 0, panel.textContent);
+        ok(c[0] + ': "… · 20 бр. · 🚚 физическа · изпратено (камион)"',
+          panel.textContent.indexOf('🔗 Размяна: Гоце Делчев → Петрич · 20 бр. · 🚚 физическа · изпратено (камион)') >= 0, panel.textContent);
         ok(c[0] + ': нула бутони в панела', panel.querySelectorAll('button').length === 0);
       }
     });
@@ -431,9 +431,63 @@ const settle = async () => { await ticks(); await ticks(); await ticks(); };
     h.w.renderStockDiff();
     const table = Array.prototype.find.call(h.doc.querySelectorAll('#mod-stock-diff table'),
       t => t.querySelector('thead') && t.querySelector('thead').textContent.indexOf('Кредитно') >= 0);
-    ok('главната таблица: "🔗 Размяна: Гоце Делчев → Петрич · 20 бр. · приключена"',
-      !!table && table.textContent.indexOf('🔗 Размяна: Гоце Делчев → Петрич · 20 бр. · приключена') >= 0,
+    ok('главната таблица: "… · 20 бр. · 📄 документална · приключена"',
+      !!table && table.textContent.indexOf('🔗 Размяна: Гоце Делчев → Петрич · 20 бр. · 📄 документална · приключена') >= 0,
       table && table.textContent.slice(0, 400));
+  }
+
+  /* ── Вид на размяната (kind, 20.09.2026) ────────────────────────────────
+     doc = само по документи (трансфер магазин→магазин в SAP, стоката не
+     пътува) — най-честият случай и затова подразбиращият се; physical =
+     стоката пътува с бус/камион. Колоната е NOT NULL DEFAULT 'doc' с
+     check (doc, physical): стойност извън двете е 400 от PostgREST и
+     размяната не се записва изобщо. */
+  section('12. Вид на размяната — подразбиране „документална", избор „физическа"');
+  {
+    const h = env(WAREHOUSE);
+    h.w.renderStockDiff();
+    realClick(h.w, btn(rowOf(h, 'l-sh'), 'Свържи'));
+    const m = modal(h);
+    if (ok('модалът е отворен', !!m)) {
+      const radios = m.querySelectorAll('input[name="sdswap-kind"]');
+      if (ok('два избора в модала', radios.length === 2, 'реално: ' + radios.length)) {
+        ok('стойностите са doc и physical',
+          radios[0].value === 'doc' && radios[1].value === 'physical',
+          radios[0].value + '|' + radios[1].value);
+        ok('📄 Документална е отметната по подразбиране',
+          radios[0].checked === true && radios[1].checked === false,
+          radios[0].checked + '|' + radios[1].checked);
+      }
+      ok('двата етикета са на екрана',
+        m.textContent.indexOf('📄 Документална') >= 0 && m.textContent.indexOf('🚚 Физическа') >= 0,
+        m.textContent.slice(0, 500));
+    }
+    realClick(h.w, btnExact(m, '🔗 Свържи'));
+    await settle();
+    const b = posts(h)[0] && posts(h)[0].body;
+    ok('без пипане по избора → kind: "doc" в POST-а', !!b && b.kind === 'doc', JSON.stringify(b));
+  }
+  {
+    const h = env(WAREHOUSE);
+    h.w.renderStockDiff();
+    realClick(h.w, btn(rowOf(h, 'l-sh'), 'Свържи'));
+    const m = modal(h);
+    const radios = m.querySelectorAll('input[name="sdswap-kind"]');
+    /* Истинска отметка, както я прави браузърът при клик по radio. Гардът е
+       заради АНТИ-ТАВТОЛОГИЯТА: срещу код без избор тук няма radio-та и
+       тестът трябва да падне с ❌, а не да умре с изключение преди report(). */
+    if (!ok('изборът съществува, за да бъде отметнат', radios.length === 2, 'реално: ' + radios.length)) {
+      report();
+    }
+    radios[0].checked = false;
+    radios[1].checked = true;
+    realClick(h.w, btnExact(m, '🔗 Свържи'));
+    await settle();
+    const b = posts(h)[0] && posts(h)[0].body;
+    ok('избрана „🚚 Физическа" → kind: "physical" в POST-а', !!b && b.kind === 'physical', JSON.stringify(b));
+    ok('останалото в POST-а е непроменено',
+      !!b && b.qty === 20 && b.status === 'linked' && b.from_line_id === 'l-ex' && b.to_line_id === 'l-sh',
+      JSON.stringify(b));
   }
 
   report();

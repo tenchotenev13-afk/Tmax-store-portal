@@ -1921,6 +1921,13 @@ function sdSwapLinkInfo(ex, sh){
   return {excess:dEx.excess, shortage:dSh.shortage, openSum:openSum, available:available,
           suspect:dEx.suspect || dSh.suspect};
 }
+/* Вид на размяната. doc = само по документи (трансфер магазин→магазин в SAP,
+   стоката НЕ пътува) — най-честият случай и затова подразбиращият се;
+   physical = стоката пътува с бус или камион. При doc transport_mode остава
+   null: няма превоз, който да се опише.
+   Етикетите стоят на ЕДНО място — модалът и заглавният ред четат оттук. */
+var SD_SWAP_KIND = {doc:'📄 документална', physical:'🚚 физическа'};
+
 function openSwapLinkModal(excessLineId, shortageLineId){
   if(!isLogisticsWarehouseUser()) return;
   var find = function(id){ return sdData.find(function(x){ return String(x.id)===String(id); }); };
@@ -1961,6 +1968,12 @@ function openSwapLinkModal(excessLineId, shortageLineId){
       ' · В отворени размени: '+info.openSum+' · <b>Налично за размяна: '+info.available+'</b></div>'+
     (info.suspect ? '<div id="sdswap-suspect" style="color:#dc2626;font-weight:700;font-size:12px;margin-bottom:8px;">Проверете количеството по документ</div>' : '')+
     (!canLink ? '<div id="sdswap-why" style="color:#dc2626;font-size:12px;margin-bottom:8px;">Няма налично за размяна: излишък '+fmtN(info.excess)+', вече в отворени размени '+info.openSum+'.</div>' : '')+
+    '<label class="fl">Вид размяна</label>'+
+    '<div id="sdswap-kind" style="display:flex;gap:16px;margin-bottom:4px;font-size:12.5px;">'+
+      '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="radio" name="sdswap-kind" value="doc" checked> 📄 Документална</label>'+
+      '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;"><input type="radio" name="sdswap-kind" value="physical"> 🚚 Физическа</label>'+
+    '</div>'+
+    '<div style="font-size:11px;color:#64748b;margin-bottom:8px;">Документална = трансфер в SAP, стоката не пътува. Физическа = стоката тръгва с бус или камион.</div>'+
     '<label class="fl">Количество</label>'+
     '<input class="fi" id="sdswap-qty" type="number" min="0" step="any" value="'+defQty+'">'+
     '<label class="fl">Бележка (по избор)</label>'+
@@ -1986,6 +1999,12 @@ function submitSwapLink(excessLineId, shortageLineId){
   if(qty > info.available){ toast('Количеството е над наличното за размяна ('+info.available+')','#dc2626'); return; }
   if(info.shortage!==null && qty > info.shortage){ toast('Количеството е над липсата ('+info.shortage+')','#dc2626'); return; }
   var repEx = diffReports.find(function(x){ return x.id===ex.report_id; }) || {};
+  /* Търси се ВЪТРЕ в наслагването (#sdswap-ov), не по цялата страница: name
+     е глобално за документа и чужд radio със същото име би отговорил вместо
+     нашия. Липсва ли отметнат — 'doc', както е и default-ът на колоната;
+     така никога не тръгва стойност извън check-а. */
+  var kEl = document.querySelector('#sdswap-ov input[name="sdswap-kind"]:checked');
+  var kind = (kEl && kEl.value==='physical') ? 'physical' : 'doc';
   sdKeepScroll(sh.report_id);
   sbPostReturn('stock_diff_swaps', {
     from_line_id: ex.id, to_line_id: sh.id,
@@ -1993,7 +2012,7 @@ function submitSwapLink(excessLineId, shortageLineId){
     warehouse: repEx.counterpart || (currentUser && currentUser.store_name) || '',
     material_code: ex.material_code || sh.material_code || null,
     material_name: ex.material_name || sh.material_name || null,
-    qty: qty, note: (nEl && nEl.value.trim()) || null,
+    qty: qty, kind: kind, note: (nEl && nEl.value.trim()) || null,
     created_by: sdActor(), status: 'linked'
   }).then(function(res){
     if(!res.ok){ toast('Размяната НЕ е записана: '+sbErrMsg(res),'#dc2626'); return; }
@@ -2096,7 +2115,12 @@ function sdSwapHeadline(s){
            s.status==='sent' ? 'изпратено'+(s.transport_mode ? ' ('+(TR[s.transport_mode]||s.transport_mode)+')' : '') :
            s.status==='received' ? 'прието в '+s.to_store :
            s.status==='closed' ? 'приключена' : String(s.status||'');
-  return '🔗 Размяна: '+esc(s.from_store||'')+' → '+esc(s.to_store||'')+' · '+esc(String(s.qty))+' бр. · '+esc(st);
+  /* Видът стои ПРЕДИ статуса: „чака изпращане" значи съвсем различно нещо при
+     документална размяна (чака се трансферът в SAP) и при физическа (чака се
+     бусът). Колоната е NOT NULL DEFAULT 'doc', тоест празно тук значи стар
+     обект в паметта, не ред без вид — затова fallback-ът е 'doc'. */
+  var kd = SD_SWAP_KIND[s.kind] || SD_SWAP_KIND.doc;
+  return '🔗 Размяна: '+esc(s.from_store||'')+' → '+esc(s.to_store||'')+' · '+esc(String(s.qty))+' бр. · '+esc(kd)+' · '+esc(st);
 }
 /* Панелът на реда в колона "Отговор на склада". Складът (своята размяна):
    "✖ Развържи" при linked, "🏁 Приключи размяната" при received. Магазините и
