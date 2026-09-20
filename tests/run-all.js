@@ -131,6 +131,7 @@ const TESTS = [
      проверяваше — наследникът му е notify-topic-button.test.js по-долу. */
   'kasa-return-status.test.js',
   'kasa-return-editable.test.js',
+  'kasa-returned-day-close.test.js',
   'kasa-history-order.test.js',
   'kasa-history-window.test.js',
   'local-date.test.js',

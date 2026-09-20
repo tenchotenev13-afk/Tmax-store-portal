@@ -1,6 +1,16 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v40 (20.09.2026) — заседналите „върнати" Равнения в дневния отчет:
+     · collectDailyKasaSection: ред 'returned' в kasa_zoborot НЕ влиза нито
+       в подробния списък, нито в дълга, ако ВСИЧКИ kasa_reports за същия
+       обект+дата са 'confirmed'. Нула отчета не е „всички потвърдени".
+       Допълнителна заявка само по датите на върнатите Равнения.
+     · Това е ЗАЩИТНА МРЕЖА за старите данни. Същинската поправка е в
+       kasa.js (kasaCloseReturnedDay) — потвърждаването на последния ПОС
+       отчет вече затваря и Равнението, и Главна каса.
+     · Нищо друго не е пипано.
+
    v39 (18.09.2026) — отделни получатели за Палети и Склад (нови колони
    report_recipients.pallets / warehouse, миграция 20260918114902):
      · Палети: report_recipients.pallets=true (досега weekly=true) +
@@ -1014,9 +1024,49 @@ function collectDailyKasaSection(cb, dayISO, scope, threshold){
   var posLabel = function(x){ return 'ПОС № ' + (x.pos_number == null ? '?' : x.pos_number); };
 
   var go = function(thr){
+    /* ЗАЩИТНА МРЕЖА за стари данни (20.09.2026).
+
+       returnKasaForRevision() връща и трите документа наведнъж, но до тази
+       дата само ПОС отчетите се потвърждаваха наново — Равнението оставаше
+       'returned' завинаги и всеки дневен отчет го носеше под „Непоправени
+       от по-рано" (39 такива реда бяха затворени на ръка). От днес
+       kasaCloseReturnedDay() в kasa.js го затваря при потвърждаване на
+       последния ПОС отчет; това тук е мрежата за редовете отпреди и за
+       всеки случай, в който PATCH-ът от браузъра не е минал.
+
+       Правилото е същото: денят е преподаден, когато ВСИЧКИ kasa_reports за
+       обект+дата са 'confirmed'. Нула отчета НЕ е „всички потвърдени".
+
+       Заявката е по ДАТИТЕ на върнатите Равнения, не по цялата таблица:
+       kasa_reports е десетки хиляди реда. Резултатът излиза като
+       { rows, fixed } на мястото на втория елемент, за да не се разцепва
+       Promise.all-ът на две стъпки.
+
+       Мрежата важи САМО за двата списъка с върнати. В разминаванията по
+       праг върнатият ред и без това не влиза (pushOver го реже по status) и
+       това нарочно не се променя. */
+    var zoReturned = sbGet('kasa_zoborot','status=eq.returned&select=store_name,date,razlika,status,return_reason,returned_at').then(function(rows){
+      var list = Array.isArray(rows) ? rows : [];
+      var dates = [];
+      list.forEach(function(x){ if (x.date && dates.indexOf(x.date) < 0) dates.push(x.date); });
+      if (!dates.length) return { rows: list, fixed: {} };
+      return sbGet('kasa_reports','date=in.('+dates.join(',')+')&select=store_name,date,status').then(function(reps){
+        var by = {};
+        (Array.isArray(reps) ? reps : []).forEach(function(x){
+          var k = x.store_name + '|' + x.date;
+          if (!by[k]) by[k] = { all: 0, ok: 0 };
+          by[k].all++;
+          if (x.status === 'confirmed') by[k].ok++;
+        });
+        var fixed = {};
+        Object.keys(by).forEach(function(k){ if (by[k].all && by[k].all === by[k].ok) fixed[k] = true; });
+        return { rows: list, fixed: fixed };
+      }).catch(function(){ return { rows: list, fixed: {} }; });
+    }).catch(function(){ return { rows: [], fixed: {} }; });
+
     Promise.all([
       sbGet('kasa_reports','status=eq.returned&select=store_name,date,pos_number,razlika,status,return_reason,returned_at'),
-      sbGet('kasa_zoborot','status=eq.returned&select=store_name,date,razlika,status,return_reason,returned_at'),
+      zoReturned,
       sbGet('kasa_reports','date=eq.'+dayISO+'&select=store_name,date,pos_number,razlika,status'),
       sbGet('kasa_zoborot','date=eq.'+dayISO+'&select=store_name,date,razlika,status')
     ]).then(function(r){
@@ -1044,7 +1094,11 @@ function collectDailyKasaSection(cb, dayISO, scope, threshold){
                         return_reason: x.return_reason || '', days: days });
       };
       (Array.isArray(r[0]) ? r[0] : []).forEach(function(x){ pushReturned(x, posLabel(x)); });
-      (Array.isArray(r[1]) ? r[1] : []).forEach(function(x){ pushReturned(x, 'Равнение'); });
+      var zoFixed = (r[1] && r[1].fixed) || {};
+      ((r[1] && Array.isArray(r[1].rows)) ? r[1].rows : []).forEach(function(x){
+        if (zoFixed[x.store_name + '|' + x.date]) return;
+        pushReturned(x, 'Равнение');
+      });
       /* Най-старото върнато отгоре — то е и най-спешното. При равни дни по
          обект, за да е стабилен редът между две изпращания. */
       returned.sort(function(a,b){

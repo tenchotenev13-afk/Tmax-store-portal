@@ -529,14 +529,79 @@ function editKasaReport(id){
 }
 function confirmKasaReport(id){
   if(!confirm('Потвърди отчета? След потвърждението не може да се редактира.'))return;
+  var by=currentUser.display_name||currentUser.email;
+  var at=new Date().toISOString();
+  var rep=kasaReports.filter(function(x){return x.id===id;})[0];
   sbPatch('kasa_reports','id=eq.'+id,{
     status:'confirmed',
-    confirmed_at:new Date().toISOString(),
-    confirmed_by:currentUser.display_name||currentUser.email
+    confirmed_at:at,
+    confirmed_by:by
   }).then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
-    toast('✅ Отчетът е потвърден и заключен!');loadKasa();
+    toast('✅ Отчетът е потвърден и заключен!');
+    kasaCloseReturnedDay(rep?rep.store_name:currentUser.store_name,
+                         rep?rep.date:kasaActiveDate(), by, at,
+                         function(){loadKasa();});
   });
+}
+
+/* Преподаден върнат ден: Равнение и Главна каса се затварят САМИ.
+
+   returnKasaForRevision() (kasa-docs.js) маркира и ТРИТЕ документа със
+   status='returned', но магазинът поправя и потвърждава наново САМО ПОС
+   отчетите — Равнението и Главна каса никой не пипа и остават 'returned'
+   завинаги. Дневният отчет ги показваше всеки ден под „Непоправени от
+   по-рано"; на 20.09.2026 39 такива реда бяха затворени на ръка
+   (backup: kasa_cleanup_bak_20260920).
+
+   Денят е преподаден, когато ВСИЧКИ ПОС отчети за обект+дата са
+   'confirmed' И потвърждението е СЛЕД връщането (confirmed_at >
+   returned_at). Без второто условие отчет, върнат СЛЕД като е бил
+   потвърден и още непипнат, минава за поправен: статусът му е 'returned',
+   но при частично връщане другите редове са си 'confirmed' от по-рано.
+
+   Гейтът „никой ред няма returned_at" пести двата PATCH-а при обикновено
+   потвърждаване — не е ли връщан денят, няма какво да се затваря. Затова и
+   returned_at НЕ се нулира при връщането: той е следата, по която този код
+   разпознава преподадения ден.
+
+   Статусите се четат ОТ БАЗАТА, не от kasaReports: масивът се пълни от
+   различни табове (kasaTab('glavna') залепя свеж срез за активната дата) и
+   спокойно може да е с един PATCH назад.
+
+   ВНИМАНИЕ: kasa_zoborot НЯМА колона confirmed_at (само confirmed_by) —
+   подаването ѝ връща 400 от PostgREST. Същата засада като в
+   returnKasaForRevision(). */
+function kasaCloseReturnedDay(storeName,date,by,at,done){
+  var fin=function(){if(typeof done==='function')done();};
+  if(!storeName||!date){fin();return;}
+  var f='store_name=eq.'+encodeURIComponent(storeName)+'&date=eq.'+date;
+  sbGet('kasa_reports',f+'&select=status,confirmed_at,returned_at').then(function(rows){
+    if(!Array.isArray(rows)||!rows.length){fin();return;}
+    var everReturned=false,allOk=true;
+    rows.forEach(function(r){
+      if(r.returned_at)everReturned=true;
+      if(r.status!=='confirmed'){allOk=false;return;}
+      if(r.returned_at&&!(r.confirmed_at&&new Date(r.confirmed_at)>new Date(r.returned_at)))allOk=false;
+    });
+    if(!everReturned||!allOk){fin();return;}
+    /* Филтърът status=eq.returned прави PATCH-а безобиден, ако документът
+       вече е потвърден или е чернова — не презаписва чужд статус. */
+    var jobs=[
+      {what:'Главна каса',p:sbPatch('kasa_glavna',f+'&status=eq.returned',
+        {status:'confirmed',confirmed_by:by,confirmed_at:at})},
+      {what:'Равнение',p:sbPatch('kasa_zoborot',f+'&status=eq.returned',
+        {status:'confirmed',confirmed_by:by})}
+    ];
+    /* Тих провал тук е най-лошият изход: денят изглежда затворен, а двата
+       документа остават да висят в дневния отчет. Червен toast. */
+    Promise.all(jobs.map(function(j){return j.p;})).then(function(res){
+      var bad=[];
+      res.forEach(function(r,i){if(!r||!r.ok)bad.push(jobs[i].what+' ('+sbErrMsg(r)+')');});
+      if(bad.length)toast('⚠️ Равнение/Главна каса НЕ се затвориха: '+bad.join('; '),'#dc2626');
+      fin();
+    });
+  }).catch(function(){fin();});
 }
 
 /* Банер „върнат за корекция" над картите на Главна каса и Равнение.
