@@ -17,6 +17,10 @@ var PALLET_TYPES = [
   { key:'grate_pallets',       label:'Скара' },
   { key:'bilka_pallets',       label:'Палет Билка' }
 ];
+/* Снабдяване гледа палетите по всички обекти (то заявява транспорт за
+   прибиране), но НЕ е глобална роля никъде другаде — затова локален чек,
+   а не разширяване на isGlobal() в shared.js. */
+function palletsIsGlobal(){ return isGlobal() || (currentUser && currentUser.role==='supply'); }
 
 function palletsStaleness(dateStr){
   if(!dateStr) return { label:'Няма данни', color:'#dc2626', bg:'#fef2f2', days:null };
@@ -34,7 +38,7 @@ function loadPallets(){
   var lookback=new Date();lookback.setDate(lookback.getDate()-90);
   var lookbackStr=localDateISO(lookback);
 
-  if(isGlobal()){
+  if(palletsIsGlobal()){
     Promise.all([
       sbGet('transport_pallets','report_date=gte.'+lookbackStr+'&order=report_date.desc'),
       /* Обектите идват от users, не от stores — същият източник и същият
@@ -262,7 +266,7 @@ function palletsRowTotal(r){
 }
 /* Редовете и обектите, които потребителят има право да види. */
 function palletsExportSource(){
-  if(isGlobal()) return { rows:palletsAdminRows.slice(), stores:palletsAdminStores.slice() };
+  if(palletsIsGlobal()) return { rows:palletsAdminRows.slice(), stores:palletsAdminStores.slice() };
   var mine=currentUser.store_name;
   return { rows:palletsData.filter(function(r){return r.store_name===mine;}), stores:[mine] };
 }
