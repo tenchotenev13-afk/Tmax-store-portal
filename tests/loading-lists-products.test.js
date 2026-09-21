@@ -757,7 +757,7 @@ async function openProducts(h, i) {
       JSON.stringify(got && got.items));
   }
 
-  section('м) „📄 Вземи артикулите" — копира от снимката, подредени по позиция като ЧИСЛО');
+  section('м) „↺ Отново от Стока на път" — от снимката, подредени по позиция като ЧИСЛО');
   {
     const h = env(WAREHOUSE, { lists: [L_DRAFT], items: [item({ id: 'I1', purchase_doc: 'ИЗХ-100' })], transit: [
       { purchase_doc: 'ИЗХ-100', store_name: 'Петрич', material_code: 'A10', material_name: 'ДЕСЕТИ', ordered_qty: 10, unit: 'бр.', position: '10', status: 'pending', supplier: WH },
@@ -767,8 +767,14 @@ async function openProducts(h, i) {
     ] });
     await openDraft(h);
     await openProducts(h, 0);
-    realClick(h.w, btn(mod(h), 'Вземи артикулите'));
+    const getsBefore = getsTo(h, 'goods_transit').length;
+    /* Етикетът е сменен: бутонът е за „отначало", не за първо вземане —
+       първото става само при отмятане на документа. */
+    ok('старият етикет „Вземи артикулите" го няма', !btn(mod(h), 'Вземи артикулите'));
+    realClick(h.w, btn(mod(h), '↺ Отново от Стока на път'));
     await ticks(); await ticks();
+    ok('взето от ВЕЧЕ заредената снимка — без нова заявка',
+      getsTo(h, 'goods_transit').length === getsBefore, getsTo(h, 'goods_transit').join(' | '));
     const pr = h.w.llDraft.items[0].products;
     ok('два артикула — само на този обект', pr.length === 2, JSON.stringify(pr.map(p => p.sap_code)));
     ok('„2" преди „10" (числово, не като текст)', pr[0] && pr[0].sap_code === 'A2' && pr[1].sap_code === 'A10',

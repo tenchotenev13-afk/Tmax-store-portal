@@ -64,6 +64,10 @@ var llScan = null;            /* {row, inst, pending, choices, busy} — отв�
 var llScanLibPromise = null;  /* зареждането на html5-qrcode — ЕДНО за сесията */
 var llViewProdOpen = {};      /* {itemId:true} — разгънати артикули в прегледа на склада */
 var llStoreProdOpen = {};     /* {itemId:true} — разгънати артикули при обекта */
+var llDocQuery = '';          /* търсене в „Документи от Стока на път" */
+var llDocStore = '';          /* чип по обект; '' = всички */
+var llTransitError = false;   /* снимката НЕ се зареди — различно от „няма документи" */
+var LL_TRANSIT_PAGE = 1000;   /* PostgREST реже отговора на 1000 реда */
 
 var LL_KINDS = [
   ['pallet', '📦 Палет'],
@@ -141,6 +145,14 @@ function llStatusBadge(key){
 function llDocKey(d){
   return JSON.stringify([String(d.purchase_doc), String(d.store_name || '')]);
 }
+/* Количеството, което още чака, е remaining_qty — към 21.09.2026 при 22 от
+   270 чакащи реда то е различно от ordered_qty (частично доставени). Копие по
+   ordered_qty би обещало на обекта стока, която вече е получил. null значи
+   „не е попълнено" — тогава поръчаното. Нула НЕ е null: нищо не остава, и
+   копието я пропуска (llDocProductsCopy). */
+function llTransitQty(r){
+  return (r && r.remaining_qty !== null && r.remaining_qty !== undefined) ? r.remaining_qty : (r ? r.ordered_qty : null);
+}
 function llGroupTransitDocs(rows){
   var byKey = {}, out = [];
   (Array.isArray(rows) ? rows : []).forEach(function(r){
@@ -153,16 +165,38 @@ function llGroupTransitDocs(rows){
         doc_date: r.doc_date || null,
         items: 0,
         checked: false,
-        pallet_spec: '1'
+        pallet_spec: '1',
+        /* Съдържанието на документа — за да го види складът ПРЕДИ да го
+           отметне, и за да се копира в реда при отмятане. */
+        products: [],
+        _open: false
       };
       out.push(byKey[key]);
     }
     byKey[key].items++;
+    if(r.material_code){
+      byKey[key].products.push({
+        sap_code: String(r.material_code), product_name: r.material_name || '',
+        unit: r.unit || '', qty: llTransitQty(r), _pos: parseInt(r.position, 10) || 0
+      });
+    }
     /* Най-ранната дата на документа — редовете му може да са въведени на
        части, а документът е един. */
     if(r.doc_date && (!byKey[key].doc_date || r.doc_date < byKey[key].doc_date)){
       byKey[key].doc_date = r.doc_date;
     }
+  });
+  /* position е ТЕКСТ в goods_transit — „10" < „2" лексикографски. */
+  out.forEach(function(d){
+    d.products.sort(function(a, b){ return a._pos - b._pos; });
+    d.products.forEach(function(p){ delete p._pos; });
+  });
+  /* Най-новите документи отгоре. Заявката вече е подредена по id (нужно за
+     страниците), затова редът по дата се прави тук. sort е стабилен —
+     документи с една дата остават в реда на въвеждане. */
+  out.sort(function(a, b){
+    var x = a.doc_date || '', y = b.doc_date || '';
+    return x < y ? 1 : (x > y ? -1 : 0);
   });
   return out;
 }
@@ -1285,6 +1319,7 @@ function llListHtml(){
 /* ─── СЪЗДАВАНЕ / РЕДАКЦИЯ ──────────────────────────────────── */
 function llNewList(){
   llCurrentId = null;
+  llDocQuery = ''; llDocStore = '';
   llDraft = { list_date: llTodayISO(), executed_by: llActor(), comment: '', items: [] };
   llPendingDocs = [];
   llView = 'edit';
@@ -1296,6 +1331,7 @@ function llOpenEdit(id){
   if(!l) return;
   if(l.status !== 'draft'){ toast('Само чернова се редактира','#d97706'); return; }
   llCurrentId = l.id;
+  llDocQuery = ''; llDocStore = '';
   llDraft = {
     list_date: l.list_date, executed_by: l.executed_by || '',
     comment: l.comment || '',
@@ -1329,10 +1365,41 @@ function llBackToList(){
    на ТОЗИ склад и списъкът обекти. Обектите идват от users през
    isReportableStore, НЕ от stores — stores държи и ЦО, самите складове и
    обекти без нито един акаунт. */
+/* ВСИЧКИ чакащи редове на склада, на страници. Образецът е supplyGetAll() в
+   supply.js — копие, не извикване: товарните листи не бива да зависят от
+   модула за зареждане. Нарочно НЕ през sbGet: той връща [] при провал и
+   паднала втора страница би изглеждала като „край на данните" — документ би
+   изгубил половината си артикули, без да личи. Тук провалът отхвърля.
+   order=id.asc е заради страниците: без стабилен ред един ред може да се
+   падне на две страници, а друг — на нито една. */
+function llTransitGetAll(query){
+  var all = [];
+  function page(offset){
+    var url = API + '/goods_transit?' + query + '&order=id.asc&limit=' + LL_TRANSIT_PAGE + '&offset=' + offset;
+    return fetch(url, { headers: H }).then(function(r){
+      return r.json().catch(function(){ return null; }).then(function(d){
+        if(!r.ok || !Array.isArray(d)) throw new Error((d && (d.message || d.hint)) || ('HTTP ' + r.status));
+        all = all.concat(d);
+        return d.length === LL_TRANSIT_PAGE ? page(offset + LL_TRANSIT_PAGE) : all;
+      });
+    });
+  }
+  return page(0);
+}
 function llLoadEditorData(){
   var wh = llActiveWarehouse();
+  llTransitError = false;
   Promise.all([
-    sbGet('goods_transit','supplier=eq.'+encodeURIComponent(wh)+'&status=eq.pending&select=purchase_doc,store_name,doc_date,created_at&order=doc_date.desc'),
+    llTransitGetAll('supplier=eq.' + encodeURIComponent(wh) + '&status=eq.pending' +
+      '&select=purchase_doc,store_name,doc_date,created_at,material_code,material_name,ordered_qty,remaining_qty,unit,position')
+      .catch(function(e){
+        /* Снимката не се зареди — казва се, вместо да изглежда като „няма
+           документи". Редакторът продължава: листът се пише и без нея. */
+        console.error('llLoadEditorData: goods_transit', e);
+        llTransitError = true;
+        toast('Стока на път не се зареди: ' + (e && e.message ? e.message : e), '#dc2626');
+        return [];
+      }),
     loadReportableStores()
   ]).then(function(res){
     llPendingDocs = llGroupTransitDocs(res[0]);
@@ -1378,18 +1445,44 @@ function llSetDocPallet(idx, val){
   if(d.checked){ llDropDocRows(d); llMaterializeDoc(d); }
   renderLoadingLists();
 }
+/* Копие на съдържанието на документа от снимката — за артикулите на реда.
+   КОПИЕ: редът после се редактира свободно, а снимката остава каквато е. */
+function llDocProductsCopy(d){
+  var out = [], skipped = 0;
+  (d && d.products || []).forEach(function(p){
+    var q = llParseQty(p.qty);
+    if(!p.sap_code || q == null){ skipped++; return; }
+    out.push({ sap_code: p.sap_code, product_name: p.product_name, unit: p.unit || '',
+               qty: q, cartons: null, _inCat: true });
+  });
+  return { list: out, skipped: skipped };
+}
 function llMaterializeDoc(d){
   /* pallet_total се оставя празно: то е „от колко" за ЦЕЛИЯ обект и се знае
      чак когато всички документи са разпределени. Смята се при запис
      (llRenumberPallets), а в редактора се показва от групирането. */
-  llParsePalletSpec(d.pallet_spec).forEach(function(n){
+  var nums = llParsePalletSpec(d.pallet_spec);
+  /* Артикулите отиват САМО в ПЪРВИЯ ред на документа. Документ върху палети
+     1-3 не се разпределя сам, а копие във всеки ред би утроило стоката в
+     описите, в писмото до обекта и в „⚠️ Разлика". Складът разпределя. */
+  var copy = llDocProductsCopy(d);
+  nums.forEach(function(n, k){
     llDraft.items.push({
       id: null, kind: 'pallet', pallet_no: n, pallet_total: null,
       purchase_doc: d.purchase_doc, clears_doc: null,
       store_name: d.store_name, warehouse_comment: '', partial: false,
-      _docKey: llDocKey(d), products: []
+      _docKey: llDocKey(d),
+      products: k === 0 ? copy.list : []
     });
   });
+  if(!copy.list.length) return;
+  if(nums.length > 1){
+    toast('📦 ' + copy.list.length + ' артикула от ' + d.purchase_doc + ' са на палет ' + nums[0] +
+      ' — документът е на ' + nums.length + ' палета, премести каквото не е на него', '#d97706');
+  } else {
+    toast('📦 Копирани ' + copy.list.length + ' артикула от ' + d.purchase_doc +
+      (copy.skipped ? ' (' + copy.skipped + ' без количество — пропуснати)' : ''));
+  }
 }
 function llDropDocRows(d){
   var key = llDocKey(d);
@@ -1759,41 +1852,53 @@ function llRemoveProduct(i, j){
    не автоматично при отмятане на документа: складът решава дали съдържанието
    от 01.09 още е вярно. Документ, разстлан върху няколко палета, НЕ се
    разпределя сам — копира се в този ред и излишното се маха на ръка. */
+/* „↺ Отново от Стока на път" — за реда, чиито артикули складът е изтрил или
+   объркал и иска отначало. ЗАМЕНЯ, не добавя: добавяне към вече копираните би
+   дублирало всичко. Ако на реда има артикули — пита, защото ръчните промени
+   се губят. Снимката е вече заредена в llPendingDocs — нова заявка само ако
+   документът го няма там (напр. снимката е наливана наново). */
 function llTakeTransitProducts(i){
   var it = llDraft && llDraft.items[i];
   if(!it || !it.purchase_doc) return Promise.resolve(0);
+  if((it.products || []).length &&
+     !confirm('Замени ' + it.products.length + ' артикула на реда с тези от Стока на път?')) return Promise.resolve(0);
+  var key = llDocKey({ purchase_doc: it.purchase_doc, store_name: it.store_name });
+  var d = llPendingDocs.find(function(x){ return llDocKey(x) === key; });
+  if(d) return Promise.resolve(llApplyTransitProducts(i, d.products));
   return sbGet('goods_transit', 'purchase_doc=eq.' + encodeURIComponent(it.purchase_doc) +
     '&store_name=eq.' + encodeURIComponent(it.store_name || '') +
-    '&select=material_code,material_name,ordered_qty,unit,position').then(function(rows){
+    '&select=material_code,material_name,ordered_qty,remaining_qty,unit,position').then(function(rows){
     var list = (Array.isArray(rows) ? rows : []).slice().sort(function(a, b){
       /* position е ТЕКСТ в goods_transit — „10" < „2" лексикографски. */
       return (parseInt(a.position, 10) || 0) - (parseInt(b.position, 10) || 0);
+    }).map(function(r){
+      return { sap_code: r.material_code ? String(r.material_code) : '', product_name: r.material_name || '',
+               unit: r.unit || '', qty: llTransitQty(r) };
     });
-    if(!list.length){ toast('Документът няма артикули в Стока на път','#d97706'); return 0; }
-    if(!Array.isArray(it.products)) it.products = [];
-    var n = 0;
-    list.forEach(function(r){
-      var q = llParseQty(r.ordered_qty);
-      if(!r.material_code || q == null) return;
-      it.products.push({ sap_code: String(r.material_code), product_name: r.material_name || '',
-                         unit: r.unit || '', qty: q, cartons: null, _inCat: true });
-      n++;
-    });
-    it._prodOpen = true;
-    /* Документ върху няколко реда (напр. палети 1-3) НЕ се разпределя сам:
-       целият списък отива в този ред. Казва се на глас, иначе описът на
-       палет 1 ще носи стоката и на 2 и 3. */
-    var docKey = llItemDocKey(it), rowsOfDoc = llDraft.items.filter(function(x){
-      return llItemDocKey(x) === docKey && (x.store_name || '') === (it.store_name || '');
-    }).length;
-    if(rowsOfDoc > 1){
-      toast('📦 Взети ' + n + ' артикула — документът е на ' + rowsOfDoc + ' реда, махни от този каквото не е на него','#d97706');
-    } else {
-      toast('📦 Взети ' + n + ' артикула от документ ' + it.purchase_doc);
-    }
-    renderLoadingLists();
-    return n;
+    return llApplyTransitProducts(i, list);
   });
+}
+function llApplyTransitProducts(i, source){
+  var it = llDraft && llDraft.items[i];
+  if(!it) return 0;
+  var copy = llDocProductsCopy({ products: source });
+  if(!copy.list.length){ toast('Документът няма артикули в Стока на път','#d97706'); return 0; }
+  it.products = copy.list;
+  it._prodOpen = true;
+  var n = copy.list.length;
+  /* Документ върху няколко реда (напр. палети 1-3) НЕ се разпределя сам:
+     целият списък отива в този ред. Казва се на глас, иначе описът на
+     палет 1 ще носи стоката и на 2 и 3. */
+  var docKey = llItemDocKey(it), rowsOfDoc = llDraft.items.filter(function(x){
+    return llItemDocKey(x) === docKey && (x.store_name || '') === (it.store_name || '');
+  }).length;
+  if(rowsOfDoc > 1){
+    toast('📦 Взети ' + n + ' артикула — документът е на ' + rowsOfDoc + ' реда, махни от този каквото не е на него','#d97706');
+  } else {
+    toast('📦 Взети ' + n + ' артикула от документ ' + it.purchase_doc);
+  }
+  renderLoadingLists();
+  return n;
 }
 
 /* ─── Блокът в редактора ────────────────────────────────── */
@@ -1830,7 +1935,7 @@ function llProductsBlockHtml(it, i){
       'oninput="llPfInput(+this.dataset.i,\'cartons\',this.value)" onkeydown="llPfKey(+this.dataset.i,\'cartons\',event)" style="'+LL_PF_IN+'width:74px;">'+
     '<button data-i="'+i+'" onclick="llAddProduct(+this.dataset.i)" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">➕ Добави</button>'+
     (it.purchase_doc
-      ? '<button data-i="'+i+'" onclick="llTakeTransitProducts(+this.dataset.i)" title="Копира артикулите на документа от Стока на път (снимка) — после се коригират на ръка" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#6d28d9;border-radius:6px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer;">📄 Вземи артикулите</button>'
+      ? '<button data-i="'+i+'" onclick="llTakeTransitProducts(+this.dataset.i)" title="Заменя артикулите на реда с тези на документа от Стока на път (снимката)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#6d28d9;border-radius:6px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer;">↺ Отново от Стока на път</button>'
       : '')+
     '</div>';
 
@@ -2071,6 +2176,89 @@ function llScanAdd(){
   });
 }
 
+/* ─── Документите от Стока на път: разгъване, търсене, чипове ─── */
+/* Какво има в документа — само четене, ПРЕДИ отмятане. */
+function llDocItemsHtml(d){
+  var pr = d.products || [];
+  if(!pr.length) return '<div style="font-size:12px;color:#94a3b8;padding:4px 0;">Документът няма артикули в снимката.</div>';
+  var h = '<table data-ll-doc-prod="1" style="width:100%;border-collapse:collapse;font-size:12px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:6px;">'+
+    '<tr style="color:#64748b;text-align:left;"><th style="padding:4px 7px;">Код</th><th style="padding:4px 7px;">Име</th>'+
+    '<th style="padding:4px 7px;text-align:right;">Количество</th><th style="padding:4px 7px;">Мярка</th></tr>';
+  pr.forEach(function(p){
+    h += '<tr style="border-top:1px solid #e2e8f0;">'+
+      '<td style="padding:3px 7px;font-family:DM Mono,monospace;white-space:nowrap;">'+esc(p.sap_code)+'</td>'+
+      '<td style="padding:3px 7px;">'+esc(p.product_name)+'</td>'+
+      '<td style="padding:3px 7px;text-align:right;font-weight:600;">'+llFmtQty(p.qty)+'</td>'+
+      '<td style="padding:3px 7px;color:#64748b;">'+esc(p.unit || '—')+'</td></tr>';
+  });
+  return h + '</table>';
+}
+function llToggleDocOpen(idx){
+  var d = llPendingDocs[idx];
+  if(!d) return;
+  d._open = !d._open;
+  renderLoadingLists();
+}
+/* Филтърът: текст (номер на документ — съдържа, или име на обект) И чип по
+   обект. Двете се комбинират: „Петрич" + „4600" значи документите на Петрич,
+   чийто номер съдържа 4600. */
+function llDocShown(){
+  var q = String(llDocQuery || '').trim().toLowerCase();
+  return llPendingDocs.filter(function(d){
+    if(llDocStore && d.store_name !== llDocStore) return false;
+    if(!q) return true;
+    return String(d.purchase_doc || '').toLowerCase().indexOf(q) >= 0 ||
+           String(d.store_name || '').toLowerCase().indexOf(q) >= 0;
+  });
+}
+/* Чиповете по обект се рендират ВИНАГИ — и при един обект (правило 11):
+   иначе човек, който е избрал чип и после филтърът по текст остави един
+   обект, няма откъде да се върне към „Всички". Броят в чипа е по ТЕКСТОВИЯ
+   филтър, без чипа — за да казва какво ще види, ако го избере. */
+function llDocFilterHtml(){
+  var q = String(llDocQuery || '').trim().toLowerCase();
+  var byText = llPendingDocs.filter(function(d){
+    return !q || String(d.purchase_doc || '').toLowerCase().indexOf(q) >= 0 ||
+                 String(d.store_name || '').toLowerCase().indexOf(q) >= 0;
+  });
+  var stores = [], cnt = {};
+  llPendingDocs.forEach(function(d){
+    var st = d.store_name || '';
+    if(stores.indexOf(st) < 0) stores.push(st);
+  });
+  stores.sort();
+  byText.forEach(function(d){ cnt[d.store_name || ''] = (cnt[d.store_name || ''] || 0) + 1; });
+  var chip = function(val, label, n){
+    var a = llDocStore === val;
+    return '<button data-s="'+escAttr(val)+'" onclick="llSetDocStore(this.dataset.s)" style="border:none;padding:4px 11px;border-radius:40px;font-size:11.5px;font-weight:600;cursor:pointer;'+
+      'background:'+(a?'#5b21b6':'#ede9fe')+';color:'+(a?'#fff':'#5b21b6')+';">'+esc(label)+' ('+n+')</button>';
+  };
+  return '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px;">'+
+    '<input id="ll-doc-q" value="'+llAttr(llDocQuery)+'" placeholder="Търси документ / обект" autocomplete="off" '+
+      'oninput="llSetDocQuery(this.value)" style="flex:1 1 200px;min-width:160px;border:1px solid #ddd6fe;border-radius:6px;padding:6px 9px;font-size:13px;">'+
+    '</div>'+
+    '<div data-ll-doc-chips="1" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;">'+
+      chip('', 'Всички', byText.length)+
+      stores.map(function(st){ return chip(st, st || '—', cnt[st] || 0); }).join('')+
+    '</div>';
+}
+/* Търсенето пре-рендира редактора — и връща фокуса и курсора в полето, иначе
+   всеки клавиш би изхвърлял човека от него. */
+function llSetDocQuery(v){
+  llDocQuery = String(v == null ? '' : v);
+  renderLoadingLists();
+  var el = document.getElementById('ll-doc-q');
+  if(el){
+    if(el.focus) el.focus();
+    try { var n = el.value.length; el.setSelectionRange(n, n); } catch(e){}
+  }
+}
+function llSetDocStore(st){
+  /* Повторен клик по избрания чип го маха — същото като „Всички". */
+  llDocStore = (llDocStore === st) ? '' : String(st || '');
+  renderLoadingLists();
+}
+
 function llEditorHtml(){
   if(!llDraft) return '';
   var isNew = !llCurrentId;
@@ -2095,24 +2283,40 @@ function llEditorHtml(){
   h += '<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:12px;">'+
     /* „Стока на път" е МЕСЕЧНА снимка, не оперативен източник. Датата стои в
        заглавието, за да не изглежда документ от 25.08 като днешен. */
-    '<div style="font-size:13px;font-weight:700;color:#5b21b6;margin-bottom:8px;">📄 Документи от Стока на път ('+llPendingDocs.length+')'+
+    '<div style="font-size:13px;font-weight:700;color:#5b21b6;margin-bottom:8px;">📄 Документи от Стока на път ('+
+      (llDocShown().length === llPendingDocs.length ? llPendingDocs.length : llDocShown().length+' от '+llPendingDocs.length)+')'+
       (llTransitSnapshot ? ' <span style="font-weight:400;color:#7c3aed;">· снимка към '+llFmtStamp(llTransitSnapshot)+'</span>' : '')+'</div>';
-  if(!llPendingDocs.length){
+  if(llTransitError){
+    h += '<div data-ll-transit-error="1" style="font-size:12px;color:#dc2626;font-weight:600;">⚠️ Стока на път не се зареди — документите не са показани. Листът може да се пише и без тях.</div>';
+  } else if(!llPendingDocs.length){
     h += '<div style="font-size:12px;color:#7c3aed;">Няма чакащи документи от този склад.</div>';
   } else {
+    h += llDocFilterHtml();
+    var shown = llDocShown();
+    if(!shown.length){
+      h += '<div style="font-size:12px;color:#7c3aed;padding:6px 0;">Нищо не отговаря на търсенето.</div>';
+    }
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px;"><tr style="color:#7c3aed;text-align:left;">'+
       '<th style="padding:3px 6px;"></th><th style="padding:3px 6px;">Документ</th><th style="padding:3px 6px;">Обект</th>'+
       '<th style="padding:3px 6px;">Дата</th><th style="padding:3px 6px;text-align:right;">Артикули</th>'+
       '<th style="padding:3px 6px;">Палет №</th></tr>';
+    /* data-i е индексът в llPendingDocs, НЕ в показания списък: филтърът
+       крие редове, а llToggleDoc/llSetDocPallet търсят по пълния списък. */
     llPendingDocs.forEach(function(d, i){
-      h += '<tr style="border-top:1px solid #ede9fe;">'+
-        '<td style="padding:3px 6px;"><input type="checkbox" data-i="'+i+'" onchange="llToggleDoc(this.dataset.i)"'+(d.checked?' checked':'')+'></td>'+
-        '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(d.purchase_doc)+'</td>'+
+      if(shown.indexOf(d) < 0) return;
+      /* Клик по целия ред разгъва; чекбоксът и „Палет №" спират клика —
+         иначе отмятането би разгъвало, а писането в полето — свивало. */
+      h += '<tr data-ll-doc="'+i+'" data-i="'+i+'" onclick="llToggleDocOpen(this.dataset.i)" style="border-top:1px solid #ede9fe;cursor:pointer;'+(d._open?'background:#ede9fe;':'')+'">'+
+        '<td style="padding:3px 6px;white-space:nowrap;" onclick="event.stopPropagation()">'+
+          '<input type="checkbox" data-i="'+i+'" onclick="event.stopPropagation()" onchange="llToggleDoc(this.dataset.i)"'+(d.checked?' checked':'')+'></td>'+
+        '<td style="padding:3px 6px;font-family:DM Mono,monospace;white-space:nowrap;">'+
+          '<span style="color:#7c3aed;display:inline-block;width:12px;">'+(d._open?'▾':'▸')+'</span>'+esc(d.purchase_doc)+'</td>'+
         '<td style="padding:3px 6px;">'+esc(d.store_name)+'</td>'+
         '<td style="padding:3px 6px;">'+fmtDate(d.doc_date)+'</td>'+
         '<td style="padding:3px 6px;text-align:right;">'+d.items+'</td>'+
-        '<td style="padding:3px 6px;"><input value="'+escVal(d.pallet_spec)+'" data-i="'+i+'" onchange="llSetDocPallet(this.dataset.i,this.value)" title="На кой палет отива този документ. Еднакъв номер за един обект = един палет. Обхват (1-3) за документ върху няколко палета." style="width:62px;border:1px solid #ddd6fe;border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
+        '<td style="padding:3px 6px;" onclick="event.stopPropagation()"><input value="'+escVal(d.pallet_spec)+'" data-i="'+i+'" onclick="event.stopPropagation()" onchange="llSetDocPallet(this.dataset.i,this.value)" title="На кой палет отива този документ. Еднакъв номер за един обект = един палет. Обхват (1-3) за документ върху няколко палета." style="width:62px;border:1px solid #ddd6fe;border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
         '</tr>';
+      if(d._open) h += '<tr data-ll-doc-items="'+i+'"><td></td><td colspan="5" style="padding:0 6px 8px;">'+llDocItemsHtml(d)+'</td></tr>';
     });
     h += '</table>';
     h += '<div style="font-size:11px;color:#7c3aed;margin-top:6px;">Стоковата № не се пише на ръка — избира се оттук. '+
