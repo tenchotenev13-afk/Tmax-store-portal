@@ -51,6 +51,20 @@ var llCollapsed = {};      /* {listId:true} — свити карти */
    провала веднага, вместо да го открие след седмица в „Стока на път". */
 var llDocFailures = {};
 
+/* ── Артикули по палет (Пакет В1) ── */
+/* Редовете идват с артикулите си наведнъж — PostgREST embed по FK-а
+   item_id → loading_list_items(id). Втора заявка item_id=in.(…) би растяла
+   с броя на редовете на ВСИЧКИ листи на склада и би ударила тавана на URL-а. */
+var LL_ITEM_SELECT = '*,loading_list_products(*)';
+var llTransitSnapshot = null; /* max(created_at) на чакащите документи — „снимка към“ */
+var llAcTimer = null;         /* debounce на автодопълването */
+var llAcSeq = 0;              /* срещу разбъркани отговори: печели последната заявка */
+var llAcResults = {};         /* {rowIdx: [каталожни редове]} — последните подсказки */
+var llScan = null;            /* {row, inst, pending, choices, busy} — отвореният скенер */
+var llScanLibPromise = null;  /* зареждането на html5-qrcode — ЕДНО за сесията */
+var llViewProdOpen = {};      /* {itemId:true} — разгънати артикули в прегледа на склада */
+var llStoreProdOpen = {};     /* {itemId:true} — разгънати артикули при обекта */
+
 var LL_KINDS = [
   ['pallet', '📦 Палет'],
   ['roll',   '🧻 Рула'],
@@ -263,7 +277,7 @@ function llCounts(items){
 function llSummaryByStore(items){
   var by = {}, order = [];
   var ensure = function(s){
-    if(!by[s]){ by[s] = { store:s, pallet:0, roll:0, bulk:0, received:0, missing:0, total:0 }; order.push(s); }
+    if(!by[s]){ by[s] = { store:s, pallet:0, roll:0, bulk:0, received:0, missing:0, total:0, products:0, qty:0 }; order.push(s); }
     return by[s];
   };
   /* Товарните единици — по същата причина като в llCounts(). */
@@ -277,6 +291,11 @@ function llSummaryByStore(items){
     e.total++;
     if(it.received) e.received++;
     if(it.missing)  e.missing++;
+    /* Бройките се сумират НАПРАВО, през мерните единици — така е поискано.
+       Смесен палет (бр. + кв.м) дава число, което не е нито едното; колоната
+       е за бърз поглед „има ли стока", не за инвентаризация. */
+    e.products += (it.products || []).length;
+    e.qty = Math.round((e.qty + llProdSum(it.products)) * 1000) / 1000;
   });
   order.sort();
   return order.map(function(s){ return by[s]; });
@@ -299,9 +318,9 @@ function loadLoadingLists(){
       if(!ids.length){ llItems = []; renderLoadingLists(); return; }
       /* Редовете на ВСИЧКИ листи наведнъж — броячите в списъка се смятат от
          тях, а втора заявка на всеки клик би била по-бавна от една обща. */
-      return sbGet('loading_list_items','list_id=in.('+ids.join(',')+')&order=position.asc')
+      return sbGet('loading_list_items','list_id=in.('+ids.join(',')+')&order=position.asc&select='+LL_ITEM_SELECT)
         .then(function(items){
-          llItems = Array.isArray(items) ? items : [];
+          llItems = llNormProducts(Array.isArray(items) ? items : []);
           renderLoadingLists();
         });
     });
@@ -313,14 +332,26 @@ function llStoreItemsOf(listId){
   return llStoreItems.filter(function(i){ return String(i.list_id) === String(listId); });
 }
 function llByPosition(a, b){ return (a.position || 0) - (b.position || 0); }
+/* PostgREST връща артикулите под ключа loading_list_products. Тук стават
+   it.products, подредени по position — embed-ът не гарантира ред, а описът
+   на палета се печата в реда, в който складът ги е въвел. Суровият ключ се
+   маха, за да няма два източника за едно и също нещо в паметта. */
+function llNormProducts(items){
+  (items || []).forEach(function(it){
+    var raw = it.loading_list_products;
+    delete it.loading_list_products;
+    if(!Array.isArray(it.products)) it.products = Array.isArray(raw) ? raw.slice().sort(llByPosition) : [];
+  });
+  return items;
+}
 
 /* ─── ЗАРЕЖДАНЕ: МАГАЗИНСКА СТРАНА ──────────────────────────
    Тръгва се от РЕДОВЕТЕ, не от листите: обектът се интересува от своите
    палети, а един лист обслужва няколко обекта. storeQ() дава филтъра —
    един обект, няколко назначени или никакъв за глобален профил. */
 function llLoadStoreSide(){
-  sbGet('loading_list_items','order=position.asc'+storeQ()).then(function(items){
-    var mine = Array.isArray(items) ? items : [];
+  sbGet('loading_list_items','order=position.asc&select='+LL_ITEM_SELECT+storeQ()).then(function(items){
+    var mine = llNormProducts(Array.isArray(items) ? items : []);
     var ids = {}, keys = [];
     mine.forEach(function(i){ if(i.list_id && !ids[i.list_id]){ ids[i.list_id] = 1; keys.push(i.list_id); } });
     if(!keys.length){ llStoreItems = []; llStoreLists = []; renderLoadingLists(); return; }
@@ -504,6 +535,15 @@ function llStoreCardHtml(l){
             : '<span style="color:#cbd5e1;">—</span>')))+
       (failed?'<div style="margin-top:3px;font-size:10px;color:#b45309;font-weight:600;">⚠️ документът не е затворен</div>':'')+
       '</td></tr>';
+    /* Какво има на палета — само за четене. Отмятането остава по ред/палет
+       както в Пакет А; по артикул е следващата стъпка (В2). 6 колони: първата
+       остава за отстъпа, артикулите — в останалите пет. */
+    if((it.products || []).length){
+      var so = !!llStoreProdOpen[it.id];
+      h += '<tr data-ll-sprod="'+it.id+'" style="border-bottom:1px solid #f1f5f9;'+(it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':''))+'">'+
+        '<td></td><td colspan="5" style="padding:0 9px 6px;">'+
+        llProductsToggleHtml(it, so, 'llToggleStoreProducts')+(so ? llProductsTableHtml(it.products) : '')+'</td></tr>';
+    }
     });
   });
   h += '</tbody></table></div></div>';
@@ -549,6 +589,15 @@ function llOpenDiffForItem(itemId){
       items: items
     });
   };
+  /* Редът носи собствените си артикули (Пакет В1) — те са ТОЧНО това, което
+     е натоварено, докато „Стока на път" е месечна снимка. Щом ги има, бланката
+     се пълни от тях и goods_transit изобщо не се пита. */
+  if((it.products || []).length){
+    open(it.products.map(function(p){
+      return { sap: p.sap_code, name: p.product_name, qty: p.qty, unit: p.unit };
+    }));
+    return;
+  }
   /* Ред без документ няма откъде да вземе артикули — бланката тръгва празна. */
   if(!doc){ open([]); return; }
   sbGet('goods_transit','purchase_doc=eq.' + encodeURIComponent(doc) +
@@ -990,6 +1039,16 @@ function llSentHtmlFor(list, store, rows){
         (it.partial ? '<div style="font-size:10px;color:#92400e;">частично</div>' : '')+'</td>'+
       '<td '+LL_MAIL_TD+'>'+(it.clears_doc ? esc(it.clears_doc) : '—')+'</td>'+
       '<td '+LL_MAIL_TD+'>'+esc(it.warehouse_comment || '—')+'</td></tr>';
+    /* Какво има на палета — компактно и сиво: писмото е „идва товар", не
+       опис; описът е на хартия върху самия палет. Отделен ред с colspan,
+       за да не разтяга колоните на таблицата с дълги имена. */
+    if((it.products || []).length){
+      body += '<tr><td colspan="4" style="padding:3px 7px 7px 18px;font-size:11px;color:#64748b;border:1px solid #e2e8f0;border-top:none;line-height:1.5;">'+
+        it.products.map(function(p){
+          return esc(p.sap_code)+' · '+esc(p.product_name)+' — '+llFmtQty(p.qty)+' '+esc(p.unit || '')+
+            (p.cartons != null ? ' ('+p.cartons+' каш.)' : '');
+        }).join('<br>')+'</td></tr>';
+    }
   });
   body += '</table>'+llMailBtn();
   return emailWrap(body, 'Товарен лист · ТеМАХ Вътрешна платформа');
@@ -1245,10 +1304,18 @@ function llOpenEdit(id){
         id: it.id, kind: it.kind, pallet_no: it.pallet_no, pallet_total: it.pallet_total,
         purchase_doc: it.purchase_doc, clears_doc: it.clears_doc,
         store_name: it.store_name, warehouse_comment: it.warehouse_comment || '',
-        partial: !!it.partial
+        partial: !!it.partial,
+        /* _inCat е неизвестно за вече записан артикул — колона за това няма.
+           Приема се, че е от каталога: маркерът „не е в каталога“ е за
+           човека, който въвежда СЕГА, не история. */
+        products: (it.products || []).map(function(pr){
+          return { sap_code: pr.sap_code, product_name: pr.product_name, unit: pr.unit || '',
+                   qty: pr.qty, cartons: pr.cartons, _inCat: true };
+        })
       };
     })
   };
+  llDraft._hadProducts = llDraft.items.some(function(it){ return (it.products || []).length; });
   llPendingDocs = [];
   llView = 'edit';
   renderLoadingLists();
@@ -1265,10 +1332,16 @@ function llBackToList(){
 function llLoadEditorData(){
   var wh = llActiveWarehouse();
   Promise.all([
-    sbGet('goods_transit','supplier=eq.'+encodeURIComponent(wh)+'&status=eq.pending&select=purchase_doc,store_name,doc_date&order=doc_date.desc'),
+    sbGet('goods_transit','supplier=eq.'+encodeURIComponent(wh)+'&status=eq.pending&select=purchase_doc,store_name,doc_date,created_at&order=doc_date.desc'),
     loadReportableStores()
   ]).then(function(res){
     llPendingDocs = llGroupTransitDocs(res[0]);
+    /* Кога е наливана снимката. max, не min: при частично доналиване най-
+       новото показва, че данните са поне толкова пресни. */
+    llTransitSnapshot = null;
+    (Array.isArray(res[0]) ? res[0] : []).forEach(function(r){
+      if(r && r.created_at && (!llTransitSnapshot || r.created_at > llTransitSnapshot)) llTransitSnapshot = r.created_at;
+    });
     llStores = Array.isArray(res[1]) ? res[1] : [];
     if(llView === 'edit') renderLoadingLists();
   });
@@ -1314,7 +1387,7 @@ function llMaterializeDoc(d){
       id: null, kind: 'pallet', pallet_no: n, pallet_total: null,
       purchase_doc: d.purchase_doc, clears_doc: null,
       store_name: d.store_name, warehouse_comment: '', partial: false,
-      _docKey: llDocKey(d)
+      _docKey: llDocKey(d), products: []
     });
   });
 }
@@ -1337,14 +1410,24 @@ function llAddFreeRow(){
   llDraft.items.push({
     id: null, kind: 'pallet', pallet_no: null, pallet_total: null,
     purchase_doc: null, clears_doc: null,
-    store_name: (llStores[0] || ''), warehouse_comment: '', partial: false, _docKey: null
+    store_name: (llStores[0] || ''), warehouse_comment: '', partial: false, _docKey: null,
+    products: []
   });
   renderLoadingLists();
+}
+/* Подсказките на автодопълването са по ИНДЕКС на реда — преместен или махнат
+   ред размества индексите и стара подсказка (или заявка, тръгнала преди
+   300 ms) би паднала върху чужд ред. */
+function llAcReset(){
+  if(llAcTimer){ clearTimeout(llAcTimer); llAcTimer = null; }
+  llAcSeq++;
+  llAcResults = {};
 }
 function llRemoveRow(i){
   if(!llDraft) return;
   var it = llDraft.items[i];
   if(!it) return;
+  llAcReset();
   if(it.id) sbDelete('loading_list_items','id=eq.'+it.id);
   llDraft.items.splice(i, 1);
   renderLoadingLists();
@@ -1353,6 +1436,7 @@ function llMoveRow(i, dir){
   if(!llDraft) return;
   var j = i + dir;
   if(j < 0 || j >= llDraft.items.length) return;
+  llAcReset();
   var tmp = llDraft.items[i];
   llDraft.items[i] = llDraft.items[j];
   llDraft.items[j] = tmp;
@@ -1407,6 +1491,586 @@ function llStoreOptions(sel){
   }).join('');
 }
 
+/* ══════════════════════════════════════════════════════════
+   АРТИКУЛИ ПО ПАЛЕТ (Пакет В1)
+
+   „Стока на път" е месечна снимка (пълно зачистване и наливане, последно
+   01.09.2026, документи до 25.08) и НЕ е оперативен източник. Товарният лист
+   носи собственото си съдържание: всеки ред (палет / руло / насип) има своите
+   артикули, защото всеки палет получава печатен опис.
+
+   Артикулът е закачен за РЕДА в loading_list_items, не за документа.
+   product_name и unit са КОПИЯ от каталога към момента на добавяне — листът е
+   документ за това какво е натоварено ТОГАВА, и преименуван артикул в
+   каталога не бива да пренаписва вече изпратен лист.
+
+   Складът работи на телефон/таблет — затова двата пътя за добавяне са
+   скенер и автодопълване, а не падащо меню със 106 000 реда. */
+
+/* ─── Общи дребни ───────────────────────────────────────── */
+/* Стойност за value="…". escVal() от shared.js НЕ бяга кавичката, а в
+   каталога 1542 имена я съдържат (инчове: 1/2", 16") — всяко от тях би
+   затворило атрибута и изсипало остатъка като markup. escAttr() бяга
+   кавичката, но връща "—" за празно (през esc()), а празно поле трябва да
+   е ПРАЗНО. Нулата също е стойност — escVal(0) дава "", което за „0 кашона"
+   е грешно. */
+function llAttr(v){
+  if(v === null || v === undefined || v === "") return "";
+  return escAttr(String(v));
+}
+/* „12,5" → 12.5. Празно, нула, отрицателно и боклук → null: количеството е
+   задължително и строго положително, а „0 бройки" на палет е грешка при
+   въвеждане, не информация. */
+function llParseQty(v){
+  var s = String(v == null ? '' : v).replace(',', '.').trim();
+  if(!s || !/^\d*\.?\d+$/.test(s)) return null;
+  var n = parseFloat(s);
+  return (isFinite(n) && n > 0) ? n : null;
+}
+/* Кашоните са по желание: празно → null (не е попълнено), иначе цяло ≥ 0.
+   undefined значи „невалидно" и спира добавянето — различно от „празно". */
+function llParseCartons(v){
+  var s = String(v == null ? '' : v).trim();
+  if(!s) return null;
+  if(!/^\d+$/.test(s)) return undefined;
+  return parseInt(s, 10);
+}
+function llFmtQty(n){
+  if(n == null || n === '') return '—';
+  var x = Number(n);
+  if(!isFinite(x)) return esc(String(n));
+  return String(Math.round(x * 1000) / 1000).replace('.', ',');
+}
+function llProdSum(products){
+  var s = 0;
+  (products || []).forEach(function(p){ var x = Number(p.qty); if(isFinite(x)) s += x; });
+  return Math.round(s * 1000) / 1000;
+}
+/* Празната форма на ред. Пази се в самия ред (it._pf), не в DOM-а: всяко
+   пре-рендиране на редактора (стрелка, смяна на обект) би изтрило наполовина
+   въведен артикул, ако стойностите живееха само в полетата. */
+function llEmptyPf(){
+  return { sap_code:'', product_name:'', unit:'', qty:'', cartons:'', _picked:false, _inCat:null };
+}
+function llPfOf(i){
+  var it = llDraft && llDraft.items[i];
+  if(!it) return null;
+  if(!it._pf) it._pf = llEmptyPf();
+  if(!Array.isArray(it.products)) it.products = [];
+  return it._pf;
+}
+/* Термин за PostgREST or=(…): запетая, скоби, звезда и кавички са СИНТАКСИС
+   там. Оставени в термина, те разцепват списъка и заявката или гърми, или —
+   по-лошо — тихо търси нещо друго. */
+function llCatTerm(q){
+  return String(q == null ? '' : q).replace(/[,()*"\\]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+/* Един и същ баркод се чете различно според формата: UPC-A (12 цифри) идва
+   като 12 или като EAN-13 с водеща нула. В каталога към 21.09.2026 има и
+   двете форми (186 с 12 цифри, 204 с 13 и водеща 0) без нито едно
+   припокриване, затова търсенето по двете форми не може да създаде фалшив
+   дубликат — само хваща баркода, който иначе би бил „няма такъв". */
+function llEanVariants(code){
+  var c = String(code == null ? '' : code).replace(/\D/g, '');
+  if(!c) return [];
+  var out = [c];
+  if(c.length === 12) out.push('0' + c);
+  if(c.length === 13 && c.charAt(0) === '0') out.push(c.slice(1));
+  return out;
+}
+/* Палетът е физическата единица: „два пъти на един палет" значи в който и да
+   е ред със същия обект и номер. Руло/насип — само самият ред. */
+function llSamePalletRows(i){
+  var it = llDraft.items[i];
+  if(!it) return [];
+  if(it.kind !== 'pallet' || it.pallet_no == null) return [it];
+  return llDraft.items.filter(function(x){
+    return x.kind === 'pallet' && x.pallet_no != null &&
+      Number(x.pallet_no) === Number(it.pallet_no) &&
+      (x.store_name || '') === (it.store_name || '');
+  });
+}
+
+/* ─── Разгъване на блока ────────────────────────────────── */
+function llToggleProducts(i){
+  var it = llDraft && llDraft.items[i];
+  if(!it) return;
+  it._prodOpen = !it._prodOpen;
+  renderLoadingLists();
+  if(it._prodOpen) llFocusPf(i, 'sap');
+}
+function llFocusPf(i, f){
+  var el = document.getElementById('ll-pf-' + f + '-' + i);
+  if(el && el.focus) el.focus();
+}
+
+/* ─── Полетата на формата ───────────────────────────────── */
+/* Пише в it._pf БЕЗ пре-рендиране: пре-рендиране при всеки клавиш би взело
+   фокуса от полето, в което човекът пише. */
+function llPfInput(i, field, val){
+  var pf = llPfOf(i);
+  if(!pf) return;
+  pf[field] = val;
+  if(field === 'sap_code'){
+    /* Промененият код вече не е този, който е избран от каталога. */
+    pf._picked = false; pf._inCat = null;
+    llAcSchedule(i, val);
+  }
+  if(field === 'product_name' && !pf._picked) pf._inCat = null;
+}
+function llPfKey(i, field, ev){
+  if(!ev || (ev.key !== 'Enter' && ev.keyCode !== 13)) return;
+  if(ev.preventDefault) ev.preventDefault();
+  if(field === 'sap_code'){
+    /* Една подсказка — Enter я взима. Иначе фокусът отива към бройките и
+       кодът ще се провери точно при добавяне. */
+    var r = llAcResults[i] || [];
+    if(r.length === 1){ llAcPick(i, 0); return; }
+    llFocusPf(i, 'qty');
+    return;
+  }
+  if(field === 'qty' || field === 'cartons') llAddProduct(i);
+}
+
+/* ─── Автодопълване от каталога ─────────────────────────── */
+function llAcSchedule(i, val){
+  if(llAcTimer) clearTimeout(llAcTimer);
+  var term = llCatTerm(val);
+  if(term.length < 3){ llAcResults[i] = []; llAcRender(i); return; }
+  llAcTimer = setTimeout(function(){ llAcTimer = null; llAcFetch(i, term); }, 300);
+}
+function llAcFetch(i, term){
+  var seq = ++llAcSeq;
+  var t = encodeURIComponent(term);
+  return sbGet('product_catalog',
+    'or=(sap_code.ilike.' + t + '*,product_name.ilike.*' + t + '*)' +
+    '&select=sap_code,product_name,default_unit&order=sap_code.asc&limit=8'
+  ).then(function(rows){
+    /* По-стар отговор, дошъл след по-нов, не бива да презапише списъка —
+       иначе подсказките отговарят на „шуро", когато в полето пише „шуроп". */
+    if(seq !== llAcSeq) return;
+    llAcResults[i] = Array.isArray(rows) ? rows : [];
+    llAcRender(i);
+  });
+}
+function llAcRender(i){
+  var box = document.getElementById('ll-pf-ac-' + i);
+  if(!box) return;
+  var r = llAcResults[i] || [];
+  if(!r.length){ box.innerHTML = ''; box.style.display = 'none'; return; }
+  box.innerHTML = r.map(function(p, k){
+    return '<div data-i="'+i+'" data-k="'+k+'" onmousedown="event.preventDefault()" onclick="llAcPick(+this.dataset.i,+this.dataset.k)" '+
+      'style="padding:7px 9px;border-bottom:1px solid #f1f5f9;cursor:pointer;font-size:12.5px;">'+
+      '<b style="font-family:DM Mono,monospace;">'+esc(p.sap_code)+'</b> · '+esc(p.product_name)+
+      (p.default_unit ? ' <span style="color:#94a3b8;">('+esc(p.default_unit)+')</span>' : '')+'</div>';
+  }).join('');
+  box.style.display = 'block';
+}
+/* Избор на подсказка: попълва и трите полета И паметта, после фокус в
+   бройките — там е следващото, което човекът трябва да въведе. */
+function llAcPick(i, k){
+  var p = (llAcResults[i] || [])[k];
+  var pf = llPfOf(i);
+  if(!p || !pf) return;
+  llPfFromCatalog(i, p);
+  llAcResults[i] = [];
+  llAcRender(i);
+  llFocusPf(i, 'qty');
+}
+function llPfFromCatalog(i, p){
+  var pf = llPfOf(i);
+  if(!pf) return;
+  pf.sap_code = p.sap_code || '';
+  pf.product_name = p.product_name || '';
+  pf.unit = p.default_unit || '';
+  pf._picked = true; pf._inCat = true;
+  [['sap', pf.sap_code], ['name', pf.product_name], ['unit', pf.unit]].forEach(function(x){
+    var el = document.getElementById('ll-pf-' + x[0] + '-' + i);
+    if(el) el.value = x[1];
+  });
+}
+
+/* ─── Добавяне ──────────────────────────────────────────── */
+/* Кодът, въведен на ръка (без избрана подсказка), се проверява ТОЧНО срещу
+   каталога. Намерен — името и мярката идват оттам. Не е намерен — складът НЕ
+   се спира: иска се име на ръка и редът се маркира „не е в каталога".
+   Проверката е при добавяне, не при писане, за да няма заявка на всеки клавиш. */
+function llAddProduct(i){
+  var it = llDraft && llDraft.items[i];
+  var pf = llPfOf(i);
+  if(!it || !pf) return Promise.resolve(false);
+  var code = String(pf.sap_code || '').trim();
+  if(!code){ toast('Въведи SAP код','#dc2626'); llFocusPf(i, 'sap'); return Promise.resolve(false); }
+  var qty = llParseQty(pf.qty);
+  if(qty == null){ toast('Бройките трябва да са число по-голямо от 0','#dc2626'); llFocusPf(i, 'qty'); return Promise.resolve(false); }
+  var cartons = llParseCartons(pf.cartons);
+  if(cartons === undefined){ toast('Кашоните са цяло число','#dc2626'); llFocusPf(i, 'ctn'); return Promise.resolve(false); }
+
+  var ready = pf._picked
+    ? Promise.resolve(true)
+    : sbGet('product_catalog', 'sap_code=eq.' + encodeURIComponent(code) +
+        '&select=sap_code,product_name,default_unit&limit=1').then(function(rows){
+        var hit = Array.isArray(rows) && rows.length ? rows[0] : null;
+        if(hit){
+          pf.product_name = hit.product_name || pf.product_name;
+          pf.unit = hit.default_unit || pf.unit;
+          pf._inCat = true;
+          return true;
+        }
+        pf._inCat = false;
+        return true;
+      });
+
+  return ready.then(function(){
+    var name = String(pf.product_name || '').trim();
+    if(!name){
+      toast('Кодът го няма в каталога — въведи име на ръка','#d97706');
+      llFocusPf(i, 'name');
+      return false;
+    }
+    /* Един и същ код два пъти на един палет е ПОЗВОЛЕН — различни партиди
+       съществуват. Но двойното сканиране по погрешка е много по-често,
+       затова се казва на глас. */
+    var dup = llSamePalletRows(i).some(function(r){
+      return (r.products || []).some(function(p){ return String(p.sap_code) === code; });
+    });
+    it.products.push({
+      sap_code: code, product_name: name, unit: String(pf.unit || '').trim(),
+      qty: qty, cartons: cartons, _inCat: pf._inCat !== false
+    });
+    if(dup) toast('⚠️ ' + code + ' вече е на този палет — добавен отново (друга партида?)','#d97706');
+    it._pf = llEmptyPf();
+    it._prodOpen = true;
+    llAcResults[i] = [];
+    renderLoadingLists();
+    llFocusPf(i, 'sap');
+    return true;
+  });
+}
+function llRemoveProduct(i, j){
+  var it = llDraft && llDraft.items[i];
+  if(!it || !it.products || !it.products[j]) return;
+  it.products.splice(j, 1);
+  renderLoadingLists();
+}
+
+/* ─── „Вземи артикулите" от Стока на път ─────────────────
+   Документът от снимката може да е остарял — затова копирането е с бутон, а
+   не автоматично при отмятане на документа: складът решава дали съдържанието
+   от 01.09 още е вярно. Документ, разстлан върху няколко палета, НЕ се
+   разпределя сам — копира се в този ред и излишното се маха на ръка. */
+function llTakeTransitProducts(i){
+  var it = llDraft && llDraft.items[i];
+  if(!it || !it.purchase_doc) return Promise.resolve(0);
+  return sbGet('goods_transit', 'purchase_doc=eq.' + encodeURIComponent(it.purchase_doc) +
+    '&store_name=eq.' + encodeURIComponent(it.store_name || '') +
+    '&select=material_code,material_name,ordered_qty,unit,position').then(function(rows){
+    var list = (Array.isArray(rows) ? rows : []).slice().sort(function(a, b){
+      /* position е ТЕКСТ в goods_transit — „10" < „2" лексикографски. */
+      return (parseInt(a.position, 10) || 0) - (parseInt(b.position, 10) || 0);
+    });
+    if(!list.length){ toast('Документът няма артикули в Стока на път','#d97706'); return 0; }
+    if(!Array.isArray(it.products)) it.products = [];
+    var n = 0;
+    list.forEach(function(r){
+      var q = llParseQty(r.ordered_qty);
+      if(!r.material_code || q == null) return;
+      it.products.push({ sap_code: String(r.material_code), product_name: r.material_name || '',
+                         unit: r.unit || '', qty: q, cartons: null, _inCat: true });
+      n++;
+    });
+    it._prodOpen = true;
+    /* Документ върху няколко реда (напр. палети 1-3) НЕ се разпределя сам:
+       целият списък отива в този ред. Казва се на глас, иначе описът на
+       палет 1 ще носи стоката и на 2 и 3. */
+    var docKey = llItemDocKey(it), rowsOfDoc = llDraft.items.filter(function(x){
+      return llItemDocKey(x) === docKey && (x.store_name || '') === (it.store_name || '');
+    }).length;
+    if(rowsOfDoc > 1){
+      toast('📦 Взети ' + n + ' артикула — документът е на ' + rowsOfDoc + ' реда, махни от този каквото не е на него','#d97706');
+    } else {
+      toast('📦 Взети ' + n + ' артикула от документ ' + it.purchase_doc);
+    }
+    renderLoadingLists();
+    return n;
+  });
+}
+
+/* ─── Блокът в редактора ────────────────────────────────── */
+var LL_PF_IN = 'border:1px solid #cbd5e1;border-radius:6px;padding:7px 8px;font-size:13px;';
+function llProductsBlockHtml(it, i){
+  var pr = it.products || [];
+  var open = !!it._prodOpen;
+  var h = '<div style="padding:4px 0 6px;">'+
+    '<button data-i="'+i+'" onclick="llToggleProducts(+this.dataset.i)" style="border:none;background:none;color:#4f46e5;font-size:12px;font-weight:600;cursor:pointer;padding:2px 0;">'+
+      (open ? '▾' : '▸')+' Артикули ('+pr.length+')'+
+      (pr.length ? ' <span style="color:#94a3b8;font-weight:400;">· '+llFmtQty(llProdSum(pr))+'</span>' : '')+
+    '</button>';
+  if(!open) return h + '</div>';
+
+  var pf = it._pf || llEmptyPf();
+  h += '<div style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:9px;margin-top:4px;">';
+  /* Формата — flex-wrap, защото складът е на телефон: на тесен екран полетата
+     слизат едно под друго, вместо да изтичат вдясно. */
+  h += '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;">'+
+    '<button data-i="'+i+'" onclick="llOpenScanner(+this.dataset.i)" style="border:none;background:#0f172a;color:#fff;border-radius:6px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;">📷 Сканирай</button>'+
+    '<div style="position:relative;flex:1 1 130px;min-width:120px;">'+
+      '<input id="ll-pf-sap-'+i+'" data-i="'+i+'" value="'+llAttr(pf.sap_code)+'" placeholder="SAP код или име" autocomplete="off" '+
+        'oninput="llPfInput(+this.dataset.i,\'sap_code\',this.value)" onkeydown="llPfKey(+this.dataset.i,\'sap_code\',event)" '+
+        'style="'+LL_PF_IN+'width:100%;box-sizing:border-box;font-family:DM Mono,monospace;">'+
+      '<div id="ll-pf-ac-'+i+'" style="display:none;position:absolute;left:0;right:0;top:100%;z-index:20;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 16px rgba(0,0,0,.12);max-height:260px;overflow-y:auto;"></div>'+
+    '</div>'+
+    '<input id="ll-pf-name-'+i+'" data-i="'+i+'" value="'+llAttr(pf.product_name)+'" placeholder="Име" '+
+      'oninput="llPfInput(+this.dataset.i,\'product_name\',this.value)" style="'+LL_PF_IN+'flex:2 1 180px;min-width:150px;">'+
+    '<input id="ll-pf-unit-'+i+'" data-i="'+i+'" value="'+llAttr(pf.unit)+'" placeholder="Мярка" '+
+      'oninput="llPfInput(+this.dataset.i,\'unit\',this.value)" style="'+LL_PF_IN+'width:64px;">'+
+    '<input id="ll-pf-qty-'+i+'" data-i="'+i+'" value="'+llAttr(pf.qty)+'" placeholder="Бройки *" inputmode="decimal" '+
+      'oninput="llPfInput(+this.dataset.i,\'qty\',this.value)" onkeydown="llPfKey(+this.dataset.i,\'qty\',event)" style="'+LL_PF_IN+'width:84px;">'+
+    '<input id="ll-pf-ctn-'+i+'" data-i="'+i+'" value="'+llAttr(pf.cartons)+'" placeholder="Кашони" inputmode="numeric" '+
+      'oninput="llPfInput(+this.dataset.i,\'cartons\',this.value)" onkeydown="llPfKey(+this.dataset.i,\'cartons\',event)" style="'+LL_PF_IN+'width:74px;">'+
+    '<button data-i="'+i+'" onclick="llAddProduct(+this.dataset.i)" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">➕ Добави</button>'+
+    (it.purchase_doc
+      ? '<button data-i="'+i+'" onclick="llTakeTransitProducts(+this.dataset.i)" title="Копира артикулите на документа от Стока на път (снимка) — после се коригират на ръка" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#6d28d9;border-radius:6px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer;">📄 Вземи артикулите</button>'
+      : '')+
+    '</div>';
+
+  if(pr.length){
+    /* Кодовете, които се повтарят на палета — за маркера „×2". */
+    var seen = {};
+    llSamePalletRows(i).forEach(function(r){
+      (r.products || []).forEach(function(p){ seen[p.sap_code] = (seen[p.sap_code] || 0) + 1; });
+    });
+    h += '<div style="overflow-x:auto;margin-top:8px;"><table data-ll-products="'+i+'" style="width:100%;border-collapse:collapse;font-size:12.5px;">'+
+      '<tr style="color:#64748b;text-align:left;"><th style="padding:4px 6px;">SAP код</th><th style="padding:4px 6px;">Име</th>'+
+      '<th style="padding:4px 6px;">Мярка</th><th style="padding:4px 6px;text-align:right;">Бройки</th>'+
+      '<th style="padding:4px 6px;text-align:right;">Кашони</th><th></th></tr>';
+    pr.forEach(function(p, j){
+      h += '<tr style="border-top:1px solid #e2e8f0;">'+
+        '<td style="padding:4px 6px;font-family:DM Mono,monospace;white-space:nowrap;">'+esc(p.sap_code)+
+          (seen[p.sap_code] > 1 ? ' <span title="Същият код е на палета повече от веднъж" style="color:#d97706;font-weight:700;">×'+seen[p.sap_code]+'</span>' : '')+'</td>'+
+        '<td style="padding:4px 6px;">'+esc(p.product_name)+
+          (p._inCat === false ? ' <span data-not-in-catalog="1" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:20px;padding:0 6px;font-size:10px;font-weight:700;white-space:nowrap;">не е в каталога</span>' : '')+'</td>'+
+        '<td style="padding:4px 6px;color:#64748b;">'+esc(p.unit || '—')+'</td>'+
+        '<td style="padding:4px 6px;text-align:right;font-weight:600;">'+llFmtQty(p.qty)+'</td>'+
+        '<td style="padding:4px 6px;text-align:right;">'+(p.cartons != null ? p.cartons : '—')+'</td>'+
+        '<td style="padding:4px 6px;text-align:right;"><button data-i="'+i+'" data-j="'+j+'" onclick="llRemoveProduct(+this.dataset.i,+this.dataset.j)" title="Махни артикула" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:4px;padding:1px 7px;font-size:11px;cursor:pointer;">✕</button></td>'+
+        '</tr>';
+    });
+    h += '</table></div>';
+  }
+  h += '</div></div>';
+  return h;
+}
+
+/* ─── Скенер (html5-qrcode) ─────────────────────────────
+   Зарежда се САМО при първото „Сканирай" — 375 KB и достъп до камера нямат
+   работа в сесия, в която никой не сканира. Образецът е SheetJS в supply.js,
+   плюс integrity: скрипт с достъп до камерата се взима само ако е байт в байт
+   този, който е проверен (SRI от cdnjs за 2.3.8).
+
+   ГЛОБАЛИ ОТ БИБЛИОТЕКАТА (не от този файл): __Html5QrcodeLibrary__,
+   Html5Qrcode, Html5QrcodeScanner, Html5QrcodeSupportedFormats,
+   Html5QrcodeScannerState, Html5QrcodeScanType — шест имена, сверени на
+   21.09.2026 с 0 колизии в портала. Тукашният код ползва само Html5Qrcode и
+   Html5QrcodeSupportedFormats. */
+var LL_SCAN_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js';
+var LL_SCAN_SRI = 'sha512-r6rDA7W6ZeQhvl8S7yRVQUKVHdexq+GAlNkNNqVC7YyIV+NwqCTJe2hDWCiffTyRNOeGEzRRJ9ifvRm/HCzGYg==';
+
+function llLoadScanLib(){
+  if(window.Html5Qrcode) return Promise.resolve(true);
+  /* Второ натискане, докато първото още зарежда, чака СЪЩОТО зареждане —
+     иначе скриптът се вмъква два пъти. */
+  if(llScanLibPromise) return llScanLibPromise;
+  llScanLibPromise = new Promise(function(resolve, reject){
+    var s = document.createElement('script');
+    s.src = LL_SCAN_LIB;
+    s.integrity = LL_SCAN_SRI;
+    s.crossOrigin = 'anonymous';
+    s.referrerPolicy = 'no-referrer';
+    s.onload = function(){ resolve(true); };
+    s.onerror = function(){
+      /* Провалът НЕ остава кеширан — следващото натискане опитва наново
+         (мрежата на склада идва и си отива). */
+      llScanLibPromise = null;
+      reject(new Error('scan lib'));
+    };
+    document.head.appendChild(s);
+  });
+  return llScanLibPromise;
+}
+
+function llOpenScanner(i){
+  if(!llDraft || !llDraft.items[i]) return;
+  llLoadScanLib().then(function(){
+    llScanShowModal(i);
+  }, function(){
+    toast('Скенерът не се зареди — въведи SAP кода на ръка','#dc2626');
+    llFocusPf(i, 'sap');
+  });
+}
+function llScanShowModal(i){
+  llScanClose();
+  var m = document.createElement('div');
+  m.id = 'll-scan-modal';
+  m.style.cssText = 'position:fixed;inset:0;z-index:400;background:rgba(15,23,42,.85);display:flex;flex-direction:column;align-items:center;justify-content:flex-start;padding:14px;overflow-y:auto;';
+  m.innerHTML =
+    '<div style="width:100%;max-width:480px;background:#fff;border-radius:12px;padding:12px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
+        '<div style="font-size:15px;font-weight:700;">📷 Сканиране — поредно</div>'+
+        '<button onclick="llScanClose()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 16px;font-size:14px;font-weight:600;cursor:pointer;">Готово</button>'+
+      '</div>'+
+      '<div id="ll-scan-view" style="width:100%;min-height:220px;background:#000;border-radius:8px;overflow:hidden;"></div>'+
+      '<div id="ll-scan-panel" style="margin-top:10px;font-size:13px;color:#475569;">Насочи камерата към баркода.</div>'+
+    '</div>';
+  document.body.appendChild(m);
+  llScan = { row: i, inst: null, pending: null, choices: null, busy: false, last: '', lastAt: 0 };
+
+  var fmts;
+  try {
+    var F = window.Html5QrcodeSupportedFormats;
+    /* Само линейните кодове по стоката — по-бързо и без фалшиви попадения от
+       QR кодове по опаковките. */
+    fmts = F ? [F.EAN_13, F.EAN_8, F.UPC_A, F.UPC_E, F.CODE_128] : undefined;
+  } catch(e){ fmts = undefined; }
+  try {
+    var inst = new window.Html5Qrcode('ll-scan-view', {
+      formatsToSupport: fmts,
+      /* Родният BarcodeDetector (Chrome на Android) чете EAN много по-добре от
+         JS декодера; където го няма, библиотеката пада към своя. */
+      experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+      verbose: false
+    });
+    llScan.inst = inst;
+    inst.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 140 } },
+      function(text){ llScanOnRead(text); }, function(){ /* кадър без код — нормално */ }
+    ).catch(function(){
+      llScanPanel('<span style="color:#dc2626;font-weight:600;">Няма достъп до камерата.</span> Разреши камерата в браузъра или въведи кода на ръка.');
+    });
+  } catch(e){
+    llScanPanel('<span style="color:#dc2626;font-weight:600;">Скенерът не тръгна.</span> Въведи кода на ръка.');
+  }
+}
+function llScanPanel(html){
+  var p = document.getElementById('ll-scan-panel');
+  if(p) p.innerHTML = html;
+}
+/* Камерата вижда един и същ баркод в няколко поредни кадъра. Без паузата
+   едно физическо сканиране би добавило артикула пет пъти. */
+function llScanOnRead(text){
+  if(!llScan || llScan.busy || llScan.pending || llScan.choices) return;
+  var now = Date.now();
+  if(text === llScan.last && now - llScan.lastAt < 1500) return;
+  llScan.last = text; llScan.lastAt = now;
+  llScan.busy = true;
+  try { if(llScan.inst && llScan.inst.pause) llScan.inst.pause(true); } catch(e){}
+  llHandleScannedEan(llScan.row, text).then(function(){ if(llScan) llScan.busy = false; });
+}
+function llScanResume(){
+  if(!llScan) return;
+  llScan.pending = null; llScan.choices = null;
+  try { if(llScan.inst && llScan.inst.resume) llScan.inst.resume(); } catch(e){}
+  llScanPanel('Насочи камерата към следващия баркод.');
+}
+function llScanClose(){
+  var s = llScan;
+  llScan = null;
+  if(s && s.inst){
+    try {
+      var st = s.inst.stop();
+      if(st && st.then) st.then(function(){ try { s.inst.clear(); } catch(e){} }, function(){});
+    } catch(e){}
+  }
+  var m = document.getElementById('ll-scan-modal');
+  if(m && m.parentNode) m.parentNode.removeChild(m);
+}
+
+/* ОБРАБОТКАТА НА ПРОЧЕТЕН КОД — единствената част от скенера, която се
+   тества: камерата и библиотеката не съществуват в jsdom.
+     0 резултата → „Няма такъв баркод", скенерът се затваря и фокусът е в
+                   „SAP код": артикулът иска човешко внимание;
+     1 резултат  → попълва кода/името/мярката и пита за бройки в модала;
+     2+          → малък избор. */
+function llHandleScannedEan(i, code){
+  var vars = llEanVariants(code);
+  if(!vars.length){
+    toast('Прочетеният код не е баркод','#d97706');
+    llScanResume();
+    return Promise.resolve(0);
+  }
+  var q = vars.length === 1
+    ? 'ean_code=eq.' + encodeURIComponent(vars[0])
+    : 'ean_code=in.(' + vars.map(encodeURIComponent).join(',') + ')';
+  return sbGet('product_catalog', q + '&select=sap_code,product_name,default_unit&limit=2').then(function(rows){
+    var r = Array.isArray(rows) ? rows : [];
+    if(!r.length){
+      toast('Няма такъв баркод в каталога','#d97706');
+      llScanClose();
+      var pf = llPfOf(i);
+      if(pf){ pf._picked = false; pf._inCat = null; }
+      llFocusPf(i, 'sap');
+      return 0;
+    }
+    if(r.length === 1){ llScanOffer(i, r[0]); return 1; }
+    if(llScan) llScan.choices = r;
+    llScanPanel('<div style="font-weight:600;margin-bottom:6px;">Баркодът съвпада с '+r.length+' артикула — избери:</div>'+
+      r.map(function(p, k){
+        return '<button data-k="'+k+'" onclick="llScanPick(+this.dataset.k)" style="display:block;width:100%;text-align:left;border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:8px 10px;margin-bottom:5px;font-size:13px;cursor:pointer;">'+
+          '<b style="font-family:DM Mono,monospace;">'+esc(p.sap_code)+'</b> · '+esc(p.product_name)+'</button>';
+      }).join('')+
+      '<button onclick="llScanResume()" style="border:none;background:none;color:#64748b;font-size:12px;cursor:pointer;">Пропусни</button>');
+    return r.length;
+  });
+}
+function llScanPick(k){
+  if(!llScan || !llScan.choices) return;
+  var p = llScan.choices[k];
+  llScan.choices = null;
+  if(p) llScanOffer(llScan.row, p);
+}
+/* Намереният артикул влиза във формата на реда (it._pf) — ЕДНО място за
+   състоянието, независимо дали кодът е дошъл от камерата или от клавиатурата.
+   Модалът само показва бройките и „Добави". */
+function llScanOffer(i, p){
+  llPfFromCatalog(i, p);
+  var pf = llPfOf(i);
+  if(llScan) llScan.pending = p;
+  var qid = 'll-scan-qty', cid = 'll-scan-ctn';
+  llScanPanel(
+    '<div style="font-weight:700;color:#0f172a;margin-bottom:6px;"><span style="font-family:DM Mono,monospace;">'+esc(p.sap_code)+'</span> · '+esc(p.product_name)+'</div>'+
+    '<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">'+
+      '<input id="'+qid+'" data-i="'+i+'" value="'+llAttr(pf ? pf.qty : '')+'" placeholder="Бройки *" inputmode="decimal" '+
+        'oninput="llPfInput(+this.dataset.i,\'qty\',this.value)" onkeydown="llScanKey(event)" style="'+LL_PF_IN+'width:110px;font-size:16px;">'+
+      '<input id="'+cid+'" data-i="'+i+'" value="'+llAttr(pf ? pf.cartons : '')+'" placeholder="Кашони" inputmode="numeric" '+
+        'oninput="llPfInput(+this.dataset.i,\'cartons\',this.value)" onkeydown="llScanKey(event)" style="'+LL_PF_IN+'width:90px;font-size:16px;">'+
+      '<button onclick="llScanAdd()" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:9px 16px;font-size:14px;font-weight:600;cursor:pointer;">➕ Добави</button>'+
+      '<button onclick="llScanResume()" style="border:1px solid #e2e8f0;background:#fff;border-radius:6px;padding:9px 12px;font-size:13px;cursor:pointer;">Пропусни</button>'+
+    '</div>'+
+    '<div style="font-size:11.5px;color:#94a3b8;margin-top:6px;">Мярка: '+esc(p.default_unit || '—')+'</div>');
+  var q = document.getElementById(qid);
+  if(q && q.focus) q.focus();
+}
+function llScanKey(ev){
+  if(!ev || (ev.key !== 'Enter' && ev.keyCode !== 13)) return;
+  if(ev.preventDefault) ev.preventDefault();
+  llScanAdd();
+}
+/* „Добави" в модала е СЪЩИЯТ llAddProduct() — валидацията е една. След успех
+   скенерът продължава (режим „поредно"); при провал модалът остава, за да се
+   поправят бройките. */
+function llScanAdd(){
+  if(!llScan) return Promise.resolve(false);
+  var i = llScan.row;
+  return llAddProduct(i).then(function(okAdd){
+    if(!okAdd){
+      var q = document.getElementById('ll-scan-qty');
+      if(q && q.focus) q.focus();
+      return false;
+    }
+    llScanResume();
+    return true;
+  });
+}
+
 function llEditorHtml(){
   if(!llDraft) return '';
   var isNew = !llCurrentId;
@@ -1414,6 +2078,10 @@ function llEditorHtml(){
     '<div class="pg-title" style="margin:0;">'+(isNew?'➕ Нов товарен лист':'✏️ Редакция на товарен лист')+'</div>'+
     '<button onclick="llBackToList()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">← Назад</button>'+
     '</div>';
+  if(llCurrentId && llIncompleteSaves[llCurrentId]){
+    h += '<div data-ll-incomplete="1" style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:13px;font-weight:600;">'+
+      '⚠️ Последният запис не е довършен — артикулите в базата може да не отговарят на екрана. Натисни „💾 Запази черновата" пак.</div>';
+  }
 
   /* а) Заглавие */
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:12px;">'+
@@ -1425,7 +2093,10 @@ function llEditorHtml(){
 
   /* б) Чакащи стокови документи */
   h += '<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:12px;">'+
-    '<div style="font-size:13px;font-weight:700;color:#5b21b6;margin-bottom:8px;">📄 Чакащи стокови документи ('+llPendingDocs.length+')</div>';
+    /* „Стока на път" е МЕСЕЧНА снимка, не оперативен източник. Датата стои в
+       заглавието, за да не изглежда документ от 25.08 като днешен. */
+    '<div style="font-size:13px;font-weight:700;color:#5b21b6;margin-bottom:8px;">📄 Документи от Стока на път ('+llPendingDocs.length+')'+
+      (llTransitSnapshot ? ' <span style="font-weight:400;color:#7c3aed;">· снимка към '+llFmtStamp(llTransitSnapshot)+'</span>' : '')+'</div>';
   if(!llPendingDocs.length){
     h += '<div style="font-size:12px;color:#7c3aed;">Няма чакащи документи от този склад.</div>';
   } else {
@@ -1461,7 +2132,7 @@ function llEditorHtml(){
   } else {
     h += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">'+
       '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">#</th><th style="padding:3px 6px;">Вид</th>'+
-      '<th style="padding:3px 6px;">№ / от</th><th style="padding:3px 6px;">Стокова №</th>'+
+      '<th style="padding:3px 6px;">№ / от</th><th style="padding:3px 6px;">Изходящ №</th>'+
       '<th style="padding:3px 6px;">Изчиства</th><th style="padding:3px 6px;">Обект</th>'+
       '<th style="padding:3px 6px;">Коментар склад</th>'+
       '<th style="padding:3px 6px;" title="С този палет тръгва само част от документа">Частично</th>'+
@@ -1497,7 +2168,8 @@ function llEditorHtml(){
           '<button data-i="'+i+'" onclick="llMoveRow(+this.dataset.i,-1)" title="Нагоре" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;">↑</button>'+
           '<button data-i="'+i+'" onclick="llMoveRow(+this.dataset.i,1)" title="Надолу" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">↓</button>'+
           '<button data-i="'+i+'" onclick="llRemoveRow(+this.dataset.i)" title="Махни реда" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">✕</button>'+
-        '</td></tr>';
+        '</td></tr>'+
+        '<tr data-ll-prodrow="'+i+'"><td></td><td colspan="8" style="padding:0 6px 6px;">'+llProductsBlockHtml(it, i)+'</td></tr>';
     });
     h += '</table></div>';
   }
@@ -1584,7 +2256,7 @@ function llWriteItems(listId){
       llBackToList();
       return;
     }
-    if(!fresh.length){ llFinishSave(listId); return; }
+    if(!fresh.length){ llWriteProducts(listId); return; }
     /* Позициите на новите се смятат от ЦЕЛИЯ списък, не от подсписъка. */
     var rows = [];
     llDraft.items.forEach(function(it, i){
@@ -1601,9 +2273,101 @@ function llWriteItems(listId){
         llBackToList();
         return;
       }
-      llFinishSave(listId);
+      llWriteProducts(listId);
     });
   });
+}
+/* ─── ЗАПИС НА АРТИКУЛИТЕ ──────────────────────────────────
+   Вика се СЛЕД като редовете са записани. Два проблема, които определят реда:
+
+   1) Новите редове се вмъкват със sbPost (return=minimal) и id-тата им НЕ се
+      връщат, а артикулът иска item_id. Затова редовете на листа се четат
+      наново (id, position) и се съпоставят по position: тя е 1..N от екрана
+      и е уникална в рамките на листа. Две с една позиция значи, че някъде
+      стои ред, който не е на екрана — това спира записа на глас, вместо да
+      закачи артикулите за грешния палет.
+
+   2) Първо ВМЪКВАНЕ, после триене на старите — не обратно. Складът е на
+      телефон с мрежа, която идва и си отива: „изтрий, после вмъкни" при
+      паднала връзка по средата оставя палета БЕЗ опис. Обратният ред в
+      най-лошия случай дава дубликат, който се вижда и се оправя със следващ
+      запис. Старите се различават от новите по created_at на СЪРВЪРА: всички
+      редове от едно INSERT получават едно и също now() (началото на
+      транзакцията), а старите са от по-ранна транзакция. Часовникът на
+      телефона не участва.
+
+   Провалът НЕ връща към списъка: черновата остава отворена с артикулите в
+   паметта, редовете вече имат id, и „Запази" пак довършва записа.
+
+   ЗА В2: всеки запис на черновата ПРЕПИСВА артикулите (нови id-та, стари
+   изтрити). Безопасно е само защото received_qty не може да съществува върху
+   чернова — обектът не вижда черновите. Щом В2 започне да пише received_qty,
+   то трябва да става САМО след status='sent', иначе следващото „Запази" го
+   изтрива мълчаливо. */
+function llWriteProducts(listId){
+  var anyNow = llDraft.items.some(function(it){ return (it.products || []).length; });
+  /* Лист, който не ползва артикули нито сега, нито преди — нула заявки. Така
+     записът на всички стари листи остава точно какъвто беше. */
+  if(!anyNow && !llDraft._hadProducts){ llFinishSave(listId); return Promise.resolve(true); }
+
+  return sbGet('loading_list_items','list_id=eq.'+listId+'&select=id,position').then(function(rows){
+    var byPos = {}, dup = false;
+    (Array.isArray(rows) ? rows : []).forEach(function(r){
+      if(byPos[r.position]) dup = true;
+      byPos[r.position] = r.id;
+    });
+    var noId = 0;
+    llDraft.items.forEach(function(it, i){
+      var id = byPos[i + 1];
+      if(id) it.id = id; else noId++;
+    });
+    if(dup) return llProductsFailed(listId, 'в листа има два реда с една и съща позиция');
+    if(noId) return llProductsFailed(listId, noId + ' реда не бяха намерени след записа');
+
+    var ids = llDraft.items.map(function(it){ return it.id; });
+    var out = [];
+    llDraft.items.forEach(function(it){
+      (it.products || []).forEach(function(pr, j){
+        out.push({
+          item_id: it.id, position: j + 1,
+          sap_code: pr.sap_code, product_name: pr.product_name,
+          unit: pr.unit || null, qty: pr.qty,
+          cartons: (pr.cartons === null || pr.cartons === undefined || pr.cartons === '') ? null : pr.cartons
+        });
+      });
+    });
+    var mine = 'item_id=in.(' + ids.join(',') + ')';
+
+    if(!out.length){
+      /* Всички артикули са махнати на екрана — махат се и в базата. */
+      return sbDelete('loading_list_products', mine).then(function(d){
+        if(!d.ok) return llProductsFailed(listId, 'старите артикули НЕ бяха изтрити: ' + sbErrMsg(d));
+        llFinishSave(listId);
+        return true;
+      });
+    }
+    return sbPostReturn('loading_list_products', out).then(function(res){
+      if(!res.ok || !res.row) return llProductsFailed(listId, 'артикулите НЕ бяха записани: ' + sbErrMsg(res));
+      var t = res.row.created_at;
+      /* Без часа на новите няма как да се различат от старите — триене „на
+         сляпо" би изтрило и тях. По-добре дубликат, отколкото празен палет. */
+      if(!t) return llProductsFailed(listId, 'сървърът не върна час на записа — старите артикули НЕ са изтрити');
+      return sbDelete('loading_list_products', mine + '&created_at=lt.' + encodeURIComponent(t)).then(function(d){
+        if(!d.ok) return llProductsFailed(listId, 'старите артикули НЕ бяха изтрити — има дублирани редове: ' + sbErrMsg(d));
+        llFinishSave(listId);
+        return true;
+      });
+    });
+  });
+}
+function llProductsFailed(listId, why){
+  llIncompleteSaves[listId] = true;
+  console.error('llWriteProducts: ' + why);
+  toast('⚠️ Редовете са записани, но ' + why + '. Натисни „Запази" пак.', '#dc2626');
+  /* Остава в редактора — виж коментара над llWriteProducts. */
+  llView = 'edit';
+  renderLoadingLists();
+  return false;
 }
 function llFinishSave(listId){
   delete llIncompleteSaves[listId];
@@ -1663,6 +2427,37 @@ function llSaveWarehouseComment(itemId, val){
   });
 }
 
+/* ─── АРТИКУЛИТЕ — САМО ЧЕТЕНЕ ────────────────────────────────
+   Един изглед за прегледа на склада и за картата на обекта. Две копия щяха
+   да се разминат по колоните — а обектът и складът трябва да гледат ЕДНА
+   и съща таблица, когато спорят за един палет. */
+function llProductsTableHtml(products){
+  var pr = products || [];
+  if(!pr.length) return '<div style="font-size:12px;color:#94a3b8;padding:4px 0;">Без артикули.</div>';
+  var h = '<table data-ll-prodlist="1" style="width:100%;border-collapse:collapse;font-size:12px;margin-top:4px;">'+
+    '<tr style="color:#64748b;text-align:left;"><th style="padding:3px 6px;">SAP код</th><th style="padding:3px 6px;">Име</th>'+
+    '<th style="padding:3px 6px;">Мярка</th><th style="padding:3px 6px;text-align:right;">Бройки</th>'+
+    '<th style="padding:3px 6px;text-align:right;">Кашони</th></tr>';
+  pr.forEach(function(p){
+    h += '<tr style="border-top:1px solid #f1f5f9;">'+
+      '<td style="padding:3px 6px;font-family:DM Mono,monospace;white-space:nowrap;">'+esc(p.sap_code)+'</td>'+
+      '<td style="padding:3px 6px;">'+esc(p.product_name)+'</td>'+
+      '<td style="padding:3px 6px;color:#64748b;">'+esc(p.unit || '—')+'</td>'+
+      '<td style="padding:3px 6px;text-align:right;font-weight:600;">'+llFmtQty(p.qty)+'</td>'+
+      '<td style="padding:3px 6px;text-align:right;">'+(p.cartons != null ? p.cartons : '—')+'</td></tr>';
+  });
+  return h + '</table>';
+}
+/* Разгъващият бутон. fn е ИМЕТО на глобалната функция за превключване —
+   прегледът на склада и картата на обекта държат отделно състояние. */
+function llProductsToggleHtml(it, open, fn){
+  var pr = it.products || [];
+  return '<button data-id="'+it.id+'" onclick="'+fn+'(this.dataset.id)" style="border:none;background:none;color:#4f46e5;font-size:11.5px;font-weight:600;cursor:pointer;padding:2px 0;">'+
+    (open ? '▾' : '▸')+' Артикули ('+pr.length+') <span style="color:#94a3b8;font-weight:400;">· '+llFmtQty(llProdSum(pr))+'</span></button>';
+}
+function llToggleViewProducts(id){ llViewProdOpen[id] = !llViewProdOpen[id]; renderLoadingLists(); }
+function llToggleStoreProducts(id){ llStoreProdOpen[id] = !llStoreProdOpen[id]; renderLoadingLists(); }
+
 /* ─── ПРЕГЛЕД НА ЛИСТ ───────────────────────────────────────── */
 function llOpenView(id){
   llCurrentId = id;
@@ -1697,7 +2492,8 @@ function llViewHtml(){
     '<div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📊 По обекти ('+c.stores+' обекта · '+c.pallet+' палета · '+c.roll+' рула · '+c.bulk+' насип'+
       (c.missing?' · <span style="color:#dc2626;">'+c.missing+' неполучени</span>':'')+')</div>'+
     '<table id="ll-summary" style="width:100%;border-collapse:collapse;font-size:12px;">'+
-    '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;text-align:right;">Палети</th><th style="padding:3px 6px;text-align:right;">Рула</th><th style="padding:3px 6px;text-align:right;">Насип</th><th style="padding:3px 6px;text-align:right;">Получени</th><th style="padding:3px 6px;text-align:right;">Неполучени</th></tr>';
+    '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;text-align:right;">Палети</th><th style="padding:3px 6px;text-align:right;">Рула</th><th style="padding:3px 6px;text-align:right;">Насип</th><th style="padding:3px 6px;text-align:right;">Получени</th><th style="padding:3px 6px;text-align:right;">Неполучени</th>'+
+    '<th style="padding:3px 6px;text-align:right;">Артикули</th><th style="padding:3px 6px;text-align:right;">Бройки</th></tr>';
   sum.forEach(function(s){
     h += '<tr style="border-top:1px solid #f1f5f9;"><td style="padding:3px 6px;font-weight:600;">'+esc(s.store)+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.pallet+'</td>'+
@@ -1706,7 +2502,9 @@ function llViewHtml(){
       '<td style="padding:3px 6px;text-align:right;">'+s.received+'/'+s.total+'</td>'+
       /* Нулата остава сива — червено число, което значи „няма липси", е точно
          толкова подвеждащо, колкото липсващата колона. */
-      '<td style="padding:3px 6px;text-align:right;'+(s.missing?'color:#dc2626;font-weight:700;':'color:#cbd5e1;')+'">'+s.missing+'</td></tr>';
+      '<td style="padding:3px 6px;text-align:right;'+(s.missing?'color:#dc2626;font-weight:700;':'color:#cbd5e1;')+'">'+s.missing+'</td>'+
+      '<td style="padding:3px 6px;text-align:right;'+(s.products?'':'color:#cbd5e1;')+'">'+s.products+'</td>'+
+      '<td style="padding:3px 6px;text-align:right;'+(s.qty?'':'color:#cbd5e1;')+'">'+llFmtQty(s.qty)+'</td></tr>';
   });
   h += '</table></div>';
 
@@ -1716,15 +2514,25 @@ function llViewHtml(){
   var locked = l.status !== 'draft';
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">'+
     '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;"><thead><tr style="background:#f8fafc;">';
-  ['#','Товарна единица','Стокова №','Изчиства','Коментар склад','Обект','Коментар обект','Получено'].forEach(function(cc){
+  ['#','Товарна единица','Изходящ №','Изчиства','Коментар склад','Обект','Коментар обект','Получено'].forEach(function(cc){
     h += '<th style="text-align:left;padding:7px 9px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+cc+'</th>';
   });
   h += '</tr></thead><tbody>';
+  /* „🖨 Опис" — на ПЪРВИЯ ред от всеки палет: палетът е една физическа
+     единица с един опис, дори да носи няколко документа (няколко реда). */
+  var descSeen = {};
   items.forEach(function(it){
+    var uref = (it.kind === 'pallet' && it.pallet_no != null) ? String(it.pallet_no) : String(it.id);
+    var ukey = JSON.stringify([it.store_name || '', uref]);
+    var firstOfUnit = !descSeen[ukey];
+    descSeen[ukey] = true;
     h += '<tr'+(it.missing?' data-missing="1"':'')+' style="border-bottom:1px solid #f1f5f9;'+
       (it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':''))+'">'+
       '<td style="padding:6px 9px;color:#94a3b8;">'+(it.position!=null?it.position:'—')+'</td>'+
-      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;">'+esc(llKindLabel(it))+'</td>'+
+      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;">'+esc(llKindLabel(it))+
+        (firstOfUnit
+          ? ' <button data-l="'+l.id+'" data-s="'+escAttr(it.store_name||'')+'" data-u="'+escAttr(uref)+'" onclick="llPrint(this.dataset.l,this.dataset.s,this.dataset.u)" title="Опис на палета — за залепване" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:4px;">🖨 Опис</button>'
+          : '')+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
         (it.partial?' '+llPartialBadge():'')+'</td>'+
       '<td style="padding:6px 9px;">'+(it.clears_doc?'изчиства '+esc(it.clears_doc):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
@@ -1743,6 +2551,12 @@ function llViewHtml(){
             (it.missing_by?' · '+esc(it.missing_by):'')+(it.missing_at?' · '+llFmtStamp(it.missing_at):'')+'</span>'
           : '<span style="color:#cbd5e1;">—</span>'))+'</td>'+
       '</tr>';
+    /* Артикулите — разгъваем под-ред, само ако има какво да се разгъне. */
+    if((it.products || []).length){
+      var vo = !!llViewProdOpen[it.id];
+      h += '<tr data-ll-vprod="'+it.id+'" style="border-bottom:1px solid #f1f5f9;"><td></td><td colspan="7" style="padding:0 9px 6px;">'+
+        llProductsToggleHtml(it, vo, 'llToggleViewProducts')+(vo ? llProductsTableHtml(it.products) : '')+'</td></tr>';
+    }
   });
   h += '</tbody></table></div>';
   return h;
@@ -1770,37 +2584,117 @@ function llFmtStamp(val){
    stock-differences.js изобщо е зареден. */
 var LL_PRINT_LOGO = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAC4AAAAqCAIAAABDSv52AAABCGlDQ1BJQ0MgUHJvZmlsZQAAeJxjYGA8wQAELAYMDLl5JUVB7k4KEZFRCuwPGBiBEAwSk4sLGHADoKpv1yBqL+viUYcLcKakFicD6Q9ArFIEtBxopAiQLZIOYWuA2EkQtg2IXV5SUAJkB4DYRSFBzkB2CpCtkY7ETkJiJxcUgdT3ANk2uTmlyQh3M/Ck5oUGA2kOIJZhKGYIYnBncAL5H6IkfxEDg8VXBgbmCQixpJkMDNtbGRgkbiHEVBYwMPC3MDBsO48QQ4RJQWJRIliIBYiZ0tIYGD4tZ2DgjWRgEL7AwMAVDQsIHG5TALvNnSEfCNMZchhSgSKeDHkMyQx6QJYRgwGDIYMZAKbWPz9HbOBQAAAFGklEQVR42u1YW2hcVRRde59z7507M5lkkia1tS9atTRqa4kgaD8UHyBqqVAMgtQHKIJIP9ovoVToTxEKRX/8ED9ExEKRCoIUaREflFIUtahVsNbUhqbmNTOZuc9zth95OElnkpi2mkLP14V7zr7rnrPW2nsf2tB9BxbHYAAi8j8iEJFxAAyAiOacfe1wTD3r+SyYE+uCR31kxqIZ1zmUa0Qdnp3VC6bO7HAbxtfXiKezR2j49gZtr1co/302aAyFRBTAQDPuEUAi9YjroYsIREgEIuPRMI8fa6AgAUImCzDIgWg7Hm+aQ6dAzOyLgAgiDNj6/yNKAENwBQwkRBBxgNnhqM7OrmmnQqRENkTmlihttZISSopZJtImABJUFbUbWR8nF7XSQMJUIQLImdywkNBh7KrEjDFHJDelooGASQECWAikgZz1jNOqELYEyXt9owYAUFJ8vMXd15k3zAoAEBNui9KDF0oxYduadhGsic091fhkzv3DVY4gJKxMzDt9o2uj9P2O7M7lrbsHy3fXkt5VRQJyxr52qXKgq2VQsyPT9olnWI8CjTErK64VAJ2p7R2q3V+NA0IEWCBkenG42l2LFJA3NmC8Mljd1z+6Z6BigAhYG6WHzw3fnBom3BqljpWfPd1TjW4PkwHNz44EW8sRNRLFNCgWyIj86unXlxW+zrtacNrXz68unsloC6xO0oKxFmhNxRJ1pRZATy15rBRaUgpQIjWmp0rBqKJDbb4IIuaMyPcZB8wbw3RzkLw8OHbW08OKtcwUbAPaKuDNjtyAovsqUYvFVzm3wrR7sPrSUO2XjO5dVWw1lkBLUvt4OdpaCQOmFmPLTDUiV+ThsXhvZ36pAYkd1GSBPx0+lXWeHgm2lwLXypc5p6y43YqZngq4kZLRIrI6tQCGNSKi3tFw919j/a76uJARQU4sATGwv780qPmnjBaRfs0ZKztGasXU3hmZJyqhZXVvNdkcJkNaHW7NdAfJplpSdvWHrX7WznVAUyMlKhoL4FjOCwkvjATG4t02/2BHtsNYQ/RR0fetOdnivdWeWxenBPzu6RWp2XNxrJCaXQPlLZXIElWZzjtqfZg8N1QDoab41eUt3/qObiRs3dC/SGRpakH4NO/lLbLWKpHHKlFe8EnBM6C327PH8t6JrLs+TJbE9kzW/SznDbjqtO/84Osv8t72UvjoSG3XsuKQ4qN9Qxui9POC11NL2lP7ZCXqc9Q5R7l1gBofkAU8kTVxeqiYPesqgrzRlf/NdzYFaUAoExnAEB0pZC44/GA1vuTwzuWFc67qDhNDsr8z/0Gbf97ho23+dxlnY2xO5dxH1i15ZmXxQGdu76Wxh8aiIUXq8h24vA8SQIk8UI2OZ92USIOqjLwVAkpMOSvbKuGxnFdVHBPtGKme8N0fPa0JPUGyIjZHCpmcyF1B/I3vpgQNqhIU4AsCpqKxJSYGZphKEygiAEImf3IuCwxNQBSigODJRIYKCErgCSwhBVKCLxAgAlwRAjC58xZgIJnkxLy4Mu7JWSsyac6WJugt018JkBUIYAkAtIgjJAQBMjI5R8ROxQF080zUvLadniSkLoSdTqx/hEkkNJGGppbPSDa2eYqeb+lU79T10RdQ1jRbMt8yu1nZ/G8L8lnm36htb0BZxFCaKYivcD1m7a7njFbfPPOCHWJ8vixIz1fUMzdzGpp09wV3+VOR+arcHlyVG7LFoiAR4UWCY+a9rSxIDvP/4OyS/BsnQaRclmJE7gAAAABJRU5ErkJggg==';
 
+/* ОПИС НА ПАЛЕТ — лепи се на самия палет. Един физически палет може да носи
+   няколко документа (няколко реда с един pallet_no); описът е ЕДИН и изброява
+   артикулите на всичките, в реда на въвеждане.
+   Сумата на бройките НЕ се показва: палетът смесва мерни единици (бр., кв.м,
+   л.м) и общото число не би значело нищо. Кашоните са една мярка — те се
+   сумират. Колоните: 8+26+88+18+24+26 = 190mm, полезната ширина на A4. */
+function llRenderPalletPrint(list, rows){
+  var wrap = document.getElementById('mod-print');
+  if(!wrap) return;
+  var first = rows[0];
+  var store = first.store_name || '';
+  var unit = (first.kind === 'pallet' && first.pallet_no != null)
+    ? 'Палет ' + first.pallet_no + (first.pallet_total != null ? ' от ' + first.pallet_total : '')
+    : llKindLabel(first).charAt(0).toUpperCase() + llKindLabel(first).slice(1);
+  var docs = [];
+  rows.forEach(function(r){ if(r.purchase_doc && docs.indexOf(r.purchase_doc) < 0) docs.push(r.purchase_doc); });
+  var prods = [];
+  rows.forEach(function(r){ (r.products || []).forEach(function(p){ prods.push(p); }); });
+  var ctn = 0, hasCtn = false;
+  prods.forEach(function(p){ if(p.cartons != null && p.cartons !== ''){ ctn += Number(p.cartons) || 0; hasCtn = true; } });
+
+  var body = prods.length
+    ? prods.map(function(p, k){
+        return '<tr class="lp-row"><td class="lp-num">'+(k + 1)+'</td>'+
+          '<td>'+esc(p.sap_code)+'</td>'+
+          '<td>'+esc(p.product_name)+'</td>'+
+          '<td>'+esc(p.unit || '—')+'</td>'+
+          '<td class="lp-num">'+llFmtQty(p.qty)+'</td>'+
+          '<td class="lp-num">'+(p.cartons != null ? p.cartons : '')+'</td></tr>';
+      }).join('') +
+      '<tr class="lp-row lp-sum"><td colspan="4">Общо: '+prods.length+(prods.length === 1 ? ' артикул' : ' артикула')+'</td>'+
+        '<td class="lp-num"></td><td class="lp-num">'+(hasCtn ? ctn : '')+'</td></tr>'
+    : '<tr class="lp-row"><td colspan="6" style="text-align:center;color:#777;">Няма въведени артикули</td></tr>';
+
+  var now = new Date();
+  var pad = function(x){ return (x < 10 ? '0' : '') + x; };
+  var stamp = pad(now.getDate())+'.'+pad(now.getMonth()+1)+'.'+now.getFullYear()+' '+
+              pad(now.getHours())+':'+pad(now.getMinutes());
+
+  wrap.innerHTML =
+    '<style>'+llPrintCss()+'</style>'+
+    '<div style="max-width:820px;margin:0 auto;padding:16px 16px 40px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;" class="no-print">'+
+        '<div style="font-size:18px;font-weight:600;">🖨 Опис на палет</div>'+
+        '<div style="display:flex;gap:8px;align-items:center;">'+
+          '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>'+
+          '<button onclick="showModule(\'loading\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Назад</button>'+
+        '</div>'+
+      '</div>'+
+      '<div class="lp-wrap" data-ll-pallet-print="1">'+
+        '<div class="lp-head">'+
+          '<div><div class="lp-wh">'+esc(list.warehouse || '')+'</div></div>'+
+          '<img src="'+LL_PRINT_LOGO+'" class="lp-logo" alt="TeMAX">'+
+        '</div>'+
+        '<div class="lp-title">ОПИС НА ТОВАРНА ЕДИНИЦА</div>'+
+        '<div class="lp-unit">'+esc(unit)+'</div>'+
+        '<table class="lp-meta">'+
+          '<tr><td>Обект получател:</td><td><b>'+esc(store || '—')+'</b></td></tr>'+
+          '<tr><td>Склад изпращач:</td><td>'+esc(list.warehouse || '—')+'</td></tr>'+
+          '<tr><td>Дата на товарене:</td><td>'+fmtDate(list.list_date)+'</td></tr>'+
+          '<tr><td>Изходящ №:</td><td>'+(docs.length ? docs.map(esc).join(', ') : 'без')+'</td></tr>'+
+        '</table>'+
+        '<table class="lp-tbl">'+
+          '<colgroup><col style="width:8mm;"><col style="width:26mm;"><col style="width:88mm;"><col style="width:18mm;"><col style="width:24mm;"><col style="width:26mm;"></colgroup>'+
+          '<tr><th>№</th><th>SAP код</th><th>Име</th><th>Мярка</th><th>Бройки</th><th>Кашони</th></tr>'+
+          body+
+        '</table>'+
+        '<div class="lp-sign">'+
+          '<div class="lp-sign-item"><div class="lp-dots"></div>Товарил: име и подпис</div>'+
+          '<div class="lp-sign-item"><div class="lp-dots"></div>Приел: име и подпис</div>'+
+        '</div>'+
+        '<div class="lp-foot">Отпечатано '+esc(stamp)+' от '+esc(llActor())+'</div>'+
+      '</div>'+
+    '</div>';
+}
+
 /* storeFilter (по избор) — печата САМО частта на този обект. Магазинът
    получава своя лист, не чуждите редове от същия курс. */
-function llPrint(listId, storeFilter){
+/* unitRef (по избор) — „Опис на палет" вместо целия лист. Цифри = номер на
+   палет (с storeFilter, защото палет 1 има всеки обект); иначе id на ред —
+   рулото и насипът нямат номер и описът е за самия ред. */
+function llPrint(listId, storeFilter, unitRef){
   var l = llLists.find(function(x){ return String(x.id) === String(listId); }) ||
           llStoreLists.find(function(x){ return String(x.id) === String(listId); });
   if(!l){ toast('Товарният лист не е намерен','#dc2626'); return; }
   /* Складът държи редовете в llItems, обектът — в llStoreItems. */
   var items = llItemsOf(listId);
   if(!items.length) items = llStoreItemsOf(listId);
+  if(unitRef !== undefined && unitRef !== null && unitRef !== ''){
+    var ref = String(unitRef);
+    var rows = /^\d+$/.test(ref)
+      ? items.filter(function(i){
+          return i.kind === 'pallet' && String(i.pallet_no) === ref &&
+            (!storeFilter || i.store_name === storeFilter);
+        })
+      : items.filter(function(i){ return String(i.id) === ref; });
+    if(!rows.length){ toast('Товарната единица не е намерена','#dc2626'); return; }
+    llRenderPalletPrint(l, rows.slice().sort(llByPosition));
+    showModule('print');
+    return;
+  }
   llRenderPrint(l, items, storeFilter);
   showModule('print');
 }
 
-function llRenderPrint(list, items, storeFilter){
-  var wrap = document.getElementById('mod-print');
-  if(!wrap) return;
-  var rows = (items || []).filter(function(i){
-    return !storeFilter || i.store_name === storeFilter;
-  });
-  /* Подредба: обект, после палет №, после позиция. Групирането по-долу пази
-     реда на входа, тоест сортирането ТУК е това, което подрежда листа. */
-  rows = rows.slice().sort(function(a, b){
-    var s = String(a.store_name || '').localeCompare(String(b.store_name || ''));
-    if(s) return s;
-    var an = a.pallet_no == null ? 9999 : Number(a.pallet_no);
-    var bn = b.pallet_no == null ? 9999 : Number(b.pallet_no);
-    if(an !== bn) return an - bn;
-    return (a.position || 0) - (b.position || 0);
-  });
-
-  var PRINT_CSS =
+/* CSS-ът на ВСИЧКИ печати от този модул — целия лист и описа на палет.
+   ЕДНО копие: трите правила долу (white-space, box-sizing, долната рамка)
+   идват от CLAUDE.md т.12 и второ копие, което ги изпуска, не гърми —
+   просто излиза с колони извън листа. */
+function llPrintCss(){
+  return (
     '@media print{'+
       '@page{size:A4 portrait;margin:10mm;}'+
       '.no-print{display:none!important;}'+
@@ -1845,7 +2739,34 @@ function llRenderPrint(list, items, storeFilter){
     '.lp-sign{display:flex;flex-wrap:wrap;gap:6mm;border-top:1px dotted #999;padding-top:3mm;margin-top:2mm;}'+
     '.lp-sign-item{flex:1 1 60mm;font-size:8.5pt;}'+
     '.lp-dots{border-bottom:1px dotted #555;height:6mm;margin-bottom:1mm;}'+
-    '.lp-foot{font-size:7.5pt;color:#555;margin-top:3mm;}';
+    '.lp-foot{font-size:7.5pt;color:#555;margin-top:3mm;}' +
+    /* Артикулите под реда в печата на целия лист — малки, но пречупващи се:
+       името на артикула е свободен текст и в тясна колона иначе излиза. */
+    '.lp-plist{font-size:7.5pt;color:#333;white-space:normal;overflow-wrap:break-word;line-height:1.35;}' +
+    /* Описът на палет: едър номер, защото се чете от метър разстояние. */
+    '.lp-unit{font-size:16pt;font-weight:700;text-align:center;margin:1mm 0 3mm;}' +
+    '.lp-sum td{font-weight:700;background:#f4f4f4;}'
+  );
+}
+
+function llRenderPrint(list, items, storeFilter){
+  var wrap = document.getElementById('mod-print');
+  if(!wrap) return;
+  var rows = (items || []).filter(function(i){
+    return !storeFilter || i.store_name === storeFilter;
+  });
+  /* Подредба: обект, после палет №, после позиция. Групирането по-долу пази
+     реда на входа, тоест сортирането ТУК е това, което подрежда листа. */
+  rows = rows.slice().sort(function(a, b){
+    var s = String(a.store_name || '').localeCompare(String(b.store_name || ''));
+    if(s) return s;
+    var an = a.pallet_no == null ? 9999 : Number(a.pallet_no);
+    var bn = b.pallet_no == null ? 9999 : Number(b.pallet_no);
+    if(an !== bn) return an - bn;
+    return (a.position || 0) - (b.position || 0);
+  });
+
+  var PRINT_CSS = llPrintCss();
 
   /* Обобщение по обект — същата сметка като llSummaryByStore() на екрана. */
   var sum = llSummaryByStore(rows);
@@ -1863,7 +2784,11 @@ function llRenderPrint(list, items, storeFilter){
      ред във ВСЕКИ палет — точно както е в базата. Няколко документа на един
      палет дават редове един под друг, а видът се изписва веднъж с rowspan. */
   var n = 0;
+  /* Под-редът с артикулите е ОТДЕЛЕН <tr> — затова rowspan-ът на „Вид"
+     брои и тях. Иначе всички колони под него се изместват с една наляво. */
+  var withProds = function(it){ return (it.products || []).length > 0; };
   var bodyHtml = llPalletGroups(rows).map(function(g){
+    var span = g.rows.reduce(function(a, it){ return a + 1 + (withProds(it) ? 1 : 0); }, 0);
     return g.rows.map(function(it, k){
       n++;
       var doc = it.purchase_doc ? esc(it.purchase_doc) : '<span style="color:#777;">без</span>';
@@ -1871,7 +2796,7 @@ function llRenderPrint(list, items, storeFilter){
       if(it.partial)    doc += '<div class="lp-tag">частично</div>';
       return '<tr class="lp-row" data-store="'+escVal(it.store_name || '')+'">'+
         '<td class="lp-num">'+n+'</td>'+
-        (k === 0 ? '<td class="lp-kind" rowspan="'+g.rows.length+'">'+esc(llKindLabel(g.rows[0]))+'</td>' : '')+
+        (k === 0 ? '<td class="lp-kind" rowspan="'+span+'">'+esc(llKindLabel(g.rows[0]))+'</td>' : '')+
         '<td>'+doc+'</td>'+
         '<td>'+esc(it.store_name || '—')+'</td>'+
         '<td>'+esc(it.warehouse_comment || '—')+'</td>'+
@@ -1886,7 +2811,15 @@ function llRenderPrint(list, items, storeFilter){
               (it.store_comment ? '<div class="lp-mtag">'+esc(it.store_comment)+'</div>' : '')+
               (it.missing_at ? '<div class="lp-tag">'+llFmtStamp(it.missing_at)+'</div>' : '')
             : '<span class="lp-box"></span>'))+'</td>'+
-      '</tr>';
+      '</tr>'+
+      /* 7 колони: № (празна) + Вид (покрита от rowspan) + 5 за артикулите. */
+      (withProds(it)
+        ? '<tr class="lp-row lp-prow"><td></td><td colspan="5" class="lp-plist">'+
+            it.products.map(function(p){
+              return esc(p.sap_code)+' · '+esc(p.product_name)+' — <b>'+llFmtQty(p.qty)+'</b> '+esc(p.unit || '')+
+                (p.cartons != null ? ' ('+p.cartons+' каш.)' : '');
+            }).join('<br>')+'</td></tr>'
+        : '');
     }).join('');
   }).join('');
   if(!bodyHtml){
