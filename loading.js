@@ -2013,6 +2013,93 @@ function llOpenScanner(i){
     llFocusPf(i, 'sap');
   });
 }
+/* ─── Камерата: фокус, резолюция, рамка, фенер ───────────────
+   Гланцираното фолио отразява лампата точно върху черните линии и
+   автофокусът „ловува" по отблясъка. Първата версия искаше само
+   facingMode и декодерът получаваше размазан кадър в ниска резолюция.
+
+   КЪДЕ ОТИВА КАКВО (сверено с html5-qrcode 2.3.8, 21.09.2026):
+     · formatsToSupport и experimentalFeatures се четат от КОНСТРУКТОРА
+       (new Html5Qrcode(id, config)). Подадени на start(), библиотеката ги
+       пренебрегва мълчаливо — затова стоят там.
+     · videoConstraints, qrbox, fps — в конфигурацията на start().
+     · Фокусът/зумът/фенерът се прилагат СЛЕД старта върху живия трак.
+
+   Всичко е ideal/advanced, нищо не е „задължително": непостижима стойност
+   се пропуска, вместо getUserMedia да откаже камерата изобщо. */
+function llScanStartConfig(){
+  return {
+    fps: 15,
+    /* 1D кодът е широк и нисък — рамка ~85% ширина × 30% височина от
+       визьора. Библиотеката отказва рамка под 50px, затова долна граница. */
+    qrbox: function(vw, vh){
+      var w = Math.floor((vw || 0) * 0.85), h = Math.floor((vh || 0) * 0.30);
+      return { width: Math.max(50, Math.min(w, vw || w)), height: Math.max(50, Math.min(h, vh || h)) };
+    },
+    videoConstraints: {
+      facingMode: 'environment',
+      width:  { ideal: 1920 },
+      height: { ideal: 1080 },
+      advanced: [{ focusMode: 'continuous' }]
+    }
+  };
+}
+/* applyVideoConstraints може да ХВЪРЛИ синхронно (невалидни ограничения,
+   скенерът вече спрян) или да ОТХВЪРЛИ (телефонът не поддържа). И двете са
+   „не стана" — никое не бива да спре сканирането. Връща true/false. */
+function llScanApply(inst, c){
+  try {
+    if(!inst || typeof inst.applyVideoConstraints !== 'function') return Promise.resolve(false);
+    var p = inst.applyVideoConstraints(c);
+    /* Библиотеката връща обещание; синхронен отговор без хвърляне е успех. */
+    if(!p || typeof p.then !== 'function') return Promise.resolve(true);
+    return p.then(function(){ return true; }, function(e){
+      console.warn('llScan: ограниченията не бяха приети', c, e);
+      return false;
+    });
+  } catch(e){
+    console.warn('llScan: ограниченията не бяха приети', c, e);
+    return Promise.resolve(false);
+  }
+}
+function llScanAfterStart(inst){
+  /* Модалът може да е затворен, докато камерата е тръгвала. */
+  if(!llScan || llScan.inst !== inst) return Promise.resolve(false);
+  var caps = null;
+  try { caps = inst.getRunningTrackCapabilities ? inst.getRunningTrackCapabilities() : null; } catch(e){ caps = null; }
+  var adv = [{ focusMode: 'continuous' }];
+  /* Зум 2 — по-близо до малкия код, без човекът да доближава телефона
+     толкова, че да излезе от фокус. Щом тракът казва обхвата си — не повече
+     от максимума; казва ли, че зум няма — не се иска. Не казва ли нищо —
+     опитва се, провалът е безвреден. */
+  if(caps && caps.zoom && typeof caps.zoom.max === 'number'){
+    var z = Math.min(2, caps.zoom.max);
+    if(z > (typeof caps.zoom.min === 'number' ? caps.zoom.min : 1)) adv.push({ zoom: z });
+  } else if(!caps){
+    adv.push({ zoom: 2 });
+  }
+  var done = llScanApply(inst, { advanced: adv });
+  llScan.torchOk = !!(caps && caps.torch);
+  var tb = document.getElementById('ll-scan-torch');
+  if(tb) tb.style.display = llScan.torchOk ? '' : 'none';
+  return done;
+}
+/* Фенерът помага и при отблясък (равномерна светлина отпред гаси
+   петното от лампата на тавана), и на тъмна рампа. */
+function llScanToggleTorch(){
+  if(!llScan || !llScan.inst || !llScan.torchOk) return Promise.resolve(false);
+  var on = !llScan.torch, s = llScan;
+  return llScanApply(s.inst, { advanced: [{ torch: on }] }).then(function(ok){
+    if(!ok){ toast('Фенерът не се включи на този телефон','#d97706'); return false; }
+    s.torch = on;
+    var tb = document.getElementById('ll-scan-torch');
+    if(tb){
+      tb.style.background = on ? '#fde68a' : '#fff';
+      tb.textContent = on ? '🔦 Изключи' : '🔦 Фенер';
+    }
+    return true;
+  });
+}
 function llScanShowModal(i){
   llScanClose();
   var m = document.createElement('div');
@@ -2022,13 +2109,22 @@ function llScanShowModal(i){
     '<div style="width:100%;max-width:480px;background:#fff;border-radius:12px;padding:12px;">'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
         '<div style="font-size:15px;font-weight:700;">📷 Сканиране — поредно</div>'+
-        '<button onclick="llScanClose()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 16px;font-size:14px;font-weight:600;cursor:pointer;">Готово</button>'+
+        '<div style="display:flex;gap:6px;">'+
+          /* Скрит, докато не се знае дали тракът има фенер — виж llScanAfterStart. */
+          '<button id="ll-scan-torch" onclick="llScanToggleTorch()" style="display:none;border:1px solid #cbd5e1;background:#fff;color:#0f172a;border-radius:8px;padding:8px 12px;font-size:14px;font-weight:600;cursor:pointer;">🔦 Фенер</button>'+
+          '<button onclick="llScanClose()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 16px;font-size:14px;font-weight:600;cursor:pointer;">Готово</button>'+
+        '</div>'+
       '</div>'+
       '<div id="ll-scan-view" style="width:100%;min-height:220px;background:#000;border-radius:8px;overflow:hidden;"></div>'+
+      /* Подсказката е ИЗВЪН панела: панелът се пренаписва при всяко
+         сканиране и би я изтрил. Ъгълът е реалният трик срещу отблясъка —
+         директно отгоре лампата се отразява точно върху черните линии. */
+      '<div id="ll-scan-hint" style="margin-top:6px;font-size:12px;color:#64748b;text-align:center;">Дръж кода в рамката, леко под ъгъл при гланц</div>'+
       '<div id="ll-scan-panel" style="margin-top:10px;font-size:13px;color:#475569;">Насочи камерата към баркода.</div>'+
     '</div>';
   document.body.appendChild(m);
-  llScan = { row: i, inst: null, pending: null, choices: null, busy: false, last: '', lastAt: 0 };
+  llScan = { row: i, inst: null, pending: null, choices: null, busy: false, last: '', lastAt: 0,
+             torchOk: false, torch: false };
 
   var fmts;
   try {
@@ -2046,9 +2142,14 @@ function llScanShowModal(i){
       verbose: false
     });
     llScan.inst = inst;
-    inst.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 260, height: 140 } },
+    /* Първият аргумент остава: библиотеката го ползва, ако videoConstraints
+       бъде отхвърлен. Приеме ли ги, facingMode оттук се пренебрегва — затова
+       е и вътре във videoConstraints. */
+    inst.start({ facingMode: 'environment' }, llScanStartConfig(),
       function(text){ llScanOnRead(text); }, function(){ /* кадър без код — нормално */ }
-    ).catch(function(){
+    ).then(function(){
+      llScanAfterStart(inst);
+    }, function(){
       llScanPanel('<span style="color:#dc2626;font-weight:600;">Няма достъп до камерата.</span> Разреши камерата в браузъра или въведи кода на ръка.');
     });
   } catch(e){

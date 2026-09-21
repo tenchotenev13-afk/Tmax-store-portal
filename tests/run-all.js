@@ -54,6 +54,7 @@ const TESTS = [
   'loading-lists-products.test.js',
   'loading-lists-print-pallet.test.js',
   'loading-lists-transit-expand.test.js',
+  'loading-lists-scanner-config.test.js',
   'loading-diff-prefill.test.js',
   'transit-store-scope.test.js',
   'transit-direction-transfer.test.js',
