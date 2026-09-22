@@ -46,17 +46,18 @@ const CVETI = { email: 'c.teneva@temax.bg', display_name: 'Цветелина Т
 
 function env(user, lines, opts) {
   opts = opts || {};
+  const rep = opts.report || REP;
   const h = boot({
     modules: opts.modules || ['transport.js', 'stock-returns.js', 'stock-differences.js', 'push.js'],
     user: user, confirm: true, fail: opts.fail,
     data: {
-      stock_differences: lines, differences_reports: [REP], stock_diff_swaps: opts.swaps || [],
+      stock_differences: lines, differences_reports: [rep], stock_diff_swaps: opts.swaps || [],
       stock_returns: [], transport_orders: [], users: [],
       stores: [{ name: 'Петрич' }, { name: WH }], contacts: []
     }
   });
   h.w.sdData = clone(lines);
-  h.w.diffReports = clone([REP]);
+  h.w.diffReports = clone([rep]);
   h.w.sdSwaps = clone(opts.swaps || []);
   h.w.transportOrders = [];
   h.w.sdFilter = opts.filter || 'pending'; h.w.sdTypeFilter = 'all';
@@ -157,6 +158,35 @@ async function openAndFill(h, date, doc, note) {
       ok('невалидно → 0 PATCH, 0 push', h.calls.patch.length === 0 && pushes(h).length === 0);
       ok('модалът остава отворен', !!modal(h));
     }
+  }
+
+  section('2б. Долна граница — датата на документа (rep.doc_date)');
+  {
+    /* doc_date на бланката е 2026-09-10; 09.09 е ден преди документа. */
+    const h = env(STORE, [line({}), OTHER]);
+    h.w.renderStockDiff();
+    const m = await openAndFill(h, '2026-09-09');
+    const minAttr = h.doc.getElementById('sdlate-date').getAttribute('min');
+    realClick(h.w, btnExact(m, '💾 Запази'));
+    await settle();
+    ok('преди doc_date → toast "Датата не може да е преди документа (10.09.2026)", 0 fetch, min=2026-09-10',
+      toasts(h).indexOf('Датата не може да е преди документа (10.09.2026)') >= 0 &&
+      h.calls.patch.length === 0 && pushes(h).length === 0 && minAttr === '2026-09-10',
+      JSON.stringify({ toasts: toasts(h), patch: h.calls.patch.length, min: minAttr }));
+  }
+  {
+    /* Бланка без doc_date → никаква долна граница: и много стара дата минава. */
+    const h = env(STORE, [line({}), OTHER], { report: Object.assign({}, REP, { doc_date: null }) });
+    h.w.renderStockDiff();
+    const m = await openAndFill(h, '2020-01-15');
+    const hasMin = h.doc.getElementById('sdlate-date').hasAttribute('min');
+    realClick(h.w, btnExact(m, '💾 Запази'));
+    await settle();
+    const p = sdPatches(h);
+    ok('бланка без doc_date → без min, 15.01.2020 се записва',
+      !hasMin && p.length === 1 && p[0].body.completed_at === new h.w.Date('2020-01-15T12:00:00').toISOString() &&
+      !toasts(h).some(t => /преди документа/.test(t)),
+      JSON.stringify({ hasMin: hasMin, patch: p.length, toasts: toasts(h) }));
   }
 
   section('3. Запис — всички полета, обяд по избраната дата');

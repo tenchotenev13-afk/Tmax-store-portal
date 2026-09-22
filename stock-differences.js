@@ -882,17 +882,26 @@ function sdLateReceiveButton(l, rep){
     'title="Липсващата стока е пристигнала по друг път - закрий реда като получен" '+
     'style="border:1px solid #0d9488;background:#fff;color:#0d9488;border-radius:5px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">📦 Получено междувременно</button></div>';
 }
+/* Долната граница на датата на получаване - датата на документа по бланката.
+   Стоката не може да е дошла преди документа, по който е липсвала. Бланка без
+   doc_date (или с невалидна) -> '' = без долна граница. Едно място за min на
+   полето И за проверката при запис. */
+function sdLateReceiveMinDate(rep){
+  var s = String((rep && rep.doc_date) || '').slice(0,10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : '';
+}
 function openStoreLateReceiveModal(lineId){
   var l = sdData.find(function(x){return String(x.id)===String(lineId);});
   if(!l) return;
   var existing = document.getElementById('sdlate-ov'); if(existing) existing.remove();
   var d = today();
+  var minD = sdLateReceiveMinDate(diffReports.find(function(x){return x.id===l.report_id;}));
   var div = document.createElement('div');
   div.innerHTML = '<div class="bov open" id="sdlate-ov"><div class="bmod" style="width:380px;">'+
     '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">📦 Получено междувременно</div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(l.material_code||'')+' · '+esc(l.material_name||'')+'</div>'+
     '<label class="fl">Дата на получаване</label>'+
-    '<input class="fi" id="sdlate-date" type="date" value="'+d+'" max="'+d+'">'+
+    '<input class="fi" id="sdlate-date" type="date" value="'+d+'" max="'+d+'"'+(minD?' min="'+minD+'"':'')+'>'+
     '<label class="fl">Номер на документ (по избор)</label>'+
     '<input class="fi" id="sdlate-doc" value="">'+
     '<label class="fl">Бележка (по избор)</label>'+
@@ -916,6 +925,8 @@ function submitStoreLateReceive(lineId){
   var d = String(dEl ? dEl.value : '').trim();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(d)){ toast('Изберете дата на получаване','#dc2626'); return; }
   if(d > today()){ toast('Датата на получаване не може да е в бъдещето','#dc2626'); return; }
+  var minD = sdLateReceiveMinDate(rep);
+  if(minD && d < minD){ toast('Датата не може да е преди документа ('+fmtDate(minD)+')','#dc2626'); return; }
   var when = new Date(d+'T12:00:00');
   if(isNaN(when.getTime())){ toast('Невалидна дата на получаване','#dc2626'); return; }
   var docEl = document.getElementById('sdlate-doc'), noteEl = document.getElementById('sdlate-note');
