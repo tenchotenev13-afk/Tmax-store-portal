@@ -107,7 +107,7 @@ function renderTransport(){
     else if(o._status==='tomorrow') anim='animation:rowPulseSoft 2.5s infinite;';
     var hl=(window._trHighlightId&&String(window._trHighlightId)===String(o.id))?'background:#fef9c3;':'';
     return '<tr id="tr-row-'+esc(o.id)+'" style="border-left:3px solid '+bdrColor+';'+anim+hl+'">'+
-      '<td style="font-size:11px;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
+      '<td data-id="'+esc(o.id)+'" onclick="openTransportDetail(this.dataset.id)" title="Отвори заявката" style="font-size:11px;cursor:pointer;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
       '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small>'+coLinkBadge(o)+'</td>'+
       '<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>'+
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
@@ -142,6 +142,93 @@ function gotoLinkedClientOrder(coId){
   var b=document.querySelector('#co-filters .filter-btn');
   if(b&&typeof filterOrders==='function')filterOrders('all',b);
   showModule('client');
+}
+
+/* ═══ МОДАЛ „ПЪЛНИ ДАННИ ЗА ТРАНСПОРТА" (само за четене) ═══
+   По образец на openClientOrderDetail() — ползва същите coDetailRow /
+   coDetailSection от client-orders.js (зарежда се преди този модал да може
+   да бъде отворен). Overlay-ят е 'trd-ov', не 'cod-ov', и Escape handler-ът
+   е собствен: двата модала не си пречат. */
+var trDetailEscHandler=null;
+function openTransportDetail(id){
+  var o=transportOrders.find(function(x){return String(x.id)===String(id);});
+  if(!o){toast('Заявката не е намерена','#dc2626');return;}
+
+  /* Пълният списък артикули — resolveItems() носи fallback-а за стари записи. */
+  var its=resolveItems(o);
+  var hasItems=!!(o.items&&o.items.length);
+  var thS='text-align:left;padding:3px 6px;border-bottom:1px solid #e2e8f0;font-size:11px;color:#94a3b8;font-weight:600;';
+  var tdS='padding:3px 6px;border-bottom:1px solid #f1f5f9;';
+  var itemsHtml='<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
+    '<thead><tr><th style="'+thS+'">SAP</th><th style="'+thS+'">Продукт</th>'+
+    '<th style="'+thS+'">Цвят</th><th style="'+thS+'text-align:right;">Кол.</th></tr></thead><tbody>'+
+    its.map(function(it){
+      return '<tr>'+
+        '<td style="'+tdS+'font-family:monospace;font-size:11px;">'+esc(it.sap||'')+'</td>'+
+        '<td style="'+tdS+'">'+esc(it.product||'')+'</td>'+
+        '<td style="'+tdS+'color:#64748b;">'+esc(it.color||'')+'</td>'+
+        '<td style="'+tdS+'text-align:right;white-space:nowrap;">'+esc(String(it.qty||1))+' '+esc(it.unit||'бр.')+'</td>'+
+      '</tr>';
+    }).join('')+'</tbody></table>'+
+    (hasItems?'':'<div style="font-size:11px;color:#b45309;margin-top:4px;">Стар запис без списък с артикули — показани са полетата от самата заявка.</div>');
+
+  var telRaw=String(o.phone||'').replace(/[^\d+]/g,'');
+  var phoneHtml=telRaw
+    ? '<a href="tel:'+escAttr(telRaw)+'" style="color:#2563eb;text-decoration:none;font-family:monospace;">'+esc(o.phone||'')+'</a>'
+    : '—';
+  var btnS='border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:6px;padding:3px 9px;font-size:11.5px;cursor:pointer;';
+
+  var zayavka=coDetailRow('Дата / Час',esc(o.date||'')+(o.hour?' · '+esc(o.hour):''))+
+    coDetailRow('Касов бон',esc(o.bon||''));
+  if(o.client_order_num||o.client_order_id){
+    zayavka+=coDetailRow('По клиентска заявка',
+      esc(o.client_order_num?'№'+o.client_order_num:'')+
+      (o.client_order_id
+        ? (o.client_order_num?' · ':'')+'<button data-co="'+escAttr(o.client_order_id)+'" onclick="closeTransportDetail();openClientOrderDetail(this.dataset.co)" style="'+btnS+'">→ отвори</button>'
+        : ''));
+  }
+
+  var klient=coDetailRow('Клиент',esc(o.customer_name||''))+
+    coDetailRow('Телефон',phoneHtml)+
+    coDetailRow('Адрес',esc(o.address||''));
+
+  var st=o._status||calcStatus(o.delivery,o.status);
+  var dostavka=coDetailRow('Доставка',o.delivery?fmtDate(o.delivery):'—')+
+    coDetailRow('Статус',statusBadge(st)+lateBadge(o));
+  if(o.awaiting_stock)dostavka+=coDetailRow('Стока','⏳ чака стока по клиентска заявка');
+
+  var html='<div class="bov" id="trd-ov"><div class="bmod" style="width:560px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px;">'+
+      '<div><div style="font-size:15px;font-weight:600;">🚚 Транспорт · '+esc(o.customer_name||'—')+'</div>'+
+      '<div style="font-size:12px;color:#64748b;margin-top:2px;">'+esc(o.store_name||'')+'</div></div>'+
+      '<button onclick="closeTransportDetail()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    coDetailSection('Заявка',zayavka)+
+    coDetailSection('Клиент',klient)+
+    '<div style="font-size:12px;font-weight:700;color:#334155;margin:13px 0 3px;">Артикули ('+its.length+')</div>'+itemsHtml+
+    coDetailSection('Доставка',dostavka)+
+    coDetailSection('Забележка',o.notes?coDetailRow('Текст',esc(o.notes)):'')+
+    '<div style="display:flex;justify-content:flex-end;margin-top:16px;">'+
+      '<button onclick="closeTransportDetail()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Затвори</button>'+
+    '</div></div></div>';
+
+  var ex=document.getElementById('trd-ov');if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('trd-ov').classList.add('open');
+  /* Ако отгоре е отворен модалът на клиентската заявка, Escape е негов. */
+  if(trDetailEscHandler)document.removeEventListener('keydown',trDetailEscHandler);
+  trDetailEscHandler=function(e){
+    if(e.key!=='Escape')return;
+    if(document.getElementById('cod-ov'))return;
+    closeTransportDetail();
+  };
+  document.addEventListener('keydown',trDetailEscHandler);
+}
+function closeTransportDetail(){
+  var el=document.getElementById('trd-ov');if(el)el.remove();
+  if(trDetailEscHandler){
+    document.removeEventListener('keydown',trDetailEscHandler);
+    trDetailEscHandler=null;
+  }
 }
 
 function filterTransport(f,btn){
