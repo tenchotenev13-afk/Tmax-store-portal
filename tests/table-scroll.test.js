@@ -97,7 +97,7 @@ function wireRow(w, tr) {
     has('sticky thead: top:0, z-index:2', /\.co-sticky-actions thead th\{position:sticky;top:0;z-index:2;background:var\(--surf\);\}/);
     has('бутоните: th:last-child z-index:4 (над останалите th)', /\.co-sticky-actions table th:last-child\{z-index:4;\}/);
     has('Клиент закачен: td Транспорт 2-ра / Клиентски 3-та',
-      /\.tbl-tr td:nth-child\(2\),\.tbl-co td:nth-child\(3\)\{position:sticky;left:0;z-index:1;background:#fff;box-shadow:6px 0 6px -6px/);
+      /\.tbl-tr td:nth-child\(2\),\.tbl-co td:nth-child\(3\)\{position:sticky;left:0;z-index:1;background:inherit;box-shadow:6px 0 6px -6px/);
     has('Клиент закачен: th със z-index:3', /\.tbl-tr th:nth-child\(2\),\.tbl-co th:nth-child\(3\)\{position:sticky;left:0;z-index:3;/);
     has('№ фиксиран на 90px', /\.tbl-co th:nth-child\(1\),\.tbl-co td:nth-child\(1\)\{box-sizing:border-box;width:90px;min-width:90px;max-width:90px;\}/);
     has('Дата фиксирана на 80px', /\.tbl-co th:nth-child\(2\),\.tbl-co td:nth-child\(2\)\{box-sizing:border-box;width:80px;min-width:80px;max-width:80px;/);
@@ -107,8 +107,36 @@ function wireRow(w, tr) {
       /\.tbl-tr td:nth-child\(1\),\.tbl-tr td:nth-child\(4\),\.tbl-tr td:nth-child\(8\),\.tbl-tr td:nth-child\(9\),\.tbl-tr td:nth-child\(10\),\s*\.tbl-co td:nth-child\(2\),\.tbl-co td:nth-child\(4\),\.tbl-co td:nth-child\(9\),\.tbl-co td:nth-child\(11\),\.tbl-co td:nth-child\(12\)\{white-space:nowrap;\}/);
     has('Продукт/Адрес: пренасят се, 160–260px (width нужен, за да държи max-width)',
       /\.tbl-tr td:nth-child\(5\),\.tbl-tr td:nth-child\(6\),\.tbl-co td:nth-child\(6\)\{width:260px;min-width:160px;max-width:260px;white-space:normal;\}/);
-    has('hover покрива и закачените клетки',
-      /\.co-sticky-actions tr\.row-click:hover td,\s*\.co-sticky-actions tr\.row-click:hover td:last-child\{background:#eef2ff;\}/);
+    /* Фонът идва от реда: закачените td наследяват <tr> (подсветка, мигане,
+       hover), а самият ред е винаги плътен — иначе под закачените прозира. */
+    has('редът е плътно бял по подразбиране', /\.co-sticky-actions tbody tr\{background:#fff;\}/);
+    has('бутоните вдясно: td:last-child наследява фона на реда',
+      /\.co-sticky-actions table td:last-child\{z-index:1;background:inherit;\}/);
+    has('десктоп: № и Дата наследяват фона на реда',
+      /@media\(min-width:768px\)\{[\s\S]*?\.tbl-co td:nth-child\(1\),\.tbl-co td:nth-child\(2\)\{position:sticky;z-index:1;background:inherit;\}/);
+    /* Правило по правило, без коментари. Изключение: общото правило за
+       td:last-child + th:last-child (заглавието иска бял фон) — за td то се
+       бие от по-късното td:last-child{…background:inherit}, проверено отгоре. */
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+\{[^{}]*\}/g) || [];
+    const stickyTd = /(\.co-sticky-actions table td:last-child|\.tbl-tr td:nth-child\(2\)|\.tbl-co td:nth-child\([123]\))(?![\d])/;
+    const hardWhite = rules.filter(r => {
+      const sel = r.slice(0, r.indexOf('{')), body = r.slice(r.indexOf('{'));
+      return stickyTd.test(sel) && /background:#fff/.test(body) && !/th:last-child/.test(sel);
+    }).map(r => r.trim());
+    ok('никоя закачена td не е с твърд background:#fff', hardWhite.length === 0, JSON.stringify(hardWhite));
+    has('hover на ниво <tr>: #fafafa', /\.co-sticky-actions tbody tr:hover\{background:#fafafa;\}/);
+    has('hover на ниво <tr>: row-click #eef2ff, бие подсветката и спира мигането',
+      /\.co-sticky-actions tbody tr\.row-click:hover\{background:#eef2ff!important;animation:none!important;\}/);
+    has('глобалните td hover правила са неутрализирани с inherit',
+      /\.co-sticky-actions tbody tr:hover td\{background:inherit;\}/);
+    ok('старите td hover правила за двете таблици са махнати',
+      !/\.co-sticky-actions tr:hover td:last-child\{/.test(css) && !/\.co-sticky-actions tr\.row-click:hover td,/.test(css));
+    has('плътно мигане: rowPulseOpaque = rgba(220,38,38,.07) върху бяло',
+      /@keyframes rowPulseOpaque\{0%,100%\{background:#fff;\}50%\{background:#fdf0f0;\}\}/);
+    has('плътно мигане: rowPulseSoftOpaque = rgba(217,119,6,.06) върху бяло',
+      /@keyframes rowPulseSoftOpaque\{0%,100%\{background:#fff;\}50%\{background:#fdf7f0;\}\}/);
+    has('глобалният rowPulse е непипнат (календар, бадж „N дни!")',
+      /@keyframes rowPulse\{0%,100%\{background:transparent;\}50%\{background:rgba\(220,38,38,\.07\);\}\}/);
     /* Заглавията по номер — ако колона се премести, nth-child-овете лъжат */
     const heads = id => Array.prototype.map.call(doc.getElementById(id).closest('table').querySelectorAll('thead th'), t => t.textContent.trim());
     const trH = heads('tr-body'), coH = heads('co-body');
@@ -205,6 +233,38 @@ function wireRow(w, tr) {
       click(w, cell);
       ok('touch: тапът отваря #' + ovId, !!doc.getElementById(ovId));
     }
+  }
+
+  section('7. Мигане и подсветка идват от реда — с плътни анимации');
+  {
+    const OVER = { delivery: dayOffset(-3) };      /* просрочен → мига */
+    const SOON = { delivery: dayOffset(1) };       /* утре → Транспорт мига меко */
+    const trData = [Object.assign({}, TR[0], { id: 't-a' }, OVER), Object.assign({}, TR[0], { id: 't-b' }, SOON),
+      Object.assign({}, TR[0], { id: 't-h' }, OVER)];
+    const coData = [Object.assign({}, CO[0], { id: 'c-a' }, OVER), Object.assign({}, CO[0], { id: 'c-h' }, OVER)];
+    const h = boot({ modules: ['transport.js', 'client-orders.js', 'notifications.js'], user: ADMIN,
+      data: { transport_orders: trData, client_orders: coData, stores: [] } });
+    const w = h.w, doc = h.doc;
+    w._trHighlightId = 't-h';
+    w._coHighlightId = 'c-h';
+    guard('loadTransport()', () => w.loadTransport());
+    guard('loadClientOrders()', () => w.loadClientOrders());
+    await ticks(5);
+    const st = id => ((doc.getElementById(id) || { getAttribute: () => '' }).getAttribute('style') || '');
+    ok('Транспорт просрочен: animation:rowPulseOpaque', /animation:rowPulseOpaque 1\.8s/.test(st('tr-row-t-a')), st('tr-row-t-a'));
+    ok('Транспорт утре: animation:rowPulseSoftOpaque', /animation:rowPulseSoftOpaque 2\.5s/.test(st('tr-row-t-b')), st('tr-row-t-b'));
+    ok('Клиентски просрочен: animation:rowPulseOpaque', /animation:rowPulseOpaque 2s/.test(st('co-row-c-a')), st('co-row-c-a'));
+    ok('никой ред в двете таблици не ползва полупрозрачния rowPulse/rowPulseSoft',
+      !/animation:rowPulse(Soft)? /.test(doc.getElementById('tr-body').innerHTML + doc.getElementById('co-body').innerHTML));
+    ok('Транспорт подсветен просрочен: жълт и НЕ мига (анимацията би скрила жълтото)',
+      /background:#fef9c3/.test(st('tr-row-t-h')) && !/animation/.test(st('tr-row-t-h')), st('tr-row-t-h'));
+    ok('Клиентски подсветен просрочен: жълт и НЕ мига',
+      /background:#fef9c3/.test(st('co-row-c-h')) && !/animation/.test(st('co-row-c-h')), st('co-row-c-h'));
+    ok('подсветката е еднократна — идентификаторите са изчистени след рендера',
+      !w._trHighlightId && !w._coHighlightId);
+    guard('втори рендер', () => { w.renderTransport(); w.renderClientOrders(); });
+    ok('при следващия рендер подсветеният ред пак мига (Транспорт)', /animation:rowPulseOpaque/.test(st('tr-row-t-h')), st('tr-row-t-h'));
+    ok('при следващия рендер подсветеният ред пак мига (Клиентски)', /animation:rowPulseOpaque/.test(st('co-row-c-h')), st('co-row-c-h'));
   }
 
   report();

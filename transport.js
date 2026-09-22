@@ -105,9 +105,12 @@ function renderTransport(){
     var anim='';
     /* "Чака стока" никога не пулсира — не е просрочен, чака клиентската заявка. */
     if(o._status==='awaiting') anim='';
-    else if(o._status==='overdue'||o._status==='today') anim='animation:rowPulse 1.8s infinite;';
-    else if(o._status==='tomorrow') anim='animation:rowPulseSoft 2.5s infinite;';
+    else if(o._status==='overdue'||o._status==='today') anim='animation:rowPulseOpaque 1.8s infinite;';
+    else if(o._status==='tomorrow') anim='animation:rowPulseSoftOpaque 2.5s infinite;';
     var hl=(window._trHighlightId&&String(window._trHighlightId)===String(o.id))?'background:#fef9c3;':'';
+    /* Подсветеният ред не мига — анимацията бие инлайн фона и жълтото иначе
+       не се вижда. Мигането се връща при следващия рендер. */
+    if(hl)anim='';
     /* Целият ред отваря детайла; клетката с бутоните и баджът на клиентската
        заявка спират bubbling-а, за да вършат само своето. */
     return '<tr id="tr-row-'+esc(o.id)+'" class="row-click" data-id="'+esc(o.id)+'" onclick="openTransportDetail(this.dataset.id)" title="Отвори заявката" style="border-left:3px solid '+bdrColor+';'+anim+hl+'cursor:pointer;">'+

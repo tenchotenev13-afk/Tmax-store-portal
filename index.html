@@ -64,7 +64,6 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .co-sticky-actions table td:last-child,
 .co-sticky-actions table th:last-child{position:sticky;right:0;background:#fff;box-shadow:-6px 0 6px -6px rgba(0,0,0,.15);}
 .co-sticky-actions table th:last-child{background:var(--surf);}
-.co-sticky-actions tr:hover td:last-child{background:#fafafa;}
 /* Транспорт (.tbl-tr) и Клиентски заявки (.tbl-co): скролът е в самата
    обвивка, затова хоризонталната лента е винаги долу на екрана, а не долу
    на таблицата. Заглавията, „Клиент" и бутоните са закачени. z-index:
@@ -73,7 +72,15 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .tbl-wrap.co-sticky-actions.dragging{cursor:grabbing;user-select:none;}
 .co-sticky-actions table{min-width:1100px;}
 .co-sticky-actions thead th{position:sticky;top:0;z-index:2;background:var(--surf);}
-.co-sticky-actions table td:last-child{z-index:1;}
+/* Фонът идва от РЕДА, не от клетката: закачените td наследяват фона на
+   <tr> (бял / жълта подсветка / мигане / hover), затова подсветката минава
+   и през тях. Редът е винаги ПЛЪТЕН — иначе при скрол под закачените
+   клетки прозират другите. Затова мигането тук е с плътни keyframes
+   (rowPulseOpaque/rowPulseSoftOpaque = същите цветове, смесени с бяло);
+   глобалните rowPulse/rowPulseSoft минават през transparent и се ползват
+   и другаде (календар, бадж „N дни!"). */
+.co-sticky-actions tbody tr{background:#fff;}
+.co-sticky-actions table td:last-child{z-index:1;background:inherit;}
 .co-sticky-actions table th:last-child{z-index:4;}
 .tbl-tr td:nth-child(1),.tbl-tr td:nth-child(4),.tbl-tr td:nth-child(8),.tbl-tr td:nth-child(9),.tbl-tr td:nth-child(10),
 .tbl-co td:nth-child(2),.tbl-co td:nth-child(4),.tbl-co td:nth-child(9),.tbl-co td:nth-child(11),.tbl-co td:nth-child(12){white-space:nowrap;}
@@ -81,7 +88,7 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
    клетка сам — таванът държи само заедно с width (измерено: без него
    Продукт стига 406px при широка таблица, с него спира на 260px). */
 .tbl-tr td:nth-child(5),.tbl-tr td:nth-child(6),.tbl-co td:nth-child(6){width:260px;min-width:160px;max-width:260px;white-space:normal;}
-.tbl-tr td:nth-child(2),.tbl-co td:nth-child(3){position:sticky;left:0;z-index:1;background:#fff;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
+.tbl-tr td:nth-child(2),.tbl-co td:nth-child(3){position:sticky;left:0;z-index:1;background:inherit;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
 .tbl-tr th:nth-child(2),.tbl-co th:nth-child(3){position:sticky;left:0;z-index:3;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
 /* Клиентски: № (90px) и Дата (80px) се закачват преди „Клиент" (left:170px).
    Само на широк екран — на телефон три закачени колони заемат целия екран,
@@ -89,7 +96,7 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .tbl-co th:nth-child(1),.tbl-co td:nth-child(1){box-sizing:border-box;width:90px;min-width:90px;max-width:90px;}
 .tbl-co th:nth-child(2),.tbl-co td:nth-child(2){box-sizing:border-box;width:80px;min-width:80px;max-width:80px;padding-left:8px;padding-right:6px;}
 @media(min-width:768px){
-  .tbl-co td:nth-child(1),.tbl-co td:nth-child(2){position:sticky;z-index:1;background:#fff;}
+  .tbl-co td:nth-child(1),.tbl-co td:nth-child(2){position:sticky;z-index:1;background:inherit;}
   .tbl-co th:nth-child(1),.tbl-co th:nth-child(2){z-index:3;}
   .tbl-co th:nth-child(1),.tbl-co td:nth-child(1){position:sticky;left:0;}
   .tbl-co th:nth-child(2),.tbl-co td:nth-child(2){position:sticky;left:90px;}
@@ -102,9 +109,14 @@ td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top;}
 tr:last-child td{border-bottom:none;}
 tr:hover td{background:#fafafa;}
 .row-click:hover td{background:#eef2ff;}
-/* Hover покрива и закачените клетки (иначе стоят бели и изглеждат „изключени"). */
-.co-sticky-actions tr.row-click:hover td,
-.co-sticky-actions tr.row-click:hover td:last-child{background:#eef2ff;}
+/* Транспорт и Клиентски: hover е на ниво <tr>, закачените клетки го
+   наследяват. Глобалните td-правила отгоре се неутрализират с inherit.
+   !important: инлайн жълтата подсветка и инлайн анимацията на реда иначе
+   бият hover-а — посоченият ред е #eef2ff и спира да мига, докато е под
+   мишката (както беше, когато hover-ът беше на клетките). */
+.co-sticky-actions tbody tr:hover td{background:inherit;}
+.co-sticky-actions tbody tr:hover{background:#fafafa;}
+.co-sticky-actions tbody tr.row-click:hover{background:#eef2ff!important;animation:none!important;}
 .card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:14px;}
 .card-title{font-size:14px;font-weight:600;margin-bottom:12px;}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
@@ -140,6 +152,10 @@ tr:hover td{background:#fafafa;}
 @keyframes slideDown{from{opacity:0;transform:translateY(-8px);}to{opacity:1;transform:translateY(0);}}
 @keyframes rowPulse{0%,100%{background:transparent;}50%{background:rgba(220,38,38,.07);}}
 @keyframes rowPulseSoft{0%,100%{background:transparent;}50%{background:rgba(217,119,6,.06);}}
+/* Плътните варианти за редовете в Транспорт/Клиентски: rgba(…,.07/.06)
+   върху бяло = #fdf0f0 / #fdf7f0 (виж .co-sticky-actions tbody tr). */
+@keyframes rowPulseOpaque{0%,100%{background:#fff;}50%{background:#fdf0f0;}}
+@keyframes rowPulseSoftOpaque{0%,100%{background:#fff;}50%{background:#fdf7f0;}}
 
 /* ── TAB GROUPS ── */
 /* Green: Transport/Client/Calendar */

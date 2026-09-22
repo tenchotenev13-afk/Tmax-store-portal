@@ -992,7 +992,11 @@ function renderClientOrders(){
   body.innerHTML=list.map(function(o){
     var urgent=o._status==='overdue'||o._status==='today';
     var bdrColor={overdue:'#dc2626',today:'#2563eb',tomorrow:'#d97706'}[o._status]||'transparent';
-    var rowStyle='border-left:3px solid '+bdrColor+';'+(urgent?'animation:rowPulse 2s infinite;':'');
+    /* Подсветеният ред (дошъл от бадж 📋 в Транспорт) не мига — анимацията
+       бие инлайн фона и жълтото иначе не се вижда. Мигането се връща при
+       следващия рендер, когато подсветката вече е изчистена. */
+    var isHl=!!(window._coHighlightId&&String(window._coHighlightId)===String(o.id));
+    var rowStyle='border-left:3px solid '+bdrColor+';'+(urgent&&!isHl?'animation:rowPulseOpaque 2s infinite;':'');
     var storeCell=o.fulfiller&&o.fulfiller!==o.store_name
       ?'<div style="font-size:10px;color:#94a3b8;">Заявител:</div><b>'+esc(o.store_name||'')+'</b><div style="font-size:10px;color:#2563eb;margin-top:2px;">Изпълнява: <b>'+esc(o.fulfiller)+'</b></div>'
       :esc(o.store_name||'');
@@ -1063,7 +1067,7 @@ function renderClientOrders(){
       btns+='<button data-id="'+o.id+'" onclick="deleteClientOrder(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button>';
     }
     btns+='</div>';
-    if(window._coHighlightId&&String(window._coHighlightId)===String(o.id))rowStyle+='background:#fef9c3;';
+    if(isHl)rowStyle+='background:#fef9c3;';
     /* Целият ред отваря пълните данни. Клетката с клиента (панел „заявките на
        клиента", бадж на групата) и клетката с бутоните спират bubbling-а. */
     rowStyle+='cursor:pointer;';
