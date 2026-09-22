@@ -489,6 +489,31 @@ function submitCoProcessed(id){
   });
 }
 
+/* ═══ „📞 УВЕДОМЕН" — клиентът е уведомен за пристигналата стока ═══
+   Не сменя статуса: заявката остава arrived, докато не бъде предадена.
+   Името е display_name — същото поле като co_processed_by. */
+function markClientNotified(id){
+  sbPatch('client_orders','id=eq.'+id,{
+    client_notified_at:new Date().toISOString(),
+    client_notified_by:(currentUser&&currentUser.display_name)||null
+  }).then(function(res){
+    if(!res.ok){
+      console.error('markClientNotified: неуспешен запис',id);
+      toast('Грешка при запис','#dc2626');
+      return;
+    }
+    toast('✓ Клиентът е отбелязан като уведомен');
+    loadClientOrders();
+  });
+}
+/* Бадж (span, не бутон): дд.мм чч:мм в реда, пълната дата в title. */
+function coNotifiedBadge(o){
+  var full=coFmtStamp(o.client_notified_at);
+  var short=full.length>=16?full.slice(0,5)+' '+full.slice(11,16):full;
+  return '<span title="Клиентът уведомен: '+escAttr(full)+'" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;white-space:nowrap;">📞 уведомен'+
+    (o.client_notified_by?' · '+esc(o.client_notified_by):'')+' · '+short+'</span>';
+}
+
 /* ═══ МОДАЛ „ПЪЛНИ ДАННИ ЗА ЗАЯВКАТА" (само за четене) ═══
    Редът в таблицата показва само част от полетата — останалото се четеше
    единствено от печатната бланка или от базата. Този модал не записва нищо:
@@ -619,8 +644,12 @@ function openClientOrderDetail(id){
   var st=o._status||calcStatus(o.delivery,o.status);
   var days=calcElapsed(o.created_at,o.date);
   var badge=elapsedBadge(days,o.status,o);
+  var notified=o.client_notified_at
+    ? esc(o.client_notified_by||'')+(o.client_notified_by?' · ':'')+coFmtStamp(o.client_notified_at)
+    : '—';
   var statusHtml=coDetailRow('Статус',statusBadge(st)+lateBadge(o)+ptBadge(o))+
-    coDetailRow('Изминало',esc(String(days))+' дни'+(badge?' · '+badge:''));
+    coDetailRow('Изминало',esc(String(days))+' дни'+(badge?' · '+badge:''))+
+    coDetailRow('Клиентът уведомен',notified);
 
   var html='<div class="bov" id="cod-ov"><div class="bmod" style="width:560px;max-width:95vw;">'+
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px;">'+
@@ -971,11 +1000,17 @@ function renderClientOrders(){
         if(rawStatus==='sent'){
           btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;arrived&apos;)" style="border:1px solid #0369a1;background:#e0f2fe;color:#0369a1;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📦 Пристигнала</button>';
         } else if(rawStatus==='arrived'){
+          /* Магазинът отбелязва, че е звъннал на клиента — другата смяна вижда
+             кой и кога, за да не звъни втори път. */
+          btns+=o.client_notified_at?coNotifiedBadge(o)
+            :'<button data-id="'+o.id+'" onclick="markClientNotified(this.dataset.id)" title="Отбележи, че клиентът е уведомен за пристигналата стока" style="border:1px solid #0369a1;background:#e0f2fe;color:#0369a1;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📞 Уведомен</button>';
           btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;done&apos;)" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Изпълнена</button>';
         }
         btns+='<button data-id="'+o.id+'" onclick="openStatus(this.dataset.id,&apos;client_orders&apos;)" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">Статус</button>';
       }
     } else {
+      /* Баджът остава и след предаване — за история; бутон вече няма. */
+      if(isRequester&&o.client_notified_at)btns+=coNotifiedBadge(o);
       if(isRequester){
         btns+='<button data-id="'+o.id+'" onclick="revertStatus(this.dataset.id,&apos;client_orders&apos;)" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">↩ Върни</button>';
       }

@@ -200,7 +200,8 @@ const TESTS = [
   'bulletin-empty-recurring.test.js',
   'transit-auto-complete.test.js',
   'admin-reports.test.js',
-  'admin-role-view.test.js'
+  'admin-role-view.test.js',
+  'client-notified.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
