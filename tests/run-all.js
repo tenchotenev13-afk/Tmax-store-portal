@@ -201,7 +201,8 @@ const TESTS = [
   'transit-auto-complete.test.js',
   'admin-reports.test.js',
   'admin-role-view.test.js',
-  'client-notified.test.js'
+  'client-notified.test.js',
+  'co-filter-arrived.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
