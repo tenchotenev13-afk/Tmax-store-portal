@@ -1,5 +1,8 @@
 /* Пуска всички jsdom тестове на портала последователно.
    Спира при първия провал (exit 1); при пълен успех — обобщение и exit 0.
+   Изключение: тест, който ЗАБИЕ (над TEST_TIMEOUT_MS), се убива, отчита се
+   като ❌ „ЗАБИ" и пускът продължава със следващия — един увиснал тест не
+   бива да крие резултата на останалите. Общият резултат тогава е червен.
 
    Тестовете приемат корена на репото като argv[2]. Подаваме го явно,
    за да не зависи резултатът от това откъде е извикана командата.
@@ -13,6 +16,9 @@ const path = require('path');
 const fs = require('fs');
 
 const ROOT = path.join(__dirname, '..');
+/* Цял тест тече секунди; над 120 сек значи увиснал (22.09.2026 пакетът стоя
+   над 10 мин на task-report-schedule.test.js, който сам минава за 10 сек). */
+const TEST_TIMEOUT_MS = 120000;
 const TESTS = [
   'client-groups.test.js',
   'client-order-double-submit.test.js',
@@ -220,6 +226,7 @@ let totalOk = 0;
 let unknownCounts = 0;
 const rows = [];
 const warnings = [];
+const hung = [];
 
 for (let i = 0; i < TESTS.length; i++) {
   const name = TESTS[i];
@@ -231,9 +238,18 @@ for (let i = 0; i < TESTS.length; i++) {
   }
 
   console.log('\n━━━ ' + name + ' ━━━');
-  const res = spawnSync(process.execPath, [file, ROOT], { encoding: 'utf8' });
+  const res = spawnSync(process.execPath, [file, ROOT],
+    { encoding: 'utf8', timeout: TEST_TIMEOUT_MS, killSignal: 'SIGKILL' });
   const out = (res.stdout || '') + (res.stderr || '');
   process.stdout.write(out);
+
+  /* Забил тест: убит от timeout-а. Отчита се и се продължава. */
+  if ((res.error && res.error.code === 'ETIMEDOUT') || res.signal) {
+    console.error('\n❌ ЗАБИ (>' + (TEST_TIMEOUT_MS / 1000) + ' сек): ' + name +
+                  (res.signal ? ' — убит със ' + res.signal : ''));
+    hung.push(name);
+    continue;
+  }
 
   /* Единственият критерий за провал. */
   if (res.status !== 0) {
@@ -267,13 +283,21 @@ console.log('\n═════════════════════�
 rows.forEach(function (r) {
   console.log('✅ ' + r.name + '  —  ' + (r.ok === null ? 'брой неизвестен' : r.ok + ' проверки'));
 });
+hung.forEach(function (n) {
+  console.log('❌ ' + n + '  —  ЗАБИ (>' + (TEST_TIMEOUT_MS / 1000) + ' сек)');
+});
 console.log('─────────────────────────────');
-console.log('ОБЩО: ' + (unknownCounts ? 'поне ' : '') + totalOk +
-            ' проверки, 0 падащи (' + rows.length + ' теста, всички с exit 0)');
+if (hung.length) {
+  console.log('ОБЩО: ❌ ' + hung.length + ' от ' + TESTS.length + ' теста ЗАБИХА; останалите ' +
+              rows.length + ' минаха с ' + (unknownCounts ? 'поне ' : '') + totalOk + ' проверки');
+} else {
+  console.log('ОБЩО: ' + (unknownCounts ? 'поне ' : '') + totalOk +
+              ' проверки, 0 падащи (' + rows.length + ' теста, всички с exit 0)');
+}
 
 if (warnings.length) {
   console.log('\n⚠️  предупреждения (не влияят на резултата):');
   warnings.forEach(function (w) { console.log('   · ' + w); });
 }
 
-process.exit(0);
+process.exit(hung.length ? 1 : 0);
