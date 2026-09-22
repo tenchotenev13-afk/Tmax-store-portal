@@ -65,6 +65,36 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .co-sticky-actions table th:last-child{position:sticky;right:0;background:#fff;box-shadow:-6px 0 6px -6px rgba(0,0,0,.15);}
 .co-sticky-actions table th:last-child{background:var(--surf);}
 .co-sticky-actions tr:hover td:last-child{background:#fafafa;}
+/* Транспорт (.tbl-tr) и Клиентски заявки (.tbl-co): скролът е в самата
+   обвивка, затова хоризонталната лента е винаги долу на екрана, а не долу
+   на таблицата. Заглавията, „Клиент" и бутоните са закачени. z-index:
+   td 1 < th 2 < закачен th отляво/отдясно 3-4 (те са sticky и по top). */
+.tbl-wrap.co-sticky-actions{max-height:calc(100vh - 140px);overflow:auto;cursor:grab;}
+.tbl-wrap.co-sticky-actions.dragging{cursor:grabbing;user-select:none;}
+.co-sticky-actions table{min-width:1100px;}
+.co-sticky-actions thead th{position:sticky;top:0;z-index:2;background:var(--surf);}
+.co-sticky-actions table td:last-child{z-index:1;}
+.co-sticky-actions table th:last-child{z-index:4;}
+.tbl-tr td:nth-child(1),.tbl-tr td:nth-child(4),.tbl-tr td:nth-child(8),.tbl-tr td:nth-child(9),.tbl-tr td:nth-child(10),
+.tbl-co td:nth-child(2),.tbl-co td:nth-child(4),.tbl-co td:nth-child(9),.tbl-co td:nth-child(11),.tbl-co td:nth-child(12){white-space:nowrap;}
+/* Продукт и Адрес: пренасят се, 160–260px. Chrome не зачита max-width на
+   клетка сам — таванът държи само заедно с width (измерено: без него
+   Продукт стига 406px при широка таблица, с него спира на 260px). */
+.tbl-tr td:nth-child(5),.tbl-tr td:nth-child(6),.tbl-co td:nth-child(6){width:260px;min-width:160px;max-width:260px;white-space:normal;}
+.tbl-tr td:nth-child(2),.tbl-co td:nth-child(3){position:sticky;left:0;z-index:1;background:#fff;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
+.tbl-tr th:nth-child(2),.tbl-co th:nth-child(3){position:sticky;left:0;z-index:3;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
+/* Клиентски: № (90px) и Дата (80px) се закачват преди „Клиент" (left:170px).
+   Само на широк екран — на телефон три закачени колони заемат целия екран,
+   затова там се закачва само „Клиент", когато стигне левия ръб. */
+.tbl-co th:nth-child(1),.tbl-co td:nth-child(1){box-sizing:border-box;width:90px;min-width:90px;max-width:90px;}
+.tbl-co th:nth-child(2),.tbl-co td:nth-child(2){box-sizing:border-box;width:80px;min-width:80px;max-width:80px;padding-left:8px;padding-right:6px;}
+@media(min-width:768px){
+  .tbl-co td:nth-child(1),.tbl-co td:nth-child(2){position:sticky;z-index:1;background:#fff;}
+  .tbl-co th:nth-child(1),.tbl-co th:nth-child(2){z-index:3;}
+  .tbl-co th:nth-child(1),.tbl-co td:nth-child(1){position:sticky;left:0;}
+  .tbl-co th:nth-child(2),.tbl-co td:nth-child(2){position:sticky;left:90px;}
+  .tbl-co th:nth-child(3),.tbl-co td:nth-child(3){left:170px;}
+}
 table{width:100%;border-collapse:collapse;font-size:12px;}
 thead{background:var(--surf);}
 th{padding:9px 10px;text-align:left;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;}
@@ -72,6 +102,9 @@ td{padding:8px 10px;border-bottom:1px solid var(--border);vertical-align:top;}
 tr:last-child td{border-bottom:none;}
 tr:hover td{background:#fafafa;}
 .row-click:hover td{background:#eef2ff;}
+/* Hover покрива и закачените клетки (иначе стоят бели и изглеждат „изключени"). */
+.co-sticky-actions tr.row-click:hover td,
+.co-sticky-actions tr.row-click:hover td:last-child{background:#eef2ff;}
 .card{background:#fff;border:1px solid var(--border);border-radius:var(--r);padding:18px 20px;margin-bottom:14px;}
 .card-title{font-size:14px;font-weight:600;margin-bottom:12px;}
 .form-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
@@ -287,7 +320,7 @@ OneSignalDeferred.push(async function(OneSignal) {
       <input id="tr-search" placeholder="🔍 Търси клиент/продукт/SAP/бон/телефон..." oninput="renderTransport()" style="flex:1;min-width:220px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 14px;font-size:13px;font-family:inherit;outline:none;">
       <select id="tr-month" onchange="renderTransport()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
     </div>
-    <div class="tbl-wrap co-sticky-actions"><table>
+    <div class="tbl-wrap co-sticky-actions tbl-tr"><table>
       <thead><tr><th>Дата / Час</th><th>Клиент</th><th>SAP</th><th>Телефон</th><th>Адрес</th><th>Продукт</th><th>Бр.</th><th>Доставка</th><th>Статус</th><th>Магазин</th><th></th></tr></thead>
       <tbody id="tr-body"><tr><td colspan="10" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
     </table></div>
@@ -330,7 +363,7 @@ OneSignalDeferred.push(async function(OneSignal) {
       <select id="co-fulfiller-filter" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:180px;"><option value="">Изпълнява: всички</option></select>
       <select id="co-month" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
     </div>
-    <div class="tbl-wrap co-sticky-actions"><table>
+    <div class="tbl-wrap co-sticky-actions tbl-co"><table>
       <thead><tr><th>№</th><th>Дата / Час</th><th>Клиент</th><th>Телефон</th><th style="width:64px;">SAP</th><th>Продукт</th><th>Бр.</th><th>От магазин</th><th>Доставка</th><th>Изминало</th><th>Статус</th><th>Магазин</th><th></th></tr></thead>
       <tbody id="co-body"><tr><td colspan="13" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
     </table></div>

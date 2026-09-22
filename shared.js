@@ -781,6 +781,62 @@ function actionBtns(id,table,status,storeName){
   if(table==='transport_orders')h+='<button onclick="loadTransportPrint(\''+id+'\')" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">🖨 Бланка</button>';
   return h+'</div>';
 }
+/* Влачене с мишка за хоризонтален скрол на таблица (Транспорт, Клиентски).
+   САМО мишка — на телефон пръстът си скролира сам и не бива да се пипа.
+   Движение до 5px е клик (детайлът на реда се отваря); над 5px е влачене и
+   click-ът след него се спира в capture фазата, преди да стигне onclick-а
+   на реда. Натиснат button/a/input/select не влачи, но движението пак се
+   следи: пуснеш ли мишката върху друга клетка от реда, Chrome праща click
+   на общия родител — реда — и детайлът би се отворил (измерено на живо).
+   Затова и тогава click-ът се спира — освен ако е пуснат върху СЪЩИЯ
+   контрол (ръката е трепнала при нормален клик по бутона).
+   Закача се веднъж на елемент (el._dragScroll). */
+function enableDragScroll(el){
+  if(!el||el._dragScroll)return;
+  el._dragScroll=true;
+  var st=null,suppress=null;
+  el.addEventListener('pointerdown',function(e){
+    if(e.pointerType!=='mouse'||e.button!==0)return;
+    var t=e.target;
+    var ctl=(t&&t.closest)?t.closest('button,a,input,select,textarea,label'):null;
+    st={x:e.clientX,left:el.scrollLeft,id:e.pointerId,moved:false,ctl:ctl};
+  });
+  el.addEventListener('pointermove',function(e){
+    if(!st||e.pointerId!==st.id)return;
+    var dx=e.clientX-st.x;
+    if(!st.moved){
+      if(Math.abs(dx)<=5)return;
+      st.moved=true;
+      if(!st.ctl){
+        el.classList.add('dragging');
+        try{el.setPointerCapture(e.pointerId);}catch(x){}
+      }
+    }
+    if(st.ctl)return;
+    el.scrollLeft=st.left-dx;
+    e.preventDefault();
+  });
+  var end=function(){
+    if(!st)return;
+    if(st.moved){
+      el.classList.remove('dragging');
+      /* click-ът идва веднага след pointerup; ако не дойде, флагът пада
+         в следващия таск, за да не изяде по-късен истински клик. */
+      var mine=suppress={ctl:st.ctl};
+      setTimeout(function(){if(suppress===mine)suppress=null;},0);
+    }
+    st=null;
+  };
+  el.addEventListener('pointerup',end);
+  el.addEventListener('pointercancel',end);
+  el.addEventListener('click',function(e){
+    if(!suppress)return;
+    var s=suppress;suppress=null;
+    if(s.ctl&&s.ctl.contains(e.target))return;
+    e.stopPropagation();
+    e.preventDefault();
+  },true);
+}
 function openStatus(id,table){
   statusTargetId=id;statusTargetTable=table;
   var list=table==='transport_orders'?transportOrders:clientOrders;

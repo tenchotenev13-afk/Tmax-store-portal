@@ -44,6 +44,8 @@ function trBuildMonthOptions(){
 }
 
 function loadTransport(){
+  var trBody=document.getElementById('tr-body');
+  if(trBody)enableDragScroll(trBody.closest('.tbl-wrap'));
   var q='order=created_at.desc'+storeQ();
   sbGet('transport_orders',q).then(function(data){
     transportOrders=Array.isArray(data)?data:[];

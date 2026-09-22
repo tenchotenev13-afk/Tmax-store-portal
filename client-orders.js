@@ -916,6 +916,8 @@ function coIsMineToFulfill(o,names){
 }
 
 function loadClientOrders(){
+  var coBody=document.getElementById('co-body');
+  if(coBody)enableDragScroll(coBody.closest('.tbl-wrap'));
   loadOrderRestrictions();
   renderCoSapBanner();
   var q='order=created_at.desc';
