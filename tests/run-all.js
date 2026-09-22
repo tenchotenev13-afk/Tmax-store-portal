@@ -204,7 +204,8 @@ const TESTS = [
   'client-notified.test.js',
   'co-filter-arrived.test.js',
   'co-filter-store.test.js',
-  'transport-detail.test.js'
+  'transport-detail.test.js',
+  'contact-detail.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

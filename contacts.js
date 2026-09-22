@@ -117,7 +117,9 @@ function contactCard(c, isAdmin) {
   var initials=(c.name||'?').split(' ').slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase();
   var bgC=['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#0f172a'];
   var bg=bgC[(c.name.charCodeAt(0)||0)%bgC.length];
-  var h='<div style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;">';
+  /* Цялата картичка отваря детайла; бутоните и линковете спират bubbling-а,
+     за да не отварят детайла вместо своето действие. */
+  var h='<div data-id="'+esc(c.id)+'" onclick="openContactDetail(this.dataset.id)" title="Отвори контакта" style="background:#fff;border:1px solid #e2e8f0;border-radius:12px;overflow:hidden;cursor:pointer;">';
   h+='<div style="height:100px;background:linear-gradient(135deg,'+bg+','+bg+'bb);display:flex;align-items:center;justify-content:center;">';
   h+=c.photo_url
     ?'<img src="'+c.photo_url+'" style="width:72px;height:72px;border-radius:50%;object-fit:cover;border:3px solid rgba(255,255,255,.8);">'
@@ -126,17 +128,82 @@ function contactCard(c, isAdmin) {
   h+='<div style="padding:12px 14px;">';
   h+='<div style="font-size:14px;font-weight:600;color:#0f172a;margin-bottom:2px;">'+esc(c.name||'')+'</div>';
   if(c.role_title)h+='<div style="font-size:11px;color:#64748b;margin-bottom:6px;">'+esc(c.role_title)+'</div>';
-  if(c.phone)h+='<a href="tel:'+esc(c.phone)+'" style="display:flex;align-items:center;gap:6px;padding:4px 0;text-decoration:none;color:#0f172a;font-size:12.5px;border-bottom:1px solid #f8fafc;">📞 '+esc(c.phone)+'</a>';
-  if(c.email)h+='<a href="mailto:'+esc(c.email)+'" style="display:flex;align-items:center;gap:6px;padding:4px 0;text-decoration:none;color:#2563eb;font-size:12px;border-bottom:1px solid #f8fafc;">✉️ '+esc(c.email)+'</a>';
+  if(c.phone)h+='<a href="tel:'+esc(c.phone)+'" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:6px;padding:4px 0;text-decoration:none;color:#0f172a;font-size:12.5px;border-bottom:1px solid #f8fafc;">📞 '+esc(c.phone)+'</a>';
+  if(c.email)h+='<a href="mailto:'+esc(c.email)+'" onclick="event.stopPropagation()" style="display:flex;align-items:center;gap:6px;padding:4px 0;text-decoration:none;color:#2563eb;font-size:12px;border-bottom:1px solid #f8fafc;">✉️ '+esc(c.email)+'</a>';
   if(c.notes)h+='<div style="font-size:11px;color:#94a3b8;margin-top:6px;line-height:1.4;">'+esc(c.notes.slice(0,80))+(c.notes.length>80?'...':'')+'</div>';
   if(isAdmin){
     h+='<div style="display:flex;gap:6px;margin-top:10px;">';
-    h+='<button data-id="'+c.id+'" onclick="openContactModal(this.dataset.id)" style="flex:1;border:1px solid #e2e8f0;background:#f8fafc;border-radius:6px;padding:5px;font-size:12px;cursor:pointer;">✏️ Редактирай</button>';
-    h+='<button data-id="'+c.id+'" onclick="doDeleteContact(this.dataset.id)" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">✕</button>';
+    h+='<button data-id="'+c.id+'" onclick="event.stopPropagation();openContactModal(this.dataset.id)" style="flex:1;border:1px solid #e2e8f0;background:#f8fafc;border-radius:6px;padding:5px;font-size:12px;cursor:pointer;">✏️ Редактирай</button>';
+    h+='<button data-id="'+c.id+'" onclick="event.stopPropagation();doDeleteContact(this.dataset.id)" style="border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:6px;padding:5px 10px;font-size:12px;cursor:pointer;">✕</button>';
     h+='</div>';
   }
   h+='</div></div>';
   return h;
+}
+
+/* ═══ МОДАЛ „КОНТАКТ" (само за четене) ═══
+   По образец на openTransportDetail(): общите coDetailRow/coDetailSection,
+   overlay 'ctd-ov' и собствен Escape handler, който отстъпва, ако отгоре е
+   отворен друг детайл (cod-ov / trd-ov). Картичката реже бележките до 80
+   знака — тук се виждат цели, плюс полетата, които картичката не показва.
+   active / store_visible / created_at са системни флагове и не се показват. */
+var ctDetailEscHandler=null;
+function openContactDetail(id){
+  var c=allContacts.find(function(x){return String(x.id)===String(id);});
+  if(!c){toast('Контактът не е намерен','#dc2626');return;}
+  var name=c.name||'?';
+  var initials=name.split(' ').slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase();
+  var bgC=['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#0f172a'];
+  var bg=bgC[(name.charCodeAt(0)||0)%bgC.length];
+  var avatar=c.photo_url
+    ?'<img src="'+escAttr(c.photo_url)+'" style="width:64px;height:64px;border-radius:50%;object-fit:cover;flex:0 0 64px;">'
+    :'<div style="width:64px;height:64px;flex:0 0 64px;border-radius:50%;background:'+bg+';display:flex;align-items:center;justify-content:center;font-size:24px;font-weight:700;color:#fff;">'+esc(initials)+'</div>';
+
+  var isSupplier=c.type==='supplier';
+  var telRaw=String(c.phone||'').replace(/[^\d+]/g,'');
+  var rows='';
+  if(c.phone)rows+=coDetailRow('Телефон',telRaw
+    ?'<a href="tel:'+escAttr(telRaw)+'" style="color:#2563eb;text-decoration:none;font-family:monospace;">'+esc(c.phone)+'</a>'
+    :esc(c.phone));
+  if(c.email)rows+=coDetailRow('Имейл','<a href="mailto:'+escAttr(c.email)+'" style="color:#2563eb;text-decoration:none;">'+esc(c.email)+'</a>');
+  if(c.category)rows+=coDetailRow(isSupplier?'Категория':'Отдел / Категория',esc(c.category));
+  if(c.store_name)rows+=coDetailRow('Магазин',esc(c.store_name));
+  if(c.address)rows+=coDetailRow('Адрес',esc(c.address));
+
+  var editBtn=isAdminContacts()
+    ?'<button data-id="'+escAttr(c.id)+'" onclick="closeContactDetail();openContactModal(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">✏️ Редактирай</button>'
+    :'';
+
+  var html='<div class="bov" id="ctd-ov"><div class="bmod" style="width:480px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">'+
+      '<div style="display:flex;gap:14px;align-items:center;min-width:0;">'+avatar+
+        '<div style="min-width:0;"><div style="font-size:16px;font-weight:600;color:#0f172a;word-break:break-word;">'+esc(c.name||'')+'</div>'+
+        (c.role_title?'<div style="font-size:12px;color:#64748b;margin-top:2px;">'+esc(c.role_title)+'</div>':'')+
+        '<div style="font-size:11px;color:#94a3b8;margin-top:2px;">'+(isSupplier?'🏭 Доставчик':'👥 Контакт')+'</div></div></div>'+
+      '<button onclick="closeContactDetail()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    coDetailSection('Данни',rows)+
+    coDetailSection('Бележки',c.notes?'<div style="font-size:12.5px;color:#1e293b;white-space:pre-wrap;word-break:break-word;line-height:1.45;">'+esc(c.notes)+'</div>':'')+
+    '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px;">'+editBtn+
+      '<button onclick="closeContactDetail()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Затвори</button>'+
+    '</div></div></div>';
+
+  var ex=document.getElementById('ctd-ov');if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('ctd-ov').classList.add('open');
+  if(ctDetailEscHandler)document.removeEventListener('keydown',ctDetailEscHandler);
+  ctDetailEscHandler=function(e){
+    if(e.key!=='Escape')return;
+    if(document.getElementById('cod-ov')||document.getElementById('trd-ov'))return;
+    closeContactDetail();
+  };
+  document.addEventListener('keydown',ctDetailEscHandler);
+}
+function closeContactDetail(){
+  var el=document.getElementById('ctd-ov');if(el)el.remove();
+  if(ctDetailEscHandler){
+    document.removeEventListener('keydown',ctDetailEscHandler);
+    ctDetailEscHandler=null;
+  }
 }
 
 function doDeleteContact(id){
