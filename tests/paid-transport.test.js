@@ -147,13 +147,15 @@ function boot(opts) {
   return { w, calls, doc: w.document };
 }
 
-/* Истински клик: изпълнява onclick атрибута точно както браузърът, с this=елемента */
+/* Истински клик: изпълнява onclick атрибута точно както браузърът, с this=елемента
+   и с `event` — браузърът го подава на всеки inline handler, а баджът в реда на
+   Транспорт вика event.stopPropagation(), за да не отваря детайла на реда. */
 function realClick(w, el) {
   if (!el) throw new Error('елементът не съществува');
   const code = el.getAttribute('onclick');
   if (!code) throw new Error('няма onclick: ' + el.outerHTML.slice(0, 140));
-  const fn = w.eval('(function(el){ (function(){' + code + '}).call(el); })');
-  fn(el);
+  const fn = w.eval('(function(el,event){ (function(){' + code + '}).call(el); })');
+  fn(el, { type: 'click', target: el, stopPropagation() {}, preventDefault() {} });
 }
 function fireChange(w, el) {
   const fn = w.eval('(function(el){ (function(){' + el.getAttribute('onchange') + '}).call(el); })');

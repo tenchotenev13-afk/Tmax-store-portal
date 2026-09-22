@@ -106,8 +106,10 @@ function renderTransport(){
     else if(o._status==='overdue'||o._status==='today') anim='animation:rowPulse 1.8s infinite;';
     else if(o._status==='tomorrow') anim='animation:rowPulseSoft 2.5s infinite;';
     var hl=(window._trHighlightId&&String(window._trHighlightId)===String(o.id))?'background:#fef9c3;':'';
-    return '<tr id="tr-row-'+esc(o.id)+'" style="border-left:3px solid '+bdrColor+';'+anim+hl+'">'+
-      '<td data-id="'+esc(o.id)+'" onclick="openTransportDetail(this.dataset.id)" title="Отвори заявката" style="font-size:11px;cursor:pointer;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
+    /* Целият ред отваря детайла; клетката с бутоните и баджът на клиентската
+       заявка спират bubbling-а, за да вършат само своето. */
+    return '<tr id="tr-row-'+esc(o.id)+'" class="row-click" data-id="'+esc(o.id)+'" onclick="openTransportDetail(this.dataset.id)" title="Отвори заявката" style="border-left:3px solid '+bdrColor+';'+anim+hl+'cursor:pointer;">'+
+      '<td style="font-size:11px;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
       '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small>'+coLinkBadge(o)+'</td>'+
       '<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>'+
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
@@ -117,7 +119,7 @@ function renderTransport(){
       '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
       '<td>'+statusBadge(o._status)+lateBadge(o)+'</td>'+
       '<td>'+esc(o.store_name||'')+'</td>'+
-      '<td>'+actionBtns(o.id,'transport_orders',o._status,o.store_name)+'</td></tr>';
+      '<td onclick="event.stopPropagation()" style="cursor:default;">'+actionBtns(o.id,'transport_orders',o._status,o.store_name)+'</td></tr>';
   }).join('');
   /* Подсветка + скрол към реда, отворен от бутона 🚚 в Клиентски заявки */
   if(window._trHighlightId){
@@ -133,7 +135,7 @@ function coLinkBadge(o){
   if(!o.client_order_id&&!o.client_order_num)return '';
   var num=o.client_order_num?'№'+esc(o.client_order_num):'';
   return '<div style="margin-top:3px;">'+
-    '<span onclick="gotoLinkedClientOrder(\''+esc(o.client_order_id||'')+'\')" title="Отвори свързаната клиентска заявка" '+
+    '<span onclick="event.stopPropagation();gotoLinkedClientOrder(\''+esc(o.client_order_id||'')+'\')" title="Отвори свързаната клиентска заявка" '+
     'style="font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;background:#eff6ff;color:#1d4ed8;cursor:pointer;">📋 Клиентска заявка '+num+'</span></div>';
 }
 function gotoLinkedClientOrder(coId){

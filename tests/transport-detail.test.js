@@ -1,6 +1,9 @@
-/* Детайл на транспортна заявка при клик по клетката Дата/Час.
-   По образец на co-detail-modal: истински клик по onclick атрибута на
-   клетката, истински keydown за Escape, listener-ите се броят през обвивка
+/* Детайл на транспортна заявка при клик по реда.
+   Целият <tr> отваря детайла; клетката с бутоните и баджът на клиентската
+   заявка спират bubbling-а. realClick() от harness-а не симулира bubbling,
+   затова bubbleClick() минава от клетката нагоре по родителите с истински
+   обект event и спира при event.stopPropagation() — както браузърът.
+   Истински keydown за Escape, listener-ите се броят през обвивка
    на document.addEventListener/removeEventListener.
 
    Всички проверки са с null-защита — срещу стария код (без модала) тестът
@@ -11,7 +14,7 @@
 'use strict';
 
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, realClick, btnExact, ok, guard, section, report, dayOffset, tsOffset } = H;
+const { boot, realClick, btn, btnExact, ok, guard, section, report, dayOffset, tsOffset } = H;
 
 const TRANSPORT = [
   { id: 't-1', store_name: 'Троян', date: dayOffset(-1), hour: '14:30', bon: 'Б-7781',
@@ -67,27 +70,50 @@ function env() {
 }
 
 const esc = w => w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-const dateCell = (doc, id) => {
+const dateCell = (doc, id) => cellAt(doc, id, 0);
+const cellAt = (doc, id, i) => {
   const row = doc.getElementById('tr-row-' + id);
-  return row ? row.querySelector('td') : null;
+  return row ? row.querySelectorAll('td')[i] || null : null;
 };
+/* Клик с bubbling; връща изпълнените onclick-и. */
+function bubbleClick(w, el) {
+  const ran = [];
+  let stopped = false;
+  const ev = { type: 'click', target: el, stopPropagation() { stopped = true; }, preventDefault() {} };
+  for (let n = el; n && n.getAttribute && !stopped; n = n.parentElement) {
+    const code = n.getAttribute('onclick');
+    if (!code) continue;
+    ran.push(code);
+    w.eval('(function(event){' + code + '})').call(n, ev);
+  }
+  return ran;
+}
 
 (async function run() {
 
-  section('1. Клетката Дата/Час е кликаема — само тя');
+  section('1. Целият ред е кликаем — onclick стои на <tr>, не на клетка');
   {
     const { doc } = env();
-    const td = dateCell(doc, 't-1');
-    ok('редът t-1 съществува', !!td);
-    ok('първата клетка вика openTransportDetail(this.dataset.id)',
-      !!td && td.getAttribute('onclick') === 'openTransportDetail(this.dataset.id)', td && td.getAttribute('onclick'));
-    ok('data-id="t-1"', !!td && td.getAttribute('data-id') === 't-1');
+    const tr = doc.getElementById('tr-row-t-1');
+    ok('редът t-1 съществува', !!tr);
+    ok('<tr> вика openTransportDetail(this.dataset.id)',
+      !!tr && tr.getAttribute('onclick') === 'openTransportDetail(this.dataset.id)', tr && tr.getAttribute('onclick'));
+    ok('data-id="t-1"', !!tr && tr.getAttribute('data-id') === 't-1');
     ok('title „Отвори заявката" и cursor:pointer',
-      !!td && td.getAttribute('title') === 'Отвори заявката' && /cursor:pointer/.test(td.getAttribute('style') || ''));
-    const row = doc.getElementById('tr-row-t-1');
-    const others = row ? Array.prototype.filter.call(row.querySelectorAll('td'),
+      !!tr && tr.getAttribute('title') === 'Отвори заявката' && /cursor:pointer/.test(tr.getAttribute('style') || ''));
+    ok('клас row-click (hover само за Транспорт)', !!tr && tr.classList.contains('row-click'));
+    const cells = tr ? Array.prototype.filter.call(tr.querySelectorAll('td'),
       c => /openTransportDetail/.test(c.getAttribute('onclick') || '')) : [];
-    ok('никоя друга клетка не отваря детайла', others.length === 1, others.length);
+    ok('никоя клетка няма собствен openTransportDetail', !!tr && cells.length === 0, cells.length);
+    const td0 = dateCell(doc, 't-1');
+    const tr2 = doc.getElementById('tr-row-t-2');
+    const st2 = tr2 ? tr2.getAttribute('style') || '' : '';
+    ok('t-2 (доставка утре) пази animation:rowPulseSoft и има cursor:pointer',
+      /animation:rowPulseSoft/.test(st2) && /cursor:pointer/.test(st2), st2);
+    const css = Array.prototype.map.call(doc.querySelectorAll('style'), s => s.textContent).join('\n');
+    ok('index.html: .row-click:hover td{background:#f8fafc;}', /\.row-click:hover td\{background:#f8fafc;\}/.test(css));
+    ok('глобалното tr:hover td е непипнато', /(^|\})\s*tr:hover td\{background:#fafafa;\}/m.test(css));
+    ok('клетката Дата/Час вече е без title/cursor',!!td0 && !td0.getAttribute('title') && !/cursor/.test(td0.getAttribute('style') || ''));
   }
 
   section('2. Клик → #trd-ov с клиента и ВСИЧКИ артикули');
@@ -95,7 +121,7 @@ const dateCell = (doc, id) => {
     const { w, doc, keydownCount } = env();
     const td = dateCell(doc, 't-1');
     const before = keydownCount();
-    if (td) guard('клик по Дата/Час', () => realClick(w, td, 'Дата/Час'));
+    if (td) guard('клик по Дата/Час', () => bubbleClick(w, td));
     const ov = doc.getElementById('trd-ov');
     ok('#trd-ov се появява', !!ov);
     ok('не е cod-ov', !doc.getElementById('cod-ov'));
@@ -121,14 +147,14 @@ const dateCell = (doc, id) => {
     const { w, doc, keydownCount } = env();
     const before = keydownCount();
     const td = dateCell(doc, 't-1');
-    if (td) guard('клик', () => realClick(w, td, 'Дата/Час'));
+    if (td) guard('клик', () => bubbleClick(w, td));
     ok('отворен', !!doc.getElementById('trd-ov'));
     guard('Escape', () => esc(w));
     ok('Escape го затваря', !doc.getElementById('trd-ov'));
     ok('listener-ът е махнат', keydownCount() === before, keydownCount() - before);
     ok('втори Escape не хвърля', guard('втори Escape', () => esc(w)));
     /* Отваряне два пъти поред не трупа listener-и */
-    if (td) { guard('клик 1', () => realClick(w, td, 'Дата/Час')); guard('клик 2', () => realClick(w, td, 'Дата/Час')); }
+    if (td) { guard('клик 1', () => bubbleClick(w, td)); guard('клик 2', () => bubbleClick(w, td)); }
     ok('двойно отваряне → пак един listener', keydownCount() === before + 1, keydownCount() - before);
     ok('и само един #trd-ov', doc.querySelectorAll('#trd-ov').length === 1);
     const x = doc.getElementById('trd-ov') && btnExact(doc.getElementById('trd-ov'), 'Затвори');
@@ -140,7 +166,7 @@ const dateCell = (doc, id) => {
   {
     const { w, doc } = env();
     const td = dateCell(doc, 't-2');
-    if (td) guard('клик', () => realClick(w, td, 'Дата/Час'));
+    if (td) guard('клик', () => bubbleClick(w, td));
     const ov = doc.getElementById('trd-ov');
     const t = ov ? ov.textContent : '';
     ok('модалът се отваря', !!ov);
@@ -157,7 +183,7 @@ const dateCell = (doc, id) => {
   {
     const { w, doc } = env();
     const td = dateCell(doc, 't-1');
-    if (td) guard('клик', () => realClick(w, td, 'Дата/Час'));
+    if (td) guard('клик', () => bubbleClick(w, td));
     const ov = doc.getElementById('trd-ov');
     const b = ov && btnExact(ov, '→ отвори');
     ok('бутонът „→ отвори" е <button>', !!b && b.tagName === 'BUTTON');
@@ -175,7 +201,7 @@ const dateCell = (doc, id) => {
   {
     const { w, doc } = env();
     const td = dateCell(doc, 't-1');
-    if (td) guard('клик', () => realClick(w, td, 'Дата/Час'));
+    if (td) guard('клик', () => bubbleClick(w, td));
     guard('openClientOrderDetail(co-9) отгоре', () => w.openClientOrderDetail('co-9'));
     ok('и двата са отворени', !!doc.getElementById('trd-ov') && !!doc.getElementById('cod-ov'));
     guard('Escape', () => esc(w));
@@ -183,6 +209,48 @@ const dateCell = (doc, id) => {
     ok('транспортният остава', !!doc.getElementById('trd-ov'));
     guard('Escape 2', () => esc(w));
     ok('втори Escape затваря и транспортния', !doc.getElementById('trd-ov'));
+  }
+
+  section('7. Клик по Адрес и по Продукт отваря; „Статус" и баджът — не');
+  {
+    const { w, doc } = env();
+    const tr = doc.getElementById('tr-row-t-1');
+    const table = doc.getElementById('tr-body') && doc.getElementById('tr-body').closest('table');
+    const heads = table ? Array.prototype.map.call(table.querySelectorAll('thead th'), th => th.textContent.trim()) : [];
+    const col = name => heads.findIndex(h => h.indexOf(name) >= 0);
+    const iAddr = col('Адрес'), iProd = col('Продукт');
+    ok('колоните Адрес и Продукт се намират по заглавие', iAddr >= 0 && iProd >= 0, JSON.stringify(heads));
+    const addr = cellAt(doc, 't-1', iAddr), prod = cellAt(doc, 't-1', iProd);
+    ok('клетката Адрес е адресът', !!addr && addr.textContent.indexOf('Васил Левски') >= 0);
+    ok('клетката Продукт е продуктът', !!prod && prod.textContent.indexOf('ПАРКЕТ') >= 0);
+    if (addr) guard('клик по Адрес', () => bubbleClick(w, addr));
+    ok('Адрес → #trd-ov', !!doc.getElementById('trd-ov'));
+    guard('Затвори', () => w.closeTransportDetail());
+    if (prod) guard('клик по Продукт', () => bubbleClick(w, prod));
+    ok('Продукт → #trd-ov', !!doc.getElementById('trd-ov'));
+    guard('Затвори', () => w.closeTransportDetail());
+
+    const status = tr && btnExact(tr, 'Статус');
+    ok('„Статус" е в реда', !!status);
+    const opened = [];
+    w.openStatus = (id, t) => opened.push(id + '/' + t);
+    if (status) guard('клик „Статус"', () => bubbleClick(w, status));
+    ok('„Статус" си върши работата (openStatus)', JSON.stringify(opened) === '["t-1/transport_orders"]', JSON.stringify(opened));
+    ok('„Статус" НЕ отваря #trd-ov', !doc.getElementById('trd-ov'));
+
+    const print = tr && btn(tr, 'Бланка');
+    w.loadTransportPrint = () => {};
+    if (print) guard('клик „Бланка"', () => bubbleClick(w, print));
+    ok('„🖨 Бланка" НЕ отваря #trd-ov', !!print && !doc.getElementById('trd-ov'));
+
+    const badge = tr && Array.prototype.filter.call(tr.querySelectorAll('span'),
+      s => /gotoLinkedClientOrder/.test(s.getAttribute('onclick') || ''))[0];
+    ok('баджът „📋 Клиентска заявка" е в реда', !!badge);
+    const went = [];
+    w.gotoLinkedClientOrder = id => went.push(id);
+    if (badge) guard('клик по баджа', () => bubbleClick(w, badge));
+    ok('баджът води към клиентската заявка', JSON.stringify(went) === '["co-9"]', JSON.stringify(went));
+    ok('баджът НЕ отваря #trd-ov', !doc.getElementById('trd-ov'));
   }
 
   report();
