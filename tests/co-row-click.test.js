@@ -1,7 +1,7 @@
 /* Клиентски заявки: целият ред отваря детайла (#cod-ov).
-   По образец на transport-detail.test.js: realClick() от harness-а не
-   симулира bubbling, затова bubbleClick() минава от клетката нагоре по
-   родителите с истински обект event и спира при event.stopPropagation().
+   По образец на transport-detail.test.js: кликовете минават през
+   bubbleClick() от harness-а — нагоре по родителите, стоп при
+   event.stopPropagation(), както браузърът.
 
    Клетката с клиента (име → панел „заявките на клиента", бадж на групата)
    и клетката с бутоните спират bubbling-а — те НЕ отварят #cod-ov.
@@ -14,7 +14,7 @@
 'use strict';
 
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, ok, guard, section, report, dayOffset, tsOffset } = H;
+const { boot, bubbleClick, ok, guard, section, report, dayOffset, tsOffset } = H;
 
 function order(id, extra) {
   return Object.assign({
@@ -56,18 +56,6 @@ function env() {
   return h;
 }
 
-function bubbleClick(w, el) {
-  const ran = [];
-  let stopped = false;
-  const ev = { type: 'click', target: el, stopPropagation() { stopped = true; }, preventDefault() {} };
-  for (let n = el; n && n.getAttribute && !stopped; n = n.parentElement) {
-    const code = n.getAttribute('onclick');
-    if (!code) continue;
-    ran.push(code);
-    w.eval('(function(event){' + code + '})').call(n, ev);
-  }
-  return ran;
-}
 
 /* Клетките се намират по заглавие на колона, не по номер */
 function colIndex(doc, name) {

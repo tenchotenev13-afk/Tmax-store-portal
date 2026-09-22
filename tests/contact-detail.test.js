@@ -1,10 +1,8 @@
 /* Детайл на контакт при клик върху картичката (#ctd-ov).
 
-   realClick() от harness-а изпълнява само onclick-а на самия елемент — не
-   симулира bubbling. Тук точно bubbling-ът е същността („Редактирай" НЕ
-   трябва да отваря детайла), затова bubbleClick() минава от елемента нагоре
-   по родителите, изпълнява всеки inline onclick с истински обект event и
-   спира, щом някой извика event.stopPropagation() — както браузърът.
+   Тук bubbling-ът е същността („Редактирай" НЕ трябва да отваря детайла),
+   затова кликовете минават през bubbleClick() от harness-а: от елемента
+   нагоре по родителите, стоп при event.stopPropagation() — както браузърът.
 
    Всички проверки са с null-защита: срещу стария код тестът дава ЧИСТ
    доклад с ❌, не хвърлена грешка.
@@ -14,7 +12,7 @@
 'use strict';
 
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, btn, ok, guard, section, report, ticks } = H;
+const { boot, bubbleClick, btn, ok, guard, section, report, ticks } = H;
 
 const LONG = 'Отговаря за доставките към всички обекти в Северна България. ' +
   'Звъни се само в работно време.\nПри спешност — на втория номер.\nКРАЙ-НА-БЕЛЕЖКАТА';
@@ -51,19 +49,6 @@ async function env(user, tab) {
   return h;
 }
 
-/* Клик с bubbling. Връща списък с onclick-ите, които са се изпълнили. */
-function bubbleClick(w, el) {
-  const ran = [];
-  let stopped = false;
-  const ev = { type: 'click', target: el, stopPropagation() { stopped = true; }, preventDefault() {} };
-  for (let n = el; n && n.getAttribute && !stopped; n = n.parentElement) {
-    const code = n.getAttribute('onclick');
-    if (!code) continue;
-    ran.push(code);
-    w.eval('(function(event){' + code + '})').call(n, ev);
-  }
-  return ran;
-}
 const guardedBubble = (w, el, label) => guard(label, () => bubbleClick(w, el));
 
 const card = (doc, id) => doc.querySelector('#contacts-grid [data-id="' + id + '"][onclick*="openContactDetail"]');

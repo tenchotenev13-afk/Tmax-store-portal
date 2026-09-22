@@ -17,9 +17,11 @@ function ok(name, cond, extra) {
 }
 function section(t) { console.log('\n=== ' + t + ' ==='); }
 
-/* dayOffset()/tsOffset() от harness-а — ползват ЛОКАЛНИ getter-и, не
-   toISOString(). Файлът има собствен boot(), взима само датите. */
-const { dayOffset, tsOffset } = require('../.claude/skills/tmax-jsdom-test/harness');
+/* Файлът има собствен boot(); от harness-а взима:
+   - dayOffset()/tsOffset() — ЛОКАЛНИ getter-и, не toISOString();
+   - realClick() — подава и `event`, както браузърът (баджът в реда на
+     Транспорт вика event.stopPropagation()). */
+const { dayOffset, tsOffset, realClick } = require('../.claude/skills/tmax-jsdom-test/harness');
 
 /* ── Дати спрямо ДНЕС ───────────────────────────────────────────────────────
    calcStatus() сравнява delivery с днешната дата, затова фикстурите НЕ бива
@@ -147,16 +149,6 @@ function boot(opts) {
   return { w, calls, doc: w.document };
 }
 
-/* Истински клик: изпълнява onclick атрибута точно както браузърът, с this=елемента
-   и с `event` — браузърът го подава на всеки inline handler, а баджът в реда на
-   Транспорт вика event.stopPropagation(), за да не отваря детайла на реда. */
-function realClick(w, el) {
-  if (!el) throw new Error('елементът не съществува');
-  const code = el.getAttribute('onclick');
-  if (!code) throw new Error('няма onclick: ' + el.outerHTML.slice(0, 140));
-  const fn = w.eval('(function(el,event){ (function(){' + code + '}).call(el); })');
-  fn(el, { type: 'click', target: el, stopPropagation() {}, preventDefault() {} });
-}
 function fireChange(w, el) {
   const fn = w.eval('(function(el){ (function(){' + el.getAttribute('onchange') + '}).call(el); })');
   fn(el);

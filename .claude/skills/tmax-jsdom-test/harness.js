@@ -286,15 +286,57 @@ function boot(opts) {
    Истински кликове
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/* Изпълнява inline onclick атрибута с правилен `this`.
+/* Обектът `event`, който браузърът подава на всеки inline handler.
+   Без него onclick="event.stopPropagation();…" гърми само в теста
+   („Cannot read properties of undefined") — порталът го ползва в реда на
+   Транспорт, Клиентски заявки, картичките в Контакти и Документи. */
+function mkEvent(type, target, currentTarget) {
+  const ev = {
+    type, target, currentTarget,
+    defaultPrevented: false, propagationStopped: false,
+    stopPropagation() { ev.propagationStopped = true; },
+    stopImmediatePropagation() { ev.propagationStopped = true; },
+    preventDefault() { ev.defaultPrevented = true; }
+  };
+  return ev;
+}
+/* Изпълнява code като inline handler: `this` = елементът, `event` = ev. */
+function runInline(w, el, code, ev) {
+  w.eval('(function(event){' + code + '})').call(el, ev);
+}
+
+/* Изпълнява inline onclick атрибута с правилен `this` и с `event`.
    Точно това хваща escaping бъговете, които изглеждат наред при четене на
-   markup-а (напр. апостроф в име на клиент, който чупи onclick стринга). */
+   markup-а (напр. апостроф в име на клиент, който чупи onclick стринга).
+   САМО onclick-а на самия елемент — без bubbling; за него виж bubbleClick().
+   Връща event обекта (напр. за проверка на propagationStopped). */
 function realClick(w, el, label) {
   if (!el) throw new Error('елементът не съществува' + (label ? ' (' + label + ')' : ''));
   const code = el.getAttribute('onclick');
   if (!code) throw new Error('няма onclick атрибут: ' + el.outerHTML.slice(0, 160));
-  const fn = w.eval('(function(el){ (function(){' + code + '}).call(el); })');
-  fn(el);
+  const ev = mkEvent('click', el, el);
+  runInline(w, el, code, ev);
+  return ev;
+}
+
+/* Клик с bubbling, както в браузъра: от el нагоре по родителите изпълнява
+   всеки inline onclick (currentTarget = текущият родител) и спира, щом някой
+   извика event.stopPropagation(). Нужен е, когато onclick стои на <tr> или
+   на картичка, а се кликва клетка/текст вътре — realClick() би гръмнал с
+   „няма onclick", а и не би проверил, че бутонът спира bubbling-а.
+   Връща масив с изпълнените onclick кодове (по ред). */
+function bubbleClick(w, el, label) {
+  if (!el) throw new Error('елементът не съществува' + (label ? ' (' + label + ')' : ''));
+  const ev = mkEvent('click', el, el);
+  const ran = [];
+  for (let n = el; n && n.getAttribute && !ev.propagationStopped; n = n.parentElement) {
+    const code = n.getAttribute('onclick');
+    if (!code) continue;
+    ev.currentTarget = n;
+    ran.push(code);
+    runInline(w, n, code, ev);
+  }
+  return ran;
 }
 
 /* Клик, който НЕ гърми — за проверка "този бутон не хвърля".
@@ -310,8 +352,9 @@ function fire(w, el, event) {
   if (!el) throw new Error('елементът не съществува');
   const code = el.getAttribute(attr);
   if (!code) throw new Error('няма ' + attr + ': ' + el.outerHTML.slice(0, 160));
-  const fn = w.eval('(function(el){ (function(){' + code + '}).call(el); })');
-  fn(el);
+  const ev = mkEvent(event, el, el);
+  runInline(w, el, code, ev);
+  return ev;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -372,7 +415,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
 const ticks = async n => { for (let i = 0; i < (n || 3); i++) await tick(); };
 
 module.exports = {
-  boot, realClick, tryClick, fire,
+  boot, realClick, bubbleClick, tryClick, fire,
   btn, btnExact, ctrl, allBtns,
   ok, section, report, guard,
   dayOffset, tsOffset, tick, ticks,

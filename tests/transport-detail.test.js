@@ -1,8 +1,7 @@
 /* Детайл на транспортна заявка при клик по реда.
    Целият <tr> отваря детайла; клетката с бутоните и баджът на клиентската
-   заявка спират bubbling-а. realClick() от harness-а не симулира bubbling,
-   затова bubbleClick() минава от клетката нагоре по родителите с истински
-   обект event и спира при event.stopPropagation() — както браузърът.
+   заявка спират bubbling-а — кликовете минават през bubbleClick() от
+   harness-а (нагоре по родителите, стоп при event.stopPropagation()).
    Истински keydown за Escape, listener-ите се броят през обвивка
    на document.addEventListener/removeEventListener.
 
@@ -14,7 +13,7 @@
 'use strict';
 
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, realClick, btn, btnExact, ok, guard, section, report, dayOffset, tsOffset } = H;
+const { boot, realClick, bubbleClick, btn, btnExact, ok, guard, section, report, dayOffset, tsOffset } = H;
 
 const TRANSPORT = [
   { id: 't-1', store_name: 'Троян', date: dayOffset(-1), hour: '14:30', bon: 'Б-7781',
@@ -75,19 +74,6 @@ const cellAt = (doc, id, i) => {
   const row = doc.getElementById('tr-row-' + id);
   return row ? row.querySelectorAll('td')[i] || null : null;
 };
-/* Клик с bubbling; връща изпълнените onclick-и. */
-function bubbleClick(w, el) {
-  const ran = [];
-  let stopped = false;
-  const ev = { type: 'click', target: el, stopPropagation() { stopped = true; }, preventDefault() {} };
-  for (let n = el; n && n.getAttribute && !stopped; n = n.parentElement) {
-    const code = n.getAttribute('onclick');
-    if (!code) continue;
-    ran.push(code);
-    w.eval('(function(event){' + code + '})').call(n, ev);
-  }
-  return ran;
-}
 
 (async function run() {
 

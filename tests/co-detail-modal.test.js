@@ -22,7 +22,7 @@
 'use strict';
 
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, realClick, btnExact, ok, guard, section, report,
+const { boot, realClick, bubbleClick, btnExact, ok, guard, section, report,
         dayOffset, tsOffset, ticks } = H;
 
 const CO = 'Централен офис';
@@ -125,17 +125,8 @@ const modal = doc => doc.getElementById('cod-ov');
 const modalText = doc => { const m = modal(doc); return m ? m.textContent : ''; };
 function cells(doc, id) { return doc.getElementById('co-row-' + id).querySelectorAll('td'); }
 /* От 22.09.2026 целият ред отваря модала (onclick на <tr>), а клетките
-   „Клиент" и бутоните спират bubbling-а. realClick() изпълнява само onclick-а
-   на самия елемент, затова кликът по клетка минава през bubbleClick():
-   нагоре по родителите с обект event, стоп при event.stopPropagation(). */
-function bubbleClick(w, el) {
-  let stopped = false;
-  const ev = { type: 'click', target: el, stopPropagation() { stopped = true; }, preventDefault() {} };
-  for (let n = el; n && n.getAttribute && !stopped; n = n.parentElement) {
-    const code = n.getAttribute('onclick');
-    if (code) w.eval('(function(event){' + code + '})').call(n, ev);
-  }
-}
+   „Клиент" и бутоните спират bubbling-а — затова кликът по клетка минава
+   през bubbleClick() от harness-а, не през realClick(). */
 function pressEsc(w) {
   w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 }

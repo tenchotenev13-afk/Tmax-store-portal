@@ -135,9 +135,11 @@ const h = boot({
 ### Кликове
 
 ```js
-realClick(w, el)          // изпълнява onclick с правилен `this` — истински клик
-tryClick(w, el)           // същото, но връща грешката вместо да хвърли
-fire(w, el, 'change')     // onchange / oninput / onsubmit
+realClick(w, el)          // изпълнява onclick с правилен `this` и `event` — истински клик, БЕЗ bubbling
+bubbleClick(w, el)        // клик с bubbling: onclick-ите от el нагоре, стоп при event.stopPropagation()
+                          // (onclick на <tr>/картичка, а се кликва клетка вътре); връща изпълнените кодове
+tryClick(w, el)           // като realClick, но връща грешката вместо да хвърли
+fire(w, el, 'change')     // onchange / oninput / onsubmit — също с `event`
 ```
 
 ### Търсене на елементи
