@@ -398,7 +398,7 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
         '<td style="padding:7px 10px;font-size:11px;color:#64748b;">'+esc(r.supplier||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.material_code||'')+'</td>'+
-        '<td style="padding:7px 10px;max-width:200px;">'+esc(r.material_name||'')+'</td>'+
+        '<td style="padding:7px 10px;max-width:200px;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+'</td>'+
         '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+sdQtyCell(r.quantity,(r.quantity)||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.order_number||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.confirmed_date)+'</td>'+
@@ -1027,6 +1027,55 @@ function submitWarehouseResponse(lineId,val){
 /* Автоматично създава запис в "За връщане" (source='diff'), когато разлика бъде
    решена като "Връщане" - проверява за вече съществуващ, за да не дублира
    при евентуална повторна корекция (напр. Връщане -> Липса -> пак Връщане). */
+/* ══ Смяна на решението от "Връщане" -> синхрон със "За връщане" ══
+   autoCreateReturnFromDiff създава ред в stock_returns (source='diff',
+   diff_line_id) при "Връщане". Смени ли се решението, редът оставаше да виси и
+   магазинът виждаше "Взета" с товарителница за стока, която е заприходил.
+
+   Два хода, защото отказът трябва да е ПРЕДИ записа, а изтриването - СЛЕД него:
+     sdSyncReturnOnTypeChange - преди PATCH-а: чете връщанията по реда. Ако
+       редът ДОСЕГА е бил "Връщане" и има взето/приключено връщане -> отказ
+       (стоката реално е върната, смяната е грешка). Иначе връща id-тата на
+       невзетите за изтриване.
+     sdDropPendingReturns - след успешния PATCH: трие ги. Провал -> типът
+       остава сменен, редът получава ⚠ (sdReturnSyncFail), а съобщението се
+       връща на извикващия, за да излезе ПОСЛЕДНО (toast() е един елемент).
+   Отказът е само при смяна ОТ "Връщане": ред, който вече не е бил такъв, но
+   има заварено взето връщане, не бива да блокира всяка следваща редакция. */
+var sdReturnSyncFail = {};
+function sdSyncReturnOnTypeChange(line, newType, cb){
+  if(!line || !line.id || newType==='return'){ cb({blocked:false, ids:[]}); return; }
+  sbGet('stock_returns','select=id,status&diff_line_id=eq.'+line.id+'&source=eq.diff').then(function(rows){
+    rows = Array.isArray(rows) ? rows : [];
+    var done = rows.filter(function(r){ return r.status==='taken' || r.status==='completed'; });
+    if(done.length && line.type==='return'){
+      toast('Връщането вече е изпълнено — решението не може да се смени','#dc2626');
+      cb({blocked:true, ids:[]});
+      return;
+    }
+    cb({blocked:false, ids: rows.filter(function(r){ return done.indexOf(r)<0; }).map(function(r){ return r.id; })});
+  });
+}
+/* cb(null) при успех или нищо за триене; cb(съобщение) при провал. Филтърът
+   по статус се повтаря в самата заявка: връщане, взето между проверката и
+   изтриването, не се трие. */
+function sdDropPendingReturns(line, ids, cb){
+  if(!ids || !ids.length){ delete sdReturnSyncFail[line.id]; cb(null); return; }
+  sbDelete('stock_returns','id=in.('+ids.join(',')+')&source=eq.diff&status=not.in.(taken,completed)').then(function(res){
+    if(!res.ok){
+      sdReturnSyncFail[line.id] = true;
+      cb('Решението е сменено, но записът в „За връщане" НЕ е изтрит: '+sbErrMsg(res));
+      return;
+    }
+    delete sdReturnSyncFail[line.id];
+    cb(null);
+  });
+}
+function sdReturnSyncMark(l){
+  if(!l || !sdReturnSyncFail[l.id]) return '';
+  return ' <span data-return-sync-fail="1" title="Решението е сменено, но записът в „За връщане" не е изтрит — запиши решението отново" '+
+    'style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;white-space:nowrap;">⚠ „За връщане" не е изтрито</span>';
+}
 function autoCreateReturnFromDiff(line,cb){
   sbGet('stock_returns','diff_line_id=eq.'+line.id+'&limit=1').then(function(existing){
     if(Array.isArray(existing)&&existing.length){ cb(); return; }
@@ -1072,7 +1121,7 @@ function diffResolvedQty(line,type){
   q = Math.round(q*1000)/1000;
   return q>0 ? q : null;
 }
-function resolveDiffLine(id,type){
+function resolveDiffLine(id,type,sync){
   if(!canReviewDiff()){toast('Нямаш права за това действие','#dc2626');return;}
   var line=sdData.find(function(x){return String(x.id)===String(id);});
   if(!line)return;
@@ -1107,6 +1156,12 @@ function resolveDiffLine(id,type){
       ? '⚠️ Реално получено не е попълнено — количеството остава по документ'
       : '⚠️ По данни няма разлика (получено = по документ) — количеството остава по документ';
   }
+  /* Решение, различно от "Връщане": първо "За връщане" (виж
+     sdSyncReturnOnTypeChange), после пак оттук, вече със sync. */
+  if(type!=='return' && !sync){
+    sdSyncReturnOnTypeChange(line, type, function(s){ if(!s.blocked) resolveDiffLine(id, type, s); });
+    return;
+  }
   sbPatch('stock_differences','id=eq.'+id,payload).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     line.type=type; line.status='pending'; line.resolved_by=sdActor(); line.resolved_at=resolvedAt; /* локално, за незабавна проверка по-долу без чакане на reload */
@@ -1114,7 +1169,12 @@ function resolveDiffLine(id,type){
     if(autoQty!==null) line.quantity=autoQty;
     /* Едно съобщение, не две: toast() презаписва един и същ елемент, затова
        отделен предупредителен toast би изял потвърждението за запис. */
-    var say=function(msg){ toast(qtyWarn ? msg+' '+qtyWarn : msg, qtyWarn ? '#d97706' : null); };
+    var returnWarn=null;
+    var say=function(msg){
+      toast(qtyWarn ? msg+' '+qtyWarn : msg, qtyWarn ? '#d97706' : null);
+      /* Червеното ПОСЛЕДНО - иначе потвърждението би го изяло. */
+      if(returnWarn) toast(returnWarn,'#dc2626');
+    };
     var finish=function(){
       var siblingLines=sdData.filter(function(x){return x.report_id===line.report_id;});
       var allResolved = siblingLines.length>0 && siblingLines.every(function(x){return !!x.type;});
@@ -1131,7 +1191,7 @@ function resolveDiffLine(id,type){
     if(type==='return'){
       autoCreateReturnFromDiff(line,finish);
     } else {
-      finish();
+      sdDropPendingReturns(line, sync ? sync.ids : [], function(err){ returnWarn = err; finish(); });
     }
   });
 }
@@ -1715,7 +1775,7 @@ function sdCleanPayload(data){
   return data;
 }
 
-function submitSD() {
+function submitSD(sync) {
   var store=(document.getElementById('sd-store').value||'').trim();
   var name=(document.getElementById('sd-name').value||'').trim();
   if(!store){toast('Избери магазин','#dc2626');return;}
@@ -1781,6 +1841,13 @@ function submitSD() {
     data.completed_at = null;
   }
   sdCleanPayload(data);
+  /* Редакция с решение, различно от "Връщане": първо "За връщане" (виж
+     sdSyncReturnOnTypeChange). При отказ модалът остава отворен, нищо не се
+     записва. Нов запис няма връщания - проверка няма. */
+  if(sdEditId && data.type!=='return' && !sync){
+    sdSyncReturnOnTypeChange(origRecord || {id:sdEditId}, data.type, function(s){ if(!s.blocked) submitSD(s); });
+    return;
+  }
   /* Тип "Връщане" трябва да породи запис в "За връщане" и когато решението е
      взето през модала, а не само през бутоните на реда (resolveDiffLine).
      Условието е САМО за крайния тип, БЕЗ сравнение с предишния: така всяка
@@ -1795,6 +1862,7 @@ function submitSD() {
   p.then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
     var returnSyncFailed = false;
+    var returnDropErr = null;
     var finish=function(){
       /* Потвърждението се чете ПРЕДИ затварянето: closeSDModal() нулира
          sdEditId, тоест на реда след него тернарният оператор винаги хващаше
@@ -1804,6 +1872,7 @@ function submitSD() {
       /* Червеното е ПОСЛЕДНО нарочно: toast() пише в един и същ елемент, значи
          по-ранно предупреждение би било изядено от потвърждението за запис. */
       if(returnSyncFailed) toast('Връщането не е обновено с номера на поръчката','#dc2626');
+      if(returnDropErr) toast(returnDropErr,'#dc2626');
       loadStockDiff();
     };
     /* Номерът на поръчката се въвежда в модала СЛЕД като връщането вече е
@@ -1842,6 +1911,10 @@ function submitSD() {
           order_number:  data.order_number
         },finish);
       });
+      return;
+    }
+    if(sync){
+      sdDropPendingReturns({id:sdEditId}, sync.ids, function(err){ returnDropErr = err; finish(); });
       return;
     }
     finish();
@@ -2822,7 +2895,7 @@ function renderDiffReportsSection(){
           /* Сигналът за размяна стои под ИМЕТО на артикула, а не в колоната на
              склада - там вече е отговорът плюс потвърждението, а въпросът
              "този ли е артикулът" е за самия артикул. Вижда го само складът. */
-          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdSwapBadge(l)+(repShowResolve?'':correctBtn)+'</td>'+
+          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdReturnSyncMark(l)+sdSwapBadge(l)+(repShowResolve?'':correctBtn)+'</td>'+
           '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
           '<td style="padding:3px 6px;text-align:right;">'+sdQtyCell(l.quantity,(l.quantity!=null?l.quantity:'—'))+'</td>'+
           (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+

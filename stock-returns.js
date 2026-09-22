@@ -50,11 +50,36 @@ function canAddSR() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
 
+/* Решението по реда в "Разлики" за връщанията, дошли оттам (diff_line_id).
+   Отделна заявка, не embed: stock_returns.diff_line_id НЯМА външен ключ към
+   stock_differences, а PostgREST вгражда само по външен ключ - нов ключ би бил
+   схемна промяна. Заявката е една, само за редовете с diff_line_id, и я няма
+   изобщо, когато такива няма.
+   Флаг се слага САМО на ред, чиято разлика е ДОШЛА с тип различен от 'return'.
+   sbGet връща [] и при грешка - липсващ отговор не бива да изглежда като
+   "решението е сменено", нито изтрита разлика (за нея стои отделно, извън
+   тази проверка). */
+var srDiffTypes = {};
+function srLoadDiffTypes(){
+  srDiffTypes = {};
+  var ids = [];
+  srData.forEach(function(r){ if(r.diff_line_id && ids.indexOf(r.diff_line_id)<0) ids.push(r.diff_line_id); });
+  if(!ids.length) return Promise.resolve();
+  return sbGet('stock_differences', 'select=id,type&id=in.('+ids.join(',')+')').then(function(rows){
+    (Array.isArray(rows) ? rows : []).forEach(function(x){ srDiffTypes[x.id] = x.type; });
+  });
+}
+function srDecisionChanged(r){
+  return !!r && !!r.diff_line_id && Object.prototype.hasOwnProperty.call(srDiffTypes, r.diff_line_id) &&
+    srDiffTypes[r.diff_line_id] !== 'return';
+}
 function loadStockReturns() {
   var wrap = document.getElementById('mod-stock-returns');
   if (wrap) wrap.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
   sbGet('stock_returns', 'order=doc_date.desc' + storeQ()).then(function(data) {
     srData = Array.isArray(data) ? data : [];
+    return srLoadDiffTypes();
+  }).then(function(){
     renderStockReturns();
   }).catch(function(err) {
     var w = document.getElementById('mod-stock-returns');
@@ -281,7 +306,11 @@ function srStatusBadge(r){
 /* Общи бутони за действие на ред (взета/редактирай/изтрий) - споделени от двете таблици */
 function srRowActions(r,isTaken,canEdit,isAdmin){
   var h='';
-  if (canEdit && !isTaken) {
+  /* Решението в "Разлики" вече не е "Връщане" (синхронът при смяната е
+     пропаднал) - вместо "Взета" с товарителница, изрично предупреждение. */
+  if (!isTaken && srDecisionChanged(r)) {
+    h += '<span data-decision-changed="1" title="Решението по този ред в Разлики вече не е „Връщане“ — този запис не бива да се взима" style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:20px;padding:2px 8px;font-size:11px;font-weight:600;margin-right:2px;white-space:nowrap;">⚠ решението е сменено</span>';
+  } else if (canEdit && !isTaken) {
     h += '<button data-id="'+r.id+'" onclick="srMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">✅ Взета</button>';
   }
   if (canEdit) {
