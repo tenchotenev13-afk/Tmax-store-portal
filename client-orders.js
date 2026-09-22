@@ -799,6 +799,30 @@ function coBuildFulfillerOptions(){
   }).join('');
   if(keys.indexOf(cur)>=0)sel.value=cur;
 }
+/* Магазин-заявител (store_name) — същата логика като изпълнителя: групира
+   нормализирано, брой в етикета, пази текущия избор. Показва се винаги,
+   и при един-единствен магазин. */
+function coBuildStoreOptions(){
+  var sel=document.getElementById('co-store-filter'); if(!sel) return;
+  var cur=sel.value;
+  var groups={};
+  clientOrders.forEach(function(o){
+    var k=coNormName(o.store_name); if(!k) return;
+    var label=String(o.store_name).trim();
+    if(!groups[k]){ groups[k]={label:label,n:0}; }
+    groups[k].n++;
+    var curAllCaps=groups[k].label===groups[k].label.toUpperCase();
+    var newAllCaps=label===label.toUpperCase();
+    if(curAllCaps&&!newAllCaps) groups[k].label=label;
+  });
+  var keys=Object.keys(groups).sort(function(a,b){
+    return groups[a].label.localeCompare(groups[b].label,'bg');
+  });
+  sel.innerHTML='<option value="">Магазин: всички</option>'+keys.map(function(k){
+    return '<option value="'+esc(k)+'"'+(k===cur?' selected':'')+'>'+esc(groups[k].label)+' ('+groups[k].n+')</option>';
+  }).join('');
+  if(keys.indexOf(cur)>=0)sel.value=cur;
+}
 
 /* Падащо меню "моя роля" — разделя двата потока, които иначе се смесват в
    един списък: заявки, по които АЗ съм изпълнителят и трябва да изпратя
@@ -916,6 +940,7 @@ function loadClientOrders(){
     });
     coBuildMonthOptions();
     coBuildFulfillerOptions();
+    coBuildStoreOptions();
     coBuildRoleOptions();
     renderClientOrders();renderMetrics();updateBadges();
   }).catch(function(e){console.warn('client_orders:',e);});
@@ -940,6 +965,8 @@ function renderClientOrders(){
   var fulf=(document.getElementById('co-fulfiller-filter')||{}).value||'';
   /* Сравнява се нормализирано, за да не изпадат старите записи с главни букви */
   if (fulf) list=list.filter(function(o){ return coNormName(o.fulfiller)===fulf; });
+  var st=(document.getElementById('co-store-filter')||{}).value||'';
+  if (st) list=list.filter(function(o){ return coNormName(o.store_name)===st; });
   if (search) {
     list=list.filter(function(o){
       if((o.customer_name||'').toLowerCase().indexOf(search)>=0)return true;

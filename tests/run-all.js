@@ -202,7 +202,8 @@ const TESTS = [
   'admin-reports.test.js',
   'admin-role-view.test.js',
   'client-notified.test.js',
-  'co-filter-arrived.test.js'
+  'co-filter-arrived.test.js',
+  'co-filter-store.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
