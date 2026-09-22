@@ -37,6 +37,7 @@ const TESTS = [
   'sd-store-response.test.js',
   'sd-notify.test.js',
   'sd-swap-link.test.js',
+  'sd-late-receive.test.js',
   'sd-swap-store.test.js',
   'sd-done-collapse.test.js',
   'sd-interstore-columns.test.js',

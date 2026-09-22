@@ -726,8 +726,13 @@ function sdToggleResolveEdit(lineId){
    Складът: Изпратено/Ще се изпрати/Обратно движение + коментар. Цвети/admin
    виждат резултата само за оглед, не могат да го сменят. */
 function diffWarehouseResolveButtons(l, rep){
+  /* Магазинът е закрил липсата сам ("Получено междувременно") - вместо
+     отговора/бутоните на склада всички виждат кой и кога го е получил. */
+  if(sdIsLateReceive(l)) return sdStoreResponseLabel(l);
   var isMyWarehouse = isLogisticsWarehouseUser() && rep && rep.counterpart===currentUser.store_name;
-  if(isMyWarehouse){
+  /* Приключен ред (received) не се пипа - трите бутона на склада изчезват и
+     остава само текстът на отговора (клона "само за оглед" по-долу). */
+  if(isMyWarehouse && l.status!=='received'){
     var mk=function(val,label,color){
       var active=l.warehouse_response===val;
       return '<button data-lid="'+l.id+'" data-val="'+val+'" onclick="openWarehouseResponseModal(this.dataset.lid,this.dataset.val)" style="border:none;background:'+(active?color:color+'1a')+';color:'+(active?'#fff':color)+';border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">'+(active?'✓ ':'')+label+'</button>';
@@ -761,6 +766,9 @@ function sdInterstoreConfirmButton(l, rep){
   if(!rep || rep.direction!=='interstore') return '';
   /* Вече потвърден ред - и двете страни виждат едно и също: кой и кога. */
   if(l.status==='received'){
+    /* "Получено междувременно" вече е показано от diffWarehouseResolveButtons
+       със същите кой/кога - втори ред "📬 Получено" би го дублирал. */
+    if(sdIsLateReceive(l)) return '';
     return '<div style="margin-top:3px;font-size:10.5px;color:#0d9488;font-weight:600;">📬 Получено'+
       (l.completed_by?' · '+esc(l.completed_by):'')+
       (l.completed_at?' · '+sdFmtDateTime(l.completed_at):'')+'</div>';
@@ -827,6 +835,15 @@ function sdStoreResponseLabel(l){
     return '<div style="margin-top:3px;font-size:10.5px;color:#dc2626;font-weight:700;">⛔ Няма наличност в логистика</div>'+
       (l.store_response_comment?'<div style="margin-top:2px;font-size:11px;color:#1e293b;white-space:normal;">💬 '+esc(l.store_response_comment)+'</div>':'');
   }
+  /* "Получено от магазина", не "Прието": стоката не е дошла по отговора на
+     склада, магазинът е закрил липсата сам. Датата е ИЗБРАНАТА дата на
+     получаване (completed_at), не моментът на записа. */
+  if(sdIsLateReceive(l)){
+    return '<div style="margin-top:3px;font-size:10.5px;color:#0d9488;font-weight:600;">📦 Получено от магазина'+
+      (l.completed_at?' · '+sdFmtDateTime(l.completed_at):'')+
+      (l.store_response_by?' · '+esc(l.store_response_by):'')+'</div>'+
+      '<div style="margin-top:2px;font-size:11px;color:#1e293b;white-space:normal;">💬 '+esc(l.store_response_comment)+'</div>';
+  }
   if(l.store_response==='sap_done' || l.store_response==='accepted'){
     return '<div style="margin-top:3px;font-size:10.5px;color:#7c3aed;font-weight:600;">'+
       (l.store_response==='sap_done'?'📄 Пуснато в SAP':'✅ Прието')+
@@ -834,6 +851,97 @@ function sdStoreResponseLabel(l){
       (l.store_response_at?' · '+sdFmtDateTime(l.store_response_at):'')+'</div>';
   }
   return '<div style="margin-top:3px;font-size:10.5px;color:#94a3b8;">чака магазина</div>';
+}
+/* ══ "Получено междувременно" — магазинът закрива липсата сам ══
+   Липсващата стока е пристигнала по друг път (следваща доставка, друг
+   документ), преди складът да отговори или независимо от отговора му. Без
+   схемна промяна: status='received' + store_response='accepted', а това, че е
+   "междувременно", личи САМО от началото на store_response_comment. Префиксът
+   по-долу е единственото място, което го разпознава - не го превеждай и не
+   го променяй, без да мигрираш заварените редове. */
+var SD_LATE_PREFIX = 'Получено междувременно на ';
+function sdIsLateReceive(l){
+  return !!l && l.store_response==='accepted' &&
+    String(l.store_response_comment||'').indexOf(SD_LATE_PREFIX)===0;
+}
+/* Кога магазинът има бутона: междускладов ред с ЛИПСА, още не приключен, без
+   отворена размяна (тя е друг път за същата липса), и потребителят е
+   магазинът. warehouse_response НЕ участва - и при null, и при
+   sent/will_send/return. */
+function sdLateReceiveAllowed(l, rep){
+  if(!l || !rep || rep.direction!=='interstore') return false;
+  if(l.difference_category!=='undelivered' || l.status==='received') return false;
+  if(sdSwapsForLine(l).some(function(s){ return s.status!=='closed'; })) return false;
+  return sdIsInterstoreStoreSide(l, rep);
+}
+/* Отделен ред под магазинските бутони, с outline стил - да не се бърка с
+   плътните ПРИЕТО / ПУСНАТО В SAP. */
+function sdLateReceiveButton(l, rep){
+  if(!sdLateReceiveAllowed(l, rep)) return '';
+  return '<div style="margin-top:4px;"><button data-lid="'+l.id+'" onclick="openStoreLateReceiveModal(this.dataset.lid)" '+
+    'title="Липсващата стока е пристигнала по друг път - закрий реда като получен" '+
+    'style="border:1px solid #0d9488;background:#fff;color:#0d9488;border-radius:5px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;">📦 Получено междувременно</button></div>';
+}
+function openStoreLateReceiveModal(lineId){
+  var l = sdData.find(function(x){return String(x.id)===String(lineId);});
+  if(!l) return;
+  var existing = document.getElementById('sdlate-ov'); if(existing) existing.remove();
+  var d = today();
+  var div = document.createElement('div');
+  div.innerHTML = '<div class="bov open" id="sdlate-ov"><div class="bmod" style="width:380px;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">📦 Получено междувременно</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(l.material_code||'')+' · '+esc(l.material_name||'')+'</div>'+
+    '<label class="fl">Дата на получаване</label>'+
+    '<input class="fi" id="sdlate-date" type="date" value="'+d+'" max="'+d+'">'+
+    '<label class="fl">Номер на документ (по избор)</label>'+
+    '<input class="fi" id="sdlate-doc" value="">'+
+    '<label class="fl">Бележка (по избор)</label>'+
+    '<input class="fi" id="sdlate-note" value="">'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
+    '<button onclick="document.getElementById(\'sdlate-ov\').remove()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button data-lid="'+l.id+'" onclick="submitStoreLateReceive(this.dataset.lid)" style="border:none;background:#0d9488;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>'+
+    '</div></div></div>';
+  document.body.appendChild(div.firstChild);
+}
+/* Един PATCH; после като sdConfirmInterstore - локално обновяване, затваряне
+   на бланката при последен отворен ред, известие до склада. completed_at е
+   ОБЯД по избраната дата (както sent_at при размяната): датата е ден, не
+   момент, и обядът не се измества при часови пояс. */
+function submitStoreLateReceive(lineId){
+  var line = sdData.find(function(x){return String(x.id)===String(lineId);});
+  if(!line) return;
+  var rep = diffReports.find(function(x){return x.id===line.report_id;});
+  if(!sdLateReceiveAllowed(line, rep)) return;
+  var dEl = document.getElementById('sdlate-date');
+  var d = String(dEl ? dEl.value : '').trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)){ toast('Изберете дата на получаване','#dc2626'); return; }
+  if(d > today()){ toast('Датата на получаване не може да е в бъдещето','#dc2626'); return; }
+  var when = new Date(d+'T12:00:00');
+  if(isNaN(when.getTime())){ toast('Невалидна дата на получаване','#dc2626'); return; }
+  var docEl = document.getElementById('sdlate-doc'), noteEl = document.getElementById('sdlate-note');
+  var doc = String(docEl ? docEl.value : '').trim(), note = String(noteEl ? noteEl.value : '').trim();
+  var comment = SD_LATE_PREFIX+fmtDate(d)+(doc?' · док. '+doc:'')+(note?' · '+note:'');
+  var by = sdActor(), at = new Date().toISOString(), doneAt = when.toISOString();
+  var data = {status:'received', store_response:'accepted', store_response_by:by, store_response_at:at,
+              store_response_comment:comment, completed_by:by, completed_at:doneAt};
+  sdKeepScroll(line.report_id);
+  sbPatch('stock_differences','id=eq.'+lineId,data).then(function(res){
+    if(!res.ok){ toast('Грешка при запис: '+sbErrMsg(res),'#dc2626'); return; }
+    Object.keys(data).forEach(function(k){ line[k]=data[k]; });
+    var ov = document.getElementById('sdlate-ov'); if(ov) ov.remove();
+    sdNotifyInterstore(rep.counterpart, '📦 Разлика закрита от '+(rep.store_name||''),
+      (line.material_name||'')+' — получено на '+fmtDate(d));
+    var siblings = sdData.filter(function(x){return x.report_id===line.report_id;});
+    if(siblings.length && siblings.every(function(x){return x.status==='received';})){
+      sbPatch('differences_reports','id=eq.'+line.report_id,{reviewed:true}).then(function(){
+        toast('✅ Бланката е приключена');
+        loadStockDiff();
+      });
+    } else {
+      toast('✅ Записано');
+      loadStockDiff();
+    }
+  });
 }
 function openStoreNoStockModal(lineId){
   var l = sdData.find(function(x){return String(x.id)===String(lineId);});
@@ -2481,7 +2589,7 @@ function sdCollectActions(){
     var art = l.material_name || l.material_code || '';
     if(l.store_response && l.store_response_at){
       add(l.store_response_at, l.report_id, rp.store_name,
-          (SR[l.store_response]||l.store_response)+' · '+art+(l.store_response_by?' · '+l.store_response_by:''),
+          (sdIsLateReceive(l) ? '📦 получено междувременно' : (SR[l.store_response]||l.store_response))+' · '+art+(l.store_response_by?' · '+l.store_response_by:''),
           l.store_response==='no_stock');
     }
     /* „Приел е МАГАЗИНЪТ" — не складът. Разпознава се по данните, които има:
@@ -2719,7 +2827,7 @@ function renderDiffReportsSection(){
           (canReviewDiff()&&!isLogisticsWarehouseUser()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
           correctBtn+
           '</td>':'')+
-          '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+sdSwapPanel(l)+'</td>'+
+          '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+sdLateReceiveButton(l,rep)+sdSwapPanel(l)+'</td>'+
         '</tr>';
       });
       h+='</table>';
