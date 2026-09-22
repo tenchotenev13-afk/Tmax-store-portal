@@ -8,6 +8,8 @@
 */
 const fs = require('fs');
 const { JSDOM } = require('jsdom');
+/* Истински клик от harness-а: onclick с this=елемента и `event`, както браузърът. */
+const { realClick } = require('../.claude/skills/tmax-jsdom-test/harness');
 const DIR = process.argv[2] ? process.argv[2].replace(/\/*$/, '/') : __dirname + '/../';
 
 let pass = 0, fail = 0;
@@ -116,12 +118,6 @@ function boot(opts) {
   return { w, calls, doc: w.document };
 }
 
-function realClick(w, el) {
-  if (!el) throw new Error('елементът не съществува');
-  const code = el.getAttribute('onclick');
-  if (!code) throw new Error('няма onclick: ' + el.outerHTML.slice(0, 140));
-  w.eval('(function(el){ (function(){' + code + '}).call(el); })')(el);
-}
 function btnOnly(root, text) {
   return Array.from(root.querySelectorAll('button')).find(b => (b.textContent || '').indexOf(text) >= 0);
 }

@@ -10,6 +10,8 @@
 */
 const fs = require('fs');
 const { JSDOM } = require('jsdom');
+/* Истински клик от harness-а: onclick с this=елемента и `event`, както браузърът. */
+const { realClick } = require('../.claude/skills/tmax-jsdom-test/harness');
 const DIR = process.argv[2] ? process.argv[2].replace(/\/*$/, '/') : __dirname + '/../';
 
 let pass = 0, fail = 0;
@@ -120,16 +122,6 @@ function click(doc, el) {
   el.dispatchEvent(new w.MouseEvent('click', { bubbles: true, cancelable: true }));
   /* onclick атрибутите се изпълняват от jsdom при runScripts:'outside-only'? не —
      затова ги пускаме ръчно през eval в контекста на прозореца. */
-}
-/* Истински клик: изпълнява onclick атрибута точно както браузърът, с this=елемента */
-function realClick(w, el) {
-  if (!el) throw new Error('елементът не съществува');
-  const code = el.getAttribute('onclick');
-  if (!code) throw new Error('няма onclick: ' + el.outerHTML.slice(0, 120));
-  w.eval('(function(){ var __el = window.__clickTarget; (function(){' + code + '}).call(__el); })');
-  w.__clickTarget = el;
-  const fn = w.eval('(function(el){ (function(){' + code + '}).call(el); })');
-  fn(el);
 }
 function findBtn(doc, text) {
   return Array.from(doc.querySelectorAll('button')).find(b => (b.textContent || '').indexOf(text) >= 0);
