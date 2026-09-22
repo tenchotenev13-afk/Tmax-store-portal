@@ -1062,27 +1062,30 @@ function renderClientOrders(){
     }
     btns+='</div>';
     if(window._coHighlightId&&String(window._coHighlightId)===String(o.id))rowStyle+='background:#fef9c3;';
-    return '<tr id="co-row-'+esc(o.id)+'" style="'+rowStyle+'">'+
+    /* Целият ред отваря пълните данни. Клетката с клиента (панел „заявките на
+       клиента", бадж на групата) и клетката с бутоните спират bubbling-а. */
+    rowStyle+='cursor:pointer;';
+    return '<tr id="co-row-'+esc(o.id)+'" class="row-click" data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="'+rowStyle+'">'+
       /* Номерът вече съдържа и обекта ("Троян-0042") — пуска се на нов ред,
          вместо да реже колоната */
       '<td style="font-size:11px;color:#94a3b8;font-family:monospace;word-break:break-word;line-height:1.3;">'+esc(o.in_num||'—')+'</td>'+
-      '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="cursor:pointer;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
+      '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
       /* Името на клиента отваря панела с всички негови заявки — там е и бутонът
          за още една заявка. Така не се налага още един бутон в реда. */
-      '<td><b data-id="'+o.id+'" onclick="openCustomerOrders(this.dataset.id)" title="Виж всички заявки на този клиент" style="cursor:pointer;border-bottom:1px dotted #94a3b8;">'+esc(o.customer_name||'')+'</b>'+coGroupBadge(o)+
+      '<td onclick="event.stopPropagation()" style="cursor:default;"><b data-id="'+o.id+'" onclick="openCustomerOrders(this.dataset.id)" title="Виж всички заявки на този клиент" style="cursor:pointer;border-bottom:1px dotted #94a3b8;">'+esc(o.customer_name||'')+'</b>'+coGroupBadge(o)+
         '<br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small></td>'+
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
-      /* Клетката отваря пълните данни, но вътрешният title с ЦЕЛИЯ SAP код
-         остава — колоната реже текста и това е единственият начин да се види. */
-      '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="font-family:monospace;font-size:11px;cursor:pointer;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escAttr(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>'+
-      '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="cursor:pointer;">'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
+      /* Вътрешният title с ЦЕЛИЯ SAP код остава — колоната реже текста и това
+         е единственият начин да се види. */
+      '<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escAttr(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>'+
+      '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
       '<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>'+
       '<td>'+esc(o.from_store||'')+'</td>'+
       '<td><b>'+fmtDate(o.delivery)+'</b>'+coEtaCell(o)+'</td>'+
       '<td>'+elapsedBadge(o._days,o.status,o)+'</td>'+
       '<td>'+statusBadge(o._status)+lateBadge(o)+ptBadge(o)+'</td>'+
       '<td style="font-size:11px;">'+storeCell+'</td>'+
-      '<td>'+btns+'</td></tr>';
+      '<td onclick="event.stopPropagation()" style="cursor:default;">'+btns+'</td></tr>';
   }).join('');
   /* Подсветка + скрол към реда, отворен от бадж 📋 в таб Транспорт */
   if(window._coHighlightId){

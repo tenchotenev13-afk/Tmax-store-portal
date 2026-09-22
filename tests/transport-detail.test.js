@@ -111,7 +111,7 @@ function bubbleClick(w, el) {
     ok('t-2 (доставка утре) пази animation:rowPulseSoft и има cursor:pointer',
       /animation:rowPulseSoft/.test(st2) && /cursor:pointer/.test(st2), st2);
     const css = Array.prototype.map.call(doc.querySelectorAll('style'), s => s.textContent).join('\n');
-    ok('index.html: .row-click:hover td{background:#f8fafc;}', /\.row-click:hover td\{background:#f8fafc;\}/.test(css));
+    ok('index.html: .row-click:hover td{background:#eef2ff;}', /\.row-click:hover td\{background:#eef2ff;\}/.test(css));
     ok('глобалното tr:hover td е непипнато', /(^|\})\s*tr:hover td\{background:#fafafa;\}/m.test(css));
     ok('клетката Дата/Час вече е без title/cursor',!!td0 && !td0.getAttribute('title') && !/cursor/.test(td0.getAttribute('style') || ''));
   }

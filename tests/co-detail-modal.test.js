@@ -124,6 +124,18 @@ function bootHistory(h, rows) {
 const modal = doc => doc.getElementById('cod-ov');
 const modalText = doc => { const m = modal(doc); return m ? m.textContent : ''; };
 function cells(doc, id) { return doc.getElementById('co-row-' + id).querySelectorAll('td'); }
+/* От 22.09.2026 целият ред отваря модала (onclick на <tr>), а клетките
+   „Клиент" и бутоните спират bubbling-а. realClick() изпълнява само onclick-а
+   на самия елемент, затова кликът по клетка минава през bubbleClick():
+   нагоре по родителите с обект event, стоп при event.stopPropagation(). */
+function bubbleClick(w, el) {
+  let stopped = false;
+  const ev = { type: 'click', target: el, stopPropagation() { stopped = true; }, preventDefault() {} };
+  for (let n = el; n && n.getAttribute && !stopped; n = n.parentElement) {
+    const code = n.getAttribute('onclick');
+    if (code) w.eval('(function(event){' + code + '})').call(n, ev);
+  }
+}
 function pressEsc(w) {
   w.document.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
 }
@@ -131,30 +143,27 @@ function pressEsc(w) {
 (async function run() {
 
   /* ══════════ 1. Кои клетки отварят модала ══════════ */
-  section('1. Клик-целите в реда — Дата/Час, SAP и Продукт, и нищо друго');
+  section('1. Клик-целта е целият ред; „Клиент" и бутоните спират bubbling-а');
   {
     const { w, doc } = env();
     if (guard('renderClientOrders() не хвърля', () => w.renderClientOrders())) {
       const td = cells(doc, 'o-multi');
+      const tr = doc.getElementById('co-row-o-multi');
       ok('редът има 13 клетки', td.length === 13, String(td.length));
 
+      ok('<tr> отваря пълните данни',
+        tr.getAttribute('onclick') === 'openClientOrderDetail(this.dataset.id)', tr.getAttribute('onclick'));
+      ok('<tr> е с cursor:pointer и title „Отвори заявката"',
+        /cursor:pointer/.test(tr.getAttribute('style') || '') && tr.getAttribute('title') === 'Отвори заявката');
       const opensDetail = i => /openClientOrderDetail/.test(td[i].getAttribute('onclick') || '');
-      ok('клетка „Дата / Час" (1) отваря пълните данни', opensDetail(1));
-      ok('клетка „SAP" (4) отваря пълните данни', opensDetail(4));
-      ok('клетка „Продукт" (5) отваря пълните данни', opensDetail(5));
+      ok('никоя клетка няма собствен openClientOrderDetail',
+        Array.prototype.every.call(td, (c, i) => !opensDetail(i)));
 
-      ok('клетка „Клиент" (2) НЕ отваря пълните данни', !opensDetail(2));
+      const stops = i => td[i].getAttribute('onclick') === 'event.stopPropagation()';
+      ok('клетка „Клиент" (2) спира bubbling-а', stops(2));
       ok('клетка „Клиент" (2) пази своя openCustomerOrders',
         /openCustomerOrders/.test(td[2].innerHTML));
-      ok('колоната с бутоните (12) НЕ отваря пълните данни', !opensDetail(12));
-      ok('клетка „№" (0) НЕ отваря пълните данни', !opensDetail(0));
-      ok('клетка „Телефон" (3) НЕ отваря пълните данни', !opensDetail(3));
-
-      ok('кликаемите клетки са с cursor:pointer',
-        /cursor:pointer/.test(td[1].getAttribute('style') || '') &&
-        /cursor:pointer/.test(td[4].getAttribute('style') || '') &&
-        /cursor:pointer/.test(td[5].getAttribute('style') || ''));
-      ok('и с title „Отвори заявката"', td[5].getAttribute('title') === 'Отвори заявката');
+      ok('колоната с бутоните (12) спира bubbling-а', stops(12));
       ok('SAP клетката пази вътрешния title с целия код',
         (td[4].querySelector('div') || {}).outerHTML &&
         /title="111222"/.test(td[4].innerHTML), td[4].innerHTML);
@@ -165,7 +174,7 @@ function pressEsc(w) {
     const { w, doc } = env();
     w.renderClientOrders();
     ok('преди клика модал няма', !modal(doc));
-    realClick(w, cells(doc, 'o-multi')[5], 'клетка Продукт');
+    bubbleClick(w, cells(doc, 'o-multi')[5]);
     ok('клик по „Продукт" отваря модала', !!modal(doc));
     ok('модалът е отворен (class open)', !!modal(doc) && modal(doc).classList.contains('open'));
     ok('показва номера на заявката', modalText(doc).indexOf('Троян-0001') >= 0);
@@ -173,13 +182,13 @@ function pressEsc(w) {
   {
     const { w, doc } = env();
     w.renderClientOrders();
-    realClick(w, cells(doc, 'o-multi')[1], 'клетка Дата');
+    bubbleClick(w, cells(doc, 'o-multi')[1]);
     ok('клик по „Дата / Час" също отваря модала', !!modal(doc));
   }
   {
     const { w, doc } = env();
     w.renderClientOrders();
-    realClick(w, cells(doc, 'o-multi')[4], 'клетка SAP');
+    bubbleClick(w, cells(doc, 'o-multi')[4]);
     ok('клик по „SAP" също отваря модала', !!modal(doc));
   }
   {
@@ -188,7 +197,7 @@ function pressEsc(w) {
     w.renderClientOrders();
     const b = cells(doc, 'o-multi')[2].querySelector('b[onclick]');
     if (ok('клетката „Клиент" има кликаем <b>', !!b)) {
-      realClick(w, b, 'Клиент');
+      bubbleClick(w, b);
       ok('клик по „Клиент" НЕ отваря пълните данни', !modal(doc));
       ok('вместо това отваря панела на клиента', !!doc.getElementById('cust-ov'));
     }
@@ -334,12 +343,13 @@ function pressEsc(w) {
       items: [{ product: 'МАСА', color: '', sap: '2', qty: 1, unit: 'бр.' }] });
     const { w, doc } = env({ orders: [APO], data: { client_orders: [APO] } });
     w.renderClientOrders();
+    const tr = doc.getElementById('co-row-o-apo');
     const td = cells(doc, 'o-apo')[5];
     let broke = null;
-    try { w.eval('(function(){' + td.getAttribute('onclick') + '})'); }
+    try { w.eval('(function(){' + tr.getAttribute('onclick') + '})'); }
     catch (e) { broke = e.message; }
-    ok('onclick-ът е валиден JS при апостроф в името', !broke, broke);
-    realClick(w, td, 'Продукт при апостроф');
+    ok('onclick-ът на реда е валиден JS при апостроф в името', !broke, broke);
+    bubbleClick(w, td);
     ok('и модалът се отваря', !!modal(doc));
     ok('името излиза цяло', modalText(doc).indexOf("Д'Артанян О'Брайън") >= 0);
   }
