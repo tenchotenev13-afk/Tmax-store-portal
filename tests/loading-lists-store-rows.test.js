@@ -264,8 +264,8 @@ const modal = doc => doc.getElementById('ll-add-modal');
     if (ok('формата се отваря', !!m)) {
       ok('носи името на обекта', m.textContent.indexOf('Петрич') >= 0, m.textContent.slice(0, 120));
       ok('има избор на вид', !!h.doc.getElementById('ll-add-kind'));
-      ok('видовете са от LL_KINDS — има и рол контейнер',
-        m.innerHTML.indexOf('roll_container') >= 0);
+      ok('видовете са от LL_KINDS — има и извънгабаритен',
+        m.innerHTML.indexOf('oversize') >= 0);
       ok('има поле за изходящ №', !!h.doc.getElementById('ll-add-doc'));
       ok('има поле за обяснение', !!h.doc.getElementById('ll-add-comment'));
       ok('полето за обяснение е ПРАЗНО, не „—"',
@@ -314,9 +314,9 @@ const modal = doc => doc.getElementById('ll-add-modal');
     realClick(h.w, btnIn(card(h.doc, 'L1'), '➕ Добави ред'));
     await ticks();
 
-    h.w.llStoreAddField('kind', 'roll_container');
+    h.w.llStoreAddField('kind', 'oversize');
     h.w.llStoreAddField('purchase_doc', '  D-999  ');
-    h.w.llStoreAddField('store_comment', '  дойде рол контейнер, който не е в листа  ');
+    h.w.llStoreAddField('store_comment', '  дойде извънгабаритен товар, който не е в листа  ');
 
     /* Артикул през същия път като в редактора: поле → „➕ Добави". */
     h.w.llPfInput(0, 'sap_code', '100200');
@@ -345,13 +345,13 @@ const modal = doc => doc.getElementById('ll-add-modal');
       ok('received_by е обектът', b.received_by === 'Управител Петрич', JSON.stringify(b.received_by));
       ok('received_at е попълнено', !!b.received_at);
       ok('missing:false', b.missing === false, JSON.stringify(b.missing));
-      ok('видът е избраният', b.kind === 'roll_container', JSON.stringify(b.kind));
+      ok('видът е избраният', b.kind === 'oversize', JSON.stringify(b.kind));
       /* „палет 3 от 5" е обещание на СКЛАДА — добавен отвън ред не го разваля. */
       ok('pallet_no остава null', b.pallet_no === null, JSON.stringify(b.pallet_no));
       ok('pallet_total остава null', b.pallet_total === null, JSON.stringify(b.pallet_total));
       ok('position е след последния ред на ЦЕЛИЯ лист (2 → 3)', b.position === 3,
         JSON.stringify(b.position));
-      ok('коментарът е trim-нат', b.store_comment === 'дойде рол контейнер, който не е в листа',
+      ok('коментарът е trim-нат', b.store_comment === 'дойде извънгабаритен товар, който не е в листа',
         JSON.stringify(b.store_comment));
       ok('изходящият № е trim-нат', b.purchase_doc === 'D-999', JSON.stringify(b.purchase_doc));
       ok('обектът е този на картата', b.store_name === 'Петрич', JSON.stringify(b.store_name));

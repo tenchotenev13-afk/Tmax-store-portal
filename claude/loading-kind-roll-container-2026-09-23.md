@@ -1,5 +1,11 @@
 # Нова стойност `roll_container` в `loading_list_items.kind` — за Живко
 
+> ⚠️ **ОТМЕНЕНА СЪЩИЯ ДЕН.** Стойността е преименувана на `oversize`
+> ("извънгабаритен товар") с миграция `20260923090000_loading_kind_oversize`,
+> преди да бъде ползвана — нула засегнати реда. Виж
+> `claude/loading-kind-oversize-2026-09-23.md`. Записът долу остава като
+> история на приложената миграция, не описва текущото състояние.
+
 **Дата:** 23.09.2026 · **Миграция:** `20260923071737_loading_kind_roll_container`
 **Rollback:** `20260923071737_loading_kind_roll_container_down.sql`
 **Копие на DDL-а в корена:** `loading-list-kind-roll-container-schema.sql`

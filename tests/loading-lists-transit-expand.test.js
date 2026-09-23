@@ -331,7 +331,7 @@ const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
     ok('нито един документ — не половината', h.w.llPendingDocs.length === 0, String(h.w.llPendingDocs.length));
     ok('в блока е казано, че не е заредено', !!mod(h).querySelector('[data-ll-transit-error]'));
     ok('а не „Няма чакащи документи"', mod(h).textContent.indexOf('Няма чакащи документи') < 0);
-    ok('редакторът работи — може да се добави ред', !!btn(mod(h), 'Ред без документ'));
+    ok('редакторът работи — може да се добави ред', !!btn(mod(h), 'Добави нов ред'));
   }
 
   section('и) Частично доставен документ — количеството е ОСТАВАЩОТО (remaining_qty)');

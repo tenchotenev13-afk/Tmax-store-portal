@@ -276,8 +276,8 @@ function itemPosts(calls) {
         ok('редовете ѝ са два', t.querySelectorAll('tr').length === 3,
           String(t.querySelectorAll('tr').length));
       }
-      ok('заглавието брои 2 обекта · 2 палета · 0 рол конт. · 1 рула · 1 насип',
-        mod(h.doc).textContent.indexOf('2 обекта · 2 палета · 0 рол конт. · 1 рула · 1 насип') >= 0,
+      ok('заглавието брои 2 обекта · 2 палета · 0 извънгабаритни · 1 рула · 1 насип',
+        mod(h.doc).textContent.indexOf('2 обекта · 2 палета · 0 извънгабаритни · 1 рула · 1 насип') >= 0,
         mod(h.doc).textContent.slice(0, 400));
       ok('„палет 2 от 5" стил на етикета',
         h.w.llKindLabel(items[0]) === 'палет 1 от 2', h.w.llKindLabel(items[0]));

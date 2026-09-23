@@ -79,17 +79,25 @@ var LL_TRANSIT_PAGE = 1000;   /* PostgREST реже отговора на 1000 �
 
 var LL_KINDS = [
   ['pallet', '📦 Палет'],
-  ['roll_container', '🛒 Рол контейнер'],
+  ['oversize', '📐 Извънгабаритен'],
   ['roll',   '🧻 Рула'],
   ['bulk',   '🧱 Насип']
 ];
 /* Видовете, които се НОМЕРИРАТ („N от M") и получават опис за печат. Всеки
-   има СОБСТВЕНА поредица в рамките на обекта: палет 1 и рол контейнер 1
+   има СОБСТВЕНА поредица в рамките на обекта: палет 1 и извънгабаритен 1
    съществуват едновременно и не са едно и също нещо. */
-var LL_NUMBERED = ['pallet', 'roll_container'];
+var LL_NUMBERED = ['pallet', 'oversize'];
 function llIsNumbered(kind){ return LL_NUMBERED.indexOf(kind) >= 0; }
-/* Кратката дума за етикета — „палет 2 от 5", „рол контейнер 1 от 3". */
-var LL_KIND_WORD = { pallet: 'палет', roll_container: 'рол контейнер' };
+/* Кратката дума за етикета — „палет 2 от 5", „извънгабаритен 1 от 3". */
+var LL_KIND_WORD = { pallet: 'палет', oversize: 'извънгабаритен' };
+/* За извънгабаритния ред „какъв е товарът" е ЕДИНСТВЕНОТО описание: той няма
+   артикули по документ и няма стандартен вид. Затова warehouse_comment му е
+   задължителен — изискването живее ТУК, не като CHECK в базата: базата не
+   може да различи „складът още пише" от „складът приключи, без да напише". */
+function llIsOversize(kind){ return kind === 'oversize'; }
+function llOversizeNeedsComment(it){
+  return !!it && llIsOversize(it.kind) && !String(it.warehouse_comment || '').trim();
+}
 /* [ключ, етикет, цвят, фон] — един източник за чиповете, баджовете и
    филтъра. Нов статус се добавя тук, не на четири места. */
 var LL_STATUSES = [
@@ -281,9 +289,9 @@ function llPalletGroups(items){
    обещание към конкретния обект, не към целия курс. Въвел ли е складът 1, 2
    и 5, палетите са три — иначе обектът чака пети палет, който не съществува. */
 function llRenumberPallets(items){
-  /* Ключът е ОБЕКТ + ВИД: „палет 2 от 5" и „рол контейнер 2 от 3" са две
+  /* Ключът е ОБЕКТ + ВИД: „палет 2 от 5" и „извънгабаритен 2 от 3" са две
      различни обещания към един и същ обект. Обща поредица би дала „палет 4
-     от 8" при четири палета и четири контейнера. */
+     от 8" при четири палета и четири извънгабаритни. */
   var byKey = {};
   var keyOf = function(it){ return JSON.stringify([it.store_name || '', it.kind]); };
   (items || []).forEach(function(it){
@@ -316,7 +324,7 @@ function llCounts(items){
   /* Отхвърленият извънреден ред не се брои никъде (Пакет Г2). Филтърът е ТУК,
      а не в осемте call site-а — едно копие по-малко, което да се разминава. */
   items = llLiveRows(items);
-  var c = { pallet:0, roll_container:0, roll:0, bulk:0, stores:0, received:0, missing:0, total:0 };
+  var c = { pallet:0, oversize:0, roll:0, bulk:0, stores:0, received:0, missing:0, total:0 };
   var seen = {};
   /* Броят се ТОВАРНИТЕ ЕДИНИЦИ, не редовете: четири документа на един палет
      са един палет. Преди консолидацията двете съвпадаха и това число лъжеше. */
@@ -336,7 +344,7 @@ function llSummaryByStore(items){
   items = llLiveRows(items);   /* същото като в llCounts() */
   var by = {}, order = [];
   var ensure = function(s){
-    if(!by[s]){ by[s] = { store:s, pallet:0, roll_container:0, roll:0, bulk:0, received:0, missing:0, total:0, products:0, qty:0 }; order.push(s); }
+    if(!by[s]){ by[s] = { store:s, pallet:0, oversize:0, roll:0, bulk:0, received:0, missing:0, total:0, products:0, qty:0 }; order.push(s); }
     return by[s];
   };
   /* Товарните единици — по същата причина като в llCounts(). */
@@ -1613,10 +1621,12 @@ function llBuildPdf(list, items, storeFilter){
     if(!rows.length) line('Листът няма редове.', 10, 5);
     rows.forEach(function(it, n){
       line((n + 1) + '. ' + llKindLabel(it) +
+        (llIsOversize(it.kind) && it.warehouse_comment ? ' — ' + it.warehouse_comment : '') +
         '   изходящ № ' + (it.purchase_doc || 'без') +
         (it.clears_doc ? '   изчиства ' + it.clears_doc : '') +
         (storeFilter ? '' : '   обект: ' + (it.store_name || '—')), 11, 5.5);
-      if(it.warehouse_comment) line('    коментар склад: ' + it.warehouse_comment, 9, 4.5);
+      /* При извънгабаритния коментарът вече е до вида — втори път би бил шум. */
+      if(it.warehouse_comment && !llIsOversize(it.kind)) line('    коментар склад: ' + it.warehouse_comment, 9, 4.5);
       (it.products || []).forEach(function(p){
         line('    · ' + p.sap_code + '  ' + p.product_name +
           '  —  ' + llFmtQty(p.qty) + ' ' + (p.unit || '') +
@@ -1795,7 +1805,9 @@ function llSentHtmlFor(list, store, rows){
     '<th '+LL_MAIL_TH+'>Изчиства</th><th '+LL_MAIL_TH+'>Коментар склад</th></tr>';
   rows.slice().sort(llByPosition).forEach(function(it){
     body += '<tr>'+
-      '<td '+LL_MAIL_TD+'><b>'+esc(llKindLabel(it))+'</b></td>'+
+      '<td '+LL_MAIL_TD+'><b>'+esc(llKindLabel(it))+'</b>'+
+        (llIsOversize(it.kind) && it.warehouse_comment
+          ? '<div style="font-size:10.5px;color:#475569;font-weight:600;">'+esc(it.warehouse_comment)+'</div>' : '')+'</td>'+
       '<td '+LL_MAIL_TD+'>'+(it.purchase_doc ? esc(it.purchase_doc) : 'без')+
         (it.partial ? '<div style="font-size:10px;color:#92400e;">частично</div>' : '')+'</td>'+
       '<td '+LL_MAIL_TD+'>'+(it.clears_doc ? esc(it.clears_doc) : '—')+'</td>'+
@@ -1848,7 +1860,9 @@ function llClosedHtmlFor(list, items){
           (when ? ' · '+llFmtStamp(when) : '')+'</div>';
       }
       body += '<tr'+bg+'>'+
-        '<td '+LL_MAIL_TD+'><b>'+esc(llKindLabel(it))+'</b></td>'+
+        '<td '+LL_MAIL_TD+'><b>'+esc(llKindLabel(it))+'</b>'+
+          (llIsOversize(it.kind) && it.warehouse_comment
+            ? '<div style="font-size:10.5px;color:#475569;font-weight:600;">'+esc(it.warehouse_comment)+'</div>' : '')+'</td>'+
         '<td '+LL_MAIL_TD+'>'+(it.purchase_doc ? esc(it.purchase_doc) : 'без')+'</td>'+
         '<td '+LL_MAIL_TD+'>'+esc(it.store_name || '—')+'</td>'+
         '<td '+LL_MAIL_TD+'>'+res+'</td>'+
@@ -3252,10 +3266,10 @@ function llEditorHtml(){
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:12px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
     '<div style="font-size:13px;font-weight:700;">📦 Редове ('+llDraft.items.length+')</div>'+
-    '<button onclick="llAddFreeRow()" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;">➕ Ред без документ</button>'+
+    '<button onclick="llAddFreeRow()" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;">➕ Добави нов ред</button>'+
     '</div>';
   if(!llDraft.items.length){
-    h += '<div style="color:#94a3b8;font-size:12px;padding:10px 0;">Още няма редове. Отметни документ отгоре или добави ред без документ.</div>';
+    h += '<div style="color:#94a3b8;font-size:12px;padding:10px 0;">Още няма редове. Отметни документ отгоре или добави нов ред.</div>';
   } else {
     h += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">'+
       '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">#</th><th style="padding:3px 6px;">Вид</th>'+
@@ -3285,7 +3299,15 @@ function llEditorHtml(){
         '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+'</td>'+
         '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'clears_doc\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;max-width:150px;">'+llClearsOptions(it)+'</select></td>'+
         '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'store_name\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+llStoreOptions(it.store_name)+'</select></td>'+
-        '<td style="padding:3px 6px;"><input value="'+escVal(it.warehouse_comment)+'" data-i="'+i+'" oninput="llSetRowField(this.dataset.i,\'warehouse_comment\',this.value)" style="width:100%;min-width:120px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
+        '<td style="padding:3px 6px;">'+
+          /* При извънгабаритния полето сменя смисъла си: то вече не е бележка
+             встрани, а ОПИСАНИЕТО на товара. Затова получава заглавие и
+             червена рамка, докато е празно — иначе складът го подминава като
+             всяко друго незадължително поле. */
+          (llIsOversize(it.kind) ? '<div style="font-size:10px;font-weight:700;color:#92400e;margin-bottom:2px;">Какъв е товарът *</div>' : '')+
+          '<input id="ll-wc-'+i+'" value="'+escVal(it.warehouse_comment)+'" data-i="'+i+'"'+
+          (llIsOversize(it.kind) ? ' placeholder="напр. стелажи, ламперия…"' : '')+
+          ' oninput="llSetRowField(this.dataset.i,\'warehouse_comment\',this.value)" style="width:100%;min-width:120px;border:1px solid '+(llOversizeNeedsComment(it)?'#fca5a5':'#e2e8f0')+';border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
         '<td style="padding:3px 6px;text-align:center;white-space:nowrap;">'+(!docOf
           ? '<span style="color:#cbd5e1;" title="Ред без документ — няма какво да остане чакащо">—</span>'
           : (first === i
@@ -3342,6 +3364,18 @@ function llSaveDraft(){
   if(!llDraft.items.length){ toast('Добави поне един ред','#dc2626'); renderLoadingLists(); return; }
   var missing = llDraft.items.filter(function(it){ return !String(it.store_name || '').trim(); }).length;
   if(missing){ toast('Има ред с документ или артикули, но без обект получател','#dc2626'); renderLoadingLists(); return; }
+  /* Извънгабаритен ред без описание НЕ се записва. На рампата обектът вижда
+     „извънгабаритен 1 от 2" и нищо друго — нито артикули, нито документ му
+     казват какво чака. Проверката е СЛЕД отпадането на празните редове:
+     недокоснат ред с вид „извънгабаритен" е непопълнена бланка, не грешка. */
+  var noDesc = llDraft.items.findIndex(llOversizeNeedsComment);
+  if(noDesc >= 0){
+    toast('Извънгабаритният ред иска описание — какъв е товарът','#dc2626');
+    renderLoadingLists();
+    var wc = document.getElementById('ll-wc-' + noDesc);
+    if(wc && wc.focus) wc.focus();
+    return;
+  }
   if(dropped) renderLoadingLists();
   /* Палетите се преномерират плътно ПРЕДИ записа — иначе „палет 2 от 5"
      обещава на обекта палет, който не съществува. */
@@ -3634,15 +3668,15 @@ function llViewHtml(){
   /* Обобщението по обект — СМЯТА СЕ от редовете, не от заглавието. */
   var sum = llSummaryByStore(items);
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:12px;">'+
-    '<div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📊 По обекти ('+c.stores+' обекта · '+c.pallet+' палета · '+c.roll_container+' рол конт. · '+c.roll+' рула · '+c.bulk+' насип'+
+    '<div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📊 По обекти ('+c.stores+' обекта · '+c.pallet+' палета · '+c.oversize+' извънгабаритни · '+c.roll+' рула · '+c.bulk+' насип'+
       (c.missing?' · <span style="color:#dc2626;">'+c.missing+' неполучени</span>':'')+')</div>'+
     '<table id="ll-summary" style="width:100%;border-collapse:collapse;font-size:12px;">'+
-    '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;text-align:right;">Палети</th><th style="padding:3px 6px;text-align:right;">Рол конт.</th><th style="padding:3px 6px;text-align:right;">Рула</th><th style="padding:3px 6px;text-align:right;">Насип</th><th style="padding:3px 6px;text-align:right;">Получени</th><th style="padding:3px 6px;text-align:right;">Неполучени</th>'+
+    '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;text-align:right;">Палети</th><th style="padding:3px 6px;text-align:right;">Извънгаб.</th><th style="padding:3px 6px;text-align:right;">Рула</th><th style="padding:3px 6px;text-align:right;">Насип</th><th style="padding:3px 6px;text-align:right;">Получени</th><th style="padding:3px 6px;text-align:right;">Неполучени</th>'+
     '<th style="padding:3px 6px;text-align:right;">Артикули</th><th style="padding:3px 6px;text-align:right;">Бройки</th></tr>';
   sum.forEach(function(s){
     h += '<tr style="border-top:1px solid #f1f5f9;"><td style="padding:3px 6px;font-weight:600;">'+esc(s.store)+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.pallet+'</td>'+
-      '<td style="padding:3px 6px;text-align:right;">'+s.roll_container+'</td>'+
+      '<td style="padding:3px 6px;text-align:right;">'+s.oversize+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.roll+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.bulk+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.received+'/'+s.total+'</td>'+
@@ -3668,8 +3702,11 @@ function llViewHtml(){
      единица с един опис, дори да носи няколко документа (няколко реда). */
   var descSeen = {};
   items.forEach(function(it){
-    /* „1" = палет 1; „rc1" = рол контейнер 1; иначе id на реда (руло/насип).
-       Без вида в препратката палет 1 и контейнер 1 на един обект се смесват. */
+    /* „1" = палет 1; „rc1" = извънгабаритен 1; иначе id на реда (руло/насип).
+       Без вида в препратката палет 1 и извънгабаритен 1 на един обект се
+       смесват. Представката „rc" е от предишното име на вида и се пази
+       нарочно: тя не се записва никъде, но стои в data-u на бутоните и
+       смяната ѝ би счупила вече отворен печатен изглед. */
     var uref = (llIsNumbered(it.kind) && it.pallet_no != null)
       ? (it.kind === 'pallet' ? String(it.pallet_no) : 'rc' + it.pallet_no)
       : String(it.id);
@@ -3832,7 +3869,7 @@ function llPrint(listId, storeFilter, unitRef){
     var ref = String(unitRef), m = /^(rc)?(\d+)$/.exec(ref);
     var rows = m
       ? items.filter(function(i){
-          return i.kind === (m[1] ? 'roll_container' : 'pallet') && String(i.pallet_no) === m[2] &&
+          return i.kind === (m[1] ? 'oversize' : 'pallet') && String(i.pallet_no) === m[2] &&
             (!storeFilter || i.store_name === storeFilter);
         })
       : items.filter(function(i){ return String(i.id) === ref; });
@@ -3932,7 +3969,7 @@ function llRenderPrint(list, items, storeFilter){
     ? sum.map(function(s){
         return '<tr class="lp-row"><td>'+esc(s.store)+'</td>'+
           '<td class="lp-num">'+s.pallet+'</td>'+
-          '<td class="lp-num">'+s.roll_container+'</td>'+
+          '<td class="lp-num">'+s.oversize+'</td>'+
           '<td class="lp-num">'+s.roll+'</td>'+
           '<td class="lp-num">'+s.bulk+'</td>'+
           '<td class="lp-num">'+s.received+'/'+s.total+'</td></tr>';
@@ -3955,7 +3992,12 @@ function llRenderPrint(list, items, storeFilter){
       if(it.partial)    doc += '<div class="lp-tag">частично</div>';
       return '<tr class="lp-row" data-store="'+escVal(it.store_name || '')+'">'+
         '<td class="lp-num">'+n+'</td>'+
-        (k === 0 ? '<td class="lp-kind" rowspan="'+span+'">'+esc(llKindLabel(g.rows[0]))+'</td>' : '')+
+        (k === 0 ? '<td class="lp-kind" rowspan="'+span+'">'+esc(llKindLabel(g.rows[0]))+
+          /* Извънгабаритният няма артикули по документ — „какъв е товарът" е
+             единственото, което казва какво се вози. Стои до вида, не в
+             колоната за коментар: там се чете като бележка встрани. */
+          (llIsOversize(g.rows[0].kind) && g.rows[0].warehouse_comment
+            ? '<div class="lp-tag">'+esc(g.rows[0].warehouse_comment)+'</div>' : '')+'</td>' : '')+
         '<td>'+doc+'</td>'+
         '<td>'+esc(it.store_name || '—')+'</td>'+
         '<td>'+esc(it.warehouse_comment || '—')+'</td>'+
@@ -4020,7 +4062,7 @@ function llRenderPrint(list, items, storeFilter){
         '<table class="lp-tbl">'+
           /* 60+26+26+26+26+26 = 190 */
           '<colgroup><col style="width:60mm;"><col style="width:26mm;"><col style="width:26mm;"><col style="width:26mm;"><col style="width:26mm;"><col style="width:26mm;"></colgroup>'+
-          '<tr><th>Обект</th><th>Палети</th><th>Рол конт.</th><th>Рула</th><th>Насип</th><th>Получени</th></tr>'+
+          '<tr><th>Обект</th><th>Палети</th><th>Извънгаб.</th><th>Рула</th><th>Насип</th><th>Получени</th></tr>'+
           sumHtml+
         '</table>'+
         '<div class="lp-sec">Товарни единици</div>'+
