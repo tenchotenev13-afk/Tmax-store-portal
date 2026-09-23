@@ -307,6 +307,9 @@ function llRenumberPallets(items){
    разминава при първата редакция на ред и не гърми — просто показва грешно
    число, докато някой не го забележи. */
 function llCounts(items){
+  /* Отхвърленият извънреден ред не се брои никъде (Пакет Г2). Филтърът е ТУК,
+     а не в осемте call site-а — едно копие по-малко, което да се разминава. */
+  items = llLiveRows(items);
   var c = { pallet:0, roll_container:0, roll:0, bulk:0, stores:0, received:0, missing:0, total:0 };
   var seen = {};
   /* Броят се ТОВАРНИТЕ ЕДИНИЦИ, не редовете: четири документа на един палет
@@ -324,6 +327,7 @@ function llCounts(items){
 }
 /* Обобщение по ОБЕКТ — това гледа шофьорът, преди да тръгне. */
 function llSummaryByStore(items){
+  items = llLiveRows(items);   /* същото като в llCounts() */
   var by = {}, order = [];
   var ensure = function(s){
     if(!by[s]){ by[s] = { store:s, pallet:0, roll_container:0, roll:0, bulk:0, received:0, missing:0, total:0, products:0, qty:0 }; order.push(s); }
@@ -445,6 +449,11 @@ function renderLoadingLists(){
   else if(llView === 'view') h = llViewHtml();
   else                       h = llListHtml();
   wrap.innerHTML = h;
+  /* Формата за извънреден ред живее ИЗВЪН #mod-loading (на body), затова не
+     се обновява от реда горе. Помощниците на артикулите (llAddProduct,
+     llRemoveProduct, llToggleProducts) викат renderLoadingLists() — без реда
+     долу добавеният артикул не се появява в модала. */
+  if(llStoreAdd) llStoreAddRender();
 }
 /* ─── ИЗГЛЕД ЗА ОБЕКТА ──────────────────────────────────────── */
 /* При обекта се търси по изходящ № (по неговите редове), по склад и по дата.
@@ -512,16 +521,446 @@ function llHandled(it){ return !!(it && (it.received || it.missing)); }
    бутоните на реда и гейтът на „Приключи приемането" се разминават и
    бутонът остава сив при нула видими действия. */
 function llOpenForStore(it){ return !llHandled(it) && llCanReceive(it); }
+
+/* ══════════════════════════════════════════════════════════
+   ИЗВЪНРЕДЕН РЕД ОТ ПОЛУЧАТЕЛЯ (Пакет Г2)
+
+   На рампата пристига палет, който го няма в листа — или в кашона има стока
+   над описаната. Дотук обектът нямаше къде да го запише: отмяташе каквото е
+   описано и звънеше по телефона. Сега добавя ред САМ, с коментар защо, а
+   редът чака одобрение.
+
+   ФАКТЪТ И РАЗРЕШЕНИЕТО СА РАЗЛИЧНИ НЕЩА. Редът се записва с received=true
+   веднага: стоката Е получена, това не подлежи на одобрение. Одобрява се
+   дали влиза в ДОКУМЕНТИТЕ на листа — броячи, печат, PDF, писмо.
+
+   КОЙ РЕШАВА: складът-изпращач (акаунтът на самия склад) ИЛИ регионалният
+   на обекта-получател, плюс admin. Първото решение е окончателно — PATCH-ът
+   носи филтър approval_status=eq.pending, тоест вторият натиснал получава
+   „вече е решено" вместо да презапише чуждото решение.
+
+   НЕ Е НАПРАВЕНО НАРОЧНО: напомняне за pending ред, който стои повече от
+   24 часа. Темата loading_lists_pending в bulletin-notify гледа само
+   НЕОТМЕТНАТИТЕ редове и не знае нищо за одобренията; това е отделно
+   решение, не пропуск. */
+
+/* Състоянието на реда — едно определение за всички места. */
+function llRowRejected(it){ return !!it && it.approval_status === 'rejected'; }
+function llRowPending(it){ return !!it && it.approval_status === 'pending'; }
+/* Отхвърленият ред НЕ СЪЩЕСТВУВА за листа: не се брои, не се печата, не влиза
+   в PDF-а и в писмото. Остава видим на екрана, зачертан, за да се знае какво
+   е било поискано и отказано — изтриването му би изтрило и обяснението. */
+function llRowCounts(it){ return !llRowRejected(it); }
+function llLiveRows(items){ return (items || []).filter(llRowCounts); }
+
+/* text[] от PostgREST идва като масив. currentUser обаче минава през
+   auth-login и в по-стари сесии е носил Postgres литерала {"А","Б"} като
+   низ — затова и двете форми. */
+function llParseStores(v){
+  if(Array.isArray(v)) return v;
+  if(typeof v === 'string' && v.length > 2){
+    return v.replace(/^\{|\}$/g, '').split(',').map(function(s){
+      return s.trim().replace(/^"|"$/g, '');
+    }).filter(function(s){ return !!s; });
+  }
+  return [];
+}
+/* Обектите, които ТОЗИ човек покрива като регионален. Чете се ПРАВО от
+   currentUser.assigned_stores, не през assignedStores(): онази функция връща
+   [собствения обект] за всеки, който не е admin/accounting/logistics. Днес
+   всичките шестима регионални са accounting или admin, тоест двете съвпадат —
+   но направи ли се регионален с роля manager, assignedStores() мълчаливо би
+   му дало собствения обект: щеше да одобрява за обекта, в който седи, и да не
+   може за своя регион. */
+function llMyRegionStores(){
+  if(!currentUser || !currentUser.is_regional) return [];
+  return llParseStores(currentUser.assigned_stores);
+}
+/* Складът-изпращач, регионалният на обекта-получател или admin. Ролята
+   „logistics" сама по себе си НЕ одобрява: тя пише листи за кой да е склад,
+   а решението е на изпращача или на регионалния. */
+function llCanApprove(list, row){
+  if(!currentUser || !list || !row) return false;
+  if(currentUser.role === 'admin') return true;
+  var wh = list.warehouse || '';
+  if(wh && currentUser.store_name === wh) return true;
+  return llMyRegionStores().indexOf(row.store_name) >= 0;
+}
+/* Маркерът на реда — един за картата на обекта и за прегледа на склада. */
+function llApprovalBadge(it){
+  if(!it || !it.added_by_store) return '';
+  if(llRowPending(it)){
+    return '<span data-ll-appr="pending" title="Добавен от обекта — чака одобрение" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;white-space:nowrap;">⏳ чака одобрение</span>';
+  }
+  if(llRowRejected(it)){
+    return '<span data-ll-appr="rejected" title="Отхвърлен — не влиза в документите на листа" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;white-space:nowrap;">⛔ отхвърлен</span>';
+  }
+  return '<span data-ll-appr="approved" title="Добавен от обекта и одобрен" style="background:#f0fdf4;color:#16a34a;border:1px solid #bbf7d0;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;white-space:nowrap;">➕ добавен от обекта</span>';
+}
+/* Решението с кой и кога — под маркера, на едно място. */
+function llApprovalNote(it){
+  if(!it || !it.added_by_store || llRowPending(it)) return '';
+  var who = it.approval_by || '—';
+  return '<div style="font-size:10px;color:#64748b;margin-top:2px;">'+
+    (llRowRejected(it) ? 'отхвърлил: ' : 'одобрил: ')+esc(who)+
+    (it.approval_at ? ' · '+llFmtStamp(it.approval_at) : '')+
+    (it.approval_comment ? ' · '+esc(it.approval_comment) : '')+'</div>';
+}
+
+/* ─── ДОБАВЯНЕ ОТ ОБЕКТА ─────────────────────────────────────
+   Формата за артикули е СЪЩАТА като в редактора на склада (Пакет В1):
+   сканиране, автодопълване, проверка на дублирани кодове. За да се ползва без
+   копие, новият ред временно живее в llDraft — помощниците там работят върху
+   llDraft.items[i]. Предишната чернова се пази и се връща при затваряне. */
+var llStoreAdd = null;   /* {listId, store, savedDraft, savedView} */
+
+function llStoreAddOpen(listId){
+  var l = llStoreLists.find(function(x){ return String(x.id) === String(listId); });
+  if(!l){ toast('Товарният лист не е намерен','#dc2626'); return; }
+  if(l.status !== 'sent'){ toast('Листът вече е приключен','#d97706'); return; }
+  var mine = llStoreItemsOf(listId);
+  var store = (currentUser && currentUser.store_name) || '';
+  /* Глобален профил вижда няколко обекта в един лист — тогава обектът се
+     взима от редовете на картата, а не от собствения му store_name. При
+     повече от един обект в картата не е ясно за кого е редът и не се гадае. */
+  var seen = {};
+  mine.forEach(function(i){ seen[i.store_name || ''] = 1; });
+  var keys = Object.keys(seen);
+  if(keys.length === 1) store = keys[0];
+  else if(keys.length > 1 && keys.indexOf(store) < 0){
+    toast('Картата е за няколко обекта — не е ясно за кой е редът','#dc2626');
+    return;
+  }
+  if(!store){ toast('Не е ясно за кой обект е редът','#dc2626'); return; }
+
+  llStoreAdd = { listId: listId, store: store, savedDraft: llDraft, savedView: llView };
+  llDraft = { list_date: l.list_date, executed_by: '', comment: '', _storeAdd: true, items: [{
+    id: null, kind: 'pallet', pallet_no: null, pallet_total: null,
+    purchase_doc: null, clears_doc: null, store_name: store,
+    warehouse_comment: '', store_comment: '', partial: false,
+    products: [], _prodOpen: true
+  }] };
+  llStoreAddRender();
+}
+function llStoreAddClose(){
+  if(!llStoreAdd) return;
+  llDraft = llStoreAdd.savedDraft;
+  llView = llStoreAdd.savedView || llView;
+  llStoreAdd = null;
+  llScanClose();
+  var m = document.getElementById('ll-add-modal');
+  if(m && m.parentNode) m.parentNode.removeChild(m);
+}
+function llStoreAddRender(){
+  if(!llStoreAdd || !llDraft || !llDraft.items[0]) return;
+  var it = llDraft.items[0];
+  var m = document.getElementById('ll-add-modal');
+  if(!m){
+    m = document.createElement('div');
+    m.id = 'll-add-modal';
+    m.style.cssText = 'position:fixed;inset:0;z-index:380;background:rgba(15,23,42,.6);display:flex;align-items:flex-start;justify-content:center;padding:14px;overflow-y:auto;';
+    document.body.appendChild(m);
+  }
+  m.innerHTML =
+    '<div style="width:100%;max-width:640px;background:#fff;border-radius:12px;padding:14px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">'+
+        '<div style="font-size:15px;font-weight:700;">➕ Извънреден ред · '+esc(llStoreAdd.store)+'</div>'+
+        '<button onclick="llStoreAddClose()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 13px;font-size:13px;cursor:pointer;">✕</button>'+
+      '</div>'+
+      '<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 10px;font-size:12px;margin-bottom:10px;">'+
+        'Редът се записва като ПОЛУЧЕН веднага, но влиза в документите на листа чак след одобрение от склада или от регионалния мениджър.</div>'+
+      '<div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px;">'+
+        '<select id="ll-add-kind" onchange="llStoreAddField(\'kind\',this.value)" style="border:1px solid #cbd5e1;border-radius:6px;padding:7px 8px;font-size:13px;">'+
+          LL_KINDS.map(function(k){ return '<option value="'+k[0]+'"'+(it.kind===k[0]?' selected':'')+'>'+k[1]+'</option>'; }).join('')+
+        '</select>'+
+        '<input id="ll-add-doc" value="'+llAttr(it.purchase_doc)+'" placeholder="Изходящ № (по желание)" '+
+          'oninput="llStoreAddField(\'purchase_doc\',this.value)" style="flex:1 1 180px;border:1px solid #cbd5e1;border-radius:6px;padding:7px 8px;font-size:13px;font-family:DM Mono,monospace;">'+
+      '</div>'+
+      /* esc('') връща „—" — за textarea трябва ПРАЗНО, иначе полето тръгва с тире. */
+      '<textarea id="ll-add-comment" placeholder="Какво и защо — задължително (напр. „дойде палет с плочки, който не е описан“)" '+
+        'oninput="llStoreAddField(\'store_comment\',this.value)" style="width:100%;box-sizing:border-box;min-height:64px;border:1px solid #cbd5e1;border-radius:6px;padding:8px;font-size:13px;margin-bottom:8px;">'+(it.store_comment ? esc(it.store_comment) : '')+'</textarea>'+
+      /* СЪЩИЯТ блок като в редактора на склада — сканиране, автодопълване, проверки. */
+      llProductsBlockHtml(it, 0)+
+      '<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px;">'+
+        '<button onclick="llStoreAddClose()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+        '<button id="ll-add-submit" onclick="llStoreAddSubmit()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;">➕ Добави реда</button>'+
+      '</div>'+
+    '</div>';
+}
+function llStoreAddField(field, val){
+  if(!llStoreAdd || !llDraft || !llDraft.items[0]) return;
+  llDraft.items[0][field] = (val === '') ? (field === 'kind' ? 'pallet' : '') : val;
+}
+function llStoreAddSubmit(){
+  if(!llStoreAdd || !llDraft || !llDraft.items[0]) return Promise.resolve(false);
+  var it = llDraft.items[0];
+  var comment = String(it.store_comment || '').trim();
+  if(!comment){
+    /* Без обяснение редът е безполезен: одобряващият няма по какво да реши. */
+    toast('Опиши какво и защо — коментарът е задължителен','#dc2626');
+    var c = document.getElementById('ll-add-comment');
+    if(c && c.focus) c.focus();
+    return Promise.resolve(false);
+  }
+  var listId = llStoreAdd.listId, store = llStoreAdd.store;
+  var products = (it.products || []).slice();
+  var kind = it.kind || 'pallet';
+  var doc = String(it.purchase_doc || '').trim();
+  var at = new Date().toISOString(), by = llActor();
+  /* Позицията е след последния ред на ЦЕЛИЯ лист, не на моите: обектът вижда
+     само своите редове, а position е уникална в рамките на листа. */
+  return sbGet('loading_list_items','list_id=eq.'+listId+'&select=position&order=position.desc&limit=1').then(function(rows){
+    var last = (Array.isArray(rows) && rows.length) ? (Number(rows[0].position) || 0) : 0;
+    return sbPostReturn('loading_list_items', {
+      list_id: listId, position: last + 1,
+      kind: kind,
+      /* Без номер: „палет 3 от 5" е обещание на СКЛАДА за курса и добавен
+         отвън ред не бива да го разваля. */
+      pallet_no: null, pallet_total: null,
+      purchase_doc: doc || null, clears_doc: null,
+      store_name: store, warehouse_comment: null,
+      store_comment: comment, partial: false,
+      /* Стоката Е получена — това е факт, не искане. */
+      received: true, received_by: by, received_at: at,
+      missing: false,
+      added_by_store: true, approval_status: 'pending'
+    });
+  }).then(function(res){
+    if(!res.ok || !res.row || !res.row.id){
+      toast('Редът НЕ беше добавен: '+sbErrMsg(res),'#dc2626');
+      return false;
+    }
+    var newId = res.row.id;
+    return llWriteStoreRowProducts(newId, products).then(function(){
+      llStoreAddClose();
+      toast('➕ Редът е добавен и чака одобрение');
+      /* Известието е СЛЕД записа: провалът му не отменя реда. */
+      llNotifyRowAdded(listId, store, kind, doc, comment, products);
+      loadLoadingLists();
+      return true;
+    });
+  });
+}
+/* Артикулите на НОВИЯ ред. НЕ през llWriteProducts: той съпоставя редовете на
+   листа по position спрямо llDraft.items и с една-единствена чернова би
+   закачил артикулите за ПЪРВИЯ ред на листа, не за новия. */
+function llWriteStoreRowProducts(itemId, products){
+  if(!products || !products.length) return Promise.resolve(true);
+  var rows = products.map(function(pr, j){
+    return { item_id: itemId, position: j + 1, sap_code: pr.sap_code,
+             product_name: pr.product_name, unit: pr.unit || null, qty: pr.qty,
+             cartons: (pr.cartons === null || pr.cartons === undefined || pr.cartons === '') ? null : pr.cartons };
+  });
+  return sbPost('loading_list_products', rows).then(function(res){
+    if(!res.ok){
+      /* Редът е записан, артикулите не са — казва се на глас, вместо да
+         изглежда като палет без съдържание. */
+      llDocFailures[itemId] = true;
+      console.error('llWriteStoreRowProducts', res.error);
+      toast('⚠️ Редът е добавен, но артикулите НЕ бяха записани: '+sbErrMsg(res),'#dc2626');
+      return false;
+    }
+    return true;
+  });
+}
+
+/* ─── РЕШЕНИЕТО ──────────────────────────────────────────────
+   PATCH с филтър approval_status=eq.pending и Prefer: count=exact.
+   PostgREST връща броя засегнати редове в Content-Range, тоест нула значи
+   „някой вече е решил". Обикновеният sbPatch не върши работа тук: той праща
+   return=minimal без count и не може да различи „нула засегнати" от успех —
+   вторият натиснал би видял „одобрено" за ред, който е отхвърлен.
+   НЕ се ползва return=representation (виж бележката при sbDelete в
+   shared.js): то иска SELECT право върху всяка върната колона. */
+function llPatchIfPending(itemId, body){
+  var url = API + '/loading_list_items?id=eq.' + encodeURIComponent(itemId) + '&approval_status=eq.pending';
+  return fetch(url, {
+    method: 'PATCH',
+    headers: Object.assign({}, H, { 'Prefer': 'return=minimal,count=exact' }),
+    body: JSON.stringify(body)
+  }).then(function(r){
+    if(!r.ok) return { ok:false, rows:0, error:'HTTP ' + r.status };
+    /* count:null значи „не можах да разбера" (отрязан хедър) — тогава се
+       приема, че е минало, вместо да се измисля нула. */
+    var n = sbCountFromRange(r);
+    return { ok:true, rows: (n === null ? 1 : n) };
+  }).catch(function(e){ return { ok:false, rows:0, error:String((e && e.message) || e) }; });
+}
+function llApproveBtnsHtml(list, row){
+  if(!llCanApprove(list, row) || !llRowPending(row)) return '';
+  /* Коментарът е ПОЛЕ, не prompt(): prompt блокира страницата, а в jsdom
+     изобщо го няма. Същият модел като „Неполучен целия палет" в Пакет А. */
+  return '<div data-ll-approve="'+escAttr(row.id)+'" style="margin-top:4px;display:flex;flex-wrap:wrap;gap:5px;align-items:center;">'+
+    '<input id="ll-apr-'+escAttr(row.id)+'" placeholder="коментар (задължителен при отхвърляне)" style="flex:1 1 170px;min-width:140px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-size:11.5px;">'+
+    '<button data-l="'+escAttr(list.id)+'" data-i="'+escAttr(row.id)+'" onclick="llDecideRow(this.dataset.l,this.dataset.i,1)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Одобри</button>'+
+    '<button data-l="'+escAttr(list.id)+'" data-i="'+escAttr(row.id)+'" onclick="llDecideRow(this.dataset.l,this.dataset.i,0)" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">⛔ Отхвърли</button>'+
+    '</div>';
+}
+/* ЕДНО място за решението — прегледът на склада и картата на обекта го викат
+   еднакво. Две копия щяха да се разминат по това кой какво записва. */
+function llDecideRow(listId, itemId, approve){
+  var list = llLists.find(function(x){ return String(x.id) === String(listId); }) ||
+             llStoreLists.find(function(x){ return String(x.id) === String(listId); });
+  var row = llItems.concat(llStoreItems).find(function(x){ return String(x.id) === String(itemId); });
+  if(!list || !row) return Promise.resolve(false);
+  if(!llCanApprove(list, row)){ toast('Нямаш права да решаваш по този ред','#dc2626'); return Promise.resolve(false); }
+  if(!llRowPending(row)){ toast('Редът вече е решен','#d97706'); return Promise.resolve(false); }
+  var inp = document.getElementById('ll-apr-' + itemId);
+  var comment = inp ? String(inp.value == null ? '' : inp.value).trim() : '';
+  if(!approve && !comment){
+    /* Отхвърляне без причина е безполезно за обекта — стоката вече е при него
+       и той трябва да знае какво да я прави. */
+    toast('Отхвърлянето иска коментар','#d97706');
+    if(inp && inp.focus) inp.focus();
+    return Promise.resolve(false);
+  }
+  return llPatchIfPending(itemId, {
+    approval_status: approve ? 'approved' : 'rejected',
+    approval_by: llActor(),
+    approval_at: new Date().toISOString(),
+    approval_comment: comment || null
+  }).then(function(res){
+    if(!res.ok){ toast('Решението НЕ беше записано: '+(res.error || ''),'#dc2626'); return false; }
+    if(!res.rows){
+      toast('Редът вече е решен от някой друг','#d97706');
+      loadLoadingLists();
+      return false;
+    }
+    toast(approve ? '✅ Редът е одобрен' : '⛔ Редът е отхвърлен', approve ? undefined : '#dc2626');
+    llNotifyRowDecided(list, row, approve, comment);
+    /* Решението може да е било последното, което е пречело листът да се
+       затвори — затова проверката тръгва веднага, не на следващото отмятане. */
+    return llAutoDoneList(listId).then(function(){
+      loadLoadingLists();
+      return true;
+    });
+  });
+}
+
+/* ─── ИЗВЕСТИЯ ПО ИЗВЪНРЕДНИЯ РЕД ───────────────────────────
+   Push-ът отива САМО до склада: регионалните седят в „Централен офис" и push
+   по обект там би отишъл до целия централен офис. До тях — имейл. */
+function llRegionalEmails(store){
+  if(!store) return Promise.resolve([]);
+  return sbGet('users','active=eq.true&is_regional=eq.true&select=email,assigned_stores').then(function(rows){
+    var out = [];
+    (Array.isArray(rows) ? rows : []).forEach(function(u){
+      if(!u.email) return;
+      if(llParseStores(u.assigned_stores).indexOf(store) < 0) return;
+      if(out.indexOf(u.email) < 0) out.push(u.email);
+    });
+    return out;
+  }).catch(function(){ return []; });
+}
+function llAddedRowHtmlFor(list, store, kind, doc, comment, products){
+  var body = '<h2 style="color:#92400e;margin:0 0 4px;font-size:19px;">➕ Извънреден ред от обекта</h2>'+
+    '<p style="color:#64748b;font-size:13px;margin:0 0 16px;"><b>'+esc(store)+
+      '</b> е добавил ред към товарния лист и той <b>чака одобрение</b>.</p>'+
+    llMailMeta(list);
+  body += '<table style="width:100%;border-collapse:collapse;"><tr>'+
+    '<th '+LL_MAIL_TH+'>Товарна единица</th><th '+LL_MAIL_TH+'>Изходящ №</th>'+
+    '<th '+LL_MAIL_TH+'>Обект</th><th '+LL_MAIL_TH+'>Обяснение на обекта</th></tr>'+
+    '<tr>'+
+    '<td '+LL_MAIL_TD+'><b>'+esc((LL_KINDS.find(function(k){ return k[0] === kind; }) || [null,kind])[1])+'</b></td>'+
+    '<td '+LL_MAIL_TD+'>'+(doc ? esc(doc) : 'без')+'</td>'+
+    '<td '+LL_MAIL_TD+'>'+esc(store)+'</td>'+
+    '<td '+LL_MAIL_TD+'>'+esc(comment)+'</td></tr>';
+  if((products || []).length){
+    body += '<tr><td colspan="4" style="padding:3px 7px 7px 18px;font-size:11px;color:#64748b;border:1px solid #e2e8f0;border-top:none;line-height:1.5;">'+
+      products.map(function(p){
+        return esc(p.sap_code)+' · '+esc(p.product_name)+' — '+llFmtQty(p.qty)+' '+esc(p.unit || '')+
+          (p.cartons != null && p.cartons !== '' ? ' ('+esc(String(p.cartons))+' каш.)' : '');
+      }).join('<br>')+'</td></tr>';
+  }
+  body += '</table>'+llMailBtn();
+  return emailWrap(body, 'Товарен лист · ТеМАХ Вътрешна платформа');
+}
+function llNotifyRowAdded(listId, store, kind, doc, comment, products){
+  var list = llStoreLists.find(function(x){ return String(x.id) === String(listId); }) ||
+             llLists.find(function(x){ return String(x.id) === String(listId); });
+  if(!list) return Promise.resolve(null);
+  var wh = list.warehouse || '';
+  var dateTxt = fmtDate(list.list_date);
+  var title = '➕ Извънреден ред от ' + store;
+  var msg = 'Товарен лист ' + dateTxt + ' · чака одобрение.';
+  var subject = 'Извънреден ред от ' + store + ' · товарен лист ' + dateTxt;
+  return Promise.all([llStoreEmails([wh]), llRegionalEmails(store)]).then(function(r){
+    var to = (r[0][wh] || []).slice();
+    r[1].forEach(function(e){ if(to.indexOf(e) < 0) to.push(e); });
+    return Promise.all([
+      llPushTo(wh, title, msg),
+      llMailTo(to, subject, function(){
+        return llAddedRowHtmlFor(list, store, kind, doc, comment, products);
+      })
+    ]);
+  }).then(function(r){
+    if(!r[0].ok && !r[1].ok){
+      console.error('llNotifyRowAdded: известието не тръгна', wh, store, r);
+      toast('⚠️ Редът е добавен, но известието до ' + (wh || 'склада') + ' не тръгна', '#d97706');
+    }
+    return { push: r[0], mail: r[1] };
+  }).catch(function(err){
+    console.error('llNotifyRowAdded: грешка', err);
+    return null;
+  });
+}
+function llNotifyRowDecided(list, row, approve, comment){
+  if(!list || !row) return Promise.resolve(null);
+  var store = row.store_name || '';
+  var dateTxt = fmtDate(list.list_date);
+  var title = approve ? '✅ Извънредният ред е одобрен' : '⛔ Извънредният ред е отхвърлен';
+  var msg = 'Товарен лист ' + dateTxt + ' · ' + (list.warehouse || '') +
+    (comment ? ' · ' + comment : '');
+  var subject = (approve ? 'Одобрен извънреден ред · ' : 'Отхвърлен извънреден ред · ') + dateTxt;
+  return llStoreEmails([store]).then(function(byStore){
+    return Promise.all([
+      llPushTo(store, title, msg),
+      llMailTo(byStore[store] || [], subject, function(){
+        var body = '<h2 style="color:'+(approve?'#16a34a':'#b91c1c')+';margin:0 0 4px;font-size:19px;">'+
+            (approve ? '✅ Извънредният ред е одобрен' : '⛔ Извънредният ред е отхвърлен')+'</h2>'+
+          '<p style="color:#64748b;font-size:13px;margin:0 0 16px;">Решил: <b>'+esc(llActor())+'</b>'+
+            (comment ? ' · '+esc(comment) : '')+'</p>'+
+          llMailMeta(list)+
+          '<div style="background:#f8fafc;border-radius:6px;padding:8px 12px;font-size:12.5px;">'+
+            esc(llKindLabel(row))+' · '+(row.purchase_doc ? esc(row.purchase_doc) : 'без документ')+
+            ' · '+esc(row.store_comment || '—')+'</div>'+
+          (approve ? '' : '<p style="color:#b91c1c;font-size:12.5px;">Редът НЕ влиза в документите на листа. Стоката остава при обекта — уточни какво да се прави с нея.</p>')+
+          llMailBtn();
+        return emailWrap(body, 'Товарен лист · ТеМАХ Вътрешна платформа');
+      })
+    ]);
+  }).then(function(r){
+    if(!r[0].ok && !r[1].ok){
+      console.error('llNotifyRowDecided: известието не тръгна', store, r);
+    }
+    return { push: r[0], mail: r[1] };
+  }).catch(function(err){
+    console.error('llNotifyRowDecided: грешка', err);
+    return null;
+  });
+}
+
 function llStoreCardHtml(l){
   var items = llStoreItemsOf(l.id).slice().sort(llByPosition);
   if(!items.length) return '';
-  var got  = items.filter(function(i){ return i.received; }).length;
-  var miss = items.filter(function(i){ return i.missing; }).length;
+  /* Отхвърленият ред се ПОКАЗВА (зачертан), но не се брои и не пречи на
+     приключването — за листа той не съществува. */
+  var live = llLiveRows(items);
+  var got  = live.filter(function(i){ return i.received; }).length;
+  var miss = live.filter(function(i){ return i.missing; }).length;
   var open = !llCollapsed[l.id];
-  var canAny = items.some(llOpenForStore);
+  var canAny = live.some(llOpenForStore);
   /* Гейтът на „Приключи приемането": нито един ред без произнасяне. */
-  var pending = items.filter(function(i){ return !llHandled(i); }).length;
-  var allDone = pending === 0;
+  var pending = live.filter(function(i){ return !llHandled(i); }).length;
+  /* ВТОРИ гейт: ред, който чака одобрение. Затвори ли се листът дотогава,
+     писмото до склада тръгва с ред, по който още никой не се е произнесъл —
+     а после одобрението няма къде да влезе. */
+  var aprPending = items.filter(llRowPending).length;
+  var allDone = pending === 0 && aprPending === 0;
+  var gateTitle = pending
+    ? 'Отметни всеки ред като получен или неполучен'
+    : 'Има ред, който чака одобрение';
+  var canAdd = l.status === 'sent' && items.some(llCanReceive);
   /* Обектът на картата — за печата. При глобален профил в един лист може да
      има няколко обекта; тогава филтър няма и се печата целият лист. */
   var seenS = {}, onlyStore = '';
@@ -537,15 +976,17 @@ function llStoreCardHtml(l){
   var h = '<div id="ll-card-'+l.id+'" style="background:#fff;border:1px solid '+edge[0]+';border-left:4px solid '+edge[1]+';border-radius:10px;padding:12px;margin-bottom:10px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">'+
       '<div style="font-size:13.5px;font-weight:700;">🚛 '+esc(l.warehouse||'')+' · '+fmtDate(l.list_date)+
-        ' <span style="background:'+edge[2]+';color:'+edge[3]+';padding:2px 8px;border-radius:20px;font-size:10.5px;">получени '+got+' · неполучени '+miss+' / '+items.length+'</span> '+
+        ' <span style="background:'+edge[2]+';color:'+edge[3]+';padding:2px 8px;border-radius:20px;font-size:10.5px;">получени '+got+' · неполучени '+miss+' / '+live.length+'</span> '+
+        (aprPending ? ' <span data-ll-apr-wait="'+aprPending+'" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">⏳ '+aprPending+' чака одобрение</span> ' : '')+
         llStatusBadge(l.status)+'</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
         (open && canAny ? '<button data-id="'+l.id+'" onclick="llMarkAllReceived(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">✅ Всичко получено</button>' : '')+
         /* Приемането се приключва ЯВНО от обекта. Дотук листът се затваряше
            сам, чак когато всеки ред на всеки обект е получен — с липси този
            момент просто не настъпваше и листът висеше „изпратен" завинаги. */
+        (open && canAdd ? '<button data-id="'+l.id+'" onclick="llStoreAddOpen(this.dataset.id)" title="Дошло е нещо, което не е в листа" style="border:1px solid #fde68a;background:#fffbeb;color:#92400e;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">➕ Добави ред</button>' : '')+
         (open && l.status === 'sent'
-          ? '<button data-id="'+l.id+'"'+(allDone?'':' disabled title="Отметни всеки ред като получен или неполучен"')+
+          ? '<button data-id="'+l.id+'"'+(allDone?'':' disabled title="'+escAttr(gateTitle)+'"')+
             ' onclick="llFinishReceiving(this.dataset.id)" style="border:none;background:'+(allDone?'#0f172a':'#e2e8f0')+';color:'+(allDone?'#fff':'#94a3b8')+';border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:'+(allDone?'pointer':'not-allowed')+';">🏁 Приключи приемането</button>'
           : '')+
         '<button data-id="'+l.id+'" data-s="'+escAttr(onlyStore)+'" onclick="llPrint(this.dataset.id,this.dataset.s)" title="Печат само на моята част от листа" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
@@ -591,10 +1032,18 @@ function llStoreCardHtml(l){
     g.rows.forEach(function(it){
     var failed = !!llDocFailures[it.id];
     /* Три фона, защото трите състояния трябва да се различават от два метра:
-       зелен = получено, червен = обектът е заявил липса, бял = още чака. */
-    var bg = it.received ? 'background:#f0fdf4;' : (it.missing ? 'background:#fef2f2;' : '');
-    h += '<tr'+(failed?' data-doc-failed="1"':'')+(it.missing?' data-missing="1"':'')+' style="border-bottom:1px solid #f1f5f9;'+bg+'">'+
-      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+(multi?'padding-left:22px;color:#94a3b8;':'')+'">'+(multi?'↳':esc(llKindLabel(it)))+'</td>'+
+       зелен = получено, червен = обектът е заявил липса, бял = още чака.
+       Извънредният ред има свои два: жълт (чака) и сив (отхвърлен) — те бият
+       зеленото, защото received=true е вярно и за двата, а въпросът на
+       екрана е друг: влиза ли този ред в листа. */
+    var bg = llRowPending(it) ? 'background:#fffbeb;'
+           : (llRowRejected(it) ? 'background:#f8fafc;color:#94a3b8;'
+           : (it.received ? 'background:#f0fdf4;' : (it.missing ? 'background:#fef2f2;' : '')));
+    h += '<tr'+(failed?' data-doc-failed="1"':'')+(it.missing?' data-missing="1"':'')+
+      (it.added_by_store?' data-ll-added="'+escAttr(it.approval_status||'')+'"':'')+
+      ' style="border-bottom:1px solid #f1f5f9;'+bg+(llRowRejected(it)?'text-decoration:line-through;':'')+'">'+
+      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+(multi?'padding-left:22px;color:#94a3b8;':'')+'">'+(multi?'↳':esc(llKindLabel(it)))+
+        (it.added_by_store?'<div style="margin-top:3px;text-decoration:none;font-weight:400;">'+llApprovalBadge(it)+llApprovalNote(it)+llApproveBtnsHtml(l, it)+'</div>':'')+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
         (it.partial?' '+llPartialBadge():'')+'</td>'+
       '<td style="padding:6px 9px;">'+(it.clears_doc?'изчиства '+esc(it.clears_doc):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
@@ -865,8 +1314,12 @@ function llUnmarkMissing(itemId){
 function llFinishReceiving(listId){
   var mine = llStoreItemsOf(listId);
   if(!mine.length) return;
-  var left = mine.filter(function(i){ return !llHandled(i); }).length;
+  var left = llLiveRows(mine).filter(function(i){ return !llHandled(i); }).length;
   if(left){ toast('Отметни всеки ред като получен или неполучен','#d97706'); return; }
+  /* Гейтът е и тук, не само в disabled атрибута на бутона: бутонът може да
+     бъде извикан и от конзолата, а и disabled-ът се смята при рендиране —
+     между него и клика някой може да е добавил ред. */
+  if(mine.some(llRowPending)){ toast('Има ред, който чака одобрение','#d97706'); return; }
   var l = llStoreLists.find(function(x){ return String(x.id) === String(listId); });
   var was = l && l.status;
   llAutoDoneList(listId).then(function(){
@@ -912,7 +1365,8 @@ function llAfterReceive(items){
 function llAutoCloseDoc(d){
   /* Документът се затваря чак когато ВСИЧКИ негови редове по този лист и за
      този обект са получени. Един палет от пет не значи, че доставката е приета. */
-  var siblings = llStoreItemsOf(d.listId).filter(function(i){
+  /* Отхвърленият ред не участва: той не е част от доставката. */
+  var siblings = llLiveRows(llStoreItemsOf(d.listId)).filter(function(i){
     return (i.store_name || '') === d.store && llItemDocKey(i) === d.doc;
   });
   if(!siblings.length || !siblings.every(function(i){ return i.received; })) return Promise.resolve();
@@ -973,8 +1427,13 @@ function llAutoDoneList(listId){
   /* Обектът вижда САМО своите редове, затова проверката е със заявка, не от
      llStoreItems: другите обекти на същия лист са невидими тук и листът би
      се приключвал още на първия готов обект. */
-  return sbGet('loading_list_items','list_id=eq.'+listId+'&select=id,received,missing').then(function(rows){
-    if(!Array.isArray(rows) || !rows.length) return;
+  return sbGet('loading_list_items','list_id=eq.'+listId+'&select=id,received,missing,approval_status').then(function(all){
+    if(!Array.isArray(all) || !all.length) return;
+    /* Ред, който чака одобрение, ДЪРЖИ листа отворен: решението още може да го
+       извади от него или да го добави към писмото до склада. */
+    if(all.some(llRowPending)) return;
+    var rows = llLiveRows(all);
+    if(!rows.length) return;
     if(!rows.every(function(r){ return r.received || r.missing; })) return;
     var want = rows.some(function(r){ return r.missing; }) ? 'partial' : 'done';
     if(l.status === want) return;
@@ -1106,7 +1565,8 @@ function llPdfName(list, store){
 /* Документът. Подредбата е като печата: обект, после палет, после позиция;
    артикулите — под своя ред. */
 function llPdfRows(items, storeFilter){
-  return (items || []).filter(function(i){
+  /* Отхвърленият ред НЕ влиза в бланката (Пакет Г2). */
+  return llLiveRows(items).filter(function(i){
     return !storeFilter || i.store_name === storeFilter;
   }).slice().sort(function(a, b){
     var s = String(a.store_name || '').localeCompare(String(b.store_name || ''));
@@ -1352,6 +1812,7 @@ function llSentHtmlFor(list, store, rows){
 /* Писмото ДО СКЛАДА при приключване — ВСИЧКИ редове, по обекти. Складът е
    изпращачът: за него въпросът не е „какво получих", а „как мина курсът". */
 function llClosedHtmlFor(list, items){
+  items = llLiveRows(items);   /* отхвърленият ред не влиза в писмото (Г2) */
   var c = llCounts(items);
   var miss = c.missing > 0;
   var body = '<h2 style="color:'+(miss?'#b91c1c':'#16a34a')+';margin:0 0 4px;font-size:19px;">'+
@@ -3042,8 +3503,16 @@ function llSendList(id){
    с липси" — и то точно от страната, която липсата засяга. */
 function llDoneList(id){
   if(!llCanEdit()){ toast('Нямаш права за това действие','#dc2626'); return; }
+  /* Същият гейт като при обекта (Пакет Г2), и то ПРЕДИ confirm-а: складът е
+     точно онзи, който може и да одобри, и да затвори. Затвори ли преди
+     решението, писмото тръгва с ред, по който никой не се е произнесъл. */
+  if(llItemsOf(id).some(llRowPending)){
+    toast('Има извънреден ред, който чака одобрение','#d97706');
+    return;
+  }
   if(!confirm('Приключи товарния лист?')) return;
-  var miss = llItemsOf(id).some(function(i){ return i.missing; });
+  /* Отхвърленият ред не е липса — за листа той не съществува. */
+  var miss = llLiveRows(llItemsOf(id)).some(function(i){ return i.missing; });
   var want = miss ? 'partial' : 'done';
   var l0 = llLists.find(function(x){ return String(x.id) === String(id); });
   /* Листът вече е в търсения статус — PATCH-ът минава, но НИЩО не се сменя.
@@ -3175,11 +3644,15 @@ function llViewHtml(){
     var ukey = JSON.stringify([it.store_name || '', uref]);
     var firstOfUnit = !descSeen[ukey];
     descSeen[ukey] = true;
-    h += '<tr'+(it.missing?' data-missing="1"':'')+' style="border-bottom:1px solid #f1f5f9;'+
-      (it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':''))+'">'+
+    h += '<tr'+(it.missing?' data-missing="1"':'')+
+      (it.added_by_store?' data-ll-added="'+escAttr(it.approval_status||'')+'"':'')+
+      ' style="border-bottom:1px solid #f1f5f9;'+
+      (llRowPending(it)?'background:#fffbeb;':(llRowRejected(it)?'background:#f8fafc;color:#94a3b8;text-decoration:line-through;':
+        (it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':''))))+'">'+
       '<td style="padding:6px 9px;color:#94a3b8;">'+(it.position!=null?it.position:'—')+'</td>'+
       '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;">'+esc(llKindLabel(it))+
-        (firstOfUnit
+        (it.added_by_store?'<div style="margin-top:3px;text-decoration:none;font-weight:400;white-space:normal;">'+llApprovalBadge(it)+llApprovalNote(it)+llApproveBtnsHtml(l, it)+'</div>':'')+
+        (firstOfUnit && llRowCounts(it)
           ? ' <button data-l="'+l.id+'" data-s="'+escAttr(it.store_name||'')+'" data-u="'+escAttr(uref)+'" onclick="llPrint(this.dataset.l,this.dataset.s,this.dataset.u)" title="Опис на палета — за залепване" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:4px;">🖨 Опис</button>'
           : '')+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
@@ -3322,6 +3795,7 @@ function llPrint(listId, storeFilter, unitRef){
   /* Складът държи редовете в llItems, обектът — в llStoreItems. */
   var items = llItemsOf(listId);
   if(!items.length) items = llStoreItemsOf(listId);
+  items = llLiveRows(items);   /* отхвърленият ред не се печата (Пакет Г2) */
   if(unitRef !== undefined && unitRef !== null && unitRef !== ''){
     var ref = String(unitRef), m = /^(rc)?(\d+)$/.exec(ref);
     var rows = m
@@ -3402,6 +3876,8 @@ function llPrintCss(){
 function llRenderPrint(list, items, storeFilter){
   var wrap = document.getElementById('mod-print');
   if(!wrap) return;
+  /* Отхвърлените редове са отсяти вече в llPrint() — ЕДНО място, а не
+     второ копие тук, което да се разминава при следващата промяна. */
   var rows = (items || []).filter(function(i){
     return !storeFilter || i.store_name === storeFilter;
   });
