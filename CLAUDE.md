@@ -355,6 +355,10 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
   `select=*` в sync-mirror.ps1**, иначе огледалото спира.
 - Не изключвай RLS „за да мине" — това е решение, което се записва в
   миграцията с едно изречение защо, не мълчалив заобикаляне.
+- При `SECURITY DEFINER` функция проверявай ACL-а за водещо `=X/` ПРЕДИ да
+  отнемаш права. Това е `EXECUTE` на `PUBLIC` и се наследява — revoke само от
+  `anon`/`authenticated` не върши нищо. Случай: `perform_daily_backup`,
+  23.09.2026 (`security-advisor-fixes-2026-09-23-schema.sql`).
 
 ## Инструменти
 

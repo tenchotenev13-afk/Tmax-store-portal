@@ -1,0 +1,62 @@
+-- security-advisor-fixes-2026-09-23-schema.sql
+-- Две находки на Security Advisor, затворени на 23.09.2026.
+-- Приложени в Supabase (xiwkdiqqplgdcrkewgtv) на 23.09.2026 през MCP.
+-- Миграции: 20260923074532_enable_rls_task_completions_bak_20260910
+--           20260923080350_revoke_public_execute_perform_daily_backup
+--
+-- ЗАЩО
+-- 1) public.task_completions_bak_20260910 — резервно копие от 10.09.2026,
+--    2126 реда, RLS изключен и нула политики. С публичния anon ключ таблицата
+--    беше четима И писуема: PostgREST я вижда като всяка друга таблица в
+--    public. RLS без политики я затваря за всички освен service_role.
+-- 2) public.perform_daily_backup(text,text) — SECURITY DEFINER, викаема с
+--    публичния anon ключ през /rest/v1/rpc/perform_daily_backup. Тоест всеки
+--    с ключа (а той стои в клиентския JS) можеше да пуска бекъпи неограничено.
+--
+-- КАПАНЪТ ПРИ ВТОРАТА — EXECUTE беше дадено и на PUBLIC (водещото '=X/' в
+-- ACL-а). PUBLIC се наследява от всяка роля, затова revoke само от anon и
+-- authenticated НЯМАШЕ да свърши работа: правото се връща през PUBLIC и
+-- проверката „вече не е в ACL-а на anon" щеше да мине, докато функцията си
+-- остава викаема. Затова първият ред е revoke от public.
+--
+-- КАКВО Е ПРОВЕРЕНО ПРЕДИ ПРИЛАГАНЕТО (основанието, не само командата)
+--   · grep през целия репо (без .claude/worktrees/) за двете bak таблици:
+--     нито един ред КОД не ги чете. Две попадения, и двете коментарни и за
+--     ДРУГАТА резервна таблица (kasa_cleanup_bak_20260920) — kasa.js:658 и
+--     tests/kasa-returned-day-close.test.js:8. За task_completions_bak_20260910
+--     попадения няма изобщо.
+--   · grep за perform_daily_backup / report_cron_schedule → admin.js:585
+--     (triggerManualBackup, самата RPC заявка на 589) и admin.js:1271
+--     (renderReportsAdmin), и двата с anon ключа.
+--   · cron.job: job 7 'temax-daily-backup', schedule '0 0 * * *', username
+--     postgres, active, команда SELECT perform_daily_backup('daily','system').
+--     Postgres е собственик на функцията и има изрично право — кронът НЕ е
+--     засегнат от revoke-а.
+--   · ACL преди промяната: {=X/postgres, postgres=X/postgres, anon=X/postgres,
+--     authenticated=X/postgres, service_role=X/postgres}
+--   · ACL след промяната: {postgres=X/postgres, service_role=X/postgres}
+--
+-- БУТОНЪТ ЗА РЪЧЕН БЕКЪП
+-- triggerManualBackup() стои в admin.js, но бутонът му днес НЕ се рендира:
+-- admin.js:13 търси #backup-admin-section, а такъв елемент в index.html няма
+-- (grep -c → 0). Тоест revoke-ът не чупи нищо живо. Върне ли се бутонът,
+-- пътят е едж функция със service ключ, както е auth-login — не RPC с anon.
+--
+-- НЕ Е ПИПНАТО
+-- report_cron_schedule() остава викаема с anon ключа. Решено съзнателно:
+-- само четене, връща часовете на четирите отчета (без command, в който стои
+-- ключ), а порталът я ползва в admin.js:1271 с резервен текст при провал.
+-- search_path на perform_daily_backup също не е пипан — отделна задача.
+--
+-- ОГЛЕДАЛО (Живко): НЕ е засегнато, затова уведомяване не се прави.
+-- sync-mirror.ps1 тегли със secret ключа (service_role), който минава и през
+-- RLS, и запазва EXECUTE; а двете bak таблици изобщо не са сред 51-те, които
+-- скриптът синхронизира (потвърдено от лога от 08.09.2026).
+
+-- 1) RLS на забравената резервна таблица
+alter table public.task_completions_bak_20260910 enable row level security;
+
+-- 2) Отнемане на публичното EXECUTE от SECURITY DEFINER функцията
+revoke execute on function public.perform_daily_backup(text, text) from public;
+revoke execute on function public.perform_daily_backup(text, text) from anon;
+revoke execute on function public.perform_daily_backup(text, text) from authenticated;
