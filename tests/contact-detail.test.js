@@ -45,7 +45,11 @@ async function env(user, tab) {
   h.keydownCount = () => live.size;
   guard('loadContacts()', () => w.loadContacts());
   await ticks();
-  if (tab) guard('setContactsTab(' + tab + ')', () => w.setContactsTab(tab));
+  /* От v4 модулът се отваря на „Начало"; картичките/редовете, които този
+     тест проверява, са в табовете Отдели и Доставчици — затова табът се
+     избира винаги. */
+  tab = tab || 'contact';
+  guard('setContactsTab(' + tab + ')', () => w.setContactsTab(tab));
   return h;
 }
 
@@ -105,7 +109,9 @@ const onlyButtons = (root, text) => root ? Array.prototype.filter.call(root.quer
     {
       const { w, doc } = await env(ADMIN, tab === 'supplier' ? 'supplier' : null);
       const cd = card(doc, id);
-      const edit = cd && btn(cd, 'Редактирай');
+      /* Доставчиците са картички с „✏️ Редактирай"; в списъка на Отдели
+         бутонът е само ✏️ с title — търси се и по двете. */
+      const edit = cd && (btn(cd, 'Редактирай') || cd.querySelector('button[title="Редактирай"]'));
       ok('„Редактирай" е на картичката', !!edit);
       const opened = [];
       w.openContactModal = x => opened.push(x);

@@ -221,6 +221,8 @@ const TESTS = [
   'co-filter-store.test.js',
   'transport-detail.test.js',
   'contact-detail.test.js',
+  'contacts-directory.test.js',
+  'contacts-home.test.js',
   'co-row-click.test.js',
   'table-scroll.test.js'
 ];
