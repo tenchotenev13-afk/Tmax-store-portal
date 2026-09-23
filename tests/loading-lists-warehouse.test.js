@@ -135,6 +135,11 @@ function itemPosts(calls) {
   {
     const h = env(WAREHOUSE);
     h.w.llNewList();
+    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
+       пише по десет наведнъж). Тук се проверява материализирането на
+       документи, затова бланката се изчиства — предварителните редове са с
+       отделен тест (loading-lists-blank-rows.test.js). */
+    h.w.llDraft.items = [];
     await ticks(); await ticks();
 
     ok('документите са групирани — 3, не 31', h.w.llPendingDocs.length === 3,
@@ -199,6 +204,11 @@ function itemPosts(calls) {
   {
     const h = env(WAREHOUSE, { fail: { POST: /loading_list_items/ } });
     h.w.llNewList();
+    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
+       пише по десет наведнъж). Тук се проверява материализирането на
+       документи, затова бланката се изчиства — предварителните редове са с
+       отделен тест (loading-lists-blank-rows.test.js). */
+    h.w.llDraft.items = [];
     await ticks(); await ticks();
     h.w.llToggleDoc(0);
     h.w.llSaveDraft();
@@ -261,8 +271,8 @@ function itemPosts(calls) {
         ok('редовете ѝ са два', t.querySelectorAll('tr').length === 3,
           String(t.querySelectorAll('tr').length));
       }
-      ok('заглавието брои 2 обекта · 2 палета · 1 рула · 1 насип',
-        mod(h.doc).textContent.indexOf('2 обекта · 2 палета · 1 рула · 1 насип') >= 0,
+      ok('заглавието брои 2 обекта · 2 палета · 0 рол конт. · 1 рула · 1 насип',
+        mod(h.doc).textContent.indexOf('2 обекта · 2 палета · 0 рол конт. · 1 рула · 1 насип') >= 0,
         mod(h.doc).textContent.slice(0, 400));
       ok('„палет 2 от 5" стил на етикета',
         h.w.llKindLabel(items[0]) === 'палет 1 от 2', h.w.llKindLabel(items[0]));
@@ -361,6 +371,11 @@ function itemPosts(calls) {
     ok('today() вече дава същия локален ден', h.w.today() === '2026-09-05', h.w.today());
 
     h.w.llNewList();
+    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
+       пише по десет наведнъж). Тук се проверява материализирането на
+       документи, затова бланката се изчиства — предварителните редове са с
+       отделен тест (loading-lists-blank-rows.test.js). */
+    h.w.llDraft.items = [];
     await ticks(); await ticks();
     ok('черновата тръгва с локалната дата', h.w.llDraft.list_date === '2026-09-05',
       h.w.llDraft.list_date);

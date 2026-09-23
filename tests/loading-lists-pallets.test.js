@@ -131,6 +131,11 @@ const idxOf = (h, doc) => h.w.llPendingDocs.indexOf(
   {
     const h = envWh();
     h.w.llNewList();
+    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
+       пише по десет наведнъж). Тук се проверява материализирането на
+       документи, затова бланката се изчиства — предварителните редове са с
+       отделен тест (loading-lists-blank-rows.test.js). */
+    h.w.llDraft.items = [];
     await ticks(); await ticks();
     ok('четирите документа са заредени', h.w.llPendingDocs.length === 4,
       String(h.w.llPendingDocs.length));
@@ -165,6 +170,11 @@ const idxOf = (h, doc) => h.w.llPendingDocs.indexOf(
   {
     const h = envWh();
     h.w.llNewList();
+    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
+       пише по десет наведнъж). Тук се проверява материализирането на
+       документи, затова бланката се изчиства — предварителните редове са с
+       отделен тест (loading-lists-blank-rows.test.js). */
+    h.w.llDraft.items = [];
     await ticks(); await ticks();
     [['D-1', '1'], ['D-9', '1']].forEach(([d, spec]) => {
       const i = idxOf(h, d);
@@ -183,6 +193,11 @@ const idxOf = (h, doc) => h.w.llPendingDocs.indexOf(
   {
     const h = envWh();
     h.w.llNewList();
+    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
+       пише по десет наведнъж). Тук се проверява материализирането на
+       документи, затова бланката се изчиства — предварителните редове са с
+       отделен тест (loading-lists-blank-rows.test.js). */
+    h.w.llDraft.items = [];
     await ticks(); await ticks();
     /* Складът е въвел 1, 2 и 5 за Петрич — палетите са ТРИ, не пет.
        Плюс един за Гоце Делчев, чиято номерация е независима. */
@@ -217,6 +232,11 @@ const idxOf = (h, doc) => h.w.llPendingDocs.indexOf(
   {
     const h = envWh();
     h.w.llNewList();
+    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
+       пише по десет наведнъж). Тук се проверява материализирането на
+       документи, затова бланката се изчиства — предварителните редове са с
+       отделен тест (loading-lists-blank-rows.test.js). */
+    h.w.llDraft.items = [];
     await ticks(); await ticks();
     const i1 = idxOf(h, 'D-1');
     h.w.llSetDocPallet(i1, '1-3');

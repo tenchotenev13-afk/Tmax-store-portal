@@ -452,7 +452,7 @@ const btnIn = (root, text) => (root ? btn(root, text) : null);
         h.calls.toast.some(t => /Опиши какво липсва в коментара/.test(String(t.msg || t))),
         JSON.stringify(h.calls.toast));
 
-      const pc = h.doc.getElementById('ll-pc-L1-1');
+      const pc = h.doc.getElementById('ll-pc-L1-pallet-1');
       ok('полето за коментар на палета съществува', !!pc);
       ok('фокусът е в него', h.doc.activeElement === pc,
         h.doc.activeElement && h.doc.activeElement.id);

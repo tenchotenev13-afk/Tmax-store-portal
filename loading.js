@@ -65,15 +65,25 @@ var llScanLibPromise = null;  /* зареждането на html5-qrcode — Е
 var llViewProdOpen = {};      /* {itemId:true} — разгънати артикули в прегледа на склада */
 var llStoreProdOpen = {};     /* {itemId:true} — разгънати артикули при обекта */
 var llDocQuery = '';          /* търсене в „Документи от Стока на път" */
+var llListQuery = '';         /* търсене в списъка на листите (складът) */
+var llStoreQuery = '';        /* търсене в картите на обекта */
 var llDocStore = '';          /* чип по обект; '' = всички */
 var llTransitError = false;   /* снимката НЕ се зареди — различно от „няма документи" */
 var LL_TRANSIT_PAGE = 1000;   /* PostgREST реже отговора на 1000 реда */
 
 var LL_KINDS = [
   ['pallet', '📦 Палет'],
+  ['roll_container', '🛒 Рол контейнер'],
   ['roll',   '🧻 Рула'],
   ['bulk',   '🧱 Насип']
 ];
+/* Видовете, които се НОМЕРИРАТ („N от M") и получават опис за печат. Всеки
+   има СОБСТВЕНА поредица в рамките на обекта: палет 1 и рол контейнер 1
+   съществуват едновременно и не са едно и също нещо. */
+var LL_NUMBERED = ['pallet', 'roll_container'];
+function llIsNumbered(kind){ return LL_NUMBERED.indexOf(kind) >= 0; }
+/* Кратката дума за етикета — „палет 2 от 5", „рол контейнер 1 от 3". */
+var LL_KIND_WORD = { pallet: 'палет', roll_container: 'рол контейнер' };
 /* [ключ, етикет, цвят, фон] — един източник за чиповете, баджовете и
    филтъра. Нов статус се добавя тук, не на четири места. */
 var LL_STATUSES = [
@@ -108,10 +118,11 @@ function llActor(){ return currentUser ? (currentUser.display_name || currentUse
 function llTodayISO(){ return toLocalISO(new Date()); }
 
 function llKindLabel(it){
-  if(it.kind === 'pallet'){
+  if(llIsNumbered(it.kind)){
+    var w = LL_KIND_WORD[it.kind] || it.kind;
     return (it.pallet_no && it.pallet_total)
-      ? 'палет ' + it.pallet_no + ' от ' + it.pallet_total
-      : 'палет';
+      ? w + ' ' + it.pallet_no + ' от ' + it.pallet_total
+      : w;
   }
   if(it.kind === 'roll') return 'рула';
   if(it.kind === 'bulk') return 'насип';
@@ -217,7 +228,7 @@ function llGroupTransitDocs(rows){
    не на физически палет. Така е нарочно — автозатварянето на стоковия
    документ пита точно това, а бутонът „целия палет" отмята групата наведнъж. */
 function llPalletKey(it){
-  return JSON.stringify([String(it.store_name || ''), Number(it.pallet_no)]);
+  return JSON.stringify([String(it.store_name || ''), String(it.kind), Number(it.pallet_no)]);
 }
 /* „2" → [2]; „1,3" → [1,3]; „1-3" → [1,2,3]. Едно поле за двете посоки:
    документ на един палет (преобладаващият случай) и документ, разстлан върху
@@ -248,7 +259,7 @@ function llParsePalletSpec(spec){
 function llPalletGroups(items){
   var by = {}, order = [];
   (items || []).forEach(function(it, i){
-    var key = (it.kind === 'pallet' && it.pallet_no != null)
+    var key = (llIsNumbered(it.kind) && it.pallet_no != null)
       ? llPalletKey(it)
       : JSON.stringify(['single', it.id || ('#' + i)]);
     if(!by[key]){
@@ -264,22 +275,26 @@ function llPalletGroups(items){
    обещание към конкретния обект, не към целия курс. Въвел ли е складът 1, 2
    и 5, палетите са три — иначе обектът чака пети палет, който не съществува. */
 function llRenumberPallets(items){
-  var byStore = {};
+  /* Ключът е ОБЕКТ + ВИД: „палет 2 от 5" и „рол контейнер 2 от 3" са две
+     различни обещания към един и същ обект. Обща поредица би дала „палет 4
+     от 8" при четири палета и четири контейнера. */
+  var byKey = {};
+  var keyOf = function(it){ return JSON.stringify([it.store_name || '', it.kind]); };
   (items || []).forEach(function(it){
-    if(it.kind !== 'pallet' || it.pallet_no == null) return;
-    var s = it.store_name || '';
-    if(!byStore[s]) byStore[s] = {};
-    byStore[s][Number(it.pallet_no)] = true;
+    if(!llIsNumbered(it.kind) || it.pallet_no == null) return;
+    var k = keyOf(it);
+    if(!byKey[k]) byKey[k] = {};
+    byKey[k][Number(it.pallet_no)] = true;
   });
   var map = {};
-  Object.keys(byStore).forEach(function(s){
-    var nums = Object.keys(byStore[s]).map(Number).sort(function(a, b){ return a - b; });
-    map[s] = { total: nums.length, at: {} };
-    nums.forEach(function(n, i){ map[s].at[n] = i + 1; });
+  Object.keys(byKey).forEach(function(k){
+    var nums = Object.keys(byKey[k]).map(Number).sort(function(a, b){ return a - b; });
+    map[k] = { total: nums.length, at: {} };
+    nums.forEach(function(n, i){ map[k].at[n] = i + 1; });
   });
   (items || []).forEach(function(it){
-    if(it.kind !== 'pallet' || it.pallet_no == null) return;
-    var m = map[it.store_name || ''];
+    if(!llIsNumbered(it.kind) || it.pallet_no == null) return;
+    var m = map[keyOf(it)];
     if(!m) return;
     it.pallet_no = m.at[Number(it.pallet_no)];
     it.pallet_total = m.total;
@@ -292,7 +307,7 @@ function llRenumberPallets(items){
    разминава при първата редакция на ред и не гърми — просто показва грешно
    число, докато някой не го забележи. */
 function llCounts(items){
-  var c = { pallet:0, roll:0, bulk:0, stores:0, received:0, missing:0, total:0 };
+  var c = { pallet:0, roll_container:0, roll:0, bulk:0, stores:0, received:0, missing:0, total:0 };
   var seen = {};
   /* Броят се ТОВАРНИТЕ ЕДИНИЦИ, не редовете: четири документа на един палет
      са един палет. Преди консолидацията двете съвпадаха и това число лъжеше. */
@@ -311,7 +326,7 @@ function llCounts(items){
 function llSummaryByStore(items){
   var by = {}, order = [];
   var ensure = function(s){
-    if(!by[s]){ by[s] = { store:s, pallet:0, roll:0, bulk:0, received:0, missing:0, total:0, products:0, qty:0 }; order.push(s); }
+    if(!by[s]){ by[s] = { store:s, pallet:0, roll_container:0, roll:0, bulk:0, received:0, missing:0, total:0, products:0, qty:0 }; order.push(s); }
     return by[s];
   };
   /* Товарните единици — по същата причина като в llCounts(). */
@@ -432,6 +447,28 @@ function renderLoadingLists(){
   wrap.innerHTML = h;
 }
 /* ─── ИЗГЛЕД ЗА ОБЕКТА ──────────────────────────────────────── */
+/* При обекта се търси по изходящ № (по неговите редове), по склад и по дата.
+   Датата се сверява И в двата вида — 23.09.2026 и 2026-09-23 — защото на
+   екрана пише първото, а човек често пише второто. */
+function llStoreMatches(l, q){
+  var t = String(q == null ? '' : q).trim().toLowerCase();
+  if(!t) return true;
+  if(String(l.warehouse || '').toLowerCase().indexOf(t) >= 0) return true;
+  if(String(l.list_date || '').toLowerCase().indexOf(t) >= 0) return true;
+  if(String(fmtDate(l.list_date) || '').toLowerCase().indexOf(t) >= 0) return true;
+  return llStoreItemsOf(l.id).some(function(i){
+    return String(i.purchase_doc || '').toLowerCase().indexOf(t) >= 0;
+  });
+}
+function llSetStoreQuery(v){
+  llStoreQuery = String(v == null ? '' : v);
+  renderLoadingLists();
+  var el = document.getElementById('ll-store-q');
+  if(el){
+    if(el.focus) el.focus();
+    try { var n = el.value.length; el.setSelectionRange(n, n); } catch(e){}
+  }
+}
 function llStoreHtml(){
   var h = '<div class="pg-title">🚛 Товарни листи</div>'+
     '<div class="pg-sub">Какво е натоварено от логистичния склад към обекта.</div>';
@@ -442,7 +479,19 @@ function llStoreHtml(){
       '<div style="margin-top:8px;font-size:14px;">Няма товари за '+esc(store)+'.</div>'+
     '</div>';
   }
-  llStoreLists.forEach(function(l){ h += llStoreCardHtml(l); });
+  /* Полето се показва ВИНАГИ, щом има поне един лист — включително когато
+     търсенето е отсяло всичко (правило 11): иначе няма как да се изчисти. */
+  h += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;align-items:center;">'+
+    '<input id="ll-store-q" value="'+llAttr(llStoreQuery)+'" placeholder="Търси: изходящ №, склад, дата" autocomplete="off" '+
+      'oninput="llSetStoreQuery(this.value)" style="flex:1 1 240px;min-width:180px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;">'+
+    (llStoreQuery ? '<button onclick="llSetStoreQuery(\'\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 12px;font-size:12.5px;cursor:pointer;">✕ Изчисти</button>' : '')+
+    '</div>';
+  var shown = llStoreLists.filter(function(l){ return llStoreMatches(l, llStoreQuery); });
+  if(!shown.length){
+    return h + '<div style="text-align:center;padding:40px 20px;color:#94a3b8;background:#fff;border:1px solid #e2e8f0;border-radius:10px;">'+
+      'Нищо не отговаря на „'+esc(llStoreQuery)+'".</div>';
+  }
+  shown.forEach(function(l){ h += llStoreCardHtml(l); });
   return h;
 }
 function llToggleCard(id){
@@ -499,7 +548,8 @@ function llStoreCardHtml(l){
           ? '<button data-id="'+l.id+'"'+(allDone?'':' disabled title="Отметни всеки ред като получен или неполучен"')+
             ' onclick="llFinishReceiving(this.dataset.id)" style="border:none;background:'+(allDone?'#0f172a':'#e2e8f0')+';color:'+(allDone?'#fff':'#94a3b8')+';border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:'+(allDone?'pointer':'not-allowed')+';">🏁 Приключи приемането</button>'
           : '')+
-        '<button data-id="'+l.id+'" data-s="'+escVal(onlyStore)+'" onclick="llPrint(this.dataset.id,this.dataset.s)" title="Печат само на моята част от листа" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
+        '<button data-id="'+l.id+'" data-s="'+escAttr(onlyStore)+'" onclick="llPrint(this.dataset.id,this.dataset.s)" title="Печат само на моята част от листа" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
+        '<button data-id="'+l.id+'" data-s="'+escAttr(onlyStore)+'" onclick="llDownloadPdf(this.dataset.id,this.dataset.s)" title="Сваля моята част като PDF" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">⬇ PDF</button>'+
         '<button data-id="'+l.id+'" onclick="llToggleCard(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 13px;font-size:12px;cursor:pointer;">'+(open?'▲ Свий':'▼ Разгъни')+'</button>'+
       '</div>'+
     '</div>';
@@ -528,11 +578,11 @@ function llStoreCardHtml(l){
           /* Коментарът на ЦЕЛИЯ палет. Стои тук, а не в prompt(): обяснението
              какво липсва се пише веднъж и се записва във всеки ред на палета,
              а полето остава на екрана, докато човекът го дописва. */
-          (gCan?'<div style="margin-top:5px;font-weight:400;"><input id="ll-pc-'+l.id+'-'+g.pallet_no+'" placeholder="какво липсва — задължително за „Неполучен целия палет“" style="width:100%;max-width:420px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-size:11.5px;"></div>':'')+
+          (gCan?'<div style="margin-top:5px;font-weight:400;"><input id="ll-pc-'+l.id+'-'+g.kind+'-'+g.pallet_no+'" placeholder="какво липсва — задължително за „Неполучен целия палет“" style="width:100%;max-width:420px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-size:11.5px;"></div>':'')+
         '</td>'+
         '<td style="padding:6px 9px;white-space:nowrap;">'+(gCan
-          ? '<button data-id="'+l.id+'" data-p="'+g.pallet_no+'" onclick="llMarkPalletReceived(this.dataset.id,this.dataset.p)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Целият палет</button>'+
-            ' <button data-id="'+l.id+'" data-p="'+g.pallet_no+'" onclick="llMarkPalletMissing(this.dataset.id,this.dataset.p)" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">⛔ Неполучен целия палет</button>'
+          ? '<button data-id="'+l.id+'" data-p="'+g.pallet_no+'" data-k="'+escAttr(g.kind)+'" onclick="llMarkPalletReceived(this.dataset.id,this.dataset.p,this.dataset.k)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Целият '+esc(LL_KIND_WORD[g.kind] || 'палет')+'</button>'+
+            ' <button data-id="'+l.id+'" data-p="'+g.pallet_no+'" data-k="'+escAttr(g.kind)+'" onclick="llMarkPalletMissing(this.dataset.id,this.dataset.p,this.dataset.k)" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">⛔ Неполучен целия '+esc(LL_KIND_WORD[g.kind] || 'палет')+'</button>'
           : '')+
           /* Разлика по ЦЕЛИЯ палет само докато е недокоснат: започне ли да се
              отмята по редове, въпросът вече е за конкретния ред. */
@@ -671,10 +721,12 @@ function llMarkReceived(itemId){
 /* Един физически палет носи няколко документа — човекът на рампата вижда ЕДИН
    палет и го отмята веднъж. Записът обаче остава по документ, защото точно
    това пита автозатварянето. */
-function llMarkPalletReceived(listId, palletNo){
-  var n = parseInt(palletNo, 10);
+/* kind е по избор заради съвместимост с по-стари извиквания — без него
+   действието е за палет, както беше. */
+function llMarkPalletReceived(listId, palletNo, kind){
+  var n = parseInt(palletNo, 10), k = kind || 'pallet';
   var mine = llStoreItemsOf(listId).filter(function(i){
-    return llOpenForStore(i) && i.kind === 'pallet' && Number(i.pallet_no) === n;
+    return llOpenForStore(i) && i.kind === k && Number(i.pallet_no) === n;
   });
   if(!mine.length){ toast('Няма неполучени редове по този палет','#64748b'); return; }
   llPatchReceived(mine, 'палета');
@@ -760,13 +812,13 @@ function llMarkMissing(itemId){
 /* Целият палет наведнъж — човекът на рампата вижда ЕДНА липсваща единица,
    не четири документа. Коментарът е ЕДИН и отива във всичките ѝ редове:
    иначе същото изречение се преписва толкова пъти, колкото са документите. */
-function llMarkPalletMissing(listId, palletNo){
-  var n = parseInt(palletNo, 10);
+function llMarkPalletMissing(listId, palletNo, kind){
+  var n = parseInt(palletNo, 10), k = kind || 'pallet';
   var mine = llStoreItemsOf(listId).filter(function(i){
-    return llOpenForStore(i) && i.kind === 'pallet' && Number(i.pallet_no) === n;
+    return llOpenForStore(i) && i.kind === k && Number(i.pallet_no) === n;
   });
   if(!mine.length){ toast('Няма неотметнати редове по този палет','#64748b'); return; }
-  var inp = document.getElementById('ll-pc-' + listId + '-' + n);
+  var inp = document.getElementById('ll-pc-' + listId + '-' + k + '-' + n);
   var txt = inp ? String(inp.value == null ? '' : inp.value).trim() : '';
   if(!txt){
     toast('Опиши какво липсва в коментара','#dc2626');
@@ -939,6 +991,211 @@ function llAutoDoneList(listId){
 }
 
 /* ══════════════════════════════════════════════════════════
+   PDF НА ТОВАРНИЯ ЛИСТ
+
+   Печатът (llRenderPrint) е HTML в страницата и минава през диалога на
+   браузъра. За имейла и за „свали го на телефона" трябва ФАЙЛ, затова тук е
+   втори път до същото съдържание — с jsPDF.
+
+   ДВЕ ВЪНШНИ ЗАВИСИМОСТИ, И ДВЕТЕ ЛЕНИВИ:
+     · jsPDF от cdnjs — 4.2.1, с integrity (SRI). Зарежда се при ПЪРВОТО
+       поискване на PDF, както html5-qrcode при първото сканиране.
+     · шрифт с кирилица — fonts/Roboto-Regular.ttf от репото. Вградените в
+       jsPDF шрифтове са WinAnsi: без този файл целият документ излиза с
+       въпросителни, БЕЗ да гръмне. Точно затова шрифтът е в репото, а не на
+       CDN, и точно затова провалът му отменя PDF-а вместо да го пусне
+       нечетим.
+
+   ПРОВАЛЪТ НЕ СПИРА ПИСМОТО. Листът е изпратен; липсващото приложение е
+   по-малката щета от неизпратено известие (llNotifySent). */
+var LL_PDF_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/4.2.1/jspdf.umd.min.js';
+var LL_PDF_SRI = 'sha512-plOdviVmws4Y3JAvbnpfKb2hVxKM1lCwsi3vmElYRj+tiDLffZ4FVUj5a8vyKJ9pIgl8JCAHEJ4D1iUKBecswg==';
+var LL_PDF_FONT_URL  = 'fonts/Roboto-Regular.ttf';
+var LL_PDF_FONT_FILE = 'Roboto-Regular.ttf';
+var LL_PDF_FONT_NAME = 'Roboto';
+var llPdfLibPromise = null;   /* зареждането на jsPDF — едно за сесията */
+var LL_PDF_TIMEOUT = 20000;   /* таван на цялото генериране (мс) */
+var llPdfFontPromise = null;  /* шрифтът като base64 — едно за сесията */
+
+/* Обещание със срок. Отменя се с изрична грешка, за да се види в toast-а
+   каква е причината, вместо да виси мълчаливо. */
+function llPdfTimeout(promise, ms, what){
+  return new Promise(function(resolve, reject){
+    var done = false;
+    var t = setTimeout(function(){
+      if(done) return;
+      done = true;
+      reject(new Error(what + ' не се зареди навреме'));
+    }, ms);
+    promise.then(function(v){
+      if(done) return;
+      done = true; clearTimeout(t); resolve(v);
+    }, function(e){
+      if(done) return;
+      done = true; clearTimeout(t); reject(e);
+    });
+  });
+}
+function llPdfCtor(){
+  return (window.jspdf && window.jspdf.jsPDF) || window.jsPDF || null;
+}
+function llLoadPdfLib(){
+  if(llPdfCtor()) return Promise.resolve(true);
+  if(llPdfLibPromise) return llPdfLibPromise;
+  llPdfLibPromise = new Promise(function(resolve, reject){
+    var s = document.createElement('script');
+    s.src = LL_PDF_LIB;
+    s.setAttribute('integrity', LL_PDF_SRI);
+    s.setAttribute('crossorigin', 'anonymous');
+    s.setAttribute('referrerpolicy', 'no-referrer');
+    s.onload = function(){ llPdfCtor() ? resolve(true) : reject(new Error('jsPDF не се появи')); };
+    /* Провалът НЕ остава кеширан — мрежата на склада идва и си отива. */
+    s.onerror = function(){ llPdfLibPromise = null; reject(new Error('jsPDF не се зареди')); };
+    document.head.appendChild(s);
+  });
+  return llPdfLibPromise;
+}
+/* Шрифтът: fetch → blob → base64. През FileReader, а не btoa(String.fromCharCode…)
+   — вторият хвърля „Maximum call stack size exceeded" при 142 KB наведнъж. */
+function llPdfFont(){
+  if(llPdfFontPromise) return llPdfFontPromise;
+  llPdfFontPromise = fetch(LL_PDF_FONT_URL).then(function(r){
+    if(!r.ok) throw new Error('шрифтът не се зареди (HTTP ' + r.status + ')');
+    return r.blob();
+  }).then(function(b){
+    return new Promise(function(resolve, reject){
+      var fr = new FileReader();
+      fr.onload = function(){
+        var s = String(fr.result || '');
+        var i = s.indexOf('base64,');
+        if(i < 0) return reject(new Error('шрифтът не се прочете'));
+        resolve(s.slice(i + 7));
+      };
+      fr.onerror = function(){ reject(new Error('шрифтът не се прочете')); };
+      fr.readAsDataURL(b);
+    });
+  }).catch(function(e){
+    llPdfFontPromise = null;   /* и тук провалът не се кешира */
+    throw e;
+  });
+  return llPdfFontPromise;
+}
+
+/* Име на файла: ASCII. Кирилицата в име на приложение минава през различни
+   кодирания при различните пощи и стига до получателя като „=?UTF-8?…" или
+   като въпросителни; латиницата стига навсякъде еднаква. */
+var LL_TRANSLIT = {
+  а:'a', б:'b', в:'v', г:'g', д:'d', е:'e', ж:'zh', з:'z', и:'i', й:'y',
+  к:'k', л:'l', м:'m', н:'n', о:'o', п:'p', р:'r', с:'s', т:'t', у:'u',
+  ф:'f', х:'h', ц:'ts', ч:'ch', ш:'sh', щ:'sht', ъ:'a', ь:'y', ю:'yu', я:'ya'
+};
+function llTranslit(txt){
+  var out = '';
+  String(txt == null ? '' : txt).toLowerCase().split('').forEach(function(ch){
+    if(LL_TRANSLIT[ch]) out += LL_TRANSLIT[ch];
+    else if(/[a-z0-9]/.test(ch)) out += ch;
+    else out += '-';
+  });
+  return out.replace(/-+/g, '-').replace(/^-|-$/g, '') || 'list';
+}
+function llPdfName(list, store){
+  return 'tovaren-list-' + String(list.list_date || '').slice(0, 10) + '-' +
+    llTranslit(store || list.warehouse || '') + '.pdf';
+}
+
+/* Документът. Подредбата е като печата: обект, после палет, после позиция;
+   артикулите — под своя ред. */
+function llPdfRows(items, storeFilter){
+  return (items || []).filter(function(i){
+    return !storeFilter || i.store_name === storeFilter;
+  }).slice().sort(function(a, b){
+    var s = String(a.store_name || '').localeCompare(String(b.store_name || ''));
+    if(s) return s;
+    var an = a.pallet_no == null ? 9999 : Number(a.pallet_no);
+    var bn = b.pallet_no == null ? 9999 : Number(b.pallet_no);
+    if(an !== bn) return an - bn;
+    return (a.position || 0) - (b.position || 0);
+  });
+}
+function llBuildPdf(list, items, storeFilter){
+  return llPdfTimeout(Promise.all([llLoadPdfLib(), llPdfFont()]), LL_PDF_TIMEOUT, 'PDF').then(function(res){
+    var Ctor = llPdfCtor();
+    if(!Ctor) throw new Error('jsPDF липсва');
+    var doc = new Ctor({ unit: 'mm', format: 'a4' });
+    doc.addFileToVFS(LL_PDF_FONT_FILE, res[1]);
+    doc.addFont(LL_PDF_FONT_FILE, LL_PDF_FONT_NAME, 'normal');
+    doc.setFont(LL_PDF_FONT_NAME, 'normal');
+
+    var L = 12, R = 198, y = 16;
+    var line = function(txt, size, step){
+      doc.setFontSize(size || 10);
+      var parts = doc.splitTextToSize(String(txt), R - L);
+      for(var k = 0; k < parts.length; k++){
+        if(y > 282){ doc.addPage(); doc.setFont(LL_PDF_FONT_NAME, 'normal'); y = 16; }
+        doc.text(parts[k], L, y);
+        y += (step || 5);
+      }
+    };
+    line('ТОВАРЕН ЛИСТ' + (storeFilter ? ' — ' + storeFilter : ''), 15, 7);
+    line('Склад изпращач: ' + (list.warehouse || '—'), 10, 5);
+    line('Дата на товарене: ' + fmtDate(list.list_date), 10, 5);
+    line('Товарил: ' + (list.executed_by || '—'), 10, 5);
+    if(list.comment) line('Коментар: ' + list.comment, 10, 5);
+    y += 2;
+
+    var rows = llPdfRows(items, storeFilter);
+    if(!rows.length) line('Листът няма редове.', 10, 5);
+    rows.forEach(function(it, n){
+      line((n + 1) + '. ' + llKindLabel(it) +
+        '   изходящ № ' + (it.purchase_doc || 'без') +
+        (it.clears_doc ? '   изчиства ' + it.clears_doc : '') +
+        (storeFilter ? '' : '   обект: ' + (it.store_name || '—')), 11, 5.5);
+      if(it.warehouse_comment) line('    коментар склад: ' + it.warehouse_comment, 9, 4.5);
+      (it.products || []).forEach(function(p){
+        line('    · ' + p.sap_code + '  ' + p.product_name +
+          '  —  ' + llFmtQty(p.qty) + ' ' + (p.unit || '') +
+          (p.cartons != null ? '  (' + p.cartons + ' каш.)' : ''), 9, 4.5);
+      });
+      y += 1.5;
+    });
+    y += 4;
+    line('Товарил: ............................        Приел: ............................', 10, 5);
+
+    /* datauristring е „data:application/pdf;filename=…;base64,AAAA" — взима
+       се ПОСЛЕДНОТО „base64,", защото в началото има и filename с точки. */
+    var uri = String(doc.output('datauristring') || '');
+    var at = uri.lastIndexOf('base64,');
+    if(at < 0) throw new Error('PDF-ът не се получи');
+    return { filename: llPdfName(list, storeFilter), base64: uri.slice(at + 7) };
+  });
+}
+
+/* „⬇ PDF" — сваля файла на устройството. Същият генератор като приложението
+   в писмото: един източник, за да не се разминат. */
+function llDownloadPdf(listId, storeFilter){
+  var l = llLists.find(function(x){ return String(x.id) === String(listId); }) ||
+          llStoreLists.find(function(x){ return String(x.id) === String(listId); });
+  if(!l){ toast('Товарният лист не е намерен','#dc2626'); return Promise.resolve(false); }
+  var items = llItemsOf(listId);
+  if(!items.length) items = llStoreItemsOf(listId);
+  toast('⏳ Готви се PDF…');
+  return llBuildPdf(l, items, storeFilter || '').then(function(pdf){
+    var a = document.createElement('a');
+    a.href = 'data:application/pdf;base64,' + pdf.base64;
+    a.download = pdf.filename;
+    document.body.appendChild(a);
+    a.click();
+    if(a.parentNode) a.parentNode.removeChild(a);
+    toast('⬇ ' + pdf.filename);
+    return true;
+  }).catch(function(e){
+    console.error('llDownloadPdf', e);
+    toast('PDF не се получи: ' + (e && e.message ? e.message : e), '#dc2626');
+    return false;
+  });
+}
+
+/* ══════════════════════════════════════════════════════════
    ИЗВЕСТИЯ ПО ТОВАРНИТЕ ЛИСТИ
 
    Дотук листът тръгваше мълчаливо: обектът разбираше, че има товар, само ако
@@ -1018,13 +1275,17 @@ function llPushTo(store, title, msg){
    се прати. Така обект без акаунт не плаща за таблица, която никой няма да
    види, а липсващ email.js връща подреден отговор вместо ReferenceError по
    средата на известието. */
-function llMailTo(emails, subject, htmlFn){
+function llMailTo(emails, subject, htmlFn, attachments){
   var to = (emails || []).filter(function(e){ return !!e; });
   if(!to.length) return Promise.resolve({ ok:false, status:0, data:{ message:'Няма имейл' } });
   if(typeof sendEmail !== 'function' || typeof emailWrap !== 'function'){
     return Promise.resolve({ ok:false, status:0, data:{ message:'email.js не е зареден' } });
   }
-  return sendEmail(to, subject, htmlFn());
+  /* Празен масив НЕ се подава: sendEmail слага attachments само при дължина,
+     но по-малко полета в тялото значи по-малко за грешене. */
+  return (attachments && attachments.length)
+    ? sendEmail(to, subject, htmlFn(), { attachments: attachments })
+    : sendEmail(to, subject, htmlFn());
 }
 
 /* ─── HTML на писмата ───────────────────────────────────────
@@ -1147,13 +1408,24 @@ function llNotifySent(list, items){
       var msg = units + ' товарни единици · ' + dateTxt +
         '. Отвори Транспорт → Товарни листи.';
       var subject = 'Товарен лист от ' + wh + ' · ' + dateTxt;
-      return Promise.all([
-        llPushTo(g.store, title, msg),
-        llMailTo(byStore[g.store] || [], subject, function(){
-          return llSentHtmlFor(list, g.store, g.rows);
-        })
-      ]).then(function(r){
-        return { store: g.store, push: r[0], mail: r[1] };
+      /* Бланката като PDF. Провалът ѝ (липсваща библиотека, липсващ шрифт,
+         паднала мрежа) НЕ спира писмото — то тръгва без приложение, а
+         човекът разбира от жълтия toast долу. */
+      var pdf = ((byStore[g.store] || []).length)
+        ? llBuildPdf(list, g.rows, g.store).catch(function(e){
+            console.error('llNotifySent: PDF', g.store, e);
+            return null;
+          })
+        : Promise.resolve(null);
+      return pdf.then(function(file){
+        return Promise.all([
+          llPushTo(g.store, title, msg),
+          llMailTo(byStore[g.store] || [], subject, function(){
+            return llSentHtmlFor(list, g.store, g.rows);
+          }, file ? [{ filename: file.filename, content: file.base64 }] : null)
+        ]).then(function(r){
+          return { store: g.store, push: r[0], mail: r[1], pdf: !!file };
+        });
       });
     }));
   }).then(function(all){
@@ -1163,6 +1435,8 @@ function llNotifySent(list, items){
     var noMail = function(r){ return (r.mail.data || {}).message === 'Няма имейл'; };
     var bad = all.filter(function(r){ return !r.push.ok && !r.mail.ok && !noMail(r); });
     var missing = all.filter(noMail);
+    /* Писмото е стигнало, но без бланката — отделно от провал на известието. */
+    var noPdf = all.filter(function(r){ return r.mail.ok && !r.pdf; });
     if(bad.length){
       console.error('llNotifySent: известието не тръгна', bad);
       toast('⚠️ Листът е изпратен, но известието до ' +
@@ -1170,6 +1444,9 @@ function llNotifySent(list, items){
     } else if(missing.length){
       toast('⚠️ Листът е изпратен. Без имейл акаунт: ' +
         missing.map(function(r){ return r.store; }).join(', '), '#d97706');
+    } else if(noPdf.length){
+      toast('⚠️ Писмото тръгна БЕЗ PDF към ' +
+        noPdf.map(function(r){ return r.store; }).join(', '), '#d97706');
     }
     return all;
   });
@@ -1238,8 +1515,30 @@ function llSetWarehouse(v){
 
 /* ─── СПИСЪК НА ЛИСТИТЕ ─────────────────────────────────────── */
 function llSetStatusFilter(f){ llStatusFilter = f; renderLoadingLists(); }
+/* Съвпада ли листът с търсенето: изходящ № (съдържа) по редовете му, обект
+   по редовете му, склад по самия лист. Празно търсене пуска всичко. */
+function llListMatches(l, q){
+  var t = String(q == null ? '' : q).trim().toLowerCase();
+  if(!t) return true;
+  if(String(l.warehouse || '').toLowerCase().indexOf(t) >= 0) return true;
+  return llItemsOf(l.id).some(function(i){
+    return String(i.purchase_doc || '').toLowerCase().indexOf(t) >= 0 ||
+           String(i.store_name || '').toLowerCase().indexOf(t) >= 0;
+  });
+}
+function llSetListQuery(v){
+  llListQuery = String(v == null ? '' : v);
+  renderLoadingLists();
+  var el = document.getElementById('ll-list-q');
+  if(el){
+    if(el.focus) el.focus();
+    try { var n = el.value.length; el.setSelectionRange(n, n); } catch(e){}
+  }
+}
 function llVisibleLists(){
   return llLists.filter(function(l){
+    /* Търсенето И статусът се комбинират — чипът не се нулира от писането. */
+    if(!llListMatches(l, llListQuery)) return false;
     if(llStatusFilter === 'all') return true;
     /* По подразбиране „Чернови + Изпратени": приключените са история и само
        биха удължавали списъка на човека, който товари днес. */
@@ -1273,6 +1572,14 @@ function llListHtml(){
     if(counts.hasOwnProperty(l.status)) counts[l.status]++;
     if(l.status === 'draft' || l.status === 'sent') counts.open++;
   });
+  /* Полето е НАД чиповете: първо се стеснява по текст, после по статус.
+     Чиповете си остават видими и при търсене (правило 11) — иначе от „нищо
+     не се намери" няма как да се излезе обратно към по-широк изглед. */
+  h += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;align-items:center;">'+
+    '<input id="ll-list-q" value="'+llAttr(llListQuery)+'" placeholder="Търси: изходящ №, обект, склад" autocomplete="off" '+
+      'oninput="llSetListQuery(this.value)" style="flex:1 1 240px;min-width:180px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;">'+
+    (llListQuery ? '<button onclick="llSetListQuery(\'\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 12px;font-size:12.5px;cursor:pointer;">✕ Изчисти</button>' : '')+
+    '</div>';
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
   [['open','Текущи ('+counts.open+')'],
    ['draft','📝 Чернови ('+counts.draft+')'],
@@ -1288,7 +1595,8 @@ function llListHtml(){
 
   var list = llVisibleLists();
   if(!list.length){
-    return h + '<div style="text-align:center;padding:50px;color:#94a3b8;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:40px;">🚛</div><div style="margin-top:8px;">Няма товарни листи в този изглед.</div></div>';
+    return h + '<div style="text-align:center;padding:50px;color:#94a3b8;background:#fff;border:1px solid #e2e8f0;border-radius:10px;"><div style="font-size:40px;">🚛</div><div style="margin-top:8px;">'+
+      (llListQuery ? 'Нищо не отговаря на „'+esc(llListQuery)+'" в този статус.' : 'Няма товарни листи в този изглед.')+'</div></div>';
   }
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px;"><thead><tr style="background:#f8fafc;">';
@@ -1317,10 +1625,30 @@ function llListHtml(){
 }
 
 /* ─── СЪЗДАВАНЕ / РЕДАКЦИЯ ──────────────────────────────────── */
+/* Складът пише лист от десет реда на хартия и ги попълва отгоре надолу.
+   Празен редактор го кара да натиска „➕ Ред без документ" десет пъти, преди
+   да започне работа. Незапълнените редове отпадат тихо при запис (виж
+   llBlankRow) — затова десет предварителни реда не са „боклук в базата".
+   СЪЩЕСТВУВАЩИТЕ чернови не се допълват: човек, който е оставил три реда, ги
+   намира три. */
+var LL_NEW_ROWS = 10;
+function llBlankDraftRow(){
+  return { id: null, kind: 'pallet', pallet_no: null, pallet_total: null,
+           purchase_doc: null, clears_doc: null, store_name: '',
+           warehouse_comment: '', partial: false, _docKey: null, products: [] };
+}
+/* Ред, който човекът НЕ е пипнал: без обект, без документ и без артикули.
+   Коментарът и номерът на палет не го правят „попълнен" сами по себе си —
+   без обект редът и без друго не може да се запише. */
+function llBlankRow(it){
+  return !!it && !String(it.store_name || '').trim() && !it.purchase_doc &&
+    !(it.products && it.products.length);
+}
 function llNewList(){
   llCurrentId = null;
   llDocQuery = ''; llDocStore = '';
   llDraft = { list_date: llTodayISO(), executed_by: llActor(), comment: '', items: [] };
+  for(var bi = 0; bi < LL_NEW_ROWS; bi++) llDraft.items.push(llBlankDraftRow());
   llPendingDocs = [];
   llView = 'edit';
   renderLoadingLists();
@@ -1500,12 +1828,9 @@ function llDropDocRows(d){
 }
 function llAddFreeRow(){
   if(!llDraft) return;
-  llDraft.items.push({
-    id: null, kind: 'pallet', pallet_no: null, pallet_total: null,
-    purchase_doc: null, clears_doc: null,
-    store_name: (llStores[0] || ''), warehouse_comment: '', partial: false, _docKey: null,
-    products: []
-  });
+  /* Обектът остава празен: при десет предварителни реда „първият обект по
+     азбучен ред" би сложил мълчаливо грешен получател на всеки недокоснат ред. */
+  llDraft.items.push(llBlankDraftRow());
   renderLoadingLists();
 }
 /* Подсказките на автодопълването са по ИНДЕКС на реда — преместен или махнат
@@ -1541,7 +1866,7 @@ function llSetRowField(i, field, val){
   if(field === 'kind'){
     it.kind = val;
     /* Рулото и насипът нямат номерация — „палет 2 от 5" там не значи нищо. */
-    if(val !== 'pallet'){ it.pallet_no = null; it.pallet_total = null; }
+    if(!llIsNumbered(val)){ it.pallet_no = null; it.pallet_total = null; }
     renderLoadingLists();
     return;
   }
@@ -1579,9 +1904,13 @@ function llClearsOptions(it){
   }).join('');
 }
 function llStoreOptions(sel){
-  return llStores.map(function(s){
-    return '<option'+(s===sel?' selected':'')+'>'+esc(s)+'</option>';
-  }).join('');
+  /* „— избери обект —" е реален избор, не украса: редът без обект е празен
+     ред, който при запис отпада. Без него селектът показва първия обект и
+     човек може да запише лист за когото не трябва. */
+  return '<option value=""'+(!sel?' selected':'')+'>— избери обект —</option>'+
+    llStores.map(function(s){
+      return '<option'+(s===sel?' selected':'')+'>'+esc(s)+'</option>';
+    }).join('');
 }
 
 /* ══════════════════════════════════════════════════════════
@@ -1989,9 +2318,9 @@ function llLoadScanLib(){
   llScanLibPromise = new Promise(function(resolve, reject){
     var s = document.createElement('script');
     s.src = LL_SCAN_LIB;
-    s.integrity = LL_SCAN_SRI;
-    s.crossOrigin = 'anonymous';
-    s.referrerPolicy = 'no-referrer';
+    s.setAttribute('integrity', LL_SCAN_SRI);
+    s.setAttribute('crossorigin', 'anonymous');
+    s.setAttribute('referrerpolicy', 'no-referrer');
     s.onload = function(){ resolve(true); };
     s.onerror = function(){
       /* Провалът НЕ остава кеширан — следващото натискане опитва наново
@@ -2443,7 +2772,7 @@ function llEditorHtml(){
       '<th style="padding:3px 6px;" title="С този палет тръгва само част от документа">Частично</th>'+
       '<th style="padding:3px 6px;"></th></tr>';
     llDraft.items.forEach(function(it, i){
-      var isPallet = it.kind === 'pallet';
+      var isPallet = llIsNumbered(it.kind);
       var docOf = llItemDocKey(it);
       /* Отметката е на ДОКУМЕНТА, не на реда: документ върху три палета е
          една пратка и е или частична, или не. Показва се на първия му ред,
@@ -2496,8 +2825,8 @@ function llBuildItemRows(listId, items){
       list_id: listId,
       position: i + 1,
       kind: it.kind,
-      pallet_no: it.kind === 'pallet' ? (it.pallet_no != null ? it.pallet_no : null) : null,
-      pallet_total: it.kind === 'pallet' ? (it.pallet_total != null ? it.pallet_total : null) : null,
+      pallet_no: llIsNumbered(it.kind) ? (it.pallet_no != null ? it.pallet_no : null) : null,
+      pallet_total: llIsNumbered(it.kind) ? (it.pallet_total != null ? it.pallet_total : null) : null,
       purchase_doc: it.purchase_doc || null,
       clears_doc: it.clears_doc || null,
       store_name: it.store_name,
@@ -2509,9 +2838,18 @@ function llBuildItemRows(listId, items){
 function llSaveDraft(){
   if(!llDraft) return;
   if(!llDraft.list_date){ toast('Избери дата','#dc2626'); return; }
-  if(!llDraft.items.length){ toast('Добави поне един ред','#dc2626'); return; }
-  var missing = llDraft.items.filter(function(it){ return !it.store_name; }).length;
-  if(missing){ toast('Има ред без обект получател','#dc2626'); return; }
+  /* Недокоснатите редове от новия лист отпадат ТИХО — те не са грешка, а
+     непопълнена бланка. Редът, който човекът Е започнал (сложил е документ
+     или артикули) без да избере обект, СИ Е грешка и спира записа.
+     Списъкът се смалява на място: при провал по-нататък редакторът остава
+     отворен и в него стои точно това, което ще бъде записано. */
+  var kept = llDraft.items.filter(function(it){ return !llBlankRow(it); });
+  var dropped = llDraft.items.length - kept.length;
+  llDraft.items = kept;
+  if(!llDraft.items.length){ toast('Добави поне един ред','#dc2626'); renderLoadingLists(); return; }
+  var missing = llDraft.items.filter(function(it){ return !String(it.store_name || '').trim(); }).length;
+  if(missing){ toast('Има ред с документ или артикули, но без обект получател','#dc2626'); renderLoadingLists(); return; }
+  if(dropped) renderLoadingLists();
   /* Палетите се преномерират плътно ПРЕДИ записа — иначе „палет 2 от 5"
      обещава на обекта палет, който не съществува. */
   llRenumberPallets(llDraft.items);
@@ -2782,6 +3120,7 @@ function llViewHtml(){
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llSendList(this.dataset.id)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">📤 Изпрати към обектите</button>':'')+
       (l.status==='sent'?'<button data-id="'+l.id+'" onclick="llDoneList(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✅ Приключи</button>':'')+
       '<button data-id="'+l.id+'" onclick="llPrint(this.dataset.id)" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
+      '<button data-id="'+l.id+'" onclick="llDownloadPdf(this.dataset.id)" title="Сваля бланката като PDF" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">⬇ PDF</button>'+
       '<button onclick="llBackToList()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 14px;font-size:12.5px;cursor:pointer;">← Назад</button>'+
     '</div></div>';
 
@@ -2794,14 +3133,15 @@ function llViewHtml(){
   /* Обобщението по обект — СМЯТА СЕ от редовете, не от заглавието. */
   var sum = llSummaryByStore(items);
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:12px;">'+
-    '<div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📊 По обекти ('+c.stores+' обекта · '+c.pallet+' палета · '+c.roll+' рула · '+c.bulk+' насип'+
+    '<div style="font-size:12.5px;font-weight:700;margin-bottom:8px;">📊 По обекти ('+c.stores+' обекта · '+c.pallet+' палета · '+c.roll_container+' рол конт. · '+c.roll+' рула · '+c.bulk+' насип'+
       (c.missing?' · <span style="color:#dc2626;">'+c.missing+' неполучени</span>':'')+')</div>'+
     '<table id="ll-summary" style="width:100%;border-collapse:collapse;font-size:12px;">'+
-    '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;text-align:right;">Палети</th><th style="padding:3px 6px;text-align:right;">Рула</th><th style="padding:3px 6px;text-align:right;">Насип</th><th style="padding:3px 6px;text-align:right;">Получени</th><th style="padding:3px 6px;text-align:right;">Неполучени</th>'+
+    '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;text-align:right;">Палети</th><th style="padding:3px 6px;text-align:right;">Рол конт.</th><th style="padding:3px 6px;text-align:right;">Рула</th><th style="padding:3px 6px;text-align:right;">Насип</th><th style="padding:3px 6px;text-align:right;">Получени</th><th style="padding:3px 6px;text-align:right;">Неполучени</th>'+
     '<th style="padding:3px 6px;text-align:right;">Артикули</th><th style="padding:3px 6px;text-align:right;">Бройки</th></tr>';
   sum.forEach(function(s){
     h += '<tr style="border-top:1px solid #f1f5f9;"><td style="padding:3px 6px;font-weight:600;">'+esc(s.store)+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.pallet+'</td>'+
+      '<td style="padding:3px 6px;text-align:right;">'+s.roll_container+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.roll+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.bulk+'</td>'+
       '<td style="padding:3px 6px;text-align:right;">'+s.received+'/'+s.total+'</td>'+
@@ -2827,7 +3167,11 @@ function llViewHtml(){
      единица с един опис, дори да носи няколко документа (няколко реда). */
   var descSeen = {};
   items.forEach(function(it){
-    var uref = (it.kind === 'pallet' && it.pallet_no != null) ? String(it.pallet_no) : String(it.id);
+    /* „1" = палет 1; „rc1" = рол контейнер 1; иначе id на реда (руло/насип).
+       Без вида в препратката палет 1 и контейнер 1 на един обект се смесват. */
+    var uref = (llIsNumbered(it.kind) && it.pallet_no != null)
+      ? (it.kind === 'pallet' ? String(it.pallet_no) : 'rc' + it.pallet_no)
+      : String(it.id);
     var ukey = JSON.stringify([it.store_name || '', uref]);
     var firstOfUnit = !descSeen[ukey];
     descSeen[ukey] = true;
@@ -2900,8 +3244,9 @@ function llRenderPalletPrint(list, rows){
   if(!wrap) return;
   var first = rows[0];
   var store = first.store_name || '';
-  var unit = (first.kind === 'pallet' && first.pallet_no != null)
-    ? 'Палет ' + first.pallet_no + (first.pallet_total != null ? ' от ' + first.pallet_total : '')
+  var unit = (llIsNumbered(first.kind) && first.pallet_no != null)
+    ? (LL_KIND_WORD[first.kind] || 'палет').charAt(0).toUpperCase() + (LL_KIND_WORD[first.kind] || 'палет').slice(1) +
+      ' ' + first.pallet_no + (first.pallet_total != null ? ' от ' + first.pallet_total : '')
     : llKindLabel(first).charAt(0).toUpperCase() + llKindLabel(first).slice(1);
   var docs = [];
   rows.forEach(function(r){ if(r.purchase_doc && docs.indexOf(r.purchase_doc) < 0) docs.push(r.purchase_doc); });
@@ -2978,10 +3323,10 @@ function llPrint(listId, storeFilter, unitRef){
   var items = llItemsOf(listId);
   if(!items.length) items = llStoreItemsOf(listId);
   if(unitRef !== undefined && unitRef !== null && unitRef !== ''){
-    var ref = String(unitRef);
-    var rows = /^\d+$/.test(ref)
+    var ref = String(unitRef), m = /^(rc)?(\d+)$/.exec(ref);
+    var rows = m
       ? items.filter(function(i){
-          return i.kind === 'pallet' && String(i.pallet_no) === ref &&
+          return i.kind === (m[1] ? 'roll_container' : 'pallet') && String(i.pallet_no) === m[2] &&
             (!storeFilter || i.store_name === storeFilter);
         })
       : items.filter(function(i){ return String(i.id) === ref; });
@@ -3079,11 +3424,12 @@ function llRenderPrint(list, items, storeFilter){
     ? sum.map(function(s){
         return '<tr class="lp-row"><td>'+esc(s.store)+'</td>'+
           '<td class="lp-num">'+s.pallet+'</td>'+
+          '<td class="lp-num">'+s.roll_container+'</td>'+
           '<td class="lp-num">'+s.roll+'</td>'+
           '<td class="lp-num">'+s.bulk+'</td>'+
           '<td class="lp-num">'+s.received+'/'+s.total+'</td></tr>';
       }).join('')
-    : '<tr class="lp-row"><td>—</td><td class="lp-num">0</td><td class="lp-num">0</td><td class="lp-num">0</td><td class="lp-num">0/0</td></tr>';
+    : '<tr class="lp-row"><td>—</td><td class="lp-num">0</td><td class="lp-num">0</td><td class="lp-num">0</td><td class="lp-num">0</td><td class="lp-num">0/0</td></tr>';
 
   /* Таблицата по товарни единици. Документ върху няколко палета дава по един
      ред във ВСЕКИ палет — точно както е в базата. Няколко документа на един
@@ -3164,8 +3510,9 @@ function llRenderPrint(list, items, storeFilter){
         (list.comment ? '<div class="lp-note"><b>Коментар:</b> '+esc(list.comment)+'</div>' : '')+
         '<div class="lp-sec">Обобщение по обекти</div>'+
         '<table class="lp-tbl">'+
-          '<colgroup><col style="width:70mm;"><col style="width:30mm;"><col style="width:30mm;"><col style="width:30mm;"><col style="width:30mm;"></colgroup>'+
-          '<tr><th>Обект</th><th>Палети</th><th>Рула</th><th>Насип</th><th>Получени</th></tr>'+
+          /* 60+26+26+26+26+26 = 190 */
+          '<colgroup><col style="width:60mm;"><col style="width:26mm;"><col style="width:26mm;"><col style="width:26mm;"><col style="width:26mm;"><col style="width:26mm;"></colgroup>'+
+          '<tr><th>Обект</th><th>Палети</th><th>Рол конт.</th><th>Рула</th><th>Насип</th><th>Получени</th></tr>'+
           sumHtml+
         '</table>'+
         '<div class="lp-sec">Товарни единици</div>'+

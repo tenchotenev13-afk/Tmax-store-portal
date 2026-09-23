@@ -20,5 +20,13 @@
 *.webp   binary
 *.ico    binary
 *.pdf    binary
+
+# Шрифтовете за PDF-а (fonts/) — изрично двоични. С text=auto горе git щеше
+# да гадае по NUL байтове; сгрешеното гадаене тук не гърми, а излиза като
+# квадратчета в готовия PDF, седмици по-късно.
+*.ttf    binary
+*.otf    binary
+*.woff   binary
+*.woff2  binary
 *.docx   binary
 *.xlsx   binary

@@ -75,7 +75,15 @@ const mod = h => h.doc.getElementById('mod-loading');
 const docRow = (h, pd) => Array.from(mod(h).querySelectorAll('tr[data-ll-doc]'))
   .find(r => r.textContent.indexOf(pd) >= 0);
 const idxOf = (h, pd, st) => h.w.llPendingDocs.findIndex(d => d.purchase_doc === pd && (!st || d.store_name === st));
-async function openNew(h) { h.w.llNewList(); await ticks(); await ticks(); await ticks(); }
+/* llNewList() отваря с 10 празни реда (23.09.2026); тук се мерят редовете,
+   които идват ОТ ДОКУМЕНТИТЕ, затова бланката се изчиства. Предварителните
+   редове имат свой тест — loading-lists-blank-rows.test.js. */
+async function openNew(h) {
+  h.w.llNewList();
+  await ticks(); await ticks(); await ticks();
+  h.w.llDraft.items = [];
+  h.w.renderLoadingLists();
+}
 const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
 
 (async function () {
