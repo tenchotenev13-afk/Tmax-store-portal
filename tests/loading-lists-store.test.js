@@ -225,8 +225,11 @@ function patchesTo(h, table) { return h.calls.patch.filter(p => p.table === tabl
     ]);
     h.w.loadLoadingLists();
     await ticks(); await ticks();
-    ok('редът показва „изчиства"',
-      card(h.doc, 'L1').textContent.indexOf('изчиства D-777') >= 0,
+    /* Колоната „Изчиства" е махната от картата (корекция 2). Данните
+       остават и автозатварянето долу пак тръгва срещу D-777 — именно това
+       прави проверката носеща. */
+    ok('редът вече НЕ показва „изчиства"',
+      card(h.doc, 'L1').textContent.indexOf('изчиства') < 0,
       card(h.doc, 'L1').textContent.slice(0, 250));
 
     realClick(h.w, btnIn(card(h.doc, 'L1'), '✅ Получено'));

@@ -94,7 +94,10 @@ const pr = h => h.doc.getElementById('mod-print');
       h.w.LL_KINDS.map(k => k[0]).join(','));
     ok('номериран вид', h.w.llIsNumbered('oversize') === true && h.w.llIsNumbered('pallet') === true);
     ok('старият ключ вече не е номериран', h.w.llIsNumbered('roll_container') === false);
-    ok('рулото и насипът — не', !h.w.llIsNumbered('roll') && !h.w.llIsNumbered('bulk'));
+    /* Рулото се номерира от 23.09.2026 (корекция 4 на Теодор) — своя
+       поредица по вид, както извънгабаритния. Насипът остава без номер. */
+    ok('рулото СЪЩО се номерира', h.w.llIsNumbered('roll') === true);
+    ok('насипът — не', !h.w.llIsNumbered('bulk'));
     ok('етикетът е „извънгабаритен N от M"',
       h.w.llKindLabel({ kind: 'oversize', pallet_no: 2, pallet_total: 3 }) === 'извънгабаритен 2 от 3',
       h.w.llKindLabel({ kind: 'oversize', pallet_no: 2, pallet_total: 3 }));

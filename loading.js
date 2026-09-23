@@ -67,6 +67,10 @@ var llStoreProdOpen = {};     /* {itemId:true} — разгънати артик
 var llDocQuery = '';          /* търсене в „Документи от Стока на път" */
 var llListQuery = '';         /* търсене в списъка на листите (складът) */
 var llStoreQuery = '';        /* търсене в картите на обекта */
+/* Кой раздел гледа магазинът-изпращач: 'in' (към мен) | 'out' (от мен).
+   По подразбиране „към мен" — получаването е всекидневната работа, а
+   изпращането е изключение. */
+var llStoreTab = 'in';
 var llDocStore = '';          /* чип по обект; '' = всички */
 var llTransitError = false;   /* снимката НЕ се зареди — различно от „няма документи" */
 /* Показва ли се блокът „Документи от Стока на път" в редактора. Ключът е
@@ -86,10 +90,11 @@ var LL_KINDS = [
 /* Видовете, които се НОМЕРИРАТ („N от M") и получават опис за печат. Всеки
    има СОБСТВЕНА поредица в рамките на обекта: палет 1 и извънгабаритен 1
    съществуват едновременно и не са едно и също нещо. */
-var LL_NUMBERED = ['pallet', 'oversize'];
+var LL_NUMBERED = ['pallet', 'oversize', 'roll'];
 function llIsNumbered(kind){ return LL_NUMBERED.indexOf(kind) >= 0; }
-/* Кратката дума за етикета — „палет 2 от 5", „извънгабаритен 1 от 3". */
-var LL_KIND_WORD = { pallet: 'палет', oversize: 'извънгабаритен' };
+/* Кратката дума за етикета — „палет 2 от 5", „извънгабаритен 1 от 3",
+   „руло 2 от 4". */
+var LL_KIND_WORD = { pallet: 'палет', oversize: 'извънгабаритен', roll: 'руло' };
 /* За извънгабаритния ред „какъв е товарът" е ЕДИНСТВЕНОТО описание: той няма
    артикули по документ и няма стандартен вид. Затова warehouse_comment му е
    задължителен — изискването живее ТУК, не като CHECK в базата: базата не
@@ -111,17 +116,34 @@ var LL_STATUSES = [
 ];
 
 /* ─── ПРАВА И КОНТЕКСТ ──────────────────────────────────────── */
+/* Магазин, който може да ИЗПРАЩА — междускладов трансфер. Изпращачът на
+   лист вече не е задължително логистичен склад: loading_lists.warehouse е
+   текст и приема име на обект.
+   Централният офис и служебните имена отпадат през isReportableStore, а
+   admin/logistics минават по другия клон — те избират изпращача явно. */
+function llIsSenderStore(){
+  if(!currentUser) return false;
+  if(isLogisticsWarehouseUser()) return false;
+  if(['admin','logistics'].indexOf(currentUser.role) >= 0) return false;
+  return isReportableStore(currentUser.store_name);
+}
 /* Складът пише по СВОИТЕ листи; admin/logistics — по кой да е, но избират
-   склада явно. Всеки друг е само читател. */
+   склада явно; магазинът — по своите, които сам изпраща. Всеки друг е само
+   читател.
+   ВНИМАНИЕ: това вече НЕ решава кой изглед се рендира. Магазинът има и двете
+   страни и renderLoadingLists() пита llIsSenderStore() първо — иначе
+   картата за получаване би изчезнала в мига, в който обектът стане изпращач. */
 function llCanEdit(){
   if(!currentUser) return false;
   return isLogisticsWarehouseUser() ||
-    ['admin','logistics'].indexOf(currentUser.role) >= 0;
+    ['admin','logistics'].indexOf(currentUser.role) >= 0 ||
+    llIsSenderStore();
 }
-/* Кой склад гледаме. За складовия потребител това е неговият собствен и НЕ
-   се избира — иначе би могъл да пише в чужд лист. */
+/* Кой изпращач гледаме. За складовия потребител и за магазина-изпращач това е
+   неговият собствен обект и НЕ се избира — иначе би могъл да пише в чужд лист. */
 function llActiveWarehouse(){
   if(isLogisticsWarehouseUser()) return currentUser.store_name;
+  if(llIsSenderStore()) return currentUser.store_name;
   return llWarehouse || '';
 }
 function llActor(){ return currentUser ? (currentUser.display_name || currentUser.email) : ''; }
@@ -138,7 +160,6 @@ function llKindLabel(it){
       ? w + ' ' + it.pallet_no + ' от ' + it.pallet_total
       : w;
   }
-  if(it.kind === 'roll') return 'рула';
   if(it.kind === 'bulk') return 'насип';
   return it.kind || '—';
 }
@@ -375,9 +396,21 @@ function loadLoadingLists(){
   if(!wrap.innerHTML.trim()){
     wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">⏳ Зареждане...</div>';
   }
+  /* Магазинът-изпращач зарежда и двете страни: чиповете показват броя на
+     получаваните листи и когато гледа „От мен". */
+  if(llIsSenderStore() && llStoreTab === 'in'){ llLoadStoreSide(); return; }
   if(!llCanEdit()){ llLoadStoreSide(); return; }
   var wh = llActiveWarehouse();
-  if(!wh){ llView = 'list'; renderLoadingLists(); return; }
+  if(!wh){
+    llView = 'list';
+    /* Списъкът на изпращачите иска имената на обектите — иначе селектът
+       показва само логистичните складове при първо отваряне. */
+    loadReportableStores().then(function(rows){
+      llStores = Array.isArray(rows) ? rows : [];
+      renderLoadingLists();
+    });
+    return;
+  }
   sbGet('loading_lists','warehouse=eq.'+encodeURIComponent(wh)+'&order=list_date.desc,created_at.desc')
     .then(function(rows){
       llLists = Array.isArray(rows) ? rows : [];
@@ -458,10 +491,16 @@ function renderLoadingLists(){
   var wrap = document.getElementById('mod-loading');
   if(!wrap) return;
   var h;
-  if(!llCanEdit())          h = llStoreHtml();
-  else if(llView === 'edit') h = llEditorHtml();
-  else if(llView === 'view') h = llViewHtml();
-  else                       h = llListHtml();
+  if(llIsSenderStore()){
+    /* Магазинът е и получател, и изпращач. Двата въпроса са различни —
+       „какво идва при мен" и „какво пращам аз" — и не се побират в един
+       екран, затова раздели, а не смесен списък. */
+    h = llStoreTabsHtml() + (llStoreTab === 'out' ? llWarehouseSideHtml() : llStoreBodyHtml());
+  } else if(!llCanEdit()){
+    h = llStoreHtml();
+  } else {
+    h = llWarehouseSideHtml();
+  }
   wrap.innerHTML = h;
   /* Формата за извънреден ред живее ИЗВЪН #mod-loading (на body), затова не
      се обновява от реда горе. Помощниците на артикулите (llAddProduct,
@@ -469,6 +508,36 @@ function renderLoadingLists(){
      долу добавеният артикул не се появява в модала. */
   if(llStoreAdd) llStoreAddRender();
 }
+/* Складовият изглед — трите му състояния на едно място, защото вече се вика
+   от два пътя: чистия склад и раздела „От мен" на магазина. */
+function llWarehouseSideHtml(){
+  if(llView === 'edit') return llEditorHtml();
+  if(llView === 'view') return llViewHtml();
+  return llListHtml();
+}
+/* Чиповете на магазина-изпращач. Заглавието е ТУК, а не в двете тела, за да
+   не се удвоява — llStoreHtml() го носи само когато е сам на екрана. */
+function llStoreTabsHtml(){
+  var chip = function(key, label){
+    var on = llStoreTab === key;
+    return '<button data-t="'+key+'" onclick="llSetStoreTab(this.dataset.t)" '+
+      'style="border:1px solid '+(on?'#2563eb':'#e2e8f0')+';background:'+(on?'#eff6ff':'#fff')+
+      ';color:'+(on?'#1e40af':'#475569')+';border-radius:20px;padding:5px 14px;font-size:12.5px;'+
+      'font-weight:'+(on?'700':'500')+';cursor:pointer;">'+label+'</button>';
+  };
+  return '<div class="pg-title">🚛 Товарни листи</div>'+
+    '<div class="pg-sub">Какво идва при обекта и какво обектът изпраща.</div>'+
+    '<div data-ll-store-tabs="1" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">'+
+      chip('in','📥 Към мен')+chip('out','📤 От мен')+'</div>';
+}
+function llSetStoreTab(t){
+  llStoreTab = (t === 'out') ? 'out' : 'in';
+  /* Връщане в списъка при смяна: редакторът на чужд раздел няма смисъл и
+     при обратно превключване би се отворил насред недовършена чернова. */
+  if(llStoreTab === 'in'){ llView = 'list'; }
+  loadLoadingLists();
+}
+
 /* ─── ИЗГЛЕД ЗА ОБЕКТА ──────────────────────────────────────── */
 /* При обекта се търси по изходящ № (по неговите редове), по склад и по дата.
    Датата се сверява И в двата вида — 23.09.2026 и 2026-09-23 — защото на
@@ -493,8 +562,14 @@ function llSetStoreQuery(v){
   }
 }
 function llStoreHtml(){
-  var h = '<div class="pg-title">🚛 Товарни листи</div>'+
-    '<div class="pg-sub">Какво е натоварено от логистичния склад към обекта.</div>';
+  return '<div class="pg-title">🚛 Товарни листи</div>'+
+    '<div class="pg-sub">Какво е натоварено към обекта.</div>'+
+    llStoreBodyHtml();
+}
+/* Само тялото — без заглавие. Разделено, защото магазинът-изпращач слага
+   своето заглавие веднъж, над чиповете. */
+function llStoreBodyHtml(){
+  var h = '';
   if(!llStoreLists.length){
     var store = (currentUser && currentUser.store_name) || 'вашия обект';
     return h + '<div style="text-align:center;padding:50px 20px;color:#94a3b8;background:#fff;border:1px solid #e2e8f0;border-radius:10px;">'+
@@ -1012,7 +1087,7 @@ function llStoreCardHtml(l){
   if(!open) return h + '</div>';
 
   h += '<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:760px;"><thead><tr style="background:#f8fafc;">';
-  ['Товарна единица','Стокова №','Изчиства','Коментар склад','Моят коментар','Получено'].forEach(function(c){
+  ['Товарна единица','Стокова №','Коментар склад','Моят коментар','Получено'].forEach(function(c){
     h += '<th style="text-align:left;padding:6px 9px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
   });
   h += '</tr></thead><tbody>';
@@ -1026,7 +1101,7 @@ function llStoreCardHtml(l){
       var gMiss = g.rows.filter(function(r){ return r.missing; }).length;
       var gCan  = g.rows.some(llOpenForStore);
       h += '<tr data-pallet-group="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+
-        '<td colspan="5" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
+        '<td colspan="4" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
           esc(llKindLabel(g.rows[0]))+' · '+g.rows.length+' документа · получени '+gGot+
           (gMiss?' · неполучени '+gMiss:'')+'/'+g.rows.length+
           (g.rows.some(function(r){ return r.partial; })?' '+llPartialBadge():'')+
@@ -1060,7 +1135,6 @@ function llStoreCardHtml(l){
         (it.added_by_store?'<div style="margin-top:3px;text-decoration:none;font-weight:400;">'+llApprovalBadge(it)+llApprovalNote(it)+llApproveBtnsHtml(l, it)+'</div>':'')+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
         (it.partial?' '+llPartialBadge():'')+'</td>'+
-      '<td style="padding:6px 9px;">'+(it.clears_doc?'изчиства '+esc(it.clears_doc):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
       '<td style="padding:6px 9px;color:#64748b;">'+esc(it.warehouse_comment||'—')+'</td>'+
       /* Коментарът на обекта остава редактируем и СЛЕД отмятането: разминаването
          често се вижда чак при подреждане на стоката, не при разтоварването. */
@@ -1088,7 +1162,7 @@ function llStoreCardHtml(l){
     if((it.products || []).length){
       var so = !!llStoreProdOpen[it.id];
       h += '<tr data-ll-sprod="'+it.id+'" style="border-bottom:1px solid #f1f5f9;'+(it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':''))+'">'+
-        '<td></td><td colspan="5" style="padding:0 9px 6px;">'+
+        '<td></td><td colspan="4" style="padding:0 9px 6px;">'+
         llProductsToggleHtml(it, so, 'llToggleStoreProducts')+(so ? llProductsTableHtml(it.products) : '')+'</td></tr>';
     }
     });
@@ -1623,7 +1697,6 @@ function llBuildPdf(list, items, storeFilter){
       line((n + 1) + '. ' + llKindLabel(it) +
         (llIsOversize(it.kind) && it.warehouse_comment ? ' — ' + it.warehouse_comment : '') +
         '   изходящ № ' + (it.purchase_doc || 'без') +
-        (it.clears_doc ? '   изчиства ' + it.clears_doc : '') +
         (storeFilter ? '' : '   обект: ' + (it.store_name || '—')), 11, 5.5);
       /* При извънгабаритния коментарът вече е до вида — втори път би бил шум. */
       if(it.warehouse_comment && !llIsOversize(it.kind)) line('    коментар склад: ' + it.warehouse_comment, 9, 4.5);
@@ -1802,7 +1875,7 @@ function llSentHtmlFor(list, store, rows){
     llMailMeta(list);
   body += '<table style="width:100%;border-collapse:collapse;"><tr>'+
     '<th '+LL_MAIL_TH+'>Товарна единица</th><th '+LL_MAIL_TH+'>Стокова №</th>'+
-    '<th '+LL_MAIL_TH+'>Изчиства</th><th '+LL_MAIL_TH+'>Коментар склад</th></tr>';
+    '<th '+LL_MAIL_TH+'>Коментар склад</th></tr>';
   rows.slice().sort(llByPosition).forEach(function(it){
     body += '<tr>'+
       '<td '+LL_MAIL_TD+'><b>'+esc(llKindLabel(it))+'</b>'+
@@ -1810,13 +1883,12 @@ function llSentHtmlFor(list, store, rows){
           ? '<div style="font-size:10.5px;color:#475569;font-weight:600;">'+esc(it.warehouse_comment)+'</div>' : '')+'</td>'+
       '<td '+LL_MAIL_TD+'>'+(it.purchase_doc ? esc(it.purchase_doc) : 'без')+
         (it.partial ? '<div style="font-size:10px;color:#92400e;">частично</div>' : '')+'</td>'+
-      '<td '+LL_MAIL_TD+'>'+(it.clears_doc ? esc(it.clears_doc) : '—')+'</td>'+
       '<td '+LL_MAIL_TD+'>'+esc(it.warehouse_comment || '—')+'</td></tr>';
     /* Какво има на палета — компактно и сиво: писмото е „идва товар", не
        опис; описът е на хартия върху самия палет. Отделен ред с colspan,
        за да не разтяга колоните на таблицата с дълги имена. */
     if((it.products || []).length){
-      body += '<tr><td colspan="4" style="padding:3px 7px 7px 18px;font-size:11px;color:#64748b;border:1px solid #e2e8f0;border-top:none;line-height:1.5;">'+
+      body += '<tr><td colspan="3" style="padding:3px 7px 7px 18px;font-size:11px;color:#64748b;border:1px solid #e2e8f0;border-top:none;line-height:1.5;">'+
         it.products.map(function(p){
           return esc(p.sap_code)+' · '+esc(p.product_name)+' — '+llFmtQty(p.qty)+' '+esc(p.unit || '')+
             (p.cartons != null ? ' ('+p.cartons+' каш.)' : '');
@@ -1980,18 +2052,39 @@ function llNotifyClosed(list){
 }
 
 /* ─── ИЗБОР НА СКЛАД (само за admin/logistics) ──────────────── */
+/* Изпращачът може да е логистичен склад ИЛИ магазин (междускладов трансфер).
+   Двете групи са разделени с optgroup, защото списъкът иначе става двайсет
+   имена без ред и складовете се губят сред обектите.
+   Собственият потребител на склад/магазин не избира — за него изпращачът е
+   зададен и llActiveWarehouse() го връща. */
 function llWarehouseSelectHtml(){
-  if(isLogisticsWarehouseUser()) return '';
+  if(isLogisticsWarehouseUser() || llIsSenderStore()) return '';
+  var opt = function(w){
+    return '<option'+(w===llWarehouse?' selected':'')+'>'+esc(w)+'</option>';
+  };
+  /* llStores идва от loadReportableStores(), а isReportableStore вече
+     изключва логистичните складове и Централния офис — втори филтър тук би
+     бил мъртъв код, който изглежда като защита. Смени ли се правилото,
+     сменя се на ЕДНО място. */
+  var shops = llStores || [];
   return '<select id="ll-wh" class="fi" onchange="llSetWarehouse(this.value)" style="max-width:260px;display:inline-block;width:auto;">'+
-    '<option value="">-- Избери склад --</option>'+
-    LOGISTICS_WAREHOUSES.map(function(w){
-      return '<option'+(w===llWarehouse?' selected':'')+'>'+esc(w)+'</option>';
-    }).join('')+'</select>';
+    '<option value="">-- Избери изпращач --</option>'+
+    '<optgroup label="Логистични складове">'+LOGISTICS_WAREHOUSES.map(opt).join('')+'</optgroup>'+
+    (shops.length ? '<optgroup label="Магазини">'+shops.map(opt).join('')+'</optgroup>' : '')+
+    '</select>';
 }
 function llSetWarehouse(v){
   llWarehouse = v || '';
   llLists = []; llItems = [];
   loadLoadingLists();
+}
+
+/* Черновата е работен документ на склада — обектите не я виждат изобщо
+   (llLoadStoreSide пуска само sent/done/partial). Това не личи отникъде и
+   складът пита „защо не го виждат"; надписът отговаря, преди да се попита. */
+function llDraftNoticeHtml(){
+  return '<div data-ll-draft-notice="1" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:12.5px;">'+
+    '📝 Черновата се вижда само тук. Обектите получават листа след „📤 Изпрати към обектите".</div>';
 }
 
 /* ─── СПИСЪК НА ЛИСТИТЕ ─────────────────────────────────────── */
@@ -2397,20 +2490,18 @@ function llSetRowPartial(i, checked){
 }
 function llSetDraftField(field, val){ if(llDraft) llDraft[field] = val; }
 
-/* Полето „изчиства друг документ" предлага само чакащите документи на СЪЩИЯ
-   обект: разписка на друг обект не може да бъде изчистена от този товар. */
-function llClearsOptions(it){
-  var opts = llPendingDocs.filter(function(d){ return d.store_name === it.store_name; });
-  return '<option value="">—</option>' + opts.map(function(d){
-    return '<option'+(d.purchase_doc===it.clears_doc?' selected':'')+'>'+esc(d.purchase_doc)+'</option>';
-  }).join('');
-}
 function llStoreOptions(sel){
+  /* Изпращачът отпада от получателите: лист от Петрич за Петрич не е товар,
+     а грешка, и би стигнал до собствената карта „Към мен" на същия човек.
+     Заварена стойност се пази видима — иначе редакция на стар лист би я
+     изтрила тихо при първото пре-рендиране. */
+  var from = llActiveWarehouse();
+  var opts = (llStores || []).filter(function(s){ return s !== from || s === sel; });
   /* „— избери обект —" е реален избор, не украса: редът без обект е празен
      ред, който при запис отпада. Без него селектът показва първия обект и
      човек може да запише лист за когото не трябва. */
   return '<option value=""'+(!sel?' selected':'')+'>— избери обект —</option>'+
-    llStores.map(function(s){
+    opts.map(function(s){
       return '<option'+(s===sel?' selected':'')+'>'+esc(s)+'</option>';
     }).join('');
 }
@@ -2519,7 +2610,10 @@ function llSamePalletRows(i){
 function llToggleProducts(i){
   var it = llDraft && llDraft.items[i];
   if(!it) return;
-  it._prodOpen = !it._prodOpen;
+  /* Спрямо ДЕЙСТВИТЕЛНОТО състояние, не спрямо флага: редът се ражда без
+     него, а !undefined е true — тоест първият клик „свиваше" вече отворен
+     блок и на екрана не се случваше нищо. */
+  it._prodOpen = (it._prodOpen === false);
   renderLoadingLists();
   if(it._prodOpen) llFocusPf(i, 'sap');
 }
@@ -2736,7 +2830,13 @@ function llApplyTransitProducts(i, source){
 var LL_PF_IN = 'border:1px solid #cbd5e1;border-radius:6px;padding:7px 8px;font-size:13px;';
 function llProductsBlockHtml(it, i){
   var pr = it.products || [];
-  var open = !!it._prodOpen;
+  /* РАЗГЪНАТ по подразбиране: артикулите са същината на реда, а зад бутон
+     складът просто не ги въвеждаше. Тества се срещу false, не срещу истина —
+     редовете се раждат на четири места (празна чернова, „Добави нов ред",
+     материализиран документ, извънреден ред от обекта) и нито едно от тях не
+     бива да помни да вдига флага. Свиването остава: llToggleProducts пише
+     изричното false. */
+  var open = it._prodOpen !== false;
   var h = '<div style="padding:4px 0 6px;">'+
     '<button data-i="'+i+'" onclick="llToggleProducts(+this.dataset.i)" style="border:none;background:none;color:#4f46e5;font-size:12px;font-weight:600;cursor:pointer;padding:2px 0;">'+
       (open ? '▾' : '▸')+' Артикули ('+pr.length+')'+
@@ -3199,6 +3299,7 @@ function llEditorHtml(){
     '<div class="pg-title" style="margin:0;">'+(isNew?'➕ Нов товарен лист':'✏️ Редакция на товарен лист')+'</div>'+
     '<button onclick="llBackToList()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">← Назад</button>'+
     '</div>';
+  h += llDraftNoticeHtml();
   if(llCurrentId && llIncompleteSaves[llCurrentId]){
     h += '<div data-ll-incomplete="1" style="background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:9px 12px;margin-bottom:12px;font-size:13px;font-weight:600;">'+
       '⚠️ Последният запис не е довършен — артикулите в базата може да не отговарят на екрана. Натисни „💾 Запази черновата" пак.</div>';
@@ -3274,7 +3375,7 @@ function llEditorHtml(){
     h += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">'+
       '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">#</th><th style="padding:3px 6px;">Вид</th>'+
       '<th style="padding:3px 6px;">№ / от</th><th style="padding:3px 6px;">Изходящ №</th>'+
-      '<th style="padding:3px 6px;">Изчиства</th><th style="padding:3px 6px;">Обект</th>'+
+      '<th style="padding:3px 6px;">Обект</th>'+
       '<th style="padding:3px 6px;">Коментар склад</th>'+
       '<th style="padding:3px 6px;" title="С този палет тръгва само част от документа">Частично</th>'+
       '<th style="padding:3px 6px;"></th></tr>';
@@ -3297,7 +3398,6 @@ function llEditorHtml(){
           ' от <input type="number" min="1" value="'+(it.pallet_total!=null?it.pallet_total:'')+'" data-i="'+i+'" oninput="llSetRowField(this.dataset.i,\'pallet_total\',this.value)" style="width:52px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;">'
           :'<span style="color:#cbd5e1;">—</span>')+'</td>'+
         '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+'</td>'+
-        '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'clears_doc\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;max-width:150px;">'+llClearsOptions(it)+'</select></td>'+
         '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'store_name\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+llStoreOptions(it.store_name)+'</select></td>'+
         '<td style="padding:3px 6px;">'+
           /* При извънгабаритния полето сменя смисъла си: то вече не е бележка
@@ -3318,7 +3418,7 @@ function llEditorHtml(){
           '<button data-i="'+i+'" onclick="llMoveRow(+this.dataset.i,1)" title="Надолу" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">↓</button>'+
           '<button data-i="'+i+'" onclick="llRemoveRow(+this.dataset.i)" title="Махни реда" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">✕</button>'+
         '</td></tr>'+
-        '<tr data-ll-prodrow="'+i+'"><td></td><td colspan="8" style="padding:0 6px 6px;">'+llProductsBlockHtml(it, i)+'</td></tr>';
+        '<tr data-ll-prodrow="'+i+'"><td></td><td colspan="7" style="padding:0 6px 6px;">'+llProductsBlockHtml(it, i)+'</td></tr>';
     });
     h += '</table></div>';
   }
@@ -3548,11 +3648,16 @@ function llFinishSave(listId){
 /* ─── ПРЕХОДИ ───────────────────────────────────────────────── */
 function llSendList(id){
   if(!llCanEdit()){ toast('Нямаш права за това действие','#dc2626'); return; }
-  if(!confirm('Изпрати товарния лист към обектите?')) return;
   /* Редовете се снимат ПРЕДИ PATCH-а: loadLoadingLists() по-долу презарежда
      llItems асинхронно и известието би тръгнало срещу празен масив, ако ги
      четеше след това. */
   var rows = llItemsOf(id).slice();
+  var noProd = rows.filter(function(it){ return !(it.products || []).length; }).length;
+  /* Питането за описа е ПЪРВО: отговори ли човекът „не" на него, няма смисъл
+     да го питаме и второто. Обратният ред би значел два диалога за отказ. */
+  if(noProd && !confirm(noProd + (noProd === 1 ? ' ред е без артикули.' : ' реда са без артикули.') +
+     ' Изпращаш ли така?')) return;
+  if(!confirm('Изпрати товарния лист към обектите?')) return;
   sbPatch('loading_lists','id=eq.'+id,{status:'sent', sent_at:new Date().toISOString()}).then(function(res){
     if(!res.ok){ toast('Грешка при изпращане: '+sbErrMsg(res),'#dc2626'); return; }
     toast('📤 Товарният лист е изпратен');
@@ -3659,6 +3764,7 @@ function llViewHtml(){
       '<button onclick="llBackToList()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 14px;font-size:12.5px;cursor:pointer;">← Назад</button>'+
     '</div></div>';
 
+  if(l.status === 'draft') h += llDraftNoticeHtml();
   h += '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">🏭 '+esc(l.warehouse||'')+
     (l.executed_by?' · Товарил: '+esc(l.executed_by):'')+
     (l.sent_at?' · Изпратен: '+llFmtStamp(l.sent_at):'')+
@@ -3694,7 +3800,7 @@ function llViewHtml(){
   var locked = l.status !== 'draft';
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">'+
     '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;"><thead><tr style="background:#f8fafc;">';
-  ['#','Товарна единица','Изходящ №','Изчиства','Коментар склад','Обект','Коментар обект','Получено'].forEach(function(cc){
+  ['#','Товарна единица','Изходящ №','Коментар склад','Обект','Коментар обект','Получено'].forEach(function(cc){
     h += '<th style="text-align:left;padding:7px 9px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+cc+'</th>';
   });
   h += '</tr></thead><tbody>';
@@ -3702,13 +3808,14 @@ function llViewHtml(){
      единица с един опис, дори да носи няколко документа (няколко реда). */
   var descSeen = {};
   items.forEach(function(it){
-    /* „1" = палет 1; „rc1" = извънгабаритен 1; иначе id на реда (руло/насип).
-       Без вида в препратката палет 1 и извънгабаритен 1 на един обект се
-       смесват. Представката „rc" е от предишното име на вида и се пази
-       нарочно: тя не се записва никъде, но стои в data-u на бутоните и
-       смяната ѝ би счупила вече отворен печатен изглед. */
+    /* „1" = палет 1; „rc1" = извънгабаритен 1; „rl1" = руло 1; иначе id на
+       реда (насип). Без вида в препратката палет 1 и руло 1 на един обект се
+       смесват в един опис. Представката „rc" е от предишното име на вида
+       („рол контейнер") и се пази нарочно: тя не се записва никъде, но стои
+       в data-u на бутоните и смяната ѝ би счупила вече отворен печат. */
     var uref = (llIsNumbered(it.kind) && it.pallet_no != null)
-      ? (it.kind === 'pallet' ? String(it.pallet_no) : 'rc' + it.pallet_no)
+      ? (it.kind === 'pallet' ? String(it.pallet_no)
+        : (it.kind === 'roll' ? 'rl' + it.pallet_no : 'rc' + it.pallet_no))
       : String(it.id);
     var ukey = JSON.stringify([it.store_name || '', uref]);
     var firstOfUnit = !descSeen[ukey];
@@ -3726,7 +3833,6 @@ function llViewHtml(){
           : '')+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
         (it.partial?' '+llPartialBadge():'')+'</td>'+
-      '<td style="padding:6px 9px;">'+(it.clears_doc?'изчиства '+esc(it.clears_doc):'<span style="color:#cbd5e1;">—</span>')+'</td>'+
       /* Единственото, което остава редактируемо след изпращане. */
       '<td style="padding:6px 9px;">'+(locked
         ? '<input value="'+escVal(it.warehouse_comment)+'" data-id="'+it.id+'" onchange="llSaveWarehouseComment(this.dataset.id,this.value)" style="width:100%;min-width:120px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;">'
@@ -3745,8 +3851,14 @@ function llViewHtml(){
     /* Артикулите — разгъваем под-ред, само ако има какво да се разгъне. */
     if((it.products || []).length){
       var vo = !!llViewProdOpen[it.id];
-      h += '<tr data-ll-vprod="'+it.id+'" style="border-bottom:1px solid #f1f5f9;"><td></td><td colspan="7" style="padding:0 9px 6px;">'+
+      h += '<tr data-ll-vprod="'+it.id+'" style="border-bottom:1px solid #f1f5f9;"><td></td><td colspan="6" style="padding:0 9px 6px;">'+
         llProductsToggleHtml(it, vo, 'llToggleViewProducts')+(vo ? llProductsTableHtml(it.products) : '')+'</td></tr>';
+    } else if(l.status === 'draft'){
+      /* В черновата липсващият опис още може да се поправи и точно затова се
+         казва — след изпращането същият надпис би бил само упрек. */
+      h += '<tr data-ll-noprod="'+it.id+'" style="border-bottom:1px solid #f1f5f9;"><td></td><td colspan="6" style="padding:0 9px 6px;">'+
+        '<span style="font-size:11.5px;color:#b45309;">Няма артикули</span> '+
+        '<button data-id="'+l.id+'" onclick="llOpenEdit(this.dataset.id)" style="border:none;background:none;color:#4f46e5;font-size:11.5px;font-weight:600;cursor:pointer;padding:2px 0;">✏️ Редакция</button></td></tr>';
     }
   });
   h += '</tbody></table></div>';
@@ -3866,10 +3978,11 @@ function llPrint(listId, storeFilter, unitRef){
   if(!items.length) items = llStoreItemsOf(listId);
   items = llLiveRows(items);   /* отхвърленият ред не се печата (Пакет Г2) */
   if(unitRef !== undefined && unitRef !== null && unitRef !== ''){
-    var ref = String(unitRef), m = /^(rc)?(\d+)$/.exec(ref);
+    var ref = String(unitRef), m = /^(rc|rl)?(\d+)$/.exec(ref);
+    var wantKind = m ? (m[1] === 'rc' ? 'oversize' : (m[1] === 'rl' ? 'roll' : 'pallet')) : null;
     var rows = m
       ? items.filter(function(i){
-          return i.kind === (m[1] ? 'oversize' : 'pallet') && String(i.pallet_no) === m[2] &&
+          return i.kind === wantKind && String(i.pallet_no) === m[2] &&
             (!storeFilter || i.store_name === storeFilter);
         })
       : items.filter(function(i){ return String(i.id) === ref; });
@@ -3988,7 +4101,6 @@ function llRenderPrint(list, items, storeFilter){
     return g.rows.map(function(it, k){
       n++;
       var doc = it.purchase_doc ? esc(it.purchase_doc) : '<span style="color:#777;">без</span>';
-      if(it.clears_doc) doc += '<div class="lp-tag">изчиства '+esc(it.clears_doc)+'</div>';
       if(it.partial)    doc += '<div class="lp-tag">частично</div>';
       return '<tr class="lp-row" data-store="'+escVal(it.store_name || '')+'">'+
         '<td class="lp-num">'+n+'</td>'+

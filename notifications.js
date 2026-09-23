@@ -390,7 +390,14 @@ function notifLoadingListsPending(cb){
     var items=Array.isArray(r[1])?r[1]:[];
     if(!lists.length || !items.length){ cb(null); return; }
     var need={}; items.forEach(function(i){ if(i.list_id) need[i.list_id]=1; });
-    cb(lists.filter(function(l){ return need[l.id]; }));
+    /* Обектът-изпращач не се известява за СВОЯ лист. Проверката е по
+       warehouse на листа, не по роля: същият човек е изпращач по едни листи
+       и получател по други, и само листът знае кой е кой.
+       Глобалният профил няма собствен обект — за него mine е празно. */
+    var mine = (currentUser && currentUser.store_name) || '';
+    cb(lists.filter(function(l){
+      return need[l.id] && (!mine || l.warehouse !== mine);
+    }));
   }).catch(function(){ cb(null); });
 }
 /* Картата „товарни листи за получаване" в банера. ЕДНО определение, ползвано

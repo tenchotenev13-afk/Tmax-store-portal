@@ -64,6 +64,7 @@ const TESTS = [
   'loading-lists-transit-expand.test.js',
   'loading-lists-scanner-config.test.js',
   'loading-lists-oversize.test.js',
+  'loading-lists-teodor-fixes.test.js',
   'loading-lists-blank-rows.test.js',
   'loading-lists-search.test.js',
   'loading-lists-pdf.test.js',

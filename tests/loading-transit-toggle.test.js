@@ -112,10 +112,9 @@ async function openEditor(h) {
       wrap.textContent.indexOf('Редове (10)') >= 0, wrap.textContent.slice(0, 500));
     ok('„➕ Добави нов ред" е там', !!btn(wrap, '➕ Добави нов ред'));
     ok('обектите са заредени', h.w.llStores.length > 0, String(h.w.llStores.length));
-    /* Блокът за артикули (Пакет В1) — скенерът и полетата. */
-    h.w.llToggleProducts(0);
-    await ticks();
-    ok('блокът за артикули се разгъва', !!btn(mod(h.doc), '📷 Сканирай'));
+    /* Блокът за артикули (Пакет В1) — скенерът и полетата. От 23.09.2026 е
+       разгънат по подразбиране (корекция 5), тоест не се отваря изрично. */
+    ok('блокът за артикули е разгънат', !!btn(mod(h.doc), '📷 Сканирай'));
     ok('и полето за SAP код е там', !!h.doc.getElementById('ll-pf-sap-0'));
     /* „↺ Отново от Стока на път" се показва само при документ НА РЕДА —
        при изключена снимка не бива да се появява дори тогава. */
@@ -146,8 +145,7 @@ async function openEditor(h) {
     ok('има чекбокс за отмятане', !!wrap.querySelector('tr[data-ll-doc="0"] input[type=checkbox]'));
 
     h.w.llSetRowField(0, 'purchase_doc', '4600179694');
-    h.w.llToggleProducts(0);
-    await ticks();
+    h.w.renderLoadingLists();
     ok('„↺ Отново от Стока на път" се показва',
       !!btn(mod(h.doc), '↺ Отново от Стока на път'),
       mod(h.doc).textContent.slice(0, 300));

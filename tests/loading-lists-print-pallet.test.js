@@ -143,20 +143,22 @@ const pr = h => h.doc.getElementById('mod-print');
     await ticks(); await ticks();
     h.w.llOpenView('L1');
     const all = h.doc.getElementById('mod-loading').querySelectorAll('button[data-u]');
-    /* A и B са един палет → 1; C → 1; D (друг обект) → 1; E (руло) → 1. */
+    /* A и B са един палет → 1; C → 1; D (друг обект) → 1; E (руло) → 1.
+       Рулото се номерира от 23.09.2026, тоест бутонът му носи „rl…", а не
+       id-то на реда — но БРОЯТ единици не се променя. */
     ok('четири бутона за пет реда', all.length === 4, String(all.length));
     ok('палет 1 на Петрич има ЕДИН бутон',
       h.doc.getElementById('mod-loading').querySelectorAll('button[data-u="1"][data-s="Петрич"]').length === 1);
   }
 
-  section('в) Руло без номер — описът е за самия ред');
+  section('в) Руло — вече номерирано, описът е за товарната единица');
   {
     const h = env();
     h.w.loadLoadingLists();
     await ticks(); await ticks();
     h.w.llPrint('L1', 'Петрич', 'E');
     const t = pr(h).textContent;
-    ok('заглавието е „Рула", не „Палет"', t.indexOf('Рула') >= 0 && t.indexOf('Палет ') < 0, t.slice(0, 300));
+    ok('заглавието е „Руло", не „Палет"', t.indexOf('Руло') >= 0 && t.indexOf('Палет ') < 0, t.slice(0, 300));
     ok('артикулът на рулото', t.indexOf('ИЗОЛАЦИЯ 10М') >= 0);
     ok('само той', pr(h).querySelectorAll('.lp-tbl tr.lp-row:not(.lp-sum)').length === 1);
     ok('изходящият му номер', t.indexOf('ИЗХ-103') >= 0);

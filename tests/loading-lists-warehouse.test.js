@@ -126,9 +126,15 @@ function itemPosts(calls) {
     const s = env(STORE);
     s.w.loadLoadingLists();
     await ticks();
-    ok('магазинът НЯМА бутон за нов лист', !hasBtn(s.doc, 'Нов товарен лист'),
+    /* От 23.09.2026 магазинът МОЖЕ да изпраща (междускладов трансфер), тоест
+       llCanEdit() му е true. Но по подразбиране стои в раздел „Към мен" и
+       там бутон за нов лист няма — изгледът вече не се решава от llCanEdit(),
+       а от llIsSenderStore() в renderLoadingLists(). */
+    ok('магазинът НЯМА бутон за нов лист в „Към мен"', !hasBtn(s.doc, 'Нов товарен лист'),
       mod(s.doc).textContent.slice(0, 200));
-    ok('llCanEdit() е false за магазина', s.w.llCanEdit() === false);
+    ok('llCanEdit() вече е true за магазина — той е изпращач', s.w.llCanEdit() === true);
+    ok('llIsSenderStore() също', s.w.llIsSenderStore() === true);
+    ok('но разделът по подразбиране е „Към мен"', s.w.llStoreTab === 'in');
     ok('вижда обяснение „Няма товари за Петрич"',
       mod(s.doc).textContent.indexOf('Няма товари за Петрич') >= 0,
       mod(s.doc).textContent.slice(0, 200));
@@ -330,18 +336,31 @@ function itemPosts(calls) {
       String(mod(h.doc).querySelectorAll('table select').length));
   }
 
-  section('е) Изборът на склад е само за admin/logistics');
+  section('е) Изборът на ИЗПРАЩАЧ е само за admin/logistics');
   {
     const a = env(ADMIN);
     a.w.loadLoadingLists();
     await ticks();
     ok('admin вижда select за склад', !!a.doc.getElementById('ll-wh'));
     ok('и още няма списък, докато не избере',
-      mod(a.doc).textContent.indexOf('Избери склад') >= 0,
+      mod(a.doc).textContent.indexOf('Избери изпращач') >= 0,
       mod(a.doc).textContent.slice(0, 200));
-    ok('опциите са само логистичните складове',
-      a.doc.getElementById('ll-wh').options.length === 1 + a.w.LOGISTICS_WAREHOUSES.length,
-      String(a.doc.getElementById('ll-wh').options.length));
+    /* От 23.09.2026 изпращач може да е и магазин (междускладов трансфер),
+       затова две групи. Складовете си остават всичките. */
+    const sel = a.doc.getElementById('ll-wh');
+    const groups = Array.from(sel.querySelectorAll('optgroup')).map(g => g.getAttribute('label'));
+    ok('две групи: складове и магазини',
+      groups.join('|') === 'Логистични складове|Магазини', groups.join('|'));
+    const whGroup = sel.querySelector('optgroup[label="Логистични складове"]');
+    ok('всички логистични складове са в първата група',
+      whGroup.querySelectorAll('option').length === a.w.LOGISTICS_WAREHOUSES.length,
+      String(whGroup.querySelectorAll('option').length));
+    const shopGroup = sel.querySelector('optgroup[label="Магазини"]');
+    const shops = Array.from(shopGroup.querySelectorAll('option')).map(o => o.textContent);
+    ok('магазините са във втората', shops.indexOf('Петрич') >= 0 && shops.indexOf('Гоце Делчев') >= 0,
+      shops.join('|'));
+    ok('и нито един логистичен склад не е сред тях',
+      shops.every(n => a.w.LOGISTICS_WAREHOUSES.indexOf(n) < 0), shops.join('|'));
 
     /* Точният случай от заданието: admin изобщо без store_name. */
     const a2 = env({ email: 'a2@temax.bg', display_name: 'Админ 2', role: 'admin' });

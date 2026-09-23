@@ -169,7 +169,7 @@ const pstyle = doc => {
       ptext(h.doc).indexOf('Гоце Делчев') < 0, ptext(h.doc).slice(0, 400));
   }
 
-  section('г) „изчиства", „частично" и празно каре');
+  section('г) „частично" и празно каре; „изчиства" вече НЕ се печата');
   {
     const items = [
       it_({ id: 'c1', purchase_doc: 'D-100', clears_doc: 'D-777', partial: true }),
@@ -182,7 +182,11 @@ const pstyle = doc => {
     await ticks();
 
     const t = ptext(h.doc);
-    ok('пише „изчиства D-777"', t.indexOf('изчиства D-777') >= 0, t.slice(0, 400));
+    /* clears_doc е попълнено в данните и ПАК не се вижда — точно това
+       разделя „махнато от UI" от „махнато от базата" (корекция 2). */
+    ok('„изчиства D-777" вече НЕ се печата', t.indexOf('изчиства') < 0, t.slice(0, 400));
+    ok('но данните са там — llItemDocKey го ползва',
+      h.w.llItemDocKey({ clears_doc: 'D-777', purchase_doc: 'D-100' }) === 'D-777');
     ok('пише „частично"', t.indexOf('частично') >= 0);
     ok('ред без документ пише „без"', t.indexOf('без') >= 0);
     ok('неполученият ред има празно каре за ръчна отметка',

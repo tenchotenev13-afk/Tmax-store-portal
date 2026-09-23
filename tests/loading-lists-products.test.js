@@ -214,9 +214,15 @@ async function openDraft(h) {
   await ticks(); await ticks();
 }
 async function openProducts(h, i) {
-  realClick(h.w, btn(mod(h), 'Артикули'));   /* първият ред */
-  await ticks();
-  return $(h, 'll-pf-sap-' + (i || 0));
+  /* От 23.09.2026 блокът е разгънат по подразбиране (корекция 5 на Теодор).
+     Клик по „Артикули" вече го ЗАТВАРЯ — затова се натиска само ако полето
+     го няма. Помощникът остава, за да работи и ако подразбирането се върне. */
+  const id = 'll-pf-sap-' + (i || 0);
+  if (!$(h, id)) {
+    realClick(h.w, btn(mod(h), 'Артикули'));   /* първият ред */
+    await ticks();
+  }
+  return $(h, id);
 }
 
 (async function () {
@@ -228,7 +234,19 @@ async function openProducts(h, i) {
 
     const sap = await openProducts(h, 0);
     if (ok('полето „SAP код" е на екрана', !!sap)) {
-      ok('и фокусът е в него при отваряне', h.doc.activeElement === sap,
+      /* От 23.09.2026 блокът е разгънат по подразбиране (корекция 5), тоест
+         при отваряне на редактора НИКОЙ не го е натискал и фокусът си остава
+         там, където човекът го е сложил — а не скача в последния ред.
+         Обещанието „натиснеш ли „Артикули", попадаш в полето" ОСТАВА и се
+         проверява през пълен цикъл свиване → отваряне. */
+      ok('фокусът НЕ скача сам при отваряне на редактора',
+        h.doc.activeElement !== sap, h.doc.activeElement && h.doc.activeElement.id);
+      h.w.llToggleProducts(0);
+      await ticks();
+      realClick(h.w, btn(mod(h), 'Артикули'));
+      await ticks();
+      ok('но натисне ли се „Артикули", фокусът влиза в полето',
+        h.doc.activeElement === $(h, 'll-pf-sap-0'),
         h.doc.activeElement && h.doc.activeElement.id);
 
       /* Две букви — никаква заявка. */
@@ -821,8 +839,10 @@ async function openProducts(h, i) {
     ok('бройките с мярката', /12 бр\./.test(html) && /6,5 л\.м/.test(html), html.slice(0, 900));
     ok('кашоните', html.indexOf('(2 каш.)') >= 0);
     ok('сиво и компактно', /font-size:11px;color:#64748b/.test(html));
+    /* Колоната „Изчиства" отпадна (корекция 2) → четирите колони станаха
+       три, тоест и colspan-ът на реда с артикулите. */
     ok('ред без артикули НЕ получава празен под-ред',
-      (html.match(/colspan="4"/g) || []).length === 1, String((html.match(/colspan="4"/g) || []).length));
+      (html.match(/colspan="3"/g) || []).length === 1, String((html.match(/colspan="3"/g) || []).length));
     /* Писмото до СКЛАДА при приключване — без промяна (точка 8). */
     const closed = h.w.llClosedHtmlFor(list, rows);
     ok('писмото до склада НЕ носи артикулите', closed.indexOf('ШУРУП 4X40') < 0);
