@@ -92,7 +92,8 @@ const search = (w, doc, q) => { const i = doc.getElementById('contacts-search');
   section('2. Отдели: чипове по отдел');
   {
     const { w, doc } = await env(ADMIN);
-    const chips = Array.from(doc.querySelectorAll('#ct-filters button.ct-chip'));
+    /* Без чипа „⚠️ За проверка" (виж contacts-stale.test.js) — тук само отделите. */
+    const chips = Array.from(doc.querySelectorAll('#ct-filters button.ct-chip:not(.ct-chip-warn)'));
     ok('чип „Всички" + 2 отдела', chips.length === 3, chips.map(c => c.textContent).join(' | '));
     const acc = chips.find(c => c.getAttribute('data-cat') === 'Счетоводство');
     if (acc) guard('клик Счетоводство', () => realClick(w, acc));
