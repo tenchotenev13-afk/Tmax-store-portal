@@ -50,6 +50,11 @@ function env(opts) {
     data: {
       /* Страниците са истински: limit/offset се спазват, иначе тестът за
          >1000 реда би минавал и без втората заявка. */
+      /* Блокът „Документи от Стока на път" е зад app_settings
+         'loading_transit_docs' (по подразбиране ИЗКЛЮЧЕН). Този тест описва
+         включения блок, затова флагът е изричен. Изключеното състояние е
+         в loading-transit-toggle.test.js. */
+      app_settings: [{ key: 'loading_transit_docs', value: 'on' }],
       goods_transit: function (url) {
         const u = new URL(url);
         const sp = u.searchParams;

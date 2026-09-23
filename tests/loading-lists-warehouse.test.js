@@ -60,6 +60,11 @@ function env(user, opts) {
     user: user, confirm: true,
     fail: opts.fail,
     data: {
+      /* Блокът „Документи от Стока на път" е зад app_settings
+         'loading_transit_docs' (по подразбиране ИЗКЛЮЧЕН). Този тест описва
+         включения блок, затова флагът е изричен. Изключеното състояние е
+         в loading-transit-toggle.test.js. */
+      app_settings: [{ key: 'loading_transit_docs', value: 'on' }],
       goods_transit: TRANSIT,
       stock_differences: [], differences_reports: [], stock_returns: [],
       users: USERS,

@@ -90,6 +90,9 @@ const SHARED_FNS = [
   'reportCommentsCountHtml',
   'crossMetricCard', 'crossModuleRow', 'reportReturnsListHtml',
   'reportLateSectionHtml', 'reportSmallStornoHtml',
+  /* „Необработени разлики над N дни" (v41) — моментната снимка в седмичния
+     отчет. Разминае ли се копието, писмото от крона брои друго от портала. */
+  'reportDiffStaleHtml',
   'reportChecklistCellValue', 'reportChecklistSectionHtml',
   'reportTransitListHtml', 'reportWarehousePendingHtml',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',

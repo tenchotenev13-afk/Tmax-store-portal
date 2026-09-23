@@ -55,6 +55,11 @@ function envWh() {
               'stock-differences.js', 'loading.js'],
     user: WAREHOUSE, confirm: true,
     data: {
+      /* Блокът „Документи от Стока на път" е зад app_settings
+         'loading_transit_docs' (по подразбиране ИЗКЛЮЧЕН). Този тест описва
+         включения блок, затова флагът е изричен. Изключеното състояние е
+         в loading-transit-toggle.test.js. */
+      app_settings: [{ key: 'loading_transit_docs', value: 'on' }],
       goods_transit: TRANSIT,
       loading_lists: [], loading_list_items: [],
       users: [{ store_name: 'Петрич' }, { store_name: 'Гоце Делчев' }],
@@ -94,6 +99,11 @@ function envStore(items) {
         if (lid) rows = rows.filter(r => String(r.list_id) === decodeURIComponent(lid[1]));
         return rows;
       },
+      /* Блокът „Документи от Стока на път" е зад app_settings
+         'loading_transit_docs' (по подразбиране ИЗКЛЮЧЕН). Този тест описва
+         включения блок, затова флагът е изричен. Изключеното състояние е
+         в loading-transit-toggle.test.js. */
+      app_settings: [{ key: 'loading_transit_docs', value: 'on' }],
       loading_lists: [L_SENT], goods_transit: [],
       users: [], stores: [], contacts: [], transport_orders: [],
       stock_differences: [], differences_reports: [], stock_returns: []

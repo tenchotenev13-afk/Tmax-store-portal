@@ -69,6 +69,12 @@ var llListQuery = '';         /* търсене в списъка на лист�
 var llStoreQuery = '';        /* търсене в картите на обекта */
 var llDocStore = '';          /* чип по обект; '' = всички */
 var llTransitError = false;   /* снимката НЕ се зареди — различно от „няма документи" */
+/* Показва ли се блокът „Документи от Стока на път" в редактора. Ключът е
+   app_settings 'loading_transit_docs' и се чете при всяко отваряне на
+   редактора (llLoadEditorData). Изключено по подразбиране И в базата, И тук:
+   снимката е месечна и складът се обърка от документи отпреди седмици.
+   НЯМА бутон за превключване — пуска се от SQL Editor, когато решим. */
+var llTransitDocsOn = false;
 var LL_TRANSIT_PAGE = 1000;   /* PostgREST реже отговора на 1000 реда */
 
 var LL_KINDS = [
@@ -2175,22 +2181,43 @@ function llTransitGetAll(query){
   }
   return page(0);
 }
+/* Стойността е ТЕКСТ (app_settings е key/value от text). Само 'on' пуска
+   блока: всичко останало — липсващ ключ, празно, боклук, паднала заявка —
+   значи изключено. Образецът е reportKasaThreshold в report.js; разликата е,
+   че тук безопасната посока е ИЗКЛЮЧЕНО, а не стойност по подразбиране. */
+function llLoadTransitFlag(){
+  return sbGet('app_settings','key=eq.loading_transit_docs&select=value&limit=1')
+    .then(function(rows){
+      var row = Array.isArray(rows) && rows.length ? rows[0] : null;
+      var raw = row && row.value != null ? String(row.value).trim().toLowerCase() : '';
+      return raw === 'on';
+    })
+    .catch(function(){ return false; });
+}
 function llLoadEditorData(){
   var wh = llActiveWarehouse();
   llTransitError = false;
-  Promise.all([
-    llTransitGetAll('supplier=eq.' + encodeURIComponent(wh) + '&status=eq.pending' +
-      '&select=purchase_doc,store_name,doc_date,created_at,material_code,material_name,ordered_qty,remaining_qty,unit,position')
-      .catch(function(e){
-        /* Снимката не се зареди — казва се, вместо да изглежда като „няма
-           документи". Редакторът продължава: листът се пише и без нея. */
-        console.error('llLoadEditorData: goods_transit', e);
-        llTransitError = true;
-        toast('Стока на път не се зареди: ' + (e && e.message ? e.message : e), '#dc2626');
-        return [];
-      }),
-    loadReportableStores()
-  ]).then(function(res){
+  /* Флагът се чете ПРЕДИ снимката, не успоредно с нея: при изключен блок
+     заявката към goods_transit изобщо не бива да тръгва — тя е най-скъпата
+     в модула (хиляди реда) и без блок никой няма да види резултата ѝ. */
+  return llLoadTransitFlag().then(function(on){
+    llTransitDocsOn = on;
+    return Promise.all([
+      on
+        ? llTransitGetAll('supplier=eq.' + encodeURIComponent(wh) + '&status=eq.pending' +
+            '&select=purchase_doc,store_name,doc_date,created_at,material_code,material_name,ordered_qty,remaining_qty,unit,position')
+            .catch(function(e){
+              /* Снимката не се зареди — казва се, вместо да изглежда като „няма
+                 документи". Редакторът продължава: листът се пише и без нея. */
+              console.error('llLoadEditorData: goods_transit', e);
+              llTransitError = true;
+              toast('Стока на път не се зареди: ' + (e && e.message ? e.message : e), '#dc2626');
+              return [];
+            })
+        : Promise.resolve([]),
+      loadReportableStores()
+    ]);
+  }).then(function(res){
     llPendingDocs = llGroupTransitDocs(res[0]);
     /* Кога е наливана снимката. max, не min: при частично доналиване най-
        новото показва, че данните са поне толкова пресни. */
@@ -2724,7 +2751,8 @@ function llProductsBlockHtml(it, i){
     '<input id="ll-pf-ctn-'+i+'" data-i="'+i+'" value="'+llAttr(pf.cartons)+'" placeholder="Кашони" inputmode="numeric" '+
       'oninput="llPfInput(+this.dataset.i,\'cartons\',this.value)" onkeydown="llPfKey(+this.dataset.i,\'cartons\',event)" style="'+LL_PF_IN+'width:74px;">'+
     '<button data-i="'+i+'" onclick="llAddProduct(+this.dataset.i)" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">➕ Добави</button>'+
-    (it.purchase_doc
+    /* „Отново от Стока на път" върши работа само докато снимката я има. */
+    (it.purchase_doc && llTransitDocsOn
       ? '<button data-i="'+i+'" onclick="llTakeTransitProducts(+this.dataset.i)" title="Заменя артикулите на реда с тези на документа от Стока на път (снимката)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#6d28d9;border-radius:6px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer;">↺ Отново от Стока на път</button>'
       : '')+
     '</div>';
@@ -3170,7 +3198,10 @@ function llEditorHtml(){
     '<div><label class="fl">Коментар</label><input class="fi" id="ll-comment" value="'+escVal(llDraft.comment)+'" oninput="llSetDraftField(\'comment\',this.value)"></div>'+
     '</div></div>';
 
-  /* б) Чакащи стокови документи */
+  /* б) Чакащи стокови документи — само при app_settings loading_transit_docs='on'.
+     Изключен, блокът не се рендира ИЗОБЩО (не се крие със CSS): скритият
+     блок пак иска снимката и пак лъже, че е налична. */
+  if(llTransitDocsOn){
   h += '<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:12px;">'+
     /* „Стока на път" е МЕСЕЧНА снимка, не оперативен източник. Датата стои в
        заглавието, за да не изглежда документ от 25.08 като днешен. */
@@ -3215,6 +3246,7 @@ function llEditorHtml(){
       'За документ върху няколко палета — обхват, напр. <code>1-3</code>.</div>';
   }
   h += '</div>';
+  }
 
   /* в–д) Редовете */
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:12px;">'+

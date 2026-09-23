@@ -1,6 +1,20 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v41 (23.09.2026) — нова секция „⏳ Необработени разлики над N дни" в
+   СЕДМИЧНИЯ отчет (collectCrossModuleWeeklySummary + reportDiffStaleHtml):
+     · МОМЕНТНА СНИМКА към изпращането, не срез от седмицата. Три нови
+       заявки без прозорец по дата: differences_reports (втори път, целите),
+       stock_differences и app_settings 'diff_stale_days' (миграция; липсва
+       → 3). Индексите r[0..11] НЕ се местят — новите са r[12..14].
+     · Критерият е по РЕД за междускладовите и по ДОКЛАД за доставчик /
+       сторна по грешен прием. Пет състояния в три колони, групирани по
+       СТРАНА: „върни"+SAP готов е на склада, „няма наличност" е на обекта.
+     · Възрастта е на ДОКЛАДА (differences_reports.created_at), в цели дни
+       между две локални полунощи — иначе числото се мени с часа на крона.
+     · Дневният отчет не я рендира: buildCrossModuleSectionHtml се вика само
+       от buildWeeklyReportHtml. Нищо друго не е пипано.
+
    v40 (20.09.2026) — заседналите „върнати" Равнения в дневния отчет:
      · collectDailyKasaSection: ред 'returned' в kasa_zoborot НЕ влиза нито
        в подробния списък, нито в дълга, ако ВСИЧКИ kasa_reports за същия
@@ -2186,7 +2200,21 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        седмицата на сторното. Подвижен прозорец (таб „Днес") няма седмица. */
     W.toISO
       ? sbGet('kasa_storno','storno_date=gte.'+W.fromISO+'&storno_date=lte.'+W.toISO+'&select=store_name,storno_date,returned_sum,created_by,article_name')
-      : Promise.resolve([])
+      : Promise.resolve([]),
+    /* ⏳ „Необработени разлики над N дни" — МОМЕНТНА СНИМКА, не срез от
+       седмицата. Затова и трите заявки нямат прозорец по дата: въпросът е
+       „какво стои неразчистено В ТОЗИ МИГ", а бланка отпреди месец тежи
+       повече от вчерашната, не по-малко.
+       Докладите се теглят ВТОРИ път (r[0] ги взима със window филтър и без
+       created_at): същата таблица, друг въпрос. Сливането им в една заявка
+       би развалило „нови за периода" горе. */
+    sbGet('differences_reports','select=id,store_name,direction,reviewed,created_at'),
+    /* Редовете нямат филтър по дата — възрастта им е възрастта на ДОКЛАДА.
+       Сверено на 23.09.2026: 552 реда, нула без доклад и нула, чийто
+       store_name се разминава с този на доклада. Затова обектът долу се
+       взима от доклада — един котва за трите колони. */
+    sbGet('stock_differences','select=report_id,store_name,status,warehouse_response,store_response'),
+    sbGet('app_settings','key=eq.diff_stale_days&select=key,value&limit=1')
   ]).then(function(r){
     /* Всеки набор минава през ЕДИН предикат — отделни филтри на отделни
        места се разминават. */
@@ -2464,10 +2492,91 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       if (diffDays > 7) palletsStale++;
     });
 
+
+    /* ⏳ НЕОБРАБОТЕНИ РАЗЛИКИ НАД N ДНИ
+       Кой чака кого, към момента на изпращането. Три колони, пет състояния —
+       състоянията се групират по СТРАНА, не по буквата на отговора:
+         чака склада  = няма отговор | „ще изпратя" | „върни" + обектът вече
+                        е направил SAP-а (стоката пътува назад към склада)
+         чака обекта  = складът е отговорил, обектът мълчи | „няма наличност"
+       Прагът е app_settings 'diff_stale_days' (образецът е returns_stale_days
+       точно отгоре); липсващ, празен или нечислов → 3. Ключът се сверява и в
+       JS, защото 'първият ред' спира да значи нещо, щом ключовете станат
+       повече. */
+    var diffStaleDays = 3;
+    (Array.isArray(r[14]) ? r[14] : []).forEach(function(s){
+      if (!s || s.key !== 'diff_stale_days') return;
+      var v = Number(String(s.value == null ? '' : s.value).trim().replace(',', '.'));
+      if (isFinite(v) && v > 0) diffStaleDays = v;
+    });
+    /* Възрастта е в ЦЕЛИ ДНИ между две локални полунощи — същото правило
+       като при невзетата стока. Между два часа един и същи доклад излиза ту
+       с 3, ту с 4 дни според това в колко часа е тръгнал кронът. */
+    var dsAge = function(ts){
+      var when = ts ? new Date(ts) : null;
+      if (!when || isNaN(when.getTime())) return null;
+      return Math.max(0, Math.floor((refD - new Date(toLocalISO(when)+'T00:00:00')) / 86400000));
+    };
+    var dsRepById = {}, dsStaleReports = [];
+    (Array.isArray(r[12]) ? r[12] : []).forEach(function(x){
+      if (!inScope(x.store_name)) return;
+      var age = dsAge(x.created_at);
+      /* Строго ПО-ГОЛЯМО от прага: „над 3 дни" не включва третия ден. */
+      if (age === null || age <= diffStaleDays) return;
+      dsRepById[x.id] = { store: x.store_name || '—', dir: x.direction, age: age };
+      dsStaleReports.push(x);
+    });
+    var dsMap = {}, dsList = [];
+    var dsBucket = function(store, age){
+      var g = dsMap[store];
+      if (!g) { g = { store: store, control: 0, warehouse: 0, storeSide: 0, oldest: 0 }; dsMap[store] = g; dsList.push(g); }
+      if (age > g.oldest) g.oldest = age;
+      return g;
+    };
+    /* (а) Доставчик и сторна по грешен прием: брои се ДОКЛАДЪТ, не редовете
+       му — както в „Разлики от доставчици" горе. Една бланка с 20 позиции е
+       едно нещо за разчистване, не двайсет. */
+    dsStaleReports.forEach(function(x){
+      var m = dsRepById[x.id];
+      if (!m || (m.dir !== 'supplier' && m.dir !== 'wrong_receipt')) return;
+      if (x.reviewed === true) return;
+      dsBucket(m.store, m.age).control++;
+    });
+    /* (б) Междускладови: брои се РЕДЪТ. Тук една бланка може да носи пет
+       артикула в пет различни състояния и „докладът" не казва нищо. */
+    (Array.isArray(r[13]) ? r[13] : []).forEach(function(d){
+      var m = dsRepById[d.report_id];
+      if (!m || m.dir !== 'interstore') return;
+      if (d.status === 'received') return;
+      var wr = d.warehouse_response, sr = d.store_response;
+      var noWr = (wr === null || wr === undefined || wr === '');
+      var noSr = (sr === null || sr === undefined || sr === '');
+      if (noWr || wr === 'will_send' || (wr === 'return' && sr === 'sap_done')) {
+        dsBucket(m.store, m.age).warehouse++;
+      } else if (((wr === 'sent' || wr === 'return') && noSr) || sr === 'no_stock') {
+        dsBucket(m.store, m.age).storeSide++;
+      }
+      /* Всичко друго (напр. обектът е приел) е разчистено и не се брои. */
+    });
+    /* Обект без нито едно чакане изобщо няма кофа — dsBucket се вика само от
+       броящите клонове, тоест филтър „махни празните" не е нужен. */
+    dsList.sort(function(a,b){
+      return b.oldest - a.oldest || String(a.store).localeCompare(String(b.store));
+    });
+    var dsTotal = { control: 0, warehouse: 0, storeSide: 0, oldest: 0 };
+    dsList.forEach(function(g){
+      dsTotal.control += g.control;
+      dsTotal.warehouse += g.warehouse;
+      dsTotal.storeSide += g.storeSide;
+      if (g.oldest > dsTotal.oldest) dsTotal.oldest = g.oldest;
+    });
+    var diffStale = { days: diffStaleDays, byStore: dsList, total: dsTotal };
+
     cb({
       diffs: diffs, wrongReceipt: wrongReceipt,
       returns: ret, storno: stornoSummary, smallStorno: smallStorno, zoborot: zoborotSummary,
       returnsList: returnsList, returnsStaleDays: returnsStaleDays,
+      diffStale: diffStale,
       lateOrders: lateOrders, lateOrdersByStore: lateOrdersByStore,
       lateTransport: lateTransport,
       transitStale: transitStale, transitByStore: transitByStore,
@@ -2773,6 +2882,59 @@ function reportSmallStornoHtml(cross){
     '</div>';
 }
 
+/* ⏳ „Необработени разлики над N дни" — моментна снимка към изпращането.
+   Отделна е от „Разлики (нови за периода)" точно защото мери друго: онази
+   казва колко са подадени, тази — колко още стоят и У КОГО е топката.
+   Обект без нищо не се показва: нула на всеки ред прави таблицата дълга и
+   нечетима, а въпросът ѝ е „къде има проблем".
+   Червено при над 14 дни — две седмици е моментът, в който разликата вече не
+   се помни от никого и разчистването ѝ става археология. */
+function reportDiffStaleHtml(cross){
+  var ds = cross && cross.diffStale;
+  if (!ds) return '';
+  var thr = esc(String(ds.days));
+  if (!ds.byStore || !ds.byStore.length) {
+    return '<div style="margin-top:12px;font-size:12px;color:#94a3b8;">Няма необработени разлики над ' + thr + ' дни</div>';
+  }
+  var RED_DAYS = 14;
+  var TH = 'padding:6px 8px;font-size:10px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.3px;background:#F9FAFC;border-bottom:1px solid #e2e8f0;';
+  var TD = 'padding:6px 8px;font-size:12px;border-bottom:1px solid #eef1f6;';
+  /* Нулата е сива: черна нула се чете като число, а тя значи „тук няма нищо". */
+  var num = function(v){
+    return v ? '<span style="font-weight:700;color:#1E2761;">' + v + '</span>'
+             : '<span style="color:#CBD5E1;">0</span>';
+  };
+  var head = '<tr>' +
+    '<th style="' + TH + 'text-align:left;">Обект</th>' +
+    '<th style="' + TH + 'text-align:right;">чака контролинг</th>' +
+    '<th style="' + TH + 'text-align:right;">чака склада</th>' +
+    '<th style="' + TH + 'text-align:right;">чака обекта</th>' +
+    '<th style="' + TH + 'text-align:right;">най-стар (дни)</th></tr>';
+  var body = ds.byStore.map(function(g){
+    var warn = g.oldest > RED_DAYS;
+    return '<tr' + (warn ? ' style="background:#FDEEEA;"' : '') + '>' +
+      '<td style="' + TD + '">' + reportStoreLinkHtml(g.store, warn ? '#7f1d1d' : '#374151') + '</td>' +
+      '<td style="' + TD + 'text-align:right;">' + num(g.control) + '</td>' +
+      '<td style="' + TD + 'text-align:right;">' + num(g.warehouse) + '</td>' +
+      '<td style="' + TD + 'text-align:right;">' + num(g.storeSide) + '</td>' +
+      '<td style="' + TD + 'text-align:right;font-weight:' + (warn ? '800' : '600') + ';color:' + (warn ? '#C0392B' : '#6B7280') + ';">' + g.oldest + '</td>' +
+      '</tr>';
+  }).join('');
+  var t = ds.total || { control: 0, warehouse: 0, storeSide: 0, oldest: 0 };
+  var TDT = 'padding:6px 8px;font-size:12px;font-weight:800;color:#1E2761;border-top:2px solid #e2e8f0;';
+  var foot = '<tr><td style="' + TDT + '">Общо</td>' +
+    '<td style="' + TDT + 'text-align:right;">' + t.control + '</td>' +
+    '<td style="' + TDT + 'text-align:right;">' + t.warehouse + '</td>' +
+    '<td style="' + TDT + 'text-align:right;">' + t.storeSide + '</td>' +
+    '<td style="' + TDT + 'text-align:right;color:' + (t.oldest > RED_DAYS ? '#C0392B' : '#1E2761') + ';">' + t.oldest + '</td></tr>';
+  return '<div style="margin-top:14px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:6px;">⏳ Необработени разлики над ' + thr + ' дни</div>' +
+    '<div style="overflow-x:auto;background:#FFFFFF;border:1px solid #e2e8f0;border-radius:8px;">' +
+    '<table role="presentation" style="width:100%;border-collapse:collapse;">' + head + body + foot + '</table></div>' +
+    '<div style="margin-top:4px;font-size:11px;color:#94a3b8;">Праг: ' + thr + ' дни (app_settings.diff_stale_days)</div>' +
+    '</div>';
+}
+
 /* Текстът на една клетка от чек листа — СЪЩОТО правило като
    checklistEmailCellValue() в checklist.js: control бие portal; при number
    control_num бие portal_value; da/ne/nyamat → да/не/нямат, всичко друго
@@ -2862,6 +3024,10 @@ function buildCrossModuleSectionHtml(cross, scoped){
     crossMetricCard(cross.diffs.unreviewed,'непрегледани', cross.diffs.unreviewed>0));
 
   h += buildWrongReceiptRowHtml(cross.wrongReceipt);
+  /* СЛЕД двойката „Разлики" — те са за периода, тази е моментна снимка.
+     Стои до тях, защото отговаря на следващия въпрос по същата тема:
+     колко от подаденото още не е разчистено. */
+  h += reportDiffStaleHtml(cross);
 
   h += crossModuleRow('📥','За връщане (текущо състояние)',
     crossMetricCard(cross.returns.open,'отворени (чакат/взети)', cross.returns.open>0) +

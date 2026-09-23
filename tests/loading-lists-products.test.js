@@ -99,6 +99,11 @@ function env(user, seed, opts) {
       /* GET-овете към тези таблици се обслужват от обвивката долу; тук само
          за да ги знае harness-ът. */
       loading_lists: [], loading_list_items: [], loading_list_products: [],
+      /* Блокът „Документи от Стока на път" е зад app_settings
+         'loading_transit_docs' (по подразбиране ИЗКЛЮЧЕН). Този тест описва
+         включения блок, затова флагът е изричен. Изключеното състояние е
+         в loading-transit-toggle.test.js. */
+      app_settings: [{ key: 'loading_transit_docs', value: 'on' }],
       product_catalog: [], goods_transit: [],
       users: db.users, stores: [], contacts: [], transport_orders: [],
       stock_differences: [], differences_reports: [], stock_returns: []
