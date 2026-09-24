@@ -22,11 +22,6 @@ var contactsTopicEdit = null;
 var contactsEdit = null;
 var contactsCat  = '';          /* филтър по отдел в таб Отдели ('' = всички) */
 var contactsStore= '';          /* филтър по обект в таб Магазини ('' = всички) */
-var contactsStaleOnly = false;  /* само „За проверка" (админ) */
-/* Седмичното обновяване: запис, непроверен над CT_STALE_DAYS дни, се
-   маркира за админите. „✓ Данните са верни" праща само updated_by —
-   тригерът в базата слага updated_at = now() (contacts-directory-schema.sql). */
-var CT_STALE_DAYS = 30;
 var CAT_ORDER    = ['Ръководство','Регионално ръководство','Централно снабдяване','Отдел внос',
                     'Отдел Реклама','Онлайн магазин','Отдел контролинг','Счетоводство',
                     'Човешки ресурси','IT','Сервиз','Друго'];
@@ -57,36 +52,6 @@ function isAdminContacts(){
    като празно. */
 function ctClean(s){ s=(s==null?'':String(s)).trim(); return s==='—'?'':s; }
 function ctVal(s){ s=ctClean(s); return s?escAttr(s):''; }
-function ctAgeDays(c){
-  if(!c.updated_at)return null;
-  var t=new Date(c.updated_at).getTime();
-  if(isNaN(t))return null;
-  return Math.floor((Date.now()-t)/86400000);
-}
-/* Без дата = никога непроверен = за проверка. Общият телефон на обекта
-   също се проверява — и той остарява. Доставчиците не влизат. */
-function ctIsStale(c){
-  if(c.type!=='contact')return false;
-  var d=ctAgeDays(c);
-  return d===null || d>CT_STALE_DAYS;
-}
-function ctStaleBadge(c){
-  if(!isAdminContacts()||!ctIsStale(c))return '';
-  var d=ctAgeDays(c);
-  return ' <span class="ct-stale" title="'+(d===null?'Никога не е проверяван':'Непроверен от '+d+' дни')+'">⚠️</span>';
-}
-function ctUserName(){ return (currentUser&&(currentUser.display_name||currentUser.email))||null; }
-/* ✓ Данните са верни — само updated_by; датата я слага тригерът. */
-function confirmContact(id){
-  var c=ctById(id); if(!c)return;
-  sbPatch('contacts','id=eq.'+id,{updated_by:ctUserName()}).then(function(res){
-    if(!res.ok){toast('⚠️ НЕ е отбелязано: '+sbErrMsg(res),'#dc2626');return;}
-    toast('✓ '+(c.name||'Записът')+' — проверен');
-    closeContactDetail();
-    loadContacts();
-  });
-}
-function setContactsStale(on){ contactsStaleOnly=!!on; renderContactsFilters(); renderContactsGrid(); }
 function ctTypeForTab(tab){ return tab==='supplier'?'supplier':'contact'; }
 function ctIsStoreStaff(c){ return c.type==='contact' && (!!c.store_role || c.category===CT_STORE_CAT); }
 function ctRoleIdx(r){
@@ -236,16 +201,13 @@ function ctStyleTag(){
       '.ct-scards{grid-template-columns:repeat(2,minmax(0,1fr));}'+
       '.ct-hero-h{font-size:20px;}'+
     '}'+
-    '.ct-row{display:grid;grid-template-columns:1.1fr 1.5fr 1.3fr 1fr 1.5fr 1.2fr 96px;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:12.5px;color:#1e293b;}'+
+    '.ct-row{display:grid;grid-template-columns:1.1fr 1.5fr 1.3fr 1fr 1.5fr 1.2fr 64px;gap:10px;align-items:center;padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:12.5px;color:#1e293b;}'+
     '.ct-row:hover{background:#f8fafc;}'+
     '.ct-row a{text-decoration:none;}'+
-    '.ct-stale{font-size:11px;cursor:help;}'+
-    '.ct-chip.ct-chip-warn{border-color:#fcd34d;background:#fffbeb;color:#92400e;}'+
-    '.ct-chip.ct-chip-warn.on{background:#d97706;border-color:#d97706;color:#fff;}'+
     '.ct-upd{display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12.5px;color:#475569;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:9px 14px;margin-bottom:16px;}'+
     '.ct-head{font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.3px;background:#f8fafc;cursor:default;}'+
     '.ct-head:hover{background:#f8fafc;}'+
-    '.ct-srow{grid-template-columns:1.3fr 1.6fr 1.1fr 96px;}'+
+    '.ct-srow{grid-template-columns:1.3fr 1.6fr 1.1fr 64px;}'+
     '.ct-c-name{font-weight:600;color:#0f172a;display:flex;align-items:center;gap:5px;min-width:0;}'+
     '.ct-c-sub{color:#64748b;}'+
     '.ct-c-mail a{color:#2563eb;word-break:break-all;}'+
@@ -347,7 +309,7 @@ function renderContactsFilters(){
        отдел) остава избран с 0 — иначе филтърът тихо ще се върне на
        „Всички" и ще покаже чужди хора като отговор. */
     if(contactsCat && !counts[contactsCat]) counts[contactsCat]=0;
-    var h='<div style="display:flex;gap:6px;flex-wrap:wrap;">'+ctStaleChip(ctDeptList());
+    var h='<div style="display:flex;gap:6px;flex-wrap:wrap;">';
     h+='<button class="ct-chip'+(contactsCat?'':' on')+'" data-cat="" onclick="setContactsCat(this.dataset.cat)">Всички</button>';
     cats.forEach(function(k){
       h+='<button class="ct-chip'+(contactsCat===k?' on':'')+'" data-cat="'+escAttr(k)+'" onclick="setContactsCat(this.dataset.cat)">'+esc(k)+' <span style="opacity:.6;">'+counts[k]+'</span></button>';
@@ -356,7 +318,7 @@ function renderContactsFilters(){
   } else if(contactsTab==='stores'){
     var names=ctStoreNames();
     if(contactsStore && names.indexOf(contactsStore)<0) contactsStore='';
-    box.innerHTML='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">'+ctStaleChip(ctStaffList())+
+    box.innerHTML='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">'+
       '<select id="ct-store-filter" onchange="setContactsStore(this.value)" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:13px;font-family:inherit;background:#fff;">'+
       '<option value="">Всички обекти ('+names.length+')</option>'+
       names.map(function(n){ return '<option value="'+escAttr(n)+'"'+(n===contactsStore?' selected':'')+'>'+esc(n)+'</option>'; }).join('')+
@@ -364,13 +326,6 @@ function renderContactsFilters(){
   } else {
     box.innerHTML='';
   }
-}
-/* Чипът е винаги там за админа — и при 0 („За проверка 0" казва, че
-   всичко е наред; изчезнал чип изглежда като счупен). Не-админът не го вижда. */
-function ctStaleChip(list){
-  if(!isAdminContacts())return '';
-  var n=list.filter(ctIsStale).length;
-  return '<button class="ct-chip ct-chip-warn'+(contactsStaleOnly?' on':'')+'" id="ct-stale-chip" onclick="setContactsStale(!contactsStaleOnly)" title="Записи, непроверени над '+CT_STALE_DAYS+' дни">⚠️ За проверка <span style="opacity:.75;">'+n+'</span></button>';
 }
 function setContactsCat(cat){ contactsCat=cat||''; renderContactsFilters(); renderContactsGrid(); }
 function setContactsStore(s){ contactsStore=s||''; renderContactsGrid(); }
@@ -404,7 +359,6 @@ function ctPhoneCell(c){
 function ctActCell(c,isAdmin){
   if(!isAdmin)return '<div class="ct-act"></div>';
   return '<div class="ct-act">'+
-    (ctIsStale(c)?'<button data-id="'+escAttr(c.id)+'" title="Данните са верни" onclick="event.stopPropagation();confirmContact(this.dataset.id)" style="color:#16a34a;">✓</button>':'')+
     '<button data-id="'+escAttr(c.id)+'" title="Редактирай" onclick="event.stopPropagation();openContactModal(this.dataset.id)">✏️</button>'+
     '<button data-id="'+escAttr(c.id)+'" title="Изтрий" onclick="event.stopPropagation();doDeleteContact(this.dataset.id)" style="color:#dc2626;">✕</button>'+
     '</div>';
@@ -414,14 +368,13 @@ function ctActCell(c,isAdmin){
 function ctRenderDepts(grid){
   var isAdmin=isAdminContacts(), q=ctSearchQ();
   var list=ctDeptList().filter(function(c){
-    return (!contactsCat || (ctClean(c.category)||'Друго')===contactsCat) && ctMatches(c,q) &&
-           (!contactsStaleOnly || !isAdmin || ctIsStale(c));
+    return (!contactsCat || (ctClean(c.category)||'Друго')===contactsCat) && ctMatches(c,q);
   });
   if(!list.length){
     var inStores=q?ctStaffList().filter(function(c){return ctMatches(c,q);}).length:0;
-    grid.innerHTML=ctEmpty(contactsStaleOnly&&isAdmin?'✅':'👥',(contactsStaleOnly&&isAdmin?'Всичко е проверено':'Няма контакти')+(q?' за „'+esc(q)+'"':'')+(contactsCat?' в „'+esc(contactsCat)+'"':'')+'.'+
+    grid.innerHTML=ctEmpty('👥','Няма контакти'+(q?' за „'+esc(q)+'"':'')+(contactsCat?' в „'+esc(contactsCat)+'"':'')+'.'+
       (inStores?'<div style="margin-top:10px;"><button class="ct-chip" data-tab="stores" onclick="setContactsTab(this.dataset.tab,true)">🏬 '+inStores+' в Магазини →</button></div>':''),
-      !q&&!contactsCat&&!contactsStaleOnly);
+      !q&&!contactsCat);
     return;
   }
   var groups={};
@@ -442,7 +395,7 @@ function ctRenderDepts(grid){
       var mail=ctClean(c.email);
       h+='<div '+ctRowAttrs(c)+'>'+
         '<div class="ct-c-dir ct-c-sub">'+esc(ctClean(c.direction))+'</div>'+
-        '<div class="ct-c-name"><div class="ct-nm">'+esc(c.name||'')+'</div>'+ctStaleBadge(c)+'</div>'+
+        '<div class="ct-c-name"><div class="ct-nm">'+esc(c.name||'')+'</div>'+'</div>'+
         '<div class="ct-c-role ct-c-sub">'+esc(ctClean(c.role_title))+'</div>'+
         ctPhoneCell(c)+
         '<div class="ct-c-mail">'+(mail?'<a href="mailto:'+escAttr(mail)+'" onclick="event.stopPropagation()">'+esc(mail)+'</a>':'')+'</div>'+
@@ -469,7 +422,6 @@ function ctRenderStores(grid){
     var all=byStore[s]||[];
     var storeHit=q && s.toLowerCase().indexOf(q)>=0;
     var m=(q&&!storeHit)?all.filter(function(c){return ctMatches(c,q);}):all;
-    if(contactsStaleOnly&&isAdmin) m=m.filter(ctIsStale);
     if(!m.length)return;
     shown++;
     var lines=all.filter(function(c){return c.store_role==='store';});
@@ -487,7 +439,7 @@ function ctRenderStores(grid){
     staff.forEach(function(c){
       h+='<div '+ctRowAttrs(c,'ct-srow')+'>'+
         '<div class="ct-c-role ct-c-sub">'+esc(ctRoleLabel(c)||'—')+'</div>'+
-        '<div class="ct-c-name"><div class="ct-nm">'+esc(c.name||'')+'</div>'+ctStaleBadge(c)+'</div>'+
+        '<div class="ct-c-name"><div class="ct-nm">'+esc(c.name||'')+'</div>'+'</div>'+
         ctPhoneCell(c)+
         ctActCell(c,isAdmin)+
         '</div>';
@@ -496,7 +448,7 @@ function ctRenderStores(grid){
   });
   grid.innerHTML=shown
     ? '<div class="ct-stores">'+h+'</div>'
-    : ctEmpty(contactsStaleOnly&&isAdmin?'✅':'🏬',(contactsStaleOnly&&isAdmin?'Всичко е проверено':'Няма контакти')+(q?' за „'+esc(q)+'"':'')+'.', !q&&!contactsStaleOnly);
+    : ctEmpty('🏬','Няма контакти'+(q?' за „'+esc(q)+'"':'')+'.', !q);
 }
 
 /* ═══ ТАБ ДОСТАВЧИЦИ — картички, както досега ═══ */
@@ -608,21 +560,17 @@ function ctHeroHtml(searchInput){
 }
 
 /* ── Табло ── */
-/* Лента „Последно обновяване" — само за админ. Показва най-новата
-   промяна и колко чакат проверка; клик → Отдели с филтъра „За проверка". */
+/* Лента „Последно обновяване" — вижда се от всички. Най-новата промяна
+   по контакт (не доставчик): дата и кой. Срок за проверка няма —
+   решено 23.09.2026 (първоначално беше ⚠️ над 30 дни, махнато). */
 function ctHomeUpdateHtml(){
-  if(!isAdminContacts())return '';
-  var people=allContacts.filter(function(c){return c.type==='contact';});
   var last=null;
-  people.forEach(function(c){ if(c.updated_at && (!last || String(c.updated_at)>String(last.updated_at))) last=c; });
-  var stale=people.filter(ctIsStale).length;
-  var when=last?fmtDate(String(last.updated_at).slice(0,10))+(ctClean(last.updated_by)?' · '+esc(ctClean(last.updated_by)):''):'—';
-  return '<div class="ct-upd">🗓️ Последно обновяване на указателя: <b>'+when+'</b>'+
-    '<span style="flex:1;"></span>'+
-    (stale
-      ? '<button class="ct-chip ct-chip-warn" onclick="contactsStaleOnly=true;setContactsTab(\'contact\')">⚠️ '+stale+' за проверка →</button>'
-      : '<span style="color:#15803d;font-weight:600;">✅ Всичко е проверено</span>')+
-    '</div>';
+  allContacts.forEach(function(c){
+    if(c.type==='contact' && c.updated_at && (!last || String(c.updated_at)>String(last.updated_at))) last=c;
+  });
+  if(!last)return '';
+  var when=fmtDate(String(last.updated_at).slice(0,10))+(ctClean(last.updated_by)?' · '+esc(ctClean(last.updated_by)):'');
+  return '<div class="ct-upd">🗓️ Последно обновяване на указателя: <b>'+when+'</b></div>';
 }
 function ctRenderHome(grid){
   var h=ctHomeUpdateHtml()+'<div class="ct-home">';
@@ -791,7 +739,7 @@ function ctRenderSearchAll(grid){
       var staff=ctIsStoreStaff(c), dep=ctById(c.deputy_id), mail=ctClean(c.email);
       h+='<div '+ctRowAttrs(c)+'>'+
         '<div class="ct-c-dir ct-c-sub">'+esc(staff?('🏬 '+(ctClean(c.store_name)||'')):ctClean(c.category))+'</div>'+
-        '<div class="ct-c-name"><div class="ct-nm">'+esc(c.name||'')+'</div>'+ctStaleBadge(c)+'</div>'+
+        '<div class="ct-c-name"><div class="ct-nm">'+esc(c.name||'')+'</div>'+'</div>'+
         '<div class="ct-c-role ct-c-sub">'+esc(staff?ctRoleLabel(c):ctClean(c.role_title))+'</div>'+
         ctPhoneCell(c)+
         '<div class="ct-c-mail">'+(mail?'<a href="mailto:'+escAttr(mail)+'" onclick="event.stopPropagation()">'+esc(mail)+'</a>':'')+'</div>'+
@@ -940,8 +888,7 @@ function openContactDetail(id){
   var updTxt=upd?upd+(ctClean(c.updated_by)?' · '+ctClean(c.updated_by):''):'';
 
   var editBtn=isAdminContacts()
-    ?(c.type==='contact'?'<button data-id="'+escAttr(c.id)+'" onclick="confirmContact(this.dataset.id)" style="margin-right:auto;border:1px solid #bbf7d0;background:#f0fdf4;color:#15803d;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;">✓ Данните са верни</button>':'')+
-     '<button data-id="'+escAttr(c.id)+'" onclick="closeContactDetail();openContactModal(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">✏️ Редактирай</button>'
+    ?'<button data-id="'+escAttr(c.id)+'" onclick="closeContactDetail();openContactModal(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">✏️ Редактирай</button>'
     :'';
 
   var html='<div class="bov" id="ctd-ov"><div class="bmod" style="width:480px;max-width:95vw;">'+

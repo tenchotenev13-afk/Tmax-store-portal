@@ -235,6 +235,27 @@ const search = (w, doc, q) => { const i = doc.getElementById('contacts-search');
     ok('доставчик: без отметка', !doc.getElementById('ct-featured'));
   }
 
+  section('7б. Лента „Последно обновяване" — за всички, без срок и ⚠️');
+  {
+    const ago = d => new Date(Date.now() - d * 86400000).toISOString();
+    const withDates = CONTACTS.map(c => Object.assign({}, c, { updated_at: ago(40), updated_by: 'Стар' }));
+    withDates[1].updated_at = ago(2); withDates[1].updated_by = 'Цветелина Тенева';
+    withDates[7].updated_at = ago(0); withDates[7].updated_by = 'Доставчик-ред';
+    for (const u of [ADMIN, STORE]) {
+      const { w, doc } = await env(u, { contacts: withDates });
+      const bar = doc.querySelector('.ct-upd');
+      ok(u.role + ': лентата се вижда', !!bar);
+      ok(u.role + ': най-новият контакт (не доставчикът) — Цветелина', !!bar && bar.textContent.indexOf('Цветелина Тенева') >= 0 && bar.textContent.indexOf('Доставчик-ред') < 0, bar && bar.textContent);
+      ok(u.role + ': без „за проверка"', !!bar && !/проверка/.test(bar.textContent));
+      w.setContactsTab('contact');
+      ok(u.role + ': няма ⚠️ в редовете', grid(doc).textContent.indexOf('⚠️') < 0);
+      ok(u.role + ': няма бутон ✓', !grid(doc).querySelector('button[title="Данните са верни"]'));
+      ok(u.role + ': няма чип „За проверка"', !doc.getElementById('ct-stale-chip'));
+    }
+    const { doc } = await env(ADMIN, { contacts: CONTACTS.map(c => Object.assign({}, c, { updated_at: null })) });
+    ok('без нито една дата → без лента (не „—")', !doc.querySelector('.ct-upd'));
+  }
+
   section('8. Провал на contact_topics не спира контактите, но не е тих');
   {
     const { doc, calls } = await env(ADMIN, { fail: { GET: /contact_topics/ } });
