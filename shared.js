@@ -556,6 +556,12 @@ function resolveItems(o){
   if(o.items&&o.items.length)return o.items;
   return [{product:o.product,color:o.color,sap:o.sap,qty:o.qty,unit:o.unit}];
 }
+/* Артикулите за клетка в списък: първите max (по подразбиране 3) + колко
+   остават за „+N още". Пълният списък е в детайла на заявката. */
+function itemsForCell(o,max){
+  var all=resolveItems(o);max=max||3;
+  return {list:all.slice(0,max),more:all.length>max?all.length-max:0,total:all.length};
+}
 function itemsPrintLine(o){
   return resolveItems(o).map(function(it){
     return (it.sap?'<b style="font-family:monospace;font-size:11pt;">'+esc(it.sap)+'</b> - ':'')+esc(it.product||'')+(it.color?' ('+esc(it.color)+')':'')+' — '+esc(String(it.qty||1))+' '+esc(it.unit||'бр.');

@@ -1083,9 +1083,7 @@ function renderClientOrders(){
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
       /* Вътрешният title с ЦЕЛИЯ SAP код остава — колоната реже текста и това
          е единственият начин да се види. */
-      '<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escAttr(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>'+
-      '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
-      '<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>'+
+      coItemCells(o)+
       '<td>'+esc(o.from_store||'')+'</td>'+
       '<td><b>'+fmtDate(o.delivery)+'</b>'+coEtaCell(o)+'</td>'+
       '<td>'+elapsedBadge(o._days,o.status,o)+'</td>'+
@@ -1099,6 +1097,37 @@ function renderClientOrders(){
     if(row&&row.scrollIntoView)row.scrollIntoView({block:'center'});
     window._coHighlightId=null;
   }
+}
+
+/* Колоните SAP / Продукт / Бр. в реда — от resolveItems(), не от o.product:
+   старите колони носят само items[0]. При 1 артикул разметката е точно
+   предишната. При 2+ всеки артикул е блок от два реда с ФИКСИРАНА височина
+   във всяка от трите клетки — така SAP, продукт и бройка стоят на една
+   линия (td е vertical-align:top). Над 3 — „+N още" под продуктите. */
+function coItemCells(o){
+  var c=itemsForCell(o,3);
+  if(c.total<2){
+    var it=c.list[0]||{};
+    return '<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escAttr(it.sap||'')+'">'+esc(it.sap||'—')+'</div></td>'+
+      '<td>'+esc(it.product||'')+'<br><small style="color:#94a3b8;">'+esc(it.color||'')+'</small></td>'+
+      '<td style="text-align:center;">'+esc(String(it.qty||1))+(it.unit&&it.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(it.unit)+'</small>':'')+'</td>';
+  }
+  var L1='height:18px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+  var L2='height:14px;line-height:14px;font-size:11px;color:#94a3b8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+  var box=function(i,l1,l2){
+    return '<div class="co-it" style="'+(i?'margin-top:3px;padding-top:3px;border-top:1px dashed #e2e8f0;':'')+'">'+
+      '<div style="'+L1+'">'+l1+'</div><div style="'+L2+'">'+(l2||'&nbsp;')+'</div></div>';
+  };
+  var sap='',prod='',qty='';
+  c.list.forEach(function(it,i){
+    sap+=box(i,'<span title="'+escAttr(it.sap||'')+'">'+esc(it.sap||'—')+'</span>','');
+    prod+=box(i,'<span title="'+escAttr(it.product||'')+'">'+esc(it.product||'')+'</span>',esc(it.color||''));
+    qty+=box(i,esc(String(it.qty||1)),it.unit&&it.unit!=='бр.'?esc(it.unit):'');
+  });
+  if(c.more)prod+='<div class="co-it-more" style="margin-top:3px;font-size:11px;font-weight:600;color:#2563eb;">+'+c.more+' още</div>';
+  return '<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;">'+sap+'</div></td>'+
+    '<td><div style="max-width:220px;">'+prod+'</div></td>'+
+    '<td style="text-align:center;">'+qty+'</td>';
 }
 
 /* Ориентировъчната дата от ЦО стои под датата за доставка — там я търси магазинът.

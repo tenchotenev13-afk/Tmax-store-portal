@@ -231,7 +231,7 @@ function renderHistoryResults(){
           '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="cursor:pointer;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
           '<td>'+esc(o.store_name||'')+'</td>'+
           '<td><b>'+esc(o.customer_name||'')+'</b>'+histGroupBadge(o)+'<br><small style="color:#94a3b8;">'+esc(o.phone||'')+'</small></td>'+
-          '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="cursor:pointer;">'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+(o.sap?'SAP: '+esc(o.sap):'')+'</small></td>'+
+          '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="cursor:pointer;">'+histCoItemsCell(o)+'</td>'+
           /* Ориентировъчната дата от ЦО се търси и в История, не само в живия таб */
           '<td><b>'+fmtDate(o.delivery)+'</b>'+
             (o.co_eta?'<br><small style="color:#047857;">🏭 ЦО: '+fmtDate(o.co_eta)+'</small>':'')+
@@ -470,7 +470,8 @@ function printHistoryReport(){
       '<td>'+esc(o.store_name||'')+'</td>'+
       '<td>'+esc(o.customer_name||'')+'</td>'+
       '<td>'+esc(o.phone||'')+'</td>'+
-      '<td>'+(o.sap?esc(o.sap)+' — ':'')+esc(o.product||'')+'</td>'+
+      /* Всички артикули, не само първия — справката е за хартия, детайл няма */
+      '<td>'+histCoItemsPrint(o)+'</td>'+
       '<td>'+fmtDate(o.delivery)+(o.co_eta?'<br>ЦО: '+fmtDate(o.co_eta):'')+'</td>'+
       /* Досега тук излизаше суровата стойност ("pending", "done") — в печатна
          справка за ръководството това няма как да е на английски. */
@@ -907,4 +908,23 @@ function previewKasaDoc(path){
       toast('Грешка: '+(d.error||JSON.stringify(d)),'#dc2626');
     }
   }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
+}
+
+/* Клетка „Продукт" за клиентска заявка в История — всички артикули през
+   resolveItems() (o.product носи само items[0]). До 3 + „+N още", както в
+   живия таб; пълният списък е в детайла. */
+function histCoItemsCell(o){
+  var c=itemsForCell(o,3);
+  return c.list.map(function(it){
+    return esc(it.product||'')+(c.total>1?' × '+esc(String(it.qty||1)):'')+
+      '<br><small style="color:#94a3b8;">'+(it.sap?'SAP: '+esc(it.sap):'')+'</small>';
+  }).join('<div style="border-top:1px dashed #e2e8f0;margin:3px 0;"></div>')+
+    (c.more?'<div style="margin-top:3px;font-size:11px;font-weight:600;color:#2563eb;">+'+c.more+' още</div>':'');
+}
+/* Същото за печатната справка — там ВСИЧКИ артикули, детайл на хартия няма */
+function histCoItemsPrint(o){
+  var all=resolveItems(o);
+  return all.map(function(it){
+    return (it.sap?esc(it.sap)+' — ':'')+esc(it.product||'')+(all.length>1?' × '+esc(String(it.qty||1)):'');
+  }).join('<br>');
 }

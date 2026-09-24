@@ -225,6 +225,7 @@ const TESTS = [
   'contacts-directory.test.js',
   'contacts-home.test.js',
   'co-row-click.test.js',
+  'co-row-all-items.test.js',
   'table-scroll.test.js'
 ];
 

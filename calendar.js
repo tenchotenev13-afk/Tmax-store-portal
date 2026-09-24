@@ -187,7 +187,9 @@ function renderCalendar() {
       h += '<div style="background:#fdf4ff;border-left:2px solid #a855f7;border-radius:0 5px 5px 0;padding:4px 6px;margin-bottom:4px;font-size:11px;">';
       h += '<div style="font-weight:600;color:#7c3aed;">📋 Клиентска заявка</div>';
       h += '<div style="color:#374151;">'+esc(c.store_name||'')+'</div>';
-      if (c.product) h += '<div style="color:#94a3b8;">'+esc((c.product||'').slice(0,30))+'</div>';
+      /* Първият артикул + „+N" — o.product носи само items[0] */
+      var cIt = resolveItems(c);
+      if (cIt[0] && cIt[0].product) h += '<div style="color:#94a3b8;">'+esc((cIt[0].product||'').slice(0,30))+(cIt.length>1?' <b>+'+(cIt.length-1)+'</b>':'')+'</div>';
       h += '</div>';
     });
 
