@@ -144,14 +144,18 @@ function recurringValidForWeek(taskId, mondayISO, periods){
       (p.to_monday===null||p.to_monday===undefined||p.to_monday>=mondayISO);
   });
 }
-function recurringTasksForWeek(tasks, periods, mondayISO){
+function recurringTasksForWeek(tasks, periods, mondayISO, versions){
   if(!mondayISO) return (Array.isArray(tasks)?tasks:[]).filter(function(t){ return !!t&&!!t.active; });
   var has={};
   (Array.isArray(periods)?periods:[]).forEach(function(p){ if(p) has[String(p.recurring_task_id)]=1; });
-  return (Array.isArray(tasks)?tasks:[]).filter(function(t){
+  var out=(Array.isArray(tasks)?tasks:[]).filter(function(t){
     if(!t) return false;
     return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
   });
+  /* Съдържанието за СЪЩАТА седмица (recurring_task_versions, 24.09.2026).
+     Без версии или без седмица — наборът минава непроменен, тоест старият
+     извикващ с три аргумента работи както преди. */
+  return recurringApplyVersions(out, versions, mondayISO);
 }
 /* Постоянна задача: съществува ли и важи ли за седмицата на днес. Общо за
    напомняне по постоянна задача и за отчет по постоянна задача — едно
@@ -165,6 +169,40 @@ async function recurringPeriodGate(supabase: any, id: any, todayStr: string, not
     .select('recurring_task_id,from_monday,to_monday').eq('recurring_task_id', id);
   const valid = recurringTasksForWeek([t], Array.isArray(periods) ? periods : [], mondayOfISO(todayStr)).length > 0;
   return valid ? {} : { skip: 'постоянната задача не важи за седмицата (периодът не е започнал или е приключил)' };
+}
+/* Копия от shared.js — съдържанието на постоянната задача ПО СЕДМИЦИ
+   (recurring_task_versions, 24.09.2026). Разминае ли се копието, писмото
+   носи заглавието/дните на ДРУГА седмица. */
+var RECURRING_CONTENT_FIELDS = ['title','description','due_weekday','due_weekdays','due_window','due_time','task_type','department','target_stores','report_groups','linked_module'];
+function recurringVersionForWeek(taskId, mondayISO, versions){
+  if(!Array.isArray(versions)||!mondayISO) return null;
+  var id=String(taskId), best=null;
+  versions.forEach(function(v){
+    if(!v||String(v.recurring_task_id)!==id) return;
+    if(v.from_monday>mondayISO) return;
+    if(v.to_monday!==null&&v.to_monday!==undefined&&v.to_monday<mondayISO) return;
+    if(!best||v.from_monday>best.from_monday) best=v;
+  });
+  return best;
+}
+function recurringApplyVersion(task, versions, mondayISO){
+  var v=task?recurringVersionForWeek(task.id, mondayISO, versions):null;
+  if(!v) return task;
+  var out={};
+  for(var k in task){ if(Object.prototype.hasOwnProperty.call(task,k)) out[k]=task[k]; }
+  RECURRING_CONTENT_FIELDS.forEach(function(f){ if(f in v) out[f]=v[f]; });
+  return out;
+}
+function recurringApplyVersions(tasks, versions, mondayISO){
+  if(!Array.isArray(tasks)) return [];
+  if(!Array.isArray(versions)||!versions.length||!mondayISO) return tasks;
+  return tasks.map(function(t){ return recurringApplyVersion(t, versions, mondayISO); });
+}
+/* Версиите на съдържанието. Провал → [] → чете се редът, както преди. */
+async function loadRecurringVersions(supabase: any): Promise<any[]> {
+  const { data } = await supabase.from('recurring_task_versions')
+    .select('id,recurring_task_id,from_monday,to_monday,title,description,due_weekday,due_weekdays,due_window,due_time,task_type,department,target_stores,report_groups,linked_module');
+  return Array.isArray(data) ? data : [];
 }
 async function publicationScheduleGate(supabase: any, s: any, todayStr: string) {
   /* task_report — отчет по задача: същото правило като напомняне по задача
@@ -311,7 +349,13 @@ Deno.serve(async (req) => {
           : s.entity_type === 'promotion' ? 'bulletin_promotions'
           : s.entity_type === 'recurring_task' ? 'recurring_tasks'
           : 'bulletin_tasks';
-        const { data: ent } = await supabase.from(table).select('title').eq('id', s.entity_id).maybeSingle();
+        const { data: entRaw } = await supabase.from(table).select('*').eq('id', s.entity_id).maybeSingle();
+        /* Постоянна задача: заглавието е на ТАЗИ седмица
+           (recurring_task_versions, 24.09.2026) — напомнянето трябва да
+           казва това, което пише в бюлетина днес. */
+        const ent = (s.entity_type === 'recurring_task' && entRaw)
+          ? recurringApplyVersion(entRaw, await loadRecurringVersions(supabase), mondayOfISO(todayStr))
+          : entRaw;
         title = ent?.title ? ('Напомняне: ' + ent.title) : 'Напомняне от бюлетина';
       }
 

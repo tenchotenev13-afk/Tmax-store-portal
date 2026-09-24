@@ -2045,8 +2045,18 @@ function loadNotifScheduleTitles(list){
   if (!types.length) return Promise.resolve();
   return Promise.all(types.map(function(t){
     var q = 'id=in.(' + byType[t].map(encodeURIComponent).join(',') + ')&select=id,title';
-    return sbGet(NOTIF_ENTITY_TABLES[t], q, true).then(function(rows){
-      (Array.isArray(rows) ? rows : []).forEach(function(r){
+    /* Заглавието на ПОСТОЯННА задача е съдържание по седмици
+       (recurring_task_versions, 24.09.2026) — тук се показва това за
+       ДНЕШНАТА седмица, същото, което dynamic-responder слага в напомнянето.
+       Иначе екранът и push-ът казват различни неща за един и същи ред. */
+    var needVer = NOTIF_ENTITY_TABLES[t] === 'recurring_tasks';
+    return Promise.all([
+      sbGet(NOTIF_ENTITY_TABLES[t], q, true),
+      needVer ? loadRecurringVersions().catch(function(){ return []; }) : Promise.resolve([])
+    ]).then(function(res){
+      var rows = Array.isArray(res[0]) ? res[0] : [];
+      if (needVer) rows = recurringApplyVersions(rows, res[1], recurringMondayOf(new Date()));
+      rows.forEach(function(r){
         adminNotifEntityTitles[t + '|' + String(r.id)] = r.title;
       });
     });

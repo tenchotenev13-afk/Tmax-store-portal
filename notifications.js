@@ -294,7 +294,13 @@ function checkNewBulletinTasksBanner(){
      по същия ключ като Бюлетина (recurringSkipWeekOf в shared.js).
      Изключванията се теглят САМО ако има нова постоянна задача за обекта —
      банерът тече при всеки вход, а обикновено няма какво да филтрира. */
-  var recTasksPromise=sbGet('recurring_tasks','active=eq.true&created_at=gte.'+cutoffISO).then(function(rtRaw){
+  /* Съдържанието за ДНЕШНАТА седмица (recurring_task_versions, 24.09.2026):
+     банерът показва заглавието и дните, които важат СЕГА. */
+  var recTasksPromise=Promise.all([
+    sbGet('recurring_tasks','active=eq.true&created_at=gte.'+cutoffISO),
+    loadRecurringVersions().catch(function(){return [];})
+  ]).then(function(res){
+    var rtRaw=recurringApplyVersions(Array.isArray(res[0])?res[0]:[], res[1], recurringMondayOf(new Date()));
     var rt=(Array.isArray(rtRaw)?rtRaw:[]).filter(function(t){return !taskIsNotice(t)&&notifTaskForStore(t,store);});
     if(!rt.length)return [];
     return loadRecurringSkips(recurringSkipWeekOf(new Date())).then(function(skips){

@@ -1,0 +1,23 @@
+-- Rollback на 20260924090416_recurring_task_versions.sql
+--
+-- ⚠️ Първо се връща КЛИЕНТЪТ (bulletin.js, today.js, notifications.js,
+-- checklist.js, daily-turnover.js, report.js) И четирите едж функции
+-- (bulletin-notify, dynamic-responder, send-routed-report,
+-- send-scheduled-report) към версията отпреди 24.09.2026. Изчезне ли
+-- таблицата, докато кодът я чете, sbGet връща PGRST205 и червен toast, а
+-- едж функциите четат [] — тоест мълчаливо се връщат към съдържанието от
+-- recurring_tasks.
+--
+-- ⚠️ Трие ВСИЧКИ седмични версии. Всяка седмица се връща към съдържанието
+-- на реда в recurring_tasks, тоест редакциите „само за тази седмица" и „от
+-- тази седмица нататък" изчезват безвъзвратно. Преди това виж какво ще се
+-- загуби:
+--   select v.recurring_task_id, t.title as base_title, v.from_monday,
+--          v.to_monday, v.title as week_title
+--     from public.recurring_task_versions v
+--     join public.recurring_tasks t on t.id = v.recurring_task_id
+--    order by v.from_monday;
+--
+-- DROP TABLE маха политиките, индексите и FK-то. recurring_tasks не се пипа.
+
+drop table if exists public.recurring_task_versions;

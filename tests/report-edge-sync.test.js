@@ -103,6 +103,12 @@ const SHARED_FNS = [
    няма достъп до тях. Носят TS анотации, затова се сравняват след махането
    им, не байт по байт. */
 const COPIED_HELPERS = [
+  /* Съдържание на постоянна задача по седмици (recurring_task_versions,
+     24.09.2026). Разминае ли се копието, писмото носи заглавието или дните
+     на ДРУГА седмица. */
+  { fn: 'recurringVersionForWeek', from: SHARED },
+  { fn: 'recurringApplyVersion', from: SHARED },
+  { fn: 'recurringApplyVersions', from: SHARED },
   { fn: 'esc', from: SHARED },
   { fn: 'toLocalISO', from: BULLETIN },
   { fn: 'taskDueDates', from: BULLETIN },
@@ -150,7 +156,7 @@ const CLIENT_ONLY = [
   'personalizedTaskCardHtml', 'personalizedSectionHtml',
   'sendWeeklyReportRouted', 'sendWeeklyReportTest'
 ];
-const EDGE_ONLY = ['sbGet', 'sbPost', 'sbPatch'];  /* SERVICE ROLE, не shared.js */
+const EDGE_ONLY = ['sbGet', 'sbPost', 'sbPatch', 'loadRecurringVersions'];  /* loadRecurringVersions: service ключ, не sbGet от shared.js */  /* SERVICE ROLE, не shared.js */
 
 /* ── send-routed-report ─────────────────────────────────────────────────
    Личният седмичен отчет по задачи. Носи СРЕЗА на report.js около
@@ -177,6 +183,12 @@ const ROUTED_FNS = [
 
 /* Помощници, копирани в send-routed-report от shared.js / bulletin.js. */
 const ROUTED_COPIED = [
+  /* Съдържание на постоянна задача по седмици (recurring_task_versions,
+     24.09.2026). Разминае ли се копието, писмото носи заглавието или дните
+     на ДРУГА седмица. */
+  { fn: 'recurringVersionForWeek', from: SHARED },
+  { fn: 'recurringApplyVersion', from: SHARED },
+  { fn: 'recurringApplyVersions', from: SHARED },
   { fn: 'esc', from: SHARED },
   { fn: 'escAttr', from: SHARED },
   { fn: 'isReportableStore', from: SHARED },
@@ -204,7 +216,7 @@ const ROUTED_COPIED = [
 
 /* Само в send-routed-report: PostgREST със service ключ и всичко около
    самото изпращане — тема, тестова лента, кой получава. */
-const ROUTED_ONLY = ['sbGet', 'sbPatch', 'routedMailPlan', 'routedEmptyGroups',
+const ROUTED_ONLY = ['sbGet', 'sbPatch', 'loadRecurringVersions', 'routedMailPlan', 'routedEmptyGroups',
   /* режим „отчет по задача" (19.09.2026) — само в едж функцията */
   'routedTaskReportSubject', 'routedTaskReportRecipients', 'collectTaskReportData', 'routedTaskReportResponse',
   /* отчет по ПОСТОЯННА задача (v11, 19.09.2026) — само в едж функцията */

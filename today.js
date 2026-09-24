@@ -47,9 +47,16 @@ function loadTodayDashboard(){
        носи в completion_date ПЪРВОНАЧАЛНИЯ срок — по дата не влиза в нито
        една от двете заявки за отмятания по-долу, а по задача може да е от
        съвсем друг бюлетин. */
-    sbGet('task_completions','postponed_to=eq.'+toLocalISO(new Date())).catch(function(){ return []; })
+    sbGet('task_completions','postponed_to=eq.'+toLocalISO(new Date())).catch(function(){ return []; }),
+    /* Съдържанието за ДНЕШНАТА седмица (recurring_task_versions, 24.09.2026):
+       редакция „само за тази седмица" важи и тук, иначе таблото показва
+       старото заглавие и дни, а Бюлетинът — новите. НАКРАЯ на списъка, за да
+       не мести индексите на заварените заявки. */
+    loadRecurringVersions().catch(function(){ return []; })
   ]).then(function(results){
     var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
+    var todayVersions = Array.isArray(results[4]) ? results[4] : [];
+    var todayMonday = recurringMondayOf(new Date());
     /* Изключванията за ТЕКУЩАТА седмица (recurring_task_skips). Глобалното
        маха задачата още на входа — както notice долу. Магазинното минава
        нататък като skip_stores на елемента и изважда САМО този обект от
@@ -62,7 +69,8 @@ function loadTodayDashboard(){
     /* Задачите „Само за информация" отпадат ТУК, на входа — таблото ги брои
        и в числителя, и в знаменателя, а те нямат отмятания и нямат как да се
        изпълнят. Виж taskIsNotice() в shared.js за пълния обхват. */
-    var allRecurring = (Array.isArray(results[1]) ? results[1] : []).filter(function(t){ return !taskIsNotice(t) && !recurringIsSkipped(t.id, null, todaySkips); });
+    var allRecurring = recurringApplyVersions(Array.isArray(results[1]) ? results[1] : [], todayVersions, todayMonday)
+      .filter(function(t){ return !taskIsNotice(t) && !recurringIsSkipped(t.id, null, todaySkips); });
     var recurringToday = allRecurring.filter(function(t){ return recurringIsDueToday(t); });
     /* "Текущи/без срок" — нямат нито ден, нито час; recurringIsDueToday() ги връща false,
        затова наборите са естествено разделени, без припокриване */
@@ -135,13 +143,15 @@ function loadTodayDashboard(){
         allRecIds.length ? sbGet('task_completions','recurring_task_id=in.('+allRecIds.join(',')+')'+recDateQ) : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name'),
         carryNeedReg.length ? sbGet('bulletin_tasks','id=in.('+carryNeedReg.join(',')+')').catch(function(){return [];}) : Promise.resolve([]),
+        /* Пренесените задачи се теглят по id — и те минават през версията за
+           днешната седмица (заглавие и отдел). */
         carryNeedRec.length ? sbGet('recurring_tasks','id=in.('+carryNeedRec.join(',')+')').catch(function(){return [];}) : Promise.resolve([])
       ]).then(function(r2){
         var regComps = Array.isArray(r2[0]) ? r2[0] : [];
         var recComps = Array.isArray(r2[1]) ? r2[1] : [];
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var carryExtraReg = Array.isArray(r2[3]) ? r2[3] : [];
-        var carryExtraRec = Array.isArray(r2[4]) ? r2[4] : [];
+        var carryExtraRec = recurringApplyVersions(Array.isArray(r2[4]) ? r2[4] : [], todayVersions, todayMonday);
         var seen = {};
         var stores = users.filter(function(u){
           if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
@@ -406,9 +416,12 @@ function todayLoadPhotoQueue(cb){
   sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1').then(function(bulRes){
     var bul = (Array.isArray(bulRes) && bulRes.length) ? bulRes[0] : null;
     var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
-    Promise.all([bulTasksPromise, sbGet('recurring_tasks','active=eq.true')]).then(function(r2){
+    Promise.all([bulTasksPromise, sbGet('recurring_tasks','active=eq.true'),
+      loadRecurringVersions().catch(function(){ return []; })]).then(function(r2){
       var regTasks = Array.isArray(r2[0]) ? r2[0] : [];
-      var recTasks = Array.isArray(r2[1]) ? r2[1] : [];
+      /* Заглавието в опашката със снимки — за днешната седмица. */
+      var recTasks = recurringApplyVersions(Array.isArray(r2[1]) ? r2[1] : [],
+        Array.isArray(r2[2]) ? r2[2] : [], recurringMondayOf(new Date()));
       var titleMap = {};
       regTasks.forEach(function(t){ titleMap['regular:'+t.id] = t.title; });
       recTasks.forEach(function(t){ titleMap['recurring:'+t.id] = t.title; });

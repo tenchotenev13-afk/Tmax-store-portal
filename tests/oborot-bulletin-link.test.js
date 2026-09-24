@@ -258,7 +258,7 @@ async function fillAndSubmit(h) {
 
   section('5. Успешен оборот отмята задачата сам');
   {
-    const h = env({ data: { recurring_tasks: [{ id: 'r-ob-1' }], task_completions: [] } });
+    const h = env({ data: { recurring_tasks: [{ id: 'r-ob-1', linked_module: 'oborot' }], task_completions: [] } });
     if (ok('формата се подава', await fillAndSubmit(h))) {
       ok('оборотът е записан', postsTo(h, 'daily_turnover').length === 1);
       const tc = postsTo(h, 'task_completions');
@@ -279,7 +279,7 @@ async function fillAndSubmit(h) {
     /* Вече отметнато днес — втори ред би дал дубликат в броенето. */
     const h = env({
       data: {
-        recurring_tasks: [{ id: 'r-ob-1' }],
+        recurring_tasks: [{ id: 'r-ob-1', linked_module: 'oborot' }],
         task_completions: [{ id: 'tc-1', recurring_task_id: 'r-ob-1', store_name: STORE, completion_date: TODAY }]
       }
     });
@@ -304,7 +304,7 @@ async function fillAndSubmit(h) {
   section('7. Оборотът мина, отмятането не — казва се, не се premълчава');
   {
     const h = env({
-      data: { recurring_tasks: [{ id: 'r-ob-1' }], task_completions: [] },
+      data: { recurring_tasks: [{ id: 'r-ob-1', linked_module: 'oborot' }], task_completions: [] },
       fail: { POST: { status: 400, body: { message: 'null value in column violates not-null' }, url: /task_completions/ } }
     });
     if (ok('формата се подава', await fillAndSubmit(h))) {
@@ -327,7 +327,7 @@ async function fillAndSubmit(h) {
   {
     /* Обратната посока: провал на оборота НЕ бива да води до отмятане. */
     const h = env({
-      data: { recurring_tasks: [{ id: 'r-ob-1' }], task_completions: [] },
+      data: { recurring_tasks: [{ id: 'r-ob-1', linked_module: 'oborot' }], task_completions: [] },
       fail: { POST: { status: 400, body: { message: 'boom' }, url: /daily_turnover/ } }
     });
     await fillAndSubmit(h);

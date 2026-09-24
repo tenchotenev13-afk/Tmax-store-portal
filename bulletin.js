@@ -27,6 +27,11 @@ var recurringStopped = []; var bulStoppedOpen = {}; /* отдел → разгъ
    валидните за седмицата на curBul (виж bulSetRecurring()). Календарът,
    блокът по отдел, статистиката и печатът четат само recurringTasks. */
 var recurringAll = []; var recurringPeriods = [];
+/* recurringVersions — recurring_task_versions: СЪДЪРЖАНИЕТО по седмици
+   (24.09.2026). Редакция от бюлетина на седмица W вече не пипа реда в
+   recurring_tasks, а пише версия; recurringTasks носи слятото съдържание за
+   седмицата на curBul. Виж recurring-task-versions-schema.sql. */
+var recurringVersions = [];
 var bulPromotions = [];
 var bulMode = 'view'; var bulSaveT = null; var dragInfo = null;
 var bulSelectedId = null; /* избран ръчно бюлетин (превключвател) - null = автоматично поведение (последен) */
@@ -1147,7 +1152,14 @@ function bulOwnAppearance(kind,t,dateISO){
 function bulCarriedTaskOf(c){
   var id=c.recurring_task_id||c.task_id;
   var arr=c.recurring_task_id?(recurringAll.length?recurringAll:recurringTasks):bulTasks.concat(bulCarriedTasks);
-  return arr.find(function(x){return String(x.id)===String(id);})||null;
+  var found=arr.find(function(x){return String(x.id)===String(id);})||null;
+  /* Пренесената ПОСТОЯННА задача се търси в recurringAll (суровите редове):
+     тя може вече да не важи за седмицата и да е филтрирана от периодите.
+     Съдържанието обаче е за ПОКАЗАНАТА седмица — иначе редът „⏱ пренесено"
+     носи старото заглавие, а собственият ред над него новото, и двата
+     описват една и съща задача. */
+  if(found&&c.recurring_task_id) found=recurringApplyVersion(found, recurringVersions, bulWeekMonday());
+  return found;
 }
 /* Пренесените В този ден, за този обект. merged=true значи, че задачата и без
    това е дължима на деня — тогава НЕ се рисува отделен ред, а значка на
@@ -1404,12 +1416,13 @@ function loadBulletin(){
       sbGet('recurring_tasks','order=sort_order.asc').catch(function(){return [];}),
       loadRecurringSkips(bulSkipWeek()).catch(function(){return [];}),
       loadRecurringPeriods().catch(function(){return [];}),
-      bulLoadCarried()
+      bulLoadCarried(),
+      loadRecurringVersions().catch(function(){return [];})
     ]);
   }).then(function(results){
     if(!results)return; /* curBul беше null - вече показахме renderBulEmpty() по-горе */
     bulPromotions=Array.isArray(results[0])?results[0]:[];
-    bulSetRecurring(results[1], results[3]);
+    bulSetRecurring(results[1], results[3], results[5]);
     bulSkips=Array.isArray(results[2])?results[2]:[];
     bulCarried=Array.isArray(results[4])?results[4]:[];
     sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=sort_order.asc,due_date.asc').then(function(t){
@@ -2508,6 +2521,7 @@ function openEditRecurringModal(taskId) {
   ov.innerHTML =
     '<div class="bmod" style="width:420px;">' +
     '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">✏️ Редактирай постоянна задача</div>' +
+    recEditScopeNoteHtml() +
     '<label class="fl">Заглавие *</label>' +
     '<input class="fi" id="erec-title" value="'+esc(t.title||'')+'">' +
     '<label class="fl">Описание</label>' +
@@ -2543,6 +2557,9 @@ function openEditRecurringModal(taskId) {
 function submitEditRecurring(taskId) {
   var title = (document.getElementById('erec-title').value||'').trim();
   if (!title) { toast('Въведи заглавие','#dc2626'); return; }
+  /* ✏️ го има само в текущата и бъдещите седмици; тази проверка е за
+     извикване отдругаде. */
+  if (!bulIsCurrentOrFuture()) { toast('Редакция на постоянна задача — само от текущата и бъдещите седмици','#d97706'); return; }
   var desc = document.getElementById('erec-desc').value||'';
   var weekdays = readRecWeekdaysCheckboxes('erec-weekdays');
   var due_weekday = weekdays.length ? weekdays[0] : null;
@@ -2556,18 +2573,13 @@ function submitEditRecurring(taskId) {
   var cur = recurringTasks.find(function(x){ return String(x.id)===String(taskId); });
   var dept = (document.getElementById('erec-dept')||{}).value || (cur&&cur.department) || DCOLS[0];
   var payload = {title:title,description:desc,department:dept,due_weekday:due_weekday,due_weekdays:weekdays.length?weekdays:null,due_window:readRecWindow('erec-window','erec-weekdays'),due_time:due_time,task_type:taskType,target_stores:stores.length?stores:null,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null};
-  /* Смяна на отдел -> задачата отива на ДЪНОТО на новия. sort_order е
-     глобален, а moveRecInDept() преномерира 1..N в рамките на отдела, тоест
-     числата се повтарят между отделите: днес „Администрация" заема 1–11, а
-     единствената задача в „Склад" е с 9. Без това преместената задача би се
-     появила по средата на чуждия списък, без потребителят да разбере защо.
-     Взима се max, не броят — гарантира последно място и при дупки. */
-  if (cur && cur.department !== dept) {
-    payload.sort_order = recurringTasks.filter(function(x){ return x.department===dept; })
-      .reduce(function(m,x){ return Math.max(m, x.sort_order||0); }, 0) + 1;
-  }
-  sbPatch('recurring_tasks','id=eq.'+taskId,payload).then(function(r){
-    if (!r.ok) { toast('Грешка при запис','#dc2626'); return; }
+  /* sort_order НЕ влиза във версия (общ е за всички седмици, решено
+     24.09.2026): смяна на отдел само за една седмица не бива да мести
+     задачата в подредбата на всички останали. Затова тук няма
+     преномериране — в новия отдел задачата застава по глобалния си
+     sort_order, а ▲▼ остават за подредбата. */
+  bulSaveRecurringContent(taskId, payload, bulWeekMonday()).then(function(r){
+    if (!r || r.ok === false) { toast('Грешка при запис: '+sbErrMsg(r),'#dc2626'); return; }
     return trSaveReports(taskId, trc.list).then(function(okRep){
       var el = document.getElementById('edit-rec-ov');
       if (el) el.remove();
@@ -2915,7 +2927,7 @@ function recurringUploadAttachment(input){
       atts.push({type:isImg?'image':'file',url:pub,filename:file.name});
       sbPatch('recurring_tasks','id=eq.'+rtid,{attachments:atts}).then(function(res){
         if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-        t.attachments=atts; renderBulletin(); toast('✅ Прикачено!');
+        t.attachments=atts; bulSyncBaseRow(rtid,{attachments:atts}); renderBulletin(); toast('✅ Прикачено!');
       });
     }).catch(function(err){toast('Грешка: '+(err.message||err),'#dc2626');});
   };
@@ -2928,7 +2940,7 @@ function recurringRemoveAttachment(rtid,idx){
   atts.splice(idx,1);
   sbPatch('recurring_tasks','id=eq.'+rtid,{attachments:atts}).then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
-    t.attachments=atts; renderBulletin(); toast('✓ Премахнато');
+    t.attachments=atts; bulSyncBaseRow(rtid,{attachments:atts}); renderBulletin(); toast('✓ Премахнато');
   });
 }
 
@@ -2963,6 +2975,7 @@ function attSetWidth(btn){
   if(!atts[aidx])return;
   atts[aidx]=Object.assign({},atts[aidx],{width:w});
   entity.attachments=atts;
+  if(kind==='recurring') bulSyncBaseRow(eid,{attachments:atts});
   sbPatch(table,'id=eq.'+eid,{attachments:atts}).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     renderBulletin();
@@ -3208,7 +3221,7 @@ function collectTodayDeadlineItems(cb){
   var mainTasks = bulTasks.filter(function(t){ return !taskIsNotice(t) && taskIsDueOnDate(t, todayStr); });
   /* Валидните за ДНЕШНАТА седмица, не за показания бюлетин (recurringTasks) —
      админ, отворил стар бюлетин, не бива да праща известие за чужд набор. */
-  var recTasks = recurringTasksForWeek(recurringAll, recurringPeriods, recurringMondayOf(new Date()))
+  var recTasks = recurringTasksForWeek(recurringAll, recurringPeriods, recurringMondayOf(new Date()), recurringVersions)
     .filter(function(t){ return !taskIsNotice(t) && recurringIsDueToday(t); });
   /* Изключванията за ДНЕШНАТА седмица, не за показания бюлетин (bulSkips) —
      админ може да гледа друга седмица, а известието е за днес. Махат се
@@ -4438,7 +4451,10 @@ function renderRecurringTasks(dk) {
       if (showBtns) h += '<div style="flex-shrink:0;align-self:flex-start;">'+showBtns+'</div>';
       if (canEdit()) {
         h += '<div style="display:flex;gap:4px;">';
-        h += '<button onclick="openEditRecurringModal(\'' + t.id + '\')" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#2563eb;">✏️</button>';
+        /* ✏️ го няма в МИНАЛ бюлетин (24.09.2026): редакцията там би
+           пренаписала минала седмица. Сивият надпис горе в блока казва
+           защо — същото правило като „⏸ Спри" и „+ Добави". */
+        if (recCanAdd) h += '<button onclick="openEditRecurringModal(\'' + t.id + '\')" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#2563eb;">✏️</button>';
         /* Само за ТАЗИ седмица — различно от „⏸ Спри" до него, което
            деактивира задачата изобщо. Скрит е при глобално изключване: там
            няма какво повече да се изключи, а връщането е с „Върни". */
@@ -4502,6 +4518,7 @@ function moveRecInDept(id,dir){
   var tmp=deptTasks[idx]; deptTasks[idx]=deptTasks[newIdx]; deptTasks[newIdx]=tmp;
   var patches=deptTasks.map(function(t,i){
     t.sort_order=i+1;
+    bulSyncBaseRow(t.id,{sort_order:i+1});
     return sbPatch('recurring_tasks','id=eq.'+t.id,{sort_order:i+1});
   });
   recurringTasks.sort(function(a,b){ return (a.sort_order||0)-(b.sort_order||0); });
@@ -4678,18 +4695,26 @@ function bulFromBadgeHtml(t) {
 /* Единственото място, което пише recurringTasks от сървърни данни:
    валидните за седмицата на curBul, по recurring_task_periods. Тук се
    извеждат и спрените — задачите без отворен период. */
-function bulSetRecurring(all, periods) {
+function bulSetRecurring(all, periods, versions) {
   recurringAll = Array.isArray(all) ? all : [];
   recurringPeriods = Array.isArray(periods) ? periods : [];
-  recurringTasks = recurringTasksForWeek(recurringAll, recurringPeriods, bulWeekMonday());
+  recurringVersions = Array.isArray(versions) ? versions : [];
+  /* Съдържанието е за седмицата на curBul: recurringTasksForWeek слива
+     версията върху реда. Целият модул (блок, календар, печат, статистика)
+     чете оттук, затова това е единственото място, което трябва да знае за
+     версиите при РИСУВАНЕТО. */
+  recurringTasks = recurringTasksForWeek(recurringAll, recurringPeriods, bulWeekMonday(), recurringVersions);
+  /* „Спрени" се показват с базовото съдържание: те не важат за нито една
+     седмица, тоест няма коя версия да се приложи. */
   recurringStopped = recurringAll.filter(function(t){ return !bulHasOpenPeriod(t); });
 }
 /* Всички задачи + периодите, наново от базата (след запис). */
 function bulFetchRecurring() {
   return Promise.all([
     sbGet('recurring_tasks','order=sort_order.asc'),
-    loadRecurringPeriods()
-  ]).then(function(res){ bulSetRecurring(res[0], res[1]); });
+    loadRecurringPeriods(),
+    loadRecurringVersions().catch(function(){return [];})
+  ]).then(function(res){ bulSetRecurring(res[0], res[1], res[2]); });
 }
 /* След „⏸ Спри" / „▶ Активирай" / ✕ — задачите и периодите наново;
    спрените се извеждат от тях в bulSetRecurring(). */
@@ -4962,6 +4987,103 @@ function submitRecurring(dk, btn) {
     }
     bulFetchRecurring().then(renderBulletin);
   }
+}
+
+/* ═══ СЪДЪРЖАНИЕ ПО СЕДМИЦИ — ЗАПИС (recurring_task_versions) ═══════════
+   Редакцията на постоянна задача вече НЕ пипа реда в recurring_tasks: той
+   остава историята: седмица без версия се чете от него. Пише се версия за
+   седмицата на показания бюлетин (W), по два пътя — виж
+   recurring-task-versions-schema.sql.
+
+   Заявките вървят ЕДНА СЛЕД ДРУГА, не наведнъж: отвореният период се
+   затваря (или трие) ПРЕДИ да се отвори новият, иначе rtv_open_uq връща 409.
+   Първата провалена спира веригата и грешката стига до потребителя — тихо
+   половин запис е по-лошо от нищо. */
+/* recurringTasks може да е КОПИЕ на реда (когато има версия за седмицата) —
+   виж recurringApplyVersion() в shared.js. Полетата, които НЕ са седмични
+   (sort_order, attachments), се пишат и в recurringAll: оттам ги четат
+   „днешната" седмица (collectTodayDeadlineItems) и секцията „Спрени". */
+function bulSyncBaseRow(id, patch){
+  var base=(recurringAll||[]).find(function(x){ return String(x.id)===String(id); });
+  if(base) Object.assign(base, patch);
+}
+function bulVerTo(v){ return (v && v.to_monday !== null && v.to_monday !== undefined) ? v.to_monday : null; }
+function bulTaskVersions(taskId){
+  return (recurringVersions||[]).filter(function(v){ return v && String(v.recurring_task_id)===String(taskId); });
+}
+/* Версията, която покрива W — при няколко печели най-късният from_monday
+   (същото правило като recurringVersionForWeek в shared.js). */
+function bulVersionCovering(taskId, W){
+  var list = bulTaskVersions(taskId).filter(function(v){
+    return v.from_monday <= W && (bulVerTo(v)===null || bulVerTo(v) >= W);
+  }).sort(function(a,b){ return a.from_monday < b.from_monday ? -1 : 1; });
+  return list.length ? list[list.length-1] : null;
+}
+/* Само полетата на съдържанието — от версия или от базовия ред. */
+function bulContentOf(src){
+  var out = {};
+  RECURRING_CONTENT_FIELDS.forEach(function(f){ out[f] = src ? (src[f]===undefined?null:src[f]) : null; });
+  return out;
+}
+function bulVersionRow(taskId, from, to, content){
+  return Object.assign({ recurring_task_id: taskId, from_monday: from, to_monday: to, created_by: bulActor() }, content);
+}
+function bulRunOps(ops){
+  return ops.reduce(function(chain, fn){
+    return chain.then(function(prev){
+      if (prev && prev.ok === false) return prev;   /* първата грешка спира */
+      return fn();
+    });
+  }, Promise.resolve({ok:true}));
+}
+function bulSaveRecurringContent(taskId, payload, W){
+  var C = recurringMondayOf(new Date());
+  if (W < C) return Promise.resolve({ok:false, error:{message:'минала седмица'}});
+  var ops = [];
+  var cov = bulVersionCovering(taskId, W);
+  if (W > C) {
+    /* „От W нататък": по-късните версии се заместват — трият се. Версия,
+       която покрива W и е започнала ПРЕДИ нея, се затваря на W−7; така
+       предишната редакция остава за седмиците преди W. */
+    bulTaskVersions(taskId).forEach(function(v){
+      if (v.from_monday >= W) ops.push(function(){ return sbDelete('recurring_task_versions','id=eq.'+v.id); });
+    });
+    if (cov && cov.from_monday < W) {
+      ops.push(function(){ return sbPatch('recurring_task_versions','id=eq.'+cov.id,{to_monday: bulShiftMonday(W,-7)}); });
+    }
+    ops.push(function(){ return sbPost('recurring_task_versions', bulVersionRow(taskId, W, null, payload)); });
+    return bulRunOps(ops);
+  }
+  /* W === C — „само тази седмица". */
+  if (cov && cov.from_monday === W && bulVerTo(cov) === W) {
+    /* Вече има версия точно за W — просто се презаписва. */
+    return sbPatch('recurring_task_versions','id=eq.'+cov.id, payload);
+  }
+  var prev = cov ? bulContentOf(cov) : null;   /* какво важи от W+1 нататък */
+  var tail = cov ? bulVerTo(cov) : null;
+  if (cov) {
+    if (cov.from_monday < W) ops.push(function(){ return sbPatch('recurring_task_versions','id=eq.'+cov.id,{to_monday: bulShiftMonday(W,-7)}); });
+    else ops.push(function(){ return sbDelete('recurring_task_versions','id=eq.'+cov.id); });
+  }
+  ops.push(function(){ return sbPost('recurring_task_versions', bulVersionRow(taskId, W, W, payload)); });
+  /* Опашката: покривала ли е старата версия и седмици СЛЕД W, те трябва да
+     си я получат обратно — иначе „само тази седмица" би изтрило по-ранна
+     постоянна редакция. Задача без версия няма опашка: от W+1 се чете
+     базовият ред, който не сме пипали. */
+  if (cov && (tail === null || tail > W)) {
+    ops.push(function(){ return sbPost('recurring_task_versions', bulVersionRow(taskId, bulShiftMonday(W,7), tail, prev)); });
+  }
+  return bulRunOps(ops);
+}
+/* Надписът във формата: докъде важи редакцията. Друг текст за текущата и за
+   бъдеща седмица — иначе „само тази седмица" е невидимо правило. */
+function recEditScopeNoteHtml(){
+  var W = bulWeekMonday(), C = recurringMondayOf(new Date());
+  var d = String(W).split('-');
+  var txt = (W > C)
+    ? '📅 Промяната важи от седмицата на '+d[2]+'.'+d[1]+' НАТАТЪК. Текущата и миналите седмици остават непроменени.'
+    : '📅 Промяната важи САМО за тази седмица. От следващата задачата се връща към предишното си съдържание.';
+  return '<div class="rec-edit-scope" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:8px;padding:7px 9px;font-size:11.5px;margin-bottom:10px;">'+txt+'</div>';
 }
 
 /* ═══════ ПОД-ЗАДАЧИ ══════════════════════════════════════════ */

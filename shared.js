@@ -314,15 +314,61 @@ function recurringValidForWeek(taskId, mondayISO, periods){
    няма период и е active=false → не важи никъде, както трябва.
    Без mondayISO (отчет без публикуван бюлетин — няма седмица, към която да
    се отнесе) решава пак кешът active, тоест поведението отпреди периодите. */
-function recurringTasksForWeek(tasks, periods, mondayISO){
+function recurringTasksForWeek(tasks, periods, mondayISO, versions){
   if(!mondayISO) return (Array.isArray(tasks)?tasks:[]).filter(function(t){ return !!t&&!!t.active; });
   var has={};
   (Array.isArray(periods)?periods:[]).forEach(function(p){ if(p) has[String(p.recurring_task_id)]=1; });
-  return (Array.isArray(tasks)?tasks:[]).filter(function(t){
+  var out=(Array.isArray(tasks)?tasks:[]).filter(function(t){
     if(!t) return false;
     return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
   });
+  /* Съдържанието за СЪЩАТА седмица (recurring_task_versions, 24.09.2026).
+     Без версии или без седмица — наборът минава непроменен, тоест старият
+     извикващ с три аргумента работи както преди. */
+  return recurringApplyVersions(out, versions, mondayISO);
 }
+/* ═══ СЪДЪРЖАНИЕТО ПО СЕДМИЦИ (recurring_task_versions, 24.09.2026) ══════
+   Периодите решават ДАЛИ задачата важи за седмицата; версиите — КАКВО пише
+   в нея. Редакция от бюлетина на седмица W вече не пипа реда в
+   recurring_tasks: той остава историята и се чете за всяка седмица БЕЗ
+   версия. Границите са същите като при периодите (понеделници, включително),
+   а при застъпване печели най-късният from_monday — така „само тази
+   седмица" (W..W) бие по-ранната отворена версия, без да я трие.
+   Виж recurring-task-versions-schema.sql за двата пътя при запис. */
+var RECURRING_CONTENT_FIELDS = ['title','description','due_weekday','due_weekdays','due_window','due_time','task_type','department','target_stores','report_groups','linked_module'];
+function recurringVersionForWeek(taskId, mondayISO, versions){
+  if(!Array.isArray(versions)||!mondayISO) return null;
+  var id=String(taskId), best=null;
+  versions.forEach(function(v){
+    if(!v||String(v.recurring_task_id)!==id) return;
+    if(v.from_monday>mondayISO) return;
+    if(v.to_monday!==null&&v.to_monday!==undefined&&v.to_monday<mondayISO) return;
+    if(!best||v.from_monday>best.from_monday) best=v;
+  });
+  return best;
+}
+/* Копие на задачата със слятото съдържание. Оригиналът НЕ се мутира: същият
+   набор се ползва и за друга седмица (напр. „Днес" при отворен стар бюлетин).
+   id, sort_order, active, attachments и created_at идват от реда. */
+function recurringApplyVersion(task, versions, mondayISO){
+  var v=task?recurringVersionForWeek(task.id, mondayISO, versions):null;
+  if(!v) return task;
+  var out={};
+  for(var k in task){ if(Object.prototype.hasOwnProperty.call(task,k)) out[k]=task[k]; }
+  RECURRING_CONTENT_FIELDS.forEach(function(f){ if(f in v) out[f]=v[f]; });
+  return out;
+}
+function recurringApplyVersions(tasks, versions, mondayISO){
+  if(!Array.isArray(tasks)) return [];
+  if(!Array.isArray(versions)||!versions.length||!mondayISO) return tasks;
+  return tasks.map(function(t){ return recurringApplyVersion(t, versions, mondayISO); });
+}
+/* Всички версии — таблицата е малка (по една-две на задача) и се ползва и
+   за показаната седмица, и за днешната, както периодите. */
+function loadRecurringVersions(){
+  return sbGet('recurring_task_versions','select=id,recurring_task_id,from_monday,to_monday,'+RECURRING_CONTENT_FIELDS.join(',')+'&order=from_monday.asc');
+}
+
 /* Всички периоди — таблицата е малка (по един-два на задача), а Бюлетинът
    ги ползва и за показаната седмица, и за днешната. */
 function loadRecurringPeriods(){

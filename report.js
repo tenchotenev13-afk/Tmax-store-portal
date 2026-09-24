@@ -73,7 +73,10 @@ function collectDailyReportData(cb, scope, kasaThreshold){
        седмица — и не влиза в нито една от заявките за отмятания по-долу.
        Без филтър по задача: пренесеното може да е от бюлетин, който този
        отчет не зарежда. */
-    sbGet('task_completions','postponed_to=eq.'+dayISO)
+    sbGet('task_completions','postponed_to=eq.'+dayISO),
+    /* Съдържанието за седмицата на ОТЧЕТНИЯ ДЕН (recurring_task_versions,
+       24.09.2026). НАКРАЯ на списъка, за да не мести индексите. */
+    loadRecurringVersions()
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], dayTarget);
     var recSkips = Array.isArray(results[2]) ? results[2] : [];
@@ -86,7 +89,8 @@ function collectDailyReportData(cb, scope, kasaThreshold){
        виж taskIsNotice(). Същото за изключените за седмицата ЗА ВСИЧКИ;
        изключените за отделен обект минават като skip_stores на елемента и
        излизат само от неговия знаменател (reportBuildSummary). */
-    var allRecurring = recurringTasksForWeek(results[1], results[3], dayMonday).filter(function(t){ return !taskIsNotice(t) && !recurringIsSkipped(t.id, null, recSkips); });
+    var recVersions = Array.isArray(results[5]) ? results[5] : [];
+    var allRecurring = recurringTasksForWeek(results[1], results[3], dayMonday, recVersions).filter(function(t){ return !taskIsNotice(t) && !recurringIsSkipped(t.id, null, recSkips); });
     /* Прозоречната задача се явява ВЕДНЪЖ — в деня на срока. Иначе обект,
        свършил я в понеделник, излиза неизпълнил във вторник и в сряда, и се
        брои три пъти. */
@@ -167,7 +171,9 @@ function collectDailyReportData(cb, scope, kasaThreshold){
         var recComps = Array.isArray(r2[1]) ? r2[1] : [];
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var carryPool = allBulTasks.concat(Array.isArray(r2[3]) ? r2[3] : []);
-        var carryRecPool = allRecurring.concat(Array.isArray(r2[4]) ? r2[4] : []);
+        /* Пренесените се теглят по id — и те минават през версията за
+           седмицата на отчета, иначе носят старото заглавие. */
+        var carryRecPool = allRecurring.concat(recurringApplyVersions(Array.isArray(r2[4]) ? r2[4] : [], recVersions, dayMonday));
         var seen = {};
         var stores = users.filter(function(u){
           if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
@@ -1260,7 +1266,9 @@ function collectWeeklyReportData(cb, scope){
     /* ВСИЧКИ задачи + периодите: отчетът е за ПРИКЛЮЧИЛАТА седмица, а active
        описва текущата. Виж recurringTasksForWeek() в shared.js. */
     sbGet('recurring_tasks','order=sort_order.asc'),
-    sbGet('recurring_task_periods','select=recurring_task_id,from_monday,to_monday')
+    sbGet('recurring_task_periods','select=recurring_task_id,from_monday,to_monday'),
+    /* Съдържанието за седмицата на отчета (recurring_task_versions). */
+    loadRecurringVersions()
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], target);
     var wkMonday = bul ? toLocalISO(weekDays(bul.week_number, bul.year)[0]) : null;
@@ -1268,7 +1276,8 @@ function collectWeeklyReportData(cb, scope){
        task_completions и влизат и в числителя, и в знаменателя като вечно
        неизпълнени. Един филтър вместо условие във всяко броене надолу —
        виж taskIsNotice(). */
-    var allRecurring = recurringTasksForWeek(results[1], results[2], wkMonday).filter(function(t){ return !taskIsNotice(t); });
+    var recVersions = Array.isArray(results[3]) ? results[3] : [];
+    var allRecurring = recurringTasksForWeek(results[1], results[2], wkMonday, recVersions).filter(function(t){ return !taskIsNotice(t); });
     var recurringScheduled = allRecurring.filter(function(t){
       return (t.due_weekday!==null && t.due_weekday!==undefined) || !!t.due_time;
     });
@@ -1411,7 +1420,8 @@ function collectWeeklyReportData(cb, scope){
         var recComps = Array.isArray(r2[1]) ? r2[1] : [];
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var carryPool = allBulTasks.concat(Array.isArray(r2[3]) ? r2[3] : []);
-        var carryRecPool = allRecurring.concat(Array.isArray(r2[4]) ? r2[4] : []);
+        /* Пренесените — със съдържанието за седмицата на отчета. */
+        var carryRecPool = allRecurring.concat(recurringApplyVersions(Array.isArray(r2[4]) ? r2[4] : [], recVersions, wkMonday));
         var seen = {};
         var stores = users.filter(function(u){
           if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
@@ -3053,7 +3063,10 @@ function collectWeeklyRoutingData(cb){
     sbGet('bulletins','status=eq.published&order=year.desc,week_number.desc&limit=20'),
     /* ВСИЧКИ задачи + периодите — отчетът е за приключилата седмица. */
     sbGet('recurring_tasks'),
-    sbGet('recurring_task_periods','select=recurring_task_id,from_monday,to_monday')
+    sbGet('recurring_task_periods','select=recurring_task_id,from_monday,to_monday'),
+    /* Съдържанието за седмицата на отчета (recurring_task_versions) —
+       заглавието и report_groups в личната картичка са на тази седмица. */
+    loadRecurringVersions()
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], target);
     var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
@@ -3061,7 +3074,7 @@ function collectWeeklyRoutingData(cb){
        task_completions и влизат и в числителя, и в знаменателя като вечно
        неизпълнени. Един филтър вместо условие във всяко броене надолу —
        виж taskIsNotice(). */
-    var allRecurring = recurringTasksForWeek(results[1], results[2], wkDates ? wkDates[0] : null).filter(function(t){ return !taskIsNotice(t); });
+    var allRecurring = recurringTasksForWeek(results[1], results[2], wkDates ? wkDates[0] : null, Array.isArray(results[3]) ? results[3] : []).filter(function(t){ return !taskIsNotice(t); });
     var routedRecurring = allRecurring.filter(function(t){ return t.report_groups && t.report_groups.length; });
     var weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
 

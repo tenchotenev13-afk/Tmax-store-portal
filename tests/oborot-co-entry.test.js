@@ -48,7 +48,9 @@ const USERS_ROWS = STORE_18
 
 /* Задачата в Бюлетина СЪЩЕСТВУВА и е активна, а отметки няма — тоест има
    какво да се отметне. Това е предпоставката, без която секция 2 е празна. */
-const TASK_ROWS = [{ id: 'rt-oborot' }];
+/* linked_module е в РЕДА: от 24.09.2026 dtMarkBulletinTask() филтрира в
+   кода (полето е съдържание по седмици), а не в заявката. */
+const TASK_ROWS = [{ id: 'rt-oborot', linked_module: 'oborot' }];
 
 function rec(over) {
   return Object.assign({

@@ -219,14 +219,18 @@ function recurringValidForWeek(taskId, mondayISO, periods){
       (p.to_monday===null||p.to_monday===undefined||p.to_monday>=mondayISO);
   });
 }
-function recurringTasksForWeek(tasks, periods, mondayISO){
+function recurringTasksForWeek(tasks, periods, mondayISO, versions){
   if(!mondayISO) return (Array.isArray(tasks)?tasks:[]).filter(function(t){ return !!t&&!!t.active; });
   var has={};
   (Array.isArray(periods)?periods:[]).forEach(function(p){ if(p) has[String(p.recurring_task_id)]=1; });
-  return (Array.isArray(tasks)?tasks:[]).filter(function(t){
+  var out=(Array.isArray(tasks)?tasks:[]).filter(function(t){
     if(!t) return false;
     return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
   });
+  /* Съдържанието за СЪЩАТА седмица (recurring_task_versions, 24.09.2026).
+     Без версии или без седмица — наборът минава непроменен, тоест старият
+     извикващ с три аргумента работи както преди. */
+  return recurringApplyVersions(out, versions, mondayISO);
 }
 /* Изключванията за ЕДНА ISO седмица ({week, year} от isoWeekOf). Провал на
    заявката → [] → темата се държи както преди изключванията: известие в
@@ -241,6 +245,40 @@ async function loadSkipsForWeek(supabase: any, wk: { week: number; year: number 
 async function loadRecurringPeriods(supabase: any): Promise<any[]> {
   const { data } = await supabase.from('recurring_task_periods')
     .select('recurring_task_id,from_monday,to_monday');
+  return Array.isArray(data) ? data : [];
+}
+/* Копия от shared.js — съдържанието на постоянната задача ПО СЕДМИЦИ
+   (recurring_task_versions, 24.09.2026). Разминае ли се копието, писмото
+   носи заглавието/дните на ДРУГА седмица. */
+var RECURRING_CONTENT_FIELDS = ['title','description','due_weekday','due_weekdays','due_window','due_time','task_type','department','target_stores','report_groups','linked_module'];
+function recurringVersionForWeek(taskId, mondayISO, versions){
+  if(!Array.isArray(versions)||!mondayISO) return null;
+  var id=String(taskId), best=null;
+  versions.forEach(function(v){
+    if(!v||String(v.recurring_task_id)!==id) return;
+    if(v.from_monday>mondayISO) return;
+    if(v.to_monday!==null&&v.to_monday!==undefined&&v.to_monday<mondayISO) return;
+    if(!best||v.from_monday>best.from_monday) best=v;
+  });
+  return best;
+}
+function recurringApplyVersion(task, versions, mondayISO){
+  var v=task?recurringVersionForWeek(task.id, mondayISO, versions):null;
+  if(!v) return task;
+  var out={};
+  for(var k in task){ if(Object.prototype.hasOwnProperty.call(task,k)) out[k]=task[k]; }
+  RECURRING_CONTENT_FIELDS.forEach(function(f){ if(f in v) out[f]=v[f]; });
+  return out;
+}
+function recurringApplyVersions(tasks, versions, mondayISO){
+  if(!Array.isArray(tasks)) return [];
+  if(!Array.isArray(versions)||!versions.length||!mondayISO) return tasks;
+  return tasks.map(function(t){ return recurringApplyVersion(t, versions, mondayISO); });
+}
+/* Версиите на съдържанието. Провал → [] → чете се редът, както преди. */
+async function loadRecurringVersions(supabase: any): Promise<any[]> {
+  const { data } = await supabase.from('recurring_task_versions')
+    .select('id,recurring_task_id,from_monday,to_monday,title,description,due_weekday,due_weekdays,due_window,due_time,task_type,department,target_stores,report_groups,linked_module');
   return Array.isArray(data) ? data : [];
 }
 /* Копия от shared.js — отлагане с точна дата (task_completions.postponed_to).
@@ -507,7 +545,8 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
   const yMonday = plusDaysISO(yISO, -yIdx);
   const { data: recsRaw } = await supabase.from('recurring_tasks').select('*');
   const recPeriods = await loadRecurringPeriods(supabase);
-  const recDue = recurringTasksForWeek(recsRaw, recPeriods, yMonday).filter((t: any) =>
+  const recVersions = await loadRecurringVersions(supabase);
+  const recDue = recurringTasksForWeek(recsRaw, recPeriods, yMonday, recVersions).filter((t: any) =>
     !taskIsNotice(t) && recurringDueOnWeekday(t, yIdx) && !recurringIsSkipped(t.id, null, ySkips));
 
   /* ═══ ОТЛАГАНЕ С ТОЧНА ДАТА (task_completions.postponed_to) ═══════════
@@ -765,8 +804,11 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
      за обект → този обект не получава напомняне (виж цикъла по byStore). */
   const skips = await loadSkipsForWeek(supabase, iso);
 
-  const { data: recs } = await supabase
+  const { data: recsRaw2 } = await supabase
     .from('recurring_tasks').select('*').eq('active', true);
+  /* Съдържанието за ДНЕШНАТА седмица (recurring_task_versions). */
+  const recMonday = plusDaysISO(bg.dateStr, -bg.weekdayIdx);
+  const recs = recurringApplyVersions(recsRaw2 || [], await loadRecurringVersions(supabase), recMonday);
   const recToday = (recs || []).filter((t: any) =>
     !taskIsNotice(t) && recurringDueOnWeekday(t, bg.weekdayIdx) && !recurringIsSkipped(t.id, null, skips));
 
@@ -790,7 +832,7 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
   const needReg = uniq(carriedOpen.map((c: any) => c.task_id)).filter(id => !bulAll.some((t: any) => t.id === id));
   const needRec = uniq(carriedOpen.map((c: any) => c.recurring_task_id)).filter(id => !(recs || []).some((t: any) => t.id === id));
   const poolReg = bulAll.concat(await loadTasksByIds(supabase, 'bulletin_tasks', needReg));
-  const poolRec = (recs || []).concat(await loadTasksByIds(supabase, 'recurring_tasks', needRec));
+  const poolRec = (recs || []).concat(recurringApplyVersions(await loadTasksByIds(supabase, 'recurring_tasks', needRec), await loadRecurringVersions(supabase), recMonday));
   const carriedByTask: Record<string, { t: any; isRec: boolean; rows: any[] }> = {};
   for (const c of carriedOpen) {
     const isRec = !!c.recurring_task_id;
@@ -892,8 +934,12 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
      за обект → обектът не е нито „подал", нито „не е подал" (виж scope). */
   const skips = await loadSkipsForWeek(supabase, isoWeekOf(bg.dateStr));
 
-  const { data: recs } = await supabase
+  const { data: recsRaw3 } = await supabase
     .from('recurring_tasks').select('*').eq('active', true);
+  /* Съдържанието за ДНЕШНАТА седмица (recurring_task_versions). */
+  const dpMonday = plusDaysISO(bg.dateStr, -bg.weekdayIdx);
+  const dpVersions = await loadRecurringVersions(supabase);
+  const recs = recurringApplyVersions(recsRaw3 || [], dpVersions, dpMonday);
 
   const todayTasks = (recs || []).filter((t: any) =>
     !taskIsNotice(t) && recurringDueOnWeekday(t, bg.weekdayIdx) && minutesOf(t.due_time) !== null
@@ -913,8 +959,8 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
   const carriedIds = carried.map((c: any) => c.recurring_task_id)
     .filter((id: string, i: number, a: string[]) => a.indexOf(id) === i)
     .filter((id: string) => !todayTasks.some((t: any) => t.id === id));
-  const poolRec = (recs || []).concat(await loadTasksByIds(supabase, 'recurring_tasks',
-    carriedIds.filter((id: string) => !(recs || []).some((t: any) => t.id === id))));
+  const poolRec = (recs || []).concat(recurringApplyVersions(await loadTasksByIds(supabase, 'recurring_tasks',
+    carriedIds.filter((id: string) => !(recs || []).some((t: any) => t.id === id))), dpVersions, dpMonday));
   for (const id of carriedIds) {
     const t = poolRec.find((x: any) => x.id === id);
     if (!t || taskIsNotice(t) || minutesOf(t.due_time) === null || recurringIsSkipped(t.id, null, skips)) continue;

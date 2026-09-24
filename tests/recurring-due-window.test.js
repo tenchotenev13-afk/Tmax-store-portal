@@ -364,8 +364,10 @@ function doneComp(date) {
         ok('и е достъпен (три избрани дни)', cb.disabled === false);
         guard('клик по „Запази"', () => realClick(w, btn(doc.getElementById('edit-rec-ov'), 'Запази')));
         await ticks();
-        const patch = calls.patch.filter(p => String(p.url).indexOf('recurring_tasks') >= 0)[0];
-        if (ok('PATCH е изпратен', !!patch)) {
+        /* От 24.09.2026 редакцията пише ВЕРСИЯ за седмицата
+           (recurring_task_versions), а не PATCH върху реда. */
+        const patch = calls.post.filter(p => String(p.url).indexOf('recurring_task_versions') >= 0)[0];
+        if (ok('версията е записана', !!patch)) {
           ok('due_window се праща като true', patch.body.due_window === true,
             String(patch.body.due_window));
         }
@@ -382,7 +384,7 @@ function doneComp(date) {
     doc.getElementById('erec-window').checked = false;
     realClick(w, btn(doc.getElementById('edit-rec-ov'), 'Запази'));
     await ticks();
-    const patch = calls.patch.filter(p => String(p.url).indexOf('recurring_tasks') >= 0)[0];
+    const patch = calls.post.filter(p => String(p.url).indexOf('recurring_task_versions') >= 0)[0];
     ok('due_window е false, не изчезва от обекта',
       !!patch && patch.body.due_window === false, JSON.stringify(patch && patch.body.due_window));
   }

@@ -10,6 +10,12 @@
    стрелките ▲▼ местят само в рамките на отдела — тоест задача в грешен отдел
    не можеше да стигне до мястото си по никакъв начин от екрана.
 
+   От 24.09.2026 редакцията не пипа реда в recurring_tasks, а пише ВЕРСИЯ за
+   седмицата (recurring_task_versions) — затова тук се чете тялото на POST-а
+   към нея. Отделът е поле на версията, тоест смяната важи за седмицата, от
+   чийто бюлетин е направена. sort_order НЕ е във версията (общ е за всички
+   седмици) — виж секция 5.
+
    Пускане: node tests/recurring-edit-department.test.js . */
 'use strict';
 
@@ -73,9 +79,13 @@ function save(w, doc) {
   if (!b) throw new Error('бутонът „Запази" не е намерен');
   realClick(w, b);
 }
+/* Тялото на записа: POST към recurring_task_versions (24.09.2026). */
 function patchBody(calls) {
-  const p = calls.patch.filter(x => String(x.url).indexOf('recurring_tasks') >= 0);
+  const p = calls.post.filter(x => String(x.url).indexOf('recurring_task_versions') >= 0);
   return p.length ? p[p.length - 1].body : null;
+}
+function baseRowPatches(calls) {
+  return calls.patch.filter(x => /\/recurring_tasks\?/.test(String(x.url)));
 }
 
 /* Деветте полета, които се пращаха и преди промяната. */
@@ -116,7 +126,7 @@ const OLD_KEYS = ['title', 'description', 'due_weekday', 'due_weekdays', 'due_ti
   }
 
   /* ═══ 2. Смяна на отдела стига до PATCH ═══════════════════════════════ */
-  section('2. Смяна на отдела -> department в PATCH');
+  section('2. Смяна на отдела -> department във версията');
   {
     const h = env();
     const { w, doc, calls } = h;
@@ -125,7 +135,7 @@ const OLD_KEYS = ['title', 'description', 'due_weekday', 'due_weekdays', 'due_ti
     if (guard('клик по „Запази"', () => save(w, doc))) {
       await ticks();
       const body = patchBody(calls);
-      if (ok('PATCH е изпратен', !!body, JSON.stringify(body))) {
+      if (ok('версията е записана', !!body, JSON.stringify(body))) {
         ok('department е новият', body.department === 'admin', String(body.department));
       }
     }
@@ -140,7 +150,7 @@ const OLD_KEYS = ['title', 'description', 'due_weekday', 'due_weekdays', 'due_ti
     if (guard('клик по „Запази"', () => save(w, doc))) {
       await ticks();
       const body = patchBody(calls);
-      if (ok('PATCH е изпратен', !!body)) {
+      if (ok('версията е записана', !!body)) {
         ok('department е "warehouse"', body.department === 'warehouse', String(body.department));
         ok('НЕ е null', body.department !== null && body.department !== undefined);
         ok('sort_order НЕ се пипа без смяна на отдел',
@@ -158,13 +168,16 @@ const OLD_KEYS = ['title', 'description', 'due_weekday', 'due_weekdays', 'due_ti
     save(w, doc);
     await ticks();
     const body = patchBody(calls);
-    if (ok('PATCH е изпратен', !!body)) {
+    if (ok('версията е записана', !!body)) {
       const keys = Object.keys(body).sort();
-      /* due_window се добави с прозореца за изпълнение (миграция
-         recurring_tasks_due_window). Списъкът е изричен нарочно: ново поле в
-         PATCH-а трябва да мине през съзнателен ред тук, не да се промъкне. */
-      ok('точно старите девет + department + due_window',
-        keys.join(',') === OLD_KEYS.concat(['department','due_window']).sort().join(','), keys.join(','));
+      /* due_window се добави с прозореца за изпълнение; от 24.09.2026 редът
+         е ВЕРСИЯ, затова носи и трите си собствени полета (за коя задача, за
+         кои седмици, кой я е записал). Списъкът е изричен нарочно: ново поле
+         трябва да мине през съзнателен ред тук, не да се промъкне. */
+      const VER_KEYS = ['recurring_task_id', 'from_monday', 'to_monday', 'created_by'];
+      ok('точно старите девет + department + due_window + полетата на версията',
+        keys.join(',') === OLD_KEYS.concat(['department','due_window']).concat(VER_KEYS).sort().join(','), keys.join(','));
+      ok('sort_order не се промъква', keys.indexOf('sort_order') < 0, keys.join(','));
       ok('due_window е булево, не undefined', typeof body.due_window === 'boolean', String(body.due_window));
       const src = TASKS.find(t => t.id === 'r-warehouse');
       ok('title непроменен', body.title === src.title, body.title);
@@ -187,11 +200,13 @@ const OLD_KEYS = ['title', 'description', 'due_weekday', 'due_weekdays', 'due_ti
     }
   }
 
-  /* ═══ 5. sort_order при смяна на отдел ═══════════════════════════════ */
-  /* Съзнателно решение: при смяна задачата отива на ДЪНОТО на новия отдел.
-     Иначе задачата от „Склад" (sort_order 9) би се появила между 8-ма и
-     10-та позиция в „Администрация" (която заема 1..11). */
-  section('5. Смяна на отдел -> задачата отива на дъното на новия');
+  /* ═══ 5. sort_order при смяна на отдел (24.09.2026) ══════════════════ */
+  /* Отделът вече е СЕДМИЧЕН (версия), а sort_order е общ за всички седмици.
+     Затова преномериране няма: задачата застава в новия отдел по глобалния
+     си sort_order — „Склад" 9 попада между „Администрация" 1 и 11. Това е
+     съзнателно: преместване само за една седмица не бива да мести задачата
+     в подредбата на всички останали. Подрежда се с ▲▼ (moveRecInDept). */
+  section('5. Смяна на отдел -> sort_order не се пипа, нито редът');
   {
     const h = env();
     const { w, doc, calls } = h;
@@ -200,14 +215,20 @@ const OLD_KEYS = ['title', 'description', 'due_weekday', 'due_weekdays', 'due_ti
     save(w, doc);
     await ticks();
     const body = patchBody(calls);
-    if (ok('PATCH е изпратен', !!body)) {
-      ok('sort_order е max+1 в новия отдел (11+1)', body.sort_order === 12,
-        String(body.sort_order));
-      ok('НЕ остава старият 9', body.sort_order !== 9);
+    if (ok('версията е записана', !!body)) {
+      ok('department е новият', body.department === 'admin', body.department);
+      ok('sort_order го НЯМА във версията', !('sort_order' in body), JSON.stringify(Object.keys(body)));
     }
+    ok('recurring_tasks не е пипана', baseRowPatches(calls).length === 0,
+      JSON.stringify(baseRowPatches(calls).map(x => x.body)));
+    /* Къде застава: по глобалния sort_order 9, тоест между 1 и 11. */
+    const order = [{ id: 'r-admin-1', s: 1 }, { id: 'r-warehouse', s: 9 }, { id: 'r-admin-11', s: 11 }]
+      .sort((a, b) => a.s - b.s).map(x => x.id).join(',');
+    ok('в новия отдел се нарежда по глобалния sort_order (9 → по средата)',
+      order === 'r-admin-1,r-warehouse,r-admin-11', order);
   }
 
-  section('5б. Смяна към празен отдел -> sort_order 1');
+  section('5б. Смяна към празен отдел -> пак без sort_order');
   {
     const h = env();
     const { w, doc, calls } = h;
@@ -216,7 +237,8 @@ const OLD_KEYS = ['title', 'description', 'due_weekday', 'due_weekdays', 'due_ti
     save(w, doc);
     await ticks();
     const body = patchBody(calls);
-    ok('sort_order е 1', !!body && body.sort_order === 1, String(body && body.sort_order));
+    ok('department е „trade"', !!body && body.department === 'trade', body && body.department);
+    ok('sort_order пак го няма', !!body && !('sort_order' in body), JSON.stringify(body && Object.keys(body)));
   }
 
   /* ═══ 6. Формата за СЪЗДАВАНЕ не е пипана ════════════════════════════ */

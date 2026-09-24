@@ -24,8 +24,8 @@
         при изпращането);
      9. без отворена секция задачата се записва както преди — без ред;
     10. ПОСТОЯННА задача (19.09.2026): реален клик ✏️ в блока → секцията е
-        в редакцията; „Запази" → PATCH на recurring_tasks и ред с
-        entity_id=recurring_tasks.id; заварените ѝ отчети — в списъка и под
+        в редакцията; „Запази" → версия в recurring_task_versions
+        (24.09.2026) и ред с entity_id=recurring_tasks.id; заварените ѝ отчети — в списъка и под
         задачата в блока, ✕ трие точно реда; без чернова-предупреждение.
 
    Пускане: node tests/task-report-schedule.test.js . */
@@ -390,8 +390,11 @@ const submitNew = h => realClick(h.w, H.btnExact($(h, 'tk-ov'), 'Добави з
         check(h, '#erec-tr-groups', ['co']);
         realClick(h.w, H.btn($(h, 'edit-rec-ov'), 'Запази'), 'Запази постоянна');
         await settle(() => reportPosts(h).length > 0);
-        const pat = h.calls.patch.filter(x => x.table === 'recurring_tasks');
-        ok('PATCH на recurring_tasks?id=eq.r-zar', pat.length === 1 && /recurring_tasks\?id=eq\.r-zar$/.test(pat[0].url), pat.map(x => x.url).join(' | '));
+        /* От 24.09.2026 съдържанието се записва като ВЕРСИЯ за седмицата
+           (recurring_task_versions); редът в recurring_tasks не се пипа. */
+        const ver = h.calls.post.filter(x => x.table === 'recurring_task_versions');
+        ok('ред във versions за r-zar', ver.length === 1 && ver[0].body.recurring_task_id === 'r-zar', JSON.stringify(ver.map(x => x.body.recurring_task_id)));
+        ok('recurring_tasks не е пипана', h.calls.patch.every(x => x.table !== 'recurring_tasks'));
         const rp = reportPosts(h);
         ok('ЕДИН нов ред в notification_schedules', rp.length === 1, String(rp.length));
         const b = (rp[0] || {}).body || {};
@@ -425,9 +428,10 @@ const submitNew = h => realClick(h.w, H.btnExact($(h, 'tk-ov'), 'Добави з
       const edit = Array.prototype.find.call(hn.doc.querySelectorAll('button'), b => /openEditRecurringModal\('r-zar'\)/.test(b.getAttribute('onclick') || ''));
       realClick(hn.w, edit, '✏️');
       realClick(hn.w, H.btn($(hn, 'edit-rec-ov'), 'Запази'), 'Запази без отчет');
-      await settle(() => hn.calls.patch.some(x => x.table === 'recurring_tasks'));
+      await settle(() => hn.calls.post.some(x => x.table === 'recurring_task_versions'));
       for (let i = 0; i < 5; i++) await ticks();
-      ok('без отворена секция — само PATCH, нито един ред за отчет', reportPosts(hn).length === 0 && hn.calls.patch.some(x => x.table === 'recurring_tasks'));
+      ok('без отворена секция — само версията, нито един ред за отчет',
+        reportPosts(hn).length === 0 && hn.calls.post.some(x => x.table === 'recurring_task_versions'));
     }
   }
 

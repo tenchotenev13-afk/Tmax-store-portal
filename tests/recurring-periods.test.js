@@ -14,8 +14,9 @@
      4. ТЕКУЩАТА и СЛЕДВАЩАТА — без двете спрени, с новата;
         loadTasksStats за миналата седмица брои спряната (1/2), за текущата —
         не (0/2);
-     4б. редакция (реален клик ✏️ → „Запази") в стар бюлетин презарежда
-        всички задачи + периодите — спряната не изчезва;
+     4б. в стар бюлетин ✏️ го НЯМА (24.09.2026 — съдържание по седмици);
+     4в. редакция (реален клик ✏️ → „Запази") в ТЕКУЩАТА презарежда всички
+        задачи + периодите + версиите;
      5. ръчното известие за днешните срокове взима ДНЕШНАТА седмица, дори
         когато е отворен стар бюлетин;
      6. провалена заявка за периодите → кешът active, бюлетинът не е празен;
@@ -237,26 +238,39 @@ function expectRows(h, label, present, absent) {
   }
 
   /* ═══ 4б. Редакция в стар бюлетин ═══════════════════════════════════════ */
-  section('4б. МИНАЛАТА седмица: ✏️ → „Запази" → спряната остава след презареждането');
+  section('4б. МИНАЛАТА седмица: ✏️ го НЯМА (24.09.2026)');
   {
-    const w = hp.w, doc = hp.doc;
+    /* Редакцията вече е съдържание ПО СЕДМИЦИ (recurring_task_versions) и от
+       минал бюлетин е забранена — иначе би пренаписала миналото. Тук се
+       проверява само, че бутонът го няма; презареждането след запис е по-долу,
+       от ТЕКУЩАТА седмица. */
+    const row = blockRow(hp.doc, 'r-act');
+    ok('редът се вижда (по периода)', !!row);
+    ok('✏️ го няма в минал бюлетин', !!row && !H.btn(row, '✏️'));
+    ok('✕ си стои', !!row && !!H.btnExact(row, '✕'));
+  }
+
+  section('4в. ТЕКУЩАТА седмица: ✏️ → „Запази" → задачите и периодите наново');
+  {
+    const w = hc.w, doc = hc.doc;
     const row = blockRow(doc, 'r-act');
     const pen = row && H.btn(row, '✏️');
     if (ok('✏️ на „Работна отдавна" съществува', !!pen)) {
       guard('клик ✏️', () => H.realClick(w, pen, '✏️'));
       const save = H.btn(doc.getElementById('edit-rec-ov'), 'Запази');
       if (ok('модалът е отворен', !!save)) {
-        const before = hp.calls.get.length;
+        const before = hc.calls.get.length;
         guard('клик „Запази"', () => H.realClick(w, save, 'Запази'));
-        await settle(() => hp.calls.get.slice(before).some(u => u.indexOf('/recurring_task_periods') >= 0));
+        await settle(() => hc.calls.get.slice(before).some(u => u.indexOf('/recurring_task_periods') >= 0));
         await settle(() => !doc.getElementById('edit-rec-ov'));
         for (let i = 0; i < 5; i++) await ticks();
-        const after = hp.calls.get.slice(before);
+        const after = hc.calls.get.slice(before);
         ok('след запис: всички задачи (без active) + периодите наново',
           after.some(u => u.indexOf('/recurring_tasks?') >= 0 && u.indexOf('active=') < 0) &&
           after.some(u => u.indexOf('/recurring_task_periods') >= 0), after.join(' | '));
-        ok('„Ревизии 953" още е в блока на миналата седмица', !!blockRow(doc, 'r-rev'));
-        ok('новата още НЕ е', !blockRow(doc, 'r-new'));
+        ok('и версиите наново', after.some(u => u.indexOf('/recurring_task_versions') >= 0), after.join(' | '));
+        ok('спрените остават извън блока на текущата', !blockRow(doc, 'r-rev'));
+        ok('новата си е в блока', !!blockRow(doc, 'r-new'));
       }
     }
   }

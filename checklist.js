@@ -403,6 +403,11 @@ function checklistRecurringChanges(idx) {
 
   return Promise.all([
     sbGet('recurring_tasks', 'id=in.(' + ids.join(',') + ')&select=id,due_weekdays'),
+    /* Дните са СЪДЪРЖАНИЕ по седмици (recurring_task_versions, 24.09.2026):
+       редакция за показаната седмица мени знаменателя („2 от 3 дни"), но не
+       и за другите. Версиите са само за тези задачи. */
+    sbGet('recurring_task_versions', 'recurring_task_id=in.(' + ids.join(',') + ')&select=recurring_task_id,from_monday,to_monday,due_weekdays')
+      .catch(function () { return []; }),
     /* Прозорецът е самата показана седмица. Заявката вече изключва
        записите без дата — PostgREST не връща NULL при gte/lte.
        id влиза в select-а заради обединяването с четвъртата заявка: при
@@ -428,10 +433,11 @@ function checklistRecurringChanges(idx) {
       '&select=id,recurring_task_id,store_name,status,completion_date,postponed_to')
       .catch(function () { return []; })
   ]).then(function (r) {
-    var tasks = Array.isArray(r[0]) ? r[0] : [];
-    var comps = (Array.isArray(r[1]) ? r[1] : []).concat(Array.isArray(r[4]) ? r[4] : []);
-    var skips = Array.isArray(r[2]) ? r[2] : [];
-    var periods = Array.isArray(r[3]) ? r[3] : [];
+    /* Индексите са с +1 след заявката за версиите. */
+    var tasks = recurringApplyVersions(Array.isArray(r[0]) ? r[0] : [], Array.isArray(r[1]) ? r[1] : [], weekISO[0]);
+    var comps = (Array.isArray(r[2]) ? r[2] : []).concat(Array.isArray(r[5]) ? r[5] : []);
+    var skips = Array.isArray(r[3]) ? r[3] : [];
+    var periods = Array.isArray(r[4]) ? r[4] : [];
     var taskById = {};
     tasks.forEach(function (t) { taskById[t.id] = t; });
 

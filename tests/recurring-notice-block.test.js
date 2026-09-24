@@ -165,12 +165,13 @@ async function loaded(h) {
           doc.getElementById('erec-desc').value = 'Нов текст';
           const save = H.btn(ov, 'Запази');
           if (ok('бутонът „Запази" съществува', !!save)) {
-            ha.calls.patch.length = 0;
+            ha.calls.post.length = 0;
             guard('клик на „Запази" не хвърля', () => realClick(w, save, 'Запази'));
-            await settle(() => ha.calls.patch.length > 0);
-            const p = ha.calls.patch.filter(x => x.table === 'recurring_tasks');
-            if (ok('един PATCH към recurring_tasks', p.length === 1, String(p.length))) {
-              ok('по id на notice', p[0].url.indexOf('id=eq.r-notice') >= 0, p[0].url);
+            await settle(() => ha.calls.post.length > 0);
+            /* От 24.09.2026 редакцията пише ВЕРСИЯ за седмицата, не PATCH. */
+            const p = ha.calls.post.filter(x => x.table === 'recurring_task_versions');
+            if (ok('един ред във versions', p.length === 1, String(p.length))) {
+              ok('за id-то на notice', p[0].body.recurring_task_id === 'r-notice', JSON.stringify(p[0].body.recurring_task_id));
               ok('новото описание', p[0].body.description === 'Нов текст', JSON.stringify(p[0].body));
               ok('видът остава notice', p[0].body.task_type === 'notice', String(p[0].body.task_type));
             }

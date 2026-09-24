@@ -21,7 +21,7 @@
         период от седмицата на създаването ѝ до W−1;
      6. нова задача → период от W; миналата седмица я няма;
      7. стар бюлетин: без Спри/Активирай/Добави и без секцията; бъдещ — без Спри
-        „Спрени", със сивия текст; ✏️ и ✕ си стоят;
+        „Спрени", със сивия текст; ✕ си стои, ✏️ го няма (24.09.2026);
      8. провал на ПЪРВАТА заявка (периода) → червен тост, active НЕ се пипа;
      9. провал на ВТОРАТА (active) → червен тост „периодът Е записан" и
         презареждане, не тихо;
@@ -354,7 +354,10 @@ const periodsOf = (db, id) => db.periods.filter(p => p.recurring_task_id === id)
     const note = panel && panel.querySelector('.rec-only-current');
     ok(label + ': сивият текст е там', !!note && txt(note) === 'Промени по постоянните задачи — само от текущата и бъдещите седмици', txt(note));
     const anyRow = panel && panel.querySelector('[data-rec-row]');
-    ok(label + ': ✏️ и ✕ си стоят', !!anyRow && !!H.btn(anyRow, '✏️') && !!H.btnExact(anyRow, '✕'));
+    /* ✏️ го няма от 24.09.2026 (редакцията е съдържание по седмици и не
+       бива да пренаписва минала седмица); ✕ си стои — трие задачата. */
+    ok(label + ': ✕ си стои', !!anyRow && !!H.btnExact(anyRow, '✕'));
+    ok(label + ': ✏️ вече го НЯМА', !!anyRow && !H.btn(anyRow, '✏️'));
     /* Втора защита: извикване отдругаде (конзолата) — нищо не се пише. */
     const writesBefore = h.calls.post.length + h.calls.patch.length + h.calls.del.length;
     guard(label + ': toggleRecurringActive() директно не хвърля', () => h.w.toggleRecurringActive('r-a', false));

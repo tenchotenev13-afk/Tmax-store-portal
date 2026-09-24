@@ -238,14 +238,49 @@ function recurringValidForWeek(taskId, mondayISO, periods){
       (p.to_monday===null||p.to_monday===undefined||p.to_monday>=mondayISO);
   });
 }
-function recurringTasksForWeek(tasks, periods, mondayISO){
+function recurringTasksForWeek(tasks, periods, mondayISO, versions){
   if(!mondayISO) return (Array.isArray(tasks)?tasks:[]).filter(function(t){ return !!t&&!!t.active; });
   var has={};
   (Array.isArray(periods)?periods:[]).forEach(function(p){ if(p) has[String(p.recurring_task_id)]=1; });
-  return (Array.isArray(tasks)?tasks:[]).filter(function(t){
+  var out=(Array.isArray(tasks)?tasks:[]).filter(function(t){
     if(!t) return false;
     return has[String(t.id)] ? recurringValidForWeek(t.id, mondayISO, periods) : !!t.active;
   });
+  /* Съдържанието за СЪЩАТА седмица (recurring_task_versions, 24.09.2026).
+     Без версии или без седмица — наборът минава непроменен, тоест старият
+     извикващ с три аргумента работи както преди. */
+  return recurringApplyVersions(out, versions, mondayISO);
+}
+/* Копия от shared.js — съдържанието на постоянната задача ПО СЕДМИЦИ
+   (recurring_task_versions, 24.09.2026). Разминае ли се копието, писмото
+   носи заглавието/дните на ДРУГА седмица. */
+var RECURRING_CONTENT_FIELDS = ['title','description','due_weekday','due_weekdays','due_window','due_time','task_type','department','target_stores','report_groups','linked_module'];
+function recurringVersionForWeek(taskId, mondayISO, versions){
+  if(!Array.isArray(versions)||!mondayISO) return null;
+  var id=String(taskId), best=null;
+  versions.forEach(function(v){
+    if(!v||String(v.recurring_task_id)!==id) return;
+    if(v.from_monday>mondayISO) return;
+    if(v.to_monday!==null&&v.to_monday!==undefined&&v.to_monday<mondayISO) return;
+    if(!best||v.from_monday>best.from_monday) best=v;
+  });
+  return best;
+}
+function recurringApplyVersion(task, versions, mondayISO){
+  var v=task?recurringVersionForWeek(task.id, mondayISO, versions):null;
+  if(!v) return task;
+  var out={};
+  for(var k in task){ if(Object.prototype.hasOwnProperty.call(task,k)) out[k]=task[k]; }
+  RECURRING_CONTENT_FIELDS.forEach(function(f){ if(f in v) out[f]=v[f]; });
+  return out;
+}
+function recurringApplyVersions(tasks, versions, mondayISO){
+  if(!Array.isArray(tasks)) return [];
+  if(!Array.isArray(versions)||!versions.length||!mondayISO) return tasks;
+  return tasks.map(function(t){ return recurringApplyVersion(t, versions, mondayISO); });
+}
+function loadRecurringVersions(){
+  return sbGet('recurring_task_versions', 'select=id,recurring_task_id,from_monday,to_monday,title,description,due_weekday,due_weekdays,due_window,due_time,task_type,department,target_stores,report_groups,linked_module&order=from_monday.asc');
 }
 /* Копия от shared.js — отлагане с точна дата (task_completions.postponed_to).
    Денят на задачата е postponed_to, ако редът е пренесен; completion_date
@@ -514,7 +549,10 @@ function collectWeeklyRoutingData(cb){
     sbGet('bulletins','status=eq.published&order=year.desc,week_number.desc&limit=20'),
     /* ВСИЧКИ задачи + периодите — отчетът е за приключилата седмица. */
     sbGet('recurring_tasks'),
-    sbGet('recurring_task_periods','select=recurring_task_id,from_monday,to_monday')
+    sbGet('recurring_task_periods','select=recurring_task_id,from_monday,to_monday'),
+    /* Съдържанието за седмицата на отчета (recurring_task_versions) —
+       заглавието и report_groups в личната картичка са на тази седмица. */
+    loadRecurringVersions()
   ]).then(function(results){
     var bul = reportPickWeeklyBulletin(results[0], target);
     var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
@@ -522,7 +560,7 @@ function collectWeeklyRoutingData(cb){
        task_completions и влизат и в числителя, и в знаменателя като вечно
        неизпълнени. Един филтър вместо условие във всяко броене надолу —
        виж taskIsNotice(). */
-    var allRecurring = recurringTasksForWeek(results[1], results[2], wkDates ? wkDates[0] : null).filter(function(t){ return !taskIsNotice(t); });
+    var allRecurring = recurringTasksForWeek(results[1], results[2], wkDates ? wkDates[0] : null, Array.isArray(results[3]) ? results[3] : []).filter(function(t){ return !taskIsNotice(t); });
     var routedRecurring = allRecurring.filter(function(t){ return t.report_groups && t.report_groups.length; });
     var weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
 
@@ -1152,9 +1190,13 @@ async function collectRecurringTaskReportData(taskId: any, recipients: any, runD
     sbGet('recurring_task_periods', 'recurring_task_id=eq.' + t.id + '&select=recurring_task_id,from_monday,to_monday'),
     sbGet('recurring_task_skips', 'recurring_task_id=eq.' + t.id + '&year=eq.' + wk.year + '&week_number=eq.' + wk.week_number + '&select=recurring_task_id,store_name')
   ]);
-  if (!recurringTasksForWeek([t], Array.isArray(pre[0]) ? pre[0] : [], wkDates[0]).length) {
+  /* Съдържанието за седмицата на отчета (recurring_task_versions). */
+  var recVer: any = await sbGet('recurring_task_versions', 'recurring_task_id=eq.' + t.id + '&select=id,recurring_task_id,from_monday,to_monday,title,description,due_weekday,due_weekdays,due_window,due_time,task_type,department,target_stores,report_groups,linked_module');
+  var forWeek = recurringTasksForWeek([t], Array.isArray(pre[0]) ? pre[0] : [], wkDates[0], Array.isArray(recVer) ? recVer : []);
+  if (!forWeek.length) {
     return { skipped:'постоянната задача не важи за седмицата', task:t };
   }
+  t = forWeek[0];
   if (taskIsNotice(t)) return { skipped:'задачата е само за информация', task:t };
   var skips = Array.isArray(pre[1]) ? pre[1] : [];
   if (recurringIsSkipped(t.id, null, skips)) return { skipped:'изключена за седмицата (за всички обекти)', task:t };
