@@ -70,6 +70,7 @@ const TESTS = [
   'loading-lists-pdf.test.js',
   'loading-lists-store-rows.test.js',
   'loading-transit-toggle.test.js',
+  'loading-scan-toggle.test.js',
   'loading-diff-prefill.test.js',
   'transit-store-scope.test.js',
   'transit-direction-transfer.test.js',

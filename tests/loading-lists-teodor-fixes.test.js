@@ -105,7 +105,11 @@ function env(user, opts) {
         return rows;
       },
       users: USERS,
-      loading_list_products: [], product_catalog: [], app_settings: [],
+      loading_list_products: [], product_catalog: [],
+      /* „📷 Сканирай" е зад app_settings 'loading_scan' (по подразбиране
+         ИЗКЛЮЧЕН, 25.09.2026). Този тест описва ВКЛЮЧЕНИЯ скенер, затова
+         флагът е изричен. Изключеното състояние е в loading-scan-toggle. */
+      app_settings: [{ key: 'loading_scan', value: 'on' }],
       stores: [], contacts: [], transport_orders: [], goods_transit: [],
       stock_differences: [], differences_reports: [], stock_returns: []
     }

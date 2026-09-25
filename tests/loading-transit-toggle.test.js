@@ -49,7 +49,10 @@ function env(settings, opts) {
     user: WAREHOUSE, confirm: true,
     fail: opts.fail,
     data: {
-      app_settings: settings || [],
+      /* Скенерът е зад СВОЙ ключ (25.09.2026). Тук той е включен, защото
+         „📷 Сканирай" се ползва като доказателство, че блокът с артикули е
+         отворен — това е друг въпрос и не бива да зависи от чужд флаг. */
+      app_settings: (settings || []).concat([{ key: 'loading_scan', value: 'on' }]),
       goods_transit: TRANSIT,
       users: USERS,
       loading_lists: [], loading_list_items: [], product_catalog: [],
@@ -92,8 +95,14 @@ async function openEditor(h) {
       JSON.stringify(transitGets(h)));
     ok('но ключът Е прочетен', settingsGets(h).length === 1,
       JSON.stringify(settingsGets(h)));
-    ok('и то точно loading_transit_docs',
-      settingsGets(h).every(u => /key=eq\.loading_transit_docs/.test(u)),
+    /* От 25.09.2026 двата скрити фийчъра се четат с ЕДНА заявка
+       (llLoadFeatureFlags): две заявки за два флага удвояваха латентността
+       при отваряне на редактора, а се четат в един и същи миг. */
+    ok('и то с един in.(…) за двата ключа',
+      settingsGets(h).every(u => /key=in\.\(loading_transit_docs,loading_scan\)/.test(u)),
+      JSON.stringify(settingsGets(h)));
+    ok('и иска и двете колони — ключ и стойност',
+      settingsGets(h).every(u => /select=key,value/.test(u)),
       JSON.stringify(settingsGets(h)));
     ok('llTransitDocsOn е false', h.w.llTransitDocsOn === false,
       String(h.w.llTransitDocsOn));

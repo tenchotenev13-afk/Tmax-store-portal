@@ -79,12 +79,18 @@ var llTransitError = false;   /* снимката НЕ се зареди — р�
    снимката е месечна и складът се обърка от документи отпреди седмици.
    НЯМА бутон за превключване — пуска се от SQL Editor, когато решим. */
 var llTransitDocsOn = false;
+/* Показва ли се „📷 Сканирай" в блока „Артикули". Ключът е app_settings
+   'loading_scan'. Изключено по подразбиране И в базата, И тук: в началото
+   складът се обърква от твърде много начини да въведе един артикул, а SAP
+   кодът с автодопълване е основният път.
+   Регистърът на скритото е HIDDEN-FEATURES.md в корена. */
+var llScanOn = false;
 var LL_TRANSIT_PAGE = 1000;   /* PostgREST реже отговора на 1000 реда */
 
 var LL_KINDS = [
   ['pallet', '📦 Палет'],
   ['oversize', '📐 Извънгабаритен'],
-  ['roll',   '🧻 Рула'],
+  ['roll',   '📏 Рула'],
   ['bulk',   '🧱 Насип']
 ];
 /* Видовете, които се НОМЕРИРАТ („N от M") и получават опис за печат. Всеки
@@ -450,6 +456,13 @@ function llNormProducts(items){
    палети, а един лист обслужва няколко обекта. storeQ() дава филтъра —
    един обект, няколко назначени или никакъв за глобален профил. */
 function llLoadStoreSide(){
+  /* Fire-and-forget: флагът решава само дали се рендира един бутон, а
+     картите не бива да чакат заради него. Провалът пада към ИЗКЛЮЧЕНО. */
+  llLoadFeatureFlags().then(function(f){
+    if(f.scan === llScanOn) return;
+    llScanOn = f.scan;
+    renderLoadingLists();
+  });
   sbGet('loading_list_items','order=position.asc&select='+LL_ITEM_SELECT+storeQ()).then(function(items){
     var mine = llNormProducts(Array.isArray(items) ? items : []);
     var ids = {}, keys = [];
@@ -2288,29 +2301,40 @@ function llTransitGetAll(query){
   }
   return page(0);
 }
-/* Стойността е ТЕКСТ (app_settings е key/value от text). Само 'on' пуска
-   блока: всичко останало — липсващ ключ, празно, боклук, паднала заявка —
+/* Скритите фийчъри на модула — ЕДНА заявка за всичките ключове. Две заявки
+   за два флага удвояват латентността при отваряне на редактора, а те се
+   четат в един и същи миг.
+   Стойността е ТЕКСТ (app_settings е key/value от text). Само 'on' пуска
+   фийчъра: всичко останало — липсващ ключ, празно, боклук, паднала заявка —
    значи изключено. Образецът е reportKasaThreshold в report.js; разликата е,
-   че тук безопасната посока е ИЗКЛЮЧЕНО, а не стойност по подразбиране. */
-function llLoadTransitFlag(){
-  return sbGet('app_settings','key=eq.loading_transit_docs&select=value&limit=1')
+   че тук безопасната посока е ИЗКЛЮЧЕНО, а не стойност по подразбиране.
+   Ключът се сверява и в JS: PostgREST връща само търсените редове, но
+   in.(…) с два ключа може да ги върне в кой да е ред. */
+var LL_FEATURE_KEYS = ['loading_transit_docs', 'loading_scan'];
+function llLoadFeatureFlags(){
+  var off = { transitDocs: false, scan: false };
+  return sbGet('app_settings','key=in.('+LL_FEATURE_KEYS.join(',')+')&select=key,value')
     .then(function(rows){
-      var row = Array.isArray(rows) && rows.length ? rows[0] : null;
-      var raw = row && row.value != null ? String(row.value).trim().toLowerCase() : '';
-      return raw === 'on';
+      var on = function(key){
+        var row = (Array.isArray(rows) ? rows : []).find(function(r){ return r && r.key === key; });
+        var raw = row && row.value != null ? String(row.value).trim().toLowerCase() : '';
+        return raw === 'on';
+      };
+      return { transitDocs: on('loading_transit_docs'), scan: on('loading_scan') };
     })
-    .catch(function(){ return false; });
+    .catch(function(){ return off; });
 }
 function llLoadEditorData(){
   var wh = llActiveWarehouse();
   llTransitError = false;
-  /* Флагът се чете ПРЕДИ снимката, не успоредно с нея: при изключен блок
+  /* Флаговете се четат ПРЕДИ снимката, не успоредно с нея: при изключен блок
      заявката към goods_transit изобщо не бива да тръгва — тя е най-скъпата
      в модула (хиляди реда) и без блок никой няма да види резултата ѝ. */
-  return llLoadTransitFlag().then(function(on){
-    llTransitDocsOn = on;
+  return llLoadFeatureFlags().then(function(f){
+    llTransitDocsOn = f.transitDocs;
+    llScanOn = f.scan;
     return Promise.all([
-      on
+      f.transitDocs
         ? llTransitGetAll('supplier=eq.' + encodeURIComponent(wh) + '&status=eq.pending' +
             '&select=purchase_doc,store_name,doc_date,created_at,material_code,material_name,ordered_qty,remaining_qty,unit,position')
             .catch(function(e){
@@ -2849,7 +2873,12 @@ function llProductsBlockHtml(it, i){
   /* Формата — flex-wrap, защото складът е на телефон: на тесен екран полетата
      слизат едно под друго, вместо да изтичат вдясно. */
   h += '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:flex-end;">'+
-    '<button data-i="'+i+'" onclick="llOpenScanner(+this.dataset.i)" style="border:none;background:#0f172a;color:#fff;border-radius:6px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;">📷 Сканирай</button>'+
+    /* Скенерът е зад app_settings 'loading_scan'. Изключен, бутонът НЕ се
+       рендира — а с него не тръгва и зареждането на html5-qrcode (375 KB и
+       достъп до камерата), защото llLoadScanLib се вика само оттук. */
+    (llScanOn
+      ? '<button data-i="'+i+'" onclick="llOpenScanner(+this.dataset.i)" style="border:none;background:#0f172a;color:#fff;border-radius:6px;padding:8px 12px;font-size:13px;font-weight:600;cursor:pointer;">📷 Сканирай</button>'
+      : '')+
     '<div style="position:relative;flex:1 1 130px;min-width:120px;">'+
       '<input id="ll-pf-sap-'+i+'" data-i="'+i+'" value="'+llAttr(pf.sap_code)+'" placeholder="SAP код или име" autocomplete="off" '+
         'oninput="llPfInput(+this.dataset.i,\'sap_code\',this.value)" onkeydown="llPfKey(+this.dataset.i,\'sap_code\',event)" '+
@@ -2937,6 +2966,10 @@ function llLoadScanLib(){
 }
 
 function llOpenScanner(i){
+  /* Гейтът е и тук, не само в рендера: бутонът може да бъде извикан от
+     конзолата или от вече отворен екран, рендиран преди флагът да се смени.
+     Иначе „скрит" значи само „не се вижда". */
+  if(!llScanOn) return Promise.resolve(false);
   if(!llDraft || !llDraft.items[i]) return;
   llLoadScanLib().then(function(){
     llScanShowModal(i);

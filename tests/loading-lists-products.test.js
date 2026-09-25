@@ -103,7 +103,9 @@ function env(user, seed, opts) {
          'loading_transit_docs' (по подразбиране ИЗКЛЮЧЕН). Този тест описва
          включения блок, затова флагът е изричен. Изключеното състояние е
          в loading-transit-toggle.test.js. */
-      app_settings: [{ key: 'loading_transit_docs', value: 'on' }],
+      app_settings: [{ key: 'loading_transit_docs', value: 'on' },
+                     /* „📷 Сканирай" е зад 'loading_scan' (25.09.2026). */
+                     { key: 'loading_scan', value: 'on' }],
       product_catalog: [], goods_transit: [],
       users: db.users, stores: [], contacts: [], transport_orders: [],
       stock_differences: [], differences_reports: [], stock_returns: []
