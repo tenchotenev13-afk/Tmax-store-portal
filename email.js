@@ -77,6 +77,15 @@ function buildWeeklyDigestHtml(storeName, tasks, wk, yr) {
   var content = '<h2 style="color:#0f172a;margin:0 0 4px;">Добро утро! 👋</h2>' +
     '<p style="color:#64748b;font-size:13px;margin:0 0 16px;">Задачи за <b>' + esc(storeName) + '</b> — Седмица ' + wk + ' · ' + yr + '</p>';
 
+  /* Многоседмичната задача (bulletin_tasks.spans_from) има срок в ПО-КЪСНА
+     седмица, а групирането отдолу е само по ДЕН ОТ СЕДМИЦАТА. Без този
+     филтър задача със срок четвъртък от следващата седмица излиза под
+     „📅 Четвъртък" на ТАЗИ — писмото твърди срок, който не е нейният.
+     Затова излиза отделно, с пълната дата. */
+  var digestWeek = (wk && yr) ? weekDays(wk, yr).map(toLocalISO) : [];
+  var spanLater = tasks.filter(function(t) { return !taskCountsInWeek(t, digestWeek); });
+  if (spanLater.length) tasks = tasks.filter(function(t) { return spanLater.indexOf(t) < 0; });
+
   /* Групирай по ден */
   var byDay = {};
   tasks.forEach(function(t) {
@@ -117,6 +126,20 @@ function buildWeeklyDigestHtml(storeName, tasks, wk, yr) {
       content += '<div class="task">' +
         '<span class="dept ' + dc + '">' + dl + '</span>' +
         '<div class="task-title">' + esc(t.title || '') + '</div>' +
+        '</div>';
+    });
+  }
+
+  if (spanLater.length) {
+    hasTasks = true;
+    content += '<div class="day-hdr">🗓 Със срок в следваща седмица</div>';
+    spanLater.forEach(function(t) {
+      var dc = deptClass[t.department] || 'dept-admin';
+      var dl = deptLabel[t.department] || t.department;
+      content += '<div class="task">' +
+        '<span class="dept ' + dc + '">' + dl + '</span>' +
+        '<div class="task-title">' + esc(t.title || '') + '</div>' +
+        '<div class="task-meta">Срок: ' + esc(fmtDate(taskSpanDue(t) || t.due_date)) + ' — може да се отметне и по-рано</div>' +
         '</div>';
     });
   }

@@ -176,6 +176,7 @@ const TESTS = [
   'task-report-responder.test.js',
   'task-report-supply.test.js',
   'task-report-recurring.test.js',
+  'task-span-weeks.test.js',
   'no-auto-push-on-load.test.js',
   'bulletin-unpublished-push.test.js',
   'responder-publication-gate.test.js',

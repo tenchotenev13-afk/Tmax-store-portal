@@ -81,6 +81,8 @@ const SHARED_FNS = [
   'reportEmailShell', 'reportTrendHtml', 'reportDotColor', 'reportPctColor',
   'reportStatCell', 'reportStoreRow', 'reportTopBottomTable',
   'reportNoDueNoticeHtml', 'reportPostponedSectionHtml', 'reportWeekRangeLabel',
+  /* списъкът „в срок" — многоседмичните преди срока си (25.09.2026) */
+  'reportSpanDueWeekLabel', 'reportSpanPendingHtml',
   'reportScopeNoticeHtml', 'reportKasaSectionHtml',
   'reportDayMonth', 'reportDailySubject', 'reportWeeklySubject',
   /* решетка „обект × задача" и двата ѝ среза */
@@ -141,7 +143,17 @@ const COPIED_HELPERS = [
      копието, отчетът мери задачата срещу първоначалния ѝ срок, докато
      порталът вече я очаква на новата дата. */
   { fn: 'taskDueDateFor', from: SHARED },
-  { fn: 'taskIsMovedAway', from: SHARED }
+  { fn: 'taskIsMovedAway', from: SHARED },
+  /* Многоседмична задача — срок в ПО-КЪСНА седмица (bulletin_tasks.spans_from,
+     25.09.2026). Разминае ли се копието, писмото от крона брои задачата в
+     седмица, в която порталът я показва само като „в срок" — или я пропуска
+     в деня на срока ѝ. */
+  { fn: 'taskSpansWeeks', from: SHARED },
+  { fn: 'taskSpanDue', from: SHARED },
+  { fn: 'taskCountsInWeek', from: SHARED },
+  { fn: 'spanWeekSunday', from: SHARED },
+  { fn: 'loadSpanningTasks', from: SHARED },
+  { fn: 'mergeSpanningTasks', from: SHARED },
 ];
 
 /* Съзнателни разминавания — изброени, за да не изглеждат като пропуск.
@@ -211,7 +223,17 @@ const ROUTED_COPIED = [
   { fn: 'coPersonName', from: BULLETIN },
   /* Отлагане с точна дата — виж COPIED_HELPERS по-горе. */
   { fn: 'taskDueDateFor', from: SHARED },
-  { fn: 'taskIsMovedAway', from: SHARED }
+  { fn: 'taskIsMovedAway', from: SHARED },
+  /* Многоседмична задача — срок в ПО-КЪСНА седмица (bulletin_tasks.spans_from,
+     25.09.2026). Разминае ли се копието, писмото от крона брои задачата в
+     седмица, в която порталът я показва само като „в срок" — или я пропуска
+     в деня на срока ѝ. */
+  { fn: 'taskSpansWeeks', from: SHARED },
+  { fn: 'taskSpanDue', from: SHARED },
+  { fn: 'taskCountsInWeek', from: SHARED },
+  { fn: 'spanWeekSunday', from: SHARED },
+  { fn: 'loadSpanningTasks', from: SHARED },
+  { fn: 'mergeSpanningTasks', from: SHARED },
 ];
 
 /* Само в send-routed-report: PostgREST със service ключ и всичко около

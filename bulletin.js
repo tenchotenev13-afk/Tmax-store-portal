@@ -648,6 +648,65 @@ function readDueDatesCheckboxes(selId){
   return Array.prototype.slice.call(wrap.querySelectorAll('input[type=checkbox]:checked')).map(function(cb){ return cb.value; });
 }
 
+/* ═══ СРОК В ПО-КЪСНА СЕДМИЦА — КОНТРОЛЪТ ВЪВ ФОРМАТА ═══════════════════
+   Отметката изключва седемте дни и обратно: срокът е ЕДИН ден (така го
+   изисква и bulletin_tasks_spans_single_day_chk), а „няколко дни + друга
+   седмица" значи няколко отмятания, тоест обратното на „една отчетност".
+   Границите: от понеделника на СЛЕДВАЩАТА седмица до spans_from+27, тоест
+   най-много четири седмици заедно с текущата. Същите числа са и в базата —
+   тук са, за да не стига човекът до 400 от PostgREST. */
+function bulSpanMinDate(days){ return toLocalISO(new Date(days[6].getFullYear(),days[6].getMonth(),days[6].getDate()+1)); }
+function bulSpanMaxDate(days){ return toLocalISO(new Date(days[0].getFullYear(),days[0].getMonth(),days[0].getDate()+27)); }
+function spanFieldHtml(prefix, days, task){
+  var due = taskSpanDue(task);
+  var on = !!due;
+  return '<div style="border:1px solid '+(on?'#a5f3fc':'#e2e8f0')+';border-radius:8px;padding:8px 10px;margin-top:6px;background:'+(on?'#ecfeff':'#fff')+';">'+
+    '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#0e7490;cursor:pointer;font-weight:600;">'+
+      '<input type="checkbox" id="'+prefix+'-span-on"'+(on?' checked':'')+' data-days="'+prefix+'-due-dates" onchange="bulSpanToggle(this)" style="width:14px;height:14px;cursor:pointer;">'+
+      '🗓 Срок в следваща седмица'+
+    '</label>'+
+    '<div id="'+prefix+'-span-wrap" style="display:'+(on?'block':'none')+';margin-top:6px;">'+
+      '<input type="date" class="fi" id="'+prefix+'-span-due" value="'+(due||'')+'" min="'+bulSpanMinDate(days)+'" max="'+bulSpanMaxDate(days)+'" style="margin:0;">'+
+      '<div style="font-size:10.5px;color:#64748b;margin-top:4px;">Един ден, най-много 4 седмици напред ('+bulDM(bulSpanMinDate(days))+' – '+bulDM(bulSpanMaxDate(days))+'). Задачата се вижда всяка седмица дотогава, отмята се веднъж и се брои в седмицата на срока.</div>'+
+    '</div></div>';
+}
+/* Отметката и седемте дни са взаимно изключващи се — иначе остава да се гадае
+   кое от двете е „срокът". */
+function bulSpanToggle(cb){
+  var prefix=String(cb.id).replace('-span-on','');
+  var wrap=document.getElementById(prefix+'-span-wrap');
+  if(wrap)wrap.style.display=cb.checked?'block':'none';
+  var days=document.getElementById(cb.dataset.days);
+  if(days){
+    Array.prototype.slice.call(days.querySelectorAll('input[type=checkbox]')).forEach(function(x){
+      if(cb.checked)x.checked=false;
+      x.disabled=cb.checked;
+    });
+    days.style.opacity=cb.checked?'.45':'1';
+  }
+}
+/* Прочита контрола. Връща {spans:false} за обикновена задача, {spans:true,
+   due, from} за многоседмична, {error} при невалидна дата. Проверките са
+   тук, а не само в min/max: полето се пълни и от клавиатурата. */
+function bulSpanRead(prefix, days){
+  var cb=document.getElementById(prefix+'-span-on');
+  if(!cb||!cb.checked) return {spans:false};
+  var v=((document.getElementById(prefix+'-span-due')||{}).value||'').slice(0,10);
+  if(!v) return {error:'Избери дата за срока в следващата седмица'};
+  var lo=bulSpanMinDate(days), hi=bulSpanMaxDate(days);
+  if(v<lo) return {error:'Срокът трябва да е след '+bulDM(days[6])+' — иначе е обикновена задача с ден от тази седмица'};
+  if(v>hi) return {error:'Срокът е най-много 4 седмици напред (до '+bulDM(hi)+')'};
+  return {spans:true, due:v, from:toLocalISO(days[0])};
+}
+/* Полетата за срока в тялото на заявката — един източник за новата задача и
+   за редакцията. Многоседмична: due_date = due_dates[0] = избраният ден,
+   spans_from = понеделникът на седмицата на бюлетина. Обикновена: spans_from
+   се ЗАНУЛЯВА изрично, за да може многоседмична да стане обикновена. */
+function bulSpanBody(span, dueDates){
+  if(span.spans) return {due_date:span.due, due_dates:[span.due], spans_from:span.from};
+  return {due_date:dueDates.length?dueDates[0]:null, due_dates:dueDates.length?dueDates:null, spans_from:null};
+}
+
 /* ═══ МНОГОДНЕВНИ ПОСТОЯННИ ЗАДАЧИ — постоянна задача може да важи за
    НЯКОЛКО дни от седмицата (напр. Пон+Ср+Пет), не само 1/всеки ден. Ново
    поле due_weekdays (масив от 0-6) с fallback към старото due_weekday
@@ -1023,8 +1082,130 @@ function bulAutoCompleteValid(auto, dueDates){
 }
 /* Автоматичното бие датата: за такава задача чекбоксът е заключен винаги,
    независимо кой ден се гледа. */
-function bulLockReason(cdate,linkedModule){
+/* ═══ МНОГОСЕДМИЧНА ЗАДАЧА — СРОК В ПО-КЪСНА СЕДМИЦА ═══════════════════
+   Задачата е ЕДНА (един ред, едно отмятане на обект, едно X/18) и се вижда
+   от седмицата, в която е поставена, до седмицата на срока. Правилата за
+   видимост и броене са в shared.js (taskSpansWeeks / taskCountsInWeek /
+   loadSpanningTasks), тук са само екранните последствия.
+   spans_from като ISO низ, '' за обикновена задача — за data- атрибутите. */
+function bulSpanOf(t){ return (t&&t.spans_from) ? String(t.spans_from).slice(0,10) : ''; }
+/* Задача от ЧУЖД бюлетин: показва се тук, но се редактира там (решение 5,
+   25.09.2026). openEditTaskModal строи дните от ПОКАЗАНАТА седмица, тоест
+   запис оттук би преместил срока в нея, мълчаливо. */
+function bulTaskIsForeign(t){
+  return !!t && !!curBul && !!t.bulletin_id && String(t.bulletin_id)!==String(curBul.id);
+}
+/* Седмицата на показания бюлетин като 7 ISO дати — ключът за „брои ли се". */
+function bulWeekISO(){
+  if(!curBul) return [];
+  return weekDays(curBul.week_number,curBul.year).map(toLocalISO);
+}
+/* Многоседмична задача, чийто срок е ИЗВЪН показаната седмица: вижда се,
+   но не влиза в никой брояч — „в срок", не „неизпълнена". */
+function bulSpanPending(t){
+  return taskSpansWeeks(t) && !taskCountsInWeek(t, bulWeekISO());
+}
+/* Седмицата, в която е поставена задачата — от вградения bulletins при
+   заявката за многоседмични, с резерва bulListCache (превключвателят). */
+function bulSpanHomeLabel(t){
+  var b=(t&&t.bulletins)||null;
+  if(!b&&t&&t.bulletin_id) b=bulListCache.find(function(x){return String(x.id)===String(t.bulletin_id);})||null;
+  if(b&&b.week_number) return 'С'+b.week_number;
+  if(t&&t.week_number) return 'С'+t.week_number;
+  return '';
+}
+/* Седмицата на СРОКА — за значката в по-ранните седмици. */
+function bulSpanDueWeekLabel(t){
+  var due=taskSpanDue(t);
+  if(!due) return '';
+  return 'С'+weekNum(new Date(due+'T00:00:00'));
+}
+function bulSpanBadgeHtml(t){
+  if(!taskSpansWeeks(t)) return '';
+  var due=taskSpanDue(t);
+  if(!due) return '';
+  var lbl = bulSpanPending(t)
+    ? '🗓 Срок '+bulDM(due)+' · '+bulSpanDueWeekLabel(t)
+    : '🗓 ↔ от '+bulSpanHomeLabel(t);
+  return '<span title="Задача с срок в по-късна седмица — едно отмятане за целия период" style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc;white-space:nowrap;cursor:help;">'+lbl+'</span>';
+}
+/* Редът „поставена е другаде" под заглавието, когато задачата идва от чужд
+   бюлетин. Бутонът превключва на него — иначе човекът трябва да се сети сам
+   в коя седмица да я търси. Само за admin/accounting: за обекта е без
+   значение къде е поставена задачата — значката със срока му казва всичко. */
+function bulSpanHomeNoteHtml(t){
+  if(!bulTaskIsForeign(t)||!canEdit()) return '';
+  var lbl=bulSpanHomeLabel(t);
+  return '<div style="font-size:10px;color:#0e7490;margin-top:2px;">↔ Поставена в '+esc(lbl||'друга седмица')+
+    ' · <button data-bid="'+esc(String(t.bulletin_id))+'" onclick="selectBulletin(this.dataset.bid)" style="border:1px solid #a5f3fc;background:#ecfeff;color:#0e7490;border-radius:5px;padding:1px 7px;font-size:10px;cursor:pointer;">Отвори '+esc(lbl||'седмицата')+'</button> за редакция'+
+    '</div>';
+}
+/* Отмятането на многоседмична задача е отключено от понеделника на
+   седмицата ѝ до СРОКА включително (решение 1, 25.09.2026). Преди
+   публикуването обектът и без това не вижда бюлетина, затова долната
+   граница е понеделникът, не датата на публикуване. След срока — заключено,
+   както при всяка друга задача. completion_date остава СРОКЪТ: оттам идват
+   „едно X/18" и „една отчетност", и точно това пише и
+   transit_sync_completions() за автоматичната „Стока на път". */
+/* ЛЕНТАТА ПОД КАЛЕНДАРА — многоседмичните задачи, чийто срок е в по-късна
+   седмица. Клетка в решетката те НЯМАТ: в тази седмица нямат ден, а
+   слагането им в неделя се чете като срок в неделя. Лентата е един ред на
+   задача, с деня на срока и седмицата му. Обектът може да отметне оттук —
+   отмятането е едно и също явяване, с completion_date = срока, тоест
+   чекбоксът в блока по отдел и в панела показват същото. */
+/* Задачите, ДЪЛЖИМИ в показаната седмица. Ползва се от изходящите неща,
+   които говорят за „тази седмица" — седмичния дайджест и push-а „бюлетинът е
+   публикуван": bulTasks вече съдържа и многоседмичните от по-ранни бюлетини,
+   а те се броят в седмицата на срока си. */
+function bulWeekTasks(){
+  var wk=bulWeekISO();
+  return bulTasks.filter(function(t){ return taskCountsInWeek(t, wk); });
+}
+function bulSpanStripHtml(){
+  var store=currentUser&&currentUser.store_name;
+  var rows=bulTasks.filter(function(t){
+    if(taskIsNotice(t)||!bulSpanPending(t)) return false;
+    return isGlobal()||!t.target_stores||!t.target_stores.length||(store&&t.target_stores.indexOf(store)>=0);
+  });
+  if(!rows.length) return '';
+  var h='<div id="sec-span-strip" style="margin-top:10px;border-top:1px dashed #a5f3fc;padding-top:8px;">';
+  h+='<div style="font-size:11px;font-weight:700;color:#0e7490;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">🗓 Със срок в следваща седмица</div>';
+  rows.forEach(function(t){
+    var due=taskSpanDue(t);
+    var done=!isGlobal()&&store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===due;});
+    h+='<div style="display:flex;gap:6px;padding:3px 0;align-items:flex-start;">';
+    if(isGlobal()){
+      h+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Срок в по-късна седмица">🗓</span>';
+      h+='<span style="font-size:12.5px;flex:1;line-height:1.35;">'+esc(t.title||'')+'</span>';
+      h+=calItemStatusHtml(t.id,'regular',t.target_stores,due,null);
+    } else {
+      h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+(due||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(due,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:#0e7490;'+bulLockStyle(due,bulTaskLinkKey(t),bulSpanOf(t))+'">';
+      h+='<span style="font-size:12.5px;flex:1;line-height:1.35;'+(done?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
+    }
+    h+='<span style="font-size:10px;font-weight:700;color:#0e7490;white-space:nowrap;margin-left:4px;">до '+bulDM(due)+' · '+bulSpanDueWeekLabel(t)+'</span>';
+    h+='</div>';
+  });
+  return h+'</div>';
+}
+/* Бюлетинът, в който задачата е ПОСТАВЕНА. Отмятането от по-късна седмица
+   иначе записваше показания бюлетин в task_completions.bulletin_id —
+   колоната никъде не се чете, но ред, който твърди чужда седмица, е точно
+   от нещата, по които следващият диагностицира грешно. */
+function bulTaskBulletinId(taskId){
+  var t=bulTasks.find(function(x){ return String(x.id)===String(taskId); });
+  if(t&&t.bulletin_id) return t.bulletin_id;
+  return curBul ? curBul.id : null;
+}
+function bulSpanLockReason(cdate,spanFrom){
+  var t=bulTodayISO();
+  if(!cdate||!spanFrom) return bulDateLockReason(cdate);
+  if(t<spanFrom) return 'future';
+  if(t>cdate) return 'past';
+  return null;
+}
+function bulLockReason(cdate,linkedModule,spanFrom){
   if(bulAutoLocked(linkedModule)) return linkedModule==='transit-auto' ? 'auto-transit' : 'auto';
+  if(spanFrom) return bulSpanLockReason(cdate,spanFrom);
   return bulDateLockReason(cdate);
 }
 function bulLockLabel(reason){
@@ -1034,12 +1215,12 @@ function bulLockLabel(reason){
 }
 /* Заключената контрола НЕ се крие — стои видима, само не се натиска.
    Контрола, която изчезва според данните, изглежда като счупена. */
-function bulLockAttr(cdate,linkedModule){
-  var r=bulLockReason(cdate,linkedModule);
+function bulLockAttr(cdate,linkedModule,spanFrom){
+  var r=bulLockReason(cdate,linkedModule,spanFrom);
   return r ? ' disabled title="'+bulLockLabel(r)+'"' : '';
 }
-function bulLockStyle(cdate,linkedModule){
-  return bulLockReason(cdate,linkedModule) ? 'opacity:.45;cursor:not-allowed;' : '';
+function bulLockStyle(cdate,linkedModule,spanFrom){
+  return bulLockReason(cdate,linkedModule,spanFrom) ? 'opacity:.45;cursor:not-allowed;' : '';
 }
 /* Втора защита в обработчиците: disabled в markup-а не спира извикване от
    конзолата и не предпазва, ако функцията бъде преизползвана отдругаде.
@@ -1047,7 +1228,7 @@ function bulLockStyle(cdate,linkedModule){
    отпреди клика (важи и за отмятане, и за разотмятане). */
 function bulLockRejected(cb){
   var ds=(cb&&cb.dataset)||{};
-  var r=bulLockReason(ds.cdate||null,ds.linked||null);
+  var r=bulLockReason(ds.cdate||null,ds.linked||null,ds.span||null);
   if(!r) return false;
   cb.checked=!cb.checked;
   toast(bulLockLabel(r),'#d97706');
@@ -1425,8 +1606,19 @@ function loadBulletin(){
     bulSetRecurring(results[1], results[3], results[5]);
     bulSkips=Array.isArray(results[2])?results[2]:[];
     bulCarried=Array.isArray(results[4])?results[4]:[];
-    sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=sort_order.asc,due_date.asc').then(function(t){
-      bulTasks=Array.isArray(t)?t:[];
+    /* Задачите на ТОЗИ бюлетин + многоседмичните от по-ранни бюлетини, чийто
+       срок още не е минал (spans_from <= неделя, due_date >= понеделник).
+       Вторият източник е по ДАТИ, не по бюлетин — задачата принадлежи на
+       чужда седмица, точно както при пренесените (bulCarriedQuery).
+       Обектите виждат само многоседмични от ПУБЛИКУВАН бюлетин: чернова W
+       значи скрита и в по-късните седмици. */
+    var bulSpanWk=weekDays(curBul.week_number,curBul.year);
+    Promise.all([
+      sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=sort_order.asc,due_date.asc'),
+      loadSpanningTasks(toLocalISO(bulSpanWk[0]),toLocalISO(bulSpanWk[6]),canEdit())
+    ]).then(function(tt){
+      var t=tt[0];
+      bulTasks=mergeSpanningTasks(Array.isArray(t)?t:[], tt[1]);
       bulFetchCarriedTasks();
       bulLoadTransitPending();
       bulLoadTaskReports();
@@ -1676,7 +1868,7 @@ function renderBulView(){
           html+=calItemStatusHtml(t.id,'regular',t.target_stores,dateStr);
         } else {
           var doneReg=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===dateStr;});
-          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+dateStr+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(dateStr,bulTaskLinkKey(t))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(dateStr,bulTaskLinkKey(t))+'">';
+          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+dateStr+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(dateStr,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(dateStr,bulTaskLinkKey(t),bulSpanOf(t))+'">';
           var carReg=bulCarriedInto('regular',t.id,store,dateStr);
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carReg?bulCarriedMiniHtml(carReg):'')+bulAutoTransitNoteHtml(t,doneReg)+'</span>';
         }
@@ -1753,7 +1945,11 @@ function renderBulView(){
     if(canEdit())html+='<button data-key="'+key+'" onclick="bulOpenCal(this)" style="width:100%;margin-top:6px;padding:4px;border:1px dashed #cbd5e1;border-radius:5px;background:none;color:#94a3b8;font-size:11.5px;cursor:pointer;font-family:inherit;">+ Добави</button>';
     html+='</div>';
   });
-  html+='</div></div>';
+  html+='</div>';
+  /* Многоседмичните със срок в по-късна седмица — под решетката, вътре в
+     картичката на календара (виж bulSpanStripHtml). */
+  html+=bulSpanStripHtml();
+  html+='</div>';
 
 
   /* Задачи панел */
@@ -1815,12 +2011,15 @@ function renderBulView(){
         var ppComp=(store&&!isMulti)?bulPostponedCompOf('regular',t.id,store,singleDate):null;
         var postponed=!!ppComp;
         var compObj=store&&!isMulti&&bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===store&&(cc.completion_date||null)===singleDate;});
-        var deptTasksForNav=bulTasks.filter(function(x){return x.department===t.department&&!taskIsNotice(x);});
+        /* Многоседмичната задача от ЧУЖД бюлетин не участва в подредбата:
+           sort_order ѝ е от нейната седмица и пренаписването му оттук би
+           разместило чужд бюлетин. Затова и ▲▼ ги няма на нейния ред. */
+        var deptTasksForNav=bulTasks.filter(function(x){return x.department===t.department&&!taskIsNotice(x)&&!bulTaskIsForeign(x);});
         var taskIdxInDept=deptTasksForNav.findIndex(function(x){return String(x.id)===String(t.id);});
         var isFirstTask=taskIdxInDept===0, isLastTask=taskIdxInDept===deptTasksForNav.length-1;
         var titleColor=done?'#94a3b8':postponed?'#b45309':'#0f172a';
-        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;"'+(canEdit()?' draggable="true" data-tid="'+t.id+'" ondragstart="taskDragStart(event,this)" ondragend="taskDragEnd(this)"':'')+'>';
-        if(canEdit()){
+        html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;"'+((canEdit()&&!bulTaskIsForeign(t))?' draggable="true" data-tid="'+t.id+'" ondragstart="taskDragStart(event,this)" ondragend="taskDragEnd(this)"':'')+'>';
+        if(canEdit()&&!bulTaskIsForeign(t)){
           html+='<div style="display:flex;flex-direction:column;gap:1px;flex-shrink:0;margin-top:1px;">'+
             '<button data-task-id="'+t.id+'" onclick="taskMoveUp(this.dataset.taskId)" '+(isFirstTask?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isFirstTask?'#f8fafc':'#fff')+';color:'+(isFirstTask?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isFirstTask?'default':'pointer')+';padding:0;">▲</button>'+
             '<button data-task-id="'+t.id+'" onclick="taskMoveDown(this.dataset.taskId)" '+(isLastTask?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isLastTask?'#f8fafc':'#fff')+';color:'+(isLastTask?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isLastTask?'default':'pointer')+';padding:0;">▼</button>'+
@@ -1829,9 +2028,9 @@ function renderBulView(){
         if(isMulti){
           html+='<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
-          html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,bulTaskLinkKey(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+bulLockStyle(singleDate,bulTaskLinkKey(t))+'">';
+          html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+'">';
         }
-        html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done,singleDate)+bulPostponedBadgeHtml(ppComp)+'</div>';
+        html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done,singleDate)+bulPostponedBadgeHtml(ppComp)+bulSpanBadgeHtml(t)+'</div>';
         if(t.description)html+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         html+=bulAutoTransitNoteHtml(t,done);
         if(isMulti){
@@ -1846,6 +2045,7 @@ function renderBulView(){
         } else if(singleDate){
           html+=bulDueLineHtml(singleDate,done?bulDoneComp(t.id,store,singleDate):null,' ⚠️');
         }
+        html+=bulSpanHomeNoteHtml(t);
         if(isGlobal()&&t.target_stores&&t.target_stores.length)html+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🏬 Само за: '+t.target_stores.map(esc).join(', ')+'</div>';
         if(isGlobal()&&t.created_by)html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">👤 Поставена от: '+esc(t.created_by)+'</div>';
         if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))html+=renderCompletionExtras(compObj);
@@ -1863,7 +2063,10 @@ function renderBulView(){
           else if(!bulAutoLocked(bulTaskLinkKey(t)))html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
           html+='</div>';
         }
-        if(canEdit()){html+='<div style="display:flex;gap:4px;flex-shrink:0;">'
+        /* Редакция, известие и изтриване САМО от бюлетина, в който задачата
+           е поставена (решение 5, 25.09.2026): формата строи дните от
+           ПОКАЗАНАТА седмица, тоест запис оттук би преместил срока в нея. */
+        if(canEdit()&&!bulTaskIsForeign(t)){html+='<div style="display:flex;gap:4px;flex-shrink:0;">'
           +'<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>'
           +'<button data-task-id="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'task\',this.dataset.taskId,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#d97706;">🔔</button>'
           +'<button data-task-id="'+t.id+'" onclick="bulDelTask(this)" style="border:1px solid #fecaca;background:#fff5f5;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#dc2626;">✕</button>'
@@ -2125,7 +2328,14 @@ function bulDelBlock(btn){
 function bulDelTask(btn){
   if(!canEdit()){toast('Нямаш права за това действие','#dc2626');return;}
   var id=btn.getAttribute('data-task-id');
-  if(!confirm('Изтрий задачата?'))return;
+  /* Многоседмичната е ЕДИН ред: изтриването я маха от всички седмици, в
+     които се вижда, заедно с отмятанията (ON DELETE CASCADE). Затова
+     въпросът го казва — иначе изглежда като изтриване „от тази седмица". */
+  var delT=bulTasks.find(function(x){ return String(x.id)===String(id); });
+  var delDue=taskSpanDue(delT);
+  if(!confirm(delDue
+    ? 'Изтрий задачата? Тя е със срок '+fmtDate2(delDue)+' и ще изчезне от всички седмици, в които се вижда, заедно с отмятанията.'
+    : 'Изтрий задачата?'))return;
   sbDelete('bulletin_tasks','id=eq.'+id).then(function(res){
     if(!res.ok){
       console.error('изтриване на задача: НЕ беше изтрита',id,res.error);
@@ -2384,6 +2594,7 @@ function taskModalHtml(){
     '<label class="fl">Вид задача</label><select class="fi" id="tk-type">'+taskTypeOptsHtml('info')+'</select>' +
     '<label class="fl">Срок — избери един или няколко дни (по избор)</label>' +
     dueDatesCheckboxesHtml('tk-due-dates', days, []) +
+    spanFieldHtml('tk', days, null) +
     '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
     '<select class="fi" id="tk-stores" multiple size="6" style="height:120px;"></select>' +
     '<label class="fl">Групи за докладване (получават известие/седмичен репорт)</label>' +
@@ -2425,6 +2636,10 @@ function openEditTaskModal(taskId) {
   if (!canEdit()) { toast('Нямаш права за това действие','#dc2626'); return; }
   var t = bulTasks.find(function(x){ return String(x.id) === String(taskId); });
   if (!t) { toast('Задачата не е намерена','#dc2626'); return; }
+  /* Втора защита: бутонът ✏️ го няма на реда на чужда задача, но извикване
+     отвън (конзола, друг рендер) не бива да отваря форма, чийто запис би
+     преместил срока в показаната седмица. */
+  if (bulTaskIsForeign(t)) { toast('Задачата е поставена в '+(bulSpanHomeLabel(t)||'друга седмица')+' — редактирай я там','#d97706'); return; }
   var wk = curBul ? curBul.week_number : weekNum(new Date());
   var yr = curBul ? curBul.year : new Date().getFullYear();
   var days = weekDays(wk, yr);
@@ -2450,7 +2665,8 @@ function openEditTaskModal(taskId) {
     '</select>' +
     '<label class="fl">Вид задача</label><select class="fi" id="etk-type">'+taskTypeOptsHtml(t.task_type)+'</select>' +
     '<label class="fl">Срок — избери един или няколко дни (по избор)</label>' +
-    dueDatesCheckboxesHtml('etk-due-dates', days, taskDueDates(t)) +
+    dueDatesCheckboxesHtml('etk-due-dates', days, taskSpansWeeks(t)?[]:taskDueDates(t)) +
+    spanFieldHtml('etk', days, t) +
     '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
     '<select class="fi" id="etk-stores" multiple size="6" style="height:120px;"></select>' +
     '<label class="fl">Групи за докладване (получават известие/седмичен репорт)</label>' +
@@ -2466,6 +2682,8 @@ function openEditTaskModal(taskId) {
     '</div></div>';
   document.body.appendChild(ov);
   bulFillStoreMultiSelect('etk-stores', t.target_stores||[]);
+  var etkSp=document.getElementById('etk-span-on');
+  if(etkSp&&etkSp.checked)bulSpanToggle(etkSp);
   setTimeout(function(){ var el=document.getElementById('etk-title'); if(el)el.focus(); }, 80);
 }
 
@@ -2477,20 +2695,24 @@ function submitEditTask(taskId) {
   var taskType = document.getElementById('etk-type').value||'info';
   var desc = document.getElementById('etk-desc').value||'';
   var dueDates = readDueDatesCheckboxes('etk-due-dates');
+  var etkDays = weekDays(curBul?curBul.week_number:weekNum(new Date()), curBul?curBul.year:new Date().getFullYear());
+  var etkSpan = bulSpanRead('etk', etkDays);
+  if (etkSpan.error) { toast(etkSpan.error,'#dc2626'); return; }
+  var etkDue = bulSpanBody(etkSpan, dueDates);
   var stores = bulReadStoreMultiSelect('etk-stores');
   var reportGroups = readReportGroupsCheckboxes('etk-report-groups');
   var linkedModule = (document.getElementById('etk-linked-module')||{}).value||null;
   var autoComplete = bulAutoCompleteRead('etk', linkedModule);
-  if (!bulAutoCompleteValid(autoComplete, dueDates)) return;
+  if (!bulAutoCompleteValid(autoComplete, etkSpan.spans?[etkSpan.due]:dueDates)) return;
   var trc = trCollect('etk');
   if (trc.error) { toast(trc.error,'#dc2626'); return; }
-  var body = {title:title,description:desc,department:dept,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete};
+  var body = {title:title,description:desc,department:dept,due_date:etkDue.due_date,due_dates:etkDue.due_dates,spans_from:etkDue.spans_from,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete};
   /* sort_order влиза САМО при истинска смяна на отдела - иначе всяко
      отваряне и запазване на задачата би я хвърлило най-отдолу. */
   var t = bulTasks.find(function(x){ return String(x.id) === String(taskId); });
   var newOrder = null;
   if (t && t.department !== dept) {
-    var maxOrder = bulTasks.filter(function(x){return x.department===dept;}).reduce(function(m,x){return Math.max(m,x.sort_order||0);},0);
+    var maxOrder = bulTasks.filter(function(x){return x.department===dept&&!bulTaskIsForeign(x);}).reduce(function(m,x){return Math.max(m,x.sort_order||0);},0);
     newOrder = maxOrder+1;
     body.sort_order = newOrder;
   }
@@ -2844,24 +3066,30 @@ function trSaveReports(taskId, list){
   });
 }
 
-function openTaskModal(){trDrafts.tk=[];var trw=document.getElementById('tk-tr-wrap');if(trw)trw.innerHTML=trSectionHtml('tk',null);if(!reportGroupPeopleCache)loadReportGroupPeople();document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');}
+function openTaskModal(){trDrafts.tk=[];var trw=document.getElementById('tk-tr-wrap');if(trw)trw.innerHTML=trSectionHtml('tk',null);if(!reportGroupPeopleCache)loadReportGroupPeople();document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');var sp=document.getElementById('tk-span-on');if(sp){sp.checked=false;var spd=document.getElementById('tk-span-due');if(spd)spd.value='';bulSpanToggle(sp);}}
 function closeTk(){document.getElementById('tk-ov').classList.remove('open');}
 function submitTask(){
   var title=(document.getElementById('tk-title').value||'').trim();
   if(!title){toast('Въведи заглавие','#dc2626');return;}
   var dept=document.getElementById('tk-dept').value;
   var taskType=document.getElementById('tk-type').value||'info';
-  var maxOrder=bulTasks.filter(function(t){return t.department===dept;}).reduce(function(m,t){return Math.max(m,t.sort_order||0);},0);
+  /* Подредбата е в ТОЗИ бюлетин: sort_order на многоседмична задача от чужд
+     бюлетин е от нейната седмица и не бива да мести новата задача. */
+  var maxOrder=bulTasks.filter(function(t){return t.department===dept&&!bulTaskIsForeign(t);}).reduce(function(m,t){return Math.max(m,t.sort_order||0);},0);
   var stores=bulReadStoreMultiSelect('tk-stores');
   var reportGroups=readReportGroupsCheckboxes('tk-report-groups');
   var linkedModule=(document.getElementById('tk-linked-module')||{}).value||null;
   var dueDates=readDueDatesCheckboxes('tk-due-dates');
+  var tkDays=weekDays(curBul.week_number,curBul.year);
+  var tkSpan=bulSpanRead('tk',tkDays);
+  if(tkSpan.error){toast(tkSpan.error,'#dc2626');return;}
+  var tkDue=bulSpanBody(tkSpan,dueDates);
   var autoComplete=bulAutoCompleteRead('tk',linkedModule);
-  if(!bulAutoCompleteValid(autoComplete,dueDates))return;
+  if(!bulAutoCompleteValid(autoComplete,tkSpan.spans?[tkSpan.due]:dueDates))return;
   var trc=trCollect('tk');
   if(trc.error){toast(trc.error,'#dc2626');return;}
   /* sbPostReturn — id-то на задачата трябва за насрочените отчети. */
-  sbPostReturn('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:dueDates.length?dueDates[0]:null,due_dates:dueDates.length?dueDates:null,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
+  sbPostReturn('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:tkDue.due_date,due_dates:tkDue.due_dates,spans_from:tkDue.spans_from,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     var newId=r.row&&r.row.id;
     var repP=trc.list.length
@@ -3072,7 +3300,8 @@ function moveTaskInDept(id,dir){
   var task=bulTasks.find(function(t){return String(t.id)===String(id);});
   if(!task)return;
   var dept=task.department;
-  var deptTasks=bulTasks.filter(function(t){return t.department===dept&&!taskIsNotice(t);});
+  if(bulTaskIsForeign(task)){toast('Задачата се подрежда в своята седмица','#d97706');return;}
+  var deptTasks=bulTasks.filter(function(t){return t.department===dept&&!taskIsNotice(t)&&!bulTaskIsForeign(t);});
   var idx=deptTasks.findIndex(function(t){return String(t.id)===String(id);});
   var newIdx=idx+dir;
   if(newIdx<0||newIdx>=deptTasks.length)return; /* вече е на края */
@@ -3100,6 +3329,7 @@ function taskTabDrop(e,btn){
   var newDept=btn.getAttribute('data-dk');
   var t=bulTasks.find(function(x){return String(x.id)===String(tid);});
   if(!t||t.department===newDept)return;
+  if(bulTaskIsForeign(t)){toast('Задачата се премества от своята седмица','#d97706');return;}
   /* Задачата отива най-отдолу в новия отдел. Старият sort_order е от
      подредбата на СТАРИЯ отдел и в новия я хвърля на случайно място. */
   var maxOrder=bulTasks.filter(function(x){return x.department===newDept;}).reduce(function(m,x){return Math.max(m,x.sort_order||0);},0);
@@ -3171,7 +3401,7 @@ function pushMenuHtml(){
     '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
       '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">📰 Бюлетин публикуван</div>'+
       '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">До всички потребители на портала.</div>'+
-      '<button onclick="if(bulConfirmUnpublished()){pushBulletinPublished(curBul.week_number,curBul.year,bulTasks.length);closePushMenu();}" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати до всички</button>'+
+      '<button onclick="if(bulConfirmUnpublished()){pushBulletinPublished(curBul.week_number,curBul.year,bulWeekTasks().length);closePushMenu();}" style="border:none;background:#2563eb;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;">📤 Изпрати до всички</button>'+
     '</div>'+
     '<div style="padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">'+
       '<div style="font-size:13px;font-weight:600;margin-bottom:3px;">⚠️ Просрочени задачи</div>'+
@@ -3533,7 +3763,10 @@ function printSection(what){
         s+='<div class="task-title">'+esc(t.title||'')+' '+taskTypeBadgeHtml(t.task_type)+(postponedComp?'<span style="font-size:8pt;font-weight:700;padding:1pt 5pt;border-radius:8pt;background:#fff7ed;color:#b45309;border:0.5pt solid #fed7aa;">⏱ Отложена'+(postponedComp.postponed_to?' → '+bulDM(postponedComp.postponed_to):'')+'</span>':'')+'</div>';
         if(t.description)s+='<div class="task-desc">'+linkify(t.description)+'</div>';
         if(isMulti)s+='<div class="task-due">📅 Дни: '+taskDueLabel(t)+' (виж бройки по дни в календара по-горе)</div>';
-        else if(singleDate)s+='<div class="task-due">📅 Срок: '+new Date(singleDate+'T00:00:00').toLocaleDateString('bg-BG')+(isDone&&comp?' &nbsp; ✅ '+esc(bulCompletedByLabel(comp.completed_by)):'')+'</div>';
+        /* Многоседмичната е в списъка и на хартията — обектът работи по нея
+           тази седмица — но редът за срока казва в коя седмица се брои.
+           Печатният календар по-горе я няма: в тази седмица тя няма ден. */
+        else if(singleDate)s+='<div class="task-due">📅 Срок: '+new Date(singleDate+'T00:00:00').toLocaleDateString('bg-BG')+(bulSpanPending(t)?' · брои се в '+bulSpanDueWeekLabel(t):'')+(isDone&&comp?' &nbsp; ✅ '+esc(bulCompletedByLabel(comp.completed_by)):'')+'</div>';
         if(comp&&(comp.comment||(comp.photos&&comp.photos.length)))s+=renderCompletionExtras(comp);
         if(postponedComp&&postponedComp.comment)s+='<div class="task-desc" style="color:#b45309;">⏱ '+esc(postponedComp.comment)+'</div>';
         s+=pTaskAttachments(t);
@@ -3662,10 +3895,16 @@ function renderTasksPanel() {
       var recHtml = renderRecurringTasks(dk);
       if (!dTasks.length && !cRows.length && !recHtml) return;
       var d = DEPT[dk];
-      var done = dTasks.filter(function(t){
+      /* Броячът е за задачите, ДЪЛЖИМИ тази седмица. Многоседмичната със
+         срок по-нататък се РИСУВА (обектът трябва да я вижда и да може да я
+         отметне по-рано), но не влиза нито в числителя, нито в знаменателя —
+         иначе процентът на обекта пада заради работа, която още не се
+         изисква. Брои се в седмицата на срока. */
+      var cntTasks = dTasks.filter(function(t){ return taskCountsInWeek(t, bulWeekISO()); });
+      var done = cntTasks.filter(function(t){
         return bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='done';});
       }).length + cRows.filter(function(r){ return r.comp.status==='done'; }).length;
-      var total = dTasks.length + cRows.length;
+      var total = cntTasks.length + cRows.length;
       var pct = total ? Math.round(done/total*100) : 0;
 
       h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;margin-bottom:10px;overflow:hidden;">';
@@ -3675,7 +3914,7 @@ function renderTasksPanel() {
          какво да брои тук — без „0/0" и празна лента. */
       if (total) {
         h += '<div style="display:flex;align-items:center;gap:8px;">';
-        h += '<div style="font-size:11px;color:rgba(255,255,255,.7);">'+done+'/'+total+'</div>';
+        h += '<div data-dept-count="'+dk+'" style="font-size:11px;color:rgba(255,255,255,.7);">'+done+'/'+total+'</div>';
         h += '<div style="background:rgba(255,255,255,.2);border-radius:20px;width:80px;height:6px;">';
         h += '<div style="background:'+(pct===100?'#4ade80':'#fff')+';width:'+pct+'%;height:6px;border-radius:20px;transition:.3s;"></div>';
         h += '</div></div>';
@@ -3694,11 +3933,11 @@ function renderTasksPanel() {
         if (isMulti) {
           h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
-          h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,bulTaskLinkKey(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+bulLockStyle(singleDate,bulTaskLinkKey(t))+'">' ;
+          h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+'">' ;
         }
         h += '<div style="flex:1;">';
         h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':isPostponed?'#b45309':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
-        h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!isDone,singleDate)+bulPostponedBadgeHtml(ppComp)+'</div>';
+        h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!isDone,singleDate)+bulPostponedBadgeHtml(ppComp)+bulSpanBadgeHtml(t)+'</div>';
         if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
         h += renderTaskAttachments(t);
         h += bulAutoTransitNoteHtml(t, isDone);
@@ -3813,7 +4052,7 @@ function toggleTask(taskId, checked, extra, completionDate) {
        409 от уникалния индекс и минава в PATCH. */
     var req = existing
       ? sbPatch('task_completions', matchQuery, basePayload)
-      : tcUpsert(matchQuery, Object.assign({task_id:taskId, bulletin_id: curBul?curBul.id:null, store_name:store}, basePayload), basePayload);
+      : tcUpsert(matchQuery, Object.assign({task_id:taskId, bulletin_id: bulTaskBulletinId(taskId), store_name:store}, basePayload), basePayload);
     req.then(function(r){
       if (!r.ok) { toast('Грешка: '+sbErrMsg(r),'#dc2626'); return; }
       toast('✅ Задачата е отбелязана!');
@@ -4049,7 +4288,7 @@ function submitPostpone(taskId, kind, completionDate){
     postponed_to: toDate
   };
   payload[idField] = taskId;
-  if (kind!=='recurring') payload.bulletin_id = curBul ? curBul.id : null;
+  if (kind!=='recurring') payload.bulletin_id = bulTaskBulletinId(taskId);
   /* Тази функция POST-ваше БЕЗУСЛОВНО — без дори да поглежда bulComps.
      Отлагане върху вече отметнат ден създаваше втори ред при всяко
      натискане. Сега 409 води до PATCH: статусът става 'postponed', а
@@ -4185,7 +4424,11 @@ function loadTasksStats() {
   var wrap = document.getElementById('tasks-stat-wrap');
   /* notice няма отмятания и не бива да влиза в нито един знаменател тук —
      филтърът е на входа, а не в трите места, където се брои по-долу. */
-  var statTasks = bulTasks.filter(function(t){ return !taskIsNotice(t); });
+  /* Многоседмична задача, чийто срок е в по-късна седмица, НЕ влиза в
+     таблицата: тя е „в срок", а знаменател тук значи „очаква се тази
+     седмица". Брои се в седмицата на срока, веднъж — виж taskCountsInWeek(). */
+  var statWeekISO = bulWeekISO();
+  var statTasks = bulTasks.filter(function(t){ return !taskIsNotice(t) && taskCountsInWeek(t, statWeekISO); });
   var statRecurring = recurringTasks.filter(function(t){ return !taskIsNotice(t); });
   /* Излиза само ако няма НИТО обикновени, НИТО постоянни задачи — иначе бюлетин
      без обикновени (С38/2026) не броеше постоянните. Самата обвивка идва от
@@ -4305,7 +4548,10 @@ function renderBulAnalysis(){
   html+='<div style="font-size:18px;font-weight:600;margin-bottom:16px;">📊 Анализ — Седмица '+wk+'</div>';
   /* notice няма отмятания — влезе ли тук, стои вечно на 0% и надува
      „Просрочени". Един филтър на входа, вместо условие във всяка карта. */
-  var anTasks=bulTasks.filter(function(t){return !taskIsNotice(t);});
+  /* Многоседмичната се брои само в седмицата на срока си (taskCountsInWeek):
+     иначе същата задача влиза в „Задачи общо", „Изпълнени" и в таблицата по
+     магазини във ВСЯКА седмица от обхвата си, тоест 2 до 4 пъти. */
+  var anTasks=bulTasks.filter(function(t){return !taskIsNotice(t) && taskCountsInWeek(t, bulWeekISO());});
   if(!anTasks.length){html+='<div class="bcard" style="text-align:center;padding:30px;color:#94a3b8;">Няма задачи.</div>';wrap.innerHTML=html+'</div>';return;}
   var ds={};bulComps.forEach(function(c){ds[c.task_id]=1;});
   var done=Object.keys(ds).length; var tot=anTasks.length;

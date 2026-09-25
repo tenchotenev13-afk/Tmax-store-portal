@@ -10,6 +10,22 @@
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
 //   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
 //
+// v9 (25.09.2026) — обикновена задача със СРОК В ПО-КЪСНА седмица
+//   (нова колона bulletin_tasks.spans_from). Задачата е ЕДНА: вижда се от
+//   седмицата, в която е поставена, до седмицата на срока, но СЕ БРОИ само в
+//   седмицата на срока (taskCountsInWeek). Отмятанията ѝ носят completion_date =
+//   СРОКА.
+//   Две теми я виждат вече през loadSpanningTasksPublished():
+//     · today_deadlines — в ДЕНЯ на срока. Бюлетинът на задачата е друг,
+//       тоест заявката по бюлетина на текущата седмица не я връщаше;
+//     · overdue_tasks — след срока, докато седмицата на срока не свърши
+//       (същият прозорец като за останалите). Дотук такава задача не се
+//       докладваше НИКОГА.
+//   deadline_passed НЕ се пипа: тя чете само постоянни задачи (по due_time).
+//   Гейтът за публикуване е върху бюлетина НА ЗАДАЧАТА, не на текущата
+//   седмица — чернова за тази седмица не бива да спира напомняне за задача,
+//   която обектите отдавна виждат. Филтърът е и в заявката, и в кода.
+//
 // v8 (20.09.2026) — НОВА ТЕМА loading_lists_pending: товарен лист със
 //   status='sent', изпратен преди повече от 48 часа, по който обектът има
 //   поне един ред с received=false И missing=false. Групира се по (лист,
@@ -182,6 +198,32 @@ function dueDatesOf(t: Record<string, unknown>): string[] {
   return Array.isArray(t.due_dates) && (t.due_dates as unknown[]).length
     ? (t.due_dates as unknown[]).map(x => String(x).slice(0, 10))
     : (t.due_date ? [String(t.due_date).slice(0, 10)] : []);
+}
+
+/* ═══ МНОГОСЕДМИЧНА ЗАДАЧА (bulletin_tasks.spans_from, 25.09.2026) ═══════
+   Обикновена задача, поставена в седмица W със срок в по-късна седмица. И
+   двете теми по-долу четат бюлетина на ТЕКУЩАТА седмица, тоест такава задача
+   им е невидима: в седмицата на срока си бюлетинът ѝ е друг. Без този
+   зареждач „днешните срокове" я пропускат в деня на срока, а „просрочени"
+   не я докладва НИКОГА.
+   Гейтът за публикуване е върху бюлетина НА ЗАДАЧАТА (W), не върху този на
+   текущата седмица: чернова W значи скрита задача и в по-късните седмици, а
+   чернова за текущата седмица не бива да спира напомняне за задача, която
+   обектите отдавна виждат. Затова .eq('bulletins.status') върху вградения
+   ресурс — и второ, кодово прецеждане, защото филтър върху embed, който
+   мълчаливо не е приложен, тук значи изтекла чернова. */
+async function loadSpanningTasksPublished(supabase: any, monISO: string, sunISO: string) {
+  const { data, error } = await supabase
+    .from('bulletin_tasks')
+    .select('*,bulletins!inner(id,status,week_number,year)')
+    /* Без .not('spans_from','is',null): в PostgREST сравнение с NULL е невярно,
+       тоест lte вече изхвърля задачите без spans_from. Едно условие по-малко
+       и една зависимост по-малко от това какво поддържа клиентът. */
+    .lte('spans_from', sunISO)
+    .gte('due_date', monISO)
+    .eq('bulletins.status', 'published');
+  if (error) return [];
+  return (data || []).filter((t: any) => t.bulletins && t.bulletins.status === 'published');
 }
 
 /* Копие от shared.js — Deno не може да import-не браузърен файл.
@@ -502,7 +544,13 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
     ? await supabase.from('bulletin_tasks').select('*').eq('bulletin_id', bulletinId)
     : { data: [] };
 
-  const overdueTasks = (tasks || []).filter((t: any) => {
+  /* Многоседмичните (spans_from) със срок В ТАЗИ седмица — идват от друг
+     бюлетин и заявката горе не ги вижда. Прозорецът е същият като за
+     останалите: докладва се, докато седмицата на срока не е свършила. */
+  const spanMonday = plusDaysISO(bg.dateStr, -bg.weekdayIdx);
+  const spanPool = (await loadSpanningTasksPublished(supabase, spanMonday, plusDaysISO(spanMonday, 6)))
+    .filter((t: any) => !(tasks || []).some((x: any) => x.id === t.id));
+  const overdueTasks = (tasks || []).concat(spanPool).filter((t: any) => {
     if (taskIsNotice(t)) return false;
     const last = lastDueDate(t);
     return !!last && last < bg.dateStr;
@@ -798,6 +846,18 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
       .from('bulletin_tasks').select('*').eq('bulletin_id', bulletins[0].id);
     bulAll = tasks || [];
     oneTime = bulAll.filter((t: any) => !taskIsNotice(t) && dueDatesOf(t).indexOf(bg.dateStr) >= 0);
+  }
+
+  /* Многоседмичните със срок ДНЕС. Добавят се и в bulAll, за да ги намира
+     търсенето на задачи зад пренесените редове по-долу. Тук няма гейт по
+     бюлетина на ТАЗИ седмица — виж loadSpanningTasksPublished(). */
+  const tdMonday = plusDaysISO(bg.dateStr, -bg.weekdayIdx);
+  const tdSpan = (await loadSpanningTasksPublished(supabase, tdMonday, plusDaysISO(tdMonday, 6)))
+    .filter((t: any) => !taskIsNotice(t) && dueDatesOf(t).indexOf(bg.dateStr) >= 0
+      && !bulAll.some((x: any) => x.id === t.id));
+  if (tdSpan.length) {
+    bulAll = bulAll.concat(tdSpan);
+    oneTime = oneTime.concat(tdSpan);
   }
 
   /* Изключванията за СЕДМИЦАТА НА ДНЕС. Изключена за всички → няма push;

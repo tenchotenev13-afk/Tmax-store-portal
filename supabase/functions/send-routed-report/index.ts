@@ -1,5 +1,21 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v12 (25.09.2026) — обикновена задача със СРОК В ПО-КЪСНА седмица
+   (нова колона bulletin_tasks.spans_from). Задачата е ЕДНА: вижда се от
+   седмицата, в която е поставена, до седмицата на срока, но СЕ БРОИ само в
+   седмицата на срока (taskCountsInWeek). Отмятанията ѝ носят completion_date =
+   СРОКА. Две места, и двете за многоседмичната:
+     · СЕДМИЧНИЯТ личен отчет (collectWeeklyRoutingData) — картичка получава
+       само задача, която тази седмица СЕ БРОИ; преди срока картичката ѝ би
+       казвала „0 от 18 изпълнили“ за работа, която не се изисква;
+     · ОТЧЕТЪТ ПО ЗАДАЧА (collectTaskReportData) — прозорецът е седмицата на
+       СРОКА, не на бюлетина, в който задачата е поставена. Отметките носят
+       completion_date = срока, тоест прозорецът на бюлетина не виждаше нито
+       една и картичката изреждаше ВСИЧКИТЕ 18 обекта като „не изпълнили“.
+     Плюс шест копия от shared.js (taskSpansWeeks, taskSpanDue,
+     taskCountsInWeek, spanWeekSunday, loadSpanningTasks, mergeSpanningTasks),
+     сверени от tests/report-edge-sync.test.js.
+
    v11 (19.09.2026) — деплой с ЕДНО нещо: отчет по задача и за ПОСТОЯННА
    задача (recurring_tasks). Само режим task_report; седмичният е непроменен.
 
@@ -211,6 +227,62 @@ var REPORT_EXCLUDED_STORES = ['Централен офис'].concat(LOGISTICS_WA
    Задача „Само за информация": показва се само в Седмичния календар на
    Бюлетина и не влиза в нито един отчет, брояч или известие. */
 function taskIsNotice(t){ return !!t && t.task_type === 'notice'; }
+/* ═══ Копия от shared.js — ОБИКНОВЕНА ЗАДАЧА СЪС СРОК В ПО-КЪСНА СЕДМИЦА
+   (bulletin_tasks.spans_from, 25.09.2026). Задачата е ЕДНА: вижда се от
+   седмицата, в която е поставена, до седмицата на срока, но СЕ БРОИ само в
+   седмицата на срока. Разминае ли се копието, писмото от крона брои друго от
+   портала — или мълчи за срок, който е минал. tests/report-edge-sync.test.js
+   сверява копията ред по ред. ═══ */
+function taskSpansWeeks(t){ return !!t && !!t.spans_from; }
+function taskSpanDue(t){
+  if(!taskSpansWeeks(t)) return null;
+  if(Array.isArray(t.due_dates)&&t.due_dates.length) return String(t.due_dates[0]).slice(0,10);
+  return t.due_date ? String(t.due_date).slice(0,10) : null;
+}
+function taskCountsInWeek(t, weekISO){
+  if(!taskSpansWeeks(t)) return true;
+  if(!Array.isArray(weekISO)||!weekISO.length) return false;
+  var due=taskSpanDue(t);
+  if(!due) return false;
+  return due>=weekISO[0] && due<=weekISO[weekISO.length-1];
+}
+function spanWeekSunday(mondayISO){
+  var d=new Date(String(mondayISO).slice(0,10)+'T00:00:00');
+  d.setDate(d.getDate()+6);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function loadSpanningTasks(monISO, sunISO, canSeeDrafts){
+  if(!monISO||!sunISO) return Promise.resolve([]);
+  var q='select=*,bulletins!inner(id,status,week_number,year)'+
+        '&spans_from=not.is.null&spans_from=lte.'+sunISO+'&due_date=gte.'+monISO;
+  if(!canSeeDrafts) q+='&bulletins.status=eq.published';
+  /* ВТОРО, кодово прецеждане на същите четири условия. Не е излишно: филтър
+     върху вграден ресурс, който мълчаливо не е приложен, тук значи изтекла
+     чернова, а ред без spans_from — задача от чужда седмица, вкарана в
+     броенето на тази. Заявката е първата защита, тази е втората. */
+  return sbGet('bulletin_tasks',q).then(function(rows){
+    return (Array.isArray(rows)?rows:[]).filter(function(t){
+      /* Първото условие е излишно по конструкция — taskSpanDue() връща null за
+         ред без spans_from и долният ред го изхвърля. Остава изрично, защото
+         пази и от t === null, и защото прочитането на филтъра не бива да
+         изисква да помниш какво прави taskSpanDue(). */
+      if(!t||!t.spans_from) return false;
+      var from=String(t.spans_from).slice(0,10), due=taskSpanDue(t);
+      if(!due||from>sunISO||due<monISO) return false;
+      return canSeeDrafts ? true : !!(t.bulletins && t.bulletins.status==='published');
+    });
+  }).catch(function(){ return []; });
+}
+function mergeSpanningTasks(own, spanning){
+  var out=Array.isArray(own)?own.slice():[];
+  var have={};
+  out.forEach(function(t){ have[String(t.id)]=1; });
+  (Array.isArray(spanning)?spanning:[]).forEach(function(t){
+    if(!t||have[String(t.id)]) return;
+    have[String(t.id)]=1; out.push(t);
+  });
+  return out;
+}
 /* Копие от shared.js — изключване на постоянна задача за седмица
    (recurring_task_skips). tests/report-edge-sync.test.js сверява копието. */
 function recurringIsSkipped(taskId, store, skips){
@@ -564,14 +636,25 @@ function collectWeeklyRoutingData(cb){
     var routedRecurring = allRecurring.filter(function(t){ return t.report_groups && t.report_groups.length; });
     var weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
 
-    var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
+    /* Задачите на бюлетина + многоседмичните, видими в отчетната седмица.
+       Картичка получава само задача, която тази седмица СЕ БРОИ (срокът е в
+       нея) — виж филтъра по taskCountsInWeek() по-долу. Така многоседмичната
+       влиза в личния отчет за седмицата на СРОКА си, и то веднъж. */
+    var rtSpanWk = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
+    var bulTasksPromise = Promise.all([
+      bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
+      rtSpanWk ? loadSpanningTasks(rtSpanWk[0], rtSpanWk[6], false) : Promise.resolve([])
+    ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
     /* Изключванията за седмицата на бюлетина — същият ключ и същата
        заявка като в общия седмичен отчет (collectWeeklyReportData). */
     var skipsPromise = bul ? sbGet('recurring_task_skips','year=eq.'+bul.year+'&week_number=eq.'+bul.week_number+'&select=recurring_task_id,store_name') : Promise.resolve([]);
     Promise.all([bulTasksPromise, skipsPromise]).then(function(pre){
       var tasksRaw = pre[0];
       var recSkips = Array.isArray(pre[1]) ? pre[1] : [];
-      var allTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
+      /* Многоседмичната със срок СЛЕД тази седмица не влиза: картичката ѝ
+         би казала „0/18“ за работа, която още не се изисква. Тя идва в
+         отчета за седмицата на срока си. */
+      var allTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t) && taskCountsInWeek(t, wkDates||[]); });
       var routedRegular = allTasks.filter(function(t){ return t.report_groups && t.report_groups.length; });
 
       /* Прозорецът се закача на самата задача - taskStoreBreakdown после го
@@ -1130,7 +1213,16 @@ async function collectTaskReportData(taskId, recipients, runDate){
   var br: any = await sbGet('bulletins', 'id=eq.' + t.bulletin_id + '&select=id,status,week_number,year&limit=1');
   var bul: any = Array.isArray(br) && br.length ? br[0] : null;
   if (!bul || bul.status !== 'published') return { draft:true, task:t };
-  var wkDates = weekDays(bul.week_number, bul.year).map(toLocalISO);
+  /* Прозорецът е седмицата на СРОКА, не тази на бюлетина, в който задачата е
+     поставена. За многоседмичната (spans_from) двете са различни: отмятанията
+     ѝ носят completion_date = срока, тоест прозорецът на W не вижда нито
+     едно и картичката би изредила ВСИЧКИТЕ 18 обекта като „не изпълнили“
+     задача, която може да е свършена от всички. Същото правило като в
+     седмичните отчети — брои се в седмицата на срока. */
+  var spanDue = taskSpanDue(t);
+  var spanW = spanDue ? reportWeekOfMonday(reportMondayOfWeek(new Date(spanDue + 'T00:00:00'))) : null;
+  var wkDates = spanW ? weekDays(spanW.week, spanW.year).map(toLocalISO)
+                      : weekDays(bul.week_number, bul.year).map(toLocalISO);
   t.kind = 'regular';
   var win = reportRoutedTaskWindow(t, wkDates, bul) || { date:null, dateFrom:wkDates[0], dateTo:wkDates[6] };
   t.date = win.date; t.dateFrom = win.dateFrom; t.dateTo = win.dateTo;

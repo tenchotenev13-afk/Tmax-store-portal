@@ -79,7 +79,17 @@ function loadTodayDashboard(){
     });
 
     var todayISO = toLocalISO(new Date());
-    var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
+    /* Задачите на бюлетина + многоседмичните (spans_from), чийто срок пада
+       ДНЕС, но които са поставени в по-ранна седмица — техният бюлетин не е
+       този и първата заявка не ги вижда. Обхватът е седмицата на днес;
+       чернова не минава (само публикуван бюлетин), както навсякъде в „Днес".
+       Виж loadSpanningTasks() в shared.js. */
+    var todayWkMon = recurringMondayOf(new Date());
+    var todayWkSun = spanWeekSunday(todayWkMon);
+    var bulTasksPromise = Promise.all([
+      bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
+      loadSpanningTasks(todayWkMon, todayWkSun, false)
+    ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
 
     bulTasksPromise.then(function(tasksRaw){
       var allBulTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
@@ -415,7 +425,13 @@ function todayCompletionExtras(compObj){
 function todayLoadPhotoQueue(cb){
   sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1').then(function(bulRes){
     var bul = (Array.isArray(bulRes) && bulRes.length) ? bulRes[0] : null;
-    var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
+    /* Многоседмичните също: обект, качил снимка към задача, чийто бюлетин е
+       по-ранна седмица, иначе изобщо не се появява в опашката за преглед. */
+    var photoWkMon = recurringMondayOf(new Date());
+    var bulTasksPromise = Promise.all([
+      bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
+      loadSpanningTasks(photoWkMon, spanWeekSunday(photoWkMon), false)
+    ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
     Promise.all([bulTasksPromise, sbGet('recurring_tasks','active=eq.true'),
       loadRecurringVersions().catch(function(){ return []; })]).then(function(r2){
       var regTasks = Array.isArray(r2[0]) ? r2[0] : [];

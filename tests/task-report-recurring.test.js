@@ -305,6 +305,33 @@ function fakeSb(data) {
     ok('„1 от 2 обекта изпълнили"', t.indexOf('1 от 2 обекта изпълнили') >= 0);
   }
 
+  section('8б. Многоседмична задача (spans_from): прозорецът е седмицата на СРОКА');
+  {
+    /* Поставена в бюлетина за С38, срок четвъртък от С39 (24.09). Отметките ѝ
+       носят completion_date = СРОКА, тоест прозорецът на бюлетина (14–20.09)
+       не вижда нито една и картичката би изредила ВСИЧКИ обекти като „не
+       изпълнили" задача, свършена от тях. run_date нарочно е в С38 — той не
+       определя прозореца при обикновена задача, срокът го определя. */
+    const SPAN_DUE = '2026-09-24', SPAN_SUN = '2026-09-27';
+    const over = {
+      bulletin_tasks: [
+        { id: 't-span', bulletin_id: 'b-pub', title: 'Клетка надувно', target_stores: ['Троян', 'Ловеч'],
+          due_date: SPAN_DUE, due_dates: [SPAN_DUE], spans_from: MON, linked_module: null, task_type: 'comment' }
+      ],
+      task_completions: [
+        { id: 'c-span', task_id: 't-span', recurring_task_id: null, store_name: 'Троян',
+          status: 'done', completion_date: SPAN_DUE, comment: 'Сглобена', photos: null, files: null }
+      ]
+    };
+    const a2 = await run('t-span', FRI, over);
+    const t2 = text(a2.html);
+    ok('заявката за отметки е за седмицата на срока',
+      a2.log.get.some(g => g === 'task_completions?task_id=eq.t-span&completion_date=gte.' + NEXT_MON + '&completion_date=lte.' + SPAN_SUN),
+      JSON.stringify(a2.log.get.filter(g => /^task_completions/.test(g))));
+    ok('Троян излиза ИЗПЪЛНИЛ, не „не изпълнил"', t2.indexOf('1 от 2 обекта изпълнили') >= 0, t2.slice(0, 220));
+    ok('коментарът му е в картичката', t2.indexOf('Сглобена') >= 0);
+  }
+
   section('9. dynamic-responder: гейтът за task_report и постоянна задача');
   {
     const GD = db();

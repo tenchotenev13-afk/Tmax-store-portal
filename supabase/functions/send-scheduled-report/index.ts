@@ -1,6 +1,25 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v42 (25.09.2026) — обикновена задача със СРОК В ПО-КЪСНА седмица
+   (нова колона bulletin_tasks.spans_from). Задачата е ЕДНА: вижда се от
+   седмицата, в която е поставена, до седмицата на срока, но СЕ БРОИ само в
+   седмицата на срока (taskCountsInWeek). Отмятанията ѝ носят completion_date =
+   СРОКА. Деплоят носи ТРИ неща, всичките в двата колектора:
+     · ДНЕВНИЯТ тегли и многоседмичните за седмицата на отчетния ден
+       (loadSpanningTasks) — денят на срока е в ДРУГ бюлетин и без тази
+       заявка отчетът за него изобщо не вижда задачата;
+     · СЕДМИЧНИЯТ вади тези със срок СЛЕД отчетната седмица от явяванията и
+       ги дава в нов списък „🗓 В срок (краен срок по-късно)“ с напредъка
+       X/18 — извън числителя и знаменателя, иначе обектът излиза
+       неизпълнил работа, която още не се изисква. Шеста заявка НАКРАЯ на
+       Promise.all (r2[5]) за техните отметки: completion_date им е срокът,
+       тоест извън прозореца на седмицата. Индексите r2[0..4] НЕ се местят;
+     · шест нови копия от shared.js (taskSpansWeeks, taskSpanDue,
+       taskCountsInWeek, spanWeekSunday, loadSpanningTasks,
+       mergeSpanningTasks) + reportSpanDueWeekLabel/reportSpanPendingHtml от
+       report.js. tests/report-edge-sync.test.js ги сверява ред по ред.
+
    v41 (23.09.2026) — нова секция „⏳ Необработени разлики над N дни" в
    СЕДМИЧНИЯ отчет (collectCrossModuleWeeklySummary + reportDiffStaleHtml):
      · МОМЕНТНА СНИМКА към изпращането, не срез от седмицата. Три нови
@@ -647,6 +666,62 @@ var REPORT_EXCLUDED_STORES = ['Централен офис'].concat(LOGISTICS_WA
    Задача „Само за информация": показва се само в Седмичния календар на
    Бюлетина и не влиза в нито един отчет, брояч или известие. */
 function taskIsNotice(t){ return !!t && t.task_type === 'notice'; }
+/* ═══ Копия от shared.js — ОБИКНОВЕНА ЗАДАЧА СЪС СРОК В ПО-КЪСНА СЕДМИЦА
+   (bulletin_tasks.spans_from, 25.09.2026). Задачата е ЕДНА: вижда се от
+   седмицата, в която е поставена, до седмицата на срока, но СЕ БРОИ само в
+   седмицата на срока. Разминае ли се копието, писмото от крона брои друго от
+   портала — или мълчи за срок, който е минал. tests/report-edge-sync.test.js
+   сверява копията ред по ред. ═══ */
+function taskSpansWeeks(t){ return !!t && !!t.spans_from; }
+function taskSpanDue(t){
+  if(!taskSpansWeeks(t)) return null;
+  if(Array.isArray(t.due_dates)&&t.due_dates.length) return String(t.due_dates[0]).slice(0,10);
+  return t.due_date ? String(t.due_date).slice(0,10) : null;
+}
+function taskCountsInWeek(t, weekISO){
+  if(!taskSpansWeeks(t)) return true;
+  if(!Array.isArray(weekISO)||!weekISO.length) return false;
+  var due=taskSpanDue(t);
+  if(!due) return false;
+  return due>=weekISO[0] && due<=weekISO[weekISO.length-1];
+}
+function spanWeekSunday(mondayISO){
+  var d=new Date(String(mondayISO).slice(0,10)+'T00:00:00');
+  d.setDate(d.getDate()+6);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function loadSpanningTasks(monISO, sunISO, canSeeDrafts){
+  if(!monISO||!sunISO) return Promise.resolve([]);
+  var q='select=*,bulletins!inner(id,status,week_number,year)'+
+        '&spans_from=not.is.null&spans_from=lte.'+sunISO+'&due_date=gte.'+monISO;
+  if(!canSeeDrafts) q+='&bulletins.status=eq.published';
+  /* ВТОРО, кодово прецеждане на същите четири условия. Не е излишно: филтър
+     върху вграден ресурс, който мълчаливо не е приложен, тук значи изтекла
+     чернова, а ред без spans_from — задача от чужда седмица, вкарана в
+     броенето на тази. Заявката е първата защита, тази е втората. */
+  return sbGet('bulletin_tasks',q).then(function(rows){
+    return (Array.isArray(rows)?rows:[]).filter(function(t){
+      /* Първото условие е излишно по конструкция — taskSpanDue() връща null за
+         ред без spans_from и долният ред го изхвърля. Остава изрично, защото
+         пази и от t === null, и защото прочитането на филтъра не бива да
+         изисква да помниш какво прави taskSpanDue(). */
+      if(!t||!t.spans_from) return false;
+      var from=String(t.spans_from).slice(0,10), due=taskSpanDue(t);
+      if(!due||from>sunISO||due<monISO) return false;
+      return canSeeDrafts ? true : !!(t.bulletins && t.bulletins.status==='published');
+    });
+  }).catch(function(){ return []; });
+}
+function mergeSpanningTasks(own, spanning){
+  var out=Array.isArray(own)?own.slice():[];
+  var have={};
+  out.forEach(function(t){ have[String(t.id)]=1; });
+  (Array.isArray(spanning)?spanning:[]).forEach(function(t){
+    if(!t||have[String(t.id)]) return;
+    have[String(t.id)]=1; out.push(t);
+  });
+  return out;
+}
 /* Копие от shared.js — изключване на постоянна задача за седмица
    (recurring_task_skips). tests/report-edge-sync.test.js сверява копието. */
 function recurringIsSkipped(taskId, store, skips){
@@ -816,7 +891,15 @@ function collectDailyReportData(cb, scope, kasaThreshold){
       return (t.due_weekday===null || t.due_weekday===undefined) && !t.due_time;
     });
 
-    var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
+    /* Задачите на бюлетина + многоседмичните (spans_from) от ПО-РАННИ
+       бюлетини, чийто срок пада в седмицата на отчетния ден. Дневният брои
+       по taskIsDueOnDate(), тоест те влизат единствено в ДЕНЯ на срока си —
+       по-рано задачата е „в срок“ и я няма в този отчет. Без тази заявка
+       денят на срока изобщо не я вижда: бюлетинът ѝ е друг. */
+    var bulTasksPromise = Promise.all([
+      bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
+      loadSpanningTasks(dayMonday, spanWeekSunday(dayMonday), false)
+    ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
 
     bulTasksPromise.then(function(tasksRaw){
       var allBulTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
@@ -1440,6 +1523,24 @@ function reportTopBottomTable(top3, bottom3, storeCount){
    съществителното, глагола И местоимението наведнъж - "1 постоянни задачи
    без конкретен срок чакат преглед ... виж ги" беше сгрешено на четири места
    в едно изречение. Затова двата варианта се пишат цели. */
+/* Копие от report.js — списъкът „в срок“ (многоседмични задачи преди срока
+   си). Разминае ли се, имейлът от крона казва друго от портала. */
+function reportSpanDueWeekLabel(due){
+  if (!due) return '';
+  var w = reportWeekOfMonday(reportMondayOfWeek(new Date(String(due).slice(0,10)+'T00:00:00')));
+  return w ? ('С' + w.week) : '';
+}
+function reportSpanPendingHtml(list){
+  if (!Array.isArray(list) || !list.length) return '';
+  var h = '<div style="margin-top:14px;padding:10px 14px;background:#ECFEFF;border-radius:8px;font-size:12px;color:#0E7490;">';
+  h += '<div style="font-weight:700;margin-bottom:4px;">🗓 В срок (краен срок по-късно) — не участват в процента</div>';
+  list.forEach(function(it){
+    h += '<div style="margin-top:3px;">• ' + esc(it.title||'') + ' — срок ' +
+         fmtDate2(it.due) + (it.dueWeek ? ' (' + it.dueWeek + ')' : '') +
+         ' · вече изпълнена от <b>' + it.done + '/' + it.total + '</b> обекта</div>';
+  });
+  return h + '</div>';
+}
 function reportNoDueNoticeHtml(n, weekly){
   if (!n || n < 1) return '';
   var txt = weekly
@@ -1933,7 +2034,14 @@ function collectWeeklyReportData(cb, scope){
     });
     var noDueCount = allRecurring.length - recurringScheduled.length;
 
-    var bulTasksPromise = bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]);
+    /* Задачите на бюлетина + многоседмичните, видими в отчетната седмица.
+       Тези със срок В нея се броят нормално; тези със срок по-нататък
+       излизат в отделния списък „в срок“ (reportSpanPendingHtml). */
+    var wkSpanRange = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
+    var bulTasksPromise = Promise.all([
+      bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
+      wkSpanRange ? loadSpanningTasks(wkSpanRange[0], wkSpanRange[6], false) : Promise.resolve([])
+    ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
     /* Изключванията за СЕДМИЦАТА НА БЮЛЕТИНА — от нея се строят и датите
        на явяванията долу, тоест ключът е същата седмица, която се брои. */
     var skipsPromise = bul ? sbGet('recurring_task_skips','year=eq.'+bul.year+'&week_number=eq.'+bul.week_number+'&select=recurring_task_id,store_name') : Promise.resolve([]);
@@ -1959,6 +2067,12 @@ function collectWeeklyReportData(cb, scope){
       /* Датите на отчетната седмица - нужни са и при СТРОЕНЕТО на явяванията
          (по-долу), не само за прозореца на заявката. */
       var wkDates = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
+
+      /* Многоседмичните, чийто срок е СЛЕД отчетната седмица, излизат от
+         явяванията: те са „в срок“, не неизпълнени. Броят се в седмицата на
+         срока, веднъж — виж taskCountsInWeek() в shared.js. */
+      var spanPending = allBulTasks.filter(function(t){ return !taskCountsInWeek(t, wkDates||[]); });
+      allBulTasks = allBulTasks.filter(function(t){ return taskCountsInWeek(t, wkDates||[]); });
 
       var items = [];
       allBulTasks.forEach(function(t){
@@ -2049,11 +2163,16 @@ function collectWeeklyReportData(cb, scope){
         recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+dateQ) : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name'),
         carryNeedReg.length ? sbGet('bulletin_tasks','id=in.('+carryNeedReg.join(',')+')') : Promise.resolve([]),
-        carryNeedRec.length ? sbGet('recurring_tasks','id=in.('+carryNeedRec.join(',')+')') : Promise.resolve([])
+        carryNeedRec.length ? sbGet('recurring_tasks','id=in.('+carryNeedRec.join(',')+')') : Promise.resolve([]),
+        /* Отмятанията на „в срок“ задачите — completion_date им е СРОКЪТ,
+           тоест извън dateQ на отчетната седмица и горните заявки не ги
+           виждат. НАКРАЯ на списъка, за да не мести индексите. */
+        spanPending.length ? sbGet('task_completions','task_id=in.('+spanPending.map(function(t){return t.id;}).join(',')+')&status=eq.done') : Promise.resolve([])
       ]).then(function(r2){
         var regComps = Array.isArray(r2[0]) ? r2[0] : [];
         var recComps = Array.isArray(r2[1]) ? r2[1] : [];
         var users = Array.isArray(r2[2]) ? r2[2] : [];
+        var spanComps = Array.isArray(r2[5]) ? r2[5] : [];
         var carryPool = allBulTasks.concat(Array.isArray(r2[3]) ? r2[3] : []);
         /* Пренесените — със съдържанието за седмицата на отчета. */
         var carryRecPool = allRecurring.concat(recurringApplyVersions(Array.isArray(r2[4]) ? r2[4] : [], recVersions, wkMonday));
@@ -2102,6 +2221,19 @@ function collectWeeklyReportData(cb, scope){
           }));
 
         var summary = reportBuildSummary(items, comps, stores, noDueCount);
+        /* Напредъкът по „в срок“ задачите: знаменателят е само обектите В
+           ОБХВАТ (target_stores), същото правило като в решетката. */
+        summary.spanPending = spanPending.map(function(t){
+          var due = taskSpanDue(t);
+          var inScope = stores.filter(function(st){ return !t.target_stores || !t.target_stores.length || t.target_stores.indexOf(st) >= 0; });
+          return {
+            title: t.title, due: due, dueWeek: reportSpanDueWeekLabel(due),
+            done: inScope.filter(function(st){
+              return spanComps.some(function(c){ return String(c.task_id)===String(t.id) && c.store_name===st && (c.completion_date||null)===due; });
+            }).length,
+            total: inScope.length
+          };
+        });
         summary.weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
         summary.scoped = !!(scope && scope.length);
         summary.weekDates = wkDates; /* същите дати, които стесняват задачите - в шапката */
@@ -3176,6 +3308,7 @@ function buildWeeklyReportHtml(data){
   body += reportTopBottomTable(data.top3, data.bottom3, data.storeCount);
   body += reportPostponedSectionHtml(data.postponedList);
   body += reportCommentsCountHtml(data.commentedList);
+  body += reportSpanPendingHtml(data.spanPending);
   body += reportNoDueNoticeHtml(data.noDueCount, true);
   body += '<div style="margin-top:10px;font-size:11px;color:#94a3b8;font-style:italic;">Забележка: постоянните задачи участват с по едно явяване за всеки ден, в който са дължими през седмицата (задача „всеки ден" = 7 явявания) — точно както се отмятат в Седмичния календар. Отметка от предишна седмица не се брои за текущата.</div>';
   body += buildCrossModuleSectionHtml(data.cross, data.scoped);

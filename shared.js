@@ -230,6 +230,96 @@ function isReportableStore(name){
    тук за първите две. */
 function taskIsNotice(t){ return !!t && t.task_type === 'notice'; }
 
+/* ═══ ОБИКНОВЕНА ЗАДАЧА СЪС СРОК В ПО-КЪСНА СЕДМИЦА (spans_from) ═════════
+   Задачата е ЕДНА: едно отмятане на обект, едно X/18, една отчетност.
+   spans_from е понеделникът на седмицата, в която е поставена; NULL значи
+   обикновена задача, която живее само в своя бюлетин, точно както досега.
+
+   Двете правила, и двете чисто по дати (виж bulletin-task-span-schema.sql):
+     ВИЖДА СЕ в седмица V ⟺ bulletin_id = бюлетина на V
+                            ИЛИ spans_from <= V.неделя И due_date >= V.понеделник
+     БРОИ СЕ  в седмица V ⟺ due_date е в V
+   Второто важи и за обикновените задачи (срокът им е в тяхната седмица),
+   затова taskCountsInWeek() не ги пипа. За многоседмичната значи: показва
+   се от W до седмицата на срока, но в числител и знаменател влиза само в
+   седмицата на срока — дотогава е „в срок", не „неизпълнена".
+
+   Трите едж функции държат СВОЕ копие (Deno не чете браузърен файл);
+   tests/report-edge-sync.test.js заковава, че копията съвпадат с това тук. */
+function taskSpansWeeks(t){ return !!t && !!t.spans_from; }
+/* Крайният срок като ISO низ — за многоседмичната е ЕДИН ден по CHECK
+   ограничението bulletin_tasks_spans_single_day_chk. */
+function taskSpanDue(t){
+  if(!taskSpansWeeks(t)) return null;
+  if(Array.isArray(t.due_dates)&&t.due_dates.length) return String(t.due_dates[0]).slice(0,10);
+  return t.due_date ? String(t.due_date).slice(0,10) : null;
+}
+/* Брои ли се задачата в тази седмица. weekISO е масивът от 7 ISO дати (или
+   само [понеделник, ..., неделя] — ползват се само краищата).
+   Обикновена задача: винаги. Многоседмична: само ако срокът е в седмицата.
+   Липсва ли седмицата (колектор без бюлетин), не се брои нищо, което не е
+   обикновено — иначе задача без известен обхват тихо влиза в знаменател. */
+function taskCountsInWeek(t, weekISO){
+  if(!taskSpansWeeks(t)) return true;
+  if(!Array.isArray(weekISO)||!weekISO.length) return false;
+  var due=taskSpanDue(t);
+  if(!due) return false;
+  return due>=weekISO[0] && due<=weekISO[weekISO.length-1];
+}
+/* Многоседмичните задачи, видими в седмицата [monISO..sunISO], които идват
+   от ДРУГ бюлетин. Огледало на bulCarriedQuery() в bulletin.js: обхватът е
+   по дати, не по бюлетин, защото задачата принадлежи на чужда седмица.
+   canSeeDrafts=false добавя гейт по статуса на бюлетина, в който задачата е
+   ПОСТАВЕНА — не на показания: чернова W значи скрита и в по-късните
+   седмици. Вгражда се bulletins!inner, за да не трябва втора заявка. */
+/* Неделята на седмицата, започваща в този понеделник. През setDate, а не
+   с +6*86400000: добавянето на милисекунди през смяната на часовото време
+   дава събота 23:00 и седмицата излиза с ден по-къса.
+   Датата се сглобява НА МЯСТО, вместо през localDateISO() — колекторите в
+   send-scheduled-report/send-routed-report са копия ред по ред и там същият
+   низ се прави от toLocalISO(). Извикване на localDateISO() тук би значело
+   или трето копие на същите три реда в Deno, или разминаване в тяло, което
+   tests/report-edge-sync.test.js сверява байт по байт. */
+function spanWeekSunday(mondayISO){
+  var d=new Date(String(mondayISO).slice(0,10)+'T00:00:00');
+  d.setDate(d.getDate()+6);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function loadSpanningTasks(monISO, sunISO, canSeeDrafts){
+  if(!monISO||!sunISO) return Promise.resolve([]);
+  var q='select=*,bulletins!inner(id,status,week_number,year)'+
+        '&spans_from=not.is.null&spans_from=lte.'+sunISO+'&due_date=gte.'+monISO;
+  if(!canSeeDrafts) q+='&bulletins.status=eq.published';
+  /* ВТОРО, кодово прецеждане на същите четири условия. Не е излишно: филтър
+     върху вграден ресурс, който мълчаливо не е приложен, тук значи изтекла
+     чернова, а ред без spans_from — задача от чужда седмица, вкарана в
+     броенето на тази. Заявката е първата защита, тази е втората. */
+  return sbGet('bulletin_tasks',q).then(function(rows){
+    return (Array.isArray(rows)?rows:[]).filter(function(t){
+      /* Първото условие е излишно по конструкция — taskSpanDue() връща null за
+         ред без spans_from и долният ред го изхвърля. Остава изрично, защото
+         пази и от t === null, и защото прочитането на филтъра не бива да
+         изисква да помниш какво прави taskSpanDue(). */
+      if(!t||!t.spans_from) return false;
+      var from=String(t.spans_from).slice(0,10), due=taskSpanDue(t);
+      if(!due||from>sunISO||due<monISO) return false;
+      return canSeeDrafts ? true : !!(t.bulletins && t.bulletins.status==='published');
+    });
+  }).catch(function(){ return []; });
+}
+/* Задачите от втория източник, които ги няма в първия — по id. Пази от
+   двоен ред в седмицата на срока, където задачата идва и по bulletin_id. */
+function mergeSpanningTasks(own, spanning){
+  var out=Array.isArray(own)?own.slice():[];
+  var have={};
+  out.forEach(function(t){ have[String(t.id)]=1; });
+  (Array.isArray(spanning)?spanning:[]).forEach(function(t){
+    if(!t||have[String(t.id)]) return;
+    have[String(t.id)]=1; out.push(t);
+  });
+  return out;
+}
+
 /* ПОСТОЯННА ЗАДАЧА, ИЗКЛЮЧЕНА ЗА СЕДМИЦА (recurring_task_skips)
    ─────────────────────────────────────────────────────────────
    Ред в таблицата значи „тази седмица задачата не се изисква" — за всички
