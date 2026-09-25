@@ -69,6 +69,7 @@ const TESTS = [
   'loading-lists-search.test.js',
   'loading-lists-pdf.test.js',
   'loading-lists-store-rows.test.js',
+  'loading-lists-photos.test.js',
   'loading-transit-toggle.test.js',
   'loading-scan-toggle.test.js',
   'loading-diff-prefill.test.js',

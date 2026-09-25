@@ -66,6 +66,23 @@ function env(user, opts) {
          в loading-transit-toggle.test.js. */
       app_settings: [{ key: 'loading_transit_docs', value: 'on' }],
       goods_transit: TRANSIT,
+      /* „📤 Изпрати" иска поне 2 снимки на натоварването (25.09.2026).
+         Този тест проверява какво става СЛЕД изпращането, не гейта — затова
+         фикстурата ги носи за КОЙТО И ДА Е лист: сценариите тук ползват
+         различни id-та и закован list_id би ги покрил само отчасти.
+         Гейтът си има свой тест: loading-lists-photos. */
+      loading_list_photos: function (url) {
+        const m = /list_id=in\.\(([^)]*)\)/.exec(url);
+        const ids = m ? m[1].split(',') : [];
+        const out = [];
+        ids.forEach(function (id, k) {
+          out.push({ id: 'ph' + k + 'a', list_id: id, store_name: WH_TG, stage: 'sent',
+                     path: 'https://x/' + k + 'a.jpg', uploaded_by: 'Склад', uploaded_at: 'x' });
+          out.push({ id: 'ph' + k + 'b', list_id: id, store_name: WH_TG, stage: 'sent',
+                     path: 'https://x/' + k + 'b.jpg', uploaded_by: 'Склад', uploaded_at: 'x' });
+        });
+        return out;
+      },
       stock_differences: [], differences_reports: [], stock_returns: [],
       users: USERS,
       loading_lists: opts.lists || [],

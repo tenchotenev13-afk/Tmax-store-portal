@@ -110,6 +110,15 @@ function env(user, opts) {
          ИЗКЛЮЧЕН, 25.09.2026). Този тест описва ВКЛЮЧЕНИЯ скенер, затова
          флагът е изричен. Изключеното състояние е в loading-scan-toggle. */
       app_settings: [{ key: 'loading_scan', value: 'on' }],
+      /* „📤 Изпрати" иска поне 2 снимки на натоварването (25.09.2026).
+         Този тест проверява какво става СЛЕД изпращането, не гейта —
+         затова фикстурата ги носи. Гейтът е в loading-lists-photos. */
+      loading_list_photos: [
+        { id: 'ph1', list_id: 'L1', store_name: WH, stage: 'sent',
+          path: 'https://x/1.jpg', uploaded_by: 'Склад', uploaded_at: 'x' },
+        { id: 'ph2', list_id: 'L1', store_name: WH, stage: 'sent',
+          path: 'https://x/2.jpg', uploaded_by: 'Склад', uploaded_at: 'x' }
+      ],
       stores: [], contacts: [], transport_orders: [], goods_transit: [],
       stock_differences: [], differences_reports: [], stock_returns: []
     }

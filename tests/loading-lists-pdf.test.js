@@ -62,6 +62,15 @@ function env(user, items, lists, opts) {
         return r;
       },
       loading_list_products: [], stores: [], contacts: [], transport_orders: [], client_orders: [],
+      /* „📤 Изпрати" иска поне 2 снимки на натоварването (25.09.2026).
+         Този тест проверява какво става СЛЕД изпращането, не гейта —
+         затова фикстурата ги носи. Гейтът е в loading-lists-photos. */
+      loading_list_photos: [
+        { id: 'ph1', list_id: 'L1', store_name: WH, stage: 'sent',
+          path: 'https://x/1.jpg', uploaded_by: 'Склад', uploaded_at: 'x' },
+        { id: 'ph2', list_id: 'L1', store_name: WH, stage: 'sent',
+          path: 'https://x/2.jpg', uploaded_by: 'Склад', uploaded_at: 'x' }
+      ],
       stock_differences: [], differences_reports: [], stock_returns: [], goods_transit: []
     }
   });

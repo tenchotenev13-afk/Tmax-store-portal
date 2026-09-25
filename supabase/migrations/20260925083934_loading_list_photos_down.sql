@@ -1,0 +1,22 @@
+-- Rollback на 20260925083934_loading_list_photos.sql
+--
+-- ВНИМАНИЕ — ОТКАТЪТ ТРИЕ ДАННИ, които не са никъде другаде.
+-- Преброй ПРЕДИ отката:
+--   select stage, count(*) from public.loading_list_photos group by 1;
+-- Различно от нула значи, че по товарни листи вече има снимки: при спор за
+-- щета при транспорт те са ЕДИНСТВЕНОТО доказателство какво е тръгнало.
+--
+-- САМИТЕ ФАЙЛОВЕ ОСТАВАТ в bucket bulletin-files под префикс
+-- loading-lists/<list_id>/ — drop-ът маха само редовете, тоест връзката
+-- „коя снимка към кой лист". Файловете стават сираци, но не се губят;
+-- при нужда се изброяват с:
+--   select name from storage.objects
+--    where bucket_id='bulletin-files' and name like 'loading-lists/%';
+--
+-- Преди пускане: върни loading.js отпреди тази промяна. Порталът иска поне 2
+-- снимки, за да пусне „📤 Изпрати" — без таблицата заявката връща 404 и нито
+-- един лист не може да бъде изпратен.
+--
+-- За Живко: махни таблицата от mirror-schema.sql и $TableColumns.
+
+drop table if exists public.loading_list_photos;

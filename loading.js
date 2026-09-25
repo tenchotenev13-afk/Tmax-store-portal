@@ -427,8 +427,11 @@ function loadLoadingLists(){
       return sbGet('loading_list_items','list_id=in.('+ids.join(',')+')&order=position.asc&select='+LL_ITEM_SELECT)
         .then(function(items){
           llItems = llNormProducts(Array.isArray(items) ? items : []);
-          renderLoadingLists();
-        });
+          /* Снимките на всички листи наведнъж — картите ги искат при първото
+             рисуване, а заявка на карта би била N+1. */
+          return llLoadPhotos(ids);
+        })
+        .then(function(){ renderLoadingLists(); });
     });
 }
 function llItemsOf(listId){
@@ -488,6 +491,7 @@ function llLoadStoreSide(){
            приемането", има какво да се прави в него — свиването го скрива
            заедно с единствения бутон, който го придвижва. Дотук условието
            беше „всички received" и точно този случай не съществуваше. */
+        llLoadPhotos(keys).then(function(){ renderLoadingLists(); });
         llStoreLists.forEach(function(l){
           if(llCollapsed[l.id] !== undefined) return;
           if(l.status !== 'done' && l.status !== 'partial') return;
@@ -1180,8 +1184,213 @@ function llStoreCardHtml(l){
     }
     });
   });
-  h += '</tbody></table></div></div>';
+  h += '</tbody></table></div>';
+  /* ДВАТА КРАЯ ЕДИН ДО ДРУГ. Снимката отпреди тръгване, която никой не
+     сравнява с пристигането, не доказва нищо — затова са в един блок, а не
+     на два екрана. */
+  h += llPhotoStripHtml(l, 'sent', l.warehouse || '', {
+    title: '📷 От изпращача при натоварване',
+    note: 'снима ' + (l.warehouse || '—')
+  });
+  /* Обектът качва СВОИТЕ. При глобален профил в картата може да има няколко
+     обекта — тогава качването няма еднозначен собственик и се скрива; който
+     е ЕДИН обект, си качва. */
+  if(onlyStore && llCanReceive({ store_name: onlyStore })){
+    h += llPhotoStripHtml(l, 'received', onlyStore, {
+      title: '📷 Моите снимки при получаване',
+      note: 'по избор', canAdd: l.status !== 'done' && l.status !== 'partial'
+    });
+  }
+  h += '</div>';
   return h;
+}
+
+
+/* ══════════════════════════════════════════════════════════
+   СНИМКИ КЪМ ТОВАРНИЯ ЛИСТ
+
+   Два края на един курс, за да се хване щета при транспорт, неправилно
+   натоварване или стречоване:
+     · ПРИ ИЗПРАЩАНЕ — изпращачът снима натоварения камион/палетите. Към
+       ЦЕЛИЯ лист, не по ред. ЗАДЪЛЖИТЕЛНИ: „Изпрати" не минава без поне две.
+     · ПРИ ПОЛУЧАВАНЕ — всеки обект снима своите палети. По избор, без
+       минимум.
+
+   Затова и двете страни се показват ЕДНА ДО ДРУГА: снимка отпреди тръгване,
+   която никой не сравнява с пристигането, не доказва нищо.
+
+   store_name е попълнено и при двете: при 'sent' е ИЗПРАЩАЧЪТ (магазин или
+   склад), при 'received' — получателят. Разликата я носи stage. Така
+   бъдещият архив („📷 Снимки" в История) филтрира по обект с един индекс.
+
+   TODO (отделна задача): diffCompressImage живее в stock-differences.js, а
+   srCompressImage в stock-returns.js — един и същи код в две копия, а тук е
+   трето извикване на първото. Правилният ход е функцията да се вдигне в
+   shared.js и трите модула да я ползват оттам. Не се прави в тази промяна,
+   за да не се пипат чужди модули. */
+
+var LL_PHOTO_MIN = 2;          /* минимумът при изпращане */
+var llPhotos = {};             /* {listId: [редове от loading_list_photos]} */
+var llPhotoBusy = {};          /* {listId: брой качвания в момента} */
+
+/* Снимките на ВСИЧКИ листи наведнъж — по същата причина като редовете:
+   картите ги искат при първото рисуване, а заявка на карта би била N+1. */
+function llLoadPhotos(listIds){
+  var ids = (listIds || []).filter(Boolean);
+  llPhotos = {};
+  if(!ids.length) return Promise.resolve({});
+  return sbGet('loading_list_photos','list_id=in.('+ids.join(',')+')&order=uploaded_at.asc')
+    .then(function(rows){
+      (Array.isArray(rows) ? rows : []).forEach(function(p){
+        if(!llPhotos[p.list_id]) llPhotos[p.list_id] = [];
+        llPhotos[p.list_id].push(p);
+      });
+      return llPhotos;
+    })
+    .catch(function(){ return llPhotos; });
+}
+function llPhotosOf(listId, stage, store){
+  return (llPhotos[listId] || []).filter(function(p){
+    if(stage && p.stage !== stage) return false;
+    if(store !== undefined && p.store_name !== store) return false;
+    return true;
+  });
+}
+/* Кой може да трие: качилият, докато листът НЕ е приключен; admin винаги.
+   След приключване снимката е доказателство по затворен курс — оттам нататък
+   се маха само от човек, който отговаря за целия портал. */
+function llCanDeletePhoto(list, p){
+  if(!currentUser || !p) return false;
+  if(currentUser.role === 'admin') return true;
+  if(!list || list.status === 'done' || list.status === 'partial') return false;
+  return p.uploaded_by === llActor();
+}
+
+/* Една миниатюра. Клик отваря оригинала в нов раздел — сравняването на две
+   снимки става на цял екран, не в каре от 56 пиксела. */
+function llPhotoThumbHtml(list, p, canDel){
+  return '<div data-ll-photo="'+escAttr(p.id)+'" style="position:relative;display:inline-block;">'+
+    '<a href="'+escAttr(p.path)+'" target="_blank" rel="noopener" title="'+escAttr((p.uploaded_by||'')+' · '+llFmtStamp(p.uploaded_at))+'">'+
+      '<img src="'+escAttr(p.path)+'" style="width:64px;height:64px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0;display:block;"></a>'+
+    (canDel
+      ? '<button data-l="'+escAttr(list.id)+'" data-p="'+escAttr(p.id)+'" onclick="llDeletePhoto(this.dataset.l,this.dataset.p)" title="Махни снимката" style="position:absolute;top:-5px;right:-5px;width:17px;height:17px;border:none;background:#dc2626;color:#fff;border-radius:50%;font-size:9px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;">✕</button>'
+      : '')+
+    '</div>';
+}
+/* Лента със снимки: заглавие, миниатюри и (по избор) бутон за качване.
+   stage и store решават КОИ снимки и КЪДЕ отиват новите. */
+function llPhotoStripHtml(list, stage, store, opts){
+  opts = opts || {};
+  var ps = llPhotosOf(list.id, stage, store);
+  var busy = llPhotoBusy[list.id] || 0;
+  var inputId = 'll-ph-' + stage + '-' + list.id;
+  var h = '<div data-ll-strip="'+escAttr(stage)+'" style="margin-top:10px;">'+
+    '<div style="font-size:11.5px;font-weight:700;color:#475569;margin-bottom:5px;">'+
+      esc(opts.title || '📷 Снимки')+
+      ' <span style="font-weight:400;color:#94a3b8;">('+ps.length+')</span>'+
+      (opts.note ? ' <span style="font-weight:400;color:#94a3b8;">· '+esc(opts.note)+'</span>' : '')+
+    '</div>';
+  if(!ps.length && !opts.canAdd){
+    h += '<div style="font-size:11.5px;color:#cbd5e1;">няма</div></div>';
+    return h;
+  }
+  h += '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">'+
+    ps.map(function(p){ return llPhotoThumbHtml(list, p, llCanDeletePhoto(list, p)); }).join('');
+  if(busy){
+    for(var b = 0; b < busy; b++){
+      h += '<div data-ll-photo-busy="1" style="width:64px;height:64px;border-radius:6px;background:#f1f5f9;display:flex;align-items:center;justify-content:center;font-size:11px;color:#94a3b8;">⏳</div>';
+    }
+  }
+  if(opts.canAdd){
+    /* capture="environment" отваря ЗАДНАТА камера направо на телефона —
+       складът снима на рампата, не избира от галерия. */
+    h += '<label for="'+inputId+'" style="width:64px;height:64px;border:1px dashed #94a3b8;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#475569;cursor:pointer;background:#f8fafc;" title="Добави снимка">＋'+
+      '<input type="file" id="'+inputId+'" accept="image/*" capture="environment" multiple '+
+        'data-l="'+escAttr(list.id)+'" data-st="'+escAttr(stage)+'" data-s="'+escAttr(store)+'" '+
+        'onchange="llUploadPhotos(this)" style="display:none;"></label>';
+  }
+  h += '</div></div>';
+  return h;
+}
+
+/* Качване. Свиването минава през diffCompressImage (виж TODO-то отгоре):
+   неговите 1600/0.75 свалят снимка от телефон от ~1.1 MB до ~250 KB —
+   числата са мерени върху bulletin-files на 25.09.2026. */
+function llUploadPhotos(input){
+  var files = Array.prototype.slice.call(input.files || []);
+  var listId = input.dataset.l, stage = input.dataset.st, store = input.dataset.s;
+  input.value = '';
+  if(!files.length) return Promise.resolve(0);
+  llPhotoBusy[listId] = (llPhotoBusy[listId] || 0) + files.length;
+  renderLoadingLists();
+  var done = 0, failed = 0;
+  return Promise.all(files.map(function(file){
+    return llUploadOnePhoto(listId, stage, store, file).then(function(ok){
+      if(ok) done++; else failed++;
+      llPhotoBusy[listId] = Math.max(0, (llPhotoBusy[listId] || 1) - 1);
+    });
+  })).then(function(){
+    /* Презареждаме от базата, не добавяме наум: id-тата трябват за триенето,
+       а sbPost не ги връща. */
+    return llLoadPhotos(Object.keys(llPhotos).concat([listId]).filter(function(v, i, a){ return a.indexOf(v) === i; }));
+  }).then(function(){
+    renderLoadingLists();
+    if(failed){
+      /* Провалът НЕ се губи тихо: човекът вижда, че е качил три, а са две. */
+      toast('⚠️ ' + failed + (failed === 1 ? ' снимка НЕ се качи' : ' снимки НЕ се качиха') +
+        ' — опитай пак', '#dc2626');
+    } else if(done){
+      toast('📷 ' + done + (done === 1 ? ' снимка е добавена' : ' снимки са добавени'));
+    }
+    return done;
+  });
+}
+function llUploadOnePhoto(listId, stage, store, file){
+  var compress = (typeof diffCompressImage === 'function')
+    ? diffCompressImage(file, 1600, 0.75)
+    : Promise.resolve(file);
+  return compress.then(function(blob){
+    var path = 'loading-lists/' + listId + '/' + Date.now() + '_' +
+      Math.random().toString(36).slice(2, 8) + '.jpg';
+    return fetch(DIFF_SB + '/storage/v1/object/' + DIFF_BKT + '/' + path, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + DIFF_KEY, 'Content-Type': 'image/jpeg', 'x-upsert': 'true' },
+      body: blob
+    }).then(function(r){
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      var pub = DIFF_SB + '/storage/v1/object/public/' + DIFF_BKT + '/' + path;
+      /* Редът се пише СЛЕД успешното качване. Обратният ред оставя ред, който
+         сочи несъществуващ файл — счупена миниатюра завинаги. */
+      return sbPost('loading_list_photos', {
+        list_id: listId, store_name: store, stage: stage,
+        path: pub, uploaded_by: llActor()
+      }).then(function(res){
+        if(!res.ok) throw new Error(sbErrMsg(res));
+        return true;
+      });
+    });
+  }).catch(function(e){
+    console.error('llUploadOnePhoto', e);
+    return false;
+  });
+}
+function llDeletePhoto(listId, photoId){
+  var list = llLists.find(function(x){ return String(x.id) === String(listId); }) ||
+             llStoreLists.find(function(x){ return String(x.id) === String(listId); });
+  var p = (llPhotos[listId] || []).find(function(x){ return String(x.id) === String(photoId); });
+  if(!list || !p) return Promise.resolve(false);
+  if(!llCanDeletePhoto(list, p)){ toast('Нямаш права да махнеш тази снимка','#dc2626'); return Promise.resolve(false); }
+  if(!confirm('Махни снимката?')) return Promise.resolve(false);
+  /* Трие се РЕДЪТ, не файлът в storage: същото като в Разлики. Файлът остава
+     невидим сирак — цената е няколко килобайта срещу риска да изтрием обект,
+     към който сочи и друг ред. */
+  return sbDelete('loading_list_photos','id=eq.'+encodeURIComponent(photoId)).then(function(res){
+    if(!res.ok){ toast('Снимката НЕ беше махната: '+sbErrMsg(res),'#dc2626'); return false; }
+    llPhotos[listId] = (llPhotos[listId] || []).filter(function(x){ return String(x.id) !== String(photoId); });
+    renderLoadingLists();
+    toast('Снимката е махната');
+    return true;
+  });
 }
 
 /* „⚠️ Разлика" по НЕПОЛУЧЕН палет — отваря бланката за разлики, попълнена от
@@ -1881,7 +2090,7 @@ function llMailBtn(){
 }
 
 /* Писмото ДО ОБЕКТА при изпращане — САМО неговите редове. */
-function llSentHtmlFor(list, store, rows){
+function llSentHtmlFor(list, store, rows, nPhotos){
   var body = '<h2 style="color:#0f172a;margin:0 0 4px;font-size:19px;">🚛 Нов товарен лист</h2>'+
     '<p style="color:#64748b;font-size:13px;margin:0 0 16px;">За <b>'+esc(store)+'</b> · '+
       llPalletGroups(rows).length+' товарни единици ('+rows.length+' реда)</p>'+
@@ -1908,7 +2117,14 @@ function llSentHtmlFor(list, store, rows){
         }).join('<br>')+'</td></tr>';
     }
   });
-  body += '</table>'+llMailBtn();
+  body += '</table>';
+  if(nPhotos){
+    body += '<div style="margin-top:14px;background:#f8fafc;border-left:3px solid #2563eb;padding:8px 12px;'+
+      'border-radius:0 6px 6px 0;font-size:12.5px;">&#128247; '+nPhotos+
+      (nPhotos === 1 ? ' снимка на натоварването' : ' снимки на натоварването')+
+      ' — виж ги в портала и ги сравни с това, което пристига.</div>';
+  }
+  body += llMailBtn();
   return emailWrap(body, 'Товарен лист · ТеМАХ Вътрешна платформа');
 }
 
@@ -1974,6 +2190,11 @@ function llNotifySent(list, items){
       var msg = units + ' товарни единици · ' + dateTxt +
         '. Отвори Транспорт → Товарни листи.';
       var subject = 'Товарен лист от ' + wh + ' · ' + dateTxt;
+      /* Снимките се СПОМЕНАВАТ, не се прикачат: две по 250 KB върху вече
+         прикачения PDF правят писмо от около мегабайт към всеки обект, а
+         смисълът им е да се сравнят с тези при получаване — което става в
+         портала, не в пощата. */
+      var nPhotos = llPhotosOf(list.id, 'sent').length;
       /* Бланката като PDF. Провалът ѝ (липсваща библиотека, липсващ шрифт,
          паднала мрежа) НЕ спира писмото — то тръгва без приложение, а
          човекът разбира от жълтия toast долу. */
@@ -1987,7 +2208,7 @@ function llNotifySent(list, items){
         return Promise.all([
           llPushTo(g.store, title, msg),
           llMailTo(byStore[g.store] || [], subject, function(){
-            return llSentHtmlFor(list, g.store, g.rows);
+            return llSentHtmlFor(list, g.store, g.rows, nPhotos);
           }, file ? [{ filename: file.filename, content: file.base64 }] : null)
         ]).then(function(r){
           return { store: g.store, push: r[0], mail: r[1], pdf: !!file };
@@ -3688,6 +3909,15 @@ function llSendList(id){
   var noProd = rows.filter(function(it){ return !(it.products || []).length; }).length;
   /* Питането за описа е ПЪРВО: отговори ли човекът „не" на него, няма смисъл
      да го питаме и второто. Обратният ред би значел два диалога за отказ. */
+  /* СНИМКИТЕ СА ЗАДЪЛЖИТЕЛНИ. Проверката е ТУК, вътре в самото изпращане, а
+     не само в бутона: llSendList е единственият път до status='sent' и
+     единственото място, през което минават и кликът, и извикването наум.
+     Гейт само в рендера значи „скрито", не „невъзможно". */
+  var nPh = llPhotosOf(id, 'sent').length;
+  if(nPh < LL_PHOTO_MIN){
+    toast('Трябват поне ' + LL_PHOTO_MIN + ' снимки на натоварването — качени са ' + nPh,'#dc2626');
+    return;
+  }
   if(noProd && !confirm(noProd + (noProd === 1 ? ' ред е без артикули.' : ' реда са без артикули.') +
      ' Изпращаш ли така?')) return;
   if(!confirm('Изпрати товарния лист към обектите?')) return;
@@ -3895,6 +4125,27 @@ function llViewHtml(){
     }
   });
   h += '</tbody></table></div>';
+  /* Тук щетата се сравнява: какво е тръгнало срещу какво е пристигнало при
+     ВСЕКИ обект. Затова снимките при получаване са групирани по обект, а не
+     смесени в една лента. */
+  h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-top:12px;">'+
+    llPhotoStripHtml(l, 'sent', l.warehouse || '', {
+      title: '📷 При натоварване',
+      note: 'поне ' + LL_PHOTO_MIN + ' са задължителни за изпращане',
+      canAdd: l.status === 'draft'
+    });
+  var phStores = {}, phOrder = [];
+  llPhotosOf(l.id, 'received').forEach(function(p){
+    if(!phStores[p.store_name]){ phStores[p.store_name] = 1; phOrder.push(p.store_name); }
+  });
+  phOrder.sort();
+  phOrder.forEach(function(st){
+    h += llPhotoStripHtml(l, 'received', st, { title: '📷 При получаване · ' + st });
+  });
+  if(!phOrder.length){
+    h += '<div style="margin-top:10px;font-size:11.5px;color:#94a3b8;">Няма снимки при получаване.</div>';
+  }
+  h += '</div>';
   return h;
 }
 /* timestamptz -> дата. fmtDate() върху суров timestamptz прави split('-') и
