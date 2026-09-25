@@ -173,8 +173,12 @@ function fakeInput(w, name, type) {
     const { w } = env(MANAGER, [LINE_A], [REP_MINE]);
     const uploads = [];
     w.fetch = function (url, opt) {
-      uploads.push({ url: url, opt: opt });
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
+      /* Само качванията в storage. От 24.09.2026 същият клик пуска и
+         markLinkedRecurringTask() (отмятането на задачата „Разлики"), която
+         чете през същия fetch — брой на ВСИЧКИ заявки тук вече не значи
+         „качване". */
+      if (String(url).indexOf('/storage/') >= 0) uploads.push({ url: url, opt: opt });
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]) });
     };
     const patches = [];
     w.sbPatch = function (table, q, body) {

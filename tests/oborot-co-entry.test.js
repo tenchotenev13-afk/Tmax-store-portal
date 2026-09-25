@@ -645,9 +645,21 @@ function toastColor(h) {
       /function dtAfterSave\(byCO\)\{[^]*?dtMarkBulletinTask\(\)[^]*?\n\}/.test(code));
     ok('пътят на ЦО подава true на dtAfterSave', /dtAfterSave\(true\)/.test(code));
     ok('пътят на магазина подава false', /dtAfterSave\(false\)/.test(code));
-    ok('в task_completions се пише на ЕДНО място',
-      (code.match(/sbPost\('task_completions'/g) || []).length === 1,
+    /* От 24.09.2026 самият запис живее в markLinkedRecurringTask() в
+       shared.js — общ за оборота и за Разлики. Правилото е същото: ЕДНО
+       място, което пише отмятане; тук се проверява, че daily-turnover вече
+       не пише сам и че в общия помощник записът е един. */
+    ok('daily-turnover не пише сам в task_completions',
+      (code.match(/sbPost\('task_completions'/g) || []).length === 0,
       'записи: ' + (code.match(/sbPost\('task_completions'/g) || []).length);
+    const sharedCode = require('fs')
+      .readFileSync(require('path').join(process.argv[2] || '.', 'shared.js'), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '');
+    ok('в общия помощник записът е ЕДИН',
+      (sharedCode.match(/sbPost\('task_completions'/g) || []).length === 1,
+      'записи в shared.js: ' + (sharedCode.match(/sbPost\('task_completions'/g) || []).length);
+    ok('и оборотът минава именно през него',
+      /markLinkedRecurringTask\('oborot'/.test(code));
     ok('и няма PATCH/DELETE по нея',
       !/sbPatch\('task_completions'|sbDelete\('task_completions'/.test(code));
     ok('корекцията минава през sbPatch, не през sbPost',

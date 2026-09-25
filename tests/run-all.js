@@ -81,6 +81,7 @@ const TESTS = [
   'stock-diff-responsibility.test.js',
   'stock-diff-resolve-qty.test.js',
   'stock-diff-status-new.test.js',
+  'stock-diff-task-autocomplete.test.js',
   'stock-diff-print.test.js',
   'diff-print-supplier-col.test.js',
   'print-transport-marker.test.js',

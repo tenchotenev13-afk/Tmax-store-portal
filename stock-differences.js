@@ -112,6 +112,37 @@ function sdFmtDateTime(val){
    Самият списък LOGISTICS_WAREHOUSES живее в shared.js (зарежда се пръв),
    защото го ползват и отчетите през isReportableStore - две копия щяха да
    се разминат при следващия нов склад. */
+/* ═══ ОТМЯТАНЕ НА ЗАДАЧАТА „РАЗЛИКИ" (linked_module='stock-diff') ═══════
+   Работата на ОБЕКТА по вече подадена бланка отмята вместо него постоянната
+   задача за деня. Процесът е двустранен, затова действието на склада или на
+   офиса НЕ отмята нищо на магазина.
+
+   Гейтът е ПО-СТРОГ от sdIsInterstoreStoreSide(): той приема и човек, в
+   чиито assigned_stores е обектът — счетоводителят по обекти и регионалният
+   мениджър. Те действат ОТ ИМЕТО на магазина, а задачата е работа НА
+   магазина, затова тук се сравнява само собственият store_name.
+   Складът отпада по isLogisticsWarehouseUser() (неговият store_name е името
+   на склада), офисът — по isGlobal().
+
+   Самото отмятане (версии за седмицата, notice, дата, втори ред, 409) е в
+   markLinkedRecurringTask() в shared.js — общо с Вечерен оборот. */
+function sdActorIsOwnStore(store){
+  return !!store && !!currentUser && !isGlobal() && !isLogisticsWarehouseUser() &&
+    currentUser.store_name === store;
+}
+/* Извиква се СЛЕД успешния запис по бланката. Провалът на отмятането не
+   връща действието назад — то е важното — но не се и премълчава (правило 13):
+   червен toast и ред в конзолата. Чекбоксът в Бюлетина остава активен, тоест
+   човекът може да се отметне и сам; затова тук няма постоянна лента като при
+   оборота. */
+function sdMarkDiffTask(store){
+  if(!sdActorIsOwnStore(store)) return;
+  markLinkedRecurringTask('stock-diff').then(function(res){
+    if(!res || res.status!=='failed') return;
+    try{console.error('sdMarkDiffTask task_completions → '+res.message);}catch(e){}
+    toast('Действието е записано, но задачата в Бюлетина не се отметна','#dc2626');
+  });
+}
 function isLogisticsWarehouseUser(){
   return currentUser && LOGISTICS_WAREHOUSES.indexOf(currentUser.store_name) >= 0;
 }
@@ -940,6 +971,7 @@ function submitStoreLateReceive(lineId){
     if(!res.ok){ toast('Грешка при запис: '+sbErrMsg(res),'#dc2626'); return; }
     Object.keys(data).forEach(function(k){ line[k]=data[k]; });
     var ov = document.getElementById('sdlate-ov'); if(ov) ov.remove();
+    sdMarkDiffTask(line.store_name||rep.store_name);
     sdNotifyInterstore(rep.counterpart, '📦 Разлика закрита от '+(rep.store_name||''),
       (line.material_name||'')+' — получено на '+fmtDate(d));
     var siblings = sdData.filter(function(x){return x.report_id===line.report_id;});
@@ -987,6 +1019,7 @@ function sdSetStoreResponse(lineId,val,comment){
     var ov=document.getElementById('sdnostock-ov'); if(ov) ov.remove();
     toast('✅ Записано');
     var rep = diffReports.find(function(x){return x.id===line.report_id;}) || {};
+    sdMarkDiffTask(line.store_name||rep.store_name);
     var art = line.material_name||'';
     if(val==='sap_done') sdNotifyInterstore(rep.counterpart, '📄 Разлика: пуснато в SAP', (rep.store_name||'')+': '+art+' — приемете обратно');
     else if(val==='no_stock') sdNotifyInterstore(rep.counterpart, '⛔ Разлика: няма наличност в логистика', (rep.store_name||'')+': '+art);
@@ -1263,6 +1296,7 @@ function sdConfirmInterstore(lineId, as){
     line.status='received'; line.completed_by=by; line.completed_at=at;
     if(as==='store'){ line.store_response='accepted'; line.store_response_by=by; line.store_response_at=at; }
     var cRep = diffReports.find(function(x){return x.id===line.report_id;}) || {};
+    if(as==='store') sdMarkDiffTask(line.store_name||cRep.store_name);
     if(as==='store') sdNotifyInterstore(cRep.counterpart, '✅ Разлика: прието в '+(cRep.store_name||''), line.material_name||'');
     else if(as==='warehouse') sdNotifyInterstore(cRep.store_name, '📬 Разлика: прието обратно в '+(cRep.counterpart||''), line.material_name||'');
     var siblings = sdData.filter(function(x){return x.report_id===line.report_id;});
@@ -1625,6 +1659,7 @@ function sdUploadLineAttachment(input,lineId){
           if(!res.ok){toast('Грешка при запис','#dc2626');return;}
           record.attachments=atts;
           toast('✅ Прикачено!');
+          sdMarkDiffTask(record.store_name);
           sdKeepScroll(record.report_id);
           renderStockDiff();
         });
@@ -1667,6 +1702,7 @@ function sdUploadReportPhoto(input,reportId){
           if(!res.ok){toast('Грешка при запис','#dc2626');return;}
           rep.photos=arr;
           toast('✅ Прикачено!');
+          sdMarkDiffTask(rep.store_name);
           sdKeepScroll(rep.id);
           renderStockDiff();
         });
@@ -2501,6 +2537,7 @@ function submitSwapSent(swapId){
        какво е изпратено и с кой документ, а не какво е било преди PATCH-а. */
     s.status='sent'; s.sap_doc_num=sap; s.sent_by=body.sent_by; s.sent_at=sentAt;
     if(isPhys) s.transport_mode=mode;
+    sdMarkDiffTask(s.from_store);
     sdNotifySwapSent(s);
     loadStockDiff();
   });
@@ -2521,6 +2558,7 @@ function sdReceiveSwap(swapId){
     if(!res.ok){ toast('Приемането НЕ е записано: '+sbErrMsg(res),'#dc2626'); return; }
     toast('📬 Прието в '+s.to_store);
     s.status='received';
+    sdMarkDiffTask(s.to_store);
     sdNotifySwapReceived(s);
     loadStockDiff();
   });
@@ -3025,6 +3063,7 @@ function submitSDCorrection(){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     var el=document.getElementById('sdc-ov'); if(el)el.remove();
     toast('✅ Корекцията е запазена!');
+    sdMarkDiffTask(current && current.store_name);
     loadStockDiff();
   });
 }

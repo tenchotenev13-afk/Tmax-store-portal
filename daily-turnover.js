@@ -706,62 +706,19 @@ function dtCOEntryBlock(byStore){
    send-oborot-report („кой не е подал оборот") чете daily_turnover, не
    recurring_tasks, и също не се влияе от изключването. */
 function dtMarkBulletinTask(){
-  var store=currentUser.store_name, day=dtToday();
-  /* linked_module вече е СЪДЪРЖАНИЕ по седмици (recurring_task_versions,
-     24.09.2026), затова филтърът не може да стои в заявката: задача, вързана
-     към „Вечерен оборот" само за тази седмица, не би се намерила. Тегли се
-     наборът, слива се версията за днешната седмица и филтърът е тук. */
-  return Promise.all([
-    sbGet('recurring_tasks','select=id,task_type,linked_module&active=is.true'),
-    loadRecurringVersions().catch(function(){ return []; })
-  ]).then(function(res){
-    var rows = recurringApplyVersions(Array.isArray(res[0])?res[0]:[], res[1], recurringMondayOf(new Date()))
-      .filter(function(t){ return t && t.linked_module === 'oborot'; });
-    return rows;
-  }).then(function(rows){
-      /* Стане ли свързаната задача „Само за информация", тя няма отмятания и
-         никой не ги брои — записът тук би трупал редове, които нищо не чете,
-         а провалът му би вдигал предупреждение за несъществуващо разминаване.
-         Затова се излиза МЪЛЧАЛИВО: notice не е пропусната работа.
-         task_type идва от заявката — иначе taskIsNotice() гледа undefined и
-         винаги връща false, тоест предпазителят би бил тавтологичен. */
-      var list=(Array.isArray(rows)?rows:[]).filter(function(t){ return !taskIsNotice(t); });
-      if(!list.length) return;
-      var rid=list[0].id;
-      /* Второ отмятане за същия ден би дало дублиран ред — Бюлетинът брои
-         редове, не уникални обекти. */
-      var q='select=id&recurring_task_id=eq.'+encodeURIComponent(rid)+
-            '&store_name=eq.'+encodeURIComponent(store)+
-            '&completion_date=eq.'+day;
-      return sbGet('task_completions',q).then(function(done){
-        if(Array.isArray(done)&&done.length) return;
-        return sbPost('task_completions',{
-          recurring_task_id:rid,
-          task_id:null,
-          store_name:store,
-          completed_by:currentUser.display_name,
-          completion_date:day,
-          status:'done'
-        }).then(function(res){
-          if(res&&res.ok) return;
-          /* 409 = вече има ред за (тази задача, този обект, този ден) — виж
-             двата частични уникални индекса от миграция 20260910231103.
-             Проверката със SELECT по-горе остава, но между нея и POST-а има
-             прозорец, а и друг човек на същия обект може да отметне пръв.
-             Задачата Е отметната, тоест няма никакво разминаване, за което
-             да се предупреждава: излизаме мълчаливо, без oborotTaskWarn.
-             Всичко останало си остава жълто предупреждение. */
-          if(res&&res.status===409) return;
-          /* Оборотът е по-важният запис и НЕ се връща назад заради това. Но
-             мълчанието тук значи Бюлетин и имейл да броят различно, затова
-             се казва — и остава видимо в изгледа, не само за 2.5 секунди. */
-          oborotTaskWarn=true;
-          var msg=(res&&res.error&&(res.error.message||res.error.hint))||('HTTP '+((res&&res.status)||'—'));
-          try{console.error('dtMarkBulletinTask task_completions → '+msg);}catch(e){}
-          toast('Оборотът е записан, но задачата в Бюлетина не се отметна','#d97706');
-        });
-      });
-    });
+  /* Логиката е обща за модулите (markLinkedRecurringTask в shared.js,
+     24.09.2026): версиите за днешната седмица, филтърът по linked_module в
+     кода, notice, вторият ред и 409. Тук остава само какво вижда човекът —
+     оборотът е записан, а разминаването с Бюлетина трябва да си личи и след
+     като toast-ът изчезне (dtTaskWarnBand).
+     date:'today' — задачата за оборота е за всеки ден; проверката „пада ли
+     се днес" няма какво да реши и само би добавила начин да се счупи. */
+  return markLinkedRecurringTask('oborot',{date:'today'}).then(function(r){
+    if(!r || r.status!=='failed') return;
+    oborotTaskWarn=true;
+    try{console.error('dtMarkBulletinTask task_completions → '+r.message);}catch(e){}
+    toast('Оборотът е записан, но задачата в Бюлетина не се отметна','#d97706');
+  });
 }
 
 /* ⚠️ ЕДИНСТВЕНОТО МЯСТО, където се решава дали задачата да се отметне.

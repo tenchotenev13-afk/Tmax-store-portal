@@ -369,6 +369,125 @@ function loadRecurringVersions(){
   return sbGet('recurring_task_versions','select=id,recurring_task_id,from_monday,to_monday,'+RECURRING_CONTENT_FIELDS.join(',')+'&order=from_monday.asc');
 }
 
+/* ═══ АВТОМАТИЧНО ОТМЯТАНЕ НА СВЪРЗАНА ПОСТОЯННА ЗАДАЧА ═════════════════
+   Модул, в който обектът е свършил работата (Вечерен оборот, Разлики),
+   отмята вместо него постоянната задача с този linked_module. Логиката е
+   ЕДНА за всички модули (24.09.2026): разминат ли се две копия, единият
+   модул почва да отмята за друг ден или да не уважава версиите.
+
+   Какво прави, по ред:
+     · тегли активните постоянни задачи и версиите, слива съдържанието за
+       ДНЕШНАТА седмица и чак тогава филтрира по linked_module — полето е
+       седмично (recurring_task_versions), затова филтър в заявката би
+       пропуснал задача, вързана към модула само за тази седмица;
+     · „Само за информация" се пропуска: тя няма отмятания и никой не ги
+       брои, а провалът би вдигал тревога за несъществуващо разминаване;
+     · решава ДАТАТА (виж linkedTaskCompletionDate) и се отказва, ако днес
+       няма какво да се отмята;
+     · не пише втори ред за същия обект и ден (Бюлетинът брои редове);
+     · 409 значи, че някой е изпреварил — задачата Е отметната, тоест
+       мълчим.
+   Връща {status}: 'done' | 'already' | 'no-task' | 'not-due' | 'no-store' |
+   'failed' (+ message). Никога не хвърля към извикващия — решението какво
+   да каже на потребителя е негово, защото само той знае какво е записал. */
+var linkedTaskMarked = {};   /* модул|обект|ден → вече отметнато в тази сесия */
+function markLinkedRecurringTask(linkedModule, opts){
+  opts = opts || {};
+  var store = opts.store || (currentUser && currentUser.store_name);
+  if(!store) return Promise.resolve({status:'no-store'});
+  /* Качването на пет снимки е пет извиквания на едно и също нещо. Веднъж
+     отметнато за (модул, обект, ден) — не се пита отново: 3 заявки на файл
+     са видима цена за нищо. Провалът НЕ се помни, за да има втори опит. */
+  var memo = linkedModule+'|'+store+'|'+today();
+  if(linkedTaskMarked[memo]) return Promise.resolve({status:'already', cached:true});
+  return Promise.all([
+    sbGet('recurring_tasks','select=id,task_type,linked_module,due_weekday,due_weekdays,due_time,due_window,target_stores&active=is.true'),
+    loadRecurringVersions().catch(function(){ return []; }),
+    loadRecurringSkips(recurringSkipWeekOf(new Date())).catch(function(){ return []; })
+  ]).then(function(res){
+    var skips = Array.isArray(res[2]) ? res[2] : [];
+    var list = recurringApplyVersions(Array.isArray(res[0])?res[0]:[], res[1], recurringMondayOf(new Date()))
+      .filter(function(t){ return t && t.linked_module===linkedModule && !taskIsNotice(t); })
+      /* Насочена задача: обект извън target_stores не я дължи, тоест ред за
+         него е сирак — отчетите и „Днес" го подминават като 'na'. */
+      .filter(function(t){ return !t.target_stores || !t.target_stores.length || t.target_stores.indexOf(store)>=0; })
+      /* „Не за тази седмица" (recurring_task_skips) — за всички или за този
+         обект. Същото правило като в Бюлетина, „Днес" и чек листа. */
+      .filter(function(t){ return !recurringIsSkipped(t.id, store, skips); });
+    if(!list.length) return {status:'no-task'};
+    var t = list[0];
+    var day = linkedTaskCompletionDate(t, opts.date);
+    if(!day) return {status:'not-due', task_id:t.id};
+    var who = (currentUser && (currentUser.display_name || currentUser.email)) || null;
+    var at = new Date().toISOString();
+    var match='recurring_task_id=eq.'+encodeURIComponent(t.id)+
+              '&store_name=eq.'+encodeURIComponent(store)+
+              '&completion_date=eq.'+day;
+    return sbGet('task_completions','select=id,status&'+match).then(function(rows){
+      var cur = (Array.isArray(rows)&&rows.length) ? rows[0] : null;
+      /* Вече отметнато днес — втори ред би дал дубликат в броенето. */
+      if(cur && cur.status==='done'){ linkedTaskMarked[memo]=1; return {status:'already', task_id:t.id}; }
+      /* Има ред, но НЕ е 'done' — почти винаги отложен (postponed_to). Двата
+         частични уникални индекса от миграция 20260910231103 не гледат
+         status, тоест мястото е заето: нов ред би дал 409, а пропускането би
+         оставило свършената работа неотметната завинаги. Затова се дописва,
+         точно както прави tcUpsert() при ръчното отмятане. */
+      if(cur){
+        return sbPatch('task_completions','id=eq.'+cur.id,{status:'done', completed_by:who, completed_at:at})
+          .then(function(r){
+            if(r&&r.ok){ linkedTaskMarked[memo]=1; return {status:'done', task_id:t.id, completion_date:day, patched:true}; }
+            return {status:'failed', task_id:t.id, message:linkedTaskErr(r)};
+          });
+      }
+      return sbPost('task_completions',{
+        recurring_task_id:t.id,
+        task_id:null,
+        store_name:store,
+        completed_by:who,
+        completed_at:at,
+        completion_date:day,
+        status:'done'
+      }).then(function(r){
+        if(r&&r.ok){ linkedTaskMarked[memo]=1; return {status:'done', task_id:t.id, completion_date:day}; }
+        /* 409 = някой е изпреварил между SELECT-а и INSERT-а. Редът е чужд
+           само по време, не по смисъл — дописва се като при ръчното. */
+        if(r&&r.status===409){
+          return sbPatch('task_completions',match,{status:'done', completed_by:who, completed_at:at})
+            .then(function(r2){
+              if(r2&&r2.ok){ linkedTaskMarked[memo]=1; return {status:'done', task_id:t.id, completion_date:day, patched:true}; }
+              return {status:'failed', task_id:t.id, message:linkedTaskErr(r2)};
+            });
+        }
+        return {status:'failed', task_id:t.id, message:linkedTaskErr(r)};
+      });
+    });
+  });
+}
+function linkedTaskErr(r){
+  return (r&&r.error&&(r.error.message||r.error.hint))||('HTTP '+((r&&r.status)||'—'));
+}
+/* Датата, с която се отмята — СЪЩАТА, която чекбоксът в Бюлетина съпоставя.
+   Сбърка ли се, редът увисва: базата го пази, но нито блокът, нито отчетите
+   го намират за явяване.
+     opts.date==='today' → днес, безусловно. Ползва го Вечерен оборот: там
+       задачата е за всеки ден и проверката по-долу само би добавила начин да
+       се счупи (а тестовете ѝ подават задача без дни и час).
+     по подразбиране   → днес САМО ако задачата се пада днес; прозоречната —
+       само ако днес е В прозореца (recurringWindowComp приема коя да е дата
+       от него). Иначе null: днес няма какво да се отмята.
+   Помощниците за дните живеят в bulletin.js, който се зарежда преди всички
+   модули; липсват ли (изолиран тест), не се гадае — връща се null. */
+function linkedTaskCompletionDate(t, mode){
+  var day = today();
+  if(mode==='today') return day;
+  if(typeof recurringIsWindow==='function' && recurringIsWindow(t)){
+    if(typeof recurringWindowDatesForDate!=='function') return null;
+    return (recurringWindowDatesForDate(t, new Date())||[]).indexOf(day)>=0 ? day : null;
+  }
+  if(typeof recurringIsDueToday!=='function') return null;
+  return recurringIsDueToday(t) ? day : null;
+}
+
 /* Всички периоди — таблицата е малка (по един-два на задача), а Бюлетинът
    ги ползва и за показаната седмица, и за днешната. */
 function loadRecurringPeriods(){
