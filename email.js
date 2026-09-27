@@ -83,6 +83,10 @@ function buildWeeklyDigestHtml(storeName, tasks, wk, yr) {
      „📅 Четвъртък" на ТАЗИ — писмото твърди срок, който не е нейният.
      Затова излиза отделно, с пълната дата. */
   var digestWeek = (wk && yr) ? weekDays(wk, yr).map(toLocalISO) : [];
+  /* „В сила от": задача, която обектът още не вижда в портала, не влиза и в
+     писмото до него. Гейтът е ТУК, в рендера, а не само в извикващите: те
+     решават дали да се праща, това — какво пише вътре. */
+  tasks = tasks.filter(function(t) { return taskInForce(t, localDateISO(new Date())); });
   var spanLater = tasks.filter(function(t) { return !taskCountsInWeek(t, digestWeek); });
   if (spanLater.length) tasks = tasks.filter(function(t) { return spanLater.indexOf(t) < 0; });
 
@@ -175,8 +179,13 @@ function sendWeeklyDigest(bulletin, tasks, onDone) {
   /* Задачите „Само за информация" отпадат на входа, не при рендера: дайджестът
      е списък с работа за седмицата, а notice не е работа. Филтърът е ТУК, а не
      в извикващия (bulletin.js), защото функцията се вика от две места — менюто
-     „Имейл" и понеделнишкият банер. Виж taskIsNotice() в shared.js. */
-  tasks = (Array.isArray(tasks) ? tasks : []).filter(function(t){ return !taskIsNotice(t); });
+     „Имейл" и понеделнишкият банер. Виж taskIsNotice() в shared.js.
+     Същото важи и за „В сила от" (starts_on, 27.09.2026): дайджестът отива до
+     УПРАВИТЕЛЯ на обекта, а задача, която още не е в сила, той не вижда в
+     портала. Извикващият подава bulTasks, който за admin/accounting съдържа и
+     невлезлите в сила — затова гейтът е тук, на входа. */
+  var digestToday = localDateISO(new Date());
+  tasks = (Array.isArray(tasks) ? tasks : []).filter(function(t){ return !taskIsNotice(t) && taskInForce(t, digestToday); });
 
   /* Вземи всички manager потребители */
   sbGet('users', 'role=eq.manager&active=eq.true&select=email,display_name,store_name').then(function(users) {
@@ -243,8 +252,11 @@ function sendTestEmail(toEmail) {
 /* ─── AUTO CHECK (при зареждане на бюлетин) ─────────────── */
 function checkBulletinEmailTriggers(bulletin, tasks, completions) {
   /* Същият филтър като в sendWeeklyDigest: банерът предлага изпращане на
-     дайджеста и не бива да изскача заради задачи, които няма да влязат в него. */
-  tasks = (Array.isArray(tasks) ? tasks : []).filter(function(t){ return !taskIsNotice(t); });
+     дайджеста и не бива да изскача заради задачи, които няма да влязат в него.
+     Включително невлезлите в сила: те не влизат в писмото, значи не бива и да
+     го предлагат. */
+  var trigToday = localDateISO(new Date());
+  tasks = (Array.isArray(tasks) ? tasks : []).filter(function(t){ return !taskIsNotice(t) && taskInForce(t, trigToday); });
   if (!canEdit() || !bulletin) return;
 
   var now = new Date();

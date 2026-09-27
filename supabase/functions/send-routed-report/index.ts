@@ -1,5 +1,17 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v13 (27.09.2026) — „В СИЛА ОТ" за многоседмична задача (нова колона
+   bulletin_tasks.starts_on). Обектите не виждат задачата преди тази дата и не
+   могат да я отметнат; действителното начало е coalesce(starts_on, spans_from)
+   — taskSpanStart(). СРОКЪТ не се променя, затова броенето пак се задейства в
+   седмицата на due_date (due_date >= starts_on е CHECK в базата). Три неща:
+     · loadSpanningTasks() с четвърти аргумент (днес) и гейт в заявката;
+     · collectWeeklyRoutingData() прилага taskInForce() — същото правило като
+       в общия седмичен отчет, за да не се разминат трите колектора;
+     · collectTaskReportData() пропуска с причина „задачата още не е в сила":
+       камбанката позволява всяка дата, а иначе картичката изреждаше всичките
+       18 обекта като „не изпълнили" за задача, която те не виждат.
+
    v12 (25.09.2026) — обикновена задача със СРОК В ПО-КЪСНА седмица
    (нова колона bulletin_tasks.spans_from). Задачата е ЕДНА: вижда се от
    седмицата, в която е поставена, до седмицата на срока, но СЕ БРОИ само в
@@ -239,6 +251,16 @@ function taskSpanDue(t){
   if(Array.isArray(t.due_dates)&&t.due_dates.length) return String(t.due_dates[0]).slice(0,10);
   return t.due_date ? String(t.due_date).slice(0,10) : null;
 }
+function taskSpanStart(t){
+  if(!taskSpansWeeks(t)) return null;
+  if(t.starts_on) return String(t.starts_on).slice(0,10);
+  return String(t.spans_from).slice(0,10);
+}
+function taskInForce(t, todayISO){
+  if(!t||!t.starts_on) return true;
+  if(!todayISO) return false;
+  return String(t.starts_on).slice(0,10) <= String(todayISO).slice(0,10);
+}
 function taskCountsInWeek(t, weekISO){
   if(!taskSpansWeeks(t)) return true;
   if(!Array.isArray(weekISO)||!weekISO.length) return false;
@@ -251,11 +273,15 @@ function spanWeekSunday(mondayISO){
   d.setDate(d.getDate()+6);
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
-function loadSpanningTasks(monISO, sunISO, canSeeDrafts){
+function loadSpanningTasks(monISO, sunISO, canSeeDrafts, todayISO){
   if(!monISO||!sunISO) return Promise.resolve([]);
   var q='select=*,bulletins!inner(id,status,week_number,year)'+
         '&spans_from=not.is.null&spans_from=lte.'+sunISO+'&due_date=gte.'+monISO;
   if(!canSeeDrafts) q+='&bulletins.status=eq.published';
+  /* „В сила от": който не вижда чернови, не вижда и задача, която още не е в
+     сила. Датата се ПОДАВА, а не се смята тук — Deno копията нямат today() и
+     така телата остават байт по байт същите (report-edge-sync). */
+  if(!canSeeDrafts&&todayISO) q+='&or=(starts_on.is.null,starts_on.lte.'+todayISO+')';
   /* ВТОРО, кодово прецеждане на същите четири условия. Не е излишно: филтър
      върху вграден ресурс, който мълчаливо не е приложен, тук значи изтекла
      чернова, а ред без spans_from — задача от чужда седмица, вкарана в
@@ -269,6 +295,7 @@ function loadSpanningTasks(monISO, sunISO, canSeeDrafts){
       if(!t||!t.spans_from) return false;
       var from=String(t.spans_from).slice(0,10), due=taskSpanDue(t);
       if(!due||from>sunISO||due<monISO) return false;
+      if(!canSeeDrafts&&todayISO&&!taskInForce(t,todayISO)) return false;
       return canSeeDrafts ? true : !!(t.bulletins && t.bulletins.status==='published');
     });
   }).catch(function(){ return []; });
@@ -643,7 +670,7 @@ function collectWeeklyRoutingData(cb){
     var rtSpanWk = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
     var bulTasksPromise = Promise.all([
       bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
-      rtSpanWk ? loadSpanningTasks(rtSpanWk[0], rtSpanWk[6], false) : Promise.resolve([])
+      rtSpanWk ? loadSpanningTasks(rtSpanWk[0], rtSpanWk[6], false, toLocalISO(new Date())) : Promise.resolve([])
     ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
     /* Изключванията за седмицата на бюлетина — същият ключ и същата
        заявка като в общия седмичен отчет (collectWeeklyReportData). */
@@ -654,7 +681,13 @@ function collectWeeklyRoutingData(cb){
       /* Многоседмичната със срок СЛЕД тази седмица не влиза: картичката ѝ
          би казала „0/18“ за работа, която още не се изисква. Тя идва в
          отчета за седмицата на срока си. */
-      var allTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t) && taskCountsInWeek(t, wkDates||[]); });
+      /* Същият пост-филтър като в collectWeeklyReportData: задача, която още не
+         е в сила, не влиза никъде. Днес е недостижимо (taskCountsInWeek стеснява
+         до седмицата на срока, а там задачата идва само през гейтнатия
+         loadSpanningTasks), но трите колектора трябва да прилагат ЕДНО правило —
+         разминаването между тях е точно начинът да се появи отново. */
+      var rtToday = toLocalISO(new Date());
+      var allTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t) && taskInForce(t, rtToday) && taskCountsInWeek(t, wkDates||[]); });
       var routedRegular = allTasks.filter(function(t){ return t.report_groups && t.report_groups.length; });
 
       /* Прозорецът се закача на самата задача - taskStoreBreakdown после го
@@ -1213,6 +1246,11 @@ async function collectTaskReportData(taskId, recipients, runDate){
   var br: any = await sbGet('bulletins', 'id=eq.' + t.bulletin_id + '&select=id,status,week_number,year&limit=1');
   var bul: any = Array.isArray(br) && br.length ? br[0] : null;
   if (!bul || bul.status !== 'published') return { draft:true, task:t };
+  /* „В сила от" (starts_on, 27.09.2026): камбанката позволява всяка дата, тоест
+     отчет може да е насрочен ПРЕДИ задачата да е влязла в сила. Тогава
+     картичката би изредила всичките 18 обекта като „не изпълнили" задача,
+     която те още не виждат. Пропуск с причина, както при notice по-долу. */
+  if (!taskInForce(t, runDate)) return { skipped:'задачата още не е в сила', task:t };
   /* Прозорецът е седмицата на СРОКА, не тази на бюлетина, в който задачата е
      поставена. За многоседмичната (spans_from) двете са различни: отмятанията
      ѝ носят completion_date = срока, тоест прозорецът на W не вижда нито

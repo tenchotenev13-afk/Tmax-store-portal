@@ -110,7 +110,7 @@ function collectDailyReportData(cb, scope, kasaThreshold){
        денят на срока изобщо не я вижда: бюлетинът ѝ е друг. */
     var bulTasksPromise = Promise.all([
       bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
-      loadSpanningTasks(dayMonday, spanWeekSunday(dayMonday), false)
+      loadSpanningTasks(dayMonday, spanWeekSunday(dayMonday), false, toLocalISO(new Date()))
     ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
 
     bulTasksPromise.then(function(tasksRaw){
@@ -1322,7 +1322,7 @@ function collectWeeklyReportData(cb, scope){
     var wkSpanRange = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
     var bulTasksPromise = Promise.all([
       bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
-      wkSpanRange ? loadSpanningTasks(wkSpanRange[0], wkSpanRange[6], false) : Promise.resolve([])
+      wkSpanRange ? loadSpanningTasks(wkSpanRange[0], wkSpanRange[6], false, toLocalISO(new Date())) : Promise.resolve([])
     ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
     /* Изключванията за СЕДМИЦАТА НА БЮЛЕТИНА — от нея се строят и датите
        на явяванията долу, тоест ключът е същата седмица, която се брои. */
@@ -1353,6 +1353,13 @@ function collectWeeklyReportData(cb, scope){
       /* Многоседмичните, чийто срок е СЛЕД отчетната седмица, излизат от
          явяванията: те са „в срок“, не неизпълнени. Броят се в седмицата на
          срока, веднъж — виж taskCountsInWeek() в shared.js. */
+      /* Задача, която още не е в сила („В сила от" в бъдещето), не влиза нито в
+         явяванията, нито в списъка „в срок": обектите не я виждат, значи
+         офисът не бива да чете „0/18 изпълнили" за нея. В седмицата на
+         ПОСТАВЯНЕ тя идва по bulletin_id, където гейтът на
+         loadSpanningTasks() не важи — затова се маха тук. */
+      var spanToday = toLocalISO(new Date());
+      allBulTasks = allBulTasks.filter(function(t){ return taskInForce(t, spanToday); });
       var spanPending = allBulTasks.filter(function(t){ return !taskCountsInWeek(t, wkDates||[]); });
       allBulTasks = allBulTasks.filter(function(t){ return taskCountsInWeek(t, wkDates||[]); });
 
@@ -3150,7 +3157,7 @@ function collectWeeklyRoutingData(cb){
     var rtSpanWk = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
     var bulTasksPromise = Promise.all([
       bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
-      rtSpanWk ? loadSpanningTasks(rtSpanWk[0], rtSpanWk[6], false) : Promise.resolve([])
+      rtSpanWk ? loadSpanningTasks(rtSpanWk[0], rtSpanWk[6], false, toLocalISO(new Date())) : Promise.resolve([])
     ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
     /* Изключванията за седмицата на бюлетина — същият ключ и същата
        заявка като в общия седмичен отчет (collectWeeklyReportData). */
@@ -3161,7 +3168,13 @@ function collectWeeklyRoutingData(cb){
       /* Многоседмичната със срок СЛЕД тази седмица не влиза: картичката ѝ
          би казала „0/18" за работа, която още не се изисква. Тя идва в
          отчета за седмицата на срока си. */
-      var allTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t) && taskCountsInWeek(t, wkDates||[]); });
+      /* Същият пост-филтър като в collectWeeklyReportData: задача, която още не
+         е в сила, не влиза никъде. Днес е недостижимо (taskCountsInWeek стеснява
+         до седмицата на срока, а там задачата идва само през гейтнатия
+         loadSpanningTasks), но трите колектора трябва да прилагат ЕДНО правило —
+         разминаването между тях е точно начинът да се появи отново. */
+      var rtToday = toLocalISO(new Date());
+      var allTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t) && taskInForce(t, rtToday) && taskCountsInWeek(t, wkDates||[]); });
       var routedRegular = allTasks.filter(function(t){ return t.report_groups && t.report_groups.length; });
 
       /* Прозорецът се закача на самата задача - taskStoreBreakdown после го

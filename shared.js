@@ -254,6 +254,27 @@ function taskSpanDue(t){
   if(Array.isArray(t.due_dates)&&t.due_dates.length) return String(t.due_dates[0]).slice(0,10);
   return t.due_date ? String(t.due_date).slice(0,10) : null;
 }
+/* ═══ „В СИЛА ОТ" (starts_on, 27.09.2026) ══════════════════════════════
+   Многоседмичната задача може да влиза в сила по-късно от понеделника на
+   седмицата, в която е поставена: поставена 28.09, в сила от 01.10, срок
+   08.10. Действителното начало е coalesce(starts_on, spans_from) — оттам
+   идват И отключването на чекбокса, И видимостта за обектите.
+   СРОКЪТ не се пипа: броенето и отчетите пак се задействат в седмицата на
+   due_date, а due_date >= starts_on е гарантирано от базата. */
+function taskSpanStart(t){
+  if(!taskSpansWeeks(t)) return null;
+  if(t.starts_on) return String(t.starts_on).slice(0,10);
+  return String(t.spans_from).slice(0,10);
+}
+/* Влязла ли е в сила към тази дата. Обикновената задача и многоседмичната без
+   starts_on — винаги (те важат от седмицата си, а видимостта им се решава от
+   бюлетина). Празна дата значи „не знам", тоест НЕ в сила: по-добре офисът да
+   пита защо я няма, отколкото обект да получи задача преди датата ѝ. */
+function taskInForce(t, todayISO){
+  if(!t||!t.starts_on) return true;
+  if(!todayISO) return false;
+  return String(t.starts_on).slice(0,10) <= String(todayISO).slice(0,10);
+}
 /* Брои ли се задачата в тази седмица. weekISO е масивът от 7 ISO дати (или
    само [понеделник, ..., неделя] — ползват се само краищата).
    Обикновена задача: винаги. Многоседмична: само ако срокът е в седмицата.
@@ -285,11 +306,15 @@ function spanWeekSunday(mondayISO){
   d.setDate(d.getDate()+6);
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
-function loadSpanningTasks(monISO, sunISO, canSeeDrafts){
+function loadSpanningTasks(monISO, sunISO, canSeeDrafts, todayISO){
   if(!monISO||!sunISO) return Promise.resolve([]);
   var q='select=*,bulletins!inner(id,status,week_number,year)'+
         '&spans_from=not.is.null&spans_from=lte.'+sunISO+'&due_date=gte.'+monISO;
   if(!canSeeDrafts) q+='&bulletins.status=eq.published';
+  /* „В сила от": който не вижда чернови, не вижда и задача, която още не е в
+     сила. Датата се ПОДАВА, а не се смята тук — Deno копията нямат today() и
+     така телата остават байт по байт същите (report-edge-sync). */
+  if(!canSeeDrafts&&todayISO) q+='&or=(starts_on.is.null,starts_on.lte.'+todayISO+')';
   /* ВТОРО, кодово прецеждане на същите четири условия. Не е излишно: филтър
      върху вграден ресурс, който мълчаливо не е приложен, тук значи изтекла
      чернова, а ред без spans_from — задача от чужда седмица, вкарана в
@@ -303,6 +328,7 @@ function loadSpanningTasks(monISO, sunISO, canSeeDrafts){
       if(!t||!t.spans_from) return false;
       var from=String(t.spans_from).slice(0,10), due=taskSpanDue(t);
       if(!due||from>sunISO||due<monISO) return false;
+      if(!canSeeDrafts&&todayISO&&!taskInForce(t,todayISO)) return false;
       return canSeeDrafts ? true : !!(t.bulletins && t.bulletins.status==='published');
     });
   }).catch(function(){ return []; });

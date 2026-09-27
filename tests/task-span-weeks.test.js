@@ -63,6 +63,8 @@ const THU = k => isoOf(shifted(1 + 7 * k));
 const DUE_NEXT = THU(1);      /* срок: четвъртък на следващата седмица */
 const DUE_FAR = THU(3);       /* срок: четвъртък след три седмици */
 const TUE0 = isoOf(shifted(-1));  /* вторник от ТАЗИ седмица — минал срок */
+const SO_FUT = isoOf(shifted(2));   /* петък от тази седмица — „в сила от" в БЪДЕЩЕТО */
+const WED_ISO = isoOf(ANCHOR);      /* самата котва — „днес" */
 
 const ADMIN = { email: 'a@temax.bg', display_name: 'Админ', role: 'admin', store_name: 'Централен офис' };
 const STORE = { email: 't@temax.bg', display_name: 'Троян', role: 'store', store_name: 'Троян' };
@@ -105,6 +107,9 @@ function tasksRoute(db, buls) {
       const lte = /[?&]spans_from=lte\.([0-9-]+)/.exec(url);
       const gte = /[?&]due_date=gte\.([0-9-]+)/.exec(url);
       const pub = url.indexOf('bulletins.status=eq.published') >= 0;
+      /* &or=(starts_on.is.null,starts_on.lte.<дата>) — гейтът „в сила от" за
+         тези, които не виждат чернови. */
+      const soGate = /or=\(starts_on\.is\.null,starts_on\.lte\.([0-9-]+)\)/.exec(url);
       return db.tasks.filter(t => {
         if (!t.spans_from) return false;
         if (lte && !(t.spans_from <= lte[1])) return false;
@@ -112,6 +117,7 @@ function tasksRoute(db, buls) {
         const b = buls.find(x => x.id === t.bulletin_id) || null;
         if (!b) return false;                               /* !inner */
         if (pub && b.status !== 'published') return false;
+        if (soGate && t.starts_on && String(t.starts_on) > soGate[1]) return false;
         return true;
       }).map(t => Object.assign({}, t, { bulletins: { id: t.bulletin_id, status: (buls.find(x => x.id === t.bulletin_id) || {}).status, week_number: (buls.find(x => x.id === t.bulletin_id) || {}).week_number, year: (buls.find(x => x.id === t.bulletin_id) || {}).year } }));
     }
@@ -181,7 +187,7 @@ function bulOf(w, id, k, status) {
 function env(bulId, db, over) {
   over = over || {};
   const h = boot({
-    modules: ['bulletin.js', 'today.js', 'report.js', 'email.js'],
+    modules: ['bulletin.js', 'today.js', 'report.js', 'email.js', 'notifications.js'],
     user: over.user || ADMIN,
     data: {
       users: STORES.map(s => ({ store_name: s })),
@@ -191,7 +197,12 @@ function env(bulId, db, over) {
       bulletins: url => {
         const m = /[?&]id=eq\.([^&]+)/.exec(url);
         if (m) return h.buls.filter(b => b.id === m[1]);
-        if (url.indexOf('status=eq.published') >= 0) return h.buls.filter(b => b.status === 'published');
+        if (url.indexOf('status=eq.published') >= 0) {
+          const pubs = h.buls.filter(b => b.status === 'published');
+          /* order=created_at.desc&limit=1 — банерът иска НАЙ-НОВИЯ бюлетин. */
+          if (/limit=1/.test(url)) return pubs.slice().sort((x, y) => (x.created_at < y.created_at ? 1 : -1)).slice(0, 1);
+          return pubs;
+        }
         return h.buls;
       },
       bulletin_promotions: [], task_subtasks: [], subtask_completions: [],
@@ -714,6 +725,329 @@ const deptCount = h => txt(h.doc.querySelector('[data-dept-count="admin"]'));
         JSON.stringify(h3.calls.toast));
       ok('задачата в базата е непокътната',
         (db.tasks.find(t => t.id === 't-span') || {}).task_type === 'info');
+    }
+  }
+
+  /* ═══ 13. „В СИЛА ОТ" (starts_on) ═══════════════════════════════════════
+     Многоседмичната задача може да влиза в сила по-късно от понеделника на
+     седмицата си: пише се предварително, но обектите не я виждат преди датата.
+     Действителното начало е coalesce(starts_on, spans_from) — оттам идват и
+     видимостта, и отключването на чекбокса. */
+  section('13. „В сила от": обектът не я вижда преди датата, офисът — да');
+  {
+    const db = freshDb();
+    db.tasks.push(task('t-so', { title: 'Клетка от петък', due_date: DUE_NEXT, due_dates: [DUE_NEXT],
+      spans_from: W0, starts_on: SO_FUT, sort_order: 7 }));
+
+    /* ── обектът, ПРЕДИ датата ── */
+    const hs = await view('b-0', db, { user: STORE });
+    ok('обектът НЕ я вижда в блока', !cbOf(panelOf(hs), 't-so'), txt(panelOf(hs)).slice(0, 200));
+    ok('обектът НЕ я вижда и в лентата',
+      !stripOf(hs) || txt(stripOf(hs)).indexOf('Клетка от петък') < 0);
+    ok('обектът НЕ я вижда в календара', txt(calOf(hs)).indexOf('Клетка от петък') < 0);
+    /* Най-силната проверка: НИКЪДЕ в тялото на бюлетина — блок, панел, лента,
+       календар. Отделните проверки по-горе са за да се вижда КОЕ е паднало. */
+    ok('обектът не я вижда НИКЪДЕ в тялото',
+      txt(hs.doc.getElementById('bul-body')).indexOf('Клетка от петък') < 0,
+      txt(hs.doc.getElementById('bul-body')).slice(0, 200));
+    ok('КОНТРОЛА: другите многоседмични ги вижда', !!cbOf(panelOf(hs), 't-span'));
+
+    /* ── офисът, преди датата: вижда я, с бадж ── */
+    const ha = await view('b-0', db);
+    ok('офисът я вижда', txt(panelOf(ha)).indexOf('Клетка от петък') >= 0);
+    ok('баджът казва „в сила от" с датата',
+      txt(panelOf(ha)).indexOf('в сила от ' + SO_FUT.slice(8,10) + '.' + SO_FUT.slice(5,7)) >= 0,
+      txt(panelOf(ha)).slice(0, 300));
+
+    /* ── обектът, НА датата: вижда я и чекбоксът е отключен ── */
+    const hOn = await view('b-0', db, { user: STORE, nowMs: new Date(SO_FUT + 'T12:00:00').getTime() });
+    const cbOn = cbOf(panelOf(hOn), 't-so');
+    if (ok('на датата обектът я вижда', !!cbOn, txt(panelOf(hOn)).slice(0, 200))) {
+      ok('чекбоксът е ОТКЛЮЧЕН', !cbOn.disabled, cbOn.getAttribute('title'));
+      ok('data-span е „в сила от", не понеделникът', cbOn.getAttribute('data-span') === SO_FUT,
+        cbOn.getAttribute('data-span'));
+      ok('data-cdate пак е срокът', cbOn.getAttribute('data-cdate') === DUE_NEXT);
+    }
+
+    /* ── ден ПРЕДИ датата: офисът вижда реда, но чекбокс за обекта няма;
+          заключването се проверява направо през предиката ── */
+    ok('bulSpanLockReason: преди „в сила от" → future',
+      hOn.w.bulSpanLockReason(DUE_NEXT, SO_FUT) === null, 'на самата дата трябва да е отключено');
+    ok('bulSpanLockReason: ден по-рано → future',
+      ha.w.bulSpanLockReason(DUE_NEXT, SO_FUT) === 'future');
+    ok('taskSpanStart: starts_on бие spans_from',
+      ha.w.taskSpanStart(db.tasks.find(t => t.id === 't-so')) === SO_FUT);
+    ok('taskSpanStart: без starts_on → spans_from',
+      ha.w.taskSpanStart(db.tasks.find(t => t.id === 't-span')) === W0);
+    ok('taskInForce: обикновена задача е винаги в сила',
+      ha.w.taskInForce(db.tasks.find(t => t.id === 't-norm'), null) === true);
+
+    /* В ПО-КЪСНА седмица задачата идва през loadSpanningTasks(), тоест гейтът е
+       в самата заявка — друг път, друга защита. */
+    const hs1 = await view('b-1', db, { user: STORE });
+    ok('обектът не я вижда и в седмицата на срока (преди датата)',
+      txt(panelOf(hs1)).indexOf('Клетка от петък') < 0, txt(panelOf(hs1)).slice(0, 200));
+    ok('заявката носи гейта „в сила от"',
+      hs1.calls.get.some(u => /bulletin_tasks/.test(u) && /starts_on\.lte\./.test(u)),
+      JSON.stringify(hs1.calls.get.filter(u => /bulletin_tasks/.test(u))));
+    const hs1on = await view('b-1', db, { user: STORE, nowMs: new Date(SO_FUT + 'T12:00:00').getTime() });
+    ok('на датата я вижда и там', txt(panelOf(hs1on)).indexOf('Клетка от петък') >= 0);
+
+    /* Надписът „⏳ N необработени реда" също минава през прозореца по импорта:
+       иначе на датата обектът чете остатъци от СТАРАТА партида, които тригерът
+       в базата не гледа. */
+    const dbT = freshDb();
+    dbT.tasks = [task('t-tr', { title: 'Стока на път — автоматична', due_date: DUE_NEXT, due_dates: [DUE_NEXT],
+      spans_from: W0, starts_on: SO_FUT, linked_module: 'transit', auto_complete: true, sort_order: 1 })];
+    const hT = await view('b-0', dbT, { user: STORE, nowMs: new Date(SO_FUT + 'T12:00:00').getTime() });
+    await settle(() => hT.calls.get.some(u => /goods_transit/.test(u)));
+    const gq = hT.calls.get.filter(u => /goods_transit/.test(u));
+    ok('заявката за необработените носи прозореца starts_on − 7',
+      gq.some(u => u.indexOf('created_at=gte.' + isoOf(shifted(2 - 7))) >= 0),
+      JSON.stringify(gq));
+  }
+
+  section('14. „В сила от": не се брои и не влиза в отчетите преди датата');
+  {
+    const db = freshDb();
+    db.tasks.push(task('t-so', { title: 'Клетка от петък', due_date: DUE_NEXT, due_dates: [DUE_NEXT],
+      spans_from: W0, starts_on: SO_FUT, sort_order: 7 }));
+
+    const hs = await view('b-0', db, { user: STORE });
+    ok('броячът на панела не я включва', deptCount(hs) === '0/1', deptCount(hs));
+
+    const h = env('b-0', db);
+    let wk = null;
+    if (guard('collectWeeklyReportData() не хвърля', () => h.w.collectWeeklyReportData(d => { wk = d; }))) {
+      await settle(() => !!wk);
+      const titles = (wk && wk.items || []).map(i => i.title);
+      ok('седмичният отчет не я брои', titles.indexOf('Клетка от петък') < 0, JSON.stringify(titles));
+      ok('и я няма в списъка „в срок"',
+        !((wk.spanPending || []).some(x => x.title === 'Клетка от петък')),
+        JSON.stringify((wk.spanPending || []).map(x => x.title)));
+      ok('КОНТРОЛА: другата многоседмична Е в „в срок"',
+        (wk.spanPending || []).some(x => x.title === 'Клетка надувно'),
+        JSON.stringify((wk.spanPending || []).map(x => x.title)));
+    }
+  }
+
+  section('15. Формата: границите на „В сила от" и известието на датата');
+  {
+    const db = freshDb();
+    const h = await view('b-0', db);
+    const w = h.w;
+    /* известието се насрочва, вместо да тръгне веднага */
+    let pushedNow = 0;
+    w.pushNewBulletinTask = function(){ pushedNow++; };
+    if (guard('openTaskModal() не хвърля', () => w.openTaskModal())) {
+      const on = h.doc.getElementById('tk-span-on');
+      on.checked = true; fire(w, on, 'change');
+      const st = h.doc.getElementById('tk-span-start');
+      ok('полето „В сила от" съществува', !!st);
+      ok('долната граница е понеделникът на седмицата', !!st && st.getAttribute('min') === W0, st && st.getAttribute('min'));
+
+      h.doc.getElementById('tk-title').value = 'С дата на влизане';
+      h.doc.getElementById('tk-span-due').value = DUE_NEXT;
+
+      /* 15а. „в сила от" СЛЕД срока → отказ */
+      st.value = isoOf(shifted(2 + 14));
+      let before = db.tasks.length, w0 = writes(h);
+      realClick(w, H.btnExact(h.doc.getElementById('tk-ov'), 'Добави задача'), 'Добави задача');
+      await ticks();
+      ok('„в сила от" след срока → нула записа', db.tasks.length === before && writes(h) === w0);
+      ok('обяснява защо', h.calls.toast.some(t => String(t).indexOf('след срока') >= 0),
+        JSON.stringify(h.calls.toast));
+
+      /* 15б. „в сила от" ПРЕДИ понеделника → отказ */
+      st.value = isoOf(shifted(-9));
+      before = db.tasks.length; w0 = writes(h);
+      realClick(w, H.btnExact(h.doc.getElementById('tk-ov'), 'Добави задача'), 'Добави задача');
+      await ticks();
+      ok('„в сила от" преди понеделника → нула записа', db.tasks.length === before && writes(h) === w0);
+      ok('и тук обяснява защо', h.calls.toast.some(t => String(t).indexOf('преди понеделника') >= 0),
+        JSON.stringify(h.calls.toast));
+
+      /* 15в. валидна дата → записва се и НАСРОЧВА известие вместо push */
+      st.value = SO_FUT;
+      realClick(w, H.btnExact(h.doc.getElementById('tk-ov'), 'Добави задача'), 'Добави задача');
+      await settle(() => db.tasks.some(t => t.title === 'С дата на влизане'));
+      const row = db.tasks.find(t => t.title === 'С дата на влизане');
+      ok('задачата е записана със starts_on', !!row && String(row.starts_on) === SO_FUT, row && String(row.starts_on));
+      ok('spans_from пак е понеделникът', !!row && String(row.spans_from) === W0);
+
+      await settle(() => h.calls.post.some(c => /notification_schedules/.test(c.url || c || '')));
+      const ns = h.calls.post.filter(c => /notification_schedules/.test(c.url || c || ''));
+      if (ok('насрочено е известие', ns.length === 1, JSON.stringify(h.calls.post.map(c => c.url || c)))) {
+        const body = ns[0].body || {};
+        ok('за датата на влизане в сила', String(body.scheduled_date) === SO_FUT, String(body.scheduled_date));
+        ok('в 08:00', String(body.scheduled_time) === '08:00', String(body.scheduled_time));
+        ok('еднократно, за задачата', body.schedule_type === 'once' && body.entity_type === 'task');
+        ok('текстът казва „Нова задача"', String(body.message).indexOf('Нова задача') === 0, String(body.message));
+      }
+      ok('НЕ е пратен push веднага', pushedNow === 0, String(pushedNow));
+    }
+  }
+
+  /* ═══ 16. КЪДЕТО ЗАДАЧАТА ИЗТИЧАШЕ ДО ОБЕКТА ════════════════════════════
+     Намерено с кръстосан преглед: рендерите в Бюлетина бяха гейтнати, но
+     банерът „N нови задачи" и седмичният дайджест — не. И двете стигат до
+     обекта ПРЕДИ рендерите, тоест бяха единственото място, където той вижда
+     задача, която после не може да намери. */
+  section('16. Банерът „нови задачи" и дайджестът не изтичат задачата');
+  {
+    const db = freshDb();
+    db.tasks.push(task('t-so', { title: 'Клетка от петък', due_date: DUE_NEXT, due_dates: [DUE_NEXT],
+      spans_from: W0, starts_on: SO_FUT, sort_order: 7, created_at: WED_ISO }));
+
+    /* 16а. банерът. ОТДЕЛНА база с ДВЕ задачи: банерът изписва само първите
+       три заглавия (pending.slice(0,3)), тоест при по-дълъг списък невлязлата
+       в сила не би стигнала до текста и проверката щеше да е празна. */
+    const dbB = { seq: 0, comps: [], tasks: [
+      task('t-norm', { title: 'Ревизия на щанда', due_date: THU(0), due_dates: [THU(0)], sort_order: 1 }),
+      task('t-so', { title: 'Клетка от петък', due_date: DUE_NEXT, due_dates: [DUE_NEXT],
+        spans_from: W0, starts_on: SO_FUT, sort_order: 2 })
+    ] };
+    const h = env('b-0', dbB, { user: STORE });
+    /* Банерът чете НАЙ-НОВИЯ публикуван бюлетин (order=created_at.desc&limit=1).
+       Оставяме само W, за да е той — иначе проверката минава тавтологично,
+       защото банерът гледа съвсем друга седмица. */
+    h.buls = [h.buls[1]];
+    /* index.html вече съдържа #notif-banner — getElementById връща НЕГО, не
+       наш добавен дубликат. Първата версия на теста четеше празния дубликат и
+       „банерът не я показва" минаваше тавтологично. */
+    let holder = h.doc.getElementById('notif-banner');
+    if (!holder) { holder = h.doc.createElement('div'); holder.id = 'notif-banner'; h.doc.body.appendChild(holder); }
+    if (guard('checkNewBulletinTasksBanner() не хвърля', () => h.w.checkNewBulletinTasksBanner())) {
+      await settle(() => holder.innerHTML.length > 0, 40);
+      ok('банерът НЕ показва задача преди „в сила от"',
+        holder.innerHTML.indexOf('Клетка от петък') < 0, holder.innerHTML.slice(0, 260));
+      ok('КОНТРОЛА: другата задача я показва',
+        holder.innerHTML.indexOf('Ревизия на щанда') >= 0, holder.innerHTML.slice(0, 260));
+      /* И БРОЯТ: той е pending.length, без рязане — така мутант, който вкарва
+         задачата в набора, се вижда дори да не стигне до заглавията. */
+      ok('банерът брои ЕДНА задача, не две',
+        holder.innerHTML.indexOf('1 нова задача') >= 0 && holder.innerHTML.indexOf('2 нови задачи') < 0,
+        holder.innerHTML.slice(0, 260));
+    }
+
+    /* 16б. седмичният дайджест до управителя */
+    const hd = await view('b-0', db);
+    const wkN = hd.buls[1].week_number, yrN = hd.buls[1].year;
+    const html = hd.w.buildWeeklyDigestHtml('Троян', hd.w.bulTasks, wkN, yrN);
+    ok('дайджестът НЕ носи задачата преди „в сила от"',
+      html.indexOf('Клетка от петък') < 0, html.slice(0, 200));
+    ok('КОНТРОЛА: другата многоседмична е в него', html.indexOf('Клетка надувно') >= 0);
+
+    /* 16в. броячите на офиса: X/18 и „Анализ" */
+    const ha = await view('b-1', db);   /* седмицата на срока — там задачата се брои */
+    /* X/18 и броят в push-а се проверяват ПРЕДИ таба „Анализ": той пренаписва
+       тялото и tasks-stat-wrap изчезва. Същото за таблицата X/18 и за броя в push-а „бюлетинът е публикуван" —
+       три брояча, три отделни места, едно правило. */
+    await settle(() => { const w = ha.doc.getElementById('tasks-stat-wrap'); return w && w.innerHTML.indexOf('Магазин') >= 0; });
+    const statW = ha.doc.getElementById('tasks-stat-wrap');
+    ok('X/18 не брои задача, която не е в сила',
+      !!statW && statW.textContent.indexOf('0/1') >= 0 && statW.textContent.indexOf('0/2') < 0,
+      statW && statW.textContent.replace(/s+/g,' ').slice(0,160));
+    ok('bulWeekTasks() не брои задача, която не е в сила',
+      ha.w.bulWeekTasks().length === 1, JSON.stringify(ha.w.bulWeekTasks().map(t => t.title)));
+    ha.w.bulMode = 'analysis';
+    if (guard('renderBulAnalysis() не хвърля', () => ha.w.renderBulAnalysis())) {
+      const lbl = Array.prototype.find.call(ha.doc.querySelectorAll('div'), d => txt(d) === '📋 Задачи');
+      const n = lbl && lbl.nextElementSibling ? txt(lbl.nextElementSibling) : null;
+      /* В b-1 се броят: t-span (срок тази седмица) — но НЕ t-so, макар срокът ѝ
+         да е същият ден: тя още не е в сила. */
+      ok('„Анализ" не брои задача, която не е в сила', n === '1', String(n));
+    }
+
+  }
+
+  section('17. Известието се съгласува при редакция, а „в сила от = днес" тръгва веднага');
+  {
+    /* 17а. датата се мести НАПРЕД → редът се обновява, не се дублира */
+    const db = freshDb();
+    db.tasks.push(task('t-so', { title: 'Клетка от петък', due_date: DUE_NEXT, due_dates: [DUE_NEXT],
+      spans_from: W0, starts_on: SO_FUT, sort_order: 7 }));
+    const h = await view('b-0', db);
+    h.setData('notification_schedules', [{ id: 'ns-1', entity_type: 'task', entity_id: 't-so',
+      schedule_type: 'once', scheduled_date: SO_FUT, scheduled_time: '08:00',
+      message: 'Нова задача: Клетка от петък', active: true }]);
+    if (guard('openEditTaskModal() не хвърля', () => h.w.openEditTaskModal('t-so'))) {
+      const later = isoOf(shifted(4));
+      h.doc.getElementById('etk-span-start').value = later;
+      h.doc.getElementById('etk-title').value = 'Клетка от неделя';
+      realClick(h.w, H.btn(h.doc.getElementById('edit-tk-ov'), '💾 Запази'), '💾 Запази');
+      await settle(() => h.calls.patch.some(c => /notification_schedules/.test(c.url || c || '')));
+      const pt = h.calls.patch.filter(c => /notification_schedules/.test(c.url || c || ''));
+      if (ok('редът за известието е обновен', pt.length === 1, JSON.stringify(h.calls.patch.map(c => c.url || c)))) {
+        ok('с новата дата', String((pt[0].body || {}).scheduled_date) === later, JSON.stringify(pt[0].body));
+        ok('и с новото заглавие', String((pt[0].body || {}).message).indexOf('Клетка от неделя') > 0,
+          String((pt[0].body || {}).message));
+      }
+      ok('не се създава втори ред',
+        !h.calls.post.some(c => /notification_schedules/.test(c.url || c || '')),
+        JSON.stringify(h.calls.post.map(c => c.url || c)));
+    }
+
+    /* 17б. „в сила от" се МАХА → редът се трие */
+    const db2 = freshDb();
+    db2.tasks.push(task('t-so', { title: 'Клетка от петък', due_date: DUE_NEXT, due_dates: [DUE_NEXT],
+      spans_from: W0, starts_on: SO_FUT, sort_order: 7 }));
+    const h2 = await view('b-0', db2);
+    h2.setData('notification_schedules', [{ id: 'ns-1', entity_type: 'task', entity_id: 't-so',
+      schedule_type: 'once', scheduled_date: SO_FUT, scheduled_time: '08:00',
+      message: 'Нова задача: Клетка от петък', active: true }]);
+    if (guard('openEditTaskModal() (махане) не хвърля', () => h2.w.openEditTaskModal('t-so'))) {
+      h2.doc.getElementById('etk-span-start').value = '';
+      realClick(h2.w, H.btn(h2.doc.getElementById('edit-tk-ov'), '💾 Запази'), '💾 Запази');
+      await settle(() => h2.calls.del.some(c => /notification_schedules/.test(c.url || c || '')));
+      ok('редът за известието се трие',
+        h2.calls.del.some(c => /notification_schedules/.test(c.url || c || '')),
+        JSON.stringify(h2.calls.del.map(c => c.url || c)));
+    }
+
+    /* 17б2. „в сила от" се мести на ДНЕС → редът се ТРИЕ. Известие за 08:00
+       днес по обяд не тръгва (прозорецът е 15 минути), а задачата вече е
+       видима — оставен ред би значел чакащо известие, което никога няма да
+       излезе. */
+    const dbT = freshDb();
+    dbT.tasks.push(task('t-so', { title: 'Клетка от петък', due_date: DUE_NEXT, due_dates: [DUE_NEXT],
+      spans_from: W0, starts_on: SO_FUT, sort_order: 7 }));
+    const hT = await view('b-0', dbT);
+    hT.setData('notification_schedules', [{ id: 'ns-1', entity_type: 'task', entity_id: 't-so',
+      schedule_type: 'once', scheduled_date: SO_FUT, scheduled_time: '08:00',
+      message: 'Нова задача: Клетка от петък', active: true }]);
+    if (guard('openEditTaskModal() (на днес) не хвърля', () => hT.w.openEditTaskModal('t-so'))) {
+      hT.doc.getElementById('etk-span-start').value = WED_ISO;
+      realClick(hT.w, H.btn(hT.doc.getElementById('edit-tk-ov'), '💾 Запази'), '💾 Запази');
+      await settle(() => hT.calls.del.some(c => /notification_schedules/.test(c.url || c || '')) ||
+                         hT.calls.patch.some(c => /notification_schedules/.test(c.url || c || '')));
+      ok('редът се ТРИЕ, не се пренасрочва за днес',
+        hT.calls.del.some(c => /notification_schedules/.test(c.url || c || '')) &&
+        !hT.calls.patch.some(c => /notification_schedules/.test(c.url || c || '')),
+        'изтрити: ' + JSON.stringify(hT.calls.del.map(c => c.url || c)) +
+        ' | patch: ' + JSON.stringify(hT.calls.patch.map(c => c.url || c)));
+    }
+
+    /* 17в. „в сила от = ДНЕС" при СЪЗДАВАНЕ → push веднага, без насрочване (прозорецът на
+       dynamic-responder е 15 минути след 08:00 и по обяд е затворен) */
+    const db3 = freshDb();
+    const h3 = await view('b-0', db3);
+    let pushed = 0;
+    h3.w.pushNewBulletinTask = function(){ pushed++; };
+    if (guard('openTaskModal() не хвърля', () => h3.w.openTaskModal())) {
+      const on = h3.doc.getElementById('tk-span-on');
+      on.checked = true; fire(h3.w, on, 'change');
+      h3.doc.getElementById('tk-title').value = 'В сила още днес';
+      h3.doc.getElementById('tk-span-due').value = DUE_NEXT;
+      h3.doc.getElementById('tk-span-start').value = WED_ISO;   /* днес */
+      realClick(h3.w, H.btnExact(h3.doc.getElementById('tk-ov'), 'Добави задача'), 'Добави задача');
+      await settle(() => db3.tasks.some(t => t.title === 'В сила още днес'));
+      await ticks();
+      ok('задачата е записана', db3.tasks.some(t => t.title === 'В сила още днес'));
+      ok('push тръгва ВЕДНАГА', pushed === 1, String(pushed));
+      ok('и НЕ се насрочва известие за 08:00',
+        !h3.calls.post.some(c => /notification_schedules/.test(c.url || c || '')),
+        JSON.stringify(h3.calls.post.map(c => c.url || c)));
     }
   }
 

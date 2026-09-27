@@ -1,6 +1,20 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v43 (27.09.2026) — „В СИЛА ОТ" за многоседмична задача (нова колона
+   bulletin_tasks.starts_on). Обектите не виждат задачата преди тази дата и не
+   могат да я отметнат; действителното начало е coalesce(starts_on, spans_from)
+   — taskSpanStart(). СРОКЪТ не се променя, затова броенето пак се задейства в
+   седмицата на due_date (due_date >= starts_on е CHECK в базата). Деплоят носи три неща:
+     · loadSpanningTasks() получава ЧЕТВЪРТИ аргумент — днешната дата. За
+       когото важи гейтът за чернови (тоест и за кроновете), влиза и
+       „&or=(starts_on.is.null,starts_on.lte.<днес>)": задача, която още не е
+       в сила, не се тегли изобщо;
+     · СЕДМИЧНИЯТ колектор маха и по bulletin_id дошлите такива задачи — в
+       седмицата на ПОСТАВЯНЕ те идват през първата заявка, където гейт няма.
+       Иначе офисът чете „0/18 изпълнили" за задача, невидима за обектите;
+     · две нови копия от shared.js — taskSpanStart() и taskInForce().
+
    v42 (25.09.2026) — обикновена задача със СРОК В ПО-КЪСНА седмица
    (нова колона bulletin_tasks.spans_from). Задачата е ЕДНА: вижда се от
    седмицата, в която е поставена, до седмицата на срока, но СЕ БРОИ само в
@@ -678,6 +692,16 @@ function taskSpanDue(t){
   if(Array.isArray(t.due_dates)&&t.due_dates.length) return String(t.due_dates[0]).slice(0,10);
   return t.due_date ? String(t.due_date).slice(0,10) : null;
 }
+function taskSpanStart(t){
+  if(!taskSpansWeeks(t)) return null;
+  if(t.starts_on) return String(t.starts_on).slice(0,10);
+  return String(t.spans_from).slice(0,10);
+}
+function taskInForce(t, todayISO){
+  if(!t||!t.starts_on) return true;
+  if(!todayISO) return false;
+  return String(t.starts_on).slice(0,10) <= String(todayISO).slice(0,10);
+}
 function taskCountsInWeek(t, weekISO){
   if(!taskSpansWeeks(t)) return true;
   if(!Array.isArray(weekISO)||!weekISO.length) return false;
@@ -690,11 +714,15 @@ function spanWeekSunday(mondayISO){
   d.setDate(d.getDate()+6);
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
-function loadSpanningTasks(monISO, sunISO, canSeeDrafts){
+function loadSpanningTasks(monISO, sunISO, canSeeDrafts, todayISO){
   if(!monISO||!sunISO) return Promise.resolve([]);
   var q='select=*,bulletins!inner(id,status,week_number,year)'+
         '&spans_from=not.is.null&spans_from=lte.'+sunISO+'&due_date=gte.'+monISO;
   if(!canSeeDrafts) q+='&bulletins.status=eq.published';
+  /* „В сила от": който не вижда чернови, не вижда и задача, която още не е в
+     сила. Датата се ПОДАВА, а не се смята тук — Deno копията нямат today() и
+     така телата остават байт по байт същите (report-edge-sync). */
+  if(!canSeeDrafts&&todayISO) q+='&or=(starts_on.is.null,starts_on.lte.'+todayISO+')';
   /* ВТОРО, кодово прецеждане на същите четири условия. Не е излишно: филтър
      върху вграден ресурс, който мълчаливо не е приложен, тук значи изтекла
      чернова, а ред без spans_from — задача от чужда седмица, вкарана в
@@ -708,6 +736,7 @@ function loadSpanningTasks(monISO, sunISO, canSeeDrafts){
       if(!t||!t.spans_from) return false;
       var from=String(t.spans_from).slice(0,10), due=taskSpanDue(t);
       if(!due||from>sunISO||due<monISO) return false;
+      if(!canSeeDrafts&&todayISO&&!taskInForce(t,todayISO)) return false;
       return canSeeDrafts ? true : !!(t.bulletins && t.bulletins.status==='published');
     });
   }).catch(function(){ return []; });
@@ -898,7 +927,7 @@ function collectDailyReportData(cb, scope, kasaThreshold){
        денят на срока изобщо не я вижда: бюлетинът ѝ е друг. */
     var bulTasksPromise = Promise.all([
       bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
-      loadSpanningTasks(dayMonday, spanWeekSunday(dayMonday), false)
+      loadSpanningTasks(dayMonday, spanWeekSunday(dayMonday), false, toLocalISO(new Date()))
     ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
 
     bulTasksPromise.then(function(tasksRaw){
@@ -2040,7 +2069,7 @@ function collectWeeklyReportData(cb, scope){
     var wkSpanRange = bul ? weekDays(bul.week_number, bul.year).map(toLocalISO) : null;
     var bulTasksPromise = Promise.all([
       bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
-      wkSpanRange ? loadSpanningTasks(wkSpanRange[0], wkSpanRange[6], false) : Promise.resolve([])
+      wkSpanRange ? loadSpanningTasks(wkSpanRange[0], wkSpanRange[6], false, toLocalISO(new Date())) : Promise.resolve([])
     ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
     /* Изключванията за СЕДМИЦАТА НА БЮЛЕТИНА — от нея се строят и датите
        на явяванията долу, тоест ключът е същата седмица, която се брои. */
@@ -2071,6 +2100,13 @@ function collectWeeklyReportData(cb, scope){
       /* Многоседмичните, чийто срок е СЛЕД отчетната седмица, излизат от
          явяванията: те са „в срок“, не неизпълнени. Броят се в седмицата на
          срока, веднъж — виж taskCountsInWeek() в shared.js. */
+      /* Задача, която още не е в сила („В сила от" в бъдещето), не влиза нито в
+         явяванията, нито в списъка „в срок": обектите не я виждат, значи
+         офисът не бива да чете „0/18 изпълнили" за нея. В седмицата на
+         ПОСТАВЯНЕ тя идва по bulletin_id, където гейтът на
+         loadSpanningTasks() не важи — затова се маха тук. */
+      var spanToday = toLocalISO(new Date());
+      allBulTasks = allBulTasks.filter(function(t){ return taskInForce(t, spanToday); });
       var spanPending = allBulTasks.filter(function(t){ return !taskCountsInWeek(t, wkDates||[]); });
       allBulTasks = allBulTasks.filter(function(t){ return taskCountsInWeek(t, wkDates||[]); });
 

@@ -88,7 +88,7 @@ function loadTodayDashboard(){
     var todayWkSun = spanWeekSunday(todayWkMon);
     var bulTasksPromise = Promise.all([
       bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
-      loadSpanningTasks(todayWkMon, todayWkSun, false)
+      loadSpanningTasks(todayWkMon, todayWkSun, false, toLocalISO(new Date()))
     ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
 
     bulTasksPromise.then(function(tasksRaw){
@@ -430,7 +430,7 @@ function todayLoadPhotoQueue(cb){
     var photoWkMon = recurringMondayOf(new Date());
     var bulTasksPromise = Promise.all([
       bul ? sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id) : Promise.resolve([]),
-      loadSpanningTasks(photoWkMon, spanWeekSunday(photoWkMon), false)
+      loadSpanningTasks(photoWkMon, spanWeekSunday(photoWkMon), false, toLocalISO(new Date()))
     ]).then(function(tt){ return mergeSpanningTasks(Array.isArray(tt[0])?tt[0]:[], tt[1]); });
     Promise.all([bulTasksPromise, sbGet('recurring_tasks','active=eq.true'),
       loadRecurringVersions().catch(function(){ return []; })]).then(function(r2){

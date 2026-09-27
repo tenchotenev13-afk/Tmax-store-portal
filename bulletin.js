@@ -668,6 +668,9 @@ function spanFieldHtml(prefix, days, task){
     '<div id="'+prefix+'-span-wrap" style="display:'+(on?'block':'none')+';margin-top:6px;">'+
       '<input type="date" class="fi" id="'+prefix+'-span-due" value="'+(due||'')+'" min="'+bulSpanMinDate(days)+'" max="'+bulSpanMaxDate(days)+'" style="margin:0;">'+
       '<div style="font-size:10.5px;color:#64748b;margin-top:4px;">Един ден, най-много 4 седмици напред ('+bulDM(bulSpanMinDate(days))+' – '+bulDM(bulSpanMaxDate(days))+'). Задачата се вижда всяка седмица дотогава, отмята се веднъж и се брои в седмицата на срока.</div>'+
+      '<label class="fl" style="margin-top:8px;">В сила от (по избор)</label>'+
+      '<input type="date" class="fi" id="'+prefix+'-span-start" value="'+((task&&task.starts_on)?String(task.starts_on).slice(0,10):'')+'" min="'+toLocalISO(days[0])+'" max="'+bulSpanMaxDate(days)+'" style="margin:0;">'+
+      '<div style="font-size:10.5px;color:#64748b;margin-top:4px;">Празно = от понеделника на тази седмица ('+bulDM(toLocalISO(days[0]))+'). Преди тази дата обектите НЕ виждат задачата и не могат да я отметнат; офисът я вижда с „⏳ в сила от".</div>'+
     '</div></div>';
 }
 /* Отметката и седемте дни са взаимно изключващи се — иначе остава да се гадае
@@ -696,15 +699,24 @@ function bulSpanRead(prefix, days){
   var lo=bulSpanMinDate(days), hi=bulSpanMaxDate(days);
   if(v<lo) return {error:'Срокът трябва да е след '+bulDM(days[6])+' — иначе е обикновена задача с ден от тази седмица'};
   if(v>hi) return {error:'Срокът е най-много 4 седмици напред (до '+bulDM(hi)+')'};
-  return {spans:true, due:v, from:toLocalISO(days[0])};
+  /* „В сила от": между понеделника на седмицата и СРОКА. Горната граница е
+     срокът, не +27 дни — задача, влизаща в сила след срока си, е невъзможна
+     за изпълнение. Същите две неравенства са и CHECK в базата. */
+  var from=toLocalISO(days[0]);
+  var st=((document.getElementById(prefix+'-span-start')||{}).value||'').slice(0,10);
+  if(st){
+    if(st<from) return {error:'„В сила от" не може преди понеделника на седмицата ('+bulDM(from)+')'};
+    if(st>v) return {error:'„В сила от" не може след срока ('+bulDM(v)+')'};
+  }
+  return {spans:true, due:v, from:from, startsOn:st||null};
 }
 /* Полетата за срока в тялото на заявката — един източник за новата задача и
    за редакцията. Многоседмична: due_date = due_dates[0] = избраният ден,
    spans_from = понеделникът на седмицата на бюлетина. Обикновена: spans_from
    се ЗАНУЛЯВА изрично, за да може многоседмична да стане обикновена. */
 function bulSpanBody(span, dueDates){
-  if(span.spans) return {due_date:span.due, due_dates:[span.due], spans_from:span.from};
-  return {due_date:dueDates.length?dueDates[0]:null, due_dates:dueDates.length?dueDates:null, spans_from:null};
+  if(span.spans) return {due_date:span.due, due_dates:[span.due], spans_from:span.from, starts_on:span.startsOn||null};
+  return {due_date:dueDates.length?dueDates[0]:null, due_dates:dueDates.length?dueDates:null, spans_from:null, starts_on:null};
 }
 
 /* ═══ МНОГОДНЕВНИ ПОСТОЯННИ ЗАДАЧИ — постоянна задача може да важи за
@@ -1030,8 +1042,22 @@ var bulTransitPending = null;
 function bulLoadTransitPending(){
   bulTransitPending=null;
   if(isGlobal()||!currentUser||!currentUser.store_name) return;
-  if(!bulTasks.some(function(t){return bulTaskLinkKey(t)==='transit-auto';})) return;
-  sbGet('goods_transit','store_name=eq.'+encodeURIComponent(currentUser.store_name)+
+  var autoT=bulTasks.filter(function(t){return bulTaskLinkKey(t)==='transit-auto';});
+  if(!autoT.length) return;
+  /* Прозорец по импорта, ако ВСИЧКИ такива задачи са с „В сила от": критерият
+     в базата (transit_store_done_since) брои само редове, внесени от
+     starts_on − 7 дни насам, и надписът трябва да казва същото. Иначе на
+     starts_on обектът чете „⏳ 12 необработени реда" от СТАРАТА партида, а
+     тригерът не ги гледа. Има ли и една задача без starts_on, прозорец няма —
+     за нея важат всички редове и по-тесният брой би излъгал в другата посока. */
+  var winFrom=null;
+  autoT.forEach(function(t){
+    if(!t.starts_on) return;
+    var w=bulShiftISO(String(t.starts_on).slice(0,10),-7);
+    if(!winFrom||w<winFrom) winFrom=w;
+  });
+  var winQ=(winFrom&&autoT.every(function(t){return !!t.starts_on;})) ? '&created_at=gte.'+winFrom : '';
+  sbGet('goods_transit','store_name=eq.'+encodeURIComponent(currentUser.store_name)+winQ+
         /* NULL статус е „необработен" — както coalesce(status,'pending') в
            transit_store_done и броячът в transit.js. */
         '&direction=eq.incoming&or=(status.eq.pending,status.is.null)&reviewed_at=is.null&select=id').then(function(rows){
@@ -1088,7 +1114,18 @@ function bulAutoCompleteValid(auto, dueDates){
    видимост и броене са в shared.js (taskSpansWeeks / taskCountsInWeek /
    loadSpanningTasks), тук са само екранните последствия.
    spans_from като ISO низ, '' за обикновена задача — за data- атрибутите. */
-function bulSpanOf(t){ return (t&&t.spans_from) ? String(t.spans_from).slice(0,10) : ''; }
+/* Действителното начало: „В сила от" (starts_on), иначе понеделникът на
+   седмицата (spans_from). Оттук тръгва и заключването на чекбокса — задача,
+   която още не е в сила, не се отмята. */
+function bulSpanOf(t){ return taskSpanStart(t) || ''; }
+/* Задача, която още не е в сила, я вижда САМО офисът: той я е написал
+   предварително и трябва да я вижда, обектът — не. */
+/* „Офисът" тук е canEdit() (admin/accounting), НЕ isGlobal(): логистиката е
+   глобална роля, но не вижда чернови, тоест гейтът в самата заявка
+   (loadSpanningTasks с canEdit()) вече не ѝ дава задачата. С isGlobal() тук
+   рендерът щеше да е готов да покаже нещо, което заявката не връща — две
+   различни правила за един и същ въпрос. */
+function bulTaskInForce(t){ return canEdit() || taskInForce(t, bulTodayISO()); }
 /* Задача от ЧУЖД бюлетин: показва се тук, но се редактира там (решение 5,
    25.09.2026). openEditTaskModal строи дните от ПОКАЗАНАТА седмица, тоест
    запис оттук би преместил срока в нея, мълчаливо. */
@@ -1124,6 +1161,11 @@ function bulSpanBadgeHtml(t){
   if(!taskSpansWeeks(t)) return '';
   var due=taskSpanDue(t);
   if(!due) return '';
+  /* Още не е в сила → това е по-важното от срока: офисът гледа задача, която
+     обектите изобщо не виждат. */
+  if(t.starts_on && !taskInForce(t, bulTodayISO())){
+    return '<span title="Обектите ще я видят на тази дата; дотогава е само тук" style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;white-space:nowrap;cursor:help;">⏳ в сила от '+bulDM(taskSpanStart(t))+'</span>';
+  }
   var lbl = bulSpanPending(t)
     ? '🗓 Срок '+bulDM(due)+' · '+bulSpanDueWeekLabel(t)
     : '🗓 ↔ от '+bulSpanHomeLabel(t);
@@ -1160,12 +1202,12 @@ function bulSpanHomeNoteHtml(t){
 function bulWeekTasks(){
   var wk=bulWeekISO();
   /* notice е извън всеки брояч — push-ът „Имате N задачи тази седмица" също. */
-  return bulTasks.filter(function(t){ return !taskIsNotice(t) && taskCountsInWeek(t, wk); });
+  return bulTasks.filter(function(t){ return !taskIsNotice(t) && taskCountsInWeek(t, wk) && taskInForce(t, bulTodayISO()); });
 }
 function bulSpanStripHtml(){
   var store=currentUser&&currentUser.store_name;
   var rows=bulTasks.filter(function(t){
-    if(taskIsNotice(t)||!bulSpanPending(t)) return false;
+    if(taskIsNotice(t)||!bulSpanPending(t)||!bulTaskInForce(t)) return false;
     return isGlobal()||!t.target_stores||!t.target_stores.length||(store&&t.target_stores.indexOf(store)>=0);
   });
   if(!rows.length) return '';
@@ -1196,6 +1238,53 @@ function bulTaskBulletinId(taskId){
   var t=bulTasks.find(function(x){ return String(x.id)===String(taskId); });
   if(t&&t.bulletin_id) return t.bulletin_id;
   return curBul ? curBul.id : null;
+}
+/* ═══ ИЗВЕСТИЕТО ЗА „В СИЛА ОТ" ══════════════════════════════════════════
+   Задача с starts_on не праща push при създаване — обектите още не бива да я
+   виждат. Вместо това се записва ЕДИН ред в notification_schedules за самата
+   дата и го праща dynamic-responder (крон на 15 минути; гейтът там проверява и
+   че бюлетинът е публикуван). Нов крон не е нужен.
+
+   Редът се разпознава по entity_type/entity_id/schedule_type И по това, че
+   message започва с този префикс. Камбанката („🔔 Нотификации") пише свой
+   текст или оставя message празен, тоест ръчно напомняне не може да бъде
+   объркано с това и изтрито под ръцете на човека.
+
+   Съгласува се при ВСЯКА редакция, защото иначе:
+     · starts_on се мести напред → push-ът тръгва на старата дата, когато
+       задачата още не се вижда;
+     · starts_on се добавя при редакция → известие няма никога;
+     · спанът се маха → редът остава и праща за нищо;
+     · заглавието се сменя → писмото казва старото.
+   Всички те са реални: записът е с точна дата и текст, а редакцията е
+   отделна функция от създаването. */
+var NS_STARTS_PREFIX='Нова задача: ';
+function bulStartsNoticeFilter(taskId){
+  return 'entity_type=eq.task&entity_id=eq.'+encodeURIComponent(String(taskId))+
+         '&schedule_type=eq.once&message=like.'+encodeURIComponent(NS_STARTS_PREFIX+'*');
+}
+/* startsOn в БЪДЕЩЕТО → един ред с тази дата; иначе (празно, днес или минало)
+   → редът се маха. „Днес" не се насрочва: прозорецът на dynamic-responder е 15
+   минути след 08:00 и по обяд вече е затворен, тоест известието би се загубило
+   тихо. Тогава задачата и без това е видима — push-ът тръгва веднага. */
+function bulSyncStartsNotice(taskId, startsOn, title, stores){
+  if(!taskId) return Promise.resolve(false);
+  var fltr=bulStartsNoticeFilter(taskId);
+  var future=!!startsOn && String(startsOn)>bulTodayISO();
+  return sbGet('notification_schedules','select=id&'+fltr).then(function(rows){
+    var have=(Array.isArray(rows)&&rows.length)?rows[0]:null;
+    if(!future) return have ? sbDelete('notification_schedules',fltr) : {ok:true};
+    var body={
+      scheduled_date:startsOn, scheduled_time:'08:00',
+      message:NS_STARTS_PREFIX+title,
+      target_stores:(stores&&stores.length)?stores:null, active:true
+    };
+    if(have) return sbPatch('notification_schedules','id=eq.'+have.id,body);
+    return sbPost('notification_schedules',Object.assign({
+      entity_type:'task', entity_id:String(taskId), schedule_type:'once',
+      created_by:currentUser.display_name||currentUser.email
+    },body));
+  }).then(function(r){ return !!(r&&r.ok); }).catch(function(){ return false; });
 }
 function bulSpanLockReason(cdate,spanFrom){
   var t=bulTodayISO();
@@ -1616,7 +1705,7 @@ function loadBulletin(){
     var bulSpanWk=weekDays(curBul.week_number,curBul.year);
     Promise.all([
       sbGet('bulletin_tasks','bulletin_id=eq.'+curBul.id+'&order=sort_order.asc,due_date.asc'),
-      loadSpanningTasks(toLocalISO(bulSpanWk[0]),toLocalISO(bulSpanWk[6]),canEdit())
+      loadSpanningTasks(toLocalISO(bulSpanWk[0]),toLocalISO(bulSpanWk[6]),canEdit(),bulTodayISO())
     ]).then(function(tt){
       var t=tt[0];
       bulTasks=mergeSpanningTasks(Array.isArray(t)?t:[], tt[1]);
@@ -1825,6 +1914,12 @@ function renderBulView(){
     var store=currentUser&&currentUser.store_name;
     /* Обикновени задачи за деня - зачитаме target_stores, точно както в
        главния списък: магазин вижда само своите/общите, офисът вижда всичко. */
+    /* Гейт за „в сила от" тук НЯМА и не е пропуск: задача с starts_on е
+       многоседмична, а CHECK-ът bulletin_tasks_spans_later_week_chk изисква
+       срокът да е в ПО-КЪСНА седмица — тоест в собствената си седмица тя няма
+       ден и клетка. В по-късните седмици идва през loadSpanningTasks(), която
+       вече отрязва невлезлите в сила за обектите. Клон, който нищо не може да
+       задейства, не се пази „за всеки случай" — той просто не се тества. */
     var regularForDay=bulTasks.filter(function(t){
       if(!taskIsDueOnDate(t,dateStr))return false;
       return isGlobal()||!t.target_stores||!t.target_stores.length||(store&&t.target_stores.indexOf(store)>=0);
@@ -1991,7 +2086,7 @@ function renderBulView(){
        редактира или изтрие от НИКЪДЕ. За постоянните същото е поправено на
        11.09 (3ec0ce0). Изключването си остава навсякъде, където се БРОИ:
        панелът на обекта, X/18, „Анализ", печатът, „Днес" и отчетите. */
-    var dTasks=bulTasks.filter(function(t){return t.department===dk&&!(taskIsNotice(t)&&bulTaskIsForeign(t));});
+    var dTasks=bulTasks.filter(function(t){return t.department===dk&&!(taskIsNotice(t)&&bulTaskIsForeign(t))&&bulTaskInForce(t);});
     /* Магазин вижда само задачи БЕЗ target_stores (= за всички) или такива,
        в които изрично е посочен; глобалните роли (admin/accounting/logistics)
        виждат винаги всичко, за да могат да управляват. */
@@ -2730,7 +2825,7 @@ function submitEditTask(taskId) {
   if (!bulAutoCompleteValid(autoComplete, etkSpan.spans?[etkSpan.due]:dueDates)) return;
   var trc = trCollect('etk');
   if (trc.error) { toast(trc.error,'#dc2626'); return; }
-  var body = {title:title,description:desc,department:dept,due_date:etkDue.due_date,due_dates:etkDue.due_dates,spans_from:etkDue.spans_from,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete};
+  var body = {title:title,description:desc,department:dept,due_date:etkDue.due_date,due_dates:etkDue.due_dates,spans_from:etkDue.spans_from,starts_on:etkDue.starts_on,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete};
   /* sort_order влиза САМО при истинска смяна на отдела - иначе всяко
      отваряне и запазване на задачата би я хвърлило най-отдолу. */
   var t = bulTasks.find(function(x){ return String(x.id) === String(taskId); });
@@ -2743,6 +2838,10 @@ function submitEditTask(taskId) {
   sbPatch('bulletin_tasks','id=eq.'+taskId,body).then(function(r){
     if (!r.ok) { toast('Грешка при запис','#dc2626'); return; }
     if (t && newOrder !== null) { t.department = dept; t.sort_order = newOrder; }
+    /* Известието за „в сила от" се съгласува с новото състояние. Push сега НЕ
+       се праща, дори датата да е минала: редакцията не е ново поставяне, а
+       обектът вижда задачата в портала. */
+    bulSyncStartsNotice(taskId, etkDue.starts_on, title, stores);
     return trSaveReports(taskId, trc.list).then(function(okRep){
       var el = document.getElementById('edit-tk-ov');
       if (el) el.remove();
@@ -3096,7 +3195,7 @@ function trSaveReports(taskId, list){
   });
 }
 
-function openTaskModal(){trDrafts.tk=[];var trw=document.getElementById('tk-tr-wrap');if(trw)trw.innerHTML=trSectionHtml('tk',null);if(!reportGroupPeopleCache)loadReportGroupPeople();document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');var sp=document.getElementById('tk-span-on');if(sp){sp.checked=false;var spd=document.getElementById('tk-span-due');if(spd)spd.value='';bulSpanToggle(sp);}}
+function openTaskModal(){trDrafts.tk=[];var trw=document.getElementById('tk-tr-wrap');if(trw)trw.innerHTML=trSectionHtml('tk',null);if(!reportGroupPeopleCache)loadReportGroupPeople();document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');var sp=document.getElementById('tk-span-on');if(sp){sp.checked=false;var spd=document.getElementById('tk-span-due');if(spd)spd.value='';var sps=document.getElementById('tk-span-start');if(sps)sps.value='';bulSpanToggle(sp);}}
 function closeTk(){document.getElementById('tk-ov').classList.remove('open');}
 function submitTask(){
   var title=(document.getElementById('tk-title').value||'').trim();
@@ -3123,7 +3222,7 @@ function submitTask(){
   var trc=trCollect('tk');
   if(trc.error){toast(trc.error,'#dc2626');return;}
   /* sbPostReturn — id-то на задачата трябва за насрочените отчети. */
-  sbPostReturn('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:tkDue.due_date,due_dates:tkDue.due_dates,spans_from:tkDue.spans_from,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
+  sbPostReturn('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:tkDue.due_date,due_dates:tkDue.due_dates,spans_from:tkDue.spans_from,starts_on:tkDue.starts_on,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     var newId=r.row&&r.row.id;
     var repP=trc.list.length
@@ -3135,7 +3234,18 @@ function submitTask(){
     });
     /* Push само ако бюлетинът вече е публикуван - иначе магазините още не
        виждат задачата и известието би било подвеждащо. */
-    if(bulIsPublished() && typeof pushNewBulletinTask==='function'){
+    /* Задача с „В сила от": push-ът НЕ тръгва сега — обектите още не бива да
+       я виждат. Записва се ред в notification_schedules за самата дата и го
+       праща dynamic-responder (крон на всеки 15 минути, прозорец 15 мин след
+       часа). Нов крон не е нужен, а гейтът там проверява и че бюлетинът е
+       публикуван. Часът е 08:00 — същият най-ранен час, който ползва и
+       bulletin-notify. Редът се вижда в „🔔 Нотификации" на задачата и се
+       маха с ✕ като всяко друго напомняне. */
+    if(tkSpan.spans && tkSpan.startsOn && String(tkSpan.startsOn)>bulTodayISO()){
+      bulSyncStartsNotice(newId, tkSpan.startsOn, title, stores).then(function(ok){
+        if(!ok) toast('Задачата е добавена, но известието за '+bulDM(tkSpan.startsOn)+' НЕ е насрочено','#dc2626');
+      });
+    } else if(bulIsPublished() && typeof pushNewBulletinTask==='function'){
       pushNewBulletinTask(title, stores.length?stores:null);
     }
   });
@@ -3723,6 +3833,7 @@ function printSection(what){
       var ds=toLocalISO(days[i]);
       var dt=bulTasks.filter(function(t){
         if(taskIsNotice(t))return false;
+        if(!bulTaskInForce(t))return false;
         if(!taskIsDueOnDate(t,ds))return false;
         return isGlobal()||!t.target_stores||!t.target_stores.length||(printStore&&t.target_stores.indexOf(printStore)>=0);
       });
@@ -3769,6 +3880,7 @@ function printSection(what){
        филтър като навсякъде другаде (офисът вижда всичко). */
     var dt=bulTasks.filter(function(t){
       if(t.department!==dk||taskIsNotice(t))return false;
+      if(!bulTaskInForce(t))return false;
       return isGlobal()||!t.target_stores||!t.target_stores.length||(printStore&&t.target_stores.indexOf(printStore)>=0);
     });
     var bdg={trade:'badge-trade',warehouse:'badge-wh',admin:'badge-admin'}[dk]||'badge-admin';
@@ -3914,7 +4026,7 @@ function renderTasksPanel() {
     depts.forEach(function(dk) {
       /* notice се показва САМО в Седмичния календар — иначе би влязло и в
          знаменателя на брояча done/dTasks.length по-долу. */
-      var dTasks = bulTasks.filter(function(t){ return t.department===dk && !taskIsNotice(t); });
+      var dTasks = bulTasks.filter(function(t){ return t.department===dk && !taskIsNotice(t) && bulTaskInForce(t); });
       /* Същият филтър по target_stores като в основния изглед по-горе —
          тази функция рендира отделен, паралелен "мобилен" панел за същите
          задачи и трябва да остане консистентна с него. */
@@ -4463,7 +4575,11 @@ function loadTasksStats() {
      таблицата: тя е „в срок", а знаменател тук значи „очаква се тази
      седмица". Брои се в седмицата на срока, веднъж — виж taskCountsInWeek(). */
   var statWeekISO = bulWeekISO();
-  var statTasks = bulTasks.filter(function(t){ return !taskIsNotice(t) && taskCountsInWeek(t, statWeekISO); });
+  /* „В сила от": задача, която обектите още не виждат, не влиза в таблицата —
+     иначе редът им свети червено 0/18 за работа, която не им е показана, а
+     изпратеният седмичен отчет за същата седмица дори не я споменава (report.js
+     я маха). Два екрана за един офис не бива да дават различни числа. */
+  var statTasks = bulTasks.filter(function(t){ return !taskIsNotice(t) && taskCountsInWeek(t, statWeekISO) && taskInForce(t, bulTodayISO()); });
   var statRecurring = recurringTasks.filter(function(t){ return !taskIsNotice(t); });
   /* Излиза само ако няма НИТО обикновени, НИТО постоянни задачи — иначе бюлетин
      без обикновени (С38/2026) не броеше постоянните. Самата обвивка идва от
@@ -4590,7 +4706,7 @@ function renderBulAnalysis(){
   /* Многоседмичната се брои само в седмицата на срока си (taskCountsInWeek):
      иначе същата задача влиза в „Задачи общо", „Изпълнени" и в таблицата по
      магазини във ВСЯКА седмица от обхвата си, тоест 2 до 4 пъти. */
-  var anTasks=bulTasks.filter(function(t){return !taskIsNotice(t) && taskCountsInWeek(t, bulWeekISO());});
+  var anTasks=bulTasks.filter(function(t){return !taskIsNotice(t) && taskCountsInWeek(t, bulWeekISO()) && taskInForce(t, bulTodayISO());});
   if(!anTasks.length){html+='<div class="bcard" style="text-align:center;padding:30px;color:#94a3b8;">Няма задачи.</div>';wrap.innerHTML=html+'</div>';return;}
   var ds={};bulComps.forEach(function(c){ds[c.task_id]=1;});
   var done=Object.keys(ds).length; var tot=anTasks.length;

@@ -283,7 +283,14 @@ function checkNewBulletinTasksBanner(){
     return sbGet('bulletin_tasks','bulletin_id=eq.'+bul.id+'&created_at=gte.'+cutoffISO).then(function(tasksRaw){
       /* notice не е задача за вършене — банерът „N нови задачи" не бива да я
          брои, нито да я показва като чакаща. Виж taskIsNotice() в shared.js. */
-      var tasks=(Array.isArray(tasksRaw)?tasksRaw:[]).filter(function(t){return !taskIsNotice(t);});
+      /* „В сила от" (starts_on, 27.09.2026): задача, която още не е в сила, я
+         няма в НИТО един изглед на Бюлетина за обекта — банерът не бива да е
+         единственото място, където тя се показва, и то със заглавието си.
+         Обектът щеше да прочете „1 нова задача", да отвори Бюлетина и да не
+         намери нищо. Виж taskInForce() в shared.js. */
+      var tasks=(Array.isArray(tasksRaw)?tasksRaw:[]).filter(function(t){
+        return !taskIsNotice(t) && taskInForce(t, localDateISO(new Date()));
+      });
       return tasks.filter(function(t){return notifTaskForStore(t,store);})
                   .map(function(t){return {id:t.id,title:t.title,kind:'regular'};});
     });

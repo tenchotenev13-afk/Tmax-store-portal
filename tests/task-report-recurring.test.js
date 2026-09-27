@@ -332,6 +332,33 @@ function fakeSb(data) {
     ok('коментарът му е в картичката', t2.indexOf('Сглобена') >= 0);
   }
 
+  section('8в. Задача с „В сила от" в бъдещето: отчет не се праща');
+  {
+    /* Камбанката позволява всяка дата за „📨 Отчет по задача", тоест отчет може
+       да е насрочен ПРЕДИ задачата да е влязла в сила. Тогава картичката би
+       изредила всичките обекти като „не изпълнили" задача, която те още не
+       виждат — затова пропуск с причина, както при notice. */
+    const SPAN_DUE = '2026-09-24', START_LATER = '2026-09-23';
+    const over = {
+      bulletin_tasks: [
+        { id: 't-later', bulletin_id: 'b-pub', title: 'Клетка надувно', target_stores: ['Троян', 'Ловеч'],
+          due_date: SPAN_DUE, due_dates: [SPAN_DUE], spans_from: MON, starts_on: START_LATER,
+          linked_module: null, task_type: 'comment' }
+      ],
+      task_completions: []
+    };
+    /* run_date е ПРЕДИ starts_on (18.09 срещу 23.09) → пропуск. */
+    const a1 = await run('t-later', FRI, over);
+    ok('нула писма', a1.log.mail.length === 0, JSON.stringify(a1.log.mail.length));
+    ok('причината е „още не е в сила"', /още не е в сила/.test(JSON.stringify(a1.j || {})),
+      JSON.stringify(a1.j || {}).slice(0, 220));
+
+    /* КОНТРОЛА: run_date НА датата на влизане → отчетът тръгва. */
+    const a2 = await run('t-later', START_LATER, over);
+    ok('КОНТРОЛА: на датата на влизане отчетът тръгва', a2.log.mail.length === 1,
+      JSON.stringify(a2.j || {}).slice(0, 220));
+  }
+
   section('9. dynamic-responder: гейтът за task_report и постоянна задача');
   {
     const GD = db();

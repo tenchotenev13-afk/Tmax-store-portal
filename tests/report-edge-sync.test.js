@@ -149,6 +149,10 @@ const COPIED_HELPERS = [
      седмица, в която порталът я показва само като „в срок" — или я пропуска
      в деня на срока ѝ. */
   { fn: 'taskSpansWeeks', from: SHARED },
+  /* „В сила от" (starts_on, 27.09.2026) — многоседмичната може да влиза в сила
+     по-късно от понеделника на седмицата си. */
+  { fn: 'taskSpanStart', from: SHARED },
+  { fn: 'taskInForce', from: SHARED },
   { fn: 'taskSpanDue', from: SHARED },
   { fn: 'taskCountsInWeek', from: SHARED },
   { fn: 'spanWeekSunday', from: SHARED },
@@ -229,6 +233,10 @@ const ROUTED_COPIED = [
      седмица, в която порталът я показва само като „в срок" — или я пропуска
      в деня на срока ѝ. */
   { fn: 'taskSpansWeeks', from: SHARED },
+  /* „В сила от" (starts_on, 27.09.2026) — многоседмичната може да влиза в сила
+     по-късно от понеделника на седмицата си. */
+  { fn: 'taskSpanStart', from: SHARED },
+  { fn: 'taskInForce', from: SHARED },
   { fn: 'taskSpanDue', from: SHARED },
   { fn: 'taskCountsInWeek', from: SHARED },
   { fn: 'spanWeekSunday', from: SHARED },
