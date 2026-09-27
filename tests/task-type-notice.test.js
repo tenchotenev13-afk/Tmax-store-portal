@@ -15,7 +15,7 @@
      2. дневният и седмичният отчет: 0 в числителя И в знаменателя;
      3. личният седмичен отчет (collectWeeklyRoutingData) също;
      4. таб „Днес": задачата не се появява;
-     5. Седмичният календар: РЕД има, но БЕЗ <input type=checkbox> и без
+     5. Седмичният календар И „План за деня": РЕД има, но БЕЗ <input type=checkbox> и без
         брояча X/18. От 25.09.2026 и двата вида notice са и в блока на своя
         отдел — заради ✏️ и ✕ (постоянната от 11.09, виж
         tests/recurring-notice-block.test.js; еднократната —
@@ -339,9 +339,14 @@ const weekly = h => new Promise(res => { h.w.collectWeeklyReportData(res); });
       await ticks(); await ticks(); await ticks();
       const wrap = h.doc.getElementById('mod-bulletin');
       const cal = h.doc.getElementById('sec-calendar');
+      const plan = h.doc.getElementById('sec-dayplan');
       if (ok('изгледът се рендира', !!wrap && !!cal)) {
-        /* Целият модул минус календара: списъкът по отдел, панелът, всичко. */
-        const outside = wrap.innerHTML.split(cal.innerHTML).join('');
+        /* Целият модул минус календара И минус „План за деня": и двата са
+           места, където notice ТРЯБВА да се вижда. Планът я показва най-отдолу,
+           отделена и без отметка (27.09.2026) — проверява се отделно по-долу,
+           за да не се смеси „показва се, където трябва" с „изтекла е някъде". */
+        let outside = wrap.innerHTML.split(cal.innerHTML).join('');
+        if (plan) outside = outside.split(plan.innerHTML).join('');
         /* Извън календара тя е точно на ЕДНО място — реда в блока на отдела.
            Броят, не наличието: втори път би значел, че е влязла и в панела
            „Задачи за седмицата" или в някой брояч, а там я няма работа. */
@@ -357,6 +362,16 @@ const weekly = h => new Promise(res => { h.w.collectWeeklyReportData(res); });
         rows.forEach(r => { rest = rest.split(r.outerHTML).join(''); });
         ok('постоянната notice има ред в блока', rows.length >= 1, String(rows.length));
         ok('и извън този ред я няма', rest.indexOf(REC_NOTICE_TITLE) < 0);
+        /* НОВОТО място: „План за деня" показва и двата вида notice — най-отдолу,
+           в своя блок „Само за информация", и БЕЗ чекбокс. */
+        if (ok('„План за деня" се рендира', !!plan)) {
+          const pTxt = plan.textContent.replace(/\s+/g, ' ');
+          ok('планът има блок „Само за информация"', pTxt.indexOf('Само за информация') >= 0, pTxt.slice(0, 200));
+          ok('постоянната notice е в плана', pTxt.indexOf(REC_NOTICE_TITLE) >= 0);
+          const noticeRow = Array.prototype.find.call(plan.querySelectorAll('[data-plan-row]'),
+            r => r.textContent.indexOf(REC_NOTICE_TITLE) >= 0);
+          ok('редът ѝ в плана е БЕЗ чекбокс', !!noticeRow && !noticeRow.querySelector('input[type=checkbox]'));
+        }
       }
     }
   }

@@ -180,6 +180,7 @@ const TESTS = [
   'task-report-recurring.test.js',
   'task-span-weeks.test.js',
   'task-notice-dept-block.test.js',
+  'day-plan.test.js',
   'no-auto-push-on-load.test.js',
   'bulletin-unpublished-push.test.js',
   'responder-publication-gate.test.js',

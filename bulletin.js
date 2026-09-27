@@ -1189,6 +1189,283 @@ function bulSpanHomeNoteHtml(t){
    както при всяка друга задача. completion_date остава СРОКЪТ: оттам идват
    „едно X/18" и „една отчетност", и точно това пише и
    transit_sync_completions() за автоматичната „Стока на път". */
+/* ═══ КАКВО СЕ ПРАВИ НА ДАТА D ЗА ОБЕКТ S — ЕДИН ИЗТОЧНИК ═════════════════
+   Дотук този подбор се строеше ТРИ пъти: в седмичния календар
+   (renderBulView), в печата (pCal) и в таб „Днес" (today.js, по свой път за
+   днешния ден). Трите вече се различаваха — по notice, по „в сила от" и по
+   обхвата на постоянните — и всяко ново място щеше да е четвърто копие.
+   „План за деня" е точно такова място, затова подборът излиза тук.
+
+   Връща ЧЕТИРИТЕ групи, не готов HTML: календарът ги подрежда по отдели,
+   планът — по час, печатът — по своя начин. Всеки изглед си пази markup-а.
+
+   opts:
+     includeNotice  (по подр. true)  — false изхвърля „Само за информация";
+                                       печатът е чеклист за вършене, не табло.
+     scopeRecurring (по подр. true)  — false НЕ филтрира постоянните по
+                                       target_stores. Това е СЪЩЕСТВУВАЩО
+                                       поведение на печата (pCal никога не е
+                                       филтрирал постоянните по обект) и е
+                                       запазено дословно, за да не се променя
+                                       хартията мълчаливо. Виж claude/open-tasks.md.
+
+   Изключените за седмицата („не за тази седмица") ОСТАВАТ в списъка: и двата
+   изгледа ги показват, само различно (сив ред с етикет). Решението „да се
+   покаже ли" е на рендера, не на подбора — иначе изгледът, който ги иска, би
+   трябвало да ги дърпа втори път. */
+function bulDayItems(dateISO, store, opts){
+  opts = opts || {};
+  var noNotice = opts.includeNotice === false;
+  var idx = (new Date(String(dateISO).slice(0,10)+'T00:00:00').getDay()+6)%7;
+  var inScope = function(t){
+    return isGlobal() || !t.target_stores || !t.target_stores.length ||
+           (store && t.target_stores.indexOf(store) >= 0);
+  };
+  var regular = bulTasks.filter(function(t){
+    if(!taskIsDueOnDate(t,dateISO)) return false;
+    if(!bulTaskInForce(t)) return false;
+    if(noNotice && taskIsNotice(t)) return false;
+    return inScope(t);
+  });
+  var recurring = recurringTasks.filter(function(t){
+    if(!recurringIsDueOnWeekday(t,idx)) return false;
+    if(noNotice && taskIsNotice(t)) return false;
+    return opts.scopeRecurring === false ? true : inScope(t);
+  });
+  /* Ръчните събития от съдържанието на бюлетина — по ден, със своя индекс:
+     той е нужен за редакция и изтриване. */
+  var cal = (curBul && curBul.content && curBul.content.calendar) || {};
+  var manual = (cal[DKEYS[idx]] || []).map(function(e,ei){ return {e:e, idx:ei}; });
+  /* Пренесените В този ден. Слетите (merged) не се рисуват отделно за обекта —
+     те са значка върху собствения му ред; офисът вижда и тях, защото за него
+     това е работа на ЕДИН обект, а не значка върху нещо негово. */
+  var carried = bulCarriedRows(dateISO, isGlobal()?null:store)
+    .filter(function(r){ return isGlobal() || !r.merged; });
+  return { dateISO:String(dateISO).slice(0,10), weekdayIdx:idx,
+           regular:regular, recurring:recurring, manual:manual, carried:carried };
+}
+
+/* ═══ „📋 ПЛАН ЗА ДЕНЯ" ═══════════════════════════════════════════════════
+   Седмичният календар е за ОБЗОР — седем колони, поглед отгоре. Планът е за
+   РАБОТА: един списък за един ден, в реда, в който се върши, без разделяне по
+   отдели. За нов колега това е разликата между „някъде има списък" и „ето кое
+   след кое".
+
+   Подборът е bulDayItems() — същият, който храни календара и печата. Тук са
+   само подредбата и редът:
+     1. с краен час (due_time) — по часа, най-ранният горе. Час имат САМО
+        постоянните задачи: bulletin_tasks няма колона due_time (записано в
+        claude/open-tasks.md като следваща задача);
+     2. без час — по отдел (DCOLS), после обикновени преди постоянни, после
+        sort_order. Обща подредба между двете таблици няма как да се зададе
+        днес — те имат отделни sort_order;
+     3. многоседмичните в сила със срок по-НАТАТЪК — отделна малка група;
+     4. „Само за информация" — най-отдолу, без отметка.
+   Пренесените влизат с часа си (постоянните имат, обикновените — не) и носят
+   „⏱ пренесена". Изключените за седмицата НЕ влизат: планът е списък за
+   вършене, а тях обектът точно този път не ги дължи.
+
+   Отмятането, заключването, снимката, коментарът и отлагането минават през
+   СЪЩИТЕ функции и същите data- атрибути като в календара. Затова отметка в
+   плана се вижда веднага и в календара: renderBulletin() пререндира всичко. */
+var bulPlanDate = null;    /* ISO; null = днес (или понеделникът, ако днес е извън седмицата) */
+var bulPlanStore = null;   /* избраният обект — само за офиса */
+
+/* Отворен за магазина (това е работният му изглед), свит за офиса (той идва за
+   седмичния обзор). Помни се per потребител в localStorage — това е удобство на
+   екрана, не данни: празен/недостъпен localStorage просто връща подразбирането. */
+function bulPlanIsOpen(){
+  try{
+    var v=localStorage.getItem('bulPlanOpen');
+    if(v==='1') return true;
+    if(v==='0') return false;
+  }catch(e){}
+  return !isGlobal();
+}
+function bulPlanToggle(){
+  var now=bulPlanIsOpen();
+  try{ localStorage.setItem('bulPlanOpen', now?'0':'1'); }catch(e){}
+  renderBulletin();
+}
+/* Денят на плана: винаги В рамките на показаната седмица. Днес, ако попада в
+   нея; иначе понеделникът — план за ден от чужда седмица е безсмислен. */
+function bulPlanDay(){
+  var wk=bulWeekISO();
+  if(!wk.length) return bulTodayISO();
+  if(bulPlanDate && wk.indexOf(bulPlanDate)>=0) return bulPlanDate;
+  var td=bulTodayISO();
+  return wk.indexOf(td)>=0 ? td : wk[0];
+}
+function bulPlanShift(n){
+  var wk=bulWeekISO();
+  var i=wk.indexOf(bulPlanDay())+Number(n);
+  if(i<0||i>=wk.length) return;
+  bulPlanDate=wk[i];
+  renderBulletin();
+}
+function bulPlanSetStore(sel){ bulPlanStore=sel.value||null; renderBulletin(); }
+/* Обектът, за който се строи планът: своят за магазина, избраният за офиса. */
+function bulPlanForStore(){
+  return isGlobal() ? (bulPlanStore||null) : (currentUser&&currentUser.store_name)||null;
+}
+function bulPlanTimeLabel(t){
+  var tm=t&&t.due_time ? String(t.due_time).slice(0,5) : '';
+  return tm || '';
+}
+/* Един ред от плана. kind: 'regular' | 'recurring'; carried носи реда на
+   пренесеното явяване. Датата за отмятане (cdate) е РАЗЛИЧНА по вид и точно
+   затова минава през същите помощници като календара, вместо да се смята тук. */
+function bulPlanRowHtml(it, store, weekArr){
+  var t=it.t, isRec=it.kind==='recurring', d=DEPTS[t.department]||{color:'#64748b',label:t.department||''};
+  var lockKey=isRec?(t.linked_module||''):bulTaskLinkKey(t);
+  var cdate=it.cdate, done=it.done, comp=it.comp||null;
+  var timeTxt=bulPlanTimeLabel(t);
+  var h='<div class="bplan-row" data-plan-row="'+esc(String(t.id))+'" style="display:flex;align-items:flex-start;gap:10px;padding:8px 2px;border-bottom:1px solid #f1f5f9;'+(done?'opacity:.6;':'')+'">';
+  /* часът е ляв котвен елемент: погледът минава по колоната с часовете */
+  h+='<div style="width:52px;flex-shrink:0;font-family:DM Mono,monospace;font-size:12.5px;font-weight:600;color:'+(timeTxt?'#0f172a':'#cbd5e1')+';padding-top:1px;">'+(timeTxt||'—')+'</div>';
+  if(it.notice){
+    h+='<div style="width:16px;flex-shrink:0;" title="Само за информация — не се отмята"></div>';
+  } else if(isRec){
+    h+='<input type="checkbox" '+(done?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(it.winComp?recurringWindowDoneAttr(it.winComp):bulLockAttr(cdate,lockKey))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+(it.winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(cdate,lockKey))+'">';
+  } else if(it.carried){
+    h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="regular" data-orig="'+(it.carriedFrom||'')+'" data-cdate="'+(cdate||'')+'" data-linked="'+lockKey+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(cdate,lockKey)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+bulLockStyle(cdate,lockKey)+'">';
+  } else {
+    h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+lockKey+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(cdate,lockKey,bulSpanOf(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+bulLockStyle(cdate,lockKey,bulSpanOf(t))+'">';
+  }
+  h+='<div style="flex:1;min-width:0;">';
+  h+='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
+  h+='<span style="font-size:13.5px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+(isRec?'🔁 ':'')+esc(t.title||'')+'</span>';
+  h+='<span style="font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:20px;background:'+d.hdr+';color:#fff;white-space:nowrap;">'+esc(d.label||'')+'</span>';
+  h+=taskTypeBadgeHtml(t.task_type,t.id,isRec?'recurring':'regular',!isGlobal()&&!it.notice&&!done,cdate);
+  if(it.carried) h+=bulCarriedBadgeHtml({t:t,comp:it.comp,merged:false,from:it.carriedFrom});
+  if(!isRec) h+=bulSpanBadgeHtml(t);
+  if(it.winDeadline) h+='<span style="font-size:9.5px;color:#7c3aed;font-weight:700;white-space:nowrap;">до '+bulDM(it.winDeadline)+'</span>';
+  h+='</div>';
+  if(t.description) h+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
+  if(comp&&(comp.comment||(comp.photos&&comp.photos.length)||(comp.files&&comp.files.length))) h+=renderCompletionExtras(comp);
+  h+='</div>';
+  /* Бутонът към свързания таб — същият, който е и в календара. */
+  if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
+    h+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="flex-shrink:0;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 9px;font-size:10.5px;cursor:pointer;white-space:nowrap;">'+esc(linkedModuleLabel(t.linked_module))+' →</button>';
+  }
+  /* „⏱ Отложи" — само за обекта, само за неотметнато и неавтоматично. */
+  if(!isGlobal()&&!done&&!it.notice&&!it.carried&&!bulAutoLocked(lockKey)){
+    h+='<button data-task-id="'+t.id+'" data-cdate="'+(cdate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\''+(isRec?'recurring':'regular')+'\',this.dataset.cdate||null)" style="flex-shrink:0;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:3px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+  }
+  return h+'</div>';
+}
+/* Сглобява елементите на плана за един ден. Връща четирите групи ГОТОВИ за
+   рисуване, за да може тестът да провери подредбата, без да чете HTML. */
+function bulPlanGroups(dateISO, store){
+  var weekArr=curBul?weekDays(curBul.week_number,curBul.year):[];
+  var it=bulDayItems(dateISO, store);
+  var timed=[], untimed=[], notices=[], later=[];
+  var deptRank=function(dk){ var i=DCOLS.indexOf(dk); return i<0?99:i; };
+  /* обикновени (включително „в сила от" вече влезлите) */
+  it.regular.forEach(function(t){
+    var cdate=taskIsMultiDay(t)?dateISO:(taskDueDates(t)[0]||null);
+    if(taskIsNotice(t)){ notices.push({kind:'regular',t:t,notice:true,cdate:null}); return; }
+    var comp=store?bulComps.find(function(c){return c.task_id===t.id&&c.store_name===store&&(c.completion_date||null)===cdate;}):null;
+    untimed.push({kind:'regular',t:t,cdate:cdate,comp:comp||null,done:!!(comp&&comp.status==='done'),
+                  rank:[deptRank(t.department),0,t.sort_order||0]});
+  });
+  /* постоянни: изключените за обекта НЕ влизат; прозоречните — всеки ден до
+     отмятането, после само в деня на изпълнението (решение от 27.09.2026) */
+  it.recurring.forEach(function(t){
+    if(taskIsNotice(t)){ notices.push({kind:'recurring',t:t,notice:true,cdate:null}); return; }
+    if(recurringIsSkipped(t.id, store, bulSkips)) return;
+    var isWin=recurringIsWindow(t);
+    var winComp=isWin&&store?recurringWindowComp(t,store,weekArr):null;
+    if(isWin&&winComp&&(winComp.completion_date||null)!==dateISO) return;
+    var cdate=isWin?(winComp?(winComp.completion_date||dateISO):dateISO):dateISO;
+    var comp=winComp||(store?recurringComps.find(function(c){return c.recurring_task_id===t.id&&c.store_name===store&&(c.completion_date||null)===cdate;}):null);
+    var row={kind:'recurring',t:t,cdate:cdate,comp:comp||null,winComp:winComp||null,
+             done:!!(comp&&comp.status==='done'),
+             winDeadline:(isWin&&!winComp)?(recurringWindowDatesInWeek(t,weekArr).slice(-1)[0]||null):null,
+             rank:[deptRank(t.department),1,t.sort_order||0]};
+    (t.due_time?timed:untimed).push(row);
+  });
+  /* пренесените В този ден — с часа си, ако имат */
+  it.carried.forEach(function(r){
+    var row={kind:r.kind,t:r.t,cdate:String(r.comp.postponed_to||'').slice(0,10),comp:r.comp,
+             carried:true,carriedFrom:r.from,done:r.comp.status==='done',
+             rank:[deptRank(r.t.department),2,r.t.sort_order||0]};
+    (r.t.due_time?timed:untimed).push(row);
+  });
+  /* многоседмичните в сила, чийто срок е ПО-НАТАТЪК — не са за днес, но са
+     „текущи": обектът трябва да знае, че висят. */
+  bulTasks.forEach(function(t){
+    if(taskIsNotice(t)||!bulSpanPending(t)||!bulTaskInForce(t)) return;
+    if(!(isGlobal()||!t.target_stores||!t.target_stores.length||(store&&t.target_stores.indexOf(store)>=0))) return;
+    var due=taskSpanDue(t);
+    var comp=store?bulComps.find(function(c){return c.task_id===t.id&&c.store_name===store&&(c.completion_date||null)===due;}):null;
+    later.push({kind:'regular',t:t,cdate:due,comp:comp||null,done:!!(comp&&comp.status==='done'),spanLater:true});
+  });
+  timed.sort(function(a,b){
+    var ta=String(a.t.due_time||'').slice(0,5), tb=String(b.t.due_time||'').slice(0,5);
+    if(ta!==tb) return ta<tb?-1:1;
+    return a.rank[0]-b.rank[0] || a.rank[1]-b.rank[1] || a.rank[2]-b.rank[2];
+  });
+  untimed.sort(function(a,b){ return a.rank[0]-b.rank[0] || a.rank[1]-b.rank[1] || a.rank[2]-b.rank[2]; });
+  return {timed:timed, untimed:untimed, later:later, notices:notices};
+}
+function bulDayPlanHtml(){
+  var open=bulPlanIsOpen();
+  var day=bulPlanDay();
+  var wk=bulWeekISO();
+  var i=wk.indexOf(day);
+  var dt=new Date(day+'T00:00:00');
+  var store=bulPlanForStore();
+  var h='<div class="bcard" id="sec-dayplan">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">';
+  h+='<div style="display:flex;align-items:center;gap:10px;">';
+  h+='<button onclick="bulPlanToggle()" title="'+(open?'Свий':'Разгъни')+'" style="border:1px solid #e2e8f0;background:#fff;border-radius:6px;width:24px;height:24px;font-size:11px;cursor:pointer;color:#64748b;">'+(open?'▾':'▸')+'</button>';
+  h+='<div style="font-size:14px;font-weight:600;">📋 План за деня</div>';
+  h+='<div style="display:flex;align-items:center;gap:4px;">';
+  h+='<button onclick="bulPlanShift(-1)" '+(i<=0?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(i<=0?'#f8fafc':'#fff')+';border-radius:6px;padding:2px 9px;font-size:12px;cursor:'+(i<=0?'default':'pointer')+';color:'+(i<=0?'#cbd5e1':'#475569')+';">◀</button>';
+  h+='<div style="font-size:12.5px;font-weight:600;color:#0f172a;min-width:132px;text-align:center;">'+DNAMES[(dt.getDay()+6)%7]+', '+fmtD(dt)+(day===bulTodayISO()?' · днес':'')+'</div>';
+  h+='<button onclick="bulPlanShift(1)" '+(i>=wk.length-1?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(i>=wk.length-1?'#f8fafc':'#fff')+';border-radius:6px;padding:2px 9px;font-size:12px;cursor:'+(i>=wk.length-1?'default':'pointer')+';color:'+(i>=wk.length-1?'#cbd5e1':'#475569')+';">▶</button>';
+  h+='</div></div>';
+  if(isGlobal()){
+    var opts=(reportableStoresCache||[]).map(function(n){
+      return '<option value="'+esc(n)+'"'+(n===bulPlanStore?' selected':'')+'>'+esc(n)+'</option>';
+    }).join('');
+    h+='<select id="plan-store" onchange="bulPlanSetStore(this)" style="border:1px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:12px;">'+
+       '<option value="">— избери обект —</option>'+opts+'</select>';
+  }
+  h+='</div>';
+  if(!open) return h+'</div>';
+  if(isGlobal()&&!store){
+    h+='<div style="margin-top:10px;font-size:12px;color:#94a3b8;">Избери обект, за да видиш неговия план за деня. Планът е това, което вижда магазинът — редът, по който работи.</div>';
+    return h+'</div>';
+  }
+  var g=bulPlanGroups(day, store);
+  var total=g.timed.length+g.untimed.length+g.later.length+g.notices.length;
+  if(!total){
+    h+='<div style="margin-top:10px;font-size:12.5px;color:#94a3b8;">Няма задачи за този ден.</div>';
+    return h+'</div>';
+  }
+  var weekArr=curBul?weekDays(curBul.week_number,curBul.year):[];
+  h+='<div style="margin-top:8px;">';
+  if(g.timed.length){
+    h+='<div class="bplan-hdr" style="font-size:11px;font-weight:700;color:#0e7490;text-transform:uppercase;letter-spacing:.05em;margin:4px 0;">⏰ С краен час</div>';
+    g.timed.forEach(function(it){ h+=bulPlanRowHtml(it,store,weekArr); });
+  }
+  if(g.untimed.length){
+    h+='<div class="bplan-hdr" style="font-size:11px;font-weight:700;color:#475569;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;">📌 Без определен час</div>';
+    g.untimed.forEach(function(it){ h+=bulPlanRowHtml(it,store,weekArr); });
+  }
+  if(g.later.length){
+    h+='<div class="bplan-hdr" style="font-size:11px;font-weight:700;color:#0e7490;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;">🗓 Текущи, срок по-късно</div>';
+    g.later.forEach(function(it){ h+=bulPlanRowHtml(it,store,weekArr); });
+  }
+  if(g.notices.length){
+    h+='<div class="bplan-hdr" style="font-size:11px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.05em;margin:10px 0 4px;border-top:1px dashed #e2e8f0;padding-top:8px;">ℹ️ Само за информация</div>';
+    g.notices.forEach(function(it){ h+=bulPlanRowHtml(it,store,weekArr); });
+  }
+  return h+'</div></div>';
+}
+
 /* ЛЕНТАТА ПОД КАЛЕНДАРА — многоседмичните задачи, чийто срок е в по-късна
    седмица. Клетка в решетката те НЯМАТ: в тази седмица нямат ден, а
    слагането им в неделя се чете като срок в неделя. Лентата е един ред на
@@ -1902,6 +2179,10 @@ function renderBulView(){
   /* Промоции */
   html+=renderPromotionsSection();
 
+  /* План за деня — НАД календара: той е работният изглед, календарът е
+     обзорът. Вътре в bul-body, за да се пререндира при всяко отмятане. */
+  html+=bulDayPlanHtml();
+
   /* Calendar */
   html+='<div class="bcard" id="sec-calendar">';
   html+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">';
@@ -1920,16 +2201,13 @@ function renderBulView(){
        ден и клетка. В по-късните седмици идва през loadSpanningTasks(), която
        вече отрязва невлезлите в сила за обектите. Клон, който нищо не може да
        задейства, не се пази „за всеки случай" — той просто не се тества. */
-    var regularForDay=bulTasks.filter(function(t){
-      if(!taskIsDueOnDate(t,dateStr))return false;
-      return isGlobal()||!t.target_stores||!t.target_stores.length||(store&&t.target_stores.indexOf(store)>=0);
-    });
-    /* Постоянни задачи, важащи за ТОЗИ ден от седмицата (не само "днес") */
-    var recurringForDay=recurringTasks.filter(function(t){
-      if(!recurringIsDueOnWeekday(t,i))return false;
-      return isGlobal()||!t.target_stores||!t.target_stores.length||(store&&t.target_stores.indexOf(store)>=0);
-    });
-    var manualAll=(c.calendar[key]||[]).map(function(e,ei){return {e:e,idx:ei};});
+    /* Подборът е в bulDayItems() — един източник за календара, печата и
+       „План за деня". Тук остава само рисуването. */
+    var dayIt=bulDayItems(dateStr, store);
+    var regularForDay=dayIt.regular;
+    var recurringForDay=dayIt.recurring;
+    var manualAll=dayIt.manual;
+    var carriedForDay=dayIt.carried;
 
     html+='<div style="border:1px solid '+(isToday?'#2563eb':'#e2e8f0')+';border-radius:8px;padding:12px 14px;min-height:100px;background:'+(isToday?'#eff6ff':'#fff')+'">';
     html+='<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#94a3b8;letter-spacing:.02em;">'+DNAMES[i]+'</div>';
@@ -1945,8 +2223,7 @@ function renderBulView(){
          са значка върху собствения ред на задачата по-долу. */
       /* Офисът вижда и слетите: за него това е втора единица работа на друг
          обект, а не значка върху собствения му ред (той няма собствен ред). */
-      var carItems=bulCarriedRows(dateStr,isGlobal()?null:store)
-        .filter(function(r){return r.t.department===dk&&(isGlobal()||!r.merged);});
+      var carItems=carriedForDay.filter(function(r){return r.t.department===dk;});
       if(!regItems.length&&!recItems.length&&!manItems.length&&!carItems.length)return;
       hasAnything=true;
       html+='<div style="margin-bottom:8px;">';
@@ -3831,13 +4108,12 @@ function printSection(what){
     s+='<div class="cal-grid">';
     DKEYS.forEach(function(key,i){
       var ds=toLocalISO(days[i]);
-      var dt=bulTasks.filter(function(t){
-        if(taskIsNotice(t))return false;
-        if(!bulTaskInForce(t))return false;
-        if(!taskIsDueOnDate(t,ds))return false;
-        return isGlobal()||!t.target_stores||!t.target_stores.length||(printStore&&t.target_stores.indexOf(printStore)>=0);
-      });
-      var rdt=recurringTasks.filter(function(t){return !taskIsNotice(t)&&recurringIsDueOnWeekday(t,i);});
+      /* Същият подбор като на екрана (bulDayItems), с двете разлики на
+         хартията изрично: без „Само за информация" и БЕЗ филтър по обект за
+         постоянните — второто е заварено поведение на pCal, запазено дословно. */
+      var pIt=bulDayItems(ds, printStore, {includeNotice:false, scopeRecurring:false});
+      var dt=pIt.regular;
+      var rdt=pIt.recurring;
       var mn=c.calendar[key]||[];
       s+='<div class="cal-day">';
       s+='<div class="cal-day-name">'+DNAMES[i]+'</div>';
@@ -3859,7 +4135,7 @@ function printSection(what){
       });
       /* Пренесените за този ден — печатът е чеклистът, по който обектът
          работи, и точно този ден е новият ѝ срок. Слетите не се дублират. */
-      var pCar=bulCarriedRows(ds,isGlobal()?null:printStore).filter(function(r){return isGlobal()||!r.merged;});
+      var pCar=pIt.carried;
       pCar.forEach(function(r){
         var dc=dotC[r.t.department]||'#64748b';
         s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span style="font-weight:600;">⏱ '+esc(r.t.title||'')+' <span style="font-weight:400;font-size:10pt;color:#7c3aed;">(пренесена от '+bulDM(r.from)+(isGlobal()?' · '+esc(r.comp.store_name||''):'')+')</span></span></div>';
