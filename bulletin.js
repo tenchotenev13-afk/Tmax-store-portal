@@ -2083,10 +2083,15 @@ function renderBulView(){
            ПОКАЗАНАТА седмица, тоест запис оттук би преместил срока в нея. */
         if(canEdit()&&!bulTaskIsForeign(t)){html+='<div style="display:flex;gap:4px;flex-shrink:0;">'
           +'<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>'
-          /* 🔔 го няма при notice: насроченият отчет би питал колко обекта са
-             изпълнили задача, която не се изпълнява. ✏️ и ✕ остават — заради
-             тях задачата влезе в този блок. */
-          +(taskIsNotice(t)?'':'<button data-task-id="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'task\',this.dataset.taskId,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#d97706;">🔔</button>')
+          /* 🔔 е НАПОМНЯНЕ (push) до обектите в избран час, не отчет — затова го
+             има и при notice: „в четвъртък 9:00 напомни да прочетат бележката"
+             е толкова смислено, колкото и при задача. Така е и в блока с
+             постоянните задачи от 11.09.2026.
+             Скрито остава ДРУГОТО: секцията „Отчет за изпълнението" във формата
+             (trSectionHtml) — тя пита колко обекта са изпълнили задачата, а
+             notice не се отмята. Двете не бива да се смесват: беше скрито
+             грешното от двете между 25 и 27.09.2026. */
+          +'<button data-task-id="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'task\',this.dataset.taskId,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#d97706;">🔔</button>'
           +'<button data-task-id="'+t.id+'" onclick="bulDelTask(this)" style="border:1px solid #fecaca;background:#fff5f5;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#dc2626;">✕</button>'
           +'</div>';}
         html+='</div>';
