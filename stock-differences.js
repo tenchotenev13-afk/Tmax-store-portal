@@ -2123,15 +2123,44 @@ function sdLineDelta(line){
   var one = doc!==null ? doc : real;
   return {excess:one, shortage:one, suspect:suspect};
 }
-/* Една заявка за размените на заредените междускладови редове (и отворени, и
-   затворени). sbGet не отхвърля - при грешка връща []. */
+/* Четене, което КАЗВА дали е паднало. sbGet() връща [] и при грешка, тоест
+   "няма размени" и "заявката гръмна" изглеждат еднакво - точно това скри 400-ката
+   по-долу. Ползва глобалните API/H от shared.js; не пипа sbGet, от който зависят
+   всички модули. */
+function sdGetOk(table, query){
+  var url = API+'/'+table+(query?'?'+query:'');
+  return fetch(url,{headers:H}).then(function(r){
+    return r.json().catch(function(){ return null; }).then(function(d){
+      if(r.ok && Array.isArray(d)) return {ok:true, rows:d};
+      return {ok:false, status:r.status, error:(d&&(d.message||d.hint))||('HTTP '+r.status), url:url};
+    });
+  }).catch(function(e){
+    return {ok:false, status:0, error:String((e&&e.message)||e), url:url};
+  });
+}
+/* Горна граница за размените. Таблицата е малка по същество (ред на размяна,
+   не на артикул): към 27.09.2026 е 0 реда. Достигне ли се таванът, тихо
+   отрязан списък би скрил размени - затова се вика console.error. */
+var SD_SWAPS_LIMIT = 5000;
+/* ЦЯЛАТА таблица с една заявка, филтрирането е в sdSwapsForLine().
+   Преди тук се изброяваха id-тата на всички междускладови редове, ДВА пъти
+   (from_line_id.in.(…),to_line_id.in.(…)): при 540 такива реда URL-ът ставаше
+   ~45 000 знака и гейтуеят го отсичаше с 400, а sbGet връщаше [] — размените
+   изчезваха от екрана без нито един признак. Заявката вече не расте с броя на
+   редовете. (Същата засада и същата причина като storno_id=in.(…) в kasa.js.) */
 function sdLoadSwaps(){
-  var ids = sdData.filter(function(l){ return sdLineDirection(l)==='interstore'; })
-    .map(function(l){ return l.id; });
-  if(!ids.length){ sdSwaps = []; return Promise.resolve(); }
-  var inList = '('+ids.join(',')+')';
-  return sbGet('stock_diff_swaps', 'or=(from_line_id.in.'+inList+',to_line_id.in.'+inList+')&order=created_at.asc')
-    .then(function(rows){ sdSwaps = Array.isArray(rows) ? rows : []; });
+  return sdGetOk('stock_diff_swaps', 'order=created_at.asc&limit='+SD_SWAPS_LIMIT).then(function(res){
+    if(!res.ok){
+      sdSwaps = [];
+      try{ console.error('sdLoadSwaps: '+res.url+' → '+(res.status||'мрежов срив')+': '+res.error); }catch(e){}
+      toast('Размените не се заредиха','#dc2626');
+      return;
+    }
+    sdSwaps = res.rows;
+    if(sdSwaps.length >= SD_SWAPS_LIMIT){
+      try{ console.error('sdLoadSwaps: достигнат е таванът от '+SD_SWAPS_LIMIT+' размени — списъкът е отрязан'); }catch(e){}
+    }
+  });
 }
 /* Всички размени, в които редът е from или to - отворени и затворени. */
 function sdSwapsForLine(line){
@@ -4311,8 +4340,17 @@ function sdRefreshTabBadge(){
      Слушателят в startSDBadgePolling() опреснява веднага щом табът стане
      видим, затова балончето не изостава. */
   if(document.hidden) return;
-  var q = 'select=id,store_name,counterpart,reviewed&reviewed=eq.false';
-  var qLines = 'select=report_id,warehouse_response,store_response,status';
+  /* Редовете идват ВЛОЖЕНИ в бланките (PostgREST embedding през
+     stock_differences_report_id_fkey), не с втора заявка
+     report_id=in.(<всички непрегледани>): онзи списък растеше с броя на
+     непрегледаните бланки (192 към 27.09.2026) и повтаряше засадата от
+     sdLoadSwaps и от storno_id=in.(…) в kasa.js. Страничен ефект в добрата
+     посока: пулсът е ЕДНА заявка вместо две.
+     Цвети/admin не получават децата - те броят бланки, не редове. */
+  var needLines = isLogisticsWarehouseUser() || !canReviewDiff();
+  var q = 'select=id,store_name,counterpart,reviewed'+
+    (needLines ? ',stock_differences(report_id,warehouse_response,store_response,status)' : '')+
+    '&reviewed=eq.false';
   if(isLogisticsWarehouseUser()){
     q += '&counterpart=eq.' + encodeURIComponent(currentUser.store_name);
   } else if(!canReviewDiff()){
@@ -4327,27 +4365,28 @@ function sdRefreshTabBadge(){
     }
     /* Складът и магазинът броят "чака моето действие" - трябват и редовете. */
     if(!reports.length){ sdBadgePulse(0); return; }
-    sbGet('stock_differences', qLines + '&report_id=in.(' + reports.map(function(r){return r.id;}).join(',') + ')')
-      .then(function(lines){
-        lines = Array.isArray(lines)?lines:[];
-        /* Размените се четат с ОТДЕЛНА лека заявка и се подават като ТРЕТИ
-           аргумент. Глобалният sdSwaps НЕ се пипа: този срез е тесен (малко
-           колони, само моите) и записан в него би осакатил следващия рендер.
-           Двата среза са различни, защото двете роли чакат различни неща:
-           складът — закъснелите, магазинът — своя ход. */
-        var me = encodeURIComponent(currentUser.store_name);
-        var q2 = isLogisticsWarehouseUser()
-          ? 'status=eq.sent&warehouse=eq.'+me+'&select=to_line_id,sent_at'
-          : 'status=in.(linked,sent)&or=(from_store.eq.'+me+',to_store.eq.'+me+')&select=from_line_id,to_line_id,from_store,to_store,status';
-        sbGet('stock_diff_swaps', q2)
-          .then(function(sw){
-            sw = Array.isArray(sw)?sw:[];
-            sdBadgePulse(sdUnreviewedCountFor(reports, lines,
-              isLogisticsWarehouseUser()
-                ? sw.map(function(x){ return {status:'sent', to_line_id:x.to_line_id, sent_at:x.sent_at}; })
-                : sw));
-          }).catch(function(){ sdBadgePulse(sdUnreviewedCountFor(reports, lines, [])); });
-      }).catch(function(){ sdSetTabBadge(reports.length); });
+    var lines = [];
+    reports.forEach(function(r){
+      if(Array.isArray(r.stock_differences)) lines = lines.concat(r.stock_differences);
+    });
+    /* Размените се четат с ОТДЕЛНА лека заявка и се подават като ТРЕТИ
+       аргумент. Глобалният sdSwaps НЕ се пипа: този срез е тесен (малко
+       колони, само моите) и записан в него би осакатил следващия рендер.
+       Двата среза са различни, защото двете роли чакат различни неща:
+       складът — закъснелите, магазинът — своя ход.
+       Заявката е по статус и по обект, не по списък с id - не расте. */
+    var me = encodeURIComponent(currentUser.store_name);
+    var q2 = isLogisticsWarehouseUser()
+      ? 'status=eq.sent&warehouse=eq.'+me+'&select=to_line_id,sent_at'
+      : 'status=in.(linked,sent)&or=(from_store.eq.'+me+',to_store.eq.'+me+')&select=from_line_id,to_line_id,from_store,to_store,status';
+    sbGet('stock_diff_swaps', q2)
+      .then(function(sw){
+        sw = Array.isArray(sw)?sw:[];
+        sdBadgePulse(sdUnreviewedCountFor(reports, lines,
+          isLogisticsWarehouseUser()
+            ? sw.map(function(x){ return {status:'sent', to_line_id:x.to_line_id, sent_at:x.sent_at}; })
+            : sw));
+      }).catch(function(){ sdBadgePulse(sdUnreviewedCountFor(reports, lines, [])); });
   }).catch(function(){});
 }
 function startSDBadgePolling(){

@@ -302,9 +302,14 @@ process.on('unhandledRejection', () => { unhandled++; });
           : { report_id: 'p' + i, warehouse_response: 'sent', store_response: null, status: 'new' });
       }
     };
+    /* Редовете идват ВЛОЖЕНИ в бланките (PostgREST embedding от 27.09.2026) -
+       пулсът вече не праща втора заявка към stock_differences. */
+    const embed = () => state.reports.map(r => Object.assign({}, r, {
+      stock_differences: state.lines.filter(l => l.report_id === r.id)
+    }));
     const pulseEnv = (user, modules) => {
       const h = env(user, [], { modules: modules, data: {
-        differences_reports: () => state.reports, stock_differences: () => state.lines } });
+        differences_reports: embed, stock_differences: () => state.lines } });
       Object.defineProperty(h.doc, 'hidden', { configurable: true, get: () => false });
       h.notes = []; h.sounds = 0;
       if (modules === undefined) {
@@ -348,10 +353,12 @@ process.on('unhandledRejection', () => { unhandled++; });
     ok('нов логин (5) → първият пулс пак е тих', h.notes.length === n0, JSON.stringify(h.notes));
   }
   {
-    /* Складът: същият пулс, собственият му брой. */
+    /* Складът: същият пулс, собственият му брой. Редовете - вложени. */
     const state = { reports: [], lines: [] };
     const h = env(WAREHOUSE, [], { data: {
-      differences_reports: () => state.reports, stock_differences: () => state.lines } });
+      differences_reports: () => state.reports.map(r => Object.assign({}, r, {
+        stock_differences: state.lines.filter(l => l.report_id === r.id) })),
+      stock_differences: () => state.lines } });
     Object.defineProperty(h.doc, 'hidden', { configurable: true, get: () => false });
     const notes = [];
     h.w.coNotifyToast = (t) => { notes.push(t); };
@@ -369,7 +376,9 @@ process.on('unhandledRejection', () => { unhandled++; });
        който превключва на таба, а не само скрива известието. */
     const state = { reports: [], lines: [] };
     const h = env(STORE, [], { data: {
-      differences_reports: () => state.reports, stock_differences: () => state.lines } });
+      differences_reports: () => state.reports.map(r => Object.assign({}, r, {
+        stock_differences: state.lines.filter(l => l.report_id === r.id) })),
+      stock_differences: () => state.lines } });
     Object.defineProperty(h.doc, 'hidden', { configurable: true, get: () => false });
     h.w.playSound = () => {};
     const shown = [];
@@ -388,7 +397,9 @@ process.on('unhandledRejection', () => { unhandled++; });
     /* Без notifications.js - coNotifyToast/playSound липсват, пулсът не гърми. */
     const state = { reports: [], lines: [] };
     const h = env(STORE, [], { modules: ['transport.js', 'stock-returns.js', 'stock-differences.js', 'push.js'],
-      data: { differences_reports: () => state.reports, stock_differences: () => state.lines } });
+      data: { differences_reports: () => state.reports.map(r => Object.assign({}, r, {
+                stock_differences: state.lines.filter(l => l.report_id === r.id) })),
+              stock_differences: () => state.lines } });
     Object.defineProperty(h.doc, 'hidden', { configurable: true, get: () => false });
     ok('coNotifyToast наистина липсва', typeof h.w.coNotifyToast === 'undefined');
     h.w.startSDBadgePolling(); await settle();

@@ -420,8 +420,11 @@ const settle = async () => { await ticks(); await ticks(); await ticks(); };
     const g = h.calls.get.filter(u => /stock_diff_swaps/.test(u));
     if (ok('loadStockDiff прави една заявка за размените', g.length === 1, h.calls.get.join(' | '))) {
       const u = decodeURIComponent(g[0]);
-      ok('по from_line_id И to_line_id на заредените междускладови редове',
-        /or=\(from_line_id\.in\.\([^)]*l-ex[^)]*\),to_line_id\.in\.\([^)]*l-sh/.test(u), u);
+      /* От 27.09.2026 заявката е за цялата (малка) таблица: списъкът с
+         id-тата на всички междускладови редове правеше URL ~45 000 знака
+         и гейтуеят го отсичаше с 400. Виж sd-swaps-url.test.js. */
+      ok('без списък с id — не расте с редовете', u.indexOf('in.(') < 0, u);
+      ok('с горна граница (limit)', /limit=\d+/.test(u), u);
     }
   }
   {
@@ -429,7 +432,10 @@ const settle = async () => { await ticks(); await ticks(); await ticks(); };
     h.calls.get.length = 0;
     h.w.loadStockDiff();
     await settle(); await settle();
-    ok('без междускладови редове → нула заявки за размени', !h.calls.get.some(u => /stock_diff_swaps/.test(u)));
+    /* Заявката вече НЕ зависи от sdData - една е, включително при нула
+       заредени редове (преди изобщо не се пращаше). */
+    ok('и без междускладови редове → пак точно една заявка',
+      h.calls.get.filter(u => /stock_diff_swaps/.test(u)).length === 1, h.calls.get.join(' | '));
   }
   {
     const closed = swap({ status: 'closed' });

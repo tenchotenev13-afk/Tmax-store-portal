@@ -45,6 +45,7 @@ const TESTS = [
   'sd-swap-link.test.js',
   'sd-late-receive.test.js',
   'sd-return-sync.test.js',
+  'sd-swaps-url.test.js',
   'sd-swap-store.test.js',
   'sd-done-collapse.test.js',
   'sd-interstore-columns.test.js',

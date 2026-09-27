@@ -416,24 +416,34 @@ const OLD = '✅ Получено';
     ok('no_stock чака склада, return без отговор на магазина и will_send - не: 3',
       h.w.sdUnreviewedCountFor(more, moreLines) === 3, String(h.w.sdUnreviewedCountFor(more, moreLines)));
 
-    /* Самостоятелната заявка трябва да чете и store_response, и status -
-       иначе горното сравнение гледа undefined и винаги казва "не чака". */
+    /* Пулсът трябва да чете и store_response, и status - иначе горното
+       сравнение гледа undefined и винаги казва "не чака". От 27.09.2026
+       редовете идват ВЛОЖЕНИ в бланките (PostgREST embedding), затова
+       проверката е върху заявката за бланките, а отделна заявка към
+       stock_differences вече не бива да има: онзи URL носеше
+       report_id=in.(<всички непрегледани>) и растеше с бланките. */
+    const withLines = reports.map(r => Object.assign({}, r, {
+      stock_differences: lines.filter(l => l.report_id === r.id)
+    }));
     const hb = boot({
       modules: ['transport.js', 'stock-returns.js', 'stock-differences.js'],
       user: WAREHOUSE,
-      data: { differences_reports: reports, stock_differences: lines, stock_returns: [],
+      data: { differences_reports: withLines, stock_differences: [], stock_returns: [],
               transport_orders: [], users: [], stores: [], contacts: [] }
     });
     Object.defineProperty(hb.doc, 'hidden', { configurable: true, get: () => false });
     hb.calls.get.length = 0;
     hb.w.sdRefreshTabBadge();
     await ticks(); await ticks();
-    const lg = hb.calls.get.filter(u => u.indexOf('/stock_differences') >= 0);
-    if (ok('има заявка за редовете', lg.length === 1, hb.calls.get.join(' | '))) {
+    const lg = hb.calls.get.filter(u => u.indexOf('/differences_reports') >= 0);
+    if (ok('има заявка за бланките с вложени редове', lg.length === 1, hb.calls.get.join(' | '))) {
       const u = decodeURIComponent(lg[0]);
-      ok('select съдържа store_response', /select=[^&]*store_response/.test(u), u);
-      ok('select съдържа status', /select=[^&]*\bstatus\b/.test(u), u);
+      ok('вложените редове носят store_response', /stock_differences\([^)]*store_response/.test(u), u);
+      ok('вложените редове носят status', /stock_differences\([^)]*\bstatus\b/.test(u), u);
+      ok('без списък с id (report_id=in.(…) го няма)', u.indexOf('report_id=in.(') < 0, u);
     }
+    ok('НЯМА отделна заявка към stock_differences',
+      !hb.calls.get.some(u => /\/stock_differences\?/.test(u)), hb.calls.get.join(' | '));
     const be = hb.doc.getElementById('badge-stock-diff');
     if (ok('балончето съществува', !!be)) {
       ok('балончето показва 2', be.textContent === '2' && be.style.display !== 'none', be.textContent + ' / ' + be.style.display);
