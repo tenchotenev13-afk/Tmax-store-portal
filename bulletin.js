@@ -1325,10 +1325,13 @@ function bulPlanRowHtml(it, store, weekArr){
   h+='<div style="width:52px;flex-shrink:0;font-family:DM Mono,monospace;font-size:12.5px;font-weight:600;color:'+(timeTxt?'#0f172a':'#cbd5e1')+';padding-top:1px;">'+(timeTxt||'—')+'</div>';
   if(it.notice){
     h+='<div style="width:16px;flex-shrink:0;" title="Само за информация — не се отмята"></div>';
+  } else if(it.carried){
+    /* Пренесеният ред се проверява ПРЕДИ вида: пренесена ПОСТОЯННА задача иначе
+       минаваше по пътя на постоянните и щеше да създаде нов ред за новия ден,
+       вместо да допише първоначалния. data-kind носи истинския вид. */
+    h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="'+(isRec?'recurring':'regular')+'" data-orig="'+(it.carriedFrom||'')+'" data-cdate="'+(cdate||'')+'" data-linked="'+lockKey+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(cdate,lockKey)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+bulLockStyle(cdate,lockKey)+'">';
   } else if(isRec){
     h+='<input type="checkbox" '+(done?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(it.winComp?recurringWindowDoneAttr(it.winComp):bulLockAttr(cdate,lockKey))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+(it.winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(cdate,lockKey))+'">';
-  } else if(it.carried){
-    h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="regular" data-orig="'+(it.carriedFrom||'')+'" data-cdate="'+(cdate||'')+'" data-linked="'+lockKey+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(cdate,lockKey)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+bulLockStyle(cdate,lockKey)+'">';
   } else {
     h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+lockKey+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(cdate,lockKey,bulSpanOf(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+bulLockStyle(cdate,lockKey,bulSpanOf(t))+'">';
   }
@@ -4535,10 +4538,16 @@ function renderCompletionExtras(compInfo){
 /* ─── МОДАЛ ЗА ЗАВЪРШВАНЕ (коментар, снимка и/или документ) ─────────── */
 var tcPendingPhotos = []; /* качени снимки за текущия отворен модал, преди запис */
 var tcPendingFiles  = []; /* качени документи — отделен буфер, отделна колона */
-function openTaskCompletionModal(taskId, kind, completionDate){
+/* carriedOrig != null значи ПРЕНЕСЕН ред: записът отива в ПЪРВОНАЧАЛНИЯ ред
+   (completion_date остава първоначалният ден — той е ключът на всички отчети),
+   а completionDate е новият ден, по който се заключва отмятането. */
+function openTaskCompletionModal(taskId, kind, completionDate, carriedOrig){
   kind = kind || 'regular';
   completionDate = completionDate || null;
-  var t = (kind==='recurring' ? recurringTasks : bulTasks).find(function(x){ return String(x.id)===String(taskId); });
+  carriedOrig = carriedOrig || null;
+  var t = carriedOrig
+    ? bulCarriedTaskById(kind, taskId)
+    : (kind==='recurring' ? recurringTasks : bulTasks).find(function(x){ return String(x.id)===String(taskId); });
   if (!t) return;
   var tt = TASK_TYPES[t.task_type||'info'];
   /* Трета защита: единственият вход към модала, който не минава през чекбокс,
@@ -4572,7 +4581,7 @@ function openTaskCompletionModal(taskId, kind, completionDate){
   }
   body += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
     '<button onclick="var e=document.getElementById(&#39;tc-modal-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
-    '<button data-task-id="'+taskId+'" data-kind="'+kind+'" data-cdate="'+(completionDate||'')+'" onclick="submitTaskCompletion(this.dataset.taskId,this.dataset.kind,this.dataset.cdate||null)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✓ Потвърди</button>' +
+    '<button data-task-id="'+taskId+'" data-kind="'+kind+'" data-cdate="'+(completionDate||'')+'" data-orig="'+(carriedOrig||'')+'" onclick="submitTaskCompletion(this.dataset.taskId,this.dataset.kind,this.dataset.cdate||null,this.dataset.orig||null)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✓ Потвърди</button>' +
     '</div>';
   ov.innerHTML = '<div class="bmod" style="width:420px;">'+body+'</div>';
   document.body.appendChild(ov);
@@ -4616,10 +4625,13 @@ function tcUploadFile(input){
     function(f){ return '<div style="font-size:12px;color:#475569;">📄 '+esc(f.filename)+'</div>'; },
     '✅ Документът е качен');
 }
-function submitTaskCompletion(taskId, kind, completionDate){
+function submitTaskCompletion(taskId, kind, completionDate, carriedOrig){
   kind = kind || 'regular';
   completionDate = completionDate || null;
-  var t = (kind==='recurring' ? recurringTasks : bulTasks).find(function(x){ return String(x.id)===String(taskId); });
+  carriedOrig = carriedOrig || null;
+  var t = carriedOrig
+    ? bulCarriedTaskById(kind, taskId)
+    : (kind==='recurring' ? recurringTasks : bulTasks).find(function(x){ return String(x.id)===String(taskId); });
   if (!t) return;
   var tt = TASK_TYPES[t.task_type||'info'];
   var comment = tt.needsComment ? (document.getElementById('tc-comment').value||'').trim() : '';
@@ -4629,7 +4641,15 @@ function submitTaskCompletion(taskId, kind, completionDate){
   var el = document.getElementById('tc-modal-ov');
   if (el) el.remove();
   var extra = { comment: comment, photos: tcPendingPhotos.slice(), files: tcPendingFiles.slice() };
-  if (kind==='recurring') toggleRecurringTask(taskId, true, extra, completionDate);
+  if (carriedOrig) {
+    /* Пренесеният ред НЕ се създава наново: дописва се първоначалният, точно
+       както прави и отмятането без изискване (bulCarriedPatch). Иначе щеше да
+       се появи втори ред за новия ден и отчетите да броят две явявания. */
+    bulCarriedPatch(kind, taskId, carriedOrig, true, extra).then(function(r){
+      if (r && r.ok) toast('✓ Отметната');
+      renderBulletin();
+    });
+  } else if (kind==='recurring') toggleRecurringTask(taskId, true, extra, completionDate);
   else toggleTask(taskId, true, extra, completionDate);
   tcPendingPhotos = [];
   tcPendingFiles = [];
@@ -4790,7 +4810,10 @@ function cancelPostpone(taskId, kind, completionDate){
    Разотмятането връща 'postponed' — редът пак си е отложен, не изтрит.
    postponed_to не се пипа в нито едната посока: пренесеното си остава
    пренесено и след отмятане (оттам „✓ със закъснение" мери срещу новия ден). */
-function bulCarriedPatch(kind, taskId, origDate, checked){
+/* extra (коментар/снимки/документи) идва САМО от модала при вид, който го
+   изисква. Празните полета не се пращат като null: това би изтрило вече
+   качено доказателство при повторно отмятане. */
+function bulCarriedPatch(kind, taskId, origDate, checked, extra){
   var store = currentUser && currentUser.store_name;
   if (!store) return Promise.resolve({ok:false});
   var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
@@ -4800,6 +4823,11 @@ function bulCarriedPatch(kind, taskId, origDate, checked){
   var body = checked
     ? { status:'done', completed_by: currentUser.display_name||currentUser.email, completed_at: at }
     : { status:'postponed' };
+  if (checked && extra) {
+    if (extra.comment) body.comment = extra.comment;
+    if (extra.photos && extra.photos.length) body.photos = extra.photos;
+    if (extra.files && extra.files.length) body.files = extra.files;
+  }
   return sbPatch('task_completions', match, body).then(function(r){
     if (!r.ok) { toast('Грешка при пренесената задача: '+sbErrMsg(r),'#dc2626'); loadBulletin(); return r; }
     /* Един и същи ред стои в ДВА локални списъка (bulComps/recurringComps по
@@ -4811,7 +4839,12 @@ function bulCarriedPatch(kind, taskId, origDate, checked){
       list.forEach(function(c){
         if (String(c[idField])===String(taskId) && c.store_name===store && (c.completion_date||null)===origDate){
           c.status = body.status;
-          if (checked){ c.completed_at = at; c.completed_by = body.completed_by; }
+          if (checked){
+            c.completed_at = at; c.completed_by = body.completed_by;
+            if (body.comment) c.comment = body.comment;
+            if (body.photos) c.photos = body.photos;
+            if (body.files) c.files = body.files;
+          }
         }
       });
     });
@@ -4824,10 +4857,37 @@ function bulCarriedPatch(kind, taskId, origDate, checked){
 function bulCarriedCheckboxChanged(cb){
   if (bulLockRejected(cb)) return;
   var kind = cb.dataset.kind || 'regular';
-  bulCarriedPatch(kind, cb.dataset.tid, cb.dataset.orig || null, cb.checked).then(function(){
+  var orig = cb.dataset.orig || null;
+  /* Вид, който изисква снимка, документ или коментар, минава през модала —
+     точно като bulCheckboxChanged / bulRecurringCheckboxChanged. Дотук
+     пренесеният ред отиваше право в bulCarriedPatch и се затваряше БЕЗ
+     доказателство: реален случай на 27.09.2026 — Монтана, „Излагане на палето
+     зона" (photo_comment), status='done' с нула снимки, а коментарът в реда е
+     от ОТЛАГАНЕТО и казва точно обратното („утре рано, това ще е първата
+     задача"). Засяга и „План за деня", който ползва същия обработчик. */
+  if (cb.checked) {
+    var t = bulCarriedTaskById(kind, cb.dataset.tid);
+    var tt = TASK_TYPES[(t&&t.task_type)||'info'];
+    if (tt && (tt.needsPhoto || tt.needsFile || tt.needsComment)) {
+      cb.checked = false; /* до потвърждение от модала */
+      openTaskCompletionModal(cb.dataset.tid, kind, cb.dataset.cdate || null, orig);
+      return;
+    }
+  }
+  bulCarriedPatch(kind, cb.dataset.tid, orig, cb.checked).then(function(){
     toast(cb.checked ? '✓ Отметната' : '↩ Върната като отложена');
     renderBulletin();
   });
+}
+/* Задачата зад пренесен ред по id. Обикновената може да е от ДРУГ бюлетин
+   (bulCarriedTasks), постоянната — вече неважаща за седмицата и затова извън
+   recurringTasks (recurringAll). Един помощник, защото и обработчикът, и
+   модалът трябва да намерят СЪЩАТА задача. */
+function bulCarriedTaskById(kind, taskId){
+  var pool = kind==='recurring'
+    ? (recurringAll.length ? recurringAll : recurringTasks)
+    : bulTasks.concat(bulCarriedTasks);
+  return pool.find(function(x){ return String(x.id)===String(taskId); }) || null;
 }
 /* СЛЯТ ред (решение 5): в този ден задачата има и собствено явяване, и
    пренесено. Рисува се един чекбокс, но явяванията са две и всяко има свой
