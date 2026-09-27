@@ -60,13 +60,44 @@ function canAddSR() {
    "решението е сменено", нито изтрита разлика (за нея стои отделно, извън
    тази проверка). */
 var srDiffTypes = {};
+/* id-та на заявка. 100 × 37 знака (uuid + запетая) + основата ≈ 3,8 KB URL —
+   далеч под тавана на гейтуея. Същият размер като порциите в transit.js. */
+var SR_DIFF_CHUNK = 100;
+/* ПОРЦИИ, не един списък: id-тата растат с всяко решение „Връщане" (15 към
+   27.09.2026) и един ден биха направили URL-а по-дълъг от тавана — точно това
+   се случи в Разлики с ~45 KB адрес и 400 (c8d0cd0). Филтър по друг признак
+   (обект/статус/период) НЕ върши работа тук: без id-та единствената
+   алтернатива е „всички редове, които не са Връщане" — 646 от 665 реда днес и
+   +597 за последните 30 дни, тоест теглим цялата история, за да проверим 15
+   реда. Затова порции с точните id-та.
+   Заявките са ПОСЛЕДОВАТЕЛНИ (както в transit.js) — не заливаме гейтуея.
+   Паднала порция не отменя останалите: картата остава непълна, но за реда без
+   отговор просто няма етикет (srDecisionChanged гледа наличието на ключ), а
+   потребителят вижда червен toast, не тишина. */
 function srLoadDiffTypes(){
   srDiffTypes = {};
   var ids = [];
   srData.forEach(function(r){ if(r.diff_line_id && ids.indexOf(r.diff_line_id)<0) ids.push(r.diff_line_id); });
   if(!ids.length) return Promise.resolve();
-  return sbGet('stock_differences', 'select=id,type&id=in.('+ids.join(',')+')').then(function(rows){
-    (Array.isArray(rows) ? rows : []).forEach(function(x){ srDiffTypes[x.id] = x.type; });
+  var chunks = [];
+  for(var i=0;i<ids.length;i+=SR_DIFF_CHUNK) chunks.push(ids.slice(i,i+SR_DIFF_CHUNK));
+  var failed = 0;
+  return chunks.reduce(function(p, part){
+    return p.then(function(){
+      return sbGetOk('stock_differences','select=id,type&id=in.('+part.join(',')+')').then(function(res){
+        if(!res.ok){
+          failed++;
+          try{ console.error('srLoadDiffTypes: '+res.url+' → '+(res.status||'мрежов срив')+': '+res.error); }catch(e){}
+          return;
+        }
+        res.rows.forEach(function(x){ srDiffTypes[x.id] = x.type; });
+      });
+    });
+  }, Promise.resolve()).then(function(){
+    if(failed){
+      toast('Решенията по разликите не се заредиха'+
+        (chunks.length>1 ? ' ('+failed+' от '+chunks.length+' пакета)' : ''),'#dc2626');
+    }
   });
 }
 function srDecisionChanged(r){

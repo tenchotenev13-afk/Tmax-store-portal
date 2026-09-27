@@ -2123,21 +2123,6 @@ function sdLineDelta(line){
   var one = doc!==null ? doc : real;
   return {excess:one, shortage:one, suspect:suspect};
 }
-/* Четене, което КАЗВА дали е паднало. sbGet() връща [] и при грешка, тоест
-   "няма размени" и "заявката гръмна" изглеждат еднакво - точно това скри 400-ката
-   по-долу. Ползва глобалните API/H от shared.js; не пипа sbGet, от който зависят
-   всички модули. */
-function sdGetOk(table, query){
-  var url = API+'/'+table+(query?'?'+query:'');
-  return fetch(url,{headers:H}).then(function(r){
-    return r.json().catch(function(){ return null; }).then(function(d){
-      if(r.ok && Array.isArray(d)) return {ok:true, rows:d};
-      return {ok:false, status:r.status, error:(d&&(d.message||d.hint))||('HTTP '+r.status), url:url};
-    });
-  }).catch(function(e){
-    return {ok:false, status:0, error:String((e&&e.message)||e), url:url};
-  });
-}
 /* Горна граница за размените. Таблицата е малка по същество (ред на размяна,
    не на артикул): към 27.09.2026 е 0 реда. Достигне ли се таванът, тихо
    отрязан списък би скрил размени - затова се вика console.error. */
@@ -2149,7 +2134,9 @@ var SD_SWAPS_LIMIT = 5000;
    изчезваха от екрана без нито един признак. Заявката вече не расте с броя на
    редовете. (Същата засада и същата причина като storno_id=in.(…) в kasa.js.) */
 function sdLoadSwaps(){
-  return sdGetOk('stock_diff_swaps', 'order=created_at.asc&limit='+SD_SWAPS_LIMIT).then(function(res){
+  /* sbGetOk (shared.js), не sbGet: то връща [] и при грешка, тоест точно тази
+     400-ка мълчеше. */
+  return sbGetOk('stock_diff_swaps', 'order=created_at.asc&limit='+SD_SWAPS_LIMIT).then(function(res){
     if(!res.ok){
       sdSwaps = [];
       try{ console.error('sdLoadSwaps: '+res.url+' → '+(res.status||'мрежов срив')+': '+res.error); }catch(e){}

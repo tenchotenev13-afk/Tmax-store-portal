@@ -37,6 +37,23 @@ function sbGet(t,q,silent){
     return fail(0,{message:String((e&&e.message)||e)});
   });
 }
+/* Четене, което КАЗВА дали е паднало: {ok:true,rows:[…]} или
+   {ok:false,status,error,url}. sbGet() по-горе връща [] И при грешка - удобно
+   за екран, който просто показва списък, но фатално, когато празният резултат
+   значи нещо ("няма размени" срещу "заявката гръмна"). Точно това скри 400-ката
+   от предълъг URL в Разлики (c8d0cd0, 27.09.2026): sbGet поглъщаше отговора,
+   екранът мълчеше. Без toast тук - извикващият решава какво да каже. */
+function sbGetOk(t,q){
+  var url=API+'/'+t+(q?'?'+q:'');
+  return fetch(url,{headers:H}).then(function(r){
+    return r.json().catch(function(){return null;}).then(function(d){
+      if(r.ok&&Array.isArray(d))return {ok:true,rows:d};
+      return {ok:false,status:r.status,error:(d&&(d.message||d.hint))||('HTTP '+r.status),url:url};
+    });
+  }).catch(function(e){
+    return {ok:false,status:0,error:String((e&&e.message)||e),url:url};
+  });
+}
 function sbPost(t,b){
   var url=API+'/'+t;
   return fetch(url,{method:'POST',headers:H,body:JSON.stringify(b)})
