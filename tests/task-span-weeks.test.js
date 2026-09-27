@@ -654,5 +654,68 @@ const deptCount = h => txt(h.doc.querySelector('[data-dept-count="admin"]'));
     }
   }
 
+  /* ═══ 12. „САМО ЗА ИНФОРМАЦИЯ" + СРОК В ДРУГА СЕДМИЦА ═══════════════════
+     От 25.09.2026 notice се вижда и в блока на отдела си. Оттам излиза нов
+     въпрос: notice със spans_from. Отговорът е, че такава комбинация няма
+     смисъл — spans_from съществува, за да има ЕДНО отмятане в седмицата на
+     срока, а notice не се отмята. Затова формата я отказва, а заварен такъв
+     ред не се показва в ЧУЖДА седмица: там няма ✏️/✕, тоест задачата би
+     висяла без начин да се пипне. */
+  section('12. notice не може да е многоседмична; заварена такава не тече в чужди седмици');
+  {
+    const db = freshDb();
+    db.tasks.push(task('t-info-span', { title: 'Бележка за три седмици', task_type: 'notice',
+      due_date: DUE_NEXT, due_dates: [DUE_NEXT], spans_from: W0, sort_order: 9 }));
+
+    const hW = await view('b-0', db);
+    ok('в СВОЯТА седмица notice се вижда', txt(panelOf(hW)).indexOf('Бележка за три седмици') >= 0);
+    ok('и има ✏️ там', !!(function(){
+      const rows = Array.prototype.slice.call(panelOf(hW).querySelectorAll('div[style*="border-bottom:1px solid #f1f5f9"]'));
+      const r = rows.find(x => txt(x).indexOf('Бележка за три седмици') >= 0);
+      return r && txt(r).indexOf('✏️') >= 0;
+    })());
+
+    const hW1 = await view('b-1', db);
+    ok('в ЧУЖДА седмица я НЯМА в блока', txt(panelOf(hW1)).indexOf('Бележка за три седмици') < 0,
+      txt(panelOf(hW1)).slice(0, 200));
+    ok('и я няма в лентата (тя и досега изхвърля notice)',
+      !stripOf(hW1) || txt(stripOf(hW1)).indexOf('Бележка за три седмици') < 0);
+
+    /* Формата отказва комбинацията — и при нова, и при редакция. */
+    const h2 = await view('b-0', db);
+    if (guard('openTaskModal() не хвърля', () => h2.w.openTaskModal())) {
+      h2.doc.getElementById('tk-title').value = 'Нова бележка';
+      h2.doc.getElementById('tk-type').value = 'notice';
+      const on = h2.doc.getElementById('tk-span-on');
+      on.checked = true; fire(h2.w, on, 'change');
+      h2.doc.getElementById('tk-span-due').value = DUE_NEXT;
+      const before = db.tasks.length, w0 = writes(h2);
+      realClick(h2.w, H.btnExact(h2.doc.getElementById('tk-ov'), 'Добави задача'), 'Добави задача');
+      await ticks();
+      ok('нова notice със срок в друга седмица НЕ се записва', db.tasks.length === before && writes(h2) === w0,
+        String(db.tasks.length - before) + ' нови, ' + String(writes(h2) - w0) + ' записа');
+      ok('обяснява защо', h2.calls.toast.some(t => String(t).indexOf('не се отмята') >= 0),
+        JSON.stringify(h2.calls.toast));
+    }
+    /* Същото при РЕДАКЦИЯ: работна задача, превърната в notice, не може да
+       запази срока си в друга седмица. Двата пътя са отделни функции и
+       затова са два отделни теста. */
+    const h3 = await view('b-0', db);
+    if (guard('openEditTaskModal() не хвърля', () => h3.w.openEditTaskModal('t-span'))) {
+      h3.doc.getElementById('etk-type').value = 'notice';
+      const on3 = h3.doc.getElementById('etk-span-on');
+      ok('отметката за срока е включена (задачата е многоседмична)', !!on3 && on3.checked);
+      const w3 = writes(h3);
+      realClick(h3.w, H.btn(h3.doc.getElementById('edit-tk-ov'), '💾 Запази'), '💾 Запази');
+      await ticks();
+      ok('превръщането в notice със запазен срок НЕ се записва', writes(h3) === w3,
+        String(writes(h3) - w3) + ' записа');
+      ok('и тук обяснява защо', h3.calls.toast.some(t => String(t).indexOf('не се отмята') >= 0),
+        JSON.stringify(h3.calls.toast));
+      ok('задачата в базата е непокътната',
+        (db.tasks.find(t => t.id === 't-span') || {}).task_type === 'info');
+    }
+  }
+
   report();
 })();

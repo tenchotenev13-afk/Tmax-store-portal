@@ -1159,7 +1159,8 @@ function bulSpanHomeNoteHtml(t){
    а те се броят в седмицата на срока си. */
 function bulWeekTasks(){
   var wk=bulWeekISO();
-  return bulTasks.filter(function(t){ return taskCountsInWeek(t, wk); });
+  /* notice е извън всеки брояч — push-ът „Имате N задачи тази седмица" също. */
+  return bulTasks.filter(function(t){ return !taskIsNotice(t) && taskCountsInWeek(t, wk); });
 }
 function bulSpanStripHtml(){
   var store=currentUser&&currentUser.store_name;
@@ -1984,8 +1985,13 @@ function renderBulView(){
   DCOLS.forEach(function(dk){
     var dept=DEPTS[dk];
     var blocks=(c.columns[dk]||[]).filter(function(b){return b.type!=='task'&&b.type!=='important';});
-    /* notice се показва САМО в Седмичния календар — виж taskIsNotice() в shared.js. */
-    var dTasks=bulTasks.filter(function(t){return t.department===dk&&!taskIsNotice(t);});
+    /* notice („Само за информация") ВЛИЗА в списъка — сив ред без чекбокс,
+       но с ✏️ и ✕. До 25.09.2026 беше само в Седмичния календар, където
+       calNoticeRowHtml() няма бутони: тоест такава задача не можеше да се
+       редактира или изтрие от НИКЪДЕ. За постоянните същото е поправено на
+       11.09 (3ec0ce0). Изключването си остава навсякъде, където се БРОИ:
+       панелът на обекта, X/18, „Анализ", печатът, „Днес" и отчетите. */
+    var dTasks=bulTasks.filter(function(t){return t.department===dk&&!(taskIsNotice(t)&&bulTaskIsForeign(t));});
     /* Магазин вижда само задачи БЕЗ target_stores (= за всички) или такива,
        в които изрично е посочен; глобалните роли (admin/accounting/logistics)
        виждат винаги всичко, за да могат да управляват. */
@@ -2005,19 +2011,26 @@ function renderBulView(){
       html+='<div style="font-size:12px;font-weight:700;color:'+dept.color+';text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">✅ Задачи</div>';
       var store=currentUser&&currentUser.store_name;
       dTasks.forEach(function(t){
-        var isMulti=taskIsMultiDay(t);
+        /* „Само за информация": няма отмятания, значи няма чекбокс, ред „Срок",
+           „Отложи", подзадачи и извлечения от изпълнението. Моделът е същият
+           като при постоянната notice в renderRecurringTasks(). */
+        var isNotice=taskIsNotice(t);
+        var isMulti=!isNotice&&taskIsMultiDay(t);
         var singleDate=isMulti?null:(taskDueDates(t)[0]||null);
-        var done=store&&!isMulti&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===singleDate;});
-        var ppComp=(store&&!isMulti)?bulPostponedCompOf('regular',t.id,store,singleDate):null;
+        var done=!isNotice&&store&&!isMulti&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===singleDate;});
+        var ppComp=(!isNotice&&store&&!isMulti)?bulPostponedCompOf('regular',t.id,store,singleDate):null;
         var postponed=!!ppComp;
-        var compObj=store&&!isMulti&&bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===store&&(cc.completion_date||null)===singleDate;});
+        var compObj=!isNotice&&store&&!isMulti&&bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===store&&(cc.completion_date||null)===singleDate;});
         /* Многоседмичната задача от ЧУЖД бюлетин не участва в подредбата:
            sort_order ѝ е от нейната седмица и пренаписването му оттук би
            разместило чужд бюлетин. Затова и ▲▼ ги няма на нейния ред. */
-        var deptTasksForNav=bulTasks.filter(function(x){return x.department===t.department&&!taskIsNotice(x)&&!bulTaskIsForeign(x);});
+        /* notice участва в подредбата — иначе редът му е закотвен там, където
+           е попаднал. Наборът тук и в moveTaskInDept() ТРЯБВА да е един и
+           същ: различават ли се, ▲ мести съседа, не задачата. */
+        var deptTasksForNav=bulTasks.filter(function(x){return x.department===t.department&&!bulTaskIsForeign(x);});
         var taskIdxInDept=deptTasksForNav.findIndex(function(x){return String(x.id)===String(t.id);});
         var isFirstTask=taskIdxInDept===0, isLastTask=taskIdxInDept===deptTasksForNav.length-1;
-        var titleColor=done?'#94a3b8':postponed?'#b45309':'#0f172a';
+        var titleColor=(done||isNotice)?'#94a3b8':postponed?'#b45309':'#0f172a';
         html+='<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;"'+((canEdit()&&!bulTaskIsForeign(t))?' draggable="true" data-tid="'+t.id+'" ondragstart="taskDragStart(event,this)" ondragend="taskDragEnd(this)"':'')+'>';
         if(canEdit()&&!bulTaskIsForeign(t)){
           html+='<div style="display:flex;flex-direction:column;gap:1px;flex-shrink:0;margin-top:1px;">'+
@@ -2025,7 +2038,9 @@ function renderBulView(){
             '<button data-task-id="'+t.id+'" onclick="taskMoveDown(this.dataset.taskId)" '+(isLastTask?'disabled':'')+' style="border:1px solid #e2e8f0;background:'+(isLastTask?'#f8fafc':'#fff')+';color:'+(isLastTask?'#cbd5e1':'#64748b')+';border-radius:3px;width:16px;height:14px;font-size:9px;line-height:1;cursor:'+(isLastTask?'default':'pointer')+';padding:0;">▼</button>'+
             '</div>';
         }
-        if(isMulti){
+        if(isNotice){
+          html+='<div style="width:16px;flex-shrink:0;" title="Само за информация — не се отмята"></div>';
+        } else if(isMulti){
           html+='<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
           html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+'">';
@@ -2042,7 +2057,7 @@ function renderBulView(){
           } else if(isGlobal()){
             html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">Живи бройки по дни виж в 📅 Седмичен календар по-горе</div>';
           }
-        } else if(singleDate){
+        } else if(singleDate&&!isNotice){
           html+=bulDueLineHtml(singleDate,done?bulDoneComp(t.id,store,singleDate):null,' ⚠️');
         }
         html+=bulSpanHomeNoteHtml(t);
@@ -2051,9 +2066,9 @@ function renderBulView(){
         if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))html+=renderCompletionExtras(compObj);
         html+=renderTaskAttachments(t);
         html+=trTaskReportsListHtml(t);
-        html+=renderSubtasks(t.id, dk, 'dept');
+        if(!isNotice)html+=renderSubtasks(t.id, dk, 'dept');
         html+='</div>';
-        if(!isGlobal()&&!isMulti&&!done){
+        if(!isGlobal()&&!isMulti&&!done&&!isNotice){
           html+='<div style="flex-shrink:0;">';
           if(postponed)html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
           /* Задача, която се отмята сама (oborot, автоматична Стока на път), не
@@ -2068,7 +2083,10 @@ function renderBulView(){
            ПОКАЗАНАТА седмица, тоест запис оттук би преместил срока в нея. */
         if(canEdit()&&!bulTaskIsForeign(t)){html+='<div style="display:flex;gap:4px;flex-shrink:0;">'
           +'<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>'
-          +'<button data-task-id="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'task\',this.dataset.taskId,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#d97706;">🔔</button>'
+          /* 🔔 го няма при notice: насроченият отчет би питал колко обекта са
+             изпълнили задача, която не се изпълнява. ✏️ и ✕ остават — заради
+             тях задачата влезе в този блок. */
+          +(taskIsNotice(t)?'':'<button data-task-id="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'task\',this.dataset.taskId,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#d97706;">🔔</button>')
           +'<button data-task-id="'+t.id+'" onclick="bulDelTask(this)" style="border:1px solid #fecaca;background:#fff5f5;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#dc2626;">✕</button>'
           +'</div>';}
         html+='</div>';
@@ -2698,6 +2716,7 @@ function submitEditTask(taskId) {
   var etkDays = weekDays(curBul?curBul.week_number:weekNum(new Date()), curBul?curBul.year:new Date().getFullYear());
   var etkSpan = bulSpanRead('etk', etkDays);
   if (etkSpan.error) { toast(etkSpan.error,'#dc2626'); return; }
+  if (etkSpan.spans && taskType==='notice') { toast('„Само за информация" не се отмята — срок в друга седмица не важи за нея','#dc2626'); return; }
   var etkDue = bulSpanBody(etkSpan, dueDates);
   var stores = bulReadStoreMultiSelect('etk-stores');
   var reportGroups = readReportGroupsCheckboxes('etk-report-groups');
@@ -2943,6 +2962,12 @@ function trDeleteReport(id){
 }
 /* Секцията във формата. prefix 'tk' (нова) или 'etk' (редакция). */
 function trSectionHtml(prefix, task){
+  /* „Само за информация": отчет по нея е насрочен имейл, който по дефиниция
+     никога не казва нищо — send-routed-report го отхвърля със skipped. Затова
+     формата не го предлага. Важи и за еднократната, и за постоянната notice. */
+  if (task && taskIsNotice(task)) {
+    return '<div id="'+prefix+'-tr" class="tr-section" style="border:1px dashed #e2e8f0;border-radius:8px;padding:8px 10px;margin-top:10px;background:#f8fafc;font-size:11px;color:#64748b;">📨 Отчет за изпълнението не важи за „Само за информация" — тя не се отмята.</div>';
+  }
   var existing = task ? trRowsForTask(task.id) : [];
   return '<div id="'+prefix+'-tr" class="tr-section" style="border:1px dashed #bae6fd;border-radius:8px;padding:8px 10px;margin-top:10px;background:#f8fdff;">' +
     '<div style="display:flex;justify-content:space-between;align-items:center;">' +
@@ -3083,6 +3108,10 @@ function submitTask(){
   var tkDays=weekDays(curBul.week_number,curBul.year);
   var tkSpan=bulSpanRead('tk',tkDays);
   if(tkSpan.error){toast(tkSpan.error,'#dc2626');return;}
+  /* notice няма отмятане, значи няма и какво да се брои в седмицата на срока —
+     spans_from съществува точно за това. Иначе такъв ред би се явявал в
+     чужди седмици без нито един бутон (виж филтъра на dTasks). */
+  if(tkSpan.spans&&taskType==='notice'){toast('„Само за информация" не се отмята — срок в друга седмица не важи за нея','#dc2626');return;}
   var tkDue=bulSpanBody(tkSpan,dueDates);
   var autoComplete=bulAutoCompleteRead('tk',linkedModule);
   if(!bulAutoCompleteValid(autoComplete,tkSpan.spans?[tkSpan.due]:dueDates))return;
@@ -3301,7 +3330,8 @@ function moveTaskInDept(id,dir){
   if(!task)return;
   var dept=task.department;
   if(bulTaskIsForeign(task)){toast('Задачата се подрежда в своята седмица','#d97706');return;}
-  var deptTasks=bulTasks.filter(function(t){return t.department===dept&&!taskIsNotice(t)&&!bulTaskIsForeign(t);});
+  /* Същият набор като deptTasksForNav в рендера, включително notice. */
+  var deptTasks=bulTasks.filter(function(t){return t.department===dept&&!bulTaskIsForeign(t);});
   var idx=deptTasks.findIndex(function(t){return String(t.id)===String(id);});
   var newIdx=idx+dir;
   if(newIdx<0||newIdx>=deptTasks.length)return; /* вече е на края */
@@ -4433,7 +4463,11 @@ function loadTasksStats() {
   /* Излиза само ако няма НИТО обикновени, НИТО постоянни задачи — иначе бюлетин
      без обикновени (С38/2026) не броеше постоянните. Самата обвивка идва от
      renderTasksPanel(), която при празен bulTasks също не бива да излиза. */
-  if (!wrap || (!statTasks.length && !statRecurring.length)) return;
+  /* Празна таблица се ПОЧИСТВА, не се изоставя: бюлетин, чиито единствени
+     обикновени задачи са notice (и без постоянни), иначе оставаше с
+     „⏳ Зареждане на статистика..." завинаги. */
+  if (!wrap) return;
+  if (!statTasks.length && !statRecurring.length) { wrap.innerHTML=''; return; }
 
   /* Филтърът беше преписан тук с твърдо 'Централен офис' и пропускаше двата
      логистични склада — 20 обекта вместо 18. Един източник за всички бройки
@@ -4705,6 +4739,10 @@ function renderRecurringTasks(dk) {
            деактивира задачата изобщо. Скрит е при глобално изключване: там
            няма какво повече да се изключи, а връщането е с „Върни". */
         if (!recurringIsSkipped(t.id,null,bulSkips)) h += '<button class="rec-skip-open" data-rid="'+t.id+'" onclick="openRecurringSkipModal(this.dataset.rid)" title="Задачата не се изисква тази седмица — за всички или за избрани обекти" style="border:1px solid #cbd5e1;background:#f8fafc;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#475569;white-space:nowrap;">Не за тази седмица</button>';
+        /* 🔔 остава и при ПОСТОЯННА notice — така е от 11.09.2026 и е заковано
+           в tests/recurring-notice-block.test.js. Еднократната notice го няма
+           (решение от 25.09.2026), тоест двата блока се разминават; записано е
+           в claude/open-tasks.md, вместо да се промени мълчаливо тук. */
         h += '<button data-rid="'+t.id+'" data-etitle="'+esc(t.title)+'" onclick="openNotifyScheduleModal(\'recurring_task\',this.dataset.rid,this.dataset.etitle)" style="border:1px solid #fde68a;background:#fffbeb;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#d97706;">🔔</button>';
         /* Активиране — само от „Спрени (N)"; тук е само спирането. */
         if (recCanChange && bulHasOpenPeriod(t)) h += '<button data-rid="'+t.id+'" onclick="toggleRecurringActive(this.dataset.rid,false,this)" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:2px 7px;font-size:10px;cursor:pointer;color:#64748b;">⏸ Спри</button>';
