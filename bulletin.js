@@ -1078,7 +1078,14 @@ function bulAutoTransitNoteHtml(t, done){
   return '<span class="bul-auto-transit" style="display:block;font-size:10px;font-weight:600;color:'+(done?'#16a34a':'#b45309')+';margin-top:2px;">'+txt+'</span>';
 }
 /* completed_by на автоматичната отметка е служебен низ, не име на човек. */
-function bulCompletedByLabel(v){ return v==='auto:transit' ? 'автоматично от Стока на път' : (v||''); }
+function bulCompletedByLabel(v){
+  if(v==='auto:transit') return 'автоматично от Стока на път';
+  /* Обект без нито един входящ ред в партидата — няма какво да обработва
+     (transit_mark_empty_stores в базата). Различава се от 'auto:transit'
+     нарочно: „няма работа" и „свърши работата" не са едно и също в отчет. */
+  if(v==='auto:transit-empty') return 'автоматично — няма входящи редове';
+  return v||'';
+}
 /* Полето „Отмята се автоматично" във формите за задача. Стои в DOM-а винаги
    и само се крие, когато свързаният таб не е Стока на път — смяна напред-назад
    не губи отметката. prefix: 'tk' (нова) / 'etk' (редакция). */

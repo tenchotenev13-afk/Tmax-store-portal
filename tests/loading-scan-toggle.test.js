@@ -79,7 +79,12 @@ function env(user, settings, opts) {
   return h;
 }
 const mod = h => h.doc.getElementById('mod-loading');
-const settingsGets = h => h.calls.get.filter(u => /app_settings/.test(u));
+/* Само заявките за ФЛАГОВЕТЕ. Филтърът е по `key=in.(`, а не по таблицата:
+   от 28.09.2026 порталът чете от app_settings и списъка на изключените обекти
+   (`key=eq.report_excluded_stores`, shared.js). Проверката „една заявка" пак
+   хваща връщането към две — разделят ли се флаговете на два `key=eq.`,
+   попаденията по `key=in.(` стават нула. */
+const settingsGets = h => h.calls.get.filter(u => /app_settings/.test(u) && /key=in\.\(/.test(u));
 
 async function openEditor(h) {
   h.w.llNewList();

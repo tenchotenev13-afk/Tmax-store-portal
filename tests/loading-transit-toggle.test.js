@@ -71,7 +71,15 @@ const mod = doc => doc.getElementById('mod-loading');
 /* Заявките към goods_transit — СЪРЦЕВИНАТА. Блокът може да е скрит и
    заявката пак да тръгва; тогава скриването не е свършило работа. */
 const transitGets = h => h.calls.get.filter(u => /goods_transit/.test(u));
-const settingsGets = h => h.calls.get.filter(u => /app_settings/.test(u));
+/* Само заявките за ФЛАГОВЕТЕ. Филтърът е по `key=in.(`, а не по таблицата:
+   от 28.09.2026 порталът чете от app_settings и списъка на изключените обекти
+   (`key=eq.report_excluded_stores`, shared.js), тоест „колко заявки към
+   app_settings" вече не е същото като „колко заявки за двата флага". Проверката
+   пак хваща връщането към две заявки: разделят ли се флаговете на два `key=eq.`,
+   попаденията по `key=in.(` стават нула. */
+const settingsGets = h => h.calls.get.filter(u => /app_settings/.test(u) && /key=in\.\(/.test(u));
+/* Никой да не чете флаг с отделна заявка покрай in.(…). */
+const flagEqGets = h => h.calls.get.filter(u => /app_settings/.test(u) && /key=eq\.loading_/.test(u));
 
 /* Отваря редактора за нов лист и изчаква зареждането. */
 async function openEditor(h) {
@@ -95,6 +103,8 @@ async function openEditor(h) {
       JSON.stringify(transitGets(h)));
     ok('но ключът Е прочетен', settingsGets(h).length === 1,
       JSON.stringify(settingsGets(h)));
+    ok('и нито един флаг не се чете с отделна заявка', flagEqGets(h).length === 0,
+      JSON.stringify(flagEqGets(h)));
     /* От 25.09.2026 двата скрити фийчъра се четат с ЕДНА заявка
        (llLoadFeatureFlags): две заявки за два флага удвояваха латентността
        при отваряне на редактора, а се четат в един и същи миг. */

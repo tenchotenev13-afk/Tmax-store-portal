@@ -214,10 +214,64 @@ var LOGISTICS_WAREHOUSES=['Логистичен склад Добрич','Лог
    (ред ~217) и НЕ се обновява оттук — виж „sbGet има ДВА договора" в
    docs/PATTERNS.md за същия шаблон. Днес разминаване няма (и двете страни
    четат users), но появи ли се акаунт, седмичният имейл ще брои обект,
-   който порталът не брои. */
-var REPORT_EXCLUDED_STORES=[CENTRAL_OFFICE].concat(LOGISTICS_WAREHOUSES).concat(['Пазарджик','Сервиз Троян']);
+   който порталът не брои.
+
+   ОТ 28.09.2026 ИСТИНСКИЯТ ИЗТОЧНИК Е app_settings.report_excluded_stores —
+   същият ключ чете и transit_mark_empty_stores() в базата, която отмята
+   обектите БЕЗ входящи редове в „Стока на път". Два списъка там значеха, че
+   кронът отмята обект, който отчетът не брои (или обратното).
+   Масивът отдолу е НАЧАЛНА стойност и резерва при нечетим ключ, не втори
+   източник: при успешно зареждане се ПРЕЗАПИСВА. Стойностите днес съвпадат
+   точно, тоест смяната не мени нито едно число.
+   Защо има резерва изобщо: празен списък би вкарал Централния офис и двата
+   склада в статистиките по магазини, а нечетим ключ е мрежов срив, не
+   решение на човек. Кронът в базата постъпва ОБРАТНО — при липсващ ключ не
+   прави нищо; там мълчаливото падане към твърд списък би върнало точно
+   копието, което този ключ премахва. */
+var REPORT_EXCLUDED_DEFAULT=[CENTRAL_OFFICE].concat(LOGISTICS_WAREHOUSES).concat(['Пазарджик','Сервиз Троян']);
+var REPORT_EXCLUDED_STORES=REPORT_EXCLUDED_DEFAULT.slice();
+var reportExcludedLoaded=null;   /* Promise — зарежда се веднъж на сесия */
 function isReportableStore(name){
   return !!name && REPORT_EXCLUDED_STORES.indexOf(name)<0;
+}
+/* Зарежда списъка от app_settings и го ПРЕЗАПИСВА върху REPORT_EXCLUDED_STORES.
+   Идемпотентна: второ извикване връща същия Promise, а не нова заявка.
+   Три изхода, нарочно различни: валиден ключ → презаписва; ЛИПСВАЩ ключ →
+   началната стойност, БЕЗ съобщение (виж защо долу); повредена стойност или
+   паднала заявка → началната стойност + console.error. */
+function loadReportExcludedStores(){
+  if(reportExcludedLoaded) return reportExcludedLoaded;
+  reportExcludedLoaded=sbGet('app_settings','key=eq.report_excluded_stores&select=key,value').then(function(rows){
+    /* Търси се ИМЕННО този ключ, а не rows[0]: заявката иска един ред, но
+       отговорът се проверява, вместо да се вярва на позицията — същото, което
+       „sbGet има ДВА договора" в docs/PATTERNS.md казва за всяка заявка тук.
+       Иначе чужд ред (напр. loading_scan със стойност „on") минава за повредена
+       стойност на този ключ и вдига фалшива тревога. */
+    var row=null,i;
+    if(Array.isArray(rows)) for(i=0;i<rows.length;i++){
+      if(rows[i]&&rows[i].key==='report_excluded_stores'){ row=rows[i]; break; }
+    }
+    var v=row?row.value:null;
+    /* ЛИПСВАЩ ключ не е грешка и не се съобщава: значи „няма презаписване", както
+       при флаговете в app_settings. Вграденият списък е документираното
+       подразбиране и днес съвпада с ключа знак по знак, а кронът в базата е
+       фаил-клоуз — липсата пак не минава незабелязано, само не оттук. Обратното
+       (console.error при всяко зареждане без ключ) би бил постоянен шум, който
+       заглушава истинските съобщения. */
+    if(v===null||v===undefined||v===''){
+      REPORT_EXCLUDED_STORES=REPORT_EXCLUDED_DEFAULT.slice();
+      return REPORT_EXCLUDED_STORES;
+    }
+    var arr=JSON.parse(v);
+    if(!Array.isArray(arr)||!arr.length) throw new Error('ключът не е непразен JSON масив: '+v);
+    REPORT_EXCLUDED_STORES=arr.map(String);
+    return REPORT_EXCLUDED_STORES;
+  }).catch(function(e){
+    try{console.error('report_excluded_stores: ползвам вградения списък — '+(e&&e.message||e));}catch(x){}
+    REPORT_EXCLUDED_STORES=REPORT_EXCLUDED_DEFAULT.slice();
+    return REPORT_EXCLUDED_STORES;
+  });
+  return reportExcludedLoaded;
 }
 
 /* ЗАДАЧА „САМО ЗА ИНФОРМАЦИЯ" (task_type='notice')
@@ -911,7 +965,11 @@ function loadAllStores(){
 var reportableStoresCache=null;
 function loadReportableStores(){
   if(reportableStoresCache)return Promise.resolve(reportableStoresCache);
-  return sbGet('users','select=store_name&order=store_name').then(function(data){
+  /* Първо ключът, после обектите: иначе първото зареждане филтрира с началната
+     стойност и кешът остава с нея до края на сесията. */
+  return loadReportExcludedStores().then(function(){
+    return sbGet('users','select=store_name&order=store_name');
+  }).then(function(data){
     var seen={};
     reportableStoresCache=Array.isArray(data)?data.filter(function(u){
       if(!isReportableStore(u.store_name)||seen[u.store_name])return false;
