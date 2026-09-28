@@ -376,9 +376,17 @@ function checklistModuleId(metric) {
    checklistModuleChanges) и точно затова тук няма отделен клон за transit и
    отделен за returns.
 
-   'module:kasa' СЪЗНАТЕЛНО го няма: показателят „Сторна по грешни приеми"
-   още няма договорено правило и остава празен, вместо да се гадае. Липсващ
-   запис тук значи „не се пълни", не грешка. */
+   Запис с load() тегли данните си сам — за източник, който не е „цялата
+   таблица": wrong_receipt филтрира по показаната седмица и брои редовете на
+   бланките от втора таблица. load() връща масив редове със store_name, или
+   не-масив, когато за седмицата нищо не бива да се пише (бъдеща седмица).
+   transit и returns минават по стария път (table + query), без промяна.
+
+   'module:kasa' вече не се пълни от нищо: „Сторна по грешни приеми" имаше
+   този source, докато нямаше договорено правило. Правилото (28.09.2026) е
+   wrong_receipt по-долу — смяната на source е в
+   checklist-wrong-receipt-source.sql. Липсващ запис тук значи „не се
+   пълни", не грешка. */
 var CHECKLIST_MODULE_FILL = {
   transit: {
     table: 'goods_transit',
@@ -389,8 +397,67 @@ var CHECKLIST_MODULE_FILL = {
     table: 'stock_returns',
     query: 'select=store_name,status,confirmed_date',
     value: function (rows) { return checklistReturnsValue(rows); }
+  },
+  wrong_receipt: {
+    table: 'differences_reports',
+    load: function () { return checklistWrongReceiptRows(); },
+    value: function (rows) { return checklistWrongReceiptValue(rows); }
   }
 };
+
+/* Показаната седмица като полуотворен интервал [понеделник 00:00, следващ
+   понеделник 00:00) в МЕСТНО време — същият weekDays(), по който чек листът
+   смята седмицата навсякъде (порталът се отваря в България). toISOString()
+   после го превежда в UTC за сравнение с timestamptz. */
+function checklistWeekBounds() {
+  var from = new Date(weekDays(checklistWeek, checklistYear)[0]);
+  from.setHours(0, 0, 0, 0);
+  var to = new Date(from);
+  to.setDate(to.getDate() + 7);
+  return { from: from, to: to };
+}
+
+/* „Сторна по грешни приеми" (правило от 28.09.2026): бланките с
+   direction='wrong_receipt', ПОДАДЕНИ (created_at) в показаната седмица, и
+   редовете им в stock_differences. Всички сторна еднакво — от ЦО и от
+   магазина. Касата няма нищо общо, въпреки стария source 'module:kasa'.
+   Бъдеща седмица → null (нищо не се пише). Редовете се теглят на порции по
+   id на бланките, за да не расте URL-ът; двете заявки минават през
+   checklistGetAll — провал в която и да е спира показателя изцяло. */
+var CHECKLIST_WR_BATCH = 100;
+function checklistWrongReceiptRows() {
+  var b = checklistWeekBounds();
+  if (b.from.getTime() > Date.now()) return Promise.resolve(null);
+  return checklistGetAll('differences_reports',
+    'direction=eq.wrong_receipt' +
+    '&created_at=gte.' + encodeURIComponent(b.from.toISOString()) +
+    '&created_at=lt.' + encodeURIComponent(b.to.toISOString()) +
+    '&select=id,store_name'
+  ).then(function (reps) {
+    if (!reps.length) return [];
+    var ids = reps.map(function (r) { return r.id; });
+    var batches = [];
+    for (var i = 0; i < ids.length; i += CHECKLIST_WR_BATCH) batches.push(ids.slice(i, i + CHECKLIST_WR_BATCH));
+    return Promise.all(batches.map(function (part) {
+      return checklistGetAll('stock_differences', 'report_id=in.(' + part.join(',') + ')&select=id,report_id');
+    })).then(function (parts) {
+      var lines = {};
+      parts.forEach(function (p) {
+        p.forEach(function (l) { if (l && l.report_id) lines[l.report_id] = (lines[l.report_id] || 0) + 1; });
+      });
+      return reps.map(function (r) { return { store_name: r.store_name, lines: lines[r.id] || 0 }; });
+    });
+  });
+}
+
+/* „бланки/редове" за един обект: „2/5" = 2 сторнирани поръчки с общо 5
+   позиции. Без сторна за седмицата → „0/0": за брояч нулата е информация
+   (за разлика от „Стока за връщане", където празното значи „няма какво"). */
+function checklistWrongReceiptValue(rows) {
+  var lines = 0;
+  rows.forEach(function (r) { lines += (r && r.lines) || 0; });
+  return rows.length + '/' + lines;
+}
 
 /* Промените от постоянните задачи. Връща Promise с масив
    {store, metric_key, value} — само за клетките, чиято стойност се МЕНИ. */
@@ -568,7 +635,10 @@ function checklistModuleChanges(idx) {
     var spec = id ? CHECKLIST_MODULE_FILL[id] : null;
     if (!spec) return;
 
-    jobs.push(checklistGetAll(spec.table, spec.query).then(function (rows) {
+    var load = spec.load ? spec.load() : checklistGetAll(spec.table, spec.query);
+    jobs.push(load.then(function (rows) {
+      /* Не-масив от load() = „тази седмица нищо не се пише" (бъдеща). */
+      if (!Array.isArray(rows)) return [];
       var byStore = {};
       rows.forEach(function (x) {
         if (!x || !x.store_name) return;
