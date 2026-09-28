@@ -214,12 +214,30 @@ function loadChecklist() {
        due_window, едно отмятане на превключвател в Бюлетина щеше тихо да
        смени „4/5" на „да" в чужд документ.
 
-   Тук са ДВА ключа, а не три, макар три показателя да имат recurring:
-   източник — „Стока за връщане- ТАБЛИЦИ" (0a20f6e8…) е с due_weekdays NULL
-   и без договорено правило. Останалите четири остават празни нарочно. */
+   'file_none' (28.09.2026, „ПРЕОЦЕНКА-ЗАДЪЛЖИТЕЛНА") е единственият режим,
+   който НЕ иска due_weekdays: задачата е file_comment без дни и прозорецът е
+   цялата показана седмица (Пн–Нд, по датата на явяването — пренесеното се
+   брои по postponed_to). Отмятане с прикачен файл → da; всичко друго → ne.
+
+   ПОРТАЛЪТ НЕ ДАВА „нямат". Бюлетинът ИЗИСКВА файл за file_comment, тоест
+   обект без преоценка пак прикачва нещо и отмятането изглежда като подадена
+   преоценка. Реален случай, седмица 37: Дупница с коментар „тази седмица
+   няма преоценка" и прикачен файл — контролингът отметна „нямат", правило
+   „само коментар → нямат" би дало „да". Затова nyamat остава САМО ръчно
+   (control_value); разликата между „не" и „нямат" я прави човек, който е
+   прочел коментара.
+
+   РЪЧНИ ЗАСЕГА (source 'manual'): razhodi, zanulyavane_lm, razliki_dostavka,
+   srok_godnost, dogovoreni_returi. Свързването на всяка от тях е смяна на
+   source в weekly_checklist_metrics ('recurring:<uuid>' или 'module:<id>')
+   плюс ред ТУК (режим) или в CHECKLIST_MODULE_FILL (модул). Нищо в рендера,
+   писмото или седмичния отчет не е заковано към броя или ключовете на
+   колоните — нова колона идва само от реда в таблицата. */
 var CHECKLIST_PORTAL_MODE = {
-  revizia_953:    'any',   /* има ли поне едно отмятане в прозореца → da/ne */
-  spravka_minusi: 'count'  /* колко РАЗЛИЧНИ дни са отметнати → „4/5" */
+  revizia_953:    'any',       /* има ли поне едно отмятане в прозореца → da/ne */
+  revizia_grupi:  'any',       /* „РЕВИЗИЯ ГРУПИ", Пон–Сря → da/ne */
+  spravka_minusi: 'count',     /* колко РАЗЛИЧНИ дни са отметнати → „4/5" */
+  preocenka:      'file_none'  /* файл → da, иначе ne; nyamat само ръчно */
 };
 
 /* 'recurring:<uuid>' → '<uuid>'. Всичко друго ('module:kasa', 'manual',
@@ -247,6 +265,9 @@ function checklistAutoMetrics() {
    час. Отмятане в 23:50 е неразличимо от отмятане в 9:00. Ако някой ден
    потрябва „в срок до часа", първо трябва да се пази часът. */
 function checklistPortalValueFor(mode, hits, denom) {
+  /* При 'file_none' hits е готовата стойност на обекта ('da'),
+     не множество дати — виж checklistFileNonePlan(). */
+  if (mode === 'file_none') return hits || 'ne';
   var n = hits ? Object.keys(hits).length : 0;
   if (mode === 'count') return n + '/' + denom;
   return n > 0 ? 'da' : 'ne';
@@ -281,6 +302,7 @@ function checklistPortalValueFor(mode, hits, denom) {
    нарочно. */
 function checklistPortalPlan(metric, task, comps, weekISO) {
   var mode = CHECKLIST_PORTAL_MODE[metric.key];
+  if (mode === 'file_none') return task ? checklistFileNonePlan(comps, weekISO) : null;
   var days = (task && Array.isArray(task.due_weekdays)) ? task.due_weekdays : null;
   if (!mode || !days || !days.length) return null;
 
@@ -326,6 +348,29 @@ function checklistPortalPlan(metric, task, comps, weekISO) {
     mode: mode, denom: days.length, hits: hits,
     denomFor: function (store) { return days.length + (delta[store] || 0); }
   };
+}
+
+/* Режим 'file_none': задача без дни, прозорецът е цялата показана седмица.
+   hits[store] е 'da' (поне едно свършено отмятане с прикачен файл). Обект
+   без такова липсва от hits и checklistPortalValueFor го дава като 'ne' —
+   включително отмятане само с коментар (защо — виж CHECKLIST_PORTAL_MODE).
+   Файлът е в task_completions.files (jsonb масив). Снимките (photos) НЕ са
+   файл: задачата иска документ и Бюлетинът за file_comment не качва снимки. */
+function checklistFileNonePlan(comps, weekISO) {
+  var wkLo = weekISO[0], wkHi = weekISO[6];
+  var hits = {}, seen = {};
+  comps.forEach(function (c) {
+    if (!c || !c.completion_date || !c.store_name) return;
+    if (c.id) { if (seen[c.id]) return; seen[c.id] = 1; }
+    if (c.status !== 'done') return;
+    /* Пренесеното се брои по новата си дата — същото като при другите режими. */
+    var eff = taskDueDateFor(String(c.completion_date).slice(0, 10), c);
+    if (!(eff >= wkLo && eff <= wkHi)) return;
+    var files = c.files;
+    if (typeof files === 'string') { try { files = JSON.parse(files); } catch (e) { files = null; } }
+    if (Array.isArray(files) && files.length) hits[c.store_name] = 'da';
+  });
+  return { mode: 'file_none', denom: 1, hits: hits, denomFor: function () { return 1; } };
 }
 
 /* Записва САМО portal_value. control_value, control_num и comment не влизат
@@ -478,11 +523,12 @@ function checklistRecurringChanges(idx) {
     /* Прозорецът е самата показана седмица. Заявката вече изключва
        записите без дата — PostgREST не връща NULL при gte/lte.
        id влиза в select-а заради обединяването с четвъртата заявка: при
-       отлагане в рамките на седмицата един и същи ред идва по двата пътя. */
+       отлагане в рамките на седмицата един и същи ред идва по двата пътя.
+       files е за режим 'file_none' (преоценката). */
     sbGet('task_completions',
       'recurring_task_id=in.(' + ids.join(',') + ')' +
       '&completion_date=gte.' + weekISO[0] + '&completion_date=lte.' + weekISO[6] +
-      '&select=id,recurring_task_id,store_name,status,completion_date,postponed_to'),
+      '&select=id,recurring_task_id,store_name,status,completion_date,postponed_to,files'),
     /* Изключванията за ПОКАЗАНАТА седмица — ключът е от понеделника ѝ, по
        същия начин като в Бюлетина (recurringSkipWeekOf в shared.js). */
     loadRecurringSkips(recurringSkipWeekOf(weekDays(checklistWeek, checklistYear)[0])),
@@ -497,7 +543,7 @@ function checklistRecurringChanges(idx) {
     sbGet('task_completions',
       'recurring_task_id=in.(' + ids.join(',') + ')' +
       '&postponed_to=gte.' + weekISO[0] + '&postponed_to=lte.' + weekISO[6] +
-      '&select=id,recurring_task_id,store_name,status,completion_date,postponed_to')
+      '&select=id,recurring_task_id,store_name,status,completion_date,postponed_to,files')
       .catch(function () { return []; })
   ]).then(function (r) {
     /* Индексите са с +1 след заявката за версиите. */

@@ -209,6 +209,7 @@ const TESTS = [
   'checklist-wrong-receipt.test.js',
   'checklist-email.test.js',
   'checklist-send.test.js',
+  'checklist-full-form.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',
