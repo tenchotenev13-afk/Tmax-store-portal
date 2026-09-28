@@ -103,6 +103,7 @@ const TESTS = [
   'stock-returns-po-sort.test.js',
   'stock-returns-complaint-export.test.js',
   'stock-returns-complaint-docdate.test.js',
+  'stock-returns-import-serial-date.test.js',
   'sd-badge-hidden-tab.test.js',
   'delete-three-states.test.js',
   'storno-embed-no-in-list.test.js',
