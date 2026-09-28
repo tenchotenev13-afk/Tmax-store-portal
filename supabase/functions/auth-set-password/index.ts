@@ -1,6 +1,7 @@
 // supabase/functions/auth-set-password/index.ts
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import * as bcrypt from "https://deno.land/x/bcrypt@v0.4.1/mod.ts";
+import { requireAdmin } from "../_shared/session.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -35,6 +36,11 @@ Deno.serve(async (req) => {
   }
   if (newPassword.length < 4) {
     return json({ ok: false, message: "Паролата трябва да е поне 4 символа." }, 400);
+  }
+  // Без стара парола = админски ресет по произволен user_id → само с админски
+  // пропуск от auth-login. Проверката е ПРЕДИ всяко обръщение към базата.
+  if (!oldPassword && !(await requireAdmin(body))) {
+    return json({ ok: false, reason: "forbidden", message: "Нямате права за тази операция." }, 403);
   }
 
   const supabaseUrl = Deno.env.get("SUPABASE_URL")!;

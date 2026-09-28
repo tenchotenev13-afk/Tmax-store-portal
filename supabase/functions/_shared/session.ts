@@ -78,3 +78,11 @@ export async function verifySession(token: unknown, now?: number): Promise<Sessi
     return null;
   }
 }
+
+// Пропускът от тялото на заявката (`body.session`) — валиден И роля admin.
+// Иначе null. Ролята идва от подписания payload, не от тялото.
+export async function requireAdmin(body: unknown, now?: number): Promise<SessionPayload | null> {
+  const token = body && typeof body === "object" ? (body as { session?: unknown }).session : undefined;
+  const p = await verifySession(token, now);
+  return p && p.role === "admin" ? p : null;
+}

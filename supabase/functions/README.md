@@ -47,7 +47,7 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 | Слуг | ver. | Файл | За какво служи | Кой го вика | JWT |
 |---|---|---|---|---|---|
 | `auth-login` | 18 | `index.ts` + `_shared/session.ts` | Логин: bcrypt срещу `password_hash`, мигрира стари пароли в чист вид; от 28.09.2026 връща и подписан пропуск `session` | портал — `shared.js` | ✅ |
-| `auth-set-password` | 16 | `index.ts` | Смяна/ресет на парола (мин. 4 символа) | портал — `shared.js`, `admin.js` | ✅ |
+| `auth-set-password` | 16 | `index.ts` + `_shared/session.ts` | Смяна/ресет на парола (мин. 4 символа); от 28.09.2026 ресетът БЕЗ стара парола иска админски пропуск, иначе 403 | портал — `shared.js` (своята, със стара парола), `admin.js` (ресет, с `session`) | ✅ |
 | `resend-email` | 56 | **`send-email.ts`** | Праща И имейл (SMTP `mail.temax.bg`), И push — по поле `type` | портал — `email.js`, `push.js`; и четирите крон функции по-долу | ✅ |
 | `portal-push` | 24 | `index.ts` | Push през OneSignal — до всички или по таг `store_name` | портал — `push.js` (`osSend`) | ✅ |
 | `bulletin-notify` | 19 | `index.ts` | Известията от Бюлетина: теми `overdue_tasks`, `today_deadlines`, `deadline_passed`, `promo_expiring`; от 20.09.2026 и `loading_lists_pending` — товарен лист, изпратен преди 48 ч и още неотметнат (v8) | **крон 15** (`*/15 * * * *`) + портал — `push.js` (`runNotifyTopic`) | ✅ |
@@ -56,7 +56,7 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 | `send-routed-report` | 11 | `index.ts` | Личният седмичен отчет по задачи (`report_groups` → отделно писмо на човек); от 19.09.2026 и **отчет по задача** — вход `{task_id, recipients}`, една картичка; при `linked_module='supply'` под нея и секция „Зареждане“ (v10); и за постоянна задача — прозорец по седмицата на `run_date` (v11) | **крон 16** (`10 5 * * 1`, понеделник); тема `weekly_routed`; `dynamic-responder` (`task_report`) | ✅ |
 | `dynamic-responder` | 23 | `index.ts` | Насрочените напомняния от `notification_schedules`; `task_report` → писмо през `send-routed-report`, не push (и за постоянна задача) | **крон 11** (`*/15 * * * *`) | ✅ |
 | `kasa-access-check` | 7 | `index.ts` | Проверка на индивидуален PIN за таб История | **никой** — няма клиентска част | ✅ |
-| `set-history-pin` | 6 | `index.ts` | Админ задава/ресетва PIN (4–6 цифри) | **никой** — няма клиентска част | ✅ |
+| `set-history-pin` | 6 | `index.ts` + `_shared/session.ts` | Админ задава/ресетва PIN (4–6 цифри); от 28.09.2026 винаги иска админски пропуск, иначе 403 | **никой** — няма клиентска част | ✅ |
 | `swift-handler` | 41 | **`rm-push-index.ts`** | ⚠️ **НЕ Е ЗА ТОЗИ ПОРТАЛ** — напомняния към **RM-app** | **крон 4, 5, 6** (`0 5`, `0 11`, `0 14`, делник) | ✅ |
 
 Часовете в крон записите са **UTC**. `0 5 * * *` е 08:00 софийско лятно време.
@@ -161,9 +161,9 @@ id-то се търси първо в `bulletin_tasks`, после в `recurring
 `_shared/session.ts`. Липсва ли секретът или подписването хвърли —
 `console.error` и `session: null`; **входът не пада заради пропуска.**
 Клиентът го държи в `currentSession` (`shared.js`) — само в паметта, не в
-`localStorage`; нулира се при изход. **Засега никой не го проверява** — това
-е етап 1 от затварянето на `users`. В етап 2 `auth-set-password` и
-`set-history-pin` ще го изискват вместо произволен `user_id`.
+`localStorage`; нулира се при изход. Етап 1 от затварянето на `users` само
+го издаде; от етап 2 (28.09.2026) го проверяват `auth-set-password` (ресет
+без стара парола) и `set-history-pin` — виж по-долу.
 Връщане назад: деплой на `auth-login/index.ts` от `894320d` (беше ver. 16) — клиентът с `currentSession=null` работи
 както преди.
 
@@ -181,15 +181,30 @@ id-то се търси първо в `bulletin_tasks`, после в `recurring
 - `verifySession(token)` → payload или `null` (никога не хвърля): липсващ
   секрет, грешен формат, неверен подпис (сравнение в константно време), изтекъл
   `exp` (`now >= exp`).
+- `requireAdmin(body)` → payload или `null`: валиден `body.session` **и**
+  `role === 'admin'`. Ролята идва от ПОДПИСАНИЯ payload, не от тялото —
+  `{role:'admin'}` в тялото без пропуск не значи нищо.
 
 Тест: `deno test supabase/functions/_shared/session.test.ts --allow-env`.
 Не е в `npm test` — той е за браузърния код. Тестът има случай с подправен, но
 **валиден** JSON payload (роля `store` → `admin`): смяна на една буква обикновено
 чупи JSON-а и дава `null` и без проверка на подписа, тоест сама по себе си е
 тавтология — проверено с контрола, при която `verify` не сверява подписа.
+Същото за `requireAdmin`: контрола без проверка на ролята → пада тестът за
+валиден пропуск с роля, различна от admin.
 
 **`auth-set-password`** — със стара парола (потребителят си я сменя сам) или
 без нея (админ ресетва).
+
+От 28.09.2026 (етап 2) пътят **без** `old_password` иска `requireAdmin(body)`,
+иначе `403 {ok:false, reason:'forbidden', message:'Нямате права за тази
+операция.'}` — ПРЕДИ каквото и да е обръщение към базата. Дотогава всеки с
+публичния ключ можеше да смени паролата на произволен `user_id`. Пътят със
+стара парола не е променен. Клиент: `setUserPassword` в `admin.js` праща
+`session: currentSession` (`tests/admin-set-password-session.test.js`).
+Пропускът живее 12 ч — админ с по-стар отворен таб, или влязъл преди етап 1,
+вижда „Записано, но паролата НЕ бе сменена: Нямате права…“ и трябва да
+влезе наново.
 
 **`resend-email`** — **изпраща И имейли, И push**, според поле `type`
 (`'email'` по подразбиране, или `'push'`). Имейлите минават през SMTP
@@ -285,6 +300,10 @@ denomailer@1.6.0 реже символи и чупи SMTP dot-stuffing; тема
 роля**, не по PIN. Не разчитай на PIN защита, докато клиентската част не бъде
 свързана.
 
+От 28.09.2026 `set-history-pin` **винаги** иска `requireAdmin(body)` (иначе
+403, преди базата) — клиентът, който тепърва ще я вика, трябва да праща
+`session: currentSession`. `kasa-access-check` не е пипана.
+
 ## Секрети
 
 Нито един ключ не е в кода — всички се четат от `Deno.env`:
@@ -294,7 +313,7 @@ denomailer@1.6.0 реже символи и чупи SMTP dot-stuffing; тема
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | auth-login, auth-set-password, kasa-access-check, set-history-pin, send-scheduled-report, send-oborot-report, dynamic-responder, bulletin-notify |
 | `ONESIGNAL_REST_KEY` | portal-push, resend-email, swift-handler |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_NAME` | resend-email |
-| `PORTAL_SESSION_SECRET` | auth-login (подписва пропуска през `_shared/session.ts`); в етап 2 и функциите, които го проверяват. ≥48 случайни байта (`openssl rand -base64 48`), зададен на 28.09.2026 с `supabase secrets set`. Смяната му обезсилва всички издадени пропуски — хората влизат наново. |
+| `PORTAL_SESSION_SECRET` | auth-login (подписва пропуска), auth-set-password и set-history-pin (проверяват го през `requireAdmin`) — всичките през `_shared/session.ts`. ≥48 случайни байта (`openssl rand -base64 48`), зададен на 28.09.2026 с `supabase secrets set`. Смяната му обезсилва всички издадени пропуски — хората влизат наново. |
 
 Задават се в Supabase → Project Settings → Edge Functions → Secrets.
 **Не ги слагай във файл в тази папка.**

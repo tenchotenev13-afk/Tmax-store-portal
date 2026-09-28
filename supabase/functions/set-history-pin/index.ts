@@ -2,6 +2,7 @@
 // Същия модел като auth-set-password — bcrypt хеш, чистият код никога не стига до таблицата.
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { hashSync, genSaltSync } from "https://deno.land/x/bcrypt@v0.4.1/mod.ts";
+import { requireAdmin } from "../_shared/session.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -15,6 +16,13 @@ Deno.serve(async (req) => {
 
   try {
     const body = await req.json().catch(() => ({}));
+    // Само с админски пропуск от auth-login — преди всяко обръщение към базата.
+    if (!(await requireAdmin(body))) {
+      return new Response(JSON.stringify({ ok: false, reason: "forbidden", message: "Нямате права за тази операция." }), {
+        status: 403,
+        headers: { ...cors, "Content-Type": "application/json" },
+      });
+    }
     const user_id = body.user_id || null;
     const new_pin = (body.new_pin || "").toString().trim();
 

@@ -1,6 +1,6 @@
 // supabase/functions/_shared/session.test.ts
 // deno test supabase/functions/_shared/session.test.ts --allow-env
-import { signSession, verifySession, SESSION_TTL_SECONDS } from "./session.ts";
+import { signSession, verifySession, requireAdmin, SESSION_TTL_SECONDS } from "./session.ts";
 
 const SECRET = "test-secret-" + "x".repeat(48);
 const CLAIMS = { uid: "u-123", role: "admin", email: "a@b.bg" };
@@ -85,3 +85,46 @@ Deno.test("грешен формат → null", withSecret(SECRET, async () => {
     assert((await verifySession(bad)) === null, "грешен формат мина: " + String(bad));
   }
 }));
+
+// ── requireAdmin(body) ──────────────────────────────────────────────────
+Deno.test("requireAdmin: валиден admin → payload", withSecret(SECRET, async () => {
+  const p = await requireAdmin({ user_id: "x", session: await signSession(CLAIMS) });
+  assert(p !== null && p.uid === "u-123" && p.role === "admin", "валиден admin не мина");
+}));
+
+Deno.test("requireAdmin: валиден пропуск, но не-admin → null", withSecret(SECRET, async () => {
+  for (const role of ["store", "accounting", "manager", "Admin", ""]) {
+    const s = await signSession({ ...CLAIMS, role });
+    assert((await verifySession(s)) !== null, "пропускът сам по себе си трябва да е валиден: " + role);
+    assert((await requireAdmin({ session: s })) === null, "не-admin мина: '" + role + "'");
+  }
+}));
+
+Deno.test("requireAdmin: липсващ пропуск / тяло → null", withSecret(SECRET, async () => {
+  for (const body of [{}, { session: null }, { session: "" }, null, undefined, "низ", 42, { role: "admin" }]) {
+    assert((await requireAdmin(body)) === null, "мина без пропуск: " + JSON.stringify(body));
+  }
+}));
+
+Deno.test("requireAdmin: подправен пропуск (store → admin) → null", withSecret(SECRET, async () => {
+  const [p, s] = (await signSession({ ...CLAIMS, role: "store" })).split(".");
+  const obj = JSON.parse(atob(p.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((p.length + 3) % 4)));
+  obj.role = "admin";
+  const forged = btoa(JSON.stringify(obj)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  assert((await requireAdmin({ session: forged + "." + s })) === null, "подправена роля мина");
+}));
+
+Deno.test("requireAdmin: изтекъл admin → null; секунда преди → payload", withSecret(SECRET, async () => {
+  const iat = 1_700_000_000;
+  const s = await signSession(CLAIMS, iat);
+  assert((await requireAdmin({ session: s }, iat + SESSION_TTL_SECONDS - 1)) !== null, "секунда преди exp трябва да мине");
+  assert((await requireAdmin({ session: s }, iat + SESSION_TTL_SECONDS)) === null, "изтекъл admin мина");
+}));
+
+Deno.test("requireAdmin: без секрет → null", async () => {
+  let s = "";
+  await withSecret(SECRET, async () => { s = await signSession(CLAIMS); })();
+  await withSecret(null, async () => {
+    assert((await requireAdmin({ session: s })) === null, "мина без секрет на сървъра");
+  })();
+});
