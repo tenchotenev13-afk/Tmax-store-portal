@@ -645,11 +645,13 @@ function sdVisibleEmailPendingReports(){
    които го пишат. При посока, по която решава Цвети (всичко освен
    междускладова — същото условие като repShowResolve), в СЪЩИЯ patch влиза и
    email_pending=true: бланката остава горе, докато не тръгне имейл или
-   „✓ Без имейл". Непозната бланка → само reviewed (без догадки). */
+   „✓ Без имейл". Имейл вече пратен ПРЕДИ последното решение (email_sent_at)
+   → без email_pending, бланката слиза направо (решено 28.09.2026).
+   Непозната бланка → само reviewed (без догадки). */
 function sdReviewedPatch(reportId){
   var rep = diffReports.find(function(r){ return String(r.id) === String(reportId); });
   var p = {reviewed:true};
-  if(rep && rep.direction !== 'interstore') p.email_pending = true;
+  if(rep && rep.direction !== 'interstore' && !rep.email_sent_at) p.email_pending = true;
   return p;
 }
 /* „✓ Без имейл": бланката е решена, имейл до доставчика нарочно не се праща.
