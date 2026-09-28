@@ -102,6 +102,7 @@ const TESTS = [
   'stock-returns-import-update.test.js',
   'stock-returns-po-sort.test.js',
   'stock-returns-complaint-export.test.js',
+  'stock-returns-complaint-docdate.test.js',
   'sd-badge-hidden-tab.test.js',
   'delete-three-states.test.js',
   'storno-embed-no-in-list.test.js',

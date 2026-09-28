@@ -305,7 +305,9 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
   var h = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1300px;">';
   h += '<thead><tr style="background:#f8fafc;">';
-  ['ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Завод','Статус','Изтеглена с','Потвърдена акт.','Коментар','Коментар Контролер',''].forEach(function(c,ci,arr){
+  /* "Дата докум." между Доставчик и Завод - същото място като във файла на
+     Цвети и в Excel износа (колона 3). */
+  ['ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Изтеглена с','Потвърдена акт.','Коментар','Коментар Контролер',''].forEach(function(c,ci,arr){
     var last=(ci===arr.length-1);
     h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
   });
@@ -318,6 +320,7 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.id_euro||'')+'</td>'+
       '<td style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#64748b;max-width:130px;">'+esc(r.supplier||'')+'</td>'+
+      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.doc_date)+'</td>'+
       '<td style="padding:7px 10px;text-align:center;color:#94a3b8;">'+esc(r.plant||'')+'</td>'+
       '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#374151;max-width:130px;">'+esc(r.courier_info||'—')+'</td>'+
@@ -454,7 +457,8 @@ function srModalHtml() {
       '<div><label class="fl">НОВА ПВ-ЕВР</label><input class="fi" id="sr-po" value="'+escVal(r.purchase_order)+'"></div>'+
       '<div><label class="fl">НОВА ИД-ЕВРО</label><input class="fi" id="sr-ie" value="'+escVal(r.id_euro)+'"></div>'+
       '<div><label class="fl">Завод</label><input class="fi" id="sr-plant" value="'+escVal(r.plant)+'"></div>'+
-      '</div>';
+      '</div>'+
+      '<label class="fl">Дата на документ</label><input type="date" class="fi" id="sr-docdate" value="'+(r.doc_date||'')+'" style="max-width:200px;margin-bottom:10px;">';
   } else {
     /* "Поръчка" (order_number). При ред от разлика (diff_line_id) номерът идва
        оттам и се синхронизира от submitSD - тук е само за четене, за да няма
@@ -1198,6 +1202,8 @@ function submitSR() {
     data.purchase_order = poEl2?poEl2.value:'';
     data.id_euro = ieEl2?ieEl2.value:'';
     data.plant = plantEl2?plantEl2.value:'';
+    var docdateEl2=document.getElementById('sr-docdate');
+    data.doc_date = docdateEl2?(docdateEl2.value||null):null;
     var ctrlEl2=document.getElementById('sr-ctrl');
     data.controller_comment = ctrlEl2?ctrlEl2.value:'';
   } else {
