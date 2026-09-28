@@ -892,8 +892,11 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
       (impl.getAttribute('style') || '').indexOf('color:#94a3b8') < 0,
       impl.getAttribute('style'));
     ok('КОНТРОЛ: бележката се среща точно веднъж — колкото са темите без строител',
+      /* През notifTopicHasBuilder(), не през indexOf по масива: от 28.09.2026
+         NOTIF_IMPLEMENTED_TOPICS е масив от ДВОЙКИ, тоест indexOf по ключ винаги
+         дава -1 и „колкото са темите без строител" ставаше „всички". */
       h.doc.getElementById('notif-topics-body').textContent.split('още не е свързана с код').length - 1
-        === TOPICS.filter(t => h.w.NOTIF_IMPLEMENTED_TOPICS.indexOf(t.key) < 0).length,
+        === TOPICS.filter(t => !h.w.notifTopicHasBuilder(t.key)).length,
       'намерени ' + (h.doc.getElementById('notif-topics-body').textContent.split('още не е свързана с код').length - 1));
     /* Заключването не е само в HTML-а: функцията е глобална и се вика по име
        от inline onchange, тоест е достижима и при disabled вход. */
@@ -1091,8 +1094,13 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
     const edge = fs.readFileSync(path.join(root, 'supabase/functions/bulletin-notify/index.ts'), 'utf8');
     const adm  = fs.readFileSync(path.join(root, 'admin.js'), 'utf8');
 
+    /* От 28.09.2026 клиентският списък е двойки тема→функция, защото НЕ всички
+       теми се обслужват от bulletin-notify: weekly_routed живее в
+       send-routed-report. Затова тук се четат ТРИ файла, а сверката е на групи
+       по функция. */
+    const routed = fs.readFileSync(path.join(root, 'supabase/functions/send-routed-report/index.ts'), 'utf8');
     const edgeBlock = (edge.match(/const IMPLEMENTED_TOPICS = \[([\s\S]*?)\n\];/) || [])[1];
-    const admBlock  = (adm.match(/var NOTIF_IMPLEMENTED_TOPICS = \[([^\]]*)\];/) || [])[1];
+    const admBlock  = (adm.match(/var NOTIF_IMPLEMENTED_TOPICS = \[([\s\S]*?)\n\];/) || [])[1];
 
     if (ok('IMPLEMENTED_TOPICS се намира в едж функцията', !!edgeBlock) &&
         ok('NOTIF_IMPLEMENTED_TOPICS се намира в admin.js', !!admBlock)) {
@@ -1101,13 +1109,56 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
         return { key: m[1], run: m[2] };
       });
       const edgeKeys = edgePairs.map(x => x.key);
-      const admKeys  = (admBlock.match(/'([^']+)'/g) || []).map(s => s.slice(1, -1));
+      /* Двойките от admin.js — ключ И функция. */
+      const admPairs = (admBlock.match(/key:\s*'([^']+)',\s*fn:\s*'([^']+)'/g) || []).map(s => {
+        const m = s.match(/key:\s*'([^']+)',\s*fn:\s*'([^']+)'/);
+        return { key: m[1], fn: m[2] };
+      });
+      const admKeys = admPairs.map(x => x.key);
 
       ok('едж списъкът не е празен', edgeKeys.length > 0, edgeKeys.join(','));
-      ok('клиентският списък не е празен', admKeys.length > 0, admKeys.join(','));
-      ok('ДВАТА СПИСЪКА СЪВПАДАТ',
-        edgeKeys.slice().sort().join(',') === admKeys.slice().sort().join(','),
-        'edge: [' + edgeKeys.join(', ') + ']  ·  admin.js: [' + admKeys.join(', ') + ']');
+      ok('клиентският списък не е празен', admPairs.length > 0, admKeys.join(','));
+      ok('всеки ред в admin.js носи И ключ, И функция',
+        admPairs.length === (admBlock.match(/key:\s*'/g) || []).length,
+        'двойки: ' + admPairs.length + ' · ключове: ' + (admBlock.match(/key:\s*'/g) || []).length);
+
+      /* (1) Групата на bulletin-notify съвпада ТОЧНО с IMPLEMENTED_TOPICS — и в
+         двете посоки. Ключ, добавен само на едното място, пада тук. */
+      const admNotify = admPairs.filter(x => x.fn === 'bulletin-notify').map(x => x.key);
+      ok('ГРУПАТА bulletin-notify СЪВПАДА с IMPLEMENTED_TOPICS',
+        admNotify.slice().sort().join(',') === edgeKeys.slice().sort().join(','),
+        'edge: [' + edgeKeys.join(', ') + ']  ·  admin.js: [' + admNotify.join(', ') + ']');
+
+      /* (2) Всеки ключ, обявен за send-routed-report, наистина е TOPIC_KEY там.
+         Функцията обслужва ЕДНА тема, затова сверката е точна, не „съдържа". */
+      const routedKey = (routed.match(/const TOPIC_KEY = '([^']+)'/) || [])[1];
+      ok('TOPIC_KEY се намира в send-routed-report', !!routedKey, String(routedKey));
+      admPairs.filter(x => x.fn === 'send-routed-report').forEach(pr => {
+        ok('„' + pr.key + '" е TOPIC_KEY в send-routed-report', pr.key === routedKey,
+          'TOPIC_KEY=' + routedKey);
+      });
+      ok('и weekly_routed НЕ е обявена за bulletin-notify',
+        admNotify.indexOf('weekly_routed') < 0, admNotify.join(','));
+
+      /* (3) Всяко fn сочи РЕАЛНО съществуваща папка в supabase/functions/.
+         Хваща и печатна грешка в името, и изтрита функция. */
+      const fnDirs = fs.readdirSync(path.join(root, 'supabase/functions'))
+        .filter(n => fs.statSync(path.join(root, 'supabase/functions', n)).isDirectory());
+      /* Четенето на index.ts минава през existsSync, а не право readFileSync:
+         сгрешено име на функция иначе хвърля ENOENT и тестът умира ПРЕДИ
+         report(), тоест губи се точно диагнозата „папката я няма" (CLAUDE.md:
+         тест, който хвърли преди report(), не казва нищо). */
+      admPairs.forEach(pr => {
+        const dirOk = fnDirs.indexOf(pr.fn) >= 0;
+        ok('папката supabase/functions/' + pr.fn + '/ съществува', dirOk,
+          'има: ' + fnDirs.join(', '));
+        const idx = path.join(root, 'supabase/functions', pr.fn, 'index.ts');
+        ok('и ' + pr.fn + ' чете notification_topics',
+          dirOk && fs.existsSync(idx) &&
+            fs.readFileSync(idx, 'utf8').indexOf('notification_topics') >= 0,
+          dirOk ? (fs.existsSync(idx) ? 'index.ts няма notification_topics' : 'няма index.ts')
+                : 'папката липсва');
+      });
 
       /* Ключ без реален строител в същия файл е същото разминаване, само
          на една крачка по-навътре. */
@@ -1124,11 +1175,94 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
         edge.indexOf("skipped: 'Темата още не е реализирана в кода'") >= 0);
 
       /* И клиентският списък не е мъртва променлива. */
-      ok('admin.js чете своя списък', /NOTIF_IMPLEMENTED_TOPICS\.indexOf\(/.test(adm));
-      ok('и рендерът пита за строител', /notifTopicHasBuilder\(t\.key\)/.test(adm));
-      ok('коментарът сочи къде е оригиналът',
-        /supabase\/functions\/bulletin-notify\/index\.ts/.test(adm));
+      ok('admin.js чете своя списък', /NOTIF_IMPLEMENTED_TOPICS\[i\]\.key/.test(adm));
+      ok('notifTopicHasBuilder минава през notifTopicBuilderFn',
+        /function notifTopicHasBuilder\(key\)\{ return !!notifTopicBuilderFn\(key\); \}/.test(adm));
+      ok('и рендерът пита за функцията, не само за boolean',
+        /notifTopicBuilderFn\(t\.key\)/.test(adm));
+      ok('името на функцията стига до реда на екрана',
+        /esc\(fnName\)/.test(adm));
+      ok('коментарът сочи къде са оригиналите',
+        /bulletin-notify/.test(adm) && /send-routed-report/.test(adm));
     }
+  }
+
+  section('17б. Тема, чийто строител е в ДРУГА функция, не се показва като мъртва');
+  {
+    /* Живият симптом (28.09.2026): weekly_routed е active=true и е пращала на
+       21.09, но екранът я показваше приглушена, с бадж „още не е свързана с
+       код" и със ЗАКЛЮЧЕН превключвател — тоест единственият начин да се спре
+       беше направо в базата. Причината: списъкът в admin.js приемаше, че всички
+       теми се обслужват от bulletin-notify. */
+    const T = [
+      { key: 'weekly_routed', label: 'Личен седмичен отчет', description: null,
+        schedule_type: 'weekly', day_of_week: 'mon', scheduled_time: '08:10:00',
+        active: true, test_email: null, last_run_at: '2026-09-21T05:10:00Z',
+        last_recipients: 16, last_status: 'ok: 16 писма, 0 неуспешни', sort_order: 1 },
+      { key: 'overdue_tasks', label: 'Просрочени задачи', description: null,
+        schedule_type: 'daily', day_of_week: null, scheduled_time: '08:15:00',
+        active: true, test_email: null, last_run_at: null,
+        last_recipients: null, last_status: null, sort_order: 2 },
+      { key: 'daily_report', label: 'Дневен отчет', description: null,
+        schedule_type: 'daily', day_of_week: null, scheduled_time: '21:00:00',
+        active: true, test_email: null, last_run_at: null,
+        last_recipients: null, last_status: null, sort_order: 3 }
+    ];
+    const h = await loaded({ topics: T });
+    const row = lbl => topicRow(h.doc, lbl);
+    const cb = tr => tr && tr.cells[TOPIC_COL.active].querySelector('input[type=checkbox]');
+
+    const wr = row('Личен седмичен отчет');
+    if (ok('редът на weekly_routed е на екрана', !!wr)) {
+      ok('НЯМА бадж „още не е свързана с код"',
+        wr.cells[TOPIC_COL.name].textContent.indexOf('още не е свързана с код') < 0,
+        wr.cells[TOPIC_COL.name].textContent);
+      ok('редът НЕ е приглушен',
+        (wr.getAttribute('style') || '').indexOf('color:#94a3b8') < 0, wr.getAttribute('style'));
+      ok('превключвателят НЕ е заключен — темата може да се спре от екрана',
+        cb(wr) && cb(wr).disabled === false, String(cb(wr) && cb(wr).disabled));
+      ok('няма ⚠️ за „включена без строител"',
+        wr.cells[TOPIC_COL.name].textContent.indexOf('⚠️') < 0,
+        wr.cells[TOPIC_COL.name].textContent);
+      /* Част 2: кой обслужва темата се вижда на реда — иначе при мълчаща тема
+         не е ясно в чии логове да се гледа. */
+      ok('редът казва, че строителят е в send-routed-report',
+        wr.cells[TOPIC_COL.name].textContent.indexOf('send-routed-report') >= 0,
+        wr.cells[TOPIC_COL.name].textContent);
+    }
+
+    const ov = row('Просрочени задачи');
+    ok('тема на bulletin-notify показва СВОЯТА функция',
+      ov && ov.cells[TOPIC_COL.name].textContent.indexOf('bulletin-notify') >= 0,
+      ov && ov.cells[TOPIC_COL.name].textContent);
+
+    /* КОНТРОЛ: поведението за теми БЕЗ строител е непроменено. */
+    const dr = row('Дневен отчет');
+    if (ok('редът на тема без строител е на екрана', !!dr)) {
+      ok('тя ПАК е с бадж',
+        dr.cells[TOPIC_COL.name].textContent.indexOf('още не е свързана с код') >= 0,
+        dr.cells[TOPIC_COL.name].textContent);
+      ok('тя ПАК е приглушена',
+        (dr.getAttribute('style') || '').indexOf('color:#94a3b8') >= 0, dr.getAttribute('style'));
+      ok('превключвателят ѝ ПАК е заключен', cb(dr) && cb(dr).disabled === true);
+      ok('и НЕ показва име на функция',
+        dr.cells[TOPIC_COL.name].textContent.indexOf('bulletin-notify') < 0 &&
+        dr.cells[TOPIC_COL.name].textContent.indexOf('send-routed-report') < 0,
+        dr.cells[TOPIC_COL.name].textContent);
+    }
+
+    /* И заключването по име: weekly_routed вече МОЖЕ да се спира. */
+    h.w.confirmAnswer = true;
+    const before = h.calls.patch.filter(x => x.table === 'notification_topics').length;
+    h.w.toggleNotifTopicActive('weekly_routed', false);
+    await ticks();
+    ok('toggleNotifTopicActive вече НЕ отказва за weekly_routed',
+      h.calls.toast.every(t => String(t).indexOf('още не е свързана с код') < 0),
+      h.calls.toast.join(' | '));
+    ok('и стига до PATCH към базата',
+      h.calls.patch.filter(x => x.table === 'notification_topics').length > before,
+      'patch-ове: ' + h.calls.patch.filter(x => x.table === 'notification_topics').length);
+    h.close && h.close();
   }
 
   report();

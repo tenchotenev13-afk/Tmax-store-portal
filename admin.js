@@ -1077,20 +1077,48 @@ var NOTIF_WEEKDAY_SHORT  = ['', 'пон', 'вт', 'ср', 'чет', 'пет', '�
 var NOTIF_DOW_LABELS = { mon:'понеделник', tue:'вторник', wed:'сряда', thu:'четвъртък', fri:'петък', sat:'събота', sun:'неделя' };
 var NOTIF_DOW_ORDER  = ['mon','tue','wed','thu','fri','sat','sun'];
 
-/* КОПИЕ на IMPLEMENTED_TOPICS от supabase/functions/bulletin-notify/index.ts.
-   notification_topics държи единайсет реда, но строител в едж функцията има
-   само за тези пет — останалите се събуждат и връщат „Темата още не е реализирана
-   в кода", тоест известието просто не излиза. Екранът трябва да го КАЗВА:
-   иначе „Дневен отчет · спряна" изглежда като тема, която чака да я включиш.
+/* КОИ ТЕМИ ИМАТ СТРОИТЕЛ — И В КОЯ ЕДЖ ФУНКЦИЯ.
+   notification_topics държи единайсет реда, а строител има за шест. Останалите
+   се събуждат и връщат „Темата още не е реализирана в кода", тоест известието
+   просто не излиза. Екранът трябва да го КАЗВА: иначе „Дневен отчет · спряна"
+   изглежда като тема, която чака да я включиш.
 
-   Това е трето копие на един и същи факт (след списъка с обектите) и се знае.
-   Порталът няма как да прочете едж функцията по време на изпълнение, а колона
-   в базата би се разминала със същия успех. Двата списъка се менят ЗАЕДНО —
-   tests/admin-notifications.test.js чете и двата от файловете и пада, ако се
-   разминат. */
-var NOTIF_IMPLEMENTED_TOPICS = ['overdue_tasks', 'today_deadlines', 'promo_expiring', 'deadline_passed', 'loading_lists_pending'];
+   Списъкът пази ДВОЙКИ тема→функция, а не голи ключове. До 28.09.2026 беше гол
+   масив и приемаше наум, че всичко се обслужва от bulletin-notify — а
+   weekly_routed живее в send-routed-report (TOPIC_KEY там). Следствието беше
+   живо: работеща тема (active=true, пращала на 21.09) излизаше приглушена, с
+   бадж „още не е свързана с код" и със ЗАКЛЮЧЕН превключвател, тоест не можеше
+   да се спре оттук — само направо в базата. Точно обратното на предназначението
+   на екрана. Добавянето само на ключа щеше да поправи симптома и да остави
+   модела, който ще сбърка при следващата едж функция.
 
-function notifTopicHasBuilder(key){ return NOTIF_IMPLEMENTED_TOPICS.indexOf(key) >= 0; }
+   Второто предназначение на двойките е диагностика: когато тема мълчи, първият
+   въпрос е в ЧИИ логове да се гледа. Затова името на функцията стои и на
+   екрана, под ключа.
+
+   Това е копие на два факта от два файла (IMPLEMENTED_TOPICS в bulletin-notify,
+   TOPIC_KEY в send-routed-report) и се знае. Порталът няма как да прочете едж
+   функция по време на изпълнение, а колона в базата би се разминала със същия
+   успех. Менят се ЗАЕДНО — tests/admin-notifications.test.js чете и трите файла
+   и пада при разминаване, включително ако fn сочи папка, която я няма. */
+var NOTIF_IMPLEMENTED_TOPICS = [
+  { key: 'overdue_tasks',         fn: 'bulletin-notify' },
+  { key: 'today_deadlines',       fn: 'bulletin-notify' },
+  { key: 'promo_expiring',        fn: 'bulletin-notify' },
+  { key: 'deadline_passed',       fn: 'bulletin-notify' },
+  { key: 'loading_lists_pending', fn: 'bulletin-notify' },
+  { key: 'weekly_routed',         fn: 'send-routed-report' }
+];
+/* Кой обслужва темата — низ или null. */
+function notifTopicBuilderFn(key){
+  for (var i=0;i<NOTIF_IMPLEMENTED_TOPICS.length;i++){
+    if (NOTIF_IMPLEMENTED_TOPICS[i].key === key) return NOTIF_IMPLEMENTED_TOPICS[i].fn;
+  }
+  return null;
+}
+/* Договорът остава boolean — двата викащи в рендера и в превключвателя не се
+   пипат. */
+function notifTopicHasBuilder(key){ return !!notifTopicBuilderFn(key); }
 
 function notifIsAdmin(){ return !!(currentUser && currentUser.role === 'admin'); }
 /* Картата „Известия" — admin и accounting (същият списък като таба в shared.js). */
@@ -1476,24 +1504,33 @@ function renderNotifTopics(){
     /* Тема без строител не е „още изключена" — тя няма какво да свърши. Редът
        е приглушен, превключвателят е ЗАКЛЮЧЕН (не просто сив), а бутонът за
        редакция остава активен: часът и дните може да се подготвят отсега. */
-    var impl = notifTopicHasBuilder(t.key);
+    var fnName = notifTopicBuilderFn(t.key);
+    var impl = !!fnName;
     /* Тема без строител, която стои active=true в базата — състояние, което не
        бива да съществува. Показва се, не се крие: кронът я събужда всеки ден и
-       тя всеки ден не праща нищо. */
+       тя всеки ден не праща нищо.
+       Текстът казва „в никоя едж функция", не „в bulletin-notify": строителят
+       може да е в друга (weekly_routed е в send-routed-report), тоест старото
+       изречение сочеше в грешна посока при търсене. */
     var warn = (!impl && t.active)
-      ? '<span title="Включена е, но няма строител в bulletin-notify — известие няма да излезе" style="margin-right:5px;">⚠️</span>'
+      ? '<span title="Включена е, но няма строител в никоя едж функция — известие няма да излезе" style="margin-right:5px;">⚠️</span>'
       : '';
     var noBuilder = impl ? ''
-      : '<span class="ntf-no-builder" title="notification_topics има реда, bulletin-notify няма строител за него" style="margin-left:6px;font-size:10px;font-weight:600;color:#94a3b8;border:1px solid #e2e8f0;border-radius:20px;padding:2px 7px;white-space:nowrap;">още не е свързана с код</span>';
+      : '<span class="ntf-no-builder" title="notification_topics има реда, но нито една едж функция няма строител за него" style="margin-left:6px;font-size:10px;font-weight:600;color:#94a3b8;border:1px solid #e2e8f0;border-radius:20px;padding:2px 7px;white-space:nowrap;">още не е свързана с код</span>';
     var trStyle = (err ? 'background:#fef2f2;' : (impl ? '' : 'background:#fcfcfd;')) + (impl ? '' : 'color:#94a3b8;');
     var badge = t.test_email
       ? '<span title="Праща САМО на този адрес — хората не получават нищо" style="background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:700;margin-left:6px;white-space:nowrap;">ТЕСТОВ РЕЖИМ: ' + esc(t.test_email) + '</span>'
       : '';
     return '<tr' + (trStyle ? ' style="' + trStyle + '"' : '') + '>' +
       '<td><div style="font-weight:500;font-size:12.5px;">' + warn + esc(t.label) + noBuilder + badge + '</div>' +
-        '<div style="font-size:10.5px;color:#94a3b8;">' + esc(t.key) + '</div></td>' +
+        /* Под ключа — КОЯ функция обслужва темата. Не е разкрасяване: когато
+           тема мълчи, първият въпрос е в чии логове да се гледа, а дотук
+           отговорът не беше никъде на екрана. */
+        '<div style="font-size:10.5px;color:#94a3b8;">' + esc(t.key) +
+          (fnName ? '<span title="Строителят е в тази едж функция — там се гледат логовете" style="margin-left:6px;color:#cbd5e1;">· ' + esc(fnName) + '</span>' : '') +
+        '</div></td>' +
       '<td style="font-size:12px;white-space:nowrap;">' + esc(notifScheduleText(t)) + '</td>' +
-      '<td><label' + (impl ? '' : ' title="Няма строител в bulletin-notify — няма какво да се включва"') +
+      '<td><label' + (impl ? '' : ' title="Няма строител в нито една едж функция — няма какво да се включва"') +
         ' style="display:inline-flex;align-items:center;gap:6px;font-size:11px;cursor:' + (impl ? 'pointer' : 'not-allowed') + ';">' +
         '<input type="checkbox" class="ntf-active-cb" data-key="' + escAttr(t.key) + '" ' + (t.active ? 'checked' : '') +
         (impl ? '' : ' disabled') +
