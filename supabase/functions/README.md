@@ -47,7 +47,7 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 | Слуг | ver. | Файл | За какво служи | Кой го вика | JWT |
 |---|---|---|---|---|---|
 | `auth-login` | 18 | `index.ts` + `_shared/session.ts` | Логин: bcrypt срещу `password_hash`, мигрира стари пароли в чист вид; от 28.09.2026 връща и подписан пропуск `session` | портал — `shared.js` | ✅ |
-| `auth-set-password` | 16 | `index.ts` + `_shared/session.ts` | Смяна/ресет на парола (мин. 4 символа); от 28.09.2026 ресетът БЕЗ стара парола иска админски пропуск, иначе 403 | портал — `shared.js` (своята, със стара парола), `admin.js` (ресет, с `session`) | ✅ |
+| `auth-set-password` | 18 | `index.ts` + `_shared/session.ts` | Смяна/ресет на парола (мин. 4 символа); от 28.09.2026 ресетът БЕЗ стара парола иска админски пропуск, иначе 403 | портал — `shared.js` (своята, със стара парола), `admin.js` (ресет, с `session`) | ✅ |
 | `resend-email` | 56 | **`send-email.ts`** | Праща И имейл (SMTP `mail.temax.bg`), И push — по поле `type` | портал — `email.js`, `push.js`; и четирите крон функции по-долу | ✅ |
 | `portal-push` | 24 | `index.ts` | Push през OneSignal — до всички или по таг `store_name` | портал — `push.js` (`osSend`) | ✅ |
 | `bulletin-notify` | 19 | `index.ts` | Известията от Бюлетина: теми `overdue_tasks`, `today_deadlines`, `deadline_passed`, `promo_expiring`; от 20.09.2026 и `loading_lists_pending` — товарен лист, изпратен преди 48 ч и още неотметнат (v8) | **крон 15** (`*/15 * * * *`) + портал — `push.js` (`runNotifyTopic`) | ✅ |
@@ -56,7 +56,7 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 | `send-routed-report` | 11 | `index.ts` | Личният седмичен отчет по задачи (`report_groups` → отделно писмо на човек); от 19.09.2026 и **отчет по задача** — вход `{task_id, recipients}`, една картичка; при `linked_module='supply'` под нея и секция „Зареждане“ (v10); и за постоянна задача — прозорец по седмицата на `run_date` (v11) | **крон 16** (`10 5 * * 1`, понеделник); тема `weekly_routed`; `dynamic-responder` (`task_report`) | ✅ |
 | `dynamic-responder` | 23 | `index.ts` | Насрочените напомняния от `notification_schedules`; `task_report` → писмо през `send-routed-report`, не push (и за постоянна задача) | **крон 11** (`*/15 * * * *`) | ✅ |
 | `kasa-access-check` | 7 | `index.ts` | Проверка на индивидуален PIN за таб История | **никой** — няма клиентска част | ✅ |
-| `set-history-pin` | 6 | `index.ts` + `_shared/session.ts` | Админ задава/ресетва PIN (4–6 цифри); от 28.09.2026 винаги иска админски пропуск, иначе 403 | **никой** — няма клиентска част | ✅ |
+| `set-history-pin` | 8 | `index.ts` + `_shared/session.ts` | Админ задава/ресетва PIN (4–6 цифри); от 28.09.2026 винаги иска админски пропуск, иначе 403 | **никой** — няма клиентска част | ✅ |
 | `swift-handler` | 41 | **`rm-push-index.ts`** | ⚠️ **НЕ Е ЗА ТОЗИ ПОРТАЛ** — напомняния към **RM-app** | **крон 4, 5, 6** (`0 5`, `0 11`, `0 14`, делник) | ✅ |
 
 Часовете в крон записите са **UTC**. `0 5 * * *` е 08:00 софийско лятно време.
@@ -173,6 +173,13 @@ id-то се търси първо в `bulletin_tasks`, после в `recurring
 (`../_shared/session.ts`), тоест **промяна тук стига до живо само с деплой на
 всяка функция, която го ползва.** Обратното четене сваля и него — сравнявай
 ДВАТА файла, не само `index.ts`.
+
+Затова копията на живо може законно да се различават. От 29.09.2026
+`auth-set-password` (ver. 18) и `set-history-pin` (ver. 8) носят
+`session.ts` от `62314bd` (с `requireAdmin`), а `auth-login` (ver. 18) —
+по-старото от `371b92f`, без `requireAdmin`. На нея не ѝ трябва, затова не е
+деплойвана наново. При сверка на `auth-login` сравнявай срещу `371b92f`, иначе
+излиза фалшиво разминаване.
 
 - `signSession({uid, role, email})` → `"payload.подпис"`, двете части base64url.
   payload = JSON `{uid, role, email, iat, exp}`, `exp = iat + 12 ч` (секунди);
