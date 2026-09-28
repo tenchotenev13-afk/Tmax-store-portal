@@ -677,7 +677,7 @@ function srParseFlexibleDate(v){
   if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
   var m2=s.match(/^(\d{1,2})[.,\/](\d{1,2})[.,\/](\d{2})$/); /* 2-цифрена година */
   if(m2) return '20'+m2[3]+'-'+m2[2].padStart(2,'0')+'-'+m2[1].padStart(2,'0');
-  var m3=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); /* вече ISO/pandas Timestamp низ */
+  var m3=s.match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})/); /* ISO/pandas Timestamp низ; и гггг/мм/дд, гггг.мм.дд */
   if(m3) return m3[1]+'-'+m3[2].padStart(2,'0')+'-'+m3[3].padStart(2,'0');
   return null; /* неразпознат текст (напр. свободен коментар в дата клетка) - пропускаме тихо */
 }
@@ -752,15 +752,6 @@ function srFindCol(headers,aliases){
     }
   }
   return null;
-}
-function srParseExcelDate(v){
-  if(!v) return null;
-  if(v instanceof Date) return v.toISOString().slice(0,10);
-  var s=String(v).trim();
-  var m=s.match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})$/); /* дд.мм.гггг */
-  if(m) return m[3]+'-'+m[2].padStart(2,'0')+'-'+m[1].padStart(2,'0');
-  var d=new Date(s);
-  return isNaN(d.getTime())?null:d.toISOString().slice(0,10);
 }
 function srImportModalHtml(){
   var hint = 'Приема 2 формата: (1) Многолистов Excel (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Завод, статус ВЗЕТА/НЕВЗЕТА/ПРИКЛЮЧЕНА и т.н.; или (2) единичен лист с колони за продукт, SAP, количество, магазин, срок на годност, причина. Разпознава автоматично кой от двата е. При повторно качване на обновена версия на МНОГОЛИСТОВИЯ файл редовете със съществуващ ПВ-ЕВР номер се ОБНОВЯВАТ от файла (статус, дати, куриер, коментари); приключените в портала не се пипат; редове, които ги няма във файла, остават непроменени. При единичния лист редове със съществуващ ПВ-ЕВР се пропускат, както досега.';
@@ -997,7 +988,8 @@ function parseComplaintReturnsSheet(wb,progEl){
       quantity:colQty?(parseFloat(row[colQty])||null):null,
       store_name:colStore?String(row[colStore]||'').trim():'',
       supplier:colSupplier?String(row[colSupplier]||'').trim():'',
-      expiry_date:colExpiry?srParseExcelDate(row[colExpiry]):null,
+      /* Същата функция като многолистовия импорт - чете и Excel сериен номер. */
+      expiry_date:colExpiry?srParseFlexibleDate(row[colExpiry]):null,
       reason:colReason?String(row[colReason]||'').trim():'',
       source:'complaint',
       status:'pending',

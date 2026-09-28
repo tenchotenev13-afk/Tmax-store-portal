@@ -106,6 +106,7 @@ const TESTS = [
   'stock-returns-import-serial-date.test.js',
   'stock-returns-discard.test.js',
   'stock-returns-import-completed.test.js',
+  'stock-returns-single-expiry.test.js',
   'sd-badge-hidden-tab.test.js',
   'delete-three-states.test.js',
   'storno-embed-no-in-list.test.js',
