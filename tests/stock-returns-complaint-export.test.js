@@ -203,16 +203,11 @@ const sheetOf = (wb, name) => (wb.Sheets[name] || {}).__aoa;
         const diff = F.filter(f => norm(b[f]) !== norm(src[f]));
         ok(src.purchase_order + ': всички 11 полета + магазин съвпадат', diff.length === 0,
           diff.map(f => f + ': ' + JSON.stringify(src[f]) + ' → ' + JSON.stringify(b[f])).join('; '));
-        if (src.status !== 'completed') {
-          ok(src.purchase_order + ': статусът се връща (' + src.status + ')', b.status === src.status,
-            JSON.stringify(b.status));
-        }
+        /* И трите, включително ПРИКЛЮЧЕНА → completed. Дали се прилага, решават
+           правата в startReturnsImport (stock-returns-import-completed). */
+        ok(src.purchase_order + ': статусът се връща (' + src.status + ')', b.status === src.status,
+          JSON.stringify(b.status));
       });
-      /* ПРИКЛЮЧЕНА: парсърът познава само ВЗЕТА/НЕВЗЕТА и я чете като
-         'pending'. Заковано нарочно — защитата е в startReturnsImport (раздел г). */
-      const done = back.find(x => x.purchase_order === '4200015982');
-      ok('ПРИКЛЮЧЕНА се парсва като pending (известно; пазено от импорта)',
-        done && done.status === 'pending', JSON.stringify(done && done.status));
     }
   }
 

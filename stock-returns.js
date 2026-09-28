@@ -704,8 +704,14 @@ function parseDiffReturnsWorkbook(wb){
       var supplier=(row[2]||'').toString().trim();
       if(!po && !ideuro && !supplier) continue; /* напълно празен ред */
       var statusRaw=(row[5]||'').toString().trim().toUpperCase();
-      var status=statusRaw.indexOf('ВЗЕТА')===0?'taken':'pending'; /* "ВЗЕТА" преди "НЕВЗЕТА" проверка, за да не съвпадне грешно */
-      if(statusRaw.indexOf('НЕВЗЕТА')>=0) status='pending';
+      /* Ред: ПРИКЛЮЧ -> НЕВЗЕТА -> ВЗЕТА ("НЕВЗЕТА" съдържа "ВЗЕТА", затова е
+         преди нея). "ПРИКЛЮЧЕНА" я пише нашият износ; дали потребителят има
+         право да приключва, решава startReturnsImport, не парсърът. */
+      var status;
+      if(statusRaw.indexOf('ПРИКЛЮЧ')===0) status='completed';
+      else if(statusRaw.indexOf('НЕВЗЕТА')>=0) status='pending';
+      else if(statusRaw.indexOf('ВЗЕТА')===0) status='taken';
+      else status='pending';
       rows.push({
         store_name:storeName,
         purchase_order:po,
@@ -757,7 +763,7 @@ function srParseExcelDate(v){
   return isNaN(d.getTime())?null:d.toISOString().slice(0,10);
 }
 function srImportModalHtml(){
-  var hint = 'Приема 2 формата: (1) Многолистов Excel (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Завод, статус ВЗЕТА/НЕВЗЕТА и т.н.; или (2) единичен лист с колони за продукт, SAP, количество, магазин, срок на годност, причина. Разпознава автоматично кой от двата е. При повторно качване на обновена версия на МНОГОЛИСТОВИЯ файл редовете със съществуващ ПВ-ЕВР номер се ОБНОВЯВАТ от файла (статус, дати, куриер, коментари); приключените в портала не се пипат; редове, които ги няма във файла, остават непроменени. При единичния лист редове със съществуващ ПВ-ЕВР се пропускат, както досега.';
+  var hint = 'Приема 2 формата: (1) Многолистов Excel (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Завод, статус ВЗЕТА/НЕВЗЕТА/ПРИКЛЮЧЕНА и т.н.; или (2) единичен лист с колони за продукт, SAP, количество, магазин, срок на годност, причина. Разпознава автоматично кой от двата е. При повторно качване на обновена версия на МНОГОЛИСТОВИЯ файл редовете със съществуващ ПВ-ЕВР номер се ОБНОВЯВАТ от файла (статус, дати, куриер, коментари); приключените в портала не се пипат; редове, които ги няма във файла, остават непроменени. При единичния лист редове със съществуващ ПВ-ЕВР се пропускат, както досега.';
   return '<div class="bov" id="sr-import-ov"><div class="bmod" style="width:460px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
     '<div style="font-size:15px;font-weight:700;">📤 Импорт от Excel — рекламации/срок на годност</div>'+
@@ -888,13 +894,23 @@ function startReturnsImport(){
           };
         };
 
+        /* "ПРИКЛЮЧЕНА" от файла - само за който може да приключва и в модала
+           (canCompleteSR). Без това право: нов ред влиза като "Взета",
+           съществуващ си пази статуса (другите полета се обновяват). */
+        var canComplete=canCompleteSR();
+        var noRightNew=0, noRightKept=0;
         var toInsert=[], toUpdate=[], skippedCompleted=0, skippedDuplicate=0;
         mapped.forEach(function(r){
           var hit = r.purchase_order ? existingByPo[r.purchase_order] : null;
-          if(!hit){ toInsert.push(r); return; }
+          if(!hit){
+            if(r.status==='completed' && !canComplete){ r.status='taken'; noRightNew++; }
+            toInsert.push(r); return;
+          }
           if(!isWorkbook){ skippedDuplicate++; return; }
           if(hit.status==='completed'){ skippedCompleted++; return; }
-          toUpdate.push({ id:hit.id, purchase_order:r.purchase_order, data:updFromFile(r) });
+          var upd=updFromFile(r);
+          if(r.status==='completed' && !canComplete){ delete upd.status; noRightKept++; }
+          toUpdate.push({ id:hit.id, purchase_order:r.purchase_order, data:upd });
         });
 
         if(!toInsert.length && !toUpdate.length){
@@ -927,6 +943,10 @@ function startReturnsImport(){
                   ' · Пропуснати (приключени): '+skippedCompleted+'</span>';
             if(skippedDuplicate){
               h+='<div style="color:#64748b;">Пропуснати като дублирани: '+skippedDuplicate+'</div>';
+            }
+            if(noRightNew||noRightKept){
+              h+='<div style="color:#d97706;">⚠️ „ПРИКЛЮЧЕНА" без право да приключваш: '+(noRightNew+noRightKept)+
+                 ' (нови, вмъкнати като „Взета": '+noRightNew+'; съществуващи със запазен статус: '+noRightKept+')</div>';
             }
             /* Провалите излизат ПОИМЕННО, не като брой: "3 грешки" не казва
                кой ред да се провери. */
@@ -1063,10 +1083,11 @@ function exportSRExcel(){
           {wch:12},{wch:8},{wch:12},{wch:14},{wch:18},{wch:26}];
     sheets.push({name:'По разлики', aoa:aoa, cols:cols});
   } else {
-    /* Главни букви - както ги пише ERP файлът. Импортът разпознава само
-       ВЗЕТА/НЕВЗЕТА; "ПРИКЛЮЧЕНА" там става 'pending', но приключен в портала
-       ред не се пипа при обратно качване (hit.status==='completed' -> пропуск
-       в startReturnsImport). */
+    /* Главни букви - както ги пише ERP файлът. Импортът разпознава и трите
+       (parseDiffReturnsWorkbook); "ПРИКЛЮЧЕНА" се прилага само при право да
+       приключваш (canCompleteSR) - иначе нов ред влиза като "Взета", а
+       съществуващ си пази статуса. Приключен в портала ред не се пипа при
+       обратно качване (hit.status==='completed' -> пропуск в startReturnsImport). */
     var XL_STATUS={pending:'НЕВЗЕТА',taken:'ВЗЕТА',completed:'ПРИКЛЮЧЕНА'};
     var storeToSheet={};
     Object.keys(SR_SHEET_TO_STORE).forEach(function(k){ storeToSheet[SR_SHEET_TO_STORE[k]]=k; });
