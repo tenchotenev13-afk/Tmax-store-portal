@@ -3207,17 +3207,23 @@ function openEditRecurringModal(taskId) {
   var ov = document.createElement('div');
   ov.className = 'bov open';
   ov.id = 'edit-rec-ov';
+  /* Дните се смятат ВЕДНЪЖ и се подават и на чекбоксите, и на реда с
+     последицата под прозореца. Два пъти един и същ израз значи, че следващата
+     промяна в него ще пипне само едното място и редът ще казва друго от
+     отметките. (due_weekday е старото единично поле — задачи отпреди
+     due_weekdays още го ползват.) */
+  var eDays = t.due_weekdays || (t.due_weekday!==null&&t.due_weekday!==undefined ? [t.due_weekday] : []);
   ov.innerHTML =
     '<div class="bmod" style="width:420px;">' +
     '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">✏️ Редактирай постоянна задача</div>' +
-    recEditScopeNoteHtml() +
+    recEditScopeHtml() +
     '<label class="fl">Заглавие *</label>' +
     '<input class="fi" id="erec-title" value="'+esc(t.title||'')+'">' +
     '<label class="fl">Описание</label>' +
     '<textarea class="fi fi-desc" id="erec-desc" rows="3" placeholder="Допълнителна информация. Дълъг адрес се скрива така: [Инструкцията](https://…)" oninput="bulAutoGrow(this)" onpaste="bulDescPaste(event)">'+escVal(t.description)+'</textarea>' +
     '<label class="fl">Повтарящи се дни (по избор)</label>' +
-    recWeekdaysCheckboxesHtml('erec-weekdays', t.due_weekdays||(t.due_weekday!==null&&t.due_weekday!==undefined?[t.due_weekday]:[])) +
-    recWindowToggleHtml('erec-window','erec-weekdays', !!t.due_window, (t.due_weekdays||[]).length) +
+    recWeekdaysCheckboxesHtml('erec-weekdays', eDays) +
+    recWindowToggleHtml('erec-window','erec-weekdays', !!t.due_window, eDays) +
     '<label class="fl">Час (по избор)</label><input type="time" class="fi" id="erec-time" value="'+esc(t.due_time||'')+'">' +
     '<label class="fl">Вид задача</label><select class="fi" id="erec-type">'+taskTypeOptsHtml(t.task_type)+'</select>' +
     /* Отделът се задава при създаване от блока, в който е натиснат бутонът.
@@ -3268,7 +3274,7 @@ function submitEditRecurring(taskId) {
      задачата в подредбата на всички останали. Затова тук няма
      преномериране — в новия отдел задачата застава по глобалния си
      sort_order, а ▲▼ остават за подредбата. */
-  bulSaveRecurringContent(taskId, payload, bulWeekMonday()).then(function(r){
+  bulSaveRecurringContent(taskId, payload, bulWeekMonday(), recReadScope()).then(function(r){
     if (!r || r.ok === false) { toast('Грешка при запис: '+sbErrMsg(r),'#dc2626'); return; }
     return trSaveReports(taskId, trc.list).then(function(okRep){
       var el = document.getElementById('edit-rec-ov');
@@ -5551,7 +5557,7 @@ function openRecurringModal(dk) {
     '<label class="fl">Описание</label><textarea class="fi fi-desc" id="rec-desc" rows="3" placeholder="Допълнителна информация. Дълъг адрес се скрива така: [Инструкцията](https://…)" oninput="bulAutoGrow(this)" onpaste="bulDescPaste(event)"></textarea>' +
     '<label class="fl">Повтарящи се дни (по избор)</label>' +
     recWeekdaysCheckboxesHtml('rec-weekdays', []) +
-    recWindowToggleHtml('rec-window','rec-weekdays', false, 0) +
+    recWindowToggleHtml('rec-window','rec-weekdays', false, []) +
     '<label class="fl">Час (по избор)</label><input type="time" class="fi" id="rec-time">' +
     '<label class="fl">Вид задача</label><select class="fi" id="rec-type">'+taskTypeOptsHtml('info')+'</select>' +
     '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
@@ -5595,13 +5601,36 @@ function readRecWeekdaysCheckboxes(selId){
 /* Превключвателят „прозорец" виси на избора на дни: смисъл има само при
    2..6 избрани. Контролата НЕ се крие — стои видима и disabled, с
    обяснение защо (правило 11). */
-function recWindowToggleHtml(selId, daysId, checked, dayCount){
-  var usable = dayCount>1 && dayCount<7;
+var REC_DSHORT = ['пон','вто','сря','чет','пет','съб','нед'];
+/* КАКВО ЗНАЧИ ТЕКУЩИЯТ ИЗБОР — на думи и с реалните дни (28.09.2026).
+   Етикетът на чекбокса описва само ЧЕКНАТОТО състояние; нечекнатото мълчеше, а
+   точно то е капанът. РЕВИЗИЯ ГРУПИ отчиташе 2/3 при свършена работа, защото
+   беше с три дни и ИЗКЛЮЧЕН прозорец — тоест ТРИ отделни отметки на седмица, а
+   не една. През 21–27.09 нито един от 18 обекта не е отметнал и трите дни.
+   Редът стои ВИНАГИ — и когато чекбоксът е недостъпен: контрол, който изчезва
+   според данните, изглежда като счупен (CLAUDE.md т.11). */
+function recWindowNoteText(days, checked){
+  var d = (Array.isArray(days)?days:[]).slice().sort(function(a,b){ return a-b; });
+  var n = d.length;
+  if (n === 0) return 'Сега: без избрани дни — задачата е за ВСЕКИ ден (ако е зададен час). Прозорец не важи.';
+  if (n === 1) return 'Сега: 1 отметка — само '+String(DNAMES[d[0]]||'').toLowerCase()+'. Прозорец няма смисъл при един ден.';
+  if (n === 7) return 'Сега: 7 отметки — по една за всеки ден. Прозорец не важи при цялата седмица.';
+  if (checked) return 'Сега: 1 отметка — срок '+String(DNAMES[d[n-1]]||'').toLowerCase()+', може от '+REC_DSHORT[d[0]]+'.';
+  return 'Сега: '+n+' отметки — по една за '+d.map(function(i){ return REC_DSHORT[i]||('?'+i); }).join(', ')+'.';
+}
+/* dayIdxs е МАСИВЪТ с избраните дни, не броят им: редът долу изписва имената,
+   а не само числото. Двата викащи (формата за създаване и за редакция) са в
+   този файл и подават масив. */
+function recWindowToggleHtml(selId, daysId, checked, dayIdxs){
+  var days = Array.isArray(dayIdxs) ? dayIdxs : [];
+  var usable = days.length>1 && days.length<7;
   return '<label id="'+selId+'-wrap" style="display:flex;align-items:center;gap:7px;font-size:12.5px;margin-top:6px;'+(usable?'color:#374151;cursor:pointer;':'color:#94a3b8;cursor:not-allowed;opacity:.6;')+'"'+
     (usable?'':' title="Изисква между 2 и 6 избрани дни"')+'>'+
     '<input type="checkbox" id="'+selId+'" data-days="'+daysId+'"'+((checked&&usable)?' checked':'')+(usable?'':' disabled')+
     ' onchange="recWindowToggleChanged(this)" style="width:14px;height:14px;cursor:inherit;">'+
-    'Прозорец до последния ден (една отметка за цялата седмица)</label>';
+    'Прозорец до последния ден (една отметка за цялата седмица)</label>'+
+    '<div id="'+selId+'-note" style="font-size:11px;color:#475569;margin:3px 0 0 21px;">'+
+      esc(recWindowNoteText(days, checked&&usable))+'</div>';
 }
 /* Преоценява достъпността след всяка промяна по дните. Излиза ли изборът от
    2..6, превключвателят се изключва И се размаркира — иначе би останал
@@ -5617,6 +5646,11 @@ function recWindowSyncToggle(selId, daysId){
   wrap.style.cursor = usable ? 'pointer' : 'not-allowed';
   wrap.style.opacity = usable ? '1' : '.6';
   if(usable) wrap.removeAttribute('title'); else wrap.setAttribute('title','Изисква между 2 и 6 избрани дни');
+  /* Редът с последицата се преизчислява от ЖИВИТЕ чекбокси — и при промяна по
+     дните, и при щракване на самия прозорец. Затова минава оттук, а не от
+     onchange на едно от двете места. */
+  var note = document.getElementById(selId+'-note');
+  if(note) note.textContent = recWindowNoteText(readRecWeekdaysCheckboxes(daysId), cb.checked);
 }
 function recWindowToggleChanged(cb){ recWindowSyncToggle(cb.id, cb.dataset.days); }
 /* Закача се на контейнера с дните, за да не се пише onchange на седем места. */
@@ -5842,12 +5876,24 @@ function bulRunOps(ops){
     });
   }, Promise.resolve({ok:true}));
 }
-function bulSaveRecurringContent(taskId, payload, W){
+/* scope: 'one' (само седмицата W) или 'forward' (от W нататък).
+   ДО 28.09.2026 обхватът се извеждаше от сравнението W срещу текущата седмица и
+   потребителят не избираше нищо. Следствие: постоянна поправка от ТЕКУЩАТА
+   седмица беше невъзможна — записваше се версия само за нея И опашка със
+   СТАРОТО съдържание, тоест поправката се самоизтриваше след седем дни, без
+   предупреждение. Ударено на живо при РЕВИЗИЯ ГРУПИ. Обратното също липсваше:
+   еднократно изключение за БЪДЕЩА седмица.
+   Двата клона отдолу и преди бяха написани общо — нищо в тях не зависи от това
+   дали W е текущата седмица. Промяната е само в това КОЙ ги избира.
+   Липсващ scope пази ДОСЛОВНО старото поведение: така стари викащи и тестове,
+   които подават три аргумента, не се чупят. */
+function bulSaveRecurringContent(taskId, payload, W, scope){
   var C = recurringMondayOf(new Date());
   if (W < C) return Promise.resolve({ok:false, error:{message:'минала седмица'}});
+  if (scope !== 'one' && scope !== 'forward') scope = (W > C) ? 'forward' : 'one';
   var ops = [];
   var cov = bulVersionCovering(taskId, W);
-  if (W > C) {
+  if (scope === 'forward') {
     /* „От W нататък": по-късните версии се заместват — трият се. Версия,
        която покрива W и е започнала ПРЕДИ нея, се затваря на W−7; така
        предишната редакция остава за седмиците преди W. */
@@ -5860,7 +5906,7 @@ function bulSaveRecurringContent(taskId, payload, W){
     ops.push(function(){ return sbPost('recurring_task_versions', bulVersionRow(taskId, W, null, payload)); });
     return bulRunOps(ops);
   }
-  /* W === C — „само тази седмица". */
+  /* „Само седмицата W" — за ПРОИЗВОЛНО W >= C, не само за текущата. */
   if (cov && cov.from_monday === W && bulVerTo(cov) === W) {
     /* Вече има версия точно за W — просто се презаписва. */
     return sbPatch('recurring_task_versions','id=eq.'+cov.id, payload);
@@ -5881,15 +5927,43 @@ function bulSaveRecurringContent(taskId, payload, W){
   }
   return bulRunOps(ops);
 }
-/* Надписът във формата: докъде важи редакцията. Друг текст за текущата и за
-   бъдеща седмица — иначе „само тази седмица" е невидимо правило. */
-function recEditScopeNoteHtml(){
-  var W = bulWeekMonday(), C = recurringMondayOf(new Date());
-  var d = String(W).split('-');
-  var txt = (W > C)
-    ? '📅 Промяната важи от седмицата на '+d[2]+'.'+d[1]+' НАТАТЪК. Текущата и миналите седмици остават непроменени.'
-    : '📅 Промяната важи САМО за тази седмица. От следващата задачата се връща към предишното си съдържание.';
-  return '<div class="rec-edit-scope" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:8px;padding:7px 9px;font-size:11.5px;margin-bottom:10px;">'+txt+'</div>';
+/* ИЗБОР НА ОБХВАТ (28.09.2026). Дотук тук стоеше само НАДПИС: обхватът се
+   решаваше от седмицата, която е отворена, и се съобщаваше на човека post
+   factum. Сега се избира.
+   Подразбира се „нататък", а не „само тази седмица": поправка, която важи
+   вечно, се забелязва; поправка, която се самоизтрива след седем дни, не се
+   забелязва — точно това се случи с РЕВИЗИЯ ГРУПИ.
+   Изречението отдолу носи ДАТИ, не общо описание: „от следващата седмица" не
+   казва нищо на човек, който гледа бюлетин отпреди две седмици. */
+function recScopeNoteText(scope){
+  var W = bulWeekMonday();
+  if (scope === 'one') {
+    return 'Важи за '+bulDM(W)+' – '+bulDM(bulShiftMonday(W,6))+'; от '+
+           bulDM(bulShiftMonday(W,7))+' задачата се връща към предишното си съдържание.';
+  }
+  return 'Важи от '+bulDM(W)+' нататък. Миналите седмици остават непроменени.';
+}
+function recReadScope(){
+  var el = document.querySelector('input[name="rec-scope"]:checked');
+  return (el && el.value === 'one') ? 'one' : 'forward';
+}
+function recScopeChanged(){
+  var el = document.getElementById('rec-scope-note');
+  if (el) el.textContent = recScopeNoteText(recReadScope());
+}
+function recEditScopeHtml(){
+  var row = function(val, label, checked){
+    return '<label style="display:flex;align-items:center;gap:7px;font-size:12px;cursor:pointer;">'+
+      '<input type="radio" name="rec-scope" value="'+val+'"'+(checked?' checked':'')+
+      ' onchange="recScopeChanged()" style="width:14px;height:14px;cursor:pointer;">'+label+'</label>';
+  };
+  return '<div class="rec-edit-scope" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e3a8a;border-radius:8px;padding:8px 9px;font-size:11.5px;margin-bottom:10px;">'+
+    '<div style="display:flex;flex-direction:column;gap:4px;">'+
+      row('one','Само за тази седмица',false)+
+      row('forward','От тази седмица нататък',true)+
+    '</div>'+
+    '<div id="rec-scope-note" style="margin-top:6px;font-size:11px;opacity:.9;">'+
+      esc(recScopeNoteText('forward'))+'</div></div>';
 }
 
 /* ═══════ ПОД-ЗАДАЧИ ══════════════════════════════════════════ */

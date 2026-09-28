@@ -153,7 +153,13 @@ async function titleIn(bulId, db) {
   const t = (h.w.recurringTasks || []).filter(x => x.id === 'r-1')[0] || null;
   return { row: txt(row), title: t && t.title, task: t, h: h };
 }
-/* ✏️ → сменя полетата → 💾 Запази */
+/* ✏️ → сменя полетата → 💾 Запази
+   fields.scope: 'one' | 'forward' — кой радио бутон се избира в синята кутия.
+   ДО 28.09.2026 обхватът не се избираше: извеждаше се от това коя седмица е
+   отворена, тоест редакция от ТЕКУЩАТА седмица беше винаги „само за нея". Сега
+   се избира, а подразбиращият се е „нататък" — затова секциите, които твърдят
+   поведението „само тази седмица", го задават ИЗРИЧНО. Без scope се тества
+   подразбиращото се. Пълното покритие на избора е в tests/rec-edit-scope.test.js. */
 async function editAndSave(h, fields) {
   const row = blockRow(h.doc, 'r-1');
   const pen = row && H.btn(row, '✏️');
@@ -167,6 +173,14 @@ async function editAndSave(h, fields) {
   if (fields.days !== undefined) {
     Array.prototype.forEach.call(h.doc.querySelectorAll('#erec-weekdays input[type=checkbox]'),
       cb => { cb.checked = fields.days.indexOf(+cb.value) >= 0; });
+  }
+  if (fields.scope !== undefined) {
+    const r = Array.prototype.find.call(ov.querySelectorAll('input[name="rec-scope"]'),
+      x => x.value === fields.scope);
+    if (!ok('радиото „' + fields.scope + '" съществува', !!r)) return false;
+    Array.prototype.forEach.call(ov.querySelectorAll('input[name="rec-scope"]'),
+      x => { x.checked = (x === r); });
+    if (!ok('и е избрано', h.w.recReadScope() === fields.scope, h.w.recReadScope())) return false;
   }
   realClick(h.w, H.btn(ov, 'Запази'), '💾 Запази');
   await settle(() => h.calls.toast.some(t => String(t).indexOf('обновена') >= 0 || String(t).indexOf('Грешка') >= 0));
@@ -185,7 +199,7 @@ const span = db => db.versions.map(v => v.from_monday + '..' + (v.to_monday || '
     const h = env('b-cur', db);
     if (await loaded(h)) {
       ok('надписът казва „само за тази седмица"', txt(h.doc.querySelector('#dept-panel-admin')).length >= 0);
-      if (await editAndSave(h, { title: 'Само за С-тази', desc: 'нов опис' })) {
+      if (await editAndSave(h, { title: 'Само за С-тази', desc: 'нов опис', scope: 'one' })) {
         const vp = verPosts(h);
         ok('ЕДИН POST на версия', vp.length === 1, JSON.stringify(vp.map(x => x.body)));
         const b = vp.length ? vp[0].body : {};
@@ -235,7 +249,7 @@ const span = db => db.versions.map(v => v.from_monday + '..' + (v.to_monday || '
     if (await loaded(h)) {
       const before = await titleIn('b-cur', db);
       ok('преди редакцията текущата чете старата версия', before.title === 'Стара постоянна', before.title);
-      if (await editAndSave(h, { title: 'Само за С-тази' })) {
+      if (await editAndSave(h, { title: 'Само за С-тази', scope: 'one' })) {
         const patched = h.calls.patch.filter(x => x.table === 'recurring_task_versions');
         ok('старата версия се затваря на W−7', patched.length === 1 && patched[0].body.to_monday === W_1, JSON.stringify(patched.map(x => x.body)));
         const vp = verPosts(h);
@@ -352,7 +366,7 @@ const span = db => db.versions.map(v => v.from_monday + '..' + (v.to_monday || '
     const db = freshDb();
     const h = env('b-cur', db);
     if (await loaded(h)) {
-      if (await editAndSave(h, { title: 'В склада', dept: 'warehouse' })) {
+      if (await editAndSave(h, { title: 'В склада', dept: 'warehouse', scope: 'one' })) {
         const b = verPosts(h)[0] ? verPosts(h)[0].body : {};
         ok('department влиза във версията', b.department === 'warehouse', b.department);
         ok('sort_order не се пипа никъде', !('sort_order' in b) && taskPatches(h).length === 0);
