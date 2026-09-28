@@ -1092,15 +1092,28 @@ function bulDescPaste(ev){
   var html=''; try{html=cb.getData('text/html')||'';}catch(e){return;}
   if(!html) return;
   var plain=''; try{plain=cb.getData('text/plain')||'';}catch(e){plain='';}
-  var m=html.match(/<a\s[^>]*href\s*=\s*("([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/i);
-  if(!m) return;
-  var href=(m[2]||m[3]||'').trim();
+  /* И АДРЕСЪТ, и текстът се вземат от ПАРСИРАН HTML, не с регекс върху суровия
+     низ. Причината е бъг от 28.09.2026: в клипборда `&` е `&amp;`, тоест
+     регексът даваше `?a=1&amp;b=2` и точно това влизаше в описанието. После
+     linkify() го ескейпваше пак и в href оставаше `&amp;` — OneDrive и
+     SharePoint отговаряха „Този елемент може да не съществува". Засягаше всеки
+     адрес с `?` и `&`, тоест практически всички споделени файлове.
+     getAttribute('href') връща стойността, РАЗКОДИРАНА от самия парсер — с
+     нея се оправят наведнъж &amp;, &#39;, &quot; и всяко друго ентитие, без да
+     се пише втори разкодировач.
+     НЕ се ползва .href (свойството): то нормализира адреса спрямо страницата —
+     добавя схема, маха точки, презаписва празните места — а тук трябва точно
+     каквото е копирано.
+     Парсва се с DOMParser, а НЕ с innerHTML на div: DOMParser дава инертен
+     документ, в който `<img onerror=…>` от подхвърлен клипборд не се изпълнява
+     и никакъв ресурс не се тегли. */
+  var pdoc=null;
+  try{ pdoc=new DOMParser().parseFromString(html,'text/html'); }catch(e){ return; }
+  var link=pdoc?pdoc.querySelector('a[href]'):null;
+  if(!link) return;
+  var href=String(link.getAttribute('href')||'').trim();
   if(!/^(https?:\/\/|mailto:)/i.test(href)) return;
-  /* Текстът на линка идва като HTML — таговете вътре се махат, ентитите се
-     разкодират през самия браузър, за да не се пише втори разкодировач. */
-  var tmp=document.createElement('div');
-  tmp.innerHTML=m[4]||'';
-  var label=(tmp.textContent||'').replace(/\s+/g,' ').trim();
+  var label=(link.textContent||'').replace(/\s+/g,' ').trim();
   if(!label||label===href) return;      /* нищо не печелим — остави го както е */
   if(label.length>120) label=label.slice(0,117)+'…';
   if(label.indexOf('[')>=0||label.indexOf(']')>=0) return;  /* би счупило формата */

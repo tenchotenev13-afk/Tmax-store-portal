@@ -361,6 +361,68 @@ async function view(db, over) {
     ok('скоба в текста → не се пипа', ev.prevented === false, JSON.stringify(el.value));
   }
 
+  section('9б. Ентитетата в АДРЕСА се разкодират (бъг от 28.09.2026)');
+  {
+    /* В клипборда `&` е `&amp;`. Дотук href се вадеше с регекс от суровия HTML,
+       тоест в описанието влизаше „?a=1&amp;b=2"; linkify() го ескейпваше пак и
+       в href оставаше &amp;. OneDrive/SharePoint отговаряха „Този елемент може
+       да не съществува" — засягаше всеки адрес с ? и &. */
+    const h = await view(freshDb());
+    h.w.openTaskModalForDept('admin');
+    const el = h.doc.getElementById('tk-desc');
+    const pasteEv = (html, plain) => ({
+      target: el, prevented: false,
+      preventDefault() { this.prevented = true; },
+      clipboardData: { getData: t => (t === 'text/html' ? html : (plain || '')) }
+    });
+
+    el.value = ''; el.selectionStart = el.selectionEnd = 0;
+    let ev = pasteEv('<a href="https://a.bg/x?a=1&amp;b=2">Файлът</a>', 'Файлът');
+    h.w.bulDescPaste(ev);
+    ok('в полето влиза АДРЕСЪТ с & , не с &amp;',
+      el.value === '[Файлът](https://a.bg/x?a=1&b=2)', JSON.stringify(el.value));
+    ok('и никъде не е останало &amp;', el.value.indexOf('&amp;') < 0, JSON.stringify(el.value));
+
+    /* Истинският случай: OneDrive адрес с два параметъра. */
+    el.value = ''; el.selectionStart = el.selectionEnd = 0;
+    ev = pasteEv('<a href="https://temax-my.sharepoint.com/:x:/g/personal/x/EdL?e=4%3Aabc&amp;at=9&amp;resid=1234">Справка</a>', 'Справка');
+    h.w.bulDescPaste(ev);
+    ok('OneDrive адресът влиза цял и с чисти &',
+      el.value === '[Справка](https://temax-my.sharepoint.com/:x:/g/personal/x/EdL?e=4%3Aabc&at=9&resid=1234)',
+      JSON.stringify(el.value));
+
+    /* Другите ентитита — същият парсер ги оправя наведнъж. */
+    el.value = ''; el.selectionStart = el.selectionEnd = 0;
+    ev = pasteEv('<a href="https://a.bg/p?q=&#39;x&#39;&amp;r=1">Кавички</a>', 'Кавички');
+    h.w.bulDescPaste(ev);
+    ok('&#39; също се разкодира',
+      el.value === "[Кавички](https://a.bg/p?q='x'&r=1)", JSON.stringify(el.value));
+
+    /* И най-важното — какво вижда човекът. */
+    const html = h.w.linkify('[Файлът](https://a.bg/x?a=1&b=2)');
+    const href = (/href="([^"]*)"/.exec(html) || [])[1] || '';
+    ok('показаният href носи &amp; ЕДИН път (валиден HTML за един &)',
+      href === 'https://a.bg/x?a=1&amp;b=2', href);
+    ok('и НЕ е двойно ескейпнат', href.indexOf('&amp;amp;') < 0, href);
+    /* Това е проверката, която решава дали линкът работи: след като браузърът
+       разкодира атрибута, адресът трябва да е точно копираният. */
+    const probe = h.doc.createElement('div');
+    probe.innerHTML = html;
+    ok('браузърът разкодира href обратно до чистия адрес',
+      probe.querySelector('a').getAttribute('href') === 'https://a.bg/x?a=1&b=2',
+      probe.querySelector('a').getAttribute('href'));
+
+    /* Клипборд без DOMParser (много стар браузър) — да не гърми. */
+    el.value = 'преди'; el.selectionStart = el.selectionEnd = 6;
+    const realDP = h.w.DOMParser;
+    h.w.DOMParser = undefined;
+    ev = pasteEv('<a href="https://a.bg/1">Х</a>', 'Х');
+    ok('без DOMParser не хвърля', guard('bulDescPaste без DOMParser',
+      () => h.w.bulDescPaste(ev)));
+    ok('и не пипа полето', el.value === 'преди', JSON.stringify(el.value));
+    h.w.DOMParser = realDP;
+  }
+
   section('10. Хартия: адресът остава на листа');
   {
     const h = await view(freshDb());
