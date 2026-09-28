@@ -90,7 +90,7 @@ const ACCOUNTANT = {
   role: 'accounting', store_name: 'Централен офис',
   assigned_stores: ['Раднево', 'Гоце Делчев']
 };
-/* Магазинска роля — вижда, но не подава и не редактира. */
+/* Магазинска роля — вижда и подава за своя обект (от 28.09.2026), не редактира. */
 const STORE_USER = {
   email: 'radnevo@temax.bg', display_name: 'Склад Раднево',
   role: 'sklad', store_name: 'Раднево', assigned_stores: []
@@ -344,33 +344,34 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
       w.diffCategoryLabel('billed_not_received').indexOf('Фактурирана неприета') >= 0);
   }
 
-  section('6. Магазинска роля НЕ може да подаде бланка в тази посока');
+  /* 6–7 до 28.09.2026 заковаваха „магазинът НЕ подава". Решение на Цвети:
+     магазинът подава за СВОЯ обект (бутон „🧾 Грешен прием"). Пълното
+     покритие — tests/wrong-receipt-store-submit.test.js. */
+  section('6. Магазинска роля вижда опцията — за своя обект');
   {
     const { w, doc } = env(STORE_USER, 'wrong_receipt');
-    ok('canSubmitWrongReceipt() е false за sklad', w.canSubmitWrongReceipt() === false);
-    ok('но обикновената бланка му остава разрешена', w.canSubmitDiff() === true);
+    ok('canSubmitWrongReceipt() (ЦО) остава false за sklad', w.canSubmitWrongReceipt() === false);
+    ok('canStoreSubmitWrongReceipt() е true за sklad', w.canStoreSubmitWrongReceipt() === true);
+    ok('обикновената бланка му остава разрешена', w.canSubmitDiff() === true);
 
     w.openDiffSubmitModal();
     await ticks();
     const sel = doc.getElementById('diff-direction');
     if (ok('формата за подаване се отваря', !!sel)) {
-      ok('опцията "wrong_receipt" изобщо не е в селекта',
-        sel.innerHTML.indexOf('wrong_receipt') < 0, sel.innerHTML);
+      ok('опцията "wrong_receipt" е в селекта', sel.innerHTML.indexOf('wrong_receipt') >= 0, sel.innerHTML);
     }
   }
 
-  section('7. …и гейтът НЕ е само скритата опция — записът също пада');
+  section('7. …но гейтът в записа спира чужд обект (подправен DOM)');
   {
     const { w, doc, calls } = env(STORE_USER, 'wrong_receipt');
-    w.openDiffSubmitModal();
+    w.openDiffSubmitModal({ direction: 'wrong_receipt' });
     await ticks();
-    /* Симулираме подправен DOM: добавяме опцията ръчно и я избираме. */
-    const sel = doc.getElementById('diff-direction');
-    sel.innerHTML += '<option value="wrong_receipt">🧾 Сторна</option>';
-    sel.value = 'wrong_receipt';
+    /* Подправяме заключеното поле за обект: чужд магазин. */
+    doc.getElementById('diff-store').value = 'Гоце Делчев';
+    doc.getElementById('diff-counterpart').innerHTML = '<option>ТЕСИ ООД</option>';
     doc.getElementById('diff-docnum').value = 'ФК-9999';
-    const nameEl = doc.querySelector('#diff-items .di-name');
-    nameEl.value = 'ПОДПРАВЕН РЕД';
+    doc.querySelector('#diff-items .di-name').value = 'ПОДПРАВЕН РЕД';
     doc.querySelector('#diff-items .di-qty').value = '5';
 
     realClick(w, btn(doc.getElementById('diff-submit-ov'), 'Подай бланка'));
@@ -379,7 +380,7 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
       JSON.stringify(calls.post.map(p => p.table)));
     ok('и НЕ се записват редове', !calls.post.some(p => p.table === 'stock_differences'));
     ok('потребителят получава обяснение',
-      calls.toast.some(t => String(t.msg || t).indexOf('централния офис') >= 0),
+      calls.toast.some(t => String(t.msg || t).indexOf('само за твоя обект') >= 0),
       JSON.stringify(calls.toast));
   }
 

@@ -53,13 +53,21 @@ function canSubmitDiff() {
 function canReviewDiff() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
-/* Подаване на бланка в посока "Сторна по грешен прием" - САМО централен офис.
-   Оперативните счетоводители по обекти са accounting профили с разпределение в
-   users.assigned_stores (store_name им е "Централен офис"), затова ролята стига
-   и нова роля не е нужна. Магазинските роли (manager/sklad/info) виждат тези
-   бланки, но не ги създават - от тях излизат глоби. */
+/* Подаване на бланка в посока "Сторна по грешен прием" от ЦЕНТРАЛНИЯ ОФИС - за
+   всеки обект. Оперативните счетоводители по обекти са accounting профили с
+   разпределение в users.assigned_stores (store_name им е "Централен офис"),
+   затова ролята стига и нова роля не е нужна. */
 function canSubmitWrongReceipt(){
   return currentUser && ['admin','accounting'].indexOf(currentUser.role) >= 0;
+}
+/* ...и от МАГАЗИНА - само за собствения му обект (решение на Цвети, 28.09.2026:
+   обектът сам хваща грешен прием). Магазин = подава бланки (canSubmitDiff) и не
+   е глобален профил, тоест manager/sklad/info - assignedStores() им връща
+   собствения обект. Бланката се третира ЕДНАКВО с тези от ЦО: глобите и
+   справката (report.js) гледат само direction, не кой я е подал. След
+   подаването редовете пак са само за четене за магазина (isWrongReceiptReadOnly). */
+function canStoreSubmitWrongReceipt(){
+  return !!currentUser && canSubmitDiff() && !isGlobal();
 }
 /* Един израз за "този ред е сторна по грешен прием и аз съм магазинът".
    Ползва се от canEditSD, от модала за корекция и от модала за редакция -
@@ -305,6 +313,9 @@ function renderStockDiff() {
   h += '<div style="font-size:20px;font-weight:600;">📋 Разлики</div>';
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
   if (canSubmitDiff()) h += '<button onclick="openDiffSubmitModal()" style="border:none;background:#7c3aed;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📝 Подай бланка</button>';
+  /* Магазинът подава "Сторна по грешен прием" за своя обект - същата форма,
+     с посоката избрана предварително. ЦО я избира от селекта, както досега. */
+  if (canStoreSubmitWrongReceipt()) h += '<button onclick="openDiffSubmitModal({direction:\'wrong_receipt\'})" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">🧾 Грешен прием</button>';
   if (canAdd) h += '<button onclick="openSDModal(null)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави ръчно</button>';
   h += '</div></div>';
 
@@ -3349,13 +3360,13 @@ function diffSubmitModalHtml(){
     '<button onclick="closeDiffSubmitModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">'+
-    /* "Сторна по грешен прием" се показва като опция само на ЦО - магазинската
-       роля не бива да може дори да я избере. Записът пак се проверява отделно
+    /* "Сторна по грешен прием" - за ЦО и за магазина (за своя обект). Ролите
+       без това право не виждат опцията изобщо. Записът пак се проверява отделно
        в submitDiffReport(), скритата опция сама по себе си не е защита. */
     '<div><label class="fl">Посока *</label><select class="fi" id="diff-direction" onchange="updateDiffCounterpartLabel()">'+
       '<option value="interstore">🔄 Междускладов трансфер</option>'+
       '<option value="supplier">📦 Доставчик</option>'+
-      (canSubmitWrongReceipt()?'<option value="wrong_receipt">🧾 Сторна по грешен прием</option>':'')+
+      ((canSubmitWrongReceipt()||canStoreSubmitWrongReceipt())?'<option value="wrong_receipt">🧾 Сторна по грешен прием</option>':'')+
     '</select></div>'+
     '<div><label class="fl">Магазин *</label>'+storeField+'</div>'+
     '</div>'+
@@ -3516,8 +3527,17 @@ function submitDiffReport(){
   /* Твърдият гейт за посоката е ТУК, не само в скритата опция на селекта -
      подаването ражда глоба и не бива да зависи от това какво е рендирано. */
   if(direction==='wrong_receipt'&&!canSubmitWrongReceipt()){
-    toast('Бланка „Сторна по грешен прием" се подава само от централния офис','#dc2626');
-    return;
+    if(!canStoreSubmitWrongReceipt()){
+      toast('Нямаш право да подаваш бланка „Сторна по грешен прием"','#dc2626');
+      return;
+    }
+    /* Магазинът - само за своя обект. Полето е заключено в модала, но
+       скрито поле не е защита. */
+    var ownStores=assignedStores()||[];
+    if(ownStores.indexOf(store)<0){
+      toast('„Сторна по грешен прием" се подава само за твоя обект','#dc2626');
+      return;
+    }
   }
   /* Празната насрещна страна минаваше тихо. Бланка без изпращач/доставчик не
      стига до никого - и двата списъка тръгват от празна опция, значи "не съм

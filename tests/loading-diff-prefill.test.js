@@ -32,8 +32,13 @@ const crypto = require('crypto');
      di-qty-real   "Реално получено"  -> "Реално получено (бр.)"                          (+6)
    „По вх. доставка" се четеше като „впиши вх. доставка" - 21 реда в базата с
    quantity = номер на доставка. Виж tests/diff-qty-guard.test.js. */
-const MODAL_SHA = '22f3cc3e09792280821876977acda8da3b804f16c9672d4fc9ad5b64576f956f';
-const MODAL_LEN = 5470;
+/* Обновена на 28.09.2026 (5470 -> 5534): магазинът (тук manager) вече подава
+   „Сторна по грешен прием" за своя обект, тоест селектът „Посока" има и
+   <option value="wrong_receipt">🧾 Сторна по грешен прием</option> - точно 64
+   знака, едно срещане и нищо друго: без него HTML-ът е байт по байт старата
+   снимка 22f3cc3e… (5470), проверено машинно. Виж wrong-receipt-store-submit. */
+const MODAL_SHA = '7ed54966b17543cdd1c6411193983245d2f4fda7c51f3d36cbef7ea3630a5a8d';
+const MODAL_LEN = 5534;
 
 const WH = 'Логистичен склад Търговище';
 const STORE = { email: 'petrich@temax.bg', display_name: 'Управител Петрич',

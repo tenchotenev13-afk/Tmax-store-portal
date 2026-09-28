@@ -119,6 +119,7 @@ const TESTS = [
   'bulletin-completion-day-lock.test.js',
   'bulletin-store-denominator.test.js',
   'wrong-receipt-tab.test.js',
+  'wrong-receipt-store-submit.test.js',
   'today-wrong-receipt-row.test.js',
   'notifications-poll.test.js',
   'weekly-report-window.test.js',
