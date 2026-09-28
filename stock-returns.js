@@ -490,7 +490,7 @@ function srModalHtml() {
     '<label class="fl">Изтеглена от/с куриер (номер на товарителница)</label>'+
     '<input class="fi" id="sr-courier" value="'+esc(r.courier_info||'')+'" placeholder="напр. по буса на Кърджали към Сливен / Еконт 5300...">'+
 
-    '<div id="sr-photo-hint" style="display:'+((r.status==='taken'||r.status==='completed')?'block':'none')+';background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11.5px;color:#92400e;">📸 <b>Задължително:</b> снимка на товарителницата, дата на изтегляне и куриер.</div>'+
+    '<div id="sr-photo-hint" style="display:'+((r.status==='taken'||r.status==='completed')?'block':'none')+';background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11.5px;color:#92400e;">'+srPhotoHintHtml(r.controller_comment)+'</div>'+
     '<label class="fl">Снимка на товарителница/документ</label>'+
     '<div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;">'+
       '<label style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:6px;padding:6px 12px;font-size:12px;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:5px;">'+
@@ -508,7 +508,7 @@ function srModalHtml() {
     '<input class="fi" id="sr-cc" value="'+esc(r.control_comment||'')+'" placeholder="напр. ИЗД КИ">';
 
   h += '<label class="fl">Коментар Контролер</label>'+
-    '<input class="fi" id="sr-ctrl" value="'+esc(r.controller_comment||'')+'" placeholder="напр. КЪМ ЛС ТЪРГОВИЩЕ / ИЗПРАЩАЙТЕ">';
+    '<input class="fi" id="sr-ctrl" value="'+esc(r.controller_comment||'')+'" placeholder="напр. КЪМ ЛС ТЪРГОВИЩЕ / ИЗПРАЩАЙТЕ" oninput="updateSRPhotoHint()">';
 
   h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
     '<button onclick="closeSRModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
@@ -624,6 +624,20 @@ function updateSRPhotoHint(){
   var hintEl=document.getElementById('sr-photo-hint');
   if(!statusEl||!hintEl)return;
   hintEl.style.display = (statusEl.value==='taken'||statusEl.value==='completed') ? 'block' : 'none';
+  var ctrlEl=document.getElementById('sr-ctrl');
+  hintEl.innerHTML = srPhotoHintHtml(ctrlEl?ctrlEl.value:'');
+}
+/* "Изхвърляне": контролерът е написал в "Коментар контролер" стоката да се
+   изхвърли (ИЗХВЪРЛЯЙТЕ / изхвърляте / изхвърлена). Тогава тя не минава през
+   куриер и товарителница няма - изисква се само дата (на изхвърлянето).
+   По корена "изхвърл", без значение от главни/малки букви. */
+function srIsDiscard(text){
+  return String(text||'').toLowerCase().indexOf('изхвърл')>=0;
+}
+function srPhotoHintHtml(ctrlText){
+  return srIsDiscard(ctrlText)
+    ? '🗑️ <b>Изхвърляне:</b> нужна е само дата.'
+    : '📸 <b>Задължително:</b> снимка на товарителницата, дата на изтегляне и куриер.';
 }
 function closeSRModal() {
   var ov=document.getElementById('sr-ov'); if(ov)ov.classList.remove('open');
@@ -1192,15 +1206,19 @@ function submitSR() {
   if(!lockStatus && (data.status==='taken' || data.status==='completed')){
     var wasProven = !!origRecord && (origRecord.status==='taken' || origRecord.status==='completed');
     if(!wasProven){
+      /* data.controller_comment се попълва по-долу, по таба - затова тук се
+         чете направо от полето. Какво се записва, не се променя. */
+      var ctrlNow=document.getElementById('sr-ctrl');
+      var discard=srIsDiscard(ctrlNow?ctrlNow.value:'');
       var missing=[];
-      if(!(Array.isArray(srPendingPhotos) && srPendingPhotos.length)) missing.push('снимка на товарителницата');
-      if(!data.withdrawal_date) missing.push('дата на изтегляне');
+      if(!discard && !(Array.isArray(srPendingPhotos) && srPendingPhotos.length)) missing.push('снимка на товарителницата');
+      if(!data.withdrawal_date) missing.push(discard?'дата на изхвърляне':'дата на изтегляне');
       var courier=(data.courier_info||'').trim();
       /* "—" и "-" не са куриер - махаме тиретата и празното място и проверяваме
          дали изобщо е останало нещо. */
-      if(courier.length<3 || !courier.replace(/[—–\-\s]/g,'')) missing.push('изтеглена от/с куриер');
+      if(!discard && (courier.length<3 || !courier.replace(/[—–\-\s]/g,''))) missing.push('изтеглена от/с куриер');
       if(missing.length){
-        toast('Липсва товарителница — '+missing.join(', '),'#dc2626');
+        toast((discard?'Изхвърляне — липсва ':'Липсва товарителница — ')+missing.join(', '),'#dc2626');
         return;
       }
     }
