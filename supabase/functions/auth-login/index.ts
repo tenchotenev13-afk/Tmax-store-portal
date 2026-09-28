@@ -1,6 +1,7 @@
 // supabase/functions/auth-login/index.ts
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
 import * as bcrypt from "https://deno.land/x/bcrypt@v0.4.1/mod.ts";
+import { signSession } from "../_shared/session.ts";
 
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
@@ -77,7 +78,14 @@ Deno.serve(async (req) => {
     }
 
     const { password: _p, password_hash: _ph, ...safeUser } = user;
-    return json({ ok: true, user: safeUser }, 200);
+    // Пропускът не бива да събаря входа: без секрет или при грешка → session: null.
+    let session: string | null = null;
+    try {
+      session = await signSession({ uid: String(user.id), role: user.role, email: user.email });
+    } catch (e) {
+      console.error("auth-login: пропускът не е подписан:", e);
+    }
+    return json({ ok: true, user: safeUser, session }, 200);
   } catch (e) {
     console.error("auth-login error:", e);
     return json({ ok: false, message: "Вътрешна грешка.", reason: "server_error" }, 500);

@@ -160,6 +160,7 @@ function logAudit(event,extra){
 
 /* STATE */
 var currentUser=null; /* {email,display_name,store_name,role} */
+var currentSession=null; /* подписан пропуск от auth-login ("payload.подпис"); само в паметта, не в localStorage */
 var transportOrders=[],clientOrders=[],docs=[];
 var transportFilter='all',orderFilter='all',docFilter='all';
 var statusTargetId=null,statusTargetTable=null;
@@ -1442,6 +1443,7 @@ function doLogin(){
       return;
     }
     currentUser=d.user;
+    currentSession=d.session||null;
     logAudit('login_success');
     startApp();
   }).catch(function(){
@@ -1453,6 +1455,7 @@ function doLogin(){
 function doLogout(){
   logAudit('logout');
   currentUser=null;
+  currentSession=null;
   transportOrders=[];clientOrders=[];docs=[];
   document.getElementById('s-app').style.display='none';
   document.getElementById('s-login').style.display='flex';

@@ -46,7 +46,7 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 
 | Слуг | ver. | Файл | За какво служи | Кой го вика | JWT |
 |---|---|---|---|---|---|
-| `auth-login` | 16 | `index.ts` | Логин: bcrypt срещу `password_hash`, мигрира стари пароли в чист вид | портал — `shared.js` | ✅ |
+| `auth-login` | 17 | `index.ts` + `_shared/session.ts` | Логин: bcrypt срещу `password_hash`, мигрира стари пароли в чист вид; от 28.09.2026 връща и подписан пропуск `session` | портал — `shared.js` | ✅ |
 | `auth-set-password` | 16 | `index.ts` | Смяна/ресет на парола (мин. 4 символа) | портал — `shared.js`, `admin.js` | ✅ |
 | `resend-email` | 56 | **`send-email.ts`** | Праща И имейл (SMTP `mail.temax.bg`), И push — по поле `type` | портал — `email.js`, `push.js`; и четирите крон функции по-долу | ✅ |
 | `portal-push` | 24 | `index.ts` | Push през OneSignal — до всички или по таг `store_name` | портал — `push.js` (`osSend`) | ✅ |
@@ -156,6 +156,38 @@ id-то се търси първо в `bulletin_tasks`, после в `recurring
 успешен логин я мигрира към хеш и зачиства `password`. Връща потребителя без
 двете полета с парола.
 
+От 28.09.2026 (ver. 17) отговорът е `{ ok, user, session }` — `session` е
+подписан пропуск ДО `user`, не вътре в него. Подписва го `signSession()` от
+`_shared/session.ts`. Липсва ли секретът или подписването хвърли —
+`console.error` и `session: null`; **входът не пада заради пропуска.**
+Клиентът го държи в `currentSession` (`shared.js`) — само в паметта, не в
+`localStorage`; нулира се при изход. **Засега никой не го проверява** — това
+е етап 1 от затварянето на `users`. В етап 2 `auth-set-password` и
+`set-history-pin` ще го изискват вместо произволен `user_id`.
+Връщане назад: деплой на ver. 16 — клиентът с `currentSession=null` работи
+както преди.
+
+### `_shared/session.ts` — пропускът
+
+Не е функция, а общ модул; CLI-то го пакетира в функцията, която го импортира
+(`../_shared/session.ts`), тоест **промяна тук стига до живо само с деплой на
+всяка функция, която го ползва.** Обратното четене сваля и него — сравнявай
+ДВАТА файла, не само `index.ts`.
+
+- `signSession({uid, role, email})` → `"payload.подпис"`, двете части base64url.
+  payload = JSON `{uid, role, email, iat, exp}`, `exp = iat + 12 ч` (секунди);
+  подпис = HMAC-SHA256 върху **низа** на payload-частта, през `crypto.subtle`.
+  Хвърля, ако `PORTAL_SESSION_SECRET` липсва.
+- `verifySession(token)` → payload или `null` (никога не хвърля): липсващ
+  секрет, грешен формат, неверен подпис (сравнение в константно време), изтекъл
+  `exp` (`now >= exp`).
+
+Тест: `deno test supabase/functions/_shared/session.test.ts --allow-env`.
+Не е в `npm test` — той е за браузърния код. Тестът има случай с подправен, но
+**валиден** JSON payload (роля `store` → `admin`): смяна на една буква обикновено
+чупи JSON-а и дава `null` и без проверка на подписа, тоест сама по себе си е
+тавтология — проверено с контрола, при която `verify` не сверява подписа.
+
 **`auth-set-password`** — със стара парола (потребителят си я сменя сам) или
 без нея (админ ресетва).
 
@@ -262,6 +294,7 @@ denomailer@1.6.0 реже символи и чупи SMTP dot-stuffing; тема
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | auth-login, auth-set-password, kasa-access-check, set-history-pin, send-scheduled-report, send-oborot-report, dynamic-responder, bulletin-notify |
 | `ONESIGNAL_REST_KEY` | portal-push, resend-email, swift-handler |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_NAME` | resend-email |
+| `PORTAL_SESSION_SECRET` | auth-login (подписва пропуска през `_shared/session.ts`); в етап 2 и функциите, които го проверяват. ≥48 случайни байта (`openssl rand -base64 48`), зададен на 28.09.2026 с `supabase secrets set`. Смяната му обезсилва всички издадени пропуски — хората влизат наново. |
 
 Задават се в Supabase → Project Settings → Edge Functions → Secrets.
 **Не ги слагай във файл в тази папка.**
