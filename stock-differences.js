@@ -629,6 +629,44 @@ function sdVisibleUnreviewedReports(){
   }
   return list;
 }
+/* „✅ Решена — чака имейл" (точка 3 от Цвети, 28.09.2026): прегледана бланка,
+   по която още не е изпратен имейл и не е натиснато „✓ Без имейл". Остава в
+   горната секция заедно с непрегледаните — там е бутонът за имейл. ОТДЕЛНА
+   функция, а не разширение на sdVisibleUnreviewedReports: от нея смятат
+   броячите и баджовете за „непрегледани", а тези бланки са прегледани. */
+function sdVisibleEmailPendingReports(){
+  var list = diffReports.filter(function(r){ return !!r.reviewed && r.email_pending === true; });
+  if(isLogisticsWarehouseUser()){
+    list = list.filter(function(r){ return r.counterpart === currentUser.store_name; });
+  }
+  return list;
+}
+/* Patch-ът, с който бланката става прегледана — ЕДИН израз за четирите места,
+   които го пишат. При посока, по която решава Цвети (всичко освен
+   междускладова — същото условие като repShowResolve), в СЪЩИЯ patch влиза и
+   email_pending=true: бланката остава горе, докато не тръгне имейл или
+   „✓ Без имейл". Непозната бланка → само reviewed (без догадки). */
+function sdReviewedPatch(reportId){
+  var rep = diffReports.find(function(r){ return String(r.id) === String(reportId); });
+  var p = {reviewed:true};
+  if(rep && rep.direction !== 'interstore') p.email_pending = true;
+  return p;
+}
+/* „✓ Без имейл": бланката е решена, имейл до доставчика нарочно не се праща.
+   Слиза долу. Провал на записа → червен toast и бланката остава горе. */
+function sdSkipDiffEmail(rid){
+  if(!canSendDiffEmail()) return;
+  var rep = diffReports.find(function(r){ return String(r.id) === String(rid); });
+  if(!rep) return;
+  if(!confirm('Бланката е решена — да слезе долу БЕЗ имейл до '+diffDirEmailTo(rep.direction)+'?')) return;
+  var at = new Date().toISOString();
+  sbPatch('differences_reports','id=eq.'+rep.id,{email_pending:false, email_skipped_at:at}).then(function(res){
+    if(!res.ok){ toast('Грешка при запис: '+sbErrMsg(res),'#dc2626'); return; }
+    rep.email_pending = false; rep.email_skipped_at = at;
+    toast('✓ Бланката е решена без имейл');
+    loadStockDiff();
+  });
+}
 /* Миниатюри на снимките, качени от МАГАЗИНА към бланката. Показват се и в
    главната таблица, и в модала - независимо дали редът е още непрегледан,
    или Цвети вече го е решила (напр. като "Липса"). */
@@ -987,7 +1025,7 @@ function submitStoreLateReceive(lineId){
       (line.material_name||'')+' — получено на '+fmtDate(d));
     var siblings = sdData.filter(function(x){return x.report_id===line.report_id;});
     if(siblings.length && siblings.every(function(x){return x.status==='received';})){
-      sbPatch('differences_reports','id=eq.'+line.report_id,{reviewed:true}).then(function(){
+      sbPatch('differences_reports','id=eq.'+line.report_id,sdReviewedPatch(line.report_id)).then(function(){
         toast('✅ Бланката е приключена');
         loadStockDiff();
       });
@@ -1223,7 +1261,10 @@ function resolveDiffLine(id,type,sync){
       var siblingLines=sdData.filter(function(x){return x.report_id===line.report_id;});
       var allResolved = siblingLines.length>0 && siblingLines.every(function(x){return !!x.type;});
       if(allResolved && line.report_id){
-        sbPatch('differences_reports','id=eq.'+line.report_id,{reviewed:true}).then(function(){
+        sbPatch('differences_reports','id=eq.'+line.report_id,sdReviewedPatch(line.report_id)).then(function(res){
+          /* Редът е решен, но бланката не е отбелязана — казва се, не се
+             поглъща: иначе „напълно прегледана" би било лъжа. */
+          if(res && !res.ok){ toast('Редът е решен, но бланката НЕ е отбелязана: '+sbErrMsg(res),'#dc2626'); loadStockDiff(); return; }
           say('✅ Решено — бланката е напълно прегледана!');
           loadStockDiff();
         });
@@ -1313,7 +1354,7 @@ function sdConfirmInterstore(lineId, as){
     var siblings = sdData.filter(function(x){return x.report_id===line.report_id;});
     var allReceived = siblings.length>0 && siblings.every(function(x){return x.status==='received';});
     if(allReceived && line.report_id){
-      sbPatch('differences_reports','id=eq.'+line.report_id,{reviewed:true}).then(function(){
+      sbPatch('differences_reports','id=eq.'+line.report_id,sdReviewedPatch(line.report_id)).then(function(){
         toast('✅ Бланката е приключена');
         loadStockDiff();
       });
@@ -2426,7 +2467,7 @@ function sdCloseSwap(swapId){
     return Promise.all(repIds.map(function(rid){
       var sib = sdData.filter(function(x){ return x.report_id===rid; });
       if(!sib.length || !sib.every(function(x){ return x.status==='received'; })) return {ok:true};
-      return sbPatch('differences_reports', 'id=eq.'+rid, {reviewed:true});
+      return sbPatch('differences_reports', 'id=eq.'+rid, sdReviewedPatch(rid));
     }));
   }).then(function(results){
     if(results.some(function(r){ return !r.ok; })) toast('Размяната е приключена, но бланката НЕ е затворена','#dc2626');
@@ -2804,7 +2845,10 @@ function sdActionsCard(){
 
 /* ── Секция с подадени бланки (чакат преглед) ── */
 function renderDiffReportsSection(){
-  var allVisible = sdVisibleUnreviewedReports();
+  /* Горе стоят непрегледаните И решените, които чакат имейл (email_pending).
+     Броячите за „непрегледани" НЕ ги виждат — те ползват само
+     sdVisibleUnreviewedReports. */
+  var allVisible = sdVisibleUnreviewedReports().concat(sdVisibleEmailPendingReports());
   var unreviewed = allVisible.slice();
   /* Подтаб по посока - Доставчик / Междускладов трансфер (искане на Цвети:
      двата потока да не се смесват в един списък). */
@@ -2846,6 +2890,8 @@ function renderDiffReportsSection(){
     return lines.length>0 && lines.every(function(l){return !!l.warehouse_response;});
   }
   unreviewed = unreviewed.slice().sort(function(a,b){
+    /* Решените, които чакат само имейл, са след още непрегледаните. */
+    if(!!a.reviewed !== !!b.reviewed) return a.reviewed ? 1 : -1;
     var aResponded = warehouseFullyResponded(a.id);
     var bResponded = warehouseFullyResponded(b.id);
     if(aResponded&&!bResponded)return 1;
@@ -2889,9 +2935,11 @@ function renderDiffReportsSection(){
        '</div>'+
        '<div style="display:flex;align-items:center;gap:8px;">'+
        '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</span>'+
+       (rep.reviewed&&rep.email_pending?'<span style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">✅ Решена — чака имейл</span>':'')+
        (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+sdFmtDateTime(rep.email_sent_at)+'</span>':'')+
        '<button data-rid="'+rep.id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
        (canSendDiffEmail()?'<button data-rid="'+rep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✉️ Изпрати имейл</button>':'')+
+       (canSendDiffEmail()&&rep.reviewed&&rep.email_pending?'<button data-rid="'+rep.id+'" onclick="sdSkipDiffEmail(this.dataset.rid)" title="Бланката е решена — слиза долу без имейл" style="border:1px solid #a7f3d0;background:#ecfdf5;color:#047857;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✓ Без имейл</button>':'')+
        (sdCanDeleteReport()?'<button data-rid="'+rep.id+'" onclick="sdDeleteReport(this.dataset.rid)" title="Изтрий ЦЯЛАТА бланка — редове и файлове, необратимо" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🗑 Изтрий бланката</button>':'')+
        '</div>';
     h+='</div>';
@@ -3964,7 +4012,11 @@ function sendDiffEmail(reportId){
       return;
     }
     toast('✅ Имейлът е изпратен!');
-    sbPatch('differences_reports','id=eq.'+rep.id,{email_sent_at:new Date().toISOString()}).then(function(){
+    /* email_pending=false в СЪЩИЯ patch: „Решена — чака имейл" слиза долу. */
+    sbPatch('differences_reports','id=eq.'+rep.id,{email_sent_at:new Date().toISOString(), email_pending:false}).then(function(res){
+      /* Имейлът е тръгнал, но бланката не е отбелязана — казва се и тя
+         остава горе, вместо тихо да изглежда, че всичко е наред. */
+      if(res && !res.ok) toast('Имейлът е изпратен, но бланката НЕ е отбелязана: '+sbErrMsg(res),'#dc2626');
       closeDiffEmailModal();
       loadStockDiff();
     });
