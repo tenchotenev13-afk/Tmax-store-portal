@@ -46,7 +46,7 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 
 | Слуг | ver. | Файл | За какво служи | Кой го вика | JWT |
 |---|---|---|---|---|---|
-| `auth-login` | 17 | `index.ts` + `_shared/session.ts` | Логин: bcrypt срещу `password_hash`, мигрира стари пароли в чист вид; от 28.09.2026 връща и подписан пропуск `session` | портал — `shared.js` | ✅ |
+| `auth-login` | 18 | `index.ts` + `_shared/session.ts` | Логин: bcrypt срещу `password_hash`, мигрира стари пароли в чист вид; от 28.09.2026 връща и подписан пропуск `session` | портал — `shared.js` | ✅ |
 | `auth-set-password` | 16 | `index.ts` | Смяна/ресет на парола (мин. 4 символа) | портал — `shared.js`, `admin.js` | ✅ |
 | `resend-email` | 56 | **`send-email.ts`** | Праща И имейл (SMTP `mail.temax.bg`), И push — по поле `type` | портал — `email.js`, `push.js`; и четирите крон функции по-долу | ✅ |
 | `portal-push` | 24 | `index.ts` | Push през OneSignal — до всички или по таг `store_name` | портал — `push.js` (`osSend`) | ✅ |
@@ -156,7 +156,7 @@ id-то се търси първо в `bulletin_tasks`, после в `recurring
 успешен логин я мигрира към хеш и зачиства `password`. Връща потребителя без
 двете полета с парола.
 
-От 28.09.2026 (ver. 17) отговорът е `{ ok, user, session }` — `session` е
+От 28.09.2026 (ver. 18) отговорът е `{ ok, user, session }` — `session` е
 подписан пропуск ДО `user`, не вътре в него. Подписва го `signSession()` от
 `_shared/session.ts`. Липсва ли секретът или подписването хвърли —
 `console.error` и `session: null`; **входът не пада заради пропуска.**
@@ -164,7 +164,7 @@ id-то се търси първо в `bulletin_tasks`, после в `recurring
 `localStorage`; нулира се при изход. **Засега никой не го проверява** — това
 е етап 1 от затварянето на `users`. В етап 2 `auth-set-password` и
 `set-history-pin` ще го изискват вместо произволен `user_id`.
-Връщане назад: деплой на ver. 16 — клиентът с `currentSession=null` работи
+Връщане назад: деплой на `auth-login/index.ts` от `894320d` (беше ver. 16) — клиентът с `currentSession=null` работи
 както преди.
 
 ### `_shared/session.ts` — пропускът
