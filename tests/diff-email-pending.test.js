@@ -6,6 +6,7 @@
      · при посока, по която решава Цвети (не междускладова), СЪЩИЯТ patch
        пише и email_pending=true → бланката остава горе с етикет
        „✅ Решена — чака имейл" и бутони „✉️ Изпрати имейл" / „✓ Без имейл";
+     · имейл вече пратен ПРЕДИ последното решение → само reviewed, слиза направо;
      · изпратен имейл → email_sent_at + email_pending=false → слиза долу;
      · „✓ Без имейл" → email_pending=false + email_skipped_at → слиза долу;
      · заварените прегледани (email_pending=false) НЕ се връщат горе;
@@ -113,6 +114,28 @@ const cardBtn = (h, id, label) => card(h, id) ? btn(card(h, id), label) : null;
       ok('с бутон „✉️ Изпрати имейл"', !!cardBtn(h, 'rep-1', '✉️ Изпрати имейл'));
       ok('с бутон „✓ Без имейл"', !!cardBtn(h, 'rep-1', '✓ Без имейл'));
     }
+    h.close();
+  }
+
+  section('а2) Имейл вече пратен ПРЕДИ последното решение → само reviewed, слиза направо');
+  {
+    const h = env([rep({ email_sent_at: '2026-09-21T09:00:00Z' })],
+      [line({ id: 'l-1', type: 'missing', status: 'pending' }), line({ id: 'l-2' })]);
+    ok('преди решението е горе (непрегледана)', inTop(h, 'rep-1'));
+    const b = resolveBtn(h, 'l-2', 'Липса');
+    if (ok('бутонът „Липса" на последния ред е на екрана', !!b)) {
+      realClick(h.w, b);
+      await settle();
+      const rp = repPatches(h);
+      ok('един patch, и той е само {reviewed:true} — без email_pending',
+        rp.length === 1 && JSON.stringify(rp[0].body) === '{"reviewed":true}', JSON.stringify(rp.map(p => p.body)));
+      ok('бланката слезе направо долу', !inTop(h, 'rep-1'));
+      ok('няма бутон „✓ Без имейл"', !btn(h.doc, '✓ Без имейл'));
+    }
+    ok('sdReviewedPatch при email_sent_at и сторна = само reviewed', (() => {
+      h.w.diffReports[0].direction = 'wrong_receipt';
+      return JSON.stringify(h.w.sdReviewedPatch('rep-1')) === '{"reviewed":true}';
+    })());
     h.close();
   }
 
