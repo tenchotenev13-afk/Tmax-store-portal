@@ -100,6 +100,7 @@ const TESTS = [
   'stock-returns-order-number.test.js',
   'stock-returns-supplier-export.test.js',
   'stock-returns-import-update.test.js',
+  'stock-returns-po-sort.test.js',
   'sd-badge-hidden-tab.test.js',
   'delete-three-states.test.js',
   'storno-embed-no-in-list.test.js',

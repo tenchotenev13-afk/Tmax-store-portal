@@ -125,7 +125,7 @@ function loadStockReturns() {
    се забелязва чак когато доставчикът получи грешния файл. */
 function srFilteredList(){
   var tabData = srData.filter(function(r){ return (r.source||'diff') === srTab; });
-  return tabData.filter(function(r) {
+  var list = tabData.filter(function(r) {
     if (srFilter === 'pending')  { if (r.status !== 'pending') return false; }
     else if (srFilter === 'taken') { if (r.status !== 'taken') return false; }
     else if (srFilter === 'completed') { if (r.status !== 'completed') return false; }
@@ -143,6 +143,20 @@ function srFilteredList(){
     }
     return true;
   });
+  /* "По рекламации" се чете по ПВ-ЕВР от най-стария към най-новия номер,
+     независимо от датите (заявката идва с order=doc_date.desc заради
+     "По разлики" - той остава точно така). Тук, а не в таблицата, за да
+     важи еднакво и за exportSRExcel(). Редове без ПВ-ЕВР - най-отдолу. */
+  if (srTab !== 'diff') {
+    list.sort(function(a, b) {
+      var pa = String(a.purchase_order == null ? '' : a.purchase_order).trim();
+      var pb = String(b.purchase_order == null ? '' : b.purchase_order).trim();
+      if (!pa || !pb) return (pa ? 0 : 1) - (pb ? 0 : 1);
+      if (/^\d+$/.test(pa) && /^\d+$/.test(pb)) return Number(pa) - Number(pb);
+      return pa.localeCompare(pb);
+    });
+  }
+  return list;
 }
 
 function renderStockReturns() {
