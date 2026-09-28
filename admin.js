@@ -534,7 +534,7 @@ function setUserPassword(userId,newPass,onDone){
   fetch(SB_URL+'/functions/v1/auth-set-password',{
     method:'POST',
     headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_KEY,'apikey':SB_KEY},
-    body:JSON.stringify({user_id:userId,new_password:newPass})
+    body:JSON.stringify({user_id:userId,new_password:newPass,session:currentSession})
   }).then(function(r){return r.json().catch(function(){return{};});}).then(function(d){
     onDone(!!d.ok, d.message);
   }).catch(function(){onDone(false,'мрежова грешка');});
