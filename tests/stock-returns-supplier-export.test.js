@@ -7,10 +7,8 @@
 
    Двата подтаба имат нарочно различен формат:
      · „По разлики"    — заглавен блок с приложените филтри, за четене от човек;
-     · „По рекламации" — БЕЗ заглавен блок, ред 1 са заглавията, за да може
-       файлът да се върне обратно през импорта. Тестът го проверява с истински
-       кръг: изнесеният aoa минава през parseComplaintReturnsSheet и трябва да
-       върне същите редове.
+     · „По рекламации" — огледало на многолистовия импорт, един лист на
+       магазин; покрит е в tests/stock-returns-complaint-export.test.js.
 
    Пускане:  node tests/stock-returns-supplier-export.test.js .
 */
@@ -270,74 +268,10 @@ const counter = doc => {
     }
   }
 
-  section('д.2) Износ „По рекламации": ред 1 са заглавията + кръг към импорта');
-  {
-    const ROWS = [
-      row({
-        id: 'c-1', source: 'complaint', supplier: 'КАМ-04', store_name: 'Враца',
-        product_name: 'БОЯ ЛАТЕКС', sap_code: '55123', quantity: 12,
-        expiry_date: '2026-12-31', reason: 'Изтекъл срок', status: 'pending'
-      }),
-      row({
-        id: 'c-2', source: 'complaint', supplier: 'КАМ-04', store_name: 'Плевен',
-        product_name: 'СИЛИКОН', sap_code: '55124', quantity: 4,
-        expiry_date: null, reason: '', status: 'taken'
-      }),
-      row({ id: 'c-3', source: 'complaint', supplier: 'ТЕСИ ООД', product_name: 'ЧУЖД РЕД' })
-    ];
-    const { w, doc } = env(ROWS, 'complaint');
-    const cap = stubXLSX(w);
-    w.srSupplierFilter = 'КАМ-04';
-    guard('рендер', () => w.renderStockReturns());
-
-    const b = btn(doc, '📥 Excel');
-    if (ok('бутонът „📥 Excel" е на екрана', !!b)) {
-      realClick(w, b);
-      if (ok('листът е подаден на SheetJS', cap.aoas.length === 1, 'брой: ' + cap.aoas.length)) {
-        const aoa = cap.aoas[0];
-        ok('НЯМА заглавен блок — ред 1 са заглавията',
-          aoa[0][0] !== 'ТеМАХ — Стока за връщане' && aoa[0].length === 8, JSON.stringify(aoa[0]));
-        /* Заглавията са първите псевдоними от SR_IMPORT_COL_ALIASES — сверява се
-           срещу самия обект, а не срещу преписан списък, който би се разминал. */
-        const AL = w.SR_IMPORT_COL_ALIASES;
-        ok('заглавията са първите псевдоними от SR_IMPORT_COL_ALIASES + Статус',
-          aoa[0].join('|') === [AL.product[0], AL.sap[0], AL.qty[0], AL.store[0],
-            AL.supplier[0], AL.expiry[0], AL.reason[0], 'Статус'].join('|'),
-          aoa[0].join('|'));
-        ok('изнесени са двата реда на КАМ-04', aoa.length === 3, 'редове: ' + (aoa.length - 1));
-        ok('чуждият доставчик не е изнесен', aoa.every(x => x.indexOf('ЧУЖД РЕД') < 0));
-        ok('празната дата е празна, не тире', aoa[2][5] === '', JSON.stringify(aoa[2][5]));
-
-        /* КРЪГЪТ: изнесеното минава обратно през реалния парсър на импорта. */
-        const prog = doc.createElement('div');
-        doc.body.appendChild(prog);
-        let back = null;
-        if (guard('parseComplaintReturnsSheet() не хвърля',
-          () => { back = w.parseComplaintReturnsSheet(cap.files[0].wb, prog); })) {
-          if (ok('импортът разпозна редовете', Array.isArray(back) && back.length === 2,
-            JSON.stringify(back && back.length) + ' | ' + prog.innerHTML)) {
-            ok('продукт се връща', back[0].product_name === 'БОЯ ЛАТЕКС', JSON.stringify(back[0].product_name));
-            ok('SAP се връща', back[0].sap_code === '55123', JSON.stringify(back[0].sap_code));
-            ok('количество се връща като число', back[0].quantity === 12, JSON.stringify(back[0].quantity));
-            ok('магазин се връща', back[0].store_name === 'Враца', JSON.stringify(back[0].store_name));
-            ok('доставчик се връща', back[0].supplier === 'КАМ-04', JSON.stringify(back[0].supplier));
-            ok('срок на годност се връща в ISO', back[0].expiry_date === '2026-12-31',
-              JSON.stringify(back[0].expiry_date));
-            ok('причина се връща', back[0].reason === 'Изтекъл срок', JSON.stringify(back[0].reason));
-            ok('вторият ред също', back[1].product_name === 'СИЛИКОН' && back[1].quantity === 4,
-              JSON.stringify([back[1].product_name, back[1].quantity]));
-            ok('празният срок се връща като null', back[1].expiry_date === null,
-              JSON.stringify(back[1].expiry_date));
-          }
-        }
-      }
-      if (ok('файлът е записан', cap.files.length === 1, 'брой: ' + cap.files.length)) {
-        ok('името е по формата за „рекламации"',
-          /^za-vrashtane-reklamacii-kam-04-\d{4}-\d{2}-\d{2}\.xlsx$/.test(cap.files[0].fname),
-          cap.files[0].fname);
-      }
-    }
-  }
+  /* д.2) Износът „По рекламации" вече е огледало на МНОГОЛИСТОВИЯ импорт
+     (parseDiffReturnsWorkbook), не на единичния лист — старият кръг през
+     parseComplaintReturnsSheet е отменен нарочно. Покрит е в
+     tests/stock-returns-complaint-export.test.js. */
 
   section('д.3) Без избран доставчик името казва „vsichki"');
   {

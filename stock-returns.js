@@ -965,12 +965,14 @@ function parseComplaintReturnsSheet(wb,progEl){
 
    Двата подтаба имат НАРОЧНО различен формат:
    · "По разлики" - заглавен блок с приложените филтри, файл за четене от човек;
-   · "По рекламации" - БЕЗ заглавен блок, ред 1 са заглавията, защото файлът
-     трябва да може да се върне обратно през импорта. parseComplaintReturnsSheet
-     чете първия ред като имена на колони (sheet_to_json), тоест заглавен блок
-     отгоре би направил кръга износ -> редакция -> импорт невъзможен.
-     Заглавията са ПЪРВИТЕ псевдоними от SR_IMPORT_COL_ALIASES - същият списък,
-     срещу който сверява самият вносител, вместо втори, който би се разминал. */
+   · "По рекламации" - ОГЛЕДАЛО на многолистовия ERP импорт
+     (parseDiffReturnsWorkbook), не на единичния лист: редовете в този подтаб
+     идват оттам и полетата на единичния формат (продукт, SAP, срок) често са
+     празни. Един лист на магазин, името му е номерът от SR_SHEET_TO_STORE.
+     БЕЗ заглавен блок - импортът прескача точно един ред (заглавията) и чете
+     колоните ПОЗИЦИОННО 0-10, тоест всеки ред отгоре би станал "запис", а
+     разместена колона - грешно поле. Колоните 11+ (продукт, SAP, ...) импортът
+     не чете; излизат само ако поне един ред ги има. */
 function exportSRExcel(){
   if(!window.XLSX){
     var sc=document.createElement('script');
@@ -1004,7 +1006,8 @@ function exportSRExcel(){
     }).join('').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
   };
 
-  var aoa, cols, sheetName;
+  var sheets=[]; /* [{name, aoa, cols}] - "По разлики" е един лист, "По рекламации" - по един на магазин */
+  var aoa, cols;
   if(srTab==='diff'){
     aoa=[
       ['ТеМАХ — Стока за връщане'],
@@ -1029,30 +1032,68 @@ function exportSRExcel(){
     });
     cols=[{wch:34},{wch:10},{wch:7},{wch:14},{wch:14},{wch:12},{wch:16},{wch:22},
           {wch:12},{wch:8},{wch:12},{wch:14},{wch:18},{wch:26}];
-    sheetName='По разлики';
+    sheets.push({name:'По разлики', aoa:aoa, cols:cols});
   } else {
-    var AL=SR_IMPORT_COL_ALIASES;
-    aoa=[[AL.product[0],AL.sap[0],AL.qty[0],AL.store[0],AL.supplier[0],
-          AL.expiry[0],AL.reason[0],'Статус']];
-    list.forEach(function(r){
-      aoa.push([
-        r.product_name||'', r.sap_code||'', (r.quantity!=null?r.quantity:''),
-        r.store_name||'', r.supplier||'', fd(r.expiry_date),
-        /* Само reason: това е полето, което импортът пише в тази колона.
-           control_comment/controller_comment не са част от формата на импорта
-           и добавени тук биха се върнали обратно като "причина". */
-        r.reason||'',
-        ROW_STATUS[r.status]||r.status||''
-      ]);
+    /* Главни букви - както ги пише ERP файлът. Импортът разпознава само
+       ВЗЕТА/НЕВЗЕТА; "ПРИКЛЮЧЕНА" там става 'pending', но приключен в портала
+       ред не се пипа при обратно качване (hit.status==='completed' -> пропуск
+       в startReturnsImport). */
+    var XL_STATUS={pending:'НЕВЗЕТА',taken:'ВЗЕТА',completed:'ПРИКЛЮЧЕНА'};
+    var storeToSheet={};
+    Object.keys(SR_SHEET_TO_STORE).forEach(function(k){ storeToSheet[SR_SHEET_TO_STORE[k]]=k; });
+    var hasExtra=list.some(function(r){
+      return r.product_name||r.sap_code||r.quantity!=null||r.expiry_date||r.reason;
     });
-    cols=[{wch:34},{wch:10},{wch:7},{wch:16},{wch:22},{wch:14},{wch:26},{wch:12}];
-    sheetName='По рекламации';
+    var byStore={}, order=[];
+    list.forEach(function(r){
+      var s=r.store_name||'';
+      if(!byStore[s]){ byStore[s]=[]; order.push(s); }
+      byStore[s].push(r);
+    });
+    /* Листовете в реда на номерата (като в ERP файла); магазини без номер - накрая. */
+    order.sort(function(a,b){
+      var ka=storeToSheet[a], kb=storeToSheet[b];
+      if(ka&&kb) return Number(ka)-Number(kb);
+      return (ka?0:1)-(kb?0:1);
+    });
+    var usedNames={};
+    order.forEach(function(s){
+      /* Магазин без номер в SR_SHEET_TO_STORE: листът се казва като магазина,
+         за да не се губят редове от износа - но импортът НЕ го разпознава и
+         при обратно качване го прескача. Към 28.09.2026 всички магазини с
+         рекламации имат номер. Excel не приема []:*?/\ и имена над 31 знака. */
+      var name=storeToSheet[s]||(s.replace(/[\[\]:*?\/\\]/g,' ').trim().slice(0,31)||'Без магазин');
+      var base=name, n=2;
+      while(usedNames[name]){ name=base.slice(0,28)+'_'+n; n++; }
+      usedNames[name]=true;
+      var a=[['НОВА ПВ-ЕВР','НОВА ИД-ЕВРО','Доставчик','Дата на документ','Завод','Статус',
+              'Дата на изтегляне','Изтеглена с','Потвърдена акт.','Коментар','Коментар контролер']];
+      if(hasExtra) a[0]=a[0].concat(['Продукт','SAP','Кол.','Срок на годност','Причина']);
+      byStore[s].forEach(function(r){
+        var line=[
+          r.purchase_order||'', r.id_euro||'', r.supplier||'', fd(r.doc_date), r.plant||'',
+          XL_STATUS[r.status]||r.status||'', fd(r.withdrawal_date), r.courier_info||'',
+          fd(r.confirmed_date), r.control_comment||'', r.controller_comment||''
+        ];
+        if(hasExtra) line=line.concat([
+          r.product_name||'', r.sap_code||'', (r.quantity!=null?r.quantity:''),
+          fd(r.expiry_date), r.reason||''
+        ]);
+        a.push(line);
+      });
+      var c=[{wch:14},{wch:12},{wch:22},{wch:12},{wch:8},{wch:12},{wch:14},{wch:18},
+             {wch:14},{wch:26},{wch:26}];
+      if(hasExtra) c=c.concat([{wch:34},{wch:10},{wch:7},{wch:14},{wch:26}]);
+      sheets.push({name:name, aoa:a, cols:c});
+    });
   }
 
   var wb=window.XLSX.utils.book_new();
-  var ws=window.XLSX.utils.aoa_to_sheet(aoa);
-  ws['!cols']=cols;
-  window.XLSX.utils.book_append_sheet(wb,ws,sheetName);
+  sheets.forEach(function(sh){
+    var ws=window.XLSX.utils.aoa_to_sheet(sh.aoa);
+    ws['!cols']=sh.cols;
+    window.XLSX.utils.book_append_sheet(wb,ws,sh.name);
+  });
   var fname='za-vrashtane-'+(srTab==='diff'?'razliki':'reklamacii')+'-'+
             (srSupplierFilter?translit(srSupplierFilter):'vsichki')+'-'+today()+'.xlsx';
   window.XLSX.writeFile(wb,fname);

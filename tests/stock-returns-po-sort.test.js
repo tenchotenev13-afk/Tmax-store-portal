@@ -62,8 +62,8 @@ const tablePOs = doc => Array.prototype.map.call(
   tr => tr.querySelector('td').textContent.trim().replace(/^—$/, ''));
 
 /* Редът в srData е по doc_date.desc — като от заявката — и нарочно НЕ съвпада
-   с реда по ПВ-ЕВР. Продуктите носят номер, за да се проследят в Excel-а,
-   където колона ПВ-ЕВР няма. */
+   с реда по ПВ-ЕВР. Продуктите носят номер, за да се провери, че в Excel-а
+   целият ред пътува заедно с ПВ-ЕВР (колона 0), а не само номерът. */
 const COMPLAINT = [
   row({ id: 'c-1', purchase_order: '4200016266', product_name: 'П-16266', doc_date: '2026-09-20' }),
   row({ id: 'c-2', purchase_order: null,         product_name: 'П-БЕЗ',   doc_date: '2026-09-19' }),
@@ -106,8 +106,13 @@ const EXPECT_PROD = ['П-15982', 'П-15990', 'П-16001', 'П-16266', 'П-17100',
       realClick(w, b);
       const aoa = cap.aoas[0];
       if (ok('aoa е подаден на SheetJS', !!aoa)) {
-        const prods = aoa.slice(1).map(r => r[0]);
-        ok('редовете в aoa са ' + EXPECT_PROD.join(' < '),
+        /* Многолистов формат: всички редове са от Раднево → един лист;
+           колона 0 = ПВ-ЕВР, колона 11 = продукт (излиза, защото редовете го имат). */
+        const pos = aoa.slice(1).map(r => r[0]);
+        ok('ПВ-ЕВР в aoa е ' + EXPECT_PO.join(' < '),
+          pos.join('|') === EXPECT_PO.join('|'), pos.join('|'));
+        const prods = aoa.slice(1).map(r => r[11]);
+        ok('продуктите пътуват със своя ПВ-ЕВР: ' + EXPECT_PROD.join(' < '),
           prods.join('|') === EXPECT_PROD.join('|'), prods.join('|'));
       }
     }
