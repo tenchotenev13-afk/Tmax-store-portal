@@ -231,6 +231,73 @@ var LOGISTICS_WAREHOUSES=['Логистичен склад Добрич','Лог
 var REPORT_EXCLUDED_DEFAULT=[CENTRAL_OFFICE].concat(LOGISTICS_WAREHOUSES).concat(['Пазарджик','Сервиз Троян']);
 var REPORT_EXCLUDED_STORES=REPORT_EXCLUDED_DEFAULT.slice();
 var reportExcludedLoaded=null;   /* Promise — зарежда се веднъж на сесия */
+/* ═══════ ЛИНКОВЕ В СВОБОДЕН ТЕКСТ ═══════════════════════════════════════
+   Ползва се за описанието на задача/подзадача/промоция и за блоковете в
+   Бюлетина — на екран, на хартия и в седмичното писмо. Две форми:
+     · гол адрес            → http://example.com/x
+     · кратък текст (28.09.2026) → [Инструкцията](https://example.com/x)
+   Второто съществува, защото управителите слагаха в описанието адреси по 120
+   знака и редът ставаше нечетим.
+
+   СИГУРНОСТ: адресът се пуска САМО ако започва с http://, https:// или
+   mailto:. Иначе цялото „[текст](адрес)" се показва като текст, вместо да се
+   превърне в линк. Без тази проверка `[виж](javascript:…)` става кликаем XSS —
+   описанието го пише човек, но го ЧЕТЕ цял магазин.
+   Нищо не се преглъща мълчаливо: невалиден адрес се вижда какъвто е написан. */
+var MD_LINK_RE=/\[([^\]\n]{1,120})\]\(([^)\s]{1,500})\)/g;
+function linkSafeHref(url){
+  /* esc() е минал преди това, значи & е &amp; — за проверката на схемата се
+     гледа началото, което esc() не пипа. */
+  return /^(https?:\/\/|mailto:)/i.test(url) ? url : null;
+}
+function linkAnchorHtml(href,label){
+  /* Кавичката СЕ маха от href-а: адресът влиза в стойност на атрибут, а
+     регексите по-долу не пускат празно място — тоест
+     `https://a.bg/"onmouseover=…` минава като един „адрес" и затваря атрибута.
+     Браузърите приемат нов атрибут веднага след затварящата кавичка, без
+     разделител, значи това е истински XSS, не теоретичен. Дупката е стара
+     (голите адреси я имаха и преди 28.09.2026); кратката форма само я прави
+     по-лесна за скриване, защото грозният адрес не се вижда.
+     НЕ се ползва escAttr(): esc() вече е минал върху целия текст и второ
+     пускане би превърнало &amp; в &amp;amp;. */
+  return '<a href="'+String(href).replace(/"/g,'&quot;')+'" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:underline;word-break:break-all;">'+label+'</a>';
+}
+/* Голите адреси. Изнесено, за да е един и същ разделът „къде свършва адресът"
+   и при HTML, и при текстовия вариант. */
+function linkifyBareUrls(escaped,wrap){
+  return escaped.replace(/(https?:\/\/[^\s<]+)/g,function(url){
+    var trail='';
+    var m=url.match(/[.,;:!?)]+$/);
+    if(m){trail=m[0]; url=url.slice(0,url.length-trail.length);}
+    return wrap(url)+trail;
+  });
+}
+/* HTML: за екран и за писма. Входът е СУРОВ текст — esc() става тук. */
+function linkify(text){
+  /* NUL се маха ПРЕДИ обработката: долу той служи за пазач на готовите <a>
+     тагове и NUL в самия текст би объркал възстановяването. */
+  var escaped=esc(String(text||'').replace(/\u0000/g,''));
+  /* Първо кратките: иначе адресът вътре в скобите щеше да стане <a> и втората
+     обработка вече не би разпознала „[текст](…)". */
+  var parts=[];
+  escaped=escaped.replace(MD_LINK_RE,function(whole,label,url){
+    var href=linkSafeHref(url);
+    if(!href) return whole;
+    parts.push(linkAnchorHtml(href,label));
+    /* Готовият <a> се вади от текста за времето на втората обработка: иначе
+       регексът за голи адреси щеше да влезе В href-а и да го скъса. */
+    return '\u0000'+(parts.length-1)+'\u0000';
+  });
+  escaped=linkifyBareUrls(escaped,function(url){return linkAnchorHtml(url,url);});
+  return escaped.replace(/\u0000(\d+)\u0000/g,function(m,i){return parts[+i];});
+}
+/* ТЕКСТ без тагове — за хартия и за push. Тук адресът НЕ бива да се губи:
+   „[Инструкцията](https://…)" на лист хартия без адреса е безполезен. */
+function linkifyPlain(text){
+  return String(text||'').replace(MD_LINK_RE,function(whole,label,url){
+    return linkSafeHref(url) ? label+' ('+url+')' : whole;
+  });
+}
 function isReportableStore(name){
   return !!name && REPORT_EXCLUDED_STORES.indexOf(name)<0;
 }

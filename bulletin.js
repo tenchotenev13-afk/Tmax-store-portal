@@ -330,7 +330,7 @@ function calNoticeRowHtml(t,kind){
   h+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="'+(isRec?'Постоянна задача — само за информация':'Бюлетин — само за информация')+'">'+(isRec?'🔁':'📰')+'</span>';
   h+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;color:#334155;">'+esc(t.title||'')+' '+taskTypeBadgeHtml('notice')+'</span>';
   h+='</div>';
-  if(t.description)h+='<div style="font-size:11px;color:#64748b;margin:0 0 4px 16px;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
+  if(t.description)h+='<div class="bul-desc" style="margin:0 0 4px 16px;">'+linkify(t.description)+'</div>';
   return h;
 }
 /* ─── ПОСТОЯННА ЗАДАЧА, ИЗКЛЮЧЕНА ЗА СЕДМИЦАТА ─────────────────
@@ -820,7 +820,7 @@ function renderPromoCard(p,refDate){
   h+='<div style="font-size:12px;font-weight:600;color:'+m.c+';">'+esc(p.title||'')+'</div>';
   h+='<span style="font-size:9px;font-weight:700;color:'+m.c+';white-space:nowrap;">'+m.label+'</span>';
   h+='</div>';
-  if(p.description)h+='<div style="font-size:11px;color:'+m.c+';opacity:.8;margin-top:2px;">'+linkify(p.description)+'</div>';
+  if(p.description)h+='<div class="bul-desc" style="color:'+m.c+';opacity:.8;margin-top:2px;">'+linkify(p.description)+'</div>';
   h+='<div style="font-size:10px;color:'+m.c+';opacity:.7;margin-top:4px;">📅 '+fmtDate2(p.start_date)+' → '+fmtDate2(p.end_date)+' &nbsp;·&nbsp; '+dLabel+'</div>';
   if(canEdit()){
     h+='<div style="display:flex;gap:5px;margin-top:7px;">';
@@ -1065,6 +1065,52 @@ function bulLoadTransitPending(){
     bulTransitPending=rows.length;
     renderBulletin();
   });
+}
+/* ═══════ ПОЛЕТО „ОПИСАНИЕ" ══════════════════════════════════════════════
+   От 28.09.2026 е textarea, не input: описанията са по няколко изречения и в
+   един ред от 40 знака не се четат. Показването зачита новия ред
+   (`white-space:pre-line` в .bul-desc), значи текстът излиза както е въведен. */
+/* Полето расте с текста, но не се свива под зададените редове. Вика се и при
+   ОТВАРЯНЕ на формата за редакция — иначе дълго описание се отваря сгънато и
+   изглежда като отрязано. */
+function bulAutoGrow(el){
+  if(!el) return;
+  el.style.height='auto';
+  /* 260px таван: по-високо поле избутва бутоните „Запази/Откажи" под ръба на
+     модала и на телефон не се стига до тях. Оттам нататък полето скролира. */
+  el.style.height=Math.min(el.scrollHeight,260)+'px';
+}
+/* Поставяне на линк, копиран от браузър/Word: клипбордът носи и text/html, в
+   който линкът е <a href="…">текст</a>. Без това в полето влизаше само
+   видимият текст (адресът се губеше) или голият адрес от 120 знака.
+   Превръща се в кратката форма [текст](адрес), която linkify() разбира.
+   Пипа се САМО когато в HTML-а има линк и текстът му е различен от адреса —
+   иначе поставянето си остава каквото беше, включително обикновен текст. */
+function bulDescPaste(ev){
+  var el=ev&&ev.target; if(!el) return;
+  var cb=ev.clipboardData||window.clipboardData; if(!cb) return;
+  var html=''; try{html=cb.getData('text/html')||'';}catch(e){return;}
+  if(!html) return;
+  var plain=''; try{plain=cb.getData('text/plain')||'';}catch(e){plain='';}
+  var m=html.match(/<a\s[^>]*href\s*=\s*("([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/i);
+  if(!m) return;
+  var href=(m[2]||m[3]||'').trim();
+  if(!/^(https?:\/\/|mailto:)/i.test(href)) return;
+  /* Текстът на линка идва като HTML — таговете вътре се махат, ентитите се
+     разкодират през самия браузър, за да не се пише втори разкодировач. */
+  var tmp=document.createElement('div');
+  tmp.innerHTML=m[4]||'';
+  var label=(tmp.textContent||'').replace(/\s+/g,' ').trim();
+  if(!label||label===href) return;      /* нищо не печелим — остави го както е */
+  if(label.length>120) label=label.slice(0,117)+'…';
+  if(label.indexOf('[')>=0||label.indexOf(']')>=0) return;  /* би счупило формата */
+  var ins='['+label+']('+href+')';
+  if(plain&&plain.trim()===ins) return;  /* вече е в тази форма */
+  ev.preventDefault();
+  var a=el.selectionStart, b=el.selectionEnd, val=el.value||'';
+  el.value=val.slice(0,a)+ins+val.slice(b);
+  el.selectionStart=el.selectionEnd=a+ins.length;
+  bulAutoGrow(el);
 }
 /* Надписът до автоматичната „Стока на път" за обекта. 0 не се изписва като
    число: sbGet връща [] и при провал, тоест „0 необработени" при неотметната
@@ -1351,7 +1397,7 @@ function bulPlanRowHtml(it, store, weekArr){
   if(!isRec) h+=bulSpanBadgeHtml(t);
   if(it.winDeadline) h+='<span style="font-size:9.5px;color:#7c3aed;font-weight:700;white-space:nowrap;">до '+bulDM(it.winDeadline)+'</span>';
   h+='</div>';
-  if(t.description) h+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
+  if(t.description) h+='<div class="bul-desc">'+linkify(t.description)+'</div>';
   if(comp&&(comp.comment||(comp.photos&&comp.photos.length)||(comp.files&&comp.files.length))) h+=renderCompletionExtras(comp);
   h+='</div>';
   /* Бутонът към свързания таб — същият, който е и в календара. */
@@ -1807,7 +1853,7 @@ function bulCarriedRowHtml(row,color){
   h+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
   h+='<div style="font-size:13px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>';
   h+=(row.kind==='recurring'?'<span title="Постоянна задача" style="font-size:11px;">🔁</span>':'')+bulCarriedBadgeHtml(row)+'</div>';
-  if(t.description)h+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
+  if(t.description)h+='<div class="bul-desc">'+linkify(t.description)+'</div>';
   h+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">📅 Пренесена за '+fmtDate2(to)+(row.comp.comment?' · '+esc(row.comp.comment):'')+'</div>';
   h+='</div></div>';
   return h;
@@ -2428,7 +2474,7 @@ function renderBulView(){
           html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+'">';
         }
         html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done,singleDate)+bulPostponedBadgeHtml(ppComp)+bulSpanBadgeHtml(t)+'</div>';
-        if(t.description)html+='<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
+        if(t.description)html+='<div class="bul-desc">'+linkify(t.description)+'</div>';
         html+=bulAutoTransitNoteHtml(t,done);
         if(isMulti){
           var multiDates=taskDueDates(t);
@@ -2515,16 +2561,11 @@ function renderBulView(){
 
 
 /* Edit block */
-/* Превръща http(s):// линкове в текста в кликаеми <a> тагове (текстът вече е escape-нат за безопасност) */
-function linkify(text){
-  var escaped=esc(text||'');
-  return escaped.replace(/(https?:\/\/[^\s<]+)/g,function(url){
-    var trail='';
-    var m=url.match(/[.,;:!?)]+$/);
-    if(m){trail=m[0]; url=url.slice(0,url.length-trail.length);}
-    return '<a href="'+url+'" target="_blank" rel="noopener" style="color:#2563eb;text-decoration:underline;word-break:break-all;">'+url+'</a>'+trail;
-  });
-}
+/* linkify() СТОЕШЕ ТУК до 28.09.2026. Премести се в shared.js, защото
+   email.js (седмичното писмо) също трябва да го ползва, а той се зарежда СЛЕД
+   bulletin.js — дотогава описанието в писмото минаваше през гол esc() и
+   „[текст](адрес)" излизаше сурово. shared.js е първи в реда, значи важи за
+   всички. */
 
 /* ═══════ ДОПЪЛНИТЕЛНА СНИМКА/ФАЙЛ В ЕДИН БЛОК (заедно с текста му) ══════ */
 function renderBlockExtras(b,dk){
@@ -2994,7 +3035,7 @@ function taskModalHtml(){
   return '<div class="bov" id="tk-ov"><div class="bmod" style="width:460px;">' +
     '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">✅ Нова задача</div>' +
     '<label class="fl">Заглавие *</label><input class="fi" id="tk-title" placeholder="напр. Провери наличностите">' +
-    '<label class="fl">Описание</label><input class="fi" id="tk-desc" placeholder="Допълнителна информация">' +
+    '<label class="fl">Описание</label><textarea class="fi fi-desc" id="tk-desc" rows="3" placeholder="Допълнителна информация. Дълъг адрес се скрива така: [Инструкцията](https://…)" oninput="bulAutoGrow(this)" onpaste="bulDescPaste(event)"></textarea>' +
     '<label class="fl">Отдел</label><select class="fi" id="tk-dept"><option value="trade">🛒 Търговска</option><option value="warehouse">📦 Склад/Приемане</option><option value="admin">⚙️ Администрация</option></select>' +
     '<label class="fl">Вид задача</label><select class="fi" id="tk-type">'+taskTypeOptsHtml('info')+'</select>' +
     '<label class="fl">Срок — избери един или няколко дни (по избор)</label>' +
@@ -3061,7 +3102,7 @@ function openEditTaskModal(taskId) {
     '<label class="fl">Заглавие *</label>' +
     '<input class="fi" id="etk-title" value="'+esc(t.title||'')+'">' +
     '<label class="fl">Описание</label>' +
-    '<input class="fi" id="etk-desc" value="'+esc(t.description||'')+'">' +
+    '<textarea class="fi fi-desc" id="etk-desc" rows="3" placeholder="Допълнителна информация. Дълъг адрес се скрива така: [Инструкцията](https://…)" oninput="bulAutoGrow(this)" onpaste="bulDescPaste(event)">'+escVal(t.description)+'</textarea>' +
     '<label class="fl">Отдел</label>' +
     '<select class="fi" id="etk-dept">' +
       '<option value="trade"'+(t.department==='trade'?' selected':'')+'>🛒 Търговска</option>' +
@@ -3087,6 +3128,9 @@ function openEditTaskModal(taskId) {
     '</div></div>';
   document.body.appendChild(ov);
   bulFillStoreMultiSelect('etk-stores', t.target_stores||[]);
+  /* Дълго описание трябва да се отвори РАЗГЪНАТО: сгънато изглежда отрязано и
+     човек започва да го дописва, вместо да го прочете. */
+  bulAutoGrow(document.getElementById('etk-desc'));
   var etkSp=document.getElementById('etk-span-on');
   if(etkSp&&etkSp.checked)bulSpanToggle(etkSp);
   setTimeout(function(){ var el=document.getElementById('etk-title'); if(el)el.focus(); }, 80);
@@ -3157,7 +3201,7 @@ function openEditRecurringModal(taskId) {
     '<label class="fl">Заглавие *</label>' +
     '<input class="fi" id="erec-title" value="'+esc(t.title||'')+'">' +
     '<label class="fl">Описание</label>' +
-    '<input class="fi" id="erec-desc" value="'+esc(t.description||'')+'">' +
+    '<textarea class="fi fi-desc" id="erec-desc" rows="3" placeholder="Допълнителна информация. Дълъг адрес се скрива така: [Инструкцията](https://…)" oninput="bulAutoGrow(this)" onpaste="bulDescPaste(event)">'+escVal(t.description)+'</textarea>' +
     '<label class="fl">Повтарящи се дни (по избор)</label>' +
     recWeekdaysCheckboxesHtml('erec-weekdays', t.due_weekdays||(t.due_weekday!==null&&t.due_weekday!==undefined?[t.due_weekday]:[])) +
     recWindowToggleHtml('erec-window','erec-weekdays', !!t.due_window, (t.due_weekdays||[]).length) +
@@ -3182,6 +3226,7 @@ function openEditRecurringModal(taskId) {
     '</div></div>';
   document.body.appendChild(ov);
   bulFillStoreMultiSelect('erec-stores', t.target_stores||[]);
+  bulAutoGrow(document.getElementById('erec-desc'));
   recWindowBindDays('erec-weekdays','erec-window');
   setTimeout(function(){ var el=document.getElementById('erec-title'); if(el)el.focus(); }, 80);
 }
@@ -4194,7 +4239,7 @@ function printSection(what){
         }
         s+='<div style="flex:1;">';
         s+='<div class="task-title">'+esc(t.title||'')+' '+taskTypeBadgeHtml(t.task_type)+(postponedComp?'<span style="font-size:8pt;font-weight:700;padding:1pt 5pt;border-radius:8pt;background:#fff7ed;color:#b45309;border:0.5pt solid #fed7aa;">⏱ Отложена'+(postponedComp.postponed_to?' → '+bulDM(postponedComp.postponed_to):'')+'</span>':'')+'</div>';
-        if(t.description)s+='<div class="task-desc">'+linkify(t.description)+'</div>';
+        if(t.description)s+='<div class="task-desc">'+linkify(linkifyPlain(t.description))+'</div>';
         if(isMulti)s+='<div class="task-due">📅 Дни: '+taskDueLabel(t)+' (виж бройки по дни в календара по-горе)</div>';
         /* Многоседмичната е в списъка и на хартията — обектът работи по нея
            тази седмица — но редът за срока казва в коя седмица се брои.
@@ -4244,7 +4289,7 @@ function printSection(what){
         }
         s+='<div style="flex:1;">';
         s+='<div class="task-title"'+(rSkip?' style="color:#94a3b8;"':'')+'>'+esc(t.title||'')+(rSkipLbl?' <span class="p-skip" style="font-size:9pt;font-weight:700;padding:1pt 5pt;border-radius:8pt;background:#f1f5f9;color:#64748b;border:0.5pt solid #cbd5e1;">⏸ '+esc(rSkipLbl)+'</span>':'')+'</div>';
-        if(t.description)s+='<div class="task-desc">'+linkify(t.description)+'</div>';
+        if(t.description)s+='<div class="task-desc">'+linkify(linkifyPlain(t.description))+'</div>';
         var dueLbl=recurringDueLabel(t);
         if(dueLbl)s+='<div class="task-due">🔁 '+esc(dueLbl)+(isMultiRecPrint?' (виж бройки по дни в календара по-горе)':'')+'</div>';
         s+=pTaskAttachments(t);
@@ -4371,7 +4416,7 @@ function renderTasksPanel() {
         h += '<div style="flex:1;">';
         h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':isPostponed?'#b45309':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
         h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!isDone,singleDate)+bulPostponedBadgeHtml(ppComp)+bulSpanBadgeHtml(t)+'</div>';
-        if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">'+linkify(t.description)+'</div>';
+        if (t.description) h += '<div class="bul-desc">'+linkify(t.description)+'</div>';
         h += renderTaskAttachments(t);
         h += bulAutoTransitNoteHtml(t, isDone);
         if (isMulti) {
@@ -5166,7 +5211,7 @@ function renderRecurringTasks(dk) {
       }
       h += '<div style="flex:1;">';
       h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done&&!skipView,singleRecDate)+bulPostponedBadgeHtml(ppComp)+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+bulFromBadgeHtml(t)+'</div>';
-      if (t.description) h += '<div style="font-size:11px;color:#94a3b8;overflow-wrap:break-word;">' + linkify(t.description) + '</div>';
+      if (t.description) h += '<div class="bul-desc">' + linkify(t.description) + '</div>';
       var dueLbl = recurringDueLabel(t);
       if (isMultiRec) {
         h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🔁 Дни: '+dueLbl+'</div>';
@@ -5490,7 +5535,7 @@ function openRecurringModal(dk) {
   ov.innerHTML = '<div class="bmod" style="width:420px;">' +
     '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">🔁 Нова постоянна задача — ' + d.label + '</div>' +
     '<label class="fl">Заглавие *</label><input class="fi" id="rec-title" placeholder="напр. Провери наличностите">' +
-    '<label class="fl">Описание</label><input class="fi" id="rec-desc" placeholder="Допълнителна информация">' +
+    '<label class="fl">Описание</label><textarea class="fi fi-desc" id="rec-desc" rows="3" placeholder="Допълнителна информация. Дълъг адрес се скрива така: [Инструкцията](https://…)" oninput="bulAutoGrow(this)" onpaste="bulDescPaste(event)"></textarea>' +
     '<label class="fl">Повтарящи се дни (по избор)</label>' +
     recWeekdaysCheckboxesHtml('rec-weekdays', []) +
     recWindowToggleHtml('rec-window','rec-weekdays', false, 0) +
@@ -5879,7 +5924,7 @@ function renderSubtasks(taskId, dept, where) {
         if (canEdit()) h += '<button data-stid="'+s.id+'" data-etitle="'+esc(s.title)+'" onclick="openNotifyScheduleModal(\'subtask\',this.dataset.stid,this.dataset.etitle)" style="border:none;background:none;color:#d97706;font-size:10px;cursor:pointer;padding:0;line-height:1;">🔔</button>';
         if (canEdit()) h += '<button data-stid="'+s.id+'" data-tid="'+taskId+'" data-dept="'+dept+'" onclick="deleteSubtask(this.dataset.stid,this.dataset.tid,this.dataset.dept)" style="border:none;background:none;color:#dc2626;font-size:10px;cursor:pointer;padding:0;line-height:1;">✕</button>';
         h += '</div>';
-        if(s.description) h += '<div style="font-size:11px;color:#94a3b8;margin:2px 0 0 21px;overflow-wrap:break-word;">'+linkify(s.description)+'</div>';
+        if(s.description) h += '<div class="bul-desc" style="margin:2px 0 0 21px;">'+linkify(s.description)+'</div>';
         h += '<div style="margin-left:21px;">'+renderSubtaskAttachments(s)+'</div>';
         h += '</div>';
       });
@@ -5937,7 +5982,7 @@ function openSubtaskModal(taskId, dept) {
   ov.innerHTML = '<div class="bmod" style="width:380px;">' +
     '<div style="font-size:14px;font-weight:600;margin-bottom:12px;">+ Нова под-задача</div>' +
     '<label class="fl">Заглавие *</label><input class="fi" id="st-title" placeholder="напр. Провери склад А">' +
-    '<label class="fl">Описание</label><textarea class="fi" id="st-desc" rows="2" placeholder="Допълнителни детайли..."></textarea>' +
+    '<label class="fl">Описание</label><textarea class="fi fi-desc" id="st-desc" rows="3" placeholder="Допълнителни детайли. Дълъг адрес се скрива така: [Инструкцията](https://…)" oninput="bulAutoGrow(this)" onpaste="bulDescPaste(event)"></textarea>' +
     '<label class="fl">Срок — ден от седмицата</label><select class="fi" id="st-due">'+dueOpts+'</select>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">' +
     '<button onclick="var e=document.getElementById(&#39;st-modal-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 14px;font-size:13px;cursor:pointer;">Откажи</button>' +

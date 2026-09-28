@@ -51,7 +51,12 @@ function emailWrap(content, footer) {
     '.task-done{border-color:#16a34a;background:#f0fdf4;}' +
     '.task-over{border-color:#dc2626;background:#fff5f5;}' +
     '.task-title{font-size:14px;font-weight:600;color:#0f172a;margin-bottom:2px;}' +
-    '.task-meta{font-size:11px;color:#64748b;}' +
+    /* pre-line: от 28.09.2026 описанието е textarea и може да съдържа нови
+       редове. Порталът ги показва (.bul-desc в index.html); без това правило
+       писмото ги слепваше в един абзац, тоест същият текст изглеждаше различно
+       на двете места. Останалите .task-meta редове („Срок: …") са едноредови и
+       правилото не ги мени. */
+    '.task-meta{font-size:11px;color:#64748b;white-space:pre-line;}' +
     '.day-hdr{background:#1e293b;color:#fff;padding:7px 12px;border-radius:6px;font-size:12px;font-weight:600;margin:14px 0 6px;}' +
     '.dept{display:inline-block;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;margin-bottom:4px;}' +
     '.dept-trade{background:#f0fdf4;color:#14532d;}' +
@@ -116,7 +121,12 @@ function buildWeeklyDigestHtml(storeName, tasks, wk, yr) {
       content += '<div class="task">' +
         '<span class="dept ' + dc + '">' + dl + '</span>' +
         '<div class="task-title">' + esc(t.title || '') + '</div>' +
-        (t.description ? '<div class="task-meta">' + esc(t.description) + '</div>' : '') +
+        /* linkify(), не esc(): описанието е свободен текст от управител и може
+           да носи адрес или кратката форма [текст](адрес). През гол esc() тя
+           излизаше СУРОВА в писмото — тоест точно там, където никой не може да
+           щракне, за да си помогне. linkify живее в shared.js именно защото
+           този файл се зарежда след bulletin.js. */
+        (t.description ? '<div class="task-meta">' + linkify(t.description) + '</div>' : '') +
         '</div>';
     });
   });

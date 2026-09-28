@@ -183,6 +183,7 @@ const TESTS = [
   'day-plan.test.js',
   'carried-completion-modal.test.js',
   'report-excluded-key.test.js',
+  'task-desc-links.test.js',
   'no-auto-push-on-load.test.js',
   'bulletin-unpublished-push.test.js',
   'responder-publication-gate.test.js',
