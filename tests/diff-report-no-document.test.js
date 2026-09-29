@@ -50,6 +50,10 @@ async function openForm(h, direction) {
   await ticks();
   const cp = h.doc.getElementById('diff-counterpart');
   if (cp && !cp.value && cp.options.length > 1) cp.selectedIndex = 1;
+  /* „Поръчка №" (41…) е задължителна при посока доставчик от 29.09.2026 —
+     покрита в diff-order-required.test.js; тук само валидна стойност. */
+  const ord = h.doc.getElementById('diff-order-num');
+  if (ord) ord.value = '4100135756';
 }
 function fillRow(h, vals) {
   const row = h.doc.querySelectorAll('#diff-items .diff-item-row')[0];

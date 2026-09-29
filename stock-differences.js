@@ -2967,7 +2967,12 @@ function renderDiffReportsSection(){
        (rep.no_document?'<span style="margin-left:6px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:10px;padding:1px 7px;font-size:10.5px;font-weight:600;">📄 Без документ</span>':'')+
        '</div>'+
        '<div style="display:flex;align-items:center;gap:8px;">'+
-       '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+'</span>'+
+       '<span style="font-size:11px;color:#94a3b8;">'+fmtDate(rep.doc_date)+(rep.document_number?' · Док. '+esc(rep.document_number):'')+
+         /* „Поръчка" - от редовете, само ако е ЕДНА И СЪЩА за всички. */
+         (function(){
+           var ords=lines.map(function(l){ return String(l.order_number||'').trim(); });
+           return (ords.length && ords[0] && ords.every(function(o){ return o===ords[0]; })) ? ' · Поръчка '+esc(ords[0]) : '';
+         })()+'</span>'+
        (rep.reviewed&&rep.email_pending?'<span style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">✅ Решена — чака имейл</span>':'')+
        (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+sdFmtDateTime(rep.email_sent_at)+'</span>':'')+
        '<button data-rid="'+rep.id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
@@ -3309,6 +3314,11 @@ function diffQtyDocNumMsg(value){ return 'количеството прилич�
 /* Първият ред на формата с такова количество: {row (1-базиран, както на
    екрана), value, el}. „По стокова на доставчика" НЕ се проверява - то е
    полето на централния офис. */
+/* Поръчка от доставчика: точно 10 цифри, започва с 41 (напр. 4100135756).
+   Входяща доставка (180…), документ (46…) и поръчка за връщане (42…) - не. */
+function diffOrderNumValid(v){
+  return /^41\d{8}$/.test(String(v==null?'':v).trim());
+}
 function diffRowQtyLikeDocNum(){
   var rows=document.querySelectorAll('#diff-items .diff-item-row');
   for(var i=0;i<rows.length;i++){
@@ -3501,10 +3511,16 @@ function updateDiffCounterpartLabel(){
      и при сторна по грешен прием документ винаги има. При смяна на посоката
      контейнерът се пренарисува, тоест отметката тръгва изключена, а надписът
      под "Снимки" вече е върнат от реда отгоре. */
+  /* „Поръчка №" (41…, поръчката ОТ доставчика) живее в същия контейнер: има
+     смисъл само при посока доставчик, тоест при другите посоки полето
+     изобщо го няма. Задължителна е, освен при „без документ" (виж
+     submitDiffReport). Отива в stock_differences.order_number на всеки ред. */
   var noDocWrap=document.getElementById('diff-no-doc-wrap');
   if(noDocWrap){
     noDocWrap.innerHTML = dir==='supplier'
-      ? '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:-2px 0 10px;cursor:pointer;">'+
+      ? '<div style="margin-bottom:8px;"><label class="fl">Поръчка № * <span style="color:#94a3b8;font-weight:400;">(41…, не входяща доставка)</span></label>'+
+          '<input class="fi" id="diff-order-num" inputmode="numeric" placeholder="напр. 4100135756" style="max-width:220px;"></div>'+
+        '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:-2px 0 10px;cursor:pointer;">'+
           '<input type="checkbox" id="diff-no-doc" onchange="var h=document.getElementById(\'diff-photo-hint\');if(h)h.textContent=this.checked?\'(без документ — по избор)\':diffPhotoHintText(\'supplier\');">'+
           ' 📄 Стоката е без документ (снимки не са задължителни)</label>'
       : '';
@@ -3573,6 +3589,9 @@ function openDiffSubmitModal(prefill){
     }
     setVal('diff-counterpart',prefill.counterpart);
     setVal('diff-docnum',prefill.document_number);
+    /* Полето съществува само при посока доставчик - при другите setVal не
+       намира елемента и не прави нищо. */
+    setVal('diff-order-num',prefill.order_number);
     setVal('diff-docdate',prefill.doc_date);
     setVal('diff-comment',prefill.comment);
     /* Редовете се рендират ПОСЛЕДНИ: updateDiffCounterpartLabel() по-горе сам
@@ -3644,6 +3663,20 @@ function submitDiffReport(){
     qtyDocNum.el.focus();
     return;
   }
+  /* „Поръчка №" (41…): задължителна при посока доставчик без „без документ";
+     попълнена ли е — и навсякъде другаде трябва да е валидна. Спира ПРЕДИ
+     POST-а, както проверката за количеството по-горе: входящата доставка
+     (180…) иначе стига до базата като поръчка. При другите посоки полето го
+     няма в DOM-а, тоест orderNum е ''. */
+  var orderEl=document.getElementById('diff-order-num');
+  var orderNum=orderEl?String(orderEl.value||'').trim():'';
+  var noDocEarly=document.getElementById('diff-no-doc');
+  var orderRequired=direction==='supplier' && !(noDocEarly && noDocEarly.checked);
+  if((orderNum||orderRequired) && !diffOrderNumValid(orderNum)){
+    toast('Поръчка №: впиши номер на поръчка 41…, не входяща доставка','#dc2626');
+    if(orderEl) orderEl.focus();
+    return;
+  }
 
   /* Реална проверка за задължителни снимки (не само текстова подсказка) -
      ако поне 1 артикул е с категория, изискваща снимки, а няма качена нито 1 */
@@ -3696,6 +3729,8 @@ function submitDiffReport(){
           difference_category:it.category,
           unit:it.unit,
           comment:it.comment,
+          /* „Поръчка №" от формата - на ВСЕКИ ред (41…); празно → null. */
+          order_number:orderNum||null,
           status:'new',
           created_by:currentUser.display_name||currentUser.email
         };
