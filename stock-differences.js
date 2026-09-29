@@ -306,7 +306,9 @@ function renderStockDiff() {
     return sdTypeFilter==='all' || r.type===sdTypeFilter;
   });
   var pending = counted.filter(function(r){ return r.status==='pending'; }).length;
-  var taken   = counted.filter(sdIsTaken).length;
+  /* При тип „Връщане" картата „Взета" не брои приключените (те са в своя чип);
+     в сборния изглед „Приключени" ги брои - същото правило като sdTableRows. */
+  var taken   = counted.filter(function(r){ return sdIsTaken(r) || (sdTypeFilter!=='return' && sdIsCompleted(r)); }).length;
 
   var h = '<div style="max-width:1400px;margin:0 auto;padding:16px;">';
 
@@ -403,7 +405,11 @@ function renderStockDiff() {
   var chipPending = sdTableRows({status:'pending'}).length;
   var chipTaken   = sdTableRows({status:'taken'}).length;
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
-  [['all','Всички ('+chipAll+')'],['pending',cw.pIcon+' '+cw.pending+' ('+chipPending+')'],['taken',cw.tIcon+' '+cw.taken+' ('+chipTaken+')']].forEach(function(f){
+  var statusChips = [['all','Всички ('+chipAll+')'],['pending',cw.pIcon+' '+cw.pending+' ('+chipPending+')'],['taken',cw.tIcon+' '+cw.taken+' ('+chipTaken+')']];
+  /* Трети чип само при тип „Връщане" - както в „За връщане". „Всички" ги
+     включва и там. */
+  if (sdTypeFilter==='return') statusChips.push(['completed','🏁 Приключени ('+sdTableRows({status:'completed'}).length+')']);
+  statusChips.forEach(function(f){
     var a = sdFilter===f[0];
     h += '<button data-f="'+f[0]+'" onclick="setSDFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
   });
@@ -479,7 +485,8 @@ function renderStockDiff() {
         h += '<button data-id="'+r.id+'" onclick="resolveDiffLine(this.dataset.id,\'writein\')" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">📥 Заприх.</button>';
         h += '<button data-id="'+r.id+'" onclick="resolveDiffLine(this.dataset.id,\'return\')" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">↩️ Връщане</button>';
       }
-      if (canEdit && !isTaken && r.status !== 'received' && r.type !== 'not_invoiced') {
+      /* Приключен ред няма „✅ Върната" - един клик би го върнал в „Взета". */
+      if (canEdit && !isTaken && r.status !== 'received' && r.type !== 'not_invoiced' && !sdIsCompleted(r)) {
         var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : r.type==='not_invoiced' ? '🧾 Приключена' : '✅ Приета';
         h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
       }
@@ -600,6 +607,14 @@ function exportSDExcel(){
    баджът, броячите и филтърът. Докато баджът я четеше, а броячът не, редът се
    показваше като ЗАПРИХОДЕНА, но не влизаше в нито едно число. */
 function sdIsTaken(r){ return r.status==='taken' || r.status==='capitalized'; }
+/* „Приключена" (status='completed', точка 2 от Цвети, 29.09.2026) - трето
+   състояние САМО за тип „Връщане", по модела на „За връщане": задава го само
+   canCompleteSR(). НАРОЧНО не влиза в sdIsTaken: чиповете „Невзета"/„Взета"
+   при тип „Връщане" не я включват, тя си има свой чип. В сборните изгледи
+   (всички типове), където думата е неутрална „Приключени", влиза заедно с
+   'taken' (виж sdTableRows и картите). Статусът не се синхронизира със
+   „За връщане" - и 'taken' не се синхронизира днес. */
+function sdIsCompleted(r){ return !!r && r.status==='completed'; }
 
 /* ЕДИН критерий за това кои редове влизат в главната таблица. Ползва се и от
    таблицата, и от числата по чиповете - иначе числото обещава едно, а кликът
@@ -637,7 +652,10 @@ function sdTableRows(over){
     }
     if (typeF !== 'all' && r.type !== typeF) return false;
     if (statusF === 'pending') { if (r.status !== 'pending') return false; }
-    else if (statusF === 'taken') { if (!sdIsTaken(r)) return false; }
+    /* „Взета" при тип „Връщане" изключва приключените; в сборния изглед
+       неутралното „Приключени" ги включва. */
+    else if (statusF === 'taken') { if (!(sdIsTaken(r) || (typeF !== 'return' && sdIsCompleted(r)))) return false; }
+    else if (statusF === 'completed') { if (!sdIsCompleted(r)) return false; }
     /* Точен филтър по магазин (чиповете) - ОТДЕЛЕН от свободното търсене
        по-долу, за да не се влияе от текст в коментари, споменаващ друг обект. */
     if (sdStoreFilter && r.store_name !== sdStoreFilter) return false;
@@ -683,6 +701,8 @@ function sdRowStatusBadge(r){
     return '<span style="background:'+bg+';color:'+fg+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+txt+'</span>';
   }
   if(r.status==='received') return badge('#f0fdfa','#0d9488','📬 ПРИЕТА');
+  /* Същите цветове и икона като в „За връщане" (srStatusBadge). */
+  if(sdIsCompleted(r)) return badge('#ede9fe','#5b21b6','🏁 ПРИКЛЮЧЕНА');
   /* Посоката влиза ЕДИНСТВЕНО за да смени думата при сторна по грешен прием
      ("Неизчистена/Изчистена" вместо "Невзета/Взета") - вече го прави и
      печатът. За всяка друга посока sdStatusWords пада на заварените си
@@ -1376,7 +1396,9 @@ function resolveDiffLine(id,type,sync){
 }
 
 function setSDFilter(f) { sdFilter=f; renderStockDiff(); }
-function setSDTypeFilter(f) { sdTypeFilter=f; renderStockDiff(); }
+/* Чипът „Приключени" съществува само при тип „Връщане" - при смяна на типа
+   оставен филтър 'completed' би скрил всичко без видим чип, който да го махне. */
+function setSDTypeFilter(f) { sdTypeFilter=f; if(f!=='return' && sdFilter==='completed') sdFilter='all'; renderStockDiff(); }
 /* Смяната на посока нулира филтъра по магазин - магазините в двата таба са
    различни набори и запазен чип от другия таб би дал празен екран. */
 function setSDDirTab(t) { sdDirTab=t; sdStoreFilter=''; renderStockDiff(); }
@@ -1678,15 +1700,25 @@ function sdModalHtml() {
   var sw = sdStatusWords(r.type);
   var sdStatusIsNew = r.status === 'new';
   var sdNoTypeYet = isEdit && !r.type;
+  /* „Приключена" - само за тип „Връщане" и само за canCompleteSR(), както в
+     „За връщане". Приключен ред при друг потребител: селектът е заключен и
+     статусът изобщо не се праща при запис (виж submitSD). */
+  var sdCanComplete = canCompleteSR();
+  var sdCompletedLocked = isEdit && sdIsCompleted(r) && !sdCanComplete;
+  var sdShowCompleted = (r.type==='return' && sdCanComplete) || sdIsCompleted(r);
   h += '<label class="fl">Статус</label>'+
-    '<select class="fi" id="sd-status"'+(sdNoTypeYet?' disabled':'')+'>'+
+    '<select class="fi" id="sd-status"'+((sdNoTypeYet||sdCompletedLocked)?' disabled':'')+'>'+
     (sdNoTypeYet||sdStatusIsNew
       ? '<option value="new"'+(sdStatusIsNew?' selected':'')+'>🆕 ПОДАДЕНА, НЕПРЕГЛЕДАНА</option>'
       : '')+
     '<option value="pending"'+(r.status==='pending'||!r.status?' selected':'')+'>'+sw.pIcon+' '+sw.pending.toUpperCase()+'</option>'+
     '<option value="taken"'+(r.status==='taken'||r.status==='capitalized'?' selected':'')+'>'+sw.tIcon+' '+sw.taken.toUpperCase()+'</option>'+
     '<option value="received"'+(r.status==='received'?' selected':'')+'>📬 ПРИЕТА</option>'+
+    (sdShowCompleted ? '<option value="completed"'+(sdIsCompleted(r)?' selected':'')+'>🏁 ПРИКЛЮЧЕНА</option>' : '')+
     '</select>'+
+    (sdCompletedLocked
+      ? '<div style="font-size:11px;color:#94a3b8;margin-top:-6px;margin-bottom:8px;">Приключен ред — статусът се сменя само от Цвети/admin.</div>'
+      : '')+
     (sdNoTypeYet
       ? '<div style="font-size:11px;color:#94a3b8;margin-top:-6px;margin-bottom:8px;">Статусът се отключва, след като бъде зададен тип на решение.</div>'
       : '')+
@@ -2028,8 +2060,18 @@ function submitSD(sync) {
      презаписва изпълнителят при редакция на коментар.
      'capitalized' е заварена стойност за СЪЩОТО състояние като 'taken', затова
      старото състояние минава през sdIsTaken, не през сравнение на низа. */
-  var isNowCompleted = data.status==='taken' || data.status==='capitalized';
-  var wasCompleted = !!origRecord && sdIsTaken(origRecord);
+  /* „Приключена" (completed): само тип „Връщане" и само canCompleteSR().
+     Заключен приключен ред (друг потребител) - статусът не се праща изобщо,
+     както lockStatus в submitSR. */
+  if(origRecord && sdIsCompleted(origRecord) && !canCompleteSR()){
+    delete data.status;
+  } else if(data.status==='completed'){
+    if(!canCompleteSR()){ toast('„Приключена" се задава само от Цвети/admin','#dc2626'); return; }
+    if(data.type!=='return'){ toast('„Приключена" е само за тип „Връщане"','#dc2626'); return; }
+  }
+  var isNowCompleted = data.status==='taken' || data.status==='capitalized' || data.status==='completed' ||
+                       (data.status===undefined && !!origRecord && sdIsCompleted(origRecord));
+  var wasCompleted = !!origRecord && (sdIsTaken(origRecord) || sdIsCompleted(origRecord));
   if(isNowCompleted && !wasCompleted){
     data.completed_by = sdActor();
     data.completed_at = new Date().toISOString();
@@ -4238,6 +4280,7 @@ function renderDiffPrint(rep){
      остава само думата. */
   var statusText = function(r){
     if(r.status==='received') return '📬 ПРИЕТА';
+    if(sdIsCompleted(r)) return '🏁 ПРИКЛЮЧЕНА';
     var w = sdStatusWords(r.type, rep.direction);
     return sdIsTaken(r) ? (w.tIcon+' '+w.taken.toUpperCase()) : (w.pIcon+' '+w.pending.toUpperCase());
   };

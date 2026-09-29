@@ -174,8 +174,10 @@ function statusOptions(doc) {
         if (ok('модалът е отворен', !!sel)) {
           ok('селектът НЕ е disabled', sel.disabled === false, String(sel.disabled));
           const opts = statusOptions(doc);
-          ok('опциите са точно трите стари', opts.join(',') === 'pending,taken,received',
-            opts.join(','));
+          /* + „completed" от 29.09.2026: тип „Връщане" и admin (canCompleteSR) —
+             виж diff-return-completed.test.js. Трите стари са на мястото си. */
+          ok('опциите са трите стари + „completed" (Връщане, admin)',
+            opts.join(',') === 'pending,taken,received,completed', opts.join(','));
           ok('избрано е pending', sel.value === 'pending', sel.value);
 
           sel.value = 'taken';
