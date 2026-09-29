@@ -349,27 +349,66 @@ var _userEditId = null; /* null = нов, string = редактиране */
 
 function openUserModal(id){
   _userEditId = id || null;
+  /* Обектите идват от таблица stores (loadAllStores, общ кеш в shared.js) —
+     същият източник като openRestrictionModal. Досега тук стоеше ръчен списък,
+     който изостана: нямаше „Сервиз Троян" и „Пазарджик", а нов обект от
+     Администрация → Магазини не се появяваше, докато някой не пипне кода. */
+  var storesP=loadAllStores();
   /* Зареди данните ако е редактиране */
   if(_userEditId){
-    sbGet('users','id=eq.'+_userEditId+'&select=id,email,display_name,store_name,role,active,is_regional').then(function(data){
-      var u=Array.isArray(data)&&data[0]?data[0]:{};
-      _renderUserModal(u);
+    Promise.all([
+      sbGet('users','id=eq.'+_userEditId+'&select=id,email,display_name,store_name,role,active,is_regional'),
+      storesP
+    ]).then(function(r){
+      var u=Array.isArray(r[0])&&r[0][0]?r[0][0]:{};
+      _renderUserModal(u, r[1]);
     });
   } else {
-    _renderUserModal({});
+    /* Нов колега: модалът се показва ВЕДНАГА (с кеша или резервата), а
+       списъкът се допълва, когато stores дойде — без да губи избраното. */
+    _renderUserModal({}, typeof allStoresCache!=='undefined'?allStoresCache:null);
+    storesP.then(function(list){
+      var sel=document.getElementById('um-store');
+      if(!sel)return;
+      var cur=sel.value;
+      sel.innerHTML=userModalStoreOptionsHtml(userModalStoreOptions(list, cur), cur);
+    });
   }
 }
 
-function _renderUserModal(u){
+/* Резерва, ако таблица stores не се зареди — иначе в падащия списък би
+   останал само текущият обект. */
+var USER_MODAL_STORES_FALLBACK=['Централен офис','Кърджали','Раднево','Враца','Троян','Сервиз Троян','Дупница','Гоце Делчев','Петрич',
+  'Силистра','Добрич','Шумен','Търговище','Сливен','Габрово','Севлиево','Пирдоп',
+  'Карлово','Козлодуй','Монтана','Пазарджик','Логистичен склад Добрич','Логистичен склад Търговище'];
+
+/* Обектите за падащия списък: „Централен офис" първи (досегашното
+   подразбиране за нов колега), после останалите по азбучен ред.
+   ТЕКУЩИЯТ store_name влиза ВИНАГИ. Липсваше ли в списъка, <select>
+   показваше първата опция и „Запази" тихо местеше колегата в ЦО. */
+function userModalStoreOptions(list, current){
+  var base=(Array.isArray(list)&&list.length?list:USER_MODAL_STORES_FALLBACK).filter(function(s){return !!s;});
+  var rest=base.filter(function(s){return s!==CENTRAL_OFFICE;})
+    .filter(function(s,i,a){return a.indexOf(s)===i;})
+    .sort(function(a,b){return a.localeCompare(b,'bg');});
+  var out=[CENTRAL_OFFICE].concat(rest);
+  if(current && out.indexOf(current)<0) out.push(current);
+  return out;
+}
+function userModalStoreOptionsHtml(stores, current){
+  return stores.map(function(s){
+    return '<option value="'+escAttr(s)+'"'+(current===s?' selected':'')+'>'+esc(s)+'</option>';
+  }).join('');
+}
+
+function _renderUserModal(u, storeList){
   /* Премахни стар модал ако има */
   var old=document.getElementById('user-modal-ov');
   if(old && typeof old.remove==='function')old.remove();
 
   var isEdit=!!_userEditId;
   var roles=['admin','accounting','logistics','manager','sklad','kasa','supply','marketing','info','user'];
-  var stores=['Централен офис','Кърджали','Раднево','Враца','Троян','Дупница','Гоце Делчев','Петрич',
-              'Силистра','Добрич','Шумен','Търговище','Сливен','Габрово','Севлиево','Пирдоп',
-              'Карлово','Козлодуй','Монтана','Логистичен склад Добрич','Логистичен склад Търговище'];
+  var stores=userModalStoreOptions(storeList, u.store_name);
 
   var html=
     '<div class="bov open" id="user-modal-ov" onclick="if(event.target===this)closeUserModal()">'+
@@ -409,9 +448,7 @@ function _renderUserModal(u){
 
     '<label class="fl">Магазин / Офис</label>'+
     '<select class="fi" id="um-store">'+
-      stores.map(function(s){
-        return '<option value="'+s+'"'+(u.store_name===s?' selected':'')+'>'+s+'</option>';
-      }).join('')+
+      userModalStoreOptionsHtml(stores, u.store_name)+
     '</select>'+
 
     '<label class="fl">'+(isEdit?'Нова парола (остави празно = без промяна)':'Парола *')+'</label>'+
