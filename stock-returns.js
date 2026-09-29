@@ -180,7 +180,8 @@ function renderStockReturns() {
   h += '<div style="font-size:20px;font-weight:600;">📦 Стока за връщане</div>';
   h += '<div style="display:flex;gap:8px;">';
   if (canAdd) h += '<button onclick="openSRModal(null)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави</button>';
-  if (canAdd && srTab==='complaint') h += '<button onclick="openReturnsImportModal()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📤 Импорт от Excel</button>';
+  /* Импортът е и в двата подтаба - всеки със свой формат (виж startReturnsImport). */
+  if (canAdd) h += '<button onclick="openReturnsImportModal()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📤 Импорт от Excel</button>';
   h += '</div></div>';
 
   /* Търсене + табове по магазин - вече еднакво и за двата подтаба */
@@ -754,6 +755,163 @@ function parseDiffReturnsWorkbook(wb){
   return rows;
 }
 
+/* ══ ИМПОРТ ЗА ПОДТАБ „ПО РАЗЛИКИ" (29.09.2026) ══
+   Цвети води паралелно Excel „Стока за изтегляне по разлики" и го качва, докато
+   спре да го попълва. Формат: лист „Обяснение" + листове с номерата от
+   SR_SHEET_TO_STORE; ред 1 = заглавия ДОСТАВЧИК, МАТЕРИАЛ, НАИМЕНОВАНИЕ,
+   КОЛИЧЕСТВО, ПОРЪЧКА, ДАТА НА ПОТВЪРДЕНА АКТУАЛИЗАЦИЯ, КОМЕНТАР (понякога с
+   интервал накрая). Колоните се търсят ПО ЗАГЛАВИЕ (trim, без значение от
+   главни/малки). Бележката (H) стои в колоната СЛЕД „КОМЕНТАР" - често без
+   заглавие, затова се търси по позиция спрямо него, не по име. */
+var SR_DIFF_LIST_COLS = {
+  supplier:'доставчик', sap:'материал', name:'наименование', qty:'количество',
+  order:'поръчка', cdate:'дата на потвърдена актуализация', comment:'коментар'
+};
+/* Статус от колона G. „невзет" се проверява ПРЕДИ „взет" - иначе „НЕВЗЕТА"
+   съдържа „взет" и става 'taken'. „Приключена" само при canComplete (както в
+   многолистовия импорт), иначе 'taken'. */
+function srDiffListStatus(text, canComplete){
+  var t=String(text==null?'':text).trim().toLowerCase();
+  if(!t) return 'pending';
+  if(t.indexOf('невзет')>=0 || t.indexOf('не е взет')>=0 || t.indexOf('не взет')>=0 || t==='тук е') return 'pending';
+  if(t.indexOf('заприход')>=0 || t.indexOf('изхвърл')>=0 || t.indexOf('прието при')>=0) return canComplete ? 'completed' : 'taken';
+  if(t.indexOf('взет')>=0 || t.indexOf('спиди')>=0 || t.indexOf('еконт')>=0 || t.indexOf('изпрат')>=0 || t.indexOf('върнат')>=0) return 'taken';
+  return 'pending';
+}
+/* Име на доставчик за сравнение: главни букви, без правна форма
+   (ЕООД/ООД/ЕАД/АД/ЕТ) и без пунктуация. „ЕЛМАК" и „ЕЛМАК ЕООД" → „ЕЛМАК". */
+function srSupplierNorm(name){
+  return String(name||'').toUpperCase()
+    .replace(/[„"“”'`.,;:()\-–—\/\\]/g,' ')
+    .replace(/(^|\s)(ЕООД|ООД|ЕАД|АД|ЕТ)(?=\s|$)/g,' ')
+    .replace(/\s+/g,' ').trim();
+}
+/* Число/текст от клетка → текст без „.0" (SAP 20923.0 → „20923"). */
+function srCellText(v){
+  if(v===null||v===undefined) return '';
+  if(typeof v==='number') return isFinite(v) ? String(v) : '';
+  return String(v).trim().replace(/^(\d+)\.0+$/,'$1');
+}
+/* Парсва файла → {rows, badDates}. Не пише нищо. */
+function srParseDiffListWorkbook(wb, canComplete){
+  var rows=[], badDates=0;
+  wb.SheetNames.forEach(function(sheetName){
+    var store=SR_SHEET_TO_STORE[String(sheetName).trim()];
+    if(!store) return; /* „Обяснение" и непознати листове */
+    var aoa=window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,defval:''});
+    if(!aoa.length) return;
+    var head=(aoa[0]||[]).map(function(h){ return String(h==null?'':h).trim().toLowerCase(); });
+    var col={};
+    Object.keys(SR_DIFF_LIST_COLS).forEach(function(k){ col[k]=head.indexOf(SR_DIFF_LIST_COLS[k]); });
+    if(col.name<0 && col.sap<0) return; /* не е този формат */
+    var noteCol = col.comment>=0 ? col.comment+1 : -1;
+    var cell=function(r,i){ return i>=0 ? r[i] : ''; };
+    for(var i=1;i<aoa.length;i++){
+      var r=aoa[i]||[];
+      var supplier=srCellText(cell(r,col.supplier)), sap=srCellText(cell(r,col.sap)), name=srCellText(cell(r,col.name));
+      /* Празен ред - и „ред" само с текст в колоната на доставчика (банер като
+         „ЗАПРИХОЖДАВАТЕ САМО АКО…" в образеца): без SAP и наименование не е запис. */
+      if(!sap && !name) continue;
+      var rawDate=cell(r,col.cdate);
+      var cdate=srParseFlexibleDate(rawDate);
+      if(cdate===null && String(rawDate==null?'':rawDate).trim()!=='') badDates++;
+      var g=srCellText(cell(r,col.comment)), note=srCellText(cell(r,noteCol));
+      var q=parseFloat(cell(r,col.qty));
+      rows.push({
+        store_name:store, supplier:supplier, sap_code:sap, product_name:name,
+        quantity:isNaN(q)?null:q, order_number:srCellText(cell(r,col.order))||null,
+        confirmed_date:cdate, status:srDiffListStatus(g,canComplete),
+        /* G + H - свободният текст на обекта. control_comment и
+           controller_comment НЕ се пипат (те са на Цвети). */
+        store_comment:[g,note].filter(function(x){return !!x;}).join(' · ')||null,
+        source:'diff'
+      });
+    }
+  });
+  return {rows:rows, badDates:badDates};
+}
+/* Ключ за съвпадение със съществуващ ред: магазин + поръчка + SAP; без
+   поръчка - магазин + SAP + наименование. */
+function srDiffListKey(r){
+  var st=String(r.store_name||'').trim(), sap=String(r.sap_code||'').trim();
+  var ord=String(r.order_number||'').trim();
+  return ord ? ('o|'+st+'|'+ord+'|'+sap) : ('n|'+st+'|'+sap+'|'+String(r.product_name||'').trim().toUpperCase());
+}
+/* Импортът на „По разлики": парсва, съпоставя доставчиците, обновява по ключ
+   или вмъква; приключените в портала не се пипат, липсващите във файла - също. */
+function srImportDiffList(wb, progEl){
+  var canComplete=canCompleteSR();
+  var parsed=srParseDiffListWorkbook(wb, canComplete);
+  var rows=parsed.rows;
+  if(!rows.length){ progEl.innerHTML='<span style="color:#dc2626;">Няма разпознати редове за импорт.</span>'; return; }
+  progEl.textContent='⏳ Проверка за съществуващи записи...';
+  var stores=rows.map(function(r){return r.store_name;}).filter(function(s,i,a){return a.indexOf(s)===i;});
+  Promise.all([
+    /* sbGetOk, не sbGet: провалена заявка НЕ бива да изглежда като „няма
+       нищо" - тогава всеки ред би станал дубликат. */
+    sbGetOk('stock_returns','source=eq.diff&select=id,store_name,order_number,sap_code,product_name,status&store_name=in.('+
+      stores.map(function(s){return '"'+encodeURIComponent(s)+'"';}).join(',')+')'),
+    sbGetOk('stock_returns','select=supplier')
+  ]).then(function(res){
+    if(!res[0].ok || !res[1].ok){
+      var err=(!res[0].ok?res[0]:res[1]).error;
+      progEl.innerHTML='<span style="color:#dc2626;">Грешка при проверка на съществуващите: '+esc(err)+'</span>';
+      return;
+    }
+    /* Доставчик: пълното име със същото нормализирано име. В базата често стоят
+       и двата вида („ЕЛМАК" и „ЕЛМАК ЕООД") - затова: ако сред съвпаденията има
+       ТОЧНО ЕДНО с правна форма, то; иначе ако съвпадението е едно - то; иначе
+       името от файла. Двойни интервали не правят второ име („ТЕКРА  ЕООД"). */
+    var byNorm={};
+    var LEGAL=/(^|\s)(ЕООД|ООД|ЕАД|АД|ЕТ)(\s|$)/;
+    res[1].rows.forEach(function(x){
+      var full=String(x.supplier||'').replace(/\s+/g,' ').trim(); if(!full) return;
+      var k=srSupplierNorm(full); if(!k) return;
+      if(!byNorm[k]) byNorm[k]=[];
+      if(byNorm[k].indexOf(full)<0) byNorm[k].push(full);
+    });
+    var unmatched=[];
+    rows.forEach(function(r){
+      if(!r.supplier) return;
+      var cand=byNorm[srSupplierNorm(r.supplier)]||[];
+      var withLegal=cand.filter(function(c){ return LEGAL.test(c.toUpperCase()); });
+      var pick = withLegal.length===1 ? withLegal[0] : (cand.length===1 ? cand[0] : null);
+      if(pick) r.supplier=pick;
+      else if(unmatched.indexOf(r.supplier)<0) unmatched.push(r.supplier);
+    });
+    var existing={};
+    res[0].rows.forEach(function(x){ var k=srDiffListKey(x); if(!existing[k]) existing[k]=x; });
+    var created=currentUser.display_name||currentUser.email;
+    var toInsert=[], toUpdate=[], skippedCompleted=0;
+    rows.forEach(function(r){
+      var hit=existing[srDiffListKey(r)];
+      if(!hit){ r.created_by=created; toInsert.push(r); return; }
+      if(hit.status==='completed'){ skippedCompleted++; return; }
+      toUpdate.push({ id:hit.id, purchase_order:r.order_number||r.product_name, data:{
+        supplier:r.supplier, sap_code:r.sap_code, product_name:r.product_name, quantity:r.quantity,
+        order_number:r.order_number, confirmed_date:r.confirmed_date, status:r.status, store_comment:r.store_comment
+      }});
+    });
+    var done=function(insertErrors, failed){
+      var h='<span style="color:#16a34a;">✅ Нови: '+toInsert.length+' · Обновени: '+(toUpdate.length-failed.length)+
+            ' · Пропуснати (приключени): '+skippedCompleted+'</span>';
+      if(unmatched.length) h+='<div style="color:#d97706;">⚠️ Несъпоставени доставчици (остават с името от файла): '+esc(unmatched.join(', '))+'</div>';
+      if(parsed.badDates) h+='<div style="color:#d97706;">⚠️ Нечетими дати (записани празни): '+parsed.badDates+'</div>';
+      if(failed.length) h+='<div style="color:#dc2626;">⚠️ Не бяха обновени: '+esc(failed.join(', '))+'</div>';
+      if(insertErrors>0) h+='<div style="color:#dc2626;">⚠️ '+insertErrors+' партиди с нови записи не минаха. Виж конзолата (F12).</div>';
+      progEl.innerHTML=h;
+      if(!failed.length && !insertErrors) toast('✅ Импортът приключи успешно!');
+      srImportFinish();
+    };
+    var runUpdates=function(insertErrors){
+      if(!toUpdate.length){ done(insertErrors, []); return; }
+      srBatchUpdate(toUpdate,function(d,t){ progEl.textContent='⏳ Обновяване на '+d+' / '+t+'...'; },function(failed){ done(insertErrors, failed); });
+    };
+    if(!toInsert.length){ runUpdates(0); return; }
+    srBatchImport(toInsert,function(d,t){ progEl.textContent='⏳ Качване на '+d+' / '+t+'...'; },runUpdates);
+  });
+}
+
 /* Гъвкаво разпознаване на колони (за подтаб "рекламации") - приема няколко
    разпространени варианта на заглавия, тъй като няма фиксиран формат. */
 var SR_IMPORT_COL_ALIASES = {
@@ -776,9 +934,11 @@ function srFindCol(headers,aliases){
 }
 function srImportModalHtml(){
   var hint = 'Приема 2 формата: (1) Многолистов Excel (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Завод, статус ВЗЕТА/НЕВЗЕТА/ПРИКЛЮЧЕНА и т.н.; или (2) единичен лист с колони за продукт, SAP, количество, магазин, срок на годност, причина. Разпознава автоматично кой от двата е. При повторно качване на обновена версия на МНОГОЛИСТОВИЯ файл редовете със съществуващ ПВ-ЕВР номер се ОБНОВЯВАТ от файла (статус, дати, куриер, коментари); приключените в портала не се пипат; редове, които ги няма във файла, остават непроменени. При единичния лист редове със съществуващ ПВ-ЕВР се пропускат, както досега.';
+  /* „По разлики" има свой формат - „Стока за изтегляне по разлики". */
+  if(srTab==='diff') hint = 'Файлът „Стока за изтегляне по разлики": 1 лист на магазин (номерата като в многолистовия), колони ДОСТАВЧИК, МАТЕРИАЛ, НАИМЕНОВАНИЕ, КОЛИЧЕСТВО, ПОРЪЧКА, ДАТА НА ПОТВЪРДЕНА АКТУАЛИЗАЦИЯ, КОМЕНТАР. Съществуващ ред (магазин + поръчка + SAP, или без поръчка: магазин + SAP + наименование) се ОБНОВЯВА; приключените в портала не се пипат; редове, които ги няма във файла, остават. Коментарът от файла отива в „Коментар обект".';
   return '<div class="bov" id="sr-import-ov"><div class="bmod" style="width:460px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
-    '<div style="font-size:15px;font-weight:700;">📤 Импорт от Excel — рекламации/срок на годност</div>'+
+    '<div style="font-size:15px;font-weight:700;">📤 Импорт от Excel — '+(srTab==='diff'?'по разлики':'рекламации/срок на годност')+'</div>'+
     '<button onclick="closeReturnsImportModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+hint+'</div>'+
     '<input type="file" id="sr-import-file" accept=".xlsx,.xls" style="margin-bottom:14px;">'+
@@ -833,6 +993,9 @@ function startReturnsImport(){
   reader.onload=function(e){
     try{
       var wb=window.XLSX.read(new Uint8Array(e.target.result),{type:'array'});
+      /* „По разлики" има свой формат („Стока за изтегляне по разлики") и свой
+         път - „По рекламации" продължава по-долу, непроменен. */
+      if(srTab==='diff'){ srImportDiffList(wb,progEl); return; }
       /* Автоматично разпознаване на формата - опитваме първо многолистовия ERP
          формат (по познати номера на листове); ако не намери нищо разпознаваемо,
          прехвърляме към единичния гъвкав лист. И в двата случая резултатът е

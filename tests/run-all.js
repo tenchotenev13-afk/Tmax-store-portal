@@ -128,6 +128,7 @@ const TESTS = [
   'sr-excel-one-sheet-qty-label.test.js',
   'diff-return-completed.test.js',
   'sr-store-comment.test.js',
+  'sr-diff-list-import.test.js',
   'today-wrong-receipt-row.test.js',
   'notifications-poll.test.js',
   'weekly-report-window.test.js',

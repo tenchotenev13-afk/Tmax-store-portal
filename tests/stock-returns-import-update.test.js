@@ -65,7 +65,9 @@ function env(aoaRows, over) {
   }, over || {}));
 
   h.w.srData = [];
-  h.w.srTab = 'diff';
+  /* „По рекламации" - там е бутонът на този импорт. От 29.09.2026 „По разлики"
+     има свой формат и път (sr-diff-list-import.test.js). */
+  h.w.srTab = 'complaint';
   h.w.srFilter = 'all';
   h.w.srStoreFilter = '';
   h.w.srSupplierFilter = '';
