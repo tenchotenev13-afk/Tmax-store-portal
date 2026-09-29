@@ -770,7 +770,7 @@ function renderTransferPrint(t, cargo, coNum) {
     var evs = tfEventsOf(t.id).filter(function (e) { return e.cargo_id === c.id; });
     if (!evs.length) return '';
     return '<tr><td>' + (i + 1) + '</td><td colspan="2">' + evs.map(function (e) {
-      return escVal(tfFmtTs(e.created_at) + ' · ' + e.store_name + ' · ' + tfEventText(e));
+      return escVal(tfFmtTs(e.created_at) + ' · ' + e.store_name + ' · ' + tfEventText(e) + tfPhotoPrintText(e));
     }).join('<br>') + '</td></tr>';
   }).join('');
 
@@ -958,8 +958,34 @@ function tfEventText(e) {
   }
   if (e.waybill_no) t += ' · № ' + e.waybill_no;
   if (e.comment) t += ' — ' + e.comment;
-  if (e.photos && e.photos.length) t += ' · 📷 ' + e.photos.length;
   return t;
+}
+
+/* Снимките на отметка — само адресите, които са http(s). */
+function tfEventPhotos(e) {
+  return ((e && e.photos) || []).filter(function (ph) { return ph && /^https?:\/\//.test(String(ph.url || '')); });
+}
+/* На екрана: миниатюра 40×40 на всяка снимка, кликаема към пълния размер в
+   нов таб. Досега беше „📷 1 📷" — брояч в текста и емотикон-линк, които
+   изглеждаха като украса, а не като снимка. */
+function tfPhotoThumbs(e) {
+  var ps = tfEventPhotos(e);
+  if (!ps.length) return '';
+  return ' <span class="trf-thumbs">' + ps.map(function (ph, i) {
+    return '<a href="' + tfAttr(ph.url) + '" target="_blank" rel="noopener" class="trf-thumb" title="Снимка ' + (i + 1) + '">' +
+      '<img src="' + tfAttr(ph.url) + '" alt="Снимка ' + (i + 1) + '" loading="lazy"' +
+      ' style="width:40px;height:40px;object-fit:cover;border:1px solid #cbd5e1;border-radius:4px;vertical-align:middle;margin-left:4px;"></a>';
+  }).join('') + '</span>';
+}
+/* В печата — текст „Снимка 1, Снимка 2", не миниатюра: външната снимка може
+   да не е заредена, когато се отвори диалогът за печат, и листът излиза с
+   празно място (затова и логото там е вградено, не по адрес). */
+function tfPhotoPrintText(e) {
+  var n = tfEventPhotos(e).length;
+  if (!n) return '';
+  var out = [];
+  for (var i = 1; i <= n; i++) out.push('Снимка ' + i);
+  return ' · ' + out.join(', ');
 }
 
 /* Състоянието на товара с думи — за картата и за „За потвърждение". */
@@ -1052,7 +1078,7 @@ function tfProblemsHtml(q) {
     return '<div class="trf-problem-row" data-e="' + tfAttr(it.p.id) + '" style="border:1px solid #fecaca;border-radius:8px;padding:10px;margin-bottom:8px;background:#fef2f2;">' +
       '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
         '<div><b>' + escVal(it.t.transfer_num) + '</b> · ' + escVal(tfCargoLabel(it.c, it.i)) +
-        '<div style="font-size:13px;margin-top:2px;">⚠️ ' + escVal(it.p.store_name) + ' · ' + escVal(tfEventText(it.p)) + '</div>' +
+        '<div style="font-size:13px;margin-top:2px;">⚠️ ' + escVal(it.p.store_name) + ' · ' + escVal(tfEventText(it.p)) + tfPhotoThumbs(it.p) + '</div>' +
         '<div style="font-size:11px;color:#64748b;">' + escVal(tfFmtTs(it.p.created_at)) + (it.p.created_by ? ' · ' + escVal(it.p.created_by) : '') + '</div></div>' +
         (res ? tfActBtn(it.t, it.c, res) : '') +
       '</div></div>';
@@ -1094,9 +1120,7 @@ function renderTransferCard() {
       '</div>' +
       (mine.length ? '<ol class="trf-history" style="margin:8px 0 0;padding-left:20px;font-size:12px;color:#334155;">' + mine.map(function (e) {
         return '<li>' + escVal(tfFmtTs(e.created_at)) + ' · <b>' + escVal(e.store_name) + '</b> · ' + escVal(tfEventText(e)) +
-          (e.photos && e.photos.length ? ' ' + e.photos.map(function (ph) {
-            return '<a href="' + tfAttr(ph.url) + '" target="_blank" rel="noopener">📷</a>';
-          }).join(' ') : '') + '</li>';
+          tfPhotoThumbs(e) + '</li>';
       }).join('') + '</ol>' : '') +
     '</div>';
   });

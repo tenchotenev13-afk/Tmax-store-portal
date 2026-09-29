@@ -247,5 +247,47 @@ function t0(h) { return h.w.tfTransfers.filter(function (t) { return t.id === 'b
     h.close();
   }
 
+  section('8. Снимки в историята: миниатюра, не емотикон');
+  {
+    const U1 = 'https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1/object/public/bulletin-files/transfers/b1/1.jpg';
+    const U2 = 'https://xiwkdiqqplgdcrkewgtv.supabase.co/storage/v1/object/public/bulletin-files/transfers/b1/2.jpg';
+    const evs = [
+      { id: 'e1', cargo_id: 'cA', transfer_id: 'b1', event: 'unloaded', store_name: 'Пирдоп', comment: 'в склада',
+        photos: [{ url: U1, name: 'a.jpg' }, { url: U2, name: 'b.jpg' }], created_at: '2026-09-30T09:00:00Z' },
+      { id: 'e2', cargo_id: 'cB', transfer_id: 'b1', event: 'problem', problem_kind: 'damaged', store_name: 'Троян', comment: 'смачкано',
+        photos: [], created_at: '2026-09-30T10:00:00Z' }
+    ];
+    const h = env(ADMIN, { events: evs });
+    await open(h); await card(h, 'b1');
+    const liA = cardCargo(h, 'cA').querySelector('.trf-history li');
+    const imgs = liA ? Array.prototype.slice.call(liA.querySelectorAll('img')) : [];
+    ok('отметка с 2 снимки → 2 миниатюри <img>', imgs.length === 2, String(imgs.length));
+    ok('src е адресът на снимката', imgs[0] && imgs[0].getAttribute('src') === U1 && imgs[1].getAttribute('src') === U2);
+    ok('40×40, object-fit:cover, с рамка', imgs[0] && /width:40px/.test(imgs[0].getAttribute('style')) && /height:40px/.test(imgs[0].getAttribute('style')) &&
+       /object-fit:cover/.test(imgs[0].getAttribute('style')) && /border:1px solid/.test(imgs[0].getAttribute('style')));
+    const a = imgs[0] && imgs[0].parentNode;
+    ok('кликаема → пълният размер в нов таб', a && a.tagName === 'A' && a.getAttribute('href') === U1 && a.getAttribute('target') === '_blank');
+    ok('без „📷" в реда', liA && liA.textContent.indexOf('📷') < 0, liA && liA.textContent);
+    const liB = cardCargo(h, 'cB').querySelector('.trf-history li');
+    ok('отметка без снимка → без <img>', liB && liB.querySelectorAll('img').length === 0);
+
+    /* „Проблеми": проблем със снимка — миниатюра и там. */
+    const h2 = env(ADMIN, { events: [Object.assign({}, evs[1], { photos: [{ url: U1 }] })] });
+    await open(h2); realClick(h2.w, $(h2, '.trf-filter[data-f="problems"]')); await ticks();
+    const pimg = $(h2, '.trf-problem-row img');
+    ok('„Проблеми": миниатюрата е там', pimg && pimg.getAttribute('src') === U1);
+    h2.close();
+
+    /* Печат: „Снимка 1, Снимка 2" като текст, без <img> на снимките. */
+    await open(h);
+    realClick(h.w, H.btn($(h, '#trf-table tr[data-id="b1"]'), 'Печат')); await ticks();
+    const pr = h.doc.getElementById('mod-print');
+    const hist = pr.querySelector('.tf-hist');
+    ok('печат: „Снимка 1, Снимка 2" в историята', hist && /Снимка 1, Снимка 2/.test(hist.textContent), hist && hist.textContent);
+    ok('печат: без <img> на снимките (само логото)', pr.querySelectorAll('img').length === 1 && !!pr.querySelector('img.tf-logo'));
+    ok('печат: без „📷"', hist && hist.textContent.indexOf('📷') < 0);
+    h.close();
+  }
+
   report();
 })().catch(function (e) { console.error(e); process.exit(1); });
