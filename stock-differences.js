@@ -414,7 +414,7 @@ function renderStockDiff() {
     h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">';
     h += '<thead><tr style="background:#f8fafc;">';
-    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Дата потвърд.','Статус','Кредитно','Снимки','Коментар','Коментар Контролер','Отговор на склада',''].forEach(function(c){
+    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Поръчка за връщане','Дата потвърд.','Статус','Кредитно','Снимки','Коментар','Коментар Контролер','Отговор на склада',''].forEach(function(c){
       h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
     });
     h += '</tr></thead><tbody>';
@@ -443,6 +443,7 @@ function renderStockDiff() {
         '<td style="padding:7px 10px;max-width:200px;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+'</td>'+
         '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+sdQtyCell(r.quantity,(r.quantity)||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.order_number||'')+'</td>'+
+        '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.return_order_number||'')+'</td>'+
         '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.confirmed_date)+'</td>'+
         '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
         '<td style="padding:7px 10px;white-space:nowrap;">'+creditCell+'</td>'+
@@ -555,7 +556,7 @@ function sdTableRows(over){
     if (sdStoreFilter && r.store_name !== sdStoreFilter) return false;
     if (sdSearch) {
       var q = sdSearch.toLowerCase();
-      var hay = [r.store_name,r.supplier,r.material_name,r.material_code,r.order_number,r.comment].join(' ').toLowerCase();
+      var hay = [r.store_name,r.supplier,r.material_name,r.material_code,r.order_number,r.return_order_number,r.comment].join(' ').toLowerCase();
       if (hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -1171,8 +1172,12 @@ function autoCreateReturnFromDiff(line,cb){
       quantity:line.quantity,
       /* Номерът на поръчката пътува заедно с реда - без него в "За връщане"
          не се вижда по коя поръчка е дошъл излишъкът и връзката се търси на
-         ръка обратно в "Разлики". '' от празно поле става null. */
+         ръка обратно в "Разлики". '' от празно поле става null.
+         Две полета, две колони (28.09.2026): поръчката ОТ доставчика (41…,
+         order_number) → „Поръчка"; поръчката ЗА ВРЪЩАНЕ (42…,
+         return_order_number) → ПВ-ЕВР (purchase_order) в „За връщане". */
       order_number:line.order_number||null,
+      purchase_order:line.return_order_number||null,
       reason:'Излишък от разлика'+(line.supplier?' — '+line.supplier:''),
       status:'pending',
       source:'diff',
@@ -1643,6 +1648,17 @@ function sdModalHtml() {
     h += '<input type="hidden" id="sd-ctrl-comment" value="'+escVal(r.resolution_comment)+'">';
   }
 
+  /* „Поръчка за връщане" (42…) - отделно от „Поръчка" (order_number, 41… от
+     доставчика). Пише я само ЦО (canReviewDiff); за магазина се вижда, ако
+     е попълнена, и не се праща при запис (виж submitSD). */
+  if(canReview){
+    h += '<label class="fl">Поръчка за връщане</label>'+
+      '<input class="fi" id="sd-return-order" value="'+escVal(r.return_order_number)+'" placeholder="напр. 4200017097">';
+  } else if(r.return_order_number){
+    h += '<label class="fl">Поръчка за връщане</label>'+
+      '<div class="fi" id="sd-return-order-ro" style="background:#f8fafc;color:#64748b;">'+esc(r.return_order_number)+'</div>';
+  }
+
   h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
     '<button onclick="closeSDModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
     '<button onclick="submitSD()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">'+(isEdit?'Запази':'Добави')+'</button>'+
@@ -1903,6 +1919,10 @@ function submitSD(sync) {
     resolution_comment: document.getElementById('sd-ctrl-comment').value,
     created_by:     currentUser.display_name||currentUser.email
   };
+  /* Само ЦО пише „Поръчка за връщане". Магазинът не праща ключа изобщо -
+     иначе запис от него би изтрил номера, който Цвети е въвела. */
+  var retOrderEl=document.getElementById('sd-return-order');
+  if(canReviewDiff() && retOrderEl) data.return_order_number=(retOrderEl.value||'').trim()||null;
   /* Ако МАГАЗИНЪТ (не Цвети/admin/logistics) коригира запис, който Цвети
      ОЩЕ НЕ Е решила (type беше празно преди тази редакция) - маркираме
      момента на корекция, за да изскочи най-отгоре в списъка. */
@@ -1978,8 +1998,18 @@ function submitSD(sync) {
        autoCreateReturnFromDiff по-долу го създава направо с номера. */
     var syncReturnOrder=function(next){
       if(!(sdEditId && data.type==='return')){ next(); return; }
+      var srPatch={order_number:data.order_number||null};
+      /* Поръчката за връщане (42…) → ПВ-ЕВР в „За връщане". Пише се САМО ако
+         има стойност или току-що е изчистена от предишна. Празно→празно не се
+         праща: иначе ПВ-ЕВР, въведено ръчно в „За връщане" (или заварен 42…),
+         би се изтрило от запис, който изобщо не пипа това поле. Без ключа
+         (запис от магазина) — не се праща никога. */
+      if(data.hasOwnProperty('return_order_number')){
+        var oldRet=(origRecord&&origRecord.return_order_number)||null;
+        if(data.return_order_number || oldRet) srPatch.purchase_order=data.return_order_number;
+      }
       sbPatch('stock_returns','diff_line_id=eq.'+sdEditId+'&source=eq.diff',
-              {order_number:data.order_number||null}).then(function(r){
+              srPatch).then(function(r){
         /* Провалът не отменя записа на самата разлика, но и не се поглъща
            тихо - иначе номерът просто липсва в другия модул без обяснение. */
         if(!r.ok) returnSyncFailed = true;
@@ -1998,7 +2028,8 @@ function submitSD(sync) {
           material_name: data.material_name,
           material_code: data.material_code,
           quantity:      data.quantity,
-          order_number:  data.order_number
+          order_number:  data.order_number,
+          return_order_number: data.return_order_number
         },finish);
       });
       return;

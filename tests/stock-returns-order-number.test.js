@@ -166,8 +166,11 @@ function cells(doc) {
             Object.keys(post[0].body).join(','));
           ok('стойността е от реда (4100135756)',
             post[0].body.order_number === '4100135756', JSON.stringify(post[0].body.order_number));
-          ok('ПВ-ЕВР не се пипа — то е друго поле',
-            !('purchase_order' in post[0].body), Object.keys(post[0].body).join(','));
+          /* От 28.09.2026 ПВ-ЕВР идва от return_order_number (42…) на реда —
+             виж diff-return-order.test.js. Тук редът го няма → null, и
+             order_number (41…) НЕ се пренася в ПВ-ЕВР. */
+          ok('ПВ-ЕВР е поръчката за връщане на реда (тук няма → null), не order_number',
+            post[0].body.purchase_order === null, JSON.stringify(post[0].body.purchase_order));
         }
       }
     }

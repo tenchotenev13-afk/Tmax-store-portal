@@ -122,6 +122,7 @@ const TESTS = [
   'wrong-receipt-tab.test.js',
   'wrong-receipt-store-submit.test.js',
   'diff-email-pending.test.js',
+  'diff-return-order.test.js',
   'today-wrong-receipt-row.test.js',
   'notifications-poll.test.js',
   'weekly-report-window.test.js',
