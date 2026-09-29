@@ -220,6 +220,7 @@ const TESTS = [
   'transfers-create.test.js',
   'report-service-troyan.test.js',
   'admin-user-store-list.test.js',
+  'transfers-confirm.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',

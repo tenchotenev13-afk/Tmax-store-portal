@@ -294,7 +294,7 @@ async function openForm(h) {
     ];
     const h = env({ transfers: T, cargo: C, clientOrders: [{ id: 'co-1', in_num: 'Добрич-0042' }] });
     h.w.showModule('transfers'); await ticks();
-    realClick(h.w, $(h, '#trf-table tbody tr[data-id="a"] button')); await ticks();
+    realClick(h.w, H.btn($(h, '#trf-table tbody tr[data-id="a"]'), 'Печат')); await ticks();
     const pr = h.doc.getElementById('mod-print');
     ok('печатът е показан', pr && pr.style.display === 'block');
     const txt = pr ? pr.textContent : '';
