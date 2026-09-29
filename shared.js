@@ -1540,7 +1540,7 @@ function showModule(mod){
     showModule('kasa');
     return;
   }
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','today','checklist'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -1557,16 +1557,18 @@ function showModule(mod){
   /* "Транспорт" и "Палети" — под-таб в Транспорт (наличности на празни палети по обекти) */
   var tpSub=document.getElementById('transport-pallets-subnav');
   if(tpSub){
-    tpSub.style.display=(mod==='transport'||mod==='pallets'||mod==='supply'||mod==='loading')?'block':'none';
+    tpSub.style.display=(mod==='transport'||mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers')?'block':'none';
     var btnT=document.getElementById('tps-transport'),btnP=document.getElementById('tps-pallets'),btnS=document.getElementById('tps-supply'),btnL=document.getElementById('tps-loading');
     if(btnT)btnT.classList.toggle('active',mod==='transport');
     if(btnP)btnP.classList.toggle('active',mod==='pallets');
     if(btnS)btnS.classList.toggle('active',mod==='supply');
     if(btnL)btnL.classList.toggle('active',mod==='loading');
+    var btnX=document.getElementById('tps-transfers');
+    if(btnX)btnX.classList.toggle('active',mod==='transfers');
   }
   /* Подтабовете на Транспорт държат главния таб активен - иначе навигацията
      показва Транспорт като незает, докато си вътре в негов подтаб. */
-  if(mod==='pallets'||mod==='supply'||mod==='loading'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
+  if(mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
   if(mod==='admin')loadAdmin();
   if(mod==='transport')loadTransport();
   if(mod==='client')loadClientOrders();
@@ -1584,6 +1586,7 @@ function showModule(mod){
   if(mod==='pallets')loadPallets();
   if(mod==='supply')loadSupply();
   if(mod==='loading')loadLoadingLists();
+  if(mod==='transfers')loadTransfers();
   if(mod==='reference')loadReference();
   if(mod==='handbook')loadHandbook();
 }
