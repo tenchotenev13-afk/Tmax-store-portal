@@ -125,6 +125,7 @@ const TESTS = [
   'diff-return-order.test.js',
   'diff-order-required.test.js',
   'diff-excel-export.test.js',
+  'sr-excel-one-sheet-qty-label.test.js',
   'today-wrong-receipt-row.test.js',
   'notifications-poll.test.js',
   'weekly-report-window.test.js',

@@ -129,7 +129,7 @@ const correctBtns = (h, id) => Array.prototype.filter.call(card(h, id).querySele
     ok('междускладов: ред има', !!r);
     ok('междускладов: td = th', !!r && r.cells.length === ths(h).length,
       'td=' + (r && r.cells.length) + ' th=' + ths(h).length);
-    /* SAP, Артикул, Категория, Кол. по док., Реално, Коментар (магазин),
+    /* SAP, Артикул, Категория, Кол. по входяща, Реално, Коментар (магазин),
        Снимки, Отговор на склада. */
     ok('междускладов: 8 колони', ths(h).length === 8, ths(h).join(' | '));
     h.close();

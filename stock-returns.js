@@ -243,6 +243,9 @@ function renderStockReturns() {
   /* Показва се винаги, включително при празен списък - иначе изчезването на
      бутона изглежда като счупен екран. Празният случай се хваща вътре. */
   h += '<button onclick="exportSRExcel()" style="margin-left:auto;border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">📥 Excel</button>';
+  /* Втори износ само в „По рекламации": всички редове в ЕДИН лист (справка по
+     доставчик). Многолистовият бутон отляво не се пипа. */
+  if (srTab==='complaint') h += '<button onclick="exportSRExcel(true)" style="border:1px solid #16a34a;background:#fff;color:#16a34a;border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">📥 Excel (един лист)</button>';
   h += '</div>';
 
   /* Таблица */
@@ -1014,13 +1017,48 @@ function parseComplaintReturnsSheet(wb,progEl){
      колоните ПОЗИЦИОННО 0-10, тоест всеки ред отгоре би станал "запис", а
      разместена колона - грешно поле. Колоните 11+ (продукт, SAP, ...) импортът
      не чете; излизат само ако поне един ред ги има. */
-function exportSRExcel(){
+/* Колоните на „По рекламации" - ЕДНО място за двата износа (един лист на
+   магазин и един общ лист). 0-10 - позиционно, както ги чете
+   parseDiffReturnsWorkbook; 11+ (продукт, SAP, ...) - само ако поне един
+   ред ги има. Главни букви в статуса - както ги пише ERP файлът. Празна
+   дата - празна клетка: клетката се чете обратно от импорта, а „—" там е
+   боклук, не липсваща стойност. */
+var SR_XL_STATUS={pending:'НЕВЗЕТА',taken:'ВЗЕТА',completed:'ПРИКЛЮЧЕНА'};
+function srXlHasExtra(list){
+  return list.some(function(r){
+    return r.product_name||r.sap_code||r.quantity!=null||r.expiry_date||r.reason;
+  });
+}
+function srXlHead(hasExtra){
+  var head=['НОВА ПВ-ЕВР','НОВА ИД-ЕВРО','Доставчик','Дата на документ','Завод','Статус',
+            'Дата на изтегляне','Изтеглена с','Потвърдена акт.','Коментар','Коментар контролер'];
+  return hasExtra ? head.concat(['Продукт','SAP','Кол.','Срок на годност','Причина']) : head;
+}
+function srXlRow(r,hasExtra){
+  var fd=function(v){ return v?fmtDate(v):''; };
+  var line=[
+    r.purchase_order||'', r.id_euro||'', r.supplier||'', fd(r.doc_date), r.plant||'',
+    SR_XL_STATUS[r.status]||r.status||'', fd(r.withdrawal_date), r.courier_info||'',
+    fd(r.confirmed_date), r.control_comment||'', r.controller_comment||''
+  ];
+  return hasExtra ? line.concat([
+    r.product_name||'', r.sap_code||'', (r.quantity!=null?r.quantity:''),
+    fd(r.expiry_date), r.reason||''
+  ]) : line;
+}
+function srXlCols(hasExtra){
+  var c=[{wch:14},{wch:12},{wch:22},{wch:12},{wch:8},{wch:12},{wch:14},{wch:18},
+         {wch:14},{wch:26},{wch:26}];
+  return hasExtra ? c.concat([{wch:34},{wch:10},{wch:7},{wch:14},{wch:26}]) : c;
+}
+/* oneSheet - „📥 Excel (един лист)" в „По рекламации"; иначе както досега. */
+function exportSRExcel(oneSheet){
   if(!window.XLSX){
     var sc=document.createElement('script');
     /* Същият CDN като при импорта (startReturnsImport) - един източник, за да
        не се теглят две различни копия на SheetJS в една сесия. */
     sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
-    sc.onload=function(){ exportSRExcel(); };
+    sc.onload=function(){ exportSRExcel(oneSheet); };
     sc.onerror=function(){ toast('Грешка при зареждане на SheetJS','#dc2626'); };
     document.head.appendChild(sc);
     return;
@@ -1080,12 +1118,17 @@ function exportSRExcel(){
        приключваш (canCompleteSR) - иначе нов ред влиза като "Взета", а
        съществуващ си пази статуса. Приключен в портала ред не се пипа при
        обратно качване (hit.status==='completed' -> пропуск в startReturnsImport). */
-    var XL_STATUS={pending:'НЕВЗЕТА',taken:'ВЗЕТА',completed:'ПРИКЛЮЧЕНА'};
+    var hasExtra=srXlHasExtra(list);
+    /* „📥 Excel (един лист)": същите колони (srXlHead/srXlRow), плюс „Магазин"
+       най-отпред, в реда от екрана - за справка по доставчик наведнъж. Не се
+       връща през импорта (листът не е номер от SR_SHEET_TO_STORE). */
+    if(oneSheet){
+      var one=[['Магазин'].concat(srXlHead(hasExtra))];
+      list.forEach(function(r){ one.push([r.store_name||''].concat(srXlRow(r,hasExtra))); });
+      sheets.push({name:'По рекламации', aoa:one, cols:[{wch:16}].concat(srXlCols(hasExtra))});
+    }
     var storeToSheet={};
     Object.keys(SR_SHEET_TO_STORE).forEach(function(k){ storeToSheet[SR_SHEET_TO_STORE[k]]=k; });
-    var hasExtra=list.some(function(r){
-      return r.product_name||r.sap_code||r.quantity!=null||r.expiry_date||r.reason;
-    });
     var byStore={}, order=[];
     list.forEach(function(r){
       var s=r.store_name||'';
@@ -1099,7 +1142,7 @@ function exportSRExcel(){
       return (ka?0:1)-(kb?0:1);
     });
     var usedNames={};
-    order.forEach(function(s){
+    if(!oneSheet) order.forEach(function(s){
       /* Магазин без номер в SR_SHEET_TO_STORE: листът се казва като магазина,
          за да не се губят редове от износа - но импортът НЕ го разпознава и
          при обратно качване го прескача. Към 28.09.2026 всички магазини с
@@ -1108,25 +1151,9 @@ function exportSRExcel(){
       var base=name, n=2;
       while(usedNames[name]){ name=base.slice(0,28)+'_'+n; n++; }
       usedNames[name]=true;
-      var a=[['НОВА ПВ-ЕВР','НОВА ИД-ЕВРО','Доставчик','Дата на документ','Завод','Статус',
-              'Дата на изтегляне','Изтеглена с','Потвърдена акт.','Коментар','Коментар контролер']];
-      if(hasExtra) a[0]=a[0].concat(['Продукт','SAP','Кол.','Срок на годност','Причина']);
-      byStore[s].forEach(function(r){
-        var line=[
-          r.purchase_order||'', r.id_euro||'', r.supplier||'', fd(r.doc_date), r.plant||'',
-          XL_STATUS[r.status]||r.status||'', fd(r.withdrawal_date), r.courier_info||'',
-          fd(r.confirmed_date), r.control_comment||'', r.controller_comment||''
-        ];
-        if(hasExtra) line=line.concat([
-          r.product_name||'', r.sap_code||'', (r.quantity!=null?r.quantity:''),
-          fd(r.expiry_date), r.reason||''
-        ]);
-        a.push(line);
-      });
-      var c=[{wch:14},{wch:12},{wch:22},{wch:12},{wch:8},{wch:12},{wch:14},{wch:18},
-             {wch:14},{wch:26},{wch:26}];
-      if(hasExtra) c=c.concat([{wch:34},{wch:10},{wch:7},{wch:14},{wch:26}]);
-      sheets.push({name:name, aoa:a, cols:c});
+      var a=[srXlHead(hasExtra)];
+      byStore[s].forEach(function(r){ a.push(srXlRow(r,hasExtra)); });
+      sheets.push({name:name, aoa:a, cols:srXlCols(hasExtra)});
     });
   }
 
@@ -1137,7 +1164,8 @@ function exportSRExcel(){
     window.XLSX.utils.book_append_sheet(wb,ws,sh.name);
   });
   var fname='za-vrashtane-'+(srTab==='diff'?'razliki':'reklamacii')+'-'+
-            (srSupplierFilter?translit(srSupplierFilter):'vsichki')+'-'+today()+'.xlsx';
+            (srSupplierFilter?translit(srSupplierFilter):'vsichki')+
+            (oneSheet&&srTab!=='diff'?'-edin-list':'')+'-'+today()+'.xlsx';
   window.XLSX.writeFile(wb,fname);
   toast('✅ Excel изтеглен! ('+list.length+' реда)');
 }

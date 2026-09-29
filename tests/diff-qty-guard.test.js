@@ -176,7 +176,7 @@ function mainCell(doc, name) {
     if (guard('renderStockDiff не хвърля', () => h.w.renderStockDiff())) {
       const big = reportCell(h.doc, 'ОТВОРЕН ВД НОМЕР', 1);
       if (ok('бланка: редът с 180493275 е на екрана', !!(big && big.td), big && big.head.join('|'))) {
-        ok('бланка: заглавието е „Кол. по док."', big.head[big.head.indexOf('Категория') + 1] === 'Кол. по док.', big.head.join('|'));
+        ok('бланка: заглавието е „Кол. по входяща"', big.head[big.head.indexOf('Категория') + 1] === 'Кол. по входяща', big.head.join('|'));
         ok('бланка: клетката съдържа „⚠️ номер на документ?"', big.td.textContent.indexOf('⚠️ номер на документ?') >= 0, big.td.innerHTML);
         const sp = big.td.querySelector('[title]');
         ok('бланка: title е пълната стойност 180493275', !!sp && sp.getAttribute('title') === '180493275', big.td.innerHTML);
@@ -232,8 +232,8 @@ function mainCell(doc, name) {
     if (guard('модалът за корекция се отваря', () => h.w.openSDCorrectModal('o-big'))) {
       const ov = h.doc.getElementById('sdc-ov');
       const labels = Array.from(ov.querySelectorAll('label.fl')).map(l => l.textContent);
-      ok('етикетите казват „Количество по документ (бр.)" / „Реално получено (бр.)"',
-        labels.indexOf('Количество по документ (бр.)') >= 0 && labels.indexOf('Реално получено (бр.)') >= 0, labels.join('|'));
+      ok('етикетите казват „Количество по входяща (бр.)" / „Реално получено (бр.)"',
+        labels.indexOf('Количество по входяща (бр.)') >= 0 && labels.indexOf('Реално получено (бр.)') >= 0, labels.join('|'));
       ok('старото 180493275 стои в полето', h.doc.getElementById('sdc-qty').value === '180493275');
       realClick(h.w, btn(ov, 'Запази корекцията'));
       await ticks();
