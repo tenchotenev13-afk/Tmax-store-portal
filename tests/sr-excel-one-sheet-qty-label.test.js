@@ -4,7 +4,8 @@
       Същите редове като на екрана (srFilteredList), колона „Магазин" най-
       отпред, после ТОЧНО колоните на многолистовия износ (srXlHead/srXlRow -
       едно място за двата). Файл …-edin-list-<дата>.xlsx. Многолистовият бутон
-      дава байт по байт същото като преди — сравнено срещу кода отпреди промяната (по SHA на блоба).
+      дава байт по байт същото като преди — сравнено срещу замразения изход на
+      кода отпреди промяната (tests/fixtures/sr-excel-multisheet-52ccb73.json).
 
    Б) „Разлики": „Кол. по док." се бърка → „Кол. по входяща" / „Количество по
       входяща (бр.)" за доставчик и междускладов. Сторната („по фактура") и
@@ -16,7 +17,6 @@ const H = require('../.claude/skills/tmax-jsdom-test/harness');
 const { boot, ok, section, report, realClick, btn, ticks, fire } = H;
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 const CVETI = { email: 'c.teneva@temax.bg', display_name: 'Цветелина Тенева',
   role: 'admin', store_name: 'Централен офис', assigned_stores: [] };
@@ -123,29 +123,27 @@ const dump = wb => JSON.stringify(wb.SheetNames.map(n => [n, wb.Sheets[n].__aoa,
 
   section('А4) Многолистовият бутон — байт по байт същото като кода отпреди промяната');
   {
-    /* Старият stock-returns.js (по SHA на блоба) в отделна папка; останалите са
-       същите. Сравнява се целият workbook: имена на листове, aoa, ширини. */
-    const repo = path.resolve(process.argv[2] || '.');
-    const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sr-head-'));
-    ['index.html', 'shared.js', 'stock-returns.js', 'stock-differences.js'].forEach(f => {
-      const src = f === 'stock-returns.js'
-        ? execSync('git cat-file blob 52ccb735dc103f59457b4b60746d79c88989a0f4', { cwd: repo })  /* stock-returns.js преди „един лист" — по SHA на блоба, не HEAD: след комита HEAD е новият */
-        : fs.readFileSync(path.join(repo, f));
-      fs.writeFileSync(path.join(tmp, f), src);
-    });
+    /* Очакваният резултат е ЗАМРАЗЕН във fixture: изходът на stock-returns.js
+       отпреди „един лист" (блоб 52ccb73…, в историята от 666a43e) за същите
+       ROWS — имена на листове, aoa, ширини и име на файла. Генериран веднъж
+       локално от стария блоб; днешната дата в името е заменена с <ДАТА>.
+       Досега тестът четеше блоба с git cat-file при всяко пускане и в CI
+       (actions/checkout без fetch-depth — само последният комит) падаше с
+       „bad file" и спираше целия пакет (29.09.2026). */
+    const FIX = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'sr-excel-multisheet-52ccb73.json'), 'utf8'));
     let same = true, detail = '';
     for (const sup of ['', 'ЕЛМАК ЕООД']) {
-      const run = dir => {
-        const h = srEnv(ROWS, dir);
-        h.w.srSupplierFilter = sup; h.w.renderStockReturns();
-        h.w.exportSRExcel();
-        const out = { wb: dump(h.cap.files[0].wb), fname: h.cap.files[0].fname };
-        h.close();
-        return out;
-      };
-      let oldOut, newOut;
-      try { oldOut = run(tmp); newOut = run(undefined); } catch (e) { same = false; detail = String(e); break; }
-      if (oldOut.wb !== newOut.wb || oldOut.fname !== newOut.fname) { same = false; detail = sup + ': ' + oldOut.fname + ' vs ' + newOut.fname; }
+      const want = FIX[sup || '(всички)'];
+      const h = srEnv(ROWS);
+      h.w.srSupplierFilter = sup; h.w.renderStockReturns();
+      h.w.exportSRExcel();
+      const f = h.cap.files[0];
+      const got = { fname: f ? f.fname.split(h.w.today()).join('<ДАТА>') : null, wb: f ? JSON.parse(dump(f.wb)) : null };
+      h.close();
+      if (!want) { same = false; detail = 'няма fixture за „' + sup + '"'; break; }
+      if (JSON.stringify(got.wb) !== JSON.stringify(want.wb) || got.fname !== want.fname) {
+        same = false; detail = (sup || '(всички)') + ': ' + got.fname + ' vs ' + want.fname; break;
+      }
     }
     ok('многолистовият износ е идентичен със стария (с и без филтър по доставчик)', same, detail);
   }
