@@ -215,6 +215,7 @@ const TESTS = [
   'checklist-send.test.js',
   'checklist-full-form.test.js',
   'transfers-create.test.js',
+  'report-service-troyan.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',

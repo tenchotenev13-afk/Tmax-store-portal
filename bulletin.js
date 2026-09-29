@@ -5117,7 +5117,10 @@ function renderBulAnalysis(){
   if(!anTasks.length){html+='<div class="bcard" style="text-align:center;padding:30px;color:#94a3b8;">Няма задачи.</div>';wrap.innerHTML=html+'</div>';return;}
   var ds={};bulComps.forEach(function(c){ds[c.task_id]=1;});
   var done=Object.keys(ds).length; var tot=anTasks.length;
-  var ss={};bulComps.forEach(function(c){ss[c.store_name]=1;});
+  /* Числителят минава през същия филтър като знаменателя (loadReportableStores
+     по-долу). Иначе отметка от необект — ЦО, склад, Сервиз Троян — прави
+     „🏪 Магазини" 19 и процента над 100%. */
+  var ss={};bulComps.forEach(function(c){if(isReportableStore(c.store_name))ss[c.store_name]=1;});
   var over=anTasks.filter(function(t){var dts=taskDueDates(t);return dts.length&&new Date(dts[dts.length-1])<new Date()&&!ds[t.id];}).length;
   html+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">';
   [['📋 Задачи',tot,'общо','#2563eb'],['✅ Изпълнени',done,'задачи','#16a34a'],['🔴 Просрочени',over,'без изпълнение','#dc2626'],['🏪 Магазини',Object.keys(ss).length,'са отметнали','#d97706']].forEach(function(card){
@@ -5133,7 +5136,7 @@ function renderBulAnalysis(){
   loadReportableStores().then(function(all){
     var tbl='<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Задача</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Отдел</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Срок</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Изпълнили</th><th style="text-align:right;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">%</th></tr></thead><tbody>';
     anTasks.forEach(function(task){
-      var comps=bulComps.filter(function(c){return c.task_id===task.id;});
+      var comps=bulComps.filter(function(c){return c.task_id===task.id&&isReportableStore(c.store_name);});
       var pct=all.length?Math.round(comps.length/all.length*100):0;
       var isOv=(function(){var dts=taskDueDates(task);return dts.length&&new Date(dts[dts.length-1])<new Date()&&!ds[task.id];})();
       var d=DEPTS[task.department]||{label:task.department,color:'#94a3b8',bg:'#f3f4f6',bdr:'#e2e8f0'};

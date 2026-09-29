@@ -1,5 +1,10 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v14 (29.09.2026) — ЕДНО нещо: REPORT_EXCLUDED_STORES вече съдържа и
+   'Пазарджик', и 'Сервиз Троян' — същият списък като в bulletin-notify и
+   shared.js. Без него Сервиз Троян (след преместването на акаунта си)
+   излизаше „неизпълнил" във всяка картичка на задача за всички обекти.
+
    v13 (27.09.2026) — „В СИЛА ОТ" за многоседмична задача (нова колона
    bulletin_tasks.starts_on). Обектите не виждат задачата преди тази дата и не
    могат да я отметнат; действителното начало е coalesce(starts_on, spans_from)
@@ -234,7 +239,11 @@ function recurringIsDueOnWeekday(t,weekdayIdx){
   return t.due_weekday===weekdayIdx;
 }
 var LOGISTICS_WAREHOUSES = ['Логистичен склад Добрич','Логистичен склад Търговище'];
-var REPORT_EXCLUDED_STORES = ['Централен офис'].concat(LOGISTICS_WAREHOUSES);
+/* Пазарджик и Сервиз Троян — обекти без седмичен бюлетин (29.09.2026). Същият
+   списък като EXCLUDED_STORES в bulletin-notify и REPORT_EXCLUDED_DEFAULT в
+   shared.js; без тях Сервиз Троян (акаунт с role user) влиза като 19-и обект
+   с 0% — в процента, „последните 3", „неизпълнени" и палетите. */
+var REPORT_EXCLUDED_STORES = ['Централен офис'].concat(LOGISTICS_WAREHOUSES).concat(['Пазарджик','Сервиз Троян']);
 /* Копие от shared.js — Deno не може да import-не браузърен файл.
    Задача „Само за информация": показва се само в Седмичния календар на
    Бюлетина и не влиза в нито един отчет, брояч или известие. */
