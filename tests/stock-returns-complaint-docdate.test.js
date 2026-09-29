@@ -98,7 +98,8 @@ const cellsOf = (doc, po) => {
       const nTh = table(doc).querySelectorAll('thead th').length;
       const rowsTd = Array.prototype.map.call(table(doc).querySelectorAll('tbody tr'), tr => tr.querySelectorAll('td').length);
       ok('броят <th> (' + nTh + ') = броят <td> на всеки ред', rowsTd.every(n => n === nTh), rowsTd.join(','));
-      ok('колоните са 12 (11 + действия)', nTh === 12, String(nTh));
+      /* 13 от 29.09.2026 — „Коментар обект" (виж sr-store-comment.test.js). */
+      ok('колоните са 13 (12 + действия)', nTh === 13, String(nTh));
     }
   }
 

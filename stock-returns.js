@@ -138,7 +138,7 @@ function srFilteredList(){
     if (srSupplierFilter && r.supplier !== srSupplierFilter) return false;
     if (srSearch) {
       var q = srSearch.toLowerCase();
-      var hay = [r.store_name,r.supplier,r.product_name,r.sap_code,r.order_number,r.purchase_order,r.id_euro,r.reason,r.control_comment,r.controller_comment,r.courier_info].join(' ').toLowerCase();
+      var hay = [r.store_name,r.supplier,r.product_name,r.sap_code,r.order_number,r.purchase_order,r.id_euro,r.reason,r.control_comment,r.controller_comment,r.store_comment,r.courier_info].join(' ').toLowerCase();
       if (hay.indexOf(q) === -1) return false;
     }
     return true;
@@ -310,7 +310,7 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
   h += '<thead><tr style="background:#f8fafc;">';
   /* "Дата докум." между Доставчик и Завод - същото място като във файла на
      Цвети и в Excel износа (колона 3). */
-  ['ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Изтеглена с','Потвърдена акт.','Коментар','Коментар Контролер',''].forEach(function(c,ci,arr){
+  ['ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Изтеглена с','Коментар обект','Потвърдена акт.','Коментар','Коментар Контролер',''].forEach(function(c,ci,arr){
     var last=(ci===arr.length-1);
     h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
   });
@@ -327,6 +327,7 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;text-align:center;color:#94a3b8;">'+esc(r.plant||'')+'</td>'+
       '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#374151;max-width:130px;">'+esc(r.courier_info||'—')+'</td>'+
+      '<td style="padding:7px 10px;font-size:11px;color:#0f766e;max-width:160px;">'+esc(r.store_comment||'')+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+(r.confirmed_date?fmtDate(r.confirmed_date):'—')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.control_comment||'')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.controller_comment||'')+'</td>'+
@@ -508,10 +509,17 @@ function srModalHtml() {
     '</div>'+
 
     '<label class="fl">Коментар</label>'+
-    '<input class="fi" id="sr-cc" value="'+esc(r.control_comment||'')+'" placeholder="напр. ИЗД КИ">';
+    '<input class="fi" id="sr-cc" value="'+esc(r.control_comment||'')+'" placeholder="напр. ИЗД КИ"'+srCmtRoAttr(tab)+'>';
 
   h += '<label class="fl">Коментар Контролер</label>'+
-    '<input class="fi" id="sr-ctrl" value="'+esc(r.controller_comment||'')+'" placeholder="напр. КЪМ ЛС ТЪРГОВИЩЕ / ИЗПРАЩАЙТЕ" oninput="updateSRPhotoHint()">';
+    '<input class="fi" id="sr-ctrl" value="'+esc(r.controller_comment||'')+'" placeholder="напр. КЪМ ЛС ТЪРГОВИЩЕ / ИЗПРАЩАЙТЕ" oninput="updateSRPhotoHint()"'+srCmtRoAttr(tab)+'>';
+
+  /* „Коментар обект" - свободен текст от магазина (и Цвети/admin). Само в
+     „По рекламации", както и колоната. */
+  if (tab==='complaint') {
+    h += '<label class="fl">Коментар обект</label>'+
+      '<input class="fi" id="sr-store-cmt" value="'+esc(r.store_comment||'')+'" placeholder="свободен текст от обекта">';
+  }
 
   h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
     '<button onclick="closeSRModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
@@ -634,6 +642,16 @@ function updateSRPhotoHint(){
    изхвърли (ИЗХВЪРЛЯЙТЕ / изхвърляте / изхвърлена). Тогава тя не минава през
    куриер и товарителница няма - изисква се само дата (на изхвърлянето).
    По корена "изхвърл", без значение от главни/малки букви. */
+/* „Коментар" и „Коментар контролер" в „По рекламации" са САМО за Цвети/admin
+   (canCompleteSR, 29.09.2026): в първия тя отбелязва КИ, във втория дава
+   насоки към обекта. За останалите полетата са само за четене - input с
+   readonly, не текст, защото srIsDiscard/updateSRPhotoHint четат sr-ctrl.
+   При запис двата ключа изобщо не се пращат (submitSR) - readonly е за
+   човека, не защита. */
+function srCommentsLocked(tab){ return tab==='complaint' && !canCompleteSR(); }
+function srCmtRoAttr(tab){
+  return srCommentsLocked(tab) ? ' readonly title="Попълва се от Цвети" style="background:#f8fafc;color:#64748b;"' : '';
+}
 function srIsDiscard(text){
   return String(text||'').toLowerCase().indexOf('изхвърл')>=0;
 }
@@ -1123,9 +1141,12 @@ function exportSRExcel(oneSheet){
        най-отпред, в реда от екрана - за справка по доставчик наведнъж. Не се
        връща през импорта (листът не е номер от SR_SHEET_TO_STORE). */
     if(oneSheet){
-      var one=[['Магазин'].concat(srXlHead(hasExtra))];
-      list.forEach(function(r){ one.push([r.store_name||''].concat(srXlRow(r,hasExtra))); });
-      sheets.push({name:'По рекламации', aoa:one, cols:[{wch:16}].concat(srXlCols(hasExtra))});
+      /* „Коментар обект" - на мястото си от екрана: след „Изтеглена с" (7),
+         преди „Потвърдена акт." (8). Тук няма импорт, който да го мести. */
+      var withCmt=function(arr,v){ var c=arr.slice(); c.splice(8,0,v); return c; };
+      var one=[['Магазин'].concat(withCmt(srXlHead(hasExtra),'Коментар обект'))];
+      list.forEach(function(r){ one.push([r.store_name||''].concat(withCmt(srXlRow(r,hasExtra),r.store_comment||''))); });
+      sheets.push({name:'По рекламации', aoa:one, cols:[{wch:16}].concat(withCmt(srXlCols(hasExtra),{wch:26}))});
     }
     var storeToSheet={};
     Object.keys(SR_SHEET_TO_STORE).forEach(function(k){ storeToSheet[SR_SHEET_TO_STORE[k]]=k; });
@@ -1151,9 +1172,11 @@ function exportSRExcel(oneSheet){
       var base=name, n=2;
       while(usedNames[name]){ name=base.slice(0,28)+'_'+n; n++; }
       usedNames[name]=true;
-      var a=[srXlHead(hasExtra)];
-      byStore[s].forEach(function(r){ a.push(srXlRow(r,hasExtra)); });
-      sheets.push({name:name, aoa:a, cols:srXlCols(hasExtra)});
+      /* „Коментар обект" - НАЙ-НАКРАЯ, след 0-10 и 11+: колоните 0-10 са
+         огледало на импорта и не се местят, а импортът чете позиционно само тях. */
+      var a=[srXlHead(hasExtra).concat(['Коментар обект'])];
+      byStore[s].forEach(function(r){ a.push(srXlRow(r,hasExtra).concat([r.store_comment||''])); });
+      sheets.push({name:name, aoa:a, cols:srXlCols(hasExtra).concat([{wch:26}])});
     });
   }
 
@@ -1235,6 +1258,10 @@ function submitSR() {
     created_by:     currentUser.display_name||currentUser.email
   };
   if(!lockStatus) data.status = document.getElementById('sr-status').value;
+  /* Коментарите на Цвети - не се пращат изобщо от други (и с подправен DOM),
+     иначе запис от магазина би изтрил написаното от нея. */
+  var cmtLocked = srCommentsLocked(tab);
+  if(cmtLocked) delete data.control_comment;
   /* Доказателство при ИЗЛИЗАНЕ ОТ "Невзета". Без товарителница доставчикът
      оспорва, че е получил стоката, и сумата по разликата не се възстановява -
      затова снимка, дата и куриер са задължителни, а не подсказка.
@@ -1250,7 +1277,10 @@ function submitSR() {
       /* data.controller_comment се попълва по-долу, по таба - затова тук се
          чете направо от полето. Какво се записва, не се променя. */
       var ctrlNow=document.getElementById('sr-ctrl');
-      var discard=srIsDiscard(ctrlNow?ctrlNow.value:'');
+      /* Заключен ли е коментарът (магазин в „По рекламации") - решава
+         ЗАПИСАНОТО от Цвети, не полето: подправено „изхвърл…" в DOM-а иначе
+         би отменило снимката. */
+      var discard=srIsDiscard(cmtLocked ? (origRecord&&origRecord.controller_comment) : (ctrlNow?ctrlNow.value:''));
       var missing=[];
       if(!discard && !(Array.isArray(srPendingPhotos) && srPendingPhotos.length)) missing.push('снимка на товарителницата');
       if(!data.withdrawal_date) missing.push(discard?'дата на изхвърляне':'дата на изтегляне');
@@ -1275,7 +1305,9 @@ function submitSR() {
     var docdateEl2=document.getElementById('sr-docdate');
     data.doc_date = docdateEl2?(docdateEl2.value||null):null;
     var ctrlEl2=document.getElementById('sr-ctrl');
-    data.controller_comment = ctrlEl2?ctrlEl2.value:'';
+    if(!cmtLocked) data.controller_comment = ctrlEl2?ctrlEl2.value:'';
+    var storeCmtEl=document.getElementById('sr-store-cmt');
+    if(storeCmtEl) data.store_comment = storeCmtEl.value.trim()||null;
   } else {
     data.product_name = productEl?productEl.value:'';
     data.sap_code     = sapEl?sapEl.value:'';

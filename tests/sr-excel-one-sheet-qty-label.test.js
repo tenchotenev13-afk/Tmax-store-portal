@@ -60,6 +60,12 @@ function srEnv(rows, dir) {
 const mod = h => h.doc.getElementById('mod-stock-returns');
 const onScreen = h => Array.prototype.map.call(mod(h).querySelectorAll('tbody tr'), tr => tr.querySelector('td').textContent.trim());
 const dump = wb => JSON.stringify(wb.SheetNames.map(n => [n, wb.Sheets[n].__aoa, wb.Sheets[n]['!cols']]));
+/* От 29.09.2026: „Коментар обект" (store_comment) — в „един лист" на мястото си
+   от екрана (позиция 8, след „Изтеглена с"), в многолистовия — най-накрая.
+   Виж sr-store-comment.test.js. */
+const ins8 = (arr, v) => { const c = arr.slice(); c.splice(8, 0, v); return c; };
+const dropLast = wb => JSON.stringify(wb.SheetNames.map(n => [n, wb.Sheets[n].__aoa.map(r => r.slice(0, -1)),
+  wb.Sheets[n]['!cols'].slice(0, -1)]));
 
 (async function run() {
 
@@ -86,16 +92,16 @@ const dump = wb => JSON.stringify(wb.SheetNames.map(n => [n, wb.Sheets[n].__aoa,
       ok('ЕДИН лист', f.wb.SheetNames.length === 1, f.wb.SheetNames.join('|'));
       const aoa = f.wb.Sheets[f.wb.SheetNames[0]].__aoa;
       ok('ред 1: „Магазин" + колоните на многолистовия (с 11+, защото има продукт)',
-        aoa[0].join('|') === ['Магазин'].concat(h.w.srXlHead(true)).join('|'), aoa[0].join('|'));
+        aoa[0].join('|') === ['Магазин'].concat(ins8(h.w.srXlHead(true), 'Коментар обект')).join('|'), aoa[0].join('|'));
       ok('един заглавен ред', aoa.length === 4, String(aoa.length));
       ok('ПВ-ЕВР в реда от екрана', aoa.slice(1).map(r => r[1]).join('|') === screen.join('|'), aoa.slice(1).map(r => r[1]).join('|'));
       ok('колона „Магазин" носи обекта', aoa.slice(1).map(r => r[0]).join('|') === 'Враца|Враца|Раднево');
       const ra = aoa.find(r => r[1] === '4200016266');
       ok('ред = „Магазин" + srXlRow (едно място за колоните)',
-        JSON.stringify(ra) === JSON.stringify(['Раднево'].concat(h.w.srXlRow(h.w.srData.find(r => r.id === 'a'), true))), JSON.stringify(ra));
+        JSON.stringify(ra) === JSON.stringify(['Раднево'].concat(ins8(h.w.srXlRow(h.w.srData.find(r => r.id === 'a'), true), ''))), JSON.stringify(ra));
       ok('статус ВЗЕТА, дати дд.мм.гггг', ra[6] === 'ВЗЕТА' && ra[4] === '02.08.2026' && ra[7] === '20.08.2026', JSON.stringify(ra));
       const rd = aoa.find(r => r[1] === '4200016001');
-      ok('SAP „0055123" — текст, нулата е запазена', rd[13] === '0055123', JSON.stringify(rd[13]));
+      ok('SAP „0055123" — текст, нулата е запазена', rd[14] === '0055123', JSON.stringify(rd[14]));
       ok('празните дати — празни клетки', ra[9] === '' && aoa.every(r => r.every(c => c !== '—')));
       ok('името: za-vrashtane-reklamacii-elmak-eood-edin-list-<дата>.xlsx',
         /^za-vrashtane-reklamacii-elmak-eood-edin-list-\d{4}-\d{2}-\d{2}\.xlsx$/.test(f.fname), f.fname);
@@ -107,7 +113,7 @@ const dump = wb => JSON.stringify(wb.SheetNames.map(n => [n, wb.Sheets[n].__aoa,
     const aoa2 = h.cap.files[0].wb.Sheets[h.cap.files[0].wb.SheetNames[0]].__aoa;
     ok('+ магазин Раднево → само неговият ред', aoa2.length === 2 && aoa2[1][0] === 'Раднево' && aoa2[1][1] === '4200016266',
       JSON.stringify(aoa2.slice(1).map(r => r.slice(0, 2))));
-    ok('без продукт в изнесените → без колони 11+', aoa2[0].length === 12, String(aoa2[0].length));
+    ok('без продукт в изнесените → без колони 11+', aoa2[0].length === 13, String(aoa2[0].length));
     h.close();
   }
 
@@ -138,14 +144,16 @@ const dump = wb => JSON.stringify(wb.SheetNames.map(n => [n, wb.Sheets[n].__aoa,
       h.w.srSupplierFilter = sup; h.w.renderStockReturns();
       h.w.exportSRExcel();
       const f = h.cap.files[0];
-      const got = { fname: f ? f.fname.split(h.w.today()).join('<ДАТА>') : null, wb: f ? JSON.parse(dump(f.wb)) : null };
+      /* Новият има „Коментар обект" най-накрая — без нея трябва да е fixture-ът. */
+      const got = { fname: f ? f.fname.split(h.w.today()).join('<ДАТА>') : null, wb: f ? JSON.parse(dropLast(f.wb)) : null,
+                    last: f ? f.wb.SheetNames.map(n => f.wb.Sheets[n].__aoa[0].slice(-1)[0]) : [] };
       h.close();
       if (!want) { same = false; detail = 'няма fixture за „' + sup + '"'; break; }
-      if (JSON.stringify(got.wb) !== JSON.stringify(want.wb) || got.fname !== want.fname) {
+      if (JSON.stringify(got.wb) !== JSON.stringify(want.wb) || got.fname !== want.fname || !got.last.every(v => v === 'Коментар обект')) {
         same = false; detail = (sup || '(всички)') + ': ' + got.fname + ' vs ' + want.fname; break;
       }
     }
-    ok('многолистовият износ е идентичен със стария (с и без филтър по доставчик)', same, detail);
+    ok('многолистовият износ = старият (fixture) + „Коментар обект" най-накрая (с и без филтър по доставчик)', same, detail);
   }
 
   section('Б) „Кол. по входяща" — форма, карта на бланката; сторната — „по фактура"');
