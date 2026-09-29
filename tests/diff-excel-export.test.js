@@ -131,7 +131,18 @@ const tableNames = h => { const t = mainTable(h); return t ? Array.prototype.map
     const tr = Array.prototype.find.call(mainTable(h).querySelectorAll('tbody tr'),
       x => x.querySelectorAll('td')[4].textContent.trim() === 'ЛИПСА ВРАЦА 1');
     const screenStatus = tr.querySelectorAll('td')[9].textContent.trim();
-    ok('Статус = текстът на екрана („' + screenStatus + '")', r1[9] === screenStatus, JSON.stringify(r1[9]));
+    /* Думата от екрана, БЕЗ иконата отпред (както при Тип). */
+    ok('на екрана статусът е с икона („' + screenStatus + '")', /^\S+ НЕВЗЕТА$/.test(screenStatus), screenStatus);
+    ok('в Excel: „НЕВЗЕТА" — думата от екрана без иконата', r1[9] === 'НЕВЗЕТА' && screenStatus.endsWith(' ' + r1[9]),
+      JSON.stringify(r1[9]));
+    const r4s = aoa.find(r => r[4] === 'ЛИПСА ВРАЦА 2')[9];
+    const tr4 = Array.prototype.find.call(mainTable(h).querySelectorAll('tbody tr'),
+      x => x.querySelectorAll('td')[4].textContent.trim() === 'ЛИПСА ВРАЦА 2');
+    const screen4 = tr4.querySelectorAll('td')[9].textContent.trim();
+    ok('приключена Липса: „' + screen4 + '" на екрана → „ВЗЕТА" в Excel', r4s === 'ВЗЕТА' && screen4.endsWith(' ВЗЕТА'),
+      JSON.stringify([screen4, r4s]));
+    ok('нито един статус не започва с не-буква', aoa.slice(1).every(r => /^[A-Za-zА-Яа-я]/.test(r[9])),
+      JSON.stringify(aoa.slice(1).map(r => r[9])));
     ok('Кол. е число 3', r1[5] === 3, JSON.stringify(r1[5]));
     ok('Кредитно „Издадено" за Липса с КИ', r1[10] === 'Издадено', r1[10]);
     ok('Кредитно празно за не-Липса', aoa.find(r => r[4] === 'ЗАПРИХОДЕНО ВРАЦА')[10] === '');

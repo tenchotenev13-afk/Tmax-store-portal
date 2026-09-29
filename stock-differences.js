@@ -557,7 +557,9 @@ function sdExcelRows(list){
       isNaN(q) ? '' : q,
       txt(r.order_number), txt(r.return_order_number),
       fd(r.confirmed_date),
-      sdHtmlText(sdRowStatusBadge(r)),
+      /* Думата от значката на екрана, без иконата отпред (както при Тип):
+         „⏳ НЕВЗЕТА" → „НЕВЗЕТА". Реже всичко до първата буква. */
+      sdHtmlText(sdRowStatusBadge(r)).replace(/^[^A-Za-z\u0400-\u04FF]+/,''),
       r.type==='missing' ? (r.credit_note_issued ? 'Издадено' : 'Няма') : '',
       txt(r.comment), txt(r.resolution_comment),
       wh.join(' · '),
