@@ -164,5 +164,62 @@ const srPatch = (h, id) => h.calls.patch.find(p => /stock_returns/.test(p.url) &
     h.close();
   }
 
+  section('е) Импорт: без canCompleteSR() коментарите НЕ се пишат; при Цвети — както досега');
+  {
+    const LOGI = { email: 'logi@temax.bg', display_name: 'Логистик', role: 'logistics',
+      store_name: 'Централен офис', assigned_stores: [] };
+    const HEAD = ['НОВА ПВ-ЕВР', 'НОВА ИД-ЕВРО', 'Доставчик', 'Дата на документ', 'Завод', 'Статус',
+      'Дата на изтегляне', 'Изтеглена с', 'Потвърдена акт.', 'Коментар', 'Коментар контролер'];
+    const line = (po, cc, ctrl) => [po, 'E', 'ЕЛМАК ЕООД', '02.08.2026', '1210', 'НЕВЗЕТА', '', 'Спиди', '', cc, ctrl];
+    async function runImport(user) {
+      const existing = [{ id: 'db-1', purchase_order: '4200000001', status: 'taken' }];
+      const h = boot({
+        modules: ['stock-returns.js', 'stock-differences.js'], user: user, confirm: true,
+        data: { stock_returns: url => url.indexOf('purchase_order=in.') < 0 ? [] : existing.filter(r => url.indexOf(r.purchase_order) >= 0),
+                stock_differences: [], differences_reports: [] }
+      });
+      h.w.srData = []; h.w.srTab = 'complaint'; h.w.srFilter = 'all'; h.w.srStoreFilter = ''; h.w.srSupplierFilter = ''; h.w.srSearch = '';
+      const WB = { SheetNames: ['21'], Sheets: { '21': { __aoa: [HEAD, line('4200000001', 'КИ ОТ ФАЙЛ', 'НАСОКА ОТ ФАЙЛ'),
+        line('4200000002', 'КИ НОВ', 'НАСОКА НОВ')] } } };
+      h.w.XLSX = { read: () => WB, utils: { sheet_to_json: (s, o) => { if (o && o.header === 1) return s.__aoa; throw new Error('header:1'); } } };
+      h.w.FileReader = function () { const self = this; this.readAsArrayBuffer = function () {
+        setTimeout(function () { self.onload({ target: { result: new Uint8Array(0) } }); }, 0); }; };
+      h.w.renderStockReturns();
+      realClick(h.w, btn(mod(h), '📤 Импорт от Excel'));
+      const inp = h.doc.getElementById('sr-import-file');
+      Object.defineProperty(inp, 'files', { value: [{ name: 'obobshten.xlsx' }], configurable: true });
+      realClick(h.w, btn(h.doc, 'Започни импорт'));
+      await new Promise(res => setTimeout(res, 60));
+      const ins = [];
+      h.calls.post.filter(p => p.table === 'stock_returns').forEach(p => (Array.isArray(p.body) ? p.body : [p.body]).forEach(b => ins.push(b)));
+      const upd = h.calls.patch.find(p => /stock_returns/.test(p.url) && p.url.indexOf('id=eq.db-1') >= 0);
+      return { h, ins, upd };
+    }
+    /* logistics: може да импортира (canAddSR), но не е canCompleteSR. */
+    const a = await runImport(LOGI);
+    ok('logistics: canCompleteSR() е false', a.h.w.canCompleteSR() === false);
+    const n = a.ins.find(r => r.purchase_order === '4200000002');
+    if (ok('logistics: новият ред е вмъкнат', !!n, a.h.calls.toast.join(' | '))) {
+      ok('logistics: новият ред БЕЗ control_comment и controller_comment',
+        !('control_comment' in n) && !('controller_comment' in n), JSON.stringify(Object.keys(n)));
+      ok('logistics: другите полета — да (куриер, ИД)', n.courier_info === 'Спиди' && n.id_euro === 'E');
+    }
+    if (ok('logistics: съществуващият се обновява', !!a.upd)) {
+      ok('logistics: обновяването БЕЗ двата коментара', !('control_comment' in a.upd.body) && !('controller_comment' in a.upd.body),
+        JSON.stringify(a.upd.body));
+      ok('logistics: другите полета се обновяват (куриер)', a.upd.body.courier_info === 'Спиди', JSON.stringify(a.upd.body));
+    }
+    a.h.close();
+
+    const c = await runImport(CVETI);
+    const n2 = c.ins.find(r => r.purchase_order === '4200000002');
+    ok('Цвети: новият ред носи двата коментара', !!n2 && n2.control_comment === 'КИ НОВ' && n2.controller_comment === 'НАСОКА НОВ',
+      JSON.stringify(n2));
+    ok('Цвети: обновяването носи двата коментара', !!c.upd && c.upd.body.control_comment === 'КИ ОТ ФАЙЛ' &&
+      c.upd.body.controller_comment === 'НАСОКА ОТ ФАЙЛ', JSON.stringify(c.upd && c.upd.body));
+    ok('Цвети: store_comment импортът не пипа', !!n2 && !('store_comment' in n2) && !!c.upd && !('store_comment' in c.upd.body));
+    c.h.close();
+  }
+
   report();
 })();

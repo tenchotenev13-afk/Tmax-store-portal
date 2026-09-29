@@ -912,7 +912,12 @@ function startReturnsImport(){
         var canComplete=canCompleteSR();
         var noRightNew=0, noRightKept=0;
         var toInsert=[], toUpdate=[], skippedCompleted=0, skippedDuplicate=0;
+        /* „Коментар" и „Коментар контролер" са само на Цвети/admin (както в
+           модала): без canCompleteSR() импортът не ги пише - нито в нов ред,
+           нито при обновяване. Ключовете се махат от ВСИЧКИ редове еднакво,
+           за да остане партидата с еднакви колони (PostgREST го изисква). */
         mapped.forEach(function(r){
+          if(!canComplete){ delete r.control_comment; delete r.controller_comment; }
           var hit = r.purchase_order ? existingByPo[r.purchase_order] : null;
           if(!hit){
             if(r.status==='completed' && !canComplete){ r.status='taken'; noRightNew++; }
@@ -921,6 +926,7 @@ function startReturnsImport(){
           if(!isWorkbook){ skippedDuplicate++; return; }
           if(hit.status==='completed'){ skippedCompleted++; return; }
           var upd=updFromFile(r);
+          if(!canComplete){ delete upd.control_comment; delete upd.controller_comment; }
           if(r.status==='completed' && !canComplete){ delete upd.status; noRightKept++; }
           toUpdate.push({ id:hit.id, purchase_order:r.purchase_order, data:upd });
         });
