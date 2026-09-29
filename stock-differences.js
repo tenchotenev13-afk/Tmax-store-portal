@@ -405,6 +405,9 @@ function renderStockDiff() {
     var a = sdFilter===f[0];
     h += '<button data-f="'+f[0]+'" onclick="setSDFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
   });
+  /* Excel на ТОЧНО видяното - същото място и стил като в „За връщане".
+     Бутонът е винаги тук, и при 0 реда (тогава износът казва „Няма редове"). */
+  h += '<button onclick="exportSDExcel()" style="margin-left:auto;border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">📥 Excel</button>';
   h += '</div>';
 
   /* Таблица */
@@ -506,6 +509,86 @@ function renderStockDiff() {
   wrap.innerHTML = h;
   sdRestoreScroll();
   sdUpdateTabBadgeFromData();
+}
+
+/* ── ЕКСПОРТ EXCEL на долната таблица (точка 1 от Цвети, част 2) ──
+   Цвети сверява КИ и дали стоката е заприходена по подтабове. Изнася ТОЧНО
+   видяното: sdTableRows() - същата функция, която пълни таблицата, тоест
+   посока, магазин, тип, статус и търсене важат и тук, без втора логика.
+   Същият подход и CDN като exportSRExcel() в stock-returns.js. Имената са
+   различни нарочно: двата модула живеят в едно глобално пространство. */
+var SD_TYPE_PLAIN = { writein:'Заприхождаване', 'return':'Връщане', missing:'Липса', not_invoiced:'Не са фактурирани' };
+/* Текстът на HTML фрагмент - статусът и отговорите се изнасят „като на
+   екрана", през същите функции, които ги рисуват. */
+function sdHtmlText(html){
+  var d = document.createElement('div');
+  d.innerHTML = html || '';
+  return (d.textContent || '').replace(/\s+/g,' ').trim();
+}
+/* Кирилица → латиница само за името на файла - „КАМ-04" → „kam-04". */
+function sdExcelTranslit(str){
+  var M={'а':'a','б':'b','в':'v','г':'g','д':'d','е':'e','ж':'zh','з':'z','и':'i',
+         'й':'y','к':'k','л':'l','м':'m','н':'n','о':'o','п':'p','р':'r','с':'s',
+         'т':'t','у':'u','ф':'f','х':'h','ц':'ts','ч':'ch','ш':'sh','щ':'sht',
+         'ъ':'a','ь':'y','ю':'yu','я':'ya'};
+  return String(str||'').toLowerCase().split('').map(function(ch){
+    return M.hasOwnProperty(ch)?M[ch]:ch;
+  }).join('').replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'');
+}
+/* aoa за износа: ред 1 = заглавия, после видимите редове в реда от екрана.
+   Номерата (SAP, поръчки, документ) - ТЕКСТ, иначе Excel яде водещите нули
+   и показва 4,1E+09. Празна дата/стойност = празна клетка, не „—". */
+function sdExcelRows(list){
+  var fd = function(v){ return v ? fmtDate(v) : ''; };
+  var txt = function(v){ return (v===null||v===undefined) ? '' : String(v); };
+  var aoa = [['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Поръчка за връщане',
+              'Дата потвърд.','Статус','Кредитно','Коментар','Коментар контролер','Отговор на склада',
+              'Дата на подаване','Документ №','Дата на документ']];
+  list.forEach(function(r){
+    var rep = diffReports.find(function(x){ return x.id===r.report_id; }) || {};
+    var q = parseFloat(r.quantity);
+    var wh = [];
+    if(r.warehouse_response) wh.push((WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+(r.warehouse_comment?' — '+r.warehouse_comment:''));
+    if(r.store_response) wh.push(sdHtmlText(sdStoreResponseLabel(r)));
+    var sw = sdHtmlText(sdSwapSummary(r)); if(sw) wh.push(sw);
+    aoa.push([
+      SD_TYPE_PLAIN[r.type] || txt(r.type),
+      txt(r.store_name), txt(r.supplier), txt(r.material_code), txt(r.material_name),
+      isNaN(q) ? '' : q,
+      txt(r.order_number), txt(r.return_order_number),
+      fd(r.confirmed_date),
+      sdHtmlText(sdRowStatusBadge(r)),
+      r.type==='missing' ? (r.credit_note_issued ? 'Издадено' : 'Няма') : '',
+      txt(r.comment), txt(r.resolution_comment),
+      wh.join(' · '),
+      rep.created_at ? fmtDate(localDateISO(new Date(rep.created_at))) : '',
+      txt(rep.document_number),
+      fd(rep.doc_date)
+    ]);
+  });
+  return aoa;
+}
+function exportSDExcel(){
+  if(!window.XLSX){
+    var sc=document.createElement('script');
+    sc.src='https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+    sc.onload=function(){ exportSDExcel(); };
+    sc.onerror=function(){ toast('Грешка при зареждане на SheetJS','#dc2626'); };
+    document.head.appendChild(sc);
+    return;
+  }
+  var list = sdTableRows();
+  if(!list.length){ toast('Няма редове за износ','#dc2626'); return; }
+  var aoa = sdExcelRows(list);
+  var wb = window.XLSX.utils.book_new();
+  var ws = window.XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = [{wch:16},{wch:16},{wch:22},{wch:10},{wch:34},{wch:7},{wch:13},{wch:13},
+                 {wch:12},{wch:16},{wch:10},{wch:26},{wch:26},{wch:26},{wch:12},{wch:14},{wch:12}];
+  window.XLSX.utils.book_append_sheet(wb, ws, 'Разлики');
+  var fname = 'razliki-'+(sdTypeFilter==='all' ? 'vsichki' : sdExcelTranslit(SD_TYPE_PLAIN[sdTypeFilter]||sdTypeFilter))+'-'+
+              (sdStoreFilter ? sdExcelTranslit(sdStoreFilter) : 'vsichki')+'-'+today()+'.xlsx';
+  window.XLSX.writeFile(wb, fname);
+  toast('✅ Excel изтеглен! ('+list.length+' реда)');
 }
 
 /* 'capitalized' е историческа стойност за СЪЩОТО състояние като 'taken' (виж

@@ -124,6 +124,7 @@ const TESTS = [
   'diff-email-pending.test.js',
   'diff-return-order.test.js',
   'diff-order-required.test.js',
+  'diff-excel-export.test.js',
   'today-wrong-receipt-row.test.js',
   'notifications-poll.test.js',
   'weekly-report-window.test.js',
