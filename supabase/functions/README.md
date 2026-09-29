@@ -1,12 +1,12 @@
 # Edge Functions — ТеМАХ Портал
 
-Изходният код на **дванайсетте** Edge Functions на проекта
+Изходният код на **тринайсетте** Edge Functions на проекта
 `xiwkdiqqplgdcrkewgtv`. Сверен с живите версии на **27.08.2026** през
 `get_edge_function`; `send-scheduled-report` и `send-routed-report` —
 отново на **11.09.2026**; `bulletin-notify` — на **20.09.2026**, а
 `send-scheduled-report` — на **23.09.2026**, през
 `supabase functions download --use-api` (обратно четене след деплой,
-байт в байт срещу `git cat-file blob HEAD:`). И дванайсетте са деплойнати.
+байт в байт срещу `git cat-file blob HEAD:`). И тринайсетте са деплойнати (`admin-users` — от 29.09.2026).
 
 ## ⚠️ Репото е ОГЛЕДАЛО, не източник
 
@@ -56,6 +56,7 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 | `send-routed-report` | 11 | `index.ts` | Личният седмичен отчет по задачи (`report_groups` → отделно писмо на човек); от 19.09.2026 и **отчет по задача** — вход `{task_id, recipients}`, една картичка; при `linked_module='supply'` под нея и секция „Зареждане“ (v10); и за постоянна задача — прозорец по седмицата на `run_date` (v11) | **крон 16** (`10 5 * * 1`, понеделник); тема `weekly_routed`; `dynamic-responder` (`task_report`) | ✅ |
 | `dynamic-responder` | 23 | `index.ts` | Насрочените напомняния от `notification_schedules`; `task_report` → писмо през `send-routed-report`, не push (и за постоянна задача) | **крон 11** (`*/15 * * * *`) | ✅ |
 | `kasa-access-check` | 7 | `index.ts` | Проверка на индивидуален PIN за таб История | **никой** — няма клиентска част | ✅ |
+| `admin-users` | 1 | `index.ts` + `handler.ts` + `_shared/session.ts` | Записите в `users` от Администрация (create / update / delete) — само с админски пропуск, бели списъци на полетата | портал — `admin.js` (`adminUsers`) — **след етап 3г**; дотогава никой | ✅ |
 | `set-history-pin` | 8 | `index.ts` + `_shared/session.ts` | Админ задава/ресетва PIN (4–6 цифри); от 28.09.2026 винаги иска админски пропуск, иначе 403 | **никой** — няма клиентска част | ✅ |
 | `swift-handler` | 41 | **`rm-push-index.ts`** | ⚠️ **НЕ Е ЗА ТОЗИ ПОРТАЛ** — напомняния към **RM-app** | **крон 4, 5, 6** (`0 5`, `0 11`, `0 14`, делник) | ✅ |
 
@@ -213,6 +214,34 @@ id-то се търси първо в `bulletin_tasks`, после в `recurring
 вижда „Записано, но паролата НЕ бе сменена: Нямате права…“ и трябва да
 влезе наново.
 
+**`admin-users`** (от 29.09.2026, етап 3 от затварянето на `users`) — всички
+записи в `users` от Администрация минават оттук вместо директно през
+PostgREST с публичния ключ. Правата на `anon` върху таблицата още НЕ са
+затегнати (етап 4) — дотогава функцията е заключената врата, а старият път
+стои отворен до нея.
+
+Тяло: `{ session, action, id?, fields? }`.
+1. `requireAdmin(body)` — иначе `403 forbidden`, **преди** валидацията и базата.
+2. `validateAdminUsers(body)` (чиста функция в `handler.ts`) — иначе `400`, нищо не се записва:
+   - `create` — `fields` само от `email, display_name, store_name, role, active`; без `id`. Връща `{ ok:true, id }`.
+   - `update` — `id` (uuid) + `fields` само от `display_name, store_name, role, active, assigned_stores, oborot_report, is_regional, notify_groups`. Връща `{ ok:true, count }`.
+   - `delete` — `id` (uuid), без `fields`. Връща `{ ok:true, count }`.
+   - `password`, `password_hash`, `history_pin_hash`, `email` при update — никога.
+     Паролите остават в `auth-set-password`.
+3. `update`/`delete`, засегнали 0 реда → `404 not_found`.
+4. Грешка от базата → `{ ok:false, message, code, details, hint }` със статуса на
+   PostgREST — текстът е същият като при директния запис, за да остане
+   `sbErrMsg` в клиента смислен.
+
+Стойностите (`role`, `oborot_report`, …) кодът не ги проверява — решава базата
+(check ограниченията), както досега.
+
+Разделена е на `index.ts` (само `Deno.serve` с истинския клиент) и
+`handler.ts` (цялата логика, базата се подава отвън), за да се тества без
+мрежа: `deno test supabase/functions/admin-users/handler.test.ts --allow-env`.
+Контроли срещу тавтология: бял списък, който пропуска всичко → падат тестовете
+за `password_hash`; без `requireAdmin` → пада тестът за 403.
+
 **`resend-email`** — **изпраща И имейли, И push**, според поле `type`
 (`'email'` по подразбиране, или `'push'`). Имейлите минават през SMTP
 (`mail.temax.bg`), не през Resend, въпреки името. Тялото се кодира на ръка в
@@ -317,10 +346,10 @@ denomailer@1.6.0 реже символи и чупи SMTP dot-stuffing; тема
 
 | Променлива | Ползва се от |
 |---|---|
-| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | auth-login, auth-set-password, kasa-access-check, set-history-pin, send-scheduled-report, send-oborot-report, dynamic-responder, bulletin-notify |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | auth-login, auth-set-password, admin-users, kasa-access-check, set-history-pin, send-scheduled-report, send-oborot-report, dynamic-responder, bulletin-notify |
 | `ONESIGNAL_REST_KEY` | portal-push, resend-email, swift-handler |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_NAME` | resend-email |
-| `PORTAL_SESSION_SECRET` | auth-login (подписва пропуска), auth-set-password и set-history-pin (проверяват го през `requireAdmin`) — всичките през `_shared/session.ts`. ≥48 случайни байта (`openssl rand -base64 48`), зададен на 28.09.2026 с `supabase secrets set`. Смяната му обезсилва всички издадени пропуски — хората влизат наново. |
+| `PORTAL_SESSION_SECRET` | auth-login (подписва пропуска), auth-set-password, set-history-pin и admin-users (проверяват го през `requireAdmin`) — всичките през `_shared/session.ts`. ≥48 случайни байта (`openssl rand -base64 48`), зададен на 28.09.2026 с `supabase secrets set`. Смяната му обезсилва всички издадени пропуски — хората влизат наново. |
 
 Задават се в Supabase → Project Settings → Edge Functions → Secrets.
 **Не ги слагай във файл в тази папка.**
