@@ -1197,15 +1197,77 @@ function tfProblemsHtml(q) {
 /* ── Търсене по товар ────────────────────────────────────────────────────── */
 
 /* Резултатът е по ТОВАР, не по транспорт: стокова разписка, № рекламация,
-   бележка на товара или № на свързана клиентска заявка („Троян-0042").
+   бележка, получател, дотоварил обект (tfCargoMatch — толерантно към
+   правописа, числата точно) или № на свързана клиентска заявка
+   („Троян-0042" — точно, през client_orders).
    Търси се само в заредените транспорти — tfTransfers вече е минал през
    tfVisibleToStores, тоест обектът не намира чужди товари, а глобалните
    роли виждат всички.
    ЕТАП 3: прехвърлените товари (нов транспорт от точката на прехвърляне)
    също трябва да излизат тук — с последното събитие от новия транспорт. */
-function tfCargoMatchesText(c, q) {
-  var hay = [c.goods_doc, c.note].concat(c.claim_numbers || []);
-  return hay.some(function (x) { return x && String(x).toLowerCase().indexOf(q) >= 0; });
+
+/* Толерантно съвпадение (30.09.2026): „дотоварване" намира „дотоварен",
+   „стелжни" — „Стелажни". Числата НЕ са толерантни: стокова / рекламация с
+   една различна цифра е друг документ. */
+var TF_LAT2CYR = { a: 'а', b: 'в', c: 'с', e: 'е', h: 'н', k: 'к', m: 'м', o: 'о', p: 'р', t: 'т', x: 'х', y: 'у' };
+
+/* Малки букви, латинските двойници → кирилица, без пунктуация, на думи. */
+function tfSearchWords(s) {
+  return String(s || '').toLowerCase().replace(/[abcehkmoptxy]/g, function (ch) { return TF_LAT2CYR[ch]; })
+    .replace(/[^0-9a-zа-яѐ-џ]+/g, ' ').split(' ').filter(Boolean);
+}
+/* Число: само цифри, или цифрите са поне половината от знаците. */
+function tfIsNumWord(w) {
+  var d = (w.match(/[0-9]/g) || []).length;
+  return d > 0 && d * 2 >= w.length;
+}
+function tfLev1(a, b) {
+  /* Разстояние на Левенщайн ≤ 1 — без пълната матрица. */
+  if (a === b) return true;
+  var la = a.length, lb = b.length;
+  if (Math.abs(la - lb) > 1) return false;
+  var i = 0, j = 0, diff = 0;
+  while (i < la && j < lb) {
+    if (a[i] === b[j]) { i++; j++; continue; }
+    if (++diff > 1) return false;
+    if (la > lb) i++; else if (lb > la) j++; else { i++; j++; }
+  }
+  return diff + (la - i) + (lb - j) <= 1;
+}
+/* 2 = точно (подниз), 1 = толерантно, 0 = не. */
+function tfWordMatch(q, w) {
+  if (w.indexOf(q) >= 0) return 2;
+  if (tfIsNumWord(q)) return 0;
+  if (q.length >= 5 && w.length >= 5) {
+    var n = Math.min(6, q.length, w.length);
+    if (q.slice(0, n) === w.slice(0, n)) return 1;
+    if (tfLev1(q, w)) return 1;
+  }
+  return 0;
+}
+/* Думите на товара, в които се търси. Дотовареният носи и „дотоварен в X",
+   както го показва етикетът. № клиентска заявка се търси отделно (uuid). */
+function tfCargoWords(c) {
+  var parts = [c.note, c.goods_doc, c.recipient_store].concat(c.claim_numbers || []);
+  if (c.loaded_at_store) parts.push('дотоварен в ' + c.loaded_at_store);
+  return tfSearchWords(parts.filter(Boolean).join(' '));
+}
+/* Всяка дума от заявката — в някоя дума на товара (И, без значение от реда).
+   Текстови думи под 3 знака се пропускат, ако има и други. 2 = всички
+   точни, 1 = има толерантно, 0 = не съвпада. */
+function tfCargoMatch(query, c) {
+  var qw = tfSearchWords(query);
+  var keep = qw.filter(function (w) { return w.length >= 3 || tfIsNumWord(w); });
+  if (keep.length) qw = keep;
+  if (!qw.length) return 0;
+  var cw = tfCargoWords(c), level = 2;
+  for (var i = 0; i < qw.length; i++) {
+    var best = 0;
+    for (var j = 0; j < cw.length && best < 2; j++) best = Math.max(best, tfWordMatch(qw[i], cw[j]));
+    if (!best) return 0;
+    level = Math.min(level, best);
+  }
+  return level;
 }
 
 /* Последното движение на товара: получен / разтоварен / предаден на куриер.
@@ -1243,8 +1305,13 @@ function tfSearchCargo(q) {
     tfTransfers.forEach(function (t) {
       (tfCargoByTransfer[t.id] || []).forEach(function (c, i) {
         var byCo = (c.client_order_ids || []).some(function (id) { return coIds.indexOf(id) >= 0; });
-        if (byCo || tfCargoMatchesText(c, ql)) hits.push({ t: t, c: c, i: i, last: tfCargoLastMove(c) });
+        var m = byCo ? 2 : tfCargoMatch(q, c);
+        if (m) hits.push({ t: t, c: c, i: i, last: tfCargoLastMove(c), exact: m === 2 });
       });
+    });
+    /* Точните първи, толерантните след тях; иначе редът на списъка. */
+    hits = hits.map(function (x, k) { x.k = k; return x; }).sort(function (a, b) {
+      return (b.exact - a.exact) || (a.k - b.k);
     });
     tfCargoHits = hits;
     renderTransfers();

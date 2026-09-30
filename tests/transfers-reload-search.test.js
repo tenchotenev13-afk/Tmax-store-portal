@@ -13,6 +13,9 @@
    5. ТЪРСЕНЕ ПО ТОВАР: стокова / рекламация / № клиентска заявка / бележка →
       точният товар с последното му движение („в път", ако няма).
    6. ВИДИМОСТ: чужд обект не намира чужд товар; админът — да.
+   7. ТОЛЕРАНТНО ТЪРСЕНЕ: общ корен, една сгрешена буква, разместени думи и
+      главни, латински двойници; числата — само точен подниз; точните
+      съвпадения преди толерантните; видимостта не се променя.
 
    Пускане:  node tests/transfers-reload-search.test.js .
 */
@@ -28,9 +31,9 @@ const BUS = { id: 'b1', transfer_num: 'Козлодуй-0001', from_store: 'Ко
               driver: 'Иван', stops: ['Враца', 'Плевен'], end_store: 'Троян', status: 'partial', created_at: '2026-09-29T08:00:00Z' };
 const CARGO = [
   /* c1: за Враца — без отметка (в раздел 5 — получен) */
-  { id: 'c1', transfer_id: 'b1', position: 1, kind: 'pallet', qty: 1, recipient_store: 'Враца', transfer_points: [], goods_doc: 'СР-1001' },
+  { id: 'c1', transfer_id: 'b1', position: 1, kind: 'pallet', qty: 1, recipient_store: 'Враца', transfer_points: [], goods_doc: 'СР-1001', note: 'Стелажни елементи' },
   /* c2: за Троян, свързан с клиентска заявка Троян-0042 */
-  { id: 'c2', transfer_id: 'b1', position: 2, kind: 'roll', qty: 2, recipient_store: 'Троян', transfer_points: [], client_order_ids: ['co-42'], claim_numbers: ['РК-555'] },
+  { id: 'c2', transfer_id: 'b1', position: 2, kind: 'roll', qty: 2, recipient_store: 'Троян', transfer_points: [], client_order_ids: ['co-42'], claim_numbers: ['РК-555'], goods_doc: '6514123134' },
   /* c3: за Троян с прехвърляне в Плевен — разтоварен там (единственото завършено) */
   { id: 'c3', transfer_id: 'b1', position: 3, kind: 'carton', qty: 1, recipient_store: 'Троян', transfer_points: ['Плевен'], note: 'чупливо стъкло' }
 ];
@@ -266,6 +269,38 @@ const hitLast = function (h, cid) { const r = $(h, '.trf-cargo-hit[data-c="' + c
     await open(ha);
     ok('админът намира „чупливо" и в двата транспорта', (await search(ha, 'чупливо')).sort().join(',') === 'c3,f1c');
     ha.close();
+  }
+
+  section('7. Толерантно търсене: правопис, корен, латиница; числата — точно');
+  {
+    const R = { id: 'c4', transfer_id: 'b1', position: 4, kind: 'pallet', qty: 1, recipient_store: 'Троян', transfer_points: [], loaded_at_store: 'Враца' };
+    const h = env(U('Враца'), { cargo: CARGO.concat([R], FCARGO) });
+    await open(h);
+    ok('„дотоварване" → дотовареният в Враца (и само той)', (await search(h, 'дотоварване')).join(',') === 'c4');
+    ok('„стелжни" (липсва буква) → „Стелажни елементи"', (await search(h, 'стелжни')).join(',') === 'c1');
+    ok('„ЕЛЕМЕНТИ стелажни" (разместени, главни) → c1', (await search(h, 'ЕЛЕМЕНТИ стелажни')).join(',') === 'c1');
+    ok('„стелажни дъски" — втората дума не съвпада → нищо (И между думите)', (await search(h, 'стелажни дъски')).length === 0);
+    const lat = await search(h, 'Tpоян');
+    ok('„Tpоян" (T и p латински) → товарите за Троян', lat.sort().join(',') === 'c2,c3,c4', lat.join(','));
+    ok('„6514123135" (една цифра разлика) → НЕ намира 6514123134', (await search(h, '6514123135')).length === 0);
+    ok('„651412" (подниз) → c2', (await search(h, '651412')).join(',') === 'c2');
+    ok('„СР-1002" (една цифра разлика) → нищо', (await search(h, 'СР-1002')).length === 0);
+    /* Точните първи: c2 получава „стелажи" (толерантно), c3 — „стелажни" (точно). */
+    const mixed = await search(h, 'стелажни');
+    ok('точно съвпадение — c1', mixed.join(',') === 'c1');
+    h.w.tfTransfers.forEach(function (t) { (h.w.tfCargoByTransfer[t.id] || []).forEach(function (c) { if (c.id === 'c2') c.note = 'стелажи'; if (c.id === 'c3') c.note = 'стелажни'; }); });
+    const ord = await search(h, 'стелажни');
+    ok('подредба: точните (c1, c3) преди толерантното (c2 „стелажи")', ord.join(',') === 'c1,c3,c2', ord.join(','));
+    ok('правилото: tfCargoMatch връща 2 за точно и 1 за толерантно',
+       h.w.tfCargoMatch('стелажни', { note: 'Стелажни' }) === 2 && h.w.tfCargoMatch('стелжни', { note: 'Стелажни' }) === 1 &&
+       h.w.tfCargoMatch('6514123135', { goods_doc: '6514123134' }) === 0);
+    ok('къса дума („в") се пропуска, щом има други', h.w.tfCargoMatch('в Троян', { recipient_store: 'Троян' }) === 2);
+    h.close();
+    const hv = env(U('Варна'), { cargo: CARGO.concat([R], FCARGO) });
+    await open(hv);
+    ok('видимост: Варна не намира „стелжни" (c1 е чужд)', (await search(hv, 'стелжни')).length === 0);
+    ok('видимост: Варна не намира „дотоварване" (c4 е чужд)', (await search(hv, 'дотоварване')).length === 0);
+    hv.close();
   }
 
   report();
