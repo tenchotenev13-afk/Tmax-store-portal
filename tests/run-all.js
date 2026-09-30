@@ -229,6 +229,7 @@ const TESTS = [
   'admin-user-store-list.test.js',
   'transfers-confirm.test.js',
   'transfers-reload-search.test.js',
+  'transfers-reship.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',

@@ -1,7 +1,8 @@
 /* transfers.js — под-таб „🔁 Трансфери" в Транспорт.
-   Междускладови трансфери, ЕТАП 1: създаване на транспорт с товари.
-   Потвърждаването по товар (разтоварен / получен / предаден на куриер /
-   проблем) е етап 2 и тук го НЯМА — статусът е винаги „Планиран".
+   Междускладови трансфери: ЕТАП 1 — създаване на транспорт с товари;
+   ЕТАП 2 — отметки по товар и статус на транспорта; дотоварване от спирка и
+   търсене по товар; ЕТАП 3 — прехвърляне на чакащ товар към следващ
+   транспорт (transfer_cargo.prev_cargo_id, виж „Етап 3: веригите").
 
    ОТДЕЛЕН МОДУЛ, не разширение на Товарни листи: loading.js остава
    инструмент на склада (какво е натоварено на неговия курс), а трансферът е
@@ -56,12 +57,16 @@ var TF_STATUS_COLORS = { planned: ['#eff6ff', '#1e40af'], partial: ['#fffbeb', '
 
 /* ── Етап 2: отметки по товар (transfer_cargo_events) ── */
 var tfEvents = [];          /* събитията на видимите транспорти, по created_at */
-var tfFilter = 'all';       /* 'all' | 'mine' (за потвърждение при мен) | 'problems' */
+var tfFilter = 'all';       /* 'all' | 'mine' (за потвърждение при мен) | 'reship' (чакащи прехвърляне) | 'problems' */
 var tfCardId = null;        /* отворената карта на транспорт */
 var tfEvForm = null;        /* прозорчето за отметка */
 var tfCargoInput = '';      /* текстът в полето „Товар" */
 var tfCargoQ = '';          /* търсенето, за което са tfCargoHits */
 var tfCargoHits = null;     /* null = няма търсене; иначе [{t, c, i, last}] */
+/* ── Етап 3: вериги от прехвърляния (transfer_cargo.prev_cargo_id) ── */
+var tfTransferById = {};    /* id -> транспорт: видимите + звената от веригите */
+var tfCargoById = {};       /* id -> товар, за всички заредени транспорти */
+var tfSuccOf = {};          /* id на товар -> товарът, който го продължава */
 var TF_EVENT_LABELS = {
   unloaded: 'Разтоварен — чака прехвърляне',
   received: 'Получен',
@@ -186,11 +191,156 @@ function loadTransfers(keepView) {
     tfTransfers.sort(function (a, b) { return String(b.created_at || '').localeCompare(String(a.created_at || '')); });
     tfCargoByTransfer = byT;
     tfEvents = r[2] || [];
-    renderTransfers();
+    tfTransferById = {};
+    r[0].forEach(function (t) { tfTransferById[t.id] = t; });
+    tfIndexChains();
+    /* Звената от веригите се дозареждат ПРЕДИ рендера: „Чакащи прехвърляне"
+       зависи от това дали товарът вече има наследник. */
+    return tfLoadChains().catch(function () {}).then(function () { renderTransfers(); });
   }).catch(function () {
     tfTransfers = []; tfCargoByTransfer = {}; tfEvents = [];
+    tfTransferById = {}; tfCargoById = {}; tfSuccOf = {};
     renderTransfers();
   });
+}
+
+/* ── Етап 3: веригите ────────────────────────────────────────────────────
+   Товар, разтоварен в точка на прехвърляне P, продължава в НОВ ред
+   transfer_cargo на следващия транспорт (нов от P или дотоварване на бус
+   през P), вързан към стария с prev_cargo_id. Звената могат да са в
+   транспорти, които обектът иначе не вижда (Козлодуй не участва в
+   Пирдоп → Троян) — те се дозареждат в tfTransferById / tfCargoByTransfer /
+   tfEvents, но НЕ влизат в tfTransfers (списъка и филтрите).
+   Заявките са малки: наследници се търсят само за разтоварените товари,
+   предшественици — само по prev_cargo_id. Двата филтъра се повтарят в
+   клиента. Най-много TF_CHAIN_ROUNDS кръга. */
+var TF_CHAIN_ROUNDS = 6;
+
+function tfArr(x) { return Array.isArray(x) ? x : []; }
+function tfUniq(a) { return a.filter(function (x, i) { return x && a.indexOf(x) === i; }); }
+
+function tfIndexChains() {
+  tfCargoById = {}; tfSuccOf = {};
+  Object.keys(tfCargoByTransfer).forEach(function (tid) {
+    (tfCargoByTransfer[tid] || []).forEach(function (c) { tfCargoById[c.id] = c; });
+  });
+  Object.keys(tfCargoById).forEach(function (id) {
+    var c = tfCargoById[id];
+    if (c.prev_cargo_id) tfSuccOf[c.prev_cargo_id] = c;
+  });
+}
+
+function tfLoadChains() {
+  var rounds = 0;
+  var next = function (batch) {
+    if (!batch.length || rounds++ >= TF_CHAIN_ROUNDS) return Promise.resolve();
+    var succFor = batch.filter(function (c) { return !!tfUnloadedEvent(c) && !tfSuccOf[c.id]; })
+      .map(function (c) { return c.id; });
+    var prevIds = tfUniq(batch.map(function (c) { return c.prev_cargo_id; })
+      .filter(function (id) { return id && !tfCargoById[id]; }));
+    if (!succFor.length && !prevIds.length) return Promise.resolve();
+    return Promise.all([
+      succFor.length ? sbGet('transfer_cargo', 'prev_cargo_id=in.(' + succFor.join(',') + ')') : Promise.resolve([]),
+      prevIds.length ? sbGet('transfer_cargo', 'id=in.(' + prevIds.join(',') + ')') : Promise.resolve([])
+    ]).then(function (r) {
+      var found = tfArr(r[0]).filter(function (c) { return c && succFor.indexOf(c.prev_cargo_id) >= 0; })
+        .concat(tfArr(r[1]).filter(function (c) { return c && prevIds.indexOf(c.id) >= 0; }))
+        .filter(function (c) { return !tfCargoById[c.id]; });
+      if (!found.length) return;
+      var tids = tfUniq(found.map(function (c) { return c.transfer_id; }))
+        .filter(function (id) { return !tfTransferById[id]; });
+      var load = tids.length ? Promise.all([
+        sbGet('transfers', 'id=in.(' + tids.join(',') + ')'),
+        sbGet('transfer_cargo', 'transfer_id=in.(' + tids.join(',') + ')&order=position.asc'),
+        sbGet('transfer_cargo_events', 'transfer_id=in.(' + tids.join(',') + ')&order=created_at.asc')
+      ]) : Promise.resolve([[], [], []]);
+      return load.then(function (x) {
+        tfArr(x[0]).forEach(function (t) { if (t && tids.indexOf(t.id) >= 0) tfTransferById[t.id] = t; });
+        var added = [];
+        var addCargo = function (c) {
+          if (!c || tfCargoById[c.id]) return;
+          (tfCargoByTransfer[c.transfer_id] = tfCargoByTransfer[c.transfer_id] || []).push(c);
+          tfCargoById[c.id] = c;
+          added.push(c);
+        };
+        tfArr(x[1]).filter(function (c) { return c && tids.indexOf(c.transfer_id) >= 0; }).forEach(addCargo);
+        found.forEach(addCargo);
+        tids.forEach(function (id) {
+          (tfCargoByTransfer[id] || []).sort(function (a, b) { return (a.position || 0) - (b.position || 0); });
+        });
+        var haveEv = {};
+        tfEvents.forEach(function (e) { haveEv[e.id] = 1; });
+        tfEvents = tfEvents.concat(tfArr(x[2]).filter(function (e) {
+          return e && tids.indexOf(e.transfer_id) >= 0 && !haveEv[e.id];
+        }));
+        tfIndexChains();
+        return next(added);
+      });
+    });
+  };
+  var all = [];
+  Object.keys(tfCargoById).forEach(function (id) { all.push(tfCargoById[id]); });
+  return next(all);
+}
+
+function tfFindTransfer(id) {
+  return tfTransferById[id] || tfTransfers.filter(function (x) { return x.id === id; })[0] || null;
+}
+function tfSuccessor(c) { return c ? tfSuccOf[c.id] || null : null; }
+function tfPredecessor(c) { return c && c.prev_cargo_id ? tfCargoById[c.prev_cargo_id] || null : null; }
+/* Звената преди c, от най-старото (без самото c). */
+function tfChainAncestors(c) {
+  var out = [], p = tfPredecessor(c), guard = 0;
+  while (p && guard++ < 20) { out.unshift(p); p = tfPredecessor(p); }
+  return out;
+}
+/* Последното звено — там, където товарът е сега. */
+function tfChainTail(c) {
+  var cur = c, n = tfSuccessor(c), guard = 0;
+  while (n && guard++ < 20) { cur = n; n = tfSuccessor(n); }
+  return cur;
+}
+/* „Козлодуй-0001 #1" — звеното като текст. */
+function tfCargoRef(c) {
+  var t = c ? tfFindTransfer(c.transfer_id) : null;
+  return (t ? t.transfer_num : '—') + ' #' + (c && c.position ? c.position : '?');
+}
+/* Отметката „Разтоварен" в първата точка на прехвърляне — последната такава. */
+function tfUnloadedEvent(c) {
+  var tg = tfCargoTarget(c);
+  if (!c || tg.event !== 'unloaded') return null;
+  var hit = null;
+  tfCargoEvents(tfEventsOf(c.transfer_id), c.id).forEach(function (e) {
+    if (e.event === 'unloaded' && e.store_name === tg.store) hit = e;
+  });
+  return hit;
+}
+/* Пълни календарни дни между отметката и днес (местно време). 0 = днес. */
+function tfWaitDays(ts, now) {
+  var d = new Date(ts), n = now ? new Date(now) : new Date();
+  if (isNaN(d.getTime())) return 0;
+  var a = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  var b = new Date(n.getFullYear(), n.getMonth(), n.getDate()).getTime();
+  return Math.max(0, Math.round((b - a) / 86400000));
+}
+function tfWaitText(days) {
+  if (!days) return 'чака от днес';
+  return 'чака ' + days + (days === 1 ? ' ден' : ' дни');
+}
+/* Чакащите прехвърляне в stores: разтоварени там, без наследник. Само от
+   видимите транспорти (tfTransfers) — чуждият обект не вижда чужди чакащи. */
+function tfReshipItems(stores, q) {
+  var out = [];
+  if (!stores || !stores.length) return out;
+  tfTransfers.forEach(function (t) {
+    if (q && !tfMatches(t, q)) return;
+    (tfCargoByTransfer[t.id] || []).forEach(function (c, i) {
+      var ev = tfUnloadedEvent(c);
+      if (!ev || stores.indexOf(ev.store_name) < 0 || tfSuccessor(c)) return;
+      out.push({ t: t, c: c, i: i, ev: ev, days: tfWaitDays(ev.created_at) });
+    });
+  });
+  return out;
 }
 
 /* ── Списък ──────────────────────────────────────────────────────────────── */
@@ -244,6 +394,7 @@ function renderTransfers() {
     '</div>' + tfCargoResultsHtml() + tfFilterBarHtml();
   if (tfFilter === 'mine') { wrap.innerHTML = h + tfPendingHtml(q); return; }
   if (tfFilter === 'problems') { wrap.innerHTML = h + tfProblemsHtml(q); return; }
+  if (tfFilter === 'reship') { wrap.innerHTML = h + tfReshipHtml(q); return; }
   h += '<div class="tbl-wrap"><table id="trf-table">' +
     '<thead><tr><th>Номер</th><th>Вид</th><th>Дата</th><th>От → до</th><th>Товари</th><th>Статус</th><th></th></tr></thead><tbody>';
 
@@ -283,6 +434,58 @@ function renderTransfersKeepFocus() {
 function tfNewCargo() {
   return { kind: 'pallet', qty: 1, recipient_store: '', transfer_points: [], note: '',
            client_order_ids: [], transport_order_ids: [], claims: '', goods_doc: '', loading_item_id: '' };
+}
+
+/* Заключен ред за чакащ товар: копие от предишното звено — вид, брой,
+   получател, връзки, рекламации, стокова, забележка; точките = оставащите
+   СЛЕД обекта, в който чака. Ред от товарен лист не се копира. */
+function tfReshipCargo(it) {
+  var c = it.c;
+  return { kind: c.kind, qty: c.qty, recipient_store: c.recipient_store,
+           transfer_points: (c.transfer_points || []).slice(1), note: c.note || '',
+           client_order_ids: (c.client_order_ids || []).slice(), transport_order_ids: (c.transport_order_ids || []).slice(),
+           claims: (c.claim_numbers || []).join(', '), goods_doc: c.goods_doc || '', loading_item_id: '',
+           prev_cargo_id: c.id, locked: true, reship_from: it.ev.store_name, prev_ref: tfCargoRef(c) };
+}
+function tfIsBlankCargo(c) {
+  return !c.locked && !c.recipient_store && !c.note && !c.goods_doc && !c.claims && !c.loading_item_id &&
+    !(c.transfer_points || []).length && !(c.client_order_ids || []).length && !(c.transport_order_ids || []).length;
+}
+function tfTogglePendingPick() { if (tfForm) { tfForm.showPending = !tfForm.showPending; renderTransferForm(); } }
+function tfAddReshipCargo(cid) {
+  var f = tfForm;
+  if (!f) return;
+  var it = tfReshipItems([f.from_store], '').filter(function (x) { return x.c.id === cid; })[0];
+  if (!it) { toast('Товарът не чака прехвърляне в ' + (f.from_store || 'този обект'), '#dc2626'); return; }
+  if (f.cargo.some(function (c) { return c.prev_cargo_id === cid; })) { toast('Товарът вече е добавен', '#d97706'); return; }
+  var row = tfReshipCargo(it);
+  if (f.cargo.length === 1 && tfIsBlankCargo(f.cargo[0])) f.cargo[0] = row;
+  else f.cargo.push(row);
+  f.showPending = false;
+  renderTransferForm();
+}
+/* Заключеният ред във формата — само за четене, с бутон за махане. */
+function tfLockedCargoHtml(f, c, i, routeStops) {
+  var links = [];
+  if (c.client_order_ids.length) links.push('КЗ ×' + c.client_order_ids.length);
+  if (c.transport_order_ids.length) links.push('ТЗ ×' + c.transport_order_ids.length);
+  if (c.claims) links.push('Рекл. ' + c.claims);
+  if (c.goods_doc) links.push('СР ' + c.goods_doc);
+  var first = c.transfer_points[0] || c.recipient_store;
+  return '<div class="trf-cargo trf-cargo-locked" data-i="' + i + '" data-prev="' + tfAttr(c.prev_cargo_id) + '" style="border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:8px;background:#fffbeb;">' +
+    '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
+      '<div><b>#' + (i + 1) + ' 🔒 ' + escVal(tfKindLabel(c.kind) + (c.qty > 1 ? ' ×' + c.qty : '') + ' → ' + c.recipient_store) + '</b>' +
+        '<div style="font-size:12px;color:#92400e;">продължение на ' + escVal(c.prev_ref) + ' · чака в ' + escVal(c.reship_from) + '</div>' +
+        '<div class="trf-locked-points" style="font-size:12px;margin-top:2px;">' + (c.transfer_points.length
+          ? 'Точки на прехвърляне: ' + escVal(c.transfer_points.join(' → ')) : 'Без прехвърляне — направо до получателя') + '</div>' +
+        (links.length ? '<div style="font-size:12px;color:#64748b;">' + escVal(links.join(', ')) + '</div>' : '') +
+        (c.note ? '<div style="font-size:12px;color:#64748b;">Забележка: ' + escVal(c.note) + '</div>' : '') +
+      '</div>' +
+      (f.cargo.length > 1 ? '<button class="btn-sm trf-remove-cargo" title="Махни товара" onclick="tfRemoveCargo(' + i + ')">✕</button>' : '') +
+    '</div>' +
+    (f.mode !== 'courier' && first && routeStops.indexOf(first) < 0
+      ? '<div class="trf-cargo-warn" style="margin-top:6px;font-size:12px;color:#b91c1c;">⚠️ ' + escVal(first) + ' не е спирка на този транспорт' + (f.reload ? ' след ' + escVal(f.from_store) : '') + '.</div>' : '') +
+  '</div>';
 }
 
 function openTransferForm() {
@@ -449,6 +652,7 @@ function renderTransferForm() {
   var routeStops = tfRouteStops(f);
   h += '<div style="font-size:12px;font-weight:700;margin:4px 0 6px;">Товари</div>';
   f.cargo.forEach(function (c, i) {
+    if (c.locked) { h += tfLockedCargoHtml(f, c, i, routeStops); return; }
     h += '<div class="trf-cargo" data-i="' + i + '" style="border:1px solid #e2e8f0;border-radius:8px;padding:10px;margin-bottom:8px;background:#f8fafc;">' +
       '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">' +
         '<b style="font-size:13px;">#' + (i + 1) + '</b>' +
@@ -497,6 +701,22 @@ function renderTransferForm() {
     h += '</div>';
   });
   h += '<button id="trf-add-cargo" class="btn-sm" onclick="tfAddCargo()">+ Товар</button>';
+  /* Етап 3: товар, който чака прехвърляне в началния обект, се слага на
+     този транспорт като заключен ред. */
+  var waiting = f.from_store ? tfReshipItems([f.from_store], '').filter(function (it) {
+    return !f.cargo.some(function (c) { return c.prev_cargo_id === it.c.id; });
+  }) : [];
+  if (waiting.length) {
+    h += ' <button id="trf-from-pending" class="btn-sm" onclick="tfTogglePendingPick()">➕ От чакащите (' + waiting.length + ')</button>';
+    if (f.showPending) {
+      h += '<div id="trf-pending-pick" style="border:1px solid #fde68a;background:#fffbeb;border-radius:8px;padding:8px;margin-top:6px;">' +
+        waiting.map(function (it) {
+          return '<div style="display:flex;justify-content:space-between;gap:8px;align-items:center;padding:4px 0;font-size:12px;">' +
+            '<span><b>' + escVal(it.t.transfer_num) + '</b> · ' + escVal(tfCargoLabel(it.c, it.i)) + ' · ' + escVal(tfWaitText(it.days)) + '</span>' +
+            '<button class="btn-sm trf-pick-pending" data-c="' + tfAttr(it.c.id) + '" onclick="tfAddReshipCargo(this.getAttribute(\'data-c\'))">Добави</button></div>';
+        }).join('') + '</div>';
+    }
+  }
 
   if (!rl) h += '<div style="margin-top:12px;"><label style="font-size:12px;">Бележка към транспорта<br>' +
     '<textarea id="trf-tnote" rows="2" oninput="tfSetField(\'note\',this.value)" style="' + TF_FLD + 'width:100%;box-sizing:border-box;">' + escVal(f.note) + '</textarea></label></div>';
@@ -562,7 +782,7 @@ function tfSetMode(m) {
     /* Куриерът е А→Б: спирките и прехвърлянията нямат смисъл. Махат се
        веднага, за да не заминат незабелязано в записа. */
     tfForm.stops = [];
-    tfForm.cargo.forEach(function (c) { c.transfer_points = []; });
+    tfForm.cargo.forEach(function (c) { if (!c.locked) c.transfer_points = []; });
   }
   renderTransferForm();
 }
@@ -623,6 +843,13 @@ function tfValidate(f) {
     if (!rec) return n + 'избери краен получател.';
     if (rec === f.from_store) return n + 'получателят не може да е началният обект.';
     var pts = c.transfer_points || [];
+    if (c.prev_cargo_id) {
+      /* Етап 3: чакащ товар — от обекта, в който чака, веднъж. */
+      if (c.reship_from && c.reship_from !== f.from_store) return n + 'товарът чака в ' + c.reship_from + ' — прехвърля се оттам, не от ' + f.from_store + '.';
+      for (var k = 0; k < i; k++) if (f.cargo[k].prev_cargo_id === c.prev_cargo_id) return n + 'същият чакащ товар е добавен два пъти.';
+      var succ = tfSuccessor(tfCargoById[c.prev_cargo_id] || { id: c.prev_cargo_id });
+      if (succ) return n + 'товарът вече е прехвърлен в ' + tfCargoRef(succ) + '.';
+    }
     if (f.reload) {
       /* Дотоварване: нищо не слиза в обект, през който бусът вече е минал. */
       var bad = [rec].concat(pts).filter(function (x) { return (f.reload.before || []).indexOf(x) >= 0; })[0];
@@ -701,7 +928,7 @@ function submitTransfer() {
            връща назад, също като при клиентските заявки. */
         return sbDelete('transfers', 'id=eq.' + t.id).then(function () {
           tfSaving = false; renderTransferForm();
-          toast('Грешка при запис на товарите — транспортът не е създаден: ' + sbErrMsg(r2), '#dc2626');
+          toast('Грешка при запис на товарите — транспортът не е създаден: ' + tfCargoErrText(r2), '#dc2626');
         });
       }
       tfSaving = false;
@@ -730,8 +957,19 @@ function tfCargoRow(f, c, transferId, position) {
     transport_order_ids: c.transport_order_ids.slice(),
     claim_numbers: tfSplitClaims(c.claims),
     goods_doc: (c.goods_doc || '').trim() || null,
-    loading_item_id: c.loading_item_id || null
+    loading_item_id: c.loading_item_id || null,
+    prev_cargo_id: c.prev_cargo_id || null
   };
+}
+
+/* Уникалният индекс по prev_cargo_id връща 23505 при втори опит за същия
+   товар (друг потребител го е прехвърлил междувременно). */
+function tfCargoErrText(res) {
+  var e = (res && res.error) || {};
+  if (e.code === '23505' || /transfer_cargo_prev_uidx/.test(String(e.message || ''))) {
+    return 'товарът вече е прехвърлен в друг транспорт — опресни списъка';
+  }
+  return sbErrMsg(res);
 }
 
 /* ── Дотоварване от спирка ───────────────────────────────────────────────── */
@@ -781,7 +1019,7 @@ function tfSubmitReload(f) {
   renderTransferForm();
   sbPost('transfer_cargo', body).then(function (r) {
     tfSaving = false;
-    if (!r.ok) { renderTransferForm(); toast('Грешка при дотоварването: ' + sbErrMsg(r), '#dc2626'); return; }
+    if (!r.ok) { renderTransferForm(); toast('Грешка при дотоварването: ' + tfCargoErrText(r), '#dc2626'); return; }
     toast('✅ Дотоварено в ' + (t.transfer_num || ''));
     tfForm = null; tfView = 'card'; tfCardId = tid;
     /* Статусът се пресмята наново с новите товари — Завършен, отбелязан
@@ -800,7 +1038,7 @@ function tfSubmitReload(f) {
 /* ── Печат ───────────────────────────────────────────────────────────────── */
 
 function printTransfer(id) {
-  var t = tfTransfers.filter(function (x) { return x.id === id; })[0];
+  var t = tfFindTransfer(id);
   if (!t) return;
   var cargo = tfCargoByTransfer[id] || [];
   /* Номерата на свързаните клиентски поръчки — само за печата. */
@@ -860,7 +1098,8 @@ function renderTransferPrint(t, cargo, coNum) {
       '<td>' + (i + 1) + '</td>' +
       '<td>' + escVal(tfKindLabel(c.kind)) + '</td>' +
       '<td>' + escVal(String(c.qty)) + '</td>' +
-      '<td><b>' + escVal(c.recipient_store) + '</b>' + (c.loaded_at_store ? '<br>дотоварен в ' + escVal(c.loaded_at_store) : '') + '</td>' +
+      '<td><b>' + escVal(c.recipient_store) + '</b>' + (c.loaded_at_store ? '<br>дотоварен в ' + escVal(c.loaded_at_store) : '') +
+        tfChainRefs(c).map(function (r) { return '<br>' + escVal(r.text); }).join('') + '</td>' +
       '<td>' + escVal((c.transfer_points || []).join(' → ')) + '</td>' +
       '<td>' + escVal(links.join(', ')) + '</td>' +
       '<td>' + escVal(c.note) + '</td>' +
@@ -870,10 +1109,13 @@ function renderTransferPrint(t, cargo, coNum) {
   /* История по товар — всички отметки по ред. */
   var hist = cargo.map(function (c, i) {
     var evs = tfEventsOf(t.id).filter(function (e) { return e.cargo_id === c.id; });
-    if (!evs.length) return '';
-    return '<tr><td>' + (i + 1) + '</td><td colspan="2">' + evs.map(function (e) {
+    var prevEv = tfChainPrevEvents(c);
+    if (!evs.length && !prevEv.length) return '';
+    return '<tr><td>' + (i + 1) + '</td><td colspan="2">' + prevEv.map(function (x) {
+      return escVal(x.num + ' · ' + tfFmtTs(x.e.created_at) + ' · ' + x.e.store_name + ' · ' + tfEventText(x.e) + tfPhotoPrintText(x.e));
+    }).concat(evs.map(function (e) {
       return escVal(tfFmtTs(e.created_at) + ' · ' + e.store_name + ' · ' + tfEventText(e) + tfPhotoPrintText(e));
-    }).join('<br>') + '</td></tr>';
+    })).join('<br>') + '</td></tr>';
   }).join('');
 
   wrap.innerHTML = '<style>' + CSS + '</style>' +
@@ -925,8 +1167,8 @@ function renderTransferPrint(t, cargo, coNum) {
    ЗАПИСВА в transfers.status след всяка отметка (tfSyncStatus), за да го
    четат отчетите без преизчисляване.
 
-   Самото прехвърляне към нов транспорт е етап 3 — тук товарът само показва
-   „чака прехвърляне в <обект>". */
+   Самото прехвърляне към следващ транспорт е етап 3 („Етап 3: веригите"):
+   нов ред с prev_cargo_id; тук старият товар показва „↪ прехвърлен в …". */
 
 var TF_PRINT_LOGO = 'data:image/png;base64,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';
 /* Логото е КОПИЕ на LL_PRINT_LOGO (loading.js), по същата причина като там:
@@ -1098,6 +1340,8 @@ function tfPhotoPrintText(e) {
 
 /* Състоянието на товара с думи — за картата и за „За потвърждение". */
 function tfCargoStateText(t, c, evs) {
+  var succ = tfSuccessor(c);
+  if (succ) return '↪ прехвърлен в ' + tfCargoRef(succ);
   var tg = tfCargoTarget(c);
   var mine = tfCargoEvents(evs, c.id);
   if (tfCargoDone(c, evs)) {
@@ -1114,9 +1358,11 @@ function tfFilterBarHtml() {
     return '<button class="filter-btn trf-filter' + (tfFilter === key ? ' active' : '') + '" data-f="' + key + '" onclick="tfSetFilter(\'' + key + '\')">' + label + '</button>';
   };
   var nMine = tfPendingItems('').length, nProb = tfProblemItems('').length;
+  var nRe = tfReshipItems(tfActorStores(), '').length;
   return '<div class="filter-bar" style="margin:0 0 12px;">' +
     b('all', 'Всички') +
     b('mine', '📥 За потвърждение при мен' + (nMine ? ' (' + nMine + ')' : '')) +
+    b('reship', '⏳ Чакащи прехвърляне при мен' + (nRe ? ' (' + nRe + ')' : '')) +
     b('problems', '⚠️ Проблеми' + (nProb ? ' (' + nProb + ')' : '')) +
   '</div>';
 }
@@ -1178,6 +1424,50 @@ function tfPendingHtml(q) {
   }).join('') + '</div>';
 }
 
+/* „⏳ Чакащи прехвърляне при мен" — разтоварените в моя обект товари, още
+   без следващ транспорт. Слагат се на нов транспорт или на минаващ бус с
+   „➕ От чакащите" във формата. */
+function tfReshipHtml(q) {
+  var items = tfReshipItems(tfActorStores(), q);
+  if (!items.length) return '<div id="trf-reship" style="text-align:center;padding:30px;color:#94a3b8;">Няма товари, които чакат прехвърляне при теб.</div>';
+  return '<div id="trf-reship">' + items.map(function (it) {
+    return '<div class="trf-reship-row" data-c="' + tfAttr(it.c.id) + '" style="border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:8px;background:#fffbeb;">' +
+      '<div><b>' + escVal(it.t.transfer_num) + '</b> · ' + escVal(tfCargoLabel(it.c, it.i)) +
+        ((it.c.transfer_points || []).length > 1 ? '<span style="font-size:12px;color:#64748b;"> · после през ' + escVal(it.c.transfer_points.slice(1).join(' → ')) + '</span>' : '') + '</div>' +
+      '<div style="font-size:12px;color:#92400e;margin-top:2px;">⏸ разтоварен в ' + escVal(it.ev.store_name) + ' на ' + escVal(tfFmtTs(it.ev.created_at)) +
+        ' · <b class="trf-wait" data-days="' + it.days + '">' + escVal(tfWaitText(it.days)) + '</b></div>' +
+      '<div style="font-size:11px;color:#64748b;margin-top:2px;">Сложи го на нов транспорт или на минаващ бус — „➕ От чакащите" във формата.</div>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+
+/* Препратките по веригата за товара: „продължение на …" / „продължава в …".
+   На екрана — линк към картата; в печата — текст. */
+function tfChainRefs(c) {
+  var out = [];
+  var p = tfPredecessor(c), n = tfSuccessor(c);
+  if (p) out.push({ cls: 'trf-chain-prev', text: '↩ продължение на ' + tfCargoRef(p), tid: p.transfer_id });
+  else if (c && c.prev_cargo_id) out.push({ cls: 'trf-chain-prev', text: '↩ продължение на друг транспорт', tid: null });
+  if (n) out.push({ cls: 'trf-chain-next', text: '↪ продължава в ' + tfCargoRef(n), tid: n.transfer_id });
+  return out;
+}
+function tfChainRefsHtml(c) {
+  return tfChainRefs(c).map(function (r) {
+    return '<div class="' + r.cls + '" style="font-size:12px;margin-top:2px;">' + (r.tid
+      ? '<a href="javascript:void(0)" onclick="openTransferCard(\'' + tfAttr(r.tid) + '\')" style="color:#1d4ed8;">' + escVal(r.text) + '</a>'
+      : escVal(r.text)) + '</div>';
+  }).join('');
+}
+/* Отметките от предишните звена — за историята на товара. */
+function tfChainPrevEvents(c) {
+  var out = [];
+  tfChainAncestors(c).forEach(function (a) {
+    var num = (tfFindTransfer(a.transfer_id) || {}).transfer_num || '—';
+    tfCargoEvents(tfEventsOf(a.transfer_id), a.id).forEach(function (e) { out.push({ e: e, num: num }); });
+  });
+  return out;
+}
+
 function tfProblemsHtml(q) {
   var items = tfProblemItems(q);
   if (!items.length) return '<div id="trf-problems" style="text-align:center;padding:30px;color:#94a3b8;">Няма отворени проблеми.</div>';
@@ -1203,8 +1493,8 @@ function tfProblemsHtml(q) {
    Търси се само в заредените транспорти — tfTransfers вече е минал през
    tfVisibleToStores, тоест обектът не намира чужди товари, а глобалните
    роли виждат всички.
-   ЕТАП 3: прехвърлените товари (нов транспорт от точката на прехвърляне)
-   също трябва да излизат тук — с последното събитие от новия транспорт. */
+   ЕТАП 3 (30.09.2026): за прехвърлен товар резултатът е последното звено от
+   веригата, с последното му движение и пътя „А #1 → Б #2". */
 
 /* Толерантно съвпадение (30.09.2026): „дотоварване" намира „дотоварен",
    „стелжни" — „Стелажни". Числата НЕ са толерантни: стокова / рекламация с
@@ -1306,7 +1596,16 @@ function tfSearchCargo(q) {
       (tfCargoByTransfer[t.id] || []).forEach(function (c, i) {
         var byCo = (c.client_order_ids || []).some(function (id) { return coIds.indexOf(id) >= 0; });
         var m = byCo ? 2 : tfCargoMatch(q, c);
-        if (m) hits.push({ t: t, c: c, i: i, last: tfCargoLastMove(c), exact: m === 2 });
+        if (!m) return;
+        /* Етап 3: показва се ПОСЛЕДНОТО звено от веригата — там, където
+           товарът е сега — с пътя. Няколко звена от една верига са един ред. */
+        var tail = tfChainTail(c);
+        var tt = tfFindTransfer(tail.transfer_id) || t;
+        var dup = hits.filter(function (x) { return x.c.id === tail.id; })[0];
+        if (dup) { dup.exact = dup.exact || m === 2; return; }
+        var ti = (tfCargoByTransfer[tt.id] || []).indexOf(tail);
+        hits.push({ t: tt, c: tail, i: ti >= 0 ? ti : i, last: tfCargoLastMove(tail), exact: m === 2,
+                    path: tfChainAncestors(tail).concat([tail]).map(tfCargoRef) });
       });
     });
     /* Точните първи, толерантните след тях; иначе редът на списъка. */
@@ -1331,7 +1630,9 @@ function tfCargoResultsHtml() {
     return '<div class="trf-cargo-hit" data-t="' + tfAttr(x.t.id) + '" data-c="' + tfAttr(x.c.id) + '" onclick="openTransferCard(\'' + tfAttr(x.t.id) + '\')"' +
       ' style="cursor:pointer;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-top:6px;">' +
       '<b>' + escVal(x.t.transfer_num) + '</b> · ' + escVal(tfCargoLabel(x.c, x.i)) +
-      '<div class="trf-cargo-last" style="font-size:12px;color:#334155;margin-top:2px;">' + escVal(tfLastMoveText(x.last)) + '</div></div>';
+      '<div class="trf-cargo-last" style="font-size:12px;color:#334155;margin-top:2px;">' + escVal(tfLastMoveText(x.last)) + '</div>' +
+      (x.path && x.path.length > 1 ? '<div class="trf-cargo-path" style="font-size:11px;color:#64748b;margin-top:2px;">Път: ' + escVal(x.path.join(' → ')) + '</div>' : '') +
+      '</div>';
   }).join('') + '</div>';
 }
 
@@ -1342,7 +1643,7 @@ function closeTransferCard() { tfCardId = null; tfView = 'list'; renderTransfers
 
 function renderTransferCard() {
   var wrap = document.getElementById('mod-transfers');
-  var t = tfTransfers.filter(function (x) { return x.id === tfCardId; })[0];
+  var t = tfFindTransfer(tfCardId);
   if (!wrap) return;
   if (!t) { tfView = 'list'; renderTransfers(); return; }
   var cargo = tfCargoByTransfer[t.id] || [];
@@ -1362,16 +1663,23 @@ function renderTransferCard() {
       '<div style="margin-top:2px;">' + escVal(tfRouteText(t)) + '</div></div>';
   cargo.forEach(function (c, i) {
     var mine = tfCargoEvents(evs, c.id);
+    var prevEv = tfChainPrevEvents(c);
     var acts = tfActionsFor(t, c, evs);
     var open = tfOpenProblems(c, evs).length;
     h += '<div class="trf-card-cargo" data-c="' + tfAttr(c.id) + '" style="border:1px solid ' + (open ? '#fecaca' : '#e2e8f0') + ';border-radius:8px;padding:10px;margin-bottom:8px;background:#fff;">' +
       '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
         '<div><b>' + escVal(tfCargoLabel(c, i)) + '</b>' +
           ((c.transfer_points || []).length ? '<span style="font-size:12px;color:#64748b;"> · през ' + escVal(c.transfer_points.join(' → ')) + '</span>' : '') +
-          '<div class="trf-state" style="font-size:12px;margin-top:2px;">' + escVal(tfCargoStateText(t, c, evs)) + (open ? ' · <b style="color:#b91c1c;">⚠️ отворен проблем</b>' : '') + '</div></div>' +
+          '<div class="trf-state" style="font-size:12px;margin-top:2px;">' + escVal(tfCargoStateText(t, c, evs)) + (open ? ' · <b style="color:#b91c1c;">⚠️ отворен проблем</b>' : '') + '</div>' +
+          tfChainRefsHtml(c) + '</div>' +
         '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + acts.map(function (a) { return tfActBtn(t, c, a); }).join('') + '</div>' +
       '</div>' +
-      (mine.length ? '<ol class="trf-history" style="margin:8px 0 0;padding-left:20px;font-size:12px;color:#334155;">' + mine.map(function (e) {
+      (mine.length || prevEv.length ? '<ol class="trf-history" style="margin:8px 0 0;padding-left:20px;font-size:12px;color:#334155;">' +
+        prevEv.map(function (x) {
+          return '<li class="trf-hist-prev" style="color:#64748b;">' + escVal(x.num) + ' · ' + escVal(tfFmtTs(x.e.created_at)) + ' · <b>' + escVal(x.e.store_name) + '</b> · ' +
+            escVal(tfEventText(x.e)) + tfPhotoThumbs(x.e) + '</li>';
+        }).join('') +
+        mine.map(function (e) {
         return '<li>' + escVal(tfFmtTs(e.created_at)) + ' · <b>' + escVal(e.store_name) + '</b> · ' + escVal(tfEventText(e)) +
           tfPhotoThumbs(e) + '</li>';
       }).join('') + '</ol>' : '') +
@@ -1383,7 +1691,7 @@ function renderTransferCard() {
 /* ── Прозорчето за отметка ───────────────────────────────────────────────── */
 
 function tfFindCargo(tid, cid) {
-  var t = tfTransfers.filter(function (x) { return x.id === tid; })[0];
+  var t = tfFindTransfer(tid);
   var c = t ? (tfCargoByTransfer[tid] || []).filter(function (x) { return x.id === cid; })[0] : null;
   return { t: t, c: c };
 }
