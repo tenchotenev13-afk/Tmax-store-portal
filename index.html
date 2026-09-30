@@ -116,6 +116,20 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
   .tbl-co th:nth-child(2),.tbl-co td:nth-child(2){position:sticky;left:90px;}
   .tbl-co th:nth-child(3),.tbl-co td:nth-child(3){left:170px;}
 }
+/* Разлики (.tbl-sd), таблицата на решените: като .tbl-co, но по КЛАС на
+   клетката (sd-c-*), не по :nth-child — „Отговор на склада" е само в
+   подтаб „Междускладови" и броят колони се мени. Тип (160px) се закачва
+   преди „Магазин" само на широк екран; на телефон — само „Магазин". */
+.tbl-sd .sd-c-qty,.tbl-sd .sd-c-ord,.tbl-sd .sd-c-rord,.tbl-sd .sd-c-date,.tbl-sd .sd-c-status,.tbl-sd .sd-c-credit{white-space:nowrap;}
+.tbl-sd td.sd-c-name,.tbl-sd td.sd-c-cmt,.tbl-sd td.sd-c-ctl,.tbl-sd td.sd-c-wh{width:260px;min-width:160px;max-width:260px;white-space:normal;}
+.tbl-sd td.sd-c-store{position:sticky;left:0;z-index:1;background:inherit;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
+.tbl-sd th.sd-c-store{position:sticky;left:0;z-index:3;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
+.tbl-sd th.sd-c-type,.tbl-sd td.sd-c-type{box-sizing:border-box;width:160px;min-width:160px;max-width:160px;}
+@media(min-width:768px){
+  .tbl-sd td.sd-c-type{position:sticky;left:0;z-index:1;background:inherit;}
+  .tbl-sd th.sd-c-type{position:sticky;left:0;z-index:3;}
+  .tbl-sd th.sd-c-store,.tbl-sd td.sd-c-store{left:160px;}
+}
 table{width:100%;border-collapse:collapse;font-size:12px;}
 thead{background:var(--surf);}
 th{padding:9px 10px;text-align:left;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;}
