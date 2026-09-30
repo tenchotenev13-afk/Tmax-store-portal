@@ -154,7 +154,7 @@ function sdMarkDiffTask(store){
 function isLogisticsWarehouseUser(){
   return currentUser && LOGISTICS_WAREHOUSES.indexOf(currentUser.store_name) >= 0;
 }
-var WH_RESPONSE_LABELS = {sent:'📤 Изпратено',will_send:'⏳ Ще се изпрати','return':'↩️ Обратно движение'};
+var WH_RESPONSE_LABELS = {sent:'📤 Изпратено',sent_sap:'📄 Изпратено по система',will_send:'⏳ Ще се изпрати','return':'↩️ Обратно движение'};
 
 /* ══ Регистър на посоките ══
    ЕДИН източник за подтабовете, броячите и всеки етикет по посока. Преди трета
@@ -962,6 +962,7 @@ function diffWarehouseResolveButtons(l, rep){
     };
     var h='<div style="display:flex;gap:3px;flex-wrap:wrap;">'+
       mk('sent','📤 Изпратено','#16a34a')+
+      mk('sent_sap','📄 Изпратено по система','#0d9488')+
       mk('will_send','⏳ Ще изпрати','#d97706')+
       mk('return','↩️ Обратно','#7c3aed')+
       '</div>';
@@ -1010,6 +1011,10 @@ function sdInterstoreConfirmButton(l, rep){
   var isStoreSide = sdIsInterstoreStoreSide(l, rep);
   if(l.warehouse_response==='sent'){
     return isStoreSide ? mk('✅ ПРИЕТО','#0d9488','store') : sdStoreResponseLabel(l);
+  }
+  /* Складът пуска движението по система - магазинът само го потвърждава в SAP. */
+  if(l.warehouse_response==='sent_sap'){
+    return isStoreSide ? mk('📄 ПРИЕТО В SAP','#7c3aed','store_sap') : sdStoreResponseLabel(l);
   }
   /* Обратно движение: магазинът първо пуска движението в SAP (или казва, че
      не може - няма наличност в логистика), и чак тогава складът приема
@@ -1067,9 +1072,9 @@ function sdStoreResponseLabel(l){
       (l.store_response_by?' · '+esc(l.store_response_by):'')+'</div>'+
       '<div style="margin-top:2px;font-size:11px;color:#1e293b;white-space:normal;">💬 '+esc(l.store_response_comment)+'</div>';
   }
-  if(l.store_response==='sap_done' || l.store_response==='accepted'){
+  if(l.store_response==='sap_done' || l.store_response==='accepted' || l.store_response==='sap_accepted'){
     return '<div style="margin-top:3px;font-size:10.5px;color:#7c3aed;font-weight:600;">'+
-      (l.store_response==='sap_done'?'📄 Пуснато в SAP':'✅ Прието')+
+      (l.store_response==='sap_done'?'📄 Пуснато в SAP':(l.store_response==='sap_accepted'?'📄 Прието в SAP':'✅ Прието'))+
       (l.store_response_by?' · '+esc(l.store_response_by):'')+
       (l.store_response_at?' · '+sdFmtDateTime(l.store_response_at):'')+'</div>';
   }
@@ -1234,12 +1239,32 @@ function openWarehouseResponseModal(lineId,val){
     '</div></div></div>';
   document.body.appendChild(div.firstChild);
 }
+/* Кой отговор на магазина върви с кой отговор на склада. will_send няма
+   съвместим отговор - още нищо не е тръгнало. */
+function sdStoreResponseCompatible(wr, sr){
+  if(wr==='sent') return sr==='accepted';
+  if(wr==='return') return sr==='sap_done' || sr==='no_stock';
+  if(wr==='sent_sap') return sr==='sap_accepted';
+  return false;
+}
 function submitWarehouseResponse(lineId,val){
   var commentEl = document.getElementById('whr-comment');
   var whLine = sdData.find(function(x){return String(x.id)===String(lineId);});
   sdKeepScroll(whLine?whLine.report_id:null);
-  sbPatch('stock_differences','id=eq.'+lineId,{warehouse_response:val,warehouse_comment:commentEl?commentEl.value:''}).then(function(res){
+  var whData = {warehouse_response:val,warehouse_comment:commentEl?commentEl.value:''};
+  /* Смяна на отговора на склада не бива да оставя store_response от старата
+     посока - иначе никой няма бутон за приключване. Съвместимата двойка се
+     пази (Троян: sent -> return при sap_done). Приключени и "получено
+     междувременно" редове не се пипат. */
+  var resetSr = !!whLine && whLine.status!=='received' && !sdIsLateReceive(whLine) &&
+    !!whLine.store_response && !sdStoreResponseCompatible(val, whLine.store_response);
+  if(resetSr){ whData.store_response=null; whData.store_response_by=null; whData.store_response_at=null; whData.store_response_comment=null; }
+  sbPatch('stock_differences','id=eq.'+lineId,whData).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    if(whLine){
+      whLine.warehouse_response=val; whLine.warehouse_comment=whData.warehouse_comment;
+      if(resetSr){ whLine.store_response=null; whLine.store_response_by=null; whLine.store_response_at=null; whLine.store_response_comment=null; }
+    }
     var el=document.getElementById('whr-ov'); if(el)el.remove();
     toast('✅ Отговорът е запазен!');
     /* И "Ще се изпрати" е отговор - магазинът научава и за него. */
@@ -1488,17 +1513,19 @@ function sdConfirmInterstore(lineId, as){
   var data = {status:'received',completed_by:by,completed_at:at};
   /* ✅ ПРИЕТО на магазина е и неговият отговор по реда. "Прието обратно" на
      склада НЕ пише store_response - там отговорът вече е sap_done. */
-  if(as==='store'){ data.store_response='accepted'; data.store_response_by=by; data.store_response_at=at; }
+  var asStore = (as==='store' || as==='store_sap');
+  if(asStore){ data.store_response=(as==='store_sap'?'sap_accepted':'accepted'); data.store_response_by=by; data.store_response_at=at; }
   sbPatch('stock_differences','id=eq.'+lineId,data).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     /* Локално ПРЕДИ проверката за останалите редове - точно както прави
        resolveDiffLine(). Иначе последният ред се брои по стария си статус и
        бланката никога не се затваря от самата себе си. */
     line.status='received'; line.completed_by=by; line.completed_at=at;
-    if(as==='store'){ line.store_response='accepted'; line.store_response_by=by; line.store_response_at=at; }
+    if(asStore){ line.store_response=data.store_response; line.store_response_by=by; line.store_response_at=at; }
     var cRep = diffReports.find(function(x){return x.id===line.report_id;}) || {};
-    if(as==='store') sdMarkDiffTask(line.store_name||cRep.store_name);
+    if(asStore) sdMarkDiffTask(line.store_name||cRep.store_name);
     if(as==='store') sdNotifyInterstore(cRep.counterpart, '✅ Разлика: прието в '+(cRep.store_name||''), line.material_name||'');
+    else if(as==='store_sap') sdNotifyInterstore(cRep.counterpart, '📄 Разлика: прието в SAP в '+(cRep.store_name||''), line.material_name||'');
     else if(as==='warehouse') sdNotifyInterstore(cRep.store_name, '📬 Разлика: прието обратно в '+(cRep.counterpart||''), line.material_name||'');
     var siblings = sdData.filter(function(x){return x.report_id===line.report_id;});
     var allReceived = siblings.length>0 && siblings.every(function(x){return x.status==='received';});
@@ -2967,7 +2994,7 @@ function sdCollectActions(){
     if(isNaN(t.getTime()) || t.getTime() < cut) return;
     out.push({at:at, ms:t.getTime(), repId:repId, who:who, what:what, red:!!red});
   };
-  var SR = {accepted:'✅ ПРИЕТО', sap_done:'📄 Пуснато в SAP', no_stock:'⛔ Няма наличност в логистика'};
+  var SR = {accepted:'✅ ПРИЕТО', sap_accepted:'📄 Прието в SAP', sap_done:'📄 Пуснато в SAP', no_stock:'⛔ Няма наличност в логистика'};
   sdData.forEach(function(l){
     var rp = repOf(l.report_id);
     if(!mineRep(rp)) return;
@@ -4590,7 +4617,7 @@ function sdUnreviewedCountFor(reports, lines, swaps){
     var repLines = (lines||[]).filter(function(l){ return l.report_id===r.id; });
     if(repLines.some(function(l){ return myMove[String(l.id)]; })) return true;
     return repLines.some(function(l){
-      return (l.warehouse_response==='sent' || l.warehouse_response==='return') &&
+      return (l.warehouse_response==='sent' || l.warehouse_response==='sent_sap' || l.warehouse_response==='return') &&
         !l.store_response && l.status!=='received';
     });
   }).length;

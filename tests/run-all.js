@@ -41,6 +41,7 @@ const TESTS = [
   'interstore-counterpart-select.test.js',
   'interstore-confirm-flow.test.js',
   'sd-store-response.test.js',
+  'sd-sent-sap.test.js',
   'sd-notify.test.js',
   'sd-swap-link.test.js',
   'sd-late-receive.test.js',
