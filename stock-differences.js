@@ -53,6 +53,12 @@ function canSubmitDiff() {
 function canReviewDiff() {
   return currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
 }
+/* „Липса" се изписва само от централния офис (Цвети, 30.09.2026): магазинът
+   не пипа нито статуса, нито кредитното. За „Заприхождаване" и „Връщане"
+   статусът си остава на магазина - там е негово задължение. */
+function sdStoreLockedMissing(line){
+  return !!line && line.type==='missing' && !canReviewDiff();
+}
 /* Подаване на бланка в посока "Сторна по грешен прием" от ЦЕНТРАЛНИЯ ОФИС - за
    всеки обект. Оперативните счетоводители по обекти са accounting профили с
    разпределение в users.assigned_stores (store_name им е "Централен офис"),
@@ -448,7 +454,7 @@ function renderStockDiff() {
          доставил артикула, трябва финансово да ни компенсира) */
       var creditCell = '—';
       if (r.type === 'missing') {
-        creditCell = canEdit
+        creditCell = (canEdit && !sdStoreLockedMissing(r))
           ? '<button data-id="'+r.id+'" onclick="sdToggleCreditNote(this.dataset.id)" style="border:none;border-radius:20px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;background:'+(r.credit_note_issued?'#f0fdf4':'#fef2f2')+';color:'+(r.credit_note_issued?'#16a34a':'#dc2626')+';">'+(r.credit_note_issued?'✅ Издадено':'❌ Няма')+'</button>'
           : (r.credit_note_issued?'<span style="color:#16a34a;">✅ Издадено</span>':'<span style="color:#dc2626;">❌ Няма</span>');
       }
@@ -493,7 +499,7 @@ function renderStockDiff() {
         h += '<button data-id="'+r.id+'" onclick="resolveDiffLine(this.dataset.id,\'return\')" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">↩️ Връщане</button>';
       }
       /* Приключен ред няма „✅ Върната" - един клик би го върнал в „Взета". */
-      if (canEdit && !isTaken && r.status !== 'received' && r.type !== 'not_invoiced' && !sdIsCompleted(r)) {
+      if (canEdit && !isTaken && r.status !== 'received' && r.type !== 'not_invoiced' && !sdIsCompleted(r) && !sdStoreLockedMissing(r)) {
         var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : r.type==='not_invoiced' ? '🧾 Приключена' : '✅ Приета';
         h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
       }
@@ -1479,6 +1485,7 @@ function setSDSearch(val){
 function sdToggleCreditNote(id){
   var line=sdData.find(function(x){return String(x.id)===String(id);});
   if(!line)return;
+  if(sdStoreLockedMissing(line)){ toast('Липсите се изписват от Цветелина','#dc2626'); return; }
   var newVal=!line.credit_note_issued;
   sbPatch('stock_differences','id=eq.'+id,{credit_note_issued:newVal}).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
@@ -1488,6 +1495,8 @@ function sdToggleCreditNote(id){
   });
 }
 function sdMarkTaken(id) {
+  var line=sdData.find(function(x){return String(x.id)===String(id);});
+  if (sdStoreLockedMissing(line)) { toast('Липсите се изписват от Цветелина','#dc2626'); return; }
   if (!confirm('Маркирай стоката като ВЗЕТА?')) return;
   sbPatch('stock_differences','id=eq.'+id,{status:'taken',completed_by:sdActor(),completed_at:new Date().toISOString()}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
@@ -1766,8 +1775,13 @@ function sdModalHtml() {
   var sdCanComplete = canCompleteSR();
   var sdCompletedLocked = isEdit && sdIsCompleted(r) && !sdCanComplete;
   var sdShowCompleted = (r.type==='return' && sdCanComplete) || sdIsCompleted(r);
+  var sdMissingLocked = isEdit && sdStoreLockedMissing(r);
+  /* Коментарът по реда: след решение магазинът само го чете (Цвети,
+     30.09.2026). При подаване на бланката той се пише от магазина - този път
+     е submitDiffReport и не минава оттук. */
+  var sdCommentLocked = isResolved && !canReview;
   h += '<label class="fl">Статус</label>'+
-    '<select class="fi" id="sd-status"'+((sdNoTypeYet||sdCompletedLocked)?' disabled':'')+'>'+
+    '<select class="fi" id="sd-status"'+((sdNoTypeYet||sdCompletedLocked||sdMissingLocked)?' disabled':'')+'>'+
     (sdNoTypeYet||sdStatusIsNew
       ? '<option value="new"'+(sdStatusIsNew?' selected':'')+'>🆕 ПОДАДЕНА, НЕПРЕГЛЕДАНА</option>'
       : '')+
@@ -1782,9 +1796,14 @@ function sdModalHtml() {
     (sdNoTypeYet
       ? '<div style="font-size:11px;color:#94a3b8;margin-top:-6px;margin-bottom:8px;">Статусът се отключва, след като бъде зададен тип на решение.</div>'
       : '')+
+    (sdMissingLocked && !sdCompletedLocked
+      ? '<div style="font-size:11px;color:#94a3b8;margin-top:-6px;margin-bottom:8px;">Липсите се изписват от Цветелина.</div>'
+      : '')+
 
     '<label class="fl">Коментар</label>'+
-    '<input class="fi" id="sd-comment" value="'+escVal(r.comment)+'" placeholder="напр. ЗАПРИХОДЕТЕ С РЕВИЗИЯ / ЧАКАМЕ">';
+    (sdCommentLocked
+      ? '<div class="fi" style="background:#f8fafc;color:#64748b;">'+esc(r.comment||'—')+'</div><input type="hidden" id="sd-comment" value="'+escVal(r.comment)+'">'
+      : '<input class="fi" id="sd-comment" value="'+escVal(r.comment)+'" placeholder="напр. ЗАПРИХОДЕТЕ С РЕВИЗИЯ / ЧАКАМЕ">');
 
   /* Снимките, качени от магазина към бланката - само за преглед. Показваме ги
      и тук, за да не се налага Цвети да търси бланката отделно, докато пише
@@ -2123,15 +2142,25 @@ function submitSD(sync) {
   /* „Приключена" (completed): само тип „Връщане" и само canCompleteSR().
      Заключен приключен ред (друг потребител) - статусът не се праща изобщо,
      както lockStatus в submitSR. */
-  if(origRecord && sdIsCompleted(origRecord) && !canCompleteSR()){
+  /* Магазин + решен ред: коментарът е само за четене, значи не се праща -
+     иначе записът би върнал стария текст върху по-нов. При „Липса" не се
+     праща и статусът (кредитното изобщо не минава през този модал). */
+  if(origRecord && origRecord.type && !canReviewDiff()){
+    delete data.comment;
+  }
+  if(sdStoreLockedMissing(origRecord)){
+    delete data.status;
+  } else if(origRecord && sdIsCompleted(origRecord) && !canCompleteSR()){
     delete data.status;
   } else if(data.status==='completed'){
     if(!canCompleteSR()){ toast('„Приключена" се задава само от Цвети/admin','#dc2626'); return; }
     if(data.type!=='return'){ toast('„Приключена" е само за тип „Връщане"','#dc2626'); return; }
   }
-  var isNowCompleted = data.status==='taken' || data.status==='capitalized' || data.status==='completed' ||
-                       (data.status===undefined && !!origRecord && sdIsCompleted(origRecord));
+  /* Неизпратен статус = състоянието не се мени, тоест изпълнителят остава.
+     Иначе запис на „Липса", ВЗЕТА от Цвети, би изтрил completed_by/at. */
   var wasCompleted = !!origRecord && (sdIsTaken(origRecord) || sdIsCompleted(origRecord));
+  var isNowCompleted = data.status==='taken' || data.status==='capitalized' || data.status==='completed' ||
+                       (data.status===undefined && wasCompleted);
   if(isNowCompleted && !wasCompleted){
     data.completed_by = sdActor();
     data.completed_at = new Date().toISOString();

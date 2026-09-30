@@ -53,6 +53,7 @@ const TESTS = [
   'sd-interstore-columns.test.js',
   'sd-wh-column.test.js',
   'sd-table-scroll.test.js',
+  'sd-store-missing-lock.test.js',
   'sd-swap-notify.test.js',
   'sd-actions-card.test.js',
   'interstore-swap-signal.test.js',
