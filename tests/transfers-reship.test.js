@@ -225,8 +225,13 @@ const newCargo = h => h.db.cargo.filter(c => c.prev_cargo_id);
     realClick(h.w, nb.querySelector('.trf-chain-prev a')); await ticks();
     ok('линкът отваря старата карта', h.w.tfCardId === 't1');
     const ob = $(h, '.trf-card-cargo[data-c="c1"]');
-    ok('старата карта: „↪ продължава в ' + newT.transfer_num + ' #1"', ob && new RegExp('продължава в ' + newT.transfer_num + ' #1').test(ob.querySelector('.trf-chain-next').textContent), ob && ob.textContent);
-    ok('и състоянието е „прехвърлен", не „чака"', ob && /прехвърлен в/.test(ob.querySelector('.trf-state').textContent) && !/чака прехвърляне/.test(ob.querySelector('.trf-state').textContent));
+    /* Един ред (тест на живо, 30.09.2026): състоянието „↪ прехвърлен в …"
+       е и линкът; отделен ред „продължава в …" в картата няма. */
+    ok('старата карта: състоянието е „↪ прехвърлен в ' + newT.transfer_num + ' #1" и е линк',
+      ob && new RegExp('прехвърлен в ' + newT.transfer_num + ' #1').test(ob.querySelector('.trf-state').textContent) &&
+      !!ob.querySelector('.trf-state a.trf-chain-next'), ob && ob.textContent);
+    ok('и НЯМА втори ред „продължава в …" в картата', ob && ob.textContent.indexOf('продължава в') < 0, ob && ob.textContent);
+    ok('и не пише „чака прехвърляне" в състоянието', ob && !/чака прехвърляне/.test(ob.querySelector('.trf-state').textContent));
     realClick(h.w, H.btn($(h, '#trf-card'), 'Печат')); await ticks(); await ticks();
     const pr = $(h, '#mod-print').textContent;
     ok('печатът на стария: „продължава в …"', new RegExp('продължава в ' + newT.transfer_num + ' #1').test(pr), pr.slice(0, 300));

@@ -221,7 +221,12 @@ function withoutSection(html, sec) {
     const html = h.w.buildWeeklyReportHtml(data);
     const sec = h.w.reportStornoShortHtml(data.cross);
     ok('новата секция е вътре точно веднъж', sec.length > 0 && html.split(sec).length === 2);
-    const rest = withoutSection(html, sec);
+    /* От 30.09.2026 (етап 4 на трансферите) отчетът има и секция
+       „🕒 Трансфери — застояли" — изрязва се и тя: този тест пази
+       ОСТАНАЛОТО около сторната, новата секция се пази в
+       transfers-stale.test.js. */
+    const ts = h.w.reportTransfersStaleHtml ? h.w.reportTransfersStaleHtml(data.cross) : '';
+    const rest = ts ? withoutSection(withoutSection(html, sec), ts) : withoutSection(html, sec);
     const before = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
     ok('фикстурата отпреди промяната я има', !!before);
     if (before && rest) {

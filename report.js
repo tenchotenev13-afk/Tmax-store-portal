@@ -1735,7 +1735,15 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        store_name се разминава с този на доклада. Затова обектът долу се
        взима от доклада — един котва за трите колони. */
     sbGet('stock_differences','select=report_id,store_name,status,warehouse_response,store_response'),
-    sbGet('app_settings','key=eq.diff_stale_days&select=key,value&limit=1')
+    sbGet('app_settings','key=eq.diff_stale_days&select=key,value&limit=1'),
+    /* 🕒 „Трансфери — застояли над N дни" (етап 4, 30.09.2026) — моментна
+       снимка, само в седмичния отчет (таб „Днес" няма седмица и не показва
+       трансфери). Без филтър по дата: застоял товар от преди месец тежи
+       повече, не по-малко. r[15]–r[18]. */
+    W.toISO ? sbGet('transfers','select=id,transfer_num,from_store,mode,depart_date,created_at') : Promise.resolve([]),
+    W.toISO ? sbGet('transfer_cargo','select=id,transfer_id,position,kind,qty,recipient_store,transfer_points,prev_cargo_id') : Promise.resolve([]),
+    W.toISO ? sbGet('transfer_cargo_events','select=id,cargo_id,transfer_id,store_name,event,resolves_id,created_at') : Promise.resolve([]),
+    W.toISO ? sbGet('app_settings','key=eq.transfer_stale_days&select=key,value&limit=1') : Promise.resolve([])
   ]).then(function(r){
     /* Всеки набор минава през ЕДИН предикат. Отделни филтри на отделни места
        се разминават — точно това правеше сторната по грешен прием да се брои
@@ -2092,11 +2100,42 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     });
     var diffStale = { days: diffStaleDays, byStore: dsList, total: dsTotal };
 
+    /* 🕒 ТРАНСФЕРИ — ЗАСТОЯЛИ. Правилото е reportTransferStale() — същото
+       като в портала (tfIsStale в transfers.js). Мери се по последното звено
+       (товар без наследник); обектът е там, където е товарът сега. */
+    var transfersStale = null;
+    if (W.toISO) {
+      var tsDays = reportTransferStaleDays(r[18]);
+      var tsT = {}, tsSucc = {}, tsEv = {};
+      (Array.isArray(r[15]) ? r[15] : []).forEach(function(t){ if (t && t.id) tsT[t.id] = t; });
+      var tsCargo = Array.isArray(r[16]) ? r[16] : [];
+      tsCargo.forEach(function(c){ if (c && c.prev_cargo_id) tsSucc[c.prev_cargo_id] = 1; });
+      (Array.isArray(r[17]) ? r[17] : []).forEach(function(e){
+        if (e && e.cargo_id) (tsEv[e.cargo_id] = tsEv[e.cargo_id] || []).push(e);
+      });
+      var tsMap = {}, tsList = [], tsTotal = 0;
+      tsCargo.forEach(function(c){
+        var t = c && tsT[c.transfer_id];
+        var st = reportTransferStale(t, c, tsEv[c.id], !!tsSucc[c.id], tsDays, refD);
+        if (!st || !inScope(st.store)) return;
+        var g = tsMap[st.store];
+        if (!g) { g = { store: st.store, oldest: 0, items: [] }; tsMap[st.store] = g; tsList.push(g); }
+        g.items.push({ num: t.transfer_num || '—', position: c.position, kind: c.kind, qty: c.qty,
+                       recipient: c.recipient_store, reason: st.reason, age: st.age });
+        if (st.age > g.oldest) g.oldest = st.age;
+        tsTotal++;
+      });
+      tsList.forEach(function(g){ g.items.sort(function(a,b){ return b.age - a.age || String(a.num).localeCompare(String(b.num)); }); });
+      tsList.sort(function(a,b){ return b.oldest - a.oldest || String(a.store).localeCompare(String(b.store)); });
+      transfersStale = { days: tsDays, byStore: tsList, total: tsTotal };
+    }
+
     cb({
       diffs: diffs, wrongReceipt: wrongReceipt,
       returns: ret, storno: stornoSummary, stornoShort: stornoShort, zoborot: zoborotSummary,
       returnsList: returnsList, returnsStaleDays: returnsStaleDays,
       diffStale: diffStale,
+      transfersStale: transfersStale,
       lateOrders: lateOrders, lateOrdersByStore: lateOrdersByStore,
       lateTransport: lateTransport,
       transitStale: transitStale, transitByStore: transitByStore,
@@ -2558,6 +2597,100 @@ function reportChecklistSectionHtml(cross){
    цялата верига. Само списъкът с невзетата стока го ползва — виж
    reportReturnsListHtml. Липсващ аргумент значи пълен отчет, тоест
    таб „Днес" и старите извиквания не се променят. */
+/* ═══ ТРАНСФЕРИ — ЗАСТОЯЛ ТОВАР (етап 4, 30.09.2026) ═══════════════════
+   ЕДНО правило за портала (transfers.js → tfIsStale) и за седмичния отчет.
+   Мери се по ПОСЛЕДНОТО звено на веригата — товар без наследник
+   (prev_cargo_id); при наследник старият ред не се пита.
+     проблем          — отворен „Проблем" (без „Решен"), от най-стария;
+     чака прехвърляне — „Разтоварен" в първата точка, без наследник;
+     в път            — без крайна отметка; начало = „Предаден на куриер",
+                        иначе depart_date, иначе created_at на транспорта.
+   Приключен (получен) товар не е застоял, дори с отворен проблем.
+   Дни — цели, между локални полунощи (като diffStale); застоял = СТРОГО
+   над прага. При няколко състояния печели първото в горния ред. */
+function reportTransferAge(ts, refD){
+  if (!ts) return null;
+  var s = String(ts);
+  var d = /^\d{4}-\d{2}-\d{2}$/.test(s) ? new Date(s + 'T00:00:00') : new Date(s);
+  if (isNaN(d.getTime())) return null;
+  var mid = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  return Math.max(0, Math.round((refD - mid) / 86400000));
+}
+/* Отворените състояния на товара, без праг: [{reason, since, store, age}]. */
+function reportTransferOpenStates(t, c, evs, hasSucc, refD){
+  if (!t || !c || hasSucc) return [];
+  var mine = (evs || []).filter(function(e){ return e && e.cargo_id === c.id; });
+  var pts = c.transfer_points || [];
+  var tgStore = pts.length ? pts[0] : c.recipient_store;
+  var tgEv = pts.length ? 'unloaded' : 'received';
+  var fin = null;
+  mine.forEach(function(e){ if (e.event === tgEv && e.store_name === tgStore) fin = e; });
+  if (fin && tgEv === 'received') return [];
+  var out = [], closed = {};
+  mine.forEach(function(e){ if (e.event === 'resolved' && e.resolves_id) closed[e.resolves_id] = 1; });
+  var probs = mine.filter(function(e){ return e.event === 'problem' && !closed[e.id]; })
+    .sort(function(a,b){ return String(a.created_at).localeCompare(String(b.created_at)); });
+  if (probs.length) out.push({ reason: 'problem', since: probs[0].created_at, store: probs[0].store_name });
+  if (fin) {
+    out.push({ reason: 'reship', since: fin.created_at, store: fin.store_name });
+  } else {
+    var handed = null;
+    mine.forEach(function(e){ if (e.event === 'handed_to_courier') handed = e; });
+    out.push({ reason: 'transit', since: handed ? handed.created_at : (t.depart_date || t.created_at), store: tgStore });
+  }
+  out.forEach(function(x){ x.age = reportTransferAge(x.since, refD); });
+  return out;
+}
+/* Застоял ли е: първото отворено състояние СТРОГО над прага, иначе null. */
+function reportTransferStale(t, c, evs, hasSucc, days, refD){
+  var st = reportTransferOpenStates(t, c, evs, hasSucc, refD);
+  for (var i = 0; i < st.length; i++) if (st[i].age !== null && st[i].age > days) return st[i];
+  return null;
+}
+/* Прагът — app_settings 'transfer_stale_days'; липсва / невалиден → 7. */
+function reportTransferStaleDays(rows){
+  var v = 7;
+  (Array.isArray(rows) ? rows : []).forEach(function(s){
+    if (!s || s.key !== 'transfer_stale_days') return;
+    var n = Number(String(s.value == null ? '' : s.value).trim().replace(',', '.'));
+    if (isFinite(n) && n > 0) v = n;
+  });
+  return v;
+}
+function reportTransfersStaleHtml(cross){
+  var ts = cross && cross.transfersStale;
+  if (!ts) return '';
+  var thr = esc(String(ts.days));
+  var title = '🕒 Трансфери — застояли над ' + thr + ' дни';
+  if (!ts.total) {
+    return '<div style="margin-top:12px;font-size:12px;color:#94a3b8;">' + title + ' · Няма застояли товари</div>';
+  }
+  var KIND = { pallet: 'Палет', roll: 'Руло', bulk: 'Насип', carton: 'Кашон' };
+  var WHY = { transit: 'в път', reship: 'чака прехвърляне', problem: 'проблем' };
+  var TH = 'padding:6px 8px;font-size:10px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.3px;background:#F9FAFC;border-bottom:1px solid #e2e8f0;';
+  var TD = 'padding:6px 8px;font-size:12px;border-bottom:1px solid #eef1f6;vertical-align:top;';
+  var rows = ts.byStore.map(function(g){
+    return g.items.map(function(it, k){
+      return '<tr>' +
+        (k === 0 ? '<td rowspan="' + g.items.length + '" style="' + TD + '">' + reportStoreLinkHtml(g.store, '#1E2761') + '</td>' : '') +
+        '<td style="' + TD + 'white-space:nowrap;">' + esc(it.num + ' #' + (it.position || '?')) + '</td>' +
+        '<td style="' + TD + '">' + esc((KIND[it.kind] || it.kind || '') + (it.qty > 1 ? ' ×' + it.qty : '')) + '</td>' +
+        '<td style="' + TD + '">' + esc(it.recipient) + '</td>' +
+        '<td style="' + TD + '">' + esc(WHY[it.reason] || it.reason) + '</td>' +
+        '<td style="' + TD + 'text-align:right;font-weight:700;color:#C0392B;">' + it.age + '</td></tr>';
+    }).join('');
+  }).join('');
+  return '<div style="margin-top:12px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:6px;">' + title + ' (' + ts.total + ')</div>' +
+    '<div style="background:#FFFFFF;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">' +
+    '<table role="presentation" style="width:100%;border-collapse:collapse;">' +
+    '<tr><th style="' + TH + 'text-align:left;">Обект</th><th style="' + TH + 'text-align:left;">Транспорт</th><th style="' + TH + 'text-align:left;">Товар</th>' +
+    '<th style="' + TH + 'text-align:left;">Получател</th><th style="' + TH + 'text-align:left;">Причина</th><th style="' + TH + 'text-align:right;">Дни</th></tr>' +
+    rows + '</table></div>' +
+    '<div style="margin-top:4px;font-size:11px;color:#94a3b8;">Праг: ' + thr + ' дни (app_settings.transfer_stale_days). Обектът е там, където е товарът сега; „в път" — следващият по пътя му.</div>' +
+    '</div>';
+}
+
 function buildCrossModuleSectionHtml(cross, scoped){
   if (!cross) return '';
   var h = '<div style="margin-top:18px;padding-top:14px;border-top:2px solid #eef1f6;">';
@@ -2603,6 +2736,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
   h += crossModuleRow('🚚','Стока на път',
     crossMetricCard(cross.transitStale,'застояли (>7 дни по документ)', cross.transitStale>0));
   h += reportTransitListHtml(cross, scoped);
+  h += reportTransfersStaleHtml(cross);
 
   h += crossModuleRow('📦','Палети',
     crossMetricCard(cross.pallets.missing,'обекта без данни', cross.pallets.missing>0) +

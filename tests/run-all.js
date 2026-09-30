@@ -233,6 +233,7 @@ const TESTS = [
   'transfers-confirm.test.js',
   'transfers-reload-search.test.js',
   'transfers-reship.test.js',
+  'transfers-stale.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',

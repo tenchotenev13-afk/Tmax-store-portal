@@ -95,6 +95,11 @@ const SHARED_FNS = [
   /* „Необработени разлики над N дни" (v41) — моментната снимка в седмичния
      отчет. Разминае ли се копието, писмото от крона брои друго от портала. */
   'reportDiffStaleHtml',
+  /* 🕒 „Трансфери — застояли над N дни" (v46) — правилото е едно и за
+     портала (transfers.js го вика от report.js). Разминае ли се копието,
+     писмото брои застояли по друго правило от екрана. */
+  'reportTransferAge', 'reportTransferOpenStates', 'reportTransferStale',
+  'reportTransferStaleDays', 'reportTransfersStaleHtml',
   'reportChecklistCellValue', 'reportChecklistSectionHtml',
   'reportTransitListHtml', 'reportWarehousePendingHtml',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',
