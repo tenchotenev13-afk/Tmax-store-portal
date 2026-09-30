@@ -498,9 +498,38 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
   {
     const h = await view();
     await submit(h, '-100.00', '-60.00', '-40.00', '25');
-    ok('отрицателни суми → НЕ тръгва POST', posts(h).length === 0);
-    ok('казва, че сумите не може да са под нула',
-      h.calls.toast.some(t => /не по-малки от нула/.test(t)));
+    ok('отрицателен общ оборот и брой → НЕ тръгва POST', posts(h).length === 0);
+    ok('казва, че общият оборот и бройката не може да са под нула',
+      h.calls.toast.some(t => /Общият оборот и сумата в брой/.test(t)));
+  }
+  {
+    const h = await view();
+    await submit(h, '-100.00', '60.00', '40.00', '25');
+    ok('отрицателен общ оборот (сам) → НЕ тръгва POST', posts(h).length === 0);
+  }
+  {
+    const h = await view();
+    await submit(h, '100.00', '-60.00', '160.00', '25');
+    ok('отрицателна сума в брой (сама) → НЕ тръгва POST', posts(h).length === 0);
+  }
+  {
+    /* Сторно по карта, по-голямо от продажбите по карта: картата е под нула.
+       1000 = 1805.99 (брой) + (−805.99) (карта) — сметка, която се връзва. */
+    const h = await view();
+    await submit(h, '1000.00', '1805.99', '-805.99', '25');
+    if (ok('отрицателна карта (−805.99), сметката се връзва → тръгва POST', posts(h).length === 1,
+      JSON.stringify(h.calls.toast))) {
+      const b = posts(h)[0].body;
+      ok('card_turnover е −805.99 (число)', b.card_turnover === -805.99, String(b.card_turnover));
+      ok('total_turnover остава 1000', b.total_turnover === 1000);
+    }
+  }
+  {
+    /* Граница: отрицателната карта не заобикаля проверката за разминаване. */
+    const h = await view();
+    await submit(h, '1000.00', '1805.99', '-700.00', '25');
+    ok('отрицателна карта, но разминаване 105.99 (над 100) → пак БЛОКИРА', posts(h).length === 0);
+    ok('казва за разминаването', h.calls.toast.some(t => /Разминаването е/.test(t)));
   }
   {
     const h = await view();
@@ -722,8 +751,28 @@ const RED = /#dc2626|rgb\(220,\s*38,\s*38\)/;
     h.doc.getElementById('dt-bank').value = '-5';
     realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши');
     await ticks();
-    ok('отрицателна банка → НЕ тръгва POST', posts(h).length === 0);
-    ok('казва защо', h.calls.toast.some(t => /не по-малки от нула/.test(t)));
+    /* 100−60−40−(−5)=5: над 1, под прага 10 → минава с предупреждение. */
+    ok('отрицателна банка (−5), разминаване 5 ≤ 10 → тръгва POST', posts(h).length === 1, JSON.stringify(h.calls.toast));
+    ok('с предупреждение за разминаването', h.calls.toast.some(t => /не се връзват/.test(t)));
+  }
+  {
+    /* 100 = 60 + 45 + (−5): връзва се. Отрицателната банка минава. */
+    const h = await view();
+    fill(h.doc, '100.00', '60.00', '45.00', '25');
+    h.doc.getElementById('dt-bank').value = '-5';
+    realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши');
+    await ticks();
+    if (ok('отрицателна банка (−5), сметката се връзва → тръгва POST', posts(h).length === 1,
+      JSON.stringify(h.calls.toast))) {
+      ok('bank_turnover е −5 (число)', posts(h)[0].body.bank_turnover === -5);
+    }
+  }
+  {
+    const h = await view();
+    ok('полето „С карта" няма min="0"', !h.doc.getElementById('dt-card').hasAttribute('min'));
+    ok('полето „По банка" няма min="0"', !h.doc.getElementById('dt-bank').hasAttribute('min'));
+    ok('„Общ оборот" пази min="0"', h.doc.getElementById('dt-total').getAttribute('min') === '0');
+    ok('„В брой" пази min="0"', h.doc.getElementById('dt-cash').getAttribute('min') === '0');
   }
 
   section('13г. Колоната „Банка" се показва само когато има какво');

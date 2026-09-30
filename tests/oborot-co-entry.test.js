@@ -399,6 +399,89 @@ function toastColor(h) {
     await ticks(); await ticks();
     ok('отрицателен брой клиенти → блокира и при корекция', dtPatches(h4).length === 0);
   }
+
+  section('6б. Отрицателна карта/банка (сторно) — ЦО въвеждане и корекция');
+  {
+    /* Въвеждане от ЦО: 1000 = 1805.99 + (−805.99) + 0. */
+    const h = await coView({ rows: [], date: dayOffset(-1), store: 'Дупница' });
+    ok('„С карта" в ЦО формата няма min', !h.doc.getElementById('dtco-card').hasAttribute('min'));
+    ok('„По банка" в ЦО формата няма min', !h.doc.getElementById('dtco-bank').hasAttribute('min'));
+    fillCO(h.doc, '1000.00', '1805.99', '-805.99', '50');
+    realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши оборота');
+    await ticks();
+    const p = dtPosts(h);
+    if (ok('ЦО: карта −805.99 при връзваща сметка → POST', p.length === 1, JSON.stringify(h.calls.toast))) {
+      ok('ЦО: card_turnover = −805.99', p[0].body.card_turnover === -805.99);
+    }
+  }
+  {
+    /* ЦО, отрицателна банка: 100 = 60 + 45 + (−5). */
+    const h = await coView({ rows: [], date: dayOffset(-1), store: 'Дупница' });
+    fillCO(h.doc, '100.00', '60.00', '45.00', '10', '', '-5');
+    realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши оборота');
+    await ticks();
+    const p = dtPosts(h);
+    if (ok('ЦО: банка −5 при връзваща сметка → POST', p.length === 1, JSON.stringify(h.calls.toast))) {
+      ok('ЦО: bank_turnover = −5', p[0].body.bank_turnover === -5);
+    }
+  }
+  {
+    /* ЦО: общият оборот под нула пак се отказва. */
+    const h = await coView({ rows: [], date: dayOffset(-1), store: 'Дупница' });
+    fillCO(h.doc, '-100.00', '60.00', '40.00', '10');
+    realClick(h.w, btn(h.doc, 'Запиши оборота'), 'Запиши оборота');
+    await ticks();
+    ok('ЦО: отрицателен общ оборот → НЕ тръгва POST', dtPosts(h).length === 0);
+  }
+  {
+    /* Корекция: модалът зарежда отрицателната карта и я записва. */
+    const day = dayOffset(-1);
+    const row = rec({
+      id: 'dt-neg', date: day, total_turnover: 1000, cash_turnover: 1805.99,
+      card_turnover: -805.99, bank_turnover: 0, customers: 50
+    });
+    const h = await coView({ rows: [row], date: day });
+    ok('справката показва минус пред картата', /-805\.99 EUR/.test(h.doc.getElementById('dt-co-table').textContent));
+    realClick(h.w, h.doc.querySelector('#dt-co-table button.dt-edit'), '✏️');
+    await ticks();
+    ok('корекция: „С карта" няма min', !h.doc.getElementById('dt-ed-card').hasAttribute('min'));
+    ok('корекция: „По банка" няма min', !h.doc.getElementById('dt-ed-bank').hasAttribute('min'));
+    ok('модалът зарежда −805.99', h.doc.getElementById('dt-ed-card').value === '-805.99', h.doc.getElementById('dt-ed-card').value);
+    fillEdit(h.doc, { 'dt-ed-total': '1100', 'dt-ed-cash': '2005.99', 'dt-ed-card': '-905.99', 'dt-ed-bank': '0' });
+    realClick(h.w, btn(h.doc, 'Запиши корекцията'), 'Запиши корекцията');
+    await ticks(); await ticks();
+    const pt = dtPatches(h);
+    if (ok('корекция: отрицателна карта → PATCH', pt.length === 1, JSON.stringify(h.calls.toast))) {
+      ok('корекция: card_turnover = −905.99', pt[0].body.card_turnover === -905.99);
+    }
+  }
+  {
+    /* Корекция: банката става отрицателна. 100 = 60 + 45 + (−5). */
+    const day = dayOffset(-1);
+    const row = rec({ id: 'dt-neg2', date: day, total_turnover: 100, cash_turnover: 60, card_turnover: 40, bank_turnover: 0, customers: 10 });
+    const h = await coView({ rows: [row], date: day });
+    realClick(h.w, h.doc.querySelector('#dt-co-table button.dt-edit'), '✏️');
+    await ticks();
+    fillEdit(h.doc, { 'dt-ed-card': '45', 'dt-ed-bank': '-5' });
+    realClick(h.w, btn(h.doc, 'Запиши корекцията'), 'Запиши корекцията');
+    await ticks(); await ticks();
+    const pt = dtPatches(h);
+    if (ok('корекция: отрицателна банка → PATCH', pt.length === 1, JSON.stringify(h.calls.toast))) {
+      ok('корекция: bank_turnover = −5', pt[0].body.bank_turnover === -5);
+      ok('следата показва „по банка 0.00 EUR → -5.00 EUR"',
+        /по банка 0\.00 EUR → -5\.00 EUR/.test(pt[0].body.note || ''), pt[0].body.note);
+    }
+  }
+  {
+    /* Колоната „Банка" и сборът не се губят при отрицателна стойност. */
+    const day = dayOffset(-1);
+    const h = await coView({ rows: [
+      rec({ id: 'n1', store_name: 'Дупница', date: day, total_turnover: 100, cash_turnover: 105, card_turnover: 0, bank_turnover: -5, customers: 5 })
+    ], date: day });
+    const txt = h.doc.getElementById('dt-co-table').textContent;
+    ok('колоната „Банка" се показва при отрицателна банка', /Банка/.test(txt));
+    ok('и с минус в реда и в общия сбор', (txt.match(/-5\.00 EUR/g) || []).length >= 2, txt);
+  }
   {
     /* Едно и също правило, дословно: dtValidate() е ЕДНА функция. */
     const h = await coView({ rows: [], date: dayOffset(-1) });

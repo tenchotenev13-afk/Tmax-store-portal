@@ -86,14 +86,14 @@ function dtTime(ts){
    Същият подход като в имейла. */
 function dtBankOf(r){ return parseFloat(r&&r.bank_turnover)||0; }
 function dtAnyBank(list){
-  for(var i=0;i<(list||[]).length;i++){ if(dtBankOf(list[i])>0) return true; }
+  for(var i=0;i<(list||[]).length;i++){ if(dtBankOf(list[i])!==0) return true; }
   return false;
 }
 /* Нула се показва като тире, не като 0.00 — за да личи, че няма банка,
    а не че е въведена нула. */
 function dtBankCell(r){
   var b=dtBankOf(r);
-  return b>0?dtMoney(b):'—';
+  return b!==0?dtMoney(b):'—';
 }
 /* Разминаване между общия оборот и сбора по начини на плащане. Законно е —
    клиент плаща по банка, а касиерът маркира „в брой" — затова не блокира
@@ -197,8 +197,11 @@ function dtWho(){
    Прагът е този от 26.08.2026: блокира се разминаване над
    greatest(1, total*0.1). Виж дългия коментар в submitOborot(). */
 function dtValidate(total,cash,card,bank,cust){
-  if(isNaN(total)||isNaN(cash)||isNaN(card)||isNaN(bank)||total<0||cash<0||card<0||bank<0){
-    return {ok:false,error:'Сумите трябва да са числа, не по-малки от нула'};
+  /* Картата и банката МОГАТ да са отрицателни: сторно по карта/банков път,
+     по-голямо от продажбите по канала за деня. Общият оборот и бройката
+     остават >= 0. Същото е и в базата (daily-turnover-negative-schema.sql). */
+  if(isNaN(total)||isNaN(cash)||isNaN(card)||isNaN(bank)||total<0||cash<0){
+    return {ok:false,error:'Общият оборот и сумата в брой трябва да са числа, не по-малки от нула; картата и банката — числа'};
   }
   if(isNaN(cust)||cust<0||Math.floor(cust)!==cust){
     return {ok:false,error:'Броят клиенти трябва да е цяло число, не по-малко от нула'};
@@ -376,7 +379,7 @@ function dtTodayBlock(){
         dtRoRow('Общ оборот',dtMoney(o.total_turnover),true)+
         dtRoRow('В брой',dtMoney(o.cash_turnover))+
         dtRoRow('С карта',dtMoney(o.card_turnover))+
-        (dtBankOf(o)>0?dtRoRow('По банка',dtMoney(o.bank_turnover)):'')+
+        (dtBankOf(o)!==0?dtRoRow('По банка',dtMoney(o.bank_turnover)):'')+
         dtRoRow('Брой клиенти',String(parseInt(o.customers,10)||0))+
         dtRoRow('Среден чек',dtAvgCheck(o.total_turnover,o.customers))+
         (o.note?dtRoRow('Забележка',esc(o.note)):'')+
@@ -389,11 +392,11 @@ function dtTodayBlock(){
     '<table style="width:100%;font-size:13px;">'+
       dtInpRow('Общ оборот','dt-total','EUR')+
       dtInpRow('В брой','dt-cash','EUR')+
-      dtInpRow('С карта','dt-card','EUR')+
+      dtInpRow('С карта','dt-card','EUR',false,true)+
       /* Фирмени клиенти плащат и по банка. Сумата влиза в оборота за деня, в
          който е ПОЛУЧЕНА, не в деня на продажбата. Полето не е задължително —
          празно значи 0. */
-      dtInpRow('По банка','dt-bank','EUR')+
+      dtInpRow('По банка','dt-bank','EUR',false,true)+
       dtInpRow('Брой клиенти','dt-customers','',true)+
       '<tr><td style="padding:6px 4px;color:#64748b;">Забележка</td>'+
         '<td style="padding:6px 4px;">'+
@@ -426,11 +429,12 @@ function dtRoRow(label,val,strong){
       (strong?'font-weight:600;':'')+'">'+val+'</td></tr>';
 }
 
-function dtInpRow(label,id,suffix,isInt){
+/* allowNeg — без min="0": картата и банката могат да са отрицателни (сторно). */
+function dtInpRow(label,id,suffix,isInt,allowNeg){
   return '<tr style="border-bottom:1px solid #f1f5f9;">'+
     '<td style="padding:6px 4px;color:#64748b;width:40%;">'+label+'</td>'+
     '<td style="padding:6px 4px;">'+
-      '<input type="number" '+(isInt?'step="1"':'step="0.01"')+' min="0" id="'+id+'" '+
+      '<input type="number" '+(isInt?'step="1"':'step="0.01"')+(allowNeg?'':' min="0"')+' id="'+id+'" '+
       'style="width:100%;padding:7px 9px;border:1px solid #e2e8f0;border-radius:8px;'+
       'font-family:DM Mono,monospace;font-size:13px;text-align:right;">'+
     '</td>'+
@@ -536,7 +540,7 @@ function dtCOView(){
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+dtMoney(tTotal)+'</td>'+
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+dtMoney(tCash)+'</td>'+
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+dtMoney(tCard)+'</td>'+
-    (showBank?'<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+(tBank>0?dtMoney(tBank):'—')+'</td>':'')+
+    (showBank?'<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+(tBank!==0?dtMoney(tBank):'—')+'</td>':'')+
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+(tTotal>0?(tCard/tTotal*100).toFixed(1)+'%':'—')+'</td>'+
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+tCust+'</td>'+
     '<td style="text-align:right;padding:8px 4px;font-family:DM Mono,monospace;">'+dtAvgCheck(tTotal,tCust)+'</td>'+
@@ -630,7 +634,7 @@ function dtCOEntryBlock(byStore){
         dtRoRow('Общ оборот',dtMoney(existing.total_turnover),true)+
         dtRoRow('В брой',dtMoney(existing.cash_turnover))+
         dtRoRow('С карта',dtMoney(existing.card_turnover))+
-        (dtBankOf(existing)>0?dtRoRow('По банка',dtMoney(existing.bank_turnover)):'')+
+        (dtBankOf(existing)!==0?dtRoRow('По банка',dtMoney(existing.bank_turnover)):'')+
         dtRoRow('Брой клиенти',String(parseInt(existing.customers,10)||0))+
         (existing.note?dtRoRow('Забележка',esc(existing.note)):'')+
       '</table>'+
@@ -643,8 +647,8 @@ function dtCOEntryBlock(byStore){
     body='<table style="width:100%;font-size:13px;">'+
       dtInpRow('Общ оборот','dtco-total','EUR')+
       dtInpRow('В брой','dtco-cash','EUR')+
-      dtInpRow('С карта','dtco-card','EUR')+
-      dtInpRow('По банка','dtco-bank','EUR')+
+      dtInpRow('С карта','dtco-card','EUR',false,true)+
+      dtInpRow('По банка','dtco-bank','EUR',false,true)+
       dtInpRow('Брой клиенти','dtco-customers','',true)+
       '<tr><td style="padding:6px 4px;color:#64748b;">Забележка</td>'+
         '<td style="padding:6px 4px;">'+
@@ -932,8 +936,8 @@ function openOborotEdit(id){
     '<table style="width:100%;font-size:13px;">'+
       dtInpRow('Общ оборот','dt-ed-total','EUR')+
       dtInpRow('В брой','dt-ed-cash','EUR')+
-      dtInpRow('С карта','dt-ed-card','EUR')+
-      dtInpRow('По банка','dt-ed-bank','EUR')+
+      dtInpRow('С карта','dt-ed-card','EUR',false,true)+
+      dtInpRow('По банка','dt-ed-bank','EUR',false,true)+
       dtInpRow('Брой клиенти','dt-ed-customers','',true)+
       '<tr style="border-bottom:1px solid #f1f5f9;">'+
         '<td style="padding:6px 4px;color:#64748b;">Забележка</td>'+

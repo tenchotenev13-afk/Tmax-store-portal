@@ -195,7 +195,7 @@ function buildHtml(d: any, rows: any[], scopeLabel: string) {
   const total = s((r) => r.total), cash = s((r) => r.cash), card = s((r) => r.card),
         bank = s((r) => r.bank), cust = s((r) => r.customers);
 
-  const hasBank = filed.some((r) => r.bank > 0);
+  const hasBank = filed.some((r) => r.bank !== 0);
   const nCols = hasBank ? 8 : 7;
 
   const both = filed.filter((r) => r.prevTotal > 0);
@@ -214,7 +214,7 @@ function buildHtml(d: any, rows: any[], scopeLabel: string) {
       '</b> <span style="color:#9CA3AF;">' + Math.round(v / total * 100) + '%</span></span>';
     b += '<div style="text-align:center;font-size:12px;color:#6B7280;margin:6px 0 8px;line-height:1.9;">' +
       part('в брой', cash) + ' &nbsp;·&nbsp; ' + part('с карта', card) +
-      (bank > 0 ? ' &nbsp;·&nbsp; ' + part('по банка', bank) : '') +
+      (bank !== 0 ? ' &nbsp;·&nbsp; ' + part('по банка', bank) : '') +
       '</div>';
   }
 
@@ -273,7 +273,7 @@ function buildHtml(d: any, rows: any[], scopeLabel: string) {
       '<td align="right" style="padding:7px 8px;color:#1F2937;font-weight:700;">' + money(r.total) + '</td>' +
       '<td align="right" style="padding:7px 8px;color:#4B5563;">' + money(r.cash) + '</td>' +
       '<td align="right" style="padding:7px 8px;color:#4B5563;">' + money(r.card) + ' <span style="color:#9CA3AF;font-size:10px;">' + r.cardPct + '%</span></td>' +
-      (hasBank ? '<td align="right" style="padding:7px 8px;color:' + (r.bank > 0 ? '#1F2937;font-weight:700;' : '#C9CDD4;') + '">' + (r.bank > 0 ? money(r.bank) : '—') + '</td>' : '') +
+      (hasBank ? '<td align="right" style="padding:7px 8px;color:' + (r.bank !== 0 ? '#1F2937;font-weight:700;' : '#C9CDD4;') + '">' + (r.bank !== 0 ? money(r.bank) : '—') + '</td>' : '') +
       '<td align="right" style="padding:7px 8px;color:#4B5563;">' + r.customers + '</td>' +
       '<td align="right" style="padding:7px 8px;color:#4B5563;">' + money(r.avg) + '</td>' +
       '<td align="right" style="padding:7px 8px;">' + diffHtml(r.diff) + '</td></tr>';
