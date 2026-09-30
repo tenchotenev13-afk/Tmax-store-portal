@@ -148,7 +148,7 @@ async function excel(h) {
     const hw = env(WAREHOUSE, [line()], [REP_I], 'interstore');
     if (ok('картата е на екрана (складът)', !!card(hw, 'rep-i'))) {
       ok('складът: колоната е там', ths(hw, 'rep-i').indexOf(COL) >= 0, ths(hw, 'rep-i').join(' | '));
-      ok('складът: трите му бутона са там', whBtns(hw, 'rep-i').length === 3,
+      ok('складът: четирите му бутона са там', whBtns(hw, 'rep-i').length === 4,
         whBtns(hw, 'rep-i').map(b => b.textContent).join(' | '));
     }
     hw.close();

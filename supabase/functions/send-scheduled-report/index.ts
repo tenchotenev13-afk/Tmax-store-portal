@@ -2787,7 +2787,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       var noSr = (sr === null || sr === undefined || sr === '');
       if (noWr || wr === 'will_send' || (wr === 'return' && sr === 'sap_done')) {
         dsBucket(m.store, m.age).warehouse++;
-      } else if (((wr === 'sent' || wr === 'return') && noSr) || sr === 'no_stock') {
+      } else if (((wr === 'sent' || wr === 'sent_sap' || wr === 'return') && noSr) || sr === 'no_stock') {
         dsBucket(m.store, m.age).storeSide++;
       }
       /* Всичко друго (напр. обектът е приел) е разчистено и не се брои. */
