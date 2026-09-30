@@ -211,7 +211,8 @@ const settle = async () => { await ticks(); await ticks(); };
         ok('доставчик: colspan съвпада с броя th', String(ths) === td.getAttribute('colspan'),
           'th=' + ths + ' colspan=' + td.getAttribute('colspan'));
       }
-      ok('и е с ЕДНА колона повече от междускладовата', ths === 11, 'реално: ' + ths);
+      /* +3 (По стокова + двете на Цвети) − 1 („Отговор на склада" го няма при доставчик). */
+      ok('и е с ДВЕ колони повече от междускладовата', ths === 10, 'реално: ' + ths);
     }
     h.close();
   }

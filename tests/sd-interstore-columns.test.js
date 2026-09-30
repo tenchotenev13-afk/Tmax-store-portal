@@ -139,8 +139,8 @@ const correctBtns = (h, id) => Array.prototype.filter.call(card(h, id).querySele
     const r = dataRows(h, 'rep-s')[0];
     ok('доставчик: td = th', !!r && r.cells.length === ths(h, 'rep-s').length,
       'td=' + (r && r.cells.length) + ' th=' + ths(h, 'rep-s').length);
-    ok('доставчик: с 3 колони повече от междускладовата (По стокова + двете на Цвети)',
-      ths(h, 'rep-s').length === 11, 'реално: ' + ths(h, 'rep-s').length);
+    ok('доставчик: с 2 колони повече от междускладовата (+По стокова +двете на Цвети −Отговор на склада)',
+      ths(h, 'rep-s').length === 10, 'реално: ' + ths(h, 'rep-s').length);
     h.close();
   }
 
@@ -207,13 +207,14 @@ const correctBtns = (h, id) => Array.prototype.filter.call(card(h, id).querySele
   }
   {
     /* При доставчикова бланка бутонът си остава там, където беше — в клетката
-       на решението, тоест предпоследната. */
+       на решението — последната, откакто бланката към доставчик е без
+       „Отговор на склада". */
     const h = env(PETRICH, [line({ id: 'l-s', report_id: 'rep-s', store_name: 'Петрич', supplier: 'ТЕСИ ООД' })], [REP_S], 'supplier');
     const cb = correctBtns(h, 'rep-s');
     if (ok('доставчик: бутонът за корекция Е на екрана', cb.length === 1, 'реално: ' + cb.length)) {
       const row = dataRows(h, 'rep-s')[0];
-      ok('и стои в клетката на решението (предпоследната)',
-        cb[0].closest('td') === row.cells[row.cells.length - 2],
+      ok('и стои в клетката на решението (последната)',
+        cb[0].closest('td') === row.cells[row.cells.length - 1],
         cb[0].closest('td') && cb[0].closest('td').textContent);
     }
     h.close();

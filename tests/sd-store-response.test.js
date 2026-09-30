@@ -389,8 +389,9 @@ const OLD = '✅ Получено';
     const thsS = Array.prototype.map.call(cs.querySelectorAll('th'), x => x.textContent);
     ok('доставчик: двете колони са на място',
       thsS.indexOf('Коментар (Цвети)') >= 0 && thsS.indexOf('Решение (Цвети)') >= 0, thsS.join('|'));
-    ok('доставчик: "чака преглед" остава', rs.cells[rs.cells.length - 2].textContent.indexOf('чака преглед') >= 0,
-      rs.cells[rs.cells.length - 2].textContent);
+    /* Бланката към доставчик е без „Отговор на склада" — решението е последната клетка. */
+    ok('доставчик: "чака преглед" остава', rs.cells[rs.cells.length - 1].textContent.indexOf('чака преглед') >= 0,
+      rs.cells[rs.cells.length - 1].textContent);
   }
 
   section('10. Бадж на склада');

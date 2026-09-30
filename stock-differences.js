@@ -291,6 +291,7 @@ function renderStockDiff() {
   var canAdd  = canAddSD();
 
   var list = sdTableRows();
+  var showWh = sdWhColumnInTable(); /* „Отговор на склада" - само междускладов */
 
   var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса', not_invoiced:'🧾 Не са фактурирани' };
   var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626', not_invoiced:'#64748b' };
@@ -425,7 +426,7 @@ function renderStockDiff() {
     h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">';
     h += '<thead><tr style="background:#f8fafc;">';
-    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Поръчка за връщане','Дата потвърд.','Статус','Кредитно','Снимки','Коментар','Коментар Контролер','Отговор на склада',''].forEach(function(c){
+    ['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Поръчка за връщане','Дата потвърд.','Статус','Кредитно','Снимки','Коментар','Коментар Контролер'].concat(showWh?['Отговор на склада']:[]).concat(['']).forEach(function(c){
       h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
     });
     h += '</tr></thead><tbody>';
@@ -469,7 +470,7 @@ function renderStockDiff() {
         /* Под отговора на склада - отговорът на магазина. Само при зададен
            store_response: без него sdStoreResponseLabel казва "чака магазина",
            а тук стоят доставчикови и вече приключени редове. */
-        '<td style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+sdSwapSummary(r)+'</td>'+
+        (showWh ? '<td style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+sdSwapSummary(r)+'</td>' : '')+
         '<td style="padding:7px 10px;white-space:nowrap;">';
 
       /* status='received' е КРАЯТ на междускладовия поток. Такъв ред няма
@@ -548,11 +549,13 @@ function sdExcelTranslit(str){
    Номерата (SAP, поръчки, документ) - ТЕКСТ, иначе Excel яде водещите нули
    и показва 4,1E+09. Празна дата/стойност = празна клетка, не „—". */
 function sdExcelRows(list){
+  var xShowWh = sdWhColumnInTable(); /* както на екрана */
   var fd = function(v){ return v ? fmtDate(v) : ''; };
   var txt = function(v){ return (v===null||v===undefined) ? '' : String(v); };
   var aoa = [['Тип','Магазин','Доставчик','Материал','Наименование','Кол.','Поръчка','Поръчка за връщане',
-              'Дата потвърд.','Статус','Кредитно','Коментар','Коментар контролер','Отговор на склада',
-              'Дата на подаване','Документ №','Дата на документ']];
+              'Дата потвърд.','Статус','Кредитно','Коментар','Коментар контролер']
+             .concat(xShowWh?['Отговор на склада']:[])
+             .concat(['Дата на подаване','Документ №','Дата на документ'])];
   list.forEach(function(r){
     var rep = diffReports.find(function(x){ return x.id===r.report_id; }) || {};
     var q = parseFloat(r.quantity);
@@ -570,12 +573,12 @@ function sdExcelRows(list){
          „⏳ НЕВЗЕТА" → „НЕВЗЕТА". Реже всичко до първата буква. */
       sdHtmlText(sdRowStatusBadge(r)).replace(/^[^A-Za-z\u0400-\u04FF]+/,''),
       r.type==='missing' ? (r.credit_note_issued ? 'Издадено' : 'Няма') : '',
-      txt(r.comment), txt(r.resolution_comment),
-      wh.join(' · '),
+      txt(r.comment), txt(r.resolution_comment)
+    ].concat(xShowWh?[wh.join(' · ')]:[]).concat([
       rep.created_at ? fmtDate(localDateISO(new Date(rep.created_at))) : '',
       txt(rep.document_number),
       fd(rep.doc_date)
-    ]);
+    ]));
   });
   return aoa;
 }
@@ -606,6 +609,21 @@ function exportSDExcel(){
    sdModalHtml). Всяко място, което пита "приключен ли е редът", минава оттук -
    баджът, броячите и филтърът. Докато баджът я четеше, а броячът не, редът се
    показваше като ЗАПРИХОДЕНА, но не влизаше в нито едно число. */
+/* „Отговор на склада" има смисъл само при междускладов поток - бутоните в
+   нея ги вижда логистичният склад, когато бланката е към него (isMyWarehouse).
+   При доставчик и сторна склад няма и там вечно стоеше „чака склада"
+   (30.09.2026). Долната таблица и Excel: само в подтаб „Междускладови" -
+   логистичният склад, който няма подтабове, я вижда както досега. */
+function sdWhColumnInTable(){ return !sdDirTabsActive() || sdDirTab==='interstore'; }
+/* Картата на бланката: междускладова - винаги; иначе само ако поне един ред
+   НОСИ данни за склада (отговор, отговор на магазина, размяна), за да не
+   изчезнат реални данни. Към 30.09.2026 такива редове при доставчик няма. */
+function sdWhColumnInCard(rep, lines){
+  if(rep && rep.direction==='interstore') return true;
+  return (lines||[]).some(function(l){
+    return !!l.warehouse_response || !!l.store_response || sdSwapsForLine(l).length>0;
+  });
+}
 function sdIsTaken(r){ return r.status==='taken' || r.status==='capitalized'; }
 /* „Приключена" (status='completed', точка 2 от Цвети, 29.09.2026) - трето
    състояние САМО за тип „Връщане", по модела на „За връщане": задава го само
@@ -3128,12 +3146,13 @@ function renderDiffReportsSection(){
          Скриват се по същия начин, по който „По стокова" се показва само за
          доставчикова бланка. */
       var repShowResolve=rep.direction!=='interstore';
+      var repShowWh=sdWhColumnInCard(rep, lines);
       h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
       var headRow='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">'+repQty.docShort+'</th>'+
         (repIsSupplier?'<th style="padding:3px 6px;text-align:right;">По стокова</th>':'')+
         '<th style="padding:3px 6px;text-align:right;">'+repQty.realShort+'</th><th style="padding:3px 6px;">Коментар (магазин)</th><th style="padding:3px 6px;">Снимки</th>'+
         (repShowResolve?'<th style="padding:3px 6px;">Коментар (Цвети)</th><th style="padding:3px 6px;">Решение (Цвети)</th>':'')+
-        '<th style="padding:3px 6px;">Отговор на склада</th></tr>';
+        (repShowWh?'<th style="padding:3px 6px;">Отговор на склада</th>':'')+'</tr>';
       h+=headRow;
       /* Приключените редове се свиват, за да изпъкне това, по което още се
          работи. ДВЕ условия, и второто е по-важното: бланка, в която ВСИЧКО е
@@ -3191,7 +3210,7 @@ function renderDiffReportsSection(){
           (canReviewDiff()&&!isLogisticsWarehouseUser()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
           correctBtn+
           '</td>':'')+
-          '<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+sdLateReceiveButton(l,rep)+sdSwapPanel(l)+'</td>'+
+          (repShowWh?'<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+sdLateReceiveButton(l,rep)+sdSwapPanel(l)+'</td>':'')+
         '</tr>';
       });
       h+='</table>';
