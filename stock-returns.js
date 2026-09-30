@@ -274,7 +274,7 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
   /* "Поръчка" е номерът на поръчката от изходната разлика (order_number) -
      различно поле от "ПВ-ЕВР" (purchase_order), което е от стария ERP износ.
      Само за показване: не се редактира от модала, попълва се автоматично. */
-  ['Продукт','SAP','Кол.','Поръчка','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Дата изтегляне','Изтеглена с','Коментар',''].forEach(function(c,ci,arr){
+  ['Продукт','SAP','Кол.','Поръчка','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Дата изтегляне','Изтеглена с','Потвърдена акт.','Коментар обект','Коментар',''].forEach(function(c,ci,arr){
     var last=(ci===arr.length-1);
     h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
   });
@@ -296,6 +296,9 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.withdrawal_date)+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;max-width:140px;color:#374151;">'+esc(r.courier_info||'')+'</td>'+
+      /* Същият ред като в „По рекламации": след „Изтеглена с", преди „Коментар". */
+      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+fmtDate(r.confirmed_date)+'</td>'+
+      '<td style="padding:7px 10px;font-size:11px;color:#0f766e;max-width:160px;">'+esc(r.store_comment||'')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;max-width:150px;">'+esc(r.reason||r.control_comment||r.controller_comment||'')+'</td>'+
       '<td style="padding:7px 10px;white-space:nowrap;position:sticky;right:0;background:#fff;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
   });
@@ -515,12 +518,10 @@ function srModalHtml() {
   h += '<label class="fl">Коментар Контролер</label>'+
     '<input class="fi" id="sr-ctrl" value="'+esc(r.controller_comment||'')+'" placeholder="напр. КЪМ ЛС ТЪРГОВИЩЕ / ИЗПРАЩАЙТЕ" oninput="updateSRPhotoHint()"'+srCmtRoAttr(tab)+'>';
 
-  /* „Коментар обект" - свободен текст от магазина (и Цвети/admin). Само в
-     „По рекламации", както и колоната. */
-  if (tab==='complaint') {
-    h += '<label class="fl">Коментар обект</label>'+
-      '<input class="fi" id="sr-store-cmt" value="'+esc(r.store_comment||'')+'" placeholder="свободен текст от обекта">';
-  }
+  /* „Коментар обект" - свободен текст от магазина (и Цвети/admin). И в двата
+     подтаба (от 30.09.2026 и в „По разлики" - импортът там пише колони G+H). */
+  h += '<label class="fl">Коментар обект</label>'+
+    '<input class="fi" id="sr-store-cmt" value="'+esc(r.store_comment||'')+'" placeholder="свободен текст от обекта">';
 
   h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
     '<button onclick="closeSRModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
@@ -1283,7 +1284,7 @@ function exportSRExcel(oneSheet){
       ['Дата: '+fmtDate(today())],
       [],
       ['Продукт','SAP','Кол.','Поръчка','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик',
-       'Дата докум.','Завод','Статус','Дата изтегляне','Изтеглена с','Коментар']
+       'Дата докум.','Завод','Статус','Дата изтегляне','Изтеглена с','Потвърдена акт.','Коментар обект','Коментар']
     ];
     list.forEach(function(r){
       aoa.push([
@@ -1291,13 +1292,13 @@ function exportSRExcel(oneSheet){
         r.order_number||'', r.purchase_order||'', r.id_euro||'',
         r.store_name||'', r.supplier||'', fd(r.doc_date), r.plant||'',
         ROW_STATUS[r.status]||r.status||'', fd(r.withdrawal_date),
-        r.courier_info||'',
+        r.courier_info||'', fd(r.confirmed_date), r.store_comment||'',
         /* Същият низ, който стои в колоната "Коментар" на екрана. */
         r.reason||r.control_comment||r.controller_comment||''
       ]);
     });
     cols=[{wch:34},{wch:10},{wch:7},{wch:14},{wch:14},{wch:12},{wch:16},{wch:22},
-          {wch:12},{wch:8},{wch:12},{wch:14},{wch:18},{wch:26}];
+          {wch:12},{wch:8},{wch:12},{wch:14},{wch:18},{wch:14},{wch:26},{wch:26}];
     sheets.push({name:'По разлики', aoa:aoa, cols:cols});
   } else {
     /* Главни букви - както ги пише ERP файлът. Импортът разпознава и трите
@@ -1488,6 +1489,8 @@ function submitSR() {
     data.id_euro = ieEl?ieEl.value:'';
     data.plant = plantEl?(plantEl.value||'5521'):'5521';
     data.doc_date = docdateEl?(docdateEl.value||null):null;
+    var storeCmtEl1=document.getElementById('sr-store-cmt');
+    if(storeCmtEl1) data.store_comment = storeCmtEl1.value.trim()||null;
     data.controller_comment = ctrlEl?ctrlEl.value:'';
     /* Само за ръчен ред. При ред от разлика не се праща изобщо - там номерът
        го пише submitSD. Решава записът (diff_line_id), не атрибутът readonly:

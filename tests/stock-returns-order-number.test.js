@@ -284,7 +284,8 @@ function cells(doc) {
           iQty >= 0 && iOrd === iQty + 1 && iPv === iOrd + 1,
           'Кол.=' + iQty + ' Поръчка=' + iOrd + ' ПВ-ЕВР=' + iPv);
         ok('„ПВ-ЕВР" не е изчезнала', iPv >= 0, hs.join(' | '));
-        ok('колоните станаха 15', hs.length === 15, 'брой: ' + hs.length);
+        /* 17 от 30.09.2026 — + „Потвърдена акт." и „Коментар обект" (sr-diff-tab-columns). */
+        ok('колоните станаха 17', hs.length === 17, 'брой: ' + hs.length);
 
         const cs = cells(doc);
         if (ok('първият ред има клетки', !!cs && cs.length === hs.length,
