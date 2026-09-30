@@ -362,9 +362,14 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
 - Anon ключът е публичен в клиента. RLS: 30 от 45 таблици с включено RLS,
   15 без. Повечето политики следват permissive `anon_all_*`
   (`for all using (true) with check (true)`).
-- `users` в момента е с **изключено RLS** и `anon` има пълни права върху нея.
-  Предстои затягане с колонни grant-ове — **не пипай преди Живко да е сменил
-  `select=*` в sync-mirror.ps1**, иначе огледалото спира.
+- `users` е с **изключено RLS**. `anon` и `authenticated` имат САМО колонен
+  SELECT върху 11 безопасни колони (от `20260824190214_users_column_grants`) —
+  без `password`, `password_hash`, `history_pin_hash`. От 30.09.2026
+  (`20260930075914_users_revoke_anon_writes`) нямат INSERT/UPDATE/DELETE
+  изобщо: всеки запис минава през едж функция със service_role (`admin-users`,
+  `auth-login`, `auth-set-password`, `set-history-pin`). Нова колона в
+  `users` → само `grant select (колона)`; запис от клиента — само през
+  `admin-users` (бял списък в `handler.ts`).
 - Не изключвай RLS „за да мине" — това е решение, което се записва в
   миграцията с едно изречение защо, не мълчалив заобикаляне.
 - При `SECURITY DEFINER` функция проверявай ACL-а за водещо `=X/` ПРЕДИ да

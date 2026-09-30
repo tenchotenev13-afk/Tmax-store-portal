@@ -327,7 +327,7 @@ Supabase advisor вика `policy_exists_rls_disabled` (ниво **ERROR**) за
 
 | Таблица | Политики | Покриват |
 |---|---|---|
-| `users` | `anon_select_users`, `anon_update_users` | само SELECT и UPDATE |
+| `users` | `anon_select_users`, `anon_update_users` | само SELECT и UPDATE (от 30.09.2026 `anon` няма и право UPDATE — `20260930075914` — тоест `anon_update_users` няма какво да пропусне; записите минават през `admin-users` със service_role) |
 | `stock_differences` | `anon_all_sd` | ALL (и четирите операции) |
 
 И трите политики са за роля `anon`, с `using true` (и `with check true` там,
