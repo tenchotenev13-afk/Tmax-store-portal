@@ -430,6 +430,8 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
        (tests/interstore-counterpart-select.test.js). */
     cp.value = 'ТЕСИ ООД';
     doc.getElementById('diff-docnum').value = 'ФК-0007777';
+    /* От 30.09.2026 „Поръчка №" (41…) е задължителна и при сторна. */
+    doc.getElementById('diff-order-num').value = '4100135756';
     doc.querySelector('#diff-items .di-name').value = 'ЩУЦЕР МЕТАЛЕН';
     doc.querySelector('#diff-items .di-qty').value = '10';
     doc.querySelector('#diff-items .di-qty-real').value = '12';

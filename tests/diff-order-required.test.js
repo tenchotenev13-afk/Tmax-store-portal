@@ -5,9 +5,10 @@
    stock_differences.order_number (42… — в return_order_number).
 
    ПРАВИЛО:
-     · полето е само при посока „Доставчик" (в контейнера diff-no-doc-wrap —
-       при другите посоки го няма в DOM-а);
-     · задължително, освен при „без документ";
+     · полето е при посока „Доставчик" и (от 30.09.2026) при „Сторна по
+       грешен прием" — в контейнера diff-no-doc-wrap; при междускладов го
+       няма в DOM-а. Сторната се покрива в tests/diff-order-wrong-receipt.test.js;
+     · задължително, освен при „без документ" (само при доставчик);
      · точно 10 цифри, започва с 41; интервалите отпред/отзад се махат;
        друго → червен toast и фокус, ПРЕДИ POST-а;
      · номерът отива в order_number на ВСЕКИ ред от бланката;
@@ -153,9 +154,11 @@ const lastToast = h => String(h.calls.toast[h.calls.toast.length - 1] || '');
     h.close(); h2.close();
   }
 
-  section('д) Междускладов и сторна → полето го няма и минават без поръчка');
+  section('д) Междускладов → полето го няма и минава без поръчка');
   {
-    for (const d of ['interstore', 'wrong_receipt']) {
+    /* Сторната беше тук до 30.09.2026 — вече иска поръчка (виж
+       tests/diff-order-wrong-receipt.test.js). */
+    for (const d of ['interstore']) {
       const h = env(d === 'wrong_receipt' ? CVETI : STORE);
       if (d === 'wrong_receipt') h.w.diffReports = [];
       await openForm(h, d);

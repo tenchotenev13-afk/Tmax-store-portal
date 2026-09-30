@@ -3731,18 +3731,31 @@ function updateDiffCounterpartLabel(){
      контейнерът се пренарисува, тоест отметката тръгва изключена, а надписът
      под "Снимки" вече е върнат от реда отгоре. */
   /* „Поръчка №" (41…, поръчката ОТ доставчика) живее в същия контейнер: има
-     смисъл само при посока доставчик, тоест при другите посоки полето
-     изобщо го няма. Задължителна е, освен при „без документ" (виж
-     submitDiffReport). Отива в stock_differences.order_number на всеки ред. */
+     смисъл при посока доставчик и при сторна по грешен прием (Цвети,
+     30.09.2026 - и тя тръгва от фактура на доставчик), при междускладов
+     полето изобщо го няма. Задължителна е, освен при „без документ" - а тази
+     отметка е само при доставчик (виж submitDiffReport). Отива в
+     stock_differences.order_number на всеки ред.
+     Въведеният номер се пази в data-order-num на контейнера: при смяна на
+     посоката той се пренарисува, а Доставчик ↔ Сторна ↔ Междускладов не бива
+     да губи вече написаното. Контейнерът е нов при всяко отваряне на модала,
+     значи и паметта. */
   var noDocWrap=document.getElementById('diff-no-doc-wrap');
   if(noDocWrap){
-    noDocWrap.innerHTML = dir==='supplier'
+    var oldOrderEl=document.getElementById('diff-order-num');
+    if(oldOrderEl) noDocWrap.setAttribute('data-order-num',oldOrderEl.value);
+    var withOrder = dir==='supplier' || dir==='wrong_receipt';
+    noDocWrap.innerHTML = (withOrder
       ? '<div style="margin-bottom:8px;"><label class="fl">Поръчка № * <span style="color:#94a3b8;font-weight:400;">(41…, не входяща доставка)</span></label>'+
-          '<input class="fi" id="diff-order-num" inputmode="numeric" placeholder="напр. 4100135756" style="max-width:220px;"></div>'+
-        '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:-2px 0 10px;cursor:pointer;">'+
+          '<input class="fi" id="diff-order-num" inputmode="numeric" placeholder="напр. 4100135756" style="max-width:220px;"></div>'
+      : '')+
+      (dir==='supplier'
+      ? '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;margin:-2px 0 10px;cursor:pointer;">'+
           '<input type="checkbox" id="diff-no-doc" onchange="var h=document.getElementById(\'diff-photo-hint\');if(h)h.textContent=this.checked?\'(без документ — по избор)\':diffPhotoHintText(\'supplier\');">'+
           ' 📄 Стоката е без документ (снимки не са задължителни)</label>'
-      : '';
+      : '');
+    var newOrderEl=document.getElementById('diff-order-num');
+    if(newOrderEl) newOrderEl.value=noDocWrap.getAttribute('data-order-num')||'';
   }
   /* Сторната по грешен прием също тръгва от фактура на ДОСТАВЧИК - списъкът е
      същият като при посока "Доставчик", не списъкът с обекти. */
@@ -3808,8 +3821,8 @@ function openDiffSubmitModal(prefill){
     }
     setVal('diff-counterpart',prefill.counterpart);
     setVal('diff-docnum',prefill.document_number);
-    /* Полето съществува само при посока доставчик - при другите setVal не
-       намира елемента и не прави нищо. */
+    /* Полето съществува само при доставчик и сторна - при междускладов setVal
+       не намира елемента и не прави нищо. */
     setVal('diff-order-num',prefill.order_number);
     setVal('diff-docdate',prefill.doc_date);
     setVal('diff-comment',prefill.comment);
@@ -3882,15 +3895,16 @@ function submitDiffReport(){
     qtyDocNum.el.focus();
     return;
   }
-  /* „Поръчка №" (41…): задължителна при посока доставчик без „без документ";
-     попълнена ли е — и навсякъде другаде трябва да е валидна. Спира ПРЕДИ
-     POST-а, както проверката за количеството по-горе: входящата доставка
-     (180…) иначе стига до базата като поръчка. При другите посоки полето го
-     няма в DOM-а, тоест orderNum е ''. */
+  /* „Поръчка №" (41…): задължителна при посока доставчик без „без документ"
+     и винаги при сторна по грешен прием (там отметка няма - сторната тръгва
+     от фактура); попълнена ли е — и навсякъде другаде трябва да е валидна.
+     Спира ПРЕДИ снимките и POST-а, както проверката за количеството по-горе:
+     входящата доставка (180…) иначе стига до базата като поръчка. При
+     междускладов полето го няма в DOM-а, тоест orderNum е ''. */
   var orderEl=document.getElementById('diff-order-num');
   var orderNum=orderEl?String(orderEl.value||'').trim():'';
   var noDocEarly=document.getElementById('diff-no-doc');
-  var orderRequired=direction==='supplier' && !(noDocEarly && noDocEarly.checked);
+  var orderRequired=(direction==='supplier' && !(noDocEarly && noDocEarly.checked)) || direction==='wrong_receipt';
   if((orderNum||orderRequired) && !diffOrderNumValid(orderNum)){
     toast('Поръчка №: впиши номер на поръчка 41…, не входяща доставка','#dc2626');
     if(orderEl) orderEl.focus();

@@ -130,6 +130,7 @@ const TESTS = [
   'diff-email-pending.test.js',
   'diff-return-order.test.js',
   'diff-order-required.test.js',
+  'diff-order-wrong-receipt.test.js',
   'diff-excel-export.test.js',
   'sr-excel-one-sheet-qty-label.test.js',
   'diff-return-completed.test.js',

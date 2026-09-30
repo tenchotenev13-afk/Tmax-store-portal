@@ -82,6 +82,9 @@ async function fillAndSubmit(h, over) {
   const doc = h.doc;
   doc.getElementById('diff-counterpart').value = 'ТЕСИ ООД';
   doc.getElementById('diff-docnum').value = over.docnum || 'ФК-4600179694';
+  /* От 30.09.2026 „Поръчка №" (41…) е задължителна и при сторна. */
+  const ord = doc.getElementById('diff-order-num');
+  if (ord) ord.value = over.order !== undefined ? over.order : '4100135756';
   doc.querySelector('#diff-items .di-name').value = over.name || 'ЛАЙСНА АЛ. 10ММ';
   doc.querySelector('#diff-items .di-qty').value = '3';
   if (over.store !== undefined) doc.getElementById('diff-store').value = over.store;
