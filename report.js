@@ -1711,14 +1711,16 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        той е този, който наистина решава. */
     sbGet('client_orders','status=not.in.(done,refused,postponed)&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,created_at,date'),
     sbGet('transport_orders','status=not.in.(done,refused,postponed)&select=id,store_name,from_store,customer_name,delivery,status,awaiting_stock'),
-    /* Прагът за „Сторна под N €" — отделен ключ, по образеца на
-       kasa_diff_threshold. В края на списъка, за да не се местят индексите. */
-    sbGet('app_settings','key=eq.storno_small_threshold&select=key,value&limit=1'),
-    /* „Сторна под N €" — ОТДЕЛНА заявка по storno_date за седмицата, не по
-       created_at: бележка, въведена седмици по-късно, пак принадлежи на
-       седмицата на сторното. Подвижен прозорец (таб „Днес") няма седмица. */
+    /* Слот r[10] беше прагът storno_small_threshold за „Сторна под N €".
+       Секцията вече не го чете (30.09.2026); слотът остава празен, за да не
+       се местят индексите след него. Ключът в app_settings НЕ е изтрит. */
+    Promise.resolve([]),
+    /* „Сторна с по-малка нова сума" — ОТДЕЛНА заявка по storno_date за
+       седмицата, не по created_at: бележка, въведена седмици по-късно, пак
+       принадлежи на седмицата на сторното. Подвижен прозорец (таб „Днес")
+       няма седмица. */
     W.toISO
-      ? sbGet('kasa_storno','storno_date=gte.'+W.fromISO+'&storno_date=lte.'+W.toISO+'&select=store_name,storno_date,returned_sum,created_by,article_name')
+      ? sbGet('kasa_storno','storno_date=gte.'+W.fromISO+'&storno_date=lte.'+W.toISO+'&select=store_name,storno_date,returned_sum,new_sum,reason,store_comment,status')
       : Promise.resolve([]),
     /* ⏳ „Необработени разлики над N дни" — МОМЕНТНА СНИМКА, не срез от
        седмицата. Затова и трите заявки нямат прозорец по дата: въпросът е
@@ -1955,38 +1957,34 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       confirmed: storno.filter(function(x){ return x.status==='confirmed'; }).length
     };
 
-    /* Сторна под прага за СЕДМИЦАТА — само при затворен прозорец (седмичният
-       отчет). Редовете са от отделната заявка по storno_date (r[11]), тоест
-       седмицата е отсята в заявката — включително бележки, въведени седмици
-       по-късно. Таб „Днес" няма седмица и не получава секцията. Без филтър
-       по reason и по status. */
-    var smallStorno = null;
+    /* „Сторна с по-малка нова сума" за СЕДМИЦАТА (Тенчо, 30.09.2026): сторно
+       НЕ отговаря на изискванията, когато новата бележка е по-малка от
+       върнатата — kasa_storno.new_sum < returned_sum. Замества „Сторна под
+       N €" (праг по returned_sum). Само при затворен прозорец (седмичният
+       отчет); редовете са от отделната заявка по storno_date (r[11]). Равна
+       или по-голяма нова сума не влиза; липсваща сума — също. Без филтър по
+       reason и по status — статусът се показва, не отсява. */
+    var stornoShort = null;
     if (W.toISO) {
-      var ssRow = (Array.isArray(r[10]) ? r[10] : []).find(function(x){ return x && x.key === 'storno_small_threshold'; });
-      var ssRaw = ssRow && ssRow.value != null ? String(ssRow.value).trim().replace(',', '.') : '';
-      var ssNum = ssRaw ? Number(ssRaw) : NaN;
-      var ssThr = Number.isFinite(ssNum) && ssNum > 0 ? ssNum : 5;
-      var ssRound = function(n){ return Math.round(n * 100) / 100; };
-      var ssMap = {}, ssByStore = [], ssTotal = 0, ssSum = 0;
+      var shRound = function(n){ return Math.round(n * 100) / 100; };
+      var shMap = {}, shByStore = [], shTotal = 0, shDiff = 0;
       (Array.isArray(r[11]) ? r[11] : []).filter(function(x){ return inScope(x.store_name); }).forEach(function(x){
-        var v = Number(x.returned_sum);
-        if (!Number.isFinite(v) || v >= ssThr) return;
-        var g = ssMap[x.store_name];
-        if (!g) { g = { store: x.store_name, count: 0, sum: 0, byUser: [], userMap: {} }; ssMap[x.store_name] = g; ssByStore.push(g); }
-        var who = x.created_by || '(без име)';
-        var u = g.userMap[who];
-        if (!u) { u = { user: who, count: 0, sum: 0 }; g.userMap[who] = u; g.byUser.push(u); }
-        g.count++; g.sum += v; u.count++; u.sum += v;
-        ssTotal++; ssSum += v;
+        if (x.returned_sum == null || x.new_sum == null) return;
+        var ret = Number(x.returned_sum), nw = Number(x.new_sum);
+        if (!Number.isFinite(ret) || !Number.isFinite(nw) || !(nw < ret)) return;
+        var d = shRound(ret - nw);
+        var g = shMap[x.store_name];
+        if (!g) { g = { store: x.store_name, count: 0, diff: 0, items: [] }; shMap[x.store_name] = g; shByStore.push(g); }
+        g.items.push({ date: x.storno_date, returned: ret, newSum: nw, diff: d,
+                       reason: x.reason || '', comment: x.store_comment || '', status: x.status || '' });
+        g.count++; g.diff += d; shTotal++; shDiff += d;
       });
-      ssByStore.forEach(function(g){
-        delete g.userMap;
-        g.sum = ssRound(g.sum);
-        g.byUser.forEach(function(u){ u.sum = ssRound(u.sum); });
-        g.byUser.sort(function(a,b){ return b.count - a.count || String(a.user).localeCompare(String(b.user)); });
+      shByStore.forEach(function(g){
+        g.diff = shRound(g.diff);
+        g.items.sort(function(a,b){ return String(a.date).localeCompare(String(b.date)); });
       });
-      ssByStore.sort(function(a,b){ return b.count - a.count || String(a.store).localeCompare(String(b.store)); });
-      smallStorno = { threshold: ssThr, total: ssTotal, sum: ssRound(ssSum), byStore: ssByStore };
+      shByStore.sort(function(a,b){ return b.count - a.count || String(a.store).localeCompare(String(b.store)); });
+      stornoShort = { total: shTotal, diff: shRound(shDiff), byStore: shByStore };
     }
     var zoborotSummary = {
       total: zoborot.length,
@@ -2096,7 +2094,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
 
     cb({
       diffs: diffs, wrongReceipt: wrongReceipt,
-      returns: ret, storno: stornoSummary, smallStorno: smallStorno, zoborot: zoborotSummary,
+      returns: ret, storno: stornoSummary, stornoShort: stornoShort, zoborot: zoborotSummary,
       returnsList: returnsList, returnsStaleDays: returnsStaleDays,
       diffStale: diffStale,
       lateOrders: lateOrders, lateOrdersByStore: lateOrdersByStore,
@@ -2383,30 +2381,52 @@ function reportWarehousePendingHtml(cross, scoped){
     '</div>';
 }
 
-/* „Сторна под N €" за седмицата — ред на обект, касиерите в реда (най-много
-   4, останалите „+K други"). Прагът и числата идват от колектора; при
-   подвижен прозорец (таб „Днес") smallStorno е null и нищо не се рендира. */
-function reportSmallStornoHtml(cross){
-  var ss = cross && cross.smallStorno;
-  if (!ss) return '';
-  var money = function(v){ return (Number(v) || 0).toFixed(2) + ' €'; };
-  var thr = esc(String(ss.threshold));
-  if (!ss.total) {
-    return '<div style="margin-top:10px;font-size:12px;color:#94a3b8;">Няма сторна под ' + thr + ' € тази седмица</div>';
+/* „Сторна с по-малка нова сума" за седмицата — таблица по обект (брой +
+   обща разлика), под нея списъкът по обект: дата, върната, нова, разлика,
+   причина, коментар на обекта, статус. При подвижен прозорец (таб „Днес")
+   stornoShort е null и нищо не се рендира. */
+var REPORT_STORNO_STATUS = { draft: 'въведено', returned: 'върнато за коментар',
+  resubmitted: 'поправено от обекта', confirmed: 'потвърдено' };
+function reportStornoShortHtml(cross){
+  var sh = cross && cross.stornoShort;
+  if (!sh) return '';
+  if (!sh.total) {
+    return '<div style="margin-top:10px;font-size:12px;color:#94a3b8;">Няма сторна с по-малка нова сума тази седмица</div>';
   }
-  var rows = (ss.byStore || []).map(function(g){
-    var users = g.byUser || [];
-    var shown = users.slice(0, 4).map(function(u){ return esc(u.user) + ' ' + u.count; });
-    if (users.length > 4) shown.push('+' + (users.length - 4) + ' други');
-    return '<div style="padding:7px 10px;border-bottom:1px solid #e2e8f0;font-size:12px;">' +
-      reportStoreLinkHtml(g.store, '#1E2761') +
-      '<span style="color:#475569;"> — ' + g.count + ' бр., ' + money(g.sum) +
-      (shown.length ? ' · ' + shown.join(', ') : '') + '</span></div>';
+  var money = function(v){ return (Number(v) || 0).toFixed(2) + ' €'; };
+  var TH = 'padding:6px 8px;font-size:10px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.3px;background:#F9FAFC;border-bottom:1px solid #e2e8f0;';
+  var TD = 'padding:6px 8px;font-size:12px;border-bottom:1px solid #eef1f6;vertical-align:top;';
+  var TDs = 'padding:5px 6px;font-size:11px;border-bottom:1px solid #eef1f6;vertical-align:top;';
+  var sum = '<table role="presentation" style="width:100%;border-collapse:collapse;">' +
+    '<tr><th style="' + TH + 'text-align:left;">Обект</th><th style="' + TH + 'text-align:right;">брой</th><th style="' + TH + 'text-align:right;">обща разлика</th></tr>' +
+    sh.byStore.map(function(g){
+      return '<tr><td style="' + TD + '">' + reportStoreLinkHtml(g.store, '#1E2761') + '</td>' +
+        '<td style="' + TD + 'text-align:right;font-weight:700;color:#1E2761;">' + g.count + '</td>' +
+        '<td style="' + TD + 'text-align:right;font-weight:700;color:#C0392B;">' + money(g.diff) + '</td></tr>';
+    }).join('') + '</table>';
+  var lists = sh.byStore.map(function(g){
+    var rows = g.items.map(function(it){
+      var d = it.date ? new Date(it.date + 'T00:00:00') : null;
+      var dl = d && !isNaN(d.getTime()) ? reportDayMonth(d) : esc(String(it.date || ''));
+      return '<tr><td style="' + TDs + 'white-space:nowrap;">' + dl + '</td>' +
+        '<td style="' + TDs + 'text-align:right;white-space:nowrap;">' + money(it.returned) + '</td>' +
+        '<td style="' + TDs + 'text-align:right;white-space:nowrap;">' + money(it.newSum) + '</td>' +
+        '<td style="' + TDs + 'text-align:right;white-space:nowrap;color:#C0392B;">' + money(it.diff) + '</td>' +
+        '<td style="' + TDs + '">' + esc(it.reason) + '</td>' +
+        '<td style="' + TDs + '">' + (it.comment ? esc(it.comment) : '<span style="color:#CBD5E1;">—</span>') + '</td>' +
+        '<td style="' + TDs + 'white-space:nowrap;">' + esc(REPORT_STORNO_STATUS[it.status] || it.status) + '</td></tr>';
+    }).join('');
+    return '<div style="margin-top:8px;font-size:12px;font-weight:700;">' + reportStoreLinkHtml(g.store, '#1E2761') + '</div>' +
+      '<table role="presentation" style="width:100%;border-collapse:collapse;background:#FFFFFF;border:1px solid #e2e8f0;">' +
+      '<tr><th style="' + TH + 'text-align:left;">дата</th><th style="' + TH + 'text-align:right;">върната</th><th style="' + TH + 'text-align:right;">нова</th>' +
+      '<th style="' + TH + 'text-align:right;">разлика</th><th style="' + TH + 'text-align:left;">причина</th><th style="' + TH + 'text-align:left;">коментар на обекта</th>' +
+      '<th style="' + TH + 'text-align:left;">статус</th></tr>' + rows + '</table>';
   }).join('');
   return '<div style="margin-top:12px;">' +
-    '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:6px;">Сторна под ' + thr + ' € (' + ss.total + ' бр., ' + money(ss.sum) + ')</div>' +
-    '<div style="background:#FFFFFF;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">' + rows + '</div>' +
-    '</div>';
+    '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:2px;">Сторна с по-малка нова сума (' + sh.total + ' бр., разлика ' + money(sh.diff) + ')</div>' +
+    '<div style="font-size:11px;color:#64748b;margin-bottom:6px;">Новата бележка е по-малка от върнатата. Проверете дали има обяснение.</div>' +
+    '<div style="background:#FFFFFF;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;">' + sum + '</div>' +
+    lists + '</div>';
 }
 
 /* ⏳ „Необработени разлики над N дни" — моментна снимка към изпращането.
@@ -2571,7 +2591,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
     crossMetricCard(cross.storno.total,'въведени') +
     crossMetricCard(cross.storno.returned,'върнати за коментар', cross.storno.returned>0) +
     crossMetricCard(cross.storno.resubmitted,'поправени от обекта'));
-  h += reportSmallStornoHtml(cross);
+  h += reportStornoShortHtml(cross);
   h += reportChecklistSectionHtml(cross);
 
   h += crossModuleRow('🧾','Каса — Равнение (за периода)',

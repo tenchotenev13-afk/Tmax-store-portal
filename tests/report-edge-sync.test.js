@@ -91,7 +91,7 @@ const SHARED_FNS = [
   'reportCommentsByStoreHtml',
   'reportCommentsCountHtml',
   'crossMetricCard', 'crossModuleRow', 'reportReturnsListHtml',
-  'reportLateSectionHtml', 'reportSmallStornoHtml',
+  'reportLateSectionHtml', 'reportStornoShortHtml',
   /* „Необработени разлики над N дни" (v41) — моментната снимка в седмичния
      отчет. Разминае ли се копието, писмото от крона брои друго от портала. */
   'reportDiffStaleHtml',

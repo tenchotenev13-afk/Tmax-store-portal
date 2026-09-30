@@ -158,7 +158,7 @@ const TESTS = [
   'report-cron-schedule.test.js',
   'pallets-drop-lock.test.js',
   'pallets-export.test.js',
-  'weekly-small-storno.test.js',
+  'weekly-storno-short.test.js',
   'weekly-diff-stale.test.js',
   'weekly-checklist-section.test.js',
   'warehouse-report.test.js',

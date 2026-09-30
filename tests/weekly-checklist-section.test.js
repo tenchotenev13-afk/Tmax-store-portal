@@ -223,16 +223,16 @@ function grid(h, html) {
     h.close();
   }
 
-  section('Мястото в писмото: след „Сторна под 5 €", преди Равнението');
+  section('Мястото в писмото: след „Сторна с по-малка нова сума", преди Равнението');
   {
     const h = env();
     const data = await weekly(h, SCOPE);
     const html = h.w.buildWeeklyReportHtml(data);
-    const iSmall = html.indexOf('сторна под 5 €');   /* „Няма сторна под 5 € тази седмица" при 0 */
+    const iSmall = html.indexOf('сторна с по-малка нова сума');   /* „Няма сторна с по-малка нова сума тази седмица" при 0 */
     const iCl = html.indexOf('Чек лист (контролинг)');
     const iZob = html.indexOf('Каса — Равнение');
     ok('и трите ги има', iSmall >= 0 && iCl >= 0 && iZob >= 0, iSmall + ' / ' + iCl + ' / ' + iZob);
-    ok('чек листът е след „Сторна под 5 €"', iCl > iSmall);
+    ok('чек листът е след „Сторна с по-малка нова сума"', iCl > iSmall);
     ok('и преди Равнението', iCl < iZob);
     h.close();
   }
