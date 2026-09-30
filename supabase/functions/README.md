@@ -49,8 +49,8 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 
 | Слуг | ver. | Файл | За какво служи | Кой го вика | JWT |
 |---|---|---|---|---|---|
-| `auth-login` | 18 | `index.ts` + `_shared/session.ts` | Логин: bcrypt срещу `password_hash`, мигрира стари пароли в чист вид; от 28.09.2026 връща и подписан пропуск `session` | портал — `shared.js` | ✅ |
-| `auth-set-password` | 18 | `index.ts` + `_shared/session.ts` | Смяна/ресет на парола (мин. 4 символа); от 28.09.2026 ресетът БЕЗ стара парола иска админски пропуск, иначе 403 | портал — `shared.js` (своята, със стара парола), `admin.js` (ресет, с `session`) | ✅ |
+| `auth-login` | 19 | `index.ts` + `_shared/session.ts` | Логин: само bcrypt срещу `password_hash` (от 30.09.2026 колоната `password` не се чете); от 28.09.2026 връща и подписан пропуск `session` | портал — `shared.js` | ✅ |
+| `auth-set-password` | 19 | `index.ts` + `_shared/session.ts` | Смяна/ресет на парола (мин. 4 символа), пише само `password_hash`; от 28.09.2026 ресетът БЕЗ стара парола иска админски пропуск, иначе 403 | портал — `shared.js` (своята, със стара парола), `admin.js` (ресет, с `session`) | ✅ |
 | `resend-email` | 56 | **`send-email.ts`** | Праща И имейл (SMTP `mail.temax.bg`), И push — по поле `type` | портал — `email.js`, `push.js`; и четирите крон функции по-долу | ✅ |
 | `portal-push` | 24 | `index.ts` | Push през OneSignal — до всички или по таг `store_name` | портал — `push.js` (`osSend`) | ✅ |
 | `bulletin-notify` | 19 | `index.ts` | Известията от Бюлетина: теми `overdue_tasks`, `today_deadlines`, `deadline_passed`, `promo_expiring`; от 20.09.2026 и `loading_lists_pending` — товарен лист, изпратен преди 48 ч и още неотметнат (v8) | **крон 15** (`*/15 * * * *`) + портал — `push.js` (`runNotifyTopic`) | ✅ |
@@ -156,9 +156,14 @@ id-то се търси първо в `bulletin_tasks`, после в `recurring
 ### Викат се от портала
 
 **`auth-login`** — чете `users` със service role ключ, сравнява bcrypt хеш
-срещу `password_hash`. Ако човекът е още на стара парола в чист вид, при
-успешен логин я мигрира към хеш и зачиства `password`. Връща потребителя без
-двете полета с парола.
+срещу `password_hash`. Без хеш → „Грешна парола.“, както при грешна парола.
+Връща потребителя без `password_hash`.
+
+До 30.09.2026 имаше и клон за стара парола в чист вид (колоната `password`):
+сравнение и мързеливо хеширане при успешен вход. Махнат е в етап 5а, когато
+103 от 103 бяха с `password_hash` и 0 с попълнено `password`; същия ден
+`auth-set-password` спря да чете и да нулира колоната. Никоя едж функция вече
+не я ползва — тя отпада в 5б.
 
 От 28.09.2026 (ver. 18) отговорът е `{ ok, user, session }` — `session` е
 подписан пропуск ДО `user`, не вътре в него. Подписва го `signSession()` от
@@ -178,12 +183,11 @@ id-то се търси първо в `bulletin_tasks`, после в `recurring
 всяка функция, която го ползва.** Обратното четене сваля и него — сравнявай
 ДВАТА файла, не само `index.ts`.
 
-Затова копията на живо може законно да се различават. От 29.09.2026
-`auth-set-password` (ver. 18) и `set-history-pin` (ver. 8) носят
-`session.ts` от `62314bd` (с `requireAdmin`), а `auth-login` (ver. 18) —
-по-старото от `371b92f`, без `requireAdmin`. На нея не ѝ трябва, затова не е
-деплойвана наново. При сверка на `auth-login` сравнявай срещу `371b92f`, иначе
-излиза фалшиво разминаване.
+Затова копията на живо може законно да се различават. Между 29.09 и
+30.09.2026 `auth-login` (ver. 18) носеше по-старото `session.ts` от
+`371b92f`, без `requireAdmin`. С деплоя от етап 5а (ver. 19) и тя носи
+текущото — при сверка сравнявай всяка функция срещу комита на последния ѝ
+деплой, не срещу HEAD.
 
 - `signSession({uid, role, email})` → `"payload.подпис"`, двете части base64url.
   payload = JSON `{uid, role, email, iat, exp}`, `exp = iat + 12 ч` (секунди);

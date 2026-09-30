@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
   try {
     const { data: rows, error } = await admin
       .from("users")
-      .select("id,email,password,password_hash,store_name,role,display_name,assigned_stores,active")
+      .select("id,email,password_hash,store_name,role,display_name,assigned_stores,active")
       .eq("email", email)
       .eq("active", true)
       .limit(1);
@@ -56,28 +56,15 @@ Deno.serve(async (req) => {
     }
 
     const user = rows[0];
-    let valid = false;
-
-    if (user.password_hash) {
-      valid = bcrypt.compareSync(password, user.password_hash);
-    } else if (user.password != null) {
-      valid = user.password === password;
-      if (valid) {
-        const salt = bcrypt.genSaltSync(10);
-        const hash = bcrypt.hashSync(password, salt);
-        const { error: migErr } = await admin
-          .from("users")
-          .update({ password_hash: hash, password: null })
-          .eq("id", user.id);
-        if (migErr) console.error("auth-login: миграция на хеш неуспешна за user", user.id, migErr);
-      }
-    }
+    // Само bcrypt. Колоната password (чист текст) не се чете — от 30.09.2026
+    // всички 103 са с password_hash; без хеш → отказ като при грешна парола.
+    const valid = user.password_hash ? bcrypt.compareSync(password, user.password_hash) : false;
 
     if (!valid) {
       return json({ ok: false, message: "Грешна парола.", reason: "wrong_password" }, 401);
     }
 
-    const { password: _p, password_hash: _ph, ...safeUser } = user;
+    const { password_hash: _ph, ...safeUser } = user;
     // Пропускът не бива да събаря входа: без секрет или при грешка → session: null.
     let session: string | null = null;
     try {

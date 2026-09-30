@@ -51,7 +51,7 @@ Deno.serve(async (req) => {
     if (oldPassword) {
       const { data: rows, error } = await admin
         .from("users")
-        .select("password,password_hash")
+        .select("password_hash")
         .eq("id", userId)
         .limit(1);
 
@@ -59,10 +59,9 @@ Deno.serve(async (req) => {
         return json({ ok: false, message: "Потребителят не е намерен." }, 404);
       }
 
+      // Само bcrypt — колоната password (чист текст) не се чете.
       const u = rows[0];
-      let validOld = false;
-      if (u.password_hash) validOld = bcrypt.compareSync(oldPassword, u.password_hash);
-      else if (u.password != null) validOld = u.password === oldPassword;
+      const validOld = u.password_hash ? bcrypt.compareSync(oldPassword, u.password_hash) : false;
 
       if (!validOld) {
         return json({ ok: false, message: "Старата парола е грешна." }, 401);
@@ -73,7 +72,7 @@ Deno.serve(async (req) => {
     const hash = bcrypt.hashSync(newPassword, salt);
     const { error: upErr } = await admin
       .from("users")
-      .update({ password_hash: hash, password: null })
+      .update({ password_hash: hash })
       .eq("id", userId);
 
     if (upErr) {
