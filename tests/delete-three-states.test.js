@@ -12,6 +12,12 @@
      {ok:true, count:null}      — броят не се чете (прокси, стар отговор) →
                                   третира се като успех, не се измисля нула
 
+   deleteUser от 29.09.2026 (етап 3) не ползва sbDelete, а едж функцията
+   admin-users през adminUsers() в admin.js. Функцията връща 404 при нула
+   изтрити реда; adminUsers го превръща в същото {ok:true, count:0}, тоест
+   трите състояния за потребителя са ЕДНИ И СЪЩИ — секции 4–6 и 9 го пазят,
+   само отговорът идва от функцията, а не от DELETE към /rest/v1/users.
+
    Пускане:  node tests/delete-three-states.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
@@ -49,8 +55,10 @@ function stubDelete(h, opt) {
   };
 }
 
-function env(modules, data) {
-  const h = boot({ modules: modules, user: ADMIN, data: data || {}, confirm: true });
+function env(modules, data, adminUsers) {
+  const h = boot({ modules: modules, user: ADMIN, data: data || {}, confirm: true,
+                   adminUsers: adminUsers });
+  h.w.currentSession = 'adm.sig';
   h.logged = [];
   h.w.console.error = function () { h.logged.push(Array.prototype.join.call(arguments, ' ')); };
   return h;
@@ -58,6 +66,16 @@ function env(modules, data) {
 
 const USERS = [{ id: 'u-1', email: 'ivan@temax.bg', display_name: 'Иван',
                  store_name: 'Раднево', role: 'user', active: true, assigned_stores: [] }];
+
+/* Изтриването на потребител: едно извикване на admin-users и НИКАКЪВ DELETE
+   към /rest/v1/users. */
+function userDeleteCalls(h) {
+  return h.calls.adminUsers.filter(c => c && c.action === 'delete');
+}
+function restUserDeletes(h) {
+  return (h.deletes || []).concat(h.calls.del.map(u => ({ url: u })))
+    .filter(d => String(d.url).indexOf('/users') >= 0);
+}
 
 function auditPosts(h) {
   return h.calls.post.filter(p => String(p.url).indexOf('audit_log') >= 0);
@@ -113,12 +131,16 @@ function auditPosts(h) {
 
   section('4. deleteUser — успех: одитът се пише, зелен toast');
   {
-    const h = env(['admin.js'], { users: USERS, stores: [] });
-    stubDelete(h, { status: 204, range: '*/1' });
+    const h = env(['admin.js'], { users: USERS, stores: [] },
+      () => ({ status: 200, body: { ok: true, count: 1 } }));
     h.w.loadUsersAdmin();
     await ticks();
     if (guard('клик по ✕', () => realClick(h.w, btn(h.doc.body, '✕')))) {
       await ticks();
+      const c = userDeleteCalls(h)[0];
+      ok('admin-users: delete за u-1 със session',
+         !!c && c.id === 'u-1' && c.session === 'adm.sig' && !('fields' in c), JSON.stringify(h.calls.adminUsers));
+      ok('няма DELETE към /rest/v1/users', restUserDeletes(h).length === 0, JSON.stringify(restUserDeletes(h)));
       ok('показано е "изтрит"', h.calls.toast.some(t => t.indexOf('Потребителят е изтрит') >= 0),
          h.calls.toast.join(' | '));
       ok('одитът Е записан', auditPosts(h).length === 1, JSON.stringify(auditPosts(h).map(p => p.body.event)));
@@ -127,15 +149,15 @@ function auditPosts(h) {
 
   section('5. deleteUser — отказано: червен toast, БЕЗ одит');
   {
-    const h = env(['admin.js'], { users: USERS, stores: [] });
-    stubDelete(h, { status: 403, body: { message: 'permission denied for table users' } });
+    const h = env(['admin.js'], { users: USERS, stores: [] },
+      () => ({ status: 403, body: { ok: false, reason: 'forbidden', message: 'Нямате права за тази операция.' } }));
     h.w.loadUsersAdmin();
     await ticks();
     realClick(h.w, btn(h.doc.body, '✕'));
     await ticks();
     ok('казва "НЕ беше изтрит"', h.calls.toast.some(t => t.indexOf('НЕ беше изтрит') >= 0),
        h.calls.toast.join(' | '));
-    ok('показва причината', h.calls.toast.some(t => t.indexOf('permission denied') >= 0),
+    ok('показва причината', h.calls.toast.some(t => t.indexOf('Нямате права') >= 0),
        h.calls.toast.join(' | '));
     ok('НЕ казва "изтрит" зелено', !h.calls.toast.some(t => t.indexOf('✓ Потребителят') >= 0));
     ok('одитът НЕ е записан', auditPosts(h).length === 0,
@@ -145,8 +167,8 @@ function auditPosts(h) {
 
   section('6. deleteUser — нула съвпаднали: неутрално, БЕЗ одит, БЕЗ червено');
   {
-    const h = env(['admin.js'], { users: USERS, stores: [] });
-    stubDelete(h, { status: 204, range: '*/0' });
+    const h = env(['admin.js'], { users: USERS, stores: [] },
+      () => ({ status: 404, body: { ok: false, reason: 'not_found', message: 'Потребителят не е намерен.' } }));
     h.w.loadUsersAdmin();
     await ticks();
     realClick(h.w, btn(h.doc.body, '✕'));
@@ -221,10 +243,12 @@ function auditPosts(h) {
        JSON.stringify(zeroH.w.bulComps));
   }
 
-  section('9. Липсващ Content-Range не ражда фалшиво "нищо не съвпадна"');
+  section('9. Липсващ брой не ражда фалшиво "нищо не съвпадна"');
   {
-    const h = env(['admin.js'], { users: USERS, stores: [] });
-    stubDelete(h, { status: 204 });   /* прокси е отрязало хедъра */
+    /* admin-users винаги връща count; ако някога не го върне, adminUsers дава
+       count:null — същото като липсващ Content-Range при sbDelete. */
+    const h = env(['admin.js'], { users: USERS, stores: [] },
+      () => ({ status: 200, body: { ok: true } }));
     h.w.loadUsersAdmin(); await ticks();
     realClick(h.w, btn(h.doc.body, '✕')); await ticks();
     ok('третира се като успех', h.calls.toast.some(t => t.indexOf('Потребителят е изтрит') >= 0),

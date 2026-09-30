@@ -149,7 +149,8 @@ function boot(opts) {
     get: [], post: [], patch: [], del: [],
     toast: [], confirm: [], alert: [],
     scrollTo: [], scrollIntoView: [],
-    notOk: []        /* заявки, върнали ok:false — за "тихите" грешки */
+    notOk: [],       /* заявки, върнали ok:false — за "тихите" грешки */
+    adminUsers: []   /* телата към едж функцията admin-users (записите в users) */
   };
 
   /* ── Браузърни неща, които jsdom няма ── */
@@ -220,9 +221,37 @@ function boot(opts) {
     };
   }
 
+  /* Едж функцията admin-users (етап 3 от затварянето на users): от 29.09.2026
+     всички записи в users от admin.js минават оттук, не през /rest/v1/users.
+     Телата се пазят в calls.adminUsers ({session, action, id?, fields?}).
+     Отговор по подразбиране — като на живата функция при успех: create →
+     {ok:true, id:'new-user-1'}, update/delete → {ok:true, count:1}.
+     opts.adminUsers(body) → {status, body} го подменя (отказ, 0 реда, грешка
+     от базата); върне ли нищо — пак подразбиращият се. */
+  function adminUsersReply(body) {
+    const custom = typeof opts.adminUsers === 'function' ? opts.adminUsers(body) : null;
+    const out = custom || (body && body.action === 'create'
+      ? { status: 200, body: { ok: true, id: 'new-user-1' } }
+      : { status: 200, body: { ok: true, count: 1 } });
+    const st = out.status || 200;
+    if (st >= 400) calls.notOk.push({ method: 'POST', url: 'functions/v1/admin-users', status: st });
+    return {
+      ok: st < 400, status: st,
+      json: () => Promise.resolve(out.body),
+      text: () => Promise.resolve(JSON.stringify(out.body))
+    };
+  }
+
   w.fetch = function (url, init) {
     init = init || {};
     const method = (init.method || 'GET').toUpperCase();
+
+    if (String(url).indexOf('/functions/v1/admin-users') >= 0) {
+      let parsed = null;
+      try { parsed = init.body ? JSON.parse(init.body) : null; } catch (e) { parsed = init.body; }
+      calls.adminUsers.push(parsed);
+      return Promise.resolve(adminUsersReply(parsed));
+    }
     const table = tableOf(url);
     const failThis = failureFor(method, url);
 

@@ -29,9 +29,11 @@ function env(opts) {
   h.edge = [];
   const orig = h.w.fetch;
   const reply = opts.reply || { status: 200, body: { ok: true } };
+  /* Стъбът е само за auth-set-password. admin-users (записите в users от
+     етап 3) минава през стъба на harness-а — той връща id при create. */
   h.w.fetch = function (url, init) {
     init = init || {};
-    if (String(url).indexOf('/functions/v1/') >= 0) {
+    if (String(url).indexOf('/functions/v1/auth-set-password') >= 0) {
       let parsed = null;
       try { parsed = JSON.parse(init.body); } catch (e) { parsed = init.body; }
       h.edge.push({ url: String(url), body: parsed });
@@ -39,13 +41,6 @@ function env(opts) {
         ok: reply.status < 400, status: reply.status,
         json: () => Promise.resolve(reply.body),
         text: () => Promise.resolve(JSON.stringify(reply.body))
-      });
-    }
-    if ((init.method || 'GET').toUpperCase() === 'POST' && String(url).indexOf('/users') >= 0) {
-      return Promise.resolve({
-        ok: true, status: 201,
-        json: () => Promise.resolve([{ id: 'new-user-1' }]),
-        text: () => Promise.resolve('[{"id":"new-user-1"}]')
       });
     }
     return orig(url, init);

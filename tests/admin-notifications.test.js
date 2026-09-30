@@ -757,8 +757,12 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
         h.doc.querySelector('.ntf-grp-cb[value="regional"]').checked = true;
         realClick(h.w, btn(ov, 'Запази'));
         await ticks();
-        const p = h.calls.patch.filter(x => x.table === 'users');
-        if (ok('тръгнал е PATCH', p.length === 1, JSON.stringify(p.map(x => x.body)))) {
+        /* От етап 3 записът минава през admin-users (update), не PATCH. */
+        const p = h.calls.adminUsers.filter(x => x && x.action === 'update')
+          .map(x => ({ id: x.id, body: x.fields }));
+        ok('няма PATCH към /rest/v1/users', !h.calls.patch.some(x => x.table === 'users'));
+        if (ok('тръгнал е update към admin-users', p.length === 1, JSON.stringify(p.map(x => x.body)))) {
+          ok('за същия човек (u-mis)', p[0].id === 'u-mis', p[0].id);
           ok('пише се само notify_groups', Object.keys(p[0].body).join(',') === 'notify_groups',
             Object.keys(p[0].body).join(','));
           ok('с двете групи', p[0].body.notify_groups.join(',') === 'co,regional',
@@ -777,7 +781,9 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
     Array.prototype.slice.call(h.doc.querySelectorAll('.ntf-grp-cb')).forEach(c => { c.checked = false; });
     realClick(h.w, btn(h.doc.getElementById('notify-groups-modal-ov'), 'Запази'));
     await ticks();
-    const b = h.calls.patch.filter(x => x.table === 'users')[0].body;
+    const up = h.calls.adminUsers.filter(x => x && x.action === 'update')[0];
+    const b = (up && up.fields) || {};
+    ok('update за u-ten', !!up && up.id === 'u-ten', JSON.stringify(h.calls.adminUsers));
     ok('нула отметки дава празен масив', Array.isArray(b.notify_groups) && b.notify_groups.length === 0,
       JSON.stringify(b));
     ok('а НЕ null', b.notify_groups !== null, JSON.stringify(b));

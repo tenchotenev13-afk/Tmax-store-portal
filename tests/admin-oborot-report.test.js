@@ -43,12 +43,15 @@ function usersFixture(list) {
 function env(over) {
   over = over || {};
   const list = over.users !== undefined ? over.users : USERS;
-  return boot({
+  const h = boot({
     modules: ['admin.js'],
     user: ADMIN,
     data: Object.assign({ users: usersFixture(list), stores: [] }, over.data || {}),
-    fail: over.fail
+    fail: over.fail,
+    adminUsers: over.adminUsers
   });
+  h.w.currentSession = 'adm.sig';
+  return h;
 }
 
 async function rows(h) {
@@ -66,7 +69,12 @@ function pencilIn(tr) {
   return Array.prototype.slice.call(tr.querySelectorAll('button'))
     .find(b => (b.getAttribute('onclick') || '').indexOf('editOborotReport') >= 0) || null;
 }
-const patches = h => h.calls.patch.filter(p => p.table === 'users');
+/* От етап 3 (29.09.2026) записът в users минава през едж функцията
+   admin-users, не през PATCH към /rest/v1/users. „patches" остава като име —
+   това са update-ите към функцията: {id, session, body: fields}. */
+const patches = h => h.calls.adminUsers.filter(c => c && c.action === 'update')
+  .map(c => ({ id: c.id, session: c.session, body: c.fields }));
+const restUserPatches = h => h.calls.patch.filter(p => p.table === 'users');
 const audits = h => h.calls.post.filter(p => p.table === 'audit_log');
 
 /* Отваря модала за даден потребител през истински клик по молива. */
@@ -170,19 +178,21 @@ async function save(h) {
     ok('за null е избрано „Не получава" (празна стойност)', chosen(h.doc) === '');
   }
 
-  section('4. Записът праща правилния PATCH');
+  section('4. Записът праща правилния update към admin-users');
   {
     const h = env();
     await openModal(h, 'kasier@temax.bg');
     pick(h.doc, 'all');
     await save(h);
     const p = patches(h);
-    if (ok('тръгва PATCH към users', p.length === 1, 'брой: ' + p.length)) {
+    if (ok('тръгва update към admin-users', p.length === 1, 'брой: ' + p.length)) {
       ok('стойността е \'all\'', p[0].body.oborot_report === 'all');
-      ok('филтърът е по id на човека', p[0].url.indexOf('id=eq.u-none') >= 0);
+      ok('id е на човека', p[0].id === 'u-none', p[0].id);
+      ok('със session', p[0].session === 'adm.sig');
       ok('нищо друго не се пипа', Object.keys(p[0].body).length === 1,
         Object.keys(p[0].body).join(','));
     }
+    ok('няма PATCH към /rest/v1/users', restUserPatches(h).length === 0);
     ok('модалът се затваря', !h.doc.getElementById('oborot-modal-ov'));
     ok('списъкът се презарежда',
       h.calls.get.filter(u => u.indexOf('order=role,email') >= 0).length >= 2);
@@ -201,7 +211,7 @@ async function save(h) {
     pick(h.doc, '');
     await save(h);
     const b = patches(h)[0] && patches(h)[0].body;
-    if (ok('тръгва PATCH', !!b)) {
+    if (ok('тръгва update', !!b)) {
       ok('„Не получава" праща null, НЕ празен низ', b.oborot_report === null,
         JSON.stringify(b.oborot_report));
       ok('и наистина е null, не undefined', 'oborot_report' in b && b.oborot_report === null);
@@ -223,8 +233,10 @@ async function save(h) {
     }
   }
   {
-    /* Провален PATCH не бива да оставя фалшива следа в одита. */
-    const h = env({ fail: { PATCH: { status: 400, body: { message: 'violates check constraint' } } } });
+    /* Провален запис не бива да оставя фалшива следа в одита. Функцията
+       подава текста на PostgREST непроменен. */
+    const h = env({ adminUsers: () => ({ status: 400, body: { ok: false,
+      message: 'new row for relation "users" violates check constraint "users_oborot_report_chk"', code: '23514' } }) });
     await openModal(h, 'kasier@temax.bg');
     pick(h.doc, 'all');
     await save(h);

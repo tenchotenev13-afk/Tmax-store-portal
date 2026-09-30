@@ -208,7 +208,7 @@ function submitAssigned(){
   var wantsAll = document.getElementById('assigned-all').checked;
   var selected = Array.from(document.querySelectorAll('.assigned-store-cb')).filter(function(cb){return cb.checked;}).map(function(cb){return cb.value;});
   var payload = wantsAll ? {assigned_stores: null} : {assigned_stores: selected.length ? selected : null};
-  sbPatch('users','id=eq.'+_assignedEditUserId, payload).then(function(res){
+  adminUsers('update', _assignedEditUserId, payload).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
     logAudit('user_assigned_stores_changed',{details:{target_user_id:_assignedEditUserId,target_user_name:_assignedEditUserName,wants_all:wantsAll,stores:selected}});
     toast(wantsAll ? '✅ Вижда всички магазини' : '✅ Назначени '+selected.length+' магазина');
@@ -302,7 +302,7 @@ function submitOborotReport(){
   var warn = (val==='assigned') && !_oborotEditAssigned.length;
   var uid = _oborotEditUserId, uname = _oborotEditUserName;
 
-  sbPatch('users','id=eq.'+uid, payload).then(function(res){
+  adminUsers('update', uid, payload).then(function(res){
     if(!res.ok){ toast('Грешка при запис: '+sbErrMsg(res),'#dc2626'); return; }
     /* Кой получава финансов отчет е промяна, която трябва да оставя следа. */
     logAudit('user_oborot_report_changed',{details:{target_user_id:uid,target_user_name:uname,value:payload.oborot_report}});
@@ -318,7 +318,7 @@ function submitOborotReport(){
 
 function deleteUser(id, email){
   if(!confirm('Изтрий потребител:\n'+email+'\n\nТова действие е необратимо!'))return;
-  sbDelete('users','id=eq.'+id).then(function(res){
+  adminUsers('delete', id).then(function(res){
     if(!res.ok){
       console.error('deleteUser: потребителят НЕ беше изтрит',id,email,res.error);
       toast('⚠️ Потребителят НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
@@ -527,7 +527,7 @@ function submitUserModal(){
   }
 
   if(editingId){
-    sbPatch('users','id=eq.'+editingId, data).then(function(res){
+    adminUsers('update', editingId, data).then(function(res){
       if(!res.ok){toast('Грешка при запис','#dc2626');return;}
       logAudit('user_edited',{details:{target_user_id:editingId,target_email:email,role:role,store_name:store,active:active,is_regional:data.is_regional}});
       if(pass){
@@ -539,23 +539,12 @@ function submitUserModal(){
       } else afterPassword();
     });
   } else {
-    /* Prefer: return=representation, за да получим id-то на новосъздадения ред (за паролата).
-       ?select=id е задължителен, не козметика: без него PostgREST прави
-       RETURNING users.*, а Postgres иска SELECT право върху ВСЯКА върната
-       колона. В мига, в който anon загуби правото върху password_hash,
-       създаването на потребител би връщало 403. Кодът и без това чете само id. */
-    fetch(API+'/users?select=id',{
-      method:'POST',
-      headers:Object.assign({},H,{'Prefer':'return=representation'}),
-      body:JSON.stringify(Object.assign({email:email},data))
-    }).then(function(r){
-      return r.text().then(function(txt){
-        var d=null; try{d=JSON.parse(txt);}catch(e){}
-        return {ok:r.ok, data:d};
-      });
-    }).then(function(res){
-      if(!res.ok||!res.data||!res.data.length){toast('Грешка при запис','#dc2626');return;}
-      var newId=res.data[0].id;
+    /* admin-users връща само id-то на новия ред (за паролата). Функцията чете
+       обратно единствено id — никога users.*, тоест скритите колони не
+       участват и при затегнати права. */
+    adminUsers('create', null, Object.assign({email:email},data)).then(function(res){
+      if(!res.ok||!res.id){toast('Грешка при запис','#dc2626');return;}
+      var newId=res.id;
       logAudit('user_added',{details:{target_user_id:newId,target_email:email,role:role,store_name:store,active:active}});
       setUserPassword(newId,pass,function(ok,msg){
         if(ok) logAudit('user_password_changed_by_admin',{details:{target_user_id:newId,target_email:email}});
@@ -564,6 +553,30 @@ function submitUserModal(){
       });
     });
   }
+}
+
+/* Записите в users минават през едж функцията admin-users с админския
+   пропуск (етап 3), не директно през PostgREST с публичния ключ. Формата на
+   резултата е като на sbPatch/sbDelete ({ok, status, error:{message}}), за да
+   работят sbErrMsg и извикващите както досега; плюс id (create) и count.
+   delete, засегнал 0 реда, функцията връща като 404 — тук той става
+   {ok:true, count:0}, тоест deleteUser си пази неутралния изход. */
+function adminUsers(action, id, fields){
+  var url=SB_URL+'/functions/v1/admin-users';
+  var body={session:currentSession, action:action};
+  if(id) body.id=id;
+  if(fields) body.fields=fields;
+  return fetch(url,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+SB_KEY,'apikey':SB_KEY},
+    body:JSON.stringify(body)
+  }).then(function(r){
+    return r.json().catch(function(){return null;}).then(function(d){
+      if(r.ok && d && d.ok) return {ok:true, status:r.status, data:d, id:d.id||null, count:(typeof d.count==='number'?d.count:null)};
+      if(action==='delete' && r.status===404) return {ok:true, status:404, data:d, count:0};
+      return sbWriteFail('adminUsers',url+' ('+action+')',r.status,d);
+    });
+  }).catch(sbNetFail('adminUsers',url));
 }
 
 /* Хеширане на парола през Edge Function — таблицата users никога не получава чист текст оттук насетне */
@@ -2284,7 +2297,7 @@ function closeNotifyGroupsModal(){
 function submitNotifyGroups(){
   /* Колоната е NOT NULL — при нула отметки се пише празен масив, не null. */
   var sel = [].map.call(document.querySelectorAll('.ntf-grp-cb:checked'), function(cb){ return cb.value; });
-  sbPatch('users','id=eq.' + _notifyGroupsUserId, { notify_groups: sel }).then(function(res){
+  adminUsers('update', _notifyGroupsUserId, { notify_groups: sel }).then(function(res){
     if(!res.ok){ toast('Грешка при запис: ' + sbErrMsg(res), '#dc2626'); return; }
     logAudit('user_notify_groups_changed', {
       details: { target_user_id: _notifyGroupsUserId, target_user_name: _notifyGroupsUserName, groups: sel }

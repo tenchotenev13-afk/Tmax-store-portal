@@ -31,7 +31,13 @@ function env(user, opts) {
 }
 const sel = function (h) { return h.doc.getElementById('um-store'); };
 const opts = function (h) { return Array.prototype.slice.call(sel(h).options).map(function (o) { return o.value; }); };
-const patches = function (h) { return h.calls.patch.filter(function (p) { return p.table === 'users'; }); };
+/* От етап 3 (29.09.2026) записът в users минава през едж функцията
+   admin-users, не през PATCH към /rest/v1/users. „patches" остава като име —
+   това са update-ите към функцията, с fields като body. */
+const patches = function (h) {
+  return h.calls.adminUsers.filter(function (c) { return c && c.action === 'update'; })
+    .map(function (c) { return { id: c.id, body: c.fields }; });
+};
 
 (async function () {
 

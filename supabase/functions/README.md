@@ -58,7 +58,7 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 | `send-routed-report` | 16 | `index.ts` | Личният седмичен отчет по задачи (`report_groups` → отделно писмо на човек); от 19.09.2026 и **отчет по задача** — вход `{task_id, recipients}`, една картичка; при `linked_module='supply'` под нея и секция „Зареждане“ (v10); и за постоянна задача — прозорец по седмицата на `run_date` (v11); от 29.09.2026 Пазарджик и Сервиз Троян извън обектите (v14) | **крон 16** (`10 5 * * 1`, понеделник); тема `weekly_routed`; `dynamic-responder` (`task_report`) | ✅ |
 | `dynamic-responder` | 23 | `index.ts` | Насрочените напомняния от `notification_schedules`; `task_report` → писмо през `send-routed-report`, не push (и за постоянна задача) | **крон 11** (`*/15 * * * *`) | ✅ |
 | `kasa-access-check` | 7 | `index.ts` | Проверка на индивидуален PIN за таб История | **никой** — няма клиентска част | ✅ |
-| `admin-users` | 1 | `index.ts` + `handler.ts` + `_shared/session.ts` | Записите в `users` от Администрация (create / update / delete) — само с админски пропуск, бели списъци на полетата | портал — `admin.js` (`adminUsers`) — **след етап 3г**; дотогава никой | ✅ |
+| `admin-users` | 1 | `index.ts` + `handler.ts` + `_shared/session.ts` | Записите в `users` от Администрация (create / update / delete) — само с админски пропуск, бели списъци на полетата | портал — `admin.js` (`adminUsers` — шестте записа в users) | ✅ |
 | `set-history-pin` | 8 | `index.ts` + `_shared/session.ts` | Админ задава/ресетва PIN (4–6 цифри); от 28.09.2026 винаги иска админски пропуск, иначе 403 | **никой** — няма клиентска част | ✅ |
 | `swift-handler` | 41 | **`rm-push-index.ts`** | ⚠️ **НЕ Е ЗА ТОЗИ ПОРТАЛ** — напомняния към **RM-app** | **крон 4, 5, 6** (`0 5`, `0 11`, `0 14`, делник) | ✅ |
 
@@ -221,6 +221,15 @@ id-то се търси първо в `bulletin_tasks`, после в `recurring
 PostgREST с публичния ключ. Правата на `anon` върху таблицата още НЕ са
 затегнати (етап 4) — дотогава функцията е заключената врата, а старият път
 стои отворен до нея.
+
+Клиент: `adminUsers(action, id, fields)` в `admin.js` — шестте места
+(„Назначени магазини", „Вечерен оборот", изтриване, редакция, създаване,
+„Групи за известия"). Връща форма като `sbPatch`/`sbDelete`
+(`{ok, status, error:{message}}` + `id`/`count`), за да работи `sbErrMsg`;
+404 при delete става `{ok:true, count:0}`, тоест `deleteUser` пази неутралния
+изход „Нямаше какво да се изтрие". `logAudit` остава в клиента. Заковано в
+`tests/admin-users-writes.test.js`: и шестте пътя с истински клик и
+глобална проверка, че няма нито една заявка ≠ GET към `/rest/v1/users`.
 
 Тяло: `{ session, action, id?, fields? }`.
 1. `requireAdmin(body)` — иначе `403 forbidden`, **преди** валидацията и базата.

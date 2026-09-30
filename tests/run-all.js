@@ -96,6 +96,7 @@ const TESTS = [
   'shared-write-errors.test.js',
   'admin-user-create-select.test.js',
   'admin-set-password-session.test.js',
+  'admin-users-writes.test.js',
   'store-cache-invalidation.test.js',
   'return-proof.test.js',
   'stock-returns-order-number.test.js',

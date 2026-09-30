@@ -310,20 +310,21 @@ function adminEnv() {
       ok('нерегионален → отметката е свалена', cb.checked === false);
     }
 
-    /* Вдигаме я и записваме → is_regional влиза в PATCH. */
+    /* Вдигаме я и записваме → is_regional влиза в update към admin-users
+       (от етап 3 записите в users минават през едж функцията, не PATCH). */
     cb.checked = true;
     if (guard('submitUserModal() не хвърля', () => h2.w.submitUserModal())) {
       await ticks();
-      const patches = h2.calls.patch.filter(p => p.table === 'users');
-      if (ok('има PATCH към users', patches.length === 1, String(patches.length))) {
-        ok('is_regional влиза в тялото', patches[0].body.is_regional === true,
-          JSON.stringify(patches[0].body));
-        ok('и попада върху ВЕРНИЯ ред', patches[0].url.indexOf('id=eq.u-2') >= 0,
-          patches[0].url);
+      const ups = h2.calls.adminUsers.filter(c => c && c.action === 'update');
+      if (ok('има update към admin-users', ups.length === 1, String(ups.length))) {
+        ok('is_regional влиза в fields', ups[0].fields.is_regional === true,
+          JSON.stringify(ups[0].fields));
+        ok('и попада върху ВЕРНИЯ ред', ups[0].id === 'u-2', ups[0].id);
         /* Останалите полета не бива да се губят при добавянето. */
-        ok('ролята продължава да се записва', patches[0].body.role === 'accounting',
-          JSON.stringify(patches[0].body));
+        ok('ролята продължава да се записва', ups[0].fields.role === 'accounting',
+          JSON.stringify(ups[0].fields));
       }
+      ok('няма PATCH към /rest/v1/users', !h2.calls.patch.some(p => p.table === 'users'));
     }
     h2.close();
 
@@ -334,10 +335,10 @@ function adminEnv() {
     h3.doc.getElementById('um-regional').checked = false;
     if (guard('submitUserModal() при сваляне не хвърля', () => h3.w.submitUserModal())) {
       await ticks();
-      const p = h3.calls.patch.filter(x => x.table === 'users')[0];
-      if (ok('има PATCH при сваляне', !!p)) {
-        ok('изпраща се false, а не липсващо поле', p.body.is_regional === false,
-          JSON.stringify(p.body));
+      const p = h3.calls.adminUsers.filter(x => x && x.action === 'update')[0];
+      if (ok('има update при сваляне', !!p)) {
+        ok('изпраща се false, а не липсващо поле', p.fields.is_regional === false,
+          JSON.stringify(p.fields));
       }
     }
     h3.close();
@@ -345,8 +346,9 @@ function adminEnv() {
 
   section('7. Създаване на нов колега — колоната НЕ се подава');
   {
-    /* anon няма INSERT грант върху is_regional (users-is-regional-schema.sql).
-       Подаде ли се, POST-ът пада с 403 и създаването на потребител спира. */
+    /* anon няма INSERT грант върху is_regional (users-is-regional-schema.sql),
+       а от етап 3 и белият списък на admin-users за create го отказва с 400.
+       Подаде ли се, създаването на потребител спира. */
     const h = adminEnv();
     h.w.openUserModal(null);
     await ticks();
@@ -360,13 +362,14 @@ function adminEnv() {
     h.doc.getElementById('um-pass').value = '1234';
     if (guard('submitUserModal() за нов не хвърля', () => h.w.submitUserModal())) {
       await ticks();
-      const posts = h.calls.post.filter(p => p.table === 'users');
-      if (ok('има POST към users', posts.length === 1, String(posts.length))) {
-        ok('is_regional НЕ е в тялото',
-          !('is_regional' in posts[0].body), JSON.stringify(posts[0].body));
-        ok('имейлът и ролята са там', posts[0].body.email === 'nov@temax.bg' &&
-          posts[0].body.role === 'accounting', JSON.stringify(posts[0].body));
+      const cr = h.calls.adminUsers.filter(c => c && c.action === 'create');
+      if (ok('има create към admin-users', cr.length === 1, String(cr.length))) {
+        ok('is_regional НЕ е в fields',
+          !('is_regional' in cr[0].fields), JSON.stringify(cr[0].fields));
+        ok('имейлът и ролята са там', cr[0].fields.email === 'nov@temax.bg' &&
+          cr[0].fields.role === 'accounting', JSON.stringify(cr[0].fields));
       }
+      ok('няма POST към /rest/v1/users', !h.calls.post.some(p => p.table === 'users'));
     }
     h.close();
   }

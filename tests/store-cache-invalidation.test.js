@@ -42,34 +42,30 @@ function env(opts) {
     modules: ['bulletin.js', 'admin.js'],
     user: ADMIN,
     data: { users: opts.users || USERS_18, stores: STORES },
-    confirm: true
+    confirm: true,
+    /* Записите в users (етап 3) минават през admin-users — стъбът на
+       harness-а; create връща id-то на новия колега. */
+    adminUsers: opts.adminUsers || (b => b && b.action === 'create'
+      ? { status: 200, body: { ok: true, id: 'u-nov' } } : null)
   });
-  h.postUrls = [];
-  /* Създаването на потребител ползва гол fetch с return=representation —
-     харнесът връща {} и потокът се разминава с реалния. Същият стъб като в
-     admin-user-create-select.test.js. */
+  h.w.currentSession = 'adm.sig';
+  /* auth-set-password трябва да върне {ok:true}, иначе потокът се разминава
+     с реалния. */
   const orig = h.w.fetch;
   h.w.fetch = function (url, init) {
     init = init || {};
-    if (String(url).indexOf('/functions/v1/') >= 0) {
+    if (String(url).indexOf('/functions/v1/auth-set-password') >= 0) {
       return Promise.resolve({
         ok: true, status: 200,
         json: () => Promise.resolve({ ok: true }),
         text: () => Promise.resolve('{"ok":true}')
       });
     }
-    if ((init.method || 'GET').toUpperCase() === 'POST' && String(url).indexOf('/users') >= 0) {
-      h.postUrls.push(String(url));
-      return Promise.resolve({
-        ok: true, status: 201,
-        json: () => Promise.resolve([{ id: 'u-nov' }]),
-        text: () => Promise.resolve('[{"id":"u-nov"}]')
-      });
-    }
     return orig(url, init);
   };
   return h;
 }
+const auCalls = (h, action) => h.calls.adminUsers.filter(c => c && c.action === action);
 
 function modal(doc) { return doc.getElementById('user-modal-ov'); }
 function fillModal(doc, o) {
@@ -121,7 +117,7 @@ function bothCleared(w) {
                        role: 'manager', store: 'Нов обект', pass: 'tajna123' });
       if (guard('клик по "Добави"', () => realClick(w, btn(modal(doc), 'Добави')))) {
         await ticks();
-        ok('POST към users е изпратен', h.postUrls.length === 1, h.postUrls.join(' | '));
+        ok('create към admin-users е изпратен', auCalls(h, 'create').length === 1, JSON.stringify(h.calls.adminUsers));
         ok('кешовете са нулирани', bothCleared(w),
           JSON.stringify([w.allStoresCache, w.reportableStoresCache]));
 
@@ -145,7 +141,7 @@ function bothCleared(w) {
     const h = env();
     const { w, doc } = h;
     await warm(w);
-    /* Редакция: _userEditId е зададен, потокът минава през sbPatch. */
+    /* Редакция: _userEditId е зададен, потокът минава през adminUsers('update'). */
     if (guard('модалът се отваря за редакция', () => w.openUserModal('u0'))) {
       await ticks();
       fillModal(doc, { email: 'vraca@temax.bg', role: 'manager', store: 'Нов обект' });
@@ -155,9 +151,8 @@ function bothCleared(w) {
         realClick(w, b);
       })) {
         await ticks();
-        ok('PATCH към users е изпратен',
-          h.calls.patch.some(p => String(p.url).indexOf('/users') >= 0),
-          h.calls.patch.map(p => p.url).join(' | '));
+        ok('update към admin-users е изпратен', auCalls(h, 'update').length === 1,
+          JSON.stringify(h.calls.adminUsers));
         ok('кешовете са нулирани', bothCleared(w),
           JSON.stringify([w.allStoresCache, w.reportableStoresCache]));
       }
@@ -172,8 +167,8 @@ function bothCleared(w) {
     await warm(w);
     guard('deleteUser() не хвърля', () => w.deleteUser('u0', 'vraca@temax.bg'));
     await ticks();
-    ok('DELETE е изпратен', h.calls.del.some(u => String(u).indexOf('/users') >= 0),
-      h.calls.del.join(' | '));
+    ok('delete към admin-users е изпратен', auCalls(h, 'delete').length === 1,
+      JSON.stringify(h.calls.adminUsers));
     ok('кешовете са нулирани', bothCleared(w),
       JSON.stringify([w.allStoresCache, w.reportableStoresCache]));
   }
@@ -211,22 +206,9 @@ function bothCleared(w) {
      рендер би теглил наново, без нищо да се е променило. */
   section('6. Провалило се изтриване не пипа кешовете');
   {
-    const h = env();
+    const h = env({ adminUsers: () => ({ status: 403,
+      body: { ok: false, reason: 'forbidden', message: 'Нямате права за тази операция.' } }) });
     const { w } = h;
-    h.w.fetch = (function (orig) {
-      return function (url, init) {
-        init = init || {};
-        if ((init.method || 'GET').toUpperCase() === 'DELETE') {
-          return Promise.resolve({
-            ok: false, status: 403,
-            headers: { get: () => null },
-            json: () => Promise.resolve({ message: 'отказано' }),
-            text: () => Promise.resolve('{"message":"отказано"}')
-          });
-        }
-        return orig(url, init);
-      };
-    })(h.w.fetch);
     await warm(w);
     guard('deleteUser() не хвърля при 403', () => w.deleteUser('u0', 'vraca@temax.bg'));
     await ticks();
