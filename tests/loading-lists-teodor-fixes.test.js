@@ -11,16 +11,11 @@
         на стоковия документ зависи от него. Тест, който проверява само че
         текстът го няма, би минал и ако колоната беше изтрита от записа.
 
-     3) Магазин като ИЗПРАЩАЧ. Тук е лесно да се счупи тихо в три посоки:
-        · llCanEdit() става true за магазина — а той дотук решаваше КОЙ
-          ИЗГЛЕД се рендира. Без llIsSenderStore() в диспечера картата за
-          получаване просто изчезва и никой не забелязва, докато обект не се
-          оплаче, че не вижда товара си;
-        · изпращачът остава в списъка с получатели → лист от Петрич за Петрич,
-          който стига до собствената му карта „Към мен";
-        · известието за СОБСТВЕНИЯ лист. Филтърът е по warehouse на листа, не
-          по роля: един и същи човек е изпращач по едни листи и получател по
-          други.
+     3) Магазинът като изпращач — ОТМЕНЕНО на 30.09.2026 (Теодор, 28.09):
+        изпращач е само логистичен склад. Тук остава обратното: магазинът е
+        само получател, без раздели и без бутон за нов лист. Проверките по
+        ДАННИ (известието за собствен лист, търсенето по изпращач) остават —
+        стари листи с изпращач магазин има в базата.
 
      4) Рулото се номерира. Препратката за опис вече различава ТРИ вида —
         „", „rc", „rl". Пропусне ли се третата, описът на руло 1 показва
@@ -125,7 +120,7 @@ function env(user, opts) {
   });
   h.w.llLists = []; h.w.llItems = []; h.w.llStoreLists = []; h.w.llStoreItems = [];
   h.w.llView = 'list'; h.w.llCurrentId = null; h.w.llDraft = null;
-  h.w.llWarehouse = ''; h.w.llStoreTab = 'in'; h.w.llCollapsed = {};
+  h.w.llWarehouse = ''; h.w.llCollapsed = {};
   h.w.invalidateStoreCaches();
   h.toasts = [];
   const origToast = h.w.toast;
@@ -180,32 +175,15 @@ const pr = h => h.doc.getElementById('mod-print');
     ok('и не носи D-777', html.indexOf('D-777') < 0);
   }
 
-  section('3) Магазинът като изпращач — права, раздели, получатели');
+  section('3) Магазинът НЕ е изпращач — само получател');
   {
     const h = env(PETRICH, { lists: [], items: [] });
-    ok('llIsSenderStore() е true за магазина', h.w.llIsSenderStore() === true);
-    ok('llCanEdit() също', h.w.llCanEdit() === true);
-    ok('llActiveWarehouse() е неговият обект', h.w.llActiveWarehouse() === 'Петрич',
+    ok('llCanEdit() е false за магазина', h.w.llCanEdit() === false);
+    ok('llActiveWarehouse() е празен — магазинът не е изпращач', h.w.llActiveWarehouse() === '',
       h.w.llActiveWarehouse());
-    ok('и той НЕ избира друг изпращач', h.w.llWarehouseSelectHtml() === '',
-      h.w.llWarehouseSelectHtml());
+    ok('llIsSenderStore вече го няма', typeof h.w.llIsSenderStore === 'undefined');
 
-    /* Логистичният склад НЕ е „магазин-изпращач" — той няма раздели. */
-    const w = env(WAREHOUSE, { lists: [], items: [] });
-    ok('складът не е sender store', w.w.llIsSenderStore() === false);
-    w.w.loadLoadingLists();
-    await ticks(); await ticks();
-    ok('и няма чипове', !mod(w).querySelector('[data-ll-store-tabs]'),
-      mod(w).textContent.slice(0, 200));
-
-    /* Централният офис също не е — той минава по клона admin/logistics. */
-    const a = env(ADMIN, { lists: [], items: [] });
-    ok('admin не е sender store', a.w.llIsSenderStore() === false);
-  }
-
-  section('3) Двата раздела при магазина');
-  {
-    /* Лист КЪМ Петрич (от склада) и лист ОТ Петрич (към Сандански). */
+    /* Лист КЪМ Петрич (от склада) и стар лист ОТ Петрич (отпреди 30.09). */
     const lists = [
       list_({ id: 'IN', warehouse: WH, status: 'sent' }),
       list_({ id: 'OUT', warehouse: 'Петрич', status: 'draft' })
@@ -214,56 +192,21 @@ const pr = h => h.doc.getElementById('mod-print');
       item_({ id: 'a1', list_id: 'IN', store_name: 'Петрич', purchase_doc: 'ИЗХ-ВХОД' }),
       item_({ id: 'b1', list_id: 'OUT', store_name: 'Сандански', purchase_doc: 'ИЗХ-ИЗХОД' })
     ];
-    const h = env(PETRICH, { lists: lists, items: items });
-    h.w.loadLoadingLists();
+    const h2 = env(PETRICH, { lists: lists, items: items });
+    h2.w.loadLoadingLists();
     await ticks(); await ticks();
+    ok('няма раздели „Към мен" / „От мен"', !mod(h2).querySelector('[data-ll-store-tabs]'));
+    ok('вижда входящия лист', mod(h2).textContent.indexOf('ИЗХ-ВХОД') >= 0, mod(h2).textContent.slice(0, 500));
+    ok('и НЕ вижда стария си изходящ', mod(h2).textContent.indexOf('ИЗХ-ИЗХОД') < 0);
+    ok('няма бутон за нов лист', !btn(mod(h2), 'Нов товарен лист'));
+    ok('заглавието е едно', (mod(h2).innerHTML.match(/class="pg-title"/g) || []).length === 1);
 
-    const tabs = mod(h).querySelector('[data-ll-store-tabs]');
-    if (ok('чиповете ги има', !!tabs, mod(h).textContent.slice(0, 300))) {
-      ok('два — „Към мен" и „От мен"', tabs.querySelectorAll('button').length === 2,
-        tabs.textContent);
-      ok('заглавието е ЕДНО, не две',
-        (mod(h).innerHTML.match(/class="pg-title"/g) || []).length === 1,
-        String((mod(h).innerHTML.match(/class="pg-title"/g) || []).length));
-    }
-    ok('по подразбиране „Към мен" — вижда входящия лист',
-      mod(h).textContent.indexOf('ИЗХ-ВХОД') >= 0, mod(h).textContent.slice(0, 500));
-    ok('и НЕ вижда изходящия', mod(h).textContent.indexOf('ИЗХ-ИЗХОД') < 0);
-    ok('няма бутон за нов лист в „Към мен"', !btn(mod(h), 'Нов товарен лист'));
-
-    /* Превключване към „От мен" — складовият изглед. */
-    h.w.llSetStoreTab('out');
-    await ticks(); await ticks();
-    ok('„От мен" показва бутона за нов лист', !!btn(mod(h), 'Нов товарен лист'),
-      mod(h).textContent.slice(0, 400));
-    ok('и собствената чернова', mod(h).textContent.indexOf('📝 Чернова') >= 0,
-      mod(h).textContent.slice(0, 400));
-    ok('llStoreTab е „out"', h.w.llStoreTab === 'out');
-    ok('чиповете си остават', !!mod(h).querySelector('[data-ll-store-tabs]'));
-
-    /* И обратно. */
-    h.w.llSetStoreTab('in');
-    await ticks(); await ticks();
-    ok('обратно в „Към мен"', mod(h).textContent.indexOf('ИЗХ-ВХОД') >= 0 &&
-      !btn(mod(h), 'Нов товарен лист'), mod(h).textContent.slice(0, 300));
-    ok('изгледът се връща в списък', h.w.llView === 'list');
-  }
-
-  section('3) Изпращачът не може да е получател на своя лист');
-  {
-    const h = env(PETRICH, { lists: [], items: [] });
-    h.w.llStoreTab = 'out';
-    h.w.llStores = ['Гоце Делчев', 'Петрич', 'Сандански'];
-    const opts = h.w.llStoreOptions('');
-    ok('Петрич го няма сред получателите', opts.indexOf('>Петрич<') < 0, opts);
-    ok('но другите два са там',
-      opts.indexOf('>Гоце Делчев<') >= 0 && opts.indexOf('>Сандански<') >= 0, opts);
-    /* Заварена стойност се пази видима — иначе редакция на стар лист би я
-       изтрила тихо при първото пре-рендиране. */
-    ok('заварен избор „Петрич" ОСТАВА видим', h.w.llStoreOptions('Петрич').indexOf('>Петрич<') >= 0,
-      h.w.llStoreOptions('Петрич'));
-    /* КОНТРОЛА: за склада нищо не отпада. */
+    /* Логистичният склад и admin — изпращачи. */
     const w = env(WAREHOUSE, { lists: [], items: [] });
+    ok('складът може да пише', w.w.llCanEdit() === true && w.w.llActiveWarehouse() === WH);
+    const a = env(ADMIN, { lists: [], items: [] });
+    ok('admin може да пише, но избира склад', a.w.llCanEdit() === true && a.w.llActiveWarehouse() === '');
+    /* КОНТРОЛА: при склада Петрич е получател. */
     w.w.llStores = ['Гоце Делчев', 'Петрич', 'Сандански'];
     ok('КОНТРОЛА: при склада Петрич е получател',
       w.w.llStoreOptions('').indexOf('>Петрич<') >= 0);
@@ -276,7 +219,6 @@ const pr = h => h.doc.getElementById('mod-print');
     const l = list_({ id: 'OUT', warehouse: 'Петрич', status: 'draft' });
     const items = [item_({ id: 'b1', list_id: 'OUT', store_name: 'Сандански' })];
     const h = env(PETRICH, { lists: [l], items: items });
-    h.w.llStoreTab = 'out';
     h.w.loadLoadingLists();
     await ticks(); await ticks();
     await h.w.llNotifyClosed(l);

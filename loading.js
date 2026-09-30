@@ -67,10 +67,6 @@ var llStoreProdOpen = {};     /* {itemId:true} — разгънати артик
 var llDocQuery = '';          /* търсене в „Документи от Стока на път" */
 var llListQuery = '';         /* търсене в списъка на листите (складът) */
 var llStoreQuery = '';        /* търсене в картите на обекта */
-/* Кой раздел гледа магазинът-изпращач: 'in' (към мен) | 'out' (от мен).
-   По подразбиране „към мен" — получаването е всекидневната работа, а
-   изпращането е изключение. */
-var llStoreTab = 'in';
 var llDocStore = '';          /* чип по обект; '' = всички */
 var llTransitError = false;   /* снимката НЕ се зареди — различно от „няма документи" */
 /* Показва ли се блокът „Документи от Стока на път" в редактора. Ключът е
@@ -122,35 +118,25 @@ var LL_STATUSES = [
 ];
 
 /* ─── ПРАВА И КОНТЕКСТ ──────────────────────────────────────── */
-/* Магазин, който може да ИЗПРАЩА — междускладов трансфер. Изпращачът на
-   лист вече не е задължително логистичен склад: loading_lists.warehouse е
-   текст и приема име на обект.
-   Централният офис и служебните имена отпадат през isReportableStore, а
-   admin/logistics минават по другия клон — те избират изпращача явно. */
-function llIsSenderStore(){
-  if(!currentUser) return false;
-  if(isLogisticsWarehouseUser()) return false;
-  if(['admin','logistics'].indexOf(currentUser.role) >= 0) return false;
-  return isReportableStore(currentUser.store_name);
-}
-/* Складът пише по СВОИТЕ листи; admin/logistics — по кой да е, но избират
-   склада явно; магазинът — по своите, които сам изпраща. Всеки друг е само
-   читател.
-   ВНИМАНИЕ: това вече НЕ решава кой изглед се рендира. Магазинът има и двете
-   страни и renderLoadingLists() пита llIsSenderStore() първо — иначе
-   картата за получаване би изчезнала в мига, в който обектът стане изпращач. */
+/* ИЗПРАЩАЧ Е САМО ЛОГИСТИЧЕН СКЛАД (Теодор, 28.09.2026). Товарният лист е
+   инструмент на изпращащия склад; магазинът е само получател — отмята,
+   заявява „Липсва", приключва приемането и добавя ред за одобрение.
+   От 23.09 до 30.09.2026 магазин можеше да изпраща (раздел „📤 От мен");
+   междуобектовото движение вече е в Трансфери (transfers.js).
+   Складът пише по СВОИТЕ листи; admin и logistics без склад — по кой да е от
+   двата склада, но го избират явно. Всеки друг е само читател. */
 function llCanEdit(){
   if(!currentUser) return false;
   return isLogisticsWarehouseUser() ||
-    ['admin','logistics'].indexOf(currentUser.role) >= 0 ||
-    llIsSenderStore();
+    ['admin','logistics'].indexOf(currentUser.role) >= 0;
 }
-/* Кой изпращач гледаме. За складовия потребител и за магазина-изпращач това е
-   неговият собствен обект и НЕ се избира — иначе би могъл да пише в чужд лист. */
+/* Кой изпращач гледаме. За складовия потребител това е собственият му склад
+   и НЕ се избира — иначе би могъл да пише в чужд лист. Изборът на admin се
+   приема само ако е логистичен склад: стар лист с изпращач магазин не се
+   отваря за писане оттук. */
 function llActiveWarehouse(){
   if(isLogisticsWarehouseUser()) return currentUser.store_name;
-  if(llIsSenderStore()) return currentUser.store_name;
-  return llWarehouse || '';
+  return LOGISTICS_WAREHOUSES.indexOf(llWarehouse) >= 0 ? llWarehouse : '';
 }
 function llActor(){ return currentUser ? (currentUser.display_name || currentUser.email) : ''; }
 /* Местна дата за новия товарен лист. Писано, когато today() от shared.js беше
@@ -402,15 +388,12 @@ function loadLoadingLists(){
   if(!wrap.innerHTML.trim()){
     wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">⏳ Зареждане...</div>';
   }
-  /* Магазинът-изпращач зарежда и двете страни: чиповете показват броя на
-     получаваните листи и когато гледа „От мен". */
-  if(llIsSenderStore() && llStoreTab === 'in'){ llLoadStoreSide(); return; }
   if(!llCanEdit()){ llLoadStoreSide(); return; }
   var wh = llActiveWarehouse();
   if(!wh){
     llView = 'list';
-    /* Списъкът на изпращачите иска имената на обектите — иначе селектът
-       показва само логистичните складове при първо отваряне. */
+    /* Обектите (получателите) се зареждат още тук, за да са готови, когато
+       складът бъде избран. */
     loadReportableStores().then(function(rows){
       llStores = Array.isArray(rows) ? rows : [];
       renderLoadingLists();
@@ -508,12 +491,7 @@ function renderLoadingLists(){
   var wrap = document.getElementById('mod-loading');
   if(!wrap) return;
   var h;
-  if(llIsSenderStore()){
-    /* Магазинът е и получател, и изпращач. Двата въпроса са различни —
-       „какво идва при мен" и „какво пращам аз" — и не се побират в един
-       екран, затова раздели, а не смесен списък. */
-    h = llStoreTabsHtml() + (llStoreTab === 'out' ? llWarehouseSideHtml() : llStoreBodyHtml());
-  } else if(!llCanEdit()){
+  if(!llCanEdit()){
     h = llStoreHtml();
   } else {
     h = llWarehouseSideHtml();
@@ -525,36 +503,12 @@ function renderLoadingLists(){
      долу добавеният артикул не се появява в модала. */
   if(llStoreAdd) llStoreAddRender();
 }
-/* Складовият изглед — трите му състояния на едно място, защото вече се вика
-   от два пътя: чистия склад и раздела „От мен" на магазина. */
+/* Складовият изглед — трите му състояния на едно място. */
 function llWarehouseSideHtml(){
   if(llView === 'edit') return llEditorHtml();
   if(llView === 'view') return llViewHtml();
   return llListHtml();
 }
-/* Чиповете на магазина-изпращач. Заглавието е ТУК, а не в двете тела, за да
-   не се удвоява — llStoreHtml() го носи само когато е сам на екрана. */
-function llStoreTabsHtml(){
-  var chip = function(key, label){
-    var on = llStoreTab === key;
-    return '<button data-t="'+key+'" onclick="llSetStoreTab(this.dataset.t)" '+
-      'style="border:1px solid '+(on?'#2563eb':'#e2e8f0')+';background:'+(on?'#eff6ff':'#fff')+
-      ';color:'+(on?'#1e40af':'#475569')+';border-radius:20px;padding:5px 14px;font-size:12.5px;'+
-      'font-weight:'+(on?'700':'500')+';cursor:pointer;">'+label+'</button>';
-  };
-  return '<div class="pg-title">🚛 Товарни листи</div>'+
-    '<div class="pg-sub">Какво идва при обекта и какво обектът изпраща.</div>'+
-    '<div data-ll-store-tabs="1" style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">'+
-      chip('in','📥 Към мен')+chip('out','📤 От мен')+'</div>';
-}
-function llSetStoreTab(t){
-  llStoreTab = (t === 'out') ? 'out' : 'in';
-  /* Връщане в списъка при смяна: редакторът на чужд раздел няма смисъл и
-     при обратно превключване би се отворил насред недовършена чернова. */
-  if(llStoreTab === 'in'){ llView = 'list'; }
-  loadLoadingLists();
-}
-
 /* ─── ИЗГЛЕД ЗА ОБЕКТА ──────────────────────────────────────── */
 /* При обекта се търси по изходящ № (по неговите редове), по склад и по дата.
    Датата се сверява И в двата вида — 23.09.2026 и 2026-09-23 — защото на
@@ -2285,26 +2239,17 @@ function llNotifyClosed(list){
   });
 }
 
-/* ─── ИЗБОР НА СКЛАД (само за admin/logistics) ──────────────── */
-/* Изпращачът може да е логистичен склад ИЛИ магазин (междускладов трансфер).
-   Двете групи са разделени с optgroup, защото списъкът иначе става двайсет
-   имена без ред и складовете се губят сред обектите.
-   Собственият потребител на склад/магазин не избира — за него изпращачът е
-   зададен и llActiveWarehouse() го връща. */
+/* ─── ИЗБОР НА СКЛАД (само за admin/logistics без склад) ────── */
+/* Изпращачът е само логистичен склад (Теодор, 28.09.2026) — изборът е между
+   двата. Складовият потребител не избира: llActiveWarehouse() връща неговия. */
 function llWarehouseSelectHtml(){
-  if(isLogisticsWarehouseUser() || llIsSenderStore()) return '';
+  if(isLogisticsWarehouseUser()) return '';
   var opt = function(w){
     return '<option'+(w===llWarehouse?' selected':'')+'>'+esc(w)+'</option>';
   };
-  /* llStores идва от loadReportableStores(), а isReportableStore вече
-     изключва логистичните складове и Централния офис — втори филтър тук би
-     бил мъртъв код, който изглежда като защита. Смени ли се правилото,
-     сменя се на ЕДНО място. */
-  var shops = llStores || [];
   return '<select id="ll-wh" class="fi" onchange="llSetWarehouse(this.value)" style="max-width:260px;display:inline-block;width:auto;">'+
     '<option value="">-- Избери изпращач --</option>'+
-    '<optgroup label="Логистични складове">'+LOGISTICS_WAREHOUSES.map(opt).join('')+'</optgroup>'+
-    (shops.length ? '<optgroup label="Магазини">'+shops.map(opt).join('')+'</optgroup>' : '')+
+    LOGISTICS_WAREHOUSES.map(opt).join('')+
     '</select>';
 }
 function llSetWarehouse(v){
