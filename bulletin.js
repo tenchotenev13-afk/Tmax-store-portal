@@ -618,14 +618,25 @@ function taskDueDates(t){
 function taskIsDueOnDate(t, dateStr){
   return taskDueDates(t).indexOf(dateStr) >= 0;
 }
-function taskIsMultiDay(t){ return taskDueDates(t).length > 1; }
+/* Многодневна = НЯКОЛКО ОТДЕЛНИ задължения. Прозоречната задача не е такава:
+   тя има едно състояние и минава по единично-дневния път навсякъде (календар,
+   блок по отдел, печат, „План за деня"). Отрязването е ТУК, в предиката, а не
+   на шестте места, които го питат — иначе едно от тях неизбежно ще остане с
+   брояча „X/4 дни отметнати" за задача, която се отмята веднъж.
+   Огледално на recurringIsMultiDay(), където решението е същото. */
+function taskIsMultiDay(t){ return !taskIsWindow(t) && taskDueDates(t).length > 1; }
 function taskDueLabel(t){
   var dates = taskDueDates(t);
   if(!dates.length) return '';
-  return dates.map(function(d){
+  var lbl = dates.map(function(d){
     var dt = new Date(d+'T00:00:00');
     return dt.toLocaleDateString('bg-BG',{day:'numeric',month:'numeric'});
-  }).join(', ');
+  });
+  /* Прозорец: „28.9–30.9" — тире, не запетая. Запетаята чете като три отделни
+     задължения, а тук денят е един, с разрешено по-рано (същото решение като
+     при recurringDueLabel). */
+  if(taskIsWindow(t)) return lbl[0]+'–'+lbl[lbl.length-1];
+  return lbl.join(', ');
 }
 /* Multi-select checkbox списък за избор на конкретни дни (Пон-Нед) при
    поставяне/редакция на задача. selectedDates: масив от YYYY-MM-DD низове. */
@@ -1602,9 +1613,12 @@ function bulPlanRowHtml(it, store, weekArr){
        вместо да допише първоначалния. data-kind носи истинския вид. */
     h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="'+(isRec?'recurring':'regular')+'" data-orig="'+(it.carriedFrom||'')+'" data-cdate="'+(cdate||'')+'" data-linked="'+lockKey+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(cdate,lockKey)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+bulLockStyle(cdate,lockKey)+'">';
   } else if(isRec){
-    h+='<input type="checkbox" '+(done?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(it.winComp?recurringWindowDoneAttr(it.winComp):bulLockAttr(cdate,lockKey))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+(it.winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(cdate,lockKey))+'">';
+    h+='<input type="checkbox" '+(done?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(it.winComp?winDoneAttr(it.winComp):bulLockAttr(cdate,lockKey))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+(it.winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(cdate,lockKey))+'">';
   } else {
-    h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+lockKey+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(cdate,lockKey,bulSpanOf(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+bulLockStyle(cdate,lockKey,bulSpanOf(t))+'">';
+    /* it.winComp го има и при еднократната с прозорец: тогава редът стои само в
+       деня на изпълнението и чекбоксът казва в title КОГА е свършена, вместо
+       само „друг ден" от заключването по дата. */
+    h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+lockKey+'" onchange="bulCheckboxChanged(this)"'+(it.winComp?winDoneAttr(it.winComp):bulLockAttr(cdate,lockKey,bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+(it.winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(cdate,lockKey,bulSpanOf(t)))+'">';
   }
   h+='<div style="flex:1;min-width:0;">';
   h+='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
@@ -1637,10 +1651,20 @@ function bulPlanGroups(dateISO, store){
   var deptRank=function(dk){ var i=DCOLS.indexOf(dk); return i<0?99:i; };
   /* обикновени (включително „в сила от" вече влезлите) */
   it.regular.forEach(function(t){
-    var cdate=taskIsMultiDay(t)?dateISO:(taskDueDates(t)[0]||null);
     if(taskIsNotice(t)){ notices.push({kind:'regular',t:t,notice:true,cdate:null}); return; }
-    var comp=store?bulComps.find(function(c){return c.task_id===t.id&&c.store_name===store&&(c.completion_date||null)===cdate;}):null;
-    untimed.push({kind:'regular',t:t,cdate:cdate,comp:comp||null,done:!!(comp&&comp.status==='done'),
+    /* Прозорец (еднократна с няколко дни): всеки ден до отмятането, после само
+       в деня на ИЗПЪЛНЕНИЕТО — същото решение б от 27.09.2026, по което се
+       държат прозоречните постоянни задачи няколко реда по-долу. Иначе
+       свършената в четвъртък задача стои в плана и в петък, и в събота. */
+    var isWin=taskIsWindow(t);
+    var winComp=isWin?taskWindowComp(t,store):null;
+    if(isWin&&winComp&&(winComp.completion_date||null)!==dateISO) return;
+    var cdate=isWin?(winComp?(winComp.completion_date||dateISO):dateISO)
+                   :(taskIsMultiDay(t)?dateISO:(taskDueDates(t)[0]||null));
+    var comp=winComp||(store?bulComps.find(function(c){return c.task_id===t.id&&c.store_name===store&&(c.completion_date||null)===cdate;}):null);
+    untimed.push({kind:'regular',t:t,cdate:cdate,comp:comp||null,winComp:winComp||null,
+                  done:!!(comp&&comp.status==='done'),
+                  winDeadline:(isWin&&!winComp)?(taskWindowDeadline(t)||null):null,
                   rank:[deptRank(t.department),0,t.sort_order||0]});
   });
   /* постоянни: изключените за обекта НЕ влизат; прозоречните — всеки ден до
@@ -2484,18 +2508,31 @@ function renderBulView(){
         /* Многоседмичната се показва във всеки ден от прозореца си, но
            отметката ѝ е ЕДНА и носи СРОКА — виж bulCellCdate(). */
         var cdateReg=bulCellCdate(t,dateStr);
+        /* Прозорец (еднократна с няколко дни): отметка на КОЙ ДА Е ден от него
+           затваря задачата. Клетката на останалите дни не се крие (правило 11)
+           — показва се отметната и заключена, с датата на реалното изпълнение.
+           Няма ли отметка, дните се държат както досега: отключен е само
+           днешният, през bulDateLockReason(). Един в един с прозоречната
+           ПОСТОЯННА задача няколко реда по-долу. */
+        var regWinComp=taskWindowComp(t,store);
+        var regWinDates=taskIsWindow(t)?taskWindowDates(t):null;
         html+='<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
         if(isGlobal()){
           html+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Бюлетин">📰</span>';
-          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;">'+esc(t.title||'')+(taskIsMultiDay(t)?'<span style="font-size:9px;color:#94a3b8;font-weight:400;"> ('+taskDueLabel(t)+')</span>':'')+'</span>';
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;">'+esc(t.title||'')+((taskIsMultiDay(t)||taskIsWindow(t))?'<span style="font-size:9px;color:#94a3b8;font-weight:400;"> ('+taskDueLabel(t)+')</span>':'')+'</span>';
           /* Брояч X/18 по СРОКА, тоест едно и също число във всеки ден от
-             прозореца — иначе офисът вижда седем различни числа за една задача. */
-          html+=calItemStatusHtml(t.id,'regular',t.target_stores,cdateReg);
+             прозореца — иначе офисът вижда седем различни числа за една задача.
+             При прозорец броячът минава по НАБОРА дати (пети аргумент): отметка
+             на кой да е ден от него брои за целия. */
+          html+=calItemStatusHtml(t.id,'regular',t.target_stores,cdateReg,regWinDates);
         } else {
-          var doneReg=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===cdateReg;});
-          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+cdateReg+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(cdateReg,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(cdateReg,bulTaskLinkKey(t),bulSpanOf(t))+'">';
+          var doneReg=regWinComp?true:(store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===cdateReg;}));
+          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+cdateReg+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(regWinComp?winDoneAttr(regWinComp):bulLockAttr(cdateReg,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(regWinComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(cdateReg,bulTaskLinkKey(t),bulSpanOf(t)))+'">';
           var carReg=bulCarriedInto('regular',t.id,store,cdateReg);
-          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carReg?bulCarriedMiniHtml(carReg):'')+bulAutoTransitNoteHtml(t,doneReg)+'</span>';
+          /* Прозорецът се изписва и на обекта: без него задачата изглежда като
+             три отделни задължения, а заключеният чекбокс на другите дни — като
+             счупен. „(28.9–30.9)" казва точно защо е заключен. */
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(taskIsWindow(t)?'<span style="font-size:9px;color:#94a3b8;font-weight:400;"> ('+taskDueLabel(t)+')</span>':'')+(carReg?bulCarriedMiniHtml(carReg):'')+bulAutoTransitNoteHtml(t,doneReg)+'</span>';
         }
         html+='</div>';
         /* „🗓 Срок ДД.ММ · С41" — същият надпис, който носеше лентата. Без него
@@ -2527,7 +2564,7 @@ function renderBulView(){
           html+=calItemStatusHtml(t.id,'recurring',t.target_stores,recCdate,recurringIsWindow(t)?recurringWindowDatesInWeek(t,days):null);
         } else {
           var doneRec=recWinComp?true:(store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===recCdate;}));
-          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(recWinComp?recurringWindowDoneAttr(recWinComp):bulLockAttr(recCdate,t.linked_module))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(recWinComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(recCdate,t.linked_module))+'">';
+          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(recWinComp?winDoneAttr(recWinComp):bulLockAttr(recCdate,t.linked_module))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(recWinComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(recCdate,t.linked_module))+'">';
           var carRec=bulCarriedInto('recurring',t.id,store,recCdate||dateStr);
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carRec?bulCarriedMiniHtml(carRec):'')+'</span>';
         }
@@ -2645,11 +2682,19 @@ function renderBulView(){
            като при постоянната notice в renderRecurringTasks(). */
         var isNotice=taskIsNotice(t);
         var isMulti=!isNotice&&taskIsMultiDay(t);
-        var singleDate=isMulti?null:(taskDueDates(t)[0]||null);
-        var done=!isNotice&&store&&!isMulti&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===singleDate;});
+        /* Прозоречната задача има ЕДНО състояние, затова taskIsMultiDay() я
+           изключва и тя минава по единично-дневния път — с истински чекбокс,
+           не с „отмятай в календара". Датата ѝ е днешната, ако днес е в
+           прозореца (тогава е отключена), иначе срокът: заключването тогава
+           казва „още не е настъпил"/„приключил", вместо да отвори отмятане
+           извън прозореца. Един в един с renderRecurringTasks(). */
+        var isWin=!isNotice&&taskIsWindow(t);
+        var winComp=isWin?taskWindowComp(t,store):null;
+        var singleDate=isMulti?null:(isWin?taskWindowCheckDate(t):(taskDueDates(t)[0]||null));
+        var done=!isNotice&&!isMulti&&(winComp?true:!!(store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===singleDate;})));
         var ppComp=(!isNotice&&store&&!isMulti)?bulPostponedCompOf('regular',t.id,store,singleDate):null;
         var postponed=!!ppComp;
-        var compObj=!isNotice&&store&&!isMulti&&bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===store&&(cc.completion_date||null)===singleDate;});
+        var compObj=!isNotice&&!isMulti&&(winComp||(store&&bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===store&&(cc.completion_date||null)===singleDate;})));
         /* Многоседмичната задача от ЧУЖД бюлетин не участва в подредбата:
            sort_order ѝ е от нейната седмица и пренаписването му оттук би
            разместило чужд бюлетин. Затова и ▲▼ ги няма на нейния ред. */
@@ -2672,7 +2717,7 @@ function renderBulView(){
         } else if(isMulti){
           html+='<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
-          html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+'">';
+          html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(winComp?winDoneAttr(winComp):bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+(winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+'">';
         }
         html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done,singleDate)+bulPostponedBadgeHtml(ppComp)+bulSpanBadgeHtml(t)+'</div>';
         if(t.description)html+='<div class="bul-desc">'+linkify(t.description)+'</div>';
@@ -2686,6 +2731,8 @@ function renderBulView(){
           } else if(isGlobal()){
             html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">Живи бройки по дни виж в 📅 Седмичен календар по-горе</div>';
           }
+        } else if(isWin){
+          html+=taskWindowDueLineHtml(t,winComp);
         } else if(singleDate&&!isNotice){
           html+=bulDueLineHtml(singleDate,done?bulDoneComp(t.id,store,singleDate):null,' ⚠️');
         }
@@ -4404,9 +4451,14 @@ function printSection(what){
            не срока — иначе листът за 28.09 твърди, че задачата важи от
            понеделник. От датата нататък — срока, както досега. */
         var spanFrom=(spanDue&&t.starts_on&&ds<taskSpanStart(t))?taskSpanStart(t):null;
+        /* Прозорецът — по същата причина като срока на многоседмичната: един и
+           същ ред в три дни иначе чете като три задачи. Тук пише и срока, и
+           най-ранния разрешен ден, защото точно те са цялото правило. */
+        var winDates=(!spanDue&&taskIsWindow(t))?taskWindowDates(t):null;
         s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span style="font-weight:600;">'+esc(t.title||'')+'</span>'+
            (spanFrom?'<span style="font-weight:400;"> (в сила от '+bulDM(spanFrom)+')</span>'
-                    :(spanDue?'<span style="font-weight:400;"> (срок '+bulDM(spanDue)+')</span>':''))+'</div>';
+                    :(spanDue?'<span style="font-weight:400;"> (срок '+bulDM(spanDue)+')</span>'
+                    :(winDates?'<span style="font-weight:400;"> (срок '+bulDM(winDates[winDates.length-1])+', може от '+bulDM(winDates[0])+')</span>':'')))+'</div>';
       });
       rdt.forEach(function(t){
         var dc=dotC[t.department]||'#64748b';
@@ -4453,12 +4505,18 @@ function printSection(what){
       s+='<div class="tasks-hdr">✅ Задачи за изпълнение тази седмица</div>';
       dt.forEach(function(t){
         var isMulti=taskIsMultiDay(t);
-        var singleDate=isMulti?null:(taskDueDates(t)[0]||null);
+        /* Прозорецът на хартията е ЕДНО квадратче: задачата се отмята веднъж.
+           taskIsMultiDay() вече я изключва, тоест редът минава по единичния
+           път; тук остава само откъде идва отметката — от набора дати, не от
+           един ден. */
+        var isWin=taskIsWindow(t);
+        var winComp=isWin?taskWindowComp(t,printStore):null;
+        var singleDate=isMulti?null:(isWin?taskWindowDeadline(t):(taskDueDates(t)[0]||null));
         /* Статус СПРЯМО КОНКРЕТНИЯ печатащ магазин и КОНКРЕТНИЯ ден (за
            многодневна задача status е неопределен без ден - показваме
            обобщение вместо чекмарк). status==='done' изрично - отложена
            задача не бива да излиза с ✓. */
-        var comp=(!isMulti&&printStore)?bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===printStore&&cc.status==='done'&&(cc.completion_date||null)===singleDate;}):null;
+        var comp=winComp||((!isMulti&&printStore)?bulComps.find(function(cc){return cc.task_id===t.id&&cc.store_name===printStore&&cc.status==='done'&&(cc.completion_date||null)===singleDate;}):null);
         var postponedComp=(!isMulti&&printStore)?bulPostponedCompOf('regular',t.id,printStore,singleDate):null;
         var isDone=!!comp;
         s+='<div class="task-row">';
@@ -4472,6 +4530,10 @@ function printSection(what){
         s+='<div class="task-title">'+esc(t.title||'')+' '+taskTypeBadgeHtml(t.task_type)+(postponedComp?'<span style="font-size:8pt;font-weight:700;padding:1pt 5pt;border-radius:8pt;background:#fff7ed;color:#b45309;border:0.5pt solid #fed7aa;">⏱ Отложена'+(postponedComp.postponed_to?' → '+bulDM(postponedComp.postponed_to):'')+'</span>':'')+'</div>';
         if(t.description)s+='<div class="task-desc">'+linkify(linkifyPlain(t.description))+'</div>';
         if(isMulti)s+='<div class="task-due">📅 Дни: '+taskDueLabel(t)+' (виж бройки по дни в календара по-горе)</div>';
+        /* Прозорец: срокът е последният ден, а предходните са разрешени —
+           затова на хартията стои и „може от", иначе обектът чете един ден и
+           пропуска, че може по-рано. */
+        else if(isWin)s+='<div class="task-due">📅 Срок: '+new Date(singleDate+'T00:00:00').toLocaleDateString('bg-BG')+' · ⏳ може от '+bulDM(taskWindowDates(t)[0])+' (една отметка)'+(isDone&&comp?' &nbsp; ✅ '+bulDM(comp.completion_date)+' '+esc(bulCompletedByLabel(comp.completed_by)):'')+'</div>';
         /* Многоседмичната е в списъка и на хартията — обектът работи по нея
            тази седмица — но редът за срока казва в коя седмица се брои.
            Печатният календар по-горе я няма: в тази седмица тя няма ден. */
@@ -4633,16 +4695,22 @@ function renderTasksPanel() {
 
       dTasks.forEach(function(t) {
         var isMulti = taskIsMultiDay(t);
-        var singleDate = isMulti ? null : (taskDueDates(t)[0]||null);
-        var isDone = !isMulti && bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='done' && (c.completion_date||null)===singleDate;});
+        /* Прозорец — същото, което прави блокът по отдел: един чекбокс, дата
+           за отмятане днес (ако е в прозореца) или срока, и отметка, намерена
+           по НАБОРА дати. Този панел е паралелният „мобилен" изглед на същите
+           задачи и трябва да казва същото, иначе обектът вижда две истини. */
+        var isWin = taskIsWindow(t);
+        var winComp = isWin ? taskWindowComp(t,store) : null;
+        var singleDate = isMulti ? null : (isWin ? taskWindowCheckDate(t) : (taskDueDates(t)[0]||null));
+        var isDone = !isMulti && (winComp ? true : bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='done' && (c.completion_date||null)===singleDate;}));
         var ppComp = isMulti ? null : bulPostponedCompOf('regular',t.id,store,singleDate);
         var isPostponed = !!ppComp;
-        var compInfo = !isMulti && (bulComps.find(function(c){return c.task_id===t.id && c.store_name===store && (c.completion_date||null)===singleDate;}) || null);
+        var compInfo = !isMulti && (winComp || bulComps.find(function(c){return c.task_id===t.id && c.store_name===store && (c.completion_date||null)===singleDate;}) || null);
         h += '<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
         if (isMulti) {
           h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
-          h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t))+'">' ;
+          h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(winComp?winDoneAttr(winComp):bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+(winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+'">' ;
         }
         h += '<div style="flex:1;">';
         h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':isPostponed?'#b45309':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
@@ -4652,6 +4720,8 @@ function renderTasksPanel() {
         h += bulAutoTransitNoteHtml(t, isDone);
         if (isMulti) {
           h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">📅 Дни: '+taskDueLabel(t)+' — отмятай в 📅 Седмичен календар</div>';
+        } else if (isWin) {
+          h += taskWindowDueLineHtml(t, winComp);
         } else if (singleDate) {
           h += bulDueLineHtml(singleDate, isDone ? bulDoneComp(t.id,store,singleDate) : null, ' ⚠️ Просрочено');
         }
@@ -5440,7 +5510,7 @@ function renderRecurringTasks(dk) {
       } else if (isMultiRec) {
         h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
       } else {
-        h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" data-cdate="'+(singleRecDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"' + (winComp?recurringWindowDoneAttr(winComp):bulLockAttr(singleRecDate,t.linked_module)) + ' ' +
+        h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" data-cdate="'+(singleRecDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"' + (winComp?winDoneAttr(winComp):bulLockAttr(singleRecDate,t.linked_module)) + ' ' +
           'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + (winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleRecDate,t.linked_module)) + '">';
       }
       h += '<div style="flex:1;">';
@@ -6016,9 +6086,22 @@ function recurringWindowCheckDate(t,weekArr){
   var td=bulTodayISO();
   return dates.indexOf(td)>=0 ? td : dates[dates.length-1];
 }
+/* Редът „Срок" за прозоречна еднократна задача. Срокът е ПОСЛЕДНИЯТ ден, не
+   датата за отмятане (taskWindowCheckDate може да е днес) — иначе редът би
+   казвал „Срок: днес (Днес!)" на всеки ден от прозореца. Вторият ред изписва
+   самия прозорец: без него задачата чете като еднодневна и целият смисъл на
+   фийчъра е невидим за обекта, който я изпълнява. */
+function taskWindowDueLineHtml(t, doneComp){
+  var dates=taskWindowDates(t);
+  if(!dates.length) return '';
+  return bulDueLineHtml(dates[dates.length-1], doneComp||null, ' ⚠️')+
+    '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">⏳ Прозорец '+taskDueLabel(t)+
+    ' — една отметка за целия период'+
+    (doneComp?(' · изпълнена на '+bulDM(doneComp.completion_date)):'')+'</div>';
+}
 /* Атрибути за вече затворен прозорец: отметнат и заключен на ВСЕКИ ден от
    прозореца, с датата на реалното изпълнение в title. */
-function recurringWindowDoneAttr(comp){
+function winDoneAttr(comp){
   return ' disabled title="Изпълнена на '+esc(fmtDate(comp.completion_date))+'"';
 }
 /* Постоянна задача с НЯКОЛКО избрани дни, които са ОТДЕЛНИ задължения.
