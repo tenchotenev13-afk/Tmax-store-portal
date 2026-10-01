@@ -104,7 +104,9 @@ function env(user, opts) {
       /* „📷 Сканирай" е зад app_settings 'loading_scan' (по подразбиране
          ИЗКЛЮЧЕН, 25.09.2026). Този тест описва ВКЛЮЧЕНИЯ скенер, затова
          флагът е изричен. Изключеното състояние е в loading-scan-toggle. */
-      app_settings: [{ key: 'loading_scan', value: 'on' }],
+      app_settings: opts.settings || [{ key: 'loading_scan', value: 'on' },
+                     /* Блокът „Артикули" е зад 'loading_products' (01.10.2026). */
+                     { key: 'loading_products', value: 'on' }],
       /* „📤 Изпрати" иска поне 2 снимки на натоварването (25.09.2026).
          Този тест проверява какво става СЛЕД изпращането, не гейта —
          затова фикстурата ги носи. Гейтът е в loading-lists-photos. */
@@ -439,6 +441,16 @@ const pr = h => h.doc.getElementById('mod-print');
     ok('ред с артикули няма надписа',
       !mod(withP).querySelector('tr[data-ll-noprod="i1"]') &&
       !!mod(withP).querySelector('tr[data-ll-vprod="i1"]'));
+
+    /* От 01.10.2026: при изключени артикули (loading_products ≠ 'on')
+       надписът го няма — те не се изискват. */
+    const off = env(WAREHOUSE, { lists: [list_({ status: 'draft' })], items: items,
+                                 settings: [{ key: 'loading_products', value: 'off' }] });
+    off.w.loadLoadingLists();
+    await ticks(); await ticks();
+    off.w.llOpenView('L1');
+    ok('loading_products = off → в черновата надписа го няма',
+      !mod(off).querySelector('tr[data-ll-noprod="i1"]'), mod(off).textContent.slice(0, 400));
   }
 
   section('6) Надписът за черновата — редактор и преглед, само в чернова');

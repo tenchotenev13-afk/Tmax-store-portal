@@ -81,6 +81,15 @@ var llTransitDocsOn = false;
    кодът с автодопълване е основният път.
    Регистърът на скритото е HIDDEN-FEATURES.md в корена. */
 var llScanOn = false;
+/* Показва ли се блокът „Артикули" във ВЪВЕЖДАНЕТО (редакторът на склада и
+   формата за извънреден ред на обекта). Ключът е app_settings
+   'loading_products'; изключено по подразбиране И в базата, И тук (Теодор,
+   01.10.2026: в началото складът да не се обърква, артикулите не са
+   задължителни). Изключен, блокът не се рендира — а с него не тръгват нито
+   автодопълването от каталога, нито скенерът: и двете се викат само оттам.
+   Вече въведените артикули остават видими в прегледа, печата и писмата.
+   Регистърът на скритото е HIDDEN-FEATURES.md в корена. */
+var llProductsOn = false;
 var LL_TRANSIT_PAGE = 1000;   /* PostgREST реже отговора на 1000 реда */
 
 var LL_KINDS = [
@@ -389,6 +398,15 @@ function loadLoadingLists(){
     wrap.innerHTML = '<div style="text-align:center;padding:40px;color:#94a3b8;">⏳ Зареждане...</div>';
   }
   if(!llCanEdit()){ llLoadStoreSide(); return; }
+  /* Флагът за артикулите трябва и на прегледа, не само на редактора:
+     надписът „Няма артикули — ✏️ Редакция" в черновата се показва само при
+     включени артикули (Теодор, 01.10.2026). Fire-and-forget, като при
+     обекта — списъкът не чака заради него; провалът пада към ИЗКЛЮЧЕНО. */
+  llLoadFeatureFlags().then(function(f){
+    if(f.products === llProductsOn) return;
+    llProductsOn = f.products;
+    renderLoadingLists();
+  });
   var wh = llActiveWarehouse();
   if(!wh){
     llView = 'list';
@@ -445,8 +463,9 @@ function llLoadStoreSide(){
   /* Fire-and-forget: флагът решава само дали се рендира един бутон, а
      картите не бива да чакат заради него. Провалът пада към ИЗКЛЮЧЕНО. */
   llLoadFeatureFlags().then(function(f){
-    if(f.scan === llScanOn) return;
+    if(f.scan === llScanOn && f.products === llProductsOn) return;
     llScanOn = f.scan;
+    llProductsOn = f.products;
     renderLoadingLists();
   });
   sbGet('loading_list_items','order=position.asc&select='+LL_ITEM_SELECT+storeQ()).then(function(items){
@@ -2476,9 +2495,9 @@ function llTransitGetAll(query){
    че тук безопасната посока е ИЗКЛЮЧЕНО, а не стойност по подразбиране.
    Ключът се сверява и в JS: PostgREST връща само търсените редове, но
    in.(…) с два ключа може да ги върне в кой да е ред. */
-var LL_FEATURE_KEYS = ['loading_transit_docs', 'loading_scan'];
+var LL_FEATURE_KEYS = ['loading_transit_docs', 'loading_scan', 'loading_products'];
 function llLoadFeatureFlags(){
-  var off = { transitDocs: false, scan: false };
+  var off = { transitDocs: false, scan: false, products: false };
   return sbGet('app_settings','key=in.('+LL_FEATURE_KEYS.join(',')+')&select=key,value')
     .then(function(rows){
       var on = function(key){
@@ -2486,7 +2505,7 @@ function llLoadFeatureFlags(){
         var raw = row && row.value != null ? String(row.value).trim().toLowerCase() : '';
         return raw === 'on';
       };
-      return { transitDocs: on('loading_transit_docs'), scan: on('loading_scan') };
+      return { transitDocs: on('loading_transit_docs'), scan: on('loading_scan'), products: on('loading_products') };
     })
     .catch(function(){ return off; });
 }
@@ -2499,6 +2518,7 @@ function llLoadEditorData(){
   return llLoadFeatureFlags().then(function(f){
     llTransitDocsOn = f.transitDocs;
     llScanOn = f.scan;
+    llProductsOn = f.products;
     return Promise.all([
       f.transitDocs
         ? llTransitGetAll('supplier=eq.' + encodeURIComponent(wh) + '&status=eq.pending' +
@@ -2658,6 +2678,16 @@ function llSetRowField(i, field, val){
   if(field === 'pallet_no' || field === 'pallet_total'){
     var n = parseInt(val, 10);
     it[field] = isNaN(n) ? null : n;
+    return;
+  }
+  if(field === 'purchase_doc'){
+    /* Ръчно въведен номер: без интервали отпред/отзад (затварянето в Стока
+       на път е точно сравнение), празно → null. Ред без документ няма
+       „частично" — отметката е на документа, а без него би останала да
+       виси като маркер при обекта. */
+    var doc = String(val == null ? '' : val).trim();
+    it.purchase_doc = doc || null;
+    if(!it.purchase_doc) it.partial = false;
     return;
   }
   it[field] = (val === '') ? null : val;
@@ -3018,7 +3048,14 @@ function llApplyTransitProducts(i, source){
 
 /* ─── Блокът в редактора ────────────────────────────────── */
 var LL_PF_IN = 'border:1px solid #cbd5e1;border-radius:6px;padding:7px 8px;font-size:13px;';
+/* Блокът се рендира, когато флагът е включен — или когато РЕДЪТ ВЕЧЕ има
+   артикули (стара чернова): иначе те биха се записали наново, без човекът да
+   ги вижда. */
+function llProductsBlockShown(it){
+  return llProductsOn || !!(it && it.products && it.products.length);
+}
 function llProductsBlockHtml(it, i){
+  if(!llProductsBlockShown(it)) return '';
   var pr = it.products || [];
   /* РАЗГЪНАТ по подразбиране: артикулите са същината на реда, а зад бутон
      складът просто не ги въвеждаше. Тества се срещу false, не срещу истина —
@@ -3596,7 +3633,13 @@ function llEditorHtml(){
           '<input type="number" min="1" value="'+(it.pallet_no!=null?it.pallet_no:'')+'" data-i="'+i+'" oninput="llSetRowField(this.dataset.i,\'pallet_no\',this.value)" style="width:52px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;">'+
           ' от <input type="number" min="1" value="'+(it.pallet_total!=null?it.pallet_total:'')+'" data-i="'+i+'" oninput="llSetRowField(this.dataset.i,\'pallet_total\',this.value)" style="width:52px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;">'
           :'<span style="color:#cbd5e1;">—</span>')+'</td>'+
-        '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+'</td>'+
+        /* Изходящ № — ръчно (Теодор, 01.10.2026). Дотук се попълваше само от
+           блока „Документи от Стока на път", скрит от 23.09. oninput пише без
+           пре-рендиране (фокусът остава); onchange пре-рендира, за да се
+           обнови колоната „частично", която зависи от документа. */
+        '<td style="padding:3px 6px;"><input class="ll-doc-in" data-i="'+i+'" value="'+llAttr(it.purchase_doc)+'" placeholder="без" '+
+          'oninput="llSetRowField(this.dataset.i,\'purchase_doc\',this.value)" onchange="renderLoadingLists()" '+
+          'style="width:110px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;font-family:DM Mono,monospace;"></td>'+
         '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'store_name\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+llStoreOptions(it.store_name)+'</select></td>'+
         '<td style="padding:3px 6px;">'+
           /* При извънгабаритния полето сменя смисъла си: то вече не е бележка
@@ -3617,7 +3660,7 @@ function llEditorHtml(){
           '<button data-i="'+i+'" onclick="llMoveRow(+this.dataset.i,1)" title="Надолу" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">↓</button>'+
           '<button data-i="'+i+'" onclick="llRemoveRow(+this.dataset.i)" title="Махни реда" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">✕</button>'+
         '</td></tr>'+
-        '<tr data-ll-prodrow="'+i+'"><td></td><td colspan="7" style="padding:0 6px 6px;">'+llProductsBlockHtml(it, i)+'</td></tr>';
+        (llProductsBlockShown(it) ? '<tr data-ll-prodrow="'+i+'"><td></td><td colspan="7" style="padding:0 6px 6px;">'+llProductsBlockHtml(it, i)+'</td></tr>' : '');
     });
     h += '</table></div>';
   }
@@ -4015,16 +4058,25 @@ function llViewHtml(){
   /* „🖨 Опис" — на ПЪРВИЯ ред от всеки палет: палетът е една физическа
      единица с един опис, дори да носи няколко документа (няколко реда). */
   var descSeen = {};
+  /* Опис без артикули е празен лист (Теодор, 01.10.2026) — бутонът е само
+     за единица, на която поне един ред има артикули. */
+  var unitRef = function(it){
+    return (llIsNumbered(it.kind) && it.pallet_no != null)
+      ? (it.kind === 'pallet' ? String(it.pallet_no)
+        : (it.kind === 'roll' ? 'rl' + it.pallet_no : 'rc' + it.pallet_no))
+      : String(it.id);
+  };
+  var unitHasProducts = {};
+  items.forEach(function(it){
+    if(it.products && it.products.length && llRowCounts(it)) unitHasProducts[JSON.stringify([it.store_name || '', unitRef(it)])] = true;
+  });
   items.forEach(function(it){
     /* „1" = палет 1; „rc1" = извънгабаритен 1; „rl1" = руло 1; иначе id на
        реда (насип). Без вида в препратката палет 1 и руло 1 на един обект се
        смесват в един опис. Представката „rc" е от предишното име на вида
        („рол контейнер") и се пази нарочно: тя не се записва никъде, но стои
        в data-u на бутоните и смяната ѝ би счупила вече отворен печат. */
-    var uref = (llIsNumbered(it.kind) && it.pallet_no != null)
-      ? (it.kind === 'pallet' ? String(it.pallet_no)
-        : (it.kind === 'roll' ? 'rl' + it.pallet_no : 'rc' + it.pallet_no))
-      : String(it.id);
+    var uref = unitRef(it);
     var ukey = JSON.stringify([it.store_name || '', uref]);
     var firstOfUnit = !descSeen[ukey];
     descSeen[ukey] = true;
@@ -4036,7 +4088,7 @@ function llViewHtml(){
       '<td style="padding:6px 9px;color:#94a3b8;">'+(it.position!=null?it.position:'—')+'</td>'+
       '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;">'+esc(llKindLabel(it))+
         (it.added_by_store?'<div style="margin-top:3px;text-decoration:none;font-weight:400;white-space:normal;">'+llApprovalBadge(it)+llApprovalNote(it)+llApproveBtnsHtml(l, it)+'</div>':'')+
-        (firstOfUnit && llRowCounts(it)
+        (firstOfUnit && llRowCounts(it) && unitHasProducts[ukey]
           ? ' <button data-l="'+l.id+'" data-s="'+escAttr(it.store_name||'')+'" data-u="'+escAttr(uref)+'" onclick="llPrint(this.dataset.l,this.dataset.s,this.dataset.u)" title="Опис на палета — за залепване" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:4px;">🖨 Опис</button>'
           : '')+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
@@ -4061,9 +4113,11 @@ function llViewHtml(){
       var vo = !!llViewProdOpen[it.id];
       h += '<tr data-ll-vprod="'+it.id+'" style="border-bottom:1px solid #f1f5f9;"><td></td><td colspan="6" style="padding:0 9px 6px;">'+
         llProductsToggleHtml(it, vo, 'llToggleViewProducts')+(vo ? llProductsTableHtml(it.products) : '')+'</td></tr>';
-    } else if(l.status === 'draft'){
+    } else if(l.status === 'draft' && llProductsOn){
       /* В черновата липсващият опис още може да се поправи и точно затова се
-         казва — след изпращането същият надпис би бил само упрек. */
+         казва — след изпращането същият надпис би бил само упрек. При
+         изключени артикули (loading_products ≠ 'on') надписът го няма: те не
+         се изискват, а редакторът и без това не показва блока. */
       h += '<tr data-ll-noprod="'+it.id+'" style="border-bottom:1px solid #f1f5f9;"><td></td><td colspan="6" style="padding:0 9px 6px;">'+
         '<span style="font-size:11.5px;color:#b45309;">Няма артикули</span> '+
         '<button data-id="'+l.id+'" onclick="llOpenEdit(this.dataset.id)" style="border:none;background:none;color:#4f46e5;font-size:11.5px;font-weight:600;cursor:pointer;padding:2px 0;">✏️ Редакция</button></td></tr>';

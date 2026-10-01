@@ -105,7 +105,9 @@ function env(user, seed, opts) {
          в loading-transit-toggle.test.js. */
       app_settings: [{ key: 'loading_transit_docs', value: 'on' },
                      /* „📷 Сканирай" е зад 'loading_scan' (25.09.2026). */
-                     { key: 'loading_scan', value: 'on' }],
+                     { key: 'loading_scan', value: 'on' },
+                     /* Блокът „Артикули" е зад 'loading_products' (01.10.2026). */
+                     { key: 'loading_products', value: 'on' }],
       product_catalog: [], goods_transit: [],
       users: db.users, stores: [], contacts: [], transport_orders: [],
       stock_differences: [], differences_reports: [], stock_returns: []

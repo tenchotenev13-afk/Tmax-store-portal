@@ -56,7 +56,9 @@ function env(user, settings, opts) {
               'stock-differences.js', 'loading.js'],
     user: user, confirm: true, fail: opts.fail,
     data: {
-      app_settings: settings || [],
+      /* Блокът „Артикули" (където живее скенерът) е зад 'loading_products'
+         (01.10.2026) — тук винаги включен, проверява се само скенерът. */
+      app_settings: (settings || []).concat([{ key: 'loading_products', value: 'on' }]),
       users: USERS,
       loading_lists: opts.lists || [],
       loading_list_items: opts.items || [],
@@ -181,8 +183,8 @@ async function openEditor(h) {
     await openEditor(h);
     const q = settingsGets(h);
     ok('точно една заявка към app_settings', q.length === 1, JSON.stringify(q));
-    ok('с in.(…) за двата ключа',
-      /key=in\.\(loading_transit_docs,loading_scan\)/.test(q[0] || ''), JSON.stringify(q));
+    ok('с in.(…) за трите ключа',
+      /key=in\.\(loading_transit_docs,loading_scan,loading_products\)/.test(q[0] || ''), JSON.stringify(q));
     ok('и иска ключа И стойността', /select=key,value/.test(q[0] || ''), JSON.stringify(q));
     ok('двата флага са вдигнати', h.w.llScanOn === true && h.w.llTransitDocsOn === true,
       h.w.llScanOn + ' / ' + h.w.llTransitDocsOn);

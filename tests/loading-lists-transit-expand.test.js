@@ -54,7 +54,9 @@ function env(opts) {
          'loading_transit_docs' (по подразбиране ИЗКЛЮЧЕН). Този тест описва
          включения блок, затова флагът е изричен. Изключеното състояние е
          в loading-transit-toggle.test.js. */
-      app_settings: [{ key: 'loading_transit_docs', value: 'on' }],
+      app_settings: [{ key: 'loading_transit_docs', value: 'on' },
+                     /* Блокът „Артикули" е зад 'loading_products' (01.10.2026). */
+                     { key: 'loading_products', value: 'on' }],
       goods_transit: function (url) {
         const u = new URL(url);
         const sp = u.searchParams;

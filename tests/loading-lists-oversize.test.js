@@ -156,8 +156,11 @@ const pr = h => h.doc.getElementById('mod-print');
       item({ id: 'C', position: 3, kind: 'oversize', pallet_no: 2, pallet_total: 2, purchase_doc: 'ИЗХ-300',
              warehouse_comment: 'ламперия' })
     ];
+    /* C също носи артикул: от 01.10.2026 „🖨 Опис" е само за единица с
+       артикули, а тук се проверяват препратките на трите. */
     const products = [P('A', 1, 'НА-ПАЛЕТА', 'СТОКА ОТ ПАЛЕТ', 5),
-                      P('B', 1, 'В-ИЗВЪНГАБ', 'СТОКА ОТ ИЗВЪНГАБАРИТЕН', 9)];
+                      P('B', 1, 'В-ИЗВЪНГАБ', 'СТОКА ОТ ИЗВЪНГАБАРИТЕН', 9),
+                      P('C', 1, 'ЛАМПЕРИЯ', 'ЛАМПЕРИЯ БОР', 3)];
     const h = env(WAREHOUSE, items, products);
     h.w.loadLoadingLists();
     await ticks(); await ticks();
