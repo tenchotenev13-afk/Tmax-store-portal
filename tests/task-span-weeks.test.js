@@ -252,7 +252,18 @@ function rowOf(root, tid) {
   return cb.closest('div[style*="border-bottom"]') || cb.parentElement;
 }
 const cbOf = (root, tid) => (root ? root.querySelector('input[data-tid="' + tid + '"]') : null);
+/* Лентата със срока в следваща седмица е МАХНАТА на 01.10.2026:
+   многоседмичната вече е в колоните на календара всеки ден от прозореца си.
+   Помощникът остава, за да може тестът да твърди, че лентата я НЯМА. */
 const stripOf = h => h.doc.getElementById('sec-span-strip');
+/* Клетката на даден ден от решетката на календара (0 = понеделник). */
+function calCell(h, dayIdx) {
+  const cal = calOf(h);
+  const grid = cal ? cal.querySelector('div[style*="grid-template-columns"]') : null;
+  return grid ? grid.children[dayIdx] : null;
+}
+const inCell = (h, dayIdx, title) => txt(calCell(h, dayIdx)).indexOf(title) >= 0;
+const inAnyCell = (h, title) => txt(calOf(h)).indexOf(title) >= 0;
 /* Числото в картата „📋 Задачи" на таба Анализ — то е в следващия div след
    етикета, затова се взима по структура, а не с регекс по целия текст. */
 function anCard(h) {
@@ -335,24 +346,33 @@ const deptCount = h => txt(h.doc.querySelector('[data-dept-count="admin"]'));
 
     const hW = await view('b-0', db);
     ok('W: задачата е в блока по отдел', !!cbOf(panelOf(hW), 't-span'));
-    ok('W: лентата под календара я показва', !!stripOf(hW) && txt(stripOf(hW)).indexOf('Клетка надувно') >= 0);
-    ok('W: НЕ е в клетка на календара (няма ден тази седмица)',
-      !!calOf(hW) && Array.prototype.every.call(calOf(hW).querySelectorAll('input[data-tid="t-span"]'),
-        cb => !!cb.closest('div') && !!stripOf(hW) && stripOf(hW).contains(cb)));
-    ok('W: лентата показва и задачата за три седмици напред', !!stripOf(hW) && txt(stripOf(hW)).indexOf('Три седмици') >= 0);
+    ok('W: календарът я показва в КОЛОНИТЕ', inAnyCell(hW, 'Клетка надувно'), txt(calOf(hW)).slice(0, 200));
+    ok('W: лентата вече не съществува', !stripOf(hW));
+    /* Дотук тук се твърдеше, че задачата НЕ е в клетка, защото нямала ден тази
+       седмица — вярно, докато клетките се пълнеха само по taskIsDueOnDate().
+       Сега прозорецът ѝ покрива цялата седмица W, тоест е във ВСИЧКИ седем дни. */
+    ok('W: и то във всеки ден от седмицата',
+      [0, 1, 2, 3, 4, 5, 6].every(i => inCell(hW, i, 'Клетка надувно')),
+      [0, 1, 2, 3, 4, 5, 6].map(i => (inCell(hW, i, 'Клетка надувно') ? '+' : '-')).join(''));
+    ok('W: колоните показват и задачата за три седмици напред', inAnyCell(hW, 'Три седмици'), txt(calOf(hW)).slice(0, 200));
 
     const hW1 = await view('b-1', db);
     ok('W+1 (седмицата на срока): задачата е в блока', !!cbOf(panelOf(hW1), 't-span'));
     ok('W+1: има значка „↔ от"', txt(panelOf(hW1)).indexOf('↔ от С') >= 0, txt(panelOf(hW1)).slice(0, 200));
-    ok('W+1: в лентата я НЯМА (срокът е в тази седмица)',
-      !stripOf(hW1) || txt(stripOf(hW1)).indexOf('Клетка надувно') < 0);
-    ok('W+1: задачата за три седмици напред е в лентата',
-      !!stripOf(hW1) && txt(stripOf(hW1)).indexOf('Три седмици') >= 0);
+    /* В седмицата на СРОКА: клетките я носят от понеделник до срока
+       (четвъртък = DUE_NEXT), след него — не. */
+    ok('W+1: в клетката на понеделник', inCell(hW1, 0, 'Клетка надувно'), txt(calCell(hW1, 0)).slice(0, 160));
+    ok('W+1: и в деня на СРОКА (четвъртък)', inCell(hW1, 3, 'Клетка надувно'), txt(calCell(hW1, 3)).slice(0, 160));
+    ok('W+1: СЛЕД срока (петък) я няма', !inCell(hW1, 4, 'Клетка надувно'), txt(calCell(hW1, 4)).slice(0, 160));
+    ok('W+1: и не се удвоява в деня на срока',
+      txt(calCell(hW1, 3)).split('Клетка надувно').length - 1 === 1, txt(calCell(hW1, 3)).slice(0, 200));
+    ok('W+1: задачата за три седмици напред е в колоните',
+      inAnyCell(hW1, 'Три седмици'), txt(calOf(hW1)).slice(0, 200));
     ok('W+1: обикновената задача на W я НЯМА', !cbOf(panelOf(hW1), 't-norm'));
 
     const hW2 = await view('b-2', db);
-    ok('W+2 (междинна за далечната): в лентата',
-      !!stripOf(hW2) && txt(stripOf(hW2)).indexOf('Три седмици') >= 0);
+    ok('W+2 (междинна за далечната): в колоните',
+      inAnyCell(hW2, 'Три седмици'), txt(calOf(hW2)).slice(0, 200));
     ok('W+2: задачата с близък срок вече я няма', !cbOf(panelOf(hW2), 't-span'));
 
     const hW3 = await view('b-3', db);
@@ -561,8 +581,8 @@ const deptCount = h => txt(h.doc.querySelector('[data-dept-count="admin"]'));
     /* Бюлетинът на W става чернова: обектите още не виждат задачите му. */
     const hs = await view('b-1', db, { user: STORE, bulStatus: { id: 'b-0', status: 'draft' } });
     ok('обект в W+1: многоседмичната от черновата я НЯМА', !cbOf(panelOf(hs), 't-span'));
-    ok('обект в W+1: и в лентата я няма',
-      !stripOf(hs) || txt(stripOf(hs)).indexOf('Три седмици') < 0);
+    ok('обект в W+1: и в клетките на календара я няма',
+      !inAnyCell(hs, 'Три седмици'), txt(calOf(hs)).slice(0, 200));
 
     const ha = await view('b-1', db, { bulStatus: { id: 'b-0', status: 'draft' } });
     ok('админ в W+1: вижда я (той вижда и черновите)', !!cbOf(panelOf(ha), 't-span'));
@@ -689,8 +709,15 @@ const deptCount = h => txt(h.doc.querySelector('[data-dept-count="admin"]'));
     const hW1 = await view('b-1', db);
     ok('в ЧУЖДА седмица я НЯМА в блока', txt(panelOf(hW1)).indexOf('Бележка за три седмици') < 0,
       txt(panelOf(hW1)).slice(0, 200));
-    ok('и я няма в лентата (тя и досега изхвърля notice)',
-      !stripOf(hW1) || txt(stripOf(hW1)).indexOf('Бележка за три седмици') < 0);
+    /* notice НЕ се размножава по прозореца: bulDayItems я изхвърля от spanDays
+       безусловно, точно както лентата никога не я показваше. В календара си
+       остава САМО в деня на срока — той е единственото място, където еднократна
+       notice се вижда, и така беше и преди 01.10.2026. Затова проверката е за
+       БРОЯ дни, не за отсъствие: отсъствието би било невярно твърдение. */
+    const noticeDays = [0, 1, 2, 3, 4, 5, 6].filter(i => inCell(hW1, i, 'Бележка за три седмици'));
+    ok('в чуждата седмица notice е в ЕДИН ден, не във всички',
+      noticeDays.length === 1, 'дни: ' + JSON.stringify(noticeDays));
+    ok('и този ден е денят на срока (четвъртък)', noticeDays[0] === 3, JSON.stringify(noticeDays));
 
     /* Формата отказва комбинацията — и при нова, и при редакция. */
     const h2 = await view('b-0', db);
@@ -742,8 +769,8 @@ const deptCount = h => txt(h.doc.querySelector('[data-dept-count="admin"]'));
     /* ── обектът, ПРЕДИ датата ── */
     const hs = await view('b-0', db, { user: STORE });
     ok('обектът НЕ я вижда в блока', !cbOf(panelOf(hs), 't-so'), txt(panelOf(hs)).slice(0, 200));
-    ok('обектът НЕ я вижда и в лентата',
-      !stripOf(hs) || txt(stripOf(hs)).indexOf('Клетка от петък') < 0);
+    /* Редът за лентата е махнат: тя вече не съществува, а проверката за
+       календара отдолу покрива същото и по-силно (цялата решетка). */
     ok('обектът НЕ я вижда в календара', txt(calOf(hs)).indexOf('Клетка от петък') < 0);
     /* Най-силната проверка: НИКЪДЕ в тялото на бюлетина — блок, панел, лента,
        календар. Отделните проверки по-горе са за да се вижда КОЕ е паднало. */

@@ -1184,6 +1184,28 @@ function bulAutoCompleteValid(auto, dueDates){
    седмицата (spans_from). Оттук тръгва и заключването на чекбокса — задача,
    която още не е в сила, не се отмята. */
 function bulSpanOf(t){ return taskSpanStart(t) || ''; }
+/* Денят, в който многоседмичната е била ИЗПЪЛНЕНА — местна дата от
+   completed_at. НЕ от completion_date: той при многоседмичната е винаги срокът
+   (решение D1), тоест не казва нищо за това кога е свършена работата.
+   През toLocalISO, не през slice на ISO низа: completed_at е UTC и между 00:00
+   и 03:00 местно време денят се разминава (виж localDateISO в shared.js).
+   Без completed_at пада на срока — редът пак се вижда, в деня на срока, вместо
+   да изчезне. */
+function bulSpanDoneDay(comp){
+  if(!comp) return null;
+  if(!comp.completed_at) return comp.completion_date ? String(comp.completion_date).slice(0,10) : null;
+  var d = new Date(comp.completed_at);
+  return isNaN(d.getTime()) ? (comp.completion_date ? String(comp.completion_date).slice(0,10) : null)
+                            : toLocalISO(d);
+}
+/* completion_date за реда в КЛЕТКАТА на календара. За многоседмичната е срокът,
+   не денят на клетката: тя се показва всеки ден от прозореца, но отметката ѝ е
+   ЕДНА и носи срока — точно както я пише лентата досега и както я четат
+   броячите, отчетите, „Днес" и известията. Ден на клетката тук би създал втори
+   ред за същата задача и би счупил всичко това мълчаливо. */
+function bulCellCdate(t, dateStr){
+  return taskSpansWeeks(t) ? (taskSpanDue(t) || dateStr) : dateStr;
+}
 /* Задача, която още не е в сила, я вижда САМО офисът: той я е написал
    предварително и трябва да я вижда, обектът — не. */
 /* „Офисът" тук е canEdit() (admin/accounting), НЕ isGlobal(): логистиката е
@@ -1236,6 +1258,26 @@ function bulSpanBadgeHtml(t){
     ? '🗓 Срок '+bulDM(due)+' · '+bulSpanDueWeekLabel(t)
     : '🗓 ↔ от '+bulSpanHomeLabel(t);
   return '<span title="Задача с срок в по-късна седмица — едно отмятане за целия период" style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#ecfeff;color:#0e7490;border:1px solid #a5f3fc;white-space:nowrap;cursor:help;">'+lbl+'</span>';
+}
+/* Значката на свой ред под заглавието в клетката на календара — същият надпис,
+   който носеше лентата „🗓 Със срок в следваща седмица". Отстъпът 16px го
+   подравнява под текста, до чекбокса. */
+function bulSpanBadgeRowHtml(t){
+  var b=bulSpanBadgeHtml(t);
+  return b ? '<div style="margin:0 0 4px 16px;">'+b+'</div>' : '';
+}
+/* ОТКЪДЕ започва прозорецът на клетките. За обекта — от „в сила от"
+   (taskSpanStart): преди тази дата задачата не го засяга и не я вижда никъде.
+   За офиса — от spans_from, тоест от собствената седмица на задачата: той я е
+   написал предварително и дотук я виждаше в лентата над календара, с бадж
+   „⏳ в сила от". Лентата е махната на 01.10.2026, значи ако прозорецът започваше
+   от starts_on за всички, задача с по-късно „в сила от" щеше да изчезне от
+   седмицата, в която е поставена — точно от погледа на човека, който я пише.
+   Ролево зависим прозорец, както е ролево зависима и видимостта в
+   bulTaskInForce(). */
+function bulSpanCellFrom(t){
+  if(canEdit() && t && t.spans_from) return String(t.spans_from).slice(0,10);
+  return taskSpanStart(t);
 }
 /* Редът „поставена е другаде" под заглавието, когато задачата идва от чужд
    бюлетин. Бутонът превключва на него — иначе човекът трябва да се сети сам
@@ -1293,6 +1335,46 @@ function bulDayItems(dateISO, store, opts){
     if(noNotice && taskIsNotice(t)) return false;
     return inScope(t);
   });
+  /* opts.spanDays — МНОГОСЕДМИЧНАТА задача във всеки ден от прозореца си
+     (01.10.2026). Дотук тя имаше клетка САМО в деня на срока и иначе стоеше
+     единствено в лентата над календара; магазините гледат колоните по дни и я
+     пропускаха, а бутонът към свързания таб го нямаше никъде.
+     Правилото е същото като при прозоречните постоянни задачи в „План за деня"
+     (решение б, 27.09.2026): всеки ден до отмятането, после само в деня на
+     ИЗПЪЛНЕНИЕТО. Денят идва от completed_at, НЕ от completion_date — при
+     многоседмичната completion_date е винаги срокът (решение D1, 25.09.2026),
+     тоест по него „денят на изпълнението" би бил срокът, какъвто и да е бил
+     истинският.
+     Опцията е изключена по подразбиране: „План за деня" има своя група
+     „🗓 Текущи, срок по-късно", а печатът на хартия е отделно решение. */
+  if(opts.spanDays){
+    var seen = {};
+    regular.forEach(function(t){ seen[String(t.id)] = 1; });
+    bulTasks.forEach(function(t){
+      if(seen[String(t.id)]) return;              /* вече е тук — денят на срока */
+      if(!taskSpansWeeks(t)) return;
+      if(!bulTaskInForce(t)) return;
+      /* notice НЕ се размножава по прозореца — безусловно, не само при
+         includeNotice:false. Лентата също никога не я показваше: задача „само за
+         информация" няма отметка и няма какво да се следи ден по ден, а 28
+         повторения на един и същ текст в календара са шум. Собственият си ден
+         си го запазва през taskIsDueOnDate() по-горе. */
+      if(taskIsNotice(t)) return;
+      if(!inScope(t)) return;
+      var from = bulSpanCellFrom(t), due = taskSpanDue(t);
+      if(!from || !due || dateISO < from || dateISO > due) return;
+      /* За обекта: отметната ли е, остава само в деня, в който е свършена. */
+      if(!isGlobal() && store){
+        var comp = bulComps.find(function(c){
+          return c.task_id===t.id && c.store_name===store && c.status==='done' &&
+                 (c.completion_date||null)===due;
+        });
+        if(comp && bulSpanDoneDay(comp) !== dateISO) return;
+      }
+      seen[String(t.id)] = 1;
+      regular.push(t);
+    });
+  }
   var recurring = recurringTasks.filter(function(t){
     if(!recurringIsDueOnWeekday(t,idx)) return false;
     if(noNotice && taskIsNotice(t)) return false;
@@ -1549,32 +1631,6 @@ function bulWeekTasks(){
   var wk=bulWeekISO();
   /* notice е извън всеки брояч — push-ът „Имате N задачи тази седмица" също. */
   return bulTasks.filter(function(t){ return !taskIsNotice(t) && taskCountsInWeek(t, wk) && taskInForce(t, bulTodayISO()); });
-}
-function bulSpanStripHtml(){
-  var store=currentUser&&currentUser.store_name;
-  var rows=bulTasks.filter(function(t){
-    if(taskIsNotice(t)||!bulSpanPending(t)||!bulTaskInForce(t)) return false;
-    return isGlobal()||!t.target_stores||!t.target_stores.length||(store&&t.target_stores.indexOf(store)>=0);
-  });
-  if(!rows.length) return '';
-  var h='<div id="sec-span-strip" style="margin-top:10px;border-top:1px dashed #a5f3fc;padding-top:8px;">';
-  h+='<div style="font-size:11px;font-weight:700;color:#0e7490;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;">🗓 Със срок в следваща седмица</div>';
-  rows.forEach(function(t){
-    var due=taskSpanDue(t);
-    var done=!isGlobal()&&store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===due;});
-    h+='<div style="display:flex;gap:6px;padding:3px 0;align-items:flex-start;">';
-    if(isGlobal()){
-      h+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Срок в по-късна седмица">🗓</span>';
-      h+='<span style="font-size:12.5px;flex:1;line-height:1.35;">'+esc(t.title||'')+'</span>';
-      h+=calItemStatusHtml(t.id,'regular',t.target_stores,due,null);
-    } else {
-      h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+(due||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(due,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:#0e7490;'+bulLockStyle(due,bulTaskLinkKey(t),bulSpanOf(t))+'">';
-      h+='<span style="font-size:12.5px;flex:1;line-height:1.35;'+(done?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</span>';
-    }
-    h+='<span style="font-size:10px;font-weight:700;color:#0e7490;white-space:nowrap;margin-left:4px;">до '+bulDM(due)+' · '+bulSpanDueWeekLabel(t)+'</span>';
-    h+='</div>';
-  });
-  return h+'</div>';
 }
 /* Бюлетинът, в който задачата е ПОСТАВЕНА. Отмятането от по-късна седмица
    иначе записваше показания бюлетин в task_completions.bulletin_id —
@@ -2264,15 +2320,14 @@ function renderBulView(){
     var store=currentUser&&currentUser.store_name;
     /* Обикновени задачи за деня - зачитаме target_stores, точно както в
        главния списък: магазин вижда само своите/общите, офисът вижда всичко. */
-    /* Гейт за „в сила от" тук НЯМА и не е пропуск: задача с starts_on е
-       многоседмична, а CHECK-ът bulletin_tasks_spans_later_week_chk изисква
-       срокът да е в ПО-КЪСНА седмица — тоест в собствената си седмица тя няма
-       ден и клетка. В по-късните седмици идва през loadSpanningTasks(), която
-       вече отрязва невлезлите в сила за обектите. Клон, който нищо не може да
-       задейства, не се пази „за всеки случай" — той просто не се тества. */
-    /* Подборът е в bulDayItems() — един източник за календара, печата и
+    /* „В сила от" се зачита в bulDayItems(): гейтът е bulTaskInForce() за
+       самата задача и прозорецът bulSpanCellFrom()..срок за деня. До 01.10.2026
+       тук пишеше, че многоседмичната няма клетка в собствената си седмица —
+       беше вярно, докато клетката се пълнеше само по taskIsDueOnDate(). Сега
+       spanDays я слага във ВСЕКИ ден от прозореца ѝ.
+       Подборът е в bulDayItems() — един източник за календара, печата и
        „План за деня". Тук остава само рисуването. */
-    var dayIt=bulDayItems(dateStr, store);
+    var dayIt=bulDayItems(dateStr, store, {spanDays:true});
     var regularForDay=dayIt.regular;
     var recurringForDay=dayIt.recurring;
     var manualAll=dayIt.manual;
@@ -2303,18 +2358,26 @@ function renderBulView(){
            филтърът е обратен на всички останали: не изхвърляне, а собствен
            ред. Ранният return минава и покрай брояча, и покрай чекбокса. */
         if(taskIsNotice(t)){ html+=calNoticeRowHtml(t,'regular'); return; }
+        /* Многоседмичната се показва във всеки ден от прозореца си, но
+           отметката ѝ е ЕДНА и носи СРОКА — виж bulCellCdate(). */
+        var cdateReg=bulCellCdate(t,dateStr);
         html+='<div style="display:flex;gap:5px;padding:2px 0;align-items:flex-start;">';
         if(isGlobal()){
           html+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Бюлетин">📰</span>';
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;">'+esc(t.title||'')+(taskIsMultiDay(t)?'<span style="font-size:9px;color:#94a3b8;font-weight:400;"> ('+taskDueLabel(t)+')</span>':'')+'</span>';
-          html+=calItemStatusHtml(t.id,'regular',t.target_stores,dateStr);
+          /* Брояч X/18 по СРОКА, тоест едно и също число във всеки ден от
+             прозореца — иначе офисът вижда седем различни числа за една задача. */
+          html+=calItemStatusHtml(t.id,'regular',t.target_stores,cdateReg);
         } else {
-          var doneReg=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===dateStr;});
-          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+dateStr+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(dateStr,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(dateStr,bulTaskLinkKey(t),bulSpanOf(t))+'">';
-          var carReg=bulCarriedInto('regular',t.id,store,dateStr);
+          var doneReg=store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===cdateReg;});
+          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+cdateReg+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+bulLockAttr(cdateReg,bulTaskLinkKey(t),bulSpanOf(t))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+bulLockStyle(cdateReg,bulTaskLinkKey(t),bulSpanOf(t))+'">';
+          var carReg=bulCarriedInto('regular',t.id,store,cdateReg);
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carReg?bulCarriedMiniHtml(carReg):'')+bulAutoTransitNoteHtml(t,doneReg)+'</span>';
         }
         html+='</div>';
+        /* „🗓 Срок ДД.ММ · С41" — същият надпис, който носеше лентата. Без него
+           редът изглежда като задача за ДНЕС, а тя е за по-късно. */
+        if(taskSpansWeeks(t)) html+=bulSpanBadgeRowHtml(t);
         if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
           var lbl=linkedModuleLabel(t.linked_module);
           if(lbl)html+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lbl)+' →</button>';
@@ -2388,9 +2451,11 @@ function renderBulView(){
     html+='</div>';
   });
   html+='</div>';
-  /* Многоседмичните със срок в по-късна седмица — под решетката, вътре в
-     картичката на календара (виж bulSpanStripHtml). */
-  html+=bulSpanStripHtml();
+  /* Лентата „🗓 Със срок в следваща седмица" СТОЕШЕ ТУК до 01.10.2026. Махната:
+     многоседмичната вече е в колоната на всеки ден от прозореца си
+     (bulDayItems с spanDays), тоест лентата стана второ място за едни и същи
+     данни — и по-лошото място, защото магазините гледат колоните по дни и
+     лентата я подминаваха. Бутонът към свързания таб също го нямаше в нея. */
   html+='</div>';
 
 

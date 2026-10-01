@@ -208,6 +208,7 @@ const TESTS = [
   'task-span-weeks.test.js',
   'task-notice-dept-block.test.js',
   'day-plan.test.js',
+  'span-calendar-days.test.js',
   'carried-completion-modal.test.js',
   'report-excluded-key.test.js',
   'task-desc-links.test.js',
