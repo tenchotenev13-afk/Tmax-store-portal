@@ -176,11 +176,13 @@ const dropLast = wb => JSON.stringify(wb.SheetNames.map(n => [n, wb.Sheets[n].__
     h.w.renderStockDiff();
     realClick(h.w, btn(h.doc.getElementById('mod-stock-diff'), '📝 Подай бланка'));
     await ticks(); await ticks();
-    const ph = () => (h.doc.querySelector('#diff-items .di-qty') || {}).getAttribute('placeholder');
-    ok('формата (междускладов): „Количество по входяща (бр.)"', ph() === 'Количество по входяща (бр.)', ph());
+    /* От 01.10.2026 думата е в постоянния надпис над полето (diffQtyLabels().formDoc),
+       а в самото поле е само „бр." — виж tests/diff-form-qty-labels.test.js. */
+    const ph = () => { const f = h.doc.querySelector('#diff-items .di-qty'); const w = f && f.closest('.di-fld'); return w ? w.querySelector('.di-lbl').textContent : null; };
+    ok('формата (междускладов): „По входяща доставка (бр.)"', ph() === 'По входяща доставка (бр.)', ph());
     const dir = h.doc.getElementById('diff-direction');
     dir.value = 'supplier'; fire(h.w, dir, 'change'); await ticks();
-    ok('формата (доставчик): „Количество по входяща (бр.)"', ph() === 'Количество по входяща (бр.)', ph());
+    ok('формата (доставчик): „По входяща доставка (бр.)"', ph() === 'По входяща доставка (бр.)', ph());
     dir.value = 'wrong_receipt'; fire(h.w, dir, 'change'); await ticks();
     ok('формата (сторна): „Количество по фактура (бр.)"', ph() === 'Количество по фактура (бр.)', ph());
     h.w.closeDiffSubmitModal();

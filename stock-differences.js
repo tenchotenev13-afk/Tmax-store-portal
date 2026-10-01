@@ -229,15 +229,24 @@ function diffDirEmailOf(dir){ return (DIFF_EMAIL_CASES[dir]||DIFF_EMAIL_CASES.su
    (1804…/8046…) - подсказката се четеше като „впиши вх. доставка". „(бр.)"
    казва, че тук се пише БРОЙ. При сторна по грешен прием смисълът остава
    фактура ↔ заприходено, затова там думите са други. Печатът не се пипа. */
+/* form* - постоянните надписи НАД полетата във формата за подаване (01.10.2026):
+   подсказката в самото поле се режеше („Количество по…") и изчезваше щом се
+   впише число. Думите са като на хартиената бланка; „(бр.)" остава в
+   надписа по същата причина като горе. formSupDoc има смисъл само при
+   доставчик. Печатът, таблиците и имейлът ползват другите полета. */
 function diffQtyLabels(dir){
   if (dir === 'wrong_receipt') return {doc:'Количество по фактура (бр.)', docShort:'Кол. по фактура',
                                        real:'Реално заприходено (бр.)',  realShort:'Заприходено',
-                                       printDoc:'Фактура',     printReal:'Заприх.'};
+                                       printDoc:'Фактура',     printReal:'Заприх.',
+                                       formDoc:'Количество по фактура (бр.)', formSupDoc:'',
+                                       formReal:'Реално заприходено (бр.)', unit:'Мярка'};
   /* „по входяща", не „по док." — Цвети: „Кол. по док." се бърка (29.09.2026).
      Важи за доставчик и междускладов; printDoc и сторната не се пипат. */
   return {doc:'Количество по входяща (бр.)', docShort:'Кол. по входяща',
           real:'Реално получено (бр.)',        realShort:'Реално',
-          printDoc:'Кол.',        printReal:'Реално'};
+          printDoc:'Кол.',        printReal:'Реално',
+          formDoc:'По входяща доставка (бр.)', formSupDoc:'По стокова на доставчика (бр.)',
+          formReal:'Реално получено (бр.)', unit:'Мярка'};
 }
 /* Изпращане на имейл до доставчик - Цветелина Тенева + admin (за тестване/подпомагане) */
 function canSendDiffEmail() {
@@ -3554,13 +3563,23 @@ function diffItemRowHtml(item,direction){
     /* Бележка от търсенето в каталога - пълни се от lookupCatalogBySap() */
     '<div class="di-lookup-hint"></div>'+
     /* Колоните са същите (quantity / quantity_received), сменя се само думата:
-       при сторната сравнението е фактура ↔ заприходено. */
-    '<div style="display:grid;grid-template-columns:'+(direction==='supplier'?'1fr 1fr 1fr 1fr':'1fr 1fr 1fr')+';gap:6px;margin-bottom:6px;">'+
-      '<input type="number" step="0.001" class="fi di-qty" placeholder="'+diffQtyLabels(direction).doc+'" value="'+(item.qty!=null?item.qty:'')+'">'+
-      (direction==='supplier'?'<input type="number" step="0.001" class="fi di-qty-supdoc" placeholder="По стокова на дост." value="'+(item.qtySupplierDoc!=null?item.qtySupplierDoc:'')+'">':'')+
-      '<input type="number" step="0.001" class="fi di-qty-real" placeholder="'+diffQtyLabels(direction).real+'" value="'+(item.qtyReal!=null?item.qtyReal:'')+'">'+
-      '<select class="fi di-unit">'+unitOptionsHtml(item.unit)+'</select>'+
-    '</div>'+
+       при сторната сравнението е фактура ↔ заприходено. Надписът е НАД полето
+       и е постоянен (diffQtyLabels().form*); в полето - само „бр.", за да не се
+       реже. Надписът може да е на два-три реда; полетата се подравняват долу,
+       min-width:0 пази колоната да не избута реда извън тесен екран. */
+    (function(){
+      var q=diffQtyLabels(direction);
+      var fld=function(lbl, ctl){
+        return '<div class="di-fld" style="display:flex;flex-direction:column;justify-content:flex-end;min-width:0;">'+
+          '<div class="di-lbl" style="font-size:10.5px;line-height:1.25;color:#64748b;margin-bottom:2px;overflow-wrap:anywhere;">'+esc(lbl)+'</div>'+ctl+'</div>';
+      };
+      return '<div style="display:grid;grid-template-columns:'+(direction==='supplier'?'repeat(4,minmax(0,1fr))':'repeat(3,minmax(0,1fr))')+';gap:6px;margin-bottom:6px;">'+
+        fld(q.formDoc,'<input type="number" step="0.001" class="fi di-qty" placeholder="бр." value="'+(item.qty!=null?item.qty:'')+'">')+
+        (direction==='supplier'?fld(q.formSupDoc,'<input type="number" step="0.001" class="fi di-qty-supdoc" placeholder="бр." value="'+(item.qtySupplierDoc!=null?item.qtySupplierDoc:'')+'">'):'')+
+        fld(q.formReal,'<input type="number" step="0.001" class="fi di-qty-real" placeholder="бр." value="'+(item.qtyReal!=null?item.qtyReal:'')+'">')+
+        fld(q.unit,'<select class="fi di-unit">'+unitOptionsHtml(item.unit)+'</select>')+
+      '</div>';
+    })()+
     '<div style="margin-bottom:6px;"><select class="fi di-cat" style="width:100%;" onchange="updateDiffItemHint(this)">'+catOpts+'</select></div>'+
     '<div class="di-hint"></div>'+
     '<div style="display:flex;gap:6px;">'+
