@@ -1003,7 +1003,10 @@ function renderClientOrders(){
     var myStore=currentUser&&currentUser.store_name;
     var rawStatus=o.status||'pending';
     var done=o._status==='done'||o._status==='refused'||o.status==='done'||o.status==='refused';
-    var isRequester=isAdmin||!o.fulfiller||o.store_name===myStore||isGlobal();
+    /* Логистичен склад (глобална роля) е изпълнител на заявка към себе си —
+       не заявител: праща/отказва, не потвърждава пристигане. */
+    var isWhFulfiller=!isAdmin&&!!o.fulfiller&&o.fulfiller===myStore&&o.store_name!==myStore&&typeof isLogisticsWarehouseUser==='function'&&isLogisticsWarehouseUser();
+    var isRequester=!isWhFulfiller&&(isAdmin||!o.fulfiller||o.store_name===myStore||isGlobal());
     var isFulfiller=o.fulfiller&&o.fulfiller===myStore&&!isRequester;
     /* Централен офис обработва заявките към доставчици. Бутонът се показва на
        всеки от ЦО (supply, accounting, admin...) и само за заявки, насочени към ЦО —
@@ -1039,6 +1042,9 @@ function renderClientOrders(){
             :'<button data-id="'+o.id+'" onclick="markClientNotified(this.dataset.id)" title="Отбележи, че клиентът е уведомен за пристигналата стока" style="border:1px solid #0369a1;background:#e0f2fe;color:#0369a1;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📞 Уведомен</button>';
           btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;done&apos;)" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✅ Изпълнена</button>';
         }
+        btns+='<button data-id="'+o.id+'" onclick="openStatus(this.dataset.id,&apos;client_orders&apos;)" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">Статус</button>';
+      }
+      if(isWhFulfiller){
         btns+='<button data-id="'+o.id+'" onclick="openStatus(this.dataset.id,&apos;client_orders&apos;)" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">Статус</button>';
       }
     } else {
