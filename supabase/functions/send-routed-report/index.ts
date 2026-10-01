@@ -231,6 +231,25 @@ function taskDueDates(t){
   if(t.due_date) return [String(t.due_date).slice(0,10)];
   return [];
 }
+/* Прозорец има смисъл само при 2..6 дни: при 0 или 1 няма какво да е по-рано,
+   а при всичките 7 задачата е за всеки ден. Копие от bulletin.js — ОБЩОТО
+   решение за постоянна и за еднократна задача. */
+function winActive(flag, dates){
+  if(!flag) return false;
+  var n=(dates||[]).length;
+  return n>1 && n<7;
+}
+/* Прозорец и при ЕДНОКРАТНА задача (bulletin_tasks.due_window, 01.10.2026) —
+   копие от bulletin.js. notice няма отмятане, а многоседмичната има свой
+   механизъм (ЕДИН ден срок + spans_from); и двете се отрязват тук, за да не
+   се пита на всяко място надолу. */
+function taskIsWindow(t){
+  if(!t||taskIsNotice(t)||taskSpansWeeks(t)) return false;
+  return winActive(t.due_window, taskDueDates(t));
+}
+function taskWindowDates(t){
+  return taskIsWindow(t) ? taskDueDates(t).slice().sort() : [];
+}
 function recurringIsDueOnWeekday(t,weekdayIdx){
   if(t.due_weekdays && t.due_weekdays.length) return t.due_weekdays.indexOf(weekdayIdx)>=0;
   if(t.due_weekday===null||t.due_weekday===undefined){
@@ -625,6 +644,15 @@ function reportRoutedTaskWindow(t, wkDates, bul){
     : taskDueDates(t);
   if (t.kind === 'recurring' && !dates.length) return null;
   if (dates.length === 1) return { date:dates[0], dateFrom:null, dateTo:null };
+  /* Прозоречната еднократна задача носи СВОЯ диапазон, не цялата седмица:
+     така отмятане извън прозореца (възможно е от по-стар запис или ръчно) не
+     я затваря. Многодневната БЕЗ прозорец пази заварения широк диапазон —
+     нейните дни са отделни задължения и тук тя и без това се брои като едно
+     явяване, а стесняването би променило кой е изпълнил за писмата. */
+  if (t.kind !== 'recurring' && taskIsWindow(t)) {
+    var win = taskWindowDates(t);
+    return { date:null, dateFrom:win[0], dateTo:win[win.length-1] };
+  }
   return { date:null, dateFrom:wkDates[0], dateTo:wkDates[6] };
 }
 

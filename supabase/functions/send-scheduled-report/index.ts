@@ -650,6 +650,17 @@ function taskDueDates(t: any){
   if(t.due_date) return [String(t.due_date).slice(0,10)];
   return [];
 }
+/* Прозорец и при ЕДНОКРАТНА задача (bulletin_tasks.due_window, 01.10.2026) —
+   копие от bulletin.js. notice няма отмятане, а многоседмичната има свой
+   механизъм (ЕДИН ден срок + spans_from); и двете се отрязват тук, за да не
+   се пита на всяко място надолу. */
+function taskIsWindow(t: any){
+  if(!t||taskIsNotice(t)||taskSpansWeeks(t)) return false;
+  return winActive(t.due_window, taskDueDates(t));
+}
+function taskWindowDates(t: any){
+  return taskIsWindow(t) ? taskDueDates(t).slice().sort() : [];
+}
 function taskIsDueOnDate(t: any, dateStr: string){
   return taskDueDates(t).indexOf(dateStr) >= 0;
 }
@@ -974,7 +985,18 @@ function collectDailyReportData(cb, scope, kasaThreshold){
 
     bulTasksPromise.then(function(tasksRaw){
       var allBulTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
-      var regularToday = allBulTasks.filter(function(t){ return taskIsDueOnDate(t, dayISO); });
+      /* Прозоречната еднократна задача (due_window) влиза в набора САМО в деня
+         на СРОКА — точно както recurringReportDueOnWeekday() прави за
+         постоянната с прозорец. Иначе задача за четири дни стои в дневния
+         отчет четири пъти: обект, свършил я в понеделник, излиза неизпълнил
+         във вторник, сряда и четвъртък. Точно това показа С39. */
+      var regWinDates = {};
+      allBulTasks.forEach(function(t){ if (taskIsWindow(t)) regWinDates[t.id] = taskWindowDates(t); });
+      var regularToday = allBulTasks.filter(function(t){
+        var w = regWinDates[t.id];
+        if (w) return w[w.length-1] === dayISO;
+        return taskIsDueOnDate(t, dayISO);
+      });
 
       /* Датата влиза в САМОТО явяване. Досега дневният я носеше само в JS
          филтъра на comps по-долу, а явяванията бяха без .date — тоест
@@ -984,7 +1006,16 @@ function collectDailyReportData(cb, scope, kasaThreshold){
          Прозоречната задача получава ДИАПАЗОНА на прозореца си — отмятане от
          кой да е негов ден я затваря, точно както решаваше recWinDates. */
       var items = [];
-      regularToday.forEach(function(t){ items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null, date:dayISO }); });
+      regularToday.forEach(function(t){
+        var it = { id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null };
+        /* Прозорецът дава ДИАПАЗОН вместо дата — reportItemMatchesComp() брои
+           отмятане вътре в dateFrom..dateTo, тоест свършена в понеделник е
+           свършена и в отчета за деня на срока. */
+        var w = regWinDates[t.id];
+        if (w) { it.dateFrom = w[0]; it.dateTo = w[w.length-1]; }
+        else it.date = dayISO;
+        items.push(it);
+      });
       recurringToday.forEach(function(t){
         var it = { id:t.id, kind:'recurring', title:t.title, target_stores:t.target_stores||null, skip_stores:recurringSkipStores(t.id, recSkips) };
         var win = (recWinDates[t.id]||[]).slice().sort();
@@ -1024,7 +1055,16 @@ function collectDailyReportData(cb, scope, kasaThreshold){
       recIds.forEach(function(id){
         (recWinDates[id]||[]).forEach(function(d){ if(d<recLo)recLo=d; if(d>recHi)recHi=d; });
       });
-      var regDateQ = '&completion_date=eq.'+dayISO;
+      /* Същото и за ОБИКНОВЕНИТЕ, откакто и те могат да имат прозорец: тесният
+         eq.dayISO не би върнал отмятането от по-ранен ден и задачата би
+         излязла неизпълнена въпреки диапазона в самото явяване. Без прозорци
+         долната граница остава dayISO, тоест заявката е същата като досега. */
+      var regLo = dayISO;
+      regIds.forEach(function(id){
+        (regWinDates[id]||[]).forEach(function(d){ if(d<regLo)regLo=d; });
+      });
+      var regDateQ = regLo===dayISO ? ('&completion_date=eq.'+dayISO)
+        : ('&completion_date=gte.'+regLo+'&completion_date=lte.'+dayISO);
       var recDateQ = '&completion_date=gte.'+recLo+'&completion_date=lte.'+recHi;
 
       Promise.all([
@@ -1058,7 +1098,15 @@ function collectDailyReportData(cb, scope, kasaThreshold){
            като "изпълнено" (или "отложено") и в сряда. */
         /* completion_date и postponed_to минават нататък: първото е ключът на
            явяването, второто решава пренесено ли е и накъде. */
-        regComps.forEach(function(c){ if((c.completion_date||null)===dayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null, postponed_to:c.postponed_to||null }); });
+        /* Прозоречната задача се затваря от отмятане на КОЙ ДА Е свой ден —
+           дословно същият предикат като при постоянната няколко реда по-долу.
+           Без прозорец условието остава точното съответствие с отчетния ден. */
+        regComps.forEach(function(c){
+          var rwin = regWinDates[c.task_id];
+          var rhit = rwin ? (!!c.completion_date && rwin.indexOf(String(c.completion_date).slice(0,10))>=0)
+                          : ((c.completion_date||null)===dayISO);
+          if(rhit) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null, postponed_to:c.postponed_to||null });
+        });
         /* Постоянна задача: отмятането трябва да носи ОТЧЕТНИЯ ден.
            Дотук `!c.completion_date ||` пускаше и старите записи без дата -
            184 такива в базата, всичките отпреди полето да се пълни. Те се
@@ -2155,6 +2203,16 @@ function collectWeeklyReportData(cb, scope){
       var items = [];
       allBulTasks.forEach(function(t){
         var dates = taskDueDates(t);
+        /* ПРОЗОРЕЦ: ЕДИН елемент за седмицата с ДИАПАЗОН вместо дата — точно
+           както прозоречната постоянна задача по-долу. Разгъването по дни тук
+           беше причината С39 да излезе 1/4: четири елемента в знаменателя, а
+           свършената веднъж работа затваря само своя ден. */
+        if (taskIsWindow(t)) {
+          var win = taskWindowDates(t);
+          items.push({ id:t.id, kind:'regular', title:t.title, target_stores:t.target_stores||null,
+                       dateFrom: win[0], dateTo: win[win.length-1] });
+          return;
+        }
         if (dates.length > 1) {
           dates.forEach(function(d){
             var dLabel = new Date(d+'T00:00:00').toLocaleDateString('bg-BG',{day:'numeric',month:'numeric'});

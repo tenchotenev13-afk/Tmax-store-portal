@@ -93,7 +93,17 @@ function loadTodayDashboard(){
 
     bulTasksPromise.then(function(tasksRaw){
       var allBulTasks = (Array.isArray(tasksRaw) ? tasksRaw : []).filter(function(t){ return !taskIsNotice(t); });
-      var regularToday = allBulTasks.filter(function(t){ return taskIsDueOnDate(t, todayISO); });
+      /* Прозоречната еднократна задача влиза в набора САМО в деня на срока —
+         същото, което recurringIsDueToday() прави за постоянната с прозорец.
+         Иначе „Днес" я показва неизпълнена на всеки ден от прозореца, въпреки
+         че работата е свършена, и я брои толкова пъти в знаменателя. */
+      var regWinDates = {};
+      allBulTasks.forEach(function(t){ if (taskIsWindow(t)) regWinDates[t.id] = taskWindowDates(t); });
+      var regularToday = allBulTasks.filter(function(t){
+        var w = regWinDates[t.id];
+        if (w) return w[w.length-1] === todayISO;
+        return taskIsDueOnDate(t, todayISO);
+      });
 
       /* обединяваме двата типа задачи в общ формат за таблото - пазим
          target_stores, за да не броим задача в знаменателя на магазин, за
@@ -140,7 +150,15 @@ function loadTodayDashboard(){
       allRecIds.forEach(function(id){
         (recWinDates[id]||[]).forEach(function(d){ if (d < recLo) recLo = d; });
       });
-      var regDateQ = '&completion_date=eq.'+todayISO;
+      /* Същото и за обикновените с прозорец: отмятането може да е от по-ранен
+         ден и тесният eq.ДНЕС не би го върнал. Без прозорци заявката остава
+         дословно същата като досега. */
+      var regLo = todayISO;
+      regIds.forEach(function(id){
+        (regWinDates[id]||[]).forEach(function(d){ if (d < regLo) regLo = d; });
+      });
+      var regDateQ = regLo===todayISO ? ('&completion_date=eq.'+todayISO)
+        : ('&completion_date=gte.'+regLo+'&completion_date=lte.'+todayISO);
       var recDateQ = '&completion_date=gte.'+recLo+'&completion_date=lte.'+todayISO;
 
       /* Задачите зад пренесените редове, които ги няма в заредените набори:
@@ -178,7 +196,14 @@ function loadTodayDashboard(){
            многодневна задача (Пон+Ср) не бива изпълнението от Понеделник
            да се показва като "изпълнено" и в сряда. */
         var comps = [];
-        regComps.forEach(function(c){ if(c.status==='done' && (c.completion_date||null)===todayISO) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, comment:c.comment, photos:c.photos, files:c.files }); });
+        /* Прозоречната се затваря от отмятане на кой да е свой ден — същият
+           предикат като при постоянната няколко реда по-долу. */
+        regComps.forEach(function(c){
+          var rwin = regWinDates[c.task_id];
+          var rhit = rwin ? (!!c.completion_date && rwin.indexOf(String(c.completion_date).slice(0,10))>=0)
+                          : ((c.completion_date||null)===todayISO);
+          if(c.status==='done' && rhit) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, comment:c.comment, photos:c.photos, files:c.files });
+        });
         /* Постоянна задача: отмятането трябва да носи ДНЕШНАТА дата, а при
            прозоречна - кой да е ден от нейния прозорец (свършена в
            понеделник е свършена, макар срокът да е сряда). Дословно същият

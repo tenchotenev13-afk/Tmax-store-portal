@@ -125,6 +125,11 @@ const COPIED_HELPERS = [
      задача (01.10.2026). Разминае ли се копието, писмото брои многодневна
      задача като N задължения, а екранът като едно — и обратно. */
   { fn: 'winActive', from: BULLETIN },
+  /* Прозорец при ЕДНОКРАТНА задача (01.10.2026) — дневният и седмичният
+     отчет я броят като ЕДНА единица през тези два предиката. Разминае ли се
+     копието, писмото пак ще иска по една отметка на ден. */
+  { fn: 'taskIsWindow', from: BULLETIN },
+  { fn: 'taskWindowDates', from: BULLETIN },
   { fn: 'recurringIsWindow', from: BULLETIN },
   { fn: 'recurringWindowIdxs', from: BULLETIN },
   { fn: 'recurringWindowDeadlineIdx', from: BULLETIN },
@@ -220,6 +225,13 @@ const ROUTED_COPIED = [
   { fn: 'toLocalISO', from: BULLETIN },
   { fn: 'weekDays', from: BULLETIN },
   { fn: 'taskDueDates', from: BULLETIN },
+  /* Прозорец при ЕДНОКРАТНА задача (01.10.2026). reportRoutedTaskWindow()
+     дава на прозоречната задача СВОЯ диапазон вместо цялата седмица —
+     разминае ли се копието, личното писмо брои по друг прозорец от общия
+     отчет и от екрана. */
+  { fn: 'winActive', from: BULLETIN },
+  { fn: 'taskIsWindow', from: BULLETIN },
+  { fn: 'taskWindowDates', from: BULLETIN },
   { fn: 'recurringIsDueOnWeekday', from: BULLETIN },
   { fn: 'taskIsNotice', from: SHARED },
   /* Изключване за седмица — вижда се в taskStoreBreakdown като skip_stores. */
