@@ -664,11 +664,17 @@ function recurringIsDueOnWeekday(t: any, weekdayIdx: number){
 /* Прозорец за изпълнение — копие от bulletin.js. due_window превръща
    due_weekdays от N задължения в СРОК: последният ден, с разрешено
    по-рано, и една отметка за цялата седмица. Смисъл има само при 2..6
-   избрани дни. */
+   избрани дни.
+   От 01.10.2026 решението „прозорец ли е" е ЕДНО за постоянните и за
+   еднократните задачи и живее в winActive() — затова и копието тук минава
+   през нея, вместо да повтаря условието. Поведението е същото. */
+function winActive(flag: any, dates: any){
+  if(!flag) return false;
+  var n=(dates||[]).length;
+  return n>1 && n<7;
+}
 function recurringIsWindow(t: any){
-  if(!t||!t.due_window) return false;
-  var d=(t.due_weekdays&&t.due_weekdays.length)?t.due_weekdays:[];
-  return d.length>1 && d.length<7;
+  return !!t && winActive(t.due_window, recurringWindowIdxs(t));
 }
 function recurringWindowIdxs(t: any){
   return ((t&&t.due_weekdays)||[]).slice().sort(function(a: number,b: number){return a-b;});

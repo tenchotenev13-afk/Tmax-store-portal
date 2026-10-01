@@ -121,6 +121,10 @@ const COPIED_HELPERS = [
   { fn: 'taskDueDates', from: BULLETIN },
   { fn: 'taskIsDueOnDate', from: BULLETIN },
   { fn: 'recurringIsDueOnWeekday', from: BULLETIN },
+  /* winActive() е ОБЩОТО решение „прозорец ли е" за постоянна и за еднократна
+     задача (01.10.2026). Разминае ли се копието, писмото брои многодневна
+     задача като N задължения, а екранът като едно — и обратно. */
+  { fn: 'winActive', from: BULLETIN },
   { fn: 'recurringIsWindow', from: BULLETIN },
   { fn: 'recurringWindowIdxs', from: BULLETIN },
   { fn: 'recurringWindowDeadlineIdx', from: BULLETIN },

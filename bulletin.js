@@ -648,6 +648,108 @@ function readDueDatesCheckboxes(selId){
   return Array.prototype.slice.call(wrap.querySelectorAll('input[type=checkbox]:checked')).map(function(cb){ return cb.value; });
 }
 
+/* ═══ „ПРОЗОРЕЦ ДО ПОСЛЕДНИЯ ДЕН" ВЪВ ФОРМАТА (01.10.2026) ═════════════════
+   Същият контрол като при постоянните задачи, за еднократна с няколко дни.
+   Показва се САМО при 2..6 избрани дни и изключен „Срок в следваща седмица" —
+   извън това е безсмислен и CHECK-ът в базата не би го допуснал.
+
+   При НОВА задача е включен по подразбиране: „изложи до събота" е почти винаги
+   едно задължение, а не N. Старите задачи остават с това, което им е записано —
+   редакцията НЕ ги превключва сама.
+
+   Редът с последицата се пази ВИДИМ и когато чекбоксът е скрит (1 ден), защото
+   точно той казва какво ще стане: „Сега: 1 отметка — само вторник". Изчезнал
+   контрол без обяснение изглежда като счупен рендер (правило 11). При „Срок в
+   следваща седмица" се крие всичко — там моделът го обяснява самото поле.
+
+   Надписът минава през recWindowNoteText() — СЪЩИЯ, който пише и при
+   постоянните. Датите се превеждат до индекси на дни; две формулировки за едно
+   и също нещо значат, че утре едната ще остане непоправена. */
+
+/* ЖЕЛАНОТО състояние по форма, отделно от чекбокса. Без него „включен по
+   подразбиране" се губи: при отваряне на формата избраните дни са НУЛА, тоест
+   прозорецът е неприложим и taskWinSync() коректно размаркира чекбокса — а
+   избере ли човек после три дни, няма откъде да се върне включен (sync само
+   изключва, никога не включва сам). Затова намерението се помни тук и
+   чекбоксът е негова ПРОЕКЦИЯ през „приложимо ли е сега".
+   Пише се на три места и само на тях: при рендер на полето (началната
+   стойност — нова задача true, редакция = записаното), при щракване по самия
+   чекбокс (taskWinChanged) и в openTaskModal() при повторно отваряне на вече
+   рендерираната форма. */
+var taskWinWant = {};
+function taskWinNoteText(dates, checked){
+  var idxs=(dates||[]).map(function(d){
+    return (new Date(String(d).slice(0,10)+'T00:00:00').getDay()+6)%7;
+  }).sort(function(a,b){ return a-b; });
+  return recWindowNoteText(idxs, checked);
+}
+function taskWindowFieldHtml(prefix, selectedDates, checked){
+  var dates=selectedDates||[];
+  var usable=dates.length>1 && dates.length<7;
+  /* Рендерът на полето ОБЯВЯВА и началното намерение — това е мястото, където
+     двата викащи казват каква да е стойността (нова задача / записаното). */
+  taskWinWant[prefix]=!!checked;
+  return '<div id="'+prefix+'-win-box" style="margin-top:6px;">'+
+    '<label id="'+prefix+'-win-wrap" style="display:'+(usable?'flex':'none')+';align-items:center;gap:7px;font-size:12.5px;color:#374151;cursor:pointer;">'+
+      '<input type="checkbox" id="'+prefix+'-win"'+((checked&&usable)?' checked':'')+
+      ' onchange="taskWinChanged(\''+prefix+'\')" style="width:14px;height:14px;cursor:pointer;">'+
+      'Прозорец до последния ден (една отметка за целия период)</label>'+
+    '<div id="'+prefix+'-win-note" style="font-size:11px;color:#475569;margin:3px 0 0 21px;">'+
+      esc(taskWinNoteText(dates, checked&&usable))+'</div></div>';
+}
+/* Щракване по самия чекбокс — СМЕНЯ намерението, после преизчислява. Отделна
+   функция от taskWinSync нарочно: sync трябва да може да се вика от промяна по
+   дните, без да чете чекбокса като ново решение на човека. */
+function taskWinChanged(prefix){
+  var cb=document.getElementById(prefix+'-win');
+  taskWinWant[prefix]=!!(cb&&cb.checked);
+  taskWinSync(prefix);
+}
+/* Преизчислява се при всяка промяна по дните, по самия прозорец И по „Срок в
+   следваща седмица" — трите влизат в едно и също решение. */
+function taskWinSync(prefix){
+  var cb=document.getElementById(prefix+'-win');
+  var box=document.getElementById(prefix+'-win-box');
+  var wrap=document.getElementById(prefix+'-win-wrap');
+  if(!cb||!box||!wrap) return;
+  var spans=document.getElementById(prefix+'-span-on');
+  var spanOn=!!(spans&&spans.checked);
+  var dates=readDueDatesCheckboxes(prefix+'-due-dates');
+  var usable=!spanOn && dates.length>1 && dates.length<7;
+  box.style.display=spanOn?'none':'block';
+  wrap.style.display=usable?'flex':'none';
+  /* Чекбоксът е проекция на намерението: включен само когато е И желан, И
+     приложим. Така изборът на дните не изтрива решението на човека и обратно. */
+  cb.checked=usable && !!taskWinWant[prefix];
+  var note=document.getElementById(prefix+'-win-note');
+  if(note) note.textContent=taskWinNoteText(dates, cb.checked);
+}
+/* Закача се на контейнера с дните — едно слушане вместо onchange на седем места
+   (същото, което прави recWindowBindDays за постоянните). */
+function taskWinBindDays(prefix){
+  var days=document.getElementById(prefix+'-due-dates');
+  /* Пази от двойно закачане: формата за НОВА задача живее в рендера на изгледа
+     и openTaskModal() може да се извика няколко пъти без пререндер. Двама
+     слушатели не чупят нищо (taskWinSync е идемпотентна), но са от нещата, по
+     които после се диагностицира грешно. */
+  if(days && !days.dataset.winBound){
+    days.dataset.winBound='1';
+    days.addEventListener('change', function(){ taskWinSync(prefix); });
+  }
+  taskWinSync(prefix);
+}
+/* Стойността за запис. Прочита се от ЖИВОТО състояние, не от подразбирането:
+   извън 2..6 дни или при многоседмична връща false, тоест CHECK-ът в базата
+   няма как да се задейства от формата. */
+function readTaskWindow(prefix){
+  var cb=document.getElementById(prefix+'-win');
+  if(!cb||!cb.checked) return false;
+  var spans=document.getElementById(prefix+'-span-on');
+  if(spans&&spans.checked) return false;
+  var n=readDueDatesCheckboxes(prefix+'-due-dates').length;
+  return n>1 && n<7;
+}
+
 /* ═══ СРОК В ПО-КЪСНА СЕДМИЦА — КОНТРОЛЪТ ВЪВ ФОРМАТА ═══════════════════
    Отметката изключва седемте дни и обратно: срокът е ЕДИН ден (така го
    изисква и bulletin_tasks_spans_single_day_chk), а „няколко дни + друга
@@ -687,6 +789,9 @@ function bulSpanToggle(cb){
     });
     days.style.opacity=cb.checked?'.45':'1';
   }
+  /* Прозорецът зависи и от този превключвател: многоседмичната е ЕДИН ден срок,
+     тоест прозорец няма какво да покрива. */
+  taskWinSync(prefix);
 }
 /* Прочита контрола. Връща {spans:false} за обикновена задача, {spans:true,
    due, from} за многоседмична, {error} при невалидна дата. Проверките са
@@ -3136,6 +3241,7 @@ function taskModalHtml(){
     '<label class="fl">Вид задача</label><select class="fi" id="tk-type">'+taskTypeOptsHtml('info')+'</select>' +
     '<label class="fl">Срок — избери един или няколко дни (по избор)</label>' +
     dueDatesCheckboxesHtml('tk-due-dates', days, []) +
+    taskWindowFieldHtml('tk', [], true) +
     spanFieldHtml('tk', days, null) +
     '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
     '<select class="fi" id="tk-stores" multiple size="6" style="height:120px;"></select>' +
@@ -3208,6 +3314,7 @@ function openEditTaskModal(taskId) {
     '<label class="fl">Вид задача</label><select class="fi" id="etk-type">'+taskTypeOptsHtml(t.task_type)+'</select>' +
     '<label class="fl">Срок — избери един или няколко дни (по избор)</label>' +
     dueDatesCheckboxesHtml('etk-due-dates', days, taskSpansWeeks(t)?[]:taskDueDates(t)) +
+    taskWindowFieldHtml('etk', taskSpansWeeks(t)?[]:taskDueDates(t), !!t.due_window) +
     spanFieldHtml('etk', days, t) +
     '<label class="fl">Магазини — остави без избор за ВСИЧКИ</label>' +
     '<select class="fi" id="etk-stores" multiple size="6" style="height:120px;"></select>' +
@@ -3229,6 +3336,9 @@ function openEditTaskModal(taskId) {
   bulAutoGrow(document.getElementById('etk-desc'));
   var etkSp=document.getElementById('etk-span-on');
   if(etkSp&&etkSp.checked)bulSpanToggle(etkSp);
+  /* След bulSpanToggle: той вече е пресинхронизирал прозореца, ако е бил
+     включен — bind-ът закача слушането по дните и изравнява реда. */
+  taskWinBindDays('etk');
   setTimeout(function(){ var el=document.getElementById('etk-title'); if(el)el.focus(); }, 80);
 }
 
@@ -3252,7 +3362,7 @@ function submitEditTask(taskId) {
   if (!bulAutoCompleteValid(autoComplete, etkSpan.spans?[etkSpan.due]:dueDates)) return;
   var trc = trCollect('etk');
   if (trc.error) { toast(trc.error,'#dc2626'); return; }
-  var body = {title:title,description:desc,department:dept,due_date:etkDue.due_date,due_dates:etkDue.due_dates,spans_from:etkDue.spans_from,starts_on:etkDue.starts_on,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete};
+  var body = {title:title,description:desc,department:dept,due_date:etkDue.due_date,due_dates:etkDue.due_dates,due_window:readTaskWindow('etk'),spans_from:etkDue.spans_from,starts_on:etkDue.starts_on,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete};
   /* sort_order влиза САМО при истинска смяна на отдела - иначе всяко
      отваряне и запазване на задачата би я хвърлило най-отдолу. */
   var t = bulTasks.find(function(x){ return String(x.id) === String(taskId); });
@@ -3629,7 +3739,10 @@ function trSaveReports(taskId, list){
   });
 }
 
-function openTaskModal(){trDrafts.tk=[];var trw=document.getElementById('tk-tr-wrap');if(trw)trw.innerHTML=trSectionHtml('tk',null);if(!reportGroupPeopleCache)loadReportGroupPeople();document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');var sp=document.getElementById('tk-span-on');if(sp){sp.checked=false;var spd=document.getElementById('tk-span-due');if(spd)spd.value='';var sps=document.getElementById('tk-span-start');if(sps)sps.value='';bulSpanToggle(sp);}}
+function openTaskModal(){trDrafts.tk=[];var trw=document.getElementById('tk-tr-wrap');if(trw)trw.innerHTML=trSectionHtml('tk',null);if(!reportGroupPeopleCache)loadReportGroupPeople();document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');var sp=document.getElementById('tk-span-on');if(sp){sp.checked=false;var spd=document.getElementById('tk-span-due');if(spd)spd.value='';var sps=document.getElementById('tk-span-start');if(sps)sps.value='';bulSpanToggle(sp);}/* Прозорецът е ВКЛЮЧЕН по подразбиране при нова задача: щом човек избере
+     няколко дни, почти винаги става дума за едно задължение до последния, не за
+     N отделни. taskWinBindDays го синхронизира с реално избраните дни. */
+  taskWinWant.tk=true;taskWinBindDays('tk');}
 function closeTk(){document.getElementById('tk-ov').classList.remove('open');}
 function submitTask(){
   var title=(document.getElementById('tk-title').value||'').trim();
@@ -3656,7 +3769,7 @@ function submitTask(){
   var trc=trCollect('tk');
   if(trc.error){toast(trc.error,'#dc2626');return;}
   /* sbPostReturn — id-то на задачата трябва за насрочените отчети. */
-  sbPostReturn('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:tkDue.due_date,due_dates:tkDue.due_dates,spans_from:tkDue.spans_from,starts_on:tkDue.starts_on,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
+  sbPostReturn('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:tkDue.due_date,due_dates:tkDue.due_dates,due_window:readTaskWindow('tk'),spans_from:tkDue.spans_from,starts_on:tkDue.starts_on,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     var newId=r.row&&r.row.id;
     var repP=trc.list.length
@@ -5806,10 +5919,64 @@ function recurringDueLabel(t){
    „по-рано", а при всичките 7 задачата е „всеки ден" (така е зададен
    „Вечерен оборот"). Извън този диапазон стойността се ИГНОРИРА, вместо
    поведението да се промени мълчаливо. */
+/* ═══ ПРОЗОРЕЦ ЗА ИЗПЪЛНЕНИЕ — ОБЩОТО ЗА ДВАТА ВИДА ЗАДАЧИ ═════════════════
+   От 01.10.2026 прозорец има и ЕДНОКРАТНАТА задача с няколко дни
+   (bulletin_tasks.due_window), не само постоянната. Решението кое е прозорец и
+   кое отмятане го затваря е ЕДНО и живее тук; двата вида само подават своите
+   дати. Копие на логиката щеше да се разминe — точно както се разминаха
+   списъците с изключени обекти и „Регионален". */
+/* Прозорец има смисъл само при 2..6 дни: при 0 или 1 няма какво да е „по-рано",
+   а при всичките 7 задачата е „всеки ден". Извън диапазона стойността се
+   ИГНОРИРА, вместо поведението да се смени мълчаливо — така ред, дошъл от ръчен
+   SQL или от огледалото, не мени нищо. */
+function winActive(flag, dates){
+  if(!flag) return false;
+  var n=(dates||[]).length;
+  return n>1 && n<7;
+}
+/* Отмятането, което ЗАТВАРЯ прозореца: първото „done" за този обект, чийто
+   completion_date е В набора. Наборът, не един ден — completion_date носи
+   реалния ден на щракване и той може да е всеки от прозореца. */
+function winClosingComp(comps, idField, itemId, store, dates){
+  if(!store||!dates||!dates.length) return null;
+  var found=null;
+  (comps||[]).forEach(function(c){
+    if(found) return;
+    if(c[idField]===itemId && c.store_name===store && c.status==='done' &&
+       dates.indexOf(c.completion_date||'')>=0) found=c;
+  });
+  return found;
+}
+/* ═══ ПРОЗОРЕЦ НА ЕДНОКРАТНА ЗАДАЧА ════════════════════════════════════════
+   notice няма отметка, тоест прозорец не ѝ значи нищо; многоседмичната има свой
+   механизъм (ЕДИН ден срок + spans_from) и CHECK-ът в базата не допуска двете
+   заедно. И двете се отрязват ТУК, за да не се пита на всяко място надолу. */
+function taskIsWindow(t){
+  if(!t||taskIsNotice(t)||taskSpansWeeks(t)) return false;
+  return winActive(t.due_window, taskDueDates(t));
+}
+function taskWindowDates(t){
+  return taskIsWindow(t) ? taskDueDates(t).slice().sort() : [];
+}
+function taskWindowDeadline(t){
+  var d=taskWindowDates(t); return d.length ? d[d.length-1] : null;
+}
+function taskWindowComp(t,store){
+  if(!taskIsWindow(t)) return null;
+  return winClosingComp(bulComps,'task_id',t.id,store,taskWindowDates(t));
+}
+/* Датата, с която се отмята от блока по отдел: днес, ако е В прозореца (тогава
+   bulDateLockReason я отключва), иначе срокът — така заключването само казва
+   „още не е настъпил"/„приключил", вместо да отвори отмятане извън прозореца.
+   Огледално на recurringWindowCheckDate(). */
+function taskWindowCheckDate(t){
+  var d=taskWindowDates(t);
+  if(!d.length) return null;
+  var td=bulTodayISO();
+  return d.indexOf(td)>=0 ? td : d[d.length-1];
+}
 function recurringIsWindow(t){
-  if(!t||!t.due_window) return false;
-  var d=(t.due_weekdays&&t.due_weekdays.length)?t.due_weekdays:[];
-  return d.length>1 && d.length<7;
+  return !!t && winActive(t.due_window, recurringWindowIdxs(t));
 }
 function recurringWindowIdxs(t){
   return ((t&&t.due_weekdays)||[]).slice().sort(function(a,b){return a-b;});
@@ -5835,13 +6002,9 @@ function recurringWindowDatesForDate(t,d){
 }
 /* Отмятането, което затваря прозореца за тази седмица, или null. */
 function recurringWindowComp(t,store,weekArr){
-  if(!store||!recurringIsWindow(t)) return null;
-  var dates=recurringWindowDatesInWeek(t,weekArr), found=null;
-  recurringComps.forEach(function(c){
-    if(found)return;
-    if(c.recurring_task_id===t.id&&c.store_name===store&&c.status==='done'&&dates.indexOf(c.completion_date||'')>=0)found=c;
-  });
-  return found;
+  if(!recurringIsWindow(t)) return null;
+  return winClosingComp(recurringComps,'recurring_task_id',t.id,store,
+                        recurringWindowDatesInWeek(t,weekArr));
 }
 /* Датата, с която прозоречна задача се отмята от блока „Постоянни задачи":
    днес, ако е В прозореца (тогава bulDateLockReason я отключва), иначе

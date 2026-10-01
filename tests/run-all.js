@@ -124,6 +124,7 @@ const TESTS = [
   'recurring-edit-department.test.js',
   'recurring-due-window.test.js',
   'recurring-window-report.test.js',
+  'task-window.test.js',
   'bulletin-week-default.test.js',
   'bulletin-completion-day-lock.test.js',
   'bulletin-store-denominator.test.js',
