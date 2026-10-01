@@ -170,20 +170,12 @@ function renderTransit(){
   else if(transitDir==='transfer') viewData=transitData.filter(function(r){return r.direction==='transfer';});
   else if(transitDir==='outgoing') viewData=transitData.filter(function(r){return r.direction==='outgoing';});
 
-  /* Статус филтър */
-  var list=viewData.filter(function(r){
-    if(transitFilter==='pending')  return r.status==='pending';
-    if(transitFilter==='received') return r.status==='received';
-    if(transitFilter==='rejected') return r.status==='rejected';
-    if(transitFilter==='sent')     return r.status==='sent';
-    return true;
-  });
-  if(transitStore&&transitOwnWarehouse()){
-    /* Складовият профил има само своите редове (филтър на сървъра), затова
-       магазинът в падащото меню е получателят - без supplier и без
-       мажоритарно правило. */
-    list=list.filter(function(r){return r.store_name===transitStore;});
-  }else if(transitStore){
+  /* Редовете при зададени филтри (посока → статус → магазин → месец → търсене).
+     over={dir,status} подменя само това измерение; останалите филтри остават.
+     Така число върху бутон = редовете след клик на него (правилото на Разлики).
+     Без over това е точно списъкът в таблицата. */
+  var _matchByStoreName=true;
+  if(transitStore&&!transitOwnWarehouse()){
     /* За transfer редове ВИНАГИ проверяваме и двете полета — магазинът
        легитимно може да е подател (supplier) в един ред и получател
        (store_name) в друг, и искаме да видим всичко, докато гледаме
@@ -206,23 +198,40 @@ function renderTransit(){
       if(r.store_name===transitStore)_ownCount++;
       if(r.supplier===transitStore)_asSupplierCount++;
     });
-    var _matchByStoreName=_ownCount>=_asSupplierCount;
-    list = list.filter(function(r){
-      if(r.direction==='transfer') return r.store_name===transitStore||r.supplier===transitStore;
-      return _matchByStoreName ? r.store_name===transitStore : r.supplier===transitStore;
-    });
+    _matchByStoreName=_ownCount>=_asSupplierCount;
   }
-  if(transitMonthFilter) list=list.filter(function(r){
-    return r.doc_date&&r.doc_date.slice(0,7)===transitMonthFilter;
-  });
-  if(transitSearch){
-    var _q=transitSearch.trim().toLowerCase();
-    list=list.filter(function(r){
-      return (r.purchase_doc&&String(r.purchase_doc).toLowerCase().indexOf(_q)>=0)
-          || (r.material_code&&String(r.material_code).toLowerCase().indexOf(_q)>=0)
-          || (r.material_name&&String(r.material_name).toLowerCase().indexOf(_q)>=0);
+  var _q=transitSearch?transitSearch.trim().toLowerCase():'';
+  function transitRows(over){
+    over=over||{};
+    var dir=over.dir!==undefined?over.dir:transitDir;
+    var status=over.status!==undefined?over.status:transitFilter;
+    var rows=transitData;
+    if(dir==='incoming'||dir==='transfer'||dir==='outgoing') rows=rows.filter(function(r){return r.direction===dir;});
+    if(status==='pending'||status==='received'||status==='rejected'||status==='sent') rows=rows.filter(function(r){return r.status===status;});
+    if(transitStore&&transitOwnWarehouse()){
+      /* Складовият профил има само своите редове (филтър на сървъра), затова
+         магазинът в падащото меню е получателят - без supplier и без
+         мажоритарно правило. */
+      rows=rows.filter(function(r){return r.store_name===transitStore;});
+    }else if(transitStore){
+      rows=rows.filter(function(r){
+        if(r.direction==='transfer') return r.store_name===transitStore||r.supplier===transitStore;
+        return _matchByStoreName ? r.store_name===transitStore : r.supplier===transitStore;
+      });
+    }
+    if(transitMonthFilter) rows=rows.filter(function(r){
+      return r.doc_date&&r.doc_date.slice(0,7)===transitMonthFilter;
     });
+    if(_q){
+      rows=rows.filter(function(r){
+        return (r.purchase_doc&&String(r.purchase_doc).toLowerCase().indexOf(_q)>=0)
+            || (r.material_code&&String(r.material_code).toLowerCase().indexOf(_q)>=0)
+            || (r.material_name&&String(r.material_name).toLowerCase().indexOf(_q)>=0);
+      });
+    }
+    return rows;
   }
+  var list=transitRows();
 
   /* Статистика */
   var counts={pending:0,received:0,rejected:0,sent:0,incCount:0,outCount:0,transferCount:0};
@@ -232,17 +241,6 @@ function renderTransit(){
     else if(r.direction==='transfer') counts.transferCount++;
     else counts.incCount++;
   });
-  /* allCounts по direction за таб надписите */
-  var allCounts={pending:0,received:0,rejected:0,outPending:0,transferPending:0,transferSent:0};
-  transitData.forEach(function(r){
-    if(r.direction==='outgoing'){if(r.status==='pending')allCounts.outPending++;}
-    else if(r.direction==='transfer'){
-      if(r.status==='pending')allCounts.transferPending++;
-      else if(r.status==='sent')allCounts.transferSent++;
-    }
-    else{if(allCounts[r.status]!==undefined)allCounts[r.status]++;}
-  });
-
   /* Магазини за dropdown */
   var stores={};
   transitData.forEach(function(r){if(r.store_name)stores[r.store_name]=1;});
@@ -284,9 +282,9 @@ function renderTransit(){
   /* Direction tabs — "Изпращам" (outgoing) е скрит по същата причина.
      Ако някога се появи такъв ред, ще се вижда под "Всички". */
   h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:640px;">';
-  [['all','📦📤 Всички','all'+(transitData.length?' ('+transitData.length+')':'')],
-   ['incoming','📦 Получавам','('+allCounts.pending+' чакат)'],
-   ['transfer','🔄 Трансфери','('+allCounts.transferPending+' за изпр. / '+allCounts.transferSent+' за получ.)']].forEach(function(t){
+  [['all','📦📤 Всички','all'+(transitData.length?' ('+transitRows({dir:'all'}).length+')':'')],
+   ['incoming','📦 Получавам','('+transitRows({dir:'incoming',status:'pending'}).length+' чакат)'],
+   ['transfer','🔄 Трансфери','('+transitRows({dir:'transfer',status:'pending'}).length+' за изпр. / '+transitRows({dir:'transfer',status:'sent'}).length+' за получ.)']].forEach(function(t){
     var active=transitDir===t[0];
     h+='<button onclick="transitDir=\''+t[0]+'\';renderTransit()" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';">'+t[1]+'<div style="font-size:10px;opacity:0.7;">'+t[2]+'</div></button>';
   });
@@ -296,7 +294,7 @@ function renderTransit(){
   h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">';
   [['all','Всички'],['pending','⏳ Не доставени'],['received','✅ Прието'],['sent','📤 Изпратена'],['rejected','✕ Неприето']].forEach(function(f){
     var a=transitFilter===f[0];
-    var cnt=f[0]==='all'?viewData.length:counts[f[0]]||0;
+    var cnt=transitRows({status:f[0]}).length;
     h+='<button onclick="transitFilter=\''+f[0]+'\';renderTransit()" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+' ('+cnt+')</button>';
   });
   /* Магазин dropdown - получатели + доставчици */
