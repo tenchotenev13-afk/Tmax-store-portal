@@ -3194,6 +3194,7 @@ function renderDiffReportsSection(){
        (rep.reviewed&&rep.email_pending?'<span style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">✅ Решена — чака имейл</span>':'')+
        (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+sdFmtDateTime(rep.email_sent_at)+'</span>':'')+
        '<button data-rid="'+rep.id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
+       (sdCanMoveReport(rep)?'<button data-rid="'+rep.id+'" onclick="openSDMoveModal(this.dataset.rid)" title="Смени посоката на бланката" style="border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">'+(sdMoveTarget(rep)==='wrong_receipt'?'🧾 Премести в Сторна':'📦 Върни в Доставчици')+'</button>':'')+
        (canSendDiffEmail()?'<button data-rid="'+rep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✉️ Изпрати имейл</button>':'')+
        (canSendDiffEmail()&&rep.reviewed&&rep.email_pending?'<button data-rid="'+rep.id+'" onclick="sdSkipDiffEmail(this.dataset.rid)" title="Бланката е решена — слиза долу без имейл" style="border:1px solid #a7f3d0;background:#ecfdf5;color:#047857;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✓ Без имейл</button>':'')+
        (sdCanDeleteReport()?'<button data-rid="'+rep.id+'" onclick="sdDeleteReport(this.dataset.rid)" title="Изтрий ЦЯЛАТА бланка — редове и файлове, необратимо" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🗑 Изтрий бланката</button>':'')+
@@ -3355,6 +3356,143 @@ function openSDCorrectModal(lineId){
     '<button onclick="submitSDCorrection()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази корекцията</button>'+
     '</div></div></div>';
   document.body.appendChild(div.firstChild);
+}
+/* ── Смяна на посоката Доставчик ↔ Сторна по грешен прием (Цвети, 30.09.2026) ──
+   Посоката е на БЛАНКАТА (differences_reports.direction) - sdLineDirection я
+   чете оттам. От сторната излиза удръжка за обекта (report.js гледа
+   direction), затова решението е само на canReviewDiff().
+   Само НЕДОКОСНАТА бланка: нито ред с тип, нито запис в „За връщане". Решен
+   ред би сменил думите на статуса („Взета" → „Изчистена"), би станал само за
+   четене за магазина и би останал с връщане, което не е на мястото си.
+   Ред на записа: категории + номер на редовете → посоката → audit_log и
+   push. Падне ли редът, посоката не се пипа и всичко може да се пусне пак.
+   Падне ли audit_log/push - преместването остава, но жълт toast го казва.
+   created_at не се мени: седмичният отчет и чек листът броят по нея, тоест
+   бланката остава в седмицата, в която е подадена. */
+function sdMoveTarget(rep){
+  var d = (rep && rep.direction) || 'supplier';
+  return d==='supplier' ? 'wrong_receipt' : (d==='wrong_receipt' ? 'supplier' : null);
+}
+function sdCanMoveReport(rep){
+  if(!canReviewDiff() || !rep || !sdMoveTarget(rep)) return false;
+  return !sdData.some(function(l){ return l.report_id===rep.id && !!l.type; });
+}
+/* Предложение за категория в новата посока - „излишък" и „недоставен" имат
+   пряк аналог; останалите се избират на ръка. */
+var SD_MOVE_CAT = {
+  wrong_receipt: {excess:'unbilled_received', undelivered:'billed_not_received'},
+  supplier:      {unbilled_received:'excess', billed_not_received:'undelivered'}
+};
+function openSDMoveModal(rid){
+  var rep = diffReports.find(function(x){ return String(x.id)===String(rid); });
+  if(!canReviewDiff()){ toast('Посоката на бланка се сменя само от Цвети/admin','#dc2626'); return; }
+  if(!sdCanMoveReport(rep)){ toast('Бланката има решен ред — първо върни типа, после смени посоката','#dc2626'); return; }
+  var target = sdMoveTarget(rep);
+  var lines = sdData.filter(function(l){ return l.report_id===rep.id; });
+  var cats = DIFF_CATEGORIES.filter(function(c){ return c[2].indexOf(target)>=0; });
+  var ords = lines.map(function(l){ return String(l.order_number||'').trim(); });
+  var ord0 = (ords.length && diffOrderNumValid(ords[0]) && ords.every(function(o){ return o===ords[0]; })) ? ords[0] : '';
+  var wk = (typeof getWeekNumber==='function' && rep.created_at) ? getWeekNumber(rep.created_at) : null;
+  var toWr = target==='wrong_receipt';
+  var h = '<div class="bov open" id="sdm-ov"><div class="bmod" style="width:560px;max-height:88vh;overflow-y:auto;">'+
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">'+(toWr?'🧾 Премести в „Сторна по грешен прием"':'📦 Върни в „Разлики от доставчици"')+'</div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">'+esc(rep.store_name||'')+' · '+esc(rep.counterpart||'')+
+      (rep.document_number?' · Док. '+esc(rep.document_number):'')+' · подадена '+fmtDate(rep.created_at)+'</div>';
+  if(rep.email_sent_at) h += '<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11.5px;color:#9a3412;">⚠️ Имейл до доставчика вече е изпратен на '+sdFmtDateTime(rep.email_sent_at)+'.</div>';
+  if(rep.reviewed) h += '<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11.5px;color:#9a3412;">⚠️ Бланката вече е прегледана.</div>';
+  h += '<div style="font-size:11.5px;color:#475569;margin-bottom:10px;">📅 Остава в седмицата на подаването'+(wk?' (седмица '+wk+')':'')+' — отчетът и чек листът броят по нея.</div>';
+  h += '<label class="fl">Категория на всеки ред *</label>';
+  if(!lines.length) h += '<div style="font-size:12px;color:#94a3b8;margin-bottom:8px;">Бланката няма редове.</div>';
+  lines.forEach(function(l, i){
+    var cur = l.difference_category;
+    var pick = cats.some(function(c){ return c[0]===cur; }) ? cur : ((SD_MOVE_CAT[target]||{})[cur]||'');
+    h += '<div style="display:grid;grid-template-columns:1fr 230px;gap:6px;align-items:center;margin-bottom:6px;">'+
+      '<div style="font-size:12px;">'+(i+1)+'. '+esc(l.material_name||'')+' <span style="color:#94a3b8;">('+esc(diffCategoryLabel(cur))+')</span></div>'+
+      '<select class="fi sdm-cat" data-id="'+l.id+'" style="margin:0;">'+diffCategoryOptionsForDirection(target, pick)+'</select></div>';
+  });
+  h += '<label class="fl">Поръчка № * <span style="color:#94a3b8;font-weight:400;">(41…, не входяща доставка)</span></label>'+
+    '<input class="fi" id="sdm-order" inputmode="numeric" placeholder="напр. 4100135756" value="'+escVal(ord0)+'" style="max-width:220px;">'+
+    '<div style="background:'+(toWr?'#fef2f2':'#eff6ff')+';border:1px solid '+(toWr?'#fecaca':'#bfdbfe')+';border-radius:6px;padding:8px 12px;margin:10px 0;font-size:12px;color:'+(toWr?'#991b1b':'#1e40af')+';">'+
+      (toWr ? 'От сторната излиза удръжка за <b>'+esc(rep.store_name||'')+'</b>. Магазинът ще получи известие и бланката става само за четене за него.'
+            : 'Бланката излиза от сторната — удръжка за <b>'+esc(rep.store_name||'')+'</b> по нея няма да се смята. Магазинът ще получи известие.')+'</div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">'+
+    '<button onclick="closeSDMoveModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+    '<button data-rid="'+rep.id+'" onclick="submitSDMove(this.dataset.rid)" style="border:none;background:#6d28d9;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">'+(toWr?'🧾 Премести':'📦 Върни')+'</button>'+
+    '</div></div></div>';
+  closeSDMoveModal();
+  document.body.insertAdjacentHTML('beforeend', h);
+}
+function closeSDMoveModal(){ var el=document.getElementById('sdm-ov'); if(el) el.remove(); }
+function submitSDMove(rid){
+  var rep = diffReports.find(function(x){ return String(x.id)===String(rid); });
+  /* Втора ключалка - модалът може да е отворен преди някой да реши ред. */
+  if(!canReviewDiff()){ toast('Посоката на бланка се сменя само от Цвети/admin','#dc2626'); return; }
+  if(!sdCanMoveReport(rep)){ toast('Бланката има решен ред — първо върни типа, после смени посоката','#dc2626'); return; }
+  var from = rep.direction || 'supplier', target = sdMoveTarget(rep);
+  var lines = sdData.filter(function(l){ return l.report_id===rep.id; });
+  var picks = {}, missing = [];
+  lines.forEach(function(l, i){
+    var sel = document.querySelector('#sdm-ov .sdm-cat[data-id="'+l.id+'"]');
+    var v = sel ? sel.value : '';
+    var ok = DIFF_CATEGORIES.some(function(c){ return c[0]===v && c[2].indexOf(target)>=0; });
+    if(!ok) missing.push(i+1); else picks[l.id] = v;
+  });
+  if(missing.length){ toast((missing.length===1?'Ред ':'Редове ')+missing.join(', ')+': избери категория','#dc2626'); return; }
+  var ordEl = document.getElementById('sdm-order');
+  var ord = ordEl ? String(ordEl.value||'').trim() : '';
+  if(!diffOrderNumValid(ord)){ toast('Поръчка №: впиши номер на поръчка 41…, не входяща доставка','#dc2626'); if(ordEl) ordEl.focus(); return; }
+  var ids = lines.map(function(l){ return l.id; });
+  /* „За връщане" не е в sdData - проверява се в базата преди първия запис. */
+  var retCheck = ids.length ? sbGet('stock_returns','diff_line_id=in.('+ids.join(',')+')&select=id&limit=1') : Promise.resolve([]);
+  retCheck.then(function(ret){
+    if(!Array.isArray(ret)){ toast('Не успях да проверя „За връщане" — нищо не е сменено','#dc2626'); return; }
+    if(ret.length){ toast('Бланката има запис в „За връщане" — посоката не може да се смени','#dc2626'); return; }
+    var before = {};
+    lines.forEach(function(l){ before[l.id] = l.difference_category || null; });
+    Promise.all(lines.map(function(l){
+      return sbPatch('stock_differences','id=eq.'+l.id,{difference_category:picks[l.id], order_number:ord});
+    })).then(function(res){
+      if(res.some(function(x){ return !x || !x.ok; })){
+        toast('Грешка при запис на редовете — посоката НЕ е сменена, опитай пак','#dc2626');
+        loadStockDiff();
+        return;
+      }
+      lines.forEach(function(l){ l.difference_category = picks[l.id]; l.order_number = ord; });
+      return sbPatch('differences_reports','id=eq.'+rep.id,{direction:target}).then(function(r2){
+        if(!r2 || !r2.ok){
+          toast('Редовете са обновени, но посоката НЕ е сменена — опитай пак','#dc2626');
+          return;
+        }
+        rep.direction = target;
+        var toWr = target==='wrong_receipt';
+        var when = fmtDate(rep.created_at), who = rep.counterpart || '';
+        var audit = sbPost('audit_log',{
+          event:'diff_report_moved', user_email:currentUser.email||null, user_role:currentUser.role||null,
+          store_name:currentUser.store_name||null, success:true,
+          details:{report_id:rep.id, from:from, to:target, store:rep.store_name, counterpart:who,
+                   lines:ids.length, order_number:ord, categories_before:before, categories_after:picks}
+        }).then(function(x){ return !!(x && x.ok); }, function(){ return false; });
+        var push = (typeof pushInterstoreDiff==='function')
+          ? Promise.resolve().then(function(){
+              return pushInterstoreDiff(rep.store_name,
+                toWr ? '🧾 Бланка прехвърлена в Сторна' : '📦 Бланка върната в Разлики',
+                'Бланката от '+when+(who?' ('+who+')':'')+(toWr?' е прехвърлена в „Сторна по грешен прием".':' е върната в „Разлики от доставчици".'));
+            }).then(function(x){ return !!(x && x.ok); }, function(){ return false; })
+          : Promise.resolve(false);
+        return Promise.all([audit, push]).then(function(r3){
+          closeSDMoveModal();
+          if(sdDirTabsActive()) sdDirTab = target;
+          renderStockDiff();
+          /* Жълтото е ПОСЛЕДНО - toast() пише в един и същ елемент. */
+          var lost = [];
+          if(!r3[0]) lost.push('следата (audit_log)');
+          if(!r3[1]) lost.push('известието до магазина');
+          if(lost.length) toast('⚠️ Посоката е сменена, но '+lost.join(' и ')+' не '+(lost.length>1?'са записани':'е записано'),'#d97706');
+          else toast(toWr?'✅ Бланката е в „Сторна по грешен прием"':'✅ Бланката е върната в „Разлики от доставчици"');
+        });
+      });
+    });
+  });
 }
 function submitSDCorrection(){
   var current = sdData.find(function(x){return String(x.id)===String(sdCorrectLineId);});
