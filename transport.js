@@ -113,14 +113,20 @@ function renderTransport(){
     if(hl)anim='';
     /* Целият ред отваря детайла; клетката с бутоните и баджът на клиентската
        заявка спират bubbling-а, за да вършат само своето. */
+    /* SAP / Продукт / Бр. — като в Клиентски (до 3 артикула + „+N още“).
+       coItemCells връща трите <td> подред, а тук между тях са Телефон и Адрес —
+       затова се режат и се подреждат на старите места (11 колони). */
+    var itCells=typeof coItemCells==='function'?coItemCells(o).split('</td>').slice(0,3).map(function(x){return x+'</td>';}):null;
+    var tdSap=itCells?itCells[0]:'<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>';
+    var tdProd=itCells?itCells[1]:'<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>';
+    var tdQty=itCells?itCells[2]:'<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>';
     return '<tr id="tr-row-'+esc(o.id)+'" class="row-click" data-id="'+esc(o.id)+'" onclick="openTransportDetail(this.dataset.id)" title="Отвори заявката" style="border-left:3px solid '+bdrColor+';'+anim+hl+'cursor:pointer;">'+
       '<td style="font-size:11px;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
       '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small>'+coLinkBadge(o)+'</td>'+
-      '<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>'+
+      tdSap+
       '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
       '<td style="font-size:12px;">'+esc(o.address||'')+'</td>'+
-      '<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>'+
-      '<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>'+
+      tdProd+tdQty+
       '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
       '<td>'+statusBadge(o._status)+lateBadge(o)+'</td>'+
       '<td>'+esc(o.store_name||'')+'</td>'+
