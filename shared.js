@@ -681,7 +681,13 @@ function markLinkedRecurringTask(linkedModule, opts){
     return sbGet('task_completions','select=id,status&'+match).then(function(rows){
       var cur = (Array.isArray(rows)&&rows.length) ? rows[0] : null;
       /* Вече отметнато днес — втори ред би дал дубликат в броенето. */
-      if(cur && cur.status==='done'){ linkedTaskMarked[memo]=1; return {status:'already', task_id:t.id}; }
+      /* „Не се отнася за нас" (not_applicable, 01.10.2026) се третира КАТО
+         отметнато и се пропуска. Обектът изрично е заявил, че задачата не важи
+         за него, и е написал защо; PATCH на 'done' отдолу би изтрил причината
+         мълчаливо и би записал като свършена работа, за която обектът е казал
+         обратното. Двете SQL функции, които пишат тук (transit_sync_completions
+         и transit_mark_empty_stores), вече са чисти — проверено в базата. */
+      if(cur && (cur.status==='done' || cur.status==='not_applicable')){ linkedTaskMarked[memo]=1; return {status:'already', task_id:t.id}; }
       /* Има ред, но НЕ е 'done' — почти винаги отложен (postponed_to). Двата
          частични уникални индекса от миграция 20260910231103 не гледат
          status, тоест мястото е заето: нов ред би дал 409, а пропускането би
