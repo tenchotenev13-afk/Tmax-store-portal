@@ -321,6 +321,47 @@ function cbOf(h, dayIdx, taskId) {
     }
   }
 
+  section('6г. Дните ПРЕДИ „в сила от" казват нея, не срока');
+  {
+    /* Офисът вижда задачата и преди „в сила от" (прозорецът му започва от
+       spans_from). Дотук в тези дни стоеше „🗓 Срок 08.10 · С41", тоест листът
+       и екранът твърдяха, че задачата важи от понеделник — а обектите я виждат
+       чак от сряда. Баджът решаваше по ДНЕШНАТА дата, а клетката е твърдение за
+       СВОЯ ден. */
+    const h = await view('b-1', freshDb(), ADMIN);
+    if (!h) return report();
+    for (const [i, name] of [[0, 'понеделник'], [1, 'вторник']]) {
+      const c = txtOf(cellOf(h, i));
+      ok(name + ': казва „в сила от"', c.indexOf('в сила от') >= 0, c);
+      ok(name + ': и НЕ казва „Срок"', c.indexOf('Срок') < 0, c);
+    }
+    for (const [i, name] of [[2, 'сряда (в сила от)'], [4, 'петък']]) {
+      const c = txtOf(cellOf(h, i));
+      ok(name + ': казва „Срок"', /Срок \d\d\.\d\d/.test(c), c);
+      ok(name + ': и НЕ казва „в сила от"', c.indexOf('в сила от') < 0, c);
+    }
+    /* КОНТРОЛ: задача БЕЗ starts_on никъде не казва „в сила от". */
+    const hNo = await view('b-1', freshDb({ tasks: [spanTask({ starts_on: null }), PLAIN] }), ADMIN);
+    ok('КОНТРОЛ: без starts_on — нито един ден не казва „в сила от"',
+      [0, 1, 2, 3, 4, 5, 6].every(i => txtOf(cellOf(hNo, i)).indexOf('в сила от') < 0),
+      txtOf(cellOf(hNo, 0)));
+    ok('КОНТРОЛ: и в понеделник вече казва „Срок"',
+      /Срок \d\d\.\d\d/.test(txtOf(cellOf(hNo, 0))), txtOf(cellOf(hNo, 0)));
+
+    /* И на ХАРТИЯ същото разграничение. */
+    let printed = '';
+    h.w.open = () => ({ document: { write(x) { printed += String(x); }, close() {} },
+                        focus() {}, print() {}, close() {} });
+    if (guard('printSection(cal) не хвърля', () => h.w.printSection('cal'))) {
+      ok('листът казва „(в сила от …)" точно за ДВАТА дни преди датата',
+        (printed.match(/\(в сила от \d\d\.\d\d\)/g) || []).length === 2,
+        JSON.stringify((printed.match(/\(в сила от \d\d\.\d\d\)/g) || []).length));
+      ok('и „(срок …)" за останалите ПЕТ',
+        (printed.match(/\(срок \d\d\.\d\d\)/g) || []).length === 5,
+        JSON.stringify((printed.match(/\(срок \d\d\.\d\d\)/g) || []).length));
+    }
+  }
+
   section('7. РЕГРЕСИЯ: задача без spans_from си остава само в своя ден');
   {
     const h = await view('b-1', freshDb());

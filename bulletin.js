@@ -1245,15 +1245,19 @@ function bulSpanDueWeekLabel(t){
   if(!due) return '';
   return 'С'+weekNum(new Date(due+'T00:00:00'));
 }
+/* „⏳ в сила от ДД.ММ" — в свой помощник, защото се ползва от два различни
+   въпроса: „в сила ли е ДНЕС" (блокът по отдел) и „в сила ли е в ТОЗИ ДЕН"
+   (клетката на календара и хартията). */
+function bulSpanNotYetBadgeHtml(t){
+  return '<span title="Обектите ще я видят на тази дата; дотогава е само тук" style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;white-space:nowrap;cursor:help;">⏳ в сила от '+bulDM(taskSpanStart(t))+'</span>';
+}
 function bulSpanBadgeHtml(t){
   if(!taskSpansWeeks(t)) return '';
   var due=taskSpanDue(t);
   if(!due) return '';
   /* Още не е в сила → това е по-важното от срока: офисът гледа задача, която
      обектите изобщо не виждат. */
-  if(t.starts_on && !taskInForce(t, bulTodayISO())){
-    return '<span title="Обектите ще я видят на тази дата; дотогава е само тук" style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;white-space:nowrap;cursor:help;">⏳ в сила от '+bulDM(taskSpanStart(t))+'</span>';
-  }
+  if(t.starts_on && !taskInForce(t, bulTodayISO())) return bulSpanNotYetBadgeHtml(t);
   var lbl = bulSpanPending(t)
     ? '🗓 Срок '+bulDM(due)+' · '+bulSpanDueWeekLabel(t)
     : '🗓 ↔ от '+bulSpanHomeLabel(t);
@@ -1262,9 +1266,23 @@ function bulSpanBadgeHtml(t){
 /* Значката на свой ред под заглавието в клетката на календара — същият надпис,
    който носеше лентата „🗓 Със срок в следваща седмица". Отстъпът 16px го
    подравнява под текста, до чекбокса. */
-function bulSpanBadgeRowHtml(t){
-  var b=bulSpanBadgeHtml(t);
+function bulSpanBadgeRowHtml(t, dateISO){
+  var b=bulSpanBadgeForDay(t, dateISO);
   return b ? '<div style="margin:0 0 4px 16px;">'+b+'</div>' : '';
+}
+/* Значката за КЛЕТКА — решава по деня на КЛЕТКАТА, не по днешната дата. Дни
+   ПРЕДИ „в сила от" носят „⏳ в сила от ДД.ММ", от нея нататък — срока.
+   Защо: bulSpanBadgeHtml() гледа bulTodayISO(), тоест на 01.10 задача „в сила
+   от 01.10" показваше „Срок 08.10" и в клетките на 28–30.09 — а там тя още не
+   важи и изглеждаше, че обектите я виждат от понеделник. Клетката е твърдение
+   за СВОЯ ден, не за днес; блокът по отдел пита другото („в сила ли е ДНЕС") и
+   затова продължава да вика bulSpanBadgeHtml() направо. */
+function bulSpanBadgeForDay(t, dateISO){
+  if(t && t.starts_on && dateISO){
+    var from=taskSpanStart(t);
+    if(from && String(dateISO).slice(0,10) < from) return bulSpanNotYetBadgeHtml(t);
+  }
+  return bulSpanBadgeHtml(t);
 }
 /* ОТКЪДЕ започва прозорецът на клетките. За обекта — от „в сила от"
    (taskSpanStart): преди тази дата задачата не го засяга и не я вижда никъде.
@@ -2377,7 +2395,7 @@ function renderBulView(){
         html+='</div>';
         /* „🗓 Срок ДД.ММ · С41" — същият надпис, който носеше лентата. Без него
            редът изглежда като задача за ДНЕС, а тя е за по-късно. */
-        if(taskSpansWeeks(t)) html+=bulSpanBadgeRowHtml(t);
+        if(taskSpansWeeks(t)) html+=bulSpanBadgeRowHtml(t,dateStr);
         if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
           var lbl=linkedModuleLabel(t.linked_module);
           if(lbl)html+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lbl)+' →</button>';
@@ -4269,8 +4287,13 @@ function printSection(what){
            bulSpanBadgeRowHtml(); тук е само текст, защото печатът няма цветове
            за значки. */
         var spanDue=taskSpansWeeks(t)?taskSpanDue(t):null;
+        /* Същото разграничение като на екрана: ден ПРЕДИ „в сила от" казва нея,
+           не срока — иначе листът за 28.09 твърди, че задачата важи от
+           понеделник. От датата нататък — срока, както досега. */
+        var spanFrom=(spanDue&&t.starts_on&&ds<taskSpanStart(t))?taskSpanStart(t):null;
         s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span style="font-weight:600;">'+esc(t.title||'')+'</span>'+
-           (spanDue?'<span style="font-weight:400;"> (срок '+bulDM(spanDue)+')</span>':'')+'</div>';
+           (spanFrom?'<span style="font-weight:400;"> (в сила от '+bulDM(spanFrom)+')</span>'
+                    :(spanDue?'<span style="font-weight:400;"> (срок '+bulDM(spanDue)+')</span>':''))+'</div>';
       });
       rdt.forEach(function(t){
         var dc=dotC[t.department]||'#64748b';
