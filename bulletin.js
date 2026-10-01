@@ -1607,6 +1607,8 @@ function bulPlanRowHtml(it, store, weekArr){
   h+='<div style="width:52px;flex-shrink:0;font-family:DM Mono,monospace;font-size:12.5px;font-weight:600;color:'+(timeTxt?'#0f172a':'#cbd5e1')+';padding-top:1px;">'+(timeTxt||'—')+'</div>';
   if(it.notice){
     h+='<div style="width:16px;flex-shrink:0;" title="Само за информация — не се отмята"></div>';
+  } else if(it.naComp){
+    h+=bulNaBoxHtml(it.naComp);
   } else if(it.carried){
     /* Пренесеният ред се проверява ПРЕДИ вида: пренесена ПОСТОЯННА задача иначе
        минаваше по пътя на постоянните и щеше да създаде нов ред за новия ден,
@@ -1625,6 +1627,7 @@ function bulPlanRowHtml(it, store, weekArr){
   h+='<span style="font-size:13.5px;font-weight:500;color:'+(done?'#94a3b8':'#0f172a')+';'+(done?'text-decoration:line-through;':'')+'">'+(isRec?'🔁 ':'')+esc(t.title||'')+'</span>';
   h+='<span style="font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:20px;background:'+d.hdr+';color:#fff;white-space:nowrap;">'+esc(d.label||'')+'</span>';
   h+=taskTypeBadgeHtml(t.task_type,t.id,isRec?'recurring':'regular',!isGlobal()&&!it.notice&&!done,cdate);
+  h+=bulNaBadgeHtml(it.naComp);
   if(it.carried) h+=bulCarriedBadgeHtml({t:t,comp:it.comp,merged:false,from:it.carriedFrom});
   if(!isRec) h+=bulSpanBadgeHtml(t);
   if(it.winDeadline) h+='<span style="font-size:9.5px;color:#7c3aed;font-weight:700;white-space:nowrap;">до '+bulDM(it.winDeadline)+'</span>';
@@ -1636,8 +1639,13 @@ function bulPlanRowHtml(it, store, weekArr){
   if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
     h+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="flex-shrink:0;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 9px;font-size:10.5px;cursor:pointer;white-space:nowrap;">'+esc(linkedModuleLabel(t.linked_module))+' →</button>';
   }
+  /* „🚫 Не се отнася" / „↩ Отмени заявката" — пренесеното явяване го няма:
+     то вече е преместена работа, а не „не важи за нас". */
+  if(!isGlobal()&&!done&&!it.notice&&!it.carried){
+    h+=bulNaBtnHtml(isRec?'recurring':'regular',t,bulNaDeclareDate(),it.naComp);
+  }
   /* „⏱ Отложи" — само за обекта, само за неотметнато и неавтоматично. */
-  if(!isGlobal()&&!done&&!it.notice&&!it.carried&&!bulAutoLocked(lockKey)){
+  if(!isGlobal()&&!done&&!it.notice&&!it.carried&&!it.naComp&&!bulAutoLocked(lockKey)){
     h+='<button data-task-id="'+t.id+'" data-cdate="'+(cdate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\''+(isRec?'recurring':'regular')+'\',this.dataset.cdate||null)" style="flex-shrink:0;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:3px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
   }
   return h+'</div>';
@@ -1663,6 +1671,7 @@ function bulPlanGroups(dateISO, store){
                    :(taskIsMultiDay(t)?dateISO:(taskDueDates(t)[0]||null));
     var comp=winComp||(store?bulComps.find(function(c){return c.task_id===t.id&&c.store_name===store&&(c.completion_date||null)===cdate;}):null);
     untimed.push({kind:'regular',t:t,cdate:cdate,comp:comp||null,winComp:winComp||null,
+                  naComp:bulNaComp('regular',t,store,weekArr),
                   done:!!(comp&&comp.status==='done'),
                   winDeadline:(isWin&&!winComp)?(taskWindowDeadline(t)||null):null,
                   rank:[deptRank(t.department),0,t.sort_order||0]});
@@ -1678,6 +1687,7 @@ function bulPlanGroups(dateISO, store){
     var cdate=isWin?(winComp?(winComp.completion_date||dateISO):dateISO):dateISO;
     var comp=winComp||(store?recurringComps.find(function(c){return c.recurring_task_id===t.id&&c.store_name===store&&(c.completion_date||null)===cdate;}):null);
     var row={kind:'recurring',t:t,cdate:cdate,comp:comp||null,winComp:winComp||null,
+             naComp:bulNaComp('recurring',t,store,weekArr),
              done:!!(comp&&comp.status==='done'),
              winDeadline:(isWin&&!winComp)?(recurringWindowDatesInWeek(t,weekArr).slice(-1)[0]||null):null,
              rank:[deptRank(t.department),1,t.sort_order||0]};
@@ -2525,6 +2535,11 @@ function renderBulView(){
              При прозорец броячът минава по НАБОРА дати (пети аргумент): отметка
              на кой да е ден от него брои за целия. */
           html+=calItemStatusHtml(t.id,'regular',t.target_stores,cdateReg,regWinDates);
+        } else if(bulNaComp('regular',t,store,days)){
+          /* „Не се отнася" покрива всички дни на задачата — значи и всяка нейна
+             клетка. Чекбокс тук би значел „може да се отметне". */
+          html+=bulNaBoxHtml(bulNaComp('regular',t,store,days));
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;color:#94a3b8;">'+esc(t.title||'')+'</span>';
         } else {
           var doneReg=regWinComp?true:(store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===cdateReg;}));
           html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+cdateReg+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(regWinComp?winDoneAttr(regWinComp):bulLockAttr(cdateReg,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(regWinComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(cdateReg,bulTaskLinkKey(t),bulSpanOf(t)))+'">';
@@ -2562,6 +2577,9 @@ function renderBulView(){
           html+='<span style="font-size:11px;flex-shrink:0;margin-top:1px;" title="Постоянна задача">🔁</span>';
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;">'+esc(t.title||'')+'</span>';
           html+=calItemStatusHtml(t.id,'recurring',t.target_stores,recCdate,recurringIsWindow(t)?recurringWindowDatesInWeek(t,days):null);
+        } else if(bulNaComp('recurring',t,store,days)){
+          html+=bulNaBoxHtml(bulNaComp('recurring',t,store,days));
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;color:#94a3b8;">'+esc(t.title||'')+'</span>';
         } else {
           var doneRec=recWinComp?true:(store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===recCdate;}));
           html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(recWinComp?winDoneAttr(recWinComp):bulLockAttr(recCdate,t.linked_module))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(recWinComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(recCdate,t.linked_module))+'">';
@@ -2690,6 +2708,10 @@ function renderBulView(){
            извън прозореца. Един в един с renderRecurringTasks(). */
         var isWin=!isNotice&&taskIsWindow(t);
         var winComp=isWin?taskWindowComp(t,store):null;
+        /* „Не се отнася за нас": един ред покрива ЦЯЛАТА задача за обекта —
+           всички дни, целия прозорец, целия период. Затова се пита веднъж тук
+           и после само се чете. */
+        var naComp=!isNotice?bulNaComp('regular',t,store,bulWeekArr()):null;
         var singleDate=isMulti?null:(isWin?taskWindowCheckDate(t):(taskDueDates(t)[0]||null));
         var done=!isNotice&&!isMulti&&(winComp?true:!!(store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===singleDate;})));
         var ppComp=(!isNotice&&store&&!isMulti)?bulPostponedCompOf('regular',t.id,store,singleDate):null;
@@ -2714,12 +2736,14 @@ function renderBulView(){
         }
         if(isNotice){
           html+='<div style="width:16px;flex-shrink:0;" title="Само за информация — не се отмята"></div>';
+        } else if(naComp){
+          html+=bulNaBoxHtml(naComp);
         } else if(isMulti){
           html+='<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
           html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(winComp?winDoneAttr(winComp):bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+(winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+'">';
         }
-        html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done,singleDate)+bulPostponedBadgeHtml(ppComp)+bulSpanBadgeHtml(t)+'</div>';
+        html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!done&&!naComp,singleDate)+bulPostponedBadgeHtml(ppComp)+bulNaBadgeHtml(naComp)+bulSpanBadgeHtml(t)+'</div>';
         if(t.description)html+='<div class="bul-desc">'+linkify(t.description)+'</div>';
         html+=bulAutoTransitNoteHtml(t,done);
         if(isMulti){
@@ -2744,14 +2768,21 @@ function renderBulView(){
         html+=trTaskReportsListHtml(t);
         if(!isNotice)html+=renderSubtasks(t.id, dk, 'dept');
         html+='</div>';
-        if(!isGlobal()&&!isMulti&&!done&&!isNotice){
-          html+='<div style="flex-shrink:0;">';
-          if(postponed)html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
-          /* Задача, която се отмята сама (oborot, автоматична Стока на път), не
-             се отлага: обектът не може да я отметне, а тригерът пак ще я
-             направи done. „↩ Отмени" остава — вече отложеното трябва да може
-             да се върне. */
-          else if(!bulAutoLocked(bulTaskLinkKey(t)))html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+        if(!isGlobal()&&!done&&!isNotice){
+          html+='<div style="display:flex;flex-direction:column;gap:3px;flex-shrink:0;">';
+          /* „🚫 Не се отнася" го има и при МНОГОДНЕВНА задача — затова условието
+             по-горе вече не иска !isMulti. Един ред покрива всичките ѝ дни,
+             значи няма смисъл обектът да го заявява ден по ден в календара.
+             Отлагането остава както беше: по ден, от календара. */
+          html+=bulNaBtnHtml('regular',t,bulNaDeclareDate(),naComp);
+          if(!naComp&&!isMulti){
+            if(postponed)html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
+            /* Задача, която се отмята сама (oborot, автоматична Стока на път), не
+               се отлага: обектът не може да я отметне, а тригерът пак ще я
+               направи done. „↩ Отмени" остава — вече отложеното трябва да може
+               да се върне. */
+            else if(!bulAutoLocked(bulTaskLinkKey(t)))html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+          }
           html+='</div>';
         }
         /* Редакция, известие и изтриване САМО от бюлетина, в който задачата
@@ -4701,20 +4732,23 @@ function renderTasksPanel() {
            задачи и трябва да казва същото, иначе обектът вижда две истини. */
         var isWin = taskIsWindow(t);
         var winComp = isWin ? taskWindowComp(t,store) : null;
+        var naComp = bulNaComp('regular', t, store, bulWeekArr());
         var singleDate = isMulti ? null : (isWin ? taskWindowCheckDate(t) : (taskDueDates(t)[0]||null));
         var isDone = !isMulti && (winComp ? true : bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='done' && (c.completion_date||null)===singleDate;}));
         var ppComp = isMulti ? null : bulPostponedCompOf('regular',t.id,store,singleDate);
         var isPostponed = !!ppComp;
         var compInfo = !isMulti && (winComp || bulComps.find(function(c){return c.task_id===t.id && c.store_name===store && (c.completion_date||null)===singleDate;}) || null);
         h += '<div style="display:flex;align-items:flex-start;gap:10px;padding:7px 0;border-bottom:1px solid #f1f5f9;">';
-        if (isMulti) {
+        if (naComp) {
+          h += bulNaBoxHtml(naComp);
+        } else if (isMulti) {
           h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
         } else {
           h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(winComp?winDoneAttr(winComp):bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+(winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+'">' ;
         }
         h += '<div style="flex:1;">';
         h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':isPostponed?'#b45309':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
-        h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!isDone,singleDate)+bulPostponedBadgeHtml(ppComp)+bulSpanBadgeHtml(t)+'</div>';
+        h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!isDone&&!naComp,singleDate)+bulPostponedBadgeHtml(ppComp)+bulNaBadgeHtml(naComp)+bulSpanBadgeHtml(t)+'</div>';
         if (t.description) h += '<div class="bul-desc">'+linkify(t.description)+'</div>';
         h += renderTaskAttachments(t);
         h += bulAutoTransitNoteHtml(t, isDone);
@@ -4731,8 +4765,13 @@ function renderTasksPanel() {
         if (compInfo && (compInfo.comment||(compInfo.photos&&compInfo.photos.length))) h += renderCompletionExtras(compInfo);
         h += renderSubtasks(t.id, dk, 'panel');
         h += '</div>';
-        h += '<div style="display:flex;gap:4px;flex-shrink:0;">';
-        if (!isGlobal() && !isMulti && !isDone) {
+        h += '<div style="display:flex;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">';
+        if (!isGlobal() && !isDone) {
+          /* Същото като в блока по отдел: заявката важи за цялата задача,
+             затова бутонът го има и при многодневна. */
+          h += bulNaBtnHtml('regular', t, bulNaDeclareDate(), naComp);
+        }
+        if (!isGlobal() && !isMulti && !isDone && !naComp) {
           if (isPostponed) h += '<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
           else if (!bulAutoLocked(bulTaskLinkKey(t))) h += '<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
         }
@@ -4932,6 +4971,16 @@ function openTaskCompletionModal(taskId, kind, completionDate, carriedOrig){
       '<label style="display:inline-flex;align-items:center;gap:4px;border:1px dashed #cbd5e1;border-radius:5px;padding:5px 10px;font-size:12px;color:#475569;cursor:pointer;">' +
       '📄 + Добави документ<input type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx" style="display:none;" onchange="tcUploadFile(this)"></label>';
   }
+  /* „🚫 Не се отнася за нас" и ОТТУК: обектът е отворил модала, видял е, че се
+     иска снимка, и точно тогава се сеща, че няма какво да снима. Бутонът НЕ
+     минава през изискванията на модала — заявката не е изпълнение. Модалът се
+     затваря, за да не остане отворен над новия. */
+  if (!isGlobal() && !carriedOrig) {
+    body += '<div style="margin-top:14px;padding-top:12px;border-top:1px dashed #e2e8f0;">' +
+      '<button data-task-id="'+taskId+'" data-kind="'+kind+'" data-cdate="'+(completionDate||'')+'" onclick="var e=document.getElementById(&#39;tc-modal-ov&#39;);if(e)e.remove();openNotApplicableModal(this.dataset.taskId,this.dataset.kind,this.dataset.cdate||null);" style="border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer;">🚫 Не се отнася за нас</button>' +
+      '<div style="font-size:10.5px;color:#94a3b8;margin-top:5px;">Обектът няма стелажа/стоката — иска се само причина, без снимка.</div>' +
+      '</div>';
+  }
   body += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
     '<button onclick="var e=document.getElementById(&#39;tc-modal-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
     '<button data-task-id="'+taskId+'" data-kind="'+kind+'" data-cdate="'+(completionDate||'')+'" data-orig="'+(carriedOrig||'')+'" onclick="submitTaskCompletion(this.dataset.taskId,this.dataset.kind,this.dataset.cdate||null,this.dataset.orig||null)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✓ Потвърди</button>' +
@@ -5126,6 +5175,134 @@ function submitPostpone(taskId, kind, completionDate){
    затова филтърът е по двете - точно както toggleTask()/toggleRecurringTask()
    скопират своя INSERT/DELETE. Стар ред отпреди датата има completion_date=
    null и се хваща от completion_date=is.null клона. */
+/* ═══ „🚫 НЕ СЕ ОТНАСЯ ЗА НАС" — ЗАЯВЯВАНЕ И ОТМЯНА ═══════════════════════
+   Модалът е по образеца на отлагането: една задължителна причина и потвърждение.
+   РАЗЛИКАТА е, че снимка/документ/коментар по ВИДА на задачата НЕ се изискват —
+   обектът заявява, че работата не важи за него, значи няма какво да снима.
+   Затова входът е отделен бутон, не чекбоксът: bulCheckboxChanged() при задача
+   без изискване вика toggleTask() направо и модал не се отваря никога. */
+function openNotApplicableModal(taskId, kind, completionDate){
+  kind = kind || 'regular';
+  completionDate = completionDate || null;
+  var t = (kind==='recurring' ? recurringTasks : bulTasks).find(function(x){ return String(x.id)===String(taskId); });
+  if (!t) return;
+  /* „Само за информация" няма отмятане — значи няма и какво да не се отнася. */
+  if (taskIsNotice(t)) { toast('„Само за информация" не се отмята','#64748b'); return; }
+  /* Същото заключване по дата като при отмятането: заявка със задна дата е
+     твърдение за минал ден. Автоматичната задача също не се заявява — нейното
+     състояние идва от данните, не от твърдение. */
+  var lockKey = kind==='recurring' ? (t.linked_module||'') : bulTaskLinkKey(t);
+  if (bulAutoLocked(lockKey)) { toast('Тази задача се отмята автоматично от данните','#d97706'); return; }
+  var lockReason = bulDateLockReason(completionDate);
+  if (lockReason) { toast(bulLockLabel(lockReason),'#d97706'); return; }
+  var existing = document.getElementById('na-modal-ov');
+  if (existing) existing.remove();
+  var ov = document.createElement('div');
+  ov.className = 'bov open';
+  ov.id = 'na-modal-ov';
+  ov.innerHTML = '<div class="bmod" style="width:400px;">' +
+    '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">🚫 Не се отнася за нас</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:14px;">'+esc(t.title||'')+'</div>' +
+    '<div style="font-size:11.5px;color:#475569;background:#f8fafc;border:1px solid #f1f5f9;border-radius:6px;padding:8px 10px;margin-bottom:12px;">'+
+    'Задачата няма да се брои нито като изпълнена, нито като пропусната — обектът излиза от броя. Причината се вижда в отчетите до офиса.</div>' +
+    '<label class="fl">Причина *</label>' +
+    '<textarea class="fi" id="na-comment" rows="3" placeholder="Напр.: обектът няма такъв стелаж / няма тази стока..."></textarea>' +
+    '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">Поне 5 знака.</div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">' +
+    '<button onclick="var e=document.getElementById(&#39;na-modal-ov&#39;);if(e)e.remove();" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>' +
+    '<button data-task-id="'+taskId+'" data-kind="'+kind+'" data-cdate="'+(completionDate||'')+'" onclick="submitNotApplicable(this.dataset.taskId,this.dataset.kind,this.dataset.cdate||null)" style="border:none;background:#64748b;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✓ Потвърди</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){ var el=document.getElementById('na-comment'); if(el)el.focus(); }, 80);
+}
+function submitNotApplicable(taskId, kind, completionDate){
+  kind = kind || 'regular';
+  completionDate = completionDate || null;
+  var el = document.getElementById('na-comment');
+  var comment = ((el&&el.value)||'').trim();
+  /* Долната граница е ТУК и в базата (task_completions_na_needs_reason_chk):
+     формата пази човека от 23514, а CHECK-ът пази данните от друг път на запис. */
+  if (comment.length < 5) { toast('Напиши причина — поне 5 знака','#dc2626'); return; }
+  var store = currentUser && currentUser.store_name;
+  if (!store) { toast('Грешка: няма магазин','#dc2626'); return; }
+  var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
+  var who = currentUser.display_name || currentUser.email;
+  var at = new Date().toISOString();
+  var payload = {
+    store_name: store, completed_by: who, completed_at: at,
+    status: 'not_applicable', comment: comment,
+    completion_date: completionDate, postponed_to: null
+  };
+  payload[idField] = taskId;
+  if (kind!=='recurring') payload.bulletin_id = bulTaskBulletinId(taskId);
+  /* Мястото може да е заето (отложен или отметнат ред за същия ден) — двата
+     частични уникални индекса не гледат статус. 409 → PATCH, точно както
+     прави submitPostpone(). postponed_to се нулира: заявката не е отлагане. */
+  var naMatch = idField+'=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+
+                (completionDate ? '&completion_date=eq.'+completionDate : '&completion_date=is.null');
+  var naPatch = {
+    completed_by: who, completed_at: at, status: 'not_applicable',
+    comment: comment, completion_date: completionDate, postponed_to: null
+  };
+  tcUpsert(naMatch, payload, naPatch).then(function(r){
+    if (!r.ok) { toast('Грешка: '+sbErrMsg(r),'#dc2626'); return; }
+    var ov = document.getElementById('na-modal-ov');
+    if (ov) ov.remove();
+    toast('🚫 Отбелязано: не се отнася за обекта');
+    /* Локално — иначе етикетът се появява чак след презареждане. Пренесеният
+       списък НЕ се пипа: заявката не е отлагане и няма нов ден. */
+    var pushObj = { store_name: store, completed_by: who, status:'not_applicable',
+                    comment: comment, completion_date: completionDate, postponed_to: null };
+    pushObj[idField] = taskId;
+    if (kind==='recurring') recurringComps.push(pushObj); else bulComps.push(pushObj);
+    renderBulletin();
+  });
+}
+/* Отмяна. Обектът — само в същия ден (bulDateLockReason), както отметката:
+   заявка със задна дата не бива да се маха със задна дата. Офисът минава през
+   bulNaReturn() и там правилото е друго — той може винаги. */
+function cancelNotApplicable(taskId, kind, completionDate){
+  kind = kind || 'regular';
+  completionDate = completionDate || null;
+  var store = currentUser && currentUser.store_name;
+  if (!store) return;
+  var lockReason = bulDateLockReason(completionDate);
+  if (lockReason) { toast(bulLockLabel(lockReason),'#d97706'); return; }
+  bulNaDelete(kind, taskId, store, completionDate, '↩ Заявката е отменена');
+}
+/* Общото изтриване — ползва се и от обекта, и от офиса („↩ Върни"). Филтърът
+   е по status=not_applicable, за да не отнесе отметка или отлагане за същия
+   ден (същата засада, която cancelPostpone() вече описва). */
+function bulNaDelete(kind, taskId, store, completionDate, okMsg){
+  var idField = kind==='recurring' ? 'recurring_task_id' : 'task_id';
+  var dateQ = completionDate ? '&completion_date=eq.'+completionDate : '&completion_date=is.null';
+  return sbDelete('task_completions', idField+'=eq.'+taskId+'&store_name=eq.'+encodeURIComponent(store)+
+                  '&status=eq.not_applicable'+dateQ).then(function(res){
+    if(!res.ok){
+      console.error('отмяна на „не се отнася": НЕ беше изтрито',taskId,store,res.error);
+      toast('⚠️ Отмяната НЕ мина: '+sbErrMsg(res),'#dc2626');
+      loadBulletin(); return false;
+    }
+    if(res.count===0){ toast('Нямаше какво да се отмени — обновено','#64748b'); loadBulletin(); return false; }
+    toast(okMsg||'↩ Отменено');
+    var keep = function(c){
+      return !(String(c[idField])===String(taskId) && c.store_name===store &&
+               c.status==='not_applicable' && (c.completion_date||null)===completionDate);
+    };
+    if (kind==='recurring') recurringComps = recurringComps.filter(keep);
+    else bulComps = bulComps.filter(keep);
+    renderBulletin();
+    return true;
+  });
+}
+/* ОФИСЪТ връща задачата като чакаща за обекта. Потвърждение, защото редът на
+   обекта се изтрива заедно с причината, която той е написал. */
+function bulNaReturn(kind, taskId, store, completionDate){
+  if (!canEdit()) return;
+  if (!confirm('Да върна задачата като чакаща за „'+store+'"?\n\nЗаявката „не се отнася" и причината към нея се изтриват.')) return;
+  bulNaDelete(kind, taskId, store, completionDate||null, '↩ Върната като чакаща за '+store);
+}
+
 function cancelPostpone(taskId, kind, completionDate){
   kind = kind || 'regular';
   completionDate = completionDate || null;
@@ -5482,6 +5659,9 @@ function renderRecurringTasks(dk) {
          казва „още не е настъпил"/„приключил". */
       var isWinRec = !isNotice && recurringIsWindow(t);
       var winComp = isWinRec ? recurringWindowComp(t,store,weekDaysArr) : null;
+      /* Заявката „не се отнася" за ТАЗИ седмица — покрива всички дни на
+         задачата в нея, затова се пита веднъж. */
+      var naRecComp = !isNotice ? bulNaComp('recurring',t,store,weekDaysArr) : null;
       var singleRecDate = isMultiRec ? null
         : (isWinRec ? recurringWindowCheckDate(t,weekDaysArr)
           : (recTaskWeekdays(t).length ? weekdayIdxToDate(recTaskWeekdays(t)[0]) : toLocalISO(new Date())));
@@ -5505,6 +5685,8 @@ function renderRecurringTasks(dk) {
       }
       if (skipView) {
         h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;color:#94a3b8;" title="Не се изисква тази седмица">⏸</div>';
+      } else if (naRecComp) {
+        h += bulNaBoxHtml(naRecComp);
       } else if (isNotice) {
         h += '<div style="width:16px;flex-shrink:0;" title="Само за информация — не се отмята"></div>';
       } else if (isMultiRec) {
@@ -5514,7 +5696,7 @@ function renderRecurringTasks(dk) {
           'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + (winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleRecDate,t.linked_module)) + '">';
       }
       h += '<div style="flex:1;">';
-      h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done&&!skipView,singleRecDate)+bulPostponedBadgeHtml(ppComp)+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+bulFromBadgeHtml(t)+'</div>';
+      h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done&&!skipView&&!naRecComp,singleRecDate)+bulPostponedBadgeHtml(ppComp)+bulNaBadgeHtml(naRecComp)+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+bulFromBadgeHtml(t)+'</div>';
       if (t.description) h += '<div class="bul-desc">' + linkify(t.description) + '</div>';
       var dueLbl = recurringDueLabel(t);
       if (isMultiRec) {
@@ -5537,7 +5719,14 @@ function renderRecurringTasks(dk) {
       h += trTaskReportsListHtml(t);
       h += '</div>';
       var showBtns='';
-      if(!isGlobal()&&!isMultiRec&&!done&&!skipView&&!isNotice){
+      /* „🚫 Не се отнася" и при ПОСТОЯННА задача: един ред важи за седмицата
+         на реда, симетрично на отметката (решение Б — една логика за всички
+         видове). Изключената за седмицата (skipView) не го получава: тя вече
+         е извън знаменателя и втори механизъм отгоре е шум. */
+      if(!isGlobal()&&!done&&!skipView&&!isNotice){
+        showBtns+=bulNaBtnHtml('recurring',t,bulNaDeclareDate(),naRecComp);
+      }
+      if(!isGlobal()&&!isMultiRec&&!done&&!skipView&&!isNotice&&!naRecComp){
         if(postponed)showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
         else if(!bulAutoLocked(t.linked_module||''))showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
       }
@@ -6007,6 +6196,12 @@ function winActive(flag, dates){
 /* Отмятането, което ЗАТВАРЯ прозореца: първото „done" за този обект, чийто
    completion_date е В набора. Наборът, не един ден — completion_date носи
    реалния ден на щракване и той може да е всеки от прозореца. */
+/* ВНИМАНИЕ: тук НАРОЧНО остава само 'done'. Съблазнително е да се добави и
+   'not_applicable', та прозорецът да се затваря и от заявката — но стойността
+   на тази функция се чете като „изпълнено" (`winComp ? true : …` в шест
+   рендера) и заявката веднага би излязла отметната. „Не се отнася" се пита
+   ОТДЕЛНО, през bulNaComp(), чийто набор дати е по-широк (целия прозорец,
+   целия период, всички дни) и затова затваря същото, без да лъже брояча. */
 function winClosingComp(comps, idField, itemId, store, dates){
   if(!store||!dates||!dates.length) return null;
   var found=null;
@@ -6016,6 +6211,102 @@ function winClosingComp(comps, idField, itemId, store, dates){
        dates.indexOf(c.completion_date||'')>=0) found=c;
   });
   return found;
+}
+
+/* ═══ „🚫 НЕ СЕ ОТНАСЯ ЗА НАС" (task_completions.status='not_applicable') ══
+   01.10.2026. Обект, който физически няма стелажа/дисплея/стоката, го заявява
+   с причина и ИЗЛИЗА ОТ ЗНАМЕНАТЕЛЯ — нито изпълнил, нито пропуснал.
+
+   ЕДИН РЕД ВАЖИ ЗА ЦЯЛАТА ЗАДАЧА за този обект, не за отделен ден (решение А):
+     · еднократна с няколко дни → всички дни;
+     · с прозорец              → целият прозорец;
+     · многоседмична           → целият период;
+     · постоянна               → СЕДМИЦАТА на реда, симетрично на отметката.
+
+   ДАТАТА В РЕДА Е ДЕНЯТ НА ЗАЯВЯВАНЕТО, не ден на задачата. Това не е
+   дребност: първият опит даваше на реда ПЪРВИЯ ден от задачата и при
+   многодневна bulDateLockReason() го отхвърляше като минал — модалът просто
+   не се отваряше. Денят на заявяването има и втора полза: заключването по
+   дата работи естествено (днес никога не е заключен), а отмяната „само днес"
+   е дословно същото правило като при отметката.
+
+   Следствието е, че търсенето НЕ може да е по набора дати на задачата.
+   Затова:
+     · еднократна (вкл. многодневна, с прозорец, многоседмична) → кой да е ред
+       за (задача, обект). Еднократната задача живее в ЕДИН бюлетин, тоест
+       няма втора седмица, в която същият ред да значи друго;
+     · постоянна → ред, чиято дата пада В ПОКАЗАНАТА седмица. Тя се явява
+       всяка седмица и заявка от минала седмица не бива да важи за тази.
+
+   Защо не нова колона: comment вече се чете и показва навсякъде, а CHECK-ът в
+   базата го прави задължителен (мин. 5 знака). Виж
+   task-completion-not-applicable-schema.sql. */
+function bulNaDeclareDate(){ return bulTodayISO(); }
+/* Заявката за (задача, обект) — или null. kind: 'regular' | 'recurring'. */
+function bulNaComp(kind, t, store, weekArr){
+  if(!t||!store) return null;
+  var lo=null, hi=null;
+  if(kind==='recurring'){
+    if(!weekArr||!weekArr.length) return null;
+    lo=toLocalISO(weekArr[0]); hi=toLocalISO(weekArr[weekArr.length-1]);
+  }
+  var arr = kind==='recurring' ? recurringComps : bulComps;
+  var f   = kind==='recurring' ? 'recurring_task_id' : 'task_id';
+  var found = null;
+  arr.forEach(function(c){
+    if(found) return;
+    if(String(c[f])!==String(t.id) || c.store_name!==store) return;
+    if(c.status!=='not_applicable') return;
+    if(lo){
+      var cd=String(c.completion_date||'').slice(0,10);
+      if(!cd || cd<lo || cd>hi) return;
+    }
+    found=c;
+  });
+  return found;
+}
+/* Седмицата на ПОКАЗАНИЯ бюлетин — удобството за извикващите, които нямат
+   weekArr под ръка. Без бюлетин връща празно и bulNaComp мълчи. */
+function bulWeekArr(){ return curBul ? weekDays(curBul.week_number, curBul.year) : []; }
+/* Сивият етикет. Причината е в title, защото редът в календара е тесен, а
+   самата причина е свободен текст — може да е цяло изречение. */
+function bulNaBadgeHtml(comp){
+  if(!comp) return '';
+  var why = String(comp.comment||'').trim();
+  return '<span title="'+escAttr(why||'без причина')+'" style="font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:20px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;white-space:nowrap;cursor:help;">🚫 Не се отнася</span>';
+}
+/* „🚫 Не се отнася: Троян — няма такъв стелаж" за ОФИСА. */
+function bulNaLineHtml(comp){
+  if(!comp) return '';
+  var why = String(comp.comment||'').trim();
+  return '<div style="font-size:10px;color:#64748b;margin-top:2px;">🚫 Не се отнася'+
+    (why?(' — '+esc(why)):'')+'</div>';
+}
+/* Бутоните на ОБЕКТА: „🚫 Не се отнася" или „↩ Отмени заявката". Едно място,
+   защото четири изгледа ги показват (блок по отдел, панел на обекта, постоянни
+   задачи, „План за деня") и пета разлика между тях не е нужна никому.
+   cdate е денят, с който се ЗАПИСВА заявката; при отмяна се ползва датата на
+   самия ред, защото точно по нея се трие.
+   Автоматичната задача не получава бутон: състоянието ѝ идва от данните, а не
+   от твърдение — същото правило като при „⏱ Отложи". */
+function bulNaBtnHtml(kind, t, cdate, naComp){
+  if(isGlobal()||!t||taskIsNotice(t)) return '';
+  var lockKey = kind==='recurring' ? (t.linked_module||'') : bulTaskLinkKey(t);
+  if(bulAutoLocked(lockKey)) return '';
+  var k = kind==='recurring' ? 'recurring' : 'regular';
+  if(naComp){
+    var ncd = String(naComp.completion_date||'').slice(0,10);
+    return '<button data-task-id="'+t.id+'" data-cdate="'+ncd+'" onclick="cancelNotApplicable(this.dataset.taskId,\''+k+'\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени заявката</button>';
+  }
+  return '<button data-task-id="'+t.id+'" data-cdate="'+(cdate||'')+'" onclick="openNotApplicableModal(this.dataset.taskId,\''+k+'\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">🚫 Не се отнася</button>';
+}
+/* Клетката вместо чекбокс, когато заявката е налице — чекбоксът би значел
+   „може да се отметне", а точно това не важи. Правило 11: контролата не
+   изчезва безследно, а се заменя с обяснение. */
+function bulNaBoxHtml(comp){
+  var why = String((comp&&comp.comment)||'').trim();
+  return '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;color:#94a3b8;cursor:help;" title="'+
+    escAttr('Не се отнася за обекта'+(why?(' — '+why):''))+'">🚫</div>';
 }
 /* ═══ ПРОЗОРЕЦ НА ЕДНОКРАТНА ЗАДАЧА ════════════════════════════════════════
    notice няма отметка, тоест прозорец не ѝ значи нищо; многоседмичната има свой
