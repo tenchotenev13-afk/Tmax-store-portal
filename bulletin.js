@@ -4249,8 +4249,12 @@ function printSection(what){
       var ds=toLocalISO(days[i]);
       /* Същият подбор като на екрана (bulDayItems), с двете разлики на
          хартията изрично: без „Само за информация" и БЕЗ филтър по обект за
-         постоянните — второто е заварено поведение на pCal, запазено дословно. */
-      var pIt=bulDayItems(ds, printStore, {includeNotice:false, scopeRecurring:false});
+         постоянните — второто е заварено поведение на pCal, запазено дословно.
+         spanDays е ВКЛЮЧЕН от 01.10.2026: хартията е чеклистът, по който
+         обектът работи през седмицата, тоест задача, която виси десет дни,
+         трябва да е на него всеки ден. Без това екранът и листът казваха
+         различно за една и съща задача. */
+      var pIt=bulDayItems(ds, printStore, {includeNotice:false, scopeRecurring:false, spanDays:true});
       var dt=pIt.regular;
       var rdt=pIt.recurring;
       var mn=c.calendar[key]||[];
@@ -4259,7 +4263,14 @@ function printSection(what){
       s+='<div class="cal-date">'+fmtD(days[i])+'</div>';
       dt.forEach(function(t){
         var dc=dotC[t.department]||'#64748b';
-        s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span style="font-weight:600;">'+esc(t.title||'')+'</span></div>';
+        /* Срокът на многоседмичната се изписва и на хартия: иначе един и същ
+           ред в десет последователни дни чете като десет отделни задачи, а не
+           като една, която виси до тази дата. На екрана това е значката
+           bulSpanBadgeRowHtml(); тук е само текст, защото печатът няма цветове
+           за значки. */
+        var spanDue=taskSpansWeeks(t)?taskSpanDue(t):null;
+        s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span style="font-weight:600;">'+esc(t.title||'')+'</span>'+
+           (spanDue?'<span style="font-weight:400;"> (срок '+bulDM(spanDue)+')</span>':'')+'</div>';
       });
       rdt.forEach(function(t){
         var dc=dotC[t.department]||'#64748b';

@@ -279,6 +279,48 @@ function cbOf(h, dayIdx, taskId) {
       typeof h.w.bulSpanStripHtml);
   }
 
+  section('6б. ХАРТИЯТА: многоседмичната е в печата всеки ден от прозореца');
+  {
+    const h = await view('b-1', freshDb());
+    if (!h) return report();
+    let printed = '';
+    h.w.open = () => ({ document: { write(x) { printed += String(x); }, close() {} },
+                        focus() {}, print() {}, close() {} });
+    if (guard('printSection(cal) не хвърля', () => h.w.printSection('cal'))) {
+      /* Броят на дните се мери по ПОЯВЯВАНИЯТА в целия печат: решетката на
+         хартията е същата, но без data- атрибути, по които да се хване клетка. */
+      const times = printed.split('Надстройка в буса').length - 1;
+      ok('задачата е на листа', times > 0, 'появявания: ' + times);
+      /* Прозорецът покрива сряда–неделя от показаната седмица, тоест пет дни. */
+      ok('и то в ПЕТ дни (сряда–неделя), не в един', times === 5, 'появявания: ' + times);
+      ok('всяко появяване носи срока', (printed.match(/срок \d\d\.\d\d/g) || []).length === times,
+        JSON.stringify((printed.match(/срок \d\d\.\d\d/g) || []).length));
+      /* Еднодневната си остава един път — регресия и на хартия. */
+      ok('еднодневната е само един път', printed.split('Еднодневна').length - 1 === 1,
+        'появявания: ' + (printed.split('Еднодневна').length - 1));
+    }
+  }
+
+  section('6в. ХАРТИЯТА без многоседмични: печатът е същият като досегашния');
+  {
+    /* Еталонът е в самия тест, не в git историята: в CI няма пълна история и
+       `git cat-file` там пада (виж tests-no-git-history в паметта). Проверката
+       е, че БЕЗ многоседмична задача печатът не съдържа нито следа от новия
+       път — нито повторения, нито надписа „(срок …)". */
+    const db = freshDb({ tasks: [PLAIN] });
+    const h = await view('b-1', db);
+    if (!h) return report();
+    let printed = '';
+    h.w.open = () => ({ document: { write(x) { printed += String(x); }, close() {} },
+                        focus() {}, print() {}, close() {} });
+    if (guard('printSection(cal) не хвърля', () => h.w.printSection('cal'))) {
+      ok('еднодневната е на листа точно един път',
+        printed.split('Еднодневна').length - 1 === 1, 'появявания: ' + (printed.split('Еднодневна').length - 1));
+      ok('и НИКЪДЕ не се появява надписът „(срок …)"',
+        !/\(срок \d\d\.\d\d\)/.test(printed), (printed.match(/\(срок[^)]*\)/g) || []).join(' | '));
+    }
+  }
+
   section('7. РЕГРЕСИЯ: задача без spans_from си остава само в своя ден');
   {
     const h = await view('b-1', freshDb());
