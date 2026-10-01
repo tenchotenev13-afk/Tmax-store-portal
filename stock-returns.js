@@ -280,7 +280,7 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
   });
   h += '</tr></thead><tbody>';
   list.forEach(function(r) {
-    var isTaken = r.status === 'taken';
+    var isTaken = r.status === 'taken' || r.status === 'completed'; /* без „Взета“ и на приключен ред */
     var statusBadge = srStatusBadge(r);
     h += '<tr style="border-bottom:1px solid #f1f5f9;'+(r.diff_line_id?'background:#f5f3ff;':'')+'">' +
       '<td style="padding:7px 10px;max-width:180px;">'+esc(r.product_name||'')+'</td>'+
@@ -320,7 +320,7 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
   });
   h += '</tr></thead><tbody>';
   list.forEach(function(r) {
-    var isTaken = r.status === 'taken';
+    var isTaken = r.status === 'taken' || r.status === 'completed'; /* без „Взета“ и на приключен ред */
     var statusBadge = srStatusBadge(r);
     h += '<tr style="border-bottom:1px solid #f1f5f9;">' +
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.purchase_order||'')+'</td>'+
