@@ -128,6 +128,7 @@ const TESTS = [
   'task-window-view.test.js',
   'task-window-report.test.js',
   'rec-window-from-version.test.js',
+  'notify-today-window.test.js',
   'bulletin-week-default.test.js',
   'bulletin-completion-day-lock.test.js',
   'bulletin-store-denominator.test.js',

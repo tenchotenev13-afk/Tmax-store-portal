@@ -10,6 +10,23 @@
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
 //   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
 //
+// v11 (01.10.2026) — ПРОЗОРЕЦ ПРИ ЕДНОКРАТНА ЗАДАЧА (bulletin_tasks.due_window)
+//   и три неща в един деплой:
+//   1) тема today_deadlines: прозоречната еднократна задача се напомня САМО в
+//      деня на СРОКА (dueTodayOneTime), а отмятане на кой да е ден от прозореца
+//      спира напомнянето. Дотук темата пращаше push на всеки ден от прозореца,
+//      включително на обект, свършил работата в първия.
+//   2) СЪЩАТА тема, ПОСТОЯННАТА с прозорец — втори, скрит дефект от същия клас:
+//      наборът беше наред (recurringDueOnWeekday), но отметката се търсеше с
+//      completion_date = ДНЕС, тоест РЕВИЗИЯ 953, свършена в понеделник, пак
+//      получаваше напомняне в сряда. Заявката вече тегли от началото на
+//      прозореца, а условието за НЕпрозоречната задача е изписано изрично —
+//      по-широката заявка иначе би минала вчерашно отмятане за днешно.
+//   3) promoLabel() разгъва кратката форма [текст](адрес) до „текст (адрес)"
+//      (висящо от 28.09.2026) и коментарът над IMPLEMENTED_TOPICS вече казва,
+//      че източниците са ТРИ, не два.
+//   Заковано в tests/notify-today-window.test.js (49 проверки, 12 мутанта).
+//
 // v10 (27.09.2026) — „В СИЛА ОТ" (bulletin_tasks.starts_on): БЕЗ промяна в
 //   логиката. Записано е ЗАЩО гейт тук не е нужен — двете теми подбират по
 //   due_date, а CHECK-ът в базата изисква starts_on <= due_date, тоест щом
@@ -374,6 +391,26 @@ function recurringIsWindow(t: any): boolean {
   if (!t || !t.due_window) return false;
   const d = (Array.isArray(t.due_weekdays) && t.due_weekdays.length) ? t.due_weekdays : [];
   return d.length > 1 && d.length < 7;
+}
+/* ═══ ПРОЗОРЕЦ И ПРИ ЕДНОКРАТНА ЗАДАЧА (bulletin_tasks.due_window) ═══════
+   01.10.2026. Копие на решението от bulletin.js: прозорец има смисъл само при
+   2..6 дни, notice няма отмятане, а многоседмичната има свой механизъм (ЕДИН
+   ден срок + spans_from) и CHECK-ът в базата не допуска двете заедно.
+   Стойност извън диапазона се ИГНОРИРА, вместо поведението да се смени
+   мълчаливо — ред, дошъл от ръчен SQL или от огледалото, не мени нищо.
+
+   ⚠ Тази функция НЕ е под гейта на report-edge-sync.test.js (той сверява
+   send-scheduled-report и send-routed-report). Разминаването с bulletin.js
+   тук се хваща само от tests/notify-today-window.test.js. */
+function taskSpansWeeks(t: any): boolean { return !!t && !!t.spans_from; }
+function taskIsWindow(t: any): boolean {
+  if (!t || taskIsNotice(t) || taskSpansWeeks(t)) return false;
+  if (!t.due_window) return false;
+  const n = dueDatesOf(t).length;
+  return n > 1 && n < 7;
+}
+function taskWindowDates(t: any): string[] {
+  return taskIsWindow(t) ? dueDatesOf(t).slice().sort() : [];
 }
 function recurringDueOnWeekday(t: any, idx: number): boolean {
   if (recurringIsWindow(t)) {
@@ -839,6 +876,18 @@ function filterItemsFor(r: Recipient, items: any[]) {
   return items;
 }
 
+/* Дължима ли е ДНЕС еднократна задача — за темата „срокове днес".
+   Прозоречната влиза САМО в деня на СРОКА (последния ден), точно както
+   recurringDueOnWeekday() прави за постоянната с прозорец. Без това задача
+   „изложи палето зоната до четвъртък" праща push на всеки от четирите дни:
+   четири напомняния за една единица работа, и то до обект, който може да я е
+   свършил още в понеделник. */
+function dueTodayOneTime(t: any, todayISO: string): boolean {
+  const win = taskWindowDates(t);
+  if (win.length) return win[win.length - 1] === todayISO;
+  return dueDatesOf(t).indexOf(todayISO) >= 0;
+}
+
 /* ──────────────── ТЕМА: НАПОМНЯНЕ ДО ОБЕКТА ────────────── */
 /* Три разлики спрямо старото клиентско известие:
    1) праща на всеки обект САМО неговите задачи (target_stores);
@@ -861,7 +910,7 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
     const { data: tasks } = await supabase
       .from('bulletin_tasks').select('*').eq('bulletin_id', bulletins[0].id);
     bulAll = tasks || [];
-    oneTime = bulAll.filter((t: any) => !taskIsNotice(t) && dueDatesOf(t).indexOf(bg.dateStr) >= 0);
+    oneTime = bulAll.filter((t: any) => !taskIsNotice(t) && dueTodayOneTime(t, bg.dateStr));
   }
 
   /* Многоседмичните със срок ДНЕС. Добавят се и в bulAll, за да ги намира
@@ -935,6 +984,26 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
   const oneIds = due.filter(d => !d.isRec && !d.carried).map(d => d.t.id);
   const recIds = due.filter(d => d.isRec && !d.carried).map(d => d.t.id);
 
+  /* Прозорците се смятат ВЕДНЪЖ и за двата вида — ползват се и за долната
+     граница на заявката за постоянните, и за съпоставянето в doneFor().
+     Разминат ли се двете, редът просто не се вижда и никой не разбира защо
+     (същият шаблон като в buildOverdue). */
+  const oneWin: Record<string, string[]> = {};
+  for (const d of due) {
+    if (d.isRec || d.carried) continue;
+    const w = taskWindowDates(d.t);
+    if (w.length) oneWin[d.t.id] = w;
+  }
+  const recWin: Record<string, string[]> = {};
+  let recLo = bg.dateStr;
+  for (const d of due) {
+    if (!d.isRec || d.carried) continue;
+    const w = recurringWindowDatesForISO(d.t, bg.dateStr, bg.weekdayIdx);
+    if (!w.length) continue;
+    recWin[d.t.id] = w;
+    for (const x of w) if (x < recLo) recLo = x;
+  }
+
   let comps: any[] = [];
   if (oneIds.length) {
     const { data } = await supabase.from('task_completions')
@@ -942,9 +1011,16 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
     comps = comps.concat(data || []);
   }
   if (recIds.length) {
+    /* Долната граница е НАЧАЛОТО на най-ранния прозорец, не днес: прозоречната
+       постоянна задача може да е отметната в по-ранен свой ден. Без прозорци
+       recLo === днес, тоест заявката е същата като досега.
+       Това беше вторият, скрит дефект от същия клас: наборът вече влизаше само
+       в деня на срока (recurringDueOnWeekday), но отметката се търсеше с
+       eq.ДНЕС — тоест РЕВИЗИЯ 953, свършена в понеделник, пак получаваше
+       напомняне в сряда. */
     const { data } = await supabase.from('task_completions')
       .select('recurring_task_id,store_name,completion_date,status,postponed_to')
-      .in('recurring_task_id', recIds).eq('completion_date', bg.dateStr);
+      .in('recurring_task_id', recIds).gte('completion_date', recLo).lte('completion_date', bg.dateStr);
     comps = comps.concat(data || []);
   }
 
@@ -954,12 +1030,29 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
      completion_date = днес и doneFor го брои. Отделна проверка по
      postponed_to би била мъртъв код (мутацията, която я изключва, не
      променя нищо — 12.09.2026). */
+  /* Прозорец: отмятане на КОЙ ДА Е негов ден брои за „свършено" и спира
+     напомнянето — свършена в понеделник е свършена, макар срокът да е в сряда.
+     Без прозорец условието е дословно каквото беше. */
   const doneFor = (d: any, store: string) => {
+    const win = d.carried ? null : (d.isRec ? recWin[d.t.id] : oneWin[d.t.id]);
     if (d.isRec) {
-      return comps.some((c: any) => c.recurring_task_id === d.t.id && c.store_name === store);
+      return comps.some((c: any) => {
+        if (c.recurring_task_id !== d.t.id || c.store_name !== store) return false;
+        const cd = c.completion_date ? String(c.completion_date).slice(0, 10) : null;
+        if (win) return !!cd && win.indexOf(cd) >= 0;
+        /* БЕЗ прозорец условието е „днешна дата" и се пише ИЗРИЧНО. Дотук то
+           идваше от самата заявка (eq.ДНЕС) и в JS нямаше проверка. Сега
+           заявката тегли и по-ранни дни заради прозорците — без този ред
+           непрозоречна задача, отметната вчера, би минала за свършена днес. */
+        return cd === bg.dateStr;
+      });
     }
-    return comps.some((c: any) => c.task_id === d.t.id && c.store_name === store
-      && (!c.completion_date || String(c.completion_date).slice(0, 10) === bg.dateStr));
+    return comps.some((c: any) => {
+      if (c.task_id !== d.t.id || c.store_name !== store) return false;
+      const cd = c.completion_date ? String(c.completion_date).slice(0, 10) : null;
+      if (win) return !!cd && win.indexOf(cd) >= 0;
+      return !cd || cd === bg.dateStr;
+    });
   };
 
   const byStore: Record<string, { slot: number; lines: string[] }> = {};
@@ -1227,10 +1320,22 @@ function plusDaysISO(iso: string, n: number): string {
    низ минава — затова има подредба от три стъпки. Ред НЕ се пропуска мълчаливо:
    по-добре „Промоция без заглавие" в известието, отколкото изчезнал ред, за
    който никой не разбира. */
+/* Кратката форма [текст](адрес) се РАЗГЪВА до „текст (адрес)" — push-ът е чист
+   текст и скобите излизаха сурови, докато на екрана същото описание минава
+   през linkify() и е линк. Същото, което прави linkifyPlain() в shared.js.
+   Адресът не се губи: в известие без линк човекът няма откъде да го вземе.
+   Разгъването е ПРЕДИ отрязването на 60 знака, иначе срязан адрес излиза
+   като текст. Отваря се само за http/https/mailto — иначе остава както е
+   написано (същата преценка като linkSafeHref в shared.js). */
+const BN_MD_LINK_RE = /\[([^\]\n]{1,120})\]\(([^)\s]{1,500})\)/g;
+function bnPlainLinks(s: string): string {
+  return s.replace(BN_MD_LINK_RE, (whole: string, label: string, url: string) =>
+    /^(https?:\/\/|mailto:)/i.test(url) ? label + ' (' + url + ')' : whole);
+}
 function promoLabel(p: any): string {
   const t = String(p.title || '').trim();
   if (t) return t;
-  const d = String(p.description || '').trim();
+  const d = bnPlainLinks(String(p.description || '').trim());
   if (d) return d.length > 60 ? d.slice(0, 60) + '…' : d;
   return 'Промоция без заглавие';
 }
@@ -1923,11 +2028,16 @@ async function runLoadingListsPending(supabase: any, topic: any, bg: any, dryRun
    отделна верига от if-ове са два списъка, които се разминават мълчаливо.
    Тук ключът и функцията стоят на един ред и не могат да се разделят.
 
-   Копие на този списък живее в admin.js (NOTIF_IMPLEMENTED_TOPICS) — екранът
-   приглушава темите без строител и заключва превключвателя им. Порталът няма
-   как да прочете този файл по време на изпълнение, затова е копие; двете се
-   менят ЗАЕДНО, а tests/admin-notifications.test.js чете и двата списъка от
-   файловете и пада, ако се разминат. */
+   Отсреща в admin.js стои NOTIF_IMPLEMENTED_TOPICS — но той е двойки
+   ключ→ИМЕ НА ФУНКЦИЯ, не копие на ключовете: екранът приглушава темите без
+   строител, заключва превключвателя им и КАЗВА коя едж функция обслужва всяка.
+   Порталът няма как да прочете тези файлове по време на изпълнение, затова е
+   копие; трите се менят ЗАЕДНО.
+
+   Източниците са ТРИ, не два (28.09.2026): този списък, TOPIC_KEY в
+   send-routed-report (темата weekly_routed се обслужва ОТТАМ, не оттук) и
+   admin.js. tests/admin-notifications.test.js чете и трите от файловете и
+   пада, ако се разминат. */
 const IMPLEMENTED_TOPICS = [
   { key: 'overdue_tasks',   run: runOverdueTasks },
   { key: 'today_deadlines', run: runTodayDeadlines },
