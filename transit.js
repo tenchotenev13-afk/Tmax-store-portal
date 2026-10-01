@@ -71,6 +71,13 @@ function transitCanMarkReceived(r){
   return canEditTransit()&&(isGlobal()||transitIsReceiverOf(r));
 }
 
+/* Складов профил (role 'logistics' със store_name) вижда само редовете на
+   своя склад. Връща името на склада или '' (admin, accounting, логистик без
+   store_name - те не се ограничават). */
+function transitOwnWarehouse(){
+  return (currentUser&&currentUser.role==='logistics'&&currentUser.store_name)?currentUser.store_name:'';
+}
+
 /* ── LOAD с pagination чрез Range header ── */
 function loadTransit(){
   var wrap=document.getElementById('mod-transit');
@@ -81,7 +88,13 @@ function loadTransit(){
   if(wrap)wrap.innerHTML='<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
 
   var storeFilter='';
-  if(!isGlobal()){
+  var ownWh=transitOwnWarehouse();
+  if(ownWh){
+    /* Складът е и подател (supplier), и получател (store_name) в своите
+       редове; чуждите складове и трансферите между магазини не се теглят. */
+    var we=encodeURIComponent(ownWh);
+    storeFilter='&or=(supplier.eq.'+we+',store_name.eq.'+we+')';
+  }else if(!isGlobal()){
     var store=currentUser.store_name||'';
     var se=encodeURIComponent(store);
     /* Обектът вижда СВОИТЕ редове плюс трансферите, които САМ е изпратил.
@@ -165,7 +178,12 @@ function renderTransit(){
     if(transitFilter==='sent')     return r.status==='sent';
     return true;
   });
-  if(transitStore){
+  if(transitStore&&transitOwnWarehouse()){
+    /* Складовият профил има само своите редове (филтър на сървъра), затова
+       магазинът в падащото меню е получателят - без supplier и без
+       мажоритарно правило. */
+    list=list.filter(function(r){return r.store_name===transitStore;});
+  }else if(transitStore){
     /* За transfer редове ВИНАГИ проверяваме и двете полета — магазинът
        легитимно може да е подател (supplier) в един ред и получател
        (store_name) в друг, и искаме да видим всичко, докато гледаме
@@ -285,8 +303,11 @@ function renderTransit(){
   var allStores={};
   transitData.forEach(function(r){
     if(r.store_name)allStores[r.store_name]=1;
-    if(r.supplier)allStores[r.supplier]=1;
+    if(r.supplier&&!transitOwnWarehouse())allStores[r.supplier]=1;
   });
+  /* Складът не е опция в собственото си меню - в базата има и случаен ред
+     със store_name=склада, който иначе би го върнал. */
+  if(transitOwnWarehouse())delete allStores[transitOwnWarehouse()];
   var allStoreList=Object.keys(allStores).sort(function(a,b){return a.localeCompare(b,'bg');});
   if(allStoreList.length>0){
     h+='<select onchange="setTStore(this.value)" style="border:1px solid #e2e8f0;border-radius:8px;padding:5px 10px;font-size:12px;font-family:inherit;">';

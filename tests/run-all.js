@@ -83,6 +83,7 @@ const TESTS = [
   'loading-scan-toggle.test.js',
   'loading-diff-prefill.test.js',
   'transit-store-scope.test.js',
+  'transit-warehouse-scope.test.js',
   'transit-direction-transfer.test.js',
   'loading-lists-print.test.js',
   'stock-diff-capitalized-counter.test.js',

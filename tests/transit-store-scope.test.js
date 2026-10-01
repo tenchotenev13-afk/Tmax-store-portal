@@ -115,16 +115,18 @@ const SKLAD = {
     }
   }
 
-  section('в) Складов профил е глобален — обхватът му не се променя');
+  section('в) Складов профил: isGlobal за правата, но данните — само неговият склад');
   {
-    /* role 'logistics' е в isGlobal(). Ако някога излезе оттам, складът
-       изведнъж би паднал до собствените си редове, а той трябва да вижда
-       всичко изпратено. Затова се проверява изрично тук, а не се подразбира. */
+    /* role 'logistics' е в isGlobal() (права за действия), но от 01.10.2026
+       тегли само редовете на своя склад — подробно в
+       tests/transit-warehouse-scope.test.js. */
     const h = env(SKLAD);
     if (guard('loadTransit() не хвърля', () => h.w.loadTransit())) {
       const url = transitUrl(h.urls);
+      const T = encodeURIComponent('Логистичен склад Търговище');
       ok('isGlobal() върна истина за logistics', h.w.isGlobal() === true);
-      ok('няма or= за складовия профил', url.indexOf('or=') < 0, url);
+      ok('or=(supplier.eq,store_name.eq) за склада',
+        url.indexOf('&or=(supplier.eq.' + T + ',store_name.eq.' + T + ')') >= 0, url);
     }
   }
 
