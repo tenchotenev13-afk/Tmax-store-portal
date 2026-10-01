@@ -101,6 +101,7 @@ const SHARED_FNS = [
   'reportTransferAge', 'reportTransferOpenStates', 'reportTransferStale',
   'reportTransferStaleDays', 'reportTransfersStaleHtml',
   'reportChecklistCellValue', 'reportChecklistSectionHtml',
+  'reportNotApplicableSectionHtml',
   'reportTransitListHtml', 'reportWarehousePendingHtml',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',
   'buildCrossModuleSectionHtml', 'buildDailyReportHtml', 'buildWeeklyReportHtml'

@@ -199,15 +199,26 @@ function collectDailyReportData(cb, scope, kasaThreshold){
         : ('&completion_date=gte.'+regLo+'&completion_date=lte.'+dayISO);
       var recDateQ = '&completion_date=gte.'+recLo+'&completion_date=lte.'+recHi;
 
+      /* „Не се отнася за нас" се тегли ОТДЕЛНО и за СЕДМИЦАТА на отчета, не
+         за деня: редът носи деня на ЗАЯВЯВАНЕТО, който почти никога не е
+         отчетният ден. Без тази заявка дневният отчет изобщо няма да види
+         заявката и обектът пак ще излиза пропуснал. Прозорецът е седмицата —
+         същият, в който се брои и самата задача. */
+      var naDateQ = '&status=eq.not_applicable&completion_date=gte.'+dayMonday+
+                    '&completion_date=lte.'+spanWeekSunday(dayMonday);
       Promise.all([
         regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+regDateQ) : Promise.resolve([]),
         recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+recDateQ) : Promise.resolve([]),
         sbGet('users','select=store_name&order=store_name'),
         carryNeedReg.length ? sbGet('bulletin_tasks','id=in.('+carryNeedReg.join(',')+')') : Promise.resolve([]),
-        carryNeedRec.length ? sbGet('recurring_tasks','id=in.('+carryNeedRec.join(',')+')') : Promise.resolve([])
+        carryNeedRec.length ? sbGet('recurring_tasks','id=in.('+carryNeedRec.join(',')+')') : Promise.resolve([]),
+        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+naDateQ) : Promise.resolve([]),
+        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')'+naDateQ) : Promise.resolve([])
       ]).then(function(r2){
         var regComps = Array.isArray(r2[0]) ? r2[0] : [];
         var recComps = Array.isArray(r2[1]) ? r2[1] : [];
+        var naReg = Array.isArray(r2[5]) ? r2[5] : [];
+        var naRec = Array.isArray(r2[6]) ? r2[6] : [];
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var carryPool = allBulTasks.concat(Array.isArray(r2[3]) ? r2[3] : []);
         /* Пренесените се теглят по id — и те минават през версията за
@@ -241,6 +252,15 @@ function collectDailyReportData(cb, scope, kasaThreshold){
                           : ((c.completion_date||null)===dayISO);
           if(rhit) comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null, postponed_to:c.postponed_to||null });
         });
+        /* Заявките „не се отнася" влизат в общия набор с истинския си статус —
+           reportBuildSummary ги познава по него и ги вади от дробта. Дублиране
+           няма: тесните заявки по-горе връщат само днешния ден/прозореца, а
+           CHECK-ът в базата допуска един ред на (задача, обект, дата). */
+        /* СТАТУСЪТ се проверява и ТУК, не само в заявката: върне ли тя повече
+           редове, същият ред влиза ВТОРИ път в набора и списъците го изброяват
+           двойно (реален случай — „Отложени" с два еднакви реда). */
+        naReg.forEach(function(c){ if(c.status!=='not_applicable') return; comps.push({ item_id:c.task_id, kind:'regular', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null, postponed_to:c.postponed_to||null }); });
+        naRec.forEach(function(c){ if(c.status!=='not_applicable') return; comps.push({ item_id:c.recurring_task_id, kind:'recurring', store_name:c.store_name, status:c.status, comment:c.comment, photos:c.photos, files:c.files, completion_date:c.completion_date||null, postponed_to:c.postponed_to||null }); });
         /* Постоянна задача: отмятането трябва да носи ОТЧЕТНИЯ ден.
            Дотук `!c.completion_date ||` пускаше и старите записи без дата -
            184 такива в базата, всичките отпреди полето да се пълни. Те се
@@ -649,6 +669,15 @@ function reportBuildSummary(items, comps, stores, noDueCount){
   var totalDone=0, totalAll=0, laggards=0;
   var doneComps = comps.filter(function(c){ return c.status==='done'; });
   var postponedComps = comps.filter(function(c){ return c.status==='postponed'; });
+  /* „🚫 Не се отнася за нас" (not_applicable, 01.10.2026) — обектът физически
+     няма стелажа/дисплея/стоката. ИЗЛИЗА от двете страни на дробта, точно
+     като 'na' (извън обхвата) и 'moved' (пренесено за друг ден), но се вижда
+     ОТДЕЛНО, с причината: разликата между „не важи за него" и „не му е
+     възложено" е интересна на офиса, а за процента е една и съща.
+     Съпоставя се по ЗАДАЧАТА, не по датата: редът носи деня на ЗАЯВЯВАНЕТО,
+     не ден на задачата (виж bulNaComp в bulletin.js). Прозорецът на седмицата
+     вече е стеснен от самата заявка към базата. */
+  var naComps = comps.filter(function(c){ return c.status==='not_applicable'; });
   /* Пренесените — по дата, не по статус: отметнатото пренесено явяване е
      'done', но първоначалният му ден пак не го дължи. */
   var movedComps = comps.filter(function(c){ return taskIsMovedAway(c); });
@@ -675,6 +704,10 @@ function reportBuildSummary(items, comps, stores, noDueCount){
          защото отметнатото пренесено явяване пази status='done' върху
          първоначалния си ред и иначе би зачело стария ден за изпълнен. */
       if (movedComps.some(function(c){ return c.store_name===s && reportCompMovedOff(it,c); })) return 'moved';
+      /* ПРЕДИ done/postponed: ако обектът е заявил, че задачата не важи за
+         него, нищо друго по нея не го описва. Проверката е по задачата, не по
+         датата — виж коментара при naComps. */
+      if (naComps.some(function(c){ return c.store_name===s && c.item_id===it.id && c.kind===it.kind; })) return 'notapp';
       if (doneComps.some(function(c){ return c.store_name===s && reportItemMatchesComp(it,c); })) return 'done';
       if (postponedComps.some(function(c){ return c.store_name===s && reportItemMatchesComp(it,c); })) return 'postponed';
       return 'missing';
@@ -682,10 +715,11 @@ function reportBuildSummary(items, comps, stores, noDueCount){
     /* Отложената задача НЕ се брои за изпълнена, но остава в знаменателя -
        точно както досега (в процента влизаше само status='done').
        'moved' е другото: явяването е в друга дата/седмица и излиза и от
-       двете страни на дробта, точно като 'na'. */
+       двете страни на дробта, точно като 'na'. 'notapp' е третото от същия
+       вид: задачата не важи за този обект. */
     var total = 0, done = 0;
     cells.forEach(function(st){
-      if (st === 'na' || st === 'moved') return;
+      if (st === 'na' || st === 'moved' || st === 'notapp') return;
       total++;
       if (st === 'done') done++;
     });
@@ -737,9 +771,24 @@ function reportBuildSummary(items, comps, stores, noDueCount){
   }).map(function(c){
     return { title: titleOf(c), store: c.store_name, comment: c.comment || '', photos: c.photos || [], files: c.files || [] };
   });
+  /* „🚫 Не се отнася" — отделен списък с ПРИЧИНАТА. Той е цялата стойност на
+     фийчъра за офиса: дробта пада от 17/18 на 17/17 и този списък казва защо.
+     Филтърът inWindow НЕ важи тук: той сверява completion_date с датата на
+     явяването, а редът на заявката носи деня на ЗАЯВЯВАНЕТО. Прозорецът идва
+     от самата заявка към базата (седмицата на отчета).
+     Броят ПОРЕДНИ СЕДМИЦИ (naStreaks) се попълва от извикващия, ако го е
+     смятал — тук няма достъп до минали седмици. */
+  var notApplicableList = naComps.filter(function(c){
+    return items.some(function(it){ return it.id===c.item_id && it.kind===c.kind; });
+  }).map(function(c){
+    return { title: titleOf(c), store: c.store_name, comment: c.comment || '',
+             kind: c.kind, item_id: c.item_id,
+             on: c.completion_date ? String(c.completion_date).slice(0,10) : null };
+  });
   return {
     overallPct: overallPct, totalDone: totalDone, totalAll: totalAll,
     laggards: laggards, storeCount: stores.length, rows: rows,
+    notApplicableList: notApplicableList,
     /* Легендата на решетката и заглавията в среза „по задачи" - в СЪЩИЯ
        ред, в който са клетките на всеки ред. Номерът на колоната е просто
        индексът тук + 1. */
@@ -888,6 +937,34 @@ function reportPostponedSectionHtml(postponedList){
   return '<div style="margin-top:14px;">' +
     '<div style="font-size:11px;font-weight:700;color:#b45309;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">⏱ Отложени задачи ('+postponedList.length+')</div>' +
     '<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;overflow:hidden;">'+rows+'</div>' +
+    '</div>';
+}
+
+/* „🚫 Не се отнася" в писмото. Отделна секция, защото тези обекти ги НЯМА в
+   дробта: без този списък офисът вижда 17/17 и няма как да разбере, че един
+   обект е извън броя — и защо.
+
+   naStreaks е карта „обект|вид|id → брой ПОРЕДНИ седмици" и се подава от
+   извикващия (той има достъп до миналите седмици). При 3 и повече до реда
+   застава маркер: три седмици подред „не се отнася" значи, че обектът
+   най-вероятно не бива да е в обхвата на задачата изобщо. САМО показване —
+   нищо не се маха автоматично, решението е на човек. */
+function reportNotApplicableSectionHtml(list, naStreaks){
+  if (!list || !list.length) return '';
+  var rows = list.map(function(p){
+    var key = p.store+'|'+(p.kind||'regular')+'|'+p.item_id;
+    var n = (naStreaks && naStreaks[key]) || 0;
+    return '<div style="padding:8px 10px;border-bottom:1px solid #E5E7EB;">' +
+      '<div style="font-size:13px;font-weight:700;color:#374151;">'+esc(p.title)+' <span style="font-weight:500;color:#6B7280;">— '+esc(p.store)+'</span></div>' +
+      '<div style="font-size:12px;color:#6B7280;margin-top:2px;">💬 '+esc(p.comment||'без причина')+
+        (p.on ? '<span style="color:#9CA3AF;"> · '+esc(reportDM(p.on))+'</span>' : '')+'</div>' +
+      (n >= 3 ? '<div style="font-size:11.5px;font-weight:700;color:#B45309;margin-top:3px;">🚫 '+n+' поредни седмици — помислете за премахване от Магазини</div>' : '') +
+      '</div>';
+  }).join('');
+  return '<div style="margin-top:14px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#6B7280;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">🚫 Не се отнася ('+list.length+')</div>' +
+    '<div style="background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;overflow:hidden;">'+rows+'</div>' +
+    '<div style="font-size:10.5px;color:#9CA3AF;margin-top:5px;font-style:italic;">Тези обекти НЕ влизат в процента по съответната задача — нито като изпълнили, нито като пропуснали.</div>' +
     '</div>';
 }
 
@@ -1231,6 +1308,7 @@ function buildDailyReportHtml(data){
   body += reportByTaskHtml(data, false);
   body += reportKasaSectionHtml(data.kasa);
   body += reportCommentsByStoreHtml(data);
+  body += reportNotApplicableSectionHtml(data.notApplicableList, data.naStreaks);
   body += reportNoDueNoticeHtml(data.noDueCount, false);
   /* Датата идва от ДАННИТЕ, не от часовника: писмото се пише в 8:00 на
      следващия ден и трябва да носи датата на деня, който описва. Fallback-ът
@@ -1512,6 +1590,15 @@ function collectWeeklyReportData(cb, scope){
       var dateQ = wkDates
         ? '&completion_date=gte.' + wkDates[0] + '&completion_date=lte.' + wkDates[6]
         : '';
+      /* Три седмици назад от понеделника на отчета — за маркера „N поредни
+         седмици" при постоянните задачи. Нарочно БЕЗ нова споделена функция:
+         всяка такава трябва да се копира и в едж файла и да влезе в гейта, а
+         за едно изваждане на дни не си струва. */
+      var naHistFrom = (function(){
+        var d = new Date(String(wkMonday).slice(0,10)+'T00:00:00');
+        d.setDate(d.getDate()-21);
+        return toLocalISO(d);
+      })();
 
       Promise.all([
         regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+dateQ) : Promise.resolve([]),
@@ -1522,12 +1609,19 @@ function collectWeeklyReportData(cb, scope){
         /* Отмятанията на „в срок“ задачите — completion_date им е СРОКЪТ,
            тоест извън dateQ на отчетната седмица и горните заявки не ги
            виждат. НАКРАЯ на списъка, за да не мести индексите. */
-        spanPending.length ? sbGet('task_completions','task_id=in.('+spanPending.map(function(t){return t.id;}).join(',')+')&status=eq.done') : Promise.resolve([])
+        spanPending.length ? sbGet('task_completions','task_id=in.('+spanPending.map(function(t){return t.id;}).join(',')+')&status=eq.done') : Promise.resolve([]),
+        /* „Не се отнася" за ПОСТОЯННИТЕ задачи през последните четири седмици
+           — само за маркера „N поредни седмици". Еднократната задача не се
+           повтаря, тоест поредни седмици при нея няма смисъл. Прозорецът е
+           четири седмици, защото маркерът пали на три: повече история не
+           променя нищо, а всяка допълнителна седмица е излишни редове. */
+        recIds.length ? sbGet('task_completions','recurring_task_id=in.('+recIds.join(',')+')&status=eq.not_applicable&completion_date=gte.'+naHistFrom+'&completion_date=lte.'+wkDates[6]).catch(function(){return [];}) : Promise.resolve([])
       ]).then(function(r2){
         var regComps = Array.isArray(r2[0]) ? r2[0] : [];
         var recComps = Array.isArray(r2[1]) ? r2[1] : [];
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var spanComps = Array.isArray(r2[5]) ? r2[5] : [];
+        var naHistory = Array.isArray(r2[6]) ? r2[6] : [];
         var carryPool = allBulTasks.concat(Array.isArray(r2[3]) ? r2[3] : []);
         /* Пренесените — със съдържанието за седмицата на отчета. */
         var carryRecPool = allRecurring.concat(recurringApplyVersions(Array.isArray(r2[4]) ? r2[4] : [], recVersions, wkMonday));
@@ -1593,6 +1687,38 @@ function collectWeeklyReportData(cb, scope){
             total: inScope.length
           };
         });
+        /* „N поредни седмици" — само за ПОСТОЯННИТЕ задачи: еднократната не
+           се повтаря и поредни седмици при нея няма смисъл. Броят се НАЗАД от
+           отчетната седмица и ПРЕКЪСВА при първата седмица без заявка: три
+           заявки в седмици 37, 39 и 40 не са „три поредни".
+           Ключът е обект|вид|id — същият, който чете
+           reportNotApplicableSectionHtml. */
+        summary.naStreaks = (function(){
+          var mondayOf = function(iso){
+            var d = new Date(String(iso).slice(0,10)+'T00:00:00');
+            d.setDate(d.getDate() - ((d.getDay()+6)%7));
+            return toLocalISO(d);
+          };
+          var byKey = {};
+          naHistory.forEach(function(c){
+            /* Пак статусът ИЗРИЧНО: иначе всяко отмятане на задачата би минало
+               за „заявка в тази седмица" и маркерът „N поредни" би лъгал. */
+            if(c.status!=='not_applicable') return;
+            if(!c.completion_date) return;
+            var k = c.store_name+'|recurring|'+c.recurring_task_id;
+            (byKey[k] = byKey[k] || {})[mondayOf(c.completion_date)] = 1;
+          });
+          var out = {};
+          Object.keys(byKey).forEach(function(k){
+            var weeks = byKey[k], n = 0, cur = wkMonday;
+            while(weeks[cur]){
+              n++;
+              var d = new Date(cur+'T00:00:00'); d.setDate(d.getDate()-7); cur = toLocalISO(d);
+            }
+            if(n) out[k] = n;
+          });
+          return out;
+        })();
         summary.weekLabel = bul ? ('Седмица ' + bul.week_number + ' · ' + bul.year) : 'Няма публикуван бюлетин';
         summary.scoped = !!(scope && scope.length);
         summary.weekDates = wkDates; /* същите дати, които стесняват задачите - в шапката */
@@ -2862,6 +2988,7 @@ function buildWeeklyReportHtml(data){
   body += reportByTaskHtml(data, true);
   body += reportTopBottomTable(data.top3, data.bottom3, data.storeCount);
   body += reportPostponedSectionHtml(data.postponedList);
+  body += reportNotApplicableSectionHtml(data.notApplicableList, data.naStreaks);
   body += reportCommentsCountHtml(data.commentedList);
   body += reportSpanPendingHtml(data.spanPending);
   body += reportNoDueNoticeHtml(data.noDueCount, true);
@@ -3618,7 +3745,7 @@ function taskStoreBreakdown(task, comps, allStores){
   if (task.skip_stores && task.skip_stores.length) {
     scope = scope.filter(function(s){ return task.skip_stores.indexOf(s) < 0; });
   }
-  var done=[], postponed=[], pending=[], movedAway=[];
+  var done=[], postponed=[], pending=[], movedAway=[], notApplicable=[];
   var taskKind = task.kind||'regular';
   /* Същият предикат като процента в общия отчет. Дотук съвпадението беше
      само item_id+kind+store_name - обект, отметнал задачата преди месец,
@@ -3627,6 +3754,23 @@ function taskStoreBreakdown(task, comps, allStores){
      са null и reportItemMatchesComp се държи както преди. */
   var matcher = { id:task.id, kind:taskKind, date:task.date||null,
                   dateFrom:task.dateFrom||null, dateTo:task.dateTo||null };
+  /* „🚫 Не се отнася за нас" — обектът ИЗЛИЗА от обхвата, както изключеният
+     за седмицата, но се изброява ОТДЕЛНО, с причината. Съпоставянето е по
+     задачата, не по датата: редът носи деня на ЗАЯВЯВАНЕТО (виж bulNaComp в
+     bulletin.js), а прозорецът идва от заявката към базата. */
+  (comps||[]).forEach(function(x){
+    if (x.status!=='not_applicable') return;
+    if (x.item_id!==task.id || (x.kind||'regular')!==taskKind) return;
+    if (scope.indexOf(x.store_name) < 0) return;
+    if (notApplicable.some(function(n){ return n.store===x.store_name; })) return;
+    notApplicable.push({ store:x.store_name, comment:x.comment||'',
+                         on:x.completion_date?String(x.completion_date).slice(0,10):null });
+  });
+  if (notApplicable.length) {
+    scope = scope.filter(function(s){
+      return !notApplicable.some(function(n){ return n.store===s; });
+    });
+  }
   scope.forEach(function(s){
     /* В диапазон един обект може да има повече от едно отмятане (отложил
        във вторник, изпълнил в четвъртък). „Изпълнено" печели - същото,
@@ -3658,7 +3802,8 @@ function taskStoreBreakdown(task, comps, allStores){
     else pending.push(s);
   });
   if (movedAway.length) scope = scope.filter(function(s){ return movedAway.indexOf(s) < 0; });
-  return { done:done, postponed:postponed, pending:pending, scope:scope, movedAway:movedAway };
+  return { done:done, postponed:postponed, pending:pending, scope:scope, movedAway:movedAway,
+           notApplicable:notApplicable };
 }
 
 function personalizedTaskCardHtml(task, comps, allStores){
@@ -3679,6 +3824,16 @@ function personalizedTaskCardHtml(task, comps, allStores){
     h += '<div style="margin-top:6px;">';
     bd.postponed.forEach(function(p){
       h += '<div style="font-size:11px;color:#92400e;">⏱ '+esc(p.store)+(p.to?' → '+esc(reportDM(p.to)):'')+(p.comment?': '+esc(p.comment):'')+'</div>';
+    });
+    h += '</div>';
+  }
+  /* „Не се отнася" — тези обекти ги НЯМА в „X от Y" горе, затова редът е
+     задължителен: без него числото просто е по-малко и необяснимо. */
+  if (bd.notApplicable && bd.notApplicable.length) {
+    h += '<div style="margin-top:6px;">';
+    bd.notApplicable.forEach(function(n){
+      h += '<div style="font-size:11px;color:#6B7280;">🚫 Не се отнася: '+esc(n.store)+
+        ' — '+esc(n.comment||'без причина')+'</div>';
     });
     h += '</div>';
   }

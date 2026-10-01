@@ -159,6 +159,12 @@ function loadTodayDashboard(){
       });
       var regDateQ = regLo===todayISO ? ('&completion_date=eq.'+todayISO)
         : ('&completion_date=gte.'+regLo+'&completion_date=lte.'+todayISO);
+      /* „🚫 Не се отнася за нас" се тегли ОТДЕЛНО и за СЕДМИЦАТА: редът носи
+         деня на ЗАЯВЯВАНЕТО, който почти никога не е днешният, тоест тесните
+         заявки горе изобщо не го виждат. Без това таблото пак брои обект,
+         който е заявил, че задачата не важи за него. */
+      var naDateQ = '&status=eq.not_applicable&completion_date=gte.'+todayWkMon+
+                    '&completion_date=lte.'+todayWkSun;
       var recDateQ = '&completion_date=gte.'+recLo+'&completion_date=lte.'+todayISO;
 
       /* Задачите зад пренесените редове, които ги няма в заредените набори:
@@ -173,10 +179,14 @@ function loadTodayDashboard(){
         carryNeedReg.length ? sbGet('bulletin_tasks','id=in.('+carryNeedReg.join(',')+')').catch(function(){return [];}) : Promise.resolve([]),
         /* Пренесените задачи се теглят по id — и те минават през версията за
            днешната седмица (заглавие и отдел). */
-        carryNeedRec.length ? sbGet('recurring_tasks','id=in.('+carryNeedRec.join(',')+')').catch(function(){return [];}) : Promise.resolve([])
+        carryNeedRec.length ? sbGet('recurring_tasks','id=in.('+carryNeedRec.join(',')+')').catch(function(){return [];}) : Promise.resolve([]),
+        regIds.length ? sbGet('task_completions','task_id=in.('+regIds.join(',')+')'+naDateQ).catch(function(){return [];}) : Promise.resolve([]),
+        allRecIds.length ? sbGet('task_completions','recurring_task_id=in.('+allRecIds.join(',')+')'+naDateQ).catch(function(){return [];}) : Promise.resolve([])
       ]).then(function(r2){
         var regComps = Array.isArray(r2[0]) ? r2[0] : [];
         var recComps = Array.isArray(r2[1]) ? r2[1] : [];
+        var naReg = Array.isArray(r2[5]) ? r2[5] : [];
+        var naRec = Array.isArray(r2[6]) ? r2[6] : [];
         var users = Array.isArray(r2[2]) ? r2[2] : [];
         var carryExtraReg = Array.isArray(r2[3]) ? r2[3] : [];
         var carryExtraRec = recurringApplyVersions(Array.isArray(r2[4]) ? r2[4] : [], todayVersions, todayMonday);
@@ -235,6 +245,18 @@ function loadTodayDashboard(){
           var f = it.kind==='recurring' ? 'recurring_task_id' : 'task_id';
           it.moved_stores = src.filter(function(c){
             return String(c[f])===String(it.id) && !!c.postponed_to && (c.completion_date||null)===todayISO;
+          }).map(function(c){ return c.store_name; });
+          /* „🚫 Не се отнася за нас" — обектът излиза от знаменателя си, точно
+             като пренесения другаде ден и изключения за седмицата. Датата не
+             участва: редът носи деня на заявяването (виж bulNaComp). */
+          var naSrc = it.kind==='recurring' ? naRec : naReg;
+          it.na_stores = naSrc.filter(function(c){
+            /* Статусът се проверява и ТУК, не само в заявката. Заявката е
+               отделна и филтрирана, но предикатът не бива да зависи от това:
+               върне ли тя повече редове (стар клиент, кеш, друг повикващ),
+               мълчаливо биха излезли от знаменателя обекти, които само са
+               отметнали задачата. */
+            return c.status==='not_applicable' && String(c[f])===String(it.id);
           }).map(function(c){ return c.store_name; });
         });
         /* Обратната посока: пренесените В днес стават собствени елементи, по
@@ -326,6 +348,8 @@ function todayItemInScope(it, store){
      днес не я дължи и излиза от знаменателя си. Броенето му е на новия ден,
      където същата задача влиза като отделен елемент само за него. */
   if (it.moved_stores && it.moved_stores.indexOf(store) >= 0) return false;
+  /* Заявил „не се отнася за нас" — задачата изобщо не е негова. */
+  if (it.na_stores && it.na_stores.indexOf(store) >= 0) return false;
   return !it.target_stores || !it.target_stores.length || it.target_stores.indexOf(store)>=0;
 }
 function todayStoreStats(store, items, comps){

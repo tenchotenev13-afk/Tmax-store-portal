@@ -954,7 +954,7 @@ function taskStoreBreakdown(task, comps, allStores){
   if (task.skip_stores && task.skip_stores.length) {
     scope = scope.filter(function(s){ return task.skip_stores.indexOf(s) < 0; });
   }
-  var done=[], postponed=[], pending=[], movedAway=[];
+  var done=[], postponed=[], pending=[], movedAway=[], notApplicable=[];
   var taskKind = task.kind||'regular';
   /* Същият предикат като процента в общия отчет. Дотук съвпадението беше
      само item_id+kind+store_name - обект, отметнал задачата преди месец,
@@ -963,6 +963,23 @@ function taskStoreBreakdown(task, comps, allStores){
      са null и reportItemMatchesComp се държи както преди. */
   var matcher = { id:task.id, kind:taskKind, date:task.date||null,
                   dateFrom:task.dateFrom||null, dateTo:task.dateTo||null };
+  /* „🚫 Не се отнася за нас" — обектът ИЗЛИЗА от обхвата, както изключеният
+     за седмицата, но се изброява ОТДЕЛНО, с причината. Съпоставянето е по
+     задачата, не по датата: редът носи деня на ЗАЯВЯВАНЕТО (виж bulNaComp в
+     bulletin.js), а прозорецът идва от заявката към базата. */
+  (comps||[]).forEach(function(x){
+    if (x.status!=='not_applicable') return;
+    if (x.item_id!==task.id || (x.kind||'regular')!==taskKind) return;
+    if (scope.indexOf(x.store_name) < 0) return;
+    if (notApplicable.some(function(n){ return n.store===x.store_name; })) return;
+    notApplicable.push({ store:x.store_name, comment:x.comment||'',
+                         on:x.completion_date?String(x.completion_date).slice(0,10):null });
+  });
+  if (notApplicable.length) {
+    scope = scope.filter(function(s){
+      return !notApplicable.some(function(n){ return n.store===s; });
+    });
+  }
   scope.forEach(function(s){
     /* В диапазон един обект може да има повече от едно отмятане (отложил
        във вторник, изпълнил в четвъртък). „Изпълнено" печели - същото,
@@ -994,7 +1011,8 @@ function taskStoreBreakdown(task, comps, allStores){
     else pending.push(s);
   });
   if (movedAway.length) scope = scope.filter(function(s){ return movedAway.indexOf(s) < 0; });
-  return { done:done, postponed:postponed, pending:pending, scope:scope, movedAway:movedAway };
+  return { done:done, postponed:postponed, pending:pending, scope:scope, movedAway:movedAway,
+           notApplicable:notApplicable };
 }
 
 function personalizedTaskCardHtml(task, comps, allStores){
@@ -1015,6 +1033,16 @@ function personalizedTaskCardHtml(task, comps, allStores){
     h += '<div style="margin-top:6px;">';
     bd.postponed.forEach(function(p){
       h += '<div style="font-size:11px;color:#92400e;">⏱ '+esc(p.store)+(p.to?' → '+esc(reportDM(p.to)):'')+(p.comment?': '+esc(p.comment):'')+'</div>';
+    });
+    h += '</div>';
+  }
+  /* „Не се отнася" — тези обекти ги НЯМА в „X от Y" горе, затова редът е
+     задължителен: без него числото просто е по-малко и необяснимо. */
+  if (bd.notApplicable && bd.notApplicable.length) {
+    h += '<div style="margin-top:6px;">';
+    bd.notApplicable.forEach(function(n){
+      h += '<div style="font-size:11px;color:#6B7280;">🚫 Не се отнася: '+esc(n.store)+
+        ' — '+esc(n.comment||'без причина')+'</div>';
     });
     h += '</div>';
   }

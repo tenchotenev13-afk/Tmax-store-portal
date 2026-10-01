@@ -277,8 +277,13 @@ let mod = null;
     ok('Ловеч не е отметнал → получава', has(b, LO, 'РЕВИЗИЯ 953'),
       JSON.stringify(linesOf(b, LO)));
     /* САМАТА ЗАЯВКА тегли от началото на прозореца, не само днес. */
+    /* От 01.10.2026 има ВТОРА заявка за постоянните — тази за „не се отнася"
+       (status=eq.not_applicable, прозорец цялата седмица). Тук се проверява
+       заявката за ОТМЯТАНИЯТА, затова се изключва по status филтъра; иначе
+       твърдението „има точно една" пада заради несвързана промяна. */
     const q = log.filter(x => x.table === 'task_completions' &&
-      x.filters.some(f => f[1] === 'recurring_task_id'));
+      x.filters.some(f => f[1] === 'recurring_task_id') &&
+      !x.filters.some(f => f[1] === 'status'));
     if (ok('има заявка за отмятанията на постоянните', q.length === 1, JSON.stringify(q.map(x => x.filters)))) {
       ok('долната граница е НАЧАЛОТО на прозореца',
         q[0].filters.some(f => f[0] === 'gte' && f[1] === 'completion_date' && f[2] === MON),

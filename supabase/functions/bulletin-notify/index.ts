@@ -713,6 +713,14 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
 
   const stores = await reportableStores(supabase);
 
+  /* „Не се отнася за нас" — обектът ИЗЛИЗА от обхвата на задачата: не е нито
+     „пропуснал", нито част от total. Същото място като изключването за
+     седмицата (skipStores в addTask), затова и пътят е същият. */
+  const naReg = await naStoresFor(supabase, 'task_id',
+    overdueTasks.map((t: any) => t.id).concat(lateRegTasks.map((t: any) => t.id)), yISO, yIdx);
+  const naRec = await naStoresFor(supabase, 'recurring_task_id',
+    recDue.map((t: any) => t.id).concat(lateRec.map((c: any) => c.recurring_task_id)), yISO, yIdx);
+
   const items: { taskId: string; kind: string; store: string; title: string; due: string; groups: string[] }[] = [];
   const taskStats: Record<string, any> = {};
 
@@ -763,7 +771,7 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
     addTask(t, 'regular', lastDueDate(t) || '',
       (s) => comps.some((c: any) => c.task_id === t.id && c.store_name === s &&
         (!taskIsMovedAway(c) || c.status === 'done' || String(c.postponed_to).slice(0, 10) >= bg.dateStr)),
-      undefined,
+      naReg[t.id] || undefined,
       (s) => {
         const m = comps.find((c: any) => c.task_id === t.id && c.store_name === s &&
           taskIsMovedAway(c) && c.status !== 'done' && String(c.postponed_to).slice(0, 10) < bg.dateStr);
@@ -776,7 +784,7 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
     if (taskIsNotice(t)) continue;
     const rows = lateReg.filter((c: any) => c.task_id === t.id);
     if (!rows.length) continue;
-    addTask(t, 'regular', String(rows[0].postponed_to).slice(0, 10), () => false, undefined,
+    addTask(t, 'regular', String(rows[0].postponed_to).slice(0, 10), () => false, naReg[t.id] || undefined,
       (s) => { const m = rows.find((c: any) => c.store_name === s); return m ? String(m.postponed_to).slice(0, 10) : null; },
       rows.map((c: any) => c.store_name));
   }
@@ -796,7 +804,7 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
     addTask(t, 'recurring', yISO, (s) => recComps.some((c: any) => {
       if (c.recurring_task_id !== t.id || c.store_name !== s || c.status !== 'done') return false;
       return onThis(c);
-    }), recurringSkipStores(t.id, ySkips).concat(movedAway));
+    }), recurringSkipStores(t.id, ySkips).concat(movedAway).concat(naRec[t.id] || []));
   }
   /* Пренесените ЗА ВЧЕРА, които вчера не са били в собствения си ден —
      просрочени само за отложилия обект. Задачата идва от recsRaw: там са
@@ -808,7 +816,7 @@ async function buildOverdueTasks(supabase: any, bg: ReturnType<typeof bgNow>) {
   for (const id of Object.keys(lateRecByTask)) {
     const t = (recsRaw || []).find((x: any) => x.id === id);
     if (!t || taskIsNotice(t)) continue;
-    addTask(t, 'recurring', yISO, () => false, recurringSkipStores(t.id, ySkips), undefined, lateRecByTask[id]);
+    addTask(t, 'recurring', yISO, () => false, recurringSkipStores(t.id, ySkips).concat(naRec[id] || []), undefined, lateRecByTask[id]);
   }
 
   if (!items.length) return { skip: 'Всички просрочени задачи са отметнати' };
@@ -874,6 +882,53 @@ function filterItemsFor(r: Recipient, items: any[]) {
     return items.filter(it => it.groups.some((g: string) => mine.indexOf(g) >= 0));
   }
   return items;
+}
+
+/* Заявките „🚫 не се отнася за нас" (not_applicable) за набор задачи — за
+   СЕДМИЦАТА, в която пада подадената дата. ОТДЕЛНА заявка, защото редът носи
+   деня на ЗАЯВЯВАНЕТО, а не ден на задачата: тесните заявки по дата
+   (eq.ДНЕС / прозореца на постоянната) изобщо не го виждат и обектът пак щеше
+   да излиза „пропуснал". Прозорецът е седмицата — същият, в който се брои и
+   самата задача.
+   Връща карта id → обекти; причината НЕ се връща, защото тук се ползва само
+   за изваждане от обхвата. Темата „изтекъл срок" я чете отделно. */
+async function naStoresFor(supabase: any, field: string, ids: string[], anchorISO: string, wdIdx: number) {
+  const out: Record<string, string[]> = {};
+  if (!ids.length) return out;
+  const monday = plusDaysISO(anchorISO, -wdIdx);
+  const { data } = await supabase.from('task_completions')
+    .select(field + ',store_name,status,comment,completion_date')
+    .in(field, ids)
+    .eq('status', 'not_applicable')
+    .gte('completion_date', monday)
+    .lte('completion_date', plusDaysISO(monday, 6));
+  (data || []).forEach((c: any) => {
+    const id = c[field];
+    /* Статусът се сверява и ТУК, не само в заявката: предикатът „този обект
+       излиза от обхвата" не бива да зависи от филтър другаде. */
+    if (!id || c.status !== 'not_applicable') return;
+    (out[id] = out[id] || []).push(c.store_name);
+  });
+  return out;
+}
+/* Същото, но с ПРИЧИНАТА — за писмото „изтекъл срок", където тя е смисълът. */
+async function naRowsFor(supabase: any, field: string, ids: string[], anchorISO: string, wdIdx: number) {
+  const out: Record<string, any[]> = {};
+  if (!ids.length) return out;
+  const monday = plusDaysISO(anchorISO, -wdIdx);
+  const { data } = await supabase.from('task_completions')
+    .select(field + ',store_name,status,comment,completion_date')
+    .in(field, ids)
+    .eq('status', 'not_applicable')
+    .gte('completion_date', monday)
+    .lte('completion_date', plusDaysISO(monday, 6));
+  (data || []).forEach((c: any) => {
+    const id = c[field];
+    if (!id) return;
+    if (c.status !== 'not_applicable') return;
+    (out[id] = out[id] || []).push({ store: c.store_name, comment: c.comment || '' });
+  });
+  return out;
 }
 
 /* Дължима ли е ДНЕС еднократна задача — за темата „срокове днес".
@@ -1055,14 +1110,21 @@ async function buildTodayDeadlines(supabase: any, bg: ReturnType<typeof bgNow>) 
     });
   };
 
+  /* „Не се отнася за нас" — обектът не дължи задачата, значи не получава и
+     напомняне за нея. Тегли се отделно: редът носи деня на ЗАЯВЯВАНЕТО, а
+     заявките по-горе са по днешната дата/прозореца. */
+  const naOne = await naStoresFor(supabase, 'task_id', oneIds, bg.dateStr, bg.weekdayIdx);
+  const naRecD = await naStoresFor(supabase, 'recurring_task_id', recIds, bg.dateStr, bg.weekdayIdx);
+
   const byStore: Record<string, { slot: number; lines: string[] }> = {};
   for (const d of due) {
+    const naHere = d.carried ? [] : ((d.isRec ? naRecD[d.t.id] : naOne[d.t.id]) || []);
     /* Пренесеното е дължимо САМО за обектите, които са го отложили. */
-    const scope = d.carried
+    const scope = (d.carried
       ? stores.filter(s => d.carried!.some((c: any) => c.store_name === s))
       : (Array.isArray(d.t.target_stores) && d.t.target_stores.length)
         ? stores.filter(s => d.t.target_stores.indexOf(s) >= 0)
-        : stores;
+        : stores).filter(s => naHere.indexOf(s) < 0);
     for (const s of scope) {
       if (d.isRec && recurringIsSkipped(d.t.id, s, skips)) continue;
       if (!d.carried && doneFor(d, s)) continue;
@@ -1153,6 +1215,11 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
 
   /* Подало = status 'done'. Отложената задача НЕ е подадена — тя е точно
      обратното и мястото ѝ е в списъка „не са подали". */
+  /* „🚫 Не се отнася за нас" — с ПРИЧИНАТА, защото тя влиза в самото писмо.
+     Обектът излиза от scope: не е нито „подал", нито „не е подал". */
+  const naRows = await naRowsFor(supabase, 'recurring_task_id',
+    due.filter(d => !d.carried).map(d => d.t.id), bg.dateStr, bg.weekdayIdx);
+
   const entries: any[] = [];
   for (const d of due) {
     /* Изключените за седмицата обекти излизат от обхвата. Изключени ли са
@@ -1167,10 +1234,14 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
           : stores).filter(s => !(comps || []).some((x: any) =>
               x.recurring_task_id === d.t.id && x.store_name === s && taskIsMovedAway(x))))
       .filter(s => !recurringIsSkipped(d.t.id, s, skips));
-    if (!scope.length) continue;
+    /* „Не се отнася за нас" — обектът излиза от обхвата: не е нито „подал",
+       нито „не е подал". Причината пътува в entries и влиза в писмото. */
+    const naHere = d.carried ? [] : (naRows[d.t.id] || []);
+    const scopeNa = scope.filter(s => !naHere.some((n: any) => n.store === s));
+    if (!scopeNa.length) continue;
     const submitted: any[] = [];
     const missing: string[] = [];
-    for (const s of scope) {
+    for (const s of scopeNa) {
       /* Отметката на пренесеното е в самия пренесен ред, не в ред с днешна дата. */
       const c = (d.carried || comps || []).find((x: any) =>
         x.recurring_task_id === d.t.id && x.store_name === s && x.status === 'done');
@@ -1184,7 +1255,8 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
         missing.push(s);
       }
     }
-    entries.push({ task: d.t, slot: d.slot, submitted: submitted, missing: missing, total: scope.length });
+    entries.push({ task: d.t, slot: d.slot, submitted: submitted, missing: missing,
+                   total: scopeNa.length, notApplicable: naHere });
   }
 
   if (!entries.length) return { skip: 'Никоя от задачите в прозореца няма обекти в обхвата си' };
@@ -1263,7 +1335,7 @@ function attachmentsHtml(photos, files){
    собствена дата — тя се явява всяка седмица и датата идва от деня, в който
    се смята (bg.dateStr). Четенето ѝ от глобална променлива би направило
    функцията нетестваема. */
-function deadlinePassedHtmlFor(task: any, slot: number, submitted: any[], missing: string[], dateStr: string) {
+function deadlinePassedHtmlFor(task: any, slot: number, submitted: any[], missing: string[], dateStr: string, notApplicable?: any[]) {
   const total = submitted.length + missing.length;
   let h = '<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:640px;">'
     + '<h2 style="margin:0 0 4px;font-size:18px;">' + esc(task.title) + '</h2>'
@@ -1287,6 +1359,18 @@ function deadlinePassedHtmlFor(task: any, slot: number, submitted: any[], missin
     h += '<div style="padding:10px 12px;background:#FDEEEA;border:1px solid #F3C6BA;border-radius:8px;">'
       + '<div style="font-size:13px;font-weight:700;color:#B4442E;margin-bottom:4px;">Не са подали:</div>'
       + '<div style="font-size:13px;color:#7f1d1d;line-height:1.6;">' + missing.map(esc).join('<br>') + '</div>'
+      + '</div>';
+  }
+
+  /* „Не се отнася" — тези обекти ги НЯМА в „X от Y" горе. Без реда числото
+     просто е по-малко и необяснимо, а точно причината е интересната част. */
+  if (notApplicable && notApplicable.length) {
+    h += '<div style="padding:10px 12px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;margin-top:10px;">'
+      + '<div style="font-size:13px;font-weight:700;color:#4B5563;margin-bottom:4px;">🚫 Не се отнася (' + notApplicable.length + '):</div>'
+      + '<div style="font-size:13px;color:#4B5563;line-height:1.6;">'
+      + notApplicable.map((n: any) => esc(n.store) + ' — ' + esc(n.comment || 'без причина')).join('<br>')
+      + '</div>'
+      + '<div style="font-size:11px;color:#9CA3AF;margin-top:4px;font-style:italic;">Тези обекти не влизат в бройката по-горе.</div>'
       + '</div>';
   }
 
@@ -1637,7 +1721,7 @@ async function runDeadlinePassed(supabase: any, topic: any, bg: any, dryRun: boo
       .insert({ topic_key: topic.key, ref_key: refKey, detail: e.submitted.length + ' от ' + e.total + ' обекта' });
     if (ins.error) { skipped++; continue; }
 
-    const body = deadlinePassedHtmlFor(e.task, e.slot, e.submitted, e.missing, bg.dateStr);
+    const body = deadlinePassedHtmlFor(e.task, e.slot, e.submitted, e.missing, bg.dateStr, e.notApplicable);
     let okAny = false;
     for (const r of e.to) {
       const dest = topic.test_email ? topic.test_email : r.email;

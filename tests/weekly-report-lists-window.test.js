@@ -185,9 +185,30 @@ function comp(o) {
       ok('ВСИЧКИ носят прозорец по дата', withWindow.length === qs.length, qs.join('\n'));
       ok('точно една е по postponed_to (пренесените)',
         qs.filter(u => u.indexOf('postponed_to=') >= 0).length === 1, qs.join('\n'));
-      ok('прозорецът е точно седмицата на бюлетина (' + days[0] + ' — ' + days[6] + ')',
-        qs.every(u => u.indexOf('gte.' + days[0]) >= 0 && u.indexOf('lte.' + days[6]) >= 0),
-        qs.join('\n'));
+      /* ЕДНО изключение от 01.10.2026: заявката за „🚫 не се отнася" в минали
+         седмици (status=eq.not_applicable) гледа ЧЕТИРИ седмици назад — тя
+         храни маркера „N поредни седмици" и по дефиниция ѝ трябва история.
+         Изключението е ТЯСНО нарочно: само тази заявка, само с този статус, и
+         пак с ДВЕ граници — иначе се връщаме към дефекта, заради който тази
+         секция съществува (заявка без прозорец тегли 1345 реда и PostgREST
+         реже най-новите). */
+      const hist = qs.filter(u => u.indexOf('status=eq.not_applicable') >= 0);
+      ok('заявката за историята е най-много една', hist.length <= 1, qs.join('\n'));
+      hist.forEach(u => {
+        ok('и тя пак е с ДВЕ граници по дата',
+          u.indexOf('completion_date=gte.') >= 0 && u.indexOf('completion_date=lte.') >= 0, u);
+        ok('горната ѝ граница е неделята на седмицата',
+          u.indexOf('lte.' + days[6]) >= 0, u);
+        /* Долната е понеделник минус 21 дни — проверява се като ДАТА, не като
+           низ, за да не зависи от формата на изписването. */
+        const m = /completion_date=gte\.(\d{4}-\d{2}-\d{2})/.exec(u);
+        const back = m ? Math.round((new Date(days[0] + 'T00:00:00') - new Date(m[1] + 'T00:00:00')) / 86400000) : -1;
+        ok('долната е точно 21 дни преди понеделника', back === 21, String(back) + ' дни: ' + u);
+      });
+      const rest = qs.filter(u => hist.indexOf(u) < 0);
+      ok('ВСИЧКИ останали са точно седмицата на бюлетина (' + days[0] + ' — ' + days[6] + ')',
+        rest.every(u => u.indexOf('gte.' + days[0]) >= 0 && u.indexOf('lte.' + days[6]) >= 0),
+        rest.join('\n'));
     }
   }
 
@@ -252,15 +273,28 @@ function comp(o) {
     h.w.collectDailyReportData(function () {});
     for (let i = 0; i < 4; i++) await ticks();
     const qs = h.calls.get.filter(u => u.indexOf('/task_completions') >= 0);
-    const rec = qs.filter(u => u.indexOf('recurring_task_id=in.(r-1)') >= 0);
-    ok('вторник: заявка за отмятанията на постоянната задача', rec.length === 1, qs.join('\n'));
+    /* От 01.10.2026 заявките за „🚫 не се отнася" (status=eq.not_applicable)
+       са отделни и гледат СЕДМИЦАТА, не отчетния ден: редът носи деня на
+       ЗАЯВЯВАНЕТО, който почти никога не е отчетният. Затова те се изваждат от
+       двете твърдения по-долу — но се проверяват поотделно, с две граници, за
+       да не се превърне изключението в вратичка. */
+    const naQ = qs.filter(u => u.indexOf('status=eq.not_applicable') >= 0);
+    const plain = qs.filter(u => naQ.indexOf(u) < 0);
+    const rec = plain.filter(u => u.indexOf('recurring_task_id=in.(r-1)') >= 0);
+    ok('вторник: заявка за отмятанията на постоянната задача', rec.length === 1, plain.join('\n'));
     if (rec.length) {
       ok('филтърът е completion_date gte = lte = отчетния ден (не седмица)',
         JSON.stringify(dateValues(rec[0])) === JSON.stringify(['completion_date=gte.' + day, 'completion_date=lte.' + day]),
         rec[0]);
     }
     ok('нито една заявка не пипа друга дата освен отчетния ден',
-      qs.every(u => dateValues(u).every(v => v.slice(-10) === day)), qs.join('\n'));
+      plain.every(u => dateValues(u).every(v => v.slice(-10) === day)), plain.join('\n'));
+    naQ.forEach(u => {
+      const dv = dateValues(u);
+      ok('заявката за „не се отнася" е с две граници', dv.length === 2, u);
+      ok('и те са в седмицата на отчетния ден',
+        dv.length === 2 && dv[0].slice(-10) <= day && dv[1].slice(-10) >= day, u);
+    });
     ok('пренесените са за същия ден', qs.some(u => u.indexOf('postponed_to=eq.' + day) >= 0), qs.join('\n'));
   }
 
