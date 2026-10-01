@@ -131,6 +131,7 @@ const TESTS = [
   'notify-today-window.test.js',
   'na-auto-complete-guard.test.js',
   'na-store-declare.test.js',
+  'na-office-view.test.js',
   'bulletin-week-default.test.js',
   'bulletin-completion-day-lock.test.js',
   'bulletin-store-denominator.test.js',

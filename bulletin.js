@@ -590,10 +590,26 @@ function calItemStatusHtml(itemId,kind,targetStores,dateStr,windowDates){
       scope = scope.filter(function(s){ return movedAway.indexOf(s)<0; });
       if(!scope.length) return '<span title="Пренесена за друг ден от всички обекти" style="font-size:11px;font-weight:700;color:#7c3aed;margin-left:4px;white-space:nowrap;cursor:help;">⏱</span>';
     }
+    /* „Не се отнася за нас" (not_applicable) — обектът ИЗЛИЗА от знаменателя:
+       17/17, не 17/18. Нито изпълнил, нито пропуснал, точно както излизат
+       изключеният за седмицата и пренесеният другаде ден. Търсенето тук НЕ
+       минава през dateMatches: редът носи деня на ЗАЯВЯВАНЕТО, а заявката
+       важи за цялата задача (виж bulNaComp). Остане ли празно — казваме го с
+       думи, вместо да върнем 0/0. */
+    var naStores = scope.filter(function(s){
+      return compsArr.some(function(c){ return c[idField]===itemId && c.store_name===s && c.status==='not_applicable'; });
+    });
+    if(naStores.length){
+      scope = scope.filter(function(s){ return naStores.indexOf(s)<0; });
+      if(!scope.length) return '<span title="'+escAttr('Не се отнася за нито един обект: '+naStores.join(', '))+'" style="font-size:11px;font-weight:700;color:#64748b;margin-left:4px;white-space:nowrap;cursor:help;">🚫</span>';
+    }
     var done = scope.filter(function(s){
       return compsArr.some(function(c){ return c[idField]===itemId && c.store_name===s && dateMatches(c) && (c.status||'done')==='done'; });
     }).length;
-    return '<span style="font-size:11px;font-weight:700;color:'+(done===scope.length&&scope.length?'#16a34a':'#94a3b8')+';margin-left:4px;white-space:nowrap;">'+done+'/'+scope.length+'</span>';
+    var naTip = naStores.length ? escAttr('🚫 Не се отнася за: '+naStores.join(', ')+' — извадени от броя') : '';
+    return '<span'+(naTip?(' title="'+naTip+'" style="cursor:help;'):' style="')+
+      'font-size:11px;font-weight:700;color:'+(done===scope.length&&scope.length?'#16a34a':'#94a3b8')+';margin-left:4px;white-space:nowrap;">'+
+      done+'/'+scope.length+(naStores.length?' <span style="font-weight:400;color:#64748b;">🚫'+naStores.length+'</span>':'')+'</span>';
   }
   var store = currentUser && currentUser.store_name;
   if(!store) return '';
@@ -2763,6 +2779,7 @@ function renderBulView(){
         html+=bulSpanHomeNoteHtml(t);
         if(isGlobal()&&t.target_stores&&t.target_stores.length)html+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🏬 Само за: '+t.target_stores.map(esc).join(', ')+'</div>';
         if(isGlobal()&&t.created_by)html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">👤 Поставена от: '+esc(t.created_by)+'</div>';
+        html+=bulNaOfficeHtml('regular',t,bulWeekArr());
         if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))html+=renderCompletionExtras(compObj);
         html+=renderTaskAttachments(t);
         html+=trTaskReportsListHtml(t);
@@ -4702,7 +4719,11 @@ function renderTasksPanel() {
          отметне по-рано), но не влиза нито в числителя, нито в знаменателя —
          иначе процентът на обекта пада заради работа, която още не се
          изисква. Брои се в седмицата на срока. */
-      var cntTasks = dTasks.filter(function(t){ return taskCountsInWeek(t, bulWeekISO()); });
+      /* Заявената „не се отнася" излиза от двете страни на дробта — обектът
+         вижда 4/4, не 4/5, и точно това е смисълът на фийчъра. */
+      var cntTasks = dTasks.filter(function(t){
+        return taskCountsInWeek(t, bulWeekISO()) && !bulNaComp('regular', t, store, bulWeekArr());
+      });
       var done = cntTasks.filter(function(t){
         return bulComps.some(function(c){return c.task_id===t.id && c.store_name===store && c.status==='done';});
       }).length + cRows.filter(function(r){ return r.comp.status==='done'; }).length;
@@ -5474,7 +5495,8 @@ function loadTasksStats() {
        Смята се ВЕДНЪЖ, не наново за всеки магазин × отдел. */
     var statWk = curBul ? curBul.week_number : weekNum(new Date());
     var statYr = curBul ? curBul.year : new Date().getFullYear();
-    var statWeekDays = weekDays(statWk, statYr).map(function(d){ return toLocalISO(d); });
+    var statWeekArr = weekDays(statWk, statYr);
+    var statWeekDays = statWeekArr.map(function(d){ return toLocalISO(d); });
     var statRecDates = {}, statRecWindow = {};
     statRecurring.forEach(function(t){
       var out = [];
@@ -5506,9 +5528,16 @@ function loadTasksStats() {
            празно/null = всички, или изрично включен) - иначе магазин без
            достъп до дадена задача пак се брои в знаменателя ѝ, изкуствено
            занижавайки % му. Същият модел като в today.js/report.js. */
+        /* Задача, за която ТОЗИ обект е заявил „не се отнася", изобщо не влиза
+           в реда му — нито в числителя, нито в знаменателя. Другите обекти не
+           се пипат: филтърът е по обект, точно както при изключването за
+           седмицата (recurringIsSkipped) по-долу. */
+        var naTasks = 0;
         var dTasks = statTasks.filter(function(t){
           if(t.department!==dk)return false;
-          return !t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0;
+          if(!(!t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0))return false;
+          if(bulNaComp('regular',t,store,statWeekArr)){ naTasks++; return false; }
+          return true;
         });
         var done = dTasks.filter(function(t){
           return bulComps.some(function(c){return c.task_id===t.id&&c.store_name===store&&c.status==='done';});
@@ -5524,6 +5553,8 @@ function loadTasksStats() {
              дължима и не влиза в знаменателя му. Останалите обекти не се
              пипат: филтърът е по обект, не по задача. */
           if(recurringIsSkipped(t.id,store,bulSkips))return false;
+          /* Същото и за заявката „не се отнася" — за ТАЗИ седмица. */
+          if(bulNaComp('recurring',t,store,statWeekArr)){ naTasks++; return false; }
           return !t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0;
         });
         var recAll=0, recDone=0;
@@ -5548,6 +5579,10 @@ function loadTasksStats() {
         h += '<td style="text-align:center;padding:7px 12px;background:'+bg+';">';
         if (pct !== null) h += '<span style="color:'+color+';font-weight:600;">'+doneCnt+'/'+allCnt+'</span>';
         else h += '<span style="color:#cbd5e1;">—</span>';
+        /* Колко задачи са ИЗВАДЕНИ от реда на обекта. Без този знак числото
+           изглежда просто по-малко и никой не разбира защо — дробта пада от
+           4/5 на 4/4 без обяснение. */
+        if (naTasks) h += '<span title="'+escAttr(naTasks+' '+(naTasks===1?'задача':'задачи')+' не се отнасят за този обект — извадени от броя')+'" style="font-size:10px;color:#64748b;margin-left:4px;cursor:help;">🚫'+naTasks+'</span>';
         h += '</td>';
       });
       var totalPct = totalAll ? Math.round(totalDone/totalAll*100) : 0;
@@ -5574,12 +5609,17 @@ function renderBulAnalysis(){
      магазини във ВСЯКА седмица от обхвата си, тоест 2 до 4 пъти. */
   var anTasks=bulTasks.filter(function(t){return !taskIsNotice(t) && taskCountsInWeek(t, bulWeekISO()) && taskInForce(t, bulTodayISO());});
   if(!anTasks.length){html+='<div class="bcard" style="text-align:center;padding:30px;color:#94a3b8;">Няма задачи.</div>';wrap.innerHTML=html+'</div>';return;}
-  var ds={};bulComps.forEach(function(c){ds[c.task_id]=1;});
+  /* „Не се отнася" НЕ е изпълнение: иначе задача, за която един обект е
+     заявил, че не важи за него, щеше да влезе в „✅ Изпълнени" и да излезе от
+     „🔴 Просрочени" — заради обект, който дори не я дължи. Заявките се
+     изброяват отделно, в колоната „Изпълнили" на таблицата по-долу.
+     (Отложените продължават да влизат в ds, както досега — заварено.) */
+  var ds={};bulComps.forEach(function(c){if(c.status!=='not_applicable')ds[c.task_id]=1;});
   var done=Object.keys(ds).length; var tot=anTasks.length;
   /* Числителят минава през същия филтър като знаменателя (loadReportableStores
      по-долу). Иначе отметка от необект — ЦО, склад, Сервиз Троян — прави
      „🏪 Магазини" 19 и процента над 100%. */
-  var ss={};bulComps.forEach(function(c){if(isReportableStore(c.store_name))ss[c.store_name]=1;});
+  var ss={};bulComps.forEach(function(c){if(c.status!=='not_applicable'&&isReportableStore(c.store_name))ss[c.store_name]=1;});
   var over=anTasks.filter(function(t){var dts=taskDueDates(t);return dts.length&&new Date(dts[dts.length-1])<new Date()&&!ds[t.id];}).length;
   html+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">';
   [['📋 Задачи',tot,'общо','#2563eb'],['✅ Изпълнени',done,'задачи','#16a34a'],['🔴 Просрочени',over,'без изпълнение','#dc2626'],['🏪 Магазини',Object.keys(ss).length,'са отметнали','#d97706']].forEach(function(card){
@@ -5595,11 +5635,17 @@ function renderBulAnalysis(){
   loadReportableStores().then(function(all){
     var tbl='<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Задача</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Отдел</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Срок</th><th style="text-align:left;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">Изпълнили</th><th style="text-align:right;padding:6px 10px;background:#f8fafc;border-bottom:1px solid #e2e8f0;">%</th></tr></thead><tbody>';
     anTasks.forEach(function(task){
-      var comps=bulComps.filter(function(c){return c.task_id===task.id&&isReportableStore(c.store_name);});
-      var pct=all.length?Math.round(comps.length/all.length*100):0;
+      /* „Изпълнили" са редовете, които СА изпълнение. Заявките „не се отнася"
+         се изброяват отделно и ИЗЛИЗАТ от знаменателя — иначе обект, който
+         физически няма стелажа, тегли процента на задачата надолу завинаги. */
+      var naRows=bulNaCompsFor('regular',task,bulWeekArr());
+      var naSet={};naRows.forEach(function(c){naSet[c.store_name]=c;});
+      var comps=bulComps.filter(function(c){return c.task_id===task.id&&isReportableStore(c.store_name)&&c.status!=='not_applicable';});
+      var denom=all.filter(function(st){return !naSet[st];}).length;
+      var pct=denom?Math.round(comps.length/denom*100):0;
       var isOv=(function(){var dts=taskDueDates(task);return dts.length&&new Date(dts[dts.length-1])<new Date()&&!ds[task.id];})();
       var d=DEPTS[task.department]||{label:task.department,color:'#94a3b8',bg:'#f3f4f6',bdr:'#e2e8f0'};
-      tbl+='<tr style="border-bottom:1px solid #f1f5f9;'+(isOv?'background:#fff5f5;':'')+'"><td style="padding:7px 10px;font-weight:500;">'+esc(task.title||'')+'</td><td style="padding:7px 10px;"><span style="background:'+d.bg+';color:'+d.color+';border:1px solid '+d.bdr+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+d.label+'</span></td><td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:'+(isOv?'#dc2626':'#64748b')+';">'+(taskDueLabel(task)||'—')+(isOv?' 🔴':'')+'</td><td style="padding:7px 10px;">'+(comps.length?comps.map(function(c){return '<span style="background:#dcfce7;color:#14532d;font-size:10px;padding:1px 6px;border-radius:20px;margin:1px 2px;display:inline-block;">'+esc(c.store_name)+'</span>';}).join(''):'<span style="color:#94a3b8;font-size:11px;">—</span>')+'</td><td style="padding:7px 10px;text-align:right;font-family:DM Mono,monospace;font-weight:700;color:'+(pct>=80?'#16a34a':pct>=50?'#d97706':'#dc2626')+';">'+pct+'%</td></tr>';
+      tbl+='<tr style="border-bottom:1px solid #f1f5f9;'+(isOv?'background:#fff5f5;':'')+'"><td style="padding:7px 10px;font-weight:500;">'+esc(task.title||'')+'</td><td style="padding:7px 10px;"><span style="background:'+d.bg+';color:'+d.color+';border:1px solid '+d.bdr+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+d.label+'</span></td><td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:'+(isOv?'#dc2626':'#64748b')+';">'+(taskDueLabel(task)||'—')+(isOv?' 🔴':'')+'</td><td style="padding:7px 10px;">'+((comps.length||naRows.length)?(comps.map(function(c){return '<span style="background:#dcfce7;color:#14532d;font-size:10px;padding:1px 6px;border-radius:20px;margin:1px 2px;display:inline-block;">'+esc(c.store_name)+'</span>';}).join('')+naRows.map(function(c){var why=String(c.comment||'').trim();return '<span title="'+escAttr('Не се отнася'+(why?(' — '+why):''))+'" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;font-size:10px;padding:1px 6px;border-radius:20px;margin:1px 2px;display:inline-block;cursor:help;">🚫 '+esc(c.store_name)+'</span>'+(canEdit()?('<button data-task-id="'+task.id+'" data-store="'+escAttr(c.store_name)+'" data-cdate="'+String(c.completion_date||'').slice(0,10)+'" onclick="bulNaReturn(\'regular\',this.dataset.taskId,this.dataset.store,this.dataset.cdate||null)" title="Върни като чакаща" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:4px;padding:0 5px;font-size:9.5px;cursor:pointer;margin:1px 4px 1px 0;">↩</button>'):'');}).join('')):'<span style="color:#94a3b8;font-size:11px;">—</span>')+'</td><td style="padding:7px 10px;text-align:right;font-family:DM Mono,monospace;font-weight:700;color:'+(pct>=80?'#16a34a':pct>=50?'#d97706':'#dc2626')+';">'+pct+'%</td></tr>';
     });
     tbl+='</tbody></table></div>';
     var el=document.getElementById('an-tbl'); if(el)el.innerHTML=tbl;
@@ -5714,6 +5760,7 @@ function renderRecurringTasks(dk) {
         h += '<div style="font-size:10px;color:'+(dueToday&&!done&&!skipView?'#d97706':'#94a3b8')+';margin-top:2px;">🔁 '+dueLbl+(dueToday&&!done&&!skipView?' (днес!)':'')+'</div>';
       }
       if(isGlobal()&&t.target_stores&&t.target_stores.length)h+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🏬 Само за: '+t.target_stores.map(esc).join(', ')+'</div>';
+      h+=bulNaOfficeHtml('recurring',t,weekDaysArr);
       if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))h+=renderCompletionExtras(compObj);
       h += renderRecurringAttachments(t);
       h += trTaskReportsListHtml(t);
@@ -6299,6 +6346,55 @@ function bulNaBtnHtml(kind, t, cdate, naComp){
     return '<button data-task-id="'+t.id+'" data-cdate="'+ncd+'" onclick="cancelNotApplicable(this.dataset.taskId,\''+k+'\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени заявката</button>';
   }
   return '<button data-task-id="'+t.id+'" data-cdate="'+(cdate||'')+'" onclick="openNotApplicableModal(this.dataset.taskId,\''+k+'\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">🚫 Не се отнася</button>';
+}
+/* ВСИЧКИ заявки за една задача — за ОФИСА. Той не вижда един обект, а всичките,
+   затова му трябва списък, а не бадж: „🚫 Не се отнася (2)" и под него кой и
+   защо. Без причината редът е безполезен — тя е цялата стойност на фийчъра.
+   Обхватът е същият като на bulNaComp, само че без филтър по обект. */
+function bulNaCompsFor(kind, t, weekArr){
+  if(!t) return [];
+  var lo=null, hi=null;
+  if(kind==='recurring'){
+    if(!weekArr||!weekArr.length) return [];
+    lo=toLocalISO(weekArr[0]); hi=toLocalISO(weekArr[weekArr.length-1]);
+  }
+  var arr = kind==='recurring' ? recurringComps : bulComps;
+  var f   = kind==='recurring' ? 'recurring_task_id' : 'task_id';
+  return (arr||[]).filter(function(c){
+    if(String(c[f])!==String(t.id)) return false;
+    if(c.status!=='not_applicable') return false;
+    if(!isReportableStore(c.store_name)) return false;
+    if(lo){
+      var cd=String(c.completion_date||'').slice(0,10);
+      if(!cd || cd<lo || cd>hi) return false;
+    }
+    return true;
+  });
+}
+/* Блокът за офиса под задачата. „↩ Върни" е само за canEdit() и минава през
+   потвърждение — редът на обекта се изтрива заедно с причината, която той е
+   написал. */
+function bulNaOfficeHtml(kind, t, weekArr){
+  if(!isGlobal()||!t||taskIsNotice(t)) return '';
+  var rows = bulNaCompsFor(kind, t, weekArr);
+  if(!rows.length) return '';
+  var k = kind==='recurring' ? 'recurring' : 'regular';
+  var h = '<div style="font-size:10px;color:#64748b;margin-top:3px;">🚫 Не се отнася ('+rows.length+'):</div>';
+  rows.forEach(function(c){
+    var why = String(c.comment||'').trim();
+    var cd = String(c.completion_date||'').slice(0,10);
+    h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:10px;color:#64748b;margin-top:2px;padding-left:8px;">'+
+      '<span style="font-weight:600;">'+esc(c.store_name)+'</span>'+
+      '<span>— '+esc(why||'без причина')+'</span>'+
+      (cd?'<span style="color:#94a3b8;">· '+bulDM(cd)+'</span>':'');
+    if(canEdit()){
+      h += '<button data-task-id="'+t.id+'" data-store="'+escAttr(c.store_name)+'" data-cdate="'+cd+'" '+
+        'onclick="bulNaReturn(\''+k+'\',this.dataset.taskId,this.dataset.store,this.dataset.cdate||null)" '+
+        'style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:4px;padding:1px 6px;font-size:9.5px;cursor:pointer;white-space:nowrap;">↩ Върни</button>';
+    }
+    h += '</div>';
+  });
+  return h;
 }
 /* Клетката вместо чекбокс, когато заявката е налице — чекбоксът би значел
    „може да се отметне", а точно това не важи. Правило 11: контролата не
