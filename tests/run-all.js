@@ -55,6 +55,7 @@ const TESTS = [
   'sd-table-scroll.test.js',
   'sd-store-missing-lock.test.js',
   'sd-move-direction.test.js',
+  'sd-return-create-fail.test.js',
   'sd-swap-notify.test.js',
   'sd-actions-card.test.js',
   'interstore-swap-signal.test.js',

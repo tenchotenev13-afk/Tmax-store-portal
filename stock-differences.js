@@ -287,9 +287,9 @@ function loadStockDiff() {
   ]).then(function(res){
     sdData = Array.isArray(res[0]) ? res[0] : [];
     diffReports = Array.isArray(res[1]) ? res[1] : [];
-    /* Размените зависят от id-тата на вече заредените редове - затова
-       след Promise.all, не в него. */
-    return sdLoadSwaps();
+    /* Размените и връзките към „За връщане" зависят от вече заредените
+       редове - затова след Promise.all, не в него. */
+    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks()]);
   }).then(function(){
     renderStockDiff();
   }).catch(function(err) {
@@ -473,7 +473,7 @@ function renderStockDiff() {
         '<td class="sd-c-store" style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
         '<td class="sd-c-sup" style="padding:7px 10px;font-size:11px;color:#64748b;">'+esc(r.supplier||'')+'</td>'+
         '<td class="sd-c-code" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.material_code||'')+'</td>'+
-        '<td class="sd-c-name" style="padding:7px 10px;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+'</td>'+
+        '<td class="sd-c-name" style="padding:7px 10px;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+sdReturnMissingMark(r)+'</td>'+
         '<td class="sd-c-qty" style="padding:7px 10px;text-align:right;font-weight:600;">'+sdQtyCell(r.quantity,(r.quantity)||'')+'</td>'+
         '<td class="sd-c-ord" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.order_number||'')+'</td>'+
         '<td class="sd-c-rord" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.return_order_number||'')+'</td>'+
@@ -1341,9 +1341,23 @@ function sdReturnSyncMark(l){
   return ' <span data-return-sync-fail="1" title="Решението е сменено, но записът в „За връщане" не е изтрит — запиши решението отново" '+
     'style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;white-space:nowrap;">⚠ „За връщане" не е изтрито</span>';
 }
+/* Провал НЕ се поглъща (02.10.2026; CLAUDE.md т.13): Цвети спира ръчния файл
+   „По разлики" и разчита само на този път. Провалена проверка или POST (вкл.
+   отговор с !ok) -> червен toast и cb(съобщение); решението в Разлики остава
+   записано, а редът получава „⚠️ Няма в За връщане" (sdReturnMissingMark) с
+   бутон за нов опит. Успех или вече съществуващ запис -> cb(null). */
+var SD_RETURN_CREATE_FAIL = 'Редът е решен като Връщане, но НЕ е добавен в „За връщане" — опитай пак';
 function autoCreateReturnFromDiff(line,cb){
-  sbGet('stock_returns','diff_line_id=eq.'+line.id+'&limit=1').then(function(existing){
-    if(Array.isArray(existing)&&existing.length){ cb(); return; }
+  var fail=function(why){
+    if(sdReturnLinked) delete sdReturnLinked[line.id];
+    try{ console.error('autoCreateReturnFromDiff '+line.id+': '+why); }catch(e){}
+    toast(SD_RETURN_CREATE_FAIL,'#dc2626');
+    cb(SD_RETURN_CREATE_FAIL);
+  };
+  var ok=function(){ if(sdReturnLinked) sdReturnLinked[line.id]=true; cb(null); };
+  sbGetOk('stock_returns','select=id&diff_line_id=eq.'+line.id+'&limit=1').then(function(chk){
+    if(!chk.ok){ fail('проверка: '+chk.error); return; }
+    if(chk.rows.length){ ok(); return; }
     var data={
       store_name:line.store_name,
       supplier:line.supplier,
@@ -1364,8 +1378,57 @@ function autoCreateReturnFromDiff(line,cb){
       diff_line_id:line.id,
       created_by:currentUser.display_name||currentUser.email
     };
-    sbPost('stock_returns',data).then(function(){ cb(); }).catch(function(){ cb(); });
-  }).catch(function(){ cb(); });
+    sbPost('stock_returns',data).then(function(res){
+      if(!res || !res.ok){ fail('POST: '+(res?sbErrMsg(res):'няма отговор')); return; }
+      ok();
+    }).catch(function(e){ fail('POST: '+((e&&e.message)||e)); });
+  }).catch(function(e){ fail('проверка: '+((e&&e.message)||e)); });
+}
+/* Кои редове тип „Връщане" ИМАТ запис в „За връщане" - по ДАННИТЕ, не по флаг
+   в паметта: така маркерът хваща и редовете отпреди тази промяна (към
+   02.10.2026 - 4 реда от Раднево, 05-19.08.2026). null = не е известно
+   (заявката е паднала) - тогава маркер не се показва, за да не лъже. */
+var sdReturnLinked = null;
+var SD_RETURN_LINK_BATCH = 100;
+function sdLoadReturnLinks(){
+  var ids = sdData.filter(function(l){ return l.type==='return'; }).map(function(l){ return l.id; });
+  if(!ids.length){ sdReturnLinked = {}; return Promise.resolve(); }
+  var parts=[];
+  for(var i=0;i<ids.length;i+=SD_RETURN_LINK_BATCH) parts.push(ids.slice(i,i+SD_RETURN_LINK_BATCH));
+  return Promise.all(parts.map(function(p){
+    return sbGetOk('stock_returns','select=diff_line_id&diff_line_id=in.('+p.join(',')+')');
+  })).then(function(res){
+    var bad = res.filter(function(x){ return !x.ok; })[0];
+    if(bad){ sdReturnLinked = null; try{ console.error('sdLoadReturnLinks: '+bad.error); }catch(e){} return; }
+    var m = {};
+    res.forEach(function(x){ x.rows.forEach(function(r){ if(r.diff_line_id) m[r.diff_line_id]=true; }); });
+    sdReturnLinked = m;
+  });
+}
+function sdReturnMissing(l){
+  return !!l && l.type==='return' && !!sdReturnLinked && !sdReturnLinked[l.id];
+}
+function sdReturnMissingMark(l){
+  if(!sdReturnMissing(l)) return '';
+  return ' <span data-return-missing="1" title="Редът е решен като Връщане, но в „За връщане" няма запис" '+
+    'style="background:#fef2f2;color:#dc2626;border:1px solid #fecaca;border-radius:10px;padding:1px 6px;font-size:10px;font-weight:700;white-space:nowrap;">⚠️ Няма в За връщане</span>'+
+    (canReviewDiff()
+      ? ' <button data-id="'+l.id+'" onclick="sdAddMissingReturn(this.dataset.id)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">↩️ Добави в За връщане</button>'
+      : '');
+}
+/* Бутонът „↩️ Добави в За връщане". Двоен клик не дублира: докато първият
+   опит тече, вторият се игнорира; после самата функция проверява diff_line_id. */
+var sdReturnAdding = {};
+function sdAddMissingReturn(id){
+  if(!canReviewDiff()){ toast('Само Цвети/admin добавят в „За връщане"','#dc2626'); return; }
+  var line = sdData.find(function(x){ return String(x.id)===String(id); });
+  if(!line || line.type!=='return' || sdReturnAdding[line.id]) return;
+  sdReturnAdding[line.id] = true;
+  autoCreateReturnFromDiff(line, function(err){
+    delete sdReturnAdding[line.id];
+    if(!err) toast('✅ Добавено в „За връщане"');
+    renderStockDiff();
+  });
 }
 /* Празно ли е количествено поле - null, undefined или само интервали.
    PostgREST връща числата като низове, а модалът пише '' за изчистено поле. */
@@ -1461,7 +1524,8 @@ function resolveDiffLine(id,type,sync){
       }
     };
     if(type==='return'){
-      autoCreateReturnFromDiff(line,finish);
+      /* Провалът излиза ПОСЛЕДЕН през returnWarn - иначе „✅ Записано!" го изяжда. */
+      autoCreateReturnFromDiff(line,function(err){ returnWarn = err; finish(); });
     } else {
       sdDropPendingReturns(line, sync ? sync.ids : [], function(err){ returnWarn = err; finish(); });
     }
@@ -2200,6 +2264,7 @@ function submitSD(sync) {
     if(!res.ok){toast('Грешка','#dc2626');return;}
     var returnSyncFailed = false;
     var returnDropErr = null;
+    var returnCreateErr = null;
     var finish=function(){
       /* Потвърждението се чете ПРЕДИ затварянето: closeSDModal() нулира
          sdEditId, тоест на реда след него тернарният оператор винаги хващаше
@@ -2210,6 +2275,7 @@ function submitSD(sync) {
          по-ранно предупреждение би било изядено от потвърждението за запис. */
       if(returnSyncFailed) toast('Връщането не е обновено с номера на поръчката','#dc2626');
       if(returnDropErr) toast(returnDropErr,'#dc2626');
+      if(returnCreateErr) toast(returnCreateErr,'#dc2626');
       loadStockDiff();
     };
     /* Номерът на поръчката се въвежда в модала СЛЕД като връщането вече е
@@ -2245,8 +2311,8 @@ function submitSD(sync) {
     };
     var lineId = sdEditId || (res.row && res.row.id);
     if(needsReturn && lineId){
-      /* Наследява поведението на autoCreateReturnFromDiff: тя поглъща
-         собствените си грешки тихо и вика cb() при всякакъв изход. */
+      /* Провалът на autoCreateReturnFromDiff стига тук като съобщение и излиза
+         ПОСЛЕДЕН във finish - същото като в resolveDiffLine. */
       syncReturnOrder(function(){
         autoCreateReturnFromDiff({
           id:            lineId,
@@ -2257,7 +2323,7 @@ function submitSD(sync) {
           quantity:      data.quantity,
           order_number:  data.order_number,
           return_order_number: data.return_order_number
-        },finish);
+        },function(err){ returnCreateErr = err; finish(); });
       });
       return;
     }
@@ -3275,7 +3341,7 @@ function renderDiffReportsSection(){
           /* Сигналът за размяна стои под ИМЕТО на артикула, а не в колоната на
              склада - там вече е отговорът плюс потвърждението, а въпросът
              "този ли е артикулът" е за самия артикул. Вижда го само складът. */
-          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdReturnSyncMark(l)+sdSwapBadge(l)+(repShowResolve?'':correctBtn)+'</td>'+
+          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdReturnSyncMark(l)+sdReturnMissingMark(l)+sdSwapBadge(l)+(repShowResolve?'':correctBtn)+'</td>'+
           '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
           '<td style="padding:3px 6px;text-align:right;">'+sdQtyCell(l.quantity,(l.quantity!=null?l.quantity:'—'))+'</td>'+
           (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
