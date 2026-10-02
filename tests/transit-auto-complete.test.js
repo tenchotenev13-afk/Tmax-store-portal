@@ -289,7 +289,7 @@ function fakeCb(doc, id, linked) {
   section('B8. Заключеният чекбокс');
   {
     const h = bulEnv(MANAGER, [T_AUTO(), T_MAN()]);
-    h.w.bulTransitPending = 3;
+    h.w.bulAutoPending['transit-auto'] = 3;
     guard('renderBulView()', () => h.w.renderBulView());
     const a = cbs(h.doc, 't-auto'), m = cbs(h.doc, 't-man');
     if (ok('автоматичната има чекбокси', a.length > 0, a.length)) {
@@ -308,14 +308,14 @@ function fakeCb(doc, id, linked) {
   section('B9. Надписите');
   {
     const h = bulEnv(MANAGER, [T_AUTO(), T_MAN()]);
-    h.w.bulTransitPending = 3;
+    h.w.bulAutoPending['transit-auto'] = 3;
     h.w.renderBulView();
     const notes = () => Array.prototype.map.call(h.doc.querySelectorAll('.bul-auto-transit'), txt);
     let n = notes();
     ok('„⏳ 3 необработени реда"', n.length > 0 && n.every(t => t === '⏳ 3 необработени реда'), n.join(' | '));
-    h.w.bulTransitPending = 1; h.w.renderBulView(); n = notes();
+    h.w.bulAutoPending['transit-auto'] = 1; h.w.renderBulView(); n = notes();
     ok('1 → „⏳ 1 необработен ред"', n.length > 0 && n.every(t => t === '⏳ 1 необработен ред'), n.join(' | '));
-    h.w.bulTransitPending = 0; h.w.renderBulView(); n = notes();
+    h.w.bulAutoPending['transit-auto'] = 0; h.w.renderBulView(); n = notes();
     ok('0 → без число: „⏳ отмята се от Стока на път"', n.length > 0 && n.every(t => t === '⏳ отмята се от Стока на път'), n.join(' | '));
     h.w.bulComps = [{ task_id: 't-auto', store_name: TR, status: 'done', completion_date: TODAY, completed_by: 'auto:transit', comment: 'всички редове обработени' }];
     h.w.renderBulView(); n = notes();
@@ -356,7 +356,8 @@ function fakeCb(doc, id, linked) {
       ok('само входящи, чакащи (и без статус), непроверени',
         /direction=eq\.incoming/.test(u[0]) && u[0].indexOf('or=(status.eq.pending,status.is.null)') >= 0 && /reviewed_at=is\.null/.test(u[0]), u[0]);
     }
-    ok('bulTransitPending = 5', h.w.bulTransitPending === 5, h.w.bulTransitPending);
+    ok('броячът за Стока на път е 5', h.w.bulAutoPending['transit-auto'] === 5,
+      String(h.w.bulAutoPending['transit-auto']));
   }
   {
     const h = bulEnv(MANAGER, [T_MAN()]);

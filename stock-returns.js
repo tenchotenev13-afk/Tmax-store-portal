@@ -36,6 +36,126 @@ function setSRSearch(val){
   }
 }
 
+/* ═══ КОЙ ПОСТАВИ „ДАТА ПОТВЪРДЕНА АКТУАЛИЗАЦИЯ" (02.10.2026) ══════════════
+   confirmed_date се пише по ЧЕТИРИ пътя и само един е обектът — ръчната форма.
+   Другите три са Excel импорти, достъпни единствено на офиса (canAddSR), и
+   ПРЕЗАПИСВАТ съществуващи редове; многолистовият дори изтрива датата при
+   празна клетка („файлът е авторитетен за тези колони").
+
+   Автоматичното отмятане на „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ" брои САМО
+   актуализация, направена от самия обект. Без следа кой я е направил, файл,
+   качен от офиса в сряда сутрин, щеше да отметне обектите наготово — тоест
+   автоматиката щеше да произведе същата лъжа като ръчната отметка.
+
+   Следата се пише САМО когато датата наистина се променя: иначе всеки импорт
+   би „освежавал" чужда актуализация и колоната би станала безполезна.
+   Виж stock-returns-confirmed-by-schema.sql. */
+function srSameDate(a, b){
+  var x=a?String(a).slice(0,10):null, y=b?String(b).slice(0,10):null;
+  return x===y;
+}
+/* Кой пише при РЪЧНАТА форма: потребител на самия обект → 'store:<обект>',
+   всеки друг (офис, логистика, admin) → 'office:<име>'. Решава store_name на
+   РЕДА, не ролята: управител, който редактира чужд обект, не е този обект. */
+function srConfirmedActor(storeName){
+  var me=currentUser||{};
+  var mine=me.store_name && storeName && String(me.store_name)===String(storeName);
+  return mine ? ('store:'+storeName) : ('office:'+(me.display_name||me.email||'?'));
+}
+/* Полетата за записа — или празен обект, ако датата не се мени. newDate може
+   да е null (изтриване): следата пак се пише, защото изтриването е промяна. */
+function srConfirmedTrace(oldDate, newDate, actor){
+  if(srSameDate(oldDate, newDate)) return {};
+  return { confirmed_by: actor, confirmed_at: new Date().toISOString() };
+}
+/* Двата импорта пишат 'import:<име>' — и когато ИЗТРИВАТ датата. */
+function srImportActor(){
+  var me=currentUser||{};
+  return 'import:'+(me.display_name||me.email||'?');
+}
+/* ОТСТЪПВА ЛИ ИМПОРТЪТ пред потвърждение на обекта (решение от 02.10.2026).
+   Файлът на офиса е авторитетен за всичко останало, но НЕ бива да изтрива или
+   да връща назад актуализация, която обектът е направил сам: точно по нея се
+   отмята задачата „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ", а файлът често се подготвя
+   по-рано и носи стара или празна стойност.
+
+   Запазва се САМО когато редът е потвърден от ОБЕКТА (confirmed_by 'store:…')
+   и файлът носи ПО-СТАРА дата или празна клетка. По-нова дата от файла се
+   пише нормално — тя е нова информация, не връщане назад.
+   Еднаква дата не е „запазване": нищо не се променя и не бива да влиза в
+   брояча, който се показва на Цвети. */
+function srImportKeepsDate(hit, fileDate){
+  if(!hit) return false;
+  if(String(hit.confirmed_by||'').indexOf('store:')!==0) return false;
+  var oldD=hit.confirmed_date?String(hit.confirmed_date).slice(0,10):null;
+  if(!oldD) return false;
+  var newD=fileDate?String(fileDate).slice(0,10):null;
+  return !newD || newD < oldD;
+}
+
+/* ═══════ „БЕЗ АКТУАЛИЗАЦИЯ ОТ ПОНЕДЕЛНИК" ═══════════════════════════════
+   Ръчната отметка на постоянната задача „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ" вече я
+   няма — базата я слага сама. Затова ТУК трябва да се вижда какво остава, и
+   то по СЪЩОТО правило, иначе екранът обещава едно, а Бюлетинът показва
+   друго: невзет запис се брои за актуализиран само когато датата е в
+   прозореца понеделник→днес И е поставена ОТ САМИЯ ОБЕКТ.
+   Горната граница е ДНЕС, а не денят на срока: надписът казва какво остава
+   днес. Бъдеща дата затова също не се зачита. */
+var SR_AUTO_START='2026-10-05';   /* = v_start в stock_returns_sync_completions */
+
+/* Понеделникът на седмицата на todayISO. Смята се с местни дати (new Date от
+   'YYYY-MM-DD' + T00:00:00), не с UTC — иначе след 21:00 българско време
+   денят подскача и прозорецът се мести с един ден. */
+function srWeekStartISO(todayISO){
+  var d=new Date((todayISO||today())+'T00:00:00');
+  d.setDate(d.getDate()-((d.getDay()+6)%7));
+  var m=d.getMonth()+1, dd=d.getDate();
+  return d.getFullYear()+'-'+(m<10?'0':'')+m+'-'+(dd<10?'0':'')+dd;
+}
+/* Преди седмицата с понеделник SR_AUTO_START правилото не важи и броячът
+   мълчи: иначе още сега щеше да покаже 221 „неактуализирани" записа за
+   седмица, в която никой нищо не дължи. */
+function srAutoActive(todayISO){ return srWeekStartISO(todayISO) >= SR_AUTO_START; }
+
+function srUpdatedByStore(r, monISO, todayISO){
+  var d=(r&&r.confirmed_date)?String(r.confirmed_date).slice(0,10):null;
+  if(!d || d<monISO || d>todayISO) return false;
+  return String((r&&r.confirmed_by)||'') === ('store:'+((r&&r.store_name)||''));
+}
+function srNeedsUpdate(r, monISO, todayISO){
+  if(!r || (r.status||'pending')!=='pending') return false;
+  return !srUpdatedByStore(r, monISO, todayISO);
+}
+
+/* Кой е поставил датата — за малкия надпис в реда и във формата. Форматът е
+   '<вид>:<кой>' и се пише от submitSR и от двата импорта. Заварен ред
+   (confirmed_by NULL) няма надпис: не се знае, а измисленото е по-лошо. */
+function srConfirmedWho(r){
+  var by=String((r&&r.confirmed_by)||'');
+  if(!by) return null;
+  var i=by.indexOf(':');
+  var kind=i<0?by:by.slice(0,i), who=i<0?'':by.slice(i+1);
+  if(kind==='store')  return {label:'потвърдено от обекта', who:who, color:'#16a34a'};
+  if(kind==='office') return {label:'потвърдено от офиса',  who:who, color:'#b45309'};
+  if(kind==='import') return {label:'от импорт',            who:who, color:'#b45309'};
+  return {label:'от '+kind, who:who, color:'#64748b'};
+}
+/* Датата в надписа е confirmed_at (КОГА е записано), не confirmed_date —
+   самата дата си стои в съседната колона и повтарянето ѝ не казва нищо. */
+function srConfirmedNote(r){
+  var w=srConfirmedWho(r);
+  if(!w) return '';
+  var at=(r&&r.confirmed_at)?fmtDate(String(r.confirmed_at).slice(0,10)):'';
+  return w.label+(at?' '+at:'');
+}
+function srConfirmedNoteHtml(r){
+  var w=srConfirmedWho(r);
+  if(!w) return '';
+  return '<div class="sr-cby" title="'+escAttr(w.label+(w.who?' — '+w.who:''))+
+         '" style="font-size:10px;color:'+w.color+';white-space:nowrap;margin-top:2px;">'+
+         esc(srConfirmedNote(r))+'</div>';
+}
+
 /* Само Цветелина (контролинг) или admin могат да маркират запис като
    "Приключена" - финален статус, различен от обикновеното "Взета". */
 function canCompleteSR() {
@@ -129,6 +249,9 @@ function srFilteredList(){
     if (srFilter === 'pending')  { if (r.status !== 'pending') return false; }
     else if (srFilter === 'taken') { if (r.status !== 'taken') return false; }
     else if (srFilter === 'completed') { if (r.status !== 'completed') return false; }
+    /* „Без актуализация" е подмножество на невзетите — srNeedsUpdate сам
+       отсява статуса, затова тук няма втора проверка. */
+    else if (srFilter === 'needs') { if (!srNeedsUpdate(r, srWeekStartISO(), today())) return false; }
     /* Точните филтри по магазин и доставчик са ОТДЕЛНИ от свободното търсене
        по-долу, за да не се влияят от текст в коментари/причини, споменаващи
        друг магазин или друга фирма (напр. коментар "изпратено към ЛС
@@ -172,6 +295,17 @@ function renderStockReturns() {
   var pending = tabData.filter(function(r){ return r.status==='pending'; }).length;
   var taken   = tabData.filter(function(r){ return r.status==='taken'; }).length;
   var completed = tabData.filter(function(r){ return r.status==='completed'; }).length;
+
+  /* „Без актуализация от понеделник" — по правилото, по което базата отмята
+     задачата. Брои се и в ДРУГИЯ подтаб: задачата гледа всички невзети
+     записи на обекта, а човек, който е изчистил „По разлики", иначе би
+     решил, че е готов, и би чакал отметка, която няма да дойде. */
+  var srToday = today(), srMon = srWeekStartISO(srToday);
+  var srAutoOn = srAutoActive(srToday);
+  var needs = tabData.filter(function(r){ return srNeedsUpdate(r, srMon, srToday); }).length;
+  var needsOther = srData.filter(function(r){
+    return (r.source||'diff') !== srTab && srNeedsUpdate(r, srMon, srToday);
+  }).length;
 
   var h = '<div style="max-width:1400px;margin:0 auto;padding:16px;">';
 
@@ -223,9 +357,16 @@ function renderStockReturns() {
   h += '</div>';
 
   /* Карти */
-  h += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;max-width:400px;">';
+  h += '<div style="display:grid;grid-template-columns:repeat('+(srAutoOn?3:2)+',1fr);gap:10px;margin-bottom:14px;max-width:'+(srAutoOn?600:400)+'px;">';
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #f59e0b;"><div style="font-size:11px;color:#64748b;">⏳ Невзета</div><div style="font-size:28px;font-weight:700;color:#f59e0b;font-family:DM Mono,monospace;">'+pending+'</div></div>';
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #16a34a;"><div style="font-size:11px;color:#64748b;">✅ Взета</div><div style="font-size:28px;font-weight:700;color:#16a34a;font-family:DM Mono,monospace;">'+taken+'</div></div>';
+  if (srAutoOn) {
+    h += '<div id="sr-needs-card" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid '+(needs?'#dc2626':'#16a34a')+';">'+
+         '<div style="font-size:11px;color:#64748b;">📝 Без актуализация от '+fmtDate(srMon)+'</div>'+
+         '<div id="sr-needs-n" style="font-size:28px;font-weight:700;color:'+(needs?'#dc2626':'#16a34a')+';font-family:DM Mono,monospace;">'+needs+'</div>'+
+         (needsOther?'<div style="font-size:10.5px;color:#b45309;">+ '+needsOther+' в другия подтаб</div>':'')+
+         '</div>';
+  }
   h += '</div>';
 
   /* Важна бележка */
@@ -235,9 +376,24 @@ function renderStockReturns() {
     h += '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#856404;">⚠️ Стоката се маркира като ВЗЕТА само след като е физически предадена на куриер или транспорт.</div>';
   }
 
+  /* Какво остава да се направи. Показва се чак от седмицата, в която
+     правилото влиза в сила — дотогава щеше да обещава отметка, която базата
+     още не прави. */
+  if (srAutoOn) {
+    var srAll = needs + needsOther;
+    h += '<div style="background:'+(srAll?'#fef2f2':'#f0fdf4')+';border:1px solid '+(srAll?'#fecaca':'#bbf7d0')+';border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:'+(srAll?'#991b1b':'#166534')+';">'+
+         (srAll
+           ? '📝 <b>'+srAll+'</b> невзети записа все още нямат „Дата потвърдена актуализация" от '+fmtDate(srMon)+' насам.'
+           : '✅ Всички невзети записи са актуализирани тази седмица.')+
+         ' Задачата „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ" в Бюлетина се отмята САМА, когато няма нито един такъв запис — ръчна отметка няма. Броят се двата подтаба заедно. Дата, поставена от офиса или от импорт, не се брои за актуализация на обекта.'+
+         '</div>';
+  }
+
   /* Филтри */
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
-  [['all','Всички ('+tabData.length+')'],['pending','⏳ Невзета ('+pending+')'],['taken','✅ Взета ('+taken+')'],['completed','🏁 Приключени ('+completed+')']].forEach(function(f){
+  var srFilters=[['all','Всички ('+tabData.length+')'],['pending','⏳ Невзета ('+pending+')'],['taken','✅ Взета ('+taken+')'],['completed','🏁 Приключени ('+completed+')']];
+  if (srAutoOn) srFilters.push(['needs','📝 Без актуализация ('+needs+')']);
+  srFilters.forEach(function(f){
     var a = srFilter===f[0];
     h += '<button data-f="'+f[0]+'" onclick="setSRFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
   });
@@ -297,7 +453,7 @@ function renderSRTableDiff(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.withdrawal_date)+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;max-width:140px;color:#374151;">'+esc(r.courier_info||'')+'</td>'+
       /* Същият ред като в „По рекламации": след „Изтеглена с", преди „Коментар". */
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+fmtDate(r.confirmed_date)+'</td>'+
+      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+fmtDate(r.confirmed_date)+srConfirmedNoteHtml(r)+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#0f766e;max-width:160px;">'+esc(r.store_comment||'')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;max-width:150px;">'+esc(r.reason||r.control_comment||r.controller_comment||'')+'</td>'+
       '<td style="padding:7px 10px;white-space:nowrap;position:sticky;right:0;background:#fff;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
@@ -332,7 +488,7 @@ function renderSRTableComplaint(list, canEdit, isAdmin) {
       '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#374151;max-width:130px;">'+esc(r.courier_info||'—')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#0f766e;max-width:160px;">'+esc(r.store_comment||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+(r.confirmed_date?fmtDate(r.confirmed_date):'—')+'</td>'+
+      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+(r.confirmed_date?fmtDate(r.confirmed_date):'—')+srConfirmedNoteHtml(r)+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.control_comment||'')+'</td>'+
       '<td style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.controller_comment||'')+'</td>'+
       '<td style="padding:7px 10px;white-space:nowrap;position:sticky;right:0;background:#fff;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
@@ -492,7 +648,9 @@ function srModalHtml() {
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
     '<div><label class="fl">Дата на изтегляне</label><input type="date" class="fi" id="sr-wdate" value="'+(r.withdrawal_date||'')+'"></div>'+
-    '<div><label class="fl">Дата потвърдена актуализация</label><input type="date" class="fi" id="sr-cdate" value="'+(r.confirmed_date||'')+'"></div>'+
+    '<div><label class="fl">Дата потвърдена актуализация</label><input type="date" class="fi" id="sr-cdate" value="'+(r.confirmed_date||'')+'">'+
+      (srConfirmedWho(r)?'<div id="sr-cdate-by" style="font-size:10.5px;margin-top:-4px;margin-bottom:6px;color:'+srConfirmedWho(r).color+';">'+esc(srConfirmedNote(r))+(srConfirmedWho(r).who?' ('+esc(srConfirmedWho(r).who)+')':'')+'</div>':'')+
+      '</div>'+
     '</div>'+
 
     '<label class="fl">Изтеглена от/с куриер (номер на товарителница)</label>'+
@@ -850,7 +1008,10 @@ function srImportDiffList(wb, progEl){
   Promise.all([
     /* sbGetOk, не sbGet: провалена заявка НЕ бива да изглежда като „няма
        нищо" - тогава всеки ред би станал дубликат. */
-    sbGetOk('stock_returns','source=eq.diff&select=id,store_name,order_number,sap_code,product_name,status&store_name=in.('+
+    /* confirmed_date се тегли, за да се разбере дали импортът я СМЕНЯ: само
+       тогава се пише следа (confirmed_by/confirmed_at). Без нея всеки импорт
+       би „освежавал" чужда актуализация и следата би станала безполезна. */
+    sbGetOk('stock_returns','source=eq.diff&select=id,store_name,order_number,sap_code,product_name,status,confirmed_date,confirmed_by&store_name=in.('+
       stores.map(function(s){return '"'+encodeURIComponent(s)+'"';}).join(',')+')'),
     sbGetOk('stock_returns','select=supplier')
   ]).then(function(res){
@@ -883,19 +1044,49 @@ function srImportDiffList(wb, progEl){
     var existing={};
     res[0].rows.forEach(function(x){ var k=srDiffListKey(x); if(!existing[k]) existing[k]=x; });
     var created=currentUser.display_name||currentUser.email;
-    var toInsert=[], toUpdate=[], skippedCompleted=0;
+    var toInsert=[], toUpdate=[], skippedCompleted=0, keptByStore=0;
     rows.forEach(function(r){
       var hit=existing[srDiffListKey(r)];
-      if(!hit){ r.created_by=created; toInsert.push(r); return; }
+      if(!hit){
+        r.created_by=created;
+        /* Нов ред с дата ОТ ФАЙЛА — следата е на импорта. Без нея редът влиза
+           с confirmed_by NULL: правилото и така не би го броил, но колоната
+           трябва да казва истината, а не да мълчи. 32 заварени реда са точно
+           такива (дата по-ранна от създаването им).
+           Ключовете се слагат на ВСЕКИ ред, дори празни: srBatchImport праща
+           партиди по 300 с ЕДИН POST, а PostgREST иска еднакви колони —
+           условно добавяне би счупило цялата партида. */
+        r.confirmed_by = r.confirmed_date ? srImportActor() : null;
+        r.confirmed_at = r.confirmed_date ? new Date().toISOString() : null;
+        toInsert.push(r); return;
+      }
       if(hit.status==='completed'){ skippedCompleted++; return; }
-      toUpdate.push({ id:hit.id, purchase_order:r.order_number||r.product_name, data:{
+      var upd={
         supplier:r.supplier, sap_code:r.sap_code, product_name:r.product_name, quantity:r.quantity,
         order_number:r.order_number, confirmed_date:r.confirmed_date, status:r.status, store_comment:r.store_comment
-      }});
+      };
+      /* Потвърдено от обекта и файлът носи по-стара дата или празна клетка —
+         датата и следата ѝ НЕ се пипат; останалите колони се обновяват както
+         досега. Виж srImportKeepsDate(). */
+      if(srImportKeepsDate(hit, r.confirmed_date)){
+        delete upd.confirmed_date;
+        keptByStore++;
+      } else {
+        /* Импортът е на ОФИСА: смени ли датата (включително на null), следата
+           става 'import:<име>' и правилото спира да брои реда за актуализиран
+           от обекта. Не пипа ли датата — колоните остават както са. */
+        var trImp=srConfirmedTrace(hit.confirmed_date, r.confirmed_date, srImportActor());
+        for(var ki in trImp){ if(Object.prototype.hasOwnProperty.call(trImp,ki)) upd[ki]=trImp[ki]; }
+      }
+      toUpdate.push({ id:hit.id, purchase_order:r.order_number||r.product_name, data:upd });
     });
     var done=function(insertErrors, failed){
       var h='<span style="color:#16a34a;">✅ Нови: '+toInsert.length+' · Обновени: '+(toUpdate.length-failed.length)+
             ' · Пропуснати (приключени): '+skippedCompleted+'</span>';
+      /* Видимо за Цвети: кои редове файлът НЕ е пипнал и защо. Без този ред
+         тя ще реши, че импортът е сработил наполовина. */
+      if(keptByStore) h+='<div style="color:#2563eb;">🛡 '+keptByStore+' '+(keptByStore===1?'ред не е пипан':'реда не са пипани')+
+                         ' — потвърдени от обекта с по-нова дата</div>';
       if(unmatched.length) h+='<div style="color:#d97706;">⚠️ Несъпоставени доставчици (остават с името от файла): '+esc(unmatched.join(', '))+'</div>';
       if(parsed.badDates) h+='<div style="color:#d97706;">⚠️ Нечетими дати (записани празни): '+parsed.badDates+'</div>';
       if(failed.length) h+='<div style="color:#dc2626;">⚠️ Не бяха обновени: '+esc(failed.join(', '))+'</div>';
@@ -1082,6 +1273,12 @@ function startReturnsImport(){
           seenKey[k]=1;
           if(isWorkbook) r.purchase_order=poOf(r);
           if(r.status==='completed' && !canComplete){ r.status='taken'; noRightNew++; }
+          /* Следата и при НОВ ред: файлът може да носи дата, а колоната трябва
+             да казва, че е от импорт, не от обекта. Ключовете се слагат на
+             ВСЕКИ ред еднакво (с null, когато дата няма) — партидата на
+             srBatchImport иска еднакви колони. */
+          r.confirmed_by = r.confirmed_date ? srImportActor() : null;
+          r.confirmed_at = r.confirmed_date ? new Date().toISOString() : null;
           toInsert.push(r);
         });
 
@@ -1406,6 +1603,25 @@ function submitSR() {
     created_by:     currentUser.display_name||currentUser.email
   };
   if(!lockStatus) data.status = document.getElementById('sr-status').value;
+  /* Бъдеща дата се отказва ТУК, не с CHECK в базата (решение на Тенчо,
+     02.10.2026): два заварени реда носят 2028-09-02 и 2029-09-02 и CHECK би
+     ги направил нередактируеми. Правилото и без това не ги зачита за
+     актуализация — отказът е, за да не се появят нови. Проверява се винаги,
+     включително когато датата не се мени: точно така двата стари реда ще
+     излязат наяве при първата редакция. */
+  if(data.confirmed_date && String(data.confirmed_date) > today()){
+    toast('„Дата потвърдена актуализация" не може да е в бъдещето','#dc2626');
+    return;
+  }
+  /* Следата за „кой постави датата" — само ако датата СЕ МЕНИ. При нов ред
+     (няма origRecord) старата е null, тоест въведена дата веднага оставя
+     следа. Актьорът се решава по ОБЕКТА НА РЕДА: потребител на същия обект е
+     'store:<обект>', всеки друг — 'office:<име>'. */
+  (function(){
+    var trace=srConfirmedTrace(origRecord?origRecord.confirmed_date:null,
+                               data.confirmed_date, srConfirmedActor(store));
+    for(var k in trace){ if(Object.prototype.hasOwnProperty.call(trace,k)) data[k]=trace[k]; }
+  })();
   /* Коментарите на Цвети - не се пращат изобщо от други (и с подправен DOM),
      иначе запис от магазина би изтрил написаното от нея. */
   var cmtLocked = srCommentsLocked(tab);

@@ -1156,7 +1156,47 @@ function bulDateLockReason(cdate){
    записа в daily_turnover, затова ръчният чекбокс е затворен и за днешния ден
    — иначе обект може да се отметне, без да е подал оборот, и Бюлетинът ще
    брои друго число от имейла. */
-function bulAutoLocked(linkedModule){ return linkedModule==='oborot'||linkedModule==='transit-auto'; }
+/* ═══ МОДУЛИ С АВТОМАТИЧНО ОТМЯТАНЕ — ЕДИН РЕГИСТЪР (02.10.2026) ═══════════
+   Задача, чието изпълнение се ДОКАЗВА ОТ ДАННИ, а не от твърдение: обектът не
+   я отмята, не я отлага и не може да каже „не се отнася за нас" — вместо
+   квадратче вижда сив надпис какво остава да се направи.
+
+   Дотук списъкът беше два низа в едно условие, а етикетът — тройна тернарна
+   проверка на три различни места. Третият модул („За връщане") показа цената:
+   три места за пипане и нито едно, което да каже КОИ са модулите. Сега
+   добавянето на четвърти е един ред ТУК.
+
+   Ключът е този на bulTaskLinkKey() / linked_module на постоянната задача:
+   'transit-auto' е 'transit' + auto_complete, затова е отделен от 'transit'
+   (ръчните задачи от С36/С37 останаха на 'transit').
+
+   reason се ПАЗИ дословно ('auto', 'auto-transit'): tests/oborot-bulletin-link
+   и tests/transit-auto-complete се закачат за тези низове и за етикетите им.
+   Преименуване заради естетика би счупило два теста за нищо. */
+var BUL_AUTO_MODULES = {
+  'oborot': {
+    reason: 'auto',
+    label:  'Отмята се автоматично при запис на оборота',
+    tab:    'Вечерен оборот',
+    cls:    'bul-auto-oborot'
+  },
+  'transit-auto': {
+    reason: 'auto-transit',
+    label:  'Отмята се автоматично от Стока на път',
+    tab:    'Стока на път',
+    cls:    'bul-auto-transit',
+    unit:   ['необработен ред', 'необработени реда']
+  },
+  'stock-returns': {
+    reason: 'auto-returns',
+    label:  'Отмята се автоматично от „За връщане"',
+    tab:    '„За връщане"',
+    cls:    'bul-auto-returns',
+    unit:   ['запис без актуализация от понеделник', 'записа без актуализация от понеделник']
+  }
+};
+function bulAutoModuleOf(linkedModule){ return BUL_AUTO_MODULES[linkedModule] || null; }
+function bulAutoLocked(linkedModule){ return !!bulAutoModuleOf(linkedModule); }
 /* Ключът за заключване на задача. Автоматичната „Стока на път" (linked_module
    'transit' + auto_complete) се отмята от тригера в базата
    (transit-reviewed-schema.sql), затова носи собствен ключ. 'transit' без
@@ -1170,9 +1210,13 @@ function bulTaskLinkKey(t){
 /* Броят необработени входящи редове на обекта в Стока на път — САМО за
    надписа до автоматичната задача. Не решава нищо: отметката идва от тригера.
    null = не е зареден (офис, няма такава задача, заявката още тече). */
-var bulTransitPending = null;
+/* Броячите за надписите, по ключ на автоматичен модул — ЕДИН източник.
+   Дотук числото за Стока на път живееше в собствена глобална променлива
+   (bulTransitPending); две места за едно число е точно разминаването, което
+   после никой не забелязва. null/липсва = не е зареден. */
+var bulAutoPending = {};
 function bulLoadTransitPending(){
-  bulTransitPending=null;
+  bulAutoPending['transit-auto']=null;
   if(isGlobal()||!currentUser||!currentUser.store_name) return;
   var autoT=bulTasks.filter(function(t){return bulTaskLinkKey(t)==='transit-auto';});
   if(!autoT.length) return;
@@ -1194,7 +1238,54 @@ function bulLoadTransitPending(){
            transit_store_done и броячът в transit.js. */
         '&direction=eq.incoming&or=(status.eq.pending,status.is.null)&reviewed_at=is.null&select=id').then(function(rows){
     if(!Array.isArray(rows)) return;
-    bulTransitPending=rows.length;
+    bulAutoPending['transit-auto']=rows.length;
+    renderBulletin();
+  });
+}
+/* „За връщане": невзетите записи БЕЗ актуализация в прозореца на седмицата —
+   същият критерий, по който базата отмята задачата (stock_returns_store_done).
+   Прозорецът е понеделник → min(днес, денят на срока); тук горната граница е
+   днес, защото надписът казва какво остава ДНЕС. Бъдеща дата не се зачита —
+   два реда в базата са 2028/2029 (печатна грешка) и не бива да минават за
+   актуализация. */
+function bulLoadReturnsPending(){
+  bulAutoPending['stock-returns']=null;
+  if(isGlobal()||!currentUser||!currentUser.store_name) return;
+  var has=(recurringTasks||[]).some(function(t){ return t && t.linked_module==='stock-returns' && !taskIsNotice(t); });
+  if(!has) return;
+  /* Понеделникът на тази седмица се смята НА МЯСТО и съзнателно НЕ се изнася
+     в помощник на име bulWeekMondayISO: това име е запазено като капан в
+     tests/bulletin-completion-day-lock.test.js — беше махнато заедно с
+     „наваксването" (отмятане на минал ден) и връщането му значи, че правилото
+     пак се е разхлабило. Тук въпросът е друг (прозорецът на седмицата за
+     брояча), затова и нова глобална не се въвежда. */
+  var today=bulTodayISO();
+  var mon=(function(){
+    var d=new Date(today+'T00:00:00');
+    d.setDate(d.getDate()-((d.getDay()+6)%7));
+    return toLocalISO(d);
+  })();
+  sbGet('stock_returns','store_name=eq.'+encodeURIComponent(currentUser.store_name)+
+        '&status=eq.pending&select=id,status,store_name,confirmed_date,confirmed_by').then(function(rows){
+    if(!Array.isArray(rows)) return;
+    var n=rows.filter(function(r){
+      /* СТАТУСЪТ и тук, не само в заявката: върне ли тя повече редове, взетите
+         записи влизат в броя и надписът лъже обекта. */
+      if((r.status||'pending')!=='pending') return false;
+      /* СЪЩОТО правило като в базата (stock_returns_store_done) и в таба „За
+         връщане" (srNeedsUpdate): дата, поставена от офиса или от импорт, не
+         е актуализация на обекта. Без тази проверка надписът тук би казвал
+         „0 остават", а задачата нямаше да се отметне — най-лошото възможно
+         разминаване.
+         НЕ се вика srNeedsUpdate от stock-returns.js: тя се зарежда СЛЕД
+         bulletin.js (index.html, 792 срещу 779) и тестовете вдигат модулите
+         поотделно. Двете се сверяват ред по ред в
+         tests/sr-needs-update.test.js — разминат ли се, тестът пада. */
+      var d=r.confirmed_date?String(r.confirmed_date).slice(0,10):null;
+      if(!d || d<mon || d>today) return true;
+      return String(r.confirmed_by||'') !== ('store:'+(r.store_name||''));
+    }).length;
+    bulAutoPending['stock-returns']=n;
     renderBulletin();
   });
 }
@@ -1260,14 +1351,25 @@ function bulDescPaste(ev){
 /* Надписът до автоматичната „Стока на път" за обекта. 0 не се изписва като
    число: sbGet връща [] и при провал, тоест „0 необработени" при неотметната
    задача би било твърдение без основание. */
-function bulAutoTransitNoteHtml(t, done){
-  if(bulTaskLinkKey(t)!=='transit-auto'||isGlobal()) return '';
-  var n=bulTransitPending, txt;
-  if(done) txt='✓ от Стока на път';
-  else if(typeof n==='number'&&n>0) txt='⏳ '+n+(n===1?' необработен ред':' необработени реда');
-  else txt='⏳ отмята се от Стока на път';
-  return '<span class="bul-auto-transit" style="display:block;font-size:10px;font-weight:600;color:'+(done?'#16a34a':'#b45309')+';margin-top:2px;">'+txt+'</span>';
+/* Сивият надпис вместо квадратче — за ВСЕКИ автоматичен модул от регистъра.
+   kind: 'regular' (ключът идва от bulTaskLinkKey) или 'recurring' (от
+   linked_module). Броят идва от bulAutoPending[ключ] и е САМО за надписа — не
+   решава нищо, отметката идва от базата.
+   Класът на модула се пази (`bul-auto-transit`), защото tests/transit-auto-
+   complete.test.js се закача за него; новият `bul-auto-note` е общият. */
+function bulAutoNoteHtml(t, done, kind){
+  if(!t||isGlobal()) return '';
+  var key = kind==='recurring' ? (t.linked_module||'') : bulTaskLinkKey(t);
+  var am = bulAutoModuleOf(key);
+  if(!am) return '';
+  var n = bulAutoPending[key], txt;
+  if(done) txt='✓ от '+am.tab;
+  else if(typeof n==='number'&&n>0&&am.unit) txt='⏳ '+n+' '+(n===1?am.unit[0]:am.unit[1]);
+  else txt='⏳ отмята се от '+am.tab;
+  return '<span class="bul-auto-note '+am.cls+'" style="display:block;font-size:10px;font-weight:600;color:'+(done?'#16a34a':'#b45309')+';margin-top:2px;">'+txt+'</span>';
 }
+/* Запазено име — викачите за ЕДНОКРАТНИ задачи минават през него. */
+function bulAutoTransitNoteHtml(t, done){ return bulAutoNoteHtml(t, done, 'regular'); }
 /* completed_by на автоматичната отметка е служебен низ, не име на човек. */
 function bulCompletedByLabel(v){
   if(v==='auto:transit') return 'автоматично от Стока на път';
@@ -1275,6 +1377,9 @@ function bulCompletedByLabel(v){
      (transit_mark_empty_stores в базата). Различава се от 'auto:transit'
      нарочно: „няма работа" и „свърши работата" не са едно и също в отчет. */
   if(v==='auto:transit-empty') return 'автоматично — няма входящи редове';
+  /* „За връщане" (02.10.2026): всички невзети записи на обекта са с
+     актуализация в прозореца на седмицата. */
+  if(v==='auto:stock-returns') return 'автоматично от „За връщане"';
   return v||'';
 }
 /* Полето „Отмята се автоматично" във формите за задача. Стои в DOM-а винаги
@@ -1869,20 +1974,29 @@ function bulSpanLockReason(cdate,spanFrom){
   return null;
 }
 function bulLockReason(cdate,linkedModule,spanFrom){
-  if(bulAutoLocked(linkedModule)) return linkedModule==='transit-auto' ? 'auto-transit' : 'auto';
+  var am=bulAutoModuleOf(linkedModule);
+  if(am) return am.reason;
   if(spanFrom) return bulSpanLockReason(cdate,spanFrom);
   return bulDateLockReason(cdate);
 }
 function bulLockLabel(reason){
-  if(reason==='auto') return 'Отмята се автоматично при запис на оборота';
-  if(reason==='auto-transit') return 'Отмята се автоматично от Стока на път';
+  /* Етикетите на автоматичните модули идват от регистъра — иначе всеки нов
+     модул иска ред и тук, а разминаването между списъка и етикетите не гърми,
+     просто показва грешен текст. */
+  for(var k in BUL_AUTO_MODULES){
+    if(Object.prototype.hasOwnProperty.call(BUL_AUTO_MODULES,k) && BUL_AUTO_MODULES[k].reason===reason) return BUL_AUTO_MODULES[k].label;
+  }
   return reason==='future' ? 'Денят още не е настъпил' : 'Денят е приключил';
 }
 /* Заключената контрола НЕ се крие — стои видима, само не се натиска.
    Контрола, която изчезва според данните, изглежда като счупена. */
 function bulLockAttr(cdate,linkedModule,spanFrom){
   var r=bulLockReason(cdate,linkedModule,spanFrom);
-  return r ? ' disabled title="'+bulLockLabel(r)+'"' : '';
+  /* escAttr, не гол низ: етикетът на „За връщане" съдържа кавичка и без
+     escape затваря атрибута по средата — title-ът става половин и останалото
+     се чете като markup. Старите два етикета са без кавички, тоест за тях
+     escAttr не променя нищо. */
+  return r ? ' disabled title="'+escAttr(bulLockLabel(r))+'"' : '';
 }
 function bulLockStyle(cdate,linkedModule,spanFrom){
   return bulLockReason(cdate,linkedModule,spanFrom) ? 'opacity:.45;cursor:not-allowed;' : '';
@@ -2286,6 +2400,10 @@ function loadBulletin(){
       bulTasks=mergeSpanningTasks(Array.isArray(t)?t:[], tt[1]);
       bulFetchCarriedTasks();
       bulLoadTransitPending();
+      /* Броячът за „За връщане" чака recurringTasks да са заредени (той пита
+         има ли такава задача), затова се вика и оттук, и след постоянните —
+         двете извиквания са идемпотентни. */
+      bulLoadReturnsPending();
       bulLoadTaskReports();
       /* Дата и в самата ЗАЯВКА. Глобалният клон (без store_name) теглеше
          ВСЯКО отмятане на постоянна задача, правено някога - 1595 реда на
@@ -5744,6 +5862,9 @@ function renderRecurringTasks(dk) {
       h += '<div style="flex:1;">';
       h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done&&!skipView&&!naRecComp,singleRecDate)+bulPostponedBadgeHtml(ppComp)+bulNaBadgeHtml(naRecComp)+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+bulFromBadgeHtml(t)+'</div>';
       if (t.description) h += '<div class="bul-desc">' + linkify(t.description) + '</div>';
+      /* Автоматичната постоянна задача („За връщане") казва какво остава —
+         дотук този надпис го имаше САМО при еднократните. */
+      h += bulAutoNoteHtml(t, done, 'recurring');
       var dueLbl = recurringDueLabel(t);
       if (isMultiRec) {
         h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🔁 Дни: '+dueLbl+'</div>';
@@ -6040,6 +6161,10 @@ function bulSetRecurring(all, periods, versions) {
   /* „Спрени" се показват с базовото съдържание: те не важат за нито една
      седмица, тоест няма коя версия да се приложи. */
   recurringStopped = recurringAll.filter(function(t){ return !bulHasOpenPeriod(t); });
+  /* Броячът за надписа на автоматичната задача „За връщане" — чак ТУК, защото
+     пита recurringTasks (вече със слятата версия: за стара седмица задачата е
+     notice и брояч не ѝ трябва). */
+  bulLoadReturnsPending();
 }
 /* Всички задачи + периодите, наново от базата (след запис). */
 function bulFetchRecurring() {
