@@ -212,7 +212,8 @@ function llGroupTransitDocs(rows){
         doc_date: r.doc_date || null,
         items: 0,
         checked: false,
-        pallet_spec: '1',
+        /* '' = автоматично: следващият свободен № за обекта (llNextPalletNo). */
+        pallet_spec: '',
         /* Съдържанието на документа — за да го види складът ПРЕДИ да го
            отметне, и за да се копира в реда при отмятане. */
         products: [],
@@ -289,6 +290,39 @@ function llParsePalletSpec(spec){
   });
   var nums = Object.keys(out).map(Number).sort(function(a, b){ return a - b; });
   return nums.length ? nums : [1];
+}
+/* ЕДНА подредба за прегледа, картата на обекта, печата и PDF-а: обект → вид →
+   палет № → позиция. Докато всеки екран си имаше собствено сортиране, един и
+   същи палет излизаше на различни места (по позиция в прегледа, по номер в
+   печата), а „1 от 2" можеше да застане след „2 от 2". Редът без номер (насип,
+   или палет без въведен №) отива след номерираните на своя вид. Стабилно:
+   равните по всичко си остават в реда по позиция. */
+function llKindRank(kind){
+  for(var i = 0; i < LL_KINDS.length; i++){ if(LL_KINDS[i][0] === kind) return i; }
+  return LL_KINDS.length;
+}
+function llByStorePallet(a, b){
+  var s = String(a.store_name || '').localeCompare(String(b.store_name || ''));
+  if(s) return s;
+  var k = llKindRank(a.kind) - llKindRank(b.kind);
+  if(k) return k;
+  var an = a.pallet_no == null ? 9999 : Number(a.pallet_no);
+  var bn = b.pallet_no == null ? 9999 : Number(b.pallet_no);
+  if(an !== bn) return an - bn;
+  return (a.position || 0) - (b.position || 0);
+}
+/* Следващият свободен № за обект + вид в черновата: max + 1, не 1. Два
+   документа на един палет става само когато складът напише същия номер
+   изрично. skip е самият ред — собствената му стойност не се брои. */
+function llNextPalletNo(items, store, kind, skip){
+  var st = String(store || ''), max = 0;
+  (items || []).forEach(function(it){
+    if(it === skip || it.pallet_no == null) return;
+    if(it.kind !== kind || String(it.store_name || '') !== st) return;
+    var n = Number(it.pallet_no);
+    if(n > max) max = n;
+  });
+  return max + 1;
 }
 /* Редовете, събрани в товарни единици. Палетите се групират по (обект, №);
    рулото и насипът са сами за себе си — там номерация няма. */
@@ -1020,7 +1054,7 @@ function llNotifyRowDecided(list, row, approve, comment){
 }
 
 function llStoreCardHtml(l){
-  var items = llStoreItemsOf(l.id).slice().sort(llByPosition);
+  var items = llStoreItemsOf(l.id).slice().sort(llByStorePallet);
   if(!items.length) return '';
   /* Отхвърленият ред се ПОКАЗВА (зачертан), но не се брои и не пречи на
      приключването — за листа той не съществува. */
@@ -1086,6 +1120,16 @@ function llStoreCardHtml(l){
      на рампата вижда четири отделни „палет 2 от 5" и не разбира, че е един. */
   llPalletGroups(items).forEach(function(g){
     var multi = g.rows.length > 1;
+    /* Заглавен ред при ВСЕКИ номериран палет („палет 2 от 5"), не само при
+       няколко документа — така „N от M" се чете на едно място и редът с
+       документа под него е само „↳". Копчетата за целия палет остават само
+       при няколко документа: при един те са същите като на реда. */
+    var headed = llIsNumbered(g.kind) && g.pallet_no != null;
+    if(headed && !multi){
+      h += '<tr data-pallet-group="1" data-pallet-single="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+
+        '<td colspan="5" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
+          esc(llKindLabel(g.rows[0]))+' · 1 документ</td></tr>';
+    }
     if(multi){
       var gGot  = g.rows.filter(function(r){ return r.received; }).length;
       var gMiss = g.rows.filter(function(r){ return r.missing; }).length;
@@ -1121,7 +1165,7 @@ function llStoreCardHtml(l){
     h += '<tr'+(failed?' data-doc-failed="1"':'')+(it.missing?' data-missing="1"':'')+
       (it.added_by_store?' data-ll-added="'+escAttr(it.approval_status||'')+'"':'')+
       ' style="border-bottom:1px solid #f1f5f9;'+bg+(llRowRejected(it)?'text-decoration:line-through;':'')+'">'+
-      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+(multi?'padding-left:22px;color:#94a3b8;':'')+'">'+(multi?'↳':esc(llKindLabel(it)))+
+      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+(headed?'padding-left:22px;color:#94a3b8;':'')+'">'+(headed?'↳':esc(llKindLabel(it)))+
         (it.added_by_store?'<div style="margin-top:3px;text-decoration:none;font-weight:400;">'+llApprovalBadge(it)+llApprovalNote(it)+llApproveBtnsHtml(l, it)+'</div>':'')+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
         (it.partial?' '+llPartialBadge():'')+'</td>'+
@@ -1851,14 +1895,7 @@ function llPdfRows(items, storeFilter){
   /* Отхвърленият ред НЕ влиза в бланката (Пакет Г2). */
   return llLiveRows(items).filter(function(i){
     return !storeFilter || i.store_name === storeFilter;
-  }).slice().sort(function(a, b){
-    var s = String(a.store_name || '').localeCompare(String(b.store_name || ''));
-    if(s) return s;
-    var an = a.pallet_no == null ? 9999 : Number(a.pallet_no);
-    var bn = b.pallet_no == null ? 9999 : Number(b.pallet_no);
-    if(an !== bn) return an - bn;
-    return (a.position || 0) - (b.position || 0);
-  });
+  }).slice().sort(llByStorePallet);
 }
 function llBuildPdf(list, items, storeFilter){
   return llPdfTimeout(Promise.all([llLoadPdfLib(), llPdfFont()]), LL_PDF_TIMEOUT, 'PDF').then(function(res){
@@ -2574,9 +2611,25 @@ function llSetDocPallet(idx, val){
     renderLoadingLists();
     return;
   }
-  d.pallet_spec = String(val == null ? '' : val).trim() || '1';
+  d.pallet_spec = String(val == null ? '' : val).trim();
   if(d.checked){ llDropDocRows(d); llMaterializeDoc(d); }
   renderLoadingLists();
+}
+/* Какво показва полето „Палет №" на документа: въведеното; иначе (отметнат) —
+   номерата, на които реално е сложен; иначе (неотметнат) — предложението,
+   което отмятането ще вземе. Пресмята се при рендер, не се пази. */
+function llDocPalletShown(d){
+  var spec = String(d.pallet_spec == null ? '' : d.pallet_spec).trim();
+  if(spec) return spec;
+  if(!llDraft) return '';
+  if(d.checked){
+    var key = llDocKey(d), nums = [];
+    llDraft.items.forEach(function(it){
+      if(it._docKey === key && it.pallet_no != null) nums.push(it.pallet_no);
+    });
+    if(nums.length) return nums.join(',');
+  }
+  return String(llNextPalletNo(llDraft.items, d.store_name, 'pallet'));
 }
 /* Копие на съдържанието на документа от снимката — за артикулите на реда.
    КОПИЕ: редът после се редактира свободно, а снимката остава каквато е. */
@@ -2594,7 +2647,8 @@ function llMaterializeDoc(d){
   /* pallet_total се оставя празно: то е „от колко" за ЦЕЛИЯ обект и се знае
      чак когато всички документи са разпределени. Смята се при запис
      (llRenumberPallets), а в редактора се показва от групирането. */
-  var nums = llParsePalletSpec(d.pallet_spec);
+  var spec = String(d.pallet_spec == null ? '' : d.pallet_spec).trim();
+  var nums = spec ? llParsePalletSpec(spec) : [llNextPalletNo(llDraft.items, d.store_name, 'pallet')];
   /* Артикулите отиват САМО в ПЪРВИЯ ред на документа. Документ върху палети
      1-3 не се разпределя сам, а копие във всеки ред би утроило стоката в
      описите, в писмото до обекта и в „⚠️ Разлика". Складът разпределя. */
@@ -2635,7 +2689,9 @@ function llAddFreeRow(){
   if(!llDraft) return;
   /* Обектът остава празен: при десет предварителни реда „първият обект по
      азбучен ред" би сложил мълчаливо грешен получател на всеки недокоснат ред. */
-  llDraft.items.push(llBlankDraftRow());
+  var row = llBlankDraftRow();
+  row.pallet_no = llNextPalletNo(llDraft.items, row.store_name, row.kind, row);
+  llDraft.items.push(row);
   renderLoadingLists();
 }
 /* Подсказките на автодопълването са по ИНДЕКС на реда — преместен или махнат
@@ -2672,6 +2728,7 @@ function llSetRowField(i, field, val){
     it.kind = val;
     /* Рулото и насипът нямат номерация — „палет 2 от 5" там не значи нищо. */
     if(!llIsNumbered(val)){ it.pallet_no = null; it.pallet_total = null; }
+    else { it.pallet_no = llNextPalletNo(llDraft.items, it.store_name, val, it); it.pallet_total = null; }
     renderLoadingLists();
     return;
   }
@@ -2691,7 +2748,11 @@ function llSetRowField(i, field, val){
     return;
   }
   it[field] = (val === '') ? null : val;
-  if(field === 'store_name') renderLoadingLists(); /* сменя списъка „изчиства" */
+  if(field === 'store_name'){
+    /* Палет № е в рамките на обекта: нов обект → следващият свободен № там. */
+    if(llIsNumbered(it.kind)){ it.pallet_no = llNextPalletNo(llDraft.items, it.store_name, it.kind, it); it.pallet_total = null; }
+    renderLoadingLists(); /* сменя списъка „изчиства" */
+  }
 }
 /* Частичността е свойство на ПРАТКАТА по документа, не на отделния палет:
    документ върху три палета тръгва или цял, или не. Затова отметката слиза на
@@ -2709,6 +2770,43 @@ function llSetRowPartial(i, checked){
   renderLoadingLists();
 }
 function llSetDraftField(field, val){ if(llDraft) llDraft[field] = val; }
+
+/* Цветът на палета в редактора. Редът остава по position (складът подрежда
+   сам), затова номерът на палета се вижда само по цвят + етикет: един цвят =
+   един палет. Индексът е по ред на първо появяване в черновата, не по номера —
+   „палет 1" на Габрово и „палет 1" на Петрич са различни палети. */
+var LL_PALLET_COLORS = ['#7c3aed', '#0891b2', '#d97706', '#16a34a', '#db2777', '#2563eb', '#65a30d', '#dc2626'];
+function llDraftPalletColors(items){
+  var map = {}, n = 0;
+  (items || []).forEach(function(it){
+    if(!llIsNumbered(it.kind) || it.pallet_no == null || it.pallet_no === '') return;
+    var k = llPalletKey(it);
+    if(!map.hasOwnProperty(k)) map[k] = LL_PALLET_COLORS[n++ % LL_PALLET_COLORS.length];
+  });
+  return map;
+}
+/* Информация, не грешка: два документа на един палет е консолидация и е
+   нормално — но ако е станало по погрешка (въведен същият № вместо нов),
+   редът го показва. */
+function llPalletShareNotes(items){
+  var by = {}, order = [];
+  (items || []).forEach(function(it){
+    if(!llIsNumbered(it.kind) || it.pallet_no == null || !it.purchase_doc) return;
+    if(!String(it.store_name || '').trim()) return;
+    var k = llPalletKey(it);
+    if(!by[k]){ by[k] = { row: it, n: 0 }; order.push(k); }
+    by[k].n++;
+  });
+  var out = [];
+  order.forEach(function(k){
+    var g = by[k];
+    if(g.n < 2) return;
+    var word = LL_KIND_WORD[g.row.kind] || g.row.kind;
+    out.push(word.charAt(0).toUpperCase() + word.slice(1) + ' ' + g.row.pallet_no + ' за ' +
+      g.row.store_name + ' носи ' + g.n + ' документа');
+  });
+  return out;
+}
 
 function llStoreOptions(sel){
   /* Изпращачът отпада от получателите: лист от Петрич за Петрич не е товар,
@@ -3587,7 +3685,7 @@ function llEditorHtml(){
         '<td style="padding:3px 6px;">'+esc(d.store_name)+'</td>'+
         '<td style="padding:3px 6px;">'+fmtDate(d.doc_date)+'</td>'+
         '<td style="padding:3px 6px;text-align:right;">'+d.items+'</td>'+
-        '<td style="padding:3px 6px;" onclick="event.stopPropagation()"><input value="'+escVal(d.pallet_spec)+'" data-i="'+i+'" onclick="event.stopPropagation()" onchange="llSetDocPallet(this.dataset.i,this.value)" title="На кой палет отива този документ. Еднакъв номер за един обект = един палет. Обхват (1-3) за документ върху няколко палета." style="width:62px;border:1px solid #ddd6fe;border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
+        '<td style="padding:3px 6px;" onclick="event.stopPropagation()"><input value="'+escVal(llDocPalletShown(d))+'" data-i="'+i+'" onclick="event.stopPropagation()" onchange="llSetDocPallet(this.dataset.i,this.value)" title="На кой палет отива този документ. Еднакъв номер за един обект = един палет. Обхват (1-3) за документ върху няколко палета." style="width:62px;border:1px solid #ddd6fe;border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
         '</tr>';
       if(d._open) h += '<tr data-ll-doc-items="'+i+'"><td></td><td colspan="5" style="padding:0 6px 8px;">'+llDocItemsHtml(d)+'</td></tr>';
     });
@@ -3615,8 +3713,10 @@ function llEditorHtml(){
       '<th style="padding:3px 6px;">Коментар склад</th>'+
       '<th style="padding:3px 6px;" title="С този палет тръгва само част от документа">Частично</th>'+
       '<th style="padding:3px 6px;"></th></tr>';
+    var pColors = llDraftPalletColors(llDraft.items);
     llDraft.items.forEach(function(it, i){
       var isPallet = llIsNumbered(it.kind);
+      var pColor = (isPallet && it.pallet_no != null && it.pallet_no !== '') ? pColors[llPalletKey(it)] : null;
       var docOf = llItemDocKey(it);
       /* Отметката е на ДОКУМЕНТА, не на реда: документ върху три палета е
          една пратка и е или частична, или не. Показва се на първия му ред,
@@ -3625,13 +3725,15 @@ function llEditorHtml(){
         return llItemDocKey(x) === docOf && (x.store_name||'') === (it.store_name||'');
       }) : -1;
       h += '<tr style="border-top:1px solid #f1f5f9;">'+
-        '<td style="padding:3px 6px;color:#94a3b8;">'+(i+1)+'</td>'+
+        '<td style="padding:3px 6px;color:#94a3b8;'+(pColor?'border-left:4px solid '+pColor+';':'')+'">'+(i+1)+'</td>'+
         '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'kind\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+
           LL_KINDS.map(function(k){ return '<option value="'+k[0]+'"'+(it.kind===k[0]?' selected':'')+'>'+k[1]+'</option>'; }).join('')+
         '</select></td>'+
         '<td style="padding:3px 6px;white-space:nowrap;">'+(isPallet?
           '<input type="number" min="1" value="'+(it.pallet_no!=null?it.pallet_no:'')+'" data-i="'+i+'" oninput="llSetRowField(this.dataset.i,\'pallet_no\',this.value)" style="width:52px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;">'+
-          ' от <input type="number" min="1" value="'+(it.pallet_total!=null?it.pallet_total:'')+'" data-i="'+i+'" oninput="llSetRowField(this.dataset.i,\'pallet_total\',this.value)" style="width:52px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;">'
+          ' от <input type="number" min="1" value="'+(it.pallet_total!=null?it.pallet_total:'')+'" data-i="'+i+'" oninput="llSetRowField(this.dataset.i,\'pallet_total\',this.value)" style="width:52px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;">'+
+          (pColor ? ' <span data-ll-pbadge="'+i+'" style="display:inline-block;background:'+pColor+';color:#fff;border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:700;">'+
+            esc(LL_KIND_WORD[it.kind] || 'палет')+' '+esc(it.pallet_no)+'</span>' : '')
           :'<span style="color:#cbd5e1;">—</span>')+'</td>'+
         /* Изходящ № — ръчно (Теодор, 01.10.2026). Дотук се попълваше само от
            блока „Документи от Стока на път", скрит от 23.09. oninput пише без
@@ -3663,6 +3765,11 @@ function llEditorHtml(){
         (llProductsBlockShown(it) ? '<tr data-ll-prodrow="'+i+'"><td></td><td colspan="7" style="padding:0 6px 6px;">'+llProductsBlockHtml(it, i)+'</td></tr>' : '');
     });
     h += '</table></div>';
+    var shareNotes = llPalletShareNotes(llDraft.items);
+    if(shareNotes.length){
+      h += '<div data-ll-pallet-note="1" style="margin-top:8px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:7px 11px;font-size:12px;">'+
+        shareNotes.map(function(t){ return 'ℹ️ '+esc(t); }).join('<br>')+'</div>';
+    }
   }
   h += '</div>';
 
@@ -4001,7 +4108,7 @@ function llOpenView(id){
 function llViewHtml(){
   var l = llLists.find(function(x){ return String(x.id) === String(llCurrentId); });
   if(!l) return llListHtml();
-  var items = llItemsOf(l.id).slice().sort(function(a,b){ return (a.position||0)-(b.position||0); });
+  var items = llItemsOf(l.id).slice().sort(llByStorePallet);
   var c = llCounts(items);
 
   var h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">'+
@@ -4346,16 +4453,9 @@ function llRenderPrint(list, items, storeFilter){
   var rows = (items || []).filter(function(i){
     return !storeFilter || i.store_name === storeFilter;
   });
-  /* Подредба: обект, после палет №, после позиция. Групирането по-долу пази
+  /* Подредба: обект, вид, палет №, позиция. Групирането по-долу пази
      реда на входа, тоест сортирането ТУК е това, което подрежда листа. */
-  rows = rows.slice().sort(function(a, b){
-    var s = String(a.store_name || '').localeCompare(String(b.store_name || ''));
-    if(s) return s;
-    var an = a.pallet_no == null ? 9999 : Number(a.pallet_no);
-    var bn = b.pallet_no == null ? 9999 : Number(b.pallet_no);
-    if(an !== bn) return an - bn;
-    return (a.position || 0) - (b.position || 0);
-  });
+  rows = rows.slice().sort(llByStorePallet);
 
   var PRINT_CSS = llPrintCss();
 

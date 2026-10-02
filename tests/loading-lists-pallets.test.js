@@ -284,11 +284,18 @@ const idxOf = (h, doc) => h.w.llPendingDocs.indexOf(
     if (ok('картата се рендира', !!c)) {
       /* Заглавният ред на групата се разпознава по data-атрибут, не по текст. */
       const heads = c.querySelectorAll('tr[data-pallet-group="1"]');
-      ok('има ЕДИН заглавен ред за групиран палет', heads.length === 1,
+      /* От 02.10.2026 заглавен ред има при ВСЕКИ номериран палет („N от M"),
+         не само при няколко документа: тук са два — групиран и самотен. */
+      ok('има заглавен ред за всеки от двата палета', heads.length === 2,
         String(heads.length));
+      ok('групираният е първи (палет 1 преди палет 2)',
+        heads[0].textContent.indexOf('3 документа') >= 0 && !heads[0].hasAttribute('data-pallet-single'));
+      ok('самотният палет има кратък заглавен ред „1 документ"',
+        heads[1].hasAttribute('data-pallet-single') && heads[1].textContent.indexOf('1 документ') >= 0 &&
+        !btn(heads[1], '✅ Целият палет'), heads[1].textContent);
       ok('казва колко документа носи',
         heads[0].textContent.indexOf('3 документа') >= 0, heads[0].textContent);
-      ok('самотният палет НЯМА заглавен ред',
+      ok('самотният палет не е „1 документа"',
         c.textContent.indexOf('1 документа') < 0, c.textContent.slice(0, 300));
 
       const b = btn(heads[0], '✅ Целият палет');
