@@ -125,8 +125,8 @@ async function openEditor(h) {
     const h = env([]);
     const wrap = await openEditor(h);
     /* Десетте празни реда (Пакет Г1) нямат нищо общо със снимката. */
-    ok('десетте празни реда си стоят', h.w.llDraft.items.length === 10,
-      String(h.w.llDraft.items.length));
+    ok('десетте празни реда си стоят', h.w.llDraft.units.length === 10,
+      String(h.w.llDraft.units.length));
     ok('заглавието „📦 Редове (10)" е там',
       wrap.textContent.indexOf('Редове (10)') >= 0, wrap.textContent.slice(0, 500));
     ok('„➕ Добави нов ред" е там', !!btn(wrap, '➕ Добави нов ред'));
@@ -137,7 +137,7 @@ async function openEditor(h) {
     ok('и полето за SAP код е там', !!h.doc.getElementById('ll-pf-sap-0'));
     /* „↺ Отново от Стока на път" се показва само при документ НА РЕДА —
        при изключена снимка не бива да се появява дори тогава. */
-    h.w.llSetRowField(0, 'purchase_doc', '4600179694');
+    h.w.llUnitDocAdd(0, '4600179694');
     h.w.renderLoadingLists();
     ok('формата за артикули Е отворена — отрицанието долу е носещо',
       !!btn(mod(h.doc), '📷 Сканирай'));
@@ -163,7 +163,7 @@ async function openEditor(h) {
       wrap.textContent.slice(0, 500));
     ok('има чекбокс за отмятане', !!wrap.querySelector('tr[data-ll-doc="0"] input[type=checkbox]'));
 
-    h.w.llSetRowField(0, 'purchase_doc', '4600179694');
+    h.w.llUnitDocAdd(0, '4600179694');
     h.w.renderLoadingLists();
     ok('„↺ Отново от Стока на път" се показва',
       !!btn(mod(h.doc), '↺ Отново от Стока на път'),
@@ -211,8 +211,8 @@ async function openEditor(h) {
        снимката, а складът не бива да остане пред празен екран. */
     ok('редакторът пак се рендира', wrap.textContent.indexOf('Нов товарен лист') >= 0,
       wrap.textContent.slice(0, 200));
-    ok('десетте реда са там', h.w.llDraft.items.length === 10,
-      String(h.w.llDraft.items.length));
+    ok('десетте реда са там', h.w.llDraft.units.length === 10,
+      String(h.w.llDraft.units.length));
     ok('обектите са заредени', h.w.llStores.length > 0, String(h.w.llStores.length));
   }
 
@@ -237,8 +237,8 @@ async function openEditor(h) {
       JSON.stringify(transitGets(h)));
     ok('редакторът пак се рендира', wrap.textContent.indexOf('Нов товарен лист') >= 0,
       wrap.textContent.slice(0, 200));
-    ok('десетте реда са там', h.w.llDraft.items.length === 10,
-      String(h.w.llDraft.items.length));
+    ok('десетте реда са там', h.w.llDraft.units.length === 10,
+      String(h.w.llDraft.units.length));
   }
 
   section('е) Паднала заявка към goods_transit при ВКЛЮЧЕН блок — както досега');

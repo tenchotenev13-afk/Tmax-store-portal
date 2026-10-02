@@ -88,7 +88,7 @@ const idxOf = (h, pd, st) => h.w.llPendingDocs.findIndex(d => d.purchase_doc ===
 async function openNew(h) {
   h.w.llNewList();
   await ticks(); await ticks(); await ticks();
-  h.w.llDraft.items = [];
+  h.w.llDraft.units = [];
   h.w.renderLoadingLists();
 }
 const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
@@ -124,7 +124,7 @@ const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
       }
       ok('стрелката е ▾', /▾/.test(docRow(h, '4600100').textContent));
       ok('нищо не е отметнато от разгъването', !h.w.llPendingDocs[idxOf(h, '4600100')].checked &&
-        h.w.llDraft.items.length === 0);
+        h.w.llDraft.units.length === 0);
 
       /* Пре-рендиране отвън — разгънатото остава. */
       h.w.llAddFreeRow();
@@ -137,8 +137,7 @@ const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
     const cbCell = docRow(h, '4600100').querySelector('input[type="checkbox"]');
     ok('чекбоксът спира клика', /stopPropagation/.test(cbCell.getAttribute('onclick') || ''));
     ok('и клетката му също', /stopPropagation/.test(cbCell.parentNode.getAttribute('onclick') || ''));
-    const pal = docRow(h, '4600100').querySelector('input:not([type])');
-    ok('„Палет №" спира клика', !!pal && /stopPropagation/.test(pal.getAttribute('onclick') || ''));
+    ok('колоната „Палет №" е махната — номерът е автоматичен', !docRow(h, '4600100').querySelector('input:not([type])'));
   }
 
   section('б) Отмятане: редът се създава КАКТО СЕГА, артикулите се копират сами');
@@ -148,10 +147,10 @@ const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
     const i = idxOf(h, '4600100');
     fire(h.w, docRow(h, '4600100').querySelector('input[type="checkbox"]'), 'change');
     await ticks();
-    const items = h.w.llDraft.items;
+    const items = h.w.llDraft.units;
     ok('един ред', items.length === 1, String(items.length));
     const it = items[0];
-    ok('с документа и обекта', it.purchase_doc === '4600100' && it.store_name === 'Петрич' && it.kind === 'pallet');
+    ok('с документа и обекта', it.docs.join() === '4600100' && it.store_name === 'Петрич' && it.kind === 'pallet');
     ok('палет 1', it.pallet_no === 1);
     const pr = it.products || [];
     ok('три артикула — копирани', pr.length === 3, JSON.stringify(pr));
@@ -175,32 +174,15 @@ const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
     const cb = () => docRow(h, '4600100').querySelector('input[type="checkbox"]');
     fire(h.w, cb(), 'change'); await ticks();
     /* Складът маха един и променя друг. */
-    h.w.llDraft.items[0].products.splice(1, 1);
-    h.w.llDraft.items[0].products[0].qty = 77;
+    h.w.llDraft.units[0].products.splice(1, 1);
+    h.w.llDraft.units[0].products[0].qty = 77;
     fire(h.w, cb(), 'change'); await ticks();          /* махане на отметката */
-    ok('без отметка — редът си отива', h.w.llDraft.items.length === 0, String(h.w.llDraft.items.length));
+    ok('без отметка — редът си отива', h.w.llDraft.units.length === 0, String(h.w.llDraft.units.length));
     fire(h.w, cb(), 'change'); await ticks();          /* отново */
-    const pr = h.w.llDraft.items[0].products;
-    ok('един ред, не два', h.w.llDraft.items.length === 1, String(h.w.llDraft.items.length));
+    const pr = h.w.llDraft.units[0].products;
+    ok('един ред, не два', h.w.llDraft.units.length === 1, String(h.w.llDraft.units.length));
     ok('трите артикула — не дубликат, не остатъкът', pr.length === 3, JSON.stringify(pr.map(p => p.sap_code)));
     ok('с количествата от снимката, не ръчните', pr[0].qty === 1.5, JSON.stringify(pr.map(p => p.qty)));
-  }
-
-  section('г) Документ върху палети 1-3 — артикулите САМО в първия ред');
-  {
-    const h = env();
-    await openNew(h);
-    const i = idxOf(h, '4600100');
-    h.w.llSetDocPallet(i, '1-3');
-    fire(h.w, docRow(h, '4600100').querySelector('input[type="checkbox"]'), 'change');
-    await ticks();
-    const items = h.w.llDraft.items;
-    ok('три реда', items.length === 3, String(items.length));
-    ok('артикулите са на първия', items[0].products.length === 3, JSON.stringify(items.map(x => x.products.length)));
-    ok('останалите са празни — не утроени', items[1].products.length === 0 && items[2].products.length === 0,
-      JSON.stringify(items.map(x => x.products.length)));
-    ok('жълто предупреждение, че документът е на три палета',
-      h.toasts.some(t => /документът е на 3 палета/.test(t.msg) && t.col === '#d97706'), JSON.stringify(h.toasts));
   }
 
   section('д) Търсене по номер и по обект; чиповете остават при един обект');
@@ -234,8 +216,8 @@ const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
     /* Отмятане при филтър — индексът е на ПЪЛНИЯ списък, не на показания. */
     fire(h.w, docRow(h, '4600200').querySelector('input[type="checkbox"]'), 'change');
     await ticks();
-    ok('отметнат е ТОЧНО показаният документ', h.w.llDraft.items.length === 1 &&
-      h.w.llDraft.items[0].purchase_doc === '4600200', JSON.stringify(h.w.llDraft.items.map(x => x.purchase_doc)));
+    ok('отметнат е ТОЧНО показаният документ', h.w.llDraft.units.length === 1 &&
+      h.w.llDraft.units[0].docs.join() === '4600200', JSON.stringify(h.w.llDraft.units.map(x => x.docs)));
 
     /* Чип + текст. */
     q().value = ''; fire(h.w, q(), 'input');
@@ -267,28 +249,28 @@ const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
     await openNew(h);
     fire(h.w, docRow(h, '4600100').querySelector('input[type="checkbox"]'), 'change');
     await ticks();
-    h.w.llDraft.items[0]._prodOpen = true;
+    h.w.llDraft.units[0]._prodOpen = true;
     h.w.renderLoadingLists();
     const again = () => btn(mod(h), '↺ Отново от Стока на път');
     ok('бутонът с новия етикет', !!again());
     ok('старият „Вземи артикулите" го няма', !btn(mod(h), 'Вземи артикулите'));
 
     /* Всичко изтрито на ръка → отначало, без въпрос. */
-    h.w.llDraft.items[0].products = [];
+    h.w.llDraft.units[0].products = [];
     h.w.renderLoadingLists();
     const confBefore = h.calls.confirm.length;
     realClick(h.w, again()); await ticks();
-    ok('списъкът е върнат', h.w.llDraft.items[0].products.length === 3,
-      JSON.stringify(h.w.llDraft.items[0].products.map(p => p.sap_code)));
+    ok('списъкът е върнат', h.w.llDraft.units[0].products.length === 3,
+      JSON.stringify(h.w.llDraft.units[0].products.map(p => p.sap_code)));
     ok('без въпрос — нямаше какво да се загуби', h.calls.confirm.length === confBefore);
 
     /* С артикули — пита; ЗАМЕНЯ, не добавя. */
-    h.w.llDraft.items[0].products.splice(0, 1);
+    h.w.llDraft.units[0].products.splice(0, 1);
     realClick(h.w, again()); await ticks();
     ok('пита преди да замени', h.calls.confirm.length === confBefore + 1 &&
       /Замени 2 артикула/.test(h.calls.confirm[h.calls.confirm.length - 1]), JSON.stringify(h.calls.confirm));
-    ok('заменени — три, не пет', h.w.llDraft.items[0].products.length === 3,
-      String(h.w.llDraft.items[0].products.length));
+    ok('заменени — три, не пет', h.w.llDraft.units[0].products.length === 3,
+      String(h.w.llDraft.units[0].products.length));
   }
 
   section('е2) Отказ на въпроса — редът остава, какъвто е');
@@ -297,12 +279,12 @@ const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
     await openNew(h);
     fire(h.w, docRow(h, '4600100').querySelector('input[type="checkbox"]'), 'change');
     await ticks();
-    h.w.llDraft.items[0].products.splice(0, 2);
-    h.w.llDraft.items[0]._prodOpen = true;
+    h.w.llDraft.units[0].products.splice(0, 2);
+    h.w.llDraft.units[0]._prodOpen = true;
     h.w.renderLoadingLists();
     realClick(h.w, btn(mod(h), '↺ Отново от Стока на път')); await ticks();
-    ok('отказ — остава единият ръчно оставен', h.w.llDraft.items[0].products.length === 1,
-      String(h.w.llDraft.items[0].products.length));
+    ok('отказ — остава единият ръчно оставен', h.w.llDraft.units[0].products.length === 1,
+      String(h.w.llDraft.units[0].products.length));
   }
 
   section('ж) Над 1000 реда — втора страница, нищо не се губи');
@@ -360,7 +342,7 @@ const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
 
     fire(h.w, docRow(h, '4800500').querySelector('input[type="checkbox"]'), 'change');
     await ticks();
-    const pr = h.w.llDraft.items[0].products;
+    const pr = h.w.llDraft.units[0].products;
     ok('копирани са двата с остатък', pr.length === 2, JSON.stringify(pr.map(p => p.sap_code + ':' + p.qty)));
     ok('R1 с 4, не с 10', pr[0] && pr[0].sap_code === 'R1' && pr[0].qty === 4, JSON.stringify(pr[0]));
     ok('R2 — null → поръчаното 6', pr[1] && pr[1].sap_code === 'R2' && pr[1].qty === 6, JSON.stringify(pr[1]));
@@ -369,15 +351,15 @@ const transitGets = h => h.calls.get.filter(u => /\/goods_transit\?/.test(u));
 
     /* „↺" по резервния път (документът го няма в снимката) — същото правило. */
     h.w.llPendingDocs = [];
-    h.w.llDraft.items[0].products = [];
-    h.w.llDraft.items[0]._prodOpen = true;
+    h.w.llDraft.units[0].products = [];
+    h.w.llDraft.units[0]._prodOpen = true;
     h.w.renderLoadingLists();
     realClick(h.w, btn(mod(h), '↺ Отново от Стока на път'));
     await ticks(); await ticks();
     const fb = transitGets(h).filter(u => /purchase_doc=eq\./.test(u));
     ok('резервната заявка също иска remaining_qty', fb.length === 1 && /remaining_qty/.test(decodeURIComponent(fb[0])),
       fb.map(decodeURIComponent).join(' | '));
-    const pr2 = h.w.llDraft.items[0].products;
+    const pr2 = h.w.llDraft.units[0].products;
     ok('и копира оставащото — 4 и 6', pr2.map(p => p.qty).join(',') === '4,6', JSON.stringify(pr2.map(p => p.qty)));
   }
 

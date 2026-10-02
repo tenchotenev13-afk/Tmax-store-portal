@@ -286,7 +286,7 @@ async function openProducts(h, i) {
       pressEnter(h.w, $(h, 'll-pf-qty-0'));
       await ticks(); await ticks();
 
-      const pr = h.w.llDraft.items[0].products;
+      const pr = h.w.llDraft.units[0].products;
       if (ok('артикулът е добавен', pr.length === 1, JSON.stringify(pr))) {
         ok('с кода', pr[0].sap_code === '3200123');
         ok('с името — КОПИЕ от каталога', pr[0].product_name === 'ШУРУП 4X40');
@@ -328,7 +328,7 @@ async function openProducts(h, i) {
       item({ id: 'I2', position: 2, pallet_no: 2, pallet_total: 2 })
     ] });
     await openDraft(h);
-    h.w.llDraft.items[1]._prodOpen = true;
+    h.w.llDraft.units[1]._prodOpen = true;
     h.w.renderLoadingLists();
     /* Пише в реда с индекс 1 и, преди да минат 300 ms, го мести нагоре. */
     typeInto(h.w, $(h, 'll-pf-sap-1'), '320');
@@ -338,8 +338,8 @@ async function openProducts(h, i) {
       getsTo(h, 'product_catalog').join(' | '));
     ok('нито един ред няма чужди подсказки', !Object.keys(h.w.llAcResults).some(k => (h.w.llAcResults[k] || []).length),
       JSON.stringify(h.w.llAcResults));
-    ok('написаното пътува с реда си', h.w.llDraft.items[0]._pf && h.w.llDraft.items[0]._pf.sap_code === '320',
-      JSON.stringify(h.w.llDraft.items.map(x => x._pf && x._pf.sap_code)));
+    ok('написаното пътува с реда си', h.w.llDraft.units[0]._pf && h.w.llDraft.units[0]._pf.sap_code === '320',
+      JSON.stringify(h.w.llDraft.units.map(x => x._pf && x._pf.sap_code)));
   }
 
   section('б) Валидация на бройките');
@@ -352,8 +352,8 @@ async function openProducts(h, i) {
       typeInto(h.w, $(h, 'll-pf-qty-0'), bad);
       h.toasts.length = 0;
       await h.w.llAddProduct(0); await ticks();
-      ok('„' + bad + '" НЕ се приема', h.w.llDraft.items[0].products.length === 0,
-        JSON.stringify(h.w.llDraft.items[0].products));
+      ok('„' + bad + '" НЕ се приема', h.w.llDraft.units[0].products.length === 0,
+        JSON.stringify(h.w.llDraft.units[0].products));
       ok('и казва защо', toastHas(h, /Бройките трябва да са число по-голямо от 0/), JSON.stringify(h.toasts));
     }
     ok('фокусът е в „Бройки"', h.doc.activeElement === $(h, 'll-pf-qty-0'),
@@ -361,8 +361,8 @@ async function openProducts(h, i) {
     /* Запетаята е десетичният знак в България. */
     typeInto(h.w, $(h, 'll-pf-qty-0'), '2,5');
     await h.w.llAddProduct(0); await ticks();
-    ok('„2,5" се приема като 2.5', h.w.llDraft.items[0].products.length === 1 &&
-      h.w.llDraft.items[0].products[0].qty === 2.5, JSON.stringify(h.w.llDraft.items[0].products));
+    ok('„2,5" се приема като 2.5', h.w.llDraft.units[0].products.length === 1 &&
+      h.w.llDraft.units[0].products[0].qty === 2.5, JSON.stringify(h.w.llDraft.units[0].products));
 
     /* Кашоните са по желание, но ако са попълнени — цяло число. */
     typeInto(h.w, $(h, 'll-pf-sap-0'), '3200124');
@@ -370,17 +370,17 @@ async function openProducts(h, i) {
     typeInto(h.w, $(h, 'll-pf-ctn-0'), '1,5');
     h.toasts.length = 0;
     await h.w.llAddProduct(0); await ticks();
-    ok('кашони „1,5" НЕ се приемат', h.w.llDraft.items[0].products.length === 1);
+    ok('кашони „1,5" НЕ се приемат', h.w.llDraft.units[0].products.length === 1);
     ok('и казва защо', toastHas(h, /Кашоните са цяло число/), JSON.stringify(h.toasts));
     typeInto(h.w, $(h, 'll-pf-ctn-0'), '');
     await h.w.llAddProduct(0); await ticks();
-    ok('празни кашони са позволени → null', h.w.llDraft.items[0].products.length === 2 &&
-      h.w.llDraft.items[0].products[1].cartons === null, JSON.stringify(h.w.llDraft.items[0].products[1]));
+    ok('празни кашони са позволени → null', h.w.llDraft.units[0].products.length === 2 &&
+      h.w.llDraft.units[0].products[1].cartons === null, JSON.stringify(h.w.llDraft.units[0].products[1]));
 
     typeInto(h.w, $(h, 'll-pf-qty-0'), '5');
     h.toasts.length = 0;
     await h.w.llAddProduct(0); await ticks();
-    ok('без SAP код — отказ', h.w.llDraft.items[0].products.length === 2);
+    ok('без SAP код — отказ', h.w.llDraft.units[0].products.length === 2);
     ok('„Въведи SAP код"', toastHas(h, /Въведи SAP код/), JSON.stringify(h.toasts));
   }
 
@@ -397,7 +397,7 @@ async function openProducts(h, i) {
     ok('проверката е ТОЧНА (sap_code=eq)',
       getsTo(h, 'product_catalog').some(u => /sap_code=eq\.3200124/.test(u)),
       getsTo(h, 'product_catalog').join(' | '));
-    const p0 = h.w.llDraft.items[0].products[0];
+    const p0 = h.w.llDraft.units[0].products[0];
     ok('името идва от каталога', p0 && p0.product_name === 'ШУРУП 4X50', JSON.stringify(p0));
     ok('мярката също', p0 && p0.unit === 'бр.');
     ok('и НЯМА маркер', !mod(h).querySelector('[data-not-in-catalog]'));
@@ -407,7 +407,7 @@ async function openProducts(h, i) {
     typeInto(h.w, $(h, 'll-pf-qty-0'), '1');
     h.toasts.length = 0;
     await h.w.llAddProduct(0); await ticks();
-    ok('без име — не се добавя', h.w.llDraft.items[0].products.length === 1);
+    ok('без име — не се добавя', h.w.llDraft.units[0].products.length === 1);
     ok('жълто „въведи име на ръка", не червено',
       h.toasts.some(t => /въведи име на ръка/.test(t.msg) && t.col === '#d97706'), JSON.stringify(h.toasts));
     ok('фокусът е в „Име"', h.doc.activeElement === $(h, 'll-pf-name-0'),
@@ -415,7 +415,7 @@ async function openProducts(h, i) {
 
     typeInto(h.w, $(h, 'll-pf-name-0'), 'МОСТРА ОТ ДОСТАВЧИК');
     await h.w.llAddProduct(0); await ticks();
-    const p1 = h.w.llDraft.items[0].products[1];
+    const p1 = h.w.llDraft.units[0].products[1];
     ok('с име — добавен', p1 && p1.sap_code === '999999' && p1.product_name === 'МОСТРА ОТ ДОСТАВЧИК',
       JSON.stringify(p1));
     ok('и маркиран „не е в каталога"',
@@ -425,28 +425,28 @@ async function openProducts(h, i) {
 
   section('г) Един SAP код два пъти на ЕДИН палет — предупреждение, но позволено');
   {
-    /* Два реда (два документа) на палет 1 за Петрич — един физически палет. */
+    /* Два документа на палет 1 за Петрич — ЕДНА единица с два номера. */
     const h = env(WAREHOUSE, { lists: [L_DRAFT], items: [
       item({ id: 'I1', position: 1, pallet_no: 1, pallet_total: 1, purchase_doc: 'D-1' }),
       item({ id: 'I2', position: 2, pallet_no: 1, pallet_total: 1, purchase_doc: 'D-2' })
     ] });
     await openDraft(h);
-    h.w.llDraft.items[0].products.push({ sap_code: '3200123', product_name: 'ШУРУП 4X40',
+    h.w.llDraft.units[0].products.push({ sap_code: '3200123', product_name: 'ШУРУП 4X40',
                                           unit: 'бр.', qty: 5, cartons: null, _inCat: true });
-    h.w.llDraft.items[1]._prodOpen = true;
+    h.w.llDraft.units[0]._prodOpen = true;
     h.w.renderLoadingLists();
 
-    h.w.llAcResults[1] = [CATALOG[0]];
+    h.w.llAcResults[0] = [CATALOG[0]];
     realClick(h.w, (function () {
-      h.w.llAcRender(1);
-      return $(h, 'll-pf-ac-1').querySelector('[onclick]');
+      h.w.llAcRender(0);
+      return $(h, 'll-pf-ac-0').querySelector('[onclick]');
     })());
-    typeInto(h.w, $(h, 'll-pf-qty-1'), '7');
+    typeInto(h.w, $(h, 'll-pf-qty-0'), '7');
     h.toasts.length = 0;
-    pressEnter(h.w, $(h, 'll-pf-qty-1'));
+    pressEnter(h.w, $(h, 'll-pf-qty-0'));
     await ticks(); await ticks();
-    ok('добавен въпреки дубликата', h.w.llDraft.items[1].products.length === 1,
-      JSON.stringify(h.w.llDraft.items[1].products));
+    ok('добавен въпреки дубликата', h.w.llDraft.units[0].products.length === 2,
+      JSON.stringify(h.w.llDraft.units[0].products));
     ok('жълто предупреждение с кода',
       h.toasts.some(t => /3200123 вече е на този палет/.test(t.msg) && t.col === '#d97706'),
       JSON.stringify(h.toasts));
@@ -458,10 +458,10 @@ async function openProducts(h, i) {
       item({ id: 'I2', position: 2, pallet_no: 2, pallet_total: 2 })
     ] });
     await openDraft(h2);
-    h2.w.llDraft.items[0].products.push({ sap_code: '3200123', product_name: 'ШУРУП 4X40',
+    h2.w.llDraft.units[0].products.push({ sap_code: '3200123', product_name: 'ШУРУП 4X40',
                                            unit: 'бр.', qty: 5, cartons: null, _inCat: true });
     h2.w.llPfFromCatalog(1, CATALOG[0]);
-    h2.w.llDraft.items[1]._pf.qty = '3';
+    h2.w.llDraft.units[1]._pf.qty = '3';
     h2.toasts.length = 0;
     await h2.w.llAddProduct(1); await ticks();
     ok('КОНТРОЛ: на друг палет — без предупреждение',
@@ -492,12 +492,12 @@ async function openProducts(h, i) {
     const h = env(WAREHOUSE, { lists: [L_DRAFT], items: [item()] });
     await openDraft(h);
     /* Съществуващият ред I1 — два артикула. */
-    h.w.llDraft.items[0].products.push(
+    h.w.llDraft.units[0].products.push(
       { sap_code: '3200123', product_name: 'ШУРУП 4X40', unit: 'бр.', qty: 12, cartons: 2, _inCat: true },
       { sap_code: '5001', product_name: 'ТРЪБА 1/2" PPR', unit: 'л.м', qty: 6.5, cartons: null, _inCat: true });
     /* Нов ред без id — един артикул. id-то му НЕ се връща от sbPost. */
     h.w.llAddFreeRow();
-    const fresh = h.w.llDraft.items[1];
+    const fresh = h.w.llDraft.units[1];
     fresh.store_name = 'Гоце Делчев'; fresh.kind = 'bulk'; fresh.pallet_no = null;
     fresh.products.push({ sap_code: '3200124', product_name: 'ШУРУП 4X50', unit: 'бр.', qty: 100, cartons: 4, _inCat: true });
 
@@ -543,16 +543,16 @@ async function openProducts(h, i) {
         unit: 'бр.', qty: 20, cartons: null, received_qty: null, created_at: '2026-09-20T10:00:00.000Z' }
     ] });
     await openDraft(h);
-    ok('старите артикули са в черновата', h.w.llDraft.items[0].products.length === 2,
-      JSON.stringify(h.w.llDraft.items[0].products));
+    ok('старите артикули са в черновата', h.w.llDraft.units[0].products.length === 2,
+      JSON.stringify(h.w.llDraft.units[0].products));
     ok('и са дошли с ЕДНА заявка (embed)', getsTo(h, 'loading_list_products').length === 0 &&
       getsTo(h, 'loading_list_items').some(u => /loading_list_products\(\*\)/.test(decodeURIComponent(u))),
       getsTo(h, 'loading_list_items').join(' | '));
 
     /* Махаме втория, променяме първия, добавяме нов. */
-    h.w.llDraft.items[0].products.splice(1, 1);
-    h.w.llDraft.items[0].products[0].qty = 11;
-    h.w.llDraft.items[0].products.push({ sap_code: '5001', product_name: 'ТРЪБА 1/2" PPR', unit: 'л.м', qty: 3, cartons: 1, _inCat: true });
+    h.w.llDraft.units[0].products.splice(1, 1);
+    h.w.llDraft.units[0].products[0].qty = 11;
+    h.w.llDraft.units[0].products.push({ sap_code: '5001', product_name: 'ТРЪБА 1/2" PPR', unit: 'л.м', qty: 3, cartons: 1, _inCat: true });
 
     h.w.llSaveDraft();
     for (let k = 0; k < 8; k++) await ticks();
@@ -586,7 +586,7 @@ async function openProducts(h, i) {
         unit: 'бр.', qty: 10, cartons: null, received_qty: null, created_at: '2026-09-20T10:00:00.000Z' }
     ] });
     await openDraft(h);
-    h.w.llDraft.items[0].products = [];
+    h.w.llDraft.units[0].products = [];
     h.w.llSaveDraft();
     for (let k = 0; k < 8; k++) await ticks();
     ok('нула POST към артикулите', !h.calls.post.some(p => p.table === 'loading_list_products'));
@@ -618,7 +618,7 @@ async function openProducts(h, i) {
         unit: 'бр.', qty: 10, cartons: null, received_qty: null, created_at: '2026-09-20T10:00:00.000Z' }
     ] }, { failPost: /^loading_list_products$/ });
     await openDraft(h);
-    h.w.llDraft.items[0].products.push({ sap_code: '5001', product_name: 'ТРЪБА 1/2" PPR', unit: 'л.м', qty: 3, cartons: null, _inCat: true });
+    h.w.llDraft.units[0].products.push({ sap_code: '5001', product_name: 'ТРЪБА 1/2" PPR', unit: 'л.м', qty: 3, cartons: null, _inCat: true });
     h.w.llSaveDraft();
     for (let k = 0; k < 8; k++) await ticks();
 
@@ -627,8 +627,8 @@ async function openProducts(h, i) {
     ok('маркер за непълен запис', h.w.llIncompleteSaves['L1'] === true, JSON.stringify(h.w.llIncompleteSaves));
     ok('ОСТАВА в редактора', h.w.llView === 'edit', h.w.llView);
     ok('банерът в редактора го казва', !!mod(h).querySelector('[data-ll-incomplete]'));
-    ok('артикулите са в паметта', h.w.llDraft && h.w.llDraft.items[0].products.length === 2,
-      JSON.stringify(h.w.llDraft && h.w.llDraft.items[0].products));
+    ok('артикулите са в паметта', h.w.llDraft && h.w.llDraft.units[0].products.length === 2,
+      JSON.stringify(h.w.llDraft && h.w.llDraft.units[0].products));
     ok('НЕ е изпратено триене', !h.calls.del.some(u => /loading_list_products/.test(u)), JSON.stringify(h.calls.del));
     ok('старият артикул е ЦЯЛ в базата', h.db.loading_list_products.length === 1 &&
       h.db.loading_list_products[0].id === 'P-old-1');
@@ -647,7 +647,7 @@ async function openProducts(h, i) {
         unit: 'бр.', qty: 10, cartons: null, received_qty: null, created_at: '2026-09-20T10:00:00.000Z' }
     ] }, { failPost: /^loading_list_products$/ });
     await openDraft(h);
-    h.w.llDraft.items[0].products.push({ sap_code: '5001', product_name: 'ТРЪБА 1/2" PPR', unit: 'л.м', qty: 3, cartons: null, _inCat: true });
+    h.w.llDraft.units[0].products.push({ sap_code: '5001', product_name: 'ТРЪБА 1/2" PPR', unit: 'л.м', qty: 3, cartons: null, _inCat: true });
     h.w.llSaveDraft();
     for (let k = 0; k < 8; k++) await ticks();
     ok('първият запис се проваля', h.w.llView === 'edit' && h.w.llIncompleteSaves['L1'] === true);
@@ -802,7 +802,7 @@ async function openProducts(h, i) {
     await ticks(); await ticks();
     ok('взето от ВЕЧЕ заредената снимка — без нова заявка',
       getsTo(h, 'goods_transit').length === getsBefore, getsTo(h, 'goods_transit').join(' | '));
-    const pr = h.w.llDraft.items[0].products;
+    const pr = h.w.llDraft.units[0].products;
     ok('два артикула — само на този обект', pr.length === 2, JSON.stringify(pr.map(p => p.sap_code)));
     ok('„2" преди „10" (числово, не като текст)', pr[0] && pr[0].sap_code === 'A2' && pr[1].sap_code === 'A10',
       JSON.stringify(pr.map(p => p.sap_code)));
@@ -821,7 +821,7 @@ async function openProducts(h, i) {
     ok('новото заглавие', /Документи от Стока на път/.test(t), t.slice(0, 400));
     ok('„снимка към" с НАЙ-новата дата', /снимка към 01\.09\.2026/.test(t), t.slice(0, 400));
     ok('старото „Чакащи стокови документи" го няма', t.indexOf('Чакащи стокови документи') < 0);
-    ok('редакторът казва „Изходящ №"', t.indexOf('Изходящ №') >= 0);
+    ok('редакторът казва „Изходящи №"', t.indexOf('Изходящи №') >= 0);
   }
 
   section('п) Писмото към обекта носи артикулите под реда — сиво, само неговите');
@@ -861,7 +861,7 @@ async function openProducts(h, i) {
     /* 1 резултат — попълва кода, името и мярката. */
     let n = await h.w.llHandleScannedEan(0, '3800001000011');
     ok('1 резултат', n === 1, String(n));
-    const pf = h.w.llDraft.items[0]._pf;
+    const pf = h.w.llDraft.units[0]._pf;
     ok('кодът/името/мярката са в паметта', pf.sap_code === '3200123' && pf.product_name === 'ШУРУП 4X40' && pf.unit === 'бр.',
       JSON.stringify(pf));
     ok('и в полетата', $(h, 'll-pf-sap-0').value === '3200123' && $(h, 'll-pf-name-0').value === 'ШУРУП 4X40');
@@ -879,8 +879,8 @@ async function openProducts(h, i) {
 
     /* UPC-A: каталогът пази 12 цифри, скенерът може да върне 13 с водеща 0. */
     n = await h.w.llHandleScannedEan(0, '0012345678905');
-    ok('13 цифри с водеща 0 намира 12-цифрения', n === 1 && h.w.llDraft.items[0]._pf.sap_code === '7001',
-      JSON.stringify(h.w.llDraft.items[0]._pf));
+    ok('13 цифри с водеща 0 намира 12-цифрения', n === 1 && h.w.llDraft.units[0]._pf.sap_code === '7001',
+      JSON.stringify(h.w.llDraft.units[0]._pf));
     ok('търси по двете форми с in.(…)',
       getsTo(h, 'product_catalog').some(u => /ean_code=in\.\(0012345678905,012345678905\)/.test(u)),
       getsTo(h, 'product_catalog').join(' | '));
@@ -910,8 +910,8 @@ async function openProducts(h, i) {
     const choices = panel.querySelectorAll('button[onclick^="llScanPick"]');
     ok('два бутона за избор', choices.length === 2, panel.innerHTML.slice(0, 200));
     realClick(h.w, choices[1]);
-    ok('изборът попълва формата', h.w.llDraft.items[0]._pf.sap_code === '8002',
-      JSON.stringify(h.w.llDraft.items[0]._pf));
+    ok('изборът попълва формата', h.w.llDraft.units[0]._pf.sap_code === '8002',
+      JSON.stringify(h.w.llDraft.units[0]._pf));
     const q = h.doc.getElementById('ll-scan-qty');
     ok('модалът пита за бройки', !!q);
     ok('и фокусът е там', h.doc.activeElement === q, h.doc.activeElement && h.doc.activeElement.id);
@@ -919,7 +919,7 @@ async function openProducts(h, i) {
     typeInto(h.w, q, '4');
     pressEnter(h.w, q);
     await ticks(); await ticks(); await ticks();
-    const pr = h.w.llDraft.items[0].products;
+    const pr = h.w.llDraft.units[0].products;
     ok('Enter в модала добавя артикула', pr.length === 1 && pr[0].sap_code === '8002' && pr[0].qty === 4,
       JSON.stringify(pr));
     ok('скенерът продължава (resume)', resumed === 1, String(resumed));
@@ -970,6 +970,86 @@ async function openProducts(h, i) {
     ok('ново натискане опитва наново', h.doc.querySelectorAll('script[src*="html5-qrcode"]').length === 2,
       String(h.doc.querySelectorAll('script[src*="html5-qrcode"]').length));
     ok('библиотеката не е заредена в jsdom — глобал Html5Qrcode НЯМА', typeof h.w.Html5Qrcode === 'undefined');
+  }
+
+  section('з) Единица с няколко изходящи номера — артикулите само в ПЪРВИЯ ред, id-тата се пазят');
+  {
+    const rows3 = [
+      item({ id: 'I1', position: 1, pallet_no: 1, pallet_total: 1, purchase_doc: 'D-1' }),
+      item({ id: 'I2', position: 2, pallet_no: 1, pallet_total: 1, purchase_doc: 'D-2' }),
+      item({ id: 'I3', position: 3, pallet_no: 1, pallet_total: 1, purchase_doc: 'D-3' })
+    ];
+    const h = env(WAREHOUSE, { lists: [L_DRAFT], items: rows3, products: [
+      { id: 'P-old', item_id: 'I2', position: 1, sap_code: '3200123', product_name: 'ШУРУП 4X40',
+        unit: 'бр.', qty: 10, cartons: null, received_qty: null, created_at: '2026-09-20T10:00:00.000Z' }
+    ] });
+    await openDraft(h);
+    ok('три реда с общ № са ЕДНА единица', h.w.llDraft.units.length === 1, String(h.w.llDraft.units.length));
+    ok('с три чипа', h.w.llDraft.units[0].docs.join() === 'D-1,D-2,D-3');
+    ok('артикулът от втория ред е в единицата', h.w.llDraft.units[0].products.length === 1);
+
+    h.w.llSaveDraft();
+    for (let k = 0; k < 8; k++) await ticks();
+    ok('артикулът отива в ПЪРВИЯ ред (I1)',
+      h.db.loading_list_products.length === 1 && h.db.loading_list_products[0].item_id === 'I1',
+      JSON.stringify(h.db.loading_list_products.map(p => p.item_id)));
+    ok('старият артикул (на I2) е заменен', h.db.loading_list_products.every(p => p.id !== 'P-old'));
+    ok('трите реда са същите, без нови', h.db.loading_list_items.map(r => r.id).join() === 'I1,I2,I3',
+      h.db.loading_list_items.map(r => r.id).join());
+
+    /* Махаме чипа на D-2 и добавяме D-4: освободеният ред I2 се преизползва. */
+    await openDraft(h);
+    h.w.llUnitDocRemove(0, 1);
+    h.w.llUnitDocAdd(0, 'D-4');
+    h.w.llSaveDraft();
+    for (let k = 0; k < 8; k++) await ticks();
+    const byId = {}; h.db.loading_list_items.forEach(r => { byId[r.id] = r.purchase_doc + '@' + r.position; });
+    ok('I1=D-1, I3=D-3, I2 преизползван за D-4 — без нови редове',
+      byId.I1 === 'D-1@1' && byId.I3 === 'D-3@2' && byId.I2 === 'D-4@3' && h.db.loading_list_items.length === 3,
+      JSON.stringify(byId));
+    ok('артикулите пак само в първия ред',
+      h.db.loading_list_products.length === 1 && h.db.loading_list_products[0].item_id === 'I1');
+
+    /* Махаме два чипа без нови: излишните редове се трият. */
+    await openDraft(h);
+    h.w.llUnitDocRemove(0, 2);
+    h.w.llUnitDocRemove(0, 1);
+    h.w.llSaveDraft();
+    for (let k = 0; k < 8; k++) await ticks();
+    ok('остава само редът на D-1', h.db.loading_list_items.map(r => r.id + ':' + r.purchase_doc).join() === 'I1:D-1',
+      h.db.loading_list_items.map(r => r.id + ':' + r.purchase_doc).join());
+    ok('артикулът е запазен', h.db.loading_list_products.length === 1 && h.db.loading_list_products[0].item_id === 'I1');
+
+    /* Номер, написан в полето без Enter, не се губи при запис. */
+    await openDraft(h);
+    h.w.llUnitDocInput(0, 'D-7');
+    h.w.llSaveDraft();
+    for (let k = 0; k < 8; k++) await ticks();
+    ok('недовършеният номер влиза при запис',
+      h.db.loading_list_items.map(r => r.purchase_doc).sort().join() === 'D-1,D-7',
+      h.db.loading_list_items.map(r => r.purchase_doc).join());
+  }
+
+  section('и) Клавиши в полето за изходящи номера (Enter и запетая)');
+  {
+    const h = env(WAREHOUSE, { lists: [L_DRAFT], items: [item({ id: 'I1', purchase_doc: 'D-1' })] });
+    await openDraft(h);
+    const input = () => h.doc.getElementById('ll-doc-in-0');
+    const press = (key, value) => {
+      const el = input(); el.value = value;
+      const code = el.getAttribute('onkeydown');
+      const ev = { key: key, keyCode: key === 'Enter' ? 13 : 188, target: el, preventDefault() {} };
+      h.w.eval('(function(el, event){ (function(){' + code + '}).call(el); })')(el, ev);
+    };
+    press('Enter', 'D-2');
+    ok('Enter добавя чип', h.w.llDraft.units[0].docs.join() === 'D-1,D-2', h.w.llDraft.units[0].docs.join());
+    ok('полето се изчиства и остава фокусът', input().value === '' && h.doc.activeElement === input());
+    press(',', 'D-3');
+    ok('запетая добавя чип', h.w.llDraft.units[0].docs.join() === 'D-1,D-2,D-3', h.w.llDraft.units[0].docs.join());
+    press('Enter', 'D-3');
+    ok('повторен номер не дублира', h.w.llDraft.units[0].docs.length === 3);
+    realClick(h.w, h.doc.querySelector('[data-ll-doc-chip="0-1"] button'));
+    ok('✕ маха чипа', h.w.llDraft.units[0].docs.join() === 'D-1,D-3', h.w.llDraft.units[0].docs.join());
   }
 
   report();

@@ -162,9 +162,9 @@ const byText = (root, re) => Array.from(root.querySelectorAll('button')).filter(
     ok('отваря редактора', h.w.llView === 'edit' && !!h.w.llDraft);
     ok('изпращачът е неговият склад', h.w.llActiveWarehouse() === WH);
     /* Записът: първи ред с обект — заглавието отива с warehouse = складът. */
-    h.w.llDraft.items[0].store_name = 'Петрич';
-    h.w.llDraft.items[0].kind = 'bulk';
-    h.w.llDraft.items[0].purchase_doc = 'ИЗХ-900';
+    h.w.llDraft.units[0].store_name = 'Петрич';
+    h.w.llDraft.units[0].kind = 'bulk';
+    h.w.llDraft.units[0].purchase_doc = 'ИЗХ-900';
     h.w.llSaveDraft();
     await ticks(); await ticks();
     const head = h.calls.post.filter(p => p.table === 'loading_lists')[0];

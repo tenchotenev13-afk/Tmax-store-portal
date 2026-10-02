@@ -221,7 +221,7 @@ const pr = h => h.doc.getElementById('mod-print');
     ok('кашоните на реда', /\(2 каш\.\)/.test(t), t.slice(0, 800));
 
     /* Палет 1 на Петрич: A + под-ред, B + под-ред = 4 реда → rowspan 4. */
-    const kind = Array.from(pr(h).querySelectorAll('td.lp-kind')).find(td => /палет 1 от 2/.test(td.textContent));
+    const kind = Array.from(pr(h).querySelectorAll('td.lp-kind')).find(td => td.getAttribute('rowspan') === '4');
     if (ok('клетката „Вид" за палет 1', !!kind)) {
       ok('rowspan брои и под-редовете (4, не 2)', kind.getAttribute('rowspan') === '4', kind.getAttribute('rowspan'));
     }
@@ -253,7 +253,7 @@ const pr = h => h.doc.getElementById('mod-print');
     await ticks(); await ticks();
     h.w.llPrint('L1', 'Петрич');
     const tbl = Array.from(pr(h).querySelectorAll('table.lp-tbl')).find(x => /Стокова №/.test(x.textContent));
-    const k = Array.from(tbl.querySelectorAll('td.lp-kind')).find(td => /палет 1 от 2/.test(td.textContent));
+    const k = Array.from(tbl.querySelectorAll('td.lp-kind')).find(td => td.getAttribute('rowspan') === '4');
     k.setAttribute('rowspan', '2');
     const trs = Array.from(tbl.querySelectorAll('tr')).slice(1);
     let carry = 0, bad = 0;

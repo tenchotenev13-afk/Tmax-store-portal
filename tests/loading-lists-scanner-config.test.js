@@ -78,7 +78,7 @@ async function openScanner(h) {
   h.w.llNewList();
   await ticks(); await ticks();
   /* Празните редове от новия лист не участват — тестът е за скенера. */
-  h.w.llDraft.items = [];
+  h.w.llDraft.units = [];
   h.w.llAddFreeRow();
   h.w.llOpenScanner(0);
   await ticks(); await ticks(); await ticks();

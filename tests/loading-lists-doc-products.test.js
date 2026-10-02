@@ -138,6 +138,7 @@ async function newList(h) {
   realClick(h.w, btn(mod(h), 'Нов товарен лист')); await ticks(); await ticks();
 }
 const docIn = (h, i) => mod(h).querySelector('input.ll-doc-in[data-i="' + i + '"]');
+const chips = (h, i) => Array.from(mod(h).querySelectorAll('[data-ll-doc-chip^="' + i + '-"]')).map(c => c.textContent.replace('✕', '').trim());
 function typeDoc(h, i, v) { const el = docIn(h, i); el.value = v; H.fire(h.w, el, 'input'); H.fire(h.w, el, 'change'); }
 
 (async function () {
@@ -146,26 +147,26 @@ function typeDoc(h, i, v) { const el = docIn(h, i); el.value = v; H.fire(h.w, el
   {
     const h = env(WAREHOUSE, { lists: [], items: [], settings: OFF });
     await newList(h);
-    ok('колоната „Изходящ №" е поле за всеки ред', !!docIn(h, 0) && !!docIn(h, 9));
-    h.w.llDraft.items[0].store_name = 'Петрич';
-    h.w.llDraft.items[1].store_name = 'Петрич';
+    ok('колоната „Изходящи №" е поле за всяка единица', !!docIn(h, 0) && !!docIn(h, 9));
+    h.w.llDraft.units[0].store_name = 'Петрич';
+    h.w.llDraft.units[1].store_name = 'Петрич';
     h.w.renderLoadingLists();
     typeDoc(h, 0, '  4600179694 ');
-    ok('записан без интервалите', h.w.llDraft.items[0].purchase_doc === '4600179694', JSON.stringify(h.w.llDraft.items[0].purchase_doc));
-    ok('полето показва въведеното след пре-рендиране', docIn(h, 0).value === '4600179694');
+    ok('записан без интервалите', h.w.llDraft.units[0].docs.join() === '4600179694', JSON.stringify(h.w.llDraft.units[0].docs));
+    ok('номерът се вижда като чип след пре-рендиране', chips(h, 0).join() === '4600179694', chips(h, 0).join());
     typeDoc(h, 1, '   ');
-    ok('празно (само интервали) → null', h.w.llDraft.items[1].purchase_doc === null);
-    /* „частично" идва от документа; изчистен номер го маха. */
+    ok('празно (само интервали) → без чип', h.w.llDraft.units[1].docs.length === 0);
+    /* „частично" е на единицата и иска поне един документ. */
     const cb = mod(h).querySelector('input[type="checkbox"][onchange^="llSetRowPartial"][data-i="0"]');
     ok('с номер — отметката „частично" е на реда', !!cb);
     cb.checked = true; H.fire(h.w, cb, 'change'); await ticks();
-    ok('отметнато „частично" стига до реда', h.w.llDraft.items[0].partial === true);
-    typeDoc(h, 0, '');
-    ok('изчистен номер → null и „частично" пада', h.w.llDraft.items[0].purchase_doc === null && h.w.llDraft.items[0].partial === false);
+    ok('отметнато „частично" стига до единицата', h.w.llDraft.units[0].partial === true);
+    realClick(h.w, mod(h).querySelector('[data-ll-doc-chip="0-0"] button')); await ticks();
+    ok('махнат последен номер → без документи и „частично" пада', h.w.llDraft.units[0].docs.length === 0 && h.w.llDraft.units[0].partial === false);
     typeDoc(h, 0, '4600179694');
     realClick(h.w, btn(mod(h), 'Запази черновата')); await ticks(); await ticks();
     const rows = [].concat.apply([], posts(h, 'loading_list_items').map(p => [].concat(p.body)));
-    ok('записът носи purchase_doc за ред 1 и null за ред 2',
+    ok('записът носи номера за единица 1 и null за единица 2',
       rows.length === 2 && rows[0].purchase_doc === '4600179694' && rows[1].purchase_doc === null, JSON.stringify(rows.map(r => r.purchase_doc)));
   }
 

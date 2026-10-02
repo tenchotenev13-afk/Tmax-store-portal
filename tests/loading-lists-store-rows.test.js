@@ -6,7 +6,7 @@
 
    Въпросите, в които е лесно да се сбърка ТИХО, и затова са заковани тук:
      · артикулите на новия ред НЕ минават през llWriteProducts — той
-       съпоставя по position спрямо llDraft.items и с една-единствена
+       съпоставя по position спрямо llDraft.units и с една-единствена
        чернова би ги закачил за ПЪРВИЯ ред на листа. Тестът проверява
        item_id, не само че е имало POST;
      · „чака одобрение" ДЪРЖИ листа отворен. Без този гейт писмото до склада
@@ -329,11 +329,11 @@ const modal = doc => doc.getElementById('ll-add-modal');
     h.w.llPfInput(0, 'qty', '12,5');
     await h.w.llAddProduct(0);
     await ticks();
-    ok('артикулът влезе в черновата', (h.w.llDraft.items[0].products || []).length === 1,
-      JSON.stringify(h.w.llDraft.items[0].products));
+    ok('артикулът влезе в черновата', (h.w.llDraft.units[0].products || []).length === 1,
+      JSON.stringify(h.w.llDraft.units[0].products));
     ok('името дойде от каталога',
-      (h.w.llDraft.items[0].products[0] || {}).product_name === 'Плочки гранитогрес 60x60',
-      JSON.stringify(h.w.llDraft.items[0].products[0]));
+      (h.w.llDraft.units[0].products[0] || {}).product_name === 'Плочки гранитогрес 60x60',
+      JSON.stringify(h.w.llDraft.units[0].products[0]));
     ok('формата се пре-рендира с новия артикул',
       modal(h.doc).innerHTML.indexOf('Плочки гранитогрес') >= 0);
 

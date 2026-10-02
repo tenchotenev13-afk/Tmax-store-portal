@@ -73,14 +73,14 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     const h = env();
     h.w.llNewList();
     await ticks(); await ticks();
-    ok('десет реда', h.w.llDraft.items.length === 10, String(h.w.llDraft.items.length));
-    ok('всички са палети', h.w.llDraft.items.every(i => i.kind === 'pallet'));
-    ok('без обект', h.w.llDraft.items.every(i => i.store_name === ''),
-      JSON.stringify(h.w.llDraft.items.map(i => i.store_name)));
+    ok('десет реда', h.w.llDraft.units.length === 10, String(h.w.llDraft.units.length));
+    ok('всички са палети', h.w.llDraft.units.every(i => i.kind === 'pallet'));
+    ok('без обект', h.w.llDraft.units.every(i => i.store_name === ''),
+      JSON.stringify(h.w.llDraft.units.map(i => i.store_name)));
     ok('без документ и без артикули',
-      h.w.llDraft.items.every(i => !i.purchase_doc && i.products && i.products.length === 0));
+      h.w.llDraft.units.every(i => !i.docs.length && i.products && i.products.length === 0));
     ok('и всички се броят за празни',
-      h.w.llDraft.items.every(i => h.w.llBlankRow(i) === true));
+      h.w.llDraft.units.every(i => h.w.llBlankRow(i) === true));
     ok('заглавието показва 10', /Редове \(10\)/.test(mod(h).textContent), mod(h).textContent.slice(0, 200));
 
     /* Селектът трябва да ПИТА, не да приписва. */
@@ -91,8 +91,8 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     }
     /* „➕ Добави нов ред" добавя ЕДИН и също празен. */
     realClick(h.w, btn(mod(h), 'Добави нов ред'));
-    ok('единадесет реда', h.w.llDraft.items.length === 11, String(h.w.llDraft.items.length));
-    ok('новият също е без обект', h.w.llDraft.items[10].store_name === '');
+    ok('единадесет реда', h.w.llDraft.units.length === 11, String(h.w.llDraft.units.length));
+    ok('новият също е без обект', h.w.llDraft.units[10].store_name === '');
   }
 
   section('б) Съществуваща чернова НЕ се допълва');
@@ -102,8 +102,8 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     await ticks(); await ticks();
     h.w.llOpenEdit('L9');
     await ticks(); await ticks();
-    ok('един ред си остава един', h.w.llDraft.items.length === 1, String(h.w.llDraft.items.length));
-    ok('и е старият', h.w.llDraft.items[0].purchase_doc === 'ИЗХ-1');
+    ok('един ред си остава един', h.w.llDraft.units.length === 1, String(h.w.llDraft.units.length));
+    ok('и е старият', h.w.llDraft.units[0].docs.join() === 'ИЗХ-1');
   }
 
   section('в) Запис: десет празни + един попълнен → ЕДИН ред в базата');
@@ -111,8 +111,8 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     const h = env();
     h.w.llNewList();
     await ticks(); await ticks();
-    h.w.llDraft.items[3].store_name = 'Петрич';
-    h.w.llDraft.items[3].purchase_doc = 'ИЗХ-77';
+    h.w.llDraft.units[3].store_name = 'Петрич';
+    h.w.llDraft.units[3].docs = ['ИЗХ-77'];
     h.w.llSaveDraft();
     for (let k = 0; k < 8; k++) await ticks();
 
@@ -134,7 +134,7 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     const h = env();
     h.w.llNewList();
     await ticks(); await ticks();
-    h.w.llDraft.items[0].purchase_doc = 'ИЗХ-88';   /* започнат, но без обект */
+    h.w.llDraft.units[0].docs = ['ИЗХ-88'];   /* започнат, но без обект */
     h.w.llSaveDraft();
     await ticks(); await ticks();
     ok('нищо не е записано', itemPosts(h).length === 0 && !h.calls.post.some(p => p.table === 'loading_lists'),
@@ -142,9 +142,9 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     ok('червено съобщение защо',
       h.toasts.some(t => /без обект получател/.test(t.msg) && t.col === '#dc2626'), JSON.stringify(h.toasts));
     ok('редът НЕ е изхвърлен тихо',
-      h.w.llDraft.items.some(i => i.purchase_doc === 'ИЗХ-88'),
-      JSON.stringify(h.w.llDraft.items.map(i => i.purchase_doc)));
-    ok('а празните до него са махнати', h.w.llDraft.items.length === 1, String(h.w.llDraft.items.length));
+      h.w.llDraft.units.some(i => i.docs.indexOf('ИЗХ-88') >= 0),
+      JSON.stringify(h.w.llDraft.units.map(i => i.docs.join())));
+    ok('а празните до него са махнати', h.w.llDraft.units.length === 1, String(h.w.llDraft.units.length));
   }
 
   section('г2) Ред с АРТИКУЛИ, но без обект — също грешка');
@@ -152,13 +152,13 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     const h = env();
     h.w.llNewList();
     await ticks(); await ticks();
-    h.w.llDraft.items[2].products.push({ sap_code: 'X1', product_name: 'НЕЩО', unit: 'бр.', qty: 2, cartons: null });
+    h.w.llDraft.units[2].products.push({ sap_code: 'X1', product_name: 'НЕЩО', unit: 'бр.', qty: 2, cartons: null });
     h.w.llSaveDraft();
     await ticks(); await ticks();
     ok('не се записва', itemPosts(h).length === 0);
     ok('и се казва', h.toasts.some(t => /без обект получател/.test(t.msg)), JSON.stringify(h.toasts));
-    ok('редът с артикулите остава', h.w.llDraft.items.length === 1 &&
-      h.w.llDraft.items[0].products.length === 1, String(h.w.llDraft.items.length));
+    ok('редът с артикулите остава', h.w.llDraft.units.length === 1 &&
+      h.w.llDraft.units[0].products.length === 1, String(h.w.llDraft.units.length));
   }
 
   section('д) Само празни редове — казва се, нищо не се записва');
@@ -171,8 +171,8 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     ok('нула записи', h.calls.post.length === 0, JSON.stringify(h.calls.post.map(p => p.table)));
     ok('„Добави поне един ред"', h.toasts.some(t => /Добави поне един ред/.test(t.msg)), JSON.stringify(h.toasts));
     ok('редакторът остава отворен', h.w.llView === 'edit', h.w.llView);
-    ok('и вече е празен — празните са махнати', h.w.llDraft.items.length === 0,
-      String(h.w.llDraft.items.length));
+    ok('и вече е празен — празните са махнати', h.w.llDraft.units.length === 0,
+      String(h.w.llDraft.units.length));
   }
 
   section('е) Празен ред с коментар пак е празен');
@@ -182,8 +182,8 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     const h = env();
     h.w.llNewList();
     await ticks(); await ticks();
-    h.w.llDraft.items[0].warehouse_comment = 'нещо си';
-    h.w.llDraft.items[5].store_name = 'Петрич';
+    h.w.llDraft.units[0].warehouse_comment = 'нещо си';
+    h.w.llDraft.units[5].store_name = 'Петрич';
     h.w.llSaveDraft();
     for (let k = 0; k < 8; k++) await ticks();
     const posts = itemPosts(h);

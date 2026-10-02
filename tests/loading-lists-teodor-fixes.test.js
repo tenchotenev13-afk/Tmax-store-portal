@@ -165,7 +165,7 @@ const pr = h => h.doc.getElementById('mod-print');
     ok('а без него пада на изходящия',
       h.w.llItemDocKey({ clears_doc: null, purchase_doc: 'D-100' }) === 'D-100');
     ok('черновата пази стойността за записа',
-      h.w.llDraft.items[0].clears_doc === 'D-777', JSON.stringify(h.w.llDraft.items[0].clears_doc));
+      h.w.llDraft.units[0].clears_doc === 'D-777', JSON.stringify(h.w.llDraft.units[0].clears_doc));
 
     /* Печатът и PDF-ът също мълчат. */
     h.w.llPrint('L1');
@@ -330,8 +330,8 @@ const pr = h => h.doc.getElementById('mod-print');
       String(mod(h).querySelectorAll('input[id^="ll-pf-sap-"]').length));
     ok('и полето за SAP код също', !!h.doc.getElementById('ll-pf-sap-0'));
     ok('черновата не е трябвало да вдига флаг',
-      h.w.llDraft.items[0]._prodOpen === undefined,
-      JSON.stringify(h.w.llDraft.items[0]._prodOpen));
+      h.w.llDraft.units[0]._prodOpen === undefined,
+      JSON.stringify(h.w.llDraft.units[0]._prodOpen));
 
     /* Свиването пак работи — и то пише изричното false. */
     h.w.llToggleProducts(0);
@@ -340,8 +340,8 @@ const pr = h => h.doc.getElementById('mod-print');
       !h.doc.getElementById('ll-pf-sap-0'));
     ok('а на съседния ред си стои — свива се само редът, по който е кликнато',
       !!h.doc.getElementById('ll-pf-sap-1'));
-    ok('и флагът е изричното false', h.w.llDraft.items[0]._prodOpen === false,
-      JSON.stringify(h.w.llDraft.items[0]._prodOpen));
+    ok('и флагът е изричното false', h.w.llDraft.units[0]._prodOpen === false,
+      JSON.stringify(h.w.llDraft.units[0]._prodOpen));
     h.w.llToggleProducts(0);
     await ticks();
     ok('и обратно', !!h.doc.getElementById('ll-pf-sap-0'));

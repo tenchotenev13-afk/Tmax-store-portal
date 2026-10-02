@@ -435,46 +435,34 @@ function patchesTo(h, table) { return h.calls.patch.filter(p => p.table === tabl
       JSON.stringify(h.calls.toast));
   }
 
-  section('к) Отметката е на ДОКУМЕНТА, не на реда (редактор на склада)');
+  section('к) Отметката е на ЕДИНИЦАТА (всичките ѝ документи), редактор на склада');
   {
     const h = env(WAREHOUSE, [], [], []);
     h.w.llStores = ['Петрич'];
-    h.w.llDraft = { list_date: '2026-09-03', executed_by: '', comment: '', items: [
-      { id: null, kind: 'pallet', pallet_no: 1, pallet_total: null, purchase_doc: 'D-1',
-        clears_doc: null, store_name: 'Петрич', warehouse_comment: '', partial: false, _docKey: 'k1' },
-      { id: null, kind: 'pallet', pallet_no: 2, pallet_total: null, purchase_doc: 'D-1',
-        clears_doc: null, store_name: 'Петрич', warehouse_comment: '', partial: false, _docKey: 'k1' },
-      { id: null, kind: 'pallet', pallet_no: 3, pallet_total: null, purchase_doc: 'D-2',
-        clears_doc: null, store_name: 'Петрич', warehouse_comment: '', partial: false, _docKey: 'k2' }
-    ]};
+    const U = (docs, no) => Object.assign(h.w.llBlankUnit(), { kind: 'pallet', pallet_no: no, docs: docs, store_name: 'Петрич' });
+    h.w.llDraft = { list_date: '2026-09-03', executed_by: '', comment: '',
+      units: [U(['D-1', 'D-2'], 1), U(['D-3'], 2)] };
     h.w.llPendingDocs = [];
     h.w.llView = 'edit';
     h.w.llSetRowPartial(0, true);
-    ok('и двата реда на D-1 станаха частични',
-      h.w.llDraft.items[0].partial === true && h.w.llDraft.items[1].partial === true,
-      JSON.stringify(h.w.llDraft.items.map(i => i.partial)));
-    ok('редът на ДРУГИЯ документ не е пипнат',
-      h.w.llDraft.items[2].partial === false,
-      JSON.stringify(h.w.llDraft.items.map(i => i.partial)));
-    h.w.llSetRowPartial(1, false);
-    ok('махането също важи за целия документ',
-      h.w.llDraft.items.every(i => i.partial === false),
-      JSON.stringify(h.w.llDraft.items.map(i => i.partial)));
+    ok('единицата с два документа е частична', h.w.llDraft.units[0].partial === true);
+    ok('другата единица не е пипната', h.w.llDraft.units[1].partial === false,
+      JSON.stringify(h.w.llDraft.units.map(i => i.partial)));
 
-    /* И най-важното: отметката трябва да СТИГНЕ до базата. Без тази проверка
-       целият сценарий (и) минава и срещу код, който я забравя при записа —
-       щеше да работи до първото презареждане на страницата. */
-    h.w.llSetRowPartial(0, true);
-    const rows = h.w.llBuildItemRows('L-NEW', h.w.llDraft.items);
-    ok('llBuildItemRows() носи partial за отметнатия документ',
-      rows[0].partial === true && rows[1].partial === true,
+    /* И най-важното: отметката трябва да СТИГНЕ до базата — на ВСЕКИ ред на
+       единицата. Без тази проверка сценарият минава и срещу код, който я
+       забравя при записа. */
+    const rows = h.w.llBuildItemRows('L-NEW', h.w.llDraftFlat().rows);
+    ok('три реда: D-1, D-2, D-3', rows.map(r => r.purchase_doc).join() === 'D-1,D-2,D-3', JSON.stringify(rows.map(r => r.purchase_doc)));
+    ok('partial е true на двата реда на единицата', rows[0].partial === true && rows[1].partial === true,
       JSON.stringify(rows.map(r => r.partial)));
-    ok('и false за другия', rows[2].partial === false,
-      JSON.stringify(rows.map(r => r.partial)));
+    ok('и false за другата', rows[2].partial === false, JSON.stringify(rows.map(r => r.partial)));
+    ok('двата реда са на ЕДИН палет', rows[0].pallet_no === 1 && rows[1].pallet_no === 1 && rows[2].pallet_no === 2,
+      JSON.stringify(rows.map(r => r.pallet_no)));
 
-    /* И обратната посока: отметката трябва да се ЧЕТЕ при редакция. Забрави ли
-       се тук, складът отмята „частично", записва, отваря пак — квадратчето е
-       празно и следващият запис мълчаливо изтрива отметката. */
+    /* Обратната посока: отметката се ЧЕТЕ при редакция. Забрави ли се тук,
+       складът отмята „частично", записва, отваря пак — квадратчето е празно
+       и следващият запис мълчаливо изтрива отметката. */
     const saved = [
       it_({ id: 's1', list_id: 'LD', position: 1, pallet_no: 1, purchase_doc: 'D-1', partial: true }),
       it_({ id: 's2', list_id: 'LD', position: 2, pallet_no: 2, purchase_doc: 'D-2', partial: false })
@@ -484,36 +472,8 @@ function patchesTo(h, table) { return h.calls.patch.filter(p => p.table === tabl
     h.w.llItems = saved;
     h.w.llOpenEdit('LD');
     ok('редакцията чете partial от записания ред',
-      h.w.llDraft.items[0].partial === true && h.w.llDraft.items[1].partial === false,
-      JSON.stringify(h.w.llDraft.items.map(i => i.partial)));
-  }
-
-  section('л) Праг от 20 палета при създаване — отказът връща стойността');
-  {
-    const h = env(WAREHOUSE, [], [], [], { confirm: false });
-    h.w.llView = 'edit';
-    h.w.llCurrentId = null;
-    h.w.llStores = ['Петрич', 'Гоце Делчев'];
-    h.w.llDraft = { list_date: '2026-09-03', executed_by: 'Иван', comment: '', items: [] };
-    h.w.llPendingDocs = [{ purchase_doc: 'D-100', store_name: 'Петрич',
-                           doc_date: '2026-09-01', items: 28, checked: false, pallet_spec: '2' }];
-
-    if (guard('llSetDocPallet(1-25) при confirm=false не хвърля',
-      () => h.w.llSetDocPallet(0, '1-25'))) {
-      ok('стойността се връща на предишната', h.w.llPendingDocs[0].pallet_spec === '2',
-        String(h.w.llPendingDocs[0].pallet_spec));
-      ok('нула редове са материализирани', h.w.llDraft.items.length === 0,
-        String(h.w.llDraft.items.length));
-    }
-    /* Под прага изобщо не пита. */
-    h.w.llSetDocPallet(0, '1-5');
-    ok('5 палета минават без въпрос', h.w.llPendingDocs[0].pallet_spec === '1-5',
-      String(h.w.llPendingDocs[0].pallet_spec));
-
-    h.w.confirm = () => true;
-    h.w.llSetDocPallet(0, '1-25');
-    ok('с потвърждение 25 се приемат', h.w.llPendingDocs[0].pallet_spec === '1-25',
-      String(h.w.llPendingDocs[0].pallet_spec));
+      h.w.llDraft.units[0].partial === true && h.w.llDraft.units[1].partial === false,
+      JSON.stringify(h.w.llDraft.units.map(i => i.partial)));
   }
 
   section('м) Складът вижда кой и кога е получил (колоната от стъпка 2)');

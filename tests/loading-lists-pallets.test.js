@@ -116,106 +116,68 @@ const idxOf = (h, doc) => h.w.llPendingDocs.indexOf(
 
 (async function () {
 
-  section('1. llParsePalletSpec — едно поле за двете посоки');
-  {
-    const h = envWh();
-    const p = s => JSON.stringify(h.w.llParsePalletSpec(s));
-    ok('„2" → [2]', p('2') === '[2]', p('2'));
-    ok('„1,3" → [1,3]', p('1,3') === '[1,3]', p('1,3'));
-    ok('„1-3" → [1,2,3]', p('1-3') === '[1,2,3]', p('1-3'));
-    ok('„3-1" се изправя → [1,2,3]', p('3-1') === '[1,2,3]', p('3-1'));
-    ok('дубликатите отпадат: „1,1,2" → [1,2]', p('1,1,2') === '[1,2]', p('1,1,2'));
-    ok('интервалите не пречат: „1 - 3" → [1,2,3]', p('1 - 3') === '[1,2,3]', p('1 - 3'));
-    /* Празно и боклук дават [1]: документ без палет няма смисъл, а мълчаливо
-       нула реда би изгубила документа без следа. */
-    ok('празно → [1]', p('') === '[1]', p(''));
-    ok('боклук → [1]', p('абв') === '[1]', p('абв'));
-    ok('нула и отрицателни отпадат: „0,-2,3" → [3]', p('0,-2,3') === '[3]', p('0,-2,3'));
-    /* Таванът пази срещу изпуснат клавиш: „1-9999" не е пратка, а авария. */
-    ok('„1-9999" е орязано до 100 номера',
-      h.w.llParsePalletSpec('1-9999').length === 100,
-      String(h.w.llParsePalletSpec('1-9999').length));
-  }
-
-  section('2. Три документа на ЕДИН палет — консолидацията');
+  section('1. Единицата е палет с няколко изходящи номера');
   {
     const h = envWh();
     h.w.llNewList();
-    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
-       пише по десет наведнъж). Тук се проверява материализирането на
-       документи, затова бланката се изчиства — предварителните редове са с
-       отделен тест (loading-lists-blank-rows.test.js). */
-    h.w.llDraft.items = [];
+    /* llNewList() отваря черновата с 10 празни единици; тук се проверяват
+       документите, затова бланката се изчиства (виж blank-rows.test.js). */
+    h.w.llDraft.units = [];
     await ticks(); await ticks();
     ok('четирите документа са заредени', h.w.llPendingDocs.length === 4,
       String(h.w.llPendingDocs.length));
 
-    /* И трите документа за Петрич отиват на палет 1 — това е един физически
-       палет с три стокови разписки върху него. */
-    ['D-1', 'D-2', 'D-3'].forEach(d => {
-      const i = idxOf(h, d);
-      h.w.llSetDocPallet(i, '1');
-      h.w.llToggleDoc(i);
-    });
-    ok('черновата има 3 РЕДА', h.w.llDraft.items.length === 3,
-      String(h.w.llDraft.items.length));
+    /* Отмятането създава НОВА единица за всеки документ; другите два се
+       добавят към палета на първия с чип. */
+    h.w.llToggleDoc(idxOf(h, 'D-1'));
+    ok('една единица след първото отмятане', h.w.llDraft.units.length === 1);
+    h.w.llUnitDocAdd(0, 'D-2, D-3');
+    ok('запетаята разделя номерата — три чипа', h.w.llDraft.units[0].docs.join() === 'D-1,D-2,D-3',
+      h.w.llDraft.units[0].docs.join());
+    h.w.llUnitDocAdd(0, 'D-2');
+    ok('повторен номер не дублира чип', h.w.llDraft.units[0].docs.length === 3);
 
-    const groups = h.w.llPalletGroups(h.w.llDraft.items);
+    const flat = h.w.llDraftFlat().rows;
+    ok('в базата това са 3 реда', flat.length === 3, String(flat.length));
+    const groups = h.w.llPalletGroups(flat);
     ok('но те са ЕДИН палет', groups.length === 1, String(groups.length));
-    ok('палетът носи трите документа', groups[0].rows.length === 3,
-      String(groups[0].rows.length));
+    ok('палетът носи трите документа', groups[0].rows.length === 3, String(groups[0].rows.length));
     /* Точно тук първата версия лъжеше: броеше редове и показваше „3 палета". */
-    ok('llCounts() брои 1 палет, не 3', h.w.llCounts(h.w.llDraft.items).pallet === 1,
-      String(h.w.llCounts(h.w.llDraft.items).pallet));
-    ok('а редовете са 3', h.w.llCounts(h.w.llDraft.items).total === 3,
-      String(h.w.llCounts(h.w.llDraft.items).total));
-
-    const sum = h.w.llSummaryByStore(h.w.llDraft.items);
-    ok('обобщението по обект също казва 1 палет',
-      sum.length === 1 && sum[0].pallet === 1, JSON.stringify(sum));
-    ok('и 3 реда за отмятане', sum[0].total === 3, JSON.stringify(sum[0]));
+    ok('llCounts() брои 1 палет, не 3', h.w.llCounts(flat).pallet === 1, String(h.w.llCounts(flat).pallet));
+    ok('а редовете са 3', h.w.llCounts(flat).total === 3, String(h.w.llCounts(flat).total));
+    const sum = h.w.llSummaryByStore(flat);
+    ok('обобщението по обект също казва 1 палет и 3 реда',
+      sum.length === 1 && sum[0].pallet === 1 && sum[0].total === 3, JSON.stringify(sum));
   }
 
-  section('3. Един и същ номер за РАЗНИ обекти е различен палет');
+  section('2. Един и същ номер за РАЗНИ обекти е различен палет');
   {
     const h = envWh();
     h.w.llNewList();
-    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
-       пише по десет наведнъж). Тук се проверява материализирането на
-       документи, затова бланката се изчиства — предварителните редове са с
-       отделен тест (loading-lists-blank-rows.test.js). */
-    h.w.llDraft.items = [];
+    h.w.llDraft.units = [];
     await ticks(); await ticks();
-    [['D-1', '1'], ['D-9', '1']].forEach(([d, spec]) => {
-      const i = idxOf(h, d);
-      h.w.llSetDocPallet(i, spec);
-      h.w.llToggleDoc(i);
-    });
-    const groups = h.w.llPalletGroups(h.w.llDraft.items);
+    ['D-1', 'D-9'].forEach(d => h.w.llToggleDoc(idxOf(h, d)));
+    const flat = h.w.llDraftFlat().rows;
+    const groups = h.w.llPalletGroups(flat);
     ok('два палета, не един', groups.length === 2, String(groups.length));
-    ok('llCounts() брои 2', h.w.llCounts(h.w.llDraft.items).pallet === 2,
-      String(h.w.llCounts(h.w.llDraft.items).pallet));
-    ok('и два обекта', h.w.llCounts(h.w.llDraft.items).stores === 2,
-      String(h.w.llCounts(h.w.llDraft.items).stores));
+    ok('и двата са №1 — всеки в своя обект', flat.every(r => r.pallet_no === 1),
+      JSON.stringify(flat.map(r => r.pallet_no)));
+    ok('llCounts() брои 2', h.w.llCounts(flat).pallet === 2, String(h.w.llCounts(flat).pallet));
+    ok('и два обекта', h.w.llCounts(flat).stores === 2, String(h.w.llCounts(flat).stores));
   }
 
-  section('4. Плътно преномериране при запис — „палет 2 от 5" не лъже');
+  section('3. Плътно преномериране при запис — „палет 2 от 5" не лъже');
   {
     const h = envWh();
     h.w.llNewList();
-    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
-       пише по десет наведнъж). Тук се проверява материализирането на
-       документи, затова бланката се изчиства — предварителните редове са с
-       отделен тест (loading-lists-blank-rows.test.js). */
-    h.w.llDraft.items = [];
+    h.w.llDraft.units = [];
     await ticks(); await ticks();
-    /* Складът е въвел 1, 2 и 5 за Петрич — палетите са ТРИ, не пет.
-       Плюс един за Гоце Делчев, чиято номерация е независима. */
-    [['D-1', '1'], ['D-2', '2'], ['D-3', '5'], ['D-9', '4']].forEach(([d, spec]) => {
-      const i = idxOf(h, d);
-      h.w.llSetDocPallet(i, spec);
-      h.w.llToggleDoc(i);
-    });
+    /* Три единици за Петрич (автоматично 1,2,3) и една за Гоце Делчев. После в
+       черновата остава дупка (1, 2, 5), както след махане на единица. */
+    ['D-1', 'D-2', 'D-3', 'D-9'].forEach(d => h.w.llToggleDoc(idxOf(h, d)));
+    ok('автоматични номера 1,2,3 за Петрич',
+      h.w.llDraft.units.filter(u => u.store_name === 'Петрич').map(u => u.pallet_no).join() === '1,2,3');
+    h.w.llDraft.units[2].pallet_no = 5;
     h.w.llSaveDraft();
     await ticks(); await ticks(); await ticks();
 
@@ -227,47 +189,96 @@ const idxOf = (h, doc) => h.w.llPendingDocs.indexOf(
       const gd = rows.filter(r => r.store_name === 'Гоце Делчев');
       ok('Петрич има 3 реда', pet.length === 3, String(pet.length));
       ok('номерата са 1,2,3 — не 1,2,5',
-        pet.map(r => r.pallet_no).sort().join(',') === '1,2,3',
-        pet.map(r => r.pallet_no).join(','));
-      ok('„от" е 3 на всичките',
-        pet.every(r => r.pallet_total === 3), JSON.stringify(pet.map(r => r.pallet_total)));
+        pet.map(r => r.pallet_no).sort().join(',') === '1,2,3', pet.map(r => r.pallet_no).join(','));
+      ok('„от" е 3 на всичките', pet.every(r => r.pallet_total === 3), JSON.stringify(pet.map(r => r.pallet_total)));
       /* Номерацията на другия обект е СВОЯ: той чака един палет, не четвъртия. */
       ok('Гоце Делчев е палет 1 от 1',
-        gd.length === 1 && gd[0].pallet_no === 1 && gd[0].pallet_total === 1,
-        JSON.stringify(gd));
+        gd.length === 1 && gd[0].pallet_no === 1 && gd[0].pallet_total === 1, JSON.stringify(gd));
     }
   }
 
-  section('5. Документ върху няколко палета — обратната посока');
+  section('4. Палет с три номера → три реда със същия №');
   {
     const h = envWh();
     h.w.llNewList();
-    /* От 23.09.2026 llNewList() отваря черновата с 10 празни реда (складът
-       пише по десет наведнъж). Тук се проверява материализирането на
-       документи, затова бланката се изчиства — предварителните редове са с
-       отделен тест (loading-lists-blank-rows.test.js). */
-    h.w.llDraft.items = [];
+    h.w.llDraft.units = [];
     await ticks(); await ticks();
-    const i1 = idxOf(h, 'D-1');
-    h.w.llSetDocPallet(i1, '1-3');
-    h.w.llToggleDoc(i1);
-    /* Втори документ на палет 2 — тоест той дели палет с част от първия. */
-    const i2 = idxOf(h, 'D-2');
-    h.w.llSetDocPallet(i2, '2');
-    h.w.llToggleDoc(i2);
-
-    ok('четири реда', h.w.llDraft.items.length === 4, String(h.w.llDraft.items.length));
-    const groups = h.w.llPalletGroups(h.w.llDraft.items);
-    ok('три палета', groups.length === 3, String(groups.length));
-    const p2 = groups.find(g => Number(g.pallet_no) === 2);
-    ok('палет 2 носи ДВА документа', p2 && p2.rows.length === 2,
-      JSON.stringify(p2 && p2.rows.map(r => r.purchase_doc)));
-    ok('и това са D-1 и D-2',
-      p2.rows.map(r => r.purchase_doc).sort().join(',') === 'D-1,D-2',
-      p2.rows.map(r => r.purchase_doc).join(','));
+    const u = Object.assign(h.w.llBlankUnit(), { store_name: 'Петрич', docs: ['D-1', 'D-2', 'D-3'],
+      products: [{ sap_code: '100', product_name: 'ШУРУП', unit: 'бр.', qty: 5, cartons: null, _inCat: true }] });
+    h.w.llDraft.units.push(u);
+    h.w.llAssignPalletNo(u);
+    h.w.llSaveDraft();
+    await ticks(); await ticks(); await ticks(); await ticks();
+    const rows = itemPosts(h.calls)[0].body;
+    ok('три реда', rows.length === 3, String(rows.length));
+    ok('със същия палет №, обект и вид',
+      rows.every(r => r.pallet_no === 1 && r.store_name === 'Петрич' && r.kind === 'pallet'),
+      JSON.stringify(rows));
+    ok('по един изходящ № на ред', rows.map(r => r.purchase_doc).join() === 'D-1,D-2,D-3');
+    ok('позиции 1,2,3', rows.map(r => r.position).join() === '1,2,3');
   }
 
-  section('6. Отмятането на цял палет отмята документите му наведнъж');
+  section('5. Зареждане: редове с общ № → ЕДНА единица с няколко номера');
+  {
+    const h = envWh();
+    const rows = [
+      it_({ id: 'a1', position: 1, pallet_no: 1, pallet_total: 2, purchase_doc: 'D-1', warehouse_comment: 'крехко' }),
+      it_({ id: 'a2', position: 2, pallet_no: 1, pallet_total: 2, purchase_doc: 'D-2' }),
+      it_({ id: 'a3', position: 3, pallet_no: 1, pallet_total: 2, purchase_doc: 'D-3' }),
+      it_({ id: 'b1', position: 4, pallet_no: 2, pallet_total: 2, purchase_doc: 'D-4' }),
+      /* Палет без номер и насип са отделни единици. */
+      it_({ id: 'n1', position: 5, pallet_no: null, pallet_total: null, purchase_doc: 'D-5' }),
+      it_({ id: 'k1', position: 6, kind: 'bulk', pallet_no: null, pallet_total: null, purchase_doc: 'D-6' })
+    ];
+    const units = h.w.llUnitsFromRows(rows);
+    ok('четири единици... и още две отделни — общо 4', units.length === 4, String(units.length));
+    ok('първата носи три номера', units[0].docs.join() === 'D-1,D-2,D-3', units[0].docs.join());
+    ok('и id-тата на редовете си', units[0]._rowIds.join() === 'a1,a2,a3', units[0]._rowIds.join());
+    ok('коментарът се взима от реда, който го има', units[0].warehouse_comment === 'крехко');
+    ok('палет 2 е сам', units[1].docs.join() === 'D-4' && units[1].pallet_no === 2);
+    ok('палет без номер е отделна единица', units[2].docs.join() === 'D-5' && units[2].pallet_no === null);
+    ok('насипът е отделна единица', units[3].kind === 'bulk' && units[3].docs.join() === 'D-6');
+  }
+
+  section('6. Номерацията е по ред на въвеждане и по обект; преместването я сменя');
+  {
+    const h = envWh();
+    h.w.llNewList();
+    h.w.llDraft.units = [];
+    await ticks(); await ticks();
+    ['D-1', 'D-2', 'D-9', 'D-3'].forEach(d => h.w.llToggleDoc(idxOf(h, d)));
+    const lbl = () => h.w.llDraft.units.map(u => u.docs[0] + ':' + u.pallet_no).join(' ');
+    ok('Петрич 1,2,3; Гоце Делчев 1', lbl() === 'D-1:1 D-2:2 D-9:1 D-3:3', lbl());
+    h.w.llMoveRow(0, 1);                 /* D-1 слиза под D-2 */
+    ok('D-2 е вече палет 1, D-1 — палет 2', lbl() === 'D-2:1 D-1:2 D-9:1 D-3:3', lbl());
+    h.w.llMoveRow(2, -1);                /* Гоце Делчев се вмъква преди D-1 — Петрич не се пипа */
+    ok('преместване през друг обект не пипа номерата на Петрич', lbl() === 'D-2:1 D-9:1 D-1:2 D-3:3', lbl());
+  }
+
+  section('7. Отмятане на документ в картата на обекта — по документ');
+  {
+    const items = [
+      it_({ id: 'a1', position: 1, pallet_no: 1, pallet_total: 1, purchase_doc: 'D-1' }),
+      it_({ id: 'a2', position: 2, pallet_no: 1, pallet_total: 1, purchase_doc: 'D-2' })
+    ];
+    const h = envStore(items);
+    h.w.loadLoadingLists();
+    await ticks(); await ticks();
+    const c = h.doc.getElementById('ll-card-L1');
+    ok('картата показва палета с двата документа',
+      !!c && c.textContent.indexOf('2 документа') >= 0 && c.textContent.indexOf('D-1') >= 0 && c.textContent.indexOf('D-2') >= 0);
+    const rowOf = id => Array.from(c.querySelectorAll('tbody tr')).find(tr => tr.textContent.indexOf(id) >= 0 && /Получено/.test(tr.textContent));
+    const b = btn(rowOf('D-2'), '✅ Получено');
+    if (ok('има бутон „Получено“ на реда на D-2', !!b)) {
+      realClick(h.w, b);
+      await ticks(); await ticks(); await ticks();
+      const ip = h.calls.patch.filter(p => p.table === 'loading_list_items');
+      ok('PATCH е само за D-2 (a2), не за палета', ip.length === 1 && /id=eq\.a2/.test(ip[0].url),
+        JSON.stringify(ip.map(p => p.url)));
+    }
+  }
+
+  section('8. Отмятането на цял палет отмята документите му наведнъж');
   {
     const items = [
       it_({ id: 'a1', position: 1, pallet_no: 1, pallet_total: 2, purchase_doc: 'D-1' }),

@@ -120,8 +120,9 @@ const pstyle = doc => {
     await ticks();
 
     const t = ptext(h.doc);
-    const occurrences = (t.match(/палет 1 от 2/g) || []).length;
-    ok('„палет 1 от 2" се среща точно веднъж', occurrences === 1, String(occurrences));
+    const occurrences = (t.match(/Палет 1 от 2/g) || []).length;
+    /* От 02.10.2026 „Палет N от M" е в заглавния ред на единицата; колоната „Вид" носи само вида. */
+    ok('„Палет 1 от 2" се среща точно веднъж (в заглавния ред)', occurrences === 1, String(occurrences));
     ok('и трите му документа са отделни редове',
       t.indexOf('D-1') >= 0 && t.indexOf('D-2') >= 0 && t.indexOf('D-3') >= 0);
     /* rowspan е това, което държи вида в един ред за целия палет.
@@ -130,7 +131,7 @@ const pstyle = doc => {
     const kinds = Array.prototype.slice.call(printWrap(h.doc).querySelectorAll('.lp-kind'));
     ok('има три товарни единици', kinds.length === 3,
       kinds.map(k => k.textContent + '/' + k.getAttribute('rowspan')).join(' | '));
-    const kind = kinds.find(k => k.textContent.indexOf('палет 1 от 2') >= 0);
+    const kind = kinds.find(k => k.getAttribute('rowspan') === '3' && k.textContent.trim() === 'палет');
     ok('палетът с трите документа е с rowspan=3',
       kind && kind.getAttribute('rowspan') === '3',
       kinds.map(k => k.textContent + '/' + k.getAttribute('rowspan')).join(' | '));

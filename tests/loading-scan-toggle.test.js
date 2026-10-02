@@ -162,7 +162,7 @@ async function openEditor(h) {
     ok('без бутон', !btn(wrap, '📷 Сканирай'));
     ok('без библиотека', h.libCalls === 0, String(h.libCalls));
     ok('редакторът пак се рендира', wrap.textContent.indexOf('Нов товарен лист') >= 0);
-    ok('и редовете са там', h.w.llDraft.items.length === 10, String(h.w.llDraft.items.length));
+    ok('и редовете са там', h.w.llDraft.units.length === 10, String(h.w.llDraft.units.length));
 
     /* sbGet НИКОГА не отхвърля — резолвва с []. Остава вторият път: самата
        обвивка да гръмне. Без този сценарий .catch-ът е непокрит код. */

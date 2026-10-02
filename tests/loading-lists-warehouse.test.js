@@ -163,7 +163,7 @@ function itemPosts(calls) {
        пише по десет наведнъж). Тук се проверява материализирането на
        документи, затова бланката се изчиства — предварителните редове са с
        отделен тест (loading-lists-blank-rows.test.js). */
-    h.w.llDraft.items = [];
+    h.w.llDraft.units = [];
     await ticks(); await ticks();
 
     ok('документите са групирани — 3, не 31', h.w.llPendingDocs.length === 3,
@@ -176,16 +176,16 @@ function itemPosts(calls) {
     const iA = h.w.llPendingDocs.indexOf(docA);
     const iB = h.w.llPendingDocs.indexOf(
       h.w.llPendingDocs.find(d => d.purchase_doc === '4600179700'));
-    /* Документ A е голям и се разстила върху три палета - затова обхват.
-       Документ B е за ДРУГ обект, тоест собствената му номерация тръгва от 1. */
-    h.w.llSetDocPallet(iA, '1-3');
+    /* Документ A е за Петрич, B — за ДРУГ обект (собствена номерация от 1).
+       Към палета на A се добавя още един изходящ № с чип. */
     h.w.llToggleDoc(iA);
     h.w.llToggleDoc(iB);
+    h.w.llUnitDocAdd(0, '4600999');
     h.w.llAddFreeRow();
-    h.w.llSetRowField(4, 'kind', 'bulk');
-    h.w.llSetRowField(4, 'store_name', 'Петрич');
-    ok('черновата има 5 реда', h.w.llDraft.items.length === 5,
-      String(h.w.llDraft.items.length));
+    h.w.llSetRowField(2, 'kind', 'bulk');
+    h.w.llSetRowField(2, 'store_name', 'Петрич');
+    ok('черновата има 3 единици', h.w.llDraft.units.length === 3,
+      String(h.w.llDraft.units.length));
 
     h.w.llSaveDraft();
     await ticks(); await ticks(); await ticks();
@@ -194,28 +194,29 @@ function itemPosts(calls) {
     if (ok('редовете са записани с един POST', posts.length === 1,
       JSON.stringify(h.calls.post.map(p => p.table)))) {
       const rows = posts[0].body;
-      if (ok('точно 5 реда', Array.isArray(rows) && rows.length === 5,
+      if (ok('точно 4 реда (палет с два документа = 2 реда)', Array.isArray(rows) && rows.length === 4,
         JSON.stringify(rows && rows.length))) {
-        ok('позициите са 1..5', rows.map(r => r.position).join(',') === '1,2,3,4,5',
+        ok('позициите са 1..4', rows.map(r => r.position).join(',') === '1,2,3,4',
           rows.map(r => r.position).join(','));
         ok('всички сочат създадения лист',
           rows.every(r => r.list_id === NEW_ID), JSON.stringify(rows[0].list_id));
-        ok('първите три са палет 1..3 от 3',
-          rows.slice(0, 3).map(r => r.kind + r.pallet_no + '/' + r.pallet_total).join(' ')
-            === 'pallet1/3 pallet2/3 pallet3/3',
-          rows.slice(0, 3).map(r => r.kind + r.pallet_no + '/' + r.pallet_total).join(' '));
-        ok('четвъртият е палет 1 от 1',
-          rows[3].kind === 'pallet' && rows[3].pallet_no === 1 && rows[3].pallet_total === 1,
+        ok('първите два са палет 1 от 1 на един обект',
+          rows.slice(0, 2).map(r => r.kind + r.pallet_no + '/' + r.pallet_total).join(' ')
+            === 'pallet1/1 pallet1/1',
+          rows.slice(0, 2).map(r => r.kind + r.pallet_no + '/' + r.pallet_total).join(' '));
+        ok('третият е палет 1 от 1 за другия обект',
+          rows[2].kind === 'pallet' && rows[2].pallet_no === 1 && rows[2].pallet_total === 1,
+          JSON.stringify(rows[2]));
+        ok('четвъртият е насип без номерация',
+          rows[3].kind === 'bulk' && rows[3].pallet_no === null && rows[3].pallet_total === null,
           JSON.stringify(rows[3]));
-        ok('петият е насип без номерация',
-          rows[4].kind === 'bulk' && rows[4].pallet_no === null && rows[4].pallet_total === null,
-          JSON.stringify(rows[4]));
         ok('обектите идват от документите',
-          rows.slice(0, 3).every(r => r.store_name === 'Петрич') &&
-          rows[3].store_name === 'Гоце Делчев', JSON.stringify(rows.map(r => r.store_name)));
-        ok('стоковата № е от документа, не писана на ръка',
-          rows[0].purchase_doc === '4600179694' && rows[3].purchase_doc === '4600179700' &&
-          rows[4].purchase_doc === null, JSON.stringify(rows.map(r => r.purchase_doc)));
+          rows.slice(0, 2).every(r => r.store_name === 'Петрич') &&
+          rows[2].store_name === 'Гоце Делчев', JSON.stringify(rows.map(r => r.store_name)));
+        ok('по един изходящ № на ред',
+          rows[0].purchase_doc === '4600179694' && rows[1].purchase_doc === '4600999' &&
+          rows[2].purchase_doc === '4600179700' && rows[3].purchase_doc === null,
+          JSON.stringify(rows.map(r => r.purchase_doc)));
       }
     }
     ok('листът е записан като чернова',
@@ -232,7 +233,7 @@ function itemPosts(calls) {
        пише по десет наведнъж). Тук се проверява материализирането на
        документи, затова бланката се изчиства — предварителните редове са с
        отделен тест (loading-lists-blank-rows.test.js). */
-    h.w.llDraft.items = [];
+    h.w.llDraft.units = [];
     await ticks(); await ticks();
     h.w.llToggleDoc(0);
     h.w.llSaveDraft();
@@ -404,7 +405,7 @@ function itemPosts(calls) {
        пише по десет наведнъж). Тук се проверява материализирането на
        документи, затова бланката се изчиства — предварителните редове са с
        отделен тест (loading-lists-blank-rows.test.js). */
-    h.w.llDraft.items = [];
+    h.w.llDraft.units = [];
     await ticks(); await ticks();
     ok('черновата тръгва с локалната дата', h.w.llDraft.list_date === '2026-09-05',
       h.w.llDraft.list_date);
@@ -429,14 +430,14 @@ function itemPosts(calls) {
     await ticks(); await ticks();
     h.w.llOpenEdit('L1');
     await ticks(); await ticks();
-    ok('черновата е заредена с двата реда', h.w.llDraft.items.length === 2,
-      String(h.w.llDraft.items.length));
+    ok('черновата е заредена с двата реда', h.w.llDraft.units.length === 2,
+      String(h.w.llDraft.units.length));
     h.w.llRemoveRow(0);
     await ticks();
     ok('DELETE по id на реда', h.calls.del.some(u => /loading_list_items.*id=eq\.i1/.test(u)),
       JSON.stringify(h.calls.del));
-    ok('и редът си отива от екрана', h.w.llDraft.items.length === 1,
-      String(h.w.llDraft.items.length));
+    ok('и редът си отива от екрана', h.w.llDraft.units.length === 1,
+      String(h.w.llDraft.units.length));
   }
 
   report();

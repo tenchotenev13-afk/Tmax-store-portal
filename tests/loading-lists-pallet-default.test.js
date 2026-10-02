@@ -61,7 +61,7 @@ function env(items, user) {
   });
 }
 const idxOf = (h, doc) => h.w.llPendingDocs.findIndex(d => d.purchase_doc === doc);
-const nums = h => h.w.llDraft.items.map(i => i.store_name + ':' + i.pallet_no).join(' ');
+const nums = h => h.w.llDraft.units.map(i => i.store_name + ':' + i.pallet_no).join(' ');
 const DOCRE = /(?:^|[^A-Za-z0-9])(G1|G2|P1a|P1b|P2|PO|PB)(?![A-Za-z0-9])/;
 const mod = h => h.doc.getElementById('mod-loading');
 
@@ -81,46 +81,34 @@ function inOrder(rows) {
   {
     const h = env([]);
     h.w.llNewList();
-    h.w.llDraft.items = [];
+    h.w.llDraft.units = [];
     await ticks(); await ticks();
     ['D-1', 'D-2', 'D-3'].forEach(d => h.w.llToggleDoc(idxOf(h, d)));
     ok('Петрич: 1, 2, 3 (всеки документ на свой палет)', nums(h) === 'Петрич:1 Петрич:2 Петрич:3', nums(h));
     h.w.llToggleDoc(idxOf(h, 'D-9'));
     ok('Гоце Делчев започва от 1 — номерацията е по обект', /Гоце Делчев:1$/.test(nums(h)), nums(h));
-    const field = d => h.doc.querySelector('tr[data-ll-doc="' + idxOf(h, d) + '"] input[onchange*="llSetDocPallet"]');
-    ok('отметнат документ показва номера, на който е', field('D-2').value === '2', field('D-2').value);
+    ok('списъкът с документи няма колона „Палет №“ — номерът е автоматичен',
+      !h.doc.querySelector('tr[data-ll-doc] input:not([type])'));
   }
 
-  section('2. Полето „Палет №" показва предложението още преди отмятането');
+  section('2. Два документа на един палет — само с чип, не по подразбиране');
   {
     const h = env([]);
-    h.w.llNewList(); h.w.llDraft.items = [];
-    await ticks(); await ticks();
-    h.w.renderLoadingLists();
-    const field = d => h.doc.querySelector('tr[data-ll-doc="' + idxOf(h, d) + '"] input[onchange*="llSetDocPallet"]');
-    ok('празна чернова: всички предлагат 1', ['D-1', 'D-2', 'D-9'].every(d => field(d).value === '1'));
-    h.w.llToggleDoc(idxOf(h, 'D-1'));
-    ok('след D-1 на палет 1, D-2 (същия обект) предлага 2', field('D-2').value === '2', field('D-2').value);
-    ok('D-9 (друг обект) още предлага 1', field('D-9').value === '1', field('D-9').value);
-  }
-
-  section('3. Същият номер, въведен ИЗРИЧНО, групира документите');
-  {
-    const h = env([]);
-    h.w.llNewList(); h.w.llDraft.items = [];
+    h.w.llNewList(); h.w.llDraft.units = [];
     await ticks(); await ticks();
     h.w.llToggleDoc(idxOf(h, 'D-1'));
-    h.w.llSetDocPallet(idxOf(h, 'D-2'), '1');
     h.w.llToggleDoc(idxOf(h, 'D-2'));
-    ok('D-1 и D-2 са на палет 1', nums(h) === 'Петрич:1 Петрич:1', nums(h));
-    ok('това е ЕДИН палет', h.w.llPalletGroups(h.w.llDraft.items).length === 1);
-    const note = mod(h).querySelector('[data-ll-pallet-note]');
-    ok('жълт ред: „Палет 1 за Петрич носи 2 документа"',
-      note && note.textContent.indexOf('Палет 1 за Петрич носи 2 документа') >= 0, note && note.textContent);
-    h.w.llToggleDoc(idxOf(h, 'D-3'));
-    ok('третият, без изрично въведен №, не се лепва към тях — отива на 2', nums(h) === 'Петрич:1 Петрич:1 Петрич:2', nums(h));
-    const note2 = mod(h).querySelector('[data-ll-pallet-note]');
-    ok('предупреждението пак е само за палет 1', note2 && note2.textContent.indexOf('Палет 2') < 0);
+    ok('отметнати поотделно → два различни палета', nums(h) === 'Петрич:1 Петрич:2', nums(h));
+    h.w.llUnitDocAdd(0, 'D-3');
+    ok('чип „D-3“ към палет 1 → той носи два номера', h.w.llDraft.units[0].docs.join() === 'D-1,D-3');
+    ok('все още палет 1 и 2', nums(h) === 'Петрич:1 Петрич:2', nums(h));
+    h.w.renderLoadingLists();
+    ok('жълтият ред „носи N документа“ отпадна — броят се вижда в чиповете',
+      !mod(h).querySelector('[data-ll-pallet-note]') &&
+      mod(h).querySelectorAll('[data-ll-doc-chip^="0-"]').length === 2);
+    h.w.llToggleDoc(idxOf(h, 'D-9'));
+    h.w.llToggleDoc(idxOf(h, 'D-9'));
+    ok('отмятане и разотмятане на документ маха само него', nums(h) === 'Петрич:1 Петрич:2', nums(h));
   }
 
   section('4. „➕ Добави нов ред" и смяна на обект');
@@ -128,47 +116,48 @@ function inOrder(rows) {
     const h = env([]);
     h.w.llNewList();
     await ticks(); await ticks();
-    ok('10-те предварителни реда са без номер', h.w.llDraft.items.slice(0, 10).every(i => i.pallet_no == null));
-    h.w.llDraft.items = [
-      Object.assign(h.w.llBlankDraftRow(), { store_name: 'Петрич', pallet_no: 1 }),
-      Object.assign(h.w.llBlankDraftRow(), { store_name: 'Петрич', pallet_no: 2 }),
-      Object.assign(h.w.llBlankDraftRow(), { store_name: 'Габрово', pallet_no: 1 })
+    ok('10-те предварителни реда са без номер', h.w.llDraft.units.slice(0, 10).every(i => i.pallet_no == null));
+    h.w.llDraft.units = [
+      Object.assign(h.w.llBlankUnit(), { store_name: 'Петрич', pallet_no: 1 }),
+      Object.assign(h.w.llBlankUnit(), { store_name: 'Петрич', pallet_no: 2 }),
+      Object.assign(h.w.llBlankUnit(), { store_name: 'Габрово', pallet_no: 1 })
     ];
     h.w.llAddFreeRow();
-    const added = h.w.llDraft.items[3];
+    const added = h.w.llDraft.units[3];
     ok('нов ред получава № (не null)', added.pallet_no != null, String(added.pallet_no));
     h.w.llSetRowField(3, 'store_name', 'Петрич');
-    ok('смяна на обекта → следващият свободен за Петрич (3)', h.w.llDraft.items[3].pallet_no === 3, String(h.w.llDraft.items[3].pallet_no));
+    ok('смяна на обекта → следващият свободен за Петрич (3)', h.w.llDraft.units[3].pallet_no === 3, String(h.w.llDraft.units[3].pallet_no));
     h.w.llSetRowField(3, 'store_name', 'Габрово');
-    ok('и обратно → следващият за Габрово (2), не 3', h.w.llDraft.items[3].pallet_no === 2, String(h.w.llDraft.items[3].pallet_no));
+    ok('и обратно → следващият за Габрово (2), не 3', h.w.llDraft.units[3].pallet_no === 2, String(h.w.llDraft.units[3].pallet_no));
     h.w.llSetRowField(3, 'kind', 'oversize');
-    ok('друг вид има своя поредица: извънгабаритен 1', h.w.llDraft.items[3].pallet_no === 1, String(h.w.llDraft.items[3].pallet_no));
+    ok('друг вид има своя поредица: извънгабаритен 1', h.w.llDraft.units[3].pallet_no === 1, String(h.w.llDraft.units[3].pallet_no));
     h.w.llSetRowField(3, 'kind', 'bulk');
-    ok('насипът няма номер', h.w.llDraft.items[3].pallet_no === null);
+    ok('насипът няма номер', h.w.llDraft.units[3].pallet_no === null);
     h.w.llSetRowField(3, 'kind', 'pallet');
-    ok('обратно към палет → следващият свободен', h.w.llDraft.items[3].pallet_no === 2, String(h.w.llDraft.items[3].pallet_no));
+    ok('обратно към палет → следващият свободен', h.w.llDraft.units[3].pallet_no === 2, String(h.w.llDraft.units[3].pallet_no));
     /* Гранично: точно на дупка — max+1, не „първия свободен". */
-    h.w.llDraft.items[0].pallet_no = 5;
-    ok('max+1 при дупка (има 5 и 2 → 6)', h.w.llNextPalletNo(h.w.llDraft.items, 'Петрич', 'pallet') === 6,
-      String(h.w.llNextPalletNo(h.w.llDraft.items, 'Петрич', 'pallet')));
+    h.w.llDraft.units[0].pallet_no = 5;
+    ok('max+1 при дупка (има 5 и 2 → 6)', h.w.llNextPalletNo(h.w.llDraft.units, 'Петрич', 'pallet') === 6,
+      String(h.w.llNextPalletNo(h.w.llDraft.units, 'Петрич', 'pallet')));
     ok('собственият ред не се брои (skip)',
-      h.w.llNextPalletNo(h.w.llDraft.items, 'Петрич', 'pallet', h.w.llDraft.items[0]) === 3);
+      h.w.llNextPalletNo(h.w.llDraft.units, 'Петрич', 'pallet', h.w.llDraft.units[0]) === 3);
   }
 
   section('5. Редакторът: „палет N" с цвят по палет');
   {
     const h = env([]);
-    h.w.llNewList(); h.w.llDraft.items = [];
+    h.w.llNewList(); h.w.llDraft.units = [];
     await ticks(); await ticks();
     h.w.llToggleDoc(idxOf(h, 'D-1'));
-    h.w.llSetDocPallet(idxOf(h, 'D-2'), '1');
     h.w.llToggleDoc(idxOf(h, 'D-2'));
-    h.w.llToggleDoc(idxOf(h, 'D-3'));
+    h.w.llUnitDocAdd(0, 'D-3');
+    h.w.llToggleDoc(idxOf(h, 'D-9'));
     const b = Array.from(mod(h).querySelectorAll('[data-ll-pbadge]'));
-    ok('три реда носят етикет', b.length === 3, String(b.length));
-    ok('етикетите казват „палет 1/1/2"', b.map(x => x.textContent).join(',') === 'палет 1,палет 1,палет 2', b.map(x => x.textContent).join(','));
+    ok('три единици носят етикет', b.length === 3, String(b.length));
+    ok('етикетите казват „палет 1/2/1“', b.map(x => x.textContent).join(',') === 'палет 1,палет 2,палет 1', b.map(x => x.textContent).join(','));
     const col = x => x.style.background;
-    ok('един палет = един цвят', col(b[0]) === col(b[1]) && col(b[0]) !== col(b[2]), b.map(col).join(' | '));
+    ok('различни палети на един обект — различен цвят', col(b[0]) !== col(b[1]), b.map(col).join(' | '));
+    ok('палет 1 на Гоце Делчев е друг палет — друг цвят', col(b[2]) !== col(b[0]), b.map(col).join(' | '));
   }
 
   section('6. Подредба: обект → вид → палет № → позиция (преглед, печат, PDF)');
@@ -215,7 +204,7 @@ function inOrder(rows) {
     const heads = Array.from(card.querySelectorAll('tr[data-pallet-group="1"]')).map(t => t.textContent.trim());
     ok('заглавен ред за всеки номериран палет (3: палет 1, палет 2, извънгабаритен 1)', heads.length === 3, JSON.stringify(heads));
     ok('„палет 1 от 2" е преди „палет 2 от 2"',
-      heads[0].indexOf('палет 1 от 2') === 0 && heads[1].indexOf('палет 2 от 2') === 0, JSON.stringify(heads));
+      heads[0].indexOf('Палет 1 от 2') === 0 && heads[1].indexOf('Палет 2 от 2') === 0, JSON.stringify(heads));
     ok('групираният палет казва „2 документа"', heads[0].indexOf('2 документа') >= 0, heads[0]);
   }
 

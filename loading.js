@@ -267,30 +267,6 @@ function llGroupTransitDocs(rows){
 function llPalletKey(it){
   return JSON.stringify([String(it.store_name || ''), String(it.kind), Number(it.pallet_no)]);
 }
-/* „2" → [2]; „1,3" → [1,3]; „1-3" → [1,2,3]. Едно поле за двете посоки:
-   документ на един палет (преобладаващият случай) и документ, разстлан върху
-   няколко. Празно или боклук → [1], защото документ без палет няма смисъл. */
-function llParsePalletSpec(spec){
-  var out = {};
-  String(spec == null ? '' : spec).split(',').forEach(function(part){
-    part = part.trim();
-    if(!part) return;
-    var m = /^(\d+)\s*-\s*(\d+)$/.exec(part);
-    if(m){
-      var a = parseInt(m[1], 10), b = parseInt(m[2], 10);
-      if(a < 1 || b < 1) return;
-      if(a > b){ var t = a; a = b; b = t; }
-      /* Таван срещу „1-9999" от изпуснат клавиш: това не е пратка, а авария. */
-      if(b - a > 99) b = a + 99;
-      for(var i = a; i <= b; i++) out[i] = true;
-      return;
-    }
-    var n = parseInt(part, 10);
-    if(!isNaN(n) && n >= 1) out[n] = true;
-  });
-  var nums = Object.keys(out).map(Number).sort(function(a, b){ return a - b; });
-  return nums.length ? nums : [1];
-}
 /* ЕДНА подредба за прегледа, картата на обекта, печата и PDF-а: обект → вид →
    палет № → позиция. Докато всеки екран си имаше собствено сортиране, един и
    същи палет излизаше на различни места (по позиция в прегледа, по номер в
@@ -340,6 +316,24 @@ function llPalletGroups(items){
     by[key].rows.push(it);
   });
   return order.map(function(k){ return by[k]; });
+}
+/* Заглавието на ТОВАРНАТА ЕДИНИЦА — едно за прегледа, картата, печата и PDF:
+   „Палет 2 от 5 · Габрово · изходящи: 4600186336, 4600186405". Документите са
+   под него, всеки на свой ред. */
+function llCap(t){ t = String(t == null ? '' : t); return t.charAt(0).toUpperCase() + t.slice(1); }
+function llGroupDocs(rows){
+  var out = [];
+  (rows || []).forEach(function(r){
+    var d = String(r.purchase_doc || '').trim();
+    if(d && out.indexOf(d) < 0) out.push(d);
+  });
+  return out;
+}
+function llIsHeaded(it){ return llIsNumbered(it.kind) && it.pallet_no != null; }
+function llGroupHeading(rows){
+  var f = rows[0], docs = llGroupDocs(rows);
+  return llCap(llKindLabel(f)) + ' · ' + (f.store_name || '—') +
+    (docs.length ? ' · изходящи: ' + docs.join(', ') : '');
 }
 /* Плътно преномериране 1..K В РАМКИТЕ НА ОБЕКТА, при запис. „Палет 2 от 5" е
    обещание към конкретния обект, не към целия курс. Въвел ли е складът 1, 2
@@ -724,7 +718,7 @@ function llApprovalNote(it){
    Формата за артикули е СЪЩАТА като в редактора на склада (Пакет В1):
    сканиране, автодопълване, проверка на дублирани кодове. За да се ползва без
    копие, новият ред временно живее в llDraft — помощниците там работят върху
-   llDraft.items[i]. Предишната чернова се пази и се връща при затваряне. */
+   llDraft.units[i]. Предишната чернова се пази и се връща при затваряне. */
 var llStoreAdd = null;   /* {listId, store, savedDraft, savedView} */
 
 function llStoreAddOpen(listId){
@@ -747,12 +741,9 @@ function llStoreAddOpen(listId){
   if(!store){ toast('Не е ясно за кой обект е редът','#dc2626'); return; }
 
   llStoreAdd = { listId: listId, store: store, savedDraft: llDraft, savedView: llView };
-  llDraft = { list_date: l.list_date, executed_by: '', comment: '', _storeAdd: true, items: [{
-    id: null, kind: 'pallet', pallet_no: null, pallet_total: null,
-    purchase_doc: null, clears_doc: null, store_name: store,
-    warehouse_comment: '', store_comment: '', partial: false,
-    products: [], _prodOpen: true
-  }] };
+  llDraft = { list_date: l.list_date, executed_by: '', comment: '', _storeAdd: true, units: [
+    Object.assign(llBlankUnit(), { store_name: store, store_comment: '', _prodOpen: true })
+  ] };
   llStoreAddRender();
 }
 function llStoreAddClose(){
@@ -765,8 +756,8 @@ function llStoreAddClose(){
   if(m && m.parentNode) m.parentNode.removeChild(m);
 }
 function llStoreAddRender(){
-  if(!llStoreAdd || !llDraft || !llDraft.items[0]) return;
-  var it = llDraft.items[0];
+  if(!llStoreAdd || !llDraft || !llDraft.units[0]) return;
+  var it = llDraft.units[0];
   var m = document.getElementById('ll-add-modal');
   if(!m){
     m = document.createElement('div');
@@ -786,7 +777,7 @@ function llStoreAddRender(){
         '<select id="ll-add-kind" onchange="llStoreAddField(\'kind\',this.value)" style="border:1px solid #cbd5e1;border-radius:6px;padding:7px 8px;font-size:13px;">'+
           LL_KINDS.map(function(k){ return '<option value="'+k[0]+'"'+(it.kind===k[0]?' selected':'')+'>'+k[1]+'</option>'; }).join('')+
         '</select>'+
-        '<input id="ll-add-doc" value="'+llAttr(it.purchase_doc)+'" placeholder="Изходящ № (по желание)" '+
+        '<input id="ll-add-doc" value="'+llAttr((it.docs || [])[0])+'" placeholder="Изходящ № (по желание)" '+
           'oninput="llStoreAddField(\'purchase_doc\',this.value)" style="flex:1 1 180px;border:1px solid #cbd5e1;border-radius:6px;padding:7px 8px;font-size:13px;font-family:DM Mono,monospace;">'+
       '</div>'+
       /* esc('') връща „—" — за textarea трябва ПРАЗНО, иначе полето тръгва с тире. */
@@ -801,12 +792,14 @@ function llStoreAddRender(){
     '</div>';
 }
 function llStoreAddField(field, val){
-  if(!llStoreAdd || !llDraft || !llDraft.items[0]) return;
-  llDraft.items[0][field] = (val === '') ? (field === 'kind' ? 'pallet' : '') : val;
+  if(!llStoreAdd || !llDraft || !llDraft.units[0]) return;
+  /* Извънредният ред е с един изходящ № — единицата го държи като docs[0]. */
+  if(field === 'purchase_doc'){ llDraft.units[0].docs = String(val || '').trim() ? [String(val).trim()] : []; return; }
+  llDraft.units[0][field] = (val === '') ? (field === 'kind' ? 'pallet' : '') : val;
 }
 function llStoreAddSubmit(){
-  if(!llStoreAdd || !llDraft || !llDraft.items[0]) return Promise.resolve(false);
-  var it = llDraft.items[0];
+  if(!llStoreAdd || !llDraft || !llDraft.units[0]) return Promise.resolve(false);
+  var it = llDraft.units[0];
   var comment = String(it.store_comment || '').trim();
   if(!comment){
     /* Без обяснение редът е безполезен: одобряващият няма по какво да реши. */
@@ -818,7 +811,7 @@ function llStoreAddSubmit(){
   var listId = llStoreAdd.listId, store = llStoreAdd.store;
   var products = (it.products || []).slice();
   var kind = it.kind || 'pallet';
-  var doc = String(it.purchase_doc || '').trim();
+  var doc = String((it.docs || [])[0] || '').trim();
   var at = new Date().toISOString(), by = llActor();
   /* Позицията е след последния ред на ЦЕЛИЯ лист, не на моите: обектът вижда
      само своите редове, а position е уникална в рамките на листа. */
@@ -855,7 +848,7 @@ function llStoreAddSubmit(){
   });
 }
 /* Артикулите на НОВИЯ ред. НЕ през llWriteProducts: той съпоставя редовете на
-   листа по position спрямо llDraft.items и с една-единствена чернова би
+   листа по position спрямо llDraft.units и с една-единствена чернова би
    закачил артикулите за ПЪРВИЯ ред на листа, не за новия. */
 function llWriteStoreRowProducts(itemId, products){
   if(!products || !products.length) return Promise.resolve(true);
@@ -1128,7 +1121,7 @@ function llStoreCardHtml(l){
     if(headed && !multi){
       h += '<tr data-pallet-group="1" data-pallet-single="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+
         '<td colspan="5" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
-          esc(llKindLabel(g.rows[0]))+' · 1 документ</td></tr>';
+          esc(llGroupHeading(g.rows))+' · 1 документ</td></tr>';
     }
     if(multi){
       var gGot  = g.rows.filter(function(r){ return r.received; }).length;
@@ -1136,7 +1129,7 @@ function llStoreCardHtml(l){
       var gCan  = g.rows.some(llOpenForStore);
       h += '<tr data-pallet-group="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+
         '<td colspan="4" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
-          esc(llKindLabel(g.rows[0]))+' · '+g.rows.length+' документа · получени '+gGot+
+          esc(llGroupHeading(g.rows))+' · '+g.rows.length+' документа · получени '+gGot+
           (gMiss?' · неполучени '+gMiss:'')+'/'+g.rows.length+
           (g.rows.some(function(r){ return r.partial; })?' '+llPartialBadge():'')+
           /* Коментарът на ЦЕЛИЯ палет. Стои тук, а не в prompt(): обяснението
@@ -1925,11 +1918,8 @@ function llBuildPdf(list, items, storeFilter){
 
     var rows = llPdfRows(items, storeFilter);
     if(!rows.length) line('Листът няма редове.', 10, 5);
-    rows.forEach(function(it, n){
-      line((n + 1) + '. ' + llKindLabel(it) +
-        (llIsOversize(it.kind) && it.warehouse_comment ? ' — ' + it.warehouse_comment : '') +
-        '   изходящ № ' + (it.purchase_doc || 'без') +
-        (storeFilter ? '' : '   обект: ' + (it.store_name || '—')), 11, 5.5);
+    var n = 0;
+    var pdfRow = function(it, lead){
       /* При извънгабаритния коментарът вече е до вида — втори път би бил шум. */
       if(it.warehouse_comment && !llIsOversize(it.kind)) line('    коментар склад: ' + it.warehouse_comment, 9, 4.5);
       (it.products || []).forEach(function(p){
@@ -1937,7 +1927,30 @@ function llBuildPdf(list, items, storeFilter){
           '  —  ' + llFmtQty(p.qty) + ' ' + (p.unit || '') +
           (p.cartons != null ? '  (' + p.cartons + ' каш.)' : ''), 9, 4.5);
       });
-      y += 1.5;
+    };
+    llPalletGroups(rows).forEach(function(g){
+      var f = g.rows[0];
+      if(llIsHeaded(f)){
+        n++;
+        /* Единицата има ЕДНО заглавие, документите ѝ — отдолу, по един ред. */
+        line(n + '. ' + llGroupHeading(g.rows) +
+          (llIsOversize(f.kind) && f.warehouse_comment ? ' — ' + f.warehouse_comment : ''), 11, 5.5);
+        g.rows.forEach(function(it){
+          line('    изходящ № ' + (it.purchase_doc || 'без') + (it.partial ? '  (частично)' : ''), 10, 5);
+          pdfRow(it);
+        });
+        y += 1.5;
+        return;
+      }
+      g.rows.forEach(function(it){
+        n++;
+        line(n + '. ' + llKindLabel(it) +
+          (llIsOversize(it.kind) && it.warehouse_comment ? ' — ' + it.warehouse_comment : '') +
+          '   изходящ № ' + (it.purchase_doc || 'без') +
+          (storeFilter ? '' : '   обект: ' + (it.store_name || '—')), 11, 5.5);
+        pdfRow(it);
+        y += 1.5;
+      });
     });
     y += 4;
     line('Товарил: ............................        Приел: ............................', 10, 5);
@@ -2441,27 +2454,85 @@ function llListHtml(){
    СЪЩЕСТВУВАЩИТЕ чернови не се допълват: човек, който е оставил три реда, ги
    намира три. */
 var LL_NEW_ROWS = 10;
-function llBlankDraftRow(){
-  return { id: null, kind: 'pallet', pallet_no: null, pallet_total: null,
-           purchase_doc: null, clears_doc: null, store_name: '',
-           warehouse_comment: '', partial: false, _docKey: null, products: [] };
+/* Редът в редактора е ТОВАРНА ЕДИНИЦА (палет / извънгабаритен / руло / насип),
+   не документ: един палет носи няколко изходящи номера. В базата единицата е
+   N реда (по един на документ) със същия pallet_no — тук е един запис.
+     docs      — изходящите номера на единицата (низове, без дубликати)
+     _rowIds   — id-тата на редовете в базата, В РЕДА на docs (префикс: нов
+                 документ в края няма id още)
+     _spareIds — id-та на редове без съответен чип; при запис се преизползват
+                 за нови документи, иначе се трият
+     products  — артикулите на ЦЯЛАТА единица; при запис отиват в първия ред
+     _docDraft — недовършеният текст в полето за номер (пази се, за да не се
+                 губи при пре-рендиране и да влезе в docs при запис) */
+function llBlankUnit(){
+  return { kind: 'pallet', pallet_no: null, pallet_total: null,
+           docs: [], clears_doc: null, store_name: '',
+           warehouse_comment: '', partial: false, products: [], _rowIds: [], _spareIds: [], _docDraft: '' };
 }
-/* Ред, който човекът НЕ е пипнал: без обект, без документ и без артикули.
-   Коментарът и номерът на палет не го правят „попълнен" сами по себе си —
-   без обект редът и без друго не може да се запише. */
+/* Единица, която човекът НЕ е пипал: без обект, без документ и без артикули.
+   Коментарът не я прави „попълнена" сама по себе си — без обект единицата
+   така или иначе не може да се запише. */
 function llBlankRow(it){
-  return !!it && !String(it.store_name || '').trim() && !it.purchase_doc &&
+  return !!it && !String(it.store_name || '').trim() &&
+    !(it.docs && it.docs.length) && !String(it._docDraft || '').trim() &&
     !(it.products && it.products.length);
+}
+/* Номерът на палета е АВТОМАТИЧЕН: нова единица взема следващия свободен за
+   обекта и вида (max+1); при размяна на местата номерата на единиците от
+   същата група се преразпределят по реда на екрана (llRenumberGroupByOrder). */
+function llAssignPalletNo(it){
+  if(!llIsNumbered(it.kind)){ it.pallet_no = null; it.pallet_total = null; return; }
+  it.pallet_no = llNextPalletNo(llDraft.units, it.store_name, it.kind, it);
+  it.pallet_total = null;
+}
+function llRenumberGroupByOrder(store, kind){
+  if(!llIsNumbered(kind)) return;
+  var st = String(store || '');
+  var grp = llDraft.units.filter(function(u){
+    return u.kind === kind && String(u.store_name || '') === st && u.pallet_no != null;
+  });
+  var nums = grp.map(function(u){ return Number(u.pallet_no); }).sort(function(a, b){ return a - b; });
+  grp.forEach(function(u, k){ u.pallet_no = nums[k]; });
 }
 function llNewList(){
   llCurrentId = null;
   llDocQuery = ''; llDocStore = '';
-  llDraft = { list_date: llTodayISO(), executed_by: llActor(), comment: '', items: [] };
-  for(var bi = 0; bi < LL_NEW_ROWS; bi++) llDraft.items.push(llBlankDraftRow());
+  llDraft = { list_date: llTodayISO(), executed_by: llActor(), comment: '', units: [] };
+  for(var bi = 0; bi < LL_NEW_ROWS; bi++) llDraft.units.push(llBlankUnit());
   llPendingDocs = [];
   llView = 'edit';
   renderLoadingLists();
   llLoadEditorData();
+}
+/* Редовете на листа → единици. Групирането е на llPalletGroups(): ред с общ
+   обект + вид + № е една единица, ред без номер (насип, или палет без №) е
+   сам за себе си. Заварените чернови (по един ред на документ) се събират
+   така без миграция. Артикулите на единицата са сборът от редовете ѝ. */
+function llUnitsFromRows(rows){
+  var sorted = (rows || []).slice().sort(llByPosition);
+  return llPalletGroups(sorted).map(function(g){
+    var u = llBlankUnit();
+    u.kind = g.kind; u.store_name = g.store_name || '';
+    u.pallet_no = g.pallet_no != null ? g.pallet_no : null;
+    u.pallet_total = g.pallet_total != null ? g.pallet_total : null;
+    u.warehouse_comment = '';
+    g.rows.forEach(function(r){
+      /* Редът без документ (или с повторен номер) не е чип, но id-то му не
+         се губи: _spareIds се преизползват при запис или се трият. */
+      var doc = String(r.purchase_doc || '').trim();
+      if(doc && u.docs.indexOf(doc) < 0){ u.docs.push(doc); u._rowIds.push(r.id); }
+      else if(r.id){ u._spareIds.push(r.id); }
+      if(!u.warehouse_comment && r.warehouse_comment) u.warehouse_comment = r.warehouse_comment;
+      if(r.partial) u.partial = true;
+      if(r.clears_doc && !u.clears_doc) u.clears_doc = r.clears_doc;
+      (r.products || []).forEach(function(pr){
+        u.products.push({ sap_code: pr.sap_code, product_name: pr.product_name, unit: pr.unit || '',
+                          qty: pr.qty, cartons: pr.cartons, _inCat: true });
+      });
+    });
+    return u;
+  });
 }
 function llOpenEdit(id){
   var l = llLists.find(function(x){ return String(x.id) === String(id); });
@@ -2472,23 +2543,12 @@ function llOpenEdit(id){
   llDraft = {
     list_date: l.list_date, executed_by: l.executed_by || '',
     comment: l.comment || '',
-    items: llItemsOf(l.id).map(function(it){
-      return {
-        id: it.id, kind: it.kind, pallet_no: it.pallet_no, pallet_total: it.pallet_total,
-        purchase_doc: it.purchase_doc, clears_doc: it.clears_doc,
-        store_name: it.store_name, warehouse_comment: it.warehouse_comment || '',
-        partial: !!it.partial,
-        /* _inCat е неизвестно за вече записан артикул — колона за това няма.
-           Приема се, че е от каталога: маркерът „не е в каталога“ е за
-           човека, който въвежда СЕГА, не история. */
-        products: (it.products || []).map(function(pr){
-          return { sap_code: pr.sap_code, product_name: pr.product_name, unit: pr.unit || '',
-                   qty: pr.qty, cartons: pr.cartons, _inCat: true };
-        })
-      };
-    })
+    /* _inCat е неизвестно за вече записан артикул — колона за това няма.
+       Приема се, че е от каталога: маркерът „не е в каталога“ е за човека,
+       който въвежда СЕГА, не история. */
+    units: llUnitsFromRows(llItemsOf(l.id))
   };
-  llDraft._hadProducts = llDraft.items.some(function(it){ return (it.products || []).length; });
+  llDraft._hadProducts = llDraft.units.some(function(it){ return (it.products || []).length; });
   llPendingDocs = [];
   llView = 'edit';
   renderLoadingLists();
@@ -2584,10 +2644,11 @@ function llLoadEditorData(){
   });
 }
 
-/* Отмятането на документ МАТЕРИАЛИЗИРА редовете веднага, а не при запис.
-   Така подредбата, стрелките и полето „изчиства друг документ" работят върху
-   един и същи списък — иначе половината редове биха съществували само като
-   намерение и не биха се виждали, докато не се запишат. */
+/* Отмятането на документ МАТЕРИАЛИЗИРА единица веднага, а не при запис. Така
+   подредбата, стрелките и номерата работят върху един и същи списък — иначе
+   половината единици биха съществували само като намерение. Отметнатият
+   документ отива на НОВА единица за обекта (следващ №); към вече съществуваща
+   се добавя с чип „изходящи №" в самия ред. */
 function llToggleDoc(idx){
   var d = llPendingDocs[idx];
   if(!d || !llDraft) return;
@@ -2595,41 +2656,6 @@ function llToggleDoc(idx){
   if(d.checked) llMaterializeDoc(d);
   else llDropDocRows(d);
   renderLoadingLists();
-}
-/* Полето е „на кой палет", не „колко палета". Два документа с еднакъв номер за
-   един обект са на ЕДИН палет — това е консолидацията. Приема и „1-3" за
-   документ, разстлан върху няколко палета. */
-function llSetDocPallet(idx, val){
-  var d = llPendingDocs[idx];
-  if(!d || !llDraft) return;
-  var nums = llParsePalletSpec(val);
-  /* „1-25" от изпуснат клавиш ражда 25 реда, без нищо да попита. Прагът ПИТА,
-     а не ограничава: наистина големи пратки съществуват. При отказ полето се
-     връща на предишната стойност — тя идва от d.pallet_spec, затова е
-     достатъчно да не я пипаме и да пре-рендираме. */
-  if(nums.length > 20 && !confirm('Наистина ' + nums.length + ' палета за един документ?')){
-    renderLoadingLists();
-    return;
-  }
-  d.pallet_spec = String(val == null ? '' : val).trim();
-  if(d.checked){ llDropDocRows(d); llMaterializeDoc(d); }
-  renderLoadingLists();
-}
-/* Какво показва полето „Палет №" на документа: въведеното; иначе (отметнат) —
-   номерата, на които реално е сложен; иначе (неотметнат) — предложението,
-   което отмятането ще вземе. Пресмята се при рендер, не се пази. */
-function llDocPalletShown(d){
-  var spec = String(d.pallet_spec == null ? '' : d.pallet_spec).trim();
-  if(spec) return spec;
-  if(!llDraft) return '';
-  if(d.checked){
-    var key = llDocKey(d), nums = [];
-    llDraft.items.forEach(function(it){
-      if(it._docKey === key && it.pallet_no != null) nums.push(it.pallet_no);
-    });
-    if(nums.length) return nums.join(',');
-  }
-  return String(llNextPalletNo(llDraft.items, d.store_name, 'pallet'));
 }
 /* Копие на съдържанието на документа от снимката — за артикулите на реда.
    КОПИЕ: редът после се редактира свободно, а снимката остава каквато е. */
@@ -2644,59 +2670,84 @@ function llDocProductsCopy(d){
   return { list: out, skipped: skipped };
 }
 function llMaterializeDoc(d){
-  /* pallet_total се оставя празно: то е „от колко" за ЦЕЛИЯ обект и се знае
-     чак когато всички документи са разпределени. Смята се при запис
-     (llRenumberPallets), а в редактора се показва от групирането. */
-  var spec = String(d.pallet_spec == null ? '' : d.pallet_spec).trim();
-  var nums = spec ? llParsePalletSpec(spec) : [llNextPalletNo(llDraft.items, d.store_name, 'pallet')];
-  /* Артикулите отиват САМО в ПЪРВИЯ ред на документа. Документ върху палети
-     1-3 не се разпределя сам, а копие във всеки ред би утроило стоката в
-     описите, в писмото до обекта и в „⚠️ Разлика". Складът разпределя. */
   var copy = llDocProductsCopy(d);
-  nums.forEach(function(n, k){
-    llDraft.items.push({
-      id: null, kind: 'pallet', pallet_no: n, pallet_total: null,
-      purchase_doc: d.purchase_doc, clears_doc: null,
-      store_name: d.store_name, warehouse_comment: '', partial: false,
-      _docKey: llDocKey(d),
-      products: k === 0 ? copy.list : []
+  var u = llBlankUnit();
+  u.store_name = d.store_name;
+  u.docs = [String(d.purchase_doc)];
+  u.products = copy.list;
+  llAssignPalletNo(u);
+  llDraft.units.push(u);
+  if(!copy.list.length) return;
+  toast('📦 Копирани ' + copy.list.length + ' артикула от ' + d.purchase_doc +
+    (copy.skipped ? ' (' + copy.skipped + ' без количество — пропуснати)' : ''));
+}
+/* Махането на отметката маха ДОКУМЕНТА от единицата, на която е. Единица,
+   останала без документи, си отива заедно с артикулите (те са копирани от
+   този документ). Редовете ѝ в базата се трият — записаното трябва да следва
+   екрана. */
+function llDropDocRows(d){
+  var doc = String(d.purchase_doc), keep = [];
+  llDraft.units.forEach(function(u){
+    var k = (u.store_name || '') === (d.store_name || '') ? u.docs.indexOf(doc) : -1;
+    if(k < 0){ keep.push(u); return; }
+    llUnitDetachDoc(u, k);
+    if(u.docs.length){ keep.push(u); return; }
+    (u._rowIds || []).concat(u._spareIds || []).forEach(function(id){
+      if(id) sbDelete('loading_list_items','id=eq.'+id);
     });
   });
-  if(!copy.list.length) return;
-  if(nums.length > 1){
-    toast('📦 ' + copy.list.length + ' артикула от ' + d.purchase_doc + ' са на палет ' + nums[0] +
-      ' — документът е на ' + nums.length + ' палета, премести каквото не е на него', '#d97706');
-  } else {
-    toast('📦 Копирани ' + copy.list.length + ' артикула от ' + d.purchase_doc +
-      (copy.skipped ? ' (' + copy.skipped + ' без количество — пропуснати)' : ''));
+  llDraft.units = keep;
+}
+/* Чипът е махнат: id-то на реда му НЕ се трие веднага (Откажи трябва да
+   връща), а остава „резервно" — преизползва се за нов документ или се трие
+   при запис. */
+function llUnitDetachDoc(u, k){
+  u.docs.splice(k, 1);
+  if(k < u._rowIds.length){
+    var id = u._rowIds.splice(k, 1)[0];
+    if(id) u._spareIds.push(id);
   }
 }
-function llDropDocRows(d){
-  var key = llDocKey(d);
-  var keep = [];
-  llDraft.items.forEach(function(it){
-    if(it._docKey === key){
-      /* Вече записан ред трябва да си отиде и от базата — черновата се
-         редактира свободно, но записът трябва да следва екрана. */
-      if(it.id) sbDelete('loading_list_items','id=eq.'+it.id);
-      return;
-    }
-    keep.push(it);
+/* „+ към палет N": документът от Стока на път се добавя към СЪЩЕСТВУВАЩА
+   единица на същия обект (чип в нея), вместо към нова. Артикулите му идват
+   със същото копие като при отмятане. Разотмятането го маха от единицата
+   (llDropDocRows), но не и копираните артикули — те вече са смесени. */
+function llAttachDocToUnit(idx, unitIdx){
+  var d = llPendingDocs[idx], u = llDraft && llDraft.units[unitIdx];
+  if(!d || !u || d.checked) return;
+  if((u.store_name || '') !== (d.store_name || '') || !llIsNumbered(u.kind)){
+    toast('Документът е за друг обект','#dc2626');
+    return;
+  }
+  var doc = String(d.purchase_doc);
+  if(u.docs.indexOf(doc) < 0) u.docs.push(doc);
+  var copy = llDocProductsCopy(d);
+  copy.list.forEach(function(p){ u.products.push(p); });
+  d.checked = true;
+  toast('📦 ' + doc + ' е добавен към ' + (LL_KIND_WORD[u.kind] || 'палет') + ' ' + u.pallet_no +
+    (copy.list.length ? ' · ' + copy.list.length + ' артикула' : ''));
+  renderLoadingLists();
+}
+/* Единиците на обекта, към които може да се добави документ. */
+function llAttachTargets(d){
+  var out = [];
+  llDraft.units.forEach(function(u, i){
+    if((u.store_name || '') === (d.store_name || '') && llIsNumbered(u.kind) && u.pallet_no != null && u.docs.length) out.push(i);
   });
-  llDraft.items = keep;
+  return out;
 }
 function llAddFreeRow(){
   if(!llDraft) return;
-  /* Обектът остава празен: при десет предварителни реда „първият обект по
-     азбучен ред" би сложил мълчаливо грешен получател на всеки недокоснат ред. */
-  var row = llBlankDraftRow();
-  row.pallet_no = llNextPalletNo(llDraft.items, row.store_name, row.kind, row);
-  llDraft.items.push(row);
+  /* Обектът остава празен: при десет предварителни единици „първият обект по
+     азбучен ред" би сложил мълчаливо грешен получател на всяка недокосната. */
+  var u = llBlankUnit();
+  llAssignPalletNo(u);
+  llDraft.units.push(u);
   renderLoadingLists();
 }
-/* Подсказките на автодопълването са по ИНДЕКС на реда — преместен или махнат
-   ред размества индексите и стара подсказка (или заявка, тръгнала преди
-   300 ms) би паднала върху чужд ред. */
+/* Подсказките на автодопълването са по ИНДЕКС на единицата — преместена или
+   махната единица размества индексите и стара подсказка (или заявка, тръгнала
+   преди 300 ms) би паднала върху чужда. */
 function llAcReset(){
   if(llAcTimer){ clearTimeout(llAcTimer); llAcTimer = null; }
   llAcSeq++;
@@ -2704,69 +2755,113 @@ function llAcReset(){
 }
 function llRemoveRow(i){
   if(!llDraft) return;
-  var it = llDraft.items[i];
+  var it = llDraft.units[i];
   if(!it) return;
   llAcReset();
-  if(it.id) sbDelete('loading_list_items','id=eq.'+it.id);
-  llDraft.items.splice(i, 1);
+  (it._rowIds || []).concat(it._spareIds || []).forEach(function(id){
+    if(id) sbDelete('loading_list_items','id=eq.'+id);
+  });
+  llDraft.units.splice(i, 1);
   renderLoadingLists();
 }
 function llMoveRow(i, dir){
   if(!llDraft) return;
   var j = i + dir;
-  if(j < 0 || j >= llDraft.items.length) return;
+  if(j < 0 || j >= llDraft.units.length) return;
   llAcReset();
-  var tmp = llDraft.items[i];
-  llDraft.items[i] = llDraft.items[j];
-  llDraft.items[j] = tmp;
+  var tmp = llDraft.units[i];
+  llDraft.units[i] = llDraft.units[j];
+  llDraft.units[j] = tmp;
+  /* Номерата са по реда на екрана В РАМКИТЕ на обекта и вида: преместването
+     нагоре е „по-ранен палет". Същите номера, само преразпределени. */
+  llRenumberGroupByOrder(tmp.store_name, tmp.kind);
+  var other = llDraft.units[i];
+  if(other.store_name !== tmp.store_name || other.kind !== tmp.kind) llRenumberGroupByOrder(other.store_name, other.kind);
   renderLoadingLists();
 }
 function llSetRowField(i, field, val){
-  if(!llDraft || !llDraft.items[i]) return;
-  var it = llDraft.items[i];
+  if(!llDraft || !llDraft.units[i]) return;
+  var it = llDraft.units[i];
   if(field === 'kind'){
     it.kind = val;
     /* Рулото и насипът нямат номерация — „палет 2 от 5" там не значи нищо. */
-    if(!llIsNumbered(val)){ it.pallet_no = null; it.pallet_total = null; }
-    else { it.pallet_no = llNextPalletNo(llDraft.items, it.store_name, val, it); it.pallet_total = null; }
+    llAssignPalletNo(it);
+    /* Насипът носи ЕДИН номер: излишните чипове се освобождават (редовете им
+       се преизползват или трият при запис). */
+    if(!llIsNumbered(val)) while(it.docs.length > 1) llUnitDetachDoc(it, it.docs.length - 1);
     renderLoadingLists();
-    return;
-  }
-  if(field === 'pallet_no' || field === 'pallet_total'){
-    var n = parseInt(val, 10);
-    it[field] = isNaN(n) ? null : n;
-    return;
-  }
-  if(field === 'purchase_doc'){
-    /* Ръчно въведен номер: без интервали отпред/отзад (затварянето в Стока
-       на път е точно сравнение), празно → null. Ред без документ няма
-       „частично" — отметката е на документа, а без него би останала да
-       виси като маркер при обекта. */
-    var doc = String(val == null ? '' : val).trim();
-    it.purchase_doc = doc || null;
-    if(!it.purchase_doc) it.partial = false;
     return;
   }
   it[field] = (val === '') ? null : val;
   if(field === 'store_name'){
     /* Палет № е в рамките на обекта: нов обект → следващият свободен № там. */
-    if(llIsNumbered(it.kind)){ it.pallet_no = llNextPalletNo(llDraft.items, it.store_name, it.kind, it); it.pallet_total = null; }
+    llAssignPalletNo(it);
     renderLoadingLists(); /* сменя списъка „изчиства" */
   }
 }
-/* Частичността е свойство на ПРАТКАТА по документа, не на отделния палет:
-   документ върху три палета тръгва или цял, или не. Затова отметката слиза на
-   всичките му редове наведнъж — иначе llAutoCloseDoc() би виждал един partial
-   и два не, а решението му е едно за целия документ. */
-function llSetRowPartial(i, checked){
-  if(!llDraft || !llDraft.items[i]) return;
-  var it = llDraft.items[i];
-  var doc = llItemDocKey(it);
-  if(!doc){ it.partial = !!checked; renderLoadingLists(); return; }
-  var store = it.store_name || '';
-  llDraft.items.forEach(function(x){
-    if(llItemDocKey(x) === doc && (x.store_name || '') === store) x.partial = !!checked;
+/* ─── Изходящите номера на единицата (чипове) ───────────────── */
+function llUnitDocAdd(i, val){
+  if(!llDraft || !llDraft.units[i]) return 0;
+  var u = llDraft.units[i], added = 0;
+  /* Насип: едно поле за ЕДИН номер, не чипове — взема се първият. */
+  if(!llIsNumbered(u.kind)){
+    var first = String(val == null ? '' : val).split(/[,;\n]/)[0];
+    u._docDraft = '';
+    if(!first.trim()) return 0;
+    llUnitDocSingle(i, first);
+    return 1;
+  }
+  /* Запетая, точка и запетая и нов ред разделят номера — поле, в което се
+     поставя „4600186336, 4600186405", не бива да прави ЕДИН чип. */
+  String(val == null ? '' : val).split(/[,;\n]/).forEach(function(part){
+    var d = part.trim();
+    if(d && u.docs.indexOf(d) < 0){ u.docs.push(d); added++; }
   });
+  u._docDraft = '';
+  return added;
+}
+/* Насип: единственият номер на единицата (пише се с oninput, без пре-рендиране). */
+function llUnitDocSingle(i, val){
+  if(!llDraft || !llDraft.units[i]) return;
+  var u = llDraft.units[i], d = String(val == null ? '' : val).trim();
+  if(!d){ while(u.docs.length) llUnitDetachDoc(u, u.docs.length - 1); if(!u.docs.length) u.partial = false; return; }
+  while(u.docs.length > 1) llUnitDetachDoc(u, u.docs.length - 1);
+  u.docs[0] = d;
+}
+/* oninput: само пази текста, БЕЗ пре-рендиране — иначе полето губи фокуса при
+   всеки клавиш. */
+function llUnitDocInput(i, val){
+  if(llDraft && llDraft.units[i]) llDraft.units[i]._docDraft = String(val == null ? '' : val);
+}
+function llUnitDocKey(i, ev){
+  if(!ev) return;
+  var k = ev.key;
+  if(k !== 'Enter' && k !== ',' && ev.keyCode !== 13) return;
+  if(ev.preventDefault) ev.preventDefault();
+  var el = ev.target;
+  llUnitDocAdd(i, el && el.value);
+  renderLoadingLists();
+  var next = document.getElementById('ll-doc-in-' + i);
+  if(next && next.focus) next.focus();
+}
+/* onchange (излизане от полето): недовършеният номер НЕ се губи. */
+function llUnitDocCommit(i, val){
+  if(!llDraft || !llDraft.units[i]) return;
+  if(llUnitDocAdd(i, val)) renderLoadingLists();
+}
+function llUnitDocRemove(i, k){
+  if(!llDraft || !llDraft.units[i]) return;
+  var u = llDraft.units[i];
+  if(k < 0 || k >= u.docs.length) return;
+  llUnitDetachDoc(u, k);
+  if(!u.docs.length) u.partial = false;
+  renderLoadingLists();
+}
+/* Частичността е свойство на ПРАТКАТА по единицата: или цялата тръгва, или
+   част от нея. Записва се на всичките ѝ редове. */
+function llSetRowPartial(i, checked){
+  if(!llDraft || !llDraft.units[i]) return;
+  llDraft.units[i].partial = !!checked;
   renderLoadingLists();
 }
 function llSetDraftField(field, val){ if(llDraft) llDraft[field] = val; }
@@ -2785,29 +2880,6 @@ function llDraftPalletColors(items){
   });
   return map;
 }
-/* Информация, не грешка: два документа на един палет е консолидация и е
-   нормално — но ако е станало по погрешка (въведен същият № вместо нов),
-   редът го показва. */
-function llPalletShareNotes(items){
-  var by = {}, order = [];
-  (items || []).forEach(function(it){
-    if(!llIsNumbered(it.kind) || it.pallet_no == null || !it.purchase_doc) return;
-    if(!String(it.store_name || '').trim()) return;
-    var k = llPalletKey(it);
-    if(!by[k]){ by[k] = { row: it, n: 0 }; order.push(k); }
-    by[k].n++;
-  });
-  var out = [];
-  order.forEach(function(k){
-    var g = by[k];
-    if(g.n < 2) return;
-    var word = LL_KIND_WORD[g.row.kind] || g.row.kind;
-    out.push(word.charAt(0).toUpperCase() + word.slice(1) + ' ' + g.row.pallet_no + ' за ' +
-      g.row.store_name + ' носи ' + g.n + ' документа');
-  });
-  return out;
-}
-
 function llStoreOptions(sel){
   /* Изпращачът отпада от получателите: лист от Петрич за Петрич не е товар,
      а грешка, и би стигнал до собствената карта „Към мен" на същия човек.
@@ -2886,7 +2958,7 @@ function llEmptyPf(){
   return { sap_code:'', product_name:'', unit:'', qty:'', cartons:'', _picked:false, _inCat:null };
 }
 function llPfOf(i){
-  var it = llDraft && llDraft.items[i];
+  var it = llDraft && llDraft.units[i];
   if(!it) return null;
   if(!it._pf) it._pf = llEmptyPf();
   if(!Array.isArray(it.products)) it.products = [];
@@ -2911,22 +2983,15 @@ function llEanVariants(code){
   if(c.length === 13 && c.charAt(0) === '0') out.push(c.slice(1));
   return out;
 }
-/* Палетът е физическата единица: „два пъти на един палет" значи в който и да
-   е ред със същия обект и номер. Руло/насип — само самият ред. */
+/* Единицата Е палетът: „два пъти на един палет" значи в същата единица. */
 function llSamePalletRows(i){
-  var it = llDraft.items[i];
-  if(!it) return [];
-  if(it.kind !== 'pallet' || it.pallet_no == null) return [it];
-  return llDraft.items.filter(function(x){
-    return x.kind === 'pallet' && x.pallet_no != null &&
-      Number(x.pallet_no) === Number(it.pallet_no) &&
-      (x.store_name || '') === (it.store_name || '');
-  });
+  var it = llDraft.units[i];
+  return it ? [it] : [];
 }
 
 /* ─── Разгъване на блока ────────────────────────────────── */
 function llToggleProducts(i){
-  var it = llDraft && llDraft.items[i];
+  var it = llDraft && llDraft.units[i];
   if(!it) return;
   /* Спрямо ДЕЙСТВИТЕЛНОТО състояние, не спрямо флага: редът се ражда без
      него, а !undefined е true — тоест първият клик „свиваше" вече отворен
@@ -3032,7 +3097,7 @@ function llPfFromCatalog(i, p){
    се спира: иска се име на ръка и редът се маркира „не е в каталога".
    Проверката е при добавяне, не при писане, за да няма заявка на всеки клавиш. */
 function llAddProduct(i){
-  var it = llDraft && llDraft.items[i];
+  var it = llDraft && llDraft.units[i];
   var pf = llPfOf(i);
   if(!it || !pf) return Promise.resolve(false);
   var code = String(pf.sap_code || '').trim();
@@ -3084,7 +3149,7 @@ function llAddProduct(i){
   });
 }
 function llRemoveProduct(i, j){
-  var it = llDraft && llDraft.items[i];
+  var it = llDraft && llDraft.units[i];
   if(!it || !it.products || !it.products[j]) return;
   it.products.splice(j, 1);
   renderLoadingLists();
@@ -3101,45 +3166,42 @@ function llRemoveProduct(i, j){
    се губят. Снимката е вече заредена в llPendingDocs — нова заявка само ако
    документът го няма там (напр. снимката е наливана наново). */
 function llTakeTransitProducts(i){
-  var it = llDraft && llDraft.items[i];
-  if(!it || !it.purchase_doc) return Promise.resolve(0);
+  var it = llDraft && llDraft.units[i];
+  if(!it || !(it.docs || []).length) return Promise.resolve(0);
   if((it.products || []).length &&
      !confirm('Замени ' + it.products.length + ' артикула на реда с тези от Стока на път?')) return Promise.resolve(0);
-  var key = llDocKey({ purchase_doc: it.purchase_doc, store_name: it.store_name });
-  var d = llPendingDocs.find(function(x){ return llDocKey(x) === key; });
-  if(d) return Promise.resolve(llApplyTransitProducts(i, d.products));
-  return sbGet('goods_transit', 'purchase_doc=eq.' + encodeURIComponent(it.purchase_doc) +
-    '&store_name=eq.' + encodeURIComponent(it.store_name || '') +
-    '&select=material_code,material_name,ordered_qty,remaining_qty,unit,position').then(function(rows){
-    var list = (Array.isArray(rows) ? rows : []).slice().sort(function(a, b){
-      /* position е ТЕКСТ в goods_transit — „10" < „2" лексикографски. */
-      return (parseInt(a.position, 10) || 0) - (parseInt(b.position, 10) || 0);
-    }).map(function(r){
-      return { sap_code: r.material_code ? String(r.material_code) : '', product_name: r.material_name || '',
-               unit: r.unit || '', qty: llTransitQty(r) };
+  /* Единицата носи няколко документа — артикулите са сборът от ВСИЧКИТЕ. */
+  var chain = Promise.resolve([]);
+  it.docs.forEach(function(doc){
+    chain = chain.then(function(acc){
+      var key = llDocKey({ purchase_doc: doc, store_name: it.store_name });
+      var d = llPendingDocs.find(function(x){ return llDocKey(x) === key; });
+      if(d) return acc.concat(d.products);
+      return sbGet('goods_transit', 'purchase_doc=eq.' + encodeURIComponent(doc) +
+        '&store_name=eq.' + encodeURIComponent(it.store_name || '') +
+        '&select=material_code,material_name,ordered_qty,remaining_qty,unit,position').then(function(rows){
+        var list = (Array.isArray(rows) ? rows : []).slice().sort(function(a, b){
+          /* position е ТЕКСТ в goods_transit — „10" < „2" лексикографски. */
+          return (parseInt(a.position, 10) || 0) - (parseInt(b.position, 10) || 0);
+        }).map(function(r){
+          return { sap_code: r.material_code ? String(r.material_code) : '', product_name: r.material_name || '',
+                   unit: r.unit || '', qty: llTransitQty(r) };
+        });
+        return acc.concat(list);
+      });
     });
-    return llApplyTransitProducts(i, list);
   });
+  return chain.then(function(all){ return llApplyTransitProducts(i, all); });
 }
 function llApplyTransitProducts(i, source){
-  var it = llDraft && llDraft.items[i];
+  var it = llDraft && llDraft.units[i];
   if(!it) return 0;
   var copy = llDocProductsCopy({ products: source });
   if(!copy.list.length){ toast('Документът няма артикули в Стока на път','#d97706'); return 0; }
   it.products = copy.list;
   it._prodOpen = true;
   var n = copy.list.length;
-  /* Документ върху няколко реда (напр. палети 1-3) НЕ се разпределя сам:
-     целият списък отива в този ред. Казва се на глас, иначе описът на
-     палет 1 ще носи стоката и на 2 и 3. */
-  var docKey = llItemDocKey(it), rowsOfDoc = llDraft.items.filter(function(x){
-    return llItemDocKey(x) === docKey && (x.store_name || '') === (it.store_name || '');
-  }).length;
-  if(rowsOfDoc > 1){
-    toast('📦 Взети ' + n + ' артикула — документът е на ' + rowsOfDoc + ' реда, махни от този каквото не е на него','#d97706');
-  } else {
-    toast('📦 Взети ' + n + ' артикула от документ ' + it.purchase_doc);
-  }
+  toast('📦 Взети ' + n + ' артикула от ' + (it.docs.length > 1 ? it.docs.length + ' документа' : 'документ ' + it.docs[0]));
   renderLoadingLists();
   return n;
 }
@@ -3196,7 +3258,7 @@ function llProductsBlockHtml(it, i){
       'oninput="llPfInput(+this.dataset.i,\'cartons\',this.value)" onkeydown="llPfKey(+this.dataset.i,\'cartons\',event)" style="'+LL_PF_IN+'width:74px;">'+
     '<button data-i="'+i+'" onclick="llAddProduct(+this.dataset.i)" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">➕ Добави</button>'+
     /* „Отново от Стока на път" върши работа само докато снимката я има. */
-    (it.purchase_doc && llTransitDocsOn
+    ((it.docs || []).length && llTransitDocsOn
       ? '<button data-i="'+i+'" onclick="llTakeTransitProducts(+this.dataset.i)" title="Заменя артикулите на реда с тези на документа от Стока на път (снимката)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#6d28d9;border-radius:6px;padding:8px 12px;font-size:12.5px;font-weight:600;cursor:pointer;">↺ Отново от Стока на път</button>'
       : '')+
     '</div>';
@@ -3271,7 +3333,7 @@ function llOpenScanner(i){
      конзолата или от вече отворен екран, рендиран преди флагът да се смени.
      Иначе „скрит" значи само „не се вижда". */
   if(!llScanOn) return Promise.resolve(false);
-  if(!llDraft || !llDraft.items[i]) return;
+  if(!llDraft || !llDraft.units[i]) return;
   llLoadScanLib().then(function(){
     llScanShowModal(i);
   }, function(){
@@ -3670,9 +3732,9 @@ function llEditorHtml(){
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px;"><tr style="color:#7c3aed;text-align:left;">'+
       '<th style="padding:3px 6px;"></th><th style="padding:3px 6px;">Документ</th><th style="padding:3px 6px;">Обект</th>'+
       '<th style="padding:3px 6px;">Дата</th><th style="padding:3px 6px;text-align:right;">Артикули</th>'+
-      '<th style="padding:3px 6px;">Палет №</th></tr>';
+      '<th style="padding:3px 6px;">Към палет</th></tr>';
     /* data-i е индексът в llPendingDocs, НЕ в показания списък: филтърът
-       крие редове, а llToggleDoc/llSetDocPallet търсят по пълния списък. */
+       крие редове, а llToggleDoc търси по пълния списък. */
     llPendingDocs.forEach(function(d, i){
       if(shown.indexOf(d) < 0) return;
       /* Клик по целия ред разгъва; чекбоксът и „Палет №" спират клика —
@@ -3685,14 +3747,17 @@ function llEditorHtml(){
         '<td style="padding:3px 6px;">'+esc(d.store_name)+'</td>'+
         '<td style="padding:3px 6px;">'+fmtDate(d.doc_date)+'</td>'+
         '<td style="padding:3px 6px;text-align:right;">'+d.items+'</td>'+
-        '<td style="padding:3px 6px;" onclick="event.stopPropagation()"><input value="'+escVal(llDocPalletShown(d))+'" data-i="'+i+'" onclick="event.stopPropagation()" onchange="llSetDocPallet(this.dataset.i,this.value)" title="На кой палет отива този документ. Еднакъв номер за един обект = един палет. Обхват (1-3) за документ върху няколко палета." style="width:62px;border:1px solid #ddd6fe;border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
+        '<td style="padding:3px 6px;white-space:nowrap;" onclick="event.stopPropagation()">'+
+          (d.checked ? '' : llAttachTargets(d).map(function(ui){
+            var u = llDraft.units[ui];
+            return '<button data-i="'+i+'" data-u="'+ui+'" onclick="event.stopPropagation();llAttachDocToUnit(+this.dataset.i,+this.dataset.u)" title="Добавя номера към този палет" style="border:1px solid #ddd6fe;background:#fff;color:#6d28d9;border-radius:5px;padding:1px 7px;font-size:11px;font-weight:600;cursor:pointer;margin-right:3px;">+ към '+esc(LL_KIND_WORD[u.kind] || 'палет')+' '+esc(u.pallet_no)+'</button>';
+          }).join(''))+'</td>'+
         '</tr>';
       if(d._open) h += '<tr data-ll-doc-items="'+i+'"><td></td><td colspan="5" style="padding:0 6px 8px;">'+llDocItemsHtml(d)+'</td></tr>';
     });
     h += '</table>';
-    h += '<div style="font-size:11px;color:#7c3aed;margin-top:6px;">Стоковата № не се пише на ръка — избира се оттук. '+
-      '<b>Палет №</b> е <i>на кой палет</i>: еднакъв номер за един обект значи един палет с няколко документа. '+
-      'За документ върху няколко палета — обхват, напр. <code>1-3</code>.</div>';
+    h += '<div style="font-size:11px;color:#7c3aed;margin-top:6px;">Отметнатият документ отива на НОВ палет за обекта. '+
+      'Още документи на същия палет се добавят с номер в колоната „Изходящи №“ на реда.</div>';
   }
   h += '</div>';
   }
@@ -3700,49 +3765,46 @@ function llEditorHtml(){
   /* в–д) Редовете */
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:12px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
-    '<div style="font-size:13px;font-weight:700;">📦 Редове ('+llDraft.items.length+')</div>'+
+    '<div style="font-size:13px;font-weight:700;">📦 Редове ('+llDraft.units.length+')</div>'+
     '<button onclick="llAddFreeRow()" style="border:1px dashed #94a3b8;background:#f8fafc;color:#475569;border-radius:6px;padding:5px 12px;font-size:12px;cursor:pointer;">➕ Добави нов ред</button>'+
     '</div>';
-  if(!llDraft.items.length){
+  if(!llDraft.units.length){
     h += '<div style="color:#94a3b8;font-size:12px;padding:10px 0;">Още няма редове. Отметни документ отгоре или добави нов ред.</div>';
   } else {
     h += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">'+
       '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">#</th><th style="padding:3px 6px;">Вид</th>'+
-      '<th style="padding:3px 6px;">№ / от</th><th style="padding:3px 6px;">Изходящ №</th>'+
-      '<th style="padding:3px 6px;">Обект</th>'+
+      '<th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;">Изходящи №</th>'+
       '<th style="padding:3px 6px;">Коментар склад</th>'+
-      '<th style="padding:3px 6px;" title="С този палет тръгва само част от документа">Частично</th>'+
+      '<th style="padding:3px 6px;" title="С този палет тръгва само част от документите">Частично</th>'+
       '<th style="padding:3px 6px;"></th></tr>';
-    var pColors = llDraftPalletColors(llDraft.items);
-    llDraft.items.forEach(function(it, i){
+    var pColors = llDraftPalletColors(llDraft.units);
+    llDraft.units.forEach(function(it, i){
       var isPallet = llIsNumbered(it.kind);
       var pColor = (isPallet && it.pallet_no != null && it.pallet_no !== '') ? pColors[llPalletKey(it)] : null;
-      var docOf = llItemDocKey(it);
-      /* Отметката е на ДОКУМЕНТА, не на реда: документ върху три палета е
-         една пратка и е или частична, или не. Показва се на първия му ред,
-         останалите носят само знак, че следват него. */
-      var first = docOf ? llDraft.items.findIndex(function(x){
-        return llItemDocKey(x) === docOf && (x.store_name||'') === (it.store_name||'');
-      }) : -1;
-      h += '<tr style="border-top:1px solid #f1f5f9;">'+
+      var hasDocs = (it.docs || []).length > 0;
+      h += '<tr data-ll-unit="'+i+'" style="border-top:1px solid #f1f5f9;">'+
         '<td style="padding:3px 6px;color:#94a3b8;'+(pColor?'border-left:4px solid '+pColor+';':'')+'">'+(i+1)+'</td>'+
-        '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'kind\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+
+        '<td style="padding:3px 6px;white-space:nowrap;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'kind\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+
           LL_KINDS.map(function(k){ return '<option value="'+k[0]+'"'+(it.kind===k[0]?' selected':'')+'>'+k[1]+'</option>'; }).join('')+
-        '</select></td>'+
-        '<td style="padding:3px 6px;white-space:nowrap;">'+(isPallet?
-          '<input type="number" min="1" value="'+(it.pallet_no!=null?it.pallet_no:'')+'" data-i="'+i+'" oninput="llSetRowField(this.dataset.i,\'pallet_no\',this.value)" style="width:52px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;">'+
-          ' от <input type="number" min="1" value="'+(it.pallet_total!=null?it.pallet_total:'')+'" data-i="'+i+'" oninput="llSetRowField(this.dataset.i,\'pallet_total\',this.value)" style="width:52px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;">'+
+        '</select>'+
           (pColor ? ' <span data-ll-pbadge="'+i+'" style="display:inline-block;background:'+pColor+';color:#fff;border-radius:10px;padding:1px 8px;font-size:10.5px;font-weight:700;">'+
-            esc(LL_KIND_WORD[it.kind] || 'палет')+' '+esc(it.pallet_no)+'</span>' : '')
-          :'<span style="color:#cbd5e1;">—</span>')+'</td>'+
-        /* Изходящ № — ръчно (Теодор, 01.10.2026). Дотук се попълваше само от
-           блока „Документи от Стока на път", скрит от 23.09. oninput пише без
-           пре-рендиране (фокусът остава); onchange пре-рендира, за да се
-           обнови колоната „частично", която зависи от документа. */
-        '<td style="padding:3px 6px;"><input class="ll-doc-in" data-i="'+i+'" value="'+llAttr(it.purchase_doc)+'" placeholder="без" '+
-          'oninput="llSetRowField(this.dataset.i,\'purchase_doc\',this.value)" onchange="renderLoadingLists()" '+
-          'style="width:110px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;font-family:DM Mono,monospace;"></td>'+
+            esc(LL_KIND_WORD[it.kind] || 'палет')+' '+esc(it.pallet_no)+'</span>' : '')+'</td>'+
         '<td style="padding:3px 6px;"><select data-i="'+i+'" onchange="llSetRowField(this.dataset.i,\'store_name\',this.value)" style="border:1px solid #e2e8f0;border-radius:5px;padding:2px 4px;font-size:12px;">'+llStoreOptions(it.store_name)+'</select></td>'+
+        /* Изходящите номера са ЧИПОВЕ: Enter или запетая добавя номер, ✕ го
+           маха. Единицата е един палет, а документите му — колкото са. */
+        '<td style="padding:3px 6px;">'+(isPallet
+          ? (it.docs || []).map(function(doc, k){
+              return '<span data-ll-doc-chip="'+i+'-'+k+'" style="display:inline-block;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:12px;padding:1px 4px 1px 8px;margin:0 4px 3px 0;font-family:DM Mono,monospace;font-size:11.5px;">'+esc(doc)+
+                ' <button data-i="'+i+'" data-k="'+k+'" onclick="llUnitDocRemove(+this.dataset.i,+this.dataset.k)" title="Махни номера" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:11px;padding:0 3px;">✕</button></span>';
+            }).join('')+
+            '<input class="ll-doc-in" id="ll-doc-in-'+i+'" data-i="'+i+'" value="'+llAttr(it._docDraft)+'" placeholder="'+(hasDocs ? 'още един номер' : 'един или няколко номера')+'" '+
+              'oninput="llUnitDocInput(this.dataset.i,this.value)" onkeydown="llUnitDocKey(+this.dataset.i,event)" onchange="llUnitDocCommit(+this.dataset.i,this.value)" '+
+              'style="width:150px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;font-family:DM Mono,monospace;">'
+          /* Насипът няма палет, на който да се събират документи — едно поле за
+             един номер, както преди чиповете. */
+          : '<input class="ll-doc-in" id="ll-doc-in-'+i+'" data-i="'+i+'" data-single="1" value="'+llAttr((it.docs || [])[0])+'" placeholder="без" '+
+              'oninput="llUnitDocSingle(this.dataset.i,this.value)" onchange="renderLoadingLists()" '+
+              'style="width:150px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 5px;font-size:12px;font-family:DM Mono,monospace;">')+'</td>'+
         '<td style="padding:3px 6px;">'+
           /* При извънгабаритния полето сменя смисъла си: то вече не е бележка
              встрани, а ОПИСАНИЕТО на товара. Затова получава заглавие и
@@ -3752,24 +3814,17 @@ function llEditorHtml(){
           '<input id="ll-wc-'+i+'" value="'+escVal(it.warehouse_comment)+'" data-i="'+i+'"'+
           (llIsOversize(it.kind) ? ' placeholder="напр. стелажи, ламперия…"' : '')+
           ' oninput="llSetRowField(this.dataset.i,\'warehouse_comment\',this.value)" style="width:100%;min-width:120px;border:1px solid '+(llOversizeNeedsComment(it)?'#fca5a5':'#e2e8f0')+';border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
-        '<td style="padding:3px 6px;text-align:center;white-space:nowrap;">'+(!docOf
-          ? '<span style="color:#cbd5e1;" title="Ред без документ — няма какво да остане чакащо">—</span>'
-          : (first === i
-            ? '<input type="checkbox" data-i="'+i+'" onchange="llSetRowPartial(this.dataset.i,this.checked)"'+(it.partial?' checked':'')+' title="Само част от документа тръгва с този товар — отмятането няма да го затвори в Стока на път">'
-            : '<span style="color:#94a3b8;" title="Следва отметката на първия палет от същия документ">'+(it.partial?'✓':'↳')+'</span>'))+'</td>'+
+        '<td style="padding:3px 6px;text-align:center;white-space:nowrap;">'+(!hasDocs
+          ? '<span style="color:#cbd5e1;" title="Единица без документ — няма какво да остане чакащо">—</span>'
+          : '<input type="checkbox" data-i="'+i+'" onchange="llSetRowPartial(this.dataset.i,this.checked)"'+(it.partial?' checked':'')+' title="Само част от документите тръгва с този товар — отмятането няма да ги затвори в Стока на път">')+'</td>'+
         '<td style="padding:3px 6px;white-space:nowrap;">'+
           '<button data-i="'+i+'" onclick="llMoveRow(+this.dataset.i,-1)" title="Нагоре" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;">↑</button>'+
           '<button data-i="'+i+'" onclick="llMoveRow(+this.dataset.i,1)" title="Надолу" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">↓</button>'+
           '<button data-i="'+i+'" onclick="llRemoveRow(+this.dataset.i)" title="Махни реда" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">✕</button>'+
         '</td></tr>'+
-        (llProductsBlockShown(it) ? '<tr data-ll-prodrow="'+i+'"><td></td><td colspan="7" style="padding:0 6px 6px;">'+llProductsBlockHtml(it, i)+'</td></tr>' : '');
+        (llProductsBlockShown(it) ? '<tr data-ll-prodrow="'+i+'"><td></td><td colspan="6" style="padding:0 6px 6px;">'+llProductsBlockHtml(it, i)+'</td></tr>' : '');
     });
     h += '</table></div>';
-    var shareNotes = llPalletShareNotes(llDraft.items);
-    if(shareNotes.length){
-      h += '<div data-ll-pallet-note="1" style="margin-top:8px;background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:7px 11px;font-size:12px;">'+
-        shareNotes.map(function(t){ return 'ℹ️ '+esc(t); }).join('<br>')+'</div>';
-    }
   }
   h += '</div>';
 
@@ -3799,6 +3854,41 @@ function llBuildItemRows(listId, items){
     };
   });
 }
+/* Единиците → редове за базата. Единица с N документа е N реда със СЪЩИТЕ
+   вид / № / обект / коментар / „частично" (минимум един, дори без документ).
+   id-то на всеки ред е на вече записания (по реда на docs), иначе резервно,
+   иначе null (нов). Редовете, които нищо не заема, отиват в del. */
+function llDraftFlat(){
+  var rows = [], del = [];
+  llDraft.units.forEach(function(u){
+    var spare = (u._spareIds || []).slice();
+    var ids = u._rowIds || [];
+    var n = Math.max(1, (u.docs || []).length);
+    for(var k = 0; k < n; k++){
+      rows.push({
+        id: ids[k] || spare.shift() || null,
+        kind: u.kind, pallet_no: u.pallet_no, pallet_total: u.pallet_total,
+        purchase_doc: (u.docs || [])[k] || null, clears_doc: u.clears_doc || null,
+        store_name: u.store_name, warehouse_comment: u.warehouse_comment,
+        partial: !!u.partial && (u.docs || []).length > 0,
+        _unit: u, _first: k === 0
+      });
+    }
+    ids.slice(n).forEach(function(id){ if(id) del.push(id); });
+    spare.forEach(function(id){ del.push(id); });
+  });
+  return { rows: rows, del: del };
+}
+/* След запис id-тата на редовете се връщат в единиците — иначе следващото
+   „Запази" би вмъкнало същите редове втори път. */
+function llSyncUnitIds(flatRows){
+  llDraft.units.forEach(function(u){ u._rowIds = []; u._spareIds = []; });
+  flatRows.forEach(function(r){
+    if(!r.id) return;
+    var u = r._unit;
+    if(u.docs.length) u._rowIds.push(r.id); else u._spareIds.push(r.id);
+  });
+}
 function llSaveDraft(){
   if(!llDraft) return;
   if(!llDraft.list_date){ toast('Избери дата','#dc2626'); return; }
@@ -3807,17 +3897,20 @@ function llSaveDraft(){
      или артикули) без да избере обект, СИ Е грешка и спира записа.
      Списъкът се смалява на място: при провал по-нататък редакторът остава
      отворен и в него стои точно това, което ще бъде записано. */
-  var kept = llDraft.items.filter(function(it){ return !llBlankRow(it); });
-  var dropped = llDraft.items.length - kept.length;
-  llDraft.items = kept;
-  if(!llDraft.items.length){ toast('Добави поне един ред','#dc2626'); renderLoadingLists(); return; }
-  var missing = llDraft.items.filter(function(it){ return !String(it.store_name || '').trim(); }).length;
+  /* Недовършеният текст в полето за номер влиза в единицата — иначе номер,
+     написан без Enter, би се загубил при запис. */
+  llDraft.units.forEach(function(u, i){ if(String(u._docDraft || '').trim()) llUnitDocAdd(i, u._docDraft); });
+  var kept = llDraft.units.filter(function(it){ return !llBlankRow(it); });
+  var dropped = llDraft.units.length - kept.length;
+  llDraft.units = kept;
+  if(!llDraft.units.length){ toast('Добави поне един ред','#dc2626'); renderLoadingLists(); return; }
+  var missing = llDraft.units.filter(function(it){ return !String(it.store_name || '').trim(); }).length;
   if(missing){ toast('Има ред с документ или артикули, но без обект получател','#dc2626'); renderLoadingLists(); return; }
   /* Извънгабаритен ред без описание НЕ се записва. На рампата обектът вижда
      „извънгабаритен 1 от 2" и нищо друго — нито артикули, нито документ му
      казват какво чака. Проверката е СЛЕД отпадането на празните редове:
      недокоснат ред с вид „извънгабаритен" е непопълнена бланка, не грешка. */
-  var noDesc = llDraft.items.findIndex(llOversizeNeedsComment);
+  var noDesc = llDraft.units.findIndex(llOversizeNeedsComment);
   if(noDesc >= 0){
     toast('Извънгабаритният ред иска описание — какъв е товарът','#dc2626');
     renderLoadingLists();
@@ -3828,7 +3921,7 @@ function llSaveDraft(){
   if(dropped) renderLoadingLists();
   /* Палетите се преномерират плътно ПРЕДИ записа — иначе „палет 2 от 5"
      обещава на обекта палет, който не съществува. */
-  llRenumberPallets(llDraft.items);
+  llRenumberPallets(llDraft.units);
 
   var head = {
     warehouse: llActiveWarehouse(),
@@ -3855,10 +3948,13 @@ function llSaveDraft(){
    Провалът на редовете НЕ се поглъща: заглавието вече е записано, тоест в
    базата стои лист без съдържание — точно това казва маркерът. */
 function llWriteItems(listId){
-  var existing = llDraft.items.filter(function(it){ return !!it.id; });
-  var fresh    = llDraft.items.filter(function(it){ return !it.id; });
+  var flat = llDraftFlat();
+  var rows = flat.rows;
+  llDraft._flat = rows;
+  var existing = rows.filter(function(it){ return !!it.id; });
+  var fresh    = rows.filter(function(it){ return !it.id; });
   var pos = {};
-  llDraft.items.forEach(function(it, i){ if(it.id) pos[it.id] = i + 1; });
+  rows.forEach(function(it, i){ if(it.id) pos[it.id] = i + 1; });
 
   var patches = existing.map(function(it){
     var row = llBuildItemRows(listId, [it])[0];
@@ -3866,7 +3962,10 @@ function llWriteItems(listId){
     delete row.list_id;
     return sbPatch('loading_list_items','id=eq.'+it.id, row);
   });
-  Promise.all(patches).then(function(pres){
+  /* Редовете без чип (махнати документи, резервни id-та) се трият СЛЕД
+     обновяването: паднала връзка по средата оставя повече, не по-малко. */
+  var deletes = flat.del.map(function(id){ return sbDelete('loading_list_items','id=eq.'+id); });
+  Promise.all(patches.concat(deletes)).then(function(pres){
     var bad = pres.filter(function(r){ return !r.ok; });
     if(bad.length){
       llIncompleteSaves[listId] = true;
@@ -3877,14 +3976,14 @@ function llWriteItems(listId){
     }
     if(!fresh.length){ llWriteProducts(listId); return; }
     /* Позициите на новите се смятат от ЦЕЛИЯ списък, не от подсписъка. */
-    var rows = [];
-    llDraft.items.forEach(function(it, i){
+    var out = [];
+    rows.forEach(function(it, i){
       if(it.id) return;
       var r = llBuildItemRows(listId, [it])[0];
       r.position = i + 1;
-      rows.push(r);
+      out.push(r);
     });
-    sbPost('loading_list_items', rows).then(function(res){
+    sbPost('loading_list_items', out).then(function(res){
       if(!res.ok){
         llIncompleteSaves[listId] = true;
         console.error('llWriteItems: редовете НЕ бяха записани', res.error);
@@ -3924,7 +4023,8 @@ function llWriteItems(listId){
    то трябва да става САМО след status='sent', иначе следващото „Запази" го
    изтрива мълчаливо. */
 function llWriteProducts(listId){
-  var anyNow = llDraft.items.some(function(it){ return (it.products || []).length; });
+  var anyNow = llDraft.units.some(function(it){ return (it.products || []).length; });
+  var flatRows = llDraft._flat || llDraftFlat().rows;
   /* Лист, който не ползва артикули нито сега, нито преди — нула заявки. Така
      записът на всички стари листи остава точно какъвто беше. */
   if(!anyNow && !llDraft._hadProducts){ llFinishSave(listId); return Promise.resolve(true); }
@@ -3936,19 +4036,22 @@ function llWriteProducts(listId){
       byPos[r.position] = r.id;
     });
     var noId = 0;
-    llDraft.items.forEach(function(it, i){
+    flatRows.forEach(function(r, i){
       var id = byPos[i + 1];
-      if(id) it.id = id; else noId++;
+      if(id) r.id = id; else noId++;
     });
+    llSyncUnitIds(flatRows);
     if(dup) return llProductsFailed(listId, 'в листа има два реда с една и съща позиция');
     if(noId) return llProductsFailed(listId, noId + ' реда не бяха намерени след записа');
 
-    var ids = llDraft.items.map(function(it){ return it.id; });
+    var ids = flatRows.map(function(r){ return r.id; });
     var out = [];
-    llDraft.items.forEach(function(it){
-      (it.products || []).forEach(function(pr, j){
+    /* Артикулите на единицата отиват в ПЪРВИЯ ѝ ред — както и досега. */
+    flatRows.forEach(function(r){
+      if(!r._first) return;
+      (r._unit.products || []).forEach(function(pr, j){
         out.push({
-          item_id: it.id, position: j + 1,
+          item_id: r.id, position: j + 1,
           sap_code: pr.sap_code, product_name: pr.product_name,
           unit: pr.unit || null, qty: pr.qty,
           cartons: (pr.cartons === null || pr.cartons === undefined || pr.cartons === '') ? null : pr.cartons
@@ -4177,7 +4280,11 @@ function llViewHtml(){
   items.forEach(function(it){
     if(it.products && it.products.length && llRowCounts(it)) unitHasProducts[JSON.stringify([it.store_name || '', unitRef(it)])] = true;
   });
+  /* Заглавен ред за всяка номерирана единица; документите са под него. */
+  var headFirst = llPalletGroups(items).filter(function(g){ return llIsHeaded(g.rows[0]); })
+    .map(function(g){ return g.rows; });
   items.forEach(function(it){
+    var isHeaded = llIsHeaded(it);
     /* „1" = палет 1; „rc1" = извънгабаритен 1; „rl1" = руло 1; иначе id на
        реда (насип). Без вида в препратката палет 1 и руло 1 на един обект се
        смесват в един опис. Представката „rc" е от предишното име на вида
@@ -4187,17 +4294,23 @@ function llViewHtml(){
     var ukey = JSON.stringify([it.store_name || '', uref]);
     var firstOfUnit = !descSeen[ukey];
     descSeen[ukey] = true;
+    var opisBtn = (firstOfUnit && llRowCounts(it) && unitHasProducts[ukey])
+      ? ' <button data-l="'+l.id+'" data-s="'+escAttr(it.store_name||'')+'" data-u="'+escAttr(uref)+'" onclick="llPrint(this.dataset.l,this.dataset.s,this.dataset.u)" title="Опис на палета — за залепване" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:4px;">🖨 Опис</button>'
+      : '';
+    var hg = headFirst.filter(function(rs){ return rs[0] === it; })[0];
+    if(hg){
+      h += '<tr data-ll-unit-head="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;"><td colspan="7" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
+        esc(llGroupHeading(hg))+opisBtn+'</td></tr>';
+    }
     h += '<tr'+(it.missing?' data-missing="1"':'')+
       (it.added_by_store?' data-ll-added="'+escAttr(it.approval_status||'')+'"':'')+
       ' style="border-bottom:1px solid #f1f5f9;'+
       (llRowPending(it)?'background:#fffbeb;':(llRowRejected(it)?'background:#f8fafc;color:#94a3b8;text-decoration:line-through;':
         (it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':''))))+'">'+
       '<td style="padding:6px 9px;color:#94a3b8;">'+(it.position!=null?it.position:'—')+'</td>'+
-      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;">'+esc(llKindLabel(it))+
+      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+(isHeaded?'padding-left:22px;color:#94a3b8;':'')+'">'+(isHeaded?'↳':esc(llKindLabel(it)))+
         (it.added_by_store?'<div style="margin-top:3px;text-decoration:none;font-weight:400;white-space:normal;">'+llApprovalBadge(it)+llApprovalNote(it)+llApproveBtnsHtml(l, it)+'</div>':'')+
-        (firstOfUnit && llRowCounts(it) && unitHasProducts[ukey]
-          ? ' <button data-l="'+l.id+'" data-s="'+escAttr(it.store_name||'')+'" data-u="'+escAttr(uref)+'" onclick="llPrint(this.dataset.l,this.dataset.s,this.dataset.u)" title="Опис на палета — за залепване" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:4px;">🖨 Опис</button>'
-          : '')+'</td>'+
+        (isHeaded ? '' : opisBtn)+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
         (it.partial?' '+llPartialBadge():'')+'</td>'+
       /* Единственото, което остава редактируемо след изпращане. */
@@ -4423,6 +4536,7 @@ function llPrintCss(){
     '.lp-tbl td{box-sizing:border-box;border:1px solid #bbb;padding:1.2mm 0.8mm;font-size:8pt;vertical-align:top;word-break:normal;overflow-wrap:break-word;}'+
     '.lp-tbl tr:last-child td{border-bottom:1px solid #bbb;}'+
     '.lp-num{text-align:right;}'+
+    '.lp-tbl td.lp-uh{background:#f4f4f4;font-weight:700;font-size:8.5pt;}'+
     '.lp-kind{font-weight:700;}'+
     '.lp-tag{font-size:7pt;color:#92400e;white-space:nowrap;}'+
     '.lp-mtag{font-size:7pt;color:#111;white-space:normal;overflow-wrap:break-word;}'+
@@ -4481,13 +4595,16 @@ function llRenderPrint(list, items, storeFilter){
   var withProds = function(it){ return (it.products || []).length > 0; };
   var bodyHtml = llPalletGroups(rows).map(function(g){
     var span = g.rows.reduce(function(a, it){ return a + 1 + (withProds(it) ? 1 : 0); }, 0);
-    return g.rows.map(function(it, k){
+    var uhead = llIsHeaded(g.rows[0])
+      ? '<tr class="lp-row lp-uhead" data-ll-unit-head="1"><td colspan="7" class="lp-uh">'+esc(llGroupHeading(g.rows))+'</td></tr>'
+      : '';
+    return uhead + g.rows.map(function(it, k){
       n++;
       var doc = it.purchase_doc ? esc(it.purchase_doc) : '<span style="color:#777;">без</span>';
       if(it.partial)    doc += '<div class="lp-tag">частично</div>';
       return '<tr class="lp-row" data-store="'+escVal(it.store_name || '')+'">'+
         '<td class="lp-num">'+n+'</td>'+
-        (k === 0 ? '<td class="lp-kind" rowspan="'+span+'">'+esc(llKindLabel(g.rows[0]))+
+        (k === 0 ? '<td class="lp-kind" rowspan="'+span+'">'+esc(llIsHeaded(g.rows[0]) ? (LL_KIND_WORD[g.rows[0].kind] || g.rows[0].kind) : llKindLabel(g.rows[0]))+
           /* Извънгабаритният няма артикули по документ — „какъв е товарът" е
              единственото, което казва какво се вози. Стои до вида, не в
              колоната за коментар: там се чете като бележка встрани. */
