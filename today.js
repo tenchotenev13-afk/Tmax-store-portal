@@ -20,6 +20,25 @@ var todayPhotosCache = null;       /* заредените снимки - lazy, 
 var todayCrossCache = null;        /* кросмодулно обобщение (Разлики/Каса/Стока на път/Палети) - lazy */
 var todayCrossFetched = false;
 
+/* Бюлетинът на ТЕКУЩАТА седмица, не последният създаден: следващата седмица се
+   публикува в петък, а до неделя „Днес“ трябва да показва още текущата. Изборът
+   е на report.js (reportPickWeeklyBulletin: точната седмица, иначе най-новият,
+   който не е след нея). report.js се зарежда след today.js, но тези функции
+   се викат при рендер — без него остава старото поведение. */
+function todayHasWeeklyPick(){
+  return typeof reportPickWeeklyBulletin==='function' && typeof reportWeekOfMonday==='function' && typeof reportMondayOfWeek==='function';
+}
+function todayBulletinQuery(){
+  return todayHasWeeklyPick()
+    ? 'status=eq.published&order=year.desc,week_number.desc&limit=20'
+    : 'status=eq.published&order=created_at.desc&limit=1';
+}
+function todayPickBulletin(list){
+  if(!Array.isArray(list)||!list.length)return null;
+  if(!todayHasWeeklyPick())return list[0];
+  return reportPickWeeklyBulletin(list, reportWeekOfMonday(reportMondayOfWeek(new Date())));
+}
+
 function loadTodayDashboard(){
   var wrap = document.getElementById('mod-today');
   if (!wrap) return;
@@ -40,7 +59,7 @@ function loadTodayDashboard(){
   } catch(e) { todayExpandedStore = null; }
 
   Promise.all([
-    sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1'),
+    sbGet('bulletins',todayBulletinQuery()),
     sbGet('recurring_tasks','active=eq.true&order=sort_order.asc'),
     loadRecurringSkips(recurringSkipWeekOf(new Date())),
     /* Пренесените ЗА ДНЕС (postponed_to = днес). Отделна заявка, защото редът
@@ -54,7 +73,7 @@ function loadTodayDashboard(){
        не мести индексите на заварените заявки. */
     loadRecurringVersions().catch(function(){ return []; })
   ]).then(function(results){
-    var bul = (Array.isArray(results[0]) && results[0].length) ? results[0][0] : null;
+    var bul = todayPickBulletin(results[0]);
     var todayVersions = Array.isArray(results[4]) ? results[4] : [];
     var todayMonday = recurringMondayOf(new Date());
     /* Изключванията за ТЕКУЩАТА седмица (recurring_task_skips). Глобалното
@@ -472,8 +491,8 @@ function todayCompletionExtras(compObj){
    липсващо: следващият го чете и не проверява. Обхватът е по ЗАДАЧИ
    (задачите на бюлетина + всички активни постоянни), не по период. ═══ */
 function todayLoadPhotoQueue(cb){
-  sbGet('bulletins','status=eq.published&order=created_at.desc&limit=1').then(function(bulRes){
-    var bul = (Array.isArray(bulRes) && bulRes.length) ? bulRes[0] : null;
+  sbGet('bulletins',todayBulletinQuery()).then(function(bulRes){
+    var bul = todayPickBulletin(bulRes);
     /* Многоседмичните също: обект, качил снимка към задача, чийто бюлетин е
        по-ранна седмица, иначе изобщо не се появява в опашката за преглед. */
     var photoWkMon = recurringMondayOf(new Date());
