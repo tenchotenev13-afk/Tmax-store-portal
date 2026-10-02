@@ -636,12 +636,12 @@ function exportTransitExcel(){
     'Обновен от','Обновен на']];
   transitData.forEach(function(r){
     rows.push([
-      r.direction==='outgoing'?'📤 Изпращам':'📦 Получавам',
+      r.direction==='outgoing'?'📤 Изпращам':r.direction==='transfer'?'🔄 Трансфер':'📦 Получавам',
       r.store_name||'',r.supplier||'',r.purchase_doc||'',r.position||'',
       r.doc_date||'',r.material_code||'',r.material_name||'',
       r.ordered_qty||'',r.unit||'',r.remaining_qty||'',
       r.transfer_date||'',
-      r.status==='received'?'Прието':r.status==='rejected'?'Неприето':'Не доставена',
+      T_STATUS[r.status]?T_STATUS[r.status].label.replace(/^[^A-Za-zА-Яа-я]+/,''):(r.status||''),
       tReviewedExcel(r),
       r.comment||'',r.updated_by||'',r.updated_at?r.updated_at.slice(0,16).replace('T',' '):''
     ]);
