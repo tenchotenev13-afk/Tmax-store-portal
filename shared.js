@@ -1476,7 +1476,6 @@ function startApp(){
   document.getElementById('nav-store').textContent=isGlobal()?'Всички магазини':currentUser.store_name;
   setupTabsForRole();
   if(typeof initTabDrag==='function')setTimeout(initTabDrag,200);
-  if(isGlobal())document.getElementById('tr-metrics').style.display='grid';
   loadAll();
   /* Покажи подходящ таб според роля */
   var startTab=currentUser.role==='kasa'?'kasa':currentUser.role==='info'?'client':'transport';
@@ -1551,6 +1550,9 @@ function showModule(mod){
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
   var tab=document.getElementById('tab-'+mod);if(tab)tab.classList.add('active');
+  /* Броячите (транспорт + клиентски) — само в самите Транспорт и Клиентски, не над всеки таб. */
+  var trMetrics=document.getElementById('tr-metrics');
+  if(trMetrics)trMetrics.style.display=(isGlobal()&&(mod==='transport'||mod==='client'))?'grid':'none';
   /* "Наръчник" и "Инструкции" са обединени в 1 таб с 2 под-таба — поддържаме визуално коректно състояние */
   var dhSub=document.getElementById('docs-handbook-subnav');
   if(dhSub){
