@@ -177,7 +177,8 @@ const blocks = c => (c ? Array.prototype.slice.call(c.querySelectorAll('.co-it')
   section('8. Календар — първият артикул + „+N"');
   {
     w.calWeekOffset = 0; w.calRoutes = []; w.calTransport = []; w.calTemplates = [];
-    w.calClients = JSON.parse(JSON.stringify(ORDERS));
+    /* Календарът слага заявките по ДОСТАВКА (delivery), не по date — затова днес. */
+    w.calClients = JSON.parse(JSON.stringify(ORDERS)).map(o => Object.assign(o, { delivery: w.localDateISO(new Date()) }));
     guard('renderCalendar()', () => w.renderCalendar());
     const t = txt(doc.getElementById('mod-calendar'));
     ok('ПЛАФОН +1', /ПЛАФОН\s*\+1/.test(t), t.slice(0, 400));

@@ -55,7 +55,7 @@ function loadCalendar() {
   Promise.all([
     sbGet('bus_routes', 'route_date=gte.'+from+'&route_date=lte.'+to+'&order=route_date.asc'+storeQ()),
     sbGet('transport_orders', 'date=gte.'+from+'&date=lte.'+to+'&order=date.asc'+storeQ()),
-    sbGet('client_orders', 'date=gte.'+from+'&date=lte.'+to+'&order=date.asc'+storeQ()),
+    sbGet('client_orders', 'delivery=gte.'+from+'&delivery=lte.'+to+'&status=neq.refused&order=delivery.asc'+storeQ()),
     sbGet('route_templates', 'active=eq.true&order=day_of_week.asc'+storeQ())
   ]).then(function(r) {
     calRoutes    = Array.isArray(r[0]) ? r[0] : [];
@@ -142,7 +142,7 @@ function renderCalendar() {
 
     var dayRoutes    = calRoutes.filter(function(r){ return r.route_date===dateStr; });
     var dayTransport = calTransport.filter(function(r){ return r.date===dateStr; });
-    var dayClients   = calClients.filter(function(r){ return r.date===dateStr; });
+    var dayClients   = calClients.filter(function(r){ return r.delivery===dateStr; });
     var total = dayRoutes.length + dayTransport.length + dayClients.length;
 
     h += '<div style="border:1px solid '+(isToday?'#2563eb':isWeekend?'#f1f5f9':'#e2e8f0')+';border-radius:10px;padding:10px;min-height:140px;background:'+(isToday?'#eff6ff':isWeekend?'#fafafa':'#fff')+';display:flex;flex-direction:column;">';
@@ -183,8 +183,8 @@ function renderCalendar() {
     });
 
     /* Клиентски доставки */
-    dayClients.filter(function(c){ return c.fulfiller_date===dateStr||c.date===dateStr; }).slice(0,3).forEach(function(c) {
-      h += '<div style="background:#fdf4ff;border-left:2px solid #a855f7;border-radius:0 5px 5px 0;padding:4px 6px;margin-bottom:4px;font-size:11px;">';
+    dayClients.slice(0,3).forEach(function(c) {
+      h += '<div data-id="'+esc(c.id)+'" onclick="if(typeof openClientOrderDetail===&apos;function&apos;)openClientOrderDetail(this.dataset.id)" style="background:#fdf4ff;border-left:2px solid #a855f7;border-radius:0 5px 5px 0;padding:4px 6px;margin-bottom:4px;font-size:11px;cursor:pointer;">';
       h += '<div style="font-weight:600;color:#7c3aed;">📋 Клиентска заявка</div>';
       h += '<div style="color:#374151;">'+esc(c.store_name||'')+'</div>';
       /* Първият артикул + „+N" — o.product носи само items[0] */
@@ -192,6 +192,9 @@ function renderCalendar() {
       if (cIt[0] && cIt[0].product) h += '<div style="color:#94a3b8;">'+esc((cIt[0].product||'').slice(0,30))+(cIt.length>1?' <b>+'+(cIt.length-1)+'</b>':'')+'</div>';
       h += '</div>';
     });
+    if (dayClients.length > 3) {
+      h += '<div onclick="showModule(&apos;client&apos;)" style="background:#fdf4ff;border-left:2px solid #a855f7;border-radius:0 5px 5px 0;padding:4px 6px;margin-bottom:4px;font-size:11px;font-weight:600;color:#7c3aed;cursor:pointer;">+'+(dayClients.length-3)+' още клиентски заявки</div>';
+    }
 
     if (!total) {
       h += '<div style="flex:1;display:flex;align-items:center;justify-content:center;color:#e2e8f0;font-size:12px;">Свободен</div>';
