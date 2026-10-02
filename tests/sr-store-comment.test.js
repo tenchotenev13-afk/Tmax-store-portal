@@ -164,7 +164,7 @@ const srPatch = (h, id) => h.calls.patch.find(p => /stock_returns/.test(p.url) &
     h.close();
   }
 
-  section('е) Импорт: без canCompleteSR() коментарите НЕ се пишат; при Цвети — както досега');
+  section('е) Импорт: без canCompleteSR() коментарите НЕ се пишат; при Цвети — да (само нови редове от 02.10.2026)');
   {
     const LOGI = { email: 'logi@temax.bg', display_name: 'Логистик', role: 'logistics',
       store_name: 'Централен офис', assigned_stores: [] };
@@ -204,20 +204,16 @@ const srPatch = (h, id) => h.calls.patch.find(p => /stock_returns/.test(p.url) &
         !('control_comment' in n) && !('controller_comment' in n), JSON.stringify(Object.keys(n)));
       ok('logistics: другите полета — да (куриер, ИД)', n.courier_info === 'Спиди' && n.id_euro === 'E');
     }
-    if (ok('logistics: съществуващият се обновява', !!a.upd)) {
-      ok('logistics: обновяването БЕЗ двата коментара', !('control_comment' in a.upd.body) && !('controller_comment' in a.upd.body),
-        JSON.stringify(a.upd.body));
-      ok('logistics: другите полета се обновяват (куриер)', a.upd.body.courier_info === 'Спиди', JSON.stringify(a.upd.body));
-    }
+    /* От 02.10.2026 импортът само добавя нови редове — съществуващият не се пипа. */
+    ok('logistics: съществуващият НЕ се обновява (няма PATCH)', !a.upd && a.h.calls.patch.length === 0);
     a.h.close();
 
     const c = await runImport(CVETI);
     const n2 = c.ins.find(r => r.purchase_order === '4200000002');
     ok('Цвети: новият ред носи двата коментара', !!n2 && n2.control_comment === 'КИ НОВ' && n2.controller_comment === 'НАСОКА НОВ',
       JSON.stringify(n2));
-    ok('Цвети: обновяването носи двата коментара', !!c.upd && c.upd.body.control_comment === 'КИ ОТ ФАЙЛ' &&
-      c.upd.body.controller_comment === 'НАСОКА ОТ ФАЙЛ', JSON.stringify(c.upd && c.upd.body));
-    ok('Цвети: store_comment импортът не пипа', !!n2 && !('store_comment' in n2) && !!c.upd && !('store_comment' in c.upd.body));
+    ok('Цвети: съществуващият НЕ се обновява (няма PATCH)', !c.upd && c.h.calls.patch.length === 0);
+    ok('Цвети: store_comment импортът не пипа', !!n2 && !('store_comment' in n2));
     c.h.close();
   }
 

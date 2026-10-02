@@ -214,7 +214,7 @@ const sheetOf = (wb, name) => (wb.Sheets[name] || {}).__aoa;
     }
   }
 
-  section('г) Обратно качване на изнесения файл: приключеният в портала не се пипа');
+  section('г) Обратно качване на изнесения файл: нищо не се пипа (само нови редове от 02.10.2026)');
   {
     const EXISTING = [
       { id: 'c-1', purchase_order: '4200016266', status: 'taken' },
@@ -235,22 +235,12 @@ const sheetOf = (wb, name) => (wb.Sheets[name] || {}).__aoa;
       const posts = calls.post.filter(p => p.table === 'stock_returns');
       ok('нищо не е вмъкнато наново (всички ПВ-ЕВР са познати)', posts.length === 0,
         JSON.stringify(posts.map(p => p.body)));
-      ok('приключеният (c-3) НЕ е пипан', !patches.some(p => p.url.indexOf('id=eq.c-3') >= 0),
+      /* От 02.10.2026 импортът само добавя нови редове: изнесеният файл, качен
+         обратно, не пипа нито един ред — и приключения, и останалите. */
+      ok('нито един PATCH (и приключеният c-3, и другите три)', patches.length === 0,
         patches.map(p => p.url).join(' | '));
-      ok('другите три са обновени', ['c-1', 'c-2', 'c-4'].every(id => patches.some(p => p.url.indexOf('id=eq.' + id) >= 0)),
-        patches.map(p => p.url).join(' | '));
-      const p1 = patches.find(p => p.url.indexOf('id=eq.c-1') >= 0);
-      if (ok('има PATCH за c-1', !!p1)) {
-        ok('c-1 се връща със същите стойности (статус, дати, куриер, коментари)',
-          p1.body.status === 'taken' && p1.body.withdrawal_date === '2026-08-20' &&
-          p1.body.confirmed_date === '2026-08-21' && p1.body.doc_date === '2026-08-02' &&
-          p1.body.courier_info === 'Спиди 777' && p1.body.control_comment === 'Проверено' &&
-          p1.body.controller_comment === 'Ок от контрольор' && p1.body.id_euro === 'E-66' &&
-          p1.body.plant === '1210' && p1.body.supplier === 'КАМ-04',
-          JSON.stringify(p1.body));
-      }
-      const prog = (doc.getElementById('sr-import-progress') || {}).innerHTML || '';
-      ok('обобщението казва „Пропуснати (приключени): 1"', prog.indexOf('Пропуснати (приключени): 1') >= 0, prog);
+      const prog = (doc.getElementById('sr-import-progress') || {}).textContent || '';
+      ok('обобщението казва „Пропуснати (вече в портала): 4"', prog.indexOf('Пропуснати (вече в портала): 4') >= 0, prog);
     }
   }
 

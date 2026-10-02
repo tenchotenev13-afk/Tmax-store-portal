@@ -110,7 +110,7 @@ const TESTS = [
   'return-proof.test.js',
   'stock-returns-order-number.test.js',
   'stock-returns-supplier-export.test.js',
-  'stock-returns-import-update.test.js',
+  'stock-returns-import-new-only.test.js',
   'stock-returns-po-sort.test.js',
   'stock-returns-complaint-export.test.js',
   'stock-returns-complaint-docdate.test.js',

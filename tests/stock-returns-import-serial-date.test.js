@@ -6,8 +6,8 @@
    нито един от 378-те реда в „По рекламации" нямаше doc_date, при 105 с дата
    на изтегляне и 129 с потвърдена акт. (тези се пишат на ръка като текст).
 
-   Данните се попълват при следващо качване на файла: познат ПВ-ЕВР се ОБНОВЯВА
-   (раздел в), приключените не се пипат (заковано в stock-returns-import-update).
+   От 02.10.2026 импортът само ДОБАВЯ нови редове (познат ПВ-ЕВР се пропуска),
+   затова раздел г) проверява целия път с НОВ ред: датата стига до POST-а.
 
    Пускане:  node tests/stock-returns-import-serial-date.test.js .
 */
@@ -119,11 +119,11 @@ const settle = () => new Promise(res => setTimeout(res, 60));
     }
   }
 
-  section('г) Повторно качване: познат ПВ-ЕВР без дата получава doc_date през PATCH');
+  section('г) Целият импорт: нов ПВ-ЕВР със сериен номер стига до POST-а с doc_date');
   {
     const { w, doc, calls } = env(
       [['4200016266', 'E-66', 'КАМ-04', 46236, '1210', 'ВЗЕТА', '', 'Спиди', '', '', '']],
-      [{ id: 'db-1', purchase_order: '4200016266', status: 'taken' }]
+      []
     );
     w.renderStockReturns();
     w.openReturnsImportModal();
@@ -133,10 +133,13 @@ const settle = () => new Promise(res => setTimeout(res, 60));
     if (ok('бутонът „Започни импорт" е на екрана', !!b)) {
       realClick(w, b);
       await settle();
-      const p = calls.patch.find(x => /stock_returns/.test(x.url) && x.url.indexOf('id=eq.db-1') >= 0);
-      if (ok('има PATCH за db-1', !!p, JSON.stringify(calls.patch.map(x => x.url)))) {
-        ok('носи doc_date = 2026-08-02', p.body.doc_date === '2026-08-02', JSON.stringify(p.body.doc_date));
+      const rows = [];
+      calls.post.filter(x => x.table === 'stock_returns').forEach(x => (Array.isArray(x.body) ? x.body : [x.body]).forEach(b => rows.push(b)));
+      const p = rows.find(x => x.purchase_order === '4200016266');
+      if (ok('има POST за 4200016266', !!p, JSON.stringify(rows))) {
+        ok('носи doc_date = 2026-08-02', p.doc_date === '2026-08-02', JSON.stringify(p.doc_date));
       }
+      ok('и нито един PATCH', calls.patch.length === 0, JSON.stringify(calls.patch.map(x => x.url)));
     }
   }
 

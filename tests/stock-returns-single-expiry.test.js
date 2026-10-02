@@ -84,7 +84,10 @@ const inserted = h => {
       ['П-ПРАЗ', '', null, 'празно'],
       ['П-БОКЛ', 'до края на месеца', null, 'боклук']
     ];
-    const h = env([HEAD].concat(CASES.map(c => [c[0], '111', 2, 'Раднево', 'КАМ-04', c[1], 'изтекъл'])));
+    /* Всеки ред със свой SAP: от 02.10.2026 единичният лист пропуска ред със
+       същите магазин + SAP + срок (srSingleSheetKey), а четири от датите тук
+       са един и същ ден в различен запис. */
+    const h = env([HEAD].concat(CASES.map((c, i) => [c[0], '11' + i, 2, 'Раднево', 'КАМ-04', c[1], 'изтекъл'])));
     await runImport(h);
     const rows = inserted(h);
     const prog = (h.doc.getElementById('sr-import-progress') || {}).innerHTML || '';

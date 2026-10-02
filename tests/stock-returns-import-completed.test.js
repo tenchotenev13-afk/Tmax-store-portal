@@ -6,9 +6,9 @@
 
    Сега:
      · „ПРИКЛЮЧ…" → 'completed', но само за canCompleteSR() (както в модала);
-     · без това право: нов ред влиза като 'taken', съществуващ си пази
-       статуса (останалите полета се обновяват), броят се показва;
-     · приключен в портала ред не се пипа — както досега.
+     · без това право: нов ред влиза като 'taken', броят се показва;
+     · от 02.10.2026 съществуващ ред (по ПВ-ЕВР) изобщо не се пипа — импортът
+       само добавя нови редове (tests/stock-returns-import-new-only.test.js).
 
    Всичко минава през целия startReturnsImport: бутон „📤 Импорт от Excel" →
    файл → „Започни импорт" → дедуп GET → POST / PATCH.
@@ -94,7 +94,7 @@ const prog = h => (h.doc.getElementById('sr-import-progress') || {}).innerHTML |
 
 (async function run() {
 
-  section('а) С право (Цвети): ПРИКЛЮЧЕНА → completed — и за нов, и за съществуващ');
+  section('а) С право (Цвети): ПРИКЛЮЧЕНА → completed за нов; съществуващият не се пипа');
   {
     const h = env(CVETI, [{ id: 'db-1', purchase_order: '4200000001', status: 'taken' }]);
     ok('canCompleteSR() е true', h.w.canCompleteSR() === true);
@@ -102,12 +102,12 @@ const prog = h => (h.doc.getElementById('sr-import-progress') || {}).innerHTML |
     await runImport(h);
     const n = posts(h).find(b => b.purchase_order === '4200000002');
     ok('новият е вмъкнат като completed', n && n.status === 'completed', JSON.stringify(n && n.status));
-    const p = patchFor(h, 'db-1');
-    ok('съществуващият taken става completed', p && p.body.status === 'completed', JSON.stringify(p && p.body));
+    ok('съществуващият taken НЕ се пипа (няма PATCH)', !patchFor(h, 'db-1') && h.calls.patch.length === 0,
+      JSON.stringify(h.calls.patch.map(p => p.url)));
     ok('няма предупреждение за права', prog(h).indexOf('без право') < 0, prog(h));
   }
 
-  section('б) Без право (logistics): нов → taken, съществуващ пази статуса, броят се вижда');
+  section('б) Без право (logistics): нов → taken, съществуващите не се пипат, броят се вижда');
   {
     const h = env(LOGI, [{ id: 'db-1', purchase_order: '4200000001', status: 'taken' },
                          { id: 'db-3', purchase_order: '4200000003', status: 'pending' }]);
@@ -117,18 +117,11 @@ const prog = h => (h.doc.getElementById('sr-import-progress') || {}).innerHTML |
     await runImport(h);
     const n = posts(h).find(b => b.purchase_order === '4200000002');
     ok('новият е вмъкнат като taken', n && n.status === 'taken', JSON.stringify(n && n.status));
-    const p1 = patchFor(h, 'db-1');
-    if (ok('има PATCH за съществуващия taken', !!p1)) {
-      ok('PATCH-ът НЕ носи status', !Object.prototype.hasOwnProperty.call(p1.body, 'status'), JSON.stringify(p1.body));
-      ok('другите полета се обновяват (куриер)', p1.body.courier_info === 'Еконт 777', JSON.stringify(p1.body.courier_info));
-    }
-    const p3 = patchFor(h, 'db-3');
-    ok('съществуващ pending също не става completed (няма status)',
-      p3 && !Object.prototype.hasOwnProperty.call(p3.body, 'status'), JSON.stringify(p3 && p3.body));
+    ok('съществуващите (db-1, db-3) НЕ се пипат', h.calls.patch.length === 0, JSON.stringify(h.calls.patch.map(p => p.url)));
     const t = prog(h);
-    ok('обобщението показва общия брой: 3', t.indexOf('без право да приключваш: 3') >= 0, t);
-    ok('и разбивката: 1 нов, 2 съществуващи',
-      t.indexOf('вмъкнати като „Взета": 1') >= 0 && t.indexOf('със запазен статус: 2') >= 0, t);
+    ok('обобщението брои само новия: „без право да приключваш: 1 (вмъкнати като „Взета")"',
+      t.indexOf('без право да приключваш: 1 (вмъкнати като „Взета")') >= 0, t);
+    ok('и 2 пропуснати като вече в портала', t.indexOf('Пропуснати (вече в портала): 2') >= 0, t);
   }
 
   section('в) Приключен в портала + файл с НЕВЗЕТА → не се пипа (и за двамата)');
@@ -139,8 +132,8 @@ const prog = h => (h.doc.getElementById('sr-import-progress') || {}).innerHTML |
       await runImport(h);
       ok(u.role + ': няма PATCH за приключения', !patchFor(h, 'db-9'),
         JSON.stringify(h.calls.patch.map(p => p.url)));
-      ok(u.role + ': обобщението брои 1 пропуснат приключен',
-        prog(h).indexOf('Пропуснати (приключени): 1') >= 0, prog(h));
+      ok(u.role + ': обобщението брои 1 пропуснат (вече в портала)',
+        prog(h).indexOf('Пропуснати (вече в портала): 1') >= 0, prog(h));
     }
   }
 
@@ -160,7 +153,7 @@ const prog = h => (h.doc.getElementById('sr-import-progress') || {}).innerHTML |
     ok('„Приключена" (малки) → completed', st['4200000016'] === 'completed', st['4200000016']);
   }
 
-  section('д) Кръг: износ → импорт запазва completed при право');
+  section('д) Кръг: износ → импорт; съществуващият не се пипа, изтритият се връща');
   {
     const R = (o) => Object.assign({ source: 'complaint', store_name: 'Раднево', supplier: 'КАМ-04',
       id_euro: 'E', plant: '1210', doc_date: '2026-08-02', withdrawal_date: '2026-08-20',
@@ -176,9 +169,8 @@ const prog = h => (h.doc.getElementById('sr-import-progress') || {}).innerHTML |
       ok('в листа пише ПРИКЛЮЧЕНА', h.cap.files[0].wb.Sheets['21'].__aoa[1][5] === 'ПРИКЛЮЧЕНА',
         JSON.stringify(h.cap.files[0].wb.Sheets['21'].__aoa[1]));
       await runImport(h);
-      const p = patchFor(h, 'x-1');
-      ok('отвореният наново ред се връща като completed, не като pending',
-        p && p.body.status === 'completed', JSON.stringify(p && p.body.status));
+      ok('отвореният наново ред НЕ се пипа (статусът се поддържа в портала)', !patchFor(h, 'x-1'),
+        JSON.stringify(h.calls.patch.map(p => p.url)));
       const n = posts(h).find(b => b.purchase_order === '4200000022');
       ok('изтритият се вмъква като taken (както е бил)', n && n.status === 'taken', JSON.stringify(n && n.status));
     }
