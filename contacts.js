@@ -217,7 +217,8 @@ function ctStyleTag(){
     '.ct-head{font-size:10.5px;font-weight:700;color:#94a3b8;text-transform:uppercase;letter-spacing:.3px;background:#f8fafc;cursor:default;}'+
     '.ct-head:hover{background:#f8fafc;}'+
     '.ct-srow{grid-template-columns:1.3fr 1.6fr 1.1fr 64px;}'+
-    '.ct-c-name{font-weight:600;color:#0f172a;display:flex;align-items:center;gap:5px;min-width:0;}'+
+    '.ct-c-name{font-weight:600;color:#0f172a;display:flex;align-items:center;gap:8px;min-width:0;}'+
+    '.ct-av{display:flex;flex:0 0 auto;}'+
     '.ct-c-sub{color:#64748b;}'+
     '.ct-c-mail a{color:#2563eb;word-break:break-all;}'+
     '.ct-c-phone a{color:#0f172a;font-family:monospace;white-space:nowrap;}'+
@@ -234,6 +235,7 @@ function ctStyleTag(){
       '.ct-c-dir,.ct-c-mail,.ct-c-dep,.ct-act{display:none;}'+
       '.ct-c-name{grid-column:1;grid-row:1;}'+
       '.ct-c-role{grid-column:1;grid-row:2;font-size:11px;}'+
+      '.ct-row:has(.ct-av) .ct-c-role{padding-left:42px;margin-top:-10px;}'+
       '.ct-c-phone{grid-column:2;grid-row:1 / 3;}'+
       '.ct-stores{grid-template-columns:1fr;}'+
       '#contacts-search{width:100% !important;}'+
@@ -405,7 +407,7 @@ function ctRenderDepts(grid){
       var mail=ctClean(c.email);
       h+='<div '+ctRowAttrs(c)+'>'+
         '<div class="ct-c-dir ct-c-sub">'+esc(ctClean(c.direction))+'</div>'+
-        '<div class="ct-c-name"><div class="ct-nm">'+esc(c.name||'')+'</div>'+'</div>'+
+        ctNameCell(c)+
         '<div class="ct-c-role ct-c-sub">'+esc(ctClean(c.role_title))+'</div>'+
         ctPhoneCell(c)+
         '<div class="ct-c-mail">'+(mail?'<a href="mailto:'+escAttr(mail)+'" onclick="event.stopPropagation()">'+esc(mail)+'</a>':'')+'</div>'+
@@ -449,7 +451,7 @@ function ctRenderStores(grid){
     staff.forEach(function(c){
       h+='<div '+ctRowAttrs(c,'ct-srow')+'>'+
         '<div class="ct-c-role ct-c-sub">'+esc(ctRoleLabel(c)||'—')+'</div>'+
-        '<div class="ct-c-name"><div class="ct-nm">'+esc(c.name||'')+'</div>'+'</div>'+
+        ctNameCell(c)+
         ctPhoneCell(c)+
         ctActCell(c,isAdmin)+
         '</div>';
@@ -520,6 +522,15 @@ var CT_DEPT_ICONS = {
 };
 function ctDeptIcon(cat){ return CT_DEPT_ICONS[cat] || ['🏢','#f1f5f9']; }
 function ctInitials(name){ return String(name||'?').split(' ').filter(Boolean).slice(0,2).map(function(w){return w[0]||'';}).join('').toUpperCase(); }
+/* Клетката с името в редовете. Докато се търси (поле с текст), до името
+   излиза профилната снимка (или кръг с инициали) — за да се познае човекът
+   още в резултатите. Без търсене списъкът е без снимки, както е искано
+   първоначално: снимката е в детайла. Името остава в собствен елемент
+   (.ct-nm) — тестовете и мобилната подредба разчитат на това. */
+function ctNameCell(c){
+  var withPhoto=!!ctSearchQ();
+  return '<div class="ct-c-name">'+(withPhoto?'<span class="ct-av">'+ctAvatar(c,34)+'</span>':'')+'<div class="ct-nm">'+esc(c.name||'')+'</div></div>';
+}
 function ctAvatar(c,size){
   var bgC=['#2563eb','#16a34a','#dc2626','#d97706','#7c3aed','#0891b2','#0f172a'];
   var name=c.name||'?', bg=bgC[(name.charCodeAt(0)||0)%bgC.length];
@@ -749,7 +760,7 @@ function ctRenderSearchAll(grid){
       var staff=ctIsStoreStaff(c), dep=ctById(c.deputy_id), mail=ctClean(c.email);
       h+='<div '+ctRowAttrs(c)+'>'+
         '<div class="ct-c-dir ct-c-sub">'+esc(staff?('🏬 '+(ctClean(c.store_name)||'')):ctClean(c.category))+'</div>'+
-        '<div class="ct-c-name"><div class="ct-nm">'+esc(c.name||'')+'</div>'+'</div>'+
+        ctNameCell(c)+
         '<div class="ct-c-role ct-c-sub">'+esc(staff?ctRoleLabel(c):ctClean(c.role_title))+'</div>'+
         ctPhoneCell(c)+
         '<div class="ct-c-mail">'+(mail?'<a href="mailto:'+escAttr(mail)+'" onclick="event.stopPropagation()">'+esc(mail)+'</a>':'')+'</div>'+
@@ -1301,21 +1312,22 @@ function savePhotoBulk(){
   });
 }
 
+/* Една снимка от ✏️ Редактирай. Смалява се като при масовото качване
+   (ctResizeImage); ако браузърът не може — качва се оригиналът. */
 function uploadContactPhoto(file,data) {
-  var ext=(file.name.split('.').pop()||'jpg').toLowerCase();
-  var path='photos/'+Date.now()+'.'+ext;
-  var reader=new FileReader();
-  reader.onload=function(e){
-    fetch(SB_CONTACTS+'/storage/v1/object/'+SB_CBKT+'/'+path,{
-      method:'POST',headers:{'Authorization':'Bearer '+SB_CKEY,'Content-Type':file.type||'image/jpeg','x-upsert':'true'},
-      body:e.target.result
+  ctResizeImage(file).then(function(blob){
+    var resized=blob!==file;
+    var ext=resized?'jpg':((file.name.split('.').pop()||'jpg').toLowerCase());
+    var path='photos/'+Date.now()+'.'+ext;
+    return fetch(SB_CONTACTS+'/storage/v1/object/'+SB_CBKT+'/'+path,{
+      method:'POST',headers:{'Authorization':'Bearer '+SB_CKEY,'Content-Type':(resized?'image/jpeg':(file.type||'image/jpeg')),'x-upsert':'true'},
+      body:blob
     }).then(function(r){
-      if(!r.ok){toast('Грешка при качване','#dc2626');return;}
+      if(!r.ok){toast('⚠️ Снимката НЕ е качена ('+r.status+')','#dc2626');return;}
       data.photo_url=SB_CPUB+path;
       saveContact(data);
-    }).catch(function(e){toast('Грешка: '+e.message,'#dc2626');});
-  };
-  reader.readAsArrayBuffer(file);
+    });
+  }).catch(function(e){toast('⚠️ Снимката НЕ е качена: '+((e&&e.message)||e),'#dc2626');});
 }
 
 function saveContact(data) {

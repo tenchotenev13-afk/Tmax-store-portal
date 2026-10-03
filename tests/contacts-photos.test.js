@@ -155,5 +155,52 @@ const storagePosts = calls => calls.post.filter(p => /storage\/v1\/object\/conta
     ok('toast „НЕ са записани 1"', calls.toast.some(t => /НЕ са записани 1/.test(t)));
   }
 
+  section('7. Снимки в резултатите от търсенето (04.10.2026)');
+  {
+    const { w, doc } = await env(OTHER);
+    const grid = () => doc.getElementById('contacts-grid');
+    const inp = doc.getElementById('contacts-search');
+    inp.value = 'инджова'; guard('търсене от банера', () => fire(w, inp, 'input'));
+    const r3 = grid().querySelector('.ct-row[data-id="p-3"]');
+    ok('Начало: ред с име и снимка', !!r3 && !!r3.querySelector('.ct-c-name img[src="https://example.org/old.jpg"]'));
+    ok('името остава отделен елемент', !!r3 && r3.querySelector('.ct-nm').textContent === 'Яна Георгиева Инджова');
+    inp.value = 'шикова'; fire(w, inp, 'input');
+    const r2 = grid().querySelector('.ct-row[data-id="p-2"]');
+    ok('без снимка → кръг с инициали „ВШ"', !!r2 && !r2.querySelector('img') && r2.querySelector('.ct-c-name').textContent.indexOf('ВШ') === 0);
+    guard('таб Отдели', () => w.setContactsTab('contact'));
+    ok('Отдели без търсене: без снимки', !grid().querySelector('.ct-c-name img') && !grid().querySelector('.ct-c-name > div:not(.ct-nm)'));
+    const inp2 = doc.getElementById('contacts-search');
+    inp2.value = 'инджова'; fire(w, inp2, 'input');
+    ok('Отдели с търсене: снимката излиза', !!grid().querySelector('.ct-row[data-id="p-3"] .ct-c-name img'));
+    guard('таб Магазини', () => w.setContactsTab('stores'));
+    const inp3 = doc.getElementById('contacts-search');
+    inp3.value = 'билбилева'; fire(w, inp3, 'input');
+    ok('Магазини с търсене: инициали „РБ"', (grid().querySelector('.ct-row[data-id="p-1"] .ct-c-name') || {}).textContent.indexOf('РБ') === 0);
+  }
+
+  section('8. Една снимка от ✏️ Редактирай: качва, закача, без тихи грешки');
+  {
+    const { w, doc, calls } = await env(PLAMENA);
+    w.openContactModal('p-6');
+    const fi = doc.getElementById('contact-photo-input');
+    Object.defineProperty(fi, 'files', { value: [new w.File(['x'], 'живко.png', { type: 'image/png' })] });
+    guard('Запази', () => realClick(w, btnExact(doc.getElementById('contact-ov'), 'Запази')));
+    await ticks(20);
+    const up = storagePosts(calls);
+    ok('1 качване в photos/', up.length === 1 && /\/contacts\/photos\/\d+\.png$/.test(up[0].url), up.map(p => p.url).join());
+    const pt = calls.patch.find(p => p.table === 'contacts' && /id=eq\.p-6/.test(p.url));
+    ok('PATCH с photo_url към качения файл', !!pt && pt.body.photo_url && up[0] && up[0].url.indexOf(pt.body.photo_url.split('/public/contacts/')[1]) > 0, pt && pt.body.photo_url);
+  }
+  {
+    const { w, doc, calls } = await env(PLAMENA, { POST: /storage\/v1\/object\/contacts\// });
+    w.openContactModal('p-6');
+    const fi = doc.getElementById('contact-photo-input');
+    Object.defineProperty(fi, 'files', { value: [new w.File(['x'], 'живко.jpg', { type: 'image/jpeg' })] });
+    guard('Запази', () => realClick(w, btnExact(doc.getElementById('contact-ov'), 'Запази')));
+    await ticks(20);
+    ok('провал → червен toast „НЕ е качена"', calls.toast.some(t => /НЕ е качена/.test(t)), JSON.stringify(calls.toast));
+    ok('провал → без PATCH', !calls.patch.some(p => p.table === 'contacts'));
+  }
+
   report();
 })();
