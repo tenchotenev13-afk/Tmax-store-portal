@@ -29,6 +29,7 @@ const TESTS = [
   'co-processed.test.js',
   'order-numbering.test.js',
   'paid-transport.test.js',
+  'co-sap-banner-state.test.js',
   'stock-differences.test.js',
   'sbget-errors.test.js',
   'stock-diff-null-payload.test.js',
@@ -294,15 +295,19 @@ const TESTS = [
   'client-notified.test.js',
   'co-filter-arrived.test.js',
   'co-filter-store.test.js',
+  'co-filter-bar.test.js',
   'transport-detail.test.js',
   'transport-row-items.test.js',
+  'metrics-only-transport-client.test.js',
   'contact-detail.test.js',
   'contacts-directory.test.js',
   'contacts-home.test.js',
   'contacts-photos.test.js',
   'co-row-click.test.js',
   'co-row-all-items.test.js',
+  'co-compact-row.test.js',
   'co-warehouse-fulfiller-buttons.test.js',
+  'nav-tabs-css.test.js',
   'table-scroll.test.js'
 ];
 
