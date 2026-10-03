@@ -958,16 +958,20 @@ function loadClientOrders(){
   }).catch(function(e){console.warn('client_orders:',e);});
 }
 
+/* Чипът на лентата „Покажи:" като предикат. 'active' = всичко, което още не е
+   приключило (нито изпълнена, нито отказана — по status И по _status). */
+function coChipMatch(f,o){
+  if(f==='all')return true;
+  if(f==='active')return o._status!=='done'&&o._status!=='refused'&&o.status!=='done'&&o.status!=='refused';
+  /* "Просрочени" е признак, не статус — заявка в sent/arrived/processed
+     никога не получава _status==='overdue'. Виж isLate() в shared.js. */
+  if(f==='overdue')return isLate(o);
+  return o._status===f||o.status===f;
+}
 function renderClientOrders(){
   var search=((document.getElementById('co-search')||{}).value||'').trim().toLowerCase();
   var month=(document.getElementById('co-month')||{}).value||'';
-  var list=clientOrders.filter(function(o){
-    if(orderFilter==='all')return true;
-    /* "Просрочени" е признак, не статус — заявка в sent/arrived/processed
-       никога не получава _status==='overdue'. Виж isLate() в shared.js. */
-    if(orderFilter==='overdue')return isLate(o);
-    return o._status===orderFilter||o.status===orderFilter;
-  });
+  var list=clientOrders.slice();
   if (month) list=list.filter(function(o){ return o.date && o.date.slice(0,7)===month; });
   var role=(document.getElementById('co-role-filter')||{}).value||'';
   if (role){
@@ -996,6 +1000,14 @@ function renderClientOrders(){
       return false;
     });
   }
+  /* Бройките до чиповете: колко заявки биха се показали с този чип при
+     текущите търсене/месец/магазин/изпълнява/роля (всички филтри без чипа). */
+  document.querySelectorAll('#co-filters .filter-btn[data-f]').forEach(function(b){
+    var n=b.querySelector('.co-chip-n');if(!n)return;
+    var f=b.getAttribute('data-f');
+    n.textContent=list.filter(function(o){return coChipMatch(f,o);}).length;
+  });
+  list=list.filter(function(o){return coChipMatch(orderFilter,o);});
   var body=document.getElementById('co-body');if(!body)return;
   if(!list.length){body.innerHTML='<tr><td colspan="14" style="text-align:center;padding:30px;color:#94a3b8;">Няма клиентски заявки.</td></tr>';return;}
   var isAdmin=currentUser&&['admin','accounting'].indexOf(currentUser.role)>=0;
@@ -1168,8 +1180,9 @@ function ptBadge(o){
 
 function filterOrders(f,btn){
   orderFilter=f;
-  document.querySelectorAll('#co-filters .filter-btn').forEach(function(b){b.classList.remove('active');});
-  if(btn)btn.classList.add('active');renderClientOrders();
+  /* Активният чип е по data-f, не по подадения btn — грешен btn от външен код не маркира грешен чип. */
+  document.querySelectorAll('#co-filters .filter-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-f')===f);});
+  renderClientOrders();
 }
 
 function setClientStatus(id,status){

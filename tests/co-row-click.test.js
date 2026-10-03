@@ -52,6 +52,8 @@ function env() {
     o._days = w.calcElapsed(o.created_at, o.date);
     o._isFulfiller = w.coIsMineToFulfill(o);
   });
+  /* Лентата „Покажи:“ е по подразбиране „Активни“; тези проверки гледат всички заявки, и приключените. */
+  h.w.orderFilter = 'all';
   guard('renderClientOrders()', () => w.renderClientOrders());
   return h;
 }

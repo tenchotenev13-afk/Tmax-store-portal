@@ -115,6 +115,8 @@ function boot(opts) {
   });
   const origToast = w.toast;
   w.toast = (m, c) => { calls.toast.push(m); try { origToast(m, c); } catch (e) {} };
+  /* Лентата „Покажи:“ е по подразбиране „Активни“; тези проверки гледат всички заявки, и приключените. */
+  w.orderFilter = 'all';
   return { w, calls, doc: w.document };
 }
 

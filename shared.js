@@ -162,7 +162,7 @@ function logAudit(event,extra){
 var currentUser=null; /* {email,display_name,store_name,role} */
 var currentSession=null; /* подписан пропуск от auth-login ("payload.подпис"); само в паметта, не в localStorage */
 var transportOrders=[],clientOrders=[],docs=[];
-var transportFilter='all',orderFilter='all',docFilter='all';
+var transportFilter='all',orderFilter='active',docFilter='all';
 var statusTargetId=null,statusTargetTable=null;
 var correctionTargetId=null,correctionTargetTable=null;
 var orderRestrictions=[]; /* активни ограничения на заявки към складове/ЦО за определен период */

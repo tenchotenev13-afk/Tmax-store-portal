@@ -78,6 +78,15 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .filter-bar{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center;}
 .filter-btn{border:1px solid var(--border);background:#fff;border-radius:6px;padding:5px 11px;font-size:12px;font-weight:500;cursor:pointer;font-family:inherit;color:var(--muted);}
 .filter-btn.active{background:var(--dark);color:#fff;border-color:var(--dark);}
+/* Лентата с филтри в Клиентски: хапчета с брой; само #co-filters, другите табове ползват .filter-btn както досега */
+#co-filters .co-filters-label{font-size:12px;font-weight:600;color:var(--muted);margin-right:2px;}
+#co-filters .filter-btn{height:32px;border-radius:16px;border:1px solid #cbd5e1;padding:0 12px;display:inline-flex;align-items:center;gap:6px;}
+#co-filters .filter-btn.active{background:var(--dark);color:#fff;border-color:var(--dark);}
+#co-filters .filter-btn.active::before{content:"✓";}
+#co-filters .filter-btn.co-hist{border-style:dashed;background:#f8fafc;}
+#co-filters .filter-btn.co-hist.active{background:var(--dark);}
+#co-filters .co-chip-n{font-size:11px;opacity:.7;font-variant-numeric:tabular-nums;}
+#co-filters .co-filters-sep{width:1px;height:20px;background:#cbd5e1;margin:0 4px;}
 .tbl-wrap{overflow-x:auto;border-radius:8px;border:1px solid var(--border);}
 .co-sticky-actions table td:last-child,
 .co-sticky-actions table th:last-child{position:sticky;right:0;background:#fff;box-shadow:-6px 0 6px -6px rgba(0,0,0,.15);}
@@ -394,17 +403,20 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div id="co-sap-banner"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
       <div id="co-filters" class="filter-bar" style="margin:0;">
-        <button class="filter-btn active" onclick="filterOrders('all',this)">Всички</button>
-        <button class="filter-btn" onclick="filterOrders('overdue',this)">🔴 Просрочени</button>
-        <button class="filter-btn" onclick="filterOrders('today',this)">🔵 Днес</button>
-        <button class="filter-btn" onclick="filterOrders('tomorrow',this)">🟡 Утре</button>
-        <button class="filter-btn" onclick="filterOrders('pending',this)">Изчаква</button>
-        <button class="filter-btn" onclick="filterOrders('processed',this)">✅ Обработена от ЦО</button>
-        <button class="filter-btn" onclick="filterOrders('sent',this)">📤 Изпратена</button>
-        <button class="filter-btn" onclick="filterOrders('arrived',this)">📦 Пристигнала</button>
-        <button class="filter-btn" onclick="filterOrders('postponed',this)">Отложена</button>
-        <button class="filter-btn" onclick="filterOrders('done',this)">Изпълнена</button>
-        <button class="filter-btn" onclick="filterOrders('refused',this)">Отказана</button>
+        <span class="co-filters-label">Покажи:</span>
+        <button class="filter-btn active" data-f="active" onclick="filterOrders('active',this)">Активни <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-f="overdue" onclick="filterOrders('overdue',this)">🔴 Просрочени <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-f="today" onclick="filterOrders('today',this)">🔵 Днес <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-f="tomorrow" onclick="filterOrders('tomorrow',this)">🟡 Утре <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-f="pending" onclick="filterOrders('pending',this)">Изчаква <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-f="processed" onclick="filterOrders('processed',this)">✅ Обработена от ЦО <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-f="sent" onclick="filterOrders('sent',this)">📤 Изпратена <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-f="arrived" onclick="filterOrders('arrived',this)">📦 Пристигнала <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-f="postponed" onclick="filterOrders('postponed',this)">Отложена <span class="co-chip-n">0</span></button>
+        <span class="co-filters-sep"></span>
+        <button class="filter-btn co-hist" data-f="done" onclick="filterOrders('done',this)">Изпълнена <span class="co-chip-n">0</span></button>
+        <button class="filter-btn co-hist" data-f="refused" onclick="filterOrders('refused',this)">Отказана <span class="co-chip-n">0</span></button>
+        <button class="filter-btn co-hist" data-f="all" onclick="filterOrders('all',this)">Всички <span class="co-chip-n">0</span></button>
       </div>
       <button class="btn btn-green" onclick="openClientModal()">+ Нова заявка</button>
     </div>

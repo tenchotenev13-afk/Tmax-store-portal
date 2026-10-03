@@ -94,6 +94,8 @@ function env(over) {
     o._status = (o.awaiting_stock && ['done', 'refused', 'postponed'].indexOf(o.status) < 0) ? 'awaiting' : st;
     o._days = h.w.calcElapsed(o.created_at, o.date);
   });
+  /* Лентата „Покажи:“ е по подразбиране „Активни“; тези проверки гледат всички заявки, и приключените. */
+  h.w.orderFilter = 'all';
   return h;
 }
 

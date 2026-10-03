@@ -89,6 +89,8 @@ function env(over) {
       o.fulfiller === h.w.currentUser.store_name &&
       o.store_name !== h.w.currentUser.store_name;
   });
+  /* Лентата „Покажи:“ е по подразбиране „Активни“; тези проверки гледат всички заявки, и приключените. */
+  h.w.orderFilter = 'all';
   return h;
 }
 

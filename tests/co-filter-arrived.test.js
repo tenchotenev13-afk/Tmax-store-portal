@@ -52,26 +52,30 @@ const rowIds = doc => Array.prototype.map.call(
   const { w, doc } = env();
   guard('първоначален рендер', () => w.renderClientOrders());
   const bar = doc.getElementById('co-filters');
+  const chip = f => bar.querySelector('[data-f="' + f + '"]');
+  /* Подразбиране е „Активни“ (done/refused скрити); тези проверки тръгват от „Всички“. */
+  realClick(w, chip('all'), 'Всички');
 
   section('1. Бутонът е в index.html, между „Изпратена" и „Отложена"');
-  const labels = Array.prototype.map.call(bar.querySelectorAll('button'), b => b.textContent.trim());
-  const i = labels.indexOf('📦 Пристигнала');
+  /* Редът е по data-f: текстът на бутона вече носи и броя. */
+  const labels = Array.prototype.map.call(bar.querySelectorAll('button'), b => b.getAttribute('data-f'));
+  const i = labels.indexOf('arrived');
   ok('бутон „📦 Пристигнала" съществува', i >= 0, JSON.stringify(labels));
-  ok('непосредствено след „📤 Изпратена"', labels[i - 1] === '📤 Изпратена', labels[i - 1]);
-  ok('непосредствено преди „Отложена"', labels[i + 1] === 'Отложена', labels[i + 1]);
+  ok('непосредствено след „📤 Изпратена"', labels[i - 1] === 'sent', labels[i - 1]);
+  ok('непосредствено преди „Отложена"', labels[i + 1] === 'postponed', labels[i + 1]);
   ok('всички 6 реда се виждат преди филтъра', rowIds(doc).length === 6, JSON.stringify(rowIds(doc)));
 
   section('2. Клик → само arrived');
-  const arrived = btnExact(bar, '📦 Пристигнала');
+  const arrived = chip('arrived');
   if (ok('бутонът се намира', !!arrived)) {
     realClick(w, arrived, '📦 Пристигнала');
     ok('остават точно a1 и a2', JSON.stringify(rowIds(doc)) === '["a1","a2"]', JSON.stringify(rowIds(doc)));
     ok('бутонът става active', arrived.classList.contains('active'));
-    ok('„Всички" вече не е active', !btnExact(bar, 'Всички').classList.contains('active'));
+    ok('„Всички" вече не е active', !chip('all').classList.contains('active'));
   }
 
   section('3. Клик на „Всички" → връщат се всички');
-  const all = btnExact(bar, 'Всички');
+  const all = chip('all');
   realClick(w, all, 'Всички');
   ok('пак 6 реда', rowIds(doc).length === 6, JSON.stringify(rowIds(doc)));
   ok('„Всички" е active', all.classList.contains('active'));

@@ -47,6 +47,8 @@ async function env(orders) {
   h.w.transportOrders = [];
   guard('loadClientOrders()', () => h.w.loadClientOrders());
   await ticks();
+  /* Лентата „Покажи:“ е по подразбиране „Активни“; тези проверки гледат всички заявки, и приключените. */
+  h.w.filterOrders('all');
   return h;
 }
 
@@ -113,7 +115,7 @@ function pick(w, sel, value) {
   {
     const { w, doc } = await env(MANY);
     const sel = doc.getElementById('co-store-filter');
-    const arrived = btnExact(doc.getElementById('co-filters'), '📦 Пристигнала');
+    const arrived = doc.querySelector('#co-filters [data-f="arrived"]');
     if (sel && arrived) {
       pick(w, sel, 'троян');
       realClick(w, arrived, '📦 Пристигнала');
