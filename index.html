@@ -413,19 +413,19 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
       <div id="co-filters" class="filter-bar" style="margin:0;">
         <span class="co-filters-label">Покажи:</span>
-        <button class="filter-btn active" data-f="active" onclick="filterOrders('active',this)">Активни <span class="co-chip-n">0</span></button>
-        <button class="filter-btn" data-f="overdue" onclick="filterOrders('overdue',this)">🔴 Просрочени <span class="co-chip-n">0</span></button>
-        <button class="filter-btn" data-f="today" onclick="filterOrders('today',this)">🔵 Днес <span class="co-chip-n">0</span></button>
-        <button class="filter-btn" data-f="tomorrow" onclick="filterOrders('tomorrow',this)">🟡 Утре <span class="co-chip-n">0</span></button>
-        <button class="filter-btn" data-f="pending" onclick="filterOrders('pending',this)">Изчаква <span class="co-chip-n">0</span></button>
-        <button class="filter-btn" data-f="processed" onclick="filterOrders('processed',this)">✅ Обработена от ЦО <span class="co-chip-n">0</span></button>
-        <button class="filter-btn" data-f="sent" onclick="filterOrders('sent',this)">📤 Изпратена <span class="co-chip-n">0</span></button>
-        <button class="filter-btn" data-f="arrived" onclick="filterOrders('arrived',this)">📦 Пристигнала <span class="co-chip-n">0</span></button>
-        <button class="filter-btn" data-f="postponed" onclick="filterOrders('postponed',this)">Отложена <span class="co-chip-n">0</span></button>
+        <button class="filter-btn active" data-co-f="active" onclick="filterOrders('active',this)">Активни <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-co-f="overdue" onclick="filterOrders('overdue',this)">🔴 Просрочени <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-co-f="today" onclick="filterOrders('today',this)">🔵 Днес <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-co-f="tomorrow" onclick="filterOrders('tomorrow',this)">🟡 Утре <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-co-f="pending" onclick="filterOrders('pending',this)">Изчаква <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-co-f="processed" onclick="filterOrders('processed',this)">✅ Обработена от ЦО <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-co-f="sent" onclick="filterOrders('sent',this)">📤 Изпратена <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-co-f="arrived" onclick="filterOrders('arrived',this)">📦 Пристигнала <span class="co-chip-n">0</span></button>
+        <button class="filter-btn" data-co-f="postponed" onclick="filterOrders('postponed',this)">Отложена <span class="co-chip-n">0</span></button>
         <span class="co-filters-sep"></span>
-        <button class="filter-btn co-hist" data-f="done" onclick="filterOrders('done',this)">Изпълнена <span class="co-chip-n">0</span></button>
-        <button class="filter-btn co-hist" data-f="refused" onclick="filterOrders('refused',this)">Отказана <span class="co-chip-n">0</span></button>
-        <button class="filter-btn co-hist" data-f="all" onclick="filterOrders('all',this)">Всички <span class="co-chip-n">0</span></button>
+        <button class="filter-btn co-hist" data-co-f="done" onclick="filterOrders('done',this)">Изпълнена <span class="co-chip-n">0</span></button>
+        <button class="filter-btn co-hist" data-co-f="refused" onclick="filterOrders('refused',this)">Отказана <span class="co-chip-n">0</span></button>
+        <button class="filter-btn co-hist" data-co-f="all" onclick="filterOrders('all',this)">Всички <span class="co-chip-n">0</span></button>
       </div>
       <button class="btn btn-green" onclick="openClientModal()">+ Нова заявка</button>
     </div>

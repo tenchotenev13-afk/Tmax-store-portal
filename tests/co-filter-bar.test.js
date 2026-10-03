@@ -52,11 +52,11 @@ function env() {
   return h;
 }
 const bar = h => h.doc.getElementById('co-filters');
-const chip = (h, f) => bar(h).querySelector('[data-f="' + f + '"]');
+const chip = (h, f) => bar(h).querySelector('[data-co-f="' + f + '"]');
 const count = (h, f) => parseInt(chip(h, f).querySelector('.co-chip-n').textContent, 10);
 const ids = h => Array.from(h.doc.querySelectorAll('#co-body tr[id^="co-row-"]')).map(r => r.id.replace('co-row-', '')).sort().join(',');
-const activeFs = h => Array.from(bar(h).querySelectorAll('.filter-btn.active')).map(b => b.getAttribute('data-f'));
-const order = h => Array.from(bar(h).querySelectorAll('button')).map(b => b.getAttribute('data-f')).join(',');
+const activeFs = h => Array.from(bar(h).querySelectorAll('.filter-btn.active')).map(b => b.getAttribute('data-co-f'));
+const order = h => Array.from(bar(h).querySelectorAll('button')).map(b => b.getAttribute('data-co-f')).join(',');
 
 (async function run() {
   section('1. лентата в index.html');
@@ -113,14 +113,14 @@ const order = h => Array.from(bar(h).querySelectorAll('button')).map(b => b.getA
     }
   }
 
-  section('5. filterOrders() маркира по data-f, не по подадения btn');
+  section('5. filterOrders() маркира по data-co-f, не по подадения btn');
   {
     const h = env();
     guard('рендер', () => h.w.renderClientOrders());
     h.w.filterOrders('sent', chip(h, 'today'));
     ok('грешен btn → маркиран е „sent"', activeFs(h).join(',') === 'sent', activeFs(h).join(','));
     h.w.filterOrders('refused');
-    ok('без btn → пак по data-f', activeFs(h).join(',') === 'refused');
+    ok('без btn → пак по data-co-f', activeFs(h).join(',') === 'refused');
   }
 
   section('6. външни извиквания');

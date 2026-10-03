@@ -152,7 +152,7 @@ function coLinkBadge(o){
 function gotoLinkedClientOrder(coId){
   window._coHighlightId=coId||null;
   /* Нулираме филтъра, за да не се окаже, че редът е скрит и изглежда сякаш нищо не става */
-  var b=document.querySelector('#co-filters .filter-btn[data-f="all"]');
+  var b=document.querySelector('#co-filters .filter-btn[data-co-f="all"]');
   if(b&&typeof filterOrders==='function')filterOrders('all',b);
   showModule('client');
 }

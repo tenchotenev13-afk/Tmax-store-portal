@@ -52,13 +52,13 @@ const rowIds = doc => Array.prototype.map.call(
   const { w, doc } = env();
   guard('първоначален рендер', () => w.renderClientOrders());
   const bar = doc.getElementById('co-filters');
-  const chip = f => bar.querySelector('[data-f="' + f + '"]');
+  const chip = f => bar.querySelector('[data-co-f="' + f + '"]');
   /* Подразбиране е „Активни“ (done/refused скрити); тези проверки тръгват от „Всички“. */
   realClick(w, chip('all'), 'Всички');
 
   section('1. Бутонът е в index.html, между „Изпратена" и „Отложена"');
-  /* Редът е по data-f: текстът на бутона вече носи и броя. */
-  const labels = Array.prototype.map.call(bar.querySelectorAll('button'), b => b.getAttribute('data-f'));
+  /* Редът е по data-co-f: текстът на бутона вече носи и броя. */
+  const labels = Array.prototype.map.call(bar.querySelectorAll('button'), b => b.getAttribute('data-co-f'));
   const i = labels.indexOf('arrived');
   ok('бутон „📦 Пристигнала" съществува', i >= 0, JSON.stringify(labels));
   ok('непосредствено след „📤 Изпратена"', labels[i - 1] === 'sent', labels[i - 1]);

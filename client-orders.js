@@ -1023,9 +1023,9 @@ function renderClientOrders(){
   }
   /* Бройките до чиповете: колко заявки биха се показали с този чип при
      текущите търсене/месец/магазин/изпълнява/роля (всички филтри без чипа). */
-  document.querySelectorAll('#co-filters .filter-btn[data-f]').forEach(function(b){
+  document.querySelectorAll('#co-filters .filter-btn[data-co-f]').forEach(function(b){
     var n=b.querySelector('.co-chip-n');if(!n)return;
-    var f=b.getAttribute('data-f');
+    var f=b.getAttribute('data-co-f');
     n.textContent=list.filter(function(o){return coChipMatch(f,o);}).length;
   });
   list=list.filter(function(o){return coChipMatch(orderFilter,o);});
@@ -1200,8 +1200,8 @@ function ptBadge(o){
 
 function filterOrders(f,btn){
   orderFilter=f;
-  /* Активният чип е по data-f, не по подадения btn — грешен btn от външен код не маркира грешен чип. */
-  document.querySelectorAll('#co-filters .filter-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-f')===f);});
+  /* Активният чип е по data-co-f, не по подадения btn — грешен btn от външен код не маркира грешен чип. */
+  document.querySelectorAll('#co-filters .filter-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-co-f')===f);});
   renderClientOrders();
 }
 
