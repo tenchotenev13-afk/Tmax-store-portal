@@ -47,8 +47,12 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .nav{background:var(--dark);padding:0 12px;display:grid;grid-template-columns:auto 1fr auto;align-items:stretch;gap:0;box-shadow:0 2px 12px rgba(0,0,0,.4);position:sticky;top:0;z-index:100;}
 .nav-brand{padding:8px 12px 8px 0;display:flex;align-items:center;}
 .nav-brand img{height:34px;display:block;}
-.nav-tabs{display:flex;overflow-x:auto;gap:0;scrollbar-width:none;justify-content:center;}
-.nav-tabs::-webkit-scrollbar{display:none;}
+.nav-tabs{display:flex;overflow-x:auto;gap:0;scrollbar-width:thin;justify-content:flex-start;}
+/* Празни елементи с auto margin: центрират реда, когато има място, и стават 0, когато не стига —
+   иначе центриран flex ред, който прелива, излиза и вляво, където скрол няма. */
+.nav-tabs::before,.nav-tabs::after{content:"";margin:auto;}
+.nav-tabs::-webkit-scrollbar{height:4px;}
+.nav-tabs::-webkit-scrollbar-thumb{background:#334155;border-radius:2px;}
 .nav-tab{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;padding:8px 10px;min-width:70px;cursor:pointer;border:none;background:none;color:#64748b;border-bottom:3px solid transparent;font-family:inherit;transition:background .15s,color .15s;border-radius:6px 6px 0 0;}
 .nav-tab .ti{font-size:20px;line-height:1;}
 .nav-tab .tl{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap;}
