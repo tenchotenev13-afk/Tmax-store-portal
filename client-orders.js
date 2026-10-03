@@ -748,9 +748,19 @@ function openHandbookClientOrders(){
   showModule('handbook');
 }
 
-/* Постоянен банер в таба (сгъваем; по подразбиране отворен) */
-var coSapBannerOpen=true;
-function toggleCoSapBanner(){coSapBannerOpen=!coSapBannerOpen;renderCoSapBanner();}
+/* Постоянен банер в таба (сгъваем; по подразбиране СГЪНАТ — заглавието с
+   напомнянето за SAP остава видимо). Състоянието се помни в localStorage
+   ('1' = отворен, '0' = сгънат); липсва или четенето гърми → сгънат. */
+var CO_SAP_BANNER_KEY='temax_co_sap_banner_open';
+function coReadSapBannerOpen(){
+  try{return localStorage.getItem(CO_SAP_BANNER_KEY)==='1';}catch(e){return false;}
+}
+var coSapBannerOpen=coReadSapBannerOpen();
+function toggleCoSapBanner(){
+  coSapBannerOpen=!coSapBannerOpen;
+  try{localStorage.setItem(CO_SAP_BANNER_KEY,coSapBannerOpen?'1':'0');}catch(e){}
+  renderCoSapBanner();
+}
 function renderCoSapBanner(){
   var el=document.getElementById('co-sap-banner');if(!el)return;
   var entries=sapClientEntries();

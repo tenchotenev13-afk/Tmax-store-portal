@@ -490,12 +490,13 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     w.renderCoSapBanner();
     const banner = doc.getElementById('co-sap-banner');
     ok('банерът съществува в таба', banner && banner.innerHTML.length > 0);
-    ok('банерът е отворен по подразбиране', banner.textContent.indexOf('951') >= 0);
+    const openBtn = () => Array.from(doc.getElementById('co-sap-banner').querySelectorAll('button')).some(b => b.textContent.indexOf('Отвори в Наръчника') >= 0);
+    ok('банерът е сгънат по подразбиране', banner.textContent.indexOf('▼ покажи') >= 0 && !openBtn());
     const head = banner.querySelector('[onclick]');
     realClick(w, head);
-    ok('свива се при клик', doc.getElementById('co-sap-banner').textContent.indexOf('▼ покажи') >= 0);
+    ok('разгъва се при първия клик', doc.getElementById('co-sap-banner').textContent.indexOf('▲ скрий') >= 0 && openBtn());
     realClick(w, doc.getElementById('co-sap-banner').querySelector('[onclick]'));
-    ok('разгъва се обратно', doc.getElementById('co-sap-banner').textContent.indexOf('951') >= 0);
+    ok('сгъва се обратно', doc.getElementById('co-sap-banner').textContent.indexOf('▼ покажи') >= 0 && !openBtn());
   }
 
   /* ══════════ 15. Бланка за шофьора + История ══════════ */
