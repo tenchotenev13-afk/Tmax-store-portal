@@ -53,7 +53,7 @@ function env() {
 }
 const bar = h => h.doc.getElementById('co-filters');
 const chip = (h, f) => bar(h).querySelector('[data-co-f="' + f + '"]');
-const count = (h, f) => parseInt(chip(h, f).querySelector('.co-chip-n').textContent, 10);
+const count = (h, f) => parseInt(chip(h, f).querySelector('.chips-n').textContent, 10);
 const ids = h => Array.from(h.doc.querySelectorAll('#co-body tr[id^="co-row-"]')).map(r => r.id.replace('co-row-', '')).sort().join(',');
 const activeFs = h => Array.from(bar(h).querySelectorAll('.filter-btn.active')).map(b => b.getAttribute('data-co-f'));
 const order = h => Array.from(bar(h).querySelectorAll('button')).map(b => b.getAttribute('data-co-f')).join(',');
@@ -65,14 +65,15 @@ const order = h => Array.from(bar(h).querySelectorAll('button')).map(b => b.getA
     guard('рендер', () => h.w.renderClientOrders());
     ok('надпис „Покажи:"', /Покажи:/.test(bar(h).textContent));
     ok('чиповете са по реда от макета', order(h) === F.join(','), order(h));
-    ok('разделител преди историческите', !!bar(h).querySelector('.co-filters-sep'));
+    ok('разделител преди историческите', !!bar(h).querySelector('.chips-sep'));
     const kids = Array.from(bar(h).children);
-    const sep = kids.indexOf(bar(h).querySelector('.co-filters-sep'));
+    const sep = kids.indexOf(bar(h).querySelector('.chips-sep'));
     ok('Изпълнена / Отказана / Всички са след разделителя', ['done', 'refused', 'all'].every(f => kids.indexOf(chip(h, f)) > sep));
-    ok('всеки чип има .co-chip-n', F.every(f => !!chip(h, f).querySelector('.co-chip-n')));
+    ok('всеки чип има .chips-n', F.every(f => !!chip(h, f).querySelector('.chips-n')));
     ok('onclick-ът на „Изчаква" е като досега (за coShowNewForMe)', /filterOrders\('pending'/.test(chip(h, 'pending').getAttribute('onclick')));
     const css = Array.from(h.doc.querySelectorAll('style')).map(s => s.textContent).join('\n');
-    ok('вид само за #co-filters', /#co-filters \.filter-btn\{[^}]*border-radius:16px/.test(css) && /#co-filters \.filter-btn\.co-hist\{[^}]*dashed/.test(css));
+    ok('#co-filters е с общия клас .chips', bar(h).classList.contains('chips') && bar(h).classList.contains('filter-bar'));
+    ok('вид само за .chips (общ), не за всички .filter-btn', /\.chips \.filter-btn\{[^}]*border-radius:16px/.test(css) && /\.chips \.filter-btn\.chip-hist\{[^}]*dashed/.test(css));
   }
 
   section('2. по подразбиране „Активни"');

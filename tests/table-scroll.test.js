@@ -89,8 +89,8 @@ function wireRow(w, tr) {
     const has = (label, re) => ok(label, re.test(css), String(re));
     ok('Транспорт: обвивката е .tbl-wrap.co-sticky-actions.tbl-tr',
       !!doc.querySelector('.tbl-wrap.co-sticky-actions.tbl-tr #tr-body'));
-    ok('Клиентски: обвивката е .tbl-wrap.tbl-co-compact (без вътрешен скрол)',
-      !!doc.querySelector('.tbl-wrap.tbl-co-compact #co-body') && !doc.querySelector('.co-sticky-actions #co-body'));
+    ok('Клиентски: обвивката е .tbl-wrap.tbl-compact.tbl-co-compact (без вътрешен скрол)',
+      !!doc.querySelector('.tbl-wrap.tbl-compact.tbl-co-compact #co-body') && !doc.querySelector('.co-sticky-actions #co-body'));
     has('max-height:calc(100vh - 140px) + overflow:auto', /\.tbl-wrap\.co-sticky-actions\{max-height:calc\(100vh - 140px\);overflow:auto;cursor:grab;\}/);
     has('min-width:1100px само в .co-sticky-actions', /\.co-sticky-actions table\{min-width:1100px;\}/);
     ok('няма глобално table{min-width', !/(^|\})\s*table\{[^}]*min-width/m.test(css));
@@ -112,12 +112,12 @@ function wireRow(w, tr) {
        скролира страницата, а заглавието е закачено под навигацията. */
     ok('няма останали .tbl-co правила (13-колонният вид е махнат)', !/\.tbl-co(?![-\w])/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')));
     has('компактна таблица: фиксиран лейаут, 100% ширина, min-width само под 1200px',
-      /\.tbl-co-compact table\{width:100%;table-layout:fixed;min-width:1180px;\}/);
+      /\.tbl-compact table\{width:100%;table-layout:fixed;\}[\s\S]*?\.tbl-co-compact table\{min-width:1180px;\}/);
     has('колони: 120 / 210 / ≥200 / 150 / 170 / 330',
       /\.tbl-co-compact th:nth-child\(1\)\{width:120px;\}[\s\S]*?\.tbl-co-compact th:nth-child\(2\)\{width:210px;\}[\s\S]*?\.tbl-co-compact th:nth-child\(3\)\{min-width:200px;\}[\s\S]*?\.tbl-co-compact th:nth-child\(4\)\{width:150px;\}[\s\S]*?\.tbl-co-compact th:nth-child\(5\)\{width:170px;\}[\s\S]*?\.tbl-co-compact th:nth-child\(6\)\{width:330px;\}/);
-    ok('компактната обвивка няма max-height', !/\.tbl-co-compact[^{]*\{[^}]*max-height/.test(css));
-    has('≥1200px: overflow видим, заглавието закачено под навигацията',
-      /@media\(min-width:1200px\)\{[\s\S]*?\.tbl-co-compact\{overflow:visible;\}[\s\S]*?\.tbl-co-compact thead th\{position:sticky;top:var\(--nav-h,58px\);z-index:2;background:var\(--surf\);\}/);
+    ok('компактната обвивка няма max-height', !/\.tbl-(co-)?compact[^{]*\{[^}]*max-height/.test(css));
+    has('≥1200px: overflow видим, min-width:0, заглавието закачено под навигацията (общият .tbl-compact)',
+      /@media\(min-width:1200px\)\{[\s\S]*?\.tbl-compact\{overflow:visible;\}[\s\S]*?\.tbl-compact table\{min-width:0;\}[\s\S]*?\.tbl-compact thead th\{position:sticky;top:var\(--nav-h,58px\);z-index:2;background:var\(--surf\);\}/);
     /* Правило по правило, без коментари. Изключение: общото правило за
        td:last-child + th:last-child (заглавието иска бял фон) — за td то се
        бие от по-късното td:last-child{…background:inherit}, проверено отгоре. */

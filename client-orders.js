@@ -1024,7 +1024,7 @@ function renderClientOrders(){
   /* Бройките до чиповете: колко заявки биха се показали с този чип при
      текущите търсене/месец/магазин/изпълнява/роля (всички филтри без чипа). */
   document.querySelectorAll('#co-filters .filter-btn[data-co-f]').forEach(function(b){
-    var n=b.querySelector('.co-chip-n');if(!n)return;
+    var n=b.querySelector('.chips-n');if(!n)return;
     var f=b.getAttribute('data-co-f');
     n.textContent=list.filter(function(o){return coChipMatch(f,o);}).length;
   });
