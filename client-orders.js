@@ -777,6 +777,27 @@ function renderCoSapBanner(){
   '</div>';
 }
 
+/* Колоната „Артикул" в компактния ред на Клиентски: ЕДНА клетка (coItemCells дава три и
+   се ползва от Транспорт — не се пипа). До 3 артикула, всеки на ред „име — бройка мярка" и
+   под него „SAP …" (сиво); режат се с … и носят title с пълното име; над 3 — „+N още". */
+function coItemCellCompact(o){
+  var c=itemsForCell(o,3);
+  /* Името се реже с …, а бройката стои в края и се вижда винаги (flex). */
+  var L1='display:flex;line-height:18px;';
+  var L2='overflow:hidden;text-overflow:ellipsis;white-space:nowrap;line-height:14px;font-size:11px;color:#94a3b8;font-family:monospace;';
+  var h='<td class="co-items">';
+  c.list.forEach(function(it,i){
+    var qty=esc(String(it.qty||1))+(it.unit?' '+esc(it.unit):'');
+    var full=(it.product||'')+(it.color?' ('+it.color+')':'');
+    h+='<div class="co-it"'+(i?' style="margin-top:3px;"':'')+'>'+
+      '<div style="'+L1+'" title="'+escAttr(full)+'"><span style="flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(it.product||'—')+'</span>'+
+        '<span style="flex:none;white-space:nowrap;padding-left:4px;"> — '+qty+'</span></div>'+
+      '<div style="'+L2+'" title="'+escAttr(it.sap||'')+'">SAP '+esc(it.sap||'—')+'</div></div>';
+  });
+  if(c.more)h+='<div class="co-it-more" style="margin-top:3px;font-size:11px;font-weight:600;color:#2563eb;">+'+c.more+' още</div>';
+  return h+'</td>';
+}
+
 /* Падащо меню "Изпълнява" — за да може ЦО (и складовете) да види само своите заявки.
 
    В базата един и същ обект е изписан по няколко начина ("Троян" / "ТРОЯН",
@@ -1009,7 +1030,7 @@ function renderClientOrders(){
   });
   list=list.filter(function(o){return coChipMatch(orderFilter,o);});
   var body=document.getElementById('co-body');if(!body)return;
-  if(!list.length){body.innerHTML='<tr><td colspan="14" style="text-align:center;padding:30px;color:#94a3b8;">Няма клиентски заявки.</td></tr>';return;}
+  if(!list.length){body.innerHTML='<tr><td colspan="6" style="text-align:center;padding:30px;color:#94a3b8;">Няма клиентски заявки.</td></tr>';return;}
   var isAdmin=currentUser&&['admin','accounting'].indexOf(currentUser.role)>=0;
   body.innerHTML=list.map(function(o){
     var urgent=o._status==='overdue'||o._status==='today';
@@ -1019,9 +1040,13 @@ function renderClientOrders(){
        следващия рендер, когато подсветката вече е изчистена. */
     var isHl=!!(window._coHighlightId&&String(window._coHighlightId)===String(o.id));
     var rowStyle='border-left:3px solid '+bdrColor+';'+(urgent&&!isHl?'animation:rowPulseOpaque 2s infinite;':'');
+    /* „От → Изпълнява": магазинът се вижда веднъж, не три пъти. */
     var storeCell=o.fulfiller&&o.fulfiller!==o.store_name
-      ?'<div style="font-size:10px;color:#94a3b8;">Заявител:</div><b>'+esc(o.store_name||'')+'</b><div style="font-size:10px;color:#2563eb;margin-top:2px;">Изпълнява: <b>'+esc(o.fulfiller)+'</b></div>'
+      ?esc(o.store_name||'')+' → <b style="color:#2563eb;">'+esc(o.fulfiller)+'</b>'
       :esc(o.store_name||'');
+    /* Изминалото време само от 5 дни нагоре и НЕ докато заявката чака доставчика — тогава срокът на ЦО
+       вече се вижда от coEtaCell("🏭 очаквана …"). Цветните степени 5/7/10 и миганeто са в elapsedBadge(). */
+    var elapsedHtml=(o._days>=5&&!(typeof coWaitingSupplier==='function'&&coWaitingSupplier(o)))?elapsedBadge(o._days,o.status,o):'';
     var myStore=currentUser&&currentUser.store_name;
     var rawStatus=o.status||'pending';
     var done=o._status==='done'||o._status==='refused'||o.status==='done'||o.status==='refused';
@@ -1100,23 +1125,18 @@ function renderClientOrders(){
        клиента", бадж на групата) и клетката с бутоните спират bubbling-а. */
     rowStyle+='cursor:pointer;';
     return '<tr id="co-row-'+esc(o.id)+'" class="row-click" data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="'+rowStyle+'">'+
-      /* Номерът вече съдържа и обекта ("Троян-0042") — пуска се на нов ред,
-         вместо да реже колоната */
-      '<td style="font-size:11px;color:#94a3b8;font-family:monospace;word-break:break-word;line-height:1.3;">'+esc(o.in_num||'—')+'</td>'+
-      '<td>'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
+      /* 6 колони. Номерът вече съдържа и обекта ("Троян-0042"); под него — кога е пусната. */
+      '<td style="font-size:11px;color:#94a3b8;font-family:monospace;word-break:break-word;line-height:1.3;">'+esc(o.in_num||'—')+
+        '<div style="font-family:inherit;margin-top:2px;">'+esc(o.date||'')+' '+esc(o.hour||'')+'</div></td>'+
       /* Името на клиента отваря панела с всички негови заявки — там е и бутонът
          за още една заявка. Така не се налага още един бутон в реда. */
       '<td onclick="event.stopPropagation()" style="cursor:default;"><b data-id="'+o.id+'" onclick="openCustomerOrders(this.dataset.id)" title="Виж всички заявки на този клиент" style="cursor:pointer;border-bottom:1px dotted #94a3b8;">'+esc(o.customer_name||'')+'</b>'+coGroupBadge(o)+
-        '<br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small></td>'+
-      '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
-      /* Вътрешният title с ЦЕЛИЯ SAP код остава — колоната реже текста и това
-         е единственият начин да се види. */
-      coItemCells(o)+
-      '<td>'+esc(o.from_store||'')+'</td>'+
-      '<td><b>'+fmtDate(o.delivery)+'</b>'+coEtaCell(o)+'</td>'+
-      '<td>'+elapsedBadge(o._days,o.status,o)+'</td>'+
-      '<td>'+statusBadge(o._status)+lateBadge(o)+ptBadge(o)+'</td>'+
-      '<td style="font-size:11px;">'+storeCell+'</td>'+
+        '<br><small style="color:#94a3b8;">'+esc(o.phone||'')+' · Бон: '+esc(o.bon||'—')+'</small></td>'+
+      coItemCellCompact(o)+
+      '<td style="font-size:12px;">'+storeCell+'</td>'+
+      '<td>'+statusBadge(o._status)+lateBadge(o)+ptBadge(o)+
+        '<div style="margin-top:3px;font-size:12px;"><b>'+fmtDate(o.delivery)+'</b></div>'+coEtaCell(o)+
+        (elapsedHtml?'<div style="margin-top:3px;">'+elapsedHtml+'</div>':'')+'</td>'+
       '<td onclick="event.stopPropagation()" style="cursor:default;">'+btns+'</td></tr>';
   }).join('');
   /* Подсветка + скрол към реда, отворен от бадж 📋 в таб Транспорт */

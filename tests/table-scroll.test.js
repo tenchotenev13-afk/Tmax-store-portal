@@ -89,36 +89,40 @@ function wireRow(w, tr) {
     const has = (label, re) => ok(label, re.test(css), String(re));
     ok('Транспорт: обвивката е .tbl-wrap.co-sticky-actions.tbl-tr',
       !!doc.querySelector('.tbl-wrap.co-sticky-actions.tbl-tr #tr-body'));
-    ok('Клиентски: обвивката е .tbl-wrap.co-sticky-actions.tbl-co',
-      !!doc.querySelector('.tbl-wrap.co-sticky-actions.tbl-co #co-body'));
+    ok('Клиентски: обвивката е .tbl-wrap.tbl-co-compact (без вътрешен скрол)',
+      !!doc.querySelector('.tbl-wrap.tbl-co-compact #co-body') && !doc.querySelector('.co-sticky-actions #co-body'));
     has('max-height:calc(100vh - 140px) + overflow:auto', /\.tbl-wrap\.co-sticky-actions\{max-height:calc\(100vh - 140px\);overflow:auto;cursor:grab;\}/);
     has('min-width:1100px само в .co-sticky-actions', /\.co-sticky-actions table\{min-width:1100px;\}/);
     ok('няма глобално table{min-width', !/(^|\})\s*table\{[^}]*min-width/m.test(css));
     has('sticky thead: top:0, z-index:2', /\.co-sticky-actions thead th\{position:sticky;top:0;z-index:2;background:var\(--surf\);\}/);
     has('бутоните: th:last-child z-index:4 (над останалите th)', /\.co-sticky-actions table th:last-child\{z-index:4;\}/);
-    has('Клиент закачен: td Транспорт 2-ра / Клиентски 3-та',
-      /\.tbl-tr td:nth-child\(2\),\.tbl-co td:nth-child\(3\)\{position:sticky;left:0;z-index:1;background:inherit;box-shadow:6px 0 6px -6px/);
-    has('Клиент закачен: th със z-index:3', /\.tbl-tr th:nth-child\(2\),\.tbl-co th:nth-child\(3\)\{position:sticky;left:0;z-index:3;/);
-    has('№ фиксиран на 90px', /\.tbl-co th:nth-child\(1\),\.tbl-co td:nth-child\(1\)\{box-sizing:border-box;width:90px;min-width:90px;max-width:90px;\}/);
-    has('Дата фиксирана на 80px', /\.tbl-co th:nth-child\(2\),\.tbl-co td:nth-child\(2\)\{box-sizing:border-box;width:80px;min-width:80px;max-width:80px;/);
-    has('десктоп: Дата на left:90px', /@media\(min-width:768px\)\{[\s\S]*?\.tbl-co th:nth-child\(2\),\.tbl-co td:nth-child\(2\)\{position:sticky;left:90px;\}/);
-    has('десктоп: Клиент на left:170px', /@media\(min-width:768px\)\{[\s\S]*?\.tbl-co th:nth-child\(3\),\.tbl-co td:nth-child\(3\)\{left:170px;\}/);
-    has('nowrap: Дата/Телефон/Доставка/Статус/Магазин в двете',
-      /\.tbl-tr td:nth-child\(1\),\.tbl-tr td:nth-child\(4\),\.tbl-tr td:nth-child\(8\),\.tbl-tr td:nth-child\(9\),\.tbl-tr td:nth-child\(10\),\s*\.tbl-co td:nth-child\(2\),\.tbl-co td:nth-child\(4\),\.tbl-co td:nth-child\(9\),\.tbl-co td:nth-child\(11\),\.tbl-co td:nth-child\(12\)\{white-space:nowrap;\}/);
-    has('Продукт/Адрес: пренасят се, 160–260px (width нужен, за да държи max-width)',
-      /\.tbl-tr td:nth-child\(5\),\.tbl-tr td:nth-child\(6\),\.tbl-co td:nth-child\(6\)\{width:260px;min-width:160px;max-width:260px;white-space:normal;\}/);
+    has('Клиент закачен (Транспорт): td 2-ра',
+      /\.tbl-tr td:nth-child\(2\)\{position:sticky;left:0;z-index:1;background:inherit;box-shadow:6px 0 6px -6px/);
+    has('Клиент закачен (Транспорт): th със z-index:3', /\.tbl-tr th:nth-child\(2\)\{position:sticky;left:0;z-index:3;/);
+    has('nowrap (Транспорт): Дата/Телефон/Доставка/Статус/Магазин',
+      /\.tbl-tr td:nth-child\(1\),\.tbl-tr td:nth-child\(4\),\.tbl-tr td:nth-child\(8\),\.tbl-tr td:nth-child\(9\),\.tbl-tr td:nth-child\(10\)\{white-space:nowrap;\}/);
+    has('Продукт/Адрес (Транспорт): пренасят се, 160–260px (width нужен, за да държи max-width)',
+      /\.tbl-tr td:nth-child\(5\),\.tbl-tr td:nth-child\(6\)\{width:260px;min-width:160px;max-width:260px;white-space:normal;\}/);
     /* Фонът идва от реда: закачените td наследяват <tr> (подсветка, мигане,
        hover), а самият ред е винаги плътен — иначе под закачените прозира. */
     has('редът е плътно бял по подразбиране', /\.co-sticky-actions tbody tr\{background:#fff;\}/);
     has('бутоните вдясно: td:last-child наследява фона на реда',
       /\.co-sticky-actions table td:last-child\{z-index:1;background:inherit;\}/);
-    has('десктоп: № и Дата наследяват фона на реда',
-      /@media\(min-width:768px\)\{[\s\S]*?\.tbl-co td:nth-child\(1\),\.tbl-co td:nth-child\(2\)\{position:sticky;z-index:1;background:inherit;\}/);
+    /* Компактният ред на Клиентски (6 колони): без закачени колони, без вътрешен скрол;
+       скролира страницата, а заглавието е закачено под навигацията. */
+    ok('няма останали .tbl-co правила (13-колонният вид е махнат)', !/\.tbl-co(?![-\w])/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')));
+    has('компактна таблица: фиксиран лейаут, 100% ширина, min-width само под 1200px',
+      /\.tbl-co-compact table\{width:100%;table-layout:fixed;min-width:1180px;\}/);
+    has('колони: 120 / 210 / ≥200 / 150 / 170 / 330',
+      /\.tbl-co-compact th:nth-child\(1\)\{width:120px;\}[\s\S]*?\.tbl-co-compact th:nth-child\(2\)\{width:210px;\}[\s\S]*?\.tbl-co-compact th:nth-child\(3\)\{min-width:200px;\}[\s\S]*?\.tbl-co-compact th:nth-child\(4\)\{width:150px;\}[\s\S]*?\.tbl-co-compact th:nth-child\(5\)\{width:170px;\}[\s\S]*?\.tbl-co-compact th:nth-child\(6\)\{width:330px;\}/);
+    ok('компактната обвивка няма max-height', !/\.tbl-co-compact[^{]*\{[^}]*max-height/.test(css));
+    has('≥1200px: overflow видим, заглавието закачено под навигацията',
+      /@media\(min-width:1200px\)\{[\s\S]*?\.tbl-co-compact\{overflow:visible;\}[\s\S]*?\.tbl-co-compact thead th\{position:sticky;top:var\(--nav-h,58px\);z-index:2;background:var\(--surf\);\}/);
     /* Правило по правило, без коментари. Изключение: общото правило за
        td:last-child + th:last-child (заглавието иска бял фон) — за td то се
        бие от по-късното td:last-child{…background:inherit}, проверено отгоре. */
     const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+\{[^{}]*\}/g) || [];
-    const stickyTd = /(\.co-sticky-actions table td:last-child|\.tbl-tr td:nth-child\(2\)|\.tbl-co td:nth-child\([123]\))(?![\d])/;
+    const stickyTd = /(\.co-sticky-actions table td:last-child|\.tbl-tr td:nth-child\(2\))(?![\d])/;
     const hardWhite = rules.filter(r => {
       const sel = r.slice(0, r.indexOf('{')), body = r.slice(r.indexOf('{'));
       return stickyTd.test(sel) && /background:#fff/.test(body) && !/th:last-child/.test(sel);
@@ -143,9 +147,8 @@ function wireRow(w, tr) {
     ok('Транспорт: колоните са на местата от CSS-а',
       trH[0] === 'Дата / Час' && trH[1] === 'Клиент' && trH[3] === 'Телефон' && trH[4] === 'Адрес' && trH[5] === 'Продукт' &&
       trH[7] === 'Доставка' && trH[8] === 'Статус' && trH[9] === 'Магазин', JSON.stringify(trH));
-    ok('Клиентски: колоните са на местата от CSS-а',
-      coH[0] === '№' && coH[1] === 'Дата / Час' && coH[2] === 'Клиент' && coH[3] === 'Телефон' && coH[5] === 'Продукт' &&
-      coH[8] === 'Доставка' && coH[10] === 'Статус' && coH[11] === 'Магазин', JSON.stringify(coH));
+    ok('Клиентски: 6 колони — № · Пусната / Клиент / Артикул / От → Изпълнява / Статус · Доставка / Действия',
+      JSON.stringify(coH) === JSON.stringify(['№ · Пусната', 'Клиент', 'Артикул', 'От → Изпълнява', 'Статус · Доставка', 'Действия']), JSON.stringify(coH));
   }
 
   section('2. enableDragScroll се закача при зареждане, веднъж');

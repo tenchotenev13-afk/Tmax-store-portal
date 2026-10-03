@@ -93,9 +93,9 @@ const reset = (w, doc) => {
     const cells = tr ? Array.prototype.filter.call(tr.querySelectorAll('td'),
       c => /openClientOrderDetail/.test(c.getAttribute('onclick') || '')) : [];
     ok('никоя клетка няма собствен openClientOrderDetail', !!tr && cells.length === 0, cells.length);
-    ok('Дата/Час, SAP и Продукт са без title „Отвори заявката"',
-      ['Дата', 'SAP', 'Продукт'].every(n => { const c = cell(doc, 'g1', n); return !!c && c.getAttribute('title') !== 'Отвори заявката'; }));
-    const sapDiv = cell(doc, 'g1', 'SAP') && cell(doc, 'g1', 'SAP').querySelector('div[title]');
+    ok('№ · Пусната, Артикул и От → Изпълнява са без title „Отвори заявката"',
+      ['№', 'Артикул', 'От'].every(n => { const c = cell(doc, 'g1', n); return !!c && c.getAttribute('title') !== 'Отвори заявката'; }));
+    const sapDiv = cell(doc, 'g1', 'Артикул') && cell(doc, 'g1', 'Артикул').querySelector('div[title="111"]');
     ok('вътрешният title с целия SAP код остава', !!sapDiv && sapDiv.getAttribute('title') === '111');
   }
 
@@ -109,10 +109,10 @@ const reset = (w, doc) => {
     ok('border-left и cursor:pointer заедно с него', /border-left:3px solid/.test(st) && /cursor:pointer/.test(st), st);
   }
 
-  section('3. Клик по Бр., Доставка, Статус, Дата/Час, Продукт → #cod-ov');
+  section('3. Клик по № · Пусната, Артикул, От → Изпълнява, Статус · Доставка → #cod-ov');
   {
     const { w, doc } = env();
-    ['Бр.', 'Доставка', 'Статус', 'Дата', 'Продукт', 'SAP', 'Телефон', '№'].forEach(name => {
+    ['№', 'Артикул', 'От', 'Статус'].forEach(name => {
       const c = cell(doc, 'g1', name);
       ok('колона „' + name + '" се намира', !!c);
       if (c) guard('клик по „' + name + '"', () => bubbleClick(w, c));

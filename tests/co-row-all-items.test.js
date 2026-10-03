@@ -4,7 +4,10 @@
    за съвместимост). Редът в таблицата, История (екран + печатна справка) и
    Календарът вече строят артикулите от resolveItems().
 
-   Случаи: 1 артикул (разметката е ТОЧНО предишната), 2 артикула (реален
+   В компактния ред (6 колони) артикулите са в ЕДНА клетка „Артикул"
+   (coItemCellCompact): всеки е .co-it с два реда — „име — бройка мярка" и
+   „SAP …"; цветът е в title.
+   Случаи: 1 артикул, 2 артикула (реален
    случай Сливен-0120), 5 артикула (първите 3 + „+2 още"), стар запис с
    items=null (fallback към единичните колони).
 
@@ -83,60 +86,53 @@ const blocks = c => (c ? Array.prototype.slice.call(c.querySelectorAll('.co-it')
   const { w, doc } = env();
   guard('renderClientOrders()', () => w.renderClientOrders());
 
-  section('1. Един артикул — разметката е точно предишната');
+  section('1. Един артикул — един ред „име — бройка мярка" и „SAP …"');
   {
-    const sap = cell(doc, '0001', 'SAP'), prod = cell(doc, '0001', 'Продукт'), qty = cell(doc, '0001', 'Бр.');
-    ok('SAP клетката е като преди',
-      html(sap) === '<div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="111">111</div>', html(sap));
-    ok('Продукт: ПАРКЕТ + цвят отдолу',
-      html(prod) === 'ПАРКЕТ<br><small style="color:#94a3b8;">дъб</small>', html(prod));
-    ok('Бр.: 5 + мярка отдолу',
-      html(qty) === '5<br><small style="color:#94a3b8;">кв.м</small>', html(qty));
-    ok('няма блокове .co-it и „още"', blocks(prod).length === 0 && !/още/.test(txt(prod)));
+    const it = cell(doc, '0001', 'Артикул');
+    const b = blocks(it);
+    ok('точно един блок', b.length === 1, b.length);
+    ok('ПАРКЕТ — 5 кв.м', b[0] && b[0].children[0].textContent === 'ПАРКЕТ — 5 кв.м', b[0] && b[0].children[0].textContent);
+    ok('SAP 111 (сиво) под него', b[0] && b[0].children[1].textContent === 'SAP 111', b[0] && b[0].children[1].textContent);
+    ok('цветът е в title на името', b[0] && b[0].children[0].getAttribute('title') === 'ПАРКЕТ (дъб)', b[0] && b[0].children[0].getAttribute('title'));
+    ok('целият SAP код е в title', b[0] && b[0].children[1].getAttribute('title') === '111');
+    ok('няма „още"', !/още/.test(txt(it)));
   }
 
-  section('2. Два артикула (Сливен-0120) — и двата, подравнени');
+  section('2. Два артикула (Сливен-0120) — и двата');
   {
-    const sap = cell(doc, '0120', 'SAP'), prod = cell(doc, '0120', 'Продукт'), qty = cell(doc, '0120', 'Бр.');
-    const bs = blocks(sap), bp = blocks(prod), bq = blocks(qty);
-    ok('по 2 блока във всяка от трите клетки', bs.length === 2 && bp.length === 2 && bq.length === 2,
-      [bs.length, bp.length, bq.length].join('/'));
-    ok('SAP: 78644, после 78643', bs.length === 2 && /78644/.test(txt(bs[0])) && /78643/.test(txt(bs[1])));
-    ok('Продукт: ПЛАФОН, после АПЛИК', bp.length === 2 && /ПЛАФОН/.test(txt(bp[0])) && /АПЛИК/.test(txt(bp[1])));
-    ok('цветът „бял" е под ПЛАФОН (втория ред на блока)',
-      bp.length === 2 && bp[0].children[1] && bp[0].children[1].textContent === 'бял');
-    ok('Бр.: 1, после 2', bq.length === 2 && bq[0].children[0].textContent === '1' && bq[1].children[0].textContent === '2');
-    /* Подравняването: еднаква структура с фиксирани височини във всяка клетка */
-    const shape = b => b.map(x => Array.prototype.map.call(x.children, ch => (ch.getAttribute('style').match(/height:\d+px/) || [''])[0]).join('+')).join('|');
-    ok('блоковете имат еднакви фиксирани височини в трите клетки',
-      shape(bs) === shape(bp) && shape(bp) === shape(bq) && /height:18px\+height:14px/.test(shape(bp)), shape(bs) + ' / ' + shape(bp) + ' / ' + shape(bq));
-    ok('без „още" при 2 артикула', !/още/.test(txt(prod)));
+    const it = cell(doc, '0120', 'Артикул');
+    const b = blocks(it);
+    ok('2 блока', b.length === 2, b.length);
+    ok('ПЛАФОН — 1 …, после АПЛИК — 2 …', b.length === 2 && /^ПЛАФОН — 1/.test(b[0].children[0].textContent) && /^АПЛИК — 2/.test(b[1].children[0].textContent));
+    ok('SAP: 78644, после 78643', b.length === 2 && b[0].children[1].textContent === 'SAP 78644' && b[1].children[1].textContent === 'SAP 78643');
+    ok('цветът „бял" е в title на ПЛАФОН', b.length === 2 && /бял/.test(b[0].children[0].getAttribute('title')));
+    ok('без „още" при 2 артикула', !/още/.test(txt(it)));
   }
 
   section('3. Пет артикула — първите 3 + „+2 още"');
   {
-    const sap = cell(doc, '0005', 'SAP'), prod = cell(doc, '0005', 'Продукт'), qty = cell(doc, '0005', 'Бр.');
-    ok('по 3 блока във всяка клетка', blocks(sap).length === 3 && blocks(prod).length === 3 && blocks(qty).length === 3,
-      [blocks(sap).length, blocks(prod).length, blocks(qty).length].join('/'));
-    ok('А4 и А5 ги няма в реда', !/А4|А5/.test(txt(prod)) && !/1004|1005/.test(txt(sap)));
-    const more = prod && prod.querySelector('.co-it-more');
-    ok('„+2 още" под продуктите', !!more && more.textContent.trim() === '+2 още', more && more.textContent);
-    ok('мярката „м" на третия стои под бройката му', blocks(qty)[2] && blocks(qty)[2].children[1].textContent === 'м');
-    ok('цветът „сив" е под А2', blocks(prod)[1] && blocks(prod)[1].children[1].textContent === 'сив');
+    const it = cell(doc, '0005', 'Артикул');
+    ok('3 блока', blocks(it).length === 3, blocks(it).length);
+    ok('А4 и А5 ги няма в реда', !/А4|А5/.test(txt(it)) && !/1004|1005/.test(txt(it)));
+    const more = it && it.querySelector('.co-it-more');
+    ok('„+2 още" под артикулите', !!more && more.textContent.trim() === '+2 още', more && more.textContent);
+    ok('мярката „м" на третия е в реда му', blocks(it)[2] && / м$/.test(blocks(it)[2].children[0].textContent), blocks(it)[2] && blocks(it)[2].children[0].textContent);
+    ok('цветът „сив" е в title на А2', blocks(it)[1] && /сив/.test(blocks(it)[1].children[0].getAttribute('title')));
   }
 
-  section('4. Стар запис без items (items=null) — fallback, като преди');
+  section('4. Стар запис без items (items=null) — fallback');
   {
-    const sap = cell(doc, '0009', 'SAP'), prod = cell(doc, '0009', 'Продукт'), qty = cell(doc, '0009', 'Бр.');
-    ok('SAP 999000', html(sap) === '<div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="999000">999000</div>', html(sap));
-    ok('МИВКА + бял', html(prod) === 'МИВКА<br><small style="color:#94a3b8;">бял</small>', html(prod));
-    ok('3, без мярка (бр.)', html(qty) === '3', html(qty));
+    const it = cell(doc, '0009', 'Артикул');
+    const b = blocks(it);
+    ok('един блок: МИВКА — 3 бр.', b.length === 1 && b[0].children[0].textContent === 'МИВКА — 3 бр.', b[0] && b[0].children[0].textContent);
+    ok('SAP 999000', b.length === 1 && b[0].children[1].textContent === 'SAP 999000');
+    ok('цветът „бял" е в title', b.length === 1 && /бял/.test(b[0].children[0].getAttribute('title')));
   }
 
   section('5. Клик по многоартикулен ред още отваря детайла');
   {
-    const prod = cell(doc, '0120', 'Продукт');
-    if (prod) guard('клик по Продукт', () => H.bubbleClick(w, blocks(prod)[1] || prod));
+    const it = cell(doc, '0120', 'Артикул');
+    if (it) guard('клик по Артикул', () => H.bubbleClick(w, blocks(it)[1] || it));
     const ov = doc.getElementById('cod-ov');
     ok('#cod-ov на Сливен-0120', !!ov && ov.textContent.indexOf('Сливен-0120') >= 0);
     if (ov) guard('затвори', () => w.closeClientOrderDetail());

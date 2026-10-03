@@ -271,8 +271,10 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     w.renderClientOrders();
     const r1 = row(doc, 'o-1'), r2 = row(doc, 'o-2'), r3 = row(doc, 'o-3');
     ok('необработена заявка на 9 дни е оранжева', r1.innerHTML.indexOf('🔶') >= 0 || r1.innerHTML.indexOf('9 дни') >= 0);
-    ok('обработена + бъдеща дата показва 🏭, не червено',
-      r2.innerHTML.indexOf('🏭 до') >= 0 && r2.innerHTML.indexOf('🔴') < 0);
+    /* В компактния ред срокът на ЦО се вижда веднъж — „🏭 очаквана …" от coEtaCell; бадж „🏭 до …"
+       на „Изминало" вече не се показва, докато заявката чака доставчика. */
+    ok('обработена + бъдеща дата показва 🏭 (срока на ЦО), не червено',
+      r2.innerHTML.indexOf('🏭 очаквана') >= 0 && r2.innerHTML.indexOf('🏭 до') < 0 && r2.innerHTML.indexOf('🔴') < 0);
     ok('обработена + бъдеща дата НЕ пулсира', !/rowPulse/.test(r2.innerHTML));
     ok('обработена + МИНАЛА дата пак алармира (20 дни)', r3.innerHTML.indexOf('🔴') >= 0);
     ok('coWaitingSupplier: бъдеща дата → true', w.coWaitingSupplier(w.clientOrders.find(o => o.id === 'o-2')) === true);

@@ -109,25 +109,34 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .co-sticky-actions tbody tr{background:#fff;}
 .co-sticky-actions table td:last-child{z-index:1;background:inherit;}
 .co-sticky-actions table th:last-child{z-index:4;}
-.tbl-tr td:nth-child(1),.tbl-tr td:nth-child(4),.tbl-tr td:nth-child(8),.tbl-tr td:nth-child(9),.tbl-tr td:nth-child(10),
-.tbl-co td:nth-child(2),.tbl-co td:nth-child(4),.tbl-co td:nth-child(9),.tbl-co td:nth-child(11),.tbl-co td:nth-child(12){white-space:nowrap;}
+.tbl-tr td:nth-child(1),.tbl-tr td:nth-child(4),.tbl-tr td:nth-child(8),.tbl-tr td:nth-child(9),.tbl-tr td:nth-child(10){white-space:nowrap;}
 /* Продукт и Адрес: пренасят се, 160–260px. Chrome не зачита max-width на
    клетка сам — таванът държи само заедно с width (измерено: без него
    Продукт стига 406px при широка таблица, с него спира на 260px). */
-.tbl-tr td:nth-child(5),.tbl-tr td:nth-child(6),.tbl-co td:nth-child(6){width:260px;min-width:160px;max-width:260px;white-space:normal;}
-.tbl-tr td:nth-child(2),.tbl-co td:nth-child(3){position:sticky;left:0;z-index:1;background:inherit;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
-.tbl-tr th:nth-child(2),.tbl-co th:nth-child(3){position:sticky;left:0;z-index:3;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
-/* Клиентски: № (90px) и Дата (80px) се закачват преди „Клиент" (left:170px).
-   Само на широк екран — на телефон три закачени колони заемат целия екран,
-   затова там се закачва само „Клиент", когато стигне левия ръб. */
-.tbl-co th:nth-child(1),.tbl-co td:nth-child(1){box-sizing:border-box;width:90px;min-width:90px;max-width:90px;}
-.tbl-co th:nth-child(2),.tbl-co td:nth-child(2){box-sizing:border-box;width:80px;min-width:80px;max-width:80px;padding-left:8px;padding-right:6px;}
-@media(min-width:768px){
-  .tbl-co td:nth-child(1),.tbl-co td:nth-child(2){position:sticky;z-index:1;background:inherit;}
-  .tbl-co th:nth-child(1),.tbl-co th:nth-child(2){z-index:3;}
-  .tbl-co th:nth-child(1),.tbl-co td:nth-child(1){position:sticky;left:0;}
-  .tbl-co th:nth-child(2),.tbl-co td:nth-child(2){position:sticky;left:90px;}
-  .tbl-co th:nth-child(3),.tbl-co td:nth-child(3){left:170px;}
+.tbl-tr td:nth-child(5),.tbl-tr td:nth-child(6){width:260px;min-width:160px;max-width:260px;white-space:normal;}
+.tbl-tr td:nth-child(2){position:sticky;left:0;z-index:1;background:inherit;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
+.tbl-tr th:nth-child(2){position:sticky;left:0;z-index:3;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
+/* Клиентски заявки (.tbl-co-compact): 6 колони, без вътрешен скрол — скролира страницата.
+   На ≥1200px таблицата се събира в обвивката, заглавието е закачено под навигацията
+   (.nav е sticky, top:0); под 1200px — хоризонтален скрол като другите таблици. */
+.tbl-co-compact{overflow-x:auto;}
+.tbl-co-compact table{width:100%;table-layout:fixed;min-width:1180px;}
+.tbl-co-compact th:nth-child(1){width:120px;}
+.tbl-co-compact th:nth-child(2){width:210px;}
+.tbl-co-compact th:nth-child(3){min-width:200px;}
+.tbl-co-compact th:nth-child(4){width:150px;}
+.tbl-co-compact th:nth-child(5){width:170px;}
+.tbl-co-compact th:nth-child(6){width:330px;}
+.tbl-co-compact td{vertical-align:top;}
+.tbl-co-compact td:nth-child(3){overflow:hidden;}
+.tbl-co-compact tbody tr{background:#fff;}
+.tbl-co-compact tbody tr:hover td{background:inherit;}
+.tbl-co-compact tbody tr:hover{background:#fafafa;}
+.tbl-co-compact tbody tr.row-click:hover{background:#eef2ff!important;animation:none!important;}
+@media(min-width:1200px){
+  .tbl-co-compact{overflow:visible;}
+  .tbl-co-compact table{min-width:0;}
+  .tbl-co-compact thead th{position:sticky;top:var(--nav-h,58px);z-index:2;background:var(--surf);}
 }
 /* Разлики (.tbl-sd), таблицата на решените: като .tbl-co, но по КЛАС на
    клетката (sd-c-*), не по :nth-child — „Отговор на склада" е само в
@@ -427,9 +436,9 @@ OneSignalDeferred.push(async function(OneSignal) {
       <select id="co-fulfiller-filter" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:180px;"><option value="">Изпълнява: всички</option></select>
       <select id="co-month" onchange="renderClientOrders()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
     </div>
-    <div class="tbl-wrap co-sticky-actions tbl-co"><table>
-      <thead><tr><th>№</th><th>Дата / Час</th><th>Клиент</th><th>Телефон</th><th style="width:64px;">SAP</th><th>Продукт</th><th>Бр.</th><th>От магазин</th><th>Доставка</th><th>Изминало</th><th>Статус</th><th>Магазин</th><th></th></tr></thead>
-      <tbody id="co-body"><tr><td colspan="13" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
+    <div class="tbl-wrap tbl-co-compact"><table>
+      <thead><tr><th>№ · Пусната</th><th>Клиент</th><th>Артикул</th><th>От → Изпълнява</th><th>Статус · Доставка</th><th>Действия</th></tr></thead>
+      <tbody id="co-body"><tr><td colspan="6" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
     </table></div>
   </div>
 

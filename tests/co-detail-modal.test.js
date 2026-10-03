@@ -140,7 +140,7 @@ function pressEsc(w) {
     if (guard('renderClientOrders() не хвърля', () => w.renderClientOrders())) {
       const td = cells(doc, 'o-multi');
       const tr = doc.getElementById('co-row-o-multi');
-      ok('редът има 13 клетки', td.length === 13, String(td.length));
+      ok('редът има 6 клетки', td.length === 6, String(td.length));
 
       ok('<tr> отваря пълните данни',
         tr.getAttribute('onclick') === 'openClientOrderDetail(this.dataset.id)', tr.getAttribute('onclick'));
@@ -151,13 +151,12 @@ function pressEsc(w) {
         Array.prototype.every.call(td, (c, i) => !opensDetail(i)));
 
       const stops = i => td[i].getAttribute('onclick') === 'event.stopPropagation()';
-      ok('клетка „Клиент" (2) спира bubbling-а', stops(2));
-      ok('клетка „Клиент" (2) пази своя openCustomerOrders',
-        /openCustomerOrders/.test(td[2].innerHTML));
-      ok('колоната с бутоните (12) спира bubbling-а', stops(12));
+      ok('клетка „Клиент" (2-ра) спира bubbling-а', stops(1));
+      ok('клетка „Клиент" (2-ра) пази своя openCustomerOrders',
+        /openCustomerOrders/.test(td[1].innerHTML));
+      ok('колоната с бутоните (6-та) спира bubbling-а', stops(5));
       ok('SAP клетката пази вътрешния title с целия код',
-        (td[4].querySelector('div') || {}).outerHTML &&
-        /title="111222"/.test(td[4].innerHTML), td[4].innerHTML);
+        /title="111222"/.test(td[2].innerHTML), td[2].innerHTML);
     }
   }
   {
@@ -165,28 +164,28 @@ function pressEsc(w) {
     const { w, doc } = env();
     w.renderClientOrders();
     ok('преди клика модал няма', !modal(doc));
-    bubbleClick(w, cells(doc, 'o-multi')[5]);
-    ok('клик по „Продукт" отваря модала', !!modal(doc));
+    bubbleClick(w, cells(doc, 'o-multi')[2]);
+    ok('клик по „Артикул" отваря модала', !!modal(doc));
     ok('модалът е отворен (class open)', !!modal(doc) && modal(doc).classList.contains('open'));
     ok('показва номера на заявката', modalText(doc).indexOf('Троян-0001') >= 0);
   }
   {
     const { w, doc } = env();
     w.renderClientOrders();
-    bubbleClick(w, cells(doc, 'o-multi')[1]);
-    ok('клик по „Дата / Час" също отваря модала', !!modal(doc));
+    bubbleClick(w, cells(doc, 'o-multi')[0]);
+    ok('клик по „№ · Пусната" също отваря модала', !!modal(doc));
   }
   {
     const { w, doc } = env();
     w.renderClientOrders();
-    bubbleClick(w, cells(doc, 'o-multi')[4]);
-    ok('клик по „SAP" също отваря модала', !!modal(doc));
+    bubbleClick(w, cells(doc, 'o-multi')[3]);
+    ok('клик по „От → Изпълнява" също отваря модала', !!modal(doc));
   }
   {
     /* Клиентът отваря СВОЯ панел, не пълните данни */
     const { w, doc } = env();
     w.renderClientOrders();
-    const b = cells(doc, 'o-multi')[2].querySelector('b[onclick]');
+    const b = cells(doc, 'o-multi')[1].querySelector('b[onclick]');
     if (ok('клетката „Клиент" има кликаем <b>', !!b)) {
       bubbleClick(w, b);
       ok('клик по „Клиент" НЕ отваря пълните данни', !modal(doc));
@@ -335,7 +334,7 @@ function pressEsc(w) {
     const { w, doc } = env({ orders: [APO], data: { client_orders: [APO] } });
     w.renderClientOrders();
     const tr = doc.getElementById('co-row-o-apo');
-    const td = cells(doc, 'o-apo')[5];
+    const td = cells(doc, 'o-apo')[2];
     let broke = null;
     try { w.eval('(function(){' + tr.getAttribute('onclick') + '})'); }
     catch (e) { broke = e.message; }
