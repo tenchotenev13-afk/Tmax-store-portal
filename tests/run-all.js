@@ -299,6 +299,7 @@ const TESTS = [
   'contact-detail.test.js',
   'contacts-directory.test.js',
   'contacts-home.test.js',
+  'contacts-photos.test.js',
   'co-row-click.test.js',
   'co-row-all-items.test.js',
   'co-warehouse-fulfiller-buttons.test.js',

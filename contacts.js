@@ -41,8 +41,17 @@ var CT_STORE_ROLES = [
   ['store','Общ телефон на обекта']
 ];
 
+/* Кой редактира Контакти: роли admin и accounting + изброените тук хора,
+   които иначе са обикновени потребители. CT_EDITOR_EMAILS дава права САМО
+   в този модул — ролята им в портала не се пипа.
+   (03.10.2026: Пламена Павлова — снимки и поддръжка на указателя.)
+   Защитата е в клиента, както и досега за contacts: таблицата е отворена
+   за anon (политика anon_all_contacts). */
+var CT_EDITOR_EMAILS = ['p.pavlova@temax.bg'];
 function isAdminContacts(){
-  return !!(currentUser && ['admin','accounting'].indexOf(currentUser.role)>=0);
+  if(!currentUser)return false;
+  if(['admin','accounting'].indexOf(currentUser.role)>=0)return true;
+  return CT_EDITOR_EMAILS.indexOf(String(currentUser.email||'').toLowerCase())>=0;
 }
 
 /* ── Помощни ── */
@@ -277,6 +286,7 @@ function renderContacts() {
   h += '</div>';
   h += '<div style="display:flex;gap:8px;align-items:center;flex:1;justify-content:flex-end;min-width:240px;">';
   if (!isHome) h += searchInput;
+  if (isAdmin) h += '<button onclick="openPhotoBulk()" title="Качи няколко снимки наведнъж — разпознават се по името на файла" style="border:1px solid #e2e8f0;background:#fff;color:#0f172a;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">📷 Качи снимки</button>';
   if (isAdmin) h += '<button onclick="openContactModal(null)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap;">+ Добави</button>';
   h += '</div></div>';
   if (isHome) h += ctHeroHtml(searchInput);
@@ -1082,6 +1092,213 @@ function submitContact() {
     if(contactsEdit&&contactsEdit.photo_url)data.photo_url=contactsEdit.photo_url;
     saveContact(data);
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   МАСОВО КАЧВАНЕ НА СНИМКИ (03.10.2026)
+   Файловете се разпознават по име („Росица Билбилева.jpg"), преглеждат се
+   в таблица и чак тогава се качват. Нищо не се записва преди „Запиши".
+   Разпознаване (ctPhotoGuess):
+     sure  — пълното име съвпада (без значение главни/малки, _ - . интервали),
+             или съвпадат и първото, и последното име (3 имена в базата);
+     check — съвпада само фамилията и тя е уникална (напр. „Васка Шикова" →
+             „Василка Шикова"), или файлът е една дума с един кандидат;
+             показва се в жълто, за потвърждение;
+     none  — нищо; избира се ръчно.
+   Латиница в името на файла се транслитерира („Rosica Bilbileva").
+   Снимката се смалява до CT_PHOTO_MAX px (канвас, JPEG); ако браузърът не
+   може — качва се оригиналът. Всеки неуспех е видим на реда си (червено),
+   не се поглъща тихо, и в крайното съобщение.
+   ═══════════════════════════════════════════════════════════════════════ */
+var CT_PHOTO_MAX = 600;
+var ctPhotoRows = [];   /* [{file, url, id, level}] */
+
+var CT_LAT = {'sht':'щ','sh':'ш','ch':'ч','zh':'ж','ts':'ц','yu':'ю','ya':'я','ju':'ю','ja':'я',
+  'a':'а','b':'б','v':'в','g':'г','d':'д','e':'е','z':'з','i':'и','y':'й','j':'й','k':'к','l':'л','m':'м',
+  'n':'н','o':'о','p':'п','r':'р','s':'с','t':'т','u':'у','f':'ф','h':'х','c':'ц','w':'в','q':'к','x':'кс'};
+function ctTranslit(s){
+  return String(s).replace(/sht|sh|ch|zh|ts|yu|ya|ju|ja|[a-z]/g,function(m){ return CT_LAT[m]||m; });
+}
+function ctNameTokens(s){
+  s=String(s||'').toLowerCase();
+  s=s.replace(/\.[a-z0-9]{2,5}$/,'');        /* разширение */
+  s=s.replace(/\(\d+\)|copy|копие/g,' ');      /* „(1)", „copy" */
+  s=s.replace(/[_\-.\/,]+/g,' ');
+  if(/[a-z]/.test(s)) s=ctTranslit(s);
+  return s.split(/\s+/).filter(function(t){ return t && !/^\d+$/.test(t); });
+}
+function ctPhotoPeople(){
+  return allContacts.filter(function(c){ return c.type==='contact' && c.store_role!=='store'; });
+}
+/* Връща {id, level, ids} — ids = всички кандидати при двусмислие. */
+function ctPhotoGuess(fileName, people){
+  var f=ctNameTokens(fileName);
+  if(!f.length) return {id:'',level:'none',ids:[]};
+  var fj=f.join(' ');
+  function hits(test){ return people.filter(function(c){ return test(ctNameTokens(c.name)); }); }
+  var exact=hits(function(n){ return n.join(' ')===fj; });
+  if(exact.length===1) return {id:exact[0].id,level:'sure',ids:[exact[0].id]};
+  var fl=hits(function(n){ return n.length>=2 && f.length>=2 && n[0]===f[0] && n[n.length-1]===f[f.length-1]; });
+  if(fl.length===1) return {id:fl[0].id,level:'sure',ids:[fl[0].id]};
+  var amb=exact.length>1?exact:fl;
+  if(amb.length>1) return {id:'',level:'none',ids:amb.map(function(c){return c.id;})};
+  if(f.length>=2){
+    var last=f[f.length-1];
+    var byLast=hits(function(n){ return n.length>=2 && n[n.length-1]===last; });
+    if(byLast.length===1) return {id:byLast[0].id,level:'check',ids:[byLast[0].id]};
+    if(byLast.length>1) return {id:'',level:'none',ids:byLast.map(function(c){return c.id;})};
+  }
+  if(f.length===1){
+    /* Само една дума („Иванова.jpg", „Нели.jpg") — никога „сигурно":
+       един кандидат → за потвърждение, няколко → предложени отгоре. */
+    var one=hits(function(n){ return n.indexOf(f[0])>=0; });
+    if(one.length===1) return {id:one[0].id,level:'check',ids:[one[0].id]};
+    if(one.length>1) return {id:'',level:'none',ids:one.map(function(c){return c.id;})};
+  }
+  return {id:'',level:'none',ids:[]};
+}
+
+function openPhotoBulk(){
+  var inp=document.getElementById('ct-photo-bulk-input');
+  if(!inp){
+    document.body.insertAdjacentHTML('beforeend','<input type="file" id="ct-photo-bulk-input" accept="image/*" multiple style="display:none;" onchange="ctPhotoFilesChosen(this)">');
+    inp=document.getElementById('ct-photo-bulk-input');
+  }
+  inp.value='';
+  inp.click();
+}
+function ctPhotoFilesChosen(input){
+  var files=Array.prototype.slice.call(input.files||[]);
+  if(!files.length)return;
+  var people=ctPhotoPeople();
+  ctPhotoRows.forEach(function(r){ if(r.url&&window.URL&&URL.revokeObjectURL) try{URL.revokeObjectURL(r.url);}catch(e){} });
+  ctPhotoRows=files.map(function(f){
+    var g=ctPhotoGuess(f.name,people);
+    var url=''; try{ url=(window.URL&&URL.createObjectURL)?URL.createObjectURL(f):''; }catch(e){}
+    return {file:f,url:url,id:g.id,level:g.level,ids:g.ids,state:''};
+  });
+  ctRenderPhotoModal();
+}
+function ctPhotoDupes(){
+  var seen={},d={};
+  ctPhotoRows.forEach(function(r){ if(r.id){ if(seen[r.id])d[r.id]=1; seen[r.id]=1; } });
+  return d;
+}
+function ctRenderPhotoModal(){
+  var people=ctPhotoPeople().slice().sort(ctByName);
+  var dup=ctPhotoDupes();
+  var n=ctPhotoRows.filter(function(r){return r.id;}).length;
+  var lbl={sure:['✅','разпознат','#15803d'],check:['⚠️','провери — съвпада фамилията','#b45309'],none:['❌','не е разпознат — избери','#dc2626']};
+  var rows=ctPhotoRows.map(function(r,i){
+    var c=ctById(r.id);
+    var L=lbl[r.id?(r.level==='none'?'sure':r.level):'none'];
+    var st=r.state==='ok'?'<span style="color:#15803d;">✓ записана</span>'
+         :r.state==='err'?'<span style="color:#dc2626;font-weight:600;">✕ '+esc(r.err||'грешка')+'</span>'
+         :r.state==='busy'?'<span style="color:#64748b;">⏳</span>'
+         :dup[r.id]?'<span style="color:#dc2626;font-weight:600;">две снимки за един човек</span>'
+         :'<span style="color:'+L[2]+';">'+L[0]+' '+L[1]+'</span>';
+    var opts='<option value="">— пропусни —</option>'+
+      (r.ids&&r.ids.length>1?'<optgroup label="Възможни">'+r.ids.map(function(id){var p=ctById(id);return p?'<option value="'+escAttr(id)+'"'+(r.id===id?' selected':'')+'>'+esc(p.name)+(p.store_name?' · '+esc(ctClean(p.store_name)):'')+'</option>':'';}).join('')+'</optgroup>':'')+
+      '<optgroup label="Всички">'+people.map(function(p){
+        var where=ctIsStoreStaff(p)?ctClean(p.store_name):ctClean(p.category);
+        return '<option value="'+escAttr(p.id)+'"'+(r.id===p.id&&!(r.ids&&r.ids.length>1)?' selected':'')+'>'+esc(p.name)+(where?' · '+esc(where):'')+'</option>';
+      }).join('')+'</optgroup>';
+    return '<tr data-i="'+i+'" style="border-bottom:1px solid #f1f5f9;'+(dup[r.id]?'background:#fef2f2;':'')+'">'+
+      '<td style="padding:6px;">'+(r.url?'<img src="'+escAttr(r.url)+'" style="width:44px;height:44px;border-radius:50%;object-fit:cover;background:#e2e8f0;">':'🖼️')+'</td>'+
+      '<td style="padding:6px;font-size:12px;color:#475569;word-break:break-all;">'+esc(r.file.name)+'</td>'+
+      '<td style="padding:6px;"><select class="fi" data-i="'+i+'" onchange="ctPhotoPick(this)" style="margin:0;min-width:200px;"'+(r.state==='ok'?' disabled':'')+'>'+opts+'</select>'+
+        (c&&c.photo_url&&r.state!=='ok'?'<div style="font-size:11px;color:#b45309;margin-top:2px;">ще замени сегашната снимка</div>':'')+'</td>'+
+      '<td style="padding:6px;font-size:12px;">'+st+'</td></tr>';
+  }).join('');
+  var blocked=Object.keys(dup).length>0;
+  var html='<div class="bov open" id="ctp-ov"><div class="bmod" style="width:820px;max-width:96vw;max-height:90vh;display:flex;flex-direction:column;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
+      '<div style="font-size:15px;font-weight:600;">📷 Качване на снимки ('+ctPhotoRows.length+')</div>'+
+      '<button onclick="closePhotoBulk()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:8px;">Провери кой човек е избран за всяка снимка. Нищо не се записва преди „Запиши“.</div>'+
+    '<div style="overflow:auto;flex:1;border:1px solid #e2e8f0;border-radius:10px;"><table style="width:100%;border-collapse:collapse;">'+rows+'</table></div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;align-items:center;margin-top:12px;">'+
+      '<span id="ctp-msg" style="margin-right:auto;font-size:12px;color:'+(blocked?'#dc2626':'#64748b')+';">'+(blocked?'Има човек с две снимки — избери само една.':n+' за запис')+'</span>'+
+      '<button onclick="closePhotoBulk()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Затвори</button>'+
+      '<button id="ctp-save" onclick="savePhotoBulk()"'+(blocked||!n?' disabled':'')+' style="border:none;background:'+(blocked||!n?'#94a3b8':'#2563eb')+';color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Запиши</button>'+
+    '</div></div></div>';
+  var ex=document.getElementById('ctp-ov'); if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+}
+function ctPhotoPick(sel){
+  var r=ctPhotoRows[+sel.getAttribute('data-i')]; if(!r)return;
+  r.id=sel.value; r.level=r.id?'sure':'none'; r.ids=r.id?[r.id]:r.ids;
+  ctRenderPhotoModal();
+}
+function closePhotoBulk(){
+  var ex=document.getElementById('ctp-ov'); if(ex)ex.remove();
+  var changed=ctPhotoRows.some(function(r){return r.state==='ok';});
+  ctPhotoRows.forEach(function(r){ if(r.url&&window.URL&&URL.revokeObjectURL) try{URL.revokeObjectURL(r.url);}catch(e){} });
+  ctPhotoRows=[];
+  if(changed) loadContacts();
+}
+
+/* Смаляване: канвас → JPEG. При всяка невъзможност — оригиналният файл. */
+function ctResizeImage(file){
+  return new Promise(function(resolve){
+    try{
+      if(!window.URL||!URL.createObjectURL||!document.createElement('canvas').getContext){ resolve(file); return; }
+      var img=new Image();
+      var u=URL.createObjectURL(file);
+      img.onload=function(){
+        try{
+          var w=img.naturalWidth||img.width, h=img.naturalHeight||img.height;
+          var k=Math.min(1, CT_PHOTO_MAX/Math.max(w,h,1));
+          var cv=document.createElement('canvas'); cv.width=Math.round(w*k); cv.height=Math.round(h*k);
+          var cx=cv.getContext('2d'); if(!cx||!cv.toBlob){ URL.revokeObjectURL(u); resolve(file); return; }
+          cx.drawImage(img,0,0,cv.width,cv.height);
+          cv.toBlob(function(b){ URL.revokeObjectURL(u); resolve(b&&b.size?b:file); },'image/jpeg',0.85);
+        }catch(e){ resolve(file); }
+      };
+      img.onerror=function(){ URL.revokeObjectURL(u); resolve(file); };
+      img.src=u;
+    }catch(e){ resolve(file); }
+  });
+}
+function ctUploadOnePhoto(r){
+  var c=ctById(r.id);
+  return ctResizeImage(r.file).then(function(blob){
+    var isJpg=blob!==r.file || /jpe?g$/i.test(r.file.name);
+    var ext=isJpg?'jpg':((r.file.name.split('.').pop()||'jpg').toLowerCase());
+    var path='photos/'+r.id+'-'+Date.now()+'.'+ext;
+    return fetch(SB_CONTACTS+'/storage/v1/object/'+SB_CBKT+'/'+path,{
+      method:'POST',
+      headers:{'Authorization':'Bearer '+SB_CKEY,'Content-Type':(blob.type||r.file.type||'image/jpeg'),'x-upsert':'true'},
+      body:blob
+    }).then(function(res){
+      if(!res.ok) throw new Error('качването отказано ('+res.status+')');
+      return sbPatch('contacts','id=eq.'+r.id,{photo_url:SB_CPUB+path, updated_by:(currentUser&&(currentUser.display_name||currentUser.email))||null});
+    }).then(function(res){
+      if(!res||!res.ok) throw new Error('снимката е качена, но не е закачена към '+(c?c.name:'човека'));
+    });
+  });
+}
+function savePhotoBulk(){
+  if(Object.keys(ctPhotoDupes()).length){ toast('Има човек с две снимки — избери само една','#dc2626'); return; }
+  var todo=ctPhotoRows.filter(function(r){ return r.id && r.state!=='ok'; });
+  if(!todo.length){ toast('Няма избрани снимки за запис','#64748b'); return; }
+  var btn=document.getElementById('ctp-save'); if(btn){ btn.disabled=true; btn.textContent='⏳ Записвам...'; }
+  var ok=0, bad=0;
+  /* Една по една: 30 снимки паралелно от телефон по мобилни данни гърмят. */
+  var chain=Promise.resolve();
+  todo.forEach(function(r){
+    chain=chain.then(function(){
+      r.state='busy';
+      return ctUploadOnePhoto(r).then(function(){ r.state='ok'; ok++; },
+        function(e){ r.state='err'; r.err=(e&&e.message)||'грешка'; bad++; console.error('photo upload',r.file.name,e); });
+    });
+  });
+  chain.then(function(){
+    ctRenderPhotoModal();
+    var m=document.getElementById('ctp-msg');
+    if(m){ m.style.color=bad?'#dc2626':'#15803d'; m.textContent='Записани: '+ok+(bad?' · с грешка: '+bad+' (виж червените редове)':''); }
+    toast(bad?'⚠️ Записани '+ok+', НЕ са записани '+bad:'✅ Записани '+ok+' снимки', bad?'#dc2626':undefined);
+  });
 }
 
 function uploadContactPhoto(file,data) {
