@@ -2817,6 +2817,7 @@ function renderBulView(){
         html+='<span style="font-size:13px;flex:1;line-height:1.35;">'+esc(e.title||'')+'</span>';
         if(canEdit())html+='<button data-key="'+key+'" data-idx="'+ei+'" onclick="bulRmCal(this)" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;padding:0;line-height:1;">✕</button>';
         html+='</div>';
+        html+=calEventDescHtml(e);
         html+=renderCalEntryAttachments(e,key,ei);
         html+='</div>';
       });
@@ -2835,6 +2836,7 @@ function renderBulView(){
         html+='<span style="font-size:13px;flex:1;line-height:1.35;">'+esc(e.title||'')+'</span>';
         if(canEdit())html+='<button data-key="'+key+'" data-idx="'+ei+'" onclick="bulRmCal(this)" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;padding:0;line-height:1;">✕</button>';
         html+='</div>';
+        html+=calEventDescHtml(e);
         html+=renderCalEntryAttachments(e,key,ei);
         html+='</div>';
       });
@@ -3323,6 +3325,19 @@ function renderCalEntryAttachments(entry,key,idx){
       '📎 +<input type="file" accept=".jpg,.jpeg,.png,.gif,.webp,.pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" style="display:none;" data-key="'+key+'" data-idx="'+idx+'" onchange="calUploadAttachment(this)"></label>';
   }
   return h;
+}
+/* Описанието на ръчно събитие (content.calendar[ден][i].desc). До 04.10.2026 се
+   записваше от формата, но никой екран не го четеше. Празно → нищо, без празен
+   ред. Свободен текст: linkify() прави esc() вътре, както при задачите. */
+function calEventDescHtml(e){
+  if(!e||!String(e.desc||'').trim()) return '';
+  return '<div class="bul-desc" style="margin:0 0 2px 16px;">'+linkify(e.desc)+'</div>';
+}
+/* Печатът: на хартия адресът трябва да се чете, затова linkifyPlain
+   (етикет + адрес), после esc(). */
+function calEventDescPrintHtml(e){
+  if(!e||!String(e.desc||'').trim()) return '';
+  return '<div style="white-space:pre-line;font-size:10.5pt;color:#475569;margin:0 0 1mm 7pt;">'+esc(linkifyPlain(e.desc))+'</div>';
 }
 function calUploadAttachment(input){
   var file=input.files[0]; if(!file)return;
@@ -4728,6 +4743,7 @@ function printSection(what){
       mn.forEach(function(e){
         var dc=dotC[e.dept]||'#64748b';
         s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span>'+esc(e.title||'')+'</span></div>';
+        s+=calEventDescPrintHtml(e);
       });
       /* Пренесените за този ден — печатът е чеклистът, по който обектът
          работи, и точно този ден е новият ѝ срок. Слетите не се дублират. */
