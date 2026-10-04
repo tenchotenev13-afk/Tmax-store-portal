@@ -194,7 +194,6 @@ function loadDailyOverview(dateOverride) {
   var labels = ['Вчера','Завчера','По-завчера'];
 
   var pickerHtml = '<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap;">'
-    + '<div style="font-size:16px;font-weight:600;">📅 Дневен преглед</div>'
     + days.map(function(d,i){
         var active = activeDate===d;
         return '<button onclick="loadDailyOverview(\'' + d + '\')" style="border:1px solid #e2e8f0;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';border-radius:6px;padding:4px 12px;font-size:12px;cursor:pointer;">'

@@ -68,6 +68,22 @@ const settle = async () => { for (let i = 0; i < 8; i++) await ticks(); await ne
     ok('кликът пак работи', guard('клик', () => realClick(h.w, $(h, 'h-st-search'))) && shown(h, 'h-sub-search') && !shown(h, 'h-sub-daily'));
   }
 
+  section('1в. без повтарящи се заглавия под подтабовете');
+  {
+    const h = env();
+    guard('renderHistoryShell()', () => h.w.renderHistoryShell());
+    const count = (root, s) => (root.textContent.match(new RegExp(s, 'g')) || []).length;
+    ok('„Търсене по период“ е точно веднъж в целия шел (само подтабът)', count($(h, 'mod-history'), 'Търсене по период') === 1, String(count($(h, 'mod-history'), 'Търсене по период')));
+    ok('и то е бутонът на подтаба, не в картата', $(h, 'h-st-search').textContent.indexOf('Търсене по период') >= 0 && count($(h, 'h-sub-search'), 'Търсене по период') === 0);
+    ok('картата с полетата и бутонът „Търси →“ си остават', !!$(h, 'h-sub-search').querySelector('.card') && !!$(h, 'h-from') && !!h.doc.querySelector('[onclick="runHistorySearch()"]'));
+    guard('loadDailyOverview()', () => h.w.loadDailyOverview());
+    await settle();
+    const dv = $(h, 'daily-overview');
+    ok('надписът „📅 Дневен преглед“ пред бутоните Вчера/Завчера е махнат', !/📅 Дневен преглед(?! —)/.test(dv.textContent) && /Вчера\(/.test(dv.textContent), dv.textContent.slice(0, 120));
+    ok('бутоните Вчера / Завчера / По-завчера и датата остават', /Вчера/.test(dv.textContent) && /Завчера/.test(dv.textContent) && /По-завчера/.test(dv.textContent) && !!dv.querySelector('input[type=date]'));
+    ok('а „Дневен преглед — ДАТА“ над картите остава', /Дневен преглед — \d{2}\.\d{2}\.\d{4}/.test(dv.textContent), dv.textContent.slice(0, 160));
+  }
+
   section('2. външни извиквания: goToStornoHistory() води към подтаба с резултатите');
   {
     const h = env();
@@ -121,6 +137,29 @@ const settle = async () => { for (let i = 0; i < 8; i++) await ticks(); await ne
     btns.forEach(b => realClick(h.w, b));
     const got = calls.map(a => a.join('|')).sort().join(',');
     ok('кликът отваря openKasaDetail с правилните аргументи за всеки ден', got === ['Ловеч|' + D, 'Троян|' + D, 'Троян|' + D2].sort().join(','), got);
+  }
+
+  section('4б. Сторно (admin): заглавие „Действие“, th = td');
+  {
+    const h = env();
+    guard('renderHistoryShell()', () => h.w.renderHistoryShell());
+    $(h, 'h-from').value = '2026-09-01'; $(h, 'h-to').value = '2026-09-30'; $(h, 'h-type').value = 'storno';
+    realClick(h.w, h.doc.querySelector('[onclick="runHistorySearch()"]'));
+    await settle();
+    const table = $(h, 'h-results').querySelector('table');
+    const ths = Array.from(table.querySelectorAll('thead th')).map(x => x.textContent.trim());
+    ok('11 заглавия, последното е „Действие“', ths.length === 11 && ths[10] === 'Действие', ths.join('|'));
+    const rows = Array.from(table.querySelectorAll('tbody tr')).filter(r => r.children.length === ths.length);
+    ok('редовете с данни имат толкова клетки, колкото заглавия', rows.length === 3, String(rows.length));
+    ok('бутонът „Върни за коментар“ е в колоната „Действие“', rows.every(r => /Върни за коментар/.test(r.children[10].textContent)));
+    const nonAdmin = boot({ modules: ['transport.js', 'client-orders.js', 'kasa.js', 'kasa-docs.js', 'history.js', 'notifications.js'], user: Object.assign({}, ADMIN, { role: 'logistics' }), data: DATA });
+    nonAdmin.w.transportOrders = []; nonAdmin.w.clientOrders = [];
+    guard('renderHistoryShell()', () => nonAdmin.w.renderHistoryShell());
+    nonAdmin.doc.getElementById('h-from').value = '2026-09-01'; nonAdmin.doc.getElementById('h-to').value = '2026-09-30'; nonAdmin.doc.getElementById('h-type').value = 'storno';
+    realClick(nonAdmin.w, nonAdmin.doc.querySelector('[onclick="runHistorySearch()"]'));
+    await settle();
+    const t2 = nonAdmin.doc.getElementById('h-results').querySelector('table');
+    ok('без право да връща (logistics): 10 заглавия, без „Действие“', Array.from(t2.querySelectorAll('thead th')).length === 10 && !/Действие/.test(t2.querySelector('thead').textContent));
   }
 
   section('5. „Дневен преглед": 7 заглавия = 7 клетки, закачен хедър');

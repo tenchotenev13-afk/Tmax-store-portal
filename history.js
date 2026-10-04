@@ -139,7 +139,6 @@ function renderHistoryShell(){
     '<div id="h-sub-daily"><div id="daily-overview" style="margin-bottom:16px;"></div></div>'+
     '<div id="h-sub-search" style="display:none;">'+
     '<div class="card" style="margin-bottom:16px;">'+
-      '<div class="card-title">🔍 Търсене по период</div>'+
       '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">'+
         '<div style="flex:1 1 160px;min-width:160px;"><label class="fl">От дата</label>'+
           '<input type="date" class="fi" id="h-from" value="'+firstDay+'"></div>'+
@@ -343,7 +342,7 @@ function renderHistoryResults(){
         '<th style="width:15%;">Реална замяна</th>'+
         '<th style="width:8%;white-space:nowrap;">Сума нов</th>'+
         '<th style="width:8%;white-space:nowrap;">Индикация</th>'+
-        '<th style="width:9%;white-space:nowrap;">Статус</th>'+(canReturnStorno?'<th></th>':'')+'</tr></thead>'+
+        '<th style="width:9%;white-space:nowrap;">Статус</th>'+(canReturnStorno?'<th>Действие</th>':'')+'</tr></thead>'+
       '<tbody>'+
       histData.storno.slice().sort(function(a,b){return stornoSortPriority(a)-stornoSortPriority(b);}).map(function(r){
         var ind=stornoIndicator(r.returned_sum,r.new_sum,r.articles);
