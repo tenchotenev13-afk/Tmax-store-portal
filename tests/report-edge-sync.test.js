@@ -118,6 +118,9 @@ const COPIED_HELPERS = [
   { fn: 'recurringApplyVersion', from: SHARED },
   { fn: 'recurringApplyVersions', from: SHARED },
   { fn: 'esc', from: SHARED },
+  /* fmtDate2 — вика го reportSpanPendingHtml; липсата му събори седмичния
+     отчет на 04.10.2026 (ReferenceError). */
+  { fn: 'fmtDate2', from: BULLETIN },
   { fn: 'toLocalISO', from: BULLETIN },
   { fn: 'taskDueDates', from: BULLETIN },
   { fn: 'taskIsDueOnDate', from: BULLETIN },

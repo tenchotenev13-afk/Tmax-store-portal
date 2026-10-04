@@ -1,6 +1,10 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v48 (04.10.2026) — ЕДНО нещо: поправка на падането на седмичния отчет.
+      „ReferenceError: fmtDate2 is not defined“ в reportSpanPendingHtml —
+      помощникът беше само в bulletin.js; копиран тук.
+
    v47 (01.10.2026) — ДВЕ неща, двете по задачите от Бюлетина:
    1) ПРОЗОРЕЦ при ЕДНОКРАТНА задача (bulletin_tasks.due_window): задачата е
       ЕДНО явяване с ДИАПАЗОН, не N явявания по ден. В дневния влиза само в
@@ -658,6 +662,10 @@ function esc(s: any){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&
    на атрибут: кавичка вътре в src="…" затваря атрибута и всичко след нея
    се чете като markup. Копие на escAttr от shared.js. */
 function escAttr(s: any){ return esc(s).replace(/"/g,'&quot;'); }
+/* Копие от bulletin.js — ползва се от reportSpanPendingHtml(). Без него
+   седмичният отчет пада с ReferenceError, щом има задача със срок в по-късна
+   седмица (04.10.2026, W40). */
+function fmtDate2(d: any){ if(!d) return '—'; var p=String(d).slice(0,10).split('-'); return p.length===3 ? p[2]+'.'+p[1]+'.'+p[0] : d; }
 function toLocalISO(d: Date){
   var y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
   return y+'-'+m+'-'+day;
