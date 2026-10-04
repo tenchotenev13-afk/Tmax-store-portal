@@ -5797,6 +5797,58 @@ function loadTasksStats() {
   });
 }
 
+/* ═══ КАКВО БРОИ „📊 Анализ" ════════════════════════════════════════════
+   До 04.10.2026 тук бяха изключени САМО редовете 'not_applicable', тоест
+   ОТЛОЖЕНАТА задача (status='postponed') се броеше за ИЗПЪЛНЕНА: вдигаше
+   процента, влизаше в „✅ Изпълнени", добавяше обекта в „Изпълнили" и махаше
+   задачата от „🔴 Просрочени". Нито едно друго място не брои така — сверено
+   на 04.10.2026 по пет източника:
+     · панелът на обекта (bulStoreCount, X/18) — done е (status||'done')==='done',
+       а обект, пренесъл явяването си за друг ден, ИЗЛИЗА от знаменателя му;
+     · „Днес" (today.js) — „взимаме само status='done', за да не броим
+       отложените като изпълнени", и пренеслият излиза от знаменателя си;
+     · печатът / решетката (report.js) — 'postponed' е ОТДЕЛНО състояние (⏳),
+       различно от 'done' (✓) и от 'missing' (✖);
+     · send-routed-report и send-scheduled-report — „Само status='done' се
+       брои за изпълнено; 'postponed' се извежда отделно в postponedList".
+   Разликата дали отложеният обект остава в знаменателя е заради ЕДИНИЦАТА:
+   панелът и „Днес" броят ЕДИН ДЕН (пренесеното е вече на друг ден, значи
+   излиза), а Анализ и седмичните картички броят ЦЯЛА СЕДМИЦА (новата дата
+   обикновено е вътре в нея, значи остава). Затова тук обектът ОСТАВА в
+   знаменателя и просто не е изпълнил — дословно като седмичната картичка в
+   send-routed-report.
+   Предикатът е (status||'done')==='done', а не status==='done', за да е
+   БУКВАЛНО същият като в bulStoreCount: ако някога се появи ред без статус,
+   двете числа не бива да се разминат. (Към 04.10.2026 такива няма — в
+   task_completions са само 3510 'done' и 5 'postponed'.) */
+function bulAnIsDone(c){ return !!c && (c.status||'done')==='done'; }
+/* Просрочена ли е задачата. Следва bulletin-notify (темата overdue_tasks):
+   „обикновена задача е просрочена СЛЕД postponed_to, не след срока" — тоест
+   отложена напред задача още не е просрочена, а щом новата дата мине без
+   изпълнение, е. Без това поправката на броенето щеше да вкара в
+   „Просрочени" задачи, за които обектът е договорил нов ден, и Анализ пак
+   щеше да казва друго от известието.
+   ppTo: task_id → най-късната бъдеща нова дата по тази задача. */
+function bulAnPostponedTo(comps){
+  var m={};
+  (comps||[]).forEach(function(c){
+    if(!c || c.status!=='postponed' || !c.postponed_to) return;
+    var to=String(c.postponed_to).slice(0,10);
+    if(!m[c.task_id] || to>m[c.task_id]) m[c.task_id]=to;
+  });
+  return m;
+}
+function bulAnOverdue(t, doneSet, ppTo, todayISO){
+  var dts=taskDueDates(t);
+  if(!dts.length || !(new Date(dts[dts.length-1])<new Date())) return false;
+  if(doneSet[t.id]) return false;
+  /* Отложена с дата НАПРЕД — работата не е изгубена, а преместена. Стар
+     отложен ред БЕЗ дата (има три такива от С36) не отлага нищо: той не може
+     да каже докога, значи задачата е просрочена както всяка друга. */
+  var to=ppTo[t.id];
+  if(to && to>=(todayISO||today())) return false;
+  return true;
+}
 function renderBulAnalysis(){
   var wrap=document.getElementById('mod-bulletin'); if(!wrap)return;
   var wk=curBul?curBul.week_number:weekNum(new Date());
@@ -5809,18 +5861,17 @@ function renderBulAnalysis(){
      магазини във ВСЯКА седмица от обхвата си, тоест 2 до 4 пъти. */
   var anTasks=bulTasks.filter(function(t){return !taskIsNotice(t) && taskCountsInWeek(t, bulWeekISO()) && taskInForce(t, bulTodayISO());});
   if(!anTasks.length){html+='<div class="bcard" style="text-align:center;padding:30px;color:#94a3b8;">Няма задачи.</div>';wrap.innerHTML=html+'</div>';return;}
-  /* „Не се отнася" НЕ е изпълнение: иначе задача, за която един обект е
-     заявил, че не важи за него, щеше да влезе в „✅ Изпълнени" и да излезе от
-     „🔴 Просрочени" — заради обект, който дори не я дължи. Заявките се
-     изброяват отделно, в колоната „Изпълнили" на таблицата по-долу.
-     (Отложените продължават да влизат в ds, както досега — заварено.) */
-  var ds={};bulComps.forEach(function(c){if(c.status!=='not_applicable')ds[c.task_id]=1;});
+  /* Изпълнение е САМО 'done' (виж bulAnIsDone по-горе): „не се отнася" не е
+     изпълнение, а отложеното — също. Заявките „не се отнася" се изброяват
+     отделно, в колоната „Изпълнили" на таблицата по-долу. */
+  var ds={};bulComps.forEach(function(c){if(bulAnIsDone(c))ds[c.task_id]=1;});
+  var ppTo=bulAnPostponedTo(bulComps);
   var done=Object.keys(ds).length; var tot=anTasks.length;
   /* Числителят минава през същия филтър като знаменателя (loadReportableStores
      по-долу). Иначе отметка от необект — ЦО, склад, Сервиз Троян — прави
      „🏪 Магазини" 19 и процента над 100%. */
-  var ss={};bulComps.forEach(function(c){if(c.status!=='not_applicable'&&isReportableStore(c.store_name))ss[c.store_name]=1;});
-  var over=anTasks.filter(function(t){var dts=taskDueDates(t);return dts.length&&new Date(dts[dts.length-1])<new Date()&&!ds[t.id];}).length;
+  var ss={};bulComps.forEach(function(c){if(bulAnIsDone(c)&&isReportableStore(c.store_name))ss[c.store_name]=1;});
+  var over=anTasks.filter(function(t){return bulAnOverdue(t,ds,ppTo,bulTodayISO());}).length;
   html+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px;">';
   [['📋 Задачи',tot,'общо','#2563eb'],['✅ Изпълнени',done,'задачи','#16a34a'],['🔴 Просрочени',over,'без изпълнение','#dc2626'],['🏪 Магазини',Object.keys(ss).length,'са отметнали','#d97706']].forEach(function(card){
     html+='<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;border-top:3px solid '+card[3]+';"><div style="font-size:11px;color:#64748b;margin-bottom:4px;">'+card[0]+'</div><div style="font-size:26px;font-weight:700;color:'+card[3]+';font-family:DM Mono,monospace;">'+card[1]+'</div><div style="font-size:11px;color:#94a3b8;">'+card[2]+'</div></div>';
@@ -5840,12 +5891,16 @@ function renderBulAnalysis(){
          физически няма стелажа, тегли процента на задачата надолу завинаги. */
       var naRows=bulNaCompsFor('regular',task,bulWeekArr());
       var naSet={};naRows.forEach(function(c){naSet[c.store_name]=c;});
-      var comps=bulComps.filter(function(c){return c.task_id===task.id&&isReportableStore(c.store_name)&&c.status!=='not_applicable';});
+      var comps=bulComps.filter(function(c){return c.task_id===task.id&&isReportableStore(c.store_name)&&bulAnIsDone(c);});
+      /* Отложилите се ПОКАЗВАТ отделно (⏱), не изчезват от реда: иначе
+         обектът пропада без обяснение и числото пак изглежда необяснимо —
+         точно което породи тази поправка. В знаменателя ОСТАВАТ. */
+      var ppRows=bulComps.filter(function(c){return c.task_id===task.id&&isReportableStore(c.store_name)&&c.status==='postponed';});
       var denom=all.filter(function(st){return !naSet[st];}).length;
       var pct=denom?Math.round(comps.length/denom*100):0;
-      var isOv=(function(){var dts=taskDueDates(task);return dts.length&&new Date(dts[dts.length-1])<new Date()&&!ds[task.id];})();
+      var isOv=bulAnOverdue(task,ds,ppTo,bulTodayISO());
       var d=DEPTS[task.department]||{label:task.department,color:'#94a3b8',bg:'#f3f4f6',bdr:'#e2e8f0'};
-      tbl+='<tr style="border-bottom:1px solid #f1f5f9;'+(isOv?'background:#fff5f5;':'')+'"><td style="padding:7px 10px;font-weight:500;">'+esc(task.title||'')+'</td><td style="padding:7px 10px;"><span style="background:'+d.bg+';color:'+d.color+';border:1px solid '+d.bdr+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+d.label+'</span></td><td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:'+(isOv?'#dc2626':'#64748b')+';">'+(taskDueLabel(task)||'—')+(isOv?' 🔴':'')+'</td><td style="padding:7px 10px;">'+((comps.length||naRows.length)?(comps.map(function(c){return '<span style="background:#dcfce7;color:#14532d;font-size:10px;padding:1px 6px;border-radius:20px;margin:1px 2px;display:inline-block;">'+esc(c.store_name)+'</span>';}).join('')+naRows.map(function(c){var why=String(c.comment||'').trim();return '<span title="'+escAttr('Не се отнася'+(why?(' — '+why):''))+'" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;font-size:10px;padding:1px 6px;border-radius:20px;margin:1px 2px;display:inline-block;cursor:help;">🚫 '+esc(c.store_name)+'</span>'+(canEdit()?('<button data-task-id="'+task.id+'" data-store="'+escAttr(c.store_name)+'" data-cdate="'+String(c.completion_date||'').slice(0,10)+'" onclick="bulNaReturn(\'regular\',this.dataset.taskId,this.dataset.store,this.dataset.cdate||null)" title="Върни като чакаща" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:4px;padding:0 5px;font-size:9.5px;cursor:pointer;margin:1px 4px 1px 0;">↩</button>'):'');}).join('')):'<span style="color:#94a3b8;font-size:11px;">—</span>')+'</td><td style="padding:7px 10px;text-align:right;font-family:DM Mono,monospace;font-weight:700;color:'+(pct>=80?'#16a34a':pct>=50?'#d97706':'#dc2626')+';">'+pct+'%</td></tr>';
+      tbl+='<tr style="border-bottom:1px solid #f1f5f9;'+(isOv?'background:#fff5f5;':'')+'"><td style="padding:7px 10px;font-weight:500;">'+esc(task.title||'')+'</td><td style="padding:7px 10px;"><span style="background:'+d.bg+';color:'+d.color+';border:1px solid '+d.bdr+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+d.label+'</span></td><td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:'+(isOv?'#dc2626':'#64748b')+';">'+(taskDueLabel(task)||'—')+(isOv?' 🔴':'')+'</td><td style="padding:7px 10px;">'+((comps.length||naRows.length||ppRows.length)?(comps.map(function(c){return '<span style="background:#dcfce7;color:#14532d;font-size:10px;padding:1px 6px;border-radius:20px;margin:1px 2px;display:inline-block;">'+esc(c.store_name)+'</span>';}).join('')+naRows.map(function(c){var why=String(c.comment||'').trim();return '<span title="'+escAttr('Не се отнася'+(why?(' — '+why):''))+'" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;font-size:10px;padding:1px 6px;border-radius:20px;margin:1px 2px;display:inline-block;cursor:help;">🚫 '+esc(c.store_name)+'</span>'+(canEdit()?('<button data-task-id="'+task.id+'" data-store="'+escAttr(c.store_name)+'" data-cdate="'+String(c.completion_date||'').slice(0,10)+'" onclick="bulNaReturn(\'regular\',this.dataset.taskId,this.dataset.store,this.dataset.cdate||null)" title="Върни като чакаща" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:4px;padding:0 5px;font-size:9.5px;cursor:pointer;margin:1px 4px 1px 0;">↩</button>'):'');}).join('')+ppRows.map(function(c){var to=c.postponed_to?bulDM(c.postponed_to):'';return '<span class="an-pp" title="'+escAttr('Отложена'+(to?(' за '+to):' (без дата)')+(String(c.comment||'').trim()?(' — '+String(c.comment).trim()):''))+'" style="background:#fff7ed;color:#b45309;border:1px solid #fed7aa;font-size:10px;padding:1px 6px;border-radius:20px;margin:1px 2px;display:inline-block;cursor:help;">⏱ '+esc(c.store_name)+(to?(' → '+esc(to)):'')+'</span>';}).join('')):'<span style="color:#94a3b8;font-size:11px;">—</span>')+'</td><td style="padding:7px 10px;text-align:right;font-family:DM Mono,monospace;font-weight:700;color:'+(pct>=80?'#16a34a':pct>=50?'#d97706':'#dc2626')+';">'+pct+'%</td></tr>';
     });
     tbl+='</tbody></table></div>';
     var el=document.getElementById('an-tbl'); if(el)el.innerHTML=tbl;

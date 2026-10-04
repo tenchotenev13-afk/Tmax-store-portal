@@ -149,6 +149,7 @@ const TESTS = [
   'bulletin-week-default.test.js',
   'bulletin-completion-day-lock.test.js',
   'bulletin-store-denominator.test.js',
+  'analysis-postponed.test.js',
   'wrong-receipt-tab.test.js',
   'wrong-receipt-store-submit.test.js',
   'diff-email-pending.test.js',
