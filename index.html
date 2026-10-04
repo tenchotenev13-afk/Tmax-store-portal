@@ -147,6 +147,24 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .tbl-tt-compact th:nth-child(5){width:160px;}
 .tbl-tt-compact th:nth-child(6){width:260px;}
 .tbl-tt-compact td:nth-child(3){overflow:hidden;}
+/* За връщане: По разлики — 6 колони (Артикул / Документ / Магазин · Доставчик / Статус / Коментари / Действия);
+   По рекламации — същите без Артикул (5) */
+.tbl-sr-diff table{min-width:1110px;}
+.tbl-sr-diff th:nth-child(1){min-width:200px;}
+.tbl-sr-diff th:nth-child(2){width:170px;}
+.tbl-sr-diff th:nth-child(3){width:170px;}
+.tbl-sr-diff th:nth-child(4){width:180px;}
+.tbl-sr-diff th:nth-child(5){width:220px;}
+.tbl-sr-diff th:nth-child(6){width:170px;}
+.tbl-sr-diff td:nth-child(1){overflow:hidden;}
+.tbl-sr-complaint table{min-width:940px;}
+.tbl-sr-complaint th:nth-child(1){width:170px;}
+.tbl-sr-complaint th:nth-child(2){width:190px;}
+.tbl-sr-complaint th:nth-child(3){width:190px;}
+.tbl-sr-complaint th:nth-child(4){min-width:200px;}
+.tbl-sr-complaint th:nth-child(5){width:170px;}
+/* Баджовете в колона „Статус“ не се пренасят („✅ ВЗЕТА“ до „⚠️ без документ“) — колоната е 4-та в „По разлики“ и 3-та в „По рекламации“ */
+.tbl-sr-diff td:nth-child(4) span,.tbl-sr-complaint td:nth-child(3) span{white-space:nowrap;}
 @media(min-width:1200px){
   .tbl-compact{overflow:visible;}
   .tbl-compact table{min-width:0;}

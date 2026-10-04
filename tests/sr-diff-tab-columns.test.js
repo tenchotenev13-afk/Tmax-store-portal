@@ -34,8 +34,9 @@ function row(o) {
 const settle = async (n) => { for (let i = 0; i < (n || 6); i++) await ticks(); };
 const mod = h => h.doc.getElementById('mod-stock-returns');
 const heads = h => Array.prototype.map.call(mod(h).querySelectorAll('thead th'), th => th.textContent.trim());
+/* Редът по име на артикул (title на първия ред в „Артикул“); клетките — като текст. */
 const cells = (h, name) => {
-  const tr = Array.prototype.find.call(mod(h).querySelectorAll('tbody tr'), x => x.querySelector('td').textContent.trim() === name);
+  const tr = Array.prototype.find.call(mod(h).querySelectorAll('tbody tr'), x => { const d = x.querySelector('td div'); return d && d.getAttribute('title') === name; });
   return tr ? Array.prototype.map.call(tr.querySelectorAll('td'), td => td.textContent.trim()) : null;
 };
 
@@ -87,17 +88,17 @@ function env(user, rows, tab) {
     realClick(h.w, btn(h.doc.getElementById('sr-import-ov'), 'Затвори'));
     await settle(10);
     const H_ = heads(h);
-    const iC = H_.indexOf('Потвърдена акт.'), iS = H_.indexOf('Коментар обект');
-    ok('„Потвърдена акт." и „Коментар обект" са след „Изтеглена с", преди „Коментар"',
-      iC > 0 && H_[iC - 1] === 'Изтеглена с' && H_[iS - 1] === 'Потвърдена акт.' && H_[iS + 1] === 'Коментар', H_.join('|'));
+    ok('„По разлики“: 6 колони — Артикул|Документ|Магазин · Доставчик|Статус|Коментари|Действия',
+      H_.join('|') === 'Артикул|Документ|Магазин · Доставчик|Статус|Коментари|Действия', H_.join('|'));
+    const iC = 3, iS = 4; /* „Потвърдена акт." е в клетката „Статус", „Коментар обект" — в „Коментари" */
     const c = cells(h, 'ЦИРКУЛЯР RAIDER');
     if (ok('редът е в таблицата на „По разлики"', !!c, JSON.stringify(h.w.srData.map(r => r.product_name)))) {
-      ok('датата: 02.09.2026', c[iC].indexOf('02.09.2026') === 0, JSON.stringify(c[iC]));
+      ok('датата: потвърдена акт. 02.09.2026', /потвърдена акт\.\s*02\.09\.2026/.test(c[iC]), JSON.stringify(c[iC]));
       /* Редът е вмъкнат от импорта → под датата стои и произходът ѝ.
          Без това клетката би изглеждала като обектова актуализация. */
       ok('и под нея — произходът ѝ (от импорт)',
         c[iC].indexOf('от импорт') > 0, JSON.stringify(c[iC]));
-      ok('коментарът на обекта: „НЕВЗЕТА · чакаме куриер"', c[iS] === 'НЕВЗЕТА · чакаме куриер', JSON.stringify(c[iS]));
+      ok('коментарът на обекта: „Обект: НЕВЗЕТА · чакаме куриер“', c[iS] === 'Обект: НЕВЗЕТА · чакаме куриер', JSON.stringify(c[iS]));
       ok('<th> = <td>', c.length === H_.length, c.length + ' / ' + H_.length);
     }
     h.close();
@@ -107,9 +108,9 @@ function env(user, rows, tab) {
   {
     const h = env(CVETI, [row(), row({ id: 'd-2', product_name: 'ДРУГ', confirmed_date: null, store_comment: null })]);
     const H_ = heads(h);
-    ok('празна дата → „—"', cells(h, 'ДРУГ')[H_.indexOf('Потвърдена акт.')] === '—');
+    ok('празна дата → няма ред „потвърдена акт.“', cells(h, 'ДРУГ')[3].indexOf('потвърдена акт.') < 0, cells(h, 'ДРУГ')[3]);
     h.w.srSearch = 'чакаме куриер'; h.w.renderStockReturns();
-    const names = Array.prototype.map.call(mod(h).querySelectorAll('tbody tr'), x => x.querySelector('td').textContent.trim());
+    const names = Array.prototype.map.call(mod(h).querySelectorAll('tbody tr'), x => x.querySelector('td div').getAttribute('title'));
     ok('търсене „чакаме куриер" → само ЦИРКУЛЯР', names.join('|') === 'ЦИРКУЛЯР', names.join('|'));
     h.close();
   }
@@ -147,16 +148,14 @@ function env(user, rows, tab) {
     const iC = head.indexOf('Потвърдена акт.'), iS = head.indexOf('Коментар обект');
     ok('заглавия: след „Изтеглена с", преди „Коментар"', iC > 0 && head[iC - 1] === 'Изтеглена с' && head[iS + 1] === 'Коментар', head.join('|'));
     ok('стойности: 02.09.2026 и текстът', aoa[7] && aoa[7][iC] === '02.09.2026' && aoa[7][iS] === 'НЕВЗЕТА · чакаме куриер', JSON.stringify(aoa[7]));
-    ok('Excel-ът и екранът са с еднакъв ред на колоните (без действията)',
-      head.join('|') === heads(h).slice(0, -1).join('|'), head.join('|') + ' ≠ ' + heads(h).slice(0, -1).join('|'));
+ok('Excel-ът не е пипан: пази пълния списък колони (екранът е компактен — 6)', head.length > heads(h).length, head.length + ' / ' + heads(h).length);
     h.close();
   }
 
   section('г) „По рекламации" — без промяна');
   {
     const h = env(CVETI, [row({ id: 'c-1', source: 'complaint', purchase_order: '4200016266' })], 'complaint');
-    ok('заглавията на „По рекламации" са непроменени', heads(h).join('|') ===
-      'ПВ-ЕВР|ИД-ЕВРО|Магазин|Доставчик|Дата докум.|Завод|Статус|Изтеглена с|Коментар обект|Потвърдена акт.|Коментар|Коментар Контролер|', heads(h).join('|'));
+ok('заглавията на „По рекламации“ — 5 колони (компактна таблица)', heads(h).join('|') === 'Документ|Магазин · Доставчик|Статус|Коментари|Действия', heads(h).join('|'));
     h.close();
   }
 

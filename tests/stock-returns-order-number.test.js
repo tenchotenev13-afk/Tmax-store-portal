@@ -139,6 +139,8 @@ function toastBg(doc) {
   const raw = (doc.getElementById('toast') || { style: {} }).style.background || '';
   return raw === '#dc2626' ? RED : raw;
 }
+/* Ред „<етикет> <стойност>" от клетката „Документ“ (компактна таблица „За връщане“). */
+const docLine = (td, label) => { const d = Array.prototype.find.call(td.querySelectorAll('div'), x => x.textContent.trim().indexOf(label) === 0); return d ? d.textContent.trim().slice(label.length).trim() : ''; };
 /* Клетките на първия ред с данни. */
 function cells(doc) {
   const wrap = doc.getElementById('mod-stock-returns');
@@ -267,7 +269,7 @@ function cells(doc) {
     }
   }
 
-  section('г) Таблица „По разлики": колона „Поръчка" между „Кол." и „ПВ-ЕВР"');
+  section('г) Таблица „По разлики": „Поръчка" и „ПВ-ЕВР" са отделни етикетирани редове в клетката „Документ"');
   {
     const { w, doc } = retEnv([
       retRow({ id: 'r-1', order_number: '4100135756', purchase_order: 'PV-777' }),
@@ -276,23 +278,20 @@ function cells(doc) {
     if (guard('renderStockReturns() не хвърля', () => w.renderStockReturns())) {
       const hs = headers(doc);
       if (ok('таблицата се рендира', !!hs, JSON.stringify(hs))) {
-        const iQty = hs.indexOf('Кол.');
-        const iOrd = hs.indexOf('Поръчка');
-        const iPv = hs.indexOf('ПВ-ЕВР');
-        ok('има заглавие „Поръчка"', iOrd >= 0, hs.join(' | '));
-        ok('„Поръчка" е точно между „Кол." и „ПВ-ЕВР"',
-          iQty >= 0 && iOrd === iQty + 1 && iPv === iOrd + 1,
-          'Кол.=' + iQty + ' Поръчка=' + iOrd + ' ПВ-ЕВР=' + iPv);
-        ok('„ПВ-ЕВР" не е изчезнала', iPv >= 0, hs.join(' | '));
-        /* 17 от 30.09.2026 — + „Потвърдена акт." и „Коментар обект" (sr-diff-tab-columns). */
-        ok('колоните станаха 17', hs.length === 17, 'брой: ' + hs.length);
+const docTd = tr => tr.children[1]; /* 2-ра клетка е „Документ“ (1-ва е „Артикул“) */
+
+
+ok('таблицата е компактна (6 колони), с „Документ“', hs.length === 6 && hs[1] === 'Документ', hs.join(' | '));
+ok('„Поръчка“ е ред пред „ПВ-ЕВР“ в клетката „Документ“', (function(){ const tr = doc.getElementById('mod-stock-returns').querySelector('tbody tr'); const txt = Array.prototype.map.call(docTd(tr).querySelectorAll('div'), d => d.textContent.trim().split(' ')[0]); return txt.indexOf('Пор.') >= 0 && txt.indexOf('ПВ-ЕВР') === txt.indexOf('Пор.') + 1; })(), 'документ');
+ok('„ПВ-ЕВР“ не е изчезнала', docLine(docTd(doc.getElementById('mod-stock-returns').querySelector('tbody tr')), 'ПВ-ЕВР') !== '', 'документ');
+        ok('колоните са 6', hs.length === 6, 'брой: ' + hs.length);
 
         const cs = cells(doc);
         if (ok('първият ред има клетки', !!cs && cs.length === hs.length,
           cs && cs.length + ' срещу ' + hs.length)) {
-          ok('клетката „Поръчка" показва номера', cs[iOrd] === '4100135756', JSON.stringify(cs[iOrd]));
-          ok('клетката „ПВ-ЕВР" показва СВОЯТА стойност, не поръчката',
-            cs[iPv] === 'PV-777', JSON.stringify(cs[iPv]));
+          const d0 = docTd(doc.getElementById('mod-stock-returns').querySelector('tbody tr'));
+          ok('„Поръчка“ показва номера', docLine(d0, 'Пор.') === '4100135756', JSON.stringify(docLine(d0, 'Пор.')));
+          ok('„ПВ-ЕВР“ показва СВОЯТА стойност, не поръчката', docLine(d0, 'ПВ-ЕВР') === 'PV-777', JSON.stringify(docLine(d0, 'ПВ-ЕВР')));
         }
         /* Ред без поръчка — тире, точно както съседната ПВ-ЕВР. Клетката
            минава през esc(), а esc('') връща тире (shared.js). */
@@ -300,9 +299,9 @@ function cells(doc) {
         if (ok('вторият ред се рендира', rows.length === 2, 'редове: ' + rows.length)) {
           const c2 = Array.prototype.map.call(rows[1].querySelectorAll('td'),
             td => td.textContent.trim());
-          ok('ред без поръчка → тире', c2[iOrd] === '—', JSON.stringify(c2[iOrd]));
-          ok('същото като съседната празна ПВ-ЕВР', c2[iOrd] === c2[iPv],
-            JSON.stringify(c2[iOrd]) + ' срещу ' + JSON.stringify(c2[iPv]));
+          const d1 = docTd(rows[1]);
+          ok('ред без поръчка → няма ред „Пор.“', docLine(d1, 'Пор.') === '', JSON.stringify(d1.textContent));
+          ok('същото като празната ПВ-ЕВР', docLine(d1, 'ПВ-ЕВР') === '', JSON.stringify(docLine(d1, 'ПВ-ЕВР')));
         }
       }
     }
@@ -317,10 +316,9 @@ function cells(doc) {
     if (guard('renderStockReturns() не хвърля', () => w.renderStockReturns())) {
       const hs = headers(doc);
       if (ok('таблицата се рендира', !!hs, JSON.stringify(hs))) {
-        ok('НЯМА заглавие „Поръчка"', hs.indexOf('Поръчка') < 0, hs.join(' | '));
-        ok('„ПВ-ЕВР" си е на място', hs.indexOf('ПВ-ЕВР') >= 0, hs.join(' | '));
-        /* 12 от 28.09.2026 — „Дата докум."; 13 от 29.09.2026 — „Коментар обект". */
-        ok('колоните са 13 — без „Поръчка"', hs.length === 13, 'брой: ' + hs.length);
+        ok('НЯМА заглавие „Поръчка“ и клетките не я показват', hs.indexOf('Поръчка') < 0 && !/Пор\./.test(doc.getElementById('mod-stock-returns').querySelector('tbody tr').textContent), hs.join(' | '));
+        ok('„Документ“ си е на място (с ПВ-ЕВР)', hs.indexOf('Документ') >= 0, hs.join(' | '));
+        ok('колоните са 5 — без „Артикул“ и без „Поръчка“', hs.length === 5, 'брой: ' + hs.length);
         /* Номерът стои в реда, но не се показва тук — проверката е, че
            таблицата не го е изкарала някъде другаде по невнимание. */
         const cs = cells(doc);

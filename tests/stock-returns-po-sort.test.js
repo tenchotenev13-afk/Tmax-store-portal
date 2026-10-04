@@ -56,10 +56,12 @@ function stubXLSX(w) {
   return cap;
 }
 
-/* Първата клетка на ред в таблицата „По рекламации" е ПВ-ЕВР. */
+/* Ред „<етикет> <стойност>" от клетката „Документ“ (компактна таблица „За връщане“). */
+const docLine = (td, label) => { const d = Array.prototype.find.call(td.querySelectorAll('div'), x => x.textContent.trim().indexOf(label) === 0); return d ? d.textContent.trim().slice(label.length).trim() : ''; };
+/* Първата клетка на ред в „По рекламации" е „Документ“; ПВ-ЕВР е ред в нея. */
 const tablePOs = doc => Array.prototype.map.call(
   doc.getElementById('mod-stock-returns').querySelectorAll('tbody tr'),
-  tr => tr.querySelector('td').textContent.trim().replace(/^—$/, ''));
+  tr => docLine(tr.children[0], 'ПВ-ЕВР'));
 
 /* Редът в srData е по doc_date.desc — като от заявката — и нарочно НЕ съвпада
    с реда по ПВ-ЕВР. Продуктите носят номер, за да се провери, че в Excel-а
@@ -148,10 +150,10 @@ const EXPECT_PROD = ['П-15982', 'П-15990', 'П-16001', 'П-16266', 'П-17100',
       const ids = w.srFilteredList().map(r => r.id);
       ok('srFilteredList() е в реда на srData',
         ids.join('|') === 'dc-1|dc-2|dc-3|dc-4|dc-5|dc-6', ids.join('|'));
-      /* В „По разлики" ПВ-ЕВР е 5-тата колона. */
+      /* В „По разлики" ПВ-ЕВР е ред в 2-рата клетка („Документ"). */
       const pos = Array.prototype.map.call(
         doc.getElementById('mod-stock-returns').querySelectorAll('tbody tr'),
-        tr => tr.querySelectorAll('td')[4].textContent.trim().replace(/^—$/, ''));
+        tr => docLine(tr.children[1], 'ПВ-ЕВР'));
       const exp = COMPLAINT.map(r => r.purchase_order || '');
       ok('таблицата е в реда на заявката', pos.join('|') === exp.join('|'), pos.join('|'));
 

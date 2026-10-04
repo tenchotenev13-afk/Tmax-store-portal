@@ -64,15 +64,17 @@ function env(rows, tab) {
 const settle = () => new Promise(res => setTimeout(res, 60));
 const table = doc => doc.getElementById('mod-stock-returns').querySelector('table');
 const heads = doc => Array.prototype.map.call(table(doc).querySelectorAll('thead th'), th => th.textContent.trim());
+/* Ред „<етикет> <стойност>" от клетката „Документ“ (компактна таблица „За връщане“). */
+const docLine = (td, label) => { const d = Array.prototype.find.call(td.querySelectorAll('div'), x => x.textContent.trim().indexOf(label) === 0); return d ? d.textContent.trim().slice(label.length).trim() : ''; };
+/* Клетките (елементи) на реда по ПВ-ЕВР — първата клетка е „Документ“. */
 const cellsOf = (doc, po) => {
-  const tr = Array.prototype.find.call(table(doc).querySelectorAll('tbody tr'),
-    t => t.querySelector('td').textContent.trim() === po);
-  return tr ? Array.prototype.map.call(tr.querySelectorAll('td'), td => td.textContent.trim()) : null;
+  const tr = Array.prototype.find.call(table(doc).querySelectorAll('tbody tr'), t => docLine(t.children[0], 'ПВ-ЕВР') === po);
+  return tr ? Array.prototype.slice.call(tr.querySelectorAll('td')) : null;
 };
 
 (async function run() {
 
-  section('а) Колоната е между „Доставчик" и „Завод", с датата или „—"');
+  section('а) Датата на документа е ред „Док.“ в клетката „Документ“, до завода; без дата няма такъв ред');
   {
     const { w, doc } = env([
       row({ id: 'c-1', purchase_order: '4200015982', doc_date: '2026-08-17', plant: '1210' }),
@@ -80,26 +82,24 @@ const cellsOf = (doc, po) => {
     ]);
     if (guard('renderStockReturns() не хвърля', () => w.renderStockReturns())) {
       const H_ = heads(doc);
-      const i = H_.indexOf('Дата докум.');
-      ok('заглавието „Дата докум." е точно след „Доставчик" и преди „Завод"',
-        i > 0 && H_[i - 1] === 'Доставчик' && H_[i + 1] === 'Завод', H_.join('|'));
+
+ok('заглавия на „По рекламации“: Документ|Магазин · Доставчик|Статус|Коментари|Действия', H_.join('|') === 'Документ|Магазин · Доставчик|Статус|Коментари|Действия', H_.join('|'));
 
       const a = cellsOf(doc, '4200015982');
       if (ok('редът с дата е на екрана', !!a)) {
-        ok('датата е в същата колона, в дд.мм.гггг', a[i] === '17.08.2026', JSON.stringify(a[i]));
-        ok('съседите са доставчикът и заводът', a[i - 1] === 'КАМ-04' && a[i + 1] === '1210',
-          JSON.stringify([a[i - 1], a[i + 1]]));
+ok('датата е в клетката „Документ“, в дд.мм.гггг', docLine(a[0], 'Док.') === '17.08.2026', JSON.stringify(docLine(a[0], 'Док.')));
+ok('доставчикът е в „Магазин · Доставчик“, а заводът — в „Документ“', /КАМ-04/.test(a[1].textContent) && docLine(a[0], 'Завод') === '1210',
+          JSON.stringify([a[1].textContent, docLine(a[0], 'Завод')]));
       }
       const b = cellsOf(doc, '4200016001');
       if (ok('редът без дата е на екрана', !!b)) {
-        ok('празната дата е „—"', b[i] === '—', JSON.stringify(b[i]));
-        ok('заводът не е изместен', b[i + 1] === '1203', JSON.stringify(b[i + 1]));
+ok('без дата няма ред „Док.“', docLine(b[0], 'Док.') === '', JSON.stringify(docLine(b[0], 'Док.')));
+ok('заводът не е изместен', docLine(b[0], 'Завод') === '1203', JSON.stringify(docLine(b[0], 'Завод')));
       }
       const nTh = table(doc).querySelectorAll('thead th').length;
       const rowsTd = Array.prototype.map.call(table(doc).querySelectorAll('tbody tr'), tr => tr.querySelectorAll('td').length);
       ok('броят <th> (' + nTh + ') = броят <td> на всеки ред', rowsTd.every(n => n === nTh), rowsTd.join(','));
-      /* 13 от 29.09.2026 — „Коментар обект" (виж sr-store-comment.test.js). */
-      ok('колоните са 13 (12 + действия)', nTh === 13, String(nTh));
+ok('колоните са 5 (Документ, Магазин · Доставчик, Статус, Коментари, Действия)', nTh === 5, String(nTh));
     }
   }
 
@@ -127,10 +127,8 @@ const cellsOf = (doc, po) => {
             ok('PATCH-ът е по id на реда', p.url.indexOf('id=eq.c-1') >= 0, p.url);
             ok('носи doc_date = 2026-09-03', p.body.doc_date === '2026-09-03', JSON.stringify(p.body.doc_date));
           }
-          const H_ = heads(doc);
           const c = cellsOf(doc, '4200015982');
-          ok('след презареждането таблицата показва 03.09.2026 в „Дата докум."',
-            c && c[H_.indexOf('Дата докум.')] === '03.09.2026', JSON.stringify(c));
+ok('след презареждането таблицата показва 03.09.2026 в „Документ“', c && docLine(c[0], 'Док.') === '03.09.2026', c && JSON.stringify(docLine(c[0], 'Док.')));
         }
       }
     }
@@ -158,8 +156,8 @@ const cellsOf = (doc, po) => {
     w.renderStockReturns();
     const H_ = heads(doc);
     /* + „Потвърдена акт." и „Коментар обект" от 30.09.2026 (sr-diff-tab-columns). */
-    ok('заглавията на „По разлики" — с двете нови колони след „Изтеглена с"',
-      H_.join('|') === 'Продукт|SAP|Кол.|Поръчка|ПВ-ЕВР|ИД-ЕВРО|Магазин|Доставчик|Дата докум.|Завод|Статус|Дата изтегляне|Изтеглена с|Потвърдена акт.|Коментар обект|Коментар|',
+    ok('заглавията на „По разлики“ — 6 колони (компактна таблица)',
+      H_.join('|') === 'Артикул|Документ|Магазин · Доставчик|Статус|Коментари|Действия',
       H_.join('|'));
   }
 

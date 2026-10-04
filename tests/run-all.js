@@ -163,6 +163,7 @@ const TESTS = [
   'sr-store-comment.test.js',
   'sr-diff-list-import.test.js',
   'sr-diff-tab-columns.test.js',
+  'sr-compact.test.js',
   'today-wrong-receipt-row.test.js',
   'notifications-poll.test.js',
   'weekly-report-window.test.js',

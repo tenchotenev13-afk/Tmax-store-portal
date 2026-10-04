@@ -145,19 +145,20 @@ const mod = h => h.doc.getElementById('mod-stock-returns');
     ];
     const h = await view(rows, WED);
     if (h) {
-      const card = h.doc.getElementById('sr-needs-card');
+      /* Картите са махнати: броят е в чипа „Без актуализация“ (#sr-needs-n), а „+ N в другия подтаб“ — в кутията „какво остава“. */
+      const card = h.doc.getElementById('sr-needs-other');
       const num = h.doc.getElementById('sr-needs-n');
-      if (ok('картата „Без актуализация" я има', !!card && !!num)) {
+      if (ok('чипът „Без актуализация“ го има, а кутията — „в другия подтаб“', !!card && !!num)) {
         /* По СВОЙ елемент, не по текста на картата: там стои и „05.10.2026",
            тоест търсене на „2" минава винаги. */
-        ok('и показва точно 2 за този подтаб', (num.textContent || '').trim() === '2', num.textContent.trim());
+        ok('чипът показва точно 2 за този подтаб', (num.textContent || '').trim() === '2', num.textContent.trim());
         ok('и казва, че в другия подтаб има още 3',
           (card.textContent || '').indexOf('+ 3 в другия подтаб') >= 0, card.textContent.trim());
         ok('тоест 2 и 3 не се разменят', (card.textContent || '').indexOf('+ 2 в другия') === -1);
       }
       const b = btn(mod(h), 'Без актуализация');
       if (ok('бутонът-филтър го има', !!b)) {
-        ok('и носи същия брой', (b.textContent || '').indexOf('(2)') >= 0, b.textContent.trim());
+        ok('и носи същия брой', ((b.querySelector('.chips-n') || {}).textContent || '').trim() === '2', b.textContent.trim());
         realClick(h.w, b);
         const html = mod(h).innerHTML;
         ok('след клик се виждат точно двата реда',
@@ -177,7 +178,7 @@ const mod = h => h.doc.getElementById('mod-stock-returns');
   {
     const h = await view([ret('a1'), ret('a2')], PREV_WED);
     if (h) {
-      ok('няма карта', !h.doc.getElementById('sr-needs-card'));
+      ok('няма чип „Без актуализация“ и кутия с „в другия подтаб“', !h.doc.getElementById('sr-needs-n') && !h.doc.getElementById('sr-needs-other'));
       ok('няма бутон-филтър', !btn(mod(h), 'Без актуализация'));
       ok('няма обяснителен текст', mod(h).innerHTML.indexOf('ръчна отметка няма') === -1);
       ok('а самата таблица си е там', mod(h).innerHTML.indexOf('Стока a1') >= 0);
@@ -190,7 +191,7 @@ const mod = h => h.doc.getElementById('mod-stock-returns');
     const h = await view(rows, WED);
     if (h) {
       const num = h.doc.getElementById('sr-needs-n');
-      ok('картата показва точно 0', !!num && (num.textContent || '').trim() === '0', num && num.textContent.trim());
+      ok('чипът показва точно 0', !!num && (num.textContent || '').trim() === '0', num && num.textContent.trim());
       ok('и текстът поздравява',
         mod(h).innerHTML.indexOf('Всички невзети записи са актуализирани') >= 0, '');
     }

@@ -318,6 +318,14 @@ function renderStockReturns() {
   if (canAdd) h += '<button onclick="openReturnsImportModal()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📤 Импорт от Excel</button>';
   h += '</div></div>';
 
+  /* Подтабове */
+  h += '<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-width:560px;">';
+  [['diff','🔄 По разлики'],['complaint','📋 По рекламации / срок на годност']].forEach(function(t){
+    var a=srTab===t[0];
+    h+='<button onclick="setSRTab(\''+t[0]+'\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:'+(a?'#2f2f2f':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+t[1]+'</button>';
+  });
+  h += '</div>';
+
   /* Търсене + табове по магазин - вече еднакво и за двата подтаба */
   var storesInTab=tabData.map(function(r){return r.store_name;}).filter(function(s,i,arr){return s&&arr.indexOf(s)===i;}).sort();
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center;">';
@@ -348,27 +356,6 @@ function renderStockReturns() {
   });
   h += '</select></div>';
 
-  /* Подтабове */
-  h += '<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-width:560px;">';
-  [['diff','🔄 По разлики'],['complaint','📋 По рекламации / срок на годност']].forEach(function(t){
-    var a=srTab===t[0];
-    h+='<button onclick="setSRTab(\''+t[0]+'\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:'+(a?'#2f2f2f':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+t[1]+'</button>';
-  });
-  h += '</div>';
-
-  /* Карти */
-  h += '<div style="display:grid;grid-template-columns:repeat('+(srAutoOn?3:2)+',1fr);gap:10px;margin-bottom:14px;max-width:'+(srAutoOn?600:400)+'px;">';
-  h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #f59e0b;"><div style="font-size:11px;color:#64748b;">⏳ Невзета</div><div style="font-size:28px;font-weight:700;color:#f59e0b;font-family:DM Mono,monospace;">'+pending+'</div></div>';
-  h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #16a34a;"><div style="font-size:11px;color:#64748b;">✅ Взета</div><div style="font-size:28px;font-weight:700;color:#16a34a;font-family:DM Mono,monospace;">'+taken+'</div></div>';
-  if (srAutoOn) {
-    h += '<div id="sr-needs-card" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid '+(needs?'#dc2626':'#16a34a')+';">'+
-         '<div style="font-size:11px;color:#64748b;">📝 Без актуализация от '+fmtDate(srMon)+'</div>'+
-         '<div id="sr-needs-n" style="font-size:28px;font-weight:700;color:'+(needs?'#dc2626':'#16a34a')+';font-family:DM Mono,monospace;">'+needs+'</div>'+
-         (needsOther?'<div style="font-size:10.5px;color:#b45309;">+ '+needsOther+' в другия подтаб</div>':'')+
-         '</div>';
-  }
-  h += '</div>';
-
   /* Важна бележка */
   if (srTab==='diff') {
     h += '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:#1e40af;">ℹ️ Записите тук се наливат автоматично, когато Цветелина маркира разлика като "Връщане" (излишък, получен в повече). Стоката се маркира като ВЗЕТА само след като е физически предадена на куриер/транспорт.</div>';
@@ -386,16 +373,21 @@ function renderStockReturns() {
            ? '📝 <b>'+srAll+'</b> невзети записа все още нямат „Дата потвърдена актуализация" от '+fmtDate(srMon)+' насам.'
            : '✅ Всички невзети записи са актуализирани тази седмица.')+
          ' Задачата „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ" в Бюлетина се отмята САМА, когато няма нито един такъв запис — ръчна отметка няма. Броят се двата подтаба заедно. Дата, поставена от офиса или от импорт, не се брои за актуализация на обекта.'+
+         (needsOther?'<div id="sr-needs-other" style="margin-top:4px;font-weight:600;">+ '+needsOther+' в другия подтаб</div>':'')+
          '</div>';
   }
 
-  /* Филтри */
-  h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
-  var srFilters=[['all','Всички ('+tabData.length+')'],['pending','⏳ Невзета ('+pending+')'],['taken','✅ Взета ('+taken+')'],['completed','🏁 Приключени ('+completed+')']];
-  if (srAutoOn) srFilters.push(['needs','📝 Без актуализация ('+needs+')']);
+  /* Статус чипове (общият вид .chips) + Excel вдясно на същия ред. Атрибутът е data-sr-f
+     (НЕ data-f — сблъсък с Разлики); числото е редовете на този статус в подтаба. */
+  h += '<div id="sr-filters" class="filter-bar chips" style="margin:0 0 12px;">';
+  h += '<span class="chips-label">Покажи:</span>';
+  var srFilters=[['pending','⏳ Невзета',pending,'']];
+  if (srAutoOn) srFilters.push(['needs','📝 Без актуализация',needs,'']);
+  srFilters.push(['|'],['taken','✅ Взета',taken,' chip-hist'],['completed','🏁 Приключени',completed,' chip-hist'],['all','Всички',tabData.length,' chip-hist']);
   srFilters.forEach(function(f){
+    if (f[0]==='|') { h += '<span class="chips-sep"></span>'; return; }
     var a = srFilter===f[0];
-    h += '<button data-f="'+f[0]+'" onclick="setSRFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
+    h += '<button class="filter-btn'+f[3]+(a?' active':'')+'" data-sr-f="'+f[0]+'" onclick="setSRFilter(this.dataset.srF)">'+f[1]+' <span class="chips-n"'+(f[0]==='needs'?' id="sr-needs-n"':'')+'>'+f[2]+'</span></button>';
   });
   /* Показва се винаги, включително при празен списък - иначе изчезването на
      бутона изглежда като счупен екран. Празният случай се хваща вътре. */
@@ -420,78 +412,92 @@ function renderStockReturns() {
   wrap.innerHTML = h;
 }
 
-/* Таблица за подтаб "По разлики" - комбинира старите ERP полета (ПВ-ЕВР/ИД-ЕВРО/Завод,
-   ползвани от 28-те съществуващи ръчно добавени записа) И новите продукт/SAP/количество
-   полета (попълвани автоматично при наливане от разлика) - нищо не се губи визуално. */
-function renderSRTableDiff(list, canEdit, isAdmin) {
-  var h = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
-  h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1300px;">';
-  h += '<thead><tr style="background:#f8fafc;">';
-  /* "Поръчка" е номерът на поръчката от изходната разлика (order_number) -
-     различно поле от "ПВ-ЕВР" (purchase_order), което е от стария ERP износ.
-     Само за показване: не се редактира от модала, попълва се автоматично. */
-  ['Продукт','SAP','Кол.','Поръчка','ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Дата изтегляне','Изтеглена с','Потвърдена акт.','Коментар обект','Коментар',''].forEach(function(c,ci,arr){
-    var last=(ci===arr.length-1);
-    h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
+/* Общи клетки на компактните таблици (По разлики / По рекламации). Само за показване —
+   Excel износът чете данните, не този HTML. */
+function srLbl(label, val, extra) {
+  if (val == null || val === '') return '';
+  return '<div style="font-size:10.5px;color:#64748b;'+(extra||'')+'"><span style="color:#94a3b8;">'+label+'</span> '+esc(val)+'</div>';
+}
+/* Документ: Поръчка (само в „По разлики“ — в „По рекламации“ я няма и не се показва), ПВ-ЕВР, ИД-ЕВРО,
+   дата докум., завод — всяко с кратък етикет, сиво, моно. */
+function srDocCell(r, withOrder) {
+  var mono = 'font-family:DM Mono,monospace;';
+  var s = (withOrder ? srLbl('Пор.', r.order_number, mono) : '') + srLbl('ПВ-ЕВР', r.purchase_order, mono) + srLbl('ИД-ЕВРО', r.id_euro, mono) +
+    (r.doc_date ? '<div style="font-size:10.5px;color:#64748b;'+mono+'"><span style="color:#94a3b8;">Док.</span> '+fmtDate(r.doc_date)+'</div>' : '') +
+    srLbl('Завод', r.plant, mono);
+  return '<td style="padding:7px 10px;">'+(s || '<span style="color:#94a3b8;">—</span>')+'</td>';
+}
+function srStoreSupplierCell(r) {
+  return '<td style="padding:7px 10px;"><div style="font-weight:600;">'+esc(r.store_name||'')+'</div>'+
+    '<div style="font-size:11px;color:#64748b;">'+esc(r.supplier||'')+'</div></td>';
+}
+/* Статус: баджът, отдолу дата изтегляне, „изтеглена с …“, „потвърдена акт. …“ + бележката за потвърждението. */
+function srStatusCell(r) {
+  var mono = 'font-family:DM Mono,monospace;';
+  return '<td style="padding:7px 10px;">'+srStatusBadge(r)+
+    (r.withdrawal_date ? '<div style="font-size:10.5px;color:#64748b;margin-top:3px;'+mono+'"><span style="color:#94a3b8;">изтеглена</span> '+fmtDate(r.withdrawal_date)+'</div>' : '')+
+    (r.courier_info ? '<div style="font-size:10.5px;color:#374151;"><span style="color:#94a3b8;">изтеглена с</span> '+esc(r.courier_info)+'</div>' : '')+
+    (r.confirmed_date ? '<div style="font-size:10.5px;color:#64748b;'+mono+'"><span style="color:#94a3b8;">потвърдена акт.</span> '+fmtDate(r.confirmed_date)+'</div>' : '')+
+    srConfirmedNoteHtml(r)+'</td>';
+}
+/* Коментари: всяко непразно поле на свой ред С ЕТИКЕТ (преди беше reason||control||controller —
+   не личеше кое поле е). */
+function srCommentsCell(r) {
+  var s = '';
+  if (r.store_comment) s += '<div style="font-size:11px;color:#0f766e;"><b style="font-weight:600;">Обект:</b> '+esc(r.store_comment)+'</div>';
+  if (r.reason) s += '<div style="font-size:11px;color:#d97706;font-weight:500;"><b style="font-weight:600;">Причина:</b> '+esc(r.reason)+'</div>';
+  if (r.control_comment) s += '<div style="font-size:11px;color:#d97706;font-weight:500;"><b style="font-weight:600;">Контрол:</b> '+esc(r.control_comment)+'</div>';
+  if (r.controller_comment) s += '<div style="font-size:11px;color:#7c3aed;font-weight:500;"><b style="font-weight:600;">Контролер:</b> '+esc(r.controller_comment)+'</div>';
+  return '<td style="padding:7px 10px;">'+(s || '<span style="color:#cbd5e1;">—</span>')+'</td>';
+}
+function srTh(cols) {
+  var h = '<thead><tr style="background:#f8fafc;">';
+  cols.forEach(function(c){
+    h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
   });
-  h += '</tr></thead><tbody>';
+  return h + '</tr></thead>';
+}
+
+/* Таблица за подтаб "По разлики" - 6 колони: Артикул / Документ / Магазин · Доставчик / Статус / Коментари /
+   Действия. Комбинира старите ERP полета (ПВ-ЕВР/ИД-ЕВРО/Завод, ползвани от ръчно добавените записи) И новите
+   продукт/SAP/количество полета (попълвани автоматично при наливане от разлика) - нищо не се губи визуално.
+   "Поръчка" е номерът на поръчката от изходната разлика (order_number) - различно поле от "ПВ-ЕВР"
+   (purchase_order), което е от стария ERP износ. */
+function renderSRTableDiff(list, canEdit, isAdmin) {
+  var h = '<div class="tbl-wrap tbl-compact tbl-sr-compact tbl-sr-diff">';
+  h += '<table style="border-collapse:collapse;font-size:12px;">';
+  h += srTh(['Артикул','Документ','Магазин · Доставчик','Статус','Коментари','Действия']);
+  h += '<tbody>';
   list.forEach(function(r) {
     var isTaken = r.status === 'taken' || r.status === 'completed'; /* без „Взета“ и на приключен ред */
-    var statusBadge = srStatusBadge(r);
     h += '<tr style="border-bottom:1px solid #f1f5f9;'+(r.diff_line_id?'background:#f5f3ff;':'')+'">' +
-      '<td style="padding:7px 10px;max-width:180px;">'+esc(r.product_name||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.sap_code||'')+'</td>'+
-      '<td style="padding:7px 10px;text-align:right;font-weight:600;">'+((r.quantity)||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.order_number||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.purchase_order||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.id_euro||'')+'</td>'+
-      '<td style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#64748b;max-width:130px;">'+esc(r.supplier||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.doc_date)+'</td>'+
-      '<td style="padding:7px 10px;text-align:center;color:#94a3b8;">'+esc(r.plant||'')+'</td>'+
-      '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.withdrawal_date)+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;max-width:140px;color:#374151;">'+esc(r.courier_info||'')+'</td>'+
-      /* Същият ред като в „По рекламации": след „Изтеглена с", преди „Коментар". */
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+fmtDate(r.confirmed_date)+srConfirmedNoteHtml(r)+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#0f766e;max-width:160px;">'+esc(r.store_comment||'')+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;max-width:150px;">'+esc(r.reason||r.control_comment||r.controller_comment||'')+'</td>'+
-      '<td style="padding:7px 10px;white-space:nowrap;position:sticky;right:0;background:#fff;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
+      '<td style="padding:7px 10px;overflow:hidden;"><div style="font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escAttr(r.product_name||'')+'">'+esc(r.product_name||'')+'</div>'+
+        '<div style="font-size:10.5px;color:#64748b;"><span style="font-family:DM Mono,monospace;">SAP '+esc(r.sap_code||'—')+'</span>'+(r.quantity?' · <b>'+r.quantity+'</b>':'')+'</div></td>'+
+      srDocCell(r, true)+
+      srStoreSupplierCell(r)+
+      srStatusCell(r)+
+      srCommentsCell(r)+
+      '<td style="padding:7px 10px;">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
   });
   h += '</tbody></table></div>';
   h += '<div style="font-size:11px;color:#94a3b8;margin-top:6px;">🟣 Лилав фон = автоматично наляно от разлика</div>';
   return h;
 }
 
-/* Таблица за подтаб "По рекламации / срок на годност" - нови, специфични колони */
+/* Таблица за подтаб "По рекламации / срок на годност" - същите колони без "Артикул" (5). */
 function renderSRTableComplaint(list, canEdit, isAdmin) {
-  var h = '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
-  h += '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1300px;">';
-  h += '<thead><tr style="background:#f8fafc;">';
-  /* "Дата докум." между Доставчик и Завод - същото място като във файла на
-     Цвети и в Excel износа (колона 3). */
-  ['ПВ-ЕВР','ИД-ЕВРО','Магазин','Доставчик','Дата докум.','Завод','Статус','Изтеглена с','Коментар обект','Потвърдена акт.','Коментар','Коментар Контролер',''].forEach(function(c,ci,arr){
-    var last=(ci===arr.length-1);
-    h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
-  });
-  h += '</tr></thead><tbody>';
+  var h = '<div class="tbl-wrap tbl-compact tbl-sr-compact tbl-sr-complaint">';
+  h += '<table style="border-collapse:collapse;font-size:12px;">';
+  h += srTh(['Документ','Магазин · Доставчик','Статус','Коментари','Действия']);
+  h += '<tbody>';
   list.forEach(function(r) {
     var isTaken = r.status === 'taken' || r.status === 'completed'; /* без „Взета“ и на приключен ред */
-    var statusBadge = srStatusBadge(r);
     h += '<tr style="border-bottom:1px solid #f1f5f9;">' +
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.purchase_order||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+esc(r.id_euro||'')+'</td>'+
-      '<td style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#64748b;max-width:130px;">'+esc(r.supplier||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.doc_date)+'</td>'+
-      '<td style="padding:7px 10px;text-align:center;color:#94a3b8;">'+esc(r.plant||'')+'</td>'+
-      '<td style="padding:7px 10px;">'+statusBadge+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#374151;max-width:130px;">'+esc(r.courier_info||'—')+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#0f766e;max-width:160px;">'+esc(r.store_comment||'')+'</td>'+
-      '<td style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;color:#64748b;">'+(r.confirmed_date?fmtDate(r.confirmed_date):'—')+srConfirmedNoteHtml(r)+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.control_comment||'')+'</td>'+
-      '<td style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.controller_comment||'')+'</td>'+
-      '<td style="padding:7px 10px;white-space:nowrap;position:sticky;right:0;background:#fff;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
+      srDocCell(r)+
+      srStoreSupplierCell(r)+
+      srStatusCell(r)+
+      srCommentsCell(r)+
+      '<td style="padding:7px 10px;">'+srRowActions(r,isTaken,canEdit,isAdmin)+'</td></tr>';
   });
   h += '</tbody></table></div>';
   return h;

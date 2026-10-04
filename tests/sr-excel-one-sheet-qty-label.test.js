@@ -58,7 +58,10 @@ function srEnv(rows, dir) {
   return h;
 }
 const mod = h => h.doc.getElementById('mod-stock-returns');
-const onScreen = h => Array.prototype.map.call(mod(h).querySelectorAll('tbody tr'), tr => tr.querySelector('td').textContent.trim());
+/* Ред „<етикет> <стойност>" от клетката „Документ“ (компактна таблица „За връщане“). */
+const docLine = (td, label) => { const d = Array.prototype.find.call(td.querySelectorAll('div'), x => x.textContent.trim().indexOf(label) === 0); return d ? d.textContent.trim().slice(label.length).trim() : ''; };
+/* Първата клетка на реда в „По рекламации“ е „Документ“ — ПВ-ЕВР е ред в нея. */
+const onScreen = h => Array.prototype.map.call(mod(h).querySelectorAll('tbody tr'), tr => docLine(tr.children[0], 'ПВ-ЕВР'));
 const dump = wb => JSON.stringify(wb.SheetNames.map(n => [n, wb.Sheets[n].__aoa, wb.Sheets[n]['!cols']]));
 /* От 29.09.2026: „Коментар обект" (store_comment) — в „един лист" на мястото си
    от екрана (позиция 8, след „Изтеглена с"), в многолистовия — най-накрая.

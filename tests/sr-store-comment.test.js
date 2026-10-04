@@ -107,15 +107,16 @@ const srPatch = (h, id) => h.calls.patch.find(p => /stock_returns/.test(p.url) &
   {
     const rows = [row({ id: 'c-1', store_comment: 'ЧАКАМЕ ПАЛЕТ' }), row({ id: 'c-2', purchase_order: '4200016267', store_comment: null })];
     const h = env(CVETI, rows);
-    const heads = Array.prototype.map.call(mod(h).querySelectorAll('thead th'), th => th.textContent.trim());
-    const i = heads.indexOf('Коментар обект');
-    ok('„Коментар обект" е между „Изтеглена с" и „Потвърдена акт."', i > 0 && heads[i - 1] === 'Изтеглена с' && heads[i + 1] === 'Потвърдена акт.',
-      heads.join('|'));
-    const tr = Array.prototype.find.call(mod(h).querySelectorAll('tbody tr'), x => x.querySelector('td').textContent.trim() === '4200016266');
-    ok('клетката показва текста', tr && tr.querySelectorAll('td')[i].textContent.trim() === 'ЧАКАМЕ ПАЛЕТ');
+const heads = Array.prototype.map.call(mod(h).querySelectorAll('thead th'), th => th.textContent.trim());
+/* Ред „<етикет> <стойност>" от клетката „Документ“ (компактна таблица „За връщане“). */
+const docLine = (td, label) => { const d = Array.prototype.find.call(td.querySelectorAll('div'), x => x.textContent.trim().indexOf(label) === 0); return d ? d.textContent.trim().slice(label.length).trim() : ''; };
+    const i = heads.indexOf('Коментари'); /* „Коментар обект“ е ред „Обект:“ в клетката „Коментари“ */
+ok('таблицата е компактна: Документ|Магазин · Доставчик|Статус|Коментари|Действия', heads.join('|') === 'Документ|Магазин · Доставчик|Статус|Коментари|Действия', heads.join('|'));
+    const tr = Array.prototype.find.call(mod(h).querySelectorAll('tbody tr'), x => docLine(x.children[0], 'ПВ-ЕВР') === '4200016266');
+    ok('клетката показва текста с етикет „Обект:“', tr && tr.querySelectorAll('td')[i].textContent.indexOf('Обект: ЧАКАМЕ ПАЛЕТ') >= 0, tr && tr.querySelectorAll('td')[i].textContent.trim());
     ok('<th> = <td>', tr && tr.querySelectorAll('td').length === heads.length);
     h.w.srSearch = 'чакаме палет'; h.w.renderStockReturns();
-    const pos = Array.prototype.map.call(mod(h).querySelectorAll('tbody tr'), x => x.querySelector('td').textContent.trim());
+    const pos = Array.prototype.map.call(mod(h).querySelectorAll('tbody tr'), x => docLine(x.children[0], 'ПВ-ЕВР'));
     ok('търсене „чакаме палет" → само c-1', pos.join('|') === '4200016266', pos.join('|'));
     h.close();
   }
