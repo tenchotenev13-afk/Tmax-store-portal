@@ -1,6 +1,15 @@
 /* Работата на ОБЕКТА по вече подадена бланка в „Разлики" отмята постоянната
    задача с linked_module='stock-diff' (24.09.2026).
 
+   ⚠ ТОВА Е РЕЖИМЪТ ДО 11.10.2026 ВКЛЮЧИТЕЛНО. От 12.10 отметката идва от
+   базата (stock_diff_sync_completions) и този път МЪЛЧИ — датата е една за
+   портала и за базата (AUTO_COMPLETE_FROM в shared.js). Затова часовникът тук
+   е ЗАКОВАН на 09.10.2026: иначе след 12.10 тестът щеше да „падне" не защото
+   нещо се е счупило, а защото описва режим, който вече го няма.
+   Новият режим е в tests/stock-diff-auto-complete.test.js; последната секция
+   тук проверява ПРЕХОДА — че действията по бланки продължават да работят, но
+   не пишат отметка.
+
    Процесът е двустранен (магазин ↔ склад/офис), затова отмята САМО магазинът:
    действие на склада или на офиса е чужда работа, а задачата е на обекта.
    Самото отмятане минава през markLinkedRecurringTask() в shared.js — общият
@@ -36,6 +45,31 @@ const OFFICE = { email: 'c@temax.bg', display_name: 'Цветелина', role: 
    assigned_stores — точно случаят, който НЕ бива да отмята. */
 const REGIONAL = { email: 'r@temax.bg', display_name: 'Регионален', role: 'accounting', store_name: 'Централен офис', assigned_stores: [STORE] };
 
+const BEFORE_SWITCH = '2026-10-09';   /* петък преди автоматичното отмятане */
+const AFTER_SWITCH  = '2026-10-12';   /* понеделник, от който базата отмята */
+/* Фалшив часовник: класът пази и конструктора с аргументи (датите на задачите
+   се смятат от него), и Date.now(). */
+function freezeDate(w, iso) {
+  const Real = w.Date, ms = new Real(iso + 'T12:00:00').getTime();
+  class F extends Real {
+    constructor(...a) { if (!a.length) super(ms); else super(...a); }
+    static now() { return ms; }
+  }
+  w.Date = F;
+}
+
+/* Date в ТЕСТА е истинският; freezeDate пипа само този в jsdom прозореца.
+   Затова всяка фикстура, която зависи от „кой ден е", се смята ОТ ЗАКОВАНАТА
+   дата, а не от new Date(). */
+const frozenDate = iso => new Date(iso + 'T12:00:00');
+const dayIdxOf = iso => (frozenDate(iso).getDay() + 6) % 7;   /* 0 = понеделник */
+const mondayISOof = iso => {
+  const x = frozenDate(iso);
+  x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
+  const q = n => String(n).padStart(2, '0');
+  return x.getFullYear() + '-' + q(x.getMonth() + 1) + '-' + q(x.getDate());
+};
+
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 function task(over) {
   return Object.assign({ id: 'r-sd', linked_module: 'stock-diff', task_type: 'comment',
@@ -70,6 +104,9 @@ function env(opts) {
       stock_differences: [], differences_reports: [], stock_returns: [], stock_diff_swaps: []
     }, opts.data || {})
   });
+  /* Заковаваме деня ПРЕДИ превключването (виж заглавието). opts.iso позволява
+     на последната секция да провери и деня СЛЕД него. */
+  freezeDate(h.w, opts.iso || BEFORE_SWITCH);
   h.w.sdData = JSON.parse(JSON.stringify(opts.rows || [line()]));
   h.w.diffReports = JSON.parse(JSON.stringify(opts.reports || [REPORT]));
   h.w.sdSwaps = JSON.parse(JSON.stringify(opts.swaps || []));
@@ -238,9 +275,8 @@ async function sapDone(h) {
 
   section('8. Задачата не се пада днес → нищо');
   {
-    /* Само вчерашният ден от седмицата. */
-    const jsDay = new Date().getDay();
-    const todayIdx = jsDay === 0 ? 6 : jsDay - 1;
+    /* Денят е по ЗАКОВАНИЯ часовник (09.10.2026 = петък, индекс 4). */
+    const todayIdx = dayIdxOf(BEFORE_SWITCH);
     const other = (todayIdx + 3) % 7;
     const h = env({ tasks: [task({ due_weekdays: [other], due_weekday: other })] });
     await sapDone(h);
@@ -303,7 +339,7 @@ async function sapDone(h) {
     /* Часовникът е замразен на сряда: иначе „днес" се мести и прозорецът
        ту покрива деня, ту не. */
     function freezeWed(w) {
-      const d = new Date(); d.setHours(12, 0, 0, 0);
+      const d = frozenDate(BEFORE_SWITCH);
       d.setDate(d.getDate() + (2 - ((d.getDay() + 6) % 7)));
       const Real = w.Date, ms = d.getTime();
       class Frozen extends Real {
@@ -332,11 +368,7 @@ async function sapDone(h) {
     /* Базовият ред не е вързан към „Разлики" — вързан е само за ТАЗИ седмица
        (recurring_task_versions). Точно затова филтърът по linked_module е в
        кода, а не в заявката: иначе задачата не би се намерила. */
-    const mondayOf = d => { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-      x.setDate(x.getDate() - ((x.getDay() + 6) % 7));
-      const p = n => String(n).padStart(2, '0');
-      return x.getFullYear() + '-' + p(x.getMonth() + 1) + '-' + p(x.getDate()); };
-    const W = mondayOf(new Date());
+    const W = mondayISOof(BEFORE_SWITCH);
     const h = env({
       tasks: [task({ linked_module: null })],
       versions: [{ id: 'v-1', recurring_task_id: 'r-sd', from_monday: W, to_monday: W,
@@ -360,7 +392,7 @@ async function sapDone(h) {
     ok('версия без връзка → нищо', compPosts(h2).length === 0, 'брой: ' + compPosts(h2).length);
   }
 
-  section('10. Ръчното отмятане остава възможно');
+  section('10. Ръчното отмятане остава възможно ДО 11.10');
   {
     const h = env();
     ok('stock-diff НЕ е сред заключените модули', h.w.bulAutoLocked('stock-diff') === false);
@@ -378,6 +410,76 @@ async function sapDone(h) {
     const hm = env();
     ok('магазинът е', hm.w.sdActorIsOwnStore(STORE) === true);
     ok('и не е за ЧУЖД обект', hm.w.sdActorIsOwnStore('Ловеч') === false);
+  }
+
+  section('12. ОТ 12.10: действията работят, но НЕ пишат отметка');
+  {
+    /* Регресията, за която е целият преход: обектът продължава да отговаря по
+       реда (PATCH към stock_differences), само отметката вече идва от базата.
+       Проверяват се ВСИЧКИТЕ осем места, през които минаваше sdMarkDiffTask. */
+    const h = env({ iso: AFTER_SWITCH });
+    await sapDone(h);
+    ok('отговорът по реда СЕ записва', h.calls.patch.some(x => x.table === 'stock_differences'),
+      JSON.stringify(h.calls.patch.map(x => x.table)));
+    ok('и нито един ред в task_completions', compPosts(h).length === 0, String(compPosts(h).length));
+    ok('и даже не се пита за задачата', recGets(h).length === 0, String(recGets(h).length));
+    ok('и няма червен toast', !h.calls.toast.some(t => String(t).indexOf('не се отметна') >= 0),
+      h.calls.toast.join(' | '));
+    h.close();
+
+    /* Останалите седем места — викат се направо, както прави и секция 9. */
+    /* Същите извиквания като в секция 9 — там те доказват, че ПИШАТ; тук, че
+       не пишат. Модалите се инжектират на ръка, защото submit-ите четат
+       полетата си от DOM-а. */
+    const places = [
+      ['корекция', h2 => { h2.w.sdCorrectLineId = 'l-1'; h2.doc.body.insertAdjacentHTML('beforeend',
+        '<div id="sdc-ov"><input id="sdc-sap" value="100"><input id="sdc-name" value="Артикул">' +
+        '<input id="sdc-qty" value="2"><input id="sdc-qty-real" value="1"><textarea id="sdc-comment"></textarea></div>');
+        h2.w.submitSDCorrection(); }],
+      ['приемане на междускладова', h2 => h2.w.sdConfirmInterstore('l-1', 'store')],
+      ['изпратена размяна', h2 => { h2.w.sdSwaps = [swap()]; h2.doc.body.insertAdjacentHTML('beforeend',
+        '<div id="sdsent-ov"><input id="sdsent-sap" value="4711"><input type="radio" name="sdsent-mode" value="bus" checked><textarea id="sdsent-note"></textarea></div>');
+        h2.w.submitSwapSent('s-1'); }],
+      ['приета размяна', h2 => { h2.w.sdSwaps = [swap({ status: 'sent', to_store: STORE, from_store: 'Ловеч' })];
+        h2.w.sdReceiveSwap('s-1'); }]
+    ];
+    for (const [name, act] of places) {
+      const hh = env({ iso: AFTER_SWITCH, rows: [line({ warehouse_response: 'sent' })] });
+      if (guard(name + ' не хвърля', () => act(hh))) {
+        for (let i = 0; i < 8; i++) await ticks();
+        ok(name + ' → действието е записано',
+          hh.calls.patch.length > 0 || hh.calls.post.length > 0,
+          'patch: ' + hh.calls.patch.length + ' post: ' + hh.calls.post.length);
+        ok(name + ' → нула редове в task_completions', compPosts(hh).length === 0,
+          String(compPosts(hh).length));
+      }
+      hh.close();
+    }
+
+    /* И обратното: СЪЩИЯТ ден преди превключването пише. Без тази проверка
+       горните нули минават и ако sdMarkDiffTask е просто счупен. */
+    const hb = env({ iso: BEFORE_SWITCH });
+    await sapDone(hb);
+    ok('КОНТРОЛА: на 09.10 същото действие ПИШЕ отметка',
+      compPosts(hb).length === 1, String(compPosts(hb).length));
+    hb.close();
+
+    /* Капан за името: пълното махане на sdMarkDiffTask е записано в
+       claude/open-tasks.md за след 12.10. Докато функцията я има, тя ТРЯБВА да
+       минава през датата — иначе връщаме стария бъг мълчаливо. */
+    const src = require('fs').readFileSync(
+      require('path').join(process.argv[2] || '.', 'stock-differences.js'), 'utf8');
+    /* Регексите са СГЛОБЕНИ от низове, а не написани с наклонени черти:
+       шаблонните литерали и heredoc-ът в тази среда изяждат по едно ниво
+       backslash и регексът мълчаливо спира да значи каквото изглежда. */
+    const fnStart = src.indexOf('function sdMarkDiffTask(store){');
+    const gateAt = src.indexOf("autoCompleteActive('stock-diff')", fnStart);
+    const ownStoreAt = src.indexOf('sdActorIsOwnStore(store)', fnStart);
+    ok('sdMarkDiffTask пита autoCompleteActive ПРЕДИ всичко друго',
+      fnStart >= 0 && gateAt > fnStart && gateAt < ownStoreAt,
+      'start=' + fnStart + ' gate=' + gateAt + ' ownStore=' + ownStoreAt);
+    const marks = src.split("markLinkedRecurringTask('stock-diff'").length - 1;
+    ok('и няма втори път, който да пише отметка за този модул', marks === 1, String(marks));
   }
 
   report();

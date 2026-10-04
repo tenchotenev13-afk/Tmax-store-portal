@@ -824,6 +824,28 @@ function localDateISO(d){
 /* До 13.09.2026 беше new Date().toISOString().slice(0,10), тоест UTC — рано
    сутрин българско време връщаше вчерашна дата. Заковано в tests/local-date.test.js. */
 function today(){return localDateISO();}
+/* ═══ ОТКОГА ВАЖИ АВТОМАТИЧНОТО ОТМЯТАНЕ ═══════════════════════════════════
+   Задача, която минава от РЪЧНА на автоматична отметка, не може да го направи
+   в мига на деплоя: порталът заключва квадратчето, а функцията в базата има
+   свой гейт по дата. Разминат ли се двете, остава ден, в който задачата не е
+   нито ръчна, нито автоматична — никой не може да я отметне.
+   Затова датата живее ТУК, в ЕДИН източник, и през нея минават и регистърът в
+   Бюлетина (bulAutoModuleOf), и старият път в модула (sdMarkDiffTask).
+   Същата дата стои в stock_diff_sync_completions (v_start) и се сверява от
+   tests/stock-diff-auto-complete.test.js — разминат ли се, тестът пада.
+   Алтернативата (деплой на портала точно в петък вечер) зависи от човек на
+   машина в точен час и не е проверима предварително. Тази е.
+   Модул, който го няма тук, е автоматичен ОТ ВИНАГИ — такива са оборотът,
+   „Стока на път" и „За връщане" (тя си носи своя гейт в SR_AUTO_START, защото
+   там въпросът е от коя СЕДМИЦА, не от кой ден). */
+var AUTO_COMPLETE_FROM = {
+  'stock-diff': '2026-10-12'   /* понеделник; решение на Тенчо, 04.10.2026 */
+};
+function autoCompleteActive(linkedModule, todayISO){
+  var from = AUTO_COMPLETE_FROM[linkedModule];
+  if(!from) return true;
+  return (todayISO || today()) >= from;
+}
 function fmtDate(d){if(!d||d==='—')return'—';var p=String(d).split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:d;}
 function v(id){var el=document.getElementById(id);return el?(el.value||'').trim():'';}
 function closeModal(id){var el=document.getElementById(id);if(el)el.classList.remove('open');}

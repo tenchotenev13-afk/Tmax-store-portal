@@ -119,8 +119,12 @@ const noteOf = (h, cls) => {
     const h = env();
     const w = h.w;
     const keys = Object.keys(w.BUL_AUTO_MODULES);
-    ok('съдържа трите модула', keys.length === 3 && keys.indexOf('oborot') >= 0 &&
-      keys.indexOf('transit-auto') >= 0 && keys.indexOf('stock-returns') >= 0, keys.join(', '));
+    /* ЧЕТИРИ от 04.10.2026: „Разлики" (stock-diff) влезе с дата на влизане в
+       сила. Числото е заковано нарочно — нов модул трябва да мине и през
+       този тест, а не да се промъкне. */
+    ok('съдържа четирите модула', keys.length === 4 && keys.indexOf('oborot') >= 0 &&
+      keys.indexOf('transit-auto') >= 0 && keys.indexOf('stock-returns') >= 0 &&
+      keys.indexOf('stock-diff') >= 0, keys.join(', '));
     ok('bulAutoLocked чете от него', w.bulAutoLocked('stock-returns') === true);
     ok('и казва НЕ за непознат модул', w.bulAutoLocked('reference') === false);
     ok('и за празен', w.bulAutoLocked('') === false);

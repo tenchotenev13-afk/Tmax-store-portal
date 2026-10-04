@@ -1193,9 +1193,27 @@ var BUL_AUTO_MODULES = {
     tab:    '„За връщане"',
     cls:    'bul-auto-returns',
     unit:   ['запис без актуализация от понеделник', 'записа без актуализация от понеделник']
+  },
+  /* „РАЗЛИКИ ЛОГИСТИЧНИ СКЛАДОВЕ" (04.10.2026). Влиза в сила от датата в
+     AUTO_COMPLETE_FROM (shared.js) — дотогава задачата си остава ръчна, иначе
+     остава ден без нито един начин да бъде отметната. */
+  'stock-diff': {
+    reason: 'auto-diff',
+    label:  'Отмята се автоматично от Разлики',
+    tab:    'Разлики',
+    cls:    'bul-auto-diff',
+    unit:   ['ред чака отговор', 'реда чакат отговор']
   }
 };
-function bulAutoModuleOf(linkedModule){ return BUL_AUTO_MODULES[linkedModule] || null; }
+function bulAutoModuleOf(linkedModule, todayISO){
+  var m = BUL_AUTO_MODULES[linkedModule];
+  if(!m) return null;
+  /* Модул с дата на влизане в сила не е автоматичен ПРЕДИ нея: квадратчето
+     трябва да работи до последния ден преди превключването. Датата е една за
+     портала и за базата — AUTO_COMPLETE_FROM в shared.js. */
+  if(typeof autoCompleteActive==='function' && !autoCompleteActive(linkedModule, todayISO)) return null;
+  return m;
+}
 function bulAutoLocked(linkedModule){ return !!bulAutoModuleOf(linkedModule); }
 /* Ключът за заключване на задача. Автоматичната „Стока на път" (linked_module
    'transit' + auto_complete) се отмята от тригера в базата
@@ -1289,6 +1307,66 @@ function bulLoadReturnsPending(){
     renderBulletin();
   });
 }
+/* „Разлики": редовете, чакащи ДЕЙСТВИЕ НА ОБЕКТА — същият критерий, по който
+   базата отмята задачата (stock_diff_store_done) и по който модулът брои
+   балончето на таба (sdUnreviewedCountFor). Броят е в РЕДОВЕ, не в бланки
+   (решение на Тенчо): баджът на таба си остава бланки и го казва в подсказката
+   си, а тук числото трябва да съвпада с „остават N реда" в самия таб.
+   Правилото НЕ се вика от stock-differences.js: тя се зарежда СЛЕД bulletin.js
+   (index.html), а тестовете вдигат модулите поотделно. Двете се сверяват в
+   tests/stock-diff-auto-complete.test.js. */
+function bulLoadDiffPending(){
+  bulAutoPending['stock-diff']=null;
+  if(isGlobal()||!currentUser||!currentUser.store_name) return;
+  /* Складовете не дължат тази задача — тя е работа на магазина. */
+  if(typeof isLogisticsWarehouseUser==='function' && isLogisticsWarehouseUser()) return;
+  var has=(recurringTasks||[]).some(function(t){ return t && t.linked_module==='stock-diff' && !taskIsNotice(t); });
+  if(!has) return;
+  var store=currentUser.store_name;
+  /* Редовете на НЕПРЕГЛЕДАНИТЕ МЕЖДУСКЛАДОВИ бланки на обекта, с вложената
+     бланка (PostgREST embedding), за да не става втора заявка по report_id —
+     онзи списък расте с броя бланки (засадата от sdRefreshTabBadge). */
+  Promise.all([
+    sbGet('stock_differences',
+      'select=id,status,warehouse_response,store_response,differences_reports!inner(id,store_name,reviewed,direction)'+
+      '&differences_reports.store_name=eq.'+encodeURIComponent(store)+
+      '&differences_reports.reviewed=eq.false'+
+      '&differences_reports.direction=eq.interstore'),
+    sbGet('stock_diff_swaps','select=from_line_id,to_line_id,from_store,to_store,status')
+  ]).then(function(res){
+    var lines=Array.isArray(res[0])?res[0]:[];
+    var swaps=Array.isArray(res[1])?res[1]:[];
+    /* Ходът е мой: 'linked' и аз съм изпращач, или 'sent' и аз съм получател.
+       Ключът е по РЕД, защото редът трябва да е в МОЯ бланка. */
+    var myMove={};
+    swaps.forEach(function(x){
+      if(!x) return;
+      if(x.status==='linked' && x.from_store===store) myMove[String(x.from_line_id)]=1;
+      if(x.status==='sent'   && x.to_store===store)   myMove[String(x.to_line_id)]=1;
+    });
+    var n=lines.filter(function(l){
+      /* ФИЛТРИТЕ СЕ ПРОВЕРЯВАТ И ТУК, не само в заявката: върне ли тя повече
+         (друг обект, прегледана бланка, доставчикова посока), броят лъже. */
+      var r=l && l.differences_reports;
+      if(!r || r.store_name!==store || r.reviewed || r.direction!=='interstore') return false;
+      if(myMove[String(l.id)]) return true;
+      return bulDiffLineWaitsStore(l);
+    }).length;
+    bulAutoPending['stock-diff']=n;
+    renderBulletin();
+  });
+}
+/* Чака ли редът отговор ОТ ОБЕКТА. Дословно условието от базата:
+   'will_send' не се брои (стоката още не е тръгнала), празен отговор на склада
+   не се брои (чака СКЛАДА), 'no_stock' вече е отговор на обекта, приключен ред
+   не се брои. */
+function bulDiffLineWaitsStore(l){
+  if(!l) return false;
+  if(String(l.status||'')==='received') return false;
+  if(l.store_response) return false;
+  var w=String(l.warehouse_response||'');
+  return w==='sent' || w==='sent_sap' || w==='return';
+}
 /* ═══════ ПОЛЕТО „ОПИСАНИЕ" ══════════════════════════════════════════════
    От 28.09.2026 е textarea, не input: описанията са по няколко изречения и в
    един ред от 40 знака не се четат. Показването зачита новия ред
@@ -1380,6 +1458,9 @@ function bulCompletedByLabel(v){
   /* „За връщане" (02.10.2026): всички невзети записи на обекта са с
      актуализация в прозореца на седмицата. */
   if(v==='auto:stock-returns') return 'автоматично от „За връщане"';
+  /* „Разлики" (04.10.2026): обектът няма нито един ред, чакащ негово действие
+     по междускладова разлика. */
+  if(v==='auto:stock-diff') return 'автоматично от Разлики';
   return v||'';
 }
 /* Полето „Отмята се автоматично" във формите за задача. Стои в DOM-а винаги
@@ -2404,6 +2485,7 @@ function loadBulletin(){
          има ли такава задача), затова се вика и оттук, и след постоянните —
          двете извиквания са идемпотентни. */
       bulLoadReturnsPending();
+      bulLoadDiffPending();
       bulLoadTaskReports();
       /* Дата и в самата ЗАЯВКА. Глобалният клон (без store_name) теглеше
          ВСЯКО отмятане на постоянна задача, правено някога - 1595 реда на
@@ -6165,6 +6247,7 @@ function bulSetRecurring(all, periods, versions) {
      пита recurringTasks (вече със слятата версия: за стара седмица задачата е
      notice и брояч не ѝ трябва). */
   bulLoadReturnsPending();
+  bulLoadDiffPending();
 }
 /* Всички задачи + периодите, наново от базата (след запис). */
 function bulFetchRecurring() {

@@ -150,6 +150,14 @@ function sdActorIsOwnStore(store){
    човекът може да се отметне и сам; затова тук няма постоянна лента като при
    оборота. */
 function sdMarkDiffTask(store){
+  /* ОТ 12.10.2026 отметката идва от базата (stock_diff_sync_completions) и
+     ТУК не се пише нищо: двата пътя заедно биха значели два източника за едно
+     число, при това неразличими в task_completions (completed_by е име на
+     човек и в двата случая — точно затова правилото се мени).
+     Функцията не е изтрита, защото трябва да работи до 11.10 включително;
+     пълното ѝ махане е записано в claude/open-tasks.md за след 12.10.
+     Датата е една за портала и за базата — AUTO_COMPLETE_FROM в shared.js. */
+  if(typeof autoCompleteActive==='function' && autoCompleteActive('stock-diff')) return;
   if(!sdActorIsOwnStore(store)) return;
   markLinkedRecurringTask('stock-diff').then(function(res){
     if(!res || res.status!=='failed') return;
@@ -302,6 +310,9 @@ function loadStockDiff() {
 function renderStockDiff() {
   var wrap = document.getElementById('mod-stock-diff');
   if (!wrap) return;
+  /* Данните може да са се сменили от последния рендер (отговор по ред, нова
+     бланка, размяна) — кешът на чакащите се пресмята наново. */
+  sdResetWaitingCache();
   var isAdmin = currentUser && ['admin','accounting','logistics'].indexOf(currentUser.role) >= 0;
   var canAdd  = canAddSD();
 
@@ -422,6 +433,12 @@ function renderStockDiff() {
   var chipTaken   = sdTableRows({status:'taken'}).length;
   h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
   var statusChips = [['all','Всички ('+chipAll+')'],['pending',cw.pIcon+' '+cw.pending+' ('+chipPending+')'],['taken',cw.tIcon+' '+cw.taken+' ('+chipTaken+')']];
+  /* Четвърти чип САМО за обекта (складът и офисът имат свои изгледи): колко
+     реда чакат НЕГОВИЯ отговор. Числото е в РЕДОВЕ, както е и надписът до
+     задачата в Бюлетина; баджът на таба брои БЛАНКИ и го казва в подсказката
+     си. Чипът стои и при 0 — изчезващ брояч изглежда като счупен екран. */
+  var chipWaiting = sdWaitingVisible();
+  if (chipWaiting !== null) statusChips.push(['waiting','📝 Чакат моя отговор ('+chipWaiting+')']);
   /* Трети чип само при тип „Връщане" - както в „За връщане". „Всички" ги
      включва и там. */
   if (sdTypeFilter==='return') statusChips.push(['completed','🏁 Приключени ('+sdTableRows({status:'completed'}).length+')']);
@@ -433,6 +450,20 @@ function renderStockDiff() {
      Бутонът е винаги тук, и при 0 реда (тогава износът казва „Няма редове"). */
   h += '<button onclick="exportSDExcel()" style="margin-left:auto;border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">📥 Excel</button>';
   h += '</div>';
+
+  /* Какво остава на ОБЕКТА и какво следва от това. Броят е ОБЩИЯТ, не този в
+     подтаба: задачата гледа всички междускладови редове, а обект, изчистил
+     „Доставчици", иначе би решил, че е готов, и би чакал отметка, която няма
+     да дойде. */
+  if (chipWaiting !== null && typeof autoCompleteActive==='function' && autoCompleteActive('stock-diff')) {
+    var sdWaitAll = sdMyWaitingLines().length;
+    h += '<div style="background:'+(sdWaitAll?'#fef2f2':'#f0fdf4')+';border:1px solid '+(sdWaitAll?'#fecaca':'#bbf7d0')+';border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:'+(sdWaitAll?'#991b1b':'#166534')+'" id="sd-waiting-note">'+
+         (sdWaitAll
+           ? '📝 <b>'+sdWaitAll+'</b> '+(sdWaitAll===1?'ред чака':'реда чакат')+' вашия отговор по междускладови разлики.'
+           : '✅ Нито един ред не чака вашия отговор.')+
+         ' Задачата „РАЗЛИКИ ЛОГИСТИЧНИ СКЛАДОВЕ" в Бюлетина се отмята САМА за деня, когато няма такъв ред — ръчна отметка няма. Броят е за двата подтаба заедно. Ред, по който складът още не е отговорил или стоката не е тръгнала („ще се изпрати"), не чака вас.'+
+         '</div>';
+  }
 
   /* Таблица */
   if (!list.length) {
@@ -450,7 +481,10 @@ function renderStockDiff() {
     [['Тип','sd-c-type'],['Магазин','sd-c-store'],['Доставчик','sd-c-sup'],['Материал','sd-c-code'],['Наименование','sd-c-name'],['Кол.','sd-c-qty'],['Поръчка','sd-c-ord'],['Поръчка за връщане','sd-c-rord'],['Дата потвърд.','sd-c-date'],['Статус','sd-c-status'],['Кредитно','sd-c-credit'],['Снимки','sd-c-photo'],['Коментар','sd-c-cmt'],['Коментар Контролер','sd-c-ctl']].concat(showWh?[['Отговор на склада','sd-c-wh']]:[]).concat([['','sd-c-act']]).forEach(function(c){
       h += '<th class="'+c[1]+'" style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c[0]+'</th>';
     });
-    h += '</tr></thead><tbody>';
+    /* Собствено id: над тази таблица стои секцията с непрегледаните бланки,
+       която също се рендира с <table><tbody>. Без id „редът в таблицата" е
+       неразличим от „редът в бланката" за всяка проверка отвън. */
+    h += '</tr></thead><tbody id="sd-rows">';
 
     list.forEach(function(r) {
       var isTaken = r.status === 'taken';
@@ -673,6 +707,24 @@ function sdIsCompleted(r){ return !!r && r.status==='completed'; }
    чипът "Липса" щеше да се брои през вече включения филтър "Заприхождаване" и
    винаги да показва 0. Останалите филтри (магазин, търсене, посока) остават
    активни нарочно - те стесняват и таблицата, значи стесняват и числото. */
+/* id-тата на чакащите редове, за филтъра. Пресмята се веднъж на рендер и се
+   помни, защото sdTableRows се вика по веднъж за ВСЕКИ чип (четири пъти) и
+   всяко пресмятане обхожда размените. */
+var _sdWaitingIdsCache = null;
+function sdWaitingIds(){
+  if(_sdWaitingIdsCache) return _sdWaitingIdsCache;
+  var m = {};
+  sdMyWaitingLines().forEach(function(l){ m[String(l.id)] = 1; });
+  _sdWaitingIdsCache = m;
+  return m;
+}
+function sdResetWaitingCache(){ _sdWaitingIdsCache = null; }
+/* Колко от ЧАКАЩИТЕ се виждат в текущия подтаб/филтри. null = този чип не е за
+   този потребител (склад, офис). */
+function sdWaitingVisible(){
+  if(!currentUser || isGlobal() || isLogisticsWarehouseUser()) return null;
+  return sdTableRows({status:'waiting'}).length;
+}
 function sdTableRows(over){
   over = over || {};
   var typeF   = over.hasOwnProperty('type')   ? over.type   : sdTypeFilter;
@@ -704,6 +756,10 @@ function sdTableRows(over){
        неутралното „Приключени" ги включва. */
     else if (statusF === 'taken') { if (!(sdIsTaken(r) || (typeF !== 'return' && sdIsCompleted(r)))) return false; }
     else if (statusF === 'completed') { if (!sdIsCompleted(r)) return false; }
+    /* „Чакат моя отговор" — подмножество на видимите редове по правилото, по
+       което базата отмята задачата. Не е статус в схемата, затова е отделен
+       клон, а не стойност на r.status. */
+    else if (statusF === 'waiting') { if (sdWaitingIds()[String(r.id)] !== 1) return false; }
     /* Точен филтър по магазин (чиповете) - ОТДЕЛЕН от свободното търсене
        по-долу, за да не се влияе от текст в коментари, споменаващ друг обект. */
     if (sdStoreFilter && r.store_name !== sdStoreFilter) return false;
@@ -4811,6 +4867,9 @@ function sdTabBadgeEl(){
     if(!tab.style.position) tab.style.position = 'relative';
     b = document.createElement('span');
     b.id = 'badge-stock-diff';
+    /* „бланки", не „редове": баджът брои БЛАНКИ, а чипът в таба и надписът в
+       Бюлетина броят РЕДОВЕ. Без този надпис двете числа изглеждат като бъг. */
+    b.title = 'Бланки, чакащи вашата реакция';
     b.style.cssText = 'position:absolute;top:2px;right:4px;min-width:16px;height:16px;padding:0 4px;'+
       'background:#dc2626;color:#fff;border-radius:20px;font-size:10px;font-weight:700;line-height:16px;'+
       'text-align:center;display:none;pointer-events:none;box-shadow:0 0 0 2px #0f172a;';
@@ -4832,6 +4891,41 @@ function sdSetTabBadge(n){
    модула би останал с осакатени размени — без id, без status, без чуждите.
    Подаден null/undefined значи „ползвай sdSwaps", което е верният източник по
    пътя на рендера (sdUpdateTabBadgeFromData). */
+/* Чака ли редът действие ОТ ОБЕКТА. Изнесено от sdUnreviewedCountFor, защото
+   от 04.10.2026 същото условие трябва и на брояча/филтъра в таба, и в базата
+   (stock_diff_store_done). Три копия на едно условие се разминават мълчаливо.
+   'will_send' не се брои (стоката още не е тръгнала), празен отговор на склада
+   не се брои (чака СКЛАДА), 'no_stock' вече е отговор на обекта, приключен ред
+   не се брои. */
+function sdLineWaitsStore(l){
+  if(!l) return false;
+  if(String(l.status||'')==='received') return false;
+  if(l.store_response) return false;
+  var w=String(l.warehouse_response||'');
+  return w==='sent' || w==='sent_sap' || w==='return';
+}
+/* Редовете на ОБЕКТА, чакащи неговото действие — за брояча и филтъра в таба.
+   Само МЕЖДУСКЛАДОВИ и само по НЕПРЕГЛЕДАНИ бланки, точно като правилото в
+   базата. Размените също местят хода, затова влизат. */
+function sdMyWaitingLines(){
+  if(!currentUser || isGlobal() || isLogisticsWarehouseUser()) return [];
+  var mine = assignedStores();
+  var myStore = function(name){
+    return name===currentUser.store_name || (mine && mine.indexOf(name)>=0);
+  };
+  var myMove = {};
+  (sdSwaps||[]).forEach(function(x){
+    if(!x) return;
+    if(x.status==='linked' && myStore(x.from_store)) myMove[String(x.from_line_id)] = true;
+    if(x.status==='sent'   && myStore(x.to_store))   myMove[String(x.to_line_id)]   = true;
+  });
+  return (sdData||[]).filter(function(l){
+    if(!l || !myStore(l.store_name)) return false;
+    var rp = (diffReports||[]).find(function(x){ return x.id===l.report_id; });
+    if(!rp || rp.reviewed || rp.direction!=='interstore') return false;
+    return !!myMove[String(l.id)] || sdLineWaitsStore(l);
+  });
+}
 function sdUnreviewedCountFor(reports, lines, swaps){
   if(!currentUser) return 0;
   var sw = swaps || sdSwaps || [];
