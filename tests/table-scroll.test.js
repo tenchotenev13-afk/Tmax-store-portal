@@ -87,8 +87,8 @@ function wireRow(w, tr) {
     const { doc } = await env();
     const css = Array.prototype.map.call(doc.querySelectorAll('style'), s => s.textContent).join('\n');
     const has = (label, re) => ok(label, re.test(css), String(re));
-    ok('Транспорт: обвивката е .tbl-wrap.co-sticky-actions.tbl-tr',
-      !!doc.querySelector('.tbl-wrap.co-sticky-actions.tbl-tr #tr-body'));
+    ok('Транспорт: обвивката е .tbl-wrap.tbl-compact.tbl-tr-compact (без вътрешен скрол)',
+      !!doc.querySelector('.tbl-wrap.tbl-compact.tbl-tr-compact #tr-body') && !doc.querySelector('.co-sticky-actions #tr-body'));
     ok('Клиентски: обвивката е .tbl-wrap.tbl-compact.tbl-co-compact (без вътрешен скрол)',
       !!doc.querySelector('.tbl-wrap.tbl-compact.tbl-co-compact #co-body') && !doc.querySelector('.co-sticky-actions #co-body'));
     has('max-height:calc(100vh - 140px) + overflow:auto', /\.tbl-wrap\.co-sticky-actions\{max-height:calc\(100vh - 140px\);overflow:auto;cursor:grab;\}/);
@@ -96,13 +96,11 @@ function wireRow(w, tr) {
     ok('няма глобално table{min-width', !/(^|\})\s*table\{[^}]*min-width/m.test(css));
     has('sticky thead: top:0, z-index:2', /\.co-sticky-actions thead th\{position:sticky;top:0;z-index:2;background:var\(--surf\);\}/);
     has('бутоните: th:last-child z-index:4 (над останалите th)', /\.co-sticky-actions table th:last-child\{z-index:4;\}/);
-    has('Клиент закачен (Транспорт): td 2-ра',
-      /\.tbl-tr td:nth-child\(2\)\{position:sticky;left:0;z-index:1;background:inherit;box-shadow:6px 0 6px -6px/);
-    has('Клиент закачен (Транспорт): th със z-index:3', /\.tbl-tr th:nth-child\(2\)\{position:sticky;left:0;z-index:3;/);
-    has('nowrap (Транспорт): Дата/Телефон/Доставка/Статус/Магазин',
-      /\.tbl-tr td:nth-child\(1\),\.tbl-tr td:nth-child\(4\),\.tbl-tr td:nth-child\(8\),\.tbl-tr td:nth-child\(9\),\.tbl-tr td:nth-child\(10\)\{white-space:nowrap;\}/);
-    has('Продукт/Адрес (Транспорт): пренасят се, 160–260px (width нужен, за да държи max-width)',
-      /\.tbl-tr td:nth-child\(5\),\.tbl-tr td:nth-child\(6\)\{width:260px;min-width:160px;max-width:260px;white-space:normal;\}/);
+    /* Транспорт (компактен ред, 6 колони): без закачени колони и без nth-child правила на старото .tbl-tr. */
+    ok('няма останали .tbl-tr правила (11-колонният вид е махнат)', !/\.tbl-tr(?![-\w])/.test(css.replace(/\/\*[\s\S]*?\*\//g, '')));
+    has('Транспорт: min-width само на таба (1130px)', /\.tbl-tr-compact table\{min-width:1130px;\}/);
+    has('Транспорт, колони: 110 / 200 / 220 / ≥200 / 170 / 230',
+      /\.tbl-tr-compact th:nth-child\(1\)\{width:110px;\}[\s\S]*?\.tbl-tr-compact th:nth-child\(2\)\{width:200px;\}[\s\S]*?\.tbl-tr-compact th:nth-child\(3\)\{width:220px;\}[\s\S]*?\.tbl-tr-compact th:nth-child\(4\)\{min-width:200px;\}[\s\S]*?\.tbl-tr-compact th:nth-child\(5\)\{width:170px;\}[\s\S]*?\.tbl-tr-compact th:nth-child\(6\)\{width:230px;\}/);
     /* Фонът идва от реда: закачените td наследяват <tr> (подсветка, мигане,
        hover), а самият ред е винаги плътен — иначе под закачените прозира. */
     has('редът е плътно бял по подразбиране', /\.co-sticky-actions tbody tr\{background:#fff;\}/);
@@ -122,7 +120,7 @@ function wireRow(w, tr) {
        td:last-child + th:last-child (заглавието иска бял фон) — за td то се
        бие от по-късното td:last-child{…background:inherit}, проверено отгоре. */
     const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').match(/[^{}]+\{[^{}]*\}/g) || [];
-    const stickyTd = /(\.co-sticky-actions table td:last-child|\.tbl-tr td:nth-child\(2\))(?![\d])/;
+    const stickyTd = /(\.co-sticky-actions table td:last-child)(?![\d])/;
     const hardWhite = rules.filter(r => {
       const sel = r.slice(0, r.indexOf('{')), body = r.slice(r.indexOf('{'));
       return stickyTd.test(sel) && /background:#fff/.test(body) && !/th:last-child/.test(sel);
@@ -144,9 +142,8 @@ function wireRow(w, tr) {
     /* Заглавията по номер — ако колона се премести, nth-child-овете лъжат */
     const heads = id => Array.prototype.map.call(doc.getElementById(id).closest('table').querySelectorAll('thead th'), t => t.textContent.trim());
     const trH = heads('tr-body'), coH = heads('co-body');
-    ok('Транспорт: колоните са на местата от CSS-а',
-      trH[0] === 'Дата / Час' && trH[1] === 'Клиент' && trH[3] === 'Телефон' && trH[4] === 'Адрес' && trH[5] === 'Продукт' &&
-      trH[7] === 'Доставка' && trH[8] === 'Статус' && trH[9] === 'Магазин', JSON.stringify(trH));
+    ok('Транспорт: 6 колони — Дата · Час / Клиент / Адрес / Артикул / Статус · Доставка / Действия',
+      JSON.stringify(trH) === JSON.stringify(['Дата · Час', 'Клиент', 'Адрес', 'Артикул', 'Статус · Доставка', 'Действия']), JSON.stringify(trH));
     ok('Клиентски: 6 колони — № · Пусната / Клиент / Артикул / От → Изпълнява / Статус · Доставка / Действия',
       JSON.stringify(coH) === JSON.stringify(['№ · Пусната', 'Клиент', 'Артикул', 'От → Изпълнява', 'Статус · Доставка', 'Действия']), JSON.stringify(coH));
   }

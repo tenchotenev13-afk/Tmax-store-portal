@@ -204,16 +204,16 @@ const cellAt = (doc, id, i) => {
     const table = doc.getElementById('tr-body') && doc.getElementById('tr-body').closest('table');
     const heads = table ? Array.prototype.map.call(table.querySelectorAll('thead th'), th => th.textContent.trim()) : [];
     const col = name => heads.findIndex(h => h.indexOf(name) >= 0);
-    const iAddr = col('Адрес'), iProd = col('Продукт');
-    ok('колоните Адрес и Продукт се намират по заглавие', iAddr >= 0 && iProd >= 0, JSON.stringify(heads));
+    const iAddr = col('Адрес'), iProd = col('Артикул');
+    ok('колоните Адрес и Артикул се намират по заглавие', iAddr >= 0 && iProd >= 0, JSON.stringify(heads));
     const addr = cellAt(doc, 't-1', iAddr), prod = cellAt(doc, 't-1', iProd);
     ok('клетката Адрес е адресът', !!addr && addr.textContent.indexOf('Васил Левски') >= 0);
-    ok('клетката Продукт е продуктът', !!prod && prod.textContent.indexOf('ПАРКЕТ') >= 0);
+    ok('клетката Артикул е продуктът', !!prod && prod.textContent.indexOf('ПАРКЕТ') >= 0);
     if (addr) guard('клик по Адрес', () => bubbleClick(w, addr));
     ok('Адрес → #trd-ov', !!doc.getElementById('trd-ov'));
     guard('Затвори', () => w.closeTransportDetail());
-    if (prod) guard('клик по Продукт', () => bubbleClick(w, prod));
-    ok('Продукт → #trd-ov', !!doc.getElementById('trd-ov'));
+    if (prod) guard('клик по Артикул', () => bubbleClick(w, prod));
+    ok('Артикул → #trd-ov', !!doc.getElementById('trd-ov'));
     guard('Затвори', () => w.closeTransportDetail());
 
     const status = tr && btnExact(tr, 'Статус');

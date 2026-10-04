@@ -92,7 +92,7 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .co-sticky-actions table td:last-child,
 .co-sticky-actions table th:last-child{position:sticky;right:0;background:#fff;box-shadow:-6px 0 6px -6px rgba(0,0,0,.15);}
 .co-sticky-actions table th:last-child{background:var(--surf);}
-/* Транспорт (.tbl-tr) и Клиентски заявки (.tbl-co): скролът е в самата
+/* Разлики (.co-sticky-actions): скролът е в самата
    обвивка, затова хоризонталната лента е винаги долу на екрана, а не долу
    на таблицата. Заглавията, „Клиент" и бутоните са закачени. z-index:
    td 1 < th 2 < закачен th отляво/отдясно 3-4 (те са sticky и по top). */
@@ -110,13 +110,6 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .co-sticky-actions tbody tr{background:#fff;}
 .co-sticky-actions table td:last-child{z-index:1;background:inherit;}
 .co-sticky-actions table th:last-child{z-index:4;}
-.tbl-tr td:nth-child(1),.tbl-tr td:nth-child(4),.tbl-tr td:nth-child(8),.tbl-tr td:nth-child(9),.tbl-tr td:nth-child(10){white-space:nowrap;}
-/* Продукт и Адрес: пренасят се, 160–260px. Chrome не зачита max-width на
-   клетка сам — таванът държи само заедно с width (измерено: без него
-   Продукт стига 406px при широка таблица, с него спира на 260px). */
-.tbl-tr td:nth-child(5),.tbl-tr td:nth-child(6){width:260px;min-width:160px;max-width:260px;white-space:normal;}
-.tbl-tr td:nth-child(2){position:sticky;left:0;z-index:1;background:inherit;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
-.tbl-tr th:nth-child(2){position:sticky;left:0;z-index:3;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
 /* Компактни таблици (Клиентски, Транспорт): без вътрешен скрол — скролира страницата.
    Обвивката е class="tbl-wrap tbl-compact tbl-XX-compact"; ширините на колоните са в класа на таба.
    На ≥1200px заглавието е закачено под навигацията (.nav е sticky, top:0); под 1200px — хоризонтален скрол. */
@@ -136,6 +129,15 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .tbl-co-compact th:nth-child(5){width:170px;}
 .tbl-co-compact th:nth-child(6){width:330px;}
 .tbl-co-compact td:nth-child(3){overflow:hidden;}
+/* Транспорт: 6 колони — Дата · Час / Клиент / Адрес / Артикул / Статус · Доставка / Действия */
+.tbl-tr-compact table{min-width:1130px;}
+.tbl-tr-compact th:nth-child(1){width:110px;}
+.tbl-tr-compact th:nth-child(2){width:200px;}
+.tbl-tr-compact th:nth-child(3){width:220px;}
+.tbl-tr-compact th:nth-child(4){min-width:200px;}
+.tbl-tr-compact th:nth-child(5){width:170px;}
+.tbl-tr-compact th:nth-child(6){width:230px;}
+.tbl-tr-compact td:nth-child(4){overflow:hidden;}
 @media(min-width:1200px){
   .tbl-compact{overflow:visible;}
   .tbl-compact table{min-width:0;}
@@ -373,16 +375,19 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div class="pg-title">🚚 Транспортни заявки</div>
     <div class="pg-sub">Заявки за доставка до адрес на клиент.</div>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
-      <div id="tr-filters" class="filter-bar" style="margin:0;">
-        <button class="filter-btn active" onclick="filterTransport('all',this)">Всички</button>
-        <button class="filter-btn" onclick="filterTransport('overdue',this)">🔴 Просрочени</button>
-        <button class="filter-btn" onclick="filterTransport('today',this)">🔵 Днес</button>
-        <button class="filter-btn" onclick="filterTransport('tomorrow',this)">🟡 Утре</button>
-        <button class="filter-btn" onclick="filterTransport('pending',this)">Изчаква</button>
-        <button class="filter-btn" onclick="filterTransport('awaiting',this)">⏳ Чака стока</button>
-        <button class="filter-btn" onclick="filterTransport('postponed',this)">Отложена</button>
-        <button class="filter-btn" onclick="filterTransport('done',this)">Изпълнена</button>
-        <button class="filter-btn" onclick="filterTransport('refused',this)">Отказана</button>
+      <div id="tr-filters" class="filter-bar chips" style="margin:0;">
+        <span class="chips-label">Покажи:</span>
+        <button class="filter-btn active" data-tr-f="active" onclick="filterTransport('active',this)">Активни <span class="chips-n">0</span></button>
+        <button class="filter-btn" data-tr-f="overdue" onclick="filterTransport('overdue',this)">🔴 Просрочени <span class="chips-n">0</span></button>
+        <button class="filter-btn" data-tr-f="today" onclick="filterTransport('today',this)">🔵 Днес <span class="chips-n">0</span></button>
+        <button class="filter-btn" data-tr-f="tomorrow" onclick="filterTransport('tomorrow',this)">🟡 Утре <span class="chips-n">0</span></button>
+        <button class="filter-btn" data-tr-f="pending" onclick="filterTransport('pending',this)">Изчаква <span class="chips-n">0</span></button>
+        <button class="filter-btn" data-tr-f="awaiting" onclick="filterTransport('awaiting',this)">⏳ Чака стока <span class="chips-n">0</span></button>
+        <button class="filter-btn" data-tr-f="postponed" onclick="filterTransport('postponed',this)">Отложена <span class="chips-n">0</span></button>
+        <span class="chips-sep"></span>
+        <button class="filter-btn chip-hist" data-tr-f="done" onclick="filterTransport('done',this)">Изпълнена <span class="chips-n">0</span></button>
+        <button class="filter-btn chip-hist" data-tr-f="refused" onclick="filterTransport('refused',this)">Отказана <span class="chips-n">0</span></button>
+        <button class="filter-btn chip-hist" data-tr-f="all" onclick="filterTransport('all',this)">Всички <span class="chips-n">0</span></button>
       </div>
       <button class="btn btn-green" onclick="openTransportModal()">+ Нова заявка</button>
     </div>
@@ -390,9 +395,9 @@ OneSignalDeferred.push(async function(OneSignal) {
       <input id="tr-search" placeholder="🔍 Търси клиент/продукт/SAP/бон/телефон..." oninput="renderTransport()" style="flex:1;min-width:220px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 14px;font-size:13px;font-family:inherit;outline:none;">
       <select id="tr-month" onchange="renderTransport()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
     </div>
-    <div class="tbl-wrap co-sticky-actions tbl-tr"><table>
-      <thead><tr><th>Дата / Час</th><th>Клиент</th><th>SAP</th><th>Телефон</th><th>Адрес</th><th>Продукт</th><th>Бр.</th><th>Доставка</th><th>Статус</th><th>Магазин</th><th></th></tr></thead>
-      <tbody id="tr-body"><tr><td colspan="10" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
+    <div class="tbl-wrap tbl-compact tbl-tr-compact"><table>
+      <thead><tr><th>Дата · Час</th><th>Клиент</th><th>Адрес</th><th>Артикул</th><th>Статус · Доставка</th><th>Действия</th></tr></thead>
+      <tbody id="tr-body"><tr><td colspan="6" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
     </table></div>
   </div>
 

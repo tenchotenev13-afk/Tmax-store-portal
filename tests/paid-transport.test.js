@@ -581,6 +581,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     const tr = JSON.parse(JSON.stringify(TRANSPORT_ORDERS));
     tr[1].status = 'done';
     const { w, doc } = boot({ tr });
+    w.transportFilter = 'all'; /* подразбирането е „Активни" — изпълненият се вижда през „Всички" */
     w.renderTransport();
     ok('изпълнен транспорт се показва като изпълнен, не "Чака стока"',
       rowOf(doc, 'tr-row-tr-2').innerHTML.indexOf('✅ Изпълнена') >= 0);

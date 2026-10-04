@@ -1,9 +1,9 @@
 /* Транспорт: редът показва ВСИЧКИ артикули (до 3 + „+N още"), като в Клиентски —
-   през coItemCells(). Колоните са все 11, на старите места (SAP=3, Телефон=4,
-   Адрес=5, Продукт=6, Бр.=7). Клик по реда пак отваря детайла.
+   през coItemCellCompact(). От компактния ред (6 колони) артикулите са в ЕДНА
+   клетка „Артикул" (4-та): всеки е .co-it с два реда — „име — бройка мярка" и
+   „SAP …". Клик по реда пак отваря детайла.
 
-   Пускане: node tests/transport-row-items.test.js .
-*/
+   Пускане: node tests/transport-row-items.test.js . */
 'use strict';
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
 const { boot, bubbleClick, ok, guard, section, report, dayOffset, tsOffset } = H;
@@ -38,65 +38,68 @@ function env() {
   return h;
 }
 const cells = (h, id) => { const r = h.doc.getElementById('tr-row-' + id); return r ? Array.from(r.children) : []; };
+const blocks = c => (c ? Array.from(c.querySelectorAll('.co-it')) : []);
 
 (async function run() {
   const h = env();
 
-  section('1. 1 артикул → като досега');
+  section('1. 1 артикул');
   {
     const c = cells(h, 'one');
-    ok('11 <td>', c.length === 11, c.length);
-    ok('SAP в колона 3', c[2] && c[2].textContent === '111', c[2] && c[2].textContent);
-    ok('Продукт + цвят в колона 6', c[5] && c[5].textContent === 'ПАРКЕТдъб', c[5] && c[5].textContent);
-    ok('Бр. + мерна единица в колона 7', c[6] && c[6].textContent === '5кв.м', c[6] && c[6].textContent);
-    ok('Телефон/Адрес са си на местата', c[3] && c[3].textContent === '0888111222' && c[4] && c[4].textContent === 'гр. Троян');
-    ok('няма „още"', !/още/.test(c.map(x => x.textContent).join('')));
+    ok('6 <td>', c.length === 6, c.length);
+    const b = blocks(c[3]);
+    ok('един блок: ПАРКЕТ — 5 кв.м', b.length === 1 && b[0].children[0].textContent === 'ПАРКЕТ — 5 кв.м', b[0] && b[0].children[0].textContent);
+    ok('SAP 111 под него', b[0] && b[0].children[1].textContent === 'SAP 111');
+    ok('цветът е в title', b[0] && b[0].children[0].getAttribute('title') === 'ПАРКЕТ (дъб)');
+    ok('Адрес е в 3-та клетка', c[2] && c[2].textContent === 'гр. Троян', c[2] && c[2].textContent);
+    ok('Клиент: име + телефон · бон', c[1] && /Иван Петров/.test(c[1].textContent) && /0888111222 · Бон: Б-1/.test(c[1].textContent), c[1] && c[1].textContent);
+    ok('няма „още"', !/още/.test(c[3].textContent));
   }
 
   section('2. стар запис без items → старите полета');
   {
     const c = cells(h, 'old');
-    ok('11 <td>', c.length === 11, c.length);
-    ok('SAP 555', c[2] && c[2].textContent === '555');
-    ok('ВРАТА + орех', c[5] && c[5].textContent === 'ВРАТАорех');
-    ok('брой 2', c[6] && c[6].textContent === '2');
+    const b = blocks(c[3]);
+    ok('6 <td>', c.length === 6, c.length);
+    ok('един блок: ВРАТА — 2 бр.', b.length === 1 && b[0].children[0].textContent === 'ВРАТА — 2 бр.', b[0] && b[0].children[0].textContent);
+    ok('SAP 555', b.length === 1 && b[0].children[1].textContent === 'SAP 555');
   }
 
   section('3. 2 артикула → и двата в реда');
   {
     const c = cells(h, 'two');
-    ok('11 <td>', c.length === 11, c.length);
-    ok('и двата SAP', c[2] && /S1/.test(c[2].textContent) && /S2/.test(c[2].textContent));
-    ok('и двата продукта', c[5] && /АРТИКУЛ1/.test(c[5].textContent) && /АРТИКУЛ2/.test(c[5].textContent));
-    ok('и двете бройки', c[6] && /1/.test(c[6].textContent) && /2/.test(c[6].textContent));
-    ok('няма „още"', !/още/.test(c[5].textContent));
+    const b = blocks(c[3]);
+    ok('6 <td>', c.length === 6, c.length);
+    ok('два блока', b.length === 2, b.length);
+    ok('и двата SAP', /SAP S1/.test(c[3].textContent) && /SAP S2/.test(c[3].textContent));
+    ok('и двата продукта', /АРТИКУЛ1/.test(c[3].textContent) && /АРТИКУЛ2/.test(c[3].textContent));
+    ok('няма „още"', !/още/.test(c[3].textContent));
   }
 
   section('4. 5 артикула → първите 3 + „+2 още"');
   {
     const c = cells(h, 'five');
-    ok('11 <td>', c.length === 11, c.length);
-    ok('SAP S1..S3, без S4', c[2] && /S3/.test(c[2].textContent) && !/S4/.test(c[2].textContent));
-    ok('продукти 1..3, без 4', c[5] && /АРТИКУЛ3/.test(c[5].textContent) && !/АРТИКУЛ4/.test(c[5].textContent));
-    ok('„+2 още" в колона Продукт', c[5] && /\+2 още/.test(c[5].textContent), c[5] && c[5].textContent);
+    ok('6 <td>', c.length === 6, c.length);
+    ok('три блока', blocks(c[3]).length === 3, blocks(c[3]).length);
+    ok('SAP S1..S3, без S4', /SAP S3/.test(c[3].textContent) && !/S4/.test(c[3].textContent));
+    ok('„+2 още"', /\+2 още/.test(c[3].textContent), c[3].textContent);
   }
 
   section('5. клик по реда → детайл');
   {
     const w = h.w;
-    const td = cells(h, 'five')[0];
-    guard('клик', () => bubbleClick(w, td));
+    guard('клик', () => bubbleClick(w, cells(h, 'five')[3]));
     ok('отворен е #trd-ov', !!h.doc.getElementById('trd-ov'));
   }
 
-  section('6. fallback без coItemCells → старият markup');
+  section('6. fallback без coItemCellCompact → една клетка със старите полета');
   {
     const h2 = env();
-    h2.w.coItemCells = undefined;
+    h2.w.coItemCellCompact = undefined;
     guard('renderTransport()', () => h2.w.renderTransport());
     const c = cells(h2, 'old');
-    ok('11 <td>', c.length === 11, c.length);
-    ok('SAP + продукт + брой', c[2].textContent === '555' && c[5].textContent === 'ВРАТАорех' && c[6].textContent === '2');
+    ok('пак 6 <td>', c.length === 6, c.length);
+    ok('продукт, брой и SAP', /ВРАТА — 2 бр\./.test(c[3].textContent) && /SAP 555/.test(c[3].textContent), c[3].textContent);
   }
   report();
 })().catch(e => { console.error(e); process.exit(1); });

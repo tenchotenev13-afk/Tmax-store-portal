@@ -298,6 +298,7 @@ const TESTS = [
   'co-filter-bar.test.js',
   'transport-detail.test.js',
   'transport-row-items.test.js',
+  'transport-filter-bar.test.js',
   'metrics-only-transport-client.test.js',
   'contact-detail.test.js',
   'contacts-directory.test.js',

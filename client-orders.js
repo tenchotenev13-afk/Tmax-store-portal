@@ -142,7 +142,7 @@ function syncLinkedTransport(id,status){
 function gotoLinkedTransport(trId){
   window._trHighlightId=trId;
   /* Нулираме филтъра — иначе редът може да е скрит и да изглежда, че бутонът не работи */
-  var b=document.querySelector('#tr-filters .filter-btn');
+  var b=document.querySelector('#tr-filters .filter-btn[data-tr-f="all"]');
   if(b&&typeof filterTransport==='function')filterTransport('all',b);
   showModule('transport');
 }

@@ -68,16 +68,25 @@ function loadTransport(){
   }).catch(function(e){console.warn('transport:',e);});
 }
 
+/* Чипът на лентата „Покажи:" като предикат. 'active' = всичко, което още не е приключило
+   (нито изпълнена, нито отказана — по status И по _status); „Чака стока" (awaiting) е активна. */
+function trChipMatch(f,o){
+  if(f==='all')return true;
+  if(f==='active')return o._status!=='done'&&o._status!=='refused'&&o.status!=='done'&&o.status!=='refused';
+  /* Същото като в Клиентски заявки: "Просрочени" е признак, не статус —
+     виж isLate() в shared.js. */
+  if(f==='overdue')return isLate(o);
+  return o._status===f||o.status===f;
+}
+/* „Артикул" без client-orders.js (не би трябвало да се случва): трите стари клетки, слети в една. */
+function trItemCellFallback(o){
+  return '<td>'+esc(o.product||'')+' — '+esc(String(o.qty||1))+(o.unit?' '+esc(o.unit):'')+
+    '<br><small style="color:#94a3b8;">SAP '+esc(o.sap||'—')+(o.color?' · '+esc(o.color):'')+'</small></td>';
+}
 function renderTransport(){
   var search=((document.getElementById('tr-search')||{}).value||'').trim().toLowerCase();
   var month=(document.getElementById('tr-month')||{}).value||'';
-  var list=transportOrders.filter(function(o){
-    if(transportFilter==='all')return true;
-    /* Същото като в Клиентски заявки: "Просрочени" е признак, не статус —
-       виж isLate() в shared.js. */
-    if(transportFilter==='overdue')return isLate(o);
-    return o._status===transportFilter||o.status===transportFilter;
-  });
+  var list=transportOrders.slice();
   if (month) list=list.filter(function(o){ return o.date && o.date.slice(0,7)===month; });
   if (search) {
     list=list.filter(function(o){
@@ -98,8 +107,16 @@ function renderTransport(){
       return false;
     });
   }
+  /* Бройките до чиповете: колко заявки биха се показали с този чип при текущите
+     търсене/месец (всички филтри без чипа). */
+  document.querySelectorAll('#tr-filters .filter-btn[data-tr-f]').forEach(function(b){
+    var n=b.querySelector('.chips-n');if(!n)return;
+    var f=b.getAttribute('data-tr-f');
+    n.textContent=list.filter(function(o){return trChipMatch(f,o);}).length;
+  });
+  list=list.filter(function(o){return trChipMatch(transportFilter,o);});
   var body=document.getElementById('tr-body');if(!body)return;
-  if(!list.length){body.innerHTML='<tr><td colspan="11" style="text-align:center;padding:30px;color:#94a3b8;">Няма транспортни заявки.</td></tr>';return;}
+  if(!list.length){body.innerHTML='<tr><td colspan="6" style="text-align:center;padding:30px;color:#94a3b8;">Няма транспортни заявки.</td></tr>';return;}
   body.innerHTML=list.map(function(o){
     var bdrColor={overdue:'#dc2626',today:'#2563eb',tomorrow:'#d97706',awaiting:'#eab308'}[o._status]||'transparent';
     var anim='';
@@ -113,23 +130,14 @@ function renderTransport(){
     if(hl)anim='';
     /* Целият ред отваря детайла; клетката с бутоните и баджът на клиентската
        заявка спират bubbling-а, за да вършат само своето. */
-    /* SAP / Продукт / Бр. — като в Клиентски (до 3 артикула + „+N още“).
-       coItemCells връща трите <td> подред, а тук между тях са Телефон и Адрес —
-       затова се режат и се подреждат на старите места (11 колони). */
-    var itCells=typeof coItemCells==='function'?coItemCells(o).split('</td>').slice(0,3).map(function(x){return x+'</td>';}):null;
-    var tdSap=itCells?itCells[0]:'<td style="font-family:monospace;font-size:11px;"><div style="max-width:70px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(o.sap||'')+'">'+esc(o.sap||'—')+'</div></td>';
-    var tdProd=itCells?itCells[1]:'<td>'+esc(o.product||'')+'<br><small style="color:#94a3b8;">'+esc(o.color||'')+'</small></td>';
-    var tdQty=itCells?itCells[2]:'<td style="text-align:center;">'+esc(String(o.qty||1))+(o.unit&&o.unit!=='бр.'?'<br><small style="color:#94a3b8;">'+esc(o.unit)+'</small>':'')+'</td>';
+    /* „Артикул" — като в Клиентски (до 3 артикула + „+N още“), една клетка. */
+    var tdItems=typeof coItemCellCompact==='function'?coItemCellCompact(o):trItemCellFallback(o);
     return '<tr id="tr-row-'+esc(o.id)+'" class="row-click" data-id="'+esc(o.id)+'" onclick="openTransportDetail(this.dataset.id)" title="Отвори заявката" style="border-left:3px solid '+bdrColor+';'+anim+hl+'cursor:pointer;">'+
-      '<td style="font-size:11px;">'+esc(o.date||'')+'<br><small style="color:#94a3b8;">'+esc(o.hour||'')+'</small></td>'+
-      '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">Бон: '+esc(o.bon||'—')+'</small>'+coLinkBadge(o)+'</td>'+
-      tdSap+
-      '<td style="font-family:monospace;">'+esc(o.phone||'')+'</td>'+
+      '<td style="font-size:11px;">'+esc(o.date||'')+' '+esc(o.hour||'')+'<div style="color:#94a3b8;margin-top:2px;">'+esc(o.store_name||'')+'</div></td>'+
+      '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">'+esc(o.phone||'')+' · Бон: '+esc(o.bon||'—')+'</small>'+coLinkBadge(o)+'</td>'+
       '<td style="font-size:12px;">'+esc(o.address||'')+'</td>'+
-      tdProd+tdQty+
-      '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
-      '<td>'+statusBadge(o._status)+lateBadge(o)+'</td>'+
-      '<td>'+esc(o.store_name||'')+'</td>'+
+      tdItems+
+      '<td>'+statusBadge(o._status)+lateBadge(o)+'<div style="margin-top:3px;font-size:12px;"><b>'+fmtDate(o.delivery)+'</b></div></td>'+
       '<td onclick="event.stopPropagation()" style="cursor:default;">'+actionBtns(o.id,'transport_orders',o._status,o.store_name)+'</td></tr>';
   }).join('');
   /* Подсветка + скрол към реда, отворен от бутона 🚚 в Клиентски заявки */
@@ -246,8 +254,9 @@ function closeTransportDetail(){
 
 function filterTransport(f,btn){
   transportFilter=f;
-  document.querySelectorAll('#tr-filters .filter-btn').forEach(function(b){b.classList.remove('active');});
-  if(btn)btn.classList.add('active');renderTransport();
+  /* Активният чип е по data-tr-f, не по подадения btn. */
+  document.querySelectorAll('#tr-filters .filter-btn').forEach(function(b){b.classList.toggle('active',b.getAttribute('data-tr-f')===f);});
+  renderTransport();
 }
 
 /* Превръща "HH:MM" в минути от полунощ, за сравнение на близост на часове */
