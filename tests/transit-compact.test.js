@@ -77,6 +77,19 @@ const S = a => a.slice().sort();
     ok('таб „Всички" още е там (посока)', !!Array.from(h.w.document.querySelectorAll('#mod-transit button')).find(b => /^transitDir='all'/.test(b.getAttribute('onclick') || '')));
   }
 
+  section('1б. празно търсене и надпис на таба „Всички"');
+  {
+    const h = env(user('admin', 'Централен офис'), DATA);
+    const si = h.w.document.getElementById('t-search');
+    ok('празно търсене → value е празен низ (не „—")', !!si && si.value === '' && si.getAttribute('value') === '', si && si.getAttribute('value'));
+    const tab = Array.from(h.w.document.querySelectorAll('#mod-transit button')).find(b => /^transitDir='all'/.test(b.getAttribute('onclick') || ''));
+    const sub = tab.querySelector('div').textContent.trim();
+    /* броят следва активния статус-филтър (подразбиране pending → 5 реда) */
+    ok('надписът на „Всички" е само броят „(5)", без „all"', sub === '(5)' && !/all/i.test(sub), sub);
+    h.w.transitSearch = 'ЛАМИНАТ'; h.w.renderTransit();
+    ok('с търсене value е търсеният текст', h.w.document.getElementById('t-search').value === 'ЛАМИНАТ');
+  }
+
   section('2. чипове');
   {
     const h = env(user('admin', 'Централен офис'), DATA);

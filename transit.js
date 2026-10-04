@@ -253,7 +253,7 @@ function renderTransit(){
   /* Direction tabs — "Изпращам" (outgoing) е скрит по същата причина.
      Ако някога се появи такъв ред, ще се вижда под "Всички". */
   h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:640px;">';
-  [['all','📦📤 Всички','all'+(transitData.length?' ('+transitRows({dir:'all'}).length+')':'')],
+  [['all','📦📤 Всички',(transitData.length?'('+transitRows({dir:'all'}).length+')':'')],
    ['incoming','📦 Получавам','('+transitRows({dir:'incoming',status:'pending'}).length+' чакат)'],
    ['transfer','🔄 Трансфери','('+transitRows({dir:'transfer',status:'pending'}).length+' за изпр. / '+transitRows({dir:'transfer',status:'sent'}).length+' за получ.)']].forEach(function(t){
     var active=transitDir===t[0];
@@ -298,7 +298,7 @@ function renderTransit(){
      прерисува таблицата на всяка буква; фокусът/курсорът се пазят от
      логиката горе/долу в renderTransit(). */
   h+='<div style="margin-bottom:12px;position:relative;max-width:340px;">';
-  h+='<input type="text" id="t-search" placeholder="🔍 Търси по документ, SAP код, описание..." value="'+esc(transitSearch)+'" oninput="setTSearch(this.value)" style="width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:7px 32px 7px 10px;font-size:12.5px;font-family:inherit;">';
+  h+='<input type="text" id="t-search" placeholder="🔍 Търси по документ, SAP код, описание..." value="'+escVal(transitSearch)+'" oninput="setTSearch(this.value)" style="width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:7px 32px 7px 10px;font-size:12.5px;font-family:inherit;">';
   if(transitSearch){
     h+='<button onclick="setTSearch(\'\');document.getElementById(\'t-search\').value=\'\';" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:none;color:#94a3b8;cursor:pointer;font-size:14px;padding:2px 6px;">✕</button>';
   }
