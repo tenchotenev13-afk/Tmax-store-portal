@@ -5,6 +5,27 @@
 var histData   = { transport:[], client:[], kasa:[], storno:[] };
 var histFilter = { from:'', to:'', store:'', type:'all' };
 var histStores = [];
+/* Подтабове: 'daily' = „Дневен преглед“ (по подразбиране), 'search' = „Търсене по период“.
+   Изборът се помни в localStorage (ключ temax_hist_subtab); достъпът е в try/catch —
+   блокиран или хвърлящ localStorage не бива да чупи екрана. */
+var HIST_SUBTAB_KEY = 'temax_hist_subtab';
+function histSubtabGet(){
+  try{ var v=localStorage.getItem(HIST_SUBTAB_KEY); if(v==='search'||v==='daily') return v; }catch(e){}
+  return 'daily';
+}
+function setHistSubtab(t){
+  t=(t==='search')?'search':'daily';
+  try{ localStorage.setItem(HIST_SUBTAB_KEY,t); }catch(e){}
+  var d=document.getElementById('h-sub-daily'), s=document.getElementById('h-sub-search');
+  if(d) d.style.display=(t==='daily')?'':'none';
+  if(s) s.style.display=(t==='search')?'':'none';
+  [['daily','h-st-daily'],['search','h-st-search']].forEach(function(p){
+    var b=document.getElementById(p[1]); if(!b) return;
+    var a=(t===p[0]);
+    b.style.background=a?'#2f2f2f':'#fff';
+    b.style.color=a?'#fff':'#64748b';
+  });
+}
 
 /* ─── LOAD ──────────────────────────────────────────────────── */
 function loadHistory(){
@@ -23,6 +44,7 @@ function loadHistory(){
    при вход (notifications.js), за да не се налага админ/счетоводство да търсят ръчно. */
 function goToStornoHistory(){
   showModule('history');
+  setHistSubtab('search'); /* резултатите са в подтаба „Търсене по период“ */
   var now=new Date();
   var from=new Date(now); from.setDate(from.getDate()-30);
   var fEl=document.getElementById('h-from'), tEl=document.getElementById('h-to'), typeEl=document.getElementById('h-type');
@@ -108,17 +130,24 @@ function renderHistoryShell(){
     '<div class="pg-title">📊 История & Търсене</div>'+
     '<div class="pg-sub">Преглед на всички записи по период, магазин и тип</div>'+
 
-    '<div id="daily-overview" style="margin-bottom:16px;"></div>'+
+    /* Подтабове — същият вид като в Стока на път / За връщане */
+    '<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-width:520px;">'+
+      '<button id="h-st-daily" onclick="setHistSubtab(\'daily\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#fff;color:#64748b;">📅 Дневен преглед</button>'+
+      '<button id="h-st-search" onclick="setHistSubtab(\'search\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:#fff;color:#64748b;">🔍 Търсене по период</button>'+
+    '</div>'+
+
+    '<div id="h-sub-daily"><div id="daily-overview" style="margin-bottom:16px;"></div></div>'+
+    '<div id="h-sub-search" style="display:none;">'+
     '<div class="card" style="margin-bottom:16px;">'+
       '<div class="card-title">🔍 Търсене по период</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr auto;gap:10px;align-items:flex-end;flex-wrap:wrap;">'+
-        '<div><label class="fl">От дата</label>'+
+      '<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">'+
+        '<div style="flex:1 1 160px;min-width:160px;"><label class="fl">От дата</label>'+
           '<input type="date" class="fi" id="h-from" value="'+firstDay+'"></div>'+
-        '<div><label class="fl">До дата</label>'+
+        '<div style="flex:1 1 160px;min-width:160px;"><label class="fl">До дата</label>'+
           '<input type="date" class="fi" id="h-to" value="'+lastDay+'"></div>'+
-        '<div><label class="fl">Магазин</label>'+
+        '<div style="flex:1 1 160px;min-width:160px;"><label class="fl">Магазин</label>'+
           '<select class="fi" id="h-store"><option value="">— Всички —</option></select></div>'+
-        '<div><label class="fl">Тип</label>'+
+        '<div style="flex:1 1 160px;min-width:160px;"><label class="fl">Тип</label>'+
           '<select class="fi" id="h-type">'+
             '<option value="all">Всички</option>'+
             '<option value="transport">Транспортни заявки</option>'+
@@ -126,7 +155,7 @@ function renderHistoryShell(){
             '<option value="kasa">Касови отчети</option>'+
             '<option value="storno">Сторно бележки</option>'+
           '</select></div>'+
-        '<div><label class="fl">&nbsp;</label>'+
+        '<div style="flex:0 0 auto;"><label class="fl">&nbsp;</label>'+
           '<button onclick="runHistorySearch()" class="btn btn-green" style="width:100%;margin-top:0;">Търси →</button></div>'+
       '</div>'+
     '</div>'+
@@ -137,8 +166,10 @@ function renderHistoryShell(){
         'Избери период и натисни Търси'+
       '</div>'+
     '</div>'+
+    '</div>'+ /* край на #h-sub-search */
   '</div>';
 
+  setHistSubtab(histSubtabGet());
   loadHistoryStores();
 }
 
@@ -172,7 +203,7 @@ function renderHistoryResults(){
   '</div>';
 
   /* Статистически карти */
-  html+='<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">';
+  html+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:16px;">';
   if(histData.transport.length){
     html+=metricCard('🚚 Транспортни заявки',histData.transport.length,'записа','#2563eb');
   }
@@ -197,7 +228,7 @@ function renderHistoryResults(){
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
         '<div class="card-title" style="margin:0;">🚚 Транспортни заявки ('+histData.transport.length+')</div>'+
       '</div>'+
-      '<div class="tbl-wrap"><table>'+
+      '<div class="tbl-wrap tbl-compact tbl-auto"><table>'+
       '<thead><tr><th>Дата</th><th>Магазин</th><th>Клиент</th><th>Продукт</th><th>Адрес</th><th>Доставка</th><th>Статус</th></tr></thead>'+
       '<tbody>'+
       histData.transport.map(function(o){
@@ -220,7 +251,7 @@ function renderHistoryResults(){
   if(histData.client.length){
     html+='<div class="card" style="margin-bottom:14px;">'+
       '<div class="card-title">📋 Клиентски заявки ('+histData.client.length+')</div>'+
-      '<div class="tbl-wrap"><table>'+
+      '<div class="tbl-wrap tbl-compact tbl-auto"><table>'+
       '<thead><tr><th>№</th><th>Дата</th><th>Магазин</th><th>Клиент</th><th>Продукт</th><th>Доставка</th><th>Статус</th></tr></thead>'+
       '<tbody>'+
       histData.client.map(function(o){
@@ -256,6 +287,7 @@ function renderHistoryResults(){
       byDate[d].tInkaso+=r._inkaso||0;
     });
     var dates=Object.keys(byDate).sort().reverse();
+    var kasaDetailShown={};
     var allRaz=histData.kasa.reduce(function(s,r){return s+(parseFloat(r.razlika)||0);},0);
     var razCol=allRaz<0?'#dc2626':allRaz>0?'#d97706':'#16a34a';
 
@@ -264,10 +296,14 @@ function renderHistoryResults(){
         '<div class="card-title" style="margin:0;">💰 Касови отчети ('+histData.kasa.length+' ПОС отчета)</div>'+
         '<div style="font-size:13px;font-weight:700;color:'+razCol+';">Обща разлика: '+(allRaz<0?'–':'')+Math.abs(allRaz).toFixed(2)+' EUR</div>'+
       '</div>'+
-      '<div class="tbl-wrap"><table>'+
-      '<thead><tr><th>Дата</th><th>Магазин</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th></tr></thead>'+
+      '<div class="tbl-wrap tbl-compact tbl-auto"><table>'+
+      '<thead><tr><th>Дата</th><th>Магазин</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th><th>Детайли</th></tr></thead>'+
       '<tbody>'+
       histData.kasa.map(function(r){
+        /* „Детайли →“ отваря целия ден на магазина (openKasaDetail(магазин, дата)) — достатъчно е
+           веднъж на магазин+ден, на останалите ПОС редове клетката е празна. */
+        var detKey=(r.store_name||'')+'|'+(r.date||'');
+        var firstOfDay=!kasaDetailShown[detKey]; kasaDetailShown[detKey]=true;
         var inkaso=calcInkaso(r);
         var raz=parseFloat(r.razlika)||0;
         var razC=raz<0?'#dc2626':raz>0?'#d97706':'#16a34a';
@@ -281,7 +317,7 @@ function renderHistoryResults(){
           '<td style="font-family:monospace;">'+fmtMoney(r.counted_cash)+'</td>'+
           '<td style="font-family:monospace;font-weight:700;color:'+razC+';">'+(raz<0?'–':'')+Math.abs(raz).toFixed(2)+' EUR</td>'+
           '<td>'+(r.status==='confirmed'?'✅':r.status==='returned'?'↩':'✏️')+'</td>'+
-        '<td><button onclick="openKasaDetail(\''+r.store_name+'\',' + '\''+r.date+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 9px;font-size:11px;cursor:pointer;">Детайли →</button></td>'+
+        '<td>'+(firstOfDay?'<button onclick="openKasaDetail(\''+r.store_name+'\',' + '\''+r.date+'\')" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 9px;font-size:11px;cursor:pointer;">Детайли →</button>':'')+'</td>'+
         '</tr>';
       }).join('')+
       '</tbody></table></div></div>';
@@ -296,7 +332,7 @@ function renderHistoryResults(){
         '<div class="card-title" style="margin:0;">🧾 Сторно бележки ('+histData.storno.length+')</div>'+
         (flaggedTotal?'<div style="font-size:13px;font-weight:700;color:#dc2626;">⚠️ '+flaggedTotal+' с по-малка сума на новата покупка</div>':'')+
       '</div>'+
-      '<div class="tbl-wrap"><table>'+
+      '<div class="tbl-wrap tbl-compact tbl-auto"><table>'+
       '<thead><tr>'+
         '<th style="width:7%;white-space:nowrap;">Дата сторно</th>'+
         '<th style="width:7%;white-space:nowrap;">Дата бон</th>'+

@@ -232,15 +232,15 @@ function loadDailyOverview(dateOverride) {
     var razC = totalRaz===0 ? '#16a34a' : totalRaz<0 ? '#dc2626' : '#d97706';
 
     var html = '<div style="font-size:16px;font-weight:600;margin-bottom:14px;">📅 Дневен преглед — '+fmtDate(todayStr)+'</div>'
-      + '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px;">'
+      + '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:16px;">'
       + mkCard('🏪 Подали отчет', Object.keys(withRep).length+' / '+names.length, 'магазина', '#2563eb')
       + mkCard('📤 За проверка', readyCount, 'изпратили', '#16a34a')
       + mkCard('📎 Документи', docs.length, 'прикачени', '#d97706')
       + mkCard('💰 Обща разлика', (totalRaz<0?'–':'')+Math.abs(totalRaz).toFixed(2), 'EUR', razC)
       + '</div>'
       + '<div class="card"><div class="card-title">Статус по магазини</div>'
-      + '<div class="tbl-wrap"><table>'
-      + '<thead><tr><th>Магазин</th><th style="text-align:center;">ПОС</th><th style="text-align:center;">Равнение</th><th style="text-align:center;">Документи</th><th style="text-align:right;">Разлика EUR</th><th style="text-align:center;">Статус</th></tr></thead><tbody>';
+      + '<div class="tbl-wrap tbl-compact tbl-auto"><table>'
+      + '<thead><tr><th>Магазин</th><th style="text-align:center;">ПОС</th><th style="text-align:center;">Равнение</th><th style="text-align:center;">Документи</th><th style="text-align:right;">Разлика EUR</th><th style="text-align:center;">Статус</th><th>Детайли</th></tr></thead><tbody>';
 
     names.forEach(function(name) {
       var sr = reps.filter(function(r) { return r.store_name===name; });

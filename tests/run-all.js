@@ -131,6 +131,7 @@ const TESTS = [
   'sd-badge-hidden-tab.test.js',
   'delete-three-states.test.js',
   'storno-embed-no-in-list.test.js',
+  'history-subtabs.test.js',
   'storno-no-age-limit.test.js',
   'linked-module-buttons.test.js',
   'recurring-edit-department.test.js',
