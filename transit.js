@@ -165,10 +165,6 @@ function renderTransit(){
   var canAdd=canAddTransit();
 
   /* Приложи direction филтър — 3 отделни посоки, не се препокриват */
-  var viewData=transitData;
-  if(transitDir==='incoming') viewData=transitData.filter(function(r){return r.direction==='incoming';});
-  else if(transitDir==='transfer') viewData=transitData.filter(function(r){return r.direction==='transfer';});
-  else if(transitDir==='outgoing') viewData=transitData.filter(function(r){return r.direction==='outgoing';});
 
   /* Редовете при зададени филтри (посока → статус → магазин → месец → търсене).
      over={dir,status} подменя само това измерение; останалите филтри остават.
@@ -233,14 +229,6 @@ function renderTransit(){
   }
   var list=transitRows();
 
-  /* Статистика */
-  var counts={pending:0,received:0,rejected:0,sent:0,incCount:0,outCount:0,transferCount:0};
-  viewData.forEach(function(r){
-    if(counts[r.status]!==undefined)counts[r.status]++;
-    if(r.direction==='outgoing') counts.outCount++;
-    else if(r.direction==='transfer') counts.transferCount++;
-    else counts.incCount++;
-  });
   /* Магазини за dropdown */
   var stores={};
   transitData.forEach(function(r){if(r.store_name)stores[r.store_name]=1;});
@@ -262,23 +250,6 @@ function renderTransit(){
   }
   h+='</div></div>';
 
-  /* Stat карти */
-  /* OUTGOING картата е скрита. SAP подава и "Завод" с изпращащ-тип код
-     (напр. 6512 Търговище), но parseTransitRows дава 'outgoing' САМО когато
-     доставчикът НЕ е реален магазин (склад/сервиз/администрация/непознат);
-     при реален магазин е 'transfer'. Всичките 51 'outgoing' реда в базата
-     към 13.09.2026 са с реален магазин доставчик — тоест грешно записани
-     трансфери отпреди поправката, не истински outgoing. Логиката (tMarkStatus)
-     остава непокътната за редовете, които реално излизат outgoing. */
-  h+='<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:14px;">';
-  h+=tStatCard('📦 Incoming',counts.incCount,'#2563eb');
-  h+=tStatCard('🔄 Трансфери',counts.transferCount,'#c2410c');
-  h+=tStatCard('⏳ Не доставени',counts.pending,'#d97706');
-  h+=tStatCard('📤 Изпратени',counts.sent,'#7c3aed');
-  h+=tStatCard('✅ Прието',counts.received,'#16a34a');
-  h+=tStatCard('✕ Неприето',counts.rejected,'#dc2626');
-  h+='</div>';
-
   /* Direction tabs — "Изпращам" (outgoing) е скрит по същата причина.
      Ако някога се появи такъв ред, ще се вижда под "Всички". */
   h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:640px;">';
@@ -290,12 +261,15 @@ function renderTransit(){
   });
   h+='</div>';
 
-  /* Статус + магазин + дата филтри */
-  h+='<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;align-items:center;">';
-  [['all','Всички'],['pending','⏳ Не доставени'],['received','✅ Прието'],['sent','📤 Изпратена'],['rejected','✕ Неприето']].forEach(function(f){
+  /* Статус (чипове с брой) + магазин + месец — на един ред. Общият вид е .chips (index.html);
+     атрибутът е data-tt-f (НЕ data-f — сблъсък с Разлики). Числото = редовете след клик на чипа. */
+  h+='<div id="t-filters" class="filter-bar chips" style="margin:0 0 12px;">';
+  h+='<span class="chips-label">Покажи:</span>';
+  [['pending','⏳ Не доставени',''],['sent','📤 Изпратена',''],['|'],['received','✅ Прието',' chip-hist'],['rejected','✕ Неприето',' chip-hist'],['all','Всички',' chip-hist']].forEach(function(f){
+    if(f[0]==='|'){h+='<span class="chips-sep"></span>';return;}
     var a=transitFilter===f[0];
     var cnt=transitRows({status:f[0]}).length;
-    h+='<button onclick="transitFilter=\''+f[0]+'\';renderTransit()" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+' ('+cnt+')</button>';
+    h+='<button class="filter-btn'+f[2]+(a?' active':'')+'" data-tt-f="'+f[0]+'" onclick="transitFilter=\''+f[0]+'\';renderTransit()">'+f[1]+' <span class="chips-n">'+cnt+'</span></button>';
   });
   /* Магазин dropdown - получатели + доставчици */
   var allStores={};
@@ -337,17 +311,11 @@ function renderTransit(){
   if(!list.length){
     h+='<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📦</div><div style="margin-top:8px;">Няма записи.</div></div>';
   }else{
-    h+='<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
-    h+='<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1000px;table-layout:fixed;">';
-    h+='<colgroup>'+
-      '<col style="width:7%"><col style="width:7%"><col style="width:8%"><col style="width:7%">'+
-      '<col style="width:6%"><col style="width:25%"><col style="width:5%"><col style="width:5%">'+
-      '<col style="width:6%"><col style="width:10%"><col style="width:14%">'+
-    '</colgroup>';
+    h+='<div class="tbl-wrap tbl-compact tbl-tt-compact">';
+    h+='<table style="border-collapse:collapse;font-size:12px;">';
     h+='<thead><tr style="background:#f8fafc;">';
-    ['Посока','Магазин','Доставчик','Документ','Дата','Описание','Кол./МЕ','Остатък','Трансфер','Статус',''].forEach(function(c,i){
-      var last=i===10;
-      h+='<th style="text-align:left;padding:8px 8px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'+(last?'position:sticky;right:0;background:#f8fafc;box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);':'')+'">'+c+'</th>';
+    ['Документ · Дата','От → Към','Описание','Количество','Статус','Действия'].forEach(function(c){
+      h+='<th style="text-align:left;padding:8px 8px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+c+'</th>';
     });
     h+='</tr></thead><tbody>';
 
@@ -358,30 +326,36 @@ function renderTransit(){
       var isOver=r.status==='pending'&&r.doc_date&&(new Date()-new Date(r.doc_date))>30*86400000;
       var dirBg=isOut?'rgba(124,58,237,.04)':(isTransfer?'rgba(194,65,12,.04)':'');
       h+='<tr style="border-bottom:1px solid #f1f5f9;'+(isOver?'background:#fffbeb;':dirBg)+'">';
-      /* Посока */
-      h+='<td style="padding:6px 8px;overflow:hidden;">';
-      h+=isOut?
-        '<span style="background:#f5f3ff;color:#7c3aed;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">📤 Изпращам</span>':
-        isTransfer?
-        '<span style="background:#fff7ed;color:#c2410c;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">🔄 Трансфер</span>':
-        '<span style="background:#eff6ff;color:#1e40af;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">📦 Получавам</span>';
-      h+='</td>';
-      h+=
-        '<td style="padding:7px 8px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.store_name||'')+'">'+esc(r.store_name||'')+'</td>'+
-        '<td style="padding:7px 8px;font-size:11px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.supplier||'')+'">'+
-        esc((r.supplier||'').replace(/^\d+\s+\d*\s*/,'').replace(/^\d+\s*/,'').replace(/^ТМ\s+/,''))+'</td>'+
-        '<td style="padding:7px 8px;font-family:DM Mono,monospace;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(r.purchase_doc||'')+'<div style="font-size:10px;color:#94a3b8;">Поз. '+(r.position||'—')+'</div></td>'+
-        '<td style="padding:7px 8px;font-family:DM Mono,monospace;font-size:11px;overflow:hidden;white-space:nowrap;">'+fmtDate(r.doc_date)+'</td>'+
-        '<td style="padding:7px 8px;overflow:hidden;"><div style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.material_name||'')+'">'+esc(r.material_name||'')+'</div><div style="font-size:10px;color:#94a3b8;">'+esc(r.material_code||'')+'</div></td>'+
-        '<td style="padding:7px 8px;text-align:right;overflow:hidden;white-space:nowrap;">'+(r.ordered_qty||'')+'<span style="font-size:10px;color:#94a3b8;margin-left:2px;">'+esc(r.unit||'')+'</span></td>'+
-        '<td style="padding:7px 8px;text-align:right;font-weight:600;overflow:hidden;">'+(r.remaining_qty||'')+'</td>'+
-        '<td style="padding:7px 8px;font-family:DM Mono,monospace;font-size:11px;overflow:hidden;white-space:nowrap;">'+fmtDate(r.transfer_date)+'</td>'+
-        '<td style="padding:7px 8px;overflow:hidden;">'+
+      /* 1. Документ · Дата + бадж за посока */
+      h+='<td style="padding:7px 8px;">'+
+        '<div style="font-family:DM Mono,monospace;font-size:11px;word-break:break-word;">'+esc(r.purchase_doc||'')+'</div>'+
+        '<div style="font-size:10px;color:#94a3b8;">Поз. '+(r.position||'—')+'</div>'+
+        '<div style="font-family:DM Mono,monospace;font-size:11px;color:#94a3b8;margin-top:2px;">'+fmtDate(r.doc_date)+'</div>'+
+        '<div style="margin-top:3px;">'+
+        (isOut?
+          '<span style="background:#f5f3ff;color:#7c3aed;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">📤 Изпращам</span>':
+          isTransfer?
+          '<span style="background:#fff7ed;color:#c2410c;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">🔄 Трансфер</span>':
+          '<span style="background:#eff6ff;color:#1e40af;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">📦 Получавам</span>')+
+        '</div></td>';
+      /* 2. От → Към: доставчикът (почистен както преди) → магазинът */
+      h+='<td style="padding:7px 8px;" title="'+esc(r.supplier||'')+'">'+
+        '<span style="font-size:11px;color:#64748b;">'+esc((r.supplier||'').replace(/^\d+\s+\d*\s*/,'').replace(/^\d+\s*/,'').replace(/^ТМ\s+/,''))+'</span>'+
+        ' → <b style="font-weight:600;">'+esc(r.store_name||'')+'</b></td>';
+      /* 3. Описание (реже се с …) + код */
+      h+='<td style="padding:7px 8px;overflow:hidden;"><div style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.material_name||'')+'">'+esc(r.material_name||'')+'</div><div style="font-size:10px;color:#94a3b8;">'+esc(r.material_code||'')+'</div></td>';
+      /* 4. Количество + остатък + дата на трансфер */
+      h+='<td style="padding:7px 8px;white-space:nowrap;">'+(r.ordered_qty||'')+'<span style="font-size:10px;color:#94a3b8;margin-left:2px;">'+esc(r.unit||'')+'</span>'+
+        (r.remaining_qty?'<div style="font-size:10px;color:#64748b;font-weight:600;">остатък '+r.remaining_qty+'</div>':'')+
+        (r.transfer_date?'<div style="font-family:DM Mono,monospace;font-size:10px;color:#94a3b8;">'+fmtDate(r.transfer_date)+'</div>':'')+'</td>';
+      /* 5. Статус */
+      h+='<td style="padding:7px 8px;">'+
           '<span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">'+st.label+'</span>'+
           tReviewedBadgeHtml(r)+
           (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.comment)+'">'+esc(r.comment)+'</div>':'')+
-        '</td>'+
-        '<td style="padding:6px 6px;position:sticky;right:0;background:'+((isOver?'#fffbeb':(isOut?'#faf9ff':(isTransfer?'#fffaf5':'#fff'))))+';box-shadow:-4px 0 6px -4px rgba(0,0,0,.15);">';
+        '</td>';
+      /* 6. Действия — същите бутони и условия като преди */
+      h+='<td style="padding:6px 6px;">';
       h+='<div style="display:flex;flex-wrap:wrap;gap:3px;">';
       if(canEdit&&isTransfer){
         /* Двустъпков поток: pending→sent само подателят, sent→received само получателят */
@@ -451,13 +425,6 @@ function renderTransit(){
       if(_searchCursorPos!=null)_si.setSelectionRange(_searchCursorPos,_searchCursorPos);
     }
   }
-}
-
-function tStatCard(label,val,color){
-  return '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid '+color+';">'+
-    '<div style="font-size:10px;color:#64748b;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">'+label+'</div>'+
-    '<div style="font-size:22px;font-weight:700;color:'+color+';font-family:DM Mono,monospace;">'+val+'</div>'+
-  '</div>';
 }
 
 function setTFilter(f){ transitFilter=f; renderTransit(); }

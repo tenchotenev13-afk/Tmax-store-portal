@@ -89,6 +89,7 @@ const TESTS = [
   'transit-store-scope.test.js',
   'transit-warehouse-scope.test.js',
   'transit-counts-follow-filters.test.js',
+  'transit-compact.test.js',
   'transit-direction-transfer.test.js',
   'transit-export-labels.test.js',
   'loading-lists-print.test.js',

@@ -94,7 +94,8 @@ function ui(h) {
   });
   return { tabs, stat };
 }
-const num = (el) => parseInt((el.textContent.match(/\((\d+)\)\s*$/) || [])[1], 10);
+/* Бройката е в <span class="chips-n"> (общите чипове), не в скоби след текста. */
+const num = (el) => parseInt((el.querySelector('.chips-n') || { textContent: '' }).textContent, 10);
 const tabNums = (b) => (b.querySelector('div').textContent.match(/\d+/g) || []).map(Number);
 const trs = (h) => h.w.document.querySelectorAll('#mod-transit tbody tr').length;
 function cards(h) {
@@ -159,11 +160,8 @@ const SKLAD = { email: 'ls@temax.bg', display_name: TG, role: 'logistics', store
     ok('Трансфери = transfer pending / sent',
       t[0] === cnt(r => r.direction === 'transfer' && r.status === 'pending') &&
       t[1] === cnt(r => r.direction === 'transfer' && r.status === 'sent'), t.join('/'));
-    const c = cards(h);
-    ok('картите: Incoming / Трансфери / Не доставени по целия модул',
-      c.indexOf('Incoming' + cnt(r => r.direction !== 'outgoing' && r.direction !== 'transfer')) >= 0 &&
-      c.indexOf('Трансфери' + cnt(r => r.direction === 'transfer')) >= 0 &&
-      c.indexOf('Не доставени' + cnt(r => r.status === 'pending')) >= 0, c);
+    /* Шестте stat карти са махнати — числата им са в табовете за посока и в чиповете. */
+    ok('няма stat карти (repeat(6,1fr))', cards(h) === null, cards(h));
     checkAll(h, 'без филтри', {});
   }
 
@@ -173,7 +171,7 @@ const SKLAD = { email: 'ls@temax.bg', display_name: TG, role: 'logistics', store
     const h = env(ADMIN, DATA);
     h.w.setTStore(store);
     checkAll(h, 'магазин ' + store, { store });
-    if (store === 'Кърджали') ok('г) картите при избран магазин = същите като без магазин', cards(h) === cardsNoStore, cards(h) + ' | ' + cardsNoStore);
+    if (store === 'Кърджали') ok('г) и при избран магазин няма stat карти', cards(h) === null && cardsNoStore === null, cards(h) + ' | ' + cardsNoStore);
   });
 
   section('в) Магазин + месец + търсене');
