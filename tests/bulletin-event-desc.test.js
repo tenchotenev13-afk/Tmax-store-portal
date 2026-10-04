@@ -22,7 +22,10 @@ function freezeAt(w, ms) {
 }
 const KEY = 'fri';
 const LONG = 'https://example.com/' + 'a'.repeat(300);
+/* Реален ред от bulletins С33/2026 (четвъртък): 314 знака, с & и %2C, с краен интервал. */
+const REAL_URL = 'https://onedrive.live.com/:x:/g/personal/628A7CB85BC75DE8/IQDoXcdbuHyKIIBirl0AAAAAAclAlO_S3H4Rf26gWWGcrJc?resid=628A7CB85BC75DE8!23982&ithint=file%2Cxlsx&e=DrPPac&migratedtospo=true&redeem=aHR0cHM6Ly8xZHJ2Lm1zL3gvYy82MjhhN2NiODViYzc1ZGU4L0lRRG9YY2RidUh5S0lJQmlybDBBQUFBQUFjbEFsT19TM0g0UmYyNmdXV0djckpjP2U9RHJQUGFj';
 const EVENTS = [
+  { title: 'Попълване на сторната в онлайн таблица :', desc: REAL_URL + ' ', dept: 'general', attachments: [] },
   { title: 'СЪБ-ОТДЕЛ', desc: 'Срок до петък\nвторият ред', dept: 'trade', attachments: [] },
   { title: 'СЪБ-БЕЗ', dept: 'trade', attachments: [] },
   { title: 'СЪБ-ПРАЗНО', desc: '   ', dept: 'warehouse', attachments: [] },
@@ -84,6 +87,16 @@ const descOf = blk => blk ? Array.from(blk.querySelectorAll('.bul-desc')) : [];
   ok('XSS: няма <b> от свободния текст', xd && !xd.querySelector('b'));
   ok('XSS: текстът е видим буквално, с кавички и &', xd && xd.textContent.indexOf('<script>window.__x=1</script>') >= 0 && xd.textContent.indexOf('"кавички"') >= 0 && xd.textContent.indexOf("'апостроф'") >= 0 && xd.textContent.indexOf('& <b>b</b>') >= 0, xd && xd.textContent);
 
+  section('Реален пример С33: дълъг onedrive линк с & и %2C');
+  {
+    const rb = evBlock(root, 'Попълване на сторната в онлайн таблица :');
+    const ra = rb && rb.querySelector('.bul-desc a');
+    ok('колона: линкът е цял в href (без краен интервал)', !!ra && ra.getAttribute('href') === REAL_URL, ra && ra.getAttribute('href'));
+    ok('колона: видимият текст е целият адрес', !!ra && ra.textContent === REAL_URL);
+    ok('колона: ровно един <a>, без счупена разметка', rb && rb.querySelectorAll('.bul-desc a').length === 1 && descOf(rb).length === 1);
+    ok('колона: .bul-desc чупи дълги думи (CSS в index.html)', /.bul-desc{[^}]*overflow-wrap:break-word/.test(require('fs').readFileSync('index.html', 'utf8')));
+  }
+
   section('Печат на седмичния календар (window.open → document.write)');
   const P = env();
   let printed = '';
@@ -97,6 +110,8 @@ const descOf = blk => blk ? Array.from(blk.querySelectorAll('.bul-desc')) : [];
   ok('печат: описанието е под заглавието',
     new RegExp('СЪБ-ОТДЕЛ</span></div><div[^>]*white-space:pre-line[^>]*>Срок до петък').test(html), at('СЪБ-ОТДЕЛ'));
   ok('печат: адресът се чете в текста', html.indexOf('https://example.com/pravila') >= 0);
+  ok('печат: реалният адрес е цял, & като &amp; в HTML, а в текста — буквално', html.indexOf(REAL_URL.replace(/&/g, '&amp;')) >= 0 && box.textContent.indexOf(REAL_URL) >= 0);
+  ok('печат: дългият адрес чупи реда (overflow-wrap + word-break)', /overflow-wrap:anywhere;word-break:break-all/.test(printed));
   ok('печат: дългият адрес е цял', html.indexOf(LONG) >= 0);
   ok('печат: без desc няма празен ред след заглавието',
     html.indexOf('СЪБ-БЕЗ</span></div><div class="cal-entry"')>=0 || html.indexOf('СЪБ-БЕЗ</span></div></div>')>=0, at('СЪБ-БЕЗ'));

@@ -3337,7 +3337,7 @@ function calEventDescHtml(e){
    (етикет + адрес), после esc(). */
 function calEventDescPrintHtml(e){
   if(!e||!String(e.desc||'').trim()) return '';
-  return '<div style="white-space:pre-line;font-size:10.5pt;color:#475569;margin:0 0 1mm 7pt;">'+esc(linkifyPlain(e.desc))+'</div>';
+  return '<div style="white-space:pre-line;overflow-wrap:anywhere;word-break:break-all;font-size:10.5pt;color:#475569;margin:0 0 1mm 7pt;">'+esc(linkifyPlain(e.desc))+'</div>';
 }
 function calUploadAttachment(input){
   var file=input.files[0]; if(!file)return;
