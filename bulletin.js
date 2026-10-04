@@ -916,7 +916,7 @@ function renderPromotionsSection(){
   h+='</div>';
   if(canEdit() && expiringCount>0){
     h+='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:7px;padding:8px 12px;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">';
-    h+='<span style="font-size:12px;color:#92400e;">⚠️ '+expiringCount+' промоци'+(expiringCount===1?'я изтича':'и изтичат')+' до 3 дни.</span>';
+    h+='<span style="font-size:12px;color:#92400e;">⚠️ '+expiringCount+' промоци'+(expiringCount===1?'я изтича':'и изтичат')+' до 5 дни.</span>';
     h+='<button onclick="sendPromoExpiringNotification()" style="border:none;background:#d97706;color:#fff;border-radius:6px;padding:4px 12px;font-size:11px;font-weight:600;cursor:pointer;">🔔 Изпрати нотификация</button>';
     h+='</div>';
   }
@@ -1070,7 +1070,7 @@ function composePromoExpiringMessage(){
   if(!expiring.length)return null;
   var titles=expiring.map(function(p){return p.title;}).join(', ');
   var title='⚠️ Изтичащи промоции';
-  var msg=expiring.length===1 ? titles+' изтича до 3 дни.' : expiring.length+' промоции изтичат до 3 дни: '+titles;
+  var msg=expiring.length===1 ? titles+' изтича до 5 дни.' : expiring.length+' промоции изтичат до 5 дни: '+titles;
   return {title:title,msg:msg,count:expiring.length};
 }
 function sendPromoExpiringNotification(){
@@ -3134,6 +3134,7 @@ function bulUploadBlockFile(input){
 }
 function bulRemoveBlockFile(col,id){
   var b=(curBul.content.columns[col]||[]).find(function(x){return x.id===id;});
+  if(b && !confirm('Изтрий файла „'+(b.file_name||'без име')+'“?'))return;
   if(b){b.file_url=''; b.file_name=''; schedSave(); renderBulletin();}
 }
 
@@ -3254,11 +3255,13 @@ function bulSetWidth(btn){
 function bulClearImg(btn){
   var col=btn.getAttribute('data-col'), id=btn.getAttribute('data-id');
   var b=(curBul.content.columns[col]||[]).find(function(x){return x.id===id;});
+  if(b && !confirm('Изтрий снимката'+(b.filename?' „'+b.filename+'“':'')+'?'))return;
   if(b){b.url=''; schedSave(); renderBulletin();}
 }
 function bulClearFile(btn){
   var col=btn.getAttribute('data-col'), id=btn.getAttribute('data-id');
   var b=(curBul.content.columns[col]||[]).find(function(x){return x.id===id;});
+  if(b && !confirm('Изтрий файла „'+(b.filename||'без име')+'“?'))return;
   if(b){b.url='';b.filename=''; schedSave(); renderBulletin();}
 }
 function bulDelBlock(btn){
@@ -3290,6 +3293,8 @@ function bulDelTask(btn){
 }
 function bulRmCal(btn){
   var key=btn.getAttribute('data-key'), idx=parseInt(btn.getAttribute('data-idx'));
+  var ev=curBul.content.calendar[key][idx];
+  if(!confirm('Изтрий събитието „'+((ev&&ev.title)||'без заглавие')+'“?'))return;
   curBul.content.calendar[key].splice(idx,1); schedSave(); renderBulletin();
 }
 function bulOpenCal(btn){openCalModal(btn.getAttribute('data-key'));}
@@ -3351,6 +3356,7 @@ function calRemoveAttachment(btn){
   var entry=curBul.content.calendar[key][idx];
   if(!entry)return;
   var atts=normAttachments(entry.attachments).slice();
+  if(!confirm('Изтрий файла „'+bulAttName(atts[aidx])+'“?'))return;
   atts.splice(aidx,1);
   entry.attachments=atts;
   schedSave(); renderBulletin();
@@ -4151,6 +4157,7 @@ function recurringRemoveAttachment(rtid,idx){
   var t=recurringTasks.find(function(x){return String(x.id)===String(rtid);});
   if(!t)return;
   var atts=normAttachments(t.attachments).slice();
+  if(!confirm('Изтрий файла „'+bulAttName(atts[idx])+'“?'))return;
   atts.splice(idx,1);
   sbPatch('recurring_tasks','id=eq.'+rtid,{attachments:atts}).then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
@@ -4159,6 +4166,8 @@ function recurringRemoveAttachment(rtid,idx){
 }
 
 /* ═══════ ПРИКАЧЕНИ ФАЙЛОВЕ КЪМ ЗАДАЧИ ══════════════════════ */
+/* Име на прикачен файл за въпроса „Изтрий файла …?“ */
+function bulAttName(a){ return (a&&(a.filename||a.name))||'без име'; }
 function normAttachments(atts){
   if(typeof atts==='string'){try{atts=JSON.parse(atts);}catch(e){atts=[];}}
   return Array.isArray(atts)?atts:[];
@@ -4262,6 +4271,7 @@ function taskRemoveAttachment(tid,idx){
   var t=bulTasks.find(function(x){return String(x.id)===String(tid);});
   if(!t)return;
   var atts=normAttachments(t.attachments).slice();
+  if(!confirm('Изтрий файла „'+bulAttName(atts[idx])+'“?'))return;
   atts.splice(idx,1);
   sbPatch('bulletin_tasks','id=eq.'+tid,{attachments:atts}).then(function(res){
     if(!res.ok){toast('Грешка','#dc2626');return;}
@@ -7169,6 +7179,7 @@ function subtaskRemoveAttachment(stId,idx,taskId){
   sbGet('task_subtasks','id=eq.'+stId).then(function(rows){
     var cur=Array.isArray(rows)&&rows[0]?rows[0]:{};
     var atts=normAttachments(cur.attachments).slice();
+    if(!confirm('Изтрий файла „'+bulAttName(atts[idx])+'“?'))return;
     atts.splice(idx,1);
     sbPatch('task_subtasks','id=eq.'+stId,{attachments:atts}).then(function(res){
       if(!res.ok){toast('Грешка','#dc2626');return;}

@@ -292,6 +292,7 @@ const TESTS = [
   'postpone-date-report.test.js',
   'postpone-date-notify.test.js',
   'bulletin-empty-recurring.test.js',
+  'bulletin-delete-confirm.test.js',
   'transit-auto-complete.test.js',
   'admin-reports.test.js',
   'admin-role-view.test.js',
