@@ -330,10 +330,42 @@ function llGroupDocs(rows){
   return out;
 }
 function llIsHeaded(it){ return llIsNumbered(it.kind) && it.pallet_no != null; }
-function llGroupHeading(rows){
+function llGroupHeading(rows, share){
   var f = rows[0], docs = llGroupDocs(rows);
   return llCap(llKindLabel(f)) + ' · ' + (f.store_name || '—') +
-    (docs.length ? ' · изходящи: ' + docs.join(', ') : '');
+    (docs.length ? ' · изходящи: ' + docs.map(function(d){
+      return d + (share ? share(f.store_name || '', d, f.kind, f.pallet_no) : '');
+    }).join(', ') : '');
+}
+/* Един изходящ № на няколко палета на един обект: „(1/2)", „(2/2)" по реда на
+   палетите (вид, №). items е ЦЕЛИЯТ набор, в който се търси — прегледът на
+   склада му подава всички редове, картата на обекта — неговите. */
+function llDocShare(items){
+  var groups = llPalletGroups(llLiveRows(items || [])).filter(function(g){ return llIsHeaded(g.rows[0]); });
+  return function(store, doc, kind, no){
+    var same = groups.filter(function(g){
+      return (g.rows[0].store_name || '') === store && llGroupDocs(g.rows).indexOf(doc) >= 0;
+    }).sort(function(a, b){
+      return (llKindRank(a.kind) - llKindRank(b.kind)) || (Number(a.pallet_no) - Number(b.pallet_no));
+    });
+    if(same.length < 2) return '';
+    for(var i = 0; i < same.length; i++){
+      if(same[i].kind === kind && Number(same[i].pallet_no) === Number(no)) return ' (' + (i + 1) + '/' + same.length + ')';
+    }
+    return '';
+  };
+}
+/* Подчертаният (deep link) палет в картата на обекта. */
+function llUnitKeyOf(g){ return llTagKey(g.kind, g.pallet_no, g.store_name); }
+function llHlAttrs(listId, g){
+  var k = llUnitKeyOf(g);
+  return ' data-ll-ukey="' + escAttr(k) + '"' +
+    ((llHighlight && String(llHighlight.listId) === String(listId) && llHighlight.key === k) ? ' data-ll-hl="1"' : '');
+}
+function llHeadBg(listId, g){
+  var k = llUnitKeyOf(g);
+  return (llHighlight && String(llHighlight.listId) === String(listId) && llHighlight.key === k)
+    ? 'background:#fef9c3;outline:2px solid #eab308;' : 'background:#f8fafc;';
 }
 /* Плътно преномериране 1..K В РАМКИТЕ НА ОБЕКТА, при запис. „Палет 2 от 5" е
    обещание към конкретния обект, не към целия курс. Въвел ли е складът 1, 2
@@ -521,7 +553,7 @@ function llLoadStoreSide(){
            приемането", има какво да се прави в него — свиването го скрива
            заедно с единствения бутон, който го придвижва. Дотук условието
            беше „всички received" и точно този случай не съществуваше. */
-        llLoadPhotos(keys).then(function(){ renderLoadingLists(); });
+        llLoadPhotos(keys).then(function(){ renderLoadingLists(); llDeepLinkApply(); });
         llStoreLists.forEach(function(l){
           if(llCollapsed[l.id] !== undefined) return;
           if(l.status !== 'done' && l.status !== 'partial') return;
@@ -1087,6 +1119,10 @@ function llStoreCardHtml(l){
         llStatusBadge(l.status)+'</div>'+
       '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
         (open && canAny ? '<button data-id="'+l.id+'" onclick="llMarkAllReceived(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">✅ Всичко получено</button>' : '')+
+        /* Основният поток на приемането — НЕ е зад loading_scan. */
+        (open && l.status === 'sent'
+          ? '<button data-id="'+l.id+'" onclick="llPalletScanOpen(this.dataset.id)" title="Сканирай QR кода на етикета на всеки палет" style="border:none;background:#0f172a;color:#fff;border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;cursor:pointer;">📷 Сканирай палети</button>'
+          : '')+
         /* Приемането се приключва ЯВНО от обекта. Дотук листът се затваряше
            сам, чак когато всеки ред на всеки обект е получен — с липси този
            момент просто не настъпваше и листът висеше „изпратен" завинаги. */
@@ -1103,6 +1139,8 @@ function llStoreCardHtml(l){
   if(l.comment) h += '<div style="font-size:11.5px;color:#374151;background:#f8fafc;border-radius:6px;padding:5px 8px;margin-top:8px;">💬 '+esc(l.comment)+'</div>';
   if(!open) return h + '</div>';
 
+  var palStatus = llPalletStatusText(l.id);
+  if(palStatus) h += '<div data-ll-pal-status="1" style="margin-top:10px;font-size:12.5px;font-weight:600;color:#334155;">'+esc(palStatus)+'</div>';
   h += '<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:760px;"><thead><tr style="background:#f8fafc;">';
   ['Товарна единица','Стокова №','Коментар склад','Моят коментар','Получено'].forEach(function(c){
     h += '<th style="text-align:left;padding:6px 9px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
@@ -1111,6 +1149,7 @@ function llStoreCardHtml(l){
   /* Палетът е една физическа единица с няколко документа — показва се като
      заглавен ред с бутон „целия палет", а документите под него. Иначе човекът
      на рампата вижда четири отделни „палет 2 от 5" и не разбира, че е един. */
+  var share = llDocShare(items);
   llPalletGroups(items).forEach(function(g){
     var multi = g.rows.length > 1;
     /* Заглавен ред при ВСЕКИ номериран палет („палет 2 от 5"), не само при
@@ -1119,17 +1158,17 @@ function llStoreCardHtml(l){
        при няколко документа: при един те са същите като на реда. */
     var headed = llIsNumbered(g.kind) && g.pallet_no != null;
     if(headed && !multi){
-      h += '<tr data-pallet-group="1" data-pallet-single="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+
-        '<td colspan="5" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
-          esc(llGroupHeading(g.rows))+' · 1 документ</td></tr>';
+      h += '<tr data-pallet-group="1" data-pallet-single="1"'+llHlAttrs(l.id, g)+' style="'+llHeadBg(l.id, g)+'border-bottom:1px solid #e2e8f0;">'+
+        '<td colspan="5" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(g.store_name)+'">'+
+          esc(llGroupHeading(g.rows, share))+' · 1 документ</td></tr>';
     }
     if(multi){
       var gGot  = g.rows.filter(function(r){ return r.received; }).length;
       var gMiss = g.rows.filter(function(r){ return r.missing; }).length;
       var gCan  = g.rows.some(llOpenForStore);
-      h += '<tr data-pallet-group="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+
-        '<td colspan="4" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
-          esc(llGroupHeading(g.rows))+' · '+g.rows.length+' документа · получени '+gGot+
+      h += '<tr data-pallet-group="1"'+llHlAttrs(l.id, g)+' style="'+llHeadBg(l.id, g)+'border-bottom:1px solid #e2e8f0;">'+
+        '<td colspan="4" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(g.store_name)+'">'+
+          esc(llGroupHeading(g.rows, share))+' · '+g.rows.length+' документа · получени '+gGot+
           (gMiss?' · неполучени '+gMiss:'')+'/'+g.rows.length+
           (g.rows.some(function(r){ return r.partial; })?' '+llPartialBadge():'')+
           /* Коментарът на ЦЕЛИЯ палет. Стои тук, а не в prompt(): обяснението
@@ -1510,10 +1549,12 @@ function llMarkAllReceived(listId){
 /* Общото тяло на двата групови бутона („целия палет" и „всичко получено").
    Едно място, защото провалът трябва да се докладва еднакво и на двете:
    мълчаливо погълнат провал тук значи палет, който изглежда отметнат, но не е. */
-function llPatchReceived(rows, what){
-  if(!confirm('Маркирай '+rows.length+' реда от '+what+' като получени?')) return;
+function llPatchReceived(rows, what, skipConfirm){
+  /* Сканирането НЕ пита: камерата вече е казала кой е палетът, а питане на
+     всеки палет би направило потока по-бавен от ръчното отмятане. */
+  if(!skipConfirm && !confirm('Маркирай '+rows.length+' реда от '+what+' като получени?')) return Promise.resolve({ good: [], bad: [] });
   var at = new Date().toISOString(), by = llActor();
-  Promise.all(rows.map(function(it){
+  return Promise.all(rows.map(function(it){
     return sbPatch('loading_list_items','id=eq.'+it.id,{received:true, received_by:by, received_at:at})
       .then(function(res){ return { it:it, res:res }; });
   })).then(function(all){
@@ -1527,6 +1568,7 @@ function llPatchReceived(rows, what){
       toast('✅ Отметнато');
     }
     llAfterReceive(good.map(function(r){ return r.it; }));
+    return { good: good, bad: bad };
   });
 }
 
@@ -4222,6 +4264,9 @@ function llViewHtml(){
       (l.status==='sent'?'<button data-id="'+l.id+'" onclick="llDoneList(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✅ Приключи</button>':'')+
       '<button data-id="'+l.id+'" onclick="llPrint(this.dataset.id)" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
       '<button data-id="'+l.id+'" onclick="llDownloadPdf(this.dataset.id)" title="Сваля бланката като PDF" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">⬇ PDF</button>'+
+      /* Етикетите: номерата са окончателни при запис и замразени при изпращане. */
+      '<button data-id="'+l.id+'" data-ll-labels-all="1" onclick="llLabels(this.dataset.id)" title="Един етикет с QR на палет, в реда на товарене" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">🏷 Етикети на листа</button>'+
+      '<button data-id="'+l.id+'" onclick="llDownloadLabelsPdf(this.dataset.id)" title="Етикетите на листа като PDF" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">⬇ PDF етикети</button>'+
       '<button onclick="llBackToList()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 14px;font-size:12.5px;cursor:pointer;">← Назад</button>'+
     '</div></div>';
 
@@ -4281,6 +4326,7 @@ function llViewHtml(){
     if(it.products && it.products.length && llRowCounts(it)) unitHasProducts[JSON.stringify([it.store_name || '', unitRef(it)])] = true;
   });
   /* Заглавен ред за всяка номерирана единица; документите са под него. */
+  var share = llDocShare(items);
   var headFirst = llPalletGroups(items).filter(function(g){ return llIsHeaded(g.rows[0]); })
     .map(function(g){ return g.rows; });
   items.forEach(function(it){
@@ -4299,8 +4345,11 @@ function llViewHtml(){
       : '';
     var hg = headFirst.filter(function(rs){ return rs[0] === it; })[0];
     if(hg){
-      h += '<tr data-ll-unit-head="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;"><td colspan="7" style="padding:6px 9px;font-weight:700;font-size:11.5px;">'+
-        esc(llGroupHeading(hg))+opisBtn+'</td></tr>';
+      var hf = hg[0], hk = llTagKey(hf.kind, hf.pallet_no, hf.store_name);
+      h += '<tr data-ll-unit-head="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;"><td colspan="7" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(hf.store_name)+'">'+
+        esc(llGroupHeading(hg, share))+opisBtn+
+        ' <button data-l="'+l.id+'" data-lk="'+escAttr(hk)+'" onclick="llLabels(this.dataset.l,this.dataset.lk)" title="Етикет с QR за този палет" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:4px;">🏷 Етикет</button>'+
+        ' <button data-l="'+l.id+'" data-lk="'+escAttr(hk)+'" onclick="llDownloadLabelsPdf(this.dataset.l,this.dataset.lk)" title="Етикетът като PDF" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:2px;">⬇</button></td></tr>';
     }
     h += '<tr'+(it.missing?' data-missing="1"':'')+
       (it.added_by_store?' data-ll-added="'+escAttr(it.approval_status||'')+'"':'')+
@@ -4694,4 +4743,716 @@ function llRenderPrint(list, items, storeFilter){
         '<div class="lp-foot">Отпечатано '+esc(stamp)+' от '+esc(llActor())+'</div>'+
       '</div>'+
     '</div>';
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ЕТИКЕТИ НА ПАЛЕТИТЕ (QR) И СКАНИРАНЕ ПРИ ПОЛУЧАВАНЕ
+
+   Всеки палет получава етикет с QR. Кодът е ОБИКНОВЕН URL към портала с хеш
+     #tl=<id на листа>&p=<вид>|<№ на палет>|<обект>
+   Така и камерата на телефона (без портала) отваря точния палет, а вътрешният
+   скенер разпознава същия низ. Обектът е В кода нарочно: обектът-получател
+   не вижда чуждите редове на листа и иначе не би могъл да различи „чужд
+   палет" от „непознат".
+
+   Две външни зависимости, и двете ЛЕНИВИ (както jsPDF и html5-qrcode):
+     · qrcode-generator 1.4.4 от cdnjs, с integrity (SRI) — рисува QR;
+     · html5-qrcode (вече е в проекта) — чете QR при получаването.
+   ══════════════════════════════════════════════════════════════════════ */
+var LL_QR_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js';
+var LL_QR_SRI = 'sha512-ZDSPMa/JM1D+7kdg2x3BsruQ6T/JpJo3jWDWkCZsP+5yVyp1KfESqLI+7RqB5k24F7p2cV7i2YHh/890y6P6Sw==';
+var llQrLibPromise = null;   /* зареждането на qrcode-generator — едно за сесията */
+
+function llQrCtor(){
+  return (typeof window.qrcode === 'function') ? window.qrcode : null;
+}
+function llLoadQrLib(){
+  if(llQrCtor()) return Promise.resolve(true);
+  if(llQrLibPromise) return llQrLibPromise;
+  llQrLibPromise = new Promise(function(resolve, reject){
+    var s = document.createElement('script');
+    s.src = LL_QR_LIB;
+    s.setAttribute('integrity', LL_QR_SRI);
+    s.setAttribute('crossorigin', 'anonymous');
+    s.setAttribute('referrerpolicy', 'no-referrer');
+    s.onload = function(){ llQrCtor() ? resolve(true) : reject(new Error('QR библиотеката не се появи')); };
+    /* Провалът НЕ остава кеширан — мрежата на склада идва и си отива. */
+    s.onerror = function(){ llQrLibPromise = null; reject(new Error('QR библиотеката не се зареди')); };
+    document.head.appendChild(s);
+  });
+  return llQrLibPromise;
+}
+/* Матрицата на кода. Библиотеката трябва да е заредена (llLoadQrLib).
+   Корекция „M" (~15%): етикетът се лепи на стреч фолио и се драска. */
+function llQrMatrix(text){
+  var ctor = llQrCtor();
+  if(!ctor) throw new Error('QR библиотеката не е заредена');
+  var q = ctor(0, 'M');
+  q.addData(String(text));
+  q.make();
+  var n = q.getModuleCount(), rows = [], r, c, row;
+  for(r = 0; r < n; r++){
+    row = [];
+    for(c = 0; c < n; c++) row.push(!!q.isDark(r, c));
+    rows.push(row);
+  }
+  return { n: n, rows: rows };
+}
+/* Векторен SVG от матрицата: не зависи от версията на библиотеката и не
+   замъглява при печат (за разлика от растерно изображение). Тихата зона е 2
+   модула — повече от нея и кодът излиза по-малък върху същия етикет. */
+function llQrSvg(text, mm){
+  var m = llQrMatrix(text), n = m.n, quiet = 2, size = n + quiet * 2, d = '', r, c, start;
+  for(r = 0; r < n; r++){
+    c = 0;
+    while(c < n){
+      if(!m.rows[r][c]){ c++; continue; }
+      start = c;
+      while(c < n && m.rows[r][c]) c++;
+      d += 'M' + (start + quiet) + ' ' + (r + quiet) + 'h' + (c - start) + 'v1h-' + (c - start) + 'z';
+    }
+  }
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + size + ' ' + size + '" ' +
+    'shape-rendering="crispEdges" style="width:' + mm + 'mm;height:' + mm + 'mm;display:block;">' +
+    '<rect width="' + size + '" height="' + size + '" fill="#fff"/><path d="' + d + '" fill="#000"/></svg>';
+}
+
+/* ─── Съдържанието на кода ─────────────────────────────────── */
+function llTagKey(kind, no, store){
+  return String(kind) + '|' + String(no) + '|' + String(store == null ? '' : store);
+}
+function llTagUrl(listId, kind, no, store){
+  return LL_PORTAL_URL + '#tl=' + encodeURIComponent(String(listId)) +
+    '&p=' + encodeURIComponent(llTagKey(kind, no, store));
+}
+/* Прочетеният текст → {listId, kind, no, store} или null. Приема целия URL и
+   само хеша; всичко друго (баркод, чужд QR) е „непознат код". */
+function llParseTag(text){
+  var s = String(text == null ? '' : text), i = s.indexOf('#');
+  if(i < 0) return null;
+  var tl = null, p = null;
+  s.slice(i + 1).split('&').forEach(function(part){
+    var k = part.indexOf('=');
+    if(k < 0) return;
+    var name = part.slice(0, k), val = part.slice(k + 1);
+    try { val = decodeURIComponent(val); } catch(e){ return; }
+    if(name === 'tl') tl = val;
+    if(name === 'p') p = val;
+  });
+  if(!tl || !p) return null;
+  var bits = p.split('|');
+  if(bits.length < 3) return null;
+  var kind = bits[0], no = parseInt(bits[1], 10);
+  /* Обектът може да съдържа „|" — взема се останалото след втората черта. */
+  var store = bits.slice(2).join('|');
+  if(!llIsNumbered(kind) || isNaN(no) || !store) return null;
+  return { listId: tl, kind: kind, no: no, store: store };
+}
+
+/* ─── Цвят на обекта ───────────────────────────────────────────
+   Етикетът и картата на обекта са с ЕДИН цвят — рампата различава обектите
+   от метри разстояние. 22 различими цвята (подредени по оттенък) и ИЗРИЧЕН
+   override за всеки известен обект: хешът не става за 22 имена в 16 клетки —
+   на живо даде 6 сблъсъка. Override-ът е пръснат така, че съседите по азбучен
+   ред да са контрастни (стъпка 7 в палитрата).
+   Хешът остава само за НОВ обект, който още няма запис тук; когато такъв се
+   появи, добави го в override (llStoreColorCollisions() показва сблъсъците). */
+var LL_STORE_COLORS = {
+  palette: ['#d32f2f', '#ff7043', '#ef6c00', '#f9a825', '#9e9d24', '#7cb342', '#2e7d32', '#00bfa5',
+            '#00838f', '#00acc1', '#039be5', '#1565c0', '#283593', '#4527a0', '#8e24aa', '#d81b60',
+            '#f06292', '#5d4037', '#880e4f', '#212121', '#607d8b', '#9e9e9e'],
+  override: {
+    'Враца': '#d32f2f', 'Габрово': '#00bfa5', 'Гоце Делчев': '#8e24aa', 'Добрич': '#9e9e9e',
+    'Дупница': '#2e7d32', 'Карлово': '#4527a0', 'Козлодуй': '#607d8b', 'Кърджали': '#7cb342',
+    'Логистичен склад Добрич': '#283593', 'Логистичен склад Търговище': '#212121',
+    'Монтана': '#9e9d24', 'Петрич': '#1565c0', 'Пирдоп': '#880e4f', 'Раднево': '#f9a825',
+    'Севлиево': '#039be5', 'Сервиз Троян': '#5d4037', 'Силистра': '#ef6c00', 'Сливен': '#00acc1',
+    'Троян': '#f06292', 'Търговище': '#ff7043', 'Централен офис': '#00838f', 'Шумен': '#d81b60'
+  }
+};
+function llStoreColor(name){
+  var s = String(name == null ? '' : name).trim();
+  if(LL_STORE_COLORS.override.hasOwnProperty(s)) return LL_STORE_COLORS.override[s];
+  var h = 2166136261, i;                       /* FNV-1a, 32 бита */
+  for(i = 0; i < s.length; i++){
+    h ^= s.charCodeAt(i);
+    h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+  }
+  return LL_STORE_COLORS.palette[h % LL_STORE_COLORS.palette.length];
+}
+function llHexRgb(hex){
+  var m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex));
+  return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [0, 0, 0];
+}
+/* Бял текст върху тъмно, черен върху светло (жълтото в палитрата). */
+function llColorText(hex){
+  var c = llHexRgb(hex);
+  return (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) > 150 ? '#000' : '#fff';
+}
+/* Кои от подадените обекти делят цвят: { '#d32f2f': ['А', 'Б'] } само при ≥2. */
+function llStoreColorCollisions(names){
+  var by = {}, out = {};
+  (names || []).forEach(function(n){
+    var c = llStoreColor(n);
+    if(!by[c]) by[c] = [];
+    if(by[c].indexOf(n) < 0) by[c].push(n);
+  });
+  Object.keys(by).forEach(function(c){ if(by[c].length > 1) out[c] = by[c]; });
+  return out;
+}
+/* Тънката лява лента на единицата — същият цвят като етикета. */
+function llStoreStripe(store){
+  return 'border-left:4px solid ' + llStoreColor(store) + ';';
+}
+
+/* ─── Единиците за етикетите ───────────────────────────────────
+   Редът на етикетите е РЕДЪТ НА ТОВАРЕНЕ — по позиция, не по обект: шофьорът
+   товари един курс. Само номерираните единици имат етикет (палет, извънгабарит,
+   руло): насипът няма №, значи няма и какво да се кодира. */
+function llLabelUnits(items){
+  var rows = llLiveRows(items || []).slice().sort(llByPosition);
+  var groups = llPalletGroups(rows).filter(function(g){ return llIsHeaded(g.rows[0]); });
+  var units = groups.map(function(g, i){
+    var f = g.rows[0], products = [];
+    g.rows.forEach(function(r){ (r.products || []).forEach(function(p){ products.push(p); }); });
+    return { key: llTagKey(f.kind, f.pallet_no, f.store_name), kind: f.kind, no: Number(f.pallet_no),
+             total: f.pallet_total != null ? Number(f.pallet_total) : null, store: f.store_name || '',
+             rows: g.rows, docs: [], products: products, seq: i + 1, seqTotal: groups.length,
+             comment: f.warehouse_comment || '' };
+  });
+  /* Един изходящ № на няколко палета на един обект: „4600186336 (1/2)" — по
+     реда на палетите (вид, №). Чиповете го позволяват и без друго. */
+  units.forEach(function(u){
+    llGroupDocs(u.rows).forEach(function(doc){
+      var same = units.filter(function(x){ return x.store === u.store && llGroupDocs(x.rows).indexOf(doc) >= 0; })
+        .sort(function(a, b){ return (llKindRank(a.kind) - llKindRank(b.kind)) || (a.no - b.no); });
+      u.docs.push({ doc: doc, k: same.indexOf(u) + 1, n: same.length });
+    });
+  });
+  return units;
+}
+function llLabelDocText(d){ return d.doc + (d.n > 1 ? ' (' + d.k + '/' + d.n + ')' : ''); }
+function llLabelWord(u){
+  return u.kind === 'oversize' ? 'извънгабаритен' : (u.kind === 'roll' ? 'руло' : '');
+}
+function llLabelTitle(u){
+  return 'ПАЛЕТ ' + u.no + (u.total != null ? ' от ' + u.total : '');
+}
+/* Размер на шрифта, при който текстът се събира в ширината (mm). Оценката
+   (~0,56 em на знак за Roboto/Arial с кирилица) е нарочно прибрана: по-добре
+   малко по-дребно, отколкото прекъснато име на обект. */
+function llFitPt(text, maxPt, widthMm, minPt){
+  var len = Math.max(1, String(text).length);
+  var pt = Math.floor(widthMm / (len * 0.3528 * 0.56));
+  return Math.max(minPt || 28, Math.min(maxPt, pt));
+}
+function llLabelProdsHtml(u){
+  if(!u.products.length){
+    return '<div class="lt-none">съдържание по изходящите номера</div>';
+  }
+  var ctn = 0, hasCtn = false;
+  u.products.forEach(function(p){ if(p.cartons != null && p.cartons !== ''){ ctn += Number(p.cartons) || 0; hasCtn = true; } });
+  return '<table class="lp-tbl">'+
+    '<colgroup><col style="width:8mm;"><col style="width:26mm;"><col style="width:88mm;"><col style="width:18mm;"><col style="width:24mm;"><col style="width:26mm;"></colgroup>'+
+    '<tr><th>№</th><th>SAP код</th><th>Име</th><th>Мярка</th><th>Бройки</th><th>Кашони</th></tr>'+
+    u.products.map(function(p, k){
+      return '<tr class="lp-row"><td class="lp-num">'+(k + 1)+'</td><td>'+esc(p.sap_code)+'</td><td>'+esc(p.product_name)+'</td>'+
+        '<td>'+esc(p.unit || '—')+'</td><td class="lp-num">'+llFmtQty(p.qty)+'</td>'+
+        '<td class="lp-num">'+(p.cartons != null ? p.cartons : '')+'</td></tr>';
+    }).join('')+
+    '<tr class="lp-row lp-sum"><td colspan="4">Общо: '+u.products.length+(u.products.length === 1 ? ' артикул' : ' артикула')+'</td>'+
+      '<td class="lp-num"></td><td class="lp-num">'+(hasCtn ? ctn : '')+'</td></tr>'+
+    '</table>';
+}
+/* Етикет от ЧЕРНОВА е позволен, но с воден знак: номерата на палетите са
+   окончателни чак при запис и замразени при изпращане — залепен етикет с
+   номер, който после се мести, е точно грешката, която етикетът трябва да
+   пази. Без знак само при sent / done / partial. */
+var LL_DRAFT_MARK = 'ЧЕРНОВА — печатай след изпращане';
+function llLabelIsDraft(list){ return !list || list.status === 'draft'; }
+function llLabelCss(){
+  return llPrintCss() +
+    '.lt-page{position:relative;}'+
+    '.lt-wm{position:absolute;left:0;right:0;top:112mm;text-align:center;transform:rotate(-35deg);font-size:38pt;font-weight:700;color:rgba(220,38,38,.28);white-space:nowrap;pointer-events:none;z-index:5;-webkit-print-color-adjust:exact;print-color-adjust:exact;}'+
+    '.lt-page{width:190mm;height:272mm;overflow:hidden;box-sizing:border-box;font-family:Arial,Helvetica,sans-serif;color:#111;page-break-after:always;break-after:page;}'+
+    '.lt-page:last-child{page-break-after:auto;break-after:auto;}'+
+    '.lt-band{-webkit-print-color-adjust:exact;print-color-adjust:exact;box-sizing:border-box;width:190mm;padding:3mm 4mm;text-align:center;border-radius:2mm;}'+
+    '.lt-store{font-weight:700;line-height:1.1;overflow-wrap:break-word;white-space:normal;}'+
+    '.lt-pal{font-weight:700;line-height:1.1;text-align:center;margin-top:5mm;white-space:normal;}'+
+    '.lt-sub{font-size:26pt;text-align:center;font-weight:700;text-transform:uppercase;margin-top:1mm;}'+
+    '.lt-mid{display:flex;justify-content:space-between;align-items:flex-start;gap:6mm;margin-top:6mm;}'+
+    '.lt-meta{flex:1;font-size:12pt;line-height:1.5;}'+
+    '.lt-meta b{font-weight:700;}'+
+    '.lt-qr{flex:0 0 60mm;width:60mm;height:60mm;}'+
+    '.lt-docs{margin-top:5mm;font-size:13pt;font-weight:700;line-height:1.4;overflow-wrap:break-word;}'+
+    '.lt-prods{margin-top:5mm;}'+
+    '.lt-none{font-size:12pt;color:#555;border:1px dashed #999;padding:4mm;text-align:center;}';
+}
+function llLabelHtml(list, u){
+  var color = llStoreColor(u.store), txt = llColorText(color);
+  var storePt = llFitPt(u.store, 120, 180, 36);
+  var title = llLabelTitle(u), titlePt = llFitPt(title, 80, 186, 36);
+  var word = llLabelWord(u);
+  return '<div class="lt-page" data-ll-label="'+escAttr(u.key)+'">'+
+    '<div class="lt-band" style="background:'+color+';color:'+txt+';">'+
+      '<div class="lt-store" style="font-size:'+storePt+'pt;">'+esc(u.store)+'</div></div>'+
+    '<div class="lt-pal" style="font-size:'+titlePt+'pt;">'+esc(title)+'</div>'+
+    (word ? '<div class="lt-sub">'+esc(word)+(u.comment ? ' · '+esc(u.comment) : '')+'</div>' : '')+
+    '<div class="lt-mid">'+
+      '<div class="lt-meta">'+
+        '<div><b>Товарен лист:</b> '+fmtDate(list.list_date)+'</div>'+
+        '<div><b>Склад:</b> '+esc(list.warehouse || '—')+'</div>'+
+        '<div><b>В курса:</b> палет '+u.seq+'/'+u.seqTotal+'</div>'+
+      '</div>'+
+      '<div class="lt-qr" data-ll-qr="1">'+llQrSvg(llTagUrl(list.id, u.kind, u.no, u.store), 60)+'</div>'+
+    '</div>'+
+    '<div class="lt-docs">'+(u.docs.length
+      ? 'Изходящи: '+u.docs.map(function(d){ return esc(llLabelDocText(d)); }).join(', ')
+      : 'Без изходящ №')+'</div>'+
+    '<div class="lt-prods">'+llLabelProdsHtml(u)+'</div>'+
+    (llLabelIsDraft(list) ? '<div class="lt-wm" data-ll-wm="1">'+esc(LL_DRAFT_MARK)+'</div>' : '')+
+  '</div>';
+}
+function llRenderLabelsPrint(list, units){
+  var wrap = document.getElementById('mod-print');
+  if(!wrap) return;
+  wrap.innerHTML =
+    '<style>'+llLabelCss()+'</style>'+
+    '<div style="max-width:820px;margin:0 auto;padding:16px 16px 40px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;" class="no-print">'+
+        '<div style="font-size:18px;font-weight:600;">🏷 Етикети · '+units.length+(units.length === 1 ? ' палет' : ' палета')+
+          (llLabelIsDraft(list) ? ' <span style="font-size:12px;color:#dc2626;font-weight:700;">· ЧЕРНОВА — номерата още могат да се променят</span>' : '')+'</div>'+
+        '<div style="display:flex;gap:8px;align-items:center;">'+
+          '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>'+
+          '<button onclick="showModule(\'loading\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Назад</button>'+
+        '</div>'+
+      '</div>'+
+      '<div data-ll-labels="1">'+units.map(function(u){ return llLabelHtml(list, u); }).join('')+'</div>'+
+    '</div>';
+}
+/* Кои единици: unitKey празен → целият лист; иначе само тази. */
+function llPickLabelUnits(listId, unitKey){
+  var l = llLists.find(function(x){ return String(x.id) === String(listId); });
+  if(!l) return { list: null, units: [] };
+  var units = llLabelUnits(llItemsOf(listId));
+  if(unitKey) units = units.filter(function(u){ return u.key === unitKey; });
+  return { list: l, units: units };
+}
+/* „🏷 Етикет" / „🏷 Етикети на листа" — печат в страницата. */
+function llLabels(listId, unitKey){
+  var pick = llPickLabelUnits(listId, unitKey);
+  if(!pick.list){ toast('Товарният лист не е намерен','#dc2626'); return Promise.resolve(false); }
+  if(!pick.units.length){ toast('Няма номерирани палети за етикети','#d97706'); return Promise.resolve(false); }
+  return llLoadQrLib().then(function(){
+    llRenderLabelsPrint(pick.list, pick.units);
+    showModule('print');
+    return true;
+  }).catch(function(e){
+    console.error('llLabels', e);
+    toast('Етикетите не се получиха: ' + (e && e.message ? e.message : e), '#dc2626');
+    return false;
+  });
+}
+
+/* ─── PDF на етикетите ─────────────────────────────────────── */
+function llBuildLabelsPdf(list, units){
+  return llPdfTimeout(Promise.all([llLoadPdfLib(), llPdfFont(), llLoadQrLib()]), LL_PDF_TIMEOUT, 'PDF').then(function(res){
+    var Ctor = llPdfCtor();
+    if(!Ctor) throw new Error('jsPDF липсва');
+    var doc = new Ctor({ unit: 'mm', format: 'a4' });
+    doc.addFileToVFS(LL_PDF_FONT_FILE, res[1]);
+    doc.addFont(LL_PDF_FONT_FILE, LL_PDF_FONT_NAME, 'normal');
+    doc.setFont(LL_PDF_FONT_NAME, 'normal');
+    units.forEach(function(u, idx){
+      if(idx > 0) doc.addPage();
+      doc.setFont(LL_PDF_FONT_NAME, 'normal');
+      var rgb = llHexRgb(llStoreColor(u.store)), txt = llColorText(llStoreColor(u.store)) === '#fff' ? [255, 255, 255] : [0, 0, 0];
+      var storePt = llFitPt(u.store, 120, 180, 36);
+      var bandH = Math.max(40, Math.round(storePt * 0.3528 * 1.25) + 12);
+      doc.setFillColor(rgb[0], rgb[1], rgb[2]);
+      doc.rect(10, 10, 190, bandH, 'F');
+      doc.setTextColor(txt[0], txt[1], txt[2]);
+      doc.setFontSize(storePt);
+      doc.text(String(u.store), 105, 10 + bandH / 2 + storePt * 0.3528 * 0.35, { align: 'center' });
+      doc.setTextColor(0, 0, 0);
+      var y = 10 + bandH + 6;
+      var title = llLabelTitle(u), titlePt = llFitPt(title, 80, 186, 36);
+      doc.setFontSize(titlePt);
+      y += titlePt * 0.3528 * 0.85;
+      doc.text(title, 105, y, { align: 'center' });
+      var word = llLabelWord(u);
+      if(word){
+        doc.setFontSize(26);
+        y += 11;
+        doc.text(word.toUpperCase() + (u.comment ? ' · ' + u.comment : ''), 105, y, { align: 'center' });
+      }
+      y += 8;
+      /* Лява колона — реквизити; дясно — QR 60×60. */
+      doc.setFontSize(12);
+      doc.text('Товарен лист: ' + fmtDate(list.list_date), 12, y + 6);
+      doc.text('Склад: ' + (list.warehouse || '—'), 12, y + 13);
+      doc.text('В курса: палет ' + u.seq + '/' + u.seqTotal, 12, y + 20);
+      var m = llQrMatrix(llTagUrl(list.id, u.kind, u.no, u.store)), quiet = 2, cell = 60 / (m.n + quiet * 2);
+      var qx = 140, qy = y, r, c, s;
+      doc.setFillColor(255, 255, 255);
+      doc.rect(qx, qy, 60, 60, 'F');
+      doc.setFillColor(0, 0, 0);
+      for(r = 0; r < m.n; r++){
+        c = 0;
+        while(c < m.n){
+          if(!m.rows[r][c]){ c++; continue; }
+          s = c;
+          while(c < m.n && m.rows[r][c]) c++;
+          doc.rect(qx + (s + quiet) * cell, qy + (r + quiet) * cell, (c - s) * cell, cell, 'F');
+        }
+      }
+      /* Воден знак: бледочервен диагонален текст през страницата. */
+      if(llLabelIsDraft(list)){
+        doc.setTextColor(240, 170, 170);
+        doc.setFontSize(34);
+        doc.text(LL_DRAFT_MARK, 105, 150, { align: 'center', angle: 35 });
+        doc.setTextColor(0, 0, 0);
+      }
+      y += 66;
+      var yy = y, put = function(txt2, size, step){
+        doc.setFontSize(size);
+        var parts = doc.splitTextToSize(String(txt2), 186);
+        for(var k = 0; k < parts.length; k++){
+          if(yy > 282){ doc.addPage(); doc.setFont(LL_PDF_FONT_NAME, 'normal'); yy = 16; }
+          doc.text(parts[k], 12, yy);
+          yy += step;
+        }
+      };
+      put(u.docs.length ? 'Изходящи: ' + u.docs.map(llLabelDocText).join(', ') : 'Без изходящ №', 13, 6);
+      yy += 3;
+      if(!u.products.length){
+        put('съдържание по изходящите номера', 12, 5.5);
+      } else {
+        u.products.forEach(function(p){
+          put(p.sap_code + '  ' + p.product_name + '  —  ' + llFmtQty(p.qty) + ' ' + (p.unit || '') +
+            (p.cartons != null ? '  (' + p.cartons + ' каш.)' : ''), 10, 5);
+        });
+      }
+    });
+    var uri = String(doc.output('datauristring') || '');
+    var at = uri.lastIndexOf('base64,');
+    if(at < 0) throw new Error('PDF-ът не се получи');
+    return { filename: 'etiketi-' + String(list.list_date || '').slice(0, 10) + '-' +
+      (units.length === 1 ? llTranslit(units[0].store) + '-' + units[0].kind + units[0].no : 'list') + '.pdf',
+      base64: uri.slice(at + 7) };
+  });
+}
+function llDownloadLabelsPdf(listId, unitKey){
+  var pick = llPickLabelUnits(listId, unitKey);
+  if(!pick.list){ toast('Товарният лист не е намерен','#dc2626'); return Promise.resolve(false); }
+  if(!pick.units.length){ toast('Няма номерирани палети за етикети','#d97706'); return Promise.resolve(false); }
+  toast('⏳ Готви се PDF…');
+  return llBuildLabelsPdf(pick.list, pick.units).then(function(pdf){
+    var a = document.createElement('a');
+    a.href = 'data:application/pdf;base64,' + pdf.base64;
+    a.download = pdf.filename;
+    document.body.appendChild(a);
+    a.click();
+    if(a.parentNode) a.parentNode.removeChild(a);
+    toast('⬇ ' + pdf.filename);
+    return true;
+  }).catch(function(e){
+    console.error('llDownloadLabelsPdf', e);
+    toast('PDF не се получи: ' + (e && e.message ? e.message : e), '#dc2626');
+    return false;
+  });
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   ПОЛУЧАВАНЕ СЪС СКАНИРАНЕ (магазинска страна)
+   ══════════════════════════════════════════════════════════════════════ */
+/* Състоянието на единицата за обекта: всички редове получени → received;
+   всичко обработено, но има липса → missing; иначе чака. */
+function llUnitState(rows){
+  if(rows.every(function(r){ return r.received; })) return 'received';
+  if(rows.every(function(r){ return r.received || r.missing; })) return 'missing';
+  return 'waiting';
+}
+function llStoreUnits(listId){
+  var items = llLiveRows(llStoreItemsOf(listId)).slice().sort(llByPosition);
+  return llPalletGroups(items).map(function(g){
+    return { kind: g.kind, no: g.pallet_no, store: g.store_name || '', rows: g.rows, state: llUnitState(g.rows) };
+  });
+}
+/* „Палети: 3 получени · 1 неполучен · 1 чака" — над таблицата в картата. */
+function llPalletStatusText(listId){
+  var got = 0, miss = 0, wait = 0;
+  llStoreUnits(listId).forEach(function(u){
+    if(u.state === 'received') got++; else if(u.state === 'missing') miss++; else wait++;
+  });
+  var parts = [];
+  if(got) parts.push(got + (got === 1 ? ' получен' : ' получени'));
+  if(miss) parts.push(miss + (miss === 1 ? ' неполучен' : ' неполучени'));
+  if(wait) parts.push(wait + (wait === 1 ? ' чака' : ' чакат'));
+  return parts.length ? 'Палети: ' + parts.join(' · ') : '';
+}
+/* Броячът в скенера: само единиците, за които този потребител отмята. */
+function llScanTotals(listId){
+  var mine = llStoreUnits(listId).filter(function(u){ return llCanReceive({ store_name: u.store }); });
+  return { got: mine.filter(function(u){ return u.state === 'received'; }).length, total: mine.length };
+}
+
+/* ЕДИНСТВЕНАТА тествана част от скенера: прочетен текст → резултат. Камерата
+   и библиотеката не съществуват в jsdom; затова логиката е отделена от нея.
+     ok       — палет на ТОЗИ обект, още неотметнат → отмятат се редовете му;
+     foreign  — палет за ДРУГ обект → червен екран, остава до „Разбрах";
+     done     — вече е получен (или вече е отбелязан като неполучен);
+     unknown  — не е код от товарен лист / друг лист / палет, който го няма. */
+function llScanResult(type, title, sub, extra){
+  var r = { result: type, title: title, sub: sub || '' };
+  if(extra) Object.keys(extra).forEach(function(k){ r[k] = extra[k]; });
+  return r;
+}
+function llHandleScannedPallet(listId, text){
+  var tag = llParseTag(text);
+  if(!tag) return Promise.resolve(llScanResult('unknown', 'Непознат код', 'Не е код от товарен лист'));
+  if(String(tag.listId) !== String(listId)){
+    return Promise.resolve(llScanResult('unknown', 'Не е от този товарен лист', 'Лист № ' + tag.listId, { tag: tag }));
+  }
+  if(!llCanReceive({ store_name: tag.store })){
+    return Promise.resolve(llScanResult('foreign', 'ЗА ' + String(tag.store).toUpperCase(), 'не е за вас', { tag: tag }));
+  }
+  var rows = llLiveRows(llStoreItemsOf(listId)).filter(function(i){
+    return i.kind === tag.kind && Number(i.pallet_no) === tag.no && (i.store_name || '') === tag.store;
+  });
+  if(!rows.length) return Promise.resolve(llScanResult('unknown', 'Палетът го няма в този лист', llTagKey(tag.kind, tag.no, tag.store), { tag: tag }));
+  var label = llCap(llKindLabel(rows[0]));
+  var open = rows.filter(llOpenForStore);
+  if(!open.length){
+    return Promise.resolve(llScanResult('done', label, rows.every(function(r){ return r.received; })
+      ? 'вече е получен' : 'вече е отбелязан като неполучен', { tag: tag }));
+  }
+  return llPatchReceived(open, 'палета', true).then(function(res){
+    if(res.bad.length) return llScanResult('unknown', 'Не се отметна', label + ' — грешка при запис', { tag: tag });
+    return llScanResult('ok', label + ' ✓', '', { tag: tag });
+  });
+}
+
+/* ─── Модалът със скенера ──────────────────────────────────── */
+var llQrScan = null;   /* {listId, inst, busy, last, lastAt, flashTimer} */
+function llQrScanConfig(){
+  return {
+    fps: 12,
+    qrbox: function(vw, vh){
+      var s = Math.floor(Math.min(vw || 250, vh || 250) * 0.72);
+      return { width: Math.max(50, s), height: Math.max(50, s) };
+    },
+    videoConstraints: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 },
+                        advanced: [{ focusMode: 'continuous' }] }
+  };
+}
+function llPalletScanOpen(listId){
+  var l = llStoreLists.find(function(x){ return String(x.id) === String(listId); });
+  if(!l){ toast('Товарният лист не е намерен','#dc2626'); return Promise.resolve(false); }
+  if(l.status !== 'sent'){ toast('Листът вече не е за приемане','#d97706'); return Promise.resolve(false); }
+  /* Основният поток на приемането — НЕ е зад loading_scan. */
+  return llLoadScanLib().then(function(){
+    llQrScanShow(listId);
+    return true;
+  }, function(){
+    toast('Скенерът не се зареди — отмятай на ръка','#dc2626');
+    return false;
+  });
+}
+function llQrScanShow(listId){
+  llQrScanClose();
+  var m = document.createElement('div');
+  m.id = 'll-qr-modal';
+  m.style.cssText = 'position:fixed;inset:0;z-index:400;background:rgba(15,23,42,.9);display:flex;flex-direction:column;align-items:center;padding:14px;overflow-y:auto;';
+  m.innerHTML =
+    '<div style="width:100%;max-width:480px;background:#fff;border-radius:12px;padding:12px;position:relative;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;gap:8px;">'+
+        '<div><div style="font-size:15px;font-weight:700;">📷 Сканирай палети</div>'+
+        '<div id="ll-qr-count" style="font-size:13px;color:#475569;"></div></div>'+
+        '<button onclick="llQrScanClose()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 16px;font-size:14px;font-weight:600;cursor:pointer;">Готово</button>'+
+      '</div>'+
+      '<div id="ll-qr-view" style="width:100%;min-height:240px;background:#000;border-radius:8px;overflow:hidden;"></div>'+
+      '<div style="margin-top:6px;font-size:12px;color:#64748b;text-align:center;">Насочи камерата към QR кода на етикета</div>'+
+      '<div id="ll-qr-flash" style="display:none;position:absolute;inset:0;border-radius:12px;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px;"></div>'+
+    '</div>';
+  document.body.appendChild(m);
+  llQrScan = { listId: listId, inst: null, busy: false, last: '', lastAt: 0, flashTimer: null };
+  llQrScanCount();
+  var fmts;
+  try { var F = window.Html5QrcodeSupportedFormats; fmts = F ? [F.QR_CODE] : undefined; } catch(e){ fmts = undefined; }
+  try {
+    var inst = new window.Html5Qrcode('ll-qr-view', { formatsToSupport: fmts, verbose: false });
+    llQrScan.inst = inst;
+    inst.start({ facingMode: 'environment' }, llQrScanConfig(),
+      function(text){ llQrScanRead(text); }, function(){ /* кадър без код — нормално */ }
+    ).then(function(){}, function(){
+      llQrFlash('unknown', 'Няма достъп до камерата', 'Разреши камерата в браузъра или отмятай на ръка');
+    });
+  } catch(e){
+    llQrFlash('unknown', 'Скенерът не тръгна', 'Отмятай на ръка');
+  }
+}
+function llQrScanCount(){
+  if(!llQrScan) return;
+  var t = llScanTotals(llQrScan.listId), el = document.getElementById('ll-qr-count');
+  if(el) el.textContent = 'получени ' + t.got + ' от ' + t.total;
+}
+/* Един и същ етикет се вижда в няколко кадъра — паузата пази от двойно четене. */
+function llQrScanRead(text){
+  if(!llQrScan || llQrScan.busy) return Promise.resolve(null);
+  var now = Date.now();
+  if(text === llQrScan.last && now - llQrScan.lastAt < 1500) return Promise.resolve(null);
+  llQrScan.last = text; llQrScan.lastAt = now; llQrScan.busy = true;
+  try { if(llQrScan.inst && llQrScan.inst.pause) llQrScan.inst.pause(true); } catch(e){}
+  var s = llQrScan;
+  return llHandleScannedPallet(s.listId, text).then(function(r){
+    if(llQrScan !== s) return r;
+    llQrFlash(r.result, r.title, r.sub);
+    llQrScanCount();
+    return r;
+  });
+}
+/* Цветният екран на цял модал. Червеният НЕ изчезва сам — иска „Разбрах":
+   чужд палет, натоварен на грешното място, е точно моментът, в който никой
+   не бива да продължи по инерция. Останалите отминават сами. */
+var LL_QR_FLASH = {
+  ok:      { bg: '#16a34a', fg: '#fff', ms: 1000 },
+  foreign: { bg: '#dc2626', fg: '#fff', ms: 0 },
+  done:    { bg: '#94a3b8', fg: '#fff', ms: 1500 },
+  unknown: { bg: '#f59e0b', fg: '#111', ms: 2200 }
+};
+function llQrFlash(type, title, sub){
+  var el = document.getElementById('ll-qr-flash');
+  if(!el) return;
+  var c = LL_QR_FLASH[type] || LL_QR_FLASH.unknown;
+  el.setAttribute('data-scan-result', type);
+  el.style.cssText = 'display:flex;position:absolute;inset:0;border-radius:12px;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:16px;background:'+c.bg+';color:'+c.fg+';z-index:5;';
+  el.innerHTML = '<div style="font-size:30px;font-weight:800;line-height:1.15;">'+esc(title)+'</div>'+
+    (sub ? '<div style="font-size:18px;margin-top:8px;font-weight:600;">'+esc(sub)+'</div>' : '')+
+    (type === 'foreign' ? '<button onclick="llQrFlashDismiss()" style="margin-top:22px;border:2px solid #fff;background:transparent;color:#fff;border-radius:10px;padding:12px 28px;font-size:18px;font-weight:700;cursor:pointer;">Разбрах</button>' : '');
+  if(type === 'ok') llBeep(true);
+  if(type === 'foreign'){
+    llBeep(false);
+    try { if(navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 300]); } catch(e){}
+  }
+  if(llQrScan){
+    if(llQrScan.flashTimer){ clearTimeout(llQrScan.flashTimer); llQrScan.flashTimer = null; }
+    if(c.ms) llQrScan.flashTimer = setTimeout(llQrFlashDismiss, c.ms);
+  }
+}
+function llQrFlashDismiss(){
+  var el = document.getElementById('ll-qr-flash');
+  if(el){ el.style.display = 'none'; el.removeAttribute('data-scan-result'); el.innerHTML = ''; }
+  if(!llQrScan) return;
+  if(llQrScan.flashTimer){ clearTimeout(llQrScan.flashTimer); llQrScan.flashTimer = null; }
+  llQrScan.busy = false;
+  try { if(llQrScan.inst && llQrScan.inst.resume) llQrScan.inst.resume(); } catch(e){}
+}
+function llQrScanClose(){
+  var s = llQrScan;
+  llQrScan = null;
+  if(s && s.flashTimer) clearTimeout(s.flashTimer);
+  if(s && s.inst){
+    try {
+      var st = s.inst.stop();
+      if(st && st.then) st.then(function(){ try { s.inst.clear(); } catch(e){} }, function(){});
+    } catch(e){}
+  }
+  var m = document.getElementById('ll-qr-modal');
+  if(m && m.parentNode) m.parentNode.removeChild(m);
+}
+/* Кратък тон: висок при успех, нисък и дълъг при чужд палет. Звукът е
+   удобство — липсата му (тих режим, нова политика на браузъра) не бива да
+   спира сканирането. */
+function llBeep(good){
+  try {
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if(!AC) return;
+    var ac = new AC(), o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'sine'; o.frequency.value = good ? 880 : 220;
+    g.gain.value = 0.15;
+    o.connect(g); g.connect(ac.destination);
+    o.start();
+    o.stop(ac.currentTime + (good ? 0.15 : 0.5));
+  } catch(e){}
+}
+
+/* ─── Deep link: #tl=…&p=… ─────────────────────────────────────
+   Обикновената камера на телефона отваря URL-а от етикета. Хендлърът се вика
+   от startApp() (shared.js) СЛЕД входа — преди вход няма потребител, който да
+   се сверява с обекта на палета. */
+var llDeepLink = null;     /* чакащият deep link, докато се заредят листите */
+var llHighlight = null;    /* {listId, key} — подчертаният палет в картата */
+function llClearUrlHash(){
+  try {
+    if(window.history && window.history.replaceState){
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+  } catch(e){}
+}
+function llDeepLinkBoot(hash){
+  var h = (hash === undefined) ? (window.location.hash || '') : String(hash);
+  var tag = llParseTag(h);
+  if(!tag) return false;
+  llClearUrlHash();
+  showModule('loading');
+  /* Чужд обект — червеният екран веднага, без да чакаме данните: не е нужно да
+     знаем нищо за листа, за да кажем „не е за вас". */
+  if(!llCanReceive({ store_name: tag.store })){
+    llForeignScreen(tag);
+    return true;
+  }
+  /* Складовият изглед няма карти за приемане — няма какво да се подчертава. */
+  if(llCanEdit()) return true;
+  llDeepLink = tag;
+  /* Данните може вече да са заредени (showModule ги пуска, но обещанието е
+     асинхронно) — llDeepLinkApply се вика и от края на зареждането. */
+  llDeepLinkApply();
+  return true;
+}
+function llForeignScreen(tag){
+  llQrScanClose();
+  var old = document.getElementById('ll-foreign-modal');
+  if(old && old.parentNode) old.parentNode.removeChild(old);
+  var m = document.createElement('div');
+  m.id = 'll-foreign-modal';
+  m.setAttribute('data-scan-result', 'foreign');
+  m.style.cssText = 'position:fixed;inset:0;z-index:500;background:#dc2626;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;';
+  m.innerHTML = '<div style="font-size:34px;font-weight:800;line-height:1.15;">ЗА '+esc(String(tag.store).toUpperCase())+'</div>'+
+    '<div style="font-size:20px;margin-top:10px;font-weight:600;">не е за вас</div>'+
+    '<button onclick="llForeignDismiss()" style="margin-top:26px;border:2px solid #fff;background:transparent;color:#fff;border-radius:10px;padding:12px 30px;font-size:18px;font-weight:700;cursor:pointer;">Разбрах</button>';
+  document.body.appendChild(m);
+  llBeep(false);
+  try { if(navigator.vibrate) navigator.vibrate([300, 120, 300, 120, 300]); } catch(e){}
+}
+function llForeignDismiss(){
+  var m = document.getElementById('ll-foreign-modal');
+  if(m && m.parentNode) m.parentNode.removeChild(m);
+}
+/* Вика се и от deep link-а, и от края на зареждането на картите: който дойде
+   пръв с налични данни, върши работата. */
+function llDeepLinkApply(){
+  if(!llDeepLink) return false;
+  var tag = llDeepLink;
+  var l = llStoreLists.find(function(x){ return String(x.id) === String(tag.listId); });
+  if(!l) return false;   /* данните още не са дошли — ще се опита пак след зареждането */
+  llDeepLink = null;
+  llCollapsed[l.id] = false;
+  llHighlight = { listId: l.id, key: llTagKey(tag.kind, tag.no, tag.store) };
+  renderLoadingLists();
+  var card = document.getElementById('ll-card-' + l.id);
+  var head = card ? card.querySelector('tr[data-ll-hl="1"]') : null;
+  if(!head){
+    toast('Палетът го няма в листа','#d97706');
+    return true;
+  }
+  /* Бутонът: на заглавния ред (няколко документа), иначе на първия ред под него. */
+  var b = head.querySelector('button[data-k]'), tr = head;
+  while(!b && tr.nextElementSibling && !tr.nextElementSibling.hasAttribute('data-pallet-group')){
+    tr = tr.nextElementSibling;
+    b = tr.querySelector('button[onclick^="llMarkReceived"]');
+  }
+  if(b && b.focus) b.focus();
+  if(head.scrollIntoView) head.scrollIntoView({ block: 'center' });
+  return true;
 }

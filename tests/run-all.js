@@ -66,6 +66,7 @@ const TESTS = [
   'loading-lists-pallets.test.js',
   'loading-lists-pallet-default.test.js',
   'loading-lists-unit-views.test.js',
+  'loading-lists-labels.test.js',
   'loading-lists-notify.test.js',
   'loading-lists-missing.test.js',
   'loading-lists-notify-send.test.js',

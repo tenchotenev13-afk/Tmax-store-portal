@@ -1508,6 +1508,8 @@ function startApp(){
     if (new URLSearchParams(window.location.search).get('store') && isGlobal()) startTab='today';
   } catch(e){}
   showModule(startTab);
+  /* Deep link от етикет на палет (#tl=…&p=…) — след входа, loading.js го чете. */
+  if(typeof llDeepLinkBoot==='function') llDeepLinkBoot();
 }
 function setupTabsForRole(){
   /* Таб Каса — само за kasa, manager, admin, accounting */
