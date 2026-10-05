@@ -441,6 +441,7 @@ const settle = async () => { await ticks(); await ticks(); await ticks(); };
     const closed = swap({ status: 'closed' });
     const lines = [line(Object.assign({}, L_EX, { status: 'received' })), line(Object.assign({}, L_SH, { status: 'received', swap_id: 'sw-1' }))];
     const h = env(CVETI, { lines: lines, swaps: [closed], filter: 'all' });
+    h.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
     h.w.renderStockDiff();
     const table = Array.prototype.find.call(h.doc.querySelectorAll('#mod-stock-diff table'),
       t => t.querySelector('thead') && t.querySelector('thead').textContent.indexOf('Кредитно') >= 0);

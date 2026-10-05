@@ -61,7 +61,7 @@ const CVETI = {
   role: 'admin', store_name: 'Централен офис', assigned_stores: ['Раднево']
 };
 
-function env(rows, reports, dirTab) {
+function env(rows, reports, dirTab, view) {
   const h = boot({
     /* transport.js ПРЕДИ stock-differences.js — редът от index.html. */
     modules: ['transport.js', 'stock-returns.js', 'stock-differences.js'],
@@ -75,6 +75,8 @@ function env(rows, reports, dirTab) {
   h.w.sdData = JSON.parse(JSON.stringify(rows));
   h.w.diffReports = JSON.parse(JSON.stringify(reports || []));
   h.w.transportOrders = [];
+  /* Бутонът 🖨 в РЕДА е в изглед „Редове“, „🖨 Печат“ в КАРТАТА на бланката — в „Бланки“. Секциите за реда подават 'interstore'. */
+  h.w.sdView = view || (dirTab ? 'rows' : 'reports');
   h.w.sdFilter = 'all';
   h.w.sdTypeFilter = 'all';
   h.w.sdDirTab = dirTab || 'supplier';
@@ -250,7 +252,7 @@ function cellOf(cells, doc, label) {
   {
     const MANUAL = row({ id: 'l-m1', report_id: null, type: 'writein', status: 'pending',
       material_name: 'РЪЧНО ДОБАВЕН' });
-    const { w, doc } = env([MANUAL], []);
+    const { w, doc } = env([MANUAL], [], undefined, 'rows');
 
     if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
       ok('редът се вижда в таблицата', doc.body.textContent.indexOf('РЪЧНО ДОБАВЕН') >= 0);

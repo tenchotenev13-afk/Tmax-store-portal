@@ -108,6 +108,8 @@ function boot(user, opts) {
   w.currentUser = user;
   w.diffReports = JSON.parse(JSON.stringify(opts.reports || REPORTS));
   w.sdData = JSON.parse(JSON.stringify(opts.lines || LINES));
+  /* Подразбирането е изглед „Бланки“; тук повечето секции гледат главната таблица → „Редове“, а секциите за карти превключват. */
+  w.sdView = opts.view || 'rows';
   const origToast = w.toast;
   w.toast = (m, c) => { calls.toast.push(m); try { origToast(m, c); } catch (e) {} };
   return { w, calls, doc: w.document };
@@ -162,6 +164,7 @@ section('1. Снимки от магазина в главната таблиц�
 section('2. Табове по посока — и за новите бланки');
 {
   const { w, doc } = boot(ADMIN);
+  w.sdView = 'reports'; /* секцията гледа картите на бланките */
   w.renderStockDiff();
   let html = doc.getElementById('mod-stock-diff').innerHTML;
   ok('секцията "Нови подадени бланки" е налична', html.indexOf('Нови подадени бланки') >= 0);
@@ -175,8 +178,12 @@ section('2. Табове по посока — и за новите бланки
   html = doc.getElementById('mod-stock-diff').innerHTML;
   ok('таб "Междускладов": показва междускладовата бланка', html.indexOf('4600333') >= 0);
   ok('таб "Междускладов": скрива доставчиковите', html.indexOf('4100111') < 0 && html.indexOf('4100222') < 0);
+  w.setSDView('rows'); /* главната таблица е в изглед „Редове“ */
+  html = doc.getElementById('mod-stock-diff').innerHTML;
   ok('таб "Междускладов": главната таблица показва КРАН СПИРАТЕЛЕН', html.indexOf('КРАН СПИРАТЕЛЕН') >= 0);
   ok('таб "Междускладов": главната таблица крие ПРОФИЛ ПВЦ', html.indexOf('ПРОФИЛ ПВЦ') < 0);
+  w.setSDView('reports'); /* снимката е на картата на бланката */
+  html = doc.getElementById('mod-stock-diff').innerHTML;
   ok('снимката на междускладовата бланка се вижда', html.indexOf('https://x/c.png') >= 0);
 }
 
@@ -184,6 +191,7 @@ section('2. Табове по посока — и за новите бланки
 section('3. Търсачка + чипове по магазин');
 {
   const { w, doc } = boot(ADMIN);
+  w.sdView = 'reports'; /* секцията гледа картите на бланките */
   w.renderStockDiff();
   let html = doc.getElementById('mod-stock-diff').innerHTML;
   ok('има точно едно поле за търсене', (html.match(/id="sd-search-input"/g) || []).length === 1);
@@ -205,6 +213,7 @@ section('3. Търсачка + чипове по магазин');
 
   /* Търсене - филтрира и бланките, и таблицата */
   const { w: w2, doc: d2 } = boot(ADMIN);
+  w2.sdView = 'reports'; /* секцията гледа картите на бланките */
   w2.renderStockDiff();
   w2.setSDSearch('БОЙЛЕР');
   let h = d2.getElementById('mod-stock-diff').innerHTML;
@@ -225,7 +234,7 @@ section('3. Търсачка + чипове по магазин');
 /* ══════════ 4. Скрол позиция ══════════ */
 section('4. Не връща най-отгоре при работа по разлика');
 {
-  const { w, doc, calls } = boot(ADMIN);
+  const { w, doc, calls } = boot(ADMIN, { view: 'reports' }); /* бутоните за решение са в картата на бланката */
   w.renderStockDiff();
   w.__y = 1200; /* потребителят е скролнал надолу */
 
@@ -269,7 +278,7 @@ section('4. Не връща най-отгоре при работа по раз�
 /* Решение "Връщане" — трябва да създаде запис в "За връщане" и пак да пази позицията */
 function testReturnPath() {
   section('4б. Решение "Връщане" — авто-запис в "За връщане"');
-  const { w, doc, calls } = boot(ADMIN);
+  const { w, doc, calls } = boot(ADMIN, { view: 'reports' }); /* бутонът „Връщане“ е в картата на бланката */
   w.renderStockDiff();
   w.__y = 900;
   const btn = allBtns(doc).filter(b => b.dataset && b.dataset.id === 'l2'
@@ -313,6 +322,7 @@ function runRest() {
       'текст=' + s2.doc.getElementById('badge-stock-diff').textContent);
 
     const wh = boot(WH);
+    wh.w.sdView = 'rows';
     wh.w.renderStockDiff();
     ok('склад Добрич вижда само своята 1 насрещна', wh.doc.getElementById('badge-stock-diff').textContent === '1',
       'текст=' + wh.doc.getElementById('badge-stock-diff').textContent);
@@ -336,6 +346,7 @@ function runRest() {
   section('6. Видимост по роли (нищо не изтича)');
   {
     const wh = boot(WH);
+    wh.w.sdView = 'reports';
     wh.w.renderStockDiff();
     const h = wh.doc.getElementById('mod-stock-diff').innerHTML;
     ok('склад: НЯМА табове по посока', h.indexOf('Разлики от доставчици') < 0);
@@ -344,6 +355,7 @@ function runRest() {
     ok('склад: НЕ вижда чужди решени редове', h.indexOf('ПРОФИЛ ПВЦ') < 0);
 
     const st = boot(STORE);
+    st.w.sdView = 'reports';
     st.w.renderStockDiff();
     const hs = st.doc.getElementById('mod-stock-diff').innerHTML;
     ok('магазин: вижда собствената си бланка', hs.indexOf('4100111') >= 0);
@@ -389,10 +401,9 @@ function runRest() {
     });
     one.w.renderStockDiff();
     const h = one.doc.getElementById('mod-stock-diff').innerHTML;
-    /* Чиповете по магазин се рисуват в ДВА реда - над новите бланки и над
-       долната таблица (виж stock-diff-store-chips-bottom.test.js). Затова
-       бройката е 2 x ("Всички" + магазина), а не 2. */
-    ok('1 магазин -> чиповете пак се показват', (h.match(/data-store=/g) || []).length === 4,
+    /* Чиповете по магазин се рисуват само ВЕДНЪЖ (до търсенето; вторият ред над таблицата е махнат -
+       виж stock-diff-store-chips-bottom.test.js): "Всички" + магазина = 2. */
+    ok('1 магазин -> чиповете пак се показват', (h.match(/data-store=/g) || []).length === 2,
       'намерени: ' + (h.match(/data-store=/g) || []).length);
     ok('1 магазин -> има чип "Всички" и чип за самия магазин',
       h.indexOf('🏪 Всички (1)') >= 0 && h.indexOf('data-store="Враца"') >= 0);
@@ -423,8 +434,8 @@ function runRest() {
     /* точно на границата: 2 магазина -> чиповете СЕ показват */
     const two = boot(ADMIN, { reports: [REPORTS[0], REPORTS[1]], lines: [LINES[0], LINES[1]] });
     two.w.renderStockDiff();
-    /* 2 реда x ("Всички" + 2 магазина) = 6 */
-    ok('2 магазина -> чиповете се показват', (two.doc.getElementById('mod-stock-diff').innerHTML.match(/data-store=/g) || []).length === 6);
+    /* чиповете са веднъж: "Всички" + 2 магазина = 3 */
+    ok('2 магазина -> чиповете се показват', (two.doc.getElementById('mod-stock-diff').innerHTML.match(/data-store=/g) || []).length === 3);
   }
 
   /* ══════════ 8б. Нагледност: прогрес + затихване на решените ══════════ */
@@ -437,7 +448,7 @@ function runRest() {
       Object.assign({}, LINES[0], { id: 'p2', material_name: 'ВТОРИ АРТИКУЛ', type: 'writein' }),
       Object.assign({}, LINES[0], { id: 'p3', material_name: 'ТРЕТИ АРТИКУЛ', type: null })
     ];
-    const { w, doc } = boot(ADMIN, { reports: reps, lines: lns });
+    const { w, doc } = boot(ADMIN, { reports: reps, lines: lns, view: 'reports' });
     w.renderStockDiff();
     let h = doc.getElementById('mod-stock-diff').innerHTML;
     ok('баджът показва "1/3 решени"', h.indexOf('1/3 решени') >= 0);
@@ -470,7 +481,7 @@ function runRest() {
       && (b.getAttribute('onclick') || '').indexOf('resolveDiffLine') >= 0).length === 0);
 
     /* недокосната бланка */
-    const untouched = boot(ADMIN, { reports: reps, lines: [Object.assign({}, LINES[0], { type: null })] });
+    const untouched = boot(ADMIN, { reports: reps, lines: [Object.assign({}, LINES[0], { type: null })], view: 'reports' });
     untouched.w.renderStockDiff();
     const hu = untouched.doc.getElementById('mod-stock-diff').innerHTML;
     ok('недокосната бланка го казва изрично', hu.indexOf('0/1 — недокосната') >= 0);
@@ -478,6 +489,7 @@ function runRest() {
 
     /* корекцията от магазина има приоритет над зеленото */
     const corrected = boot(ADMIN, {
+      view: 'reports',
       reports: reps,
       lines: [Object.assign({}, LINES[0], { type: 'missing', store_corrected_at: '2026-08-17T10:00:00Z' })]
     });
@@ -487,7 +499,7 @@ function runRest() {
     ok('баджът КОРИГИРАНА се пази', hc.indexOf('КОРИГИРАНА') >= 0);
 
     /* магазинът и складът не виждат нищо ново/чупливо */
-    const st = boot(STORE, { reports: reps, lines: lns });
+    const st = boot(STORE, { reports: reps, lines: lns, view: 'reports' });
     st.w.renderStockDiff();
     const hst = st.doc.getElementById('mod-stock-diff').innerHTML;
     ok('магазин: вижда прогреса', hst.indexOf('1/3 решени') >= 0);

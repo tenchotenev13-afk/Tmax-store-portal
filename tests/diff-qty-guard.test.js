@@ -190,6 +190,7 @@ function mainCell(doc, name) {
       ok('бланка: „Реално" 2 на същия ред остава „2"', !!(realOk && realOk.td) && realOk.td.textContent === '2',
         realOk && realOk.td && realOk.td.innerHTML);
 
+      h.w.setSDView('rows'); /* долната таблица е в изглед „Редове“ (бланките — в „Бланки“) */
       const mBig = mainCell(h.doc, 'РЕШЕН ВД НОМЕР');
       if (ok('долна таблица: редът с „180493275" е на екрана', !!(mBig && mBig.td))) {
         ok('долна таблица: колоната е „Кол."', mBig.head[mBig.head.indexOf('Наименование') + 1] === 'Кол.', mBig.head.join('|'));

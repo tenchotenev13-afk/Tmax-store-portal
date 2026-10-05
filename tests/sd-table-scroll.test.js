@@ -71,6 +71,7 @@ function env(dirTab) {
     });
   });
   h.w.sdData = clone(lines); h.w.diffReports = clone(reps); h.w.sdSwaps = []; h.w.transportOrders = [];
+  h.w.sdView = 'rows'; /* изгледът „Редове" (таблицата) — подразбирането е „Бланки" */
   h.w.sdFilter = 'all'; h.w.sdTypeFilter = 'all'; h.w.sdStoreFilter = ''; h.w.sdSearch = '';
   h.w.sdDirTab = dirTab; h.w.sdShowDone = {};
   h.w.invalidateStoreCaches(); h.w.invalidateSuppliersCache();

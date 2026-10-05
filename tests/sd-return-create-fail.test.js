@@ -87,12 +87,14 @@ const settle = async () => { for (let i = 0; i < 12; i++) await ticks(); };
 const mod = h => h.doc.getElementById('mod-stock-diff');
 const srPosts = h => h.calls.post.filter(p => p.table === 'stock_returns');
 const lastToast = h => String(h.calls.toast[h.calls.toast.length - 1] || '');
-const markers = (h, id) => Array.prototype.filter.call(mod(h).querySelectorAll('[data-return-missing]'),
-  m => { const tr = m.closest('tr'); return tr && tr.querySelector('[data-id="' + id + '"]'); });
-const addBtns = (h, id) => Array.prototype.filter.call(mod(h).querySelectorAll('button[data-id="' + id + '"]'),
-  b => /sdAddMissingReturn/.test(b.getAttribute('onclick') || ''));
-const returnBtn = (h, id) => Array.prototype.find.call(mod(h).querySelectorAll('button[data-id="' + id + '"]'),
-  b => /resolveDiffLine/.test(b.getAttribute('onclick') || '') && /'return'/.test(b.getAttribute('onclick') || ''));
+/* Маркерът и „Добави в За връщане“ са на РЕДА (изглед „Редове“); „↩️ Връщане“ е в КАРТАТА на новата бланка (изглед „Бланки“). */
+const viewIs = (h, v) => { if (h.w.sdView !== v) h.w.setSDView(v); };
+const markers = (h, id) => (viewIs(h, 'rows'), Array.prototype.filter.call(mod(h).querySelectorAll('[data-return-missing]'),
+  m => { const tr = m.closest('tr'); return tr && tr.querySelector('[data-id="' + id + '"]'); }));
+const addBtns = (h, id) => (viewIs(h, 'rows'), Array.prototype.filter.call(mod(h).querySelectorAll('button[data-id="' + id + '"]'),
+  b => /sdAddMissingReturn/.test(b.getAttribute('onclick') || '')));
+const returnBtn = (h, id) => (viewIs(h, 'reports'), Array.prototype.find.call(mod(h).querySelectorAll('button[data-id="' + id + '"]'),
+  b => /resolveDiffLine/.test(b.getAttribute('onclick') || '') && /'return'/.test(b.getAttribute('onclick') || '')));
 
 async function resolveAsReturn(h) {
   await settle();

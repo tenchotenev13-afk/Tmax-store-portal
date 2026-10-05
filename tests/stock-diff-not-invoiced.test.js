@@ -172,10 +172,9 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
     realClick(h.w, notInvoicedBtn(h.doc));
     await ticks();
     if (guard('прилагане на PATCH-овете и пренарисуване', () => applyPatchesAndRender(h))) {
-      const txt = mod(h.doc).textContent;
-      /* Картите при „Всички типове" — думите за 'all' не се пипат. */
-      ok('картата „Чакащи" брои 1', /Чакащи\s*1/.test(txt), txt.slice(0, 300));
-      ok('картата „Приключени" брои 0', /Приключени\s*0/.test(txt), txt.slice(0, 300));
+      h.w.setSDView('rows'); /* картите ги няма — броевете са в чиповете по статус (изглед „Редове“) */
+      const takenChip0 = chipByF(h.doc, 'taken', 'setSDFilter');
+      ok('чипът „Приключени“ казва (0)', !!takenChip0 && /\(0\)/.test(takenChip0.textContent), takenChip0 && takenChip0.textContent);
 
       const pending = chipByF(h.doc, 'pending', 'setSDFilter');
       if (ok('чипът за чакащи е на екрана', !!pending)) {
@@ -203,8 +202,8 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
           JSON.stringify(chip.textContent.trim()));
         realClick(h.w, chip);
         const txt2 = mod(h.doc).textContent;
-        ok('при филтър по типа картата казва „Чака решение 1"', /Чака решение\s*1/.test(txt2), txt2.slice(0, 300));
-        ok('и „Приключена 0"', /Приключена\s*0/.test(txt2), txt2.slice(0, 300));
+        ok('при филтър по типа чипът казва „Чака решение (1)"', /Чака решение\s*\(1\)/.test(txt2), txt2.slice(0, 300));
+        ok('и „Приключена (0)"', /Приключена\s*\(0\)/.test(txt2), txt2.slice(0, 300));
       }
     }
   }
@@ -254,6 +253,7 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
       Array.prototype.some.call(r.querySelectorAll('button'), b => /sdMarkTaken/.test(b.getAttribute('onclick') || '')));
 
     const h = env([REV], [WAIT], 'supplier');
+    h.w.sdView = 'rows'; /* изгледът „Редове“ — таблицата и чиповете; подразбирането е „Бланки“ */
     if (guard('рендер', () => h.w.renderStockDiff())) {
       ok('редът е в долната таблица', mainTableRows(h.doc).length === 1, 'редове: ' + mainTableRows(h.doc).length);
       const bW = finalBtn(h.doc, 'writein'), bR = finalBtn(h.doc, 'return');
@@ -287,6 +287,7 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
     }
 
     const h2 = env([REV], [WAIT], 'supplier');
+    h2.w.sdView = 'rows';
     guard('рендер (заприх.)', () => h2.w.renderStockDiff());
     const bW2 = finalBtn(h2.doc, 'writein');
     if (ok('„Заприх.": бутонът е на екрана', !!bW2)) {
@@ -313,6 +314,7 @@ const sdPatch = calls => calls.patch.filter(p => /stock_differences/.test(p.url)
     hs.w.diffReports = [JSON.parse(JSON.stringify(REV))];
     hs.w.sdFilter = 'all'; hs.w.sdTypeFilter = 'all'; hs.w.sdStoreFilter = ''; hs.w.sdSearch = '';
     hs.w.sdDirTab = 'supplier';
+    hs.w.sdView = 'rows';
     if (guard('рендер (магазин)', () => hs.w.renderStockDiff())) {
       ok('магазин: редът се вижда', mainTableRows(hs.doc).length === 1, 'редове: ' + mainTableRows(hs.doc).length);
       ok('магазин: НЯМА бутоните за крайно решение', !finalBtn(hs.doc, 'writein') && !finalBtn(hs.doc, 'return'));

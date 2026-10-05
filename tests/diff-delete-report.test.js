@@ -117,6 +117,7 @@ section('1. admin вижда 🗑 и в картата, и на реда');
       }
       ok('в картата 🖨 Печат си стои', !!btn(c, '🖨'));
     }
+    h.w.setSDView('rows'); /* редът е в изглед „Редове“, картата — в „Бланки“ */
     const tr = trOf(h.doc, 'l-a1');
     if (ok('редът от бланката е в главната таблица', !!tr)) {
       const b = delBtns(tr);
@@ -132,6 +133,7 @@ section('1. admin вижда 🗑 и в картата, и на реда');
 section('2. ред без report_id (ръчно добавен) НЕ показва 🗑');
 {
   const h = env('admin');
+  h.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
   guard('рендер', () => h.w.renderStockDiff());
   const tr = trOf(h.doc, 'l-m1');
   if (ok('ръчният ред е в таблицата', !!tr)) {
@@ -149,10 +151,13 @@ section('3. accounting НЕ вижда 🗑, но вижда стария ✕');
   const wrap = h.doc.getElementById('mod-stock-diff');
   ok('никъде в модула няма 🗑 бутон', delBtns(wrap).length === 0,
      'намерени: ' + delBtns(wrap).length);
+  h.w.setSDView('rows');
+  ok('и в изглед „Редове“ няма 🗑 бутон', delBtns(h.doc.getElementById('mod-stock-diff')).length === 0);
   const tr = trOf(h.doc, 'l-a1');
   if (ok('редът е видим за accounting', !!tr)) {
     ok('✕ за реда е наличен', !!btn(tr, '✕'));
   }
+  h.w.setSDView('reports');
   ok('картата на бланката се вижда', !!card(h.doc));
   ok('в картата няма 🗑', delBtns(card(h.doc)).length === 0);
   ok('sdCanDeleteReport() е false за accounting', h.w.sdCanDeleteReport() === false);

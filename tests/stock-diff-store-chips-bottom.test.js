@@ -1,13 +1,9 @@
-/* „Разлики": чиповете по магазин се рисуват втори път — над долната таблица.
+/* „Разлики": чиповете по магазин са САМО веднъж — над превключвателя на изгледите, до търсенето.
 
-   sdStoreChipsHtml() стоеше само веднъж, над непрегледаните бланки. Филтърът
-   sdStoreFilter важи и за долната таблица (sdTableRows), но тя е екрани
-   по-надолу и Цветелина не вижда чиповете оттам.
-
-   Сега същата функция се вика втори път, непосредствено ПРЕДИ реда с типовите
-   чипове („Всички типове / Заприхождаване / Връщане / Липса") и СЛЕД картите
-   Чакащи/Приключени. Логиката не се дублира: един филтър, едни бройки, а
-   кликът на който и да е ред пренарисува целия модул.
+   До част 1 на новата подредба sdStoreChipsHtml() се викаше втори път — над долната таблица, защото
+   тя беше екрани по-надолу. Сега таблицата е в собствен изглед („Решени редове"), превключвателят е
+   веднага под чиповете, и вторият ред изчезна. Филтърът sdStoreFilter важи и за двата изгледа
+   (бланки и таблица): един филтър, едни бройки, а кликът пренарисува целия модул.
 
    Пускане:  node tests/stock-diff-store-chips-bottom.test.js .
 */
@@ -42,6 +38,7 @@ function env(rows) {
   h.w.sdData = JSON.parse(JSON.stringify(rows));
   h.w.diffReports = [];
   h.w.sdTypeFilter = 'all';
+  h.w.sdView = 'rows';
   h.w.sdFilter = 'all';
   h.w.sdStoreFilter = '';
   h.w.sdSearch = '';
@@ -85,68 +82,59 @@ const before = (a, b) => !!(a.compareDocumentPosition(b) & 4); /* DOCUMENT_POSIT
 
 (async function run() {
 
-  section('а) Два реда чипове; долният е СЛЕД картите и ПРЕДИ типовите чипове');
+  section('а) Един ред чипове — над превключвателя на изгледите и след търсенето');
   {
     const { w, doc } = env(ROWS);
     if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
       ok('контейнерът #mod-stock-diff съществува', !!mod(doc));
       const troyan = storeChips(doc, 'Троян');
-      ok('точно 2 бутона с data-store="Троян"', troyan.length === 2, 'брой: ' + troyan.length);
-      ok('точно 2 бутона „🏪 Всички"', storeChips(doc, '').length === 2,
-        'брой: ' + storeChips(doc, '').length);
+      ok('точно 1 бутон с data-store="Троян"', troyan.length === 1, 'брой: ' + troyan.length);
+      ok('точно 1 бутон „🏪 Всички"', storeChips(doc, '').length === 1, 'брой: ' + storeChips(doc, '').length);
       const rows = chipRows(doc);
-      if (ok('точно 2 реда чипове', rows.length === 2, 'брой: ' + rows.length)) {
-        const grid = cardsGrid(doc), types = typeChipAll(doc);
-        if (ok('картите и типовите чипове се намират', !!grid && !!types)) {
-          ok('горният ред е ПРЕДИ картите', before(rows[0], grid));
-          ok('долният ред е СЛЕД картите', before(grid, rows[1]));
-          ok('долният ред е ПРЕДИ типовите чипове', before(rows[1], types));
+      if (ok('точно 1 ред чипове', rows.length === 1, 'брой: ' + rows.length)) {
+        const search = doc.getElementById('sd-search-input'), sw = doc.getElementById('sd-view-switch'), types = typeChipAll(doc);
+        if (ok('търсенето, превключвателят и типовите чипове се намират', !!search && !!sw && !!types)) {
+          ok('редът чипове е СЛЕД търсенето', before(search, rows[0]));
+          ok('редът чипове е ПРЕДИ превключвателя на изгледите', before(rows[0], sw));
+          ok('типовите чипове са СЛЕД превключвателя (в изглед „Редове")', before(sw, types));
         }
-        ok('двата реда са еднакви — едни и същи бутони и бройки',
-          rows[0].textContent === rows[1].textContent,
-          rows[0].textContent + ' | ' + rows[1].textContent);
+        ok('няма карти Чакащи/Приключени (grid с 2 колони)', !cardsGrid(doc));
       }
     }
   }
 
-  section('б) Клик на „Троян" в ДОЛНИЯ ред → таблицата и двата реда');
+  section('б) Клик на „Троян" → таблицата и редът чипове');
   {
     const { w, doc } = env(ROWS);
     guard('рендер', () => w.renderStockDiff());
     ok('без филтър таблицата има 3 реда', mainRows(doc).length === 3, 'редове: ' + mainRows(doc).length);
-    const bottom = storeChips(doc, 'Троян')[1];
-    if (ok('долният чип „Троян" е на екрана', !!bottom)) {
-      realClick(w, bottom);
+    const chip = storeChips(doc, 'Троян')[0];
+    if (ok('чипът „Троян" е на екрана', !!chip)) {
+      realClick(w, chip);
       ok('sdStoreFilter е Троян', w.sdStoreFilter === 'Троян', JSON.stringify(w.sdStoreFilter));
       const rows = mainRows(doc);
       ok('таблицата показва 2 реда', rows.length === 2, 'редове: ' + rows.length);
-      ok('и двата са на Троян', rows.every(r => r.textContent.indexOf('Троян') >= 0),
-        rows.map(r => r.textContent.slice(0, 40)).join(' | '));
+      ok('и двата са на Троян', rows.every(r => r.textContent.indexOf('Троян') >= 0), rows.map(r => r.textContent.slice(0, 40)).join(' | '));
       ok('Раднево го няма', rows.every(r => r.textContent.indexOf('РАДНЕВО') < 0));
       const troyan = storeChips(doc, 'Троян');
-      ok('„Троян" е маркиран и в двата реда',
-        troyan.length === 2 && troyan.every(isActive), troyan.map(isActive).join(','));
-      ok('„🏪 Всички" не е маркиран в нито един',
-        storeChips(doc, '').every(b => !isActive(b)), storeChips(doc, '').map(isActive).join(','));
+      ok('„Троян" е маркиран', troyan.length === 1 && troyan.every(isActive), troyan.map(isActive).join(','));
+      ok('„🏪 Всички" не е маркиран', storeChips(doc, '').every(b => !isActive(b)), storeChips(doc, '').map(isActive).join(','));
     }
   }
 
-  section('в) Клик на „🏪 Всички" в ГОРНИЯ ред → филтърът пада и в двата');
+  section('в) Клик на „🏪 Всички" → филтърът пада');
   {
     const { w, doc } = env(ROWS);
     w.sdStoreFilter = 'Троян';
     guard('рендер с активен филтър', () => w.renderStockDiff());
     ok('стартово таблицата е филтрирана до 2', mainRows(doc).length === 2);
-    const topAll = storeChips(doc, '')[0];
-    if (ok('горният „🏪 Всички" е на екрана', !!topAll)) {
-      realClick(w, topAll);
+    const all = storeChips(doc, '')[0];
+    if (ok('„🏪 Всички" е на екрана', !!all)) {
+      realClick(w, all);
       ok('sdStoreFilter е празен', w.sdStoreFilter === '', JSON.stringify(w.sdStoreFilter));
       ok('таблицата пак показва 3 реда', mainRows(doc).length === 3, 'редове: ' + mainRows(doc).length);
-      ok('„🏪 Всички" е маркиран и в двата реда',
-        storeChips(doc, '').length === 2 && storeChips(doc, '').every(isActive),
-        storeChips(doc, '').map(isActive).join(','));
-      ok('„Троян" не е маркиран в нито един',
-        storeChips(doc, 'Троян').every(b => !isActive(b)), storeChips(doc, 'Троян').map(isActive).join(','));
+      ok('„🏪 Всички" е маркиран', storeChips(doc, '').length === 1 && storeChips(doc, '').every(isActive));
+      ok('„Троян" не е маркиран', storeChips(doc, 'Троян').every(b => !isActive(b)));
     }
   }
 
@@ -154,9 +142,18 @@ const before = (a, b) => !!(a.compareDocumentPosition(b) & 4); /* DOCUMENT_POSIT
   {
     const { w, doc } = env([]);
     if (guard('рендер без данни', () => w.renderStockDiff())) {
-      ok('няма бутони по магазин изобщо', storeChips(doc, '').length === 0,
-        'брой: ' + storeChips(doc, '').length);
+      ok('няма бутони по магазин изобщо', storeChips(doc, '').length === 0, 'брой: ' + storeChips(doc, '').length);
     }
+  }
+
+  section('д) Чиповете са в ДВАТА изгледа (един и същ филтър)');
+  {
+    const { w, doc } = env(ROWS);
+    w.sdView = 'reports';
+    guard('рендер (Бланки)', () => w.renderStockDiff());
+    ok('в изглед „Бланки“ чиповете са точно веднъж', storeChips(doc, 'Троян').length === 1 && chipRows(doc).length === 1);
+    w.setSDView('rows');
+    ok('в изглед „Редове“ — също веднъж', storeChips(doc, 'Троян').length === 1 && chipRows(doc).length === 1);
   }
 
   report();

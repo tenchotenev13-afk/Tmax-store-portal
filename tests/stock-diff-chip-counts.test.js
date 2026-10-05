@@ -64,6 +64,7 @@ function env(rows, reports) {
   h.w.sdData = JSON.parse(JSON.stringify(rows));
   h.w.diffReports = JSON.parse(JSON.stringify(reports || []));
   h.w.sdTypeFilter = 'all';
+  h.w.sdView = 'rows'; /* изгледът „Редове“ (таблицата) — подразбирането е „Бланки“ */
   h.w.sdFilter = 'all';
   h.w.sdStoreFilter = '';
   h.w.sdSearch = '';
@@ -193,6 +194,7 @@ function chipMatchesTable(w, doc, chip, label) {
       ok('"Приключени" е 0', chipNumber(statusChip(doc, 'taken')) === 0);
       ok('типът writein е 0', chipNumber(typeChip(doc, 'writein')) === 0);
       ok('таблицата е празна', tableRowCount(doc) === 0);
+      w.setSDView('reports'); /* непрегледаните бланки са в изглед „Бланки“ */
       ok('секцията "За преглед" пак показва непрегледаните',
          doc.getElementById('mod-stock-diff').innerHTML.indexOf('НЕПРЕГЛЕДАН 1') >= 0);
     }

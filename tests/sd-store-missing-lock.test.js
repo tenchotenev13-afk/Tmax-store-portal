@@ -48,6 +48,7 @@ function env(user) {
   });
   h.w.sdData = JSON.parse(JSON.stringify(LINES));
   h.w.diffReports = []; h.w.transportOrders = [];
+  h.w.sdView = 'rows'; /* изгледът „Редове" (таблицата) — подразбирането е „Бланки" */
   h.w.sdFilter = 'all'; h.w.sdTypeFilter = 'all'; h.w.sdStoreFilter = ''; h.w.sdSearch = ''; h.w.sdDirTab = 'supplier';
   h.w.loadAllSuppliers = () => Promise.resolve(['ТЕСИ ООД']);
   h.w.renderStockDiff();

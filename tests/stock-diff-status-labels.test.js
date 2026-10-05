@@ -37,6 +37,7 @@ function env(rows) {
   h.w.sdData = JSON.parse(JSON.stringify(rows));
   h.w.diffReports = [];
   h.w.sdTypeFilter = 'all';
+  h.w.sdView = 'rows'; /* изгледът „Редове" (таблицата) — подразбирането е „Бланки" */
   h.w.sdFilter = 'all';
   return h;
 }

@@ -44,6 +44,7 @@ function env(rows, reports, over) {
   }, over || {}));
   h.w.sdData = JSON.parse(JSON.stringify(rows));
   h.w.diffReports = JSON.parse(JSON.stringify(reports || []));
+  h.w.sdView = 'rows'; /* изгледът „Редове“ (таблицата) — подразбирането е „Бланки“ */
   h.w.sdFilter = 'all';
   h.w.sdTypeFilter = 'all';
   h.w.sdDirTab = 'supplier';
@@ -79,6 +80,7 @@ function sdPatch(calls) {
     };
     const ROWS = [row({ id: 'l-1', report_id: 'rep-1', type: null, status: 'new' })];
     const { w, doc, calls } = env(ROWS, [REPORT]);
+    w.sdView = 'reports'; /* бланка в статус new живее в картата — изглед „Бланки“ */
 
     if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
       const b = btn(doc, '📥 Заприх.');

@@ -134,6 +134,7 @@ function offline(w) {
     const h = env({ PATCH: { status: 400, body: PG_ERROR } });
     h.w.sdData = [ROW];
     h.w.diffReports = [];
+    h.w.sdView = 'rows'; /* изгледът „Редове" (таблицата) — подразбирането е „Бланки" */
     h.w.sdFilter = 'all';
     h.w.renderStockDiff();
     /* Етикетът на бутона следва типа: при 'return' е "✅ Върната", не "Взета". */

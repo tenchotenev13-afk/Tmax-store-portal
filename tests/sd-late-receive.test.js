@@ -310,6 +310,7 @@ async function openAndFill(h, date, doc, note) {
     {
       /* Главната таблица - същият текст през sdStoreResponseLabel. */
       const h = env(CVETI, [saved], { filter: 'all' });
+      h.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
       h.w.renderStockDiff();
       const table = Array.prototype.find.call(h.doc.querySelectorAll('#mod-stock-diff table'),
         t => t.querySelector('thead') && t.querySelector('thead').textContent.indexOf('Кредитно') >= 0);

@@ -58,6 +58,7 @@ function env(lines) {
   h.w.sdData = JSON.parse(JSON.stringify(lines));
   h.w.diffReports = JSON.parse(JSON.stringify(REPS));
   h.w.transportOrders = [];
+  h.w.sdView = 'rows'; /* изгледът „Редове" (таблицата) — подразбирането е „Бланки" */
   h.w.sdFilter = 'all'; h.w.sdTypeFilter = 'all'; h.w.sdStoreFilter = ''; h.w.sdSearch = '';
   h.w.sdDirTab = 'supplier';
   h.cap = { aoas: [], files: [] };

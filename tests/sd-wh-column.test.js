@@ -81,11 +81,14 @@ function env(user, lines, reports, dirTab) {
     },
     writeFile: () => {}
   };
+  h.w.sdView = 'reports'; /* изгледът на екрана за тази проверка */
   h.w.renderStockDiff();
   return h;
 }
 
-const card = (h, id) => h.doc.getElementById('diff-rep-' + id);
+/* Картата на бланката е в изглед „Бланки“, долната таблица и Excel — в „Редове“: помощниците превключват сами. */
+const viewIs = (h, v) => { if (h.w.sdView !== v) h.w.setSDView(v); };
+const card = (h, id) => (viewIs(h, 'reports'), h.doc.getElementById('diff-rep-' + id));
 const ths = (h, id) => Array.prototype.map.call(card(h, id).querySelectorAll('th'), x => x.textContent.trim());
 const dataRows = (h, id) => Array.prototype.filter.call(card(h, id).querySelectorAll('tr'),
   tr => tr.querySelectorAll('td').length > 1 && !tr.classList.contains('sd-done-toggle'));
@@ -93,6 +96,7 @@ const whBtns = (h, id) => Array.prototype.filter.call(card(h, id).querySelectorA
   x => /openWarehouseResponseModal\(/.test(x.getAttribute('onclick') || ''));
 /* Долната таблица — последната таблица в модула, която НЕ е в карта на бланка. */
 function bottomTable(h) {
+  viewIs(h, 'rows');
   const t = Array.prototype.filter.call(h.doc.querySelectorAll('#mod-stock-diff table'),
     x => !x.closest('[id^="diff-rep-"]'));
   return t[t.length - 1] || null;
@@ -102,6 +106,7 @@ const bottomThs = h => bottomTable(h)
 const bottomRow = h => bottomTable(h)
   ? Array.prototype.find.call(bottomTable(h).querySelectorAll('tr'), tr => tr.querySelector('td')) : null;
 async function excel(h) {
+  viewIs(h, 'rows');
   const b = btn(h.doc.getElementById('mod-stock-diff'), '📥 Excel');
   if (!b) return null;
   realClick(h.w, b);

@@ -199,6 +199,7 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
       line('l-5', { id: 'l-5', report_id: 'r-2', warehouse_response: 'return', store_response: 'sap_done' })
     ];
     const h = env(AFTER, USER, reports, lines);
+    h.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
     if (guard('renderStockDiff() не хвърля', () => h.w.renderStockDiff())) {
       const b = btn(mod(h), 'Чакат моя отговор');
       if (ok('чипът „Чакат моя отговор" го има', !!b)) {
@@ -230,6 +231,7 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
        разликата между „общо" и „в подтаба" не се вижда. */
     const hSup = env(AFTER, USER, reports, lines);
     hSup.w.sdDirTab = 'supplier';
+    hSup.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
     if (guard('рендер в подтаб „Доставчици" не хвърля', () => hSup.w.renderStockDiff())) {
       const bs = btn(mod(hSup), 'Чакат моя отговор');
       ok('чипът в „Доставчици" показва 0', !!bs && (bs.textContent || '').indexOf('(0)') >= 0,
@@ -241,6 +243,7 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
 
     /* Преди 12.10 обяснението го няма, но чипът и филтърът работят. */
     const h2 = env(BEFORE, USER, reports, lines);
+    h2.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
     if (guard('renderStockDiff() преди датата не хвърля', () => h2.w.renderStockDiff())) {
       ok('преди 12.10 обяснение НЯМА', !h2.doc.getElementById('sd-waiting-note'));
       ok('а чипът си е там', !!btn(mod(h2), 'Чакат моя отговор'));
@@ -259,6 +262,7 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
   section('7. Нула чакащи → обяснението поздравява');
   {
     const h = env(AFTER, USER, [rep_('r-1')], [line('l-1', { warehouse_response: 'will_send' })]);
+    h.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
     if (guard('рендер не хвърля', () => h.w.renderStockDiff())) {
       const b = btn(mod(h), 'Чакат моя отговор');
       ok('чипът стои и при 0', !!b && (b.textContent || '').indexOf('(0)') >= 0, b && b.textContent.trim());

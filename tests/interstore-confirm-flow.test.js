@@ -237,6 +237,7 @@ const BACK = '📬 Прието обратно';
     /* Старият предикат беше само !r.type - точно него сменяме. */
     ok('старият предикат (!r.type) би го изхвърлил', !rec.type);
 
+    h.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
     if (guard('renderStockDiff() не хвърля при type=null', () => h.w.renderStockDiff())) {
       const t = mainTable(h.doc);
       if (ok('главната таблица съществува', !!t)) {

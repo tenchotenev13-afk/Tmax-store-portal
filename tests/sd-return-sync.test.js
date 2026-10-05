@@ -96,6 +96,7 @@ async function resolveToWritein(h) {
 }
 /* Модалът: ✏️ на реда в главната таблица → тип → Запази. */
 async function modalToType(h, type) {
+  h.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
   h.w.renderStockDiff();
   const edit = btn(h.doc, '✏️');
   if (!edit) return false;

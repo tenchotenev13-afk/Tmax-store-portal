@@ -44,6 +44,7 @@ function env(rows) {
   h.w.sdData = JSON.parse(JSON.stringify(rows));
   h.w.diffReports = [];
   h.w.sdTypeFilter = 'all';
+  h.w.sdView = 'rows'; /* изгледът „Редове“ (таблицата) — подразбирането е „Бланки“ */
   h.w.sdFilter = 'all';
   return h;
 }
@@ -62,11 +63,12 @@ function chipCount(doc, which) {
   const m = el && el.textContent.match(/\((\d+)\)/);
   return m ? parseInt(m[1], 10) : -1;
 }
-/* Числото в картата - вторият <div> вътре в картата с дадения етикет. */
+/* Картите Чакащи/Приключени са махнати (изглед „Редове“) — броевете им са в чиповете по статус:
+   „Чакащи“/„Незаприходена“ = чипът pending, „Приключени“/„Заприходена“ = чипът taken. Името е
+   запазено, за да остане четим смисълът на проверките. */
+const CARD_TO_CHIP = { 'Приключени': 'taken', 'Заприходена': 'taken', 'Чакащи': 'pending', 'Незаприходена': 'pending' };
 function cardCount(doc, label) {
-  const m = doc.getElementById('mod-stock-diff').innerHTML
-    .match(new RegExp(label + '</div><div[^>]*>(\\d+)</div>'));
-  return m ? parseInt(m[1], 10) : -1;
+  return chipCount(doc, CARD_TO_CHIP[label]);
 }
 function rowVisible(doc, name) {
   return doc.getElementById('mod-stock-diff').innerHTML.indexOf(name) >= 0;

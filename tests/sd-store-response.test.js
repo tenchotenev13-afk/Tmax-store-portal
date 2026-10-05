@@ -485,6 +485,7 @@ const OLD = '✅ Получено';
         completed_by: 'Управител Петрич', completed_at: '2026-09-01T10:00:00.000Z' })
     ]);
     h.w.sdFilter = 'all';
+    h.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
     h.w.renderStockDiff();
     /* Главната таблица се разпознава по заглавието "Кредитно" - само нейно е. */
     const t = Array.prototype.find.call(h.doc.querySelectorAll('#mod-stock-diff table'),

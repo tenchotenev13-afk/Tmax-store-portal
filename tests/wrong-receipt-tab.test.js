@@ -174,6 +174,7 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
   section('2. Броячът на подтаба съвпада с реалната таблица след клик');
   {
     const { w, doc } = env(ACCOUNTANT, 'supplier');
+    w.sdView = 'rows'; /* таблицата/редовете са в изглед „Редове“ */
     w.renderStockDiff();
     const t = dirTabBtn(doc, 'wrong_receipt');
     const promised = tabNumber(t);
@@ -458,6 +459,7 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
     ok('canEditSD(ред от доставчик) остава true', w.canEditSD(supLine) === true);
     ok('canEditSD() без аргумент е непроменена', w.canEditSD() === true);
 
+    w.sdView = 'rows'; /* таблицата/редовете са в изглед „Редове“ */
     w.renderStockDiff();
     const tbl = doc.getElementById('mod-stock-diff');
     ok('редът се ВИЖДА от магазина', tbl.innerHTML.indexOf('КРАН СФЕРИЧЕН') >= 0);
@@ -470,6 +472,7 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
   {
     /* Корекция на нерешен ред — пътят, по който магазинът иначе има право. */
     const { w, doc, calls } = env(STORE_USER, 'wrong_receipt');
+    w.sdView = 'rows'; /* таблицата/редовете са в изглед „Редове“ */
     w.renderStockDiff();
     w.openSDCorrectModal('wr-1');
     ok('модалът за корекция изобщо не се отваря', !doc.getElementById('sdc-ov'));
@@ -486,6 +489,7 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
 
     /* Редакцията през главния модал — същата ключалка. */
     w.sdEditId = 'wr-2';
+    w.sdView = 'rows'; /* таблицата/редовете са в изглед „Редове“ */
     w.renderStockDiff();
     const nameInput = doc.getElementById('sd-name');
     if (ok('модалът се рендира', !!nameInput)) {
@@ -504,6 +508,7 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
     const { w, doc } = env(ACCOUNTANT, 'wrong_receipt');
     const wrLine = w.sdData.find(l => l.id === 'wr-2');
     ok('canEditSD(ред от сторна) е true за accounting', w.canEditSD(wrLine) === true);
+    w.sdView = 'rows'; /* таблицата/редовете са в изглед „Редове“ */
     w.renderStockDiff();
     const tbl = doc.getElementById('mod-stock-diff');
     ok('бутонът за редакция е налице', !!btn(tbl, '✏️'));
@@ -519,6 +524,7 @@ const repCard = (doc, id) => doc.getElementById('diff-rep-' + id);
     ok('но не и по чужд', w.canAttachSDLine(foreign) === false);
     ok('липсващ ред не хвърля', w.canAttachSDLine(null) === false);
 
+    w.sdView = 'reports'; /* картата на бланката е в изглед „Бланки“ */
     w.renderStockDiff();
     const card = repCard(doc, 'rep-wr');
     if (ok('картата на бланката се рендира', !!card)) {

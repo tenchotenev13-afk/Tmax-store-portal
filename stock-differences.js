@@ -7,6 +7,19 @@ var sdDirTab = 'supplier'; /* 'supplier' | 'interstore' - разделя И но
 var sdEditId = null;
 var sdSearch = '';
 var sdStoreFilter = ''; /* точен филтър по магазин (чипове), отделен от свободното търсене */
+/* Два изгледа вместо две зони една под друга: 'reports' = бланки за преглед (по подразбиране),
+   'rows' = решени редове (чипове по тип и статус, Excel, таблицата). Изборът се помни в
+   localStorage (temax_sd_view), достъпът е в try/catch — блокиран localStorage не чупи екрана. */
+var SD_VIEW_KEY = 'temax_sd_view';
+function sdViewGet(){
+  try{ var v = localStorage.getItem(SD_VIEW_KEY); if(v==='rows' || v==='reports') return v; }catch(e){}
+  return 'reports';
+}
+function sdViewSave(v){ try{ localStorage.setItem(SD_VIEW_KEY, v); }catch(e){} }
+var sdView = sdViewGet();
+function setSDView(v){ sdView = (v==='rows') ? 'rows' : 'reports'; sdViewSave(sdView); renderStockDiff(); }
+/* Отваря изгледа с бланките, без да рендира (за скокове отвън, преди showModule). */
+function sdOpenReportsView(){ sdView = 'reports'; sdViewSave('reports'); }
 /* Кои вече решени редове са с разгънати бутони за смяна на решението.
    По подразбиране решеният ред показва само спокоен чип с избора. */
 var sdExpandedResolve = {};
@@ -322,26 +335,17 @@ function renderStockDiff() {
   var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса', not_invoiced:'🧾 Не са фактурирани' };
   var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626', not_invoiced:'#64748b' };
 
-  /* Обхватът на КАРТИТЕ следва филтъра по тип - иначе етикетът казва
-     "Заприходена", а числото брои и връщанията. При "Всички типове" остават
-     сборни (там и думите са неутрални). Другите филтри (магазин, търсене,
-     посока, статус) НЕ стесняват картите - те са преглед на модула, не на
-     текущия изглед. Редовете без тип обаче отпадат и тук: те стоят в "За
-     преглед" и не могат да се появят в таблицата при никой филтър. */
-  var counted = sdData.filter(function(r){
-    if (!r.type) return false;
-    return sdTypeFilter==='all' || r.type===sdTypeFilter;
-  });
-  var pending = counted.filter(function(r){ return r.status==='pending'; }).length;
-  /* При тип „Връщане" картата „Взета" не брои приключените (те са в своя чип);
-     в сборния изглед „Приключени" ги брои - същото правило като sdTableRows. */
-  var taken   = counted.filter(function(r){ return sdIsTaken(r) || (sdTypeFilter!=='return' && sdIsCompleted(r)); }).length;
+  var cw = sdCounterWords(sdTypeFilter);
+  /* Дали обектът има „Чакат моя отговор“ (null за офис и склад) — за бележката горе и за чипа долу. */
+  var chipWaiting = sdWaitingVisible();
 
   var h = '<div style="max-width:1400px;margin:0 auto;padding:16px;">';
 
   /* Заглавие */
   h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">';
   h += '<div style="font-size:20px;font-weight:600;">📋 Разлики</div>';
+  /* Важната бележка е тънък надпис тук, не цяла лента: същият текст, жълт фон. */
+  h += '<div style="flex:1 1 auto;min-width:200px;"><span style="display:inline-block;background:#fff3cd;border:1px solid #ffc107;border-radius:6px;padding:3px 10px;font-size:11.5px;font-weight:600;color:#856404;">⚠️ ЗАПРИХОЖДАВАТЕ САМО АКО СТОКАТА Е ПРИ ВАС И Е В ДОБЪР ТЪРГОВСКИ ВИД!</span></div>';
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap;">';
   if (canSubmitDiff()) h += '<button onclick="openDiffSubmitModal()" style="border:none;background:#7c3aed;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📝 Подай бланка</button>';
   /* Магазинът подава "Сторна по грешен прием" за своя обект - същата форма,
@@ -349,11 +353,6 @@ function renderStockDiff() {
   if (canStoreSubmitWrongReceipt()) h += '<button onclick="openDiffSubmitModal({direction:\'wrong_receipt\'})" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">🧾 Грешен прием</button>';
   if (canAdd) h += '<button onclick="openSDModal(null)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави ръчно</button>';
   h += '</div></div>';
-
-  /* Важна бележка */
-  h += '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;font-weight:600;color:#856404;">'+
-    '⚠️ ЗАПРИХОЖДАВАТЕ САМО АКО СТОКАТА Е ПРИ ВАС И Е В ДОБЪР ТЪРГОВСКИ ВИД!'+
-    '</div>';
 
   /* Подтабове по посока - разделят И новоподадените бланки, И главната
      (резолвирана) таблица, за да не се смесват доставчиковите разлики
@@ -389,68 +388,6 @@ function renderStockDiff() {
   h += '<input id="sd-search-input" value="'+escVal(sdSearch)+'" oninput="setSDSearch(this.value)" placeholder="🔍 Търси по магазин, доставчик/изпращач, артикул, SAP, документ, поръчка..." style="width:100%;max-width:520px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 12px;font-size:12.5px;font-family:inherit;margin-bottom:10px;display:block;">';
   h += sdStoreChipsHtml();
 
-  /* Действията на магазините — само за логистичния склад, над бланките.
-     За всички останали sdActionsCard() връща празен низ. */
-  h += sdActionsCard();
-
-  /* Новоподадени бланки - чакат преглед от Цветелина */
-  h += renderDiffReportsSection();
-
-  /* Карти */
-  h += '<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:14px;max-width:400px;">';
-  var cw = sdCounterWords(sdTypeFilter);
-  h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #f59e0b;"><div style="font-size:11px;color:#64748b;">'+cw.pIcon+' '+cw.pending+'</div><div style="font-size:28px;font-weight:700;color:#f59e0b;font-family:DM Mono,monospace;">'+pending+'</div></div>';
-  h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:12px;border-left:3px solid #16a34a;"><div style="font-size:11px;color:#64748b;">'+cw.tIcon+' '+cw.taken+'</div><div style="font-size:28px;font-weight:700;color:#16a34a;font-family:DM Mono,monospace;">'+taken+'</div></div>';
-  h += '</div>';
-
-  /* Филтър по тип. Числото е "колко реда ще видиш при клик" - затова минава
-     през sdTableRows със заменен само типа, а активният филтър по статус,
-     магазин, търсене и посока остава. */
-  var typeCounts = {
-    writein:  sdTableRows({type:'writein'}).length,
-    'return': sdTableRows({type:'return'}).length,
-    missing:  sdTableRows({type:'missing'}).length,
-    not_invoiced: sdTableRows({type:'not_invoiced'}).length
-  };
-  /* Втори ред чипове по магазин, точно над филтрите на долната таблица.
-     Филтърът sdStoreFilter важи и за нея, но горният ред е екрани по-нагоре
-     (над непрегледаните бланки) и оттук не се вижда. Същата функция - един
-     филтър, едни бройки; кликът на който и да е от двата реда пренарисува
-     целия модул, тоест маркирането винаги е еднакво и в двата. При 0 магазина
-     функцията връща '' и двата реда изчезват заедно. */
-  h += sdStoreChipsHtml();
-  h += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">';
-  [['all','Всички типове'],['writein','📥 Заприхождаване ('+typeCounts.writein+')'],['return','↩️ Връщане ('+typeCounts['return']+')'],['missing','❓ Липса ('+typeCounts.missing+')'],['not_invoiced','🧾 Не са фактурирани ('+typeCounts.not_invoiced+')']].forEach(function(f){
-    var a = sdTypeFilter===f[0];
-    h += '<button data-f="'+f[0]+'" onclick="setSDTypeFilter(this.dataset.f)" style="border:1px solid '+(a?'#0f172a':'#e2e8f0')+';padding:4px 12px;border-radius:40px;font-size:11.5px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
-  });
-  h += '</div>';
-
-  /* Филтри по статус. Същият критерий - числото е броят редове след клика,
-     не общият брой в модула (за това са картите отгоре). */
-  var chipAll     = sdTableRows({status:'all'}).length;
-  var chipPending = sdTableRows({status:'pending'}).length;
-  var chipTaken   = sdTableRows({status:'taken'}).length;
-  h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
-  var statusChips = [['all','Всички ('+chipAll+')'],['pending',cw.pIcon+' '+cw.pending+' ('+chipPending+')'],['taken',cw.tIcon+' '+cw.taken+' ('+chipTaken+')']];
-  /* Четвърти чип САМО за обекта (складът и офисът имат свои изгледи): колко
-     реда чакат НЕГОВИЯ отговор. Числото е в РЕДОВЕ, както е и надписът до
-     задачата в Бюлетина; баджът на таба брои БЛАНКИ и го казва в подсказката
-     си. Чипът стои и при 0 — изчезващ брояч изглежда като счупен екран. */
-  var chipWaiting = sdWaitingVisible();
-  if (chipWaiting !== null) statusChips.push(['waiting','📝 Чакат моя отговор ('+chipWaiting+')']);
-  /* Трети чип само при тип „Връщане" - както в „За връщане". „Всички" ги
-     включва и там. */
-  if (sdTypeFilter==='return') statusChips.push(['completed','🏁 Приключени ('+sdTableRows({status:'completed'}).length+')']);
-  statusChips.forEach(function(f){
-    var a = sdFilter===f[0];
-    h += '<button data-f="'+f[0]+'" onclick="setSDFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
-  });
-  /* Excel на ТОЧНО видяното - същото място и стил като в „За връщане".
-     Бутонът е винаги тук, и при 0 реда (тогава износът казва „Няма редове"). */
-  h += '<button onclick="exportSDExcel()" style="margin-left:auto;border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">📥 Excel</button>';
-  h += '</div>';
-
   /* Какво остава на ОБЕКТА и какво следва от това. Броят е ОБЩИЯТ, не този в
      подтаба: задачата гледа всички междускладови редове, а обект, изчистил
      „Доставчици", иначе би решил, че е готов, и би чакал отметка, която няма
@@ -465,108 +402,166 @@ function renderStockDiff() {
          '</div>';
   }
 
-  /* Таблица */
-  if (!list.length) {
-    h += '<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📋</div><div style="margin-top:8px;">Няма записи.</div></div>';
+  /* Превключвател на изгледите — ВИНАГИ видим (и при 0). Числата са това, което се вижда при
+     текущите филтри: бланките — както в заглавието на секцията (sdReportsCount), редовете — sdTableRows(). */
+  var swWh = isLogisticsWarehouseUser();
+  h += '<div id="sd-view-switch" style="display:flex;gap:0;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-width:520px;">';
+  [['reports', swWh ? 'Бланки към мен' : 'Бланки за преглед', sdReportsCount()], ['rows', swWh ? 'Приети редове' : 'Решени редове', list.length]].forEach(function(v){
+    var a = sdView===v[0];
+    h += '<button data-sd-view="'+v[0]+'" onclick="setSDView(this.dataset.sdView)" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:'+(a?'#2f2f2f':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+v[1]+' ('+v[2]+')</button>';
+  });
+  h += '</div>';
+
+  if (sdView === 'reports') {
+    /* Изглед „Бланки“: действията на магазините (само склад) + бланките за преглед. При 0 — празно състояние. */
+    h += sdActionsCard();
+    var repHtml = renderDiffReportsSection();
+    h += repHtml || '<div id="sd-reports-empty" style="text-align:center;padding:50px 20px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:14px;"><div style="font-size:36px;">📭</div><div style="margin-top:8px;">Няма бланки за преглед</div></div>';
   } else {
-    /* Като Транспорт/Клиентски (.tbl-wrap.co-sticky-actions): скролът е в
-       обвивката, лентата е винаги долу на екрана, заглавията, „Магазин" и
-       бутоните са закачени, влачене с мишка (enableDragScroll по-долу).
-       Закачването и ширините са по КЛАС на клетката (sd-c-*), не по
-       :nth-child - „Отговор на склада" е само в „Междускладови" и броят
-       колони се мени по подтаб. Правилата са в index.html (.tbl-sd). */
-    h += '<div id="sd-tbl-wrap" class="tbl-wrap co-sticky-actions" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;">';
-    h += '<table class="tbl-sd" style="width:100%;border-collapse:collapse;font-size:12px;">';
-    h += '<thead><tr style="background:#f8fafc;">';
-    [['Тип','sd-c-type'],['Магазин','sd-c-store'],['Доставчик','sd-c-sup'],['Материал','sd-c-code'],['Наименование','sd-c-name'],['Кол.','sd-c-qty'],['Поръчка','sd-c-ord'],['Поръчка за връщане','sd-c-rord'],['Дата потвърд.','sd-c-date'],['Статус','sd-c-status'],['Кредитно','sd-c-credit'],['Снимки','sd-c-photo'],['Коментар','sd-c-cmt'],['Коментар Контролер','sd-c-ctl']].concat(showWh?[['Отговор на склада','sd-c-wh']]:[]).concat([['','sd-c-act']]).forEach(function(c){
-      h += '<th class="'+c[1]+'" style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c[0]+'</th>';
+    /* Изглед „Редове“: чипове по тип и статус, Excel и таблицата. */
+    /* Филтър по тип. Числото е "колко реда ще видиш при клик" - затова минава
+       през sdTableRows със заменен само типа, а активният филтър по статус,
+       магазин, търсене и посока остава. */
+    var typeCounts = {
+      writein:  sdTableRows({type:'writein'}).length,
+      'return': sdTableRows({type:'return'}).length,
+      missing:  sdTableRows({type:'missing'}).length,
+      not_invoiced: sdTableRows({type:'not_invoiced'}).length
+    };
+    h += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap;">';
+    [['all','Всички типове'],['writein','📥 Заприхождаване ('+typeCounts.writein+')'],['return','↩️ Връщане ('+typeCounts['return']+')'],['missing','❓ Липса ('+typeCounts.missing+')'],['not_invoiced','🧾 Не са фактурирани ('+typeCounts.not_invoiced+')']].forEach(function(f){
+      var a = sdTypeFilter===f[0];
+      h += '<button data-f="'+f[0]+'" onclick="setSDTypeFilter(this.dataset.f)" style="border:1px solid '+(a?'#0f172a':'#e2e8f0')+';padding:4px 12px;border-radius:40px;font-size:11.5px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
     });
-    /* Собствено id: над тази таблица стои секцията с непрегледаните бланки,
-       която също се рендира с <table><tbody>. Без id „редът в таблицата" е
-       неразличим от „редът в бланката" за всяка проверка отвън. */
-    h += '</tr></thead><tbody id="sd-rows">';
+    h += '</div>';
 
-    list.forEach(function(r) {
-      var isTaken = r.status === 'taken';
-      var statusBadge = sdRowStatusBadge(r);
-      /* Правата се смятат ПО РЕД, не веднъж за целия рендер - редовете от
-         "Сторна по грешен прием" са само за четене за магазина, а в един и същ
-         изглед може да има редове от повече от една посока. */
-      var canEdit = canEditSD(r);
-      /* Кредитно известие - релевантно само за тип "Липса" (доставчикът не ни е
-         доставил артикула, трябва финансово да ни компенсира) */
-      var creditCell = '—';
-      if (r.type === 'missing') {
-        creditCell = (canEdit && !sdStoreLockedMissing(r))
-          ? '<button data-id="'+r.id+'" onclick="sdToggleCreditNote(this.dataset.id)" style="border:none;border-radius:20px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;background:'+(r.credit_note_issued?'#f0fdf4':'#fef2f2')+';color:'+(r.credit_note_issued?'#16a34a':'#dc2626')+';">'+(r.credit_note_issued?'✅ Издадено':'❌ Няма')+'</button>'
-          : (r.credit_note_issued?'<span style="color:#16a34a;">✅ Издадено</span>':'<span style="color:#dc2626;">❌ Няма</span>');
-      }
-
-      h += '<tr style="border-bottom:1px solid #f1f5f9;">'+
-        '<td class="sd-c-type" style="padding:7px 10px;white-space:nowrap;"><span style="background:'+(TYPE_COLORS[r.type]||'#94a3b8')+'1a;color:'+(TYPE_COLORS[r.type]||'#64748b')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(TYPE_LABELS[r.type]||r.type||'—')+'</span></td>'+
-        '<td class="sd-c-store" style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
-        '<td class="sd-c-sup" style="padding:7px 10px;font-size:11px;color:#64748b;">'+esc(r.supplier||'')+'</td>'+
-        '<td class="sd-c-code" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.material_code||'')+'</td>'+
-        '<td class="sd-c-name" style="padding:7px 10px;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+sdReturnMissingMark(r)+'</td>'+
-        '<td class="sd-c-qty" style="padding:7px 10px;text-align:right;font-weight:600;">'+sdQtyCell(r.quantity,(r.quantity)||'')+'</td>'+
-        '<td class="sd-c-ord" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.order_number||'')+'</td>'+
-        '<td class="sd-c-rord" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.return_order_number||'')+'</td>'+
-        '<td class="sd-c-date" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.confirmed_date)+'</td>'+
-        '<td class="sd-c-status" style="padding:7px 10px;">'+statusBadge+'</td>'+
-        '<td class="sd-c-credit" style="padding:7px 10px;white-space:nowrap;">'+creditCell+'</td>'+
-        /* Снимките са прикачени на ниво БЛАНКА (differences_reports.photos), не
-           на реда - затова не се виждаха тук, след като редът бъде решен и
-           излезе от секцията "Нови подадени бланки" (напр. при директно
-           решение "Липса" без коментар). Под тях стоят и прикачените към САМИЯ
-           РЕД файлове (attachments) - там живеят снимките по сторната. */
-        '<td class="sd-c-photo" style="padding:7px 10px;">'+diffReportPhotoThumbs(r.report_id)+sdLineAttachCell(r)+'</td>'+
-        '<td class="sd-c-cmt" style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.comment||'')+'</td>'+
-        '<td class="sd-c-ctl" style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.resolution_comment||'')+(normSDAttachments(r.attachments).length?' 📎'+normSDAttachments(r.attachments).length:'')+'</td>'+
-        /* Под отговора на склада - отговорът на магазина. Само при зададен
-           store_response: без него sdStoreResponseLabel казва "чака магазина",
-           а тук стоят доставчикови и вече приключени редове. */
-        (showWh ? '<td class="sd-c-wh" style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+sdSwapSummary(r)+'</td>' : '')+
-        '<td class="sd-c-act" style="padding:7px 10px;white-space:nowrap;">';
-
-      /* status='received' е КРАЯТ на междускладовия поток. Такъв ред няма
-         type, тоест етикетът по-долу пада на "✅ Приета" и един клик би
-         записал status='taken' върху потвърждението - тоест би изтрил края
-         на потока и би върнал реда в "чакащи". Затова бутон няма. */
-      /* "Не са фактурирани" чака крайно решение. Вместо бутона за приключване
-         (той би го направил 'taken' без решение) редът предлага двете крайни
-         решения - същият resolveDiffLine като бутоните в новите бланки, тоест
-         сменя типа, при "Връщане" създава запис в "За връщане" и прилага
-         автоматичното количество. Само за който има право да решава. */
-      if (r.type==='not_invoiced' && !isTaken && canReviewDiff() && !isLogisticsWarehouseUser()) {
-        h += '<button data-id="'+r.id+'" onclick="resolveDiffLine(this.dataset.id,\'writein\')" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">📥 Заприх.</button>';
-        h += '<button data-id="'+r.id+'" onclick="resolveDiffLine(this.dataset.id,\'return\')" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">↩️ Връщане</button>';
-      }
-      /* Приключен ред няма „✅ Върната" - един клик би го върнал в „Взета". */
-      if (canEdit && !isTaken && r.status !== 'received' && r.type !== 'not_invoiced' && !sdIsCompleted(r) && !sdStoreLockedMissing(r)) {
-        var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : r.type==='not_invoiced' ? '🧾 Приключена' : '✅ Приета';
-        h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
-      }
-      if (canEdit) {
-        h += '<button data-id="'+r.id+'" onclick="openSDModal(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">✏️</button>';
-      }
-      /* Печат само за редове, дошли от бланка - ръчно добавените нямат
-         report_id, тоест няма какво да се разпечата. */
-      if (r.report_id) {
-        h += '<button data-rid="'+r.report_id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #e2e8f0;background:#fff;color:#475569;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">🖨</button>';
-      }
-      if (isAdmin) {
-        h += '<button data-id="'+r.id+'" onclick="sdDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✕</button>';
-      }
-      /* Триене на ЦЯЛАТА бланка — второ място нарочно: картата горе изчезва,
-         щом бланката бъде маркирана като прегледана (sdVisibleUnreviewedReports
-         филтрира !reviewed), тоест стара сгрешена бланка иначе е недостижима. */
-      if (r.report_id && sdCanDeleteReport()) {
-        h += '<button data-rid="'+r.report_id+'" onclick="sdDeleteReport(this.dataset.rid)" title="Изтрий ЦЯЛАТА бланка — редове и файлове, необратимо" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-left:2px;">🗑</button>';
-      }
-      h += '</td></tr>';
+    /* Филтри по статус. Същият критерий - числото е броят редове след клика,
+       не общият брой в модула (за това са картите отгоре). */
+    var chipAll     = sdTableRows({status:'all'}).length;
+    var chipPending = sdTableRows({status:'pending'}).length;
+    var chipTaken   = sdTableRows({status:'taken'}).length;
+    h += '<div style="display:flex;gap:8px;margin-bottom:12px;">';
+    var statusChips = [['all','Всички ('+chipAll+')'],['pending',cw.pIcon+' '+cw.pending+' ('+chipPending+')'],['taken',cw.tIcon+' '+cw.taken+' ('+chipTaken+')']];
+    /* Четвърти чип САМО за обекта (складът и офисът имат свои изгледи): колко
+       реда чакат НЕГОВИЯ отговор. Числото е в РЕДОВЕ, както е и надписът до
+       задачата в Бюлетина; баджът на таба брои БЛАНКИ и го казва в подсказката
+       си. Чипът стои и при 0 — изчезващ брояч изглежда като счупен екран. */
+    if (chipWaiting !== null) statusChips.push(['waiting','📝 Чакат моя отговор ('+chipWaiting+')']);
+    /* Трети чип само при тип „Връщане" - както в „За връщане". „Всички" ги
+       включва и там. */
+    if (sdTypeFilter==='return') statusChips.push(['completed','🏁 Приключени ('+sdTableRows({status:'completed'}).length+')']);
+    statusChips.forEach(function(f){
+      var a = sdFilter===f[0];
+      h += '<button data-f="'+f[0]+'" onclick="setSDFilter(this.dataset.f)" style="border:none;padding:5px 14px;border-radius:40px;font-size:12px;font-weight:600;cursor:pointer;background:'+(a?'#0f172a':'#f1f5f9')+';color:'+(a?'#fff':'#64748b')+';">'+f[1]+'</button>';
     });
-    h += '</tbody></table></div>';
-    h += '<div style="font-size:12px;color:#94a3b8;margin-top:8px;">'+list.length+' от '+sdData.length+' записа.</div>';
+    /* Excel на ТОЧНО видяното - същото място и стил като в „За връщане".
+       Бутонът е винаги тук, и при 0 реда (тогава износът казва „Няма редове"). */
+    h += '<button onclick="exportSDExcel()" style="margin-left:auto;border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">📥 Excel</button>';
+    h += '</div>';
+
+    /* Таблица */
+    if (!list.length) {
+      h += '<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📋</div><div style="margin-top:8px;">Няма записи.</div></div>';
+    } else {
+      /* Като Транспорт/Клиентски (.tbl-wrap.co-sticky-actions): скролът е в
+         обвивката, лентата е винаги долу на екрана, заглавията, „Магазин" и
+         бутоните са закачени, влачене с мишка (enableDragScroll по-долу).
+         Закачването и ширините са по КЛАС на клетката (sd-c-*), не по
+         :nth-child - „Отговор на склада" е само в „Междускладови" и броят
+         колони се мени по подтаб. Правилата са в index.html (.tbl-sd). */
+      h += '<div id="sd-tbl-wrap" class="tbl-wrap co-sticky-actions" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;">';
+      h += '<table class="tbl-sd" style="width:100%;border-collapse:collapse;font-size:12px;">';
+      h += '<thead><tr style="background:#f8fafc;">';
+      [['Тип','sd-c-type'],['Магазин','sd-c-store'],['Доставчик','sd-c-sup'],['Материал','sd-c-code'],['Наименование','sd-c-name'],['Кол.','sd-c-qty'],['Поръчка','sd-c-ord'],['Поръчка за връщане','sd-c-rord'],['Дата потвърд.','sd-c-date'],['Статус','sd-c-status'],['Кредитно','sd-c-credit'],['Снимки','sd-c-photo'],['Коментар','sd-c-cmt'],['Коментар Контролер','sd-c-ctl']].concat(showWh?[['Отговор на склада','sd-c-wh']]:[]).concat([['','sd-c-act']]).forEach(function(c){
+        h += '<th class="'+c[1]+'" style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c[0]+'</th>';
+      });
+      /* Собствено id: над тази таблица стои секцията с непрегледаните бланки,
+         която също се рендира с <table><tbody>. Без id „редът в таблицата" е
+         неразличим от „редът в бланката" за всяка проверка отвън. */
+      h += '</tr></thead><tbody id="sd-rows">';
+
+      list.forEach(function(r) {
+        var isTaken = r.status === 'taken';
+        var statusBadge = sdRowStatusBadge(r);
+        /* Правата се смятат ПО РЕД, не веднъж за целия рендер - редовете от
+           "Сторна по грешен прием" са само за четене за магазина, а в един и същ
+           изглед може да има редове от повече от една посока. */
+        var canEdit = canEditSD(r);
+        /* Кредитно известие - релевантно само за тип "Липса" (доставчикът не ни е
+           доставил артикула, трябва финансово да ни компенсира) */
+        var creditCell = '—';
+        if (r.type === 'missing') {
+          creditCell = (canEdit && !sdStoreLockedMissing(r))
+            ? '<button data-id="'+r.id+'" onclick="sdToggleCreditNote(this.dataset.id)" style="border:none;border-radius:20px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;background:'+(r.credit_note_issued?'#f0fdf4':'#fef2f2')+';color:'+(r.credit_note_issued?'#16a34a':'#dc2626')+';">'+(r.credit_note_issued?'✅ Издадено':'❌ Няма')+'</button>'
+            : (r.credit_note_issued?'<span style="color:#16a34a;">✅ Издадено</span>':'<span style="color:#dc2626;">❌ Няма</span>');
+        }
+
+        h += '<tr style="border-bottom:1px solid #f1f5f9;">'+
+          '<td class="sd-c-type" style="padding:7px 10px;white-space:nowrap;"><span style="background:'+(TYPE_COLORS[r.type]||'#94a3b8')+'1a;color:'+(TYPE_COLORS[r.type]||'#64748b')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(TYPE_LABELS[r.type]||r.type||'—')+'</span></td>'+
+          '<td class="sd-c-store" style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
+          '<td class="sd-c-sup" style="padding:7px 10px;font-size:11px;color:#64748b;">'+esc(r.supplier||'')+'</td>'+
+          '<td class="sd-c-code" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.material_code||'')+'</td>'+
+          '<td class="sd-c-name" style="padding:7px 10px;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+sdReturnMissingMark(r)+'</td>'+
+          '<td class="sd-c-qty" style="padding:7px 10px;text-align:right;font-weight:600;">'+sdQtyCell(r.quantity,(r.quantity)||'')+'</td>'+
+          '<td class="sd-c-ord" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.order_number||'')+'</td>'+
+          '<td class="sd-c-rord" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.return_order_number||'')+'</td>'+
+          '<td class="sd-c-date" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.confirmed_date)+'</td>'+
+          '<td class="sd-c-status" style="padding:7px 10px;">'+statusBadge+'</td>'+
+          '<td class="sd-c-credit" style="padding:7px 10px;white-space:nowrap;">'+creditCell+'</td>'+
+          /* Снимките са прикачени на ниво БЛАНКА (differences_reports.photos), не
+             на реда - затова не се виждаха тук, след като редът бъде решен и
+             излезе от секцията "Нови подадени бланки" (напр. при директно
+             решение "Липса" без коментар). Под тях стоят и прикачените към САМИЯ
+             РЕД файлове (attachments) - там живеят снимките по сторната. */
+          '<td class="sd-c-photo" style="padding:7px 10px;">'+diffReportPhotoThumbs(r.report_id)+sdLineAttachCell(r)+'</td>'+
+          '<td class="sd-c-cmt" style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.comment||'')+'</td>'+
+          '<td class="sd-c-ctl" style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.resolution_comment||'')+(normSDAttachments(r.attachments).length?' 📎'+normSDAttachments(r.attachments).length:'')+'</td>'+
+          /* Под отговора на склада - отговорът на магазина. Само при зададен
+             store_response: без него sdStoreResponseLabel казва "чака магазина",
+             а тук стоят доставчикови и вече приключени редове. */
+          (showWh ? '<td class="sd-c-wh" style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+sdSwapSummary(r)+'</td>' : '')+
+          '<td class="sd-c-act" style="padding:7px 10px;white-space:nowrap;">';
+
+        /* status='received' е КРАЯТ на междускладовия поток. Такъв ред няма
+           type, тоест етикетът по-долу пада на "✅ Приета" и един клик би
+           записал status='taken' върху потвърждението - тоест би изтрил края
+           на потока и би върнал реда в "чакащи". Затова бутон няма. */
+        /* "Не са фактурирани" чака крайно решение. Вместо бутона за приключване
+           (той би го направил 'taken' без решение) редът предлага двете крайни
+           решения - същият resolveDiffLine като бутоните в новите бланки, тоест
+           сменя типа, при "Връщане" създава запис в "За връщане" и прилага
+           автоматичното количество. Само за който има право да решава. */
+        if (r.type==='not_invoiced' && !isTaken && canReviewDiff() && !isLogisticsWarehouseUser()) {
+          h += '<button data-id="'+r.id+'" onclick="resolveDiffLine(this.dataset.id,\'writein\')" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">📥 Заприх.</button>';
+          h += '<button data-id="'+r.id+'" onclick="resolveDiffLine(this.dataset.id,\'return\')" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">↩️ Връщане</button>';
+        }
+        /* Приключен ред няма „✅ Върната" - един клик би го върнал в „Взета". */
+        if (canEdit && !isTaken && r.status !== 'received' && r.type !== 'not_invoiced' && !sdIsCompleted(r) && !sdStoreLockedMissing(r)) {
+          var takenLabel = r.type==='return' ? '✅ Върната' : r.type==='missing' ? '✅ Изписана' : r.type==='writein' ? '📥 Заприходена' : r.type==='not_invoiced' ? '🧾 Приключена' : '✅ Приета';
+          h += '<button data-id="'+r.id+'" onclick="sdMarkTaken(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;margin-right:2px;">'+takenLabel+'</button>';
+        }
+        if (canEdit) {
+          h += '<button data-id="'+r.id+'" onclick="openSDModal(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">✏️</button>';
+        }
+        /* Печат само за редове, дошли от бланка - ръчно добавените нямат
+           report_id, тоест няма какво да се разпечата. */
+        if (r.report_id) {
+          h += '<button data-rid="'+r.report_id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #e2e8f0;background:#fff;color:#475569;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">🖨</button>';
+        }
+        if (isAdmin) {
+          h += '<button data-id="'+r.id+'" onclick="sdDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✕</button>';
+        }
+        /* Триене на ЦЯЛАТА бланка — второ място нарочно: картата горе изчезва,
+           щом бланката бъде маркирана като прегледана (sdVisibleUnreviewedReports
+           филтрира !reviewed), тоест стара сгрешена бланка иначе е недостижима. */
+        if (r.report_id && sdCanDeleteReport()) {
+          h += '<button data-rid="'+r.report_id+'" onclick="sdDeleteReport(this.dataset.rid)" title="Изтрий ЦЯЛАТА бланка — редове и файлове, необратимо" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-left:2px;">🗑</button>';
+        }
+        h += '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+      h += '<div style="font-size:12px;color:#94a3b8;margin-top:8px;">'+list.length+' от '+sdData.length+' записа.</div>';
+    }
   }
 
   h += '</div>';
@@ -3136,6 +3131,7 @@ function sdToggleActions(){
    в края на renderStockDiff), а не нов механизъм за скрол. */
 function sdActionsGoto(repId){
   if(!repId) return;
+  sdOpenReportsView(); /* бланката е в изгледа „Бланки“ */
   sdKeepScroll(repId);
   renderStockDiff();
 }
@@ -3225,11 +3221,9 @@ function sdActionsCard(){
   return h+'</div></div>';
 }
 
-/* ── Секция с подадени бланки (чакат преглед) ── */
-function renderDiffReportsSection(){
-  /* Горе стоят непрегледаните И решените, които чакат имейл (email_pending).
-     Броячите за „непрегледани" НЕ ги виждат — те ползват само
-     sdVisibleUnreviewedReports. */
+/* Бланките, които се виждат при текущите филтри (посока, магазин, търсене). ЕДНО място за
+   броенето: заглавието на секцията и превключвателят „Бланки …“ показват едно и също число. */
+function sdFilteredReports(){
   var allVisible = sdVisibleUnreviewedReports().concat(sdVisibleEmailPendingReports());
   var unreviewed = allVisible.slice();
   /* Подтаб по посока - Доставчик / Междускладов трансфер (искане на Цвети:
@@ -3252,6 +3246,17 @@ function renderDiffReportsSection(){
       return hay.indexOf(qRep) !== -1;
     });
   }
+  return { all: allVisible, list: unreviewed };
+}
+function sdReportsCount(){ return sdFilteredReports().list.length; }
+
+/* ── Секция с подадени бланки (чакат преглед) ── */
+function renderDiffReportsSection(){
+  /* Горе стоят непрегледаните И решените, които чакат имейл (email_pending).
+     Броячите за „непрегледани" НЕ ги виждат — те ползват само
+     sdVisibleUnreviewedReports. */
+  var fr = sdFilteredReports();
+  var allVisible = fr.all, unreviewed = fr.list;
   if(!unreviewed.length){
     /* Има непрегледани бланки, но текущите филтри ги крият - казваме го явно,
        вместо секцията просто да изчезне и да изглежда, че няма нищо за преглед. */
@@ -5004,7 +5009,7 @@ function sdBadgePulse(n){
   if(prev===null || n<=prev) return;
   if(typeof coNotifyToast==='function'){
     coNotifyToast('🔔 Разлики: '+n+(n===1?' бланка чака':' бланки чакат')+' вашата реакция', '', 'Отвори Разлики',
-      function(){ if(typeof showModule==='function') showModule('stock-diff'); });
+      function(){ sdOpenReportsView(); if(typeof showModule==='function') showModule('stock-diff'); }); /* известието е за бланки */
   }
   if(typeof playSound==='function') playSound();
 }

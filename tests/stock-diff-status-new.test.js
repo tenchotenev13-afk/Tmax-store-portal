@@ -49,6 +49,7 @@ function env(rows, reports) {
   });
   h.w.sdData = JSON.parse(JSON.stringify(rows));
   h.w.diffReports = JSON.parse(JSON.stringify(reports || []));
+  h.w.sdView = 'rows'; /* изгледът „Редове“ (таблицата) — подразбирането е „Бланки“ */
   h.w.sdFilter = 'all';
   h.w.sdTypeFilter = 'all';
   h.w.sdDirTab = 'supplier';
@@ -79,6 +80,7 @@ function statusOptions(doc) {
   {
     const ROWS = [row({ id: 'l-1', report_id: 'rep-1', type: null, status: 'new' })];
     const { w, doc, calls } = env(ROWS, [REPORT]);
+    w.sdView = 'reports'; /* бутонът 💬 е в картата на бланката — изглед „Бланки“ */
 
     if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
       const chat = btn(doc, '💬');
@@ -126,6 +128,7 @@ function statusOptions(doc) {
     const ROWS = [row({ id: 'l-2', report_id: 'rep-1', type: null, status: 'new',
       comment: 'стар коментар' })];
     const { w, doc, calls } = env(ROWS, [REPORT]);
+    w.sdView = 'reports'; /* бутонът 💬 е в картата на бланката — изглед „Бланки“ */
 
     if (guard('renderStockDiff() не хвърля', () => w.renderStockDiff())) {
       const chat = btn(doc, '💬');
