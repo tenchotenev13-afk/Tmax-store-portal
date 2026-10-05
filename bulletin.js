@@ -136,7 +136,11 @@ function taskTypeBadgeHtml(taskType,taskId,kind,clickable,completionDate){
   /* notice няма изпълнение, значи баджът му не бива да отваря модала за
      отмятане — иначе остава единствената контрола, през която се стига
      дотам за задача, която не се отмята. */
-  if(clickable&&taskId&&taskType!=='notice'&&!bulDateLockReason(completionDate||null)){
+  /* bulLockReasonFor, не bulDateLockReason: баджът е пряк път към СЪЩИЯ
+     модал, значи трябва да е кликаем точно когато модалът би се отворил. С
+     голата дата той мълчеше за многоседмичната (срокът е в бъдещето), а за
+     автоматичен модул беше кликаем — тоест заобикаляше заключения чекбокс. */
+  if(clickable&&taskId&&taskType!=='notice'&&!bulLockReasonFor(kind, taskId, completionDate||null)){
     return '<span data-task-id="'+taskId+'" data-kind="'+(kind||'regular')+'" data-cdate="'+(completionDate||'')+'" onclick="taskTypeBadgeClick(this)" style="cursor:pointer;font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:'+tt.bg+';color:'+tt.color+';border:1px solid '+tt.bdr+';white-space:nowrap;">'+tt.short+'</span>';
   }
   return '<span style="font-size:9.5px;font-weight:700;padding:1px 8px;border-radius:20px;background:'+tt.bg+';color:'+tt.color+';border:1px solid '+tt.bdr+';white-space:nowrap;">'+tt.short+'</span>';
@@ -1502,6 +1506,32 @@ function bulAutoCompleteValid(auto, dueDates){
    седмицата (spans_from). Оттук тръгва и заключването на чекбокса — задача,
    която още не е в сила, не се отмята. */
 function bulSpanOf(t){ return taskSpanStart(t) || ''; }
+/* ═══ ЗАКЛЮЧВАНЕТО ПО ДЕН — ЕДНО ПРАВИЛО, НЕ ЧЕТИРИ ═══════════════════════
+   Чекбоксът пита bulLockReason(cdate, linked, span) — той знае и за
+   автоматичните модули, и за многоседмичните (отключени от starts_on до
+   срока). Но входовете към отмятането, които получават само id и вид, питаха
+   bulDateLockReason(cdate) — САМО датата. За многоседмична задача
+   completion_date е СРОКЪТ (решение D1), тоест 15.10 при днес 05.10 излизаше
+   'future' и модалът отказваше с „Денят още не е настъпил", докато чекбоксът
+   до него минаваше. Точно това се случи на 05.10.2026 с „Надстройка в буса за
+   превоз на PVC плоскости" (spans_from 28.09, starts_on 01.10, срок 15.10).
+   Затова решението живее на ЕДНО място и всеки вход минава през него. */
+function bulTaskByIdKind(kind, taskId){
+  var arr = (kind==='recurring') ? recurringTasks : bulTasks;
+  var t = (arr||[]).find(function(x){ return String(x.id)===String(taskId); });
+  if(t) return t;
+  /* Пренесената задача не е в списъка на седмицата — тя си има свой кеш. */
+  return (typeof bulCarriedTaskById==='function') ? bulCarriedTaskById(kind||'regular', taskId) : null;
+}
+/* Пълната причина (автоматичен модул + многоседмична + дата) за задача, от
+   която имаме само id и вид. Непозната задача → пада на самата дата, тоест
+   старото поведение, вместо да отвори нещо наслуки. */
+function bulLockReasonFor(kind, taskId, cdate){
+  var t = bulTaskByIdKind(kind, taskId);
+  if(!t) return bulDateLockReason(cdate);
+  var lockKey = (kind==='recurring') ? (t.linked_module||'') : bulTaskLinkKey(t);
+  return bulLockReason(cdate, lockKey, bulSpanOf(t));
+}
 /* Денят, в който многоседмичната е била ИЗПЪЛНЕНА — местна дата от
    completed_at. НЕ от completion_date: той при многоседмичната е винаги срокът
    (решение D1), тоест не казва нищо за това кога е свършена работата.
@@ -5192,7 +5222,12 @@ function openTaskCompletionModal(taskId, kind, completionDate, carriedOrig){
   /* Трета защита: единственият вход към модала, който не минава през чекбокс,
      е клик върху баджа (taskTypeBadgeClick). Проверката е тук, за да покрие и
      него, и всяко бъдещо извикване отдругаде. */
-  var lockReason = (kind!=='recurring' && bulTaskLinkKey(t)==='transit-auto') ? 'auto-transit' : bulDateLockReason(completionDate);
+  /* Беше: ръчна проверка само за 'transit-auto' при еднократните + голата
+     дата. Две дупки наведнъж — многоседмичната не можеше да се отметне, а
+     ПОСТОЯННА автоматична задача („За връщане", „Разлики") можеше, стигне ли
+     се дотук през баджа. bulLockReason покрива и трите случая от регистъра. */
+  var lockKey = (kind==='recurring') ? (t.linked_module||'') : bulTaskLinkKey(t);
+  var lockReason = bulLockReason(completionDate, lockKey, bulSpanOf(t));
   if (lockReason) { toast(bulLockLabel(lockReason),'#d97706'); return; }
   tcPendingPhotos = [];
   tcPendingFiles = [];
@@ -5440,7 +5475,9 @@ function openNotApplicableModal(taskId, kind, completionDate){
      състояние идва от данните, не от твърдение. */
   var lockKey = kind==='recurring' ? (t.linked_module||'') : bulTaskLinkKey(t);
   if (bulAutoLocked(lockKey)) { toast('Тази задача се отмята автоматично от данните','#d97706'); return; }
-  var lockReason = bulDateLockReason(completionDate);
+  /* През bulSpanLockReason, не през голата дата: иначе многоседмичната не
+     може и да се ЗАЯВИ като неотнасяща се, със същия подвеждащ toast. */
+  var lockReason = bulSpanLockReason(completionDate, bulSpanOf(t));
   if (lockReason) { toast(bulLockLabel(lockReason),'#d97706'); return; }
   var existing = document.getElementById('na-modal-ov');
   if (existing) existing.remove();
@@ -5505,15 +5542,17 @@ function submitNotApplicable(taskId, kind, completionDate){
     renderBulletin();
   });
 }
-/* Отмяна. Обектът — само в същия ден (bulDateLockReason), както отметката:
-   заявка със задна дата не бива да се маха със задна дата. Офисът минава през
-   bulNaReturn() и там правилото е друго — той може винаги. */
+/* Отмяна. Обектът — само докато денят е отворен (bulLockReasonFor, същото
+   правило като отметката: при многоседмична това е от starts_on до срока, не
+   само денят на срока). Заявка със задна дата не бива да се маха със задна
+   дата. Офисът минава през bulNaReturn() и там правилото е друго — той може
+   винаги. */
 function cancelNotApplicable(taskId, kind, completionDate){
   kind = kind || 'regular';
   completionDate = completionDate || null;
   var store = currentUser && currentUser.store_name;
   if (!store) return;
-  var lockReason = bulDateLockReason(completionDate);
+  var lockReason = bulLockReasonFor(kind, taskId, completionDate);
   if (lockReason) { toast(bulLockLabel(lockReason),'#d97706'); return; }
   bulNaDelete(kind, taskId, store, completionDate, '↩ Заявката е отменена');
 }

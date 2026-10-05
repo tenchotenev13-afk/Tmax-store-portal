@@ -150,6 +150,7 @@ const TESTS = [
   'auto-modules-registry.test.js',
   'bulletin-week-default.test.js',
   'bulletin-completion-day-lock.test.js',
+  'span-lock-completion.test.js',
   'bulletin-store-denominator.test.js',
   'analysis-postponed.test.js',
   'wrong-receipt-tab.test.js',
