@@ -105,6 +105,7 @@ const TESTS = [
   'stock-diff-status-new.test.js',
   'stock-diff-task-autocomplete.test.js',
   'stock-diff-auto-complete.test.js',
+  'supply-auto-complete.test.js',
   'stock-diff-print.test.js',
   'diff-print-supplier-col.test.js',
   'print-transport-marker.test.js',

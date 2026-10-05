@@ -839,7 +839,10 @@ function today(){return localDateISO();}
    „Стока на път" и „За връщане" (тя си носи своя гейт в SR_AUTO_START, защото
    там въпросът е от коя СЕДМИЦА, не от кой ден). */
 var AUTO_COMPLETE_FROM = {
-  'stock-diff': '2026-10-12'   /* понеделник; решение на Тенчо, 04.10.2026 */
+  'stock-diff': '2026-10-12',  /* понеделник; решение на Тенчо, 04.10.2026 */
+  /* „Зареждане": същата дата като v_start в supply_sync_completions (05.10.2026).
+     05.10 вече има ръчни отметки; първият чист ден е 12.10. */
+  'supply':     '2026-10-12'
 };
 function autoCompleteActive(linkedModule, todayISO){
   var from = AUTO_COMPLETE_FROM[linkedModule];

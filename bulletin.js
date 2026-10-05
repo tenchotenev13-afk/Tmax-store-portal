@@ -1207,6 +1207,16 @@ var BUL_AUTO_MODULES = {
     tab:    'Разлики',
     cls:    'bul-auto-diff',
     unit:   ['ред чака отговор', 'реда чакат отговор']
+  },
+  /* „ЗАРЕЖДАНЕ АРТИКУЛИ НА Л.М." (05.10.2026). Отметка от supply_sync_completions
+     (тригер върху supply_entries + часов крон), от 12.10.2026. Надписът е
+     „попълнено X от Y бланки" — bulAutoPending['supply'] = {done,total}. */
+  'supply': {
+    reason:   'auto-supply',
+    label:    'Отмята се автоматично от Зареждане',
+    tab:      'Зареждане',
+    cls:      'bul-auto-supply',
+    progress: ['бланка', 'бланки']
   }
 };
 function bulAutoModuleOf(linkedModule, todayISO){
@@ -1308,6 +1318,37 @@ function bulLoadReturnsPending(){
       return String(r.confirmed_by||'') !== ('store:'+(r.store_name||''));
     }).length;
     bulAutoPending['stock-returns']=n;
+    renderBulletin();
+  });
+}
+/* „Зареждане": колко от активните бланки, които важат за обекта, са попълнени
+   за ТАЗИ седмица — същото правило като supply_store_done() в базата (поне
+   един ред с непразна стойност, 0 се брои). САМО за надписа: отметката идва от
+   базата. Понеделникът се смята на място — вж. забележката при
+   bulLoadReturnsPending за името bulWeekMondayISO. */
+function bulLoadSupplyPending(){
+  bulAutoPending['supply']=null;
+  if(isGlobal()||!currentUser||!currentUser.store_name) return;
+  var has=(recurringTasks||[]).some(function(t){ return t && t.linked_module==='supply' && !taskIsNotice(t); });
+  if(!has) return;
+  var store=currentUser.store_name;
+  var mon=(function(){
+    var d=new Date(bulTodayISO()+'T00:00:00');
+    d.setDate(d.getDate()-((d.getDay()+6)%7));
+    return toLocalISO(d);
+  })();
+  Promise.all([
+    sbGet('supply_templates','select=id,active,target_stores&active=is.true'),
+    sbGet('supply_entries','select=template_id,qty1,qty2&store_name=eq.'+encodeURIComponent(store)+'&week_start=eq.'+mon)
+  ]).then(function(res){
+    /* sbGet връща масив и при провал — празен отговор НЕ е „0 от 0". */
+    if(!Array.isArray(res[0])||!Array.isArray(res[1])||!res[0].length) return;
+    var mine=res[0].filter(function(t){
+      return t.active!==false && (!t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0);
+    });
+    var filled={};
+    res[1].forEach(function(e){ if((e.qty1!==null&&e.qty1!==undefined) || (e.qty2!==null&&e.qty2!==undefined)) filled[e.template_id]=true; });
+    bulAutoPending['supply']={done:mine.filter(function(t){return filled[t.id];}).length, total:mine.length};
     renderBulletin();
   });
 }
@@ -1446,6 +1487,7 @@ function bulAutoNoteHtml(t, done, kind){
   if(!am) return '';
   var n = bulAutoPending[key], txt;
   if(done) txt='✓ от '+am.tab;
+  else if(am.progress&&n&&typeof n==='object'&&n.total>0) txt='⏳ попълнено '+n.done+' от '+n.total+' '+(n.total===1?am.progress[0]:am.progress[1]);
   else if(typeof n==='number'&&n>0&&am.unit) txt='⏳ '+n+' '+(n===1?am.unit[0]:am.unit[1]);
   else txt='⏳ отмята се от '+am.tab;
   return '<span class="bul-auto-note '+am.cls+'" style="display:block;font-size:10px;font-weight:600;color:'+(done?'#16a34a':'#b45309')+';margin-top:2px;">'+txt+'</span>';
@@ -1465,6 +1507,9 @@ function bulCompletedByLabel(v){
   /* „Разлики" (04.10.2026): обектът няма нито един ред, чакащ негово действие
      по междускладова разлика. */
   if(v==='auto:stock-diff') return 'автоматично от Разлики';
+  /* „Зареждане" (05.10.2026): обектът има попълнена бланка във всяка активна
+     бланка, която важи за него. */
+  if(v==='auto:supply') return 'автоматично от Зареждане';
   return v||'';
 }
 /* Полето „Отмята се автоматично" във формите за задача. Стои в DOM-а винаги
@@ -2516,6 +2561,7 @@ function loadBulletin(){
          двете извиквания са идемпотентни. */
       bulLoadReturnsPending();
       bulLoadDiffPending();
+      bulLoadSupplyPending();
       bulLoadTaskReports();
       /* Дата и в самата ЗАЯВКА. Глобалният клон (без store_name) теглеше
          ВСЯКО отмятане на постоянна задача, правено някога - 1595 реда на
@@ -6368,6 +6414,7 @@ function bulSetRecurring(all, periods, versions) {
      notice и брояч не ѝ трябва). */
   bulLoadReturnsPending();
   bulLoadDiffPending();
+  bulLoadSupplyPending();
 }
 /* Всички задачи + периодите, наново от базата (след запис). */
 function bulFetchRecurring() {
