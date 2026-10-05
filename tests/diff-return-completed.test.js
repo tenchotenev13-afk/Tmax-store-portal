@@ -58,8 +58,8 @@ const settle = async () => { for (let i = 0; i < 6; i++) await ticks(); };
 const mod = h => h.doc.getElementById('mod-stock-diff');
 function names(h) {
   const t = Array.prototype.find.call(mod(h).querySelectorAll('table'),
-    x => Array.prototype.some.call(x.querySelectorAll('thead th'), th => th.textContent.trim() === 'Дата потвърд.'));
-  return t ? Array.prototype.map.call(t.querySelectorAll('tbody tr'), tr => tr.querySelectorAll('td')[4].textContent.trim()) : [];
+    x => !!x.querySelector('#sd-rows')); /* долната таблица е с #sd-rows; „Дата потвърд.“ вече не е собствена колона */
+  return t ? Array.prototype.map.call(t.querySelectorAll('tbody tr'), tr => tr.querySelector('.sd-name').textContent.trim()) : [];
 }
 const statusChip = (h, f) => mod(h).querySelector('button[data-f="' + f + '"][onclick^="setSDFilter"]');
 const typeChip = (h, f) => mod(h).querySelector('button[data-f="' + f + '"][onclick^="setSDTypeFilter"]');
@@ -115,7 +115,7 @@ const sdPatch = (h, id) => h.calls.patch.find(p => /stock_differences/.test(p.ur
     realClick(h.w, statusChip(h, 'completed'));
     ok('клик „Приключени" → само приключеното', names(h).join('|') === 'ВРЪЩАНЕ ПРИКЛЮЧЕНО', names(h).join('|'));
     const tr = Array.prototype.find.call(mod(h).querySelectorAll('tbody tr'), x => x.textContent.indexOf('ВРЪЩАНЕ ПРИКЛЮЧЕНО') >= 0);
-    ok('баджът е „🏁 ПРИКЛЮЧЕНА"', tr && tr.querySelectorAll('td')[9].textContent.trim() === '🏁 ПРИКЛЮЧЕНА');
+    ok('баджът е „🏁 ПРИКЛЮЧЕНА"', tr && tr.querySelector('.sd-st').textContent.trim() === '🏁 ПРИКЛЮЧЕНА');
     ok('на приключения ред няма „✅ Върната"', !!tr && !Array.prototype.some.call(tr.querySelectorAll('button'),
       b => /sdMarkTaken/.test(b.getAttribute('onclick') || '')));
     /* Смяна на типа от „Приключени" → филтърът по статус се връща на „Всички". */

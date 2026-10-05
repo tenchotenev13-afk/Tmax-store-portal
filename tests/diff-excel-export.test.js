@@ -77,10 +77,10 @@ const excelBtn = h => btn(h.doc.getElementById('mod-stock-diff'), '📥 Excel');
 const chip = (h, sel) => h.doc.querySelector(sel);
 function mainTable(h) {
   return Array.prototype.find.call(h.doc.querySelectorAll('#mod-stock-diff table'),
-    t => Array.prototype.some.call(t.querySelectorAll('thead th'), th => th.textContent.trim() === 'Дата потвърд.'));
+    t => !!t.querySelector('#sd-rows')); /* долната таблица е с #sd-rows; „Дата потвърд.“ вече не е собствена колона */
 }
 const tableNames = h => { const t = mainTable(h); return t ? Array.prototype.map.call(t.querySelectorAll('tbody tr'),
-  tr => tr.querySelectorAll('td')[4].textContent.trim()) : []; };
+  tr => tr.querySelector('.sd-name').textContent.trim()) : []; };
 
 (async function run() {
 
@@ -130,16 +130,16 @@ const tableNames = h => { const t = mainTable(h); return t ? Array.prototype.map
     ok('Тип „Заприхождаване"', aoa.find(r => r[4] === 'ЗАПРИХОДЕНО ВРАЦА')[0] === 'Заприхождаване');
     /* Статусът — като на екрана: сравнява се с клетката на таблицата. */
     const tr = Array.prototype.find.call(mainTable(h).querySelectorAll('tbody tr'),
-      x => x.querySelectorAll('td')[4].textContent.trim() === 'ЛИПСА ВРАЦА 1');
-    const screenStatus = tr.querySelectorAll('td')[9].textContent.trim();
+      x => x.querySelector('.sd-name').textContent.trim() === 'ЛИПСА ВРАЦА 1');
+    const screenStatus = tr.querySelector('.sd-st').textContent.trim();
     /* Думата от екрана, БЕЗ иконата отпред (както при Тип). */
     ok('на екрана статусът е с икона („' + screenStatus + '")', /^\S+ НЕВЗЕТА$/.test(screenStatus), screenStatus);
     ok('в Excel: „НЕВЗЕТА" — думата от екрана без иконата', r1[9] === 'НЕВЗЕТА' && screenStatus.endsWith(' ' + r1[9]),
       JSON.stringify(r1[9]));
     const r4s = aoa.find(r => r[4] === 'ЛИПСА ВРАЦА 2')[9];
     const tr4 = Array.prototype.find.call(mainTable(h).querySelectorAll('tbody tr'),
-      x => x.querySelectorAll('td')[4].textContent.trim() === 'ЛИПСА ВРАЦА 2');
-    const screen4 = tr4.querySelectorAll('td')[9].textContent.trim();
+      x => x.querySelector('.sd-name').textContent.trim() === 'ЛИПСА ВРАЦА 2');
+    const screen4 = tr4.querySelector('.sd-st').textContent.trim();
     ok('приключена Липса: „' + screen4 + '" на екрана → „ВЗЕТА" в Excel', r4s === 'ВЗЕТА' && screen4.endsWith(' ВЗЕТА'),
       JSON.stringify([screen4, r4s]));
     ok('нито един статус не започва с не-буква', aoa.slice(1).every(r => /^[A-Za-zА-Яа-я]/.test(r[9])),

@@ -23,6 +23,8 @@ const { boot, ok, section, report, realClick, btn } = H;
 
 const WH = 'Логистичен склад Търговище';
 const COL = 'Отговор на склада';
+/* В компактната таблица „Решени редове“ колоната е „Склад · Магазин“ (в картата на бланката и в Excel — както досега). */
+const BOT_COL = 'Склад · Магазин';
 const clone = x => JSON.parse(JSON.stringify(x));
 
 function rep(o) {
@@ -198,7 +200,7 @@ async function excel(h) {
       [Object.assign({}, c[2], { reviewed: true })], c[3]);
     const bt = bottomThs(h);
     if (ok(c[0] + ': долната таблица е на екрана', bt.length > 0)) {
-      ok(c[0] + ': колоната ' + (c[4] ? 'Е' : 'НЕ е') + ' в долната таблица', (bt.indexOf(COL) >= 0) === c[4], bt.join(' | '));
+      ok(c[0] + ': колоната ' + (c[4] ? 'Е' : 'НЕ е') + ' в долната таблица', (bt.indexOf(BOT_COL) >= 0) === c[4], bt.join(' | '));
       const r = bottomRow(h);
       ok(c[0] + ': долу td = th', !!r && r.cells.length === bt.length, 'td=' + (r && r.cells.length) + ' th=' + bt.length);
     }

@@ -463,17 +463,16 @@ function renderStockDiff() {
     if (!list.length) {
       h += '<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📋</div><div style="margin-top:8px;">Няма записи.</div></div>';
     } else {
-      /* Като Транспорт/Клиентски (.tbl-wrap.co-sticky-actions): скролът е в
-         обвивката, лентата е винаги долу на екрана, заглавията, „Магазин" и
-         бутоните са закачени, влачене с мишка (enableDragScroll по-долу).
-         Закачването и ширините са по КЛАС на клетката (sd-c-*), не по
-         :nth-child - „Отговор на склада" е само в „Междускладови" и броят
-         колони се мени по подтаб. Правилата са в index.html (.tbl-sd). */
-      h += '<div id="sd-tbl-wrap" class="tbl-wrap co-sticky-actions" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;">';
+      /* Компактна таблица като „За връщане“ / Клиентски (общият модел в index.html:
+         .tbl-wrap.tbl-compact + клас на таба .tbl-sd-compact). Без вътрешен скрол и без
+         влачене: под 1200px хоризонталният скрол е в кутията, от 1200px заглавието е
+         закачено под навигацията. Ширините са по КЛАС на клетката (sd-c-*), не по
+         :nth-child — „Склад · Магазин“ е само в „Междускладови“ и броят колони се мени. */
+      h += '<div id="sd-tbl-wrap" class="tbl-wrap tbl-compact tbl-sd-compact" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;">';
       h += '<table class="tbl-sd" style="width:100%;border-collapse:collapse;font-size:12px;">';
       h += '<thead><tr style="background:#f8fafc;">';
-      [['Тип','sd-c-type'],['Магазин','sd-c-store'],['Доставчик','sd-c-sup'],['Материал','sd-c-code'],['Наименование','sd-c-name'],['Кол.','sd-c-qty'],['Поръчка','sd-c-ord'],['Поръчка за връщане','sd-c-rord'],['Дата потвърд.','sd-c-date'],['Статус','sd-c-status'],['Кредитно','sd-c-credit'],['Снимки','sd-c-photo'],['Коментар','sd-c-cmt'],['Коментар Контролер','sd-c-ctl']].concat(showWh?[['Отговор на склада','sd-c-wh']]:[]).concat([['','sd-c-act']]).forEach(function(c){
-        h += '<th class="'+c[1]+'" style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c[0]+'</th>';
+      [['Тип · Артикул','sd-c-item'],['Магазин · Доставчик','sd-c-who'],['Кол.','sd-c-qty'],['Поръчки','sd-c-ord'],['Статус · Кредитно','sd-c-status'],['Коментари · Файлове','sd-c-cmt']].concat(showWh?[['Склад · Магазин','sd-c-wh']]:[]).concat([['Действия','sd-c-act']]).forEach(function(c){
+        h += '<th class="'+c[1]+'" style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:normal;">'+c[0]+'</th>';
       });
       /* Собствено id: над тази таблица стои секцията с непрегледаните бланки,
          която също се рендира с <table><tbody>. Без id „редът в таблицата" е
@@ -489,38 +488,47 @@ function renderStockDiff() {
         var canEdit = canEditSD(r);
         /* Кредитно известие - релевантно само за тип "Липса" (доставчикът не ни е
            доставил артикула, трябва финансово да ни компенсира) */
-        var creditCell = '—';
+        var creditCell = '';
         if (r.type === 'missing') {
           creditCell = (canEdit && !sdStoreLockedMissing(r))
             ? '<button data-id="'+r.id+'" onclick="sdToggleCreditNote(this.dataset.id)" style="border:none;border-radius:20px;padding:2px 8px;font-size:10.5px;font-weight:600;cursor:pointer;background:'+(r.credit_note_issued?'#f0fdf4':'#fef2f2')+';color:'+(r.credit_note_issued?'#16a34a':'#dc2626')+';">'+(r.credit_note_issued?'✅ Издадено':'❌ Няма')+'</button>'
             : (r.credit_note_issued?'<span style="color:#16a34a;">✅ Издадено</span>':'<span style="color:#dc2626;">❌ Няма</span>');
         }
 
+        var LB = 'font-size:9.5px;font-weight:700;text-transform:uppercase;color:#94a3b8;margin-right:4px;';
+        var MONO = 'font-family:DM Mono,monospace;font-size:11px;';
+        var DASH = '<span style="color:#cbd5e1;">—</span>';
+        var tcol = TYPE_COLORS[r.type]||'#94a3b8';
         h += '<tr style="border-bottom:1px solid #f1f5f9;">'+
-          '<td class="sd-c-type" style="padding:7px 10px;white-space:nowrap;"><span style="background:'+(TYPE_COLORS[r.type]||'#94a3b8')+'1a;color:'+(TYPE_COLORS[r.type]||'#64748b')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(TYPE_LABELS[r.type]||r.type||'—')+'</span></td>'+
-          '<td class="sd-c-store" style="padding:7px 10px;font-weight:500;">'+esc(r.store_name||'')+'</td>'+
-          '<td class="sd-c-sup" style="padding:7px 10px;font-size:11px;color:#64748b;">'+esc(r.supplier||'')+'</td>'+
-          '<td class="sd-c-code" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.material_code||'')+'</td>'+
-          '<td class="sd-c-name" style="padding:7px 10px;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+sdReturnMissingMark(r)+'</td>'+
+          '<td class="sd-c-item" style="padding:7px 10px;">'+
+            '<div><span style="background:'+tcol+'1a;color:'+(TYPE_COLORS[r.type]||'#64748b')+';padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">'+(TYPE_LABELS[r.type]||r.type||'—')+'</span></div>'+
+            '<div class="sd-name" style="margin-top:3px;word-break:break-word;">'+esc(r.material_name||'')+sdReturnSyncMark(r)+sdReturnMissingMark(r)+'</div>'+
+            (r.material_code?'<div style="'+MONO+'color:#64748b;">SAP '+esc(r.material_code)+'</div>':'')+
+          '</td>'+
+          '<td class="sd-c-who" style="padding:7px 10px;word-break:break-word;"><div style="font-weight:600;">'+esc(r.store_name||'')+'</div><div style="font-size:11px;color:#64748b;">'+esc(r.supplier||'')+'</div></td>'+
           '<td class="sd-c-qty" style="padding:7px 10px;text-align:right;font-weight:600;">'+sdQtyCell(r.quantity,(r.quantity)||'')+'</td>'+
-          '<td class="sd-c-ord" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.order_number||'')+'</td>'+
-          '<td class="sd-c-rord" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+esc(r.return_order_number||'')+'</td>'+
-          '<td class="sd-c-date" style="padding:7px 10px;font-family:DM Mono,monospace;font-size:11px;">'+fmtDate(r.confirmed_date)+'</td>'+
-          '<td class="sd-c-status" style="padding:7px 10px;">'+statusBadge+'</td>'+
-          '<td class="sd-c-credit" style="padding:7px 10px;white-space:nowrap;">'+creditCell+'</td>'+
+          '<td class="sd-c-ord" style="padding:7px 10px;'+MONO+'">'+
+            '<div><span style="'+LB+'">Поръчка</span>'+(r.order_number?esc(r.order_number):DASH)+'</div>'+
+            '<div><span style="'+LB+'">За връщ.</span>'+(r.return_order_number?esc(r.return_order_number):DASH)+'</div>'+
+            '<div><span style="'+LB+'">Потвърд.</span>'+(r.confirmed_date?fmtDate(r.confirmed_date):DASH)+'</div>'+
+          '</td>'+
+          '<td class="sd-c-status" style="padding:7px 10px;"><div class="sd-st">'+statusBadge+'</div>'+(creditCell?'<div class="sd-credit" style="margin-top:4px;">'+creditCell+'</div>':'')+'</td>'+
           /* Снимките са прикачени на ниво БЛАНКА (differences_reports.photos), не
              на реда - затова не се виждаха тук, след като редът бъде решен и
              излезе от секцията "Нови подадени бланки" (напр. при директно
              решение "Липса" без коментар). Под тях стоят и прикачените към САМИЯ
-             РЕД файлове (attachments) - там живеят снимките по сторната. */
-          '<td class="sd-c-photo" style="padding:7px 10px;">'+diffReportPhotoThumbs(r.report_id)+sdLineAttachCell(r)+'</td>'+
-          '<td class="sd-c-cmt" style="padding:7px 10px;font-size:11px;color:#d97706;font-weight:500;">'+esc(r.comment||'')+'</td>'+
-          '<td class="sd-c-ctl" style="padding:7px 10px;font-size:11px;color:#7c3aed;font-weight:500;">'+esc(r.resolution_comment||'')+(normSDAttachments(r.attachments).length?' 📎'+normSDAttachments(r.attachments).length:'')+'</td>'+
+             РЕД файлове (attachments) - там живеят снимките по сторната. Файловете
+             на реда се показват САМО в „Файлове“ (без „📎N“ след коментара). */
+          '<td class="sd-c-cmt" style="padding:7px 10px;font-size:11px;word-break:break-word;">'+
+            '<div style="color:#d97706;font-weight:500;"><span style="'+LB+'">Обект</span>'+(r.comment?esc(r.comment):DASH)+'</div>'+
+            '<div style="color:#7c3aed;font-weight:500;"><span style="'+LB+'">Контролер</span>'+(r.resolution_comment?esc(r.resolution_comment):DASH)+'</div>'+
+            '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;gap:4px;"><span style="'+LB+'">Файлове</span><span>'+diffReportPhotoThumbs(r.report_id,24)+sdLineAttachCell(r)+'</span></div>'+
+          '</td>'+
           /* Под отговора на склада - отговорът на магазина. Само при зададен
              store_response: без него sdStoreResponseLabel казва "чака магазина",
              а тук стоят доставчикови и вече приключени редове. */
           (showWh ? '<td class="sd-c-wh" style="padding:7px 10px;font-size:11px;">'+(r.warehouse_response?('<span style="color:#16a34a;font-weight:600;">'+(WH_RESPONSE_LABELS[r.warehouse_response]||r.warehouse_response)+'</span>'+(r.warehouse_comment?'<div style="font-size:10px;color:#64748b;">💬 '+esc(r.warehouse_comment)+'</div>':'')):'<span style="color:#cbd5e1;">—</span>')+(r.store_response?sdStoreResponseLabel(r):'')+sdSwapSummary(r)+'</td>' : '')+
-          '<td class="sd-c-act" style="padding:7px 10px;white-space:nowrap;">';
+          '<td class="sd-c-act" style="padding:7px 10px;">';
 
         /* status='received' е КРАЯТ на междускладовия поток. Такъв ред няма
            type, тоест етикетът по-долу пада на "✅ Приета" и един клик би
@@ -574,7 +582,6 @@ function renderStockDiff() {
   var tw = document.getElementById('sd-tbl-wrap');
   if (tw) {
     if (twPos) { tw.scrollLeft = twPos.l; tw.scrollTop = twPos.t; }
-    enableDragScroll(tw);
   }
   sdRestoreScroll();
   sdUpdateTabBadgeFromData();
@@ -3355,7 +3362,7 @@ function renderDiffReportsSection(){
          доставчикова бланка. */
       var repShowResolve=rep.direction!=='interstore';
       var repShowWh=sdWhColumnInCard(rep, lines);
-      h+='<table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
+      h+='<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:6px;">';
       var headRow='<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">SAP</th><th style="padding:3px 6px;">Артикул</th><th style="padding:3px 6px;">Категория</th><th style="padding:3px 6px;text-align:right;">'+repQty.docShort+'</th>'+
         (repIsSupplier?'<th style="padding:3px 6px;text-align:right;">По стокова</th>':'')+
         '<th style="padding:3px 6px;text-align:right;">'+repQty.realShort+'</th><th style="padding:3px 6px;">Коментар (магазин)</th><th style="padding:3px 6px;">Снимки</th>'+
@@ -3421,7 +3428,7 @@ function renderDiffReportsSection(){
           (repShowWh?'<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+sdLateReceiveButton(l,rep)+sdSwapPanel(l)+'</td>':'')+
         '</tr>';
       });
-      h+='</table>';
+      h+='</table></div>';
     }
     if(rep.general_comment) h+='<div style="font-size:12px;color:#374151;background:#f8fafc;border-radius:6px;padding:6px 8px;margin-bottom:6px;">💬 '+esc(rep.general_comment)+'</div>';
     var photos = Array.isArray(rep.photos)?rep.photos:[];

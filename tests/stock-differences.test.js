@@ -136,7 +136,7 @@ section('1. Снимки от магазина в главната таблиц�
   const { w, doc } = boot(ADMIN);
   w.renderStockDiff();
   const html = doc.getElementById('mod-stock-diff').innerHTML;
-  ok('колоната "Снимки" е в заглавния ред', /<th[^>]*>Снимки<\/th>/.test(html));
+  ok('колоната „Коментари · Файлове“ е в заглавния ред', /<th[^>]*>Коментари · Файлове<\/th>/.test(html));
 
   /* l4 = Липса, бланка r-sup-done с 2 снимки. Табът по подразбиране е supplier. */
   ok('снимка miss1.jpg се показва в таблицата', html.indexOf('https://x/miss1.jpg') >= 0);

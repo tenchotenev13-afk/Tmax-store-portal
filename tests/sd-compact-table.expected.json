@@ -1,0 +1,209 @@
+{
+ "admin/supplier": {
+  "ДЪЛГО ИМЕ НА АРТИКУЛ ЗА ПРОВЕРКА НА ПРЕНАСЯНЕТО В КЛЕТКАТА НА КОМПАКТНАТА ТАБЛИЦА": [
+   "sdMarkTaken(s1) ✅ Върната",
+   "openSDModal(s1) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s1) ✕",
+   "sdDeleteReport(rep-s) 🗑"
+  ],
+  "ВЗЕТ РЕД": [
+   "openSDModal(s2) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s2) ✕",
+   "sdDeleteReport(rep-s) 🗑"
+  ],
+  "ЛИПСА ЧАКАЩА": [
+   "sdToggleCreditNote(s3) ❌ Няма",
+   "sdMarkTaken(s3) ✅ Изписана",
+   "openSDModal(s3) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s3) ✕",
+   "sdDeleteReport(rep-s) 🗑"
+  ],
+  "ЛИПСА ИЗДАДЕНА": [
+   "sdToggleCreditNote(s4) ✅ Издадено",
+   "openSDModal(s4) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s4) ✕",
+   "sdDeleteReport(rep-s) 🗑"
+  ],
+  "НЕФАКТУРИРАН": [
+   "resolveDiffLine(s5),writein 📥 Заприх.",
+   "resolveDiffLine(s5),return ↩️ Връщане",
+   "openSDModal(s5) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s5) ✕",
+   "sdDeleteReport(rep-s) 🗑"
+  ],
+  "РЪЧЕН РЕД": [
+   "sdMarkTaken(s6) 📥 Заприходена",
+   "openSDModal(s6) ✏️",
+   "sdDelete(s6) ✕"
+  ],
+  "ЗАПРИХОДЕНА": [
+   "openSDModal(s7) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s7) ✕",
+   "sdDeleteReport(rep-s) 🗑"
+  ]
+ },
+ "admin/interstore": {
+  "МЕЖДУСКЛАДОВ ЧАКАЩ": [
+   "sdMarkTaken(i1) ✅ Върната",
+   "openSDModal(i1) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i1) ✕",
+   "sdDeleteReport(rep-i) 🗑"
+  ],
+  "МЕЖДУСКЛАДОВ ПРИЕТ": [
+   "openSDModal(i2) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i2) ✕",
+   "sdDeleteReport(rep-i) 🗑"
+  ],
+  "МЕЖДУСКЛАДОВ ЛИПСА": [
+   "sdToggleCreditNote(i3) ❌ Няма",
+   "sdMarkTaken(i3) ✅ Изписана",
+   "openSDModal(i3) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i3) ✕",
+   "sdDeleteReport(rep-i) 🗑"
+  ]
+ },
+ "accounting/supplier": {
+  "ДЪЛГО ИМЕ НА АРТИКУЛ ЗА ПРОВЕРКА НА ПРЕНАСЯНЕТО В КЛЕТКАТА НА КОМПАКТНАТА ТАБЛИЦА": [
+   "sdMarkTaken(s1) ✅ Върната",
+   "openSDModal(s1) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s1) ✕"
+  ],
+  "ВЗЕТ РЕД": [
+   "openSDModal(s2) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s2) ✕"
+  ],
+  "ЛИПСА ЧАКАЩА": [
+   "sdToggleCreditNote(s3) ❌ Няма",
+   "sdMarkTaken(s3) ✅ Изписана",
+   "openSDModal(s3) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s3) ✕"
+  ],
+  "ЛИПСА ИЗДАДЕНА": [
+   "sdToggleCreditNote(s4) ✅ Издадено",
+   "openSDModal(s4) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s4) ✕"
+  ],
+  "НЕФАКТУРИРАН": [
+   "resolveDiffLine(s5),writein 📥 Заприх.",
+   "resolveDiffLine(s5),return ↩️ Връщане",
+   "openSDModal(s5) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s5) ✕"
+  ],
+  "РЪЧЕН РЕД": [
+   "sdMarkTaken(s6) 📥 Заприходена",
+   "openSDModal(s6) ✏️",
+   "sdDelete(s6) ✕"
+  ],
+  "ЗАПРИХОДЕНА": [
+   "openSDModal(s7) ✏️",
+   "loadDiffPrint(rep-s) 🖨",
+   "sdDelete(s7) ✕"
+  ]
+ },
+ "accounting/interstore": {
+  "МЕЖДУСКЛАДОВ ЧАКАЩ": [
+   "sdMarkTaken(i1) ✅ Върната",
+   "openSDModal(i1) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i1) ✕"
+  ],
+  "МЕЖДУСКЛАДОВ ПРИЕТ": [
+   "openSDModal(i2) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i2) ✕"
+  ],
+  "МЕЖДУСКЛАДОВ ЛИПСА": [
+   "sdToggleCreditNote(i3) ❌ Няма",
+   "sdMarkTaken(i3) ✅ Изписана",
+   "openSDModal(i3) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i3) ✕"
+  ]
+ },
+ "warehouse/supplier": {
+  "МЕЖДУСКЛАДОВ ЧАКАЩ": [
+   "sdMarkTaken(i1) ✅ Върната",
+   "openSDModal(i1) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i1) ✕"
+  ],
+  "МЕЖДУСКЛАДОВ ПРИЕТ": [
+   "openSDModal(i2) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i2) ✕"
+  ],
+  "МЕЖДУСКЛАДОВ ЛИПСА": [
+   "sdToggleCreditNote(i3) ❌ Няма",
+   "sdMarkTaken(i3) ✅ Изписана",
+   "openSDModal(i3) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i3) ✕"
+  ]
+ },
+ "warehouse/interstore": {
+  "МЕЖДУСКЛАДОВ ЧАКАЩ": [
+   "sdMarkTaken(i1) ✅ Върната",
+   "openSDModal(i1) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i1) ✕"
+  ],
+  "МЕЖДУСКЛАДОВ ПРИЕТ": [
+   "openSDModal(i2) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i2) ✕"
+  ],
+  "МЕЖДУСКЛАДОВ ЛИПСА": [
+   "sdToggleCreditNote(i3) ❌ Няма",
+   "sdMarkTaken(i3) ✅ Изписана",
+   "openSDModal(i3) ✏️",
+   "loadDiffPrint(rep-i) 🖨",
+   "sdDelete(i3) ✕"
+  ]
+ },
+ "store/supplier": {
+  "ДЪЛГО ИМЕ НА АРТИКУЛ ЗА ПРОВЕРКА НА ПРЕНАСЯНЕТО В КЛЕТКАТА НА КОМПАКТНАТА ТАБЛИЦА": [
+   "loadDiffPrint(rep-s) 🖨"
+  ],
+  "ВЗЕТ РЕД": [
+   "loadDiffPrint(rep-s) 🖨"
+  ],
+  "ЛИПСА ЧАКАЩА": [
+   "loadDiffPrint(rep-s) 🖨"
+  ],
+  "ЛИПСА ИЗДАДЕНА": [
+   "loadDiffPrint(rep-s) 🖨"
+  ],
+  "НЕФАКТУРИРАН": [
+   "loadDiffPrint(rep-s) 🖨"
+  ],
+  "РЪЧЕН РЕД": [],
+  "ЗАПРИХОДЕНА": [
+   "loadDiffPrint(rep-s) 🖨"
+  ]
+ },
+ "store/interstore": {
+  "МЕЖДУСКЛАДОВ ЧАКАЩ": [
+   "loadDiffPrint(rep-i) 🖨"
+  ],
+  "МЕЖДУСКЛАДОВ ПРИЕТ": [
+   "loadDiffPrint(rep-i) 🖨"
+  ],
+  "МЕЖДУСКЛАДОВ ЛИПСА": [
+   "loadDiffPrint(rep-i) 🖨"
+  ]
+ }
+}

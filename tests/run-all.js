@@ -54,6 +54,7 @@ const TESTS = [
   'sd-interstore-columns.test.js',
   'sd-wh-column.test.js',
   'sd-view-toggle.test.js',
+  'sd-compact-table.test.js',
   'sd-table-scroll.test.js',
   'sd-store-missing-lock.test.js',
   'sd-move-direction.test.js',

@@ -245,7 +245,7 @@ const BACK = '📬 Прието обратно';
         ok('редът е вътре', rows.length === 1, String(rows.length));
         ok('колоната "Тип" показва тире, не "undefined"',
           rows[0].textContent.indexOf('undefined') < 0 &&
-          rows[0].cells[0].textContent.trim() === '—', rows[0].cells[0].textContent);
+          rows[0].cells[0].querySelector('span').textContent.trim() === '—', rows[0].cells[0].textContent);
         ok('статусът е "📬 ПРИЕТА"', rows[0].textContent.indexOf('📬 ПРИЕТА') >= 0,
           rows[0].textContent.slice(0, 200));
         /* Тук беше вторият капан: type=null праща етикета на бутона в

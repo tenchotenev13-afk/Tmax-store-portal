@@ -95,10 +95,11 @@ function reportCell(doc, name, offset) {
 }
 function mainCell(doc, name) {
   const tr = Array.from(doc.querySelectorAll('#mod-stock-diff tbody tr'))
-    .find(r => r.children[4] && r.children[4].textContent === name);
+    .find(r => { const n = r.querySelector('.sd-name'); return n && n.textContent === name; });
   if (!tr) return null;
   const head = Array.from(tr.closest('table').querySelectorAll('thead th')).map(c => c.textContent);
-  return { td: tr.children[head.indexOf('Наименование') + 1], head: head };
+  /* количеството е собствена колона „Кол.“ (sd-c-qty) в компактната таблица */
+  return { td: tr.querySelector('td.sd-c-qty'), head: head };
 }
 
 (async function run() {
@@ -193,7 +194,7 @@ function mainCell(doc, name) {
       h.w.setSDView('rows'); /* долната таблица е в изглед „Редове“ (бланките — в „Бланки“) */
       const mBig = mainCell(h.doc, 'РЕШЕН ВД НОМЕР');
       if (ok('долна таблица: редът с „180493275" е на екрана', !!(mBig && mBig.td))) {
-        ok('долна таблица: колоната е „Кол."', mBig.head[mBig.head.indexOf('Наименование') + 1] === 'Кол.', mBig.head.join('|'));
+        ok('долна таблица: колоната е „Кол."', mBig.head.indexOf('Кол.') >= 0 && mBig.td.className === 'sd-c-qty', mBig.head.join('|'));
         ok('долна таблица: клетката съдържа „⚠️"', mBig.td.textContent.indexOf('⚠️') >= 0, mBig.td.innerHTML);
         const sp = mBig.td.querySelector('[title]');
         ok('долна таблица: title е 180493275', !!sp && sp.getAttribute('title') === '180493275', mBig.td.innerHTML);

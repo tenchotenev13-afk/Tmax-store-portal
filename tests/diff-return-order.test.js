@@ -57,7 +57,7 @@ const editBtn = (h, id) => Array.prototype.find.call(h.doc.querySelectorAll('but
 const sdPatches = h => h.calls.patch.filter(p => /stock_differences/.test(p.url));
 function mainTable(h) {
   return Array.prototype.find.call(h.doc.querySelectorAll('#mod-stock-diff table'),
-    t => Array.prototype.some.call(t.querySelectorAll('thead th'), th => th.textContent.trim() === 'Дата потвърд.'));
+    t => !!t.querySelector('#sd-rows')); /* долната таблица е с #sd-rows; „Дата потвърд.“ вече не е собствена колона */
 }
 
 (async function run() {
@@ -140,18 +140,20 @@ function mainTable(h) {
     h.close(); h2.close();
   }
 
-  section('в) Колоната „Поръчка за връщане" е до „Поръчка" и показва номера');
+  section('в) „За връщ." е в клетката „Поръчки“ до „Поръчка" и показва номера');
   {
     const h = env(CVETI, [line({ return_order_number: '4200017097' })]);
     const t = mainTable(h);
     if (ok('главната таблица е на екрана', !!t)) {
       const heads = Array.prototype.map.call(t.querySelectorAll('thead th'), th => th.textContent.trim());
-      const i = heads.indexOf('Поръчка за връщане');
-      ok('колоната е точно след „Поръчка"', i > 0 && heads[i - 1] === 'Поръчка', heads.join(' | '));
-      const tds = t.querySelector('tbody tr').querySelectorAll('td');
-      ok('в нея е 4200017097', tds[i] && tds[i].textContent.trim() === '4200017097', tds[i] && tds[i].textContent);
-      ok('в „Поръчка" е 4100196440', tds[i - 1] && tds[i - 1].textContent.trim() === '4100196440');
-      ok('<th> = <td> на реда', heads.length === tds.length, heads.length + ' срещу ' + tds.length);
+      ok('има колона „Поръчки“', heads.indexOf('Поръчки') >= 0, heads.join(' | '));
+      const tr = t.querySelector('tbody tr');
+      const ord = tr.querySelector('td.sd-c-ord');
+      const lines3 = ord ? Array.prototype.map.call(ord.children, d => d.textContent.trim()) : [];
+      ok('в клетката са точно 3 реда', lines3.length === 3, JSON.stringify(lines3));
+      ok('първо „Поръчка" 4100196440', /^Поръчка\s*4100196440$/.test(lines3[0] || ''), lines3[0]);
+      ok('после „За връщ." 4200017097 (точно след „Поръчка")', /^За връщ\.\s*4200017097$/.test(lines3[1] || ''), lines3[1]);
+      ok('<th> = <td> на реда', heads.length === tr.querySelectorAll('td').length, heads.length + ' срещу ' + tr.querySelectorAll('td').length);
     }
     h.close();
   }

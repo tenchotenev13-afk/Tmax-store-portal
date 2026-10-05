@@ -72,13 +72,13 @@ async function save(h) { realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'За
     const tr = row(h, 'm-p');
     if (ok('редът „ЛИПСА ЧАКАЩА" е на екрана', !!tr)) {
       ok('няма бутон за кредитно', !btnOn(h, 'm-p', 'sdToggleCreditNote'));
-      ok('кредитното е текст „❌ Няма"', tr.querySelector('td.sd-c-credit').textContent.trim() === '❌ Няма',
-        tr.querySelector('td.sd-c-credit').textContent);
+      ok('кредитното е текст „❌ Няма"', tr.querySelector('.sd-credit').textContent.trim() === '❌ Няма',
+        tr.querySelector('.sd-credit').textContent);
       ok('няма „✅ Изписана"', !btnOn(h, 'm-p', 'sdMarkTaken'));
       ok('✏️ си е там', !!btnOn(h, 'm-p', 'openSDModal'));
     }
     ok('ВЗЕТА „Липса": кредитното е текст „✅ Издадено"',
-      !btnOn(h, 'm-t', 'sdToggleCreditNote') && row(h, 'm-t').querySelector('td.sd-c-credit').textContent.trim() === '✅ Издадено');
+      !btnOn(h, 'm-t', 'sdToggleCreditNote') && row(h, 'm-t').querySelector('.sd-credit').textContent.trim() === '✅ Издадено');
     h.close();
   }
 
