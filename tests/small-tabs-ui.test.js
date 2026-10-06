@@ -157,9 +157,12 @@ async function snapshot() {
     ok('всички са tbl-wrap tbl-compact tbl-auto', ws.length > 0 && ws.every(isCompact), ws.map(x => x.className).join(' | '));
     guard('renderReportsAdmin() и renderNotifSchedules() директно', () => { try { h.w.renderReportsAdmin(); } catch (e) {} try { h.w.renderNotifSchedules(); } catch (e) {} });
     const all = wraps(mod(h, 'mod-admin'));
-    /* двете статични таблици (потребители, обекти) са в index.html и не са част от тази промяна */
-    const dyn = all.filter(x => !x.closest('#users-section, #stores-section') && !isCompact(x));
-    ok('всички таблици, които рисува admin.js, са tbl-compact tbl-auto (извън двете статични от index.html)', all.filter(isCompact).length >= 4 && dyn.length === 2, 'компактни: ' + all.filter(isCompact).length + ', други: ' + dyn.length);
+    ok('всички таблици в Администрация са tbl-compact tbl-auto (и тези от index.html)', all.length >= 6 && all.every(isCompact), all.map(x => x.className).join(' | '));
+    for (const [id, what] of [['users-body', 'потребители'], ['stores-body', 'обекти']]) {
+      const w = h.doc.getElementById(id) && h.doc.getElementById(id).closest('.tbl-wrap');
+      ok('статичната таблица „' + what + '“ (index.html) е tbl-wrap tbl-compact tbl-auto', !!w && isCompact(w), w && w.className);
+    }
+    ok('в index.html няма останала „гола“ tbl-wrap', !/<div class="tbl-wrap"><table/.test(src('index.html')));
     ok('няма останала „гола“ tbl-wrap без tbl-compact в admin.js', !/<div class="tbl-wrap"><table/.test(src('admin.js')));
     /* таблицата на търсене в каталога (без обвивка досега) */
     h.doc.body.insertAdjacentHTML('beforeend', '<div id="catalog-host"></div>');
