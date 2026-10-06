@@ -216,6 +216,7 @@ const TESTS = [
   'kasa-ui.test.js',
   'kasa-work-day.test.js',
   'pallets-summary.test.js',
+  'small-tabs-ui.test.js',
   'supply.test.js',
   'oborot-bulletin-link.test.js',
   'oborot-co-entry.test.js',

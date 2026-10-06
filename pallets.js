@@ -104,7 +104,7 @@ function renderPalletsAdmin(storeNames,latestByStore){
       '</div>'+
       '<button id="pallets-export-btn" onclick="exportPalletsExcel()" style="margin-left:auto;'+PALLETS_EXPORT_BTN_CSS+'">📊 Експорт Excel</button>'+
     '</div>'+
-    '<div class="card"><div class="tbl-wrap"><table>'+
+    '<div class="card"><div class="tbl-wrap tbl-compact tbl-auto"><table>'+
     '<thead><tr><th>Магазин</th>'+
       PALLET_TYPES.map(function(t){return '<th style="text-align:center;">'+t.label+'</th>';}).join('')+
       '<th>Изпратени с камион</th><th>Последно въведено</th>'+
@@ -171,7 +171,7 @@ function renderPalletsStore(){
       '<div class="card-title">Въведи наличности</div>'+
       /* Датата е винаги днешната — без поле, за да не се пренаписва минала седмица. */
       '<div style="font-size:13px;color:var(--muted);margin-bottom:10px;">Дата: <b id="pf-date-text">'+fmtDate(today())+'</b></div>'+
-      '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:12px;">'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,110px),1fr));gap:10px;margin-bottom:12px;">'+
         PALLET_TYPES.map(function(t){
           return '<div><label class="fl">'+t.label+'</label>'+numField('pf-'+t.key,r[t.key])+'</div>';
         }).join('')+
@@ -186,7 +186,7 @@ function renderPalletsStore(){
     (latest?
       '<div class="card" style="margin-bottom:14px;background:#f8fafc;">'+
         '<div class="card-title">📊 Текущи наличности ('+fmtDate(latest.report_date)+')</div>'+
-        '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;">'+
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,110px),1fr));gap:10px;">'+
           PALLET_TYPES.map(function(t){
             return '<div style="text-align:center;padding:10px;background:#fff;border-radius:8px;border:1px solid #e2e8f0;">'+
               '<div style="font-size:11px;color:#64748b;">'+t.label+'</div>'+
@@ -199,7 +199,7 @@ function renderPalletsStore(){
 
     (palletsData.length?
       '<div class="card"><div class="card-title">История (последните 90 дни)</div>'+
-      '<div class="tbl-wrap"><table><thead><tr><th>Дата</th>'+
+      '<div class="tbl-wrap tbl-compact tbl-auto"><table><thead><tr><th>Дата</th>'+
         PALLET_TYPES.map(function(t){return '<th style="text-align:center;">'+t.label+'</th>';}).join('')+
         '<th>Изпратени с камион</th></tr></thead><tbody>'+
         palletsData.map(function(row){

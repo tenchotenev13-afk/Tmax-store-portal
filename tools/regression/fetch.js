@@ -4,6 +4,7 @@ const repo = path.resolve(process.argv[2]);
 const sh = fs.readFileSync(repo + '/shared.js', 'utf8');
 const URL_ = /SB_URL='([^']+)'/.exec(sh)[1], KEY = /SB_KEY='([^']+)'/.exec(sh)[1];
 const out = process.env.REG_DATA || path.join(require('os').tmpdir(), 'regdata'); fs.mkdirSync(out, { recursive: true });
+const d90 = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10);
 const d30 = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);
 const T = {
   client_orders: 'created_at=gte.' + d30 + '&order=created_at.desc',
@@ -21,6 +22,17 @@ const T = {
   kasa_documents: 'date=gte.' + d30,
   kasa_storno: 'select=*&order=created_at.desc&limit=300',
   app_settings: 'select=*',
+  transport_pallets: 'report_date=gte.' + d90 + '&order=report_date.desc',
+  users: 'select=id,email,display_name,store_name,role,active,assigned_stores,oborot_report,is_regional,notify_groups&order=role,email',
+  weekly_checklist_metrics: 'select=*',
+  weekly_checklist: 'year=gte.' + (new Date().getFullYear() - 1),
+  weekly_checklist_sends: 'select=*',
+  product_catalog: 'select=sap_code,product_name,default_unit&limit=300',
+  report_recipients: 'select=*',
+  notification_topics: 'select=*',
+  notification_matrix: 'select=*',
+  notification_overrides: 'select=*',
+  notification_schedules: 'select=*',
   contacts: 'select=*'
 };
 (async () => {

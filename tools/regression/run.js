@@ -20,11 +20,14 @@ const TABS = {
   returns: { cont: ['mod-stock-returns'], open: h => h.w.loadStockReturns(), sub: 'setSRTab', excel: h => h.w.exportSRExcel(), wait: 0 },
   history: { cont: ['mod-history'], open: h => h.w.loadHistory(), sub: null, wait: 320 },
   diff: { cont: ['mod-stock-diff'], open: h => h.w.loadStockDiff(), sub: 'setSDDirTab', excel: h => h.w.exportSDExcel(), wait: 0, views: true },
-  kasa: { cont: ['mod-kasa'], open: h => h.w.loadKasa(), sub: null, wait: 0, kasa: true }
+  kasa: { cont: ['mod-kasa'], open: h => h.w.loadKasa(), sub: null, wait: 0, kasa: true },
+  pallets: { cont: ['mod-pallets'], open: h => h.w.loadPallets(), sub: null, excel: h => h.w.exportPalletsExcel(), wait: 0 },
+  checklist: { cont: ['mod-checklist'], open: h => h.w.loadChecklist(), sub: null, wait: 0, cells: true },
+  admin: { cont: ['mod-admin'], open: h => h.w.loadAdmin(), sub: null, wait: 400 }
 };
 const REP_STATES = {
   client: ['-|filterOrders:all'], transport: ['-|filterTransport:all'], transit: ['transitDir:all|transitFilter:all'],
-  returns: ['setSRTab:diff|setSRFilter:all', 'setSRTab:complaint|setSRFilter:all'],
+  returns: ['setSRTab:diff|setSRFilter:all', 'setSRTab:complaint|setSRFilter:all'], pallets: ['-|-'], admin: ['-|-'], checklist: ['-|-'],
   diff: ['setSDDirTab:supplier|setSDFilter:all', 'setSDDirTab:interstore|setSDFilter:all', 'setSDDirTab:wrong_receipt|setSDFilter:all']
 };
 const LIMIT_VALUES = { setTStore: 2, setSRStoreFilter: 2, setSRSupplierFilter: 2, setSDStoreFilter: 2 };
@@ -53,7 +56,17 @@ async function snapTab(h, tab) {
     s = union(s, L.snap(h, T.cont));
     try { h.w.setSDView(cur); await L.settle(h, 2); } catch (e) {}
   }
+  if (T.cells) s = addCells(h, s);
   return s;
+}
+/* Чек лист: клетките нямат inline onclick (слушатели) — снимаме ги като „действия“: обект, показател, стойност, коментар */
+function addCells(h, s) {
+  const cells = Array.from(h.doc.querySelectorAll('#checklist-table td[data-si]')).map(td => {
+    const ic = td.querySelector('.cl-cmt'), v = td.querySelector('.cl-val');
+    return 'cell|' + td.getAttribute('data-si') + '|' + td.getAttribute('data-mi') + '|' + norm(v ? v.textContent : '') + '|' + (ic ? ic.getAttribute('title') : '-');
+  });
+  const heads = Array.from(h.doc.querySelectorAll('#checklist-table thead th')).map(th => 'head|' + norm(th.textContent));
+  return { actions: s.actions.concat(cells, heads).sort(), ctl: s.ctl, rows: s.rows };
 }
 function clickCtl(h, tab, key) {
   const el = L.findCtl(h, TABS[tab].cont, key);
@@ -177,12 +190,39 @@ async function runTab(role, tab) {
   }
   /* печат */
   await printsFor(role, tab, res);
+  if (T.cells) await cellClicks(role, tab, res);
   /* клик на представителите (от default) */
   for (const best of (REP_STATES[tab] || [])) {
-    if (!res.states[best] || !res.states[best].actions) continue;
-    await clickReps(role, tab, best, res, async () => buildState(role, tab, best));
+    /* '-|-' е подразбиращото се състояние (в резултата то се казва 'default') */
+    const sk = best === '-|-' ? 'default' : best;
+    if (!res.states[sk] || !res.states[sk].actions) continue;
+    await clickReps(role, tab, sk, res, async () => buildState(role, tab, best));
   }
   return res;
+}
+
+/* Чек лист: клик по първата клетка на всеки показател (въртене на стойността / число) и по 💬 → заявките и новите елементи */
+async function cellClicks(role, tab, res) {
+  const probe = await buildState(role, tab, '-|-');
+  const mis = Array.from(new Set(Array.from(probe.doc.querySelectorAll('#checklist-table td[data-si]')).map(td => td.getAttribute('data-mi')))).sort();
+  probe.close();
+  for (const kind of ['cell', 'icon']) for (const mi of mis) {
+    const h = await buildState(role, tab, '-|-');
+    const td = h.doc.querySelector('#checklist-table td[data-si="0"][data-mi="' + mi + '"]');
+    const key = 'cells::' + kind + ':' + mi;
+    if (!td) { res.clicks[key] = { notfound: true }; h.close(); continue; }
+    const before = new Set(Array.from(h.doc.querySelectorAll('[id]')).map(e => e.id));
+    h.calls.adminUsers.length = 0; h.errs.length = 0; h.calls.post.length = 0; h.calls.patch.length = 0; h.calls.del.length = 0; h.net.length = 0; h.calls.toast.length = 0; h.calls.confirm.length = 0;
+    try { const tgt = kind === 'icon' ? td.querySelector('.cl-cmt') : td; tgt.dispatchEvent(new h.w.MouseEvent('click', { bubbles: true, cancelable: true })); } catch (e) { h.errs.push('click: ' + e.message); }
+    await L.settle(h, 8);
+    res.clicks[key] = {
+      sig: key, state: '-|-', post: h.calls.post.map(r => ({ t: r.table, u: r.url.replace(/^.*\/rest\/v1\//, ''), b: r.body })),
+      patch: h.calls.patch.map(r => ({ t: r.table, u: r.url.replace(/^.*\/rest\/v1\//, ''), b: r.body })),
+      del: h.calls.del.map(u => u.replace(/^.*\/rest\/v1\//, '')), adm: [], net: h.net.slice(), toast: h.calls.toast.map(norm), confirm: h.calls.confirm.map(norm),
+      newIds: Array.from(h.doc.querySelectorAll('[id]')).map(e => e.id).filter(i => !before.has(i)).sort(), errs: h.errs.slice()
+    };
+    h.close();
+  }
 }
 
 async function printsFor(role, tab, res) {
@@ -216,7 +256,7 @@ async function clickReps(role, tab, stateKey, res, mk) {
     if (!el && TABS[tab].views && typeof h.w.setSDView === 'function') { h.w.setSDView(h.w.sdView === 'rows' ? 'reports' : 'rows'); await L.settle(h, 3); el = find(); }
     const key = stateKey + '::' + fn;
     if (!el) { res.clicks[key] = { notfound: true }; h.close(); continue; }
-    h.errs.length = 0; h.calls.post.length = 0; h.calls.patch.length = 0; h.calls.del.length = 0; h.net.length = 0; h.calls.toast.length = 0; h.calls.confirm.length = 0;
+    h.calls.adminUsers.length = 0; h.errs.length = 0; h.calls.post.length = 0; h.calls.patch.length = 0; h.calls.del.length = 0; h.net.length = 0; h.calls.toast.length = 0; h.calls.confirm.length = 0;
     try {
       const attr = el.getAttribute('onclick') ? 'onclick' : el.getAttribute('onchange') ? 'onchange' : 'oninput';
       if (attr === 'onclick') H.realClick(h.w, el); else H.fire(h.w, el, attr.slice(2));
@@ -228,7 +268,7 @@ async function clickReps(role, tab, stateKey, res, mk) {
       post: h.calls.post.map(r => ({ t: r.table, u: r.url.replace(/^.*\/rest\/v1\//, ''), b: r.body })),
       patch: h.calls.patch.map(r => ({ t: r.table, u: r.url.replace(/^.*\/rest\/v1\//, ''), b: r.body })),
       del: h.calls.del.map(u => u.replace(/^.*\/rest\/v1\//, '')),
-      net: h.net.slice(), toast: h.calls.toast.map(norm), confirm: h.calls.confirm.map(norm), newIds: after, errs: h.errs.slice()
+      adm: h.calls.adminUsers.slice(), net: h.net.slice(), toast: h.calls.toast.map(norm), confirm: h.calls.confirm.map(norm), newIds: after, errs: h.errs.slice()
     };
     h.close();
   }

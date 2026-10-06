@@ -58,6 +58,12 @@ var checklistSendBusy = false; /* тече изпращане — бутонът
 /* Стойностите се пазят в базата на латиница, за да не зависи схемата от
    изписването. Превеждат се само тук, при показване. */
 var CHECKLIST_VALUE_LABELS = { da: 'да', ne: 'не', nyamat: 'нямат' };
+/* Фонове на „да"/„не" в екранната таблица: bg — потвърдено от контролинга (по-наситено), bgf — предположение на портала
+   (по-светло). Цветът на ТЕКСТА не се пипа: тъмният #0f172a е знакът „потвърдено", сивият #94a3b8 — „предположение на портала". */
+var CHECKLIST_TONES = {
+  da: { bg: '#bbf7d0', bgf: '#f0fdf4' },
+  ne: { bg: '#fecaca', bgf: '#fef2f2' }
+};
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ДОСТЪП
@@ -817,7 +823,8 @@ function checklistCommentIconHtml(row) {
   var has = !!(row && row.comment);
   return '<span class="cl-cmt"' +
     ' title="' + (has ? escAttr(row.comment) : 'Добави коментар') + '"' +
-    ' style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;' +
+    ' style="position:absolute;top:0;right:0;min-width:28px;min-height:28px;' +
+    'display:flex;align-items:center;justify-content:center;font-size:11px;line-height:1;' +
     'cursor:pointer;opacity:' + (has ? '1' : '.25') + ';">💬</span>';
 }
 
@@ -867,9 +874,19 @@ function checklistCellInner(metric, row, early, earlyTitle) {
         '" style="color:#94a3b8;font-style:italic;border-bottom:1px dotted #cbd5e1;">' +
         escVal(text) + '</span>';
     } else {
+      /* „да"/„не" са в цвят (зелено/червено; потвърденото е по-наситено, предположението на портала — по-светло);
+         текстът е същият. Числата и „нямат" остават неутрални. */
+      var tone = null;
+      if (metric.value_type !== 'number') {
+        var rawVal = (row.control_value !== null && row.control_value !== undefined && row.control_value !== '') ? row.control_value : row.portal_value;
+        tone = CHECKLIST_TONES[rawVal] || null;
+      }
+      var pill = 'display:inline-block;padding:1px 9px;border-radius:10px;';
       out += faint
-        ? '<span class="cl-val" title="Стойност от портала — не е потвърдена от контролинга" style="color:#94a3b8;font-style:italic;">' + escVal(text) + '</span>'
-        : '<span class="cl-val" style="font-weight:600;color:#0f172a;">' + escVal(text) + '</span>';
+        ? '<span class="cl-val" title="Стойност от портала — не е потвърдена от контролинга" style="' +
+            'color:#94a3b8;' + (tone ? 'background:' + tone.bgf + ';' + pill : '') + 'font-style:italic;">' + escVal(text) + '</span>'
+        : '<span class="cl-val" style="font-weight:600;' +
+            'color:#0f172a;' + (tone ? 'background:' + tone.bg + ';' + pill : '') + '">' + escVal(text) + '</span>';
     }
   }
   out += checklistCommentIconHtml(row);
@@ -935,14 +952,14 @@ function renderChecklist() {
 
   var h = '<div class="page">' + checklistHeaderHtml();
 
-  h += '<div style="overflow-x:auto;">' +
+  h += '<div class="tbl-wrap tbl-compact tbl-auto">' +
     '<table id="checklist-table" style="border-collapse:collapse;width:100%;min-width:760px;">';
 
   /* Шапка на две нива: label отгоре, sublabel отдолу и по-дребно. Двата реда
      са в един <th> с <div>-ове, не два <tr> с rowspan — така колоната на
      обекта не иска rowspan и подравняването не зависи от височината. */
   h += '<thead><tr>' +
-    '<th style="' + cellCss + 'background:#f1f5f9;text-align:left;position:sticky;left:0;z-index:1;min-width:150px;">Обект</th>';
+    '<th style="' + cellCss + 'background:#f1f5f9;text-align:left;position:sticky;left:0;z-index:3;min-width:150px;">Обект</th>';
   checklistMetrics.forEach(function (m) {
     h += '<th style="' + cellCss + 'background:#f1f5f9;vertical-align:bottom;">' +
       '<div style="font-weight:700;color:#0f172a;">' + escVal(m.label) + '</div>' +

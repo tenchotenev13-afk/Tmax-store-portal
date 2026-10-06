@@ -653,7 +653,7 @@ function _renderRestrictionModal(allStores){
         '</label>';
     }).join('')+
     '</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:8px;margin-bottom:10px;">'+
     '<div><label class="fl">Начална дата *</label><input type="date" class="fi" id="restr-start" value="'+today()+'"></div>'+
     '<div><label class="fl">Крайна дата *</label><input type="date" class="fi" id="restr-end"></div>'+
     '</div>'+
@@ -742,7 +742,7 @@ function searchCatalog(){
   sbGet('product_catalog',filter).then(function(data){
     var rows=Array.isArray(data)?data:[];
     if(!rows.length){resultsEl.innerHTML='<div style="padding:8px;color:#94a3b8;">Няма намерени артикули.</div>';return;}
-    resultsEl.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
+    resultsEl.innerHTML='<div class="tbl-wrap tbl-compact tbl-auto"><table style="width:100%;border-collapse:collapse;font-size:12px;">'+
       '<tr style="color:#94a3b8;text-align:left;"><th style="padding:4px 6px;">SAP</th><th style="padding:4px 6px;">Наименование</th><th style="padding:4px 6px;">Мярка</th><th style="padding:4px 6px;"></th></tr>'+
       rows.map(function(r){
         return '<tr style="border-top:1px solid #f1f5f9;"><td style="padding:4px 6px;font-family:DM Mono,monospace;">'+esc(r.sap_code)+'</td>'+
@@ -750,7 +750,7 @@ function searchCatalog(){
           '<td style="padding:4px 6px;">'+esc(r.default_unit||'—')+'</td>'+
           '<td style="padding:4px 6px;"><button data-sap="'+esc(r.sap_code)+'" onclick="deleteCatalogItem(this.dataset.sap)" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;">✕</button></td></tr>';
       }).join('')+
-    '</table>';
+    '</table></div>';
   });
 }
 function openAddCatalogItemModal(){
@@ -1235,7 +1235,7 @@ function renderReportsAdmin(){
   h += '<div id="notif-reports-note" style="font-size:12px;color:#94a3b8;margin-bottom:8px;">Кой получава известията за задачи — матрицата по-горе. Кой получава общите отчети — този списък.</div>';
 
   var admin = notifIsAdmin();
-  h += '<div class="tbl-wrap"><table><thead><tr><th>Отчет</th><th>Разписание</th><th>Получатели</th><th></th></tr></thead><tbody>';
+  h += '<div class="tbl-wrap tbl-compact tbl-auto"><table><thead><tr><th>Отчет</th><th>Разписание</th><th>Получатели</th><th></th></tr></thead><tbody>';
   ADMIN_REPORTS.forEach(function(r){
     var n = adminReportRecipients === null ? '…' : String(adminReportCount(r.kind));
     h += '<tr id="report-row-' + r.kind + '">' +
@@ -1430,7 +1430,7 @@ function renderNotifTopics(){
       '<td><button onclick="openNotifTopicModal(\'' + esc(t.key) + '\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️</button></td>' +
     '</tr>';
   }).join('');
-  body.innerHTML = head + '<div class="tbl-wrap"><table>' +
+  body.innerHTML = head + '<div class="tbl-wrap tbl-compact tbl-auto"><table>' +
     '<thead><tr><th>Тема</th><th>Разписание</th><th>Включена</th><th>Последно тръгнало</th><th>Души</th><th>Статус</th><th></th></tr></thead>' +
     '<tbody>' + rows + '</tbody></table></div>';
 }
@@ -1652,7 +1652,7 @@ function renderNotifMatrix(){
     '<b>своите обекти</b> — само за обектите, които са му назначени (за група „Магазин" — неговият обект).<br>' +
     '<b>своите задачи</b> — само редовете, на които той е отговорник.' +
     '</div>';
-  body.innerHTML = head + '<div class="tbl-wrap"><table>' + thead + '<tbody>' + rows + '</tbody></table></div>' + legend;
+  body.innerHTML = head + '<div class="tbl-wrap tbl-compact tbl-auto"><table>' + thead + '<tbody>' + rows + '</tbody></table></div>' + legend;
 }
 
 function notifMatrixChannel(sel, topicKey, groupKey){
@@ -1779,7 +1779,7 @@ function renderNotifOverrides(){
       '<td><button onclick="deleteNotifOverride(\'' + esc(o.id) + '\')" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button></td>' +
     '</tr>';
   }).join('');
-  body.innerHTML = head + '<div class="tbl-wrap"><table>' +
+  body.innerHTML = head + '<div class="tbl-wrap tbl-compact tbl-auto"><table>' +
     '<thead><tr><th>Човек</th><th>Тема</th><th>Режим</th><th>Канал</th><th>Обхват</th><th>Бележка</th><th></th></tr></thead>' +
     '<tbody>' + rows + '</tbody></table></div>';
 }
@@ -2017,7 +2017,7 @@ function renderNotifSchedules(){
       '<td><button onclick="deleteAdminNotifSchedule(\'' + esc(s.id) + '\')" style="border:1px solid #fecaca;background:#fef2f2;color:#991b1b;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕</button></td>' +
     '</tr>';
   }).join('');
-  body.innerHTML = head + '<div class="tbl-wrap"><table>' +
+  body.innerHTML = head + '<div class="tbl-wrap tbl-compact tbl-auto"><table>' +
     '<thead><tr><th>За какво</th><th>Вид</th><th>Кога</th><th>Час</th><th>Обекти</th><th>Създал</th><th>Последно изпратено</th><th>Включено</th><th></th></tr></thead>' +
     '<tbody>' + rows + '</tbody></table></div>';
 }

@@ -35,12 +35,15 @@ function applyQuery(rows, url) {
   const qi = url.indexOf('?');
   if (qi < 0) return rows;
   const params = qi >= 0 ? url.slice(qi + 1).split('&') : [];
-  let out = rows, limit = null;
+  let out = rows, limit = null, offset = 0, order = null;
   params.forEach(p => {
     const eq = p.indexOf('=');
     if (eq < 0) return;
     const k = decodeURIComponent(p.slice(0, eq)), v = decodeURIComponent(p.slice(eq + 1));
-    if (['select', 'order', 'or', 'and', 'offset'].indexOf(k) >= 0) return;
+    if (k === 'order') { order = v.split(',').map(x => { const i = x.lastIndexOf('.'); return i > 0 ? { c: x.slice(0, i), d: /desc/.test(x.slice(i)) ? -1 : 1 } : { c: x, d: 1 }; }); return; }
+    if (['select', 'or', 'and'].indexOf(k) >= 0) return;
+    /* offset/limit — страниците на модулите (напр. чек листът чете по 1000 с &offset=): без тях четенето зацикля */
+    if (k === 'offset') { offset = parseInt(v, 10) || 0; return; }
     if (k === 'limit') { limit = parseInt(v, 10); return; }
     const m = /^(not\.)?(eq|neq|gt|gte|lt|lte|in|is|ilike|like)\.(.*)$/.exec(v);
     if (!m) return;
@@ -60,6 +63,19 @@ function applyQuery(rows, url) {
       return neg ? !res : res;
     });
   });
+  if (order) {
+    out = out.slice().sort((a, b) => {
+      for (const o of order) {
+        const x = a[o.c], y = b[o.c];
+        if (x === y) continue;
+        if (x === null || x === undefined) return 1;
+        if (y === null || y === undefined) return -1;
+        return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x) < String(y) ? -1 : 1) * o.d;
+      }
+      return 0;
+    });
+  }
+  if (offset) out = out.slice(offset);
   if (limit != null) out = out.slice(0, limit);
   return out;
 }
@@ -123,7 +139,7 @@ function mkEnv(repo, role, H) {
 async function settle(h, n) { for (let i = 0; i < (n || 6); i++) { await h._H.ticks(); await sleep(8); } }
 
 /* ── Снимка на действията ── */
-const CONTROL_FN = /^(transitDir|transitFilter|filterOrders|filterTransport|setTFilter|setTStore|setTSearch|setTDir|setSRFilter|setSRTab|setSRStoreFilter|setSRSupplierFilter|setSRSearch|setSDFilter|setSDTypeFilter|setSDDirTab|setSDStoreFilter|setSDView|setSDSearch|setHistSubtab|kasaTab|kasaShiftDay|kasaPickDay|toggleSapBanner|coToggleSap\w*)$/;
+const CONTROL_FN = /^(checklistShiftWeek|transitDir|transitFilter|filterOrders|filterTransport|setTFilter|setTStore|setTSearch|setTDir|setSRFilter|setSRTab|setSRStoreFilter|setSRSupplierFilter|setSRSearch|setSDFilter|setSDTypeFilter|setSDDirTab|setSDStoreFilter|setSDView|setSDSearch|setHistSubtab|kasaTab|kasaShiftDay|kasaPickDay|toggleSapBanner|coToggleSap\w*)$/;
 function fnOf(on) { const a = /^\s*(transitDir|transitFilter)\s*=/.exec(on); if (a) return a[1]; const m = /^\s*(?:event\.stopPropagation\(\);\s*)?(?:if\([^)]*\)\s*)?([A-Za-z_$][\w$.]*)\(/.exec(on); return m ? m[1] : on.slice(0, 24); }
 function dsig(el) {
   const parts = [];
