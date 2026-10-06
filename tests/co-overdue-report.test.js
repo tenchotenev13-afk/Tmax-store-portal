@@ -181,6 +181,26 @@ const ORDERS = [
     ok('без получатели → не праща', n.sent === false && n.reason === 'no_recipients' && N.posts.length === 0, JSON.stringify(n));
   }
 
+  section('4б. Грешка от базата не се превръща в „Няма просрочени"');
+  {
+    /* PostgREST връща ОБЕКТ при грешка (напр. несъществуваща колона в select) */
+    const E = load({ client_orders: { code: '42703', message: 'column client_orders.awaiting_stock does not exist' }, report_recipients: RECIP });
+    const e = await E.call({ type: 'co_overdue' });
+    ok('обект вместо масив → collect_failed, не писмо', e.ok === false && e.error === 'collect_failed' && E.posts.length === 0, JSON.stringify(e));
+    /* 06.10.2026: селектът искаше awaiting_stock, колона, която client_orders НЯМА
+       (само transport_orders) — отчетът излезе 0/0 срещу 10 pending и 28 processed.
+       Заявените колони трябва да са подмножество на реалните колони на таблицата. */
+    const REAL = ['id', 'in_num', 'store_name', 'customer_name', 'fulfiller', 'delivery', 'status', 'co_eta', 'co_note',
+      'co_processed_by', 'created_at', 'date', 'phone', 'product', 'sap', 'qty', 'unit', 'items', 'note', 'agent', 'bon',
+      'from_store', 'group_id', 'paid_transport', 'transport_id', 'delivery_reason', 'co_processed_at'];
+    const L = load({ client_orders: ORDERS, report_recipients: RECIP });
+    await L.call({ type: 'co_overdue' });
+    const q = decodeURIComponent(L.gets.filter(u => /client_orders/.test(u))[0] || '');
+    const cols = (/select=([^&]+)/.exec(q) || [, ''])[1].split(',');
+    const bad = cols.filter(c => REAL.indexOf(c) < 0);
+    ok('select иска само колони на client_orders', cols.length > 5 && !bad.length, 'непознати: ' + bad.join(','));
+  }
+
   section('5. Празник и уикенд — не се праща');
   {
     /* 22.09.2026 (вторник) — Ден на независимостта; 08:00 София = 05:00 UTC */

@@ -4230,7 +4230,11 @@ function reportCoOverdueSections(rows, refD){
 function collectCoOverdueReportData(cb, now?: Date){
   var refD = reportSofiaToday(now || new Date());
   sbGet('client_orders','status=in.(pending,processed)&fulfiller=ilike.' + encodeURIComponent('Централен офис') +
-    '&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,co_note,co_processed_by,created_at,date,awaiting_stock').then(function(rows){
+    '&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,co_note,co_processed_by,created_at,date').then(function(rows){
+    /* Грешка на PostgREST (напр. несъществуваща колона в select) идва като
+       ОБЕКТ, не масив. Без тази проверка писмото щеше да каже „Няма просрочени
+       заявки" при реални просрочени — тих провал, по-лош от липсващо писмо. */
+    if (!Array.isArray(rows)) { cb(null); return; }
     var sec = reportCoOverdueSections(rows, refD);
     cb({ reportDate: localDateISO(refD), pending: sec.pending, processed: sec.processed,
          total: sec.pending.length + sec.processed.length });
