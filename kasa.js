@@ -1667,7 +1667,7 @@ function printZoborot(){
 
   var win=window.open('','_blank','width=800,height:600');
   win.document.write('<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">'+
-    '<title>Равнение — '+esc(currentUser.store_name)+' — '+fmtDate(today())+'</title>'+
+    '<title>Равнение — '+esc(currentUser.store_name)+' — '+fmtDate(kasaActiveDate())+'</title>'+
     '<style>@page{size:A4;margin:15mm;}*{box-sizing:border-box;margin:0;padding:0;}'+
     'body{font-family:Arial,sans-serif;font-size:11pt;color:#111;}'+
     'h1{font-size:15pt;margin-bottom:2mm;}h2{font-size:12pt;margin:5mm 0 3mm;border-bottom:1px solid #ccc;padding-bottom:1mm;}'+
@@ -1682,8 +1682,8 @@ function printZoborot(){
     '</style></head><body>'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5mm;">'+
       '<div><h1>ТЕМАКС — Равнение на оборота</h1>'+
-      '<div style="font-size:11pt;color:#444;">'+esc(currentUser.store_name)+' &nbsp;|&nbsp; '+fmtDate(today())+'</div>'+
-      '<div style="font-size:8pt;color:#888;margin-top:1mm;">Статус: '+(z.status==='confirmed'?'✅ Потвърден':'✏️ Чернова')+'</div></div>'+
+      '<div style="font-size:11pt;color:#444;">'+esc(currentUser.store_name)+' &nbsp;|&nbsp; '+fmtDate(kasaActiveDate())+'</div>'+
+      '<div style="font-size:8pt;color:#888;margin-top:1mm;">Статус: '+(z.status==='confirmed'?'✅ Потвърден':z.status==='returned'?'↩ Върнат':'✏️ Чернова')+'</div></div>'+
     '</div>'+
     '<h2>Данни от POS Zoborot</h2>'+
     '<table><tbody>'+

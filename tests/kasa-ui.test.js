@@ -148,9 +148,36 @@ async function snapshot() {
     const h = env();
     const a = await printReport(h);
     ok('Печат на ПОС отчети: непроменен (' + a.length + ' знака)', a === EXPECTED.report && a.length > 1000);
+    h.w.kasaSelectedDate = TODAY; /* работна дата = днес: след комит Б печатът е същият и тук (без дата — вчера) */
     const b = await printZob(h, clone(ZOB));
     ok('Печат на Равнение (работна дата = днес): непроменен (' + b.length + ' знака)', b === EXPECTED.zoborot && b.length > 500);
     h.close();
+  }
+
+  /* Комит Б — датата и статусът в печата на Равнение. Единственото изключение от „байт по байт същият“:
+     точно тези три места (<title>, заглавието, статусът). Еталонът е от f018d99 — работна дата ≠ днес, върнат запис. */
+  section('5. Печат на Равнение: работната дата (не днес) и статус „Върнат“');
+  {
+    const h = env();
+    h.w.kasaSelectedDate = OLD;
+    const nowS = h.w.fmtDate(TODAY), oldS = h.w.fmtDate(OLD);
+    const html = await printZob(h, clone(ZOB_B));
+    ok('печатът съдържа работната дата ' + oldS, html.indexOf(oldS) >= 0);
+    ok('печатът НЕ съдържа днешната дата ' + nowS, html.indexOf(nowS) < 0);
+    ok('и <title>, и заглавието са с работната дата', (html.match(new RegExp(oldS.replace(/\./g, '\\.'), 'g')) || []).length === 2);
+    ok('върнат запис: „↩ Върнат“, не „Чернова“', html.indexOf('Статус: ↩ Върнат') >= 0 && html.indexOf('Чернова') < 0);
+    const want = EXPECTED.zoborot_other_day_returned.split(nowS).join(oldS).split('✏️ Чернова').join('↩ Върнат');
+    ok('освен тези места печатът е байт по байт като преди', html === want && html.length === want.length, html.length + ' / ' + want.length);
+    const c = await printZob(h, clone(ZOB));
+    ok('потвърден: „✅ Потвърден“', c.indexOf('Статус: ✅ Потвърден') >= 0);
+    const d = await printZob(h, Object.assign(clone(ZOB), { status: 'draft' }));
+    ok('чернова: „✏️ Чернова“', d.indexOf('Статус: ✏️ Чернова') >= 0);
+    /* работна дата 05.10, днес 06.10 — като в задачата */
+    const h2 = env();
+    h2.w.kasaSelectedDate = dayOffset(-1);
+    const e = await printZob(h2, clone(ZOB));
+    ok('работна дата вчера: вчерашната е в печата, днешната — не', e.indexOf(h2.w.fmtDate(dayOffset(-1))) >= 0 && e.indexOf(h2.w.fmtDate(TODAY)) < 0);
+    h.close(); h2.close();
   }
 
   report();
