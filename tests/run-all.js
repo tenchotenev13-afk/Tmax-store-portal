@@ -210,6 +210,7 @@ const TESTS = [
   'email-subject-rfc2047.test.js',
   'daily-turnover.test.js',
   'kasa-tab-routing.test.js',
+  'kasa-ui.test.js',
   'pallets-summary.test.js',
   'supply.test.js',
   'oborot-bulletin-link.test.js',

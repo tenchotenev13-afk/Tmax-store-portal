@@ -226,7 +226,7 @@ function renderKasa(){
     });
     html+='<div class="card" style="margin-bottom:16px;">'+
       '<div class="card-title">📅 Днешни отчети — '+fmtDate(todayStr)+'</div>'+
-      '<div class="tbl-wrap"><table>'+
+      '<div class="tbl-wrap tbl-compact tbl-auto"><table>'+
       '<thead><tr><th>ПОС</th><th>Касиер</th><th>Оборот</th><th>В брой</th><th>Карти</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th><th></th></tr></thead><tbody>';
     todayRep.forEach(function(r){
       var draft=r.status==='draft';
@@ -368,11 +368,11 @@ function openKasaForm(report){
       '<div><label class="fl">Деб./кредитни (EUR)</label><input type="number" step="0.01" class="fi" id="kf-card_turnover" value="'+(r.card_turnover||'')+'" oninput="kasaLiveCalc()" placeholder="0.00"></div>'+
     '</div></div>'+
 
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:14px;margin-bottom:14px;">'+
 
     /* Отчетени купюри */
     '<div class="card"><div class="card-title">Отчетени купюри</div>'+
-    '<table style="width:100%;"><thead><tr>'+
+    '<div style="overflow-x:auto;"><table style="width:100%;"><thead><tr>'+
       '<th style="text-align:right;padding:4px 10px;font-size:11px;color:#64748b;">Ном.</th>'+
       '<th style="padding:4px 6px;font-size:11px;color:#64748b;text-align:center;">Брой</th>'+
       '<th style="padding:4px 10px;font-size:11px;color:#64748b;">Сума</th>'+
@@ -381,12 +381,12 @@ function openKasaForm(report){
     COINS.map(function(v){return denomRow(v,DENOM_KEY[v]);}).join('')+
     '<tr style="border-top:2px solid #e2e8f0;"><td colspan="2" style="padding:6px 10px;font-weight:700;">Общо налични:</td>'+
     '<td style="padding:6px 10px;font-family:DM Mono,monospace;font-weight:700;" id="kf-counted-total">0.00</td></tr>'+
-    '</tbody></table></div>'+
+    '</tbody></table></div></div>'+
 
     /* Инкасо + Сторна */
     '<div>'+
     '<div class="card" style="margin-bottom:14px;"><div class="card-title">Изведени за инкасо (брой банкноти)</div>'+
-    '<table style="width:100%;"><thead><tr>'+
+    '<div style="overflow-x:auto;"><table style="width:100%;"><thead><tr>'+
       '<th style="text-align:right;padding:4px 10px;font-size:11px;color:#64748b;">Ном.</th>'+
       '<th style="padding:4px 6px;font-size:11px;color:#64748b;text-align:center;">Брой</th>'+
       '<th style="padding:4px 10px;font-size:11px;color:#64748b;">Сума</th>'+
@@ -394,7 +394,7 @@ function openKasaForm(report){
     INKASO_DENOM.map(function(v){return inkRow(v);}).join('')+
     '<tr style="border-top:2px solid #e2e8f0;"><td colspan="2" style="padding:6px 10px;font-weight:700;">Общо инкасо:</td>'+
     '<td style="padding:6px 10px;font-family:DM Mono,monospace;font-weight:700;" id="kf-inkaso-total">0.00</td></tr>'+
-    '</tbody></table></div>'+
+    '</tbody></table></div></div>'+
     '<div class="card"><div class="card-title">Сторна</div>'+
     '<label class="fl">Сума сторна (EUR)</label>'+
     '<input type="number" step="0.01" class="fi" id="kf-storna" value="'+(r.storna_total||0)+'" oninput="kasaLiveCalc()" placeholder="0.00">'+
@@ -406,7 +406,7 @@ function openKasaForm(report){
       '<div style="font-size:13px;color:#1e40af;font-weight:600;">💵 Обща парична наличност (налични + инкасо)</div>'+
       '<div id="kf-total-nalichnost" style="font-size:18px;font-weight:700;font-family:DM Mono,monospace;color:#1e40af;">0.00</div>'+
     '</div>'+
-    '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px;">'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,105px),1fr));gap:8px;margin-bottom:12px;">'+
       '<div style="background:#f8fafc;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:11px;color:#64748b;">В брой (ПОС)</div><div style="font-size:16px;font-weight:700;font-family:DM Mono,monospace;" id="kf-r-cash">0.00</div></div>'+
       '<div style="background:#fff5f5;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:11px;color:#64748b;">– Сторна</div><div style="font-size:16px;font-weight:700;font-family:DM Mono,monospace;color:#dc2626;" id="kf-r-storna">0.00</div></div>'+
       '<div style="background:#f0fdf4;border-radius:8px;padding:10px;text-align:center;"><div style="font-size:11px;color:#64748b;">= Нето</div><div style="font-size:16px;font-weight:700;font-family:DM Mono,monospace;color:#16a34a;" id="kf-r-net">0.00</div></div>'+
@@ -777,7 +777,7 @@ function renderGlavna(){
     /* Сборна таблица деноминации */
     '<div class="card" style="margin-bottom:14px;">'+
     '<div class="card-title">📊 Обобщение по купюри — '+fmtDate(todayStr)+'</div>'+
-    '<div class="tbl-wrap"><table style="font-size:12px;">'+
+    '<div class="tbl-wrap tbl-compact tbl-auto"><table style="font-size:12px;">'+
     '<thead><tr>'+
       '<th>Ном.</th>'+
       todayRep.map(function(r){return '<th style="text-align:center;">ПОС '+r.pos_number+'</th>';}).join('')+
@@ -811,7 +811,7 @@ function renderGlavna(){
       '<div class="card-title" style="margin:0;">📤 Изведени за инкасо — по деноминации</div>'+
       '<div style="font-size:11px;color:#d97706;font-weight:600;">Ориентир за инкасиране</div>'+
     '</div>'+
-    '<div class="tbl-wrap"><table style="font-size:12px;">'+
+    '<div class="tbl-wrap tbl-compact tbl-auto"><table style="font-size:12px;">'+
     '<thead><tr>'+
       '<th style="text-align:right;">Ном.</th>'+
       todayRep.map(function(r){return '<th style="text-align:center;">ПОС '+r.pos_number+'</th>';}).join('')+
@@ -844,7 +844,7 @@ function renderGlavna(){
     /* Жълти полета — ръчно въвеждане */
     '<div class="card" style="margin-bottom:14px;background:#fffbeb;border-color:#f0c940;">'+
     '<div class="card-title" style="color:#92400e;">⭐ Ръчно въвеждане (жълти полета)</div>'+
-    '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;">'+
       '<div><label class="fl">Служебно въведени (EUR)</label>'+
         (canInput?
           '<input type="number" step="0.01" class="fi" id="gl-slujebno" value="'+(g.slujebno||0)+'" oninput="glavnaLiveCalc()" style="background:#fffbeb;">':
@@ -871,7 +871,7 @@ function renderGlavna(){
     /* Финален резултат */
     '<div class="card" style="background:#f8fafc;">'+
     '<div class="card-title">📊 Краен резултат</div>'+
-    '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;">'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,200px),1fr));gap:10px;">'+
       '<div style="text-align:center;padding:12px;border-radius:8px;background:#f0fdf4;">'+
         '<div style="font-size:10px;color:#166534;text-transform:uppercase;margin-bottom:4px;">Общо налични</div>'+
         '<div style="font-size:15px;font-weight:700;font-family:DM Mono,monospace;color:#166534;" id="gl-r-counted">'+totalCounted.toFixed(2)+' EUR</div>'+
@@ -1358,7 +1358,7 @@ function renderHistTable(rows) {
     if (da !== db) return da < db ? 1 : -1;              /* дата низходящо */
     return (parseInt(a.pos_number)||0)-(parseInt(b.pos_number)||0); /* ПОС възходящо */
   });
-  var h = '<div class="tbl-wrap"><table>'+
+  var h = '<div class="tbl-wrap tbl-compact tbl-auto"><table>'+
     '<thead><tr><th>Дата</th><th>ПОС</th><th>Касиер</th><th>В брой</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th><th></th></tr></thead><tbody>';
   sorted.slice(0,60).forEach(function(r){
     var canEdit = r.status==='draft' || r.status==='returned';
@@ -1470,12 +1470,12 @@ function renderZoborot(){
       '</div>'+
     '</div>'+
 
-    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;">'+
+    '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:14px;margin-bottom:14px;">'+
 
     /* ПОС данни */
     '<div class="card">'+
       '<div class="card-title">📊 Данни от POS Zoborot</div>'+
-      '<table style="width:100%;font-size:13px;">'+
+      '<div style="overflow-x:auto;"><table style="width:100%;font-size:13px;">'+
         '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане в брой EUR (BGN)</td>'+
           '<td style="text-align:right;padding:6px 4px;">'+inp('cash_bgn',z.cash_bgn)+'</td></tr>'+
         '<tr style="border-bottom:1px solid #f1f5f9;"><td style="padding:6px 4px;color:#64748b;">Плащане в брой EUR</td>'+
@@ -1490,13 +1490,13 @@ function renderZoborot(){
           '<td style="text-align:right;padding:8px 4px;" id="zf-pos-total">'+
             '<span style="font-family:DM Mono,monospace;font-weight:700;font-size:14px;">'+pnb.toFixed(2)+' EUR</span>'+
           '</td></tr>'+
-      '</table>'+
+      '</table></div>'+
     '</div>'+
 
     /* ФУ данни */
     '<div class="card">'+
       '<div class="card-title">🖨 Фискални устройства (ФУ)</div>'+
-      '<table style="width:100%;font-size:12px;">'+
+      '<div style="overflow-x:auto;"><table style="width:100%;font-size:12px;">'+
         '<thead><tr>'+
           '<th style="padding:5px 6px;text-align:left;background:#2f2f2f;color:#fff;font-size:11px;">ФУ</th>'+
           '<th style="padding:5px 6px;text-align:right;background:#2f2f2f;color:#fff;font-size:11px;">Общ оборот</th>'+
@@ -1520,13 +1520,13 @@ function renderZoborot(){
           '<td style="text-align:right;padding:8px 6px;font-family:DM Mono,monospace;font-size:14px;" id="zf-fu-total">'+ftn.toFixed(2)+'</td>'+
         '</tr>'+
         '</tbody>'+
-      '</table>'+
+      '</table></div>'+
     '</div></div>'+
 
     /* Резултат */
     '<div class="card" style="background:#f8fafc;">'+
       '<div class="card-title">📊 Равнение</div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;">'+
+      '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr));gap:12px;">'+
         '<div style="text-align:center;padding:14px;border-radius:8px;background:#eff6ff;">'+
           '<div style="font-size:10px;color:#1e40af;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px;">POS оборот (без банков път)</div>'+
           '<div style="font-size:18px;font-weight:700;font-family:DM Mono,monospace;color:#1e40af;" id="zf-r-pos">'+pnb.toFixed(2)+' EUR</div>'+
@@ -1853,7 +1853,7 @@ function renderStorno(){
     return;
   }
 
-  html+='<div class="card"><div class="tbl-wrap"><table>'+
+  html+='<div class="card"><div class="tbl-wrap tbl-compact tbl-auto"><table>'+
     '<thead><tr>'+
       '<th style="width:8%;white-space:nowrap;">Дата сторно</th><th style="width:8%;white-space:nowrap;">Дата бон</th>'+
       '<th style="width:16%;">Артикул/и</th>'+
