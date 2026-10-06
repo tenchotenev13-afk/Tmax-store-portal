@@ -330,6 +330,12 @@ function llGroupDocs(rows){
   return out;
 }
 function llIsHeaded(it){ return llIsNumbered(it.kind) && it.pallet_no != null; }
+/* Единица БЕЗ номер (насип, или ред без pallet_no): за ПОКАЗВАНЕ получава
+   заглавен ред като палетите — „Насип · Монтана · изходящи: 80472771" — а
+   редът под него е „↳". llIsHeaded() НЕ се пипа: от него зависят дялът
+   „(1/2)" (llDocShare) и етикетите (llLabelUnits), а насипът няма нито
+   дял, нито етикет — затова на този заглавен ред няма и бутони. */
+function llIsUnnumberedUnit(it){ return !!it && !llIsHeaded(it); }
 function llGroupHeading(rows, share){
   var f = rows[0], docs = llGroupDocs(rows);
   return llCap(llKindLabel(f)) + ' · ' + (f.store_name || '—') +
@@ -1157,8 +1163,17 @@ function llStoreCardHtml(l){
        документа под него е само „↳". Копчетата за целия палет остават само
        при няколко документа: при един те са същите като на реда. */
     var headed = llIsNumbered(g.kind) && g.pallet_no != null;
+    var unnum = llIsUnnumberedUnit(g.rows[0]);
+    /* Единица без номер (насип…): същият заглавен ред, без „N от M", без
+       „1 документ" и без копчета — стои само за да е ясно, КОЯ товарна
+       единица е редът под него. */
+    if(unnum){
+      h += '<tr data-pallet-group="1" data-pallet-single="1" data-ll-unit-head="1" data-ll-unnumbered="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;">'+
+        '<td colspan="5" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(g.store_name)+'">'+
+          esc(llGroupHeading(g.rows, share))+'</td></tr>';
+    }
     if(headed && !multi){
-      h += '<tr data-pallet-group="1" data-pallet-single="1"'+llHlAttrs(l.id, g)+' style="'+llHeadBg(l.id, g)+'border-bottom:1px solid #e2e8f0;">'+
+      h += '<tr data-pallet-group="1" data-pallet-single="1" data-ll-unit-head="1"'+llHlAttrs(l.id, g)+' style="'+llHeadBg(l.id, g)+'border-bottom:1px solid #e2e8f0;">'+
         '<td colspan="5" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(g.store_name)+'">'+
           esc(llGroupHeading(g.rows, share))+' · 1 документ</td></tr>';
     }
@@ -1166,7 +1181,7 @@ function llStoreCardHtml(l){
       var gGot  = g.rows.filter(function(r){ return r.received; }).length;
       var gMiss = g.rows.filter(function(r){ return r.missing; }).length;
       var gCan  = g.rows.some(llOpenForStore);
-      h += '<tr data-pallet-group="1"'+llHlAttrs(l.id, g)+' style="'+llHeadBg(l.id, g)+'border-bottom:1px solid #e2e8f0;">'+
+      h += '<tr data-pallet-group="1" data-ll-unit-head="1"'+llHlAttrs(l.id, g)+' style="'+llHeadBg(l.id, g)+'border-bottom:1px solid #e2e8f0;">'+
         '<td colspan="4" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(g.store_name)+'">'+
           esc(llGroupHeading(g.rows, share))+' · '+g.rows.length+' документа · получени '+gGot+
           (gMiss?' · неполучени '+gMiss:'')+'/'+g.rows.length+
@@ -1197,7 +1212,7 @@ function llStoreCardHtml(l){
     h += '<tr'+(failed?' data-doc-failed="1"':'')+(it.missing?' data-missing="1"':'')+
       (it.added_by_store?' data-ll-added="'+escAttr(it.approval_status||'')+'"':'')+
       ' style="border-bottom:1px solid #f1f5f9;'+bg+(llRowRejected(it)?'text-decoration:line-through;':'')+'">'+
-      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+(headed?'padding-left:22px;color:#94a3b8;':'')+'">'+(headed?'↳':esc(llKindLabel(it)))+
+      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+((headed||unnum)?'padding-left:22px;color:#94a3b8;':'')+'">'+((headed||unnum)?'↳':esc(llKindLabel(it)))+
         (it.added_by_store?'<div style="margin-top:3px;text-decoration:none;font-weight:400;">'+llApprovalBadge(it)+llApprovalNote(it)+llApproveBtnsHtml(l, it)+'</div>':'')+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
         (it.partial?' '+llPartialBadge():'')+'</td>'+
@@ -1972,9 +1987,10 @@ function llBuildPdf(list, items, storeFilter){
     };
     llPalletGroups(rows).forEach(function(g){
       var f = g.rows[0];
-      if(llIsHeaded(f)){
+      /* Единицата има ЕДНО заглавие, документите ѝ — отдолу, по един ред; и
+         без номер (насип): „N. Насип · Монтана · изходящи: …". */
+      if(llIsHeaded(f) || llIsUnnumberedUnit(f)){
         n++;
-        /* Единицата има ЕДНО заглавие, документите ѝ — отдолу, по един ред. */
         line(n + '. ' + llGroupHeading(g.rows) +
           (llIsOversize(f.kind) && f.warehouse_comment ? ' — ' + f.warehouse_comment : ''), 11, 5.5);
         g.rows.forEach(function(it){
@@ -1984,15 +2000,6 @@ function llBuildPdf(list, items, storeFilter){
         y += 1.5;
         return;
       }
-      g.rows.forEach(function(it){
-        n++;
-        line(n + '. ' + llKindLabel(it) +
-          (llIsOversize(it.kind) && it.warehouse_comment ? ' — ' + it.warehouse_comment : '') +
-          '   изходящ № ' + (it.purchase_doc || 'без') +
-          (storeFilter ? '' : '   обект: ' + (it.store_name || '—')), 11, 5.5);
-        pdfRow(it);
-        y += 1.5;
-      });
     });
     y += 4;
     line('Товарил: ............................        Приел: ............................', 10, 5);
@@ -4325,12 +4332,13 @@ function llViewHtml(){
   items.forEach(function(it){
     if(it.products && it.products.length && llRowCounts(it)) unitHasProducts[JSON.stringify([it.store_name || '', unitRef(it)])] = true;
   });
-  /* Заглавен ред за всяка номерирана единица; документите са под него. */
+  /* Заглавен ред за всяка единица — и за номерираните, и за тези без номер
+     (насип); документите са под него. */
   var share = llDocShare(items);
-  var headFirst = llPalletGroups(items).filter(function(g){ return llIsHeaded(g.rows[0]); })
-    .map(function(g){ return g.rows; });
+  var headFirst = llPalletGroups(items).map(function(g){ return g.rows; });
   items.forEach(function(it){
     var isHeaded = llIsHeaded(it);
+    var isUnnum = llIsUnnumberedUnit(it);
     /* „1" = палет 1; „rc1" = извънгабаритен 1; „rl1" = руло 1; иначе id на
        реда (насип). Без вида в препратката палет 1 и руло 1 на един обект се
        смесват в един опис. Представката „rc" е от предишното име на вида
@@ -4344,7 +4352,11 @@ function llViewHtml(){
       ? ' <button data-l="'+l.id+'" data-s="'+escAttr(it.store_name||'')+'" data-u="'+escAttr(uref)+'" onclick="llPrint(this.dataset.l,this.dataset.s,this.dataset.u)" title="Опис на палета — за залепване" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:5px;padding:1px 7px;font-size:10.5px;font-weight:600;cursor:pointer;margin-left:4px;">🖨 Опис</button>'
       : '';
     var hg = headFirst.filter(function(rs){ return rs[0] === it; })[0];
-    if(hg){
+    if(hg && isUnnum){
+      /* Без бутони: насипът няма етикет и няма „Опис" на заглавния ред. */
+      h += '<tr data-ll-unit-head="1" data-ll-unnumbered="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;"><td colspan="7" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(it.store_name)+'">'+
+        esc(llGroupHeading(hg, share))+'</td></tr>';
+    } else if(hg){
       var hf = hg[0], hk = llTagKey(hf.kind, hf.pallet_no, hf.store_name);
       h += '<tr data-ll-unit-head="1" style="background:#f8fafc;border-bottom:1px solid #e2e8f0;"><td colspan="7" style="padding:6px 9px;font-weight:700;font-size:11.5px;'+llStoreStripe(hf.store_name)+'">'+
         esc(llGroupHeading(hg, share))+opisBtn+
@@ -4357,7 +4369,7 @@ function llViewHtml(){
       (llRowPending(it)?'background:#fffbeb;':(llRowRejected(it)?'background:#f8fafc;color:#94a3b8;text-decoration:line-through;':
         (it.received?'background:#f0fdf4;':(it.missing?'background:#fef2f2;':''))))+'">'+
       '<td style="padding:6px 9px;color:#94a3b8;">'+(it.position!=null?it.position:'—')+'</td>'+
-      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+(isHeaded?'padding-left:22px;color:#94a3b8;':'')+'">'+(isHeaded?'↳':esc(llKindLabel(it)))+
+      '<td style="padding:6px 9px;font-weight:600;white-space:nowrap;'+((isHeaded||isUnnum)?'padding-left:22px;color:#94a3b8;':'')+'">'+((isHeaded||isUnnum)?'↳':esc(llKindLabel(it)))+
         (it.added_by_store?'<div style="margin-top:3px;text-decoration:none;font-weight:400;white-space:normal;">'+llApprovalBadge(it)+llApprovalNote(it)+llApproveBtnsHtml(l, it)+'</div>':'')+
         (isHeaded ? '' : opisBtn)+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
@@ -4644,9 +4656,8 @@ function llRenderPrint(list, items, storeFilter){
   var withProds = function(it){ return (it.products || []).length > 0; };
   var bodyHtml = llPalletGroups(rows).map(function(g){
     var span = g.rows.reduce(function(a, it){ return a + 1 + (withProds(it) ? 1 : 0); }, 0);
-    var uhead = llIsHeaded(g.rows[0])
-      ? '<tr class="lp-row lp-uhead" data-ll-unit-head="1"><td colspan="7" class="lp-uh">'+esc(llGroupHeading(g.rows))+'</td></tr>'
-      : '';
+    /* Заглавен ред за ВСЯКА единица — и без номер (насип). */
+    var uhead = '<tr class="lp-row lp-uhead" data-ll-unit-head="1"><td colspan="7" class="lp-uh">'+esc(llGroupHeading(g.rows))+'</td></tr>';
     return uhead + g.rows.map(function(it, k){
       n++;
       var doc = it.purchase_doc ? esc(it.purchase_doc) : '<span style="color:#777;">без</span>';

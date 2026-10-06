@@ -202,7 +202,7 @@ function inOrder(rows) {
       .map(tr => DOCRE.exec(tr.children[1] && tr.children[1].textContent)).filter(Boolean).map(m => m[1]).join(',');
     ok('картата на обекта: P1a,P1b,P2,PO,PB', cardOrder === 'P1a,P1b,P2,PO,PB', cardOrder);
     const heads = Array.from(card.querySelectorAll('tr[data-pallet-group="1"]')).map(t => t.textContent.trim());
-    ok('заглавен ред за всеки номериран палет (3: палет 1, палет 2, извънгабаритен 1)', heads.length === 3, JSON.stringify(heads));
+    ok('заглавен ред за всяка единица (4: палет 1, палет 2, извънгабаритен 1 и насип — от 06.10.2026 и без номер)', heads.length === 4, JSON.stringify(heads));
     ok('„палет 1 от 2" е преди „палет 2 от 2"',
       heads[0].indexOf('Палет 1 от 2') === 0 && heads[1].indexOf('Палет 2 от 2') === 0, JSON.stringify(heads));
     ok('групираният палет казва „2 документа"', heads[0].indexOf('2 документа') >= 0, heads[0]);

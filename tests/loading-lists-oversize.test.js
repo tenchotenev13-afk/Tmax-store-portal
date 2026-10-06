@@ -345,7 +345,7 @@ const pr = h => h.doc.getElementById('mod-print');
        същият низ, който влиза в line(). */
     const src = fs.readFileSync(path.join(ROOT, 'loading.js'), 'utf8');
     ok('PDF-ът слага описанието на реда на вида',
-      src.indexOf("(llIsOversize(it.kind) && it.warehouse_comment ? ' — ' + it.warehouse_comment : '')") >= 0);
+      src.indexOf("(llIsOversize(f.kind) && f.warehouse_comment ? ' — ' + f.warehouse_comment : '')") >= 0);
     ok('и НЕ го повтаря на отделен ред',
       src.indexOf("if(it.warehouse_comment && !llIsOversize(it.kind)) line('    коментар склад: '") >= 0);
   }
