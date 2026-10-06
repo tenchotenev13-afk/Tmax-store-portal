@@ -248,7 +248,9 @@ function shown(doc) {
     h.close();
   }
 
-  section('8. Днешните отчети не влизат в История');
+  /* Работният ден по подразбиране е ВЧЕРА (kasaActiveDate()); отчетите за него са в картата „ПОС отчети“
+     горе, затова История ги не повтаря. До работния ден „днес“ беше обратното. */
+  section('8. Отчетите за работния ден не влизат в История');
   {
     const h = env([
       rep({ id: 'today-1', status: 'confirmed', date: w0() }),
@@ -258,8 +260,16 @@ function shown(doc) {
     if (guard('renderKasa() не хвърля', () => w.renderKasa())) {
       const list = shown(doc);
       if (ok('таблицата е рендирана', !!list, String(list))) {
-        ok('днешният не е в История', list.indexOf('today-1') < 0, list.join(','));
-        ok('вчерашният е в История', list.indexOf('y-1') >= 0, list.join(','));
+        ok('работен ден вчера: вчерашният не е в История (той е в картата)', list.indexOf('y-1') < 0, list.join(','));
+        ok('работен ден вчера: днешният е в История', list.indexOf('today-1') >= 0, list.join(','));
+      }
+    }
+    w.kasaSetDate(w0());
+    if (guard('renderKasa() при работен ден днес', () => w.renderKasa())) {
+      const list = shown(doc);
+      if (ok('таблицата е рендирана (работен ден днес)', !!list, String(list))) {
+        ok('работен ден днес: днешният не е в История', list.indexOf('today-1') < 0, list.join(','));
+        ok('работен ден днес: вчерашният е в История', list.indexOf('y-1') >= 0, list.join(','));
       }
     }
     h.close();

@@ -240,8 +240,8 @@ function renderKasa(){
   var todayStr=kasaActiveDate(); /* работният ден; картата показва него, не днес */
   var sd=kasaShortDate(todayStr);
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
-  /* История — без промяна: всичко, което не е с днешна дата */
-  var histRep =kasaReports.filter(function(r){return r.date!==realToday;});
+  /* История: всичко, което не е за работния ден — него го показва картата горе */
+  var histRep =kasaReports.filter(function(r){return r.date!==todayStr;});
   var realTodayCnt=todayStr!==realToday?kasaReports.filter(function(r){return r.date===realToday;}).length:0;
   /* Картата се показва при ВСЯКА история (histRep), а таблицата получава само
      прозореца (histWin). Ако гейтът беше по histWin, магазин само със стари
@@ -259,8 +259,10 @@ function renderKasa(){
     kasaWorkDayBar()+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
       '<div style="font-size:13px;color:var(--muted);">За '+sd+': <b>'+todayRep.length+'</b> '+(todayRep.length===1?'отчет':'отчета')+'</div>'+
+      '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
       '<button class="btn btn-green" onclick="openKasaForm(null)">+ Нов ПОС отчет за '+sd+'</button>'+
       '<button onclick="printKasaReport()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:500;cursor:pointer;">🖨 Разпечатай отчет</button>'+
+      '</div>'+
     '</div>';
 
   /* Подсказка: отчети с днешна дата, докато работният ден е друг */
@@ -1448,8 +1450,9 @@ function renderHistTable(rows) {
 function filterHistRep() {
   var dateVal = (document.getElementById('hist-date-filter')||{}).value || '';
   var statusVal = (document.getElementById('hist-status-filter')||{}).value || 'all';
-  var todayStr = today();
-  var all = kasaReports.filter(function(r){ return r.date !== todayStr; });
+  /* Без избрана дата — като таблицата горе: без отчетите на работния ден (те са в картата). С избрана дата
+     търсенето обхваща ВСИЧКО: ако датата е равна на работния ден, резултатът се показва, не се крие. */
+  var all = dateVal ? kasaReports.slice() : kasaReports.filter(function(r){ return r.date !== kasaActiveDate(); });
   var filtered = all.filter(function(r){
     if (dateVal && r.date !== dateVal) return false;
     if (statusVal !== 'all' && r.status !== statusVal) return false;

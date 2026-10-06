@@ -61,12 +61,12 @@ async function settle() { for (let i = 0; i < 8; i++) await ticks(); }
     ok('над нея: „За 05.10: 2 отчета“', /За 05\.10: 2 отчета/.test(txt(h)), txt(h).slice(0, 300));
     ok('бутонът е „+ Нов ПОС отчет за 05.10“', /\+ Нов ПОС отчет за 05\.10/.test(txt(h)));
     ok('вчерашните отчети са в картата', /Касиер вчера-1/.test(txt(h)) && /Касиер вчера-2/.test(txt(h)));
-    ok('днешният НЕ е в таблицата (ПОС 1 днес)', !/Касиер днес-1/.test(txt(h)));
+    ok('днешният НЕ е в картата за работния ден (той е в Историята — виж т.8)', !/Касиер днес-1/.test(mod(h).querySelector('.card .tbl-wrap').textContent));
     const hint = $(h, 'kasa-today-hint');
     ok('жълта подсказка: „Има 1 ПОС отчет с днешна дата (06.10).“', !!hint && /Има 1 ПОС отчет с днешна дата \(06\.10\)\./.test(hint.textContent), hint && hint.textContent);
     ok('подсказката е над таблицата', !!hint && !!(hint.compareDocumentPosition(mod(h).querySelector('.tbl-wrap')) & 4));
     ok('бутон „Покажи 06.10“', !!hint && /Покажи 06\.10/.test(hint.textContent));
-    ok('История (последните 60 дни) е без промяна: днешният отчет не е в нея, вчерашните са', /История/.test(txt(h)) && !/днес-1/.test(mod(h).querySelector('#hist-table-wrap').textContent));
+    ok('История: отчетите за работния ден (вчера) са САМО в картата, днешният е в Историята', /История/.test(txt(h)) && /днес-1/.test(mod(h).querySelector('#hist-table-wrap').textContent) && !/вчера-/.test(mod(h).querySelector('#hist-table-wrap').textContent));
     h.close();
   }
 
@@ -184,6 +184,48 @@ async function settle() { for (let i = 0; i < 8; i++) await ticks(); }
       ok(st + ': ' + want, txt(h).indexOf(want) >= 0, txt(h).slice(-200));
       h.close();
     }
+  }
+
+  section('8. История не повтаря отчетите на работния ден; филтърът по дата ги показва, броячът е както преди');
+  {
+    const OLD = '2026-09-20';
+    const h = env({ data: { kasa_reports: clone(REPORTS).concat([pos('стар', OLD, 1, { status: 'confirmed' })]), kasa_glavna: [], kasa_zoborot: [], kasa_documents: [], kasa_storno: [], stores: [{ name: 'Троян' }] } });
+    h.w.showModule('kasa'); await settle();
+    const hist = () => mod(h).querySelector('#hist-table-wrap').textContent;
+    const card = () => Array.from(mod(h).querySelectorAll('.card')).find(c => /ПОС отчети —/.test(c.textContent)).querySelector('table').textContent;
+    ok('работен ден вчера: вчерашните са в картата', /вчера-1/.test(card()) && /вчера-2/.test(card()));
+    ok('работен ден вчера: НЕ са в История', !/вчера-/.test(hist()), hist().slice(0, 200));
+    ok('работен ден вчера: днешният е в История (и в подсказката)', /днес-1/.test(hist()) && !!$(h, 'kasa-today-hint'));
+    ok('броячът „Още 1 по-стари записа са скрити“ е както преди', /Още 1 по-стари записа са скрити/.test(txt(h)), txt(h).slice(-200));
+    ok('записът извън прозореца не е в таблицата без филтър', !/стар/.test(hist()));
+
+    $(h, 'hist-date-filter').value = YEST;
+    h.w.filterHistRep();
+    ok('филтър по дата = работния ден → ВИЖДАТ СЕ отчетите за вчера (не „Няма записи“)', /вчера-1/.test(hist()) && /вчера-2/.test(hist()) && !/Няма записи/.test(hist()), hist().slice(0, 160));
+    $(h, 'hist-date-filter').value = OLD;
+    h.w.filterHistRep();
+    ok('филтър по стара дата извън прозореца → записът се показва', /стар/.test(hist()));
+    h.w.clearHistFilter();
+    ok('✕ → пак без вчерашните', !/вчера-/.test(hist()) && /днес-1/.test(hist()));
+
+    h.w.kasaPickDay(TODAY); await settle();
+    ok('работен ден днес: вчерашните са в История', /вчера-1/.test(hist()) && /вчера-2/.test(hist()));
+    ok('работен ден днес: днешният е само в картата', !/днес-1/.test(hist()) && /днес-1/.test(card()));
+    h.close();
+  }
+
+  section('9. Редът „За ДД.ММ“: текстът вляво, двата бутона заедно вдясно');
+  {
+    const h = env();
+    h.w.showModule('kasa'); await settle();
+    const lbl = Array.from(mod(h).querySelectorAll('div')).find(d => /^За 05\.10: 2 отчета$/.test(d.textContent.trim()) && d.children.length === 1);
+    const row = lbl && lbl.parentElement;
+    ok('редът е flex със space-between', !!row && /justify-content:space-between/.test(row.getAttribute('style')));
+    const grp = row && row.children[1];
+    ok('вторият елемент е група с gap:8px', !!grp && row.children.length === 2 && /display:flex;gap:8px/.test(grp.getAttribute('style')), grp && grp.getAttribute('style'));
+    const labels = grp ? Array.from(grp.querySelectorAll('button')).map(b => b.textContent.trim()) : [];
+    ok('в групата: „+ Нов ПОС отчет за 05.10“ и „Разпечатай отчет“ — един до друг', labels.length === 2 && /^\+ Нов ПОС отчет за 05\.10$/.test(labels[0]) && /Разпечатай отчет$/.test(labels[1]), JSON.stringify(labels));
+    h.close();
   }
 
   report();
