@@ -675,7 +675,7 @@ OneSignalDeferred.push(async function(OneSignal) {
   <h3>✏️ Корекция на заявка</h3>
   <div class="modal-sub">Полетата с * са задължителни. Промените се записват веднага.</div>
   <div class="form-grid">
-    <div><label class="fl">Дата *</label><input type="date" class="fi" id="edt-date"></div>
+    <div><label class="fl">Дата *</label><input type="date" class="fi" id="edt-date" onchange="corDeliveryChanged()"></div>
     <div><label class="fl">Час</label><select class="fi" id="edt-hour"><option>08:00</option><option>09:00</option><option>10:00</option><option>11:00</option><option>12:00</option><option>13:00</option><option>14:00</option><option>15:00</option><option>16:00</option><option>17:00</option><option>18:00</option><option>19:00</option></select></div>
     <div><label class="fl">Три имена на клиента *</label><input class="fi" id="edt-name" placeholder="Иван Петров Иванов"></div>
     <div><label class="fl">Телефон *</label><input class="fi" id="edt-phone" placeholder="0888 000 000"></div>
@@ -688,7 +688,8 @@ OneSignalDeferred.push(async function(OneSignal) {
     <div><label class="fl">№ Бон</label><input class="fi" id="edt-bon" placeholder="000123"></div>
     <div id="edt-fromstore-wrap"><label class="fl">Поръчан от магазин</label><select class="fi" id="edt-from-store"></select></div>
     <div id="edt-fulfiller-wrap"><label class="fl">Изпълнява (склад)</label><select class="fi" id="edt-fulfiller"></select></div>
-    <div><label class="fl">★ Дата на доставка</label><input type="date" class="fi" id="edt-delivery"></div>
+    <div><label class="fl">★ Дата на доставка</label><input type="date" class="fi" id="edt-delivery" onchange="corDeliveryChanged()"></div>
+    <div class="full" id="edt-delivery-reason-wrap" style="display:none;"><label class="fl">Причина за промяна на срока *</label><input class="fi" id="edt-delivery-reason" placeholder="напр. клиентът поиска по-късно"></div>
     <div><label class="fl">Агент / Изготвил</label><input class="fi" id="edt-agent"></div>
     <div class="full"><label class="fl">Бележки</label><input class="fi" id="edt-note" placeholder="Допълнителна информация..."></div>
   </div>

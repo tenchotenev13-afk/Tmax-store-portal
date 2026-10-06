@@ -1421,6 +1421,7 @@ function openCorrection(id,table){
   renderItemRows('edt-items',resolveItems(rec));
   document.getElementById('edt-bon').value=rec.bon||'';
   document.getElementById('edt-delivery').value=rec.delivery||'';
+  document.getElementById('edt-delivery-reason').value=table==='client_orders'?(rec.delivery_reason||''):'';
   document.getElementById('edt-agent').value=rec.agent||'';
   var isClient=table==='client_orders';
   document.getElementById('edt-note').value=(isClient?rec.note:rec.notes)||'';
@@ -1437,6 +1438,27 @@ function openCorrection(id,table){
   }
   closeModal('status-modal');
   document.getElementById('correction-modal').classList.add('open');
+  corDeliveryChanged();
+}
+/* Срок при корекция на КЛИЕНТСКА заявка: същото правило като при създаване —
+   не по-рано от CO_DEFAULT_WORKDAYS работни дни от датата на заявката; промяна
+   спрямо записаното изисква причина. transport_orders не се пипат. */
+function corRec(){
+  if(correctionTargetTable!=='client_orders')return null;
+  return clientOrders.find(function(o){return String(o.id)===String(correctionTargetId);})||null;
+}
+function corAutoDelivery(){
+  var d=v('edt-date');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)){var r=corRec();d=r&&r.date?r.date:today();}
+  return addBgWorkdays(d,CO_DEFAULT_WORKDAYS);
+}
+function corDeliveryChanged(){
+  var el=document.getElementById('edt-delivery'),wrap=document.getElementById('edt-delivery-reason-wrap');
+  if(!el||!wrap)return;
+  var rec=corRec();
+  if(!rec){wrap.style.display='none';el.removeAttribute('min');return;}
+  el.min=corAutoDelivery();
+  wrap.style.display=el.value!==(rec.delivery||'')?'':'none';
 }
 function submitCorrection(){
   if(!correctionTargetId||!correctionTargetTable)return;
@@ -1458,6 +1480,21 @@ function submitCorrection(){
     if(restriction){
       toast('🚫 '+fulfillerVal+' не приема заявки от '+fmtDate(restriction.start_date)+' до '+fmtDate(restriction.end_date)+(restriction.note?' — '+restriction.note:''),'#dc2626');
       return;
+    }
+    var rec=corRec();
+    /* Сменена дата на заявката при непроменен срок: срокът трябва да отговаря на новия минимум.
+       Нито датата, нито срокът сменени → минава както досега (стари заявки с кратък срок). */
+    if(rec&&v('edt-delivery')===(rec.delivery||'')&&v('edt-date')!==(rec.date||'')&&v('edt-delivery')){
+      var minDel=corAutoDelivery();
+      if(v('edt-delivery')<minDel){toast('Срокът не може да е по-кратък от '+CO_DEFAULT_WORKDAYS+' работни дни ('+fmtDate(minDel)+')','#dc2626');return;}
+    }
+    if(rec&&v('edt-delivery')!==(rec.delivery||'')){
+      var newDel=v('edt-delivery'),autoDel=corAutoDelivery(),reason=v('edt-delivery-reason');
+      if(!newDel){toast('Срокът на доставка не може да е празен','#dc2626');return;}
+      if(newDel<autoDel){toast('Срокът не може да е по-кратък от '+CO_DEFAULT_WORKDAYS+' работни дни ('+fmtDate(autoDel)+')','#dc2626');return;}
+      if(newDel>autoDel&&!reason){toast('Попълни причина за промяна на срока','#dc2626');return;}
+      patch.delivery=newDel;
+      patch.delivery_reason=newDel===autoDel?null:reason;
     }
     patch.from_store=v('edt-from-store');
     /* store_name следва „Поръчан от магазин" и при корекция. Дотук патчът

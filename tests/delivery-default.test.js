@@ -230,5 +230,114 @@ const lastBody = calls => { const p = orderPosts(calls); return p.length ? p[p.l
     ok('редът в таба показва причината', doc.body.textContent.indexOf('УНИКАЛНА-ПРИЧИНА') >= 0);
   }
 
+  section('7. Корекция на клиентска заявка — срок и причина');
+  {
+    const ADMIN = { email: 'ad@temax.bg', display_name: 'Админ', role: 'admin', store_name: CO };
+    const REQ = dayOffset(-3);
+    const MINC = (w, d) => w.addBgWorkdays(d || REQ, 10);
+    const cenv = (over) => {
+      const O = mkOrder('k1', Object.assign({ date: REQ, delivery: dayOffset(20), delivery_reason: 'Стара причина' }, over || {}));
+      const h = boot({ modules: ['transport.js', 'client-orders.js', 'history.js', 'notifications.js'], user: ADMIN,
+        data: { client_orders: [O], transport_orders: [{ id: 't1', store_name: 'Троян', date: REQ, delivery: dayOffset(1), customer_name: 'Т', phone: '1', items: [], notes: '' }], stores: [] } });
+      h.w.transportOrders = [{ id: 't1', store_name: 'Троян', date: REQ, delivery: dayOffset(1), customer_name: 'Т', phone: '1', hour: '10:00', items: [{ product: 'Х', qty: 1, unit: 'бр' }], notes: '' }];
+      h.w.clientOrders = JSON.parse(JSON.stringify([O]));
+      h.w.clientOrders.forEach(o => { o._status = h.w.calcStatus(o.delivery, o.status); });
+      return h;
+    };
+    const cpatch = e => e.calls.patch.filter(p => /client_orders/.test(p.url));
+    const hasToast = (e, re) => e.calls.toast.some(t => re.test(typeof t === 'string' ? t : t.msg || ''));
+    const save = async (e) => {
+      const btn = Array.from(e.doc.querySelectorAll('#correction-modal .btn-green')).find(b => /submitCorrection/.test(b.getAttribute('onclick')));
+      realClick(e.w, btn); await ticks();
+    };
+
+    /* без смяна на датата → минава както досега */
+    let e = cenv(); e.w.openCorrection('k1', 'client_orders');
+    ok('отваряне: срокът е зареден', el(e.doc, 'edt-delivery').value === dayOffset(20));
+    ok('отваряне: причината е скрита', el(e.doc, 'edt-delivery-reason-wrap').style.display === 'none');
+    ok('отваряне: причината е попълнена с текущата', el(e.doc, 'edt-delivery-reason').value === 'Стара причина');
+    ok('отваряне: min = дата на заявката + 10 р.д.', el(e.doc, 'edt-delivery').min === MINC(e.w));
+    el(e.doc, 'edt-name').value = 'Нов Клиент';
+    await save(e);
+    ok('без смяна на срока → PATCH', cpatch(e).length === 1 && cpatch(e)[0].body.customer_name === 'Нов Клиент');
+    ok('без смяна → delivery непроменен, delivery_reason не се пипа', cpatch(e)[0].body.delivery === dayOffset(20) && !('delivery_reason' in cpatch(e)[0].body));
+
+    /* смяна без причина → отказ */
+    e = cenv(); e.w.openCorrection('k1', 'client_orders');
+    setChange(e.w, e.doc, 'edt-delivery', dayOffset(25));
+    ok('смяна → причината се показва', el(e.doc, 'edt-delivery-reason-wrap').style.display === '');
+    el(e.doc, 'edt-delivery-reason').value = '';
+    await save(e);
+    ok('смяна без причина → няма PATCH', cpatch(e).length === 0);
+    ok('смяна без причина → червен toast', hasToast(e, /причина/));
+
+    /* по-ранна от минимума → отказ (границата −1 ден) */
+    e = cenv(); e.w.openCorrection('k1', 'client_orders');
+    const minD = MINC(e.w), before = e.w.localDateISO(new Date(new Date(minD + 'T00:00:00').getTime() - 86400000));
+    setChange(e.w, e.doc, 'edt-delivery', before);
+    el(e.doc, 'edt-delivery-reason').value = 'искам по-рано';
+    await save(e);
+    ok('ден преди минимума → отказ', cpatch(e).length === 0 && hasToast(e, /по-кратък/));
+
+    /* точно минимумът → допустим, причината се чисти (null) */
+    e = cenv(); e.w.openCorrection('k1', 'client_orders');
+    setChange(e.w, e.doc, 'edt-delivery', minD);
+    await save(e);
+    ok('точно минимумът → PATCH с delivery_reason null', cpatch(e).length === 1 && cpatch(e)[0].body.delivery === minD && cpatch(e)[0].body.delivery_reason === null);
+
+    /* празна → отказ */
+    e = cenv(); e.w.openCorrection('k1', 'client_orders');
+    setChange(e.w, e.doc, 'edt-delivery', '');
+    el(e.doc, 'edt-delivery-reason').value = 'х';
+    await save(e);
+    ok('празна дата → отказ', cpatch(e).length === 0 && hasToast(e, /празен/));
+
+    /* с причина → patch носи delivery и delivery_reason (презаписва старата) */
+    e = cenv(); e.w.openCorrection('k1', 'client_orders');
+    setChange(e.w, e.doc, 'edt-delivery', dayOffset(30));
+    el(e.doc, 'edt-delivery-reason').value = 'Нова причина';
+    await save(e);
+    ok('с причина → PATCH', cpatch(e).length === 1);
+    ok('patch.delivery и patch.delivery_reason', cpatch(e)[0].body.delivery === dayOffset(30) && cpatch(e)[0].body.delivery_reason === 'Нова причина');
+
+    /* смяна на датата на заявката → минимумът се смята от новата */
+    e = cenv(); e.w.openCorrection('k1', 'client_orders');
+    setChange(e.w, e.doc, 'edt-date', dayOffset(10));
+    const m2 = MINC(e.w, dayOffset(10));
+    ok('смяна на edt-date → преизчислен min', el(e.doc, 'edt-delivery').min === m2);
+    setChange(e.w, e.doc, 'edt-delivery', dayOffset(21));
+    el(e.doc, 'edt-delivery-reason').value = 'причина';
+    await save(e);
+    ok('срок по-ранен от новия минимум → отказ', cpatch(e).length === 0 && hasToast(e, /по-кратък/));
+
+    /* сменена дата, срокът НЕ е пипан и е по-ранен от новия минимум → отказ */
+    e = cenv(); e.w.openCorrection('k1', 'client_orders');
+    setChange(e.w, e.doc, 'edt-date', dayOffset(10));
+    await save(e);
+    ok('сменена дата + стар срок под новия минимум → отказ', cpatch(e).length === 0 && hasToast(e, /по-кратък/));
+    ok('toast носи минимума', hasToast(e, new RegExp(e.w.fmtDate(MINC(e.w, dayOffset(10))).replace(/./g, '\.'))));
+
+    /* сменена дата, срокът още е ≥ новия минимум → минава без причина */
+    e = cenv({ delivery: dayOffset(60) }); e.w.openCorrection('k1', 'client_orders');
+    setChange(e.w, e.doc, 'edt-date', dayOffset(10));
+    await save(e);
+    ok('сменена дата, срок над минимума → PATCH без причина', cpatch(e).length === 1 && !('delivery_reason' in cpatch(e)[0].body));
+
+    /* нито датата, нито срокът → минава дори при кратък стар срок */
+    e = cenv({ delivery: dayOffset(1) }); e.w.openCorrection('k1', 'client_orders');
+    el(e.doc, 'edt-phone').value = '0899123456';
+    await save(e);
+    ok('нито дата, нито срок (стар кратък срок) → PATCH минава', cpatch(e).length === 1 && cpatch(e)[0].body.phone === '0899123456');
+
+    /* transport_orders — непроменена */
+    e = cenv(); e.w.openCorrection('t1', 'transport_orders');
+    ok('транспорт: причината е скрита', el(e.doc, 'edt-delivery-reason-wrap').style.display === 'none');
+    ok('транспорт: няма min', !el(e.doc, 'edt-delivery').min);
+    setChange(e.w, e.doc, 'edt-delivery', dayOffset(-5));
+    await save(e);
+    const tp = e.calls.patch.filter(p => /transport_orders/.test(p.url));
+    ok('транспорт: по-ранна дата без причина → PATCH минава', tp.length === 1 && tp[0].body.delivery === dayOffset(-5) && !('delivery_reason' in tp[0].body));
+  }
+
   report();
 })();
