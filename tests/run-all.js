@@ -27,6 +27,7 @@ const TESTS = [
   'contacts-id-collision.test.js',
   'id-collisions.test.js',
   'co-processed.test.js',
+  'delivery-default.test.js',
   'order-numbering.test.js',
   'paid-transport.test.js',
   'co-sap-banner-state.test.js',

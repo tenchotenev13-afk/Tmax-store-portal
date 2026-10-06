@@ -34,7 +34,7 @@ const D_CO2_DELIVERY = dayOffset(6);    /* co-2 — статус 'sent' бие �
 const D_CO3_DELIVERY = dayOffset(5);    /* co-3 — бъдеща доставка → непросрочена */
 const D_TR1_DELIVERY = dayOffset(-7);   /* tr-1 — минала: ЕДИНСТВЕНАТА просрочена */
 const D_TR2_DELIVERY = dayOffset(-9);   /* tr-2 — минала, но awaiting_stock → не брои */
-const D_NEW_DELIVERY = dayOffset(7);    /* дата, въвеждана ръчно в модалите */
+let D_NEW_DELIVERY = null;  /* автоматичната дата (10 работни дни) — задава се във всяка проба от формата */
 
 /* ── Данни ── */
 const CLIENT_ORDERS = [
@@ -197,6 +197,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     doc.getElementById('c-name').value = 'Нов Клиент';
     doc.getElementById('c-phone').value = '0899123456';
     doc.querySelector('#c-items .item-product').value = 'ТЕСТ ПРОДУКТ';
+    D_NEW_DELIVERY = w.addBgWorkdays(w.today(), 10);
     doc.getElementById('c-delivery').value = D_NEW_DELIVERY;
     realClick(w, btnIn(doc.getElementById('client-modal'), '✓ Запази заявката'));
     await tick(); await tick();
@@ -234,6 +235,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     doc.querySelector('#c-items .item-product').value = 'ДИВАН';
     doc.querySelector('#c-items .item-sap').value = '777';
     doc.querySelector('#c-items .item-qty').value = '1';
+    D_NEW_DELIVERY = w.addBgWorkdays(w.today(), 10);
     doc.getElementById('c-delivery').value = D_NEW_DELIVERY;
     doc.getElementById('c-bon').value = '000999';
     const cb = doc.getElementById('c-paid-transport'); cb.checked = true; fireChange(w, cb);
@@ -552,7 +554,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
   /* ══════════ 17. Гранични случаи ══════════ */
   section('17. Гранични случаи');
   {
-    /* клиентска заявка БЕЗ дата на доставка -> транспортът се създава с delivery=null */
+    /* празна дата на доставка -> от 06.10.2026 записът ползва автоматичната (10 работни дни) */
     const { w, doc, calls } = boot();
     w.openClientModal();
     doc.getElementById('c-name').value = 'Без Дата';
@@ -564,8 +566,8 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     realClick(w, btnIn(doc.getElementById('client-modal'), '✓ Запази заявката'));
     await tick(); await tick(); await tick();
     const trPost = calls.post.find(p => /transport_orders/.test(p.url));
-    ok('без дата на доставка транспортът пак се създава', !!trPost);
-    ok('delivery e null, а не празен низ', trPost && trPost.body.delivery === null);
+    ok('празна дата — транспортът пак се създава', !!trPost);
+    ok('delivery е автоматичната дата, а не празен низ', trPost && trPost.body.delivery === w.addBgWorkdays(w.today(), 10));
   }
   {
     /* повторно натискане на 🚚 при вече свързана заявка -> отваря транспорта, не дублира */

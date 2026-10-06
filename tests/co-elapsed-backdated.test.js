@@ -23,7 +23,7 @@
 'use strict';
 
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, realClick, btnExact, ok, guard, section, report,
+const { boot, realClick, fire, btnExact, ok, guard, section, report,
         dayOffset, tsOffset, ticks } = H;
 
 /* Потребител в обект, който е ИЗПЪЛНИТЕЛ по чужди заявки — само така
@@ -220,7 +220,10 @@ function env(over) {
     const h = env(over);
     h.w.today = function () { return clock; };
     h.w.openClientModal();
-    if (dateVal !== undefined) h.doc.getElementById('c-date').value = dateVal;
+    if (dateVal !== undefined) {
+      h.doc.getElementById('c-date').value = dateVal;
+      fire(h.w, h.doc.getElementById('c-date'), 'change'); /* като в браузъра: срокът следва датата */
+    }
     h.doc.getElementById('c-name').value = 'Нов Клиент';
     h.doc.getElementById('c-phone').value = '0899123456';
     h.doc.querySelector('#c-items .item-product').value = 'ТЕСТ ПРОДУКТ';

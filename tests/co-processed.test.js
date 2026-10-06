@@ -219,15 +219,14 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     ok('съобщението показва датата', calls.toast.some(t => /Обработена от ЦО/.test(t)));
   }
   {
-    /* без дата — пак се записва, датата просто е null */
+    /* без дата — от 06.10.2026 е отказ (co_eta е задължителна) */
     const { w, doc, calls } = boot();
     w.renderClientOrders();
     realClick(w, btnIn(row(doc, 'o-1'), '✅ Обработена от ЦО'));
     realClick(w, doc.getElementById('cop-submit'));
     await tick(); await tick();
-    const p = calls.patch.find(x => /client_orders/.test(x.url));
-    ok('без дата статусът пак се записва', p && p.body.status === 'processed');
-    ok('датата е null, не празен низ', p && p.body.co_eta === null);
+    ok('без дата НЕ се праща PATCH', !calls.patch.some(x => /client_orders/.test(x.url)));
+    ok('без дата модалът остава отворен', !!doc.getElementById('cop-ov'));
   }
   {
     /* редакция на вече обработена заявка — полетата са предварително попълнени */
@@ -242,6 +241,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     const { w, doc, calls } = boot({ failPatch: true });
     w.renderClientOrders();
     realClick(w, btnIn(row(doc, 'o-1'), '✅ Обработена от ЦО'));
+    doc.getElementById('cop-eta').value = d(12); /* = delivery на o-1 → коментар не е нужен */
     realClick(w, doc.getElementById('cop-submit'));
     await tick(); await tick();
     ok('при грешка модалът ОСТАВА отворен', !!doc.getElementById('cop-ov'));

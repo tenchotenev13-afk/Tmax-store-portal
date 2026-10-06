@@ -348,7 +348,7 @@ function coAddAnotherForCustomer(id){
     });
   }
   openClientModal({customer_name:o.customer_name,phone:o.phone,bon:o.bon,
-    delivery:o.delivery,from_store:o.from_store,group_id:gid});
+    delivery:o.delivery,delivery_reason:o.delivery_reason,from_store:o.from_store,group_id:gid});
 }
 
 /* Предложение веднага след запис на нова заявка */
@@ -442,9 +442,9 @@ function openCoProcessedModal(id){
       '<button onclick="closeCoProcessedModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
     '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">Заявка №'+esc(o.in_num||'—')+' · '+esc(o.store_name||'')+' · '+esc(o.customer_name||'')+'</div>'+
     '<div style="font-size:11.5px;color:#475569;background:#f8fafc;border-radius:6px;padding:7px 10px;margin-bottom:12px;">'+items+'</div>'+
-    '<label class="fl">Ориентировъчна дата за получаване в обекта</label>'+
-    '<input type="date" class="fi" id="cop-eta" value="'+escVal(o.co_eta)+'" style="margin-bottom:10px;">'+
-    '<label class="fl">Коментар от ЦО (доставчик, № на поръчка...)</label>'+
+    '<label class="fl">Ориентировъчна дата за получаване в обекта *</label>'+
+    '<input type="date" class="fi" id="cop-eta" min="'+today()+'" data-delivery="'+escVal(o.delivery)+'" value="'+escVal(o.co_eta)+'" onchange="coCopNoteStar()" style="margin-bottom:10px;">'+
+    '<label class="fl" id="cop-note-lbl">Коментар от ЦО (доставчик, № на поръчка...)</label>'+
     '<input class="fi" id="cop-note" value="'+escVal(o.co_note)+'" placeholder="напр. ТЕСИ, поръчка 4500123" style="margin-bottom:12px;">'+
     '<div style="font-size:11.5px;color:#047857;background:#ecfdf5;border-radius:6px;padding:7px 10px;margin-bottom:14px;">'+
       'Докато очакваната дата не мине, заявката <b>няма да се брои за закъсняла</b> — броячът „Изминало" изчаква доставчика. След тази дата пак започва да алармира.</div>'+
@@ -455,6 +455,17 @@ function openCoProcessedModal(id){
   var ex=document.getElementById('cop-ov');if(ex)ex.remove();
   document.body.insertAdjacentHTML('beforeend',html);
   document.getElementById('cop-ov').classList.add('open');
+  coCopNoteStar();
+}
+/* Коментарът е задължителен, когато датата от ЦО се различава от срока на заявката */
+function coCopNeedsNote(){
+  var el=document.getElementById('cop-eta');
+  if(!el)return false;
+  return el.value!==(el.getAttribute('data-delivery')||'');
+}
+function coCopNoteStar(){
+  var l=document.getElementById('cop-note-lbl');
+  if(l)l.textContent='Коментар от ЦО (доставчик, № на поръчка...)'+(coCopNeedsNote()?' *':'');
 }
 function closeCoProcessedModal(){var el=document.getElementById('cop-ov');if(el)el.remove();}
 /* Извиква се от бутона в модала "Статус" — там id-то стои в statusTargetId. */
@@ -467,6 +478,9 @@ function submitCoProcessed(id){
   var o=clientOrders.find(function(x){return String(x.id)===String(id);});
   if(!o){toast('Заявката не е намерена','#dc2626');return;}
   var eta=v('cop-eta')||null;
+  if(!eta){toast('Въведи ориентировъчна дата за получаване *','#dc2626');return;}
+  if(eta<today()){toast('Датата не може да е преди днес','#dc2626');return;}
+  if(coCopNeedsNote()&&!v('cop-note')){toast('Датата е различна от срока на заявката ('+fmtDate(o.delivery)+') — напиши коментар *','#dc2626');return;}
   var btn=document.getElementById('cop-submit');
   if(btn){btn.disabled=true;btn.textContent='Записване...';}
   var patch={
@@ -618,7 +632,7 @@ function openClientOrderDetail(id){
 
   var logistika=coDetailRow('Поръчан от',esc(o.from_store||''))+
     coDetailRow('Изпълнител',esc(o.fulfiller||''))+
-    coDetailRow('Доставка',fmtDate(o.delivery))+
+    coDetailRow('Доставка',fmtDate(o.delivery)+(o.delivery_reason?' · причина: '+esc(o.delivery_reason):''))+
     coDetailRow('Платен транспорт',o.paid_transport
       ? 'Да'+(o.transport_id
           ? ' · <button data-tr="'+escAttr(o.transport_id)+'" onclick="closeClientOrderDetail();gotoLinkedTransport(this.dataset.tr)" style="'+btnS+'">🚚 Виж транспорта</button>'
@@ -1135,7 +1149,8 @@ function renderClientOrders(){
       coItemCellCompact(o)+
       '<td style="font-size:12px;">'+storeCell+'</td>'+
       '<td>'+statusBadge(o._status)+lateBadge(o)+ptBadge(o)+
-        '<div style="margin-top:3px;font-size:12px;"><b>'+fmtDate(o.delivery)+'</b></div>'+coEtaCell(o)+
+        '<div style="margin-top:3px;font-size:12px;"><b>'+fmtDate(o.delivery)+'</b></div>'+
+          (o.delivery_reason?'<div style="font-size:11px;color:#64748b;">'+esc(o.delivery_reason)+'</div>':'')+coEtaCell(o)+
         (elapsedHtml?'<div style="margin-top:3px;">'+elapsedHtml+'</div>':'')+'</td>'+
       '<td onclick="event.stopPropagation()" style="cursor:default;">'+btns+'</td></tr>';
   }).join('');
@@ -1256,6 +1271,35 @@ var coPendingGroupId=null;
    Моделът е същият като при submitPaidTransport/submitCoProcessed по-горе. */
 var coSubmitting=false;
 
+/* ═══ СРОК ПО ПОДРАЗБИРАНЕ: CO_DEFAULT_WORKDAYS работни дни от „Дата" ═══ */
+var coDeliveryPrev=null;
+function coAutoDelivery(){
+  var d=v('c-date');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d))d=today();
+  return addBgWorkdays(d,CO_DEFAULT_WORKDAYS);
+}
+/* Показва причината само при срок по-дълъг от автоматичния; иначе я чисти,
+   за да не се запише остатък от предишен избор. */
+function coDeliveryChanged(){
+  var el=document.getElementById('c-delivery');
+  var wrap=document.getElementById('c-delivery-reason-wrap');
+  if(!el||!wrap)return;
+  var long=!!el.value&&el.value>coAutoDelivery();
+  wrap.style.display=long?'':'none';
+  if(!long){var r=document.getElementById('c-delivery-reason');if(r)r.value='';}
+}
+function coDeliveryRecalc(){
+  var el=document.getElementById('c-delivery');
+  if(!el)return;
+  var auto=coAutoDelivery();
+  el.min=auto;
+  var hint=document.getElementById('c-delivery-hint');
+  if(hint)hint.textContent='Автоматично: '+CO_DEFAULT_WORKDAYS+' работни дни (до '+fmtDate(auto)+')';
+  if(!el.value||el.value===coDeliveryPrev||el.value<auto)el.value=auto;
+  coDeliveryPrev=auto;
+  coDeliveryChanged();
+}
+
 function openClientModal(prefill){
   prefill=prefill||{};
   coPendingGroupId=prefill.group_id||null;
@@ -1269,6 +1313,9 @@ function openClientModal(prefill){
   document.getElementById('c-date').value=today();
   document.getElementById('c-hour').value='10:00';
   document.getElementById('c-delivery').value='';
+  var rsn0=document.getElementById('c-delivery-reason');if(rsn0)rsn0.value='';
+  coDeliveryPrev=null;
+  coDeliveryRecalc();
   /* Обикновените служители (точно 1 назначен магазин) не бива да могат да
      заявяват "от чуждо име" - заключваме "Поръчан от магазин" на техния
      собствен магазин. Само admin/multi-store потребители виждат истински
@@ -1306,7 +1353,13 @@ function openClientModal(prefill){
   if(prefill.customer_name){var n1=document.getElementById('c-name');if(n1)n1.value=prefill.customer_name;}
   if(prefill.phone){var p1=document.getElementById('c-phone');if(p1)p1.value=prefill.phone;}
   if(prefill.bon){var b1=document.getElementById('c-bon');if(b1)b1.value=prefill.bon;}
-  if(prefill.delivery){var d1=document.getElementById('c-delivery');if(d1)d1.value=prefill.delivery;}
+  /* Срокът се пренася, освен ако е по-ранен от новия минимум (тогава остава
+     автоматичният). Причината върви със срока. */
+  if(prefill.delivery&&prefill.delivery>=coAutoDelivery()){
+    var d1=document.getElementById('c-delivery');if(d1)d1.value=prefill.delivery;
+    var r1=document.getElementById('c-delivery-reason');if(r1)r1.value=prefill.delivery_reason||'';
+    coDeliveryChanged();
+  }
   /* Видимо е, че заявката ще влезе в обща поръчка — иначе изглежда като обикновена нова */
   var gh=document.getElementById('c-group-hint');
   if(gh){
@@ -1346,6 +1399,13 @@ function submitClientOrder(){
      дата. Вече today() е местна (localDateISO) и двата часовника съвпадат.
      И двете страни са 'YYYY-MM-DD', значи низовото сравнение е коректно и
      не минава през още един Date() с още една часова зона. */
+  /* Срокът: празен → автоматичният; по-ранен → отказ; по-дълъг → причина.
+     Проверява се тук, защото min на полето не спира ръчно въвеждане. */
+  var autoDel=coAutoDelivery();
+  var delivery=v('c-delivery')||autoDel;
+  if(delivery<autoDel){toast('Срокът не може да е по-кратък от '+CO_DEFAULT_WORKDAYS+' работни дни ('+fmtDate(autoDel)+')','#dc2626');return;}
+  var deliveryReason=delivery>autoDel?v('c-delivery-reason'):'';
+  if(delivery>autoDel&&!deliveryReason){toast('Въведи причина за по-дълъг срок *','#dc2626');return;}
   var cDateVal=v('c-date');
   if(/^\d{4}-\d{2}-\d{2}$/.test(cDateVal)&&cDateVal<today()){
     if(!confirm('Датата на заявката е преди днес. Броячът „Изминало" ще се смята от тази дата. Продължаваш ли?')) return;
@@ -1361,7 +1421,6 @@ function submitClientOrder(){
     if(coBtn){coBtn.disabled=false;coBtn.textContent='✓ Запази заявката';}
   };
   var first=items[0];
-  var delivery=v('c-delivery')||null;
   /* Заявката принадлежи на ОБЕКТА от „Поръчан от магазин", не на този, който
      я въвежда. Досега беше currentUser.store_name и когато регионален или
      админ пуснеше заявка за друг обект, тя излизаше като „Централен офис-0133":
@@ -1388,7 +1447,7 @@ function submitClientOrder(){
     items:items,
     from_store:v('c-from-store'),fulfiller:v('c-fulfiller'),
     agent:v('c-agent')||currentUser.display_name,
-    delivery:delivery,status:'pending',note:v('c-note'),
+    delivery:delivery,delivery_reason:deliveryReason||null,status:'pending',note:v('c-note'),
     paid_transport:paidTransport,
     group_id:coPendingGroupId||null
   };
@@ -1484,7 +1543,8 @@ function renderPrint(o){
           itemsPrintBlock(o)+
           '<div style="background:#fff8e1;border:1px solid #f0c940;border-radius:5px;padding:4px 8px;grid-column:1/-1;">'+
             '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">★ Дата на доставка</div>'+
-            '<div style="font-size:12px;font-weight:700;color:#dc2626;">'+fmtDate(o.delivery)+'</div></div>'+
+            '<div style="font-size:12px;font-weight:700;color:#dc2626;">'+fmtDate(o.delivery)+'</div>'+
+            (o.delivery_reason?'<div style="font-size:9px;color:#666;">'+esc(o.delivery_reason)+'</div>':'')+'</div>'+
           /* Клиентът трябва да знае, че поръчката му е разделена на няколко заявки —
              иначе идва с една бланка и очаква цялата стока. */
           (o.group_id&&coGroupMembers(o).length>1

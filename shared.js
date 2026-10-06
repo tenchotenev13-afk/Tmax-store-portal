@@ -824,6 +824,53 @@ function localDateISO(d){
 /* До 13.09.2026 беше new Date().toISOString().slice(0,10), тоест UTC — рано
    сутрин българско време връщаше вчерашна дата. Заковано в tests/local-date.test.js. */
 function today(){return localDateISO();}
+/* ═══ РАБОТНИ ДНИ В БЪЛГАРИЯ ═══════════════════════════════════════════════
+   Срокът по подразбиране на клиентските заявки е 10 РАБОТНИ дни. Почивните
+   дни се смятат алгоритмично (без списък по години): фиксираните празници +
+   православният Великден (Разпети петък до Великден понеделник).
+   Чл.154 ал.2 КТ: фиксиран празник в събота/неделя пренася почивния ден на
+   следващия работен ден (за 24–26.12 — толкова дни, колкото падат в уикенд).
+   Великденските дни не се пренасят. Извънредни почивни дни, обявени от МС, НЕ
+   се покриват. Местни дати (new Date(y,m,d)), не UTC — като localDateISO(). */
+var CO_DEFAULT_WORKDAYS=10;
+var _bgHolidayCache={};
+function bgOrthodoxEaster(year){
+  /* Meeus Julian алгоритъм + 13 дни към григориански (валидно 1900–2099) */
+  var a=year%4,b=year%7,c=year%19,d=(19*c+15)%30,e=(2*a+4*b-d+34)%7;
+  var m=Math.floor((d+e+114)/31),day=((d+e+114)%31)+1;
+  return new Date(year,m-1,day+13);
+}
+function bgHolidaysForYear(year){
+  if(_bgHolidayCache[year])return _bgHolidayCache[year];
+  var set={};
+  var isWeekend=function(dt){var w=dt.getDay();return w===0||w===6;};
+  var fixed=[[0,1],[2,3],[4,1],[4,6],[4,24],[8,6],[8,22],[11,24],[11,25],[11,26]];
+  var e=bgOrthodoxEaster(year);
+  [-2,-1,0,1].forEach(function(off){set[localDateISO(new Date(year,e.getMonth(),e.getDate()+off))]=true;});
+  fixed.forEach(function(f){set[localDateISO(new Date(year,f[0],f[1]))]=true;});
+  fixed.forEach(function(f){
+    if(!isWeekend(new Date(year,f[0],f[1])))return;
+    var n=new Date(year,f[0],f[1]+1);
+    while(isWeekend(n)||set[localDateISO(n)])n=new Date(n.getFullYear(),n.getMonth(),n.getDate()+1);
+    set[localDateISO(n)]=true;
+  });
+  _bgHolidayCache[year]=set;
+  return set;
+}
+function isBgWorkday(iso){
+  var dt=new Date(iso+'T00:00:00');
+  var w=dt.getDay();
+  if(w===0||w===6)return false;
+  return !bgHolidaysForYear(dt.getFullYear())[iso];
+}
+function addBgWorkdays(iso,n){
+  var dt=new Date(iso+'T00:00:00');
+  while(n>0){
+    dt=new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()+1);
+    if(isBgWorkday(localDateISO(dt)))n--;
+  }
+  return localDateISO(dt);
+}
 /* ═══ ОТКОГА ВАЖИ АВТОМАТИЧНОТО ОТМЯТАНЕ ═══════════════════════════════════
    Задача, която минава от РЪЧНА на автоматична отметка, не може да го направи
    в мига на деплоя: порталът заключва квадратчето, а функцията в базата има

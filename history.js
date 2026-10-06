@@ -264,6 +264,7 @@ function renderHistoryResults(){
           '<td data-id="'+o.id+'" onclick="openClientOrderDetail(this.dataset.id)" title="Отвори заявката" style="cursor:pointer;">'+histCoItemsCell(o)+'</td>'+
           /* Ориентировъчната дата от ЦО се търси и в История, не само в живия таб */
           '<td><b>'+fmtDate(o.delivery)+'</b>'+
+            (o.delivery_reason?'<br><small style="color:#64748b;">'+esc(o.delivery_reason)+'</small>':'')+
             (o.co_eta?'<br><small style="color:#047857;">🏭 ЦО: '+fmtDate(o.co_eta)+'</small>':'')+
             (o.co_note?'<br><small style="color:#94a3b8;">'+esc(o.co_note)+'</small>':'')+'</td>'+
           '<td>'+statusBadge(calcStatus(o.delivery,o.status))+lateBadge(o)+'</td>'+
@@ -507,7 +508,7 @@ function printHistoryReport(){
       '<td>'+esc(o.phone||'')+'</td>'+
       /* Всички артикули, не само първия — справката е за хартия, детайл няма */
       '<td>'+histCoItemsPrint(o)+'</td>'+
-      '<td>'+fmtDate(o.delivery)+(o.co_eta?'<br>ЦО: '+fmtDate(o.co_eta):'')+'</td>'+
+      '<td>'+fmtDate(o.delivery)+(o.delivery_reason?'<br>'+esc(o.delivery_reason):'')+(o.co_eta?'<br>ЦО: '+fmtDate(o.co_eta):'')+'</td>'+
       /* Досега тук излизаше суровата стойност ("pending", "done") — в печатна
          справка за ръководството това няма как да е на английски. */
       '<td>'+esc(statusLabel(o.status))+'</td>'+
