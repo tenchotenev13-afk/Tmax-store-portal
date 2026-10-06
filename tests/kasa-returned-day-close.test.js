@@ -93,8 +93,9 @@ const warnToasts = function (h) {
 };
 
 /* Кликът минава през реалния onclick на „✅ Потвърди" в картата
-   „Днешни отчети" — renderKasa() реже по today(), затова датата е днешната. */
+   „ПОС отчети — <работният ден>" — renderKasa() реже по kasaActiveDate(), затова работният ден е зададен на днешния. */
 async function clickConfirm(h, id) {
+  h.w.kasaSetDate(h.w.today()); /* картата показва работния ден — тук е днешният, на който са редовете */
   h.w.renderKasa();
   const b = btn(h.doc.getElementById('mod-kasa'), 'Потвърди');
   if (!ok('бутонът „✅ Потвърди" е на екрана (' + id + ')', !!b)) return false;

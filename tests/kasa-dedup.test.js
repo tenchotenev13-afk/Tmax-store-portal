@@ -260,7 +260,7 @@ function posRow(over) {
     const h = env();
     h.w.kasaReports = [posRow({ id: 'r-0', date: TODAY, status: 'draft',
                                 total_turnover: 0, cash_turnover: 0, counted_cash: 0 })];
-    if (guard('renderKasa() не хвърля', function () { h.w.renderKasa(); })) {
+    if (guard('renderKasa() не хвърля', function () { h.w.kasaSetDate(TODAY); h.w.renderKasa(); })) {
       realClick(h.w, btn(wrap(h), 'Потвърди'));
       await ticks(6);
       ok('няма PATCH', patchesTo(h, 'kasa_reports').length === 0,
@@ -276,7 +276,7 @@ function posRow(over) {
   {
     const h = env();
     h.w.kasaReports = [posRow({ id: 'r-1', date: TODAY, status: 'draft' })];
-    if (guard('renderKasa() не хвърля', function () { h.w.renderKasa(); })) {
+    if (guard('renderKasa() не хвърля', function () { h.w.kasaSetDate(TODAY); h.w.renderKasa(); })) {
       realClick(h.w, btn(wrap(h), 'Потвърди'));
       await ticks(6);
       const pt = patchesTo(h, 'kasa_reports');
@@ -296,7 +296,7 @@ function posRow(over) {
     const h = env();
     h.w.kasaReports = [posRow({ id: 'r-2', date: TODAY, status: 'draft',
                                 total_turnover: 0, cash_turnover: 0, counted_cash: 45.5 })];
-    if (guard('renderKasa() не хвърля', function () { h.w.renderKasa(); })) {
+    if (guard('renderKasa() не хвърля', function () { h.w.kasaSetDate(TODAY); h.w.renderKasa(); })) {
       realClick(h.w, btn(wrap(h), 'Потвърди'));
       await ticks(6);
       ok('потвърждава се', patchesTo(h, 'kasa_reports').length === 1,
@@ -309,7 +309,7 @@ function posRow(over) {
   {
     const h = env();
     h.w.kasaReports = [posRow({ id: 'r-1', date: TODAY, status: 'draft' })];
-    if (guard('renderKasa() не хвърля', function () { h.w.renderKasa(); })) {
+    if (guard('renderKasa() не хвърля', function () { h.w.kasaSetDate(TODAY); h.w.renderKasa(); })) {
       const b = btn(wrap(h), 'Потвърди');
       realClick(h.w, b);
       realClick(h.w, b);

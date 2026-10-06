@@ -1656,7 +1656,7 @@ function showModule(mod){
   if(mod==='client')loadClientOrders();
   if(mod==='bulletin')loadBulletin();
   if(mod==='docs')loadDocs();
-  if(mod==='kasa')loadKasa();
+  if(mod==='kasa'){ if(typeof kasaResetDay==='function') kasaResetDay(); loadKasa(); } /* влизане през навигацията → работният ден е пак вчера; вътрешните презареждания не го пипат */
   if(mod==='history')loadHistory();
   if(mod==='today')loadTodayDashboard();
   if(mod==='checklist')loadChecklist();

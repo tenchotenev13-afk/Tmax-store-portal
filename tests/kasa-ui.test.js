@@ -41,7 +41,7 @@ function env(over) {
   const h = boot({ modules: ['kasa.js', 'kasa-docs.js'], user: USER, data: {}, ...(over || {}) });
   const w = h.w;
   w.kasaReports = clone(REPORTS); w.kasaGlavna = clone(GLAVNA); w.zoborotData = clone(ZOB); w.kasaStorno = clone(STORNO);
-  w.kasaSelectedDate = null;
+  w.kasaSelectedDate = TODAY; /* картата на ПОС показва работния ден — тук е днешният */
   freeze(w, TODAY); /* печатът пише „Изготвен: <час>“ — часовникът е замразен */
   return h;
 }

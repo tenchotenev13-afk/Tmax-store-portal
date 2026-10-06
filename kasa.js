@@ -27,6 +27,49 @@ function yesterday(){
 function kasaActiveDate(){ return kasaSelectedDate || yesterday(); }
 function kasaSetDate(d){ kasaSelectedDate=d||null; }
 
+/* ─── РАБОТЕН ДЕН (ПОС, Главна каса, Равнение, печатът) ──────────
+   Една дата за трите подтаба: kasaActiveDate() = избраната или вчера. Изборът НЕ се помни —
+   влизането в Каса през навигацията (showModule('kasa') в shared.js) вика kasaResetDay();
+   вътрешните презареждания на loadKasa() (след запис, потвърждение, разключване) не го пипат. */
+var KASA_WEEKDAYS=['неделя','понеделник','вторник','сряда','четвъртък','петък','събота'];
+function kasaResetDay(){ kasaSelectedDate=null; }
+function kasaShortDate(iso){ return String(iso).slice(8,10)+'.'+String(iso).slice(5,7); }
+function kasaDayAdd(iso,n){
+  var p=String(iso).split('-');
+  return localDateISO(new Date(parseInt(p[0],10),parseInt(p[1],10)-1,parseInt(p[2],10)+n));
+}
+function kasaDayRefresh(){ kasaTab(kasaView||'pos'); }
+function kasaShiftDay(n){
+  var next=kasaDayAdd(kasaActiveDate(),n);
+  if(next>today()) return; /* не може след днес */
+  kasaSetDate(next);
+  kasaDayRefresh();
+}
+function kasaPickDay(v){
+  if(!v) return;
+  if(v>today()) v=today();
+  kasaSetDate(v);
+  kasaDayRefresh();
+}
+function kasaWorkDayBar(){
+  var act=kasaActiveDate(), t=today();
+  var p=act.split('-');
+  var wd=KASA_WEEKDAYS[new Date(parseInt(p[0],10),parseInt(p[1],10)-1,parseInt(p[2],10)).getDay()];
+  var badge=act===t?'днес':act===yesterday()?'вчера':'';
+  var atToday=act>=t;
+  var btn='border:1px solid #e2e8f0;background:#fff;border-radius:6px;width:30px;height:30px;font-size:16px;line-height:1;cursor:pointer;color:#334155;';
+  return '<div id="kasa-workday" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px;background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;margin-bottom:14px;">'+
+    '<span style="font-size:11px;font-weight:700;letter-spacing:.05em;color:#64748b;">РАБОТЕН ДЕН</span>'+
+    '<button id="kasa-day-prev" onclick="kasaShiftDay(-1)" title="Ден назад" style="'+btn+'">‹</button>'+
+    '<b id="kasa-day-label" style="font-size:14px;">'+wd+', '+fmtDate(act)+'</b>'+
+    (badge?'<span id="kasa-day-badge" style="background:#eff6ff;color:#1e40af;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+badge+'</span>':'')+
+    '<button id="kasa-day-next" onclick="kasaShiftDay(1)" title="Ден напред"'+(atToday?' disabled':'')+' style="'+btn+(atToday?'opacity:.4;cursor:not-allowed;':'')+'">›</button>'+
+    '<label style="font-size:12px;color:#64748b;margin-left:6px;">друга дата</label>'+
+    '<input type="date" id="kasa-day-pick" value="'+act+'" max="'+t+'" onchange="kasaPickDay(this.value)" style="border:1.5px solid #e2e8f0;border-radius:6px;padding:4px 8px;font-size:12px;font-family:inherit;">'+
+    '<span style="font-size:11px;color:#94a3b8;">Важи за ПОС, Главна каса, Равнение и печата</span>'+
+  '</div>';
+}
+
 /* ─── HELPERS ───────────────────────────────────────────────── */
 function fmtMoney(v){
   var n=parseFloat(v)||0;
@@ -193,9 +236,13 @@ function kasaTabBar(){
 ══════════════════════════════════════════════════════════════ */
 function renderKasa(){
   var wrap=document.getElementById('mod-kasa');if(!wrap)return;
-  var todayStr=today();
+  var realToday=today();
+  var todayStr=kasaActiveDate(); /* работният ден; картата показва него, не днес */
+  var sd=kasaShortDate(todayStr);
   var todayRep=kasaReports.filter(function(r){return r.date===todayStr;});
-  var histRep =kasaReports.filter(function(r){return r.date!==todayStr;});
+  /* История — без промяна: всичко, което не е с днешна дата */
+  var histRep =kasaReports.filter(function(r){return r.date!==realToday;});
+  var realTodayCnt=todayStr!==realToday?kasaReports.filter(function(r){return r.date===realToday;}).length:0;
   /* Картата се показва при ВСЯКА история (histRep), а таблицата получава само
      прозореца (histWin). Ако гейтът беше по histWin, магазин само със стари
      записи не би видял картата изобщо — а с нея изчезва и филтърът по дата,
@@ -209,11 +256,20 @@ function renderKasa(){
     '<div class="pg-title">💰 Каса</div>'+
     '<div class="pg-sub">'+esc(currentUser.store_name)+'</div>'+
     kasaTabBar()+
+    kasaWorkDayBar()+
     '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
-      '<div style="font-size:13px;color:var(--muted);">Днес: <b>'+todayRep.length+'</b> отчета</div>'+
-      '<button class="btn btn-green" onclick="openKasaForm(null)">+ Нов ПОС отчет</button>'+
+      '<div style="font-size:13px;color:var(--muted);">За '+sd+': <b>'+todayRep.length+'</b> '+(todayRep.length===1?'отчет':'отчета')+'</div>'+
+      '<button class="btn btn-green" onclick="openKasaForm(null)">+ Нов ПОС отчет за '+sd+'</button>'+
       '<button onclick="printKasaReport()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:13px;font-weight:500;cursor:pointer;">🖨 Разпечатай отчет</button>'+
     '</div>';
+
+  /* Подсказка: отчети с днешна дата, докато работният ден е друг */
+  if(realTodayCnt){
+    html+='<div id="kasa-today-hint" style="background:#fffbeb;border:1px solid #f0c940;color:#92400e;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:12px;display:flex;align-items:center;flex-wrap:wrap;gap:10px;">'+
+      'Има '+realTodayCnt+' ПОС '+(realTodayCnt===1?'отчет':'отчета')+' с днешна дата ('+kasaShortDate(realToday)+').'+
+      '<button data-d="'+realToday+'" onclick="kasaPickDay(this.dataset.d)" style="border:1px solid #d97706;background:#fff;color:#92400e;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:600;cursor:pointer;">Покажи '+kasaShortDate(realToday)+'</button>'+
+    '</div>';
+  }
 
   if(todayRep.length){
     var tTurn=0,tCash=0,tCard=0,tCount=0,tRaz=0;
@@ -225,7 +281,7 @@ function renderKasa(){
       tRaz  +=parseFloat(r.razlika)||0;
     });
     html+='<div class="card" style="margin-bottom:16px;">'+
-      '<div class="card-title">📅 Днешни отчети — '+fmtDate(todayStr)+'</div>'+
+      '<div class="card-title">📅 ПОС отчети — '+fmtDate(todayStr)+'</div>'+
       '<div class="tbl-wrap tbl-compact tbl-auto"><table>'+
       '<thead><tr><th>ПОС</th><th>Касиер</th><th>Оборот</th><th>В брой</th><th>Карти</th><th>Инкасо</th><th>Налични</th><th>Разлика</th><th>Статус</th><th></th></tr></thead><tbody>';
     todayRep.forEach(function(r){
@@ -269,7 +325,8 @@ function renderKasa(){
   } else {
     html+='<div class="card" style="text-align:center;padding:40px;">'+
       '<div style="font-size:40px;margin-bottom:10px;">📋</div>'+
-      '<div style="font-size:14px;color:var(--muted);">Няма отчети за днес.</div></div>';
+      '<div id="kasa-pos-empty" style="font-size:14px;color:var(--muted);">Няма ПОС отчети за '+fmtDate(todayStr)+'</div>'+
+      '<div style="font-size:12px;color:#94a3b8;margin-top:6px;">Натисни „+ Нов ПОС отчет за '+sd+'“ или смени работния ден със стрелките.</div></div>';
   }
   if(histRep.length){
     html+='<div class="card">';
@@ -772,6 +829,7 @@ function renderGlavna(){
     '<div class="pg-title">💰 Каса</div>'+
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — Главна каса</div>'+
     kasaTabBar()+
+    kasaWorkDayBar()+
     kasaReturnedBanner(g)+
 
     /* Сборна таблица деноминации */
@@ -1459,9 +1517,9 @@ function renderZoborot(){
     '<div class="pg-title">💰 Каса</div>'+
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — Равнение на оборота</div>'+
     kasaTabBar()+
+    kasaWorkDayBar()+
     kasaReturnedBanner(z)+
-    '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
-      '<div style="font-size:13px;color:var(--muted);">Дата: <b>'+fmtDate(kasaActiveDate())+'</b></div>'+
+    '<div style="display:flex;justify-content:flex-end;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:16px;">'+
       '<div style="display:flex;gap:8px;">'+
         (isDraft&&canConfirm?'<button id="k-btn-zoborot-save" onclick="saveZoborot()" class="btn btn-green">💾 Запази</button>':'')+
         (isDraft&&canConfirm&&z.id?'<button id="k-btn-zoborot-confirm" onclick="confirmZoborot()" class="btn" style="background:#2563eb;color:#fff;">✅ Потвърди</button>':'')+
@@ -1548,7 +1606,7 @@ function renderZoborot(){
     '</div>'+
 
     (z.id?'<div style="font-size:12px;color:#94a3b8;margin-top:8px;text-align:right;">'+
-      'Статус: '+(z.status==='confirmed'?'✅ Потвърден':'✏️ Чернова')+
+      'Статус: '+(z.status==='confirmed'?'✅ Потвърден':z.status==='returned'?'↩ Върнат':'✏️ Чернова')+
       (z.status==='confirmed'?' · Потвърден от '+esc(z.confirmed_by||''):'')+'</div>':'')+
   '</div>';
 

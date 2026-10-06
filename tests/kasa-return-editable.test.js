@@ -75,12 +75,12 @@ function hasBtn(doc, text) { return !!btn(doc.getElementById('mod-kasa'), text);
    #mod-kasa стои и таблицата на История (renderHistTable), която ВЕЧЕ знае
    за 'returned' и служи за образец. Без това стесняване тестът мери
    образеца вместо промяната и минава срещу непоправен код.
-   renderKasa() дели редовете по today(), НЕ по kasaActiveDate() (= вчера). */
+   renderKasa() дели редовете по kasaActiveDate() (работния ден); тестът го задава на днешния. */
 function todayCard(doc) {
   const cards = doc.getElementById('mod-kasa').querySelectorAll('.card');
   for (let i = 0; i < cards.length; i++) {
     const t = cards[i].querySelector('.card-title');
-    if (t && t.textContent.indexOf('Днешни отчети') >= 0) return cards[i];
+    if (t && t.textContent.indexOf('ПОС отчети —') >= 0) return cards[i];
   }
   return null;
 }
@@ -224,7 +224,7 @@ function todayCard(doc) {
       posReport('draft', { id: 'r-3', pos_number: 3, date: D })
     ];
 
-    if (guard('renderKasa() не хвърля', () => w.renderKasa())) {
+    if (guard('renderKasa() не хвърля', () => { w.kasaSetDate(D); w.renderKasa(); })) {
       const card = todayCard(doc);
       if (ok('картата „Днешни отчети" съществува', !!card)) {
         const inner = card.innerHTML;
@@ -263,7 +263,7 @@ function todayCard(doc) {
     /* Отчет на ДРУГ обект — точно случаят от История. */
     w.kasaReports = [posReport('returned', { id: 'r-9', store_name: 'Дупница', date: D })];
 
-    if (guard('renderKasa() не хвърля', () => w.renderKasa())) {
+    if (guard('renderKasa() не хвърля', () => { w.kasaSetDate(D); w.renderKasa(); })) {
       const editBtn = btn(doc.getElementById('mod-kasa'), 'Редактирай');
       if (ok('бутонът „Редактирай" е там', !!editBtn)) {
         guard('клик по „Редактирай" не хвърля', () => realClick(w, editBtn));
@@ -337,7 +337,7 @@ function todayCard(doc) {
     w.kasaView = 'pos';
     w.kasaReports = [posReport('returned', { id: 'r-7', store_name: 'Централен офис', date: D })];
 
-    if (guard('renderKasa() не хвърля', () => w.renderKasa())) {
+    if (guard('renderKasa() не хвърля', () => { w.kasaSetDate(D); w.renderKasa(); })) {
       const editBtn = btn(doc.getElementById('mod-kasa'), 'Редактирай');
       if (ok('бутонът е там', !!editBtn)) {
         guard('клик не хвърля', () => realClick(w, editBtn));
@@ -357,7 +357,7 @@ function todayCard(doc) {
     w.kasaView = 'pos';
     w.kasaReports = [posReport('returned', { id: 'r-8', store_name: 'Дупница', date: D })];
 
-    if (guard('renderKasa() не хвърля', () => w.renderKasa())) {
+    if (guard('renderKasa() не хвърля', () => { w.kasaSetDate(D); w.renderKasa(); })) {
       const editBtn = btn(doc.getElementById('mod-kasa'), 'Редактирай');
       if (ok('бутонът е там', !!editBtn)) {
         guard('клик не хвърля', () => realClick(w, editBtn));
