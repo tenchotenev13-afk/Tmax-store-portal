@@ -1,0 +1,32 @@
+-- report-cron-co-overdue-schema.sql
+-- Крон за „Просрочени клиентски заявки — ЦО" (send-scheduled-report, type 'co_overdue').
+-- ПРИЛОЖЕНО В SUPABASE НА 06.10.2026 през execute_sql (cron.schedule е DML върху
+-- cron.job, не DDL — затова не е миграция). jobid = 26, име co-overdue-weekdays-8h.
+--
+-- ⚠️ СЪЗДАДЕН НЕАКТИВЕН (cron.alter_job(26, active := false)) — първото писмо до
+-- Теодор и Васка не бива да тръгне без изрично потвърждение. Пуска се с:
+--   select cron.alter_job(26, active := true);
+--
+-- Моделът е като jobs 19/20: два UTC часа (5 и 6) + условие
+-- extract(hour from now() at time zone 'Europe/Sofia') = 8, за да тръгва ВЕДНЪЖ в
+-- 08:00 София и при лятно, и при зимно време. Понеделник–петък (1-5). На официален
+-- празник функцията сама не праща (isBgWorkday), кронът не знае за празниците.
+--
+-- Командата е СЪЗДАДЕНА като копие на command на job 19 със замяна на типа и часа —
+-- Authorization заглавният ред носи service ключ и затова НЕ е записан тук:
+--   cron.schedule('co-overdue-weekdays-8h', '0 5,6 * * 1-5',
+--     replace(replace((select command from cron.job where jobid = 19),
+--             '"type":"daily"', '"type":"co_overdue"'), '= 21;', '= 8;'))
+-- Получената команда (без ключа):
+--   select net.http_post(
+--     url := 'https://xiwkdiqqplgdcrkewgtv.supabase.co/functions/v1/send-scheduled-report',
+--     headers := '{"Content-Type":"application/json","Authorization":"Bearer <SERVICE_KEY>"}'::jsonb,
+--     body := '{"type":"co_overdue"}'::jsonb
+--   )
+--   where extract(hour from now() at time zone 'Europe/Sofia') = 8;
+--
+-- Rollback: select cron.unschedule('co-overdue-weekdays-8h');
+--
+-- ОГЛЕДАЛО (Живко): нищо — крон задание, без таблици и колони.
+-- report_cron_schedule() (report-cron-schedule-schema.sql) НЕ го показва: филтрира
+-- само daily/weekly/pallets/warehouse, а в admin.js няма ред за този отчет.

@@ -1,6 +1,14 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v49 (06.10.2026) — ЕДНО нещо: нов type 'co_overdue' — „Просрочени клиентски
+      заявки — ЦО", едно общо писмо до report_recipients.co_overdue=true
+      (понеделник–петък 08:00 София, крон co-overdue-weekdays-8h). Две секции
+      (pending с изтекъл срок; processed с минала/липсваща дата от ЦО), праща
+      се и при 0, не се праща на официален празник/уикенд, dry_run:true е без
+      изпращане и без лични данни. bgHolidaysForYear/isBgWorkday са копие от
+      shared.js (tests/co-overdue-report.test.js сверява резултата им).
+
    v48 (04.10.2026) — ЕДНО нещо: поправка на падането на седмичния отчет.
       „ReferenceError: fmtDate2 is not defined“ в reportSpanPendingHtml —
       помощникът беше само в bulletin.js; копиран тук.
@@ -4135,11 +4143,194 @@ function reportWarehouseRecipients(users, recipientRows){
 }
 
 
+/* ═══════ ПРОСРОЧЕНИ КЛИЕНТСКИ ЗАЯВКИ — ЦЕНТРАЛЕН ОФИС ═══════════════
+   Понеделник–петък 08:00 по София, body {"type":"co_overdue"}: ЕДНО общо писмо
+   до report_recipients с active=true и co_overdue=true. Обхват: client_orders
+   с fulfiller = „Централен офис" (същото сравнение като isCentralOffice() в
+   shared.js — без значение на регистъра). Две секции:
+     1. „Необработени с изтекъл срок" — status='pending' и reportIsLate();
+     2. „Обработени, но датата от ЦО е минала" — status='processed' и
+        (co_eta < опорния ден, ИЛИ co_eta е празна и reportIsLate()).
+   Просрочието в секция 1 и в секция 2 без дата от ЦО е reportLateDays() от
+   срока (delivery); в секция 2 с минала co_eta е от ДАТАТА НА ЦО — тя е
+   обещанието, което е изтекло (reportLateDays върху co_eta, същата аритметика).
+   „Чака" — reportWaitDays(). Опорният ден е днешният по София (не по часовника
+   на сървъра — Deno тече в UTC). Праща се и при 0 реда. На официален празник
+   (и в уикенд) не се праща. dry_run:true връща броя и първите 5 от секция
+   БЕЗ да праща и БЕЗ имена/телефони на клиенти — функцията се вика и с
+   публичния ключ, затова не връща лични данни. */
+function localDateISO(d?: Date){
+  d = d || new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+var _bgHolidayCache: any = {};
+function bgOrthodoxEaster(year){
+  var a=year%4,b=year%7,c=year%19,d=(19*c+15)%30,e=(2*a+4*b-d+34)%7;
+  var m=Math.floor((d+e+114)/31),day=((d+e+114)%31)+1;
+  return new Date(year,m-1,day+13);
+}
+function bgHolidaysForYear(year){
+  if(_bgHolidayCache[year])return _bgHolidayCache[year];
+  var set: any = {};
+  var isWeekend=function(dt){var w=dt.getDay();return w===0||w===6;};
+  var fixed=[[0,1],[2,3],[4,1],[4,6],[4,24],[8,6],[8,22],[11,24],[11,25],[11,26]];
+  var e=bgOrthodoxEaster(year);
+  [-2,-1,0,1].forEach(function(off){set[localDateISO(new Date(year,e.getMonth(),e.getDate()+off))]=true;});
+  fixed.forEach(function(f){set[localDateISO(new Date(year,f[0],f[1]))]=true;});
+  fixed.forEach(function(f){
+    if(!isWeekend(new Date(year,f[0],f[1])))return;
+    var n=new Date(year,f[0],f[1]+1);
+    while(isWeekend(n)||set[localDateISO(n)])n=new Date(n.getFullYear(),n.getMonth(),n.getDate()+1);
+    set[localDateISO(n)]=true;
+  });
+  _bgHolidayCache[year]=set;
+  return set;
+}
+function isBgWorkday(iso){
+  var dt=new Date(iso+'T00:00:00');
+  var w=dt.getDay();
+  if(w===0||w===6)return false;
+  return !bgHolidaysForYear(dt.getFullYear())[iso];
+}
+/* Днешната календарна дата в Europe/Sofia като полунощ (като reportDailyTargetDate) */
+function reportSofiaToday(now: Date){
+  var p: any = {};
+  new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Sofia', year: 'numeric', month: '2-digit', day: '2-digit' })
+    .formatToParts(now).forEach(function(x){ p[x.type] = x.value; });
+  return new Date(Number(p.year), Number(p.month) - 1, Number(p.day));
+}
+function reportCoOverdueIsCO(fulfiller){
+  return String(fulfiller || '').trim().toLowerCase() === 'централен офис';
+}
+/* Чиста функция (за jsdom): от редовете на client_orders строи двете секции. */
+function reportCoOverdueSections(rows, refD){
+  var s1: any[] = [], s2: any[] = [];
+  (Array.isArray(rows) ? rows : []).forEach(function(o){
+    if (!o || !reportCoOverdueIsCO(o.fulfiller)) return;
+    var base = { id: o.id, in_num: o.in_num || '', store: o.store_name || '—', customer: o.customer_name || '',
+                 delivery: o.delivery || null, waitDays: reportWaitDays(o, refD) };
+    if (o.status === 'pending') {
+      if (!reportIsLate(o, refD)) return;
+      s1.push(Object.assign(base, { lateDays: reportLateDays(o, refD) }));
+    } else if (o.status === 'processed') {
+      var late = false, lateDays = 0;
+      if (o.co_eta) {
+        var eta = new Date(o.co_eta); eta.setHours(0,0,0,0);
+        if (eta < refD) { late = true; lateDays = reportLateDays({ delivery: o.co_eta }, refD); }
+      } else if (reportIsLate(o, refD)) { late = true; lateDays = reportLateDays(o, refD); }
+      if (!late) return;
+      s2.push(Object.assign(base, { lateDays: lateDays, co_eta: o.co_eta || null,
+                                    co_note: o.co_note || '', processedBy: o.co_processed_by || '' }));
+    }
+  });
+  var cmp = function(a, b){ return b.lateDays - a.lateDays || String(a.in_num).localeCompare(String(b.in_num)); };
+  s1.sort(cmp); s2.sort(cmp);
+  return { pending: s1, processed: s2 };
+}
+function collectCoOverdueReportData(cb, now?: Date){
+  var refD = reportSofiaToday(now || new Date());
+  sbGet('client_orders','status=in.(pending,processed)&fulfiller=ilike.' + encodeURIComponent('Централен офис') +
+    '&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,co_note,co_processed_by,created_at,date,awaiting_stock').then(function(rows){
+    var sec = reportCoOverdueSections(rows, refD);
+    cb({ reportDate: localDateISO(refD), pending: sec.pending, processed: sec.processed,
+         total: sec.pending.length + sec.processed.length });
+  }).catch(function(){ cb(null); });
+}
+function reportCoOverdueSubject(data){
+  var d = data && data.reportDate ? new Date(data.reportDate+'T00:00:00') : null;
+  var base = 'Просрочени клиентски заявки — ЦО';
+  if (!d || isNaN(d.getTime())) return base;
+  return base + ' — ' + reportDayMonth(d) + '.' + d.getFullYear() + ' (' + ((data && data.total) || 0) + ')';
+}
+function reportCoOverdueHtml(data){
+  var total = (data && data.total) || 0;
+  var TH = 'padding:5px 6px;font-size:10px;font-weight:700;color:#475569;border-bottom:2px solid #e2e8f0;text-align:left;';
+  var TD = 'padding:5px 6px;font-size:11px;color:#334155;border-bottom:1px solid #eef1f6;';
+  var fd = function(iso){ return iso ? esc(fmtDate2(iso)) : '—'; };
+  var section = function(title, items, withEta){
+    if (!items.length) return '';
+    var head = '<tr><th style="' + TH + '">Обект</th><th style="' + TH + '">№</th><th style="' + TH + '">Клиент</th>' +
+      '<th style="' + TH + '">Срок</th>' + (withEta ? '<th style="' + TH + '">Дата от ЦО</th>' : '') +
+      '<th style="' + TH + '">Просрочие</th><th style="' + TH + '">Чака</th></tr>';
+    var cols = withEta ? 7 : 6;
+    var body = items.map(function(x){
+      var r = '<tr><td style="' + TD + '">' + reportStoreLinkHtml(x.store, '#1E2761') + '</td>' +
+        '<td style="' + TD + '">' + esc(x.in_num) + '</td><td style="' + TD + '">' + (x.customer ? esc(x.customer) : 'без клиент') + '</td>' +
+        '<td style="' + TD + '">' + fd(x.delivery) + '</td>' +
+        (withEta ? '<td style="' + TD + '">' + (x.co_eta ? fd(x.co_eta) : '<i style="color:#C0392B;">без дата от ЦО</i>') + '</td>' : '') +
+        '<td style="' + TD + 'color:#C0392B;font-weight:700;">' + x.lateDays + (x.lateDays === 1 ? ' ден' : ' дни') + '</td>' +
+        '<td style="' + TD + '">' + x.waitDays + (x.waitDays === 1 ? ' ден' : ' дни') + '</td></tr>';
+      if (withEta && (x.co_note || x.processedBy)) {
+        r += '<tr><td colspan="' + cols + '" style="' + TD + 'color:#64748b;font-size:10.5px;">' +
+          (x.co_note ? 'Коментар от ЦО: ' + esc(x.co_note) : '') + (x.co_note && x.processedBy ? ' · ' : '') +
+          (x.processedBy ? 'Обработил: ' + esc(x.processedBy) : '') + '</td></tr>';
+      }
+      return r;
+    }).join('');
+    return '<div style="margin-top:14px;"><div style="font-size:12px;font-weight:700;color:#1E2761;margin-bottom:6px;">' +
+      esc(title) + ' <span style="font-weight:500;color:#64748b;">(' + items.length + ')</span></div>' +
+      '<div style="overflow-x:auto;background:#FFFFFF;border:1px solid #e2e8f0;border-radius:8px;">' +
+      '<table role="presentation" style="width:100%;border-collapse:collapse;">' + head + body + '</table></div></div>';
+  };
+  var body = total
+    ? section('Необработени с изтекъл срок', data.pending, false) +
+      section('Обработени, но датата от ЦО е минала', data.processed, true)
+    : '<div style="font-size:13px;color:#94a3b8;">Няма просрочени заявки</div>';
+  var d = data && data.reportDate ? new Date(data.reportDate+'T00:00:00') : new Date();
+  var dateStr = d.toLocaleDateString('bg-BG', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
+  return reportEmailShell('📦 Просрочени клиентски заявки — Централен офис', dateStr, body, 'Автоматичен репорт · ТеМАХ Портал');
+}
+/* Кой получава: активните редове с co_overdue=true, по един път на имейл */
+function reportCoOverdueRecipients(rows){
+  var out: string[] = [], seen: any = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(r){
+    if (!r || r.active === false || r.co_overdue !== true || !r.email) return;
+    var k = String(r.email).trim().toLowerCase();
+    if (seen[k]) return;
+    seen[k] = 1; out.push(r.email);
+  });
+  return out;
+}
+
 Deno.serve(async (req: Request) => {
   try {
     var body: any = {};
     try { body = await req.json(); } catch(e) {}
-    var type = body && (body.type === 'weekly' || body.type === 'pallets' || body.type === 'warehouse') ? body.type : 'daily';
+    var type = body && (body.type === 'weekly' || body.type === 'pallets' || body.type === 'warehouse' || body.type === 'co_overdue') ? body.type : 'daily';
+
+    /* v49 — „Просрочени клиентски заявки — ЦО": ЕДНО общо писмо, ранен клон
+       като „Палети"/„Склад". Не се праща на официален празник и в уикенд;
+       dry_run:true не праща нищо и не връща лични данни. */
+    if (type === 'co_overdue') {
+      var coToday = reportSofiaToday(new Date());
+      var coIso = localDateISO(coToday);
+      var coDry = !!(body && body.dry_run === true);
+      var coWorkday = isBgWorkday(coIso);
+      if (!coWorkday && !coDry) {
+        return new Response(JSON.stringify({ ok:true, sent:false, reason: bgHolidaysForYear(coToday.getFullYear())[coIso] ? 'holiday' : 'weekend', date:coIso, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      }
+      var coData: any = await new Promise(function(resolve){ collectCoOverdueReportData(resolve); });
+      if (!coData) {
+        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{'Content-Type':'application/json'} });
+      }
+      var coRecRes: any = await sbGet('report_recipients', 'active=eq.true&co_overdue=eq.true&select=email,name,active,co_overdue');
+      var coTo: string[] = reportCoOverdueRecipients(coRecRes);
+      if (coDry) {
+        var coPick = function(x: any){ return { in_num:x.in_num, store:x.store, delivery:x.delivery, co_eta:x.co_eta || null, lateDays:x.lateDays, waitDays:x.waitDays }; };
+        return new Response(JSON.stringify({ ok:true, dry_run:true, date:coIso, workday:coWorkday, subject:reportCoOverdueSubject(coData),
+          recipients:coTo.length, pending:{ count:coData.pending.length, first5:coData.pending.slice(0,5).map(coPick) },
+          processed:{ count:coData.processed.length, first5:coData.processed.slice(0,5).map(coPick) }, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      }
+      if (!coTo.length) {
+        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      }
+      var coRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
+        method: 'POST',
+        headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
+        body: JSON.stringify({ to: coTo, subject: reportCoOverdueSubject(coData), html: reportCoOverdueHtml(coData) })
+      });
+      return new Response(JSON.stringify({ ok:true, sent:coRes.ok, email_status:coRes.status, recipients:coTo.length, pending:coData.pending.length, processed:coData.processed.length, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+    }
 
     /* v33 — „Палети": отделен, по-кратък път. Без праг за каса, без
        snapshot, без управители; връща отговор тук и не стига до

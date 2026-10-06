@@ -14,6 +14,8 @@
 
 ## Чака изпращане
 
+- 06.10 · report_recipients.co_overdue — boolean, NOT NULL, default false
+
 - 06.10 · client_orders.delivery_reason — text, NULL, без default
 - 30.09 · stock_differences.warehouse_response — нова стойност на статус 'sent_sap'
 - 30.09 · stock_differences.store_response — нова стойност на статус 'sap_accepted'

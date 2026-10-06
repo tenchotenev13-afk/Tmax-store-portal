@@ -1,0 +1,16 @@
+-- report-recipients-co-overdue-schema.sql
+-- Отчет „Просрочени клиентски заявки — ЦО" (send-scheduled-report, type 'co_overdue'):
+-- кой го получава. Нов флаг report_recipients.co_overdue — като daily/weekly/pallets/warehouse.
+-- ПРИЛОЖЕНО В SUPABASE НА 06.10.2026 като миграция
+-- 20261006080431_report_recipients_co_overdue и прочетено обратно
+-- (boolean, NOT NULL, default false; 0 реда с true преди попълването).
+-- Този файл е ОГЛЕДАЛО на миграцията, не източник.
+-- Rollback: supabase/migrations/20261006080431_report_recipients_co_overdue_down.sql.
+--
+-- Данни (06.10.2026, DML през execute_sql, не част от миграцията):
+--   · t.tenev@temax.bg вече имаше ред (daily/weekly/pallets=true) → само co_overdue=true;
+--   · v.shikova@temax.bg нямаше ред → нов ред с daily=false, weekly=false,
+--     pallets=false, warehouse=false, active=true, co_overdue=true
+--     (daily/weekly имат default true — без изричното false щяха да я запишат
+--     и в дневния/седмичния).
+alter table public.report_recipients add column if not exists co_overdue boolean not null default false;

@@ -205,6 +205,7 @@ const TESTS = [
   'weekly-diff-stale.test.js',
   'weekly-checklist-section.test.js',
   'warehouse-report.test.js',
+  'co-overdue-report.test.js',
   'report-returns-list.test.js',
   'report-late-section.test.js',
   'report-transit-warehouse.test.js',
