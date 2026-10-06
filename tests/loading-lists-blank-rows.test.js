@@ -68,12 +68,12 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
 
 (async function () {
 
-  section('а) Нов лист — десет празни реда, всеки без обект');
+  section('а) Нов лист — 30 празни реда, всеки без обект');
   {
     const h = env();
     h.w.llNewList();
     await ticks(); await ticks();
-    ok('десет реда', h.w.llDraft.units.length === 10, String(h.w.llDraft.units.length));
+    ok('30 реда', h.w.llDraft.units.length === 30, String(h.w.llDraft.units.length));
     ok('всички са палети', h.w.llDraft.units.every(i => i.kind === 'pallet'));
     ok('без обект', h.w.llDraft.units.every(i => i.store_name === ''),
       JSON.stringify(h.w.llDraft.units.map(i => i.store_name)));
@@ -81,7 +81,7 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
       h.w.llDraft.units.every(i => !i.docs.length && i.products && i.products.length === 0));
     ok('и всички се броят за празни',
       h.w.llDraft.units.every(i => h.w.llBlankRow(i) === true));
-    ok('заглавието показва 10', /Редове \(10\)/.test(mod(h).textContent), mod(h).textContent.slice(0, 200));
+    ok('заглавието показва 30', /Редове \(30\)/.test(mod(h).textContent), mod(h).textContent.slice(0, 200));
 
     /* Селектът трябва да ПИТА, не да приписва. */
     const sel = mod(h).querySelector('select[onchange*="store_name"]');
@@ -91,8 +91,8 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     }
     /* „➕ Добави нов ред" добавя ЕДИН и също празен. */
     realClick(h.w, btn(mod(h), 'Добави нов ред'));
-    ok('единадесет реда', h.w.llDraft.units.length === 11, String(h.w.llDraft.units.length));
-    ok('новият също е без обект', h.w.llDraft.units[10].store_name === '');
+    ok('31 реда', h.w.llDraft.units.length === 31, String(h.w.llDraft.units.length));
+    ok('новият също е без обект', h.w.llDraft.units[30].store_name === '');
   }
 
   section('б) Съществуваща чернова НЕ се допълва');
@@ -126,7 +126,7 @@ const itemPosts = h => h.calls.post.filter(p => /loading_list_items/.test(p.url)
     }
     ok('нищо не е казано за пропуснатите — не са грешка',
       !h.toasts.some(t => /ред/.test(t.msg) && t.col === '#dc2626'), JSON.stringify(h.toasts));
-    ok('записът е довършен', h.w.llView === 'list', h.w.llView);
+    ok('записът е довършен — отваря се Прегледът на листа', h.w.llView === 'view', h.w.llView);
   }
 
   section('г) Ред с документ, но БЕЗ обект — това Е грешка, не празен ред');

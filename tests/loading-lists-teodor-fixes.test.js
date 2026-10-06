@@ -325,8 +325,8 @@ const pr = h => h.doc.getElementById('mod-print');
     await ticks(); await ticks();
     ok('формата за добавяне е на екрана, не зад бутон', !!btn(mod(h), '📷 Сканирай'),
       mod(h).textContent.slice(0, 400));
-    ok('и то за ВСЕКИ от десетте реда, не само за първия',
-      mod(h).querySelectorAll('input[id^="ll-pf-sap-"]').length === 10,
+    ok('и то за ВСЕКИ от 30-те реда, не само за първия',
+      mod(h).querySelectorAll('input[id^="ll-pf-sap-"]').length === 30,
       String(mod(h).querySelectorAll('input[id^="ll-pf-sap-"]').length));
     ok('и полето за SAP код също', !!h.doc.getElementById('ll-pf-sap-0'));
     ok('черновата не е трябвало да вдига флаг',

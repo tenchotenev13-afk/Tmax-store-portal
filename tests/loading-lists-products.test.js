@@ -530,7 +530,7 @@ async function openProducts(h, i) {
     }
     ok('в базата има три артикула', h.db.loading_list_products.length === 3,
       JSON.stringify(h.db.loading_list_products.map(p => p.sap_code)));
-    ok('записът е довършен — обратно в списъка', h.w.llView === 'list', h.w.llView);
+    ok('записът е довършен — отваря се Прегледът на листа', h.w.llView === 'view', h.w.llView);
     ok('без маркер за непълен запис', !h.w.llIncompleteSaves['L1']);
   }
 
@@ -608,7 +608,7 @@ async function openProducts(h, i) {
     ok('и нито една повторна за id-тата',
       !getsTo(h, 'loading_list_items').some(u => /select=id,position/.test(u)),
       getsTo(h, 'loading_list_items').join(' | '));
-    ok('записът е довършен', h.w.llView === 'list', h.w.llView);
+    ok('записът е довършен — Преглед', h.w.llView === 'view', h.w.llView);
   }
 
   section('з) Провал на вмъкването — червен toast, маркер, черновата ОСТАВА, старите НЕ се трият');
@@ -655,7 +655,7 @@ async function openProducts(h, i) {
     h.healPost = true;
     h.w.llSaveDraft();
     for (let k = 0; k < 8; k++) await ticks();
-    ok('вторият довършва — обратно в списъка', h.w.llView === 'list', h.w.llView);
+    ok('вторият довършва — Преглед на листа', h.w.llView === 'view', h.w.llView);
     ok('маркерът е изчистен', !h.w.llIncompleteSaves['L1'], JSON.stringify(h.w.llIncompleteSaves));
     ok('в базата са точно двата артикула от екрана', h.db.loading_list_products.length === 2 &&
       !h.db.loading_list_products.some(p => p.id === 'P-old-1'),

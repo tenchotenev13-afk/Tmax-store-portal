@@ -2496,13 +2496,21 @@ function llListHtml(){
 }
 
 /* ─── СЪЗДАВАНЕ / РЕДАКЦИЯ ──────────────────────────────────── */
-/* Складът пише лист от десет реда на хартия и ги попълва отгоре надолу.
-   Празен редактор го кара да натиска „➕ Ред без документ" десет пъти, преди
-   да започне работа. Незапълнените редове отпадат тихо при запис (виж
-   llBlankRow) — затова десет предварителни реда не са „боклук в базата".
+/* Складът пише лист на хартия и го попълва отгоре надолу. Празен редактор го
+   кара да натиска „➕ Добави нов ред" десетки пъти, преди да започне работа.
+   Незапълнените редове отпадат тихо при запис (виж llBlankRow) — затова 30
+   предварителни реда не са „боклук в базата". Над 30 се добавя без
+   ограничение („➕ Добави нов ред" и лентата „⚡ Бързо добавяне").
    СЪЩЕСТВУВАЩИТЕ чернови не се допълват: човек, който е оставил три реда, ги
    намира три. */
-var LL_NEW_ROWS = 10;
+var LL_NEW_ROWS = 30;
+/* Състоянието на лентата „⚡ Бързо добавяне": живее извън DOM-а, защото всяко
+   пре-рендиране на редактора би изтрило написаното. Обектът остава избран
+   между две добавяния (следващият град е друг, но често — съседен). */
+var llQuick = { store: '', pallet: 1, roll: 0, bulk: 0 };
+function llQuickReset(keepStore){
+  llQuick = { store: keepStore ? llQuick.store : '', pallet: 1, roll: 0, bulk: 0 };
+}
 /* Редът в редактора е ТОВАРНА ЕДИНИЦА (палет / извънгабаритен / руло / насип),
    не документ: един палет носи няколко изходящи номера. В базата единицата е
    N реда (по един на документ) със същия pallet_no — тук е един запис.
@@ -2547,6 +2555,7 @@ function llRenumberGroupByOrder(store, kind){
 function llNewList(){
   llCurrentId = null;
   llDocQuery = ''; llDocStore = '';
+  llQuickReset(false);
   llDraft = { list_date: llTodayISO(), executed_by: llActor(), comment: '', units: [] };
   for(var bi = 0; bi < LL_NEW_ROWS; bi++) llDraft.units.push(llBlankUnit());
   llPendingDocs = [];
@@ -2589,6 +2598,7 @@ function llOpenEdit(id){
   if(l.status !== 'draft'){ toast('Само чернова се редактира','#d97706'); return; }
   llCurrentId = l.id;
   llDocQuery = ''; llDocStore = '';
+  llQuickReset(false);
   llDraft = {
     list_date: l.list_date, executed_by: l.executed_by || '',
     comment: l.comment || '',
@@ -2784,6 +2794,65 @@ function llAttachTargets(d){
     if((u.store_name || '') === (d.store_name || '') && llIsNumbered(u.kind) && u.pallet_no != null && u.docs.length) out.push(i);
   });
   return out;
+}
+/* ─── ⚡ Бързо добавяне ──────────────────────────────────────────
+   „Монтана: 5 палета, 1 руло, 2 насипа" е една операция, не осем реда на ръка.
+   Единиците са БЕЗ документи (те идват после) и със зададен обект. Първо се
+   запълват недокоснатите празни единици (llBlankRow) — иначе празните остават
+   отдолу, под попълнените; чак тогава се добавя в края. Вече попълнените
+   редове не се пипат, затова лентата може да се ползва втори път за друг
+   град. */
+var LL_QUICK_MAX = 60;
+function llQuickNum(v){
+  var n = parseInt(v, 10);
+  if(isNaN(n) || n < 0) n = 0;
+  return n > LL_QUICK_MAX ? LL_QUICK_MAX : n;
+}
+function llQuickSet(field, val){
+  if(field === 'store') llQuick.store = String(val == null ? '' : val);
+  else if(field === 'pallet' || field === 'roll' || field === 'bulk') llQuick[field] = llQuickNum(val);
+}
+function llQuickAdd(){
+  if(!llDraft) return 0;
+  var store = String(llQuick.store || '').trim();
+  if(!store){ toast('Избери обект','#dc2626'); return 0; }
+  var plan = [];
+  [['pallet', llQuick.pallet], ['roll', llQuick.roll], ['bulk', llQuick.bulk]].forEach(function(p){
+    for(var i = 0; i < llQuickNum(p[1]); i++) plan.push(p[0]);
+  });
+  if(!plan.length){ toast('Въведи поне един палет, руло или насип','#d97706'); return 0; }
+  /* Свободните места — недокоснатите единици, В РЕДА им на екрана. */
+  var blanks = [];
+  llDraft.units.forEach(function(u){ if(llBlankRow(u)) blanks.push(u); });
+  plan.forEach(function(kind){
+    var u = blanks.shift();
+    if(!u){ u = llBlankUnit(); llDraft.units.push(u); }
+    u.kind = kind;
+    u.store_name = store;
+    /* Номерът е следващият свободен за обекта и вида — като в llAddFreeRow,
+       но вече с обект, затова редовете на един обект се номерират подред. */
+    llAssignPalletNo(u);
+  });
+  toast('Добавени ' + plan.length + (plan.length === 1 ? ' ред' : ' реда') + ' за ' + store);
+  llQuickReset(true);
+  renderLoadingLists();
+  return plan.length;
+}
+function llQuickBarHtml(){
+  var num = function(id, field, val, label){
+    return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12.5px;color:#475569;">'+label+
+      ' <input id="'+id+'" type="number" min="0" max="'+LL_QUICK_MAX+'" value="'+val+'" oninput="llQuickSet(\''+field+'\',this.value)" '+
+      'style="width:60px;border:1px solid #cbd5e1;border-radius:6px;padding:5px 6px;font-size:13px;"></label>';
+  };
+  return '<div data-ll-quick="1" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:12px;">'+
+    '<div style="font-size:13px;font-weight:700;margin-bottom:8px;">⚡ Бързо добавяне</div>'+
+    '<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">'+
+      '<select id="ll-qa-store" onchange="llQuickSet(\'store\',this.value)" style="border:1px solid #cbd5e1;border-radius:6px;padding:6px 8px;font-size:13px;">'+llStoreOptions(llQuick.store)+'</select>'+
+      num('ll-qa-pallet', 'pallet', llQuick.pallet, 'палети')+
+      num('ll-qa-roll', 'roll', llQuick.roll, 'рула')+
+      num('ll-qa-bulk', 'bulk', llQuick.bulk, 'насип')+
+      '<button onclick="llQuickAdd()" style="border:none;background:#16a34a;color:#fff;border-radius:6px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">➕ Добави</button>'+
+    '</div></div>';
 }
 function llAddFreeRow(){
   if(!llDraft) return;
@@ -3811,6 +3880,9 @@ function llEditorHtml(){
   h += '</div>';
   }
 
+  /* ⚡ Бързо добавяне — над „Редове", в карта като заглавието. */
+  h += llQuickBarHtml();
+
   /* в–д) Редовете */
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:12px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
@@ -4143,7 +4215,14 @@ function llProductsFailed(listId, why){
 function llFinishSave(listId){
   delete llIncompleteSaves[listId];
   toast('✅ Черновата е записана');
-  llBackToList();
+  /* След запис складът иска да ВИДИ какво е записал (и да печата етикети) —
+     не да се връща в списъка и да търси листа. Прегледът е на СЪЩИЯ лист.
+     Данните се презареждат: нов лист още го няма в llLists, а редовете на
+     стар са остарели; loadLoadingLists() рисува при пристигането им. */
+  llDraft = null; llPendingDocs = [];
+  llCurrentId = listId;
+  llView = 'view';
+  loadLoadingLists();
 }
 
 /* ─── ПРЕХОДИ ───────────────────────────────────────────────── */

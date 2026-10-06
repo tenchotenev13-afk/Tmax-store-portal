@@ -125,10 +125,10 @@ async function openEditor(h) {
     const h = env([]);
     const wrap = await openEditor(h);
     /* Десетте празни реда (Пакет Г1) нямат нищо общо със снимката. */
-    ok('десетте празни реда си стоят', h.w.llDraft.units.length === 10,
+    ok('30-те празни реда си стоят', h.w.llDraft.units.length === 30,
       String(h.w.llDraft.units.length));
-    ok('заглавието „📦 Редове (10)" е там',
-      wrap.textContent.indexOf('Редове (10)') >= 0, wrap.textContent.slice(0, 500));
+    ok('заглавието „📦 Редове (30)" е там',
+      wrap.textContent.indexOf('Редове (30)') >= 0, wrap.textContent.slice(0, 500));
     ok('„➕ Добави нов ред" е там', !!btn(wrap, '➕ Добави нов ред'));
     ok('обектите са заредени', h.w.llStores.length > 0, String(h.w.llStores.length));
     /* Блокът за артикули (Пакет В1) — скенерът и полетата. От 23.09.2026 е
@@ -211,7 +211,7 @@ async function openEditor(h) {
        снимката, а складът не бива да остане пред празен екран. */
     ok('редакторът пак се рендира', wrap.textContent.indexOf('Нов товарен лист') >= 0,
       wrap.textContent.slice(0, 200));
-    ok('десетте реда са там', h.w.llDraft.units.length === 10,
+    ok('30-те реда са там', h.w.llDraft.units.length === 30,
       String(h.w.llDraft.units.length));
     ok('обектите са заредени', h.w.llStores.length > 0, String(h.w.llStores.length));
   }
@@ -237,7 +237,7 @@ async function openEditor(h) {
       JSON.stringify(transitGets(h)));
     ok('редакторът пак се рендира', wrap.textContent.indexOf('Нов товарен лист') >= 0,
       wrap.textContent.slice(0, 200));
-    ok('десетте реда са там', h.w.llDraft.units.length === 10,
+    ok('30-те реда са там', h.w.llDraft.units.length === 30,
       String(h.w.llDraft.units.length));
   }
 
