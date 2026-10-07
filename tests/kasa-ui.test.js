@@ -22,7 +22,7 @@ const clone = x => JSON.parse(JSON.stringify(x));
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
 const USER = { email: 'm@temax.bg', display_name: 'Управител Троян', role: 'manager', store_name: 'Троян', assigned_stores: [] };
-const TODAY = dayOffset(0), OLD = dayOffset(-3);
+const TODAY = '2026-10-06', OLD = '2026-10-03'; /* фиксирани: еталонът е снет на 06.10.2026 */
 
 function pos(id, date, n, over) {
   return Object.assign({ id, store_name: 'Троян', date, pos_number: n, kasa_number: n, cashier_name: 'Касиер ' + n, status: 'confirmed',
@@ -174,9 +174,9 @@ async function snapshot() {
     ok('чернова: „✏️ Чернова“', d.indexOf('Статус: ✏️ Чернова') >= 0);
     /* работна дата 05.10, днес 06.10 — като в задачата */
     const h2 = env();
-    h2.w.kasaSelectedDate = dayOffset(-1);
+    h2.w.kasaSelectedDate = '2026-10-05';
     const e = await printZob(h2, clone(ZOB));
-    ok('работна дата вчера: вчерашната е в печата, днешната — не', e.indexOf(h2.w.fmtDate(dayOffset(-1))) >= 0 && e.indexOf(h2.w.fmtDate(TODAY)) < 0);
+    ok('работна дата вчера: вчерашната е в печата, днешната — не', e.indexOf(h2.w.fmtDate('2026-10-05')) >= 0 && e.indexOf(h2.w.fmtDate(TODAY)) < 0);
     h.close(); h2.close();
   }
 
