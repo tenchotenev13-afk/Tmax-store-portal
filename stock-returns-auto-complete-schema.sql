@@ -5,6 +5,22 @@
 -- ⚠ ТОЗИ ФАЙЛ Е ПОДГОТВЕН, НО НЕ Е ПРИЛОЖЕН към 02.10.2026 — чака изрично
 -- потвърждение. Миграция: supabase/migrations/20261002..._stock_returns_auto.sql
 --
+-- ═══ ОБНОВЕНО 07.10.2026 — „ЗА ВРЪЩАНЕ" ПО SOURCE ═════════════════════════
+-- Секции 1–3 по-долу са ТЕКУЩИТЕ функции (миграция
+-- 20261007090000_stock_returns_auto_per_source.sql). Автоматиката вече НЕ е на
+-- „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ" (тя е ръчна, без linked_module), а на две задачи:
+--   linked_module 'stock-returns-complaint' → stock_returns.source = 'complaint'
+--   linked_module 'stock-returns-diff'      → stock_returns.source = 'diff'
+-- Старата стойност 'stock-returns' не е автоматична и не остава никъде.
+-- stock_returns_task_for_week(date) → stock_returns_tasks_for_week(date)
+-- (set of; версията печели и за linked_module; без limit 1);
+-- stock_returns_store_done получи четвърти параметър p_source.
+-- Заглавието и бележките по-долу (до секция 1) са от 02.10.2026 и описват
+-- първоначалния замисъл — задачата и обхватът (всички невзети записи) са
+-- заменени с горното. Секции 4–5 (тригери, права, крон) са непроменени.
+-- Огледало (Живко): НЯМА нова колона; новата таблица
+-- stock_returns_auto_bak_20261007 е еднократен архив и НЕ се праща.
+
 -- ЗАЩО
 -- Обектите трябва всяка седмица, от понеделник до срока на задачата, да
 -- попълнят „Дата потвърдена актуализация" (stock_returns.confirmed_date) на
@@ -143,50 +159,64 @@
 --   преди 05.10 гейтът го затваря; и целият път през тригера с ОТВОРЕН гейт —
 --   двете се проверяват на живо след 05.10.
 
--- ═══ 1. ПОМОЩНИК: задачата за дадена седмица, със слята версия ═══════════
-create or replace function public.stock_returns_task_for_week(p_monday date)
-returns table (task_id uuid, task_type text, due_idx int, due_time text, target_stores text[])
+-- ═══ 1. ЗАДАЧИТЕ ЗА СЕДМИЦАТА (от 07.10.2026; преди това: stock_returns_task_for_week) — със слят linked_module, без limit 1 ══════
+drop function if exists public.stock_returns_task_for_week(date);
+
+create or replace function public.stock_returns_tasks_for_week(p_monday date)
+returns table (task_id uuid, source text, task_type text, due_idx int,
+               due_time text, target_stores text[])
 language sql
 stable
 security definer
 set search_path to 'public'
 as $$
-  select t.id,
-         case when v.id is null then t.task_type else v.task_type end,
-         /* Денят: due_weekdays[1], иначе due_weekday. Прозоречна задача тук
-            няма (due_window=false) — а и правилото ѝ не зависи от прозорец,
-            защото заявката е по седмица, не по ден. */
-         coalesce(
-           (case when v.id is null then t.due_weekdays else v.due_weekdays end)[1],
-           (case when v.id is null then t.due_weekday  else v.due_weekday  end)
-         ),
-         case when v.id is null then t.due_time else v.due_time end,
-         /* target_stores също е седмично съдържание: днес е NULL (задачата
-            важи за всички), но сложи ли го някой за една седмица, правилото
-            трябва да го зачете — иначе базата отмята обект, който екранът
-            изобщо не показва. */
-         case when v.id is null then t.target_stores else v.target_stores end
-    from recurring_tasks t
-    left join lateral (
-      select vv.id, vv.task_type, vv.due_weekdays, vv.due_weekday, vv.due_time, vv.target_stores
-        from recurring_task_versions vv
-       where vv.recurring_task_id = t.id
-         and vv.from_monday <= p_monday
-         and (vv.to_monday is null or vv.to_monday >= p_monday)
-       order by vv.from_monday desc
-       limit 1
-    ) v on true
-   where t.linked_module = 'stock-returns'
-     and t.active
-   limit 1;
+  select m.id,
+         /* ЕДИНСТВЕНОТО място, което знае кой linked_module на кой source
+            отговаря. Нова стойност, която не е тук, се игнорира (source IS NULL
+            отпада по-долу) — не се отмята „всичко". */
+         case m.linked_module
+           when 'stock-returns-complaint' then 'complaint'
+           when 'stock-returns-diff'      then 'diff'
+         end,
+         m.task_type,
+         coalesce(m.due_weekdays[1], m.due_weekday),
+         m.due_time,
+         m.target_stores
+    from (
+      select t.id,
+             case when v.id is null then t.linked_module else v.linked_module end as linked_module,
+             case when v.id is null then t.task_type     else v.task_type     end as task_type,
+             case when v.id is null then t.due_weekdays  else v.due_weekdays  end as due_weekdays,
+             case when v.id is null then t.due_weekday   else v.due_weekday   end as due_weekday,
+             case when v.id is null then t.due_time      else v.due_time      end as due_time,
+             /* target_stores също е седмично съдържание — виж бележката в
+                20261002090100: иначе базата отмята обект, който екранът не
+                показва. */
+             case when v.id is null then t.target_stores else v.target_stores end as target_stores
+        from recurring_tasks t
+        left join lateral (
+          select vv.id, vv.linked_module, vv.task_type, vv.due_weekdays,
+                 vv.due_weekday, vv.due_time, vv.target_stores
+            from recurring_task_versions vv
+           where vv.recurring_task_id = t.id
+             and vv.from_monday <= p_monday
+             and (vv.to_monday is null or vv.to_monday >= p_monday)
+           order by vv.from_monday desc
+           limit 1
+        ) v on true
+       where t.active
+    ) m
+   where m.linked_module in ('stock-returns-complaint', 'stock-returns-diff');
 $$;
 
-comment on function public.stock_returns_task_for_week(date) is
-  'Постоянната задача „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ" за седмицата на p_monday, със СЛЯТА версия (recurring_task_versions). Връща task_type, индекса на деня (0=Пон), часа и target_stores. Сливането е „версията печели", не coalesce по поле — точно както recurringApplyVersion() в shared.js.';
+comment on function public.stock_returns_tasks_for_week(date) is
+  'Активните постоянни задачи за седмицата на p_monday, вързани към „За връщане" (linked_module stock-returns-complaint / stock-returns-diff), със СЛЯТА версия — „версията печели", както recurringApplyVersion() в shared.js. source е stock_returns.source, по който задачата се отмята. Връща ВСИЧКИ такива задачи (без limit 1).';
 
--- ═══ 2. УСЛОВИЕТО: обектът актуализирал ли е всичко в прозореца ══════════
+-- ═══ 2. УСЛОВИЕТО — вече по source ═══════════════════════════════════════
+drop function if exists public.stock_returns_store_done(text, date, date);
+
 create or replace function public.stock_returns_store_done(
-  p_store text, p_from date, p_upto date)
+  p_store text, p_from date, p_upto date, p_source text)
 returns boolean
 language sql
 stable
@@ -197,23 +227,19 @@ as $$
     select 1 from stock_returns
      where store_name = p_store
        and status = 'pending'
+       and source = p_source
        and (confirmed_date is null
             or confirmed_date < p_from
             or confirmed_date > p_upto
-            /* АКТУАЛИЗАЦИЯТА ТРЯБВА ДА Е НА ОБЕКТА. confirmed_date се пише и
-               от двата Excel импорта, които са само на офиса и презаписват
-               съществуващи редове — без тази проверка файл, качен в сряда
-               сутрин, щеше да отметне обектите, без те да са работили.
-               Заварен ред (confirmed_by NULL) не се брои; на практика без
-               значение, защото датите му са от минали седмици.
-               Виж stock-returns-confirmed-by-schema.sql. */
+            /* АКТУАЛИЗАЦИЯТА ТРЯБВА ДА Е НА ОБЕКТА — виж 20261002090100 и
+               stock-returns-confirmed-by-schema.sql. Непроменено. */
             or confirmed_by is distinct from ('store:' || p_store)));
 $$;
 
-comment on function public.stock_returns_store_done(text, date, date) is
-  'Има ли обектът НЕВЗЕТ запис без актуализация в [p_from .. p_upto], направена ОТ САМИЯ ОБЕКТ (confirmed_by = store:<обект>). true = всичко е актуализирано (включително когато обектът няма невзети записи). Бъдеща дата не се зачита — извън горната граница. Дата от офис или от импорт не се зачита — не е негова работа.';
+comment on function public.stock_returns_store_done(text, date, date, text) is
+  'Има ли обектът НЕВЗЕТ запис от този source (complaint/diff) без актуализация в [p_from .. p_upto], направена ОТ САМИЯ ОБЕКТ (confirmed_by = store:<обект>). true = всичко е актуализирано, включително когато обектът няма невзети записи от този source. Бъдеща дата не се зачита. Дата от офис или импорт не се зачита.';
 
--- ═══ 3. СИНХРОНИЗАЦИЯТА ══════════════════════════════════════════════════
+-- ═══ 3. СИНХРОНИЗАЦИЯТА — цикъл по задачите ══════════════════════════════
 create or replace function public.stock_returns_sync_completions(
   p_store text default null, p_today date default null)
 returns integer
@@ -223,9 +249,8 @@ set search_path to 'public'
 as $function$
 declare
   /* p_today е САМО за тест и за ръчно препускане на конкретен ден. Всички
-     гейтове (началната седмица, замразяването след срока) важат спрямо него,
-     тоест подаден ден не отваря вратичка — отваря прозорец, който и без това
-     съществува. Функцията не е достъпна на anon/authenticated. */
+     гейтове (началната седмица, замразяването след срока) важат спрямо него.
+     Функцията не е достъпна на anon/authenticated. */
   v_today   date := coalesce(p_today, (now() at time zone 'Europe/Sofia')::date);
   v_monday  date;
   v_start   date := date '2026-10-05';   -- от тази седмица нататък, не по-рано
@@ -244,93 +269,74 @@ begin
     return 0;
   end if;
 
-  -- Миналото не се пипа. Проверката е по СЕДМИЦАТА, не по днешната дата:
-  -- иначе в понеделник 05.10 функцията още щеше да смята за 28.09.
+  -- Миналото не се пипа. Проверката е по СЕДМИЦАТА, не по днешната дата.
   if v_monday < v_start then
     return 0;
   end if;
 
-  /* ЗАКЛЮЧВАНЕ ПО ОБЕКТ — вместо „тих период" (защо: виж заглавието).
-     srBatchUpdate праща по 20 PATCH-а УСПОРЕДНО; без това две пресмятания с
-     различни моментни снимки могат да се разминат — едното вмъква, другото
-     трие — и да оставят грешен последен резултат. Ключалката е за
-     транзакцията, значи редът на вземането ѝ съвпада с реда на комитите и
-     последното пресмятане вижда всичко. При p_store = NULL (кронът) се взема
-     една обща ключалка, за да не се застъпва с друг крон. */
+  /* ЗАКЛЮЧВАНЕ ПО ОБЕКТ — непроменено (защо: 20261002090100). Една ключалка за
+     цялото извикване, не по задача: двете задачи на един обект се пресмятат
+     последователно в една транзакция. */
   perform pg_advisory_xact_lock(hashtext('sr-sync:' || coalesce(p_store, '*')));
 
-  select * into v_task from stock_returns_task_for_week(v_monday);
-  if v_task.task_id is null then
-    return 0;                       -- няма такава активна задача
-  end if;
-  -- „Само за информация" НЕ се отмята (решение на Тенчо): редове по нея
-  -- никой не чете, а записването им би било мъртъв код в данните.
-  if coalesce(v_task.task_type, 'info') = 'notice' then
-    return 0;
-  end if;
-  if v_task.due_idx is null then
-    return 0;                       -- задача без ден: няма срок, няма прозорец
-  end if;
+  for v_task in select * from stock_returns_tasks_for_week(v_monday) loop
+    -- „Само за информация" не се отмята. continue, не return: другата задача
+    -- може да е за отмятане.
+    if coalesce(v_task.task_type, 'info') = 'notice' then continue; end if;
+    if v_task.due_idx is null then continue; end if;   -- няма ден → няма прозорец
 
-  v_due  := v_monday + v_task.due_idx;
-  v_upto := least(v_today, v_due);
+    v_due  := v_monday + v_task.due_idx;
+    v_upto := least(v_today, v_due);
 
-  -- ЗАМРАЗЯВАНЕ: след деня на срока нищо не се пипа — нито се добавя, нито се
-  -- маха. Същият гейт като `if t.due >= v_today` в transit_mark_empty_stores.
-  if v_today > v_due then
-    return 0;
-  end if;
+    -- ЗАМРАЗЯВАНЕ: след деня на срока на ТАЗИ задача нищо не се пипа.
+    if v_today > v_due then continue; end if;
 
-  v_stores := case
-    when p_store is not null then array[p_store]
-    else array(select distinct u.store_name
-                 from users u
-                where u.store_name is not null
-                  and not (u.store_name = any(v_excl)))
-  end;
+    v_stores := case
+      when p_store is not null then array[p_store]
+      else array(select distinct u.store_name
+                   from users u
+                  where u.store_name is not null
+                    and not (u.store_name = any(v_excl)))
+    end;
 
-  -- Обхватът по target_stores — същото правило като на екрана: празно/NULL
-  -- значи „всички обекти", иначе само изброените.
-  if v_task.target_stores is not null and cardinality(v_task.target_stores) > 0 then
-    v_stores := array(select s from unnest(v_stores) as s
-                       where s = any(v_task.target_stores));
-  end if;
-  if cardinality(v_stores) = 0 then
-    return 0;
-  end if;
+    -- target_stores: празно/NULL значи „всички обекти".
+    if v_task.target_stores is not null and cardinality(v_task.target_stores) > 0 then
+      v_stores := array(select s from unnest(v_stores) as s
+                         where s = any(v_task.target_stores));
+    end if;
+    if cardinality(v_stores) = 0 then continue; end if;
 
-  -- ДОБАВЯНЕ: само където условието е изпълнено. `do nothing` пази ръчната
-  -- отметка, отлагането и „не се отнася за нас" — редът вече е там.
-  insert into task_completions
-         (recurring_task_id, store_name, completed_by, completed_at,
-          status, completion_date)
-  select v_task.task_id, s, 'auto:stock-returns', now(), 'done', v_due
-    from unnest(v_stores) as s
-   where not (s = any(v_excl))
-     and stock_returns_store_done(s, v_monday, v_upto)
-  on conflict (recurring_task_id, store_name, completion_date)
-     where recurring_task_id is not null and completion_date is not null
-  do nothing;
-  get diagnostics v_tmp = row_count;
-  v_n := v_n + coalesce(v_tmp, 0);
+    -- ДОБАВЯНЕ: `do nothing` пази ръчната отметка, отлагането и „не се отнася".
+    insert into task_completions
+           (recurring_task_id, store_name, completed_by, completed_at,
+            status, completion_date)
+    select v_task.task_id, s, 'auto:stock-returns', now(), 'done', v_due
+      from unnest(v_stores) as s
+     where not (s = any(v_excl))
+       and stock_returns_store_done(s, v_monday, v_upto, v_task.source)
+    on conflict (recurring_task_id, store_name, completion_date)
+       where recurring_task_id is not null and completion_date is not null
+    do nothing;
+    get diagnostics v_tmp = row_count;
+    v_n := v_n + coalesce(v_tmp, 0);
 
-  -- МАХАНЕ: условието се е развалило (нов невзет запис, изтрита дата). Трие се
-  -- САМО свой ред — ръчната отметка на обекта и 'not_applicable' не се пипат.
-  delete from task_completions tc
-   where tc.recurring_task_id = v_task.task_id
-     and tc.completion_date = v_due
-     and tc.completed_by = 'auto:stock-returns'
-     and tc.store_name = any(v_stores)
-     and not stock_returns_store_done(tc.store_name, v_monday, v_upto);
-  get diagnostics v_tmp = row_count;
-  v_n := v_n + coalesce(v_tmp, 0);
+    -- МАХАНЕ: само свой ред ('auto:stock-returns') и само на тази задача.
+    delete from task_completions tc
+     where tc.recurring_task_id = v_task.task_id
+       and tc.completion_date = v_due
+       and tc.completed_by = 'auto:stock-returns'
+       and tc.store_name = any(v_stores)
+       and not stock_returns_store_done(tc.store_name, v_monday, v_upto, v_task.source);
+    get diagnostics v_tmp = row_count;
+    v_n := v_n + coalesce(v_tmp, 0);
+  end loop;
 
   return v_n;
 end
 $function$;
 
 comment on function public.stock_returns_sync_completions(text, date) is
-  'Отмята/разотмята постоянната задача „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ" за обект (или за всички, ако p_store е NULL) за ТЕКУЩАТА седмица. Пише само в прозореца понеделник..ден на срока; след срока замразява. Не пренаписва ръчна отметка, отлагане и not_applicable; трие само свои редове (auto:stock-returns). Седмици преди 2026-10-05 не се пипат. Взема advisory lock по обект, за да не се разминат две успоредни пресмятания при импорт. p_today е само за тест/ръчно препускане — гейтовете важат спрямо него.';
+  'Отмята/разотмята постоянните задачи, вързани към „За връщане" (linked_module stock-returns-complaint / stock-returns-diff), за обект (или за всички, ако p_store е NULL) за ТЕКУЩАТА седмица — всяка по записите от своя source. Пише само в прозореца понеделник..ден на срока на задачата; след него замразява. Не пренаписва ръчна отметка, отлагане и not_applicable; трие само свои редове (auto:stock-returns). Седмици преди 2026-10-05 не се пипат. Advisory lock по обект. p_today е само за тест/ръчно препускане.';
 
 -- ═══ 4. ТРИГЕР върху stock_returns ═══════════════════════════════════════
 create or replace function public.stock_returns_sync_trg()
@@ -421,8 +427,8 @@ create trigger stock_returns_sync_upd
 -- от PUBLIC (случаят perform_daily_backup, 23.09.2026). Тригерът пак работи:
 -- изпълнението на тригерна функция не проверява EXECUTE, а самата тя е
 -- security definer, значи вътрешните извиквания минават като собственика.
-revoke execute on function public.stock_returns_task_for_week(date) from public, anon, authenticated;
-revoke execute on function public.stock_returns_store_done(text, date, date) from public, anon, authenticated;
+revoke execute on function public.stock_returns_tasks_for_week(date) from public, anon, authenticated;
+revoke execute on function public.stock_returns_store_done(text, date, date, text) from public, anon, authenticated;
 revoke execute on function public.stock_returns_sync_completions(text, date) from public, anon, authenticated;
 revoke execute on function public.stock_returns_sync_trg() from public, anon, authenticated;
 

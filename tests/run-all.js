@@ -154,6 +154,7 @@ const TESTS = [
   'na-office-view.test.js',
   'na-report-count.test.js',
   'auto-modules-registry.test.js',
+  'stock-returns-per-source.test.js',
   'bulletin-week-default.test.js',
   'bulletin-completion-day-lock.test.js',
   'span-lock-completion.test.js',

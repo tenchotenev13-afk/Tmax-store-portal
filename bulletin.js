@@ -277,7 +277,13 @@ var LINKED_MODULES = [
   { value:'transport', label:'📦 Транспорт' },
   { value:'client', label:'🛒 Клиентски поръчки' },
   { value:'stock-diff', label:'⚖️ Разлики' },
-  { value:'stock-returns', label:'📥 За връщане' },
+  /* „За връщане" е ДВЕ задачи с два source (07.10.2026): рекламации
+     (stock_returns.source='complaint') и разлики ('diff'). И двете са
+     автоматични и водят към таба stock-returns — виж linkedModuleTab().
+     Старата стойност 'stock-returns' я НЯМА нарочно: като „чист бутон" тя
+     изглеждаше автоматична, а базата вече не я отмята. */
+  { value:'stock-returns-complaint', label:'📥 За връщане: рекламации' },
+  { value:'stock-returns-diff', label:'📥 За връщане: разлики' },
   { value:'contacts', label:'📇 Контакти' },
   { value:'reference', label:'🛡️ Гаранции' },
   { value:'history', label:'📊 История' },
@@ -299,12 +305,22 @@ function linkedModuleLabel(value){
   var m = LINKED_MODULES.find(function(x){ return x.value===value; });
   return m ? m.label : null;
 }
+/* Табът, който отваря бутонът. Двете стойности на „За връщане" са ключове на
+   задача, не имена на модул — showModule('stock-returns-complaint') не прави
+   нищо. Всичко останало е собственото си име на таб. */
+function linkedModuleTab(value){
+  return (value==='stock-returns-complaint'||value==='stock-returns-diff') ? 'stock-returns' : value;
+}
 /* Бутонът "свързан модул" се показва само ако ролята изобщо вижда този таб.
    Огледало на setupTabsForRole() в shared.js: История = само isGlobal(),
    Каса = kasa/admin/manager, останалите модули са видими за всички
    (Палети е под-таб на Транспорт и не се ограничава). */
 function linkedModuleAllowed(value){
   if(!value) return false;
+  /* Стойност, която не е в списъка (напр. старата 'stock-returns', останала в
+     данните), няма етикет — без бутон, вместо бутон „— →" към таб, който задачата
+     вече не води автоматично. */
+  if(!linkedModuleLabel(value)) return false;
   if(value==='history') return isGlobal();
   /* 'oborot' е подтаб на Каса и се пуска по същото право като нея. Без този
      ред бутонът в календара би бил път до формата за роли, които през самия
@@ -1191,8 +1207,19 @@ var BUL_AUTO_MODULES = {
     cls:    'bul-auto-transit',
     unit:   ['необработен ред', 'необработени реда']
   },
-  'stock-returns': {
+  /* „За връщане" са ДВЕ задачи (07.10.2026) — по една за всеки source на
+     stock_returns. Етикетът и класът са общи нарочно: за обекта това е една и съща
+     автоматика. Причината е различна (регистърът изисква уникални причини,
+     tests/auto-modules-registry), но етикетът е същият. */
+  'stock-returns-complaint': {
     reason: 'auto-returns',
+    label:  'Отмята се автоматично от „За връщане"',
+    tab:    '„За връщане"',
+    cls:    'bul-auto-returns',
+    unit:   ['запис без актуализация от понеделник', 'записа без актуализация от понеделник']
+  },
+  'stock-returns-diff': {
+    reason: 'auto-returns-diff',
     label:  'Отмята се автоматично от „За връщане"',
     tab:    '„За връщане"',
     cls:    'bul-auto-returns',
@@ -1280,11 +1307,10 @@ function bulLoadTransitPending(){
    днес, защото надписът казва какво остава ДНЕС. Бъдеща дата не се зачита —
    два реда в базата са 2028/2029 (печатна грешка) и не бива да минават за
    актуализация. */
+var BUL_RETURNS_SOURCES = { 'stock-returns-complaint':'complaint', 'stock-returns-diff':'diff' };
 function bulLoadReturnsPending(){
-  bulAutoPending['stock-returns']=null;
+  Object.keys(BUL_RETURNS_SOURCES).forEach(function(k){ bulAutoPending[k]=null; });
   if(isGlobal()||!currentUser||!currentUser.store_name) return;
-  var has=(recurringTasks||[]).some(function(t){ return t && t.linked_module==='stock-returns' && !taskIsNotice(t); });
-  if(!has) return;
   /* Понеделникът на тази седмица се смята НА МЯСТО и съзнателно НЕ се изнася
      в помощник на име bulWeekMondayISO: това име е запазено като капан в
      tests/bulletin-completion-day-lock.test.js — беше махнато заедно с
@@ -1297,28 +1323,36 @@ function bulLoadReturnsPending(){
     d.setDate(d.getDate()-((d.getDay()+6)%7));
     return toLocalISO(d);
   })();
-  sbGet('stock_returns','store_name=eq.'+encodeURIComponent(currentUser.store_name)+
-        '&status=eq.pending&select=id,status,store_name,confirmed_date,confirmed_by').then(function(rows){
-    if(!Array.isArray(rows)) return;
-    var n=rows.filter(function(r){
-      /* СТАТУСЪТ и тук, не само в заявката: върне ли тя повече редове, взетите
-         записи влизат в броя и надписът лъже обекта. */
-      if((r.status||'pending')!=='pending') return false;
-      /* СЪЩОТО правило като в базата (stock_returns_store_done) и в таба „За
-         връщане" (srNeedsUpdate): дата, поставена от офиса или от импорт, не
-         е актуализация на обекта. Без тази проверка надписът тук би казвал
-         „0 остават", а задачата нямаше да се отметне — най-лошото възможно
-         разминаване.
-         НЕ се вика srNeedsUpdate от stock-returns.js: тя се зарежда СЛЕД
-         bulletin.js (index.html, 792 срещу 779) и тестовете вдигат модулите
-         поотделно. Двете се сверяват ред по ред в
-         tests/sr-needs-update.test.js — разминат ли се, тестът пада. */
-      var d=r.confirmed_date?String(r.confirmed_date).slice(0,10):null;
-      if(!d || d<mon || d>today) return true;
-      return String(r.confirmed_by||'') !== ('store:'+(r.store_name||''));
-    }).length;
-    bulAutoPending['stock-returns']=n;
-    renderBulletin();
+  Object.keys(BUL_RETURNS_SOURCES).forEach(function(key){
+    var src=BUL_RETURNS_SOURCES[key];
+    var has=(recurringTasks||[]).some(function(t){ return t && t.linked_module===key && !taskIsNotice(t); });
+    if(!has) return;
+    /* source и в заявката, и във филтъра: всяка задача брои САМО записите от
+       своя source — същото като p_source в stock_returns_store_done. */
+    sbGet('stock_returns','store_name=eq.'+encodeURIComponent(currentUser.store_name)+
+          '&status=eq.pending&source=eq.'+src+'&select=id,status,source,store_name,confirmed_date,confirmed_by').then(function(rows){
+      if(!Array.isArray(rows)) return;
+      var n=rows.filter(function(r){
+        /* СТАТУСЪТ и source-ът и тук, не само в заявката: върне ли тя повече
+           редове, чужди записи влизат в броя и надписът лъже обекта. */
+        if((r.status||'pending')!=='pending') return false;
+        if(r.source!==undefined && r.source!==src) return false;
+        /* СЪЩОТО правило като в базата (stock_returns_store_done) и в таба „За
+           връщане" (srNeedsUpdate): дата, поставена от офиса или от импорт, не
+           е актуализация на обекта. Без тази проверка надписът тук би казвал
+           „0 остават", а задачата нямаше да се отметне — най-лошото възможно
+           разминаване.
+           НЕ се вика srNeedsUpdate от stock-returns.js: тя се зарежда СЛЕД
+           bulletin.js (index.html, 792 срещу 779) и тестовете вдигат модулите
+           поотделно. Двете се сверяват ред по ред в
+           tests/sr-needs-update.test.js — разминат ли се, тестът пада. */
+        var d=r.confirmed_date?String(r.confirmed_date).slice(0,10):null;
+        if(!d || d<mon || d>today) return true;
+        return String(r.confirmed_by||'') !== ('store:'+(r.store_name||''));
+      }).length;
+      bulAutoPending[key]=n;
+      renderBulletin();
+    });
   });
 }
 /* „Зареждане": колко от активните бланки, които важат за обекта, са попълнени
@@ -1914,7 +1948,7 @@ function bulPlanRowHtml(it, store, weekArr){
   h+='</div>';
   /* Бутонът към свързания таб — същият, който е и в календара. */
   if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
-    h+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="flex-shrink:0;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 9px;font-size:10.5px;cursor:pointer;white-space:nowrap;">'+esc(linkedModuleLabel(t.linked_module))+' →</button>';
+    h+='<button data-mod="'+linkedModuleTab(t.linked_module)+'" onclick="showModule(this.dataset.mod)" style="flex-shrink:0;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 9px;font-size:10.5px;cursor:pointer;white-space:nowrap;">'+esc(linkedModuleLabel(t.linked_module))+' →</button>';
   }
   /* „🚫 Не се отнася" / „↩ Отмени заявката" — пренесеното явяване го няма:
      то вече е преместена работа, а не „не важи за нас". */
@@ -2847,7 +2881,7 @@ function renderBulView(){
         if(taskSpansWeeks(t)) html+=bulSpanBadgeRowHtml(t,dateStr);
         if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
           var lbl=linkedModuleLabel(t.linked_module);
-          if(lbl)html+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lbl)+' →</button>';
+          if(lbl)html+='<button data-mod="'+linkedModuleTab(t.linked_module)+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lbl)+' →</button>';
         }
       });
       recItems.forEach(function(t){
@@ -2881,7 +2915,7 @@ function renderBulView(){
         html+='</div>';
         if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
           var lblRec=linkedModuleLabel(t.linked_module);
-          if(lblRec)html+='<button data-mod="'+t.linked_module+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lblRec)+' →</button>';
+          if(lblRec)html+='<button data-mod="'+linkedModuleTab(t.linked_module)+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lblRec)+' →</button>';
         }
       });
       carItems.forEach(function(r){ html+=isGlobal()?bulCarriedCalGlobalHtml(r):bulCarriedCalRowHtml(r,dept.color); });

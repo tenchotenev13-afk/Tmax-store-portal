@@ -353,7 +353,7 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
       hb.w.bulAutoModuleOf('stock-diff') === null);
     ok('а „Стока на път" е заключена и тогава',
       hb.w.bulAutoLocked('transit-auto') === true);
-    ok('и „За връщане" също', hb.w.bulAutoLocked('stock-returns') === true);
+    ok('и „За връщане" също', hb.w.bulAutoLocked('stock-returns-complaint') === true);
     hb.close();
 
     const ha = envBul(AFTER);

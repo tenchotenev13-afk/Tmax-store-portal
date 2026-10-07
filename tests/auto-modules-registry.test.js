@@ -53,7 +53,7 @@ function retTask(over) {
     id: 'r-ret', title: 'СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ', department: 'admin',
     task_type: 'info', active: true, sort_order: 1,
     due_weekday: 2, due_weekdays: [2], due_time: '20:00', due_window: false,
-    target_stores: null, report_groups: ['controlling'], linked_module: 'stock-returns'
+    target_stores: null, report_groups: ['controlling'], linked_module: 'stock-returns-complaint'
   }, over || {});
 }
 function manualTask(over) {
@@ -122,10 +122,10 @@ const noteOf = (h, cls) => {
     /* ПЕТ от 05.10.2026 („Зареждане"); ЧЕТИРИ от 04.10.2026: „Разлики" (stock-diff) влезе с дата на влизане в
        сила. Числото е заковано нарочно — нов модул трябва да мине и през
        този тест, а не да се промъкне. */
-    ok('съдържа петте модула', keys.length === 5 && keys.indexOf('supply') >= 0 && keys.indexOf('oborot') >= 0 &&
-      keys.indexOf('transit-auto') >= 0 && keys.indexOf('stock-returns') >= 0 &&
+    ok('съдържа шестте ключа', keys.length === 6 && keys.indexOf('stock-returns-diff') >= 0 && keys.indexOf('supply') >= 0 && keys.indexOf('oborot') >= 0 &&
+      keys.indexOf('transit-auto') >= 0 && keys.indexOf('stock-returns-complaint') >= 0 &&
       keys.indexOf('stock-diff') >= 0, keys.join(', '));
-    ok('bulAutoLocked чете от него', w.bulAutoLocked('stock-returns') === true);
+    ok('bulAutoLocked чете от него', w.bulAutoLocked('stock-returns-complaint') === true);
     ok('и казва НЕ за непознат модул', w.bulAutoLocked('reference') === false);
     ok('и за празен', w.bulAutoLocked('') === false);
     /* Всеки модул носи reason, label и tab — иначе етикетът излиза празен. */
@@ -157,13 +157,13 @@ const noteOf = (h, cls) => {
   section('2. „За връщане" получава всичко наведнъж');
   {
     const w = env().w;
-    ok('заключена е', w.bulAutoLocked('stock-returns') === true);
-    ok('reason е свой', w.bulLockReason(WED, 'stock-returns') === 'auto-returns');
+    ok('заключена е', w.bulAutoLocked('stock-returns-complaint') === true);
+    ok('reason е свой', w.bulLockReason(WED, 'stock-returns-complaint') === 'auto-returns');
     ok('етикетът сочи таба',
       w.bulLockLabel('auto-returns') === 'Отмята се автоматично от „За връщане"',
       w.bulLockLabel('auto-returns'));
     /* Бутонът „🚫 Не се отнася" го няма — както при Стока на път. */
-    const t = { id: 'r-ret', task_type: 'info', linked_module: 'stock-returns' };
+    const t = { id: 'r-ret', task_type: 'info', linked_module: 'stock-returns-complaint' };
     ok('„🚫 Не се отнася" го няма', w.bulNaBtnHtml('recurring', t, WED, null) === '');
     ok('КОНТРОЛА: ръчната постоянна го има',
       w.bulNaBtnHtml('recurring', { id: 'r-man', task_type: 'info', linked_module: null }, WED, null)
@@ -174,7 +174,7 @@ const noteOf = (h, cls) => {
   {
     const h = await view([retTask(), manualTask()], [ret('s1'), ret('s2'), ret('s3')]);
     if (!h) return report();
-    await settle(() => h.w.bulAutoPending['stock-returns'] !== null && h.w.bulAutoPending['stock-returns'] !== undefined, 80);
+    await settle(() => h.w.bulAutoPending['stock-returns-complaint'] !== null && h.w.bulAutoPending['stock-returns-complaint'] !== undefined, 80);
     const p = panel(h);
     const cb = p.querySelector('input[data-rtid="r-ret"]');
     if (ok('чекбоксът е в DOM-а (не се крие — правило 11)', !!cb)) {
@@ -223,9 +223,9 @@ const noteOf = (h, cls) => {
       ret('taken', Object.assign({ status: 'taken' }, BY))
     ]);
     if (!h) return report();
-    await settle(() => typeof h.w.bulAutoPending['stock-returns'] === 'number', 80);
+    await settle(() => typeof h.w.bulAutoPending['stock-returns-complaint'] === 'number', 80);
     ok('броят е 4 — без дата, стара, бъдеща и поставена от офиса',
-      h.w.bulAutoPending['stock-returns'] === 4, String(h.w.bulAutoPending['stock-returns']));
+      h.w.bulAutoPending['stock-returns-complaint'] === 4, String(h.w.bulAutoPending['stock-returns-complaint']));
     ok('надписът го казва',
       noteOf(h, 'bul-auto-returns') === '⏳ 4 записа без актуализация от понеделник',
       noteOf(h, 'bul-auto-returns'));
@@ -238,8 +238,8 @@ const noteOf = (h, cls) => {
       ret('b', { confirmed_date: TUE, confirmed_by: 'store:' + STORE })
     ]);
     if (!h) return report();
-    await settle(() => typeof h.w.bulAutoPending['stock-returns'] === 'number', 80);
-    ok('броят е 0', h.w.bulAutoPending['stock-returns'] === 0, String(h.w.bulAutoPending['stock-returns']));
+    await settle(() => typeof h.w.bulAutoPending['stock-returns-complaint'] === 'number', 80);
+    ok('броят е 0', h.w.bulAutoPending['stock-returns-complaint'] === 0, String(h.w.bulAutoPending['stock-returns-complaint']));
     ok('надписът е общият', noteOf(h, 'bul-auto-returns') === '⏳ отмята се от „За връщане"',
       noteOf(h, 'bul-auto-returns'));
   }
@@ -248,8 +248,8 @@ const noteOf = (h, cls) => {
   {
     const h = await view([retTask()], []);
     if (!h) return report();
-    await settle(() => typeof h.w.bulAutoPending['stock-returns'] === 'number', 80);
-    ok('броят е 0', h.w.bulAutoPending['stock-returns'] === 0);
+    await settle(() => typeof h.w.bulAutoPending['stock-returns-complaint'] === 'number', 80);
+    ok('броят е 0', h.w.bulAutoPending['stock-returns-complaint'] === 0);
     ok('надписът съществува', !!noteOf(h, 'bul-auto-returns'), String(noteOf(h, 'bul-auto-returns')));
   }
 
@@ -261,8 +261,8 @@ const noteOf = (h, cls) => {
     if (!h) return report();
     await ticks(); await ticks();
     ok('броячът остава незареден',
-      h.w.bulAutoPending['stock-returns'] === null || h.w.bulAutoPending['stock-returns'] === undefined,
-      String(h.w.bulAutoPending['stock-returns']));
+      h.w.bulAutoPending['stock-returns-complaint'] === null || h.w.bulAutoPending['stock-returns-complaint'] === undefined,
+      String(h.w.bulAutoPending['stock-returns-complaint']));
     const q = h.calls.get.filter(u => u.indexOf('/stock_returns') >= 0);
     ok('и заявка към stock_returns няма', q.length === 0, q.join('\n'));
   }

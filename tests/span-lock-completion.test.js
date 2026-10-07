@@ -256,7 +256,7 @@ const naModal = h => h.doc.getElementById('na-modal-ov');
     const rec = [{ id: 'r-1', title: 'СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ', department: 'admin',
                    task_type: 'photo', active: true, due_weekday: 1, due_weekdays: [1],
                    due_time: null, due_window: false, target_stores: null,
-                   linked_module: 'stock-returns' }];
+                   linked_module: 'stock-returns-complaint' }];
     const h = env([], rec);
     h.calls.toast.length = 0;
     guard('openTaskCompletionModal не хвърля', () => h.w.openTaskCompletionModal('r-1', 'recurring', TODAY));

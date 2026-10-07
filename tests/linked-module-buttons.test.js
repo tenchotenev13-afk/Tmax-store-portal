@@ -91,7 +91,7 @@ function renderOk(h, name) {
 
   section('0. Средата се вдига');
   {
-    const h = env({ regular: 'stock-returns' });
+    const h = env({ regular: 'stock-returns-complaint' });
     ok('bulletin.js е зареден (renderBulView съществува)',
       typeof h.w.renderBulView === 'function');
     ok('linkedModuleAllowed() съществува',
@@ -104,7 +104,7 @@ function renderOk(h, name) {
 
   section('A. manager/магазин + обикновена задача с linked_module=stock-returns');
   {
-    const h = env({ regular: 'stock-returns' });
+    const h = env({ regular: 'stock-returns-complaint' });
     if (renderOk(h, 'рендерът минава')) {
       const b = modBtn(h.doc, 'stock-returns');
       if (ok('бутонът data-mod="stock-returns" СЪЩЕСТВУВА', !!b)) {
@@ -157,7 +157,7 @@ function renderOk(h, name) {
 
   section('E. регресия за админ изгледа — admin (isGlobal) + stock-returns');
   {
-    const h = env({ role: 'admin', store: 'Централен офис', regular: 'stock-returns' });
+    const h = env({ role: 'admin', store: 'Централен офис', regular: 'stock-returns-complaint' });
     ok('admin е глобална роля', h.w.isGlobal() === true);
     if (renderOk(h, 'рендерът минава')) {
       ok('бутонът продължава да съществува', !!modBtn(h.doc, 'stock-returns'));
@@ -188,7 +188,7 @@ function renderOk(h, name) {
 
   section('G. РЕАЛЕН КЛИК върху бутона (случай A)');
   {
-    const h = env({ regular: 'stock-returns' });
+    const h = env({ regular: 'stock-returns-complaint' });
     if (renderOk(h, 'рендерът минава')) {
       const b = modBtn(h.doc, 'stock-returns');
       if (ok('бутонът съществува', !!b)) {

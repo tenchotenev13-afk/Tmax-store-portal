@@ -277,8 +277,8 @@ const mod = h => h.doc.getElementById('mod-stock-returns');
        затова правилото е преписано там. Тук се сверява ред по ред: при
        разминаване единият екран обещава отметка, която другият не прави. */
     const bul = fs.readFileSync(path.join(ROOT, 'bulletin.js'), 'utf8');
-    ok('bulletin.js тегли и confirmed_by',
-      bul.indexOf('select=id,status,store_name,confirmed_date,confirmed_by') >= 0, 'няма го');
+    ok('bulletin.js тегли и confirmed_by (и source — от 07.10.2026 брояч по задача)',
+      bul.indexOf('select=id,status,source,store_name,confirmed_date,confirmed_by') >= 0, 'няма го');
     ok('и сверява префикса на обекта',
       bul.indexOf("String(r.confirmed_by||'') !== ('store:'+(r.store_name||''))") >= 0, 'няма го');
     ok('и прозореца', bul.indexOf('if(!d || d<mon || d>today) return true;') >= 0, 'няма го');
