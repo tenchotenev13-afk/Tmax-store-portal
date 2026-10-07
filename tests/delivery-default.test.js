@@ -10,6 +10,15 @@ const { boot, realClick, fire, ok, guard, section, report, dayOffset, ticks } = 
 const CO = 'Централен офис';
 const USER = { email: 'sn@temax.bg', display_name: 'Снабдяване ЦО', role: 'supply', store_name: CO };
 
+/* Първият РАБОТЕН ден на или след днес+n — датата от ЦО не може да е почивен ден,
+   а фикстурите са относителни към днес; без това тестът мига според деня от седмицата. */
+const PROBE = boot({ modules: [], user: USER, data: {} }).w;
+const iso = dt => dt.getFullYear() + '-' + String(dt.getMonth() + 1).padStart(2, '0') + '-' + String(dt.getDate()).padStart(2, '0');
+const wk = n => { let dt = new Date(dayOffset(n) + 'T00:00:00'); while (!PROBE.isBgWorkday(iso(dt))) dt.setDate(dt.getDate() + 1); return iso(dt); };
+/* Първата събота/неделя на или след днес+30 и първото 22.09 във делник след днес */
+const nextDow = (dow) => { const dt = new Date(dayOffset(30) + 'T00:00:00'); while (dt.getDay() !== dow) dt.setDate(dt.getDate() + 1); return iso(dt); };
+const nextIndep = () => { for (let y = new Date().getFullYear(); ; y++) { const dt = new Date(y, 8, 22); const w = dt.getDay(); if (w >= 1 && w <= 5 && iso(dt) > dayOffset(0)) return iso(dt); } };
+
 const mkOrder = (id, over) => Object.assign({
   id, in_num: id, store_name: 'Троян', fulfiller: CO, status: 'pending',
   date: dayOffset(-3), hour: '10:00', customer_name: 'Иван Петров', phone: '0888111222',
@@ -166,7 +175,7 @@ const lastBody = calls => { const p = orderPosts(calls); return p.length ? p[p.l
 
   section('5. Модал „Обработена от ЦО"');
   {
-    const O = mkOrder('c1', { delivery: dayOffset(12) });
+    const O = mkOrder('c1', { delivery: wk(12) });
     const open = (e) => { e.w.openCoProcessedModal('c1'); return e.w.document; };
     const submit = async (e) => { realClick(e.w, e.w.document.getElementById('cop-submit')); await ticks(); };
     const patches = e => e.calls.patch.filter(p => /client_orders/.test(p.url));
@@ -183,7 +192,7 @@ const lastBody = calls => { const p = orderPosts(calls); return p.length ? p[p.l
     ok('co_eta в миналото → отказ', patches(e).length === 0);
 
     e = env([O]); doc = open(e);
-    doc.getElementById('cop-eta').value = dayOffset(15);
+    doc.getElementById('cop-eta').value = wk(15);
     fire(e.w, doc.getElementById('cop-eta'), 'change');
     ok('различна дата → етикетът на коментара е със *', /\*$/.test(doc.getElementById('cop-note-lbl').textContent));
     await submit(e);
@@ -191,11 +200,11 @@ const lastBody = calls => { const p = orderPosts(calls); return p.length ? p[p.l
 
     doc.getElementById('cop-note').value = 'ТЕСИ, поръчка 1';
     await submit(e);
-    ok('с коментар → запис', patches(e).length === 1 && patches(e)[0].body.co_eta === dayOffset(15));
+    ok('с коментар → запис', patches(e).length === 1 && patches(e)[0].body.co_eta === wk(15));
     ok('delivery не се пипа', !('delivery' in patches(e)[0].body));
 
     e = env([O]); doc = open(e);
-    doc.getElementById('cop-eta').value = dayOffset(12);
+    doc.getElementById('cop-eta').value = wk(12);
     fire(e.w, doc.getElementById('cop-eta'), 'change');
     ok('равна на delivery → без звезда на коментара', !/\*$/.test(doc.getElementById('cop-note-lbl').textContent));
     await submit(e);
@@ -203,7 +212,7 @@ const lastBody = calls => { const p = orderPosts(calls); return p.length ? p[p.l
 
     /* днес (граничен случай) е позволено */
     e = env([O]); doc = open(e);
-    doc.getElementById('cop-eta').value = dayOffset(0);
+    doc.getElementById('cop-eta').value = wk(0);
     doc.getElementById('cop-note').value = 'днес';
     await submit(e);
     ok('co_eta = днес → допустимо', patches(e).length === 1);
@@ -214,6 +223,75 @@ const lastBody = calls => { const p = orderPosts(calls); return p.length ? p[p.l
     ok('редакция: isEdit бутон „Запази"', /Запази/.test(doc.getElementById('cop-submit').textContent));
     await submit(e);
     ok('редакция без co_eta → отказ', patches(e).length === 0);
+  }
+
+  section('5б. Датата от ЦО — само работни дни');
+  {
+    const open = (e, id) => { e.w.openCoProcessedModal(id || 'c1'); return e.w.document; };
+    const submit = async (e) => { realClick(e.w, e.w.document.getElementById('cop-submit')); await ticks(); };
+    const patches = e => e.calls.patch.filter(p => /client_orders/.test(p.url));
+    const fmt = s => s.slice(8, 10) + '.' + s.slice(5, 7) + '.' + s.slice(0, 4);
+    const toasts = e => e.calls.toast.map(t => (typeof t === 'string' ? t : t.msg || '')).join(' | ');
+    const WD = wk(12);                      /* работен срок на заявката */
+    const O = mkOrder('c1', { delivery: WD });
+    const SAT = nextDow(6), SUN = nextDow(0), IND = nextIndep();
+
+    /* всяка от трите дати има коментар, за да не пада на коментара, а на дата */
+    for (const [name, date] of [['събота', SAT], ['неделя', SUN], ['22.09 (празник, делник)', IND]]) {
+      const e = env([O]); const doc = open(e);
+      doc.getElementById('cop-eta').value = date;
+      doc.getElementById('cop-note').value = 'има коментар';
+      await submit(e);
+      ok(name + ' (' + date + ') → отказ, няма PATCH', patches(e).length === 0 && !!doc.getElementById('cop-ov'));
+      ok(name + ' → червен toast „' + fmt(date) + ' е почивен ден — избери работен ден"',
+        toasts(e).indexOf(fmt(date) + ' е почивен ден — избери работен ден') >= 0, toasts(e));
+    }
+    ok('22.09 е действително делник и празник (проверка на самия тест)',
+      new Date(IND + 'T00:00:00').getDay() % 6 !== 0 && !PROBE.isBgWorkday(IND), IND);
+
+    /* работен ден = срока → минава без коментар */
+    let e = env([O]); let doc = open(e);
+    doc.getElementById('cop-eta').value = WD;
+    fire(e.w, doc.getElementById('cop-eta'), 'change');
+    await submit(e);
+    ok('работен ден = срока → записва без коментар', patches(e).length === 1 && patches(e)[0].body.co_eta === WD && patches(e)[0].body.co_note === null);
+
+    /* работен ден ≠ срока без коментар → отказ (правилото за коментара е същото) */
+    e = env([O]); doc = open(e);
+    doc.getElementById('cop-eta').value = wk(20);
+    fire(e.w, doc.getElementById('cop-eta'), 'change');
+    await submit(e);
+    ok('работен ден ≠ срока без коментар → отказ', patches(e).length === 0 && /коментар/.test(toasts(e)), toasts(e));
+
+    /* подсказката */
+    e = env([O]); doc = open(e);
+    ok('под полето: „Само работни дни"', doc.getElementById('cop-eta-hint').textContent.indexOf('Само работни дни') === 0);
+    ok('срокът е работен → няма съобщение за почивен срок', doc.getElementById('cop-eta-hint').textContent.indexOf('почивен') < 0);
+    doc.getElementById('cop-eta').value = SAT;
+    fire(e.w, doc.getElementById('cop-eta'), 'change');
+    ok('избрана събота → червено съобщение в подсказката',
+      doc.getElementById('cop-eta-hint').textContent === fmt(SAT) + ' е почивен ден — избери работен ден');
+
+    /* срокът на заявката е почивен ден: нищо не се попълва, само съобщение */
+    const O2 = mkOrder('c1', { delivery: SAT });
+    e = env([O2]); doc = open(e);
+    ok('срок почивен → cop-eta остава празно (без автоматично попълване)', doc.getElementById('cop-eta').value === '');
+    ok('срок почивен → „Срокът на заявката (ДД.ММ) е почивен ден"',
+      doc.getElementById('cop-eta-hint').textContent.indexOf('Срокът на заявката (' + fmt(SAT).slice(0, 5) + ') е почивен ден') >= 0,
+      doc.getElementById('cop-eta-hint').textContent);
+    await submit(e);
+    ok('без избрана дата пак → отказ (задължителна)', patches(e).length === 0);
+
+    /* редакция („✏️ Дата от ЦО") на заявка със съхранена почивна co_eta — като Пирдоп-0258 */
+    const OLD = mkOrder('c1', { status: 'processed', delivery: SUN, co_eta: SUN, co_note: 'стар' });
+    e = env([OLD]); doc = open(e);
+    ok('редакция: съхранената неделя се показва в червено', /почивен ден/.test(doc.getElementById('cop-eta-hint').textContent));
+    await submit(e);
+    ok('редакция с неделя (= срока) → отказ', patches(e).length === 0 && toasts(e).indexOf(fmt(SUN) + ' е почивен ден') >= 0, toasts(e));
+    doc.getElementById('cop-eta').value = wk(14);
+    fire(e.w, doc.getElementById('cop-eta'), 'change');
+    await submit(e);
+    ok('редакция с поправена работна дата (коментарът е вече попълнен) → записва', patches(e).length === 1 && patches(e)[0].body.co_eta === wk(14));
   }
 
   section('6. delivery_reason се показва (детайл + История)');

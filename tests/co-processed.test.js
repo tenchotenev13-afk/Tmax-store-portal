@@ -9,7 +9,7 @@
 const fs = require('fs');
 const { JSDOM } = require('jsdom');
 /* Истински клик от harness-а: onclick с this=елемента и `event`, както браузърът. */
-const { realClick } = require('../.claude/skills/tmax-jsdom-test/harness');
+const { realClick, boot: hBoot } = require('../.claude/skills/tmax-jsdom-test/harness');
 const DIR = process.argv[2] ? process.argv[2].replace(/\/*$/, '/') : __dirname + '/../';
 
 let pass = 0, fail = 0;
@@ -31,13 +31,18 @@ const daysAgoISO = n => { const x = new Date(); x.setDate(x.getDate() - n); retu
 
 const CO = 'Централен офис';
 
+/* Първият РАБОТЕН ден на или след d(n): датата от ЦО не може да е почивен ден (07.10.2026),
+   а фикстурите са относителни към днес — без това тестът мига според деня от седмицата. */
+const PROBE = hBoot({ modules: [], user: { email: 'a@temax.bg', display_name: 'А', role: 'admin', store_name: CO }, data: {} }).w;
+const wk = n => { let x = d(n); while (!PROBE.isBgWorkday(x)) { const t = new Date(x + 'T00:00:00'); t.setDate(t.getDate() + 1); x = d(Math.round((t - new Date(d(0) + 'T00:00:00')) / 86400000)); } return x; };
+
 const ORDERS = [
   /* 1) Заявка към ЦО, още необработена, стара 9 дни -> трябва да алармира */
   { id: 'o-1', in_num: '0001', store_name: 'Троян', fulfiller: CO, status: 'pending',
     date: d(-9), hour: '10:00', customer_name: 'Иван Петров', phone: '0888111222',
     product: 'ПАРКЕТ', sap: '111', qty: 5, unit: 'кв.м',
     items: [{ product: 'ПАРКЕТ', sap: '111', qty: 5, unit: 'кв.м' }],
-    delivery: d(12), note: '', created_at: daysAgoISO(9), co_eta: null, co_note: null,
+    delivery: wk(12), note: '', created_at: daysAgoISO(9), co_eta: null, co_note: null,
     paid_transport: false, transport_id: null },
   /* 2) Заявка към ЦО, обработена, доставчикът има срок напред -> НЕ алармира */
   { id: 'o-2', in_num: '0002', store_name: 'Монтана', fulfiller: CO, status: 'processed',
@@ -202,7 +207,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     ok('има поле за коментар', !!doc.getElementById('cop-note'));
     ok('обяснява, че няма да алармира', ov.textContent.indexOf('няма да се брои за закъсняла') >= 0);
 
-    doc.getElementById('cop-eta').value = d(15);
+    doc.getElementById('cop-eta').value = wk(15);
     doc.getElementById('cop-note').value = 'ТЕСИ, поръчка 4500999';
     realClick(w, doc.getElementById('cop-submit'));
     await tick(); await tick();
@@ -210,7 +215,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     const p = calls.patch.find(x => /client_orders/.test(x.url));
     ok('прави PATCH към client_orders', !!p);
     ok('статусът е processed', p && p.body.status === 'processed');
-    ok('записва очакваната дата', p && p.body.co_eta === d(15));
+    ok('записва очакваната дата', p && p.body.co_eta === wk(15));
     ok('записва коментара', p && p.body.co_note === 'ТЕСИ, поръчка 4500999');
     ok('записва кой е обработил', p && p.body.co_processed_by === 'Снабдяване ЦО');
     ok('записва кога', p && !!p.body.co_processed_at);
@@ -241,7 +246,7 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     const { w, doc, calls } = boot({ failPatch: true });
     w.renderClientOrders();
     realClick(w, btnIn(row(doc, 'o-1'), '✅ Обработена от ЦО'));
-    doc.getElementById('cop-eta').value = d(12); /* = delivery на o-1 → коментар не е нужен */
+    doc.getElementById('cop-eta').value = wk(12); /* = delivery на o-1 → коментар не е нужен */
     realClick(w, doc.getElementById('cop-submit'));
     await tick(); await tick();
     ok('при грешка модалът ОСТАВА отворен', !!doc.getElementById('cop-ov'));

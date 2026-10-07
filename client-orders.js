@@ -443,7 +443,8 @@ function openCoProcessedModal(id){
     '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">Заявка №'+esc(o.in_num||'—')+' · '+esc(o.store_name||'')+' · '+esc(o.customer_name||'')+'</div>'+
     '<div style="font-size:11.5px;color:#475569;background:#f8fafc;border-radius:6px;padding:7px 10px;margin-bottom:12px;">'+items+'</div>'+
     '<label class="fl">Ориентировъчна дата за получаване в обекта *</label>'+
-    '<input type="date" class="fi" id="cop-eta" min="'+today()+'" data-delivery="'+escVal(o.delivery)+'" value="'+escVal(o.co_eta)+'" onchange="coCopNoteStar()" style="margin-bottom:10px;">'+
+    '<input type="date" class="fi" id="cop-eta" min="'+today()+'" data-delivery="'+escVal(o.delivery)+'" value="'+escVal(o.co_eta)+'" onchange="coCopNoteStar()" style="margin-bottom:2px;">'+
+    '<div id="cop-eta-hint" style="font-size:11px;color:#64748b;margin-bottom:10px;"></div>'+
     '<label class="fl" id="cop-note-lbl">Коментар от ЦО (доставчик, № на поръчка...)</label>'+
     '<input class="fi" id="cop-note" value="'+escVal(o.co_note)+'" placeholder="напр. ТЕСИ, поръчка 4500123" style="margin-bottom:12px;">'+
     '<div style="font-size:11.5px;color:#047857;background:#ecfdf5;border-radius:6px;padding:7px 10px;margin-bottom:14px;">'+
@@ -466,6 +467,23 @@ function coCopNeedsNote(){
 function coCopNoteStar(){
   var l=document.getElementById('cop-note-lbl');
   if(l)l.textContent='Коментар от ЦО (доставчик, № на поръчка...)'+(coCopNeedsNote()?' *':'');
+  coCopEtaHint();
+}
+/* Под полето: „Само работни дни"; червено, ако избраната дата е почивен ден;
+   ако срокът на заявката е почивен ден — само съобщение, НИЩО не се попълва. */
+function coCopEtaHint(){
+  var h=document.getElementById('cop-eta-hint'),el=document.getElementById('cop-eta');
+  if(!h||!el)return;
+  var del=el.getAttribute('data-delivery')||'';
+  var txt='Само работни дни';
+  if(el.value&&!isBgWorkday(el.value)){
+    h.style.color='#dc2626';
+    h.textContent=fmtDate(el.value)+' е почивен ден — избери работен ден';
+    return;
+  }
+  if(del&&!isBgWorkday(del))txt+=' · Срокът на заявката ('+fmtDate(del).slice(0,5)+') е почивен ден';
+  h.style.color='#64748b';
+  h.textContent=txt;
 }
 function closeCoProcessedModal(){var el=document.getElementById('cop-ov');if(el)el.remove();}
 /* Извиква се от бутона в модала "Статус" — там id-то стои в statusTargetId. */
@@ -480,6 +498,7 @@ function submitCoProcessed(id){
   var eta=v('cop-eta')||null;
   if(!eta){toast('Въведи ориентировъчна дата за получаване *','#dc2626');return;}
   if(eta<today()){toast('Датата не може да е преди днес','#dc2626');return;}
+  if(!isBgWorkday(eta)){toast(fmtDate(eta)+' е почивен ден — избери работен ден','#dc2626');return;}
   if(coCopNeedsNote()&&!v('cop-note')){toast('Датата е различна от срока на заявката ('+fmtDate(o.delivery)+') — напиши коментар *','#dc2626');return;}
   var btn=document.getElementById('cop-submit');
   if(btn){btn.disabled=true;btn.textContent='Записване...';}
