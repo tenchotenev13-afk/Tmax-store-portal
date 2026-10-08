@@ -379,7 +379,9 @@ const lastBody = calls => { const p = orderPosts(calls); return p.length ? p[p.l
     ok('patch.delivery и patch.delivery_reason', cpatch(e)[0].body.delivery === dayOffset(30) && cpatch(e)[0].body.delivery_reason === 'Нова причина');
 
     /* смяна на датата на заявката → минимумът се смята от новата */
-    e = cenv(); e.w.openCorrection('k1', 'client_orders');
+    /* Правилото date <= created_at (co-date-not-future.test.js): за да се смени на по-късна
+       дата, записът тук е създаден на нея. Проверява се срокът, не датата. */
+    e = cenv({ created_at: dayOffset(10) + 'T12:00:00' }); e.w.openCorrection('k1', 'client_orders');
     setChange(e.w, e.doc, 'edt-date', dayOffset(10));
     const m2 = MINC(e.w, dayOffset(10));
     ok('смяна на edt-date → преизчислен min', el(e.doc, 'edt-delivery').min === m2);
@@ -389,14 +391,14 @@ const lastBody = calls => { const p = orderPosts(calls); return p.length ? p[p.l
     ok('срок по-ранен от новия минимум → отказ', cpatch(e).length === 0 && hasToast(e, /по-кратък/));
 
     /* сменена дата, срокът НЕ е пипан и е по-ранен от новия минимум → отказ */
-    e = cenv(); e.w.openCorrection('k1', 'client_orders');
+    e = cenv({ created_at: dayOffset(10) + 'T12:00:00' }); e.w.openCorrection('k1', 'client_orders');
     setChange(e.w, e.doc, 'edt-date', dayOffset(10));
     await save(e);
     ok('сменена дата + стар срок под новия минимум → отказ', cpatch(e).length === 0 && hasToast(e, /по-кратък/));
     ok('toast носи минимума', hasToast(e, new RegExp(e.w.fmtDate(MINC(e.w, dayOffset(10))).replace(/./g, '\.'))));
 
     /* сменена дата, срокът още е ≥ новия минимум → минава без причина */
-    e = cenv({ delivery: dayOffset(60) }); e.w.openCorrection('k1', 'client_orders');
+    e = cenv({ delivery: dayOffset(60), created_at: dayOffset(10) + 'T12:00:00' }); e.w.openCorrection('k1', 'client_orders');
     setChange(e.w, e.doc, 'edt-date', dayOffset(10));
     await save(e);
     ok('сменена дата, срок над минимума → PATCH без причина', cpatch(e).length === 1 && !('delivery_reason' in cpatch(e)[0].body));

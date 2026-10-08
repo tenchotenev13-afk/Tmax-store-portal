@@ -1415,6 +1415,8 @@ function openCorrection(id,table){
   if(!canCorrectRecord(rec,table)){toast('Нямаш права за корекция на тази заявка','#dc2626');return;}
   correctionTargetId=id;correctionTargetTable=table;
   document.getElementById('edt-date').value=rec.date||'';
+  var edtDateEl=document.getElementById('edt-date');
+  if(table==='client_orders')edtDateEl.max=corMaxDate(rec);else edtDateEl.removeAttribute('max');
   document.getElementById('edt-hour').value=rec.hour||'10:00';
   document.getElementById('edt-name').value=rec.customer_name||'';
   document.getElementById('edt-phone').value=rec.phone||'';
@@ -1446,6 +1448,13 @@ function openCorrection(id,table){
 function corRec(){
   if(correctionTargetTable!=='client_orders')return null;
   return clientOrders.find(function(o){return String(o.id)===String(correctionTargetId);})||null;
+}
+/* Най-късната допустима дата на клиентска заявка при корекция: местната дата на
+   създаването, не днес — иначе късна корекция би позволила преместване напред
+   и скрито удължаване на автоматичния срок. Липсващ created_at → today(). */
+function corMaxDate(rec){
+  var c=rec&&rec.created_at?new Date(rec.created_at):null;
+  return c&&!isNaN(c.getTime())?localDateISO(c):today();
 }
 function corAutoDelivery(){
   var d=v('edt-date');
@@ -1482,6 +1491,10 @@ function submitCorrection(){
       return;
     }
     var rec=corRec();
+    /* Дата след създаването — отказ. Непроменена дата се пропуска, за да не се
+       блокира корекция на стар запис, който вече я има след създаването. */
+    var corDateVal=v('edt-date'),corMax=corMaxDate(rec);
+    if(rec&&/^\d{4}-\d{2}-\d{2}$/.test(corDateVal)&&corDateVal>corMax&&corDateVal!==(rec.date||'')){toast('Датата на заявката не може да е след '+fmtDate(corMax)+' (датата на създаване)','#dc2626');return;}
     /* Сменена дата на заявката при непроменен срок: срокът трябва да отговаря на новия минимум.
        Нито датата, нито срокът сменени → минава както досега (стари заявки с кратък срок). */
     if(rec&&v('edt-delivery')===(rec.delivery||'')&&v('edt-date')!==(rec.date||'')&&v('edt-delivery')){

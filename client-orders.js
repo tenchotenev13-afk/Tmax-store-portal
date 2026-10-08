@@ -1332,6 +1332,7 @@ function openClientModal(prefill){
   var ptHour=document.getElementById('c-pt-hour');if(ptHour)ptHour.value='10:00';
   toggleClientPT();
   document.getElementById('c-date').value=today();
+  document.getElementById('c-date').max=today();
   document.getElementById('c-hour').value='10:00';
   document.getElementById('c-delivery').value='';
   var rsn0=document.getElementById('c-delivery-reason');if(rsn0)rsn0.value='';
@@ -1428,6 +1429,9 @@ function submitClientOrder(){
   var deliveryReason=delivery>autoDel?v('c-delivery-reason'):'';
   if(delivery>autoDel&&!deliveryReason){toast('Въведи причина за по-дълъг срок *','#dc2626');return;}
   var cDateVal=v('c-date');
+  /* Бъдеща дата скрито удължава автоматичния срок (10 работни дни се броят от нея).
+     max на полето не спира ръчно въвеждане, затова и тук. Низово сравнение като по-долу. */
+  if(/^\d{4}-\d{2}-\d{2}$/.test(cDateVal)&&cDateVal>today()){toast('Датата на заявката не може да е в бъдещето','#dc2626');return;}
   if(/^\d{4}-\d{2}-\d{2}$/.test(cDateVal)&&cDateVal<today()){
     if(!confirm('Датата на заявката е преди днес. Броячът „Изминало" ще се смята от тази дата. Продължаваш ли?')) return;
   }

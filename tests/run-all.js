@@ -285,6 +285,7 @@ const TESTS = [
   'today-current-week-bulletin.test.js',
   'task-completion-duplicates.test.js',
   'co-elapsed-backdated.test.js',
+  'co-date-not-future.test.js',
   'co-detail-modal.test.js',
   'co-new-for-fulfiller.test.js',
   'recurring-task-skips.test.js',
