@@ -147,7 +147,7 @@ function showLoginBanner(){
        calcElapsed(), не втора аритметика тук. Разминат ли се двете, таблицата
        светва, а банерът мълчи (или обратното) и никой не разбира защо. */
     var days=calcElapsed(o.created_at,o.date);
-    return days>=7&&['done','refused','postponed'].indexOf(o._status)<0&&o._isFulfiller;
+    return days>=7&&['done','refused','postponed','arrived'].indexOf(o._status)<0&&o._isFulfiller;
   });
   var td=all.filter(function(o){return o._status==='today';});
   var tm=all.filter(function(o){return o._status==='tomorrow';});
@@ -155,7 +155,7 @@ function showLoginBanner(){
   var oldOrders=clientOrders.filter(function(o){
     if(typeof coWaitingSupplier==='function'&&coWaitingSupplier(o)) return false;
     var days=calcElapsed(o.created_at,o.date);
-    return days>=5&&days<7&&['done','refused','postponed'].indexOf(o._status)<0&&o._isFulfiller;
+    return days>=5&&days<7&&['done','refused','postponed','arrived'].indexOf(o._status)<0&&o._isFulfiller;
   });
   var html='';
   if(od.length) html+='<div class="notif-card urgent"><div class="notif-icon">🚨</div><div class="notif-text"><div class="notif-title">'+od.length+' просрочен'+(od.length===1?'а заявка':'и заявки')+'!</div><div class="notif-sub">Трябва незабавно внимание.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';

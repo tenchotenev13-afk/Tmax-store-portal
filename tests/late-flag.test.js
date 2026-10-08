@@ -39,6 +39,8 @@ function co(over) {
    така единствената променлива е статусът. */
 const ORDERS = [
   co({ id: 'c-sent', in_num: '0001', status: 'sent' }),
+  /* Пристигнала + и двата срока минали — стоката е в магазина, не е закъсняла. */
+  co({ id: 'c-arrived-eta', in_num: '0011', status: 'arrived', co_eta: dayOffset(-2) }),
   co({ id: 'c-arrived', in_num: '0002', status: 'arrived' }),
   co({ id: 'c-proc-future', in_num: '0003', status: 'processed', co_eta: dayOffset(1) }),
   co({ id: 'c-proc-past', in_num: '0004', status: 'processed', co_eta: dayOffset(-1) }),
@@ -53,7 +55,7 @@ const ORDERS = [
 
 /* Очакваният признак за всяка заявка — таблицата е самият тест. */
 const EXPECT = {
-  'c-sent': true, 'c-arrived': true, 'c-proc-future': false, 'c-proc-past': true,
+  'c-sent': true, 'c-arrived': false, 'c-arrived-eta': false, 'c-proc-future': false, 'c-proc-past': true,
   'c-postponed': false, 'c-done': false, 'c-refused': false, 'c-nodate': false,
   'c-pending': true, 'c-future': false
 };
@@ -116,7 +118,8 @@ function rowIds(doc, bodyId) {
     w.clientOrders.forEach(o => { byId[o.id] = o; });
 
     ok('sent + доставка вчера → true', w.isLate(byId['c-sent']) === true);
-    ok('arrived + доставка вчера → true', w.isLate(byId['c-arrived']) === true);
+    ok('arrived + доставка вчера → false (стоката е в магазина)', w.isLate(byId['c-arrived']) === false);
+    ok('arrived + co_eta минала + доставка минала → false', w.isLate(byId['c-arrived-eta']) === false);
     ok('processed + co_eta УТРЕ → false (доставчикът е в срок)',
       w.isLate(byId['c-proc-future']) === false);
     ok('processed + co_eta ВЧЕРА → true (срокът на доставчика мина)',
@@ -179,7 +182,7 @@ function rowIds(doc, bodyId) {
   {
     const { w, doc } = env();
     w.renderClientOrders();
-    ok('преди клика се виждат всичките 10', (rowIds(doc, 'co-body') || []).length === 10);
+    ok('преди клика се виждат всичките 11', (rowIds(doc, 'co-body') || []).length === 11);
 
     const chip = btn(doc.getElementById('co-filters'), 'Просрочени');
     if (ok('чипът съществува', !!chip) &&
@@ -209,7 +212,7 @@ function rowIds(doc, bodyId) {
     /* Другите чипове не са пипани. */
     const chipAll = btn(doc.getElementById('co-filters'), 'Всички');
     realClick(w, chipAll);
-    ok('чипът "Всички" пак дава 10', (rowIds(doc, 'co-body') || []).length === 10);
+    ok('чипът "Всички" пак дава 11', (rowIds(doc, 'co-body') || []).length === 11);
     const chipDone = btn(doc.getElementById('co-filters'), 'Изпълнена');
     realClick(w, chipDone);
     ok('чипът "Изпълнена" остава непроменен — само c-done',
@@ -284,12 +287,11 @@ function rowIds(doc, bodyId) {
     const ids = (rowIds(doc, 'co-body') || []).sort();
 
     ok('СЪС стария критерий c-sent изпада', ids.indexOf('c-sent') < 0, ids.join(','));
-    ok('СЪС стария критерий c-arrived изпада', ids.indexOf('c-arrived') < 0, ids.join(','));
     ok('СЪС стария критерий c-proc-past изпада', ids.indexOf('c-proc-past') < 0, ids.join(','));
     ok('остава само c-pending — единственото, което старият критерий хващаше',
       ids.join(',') === 'c-pending', ids.join(','));
-    ok('тоест новият критерий добавя 3 заявки, които преди се губеха',
-      LATE_IDS.length - ids.length === 3, LATE_IDS.length + ' срещу ' + ids.length);
+    ok('тоест новият критерий добавя 2 заявки, които преди се губеха',
+      LATE_IDS.length - ids.length === 2, LATE_IDS.length + ' срещу ' + ids.length);
   }
 
   report();

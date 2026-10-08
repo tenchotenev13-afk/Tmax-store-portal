@@ -1259,7 +1259,7 @@ function collectDailyReportData(cb, scope, kasaThreshold){
    тя е три реда и единственият ѝ повикващ е този. */
 function reportIsLate(o, refD){
   if (!o || !o.delivery) return false;
-  if (['done','refused','postponed'].indexOf(o.status) >= 0) return false;
+  if (['done','refused','postponed','arrived'].indexOf(o.status) >= 0) return false;
   if (o.status === 'processed' && o.co_eta) {
     var eta = new Date(o.co_eta); eta.setHours(0,0,0,0);
     if (eta >= refD) return false;

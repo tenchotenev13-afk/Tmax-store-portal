@@ -977,7 +977,7 @@ function coWaitingSupplier(o){
 function isLate(o){
   if(!o||!o.delivery)return false;
   /* Приключените и отложените нямат срок, който да тече. */
-  if(['done','refused','postponed'].indexOf(o.status)>=0)return false;
+  if(['done','refused','postponed','arrived'].indexOf(o.status)>=0)return false;
   /* ЦО е обработил и доставчикът още е в срок — виж coWaitingSupplier(). */
   if(coWaitingSupplier(o))return false;
   /* Транспорт, чакащ стока по клиентска заявка: срокът се води по клиентската

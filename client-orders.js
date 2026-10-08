@@ -23,6 +23,8 @@ function calcElapsed(createdAt, orderDate){
 function elapsedBadge(days, status, order){
   /* Не показваме за финални статуси */
   if(['done','refused','postponed'].indexOf(status)>=0) return '';
+  /* Пристигнала в магазина — срокът е изпълнен, броячът е спокоен. */
+  if(status==='arrived') return '<span style="font-size:11px;color:#94a3b8;">'+days+' дни</span>';
   /* Обработена от ЦО и все още в срока на доставчика — броячът остава спокоен и
      показва какво чакаме. Иначе заявка с доставчик за 3 седмици светва червено
      на 10-ия ден без никой да е закъснял. */
@@ -36,7 +38,7 @@ function elapsedBadge(days, status, order){
 }
 
 function elapsedRowStyle(days, baseStatus, order){
-  if(['done','refused','postponed'].indexOf(baseStatus)>=0) return '';
+  if(['done','refused','postponed','arrived'].indexOf(baseStatus)>=0) return '';
   if(typeof coWaitingSupplier==='function'&&coWaitingSupplier(order)) return '';
   if(days>=10) return 'background:rgba(220,38,38,.04);animation:rowPulse 1.8s infinite;';
   if(days>=7)  return 'background:rgba(234,88,12,.03);';
