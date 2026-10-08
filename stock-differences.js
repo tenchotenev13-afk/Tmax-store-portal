@@ -46,12 +46,22 @@ function sdRestoreScroll(){
   else apply();
 }
 
+/* Централен офис БЕЗ право на действие (supply / marketing / user): виждат
+   Разлики на всички обекти само за справка — нито един бутон за промяна.
+   admin / accounting / logistics си остават с пълните права. Един израз за
+   всички места, които рисуват действие или броят „чака мен". */
+function sdIsCOViewer(){
+  return !!currentUser && isCentralOfficeUser() &&
+    ['admin','accounting','logistics'].indexOf(currentUser.role) < 0;
+}
+
 /* line (по избор) — ред от посока 'wrong_receipt' е САМО ЗА ЧЕТЕНЕ за магазина.
    От тези редове излизат глоби (удръжки от гъвкавата част на обекта), затова
    обектът ги вижда и ги проследява, но не пипа количествата им. Без аргумент
    функцията се държи както преди — общ въпрос "тази роля пипа ли изобщо". */
 function canEditSD(line) {
   if (!currentUser) return false;
+  if (sdIsCOViewer()) return false;
   if (isWrongReceiptReadOnly(line)) return false;
   return ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
 }
@@ -60,7 +70,7 @@ function canAddSD() {
 }
 /* Подаване на нова бланка за разлики - магазинска страна (същите роли като canEditTransit) */
 function canSubmitDiff() {
-  return currentUser && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
+  return currentUser && !sdIsCOViewer() && ['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role) >= 0;
 }
 /* Решение по разликата (Заприхождаване/Връщане/Липса) - само централен офис */
 function canReviewDiff() {
@@ -294,6 +304,21 @@ function sdToggleDone(repId){
   renderStockDiff();
 }
 
+var SD_PAGE_SIZE = 1000;
+/* Всички редове на страници. Минава през sbGet, така че провал на страница
+   дава toast; последната непълна страница затваря веригата. */
+function sdGetAllPaged(table, query){
+  var all = [];
+  function page(offset){
+    return sbGet(table, query + '&limit=' + SD_PAGE_SIZE + '&offset=' + offset).then(function(d){
+      d = Array.isArray(d) ? d : [];
+      all = all.concat(d);
+      return d.length === SD_PAGE_SIZE ? page(offset + SD_PAGE_SIZE) : all;
+    });
+  }
+  return page(0);
+}
+
 function loadStockDiff() {
   var wrap = document.getElementById('mod-stock-diff');
   sdKeepScroll();
@@ -302,9 +327,13 @@ function loadStockDiff() {
      иначе височината на страницата се срива до 200px и браузърът сам изтрива
      скрол позицията, преди да успеем да я върнем. */
   if (wrap && !wrap.innerHTML.trim()) wrap.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
+  /* ЦО само за преглед вижда ВСИЧКИ обекти (без storeQ). За всички четенето е
+     на страници: PostgREST реже на 1000 реда, а таблицата растеше с ~39/ден
+     (994 реда на 08.10.2026) — тихо падаха най-старите. */
+  var sq = sdIsCOViewer() ? '' : storeQ();
   Promise.all([
-    sbGet('stock_differences', 'order=created_at.desc.nullslast' + storeQ()),
-    sbGet('differences_reports', 'order=created_at.desc' + storeQ())
+    sdGetAllPaged('stock_differences', 'order=created_at.desc.nullslast,id.desc' + sq),
+    sdGetAllPaged('differences_reports', 'order=created_at.desc,id.desc' + sq)
   ]).then(function(res){
     sdData = Array.isArray(res[0]) ? res[0] : [];
     diffReports = Array.isArray(res[1]) ? res[1] : [];
@@ -340,6 +369,7 @@ function renderStockDiff() {
   var chipWaiting = sdWaitingVisible();
 
   var h = '<div style="max-width:1400px;margin:0 auto;padding:16px;">';
+  if (sdIsCOViewer()) h += '<div id="sd-viewer-bar" style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;border-radius:8px;padding:7px 14px;margin-bottom:12px;font-size:12.5px;font-weight:600;">👁 Режим преглед — само за справка</div>';
 
   /* Заглавие */
   h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:14px;">';
@@ -573,7 +603,10 @@ function renderStockDiff() {
   }
 
   h += '</div>';
-  h += sdModalHtml();
+  /* Само за преглед: формата за добавяне/редакция изобщо не се рисува (иначе
+     скритият модал носи „Добави“/„Откажи“ в DOM-а). openSDModal() без #sd-ov
+     излиза тихо. */
+  if (!sdIsCOViewer()) h += sdModalHtml();
   /* Всеки рендер пише наново цялата обвивка - без това всяко действие по
      ред (✅, Кредитно) връщаше таблицата в горния ляв ъгъл. */
   var oldTw = document.getElementById('sd-tbl-wrap');
@@ -724,7 +757,7 @@ function sdResetWaitingCache(){ _sdWaitingIdsCache = null; }
 /* Колко от ЧАКАЩИТЕ се виждат в текущия подтаб/филтри. null = този чип не е за
    този потребител (склад, офис). */
 function sdWaitingVisible(){
-  if(!currentUser || isGlobal() || isLogisticsWarehouseUser()) return null;
+  if(!currentUser || sdIsCOViewer() || isGlobal() || isLogisticsWarehouseUser()) return null;
   return sdTableRows({status:'waiting'}).length;
 }
 function sdTableRows(over){
@@ -4939,7 +4972,7 @@ function sdMyWaitingLines(){
   });
 }
 function sdUnreviewedCountFor(reports, lines, swaps){
-  if(!currentUser) return 0;
+  if(!currentUser || sdIsCOViewer()) return 0;
   var sw = swaps || sdSwaps || [];
   var unrev = (reports||[]).filter(function(r){ return !r.reviewed; });
   if(isLogisticsWarehouseUser()){
@@ -5030,6 +5063,8 @@ function sdRefreshTabBadge(){
      Слушателят в startSDBadgePolling() опреснява веднага щом табът стане
      видим, затова балончето не изостава. */
   if(document.hidden) return;
+  /* ЦО само за преглед: нищо не чака тяхно действие — без заявка, без звук. */
+  if(sdIsCOViewer()){ sdBadgePulse(0); return; }
   /* Редовете идват ВЛОЖЕНИ в бланките (PostgREST embedding през
      stock_differences_report_id_fkey), не с втора заявка
      report_id=in.(<всички непрегледани>): онзи списък растеше с броя на

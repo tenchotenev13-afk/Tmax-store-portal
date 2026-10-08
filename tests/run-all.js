@@ -102,6 +102,7 @@ const TESTS = [
   'loading-lists-print.test.js',
   'stock-diff-capitalized-counter.test.js',
   'stock-diff-chip-counts.test.js',
+  'stock-diff-co-viewer.test.js',
   'stock-diff-store-chips-bottom.test.js',
   'stock-diff-not-invoiced.test.js',
   'stock-diff-responsibility.test.js',
