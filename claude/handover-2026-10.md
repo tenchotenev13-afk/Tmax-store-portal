@@ -263,6 +263,10 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
   Бюлетин редакция на събитие; „План за деня“ без ръчни събития; дроп
   `stock_returns_auto_bak_20261007` след ~14.10; `stock_diff_task_for_week`
   / `linked_module`; **`kasa-ui.test.js` червен на чист main**.
+- **Чакаща TASK, още непусната**: `claude/task-loading-done-gate.md` —
+  складът може да приключи товарен лист с 0 отметнати редове (реален случай
+  Добрич → Раднево 05.10, поправен ръчно 08.10); решение А (блокиране) /
+  Б (предупреждение) е на Тенчо, препоръка А за склада + Б за admin.
 - **HIDDEN-FEATURES.md**: „Документи от Стока на път“ (23.09,
   `loading_transit_docs`), „📷 Сканирай“ (25.09, `loading_scan`), блок
   „Артикули“ (01.10, `loading_products`) — всички през `app_settings`,
