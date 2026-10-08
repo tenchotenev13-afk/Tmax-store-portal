@@ -185,6 +185,23 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .tbl-sd-compact th.sd-c-act{width:190px;}
 .tbl-sd-compact td.sd-c-ord{white-space:nowrap;}
 .tbl-sd-compact td.sd-c-act button{margin-bottom:3px;}
+/* Товарни листи (.ll-tbl): последната колона с бутоните (.ll-act) е закачена вдясно при скрол настрани. Фонът на
+   реда не прозира: редовете са бели по подразбиране, а оцветените (получено / липса / чака / отхвърлено) носят
+   inline фон, който закачената клетка наследява. Само преките редове — вложените таблици (артикули) не се пипат. */
+.ll-tbl>tbody>tr,.ll-tbl>thead>tr,.ll-tbl>tr{background:#fff;}
+.ll-tbl th.ll-act,.ll-tbl td.ll-act{position:sticky;right:0;background:inherit;z-index:1;box-shadow:-6px 0 6px -6px rgba(0,0,0,.15);}
+/* На телефон закачената колона с бутоните не бива да покрива данните: бутоните се подреждат един под друг (колоната е ~130px, не ~300px). */
+@media(max-width:600px){
+  .ll-tbl td.ll-act{white-space:normal!important;}
+  .ll-tbl td.ll-act button{display:block;margin:0 0 4px 0!important;}
+}
+/* Зареждане: матрицата артикули × обекти — закачен заглавен ред (и вторият ред при двуредова шапка) и закачена колона „Име“.
+   Вертикалният скрол е в обвивката (max-height), иначе sticky top няма спрямо какво да залепи. */
+.sup-matrix-wrap{max-height:calc(100vh - 220px);overflow-y:auto;}
+.sup-matrix thead th{position:sticky;top:0;z-index:2;background:var(--surf);}
+.sup-matrix thead tr+tr th{top:34px;}
+.sup-matrix .sup-name-c{position:sticky;left:0;z-index:1;background:#fff;box-shadow:6px 0 6px -6px rgba(0,0,0,.15);}
+.sup-matrix thead th.sup-name-c{z-index:3;background:var(--surf);}
 table{width:100%;border-collapse:collapse;font-size:12px;}
 thead{background:var(--surf);}
 th{padding:9px 10px;text-align:left;font-size:11px;font-weight:600;color:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap;}

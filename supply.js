@@ -153,7 +153,7 @@ function renderSupplyStore(){
       (t.instructions ? '<div style="font-size:13px;color:var(--muted);margin-bottom:10px;white-space:pre-line;">' + esc(t.instructions) + '</div>' : '') +
       supplyPhotosHtml(t) +
       (last ? '<div class="sup-last" style="font-size:12px;color:#16a34a;margin-bottom:8px;">Последно запазено: ' + supplyFmtStamp(last.ts) + ' от ' + esc(last.by) + '</div>' : '') +
-      '<div class="tbl-wrap"><table><thead><tr>' +
+      '<div class="tbl-wrap tbl-compact tbl-auto"><table><thead><tr>' +
         (sap ? '<th>САП</th>' : '') + '<th>Име</th><th>Доставчик</th>' +
         '<th style="text-align:center;">' + esc(t.col1_label) + '</th>' +
         (two ? '<th style="text-align:center;">' + esc(t.col2_label) + '</th>' : '') +
@@ -454,14 +454,14 @@ function renderSupplyOverview(){
 
     var thead;
     if(m.two){
-      thead = '<tr>' + (sap ? '<th rowspan="2">САП</th>' : '') + '<th rowspan="2">Име</th>' + (hasSup ? '<th rowspan="2">Доставчик</th>' : '') +
+      thead = '<tr>' + (sap ? '<th rowspan="2">САП</th>' : '') + '<th class="sup-name-c" rowspan="2">Име</th>' + (hasSup ? '<th rowspan="2">Доставчик</th>' : '') +
         m.stores.map(function(s){ return '<th colspan="2" style="text-align:center;">' + esc(s) + '</th>'; }).join('') +
         '<th colspan="2" style="text-align:center;">Общо</th></tr><tr>' +
         m.stores.concat(['Общо']).map(function(){
           return '<th style="text-align:center;">' + esc(t.col1_label) + '</th><th style="text-align:center;">' + esc(t.col2_label) + '</th>';
         }).join('') + '</tr>';
     } else {
-      thead = '<tr>' + (sap ? '<th>САП</th>' : '') + '<th>Име</th>' + (hasSup ? '<th>Доставчик</th>' : '') +
+      thead = '<tr>' + (sap ? '<th>САП</th>' : '') + '<th class="sup-name-c">Име</th>' + (hasSup ? '<th>Доставчик</th>' : '') +
         m.stores.map(function(s){ return '<th style="text-align:center;">' + esc(s) + '</th>'; }).join('') +
         '<th style="text-align:center;">Общо</th></tr>';
     }
@@ -487,7 +487,7 @@ function renderSupplyOverview(){
       (visible.length ? visible.map(function(r){
         return '<tr data-item="' + escAttr(r.item.id) + '">' +
           (sap ? '<td style="font-family:DM Mono,monospace;">' + esc(r.item.sap_code) + '</td>' : '') +
-          '<td style="white-space:nowrap;">' + esc(r.item.name) + '</td>' +
+          '<td class="sup-name-c" style="white-space:nowrap;">' + esc(r.item.name) + '</td>' +
           (hasSup ? '<td style="font-size:12px;white-space:nowrap;">' + esc(r.item.supplier) + '</td>' : '') +
           r.cells.map(function(v){ return '<td class="sup-cell" style="' + tdNum + '">' + num(v) + '</td>'; }).join('') +
           r.totals.map(function(v){ return '<td class="sup-total" style="' + tdNum + 'font-weight:700;">' + num(v) + '</td>'; }).join('') +

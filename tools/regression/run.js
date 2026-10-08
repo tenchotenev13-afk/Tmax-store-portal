@@ -23,18 +23,30 @@ const TABS = {
   kasa: { cont: ['mod-kasa'], open: h => h.w.loadKasa(), sub: null, wait: 0, kasa: true },
   pallets: { cont: ['mod-pallets'], open: h => h.w.loadPallets(), sub: null, excel: h => h.w.exportPalletsExcel(), wait: 0 },
   checklist: { cont: ['mod-checklist'], open: h => h.w.loadChecklist(), sub: null, wait: 0, cells: true },
-  admin: { cont: ['mod-admin'], open: h => h.w.loadAdmin(), sub: null, wait: 400 }
+  admin: { cont: ['mod-admin'], open: h => h.w.loadAdmin(), sub: null, wait: 400 },
+  loading: { cont: ['mod-loading'], open: openLoading, sub: null, wait: 0, extras: loadingExtras },
+  supply: { cont: ['mod-supply'], open: h => h.w.loadSupply(), sub: null, wait: 0 }
 };
+/* Товарни листи: за admin/склад се избира склад (в данните — този с най-много листове), иначе листите не се теглят */
+async function openLoading(h) {
+  h.w.loadLoadingLists();
+  await L.settle(h, 6);
+  if (h.doc.querySelector('[onchange^="llSetWarehouse"]') && typeof h.w.llSetWarehouse === 'function') {
+    const cnt = {}; (DATA.loading_lists || []).forEach(l => { cnt[l.warehouse] = (cnt[l.warehouse] || 0) + 1; });
+    const wh = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0];
+    if (wh) { h.w.llSetWarehouse(wh); await L.settle(h, 8); }
+  }
+}
 const REP_STATES = {
   client: ['-|filterOrders:all'], transport: ['-|filterTransport:all'], transit: ['transitDir:all|transitFilter:all'],
-  returns: ['setSRTab:diff|setSRFilter:all', 'setSRTab:complaint|setSRFilter:all'], pallets: ['-|-'], admin: ['-|-'], checklist: ['-|-'],
+  returns: ['setSRTab:diff|setSRFilter:all', 'setSRTab:complaint|setSRFilter:all'], pallets: ['-|-'], admin: ['-|-'], checklist: ['-|-'], loading: ['-|-'], supply: ['-|-'],
   diff: ['setSDDirTab:supplier|setSDFilter:all', 'setSDDirTab:interstore|setSDFilter:all', 'setSDDirTab:wrong_receipt|setSDFilter:all']
 };
 const LIMIT_VALUES = { setTStore: 2, setSRStoreFilter: 2, setSRSupplierFilter: 2, setSDStoreFilter: 2 };
 
 async function openTab(h, tab) {
   const T = TABS[tab];
-  try { T.open(h); } catch (e) { h.errs.push('open: ' + e.message); }
+  try { await Promise.resolve(T.open(h)); } catch (e) { h.errs.push('open: ' + e.message); }
   await L.settle(h, 8);
   if (T.wait) await L.sleep(T.wait);
   await L.settle(h, 3);
@@ -191,6 +203,7 @@ async function runTab(role, tab) {
   /* печат */
   await printsFor(role, tab, res);
   if (T.cells) await cellClicks(role, tab, res);
+  if (T.extras) await T.extras(role, tab, res);
   /* клик на представителите (от default) */
   for (const best of (REP_STATES[tab] || [])) {
     /* '-|-' е подразбиращото се състояние (в резултата то се казва 'default') */
@@ -212,7 +225,7 @@ async function cellClicks(role, tab, res) {
     const key = 'cells::' + kind + ':' + mi;
     if (!td) { res.clicks[key] = { notfound: true }; h.close(); continue; }
     const before = new Set(Array.from(h.doc.querySelectorAll('[id]')).map(e => e.id));
-    h.calls.adminUsers.length = 0; h.errs.length = 0; h.calls.post.length = 0; h.calls.patch.length = 0; h.calls.del.length = 0; h.net.length = 0; h.calls.toast.length = 0; h.calls.confirm.length = 0;
+    h.xl.length = 0; h.calls.adminUsers.length = 0; h.errs.length = 0; h.calls.post.length = 0; h.calls.patch.length = 0; h.calls.del.length = 0; h.net.length = 0; h.calls.toast.length = 0; h.calls.confirm.length = 0;
     try { const tgt = kind === 'icon' ? td.querySelector('.cl-cmt') : td; tgt.dispatchEvent(new h.w.MouseEvent('click', { bubbles: true, cancelable: true })); } catch (e) { h.errs.push('click: ' + e.message); }
     await L.settle(h, 8);
     res.clicks[key] = {
@@ -221,6 +234,48 @@ async function cellClicks(role, tab, res) {
       del: h.calls.del.map(u => u.replace(/^.*\/rest\/v1\//, '')), adm: [], net: h.net.slice(), toast: h.calls.toast.map(norm), confirm: h.calls.confirm.map(norm),
       newIds: Array.from(h.doc.querySelectorAll('[id]')).map(e => e.id).filter(i => !before.has(i)).sort(), errs: h.errs.slice()
     };
+    h.close();
+  }
+}
+
+/* Товарни листи: преглед и редактор на първите три листа + печат, PDF и имейли за всеки (фалшив jsPDF, записва текста) */
+async function loadingExtras(role, tab, res) {
+  const probe = await buildState(role, tab, '-|-');
+  const lists = (typeof probe.w.llVisibleLists === 'function' ? probe.w.llVisibleLists() : []).slice(0, 3).map(l => String(l.id));
+  probe.close();
+  for (const id of lists) for (const kind of ['view', 'edit']) {
+    const h = await buildState(role, tab, '-|-');
+    const key = kind + ':' + id;
+    const rec = { text: [], pages: 0 };
+    function Doc() { rec.pages = 1; }
+    Doc.prototype.addFileToVFS = function () {}; Doc.prototype.addFont = function () {};
+    Doc.prototype.setFont = function (n, st) { rec.text.push('font:' + n + '/' + st); };
+    Doc.prototype.setFontSize = function (s) { rec.text.push('size:' + s); };
+    Doc.prototype.splitTextToSize = function (t) { return [String(t)]; };
+    Doc.prototype.text = function (t) { rec.text.push(String(t)); };
+    Doc.prototype.addPage = function () { rec.pages++; rec.text.push('PAGE'); };
+    Doc.prototype.output = function () { return 'data:application/pdf;filename=generated.pdf;base64,UERG'; };
+    ['line', 'rect', 'setDrawColor', 'setFillColor', 'setTextColor', 'setLineWidth', 'roundedRect', 'circle'].forEach(m => { Doc.prototype[m] = function () { rec.text.push(m + ':' + Array.prototype.join.call(arguments, ',')); }; });
+    h.w.jspdf = { jsPDF: Doc }; h.w.llPdfFont = () => Promise.resolve('Rk9OVA==');
+    h.w.llQrSvg = (t, mm) => '<svg data-qr="' + t + '" data-mm="' + mm + '"></svg>';
+    try { h.w[kind === 'view' ? 'llOpenView' : 'llOpenEdit'](id); } catch (e) { h.errs.push(kind + ': ' + e.message); }
+    await L.settle(h, 10);
+    res.states[key] = L.snap(h, ['mod-loading']);
+    if (kind === 'view') {
+      try {
+        const list = h.w.llLists.find(l => String(l.id) === id), items = h.w.llItems.slice();
+        const pw = () => (h.doc.getElementById('mod-print') || {}).innerHTML || '';
+        const grab = (k, fn) => { try { h.doc.getElementById('mod-print') && (h.doc.getElementById('mod-print').innerHTML = ''); const r = fn(); const t = (typeof r === 'string' ? r : '') + '\n#mod-print:\n' + pw(); if (t.length > 20) res.prints[k + ':' + id] = t; } catch (e) { res.prints[k + ':' + id] = 'ERR ' + e.message; } };
+        h.w.showModule = function () {};
+        grab('print', () => h.w.llRenderPrint(list, items));
+        const stores = Array.from(new Set(items.map(x => x.store_name))).sort().slice(0, 2);
+        stores.forEach(s => { grab('print-' + s, () => h.w.llRenderPrint(list, items, s)); res.prints['mailSent-' + s + ':' + id] = String(h.w.llSentHtmlFor(list, s, items.filter(x => x.store_name === s), 2)); });
+        res.prints['mailClosed:' + id] = String(h.w.llClosedHtmlFor(list, items));
+        grab('labels', () => { const units = h.w.llLabelUnits(items); return h.w.llRenderLabelsPrint(list, units); });
+        for (const s of stores.slice(0, 1)) { const r = await h.w.llBuildPdf(list, items, s); res.prints['pdf-' + s + ':' + id] = JSON.stringify({ name: r && r.name, base64: r && r.base64, text: rec.text.slice(), pages: rec.pages }); }
+      } catch (e) { h.errs.push('print: ' + e.message); }
+    }
+    if (h.errs.length) res.errors[key] = h.errs.slice();
     h.close();
   }
 }
@@ -256,7 +311,7 @@ async function clickReps(role, tab, stateKey, res, mk) {
     if (!el && TABS[tab].views && typeof h.w.setSDView === 'function') { h.w.setSDView(h.w.sdView === 'rows' ? 'reports' : 'rows'); await L.settle(h, 3); el = find(); }
     const key = stateKey + '::' + fn;
     if (!el) { res.clicks[key] = { notfound: true }; h.close(); continue; }
-    h.calls.adminUsers.length = 0; h.errs.length = 0; h.calls.post.length = 0; h.calls.patch.length = 0; h.calls.del.length = 0; h.net.length = 0; h.calls.toast.length = 0; h.calls.confirm.length = 0;
+    h.xl.length = 0; h.calls.adminUsers.length = 0; h.errs.length = 0; h.calls.post.length = 0; h.calls.patch.length = 0; h.calls.del.length = 0; h.net.length = 0; h.calls.toast.length = 0; h.calls.confirm.length = 0;
     try {
       const attr = el.getAttribute('onclick') ? 'onclick' : el.getAttribute('onchange') ? 'onchange' : 'oninput';
       if (attr === 'onclick') H.realClick(h.w, el); else H.fire(h.w, el, attr.slice(2));
@@ -268,7 +323,7 @@ async function clickReps(role, tab, stateKey, res, mk) {
       post: h.calls.post.map(r => ({ t: r.table, u: r.url.replace(/^.*\/rest\/v1\//, ''), b: r.body })),
       patch: h.calls.patch.map(r => ({ t: r.table, u: r.url.replace(/^.*\/rest\/v1\//, ''), b: r.body })),
       del: h.calls.del.map(u => u.replace(/^.*\/rest\/v1\//, '')),
-      adm: h.calls.adminUsers.slice(), net: h.net.slice(), toast: h.calls.toast.map(norm), confirm: h.calls.confirm.map(norm), newIds: after, errs: h.errs.slice()
+      xl: excelOf(h), adm: h.calls.adminUsers.slice(), net: h.net.slice(), toast: h.calls.toast.map(norm), confirm: h.calls.confirm.map(norm), newIds: after, errs: h.errs.slice()
     };
     h.close();
   }

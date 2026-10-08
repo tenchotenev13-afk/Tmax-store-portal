@@ -45,7 +45,7 @@ for (const role of roles) for (const tab of Object.keys(N[role])) {
   Object.keys(oc).filter(k => nc[k]).forEach(k => {
     const a = oc[k], b = nc[k];
     if (a.notfound || b.notfound) { if (!!a.notfound !== !!b.notfound) note('3 клик→заявки', k + ': не е намерена old=' + !!a.notfound + ' new=' + !!b.notfound); return; }
-    for (const f of ['post', 'patch', 'del', 'adm', 'net', 'toast', 'confirm', 'errs']) if (J(a[f]) !== J(b[f])) note('3 клик→заявки', k + '.' + f + ': старо ' + trunc(J(a[f]), 200) + ' | ново ' + trunc(J(b[f]), 200));
+    for (const f of ['post', 'patch', 'del', 'xl', 'adm', 'net', 'toast', 'confirm', 'errs']) if (J(a[f]) !== J(b[f])) note('3 клик→заявки', k + '.' + f + ': старо ' + trunc(J(a[f]), 200) + ' | ново ' + trunc(J(b[f]), 200));
     if (J(a.newIds) !== J(b.newIds)) (out.info = out.info || []).push(role + '|' + tab + ' [инфо] ' + k + ' нови id: старо ' + a.newIds.length + ' ново ' + b.newIds.length + (detail ? ' ' + trunc(J(a.newIds.filter(x => b.newIds.indexOf(x) < 0)), 120) + ' / ' + trunc(J(b.newIds.filter(x => a.newIds.indexOf(x) < 0)), 120) : ''));
   });
   /* 5 */

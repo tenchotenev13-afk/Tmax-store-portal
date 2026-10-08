@@ -1147,9 +1147,9 @@ function llStoreCardHtml(l){
 
   var palStatus = llPalletStatusText(l.id);
   if(palStatus) h += '<div data-ll-pal-status="1" style="margin-top:10px;font-size:12.5px;font-weight:600;color:#334155;">'+esc(palStatus)+'</div>';
-  h += '<div style="overflow-x:auto;margin-top:10px;"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:760px;"><thead><tr style="background:#f8fafc;">';
+  h += '<div style="overflow-x:auto;margin-top:10px;"><table class="ll-tbl" style="width:100%;border-collapse:collapse;font-size:12px;min-width:760px;"><thead><tr style="background:#f8fafc;">';
   ['Товарна единица','Стокова №','Коментар склад','Моят коментар','Получено'].forEach(function(c){
-    h += '<th style="text-align:left;padding:6px 9px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
+    h += '<th'+(c==='Получено'?' class="ll-act"':'')+' style="text-align:left;padding:6px 9px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
   });
   h += '</tr></thead><tbody>';
   /* Палетът е една физическа единица с няколко документа — показва се като
@@ -1191,7 +1191,7 @@ function llStoreCardHtml(l){
              а полето остава на екрана, докато човекът го дописва. */
           (gCan?'<div style="margin-top:5px;font-weight:400;"><input id="ll-pc-'+l.id+'-'+g.kind+'-'+g.pallet_no+'" placeholder="какво липсва — задължително за „Неполучен целия палет“" style="width:100%;max-width:420px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-size:11.5px;"></div>':'')+
         '</td>'+
-        '<td style="padding:6px 9px;white-space:nowrap;">'+(gCan
+        '<td class="ll-act" style="padding:6px 9px;white-space:nowrap;">'+(gCan
           ? '<button data-id="'+l.id+'" data-p="'+g.pallet_no+'" data-k="'+escAttr(g.kind)+'" onclick="llMarkPalletReceived(this.dataset.id,this.dataset.p,this.dataset.k)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Целият '+esc(LL_KIND_WORD[g.kind] || 'палет')+'</button>'+
             ' <button data-id="'+l.id+'" data-p="'+g.pallet_no+'" data-k="'+escAttr(g.kind)+'" onclick="llMarkPalletMissing(this.dataset.id,this.dataset.p,this.dataset.k)" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">⛔ Неполучен целия '+esc(LL_KIND_WORD[g.kind] || 'палет')+'</button>'
           : '')+
@@ -1225,7 +1225,7 @@ function llStoreCardHtml(l){
       '<td style="padding:6px 9px;">'+(llCanReceive(it)
         ? '<input id="ll-sc-'+it.id+'" value="'+escVal(it.store_comment)+'" data-id="'+it.id+'" onchange="llSaveStoreComment(this.dataset.id,this.value)" placeholder="напр. кашонът е мокър" style="width:100%;min-width:130px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;">'
         : esc(it.store_comment||'—'))+'</td>'+
-      '<td style="padding:6px 9px;white-space:nowrap;">'+(it.received
+      '<td class="ll-act" style="padding:6px 9px;white-space:nowrap;">'+(it.received
         ? '<span style="color:#16a34a;font-weight:600;">✅ '+esc(it.received_by||'')+(it.received_at?' · '+llFmtStamp(it.received_at):'')+'</span>'
         : (it.missing
           ? '<span style="color:#dc2626;font-weight:600;">⛔ '+esc(it.missing_by||'')+(it.missing_at?' · '+llFmtStamp(it.missing_at):'')+'</span>'+
@@ -2470,9 +2470,9 @@ function llListHtml(){
       (llListQuery ? 'Нищо не отговаря на „'+esc(llListQuery)+'" в този статус.' : 'Няма товарни листи в този изглед.')+'</div></div>';
   }
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">';
-  h += '<table style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px;"><thead><tr style="background:#f8fafc;">';
+  h += '<table class="ll-tbl" style="width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px;"><thead><tr style="background:#f8fafc;">';
   ['Дата','Статус','Обекти','Палети','Рула','Насип','Изпълнил',''].forEach(function(c){
-    h += '<th style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
+    h += '<th'+(c===''?' class="ll-act"':'')+' style="text-align:left;padding:8px 10px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+c+'</th>';
   });
   h += '</tr></thead><tbody>';
   list.forEach(function(l){
@@ -2486,7 +2486,7 @@ function llListHtml(){
       '<td style="padding:7px 10px;text-align:center;">'+c.roll+'</td>'+
       '<td style="padding:7px 10px;text-align:center;">'+c.bulk+'</td>'+
       '<td style="padding:7px 10px;color:#64748b;">'+esc(l.executed_by||'—')+'</td>'+
-      '<td style="padding:7px 10px;white-space:nowrap;">'+
+      '<td class="ll-act" style="padding:7px 10px;white-space:nowrap;">'+
         '<button data-id="'+l.id+'" onclick="llOpenView(this.dataset.id)" style="border:1px solid #e2e8f0;background:#fff;color:#475569;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;margin-right:3px;">👁 Преглед</button>'+
         (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llOpenEdit(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:5px;padding:3px 9px;font-size:11px;cursor:pointer;">✏️ Редакция</button>':'')+
       '</td></tr>';
@@ -3892,12 +3892,12 @@ function llEditorHtml(){
   if(!llDraft.units.length){
     h += '<div style="color:#94a3b8;font-size:12px;padding:10px 0;">Още няма редове. Отметни документ отгоре или добави нов ред.</div>';
   } else {
-    h += '<div style="overflow-x:auto;"><table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">'+
+    h += '<div style="overflow-x:auto;"><table class="ll-tbl" style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;">'+
       '<tr style="color:#94a3b8;text-align:left;"><th style="padding:3px 6px;">#</th><th style="padding:3px 6px;">Вид</th>'+
       '<th style="padding:3px 6px;">Обект</th><th style="padding:3px 6px;">Изходящи №</th>'+
       '<th style="padding:3px 6px;">Коментар склад</th>'+
       '<th style="padding:3px 6px;" title="С този палет тръгва само част от документите">Частично</th>'+
-      '<th style="padding:3px 6px;"></th></tr>';
+      '<th class="ll-act" style="padding:3px 6px;"></th></tr>';
     var pColors = llDraftPalletColors(llDraft.units);
     llDraft.units.forEach(function(it, i){
       var isPallet = llIsNumbered(it.kind);
@@ -3938,7 +3938,7 @@ function llEditorHtml(){
         '<td style="padding:3px 6px;text-align:center;white-space:nowrap;">'+(!hasDocs
           ? '<span style="color:#cbd5e1;" title="Единица без документ — няма какво да остане чакащо">—</span>'
           : '<input type="checkbox" data-i="'+i+'" onchange="llSetRowPartial(this.dataset.i,this.checked)"'+(it.partial?' checked':'')+' title="Само част от документите тръгва с този товар — отмятането няма да ги затвори в Стока на път">')+'</td>'+
-        '<td style="padding:3px 6px;white-space:nowrap;">'+
+        '<td class="ll-act" style="padding:3px 6px;white-space:nowrap;">'+
           '<button data-i="'+i+'" onclick="llMoveRow(+this.dataset.i,-1)" title="Нагоре" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;">↑</button>'+
           '<button data-i="'+i+'" onclick="llMoveRow(+this.dataset.i,1)" title="Надолу" style="border:1px solid #e2e8f0;background:#fff;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">↓</button>'+
           '<button data-i="'+i+'" onclick="llRemoveRow(+this.dataset.i)" title="Махни реда" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:4px;padding:1px 6px;font-size:11px;cursor:pointer;margin-left:2px;">✕</button>'+
@@ -4391,7 +4391,7 @@ function llViewHtml(){
   }
   var locked = l.status !== 'draft';
   h += '<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;overflow:hidden;overflow-x:auto;">'+
-    '<table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;"><thead><tr style="background:#f8fafc;">';
+    '<table class="ll-tbl" style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px;"><thead><tr style="background:#f8fafc;">';
   ['#','Товарна единица','Изходящ №','Коментар склад','Обект','Коментар обект','Получено'].forEach(function(cc){
     h += '<th style="text-align:left;padding:7px 9px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;white-space:nowrap;">'+cc+'</th>';
   });

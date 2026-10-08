@@ -64,6 +64,7 @@ const TESTS = [
   'sd-actions-card.test.js',
   'interstore-swap-signal.test.js',
   'loading-lists-warehouse.test.js',
+  'loading-ui.test.js',
   'loading-lists-store.test.js',
   'loading-lists-pallets.test.js',
   'loading-lists-pallet-default.test.js',

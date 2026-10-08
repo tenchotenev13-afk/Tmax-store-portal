@@ -10,7 +10,7 @@ const STATUS = path.join(OUT, 'STATUS.log');
 const CONC = parseInt(process.env.CONC || '4', 10), LIMIT_MS = 10 * 60 * 1000;
 const roles = ['admin', 'accounting', 'logistics', 'warehouse', 'manager', 'kasa', 'supply', 'info'];
 /* REG_TABS=pallets,checklist,admin ограничава табовете */
-const tabs = process.env.REG_TABS ? process.env.REG_TABS.split(',') : ['client', 'diff', 'transport', 'kasa', 'returns', 'history', 'transit', 'pallets', 'checklist', 'admin'];
+const tabs = process.env.REG_TABS ? process.env.REG_TABS.split(',') : ['client', 'diff', 'transport', 'kasa', 'returns', 'history', 'transit', 'pallets', 'checklist', 'admin', 'loading', 'supply'];
 const jobs = [];
 for (const tab of tabs) for (const role of roles) for (const v of ['old', 'new']) jobs.push({ v, role, tab, file: path.join(OUT, v + '-' + role + '-' + tab + '.json') });
 const log = s => { const line = new Date().toTimeString().slice(0, 8) + ' ' + s; fs.appendFileSync(STATUS, line + '\n'); console.log(line); };

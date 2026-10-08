@@ -76,6 +76,9 @@ function applyQuery(rows, url) {
     });
   }
   if (offset) out = out.slice(offset);
+  /* вложени редове: select=*,loading_list_products(*) — детайлите на ред по item_id */
+  const emb = /select=[^&]*?([a-z_]+)\(\*\)/.exec(url);
+  if (emb && _data && _data[emb[1]]) { const kids = _data[emb[1]]; out = out.map(r => Object.assign({}, r, { [emb[1]]: kids.filter(k => k.item_id === r.id) })); }
   if (limit != null) out = out.slice(0, limit);
   return out;
 }
@@ -139,7 +142,7 @@ function mkEnv(repo, role, H) {
 async function settle(h, n) { for (let i = 0; i < (n || 6); i++) { await h._H.ticks(); await sleep(8); } }
 
 /* ── Снимка на действията ── */
-const CONTROL_FN = /^(checklistShiftWeek|transitDir|transitFilter|filterOrders|filterTransport|setTFilter|setTStore|setTSearch|setTDir|setSRFilter|setSRTab|setSRStoreFilter|setSRSupplierFilter|setSRSearch|setSDFilter|setSDTypeFilter|setSDDirTab|setSDStoreFilter|setSDView|setSDSearch|setHistSubtab|kasaTab|kasaShiftDay|kasaPickDay|toggleSapBanner|coToggleSap\w*)$/;
+const CONTROL_FN = /^(llSetStatusFilter|supplyOvSetSupplier|supplyOvShift|checklistShiftWeek|transitDir|transitFilter|filterOrders|filterTransport|setTFilter|setTStore|setTSearch|setTDir|setSRFilter|setSRTab|setSRStoreFilter|setSRSupplierFilter|setSRSearch|setSDFilter|setSDTypeFilter|setSDDirTab|setSDStoreFilter|setSDView|setSDSearch|setHistSubtab|kasaTab|kasaShiftDay|kasaPickDay|toggleSapBanner|coToggleSap\w*)$/;
 function fnOf(on) { const a = /^\s*(transitDir|transitFilter)\s*=/.exec(on); if (a) return a[1]; const m = /^\s*(?:event\.stopPropagation\(\);\s*)?(?:if\([^)]*\)\s*)?([A-Za-z_$][\w$.]*)\(/.exec(on); return m ? m[1] : on.slice(0, 24); }
 function dsig(el) {
   const parts = [];
