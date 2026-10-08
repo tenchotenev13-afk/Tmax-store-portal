@@ -10,6 +10,7 @@
    Пускане:  node tests/small-tabs-ui.test.js .
    Еталон от друга версия:  node tests/small-tabs-ui.test.js <корен> --dump */
 'use strict';
+process.env.TZ = 'Europe/Sofia'; // еталонът е снет в българско време — CI в GitHub е UTC
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
 const { boot, ok, guard, section, report, ticks } = H;
 const fs = require('fs');
