@@ -1,6 +1,11 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v50 (08.10.2026) — ЕДНО нещо: reportIsLate() изключва и статус 'arrived'
+      (клиентска заявка, пристигнала в магазина, не е закъсняла) — същото като
+      isLate() в shared.js. Заковано в tests/late-flag.test.js и
+      tests/report-late-section.test.js.
+
    v49 (06.10.2026) — ЕДНО нещо: нов type 'co_overdue' — „Просрочени клиентски
       заявки — ЦО", едно общо писмо до report_recipients.co_overdue=true
       (понеделник–петък 08:00 София, крон co-overdue-weekdays-8h). Две секции
