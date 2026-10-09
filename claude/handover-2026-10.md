@@ -29,7 +29,7 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
     изтрити от личния: задача 1 (11.10 21:15) е облачна в Claude Code
     routines (`trig_012CHU9d7Mn6RmksdJjbiZje`, модел Sonnet 5.5, с конектор
     Supabase); задачи 2 и 3 (12.10 11:00, 20.10 10:00) са локални в
-    Scheduled на desktop приложението и тръгват само при отворено
+    Routines на desktop приложението и тръгват само при отворено
     приложение.
   - Plugin github (Anthropic Directory) е включен във фирмения; GitHub за
     Claude Code в облака чака одобрение от Живко (admin@temax.bg).
