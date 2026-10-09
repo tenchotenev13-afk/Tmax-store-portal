@@ -263,12 +263,8 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
   portal-push 24/25, bulletin-notify 19/25, send-oborot-report 9/11,
   send-routed-report 16/18, dynamic-responder 23/25, kasa-access-check 7/8,
   swift-handler 41/42) — само документация. Байтова сверка не е правена.
-- **Живко — „Чака изпращане“ в `zhivko-opashka.md`** (4 реда, 2 от тях от
-  30.09 никога не пращани): `report_recipients.co_overdue boolean not null
-  default false`; `client_orders.delivery_reason text`;
-  `stock_differences.warehouse_response` нова стойност `sent_sap`;
-  `stock_differences.store_response` нова стойност `sap_accepted`.
-  **Първа задача в новия акаунт: едно писмо с четирите.**
+- Промени по схемата за Живко — виж `zhivko-opashka.md`.
+  **Първа задача в новия акаунт: едно писмо с всичко от „Чака изпращане“ там.**
 - **`claude/open-tasks.md`, отворени с приоритет**: сървърна проверка на
   самоличност (ВИСОК); `in.(<списък>)` без граница (СРЕДЕН, един случай
   ВИСОК); чек лист vs Бюлетин броене (СРЕДЕН, нарочно отложено); `due_time`
