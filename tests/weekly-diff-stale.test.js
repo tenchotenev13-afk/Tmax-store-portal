@@ -257,12 +257,12 @@ const names = ds => (ds && ds.byStore || []).map(g => g.store);
     ok('снимката е БЕЗ прозорец по дата', snap.length === 1, drep.join(' | '));
     ok('и носи id, обект, посока, преглед и дата',
       snap.length === 1 &&
-      /select=id,store_name,direction,reviewed,created_at$/.test(snap[0]), snap.join(' | '));
+      /select=id,store_name,direction,reviewed,created_at&order=id.asc&limit=1000&offset=0$/.test(snap[0]), snap.join(' | '));
     ok('една заявка към stock_differences, без прозорец',
       dsq.length === 1 && dsq[0].indexOf('created_at=') < 0, dsq.join(' | '));
     ok('и носи точно нужните пет колони',
       dsq.length === 1 &&
-      /select=report_id,store_name,status,warehouse_response,store_response$/.test(dsq[0]),
+      /select=report_id,store_name,status,warehouse_response,store_response&order=id.asc&limit=1000&offset=0$/.test(dsq[0]),
       dsq.join(' | '));
     ok('една заявка за прага', aps.length === 1, aps.join(' | '));
     h.close();

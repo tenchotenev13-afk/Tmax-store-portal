@@ -1,6 +1,19 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v51 (09.10.2026) — ТРИ неща, едно писмо:
+   1) Четенията без прозорец по дата минават на страници по 1000
+      (reportGetAll, копие от report.js) — differences_reports, stock_differences и
+      отворените goods_transit. PostgREST реже на 1000 без грешка: stock_differences
+      стана 1011, goods_transit отворени 1650, тоест „Необработени разлики над N дни“
+      и „Стока на път“ броеха по непълни данни.
+   2) Прекъснато четене НЕ се премълчава: reportGetAll връща .partial = true, а
+      секцията показва червен ред „⚠️ Непълни данни — прочетени N реда“
+      (reportPartialHtml). sbGetOk е копие по смисъл на shared.js със service ключ.
+   3) {"type":"weekly","dry_run":true} връща броевете на двете секции и колко реда е
+      прочетено от всяка таблица — без писмо, без запис в notification_log.
+      Заковано в tests/report-paging-1000.test.js и tests/report-edge-sync.test.js.
+
    v50 (08.10.2026) — ЕДНО нещо: reportIsLate() изключва и статус 'arrived'
       (клиентска заявка, пристигнала в магазина, не е закъсняла) — същото като
       isLate() в shared.js. Заковано в tests/late-flag.test.js и
@@ -653,6 +666,20 @@ function sbGet(t: string, q?: string) {
   return fetch(REST + t + (q ? '?' + q : ''), {
     headers: { 'apikey': SERVICE_KEY, 'Authorization': 'Bearer ' + SERVICE_KEY }
   }).then(function(r){ return r.json(); });
+}
+/* Като sbGet, но КАЗВА дали е паднало: {ok,rows} или {ok:false,error}. Копие по смисъл на
+   sbGetOk от shared.js, със service ключ — нужно на reportGetAll. */
+function sbGetOk(t: string, q?: string) {
+  return fetch(REST + t + (q ? '?' + q : ''), {
+    headers: { 'apikey': SERVICE_KEY, 'Authorization': 'Bearer ' + SERVICE_KEY }
+  }).then(function(r){
+    return r.json().catch(function(){ return null; }).then(function(d: any){
+      if (r.ok && Array.isArray(d)) return { ok: true, rows: d };
+      return { ok: false, rows: [], error: (d && (d.message || d.hint)) || ('HTTP ' + r.status) };
+    });
+  }).catch(function(e){
+    return { ok: false, rows: [], error: String((e && e.message) || e) };
+  });
 }
 function sbPost(t: string, b: any) {
   return fetch(REST + t, {
@@ -2649,6 +2676,31 @@ function reportCrossWindow(win){
   };
 }
 
+/* Всички редове на страници по 1000, в стабилен ред (поръчката е в query-то).
+   PostgREST реже отговора на 1000 реда без грешка: stock_differences мина 1000
+   на 08.10.2026 (1011), а отворените goods_transit са 1650 — част от редовете
+   падаха тихо и числата в отчета излизаха по-малки. Копие в report.js и в
+   send-scheduled-report — кодът им е заковат от report-edge-sync.
+   Провалена страница (включително първата) НЕ се премълчава: връща се вече
+   събраното, а масивът носи .partial = true. Колекторът го прехвърля в
+   cross.partial и секцията показва червен ред „Непълни данни“. sbGetOk, не
+   sbGet: sbGet връща [] и при грешка и не се различава от края на данните. */
+function reportGetAll(t, q){
+  var all = [];
+  var page = function(off){
+    return sbGetOk(t, q + '&limit=1000&offset=' + off).then(function(res){
+      if(!res.ok){
+        console.error('reportGetAll ' + t + ': страница ' + off + ' — ' + res.error);
+        all.partial = true;
+        return all;
+      }
+      all = all.concat(res.rows);
+      return res.rows.length === 1000 ? page(off + 1000) : all;
+    });
+  };
+  return page(0);
+}
+
 /* scope: масив с обекти или null/празно = цялата верига. Дневният отчет не
    рендира тази секция; параметърът е тук, за да не се смятат числата втори
    път другаде. store_name влезе в четирите select-а, които взимаха само
@@ -2676,7 +2728,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
     /* Отворените позиции, БЕЗ филтър по created_at - той е датата на SAP
        импорта, не възрастта на позицията (виж пресмятането по-долу). */
-    sbGet('goods_transit','status=in.(pending,sent)&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name'),
+    reportGetAll('goods_transit','status=in.(pending,sent)&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name&order=id.asc'),
     sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
     sbGet('users','select=store_name&order=store_name'),
     /* Прагът за „застояла" — една заявка вътре в колектора. Функцията се
@@ -2710,12 +2762,12 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        Докладите се теглят ВТОРИ път (r[0] ги взима със window филтър и без
        created_at): същата таблица, друг въпрос. Сливането им в една заявка
        би развалило „нови за периода" горе. */
-    sbGet('differences_reports','select=id,store_name,direction,reviewed,created_at'),
+    reportGetAll('differences_reports','select=id,store_name,direction,reviewed,created_at&order=id.asc'),
     /* Редовете нямат филтър по дата — възрастта им е възрастта на ДОКЛАДА.
        Сверено на 23.09.2026: 552 реда, нула без доклад и нула, чийто
        store_name се разминава с този на доклада. Затова обектът долу се
        взима от доклада — един котва за трите колони. */
-    sbGet('stock_differences','select=report_id,store_name,status,warehouse_response,store_response'),
+    reportGetAll('stock_differences','select=report_id,store_name,status,warehouse_response,store_response&order=id.asc'),
     sbGet('app_settings','key=eq.diff_stale_days&select=key,value&limit=1'),
     /* 🕒 „Трансфери — застояли над N дни" (етап 4, 30.09.2026) — моментна
        снимка, само в седмичния отчет (таб „Днес" няма седмица и не показва
@@ -2728,6 +2780,12 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
   ]).then(function(r){
     /* Всеки набор минава през ЕДИН предикат — отделни филтри на отделни
        места се разминават. */
+    /* Непълно четене на страница (reportGetAll) — не се премълчава. */
+    var partial = [], rowsRead = {};
+    [['goods_transit', r[4]], ['differences_reports', r[12]], ['stock_differences', r[13]]].forEach(function(p){
+      rowsRead[p[0]] = Array.isArray(p[1]) ? p[1].length : 0;
+      if (Array.isArray(p[1]) && p[1].partial) partial.push({ table: p[0], rows: p[1].length });
+    });
     var diffReports = (Array.isArray(r[0]) ? r[0] : []).filter(function(x){ return inScope(x.store_name); });
     var returns = (Array.isArray(r[1]) ? r[1] : []).filter(function(x){ return inScope(x.store_name); });
     var storno = (Array.isArray(r[2]) ? r[2] : []).filter(function(x){ return inScope(x.store_name); });
@@ -3113,6 +3171,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       returns: ret, storno: stornoSummary, stornoShort: stornoShort, zoborot: zoborotSummary,
       returnsList: returnsList, returnsStaleDays: returnsStaleDays,
       diffStale: diffStale,
+      partial: partial, rowsRead: rowsRead,
       transfersStale: transfersStale,
       lateOrders: lateOrders, lateOrdersByStore: lateOrdersByStore,
       lateTransport: lateTransport,
@@ -3448,6 +3507,17 @@ function reportStornoShortHtml(cross){
    нечетима, а въпросът ѝ е „къде има проблем".
    Червено при над 14 дни — две седмици е моментът, в който разликата вече не
    се помни от никого и разчистването ѝ става археология. */
+/* Червен ред, когато четенето на таблица е прекъснало след/на някоя страница
+   (виж reportGetAll). Без него секцията би показала по-малки числа като
+   истински. tables — кои таблици касаят секцията, която я вика. */
+function reportPartialHtml(cross, tables){
+  var list = ((cross && cross.partial) || []).filter(function(p){ return tables.indexOf(p.table) >= 0; });
+  if (!list.length) return '';
+  return list.map(function(p){
+    return '<div style="margin-top:12px;padding:8px 10px;background:#FDECEA;border:1px solid #C0392B;border-radius:6px;font-size:12px;font-weight:700;color:#C0392B;">' +
+      '⚠️ Непълни данни — прочетени ' + p.rows + ' реда, четенето прекъсна (' + esc(p.table) + ')</div>';
+  }).join('');
+}
 function reportDiffStaleHtml(cross){
   var ds = cross && cross.diffStale;
   if (!ds) return '';
@@ -3680,6 +3750,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
   /* СЛЕД двойката „Разлики" — те са за периода, тази е моментна снимка.
      Стои до тях, защото отговаря на следващия въпрос по същата тема:
      колко от подаденото още не е разчистено. */
+  h += reportPartialHtml(cross, ['differences_reports', 'stock_differences']);
   h += reportDiffStaleHtml(cross);
 
   h += crossModuleRow('📥','За връщане (текущо състояние)',
@@ -3708,6 +3779,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
 
   h += crossModuleRow('🚚','Стока на път',
     crossMetricCard(cross.transitStale,'застояли (>7 дни по документ)', cross.transitStale>0));
+  h += reportPartialHtml(cross, ['goods_transit']);
   h += reportTransitListHtml(cross, scoped);
   h += reportTransfersStaleHtml(cross);
 
@@ -4306,6 +4378,24 @@ Deno.serve(async (req: Request) => {
     var body: any = {};
     try { body = await req.json(); } catch(e) {}
     var type = body && (body.type === 'weekly' || body.type === 'pallets' || body.type === 'warehouse' || body.type === 'co_overdue') ? body.type : 'daily';
+
+    /* v52 — dry_run за седмичния отчет: {"type":"weekly","dry_run":true}. Вика САМО
+       кросмодулния колектор (четене, без запис в report_snapshots), не праща писмо и не
+       пише в notification_log. Връща броевете на двете секции, които минават на
+       страници, и колко реда е прочетено от всяка таблица (преди срязването по обект). */
+    if (type === 'weekly' && body && body.dry_run === true) {
+      var wkCross: any = await new Promise(function(resolve){ collectCrossModuleWeeklySummary(resolve, null, null); });
+      if (!wkCross) {
+        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type, dry_run:true }), { status:500, headers:{'Content-Type':'application/json'} });
+      }
+      var wkDs: any = wkCross.diffStale || { days:null, byStore:[], total:{} };
+      var wkOpen = 0;
+      (wkCross.transitByStore || []).forEach(function(g: any){ wkOpen += g.open || 0; });
+      return new Response(JSON.stringify({ ok:true, dry_run:true, type:type,
+        diffStale:{ days:wkDs.days, stores:(wkDs.byStore || []).length, control:wkDs.total.control, warehouse:wkDs.total.warehouse, storeSide:wkDs.total.storeSide, oldest:wkDs.total.oldest },
+        transit:{ open:wkOpen, stale:wkCross.transitStale },
+        rows_read: wkCross.rowsRead, partial: wkCross.partial }), { status:200, headers:{'Content-Type':'application/json'} });
+    }
 
     /* v49 — „Просрочени клиентски заявки — ЦО": ЕДНО общо писмо, ранен клон
        като „Палети"/„Склад". Не се праща на официален празник и в уикенд;

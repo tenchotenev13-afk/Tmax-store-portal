@@ -315,7 +315,9 @@ function cross(h, scope) {
     [['report.js', client], ['едж', edge]].forEach(function (pair) {
       const src = pair[1];
       const trLine = src.split('\n').filter(function (l) {
-        return l.indexOf("sbGet('goods_transit'") >= 0;
+        /* От 08.10.2026 заявката минава на страници (reportGetAll) — 1650
+           отворени позиции са над тавана от 1000 на PostgREST. */
+        return l.indexOf("sbGet('goods_transit'") >= 0 || l.indexOf("reportGetAll('goods_transit'") >= 0;
       })[0] || '';
       ok(pair[0] + ': заявката за goods_transit я има', !!trLine);
       ok(pair[0] + ': тегли отворените (pending и sent)',

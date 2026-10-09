@@ -190,6 +190,7 @@ const TESTS = [
   'report-ranking-plural.test.js',
   'report-scope-notice.test.js',
   'report-edge-sync.test.js',
+  'report-paging-1000.test.js',
   'routed-empty-recipient.test.js',
   'report-daily-date.test.js',
   'report-target-day-week.test.js',

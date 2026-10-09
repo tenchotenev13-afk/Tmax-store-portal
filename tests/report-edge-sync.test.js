@@ -56,7 +56,7 @@ const BULLETIN = path.join(ROOT, 'bulletin.js');
 const SHARED_FNS = [
   /* събиране на данни */
   'collectDailyReportData', 'collectWeeklyReportData',
-  'collectCrossModuleWeeklySummary',
+  'collectCrossModuleWeeklySummary', 'reportGetAll', 'reportPartialHtml',
   'collectDailyKasaSection', 'reportKasaThreshold',
   /* „Палети за прибиране" (v33) — колектор, рендер, тема и получатели */
   'collectPalletsReportData', 'reportPalletsHtml', 'reportPalletsSubject',
@@ -190,7 +190,7 @@ const CLIENT_ONLY = [
   'personalizedTaskCardHtml', 'personalizedSectionHtml',
   'sendWeeklyReportRouted', 'sendWeeklyReportTest'
 ];
-const EDGE_ONLY = ['sbGet', 'sbPost', 'sbPatch', 'loadRecurringVersions'];  /* loadRecurringVersions: service ключ, не sbGet от shared.js */  /* SERVICE ROLE, не shared.js */
+const EDGE_ONLY = ['sbGet', 'sbGetOk', 'sbPost', 'sbPatch', 'loadRecurringVersions'];  /* loadRecurringVersions: service ключ, не sbGet от shared.js */  /* SERVICE ROLE, не shared.js */
 
 /* ── send-routed-report ─────────────────────────────────────────────────
    Личният седмичен отчет по задачи. Носи СРЕЗА на report.js около

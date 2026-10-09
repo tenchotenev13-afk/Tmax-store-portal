@@ -1838,6 +1838,31 @@ function reportCrossWindow(win){
   };
 }
 
+/* Всички редове на страници по 1000, в стабилен ред (поръчката е в query-то).
+   PostgREST реже отговора на 1000 реда без грешка: stock_differences мина 1000
+   на 08.10.2026 (1011), а отворените goods_transit са 1650 — част от редовете
+   падаха тихо и числата в отчета излизаха по-малки. Копие в report.js и в
+   send-scheduled-report — кодът им е заковат от report-edge-sync.
+   Провалена страница (включително първата) НЕ се премълчава: връща се вече
+   събраното, а масивът носи .partial = true. Колекторът го прехвърля в
+   cross.partial и секцията показва червен ред „Непълни данни“. sbGetOk, не
+   sbGet: sbGet връща [] и при грешка и не се различава от края на данните. */
+function reportGetAll(t, q){
+  var all = [];
+  var page = function(off){
+    return sbGetOk(t, q + '&limit=1000&offset=' + off).then(function(res){
+      if(!res.ok){
+        console.error('reportGetAll ' + t + ': страница ' + off + ' — ' + res.error);
+        all.partial = true;
+        return all;
+      }
+      all = all.concat(res.rows);
+      return res.rows.length === 1000 ? page(off + 1000) : all;
+    });
+  };
+  return page(0);
+}
+
 /* scope: масив с имена на обекти или null/празно = цялата верига.
    Дневният отчет НЕ рендира тази секция (buildCrossModuleSectionHtml се вика
    само от buildWeeklyReportHtml) — параметърът е тук, за да може срязаният
@@ -1872,7 +1897,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
     /* Отворените позиции, БЕЗ филтър по created_at - той е датата на SAP
        импорта, не възрастта на позицията (виж пресмятането по-долу). */
-    sbGet('goods_transit','status=in.(pending,sent)&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name'),
+    reportGetAll('goods_transit','status=in.(pending,sent)&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name&order=id.asc'),
     sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
     sbGet('users','select=store_name&order=store_name'),
     /* Прагът за „застояла" — една заявка вътре в колектора. Функцията се
@@ -1906,12 +1931,12 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        Докладите се теглят ВТОРИ път (r[0] ги взима със window филтър и без
        created_at): същата таблица, друг въпрос. Сливането им в една заявка
        би развалило „нови за периода" горе. */
-    sbGet('differences_reports','select=id,store_name,direction,reviewed,created_at'),
+    reportGetAll('differences_reports','select=id,store_name,direction,reviewed,created_at&order=id.asc'),
     /* Редовете нямат филтър по дата — възрастта им е възрастта на ДОКЛАДА.
        Сверено на 23.09.2026: 552 реда, нула без доклад и нула, чийто
        store_name се разминава с този на доклада. Затова обектът долу се
        взима от доклада — един котва за трите колони. */
-    sbGet('stock_differences','select=report_id,store_name,status,warehouse_response,store_response'),
+    reportGetAll('stock_differences','select=report_id,store_name,status,warehouse_response,store_response&order=id.asc'),
     sbGet('app_settings','key=eq.diff_stale_days&select=key,value&limit=1'),
     /* 🕒 „Трансфери — застояли над N дни" (етап 4, 30.09.2026) — моментна
        снимка, само в седмичния отчет (таб „Днес" няма седмица и не показва
@@ -1925,6 +1950,12 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     /* Всеки набор минава през ЕДИН предикат. Отделни филтри на отделни места
        се разминават — точно това правеше сторната по грешен прием да се брои
        два пъти, преди да излезе в собствен ред. */
+    /* Непълно четене на страница (reportGetAll) — не се премълчава. */
+    var partial = [], rowsRead = {};
+    [['goods_transit', r[4]], ['differences_reports', r[12]], ['stock_differences', r[13]]].forEach(function(p){
+      rowsRead[p[0]] = Array.isArray(p[1]) ? p[1].length : 0;
+      if (Array.isArray(p[1]) && p[1].partial) partial.push({ table: p[0], rows: p[1].length });
+    });
     var diffReports = (Array.isArray(r[0]) ? r[0] : []).filter(function(x){ return inScope(x.store_name); });
     var returns = (Array.isArray(r[1]) ? r[1] : []).filter(function(x){ return inScope(x.store_name); });
     var storno = (Array.isArray(r[2]) ? r[2] : []).filter(function(x){ return inScope(x.store_name); });
@@ -2312,6 +2343,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       returns: ret, storno: stornoSummary, stornoShort: stornoShort, zoborot: zoborotSummary,
       returnsList: returnsList, returnsStaleDays: returnsStaleDays,
       diffStale: diffStale,
+      partial: partial, rowsRead: rowsRead,
       transfersStale: transfersStale,
       lateOrders: lateOrders, lateOrdersByStore: lateOrdersByStore,
       lateTransport: lateTransport,
@@ -2652,6 +2684,17 @@ function reportStornoShortHtml(cross){
    нечетима, а въпросът ѝ е „къде има проблем".
    Червено при над 14 дни — две седмици е моментът, в който разликата вече не
    се помни от никого и разчистването ѝ става археология. */
+/* Червен ред, когато четенето на таблица е прекъснало след/на някоя страница
+   (виж reportGetAll). Без него секцията би показала по-малки числа като
+   истински. tables — кои таблици касаят секцията, която я вика. */
+function reportPartialHtml(cross, tables){
+  var list = ((cross && cross.partial) || []).filter(function(p){ return tables.indexOf(p.table) >= 0; });
+  if (!list.length) return '';
+  return list.map(function(p){
+    return '<div style="margin-top:12px;padding:8px 10px;background:#FDECEA;border:1px solid #C0392B;border-radius:6px;font-size:12px;font-weight:700;color:#C0392B;">' +
+      '⚠️ Непълни данни — прочетени ' + p.rows + ' реда, четенето прекъсна (' + esc(p.table) + ')</div>';
+  }).join('');
+}
 function reportDiffStaleHtml(cross){
   var ds = cross && cross.diffStale;
   if (!ds) return '';
@@ -2884,6 +2927,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
   /* СЛЕД двойката „Разлики" — те са за периода, тази е моментна снимка.
      Стои до тях, защото отговаря на следващия въпрос по същата тема:
      колко от подаденото още не е разчистено. */
+  h += reportPartialHtml(cross, ['differences_reports', 'stock_differences']);
   h += reportDiffStaleHtml(cross);
 
   h += crossModuleRow('📥','За връщане (текущо състояние)',
@@ -2912,6 +2956,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
 
   h += crossModuleRow('🚚','Стока на път',
     crossMetricCard(cross.transitStale,'застояли (>7 дни по документ)', cross.transitStale>0));
+  h += reportPartialHtml(cross, ['goods_transit']);
   h += reportTransitListHtml(cross, scoped);
   h += reportTransfersStaleHtml(cross);
 
