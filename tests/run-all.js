@@ -336,7 +336,8 @@ const TESTS = [
   'co-compact-row.test.js',
   'co-warehouse-fulfiller-buttons.test.js',
   'nav-tabs-css.test.js',
-  'table-scroll.test.js'
+  'table-scroll.test.js',
+  'recurring-store-hints.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

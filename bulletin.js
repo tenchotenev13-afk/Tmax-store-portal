@@ -1944,6 +1944,10 @@ function bulPlanRowHtml(it, store, weekArr){
   if(it.winDeadline) h+='<span style="font-size:9.5px;color:#7c3aed;font-weight:700;white-space:nowrap;">до '+bulDM(it.winDeadline)+'</span>';
   h+='</div>';
   if(t.description) h+='<div class="bul-desc">'+linkify(t.description)+'</div>';
+  /* Жокерът по обект е само при постоянните (store_hints няма в bulletin_tasks).
+     Планът е „това, което вижда магазинът" — и при глобален изглед с избран
+     обект идва текстът на ТОЗИ обект, не списъкът с всички. */
+  if(isRec&&store){ var sh=bulStoreHintsOf(t)[store]; if(sh) h+=bulStoreHintBoxHtml('Жокер за '+store, sh, false); }
   if(comp&&(comp.comment||(comp.photos&&comp.photos.length)||(comp.files&&comp.files.length))) h+=renderCompletionExtras(comp);
   h+='</div>';
   /* Бутонът към свързания таб — същият, който е и в календара. */
@@ -4290,6 +4294,125 @@ function recurringRemoveAttachment(rtid,idx){
   });
 }
 
+/* ═══════ ЖОКЕР ПО ОБЕКТ (recurring_tasks.store_hints, 11.10.2026) ═══════
+   { "<store_name>": "<текст>" } — подсказка ПОД постоянната задача, различна
+   за всеки обект (първо: „ЗАРЕЖДАНЕ КОЛОРАНТИ" — кой обект кои артикули
+   поръчва). Общ за всички седмици, като прикачените файлове: НЕ е в
+   RECURRING_CONTENT_FIELDS и се пише с PATCH върху recurring_tasks, не през
+   версиите. Ключът е ТОЧНО users.store_name. */
+function bulStoreHintsOf(t){
+  var h=t&&t.store_hints;
+  if(typeof h==='string'){ try{ h=JSON.parse(h); }catch(e){ h=null; } }
+  if(!h||typeof h!=='object'||Array.isArray(h)) return {};
+  var out={};
+  Object.keys(h).forEach(function(k){ var v=h[k]; if(typeof v==='string'&&v.trim()) out[k]=v; });
+  return out;
+}
+function bulStoreHintBoxHtml(label, text, open){
+  return '<details class="bul-hint"'+(open?' open':'')+' style="margin-top:4px;border:1px solid #fde68a;background:#fffbeb;border-radius:6px;padding:3px 8px;">'+
+    '<summary style="font-size:11px;font-weight:600;color:#b45309;cursor:pointer;">💡 '+esc(label)+'</summary>'+
+    '<div class="bul-desc" style="margin-top:4px;color:#334155;">'+linkify(text)+'</div></details>';
+}
+/* Редът на обекта: само неговият жокер (обект без ключ не вижда нищо — това
+   не е контрол, който изчезва, а текст, който го няма). Глобалният изглед:
+   всички обекти сгънати + бутон за редакция при canEdit(). */
+function bulStoreHintsHtml(t, store){
+  var hints=bulStoreHintsOf(t), keys=Object.keys(hints);
+  var h='';
+  if(!isGlobal()){
+    if(store&&hints[store]) h+=bulStoreHintBoxHtml('Жокер за '+store, hints[store], false);
+    return h;
+  }
+  if(keys.length){
+    h+='<details class="bul-hint" style="margin-top:4px;">'+
+      '<summary style="font-size:10px;font-weight:600;color:#b45309;cursor:pointer;">💡 Жокери по обект: '+keys.length+'</summary>'+
+      '<div style="margin-top:2px;">';
+    keys.sort(function(a,b){ return a.localeCompare(b,'bg'); }).forEach(function(k){ h+=bulStoreHintBoxHtml(k, hints[k], false); });
+    h+='</div></details>';
+  }
+  if(canEdit()){
+    h+='<button data-rtid="'+t.id+'" onclick="openStoreHintsModal(this.dataset.rtid)" style="display:inline-flex;align-items:center;gap:4px;margin-top:5px;border:1px dashed #fcd34d;background:#fff;border-radius:5px;padding:2px 8px;font-size:10px;color:#b45309;cursor:pointer;">💡 '+(keys.length?'Редактирай жокерите':'+ Жокер по обект')+'</button>';
+  }
+  return h;
+}
+var bulHintDraft=null;   /* {rtid, hints:{store:text}, store} — докато модалът е отворен */
+function openStoreHintsModal(rtid){
+  /* Базовият ред (recurringAll): store_hints не се версионира, значи се чете
+     оттам, не от слятото копие за седмицата. */
+  var t=(recurringAll||[]).find(function(x){return String(x.id)===String(rtid);})||recurringTasks.find(function(x){return String(x.id)===String(rtid);});
+  if(!t){ toast('Задачата не е намерена','#dc2626'); return; }
+  var ex=document.getElementById('hint-ov'); if(ex)ex.remove();
+  loadAllStores().then(function(names){
+    var hints=bulStoreHintsOf(t);
+    /* Копие: модалът работи върху чернова, базата и редът се пипат чак при 💾. */
+    var draft={}; Object.keys(hints).forEach(function(k){ draft[k]=hints[k]; });
+    var stores=names.slice();
+    /* Обект с жокер, който вече го няма в stores (преименуван), остава видим, за
+       да може да се изтрие — иначе би се влачил невидим в колоната. */
+    Object.keys(draft).forEach(function(k){ if(stores.indexOf(k)<0) stores.push(k); });
+    var first=stores.length?stores[0]:'';
+    bulHintDraft={rtid:rtid, hints:draft, store:first};
+    var ov=document.createElement('div'); ov.className='bov open'; ov.id='hint-ov';
+    ov.innerHTML='<div class="bmod" style="width:460px;">'+
+      '<div style="font-size:15px;font-weight:600;margin-bottom:4px;">💡 Жокери по обект</div>'+
+      '<div style="font-size:11.5px;color:#64748b;margin-bottom:12px;">'+esc(t.title||'')+' — всеки обект вижда само своя текст под задачата. Празен текст = без жокер за обекта.</div>'+
+      '<label class="fl">Обект</label>'+
+      '<select class="fi" id="hint-store" onchange="bulHintSwitchStore(this.value)"></select>'+
+      '<label class="fl">Текст за обекта</label>'+
+      '<textarea class="fi fi-desc" id="hint-text" rows="8" placeholder="Напр. списък с артикули: код — описание" oninput="bulHintTextChanged(this)"></textarea>'+
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:14px;">'+
+      '<button onclick="bulHintClose()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+      '<button onclick="submitStoreHints()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">💾 Запази</button>'+
+      '</div></div>';
+    document.body.appendChild(ov);
+    bulHintFillSelect(stores);
+    bulHintSwitchStore(first);
+  });
+}
+function bulHintFillSelect(stores){
+  var sel=document.getElementById('hint-store'); if(!sel||!bulHintDraft)return;
+  var cur=bulHintDraft.store;
+  sel.innerHTML=stores.map(function(s){
+    var has=!!(bulHintDraft.hints[s]&&bulHintDraft.hints[s].trim());
+    return '<option value="'+esc(s)+'"'+(s===cur?' selected':'')+'>'+esc(s)+(has?' ✓':'')+'</option>';
+  }).join('');
+}
+function bulHintSwitchStore(store){
+  if(!bulHintDraft)return;
+  bulHintDraft.store=store;
+  var ta=document.getElementById('hint-text'); if(!ta)return;
+  ta.value=bulHintDraft.hints[store]||'';
+  var sel=document.getElementById('hint-store'); if(sel&&sel.value!==store)sel.value=store;
+}
+/* Черновата се пише при всяко натискане — смяната на обекта в <select> не
+   минава през „запази", тоест без това текстът за предишния обект се губи. */
+function bulHintTextChanged(ta){
+  if(!bulHintDraft)return;
+  var s=bulHintDraft.store, v=ta.value;
+  if(v.trim()) bulHintDraft.hints[s]=v; else delete bulHintDraft.hints[s];
+  var sel=document.getElementById('hint-store');
+  if(sel){ var opt=sel.options[sel.selectedIndex]; if(opt) opt.textContent=s+(v.trim()?' ✓':''); }
+}
+function bulHintClose(){
+  var ov=document.getElementById('hint-ov'); if(ov)ov.remove();
+  bulHintDraft=null;
+}
+function submitStoreHints(){
+  if(!bulHintDraft)return;
+  var rtid=bulHintDraft.rtid, out={};
+  Object.keys(bulHintDraft.hints).forEach(function(k){ var v=bulHintDraft.hints[k]; if(typeof v==='string'&&v.trim()) out[k]=v.replace(/\r\n/g,'\n').trim(); });
+  var payload=Object.keys(out).length?out:null;
+  sbPatch('recurring_tasks','id=eq.'+rtid,{store_hints:payload}).then(function(res){
+    if(!res||!res.ok){ toast('Грешка при запис: '+sbErrMsg(res),'#dc2626'); return; }
+    var t=recurringTasks.find(function(x){return String(x.id)===String(rtid);});
+    if(t) t.store_hints=payload;
+    bulSyncBaseRow(rtid,{store_hints:payload});
+    bulHintClose();
+    renderBulletin();
+    toast('✅ Жокерите са записани ('+Object.keys(out).length+' обекта)');
+  });
+}
+
 /* ═══════ ПРИКАЧЕНИ ФАЙЛОВЕ КЪМ ЗАДАЧИ ══════════════════════ */
 /* Име на прикачен файл за въпроса „Изтрий файла …?“ */
 function bulAttName(a){ return (a&&(a.filename||a.name))||'без име'; }
@@ -6144,6 +6267,8 @@ function renderRecurringTasks(dk) {
       h += '<div style="flex:1;">';
       h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!isGlobal()&&!isMultiRec&&!done&&!skipView&&!naRecComp,singleRecDate)+bulPostponedBadgeHtml(ppComp)+bulNaBadgeHtml(naRecComp)+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+bulFromBadgeHtml(t)+'</div>';
       if (t.description) h += '<div class="bul-desc">' + linkify(t.description) + '</div>';
+      /* Жокер по обект (store_hints): обектът вижда своя, глобалният — всички. */
+      h += bulStoreHintsHtml(t, store);
       /* Автоматичната постоянна задача („За връщане") казва какво остава —
          дотук този надпис го имаше САМО при еднократните. */
       h += bulAutoNoteHtml(t, done, 'recurring');
