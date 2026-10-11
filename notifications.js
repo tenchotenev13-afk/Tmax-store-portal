@@ -181,16 +181,28 @@ function showLoginBanner(){
      последните 30 дни, за да не се налага да влизат в История, за да разберат. */
   if(['admin','accounting'].indexOf(currentUser.role)>=0){
     var stFrom=new Date();stFrom.setDate(stFrom.getDate()-30);
-    sbGet('kasa_storno','storno_date=gte.'+localDateISO(stFrom)+'&select=store_name,returned_sum,new_sum').then(function(rows){
-      if(!Array.isArray(rows)||!rows.length) return;
+    /* sbGetAll + order=id.asc: 30 дни са над 1000 реда (2287 на 11.10.2026),
+       а PostgREST реже тихо. При .partial банерът НЕ мълчи — тишината би
+       значила „няма разминаване“, а това не е проверено. */
+    sbGetAll('kasa_storno','storno_date=gte.'+localDateISO(stFrom)+'&select=store_name,returned_sum,new_sum&order=id.asc').then(function(rows){
+      if(!Array.isArray(rows)) return;
+      var partialNote=rows.partial?' &nbsp;·&nbsp; ⚠️ Непълни данни — прочетени '+rows.length+' реда':'';
       var flagged=rows.filter(function(r){return (parseFloat(r.new_sum)||0)<(parseFloat(r.returned_sum)||0);});
-      if(!flagged.length) return;
       var el=document.getElementById('notif-banner');if(!el)return;
+      if(!flagged.length){
+        if(!rows.partial) return;
+        el.innerHTML='<div class="notif-card urgent"><div class="notif-icon">⚠️</div><div class="notif-text">'+
+          '<div class="notif-title">Сторно бележки: непълни данни</div>'+
+          '<div class="notif-sub">Прочетени '+rows.length+' реда, четенето прекъсна — разминаванията за последните 30 дни не са проверени.</div>'+
+          '</div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>'+el.innerHTML;
+        el.style.display='block';
+        return;
+      }
       var stores={};flagged.forEach(function(r){stores[r.store_name]=(stores[r.store_name]||0)+1;});
       var storeList=Object.keys(stores).map(function(s){return s+' ('+stores[s]+')';}).join(', ');
       var card='<div class="notif-card urgent"><div class="notif-icon">🧾</div><div class="notif-text">'+
         '<div class="notif-title">'+flagged.length+' сторно бележк'+(flagged.length===1?'а':'и')+' с по-малка сума на новата покупка!</div>'+
-        '<div class="notif-sub">'+esc(storeList)+' &nbsp;·&nbsp; последните 30 дни</div>'+
+        '<div class="notif-sub">'+esc(storeList)+' &nbsp;·&nbsp; последните 30 дни'+partialNote+'</div>'+
         '</div><button onclick="goToStornoHistory()" style="border:none;background:#dc2626;color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">Виж →</button>'+
         '<span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
       el.innerHTML=card+el.innerHTML;el.style.display='block';

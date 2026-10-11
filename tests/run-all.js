@@ -33,6 +33,7 @@ const TESTS = [
   'co-sap-banner-state.test.js',
   'stock-differences.test.js',
   'sbget-errors.test.js',
+  'sb-get-all.test.js',
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',
   'catalog-lookup.test.js',

@@ -54,6 +54,29 @@ function sbGetOk(t,q){
     return {ok:false,status:0,error:String((e&&e.message)||e),url:url};
   });
 }
+/* Всички редове на страници по 1000. PostgREST реже отговора на 1000 реда
+   БЕЗ грешка: kasa_storno за 30 дни са 2287 (11.10.2026), а банерът за
+   разминаване и История виждаха само първите 1000. Образец: reportGetAll в
+   report.js (той остава там — report-edge-sync го заковава).
+   query ТРЯБВА да носи order с уникален tiebreaker (напр. id) — без
+   детерминиран ред offset-страниците се припокриват и губят редове.
+   Провалена страница (и първата) не се премълчава: връща се събраното, а
+   масивът носи .partial = true. Извикващият решава какво да покаже. */
+function sbGetAll(t,q){
+  var all=[];
+  var page=function(off){
+    return sbGetOk(t,(q?q+'&':'')+'limit=1000&offset='+off).then(function(res){
+      if(!res.ok){
+        try{console.error('sbGetAll '+t+': страница '+off+' — '+res.error);}catch(e){}
+        all.partial=true;
+        return all;
+      }
+      all=all.concat(res.rows);
+      return res.rows.length===1000?page(off+1000):all;
+    });
+  };
+  return page(0);
+}
 function sbPost(t,b){
   var url=API+'/'+t;
   return fetch(url,{method:'POST',headers:H,body:JSON.stringify(b)})

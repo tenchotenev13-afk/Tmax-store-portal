@@ -102,13 +102,16 @@ function runHistorySearch(){
   } else { histData.kasa=[]; }
 
   if(type==='all'||type==='storno'){
-    var q4=STORNO_SELECT+'&order=storno_date.desc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter;
-    promises.push(sbGet('kasa_storno',q4).then(function(d){histData.storno=Array.isArray(d)?d:[];}));
+    /* sbGetAll + id като tiebreaker: 30 дни сторна по всички обекти са над
+       1000 реда (2287 на 11.10.2026) и PostgREST реже тихо. */
+    var q4=STORNO_SELECT+'&order=storno_date.desc,id.desc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter;
+    promises.push(sbGetAll('kasa_storno',q4).then(function(d){histData.storno=Array.isArray(d)?d:[];}));
   } else { histData.storno=[]; }
 
   Promise.all(promises).then(function(){
     stornoIndexItems(histData.storno);
     renderHistoryResults();
+    if(histData.storno.partial) toast('⚠️ Непълни данни — сторно: прочетени '+histData.storno.length+' реда, четенето прекъсна','#dc2626');
   }).catch(function(e){
     document.getElementById('h-results').innerHTML=
       '<div style="text-align:center;padding:30px;color:#dc2626;">Грешка при зареждане.</div>';
@@ -181,15 +184,19 @@ function renderHistoryResults(){
   var totalK=histData.kasa.length;
   var totalS=histData.storno.length;
   var totalAll=totalT+totalC+totalK+totalS;
+  /* Тоастът изчезва след 2.5 сек — редът остава, докато резултатите са на екрана. */
+  var partialHtml=histData.storno.partial
+    ? '<div style="color:#dc2626;font-weight:600;font-size:13px;margin-bottom:10px;">⚠️ Непълни данни — сторно: прочетени '+totalS+' реда, четенето прекъсна. Броят и списъкът по-долу не са пълни.</div>'
+    : '';
 
   if(!totalAll){
-    wrap.innerHTML='<div class="card" style="text-align:center;padding:30px;color:#94a3b8;">'+
+    wrap.innerHTML=partialHtml+'<div class="card" style="text-align:center;padding:30px;color:#94a3b8;">'+
       '<div style="font-size:32px;margin-bottom:8px;">📭</div>'+
       'Няма записи за избрания период и филтри.</div>';
     return;
   }
 
-  var html='<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px;">'+
+  var html=partialHtml+'<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:14px;">'+
     '<div style="font-size:13px;color:var(--muted);">'+
       'Период: <b>'+fmtDate(from)+' — '+fmtDate(to)+'</b>'+
       (store?' &nbsp;|&nbsp; Магазин: <b>'+esc(store)+'</b>':'')+
@@ -592,8 +599,15 @@ function exportKasaToExcel(){
     /* Сторно бележките идват заедно с редовете си (STORNO_SELECT), затова тук
        няма втора заявка за kasa_storno_items - останалите данни се теглят
        паралелно веднага след това. */
-    sbGet('kasa_storno',STORNO_SELECT+'&order=storno_date.desc,store_name.asc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter).then(function(stornoRes){
+    /* sbGetAll + id като tiebreaker — над 1000 реда PostgREST реже тихо.
+       При .partial файл НЕ се прави: лист „Сторно“ с ОБЩО от непълни редове
+       изглежда като пълен отчет и така тръгва нататък. */
+    sbGetAll('kasa_storno',STORNO_SELECT+'&order=storno_date.desc,store_name.asc,id.desc&storno_date=gte.'+from+'&storno_date=lte.'+to+sFilter).then(function(stornoRes){
       var stornoAll = Array.isArray(stornoRes) ? stornoRes : [];
+      if(stornoAll.partial){
+        toast('⚠️ Непълни данни — сторно: прочетени '+stornoAll.length+' реда, четенето прекъсна. Excel не е създаден, опитай пак.','#dc2626');
+        return;
+      }
       stornoIndexItems(stornoAll);
 
       return Promise.all([
