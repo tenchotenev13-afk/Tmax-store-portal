@@ -14,12 +14,16 @@
 
 ## Чака изпращане
 
-- 06.10 · report_recipients.co_overdue — boolean, NOT NULL, default false
+(няма)
 
+## Потвърдено 11.10.2026
+
+- 06.10 · report_recipients.co_overdue — boolean, NOT NULL, default false
 - 06.10 · client_orders.delivery_reason — text, NULL, без default
 - 30.09 · stock_differences.warehouse_response — нова стойност на статус 'sent_sap'
 - 30.09 · stock_differences.store_response — нова стойност на статус 'sap_accepted'
-  (миграцията 20260930120000_stock_differences_sent_sap — никога не са пращани)
+  (миграцията 20260930120000_stock_differences_sent_sap)
+  (потвърдено от Живко: огледалото е наваксало)
 
 ## Изпратено 04.10.2026
 
