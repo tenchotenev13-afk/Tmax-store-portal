@@ -33,7 +33,6 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
     приложение.
   - Plugin github (Anthropic Directory) е включен във фирмения; GitHub за
     Claude Code в облака чака одобрение от Живко (admin@temax.bg).
-  - Конектор Microsoft 365 е заявен (Requested), чака одобрение от Живко.
   - Desktop приложението и Claude Code в терминала са логнати с
     ten.tenev@temax.bg (Team, org Temax); 49-те локални сесии по репото са
     видими през /resume. При /login браузърът логва личния акаунт — ползва
@@ -124,6 +123,8 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
   домашна охрана). Разделение по тема: всичко ТеМАХ → фирмения акаунт.
   Desktop app = фирмения; личният — в браузъра (отделен Edge профил).
   Claude Code сесиите са локални в `~/.claude/projects` и не зависят от акаунта.
+- **Поща**: Фирмената поща (ten.tenev@temax.bg) е на собствен сървър на
+  фирмата, не Microsoft 365 — конектор няма; чете се през препращане към Gmail.
 - **Supabase CLI** v2.11x е инсталиран на машината на Тенчо (`npx supabase`),
   логнат от 18.09. Edge функции над ~44 KB се деплойват **само през CLI**
   (`supabase functions deploy <name> --project-ref xiwkdiqqplgdcrkewgtv`), не
@@ -324,5 +325,3 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
 5. Първо: `kasa-ui.test.js` на чист main; после редовете за „ЗАРЕЖДАНЕ ЛИНЕЙНИ
    МЕТРИ“, отговора на Теодор за трансферите и Минуси, потвърждението на
    Цвети за връщанията.
-6. Фирмена поща (Microsoft 365) като конектор — Живко я одобрява в Admin →
-   Connectors; след това Тенчо я свързва от Settings → Connectors.
