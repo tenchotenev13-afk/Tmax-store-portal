@@ -1469,6 +1469,21 @@ function autoCreateReturnFromDiff(line,cb){
       diff_line_id:line.id,
       created_by:currentUser.display_name||currentUser.email
     };
+    /* Запис, създаден ОТ САМИЯ ОБЕКТ, се брои за актуализиран в деня на
+       създаване (решение на Тенчо, 08.10.2026). Без това обект, който подава
+       разлика навреме, губи отметката на „Изтегляне по разлики": тригерът върху
+       stock_returns вижда нов ред без confirmed_date и маха автоматичната
+       отметка (Троян, 07.10.2026). Правилото „кой е обектът" е на едно място —
+       srConfirmedActor() в stock-returns.js (зарежда се преди този файл):
+       store_name на РЕДА срещу този на потребителя. Офисът (Цвети, ↩️ „Добави в
+       За връщане", импортите) не получава следа — обектът трябва да го
+       актуализира сам. Липсва ли модулът, записът се създава без следа. */
+    var actor=(typeof srConfirmedActor==='function') ? srConfirmedActor(line.store_name) : '';
+    if(actor.indexOf('store:')===0){
+      data.confirmed_date=today();
+      data.confirmed_by=actor;
+      data.confirmed_at=new Date().toISOString();
+    }
     sbPost('stock_returns',data).then(function(res){
       if(!res || !res.ok){ fail('POST: '+(res?sbErrMsg(res):'няма отговор')); return; }
       ok();
