@@ -14,9 +14,12 @@
 
 ## Чака изпращане
 
+(няма)
+
+## Изпратено 11.10.2026
+
 - 11.10 · supply_entries.note — text, NULL, без default
-  (миграцията 20261011120000_supply_entries_note; ПРИЛАГА СЕ след „давай“ от Тенчо —
-  не пращай преди потвърждение, че е в базата)
+  (в базата от миграцията 20261011144917)
 - 11.10 · recurring_tasks.store_hints — jsonb, NULL, без default
   (жокер по обект под постоянната задача; recurring-task-store-hints-schema.sql)
 
