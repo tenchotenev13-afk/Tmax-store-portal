@@ -15,6 +15,7 @@
 ## Чака изпращане
 
 - 11.10 · нова таблица supply_store_notes — id uuid PK, template_id uuid, store_name text, week_start date, co_note text NULL, co_note_by text NULL, co_note_at timestamptz; уникалност (template_id, store_name, week_start)
+  (в базата от миграцията 20261011185952)
 
 ## Изпратено 11.10.2026
 

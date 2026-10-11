@@ -309,8 +309,8 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
   send-routed-report 16/18, dynamic-responder 23/25, kasa-access-check 7/8,
   swift-handler 41/42) — само документация. Байтова сверка не е правена.
 - Промени по схемата за Живко — виж `zhivko-opashka.md`.
-- **Зареждане — коментар на Снабдяването (`supply_store_notes`)**: чака
-  миграция `20261011200000_supply_store_notes` (ПРЕДИ push на supply.js) и
+- **Зареждане — коментар на Снабдяването (`supply_store_notes`)**: миграцията
+  е приложена 11.10 (в базата 20261011185952); чака push на fcfc595 и
   проверка на живо от Тенчо. Кой чака: Тенчо.
 - **Зареждане — коментарът на Снабдяването в имейла**: `send-routed-report`
   (отчет по задача, секция „Зареждане“) показва „💬 Обект: текст“ под
