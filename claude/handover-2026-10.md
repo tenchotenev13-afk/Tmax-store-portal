@@ -20,8 +20,7 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
   инструкциите + този файл + CLAUDE.md като файлове; Supabase конектор
   одобрен от Живко и свързан (05.10, Temax Ug EOOD / pro / healthy); GitHub
   конектор нарочно НЕ е добавен — репото се ползва през Claude Code. Остават
-  desktop app и Claude Code да се прелогнат с ten.tenev@temax.bg и връзка с
-  фирмената поща (Microsoft 365, през Admin).
+  desktop app и Claude Code да се прелогнат с ten.tenev@temax.bg.
 - **09.10 — миграцията е направена**:
   - Skill `temax-instrukcia` е качен във фирмения акаунт (Settings → Skills,
     „Created by you“).
