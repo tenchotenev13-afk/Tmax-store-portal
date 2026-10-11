@@ -225,6 +225,7 @@ const TESTS = [
   'small-tabs-ui.test.js',
   'supply.test.js',
   'supply-note.test.js',
+  'supply-history.test.js',
   'oborot-bulletin-link.test.js',
   'oborot-co-entry.test.js',
   'admin-oborot-report.test.js',

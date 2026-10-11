@@ -158,25 +158,31 @@ function renderSupplyStore(){
         '<th style="text-align:center;">' + esc(t.col1_label) + '</th>' +
         (two ? '<th style="text-align:center;">' + esc(t.col2_label) + '</th>' : '') +
         '<th>Коментар</th>' +
-        '<th style="text-align:center;">Миналата седмица</th>' +
+        '<th>Миналата седмица</th>' +
       '</tr></thead><tbody>' +
       items.map(function(i){
-        var e = byItem[i.id] || {}, p = prevByItem[i.id];
-        var prevTxt = p ? supplyQtyText(p.qty1) + (two ? ' / ' + supplyQtyText(p.qty2) : '') : '—';
-        function inp(n, val){
+        var e = byItem[i.id] || {}, p = prevByItem[i.id] || {};
+        /* Миналата стойност стои ПОД полето на същата колона — етикетът на
+           колоната я обяснява. Не „За поръчка: X": не всяка бланка има колона
+           за поръчка (Кабели: „Налична макара"). */
+        function inp(n, val, prevVal){
           return '<input type="number" min="0" step="1" inputmode="numeric" class="fi" id="sup-q' + n + '-' + escAttr(i.id) + '" value="' +
-            (val === null || val === undefined ? '' : String(val)) + '" style="text-align:center;max-width:110px;padding:5px 8px;">';
+            (val === null || val === undefined ? '' : String(val)) + '" style="text-align:center;max-width:110px;padding:5px 8px;">' +
+            '<div class="sup-prev-q" style="font-size:11px;color:var(--muted);margin-top:3px;">мин. седм.: ' + supplyQtyText(prevVal) + '</div>';
         }
+        /* Последната колона: коментарът от миналата седмица (ако има) и историята. */
+        var prevCell = (p.note ? '<div class="sup-prev-note" style="font-size:12px;color:var(--muted);white-space:pre-line;margin-bottom:4px;">💬 ' + esc(p.note) + '</div>' : '') +
+          '<button type="button" class="btn sup-hist-btn" style="background:#f1f5f9;font-size:12px;padding:4px 8px;white-space:nowrap;" onclick="supplyShowHistory(\'' + escAttr(i.id) + '\')">🕘 4 седмици</button>';
         return '<tr>' +
           (sap ? '<td style="font-family:DM Mono,monospace;">' + esc(i.sap_code) + '</td>' : '') +
           '<td>' + esc(i.name) + '</td>' +
           '<td style="font-size:12px;">' + esc(i.supplier) + '</td>' +
-          '<td style="text-align:center;">' + inp(1, e.qty1) + '</td>' +
-          (two ? '<td style="text-align:center;">' + inp(2, e.qty2) + '</td>' : '') +
+          '<td style="text-align:center;">' + inp(1, e.qty1, p.qty1) + '</td>' +
+          (two ? '<td style="text-align:center;">' + inp(2, e.qty2, p.qty2) + '</td>' : '') +
           /* Коментарът е по желание; escAttr — кавичка в текста не бива да затваря value="". */
           '<td><input type="text" maxlength="500" class="fi sup-note" id="sup-note-' + escAttr(i.id) + '" placeholder="по желание" value="' +
             (e.note ? escAttr(e.note) : '') + '" style="min-width:140px;width:100%;padding:5px 8px;"></td>' +
-          '<td class="sup-prev" style="text-align:center;color:var(--muted);font-family:DM Mono,monospace;">' + prevTxt + '</td>' +
+          '<td class="sup-prev" style="min-width:120px;">' + prevCell + '</td>' +
         '</tr>';
       }).join('') +
       '</tbody></table></div>' +
@@ -184,6 +190,67 @@ function renderSupplyStore(){
     '</div>';
   });
   wrap.innerHTML = html + '</div>';
+}
+
+/* ─── ИСТОРИЯ НА РЕД (последните 4 седмици преди текущата) ───── */
+/* Една заявка при клик — по обекта, артикула и четирите понеделника. През
+   supplyGetAll, не sbGet: sbGet връща [] при провал и прозорецът би казал
+   „няма запис" за всяка седмица, без да личи, че данните не са заредени. */
+var SUPPLY_HIST_WEEKS = 4;
+var supplyHistSeq = 0; /* по-стар отговор не бива да презапише прозореца на по-нов клик */
+function supplyHistOverlay(){
+  var ov = document.getElementById('sup-hist-ov');
+  if(!ov){
+    ov = document.createElement('div');
+    ov.id = 'sup-hist-ov';
+    ov.className = 'modal-bg';
+    ov.onclick = function(ev){ if(ev.target === ov) closeModal('sup-hist-ov'); };
+    document.body.appendChild(ov);
+  }
+  return ov;
+}
+function supplyShowHistory(itemId){
+  var i = supplyItems.find(function(x){ return x.id === itemId; }); if(!i) return;
+  var t = supplyTemplates.find(function(x){ return x.id === i.template_id; }); if(!t) return;
+  var two = !!t.col2_label, store = currentUser.store_name, base = supplyWeek || supplyWeekStart();
+  var weeks = [];
+  for(var k = 1; k <= SUPPLY_HIST_WEEKS; k++) weeks.push(supplyAddDays(base, -7 * k));
+  var ov = supplyHistOverlay();
+  function frame(body){
+    ov.innerHTML = '<div class="modal" style="width:640px;">' +
+      '<h3>🕘 ' + esc(i.name) + '</h3>' +
+      '<div class="modal-sub">' + esc(store) + ' — последните ' + SUPPLY_HIST_WEEKS + ' седмици</div>' + body +
+      '<div class="modal-actions"><button type="button" class="btn sup-hist-close" style="background:#f1f5f9;" onclick="closeModal(\'sup-hist-ov\')">Затвори</button></div></div>';
+  }
+  var seq = ++supplyHistSeq;
+  frame('<div style="text-align:center;padding:18px;color:#94a3b8;">⏳ Зареждане...</div>');
+  ov.classList.add('open');
+  supplyGetAll('supply_entries', 'store_name=eq.' + encodeURIComponent(store) + '&item_id=eq.' + encodeURIComponent(itemId) +
+    '&week_start=in.(' + weeks.join(',') + ')&select=id,item_id,store_name,week_start,qty1,qty2,note,created_by,created_at,updated_by,updated_at')
+  .then(function(rows){
+    if(seq !== supplyHistSeq) return;
+    var byWeek = {};
+    rows.forEach(function(e){ if(e.store_name === store && e.item_id === itemId) byWeek[e.week_start] = e; });
+    /* Блок на седмица, не таблица: на телефон таблицата с дългите етикети на
+       колоните излиза ~690px и коментарът остава извън екрана (мерено на 375px). */
+    var lbl = 'font-size:12px;color:var(--muted);';
+    var val = 'font-family:DM Mono,monospace;font-weight:600;';
+    frame('<div class="sup-hist">' +
+      weeks.map(function(w){
+        var e = byWeek[w];
+        var head = '<div style="font-weight:600;margin-bottom:4px;">Седмица от ' + fmtDate(w) + '</div>';
+        if(!e) return '<div class="sup-hist-week" data-week="' + w + '" style="padding:8px 0;border-bottom:1px solid #f1f5f9;">' + head +
+          '<div class="sup-hist-none" style="color:#94a3b8;font-size:13px;">няма запис</div></div>';
+        return '<div class="sup-hist-week" data-week="' + w + '" style="padding:8px 0;border-bottom:1px solid #f1f5f9;">' + head +
+          '<div class="sup-hist-q" style="font-size:13px;"><span style="' + lbl + '">' + esc(t.col1_label) + ':</span> <span style="' + val + '">' + supplyQtyText(e.qty1) + '</span></div>' +
+          (two ? '<div class="sup-hist-q" style="font-size:13px;"><span style="' + lbl + '">' + esc(t.col2_label) + ':</span> <span style="' + val + '">' + supplyQtyText(e.qty2) + '</span></div>' : '') +
+          (e.note ? '<div class="sup-hist-note" style="font-size:13px;margin-top:2px;white-space:pre-line;">💬 ' + esc(e.note) + '</div>' : '') +
+          '<div class="sup-hist-by" style="' + lbl + 'margin-top:2px;">' + esc(e.updated_by || e.created_by) + ' · ' + supplyFmtStamp(e.updated_at || e.created_at) + '</div></div>';
+      }).join('') + '</div>');
+  }).catch(function(err){
+    if(seq !== supplyHistSeq) return;
+    frame('<div class="sup-hist-err" style="text-align:center;padding:18px;color:#dc2626;">Историята не можа да се зареди: ' + esc(String((err && err.message) || err)) + '</div>');
+  });
 }
 
 /* Стойност от поле: '' -> null; цяло число >= 0 -> число; всичко друго -> undefined (невалидно). */

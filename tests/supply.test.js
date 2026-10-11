@@ -95,8 +95,9 @@ const RED = /^(#dc2626|rgb\(220,38,38\))$/;
       const a = h.doc.getElementById('sup-q1-it-a'), b = h.doc.getElementById('sup-q1-it-b');
       ok('поле A е празно (няма запис за седмицата; чуждото 99 не влиза)', a && a.value === '', a && a.value);
       ok('поле B е предзаредено с 4', b && b.value === '4', b && b.value);
-      const prevCells = Array.from(m.querySelectorAll('td.sup-prev')).map(td => td.textContent.trim());
-      ok('миналата седмица: A=7, B=—', prevCells.join('|') === '7|—', prevCells.join('|'));
+      /* от 11.10.2026 миналата стойност е под полето на колоната (.sup-prev-q), не в последната колона */
+      const prevCells = Array.from(m.querySelectorAll('.sup-prev-q')).map(d => d.textContent.trim());
+      ok('миналата седмица: A=7, B=—', prevCells.join('|') === 'мин. седм.: 7|мин. седм.: —', prevCells.join('|'));
       ok('„Последно запазено … от Мария"', /Последно запазено: \d\d\.\d\d\.\d{4} \d\d:\d\d от Мария/.test(m.textContent),
         (m.querySelector('.sup-last') || {}).textContent);
       ok('заявката за записите е по обекта и двете седмици',
