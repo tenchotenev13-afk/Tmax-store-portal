@@ -318,9 +318,6 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
 
 ## 8. Първа сесия в новия акаунт — чеклист
 
-1. Проект „Темакс Портал“ с инструкциите, копирани 1:1 от стария Проект.
-2. Този файл и CLAUDE.md в контекста; `npm run brief` за пакета.
-3. Claude Code: `claude logout` → `claude` с ten.tenev@temax.bg.
-4. Първо: `kasa-ui.test.js` на чист main; после редовете за „ЗАРЕЖДАНЕ ЛИНЕЙНИ
+1. Първо: `kasa-ui.test.js` на чист main; после редовете за „ЗАРЕЖДАНЕ ЛИНЕЙНИ
    МЕТРИ“, отговора на Теодор за трансферите и Минуси, потвърждението на
    Цвети за връщанията.
