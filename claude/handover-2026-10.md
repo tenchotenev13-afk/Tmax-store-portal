@@ -359,6 +359,8 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
 - Липсват 8 `*-schema.sql` файла, споменати в `claude/*.md`/README, и
   `docs/DECISIONS.md` (очакван от `npm run brief`) — от описа на 04.10, не е
   проверявано повторно.
+- Лимит 1000, стъпка 1 (41dad32) — проверка на живо: банер, История →
+  Сторно 30 дни (~2287), Excel. Кой чака: Тенчо.
 - **Лимит 1000 — стъпки 2–4 (#4–#10 от прегледа 11.10)**: стъпка 2 —
   седмичният отчет, report.js:1895–1925 + send-scheduled-report (kasa_storno
   по седмица, днес до 642/1000; stock_returns без филтър) през
