@@ -31,7 +31,8 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
     Routines на desktop приложението и тръгват само при отворено
     приложение.
   - Plugin github (Anthropic Directory) е включен във фирмения; GitHub за
-    Claude Code в облака чака одобрение от Живко (admin@temax.bg).
+    Claude Code в облака е включен от Живко и свързан на 11.10
+    (claude.ai/code вижда репото).
   - Desktop приложението и Claude Code в терминала са логнати с
     ten.tenev@temax.bg (Team, org Temax); 49-те локални сесии по репото са
     видими през /resume. При /login браузърът логва личния акаунт — ползва
