@@ -266,6 +266,10 @@ pills с бройки, „Активни“ по подразбиране. Ек�
 вечерен оборот — класация в имейла, регионални мениджъри в системата,
 Теодор като получател; дроп на `task_completions_bak_20260910`; мъртъв код в
 push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
+- 11.10 — Зареждане: незадължителен коментар от обекта на всеки ред
+  (`supply_entries.note`, supply-note-schema.sql). Форма на обекта, ЦО
+  обобщение (блок „💬 Коментари от обектите“), Excel (лист „Коментари“),
+  имейл task_report (send-routed-report v16). Тест `supply-note.test.js`.
 
 ## 6. Опис на незавършеното от Claude Code (08.10.2026, само четене)
 
@@ -285,6 +289,9 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
   send-routed-report 16/18, dynamic-responder 23/25, kasa-access-check 7/8,
   swift-handler 41/42) — само документация. Байтова сверка не е правена.
 - Промени по схемата за Живко — виж `zhivko-opashka.md`.
+- **Зареждане — коментар (11.10)**: миграцията `20261011120000_supply_entries_note`
+  и деплоят на send-routed-report v16 чакат „давай“ от Тенчо. Ред: миграция →
+  деплой → push на supply.js (иначе 400 при запис от обектите). Кой чака: Тенчо.
 - **`claude/open-tasks.md`, отворени с приоритет**: сървърна проверка на
   самоличност (ВИСОК); `in.(<списък>)` без граница (СРЕДЕН, един случай
   ВИСОК); чек лист vs Бюлетин броене (СРЕДЕН, нарочно отложено); `due_time`

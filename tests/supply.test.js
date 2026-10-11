@@ -552,10 +552,10 @@ const RED = /^(#dc2626|rgb\(220,38,38\))$/;
     h.w.loadSupply(); await ticks(6);
     const fc = card(h, 'sup-card-tpl-floor'), cc = card(h, 'sup-card-tpl-cab');
     const fHeads = fc ? Array.from(fc.querySelectorAll('thead th')).map(th => th.textContent.trim()) : [];
-    ok('floor-lm: колони Име | Доставчик | col1 | col2 | Миналата седмица (без САП)',
-      fHeads.join('|') === 'Име|Доставчик|Общ брой места в търговска зала|Брой за трансфер/поръчка ОБЩО (зала и склад)|Миналата седмица', fHeads.join('|'));
+    ok('floor-lm: колони Име | Доставчик | col1 | col2 | Коментар | Миналата седмица (без САП)',
+      fHeads.join('|') === 'Име|Доставчик|Общ брой места в търговска зала|Брой за трансфер/поръчка ОБЩО (зала и склад)|Коментар|Миналата седмица', fHeads.join('|'));
     const fRow = fc ? fc.querySelector('tbody tr') : null;
-    ok('floor-lm: всеки ред има 5 клетки (колкото заглавията)', !!fRow && fRow.children.length === 5, fRow && String(fRow.children.length));
+    ok('floor-lm: всеки ред има 6 клетки (колкото заглавията)', !!fRow && fRow.children.length === 6, fRow && String(fRow.children.length));
     ok('floor-lm: първата клетка е името, не празен САП', !!fRow && fRow.children[0].textContent.trim() === 'Балатум 4м.');
     ok('floor-lm: две полета за вход на ред', !!h.doc.getElementById('sup-q1-f-1') && !!h.doc.getElementById('sup-q2-f-1'));
     ok('floor-lm (photos=null): без снимки', !!fc && !fc.querySelector('.sup-photos'));

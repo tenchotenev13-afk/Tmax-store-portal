@@ -1,5 +1,13 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v16 (11.10.2026) — ЕДНО нещо: КОМЕНТАРЪТ от обекта в секция „Зареждане"
+   (нова колона supply_entries.note, supply-note-schema.sql). Чете се с
+   останалите колони; под стойностите на артикула излиза ред „💬 Обект:
+   текст" за всеки непразен коментар. Ред само с коментар (без бройки) също
+   се показва. „Попълнили N от M" и „Без данни" НЕ се променят — броят се
+   само qty1/qty2. Изисква миграцията 20261011120000_supply_entries_note
+   ПРЕДИ деплоя, иначе select=…,note дава 400 и секцията излиза червена.
+
    v15 (01.10.2026) — ДВЕ неща по задачите от Бюлетина:
    1) ПРОЗОРЕЦ при ЕДНОКРАТНА задача (bulletin_tasks.due_window):
       reportRoutedTaskWindow дава на прозоречната задача СВОЯ диапазон, не
@@ -1179,7 +1187,7 @@ async function collectSupplyReport(weekStart: string, reportable: any[]){
     var ids = tpls.map(function(t: any){ return t.id; });
     var res: any[] = await Promise.all([
       supplyRest('supply_template_items', 'active=eq.true&template_id=in.(' + ids.join(',') + ')&order=sort_order.asc&select=id,template_id,sap_code,name,active,sort_order'),
-      supplyRestAll('supply_entries', 'week_start=eq.' + weekStart + '&template_id=in.(' + ids.join(',') + ')&select=id,template_id,item_id,store_name,week_start,qty1,qty2')
+      supplyRestAll('supply_entries', 'week_start=eq.' + weekStart + '&template_id=in.(' + ids.join(',') + ')&select=id,template_id,item_id,store_name,week_start,qty1,qty2,note')
     ]);
     var items = res[0].filter(function(i: any){ return i.active !== false; });
     var entries = res[1].filter(function(e: any){ return String(e.week_start).slice(0,10) === weekStart; });
@@ -1199,18 +1207,20 @@ async function collectSupplyReport(weekStart: string, reportable: any[]){
       items.filter(function(i: any){ return i.template_id === t.id; })
         .sort(function(a: any, b: any){ return (a.sort_order||0) - (b.sort_order||0); })
         .forEach(function(i: any){
-          var parts: any[] = [], tot1: any = null, tot2: any = null;
+          var parts: any[] = [], notes: any[] = [], tot1: any = null, tot2: any = null;
           scope.forEach(function(s: any){
             var e = byKey[i.id + '|' + s]; if (!e) return;
+            /* Коментарът (v16) — и при празни бройки; не прави обекта „попълнил". */
+            if (supplyHasVal(e.note) && String(e.note).trim() !== '') notes.push({ store:s, note:String(e.note).trim() });
             var a = supplyNum(e.qty1), b = two ? supplyNum(e.qty2) : null;
             if (a === null && b === null) return;
             if (a !== null) tot1 = (tot1 || 0) + a;
             if (b !== null) tot2 = (tot2 || 0) + b;
             parts.push({ store:s, a:a, b:b });
           });
-          if (!parts.length) return;
+          if (!parts.length && !notes.length) return;
           var sap = supplyHasVal(i.sap_code) ? String(i.sap_code).trim() : '';
-          rows.push({ sap:sap, name:i.name || '', parts:parts, tot1:tot1, tot2:tot2 });
+          rows.push({ sap:sap, name:i.name || '', parts:parts, notes:notes, tot1:tot1, tot2:tot2 });
         });
       return { name:t.name, col1:t.col1_label, col2:t.col2_label || null, two:two,
         scope:scope, filled:scope.filter(function(s: any){ return filled[s]; }),
@@ -1242,10 +1252,14 @@ function supplyReportSectionHtml(rep: any){
         h += '<div style="font-size:12px;color:#B91C1C;margin-top:2px;">Без данни: ' +
           b.missing.map(function(s: any){ return esc(s); }).join(', ') + '</div>';
       }
-      if (!b.rows.length) {
+      /* Редове само с коментар (v16) не са „попълнени данни": без бройки
+         остава „Няма попълнени данни", без легенда и без „Общо". */
+      var hasQty = b.rows.some(function(r: any){ return r.parts.length > 0; });
+      if (!hasQty) {
         h += '<div style="font-size:12px;color:#6B7280;margin-top:6px;">Няма попълнени данни за седмицата</div>';
-      } else {
-        if (b.two) h += '<div style="font-size:11px;color:#6B7280;margin-top:6px;">' + esc(b.col1) + ' / ' + esc(b.col2) + '</div>';
+      }
+      if (b.rows.length) {
+        if (b.two && hasQty) h += '<div style="font-size:11px;color:#6B7280;margin-top:6px;">' + esc(b.col1) + ' / ' + esc(b.col2) + '</div>';
         h += '<table style="width:100%;border-collapse:collapse;margin-top:6px;font-size:12px;">';
         b.rows.forEach(function(r: any){
           var vals = r.parts.map(function(p: any){
@@ -1254,13 +1268,17 @@ function supplyReportSectionHtml(rep: any){
           h += '<tr>' +
             '<td style="padding:4px 6px;border-bottom:1px solid #E5E9F0;color:#1F2937;vertical-align:top;">' +
               (r.sap ? '<span style="font-family:monospace;color:#6B7280;">' + esc(r.sap) + '</span> ' : '') + esc(r.name) + '</td>' +
-            '<td style="padding:4px 6px;border-bottom:1px solid #E5E9F0;color:#374151;vertical-align:top;">' + vals + '</td>' +
+            '<td style="padding:4px 6px;border-bottom:1px solid #E5E9F0;color:#374151;vertical-align:top;">' + vals +
+              /* Коментарите на обектите — под стойностите, по един на ред; само ако ги има. */
+              (r.notes && r.notes.length ? r.notes.map(function(n: any){
+                return '<div style="font-size:11px;color:#6B7280;margin-top:3px;">💬 ' + esc(n.store) + ': ' + esc(n.note) + '</div>';
+              }).join('') : '') + '</td>' +
           '</tr>';
         });
         var t1 = b.rows.reduce(function(s: any, r: any){ return r.tot1 === null ? s : (s || 0) + r.tot1; }, null);
         var t2 = b.rows.reduce(function(s: any, r: any){ return r.tot2 === null ? s : (s || 0) + r.tot2; }, null);
         h += '</table>';
-        h += '<div style="font-size:12px;font-weight:700;color:#1F2937;margin-top:6px;">Общо: ' +
+        if (hasQty) h += '<div style="font-size:12px;font-weight:700;color:#1F2937;margin-top:6px;">Общо: ' +
           (b.two ? q(t1) + ' / ' + q(t2) : q(t1)) + '</div>';
       }
       h += '</div>';
@@ -1274,7 +1292,10 @@ function supplyReportSectionHtml(rep: any){
 function supplyReportSummary(rep: any){
   if (!rep || !rep.ok) return { ok:false, week:rep && rep.week, error:rep && rep.error };
   return { ok:true, week:rep.week, templates: rep.blocks.map(function(b: any){
-    return { name:b.name, filled:b.filled.length, of:b.scope.length, missing:b.missing, rows:b.rows.length };
+    /* rows = артикули С БРОЙКИ, както преди v16; notes = брой коментари отделно. */
+    return { name:b.name, filled:b.filled.length, of:b.scope.length, missing:b.missing,
+      rows:b.rows.filter(function(r: any){ return r.parts.length > 0; }).length,
+      notes:b.rows.reduce(function(s: any, r: any){ return s + r.notes.length; }, 0) };
   }) };
 }
 

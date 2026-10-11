@@ -157,6 +157,7 @@ function renderSupplyStore(){
         (sap ? '<th>САП</th>' : '') + '<th>Име</th><th>Доставчик</th>' +
         '<th style="text-align:center;">' + esc(t.col1_label) + '</th>' +
         (two ? '<th style="text-align:center;">' + esc(t.col2_label) + '</th>' : '') +
+        '<th>Коментар</th>' +
         '<th style="text-align:center;">Миналата седмица</th>' +
       '</tr></thead><tbody>' +
       items.map(function(i){
@@ -172,6 +173,9 @@ function renderSupplyStore(){
           '<td style="font-size:12px;">' + esc(i.supplier) + '</td>' +
           '<td style="text-align:center;">' + inp(1, e.qty1) + '</td>' +
           (two ? '<td style="text-align:center;">' + inp(2, e.qty2) + '</td>' : '') +
+          /* Коментарът е по желание; escAttr — кавичка в текста не бива да затваря value="". */
+          '<td><input type="text" maxlength="500" class="fi sup-note" id="sup-note-' + escAttr(i.id) + '" placeholder="по желание" value="' +
+            (e.note ? escAttr(e.note) : '') + '" style="min-width:140px;width:100%;padding:5px 8px;"></td>' +
           '<td class="sup-prev" style="text-align:center;color:var(--muted);font-family:DM Mono,monospace;">' + prevTxt + '</td>' +
         '</tr>';
       }).join('') +
@@ -191,12 +195,20 @@ function supplyReadQty(id){
   return parseInt(raw, 10);
 }
 
+/* Коментар от поле: празен или само интервали -> null, иначе подрязаният текст. */
+function supplyReadNote(id){
+  var el = document.getElementById(id); if(!el) return null;
+  var raw = String(el.value || '').trim();
+  return raw === '' ? null : raw;
+}
+
 /* ─── SUBMIT ────────────────────────────────────────────────── */
 /* Upsert по (item_id, store_name, week_start): GET на съществуващите редове,
    после PATCH за тях и POST за новите — както submitPalletsForm().
-   Нов ред с ВСИЧКИ полета празни не се създава: иначе празна бланка би
-   изглеждала като попълнена в списъка на ЦО. Съществуващ ред се PATCH-ва и
-   до null — човекът изрично е изтрил стойността. */
+   Нов ред с ВСИЧКИ полета празни (и без коментар) не се създава: иначе празна
+   бланка би изглеждала като попълнена в списъка на ЦО. Ред само с коментар се
+   създава, но не брои за попълнен — там се гледат само qty1/qty2. Съществуващ
+   ред се PATCH-ва и до null — човекът изрично е изтрил стойността. */
 function submitSupplyForm(templateId){
   var t = supplyTemplates.find(function(x){ return x.id === templateId; });
   if(!t){ toast('Бланката не е намерена', '#dc2626'); return; }
@@ -209,7 +221,7 @@ function submitSupplyForm(templateId){
     var q1 = supplyReadQty('sup-q1-' + i.id);
     var q2 = two ? supplyReadQty('sup-q2-' + i.id) : null;
     if(q1 === undefined || q2 === undefined){ bad.push(i.sap_code || i.name); return; }
-    rows.push({ item: i, qty1: q1, qty2: q2 });
+    rows.push({ item: i, qty1: q1, qty2: q2, note: supplyReadNote('sup-note-' + i.id) });
   });
   if(bad.length){ toast('Невалидно количество (цяло число ≥ 0): ' + bad.join(', '), '#dc2626'); return; }
 
@@ -229,11 +241,11 @@ function submitSupplyForm(templateId){
       var match = byItem[r.item.id];
       if(match){
         reqs.push(sbPatch('supply_entries', 'id=eq.' + match.id,
-          { qty1: r.qty1, qty2: r.qty2, updated_by: who, updated_at: now }));
-      } else if(r.qty1 !== null || r.qty2 !== null){
+          { qty1: r.qty1, qty2: r.qty2, note: r.note, updated_by: who, updated_at: now }));
+      } else if(r.qty1 !== null || r.qty2 !== null || r.note !== null){
         reqs.push(sbPost('supply_entries', {
           template_id: templateId, item_id: r.item.id, store_name: store, week_start: week,
-          qty1: r.qty1, qty2: r.qty2, created_by: who, updated_by: who, updated_at: now
+          qty1: r.qty1, qty2: r.qty2, note: r.note, created_by: who, updated_by: who, updated_at: now
         }));
       }
     });
@@ -314,7 +326,7 @@ function supplyLoadOverview(tpls){
   return Promise.all([
     sbGet('supply_template_items', 'template_id=in.(' + ids.join(',') + ')&active=eq.true&order=sort_order'),
     supplyGetAll('supply_entries', 'week_start=eq.' + week + '&template_id=in.(' + ids.join(',') +
-      ')&select=id,template_id,item_id,store_name,week_start,qty1,qty2'),
+      ')&select=id,template_id,item_id,store_name,week_start,qty1,qty2,note'),
     loadReportableStores()
   ]).then(function(res){
     if(week !== supplyOvWeek) return; /* междувременно е избрана друга седмица */
@@ -351,7 +363,8 @@ function supplyOvSuppliers(t){
 /* Матрицата на един шаблон — общ източник за HTML и за Excel.
    Колоните за обекти: target_stores, а при null — обектите, които имат записи
    за седмицата. Клетка без запис или с null = null (празно, не 0). Общо = сума
-   на непразните; ако всички са празни — null. */
+   на непразните; ако всички са празни — null. notes = [{store, note}] по азбучен
+   ред на обекта, само непразните коментари; не влияят на empty (той е за бройките). */
 function supplyOvMatrix(t){
   var d = supplyOvData || { items: [], entries: [], allStores: [] };
   var two = !!t.col2_label;
@@ -362,7 +375,11 @@ function supplyOvMatrix(t){
   } else {
     var seenS = {};
     stores = [];
-    entries.forEach(function(e){ if(!seenS[e.store_name]){ seenS[e.store_name] = 1; stores.push(e.store_name); } });
+    entries.forEach(function(e){
+      /* Ред само с коментар не отваря колона — обектът не е попълнил; коментарът е в блока под матрицата. */
+      if(e.qty1 === null && e.qty2 === null && e.note) return;
+      if(!seenS[e.store_name]){ seenS[e.store_name] = 1; stores.push(e.store_name); }
+    });
   }
   stores.sort(function(a,b){ return a.localeCompare(b,'bg'); });
   var byKey = {};
@@ -371,6 +388,13 @@ function supplyOvMatrix(t){
 
   var rows = d.items.filter(function(i){ return i.template_id === t.id; }).map(function(i){
     var cells = [], tot1 = null, tot2 = null, empty = true;
+    /* Коментарите — от записите, не от колоните: обект само с коментар няма колона. */
+    var notes = entries.filter(function(e){
+      return e.item_id === i.id && e.note && String(e.note).trim() !== '' &&
+        (!Array.isArray(t.target_stores) || t.target_stores.indexOf(e.store_name) >= 0);
+    })
+      .map(function(e){ return { store: e.store_name, note: String(e.note).trim() }; })
+      .sort(function(a,b){ return a.store.localeCompare(b.store,'bg'); });
     stores.forEach(function(s){
       var e = byKey[i.id + '|' + s] || {};
       var a = val(e.qty1);
@@ -380,7 +404,7 @@ function supplyOvMatrix(t){
         cells.push(b); if(b !== null){ tot2 = (tot2 || 0) + b; empty = false; }
       }
     });
-    return { item: i, cells: cells, totals: two ? [tot1, tot2] : [tot1], empty: empty };
+    return { item: i, cells: cells, totals: two ? [tot1, tot2] : [tot1], empty: empty, notes: notes };
   });
   return { stores: stores, two: two, rows: rows };
 }
@@ -434,7 +458,7 @@ function renderSupplyOverview(){
 
     var visible = m.rows.filter(function(r){
       if(selIdx >= 0 && (r.item.supplier || '') !== sups[selIdx]) return false;
-      if(hide && r.empty) return false;
+      if(hide && r.empty && !r.notes.length) return false; /* ред само с коментар не е празен */
       return true;
     });
 
@@ -494,9 +518,24 @@ function renderSupplyOverview(){
         '</tr>';
       }).join('') : '<tr><td colspan="' + colCount + '" style="text-align:center;padding:18px;color:#94a3b8;">Няма редове за показване.</td></tr>') +
       '</tbody></table></div>' +
+      supplyOvNotesHtml(visible) +
     '</div>';
   });
   wrap.innerHTML = html + '</div>';
+}
+/* Коментарите от обектите под матрицата — само за видимите редове (филтърът по
+   доставчик важи и тук). Няма коментари -> празен низ, без заглавие. */
+function supplyOvNotesHtml(rows){
+  var list = [];
+  rows.forEach(function(r){ r.notes.forEach(function(n){ list.push({ item: r.item, store: n.store, note: n.note }); }); });
+  if(!list.length) return '';
+  return '<div class="sup-notes" style="margin-top:12px;font-size:13px;">' +
+    '<div style="font-weight:600;margin-bottom:6px;">💬 Коментари от обектите</div>' +
+    list.map(function(x){
+      return '<div class="sup-note-row" style="padding:4px 0;border-bottom:1px solid #f1f5f9;">' +
+        '<b>' + esc(x.store) + '</b> · ' + esc(x.item.name) + ': ' +
+        '<span style="color:var(--muted);white-space:pre-line;">' + esc(x.note) + '</span></div>';
+    }).join('') + '</div>';
 }
 function supplyOvSetSupplier(templateId, idx){
   if(idx < 0) delete supplyOvSupplier[templateId]; else supplyOvSupplier[templateId] = idx;
@@ -514,7 +553,7 @@ function supplySheetName(name){
   return (s || 'Лист').slice(0, 31);
 }
 /* Износът е ВИНАГИ пълен: без филтъра по доставчик и без скриване на празни.
-   Празна клетка остава празна (null в aoa), не 0. */
+   Празна клетка остава празна (null в aoa), не 0. Коментарите — втори лист. */
 function supplyExportExcel(templateId){
   var t = supplyTemplates.find(function(x){ return x.id === templateId; });
   if(!t || !supplyOvData){ toast('Няма заредени данни за износ', '#dc2626'); return; }
@@ -530,6 +569,17 @@ function supplyExportExcel(templateId){
       var ws = XLSX.utils.aoa_to_sheet(aoa);
       ws['!cols'] = [{wch:10},{wch:40},{wch:24}].concat(aoa[0].slice(3).map(function(){ return {wch:12}; }));
       XLSX.utils.book_append_sheet(wb, ws, supplySheetName(t.name));
+      /* Коментарите — на отделен лист: в матрицата колоните са обекти и един
+         коментар на клетка няма къде да стои. Без коментари листът го няма. */
+      var notes = [['Обект', 'САП', 'Име', 'Доставчик', 'Коментар']];
+      m.rows.forEach(function(r){
+        r.notes.forEach(function(n){ notes.push([n.store, r.item.sap_code || '', r.item.name || '', r.item.supplier || '', n.note]); });
+      });
+      if(notes.length > 1){
+        var wn = XLSX.utils.aoa_to_sheet(notes);
+        wn['!cols'] = [{wch:18},{wch:10},{wch:40},{wch:24},{wch:60}];
+        XLSX.utils.book_append_sheet(wb, wn, supplySheetName(t.name) === 'Коментари' ? 'Коментари (2)' : 'Коментари');
+      }
       XLSX.writeFile(wb, 'zarezhdane_' + (t.slug || t.id) + '_' + week + '.xlsx');
       toast('✅ Excel изтеглен');
     } catch(e){
