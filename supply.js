@@ -25,6 +25,7 @@ var supplyEntries = [];     /* записите на обекта за теку�
 var supplyPrevEntries = []; /* записите на обекта за предишната седмица */
 var supplyWeek = '';        /* седмицата, за която е рендирана формата */
 var supplySaving = {};      /* templateId -> true, докато тече запис */
+var supplyCoNotes = [];     /* supply_store_notes на обекта за текущата и предишната седмица */
 
 /* Понеделникът на ISO седмицата на дадена дата (по подразбиране днес), като
    местна дата 'YYYY-MM-DD'. Неделя е последният ден от седмицата, не първият. */
@@ -47,6 +48,21 @@ function supplyTemplateForStore(t, store){
    Централният офис не попълва бланки за зареждане. */
 function supplyIsOverview(){
   return isGlobal() || isCentralOfficeUser();
+}
+/* Коментарът на Снабдяването (supply_store_notes, 11.10.2026) — един свободен
+   текст на бланка × обект × седмица: какво е поръчано, за да не се заявява
+   същото всяка седмица. Пишат само supply и admin (supplyCanWriteCoNote);
+   обектът и останалите го виждат само като текст. */
+function supplyCanWriteCoNote(){
+  return !!currentUser && (currentUser.role === 'supply' || currentUser.role === 'admin');
+}
+/* 'дд.мм чч:мм' — за реда на Снабдяването; без година, тя е ясна от седмицата. */
+function supplyFmtDM(ts){
+  if(!ts) return '';
+  var d = new Date(ts);
+  if(isNaN(d.getTime())) return '';
+  function p2(n){ return String(n).padStart(2,'0'); }
+  return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
 }
 function supplyQtyText(v){ return (v === null || v === undefined) ? '—' : String(v); }
 function supplyFmtStamp(ts){
@@ -102,7 +118,13 @@ function loadSupply(){
     return Promise.all([
       sbGet('supply_template_items', 'template_id=in.(' + ids.join(',') + ')&active=eq.true&order=sort_order'),
       sbGet('supply_entries', 'store_name=eq.' + encodeURIComponent(store) +
-        '&week_start=in.(' + supplyWeek + ',' + prev + ')&template_id=in.(' + ids.join(',') + ')')
+        '&week_start=in.(' + supplyWeek + ',' + prev + ')&template_id=in.(' + ids.join(',') + ')'),
+      /* Коментарът на Снабдяването за двете седмици. silent: това е само текст
+         над бланката — провал значи, че редът просто не излиза (грешката е в
+         конзолата), а формата си остава. */
+      sbGet('supply_store_notes', 'store_name=eq.' + encodeURIComponent(store) +
+        '&week_start=in.(' + supplyWeek + ',' + prev + ')&template_id=in.(' + ids.join(',') + ')' +
+        '&select=template_id,store_name,week_start,co_note,co_note_by,co_note_at', true)
     ]).then(function(res){
       /* Филтрите се повтарят и тук: редовете, които не са за тази бланка,
          обект и седмица, не бива да попаднат във формата, каквото и да върне заявката. */
@@ -112,6 +134,10 @@ function loadSupply(){
       var entries = (Array.isArray(res[1]) ? res[1] : []).filter(function(e){ return e.store_name === store; });
       supplyEntries = entries.filter(function(e){ return e.week_start === supplyWeek; });
       supplyPrevEntries = entries.filter(function(e){ return e.week_start === prev; });
+      supplyCoNotes = (Array.isArray(res[2]) ? res[2] : []).filter(function(n){
+        return n.store_name === store && ids.indexOf(n.template_id) >= 0 &&
+          (n.week_start === supplyWeek || n.week_start === prev);
+      });
       renderSupplyStore();
     });
   });
@@ -153,6 +179,7 @@ function renderSupplyStore(){
       (t.instructions ? '<div style="font-size:13px;color:var(--muted);margin-bottom:10px;white-space:pre-line;">' + esc(t.instructions) + '</div>' : '') +
       supplyPhotosHtml(t) +
       (last ? '<div class="sup-last" style="font-size:12px;color:#16a34a;margin-bottom:8px;">Последно запазено: ' + supplyFmtStamp(last.ts) + ' от ' + esc(last.by) + '</div>' : '') +
+      supplyStoreCoNoteHtml(t) +
       '<div class="tbl-wrap tbl-compact tbl-auto"><table><thead><tr>' +
         (sap ? '<th>САП</th>' : '') + '<th>Име</th><th>Доставчик</th>' +
         '<th style="text-align:center;">' + esc(t.col1_label) + '</th>' +
@@ -190,6 +217,29 @@ function renderSupplyStore(){
     '</div>';
   });
   wrap.innerHTML = html + '</div>';
+}
+
+/* Коментарът на Снабдяването над таблицата на бланката. Само ако има непразен
+   текст: за ТАЗИ седмица — „🏢 Снабдяване: …"; за предишната — сив ред
+   „миналата седмица: …". Без запис -> празен низ. */
+function supplyStoreCoNoteHtml(t){
+  var prev = supplyAddDays(supplyWeek, -7);
+  function find(w){
+    return supplyCoNotes.find(function(n){
+      return n.template_id === t.id && n.week_start === w && n.co_note && String(n.co_note).trim() !== '';
+    });
+  }
+  var cur = find(supplyWeek), old = find(prev), h = '';
+  if(cur){
+    var meta = [cur.co_note_by ? esc(cur.co_note_by) : '', supplyFmtDM(cur.co_note_at)].filter(Boolean).join(', ');
+    h += '<div class="sup-co-cur" style="font-size:13px;background:#eff6ff;border-left:3px solid #2563eb;padding:6px 10px;border-radius:4px;margin-bottom:6px;white-space:pre-line;">' +
+      '🏢 Снабдяване: ' + esc(String(cur.co_note).trim()) + (meta ? ' · <span style="color:var(--muted);font-size:12px;">' + meta + '</span>' : '') + '</div>';
+  }
+  if(old){
+    h += '<div class="sup-co-prev" style="font-size:12px;color:#94a3b8;margin-bottom:8px;white-space:pre-line;">миналата седмица: ' +
+      esc(String(old.co_note).trim()) + '</div>';
+  }
+  return h;
 }
 
 /* ─── ИСТОРИЯ НА РЕД (последните 4 седмици преди текущата) ───── */
@@ -346,6 +396,7 @@ var supplyOvWeek = '';        /* избраната седмица в обобщ
 var supplyOvData = null;      /* {items, entries, allStores} за supplyOvWeek */
 var supplyOvSupplier = {};    /* templateId -> индекс в supplyOvSuppliers(t); липсва = „Всички" */
 var supplyOvHideEmpty = {};   /* templateId -> true, ако „Скрий празните редове" е включено */
+var supplyCoSaving = {};      /* 'templateId|обект' -> true, докато тече запис на коментара на Снабдяването */
 var SUPPLY_PAGE_SIZE = 1000;
 
 /* ВСИЧКИ редове на страници — PostgREST реже отговора на 1000 реда, а
@@ -386,7 +437,7 @@ function supplyLoadOverview(tpls){
   supplyTemplates = tpls;
   var week = supplyOvWeek;
   if(!tpls.length){
-    supplyOvData = { items: [], entries: [], allStores: [] };
+    supplyOvData = { items: [], entries: [], allStores: [], coNotes: [], coNotesErr: null };
     renderSupplyOverview(); return;
   }
   var ids = tpls.map(function(t){ return t.id; });
@@ -394,7 +445,13 @@ function supplyLoadOverview(tpls){
     sbGet('supply_template_items', 'template_id=in.(' + ids.join(',') + ')&active=eq.true&order=sort_order'),
     supplyGetAll('supply_entries', 'week_start=eq.' + week + '&template_id=in.(' + ids.join(',') +
       ')&select=id,template_id,item_id,store_name,week_start,qty1,qty2,note'),
-    loadReportableStores()
+    loadReportableStores(),
+    /* Провалът тук НЕ чупи матрицата — хваща се отделно и полетата за писане
+       се заключват (supplyOvCoNotesHtml): запис „на сляпо" би презаписал
+       коментар, който просто не е бил зареден. */
+    supplyGetAll('supply_store_notes', 'week_start=eq.' + week + '&template_id=in.(' + ids.join(',') +
+      ')&select=id,template_id,store_name,week_start,co_note,co_note_by,co_note_at')
+      .catch(function(e){ return { error: String((e && e.message) || e) }; })
   ]).then(function(res){
     if(week !== supplyOvWeek) return; /* междувременно е избрана друга седмица */
     supplyOvData = {
@@ -402,7 +459,9 @@ function supplyLoadOverview(tpls){
         return ids.indexOf(i.template_id) >= 0 && i.active !== false;
       }).sort(function(a,b){ return (a.sort_order||0) - (b.sort_order||0); }),
       entries: res[1].filter(function(e){ return e.week_start === week; }),
-      allStores: Array.isArray(res[2]) ? res[2] : []
+      allStores: Array.isArray(res[2]) ? res[2] : [],
+      coNotes: Array.isArray(res[3]) ? res[3].filter(function(n){ return n.week_start === week; }) : [],
+      coNotesErr: Array.isArray(res[3]) ? null : ((res[3] && res[3].error) || 'неизвестна грешка')
     };
     renderSupplyOverview();
   }).catch(function(e){
@@ -512,8 +571,7 @@ function renderSupplyOverview(){
     d.entries.forEach(function(e){
       if(e.template_id === t.id && (e.qty1 !== null || e.qty2 !== null)) filled[e.store_name] = true;
     });
-    var roster = (Array.isArray(t.target_stores) ? t.target_stores : d.allStores).slice()
-      .sort(function(a,b){ return a.localeCompare(b,'bg'); });
+    var roster = supplyOvRoster(t);
     var done = roster.filter(function(s){ return filled[s]; }).length;
 
     var m = supplyOvMatrix(t);
@@ -586,6 +644,7 @@ function renderSupplyOverview(){
       }).join('') : '<tr><td colspan="' + colCount + '" style="text-align:center;padding:18px;color:#94a3b8;">Няма редове за показване.</td></tr>') +
       '</tbody></table></div>' +
       supplyOvNotesHtml(visible) +
+      supplyOvCoNotesHtml(t) +
     '</div>';
   });
   wrap.innerHTML = html + '</div>';
@@ -604,6 +663,106 @@ function supplyOvNotesHtml(rows){
         '<span style="color:var(--muted);white-space:pre-line;">' + esc(x.note) + '</span></div>';
     }).join('') + '</div>';
 }
+/* Обектите на бланката: target_stores, а при null — всички отчитащи се. */
+function supplyOvRoster(t){
+  var d = supplyOvData || { allStores: [] };
+  return (Array.isArray(t.target_stores) ? t.target_stores : d.allStores).slice()
+    .sort(function(a,b){ return a.localeCompare(b,'bg'); });
+}
+function supplyOvCoNote(templateId, store){
+  var list = (supplyOvData && supplyOvData.coNotes) || [];
+  return list.find(function(n){ return n.template_id === templateId && n.store_name === store; }) || null;
+}
+/* „🏢 Коментар на Снабдяването" — отделен блок под матрицата, по един ред на
+   обект от списъка ✅/⬜. Не е ред в матрицата: колоните там са само обектите
+   със записи (при target_stores null) и са закачени (a90ffaa), а коментар се
+   оставя и на обект, който още не е попълнил. supply/admin — поле и „💾";
+   останалите — само непразните коментари като текст. id-тата са по индекс в
+   списъка, не по името на обекта. */
+function supplyOvCoNotesHtml(t){
+  var d = supplyOvData || {};
+  var roster = supplyOvRoster(t), tid = escAttr(t.id), canWrite = supplyCanWriteCoNote();
+  var head = '<div style="font-weight:600;margin-bottom:6px;">🏢 Коментар на Снабдяването</div>';
+  var wrapOpen = '<div class="sup-co" style="margin-top:12px;font-size:13px;">';
+  if(d.coNotesErr){
+    return wrapOpen + head + '<div class="sup-co-err" style="color:#dc2626;">Коментарите на Снабдяването не можаха да се заредят: ' +
+      esc(d.coNotesErr) + '</div></div>';
+  }
+  function stamp(n){
+    if(!n || !n.co_note) return '';
+    return [n.co_note_by ? esc(n.co_note_by) : '', supplyFmtDM(n.co_note_at)].filter(Boolean).join(', ');
+  }
+  if(!canWrite){
+    var withNote = roster.filter(function(s){ var n = supplyOvCoNote(t.id, s); return n && n.co_note && String(n.co_note).trim() !== ''; });
+    if(!withNote.length) return '';
+    return wrapOpen + head + withNote.map(function(s){
+      var n = supplyOvCoNote(t.id, s);
+      return '<div class="sup-co-row" style="padding:4px 0;border-bottom:1px solid #f1f5f9;"><b>' + esc(s) + '</b>: ' +
+        '<span class="sup-co-text" style="white-space:pre-line;">' + esc(String(n.co_note).trim()) + '</span>' +
+        ' <span style="color:var(--muted);font-size:12px;">· ' + stamp(n) + '</span></div>';
+    }).join('') + '</div>';
+  }
+  return wrapOpen + head + roster.map(function(s, idx){
+    var n = supplyOvCoNote(t.id, s);
+    return '<div class="sup-co-row" style="display:flex;flex-wrap:wrap;align-items:flex-start;gap:6px 10px;padding:5px 0;border-bottom:1px solid #f1f5f9;">' +
+      '<div style="min-width:140px;font-weight:600;padding-top:5px;">' + esc(s) + '</div>' +
+      '<textarea rows="1" maxlength="500" class="fi sup-co-input" id="sup-co-' + tid + '-' + idx + '" placeholder="какво е поръчано за обекта" ' +
+        'style="flex:1;min-width:200px;padding:5px 8px;resize:vertical;">' + (n && n.co_note ? esc(n.co_note) : '') + '</textarea>' +
+      '<button type="button" class="btn sup-co-save" style="background:#f1f5f9;padding:5px 10px;" onclick="supplySaveCoNote(\'' + tid + '\',' + idx + ')">💾</button>' +
+      '<div class="sup-co-by" id="sup-co-by-' + tid + '-' + idx + '" style="flex-basis:100%;font-size:11px;color:var(--muted);">' + stamp(n) + '</div>' +
+    '</div>';
+  }).join('') + '</div>';
+}
+/* UPSERT по (template_id, store_name, week_start) — Prefer merge-duplicates с
+   on_conflict, както checklistWritePortalValues(). Празен текст -> co_note
+   null (съдържанието се трие, редът остава). co_note_at се праща изрично:
+   default now() важи само при INSERT, а при UPDATE би останал старият час.
+   Седмицата е supplyOvWeek — избраната в обобщението, не текущата. */
+function supplySaveCoNote(templateId, idx){
+  if(!supplyCanWriteCoNote()) return;
+  if(!supplyOvData || supplyOvData.coNotesErr){ toast('Коментарите не са заредени — презаредете', '#dc2626'); return; }
+  var t = supplyTemplates.find(function(x){ return x.id === templateId; });
+  if(!t){ toast('Бланката не е намерена', '#dc2626'); return; }
+  var store = supplyOvRoster(t)[idx];
+  var el = document.getElementById('sup-co-' + templateId + '-' + idx);
+  if(!store || !el) return;
+  var key = templateId + '|' + store;
+  if(supplyCoSaving[key]) return;
+  var raw = String(el.value || '').trim();
+  var week = supplyOvWeek;
+  var body = {
+    template_id: templateId, store_name: store, week_start: week,
+    co_note: raw === '' ? null : raw,
+    co_note_by: currentUser.display_name || currentUser.email,
+    co_note_at: new Date().toISOString()
+  };
+  supplyCoSaving[key] = true;
+  fetch(API + '/supply_store_notes?on_conflict=template_id,store_name,week_start', {
+    method: 'POST',
+    headers: Object.assign({}, H, { 'Prefer': 'resolution=merge-duplicates,return=minimal' }),
+    body: JSON.stringify(body)
+  }).then(function(r){
+    if(r.ok) return { ok: true };
+    return r.json().catch(function(){ return null; }).then(function(dd){
+      return { ok: false, error: (dd && (dd.message || dd.hint)) || ('HTTP ' + r.status) };
+    });
+  }).catch(function(e){
+    return { ok: false, error: (e && e.message) || 'мрежов срив' };
+  }).then(function(res){
+    supplyCoSaving[key] = false;
+    if(!res.ok){ toast('Грешка при запис на коментара: ' + res.error, '#dc2626'); return; }
+    /* Междувременно е избрана друга седмица — локалното състояние е за нея. */
+    if(supplyOvData && week === supplyOvWeek){
+      var list = supplyOvData.coNotes = supplyOvData.coNotes || [];
+      var n = supplyOvCoNote(templateId, store);
+      if(!n){ n = { template_id: templateId, store_name: store, week_start: week }; list.push(n); }
+      n.co_note = body.co_note; n.co_note_by = body.co_note_by; n.co_note_at = body.co_note_at;
+      var by = document.getElementById('sup-co-by-' + templateId + '-' + idx);
+      if(by) by.innerHTML = n.co_note ? [esc(n.co_note_by), supplyFmtDM(n.co_note_at)].join(', ') : '';
+    }
+    toast('✓ Запазено');
+  });
+}
 function supplyOvSetSupplier(templateId, idx){
   if(idx < 0) delete supplyOvSupplier[templateId]; else supplyOvSupplier[templateId] = idx;
   renderSupplyOverview();
@@ -620,7 +779,8 @@ function supplySheetName(name){
   return (s || 'Лист').slice(0, 31);
 }
 /* Износът е ВИНАГИ пълен: без филтъра по доставчик и без скриване на празни.
-   Празна клетка остава празна (null в aoa), не 0. Коментарите — втори лист. */
+   Празна клетка остава празна (null в aoa), не 0. Коментарите — втори лист,
+   коментарът на Снабдяването — трети („Снабдяване"). */
 function supplyExportExcel(templateId){
   var t = supplyTemplates.find(function(x){ return x.id === templateId; });
   if(!t || !supplyOvData){ toast('Няма заредени данни за износ', '#dc2626'); return; }
@@ -646,6 +806,18 @@ function supplyExportExcel(templateId){
         var wn = XLSX.utils.aoa_to_sheet(notes);
         wn['!cols'] = [{wch:18},{wch:10},{wch:40},{wch:24},{wch:60}];
         XLSX.utils.book_append_sheet(wb, wn, supplySheetName(t.name) === 'Коментари' ? 'Коментари (2)' : 'Коментари');
+      }
+      /* Коментарът на Снабдяването — свой лист „Снабдяване": обект -> текст за
+         седмицата. Само непразните; без тях листът го няма. */
+      var co = [['Обект', 'Коментар на Снабдяването', 'От', 'Кога']];
+      supplyOvRoster(t).forEach(function(s){
+        var n = supplyOvCoNote(t.id, s);
+        if(n && n.co_note && String(n.co_note).trim() !== '') co.push([s, String(n.co_note).trim(), n.co_note_by || '', supplyFmtStamp(n.co_note_at)]);
+      });
+      if(co.length > 1){
+        var wc = XLSX.utils.aoa_to_sheet(co);
+        wc['!cols'] = [{wch:18},{wch:60},{wch:18},{wch:18}];
+        XLSX.utils.book_append_sheet(wb, wc, supplySheetName(t.name) === 'Снабдяване' ? 'Снабдяване (2)' : 'Снабдяване');
       }
       XLSX.writeFile(wb, 'zarezhdane_' + (t.slug || t.id) + '_' + week + '.xlsx');
       toast('✅ Excel изтеглен');
