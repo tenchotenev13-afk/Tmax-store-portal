@@ -29,8 +29,7 @@ function setHistSubtab(t){
 
 /* ─── LOAD ──────────────────────────────────────────────────── */
 function loadHistory(){
-  renderHistoryShell();
-  loadHistoryStores();
+  renderHistoryShell(); /* тя вика и loadHistoryStores() — второ викане тук дублираше обектите */
   setTimeout(function(){
     var dw=document.getElementById('daily-overview');
     if(dw&&typeof loadDailyOverview==='function'){
@@ -60,9 +59,14 @@ function loadHistoryStores(){
     /* Попълни dropdown */
     var sel=document.getElementById('h-store');
     if(sel){
+      /* Нулира до „— Всички —“ — повторно викане не бива да дублира
+         обектите (12.10.2026 всеки излизаше по два пъти). Избраното се пази. */
+      var keep=sel.value;
+      sel.length=1;
       histStores.forEach(function(name){
         var o=document.createElement('option');o.value=name;o.textContent=name;sel.appendChild(o);
       });
+      if(keep&&histStores.indexOf(keep)>=0) sel.value=keep;
     }
   }).catch(function(){});
 }
