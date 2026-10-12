@@ -116,11 +116,21 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
   разминаване (notifications.js) и История + Excel износ на сторната
   (history.js) минаха през нея — 30 дни сторна са 2287 реда, виждаха се
   само 1000. При непълни данни: карта/червен ред/toast, Excel не се прави.
-  Тест `sb-get-all.test.js`.
+  Тест `sb-get-all.test.js`. Потвърдено на живо от Тенчо 11.10: История
+  3027 реда за 01.09–31.10, Excel лист „Сторно“ 3027 + ОБЩО, банер 108 за
+  30 дни по 18 обекта.
 - 11.10 — Преоценка, етап 1 от 4: схема — `revaluation_campaigns`,
   `revaluation_submissions`, `revaluation_items` (`revaluation-schema.sql`,
   миграция `20261011210000_revaluation`). Без JS, нищо не я чете. Чака
   apply_migration.
+- 11.10 — лимит 1000, стъпка 2 от 5: История — `kasa_reports` (търсене) и
+  `kasa_zoborot`/`kasa_glavna`/`kasa_documents` (Excel износ) през
+  `sbGetAll` с `id` за tiebreaker. За 01.09–31.10 в базата: 1309 / 708 /
+  710 / 1427 — листът „Документи“ излизаше с точно 1000. Същото и за
+  секцията „📎 Прикачени документи“ на ЕКРАНА (`renderHistoryResults`) —
+  показваше 1000 от 1427. При непълни данни: червен ред („каса“ /
+  „документи“) + toast на екрана; Excel не се прави. Тест
+  `history-kasa-get-all.test.js`.
 
 ## 1. Хора
 
@@ -379,17 +389,21 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
 - Липсват 8 `*-schema.sql` файла, споменати в `claude/*.md`/README, и
   `docs/DECISIONS.md` (очакван от `npm run brief`) — от описа на 04.10, не е
   проверявано повторно.
-- Лимит 1000, стъпка 1 (41dad32) — проверка на живо: банер, История →
-  Сторно 30 дни (~2287), Excel. Кой чака: Тенчо.
-- **Лимит 1000 — стъпки 2–4 (#4–#10 от прегледа 11.10)**: стъпка 2 —
-  седмичният отчет, report.js:1895–1925 + send-scheduled-report (kasa_storno
+- **Лимит 1000 — стъпки 3–5 (от прегледа 11.10)**: стъпка 3 — седмичният
+  отчет (#5, #6), report.js:1895–1925 + send-scheduled-report (kasa_storno
   по седмица, днес до 642/1000; stock_returns без филтър) през
-  `reportGetAll`, заедно заради report-edge-sync, + деплой; стъпка 3 —
-  stock-returns.js:1245 дедупликация на рекламации (отрязване = дубликати
-  при импорт); стъпка 4 — `loadStorno` (kasa.js:1884, обект без дата, 432
-  max), `loadStockReturns` (stock-returns.js:230) и `select=supplier`
-  (stock-returns.js:1022). stock_returns е 527 — резерв ~4–5 месеца. Кой
-  чака: Claude Code, по ред от Тенчо.
+  `reportGetAll`, заедно заради report-edge-sync, + деплой; стъпка 4 —
+  stock-returns.js:1245 дедупликация на рекламации (#10; отрязване =
+  дубликати при импорт); стъпка 5 — `loadStorno` (#4, kasa.js:1884, обект
+  без дата, 432 max), `loadStockReturns` (#8, stock-returns.js:230) и
+  `select=supplier` (#9, stock-returns.js:1022), + `stock_returns` в #7.
+  stock_returns е 527 — резерв ~4–5 месеца. Кой чака: Claude Code, по ред
+  от Тенчо.
+- **История — лист „Обобщение“ в Excel** (бележка, не се поправя сега):
+  строи се от `histData.kasa`, тоест от търсенето на екрана, и е празен,
+  когато типът не е Каса/Всички — докато равнение/главна/документи се
+  теглят наново в износа. Същото важи за частта „ПОС ОТЧЕТИ“ в листовете
+  по магазини (пак `histData.kasa`). Кой чака: Тенчо.
 - **Мъртъв CSS**: `.co-sticky-actions` в index.html:92–112 и 217–219 — за
   махане (никой JS файл вече не слага класа). Чака: Claude Code.
 

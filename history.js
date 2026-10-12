@@ -97,8 +97,10 @@ function runHistorySearch(){
   } else { histData.client=[]; }
 
   if(type==='all'||type==='kasa'){
-    var q3='order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter;
-    promises.push(sbGet('kasa_reports',q3).then(function(d){histData.kasa=Array.isArray(d)?d:[];}));
+    /* sbGetAll + id като tiebreaker: 01.09–31.10 по всички обекти са 1309
+       реда (11.10.2026), PostgREST реже на 1000 тихо. */
+    var q3='order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter;
+    promises.push(sbGetAll('kasa_reports',q3).then(function(d){histData.kasa=Array.isArray(d)?d:[];}));
   } else { histData.kasa=[]; }
 
   if(type==='all'||type==='storno'){
@@ -112,6 +114,7 @@ function runHistorySearch(){
     stornoIndexItems(histData.storno);
     renderHistoryResults();
     if(histData.storno.partial) toast('⚠️ Непълни данни — сторно: прочетени '+histData.storno.length+' реда, четенето прекъсна','#dc2626');
+    else if(histData.kasa.partial) toast('⚠️ Непълни данни — каса: прочетени '+histData.kasa.length+' реда, четенето прекъсна','#dc2626');
   }).catch(function(e){
     document.getElementById('h-results').innerHTML=
       '<div style="text-align:center;padding:30px;color:#dc2626;">Грешка при зареждане.</div>';
@@ -185,9 +188,11 @@ function renderHistoryResults(){
   var totalS=histData.storno.length;
   var totalAll=totalT+totalC+totalK+totalS;
   /* Тоастът изчезва след 2.5 сек — редът остава, докато резултатите са на екрана. */
-  var partialHtml=histData.storno.partial
-    ? '<div style="color:#dc2626;font-weight:600;font-size:13px;margin-bottom:10px;">⚠️ Непълни данни — сторно: прочетени '+totalS+' реда, четенето прекъсна. Броят и списъкът по-долу не са пълни.</div>'
-    : '';
+  var partialRow=function(what,n){
+    return '<div style="color:#dc2626;font-weight:600;font-size:13px;margin-bottom:10px;">⚠️ Непълни данни — '+what+': прочетени '+n+' реда, четенето прекъсна. Броят и списъкът по-долу не са пълни.</div>';
+  };
+  var partialHtml=(histData.kasa.partial?partialRow('каса',totalK):'')+
+                  (histData.storno.partial?partialRow('сторно',totalS):'');
 
   if(!totalAll){
     wrap.innerHTML=partialHtml+'<div class="card" style="text-align:center;padding:30px;color:#94a3b8;">'+
@@ -392,10 +397,13 @@ function renderHistoryResults(){
 
   /* Секция Документи за периода */
   if(histData.kasa.length){
-    sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+histFilter.from+'&date=lte.'+histFilter.to+(histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ())).then(function(docs){
-      if(!Array.isArray(docs)||!docs.length) return;
+    /* sbGetAll + id като tiebreaker — 01.09–31.10 са 1427 документа
+       (11.10.2026), на екрана излизаха 1000. Същата заявка като в Excel. */
+    sbGetAll('kasa_documents','order=date.desc,store_name.asc,created_at.desc,id.desc&date=gte.'+histFilter.from+'&date=lte.'+histFilter.to+(histFilter.store?'&store_name=eq.'+encodeURIComponent(histFilter.store):storeQ())).then(function(docs){
+      if(!Array.isArray(docs)||(!docs.length&&!docs.partial)) return;
       var docTypes={pos:'ПОС',glavna:'Главна каса',zoborot:'Равнение',other:'Друго'};
-      var docHtml='<div class="card" style="margin-top:14px;">'+
+      var docHtml=(docs.partial?partialRow('документи',docs.length):'')+
+        '<div class="card" style="margin-top:14px;">'+
         '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'+
           '<div class="card-title" style="margin:0;">📎 Прикачени документи ('+docs.length+')</div>'+
           '<div style="font-size:11px;color:#64748b;">Преглед в портала · Изтегляне от Supabase Storage</div>'+
@@ -610,14 +618,25 @@ function exportKasaToExcel(){
       }
       stornoIndexItems(stornoAll);
 
+      /* sbGetAll + id като tiebreaker и за трите. Лист „Документи“ излезе
+         с точно 1000 реда за 01.09–31.10 (1427 в базата, 11.10.2026).
+         histData.kasa (ПОС отчетите в листовете по магазини) идва от
+         търсенето на екрана — и неговото .partial спира файла. */
       return Promise.all([
-        sbGet('kasa_zoborot',  'order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
-        sbGet('kasa_glavna',   'order=date.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
-        sbGet('kasa_documents','order=date.desc,store_name.asc,created_at.desc&date=gte.'+from+'&date=lte.'+to+sFilter)
+        sbGetAll('kasa_zoborot',  'order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
+        sbGetAll('kasa_glavna',   'order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
+        sbGetAll('kasa_documents','order=date.desc,store_name.asc,created_at.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter)
       ]).then(function(res){
       var zobAll   = Array.isArray(res[0]) ? res[0] : [];
       var glAll    = Array.isArray(res[1]) ? res[1] : [];
       var docsAll  = Array.isArray(res[2]) ? res[2] : [];
+      var cut = [['каса', histData.kasa], ['равнение на оборота', zobAll], ['главна каса', glAll], ['документи', docsAll]]
+        .filter(function(p){ return p[1].partial; });
+      if(cut.length){
+        toast('⚠️ Непълни данни — '+cut.map(function(p){ return p[0]+': прочетени '+p[1].length+' реда'; }).join(', ')+
+              '. Excel не е създаден, опитай пак.','#dc2626');
+        return;
+      }
 
       var wb = XLSX.utils.book_new();
 
