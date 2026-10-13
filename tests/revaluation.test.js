@@ -21,6 +21,12 @@
         → пада „регионалният на Шумен получава (Т. Иванова)";
      M6 rvParseZstock без бройката повторени кодове (dupes винаги 0)
         → пада „toast 1 код се срещаше…" и „rvImportAoa връща dupes = 1".
+     M7 (13.10.2026) rvCanSee без проверката на rvStoresOn за обекта
+        → пада „manager без ключ → табът е скрит" и „…showModule не рендира бланка";
+     M8 (13.10.2026) rvLoadStoresFlag приема всяка непразна стойност
+        → пада „„off“ → скрит" и „боклук („yes“) → скрит";
+     M9 (13.10.2026) rvCanEdit без rvStoresOn
+        → пада „…но без ключ не пише в бланката на своя обект".
 */
 'use strict';
 
@@ -82,7 +88,8 @@ function env(o) {
       users: url => /email=eq\./.test(url)
         ? USERS.filter(u => url.indexOf(encodeURIComponent(u.email)) >= 0)
         : USERS,
-      product_catalog: []
+      product_catalog: [],
+      app_settings: o.settings || [{ key: 'revaluation_stores', value: 'on' }]
     },
     globals: {
       pushToPeople: (names, title, msg) => { h.push.push({ names, title, msg }); return Promise.resolve({ ok: !o.pushFail }); },
@@ -90,6 +97,9 @@ function env(o) {
     }
   });
   h.push = []; h.mail = []; h.db = db;
+  /* Ключът се чете при логин (setupTabsForRole); старите секции го приемат за
+     включен — секция 0б минава през истинския път. */
+  h.w.rvStoresOn = o.storesOn === undefined ? true : o.storesOn;
   /* PostgREST с return=representation връща реда; stub-ът на harness-а връща {}. */
   const orig = h.w.fetch;
   h.w.fetch = function (url, init) {
@@ -145,6 +155,57 @@ async function imported(o) {
     await ticks(5);
     ok('showModule показва модула', mod(h).style.display === 'block');
     ok('и го зарежда (бутон „Качи файл")', !!btn(mod(h), 'Качи файл от SAP'));
+  }
+
+  section('0б. Скрито за обектите: app_settings.revaluation_stores');
+  {
+    const tab = h => h.doc.getElementById('tab-revaluation');
+    const login = async (o) => {
+      const h = env(Object.assign({ storesOn: false }, o));
+      guard('setupTabsForRole', () => h.w.setupTabsForRole());
+      const hiddenBefore = tab(h).style.display === 'none';
+      await ticks(5);
+      return { h, hiddenBefore };
+    };
+    let r = await login({ settings: [] });
+    ok('manager без ключ → табът е скрит', tab(r.h).style.display === 'none' && r.h.w.rvCanSee() === false);
+    ok('заявката е точно за ключа', r.h.calls.get.some(u => u.indexOf('/app_settings?key=eq.revaluation_stores&') >= 0));
+    guard('showModule(revaluation)', () => r.h.w.showModule('revaluation')); await ticks(5);
+    ok('manager без ключ → showModule не рендира бланка', !btn(mod(r.h), 'Качи файл') && !btn(mod(r.h), 'Подай') &&
+      !r.h.doc.getElementById('rv-rows') && mod(r.h).textContent.indexOf('Нямаш достъп') >= 0);
+    ok('и не чете бланки', !r.h.calls.get.some(u => u.indexOf('/rest/v1/revaluation_') >= 0));
+
+    r = await login({ settings: [{ key: 'revaluation_stores', value: 'on' }] });
+    ok('manager с „on“ → табът е скрит ДО отговора (не мига)', r.hiddenBefore);
+    ok('manager с „on“ → вижда таба след отговора', tab(r.h).style.display === '' && r.h.w.rvCanSee() === true);
+    guard('showModule(revaluation)', () => r.h.w.showModule('revaluation')); await ticks(5);
+    ok('manager с „on“ → бланката се рендира', !!btn(mod(r.h), 'Качи файл'));
+
+    r = await login({ settings: [{ key: 'revaluation_stores', value: 'off' }] });
+    ok('„off“ → скрит', tab(r.h).style.display === 'none');
+    r = await login({ settings: [{ key: 'revaluation_stores', value: ' ON ' }] });
+    ok('„ ON “ (главни, интервал) → включено, както loading_* флаговете', tab(r.h).style.display === '');
+    r = await login({ settings: [{ key: 'revaluation_stores', value: 'yes' }] });
+    ok('боклук („yes“) → скрит', tab(r.h).style.display === 'none');
+    r = await login({ settings: [{ key: 'loading_scan', value: 'on' }] });
+    ok('чужд ключ с „on“ в отговора → скрит', tab(r.h).style.display === 'none');
+    r = await login({ fail: { GET: /app_settings/ } });
+    ok('паднала заявка → скрит', tab(r.h).style.display === 'none');
+    ok('и без червен toast при вход (тиха заявка)', !r.h.calls.toast.some(t => /Грешка при зареждане/.test(t)));
+
+    r = await login({ user: ADMIN, settings: [] });
+    ok('admin без ключ → вижда', tab(r.h).style.display === '' && r.h.w.rvCanSee() === true);
+    r = await login({ user: { email: 'sn@temax.bg', display_name: 'Снаб', role: 'supply', store_name: 'Централен офис' }, settings: [] });
+    ok('supply без ключ → вижда', tab(r.h).style.display === '');
+    r = await login({ user: REGIONAL, settings: [] });
+    ok('регионален (accounting) без ключ → вижда таба', tab(r.h).style.display === '');
+    guard('showModule(revaluation)', () => r.h.w.showModule('revaluation')); await ticks(5);
+    await r.h.w.rvPickStore('Шумен'); await ticks(5);
+    ok('…но без ключ не пише в бланката на своя обект', !btn(mod(r.h), 'Качи файл') && !btn(mod(r.h), 'Подай'));
+    const r2 = await login({ user: REGIONAL, settings: [{ key: 'revaluation_stores', value: 'on' }] });
+    guard('showModule(revaluation)', () => r2.h.w.showModule('revaluation')); await ticks(5);
+    await r2.h.w.rvPickStore('Шумен'); await ticks(5);
+    ok('регионален с „on“ → пише в бланката на своя обект', !!btn(mod(r2.h), 'Качи файл'));
   }
 
   section('1. Импорт на ZSTOCK — Шумен, Завод 1514 → 5 реда');

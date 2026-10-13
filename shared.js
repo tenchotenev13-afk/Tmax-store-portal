@@ -1664,10 +1664,17 @@ function setupTabsForRole(){
   if(calTab)calTab.style.display='';
   var srTab=document.getElementById('tab-stock-returns');
   if(srTab)srTab.style.display='';
-  /* Таб Преоценка — обекти (manager/sklad), admin, accounting, supply; правилото е
-     rvCanSee() в revaluation.js (зарежда се последен — затова typeof). */
+  /* Таб Преоценка — admin, accounting, supply винаги; обекти (manager/sklad) само
+     при app_settings.revaluation_stores = 'on'. Правилото е rvCanSee() в
+     revaluation.js (зарежда се последен — затова typeof). Ключът се чете при
+     всеки логин; до отговора табът на обекта е скрит, после се преизчислява. */
   var rvTab=document.getElementById('tab-revaluation');
-  if(rvTab)rvTab.style.display=(typeof rvCanSee==='function'&&rvCanSee())?'':'none';
+  if(rvTab){
+    rvTab.style.display=(typeof rvCanSee==='function'&&rvCanSee())?'':'none';
+    if(typeof rvLoadStoresFlag==='function') rvLoadStoresFlag().then(function(){
+      rvTab.style.display=rvCanSee()?'':'none';
+    });
+  }
   var sdTab=document.getElementById('tab-stock-diff');
   if(sdTab)sdTab.style.display='';
   /* Таб Администрация — admin и accounting. Accounting вижда вътре САМО

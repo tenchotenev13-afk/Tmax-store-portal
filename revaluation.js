@@ -39,6 +39,13 @@ var rvShowNewCampaign = false;
 var rvAcRes = [];
 var rvAcSeq = 0;
 var rvAcTimer = null;
+/* app_settings.revaluation_stores — скрит фийчър (HIDDEN-FEATURES.md). Само
+   'on' пуска обектите (и правото на регионалния да пише в бланките им);
+   липсващ ключ, празно, боклук и паднала заявка = изключено. Чете се при
+   всеки логин от setupTabsForRole(); докато отговорът не е дошъл, е false —
+   табът на обекта е скрит, тоест не мига. */
+var rvStoresOn = false;
+var rvStoresSeq = 0;
 
 var RV_STORE_ROLES = ['manager', 'sklad'];
 var RV_KIND_LABEL = { mandatory: 'Задължителна', optional: 'Пожелателна' };
@@ -61,11 +68,26 @@ function rvRegionStores(){
   return rvParseList(rvMe.assigned_stores);
 }
 function rvIsRegionalFor(store){ return !!store && rvRegionStores().indexOf(store) >= 0; }
-/* Видимост на таба: обекти, admin, accounting, supply, регионални. Регионалните
-   днес са admin/accounting (проверено 12.10.2026), затова ролите стигат. */
+/* Видимост на таба: admin, accounting, supply — винаги; обекти — само при
+   revaluation_stores = 'on' (скрито от 13.10.2026 до етап 3). Регионалните днес
+   са admin/accounting (проверено 12.10.2026) и виждат таба като ЦО; правото им
+   да ПИШАТ в бланката на обект е зад същия ключ (rvCanEdit). */
 function rvCanSee(){
   if(!currentUser) return false;
-  return rvIsStoreUser() || ['admin', 'accounting', 'supply'].indexOf(currentUser.role) >= 0;
+  if(['admin', 'accounting', 'supply'].indexOf(currentUser.role) >= 0) return true;
+  return rvIsStoreUser() && rvStoresOn;
+}
+function rvLoadStoresFlag(){
+  var seq = ++rvStoresSeq;
+  return sbGet('app_settings', 'key=eq.revaluation_stores&select=key,value', true).then(function(rows){
+    var row = (Array.isArray(rows) ? rows : []).filter(function(r){ return r && r.key === 'revaluation_stores'; })[0];
+    var on = !!row && row.value != null && String(row.value).trim().toLowerCase() === 'on';
+    if(seq === rvStoresSeq) rvStoresOn = on;
+    return rvStoresOn;
+  }).catch(function(){
+    if(seq === rvStoresSeq) rvStoresOn = false;
+    return false;
+  });
 }
 
 /* ─── Числа ────────────────────────────────────────────── */
@@ -121,7 +143,7 @@ function rvCampaignOpenNow(c){
 }
 function rvCanEdit(){
   var c = rvCampaign();
-  if(!c || !rvStore || !rvCampaignOpenNow(c)) return false;
+  if(!c || !rvStore || !rvCampaignOpenNow(c) || !rvStoresOn) return false;
   if(rvIsRegionalFor(rvStore)) return true;
   if(rvIsStoreUser() && currentUser.store_name === rvStore) return !rvSub || rvSub.status !== 'submitted';
   return false;
