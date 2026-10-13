@@ -6270,8 +6270,12 @@ function renderRecurringTasks(dk) {
       /* Жокер по обект (store_hints): обектът вижда своя, глобалният — всички. */
       h += bulStoreHintsHtml(t, store);
       /* Автоматичната постоянна задача („За връщане") казва какво остава —
-         дотук този надпис го имаше САМО при еднократните. */
-      h += bulAutoNoteHtml(t, done, 'recurring');
+         дотук този надпис го имаше САМО при еднократните.
+         Многодневната („РАЗЛИКИ" пон–пет) тук няма `done` — за надписа важи
+         ДНЕШНАТА отметка на обекта. От 13.10.2026 тя не пада при нов отговор
+         на склада и иначе отметнат обект четеше „⏳ N реда чакат отговор". */
+      var noteDone = done || (isMultiRec && !!store && recurringComps.some(function(c){return c.recurring_task_id===t.id&&c.store_name===store&&c.status==='done'&&(c.completion_date||null)===bulTodayISO();}));
+      h += bulAutoNoteHtml(t, noteDone, 'recurring');
       var dueLbl = recurringDueLabel(t);
       if (isMultiRec) {
         h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🔁 Дни: '+dueLbl+'</div>';

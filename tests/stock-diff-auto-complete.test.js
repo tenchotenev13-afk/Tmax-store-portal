@@ -391,5 +391,99 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
     ha.close();
   }
 
+  section('11. Отметка, която не пада (13.10.2026): Бюлетинът показва ✓, не „⏳ N"');
+  {
+    /* Решение на Тенчо, 13.10.2026 (вариант Б): stock_diff_sync_completions
+       само добавя — обект, отметнат сутринта, остава отметнат и когато
+       складът следобед отговори по друг ред. Значи „отметнат + чакащи редове"
+       вече е НОРМАЛНО състояние за деня. Задачата е пон–пет, тоест в блока по
+       отдел е многодневна и там `done` го няма — надписът трябваше да гледа
+       ДНЕШНАТА отметка, иначе отметнатият обект четеше „⏳ 2 реда чакат
+       отговор" точно като неотметнатия. Календарът и „План за деня" показваха
+       отметката и преди — заковани са тук, за да не се разминат. */
+    const DAY = new Date(2026, 9, 13, 15, 0, 0), DAY_ISO = '2026-10-13', MON = '2026-10-12';
+    const ST = 'Силистра';
+    const isoWY = d => { const t = new Date(d.getTime()); t.setHours(0, 0, 0, 0); t.setDate(t.getDate() + 3 - ((t.getDay() + 6) % 7)); return t.getFullYear(); };
+    const task = { id: 'r-sd', title: 'РАЗЛИКИ ЛОГИСТИЧНИ СКЛАДОВЕ', department: 'admin',
+      task_type: 'info', active: true, sort_order: 1, due_weekday: 0, due_weekdays: [0, 1, 2, 3, 4],
+      due_time: null, due_window: false, target_stores: null, report_groups: null, linked_module: 'stock-diff' };
+    const comp = over => Object.assign({ id: 'c-1', recurring_task_id: 'r-sd', store_name: ST,
+      completed_by: 'auto:stock-diff', completed_at: DAY_ISO + 'T07:00:00Z', status: 'done',
+      completion_date: DAY_ISO }, over || {});
+    const rp = { id: 'rp', store_name: ST, reviewed: false, direction: 'interstore' };
+    /* Двата реда са дошли СЛЕД отметката — складът е отговорил следобед. */
+    const waiting = [
+      { id: 'l-1', status: 'pending', warehouse_response: 'return', store_response: null, differences_reports: rp },
+      { id: 'l-2', status: 'pending', warehouse_response: 'sent', store_response: null, differences_reports: rp }
+    ];
+    async function bul(comps) {
+      const h = boot({
+        modules: ['bulletin.js', 'stock-returns.js', 'stock-differences.js'],
+        user: { email: 's@temax.bg', display_name: 'Обект', role: 'store', store_name: ST },
+        data: {
+          users: [{ store_name: ST }], stores: [{ name: ST }],
+          recurring_tasks: [task], recurring_task_periods: [], recurring_task_skips: [], recurring_task_versions: [],
+          bulletins: () => [{ id: 'b-1', week_number: h.w.weekNum(DAY), year: isoWY(DAY), status: 'published',
+            created_at: MON, content: { calendar: (function () { const c = {}; h.w.DKEYS.forEach(k => { c[k] = []; }); return c; })(),
+            columns: { trade: [], warehouse: [], admin: [] } } }],
+          bulletin_tasks: [], task_completions: comps,
+          stock_differences: waiting, stock_diff_swaps: [], differences_reports: [],
+          goods_transit: [], bulletin_promotions: [], task_subtasks: [], subtask_completions: [],
+          notification_schedules: [], report_snapshots: [], supply_templates: [], supply_entries: []
+        }
+      });
+      const Real = h.w.Date, ms = DAY.getTime();
+      h.w.Date = class extends Real { constructor(...a) { if (!a.length) super(ms); else super(...a); } static now() { return ms; } };
+      h.w.bulSelectedId = 'b-1'; h.w.bulActiveDept = 'admin';
+      h.w.reportableStoresCache = [ST]; h.w.allStoresCache = [ST];
+      if (!guard('loadBulletin() не хвърля', () => h.w.loadBulletin())) return null;
+      for (let i = 0; i < 120; i++) {
+        if (h.w.bulAutoPending['stock-diff'] != null && h.doc.getElementById('sec-calendar')) break;
+        await ticks();
+      }
+      await ticks(); await ticks();
+      return h;
+    }
+    const note = h => { const p = h.doc.getElementById('dept-panel-admin');
+      const el = p && p.querySelector('[data-rec-row="r-sd"] .bul-auto-diff');
+      return el ? (el.textContent || '').trim() : '(няма надпис)'; };
+
+    /* А. Отметнат днес + 2 нови чакащи → ✓ от Разлики. */
+    const hA = await bul([comp()]);
+    if (hA) {
+      ok('чакащите редове са преброени (2) — сценарият е истински',
+        hA.w.bulAutoPending['stock-diff'] === 2, String(hA.w.bulAutoPending['stock-diff']));
+      ok('отметнат днес + 2 чакащи → блокът по отдел казва „✓ от Разлики"',
+        note(hA) === '✓ от Разлики', note(hA));
+      const cb = hA.doc.querySelector('#sec-calendar input[data-rtid="r-sd"][data-cdate="' + DAY_ISO + '"]');
+      ok('клетката за 13.10 в календара е отметната', !!cb && cb.checked === true);
+      const sp = cb && cb.parentNode.querySelector('span');
+      ok('и зачертана', !!sp && /line-through/.test(sp.getAttribute('style') || ''));
+      const plan = hA.doc.getElementById('sec-dayplan');
+      const ps = plan && Array.prototype.slice.call(plan.querySelectorAll('span'))
+        .filter(s => (s.textContent || '').indexOf('РАЗЛИКИ') >= 0)[0];
+      ok('„План за деня" — зачертан', !!ps && /line-through/.test(ps.getAttribute('style') || ''));
+      ok('и в плана няма „⏳ … чакат"', !!plan && plan.textContent.indexOf('чакат отговор') === -1);
+      hA.close();
+    }
+
+    /* Б. Неотметнат + 2 чакащи → брояч (регресия: поправката не скрива броя). */
+    const hB = await bul([]);
+    if (hB) { ok('неотметнат + 2 чакащи → „⏳ 2 реда чакат отговор"', note(hB) === '⏳ 2 реда чакат отговор', note(hB)); hB.close(); }
+
+    /* В. Отметка само за ВЧЕРА (12.10) → днес е брояч. Хваща „коя да е отметка
+       от седмицата". */
+    const hC = await bul([comp({ completion_date: MON })]);
+    if (hC) { ok('отметка само за 12.10 → днес пак брояч', note(hC) === '⏳ 2 реда чакат отговор', note(hC)); hC.close(); }
+
+    /* Г. Отметка на ДРУГ обект за днес → брояч. */
+    const hD = await bul([comp({ store_name: 'Добрич' })]);
+    if (hD) { ok('отметка на друг обект → брояч', note(hD) === '⏳ 2 реда чакат отговор', note(hD)); hD.close(); }
+
+    /* Д. Отложена днес (postponed) не е отметка. */
+    const hE = await bul([comp({ status: 'postponed', completed_by: 'Иван' })]);
+    if (hE) { ok('отложена днес → не е „✓"', note(hE) !== '✓ от Разлики', note(hE)); hE.close(); }
+  }
+
   report();
 })();
