@@ -131,7 +131,17 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
   секцията „📎 Прикачени документи“ на ЕКРАНА (`renderHistoryResults`) —
   показваше 1000 от 1427. При непълни данни: червен ред („каса“ /
   „документи“) + toast на екрана; Excel не се прави. Тест
-  `history-kasa-get-all.test.js`.
+  `history-kasa-get-all.test.js`. Потвърдено на живо 12.10 през браузъра на
+  Claude (admin): История → Каса 01.09–31.10 — 1360 ПОС и 1480 документа,
+  равни на SQL броя. Excel не е пускан.
+- 12.10 — лимит 1000, стъпка 3 от 5: кръстосаната секция на отчета
+  (report.js + send-scheduled-report, v52) — `stock_returns`, `kasa_storno`
+  по created_at и `kasa_storno` по storno_date през `reportGetAll` с
+  `order=id.asc`; ключове в `partial`: `stock_returns`, `kasa_storno`,
+  `kasa_storno_week`. Червеният ред „Непълни данни“ излиза под „За връщане“
+  и под „Сторно“ (нови `reportPartialHtml` там — дотогава редът имаше само
+  разликите и стоката на път). Важи и за таб „Днес“. Тест
+  `report-cross-get-all.test.js`.
 - 12.10 — История: падащото „Магазин“ показваше всеки обект по два пъти
   (`loadHistory()` викаше `loadHistoryStores()` и сама, и през
   `renderHistoryShell()`). Махнато е второто викане; `loadHistoryStores()`
@@ -394,19 +404,17 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
 - Липсват 8 `*-schema.sql` файла, споменати в `claude/*.md`/README, и
   `docs/DECISIONS.md` (очакван от `npm run brief`) — от описа на 04.10, не е
   проверявано повторно.
-- Лимит 1000, стъпка 2 (09feb73) — проверка на живо: История → Каса
-  01.09–31.10 (1309 ПОС, 1427 документа на екрана), Excel лист „Документи“
-  1427. Кой чака: Тенчо.
-- **Лимит 1000 — стъпки 3–5 (от прегледа 11.10)**: стъпка 3 — седмичният
-  отчет (#5, #6), report.js:1895–1925 + send-scheduled-report (kasa_storno
-  по седмица, днес до 642/1000; stock_returns без филтър) през
-  `reportGetAll`, заедно заради report-edge-sync, + деплой; стъпка 4 —
+- **Лимит 1000, стъпка 3 — деплой на send-scheduled-report (v52)**: файлът
+  в репото е готов, живата функция е още v51. Деплой през CLI след push,
+  после обратно четене. Дотогава имейлите от крона броят по старому;
+  таб „Днес“ (report.js) е с новото веднага след push. Кой чака: Тенчо
+  (давай за деплой).
+- **Лимит 1000 — стъпки 4–5 (от прегледа 11.10)**: стъпка 4 —
   stock-returns.js:1245 дедупликация на рекламации (#10; отрязване =
   дубликати при импорт); стъпка 5 — `loadStorno` (#4, kasa.js:1884, обект
   без дата, 432 max), `loadStockReturns` (#8, stock-returns.js:230) и
-  `select=supplier` (#9, stock-returns.js:1022), + `stock_returns` в #7.
-  stock_returns е 527 — резерв ~4–5 месеца. Кой чака: Claude Code, по ред
-  от Тенчо.
+  `select=supplier` (#9, stock-returns.js:1022). stock_returns е 527 —
+  резерв ~4–5 месеца. Кой чака: Claude Code, по ред от Тенчо.
 - **История — лист „Обобщение“ в Excel** (бележка, не се поправя сега):
   строи се от `histData.kasa`, тоест от търсенето на екрана, и е празен,
   когато типът не е Каса/Всички — докато равнение/главна/документи се

@@ -348,8 +348,10 @@ function byPair(list, store, supplier) {
          src.indexOf('buildCrossModuleSectionHtml(data.cross, data.scoped)') >= 0);
       ok(pair[0] + ': списъкът се вика с scoped',
          src.indexOf('reportReturnsListHtml(cross, scoped)') >= 0);
+      /* От 12.10.2026 заявката е на страници през reportGetAll
+         (report-cross-get-all) — колоните са същите. */
       ok(pair[0] + ': заявката носи supplier и created_at',
-         src.indexOf("sbGet('stock_returns','select=store_name,status,supplier,created_at')") >= 0);
+         src.indexOf("reportGetAll('stock_returns','select=store_name,status,supplier,created_at&order=id.asc')") >= 0);
       ok(pair[0] + ': прагът се чете от app_settings',
          src.indexOf("key=eq.returns_stale_days") >= 0);
     });

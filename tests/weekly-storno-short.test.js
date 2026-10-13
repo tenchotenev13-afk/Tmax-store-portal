@@ -209,7 +209,9 @@ function withoutSection(html, sec) {
     ok('една заявка по storno_date за седмицата', byStorno.length === 1 &&
       byStorno[0].indexOf('storno_date=gte.2026-09-07') >= 0 && byStorno[0].indexOf('storno_date=lte.2026-09-13') >= 0, byStorno.join(' | '));
     ok('select носи new_sum, reason, store_comment, status',
-      /select=store_name,storno_date,returned_sum,new_sum,reason,store_comment,status$/.test(byStorno[0] || ''), byStorno[0]);
+      /* (&|$), не $: от 12.10.2026 заявката е през reportGetAll и след select
+         идват &order=id.asc&limit=1000&offset=0 (report-cross-get-all). */
+      /select=store_name,storno_date,returned_sum,new_sum,reason,store_comment,status(&|$)/.test(byStorno[0] || ''), byStorno[0]);
     ok('storno_small_threshold не се чете', !h.calls.get.some(u => decodeURIComponent(u).indexOf('storno_small_threshold') >= 0));
     h.close();
   }

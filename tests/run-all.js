@@ -36,6 +36,7 @@ const TESTS = [
   'sb-get-all.test.js',
   'history-kasa-get-all.test.js',
   'history-store-dropdown.test.js',
+  'report-cross-get-all.test.js',
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',
   'catalog-lookup.test.js',

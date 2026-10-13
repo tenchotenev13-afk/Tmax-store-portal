@@ -1,6 +1,14 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v52 (12.10.2026) — ЕДНО нещо: още три четения на страници по 1000
+      (reportGetAll, order=id.asc) — stock_returns (без филтър, 527+ и расте),
+      kasa_storno по created_at в седмицата и kasa_storno по storno_date
+      („Сторна с по-малка нова сума"; най-лошата седмица досега 642). Ключове в
+      cross.partial: 'stock_returns', 'kasa_storno', 'kasa_storno_week'; червеният
+      ред „Непълни данни" излиза под „За връщане" и под „Сторно". Заковано в
+      tests/report-cross-get-all.test.js и tests/report-edge-sync.test.js.
+
    v51 (09.10.2026) — ТРИ неща, едно писмо:
    1) Четенията без прозорец по дата минават на страници по 1000
       (reportGetAll, копие от report.js) — differences_reports, stock_differences и
@@ -2723,8 +2731,8 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        прием от другите две посоки и да се разбие по обект. Само reviewed
        не стигаше - разбивка по магазин беше физически невъзможна. */
     sbGet('differences_reports','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,direction,reviewed'),
-    sbGet('stock_returns','select=store_name,status,supplier,created_at'),
-    sbGet('kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,status'),
+    reportGetAll('stock_returns','select=store_name,status,supplier,created_at&order=id.asc'),
+    reportGetAll('kasa_storno','created_at=gte.'+W.fromStamp+upStamp+'&select=store_name,status&order=id.asc'),
     sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
     /* Отворените позиции, БЕЗ филтър по created_at - той е датата на SAP
        импорта, не възрастта на позицията (виж пресмятането по-долу). */
@@ -2753,7 +2761,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        принадлежи на седмицата на сторното. Подвижен прозорец (таб „Днес")
        няма седмица. */
     W.toISO
-      ? sbGet('kasa_storno','storno_date=gte.'+W.fromISO+'&storno_date=lte.'+W.toISO+'&select=store_name,storno_date,returned_sum,new_sum,reason,store_comment,status')
+      ? reportGetAll('kasa_storno','storno_date=gte.'+W.fromISO+'&storno_date=lte.'+W.toISO+'&select=store_name,storno_date,returned_sum,new_sum,reason,store_comment,status&order=id.asc')
       : Promise.resolve([]),
     /* ⏳ „Необработени разлики над N дни" — МОМЕНТНА СНИМКА, не срез от
        седмицата. Затова и трите заявки нямат прозорец по дата: въпросът е
@@ -2782,7 +2790,8 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        места се разминават. */
     /* Непълно четене на страница (reportGetAll) — не се премълчава. */
     var partial = [], rowsRead = {};
-    [['goods_transit', r[4]], ['differences_reports', r[12]], ['stock_differences', r[13]]].forEach(function(p){
+    [['goods_transit', r[4]], ['differences_reports', r[12]], ['stock_differences', r[13]],
+     ['stock_returns', r[1]], ['kasa_storno', r[2]], ['kasa_storno_week', r[11]]].forEach(function(p){
       rowsRead[p[0]] = Array.isArray(p[1]) ? p[1].length : 0;
       if (Array.isArray(p[1]) && p[1].partial) partial.push({ table: p[0], rows: p[1].length });
     });
@@ -3756,6 +3765,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
   h += crossModuleRow('📥','За връщане (текущо състояние)',
     crossMetricCard(cross.returns.open,'отворени (чакат/взети)', cross.returns.open>0) +
     crossMetricCard(cross.returns.completed,'приключени'));
+  h += reportPartialHtml(cross, ['stock_returns']);
   h += reportReturnsListHtml(cross, scoped);
 
   h += reportLateSectionHtml(cross, scoped);
@@ -3768,6 +3778,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
     crossMetricCard(cross.storno.total,'въведени') +
     crossMetricCard(cross.storno.returned,'върнати за коментар', cross.storno.returned>0) +
     crossMetricCard(cross.storno.resubmitted,'поправени от обекта'));
+  h += reportPartialHtml(cross, ['kasa_storno', 'kasa_storno_week']);
   h += reportStornoShortHtml(cross);
   h += reportChecklistSectionHtml(cross);
 
