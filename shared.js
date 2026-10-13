@@ -1664,6 +1664,10 @@ function setupTabsForRole(){
   if(calTab)calTab.style.display='';
   var srTab=document.getElementById('tab-stock-returns');
   if(srTab)srTab.style.display='';
+  /* Таб Преоценка — обекти (manager/sklad), admin, accounting, supply; правилото е
+     rvCanSee() в revaluation.js (зарежда се последен — затова typeof). */
+  var rvTab=document.getElementById('tab-revaluation');
+  if(rvTab)rvTab.style.display=(typeof rvCanSee==='function'&&rvCanSee())?'':'none';
   var sdTab=document.getElementById('tab-stock-diff');
   if(sdTab)sdTab.style.display='';
   /* Таб Администрация — admin и accounting. Accounting вижда вътре САМО
@@ -1692,7 +1696,7 @@ function showModule(mod){
     showModule('kasa');
     return;
   }
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist','revaluation'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -1737,6 +1741,7 @@ function showModule(mod){
   if(mod==='transit')loadTransit();
   if(mod==='calendar')loadCalendar();
   if(mod==='stock-returns')loadStockReturns();
+  if(mod==='revaluation'&&typeof loadRevaluation==='function')loadRevaluation();
   if(mod==='stock-diff')loadStockDiff();
   if(mod==='pallets')loadPallets();
   if(mod==='supply')loadSupply();

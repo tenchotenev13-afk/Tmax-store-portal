@@ -263,9 +263,9 @@ tr:hover td{background:#fafafa;}
 #tab-transport:hover,#tab-client:hover,#tab-calendar:hover{color:#86efac;background:rgba(22,101,52,.25);}
 #tab-transport.active,#tab-client.active,#tab-calendar.active{color:#4ade80;border-bottom-color:#16a34a;border-top-color:#16a34a;background:rgba(22,101,52,.2);}
 /* Blue: Warehouse */
-#tab-transit,#tab-stock-returns,#tab-stock-diff{border-top:3px solid transparent;}
-#tab-transit:hover,#tab-stock-returns:hover,#tab-stock-diff:hover{color:#93c5fd;background:rgba(30,64,175,.25);}
-#tab-transit.active,#tab-stock-returns.active,#tab-stock-diff.active{color:#60a5fa;border-bottom-color:#2563eb;border-top-color:#2563eb;background:rgba(30,64,175,.2);}
+#tab-transit,#tab-stock-returns,#tab-revaluation,#tab-stock-diff{border-top:3px solid transparent;}
+#tab-transit:hover,#tab-stock-returns:hover,#tab-revaluation:hover,#tab-stock-diff:hover{color:#93c5fd;background:rgba(30,64,175,.25);}
+#tab-transit.active,#tab-stock-returns.active,#tab-revaluation.active,#tab-stock-diff.active{color:#60a5fa;border-bottom-color:#2563eb;border-top-color:#2563eb;background:rgba(30,64,175,.2);}
 /* Red: Bulletin */
 #tab-bulletin{border-top:3px solid transparent;}
 #tab-bulletin:hover{color:#fca5a5;background:rgba(185,28,28,.25);}
@@ -375,6 +375,7 @@ OneSignalDeferred.push(async function(OneSignal) {
       <!-- Група: Склад/Приемане (синьо) -->
       <button id="tab-transit" class="nav-tab" onclick="showModule('transit')" style="display:none;"><span class="ti">📦</span><span class="tl">Стока на път</span></button>
       <button id="tab-stock-returns" class="nav-tab" onclick="showModule('stock-returns')" style="display:none;"><span class="ti">🔄</span><span class="tl">За връщане</span></button>
+      <button id="tab-revaluation" class="nav-tab" onclick="showModule('revaluation')" style="display:none;"><span class="ti">🏷️</span><span class="tl">Преоценка</span></button>
       <button id="tab-stock-diff" class="nav-tab" onclick="showModule('stock-diff')" style="display:none;"><span class="ti">📊</span><span class="tl">Разлики</span></button>
       <div class="tab-sep" id="sep-misc"></div>
       <!-- Група: Справки (сиво) -->
@@ -531,6 +532,7 @@ OneSignalDeferred.push(async function(OneSignal) {
   <div id="mod-calendar" class="page" style="display:none;"></div>
 
   <div id="mod-stock-returns" class="page" style="display:none;"></div>
+  <div id="mod-revaluation" class="page" style="display:none;"></div>
   <div id="mod-stock-diff" class="page" style="display:none;"></div>
 
   <!-- ADMIN -->
@@ -879,5 +881,6 @@ function loadTabOrder(){
 <script src="notifications.js"></script>
 <script src="reference.js"></script>
 <script src="handbook.js?v=20260707a"></script>
+<script src="revaluation.js"></script>
 </body>
 </html>
