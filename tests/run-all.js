@@ -233,6 +233,7 @@ const TESTS = [
   'supply-note.test.js',
   'supply-history.test.js',
   'supply-co-note.test.js',
+  'supply-no-need.test.js',
   'oborot-bulletin-link.test.js',
   'oborot-co-entry.test.js',
   'admin-oborot-report.test.js',

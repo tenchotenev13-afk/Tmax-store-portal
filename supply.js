@@ -26,6 +26,11 @@ var supplyPrevEntries = []; /* записите на обекта за пред�
 var supplyWeek = '';        /* седмицата, за която е рендирана формата */
 var supplySaving = {};      /* templateId -> true, докато тече запис */
 var supplyCoNotes = [];     /* supply_store_notes на обекта за текущата и предишната седмица */
+/* „Нямам нужда тази седмица" (supply_no_need, supply-no-need-schema.sql, 13.10.2026)
+   — редовете на обекта за supplyWeek. Ред за бланка = бланката се брои за
+   попълнена в supply_store_done() и задачата в Бюлетина се отмята. */
+var supplyNoNeed = [];
+var supplyNoNeedSaving = {}; /* templateId -> true, докато тече запис/отмяна */
 
 /* Понеделникът на ISO седмицата на дадена дата (по подразбиране днес), като
    местна дата 'YYYY-MM-DD'. Неделя е последният ден от седмицата, не първият. */
@@ -111,6 +116,7 @@ function loadSupply(){
     tpls = Array.isArray(tpls) ? tpls.filter(function(t){ return t.active !== false; }) : [];
     var store = currentUser.store_name;
     supplyTemplates = tpls.filter(function(t){ return supplyTemplateForStore(t, store); });
+    supplyNoNeed = [];
     if(!supplyTemplates.length){ renderSupplyStore(); return; }
 
     var ids = supplyTemplates.map(function(t){ return t.id; });
@@ -124,7 +130,12 @@ function loadSupply(){
          конзолата), а формата си остава. */
       sbGet('supply_store_notes', 'store_name=eq.' + encodeURIComponent(store) +
         '&week_start=in.(' + supplyWeek + ',' + prev + ')&template_id=in.(' + ids.join(',') + ')' +
-        '&select=template_id,store_name,week_start,co_note,co_note_by,co_note_at', true)
+        '&select=template_id,store_name,week_start,co_note,co_note_by,co_note_at', true),
+      /* Не silent: провалът значи, че бутонът „Нямам нужда" би стоял, макар
+         отметката да съществува — грешката трябва да се види. */
+      sbGet('supply_no_need', 'store_name=eq.' + encodeURIComponent(store) +
+        '&week_start=eq.' + supplyWeek + '&template_id=in.(' + ids.join(',') + ')' +
+        '&select=id,template_id,store_name,week_start,created_by,created_at')
     ]).then(function(res){
       /* Филтрите се повтарят и тук: редовете, които не са за тази бланка,
          обект и седмица, не бива да попаднат във формата, каквото и да върне заявката. */
@@ -137,6 +148,9 @@ function loadSupply(){
       supplyCoNotes = (Array.isArray(res[2]) ? res[2] : []).filter(function(n){
         return n.store_name === store && ids.indexOf(n.template_id) >= 0 &&
           (n.week_start === supplyWeek || n.week_start === prev);
+      });
+      supplyNoNeed = (Array.isArray(res[3]) ? res[3] : []).filter(function(n){
+        return n.store_name === store && n.week_start === supplyWeek && ids.indexOf(n.template_id) >= 0;
       });
       renderSupplyStore();
     });
@@ -173,12 +187,23 @@ function renderSupplyStore(){
       var ts = e.updated_at || e.created_at;
       if(ts && (!last || ts > last.ts)) last = { ts: ts, by: e.updated_by || e.created_by };
     });
+    /* „Нямам нужда": има ли ред за бланката и има ли ЗАПИСАНИ количества.
+       Бутонът не се крие според данните — при количества е неактивен. */
+    var nn = supplyNoNeedFor(t.id);
+    var hasQty = items.some(function(i){
+      var e = byItem[i.id];
+      return !!e && ((e.qty1 !== null && e.qty1 !== undefined) || (e.qty2 !== null && e.qty2 !== undefined));
+    });
+    var tidA = escAttr(t.id);
 
     html += '<div class="card" id="sup-card-' + escAttr(t.id) + '" style="margin-bottom:14px;">' +
       '<div class="card-title">' + esc(t.name) + '</div>' +
       (t.instructions ? '<div style="font-size:13px;color:var(--muted);margin-bottom:10px;white-space:pre-line;">' + esc(t.instructions) + '</div>' : '') +
       supplyPhotosHtml(t) +
       (last ? '<div class="sup-last" style="font-size:12px;color:#16a34a;margin-bottom:8px;">Последно запазено: ' + supplyFmtStamp(last.ts) + ' от ' + esc(last.by) + '</div>' : '') +
+      (nn ? '<div class="sup-no-need" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:13px;color:#16a34a;background:#f0fdf4;border-left:3px solid #16a34a;padding:6px 10px;border-radius:4px;margin-bottom:8px;">' +
+        '<span>✅ Нямам нужда тази седмица — отбелязано ' + esc(supplyFmtDM(nn.created_at)) + (nn.created_by ? ' от ' + esc(nn.created_by) : '') + '</span>' +
+        '<button type="button" class="btn sup-no-need-undo" style="background:#f1f5f9;font-size:12px;padding:4px 10px;" onclick="supplyUndoNoNeed(\'' + tidA + '\')">↩ Отмени</button></div>' : '') +
       supplyStoreCoNoteHtml(t) +
       '<div class="tbl-wrap tbl-compact tbl-auto"><table><thead><tr>' +
         (sap ? '<th>САП</th>' : '') + '<th>Име</th><th>Доставчик</th>' +
@@ -213,7 +238,11 @@ function renderSupplyStore(){
         '</tr>';
       }).join('') +
       '</tbody></table></div>' +
-      '<div style="margin-top:14px;"><button class="btn btn-green" onclick="submitSupplyForm(\'' + escAttr(t.id) + '\')">💾 Запази</button></div>' +
+      '<div style="margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;"><button class="btn btn-green" onclick="submitSupplyForm(\'' + escAttr(t.id) + '\')">💾 Запази</button>' +
+        (nn ? '' : '<button type="button" class="btn sup-no-need-btn" style="background:#f1f5f9;' + (hasQty ? 'opacity:.5;cursor:not-allowed;' : '') + '"' +
+          (hasQty ? ' disabled title="Има попълнени количества — първо ги изчисти"' : '') +
+          ' onclick="supplyMarkNoNeed(\'' + tidA + '\')">Нямам нужда тази седмица</button>') +
+      '</div>' +
     '</div>';
   });
   wrap.innerHTML = html + '</div>';
@@ -240,6 +269,49 @@ function supplyStoreCoNoteHtml(t){
       esc(String(old.co_note).trim()) + '</div>';
   }
   return h;
+}
+
+/* ─── „НЯМАМ НУЖДА ТАЗИ СЕДМИЦА" ────────────────────────────── */
+function supplyNoNeedFor(templateId){
+  return supplyNoNeed.find(function(n){ return n.template_id === templateId; }) || null;
+}
+/* Има ли въведено количество в полетата на бланката — и незаписано. */
+function supplyFormHasQty(templateId){
+  return supplyItems.some(function(i){
+    if(i.template_id !== templateId) return false;
+    return [1, 2].some(function(n){
+      var el = document.getElementById('sup-q' + n + '-' + i.id);
+      return !!el && String(el.value || '').trim() !== '';
+    });
+  });
+}
+function supplyMarkNoNeed(templateId){
+  var t = supplyTemplates.find(function(x){ return x.id === templateId; });
+  if(!t){ toast('Бланката не е намерена', '#dc2626'); return; }
+  if(supplyNoNeedSaving[templateId] || supplyNoNeedFor(templateId)) return;
+  if(supplyFormHasQty(templateId)){ toast('Има попълнени количества — първо ги изчисти', '#d97706'); return; }
+  supplyNoNeedSaving[templateId] = true;
+  sbPost('supply_no_need', {
+    template_id: templateId, store_name: currentUser.store_name,
+    week_start: supplyWeek || supplyWeekStart(),
+    created_by: currentUser.display_name || currentUser.email
+  }).then(function(res){
+    supplyNoNeedSaving[templateId] = false;
+    if(!res || !res.ok){ toast('Грешка при запис на „Нямам нужда": ' + sbErrMsg(res), '#dc2626'); return; }
+    toast('✅ Отбелязано: нямам нужда тази седмица');
+    loadSupply();
+  });
+}
+function supplyUndoNoNeed(templateId){
+  var nn = supplyNoNeedFor(templateId);
+  if(!nn || supplyNoNeedSaving[templateId]) return;
+  supplyNoNeedSaving[templateId] = true;
+  sbDelete('supply_no_need', 'id=eq.' + encodeURIComponent(nn.id)).then(function(res){
+    supplyNoNeedSaving[templateId] = false;
+    if(!res || !res.ok){ toast('Грешка при отмяна: ' + sbErrMsg(res), '#dc2626'); return; }
+    toast('↩ Отменено');
+    loadSupply();
+  });
 }
 
 /* ─── ИСТОРИЯ НА РЕД (последните 4 седмици преди текущата) ───── */
@@ -380,8 +452,20 @@ function submitSupplyForm(templateId){
         toast('Грешка при запис: ' + failed.length + ' от ' + results.length + ' реда не са записани — ' + sbErrMsg(failed[0]), '#dc2626');
         return;
       }
-      toast('💾 Запазено');
-      loadSupply();
+      /* Записана поне една стойност -> бланката е заявена, не „без нужда":
+         редът в supply_no_need се трие. По филтър, не по id — отметка от
+         друго устройство след зареждането също трябва да падне. */
+      var hasVal = rows.some(function(r){ return r.qty1 !== null || r.qty2 !== null; });
+      if(!hasVal){ toast('💾 Запазено'); loadSupply(); return; }
+      return sbDelete('supply_no_need', 'template_id=eq.' + templateId + '&store_name=eq.' + encodeURIComponent(store) +
+        '&week_start=eq.' + week).then(function(del){
+        if(!del || !del.ok){
+          toast('Количествата са записани, но „Нямам нужда" НЕ е махнато: ' + sbErrMsg(del), '#dc2626');
+        } else {
+          toast('💾 Запазено');
+        }
+        loadSupply();
+      });
     });
   }).catch(function(){
     supplySaving[templateId] = false;
@@ -437,7 +521,7 @@ function supplyLoadOverview(tpls){
   supplyTemplates = tpls;
   var week = supplyOvWeek;
   if(!tpls.length){
-    supplyOvData = { items: [], entries: [], allStores: [], coNotes: [], coNotesErr: null };
+    supplyOvData = { items: [], entries: [], allStores: [], coNotes: [], coNotesErr: null, noNeed: [], noNeedErr: null };
     renderSupplyOverview(); return;
   }
   var ids = tpls.map(function(t){ return t.id; });
@@ -451,6 +535,11 @@ function supplyLoadOverview(tpls){
        коментар, който просто не е бил зареден. */
     supplyGetAll('supply_store_notes', 'week_start=eq.' + week + '&template_id=in.(' + ids.join(',') +
       ')&select=id,template_id,store_name,week_start,co_note,co_note_by,co_note_at')
+      .catch(function(e){ return { error: String((e && e.message) || e) }; }),
+    /* „Без нужда" — провалът също не чупи матрицата, но се казва с червен ред
+       (supplyOvNoNeedErrHtml): иначе обектът би изглеждал като непопълнил. */
+    supplyGetAll('supply_no_need', 'week_start=eq.' + week + '&template_id=in.(' + ids.join(',') +
+      ')&select=id,template_id,store_name,week_start,created_by,created_at')
       .catch(function(e){ return { error: String((e && e.message) || e) }; })
   ]).then(function(res){
     if(week !== supplyOvWeek) return; /* междувременно е избрана друга седмица */
@@ -461,7 +550,9 @@ function supplyLoadOverview(tpls){
       entries: res[1].filter(function(e){ return e.week_start === week; }),
       allStores: Array.isArray(res[2]) ? res[2] : [],
       coNotes: Array.isArray(res[3]) ? res[3].filter(function(n){ return n.week_start === week; }) : [],
-      coNotesErr: Array.isArray(res[3]) ? null : ((res[3] && res[3].error) || 'неизвестна грешка')
+      coNotesErr: Array.isArray(res[3]) ? null : ((res[3] && res[3].error) || 'неизвестна грешка'),
+      noNeed: Array.isArray(res[4]) ? res[4].filter(function(n){ return n.week_start === week; }) : [],
+      noNeedErr: Array.isArray(res[4]) ? null : ((res[4] && res[4].error) || 'неизвестна грешка')
     };
     renderSupplyOverview();
   }).catch(function(e){
@@ -507,6 +598,17 @@ function supplyOvMatrix(t){
       if(!seenS[e.store_name]){ seenS[e.store_name] = 1; stores.push(e.store_name); }
     });
   }
+  /* „Без нужда" = ред в supply_no_need И нито един ред с бройки за бланката.
+     Има ли бройки — данните печелят. При target_stores null такъв обект
+     отваря колона, за да не изглежда като непопълнил. */
+  var withQty = {}, noNeed = {};
+  entries.forEach(function(e){ if(val(e.qty1) !== null || val(e.qty2) !== null) withQty[e.store_name] = true; });
+  (d.noNeed || []).forEach(function(n){
+    if(n.template_id !== t.id || withQty[n.store_name]) return;
+    if(Array.isArray(t.target_stores) && t.target_stores.indexOf(n.store_name) < 0) return;
+    noNeed[n.store_name] = true;
+    if(stores.indexOf(n.store_name) < 0) stores.push(n.store_name);
+  });
   stores.sort(function(a,b){ return a.localeCompare(b,'bg'); });
   var byKey = {};
   entries.forEach(function(e){ byKey[e.item_id + '|' + e.store_name] = e; });
@@ -532,8 +634,11 @@ function supplyOvMatrix(t){
     });
     return { item: i, cells: cells, totals: two ? [tot1, tot2] : [tot1], empty: empty, notes: notes };
   });
-  return { stores: stores, two: two, rows: rows };
+  return { stores: stores, two: two, rows: rows, noNeed: noNeed };
 }
+var SUPPLY_NO_NEED_TEXT = 'без нужда';
+/* Обектът на клетка с индекс idx в r.cells (при col2_label — по две клетки на обект). */
+function supplyOvCellStore(m, idx){ return m.stores[Math.floor(idx / (m.two ? 2 : 1))]; }
 /* Един заглавен ред — за Excel. В HTML при col2_label заглавието е на два реда. */
 function supplyOvHeaderRow(t, m){
   var h = ['САП', 'Име', 'Доставчик'];
@@ -575,6 +680,7 @@ function renderSupplyOverview(){
     var done = roster.filter(function(s){ return filled[s]; }).length;
 
     var m = supplyOvMatrix(t);
+    var nnCount = roster.filter(function(s){ return m.noNeed[s]; }).length;
     var sups = supplyOvSuppliers(t);
     var selIdx = Object.prototype.hasOwnProperty.call(supplyOvSupplier, t.id) ? supplyOvSupplier[t.id] : -1;
     if(selIdx >= sups.length) selIdx = -1;
@@ -616,13 +722,18 @@ function renderSupplyOverview(){
     }
 
     html += '<div class="card" id="sup-ov-' + tid + '" style="margin-bottom:14px;">' +
-      '<div class="card-title">' + esc(t.name) + ' — попълнили ' + done + ' от ' + roster.length + '</div>' +
+      '<div class="card-title">' + esc(t.name) + ' — попълнили ' + done + ' от ' + roster.length +
+        (nnCount ? ' · без нужда: ' + nnCount : '') + '</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:6px 18px;font-size:13px;margin-bottom:12px;">' +
       roster.map(function(s){
         var ok = !!filled[s];
+        if(!ok && m.noNeed[s]){
+          return '<span class="sup-ov-store sup-ov-nn" data-filled="nn" style="color:#94a3b8;">➖ ' + esc(s) + ' — ' + SUPPLY_NO_NEED_TEXT + '</span>';
+        }
         return '<span class="sup-ov-store" data-filled="' + (ok ? '1' : '0') + '">' + (ok ? '✅' : '⬜') + ' ' + esc(s) + '</span>';
       }).join('') +
       '</div>' +
+      supplyOvNoNeedErrHtml() +
       (hasSup ? '<div class="filter-bar sup-chips" style="margin-bottom:8px;">' +
         chip(-1, 'Всички') + sups.map(function(s, i){ return chip(i, s || 'Без доставчик'); }).join('') +
       '</div>' : '') +
@@ -638,7 +749,12 @@ function renderSupplyOverview(){
           (sap ? '<td style="font-family:DM Mono,monospace;">' + esc(r.item.sap_code) + '</td>' : '') +
           '<td class="sup-name-c" style="white-space:nowrap;">' + esc(r.item.name) + '</td>' +
           (hasSup ? '<td style="font-size:12px;white-space:nowrap;">' + esc(r.item.supplier) + '</td>' : '') +
-          r.cells.map(function(v){ return '<td class="sup-cell" style="' + tdNum + '">' + num(v) + '</td>'; }).join('') +
+          r.cells.map(function(v, ci){
+            if(v === null && m.noNeed[supplyOvCellStore(m, ci)]){
+              return '<td class="sup-cell sup-nn" style="' + tdNum + 'color:#94a3b8;font-size:11px;font-family:inherit;">' + SUPPLY_NO_NEED_TEXT + '</td>';
+            }
+            return '<td class="sup-cell" style="' + tdNum + '">' + num(v) + '</td>';
+          }).join('') +
           r.totals.map(function(v){ return '<td class="sup-total" style="' + tdNum + 'font-weight:700;">' + num(v) + '</td>'; }).join('') +
         '</tr>';
       }).join('') : '<tr><td colspan="' + colCount + '" style="text-align:center;padding:18px;color:#94a3b8;">Няма редове за показване.</td></tr>') +
@@ -648,6 +764,11 @@ function renderSupplyOverview(){
     '</div>';
   });
   wrap.innerHTML = html + '</div>';
+}
+function supplyOvNoNeedErrHtml(){
+  var e = supplyOvData && supplyOvData.noNeedErr;
+  if(!e) return '';
+  return '<div class="sup-nn-err" style="font-size:12px;color:#dc2626;margin-bottom:8px;">Отметките „без нужда" не можаха да се заредят: ' + esc(e) + '</div>';
 }
 /* Коментарите от обектите под матрицата — само за видимите редове (филтърът по
    доставчик важи и тук). Няма коментари -> празен низ, без заглавие. */
@@ -790,7 +911,10 @@ function supplyExportExcel(templateId){
       var m = supplyOvMatrix(t);
       var aoa = [supplyOvHeaderRow(t, m)];
       m.rows.forEach(function(r){
-        aoa.push([r.item.sap_code || '', r.item.name || '', r.item.supplier || ''].concat(r.cells, r.totals));
+        var cells = r.cells.map(function(v, ci){
+          return (v === null && m.noNeed[supplyOvCellStore(m, ci)]) ? SUPPLY_NO_NEED_TEXT : v;
+        });
+        aoa.push([r.item.sap_code || '', r.item.name || '', r.item.supplier || ''].concat(cells, r.totals));
       });
       var wb = XLSX.utils.book_new();
       var ws = XLSX.utils.aoa_to_sheet(aoa);

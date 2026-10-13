@@ -1357,7 +1357,8 @@ function bulLoadReturnsPending(){
 }
 /* „Зареждане": колко от активните бланки, които важат за обекта, са попълнени
    за ТАЗИ седмица — същото правило като supply_store_done() в базата (поне
-   един ред с непразна стойност, 0 се брои). САМО за надписа: отметката идва от
+   един ред с непразна стойност, 0 се брои, ИЛИ ред „Нямам нужда" в
+   supply_no_need — от 13.10.2026). САМО за надписа: отметката идва от
    базата. Понеделникът се смята на място — вж. забележката при
    bulLoadReturnsPending за името bulWeekMondayISO. */
 function bulLoadSupplyPending(){
@@ -1373,15 +1374,17 @@ function bulLoadSupplyPending(){
   })();
   Promise.all([
     sbGet('supply_templates','select=id,active,target_stores&active=is.true'),
-    sbGet('supply_entries','select=template_id,qty1,qty2&store_name=eq.'+encodeURIComponent(store)+'&week_start=eq.'+mon)
+    sbGet('supply_entries','select=template_id,qty1,qty2&store_name=eq.'+encodeURIComponent(store)+'&week_start=eq.'+mon),
+    sbGet('supply_no_need','select=template_id&store_name=eq.'+encodeURIComponent(store)+'&week_start=eq.'+mon)
   ]).then(function(res){
     /* sbGet връща масив и при провал — празен отговор НЕ е „0 от 0". */
-    if(!Array.isArray(res[0])||!Array.isArray(res[1])||!res[0].length) return;
+    if(!Array.isArray(res[0])||!Array.isArray(res[1])||!Array.isArray(res[2])||!res[0].length) return;
     var mine=res[0].filter(function(t){
       return t.active!==false && (!t.target_stores||!t.target_stores.length||t.target_stores.indexOf(store)>=0);
     });
     var filled={};
     res[1].forEach(function(e){ if((e.qty1!==null&&e.qty1!==undefined) || (e.qty2!==null&&e.qty2!==undefined)) filled[e.template_id]=true; });
+    res[2].forEach(function(n){ filled[n.template_id]=true; });
     bulAutoPending['supply']={done:mine.filter(function(t){return filled[t.id];}).length, total:mine.length};
     renderBulletin();
   });

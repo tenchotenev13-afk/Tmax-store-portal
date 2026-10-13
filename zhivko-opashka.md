@@ -23,6 +23,9 @@
 - 11.10 · нова таблица revaluation_items — id uuid PK, submission_id uuid NOT NULL → revaluation_submissions, campaign_id uuid NOT NULL → revaluation_campaigns, store_name text NOT NULL, sort_order integer NOT NULL default 0, sap_code text NOT NULL, product_name text NULL, unit text NULL, qty numeric(12,3) NOT NULL default 0, store_comment text NULL, std_price numeric(10,2) NULL, discount_pct numeric(5,2) NULL, proposed_price numeric(10,2) NULL, new_sap_code text NULL, sale_price numeric(10,2) NULL, co_comment text NULL, co_by text NULL, co_at timestamptz NULL, created_by text NULL, created_at timestamptz NOT NULL default now(), updated_at timestamptz NULL
   (в базата от миграцията 20261011204320)
 
+- 13.10 · нова таблица supply_no_need — id uuid PK, template_id uuid NOT NULL → supply_templates, store_name text NOT NULL, week_start date NOT NULL, created_by text NULL, created_at timestamptz NOT NULL default now(); уникалност (template_id, store_name, week_start)
+  (в базата от миграцията 20261013062446)
+
 ## Изпратено 11.10.2026
 
 - 11.10 · supply_entries.note — text, NULL, без default
