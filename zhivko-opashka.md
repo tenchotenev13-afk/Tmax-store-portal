@@ -14,8 +14,6 @@
 
 ## Чака изпращане
 
-- 11.10 · нова таблица supply_store_notes — id uuid PK, template_id uuid, store_name text, week_start date, co_note text NULL, co_note_by text NULL, co_note_at timestamptz; уникалност (template_id, store_name, week_start)
-  (в базата от миграцията 20261011185952)
 - 11.10 · нова таблица revaluation_campaigns — id uuid PK, title text NOT NULL, kind text NOT NULL default 'mandatory' (стойности 'mandatory' / 'optional'), starts_on date NOT NULL, ends_on date NOT NULL, default_pct numeric(5,2) NULL, note text NULL, status text NOT NULL default 'open' (стойности 'open' / 'closed'), created_by text NULL, created_at timestamptz NOT NULL default now(), closed_at timestamptz NULL, closed_by text NULL
   (в базата от миграцията 20261011204320)
 - 11.10 · нова таблица revaluation_submissions — id uuid PK, campaign_id uuid NOT NULL → revaluation_campaigns, store_name text NOT NULL, default_pct numeric(5,2) NULL, no_items boolean NOT NULL default false, store_note text NULL, status text NOT NULL default 'draft' (стойности 'draft' / 'submitted'), submitted_at timestamptz NULL, submitted_by text NULL, reopened_at timestamptz NULL, reopened_by text NULL, created_at timestamptz NOT NULL default now(); уникалност (campaign_id, store_name)
@@ -26,12 +24,15 @@
 - 13.10 · нова таблица supply_no_need — id uuid PK, template_id uuid NOT NULL → supply_templates, store_name text NOT NULL, week_start date NOT NULL, created_by text NULL, created_at timestamptz NOT NULL default now(); уникалност (template_id, store_name, week_start)
   (в базата от миграцията 20261013062446)
 
-## Изпратено 11.10.2026
+## Потвърдено 12.10.2026
 
 - 11.10 · supply_entries.note — text, NULL, без default
   (в базата от миграцията 20261011144917)
 - 11.10 · recurring_tasks.store_hints — jsonb, NULL, без default
   (жокер по обект под постоянната задача; recurring-task-store-hints-schema.sql)
+- 11.10 · нова таблица supply_store_notes — id uuid PK, template_id uuid, store_name text, week_start date, co_note text NULL, co_note_by text NULL, co_note_at timestamptz; уникалност (template_id, store_name, week_start) (в огледалото — обикновен индекс вместо UNIQUE)
+  (в базата от миграцията 20261011185952)
+  (потвърдено от Живко на 12.10 в 13:48: огледалото е наваксало)
 
 ## Потвърдено 11.10.2026
 
