@@ -1,6 +1,7 @@
 /* stock-returns.js — Стока за връщане */
 
 var srData   = [];
+var srPartial = null; /* брой прочетени редове, ако четенето в loadStockReturns е прекъснало; иначе null */
 /* Storage за снимки на товарителница/документ при връщане - преизползва
    същия bucket като модул "Разлики", отделен префикс на пътя */
 var SR_SB    = 'https://xiwkdiqqplgdcrkewgtv.supabase.co';
@@ -227,11 +228,16 @@ function srDecisionChanged(r){
 function loadStockReturns() {
   var wrap = document.getElementById('mod-stock-returns');
   if (wrap) wrap.innerHTML = '<div style="display:flex;justify-content:center;align-items:center;height:200px;color:#94a3b8;">⏳ Зареждане...</div>';
-  sbGet('stock_returns', 'order=doc_date.desc' + storeQ()).then(function(data) {
+  /* sbGetAll + id като tiebreaker: PostgREST реже на 1000 без грешка
+     (627 реда на 13.10.2026, ~100 нови на месец). При .partial списъкът се
+     показва, но с червен ред над него — не като пълен. */
+  sbGetAll('stock_returns', 'order=doc_date.desc,id.desc' + storeQ()).then(function(data) {
     srData = Array.isArray(data) ? data : [];
+    srPartial = data && data.partial ? srData.length : null;
     return srLoadDiffTypes();
   }).then(function(){
     renderStockReturns();
+    if (srPartial !== null) toast('⚠️ Непълни данни — За връщане: прочетени ' + srPartial + ' реда, четенето прекъсна', '#dc2626');
   }).catch(function(err) {
     var w = document.getElementById('mod-stock-returns');
     if (w) w.innerHTML = '<div style="color:#dc2626;padding:40px;text-align:center;">Грешка при зареждане.</div>';
@@ -397,6 +403,9 @@ function renderStockReturns() {
   if (srTab==='complaint') h += '<button onclick="exportSRExcel(true)" style="border:1px solid #16a34a;background:#fff;color:#16a34a;border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">📥 Excel (един лист)</button>';
   h += '</div>';
 
+  if (srPartial !== null) {
+    h += '<div style="color:#dc2626;font-weight:600;font-size:13px;margin-bottom:10px;">⚠️ Непълни данни — прочетени ' + srPartial + ' реда, четенето прекъсна. Списъкът и броячите по-долу не са пълни.</div>';
+  }
   /* Таблица */
   if (!list.length) {
     h += '<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📦</div><div style="margin-top:8px;">Няма записи.</div></div>';
@@ -1012,17 +1021,19 @@ function srImportDiffList(wb, progEl){
   progEl.textContent='⏳ Проверка за съществуващи записи...';
   var stores=rows.map(function(r){return r.store_name;}).filter(function(s,i,a){return a.indexOf(s)===i;});
   Promise.all([
-    /* sbGetOk, не sbGet: провалена заявка НЕ бива да изглежда като „няма
-       нищо" - тогава всеки ред би станал дубликат. */
+    /* sbGetAll (на страници, .partial при провал), не sbGet: провалена или
+       отрязана заявка НЕ бива да изглежда като „няма нищо" - тогава всеки
+       ред би станал дубликат. .partial спира импорта. */
     /* confirmed_date се тегли, за да се разбере дали импортът я СМЕНЯ: само
        тогава се пише следа (confirmed_by/confirmed_at). Без нея всеки импорт
        би „освежавал" чужда актуализация и следата би станала безполезна. */
-    sbGetOk('stock_returns','source=eq.diff&select=id,store_name,order_number,sap_code,product_name,status,confirmed_date,confirmed_by&store_name=in.('+
-      stores.map(function(s){return '"'+encodeURIComponent(s)+'"';}).join(',')+')'),
-    sbGetOk('stock_returns','select=supplier')
+    sbGetAll('stock_returns','source=eq.diff&select=id,store_name,order_number,sap_code,product_name,status,confirmed_date,confirmed_by&store_name=in.('+
+      stores.map(function(s){return '"'+encodeURIComponent(s)+'"';}).join(',')+')&order=id.asc'),
+    sbGetAll('stock_returns','select=supplier&order=id.asc')
   ]).then(function(res){
-    if(!res[0].ok || !res[1].ok){
-      var err=(!res[0].ok?res[0]:res[1]).error;
+    if(res[0].partial || res[1].partial){
+      var cut=res[0].partial?res[0]:res[1];
+      var err='Непълни данни — прочетени '+cut.length+' реда, четенето прекъсна';
       progEl.innerHTML='<span style="color:#dc2626;">Грешка при проверка на съществуващите: '+esc(err)+'</span>';
       return;
     }
@@ -1032,7 +1043,7 @@ function srImportDiffList(wb, progEl){
        името от файла. Двойни интервали не правят второ име („ТЕКРА  ЕООД"). */
     var byNorm={};
     var LEGAL=/(^|\s)(ЕООД|ООД|ЕАД|АД|ЕТ)(\s|$)/;
-    res[1].rows.forEach(function(x){
+    res[1].forEach(function(x){
       var full=String(x.supplier||'').replace(/\s+/g,' ').trim(); if(!full) return;
       var k=srSupplierNorm(full); if(!k) return;
       if(!byNorm[k]) byNorm[k]=[];
@@ -1048,7 +1059,7 @@ function srImportDiffList(wb, progEl){
       else if(unmatched.indexOf(r.supplier)<0) unmatched.push(r.supplier);
     });
     var existing={};
-    res[0].rows.forEach(function(x){ var k=srDiffListKey(x); if(!existing[k]) existing[k]=x; });
+    res[0].forEach(function(x){ var k=srDiffListKey(x); if(!existing[k]) existing[k]=x; });
     var created=currentUser.display_name||currentUser.email;
     var toInsert=[], toUpdate=[], skippedCompleted=0, keptByStore=0;
     rows.forEach(function(r){
@@ -1236,24 +1247,29 @@ function startReturnsImport(){
       for(var di=0; di<uniquePos.length; di+=DEDUP_BATCH){
         dedupBatches.push(uniquePos.slice(di,di+DEDUP_BATCH));
       }
-      /* sbGetOk, не sbGet: провалена проверка НЕ бива да изглежда като „няма
-         нищо" - при импорт само на нови редове всеки ред би станал дубликат. */
+      /* sbGetAll (на страници по 1000, order=id.asc), не sbGet: провалена
+         или отрязана проверка НЕ бива да изглежда като „няма нищо" - при
+         импорт само на нови редове всеки ред би станал дубликат. .partial
+         хвърля и импортът спира (472 рекламации на 13.10.2026). */
       var storesInFile=mapped.map(function(r){ return String(r.store_name||'').trim(); });
       var dedupCheck = !isWorkbook
         /* Единичният лист: по обектите от файла (без обект в някой ред - всички
            записи „По рекламации"). */
-        ? sbGetOk('stock_returns','source=eq.complaint&select=id,store_name,sap_code,product_name,expiry_date'+
+        ? sbGetAll('stock_returns','source=eq.complaint&select=id,store_name,sap_code,product_name,expiry_date'+
             (storesInFile.every(function(x){return x;})
               ? '&store_name=in.('+storesInFile.filter(function(x,i,a){return a.indexOf(x)===i;}).map(function(x){return '"'+encodeURIComponent(x)+'"';}).join(',')+')'
-              : '')).then(function(res){ if(!res.ok) throw new Error(res.error); return res.rows; })
+              : '')+'&order=id.asc').then(function(rows){
+              if(rows.partial) throw new Error('Непълна проверка за дубликати: прочетени '+rows.length+' реда');
+              return rows;
+            })
         : dedupBatches.length
         ? Promise.all(dedupBatches.map(function(batchPos){
-            return sbGetOk('stock_returns','source=eq.complaint&select=id,purchase_order&purchase_order=in.('+batchPos.map(function(p){return encodeURIComponent(p);}).join(',')+')');
+            return sbGetAll('stock_returns','source=eq.complaint&select=id,purchase_order&purchase_order=in.('+batchPos.map(function(p){return encodeURIComponent(p);}).join(',')+')&order=id.asc');
           })).then(function(results){
-            var bad=results.filter(function(r){ return !r.ok; })[0];
-            if(bad) throw new Error(bad.error);
+            var bad=results.filter(function(r){ return r.partial; })[0];
+            if(bad) throw new Error('Непълна проверка за дубликати: прочетени '+bad.length+' реда');
             var merged=[];
-            results.forEach(function(r){ merged=merged.concat(r.rows); });
+            results.forEach(function(r){ merged=merged.concat(r); });
             return merged;
           })
         : Promise.resolve([]);

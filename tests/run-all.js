@@ -37,6 +37,7 @@ const TESTS = [
   'history-kasa-get-all.test.js',
   'history-store-dropdown.test.js',
   'report-cross-get-all.test.js',
+  'stock-returns-get-all.test.js',
   'revaluation.test.js',
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',
