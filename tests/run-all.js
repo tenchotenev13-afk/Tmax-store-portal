@@ -256,6 +256,7 @@ const TESTS = [
   'calendar-local-dates.test.js',
   'calendar-client-delivery.test.js',
   'kasa-returned-in-reports.test.js',
+  'zoborot-hint.test.js',
   'report-groups-users.test.js',
   'report-groups-from-users.test.js',
   'task-report-schedule.test.js',

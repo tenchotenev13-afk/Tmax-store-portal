@@ -1481,11 +1481,90 @@ function clearHistFilter() {
 var zoborotData = null;
 
 function loadZoborot(){
-  var q='store_name=eq.'+encodeURIComponent(currentUser.store_name)+'&date=eq.'+kasaActiveDate()+'&order=created_at.desc';
-  sbGet('kasa_zoborot',q).then(function(data){
+  var activeDate=kasaActiveDate();
+  var enc=encodeURIComponent(currentUser.store_name);
+  var q='store_name=eq.'+enc+'&date=eq.'+activeDate+'&order=created_at.desc';
+  /* ПОС отчетите за деня — за подсказката под разликата (zoborotHint).
+     Сливат се като в kasaTab('glavna'): другите дати остават, за деня — свежите.
+     sbGetOk, не sbGet: sbGet връща [] и при грешка, а тогава подсказката би
+     казала „няма отчети" вместо да мълчи. */
+  Promise.all([
+    sbGet('kasa_zoborot',q),
+    sbGetOk('kasa_reports','order=pos_number.asc&date=eq.'+activeDate+'&store_name=eq.'+enc)
+  ]).then(function(res){
+    var data=res[0];
     zoborotData=(Array.isArray(data)&&data.length)?data[0]:null;
+    zoborotReportsOk=!!(res[1]&&res[1].ok);
+    if(zoborotReportsOk){
+      var other=kasaReports.filter(function(r){return r.date!==activeDate;});
+      kasaReports=other.concat(res[1].rows);
+    }
     renderZoborot();
-  }).catch(function(){renderZoborot();});
+  }).catch(function(){zoborotReportsOk=false;renderZoborot();});
+}
+
+/* Подсказка откъде идва разликата в Равнение: сравнява въведените ФУ с ПОС
+   отчетите (kasa_reports) за деня. Само на екрана — не влиза в печат,
+   История и имейли. '' = няма подсказка. zoborotReportsOk е false до
+   успешно зареждане на отчетите — без тях подсказката мълчи. */
+var zoborotReportsOk=false;
+function zoborotHint(vals,reports){
+  var EPS=0.005;
+  function num(x){return parseFloat(x)||0;}
+  function eq(a,b){return Math.abs(num(a)-num(b))<EPS;}
+  function f(x){return num(x).toFixed(2).replace('.',',');}
+  function kasaLbl(r,extra){
+    var k=r.kasa_number!=null?r.kasa_number:r.pos_number;
+    var parts=[];
+    if(r.cashier_name) parts.push(r.cashier_name);
+    if(extra) parts.push(extra);
+    return 'каса '+k+(parts.length?' ('+parts.join(', ')+')':'');
+  }
+  reports=Array.isArray(reports)?reports:[];
+  if(!reports.length) return 'Няма ПОС отчети за деня — няма с какво да се сравни.';
+  var fu=(vals&&vals.fu)||[];
+  var used=reports.map(function(){return false;});
+  /* Първо маркираме отчетите, които вече съвпадат с някое ФУ. */
+  fu.forEach(function(x){
+    var g=num(x&&x.gross); if(g<=0) return;
+    for(var i=0;i<reports.length;i++){
+      if(!used[i]&&eq(g,reports[i].total_turnover)){used[i]=true;return;}
+    }
+  });
+  for(var n=0;n<fu.length;n++){
+    var g=num(fu[n]&&fu[n].gross); if(g<=0) continue;
+    var ok=reports.some(function(r){return eq(g,r.total_turnover);});
+    if(ok) continue;
+    var cand=null,i;
+    for(i=0;i<reports.length;i++){
+      if(eq(reports[i].storna_total,fu[n].discount)){cand=reports[i];break;}
+    }
+    if(!cand) for(i=0;i<reports.length;i++){ if(!used[i]){cand=reports[i];break;} }
+    if(cand) return 'ФУ '+(n+1)+': въведен общ оборот '+f(g)+', а ПОС отчетът на '+kasaLbl(cand)+
+      ' е с общ оборот '+f(cand.total_turnover)+' (в брой '+f(cand.cash_turnover)+
+      ' + карти '+f(cand.card_turnover)+', сторно '+f(cand.storna_total)+').';
+  }
+  for(var j=0;j<reports.length;j++){
+    var r=reports[j];
+    var hit=fu.some(function(x){return num(x&&x.gross)>0&&eq(x.gross,r.total_turnover);});
+    if(!hit) return 'ПОС отчетът на '+kasaLbl(r,'общ оборот '+f(r.total_turnover))+' не е въведен в нито едно ФУ.';
+  }
+  /* cash_turnover в отчета е ПРЕДИ сторното, „Плащане в брой" в Равнението —
+     СЛЕД него (Кърджали 13.10: 10127,92 − 100,20 = 10027,72).
+     Картите — total_turnover − cash_turnover, не card_turnover: на каса 1
+     в Кърджали 13.10 card_turnover е с 0,07 по-малко (705,88 при
+     2610,60 − 1904,65 = 705,95), а въведените карти са 1757,86. */
+  var cash=0,card=0;
+  reports.forEach(function(r){cash+=num(r.cash_turnover)-num(r.storna_total);card+=num(r.total_turnover)-num(r.cash_turnover);});
+  var v=vals||{};
+  if(!eq(cash,num(v.cashEur)+num(v.cashBgn))||!eq(card,v.card))
+    return 'ФУ съвпадат с отчетите; разликата е в ПОС данните: по отчети в брой '+f(cash)+' (след сторно), карти '+f(card)+'.';
+  return '';
+}
+function zoborotDayReports(){
+  if(!zoborotReportsOk) return null;
+  var d=kasaActiveDate(), s=currentUser.store_name;
+  return kasaReports.filter(function(r){return r.date===d&&(!r.store_name||r.store_name===s);});
 }
 
 function renderZoborot(){
@@ -1507,6 +1586,11 @@ function renderZoborot(){
   var raz=parseFloat(z.razlika)||calcRaz();
   var razCol=raz===0?'#16a34a':raz<0?'#dc2626':'#d97706';
   var razBg =raz===0?'#f0fdf4':raz<0?'#fff5f5':'#fffbeb';
+  var dayReps=zoborotDayReports();
+  var hint=(raz!==0&&dayReps)?zoborotHint({
+    fu:[1,2,3].map(function(n){return {gross:z['fu'+n+'_gross'],discount:z['fu'+n+'_discount']};}),
+    cashEur:z.cash_eur,cashBgn:z.cash_bgn,card:z.card_eur,voucheri:z.voucheri
+  },dayReps):'';
 
   function inp(id,val,placeholder){
     if(!isDraft) return '<span style="font-family:DM Mono,monospace;">'+(parseFloat(val)||0).toFixed(2)+'</span>';
@@ -1603,6 +1687,7 @@ function renderZoborot(){
           '<div style="font-size:22px;font-weight:700;font-family:DM Mono,monospace;color:'+razCol+';" id="zf-r-raz">'+
             (raz<0?'– ':'')+Math.abs(raz).toFixed(2)+' EUR'+
           '</div>'+
+          (raz!==0&&hint?'<div id="zf-r-hint" style="font-size:11px;margin-top:6px;color:#92400e;">'+esc(hint)+'</div>':'')+
           (raz===0?'<div style="font-size:11px;color:#16a34a;margin-top:4px;">Без разлика ✓</div>':'')+ 
         '</div>'+
       '</div>'+
@@ -1643,6 +1728,22 @@ function zoborotLiveCalc(){
   if(rEl){rEl.textContent=(raz<0?'– ':'')+Math.abs(raz).toFixed(2)+' EUR';rEl.style.color=razCol;}
   var box=rEl?rEl.parentElement:null;
   if(box){box.style.borderColor=razCol;box.style.background=razBg;}
+
+  var dayReps=zoborotDayReports();
+  var hint=(raz!==0&&dayReps)?zoborotHint({
+    fu:[1,2,3].map(function(n){return {gross:g('fu'+n+'_gross'),discount:g('fu'+n+'_discount')};}),
+    cashEur:cashEur,cashBgn:cashBgn,card:card,voucheri:vouch
+  },dayReps):'';
+  var hEl=document.getElementById('zf-r-hint');
+  if(!hint){ if(hEl) hEl.parentNode.removeChild(hEl); }
+  else if(rEl){
+    if(!hEl){
+      hEl=document.createElement('div');hEl.id='zf-r-hint';
+      hEl.style.cssText='font-size:11px;margin-top:6px;color:#92400e;';
+      rEl.parentNode.insertBefore(hEl,rEl.nextSibling);
+    }
+    hEl.textContent=hint;
+  }
 }
 
 /* ─── SAVE / CONFIRM / UNLOCK ───────────────────────────────── */
