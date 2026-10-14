@@ -414,6 +414,22 @@ function submitSupplyForm(templateId){
   });
   if(bad.length){ toast('Невалидно количество (цяло число ≥ 0): ' + bad.join(', '), '#dc2626'); return; }
 
+  /* Число в коментара при празно количество — почти сигурно е сбъркана колона
+     (Севлиево, 12.10.2026: 25 реда „Кабели на макара" с броя в „Коментар").
+     Базата брои само qty1/qty2, тоест бланката би излязла непопълнена. Спира се
+     целият запис, както при невалидно количество. */
+  var noteNum = rows.filter(function(r){
+    return r.qty1 === null && r.qty2 === null && r.note !== null && /^\s*\d+(?:[.,]\d+)?\s*$/.test(r.note);
+  });
+  if(noteNum.length){
+    toast('Коментарът е число, а количеството е празно — ред(ове): ' +
+      noteNum.map(function(r){ return r.item.sap_code || r.item.name; }).join(', ') +
+      '. Напишете числото в количеството или го обяснете с думи.', '#dc2626');
+    var f = document.getElementById('sup-q1-' + noteNum[0].item.id);
+    if(f && f.focus) f.focus();
+    return;
+  }
+
   var store = currentUser.store_name, week = supplyWeek || supplyWeekStart();
   var who = currentUser.display_name || currentUser.email;
   supplySaving[templateId] = true;
