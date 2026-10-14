@@ -1,7 +1,9 @@
 -- transfers-plate-schema.sql
 -- Междускладови трансфери — вид „Камион" (групажен): transfers.plate_no.
--- ЧАКА ПРИЛАГАНЕ (apply_migration след „давай" от Тенчо). След прилагане тук
--- се вписва номерът на миграцията, който базата даде.
+-- ПРИЛОЖЕНО В SUPABASE НА 14.10.2026 като миграция 20261014113103_transfers_plate_no
+-- и прочетено обратно (text, NULL, без default, 0 попълнени от 9 реда; коментарът е
+-- там). Този файл е ОГЛЕДАЛО на миграцията, не източник.
+-- Rollback: supabase/migrations/20261014113103_transfers_plate_no_down.sql.
 -- Предишни: transfers-schema.sql · transfers-events-schema.sql ·
 -- transfer-cargo-loaded-at-schema.sql · transfer-cargo-prev-schema.sql.
 --
