@@ -362,11 +362,12 @@ function tfRouteText(t) {
 
 function tfModeLabel(t) {
   if (t.mode === 'courier') return '📦 Куриер' + (t.courier_company ? ' · ' + t.courier_company : '');
+  if (t.mode === 'truck') return '🚛 Камион' + (t.plate_no ? ' · ' + t.plate_no : '');
   return '🚐 Бус';
 }
 
 function tfDateLabel(t) {
-  if (t.mode === 'bus' && t.depart_date) {
+  if (t.mode !== 'courier' && t.depart_date) {
     return fmtDate(t.depart_date) + (t.depart_time ? ' ' + t.depart_time : '');
   }
   return fmtDate(String(t.created_at || '').slice(0, 10));
@@ -376,7 +377,7 @@ function tfDateLabel(t) {
 function tfMatches(t, q) {
   if (!q) return true;
   q = q.toLowerCase();
-  var hay = [t.transfer_num, t.end_store, t.waybill_no];
+  var hay = [t.transfer_num, t.end_store, t.waybill_no, t.plate_no];
   (tfCargoByTransfer[t.id] || []).forEach(function (c) { hay.push(c.recipient_store); });
   return hay.some(function (x) { return x && String(x).toLowerCase().indexOf(q) >= 0; });
 }
@@ -512,7 +513,7 @@ function openTransferForm() {
   tfForm = {
     from_store: creators.length === 1 ? creators[0] : '',
     mode: 'bus',
-    depart_date: today(), depart_time: '', driver: '',
+    depart_date: today(), depart_time: '', driver: '', plate_no: '',
     stops: [], end_store: '',
     courier_company: '', waybill_no: '',
     note: '',
@@ -588,7 +589,7 @@ function tfStoreOptions(selected, exclude) {
 
 /* Спирките на транспорта (без началото): където товар може да слезе. */
 function tfRouteStops(f) {
-  var out = (f.mode === 'bus' ? (f.stops || []) : []).slice();
+  var out = (f.mode !== 'courier' ? (f.stops || []) : []).slice();
   if (f.end_store) out.push(f.end_store);
   return out.filter(Boolean);
 }
@@ -629,8 +630,9 @@ function renderTransferForm() {
             }).join('') + '</select>') +
     '</label>' +
     '<div style="font-size:12px;">Вид<br>' +
-      '<label style="margin-right:12px;"><input type="radio" name="trf-mode" id="trf-mode-bus" value="bus"' + (!courier ? ' checked' : '') + ' onchange="tfSetMode(\'bus\')"> 🚐 Бус</label>' +
-      '<label><input type="radio" name="trf-mode" id="trf-mode-courier" value="courier"' + (courier ? ' checked' : '') + ' onchange="tfSetMode(\'courier\')"> 📦 Куриер</label>' +
+      '<label style="margin-right:12px;"><input type="radio" name="trf-mode" id="trf-mode-bus" value="bus"' + (f.mode === 'bus' ? ' checked' : '') + ' onchange="tfSetMode(\'bus\')"> 🚐 Бус</label>' +
+      '<label style="margin-right:12px;"><input type="radio" name="trf-mode" id="trf-mode-courier" value="courier"' + (courier ? ' checked' : '') + ' onchange="tfSetMode(\'courier\')"> 📦 Куриер</label>' +
+      '<label><input type="radio" name="trf-mode" id="trf-mode-truck" value="truck"' + (f.mode === 'truck' ? ' checked' : '') + ' onchange="tfSetMode(\'truck\')"> 🚛 Камион</label>' +
     '</div></div>';
 
   if (!courier) {
@@ -638,6 +640,7 @@ function renderTransferForm() {
       '<label style="font-size:12px;">Дата<br><input id="trf-date" type="date" value="' + tfAttr(f.depart_date) + '" onchange="tfSetField(\'depart_date\',this.value)" style="' + TF_FLD + '"></label>' +
       '<label style="font-size:12px;">Час<br><input id="trf-time" type="time" value="' + tfAttr(f.depart_time) + '" onchange="tfSetField(\'depart_time\',this.value)" style="' + TF_FLD + '"></label>' +
       '<label style="font-size:12px;">Шофьор<br><input id="trf-driver" value="' + tfAttr(f.driver) + '" oninput="tfSetField(\'driver\',this.value)" style="' + TF_FLD + 'min-width:200px;"></label>' +
+      (f.mode === 'truck' ? '<label style="font-size:12px;">Рег. номер<br><input id="trf-plate" value="' + tfAttr(f.plate_no || '') + '" oninput="tfSetField(\'plate_no\',this.value)" style="' + TF_FLD + '"></label>' : '') +
     '</div>';
     /* Маршрут */
     h += '<div style="font-size:12px;font-weight:700;margin-bottom:4px;">Маршрут</div>' +
@@ -827,14 +830,15 @@ function tfRemovePoint(i, j) { if (tfForm && tfForm.cargo[i]) { tfForm.cargo[i].
 function tfValidate(f) {
   if (!f) return 'Няма форма';
   if (!f.from_store) return 'Избери от кой обект тръгва транспортът.';
-  if (f.mode !== 'bus' && f.mode !== 'courier') return 'Избери вид — бус или куриер.';
+  if (f.mode !== 'bus' && f.mode !== 'courier' && f.mode !== 'truck') return 'Избери вид — бус, камион или куриер.';
   if (!f.end_store) return f.mode === 'courier' ? 'Избери получател.' : 'Избери крайна точка.';
   if (f.end_store === f.from_store) return 'Крайната точка не може да е началният обект.';
 
   if (f.reload) {
     /* Дотоварване: заглавието на транспорта вече е записано и валидно. */
-    if (f.mode !== 'bus') return 'Дотоварва се само бус.';
-  } else if (f.mode === 'bus') {
+    if (f.mode === 'courier') return 'Дотоварва се само бус или камион.';
+  } else if (f.mode !== 'courier') {
+    if (f.mode === 'truck' && !String(f.plate_no || '').trim()) return 'Въведи регистрационен номер на камиона.';
     if (!f.depart_date) return 'Въведи дата на тръгване.';
     if (!f.depart_time) return 'Въведи час на тръгване.';
     var seen = {};
@@ -919,6 +923,7 @@ function submitTransfer() {
     depart_date: courier ? null : f.depart_date,
     depart_time: courier ? null : f.depart_time,
     driver: courier ? null : (f.driver.trim() || null),
+    plate_no: f.mode === 'truck' ? String(f.plate_no || '').trim() : null,
     stops: courier ? [] : f.stops.slice(),
     end_store: f.end_store,
     courier_company: courier ? f.courier_company : null,
@@ -996,7 +1001,7 @@ function tfCargoErrText(res) {
    началото, не крайната точка), докато транспортът не е Завършен. Глобалните
    роли не са обект и не дотоварват. */
 function tfReloadStores(t) {
-  if (!t || t.mode !== 'bus') return [];
+  if (!t || t.mode === 'courier') return [];
   if (tfComputeStatus(t, tfCargoByTransfer[t.id] || [], tfEventsOf(t.id)).status === 'done') return [];
   return tfActorStores().filter(function (s) {
     return (t.stops || []).indexOf(s) >= 0 && s !== t.from_store && s !== t.end_store;
@@ -1010,8 +1015,8 @@ function openReloadForm(tid, store) {
   var at = stops.indexOf(store);
   tfForm = {
     reload: { tid: t.id, num: t.transfer_num, before: [t.from_store].concat(stops.slice(0, at + 1)) },
-    from_store: store, mode: 'bus',
-    depart_date: t.depart_date, depart_time: t.depart_time, driver: t.driver || '',
+    from_store: store, mode: t.mode,
+    depart_date: t.depart_date, depart_time: t.depart_time, driver: t.driver || '', plate_no: t.plate_no || '',
     stops: stops.slice(at + 1), end_store: t.end_store,
     courier_company: '', waybill_no: '', note: '',
     cargo: [tfNewCargo()]
@@ -1097,9 +1102,10 @@ function renderTransferPrint(t, cargo, coNum) {
   var kv = function (k, v) { return v ? '<tr><td>' + k + '</td><td>' + escVal(v) + '</td></tr>' : ''; };
   var courier = t.mode === 'courier';
   var head = '<table class="tf-kv">' +
-    kv('Вид', courier ? 'Куриер · ' + (t.courier_company || '') : 'Бус') +
+    kv('Вид', courier ? 'Куриер · ' + (t.courier_company || '') : (t.mode === 'truck' ? 'Камион' : 'Бус')) +
     (courier ? kv('№ товарителница', t.waybill_no) : kv('Дата / час', tfDateLabel(t))) +
     (courier ? '' : kv('Шофьор', t.driver)) +
+    (t.mode === 'truck' ? kv('Рег. номер', t.plate_no) : '') +
     kv('Маршрут', tfRouteText(t)) +
     kv('Статус', (TF_STATUS_LABELS[tfComputeStatus(t, cargo, tfEventsOf(t.id)).status] || t.status) + ' · ' + tfProgressLabel(t, cargo)) +
     kv('Бележка', t.note) +
@@ -1511,7 +1517,7 @@ function tfCountersHtml(q) {
 /* Бързите филтри над списъка — съчетават се с търсенето и с броячите. */
 var TF_QUICK = [
   ['status', 'Статус', [['', 'Всички'], ['planned', 'Планиран'], ['partial', 'Частично'], ['done', 'Завършен']]],
-  ['mode', 'Вид', [['', 'Всички'], ['bus', '🚐 Бус'], ['courier', '📦 Куриер']]],
+  ['mode', 'Вид', [['', 'Всички'], ['bus', '🚐 Бус'], ['courier', '📦 Куриер'], ['truck', '🚛 Камион']]],
   ['period', 'Тръгване', [['', 'Всички'], ['week', 'Тази седмица'], ['month', 'Този месец']]]
 ];
 function tfQuickBarHtml() {

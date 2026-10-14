@@ -14,6 +14,10 @@
 
 ## Чака изпращане
 
+- 14.10 · transfers.plate_no — text, NULL, без default (регистрационен номер на камиона)
+  (в базата от миграцията ЧАКА ПРИЛАГАНЕ)
+- 14.10 · transfers.mode — нова стойност на статус 'truck' (камион; досега 'bus' / 'courier')
+
 ## Изпратено 14.10.2026
 
 - 11.10 · нова таблица revaluation_campaigns — id uuid PK, title text NOT NULL, kind text NOT NULL default 'mandatory' (стойности 'mandatory' / 'optional'), starts_on date NOT NULL, ends_on date NOT NULL, default_pct numeric(5,2) NULL, note text NULL, status text NOT NULL default 'open' (стойности 'open' / 'closed'), created_by text NULL, created_at timestamptz NOT NULL default now(), closed_at timestamptz NULL, closed_by text NULL

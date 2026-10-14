@@ -274,7 +274,7 @@ const weekly = (h, scope) => new Promise(res => { h.w.collectWeeklyReportData(re
   {
     const h = envUI(ADMIN);
     await open(h);
-    ok('лентата с бързите филтри е там', !!$(h, '#trf-quick') && $$(h, '.trf-q').length === 10);
+    ok('лентата с бързите филтри е там', !!$(h, '#trf-quick') && $$(h, '.trf-q').length === 11);  /* 11 от 14.10: + „🚛 Камион" */
     await quick(h, 'mode', 'courier');
     ok('вид „Куриер" → таблицата е само t3', tableIds(h).join(',') === 't3', tableIds(h).join(','));
     ok('и броячите следват: В път 1, Застояли 0', counter(h, 'transit') === 1 && counter(h, 'stale') === 0);
