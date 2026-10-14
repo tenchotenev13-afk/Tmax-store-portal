@@ -108,11 +108,12 @@ function tfLoadStoreList() {
 }
 
 /* От кой обект може да създава текущият потребител. Глобалните избират;
-   обектът — само себе си (или назначените си). */
+   обектът — само себе си (или назначените си). Само обекти от tfStoreList:
+   ЦО (supply) не е обект, между който се движи товар. */
 function tfCreatorStores() {
   var st = assignedStores();
   if (!st) return tfStoreList.slice();
-  return st.filter(function (s) { return !!s; });
+  return st.filter(function (s) { return !!s && tfStoreList.indexOf(s) >= 0; });
 }
 
 /* Обектите, чиито транспорти потребителят гледа. null = всички. */
@@ -1379,7 +1380,7 @@ function tfFilterBarHtml() {
   return '<div class="filter-bar" style="margin:0 0 12px;">' +
     b('all', 'Всички') +
     b('mine', '📥 За потвърждение при мен' + (nMine ? ' (' + nMine + ')' : '')) +
-    b('reship', '⏳ Чакащи прехвърляне при мен' + (nRe ? ' (' + nRe + ')' : '')) +
+    b('reship', '⏳ ' + tfReshipLabel() + (nRe ? ' (' + nRe + ')' : '')) +
     b('problems', '⚠️ Проблеми' + (nProb ? ' (' + nProb + ')' : '')) +
   '</div>';
 }
@@ -1484,6 +1485,10 @@ function tfStaleItems(q) {
 }
 /* „⏳ Чакащи прехвърляне": обектът — своите; admin / ЦО — всички. */
 function tfReshipScope() { return (currentUser && isGlobal()) ? null : tfActorStores(); }
+/* Етикетът на брояча и на филтъра — едно място, за да не се разминат. */
+function tfReshipLabel() {
+  return tfReshipScope() === null ? 'Чакащи прехвърляне (всички обекти)' : 'Чакащи прехвърляне при мен';
+}
 
 var TF_STALE_WHY = { transit: 'в път', reship: 'чака прехвърляне', problem: 'отворен проблем' };
 
@@ -1497,7 +1502,7 @@ function tfCountersHtml(q) {
   };
   return '<div id="trf-counters" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;margin-bottom:12px;">' +
     box('transit', '🚐', 'В път', tfTransitItems(q).length) +
-    box('reship', '⏳', 'Чакащи прехвърляне при мен', tfReshipItems(tfReshipScope(), q).length) +
+    box('reship', '⏳', tfReshipLabel(), tfReshipItems(tfReshipScope(), q).length) +
     box('problems', '⚠️', 'Отворени проблеми', tfProblemItems(q).length) +
     box('stale', '🕒', 'Застояли над ' + tfStaleDays + ' дни', tfStaleItems(q).length) +
   '</div>';
@@ -1572,7 +1577,8 @@ function tfStaleHtml(q) {
    „➕ От чакащите" във формата. */
 function tfReshipHtml(q) {
   var items = tfReshipItems(tfReshipScope(), q);
-  if (!items.length) return '<div id="trf-reship" style="text-align:center;padding:30px;color:#94a3b8;">Няма товари, които чакат прехвърляне при теб.</div>';
+  if (!items.length) return '<div id="trf-reship" style="text-align:center;padding:30px;color:#94a3b8;">Няма товари, които чакат прехвърляне' +
+    (tfReshipScope() === null ? '' : ' при теб') + '.</div>';
   return '<div id="trf-reship">' + items.map(function (it) {
     return '<div class="trf-reship-row" data-c="' + tfAttr(it.c.id) + '" style="border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:8px;background:#fffbeb;">' +
       '<div><b>' + escVal(it.t.transfer_num) + '</b> · ' + escVal(tfCargoLabel(it.c, it.i)) +
@@ -1794,6 +1800,46 @@ function tfCargoResultsHtml() {
 function openTransferCard(id) { tfCardId = id; tfView = 'card'; renderTransfers(); }
 function closeTransferCard() { tfCardId = null; tfView = 'list'; renderTransfers(); }
 
+/* Може ли текущият потребител да изтрие транспорта t. null = да, иначе
+   текст на причината. Само „Планиран" (нито една отметка) и само от
+   създалия го обект или админ. Едно правило за бутона и за самото триене. */
+function tfCanDelete(t) {
+  if (!t) return 'Няма транспорт.';
+  var evs = tfEventsOf(t.id);
+  if (evs.length || tfComputeStatus(t, tfCargoByTransfer[t.id] || [], evs).status !== 'planned') return 'Транспортът вече има отметки.';
+  if (!tfIsAdmin() && tfActorStores().indexOf(t.from_store) < 0) return 'Изтрива създалият го обект или админ.';
+  return null;
+}
+
+/* Изтриване на планиран транспорт: първо товарите, после заглавието.
+   Номерът остава изразходван — броячът не се връща назад. */
+function deleteTransfer(id) {
+  var t = tfFindTransfer(id);
+  var why = tfCanDelete(t);
+  if (why) { toast(why, '#dc2626'); return; }
+  var cargo = tfCargoByTransfer[t.id] || [];
+  var msg = 'Изтриване на ' + (t.transfer_num || '') + ' с ' + cargo.length + ' товара. Номерът остава изразходван. Продължавам?';
+  var other = tfUniq(cargo.map(function (c) { return c.loaded_at_store && c.loaded_at_store !== t.from_store ? c.loaded_at_store : null; }));
+  if (other.length) msg += '\nВнимание: има товар, дотоварен от ' + other.join(', ');
+  if (cargo.some(function (c) { return !!c.prev_cargo_id; })) msg += '\nВнимание: има товар, прехвърлен от чакащите — той ще се върне в „Чакащи прехвърляне“.';
+  if (!confirm(msg)) return;
+  sbDelete('transfer_cargo', 'transfer_id=eq.' + t.id).then(function (r1) {
+    if (!r1 || !r1.ok) { toast('Товарите НЕ са изтрити: ' + sbErrMsg(r1), '#dc2626'); return; }
+    return sbDelete('transfers', 'id=eq.' + t.id).then(function (r2) {
+      /* count:0 = минало, но нищо не е изтрито — също провал, не успех. */
+      if (!r2 || !r2.ok || r2.count === 0) {
+        toast('Товарите са изтрити, но транспортът остана — опресни и опитай пак', '#dc2626');
+        return;
+      }
+      toast('🗑 Изтрит транспорт ' + (t.transfer_num || ''));
+      tfForm = null;
+      tfCardId = null;
+      tfView = 'list';
+      loadTransfers();
+    });
+  }).catch(function () { toast('Грешка при изтриване', '#dc2626'); });
+}
+
 function renderTransferCard() {
   var wrap = document.getElementById('mod-transfers');
   var t = tfFindTransfer(tfCardId);
@@ -1809,6 +1855,7 @@ function renderTransferCard() {
         return '<button class="btn-sm trf-reload" data-s="' + tfAttr(s) + '" onclick="openReloadForm(\'' + tfAttr(t.id) + '\',this.getAttribute(\'data-s\'))">➕ Дотовари' + (a.length > 1 ? ' в ' + escVal(s) : '') + '</button>';
       }).join('') +
       '<button class="btn-sm" onclick="printTransfer(\'' + tfAttr(t.id) + '\')">🖨 Печат</button>' +
+      (tfCanDelete(t) === null ? '<button id="trf-delete" class="btn-sm" onclick="deleteTransfer(\'' + tfAttr(t.id) + '\')">🗑 Изтрий</button>' : '') +
       '<button id="trf-card-back" class="btn-sm" onclick="closeTransferCard()">← Обратно</button></div>' +
     '</div>' +
     '<div style="font-size:13px;color:#334155;margin-bottom:12px;">' + escVal(tfModeLabel(t)) + ' · ' + escVal(tfDateLabel(t)) +
