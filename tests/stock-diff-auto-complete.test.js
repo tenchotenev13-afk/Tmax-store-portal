@@ -289,8 +289,14 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
   section('9. Едно правило на три места — SQL, модулът, Бюлетинът');
   {
     const sql = fs.readFileSync(path.join(ROOT, 'stock-diff-auto-complete-schema.sql'), 'utf8');
-    ok('SQL-ът брои само sent/sent_sap/return',
-      /warehouse_response in \('sent','sent_sap','return'\)/.test(sql));
+    // От 14.10.2026 (20261014120000_stock_diff_store_move): ход на обекта е
+    // само 'return'; sent/sent_sap са на път, двете категории чакат ЦО.
+    // Модулът и Бюлетинът още броят sent/sent_sap — решение отделно.
+    ok('SQL-ът брои само return',
+      /warehouse_response in \('return'\)/.test(sql) &&
+      !/warehouse_response in \('sent','sent_sap','return'\)/.test(sql));
+    ok('и пропуска wrong_barcode/similar_item',
+      /coalesce\(d\.difference_category, ''\) not in \('wrong_barcode','similar_item'\)/.test(sql));
     ok('и иска празен store_response', /d\.store_response is null/.test(sql));
     ok('и пропуска приключения ред', /coalesce\(d\.status, ''\) <> 'received'/.test(sql));
     ok('и само междускладови', /r\.direction = 'interstore'/.test(sql));
