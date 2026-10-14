@@ -1,0 +1,74 @@
+-- Мъртвите теми в Известията — изтриване (14.10.2026, сесия reporting-cleanup)
+--
+-- Пет реда в notification_topics, които нито една едж функция не обслужва
+-- (няма ги в IMPLEMENTED_TOPICS на bulletin-notify, нито са TOPIC_KEY на
+-- send-routed-report), нито един крон не ги вика и всички са active=false:
+--   daily_report, weekly_report     — дублират кроновете на send-scheduled-report
+--                                     (daily-report-21h, weekly-report-sun-21h);
+--   evening_turnover                — оборотът се движи от крон 14;
+--   weekly_checklist, weekly_digest — никога не са реализирани.
+-- В Администрация → Известия стояха с бадж „още не е свързана с код" и
+-- изглеждаха като нещо, което чака да се включи. Решение на Тенчо 14.10.2026.
+--
+-- Само данни (DML), без DDL. notification_matrix и notification_overrides
+-- имат FK към notification_topics(key) с ON DELETE CASCADE — 12 реда в
+-- матрицата и 3 в overrides падат заедно с темите. notification_log няма FK
+-- и няма нито един запис за петте ключа (проверено 14.10.2026).
+-- Огледалото: само редове, без нова таблица/колона/статус — ред в
+-- zhivko-opashka.md не се добавя.
+
+-- ── Проверка преди (очаквано: 5 · 12 · 3) ──────────────────────────────────
+-- select (select count(*) from public.notification_topics
+--          where key in ('daily_report','weekly_report','evening_turnover','weekly_checklist','weekly_digest')),
+--        (select count(*) from public.notification_matrix
+--          where topic_key in ('daily_report','weekly_report','evening_turnover','weekly_checklist','weekly_digest')),
+--        (select count(*) from public.notification_overrides
+--          where topic_key in ('daily_report','weekly_report','evening_turnover','weekly_checklist','weekly_digest'));
+
+-- ── Изтриване ─────────────────────────────────────────────────────────────
+delete from public.notification_topics
+ where key in ('daily_report','weekly_report','evening_turnover','weekly_checklist','weekly_digest')
+   and active = false;
+
+-- ── Rollback ──────────────────────────────────────────────────────────────
+-- Редовете точно както стояха в базата на 14.10.2026 преди изтриването.
+-- Темите първо — матрицата и overrides имат FK към тях.
+--
+-- insert into public.notification_topics
+--   (key, label, description, schedule_type, weekdays, day_of_week, scheduled_time,
+--    active, test_email, last_run_at, last_recipients, last_status, sort_order, created_at)
+-- values
+--   ('weekly_digest', 'Задачите за седмицата', 'Задачите от бюлетина до всеки обект, в началото на седмицата.',
+--    'weekly', null, 'mon', '07:00:00', false, null, null, null, null, 20, '2026-08-26 14:44:16.063834+00'),
+--   ('weekly_checklist', 'Седмичен чек лист', 'Обобщението на Миглена. Още не съществува.',
+--    'weekly', null, 'fri', '16:00:00', false, null, null, null, null, 40, '2026-08-26 14:44:16.063834+00'),
+--   ('daily_report', 'Дневен отчет', 'Не се ползва — отчетът се пуска направо от cron.job (send-scheduled-report, 21:00). Виж supabase/functions/README.md.',
+--    'daily', '{1,2,3,4,5,6,7}', null, '08:00:00', false, null, null, null, null, 50, '2026-08-26 14:44:16.063834+00'),
+--   ('weekly_report', 'Седмичен отчет', 'Не се ползва — отчетът се пуска направо от cron.job (send-scheduled-report, 21:00). Виж supabase/functions/README.md.',
+--    'weekly', null, 'mon', '08:00:00', false, null, null, null, null, 60, '2026-08-26 14:44:16.063834+00'),
+--   ('evening_turnover', 'Вечерен оборот', 'Оборотът по обекти. Днес се движи от крон 14.',
+--    'daily', '{1,2,3,4,5,6,7}', null, '20:45:00', false, null, null, null, null, 70, '2026-08-26 14:44:16.063834+00');
+--
+-- insert into public.notification_matrix (topic_key, group_key, channel, scope) values
+--   ('daily_report',     'controlling', 'email', 'all'),
+--   ('daily_report',     'owner',       'email', 'all'),
+--   ('evening_turnover', 'controlling', 'email', 'all'),
+--   ('evening_turnover', 'owner',       'email', 'all'),
+--   ('evening_turnover', 'regional',    'email', 'own_stores'),
+--   ('weekly_checklist', 'co',          'email', 'all'),
+--   ('weekly_checklist', 'controlling', 'email', 'all'),
+--   ('weekly_checklist', 'owner',       'email', 'all'),
+--   ('weekly_checklist', 'regional',    'email', 'all'),
+--   ('weekly_digest',    'store',       'email', 'own_stores'),
+--   ('weekly_report',    'controlling', 'email', 'all'),
+--   ('weekly_report',    'owner',       'email', 'all');
+--
+-- insert into public.notification_overrides
+--   (id, user_email, topic_key, mode, channel, scope, note, created_at)
+-- values
+--   ('98949862-50b9-4255-a85a-ad72da304411', 'ten.tenev@temax.bg', 'daily_report',     'include', 'email', 'all',
+--    'Днешният получател от report_recipients.', '2026-08-26 14:44:16.063834+00'),
+--   ('600fb666-7814-4ba4-b114-a16c2d67ef44', 'ten.tenev@temax.bg', 'evening_turnover', 'include', 'email', 'all',
+--    'Днешното oborot_report=all.',              '2026-08-26 14:44:16.063834+00'),
+--   ('c75994b9-642c-4266-9723-6313be79a9e6', 'ten.tenev@temax.bg', 'weekly_report',    'include', 'email', 'all',
+--    'Днешният получател от report_recipients.', '2026-08-26 14:44:16.063834+00');
