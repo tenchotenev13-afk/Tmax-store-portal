@@ -381,6 +381,13 @@ function bulSkipHidden(t){
   var vs=bulSkipViewStore();
   return !!(vs&&t&&recurringIsSkipped(t.id,vs,bulSkips));
 }
+/* Пренесеният (отложен) ред на ИЗКЛЮЧЕНА постоянна задача — също скрит на
+   обекта (15.10.2026, skip-hide-carried): задачата е отложена, после
+   изключена за седмицата. Обикновените задачи нямат изключване — не се пипат.
+   Филтърът е в рендера (план, календар, печат), не в bulCarriedRows(). */
+function bulCarriedHidden(r){
+  return !!(r&&r.kind==='recurring'&&bulSkipHidden(r.t));
+}
 function recSkipLabel(taskId,store){
   if(recurringIsSkipped(taskId,store,bulSkips)) return 'Не се изисква тази седмица';
   if(store) return '';
@@ -2022,6 +2029,7 @@ function bulPlanGroups(dateISO, store){
   });
   /* пренесените В този ден — с часа си, ако имат */
   it.carried.forEach(function(r){
+    if(bulCarriedHidden(r)) return;
     var row={kind:r.kind,t:r.t,cdate:String(r.comp.postponed_to||'').slice(0,10),comp:r.comp,
              carried:true,carriedFrom:r.from,done:r.comp.status==='done',
              rank:[deptRank(r.t.department),2,r.t.sort_order||0]};
@@ -2848,7 +2856,7 @@ function renderBulView(){
          са значка върху собствения ред на задачата по-долу. */
       /* Офисът вижда и слетите: за него това е втора единица работа на друг
          обект, а не значка върху собствения му ред (той няма собствен ред). */
-      var carItems=carriedForDay.filter(function(r){return r.t.department===dk;});
+      var carItems=carriedForDay.filter(function(r){return r.t.department===dk&&!bulCarriedHidden(r);});
       if(!regItems.length&&!recItems.length&&!manItems.length&&!carItems.length)return;
       hasAnything=true;
       html+='<div style="margin-bottom:8px;">';
@@ -4994,7 +5002,7 @@ function printSection(what){
       });
       /* Пренесените за този ден — печатът е чеклистът, по който обектът
          работи, и точно този ден е новият ѝ срок. Слетите не се дублират. */
-      var pCar=pIt.carried;
+      var pCar=pIt.carried.filter(function(r){ return !bulCarriedHidden(r); });
       pCar.forEach(function(r){
         var dc=dotC[r.t.department]||'#64748b';
         s+='<div class="cal-entry"><span class="cal-dot" style="background:'+dc+'"></span><span style="font-weight:600;">⏱ '+esc(r.t.title||'')+' <span style="font-weight:400;font-size:10pt;color:#7c3aed;">(пренесена от '+bulDM(r.from)+(isGlobal()?' · '+esc(r.comp.store_name||''):'')+')</span></span></div>';

@@ -287,6 +287,9 @@ function loadTodayDashboard(){
           var id = c.recurring_task_id || c.task_id;
           var t = todayCarriedTask(kind, id, allBulTasks, allRecurring, carryExtraReg, carryExtraRec);
           if (!t || taskIsNotice(t)) return;
+          /* Пренесен ред на постоянна задача, изключена за седмицата за този
+             обект (или глобално) — обектът не я дължи (15.10.2026). */
+          if (kind === 'recurring' && recurringIsSkipped(id, c.store_name, todaySkips)) return;
           items.push({ id:id, title:t.title, department:t.department, kind:kind,
                        target_stores:[c.store_name], carried_from:(c.completion_date||null) });
           if (c.status === 'done') comps.push({ item_id:id, kind:kind, store_name:c.store_name, comment:c.comment, photos:c.photos, files:c.files });
