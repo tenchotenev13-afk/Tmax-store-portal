@@ -314,15 +314,13 @@ function tfCargoRef(c) {
   var t = c ? tfFindTransfer(c.transfer_id) : null;
   return (t ? t.transfer_num : '—') + ' #' + (c && c.position ? c.position : '?');
 }
-/* Отметката „Разтоварен" в първата точка на прехвърляне — последната такава. */
+/* Отметката „Разтоварен" в първата точка на прехвърляне — най-новата, и то
+   САМО когато всички единици са разтоварени (по единица от 15.10.2026). */
 function tfUnloadedEvent(c) {
   var tg = tfCargoTarget(c);
   if (!c || tg.event !== 'unloaded') return null;
-  var hit = null;
-  tfCargoEvents(tfEventsOf(c.transfer_id), c.id).forEach(function (e) {
-    if (e.event === 'unloaded' && e.store_name === tg.store) hit = e;
-  });
-  return hit;
+  var st = tfUnitsState(c, tfEventsOf(c.transfer_id), 'unloaded', tg.store);
+  return st.left.length ? null : st.last;
 }
 /* Пълни календарни дни между отметката и днес (местно време). 0 = днес. */
 function tfWaitDays(ts, now) {
@@ -1160,7 +1158,7 @@ function renderTransferPrint(t, cargo, coNum) {
     return '<tr><td>' + (i + 1) + '</td><td colspan="2">' + prevEv.map(function (x) {
       return escVal(x.num + ' · ' + tfFmtTs(x.e.created_at) + ' · ' + x.e.store_name + ' · ' + tfEventText(x.e) + tfPhotoPrintText(x.e));
     }).concat(evs.map(function (e) {
-      return escVal(tfFmtTs(e.created_at) + ' · ' + e.store_name + ' · ' + tfEventText(e) + tfPhotoPrintText(e));
+      return escVal(tfFmtTs(e.created_at) + ' · ' + tfHistUnit(e) + e.store_name + ' · ' + tfEventText(e) + tfPhotoPrintText(e));
     })).join('<br>') + '</td></tr>';
   }).join('');
 
@@ -1233,9 +1231,38 @@ function tfCargoTarget(c) {
   if (pts.length) return { store: pts[0], event: 'unloaded' };
   return { store: c ? c.recipient_store : null, event: 'received' };
 }
+/* ── Приемане ПО ЕДИНИЦА (15.10.2026) ──────────────────────────────────────
+   „Получен" и „Разтоварен" се отбелязват за всеки кашон / палет / руло /
+   насип поотделно (transfer_cargo_events.unit = 1..qty). Отметка без unit
+   (старите, преди 15.10.2026) покрива целия товар. Същото правило е
+   reportTransferUnits в report.js (застоял / в път, седмичният отчет). */
+function tfUnitsState(c, evs, kind, store) {
+  var qty = Math.max(1, parseInt(c && c.qty, 10) || 1);
+  var seen = {}, all = false, last = null, done = [], left = [], n;
+  tfCargoEvents(evs, c && c.id).forEach(function (e) {
+    if (e.event !== kind || (store != null && e.store_name !== store)) return;
+    if (!last || String(e.created_at || '') >= String(last.created_at || '')) last = e;
+    var u = parseInt(e.unit, 10);
+    if (e.unit == null || isNaN(u)) all = true;
+    else if (u >= 1 && u <= qty) seen[u] = 1;
+  });
+  for (n = 1; n <= qty; n++) (all || seen[n] ? done : left).push(n);
+  return { qty: qty, done: done, left: left, last: last };
+}
+/* „3/12" на отметка с единица; '' без. */
+function tfEventUnitText(e) {
+  if (!e || e.unit == null) return '';
+  var c = tfCargoById[e.cargo_id];
+  return e.unit + '/' + Math.max(1, parseInt(c && c.qty, 10) || 1);
+}
+/* В историята: „1/3 · “ пред обекта при получен / разтоварен по единица. */
+function tfHistUnit(e) {
+  return e && e.unit != null && e.event !== 'problem' ? tfEventUnitText(e) + ' · ' : '';
+}
+/* Крайната отметка за транспорта — за ВСИЧКИ единици. */
 function tfCargoDone(c, evs) {
   var tg = tfCargoTarget(c);
-  return tfCargoEvents(evs, c.id).some(function (e) { return e.event === tg.event && e.store_name === tg.store; });
+  return !tfUnitsState(c, evs, tg.event, tg.store).left.length;
 }
 function tfOpenProblems(c, evs) {
   var mine = tfCargoEvents(evs, c.id);
@@ -1263,19 +1290,28 @@ function tfActorStores() {
 }
 
 /* Може ли store да отбележи kind за товар c от транспорт t. null = да,
-   иначе текст на причината. Едно правило за бутоните, за записа и за теста. */
-function tfEventAllowed(kind, t, c, evs, store, isAdmin) {
+   иначе текст на причината. Едно правило за бутоните, за записа и за теста.
+   unit (по избор): за received / unloaded — единицата трябва да е още
+   свободна; за problem — съществуваща единица (null = целият товар). */
+function tfEventAllowed(kind, t, c, evs, store, isAdmin, unit) {
   if (!t || !c) return 'Няма товар';
   var tg = tfCargoTarget(c);
   var done = tfCargoDone(c, evs);
+  var qty = Math.max(1, parseInt(c.qty, 10) || 1);
+  var u = unit == null ? null : parseInt(unit, 10);
+  if (u !== null && !(u >= 1 && u <= qty)) return 'Няма единица ' + unit + ' (товарът е ' + qty + ').';
   if (kind === 'unloaded' || kind === 'received') {
     if (tg.event !== kind) return kind === 'received'
       ? 'Товарът се разтоварва в ' + tg.store + ' — не се получава в този транспорт.'
       : 'Товарът няма прехвърляне в този транспорт.';
     if (store !== tg.store) return 'Това се отбелязва от ' + tg.store + '.';
     if (done) return 'Вече е отбелязано.';
+    if (u !== null && tfUnitsState(c, evs, kind, tg.store).done.indexOf(u) >= 0) {
+      return tfKindLabel(c.kind) + ' ' + u + '/' + qty + ' вече е ' + (kind === 'received' ? 'получен' : 'разтоварен') + ' в ' + tg.store + '.';
+    }
     return null;
   }
+  if (u !== null && kind !== 'problem') return 'Тази отметка е за целия товар.';
   if (kind === 'handed_to_courier') {
     if (t.mode !== 'courier') return 'Само при куриер.';
     if (store !== tfCargoSender(t, c)) return 'Отбелязва изпращачът — ' + tfCargoSender(t, c) + '.';
@@ -1351,6 +1387,7 @@ function tfEventText(e) {
   if (e.event === 'problem') {
     var k = TF_PROBLEM_KINDS.filter(function (p) { return p[0] === e.problem_kind; })[0];
     if (k) t += ' (' + k[1].toLowerCase() + ')';
+    if (e.unit != null) t += ' · ' + tfEventUnitText(e);
   }
   if (e.waybill_no) t += ' · № ' + e.waybill_no;
   if (e.comment) t += ' — ' + e.comment;
@@ -1392,6 +1429,12 @@ function tfCargoStateText(t, c, evs) {
   var mine = tfCargoEvents(evs, c.id);
   if (tfCargoDone(c, evs)) {
     return tg.event === 'unloaded' ? '⏸ чака прехвърляне в ' + tg.store : '✅ получен в ' + tg.store;
+  }
+  var us = tfUnitsState(c, evs, tg.event, tg.store);
+  if (us.done.length) {
+    return tg.event === 'unloaded'
+      ? '⏸ разтоварени ' + us.done.length + '/' + us.qty + ' в ' + tg.store + ' — чака прехвърляне'
+      : '📦 получени ' + us.done.length + '/' + us.qty + ' в ' + tg.store;
   }
   if (mine.some(function (e) { return e.event === 'handed_to_courier'; })) return '🚚 предаден на куриер';
   return '⏳ очаква се в ' + tg.store + (tg.event === 'unloaded' ? ' (прехвърляне)' : '');
@@ -1443,8 +1486,14 @@ function tfProblemItems(q) {
 
 function tfActBtn(t, c, a, extraCls) {
   var icon = { unloaded: '⏸', received: '✅', handed_to_courier: '🚚', problem: '⚠️', resolved: '✔' }[a.kind] || '';
+  /* По единица: „✅ Получен (2 остават)" — колко още чакат отметка. */
+  var rest = '';
+  if ((a.kind === 'received' || a.kind === 'unloaded') && (parseInt(c.qty, 10) || 1) > 1) {
+    var n = tfUnitsState(c, tfEventsOf(t.id), a.kind, a.store).left.length;
+    rest = ' (' + n + (n === 1 ? ' остава)' : ' остават)');
+  }
   return '<button class="btn-sm trf-act trf-act-' + a.kind + (extraCls || '') + '" data-t="' + tfAttr(t.id) + '" data-c="' + tfAttr(c.id) + '"' +
-    ' onclick="openEventModal(\'' + tfAttr(t.id) + '\',\'' + tfAttr(c.id) + '\',\'' + a.kind + '\')">' + icon + ' ' + escVal(TF_EVENT_LABELS[a.kind]) + '</button>';
+    ' onclick="openEventModal(\'' + tfAttr(t.id) + '\',\'' + tfAttr(c.id) + '\',\'' + a.kind + '\')">' + icon + ' ' + escVal(TF_EVENT_LABELS[a.kind]) + rest + '</button>';
 }
 function tfCargoLabel(c, i) {
   return '#' + (i + 1) + ' ' + tfKindLabel(c.kind) + (c.qty > 1 ? ' ×' + c.qty : '') + ' → ' + c.recipient_store +
@@ -1759,6 +1808,12 @@ function tfCargoLastMove(c) {
 function tfLastMoveText(e) {
   if (!e) return '🚐 в път';
   var when = tfFmtTs(e.created_at);
+  /* По единица: частично получен / разтоварен — с броя, не „получен". */
+  var c = tfCargoById[e.cargo_id];
+  if (c && (e.event === 'received' || e.event === 'unloaded')) {
+    var us = tfUnitsState(c, tfEventsOf(c.transfer_id), e.event, e.store_name);
+    if (us.left.length) return (e.event === 'received' ? '📦 получени ' : '⏸ разтоварени ') + us.done.length + '/' + us.qty + ' в ' + e.store_name + ' · ' + when;
+  }
   if (e.event === 'received') return '✅ получен в ' + e.store_name + ' · ' + when;
   if (e.event === 'unloaded') return '⏸ разтоварен в ' + e.store_name + ' — чака прехвърляне · ' + when;
   return '🚚 предаден на куриер от ' + e.store_name + ' · ' + when;
@@ -1966,17 +2021,46 @@ function tfDeepLinkApply() {
     return true;
   }
   tfHighlight = tag.cid;
+  /* По единица: квадратчето от етикета (&u=) е избрано в картата и в
+     прозорчето; вече отбелязана единица → само съобщение. */
+  tfHighlightUnit = null;
+  var c = (tfCargoByTransfer[t.id] || []).filter(function (x) { return String(x.id) === String(tag.cid); })[0];
+  var already = null;
+  if (c) {
+    var tg = tfCargoTarget(c), us = tfUnitsState(c, tfEventsOf(t.id), tg.event, tg.store);
+    if (us.done.indexOf(tag.unit) >= 0) {
+      already = tfKindLabel(c.kind) + ' ' + tag.unit + '/' + us.qty + ' вече е ' + (tg.event === 'received' ? 'получен' : 'разтоварен') + ' в ' + tg.store;
+    } else if (tag.unit <= us.qty) tfHighlightUnit = tag.unit;
+  }
   openTransferCard(t.id);
   var row = document.querySelector('.trf-card-cargo[data-trf-hl="1"]');
   if (!row) { toast('Товарът го няма в транспорта', '#d97706'); return true; }
+  if (already) toast(already, '#d97706');
   if (row.scrollIntoView) row.scrollIntoView({ block: 'center' });
   return true;
+}
+var tfHighlightUnit = null;  /* единицата от етикета (&u=) в подчертания товар */
+
+/* Ивицата с единиците в картата: „1 ✅ 2 ⬜ 3 ⬜" за крайната отметка. */
+function tfUnitStripHtml(t, c, evs) {
+  var qty = Math.max(1, parseInt(c.qty, 10) || 1);
+  if (qty < 2) return '';
+  var tg = tfCargoTarget(c), us = tfUnitsState(c, evs, tg.event, tg.store);
+  var hlU = (tfHighlight !== null && String(tfHighlight) === String(c.id)) ? tfHighlightUnit : null;
+  var h = '<div class="trf-units" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;font-size:12px;">';
+  for (var n = 1; n <= qty; n++) {
+    var ok = us.done.indexOf(n) >= 0, hl = hlU === n;
+    h += '<span class="trf-unit" data-u="' + n + '" data-done="' + (ok ? 1 : 0) + '"' + (hl ? ' data-trf-hl-unit="1"' : '') +
+      ' style="border:' + (hl ? '2px solid #ca8a04' : '1px solid #e2e8f0') + ';border-radius:6px;padding:1px 6px;background:' + (ok ? '#f0fdf4' : (hl ? '#fef9c3' : '#fff')) + ';">' +
+      n + ' ' + (ok ? '✅' : '⬜') + '</span>';
+  }
+  return h + '</div>';
 }
 
 /* ── Карта на транспорта ─────────────────────────────────────────────────── */
 
 function openTransferCard(id) { tfCardId = id; tfView = 'card'; renderTransfers(); }
-function closeTransferCard() { tfCardId = null; tfHighlight = null; tfView = 'list'; renderTransfers(); }
+function closeTransferCard() { tfCardId = null; tfHighlight = null; tfHighlightUnit = null; tfView = 'list'; renderTransfers(); }
 
 /* Може ли текущият потребител да изтрие транспорта t. null = да, иначе
    текст на причината. Само „Планиран" (нито една отметка) и само от
@@ -2052,7 +2136,7 @@ function renderTransferCard() {
         '<div><b>' + escVal(tfCargoLabel(c, i)) + '</b>' +
           ((c.transfer_points || []).length ? '<span style="font-size:12px;color:#64748b;"> · през ' + escVal(c.transfer_points.join(' → ')) + '</span>' : '') +
           '<div class="trf-state" style="font-size:12px;margin-top:2px;">' + tfCargoStateHtml(t, c, evs) + (open ? ' · <b style="color:#b91c1c;">⚠️ отворен проблем</b>' : '') + '</div>' +
-          tfChainRefsHtml(c) + '</div>' +
+          tfUnitStripHtml(t, c, evs) + tfChainRefsHtml(c) + '</div>' +
         '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + acts.map(function (a) { return tfActBtn(t, c, a); }).join('') + '</div>' +
       '</div>' +
       (mine.length || prevEv.length ? '<ol class="trf-history" style="margin:8px 0 0;padding-left:20px;font-size:12px;color:#334155;">' +
@@ -2061,7 +2145,7 @@ function renderTransferCard() {
             escVal(tfEventText(x.e)) + tfPhotoThumbs(x.e) + '</li>';
         }).join('') +
         mine.map(function (e) {
-        return '<li>' + escVal(tfFmtTs(e.created_at)) + ' · <b>' + escVal(e.store_name) + '</b> · ' + escVal(tfEventText(e)) +
+        return '<li>' + escVal(tfFmtTs(e.created_at)) + ' · ' + escVal(tfHistUnit(e)) + '<b>' + escVal(e.store_name) + '</b> · ' + escVal(tfEventText(e)) +
           tfPhotoThumbs(e) + '</li>';
       }).join('') + '</ol>' : '') +
     '</div>';
@@ -2083,9 +2167,29 @@ function openEventModal(tid, cid, kind) {
   var act = tfActionsFor(x.t, x.c, tfEventsOf(tid)).filter(function (a) { return a.kind === kind; })[0];
   if (!act) { toast('Тази отметка не е за теб', '#dc2626'); return; }
   var probs = tfOpenProblems(x.c, tfEventsOf(tid));
-  tfEvForm = { tid: tid, cid: cid, kind: kind, store: act.store, comment: '', problem_kind: '',
+  /* По единица: предварително избрана е единицата от етикета (deep link),
+     иначе първата свободна. „Проблем" — по подразбиране за целия товар. */
+  var units = [], whole = true;
+  if (kind === 'received' || kind === 'unloaded') {
+    var us = tfUnitsState(x.c, tfEventsOf(tid), kind, act.store);
+    var hlU = (String(tfHighlight) === String(cid) && us.left.indexOf(tfHighlightUnit) >= 0) ? tfHighlightUnit : null;
+    units = hlU !== null ? [hlU] : us.left.slice(0, 1);
+  }
+  tfEvForm = { tid: tid, cid: cid, kind: kind, store: act.store, comment: '', problem_kind: '', units: units, whole: whole,
                waybill_no: kind === 'handed_to_courier' ? (x.t.waybill_no || '') : '',
                photos: [], uploading: 0, resolves_id: probs.length ? probs[0].id : null, saving: false };
+  renderEventModal();
+}
+/* Квадратче за единица n (0 = „целият товар" при „Проблем"). */
+function tfEvToggleUnit(n, on) {
+  var f = tfEvForm;
+  if (!f) return;
+  n = parseInt(n, 10);
+  if (n === 0) f.whole = !!on;
+  else {
+    f.units = f.units.filter(function (u) { return u !== n; });
+    if (on) { f.units.push(n); f.units.sort(function (a, b) { return a - b; }); f.whole = false; }
+  }
   renderEventModal();
 }
 function closeEventModal() {
@@ -2106,6 +2210,21 @@ function renderEventModal() {
     '<div style="font-weight:700;font-size:15px;margin-bottom:2px;">' + escVal(TF_EVENT_LABELS[f.kind]) + '</div>' +
     '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">' + escVal(x.t.transfer_num) + ' · ' +
       escVal(tfCargoLabel(x.c, (tfCargoByTransfer[f.tid] || []).indexOf(x.c))) + ' · от името на ' + escVal(f.store) + '</div>';
+  var qty = Math.max(1, parseInt(x.c.qty, 10) || 1);
+  if (qty > 1 && (f.kind === 'received' || f.kind === 'unloaded' || f.kind === 'problem')) {
+    var usM = f.kind === 'problem' ? null : tfUnitsState(x.c, tfEventsOf(f.tid), f.kind, f.store);
+    h += '<label class="fl">' + (f.kind === 'problem' ? 'За кои единици' : 'Единици (може няколко)') + '</label><div id="tfe-units" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
+    if (f.kind === 'problem') {
+      h += '<label class="tfe-unit" data-u="0" style="font-size:13px;"><input type="checkbox" id="tfe-whole"' + (f.whole ? ' checked' : '') + ' onchange="tfEvToggleUnit(0,this.checked)"> целият товар</label>';
+    }
+    for (var n = 1; n <= qty; n++) {
+      var dn = usM ? usM.done.indexOf(n) >= 0 : false;
+      var on = dn || (!(f.kind === 'problem' && f.whole) && f.units.indexOf(n) >= 0);
+      h += '<label class="tfe-unit" data-u="' + n + '" data-done="' + (dn ? 1 : 0) + '" style="font-size:13px;border:1px solid #e2e8f0;border-radius:6px;padding:2px 6px;">' +
+        '<input type="checkbox" id="tfe-u-' + n + '"' + (on ? ' checked' : '') + (dn ? ' disabled' : '') + ' onchange="tfEvToggleUnit(' + n + ',this.checked)"> ' + n + (dn ? ' ✅' : '') + '</label>';
+    }
+    h += '</div>';
+  }
   if (f.kind === 'problem') {
     h += '<label class="fl">Вид *</label><select id="tfe-pkind" class="fi" onchange="tfEvSet(\'problem_kind\',this.value)">' +
       '<option value="">— избери —</option>' + TF_PROBLEM_KINDS.map(function (p) {
@@ -2182,13 +2301,23 @@ function submitEvent() {
   var evs = tfEventsOf(f.tid);
   /* Правото се проверява пак при записа — между отварянето и клика друг
      обект може да е отбелязал. */
-  var why = tfEventAllowed(f.kind, x.t, x.c, evs, f.store, tfIsAdmin() && f.kind === 'resolved');
-  var err = why || tfValidateEvent(f.kind, f, x.t);
+  var qty = Math.max(1, parseInt(x.c.qty, 10) || 1);
+  /* По единица: received / unloaded — избраните квадратчета (при qty 1
+     винаги единица 1); problem — null за целия товар или избраните. */
+  var units = [null];
+  if (f.kind === 'received' || f.kind === 'unloaded') units = qty === 1 ? [1] : (f.units || []).slice();
+  else if (f.kind === 'problem' && qty > 1 && !f.whole) units = (f.units || []).slice();
+  var err = null;
+  if (!units.length) err = f.kind === 'problem' ? 'Избери единица или „целият товар“.' : 'Избери поне една единица.';
+  for (var i = 0; !err && i < units.length; i++) {
+    err = tfEventAllowed(f.kind, x.t, x.c, evs, f.store, tfIsAdmin() && f.kind === 'resolved', units[i]);
+  }
+  err = err || tfValidateEvent(f.kind, f, x.t);
   var errEl = document.getElementById('tfe-error');
   if (err) { if (errEl) errEl.textContent = err; toast(err, '#dc2626'); return; }
 
   var wb = String(f.waybill_no || '').trim();
-  var row = {
+  var base = {
     cargo_id: x.c.id, transfer_id: x.t.id, store_name: f.store, event: f.kind,
     problem_kind: f.kind === 'problem' ? f.problem_kind : null,
     comment: String(f.comment || '').trim() || null,
@@ -2197,20 +2326,34 @@ function submitEvent() {
     resolves_id: f.kind === 'resolved' ? f.resolves_id : null,
     created_by: (currentUser && (currentUser.display_name || currentUser.email)) || null
   };
+  var rows = units.map(function (u) { var r = Object.assign({}, base); r.unit = u; return r; });
   f.saving = true; renderEventModal();
-  sbPostReturn('transfer_cargo_events', row).then(function (res) {
+  /* Няколко единици — ЕДИН POST с масив: базата записва всички или нито една
+     (един INSERT), тоест няма „записана 1 от 2“. Една — както досега, с
+     връщане на реда. */
+  var p = rows.length === 1
+    ? sbPostReturn('transfer_cargo_events', rows[0])
+    : sbPost('transfer_cargo_events', rows);
+  p.then(function (res) {
     if (!res.ok) {
       f.saving = false; renderEventModal();
-      toast('Грешка при запис на отметката: ' + sbErrMsg(res), '#dc2626');
+      var dup = res.status === 409 || /duplicate key|23505/.test(sbErrMsg(res));
+      toast((rows.length > 1 ? 'Нищо не е записано (0 от ' + rows.length + '): ' : 'Грешка при запис на отметката: ') +
+        (dup ? 'единица вече е отбелязана от друг — опресни' : sbErrMsg(res)), '#dc2626');
       return;
     }
-    var saved = (res.row && res.row.id) ? res.row : Object.assign({ id: 'local-' + Date.now(), created_at: new Date().toISOString() }, row);
-    tfEvents.push(saved);
+    var now = new Date().toISOString();
+    if (rows.length === 1 && res.row && res.row.id) tfEvents.push(res.row);
+    else rows.forEach(function (r, k) { tfEvents.push(Object.assign({ id: 'local-' + Date.now() + '-' + k, created_at: now }, r)); });
     closeEventModal();
+    if (String(tfHighlight) === String(x.c.id) && units.indexOf(tfHighlightUnit) >= 0) tfHighlightUnit = null;
     var extra = (f.kind === 'handed_to_courier' && wb && !x.t.waybill_no) ? { waybill_no: wb } : null;
     return tfSyncStatus(x.t, extra).then(function () {
-      toast('✅ ' + TF_EVENT_LABELS[f.kind]);
+      var uTxt = units[0] !== null && qty > 1 ? ' · ' + units.join(', ') + ' от ' + qty : '';
+      toast('✅ ' + TF_EVENT_LABELS[f.kind] + uTxt);
       renderTransfers();
+      /* Местните редове нямат истински id — за „Решен“ по тях трябва презареждане. */
+      if (rows.length > 1) return loadTransfers(true);
     });
   }).catch(function () {
     f.saving = false; renderEventModal();

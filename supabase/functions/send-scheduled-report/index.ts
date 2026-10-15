@@ -1,6 +1,15 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v55 (15.10.2026) — ЕДНО нещо: „Трансфери — застояли над N дни" по
+      ЕДИНИЦА. Крайната отметка („Получен" / „Разтоварен") важи, когато
+      всички единици 1..qty са отбелязани (reportTransferUnits — копие от
+      report.js; отметка без unit покрива целия товар); частично получен е
+      още „в път", „чака прехвърляне" се мери от най-новата единица.
+      Четенето на transfer_cargo_events тегли и unit (колона от миграцията
+      transfer_events_unit). Заковано в tests/report-edge-sync.test.js и
+      tests/transfers-units.test.js.
+
    v54 (15.10.2026) — ЕДНО нещо: reportLateDays/reportWaitDays броят РАБОТНИ
       дни (нов reportWorkdaysBetween върху isBgWorkday — без събота, неделя и
       официални празници). Важи за всичко, което ги вика: co_overdue,
@@ -2839,7 +2848,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        повече, не по-малко. r[15]–r[18]. */
     W.toISO ? sbGet('transfers','select=id,transfer_num,from_store,mode,depart_date,created_at') : Promise.resolve([]),
     W.toISO ? sbGet('transfer_cargo','select=id,transfer_id,position,kind,qty,recipient_store,transfer_points,prev_cargo_id') : Promise.resolve([]),
-    W.toISO ? sbGet('transfer_cargo_events','select=id,cargo_id,transfer_id,store_name,event,resolves_id,created_at') : Promise.resolve([]),
+    W.toISO ? sbGet('transfer_cargo_events','select=id,cargo_id,transfer_id,store_name,event,unit,resolves_id,created_at') : Promise.resolve([]),
     W.toISO ? sbGet('app_settings','key=eq.transfer_stale_days&select=key,value&limit=1') : Promise.resolve([])
   ]).then(function(r){
     /* Всеки набор минава през ЕДИН предикат — отделни филтри на отделни
@@ -3730,7 +3739,27 @@ function reportChecklistSectionHtml(cross){
                         иначе depart_date, иначе created_at на транспорта.
    Приключен (получен) товар не е застоял, дори с отворен проблем.
    Дни — цели, между локални полунощи (като diffStale); застоял = СТРОГО
-   над прага. При няколко състояния печели първото в горния ред. */
+   над прага. При няколко състояния печели първото в горния ред.
+   По ЕДИНИЦА (15.10.2026): крайната отметка важи, когато ВСИЧКИ единици
+   1..qty са отбелязани (reportTransferUnits); „чака прехвърляне" се мери от
+   НАЙ-НОВАТА единица. Частично получен / разтоварен товар е още „в път". */
+/* Единиците на товара c с отметка от вида ev в обекта store:
+   {qty, done:[n], left:[n], last:отметка|null}. Отметка без unit (стара,
+   преди 15.10.2026) покрива целия товар. last = най-новата от вида. */
+function reportTransferUnits(c, evs, ev, store){
+  var qty = Math.max(1, parseInt(c && c.qty, 10) || 1);
+  var seen = {}, all = false, last = null, done = [], left = [], n;
+  (evs || []).forEach(function(e){
+    if (!e || !c || e.cargo_id !== c.id || e.event !== ev) return;
+    if (store != null && e.store_name !== store) return;
+    if (!last || String(e.created_at || '') >= String(last.created_at || '')) last = e;
+    var u = parseInt(e.unit, 10);
+    if (e.unit == null || isNaN(u)) all = true;
+    else if (u >= 1 && u <= qty) seen[u] = 1;
+  });
+  for (n = 1; n <= qty; n++) (all || seen[n] ? done : left).push(n);
+  return { qty: qty, done: done, left: left, last: last };
+}
 function reportTransferAge(ts, refD){
   if (!ts) return null;
   var s = String(ts);
@@ -3746,8 +3775,8 @@ function reportTransferOpenStates(t, c, evs, hasSucc, refD){
   var pts = c.transfer_points || [];
   var tgStore = pts.length ? pts[0] : c.recipient_store;
   var tgEv = pts.length ? 'unloaded' : 'received';
-  var fin = null;
-  mine.forEach(function(e){ if (e.event === tgEv && e.store_name === tgStore) fin = e; });
+  var un = reportTransferUnits(c, mine, tgEv, tgStore);
+  var fin = un.left.length ? null : un.last;
   if (fin && tgEv === 'received') return [];
   var out = [], closed = {};
   mine.forEach(function(e){ if (e.event === 'resolved' && e.resolves_id) closed[e.resolves_id] = 1; });

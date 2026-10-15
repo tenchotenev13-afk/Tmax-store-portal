@@ -98,7 +98,7 @@ const SHARED_FNS = [
   /* 🕒 „Трансфери — застояли над N дни" (v46) — правилото е едно и за
      портала (transfers.js го вика от report.js). Разминае ли се копието,
      писмото брои застояли по друго правило от екрана. */
-  'reportTransferAge', 'reportTransferOpenStates', 'reportTransferStale',
+  'reportTransferAge', 'reportTransferUnits', 'reportTransferOpenStates', 'reportTransferStale',
   'reportTransferStaleDays', 'reportTransfersStaleHtml',
   'reportChecklistCellValue', 'reportChecklistSectionHtml',
   'reportNotApplicableSectionHtml',

@@ -302,6 +302,7 @@ const TESTS = [
   'transfers-truck.test.js',
   'transfers-co-label.test.js',
   'transfers-labels.test.js',
+  'transfers-units.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',

@@ -42,8 +42,10 @@ function env(user, opts) {
      ги върне следващото зареждане, както би направила базата. */
   const box = { h: null };
   const storedEvents = function () {
-    const posted = box.h ? box.h.calls.post.filter(function (p) { return p.table === 'transfer_cargo_events'; })
-      .map(function (p, i) { return Object.assign({ id: 'ev-' + i, created_at: '2026-09-30T1' + i + ':00:00Z' }, p.body); }) : [];
+    /* POST с масив (няколко единици наведнъж) — по ред на единица, като в базата. */
+    const rows = box.h ? [].concat.apply([], box.h.calls.post.filter(function (p) { return p.table === 'transfer_cargo_events'; })
+      .map(function (p) { return Array.isArray(p.body) ? p.body : [p.body]; })) : [];
+    const posted = rows.map(function (r, i) { return Object.assign({ id: 'ev-' + i, created_at: '2026-09-30T1' + i + ':00:00Z' }, r); });
     return (opts.events || []).concat(posted);
   };
   const h = boot({
@@ -105,8 +107,13 @@ function t0(h) { return h.w.tfTransfers.filter(function (t) { return t.id === 'b
     await open(h3); await mine(h3);
     realClick(h3.w, $(h3, '.trf-pending-row[data-c="cA"] .trf-act-unloaded')); await ticks();
     ok('прозорчето е отворено', !!$(h3, '#tfe-ov'));
+    /* A е qty 2: по единица (15.10.2026) „чака прехвърляне" иска и двете —
+       единица 1 е избрана сама, 2 се избира тук. */
+    { const u2 = $(h3, '#tfe-u-2'); u2.checked = true; fire(h3.w, u2, 'change'); await ticks(); }
     realClick(h3.w, $(h3, '#tfe-save')); await ticks();
-    const ev = (posts(h3, 'transfer_cargo_events')[0] || {}).body || {};
+    const evB = (posts(h3, 'transfer_cargo_events')[0] || {}).body || [];
+    ok('по единица: един POST с двете единици', Array.isArray(evB) && evB.map(function (r) { return r.unit; }).join(',') === '1,2', JSON.stringify(evB));
+    const ev = Array.isArray(evB) ? evB[0] || {} : evB;
     ok('записът: unloaded, Пирдоп, товар A', ev.event === 'unloaded' && ev.store_name === 'Пирдоп' && ev.cargo_id === 'cA' && ev.transfer_id === 'b1', JSON.stringify(ev));
     await open(h3); await card(h3, 'b1');
     ok('A вече „чака прехвърляне в Пирдоп"', /чака прехвърляне в Пирдоп/.test(cardCargo(h3, 'cA').querySelector('.trf-state').textContent));
@@ -192,6 +199,7 @@ function t0(h) { return h.w.tfTransfers.filter(function (t) { return t.id === 'b
     const h1 = env(U('Пирдоп'));
     await open(h1); await mine(h1);
     realClick(h1.w, $(h1, '.trf-act-unloaded')); await ticks();
+    { const u2 = $(h1, '#tfe-u-2'); u2.checked = true; fire(h1.w, u2, 'change'); await ticks(); }  /* qty 2 — и двете единици */
     realClick(h1.w, $(h1, '#tfe-save')); await ticks();
     ok('първата отметка → transfers.status = partial', (patches(h1, 'transfers')[0] || {}).body && patches(h1, 'transfers')[0].body.status === 'partial', JSON.stringify(patches(h1, 'transfers')));
     ok('прогресът е 1/2 в картата', /1\/2/.test(h1.w.tfProgressLabel(t0(h1))));
