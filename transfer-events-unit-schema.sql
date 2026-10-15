@@ -1,7 +1,10 @@
 -- transfer-events-unit-schema.sql
 -- Междускладови трансфери — приемане ПО ЕДИНИЦА: transfer_cargo_events.unit.
--- ЧАКА ПРИЛАГАНЕ (apply_migration след „давай" от Тенчо). След прилагане тук
--- се вписва номерът на миграцията, който базата даде.
+-- ПРИЛОЖЕНО В SUPABASE НА 15.10.2026 като миграция 20261015132314_transfer_events_unit
+-- и прочетено обратно (integer, NULL, без default, 0 попълнени от 18 реда;
+-- индексът transfer_cargo_events_unit_once — уникален, частичен, valid;
+-- коментарът е там). Този файл е ОГЛЕДАЛО на миграцията, не източник.
+-- Rollback: supabase/migrations/20261015132314_transfer_events_unit_down.sql.
 -- Предишни: transfers-schema.sql · transfers-events-schema.sql ·
 -- transfer-cargo-loaded-at-schema.sql · transfer-cargo-prev-schema.sql ·
 -- transfers-plate-schema.sql.
