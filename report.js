@@ -365,12 +365,35 @@ function reportIsLate(o, refD){
   var dl = new Date(o.delivery); dl.setHours(0,0,0,0);
   return dl < refD;
 }
-/* С колко дни. Същата аритметика като lateBadge() в shared.js — Math.round,
-   не floor: през преминаването към лятно/зимно часово време денонощието не е
-   86400000 мс и floor би отчитал един ден по-малко. */
+/* РАБОТНИ дни между две полунощни дати: броят дни d с from < d <= refD, за
+   които isBgWorkday() — без събота, неделя и официалните празници
+   (bgHolidaysForYear). Отрицателен или нулев интервал → 0. Итерира по
+   календарни дати (new Date(y,m,d+1)), не по 86400000 мс, затова смяната на
+   часовото време не мести броя. Примери: срок петък → понеделник = 1 (само
+   понеделникът); срок вчера (работен) = 1; срок днес = 0; срок събота,
+   опорен ден понеделник = 1. */
+function reportWorkdaysBetween(fromD, refD){
+  var n = 0;
+  var d = new Date(fromD.getFullYear(), fromD.getMonth(), fromD.getDate());
+  while (true) {
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    if (d > refD) break;
+    if (isBgWorkday(localDateISO(d))) n++;
+  }
+  return n;
+}
+/* С колко дни — РАБОТНИ от 15.10.2026 (reportWorkdaysBetween; писмо на
+   Теодор от 14.10: „системата брои събота и неделя"). lateBadge() в shared.js
+   и calcElapsed() в client-orders.js още броят КАЛЕНДАРНИ — модулът и
+   писмата се разминават, отворено в предавката.
+   Изтекъл срок е ПОНЕ 1: срок петък, опорен ден събота/неделя (дневният и
+   складовият отчет текат и в почивни дни) дава 0 работни дни, а навсякъде
+   „просрочена" се познава по lateDays > 0 — без пода заявката тихо изчезва
+   от броя на просрочените и губи „+N просрочие". Срокът не е изтекъл → 0. */
 function reportLateDays(o, refD){
   var dl = new Date(o.delivery); dl.setHours(0,0,0,0);
-  return Math.round((refD - dl) / 86400000);
+  if (!(dl < refD)) return 0;
+  return Math.max(1, reportWorkdaysBetween(dl, refD));
 }
 /* Колко дни ЧАКА заявката — от ПО-РАННАТА от created_at и date, същата
    начална точка като calcElapsed() в client-orders.js. Изнесена от
@@ -388,7 +411,7 @@ function reportWaitDays(o, refD){
       if (od < d) d = od;
     }
   }
-  return Math.round((refD - d) / 86400000);
+  return reportWorkdaysBetween(d, refD);
 }
 
 /* Прагът за „разминаване" — app_settings, ключ 'kasa_diff_threshold'.

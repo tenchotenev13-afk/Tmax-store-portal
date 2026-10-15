@@ -78,8 +78,8 @@ const RECIP = [
 ];
 
 const ORDERS = [
-  mk('P-LATE', { delivery: '2026-10-02' }),                                   /* 5 дни просрочие → секция 1 */
-  mk('P-OLDER', { delivery: '2026-09-25', store_name: 'Враца' }),            /* 12 дни → секция 1, най-отгоре */
+  mk('P-LATE', { delivery: '2026-10-02' }),                                   /* 3 раб. дни (пн 05, вт 06, ср 07) → секция 1 */
+  mk('P-OLDER', { delivery: '2026-09-25', store_name: 'Враца' }),            /* 8 раб. дни → секция 1, най-отгоре */
   mk('P-OK', { delivery: '2026-10-20' }),                                     /* в срок → не */
   mk('P-TODAY', { delivery: '2026-10-07' }),                                  /* срок днес → не */
   mk('P-LOWER', { fulfiller: ' централен ОФИС ', delivery: '2026-10-05' }),   /* същото сравнение като isCentralOffice */
@@ -113,7 +113,9 @@ const ORDERS = [
       ['S-SENT', 'S-ARR', 'S-DONE', 'S-REF', 'S-POST'].every(n => p.indexOf(n) < 0 && d.processed.map(x => x.in_num).indexOf(n) < 0));
     ok('сортиране: най-много дни просрочие отгоре', p.join('|') === 'P-OLDER|P-LATE|P-LOWER', p.join('|'));
     const late = d.pending.find(x => x.in_num === 'P-LATE');
-    ok('lateDays = reportLateDays (5), waitDays = reportWaitDays (6)', late.lateDays === 5 && late.waitDays === 6, JSON.stringify(late));
+    /* Работни дни от v54: срок пт 02.10 → ср 07.10 = 3; чака от чт 01.10 = 4
+       (пт 02, пн 05, вт 06, ср 07). Календарно бяха 5 и 6. */
+    ok('lateDays = reportLateDays (3 раб.), waitDays = reportWaitDays (4 раб.)', late.lateDays === 3 && late.waitDays === 4, JSON.stringify(late));
   }
 
   section('2. Секция 2 — processed с минала/липсваща дата от ЦО');
@@ -130,7 +132,8 @@ const ORDERS = [
     const y = d.processed.find(x => x.in_num === 'Q-YDAY');
     ok('просрочието при минала co_eta е от датата на ЦО (1 ден)', y.lateDays === 1, JSON.stringify(y));
     const n = d.processed.find(x => x.in_num === 'Q-NOETA');
-    ok('просрочието без co_eta е от срока (7 дни)', n.lateDays === 7, JSON.stringify(n));
+    /* срок ср 30.09 → ср 07.10: чт, пт, пн, вт, ср = 5 раб. дни (календарно 7) */
+    ok('просрочието без co_eta е от срока (5 раб. дни)', n.lateDays === 5, JSON.stringify(n));
     ok('сортиране в секция 2: най-много отгоре', q.join('|') === 'Q-NOETA|Q-YDAY', q.join('|'));
     ok('processed не попада в секция 1', d.pending.every(x => x.in_num.indexOf('Q-') !== 0));
   }
@@ -146,8 +149,9 @@ const ORDERS = [
     ok('секция 2 със заглавие', html.indexOf('Обработени, но датата от ЦО е минала') >= 0);
     ok('празната co_eta е „без дата от ЦО"', html.indexOf('без дата от ЦО') >= 0);
     ok('показва коментар и обработил, ескейпнати', html.indexOf('Коментар от ЦО: ТЕСИ &lt;поръчка&gt; 45') >= 0 && html.indexOf('Обработил: Снабдяване') >= 0);
-    ['Обект', '№', 'Клиент', 'Срок', 'Дата от ЦО', 'Просрочие', 'Чака'].forEach(c =>
+    ['Обект', '№', 'Клиент', 'Срок', 'Дата от ЦО', 'Просрочие (раб. дни)', 'Чака (раб. дни)'].forEach(c =>
       ok('колона „' + c + '"', html.indexOf('>' + c + '</th>') >= 0));
+    ok('под таблицата: дните са работни', html.indexOf('Дните са работни (без събота, неделя и официални празници).') >= 0);
     ok('реда: P-OLDER преди P-LATE', html.indexOf('P-OLDER') < html.indexOf('P-LATE'));
     ok('темата: „Просрочени клиентски заявки — ЦО — 07.10.2026 (5)"',
       L.ctx.reportCoOverdueSubject(data) === 'Просрочени клиентски заявки — ЦО — 07.10.2026 (5)', L.ctx.reportCoOverdueSubject(data));

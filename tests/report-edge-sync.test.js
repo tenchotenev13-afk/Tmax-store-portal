@@ -72,7 +72,7 @@ const SHARED_FNS = [
      другаде и явяванията, пренесени В прозореца. Разминае ли се копието,
      писмото брои деня, на който задачата вече не се очаква. */
   'reportDM', 'reportCompMovedOff', 'reportCarriedItems',
-  'reportIsLate', 'reportLateDays',
+  'reportIsLate', 'reportLateDays', 'reportWorkdaysBetween',
   'reportDailyTargetDate', 'reportWeekdayIdx',
   /* обобщение */
   'reportBuildSummary', 'reportSaveSnapshot', 'reportFetchSnapshot',

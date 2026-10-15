@@ -63,6 +63,16 @@ function stampShift(n) {
   d.setDate(d.getDate() + n);
   return d.toISOString();
 }
+/* „Чака" е в РАБОТНИ дни от 15.10.2026, а датите тук са спрямо ДНЕС —
+   очакваното се смята: днешният и предишните n−1 дни, които са работни по
+   isBgWorkday() от shared.js (не през reportWorkdaysBetween — иначе тестът
+   сверява функцията със самата нея). Без под: „чака" може да е 0. */
+function waitWd(w, n) {
+  let c = 0;
+  for (let k = -n + 1; k <= 0; k++) if (w.isBgWorkday(dayShift(k))) c++;
+  return c;
+}
+const wdWord = function (n) { return n === 1 ? ' ден' : ' дни'; };
 
 /* ВСИЧКИТЕ носят created_at = вчера. Точно това е капанът в живите данни:
    един и същ SAP импорт слага една и съща дата на позиции на всякаква
@@ -203,10 +213,10 @@ function cross(h, scope) {
     ok('първата е закъснялата (lateDays=1)',
       wp[0] && wp[0].in_num === '2001' && wp[0].lateDays === 1,
       wp[0] ? JSON.stringify(wp[0]) : 'няма');
-    ok('чакането е от created_at, не от срока',
-      wp[0] && wp[0].waitDays === 6, wp[0] ? 'waitDays=' + wp[0].waitDays : 'няма');
+    ok('чакането е от created_at, не от срока (6 календарни → ' + waitWd(h.w, 6) + ' раб.)',
+      wp[0] && wp[0].waitDays === waitWd(h.w, 6), wp[0] ? 'waitDays=' + wp[0].waitDays : 'няма');
     ok('втората чака склада, но НЕ е закъсняла',
-      wp[1] && wp[1].in_num === '2002' && wp[1].lateDays === 0 && wp[1].waitDays === 2,
+      wp[1] && wp[1].in_num === '2002' && wp[1].lateDays === 0 && wp[1].waitDays === waitWd(h.w, 2),
       wp[1] ? JSON.stringify(wp[1]) : 'няма');
     ok('складът пътува до писмото', wp[0] && wp[0].warehouse === WH_D,
       wp[0] ? wp[0].warehouse : 'няма');
@@ -218,9 +228,9 @@ function cross(h, scope) {
 
     const bs = c.warehousePendingByStore || [];
     ok('разбивката е един обект', bs.length === 1, 'реално: ' + bs.length);
-    ok('A: 2 заявки, 1 просрочена, най-дълго чака 6 дни',
+    ok('A: 2 заявки, 1 просрочена, най-дълго чака 6 календарни дни (в работни)',
       bs[0] && bs[0].store === A && bs[0].count === 2 && bs[0].late === 1 &&
-      bs[0].oldestWait === 6, bs[0] ? JSON.stringify(bs[0]) : 'няма');
+      bs[0].oldestWait === waitWd(h.w, 6), bs[0] ? JSON.stringify(bs[0]) : 'няма');
     h.close();
   }
 
@@ -262,7 +272,7 @@ function cross(h, scope) {
       whScoped.indexOf('📦 Необработени от логистичен склад (2)') >= 0, whScoped);
     ok('срязан: ред по ред — номер, клиент, склад, чакане',
       whScoped.indexOf('№ 2001') >= 0 && whScoped.indexOf('Иван Петров') >= 0 &&
-      whScoped.indexOf(WH_D) >= 0 && whScoped.indexOf('чака 6 дни') >= 0, whScoped);
+      whScoped.indexOf(WH_D) >= 0 && whScoped.indexOf('чака ' + waitWd(h.w, 6) + wdWord(waitWd(h.w, 6))) >= 0, whScoped);
     ok('просрочието се показва само където го има',
       whScoped.indexOf('+1 просрочие') >= 0 &&
       (whScoped.match(/просрочие/g) || []).length === 1, whScoped);

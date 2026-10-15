@@ -51,6 +51,16 @@ function dayShift(n) {
   const p = function (x) { return String(x).padStart(2, '0'); };
   return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate());
 }
+/* Просрочието е в РАБОТНИ дни от 15.10.2026, а датите тук са спрямо ДНЕС —
+   затова очакваното се смята, не се закодира. Брои днешния и предишните
+   n−1 дни, които са работни по isBgWorkday() от shared.js (НЕ през
+   reportWorkdaysBetween — иначе тестът би сверил функцията сама със себе си),
+   с пода 1 от reportLateDays: изтекъл срок в почивен ден е поне 1. */
+function lateWd(w, n) {
+  let c = 0;
+  for (let k = -n + 1; k <= 0; k++) if (w.isBgWorkday(dayShift(k))) c++;
+  return Math.max(1, c);
+}
 
 const CLIENT_ORDERS = [
   { id: 'co-1', in_num: '1001', store_name: A, customer_name: 'Иван Петров',
@@ -140,8 +150,8 @@ function cross(h, scope) {
        h.w.reportIsLate({ status: 'pending' }, TODAY) === false);
 
     /* Дните: същата аритметика като lateBadge(). */
-    ok('reportLateDays брои цели дни',
-       h.w.reportLateDays({ delivery: dayShift(-5) }, TODAY) === 5,
+    ok('reportLateDays брои работни дни (' + lateWd(h.w, 5) + ' за 5 календарни)',
+       h.w.reportLateDays({ delivery: dayShift(-5) }, TODAY) === lateWd(h.w, 5),
        'реално: ' + h.w.reportLateDays({ delivery: dayShift(-5) }, TODAY));
     h.close();
   }
@@ -157,8 +167,8 @@ function cross(h, scope) {
       ok('две закъснели клиентски заявки', lo.length === 2,
          'реално: ' + lo.length + ' → ' +
          lo.map(function (x) { return x.in_num + '/' + x.days; }).join(', '));
-      ok('най-старата отгоре (12 преди 5)',
-         lo.length === 2 && lo[0].days === 12 && lo[1].days === 5,
+      ok('най-старата отгоре (12 преди 5 календарни, в работни дни)',
+         lo.length === 2 && lo[0].days === lateWd(h.w, 12) && lo[1].days === lateWd(h.w, 5),
          lo.map(function (x) { return x.days; }).join(' > '));
       ok('номерът, клиентът и изпълняващият пътуват до писмото',
          lo[0] && lo[0].in_num === '1002' && lo[0].customer === 'Мария Георгиева' &&
@@ -173,16 +183,16 @@ function cross(h, scope) {
       const lt = c.lateTransport || [];
       ok('един закъснял транспорт', lt.length === 1,
          'реално: ' + lt.length + ' → ' + lt.map(function (x) { return x.days; }).join(','));
-      ok('и той е от 3 дни', lt[0] && lt[0].days === 3,
+      ok('и той е от 3 календарни дни (' + lateWd(h.w, 3) + ' раб.)', lt[0] && lt[0].days === lateWd(h.w, 3),
          lt[0] ? 'реално: ' + lt[0].days : 'няма');
       /* АНТИ-ТАВТОЛОГИЯ: единствената причина tr-2 (30 дни!) да не е пръв. */
       ok('чакащият стока (awaiting_stock, 30 дни) НЕ влиза',
-         lt.length === 1 && lt[0].days === 3, 'реално: ' + lt.length + ' записа');
+         lt.length === 1 && lt[0].days === lateWd(h.w, 3), 'реално: ' + lt.length + ' записа');
 
       const bs = c.lateOrdersByStore || [];
       ok('разбивката по обект е един ред', bs.length === 1, 'реално: ' + bs.length);
-      ok('за обект A, две заявки, най-старата 12 дни',
-         bs[0] && bs[0].store === A && bs[0].count === 2 && bs[0].maxDays === 12,
+      ok('за обект A, две заявки, най-старата 12 календарни дни (в работни)',
+         bs[0] && bs[0].store === A && bs[0].count === 2 && bs[0].maxDays === lateWd(h.w, 12),
          bs[0] ? JSON.stringify(bs[0]) : 'няма');
     }
     h.close();
@@ -225,7 +235,7 @@ function cross(h, scope) {
     ok('редът носи номера на заявката', html.indexOf('№ 1002') >= 0);
     ok('и клиента', html.indexOf('Мария Георгиева') >= 0);
     ok('и кой изпълнява', html.indexOf('изпълнява Доставчик') >= 0);
-    ok('и с колко дни', html.indexOf('+12 дни') >= 0);
+    ok('и с колко дни', html.indexOf('+' + lateWd(h.w, 12) + (lateWd(h.w, 12) === 1 ? ' ден' : ' дни')) >= 0);
     ok('обектът е връзка към портала', html.indexOf('?store=') >= 0);
 
     /* from_store е празен в цялата таблица — редът пада на клиента, а не
@@ -250,7 +260,7 @@ function cross(h, scope) {
     ok('редът за A казва 2 заявки', html.indexOf('2 заявки') >= 0);
     ok('редът за C казва 1 заявка (единствено число)',
        html.indexOf('1 заявка') >= 0);
-    ok('и най-старата', html.indexOf('най-старата +12 дни') >= 0);
+    ok('и най-старата', html.indexOf('най-старата +' + lateWd(h.w, 12) + (lateWd(h.w, 12) === 1 ? ' ден' : ' дни')) >= 0);
     ok('номерата на заявките ГИ НЯМА в пълния режим',
        html.indexOf('№ 1002') < 0);
     ok('имената на клиентите също ги няма',

@@ -1,6 +1,16 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v54 (15.10.2026) — ЕДНО нещо: reportLateDays/reportWaitDays броят РАБОТНИ
+      дни (нов reportWorkdaysBetween върху isBgWorkday — без събота, неделя и
+      официални празници). Важи за всичко, което ги вика: co_overdue,
+      седмичното писмо (вкл. „Закъснял транспорт“), „Необработени заявки —
+      склад". В писмото за ЦО колоните са „Просрочие (раб. дни)" / „Чака
+      (раб. дни)" и под таблицата има ред, че дните са работни. Изтекъл срок е поне 1 (опорен ден в
+      почивен ден иначе дава 0 и заявката изпада от „просрочени“). Повод:
+      писмо на Теодор от 14.10.2026.
+      Заковано в tests/report-workdays.test.js и tests/report-edge-sync.test.js.
+
    v53 (14.10.2026) — ЕДНО нещо: „Необработени разлики над N дни" по новото
       правило за хода на обекта, без да губи редове. „чака обекта" брои по
       diffLineWaitsStore() (копие от shared.js, огледало на SQL
@@ -1331,12 +1341,35 @@ function reportIsLate(o, refD){
   var dl = new Date(o.delivery); dl.setHours(0,0,0,0);
   return dl < refD;
 }
-/* С колко дни. Същата аритметика като lateBadge() в shared.js — Math.round,
-   не floor: през преминаването към лятно/зимно часово време денонощието не е
-   86400000 мс и floor би отчитал един ден по-малко. */
+/* РАБОТНИ дни между две полунощни дати: броят дни d с from < d <= refD, за
+   които isBgWorkday() — без събота, неделя и официалните празници
+   (bgHolidaysForYear). Отрицателен или нулев интервал → 0. Итерира по
+   календарни дати (new Date(y,m,d+1)), не по 86400000 мс, затова смяната на
+   часовото време не мести броя. Примери: срок петък → понеделник = 1 (само
+   понеделникът); срок вчера (работен) = 1; срок днес = 0; срок събота,
+   опорен ден понеделник = 1. */
+function reportWorkdaysBetween(fromD, refD){
+  var n = 0;
+  var d = new Date(fromD.getFullYear(), fromD.getMonth(), fromD.getDate());
+  while (true) {
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    if (d > refD) break;
+    if (isBgWorkday(localDateISO(d))) n++;
+  }
+  return n;
+}
+/* С колко дни — РАБОТНИ от 15.10.2026 (reportWorkdaysBetween; писмо на
+   Теодор от 14.10: „системата брои събота и неделя"). lateBadge() в shared.js
+   и calcElapsed() в client-orders.js още броят КАЛЕНДАРНИ — модулът и
+   писмата се разминават, отворено в предавката.
+   Изтекъл срок е ПОНЕ 1: срок петък, опорен ден събота/неделя (дневният и
+   складовият отчет текат и в почивни дни) дава 0 работни дни, а навсякъде
+   „просрочена" се познава по lateDays > 0 — без пода заявката тихо изчезва
+   от броя на просрочените и губи „+N просрочие". Срокът не е изтекъл → 0. */
 function reportLateDays(o, refD){
   var dl = new Date(o.delivery); dl.setHours(0,0,0,0);
-  return Math.round((refD - dl) / 86400000);
+  if (!(dl < refD)) return 0;
+  return Math.max(1, reportWorkdaysBetween(dl, refD));
 }
 /* Колко дни ЧАКА заявката — от ПО-РАННАТА от created_at и date, същата
    начална точка като calcElapsed() в client-orders.js. Изнесена от
@@ -1354,7 +1387,7 @@ function reportWaitDays(o, refD){
       if (od < d) d = od;
     }
   }
-  return Math.round((refD - d) / 86400000);
+  return reportWorkdaysBetween(d, refD);
 }
 
 /* Прагът за „разминаване" — app_settings, ключ 'kasa_diff_threshold'.
@@ -4280,8 +4313,8 @@ function reportWarehouseRecipients(users, recipientRows){
    Просрочието в секция 1 и в секция 2 без дата от ЦО е reportLateDays() от
    срока (delivery); в секция 2 с минала co_eta е от ДАТАТА НА ЦО — тя е
    обещанието, което е изтекло (reportLateDays върху co_eta, същата аритметика).
-   „Чака" — reportWaitDays(). Опорният ден е днешният по София (не по часовника
-   на сървъра — Deno тече в UTC). Праща се и при 0 реда. На официален празник
+   „Чака" — reportWaitDays(). И двете — в РАБОТНИ дни от v54. Опорният ден е
+   днешният по София (не по часовника на сървъра — Deno тече в UTC). Праща се и при 0 реда. На официален празник
    (и в уикенд) не се праща. dry_run:true връща броя и първите 5 от секция
    БЕЗ да праща и БЕЗ имена/телефони на клиенти — функцията се вика и с
    публичния ключ, затова не връща лични данни. */
@@ -4381,7 +4414,7 @@ function reportCoOverdueHtml(data){
     if (!items.length) return '';
     var head = '<tr><th style="' + TH + '">Обект</th><th style="' + TH + '">№</th><th style="' + TH + '">Клиент</th>' +
       '<th style="' + TH + '">Срок</th>' + (withEta ? '<th style="' + TH + '">Дата от ЦО</th>' : '') +
-      '<th style="' + TH + '">Просрочие</th><th style="' + TH + '">Чака</th></tr>';
+      '<th style="' + TH + '">Просрочие (раб. дни)</th><th style="' + TH + '">Чака (раб. дни)</th></tr>';
     var cols = withEta ? 7 : 6;
     var body = items.map(function(x){
       var r = '<tr><td style="' + TD + '">' + reportStoreLinkHtml(x.store, '#1E2761') + '</td>' +
@@ -4406,6 +4439,7 @@ function reportCoOverdueHtml(data){
     ? section('Необработени с изтекъл срок', data.pending, false) +
       section('Обработени, но датата от ЦО е минала', data.processed, true)
     : '<div style="font-size:13px;color:#94a3b8;">Няма просрочени заявки</div>';
+  if (total) body += '<div style="margin-top:10px;font-size:11px;color:#64748b;">Дните са работни (без събота, неделя и официални празници).</div>';
   var d = data && data.reportDate ? new Date(data.reportDate+'T00:00:00') : new Date();
   var dateStr = d.toLocaleDateString('bg-BG', { weekday:'long', year:'numeric', month:'long', day:'numeric' });
   return reportEmailShell('📦 Просрочени клиентски заявки — Централен офис', dateStr, body, 'Автоматичен репорт · ТеМАХ Портал');
