@@ -358,9 +358,9 @@ function calNoticeRowHtml(t,kind){
    минала седмица, вижда изключванията на минала седмица. Ключът минава през
    понеделника на curBul, за да е същият, който смятат „Днес", банерът и
    едж функциите от дата (виж recurringSkipWeekOf() в shared.js).
-   Изключената задача НЕ се крие (правило 11): за обекта е сив ред без
-   чекбокс, с бадж. Глобалният изглед я сивее само при глобално изключване;
-   магазинното вади обекта от брояча X/18, но задачата си остава. */
+   За обекта изключената задача НЕ се рендира (от 15.10.2026, bulSkipHidden).
+   Глобалният изглед я сивее само при глобално изключване; магазинното вади
+   обекта от брояча X/18, но задачата си остава. */
 function bulSkipWeek(){
   return recurringSkipWeekOf(curBul ? weekDays(curBul.week_number,curBul.year)[0] : new Date());
 }
@@ -371,6 +371,16 @@ function bulSkipViewStore(){
 }
 /* Текстът на баджа или ''. store=null е глобалният изглед: при глобално
    изключване „тази седмица", иначе списъкът с изключените обекти. */
+/* Скрита ли е постоянната задача от рендера (решение на Тенчо 15.10.2026):
+   изключената за седмицата — за обекта или глобално — НЕ се показва на обекта
+   никъде в Бюлетина (списък, календар, „План за деня"), включително Инфо.
+   Сивият ред с баджа подвеждаше обектите. Глобалните роли (bulSkipViewStore
+   е null) не се крият — те я виждат сива с „Върни" / ✕. Проверката стои
+   ПРЕДИ taskIsNotice: до 15.10 Инфо задачите изобщо не стигаха до нея. */
+function bulSkipHidden(t){
+  var vs=bulSkipViewStore();
+  return !!(vs&&t&&recurringIsSkipped(t.id,vs,bulSkips));
+}
 function recSkipLabel(taskId,store){
   if(recurringIsSkipped(taskId,store,bulSkips)) return 'Не се изисква тази седмица';
   if(store) return '';
@@ -1761,10 +1771,11 @@ function bulSpanHomeNoteHtml(t){
                                        запазено дословно, за да не се променя
                                        хартията мълчаливо. Виж claude/open-tasks.md.
 
-   Изключените за седмицата („не за тази седмица") ОСТАВАТ в списъка: и двата
-   изгледа ги показват, само различно (сив ред с етикет). Решението „да се
-   покаже ли" е на рендера, не на подбора — иначе изгледът, който ги иска, би
-   трябвало да ги дърпа втори път. */
+   Изключените за седмицата („не за тази седмица") ОСТАВАТ в списъка, но
+   решението „да се покаже ли" е на рендера, не на подбора — иначе изгледът,
+   който ги иска, би трябвало да ги дърпа втори път. От 15.10.2026 (решение на
+   Тенчо) рендерът ги СКРИВА на обекта навсякъде, вкл. Инфо (bulSkipHidden);
+   само глобалните роли ги виждат — сив ред с етикет и „Върни". */
 function bulDayItems(dateISO, store, opts){
   opts = opts || {};
   var noNotice = opts.includeNotice === false;
@@ -1993,6 +2004,8 @@ function bulPlanGroups(dateISO, store){
   /* постоянни: изключените за обекта НЕ влизат; прозоречните — всеки ден до
      отмятането, после само в деня на изпълнението (решение от 27.09.2026) */
   it.recurring.forEach(function(t){
+    /* Изключената за обекта — преди Инфо: и Инфо задачата се скрива (15.10.2026). */
+    if(bulSkipHidden(t)) return;
     if(taskIsNotice(t)){ notices.push({kind:'recurring',t:t,notice:true,cdate:null}); return; }
     if(recurringIsSkipped(t.id, store, bulSkips)) return;
     var isWin=recurringIsWindow(t);
@@ -2827,7 +2840,9 @@ function renderBulView(){
     DCOLS.forEach(function(dk){
       var dept=DEPTS[dk];
       var regItems=regularForDay.filter(function(t){return t.department===dk;});
-      var recItems=recurringForDay.filter(function(t){return t.department===dk;});
+      /* Изключената за обекта не се рендира изобщо, вкл. Инфо (15.10.2026) —
+         филтърът е тук, преди брояча на отдела, за да не остане празно заглавие. */
+      var recItems=recurringForDay.filter(function(t){return t.department===dk&&!bulSkipHidden(t);});
       var manItems=manualAll.filter(function(mi){return mi.e.dept===dk;});
       /* Пренесените В този ден. Слетите (merged) не се рисуват отделно — те
          са значка върху собствения ред на задачата по-долу. */
@@ -6187,6 +6202,8 @@ function renderRecurringTasks(dk) {
   var dTasks = dTasksAll.filter(function(t){
     return isGlobal()||!t.target_stores||!t.target_stores.length||(store&&t.target_stores.indexOf(store)>=0);
   });
+  /* Изключената за седмицата не се показва на обекта, вкл. Инфо (15.10.2026). */
+  dTasks = dTasks.filter(function(t){ return !bulSkipHidden(t); });
   if (!dTasks.length && !canEdit()) return '';
   var d = DEPTS[dk];
   /* За многодневни (due_weekdays) постоянни задачи трябва конкретната дата

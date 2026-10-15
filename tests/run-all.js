@@ -315,6 +315,7 @@ const TESTS = [
   'recurring-task-skips-report.test.js',
   'recurring-task-skips-notify.test.js',
   'recurring-task-skips-responder.test.js',
+  'skip-hide.test.js',
   'recurring-notice-block.test.js',
   'recurring-stopped.test.js',
   'bulletin-due-done.test.js',

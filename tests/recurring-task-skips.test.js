@@ -6,8 +6,10 @@
 
      - заявката тегли САМО седмицата на показания бюлетин (съседната не се
        прилага, дори да има ред в базата);
-     - глобалното изключване сивее задачата за всеки обект — без чекбокс, с
-       бадж, без „Отложи" (не се крие: правило 11);
+     - на обекта изключената (глобално или за него) НЕ се показва изобщо —
+       нито в календара, нито в блока (решение 15.10.2026; до тогава беше сив
+       ред с бадж). Глобалният изглед я сивее с бадж — виж секция 5 и
+       tests/skip-hide.test.js;
      - магазинното засяга САМО този обект — другият си я вижда и отмята;
      - глобалният изглед крие задачата от брояча единствено при глобално
        изключване; магазинното вади обекта от знаменателя X/N;
@@ -244,26 +246,16 @@ function calBoxes(doc, id) { return doc.querySelectorAll('#sec-calendar input[da
   }
 
   /* ═══ 3. Обект Кърджали ══════════════════════════════════════════════ */
-  section('3. Кърджали: глобално и собствено изключване → сив ред, без чекбокс');
+  section('3. Кърджали: глобално и собствено изключване → задачата не се показва (15.10.2026)');
   {
     const w = hs.w, doc = hs.doc;
     ['r-a', 'r-b', 'r-e'].forEach(id => {
       ok(id + ': в календара няма чекбокс', calBoxes(doc, id).length === 0);
       const rows = calSkipRows(doc, id);
-      ok(id + ': в календара е сив ред с бадж (по един на ден — 7)', rows.length === 7, 'редове: ' + rows.length);
-      ok(id + ': баджът казва „Не се изисква тази седмица"',
-        rows.length && txt(rows[0]).indexOf('⏸ Не се изисква тази седмица') >= 0, txt(rows[0]));
-      const br = blockRow(doc, id);
-      if (ok(id + ': редът в блока „Постоянни задачи" съществува', !!br)) {
-        ok(id + ': в блока няма чекбокс', !br.querySelector('input[type=checkbox]'));
-        ok(id + ': в блока стои ⏸ на мястото на чекбокса', txt(br).indexOf('⏸') >= 0);
-        ok(id + ': няма „Отложи"', !H.btn(br, 'Отложи'));
-        ok(id + ': баджът е в блока', !!br.querySelector('.rec-skip-badge'));
-      }
+      ok(id + ': в календара няма и сив ред', rows.length === 0, 'редове: ' + rows.length);
+      ok(id + ': заглавието го няма в календара', txt(doc.getElementById('sec-calendar')).indexOf('Постоянна ' + id) < 0);
+      ok(id + ': редът в блока „Постоянни задачи" го няма', !blockRow(doc, id));
     });
-    const badgeA = (blockRow(doc, 'r-a') || doc.createElement('div')).querySelector('.rec-skip-badge');
-    ok('причината и авторът са в title', badgeA && badgeA.getAttribute('title').indexOf('инвентаризация') >= 0 &&
-      badgeA.getAttribute('title').indexOf('Админ') >= 0, badgeA && badgeA.getAttribute('title'));
     ['r-c', 'r-d'].forEach(id => {
       ok(id + ': Кърджали си има чекбокс в календара (7 дни)', calBoxes(doc, id).length === 7, calBoxes(doc, id).length);
       const br = blockRow(doc, id);
@@ -281,7 +273,7 @@ function calBoxes(doc, id) { return doc.querySelectorAll('#sec-calendar input[da
     if (guard('renderBulView() като Раднево', () => w.renderBulView())) {
       ok('r-b: Раднево има чекбокс (7 дни)', calBoxes(doc, 'r-b').length === 7);
       ok('r-b: без бадж в блока', !!blockRow(doc, 'r-b') && !blockRow(doc, 'r-b').querySelector('.rec-skip-badge'));
-      ok('r-c: изключена за Раднево — без чекбокс', calBoxes(doc, 'r-c').length === 0 && calSkipRows(doc, 'r-c').length === 7);
+      ok('r-c: изключена за Раднево — не се показва', calBoxes(doc, 'r-c').length === 0 && calSkipRows(doc, 'r-c').length === 0 && !blockRow(doc, 'r-c'));
       ok('r-a: глобалното важи и за Раднево', calBoxes(doc, 'r-a').length === 0);
       ok('r-e: не е за Раднево — изобщо не се показва', !blockRow(doc, 'r-e') && calSkipRows(doc, 'r-e').length === 0);
     }
@@ -295,6 +287,9 @@ function calBoxes(doc, id) { return doc.querySelectorAll('#sec-calendar input[da
     w.reportableStoresCache = [KA, RA, TR];
     if (guard('renderBulView() като admin', () => w.renderBulView())) {
       ok('r-a (глобално): сив ред в календара, 7 дни', calSkipRows(doc, 'r-a').length === 7);
+      const badgeA = (calSkipRows(doc, 'r-a')[0] || doc.createElement('div')).querySelector('.rec-skip-badge');
+      ok('причината и авторът са в title', badgeA && badgeA.getAttribute('title').indexOf('инвентаризация') >= 0 &&
+        badgeA.getAttribute('title').indexOf('Админ') >= 0, badgeA && badgeA.getAttribute('title'));
       ok('r-b (само Кърджали): НЕ е сив ред в календара', calSkipRows(doc, 'r-b').length === 0);
       const stB = txt({ textContent: w.calItemStatusHtml('r-b', 'recurring', null, TODAY).replace(/<[^>]+>/g, '') });
       ok('r-b: брояч 0/2 — Кърджали извън знаменателя', stB === '0/2', stB);
@@ -368,7 +363,7 @@ function calBoxes(doc, id) { return doc.querySelectorAll('#sec-calendar input[da
     if (guard('renderBulView() за следващата седмица', () => w.renderBulView())) {
       ok('r-b: следващата седмица Кърджали отново има чекбокс', calBoxes(hs.doc, 'r-b').length === 7);
       ok('r-a: следващата седмица не е изключена', calBoxes(hs.doc, 'r-a').length === 7);
-      ok('r-d: изключена е точно следващата седмица', calBoxes(hs.doc, 'r-d').length === 0 && calSkipRows(hs.doc, 'r-d').length === 7);
+      ok('r-d: изключена е точно следващата седмица (на обекта не се показва)', calBoxes(hs.doc, 'r-d').length === 0 && calSkipRows(hs.doc, 'r-d').length === 0 && !blockRow(hs.doc, 'r-d'));
     }
   }
 
