@@ -505,25 +505,14 @@ async function imported(o) {
     const c = env({ campaigns: [closed] }); await open(c);
     ok('извън прозореца → няма „Качи файл" и „Подай"', !btn(mod(c), 'Качи файл') && !btn(mod(c), 'Подай'));
 
-    const a = env({ user: ADMIN, campaigns: [] }); await open(a);
-    ok('обект няма „Нова кампания"', !btn(mod(h), 'Нова кампания'));
-    realClick(a.w, btn(mod(a), 'Нова кампания'));
-    a.doc.getElementById('rv-c-title').value = 'Ноември';
-    a.doc.getElementById('rv-c-to').value = dayOffset(3);
-    a.doc.getElementById('rv-c-pct').value = '30';
-    realClick(a.w, btn(mod(a), 'Запази')); await ticks(5);
-    const cp = a.calls.post.find(x => x.table === 'revaluation_campaigns');
-    ok('нова кампания: POST status open, % 30, вид mandatory', cp && cp.body.status === 'open' && cp.body.default_pct === 30 && cp.body.kind === 'mandatory' && cp.body.starts_on === dayOffset(0));
+    /* От етап 3б „＋ Нова кампания" е заменена от „📅 График на кампаниите" —
+       създаването, „до" преди „от" и припокриването са в revaluation-sap.test.js. */
+    const a = env({ user: ADMIN }); await open(a);
+    ok('обект няма „График на кампаниите"', !btn(mod(h), 'График на кампаниите'));
+    ok('admin има „📅 График на кампаниите"', !!btn(mod(a), 'График на кампаниите'));
     realClick(a.w, btn(mod(a), 'Затвори кампанията')); await ticks(5);
     const cc = a.calls.patch.find(x => x.table === 'revaluation_campaigns');
     ok('затваряне: PATCH status closed + closed_at/by', cc && cc.body.status === 'closed' && !!cc.body.closed_at && cc.body.closed_by === 'Тен Тенев');
-    a.w.rvShowNewCampaign = true; a.w.rvRender();
-    a.doc.getElementById('rv-c-title').value = 'X';
-    a.doc.getElementById('rv-c-from').value = dayOffset(3);
-    a.doc.getElementById('rv-c-to').value = dayOffset(1);
-    const n = a.calls.post.length;
-    realClick(a.w, btn(mod(a), 'Запази')); await ticks(3);
-    ok('„до" преди „от" → отказ', a.calls.post.length === n);
   }
 
   section('15. Нищо не се е провалило тихо');

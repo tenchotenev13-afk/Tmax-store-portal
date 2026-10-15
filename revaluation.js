@@ -35,7 +35,6 @@ var rvImportFails = []; /* кодове от последния импорт, к
 var rvMe = null;       /* {is_regional, assigned_stores} от users */
 var rvLoadSeq = 0;
 var rvShowAdd = false;
-var rvShowNewCampaign = false;
 var rvAcRes = [];
 var rvAcSeq = 0;
 var rvAcTimer = null;
@@ -187,14 +186,18 @@ function loadRevaluation(){
   return Promise.all([
     sbGet('revaluation_campaigns', 'select=*&order=starts_on.desc'),
     sbGet('users', 'email=eq.' + encodeURIComponent(currentUser.email || '') + '&select=is_regional,assigned_stores'),
-    sbGet('stores', 'select=name&order=name.asc')
+    sbGet('stores', 'select=name&order=name.asc'),
+    rvIsCoViewer() ? rvLoadCodes() : Promise.resolve([]),
+    rvIsStoreUser() ? sbGet('revaluation_submissions', 'store_name=eq.' + encodeURIComponent(currentUser.store_name || '') + '&status=in.(submitted,processed)&select=campaign_id') : Promise.resolve([])
   ]).then(function(r){
+    rvMyCampaignIds = {};
+    (Array.isArray(r[4]) ? r[4] : []).forEach(function(s){ rvMyCampaignIds[s.campaign_id] = true; });
     rvCampaigns = rvSortCampaigns(Array.isArray(r[0]) ? r[0] : []);
     rvMe = (r[1] && r[1][0]) || null;
     rvStoreList = (r[2] || []).map(function(s){ return s.name; }).filter(function(n){
       return n && n !== 'Централен офис' && n.indexOf('Логистичен') !== 0;
     });
-    if(!rvCampaign()) rvCampaignId = rvCampaigns.length ? rvCampaigns[0].id : null;
+    rvPickDefaultCampaign();
     var opts = rvStoreOptions();
     if(rvIsStoreUser()) rvStore = currentUser.store_name;
     else if(opts.indexOf(rvStore) < 0) rvStore = opts[0] || '';
@@ -247,18 +250,14 @@ function rvRender(){
 
   /* Избор на кампания (+ за ЦО: нова / затвори) */
   h += '<div class="card"><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
-  if(rvCampaigns.length){
-    h += '<label style="font-size:12px;color:#64748b;">Кампания</label><select id="rv-campaign" onchange="rvPickCampaign(this.value)" style="min-width:260px;">';
-    rvCampaigns.forEach(function(x){
-      h += '<option value="' + escAttr(x.id) + '"' + (x.id === rvCampaignId ? ' selected' : '') + '>' + esc(rvCampaignLabel(x)) + '</option>';
-    });
-    h += '</select>';
-  } else {
-    h += '<span style="color:#94a3b8;font-size:13px;">Няма кампании.</span>';
-  }
+  h += rvCampaignPickerHtml();
   if(rvIsCoViewer()){
     if(rvCoOpen) h += '<button class="btn-sm" onclick="rvCoBack()">← Към списъка на обектите</button>';
-    h += '<button class="btn-sm" onclick="rvExportCampaign()">📥 Excel — кампания</button>';
+    if(c){
+      h += '<button class="btn-sm" onclick="rvExportCampaign()">📥 Excel — кампания</button>';
+      h += '<button class="btn-sm" onclick="rvMm41()">📄 MM41 — нови кодове</button>';
+      if(rvIsCO()) h += '<button class="btn-sm" onclick="rvMm41Done()">✔ Кодовете са създадени в SAP</button>';
+    }
   } else if(!rvIsStoreUser()){
     var opts = rvStoreOptions();
     h += '<label style="font-size:12px;color:#64748b;margin-left:8px;">Обект</label><select id="rv-store" onchange="rvPickStore(this.value)">';
@@ -266,7 +265,7 @@ function rvRender(){
     h += '</select>';
   }
   if(rvIsCO()){
-    h += '<button class="btn-sm" onclick="rvToggleNewCampaign()">＋ Нова кампания</button>';
+    h += '<button class="btn-sm" onclick="rvToggleSchedule()">📅 График на кампаниите</button>';
     if(c && c.status === 'open') h += '<button class="btn-sm" onclick="rvCloseCampaign()">🔒 Затвори кампанията</button>';
   }
   h += '</div>';
@@ -274,7 +273,7 @@ function rvRender(){
   if(c && !rvCampaignOpenNow(c)){
     h += '<div style="font-size:12px;color:#b45309;margin-top:6px;">' + (c.status === 'open' ? 'Извън прозореца на кампанията — бланката е само за четене.' : 'Кампанията е затворена — само за четене.') + '</div>';
   }
-  if(rvShowNewCampaign && rvIsCO()) h += rvNewCampaignHtml();
+  if(rvShowSchedule && rvIsCO()) h += rvScheduleHtml();
   h += '</div>';
 
   if(c && rvIsCoViewer() && !rvCoOpen){ el.innerHTML = h + rvOverviewHtml(); return; }
@@ -335,7 +334,7 @@ function rvInp(it, field, val, w){
 function rvRowHtml(it, edit, pink, coEdit){
   var bad = rvBad[it.id], err = rvErr[it.id];
   var bg = bad || err ? 'background:#fef2f2;' : '';
-  var badge = rvIsRepeat(it.sap_code) ? ' <span class="rv-repeat" style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;">вече преоценен</span>' : '';
+  var badge = (rvIsRepeat(it.sap_code) ? ' <span class="rv-repeat" style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;">вече преоценен</span>' : '') + rvCodeBadge(it);
   var h = '<tr id="rv-row-' + escAttr(it.id) + '" style="' + bg + '">';
   h += '<td style="font-family:DM Mono,monospace;">' + esc(it.sap_code) + badge +
     (bad ? '<div class="rv-bad" style="font-size:10px;color:#b91c1c;">' + esc(bad.join(' · ')) + '</div>' : '') +
@@ -796,37 +795,8 @@ function rvExport(){
 }
 
 /* ─── Кампания (admin / accounting) ────────────────────── */
-function rvToggleNewCampaign(){ rvShowNewCampaign = !rvShowNewCampaign; rvRender(); }
-function rvNewCampaignHtml(){
-  return '<div id="rv-new-campaign" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px;">' +
-    '<input id="rv-c-title" type="text" placeholder="Заглавие" style="width:200px;">' +
-    '<select id="rv-c-kind"><option value="mandatory">Задължителна</option><option value="optional">Пожелателна</option></select>' +
-    '<label style="font-size:12px;">от</label><input id="rv-c-from" type="date" value="' + today() + '">' +
-    '<label style="font-size:12px;">до</label><input id="rv-c-to" type="date">' +
-    '<input id="rv-c-pct" type="text" inputmode="decimal" placeholder="% (по желание)" style="width:110px;">' +
-    '<input id="rv-c-note" type="text" placeholder="Бележка" style="width:220px;">' +
-    '<button class="btn-sm" onclick="rvSaveCampaign()" style="background:#2563eb;color:#fff;">Запази</button>' +
-    '<button class="btn-sm" onclick="rvToggleNewCampaign()">Откажи</button></div>';
-}
-function rvSaveCampaign(){
-  if(!rvIsCO()) return Promise.resolve(false);
-  var title = v('rv-c-title'), from = v('rv-c-from'), to = v('rv-c-to'), pctS = v('rv-c-pct');
-  if(!title){ toast('Въведи заглавие', '#dc2626'); return Promise.resolve(false); }
-  if(!from || !to){ toast('Въведи прозорец от–до', '#dc2626'); return Promise.resolve(false); }
-  if(to < from){ toast('„До" е преди „от"', '#dc2626'); return Promise.resolve(false); }
-  var pct = pctS === '' ? null : rvNum(pctS);
-  if(pctS !== '' && (pct == null || pct < 0 || pct > 100)){ toast('Процентът е от 0 до 100', '#dc2626'); return Promise.resolve(false); }
-  var body = { title: title, kind: v('rv-c-kind') || 'mandatory', starts_on: from, ends_on: to,
-    default_pct: pct, note: v('rv-c-note') || null, status: 'open', created_by: currentUser.display_name || currentUser.email };
-  return sbPostReturn('revaluation_campaigns', body).then(function(res){
-    if(!res.ok || !res.row){ toast('Кампанията не е създадена: ' + sbErrMsg(res), '#dc2626'); return false; }
-    rvCampaigns = rvSortCampaigns(rvCampaigns.concat([res.row]));
-    rvCampaignId = res.row.id;
-    rvShowNewCampaign = false;
-    toast('Кампанията е отворена');
-    return rvLoadSheet().then(function(){ return true; });
-  });
-}
+/* „＋ Нова кампания" (етап 2, една по една) е заменена от „📅 График на
+   кампаниите" (етап 3б) — виж rvScheduleHtml по-долу. */
 function rvCloseCampaign(){
   var c = rvCampaign();
   if(!rvIsCO() || !c || c.status !== 'open') return Promise.resolve(false);
@@ -1005,8 +975,13 @@ function rvCoAcceptAll(){
 
 /* ─── Бутоните на ЦО ───────────────────────────────────── */
 function rvCoButtonsHtml(){
-  if(!rvIsCO() || !rvSub) return '';
+  if(!rvIsCoViewer() || !rvSub) return '';
   var h = '';
+  if(!rvSub.no_items && rvItems.length){
+    h += '<label style="font-size:12px;color:#64748b;margin-left:6px;">Валидна от</label><input id="rv-vk-from" type="date" value="' + today() + '">' +
+      '<button class="btn-sm" onclick="rvVk11()">📄 VK11 — ' + esc(rvStore) + '</button>';
+  }
+  if(!rvIsCO()) return h;
   if(rvCoCanEdit() && rvItems.some(function(it){ return Object.keys(rvCoProposal(it)).length > 0; })){
     h += '<button class="btn-sm" onclick="rvCoAcceptAll()">✔ Приеми предложените за всички</button>';
   }
@@ -1175,4 +1150,381 @@ function rvExportCampaign(){
       });
     });
   });
+}
+
+/* ═══ ЕТАП 3б: файловете за SAP + регистър + график на кампаниите (15.10.2026) ═══
+   MM41 (създаване на преоценените кодове) — шаблон „MM41RAZPR Създаване на
+   преоценени кодове.xlsx": точно MATNR, MAKTX, MEINH_01, ENDPR.
+     MATNR = преоцененият код; MAKTX = „ПРЕОЦ." + описанието (без интервал,
+     както в примера на шаблона), отрязано на 40 знака — SAP реже там;
+     MEINH_01 = МЕ по SAP (rvSapUnit); ENDPR = СТАНДАРТНАТА цена на
+     оригиналния артикул. Не влизат: повторна преоценка (sap_code
+     /^8\d{6}$/), кодове от регистъра revaluation_codes (създадени по-рано),
+     дубликати по код. Източник: подадени и обработени бланки на кампанията.
+   VK11 (цената по обект) — шаблон „Смяна на продажна цена.xlsx": точно
+   Материал, МЕ, „Прод,цена нова", „Валидна от", „Валидна до". Датите са
+   ИСТИНСКИ дати (Date → Excel сериен номер с формат за дата), „Валидна до" =
+   31.12.9999. Ред = всеки ред с new_sap_code и sale_price.
+   График на кампаниите — Контролинг въвежда няколко наведнъж; припокриване
+   на прозорци с друга кампания → отказ. Обектът вижда САМО активната (днес в
+   прозореца); няма ли — „Следваща: …" без бланка. */
+
+var rvCodes = {};            /* new_sap_code → true: регистърът revaluation_codes */
+var rvShowSchedule = false;
+var rvSchedRows = [];        /* нови редове във формата на графика */
+var rvSchedEditId = null;
+var rvSchedEdit = null;      /* {from,to,kind,pct,title} на редактираната кампания */
+var rvSchedSubs = null;      /* campaign_id → брой бланки; null = не е заредено */
+var rvMyCampaignIds = {};    /* обект: кампании, в които СВОЯТА му бланка е submitted / processed */
+var RV_MM41_HEADERS = ['MATNR', 'MAKTX', 'MEINH_01', 'ENDPR'];
+var RV_VK11_HEADERS = ['Материал', 'МЕ', 'Прод,цена нова', 'Валидна от', 'Валидна до'];
+var RV_MM41_SHEET = 'MM41RAZPR Създаване на преоцене';  /* както в шаблона (31 знака) */
+var RV_VK11_SHEET = 'смяна на продажна цена ';          /* както в шаблона, с интервала */
+
+/* ─── Активна / предстоящи / минали ────────────────────── */
+/* Решение А на Тенчо (15.10.2026): обектът вижда активната кампания И всяка
+   кампания, в която има своя подадена или обработена бланка — без срок, само
+   за четене (rvCanEdit иска активна кампания). Иначе обработеното СЛЕД
+   прозореца („Копирай новите кодове") нямаше как да се види. */
+function rvStoreCampaigns(){
+  return rvCampaigns.filter(function(c){ return rvBucket(c) === 'active' || rvMyCampaignIds[c.id]; })
+    .sort(function(a, b){
+      var aa = rvBucket(a) === 'active' ? 0 : 1, bb = rvBucket(b) === 'active' ? 0 : 1;
+      return aa !== bb ? aa - bb : rvByStart(b, a);
+    });
+}
+function rvBucket(c){
+  var t = today();
+  if(!c || c.status !== 'open' || c.ends_on < t) return 'past';
+  if(c.starts_on > t) return 'upcoming';
+  return 'active';
+}
+function rvByStart(a, b){ return String(a.starts_on).localeCompare(String(b.starts_on)); }
+function rvActiveCampaign(){ return rvCampaigns.filter(function(c){ return rvBucket(c) === 'active'; }).sort(rvByStart)[0] || null; }
+function rvNextCampaign(){ return rvCampaigns.filter(function(c){ return rvBucket(c) === 'upcoming'; }).sort(rvByStart)[0] || null; }
+function rvPickDefaultCampaign(){
+  if(rvIsStoreUser()){
+    var mine = rvStoreCampaigns();
+    if(!mine.some(function(c){ return c.id === rvCampaignId; })) rvCampaignId = mine.length ? mine[0].id : null;
+    return;
+  }
+  if(rvCampaign()) return;
+  var pick = rvActiveCampaign() || rvNextCampaign() ||
+    rvCampaigns.slice().sort(function(a, b){ return rvByStart(b, a); })[0] || null;
+  rvCampaignId = pick ? pick.id : null;
+}
+function rvCampaignPickerHtml(){
+  if(rvIsStoreUser()){
+    var a = rvActiveCampaign();
+    var mine = rvStoreCampaigns();
+    var nextTxt = function(){
+      var n = rvNextCampaign();
+      return '<span id="rv-next" style="font-size:13px;color:#64748b;">' + (n
+        ? 'Следваща: ' + esc((RV_KIND_LABEL[n.kind] || n.kind).toLowerCase()) + ' ' + esc(fmtDate(n.starts_on).slice(0, 5)) + '–' + esc(fmtDate(n.ends_on))
+        : 'Няма активна кампания.') + '</span>';
+    };
+    if(!mine.length) return nextTxt();
+    if(mine.length === 1 && a) return '<span id="rv-active" style="font-size:13px;">Кампания: <b>' + esc(rvCampaignLabel(a)) + '</b></span>';
+    return '<label style="font-size:12px;color:#64748b;">Кампания</label><select id="rv-campaign" onchange="rvPickCampaign(this.value)" style="min-width:260px;">' +
+      mine.map(function(x){
+        return '<option value="' + escAttr(x.id) + '"' + (x.id === rvCampaignId ? ' selected' : '') + '>' + esc((rvBucket(x) === 'active' ? '' : '🗄 ') + rvCampaignLabel(x)) + '</option>';
+      }).join('') + '</select>' + (a ? '' : ' ' + nextTxt());
+  }
+  if(!rvCampaigns.length) return '<span style="color:#94a3b8;font-size:13px;">Няма кампании.</span>';
+  var h = '<label style="font-size:12px;color:#64748b;">Кампания</label><select id="rv-campaign" onchange="rvPickCampaign(this.value)" style="min-width:260px;">';
+  [['active', 'Активна'], ['upcoming', 'Предстоящи'], ['past', 'Минали и затворени']].forEach(function(g){
+    var list = rvCampaigns.filter(function(c){ return rvBucket(c) === g[0]; }).sort(g[0] === 'past' ? function(a, b){ return rvByStart(b, a); } : rvByStart);
+    if(!list.length) return;
+    h += '<optgroup label="' + g[1] + '">' + list.map(function(x){
+      return '<option value="' + escAttr(x.id) + '"' + (x.id === rvCampaignId ? ' selected' : '') + '>' + esc(rvCampaignLabel(x)) + '</option>';
+    }).join('') + '</optgroup>';
+  });
+  return h + '</select>';
+}
+
+/* ─── График на кампаниите (admin / accounting) ────────── */
+function rvSchedBlank(){ return { from: '', to: '', kind: 'mandatory', pct: '', title: '' }; }
+function rvDefaultTitle(kind, from){
+  var m = /^\d{4}-\d{2}-\d{2}$/.test(from || '') ? ' ' + from.slice(5, 7) + '.' + from.slice(0, 4) : '';
+  return (kind === 'optional' ? 'Пожелателна' : 'Задължителна') + ' преоценка' + m;
+}
+function rvToggleSchedule(){
+  if(!rvIsCO()) return Promise.resolve();
+  rvShowSchedule = !rvShowSchedule;
+  if(!rvShowSchedule){ rvRender(); return Promise.resolve(); }
+  if(!rvSchedRows.length) rvSchedRows = [rvSchedBlank()];
+  return rvLoadSchedSubs();
+}
+function rvLoadSchedSubs(){
+  return sbGetAll('revaluation_submissions', 'select=id,campaign_id&order=id.asc').then(function(rows){
+    if(rows.partial){ rvSchedSubs = null; toast('Бланките не се прочетоха — изтриването е спряно', '#dc2626'); }
+    else { rvSchedSubs = {}; rows.forEach(function(r){ rvSchedSubs[r.campaign_id] = (rvSchedSubs[r.campaign_id] || 0) + 1; }); }
+    rvRender();
+  });
+}
+function rvSchedSet(i, f, val){
+  if(!rvSchedRows[i]) return;
+  rvSchedRows[i][f] = val;
+  if(f === 'kind' || f === 'from') rvRender(); /* подсказката за заглавието следва вида и месеца */
+}
+function rvSchedAddRow(){ rvSchedRows.push(rvSchedBlank()); rvRender(); }
+function rvSchedDelRow(i){ rvSchedRows.splice(i, 1); if(!rvSchedRows.length) rvSchedRows.push(rvSchedBlank()); rvRender(); }
+/* {body} или {error}. Празен ред (без от/до/заглавие/%) → {skip:true}. */
+function rvSchedBody(r){
+  if(!r.from && !r.to && !String(r.title || '').trim() && !String(r.pct || '').trim()) return { skip: true };
+  if(!r.from || !r.to) return { error: 'липсва от/до' };
+  if(r.to < r.from) return { error: '„до" е преди „от" (' + fmtDate(r.from) + ' – ' + fmtDate(r.to) + ')' };
+  if(!RV_KIND_LABEL[r.kind]) return { error: 'невалиден вид' };
+  var ps = String(r.pct == null ? '' : r.pct).trim();
+  var pct = ps === '' ? null : rvNum(ps);
+  if(ps !== '' && (pct == null || pct < 0 || pct > 100)) return { error: 'процентът е от 0 до 100' };
+  return { body: { title: String(r.title || '').trim() || rvDefaultTitle(r.kind, r.from), kind: r.kind,
+    starts_on: r.from, ends_on: r.to, default_pct: pct } };
+}
+/* Списък с припокриванията: всяко тяло срещу кампаниите в базата (без exceptId)
+   и срещу останалите тела. Включително затворените — един прозорец, една кампания. */
+function rvOverlaps(bodies, exceptId){
+  var out = [];
+  var hit = function(a, b){ return a.starts_on <= b.ends_on && b.starts_on <= a.ends_on; };
+  var lbl = function(x){ return '„' + x.title + '" ' + fmtDate(x.starts_on).slice(0, 5) + '–' + fmtDate(x.ends_on); };
+  bodies.forEach(function(b, i){
+    rvCampaigns.forEach(function(c){ if(c.id !== exceptId && hit(b, c)) out.push(lbl(b) + ' × ' + lbl(c)); });
+    for(var j = i + 1; j < bodies.length; j++) if(hit(b, bodies[j])) out.push(lbl(b) + ' × ' + lbl(bodies[j]));
+  });
+  return out;
+}
+function rvReloadCampaigns(){
+  return sbGet('revaluation_campaigns', 'select=*&order=starts_on.desc').then(function(rows){
+    rvCampaigns = rvSortCampaigns(Array.isArray(rows) ? rows : []);
+    rvPickDefaultCampaign();
+  });
+}
+function rvSchedSave(){
+  if(!rvIsCO()) return Promise.resolve(false);
+  var bodies = [], errs = [];
+  rvSchedRows.forEach(function(r, i){
+    var x = rvSchedBody(r);
+    if(x.skip) return;
+    if(x.error){ errs.push('ред ' + (i + 1) + ': ' + x.error); return; }
+    x.body.status = 'open';
+    x.body.created_by = currentUser.display_name || currentUser.email;
+    bodies.push(x.body);
+  });
+  if(errs.length){ toast(errs.join('; '), '#dc2626'); return Promise.resolve(false); }
+  if(!bodies.length){ toast('Няма попълнени редове', '#dc2626'); return Promise.resolve(false); }
+  var ov = rvOverlaps(bodies, null);
+  if(ov.length){ toast('Припокриване — нищо не е записано: ' + ov.join('; '), '#dc2626'); return Promise.resolve(false); }
+  /* Една заявка за всички: PostgREST записва масива атомарно — или всички, или нито една. */
+  return sbPost('revaluation_campaigns', bodies).then(function(res){
+    if(!res.ok){ toast('Кампаниите не са записани: ' + sbErrMsg(res), '#dc2626'); return false; }
+    rvSchedRows = [rvSchedBlank()];
+    toast('Записани ' + bodies.length + (bodies.length === 1 ? ' кампания' : ' кампании'));
+    return rvReloadCampaigns().then(function(){ return rvLoadSchedSubs(); }).then(function(){ return true; });
+  });
+}
+function rvSchedOpenEdit(id){
+  var c = rvCampaigns.filter(function(x){ return x.id === id; })[0];
+  if(!rvIsCO() || !c || rvBucket(c) === 'past') return;
+  rvSchedEditId = id;
+  rvSchedEdit = { from: c.starts_on, to: c.ends_on, kind: c.kind, pct: c.default_pct == null ? '' : String(c.default_pct), title: c.title };
+  rvRender();
+}
+function rvSchedEditSet(f, val){ if(rvSchedEdit) rvSchedEdit[f] = val; }
+function rvSchedCancelEdit(){ rvSchedEditId = null; rvSchedEdit = null; rvRender(); }
+function rvSchedSaveEdit(){
+  var id = rvSchedEditId;
+  var c = rvCampaigns.filter(function(x){ return x.id === id; })[0];
+  if(!rvIsCO() || !c || !rvSchedEdit) return Promise.resolve(false);
+  var x = rvSchedBody(rvSchedEdit);
+  if(x.skip || x.error){ toast(x.error || 'Попълни кампанията', '#dc2626'); return Promise.resolve(false); }
+  var ov = rvOverlaps([x.body], id);
+  if(ov.length){ toast('Припокриване — нищо не е записано: ' + ov.join('; '), '#dc2626'); return Promise.resolve(false); }
+  return sbPatch('revaluation_campaigns', 'id=eq.' + id, x.body).then(function(res){
+    if(!res.ok){ toast('Кампанията не е записана: ' + sbErrMsg(res), '#dc2626'); return false; }
+    Object.keys(x.body).forEach(function(k){ c[k] = x.body[k]; });
+    rvCampaigns = rvSortCampaigns(rvCampaigns);
+    rvSchedEditId = null; rvSchedEdit = null;
+    toast('Кампанията е обновена');
+    rvRender(); return true;
+  });
+}
+/* Изтриване само на кампания БЕЗ бланки. FK от бланките е ON DELETE CASCADE —
+   затова броят се чете наново точно преди заявката, не от екрана. */
+function rvSchedDelete(id){
+  var c = rvCampaigns.filter(function(x){ return x.id === id; })[0];
+  if(!rvIsCO() || !c) return Promise.resolve(false);
+  return sbGetOk('revaluation_submissions', 'campaign_id=eq.' + id + '&select=id&limit=1').then(function(res){
+    if(!res.ok){ toast('Бланките не се прочетоха — кампанията НЕ е изтрита', '#dc2626'); return false; }
+    if(res.rows.length){ toast('„' + c.title + '" има бланки — не може да се изтрие', '#dc2626'); return false; }
+    if(!confirm('Изтриване на кампания „' + c.title + '" (' + fmtDate(c.starts_on) + ' – ' + fmtDate(c.ends_on) + ')?')) return false;
+    return sbDelete('revaluation_campaigns', 'id=eq.' + id).then(function(d){
+      if(!d.ok || d.count === 0){ toast(d.ok ? 'Кампанията не е изтрита (0 реда)' : 'Кампанията не е изтрита: ' + sbErrMsg(d), '#dc2626'); return false; }
+      rvCampaigns = rvCampaigns.filter(function(x){ return x.id !== id; });
+      if(rvCampaignId === id){ rvCampaignId = null; rvPickDefaultCampaign(); }
+      toast('Кампанията е изтрита');
+      rvRender(); return true;
+    });
+  });
+}
+function rvScheduleHtml(){
+  var h = '<div id="rv-schedule" style="margin-top:10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:10px;">';
+  h += '<div style="font-weight:700;margin-bottom:6px;">📅 График на кампаниите</div>';
+  /* нови редове */
+  rvSchedRows.forEach(function(r, i){
+    h += '<div class="rv-s-row" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:4px;">' +
+      '<input id="rv-s-from-' + i + '" type="date" value="' + rvVal(r.from) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'from\',this.value)">' +
+      '<input id="rv-s-to-' + i + '" type="date" value="' + rvVal(r.to) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'to\',this.value)">' +
+      '<select id="rv-s-kind-' + i + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'kind\',this.value)">' +
+      ['mandatory', 'optional'].map(function(k){ return '<option value="' + k + '"' + (r.kind === k ? ' selected' : '') + '>' + RV_KIND_LABEL[k] + '</option>'; }).join('') + '</select>' +
+      '<input id="rv-s-pct-' + i + '" type="text" inputmode="decimal" placeholder="%" value="' + rvVal(r.pct) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'pct\',this.value)" style="width:56px;">' +
+      '<input id="rv-s-title-' + i + '" type="text" placeholder="' + escAttr(rvDefaultTitle(r.kind, r.from)) + '" value="' + rvVal(r.title) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'title\',this.value)" style="width:240px;">' +
+      '<button class="btn-sm" data-i="' + i + '" onclick="rvSchedDelRow(+this.dataset.i)" title="Махни реда">–</button></div>';
+  });
+  h += '<div style="display:flex;gap:6px;margin:6px 0 10px;"><button class="btn-sm" onclick="rvSchedAddRow()">＋ Ред</button>' +
+    '<button class="btn-sm" onclick="rvSchedSave()" style="background:#2563eb;color:#fff;">Запази всички</button></div>';
+  /* съществуващите */
+  [['active', 'Активна'], ['upcoming', 'Предстоящи'], ['past', 'Минали и затворени']].forEach(function(g){
+    var list = rvCampaigns.filter(function(c){ return rvBucket(c) === g[0]; }).sort(g[0] === 'past' ? function(a, b){ return rvByStart(b, a); } : rvByStart);
+    if(!list.length) return;
+    h += '<div style="font-size:12px;font-weight:700;color:#475569;margin-top:6px;">' + g[1] + '</div>';
+    list.forEach(function(c){
+      if(rvSchedEditId === c.id && rvSchedEdit){
+        var e = rvSchedEdit;
+        h += '<div id="rv-sched-' + escAttr(c.id) + '" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:4px 0;">' +
+          '<input id="rv-se-from" type="date" value="' + rvVal(e.from) + '" onchange="rvSchedEditSet(\'from\',this.value)">' +
+          '<input id="rv-se-to" type="date" value="' + rvVal(e.to) + '" onchange="rvSchedEditSet(\'to\',this.value)">' +
+          '<select id="rv-se-kind" onchange="rvSchedEditSet(\'kind\',this.value)">' +
+          ['mandatory', 'optional'].map(function(k){ return '<option value="' + k + '"' + (e.kind === k ? ' selected' : '') + '>' + RV_KIND_LABEL[k] + '</option>'; }).join('') + '</select>' +
+          '<input id="rv-se-pct" type="text" value="' + rvVal(e.pct) + '" onchange="rvSchedEditSet(\'pct\',this.value)" style="width:56px;">' +
+          '<input id="rv-se-title" type="text" value="' + rvVal(e.title) + '" onchange="rvSchedEditSet(\'title\',this.value)" style="width:240px;">' +
+          '<button class="btn-sm" onclick="rvSchedSaveEdit()" style="background:#2563eb;color:#fff;">Запази</button>' +
+          '<button class="btn-sm" onclick="rvSchedCancelEdit()">Откажи</button></div>';
+        return;
+      }
+      var n = rvSchedSubs ? (rvSchedSubs[c.id] || 0) : null;
+      h += '<div id="rv-sched-' + escAttr(c.id) + '" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:3px 0;font-size:13px;">' +
+        '<span>' + esc(rvCampaignLabel(c)) + '</span>' +
+        '<span style="color:#94a3b8;font-size:11px;">' + (n == null ? '' : n + (n === 1 ? ' бланка' : ' бланки')) + '</span>' +
+        (g[0] !== 'past' ? '<button class="btn-sm" data-id="' + escAttr(c.id) + '" onclick="rvSchedOpenEdit(this.dataset.id)" title="Редактирай">✏️</button>' : '') +
+        (n === 0 ? '<button class="btn-sm" data-id="' + escAttr(c.id) + '" onclick="rvSchedDelete(this.dataset.id)" title="Изтрий">🗑</button>' : '') +
+        '</div>';
+    });
+  });
+  return h + '</div>';
+}
+
+/* ─── Регистър на създадените кодове ───────────────────── */
+function rvLoadCodes(){
+  return sbGetAll('revaluation_codes', 'select=new_sap_code&order=new_sap_code.asc').then(function(rows){
+    rvCodes = {};
+    rows.forEach(function(r){ rvCodes[r.new_sap_code] = true; });
+    if(rows.partial) toast('Регистърът на кодовете не се прочете изцяло', '#dc2626');
+    return rows;
+  });
+}
+function rvCodeBadge(it){
+  if(!rvIsCoViewer()) return '';
+  var code = String(it.new_sap_code || '').trim();
+  if(!code || rvIsRepeat(it.sap_code)) return '';
+  return rvCodes[code]
+    ? ' <span class="rv-in-sap" style="background:#dcfce7;color:#166534;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;">в SAP</span>'
+    : ' <span class="rv-to-create" style="background:#ffedd5;color:#9a3412;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;">за създаване</span>';
+}
+
+/* ─── MM41 ─────────────────────────────────────────────── */
+/* Чете НАНОВО бланките, редовете и регистъра (не вярва на екрана) и връща
+   {ok:true, rows:[…]} или {ok:false}. */
+function rvMm41Collect(){
+  var c = rvCampaign();
+  if(!c) return Promise.resolve({ ok: false });
+  return Promise.all([
+    sbGetOk('revaluation_submissions', 'campaign_id=eq.' + c.id + '&select=id,status,no_items'),
+    sbGetAll('revaluation_items', 'campaign_id=eq.' + c.id + '&select=*&order=store_name.asc,sort_order.asc,id.asc'),
+    rvLoadCodes()
+  ]).then(function(r){
+    if(!r[0].ok || r[1].partial || r[2].partial) return { ok: false };
+    var subs = {};
+    r[0].rows.forEach(function(s){ if(!s.no_items && (s.status === 'submitted' || s.status === 'processed')) subs[s.id] = 1; });
+    var seen = {}, rows = [];
+    r[1].forEach(function(it){
+      if(!subs[it.submission_id]) return;
+      var code = String(it.new_sap_code || '').trim();
+      if(!code || rvIsRepeat(it.sap_code) || rvCodes[code] || seen[code]) return;
+      seen[code] = 1;
+      var su = rvSapUnit(it.unit);
+      rows.push({ new_sap_code: code, sap_code: String(it.sap_code), maktx: ('ПРЕОЦ.' + String(it.product_name || '').trim()).slice(0, 40),
+        unit: su.unit, unitOk: su.ok, std: it.std_price == null ? null : Number(it.std_price), campaign_id: c.id });
+    });
+    return { ok: true, rows: rows };
+  });
+}
+function rvMm41Aoa(rows){
+  return [RV_MM41_HEADERS.slice()].concat(rows.map(function(x){ return [x.new_sap_code, x.maktx, x.unit, x.std == null ? '' : x.std]; }));
+}
+function rvMm41(){
+  if(!rvIsCoViewer()) return Promise.resolve(false);
+  return rvMm41Collect().then(function(res){
+    if(!res.ok){ toast('Данните са непълни — MM41 НЕ е направен', '#dc2626'); return false; }
+    if(!res.rows.length){ toast('Няма нови кодове за MM41'); return false; }
+    var bad = res.rows.filter(function(x){ return !x.unitOk; }).map(function(x){ return x.new_sap_code + ' (' + (x.unit || 'празна') + ')'; });
+    var noStd = res.rows.filter(function(x){ return x.std == null; }).map(function(x){ return x.new_sap_code; });
+    var c = rvCampaign();
+    return new Promise(function(resolve){
+      rvWithXlsx(function(){
+        var wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rvMm41Aoa(res.rows)), RV_MM41_SHEET);
+        XLSX.writeFile(wb, 'MM41-preocenka-' + ((c && c.starts_on) || today()) + '.xlsx');
+        var w = [];
+        if(bad.length) w.push('МЕ не е по SAP: ' + bad.join(', '));
+        if(noStd.length) w.push('без стандартна цена: ' + noStd.join(', '));
+        toast('MM41: ' + res.rows.length + ' кода' + (w.length ? ' · ' + w.join(' · ') : ''), w.length ? '#d97706' : undefined);
+        resolve(true);
+      });
+    });
+  });
+}
+function rvMm41Done(){
+  if(!rvIsCO()) return Promise.resolve(false);
+  return rvMm41Collect().then(function(res){
+    if(!res.ok){ toast('Данните са непълни — нищо не е записано', '#dc2626'); return false; }
+    if(!res.rows.length){ toast('Няма нови кодове за MM41'); return false; }
+    if(!confirm('Да се запишат ' + res.rows.length + ' кода като създадени в SAP? Следващият MM41 няма да ги съдържа.')) return false;
+    var who = currentUser.display_name || currentUser.email;
+    var bodies = res.rows.map(function(x){
+      return { new_sap_code: x.new_sap_code, sap_code: x.sap_code, product_name: x.maktx, unit: x.unit, std_price: x.std, campaign_id: x.campaign_id, created_by: who };
+    });
+    return sbPost('revaluation_codes', bodies).then(function(p){
+      if(!p.ok){ toast('Кодовете НЕ са записани: ' + sbErrMsg(p), '#dc2626'); return false; }
+      bodies.forEach(function(b){ rvCodes[b.new_sap_code] = true; });
+      toast('Записани ' + bodies.length + ' кода в регистъра');
+      rvRender(); return true;
+    });
+  });
+}
+
+/* ─── VK11 (цената по обект) ───────────────────────────── */
+function rvVk11Aoa(items, fromIso){
+  var p = fromIso.split('-');
+  var from = new Date(+p[0], +p[1] - 1, +p[2]);
+  var to = new Date(9999, 11, 31);
+  return [RV_VK11_HEADERS.slice()].concat(items.filter(function(it){
+    return String(it.new_sap_code || '').trim() && it.sale_price != null && it.sale_price !== '';
+  }).map(function(it){
+    return [String(it.new_sap_code).trim(), rvSapUnit(it.unit).unit, Number(it.sale_price), from, to];
+  }));
+}
+function rvVk11(){
+  if(!rvIsCoViewer() || !rvSub) return false;
+  var fromIso = v('rv-vk-from') || today();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(fromIso)){ toast('Невалидна дата „Валидна от"', '#dc2626'); return false; }
+  var aoa = rvVk11Aoa(rvSub.no_items ? [] : rvItems, fromIso);
+  if(aoa.length < 2){ toast('Няма редове с преоценен код и цена — VK11 НЕ е направен', '#dc2626'); return false; }
+  var no = rvStoreNo(rvStore);
+  rvWithXlsx(function(){
+    var wb = XLSX.utils.book_new();
+    /* Date клетка → Excel сериен номер с формат за дата (като в шаблона), не текст. */
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa, { dateNF: 'dd.mm.yyyy' }), RV_VK11_SHEET);
+    XLSX.writeFile(wb, 'VK11-' + (no || 'obekt') + '-' + fromIso + '.xlsx');
+  });
+  return true;
 }

@@ -40,6 +40,7 @@ const TESTS = [
   'stock-returns-get-all.test.js',
   'revaluation.test.js',
   'revaluation-co.test.js',
+  'revaluation-sap.test.js',
   'revision-schedule.test.js',
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',

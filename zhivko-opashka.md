@@ -21,6 +21,8 @@
 - 15.10 · revaluation_submissions.processed_by — text, NULL, без default
 - 15.10 · revaluation_submissions.status — нова стойност на статус 'processed' (обработена от ЦО; досега 'draft' / 'submitted')
   (в базата от миграцията 20261015102839; файл 20261015140000_revaluation_co)
+- 15.10 · нова таблица revaluation_codes — new_sap_code text PK, sap_code text NOT NULL, product_name text NULL, unit text NULL, std_price numeric(10,2) NULL, campaign_id uuid NULL → revaluation_campaigns (при изтриване на кампанията → NULL), created_in_sap_at timestamptz NOT NULL default now(), created_by text NULL
+  (в базата от миграцията 20261015132455; файл 20261015180000_revaluation_codes)
 
 ## Потвърдено 15.10.2026
 
