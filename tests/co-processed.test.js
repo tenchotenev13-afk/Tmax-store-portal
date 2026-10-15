@@ -296,16 +296,22 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     const { w, doc } = boot();
     w.showLoginBanner();
     const txt = (doc.getElementById('notif-banner') || {}).textContent || '';
-    /* o-1 (9 дни, необработена) и o-3 (20 дни, просрочена дата) трябва да влязат;
-       o-2 (11 дни, обработена с бъдеща дата) — не. */
-    ok('банерът брои 2 заявки, не 3', /2 просрочени заявки/.test(txt), txt.slice(0, 160));
+    /* o-1 (9 дни, необработена) и o-3 (20 дни, минала дата от ЦО) трябва да влязат;
+       o-2 (11 дни, обработена с бъдеща дата) — не. От 15.10.2026 банерът е на
+       три карти: и двете са „над 7 дни" (C) — доставката им е в бъдещето,
+       затова isLate() е false и карта A („изтекла дата на доставка") няма. */
+    const titles = Array.from(doc.querySelectorAll('#notif-banner .notif-title')).map(t => t.textContent.trim());
+    ok('карта C брои 2 заявки, не 3', titles.indexOf('2 заявки над 7 дни без приключване') >= 0, titles.join(' | ') || txt.slice(0, 160));
+    ok('няма карта A (доставките не са изтекли)', !titles.some(t => /с изтекла дата на доставка/.test(t)), titles.join(' | '));
   }
   {
     const co = JSON.parse(JSON.stringify(ORDERS)).filter(o => o.id === 'o-2');
     const { w, doc } = boot({ co });
     w.showLoginBanner();
     const txt = (doc.getElementById('notif-banner') || {}).textContent || '';
-    ok('само обработена заявка → никаква тревога', !/\d+ просрочен/.test(txt), txt.slice(0, 160));
+    const titles = Array.from(doc.querySelectorAll('#notif-banner .notif-title')).map(t => t.textContent.trim());
+    ok('само обработена заявка → нито карта A, нито C',
+      !titles.some(t => /с изтекла дата на доставка|над 7 дни без приключване/.test(t)), titles.join(' | '));
     ok('вместо това показва "Всичко е наред"', /Всичко е наред/.test(txt), txt.slice(0, 160));
   }
 

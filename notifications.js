@@ -137,9 +137,17 @@ function coNotifyToast(text,id,hover,onClick){
 function showLoginBanner(){
   var banner=document.getElementById('notif-banner');if(!banner)return;
   var all=transportOrders.concat(clientOrders);
-  /* Просрочени по дата на доставка + клиентски заявки >7 дни без отговор */
-  var od=all.filter(function(o){
-    if(o._status==='overdue') return true;
+  /* Три отделни карти, не едно „N просрочени заявки!": до 15.10.2026 едно
+     число смесваше клиентски с изтекла дата, транспортни с изтекла дата и
+     заявки ≥7 дни без приключване — а чипът „Просрочени" в Клиентски брои
+     само първите (Добрич, 29.09: „4 просрочени" при празен чип).
+     A — клиентски, isLate(): СЪЩИЯТ предикат като чипа (coChipMatch).
+     B — транспортни с _status overdue.
+     C — ≥7 дни без приключване, без вече преброените в A и B. */
+  var lateCo=clientOrders.filter(function(o){return isLate(o);});
+  var lateTr=transportOrders.filter(function(o){return o._status==='overdue';});
+  var old7=all.filter(function(o){
+    if(lateCo.indexOf(o)>=0||lateTr.indexOf(o)>=0) return false;
     /* Заявка, която ЦО е обработил и която още е в срока на доставчика, не е
        "без отговор" — отговорът е даден, чака се стоката. */
     if(typeof coWaitingSupplier==='function'&&coWaitingSupplier(o)) return false;
@@ -158,7 +166,9 @@ function showLoginBanner(){
     return days>=5&&days<7&&['done','refused','postponed','arrived'].indexOf(o._status)<0&&o._isFulfiller;
   });
   var html='';
-  if(od.length) html+='<div class="notif-card urgent"><div class="notif-icon">🚨</div><div class="notif-text"><div class="notif-title">'+od.length+' просрочен'+(od.length===1?'а заявка':'и заявки')+'!</div><div class="notif-sub">Трябва незабавно внимание.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
+  if(lateCo.length) html+='<div class="notif-card urgent"><div class="notif-icon">🚨</div><div class="notif-text"><div class="notif-title">'+lateCo.length+' клиентск'+(lateCo.length===1?'а заявка':'и заявки')+' с изтекла дата на доставка</div><div class="notif-sub">Същите като чипа „Просрочени“ в Клиентски.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
+  if(lateTr.length) html+='<div class="notif-card urgent"><div class="notif-icon">🚚</div><div class="notif-text"><div class="notif-title">'+lateTr.length+' транспортн'+(lateTr.length===1?'а заявка':'и заявки')+' с изтекла дата</div><div class="notif-sub">Виж таб Транспорт.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
+  if(old7.length) html+='<div class="notif-card warning"><div class="notif-icon">⏰</div><div class="notif-text"><div class="notif-title">'+old7.length+' заявк'+(old7.length===1?'а':'и')+' над 7 дни без приключване</div><div class="notif-sub">Подадени преди повече от 7 дни и още неприключени — вие сте изпълнител.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   if(td.length) html+='<div class="notif-card info"><div class="notif-icon">🔵</div><div class="notif-text"><div class="notif-title">'+td.length+' доставк'+(td.length===1?'а':'и')+' ДНЕС</div><div class="notif-sub">Заявки с дата на доставка за днес.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   if(oldOrders&&oldOrders.length) html+='<div class="notif-card warning"><div class="notif-icon">⏳</div><div class="notif-text"><div class="notif-title">'+oldOrders.length+' клиентска заявка за изпълнение над 5 дни!</div><div class="notif-sub">Заявките трябва да се изпълнят в рамките на 7-10 дни.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   if(tm.length) html+='<div class="notif-card warning"><div class="notif-icon">🟡</div><div class="notif-text"><div class="notif-title">'+tm.length+' доставк'+(tm.length===1?'а':'и')+' УТРЕ</div><div class="notif-sub">Подготви стоката навреме.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
@@ -209,7 +219,7 @@ function showLoginBanner(){
     }).catch(function(){});
   }
 
-  if(!od.length&&!td.length&&!tm.length) html='<div class="notif-card success"><div class="notif-icon">✅</div><div class="notif-text"><div class="notif-title">Всичко е наред!</div><div class="notif-sub">Няма просрочени или спешни заявки.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
+  if(!lateCo.length&&!lateTr.length&&!old7.length&&!td.length&&!tm.length) html='<div class="notif-card success"><div class="notif-icon">✅</div><div class="notif-text"><div class="notif-title">Всичко е наред!</div><div class="notif-sub">Няма просрочени или спешни заявки.</div></div><span class="notif-close" onclick="dismissCard(this)">✕</span></div>';
   banner.innerHTML=html;banner.style.display='block';
 
   /* Товарни листи за получаване. Картата е ЗА ОБЕКТА: глобалният профил и

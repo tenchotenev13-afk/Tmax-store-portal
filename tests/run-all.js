@@ -355,7 +355,8 @@ const TESTS = [
   'co-warehouse-fulfiller-buttons.test.js',
   'nav-tabs-css.test.js',
   'table-scroll.test.js',
-  'recurring-store-hints.test.js'
+  'recurring-store-hints.test.js',
+  'banner-split.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
