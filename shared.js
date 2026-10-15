@@ -1687,15 +1687,19 @@ function setupTabsForRole(){
   if(calTab)calTab.style.display='';
   var srTab=document.getElementById('tab-stock-returns');
   if(srTab)srTab.style.display='';
-  /* Таб Преоценка — admin, accounting, supply винаги; обекти (manager/sklad) само
-     при app_settings.revaluation_stores = 'on'. Правилото е rvCanSee() в
-     revaluation.js (зарежда се последен — затова typeof). Ключът се чете при
-     всеки логин; до отговора табът на обекта е скрит, после се преизчислява. */
+  /* Таб „Ревизии и преоценка“ (id tab-revaluation от преди) — admin, accounting,
+     supply, manager, sklad: rsCanSee() в revisions.js. Под-бутонът „🏷️ Преоценка“
+     — по rvCanSee() от revaluation.js: admin/accounting/supply винаги, обектите
+     само при app_settings.revaluation_stores = 'on'. Ключът се чете при всеки
+     логин; до отговора под-бутонът на обекта е скрит, после се преизчислява.
+     И двата файла се зареждат след този — затова typeof. */
   var rvTab=document.getElementById('tab-revaluation');
-  if(rvTab){
-    rvTab.style.display=(typeof rvCanSee==='function'&&rvCanSee())?'':'none';
+  if(rvTab)rvTab.style.display=(typeof rsCanSee==='function'&&rsCanSee())?'':'none';
+  var rvSubBtn=document.getElementById('rvs-revaluation');
+  if(rvSubBtn){
+    rvSubBtn.style.display=(typeof rvCanSee==='function'&&rvCanSee())?'':'none';
     if(typeof rvLoadStoresFlag==='function') rvLoadStoresFlag().then(function(){
-      rvTab.style.display=rvCanSee()?'':'none';
+      rvSubBtn.style.display=rvCanSee()?'':'none';
     });
   }
   var sdTab=document.getElementById('tab-stock-diff');
@@ -1726,7 +1730,7 @@ function showModule(mod){
     showModule('kasa');
     return;
   }
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist','revaluation'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist','revaluation','rev-schedule'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -1758,6 +1762,16 @@ function showModule(mod){
   /* Подтабовете на Транспорт държат главния таб активен - иначе навигацията
      показва Транспорт като незает, докато си вътре в негов подтаб. */
   if(mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
+  /* „Ревизии и преоценка“ — под-лента като при Транспорт; главният таб е
+     tab-revaluation и за двата под-таба. */
+  var rvSubnav=document.getElementById('rev-subnav');
+  if(rvSubnav){
+    rvSubnav.style.display=(mod==='rev-schedule'||mod==='revaluation')?'block':'none';
+    var btnRs=document.getElementById('rvs-schedule'),btnRv=document.getElementById('rvs-revaluation');
+    if(btnRs)btnRs.classList.toggle('active',mod==='rev-schedule');
+    if(btnRv)btnRv.classList.toggle('active',mod==='revaluation');
+  }
+  if(mod==='rev-schedule'){var rvMainTab=document.getElementById('tab-revaluation');if(rvMainTab)rvMainTab.classList.add('active');}
   if(mod==='admin')loadAdmin();
   if(mod==='transport')loadTransport();
   if(mod==='client')loadClientOrders();
@@ -1772,6 +1786,7 @@ function showModule(mod){
   if(mod==='calendar')loadCalendar();
   if(mod==='stock-returns')loadStockReturns();
   if(mod==='revaluation'&&typeof loadRevaluation==='function')loadRevaluation();
+  if(mod==='rev-schedule'&&typeof loadRevSchedule==='function')loadRevSchedule();
   if(mod==='stock-diff')loadStockDiff();
   if(mod==='pallets')loadPallets();
   if(mod==='supply')loadSupply();

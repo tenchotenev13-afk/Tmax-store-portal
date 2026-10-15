@@ -375,7 +375,7 @@ OneSignalDeferred.push(async function(OneSignal) {
       <!-- Група: Склад/Приемане (синьо) -->
       <button id="tab-transit" class="nav-tab" onclick="showModule('transit')" style="display:none;"><span class="ti">📦</span><span class="tl">Стока на път</span></button>
       <button id="tab-stock-returns" class="nav-tab" onclick="showModule('stock-returns')" style="display:none;"><span class="ti">🔄</span><span class="tl">За връщане</span></button>
-      <button id="tab-revaluation" class="nav-tab" onclick="showModule('revaluation')" style="display:none;"><span class="ti">🏷️</span><span class="tl">Преоценка</span></button>
+      <button id="tab-revaluation" class="nav-tab" onclick="showModule('rev-schedule')" style="display:none;"><span class="ti">🔎</span><span class="tl">Ревизии и преоценка</span></button>
       <button id="tab-stock-diff" class="nav-tab" onclick="showModule('stock-diff')" style="display:none;"><span class="ti">📊</span><span class="tl">Разлики</span></button>
       <div class="tab-sep" id="sep-misc"></div>
       <!-- Група: Справки (сиво) -->
@@ -413,6 +413,15 @@ OneSignalDeferred.push(async function(OneSignal) {
       <button id="tps-supply" class="filter-btn" onclick="showModule('supply')">🎨 Зареждане</button>
       <button id="tps-loading" class="filter-btn" onclick="showModule('loading')">🚛 Товарни листи</button>
       <button id="tps-transfers" class="filter-btn" onclick="showModule('transfers')">🔁 Трансфери</button>
+    </div>
+  </div>
+
+  <!-- Под-лента на „Ревизии и преоценка“ (tab-revaluation). Нов под-таб (напр.
+       „Минуси (953)“) = нов бутон тук + нов mod-* — без пренареждане. -->
+  <div id="rev-subnav" class="no-print" style="display:none;max-width:1300px;margin:12px auto 0;width:100%;padding:0 16px;">
+    <div style="display:flex;gap:8px;">
+      <button id="rvs-schedule" class="filter-btn" onclick="showModule('rev-schedule')">📅 График ревизии</button>
+      <button id="rvs-revaluation" class="filter-btn" onclick="showModule('revaluation')" style="display:none;">🏷️ Преоценка</button>
     </div>
   </div>
 
@@ -532,6 +541,7 @@ OneSignalDeferred.push(async function(OneSignal) {
   <div id="mod-calendar" class="page" style="display:none;"></div>
 
   <div id="mod-stock-returns" class="page" style="display:none;"></div>
+  <div id="mod-rev-schedule" class="page" style="display:none;"></div>
   <div id="mod-revaluation" class="page" style="display:none;"></div>
   <div id="mod-stock-diff" class="page" style="display:none;"></div>
 
@@ -882,5 +892,6 @@ function loadTabOrder(){
 <script src="reference.js"></script>
 <script src="handbook.js?v=20260707a"></script>
 <script src="revaluation.js"></script>
+<script src="revisions.js"></script>
 </body>
 </html>

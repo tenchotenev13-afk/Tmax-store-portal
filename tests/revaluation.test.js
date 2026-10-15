@@ -22,7 +22,10 @@
      M6 rvParseZstock без бройката повторени кодове (dupes винаги 0)
         → пада „toast 1 код се срещаше…" и „rvImportAoa връща dupes = 1".
      M7 (13.10.2026) rvCanSee без проверката на rvStoresOn за обекта
-        → пада „manager без ключ → табът е скрит" и „…showModule не рендира бланка";
+        → пада „manager без ключ → под-бутонът е скрит" и „…showModule не рендира бланка";
+     (14.10.2026) Табът стана „Ревизии и преоценка“ с под-табове: обектите го
+     виждат заради графика (revisions.js), а ключът крие ПОД-БУТОНА
+     „🏷️ Преоценка“ (rvs-revaluation). Проверките по-долу са за под-бутона.
      M8 (13.10.2026) rvLoadStoresFlag приема всяка непразна стойност
         → пада „„off“ → скрит" и „боклук („yes“) → скрит";
      M9 (13.10.2026) rvCanEdit без rvStoresOn
@@ -76,7 +79,7 @@ function env(o) {
   o = o || {};
   const db = { subs: (o.subs || []).map(x => Object.assign({}, x)), items: (o.items || []).map(x => Object.assign({}, x)) };
   const h = boot({
-    modules: ['admin.js', 'stock-returns.js', 'push.js', 'email.js', 'revaluation.js'],
+    modules: ['admin.js', 'stock-returns.js', 'push.js', 'email.js', 'revaluation.js', 'revisions.js'],
     user: o.user || STORE_USER,
     confirm: o.confirm,
     fail: o.fail,
@@ -159,7 +162,9 @@ async function imported(o) {
 
   section('0б. Скрито за обектите: app_settings.revaluation_stores');
   {
-    const tab = h => h.doc.getElementById('tab-revaluation');
+    /* под-бутонът „🏷️ Преоценка“; главният таб е за графика и се вижда винаги */
+    const tab = h => h.doc.getElementById('rvs-revaluation');
+    const mainTab = h => h.doc.getElementById('tab-revaluation');
     const login = async (o) => {
       const h = env(Object.assign({ storesOn: false }, o));
       guard('setupTabsForRole', () => h.w.setupTabsForRole());
@@ -168,7 +173,8 @@ async function imported(o) {
       return { h, hiddenBefore };
     };
     let r = await login({ settings: [] });
-    ok('manager без ключ → табът е скрит', tab(r.h).style.display === 'none' && r.h.w.rvCanSee() === false);
+    ok('manager без ключ → под-бутонът е скрит', tab(r.h).style.display === 'none' && r.h.w.rvCanSee() === false);
+    ok('…а главният таб „Ревизии и преоценка“ се вижда (графикът е за обектите)', mainTab(r.h).style.display === '');
     ok('заявката е точно за ключа', r.h.calls.get.some(u => u.indexOf('/app_settings?key=eq.revaluation_stores&') >= 0));
     guard('showModule(revaluation)', () => r.h.w.showModule('revaluation')); await ticks(5);
     ok('manager без ключ → showModule не рендира бланка', !btn(mod(r.h), 'Качи файл') && !btn(mod(r.h), 'Подай') &&
@@ -176,8 +182,8 @@ async function imported(o) {
     ok('и не чете бланки', !r.h.calls.get.some(u => u.indexOf('/rest/v1/revaluation_') >= 0));
 
     r = await login({ settings: [{ key: 'revaluation_stores', value: 'on' }] });
-    ok('manager с „on“ → табът е скрит ДО отговора (не мига)', r.hiddenBefore);
-    ok('manager с „on“ → вижда таба след отговора', tab(r.h).style.display === '' && r.h.w.rvCanSee() === true);
+    ok('manager с „on“ → под-бутонът е скрит ДО отговора (не мига)', r.hiddenBefore);
+    ok('manager с „on“ → вижда под-бутона след отговора', tab(r.h).style.display === '' && r.h.w.rvCanSee() === true);
     guard('showModule(revaluation)', () => r.h.w.showModule('revaluation')); await ticks(5);
     ok('manager с „on“ → бланката се рендира', !!btn(mod(r.h), 'Качи файл'));
 
@@ -198,7 +204,7 @@ async function imported(o) {
     r = await login({ user: { email: 'sn@temax.bg', display_name: 'Снаб', role: 'supply', store_name: 'Централен офис' }, settings: [] });
     ok('supply без ключ → вижда', tab(r.h).style.display === '');
     r = await login({ user: REGIONAL, settings: [] });
-    ok('регионален (accounting) без ключ → вижда таба', tab(r.h).style.display === '');
+    ok('регионален (accounting) без ключ → вижда под-бутона', tab(r.h).style.display === '');
     guard('showModule(revaluation)', () => r.h.w.showModule('revaluation')); await ticks(5);
     await r.h.w.rvPickStore('Шумен'); await ticks(5);
     ok('…но без ключ не пише в бланката на своя обект', !btn(mod(r.h), 'Качи файл') && !btn(mod(r.h), 'Подай'));

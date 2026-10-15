@@ -39,6 +39,7 @@ const TESTS = [
   'report-cross-get-all.test.js',
   'stock-returns-get-all.test.js',
   'revaluation.test.js',
+  'revision-schedule.test.js',
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',
   'catalog-lookup.test.js',

@@ -26,7 +26,7 @@ const MODULE_ORDER = [
   'admin.js', 'history.js',
   'contacts.js', 'transit.js', 'calendar.js', 'stock-returns.js',
   'stock-differences.js', 'push.js', 'email.js', 'report.js', 'loading.js', 'transfers.js', 'notifications.js',
-  'reference.js', 'handbook.js', 'revaluation.js'
+  'reference.js', 'handbook.js', 'revaluation.js', 'revisions.js'
 ];
 
 /* Функции, които showModule() вика; ако модулът им не е зареден, се stub-ват,
@@ -36,7 +36,7 @@ const LOADERS = [
   'loadTodayDashboard', 'loadChecklist', 'loadKasa', 'loadKasaDocs', 'loadAdmin', 'loadHistory',
   'loadContacts', 'loadTransit', 'loadCalendar', 'loadStockReturns', 'loadStockDiff',
   'loadPush', 'loadEmail', 'loadReport', 'loadLoadingLists', 'loadTransfers', 'loadNotifications', 'loadReference',
-  'loadHandbook', 'loadRevaluation'
+  'loadHandbook', 'loadRevaluation', 'loadRevSchedule'
 ];
 
 /* ── Броене на резултати ─────────────────────────────────────────────────── */
