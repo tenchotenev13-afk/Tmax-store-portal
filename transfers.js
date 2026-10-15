@@ -204,11 +204,12 @@ function loadTransfers(keepView) {
     tfIndexChains();
     /* Звената от веригите се дозареждат ПРЕДИ рендера: „Чакащи прехвърляне"
        зависи от това дали товарът вече има наследник. */
-    return tfLoadChains().catch(function () {}).then(function () { renderTransfers(); });
+    return tfLoadChains().catch(function () {}).then(function () { renderTransfers(); tfDeepLinkApply(); });
   }).catch(function () {
     tfTransfers = []; tfCargoByTransfer = {}; tfEvents = [];
     tfTransferById = {}; tfCargoById = {}; tfSuccOf = {};
     renderTransfers();
+    if (tfDeepLink) { tfDeepLink = null; toast('Транспортите не се заредиха — отвори етикета пак', '#dc2626'); }
   });
 }
 
@@ -1822,10 +1823,160 @@ function tfCargoResultsHtml() {
   }).join('') + '</div>';
 }
 
+/* ── Етикети с QR по единица товар ─────────────────────────────────────────
+   Образец: Товарни листи (loading.js). Ползват се готовите llLoadQrLib,
+   llQrSvg, llLabelCss, llStoreColor, llFitPt и LL_PORTAL_URL — loading.js е
+   преди transfers.js в index.html, така етикетът излиза на същата хартия, с
+   QR от същия размер и с цвета на обекта. Един етикет на ЕДИНИЦА: товар с
+   qty 12 дава 12 етикета „3/12". QR-ът е URL към портала: камерата на
+   телефона го отваря, а tfDeepLinkBoot (след входа) отваря картата. */
+var tfDeepLink = null;   /* чакащият #tf=… — докато се заредят транспортите */
+var tfHighlight = null;  /* id на подчертания товар в картата */
+
+function tfTagUrl(transferId, cargoId, unit) {
+  return LL_PORTAL_URL + '#tf=' + encodeURIComponent(String(transferId)) +
+    '&c=' + encodeURIComponent(String(cargoId)) + '&u=' + (parseInt(unit, 10) || 1);
+}
+/* Прочетеният текст → {tid, cid, unit} или null. Приема целия URL и само
+   хеша; #tl=… (Товарни листи) и всичко друго е null. */
+function tfParseTag(text) {
+  var s = String(text == null ? '' : text), i = s.indexOf('#');
+  if (i < 0) return null;
+  var tid = null, cid = null, unit = null;
+  s.slice(i + 1).split('&').forEach(function (part) {
+    var k = part.indexOf('=');
+    if (k < 0) return;
+    var name = part.slice(0, k), val = part.slice(k + 1);
+    try { val = decodeURIComponent(val); } catch (e) { return; }
+    if (name === 'tf') tid = val;
+    if (name === 'c') cid = val;
+    if (name === 'u') unit = parseInt(val, 10);
+  });
+  if (!tid || !cid || !(unit >= 1)) return null;
+  return { tid: tid, cid: cid, unit: unit };
+}
+
+/* Печатът: страница A4 на единица, по position на товара, после по единица. */
+function tfRenderLabelsPrint(t, cargo) {
+  var wrap = document.getElementById('mod-print');
+  if (!wrap) return 0;
+  var list = (cargo || []).slice().sort(function (a, b) { return (parseInt(a.position, 10) || 0) - (parseInt(b.position, 10) || 0); });
+  var pages = [];
+  list.forEach(function (c, i) {
+    var qty = Math.max(1, parseInt(c.qty, 10) || 1);
+    var rec = c.recipient_store || '—';
+    var color = llStoreColor(rec), txt = llColorText(color);
+    var pts = (c.transfer_points || []).filter(Boolean);
+    var when = t.mode === 'courier'
+      ? 'Куриер: ' + (t.courier_company || '—') + (t.waybill_no ? ' · № ' + t.waybill_no : '')
+      : 'Тръгва: ' + tfDateLabel(t);
+    for (var u = 1; u <= qty; u++) {
+      var title = '#' + (c.position || i + 1) + ' ' + tfKindLabel(c.kind) + ' ' + u + '/' + qty;
+      var url = tfTagUrl(t.id, c.id, u);
+      pages.push('<div class="lt-page" data-tf-label="1" data-tf-tag="' + tfAttr(url) + '">' +
+        '<div class="lt-pal" style="font-size:' + llFitPt(t.transfer_num + ' · ' + title, 40, 186, 20) + 'pt;margin-top:0;margin-bottom:4mm;">' +
+          escVal(t.transfer_num || '') + ' · ' + escVal(title) + '</div>' +
+        '<div class="lt-band" style="background:' + color + ';color:' + txt + ';">' +
+          '<div class="lt-store" style="font-size:' + llFitPt(rec, 120, 180, 36) + 'pt;">' + escVal(rec) + '</div></div>' +
+        (pts.length ? '<div class="tf-lt-via" style="font-size:20pt;font-weight:700;text-align:center;margin-top:3mm;">през ' + escVal(pts.join(' → ')) + '</div>' : '') +
+        '<div class="lt-mid">' +
+          '<div class="lt-meta">' +
+            '<div><b>от</b> ' + escVal(tfCargoSender(t, c) || '—') + '</div>' +
+            '<div>' + escVal(when) + '</div>' +
+            (c.note ? '<div>' + escVal(c.note) + '</div>' : '') +
+          '</div>' +
+          '<div class="lt-qr" data-tf-qr="1">' + llQrSvg(url, 60) + '</div>' +
+        '</div>' +
+      '</div>');
+    }
+  });
+  wrap.innerHTML =
+    '<style>' + llLabelCss() + '</style>' +
+    '<div style="max-width:820px;margin:0 auto;padding:16px 16px 40px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;" class="no-print">' +
+        '<div style="font-size:18px;font-weight:600;">🏷 Етикети · ' + escVal(t.transfer_num || '') + ' · ' + pages.length + (pages.length === 1 ? ' етикет' : ' етикета') + '</div>' +
+        '<div style="display:flex;gap:8px;align-items:center;">' +
+          '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>' +
+          '<button onclick="showModule(\'transfers\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Назад</button>' +
+        '</div>' +
+      '</div>' +
+      '<div data-tf-labels="1">' + pages.join('') + '</div>' +
+    '</div>';
+  return pages.length;
+}
+
+/* „🏷 Етикети" в картата — за всеки, който вижда картата. */
+function tfLabels(transferId) {
+  var t = tfFindTransfer(transferId);
+  if (!t) { toast('Транспортът не е намерен', '#dc2626'); return Promise.resolve(false); }
+  var cargo = tfCargoByTransfer[t.id] || [];
+  if (!cargo.length) { toast('Няма товари за етикети', '#d97706'); return Promise.resolve(false); }
+  return llLoadQrLib().then(function () {
+    tfRenderLabelsPrint(t, cargo);
+    showModule('print');
+    return true;
+  }).catch(function (e) {
+    console.error('tfLabels', e);
+    toast('Етикетите не се получиха: ' + (e && e.message ? e.message : e), '#dc2626');
+    return false;
+  });
+}
+
+/* Deep link #tf=…&c=…&u=… — вика се от startApp() (shared.js) след входа,
+   само ако llDeepLinkBoot не е поел хеша. false = хешът не е наш. */
+function tfDeepLinkBoot(hash) {
+  var h = (hash === undefined) ? (window.location.hash || '') : String(hash);
+  var tag = tfParseTag(h);
+  if (!tag) return false;
+  llClearUrlHash();
+  tfDeepLink = tag;
+  /* showModule пуска loadTransfers, а той вика tfDeepLinkApply в края си. */
+  showModule('transfers');
+  return true;
+}
+/* Чужд обект: червен екран, картата не се отваря. */
+function tfForeignScreen(num) {
+  var old = document.getElementById('trf-foreign-modal');
+  if (old && old.parentNode) old.parentNode.removeChild(old);
+  var m = document.createElement('div');
+  m.id = 'trf-foreign-modal';
+  m.setAttribute('data-scan-result', 'foreign');
+  m.style.cssText = 'position:fixed;inset:0;z-index:500;background:#dc2626;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:24px;';
+  m.innerHTML = '<div style="font-size:30px;font-weight:800;line-height:1.2;">Транспорт ' + escVal(num || '') + ' не е за вашия обект</div>' +
+    '<button onclick="var m=document.getElementById(\'trf-foreign-modal\');if(m&&m.parentNode)m.parentNode.removeChild(m);" style="margin-top:26px;border:2px solid #fff;background:transparent;color:#fff;border-radius:10px;padding:12px 30px;font-size:18px;font-weight:700;cursor:pointer;">Затвори</button>';
+  document.body.appendChild(m);
+}
+/* След зареждането: видим транспорт → картата с подчертан товар; иначе
+   червен екран. Нищо не се отбелязва автоматично. */
+function tfDeepLinkApply() {
+  if (!tfDeepLink) return false;
+  var tag = tfDeepLink;
+  tfDeepLink = null;
+  var t = tfTransferById[tag.tid] || null;
+  if (t) {
+    /* tfTransferById носи и звената от веригите — те НЕ са видими сами по себе си. */
+    if (!tfVisibleToStores(t, tfCargoByTransfer[t.id], tfMyStores())) { tfForeignScreen(t.transfer_num); return true; }
+  } else {
+    /* Не е сред заредените: или е чужд, или го няма. Номерът — за червения екран. */
+    sbGet('transfers', 'id=eq.' + encodeURIComponent(tag.tid) + '&select=id,transfer_num').then(function (rows) {
+      var r = Array.isArray(rows) ? rows[0] : null;
+      if (r) tfForeignScreen(r.transfer_num);
+      else toast('Транспортът не е намерен', '#dc2626');
+    });
+    return true;
+  }
+  tfHighlight = tag.cid;
+  openTransferCard(t.id);
+  var row = document.querySelector('.trf-card-cargo[data-trf-hl="1"]');
+  if (!row) { toast('Товарът го няма в транспорта', '#d97706'); return true; }
+  if (row.scrollIntoView) row.scrollIntoView({ block: 'center' });
+  return true;
+}
+
 /* ── Карта на транспорта ─────────────────────────────────────────────────── */
 
 function openTransferCard(id) { tfCardId = id; tfView = 'card'; renderTransfers(); }
-function closeTransferCard() { tfCardId = null; tfView = 'list'; renderTransfers(); }
+function closeTransferCard() { tfCardId = null; tfHighlight = null; tfView = 'list'; renderTransfers(); }
 
 /* Може ли текущият потребител да изтрие транспорта t. null = да, иначе
    текст на причината. Само „Планиран" (нито една отметка) и само от
@@ -1882,6 +2033,7 @@ function renderTransferCard() {
         return '<button class="btn-sm trf-reload" data-s="' + tfAttr(s) + '" onclick="openReloadForm(\'' + tfAttr(t.id) + '\',this.getAttribute(\'data-s\'))">➕ Дотовари' + (a.length > 1 ? ' в ' + escVal(s) : '') + '</button>';
       }).join('') +
       '<button class="btn-sm" onclick="printTransfer(\'' + tfAttr(t.id) + '\')">🖨 Печат</button>' +
+      '<button id="trf-labels" class="btn-sm" onclick="tfLabels(\'' + tfAttr(t.id) + '\')">🏷 Етикети</button>' +
       (tfCanDelete(t) === null ? '<button id="trf-delete" class="btn-sm" onclick="deleteTransfer(\'' + tfAttr(t.id) + '\')">🗑 Изтрий</button>' : '') +
       '<button id="trf-card-back" class="btn-sm" onclick="closeTransferCard()">← Обратно</button></div>' +
     '</div>' +
@@ -1893,7 +2045,9 @@ function renderTransferCard() {
     var prevEv = tfChainPrevEvents(c);
     var acts = tfActionsFor(t, c, evs);
     var open = tfOpenProblems(c, evs).length;
-    h += '<div class="trf-card-cargo" data-c="' + tfAttr(c.id) + '" style="border:1px solid ' + (open ? '#fecaca' : '#e2e8f0') + ';border-radius:8px;padding:10px;margin-bottom:8px;background:#fff;">' +
+    var hl = tfHighlight !== null && String(tfHighlight) === String(c.id);
+    h += '<div class="trf-card-cargo" data-c="' + tfAttr(c.id) + '"' + (hl ? ' data-trf-hl="1"' : '') +
+      ' style="border:' + (hl ? '2px solid #ca8a04' : '1px solid ' + (open ? '#fecaca' : '#e2e8f0')) + ';border-radius:8px;padding:10px;margin-bottom:8px;background:' + (hl ? '#fef9c3' : '#fff') + ';">' +
       '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
         '<div><b>' + escVal(tfCargoLabel(c, i)) + '</b>' +
           ((c.transfer_points || []).length ? '<span style="font-size:12px;color:#64748b;"> · през ' + escVal(c.transfer_points.join(' → ')) + '</span>' : '') +

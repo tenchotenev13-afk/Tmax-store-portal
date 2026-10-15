@@ -1654,8 +1654,10 @@ function startApp(){
     if (new URLSearchParams(window.location.search).get('store') && isGlobal()) startTab='today';
   } catch(e){}
   showModule(startTab);
-  /* Deep link от етикет на палет (#tl=…&p=…) — след входа, loading.js го чете. */
-  if(typeof llDeepLinkBoot==='function') llDeepLinkBoot();
+  /* Deep link от етикет — след входа. Палет (#tl=…&p=…) чете loading.js;
+     само ако не е негов, товар от трансфер (#tf=…&c=…&u=…) — transfers.js. */
+  var dl = (typeof llDeepLinkBoot==='function') && llDeepLinkBoot();
+  if(!dl && typeof tfDeepLinkBoot==='function') tfDeepLinkBoot();
 }
 function setupTabsForRole(){
   /* Таб Каса — само за kasa, manager, admin, accounting */
