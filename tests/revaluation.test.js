@@ -111,7 +111,9 @@ function env(o) {
     if (m !== 'POST' || !/revaluation_/.test(url)) return p;
     return p.then(r => {
       if (!r.ok) return r;
-      const row = Object.assign({ id: 'id-' + (++idSeq) }, JSON.parse(init.body));
+      /* подразбиращите се от базата (PostgREST ги връща с return=representation) */
+      const defs = /revaluation_submissions/.test(url) ? { status: 'draft', no_items: false } : {};
+      const row = Object.assign({ id: 'id-' + (++idSeq) }, defs, JSON.parse(init.body));
       if (/revaluation_submissions/.test(url)) db.subs.push(row);
       if (/revaluation_items/.test(url)) db.items.push(row);
       return { ok: true, status: 201, json: () => Promise.resolve([row]), text: () => Promise.resolve(JSON.stringify([row])) };
@@ -206,11 +208,11 @@ async function imported(o) {
     r = await login({ user: REGIONAL, settings: [] });
     ok('регионален (accounting) без ключ → вижда под-бутона', tab(r.h).style.display === '');
     guard('showModule(revaluation)', () => r.h.w.showModule('revaluation')); await ticks(5);
-    await r.h.w.rvPickStore('Шумен'); await ticks(5);
+    await r.h.w.rvCoOpenStore('Шумен'); await ticks(5);
     ok('…но без ключ не пише в бланката на своя обект', !btn(mod(r.h), 'Качи файл') && !btn(mod(r.h), 'Подай'));
     const r2 = await login({ user: REGIONAL, settings: [{ key: 'revaluation_stores', value: 'on' }] });
     guard('showModule(revaluation)', () => r2.h.w.showModule('revaluation')); await ticks(5);
-    await r2.h.w.rvPickStore('Шумен'); await ticks(5);
+    await r2.h.w.rvCoOpenStore('Шумен'); await ticks(5);
     ok('регионален с „on“ → пише в бланката на своя обект', !!btn(mod(r2.h), 'Качи файл'));
   }
 
@@ -321,6 +323,17 @@ async function imported(o) {
     ok('% 0 → цена = стандартната (17,79)', p3 && p3.body.proposed_price === 17.79);
   }
 
+  section('5б. Празно поле е празно, не „—"');
+  {
+    const h = await imported();
+    const c = rowInput(h, '53531', 'store_comment');
+    ok('празният коментар на обекта е "" в полето', c && c.value === '', c && JSON.stringify(c.value));
+    h.w.rvItems[0].discount_pct = null; h.w.rvItems[0].proposed_price = null; h.w.rvRender();
+    ok('празен % и празна цена — ""', rowInput(h, h.w.rvItems[0].sap_code, 'discount_pct').value === '' && rowInput(h, h.w.rvItems[0].sap_code, 'proposed_price').value === '');
+    h.w.rvSub.default_pct = null; h.w.rvCampaigns[0].default_pct = null; h.w.rvRender();
+    ok('празен % за бланката — ""', h.doc.getElementById('rv-sub-pct').value === '');
+  }
+
   section('6. „Приложи % към всички" — само с потвърждение');
   {
     const h = await imported({ confirm: false });
@@ -383,7 +396,8 @@ async function imported(o) {
     const h = env({ user: REGIONAL, subs: [sub], items });
     await open(h);
     ok('избран е обект от региона (Добрич — първият)', h.w.rvStore === 'Добрич');
-    await h.w.rvPickStore('Шумен'); await ticks(5);
+    /* от етап 3а регионалните (accounting/admin) виждат списъка на ЦО и отварят бланка с „Отвори" */
+    await h.w.rvCoOpenStore('Шумен'); await ticks(5);
     ok('регионалният: има „Изтрий ред" след подаване', !!btn(mod(h), 'Изтрий ред'));
     ok('и полета за редакция', h.doc.querySelectorAll('#rv-rows input').length > 0);
     ok('но не и „Подай" (вече е подадена)', !btn(mod(h), 'Подай'));
@@ -391,13 +405,14 @@ async function imported(o) {
     ok('редакцията пише PATCH', h.calls.patch.some(x => x.table === 'revaluation_items' && x.body.qty === 7));
     realClick(h.w, btn(mod(h), 'Изтрий ред')); await ticks(3);
     ok('изтриването праща DELETE', h.calls.del.some(u => /revaluation_items\?id=eq\.i-1/.test(u)));
-    const o = Array.from(h.doc.querySelectorAll('#rv-store option')).map(x => x.value);
-    ok('регионът е пръв в избора, после останалите (accounting = ЦО)', o.join(',') === 'Добрич,Силистра,Търговище,Шумен,Пазарджик', o.join(','));
-    await h.w.rvPickStore('Пазарджик'); await ticks(5);
+    await h.w.rvCoBack(); await ticks(5);
+    const shumenRow = h.doc.getElementById('rv-co-Шумен');
+    ok('„← Към списъка" → списъкът на ЦО, Шумен „подадена"', !!shumenRow && shumenRow.textContent.indexOf('подадена') >= 0);
+    await h.w.rvCoOpenStore('Пазарджик'); await ticks(5);
     ok('обект извън региона → само четене', !btn(mod(h), 'Качи файл'));
     /* admin (не регионален) — само чете */
     const a = env({ user: ADMIN, subs: [sub], items }); await open(a);
-    await a.w.rvPickStore('Шумен'); await ticks(5);
+    await a.w.rvCoOpenStore('Шумен'); await ticks(5);
     ok('admin: вижда реда, но без „Изтрий ред"', a.w.rvItems.length === 1 && !btn(mod(a), 'Изтрий ред'));
   }
 

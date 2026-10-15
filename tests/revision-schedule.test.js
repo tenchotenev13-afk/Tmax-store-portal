@@ -110,6 +110,7 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
     const h = env(); await open(h);
     realClick(h.w, btn(mod(h), '＋ Седмица'));
     ok('формата се отваря', !!h.doc.getElementById('rs-form'));
+    ok('празните полета са "" (не „—")', h.doc.getElementById('rs-f-note').value === '' && h.doc.getElementById('rs-g-code-0').value === '' && h.doc.getElementById('rs-g-name-0').value === '');
     setVal(h, 'rs-f-from', '2026-11-30'); setVal(h, 'rs-f-to', '2026-12-02');
     setVal(h, 'rs-f-note', 'бележка 1');
     setVal(h, 'rs-g-code-0', '24101010'); setVal(h, 'rs-g-name-0', 'Проточни бойлери');
