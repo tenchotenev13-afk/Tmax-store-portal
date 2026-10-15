@@ -538,7 +538,9 @@ function tfLoadLinkOptions() {
   if (!f || !f.from_store) { tfCoOpts = []; tfToOpts = []; tfLlOpts = []; return Promise.resolve(); }
   var s = encodeURIComponent(f.from_store);
   var jobs = [
-    sbGet('client_orders', 'select=id,in_num,customer_name,status&or=(store_name.eq.' + s + ',fulfiller.eq.' + s + ')&order=created_at.desc&limit=300'),
+    /* Само отворените заявки — приключените (done / refused) не тръгват с транспорт. */
+    sbGet('client_orders', 'select=id,in_num,customer_name,status,product,sap,qty,unit,items&or=(store_name.eq.' + s + ',fulfiller.eq.' + s + ')' +
+      '&status=not.in.(done,refused)&order=created_at.desc&limit=300'),
     sbGet('transport_orders', 'select=id,date,customer_name,address&store_name=eq.' + s + '&order=created_at.desc&limit=300')
   ];
   var isWh = LOGISTICS_WAREHOUSES.indexOf(f.from_store) >= 0;
@@ -559,7 +561,7 @@ function tfLoadLinkOptions() {
   return Promise.all(jobs).then(function (r) {
     if (tfForm !== f) return;
     tfCoOpts = (Array.isArray(r[0]) ? r[0] : []).map(function (o) {
-      return { id: o.id, label: (o.in_num || '—') + ' · ' + (o.customer_name || '') };
+      return { id: o.id, label: tfCoLabel(o) };
     });
     tfToOpts = (Array.isArray(r[1]) ? r[1] : []).map(function (o) {
       return { id: o.id, label: (o.date ? fmtDate(o.date) + ' · ' : '') + (o.customer_name || '') + (o.address ? ' · ' + o.address : '') };
@@ -571,6 +573,25 @@ function tfLoadLinkOptions() {
     });
     if (tfView === 'form') renderTransferForm();
   });
+}
+
+/* Етикетът на клиентска заявка в списъка за избор и в чипчето:
+   „<№> · <клиент> · <артикул> · SAP <sap> · <к-во> <мярка>". Артикулът е
+   първият ред от items (+N арт. при повече), иначе полетата на заявката.
+   Липсващо (или „—" от старите записи) се пропуска. Картата, печатът и
+   търсенето остават с „КЗ <№>". */
+function tfCoLabel(o) {
+  o = o || {};
+  var val = function (x) { var s = x === null || x === undefined ? '' : String(x).trim(); return s === '—' ? '' : s; };
+  var items = Array.isArray(o.items) ? o.items.filter(Boolean) : [];
+  var it = items.length ? items[0] : o;
+  var prod = val(it.product);
+  if (prod.length > 60) prod = prod.slice(0, 60) + '…';
+  var sap = val(it.sap);
+  var qty = val(it.qty);
+  var parts = [val(o.in_num) || '—', val(o.customer_name), prod, sap ? 'SAP ' + sap : '',
+    qty ? (qty + (val(it.unit) ? ' ' + val(it.unit) : '')) : ''].filter(Boolean);
+  return parts.join(' · ') + (items.length > 1 ? ' +' + (items.length - 1) + ' арт.' : '');
 }
 
 function tfOptLabel(opts, id) {

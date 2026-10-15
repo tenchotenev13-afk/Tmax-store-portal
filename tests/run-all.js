@@ -297,6 +297,7 @@ const TESTS = [
   'transfers-stale.test.js',
   'transfers-delete.test.js',
   'transfers-truck.test.js',
+  'transfers-co-label.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',
