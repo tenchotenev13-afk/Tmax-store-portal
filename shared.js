@@ -1043,6 +1043,17 @@ function lateBadge(o){
   var days=Math.round((TODAY-dl)/86400000);
   return '<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;display:inline-flex;align-items:center;background:#fee2e2;color:#991b1b;margin-left:4px;">🔴 +'+days+(days===1?' ден':' дни')+'</span>';
 }
+/* Транспорт по клиентска заявка, чиято стока вече е пристигнала: статусът
+   остава по дата (syncLinkedTransport() в client-orders.js нулира
+   awaiting_stock), а този чип показва отстрани, че стоката е в магазина.
+   client_order_id е задължителен: транспорт без клиентска заявка ВСЪЩНОСТ
+   има awaiting_stock=false (15.10.2026: 63 активни такива). Строго ===false
+   — липсваща колона (undefined) или null не значи „пристигнала“. */
+function stockArrivedBadge(o){
+  if(!o||!o.client_order_id||o.awaiting_stock!==false)return '';
+  if(['done','refused','postponed'].indexOf(o.status)>=0)return '';
+  return '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:20px;display:inline-flex;align-items:center;background:#dcfce7;color:#14532d;margin-left:4px;">📦 Стоката е в магазина</span>';
+}
 /* ===== МНОЖЕСТВО АРТИКУЛИ (items[]) - споделено между клиентски и транспортни заявки ===== */
 function unitOptionsHtml(sel){
   var opts=[['бр.','Бр.'],['кашон','Кашон'],['кв.м','Кв.м'],['л.м','Л.м'],['компл.','Компл.'],['пакет','Пакет'],['чифт','Чифт']];

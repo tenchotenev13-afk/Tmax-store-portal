@@ -137,7 +137,7 @@ function renderTransport(){
       '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">'+esc(o.phone||'')+' · Бон: '+esc(o.bon||'—')+'</small>'+coLinkBadge(o)+'</td>'+
       '<td style="font-size:12px;">'+esc(o.address||'')+'</td>'+
       tdItems+
-      '<td>'+statusBadge(o._status)+lateBadge(o)+'<div style="margin-top:3px;font-size:12px;"><b>'+fmtDate(o.delivery)+'</b></div></td>'+
+      '<td>'+statusBadge(o._status)+stockArrivedBadge(o)+lateBadge(o)+'<div style="margin-top:3px;font-size:12px;"><b>'+fmtDate(o.delivery)+'</b></div></td>'+
       '<td onclick="event.stopPropagation()" style="cursor:default;">'+actionBtns(o.id,'transport_orders',o._status,o.store_name)+'</td></tr>';
   }).join('');
   /* Подсветка + скрол към реда, отворен от бутона 🚚 в Клиентски заявки */
@@ -217,6 +217,7 @@ function openTransportDetail(id){
   var dostavka=coDetailRow('Доставка',o.delivery?fmtDate(o.delivery):'—')+
     coDetailRow('Статус',statusBadge(st)+lateBadge(o));
   if(o.awaiting_stock)dostavka+=coDetailRow('Стока','⏳ чака стока по клиентска заявка');
+  else if(stockArrivedBadge(o))dostavka+=coDetailRow('Стока','📦 пристигнала в магазина');
 
   var html='<div class="bov" id="trd-ov"><div class="bmod" style="width:560px;max-width:95vw;">'+
     '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:2px;">'+

@@ -256,7 +256,7 @@ function renderHistoryResults(){
           '<td style="font-size:11px;">'+esc(o.address||'')+'</td>'+
           '<td><b>'+fmtDate(o.delivery)+'</b></td>'+
           /* Същото правило като в таб Транспорт — чакащ стока транспорт не е просрочен */
-          '<td>'+statusBadge((o.awaiting_stock&&['done','refused','postponed'].indexOf(o.status)<0)?'awaiting':calcStatus(o.delivery,o.status))+lateBadge(o)+'</td>'+
+          '<td>'+statusBadge((o.awaiting_stock&&['done','refused','postponed'].indexOf(o.status)<0)?'awaiting':calcStatus(o.delivery,o.status))+stockArrivedBadge(o)+lateBadge(o)+'</td>'+
         '</tr>';
       }).join('')+
       '</tbody></table></div></div>';

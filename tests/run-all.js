@@ -344,6 +344,7 @@ const TESTS = [
   'transport-row-items.test.js',
   'transport-filter-bar.test.js',
   'metrics-only-transport-client.test.js',
+  'transport-stock-arrived.test.js',
   'contact-detail.test.js',
   'contacts-directory.test.js',
   'contacts-home.test.js',
