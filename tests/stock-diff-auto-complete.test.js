@@ -8,9 +8,12 @@
    5 от 18.
 
    ТВЪРДЕНИЯТА:
-   · правилото „чака МОЕТО действие" е едно и също на трите места — SQL,
-     stock-differences.js и броячът в Бюлетина — и ИЗКЛЮЧВА will_send, празен
-     отговор на склада, no_stock и приключен ред;
+   · правилото „чака МОЕТО действие" ИЗКЛЮЧВА will_send, празен отговор на
+     склада, no_stock и приключен ред. От 14.10.2026 правилата са ДВЕ:
+     ОЦЕНКАТА (SQL stock_diff_store_done = diffLineWaitsStore в shared.js =
+     броячът в Бюлетина) е само 'return' без wrong_barcode / similar_item, а
+     „какво да направя" (sdLineWaitsStore — бутонът „📝 Чакат моя отговор")
+     брои и 'sent'/'sent_sap', защото обектът ще отговори „прието";
    · превключването е по ДАТА (AUTO_COMPLETE_FROM в shared.js = v_start в
      базата): до 11.10 задачата е РЪЧНА и sdMarkDiffTask пише, от 12.10 е
      заключена и той мълчи;
@@ -20,6 +23,8 @@
    · баджът на таба продължава да брои БЛАНКИ и го казва в подсказката си;
    · действията по бланки работят както преди (регресия — само отметката
      отпада).
+   Мутационна проверка (14.10.2026) на diffLineWaitsStore: „sent пак брои",
+   „категорията не се изключва" и „received брои" — и трите събарят теста.
 
    Пускане: node tests/stock-diff-auto-complete.test.js . */
 'use strict';
@@ -291,7 +296,8 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
     const sql = fs.readFileSync(path.join(ROOT, 'stock-diff-auto-complete-schema.sql'), 'utf8');
     // От 14.10.2026 (20261014120000_stock_diff_store_move): ход на обекта е
     // само 'return'; sent/sent_sap са на път, двете категории чакат ЦО.
-    // Модулът и Бюлетинът още броят sent/sent_sap — решение отделно.
+    // Бюлетинът я следва през diffLineWaitsStore (shared.js, 14.10.2026);
+    // модулът (sdLineWaitsStore) нарочно брои и sent/sent_sap.
     ok('SQL-ът брои само return',
       /warehouse_response in \('return'\)/.test(sql) &&
       !/warehouse_response in \('sent','sent_sap','return'\)/.test(sql));
@@ -311,17 +317,20 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
     ok('Бюлетинът тегли и посоката, и reviewed',
       bul.indexOf('differences_reports.direction=eq.interstore') >= 0 &&
       bul.indexOf('differences_reports.reviewed=eq.false') >= 0, 'няма ги');
-    ok('и има свое копие на условието (зарежда се преди модула)',
-      bul.indexOf('function bulDiffLineWaitsStore') >= 0, 'няма го');
+    ok('и тегли категорията — без нея wrong_barcode/similar_item не се изключват',
+      /select=id,status,warehouse_response,store_response,difference_category,differences_reports!inner/.test(bul), 'няма я');
+    ok('и брои по общото правило от shared.js',
+      /function bulDiffLineWaitsStore\(l\)\{\s*return diffLineWaitsStore\(l\);\s*\}/.test(bul), 'няма го');
 
-    /* И функционално: двете реализации върху едни и същи редове. */
+    /* И функционално: diffLineWaitsStore срещу ПРЕПИС на SQL клон 1. */
     const w = env(AFTER).w;
-    const bulRule = l => {
+    const sqlRule = l => {
       if (!l) return false;
       if (String(l.status || '') === 'received') return false;
       if (l.store_response) return false;
-      const x = String(l.warehouse_response || '');
-      return x === 'sent' || x === 'sent_sap' || x === 'return';
+      if (String(l.warehouse_response || '') !== 'return') return false;
+      const c = String(l.difference_category || '');
+      return c !== 'wrong_barcode' && c !== 'similar_item';
     };
     const cases = [
       line('c1'), line('c2', { warehouse_response: 'return' }),
@@ -329,11 +338,14 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
       line('c5', { warehouse_response: 'will_send' }),
       line('c6', { warehouse_response: 'return', store_response: 'sap_done' }),
       line('c7', { warehouse_response: 'return', store_response: 'no_stock' }),
-      line('c8', { warehouse_response: 'return', status: 'received' })
+      line('c8', { warehouse_response: 'return', status: 'received' }),
+      line('c9', { warehouse_response: 'return', difference_category: 'wrong_barcode' }),
+      line('c10', { warehouse_response: 'return', difference_category: 'similar_item' }),
+      line('c11', { warehouse_response: 'return', difference_category: 'undelivered' })
     ];
-    const diff = cases.filter(l => w.sdLineWaitsStore(l) !== bulRule(l));
-    ok('двете дават еднакъв отговор за 8 случая', diff.length === 0, diff.map(x => x.id).join(', '));
-    const yes = cases.filter(l => w.sdLineWaitsStore(l)).length;
+    const diff = cases.filter(l => w.diffLineWaitsStore(l) !== sqlRule(l));
+    ok('diffLineWaitsStore = SQL клон 1 за 11 случая', diff.length === 0, diff.map(x => x.id).join(', '));
+    const yes = cases.filter(l => w.diffLineWaitsStore(l)).length;
     ok('и случаите не са едностранни', yes > 0 && yes < cases.length, yes + ' от ' + cases.length);
   }
 
@@ -378,18 +390,27 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
       ha.w.bulCompletedByLabel('auto:stock-diff') === 'автоматично от Разлики',
       ha.w.bulCompletedByLabel('auto:stock-diff'));
 
-    /* ДВЕТЕ ИСТИНСКИ функции, ред по ред — не препис в теста. */
+    /* ИСТИНСКИТЕ функции, ред по ред — не препис в теста. От 14.10.2026
+       Бюлетинът = diffLineWaitsStore (оценката), а модулът НАРОЧНО се
+       различава точно на 'sent'/'sent_sap' и на двете категории. */
     const cases = [
       line('c1'), line('c2', { warehouse_response: 'return' }),
       line('c3', { warehouse_response: 'sent' }), line('c4', { warehouse_response: 'sent_sap' }),
       line('c5', { warehouse_response: 'will_send' }),
       line('c6', { warehouse_response: 'return', store_response: 'sap_done' }),
       line('c7', { warehouse_response: 'return', store_response: 'no_stock' }),
-      line('c8', { warehouse_response: 'return', status: 'received' })
+      line('c8', { warehouse_response: 'return', status: 'received' }),
+      line('c9', { warehouse_response: 'return', difference_category: 'wrong_barcode' }),
+      line('c10', { warehouse_response: 'return', difference_category: 'similar_item' })
     ];
-    const diff2 = cases.filter(l => ha.w.sdLineWaitsStore(l) !== ha.w.bulDiffLineWaitsStore(l));
-    ok('sdLineWaitsStore и bulDiffLineWaitsStore съвпадат за 8 случая',
-      diff2.length === 0, diff2.map(x => x.id).join(', '));
+    const same = cases.filter(l => ha.w.bulDiffLineWaitsStore(l) !== ha.w.diffLineWaitsStore(l));
+    ok('bulDiffLineWaitsStore = diffLineWaitsStore за всичките случаи',
+      same.length === 0, same.map(x => x.id).join(', '));
+    const diff2 = cases.filter(l => ha.w.sdLineWaitsStore(l) !== ha.w.bulDiffLineWaitsStore(l)).map(x => x.id);
+    ok('модулът се различава от оценката САМО на sent, sent_sap и двете категории',
+      diff2.join(',') === 'c3,c4,c9,c10', diff2.join(','));
+    ok('решението е заковано: sdLineWaitsStore(sent) остава true (бутонът „Чакат моя отговор")',
+      ha.w.sdLineWaitsStore(line('x', { warehouse_response: 'sent' })) === true);
     const yes2 = cases.filter(l => ha.w.bulDiffLineWaitsStore(l)).length;
     ok('и случаите не са едностранни', yes2 > 0 && yes2 < cases.length,
       yes2 + ' от ' + cases.length);
@@ -420,9 +441,9 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
     /* Двата реда са дошли СЛЕД отметката — складът е отговорил следобед. */
     const waiting = [
       { id: 'l-1', status: 'pending', warehouse_response: 'return', store_response: null, differences_reports: rp },
-      { id: 'l-2', status: 'pending', warehouse_response: 'sent', store_response: null, differences_reports: rp }
+      { id: 'l-2', status: 'pending', warehouse_response: 'return', store_response: null, differences_reports: rp }
     ];
-    async function bul(comps) {
+    async function bul(comps, lines) {
       const h = boot({
         modules: ['bulletin.js', 'stock-returns.js', 'stock-differences.js'],
         user: { email: 's@temax.bg', display_name: 'Обект', role: 'store', store_name: ST },
@@ -433,7 +454,7 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
             created_at: MON, content: { calendar: (function () { const c = {}; h.w.DKEYS.forEach(k => { c[k] = []; }); return c; })(),
             columns: { trade: [], warehouse: [], admin: [] } } }],
           bulletin_tasks: [], task_completions: comps,
-          stock_differences: waiting, stock_diff_swaps: [], differences_reports: [],
+          stock_differences: lines || waiting, stock_diff_swaps: [], differences_reports: [],
           goods_transit: [], bulletin_promotions: [], task_subtasks: [], subtask_completions: [],
           notification_schedules: [], report_snapshots: [], supply_templates: [], supply_entries: []
         }
@@ -489,6 +510,42 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
     /* Д. Отложена днес (postponed) не е отметка. */
     const hE = await bul([comp({ status: 'postponed', completed_by: 'Иван' })]);
     if (hE) { ok('отложена днес → не е „✓"', note(hE) !== '✓ от Разлики', note(hE)); hE.close(); }
+
+    section('12. Оценката = базата (14.10.2026): „изпратено" и категориите на ЦО не са ход на обекта');
+    /* Решение на Тенчо, 14.10.2026: надписът под задачата брои по
+       diffLineWaitsStore — огледало на stock_diff_store_done (20261014111456).
+       Реален DOM на Бюлетина; заявката минава през мока на sbGet. При 0
+       чакащи и без отметка надписът е „⏳ отмята се от Разлики" — затова
+       „няма ⏳" тук значи: няма брояч „… чака(т) отговор", а с отметката,
+       която базата вече дава, надписът е „✓ от Разлики". */
+    const L1 = (wr, cat) => [{ id: 'l-x', status: 'pending', warehouse_response: wr, store_response: null,
+      difference_category: cat === undefined ? null : cat, differences_reports: rp }];
+    /* а) 'sent' / 'sent_sap' без отговор. */
+    const h12a = await bul([comp()], L1('sent'));
+    if (h12a) {
+      ok('изпратено без отговор → брояч 0', h12a.w.bulAutoPending['stock-diff'] === 0, String(h12a.w.bulAutoPending['stock-diff']));
+      ok('и отметнат → „✓ от Разлики", без „⏳"', note(h12a) === '✓ от Разлики', note(h12a));
+      h12a.close();
+    }
+    const h12a2 = await bul([], L1('sent'));
+    if (h12a2) { ok('изпратено и без отметка → няма „… чака отговор"', note(h12a2).indexOf('чака') < 0, note(h12a2)); h12a2.close(); }
+    const h12s = await bul([], L1('sent_sap'));
+    if (h12s) { ok('изпратено SAP → брояч 0', h12s.w.bulAutoPending['stock-diff'] === 0, String(h12s.w.bulAutoPending['stock-diff'])); h12s.close(); }
+    /* б) 'return' без отговор → ⏳ 1. */
+    const h12b = await bul([], L1('return'));
+    if (h12b) { ok('връщане без отговор → „⏳ 1 ред чака отговор"', note(h12b) === '⏳ 1 ред чака отговор', note(h12b)); h12b.close(); }
+    /* в) 'return' + wrong_barcode / similar_item → не е ход на обекта. */
+    const h12c = await bul([comp()], L1('return', 'wrong_barcode'));
+    if (h12c) {
+      ok('връщане + wrong_barcode → брояч 0', h12c.w.bulAutoPending['stock-diff'] === 0, String(h12c.w.bulAutoPending['stock-diff']));
+      ok('и отметнат → „✓ от Разлики", без „⏳"', note(h12c) === '✓ от Разлики', note(h12c));
+      h12c.close();
+    }
+    const h12d = await bul([], L1('return', 'similar_item'));
+    if (h12d) { ok('връщане + similar_item → няма „… чака отговор"', note(h12d).indexOf('чака') < 0, note(h12d)); h12d.close(); }
+    /* г) категорията не изключва ВСИЧКО. */
+    const h12e = await bul([], L1('return', 'undelivered'));
+    if (h12e) { ok('връщане + undelivered → „⏳ 1 ред чака отговор"', note(h12e) === '⏳ 1 ред чака отговор', note(h12e)); h12e.close(); }
   }
 
   report();

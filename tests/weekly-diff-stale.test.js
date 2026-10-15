@@ -10,11 +10,25 @@
      · междускладови — брои се РЕДЪТ. Една бланка носи пет артикула в пет
        различни състояния и „докладът" не казва нищо.
 
-   Пет състояния влизат в три колони, групирани по СТРАНА:
+   Междускладовите редове влизат в три колони, групирани по СТРАНА:
      чака склада = няма отговор | „ще изпратя" | „върни" + обектът е готов
-                   със SAP-а (стоката пътува назад към склада)
-     чака обекта = складът е отговорил, обектът мълчи | „няма наличност"
-   Всичко друго (обектът е приел) е разчистено и не се брои никъде.
+                   със SAP-а (стоката пътува назад към склада) | „няма
+                   наличност" (от 14.10.2026)
+     чака обекта = diffLineWaitsStore() от shared.js (от 14.10.2026):
+                   „върни", обектът мълчи, без wrong_barcode / similar_item
+     на път      = „изпратено" / „изпратено SAP", обектът още не е приел
+                   (от 14.10.2026, решение Б: имейлът гони застояли
+                   разлики, не оценява обекта — редът не изчезва)
+   Не се брои: обектът е приел, приключен ред и „върни" по категория, която
+   чака ЦО (стъпка 2). Сборът на колоните = броя на чакащите редове.
+   Мутационна проверка (14.10.2026) на diffLineWaitsStore: „sent пак брои"
+   и „категорията не се изключва" събарят ТОЗИ тест; „received брои" — НЕ,
+   и това е вярно: report.js пропуска приключения ред ПРЕДИ да извика
+   правилото, тоест мутантът е недостижим оттук. Него го хваща
+   stock-diff-auto-complete.test.js (§9 и §10).
+   Мутационна проверка (14.10.2026) на колоните в report.js: „sent
+   изчезва", „no_stock изчезва" и „sent пак е на обекта" — и трите събарят
+   теста.
 
    Часовата зона е UTC НАРОЧНО. Възрастта се мери в цели дни между две
    полунощи; при зона с лятно/зимно време разликата е 23 или 25 часа два
@@ -88,9 +102,13 @@ const ROWS = [
   row('R5', 'Троян'),                                                   /* няма отговор → склада */
   row('R5', 'Троян', { warehouse_response: 'will_send' }),              /* ще изпратя → склада */
   row('R5', 'Троян', { warehouse_response: 'return', store_response: 'sap_done' }), /* връща се → склада */
-  row('R5', 'Троян', { warehouse_response: 'sent' }),                   /* изпратено, обектът мълчи → обекта */
+  row('R5', 'Троян', { warehouse_response: 'sent' }),                   /* изпратено → на път (14.10) */
+  row('R5', 'Троян', { warehouse_response: 'sent_sap' }),               /* изпратено SAP → на път (14.10) */
   row('R5', 'Троян', { warehouse_response: 'return' }),                 /* върни, обектът мълчи → обекта */
-  row('R5', 'Троян', { warehouse_response: 'sent', store_response: 'no_stock' }), /* няма наличност → обекта */
+  row('R5', 'Троян', { warehouse_response: 'return', difference_category: 'undelivered' }), /* категорията не изключва всичко → обекта */
+  row('R5', 'Троян', { warehouse_response: 'return', difference_category: 'wrong_barcode' }), /* чака ЦО → никъде (14.10) */
+  row('R5', 'Троян', { warehouse_response: 'return', difference_category: 'similar_item' }),  /* чака ЦО → никъде (14.10) */
+  row('R5', 'Троян', { warehouse_response: 'sent', store_response: 'no_stock' }), /* няма наличност → склада (14.10) */
   row('R5', 'Троян', { warehouse_response: 'sent', store_response: 'accepted' }), /* разчистено → никъде */
   row('R5', 'Троян', { warehouse_response: null, status: 'received' }), /* прието → никъде */
   row('R6', 'Петрич'),
@@ -155,16 +173,26 @@ const names = ds => (ds && ds.byStore || []).map(g => g.store);
 
       /* Троян: трите състояния „на склада" и трите „на обекта". */
       const tr = m['Троян'] || {};
-      ok('Троян: чака склада 3 (няма отговор + ще изпратя + върни/SAP готов)',
-        tr.warehouse === 3, JSON.stringify(tr));
-      ok('Троян: чака обекта 3 (изпратено + върни без отговор + няма наличност)',
-        tr.storeSide === 3, JSON.stringify(tr));
+      ok('Троян: чака склада 4 (няма отговор + ще изпратя + върни/SAP готов + няма наличност)',
+        tr.warehouse === 4, JSON.stringify(tr));
+      ok('Троян: чака обекта 2 (върни без отговор + върни/undelivered; не изпратено, не SAP, не ЦО, не няма наличност)',
+        tr.storeSide === 2, JSON.stringify(tr));
+      ok('Троян: на път 2 (изпратено + изпратено SAP без отговор)',
+        tr.transit === 2, JSON.stringify(tr));
+      /* Сборът на колоните = чакащите редове на Троян, преброени ОТ ФИКСТУРАТА:
+         всичко без приключените, без приетите и без двете категории на ЦО.
+         Хваща ред, който тихо изчезва от таблицата. */
+      const pend = ROWS.filter(x => x.report_id === 'R5' && x.status !== 'received' &&
+        x.store_response !== 'accepted' && x.difference_category !== 'wrong_barcode' &&
+        x.difference_category !== 'similar_item').length;
+      ok('сборът на колоните = чакащите редове (' + pend + ')',
+        pend === 8 && tr.warehouse + tr.storeSide + tr.transit === pend, JSON.stringify(tr));
       ok('Троян: чака контролинг 1 (сторната по грешен прием)',
         tr.control === 1, JSON.stringify(tr));
       ok('приетият ред (status=received) НЕ се брои никъде',
-        tr.warehouse + tr.storeSide === 6, JSON.stringify(tr));
+        tr.warehouse + tr.storeSide + tr.transit === 8, JSON.stringify(tr));
       ok('разчистеният ред (обектът е приел) също не се брои',
-        tr.warehouse + tr.storeSide === 6, JSON.stringify(tr));
+        tr.warehouse + tr.storeSide + tr.transit === 8, JSON.stringify(tr));
 
       /* Враца: доклад без нито един ред пак чака контролинга. */
       ok('Враца: доклад без редове се брои', m['Враца'] && m['Враца'].control === 1,
@@ -172,8 +200,9 @@ const names = ds => (ds && ds.byStore || []).map(g => g.store);
 
       ok('общо: контролинг 5 (2 Кърджали + 1 Троян + 1 Враца + 1 Бургас)',
         ds.total.control === 5, JSON.stringify(ds.total));
-      ok('общо: чака склада 3', ds.total.warehouse === 3, JSON.stringify(ds.total));
-      ok('общо: чака обекта 3', ds.total.storeSide === 3, JSON.stringify(ds.total));
+      ok('общо: чака склада 4', ds.total.warehouse === 4, JSON.stringify(ds.total));
+      ok('общо: чака обекта 2', ds.total.storeSide === 2, JSON.stringify(ds.total));
+      ok('общо: на път 2', ds.total.transit === 2, JSON.stringify(ds.total));
     }
     h.close();
   }
@@ -260,9 +289,9 @@ const names = ds => (ds && ds.byStore || []).map(g => g.store);
       /select=id,store_name,direction,reviewed,created_at&order=id.asc&limit=1000&offset=0$/.test(snap[0]), snap.join(' | '));
     ok('една заявка към stock_differences, без прозорец',
       dsq.length === 1 && dsq[0].indexOf('created_at=') < 0, dsq.join(' | '));
-    ok('и носи точно нужните пет колони',
+    ok('и носи точно нужните шест колони (с difference_category от 14.10)',
       dsq.length === 1 &&
-      /select=report_id,store_name,status,warehouse_response,store_response&order=id.asc&limit=1000&offset=0$/.test(dsq[0]),
+      /select=report_id,store_name,status,warehouse_response,store_response,difference_category&order=id.asc&limit=1000&offset=0$/.test(dsq[0]),
       dsq.join(' | '));
     ok('една заявка за прага', aps.length === 1, aps.join(' | '));
     h.close();
@@ -275,7 +304,7 @@ const names = ds => (ds && ds.byStore || []).map(g => g.store);
     const html = h.w.reportDiffStaleHtml(c);
     ok('заглавието носи прага', html.indexOf('⏳ Необработени разлики над 3 дни') >= 0,
       html.slice(0, 200));
-    ['Обект', 'чака контролинг', 'чака склада', 'чака обекта', 'най-стар (дни)']
+    ['Обект', 'чака контролинг', 'чака склада', 'чака обекта', 'на път', 'най-стар (дни)']
       .forEach(col => ok('колона „' + col + '"', html.indexOf(col) >= 0));
     ok('има ред „Общо"', html.indexOf('>Общо<') >= 0, html.slice(-700));
     ok('редът за прага сочи ключа',
@@ -287,6 +316,14 @@ const names = ds => (ds && ds.byStore || []).map(g => g.store);
     const kardzh = trs.find(t => t.indexOf('Кърджали') >= 0) || '';
     ok('Троян (20 дни) е червен', /#FDEEEA/.test(troyan) && /#C0392B/.test(troyan),
       troyan.slice(0, 260));
+    /* Колоните в РЕДА на заглавието: контролинг 1, склада 4, обекта 2, на път 2. */
+    const cells = (troyan.match(/<td[^>]*>([\s\S]*?)<\/td>/g) || []).map(c => c.replace(/<[^>]+>/g, '').trim());
+    ok('редът на Троян: 6 клетки, „на път" = 2 след „чака обекта" = 2',
+      cells.length === 6 && cells[1] === '1' && cells[2] === '4' && cells[3] === '2' && cells[4] === '2',
+      JSON.stringify(cells));
+    const foot = trs.find(t => t.indexOf('>Общо<') >= 0) || '';
+    const fcells = (foot.match(/<td[^>]*>([\s\S]*?)<\/td>/g) || []).map(c => c.replace(/<[^>]+>/g, '').trim());
+    ok('редът „Общо": 6 клетки, „на път" = 2', fcells.length === 6 && fcells[4] === '2', JSON.stringify(fcells));
     ok('Кърджали (10 дни) НЕ е червен', !/#FDEEEA/.test(kardzh) && !/#C0392B/.test(kardzh),
       kardzh.slice(0, 260));
 

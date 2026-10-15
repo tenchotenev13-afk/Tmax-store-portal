@@ -160,6 +160,19 @@ function envReport(opts, repo) {
 }
 const weekly = (h, scope) => new Promise(res => { h.w.collectWeeklyReportData(res, scope); });
 
+/* „⏳ Необработени разлики над N дни" се изрязва и от отчета, и от
+   фикстурата: от 14.10.2026 таблицата има колона „на път" (решение Б на
+   Тенчо) и се пази от tests/weekly-diff-stale.test.js. Маркерите са едни и
+   същи в старата и в новата версия; липсва ли някой или се повтаря — null,
+   тоест сравнението пада, вместо тихо да мине. */
+function withoutDiffStale(s) {
+  const a = '<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:6px;">⏳ Необработени разлики над';
+  const b = '(app_settings.diff_stale_days)</div></div>';
+  if (typeof s !== 'string' || s.split(a).length !== 2 || s.split(b).length !== 2) return null;
+  const i = s.indexOf(a), j = s.indexOf(b, i);
+  if (j < 0) return null;
+  return s.slice(0, i) + s.slice(j + b.length);
+}
 (async function () {
 
   if (process.env.GEN_OLD_FIXTURE) {
@@ -343,10 +356,12 @@ const weekly = (h, scope) => new Promise(res => { h.w.collectWeeklyReportData(re
     const sec = h.w.reportTransfersStaleHtml(data.cross);
     ok('новата секция е в отчета точно веднъж', sec.length > 0 && html.split(sec).length === 2);
     const i = html.indexOf(sec);
-    const rest = html.slice(0, i) + html.slice(i + sec.length);
-    const before = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
-    ok('фикстурата отпреди промяната я има', !!before);
-    if (before) {
+    const rest = withoutDiffStale(html.slice(0, i) + html.slice(i + sec.length));
+    const before0 = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
+    ok('фикстурата отпреди промяната я има', !!before0);
+    const before = withoutDiffStale(before0);
+    ok('таблицата „Необработени разлики" е изрязана и от двете (точно веднъж)', !!before && !!rest);
+    if (before && rest) {
       let at = -1;
       if (rest !== before) { for (let k = 0; k < Math.max(rest.length, before.length); k++) if (rest[k] !== before[k]) { at = k; break; } }
       ok('целият отчет без новата секция = отчетът отпреди (' + before.length + ' знака)', rest === before,

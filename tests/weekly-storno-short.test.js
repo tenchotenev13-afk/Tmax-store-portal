@@ -120,6 +120,19 @@ const cross = (h, scope) => new Promise(res => { h.w.collectCrossModuleWeeklySum
 
 /* Отчетът без секцията на сторната: изрязва ТОЧНИЯ HTML на секцията
    (веднъж) — всичко друго остава байт по байт. */
+/* „⏳ Необработени разлики над N дни" се изрязва и от отчета, и от
+   фикстурата: от 14.10.2026 таблицата има колона „на път" (решение Б на
+   Тенчо) и се пази от tests/weekly-diff-stale.test.js. Маркерите са едни и
+   същи в старата и в новата версия; липсва ли някой или се повтаря — null,
+   тоест сравнението пада, вместо тихо да мине. */
+function withoutDiffStale(s) {
+  const a = '<div style="margin-top:14px;"><div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:6px;">⏳ Необработени разлики над';
+  const b = '(app_settings.diff_stale_days)</div></div>';
+  if (typeof s !== 'string' || s.split(a).length !== 2 || s.split(b).length !== 2) return null;
+  const i = s.indexOf(a), j = s.indexOf(b, i);
+  if (j < 0) return null;
+  return s.slice(0, i) + s.slice(j + b.length);
+}
 function withoutSection(html, sec) {
   const i = html.indexOf(sec);
   if (!sec || i < 0 || html.indexOf(sec, i + 1) >= 0) return null;
@@ -228,9 +241,12 @@ function withoutSection(html, sec) {
        ОСТАНАЛОТО около сторната, новата секция се пази в
        transfers-stale.test.js. */
     const ts = h.w.reportTransfersStaleHtml ? h.w.reportTransfersStaleHtml(data.cross) : '';
-    const rest = ts ? withoutSection(withoutSection(html, sec), ts) : withoutSection(html, sec);
-    const before = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
-    ok('фикстурата отпреди промяната я има', !!before);
+    const rest0 = ts ? withoutSection(withoutSection(html, sec), ts) : withoutSection(html, sec);
+    const before0 = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
+    ok('фикстурата отпреди промяната я има', !!before0);
+    const before = withoutDiffStale(before0);
+    const rest = withoutDiffStale(rest0);
+    ok('таблицата „Необработени разлики" е изрязана и от двете (точно веднъж)', !!before && !!rest);
     if (before && rest) {
       const same = rest === before;
       let at = -1;

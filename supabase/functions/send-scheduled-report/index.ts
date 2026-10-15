@@ -1,6 +1,16 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v53 (14.10.2026) — ЕДНО нещо: „Необработени разлики над N дни" по новото
+      правило за хода на обекта, без да губи редове. „чака обекта" брои по
+      diffLineWaitsStore() (копие от shared.js, огледало на SQL
+      stock_diff_store_done от миграция 20261014111456): само „върни" без
+      отговор на обекта, без wrong_barcode / similar_item. „Няма наличност"
+      отива в „чака склада"; „изпратено"/„изпратено SAP" без отговор — в нова
+      колона „на път". Четенето на stock_differences тегли и
+      difference_category. Заковано в tests/report-edge-sync.test.js и
+      tests/weekly-diff-stale.test.js.
+
    v52 (12.10.2026) — ЕДНО нещо: още три четения на страници по 1000
       (reportGetAll, order=id.asc) — stock_returns (без филтър, 527+ и расте),
       kasa_storno по created_at в седмицата и kasa_storno по storno_date
@@ -710,6 +720,19 @@ function esc(s: any){ return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&
    на атрибут: кавичка вътре в src="…" затваря атрибута и всичко след нея
    се чете като markup. Копие на escAttr от shared.js. */
 function escAttr(s: any){ return esc(s).replace(/"/g,'&quot;'); }
+/* Копие на diffLineWaitsStore в shared.js (14.10.2026) — колоната „чака
+   обекта" в „Необработени разлики над N дни". Огледало на SQL
+   stock_diff_store_done, клон 1: само 'return' без отговор на обекта,
+   неприключен ред, без wrong_barcode / similar_item. Сменя ли се там,
+   сменя се и тук (tests/report-edge-sync.test.js). */
+function diffLineWaitsStore(l: any){
+  if(!l) return false;
+  if(String(l.status||'')==='received') return false;
+  if(l.store_response) return false;
+  if(String(l.warehouse_response||'')!=='return') return false;
+  var c=String(l.difference_category||'');
+  return c!=='wrong_barcode' && c!=='similar_item';
+}
 /* Копие от bulletin.js — ползва се от reportSpanPendingHtml(). Без него
    седмичният отчет пада с ReferenceError, щом има задача със срок в по-късна
    седмица (04.10.2026, W40). */
@@ -2775,7 +2798,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        Сверено на 23.09.2026: 552 реда, нула без доклад и нула, чийто
        store_name се разминава с този на доклада. Затова обектът долу се
        взима от доклада — един котва за трите колони. */
-    reportGetAll('stock_differences','select=report_id,store_name,status,warehouse_response,store_response&order=id.asc'),
+    reportGetAll('stock_differences','select=report_id,store_name,status,warehouse_response,store_response,difference_category&order=id.asc'),
     sbGet('app_settings','key=eq.diff_stale_days&select=key,value&limit=1'),
     /* 🕒 „Трансфери — застояли над N дни" (етап 4, 30.09.2026) — моментна
        снимка, само в седмичния отчет (таб „Днес" няма седмица и не показва
@@ -3067,11 +3090,19 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
 
 
     /* ⏳ НЕОБРАБОТЕНИ РАЗЛИКИ НАД N ДНИ
-       Кой чака кого, към момента на изпращането. Три колони, пет състояния —
+       Кой чака кого, към момента на изпращането. Четири колони —
        състоянията се групират по СТРАНА, не по буквата на отговора:
          чака склада  = няма отговор | „ще изпратя" | „върни" + обектът вече
                         е направил SAP-а (стоката пътува назад към склада)
-         чака обекта  = складът е отговорил, обектът мълчи | „няма наличност"
+                        | „няма наличност" (ходът е на склада — същото като
+                        в stock_diff_store_done; от 14.10.2026)
+         чака обекта  = diffLineWaitsStore() (копие от shared.js, 14.10.2026):
+                        „върни", обектът мълчи, без wrong_barcode /
+                        similar_item
+         на път       = „изпратено" / „изпратено SAP", обектът още не е
+                        приел (от 14.10.2026, решение Б на Тенчо: имейлът
+                        гони застояли разлики, не оценява обекта — редът не
+                        бива да изчезва, само да не е „на обекта")
        Прагът е app_settings 'diff_stale_days' (образецът е returns_stale_days
        точно отгоре); липсващ, празен или нечислов → 3. Ключът се сверява и в
        JS, защото 'първият ред' спира да значи нещо, щом ключовете станат
@@ -3102,7 +3133,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     var dsMap = {}, dsList = [];
     var dsBucket = function(store, age){
       var g = dsMap[store];
-      if (!g) { g = { store: store, control: 0, warehouse: 0, storeSide: 0, oldest: 0 }; dsMap[store] = g; dsList.push(g); }
+      if (!g) { g = { store: store, control: 0, warehouse: 0, storeSide: 0, transit: 0, oldest: 0 }; dsMap[store] = g; dsList.push(g); }
       if (age > g.oldest) g.oldest = age;
       return g;
     };
@@ -3123,24 +3154,28 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
       if (d.status === 'received') return;
       var wr = d.warehouse_response, sr = d.store_response;
       var noWr = (wr === null || wr === undefined || wr === '');
-      var noSr = (sr === null || sr === undefined || sr === '');
-      if (noWr || wr === 'will_send' || (wr === 'return' && sr === 'sap_done')) {
+      if (noWr || wr === 'will_send' || (wr === 'return' && sr === 'sap_done') || sr === 'no_stock') {
         dsBucket(m.store, m.age).warehouse++;
-      } else if (((wr === 'sent' || wr === 'sent_sap' || wr === 'return') && noSr) || sr === 'no_stock') {
+      } else if (diffLineWaitsStore(d)) {
         dsBucket(m.store, m.age).storeSide++;
+      } else if ((wr === 'sent' || wr === 'sent_sap') && !sr) {
+        dsBucket(m.store, m.age).transit++;
       }
-      /* Всичко друго (напр. обектът е приел) е разчистено и не се брои. */
+      /* Всичко друго (напр. обектът е приел) е разчистено и не се брои.
+         Единственото чакащо без колона: „върни" + wrong_barcode / similar_item
+         без отговор — чака ЦО (стъпка 2); на 14.10.2026 такива редове 0. */
     });
     /* Обект без нито едно чакане изобщо няма кофа — dsBucket се вика само от
        броящите клонове, тоест филтър „махни празните" не е нужен. */
     dsList.sort(function(a,b){
       return b.oldest - a.oldest || String(a.store).localeCompare(String(b.store));
     });
-    var dsTotal = { control: 0, warehouse: 0, storeSide: 0, oldest: 0 };
+    var dsTotal = { control: 0, warehouse: 0, storeSide: 0, transit: 0, oldest: 0 };
     dsList.forEach(function(g){
       dsTotal.control += g.control;
       dsTotal.warehouse += g.warehouse;
       dsTotal.storeSide += g.storeSide;
+      dsTotal.transit += g.transit;
       if (g.oldest > dsTotal.oldest) dsTotal.oldest = g.oldest;
     });
     var diffStale = { days: diffStaleDays, byStore: dsList, total: dsTotal };
@@ -3547,6 +3582,7 @@ function reportDiffStaleHtml(cross){
     '<th style="' + TH + 'text-align:right;">чака контролинг</th>' +
     '<th style="' + TH + 'text-align:right;">чака склада</th>' +
     '<th style="' + TH + 'text-align:right;">чака обекта</th>' +
+    '<th style="' + TH + 'text-align:right;">на път</th>' +
     '<th style="' + TH + 'text-align:right;">най-стар (дни)</th></tr>';
   var body = ds.byStore.map(function(g){
     var warn = g.oldest > RED_DAYS;
@@ -3555,15 +3591,17 @@ function reportDiffStaleHtml(cross){
       '<td style="' + TD + 'text-align:right;">' + num(g.control) + '</td>' +
       '<td style="' + TD + 'text-align:right;">' + num(g.warehouse) + '</td>' +
       '<td style="' + TD + 'text-align:right;">' + num(g.storeSide) + '</td>' +
+      '<td style="' + TD + 'text-align:right;">' + num(g.transit) + '</td>' +
       '<td style="' + TD + 'text-align:right;font-weight:' + (warn ? '800' : '600') + ';color:' + (warn ? '#C0392B' : '#6B7280') + ';">' + g.oldest + '</td>' +
       '</tr>';
   }).join('');
-  var t = ds.total || { control: 0, warehouse: 0, storeSide: 0, oldest: 0 };
+  var t = ds.total || { control: 0, warehouse: 0, storeSide: 0, transit: 0, oldest: 0 };
   var TDT = 'padding:6px 8px;font-size:12px;font-weight:800;color:#1E2761;border-top:2px solid #e2e8f0;';
   var foot = '<tr><td style="' + TDT + '">Общо</td>' +
     '<td style="' + TDT + 'text-align:right;">' + t.control + '</td>' +
     '<td style="' + TDT + 'text-align:right;">' + t.warehouse + '</td>' +
     '<td style="' + TDT + 'text-align:right;">' + t.storeSide + '</td>' +
+    '<td style="' + TDT + 'text-align:right;">' + t.transit + '</td>' +
     '<td style="' + TDT + 'text-align:right;color:' + (t.oldest > RED_DAYS ? '#C0392B' : '#1E2761') + ';">' + t.oldest + '</td></tr>';
   return '<div style="margin-top:14px;">' +
     '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:6px;">⏳ Необработени разлики над ' + thr + ' дни</div>' +

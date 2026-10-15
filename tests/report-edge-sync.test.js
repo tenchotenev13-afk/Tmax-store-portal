@@ -118,6 +118,10 @@ const COPIED_HELPERS = [
   { fn: 'recurringApplyVersion', from: SHARED },
   { fn: 'recurringApplyVersions', from: SHARED },
   { fn: 'esc', from: SHARED },
+  /* Колоната „чака обекта" в „Необработени разлики над N дни" (14.10.2026) —
+     огледало на SQL stock_diff_store_done. Разминае ли се копието, писмото
+     оценява обектите по друго правило от портала и от отметката. */
+  { fn: 'diffLineWaitsStore', from: SHARED },
   /* fmtDate2 — вика го reportSpanPendingHtml; липсата му събори седмичния
      отчет на 04.10.2026 (ReferenceError). */
   { fn: 'fmtDate2', from: BULLETIN },

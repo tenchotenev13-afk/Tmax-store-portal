@@ -919,6 +919,29 @@ function autoCompleteActive(linkedModule, todayISO){
   if(!from) return true;
   return (todayISO || today()) >= from;
 }
+/* Чака ли РЕДЪТ от междускладова разлика действие на ОБЕКТА — правилото, по
+   което се ОЦЕНЯВА обектът. Огледало на SQL stock_diff_store_done, клон 1
+   (миграция 20261014111456, 14.10.2026): само „връщане" без отговор на
+   обекта, неприключен ред, категорията не е wrong_barcode / similar_item.
+   'sent' / 'sent_sap' не са ход на обекта — стоката е на път; двете
+   категории чакат ЦО (ZPACK/баркод). Сменя ли се едното, сменя се и другото.
+   Бланката (непрегледана, interstore) и размените се проверяват от
+   извикващия — тук е само редът.
+   Ползват я: надписът „⏳ N реда чакат отговор" в Бюлетина и колоната
+   „чака обекта" в „Необработени разлики над N дни" (report.js + копие в
+   send-scheduled-report). НАРОЧНО НЕ я ползват (решение на Тенчо, 14.10):
+   sdLineWaitsStore / sdMyWaitingLines (бутонът и банерът „📝 Чакат моя
+   отговор") и sdUnreviewedCountFor (балончето на таба Разлики) — там
+   'sent' остава, защото обектът трябва да отговори „прието", когато стоката
+   дойде. Те казват „какво да направя", не „изпълнил ли съм". */
+function diffLineWaitsStore(l){
+  if(!l) return false;
+  if(String(l.status||'')==='received') return false;
+  if(l.store_response) return false;
+  if(String(l.warehouse_response||'')!=='return') return false;
+  var c=String(l.difference_category||'');
+  return c!=='wrong_barcode' && c!=='similar_item';
+}
 function fmtDate(d){if(!d||d==='—')return'—';var p=String(d).split('-');return p.length===3?p[2]+'.'+p[1]+'.'+p[0]:d;}
 function v(id){var el=document.getElementById(id);return el?(el.value||'').trim():'';}
 function closeModal(id){var el=document.getElementById(id);if(el)el.classList.remove('open');}

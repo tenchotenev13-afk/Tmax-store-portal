@@ -1410,7 +1410,7 @@ function bulLoadDiffPending(){
      онзи списък расте с броя бланки (засадата от sdRefreshTabBadge). */
   Promise.all([
     sbGet('stock_differences',
-      'select=id,status,warehouse_response,store_response,differences_reports!inner(id,store_name,reviewed,direction)'+
+      'select=id,status,warehouse_response,store_response,difference_category,differences_reports!inner(id,store_name,reviewed,direction)'+
       '&differences_reports.store_name=eq.'+encodeURIComponent(store)+
       '&differences_reports.reviewed=eq.false'+
       '&differences_reports.direction=eq.interstore'),
@@ -1438,16 +1438,12 @@ function bulLoadDiffPending(){
     renderBulletin();
   });
 }
-/* Чака ли редът отговор ОТ ОБЕКТА. Дословно условието от базата:
-   'will_send' не се брои (стоката още не е тръгнала), празен отговор на склада
-   не се брои (чака СКЛАДА), 'no_stock' вече е отговор на обекта, приключен ред
-   не се брои. */
+/* Чака ли редът отговор ОТ ОБЕКТА. От 14.10.2026 — общото правило
+   diffLineWaitsStore() от shared.js (огледало на stock_diff_store_done):
+   само 'return' без отговор, без wrong_barcode / similar_item. Затова
+   заявката горе тегли и difference_category. */
 function bulDiffLineWaitsStore(l){
-  if(!l) return false;
-  if(String(l.status||'')==='received') return false;
-  if(l.store_response) return false;
-  var w=String(l.warehouse_response||'');
-  return w==='sent' || w==='sent_sap' || w==='return';
+  return diffLineWaitsStore(l);
 }
 /* ═══════ ПОЛЕТО „ОПИСАНИЕ" ══════════════════════════════════════════════
    От 28.09.2026 е textarea, не input: описанията са по няколко изречения и в
