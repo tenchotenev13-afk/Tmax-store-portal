@@ -217,6 +217,14 @@ Netlify се ползва само за тестване/staging.
       прескочен"): `npm ci` в worktree-а или
       `NODE_PATH=<главното дърво>/node_modules node tests/run-all.js .` —
       второто само ЧЕТЕ от главното дърво.
+    - **Главното дърво не носи незавършена работа.** В него няма некомитнати
+      промени, untracked файлове и локални комити извън `origin/main`.
+      Всичко в ход стои в worktree-а на съответната сесия. Главното дърво се
+      обновява **единствено** с `git pull --ff-only`, без merge, rebase,
+      stash или reset. Ако `--ff-only` откаже, значи някой е писал в
+      главното дърво. Тогава се спира и се търси кой, а не се „оправя“.
+      Преди pull: `git status --porcelain` трябва да е празен и
+      `git rev-list --count origin/main..HEAD` трябва да е 0.
     - **Push:** `git fetch` → rebase върху `origin/main` → пълният пакет →
       `git push origin <sha>:main` на ТОЧНО проверения комит (по SHA, не
       `HEAD`). Мръдне ли `origin` междувременно — пак rebase и пак пакетът.
