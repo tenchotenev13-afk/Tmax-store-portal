@@ -41,6 +41,7 @@ const TESTS = [
   'revaluation.test.js',
   'revaluation-co.test.js',
   'revaluation-sap.test.js',
+  'revaluation-history.test.js',
   'revision-schedule.test.js',
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',

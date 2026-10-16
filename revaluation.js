@@ -253,6 +253,9 @@ function rvRender(){
   h += rvCampaignPickerHtml();
   if(rvIsCoViewer()){
     if(rvCoOpen) h += '<button class="btn-sm" onclick="rvCoBack()">← Към списъка на обектите</button>';
+    h += rvHistOpen
+      ? '<button class="btn-sm" onclick="rvHistClose()">← Към кампанията</button>'
+      : '<button class="btn-sm" onclick="rvHistOpenView()">📁 История</button>';
     if(c){
       h += '<button class="btn-sm" onclick="rvExportCampaign()">📥 Excel — кампания</button>';
       h += '<button class="btn-sm" onclick="rvMm41()">📄 MM41 — нови кодове</button>';
@@ -276,6 +279,7 @@ function rvRender(){
   if(rvShowSchedule && rvIsCO()) h += rvScheduleHtml();
   h += '</div>';
 
+  if(rvIsCoViewer() && rvHistOpen){ el.innerHTML = h + rvHistHtml(); return; }
   if(c && rvIsCoViewer() && !rvCoOpen){ el.innerHTML = h + rvOverviewHtml(); return; }
   if(!c || !rvStore){ el.innerHTML = h; return; }
 
@@ -1527,4 +1531,96 @@ function rvVk11(){
     XLSX.writeFile(wb, 'VK11-' + (no || 'obekt') + '-' + fromIso + '.xlsx');
   });
   return true;
+}
+
+/* ═══ „📁 История" за ЦО (16.10.2026) ═══════════════════════════════════════
+   Дърво като папки: Година → Кампания → Обект. Клик на папка само разгъва /
+   свива (rvHistToggle); клик на обект отваря СЪЩИЯ лист като от обзора
+   (rvPickCampaign + rvCoOpenStore). Данни: rvCampaigns (вече заредени) +
+   ЕДНА заявка за всички бланки и ЕДНА за id-тата на редовете (броят по
+   submission_id се смята тук, без N заявки). Непълни данни → червен toast,
+   дървото не се показва. Нищо ново в схемата. */
+var rvHistOpen = false;
+var rvHistExp = {};        /* 'y:2026' / 'c:<campaign_id>' → разгъната */
+var rvHistSubs = null;     /* бланките; null = не са заредени / непълни */
+var rvHistCounts = {};     /* submission_id → брой редове */
+var rvHistSeq = 0;
+
+function rvHistOpenView(){
+  if(!rvIsCoViewer()) return Promise.resolve(false);
+  rvHistOpen = true; rvCoOpen = false;
+  var seq = ++rvHistSeq;
+  rvHistSubs = null;
+  return Promise.all([
+    sbGetAll('revaluation_submissions', 'select=id,campaign_id,store_name,status,no_items,submitted_at,processed_at,processed_by&order=store_name.asc,id.asc'),
+    sbGetAll('revaluation_items', 'select=id,submission_id&order=id.asc')
+  ]).then(function(r){
+    if(seq !== rvHistSeq) return false;
+    if(r[0].partial || r[1].partial){
+      toast('Историята не се зареди изцяло — дървото не е показано', '#dc2626');
+      rvHistSubs = null; rvRender(); return false;
+    }
+    rvHistSubs = r[0];
+    rvHistCounts = {};
+    r[1].forEach(function(it){ rvHistCounts[it.submission_id] = (rvHistCounts[it.submission_id] || 0) + 1; });
+    /* по подразбиране е разгъната последната година */
+    var years = rvHistYears();
+    if(years.length && !Object.keys(rvHistExp).some(function(k){ return k.indexOf('y:') === 0; })) rvHistExp['y:' + years[0]] = true;
+    rvRender(); return true;
+  });
+}
+function rvHistClose(){ rvHistOpen = false; return rvLoadOverview(); }
+function rvHistToggle(key){ rvHistExp[key] = !rvHistExp[key]; rvRender(); }
+function rvHistOpenStore(campaignId, store){
+  rvHistOpen = false;
+  return rvPickCampaign(campaignId).then(function(){ return rvCoOpenStore(store); });
+}
+function rvHistYears(){
+  var y = {};
+  rvCampaigns.forEach(function(c){ if(c.starts_on) y[String(c.starts_on).slice(0, 4)] = 1; });
+  return Object.keys(y).sort().reverse();
+}
+function rvHistCampaignState(c){
+  var b = rvBucket(c);
+  return b === 'active' ? 'активна' : b === 'upcoming' ? 'предстояща' : (c.status === 'closed' ? 'затворена' : 'изтекла');
+}
+function rvHistHtml(){
+  if(!rvHistSubs) return '<div class="card" id="rv-hist" style="color:#94a3b8;">⏳ Зареждане на историята…</div>';
+  var COL = { none: '#94a3b8', no: '#6d28d9', processed: '#1e40af', submitted: '#166534', draft: '#854d0e' };
+  var subsBy = {};
+  rvHistSubs.forEach(function(sb){ (subsBy[sb.campaign_id] = subsBy[sb.campaign_id] || []).push(sb); });
+  var ROW = 'cursor:pointer;padding:4px 6px;border-radius:6px;';
+  var h = '<div class="card" id="rv-hist"><div style="font-weight:700;margin-bottom:6px;">📁 История на преоценките</div>';
+  var years = rvHistYears();
+  if(!years.length) h += '<div style="color:#94a3b8;">Няма кампании.</div>';
+  years.forEach(function(y){
+    var yk = 'y:' + y, yOpen = !!rvHistExp[yk];
+    var camps = rvCampaigns.filter(function(c){ return String(c.starts_on).slice(0, 4) === y; })
+      .sort(function(a, b){ return String(b.starts_on).localeCompare(String(a.starts_on)); });
+    h += '<div id="rv-hist-y-' + y + '" data-k="' + yk + '" onclick="rvHistToggle(this.dataset.k)" style="' + ROW + 'font-weight:700;">' +
+      (yOpen ? '▾ ' : '▸ ') + '📁 ' + y + ' <span style="color:#94a3b8;font-weight:400;font-size:12px;">(' + camps.length + ')</span></div>';
+    if(!yOpen) return;
+    camps.forEach(function(c){
+      var ck = 'c:' + c.id, cOpen = !!rvHistExp[ck];
+      var list = subsBy[c.id] || [];
+      var done = list.filter(function(sb){ return sb.status === 'processed'; }).length;
+      h += '<div id="rv-hist-c-' + escAttr(c.id) + '" data-k="' + escAttr(ck) + '" onclick="rvHistToggle(this.dataset.k)" style="' + ROW + 'margin-left:18px;">' +
+        (cOpen ? '▾ ' : '▸ ') + '📁 ' + esc(c.title) + ' · ' + esc(fmtDate(c.starts_on).slice(0, 5)) + '–' + esc(fmtDate(c.ends_on)) + ' · ' +
+        esc((RV_KIND_LABEL[c.kind] || c.kind).toLowerCase()) + ' · ' + esc(rvHistCampaignState(c)) + ' ' +
+        (list.length
+          ? '<span class="rv-hist-cnt" style="background:#f1f5f9;color:#475569;border-radius:20px;padding:1px 8px;font-size:11px;">' + list.length + (list.length === 1 ? ' обект' : ' обекта') + ' · ' + done + ' обработени</span>'
+          : '<span class="rv-hist-cnt" style="color:#94a3b8;font-size:12px;">(няма подадени)</span>') + '</div>';
+      if(!cOpen) return;
+      list.forEach(function(sb){
+        var st = rvCoStatus(sb);
+        var n = rvHistCounts[sb.id] || 0;
+        var tail = sb.no_items ? ' · нямаме за преоценка'
+          : ' · ' + n + (n === 1 ? ' ред' : ' реда') + (sb.status === 'processed' && sb.processed_at
+            ? ' · обработена ' + esc(fmtDate(String(sb.processed_at).slice(0, 10))) + (sb.processed_by ? ' от ' + esc(sb.processed_by) : '') : '');
+        h += '<div class="rv-hist-s" id="rv-hist-s-' + escAttr(sb.id) + '" data-c="' + escAttr(c.id) + '" data-s="' + escAttr(sb.store_name) + '" onclick="rvHistOpenStore(this.dataset.c,this.dataset.s)" style="' + ROW + 'margin-left:40px;">' +
+          '📄 <b>' + esc(sb.store_name) + '</b> · <span class="rv-hist-st" style="color:' + COL[st.key] + ';font-weight:600;">' + esc(st.key === 'draft' ? 'чернова' : st.txt) + '</span>' + tail + '</div>';
+      });
+    });
+  });
+  return h + '</div>';
 }
