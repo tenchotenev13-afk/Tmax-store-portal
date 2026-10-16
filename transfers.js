@@ -1080,6 +1080,50 @@ function tfSubmitReload(f) {
 
 /* ── Печат ───────────────────────────────────────────────────────────────── */
 
+/* Връзките на товара като текст — ЕДНО място за печата и за картата:
+   „КЗ Троян-0042 · ТЗ ×1 · Рекл. 1234 · СР 80477763". coNum: id → in_num;
+   skipUnknown — КЗ без номер (още не е дотеглен) се пропуска вместо „—". */
+function tfCargoLinks(c, coNum, skipUnknown) {
+  var links = [];
+  coNum = coNum || {};
+  (c.client_order_ids || []).forEach(function (id) {
+    if (coNum[id]) links.push('КЗ ' + coNum[id]);
+    else if (!skipUnknown) links.push('КЗ —');
+  });
+  if ((c.transport_order_ids || []).length) links.push('ТЗ ×' + c.transport_order_ids.length);
+  (c.claim_numbers || []).forEach(function (x) { links.push('Рекл. ' + x); });
+  if (c.goods_doc) links.push('СР ' + c.goods_doc);
+  return links;
+}
+/* Номерата на клиентските заявки за мета реда — кеш за сесията. Картата се
+   рисува веднага без КЗ; липсващите се дотеглят с една заявка и картата /
+   списъкът се дорисуват. Всяко id се пита най-много веднъж. */
+var tfCoNumCache = {};
+var tfCoNumAsked = {};
+function tfQueueCoNums(ids) {
+  var need = (ids || []).filter(function (id) { return id && !tfCoNumAsked[id]; });
+  if (!need.length) return null;
+  need.forEach(function (id) { tfCoNumAsked[id] = 1; });
+  return sbGet('client_orders', 'select=id,in_num&id=in.(' + need.join(',') + ')').then(function (rows) {
+    var got = 0;
+    (Array.isArray(rows) ? rows : []).forEach(function (r) { if (r && r.id && r.in_num) { tfCoNumCache[r.id] = r.in_num; got++; } });
+    if (got && tfView !== 'form') renderTransfersKeepFocus();
+  }).catch(function () {});
+}
+/* Сивият ред под заглавието на товара: забележката, после връзките.
+   Празно → нищо (без празен ред). Открито от колегите 16.10.2026 —
+   вписват ги, а ги виждаше само печатът. */
+function tfCargoMetaHtml(c) {
+  if (!c) return '';
+  var missing = (c.client_order_ids || []).filter(function (id) { return !tfCoNumCache[id]; });
+  if (missing.length) tfQueueCoNums(missing);
+  var parts = [];
+  if (c.note && String(c.note).trim()) parts.push(String(c.note).trim());
+  parts = parts.concat(tfCargoLinks(c, tfCoNumCache, true));
+  if (!parts.length) return '';
+  return '<div class="trf-cargo-meta" style="font-size:12px;color:#64748b;margin-top:2px;">' + escVal(parts.join(' · ')) + '</div>';
+}
+
 function printTransfer(id) {
   var t = tfFindTransfer(id);
   if (!t) return;
@@ -1133,11 +1177,7 @@ function renderTransferPrint(t, cargo, coNum) {
     '</table>';
 
   var rows = cargo.map(function (c, i) {
-    var links = [];
-    (c.client_order_ids || []).forEach(function (id) { links.push('КЗ ' + (coNum[id] || '—')); });
-    if ((c.transport_order_ids || []).length) links.push('ТЗ ×' + c.transport_order_ids.length);
-    (c.claim_numbers || []).forEach(function (x) { links.push('Рекл. ' + x); });
-    if (c.goods_doc) links.push('СР ' + c.goods_doc);
+    var links = tfCargoLinks(c, coNum);
     return '<tr>' +
       '<td>' + (i + 1) + '</td>' +
       '<td>' + escVal(tfKindLabel(c.kind)) + '</td>' +
@@ -1510,6 +1550,7 @@ function tfPendingHtml(q) {
       '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
         '<div><b>' + escVal(it.t.transfer_num) + '</b> · ' + escVal(tfModeLabel(it.t)) + ' · ' + escVal(tfRouteText(it.t)) +
         '<div style="font-size:13px;margin-top:2px;">' + escVal(tfCargoLabel(it.c, it.i)) + '</div>' +
+        tfCargoMetaHtml(it.c) +
         '<div class="trf-state" style="font-size:12px;color:#64748b;">' + escVal(tfCargoStateText(it.t, it.c, evs)) + '</div></div>' +
         '<div style="display:flex;gap:6px;align-items:flex-start;flex-wrap:wrap;">' +
           it.acts.map(function (a) { return tfActBtn(it.t, it.c, a); }).join('') +
@@ -1660,6 +1701,7 @@ function tfReshipHtml(q) {
     return '<div class="trf-reship-row" data-c="' + tfAttr(it.c.id) + '" style="border:1px solid #fde68a;border-radius:8px;padding:10px;margin-bottom:8px;background:#fffbeb;">' +
       '<div><b>' + escVal(it.t.transfer_num) + '</b> · ' + escVal(tfCargoLabel(it.c, it.i)) +
         ((it.c.transfer_points || []).length > 1 ? '<span style="font-size:12px;color:#64748b;"> · после през ' + escVal(it.c.transfer_points.slice(1).join(' → ')) + '</span>' : '') + '</div>' +
+      tfCargoMetaHtml(it.c) +
       '<div style="font-size:12px;color:#92400e;margin-top:2px;">⏸ разтоварен в ' + escVal(it.ev.store_name) + ' на ' + escVal(tfFmtTs(it.ev.created_at)) +
         ' · <b class="trf-wait" data-days="' + it.days + '">' + escVal(tfWaitText(it.days)) + '</b></div>' +
       '<div style="font-size:11px;color:#64748b;margin-top:2px;">Сложи го на нов транспорт или на минаващ бус — „➕ От чакащите" във формата.</div>' +
@@ -2135,6 +2177,7 @@ function renderTransferCard() {
       '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;">' +
         '<div><b>' + escVal(tfCargoLabel(c, i)) + '</b>' +
           ((c.transfer_points || []).length ? '<span style="font-size:12px;color:#64748b;"> · през ' + escVal(c.transfer_points.join(' → ')) + '</span>' : '') +
+          tfCargoMetaHtml(c) +
           '<div class="trf-state" style="font-size:12px;margin-top:2px;">' + tfCargoStateHtml(t, c, evs) + (open ? ' · <b style="color:#b91c1c;">⚠️ отворен проблем</b>' : '') + '</div>' +
           tfUnitStripHtml(t, c, evs) + tfChainRefsHtml(c) + '</div>' +
         '<div style="display:flex;gap:6px;flex-wrap:wrap;">' + acts.map(function (a) { return tfActBtn(t, c, a); }).join('') + '</div>' +
