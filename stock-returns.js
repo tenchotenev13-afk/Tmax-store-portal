@@ -620,8 +620,8 @@ function srModalHtml() {
 
   if (tab!=='complaint') {
     h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
-    '<div><label class="fl">Продукт</label><input class="fi" id="sr-product" value="'+esc(r.product_name||'')+'" placeholder="Наименование"></div>'+
-    '<div><label class="fl">SAP №</label><input class="fi" id="sr-sap" value="'+esc(r.sap_code||'')+'" placeholder="напр. 34989"></div>'+
+    '<div><label class="fl">Продукт</label><input class="fi" id="sr-product" value="'+escAttrVal(r.product_name||'')+'" placeholder="Наименование"></div>'+
+    '<div><label class="fl">SAP №</label><input class="fi" id="sr-sap" value="'+escAttrVal(r.sap_code||'')+'" placeholder="напр. 34989"></div>'+
     '<div><label class="fl">Количество</label><input type="number" step="0.001" class="fi" id="sr-qty" value="'+(r.quantity!=null?r.quantity:'')+'"></div>'+
     '</div>';
   }
@@ -629,7 +629,7 @@ function srModalHtml() {
   if (tab==='complaint') {
     h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
       '<div><label class="fl">Срок на годност</label><input type="date" class="fi" id="sr-expiry" value="'+(r.expiry_date||'')+'"></div>'+
-      '<div><label class="fl">Причина</label><input class="fi" id="sr-reason" value="'+esc(r.reason||'')+'" placeholder="напр. Рекламация - счупен продукт"></div>'+
+      '<div><label class="fl">Причина</label><input class="fi" id="sr-reason" value="'+escAttrVal(r.reason||'')+'" placeholder="напр. Рекламация - счупен продукт"></div>'+
       '</div>'+
       '<div style="font-size:11px;color:#94a3b8;margin-bottom:4px;">Полета от ERP импорт (по избор):</div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
@@ -669,7 +669,7 @@ function srModalHtml() {
     '</div>'+
 
     '<label class="fl">Изтеглена от/с куриер (номер на товарителница)</label>'+
-    '<input class="fi" id="sr-courier" value="'+esc(r.courier_info||'')+'" placeholder="напр. по буса на Кърджали към Сливен / Еконт 5300...">'+
+    '<input class="fi" id="sr-courier" value="'+escAttrVal(r.courier_info||'')+'" placeholder="напр. по буса на Кърджали към Сливен / Еконт 5300...">'+
 
     '<div id="sr-photo-hint" style="display:'+((r.status==='taken'||r.status==='completed')?'block':'none')+';background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:8px 10px;margin-bottom:6px;font-size:11.5px;color:#92400e;">'+srPhotoHintHtml(r.controller_comment)+'</div>'+
     '<label class="fl">Снимка на товарителница/документ</label>'+
@@ -686,15 +686,15 @@ function srModalHtml() {
     '</div>'+
 
     '<label class="fl">Коментар</label>'+
-    '<input class="fi" id="sr-cc" value="'+esc(r.control_comment||'')+'" placeholder="напр. ИЗД КИ"'+srCmtRoAttr(tab)+'>';
+    '<input class="fi" id="sr-cc" value="'+escAttrVal(r.control_comment||'')+'" placeholder="напр. ИЗД КИ"'+srCmtRoAttr(tab)+'>';
 
   h += '<label class="fl">Коментар Контролер</label>'+
-    '<input class="fi" id="sr-ctrl" value="'+esc(r.controller_comment||'')+'" placeholder="напр. КЪМ ЛС ТЪРГОВИЩЕ / ИЗПРАЩАЙТЕ" oninput="updateSRPhotoHint()"'+srCmtRoAttr(tab)+'>';
+    '<input class="fi" id="sr-ctrl" value="'+escAttrVal(r.controller_comment||'')+'" placeholder="напр. КЪМ ЛС ТЪРГОВИЩЕ / ИЗПРАЩАЙТЕ" oninput="updateSRPhotoHint()"'+srCmtRoAttr(tab)+'>';
 
   /* „Коментар обект" - свободен текст от магазина (и Цвети/admin). И в двата
      подтаба (от 30.09.2026 и в „По разлики" - импортът там пише колони G+H). */
   h += '<label class="fl">Коментар обект</label>'+
-    '<input class="fi" id="sr-store-cmt" value="'+esc(r.store_comment||'')+'" placeholder="свободен текст от обекта">';
+    '<input class="fi" id="sr-store-cmt" value="'+escAttrVal(r.store_comment||'')+'" placeholder="свободен текст от обекта">';
 
   h += '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
     '<button onclick="closeSRModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+

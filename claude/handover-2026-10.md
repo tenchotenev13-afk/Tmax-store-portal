@@ -406,6 +406,20 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
   отваря същия лист като от обзора. Една заявка за бланките + една за
   редовете; непълни → червен toast, без дърво. Без схемна промяна, ред за
   Живко няма. Тест `revaluation-history.test.js`.
+- 15.10 — „—“ в празни полета за редакция: `esc()` връща „—“ за празно,
+  тоест `value="'+esc(x||'')+'"` и съдържание на <textarea> предпопълваха
+  празно поле с тире — човекът пише след него и тирето влиза в базата.
+  Нов помощник `escAttrVal()` в shared.js ('' за null/undefined/'', иначе
+  `escAttr(String(x))` — 0 остава „0“, кавичките се ескейпват); `escVal()`
+  НЕ е пипан (155 извиквания, дава '' и за 0). Поправени 43 полета: admin
+  (нов потребител: имейл, име), bulletin (промоция, блоковете, заглавие на
+  задача / постоянна задача), handbook (търсачката), kasa (касиер),
+  reference (textarea, 16 полета на гаранционен запис, 4 на сервизна
+  точка), stock-returns (продукт, SAP, причина, куриер, 3 коментара);
+  `rvVal` / `rsVal` (revaluation.js, revisions.js) минаха на него. Не са
+  пипани: date / time / number полета (браузърът нулира невалидното),
+  количество / CC / тема (никога празни), преименуване (името не е
+  празно), 40 `<option>` / checkbox / hidden. Тест `empty-field-dash.test.js`.
 
 ## 1. Хора
 
@@ -753,12 +767,18 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
   application/octet-stream — клиентът го отваря по разширението;
   непроверено на живо) и push до четиримата на Кърджали (Управител,
   Каса, Склад, „Тест“). Кой чака: Тенчо / Елица.
-- **„—“ в празни полета в други модули**: `value="' + escAttr(…)` дава „—“
-  за празна стойност (esc() връща тире). Поправено в revaluation.js и
-  revisions.js (15.10); същият шаблон има в admin.js (3), bulletin.js (2),
-  checklist.js (1), contacts.js (8), daily-turnover.js (1),
-  stock-returns.js (1) — да се провери кои могат да са празни. Кой чака:
-  Claude Code (отделна сесия).
+- **Почистване на „—“ в данните (следи от бъга, кодът е поправен 15.10)** —
+  след push-а на кода, в две части, всяка с отделно „давай“ и преди нея
+  брой + 5 примера „преди → след“ без лични данни. Броят към 15.10:
+  (а) точно „—“ → NULL / '' — stock_returns (store_comment 349, reason 330,
+  courier_info 163, control_comment 126, controller_comment 88,
+  product_name 1), kasa_reports.cashier_name 18, warranty_entries (16
+  колони, 4–109 на колона), warranty_service_locations (4 колони, 22–23),
+  bulletin_promotions.description 18;
+  (б) водещо „—“ / „— “ се маха, ако остатъкът не е празен —
+  kasa_reports.cashier_name (1160 „—Име“ + 5 „— Име“), stock_returns
+  (courier_info 86 + 15, store_comment 16, …).
+  Кой чака: Тенчо („давай“ за всяка част), после Claude Code.
 - **`currentUser.is_regional` винаги е празно на живо**: auth-login (v19,
   проверено 12.10) не връща колоната, а `llMyRegionStores()` в loading.js
   разчита на нея → регионалният никога не може да одобрява ред в Товарни

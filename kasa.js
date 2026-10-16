@@ -414,7 +414,7 @@ function openKasaForm(report){
       '<div><label class="fl">ПОС №</label><select class="fi" id="kf-pos">'+
         [1,2,3].map(function(n){return '<option value="'+n+'"'+(r.pos_number==n?' selected':'')+'>ПОС '+n+'</option>';}).join('')+
       '</select></div>'+
-      '<div><label class="fl">Касиер (три имена)</label><input class="fi" id="kf-cashier" value="'+esc(r.cashier_name||'')+'"></div>'+
+      '<div><label class="fl">Касиер (три имена)</label><input class="fi" id="kf-cashier" value="'+escAttrVal(r.cashier_name||'')+'"></div>'+
       '<div><label class="fl">Каса №</label><input type="number" class="fi" id="kf-kasa" value="'+(r.kasa_number||1)+'"></div>'+
     '</div></div>'+
 

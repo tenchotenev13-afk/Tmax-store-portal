@@ -473,7 +473,7 @@ function renderHandbook() {
     /* Search */
     + '<div class="hb-search-wrap">'
     + '<span class="hb-search-icon">🔍</span>'
-    + '<input class="hb-search" id="hb-search-input" type="text" placeholder="Търси — напр. минуси, прием, ZINVCOUNT, 951..." value="' + esc(hbState.search) + '" oninput="hbOnSearch(this.value)">'
+    + '<input class="hb-search" id="hb-search-input" type="text" placeholder="Търси — напр. минуси, прием, ZINVCOUNT, 951..." value="' + escAttrVal(hbState.search) + '" oninput="hbOnSearch(this.value)">'
     + '<button class="hb-search-clear" id="hb-search-clear" onclick="hbClearSearch()" title="Изчисти">✕</button>'
     + '</div>'
 

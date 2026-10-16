@@ -40,7 +40,7 @@ function taField(label, id, val, rows) {
     '<label class="fl" style="margin:0;">' + label + '</label>' +
     '<button type="button" onclick="wrapBold(\'' + id + '\')" title="Селектирай текст и натисни, за да го удебелиш (или пиши ръчно **текст**)" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;padding:0 8px;font-size:11px;font-weight:700;cursor:pointer;line-height:19px;">B</button>' +
     '</div>' +
-    '<textarea class="fi" id="' + id + '" rows="' + rows + '">' + esc(val || '') + '</textarea>';
+    '<textarea class="fi" id="' + id + '" rows="' + rows + '">' + escAttrVal(val || '') + '</textarea>';
 }
 
 /* ── LOAD (dropdown списъци) ── */
@@ -639,39 +639,39 @@ function refEntryModalHtml() {
     '<div><label class="fl">Марка *</label><select class="fi" id="re-brand"><option value="">-- Избери --</option>' + refBrands.map(function(b){return '<option value="'+b.id+'"'+(String(refSelBrand)===String(b.id)?' selected':'')+'>'+esc(b.name)+'</option>';}).join('') + '</select></div>' +
     '</div>' +
 
-    '<label class="fl">Срок на гаранцията</label><input class="fi" id="re-period" value="'+esc(r.warranty_period||'')+'">' +
+    '<label class="fl">Срок на гаранцията</label><input class="fi" id="re-period" value="'+escAttrVal(r.warranty_period||'')+'">' +
     taField('За какво се отнася','re-covers',r.covers,2) +
     taField('Критерии за отказване','re-excl',r.exclusions,2) +
-    '<label class="fl">Срок за обслужване на претенция</label><input class="fi" id="re-deadline" value="'+esc(r.claim_deadline||'')+'">' +
+    '<label class="fl">Срок за обслужване на претенция</label><input class="fi" id="re-deadline" value="'+escAttrVal(r.claim_deadline||'')+'">' +
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
     '<div><label class="fl">Тип сервиз</label><select class="fi" id="re-svctype"><option value=""'+(!r.service_type?' selected':'')+'>— Няма данни —</option><option'+(r.service_type==='Чужд'?' selected':'')+'>Чужд</option><option'+(r.service_type==='Вътрешен'?' selected':'')+'>Вътрешен</option></select></div>' +
-    '<div><label class="fl">Национален/Регионален</label><input class="fi" id="re-svcscope" value="'+esc(r.service_scope_foreign||'')+'"></div>' +
+    '<div><label class="fl">Национален/Регионален</label><input class="fi" id="re-svcscope" value="'+escAttrVal(r.service_scope_foreign||'')+'"></div>' +
     '</div>' +
 
-    '<label class="fl">Сервиз: Наименование</label><input class="fi" id="re-svcname" value="'+esc(r.service_name||'')+'">' +
-    '<label class="fl">Сервиз: Адрес</label><input class="fi" id="re-svcaddr" value="'+esc(r.service_address||'')+'">' +
+    '<label class="fl">Сервиз: Наименование</label><input class="fi" id="re-svcname" value="'+escAttrVal(r.service_name||'')+'">' +
+    '<label class="fl">Сервиз: Адрес</label><input class="fi" id="re-svcaddr" value="'+escAttrVal(r.service_address||'')+'">' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
-    '<div><label class="fl">Телефон</label><input class="fi" id="re-svcphone" value="'+esc(r.service_phone||'')+'"></div>' +
-    '<div><label class="fl">Имейл</label><input class="fi" id="re-svcemail" value="'+esc(r.service_email||'')+'"></div>' +
+    '<div><label class="fl">Телефон</label><input class="fi" id="re-svcphone" value="'+escAttrVal(r.service_phone||'')+'"></div>' +
+    '<div><label class="fl">Имейл</label><input class="fi" id="re-svcemail" value="'+escAttrVal(r.service_email||'')+'"></div>' +
     '</div>' +
-    '<label class="fl">Лице за контакт</label><input class="fi" id="re-svcperson" value="'+esc(r.service_contact_person||'')+'">' +
+    '<label class="fl">Лице за контакт</label><input class="fi" id="re-svcperson" value="'+escAttrVal(r.service_contact_person||'')+'">' +
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
-    '<div><label class="fl">Обхват</label><input class="fi" id="re-covscope" value="'+esc(r.coverage_scope||'')+'"></div>' +
-    '<div><label class="fl">Региони на покритие</label><input class="fi" id="re-covregions" value="'+esc(r.coverage_regions||'')+'"></div>' +
+    '<div><label class="fl">Обхват</label><input class="fi" id="re-covscope" value="'+escAttrVal(r.coverage_scope||'')+'"></div>' +
+    '<div><label class="fl">Региони на покритие</label><input class="fi" id="re-covregions" value="'+escAttrVal(r.coverage_regions||'')+'"></div>' +
     '</div>' +
-    '<label class="fl">Работно време</label><input class="fi" id="re-hours" value="'+esc(r.working_hours||'')+'">' +
+    '<label class="fl">Работно време</label><input class="fi" id="re-hours" value="'+escAttrVal(r.working_hours||'')+'">' +
     taField('Инструкции за предаване','re-handover-instr',r.handover_instructions,2) +
 
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">' +
     '<div><label class="fl">Заместващ продукт</label><select class="fi" id="re-replace"><option value=""'+(!r.replacement_product?' selected':'')+'>— Няма данни —</option><option'+(r.replacement_product==='Да'?' selected':'')+'>Да</option><option'+(r.replacement_product==='Не'?' selected':'')+'>Не</option></select></div>' +
-    '<div><label class="fl">Сервизиране</label><input class="fi" id="re-svcloc" value="'+esc(r.service_location||'')+'" placeholder="В сервиз / На място / И двете"></div>' +
+    '<div><label class="fl">Сервизиране</label><input class="fi" id="re-svcloc" value="'+escAttrVal(r.service_location||'')+'" placeholder="В сервиз / На място / И двете"></div>' +
     '</div>' +
-    '<label class="fl">Пояснение към заместващ продукт</label><input class="fi" id="re-replacenote" value="'+esc(r.replacement_note||'')+'">' +
-    '<label class="fl">Начин на предаване</label><input class="fi" id="re-handovermethod" value="'+esc(r.handover_method||'')+'">' +
+    '<label class="fl">Пояснение към заместващ продукт</label><input class="fi" id="re-replacenote" value="'+escAttrVal(r.replacement_note||'')+'">' +
+    '<label class="fl">Начин на предаване</label><input class="fi" id="re-handovermethod" value="'+escAttrVal(r.handover_method||'')+'">' +
     taField('Необходими документи','re-docs',r.required_documents,2) +
-    '<label class="fl">Начин на уведомяване</label><input class="fi" id="re-notify" value="'+esc(r.notification_method||'')+'">' +
-    '<label class="fl">Обслужване на рекламацията</label><input class="fi" id="re-claimhandling" value="'+esc(r.claim_handling||'')+'">' +
+    '<label class="fl">Начин на уведомяване</label><input class="fi" id="re-notify" value="'+escAttrVal(r.notification_method||'')+'">' +
+    '<label class="fl">Обслужване на рекламацията</label><input class="fi" id="re-claimhandling" value="'+escAttrVal(r.claim_handling||'')+'">' +
 
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:4px;">' +
     '<label class="fl" style="margin:0;">Въпроси към клиента (по 1 на ред, до 10)</label>' +
@@ -781,10 +781,10 @@ function refLocationsModalHtml() {
     var l = refLocations.find(function(x){return x.store_name===storeName;}) || {};
     return '<tr data-store="'+esc(storeName)+'" style="border-bottom:1px solid #f1f5f9;">' +
       '<td style="padding:5px 8px;font-weight:600;font-size:12px;white-space:nowrap;">'+esc(storeName)+'</td>' +
-      '<td style="padding:5px;"><input class="fi rl-name" value="'+esc(l.service_name||'')+'" placeholder="Наименование" style="font-size:12px;"></td>' +
-      '<td style="padding:5px;"><input class="fi rl-phone" value="'+esc(l.phone||'')+'" placeholder="Тел." style="font-size:12px;width:90px;"></td>' +
-      '<td style="padding:5px;"><input class="fi rl-email" value="'+esc(l.email||'')+'" placeholder="Имейл" style="font-size:12px;"></td>' +
-      '<td style="padding:5px;"><input class="fi rl-person" value="'+esc(l.contact_person||'')+'" placeholder="Лице" style="font-size:12px;"></td>' +
+      '<td style="padding:5px;"><input class="fi rl-name" value="'+escAttrVal(l.service_name||'')+'" placeholder="Наименование" style="font-size:12px;"></td>' +
+      '<td style="padding:5px;"><input class="fi rl-phone" value="'+escAttrVal(l.phone||'')+'" placeholder="Тел." style="font-size:12px;width:90px;"></td>' +
+      '<td style="padding:5px;"><input class="fi rl-email" value="'+escAttrVal(l.email||'')+'" placeholder="Имейл" style="font-size:12px;"></td>' +
+      '<td style="padding:5px;"><input class="fi rl-person" value="'+escAttrVal(l.contact_person||'')+'" placeholder="Лице" style="font-size:12px;"></td>' +
       '</tr>';
   }).join('');
 

@@ -21,8 +21,6 @@ var rsForm = null;     /* {starts_on, ends_on, kind, note, groups:[{code,name}]}
 var rsLoadSeq = 0;
 var RS_KIND_LABEL = { groups: 'Ревизия на групи', none: 'Няма ревизии', movements: 'Движения' };
 
-/* value="…" — празното остава празно (escAttr дава „—" за празно). */
-function rsVal(s){ return s == null || s === '' ? '' : escAttr(s); }
 function rsCanSee(){
   return !!currentUser && ['admin', 'accounting', 'supply', 'manager', 'sklad'].indexOf(currentUser.role) >= 0;
 }
@@ -147,19 +145,19 @@ function rsFormHtml(){
   var h = '<div class="card" id="rs-form" style="border:2px dashed #2563eb;">';
   h += '<div style="font-weight:700;margin-bottom:8px;">' + (rsEditId === 'new' ? '＋ Нова седмица' : '✏️ Редакция на седмица') + '</div>';
   h += '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">' +
-    '<label style="font-size:12px;">от</label><input id="rs-f-from" type="date" value="' + rsVal(f.starts_on) + '" onchange="rsFormSet(\'starts_on\',this.value)">' +
-    '<label style="font-size:12px;">до</label><input id="rs-f-to" type="date" value="' + rsVal(f.ends_on) + '" onchange="rsFormSet(\'ends_on\',this.value)">' +
+    '<label style="font-size:12px;">от</label><input id="rs-f-from" type="date" value="' + escAttrVal(f.starts_on) + '" onchange="rsFormSet(\'starts_on\',this.value)">' +
+    '<label style="font-size:12px;">до</label><input id="rs-f-to" type="date" value="' + escAttrVal(f.ends_on) + '" onchange="rsFormSet(\'ends_on\',this.value)">' +
     '<select id="rs-f-kind" onchange="rsFormSet(\'kind\',this.value)">' +
     ['groups', 'none', 'movements'].map(function(k){ return '<option value="' + k + '"' + (f.kind === k ? ' selected' : '') + '>' + RS_KIND_LABEL[k] + '</option>'; }).join('') +
     '</select>' +
-    '<input id="rs-f-note" type="text" placeholder="Бележка" value="' + rsVal(f.note) + '" onchange="rsFormSet(\'note\',this.value)" style="width:280px;">' +
+    '<input id="rs-f-note" type="text" placeholder="Бележка" value="' + escAttrVal(f.note) + '" onchange="rsFormSet(\'note\',this.value)" style="width:280px;">' +
     '</div>';
   if(f.kind === 'groups'){
     h += '<div style="margin-top:8px;">';
     f.groups.forEach(function(g, i){
       h += '<div class="rs-g-row" style="display:flex;gap:6px;margin-bottom:4px;">' +
-        '<input id="rs-g-code-' + i + '" type="text" placeholder="Код" value="' + rsVal(g.code) + '" data-i="' + i + '" onchange="rsGroupSet(+this.dataset.i,\'code\',this.value)" style="width:110px;">' +
-        '<input id="rs-g-name-' + i + '" type="text" placeholder="Група" value="' + rsVal(g.name) + '" data-i="' + i + '" onchange="rsGroupSet(+this.dataset.i,\'name\',this.value)" style="width:240px;">' +
+        '<input id="rs-g-code-' + i + '" type="text" placeholder="Код" value="' + escAttrVal(g.code) + '" data-i="' + i + '" onchange="rsGroupSet(+this.dataset.i,\'code\',this.value)" style="width:110px;">' +
+        '<input id="rs-g-name-' + i + '" type="text" placeholder="Група" value="' + escAttrVal(g.name) + '" data-i="' + i + '" onchange="rsGroupSet(+this.dataset.i,\'name\',this.value)" style="width:240px;">' +
         '<button class="btn-sm" data-i="' + i + '" onclick="rsGroupDel(+this.dataset.i)" title="Махни групата">–</button></div>';
     });
     h += '<button class="btn-sm" onclick="rsGroupAdd()">＋ Група</button></div>';

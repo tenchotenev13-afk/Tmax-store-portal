@@ -413,10 +413,10 @@ function _renderUserModal(u, storeList){
     '</div>'+
 
     '<label class="fl">Имейл *</label>'+
-    '<input class="fi" id="um-email" type="email" value="'+esc(u.email||'')+'" placeholder="name@temax.bg"'+(isEdit?' readonly style="background:#f8fafc;color:#64748b;"':'')+'>'+
+    '<input class="fi" id="um-email" type="email" value="'+escAttrVal(u.email||'')+'" placeholder="name@temax.bg"'+(isEdit?' readonly style="background:#f8fafc;color:#64748b;"':'')+'>'+
 
     '<label class="fl">Имe (показвано)</label>'+
-    '<input class="fi" id="um-name" value="'+esc(u.display_name||'')+'" placeholder="напр. А. Димитрова">'+
+    '<input class="fi" id="um-name" value="'+escAttrVal(u.display_name||'')+'" placeholder="напр. А. Димитрова">'+
 
     '<label class="fl">Роля *</label>'+
     '<select class="fi" id="um-role">'+

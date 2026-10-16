@@ -53,10 +53,6 @@ var RV_EXPORT_HEADERS = ['Магазин', 'Код', 'Описание на ма
   'Цена преоценен код', 'Коментар Ели', 'Тотал ст.пр.цена', 'Тотал преоценка'];
 
 /* ─── Роли ─────────────────────────────────────────────── */
-/* Стойност за value="…" на поле. escAttr() минава през esc(), който връща „—"
-   за празно — така всяко празно поле излизаше с тире вътре (етапи 2–3а,
-   хванато 15.10.2026). Празното трябва да е празно. */
-function rvVal(s){ return s == null || s === '' ? '' : escAttr(s); }
 function rvIsStoreUser(){ return !!currentUser && RV_STORE_ROLES.indexOf(currentUser.role) >= 0; }
 function rvIsCO(){ return !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'accounting'); }
 function rvParseList(v){
@@ -293,7 +289,7 @@ function rvRender(){
   h += '<b>' + esc(rvStore) + '</b>' + (rvStoreNo(rvStore) ? ' <span style="color:#94a3b8;">№ ' + esc(rvStoreNo(rvStore)) + '</span>' : '') + ' ' + rvStatusBadge();
   if(edit){
     h += '<label style="font-size:12px;color:#64748b;margin-left:8px;">% за бланката</label>' +
-      '<input id="rv-sub-pct" type="text" inputmode="decimal" value="' + rvVal(pct == null ? '' : rvFmtQty(pct)) + '" onchange="rvSetSubPct(this.value)" style="width:64px;">' +
+      '<input id="rv-sub-pct" type="text" inputmode="decimal" value="' + escAttrVal(pct == null ? '' : rvFmtQty(pct)) + '" onchange="rvSetSubPct(this.value)" style="width:64px;">' +
       '<button class="btn-sm" onclick="rvApplyPctAll()">Приложи % към всички редове</button>';
   } else if(pct != null){
     h += '<span style="font-size:12px;color:#64748b;">% за бланката: ' + esc(rvFmtQty(pct)) + '</span>';
@@ -333,7 +329,7 @@ function rvRender(){
   el.innerHTML = h;
 }
 function rvInp(it, field, val, w){
-  return '<input type="text" data-id="' + escAttr(it.id) + '" data-f="' + field + '" value="' + rvVal(val) + '" onchange="rvEdit(this.dataset.id,this.dataset.f,this.value)" style="width:' + w + ';">';
+  return '<input type="text" data-id="' + escAttr(it.id) + '" data-f="' + field + '" value="' + escAttrVal(val) + '" onchange="rvEdit(this.dataset.id,this.dataset.f,this.value)" style="width:' + w + ';">';
 }
 function rvRowHtml(it, edit, pink, coEdit){
   var bad = rvBad[it.id], err = rvErr[it.id];
@@ -933,7 +929,7 @@ function rvPinkCells(it, coEdit){
     var v = fmt[f](val(f));
     if(!coEdit) return '<td style="' + PINK + (f === 'new_sap_code' ? 'font-family:DM Mono,monospace;' : '') + '">' + esc(v) + '</td>';
     var w = f === 'co_comment' ? '160px' : (f === 'new_sap_code' ? '84px' : '68px');
-    return '<td style="' + PINK + '"><input type="text" class="' + (isProp(f) ? 'rv-prop' : '') + '" data-id="' + escAttr(it.id) + '" data-f="' + f + '" value="' + rvVal(v) + '"' +
+    return '<td style="' + PINK + '"><input type="text" class="' + (isProp(f) ? 'rv-prop' : '') + '" data-id="' + escAttr(it.id) + '" data-f="' + f + '" value="' + escAttrVal(v) + '"' +
       (isProp(f) ? ' title="предложено — записва се, когато пипнеш реда" style="width:' + w + ';font-style:italic;color:#9d174d;border:1px dashed #f9a8d4;"' : ' style="width:' + w + ';"') +
       ' onchange="rvCoEdit(this.dataset.id,this.dataset.f,this.value)"></td>';
   }).join('');
@@ -1376,12 +1372,12 @@ function rvScheduleHtml(){
   /* нови редове */
   rvSchedRows.forEach(function(r, i){
     h += '<div class="rv-s-row" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:4px;">' +
-      '<input id="rv-s-from-' + i + '" type="date" value="' + rvVal(r.from) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'from\',this.value)">' +
-      '<input id="rv-s-to-' + i + '" type="date" value="' + rvVal(r.to) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'to\',this.value)">' +
+      '<input id="rv-s-from-' + i + '" type="date" value="' + escAttrVal(r.from) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'from\',this.value)">' +
+      '<input id="rv-s-to-' + i + '" type="date" value="' + escAttrVal(r.to) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'to\',this.value)">' +
       '<select id="rv-s-kind-' + i + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'kind\',this.value)">' +
       ['mandatory', 'optional'].map(function(k){ return '<option value="' + k + '"' + (r.kind === k ? ' selected' : '') + '>' + RV_KIND_LABEL[k] + '</option>'; }).join('') + '</select>' +
-      '<input id="rv-s-pct-' + i + '" type="text" inputmode="decimal" placeholder="%" value="' + rvVal(r.pct) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'pct\',this.value)" style="width:56px;">' +
-      '<input id="rv-s-title-' + i + '" type="text" placeholder="' + escAttr(rvDefaultTitle(r.kind, r.from)) + '" value="' + rvVal(r.title) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'title\',this.value)" style="width:240px;">' +
+      '<input id="rv-s-pct-' + i + '" type="text" inputmode="decimal" placeholder="%" value="' + escAttrVal(r.pct) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'pct\',this.value)" style="width:56px;">' +
+      '<input id="rv-s-title-' + i + '" type="text" placeholder="' + escAttr(rvDefaultTitle(r.kind, r.from)) + '" value="' + escAttrVal(r.title) + '" data-i="' + i + '" onchange="rvSchedSet(+this.dataset.i,\'title\',this.value)" style="width:240px;">' +
       '<button class="btn-sm" data-i="' + i + '" onclick="rvSchedDelRow(+this.dataset.i)" title="Махни реда">–</button></div>';
   });
   h += '<div style="display:flex;gap:6px;margin:6px 0 10px;"><button class="btn-sm" onclick="rvSchedAddRow()">＋ Ред</button>' +
@@ -1395,12 +1391,12 @@ function rvScheduleHtml(){
       if(rvSchedEditId === c.id && rvSchedEdit){
         var e = rvSchedEdit;
         h += '<div id="rv-sched-' + escAttr(c.id) + '" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;padding:4px 0;">' +
-          '<input id="rv-se-from" type="date" value="' + rvVal(e.from) + '" onchange="rvSchedEditSet(\'from\',this.value)">' +
-          '<input id="rv-se-to" type="date" value="' + rvVal(e.to) + '" onchange="rvSchedEditSet(\'to\',this.value)">' +
+          '<input id="rv-se-from" type="date" value="' + escAttrVal(e.from) + '" onchange="rvSchedEditSet(\'from\',this.value)">' +
+          '<input id="rv-se-to" type="date" value="' + escAttrVal(e.to) + '" onchange="rvSchedEditSet(\'to\',this.value)">' +
           '<select id="rv-se-kind" onchange="rvSchedEditSet(\'kind\',this.value)">' +
           ['mandatory', 'optional'].map(function(k){ return '<option value="' + k + '"' + (e.kind === k ? ' selected' : '') + '>' + RV_KIND_LABEL[k] + '</option>'; }).join('') + '</select>' +
-          '<input id="rv-se-pct" type="text" value="' + rvVal(e.pct) + '" onchange="rvSchedEditSet(\'pct\',this.value)" style="width:56px;">' +
-          '<input id="rv-se-title" type="text" value="' + rvVal(e.title) + '" onchange="rvSchedEditSet(\'title\',this.value)" style="width:240px;">' +
+          '<input id="rv-se-pct" type="text" value="' + escAttrVal(e.pct) + '" onchange="rvSchedEditSet(\'pct\',this.value)" style="width:56px;">' +
+          '<input id="rv-se-title" type="text" value="' + escAttrVal(e.title) + '" onchange="rvSchedEditSet(\'title\',this.value)" style="width:240px;">' +
           '<button class="btn-sm" onclick="rvSchedSaveEdit()" style="background:#2563eb;color:#fff;">Запази</button>' +
           '<button class="btn-sm" onclick="rvSchedCancelEdit()">Откажи</button></div>';
         return;

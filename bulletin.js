@@ -1011,8 +1011,8 @@ function openPromoModal(id){
   ov.className='bov open'; ov.id='promo-modal-ov';
   ov.innerHTML='<div class="bmod" style="width:440px;">'+
     '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">🎯 '+(p?'Редактирай промоция':'Нова промоция')+'</div>'+
-    '<label class="fl">Заглавие *</label><input class="fi" id="pm-title" value="'+esc(p?p.title:'')+'" placeholder="напр. -20% на градински инструменти">'+
-    '<label class="fl">Описание</label><input class="fi" id="pm-desc" value="'+esc(p?p.description||'':'')+'" placeholder="Допълнителна информация, линк и т.н.">'+
+    '<label class="fl">Заглавие *</label><input class="fi" id="pm-title" value="'+escAttrVal(p?p.title:'')+'" placeholder="напр. -20% на градински инструменти">'+
+    '<label class="fl">Описание</label><input class="fi" id="pm-desc" value="'+escAttrVal(p?p.description||'':'')+'" placeholder="Допълнителна информация, линк и т.н.">'+
     '<label class="fl">Отдел</label><select class="fi" id="pm-dept">'+
       '<option value="all"'+(!p||p.department==='all'?' selected':'')+'>Всички</option>'+
       deptOptsHtml(p&&p.department)+
@@ -3285,7 +3285,7 @@ function editBlock(b,dk,i){
 
   if(b.type==='text'){
     if(isEditing){
-      h+='<textarea class="blk-ta" rows="3" placeholder="Въведи текст... (линковете стават кликаеми в изглед за преглед)" data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+      h+='<textarea class="blk-ta" rows="3" placeholder="Въведи текст... (линковете стават кликаеми в изглед за преглед)" data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+escAttrVal(b.content||'')+'</textarea>';
     }else{
       h+='<div style="font-size:13px;color:#0f172a;white-space:pre-wrap;line-height:1.5;">'+linkify(b.content||'')+'</div>';
     }
@@ -3295,7 +3295,7 @@ function editBlock(b,dk,i){
   }else if(b.type==='list'){
     if(isEditing){
       h+='<div style="font-size:11px;color:#64748b;margin-bottom:3px;">Всеки ред = нова точка (линковете стават кликаеми в изглед за преглед)</div>';
-      h+='<textarea class="blk-ta" rows="4" placeholder="Ред 1..." data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+      h+='<textarea class="blk-ta" rows="4" placeholder="Ред 1..." data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+escAttrVal(b.content||'')+'</textarea>';
     }else{
       var items=(b.content||'').split('\n').filter(Boolean);
       h+='<ul style="margin:0;padding-left:18px;">'+items.map(function(it){return '<li style="font-size:13px;color:#0f172a;padding:2px 0;">'+linkify(it)+'</li>';}).join('')+'</ul>';
@@ -3307,8 +3307,8 @@ function editBlock(b,dk,i){
       h+='<select data-col="'+dk+'" data-id="'+b.id+'" data-field="color" onchange="bulSetBlk(this)" style="font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 6px;margin-bottom:5px;background:#f8fafc;width:100%;">';
       cOpts.forEach(function(o){h+='<option value="'+o[0]+'"'+(b.color===o[0]?' selected':'')+'>'+o[1]+'</option>';});
       h+='</select><br>';
-      h+='<input placeholder="Заглавие (по избор)" value="'+esc(b.label||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="label" oninput="bulSetBlk(this)" style="width:100%;font-size:12px;border:1px solid #e2e8f0;border-radius:5px;padding:4px 7px;margin-bottom:4px;font-family:inherit;box-sizing:border-box;"><br>';
-      h+='<textarea class="blk-ta" rows="2" placeholder="Съдържание... (линковете стават кликаеми в изглед за преглед)" data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+esc(b.content||'')+'</textarea>';
+      h+='<input placeholder="Заглавие (по избор)" value="'+escAttrVal(b.label||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="label" oninput="bulSetBlk(this)" style="width:100%;font-size:12px;border:1px solid #e2e8f0;border-radius:5px;padding:4px 7px;margin-bottom:4px;font-family:inherit;box-sizing:border-box;"><br>';
+      h+='<textarea class="blk-ta" rows="2" placeholder="Съдържание... (линковете стават кликаеми в изглед за преглед)" data-col="'+dk+'" data-id="'+b.id+'" data-field="content" oninput="bulSetBlk(this)">'+escAttrVal(b.content||'')+'</textarea>';
     }else{
       var aC={red:'#fff1f2:#dc2626:#991b1b',amb:'#fffbeb:#f59e0b:#92400e',grn:'#f0fdf4:#16a34a:#14532d',blu:'#eff6ff:#2563eb:#1e40af',pur:'#f5f3ff:#8b5cf6:#4c1d95'}[b.color||'blu']||'#eff6ff:#2563eb:#1e40af';
       var aC2=aC.split(':');
@@ -3323,8 +3323,8 @@ function editBlock(b,dk,i){
       h+='<select data-col="'+dk+'" data-id="'+b.id+'" data-field="urgency" onchange="bulSetBlk(this)" style="font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 6px;margin-bottom:5px;background:#f8fafc;width:100%;">';
       uOpts.forEach(function(o){h+='<option value="'+o[0]+'"'+(b.urgency===o[0]?' selected':'')+'>'+o[1]+'</option>';});
       h+='</select><br>';
-      h+='<input placeholder="Заглавие *" value="'+esc(b.title||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="title" oninput="bulSetBlk(this)" style="width:100%;font-size:13px;font-weight:600;border:1px solid #e2e8f0;border-radius:5px;padding:5px 7px;margin-bottom:4px;font-family:inherit;box-sizing:border-box;"><br>';
-      h+='<input placeholder="Подзаглавие (по избор)" value="'+esc(b.sub||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="sub" oninput="bulSetBlk(this)" style="width:100%;font-size:12px;border:1px solid #e2e8f0;border-radius:5px;padding:4px 7px;font-family:inherit;box-sizing:border-box;"><br>';
+      h+='<input placeholder="Заглавие *" value="'+escAttrVal(b.title||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="title" oninput="bulSetBlk(this)" style="width:100%;font-size:13px;font-weight:600;border:1px solid #e2e8f0;border-radius:5px;padding:5px 7px;margin-bottom:4px;font-family:inherit;box-sizing:border-box;"><br>';
+      h+='<input placeholder="Подзаглавие (по избор)" value="'+escAttrVal(b.sub||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="sub" oninput="bulSetBlk(this)" style="width:100%;font-size:12px;border:1px solid #e2e8f0;border-radius:5px;padding:4px 7px;font-family:inherit;box-sizing:border-box;"><br>';
       h+='<div style="font-size:10px;color:#f59e0b;margin-top:4px;">⭐ → показва се в секция Важно</div>';
     }else{
       var uC={ok:'#f0fdf4:#16a34a:#14532d',warn:'#fffbeb:#f59e0b:#92400e',urgent:'#fff1f2:#dc2626:#991b1b',info:'#eff6ff:#2563eb:#1e40af'}[b.urgency||'info']||'#eff6ff:#2563eb:#1e40af';
@@ -3344,7 +3344,7 @@ function editBlock(b,dk,i){
       h+='</div>';
       if(b.url){
         h+='<img src="'+b.url+'" style="width:'+(b.width||100)+'%;border-radius:7px;display:block;margin-bottom:4px;" onerror="bulImgErr(this)">'; 
-        h+='<input placeholder="Подпис (по избор)" value="'+esc(b.caption||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="caption" oninput="bulSetBlk(this)" style="width:100%;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-family:inherit;box-sizing:border-box;"><br>';
+        h+='<input placeholder="Подпис (по избор)" value="'+escAttrVal(b.caption||'')+'" data-col="'+dk+'" data-id="'+b.id+'" data-field="caption" oninput="bulSetBlk(this)" style="width:100%;font-size:11px;border:1px solid #e2e8f0;border-radius:5px;padding:3px 7px;font-family:inherit;box-sizing:border-box;"><br>';
         h+='<button data-col="'+dk+'" data-id="'+b.id+'" onclick="bulClearImg(this)" style="margin-top:4px;border:1px solid #fecaca;background:#fff5f5;color:#dc2626;border-radius:5px;padding:2px 8px;font-size:11px;cursor:pointer;">✕ Смени снимката</button>';
       }else{
         h+='<label style="display:flex;flex-direction:column;align-items:center;padding:18px;border:1.5px dashed #cbd5e1;border-radius:7px;cursor:pointer;color:#64748b;font-size:12px;">';
@@ -3754,7 +3754,7 @@ function openEditTaskModal(taskId) {
     '<div class="bmod" style="width:460px;">' +
     '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">✏️ Редактирай задача</div>' +
     '<label class="fl">Заглавие *</label>' +
-    '<input class="fi" id="etk-title" value="'+esc(t.title||'')+'">' +
+    '<input class="fi" id="etk-title" value="'+escAttrVal(t.title||'')+'">' +
     '<label class="fl">Описание</label>' +
     '<textarea class="fi fi-desc" id="etk-desc" rows="3" placeholder="Допълнителна информация. Дълъг адрес се скрива така: [Инструкцията](https://…)" oninput="bulAutoGrow(this)" onpaste="bulDescPaste(event)">'+escVal(t.description)+'</textarea>' +
     '<label class="fl">Отдел</label>' +
@@ -3863,7 +3863,7 @@ function openEditRecurringModal(taskId) {
     '<div style="font-size:15px;font-weight:600;margin-bottom:14px;">✏️ Редактирай постоянна задача</div>' +
     recEditScopeHtml() +
     '<label class="fl">Заглавие *</label>' +
-    '<input class="fi" id="erec-title" value="'+esc(t.title||'')+'">' +
+    '<input class="fi" id="erec-title" value="'+escAttrVal(t.title||'')+'">' +
     '<label class="fl">Описание</label>' +
     '<textarea class="fi fi-desc" id="erec-desc" rows="3" placeholder="Допълнителна информация. Дълъг адрес се скрива така: [Инструкцията](https://…)" oninput="bulAutoGrow(this)" onpaste="bulDescPaste(event)">'+escVal(t.description)+'</textarea>' +
     '<label class="fl">Повтарящи се дни (по избор)</label>' +
