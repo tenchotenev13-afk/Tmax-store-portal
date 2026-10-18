@@ -123,10 +123,10 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     const h = env(); await openCo(h, 'Кърджали');
     const u = h.w.rvSapUnit;
     ok('„бр.“ → БР', u('бр.').unit === 'БР' && u('бр.').ok);
-    ok('„кв.м“ → M2, „л.м“ → M, „ккт“ → ККТ, „кг“ → KG, „л“ → L', u('кв.м').unit === 'M2' && u('л.м').unit === 'M' && u('ккт').unit === 'ККТ' && u('кг').unit === 'KG' && u('л').unit === 'L');
+    ok('„кв.м“ → M2, „л.м“ → ЛМ, „ккт“ → ККТ, „кг“ → КГ (кирилица), „л“ → не е ок', u('кв.м').unit === 'M2' && u('л.м').unit === 'ЛМ' && u('ккт').unit === 'ККТ' && u('кг').unit === 'КГ' && !u('л').ok);
     ok('„БР“ (от ZSTOCK) → без промяна, ок', u('БР').unit === 'БР' && u('БР').ok);
     ok('„кашон“ → КАШ (15.10)', u('кашон').unit === 'КАШ' && u('кашон').ok);
-    ok('„пакет“, „чифт“ → остават, НЕ са ок (жълти)', u('пакет').unit === 'пакет' && !u('пакет').ok && !u('чифт').ok);
+    ok('„пакет“ → ПАК, „чифт“ → ЧФТ (16.10); „пале“ → остава, НЕ е ок', u('пакет').unit === 'ПАК' && u('чифт').unit === 'ЧФТ' && u('пакет').ok && u('пале').unit === 'пале' && !u('пале').ok);
     ok('„xyz“ → остава, НЕ е ок', u('xyz').unit === 'xyz' && !u('xyz').ok);
     ok('„xyz“ → жълт маркер „МЕ не е по SAP“ в екрана на ЦО', !!h.doc.querySelector('#rv-row-i-2 .rv-unit-bad'));
     ok('„бр.“ → без маркер, показва БР', !h.doc.querySelector('#rv-row-i-1 .rv-unit-bad') && h.doc.getElementById('rv-row-i-1').textContent.indexOf('БР') >= 0);

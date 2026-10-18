@@ -16,6 +16,9 @@
      S7 обектът вижда и неактивна кампания → пада „без активна → „Следваща" и без бланка";
      S8 (решение А) обектът не вижда изтекла кампания със своя обработена
         бланка → пада „изтекла кампания с processed бланка → вижда я".
+   Мутационна проверка на картата на МЕ (18.10.2026, EXPORT.XLSX от Елица):
+     U1 'кг' → латинско 'KG' вместо 'КГ' → пада „„кг“ → КГ" и „на кирилица";
+     U2 'л.м' → 'M' вместо 'ЛМ' → пада „„л.м“ → ЛМ" и „на кирилица (не M)".
 */
 'use strict';
 
@@ -37,7 +40,7 @@ const ITEMS = [
   it({ id: 'i-1', submission_id: 's-1', store_name: 'Кърджали', sap_code: '14557', product_name: LONG, std_price: 139.99, new_sap_code: '8014557', sale_price: 69.99, unit: 'бр.' }),
   it({ id: 'i-2', submission_id: 's-1', store_name: 'Кърджали', sap_code: '8025298', product_name: 'ПРЕОЦ. ЛАМПА', new_sap_code: '8025298', sale_price: 3, sort_order: 2 }),
   it({ id: 'i-3', submission_id: 's-1', store_name: 'Кърджали', sap_code: '33333', product_name: 'В РЕГИСТЪРА', new_sap_code: '8033333', sale_price: 4, sort_order: 3 }),
-  it({ id: 'i-4', submission_id: 's-1', store_name: 'Кърджали', sap_code: '44444', product_name: 'БЕЗ ЦЕНА', new_sap_code: '8044444', sale_price: null, unit: 'пакет', sort_order: 4 }),
+  it({ id: 'i-4', submission_id: 's-1', store_name: 'Кърджали', sap_code: '44444', product_name: 'БЕЗ ЦЕНА', new_sap_code: '8044444', sale_price: null, unit: 'пале', sort_order: 4 }),
   it({ id: 'i-5', submission_id: 's-2', store_name: 'Шумен', sap_code: '14557', product_name: LONG, std_price: 139.99, new_sap_code: '8014557', sale_price: 79.99 }),
   it({ id: 'i-6', submission_id: 's-2', store_name: 'Шумен', sap_code: '55555', product_name: 'БЕЗ КОД', new_sap_code: null, sale_price: null, sort_order: 2 }),
   it({ id: 'i-7', submission_id: 's-3', store_name: 'Добрич', sap_code: '77777', product_name: 'ЧЕРНОВА', new_sap_code: '8077777', sale_price: 1 })
@@ -111,7 +114,7 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
     ok('код в регистъра не влиза (8033333)', !a.some(x => x[0] === '8033333'));
     ok('чернова не влиза (8077777)', !a.some(x => x[0] === '8077777'));
     ok('ред без new_sap_code не влиза', a.length === 3, a.length);
-    ok('„пакет“ влиза, но toast го изброява', a.some(x => x[0] === '8044444') && h.calls.toast.some(t => t.indexOf('МЕ не е по SAP: 8044444 (пакет)') >= 0), h.calls.toast.join(' | '));
+    ok('„пале“ (непозната МЕ) влиза, но toast го изброява', a.some(x => x[0] === '8044444') && h.calls.toast.some(t => t.indexOf('МЕ не е по SAP: 8044444 (пале)') >= 0), h.calls.toast.join(' | '));
     ok('файл MM41-preocenka-…', /^MM41-preocenka-/.test(h.files[0] || ''));
     const e = env({ subs: [Object.assign({}, SUBS[2])], items: [ITEMS[6]] }); await open(e);
     realClick(e.w, btn(mod(e), 'MM41 — нови кодове')); await ticks(8);
@@ -119,6 +122,28 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
     const f = env({ fail: { GET: /revaluation_codes/ } }); await open(f);
     realClick(f.w, btn(mod(f), 'MM41 — нови кодове')); await ticks(8);
     ok('паднал регистър → файлът НЕ е направен', !f.files.length && f.calls.toast.some(t => t.indexOf('MM41 НЕ е направен') >= 0));
+  }
+
+  section('1б. Картата на МЕ по SAP (EXPORT.XLSX, 16.10.2026)');
+  {
+    const h = env();
+    const u = h.w.rvSapUnit;
+    const PAIRS = [['бр.', 'БР'], ['бр', 'БР'], ['кв.м', 'M2'], ['кв.м.', 'M2'], ['м2', 'M2'],
+      ['л.м', 'ЛМ'], ['л.м.', 'ЛМ'], ['лм', 'ЛМ'], ['м', 'ЛМ'], ['пакет', 'ПАК'], ['пак', 'ПАК'],
+      ['чифт', 'ЧФТ'], ['чфт', 'ЧФТ'], ['ккт', 'ККТ'], ['к-кт', 'ККТ'], ['бли', 'БЛИ'], ['блистер', 'БЛИ'],
+      ['кг', 'КГ'], ['кут', 'КУТ'], ['кутия', 'КУТ'], ['кашон', 'КАШ'], ['каш', 'КАШ'], ['топ', 'ТОП'],
+      ['рол', 'РОЛ'], ['ролка', 'РОЛ'], ['тон', 'ТОН'], ['m3', 'M3'], ['м3', 'M3']];
+    PAIRS.forEach(p => { const r = u(p[0]); ok('„' + p[0] + '“ → ' + p[1], r.unit === p[1] && r.ok, JSON.stringify(r)); });
+    ok('всичките 14 SAP стойности са покрити', new Set(PAIRS.map(p => p[1])).size === 14);
+    ok('ключовете в картата = точно тези', Object.keys(h.w.RV_SAP_UNITS).sort().join('|') === PAIRS.map(p => p[0]).sort().join('|'));
+    ok('„кг“ → КГ на кирилица (не латинско KG)', u('кг').unit.charCodeAt(0) === 0x41A && u('кг').unit.charCodeAt(1) === 0x413);
+    ok('„л.м“ → ЛМ на кирилица (не M)', u('л.м').unit.charCodeAt(0) === 0x41B && u('л.м').unit.charCodeAt(1) === 0x41C);
+    ok('M2 — първата буква е латинско M (0x4D)', u('кв.м').unit.charCodeAt(0) === 0x4D && u('м3').unit.charCodeAt(0) === 0x4D);
+    ok('M2 / M3 — с латинско M', u('кв.м').unit === 'M2' && u('m3').unit === 'M3' && u('м3').unit === 'M3');
+    ok('„л“ вече НЕ е ок (в SAP няма L)', !u('л').ok && u('л').unit === 'л');
+    ok('главни главни: „ПАК“, „ТОН“ → без промяна, ок', u('ПАК').unit === 'ПАК' && u('ПАК').ok && u('ТОН').ok);
+    ok('регистърът не пречи: „ПАКЕТ“ → ПАК', u('ПАКЕТ').unit === 'ПАК');
+    ok('„пале“ → остава, НЕ е ок', u('пале').unit === 'пале' && !u('пале').ok);
   }
 
   section('2. „Кодовете са създадени в SAP“ → регистър');
