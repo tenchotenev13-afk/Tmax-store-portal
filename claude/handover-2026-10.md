@@ -422,6 +422,20 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
   празно), 40 `<option>` / checkbox / hidden. Тест `empty-field-dash.test.js`.
 - 18.10 — Трансфери: всички сесии от седмицата проверени; инструкцията
   (15 стр.) е окончателна, раздава се след срещата 20.10.
+- 18.10 — Почистване на „—“ в данните (следите от бъга; кодът е на живо от
+  39914e2), execute_sql, без схема, ред за Живко няма.
+  (а) точно „—“ → NULL (всички колони допускат NULL), с NULLIF — 2056
+  клетки в 673 реда: stock_returns 1097 (store_comment 359, reason 330,
+  courier_info 167, control_comment 139, controller_comment 101,
+  product_name 1; 502 реда), warranty_entries 832 (16 колони; 112 реда),
+  warranty_service_locations 91 (23 реда), kasa_reports.cashier_name 18,
+  bulletin_promotions.description 18. След: 0.
+  (б) водещо „—“ + интервали се маха, остатъкът — trim, празен → NULL
+  (0 такива) — kasa_reports.cashier_name 1189, stock_returns 138 клетки
+  (courier_info 103, store_comment 15, controller_comment 10,
+  control_comment 7, reason 3; 115 реда). След: касата 0, без интервали в
+  краищата. Тригерът stock_returns_sync_upd реагира само на status /
+  confirmed_date — авто-отметките не са пипани.
 
 ## 1. Хора
 
@@ -769,18 +783,12 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
   application/octet-stream — клиентът го отваря по разширението;
   непроверено на живо) и push до четиримата на Кърджали (Управител,
   Каса, Склад, „Тест“). Кой чака: Тенчо / Елица.
-- **Почистване на „—“ в данните (следи от бъга, кодът е поправен 15.10)** —
-  след push-а на кода, в две части, всяка с отделно „давай“ и преди нея
-  брой + 5 примера „преди → след“ без лични данни. Броят към 15.10:
-  (а) точно „—“ → NULL / '' — stock_returns (store_comment 349, reason 330,
-  courier_info 163, control_comment 126, controller_comment 88,
-  product_name 1), kasa_reports.cashier_name 18, warranty_entries (16
-  колони, 4–109 на колона), warranty_service_locations (4 колони, 22–23),
-  bulletin_promotions.description 18;
-  (б) водещо „—“ / „— “ се маха, ако остатъкът не е празен —
-  kasa_reports.cashier_name (1160 „—Име“ + 5 „— Име“), stock_returns
-  (courier_info 86 + 15, store_comment 16, …).
-  Кой чака: Тенчо („давай“ за всяка част), после Claude Code.
+- **Почистване на „—“ — остатък след (а) и (б) (18.10, РЕШЕНИЕ)**:
+  (1) stock_returns.courier_info — 8 стойности с ОЩЕ едно водещо „—“ (били
+  „——…“: формата е записана двукратно; правилото махна точно едно);
+  (2) извън обхвата на (б): warranty_entries 2 реда и
+  bulletin_promotions.description 1 ред с водещо „—“ пред текст — може да
+  е истински текст. Да / не за всяко. Кой чака: Тенчо.
 - **`currentUser.is_regional` винаги е празно на живо**: auth-login (v19,
   проверено 12.10) не връща колоната, а `llMyRegionStores()` в loading.js
   разчита на нея → регионалният никога не може да одобрява ред в Товарни
