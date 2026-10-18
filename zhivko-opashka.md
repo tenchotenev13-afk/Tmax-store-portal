@@ -14,6 +14,8 @@
 
 ## Чака изпращане
 
+## Изпратено 18.10.2026
+
 - 18.10 · transfers.departed_at — timestamptz, NULL, без default (кога е тръгнал бусът / камионът)
   (в базата от миграцията 20261018151927)
 - 18.10 · transfers.departed_by — text, NULL, без default (кой е отбелязал „Тръгна")
@@ -21,6 +23,9 @@
 - 18.10 · transfers.status — нова стойност на статус 'sent' („Изпратен"; досега 'planned' / 'partial' / 'done')
 - 15.10 · transfer_cargo_events.unit — integer, NULL, без default (номер на единицата 1..qty; null = целият товар)
   (в базата от миграцията 20261015132314)
+
+## Потвърдено 16.10.2026
+
 - 15.10 · нова таблица revision_schedule — id uuid PK default gen_random_uuid(), starts_on date NOT NULL, ends_on date NOT NULL, kind text NOT NULL default 'groups' (стойности 'groups' / 'none' / 'movements'), note text NULL, groups jsonb NOT NULL default '[]', created_by text NULL, created_at timestamptz NOT NULL default now(), updated_by text NULL, updated_at timestamptz NULL; уникалност (starts_on)
   (в базата от миграцията 20261015075210; файл 20261015090000_revision_schedule)
 - 15.10 · revaluation_items.co_qty — numeric(12,3), NULL, без default (прехвърлено количество, ЦО)
@@ -30,6 +35,7 @@
   (в базата от миграцията 20261015102839; файл 20261015140000_revaluation_co)
 - 15.10 · нова таблица revaluation_codes — new_sap_code text PK, sap_code text NOT NULL, product_name text NULL, unit text NULL, std_price numeric(10,2) NULL, campaign_id uuid NULL → revaluation_campaigns (при изтриване на кампанията → NULL), created_in_sap_at timestamptz NOT NULL default now(), created_by text NULL
   (в базата от миграцията 20261015132455; файл 20261015180000_revaluation_codes)
+  (потвърдено от Живко с писмо на 16.10 в 10:33: 75 таблици, 0 грешки)
 
 ## Потвърдено 15.10.2026
 

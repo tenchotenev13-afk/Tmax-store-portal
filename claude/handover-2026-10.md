@@ -791,7 +791,11 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
   portal-push 24/25, bulletin-notify 19/25, send-oborot-report 9/11,
   send-routed-report 16/18, dynamic-responder 23/25, kasa-access-check 7/8,
   swift-handler 41/42) — само документация. Байтова сверка не е правена.
-- Промени по схемата за Живко — виж `zhivko-opashka.md`.
+- Промени по схемата за Живко — виж `zhivko-opashka.md`. Към 18.10:
+  „Чака изпращане“ е празна; 15.10 (ревизии / преоценка, 6 реда) —
+  потвърдено от Живко на 16.10 (75 таблици, 0 грешки); трансферите
+  (departed_at / departed_by / 'sent' и transfer_cargo_events.unit) —
+  изпратени 18.10, чакат потвърждение от Живко. Кой чака: Живко.
 - **Ревизии — график за следваща година**: шаблон / импорт за 2027 —
   по-късно; `tools/revision-schedule-2026.js` е еднократен (годината е
   закована). Кой чака: Тенчо (кога и в какъв файл).
