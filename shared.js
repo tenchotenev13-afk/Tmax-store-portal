@@ -1654,6 +1654,10 @@ function doLogout(){
   document.getElementById('l-pass').value='';
   document.getElementById('l-err').style.display='none';
 }
+/* Роля 'controlling' („Контролинг", от 18.10.2026) — вижда САМО подтаба
+   „🏷️ Преоценка" и работи в него като ЦО (rvIsCO в revaluation.js). НЕ е
+   глобална (isGlobal() не я включва): без История, „Днес", Чек лист. */
+function isControllingRole(){ return !!currentUser && currentUser.role === 'controlling'; }
 function startApp(){
   if(typeof initPush==='function') initPush(currentUser);
   document.getElementById('s-login').style.display='none';
@@ -1662,9 +1666,10 @@ function startApp(){
   document.getElementById('nav-store').textContent=isGlobal()?'Всички магазини':currentUser.store_name;
   setupTabsForRole();
   if(typeof initTabDrag==='function')setTimeout(initTabDrag,200);
-  loadAll();
+  /* Контролинг не вижда Транспорт / Клиентски / Документи — не ги зарежда. */
+  if(!isControllingRole()) loadAll();
   /* Покажи подходящ таб според роля */
-  var startTab=currentUser.role==='kasa'?'kasa':currentUser.role==='info'?'client':'transport';
+  var startTab=currentUser.role==='kasa'?'kasa':currentUser.role==='info'?'client':isControllingRole()?'revaluation':'transport';
   /* Deep-link от имейл репорт (?store=Име) - отвежда директно на "Днес",
      ако ролята изобщо има достъп до този таб (isGlobal). today.js сам чете
      същия параметър, за да разгъне точно този магазин. */
@@ -1678,6 +1683,9 @@ function startApp(){
   if(!dl && typeof tfDeepLinkBoot==='function') tfDeepLinkBoot();
 }
 function setupTabsForRole(){
+  /* Вход след Контролинг без презареждане (doLogout не презарежда): скритото
+     от него се връща ПЪРВО, после правилата по-долу решават както винаги. */
+  document.querySelectorAll('[data-ctrl-hidden]').forEach(function(el){ el.style.display=''; el.removeAttribute('data-ctrl-hidden'); });
   /* Таб Каса — само за kasa, manager, admin, accounting */
   var kasaRoles=['kasa','admin','manager']; /* kasa, управители и администратори */
   var kasaTab=document.getElementById('tab-kasa');
@@ -1715,6 +1723,12 @@ function setupTabsForRole(){
      И двата файла се зареждат след този — затова typeof. */
   var rvTab=document.getElementById('tab-revaluation');
   if(rvTab)rvTab.style.display=(typeof rsCanSee==='function'&&rsCanSee())?'':'none';
+  /* Контролинг: главният таб отваря директно Преоценка, графикът е скрит.
+     Атрибутът се връща при всеки вход — същата страница може да смени
+     потребителя без презареждане. */
+  if(rvTab)rvTab.setAttribute('onclick',isControllingRole()?"showModule('revaluation')":"showModule('rev-schedule')");
+  var rvsSched=document.getElementById('rvs-schedule');
+  if(rvsSched)rvsSched.style.display=isControllingRole()?'none':'';
   var rvSubBtn=document.getElementById('rvs-revaluation');
   if(rvSubBtn){
     rvSubBtn.style.display=(typeof rvCanSee==='function'&&rvCanSee())?'':'none';
@@ -1739,6 +1753,14 @@ function setupTabsForRole(){
     if(el.id==='tab-admin') return; /* вече е обработен */
     el.style.display=admRoles.indexOf(currentUser.role)>=0?'inline-flex':'none';
   });
+  /* Контролинг: всички табове и разделители скрити, освен „Ревизии и
+     преоценка". Последно в функцията — бие всяко '' / 'flex' отгоре. */
+  if(isControllingRole()){
+    document.querySelectorAll('#nav-tabs-container .nav-tab, #nav-tabs-container .tab-sep').forEach(function(t){
+      if(t.id==='tab-revaluation' || t.style.display==='none') return;
+      t.style.display='none'; t.setAttribute('data-ctrl-hidden','1');
+    });
+  }
 }
 function showModule(mod){
   /* 'oborot' НЕ е самостоятелен модул — няма контейнер mod-oborot и затова

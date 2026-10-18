@@ -69,8 +69,9 @@ const USERS = [
   { email: 'm.pavlova@temax.bg', display_name: 'Миглена Павлова', notify_groups: ['controlling'], is_regional: false, assigned_stores: [] },
   { email: 't.ivanova@temax.bg', display_name: 'Т. Иванова', notify_groups: [], is_regional: true, assigned_stores: ['Добрич', 'Силистра', 'Търговище', 'Шумен'] },
   { email: 'n.koleva@temax.bg', display_name: 'Н. Колева', notify_groups: [], is_regional: true, assigned_stores: ['Петрич'] },
-  /* Елица е в controlling от 13.10.2026 (проверено в базата) */
-  { email: 'e.gurova@temax.bg', display_name: 'Елица Гюрова', notify_groups: ['controlling'], is_regional: false, assigned_stores: [] },
+  /* От 18.10.2026 известието отива по групата 'revaluation', не 'controlling'
+     (rvRecipients). Елица е и в двете; Цветелина и Миглена — само controlling. */
+  { email: 'e.gurova@temax.bg', display_name: 'Елица Гюрова', notify_groups: ['controlling', 'revaluation'], is_regional: false, assigned_stores: [] },
   { email: 'v.drug@temax.bg', display_name: 'Друг ЦО', notify_groups: ['co'], is_regional: false, assigned_stores: [] }
 ];
 
@@ -375,11 +376,12 @@ async function imported(o) {
     ok('submitted_by = името', sp && sp.body.submitted_by === 'Управител Шумен');
     ok('push извикан веднъж', h.push.length === 1);
     const names = h.push[0] ? h.push[0].names : [];
-    ok('получават controlling (Цветелина, Миглена, Елица)', names.indexOf('Цветелина Тенева') >= 0 && names.indexOf('Миглена Павлова') >= 0 && names.indexOf('Елица Гюрова') >= 0, names.join(','));
+    ok('получава групата revaluation (Елица)', names.indexOf('Елица Гюрова') >= 0, names.join(','));
+    ok('само controlling НЕ получава (Цветелина, Миглена)', names.indexOf('Цветелина Тенева') < 0 && names.indexOf('Миглена Павлова') < 0, names.join(','));
     ok('регионалният на Шумен получава (Т. Иванова)', names.indexOf('Т. Иванова') >= 0);
     ok('чужд регионален НЕ (Н. Колева), друга група НЕ (Друг ЦО)', names.indexOf('Н. Колева') < 0 && names.indexOf('Друг ЦО') < 0);
     ok('текст „Преоценка · Шумен · Октомври: подадени 5 реда"', h.push[0] && h.push[0].msg === 'Преоценка · Шумен · Октомври: подадени 5 реда', h.push[0] && h.push[0].msg);
-    ok('имейл до същите 4 адреса', h.mail.length === 1 && h.mail[0].to.length === 4 && h.mail[0].subj === 'Преоценка · Шумен · Октомври: подадени 5 реда');
+    ok('имейл до същите 2 адреса', h.mail.length === 1 && h.mail[0].to.length === 2 && h.mail[0].subj === 'Преоценка · Шумен · Октомври: подадени 5 реда');
     ok('статусът показва „Подадена"', h.doc.getElementById('rv-status').textContent.indexOf('Подадена') === 0);
     /* обектът след подаване — само четене */
     ok('обектът: няма „Изтрий ред"', !btn(mod(h), 'Изтрий ред'));

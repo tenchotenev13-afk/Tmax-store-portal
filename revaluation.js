@@ -54,7 +54,7 @@ var RV_EXPORT_HEADERS = ['Магазин', 'Код', 'Описание на ма
 
 /* ─── Роли ─────────────────────────────────────────────── */
 function rvIsStoreUser(){ return !!currentUser && RV_STORE_ROLES.indexOf(currentUser.role) >= 0; }
-function rvIsCO(){ return !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'accounting'); }
+function rvIsCO(){ return !!currentUser && ['admin', 'accounting', 'controlling'].indexOf(currentUser.role) >= 0; }
 function rvParseList(v){
   if(Array.isArray(v)) return v;
   if(typeof v === 'string' && v.length > 2){
@@ -73,7 +73,7 @@ function rvIsRegionalFor(store){ return !!store && rvRegionStores().indexOf(stor
    да ПИШАТ в бланката на обект е зад същия ключ (rvCanEdit). */
 function rvCanSee(){
   if(!currentUser) return false;
-  if(['admin', 'accounting', 'supply'].indexOf(currentUser.role) >= 0) return true;
+  if(['admin', 'accounting', 'supply', 'controlling'].indexOf(currentUser.role) >= 0) return true;
   return rvIsStoreUser() && rvStoresOn;
 }
 function rvLoadStoresFlag(){
@@ -725,14 +725,16 @@ function rvNoItems(){
 }
 
 /* ─── Известия ─────────────────────────────────────────── */
-/* Получатели: група 'controlling' в notify_groups + регионалните, чиито
-   assigned_stores включват обекта. Провалено известие не отменя подаването,
+/* Получатели: група 'revaluation' („Преоценка") в notify_groups + регионалните,
+   чиито assigned_stores включват обекта. До 18.10.2026 беше групата
+   'controlling' — сменена, за да се реши поименно кой получава подадените
+   бланки (Администрация → Групи). Провалено известие не отменя подаването,
    но се казва с жълт toast. */
 function rvRecipients(users, store){
   var out = [], seen = {};
   (users || []).forEach(function(u){
     var groups = typeof notifyGroupsOf === 'function' ? notifyGroupsOf(u) : rvParseList(u.notify_groups);
-    var hit = groups.indexOf('controlling') >= 0 || (u.is_regional && rvParseList(u.assigned_stores).indexOf(store) >= 0);
+    var hit = groups.indexOf('revaluation') >= 0 || (u.is_regional && rvParseList(u.assigned_stores).indexOf(store) >= 0);
     var key = u.email || u.display_name;
     if(hit && key && !seen[key]){ seen[key] = 1; out.push(u); }
   });

@@ -43,6 +43,7 @@ const TESTS = [
   'revaluation-sap.test.js',
   'revaluation-history.test.js',
   'empty-field-dash.test.js',
+  'role-controlling.test.js',
   'revision-schedule.test.js',
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',

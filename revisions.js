@@ -22,8 +22,11 @@ var rsLoadSeq = 0;
 var RS_KIND_LABEL = { groups: 'Ревизия на групи', none: 'Няма ревизии', movements: 'Движения' };
 
 function rsCanSee(){
-  return !!currentUser && ['admin', 'accounting', 'supply', 'manager', 'sklad'].indexOf(currentUser.role) >= 0;
+  return !!currentUser && ['admin', 'accounting', 'supply', 'manager', 'sklad', 'controlling'].indexOf(currentUser.role) >= 0;
 }
+/* Самият график — без Контролинг (rsCanSee го пуска само заради главния
+   таб, под който е „🏷️ Преоценка"). Отворен по друг път → „Нямаш достъп". */
+function rsCanSeeSchedule(){ return rsCanSee() && currentUser.role !== 'controlling'; }
 function rsCanEdit(){ return !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'accounting'); }
 
 /* ─── Подредба ─────────────────────────────────────────── */
@@ -52,7 +55,7 @@ function rsRange(w){
 function loadRevSchedule(){
   var el = document.getElementById('mod-rev-schedule');
   if(!el) return Promise.resolve();
-  if(!rsCanSee()){ el.innerHTML = '<div class="pg-title">📅 График ревизии</div><div class="card">Нямаш достъп до този модул.</div>'; return Promise.resolve(); }
+  if(!rsCanSeeSchedule()){ el.innerHTML = '<div class="pg-title">📅 График ревизии</div><div class="card">Нямаш достъп до този модул.</div>'; return Promise.resolve(); }
   var seq = ++rsLoadSeq;
   el.innerHTML = '<div class="pg-title">📅 График ревизии</div><div style="padding:20px;color:#94a3b8;">⏳ Зареждане...</div>';
   return sbGetOk('revision_schedule', 'select=*&order=starts_on.asc').then(function(res){

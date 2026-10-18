@@ -401,7 +401,7 @@ function _renderUserModal(u, storeList){
   if(old && typeof old.remove==='function')old.remove();
 
   var isEdit=!!_userEditId;
-  var roles=['admin','accounting','logistics','manager','sklad','kasa','supply','marketing','info','user'];
+  var roles=['admin','accounting','logistics','manager','sklad','kasa','supply','marketing','info','user','controlling'];
   var stores=userModalStoreOptions(storeList, u.store_name);
 
   var html=
@@ -2046,8 +2046,16 @@ function deleteAdminNotifSchedule(id){
 
 /* ── users.notify_groups — колоната „Групи" в списъка с потребители ─────── */
 
-var NOTIFY_GROUP_LABELS = { co: 'ЦО', controlling: 'Контролинг', regional: 'Регионален', owner: 'Собственик' };
+/* 'revaluation' (18.10.2026) — кой получава „Преоценка · <обект>: подадена"
+   (rvRecipients в revaluation.js). Само група на ПОТРЕБИТЕЛЯ:
+   - в матрицата (NOTIF_GROUPS) я няма — notification_matrix_group_key_check
+     в базата допуска само co / controlling / regional / owner / store;
+   - в NOTIFY_GROUP_ORDER я няма — той е = REPORT_GROUP_KEYS (bulletin.js),
+     групите на отчетите по задача, които решава send-routed-report.
+   Затова е в отделен списък, показван само в редактора на групите. */
+var NOTIFY_GROUP_LABELS = { co: 'ЦО', controlling: 'Контролинг', regional: 'Регионален', owner: 'Собственик', revaluation: 'Преоценка' };
 var NOTIFY_GROUP_ORDER  = ['co','controlling','regional','owner'];
+var NOTIFY_GROUP_USER_ONLY = ['revaluation'];
 
 function notifyGroupsOf(u){
   var g = u && u.notify_groups;
@@ -2109,7 +2117,7 @@ function _renderNotifyGroupsModal(userName, currentList, isRegional){
       ? '<div style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:8px 10px;font-size:11.5px;margin-bottom:10px;">⚠️ is_regional = ' + (isRegional?'да':'не') + ', а групата „Регионален" ' + (isRegional?'липсва':'е сложена') + '. Двете полета се четат от различен код (личният отчет по задачи чете is_regional за „Регионален") — изравни ги съзнателно.</div>'
       : '') +
     '<div style="border:1px solid #e2e8f0;border-radius:8px;padding:8px;">' +
-    NOTIFY_GROUP_ORDER.map(function(k){
+    NOTIFY_GROUP_ORDER.concat(NOTIFY_GROUP_USER_ONLY).map(function(k){
       return '<label style="display:flex;align-items:center;gap:8px;padding:5px 4px;font-size:13px;cursor:pointer;">' +
         '<input type="checkbox" class="ntf-grp-cb" value="' + k + '" ' + (currentList.indexOf(k)>=0?'checked':'') + '> ' +
         esc(NOTIFY_GROUP_LABELS[k]) + '</label>';
