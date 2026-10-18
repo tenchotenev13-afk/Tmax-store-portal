@@ -14,6 +14,11 @@
 
 ## Чака изпращане
 
+- 18.10 · transfers.departed_at — timestamptz, NULL, без default (кога е тръгнал бусът / камионът)
+  (в базата от миграцията ЧАКА ПРИЛАГАНЕ)
+- 18.10 · transfers.departed_by — text, NULL, без default (кой е отбелязал „Тръгна")
+  (в базата от миграцията ЧАКА ПРИЛАГАНЕ)
+- 18.10 · transfers.status — нова стойност на статус 'sent' („Изпратен"; досега 'planned' / 'partial' / 'done')
 - 15.10 · transfer_cargo_events.unit — integer, NULL, без default (номер на единицата 1..qty; null = целият товар)
   (в базата от миграцията 20261015132314)
 - 15.10 · нова таблица revision_schedule — id uuid PK default gen_random_uuid(), starts_on date NOT NULL, ends_on date NOT NULL, kind text NOT NULL default 'groups' (стойности 'groups' / 'none' / 'movements'), note text NULL, groups jsonb NOT NULL default '[]', created_by text NULL, created_at timestamptz NOT NULL default now(), updated_by text NULL, updated_at timestamptz NULL; уникалност (starts_on)

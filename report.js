@@ -1965,7 +1965,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        снимка, само в седмичния отчет (таб „Днес" няма седмица и не показва
        трансфери). Без филтър по дата: застоял товар от преди месец тежи
        повече, не по-малко. r[15]–r[18]. */
-    W.toISO ? sbGet('transfers','select=id,transfer_num,from_store,mode,depart_date,created_at') : Promise.resolve([]),
+    W.toISO ? sbGet('transfers','select=id,transfer_num,from_store,mode,depart_date,departed_at,created_at') : Promise.resolve([]),
     W.toISO ? sbGet('transfer_cargo','select=id,transfer_id,position,kind,qty,recipient_store,transfer_points,prev_cargo_id') : Promise.resolve([]),
     W.toISO ? sbGet('transfer_cargo_events','select=id,cargo_id,transfer_id,store_name,event,unit,resolves_id,created_at') : Promise.resolve([]),
     W.toISO ? sbGet('app_settings','key=eq.transfer_stale_days&select=key,value&limit=1') : Promise.resolve([])
@@ -2863,6 +2863,7 @@ function reportChecklistSectionHtml(cross){
      проблем          — отворен „Проблем" (без „Решен"), от най-стария;
      чака прехвърляне — „Разтоварен" в първата точка, без наследник;
      в път            — без крайна отметка; начало = „Предаден на куриер",
+                        иначе „🚚 Тръгна" (departed_at, от 18.10.2026),
                         иначе depart_date, иначе created_at на транспорта.
    Приключен (получен) товар не е застоял, дори с отворен проблем.
    Дни — цели, между локални полунощи (като diffStale); застоял = СТРОГО
@@ -2915,7 +2916,7 @@ function reportTransferOpenStates(t, c, evs, hasSucc, refD){
   } else {
     var handed = null;
     mine.forEach(function(e){ if (e.event === 'handed_to_courier') handed = e; });
-    out.push({ reason: 'transit', since: handed ? handed.created_at : (t.depart_date || t.created_at), store: tgStore });
+    out.push({ reason: 'transit', since: handed ? handed.created_at : (t.departed_at || t.depart_date || t.created_at), store: tgStore });
   }
   out.forEach(function(x){ x.age = reportTransferAge(x.since, refD); });
   return out;

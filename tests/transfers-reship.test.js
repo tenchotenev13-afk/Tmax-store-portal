@@ -312,7 +312,8 @@ const newCargo = h => h.db.cargo.filter(c => c.prev_cargo_id);
     ok('резултатът е НОВИЯТ транспорт (там е товарът сега)', hits[0] && hits[0].getAttribute('data-t') === newT.id, hits[0] && hits[0].outerHTML.slice(0, 200));
     ok('пътят: „Козлодуй-0001 #1 → ' + newT.transfer_num + ' #1"', hits[0] && hits[0].querySelector('.trf-cargo-path') &&
       hits[0].querySelector('.trf-cargo-path').textContent.indexOf('Козлодуй-0001 #1 → ' + newT.transfer_num + ' #1') >= 0);
-    ok('последното движение е от новото звено — „в път"', hits[0] && /в път/.test(hits[0].querySelector('.trf-cargo-last').textContent));
+    /* От 18.10.2026 („🚚 Тръгна"): без движение и без departed_at → „още не е тръгнал". */
+    ok('последното движение е от новото звено — „в път" / „още не е тръгнал"', hits[0] && /в път|още не е тръгнал/.test(hits[0].querySelector('.trf-cargo-last').textContent));
     h.close();
 
     /* Козлодуй не участва в новия транспорт — звеното се дозарежда. */

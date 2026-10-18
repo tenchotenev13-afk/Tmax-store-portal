@@ -52,8 +52,8 @@ var TF_KINDS = [
   ['carton', 'Кашон']
 ];
 var TF_COURIERS = ['Intime', 'Econt', 'Transpress'];
-var TF_STATUS_LABELS = { planned: 'Планиран', partial: 'Частично изпълнен', done: 'Завършен' };
-var TF_STATUS_COLORS = { planned: ['#eff6ff', '#1e40af'], partial: ['#fffbeb', '#92400e'], done: ['#f0fdf4', '#166534'] };
+var TF_STATUS_LABELS = { planned: 'Планиран', sent: 'Изпратен', partial: 'Частично изпълнен', done: 'Завършен' };
+var TF_STATUS_COLORS = { planned: ['#eff6ff', '#1e40af'], sent: ['#e0f2fe', '#075985'], partial: ['#fffbeb', '#92400e'], done: ['#f0fdf4', '#166534'] };
 
 /* ── Етап 2: отметки по товар (transfer_cargo_events) ── */
 var tfEvents = [];          /* събитията на видимите транспорти, по created_at */
@@ -426,7 +426,8 @@ function renderTransfers() {
     h += '<tr data-id="' + tfAttr(t.id) + '">' +
       '<td style="font-weight:700;white-space:nowrap;">' + escVal(t.transfer_num) + '</td>' +
       '<td>' + escVal(tfModeLabel(t)) + (t.waybill_no ? '<div style="font-size:11px;color:#64748b;">№ ' + escVal(t.waybill_no) + '</div>' : '') + '</td>' +
-      '<td style="white-space:nowrap;">' + escVal(tfDateLabel(t)) + '</td>' +
+      '<td style="white-space:nowrap;">' + escVal(tfDateLabel(t)) +
+        (t.mode !== 'courier' && t.departed_at ? '<div class="trf-departed" style="font-size:11px;color:#075985;">🚚 тръгна ' + escVal(tfFmtTs(t.departed_at)) + '</div>' : '') + '</td>' +
       '<td>' + escVal(tfRouteText(t)) + '</td>' +
       '<td style="text-align:center;white-space:nowrap;" class="trf-progress">' + tfProgressLabel(t) + (pcs !== cargo.length ? ' <span style="color:#64748b;font-size:11px;">(' + pcs + ' бр.)</span>' : '') + '</td>' +
       '<td>' + tfStatusBadge(t) + '</td>' +
@@ -1169,6 +1170,7 @@ function renderTransferPrint(t, cargo, coNum) {
     kv('Вид', courier ? 'Куриер · ' + (t.courier_company || '') : (t.mode === 'truck' ? 'Камион' : 'Бус')) +
     (courier ? kv('№ товарителница', t.waybill_no) : kv('Дата / час', tfDateLabel(t))) +
     (courier ? '' : kv('Шофьор', t.driver)) +
+    (courier || !t.departed_at ? '' : kv('Тръгнал', tfFmtTs(t.departed_at) + (t.departed_by ? ' · ' + t.departed_by : ''))) +
     (t.mode === 'truck' ? kv('Рег. номер', t.plate_no) : '') +
     kv('Маршрут', tfRouteText(t)) +
     kv('Статус', (TF_STATUS_LABELS[tfComputeStatus(t, cargo, tfEventsOf(t.id)).status] || t.status) + ' · ' + tfProgressLabel(t, cargo)) +
@@ -1401,7 +1403,8 @@ function tfValidateEvent(kind, f, t) {
 function tfComputeStatus(t, cargo, evs) {
   cargo = cargo || [];
   var done = cargo.filter(function (c) { return tfCargoDone(c, evs); }).length;
-  var status = !(evs && evs.length) ? 'planned' : (cargo.length && done === cargo.length ? 'done' : 'partial');
+  /* Без отметки: „Изпратен" след „🚚 Тръгна" (departed_at), иначе „Планиран". */
+  var status = !(evs && evs.length) ? (t && t.departed_at ? 'sent' : 'planned') : (cargo.length && done === cargo.length ? 'done' : 'partial');
   return { status: status, done: done, total: cargo.length };
 }
 function tfProgressLabel(t, cargo) {
@@ -1461,6 +1464,15 @@ function tfPhotoPrintText(e) {
   return ' · ' + out.join(', ');
 }
 
+/* Бус / камион, товарът още без отметка: тръгнал ли е транспортът.
+   null при куриер (там „Предаден на куриер" казва същото). „Получен" /
+   „Разтоварен" НЕ се блокират преди тръгването — текстът предупреждава. */
+function tfNotMovedText(t, c) {
+  if (!t || !c || t.mode === 'courier') return null;
+  var tg = tfCargoTarget(c);
+  if (t.departed_at) return '🚚 в път от ' + tfFmtTs(t.departed_at) + ' — очаква се в ' + tg.store + (tg.event === 'unloaded' ? ' (прехвърляне)' : '');
+  return '⏳ още не е тръгнал от ' + (t.from_store || '—');
+}
 /* Състоянието на товара с думи — за картата и за „За потвърждение". */
 function tfCargoStateText(t, c, evs) {
   var succ = tfSuccessor(c);
@@ -1477,7 +1489,7 @@ function tfCargoStateText(t, c, evs) {
       : '📦 получени ' + us.done.length + '/' + us.qty + ' в ' + tg.store;
   }
   if (mine.some(function (e) { return e.event === 'handed_to_courier'; })) return '🚚 предаден на куриер';
-  return '⏳ очаква се в ' + tg.store + (tg.event === 'unloaded' ? ' (прехвърляне)' : '');
+  return tfNotMovedText(t, c) || ('⏳ очаква се в ' + tg.store + (tg.event === 'unloaded' ? ' (прехвърляне)' : ''));
 }
 
 /* ── Филтри ──────────────────────────────────────────────────────────────── */
@@ -1628,7 +1640,7 @@ function tfCountersHtml(q) {
 
 /* Бързите филтри над списъка — съчетават се с търсенето и с броячите. */
 var TF_QUICK = [
-  ['status', 'Статус', [['', 'Всички'], ['planned', 'Планиран'], ['partial', 'Частично'], ['done', 'Завършен']]],
+  ['status', 'Статус', [['', 'Всички'], ['planned', 'Планиран'], ['sent', 'Изпратен'], ['partial', 'Частично'], ['done', 'Завършен']]],
   ['mode', 'Вид', [['', 'Всички'], ['bus', '🚐 Бус'], ['courier', '📦 Куриер'], ['truck', '🚛 Камион']]],
   ['period', 'Тръгване', [['', 'Всички'], ['week', 'Тази седмица'], ['month', 'Този месец']]]
 ];
@@ -1847,8 +1859,8 @@ function tfCargoLastMove(c) {
   });
   return last;
 }
-function tfLastMoveText(e) {
-  if (!e) return '🚐 в път';
+function tfLastMoveText(e, t, c) {
+  if (!e) return tfNotMovedText(t, c) || '🚐 в път';
   var when = tfFmtTs(e.created_at);
   /* По единица: частично получен / разтоварен — с броя, не „получен". */
   var c = tfCargoById[e.cargo_id];
@@ -1914,7 +1926,7 @@ function tfCargoResultsHtml() {
     return '<div class="trf-cargo-hit" data-t="' + tfAttr(x.t.id) + '" data-c="' + tfAttr(x.c.id) + '" onclick="openTransferCard(\'' + tfAttr(x.t.id) + '\')"' +
       ' style="cursor:pointer;background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:8px;margin-top:6px;">' +
       '<b>' + escVal(x.t.transfer_num) + '</b> · ' + escVal(tfCargoLabel(x.c, x.i)) +
-      '<div class="trf-cargo-last" style="font-size:12px;color:#334155;margin-top:2px;">' + escVal(tfLastMoveText(x.last)) + '</div>' +
+      '<div class="trf-cargo-last" style="font-size:12px;color:#334155;margin-top:2px;">' + escVal(tfLastMoveText(x.last, x.t, x.c)) + '</div>' +
       (x.path && x.path.length > 1 ? '<div class="trf-cargo-path" style="font-size:11px;color:#64748b;margin-top:2px;">Път: ' + escVal(x.path.join(' → ')) + '</div>' : '') +
       '</div>';
   }).join('') + '</div>';
@@ -2109,10 +2121,108 @@ function closeTransferCard() { tfCardId = null; tfHighlight = null; tfHighlightU
    създалия го обект или админ. Едно правило за бутона и за самото триене. */
 function tfCanDelete(t) {
   if (!t) return 'Няма транспорт.';
+  if (t.departed_at) return 'Тръгнал транспорт не се трие.';
   var evs = tfEventsOf(t.id);
   if (evs.length || tfComputeStatus(t, tfCargoByTransfer[t.id] || [], evs).status !== 'planned') return 'Транспортът вече има отметки.';
   if (!tfIsAdmin() && tfActorStores().indexOf(t.from_store) < 0) return 'Изтрива създалият го обект или админ.';
   return null;
+}
+
+/* ── „🚚 Тръгна" (18.10.2026) ─────────────────────────────────────────────
+   Бус / камион; отбелязва създалият го обект или админ; веднъж, без
+   връщане. Часът — между създаването на транспорта и сега. Без отметки
+   транспортът става „Изпратен"; „в път" / „застоял" се мерят оттук
+   (reportTransferOpenStates). */
+function tfCanDepart(t) {
+  if (!t) return 'Няма транспорт.';
+  if (t.mode === 'courier') return 'При куриер се отбелязва „Предаден на куриер“.';
+  if (t.departed_at) return 'Транспортът вече е тръгнал на ' + tfFmtTs(t.departed_at) + '.';
+  if (!tfIsAdmin() && tfActorStores().indexOf(t.from_store) < 0) return 'Отбелязва създалият го обект или админ.';
+  return null;
+}
+/* Стойност за <input type=datetime-local> по местно време. */
+function tfLocalDT(d) {
+  var p = function (n) { return String(n).padStart(2, '0'); };
+  return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + 'T' + p(d.getHours()) + ':' + p(d.getMinutes());
+}
+/* Часът от прозорчето → {iso} или {err}. now — за теста. */
+function tfValidateDepart(t, value, now) {
+  var d = new Date(String(value || ''));
+  if (!value || isNaN(d.getTime())) return { err: 'Въведи час на тръгване.' };
+  var n = now ? new Date(now) : new Date();
+  /* Полето е с минутна точност — сравнява се с началото на минутата на създаването. */
+  var created = new Date(t.created_at);
+  if (!isNaN(created.getTime()) && d.getTime() < created.getTime() - created.getSeconds() * 1000 - created.getMilliseconds()) {
+    return { err: 'Часът не може да е преди създаването на транспорта (' + tfFmtTs(t.created_at) + ').' };
+  }
+  if (d.getTime() > n.getTime() + 60000) return { err: 'Часът не може да е в бъдещето.' };
+  return { iso: d.toISOString() };
+}
+var tfDepartForm = null;
+function openDepartModal(tid) {
+  var t = tfFindTransfer(tid);
+  var why = tfCanDepart(t);
+  if (why) { toast(why, '#dc2626'); return; }
+  tfDepartForm = { tid: tid, value: tfLocalDT(new Date()), saving: false };
+  renderDepartModal();
+}
+function closeDepartModal() {
+  tfDepartForm = null;
+  var ov = document.getElementById('tfd-ov');
+  if (ov) ov.remove();
+}
+function renderDepartModal() {
+  var f = tfDepartForm;
+  if (!f) return;
+  var t = tfFindTransfer(f.tid);
+  var old = document.getElementById('tfd-ov');
+  if (old) old.remove();
+  var created = new Date(t.created_at);
+  var h = '<div class="bmod" style="width:min(380px,94vw);">' +
+    '<div style="font-weight:700;font-size:15px;margin-bottom:2px;">🚚 Тръгна</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">' + escVal(t.transfer_num) + ' · ' + escVal(tfRouteText(t)) + '</div>' +
+    '<label class="fl">Час на тръгване</label>' +
+    '<input id="tfd-time" type="datetime-local" class="fi" value="' + tfAttr(f.value) + '"' +
+      (isNaN(created.getTime()) ? '' : ' min="' + tfLocalDT(created) + '"') + ' max="' + tfLocalDT(new Date()) + '"' +
+      ' onchange="if(tfDepartForm)tfDepartForm.value=this.value">' +
+    '<div style="font-size:11px;color:#64748b;margin-top:4px;">Отбелязва се веднъж и не се връща.</div>' +
+    '<div id="tfd-error" style="color:#b91c1c;font-size:13px;margin-top:8px;"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">' +
+      '<button class="btn-sm" onclick="closeDepartModal()">Откажи</button>' +
+      '<button id="tfd-save" class="btn btn-green"' + (f.saving ? ' disabled' : '') + ' onclick="submitDepart()">' + (f.saving ? '⏳ Записвам…' : 'Запиши') + '</button>' +
+    '</div></div>';
+  var ov = document.createElement('div');
+  ov.id = 'tfd-ov'; ov.className = 'bov open';
+  ov.innerHTML = h;
+  document.body.appendChild(ov);
+}
+function submitDepart() {
+  var f = tfDepartForm;
+  if (!f || f.saving) return;
+  var t = tfFindTransfer(f.tid);
+  /* Пак при записа — между отварянето и клика друг може да е отбелязал. */
+  var why = tfCanDepart(t);
+  var v = why ? null : tfValidateDepart(t, f.value);
+  var err = why || (v && v.err);
+  var errEl = document.getElementById('tfd-error');
+  if (err) { if (errEl) errEl.textContent = err; toast(err, '#dc2626'); return; }
+  var body = { departed_at: v.iso, departed_by: (currentUser && (currentUser.display_name || currentUser.email)) || null };
+  if (!tfEventsOf(t.id).length) body.status = 'sent';
+  f.saving = true; renderDepartModal();
+  sbPatch('transfers', 'id=eq.' + t.id, body).then(function (res) {
+    if (!res || !res.ok) {
+      f.saving = false; renderDepartModal();
+      toast('„Тръгна“ НЕ е записано: ' + sbErrMsg(res), '#dc2626');
+      return;
+    }
+    Object.keys(body).forEach(function (k) { t[k] = body[k]; });
+    closeDepartModal();
+    toast('🚚 ' + (t.transfer_num || '') + ' тръгна в ' + tfFmtTs(t.departed_at));
+    renderTransfers();
+  }).catch(function () {
+    f.saving = false; renderDepartModal();
+    toast('Грешка при запис', '#dc2626');
+  });
 }
 
 /* Изтриване на планиран транспорт: първо товарите, после заглавието.
@@ -2160,11 +2270,13 @@ function renderTransferCard() {
       }).join('') +
       '<button class="btn-sm" onclick="printTransfer(\'' + tfAttr(t.id) + '\')">🖨 Печат</button>' +
       '<button id="trf-labels" class="btn-sm" onclick="tfLabels(\'' + tfAttr(t.id) + '\')">🏷 Етикети</button>' +
+      (tfCanDepart(t) === null ? '<button id="trf-depart" class="btn-sm" onclick="openDepartModal(\'' + tfAttr(t.id) + '\')">🚚 Тръгна</button>' : '') +
       (tfCanDelete(t) === null ? '<button id="trf-delete" class="btn-sm" onclick="deleteTransfer(\'' + tfAttr(t.id) + '\')">🗑 Изтрий</button>' : '') +
       '<button id="trf-card-back" class="btn-sm" onclick="closeTransferCard()">← Обратно</button></div>' +
     '</div>' +
     '<div style="font-size:13px;color:#334155;margin-bottom:12px;">' + escVal(tfModeLabel(t)) + ' · ' + escVal(tfDateLabel(t)) +
-      (t.driver ? ' · шофьор ' + escVal(t.driver) : '') + (t.waybill_no ? ' · № ' + escVal(t.waybill_no) : '') +
+      (t.driver ? ' · шофьор ' + escVal(t.driver) : '') + (t.mode !== 'courier' && t.departed_at ? ' · <span class="trf-departed">🚚 тръгна ' + escVal(tfFmtTs(t.departed_at)) + '</span>' : '') +
+      (t.waybill_no ? ' · № ' + escVal(t.waybill_no) : '') +
       '<div style="margin-top:2px;">' + escVal(tfRouteText(t)) + '</div></div>';
   cargo.forEach(function (c, i) {
     var mine = tfCargoEvents(evs, c.id);

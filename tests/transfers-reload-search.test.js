@@ -238,7 +238,8 @@ const hitLast = function (h, cid) { const r = $(h, '.trf-cargo-hit[data-c="' + c
     ok('по стокова СР-1001 → c1', (await search(h, 'ср-1001')).join(',') === 'c1');
     ok('c1: последно — получен във Враца, с час', /получен в Враца · 30\.09 \d\d:15/.test(hitLast(h, 'c1')), hitLast(h, 'c1'));
     ok('по рекламация РК-555 → c2', (await search(h, 'РК-555')).join(',') === 'c2');
-    ok('c2 без движение → „в път"', /в път/.test(hitLast(h, 'c2')), hitLast(h, 'c2'));
+    /* От 18.10.2026 („🚚 Тръгна"): бусът без departed_at → „още не е тръгнал от …". */
+    ok('c2 без движение → „в път" / „още не е тръгнал"', /в път|още не е тръгнал/.test(hitLast(h, 'c2')), hitLast(h, 'c2'));
     ok('по № клиентска заявка Троян-0042 → c2 (номер → id)', (await search(h, 'Троян-0042')).join(',') === 'c2');
     const coCall = h.calls.get.filter(function (g) { return /\/client_orders\?/.test(g); }).pop();
     ok('заявката към client_orders е по in_num', coCall && /in_num=ilike/.test(decodeURIComponent(coCall)), coCall);

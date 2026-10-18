@@ -287,7 +287,7 @@ function withoutDiffStale(s) {
   {
     const h = envUI(ADMIN);
     await open(h);
-    ok('лентата с бързите филтри е там', !!$(h, '#trf-quick') && $$(h, '.trf-q').length === 11);  /* 11 от 14.10: + „🚛 Камион" */
+    ok('лентата с бързите филтри е там', !!$(h, '#trf-quick') && $$(h, '.trf-q').length === 12);  /* 11 от 14.10: + „🚛 Камион"; 12 от 18.10: + „Изпратен" */
     await quick(h, 'mode', 'courier');
     ok('вид „Куриер" → таблицата е само t3', tableIds(h).join(',') === 't3', tableIds(h).join(','));
     ok('и броячите следват: В път 1, Застояли 0', counter(h, 'transit') === 1 && counter(h, 'stale') === 0);
