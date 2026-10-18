@@ -1,8 +1,10 @@
 -- transfers-departed-schema.sql
 -- Междускладови трансфери — отметка „🚚 Тръгна" за бус и камион:
 -- transfers.departed_at, transfers.departed_by; нов статус 'sent' („Изпратен").
--- ЧАКА ПРИЛАГАНЕ (apply_migration след „давай" от Тенчо). След прилагане тук
--- се вписва номерът на миграцията, който базата даде.
+-- ПРИЛОЖЕНО В SUPABASE НА 18.10.2026 като миграция 20261018151927_transfers_departed
+-- и прочетено обратно (timestamptz и text, NULL, без default, 0 попълнени от
+-- 17 реда; коментарите са там). Този файл е ОГЛЕДАЛО на миграцията, не източник.
+-- Rollback: supabase/migrations/20261018151927_transfers_departed_down.sql.
 -- Предишни: transfers-schema.sql · transfers-events-schema.sql ·
 -- transfer-cargo-loaded-at-schema.sql · transfer-cargo-prev-schema.sql ·
 -- transfers-plate-schema.sql · transfer-events-unit-schema.sql.
