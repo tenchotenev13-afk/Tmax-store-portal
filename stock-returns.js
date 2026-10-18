@@ -69,31 +69,11 @@ function srConfirmedTrace(oldDate, newDate, actor){
   if(srSameDate(oldDate, newDate)) return {};
   return { confirmed_by: actor, confirmed_at: new Date().toISOString() };
 }
-/* Двата импорта пишат 'import:<име>' — и когато ИЗТРИВАТ датата. */
+/* Двата импорта пишат 'import:<име>' на НОВИТЕ си редове (съществуващ ред не пипат). */
 function srImportActor(){
   var me=currentUser||{};
   return 'import:'+(me.display_name||me.email||'?');
 }
-/* ОТСТЪПВА ЛИ ИМПОРТЪТ пред потвърждение на обекта (решение от 02.10.2026).
-   Файлът на офиса е авторитетен за всичко останало, но НЕ бива да изтрива или
-   да връща назад актуализация, която обектът е направил сам: точно по нея се
-   отмята задачата „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ", а файлът често се подготвя
-   по-рано и носи стара или празна стойност.
-
-   Запазва се САМО когато редът е потвърден от ОБЕКТА (confirmed_by 'store:…')
-   и файлът носи ПО-СТАРА дата или празна клетка. По-нова дата от файла се
-   пише нормално — тя е нова информация, не връщане назад.
-   Еднаква дата не е „запазване": нищо не се променя и не бива да влиза в
-   брояча, който се показва на Цвети. */
-function srImportKeepsDate(hit, fileDate){
-  if(!hit) return false;
-  if(String(hit.confirmed_by||'').indexOf('store:')!==0) return false;
-  var oldD=hit.confirmed_date?String(hit.confirmed_date).slice(0,10):null;
-  if(!oldD) return false;
-  var newD=fileDate?String(fileDate).slice(0,10):null;
-  return !newD || newD < oldD;
-}
-
 /* ═══════ „БЕЗ АКТУАЛИЗАЦИЯ ОТ ПОНЕДЕЛНИК" ═══════════════════════════════
    Ръчната отметка на постоянната задача „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ" вече я
    няма — базата я слага сама. Затова ТУК трябва да се вижда какво остава, и
@@ -428,12 +408,14 @@ function srLbl(label, val, extra) {
   return '<div style="font-size:10.5px;color:#64748b;'+(extra||'')+'"><span style="color:#94a3b8;">'+label+'</span> '+esc(val)+'</div>';
 }
 /* Документ: Поръчка (само в „По разлики“ — в „По рекламации“ я няма и не се показва), ПВ-ЕВР, ИД-ЕВРО,
-   дата докум., завод — всяко с кратък етикет, сиво, моно. */
+   дата докум., завод — всяко с кратък етикет, сиво, моно.
+   Завод — само в „По рекламации“ (кодът на обекта, напр. 5527). В „По разлики“
+   всички редове са 5521 и обектите се бъркаха (Цвети, 14.10.2026). */
 function srDocCell(r, withOrder) {
   var mono = 'font-family:DM Mono,monospace;';
   var s = (withOrder ? srLbl('Пор.', r.order_number, mono) : '') + srLbl('ПВ-ЕВР', r.purchase_order, mono) + srLbl('ИД-ЕВРО', r.id_euro, mono) +
     (r.doc_date ? '<div style="font-size:10.5px;color:#64748b;'+mono+'"><span style="color:#94a3b8;">Док.</span> '+fmtDate(r.doc_date)+'</div>' : '') +
-    srLbl('Завод', r.plant, mono);
+    (withOrder ? '' : srLbl('Завод', r.plant, mono));
   return '<td style="padding:7px 10px;">'+(s || '<span style="color:#94a3b8;">—</span>')+'</td>';
 }
 function srStoreSupplierCell(r) {
@@ -643,12 +625,12 @@ function srModalHtml() {
        оттам и се синхронизира от submitSD - тук е само за четене, за да няма
        два пътя за една стойност. Ръчният ред няма друг източник. */
     var orderFromDiff = !!r.diff_line_id;
-    h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:8px;">'+
+    /* Без „Завод“: в „По разлики“ е винаги 5521 и само обърква (14.10.2026). */
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;">'+
       '<div><label class="fl">Поръчка</label><input class="fi" id="sr-order" value="'+escVal(r.order_number)+'" placeholder="напр. 4100196440"'+
         (orderFromDiff?' readonly title="Идва от разликата — редактира се в Разлики" style="background:#f8fafc;color:#64748b;"':'')+'></div>'+
       '<div><label class="fl">НОВА ПВ-ЕВР</label><input class="fi" id="sr-po" value="'+escVal(r.purchase_order)+'" placeholder="напр. 4200014948"></div>'+
       '<div><label class="fl">НОВА ИД-ЕВРО</label><input class="fi" id="sr-ie" value="'+escVal(r.id_euro)+'" placeholder="напр. 80413769"></div>'+
-      '<div><label class="fl">Завод</label><input class="fi" id="sr-plant" value="'+(r.plant||'5521')+'" placeholder="5521"></div>'+
       '</div>'+
       '<label class="fl">Дата на документ</label><input type="date" class="fi" id="sr-docdate" value="'+(r.doc_date||'')+'" style="max-width:200px;margin-bottom:10px;">';
   }
@@ -1011,8 +993,12 @@ function srDiffListKey(r){
   var ord=String(r.order_number||'').trim();
   return ord ? ('o|'+st+'|'+ord+'|'+sap) : ('n|'+st+'|'+sap+'|'+String(r.product_name||'').trim().toUpperCase());
 }
-/* Импортът на „По разлики": парсва, съпоставя доставчиците, обновява по ключ
-   или вмъква; приключените в портала не се пипат, липсващите във файла - също. */
+/* Импортът на „По разлики": парсва, съпоставя доставчиците и САМО ДОБАВЯ нови
+   редове. Ред, чийто ключ (srDiffListKey) вече е в портала, се пропуска изцяло
+   — нито едно поле не се пипа, и приключените, и останалите; повторен във
+   файла ключ влиза веднъж. Решение на Цвети от 07.10.2026, както „По
+   рекламации" от 02.10.2026: статусите, датите и коментарите се поддържат в
+   портала, файлът само носи новото. */
 function srImportDiffList(wb, progEl){
   var canComplete=canCompleteSR();
   var parsed=srParseDiffListWorkbook(wb, canComplete);
@@ -1023,11 +1009,10 @@ function srImportDiffList(wb, progEl){
   Promise.all([
     /* sbGetAll (на страници, .partial при провал), не sbGet: провалена или
        отрязана заявка НЕ бива да изглежда като „няма нищо" - тогава всеки
-       ред би станал дубликат. .partial спира импорта. */
-    /* confirmed_date се тегли, за да се разбере дали импортът я СМЕНЯ: само
-       тогава се пише следа (confirmed_by/confirmed_at). Без нея всеки импорт
-       би „освежавал" чужда актуализация и следата би станала безполезна. */
-    sbGetAll('stock_returns','source=eq.diff&select=id,store_name,order_number,sap_code,product_name,status,confirmed_date,confirmed_by&store_name=in.('+
+       ред би станал дубликат. .partial спира импорта.
+       Само колоните на ключа: съществуващ ред не се обновява, значи друго
+       от него не трябва. */
+    sbGetAll('stock_returns','source=eq.diff&select=id,store_name,order_number,sap_code,product_name&store_name=in.('+
       stores.map(function(s){return '"'+encodeURIComponent(s)+'"';}).join(',')+')&order=id.asc'),
     sbGetAll('stock_returns','select=supplier&order=id.asc')
   ]).then(function(res){
@@ -1059,65 +1044,39 @@ function srImportDiffList(wb, progEl){
       else if(unmatched.indexOf(r.supplier)<0) unmatched.push(r.supplier);
     });
     var existing={};
-    res[0].forEach(function(x){ var k=srDiffListKey(x); if(!existing[k]) existing[k]=x; });
+    res[0].forEach(function(x){ existing[srDiffListKey(x)]=1; });
     var created=currentUser.display_name||currentUser.email;
-    var toInsert=[], toUpdate=[], skippedCompleted=0, keptByStore=0;
+    var toInsert=[], skippedExisting=0, repeatedInFile=0, seenKey={};
     rows.forEach(function(r){
-      var hit=existing[srDiffListKey(r)];
-      if(!hit){
-        r.created_by=created;
-        /* Нов ред с дата ОТ ФАЙЛА — следата е на импорта. Без нея редът влиза
-           с confirmed_by NULL: правилото и така не би го броил, но колоната
-           трябва да казва истината, а не да мълчи. 32 заварени реда са точно
-           такива (дата по-ранна от създаването им).
-           Ключовете се слагат на ВСЕКИ ред, дори празни: srBatchImport праща
-           партиди по 300 с ЕДИН POST, а PostgREST иска еднакви колони —
-           условно добавяне би счупило цялата партида. */
-        r.confirmed_by = r.confirmed_date ? srImportActor() : null;
-        r.confirmed_at = r.confirmed_date ? new Date().toISOString() : null;
-        toInsert.push(r); return;
-      }
-      if(hit.status==='completed'){ skippedCompleted++; return; }
-      var upd={
-        supplier:r.supplier, sap_code:r.sap_code, product_name:r.product_name, quantity:r.quantity,
-        order_number:r.order_number, confirmed_date:r.confirmed_date, status:r.status, store_comment:r.store_comment
-      };
-      /* Потвърдено от обекта и файлът носи по-стара дата или празна клетка —
-         датата и следата ѝ НЕ се пипат; останалите колони се обновяват както
-         досега. Виж srImportKeepsDate(). */
-      if(srImportKeepsDate(hit, r.confirmed_date)){
-        delete upd.confirmed_date;
-        keptByStore++;
-      } else {
-        /* Импортът е на ОФИСА: смени ли датата (включително на null), следата
-           става 'import:<име>' и правилото спира да брои реда за актуализиран
-           от обекта. Не пипа ли датата — колоните остават както са. */
-        var trImp=srConfirmedTrace(hit.confirmed_date, r.confirmed_date, srImportActor());
-        for(var ki in trImp){ if(Object.prototype.hasOwnProperty.call(trImp,ki)) upd[ki]=trImp[ki]; }
-      }
-      toUpdate.push({ id:hit.id, purchase_order:r.order_number||r.product_name, data:upd });
+      var k=srDiffListKey(r);
+      if(existing[k]){ skippedExisting++; return; }
+      if(seenKey[k]){ repeatedInFile++; return; }
+      seenKey[k]=1;
+      r.created_by=created;
+      /* Нов ред с дата ОТ ФАЙЛА — следата е на импорта. Без нея редът влиза
+         с confirmed_by NULL: правилото и така не би го броил, но колоната
+         трябва да казва истината, а не да мълчи. 32 заварени реда са точно
+         такива (дата по-ранна от създаването им).
+         Ключовете се слагат на ВСЕКИ ред, дори празни: srBatchImport праща
+         партиди по 300 с ЕДИН POST, а PostgREST иска еднакви колони —
+         условно добавяне би счупило цялата партида. */
+      r.confirmed_by = r.confirmed_date ? srImportActor() : null;
+      r.confirmed_at = r.confirmed_date ? new Date().toISOString() : null;
+      toInsert.push(r);
     });
-    var done=function(insertErrors, failed){
-      var h='<span style="color:#16a34a;">✅ Нови: '+toInsert.length+' · Обновени: '+(toUpdate.length-failed.length)+
-            ' · Пропуснати (приключени): '+skippedCompleted+'</span>';
-      /* Видимо за Цвети: кои редове файлът НЕ е пипнал и защо. Без този ред
-         тя ще реши, че импортът е сработил наполовина. */
-      if(keptByStore) h+='<div style="color:#2563eb;">🛡 '+keptByStore+' '+(keptByStore===1?'ред не е пипан':'реда не са пипани')+
-                         ' — потвърдени от обекта с по-нова дата</div>';
+    var done=function(insertErrors){
+      var h='<span style="color:#16a34a;">✅ Нови: '+toInsert.length+
+            ' · Пропуснати (вече в портала): '+skippedExisting+
+            ' · Повторени във файла: '+repeatedInFile+'</span>';
       if(unmatched.length) h+='<div style="color:#d97706;">⚠️ Несъпоставени доставчици (остават с името от файла): '+esc(unmatched.join(', '))+'</div>';
       if(parsed.badDates) h+='<div style="color:#d97706;">⚠️ Нечетими дати (записани празни): '+parsed.badDates+'</div>';
-      if(failed.length) h+='<div style="color:#dc2626;">⚠️ Не бяха обновени: '+esc(failed.join(', '))+'</div>';
       if(insertErrors>0) h+='<div style="color:#dc2626;">⚠️ '+insertErrors+' партиди с нови записи не минаха. Виж конзолата (F12).</div>';
       progEl.innerHTML=h;
-      if(!failed.length && !insertErrors) toast('✅ Импортът приключи успешно!');
+      if(!insertErrors) toast('✅ Импортът приключи успешно!');
       srImportFinish();
     };
-    var runUpdates=function(insertErrors){
-      if(!toUpdate.length){ done(insertErrors, []); return; }
-      srBatchUpdate(toUpdate,function(d,t){ progEl.textContent='⏳ Обновяване на '+d+' / '+t+'...'; },function(failed){ done(insertErrors, failed); });
-    };
-    if(!toInsert.length){ runUpdates(0); return; }
-    srBatchImport(toInsert,function(d,t){ progEl.textContent='⏳ Качване на '+d+' / '+t+'...'; },runUpdates);
+    if(!toInsert.length){ done(0); return; }
+    srBatchImport(toInsert,function(d,t){ progEl.textContent='⏳ Качване на '+d+' / '+t+'...'; },done);
   });
 }
 
@@ -1144,7 +1103,7 @@ function srFindCol(headers,aliases){
 function srImportModalHtml(){
   var hint = 'Приема 2 формата: (1) Многолистов Excel (1 лист на магазин), формат "Обобщен списък - стока за връщане" — колони НОВА ПВ-ЕВРО, НОВА ИД-ЕВРО, Доставчик, Завод, статус ВЗЕТА/НЕВЗЕТА/ПРИКЛЮЧЕНА и т.н.; или (2) единичен лист с колони за продукт, SAP, количество, магазин, срок на годност, причина. Разпознава автоматично кой от двата е. Импортът само ДОБАВЯ нови редове: ред с ПВ-ЕВР, който вече е в портала, се пропуска и нищо по него не се променя — статусите, датите, куриерът и коментарите се поддържат в портала. Редове без ПВ-ЕВР и повторени ПВ-ЕВР във файла също се пропускат. Единичният лист няма ПВ-ЕВР — там ред се пропуска, ако същият магазин + SAP + срок на годност вече е в портала или се повтаря във файла.';
   /* „По разлики" има свой формат - „Стока за изтегляне по разлики". */
-  if(srTab==='diff') hint = 'Файлът „Стока за изтегляне по разлики": 1 лист на магазин (номерата като в многолистовия), колони ДОСТАВЧИК, МАТЕРИАЛ, НАИМЕНОВАНИЕ, КОЛИЧЕСТВО, ПОРЪЧКА, ДАТА НА ПОТВЪРДЕНА АКТУАЛИЗАЦИЯ, КОМЕНТАР. Съществуващ ред (магазин + поръчка + SAP, или без поръчка: магазин + SAP + наименование) се ОБНОВЯВА; приключените в портала не се пипат; редове, които ги няма във файла, остават. Коментарът от файла отива в „Коментар обект".';
+  if(srTab==='diff') hint = 'Файлът „Стока за изтегляне по разлики": 1 лист на магазин (номерата като в многолистовия), колони ДОСТАВЧИК, МАТЕРИАЛ, НАИМЕНОВАНИЕ, КОЛИЧЕСТВО, ПОРЪЧКА, ДАТА НА ПОТВЪРДЕНА АКТУАЛИЗАЦИЯ, КОМЕНТАР. Импортът само ДОБАВЯ нови редове: ред, който вече е в портала (магазин + поръчка + SAP, или без поръчка: магазин + SAP + наименование), се пропуска и нищо по него не се променя — статусите, датите и коментарите се поддържат в портала. Повторен във файла ред влиза веднъж; редове, които ги няма във файла, остават. Коментарът от файла отива в „Коментар обект".';
   return '<div class="bov" id="sr-import-ov"><div class="bmod" style="width:460px;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
     '<div style="font-size:15px;font-weight:700;">📤 Импорт от Excel — '+(srTab==='diff'?'по разлики':'рекламации/срок на годност')+'</div>'+
@@ -1576,32 +1535,6 @@ function srBatchImport(rows,onProgress,onDone){
   next();
 }
 
-/* Обновява съществуващи редове по id. За разлика от srBatchImport тук всеки
-   ред е ОТДЕЛНА заявка - PostgREST не приема различни тела в един PATCH -
-   затова вървят на групи по 20 успоредно, вместо всичките наведнъж.
-   Провалите се връщат ПОИМЕННО (ПВ-ЕВР номер), не като брой: числото "3
-   грешки" не казва кой ред да се провери на ръка. Един провален ред не спира
-   останалите. */
-function srBatchUpdate(updates,onProgress,onDone){
-  var BATCH=20;
-  var i=0;
-  var failed=[];
-  function next(){
-    if(i>=updates.length){onDone(failed);return;}
-    var batch=updates.slice(i,i+BATCH);
-    Promise.all(batch.map(function(u){
-      return sbPatch('stock_returns','id=eq.'+u.id,u.data).then(function(res){
-        if(!res.ok) failed.push(u.purchase_order||u.id);
-      });
-    })).then(function(){
-      i+=BATCH;
-      onProgress(Math.min(i,updates.length),updates.length);
-      next();
-    });
-  }
-  next();
-}
-
 function submitSR() {
   var store=(document.getElementById('sr-store').value||'').trim();
   if(!store){toast('Избери магазин','#dc2626');return;}
@@ -1699,11 +1632,13 @@ function submitSR() {
     data.sap_code     = sapEl?sapEl.value:'';
     data.quantity     = qtyEl?(parseFloat(qtyEl.value)||null):null;
     var poEl=document.getElementById('sr-po'), ieEl=document.getElementById('sr-ie'),
-        plantEl=document.getElementById('sr-plant'), docdateEl=document.getElementById('sr-docdate'),
+        docdateEl=document.getElementById('sr-docdate'),
         ctrlEl=document.getElementById('sr-ctrl');
     data.purchase_order = poEl?poEl.value:'';
     data.id_euro = ieEl?ieEl.value:'';
-    data.plant = plantEl?(plantEl.value||'5521'):'5521';
+    /* Полето „Завод“ го няма във формата: редакцията не пипа plant, новият ред
+       получава 5521 — както редовете, преместени от Разлики. */
+    if(!srEditId) data.plant = '5521';
     data.doc_date = docdateEl?(docdateEl.value||null):null;
     var storeCmtEl1=document.getElementById('sr-store-cmt');
     if(storeCmtEl1) data.store_comment = storeCmtEl1.value.trim()||null;

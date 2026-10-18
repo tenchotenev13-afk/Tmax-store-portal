@@ -90,8 +90,8 @@ async function save(h, label) {
         ok('placeholder „напр. 4100196440"', o.getAttribute('placeholder') === 'напр. 4100196440');
         ok('празно при нов запис', o.value === '', JSON.stringify(o.value));
         ok('етикетът е „Поръчка"', o.parentNode.querySelector('label').textContent === 'Поръчка');
-        ok('стои в реда с ПВ-ЕВР / ИД-ЕВРО / Завод',
-          ['sr-po', 'sr-ie', 'sr-plant'].every(id => o.closest('div[style*="grid"]').querySelector('#' + id)));
+        ok('стои в реда с ПВ-ЕВР / ИД-ЕВРО',
+          ['sr-po', 'sr-ie'].every(id => o.closest('div[style*="grid"]').querySelector('#' + id)));
         o.value = ' 4100196440 ';
         h.doc.getElementById('sr-product').value = 'НОВ АРТИКУЛ';
         await save(h, 'Добави');

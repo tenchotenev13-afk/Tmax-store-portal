@@ -4,9 +4,10 @@
    Формат: листове с номерата от SR_SHEET_TO_STORE; ред 1 = заглавия (по име,
    trim, без значение от главни/малки); бележка H — колоната след „КОМЕНТАР"
    (често без заглавие).
-     · обновяване вместо дубликат: магазин + поръчка + SAP; без поръчка —
-       магазин + SAP + наименование; приключените не се пипат; липсващите във
-       файла не се пипат;
+     · САМО НОВИ (от 18.10.2026): ред с ключ магазин + поръчка + SAP (без
+       поръчка — магазин + SAP + наименование), който вече е в портала, се
+       пропуска изцяло — нито едно поле, и приключените; повторен във файла
+       ключ влиза веднъж; липсващите във файла не се пипат;
      · статус от G — „невзет" ПРЕДИ „взет"; „заприход/изхвърл/прието при" →
        completed само при canCompleteSR, иначе taken;
      · G + H → store_comment; control_comment / controller_comment — никога;
@@ -17,6 +18,7 @@
 
    Пускане:  node tests/sr-diff-list-import.test.js .
 */
+process.env.TZ = 'Europe/Sofia';
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
 const { boot, ok, section, report, realClick, btn } = H;
 
@@ -35,9 +37,10 @@ const WB = () => ({
     'Обяснение': { __aoa: [['Обяснение:', ''], ['някакъв текст']] },
     '21': { __aoa: [
       HEAD,
-      ['ЕЛМАК', 20923, 'ЦИРКУЛЯР', 1, 4100141066, '02.09.2026', 'НЕВЗЕТА', 'НЕ Е ЛИ ИЗТЕГЛЕН???'],   /* обновява ex-1 */
+      ['ЕЛМАК', 20923, 'ЦИРКУЛЯР', 1, 4100141066, '02.09.2026', 'НЕВЗЕТА', 'НЕ Е ЛИ ИЗТЕГЛЕН???'],   /* ex-1 — не се пипа */
       ['ДЕНИКОМ', '88749.0', 'ПЛИК', 4, 4100167424, 46267, 'Спиди 1234'],                       /* нов */
-      ['ТЕКРА', 18873, 'СКОБА', 1, '', '23,09,2026', 'тук е'],                                    /* без поръчка → ex-2 */
+      ['ДЕНИКОМ', 88749, 'ПЛИК', 4, 4100167424, '', 'дубликат'],                               /* повторен във файла */
+      ['ТЕКРА', 18873, 'СКОБА', 1, '', '23,09,2026', 'тук е'],                                    /* без поръчка = ex-2 — не се пипа */
       ['ВИТО', 111, 'ЗАПРИХОДЕНО', 2, 4100000001, '16.09.226', 'заприходено'],                    /* нов, нечетима дата */
       ['НЕПОЗНАТ ДОСТАВЧИК', 222, 'ИЗХВЪРЛЕНО', 1, 4100000002, '09/232026', 'изхвърлена'],       /* нов, нечетима дата */
       ['ВИТО', 333, 'ПРИКЛЮЧЕН В ПОРТАЛА', 1, 4100000003, '', 'взета'],                           /* ex-3 completed */
@@ -127,7 +130,7 @@ const byName = (h, n) => h.ins.find(r => r.product_name === n);
     const h = await runImport(CVETI, 'diff');
     ok('бутонът „📤 Импорт от Excel" е и в „По разлики"', h.hasBtn);
     ok('минава по новия път (srImportDiffList)', h.spy.diffList === 1);
-    ok('вмъкнати: 6 (3 от „21" + 3 от „3"; без банера, празния, обновените и приключения)', h.ins.length === 6,
+    ok('вмъкнати: 6 (3 от „21" + 3 от „3"; без банера, празния, дубликата и съществуващите)', h.ins.length === 6,
       String(h.ins.length) + ' ' + JSON.stringify(h.ins.map(r => r.product_name)));
     ok('всички вмъкнати са source=diff', h.ins.every(r => r.source === 'diff'));
     ok('банерът не е вмъкнат', !h.ins.some(r => /ЗАПРИХОЖДАВАТЕ/.test(r.supplier || '')));
@@ -160,25 +163,27 @@ const byName = (h, n) => h.ins.find(r => r.product_name === n);
     ok('всички вмъкнати са с еднакви ключове (PostgREST партида)',
       h.ins.every(r => Object.keys(r).sort().join() === Object.keys(h.ins[0]).sort().join()));
 
-    const u1 = h.upd('ex-1');
-    if (ok('ex-1 (магазин + поръчка + SAP) се ОБНОВЯВА, не се дублира', !!u1 && !h.ins.some(r => r.product_name === 'ЦИРКУЛЯР'))) {
-      ok('ex-1: НЕВЗЕТА → pending (не taken)', u1.body.status === 'pending', u1.body.status);
-      ok('ex-1: store_comment = G · H', u1.body.store_comment === 'НЕВЗЕТА · НЕ Е ЛИ ИЗТЕГЛЕН???', JSON.stringify(u1.body.store_comment));
-      ok('ex-1: „ЕЛМАК" → „ЕЛМАК ЕООД"', u1.body.supplier === 'ЕЛМАК ЕООД');
-      ok('ex-1: дата „02.09.2026" → 2026-09-02', u1.body.confirmed_date === '2026-09-02');
-      ok('ex-1: без коментарите на Цвети', !('control_comment' in u1.body) && !('controller_comment' in u1.body));
-    }
-    const u2 = h.upd('ex-2');
-    if (ok('ex-2 (без поръчка: магазин + SAP + наименование) се ОБНОВЯВА', !!u2 && !h.ins.some(r => r.product_name === 'СКОБА'))) {
-      ok('ex-2: „тук е" → pending; дата „23,09,2026" → 2026-09-23', u2.body.status === 'pending' && u2.body.confirmed_date === '2026-09-23',
-        JSON.stringify(u2.body));
-      ok('ex-2: „ТЕКРА" → „ТЕКРА ЕООД" (двойният интервал не е второ име)', u2.body.supplier === 'ТЕКРА ЕООД', u2.body.supplier);
-    }
+    /* САМО НОВИ (писмо на Цвети от 07.10.2026, от 18.10.2026): съществуващ
+       ред по ключ не се пипа — нито едно поле, дори файлът да носи друг
+       статус, коментар, дата или доставчик. ex-1 във файла е „НЕВЗЕТА" с
+       нов коментар и дата, а в портала е taken без тях. */
+    ok('НИТО ЕДИН PATCH към stock_returns', !h.calls.patch.some(p => /stock_returns/.test(p.url)),
+      JSON.stringify(h.calls.patch.map(p => p.url)));
+    ok('ex-1 (магазин + поръчка + SAP, сменен статус/коментар/дата във файла) — не се пипа и не се дублира',
+      !h.upd('ex-1') && !h.ins.some(r => r.product_name === 'ЦИРКУЛЯР'));
+    ok('ex-2 (без поръчка: магазин + SAP + наименование) — не се пипа и не се дублира',
+      !h.upd('ex-2') && !h.ins.some(r => r.product_name === 'СКОБА'));
     ok('ex-3 (приключен в портала) НЕ се пипа', !h.upd('ex-3') && !h.ins.some(r => r.product_name === 'ПРИКЛЮЧЕН В ПОРТАЛА'));
     ok('ex-4 (няма го във файла) НЕ се пипа', !h.upd('ex-4'));
+    ok('повторен във файла ред (ПЛИК два пъти) влиза ВЕДНЪЖ', h.ins.filter(r => r.product_name === 'ПЛИК').length === 1,
+      String(h.ins.filter(r => r.product_name === 'ПЛИК').length));
+    ok('и първият печели (store_comment „Спиди 1234", не „дубликат")', byName(h, 'ПЛИК').store_comment === 'Спиди 1234');
 
-    ok('обобщение: Нови 6 · Обновени 2 · Пропуснати (приключени) 1',
-      h.prog.indexOf('Нови: 6') >= 0 && h.prog.indexOf('Обновени: 2') >= 0 && h.prog.indexOf('Пропуснати (приключени): 1') >= 0, h.prog);
+    ok('обобщение: Нови 6 · Пропуснати (вече в портала) 3 · Повторени във файла 1',
+      h.prog.indexOf('Нови: 6') >= 0 && h.prog.indexOf('Пропуснати (вече в портала): 3') >= 0 &&
+      h.prog.indexOf('Повторени във файла: 1') >= 0, h.prog);
+    ok('в обобщението няма „Обновени" и „Пропуснати (приключени)"',
+      h.prog.indexOf('Обновени') < 0 && h.prog.indexOf('приключени') < 0, h.prog);
     ok('обобщение: несъпоставен „НЕПОЗНАТ ДОСТАВЧИК"', h.prog.indexOf('Несъпоставени доставчици') >= 0 &&
       h.prog.indexOf('НЕПОЗНАТ ДОСТАВЧИК') >= 0 && h.prog.indexOf('ЕЛМАК') < 0, h.prog);
     ok('обобщение: нечетими дати 2', h.prog.indexOf('Нечетими дати (записани празни): 2') >= 0, h.prog);
@@ -213,6 +218,20 @@ const byName = (h, n) => h.ins.find(r => r.product_name === n);
     ok('няма POST', !h.calls.post.some(p => p.table === 'stock_returns'));
     ok('няма PATCH', !h.calls.patch.some(p => /stock_returns/.test(p.url)));
     ok('съобщение за грешката', /Грешка при проверка на съществуващите/.test((h.doc.getElementById('sr-import-progress') || {}).innerHTML || ''));
+    h.close();
+  }
+
+  section('д) Текстът в модала за импорт казва „само нови"');
+  {
+    const h = boot({ modules: ['stock-returns.js', 'stock-differences.js'], user: CVETI,
+      data: { stock_returns: [], stock_differences: [], differences_reports: [] } });
+    h.w.srData = []; h.w.srTab = 'diff'; h.w.srFilter = 'all'; h.w.srStoreFilter = ''; h.w.srSupplierFilter = ''; h.w.srSearch = '';
+    h.w.renderStockReturns();
+    realClick(h.w, btn(h.doc.getElementById('mod-stock-returns'), '📤 Импорт от Excel'));
+    const t = (h.doc.getElementById('sr-import-ov') || {}).textContent || '';
+    ok('„По разлики": „само ДОБАВЯ нови редове"', t.indexOf('Импортът само ДОБАВЯ нови редове') >= 0, t);
+    ok('„По разлики": ред, който вече е в портала, се пропуска', t.indexOf('вече е в портала') >= 0 && t.indexOf('се пропуска') >= 0, t);
+    ok('„По разлики": без „се ОБНОВЯВА"', t.indexOf('ОБНОВЯВА') < 0, t);
     h.close();
   }
 

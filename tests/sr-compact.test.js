@@ -143,7 +143,9 @@ const before = (a, b) => !!a && !!b && !!(a.compareDocumentPosition(b) & 4);   /
     const st4 = rowOf(h, 'Стока a4').children[3].textContent;
     ok('„Статус": потвърдена акт.', /потвърдена акт\.\s*06\.10\.2026/.test(st4), st4);
     const doc = rowOf(h, 'Стока a1').children[1].textContent;
-    ok('„Документ": етикети ПВ-ЕВР и завод', /ПВ-ЕВР\s*PV-a1/.test(doc) && /Завод\s*1210/.test(doc), doc);
+    ok('„Документ": етикет ПВ-ЕВР', /ПВ-ЕВР\s*PV-a1/.test(doc), doc);
+    /* В „По разлики“ заводът е винаги 5521 и обектите се бъркаха (14.10.2026). */
+    ok('„Документ": БЕЗ завод в „По разлики“', !/Завод/.test(doc), doc);
     const css = Array.from(h.doc.querySelectorAll('style')).map(x => x.textContent).join(' ');
     ok('баджовете в „Статус“ не се пренасят (white-space:nowrap на span-овете в колоната)', /\.tbl-sr-diff td:nth-child\(4\) span,\.tbl-sr-complaint td:nth-child\(3\) span\{white-space:nowrap;\}/.test(css));
     ok('„Магазин · Доставчик"', /Троян/.test(rowOf(h, 'Стока a1').children[2].textContent) && /ЕЛМАК/.test(rowOf(h, 'Стока a1').children[2].textContent));
@@ -154,6 +156,7 @@ const before = (a, b) => !!a && !!b && !!(a.compareDocumentPosition(b) & 4);   /
     ok('„По рекламации": Документ|Магазин · Доставчик|Статус|Коментари|Действия', th2.join('|') === 'Документ|Магазин · Доставчик|Статус|Коментари|Действия', th2.join('|'));
     ok('всеки ред има 5 <td>', Array.from(mod(h).querySelectorAll('tbody tr')).length === 3 && Array.from(mod(h).querySelectorAll('tbody tr')).every(tr => tr.children.length === 5));
     ok('„Поръчка" не излиза в „По рекламации"', !/Пор\./.test(mod(h).querySelector('tbody').textContent));
+    ok('„Завод" в „По рекламации" остава', /Завод\s*1210/.test(mod(h).querySelector('tbody').textContent), mod(h).querySelector('tbody').textContent);
   }
 
   section('6. коментарите са с етикети');

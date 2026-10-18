@@ -186,6 +186,7 @@ const TESTS = [
   'diff-return-completed.test.js',
   'sr-store-comment.test.js',
   'sr-diff-list-import.test.js',
+  'sr-diff-no-plant.test.js',
   'sr-diff-tab-columns.test.js',
   'sr-compact.test.js',
   'today-wrong-receipt-row.test.js',
