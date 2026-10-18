@@ -1654,10 +1654,51 @@ function doLogout(){
   document.getElementById('l-pass').value='';
   document.getElementById('l-err').style.display='none';
 }
-/* Роля 'controlling' („Контролинг", от 18.10.2026) — вижда САМО подтаба
-   „🏷️ Преоценка" и работи в него като ЦО (rvIsCO в revaluation.js). НЕ е
-   глобална (isGlobal() не я включва): без История, „Днес", Чек лист. */
+/* Роля 'controlling' („Контролинг", от 18.10.2026) — общите табове +
+   „Ревизии и преоценка" (двата под-таба; в Преоценка работи като ЦО, графикът
+   е само за гледане) + „Днес". Без Каса, История, Чек лист, Администрация.
+   НЕ е глобална (isGlobal() не я включва — той решава данни в Транспорт и др.). */
 function isControllingRole(){ return !!currentUser && currentUser.role === 'controlling'; }
+/* Видимост по роли (решение на Тенчо, 18.10.2026). Само за табовете — isGlobal()
+   не се пипа. „Днес" за accounting иска is_regional, който auth-login НЕ връща:
+   чете се след входа (rolesLoadRegional), дотогава табът е скрит. */
+function roleCanSeeHistory(){ return !!currentUser && ['admin','accounting'].indexOf(currentUser.role)>=0; }
+function roleCanSeeToday(){
+  if(!currentUser) return false;
+  if(currentUser.role==='admin' || currentUser.role==='controlling') return true;
+  return currentUser.role==='accounting' && currentUser.is_regional===true;
+}
+function roleCanSeeAdmin(){ return !!currentUser && currentUser.role==='admin'; }
+/* Обектите на регионалния accounting — „Днес" и Преоценка го ограничават до тях.
+   null = без ограничение (admin, controlling, нерегионален и т.н.). admin с
+   is_regional (В. Филев) НЕ се ограничава — admin е admin. */
+function roleRegionalScope(){
+  if(!currentUser || currentUser.role!=='accounting' || currentUser.is_regional!==true) return null;
+  var a=currentUser.assigned_stores;
+  if(Array.isArray(a)) return a.slice();
+  if(typeof a==='string' && a.length>2) return a.replace(/^{|}$/g,'').split(',').map(function(s){return s.trim().replace(/^"|"$/g,'');}).filter(Boolean);
+  return [];
+}
+/* is_regional / assigned_stores след входа — auth-login не връща is_regional.
+   Тиха заявка; при отговор се сливат в currentUser и „Днес" се преизчислява.
+   loading.js (llMyRegionStores) чете currentUser.is_regional — оттук го получава. */
+var rolesRegionalSeq=0;
+var rolesPendingTodayDeepLink=false;
+function rolesLoadRegional(){
+  if(!currentUser || !currentUser.id) return Promise.resolve(false);
+  var seq=++rolesRegionalSeq, me=currentUser;
+  return sbGet('users','id=eq.'+encodeURIComponent(currentUser.id)+'&select=is_regional,assigned_stores',true).then(function(rows){
+    if(seq!==rolesRegionalSeq || currentUser!==me) return false;
+    var r=Array.isArray(rows)&&rows[0];
+    if(!r) return false;
+    currentUser.is_regional=r.is_regional===true;
+    if(r.assigned_stores!==undefined) currentUser.assigned_stores=r.assigned_stores;
+    var t=document.getElementById('tab-today');
+    if(t) t.style.display=roleCanSeeToday()?'flex':'none';
+    if(rolesPendingTodayDeepLink && roleCanSeeToday()){ rolesPendingTodayDeepLink=false; showModule('today'); }
+    return true;
+  });
+}
 function startApp(){
   if(typeof initPush==='function') initPush(currentUser);
   document.getElementById('s-login').style.display='none';
@@ -1665,16 +1706,21 @@ function startApp(){
   document.getElementById('nav-name').textContent=currentUser.display_name||currentUser.email;
   document.getElementById('nav-store').textContent=isGlobal()?'Всички магазини':currentUser.store_name;
   setupTabsForRole();
+  rolesPendingTodayDeepLink=false;
+  rolesLoadRegional();
   if(typeof initTabDrag==='function')setTimeout(initTabDrag,200);
-  /* Контролинг не вижда Транспорт / Клиентски / Документи — не ги зарежда. */
-  if(!isControllingRole()) loadAll();
+  loadAll();
   /* Покажи подходящ таб според роля */
   var startTab=currentUser.role==='kasa'?'kasa':currentUser.role==='info'?'client':isControllingRole()?'revaluation':'transport';
   /* Deep-link от имейл репорт (?store=Име) - отвежда директно на "Днес",
-     ако ролята изобщо има достъп до този таб (isGlobal). today.js сам чете
-     същия параметър, за да разгъне точно този магазин. */
+     ако ролята има достъп до този таб (roleCanSeeToday). За accounting това
+     се знае чак след rolesLoadRegional — тогава отваря „Днес" оттам. today.js
+     сам чете същия параметър, за да разгъне точно този магазин. */
   try {
-    if (new URLSearchParams(window.location.search).get('store') && isGlobal()) startTab='today';
+    if (new URLSearchParams(window.location.search).get('store')) {
+      if (roleCanSeeToday()) startTab='today';
+      else if (currentUser.role==='accounting') rolesPendingTodayDeepLink=true;
+    }
   } catch(e){}
   showModule(startTab);
   /* Deep link от етикет — след входа. Палет (#tl=…&p=…) чете loading.js;
@@ -1683,19 +1729,19 @@ function startApp(){
   if(!dl && typeof tfDeepLinkBoot==='function') tfDeepLinkBoot();
 }
 function setupTabsForRole(){
-  /* Вход след Контролинг без презареждане (doLogout не презарежда): скритото
-     от него се връща ПЪРВО, после правилата по-долу решават както винаги. */
-  document.querySelectorAll('[data-ctrl-hidden]').forEach(function(el){ el.style.display=''; el.removeAttribute('data-ctrl-hidden'); });
   /* Таб Каса — само за kasa, manager, admin, accounting */
   var kasaRoles=['kasa','admin','manager']; /* kasa, управители и администратори */
   var kasaTab=document.getElementById('tab-kasa');
   if(kasaTab)kasaTab.style.display=kasaRoles.indexOf(currentUser.role)>=0?'flex':'none';
-  /* Таб Администрация — само за admin */
+  /* Таб История — admin и accounting (logistics навън от 18.10.2026: виждаше
+     касовата и сторно историята без нужда). */
   var histTab=document.getElementById('tab-history');
-  if(histTab)histTab.style.display=isGlobal()?'flex':'none';
-  /* Таб Днес — живо табло с изпълнението по обекти, само за глобални роли (admin/accounting/logistics) */
+  if(histTab)histTab.style.display=roleCanSeeHistory()?'flex':'none';
+  /* Таб Днес — admin, controlling и accounting САМО при is_regional (тогава
+     само своите обекти — roleRegionalScope в today.js). is_regional идва след
+     входа (rolesLoadRegional); дотогава табът за accounting е скрит. */
   var todayTab=document.getElementById('tab-today');
-  if(todayTab)todayTab.style.display=isGlobal()?'flex':'none';
+  if(todayTab)todayTab.style.display=roleCanSeeToday()?'flex':'none';
   /* Таб Чек лист — седмичният контрол на контролинга. Правилото кой го вижда
      (admin или notify_groups съдържа 'controlling') живее в checklist.js,
      защото там е и парсването на notify_groups. Този файл се зарежда пръв,
@@ -1723,12 +1769,10 @@ function setupTabsForRole(){
      И двата файла се зареждат след този — затова typeof. */
   var rvTab=document.getElementById('tab-revaluation');
   if(rvTab)rvTab.style.display=(typeof rsCanSee==='function'&&rsCanSee())?'':'none';
-  /* Контролинг: главният таб отваря директно Преоценка, графикът е скрит.
-     Атрибутът се връща при всеки вход — същата страница може да смени
-     потребителя без презареждане. */
+  /* Контролинг: главният таб отваря директно Преоценка (графикът е до него в
+     под-лентата). Атрибутът се връща при всеки вход — същата страница може да
+     смени потребителя без презареждане. */
   if(rvTab)rvTab.setAttribute('onclick',isControllingRole()?"showModule('revaluation')":"showModule('rev-schedule')");
-  var rvsSched=document.getElementById('rvs-schedule');
-  if(rvsSched)rvsSched.style.display=isControllingRole()?'none':'';
   var rvSubBtn=document.getElementById('rvs-revaluation');
   if(rvSubBtn){
     rvSubBtn.style.display=(typeof rvCanSee==='function'&&rvCanSee())?'':'none';
@@ -1738,14 +1782,12 @@ function setupTabsForRole(){
   }
   var sdTab=document.getElementById('tab-stock-diff');
   if(sdTab)sdTab.style.display='';
-  /* Таб Администрация — admin и accounting. Accounting вижда вътре САМО
-     картата „Известия" (матрицата и „📧 Общи отчети") — решава loadAdmin() в
-     admin.js; потребители, магазини и останалото са само за admin. */
-  var adminTabRoles=['admin','accounting'];
+  /* Таб Администрация — САМО admin (от 18.10.2026; дотогава и accounting с
+     картата „Известия"). notifCanSee() в admin.js върви с таба. */
   var adminTab=document.getElementById('tab-admin');
-  if(adminTab)adminTab.style.display=adminTabRoles.indexOf(currentUser.role)>=0?'':'none';
+  if(adminTab)adminTab.style.display=roleCanSeeAdmin()?'':'none';
   var sepAdmin=document.getElementById('sep-admin');
-  if(sepAdmin)sepAdmin.style.display=adminTabRoles.indexOf(currentUser.role)>=0?'':'none';
+  if(sepAdmin)sepAdmin.style.display=roleCanSeeAdmin()?'':'none';
 
   /* Покажи .adm елементи (напр. бутон + Добави в Инструкции) за admin */
   var admRoles=['admin','accounting'];
@@ -1753,14 +1795,6 @@ function setupTabsForRole(){
     if(el.id==='tab-admin') return; /* вече е обработен */
     el.style.display=admRoles.indexOf(currentUser.role)>=0?'inline-flex':'none';
   });
-  /* Контролинг: всички табове и разделители скрити, освен „Ревизии и
-     преоценка". Последно в функцията — бие всяко '' / 'flex' отгоре. */
-  if(isControllingRole()){
-    document.querySelectorAll('#nav-tabs-container .nav-tab, #nav-tabs-container .tab-sep').forEach(function(t){
-      if(t.id==='tab-revaluation' || t.style.display==='none') return;
-      t.style.display='none'; t.setAttribute('data-ctrl-hidden','1');
-    });
-  }
 }
 function showModule(mod){
   /* 'oborot' НЕ е самостоятелен модул — няма контейнер mod-oborot и затова

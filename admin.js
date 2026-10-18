@@ -1006,7 +1006,8 @@ function notifTopicHasBuilder(key){ return !!notifTopicBuilderFn(key); }
 
 function notifIsAdmin(){ return !!(currentUser && currentUser.role === 'admin'); }
 /* Картата „Известия" — admin и accounting (същият списък като таба в shared.js). */
-function notifCanSee(){ return !!(currentUser && ['admin','accounting'].indexOf(currentUser.role) >= 0); }
+/* От 18.10.2026 само admin — табът Администрация е само негов (shared.js). */
+function notifCanSee(){ return !!(currentUser && currentUser.role === 'admin'); }
 
 /* weekdays е int[] в базата. PostgREST го връща като масив, но огледалото и
    стари редове могат да дадат текстовия литерал '{1,2,3,4,5}'. */

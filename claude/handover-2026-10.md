@@ -498,6 +498,26 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
     Раднево“.
   · Трансфери, приемане по единица (d222667) — 18 събития с unit на 16.10
     (Враца, Карлово, Монтана, Сервиз Троян).
+- 18.10 — видимост по роли: История без logistics, Днес = admin/controlling/
+  регионални accounting, Администрация само admin, Контролинг с общите
+  табове + График + Днес, регионалните в Преоценка и Днес само своите
+  обекти (сесия wt-roli-tabove). shared.js: roleCanSeeHistory /
+  roleCanSeeToday / roleCanSeeAdmin / roleRegionalScope; isGlobal() НЕ е
+  пипан. is_regional + assigned_stores се четат след входа
+  (rolesLoadRegional → users id=eq.<id>, само тези две колони) и се сливат в
+  currentUser — така работи и llMyRegionStores в loading.js, а revaluation.js
+  ги взема оттам вместо собствена заявка. Контролинг: махнати скриването на
+  всички табове (data-ctrl-hidden), спрените банер / polling / loadAll;
+  графикът — само гледане; Чек лист изрично без ролята. Днес за регионален
+  accounting: само зачислените обекти, без „всички“, БЕЗ запис на общия
+  дневен snapshot (report_snapshots — иначе презаписва тенденцията на
+  компанията), снимките — само негови. Преоценка за регионален accounting:
+  обзор / избор / „История“ / лист само своите обекти, без кампанийните
+  бутони; admin с is_regional (В. Филев) — всичко. notifCanSee() в admin.js —
+  само admin. Обновени admin-role-view / admin-notifications / admin-reports
+  (accounting вече без Администрация) и role-controlling. Нови тестове
+  role-tabs-matrix, today-regional-scope, revaluation-regional. Схема не е
+  пипана, ред за Живко няма.
 
 ## 1. Хора
 
@@ -878,6 +898,13 @@ push.js (`pushTasksToday`, `checkTaskReminders`, `sendWeeklyTasksReminder`).
   `rvImportAoa`, revaluation.js) — проверява се само с реален ZSTOCK файл
   от Елица в бланката на обект; заедно с push/имейл до реалните хора.
   Кой чака: Елица.
+- **Видимост по роли — непроверено на живо** (18.10): вход като logistics
+  (без История / Днес), accounting (без Днес и Администрация), регионален
+  accounting (Днес и Преоценка само своите обекти; появява се след
+  секунда — is_regional идва след входа), controlling (общите табове +
+  Ревизии и преоценка + Днес), admin (всичко). Одобрение на регионален в
+  Товарни листи (llMyRegionStores вече получава is_regional) — също
+  непроверено. Кой чака: Тенчо.
 - **Зареждане — коментарът на Снабдяването в имейла**: `send-routed-report`
   (отчет по задача, секция „Зареждане“) показва „💬 Обект: текст“ под
   артикулите, но не и `supply_store_notes`. Ред „Снабдяване: …“ на същото

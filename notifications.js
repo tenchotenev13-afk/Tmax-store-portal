@@ -135,9 +135,6 @@ function coNotifyToast(text,id,hover,onClick){
 }
 
 function showLoginBanner(){
-  /* Контролинг вижда само Преоценка — банерите (просрочени заявки, товарни
-     листи, нови задачи) не са за него. */
-  if(typeof isControllingRole==='function' && isControllingRole()) return;
   var banner=document.getElementById('notif-banner');if(!banner)return;
   var all=transportOrders.concat(clientOrders);
   /* Три отделни карти, не едно „N просрочени заявки!": до 15.10.2026 едно
@@ -652,5 +649,5 @@ startApp=function(){
   _origStart();
   _notifShown=false;
   _metricsCount=0;
-  if(!(typeof isControllingRole==='function' && isControllingRole())) setTimeout(startPolling,3000);
+  setTimeout(startPolling,3000);
 };

@@ -69,7 +69,8 @@ async function openAdminTab(h) {
 
   section('1. Табът по роля');
   {
-    [['admin', true], ['accounting', true], ['manager', false], ['kasa', false], ['sklad', false],
+    /* От 18.10.2026 табът е САМО за admin (accounting навън). */
+    [['admin', true], ['accounting', false], ['manager', false], ['kasa', false], ['sklad', false],
      ['info', false], ['logistics', false], ['user', false]].forEach(function (p) {
       const h = env(user(p[0], p[1] ? 'Централен офис' : 'Троян'));
       guard('setupTabsForRole(' + p[0] + ')', () => h.w.setupTabsForRole());
@@ -81,27 +82,14 @@ async function openAdminTab(h) {
     });
   }
 
-  section('2. accounting: само картата „Известия"');
+  section('2. accounting: без Администрация (от 18.10.2026)');
   {
+    /* До 18.10.2026 accounting виждаше таба с картата „Известия"; решение на
+       Тенчо — Администрацията е само за admin, notifCanSee() върви с таба. */
     const h = env(user('accounting'));
-    if (await openAdminTab(h)) {
-      ok('модулът е отворен', h.doc.getElementById('mod-admin').style.display !== 'none');
-      const vis = shown(h);
-      ok('една видима карта — „Известия"', vis.length === 1 && vis[0].id === 'notif-admin-card',
-        vis.map(c => c.id || (c.querySelector('.card-title') || {}).textContent).join(' | '));
-      ok('подзаглавието не говори за потребители', h.doc.querySelector('#mod-admin .pg-sub').textContent === 'Известия и общи отчети.');
-      ok('матрицата е нарисувана (2 теми)', h.doc.querySelectorAll('#notif-matrix-body tbody tr').length === 2);
-      ok('темите, изключенията и насрочените са скрити',
-        hidden(h, 'notif-topics-body') && hidden(h, 'notif-overrides-body') && hidden(h, 'notif-schedules-body'));
-      ok('„Общи отчети": 4 × „Тест до мен"', reportBtns(h, 'Тест до мен').length === 4, reportBtns(h, 'Тест до мен').length);
-      ok('„Общи отчети": без „Изпрати сега"', reportBtns(h, '📤 Изпрати сега').length === 0);
-      ok('нула заявки за списъка потребители', !got(h, 'order=role,email'), h.calls.get.join('\n'));
-      ok('нула заявки за магазините', !got(h, '/stores?order=name'));
-      ok('нула заявки за забраните', !got(h, 'order_restrictions'));
-      ok('каталогът не се зарежда', h.catalogCalls === 0);
-      ok('нула заявки за изключенията и насрочените',
-        !got(h, 'notification_overrides') && !got(h, 'notification_schedules'));
-    }
+    guard('setupTabsForRole', () => h.w.setupTabsForRole());
+    ok('табът е скрит', h.doc.getElementById('tab-admin').style.display === 'none');
+    ok('notifCanSee() === false', h.w.notifCanSee() === false);
     h.close();
   }
 

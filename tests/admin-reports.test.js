@@ -34,7 +34,8 @@ const { boot, realClick, ok, guard, section, report, ticks } = H;
 
 const ADMIN = { id: 'u-adm', email: 'm.ivanova@temax.bg', display_name: 'Мария Иванова', role: 'admin', store_name: 'Централен офис' };
 const ACC = { id: 'u-acc', email: 'acc@temax.bg', display_name: 'Счетоводство', role: 'accounting', store_name: 'Централен офис' };
-const ACC_NOMAIL = { id: 'u-nm', email: '', display_name: 'Без имейл', role: 'accounting', store_name: 'Централен офис' };
+/* „без имейл в профила" — admin (от 18.10.2026 картата е само за admin). */
+const ACC_NOMAIL = { id: 'u-nm', email: '', display_name: 'Без имейл', role: 'admin', store_name: 'Централен офис' };
 const MANAGER = { id: 'u-mgr', email: 's@temax.bg', display_name: 'Управител', role: 'manager', store_name: 'Троян' };
 
 const RECIPIENTS = [
@@ -122,15 +123,12 @@ const sendBtns = h => Array.prototype.filter.call(h.doc.querySelectorAll('#notif
 
   section('2. Видимост по роля');
   {
+    /* accounting: от 18.10.2026 без картата — Администрацията е само за admin. */
     const h = await env(ACC);
     const card = h.doc.getElementById('notif-admin-card');
-    ok('accounting: картата е видима', card.style.display !== 'none', card.style.display);
-    ok('accounting: секцията е нарисувана (4 реда)', h.doc.querySelectorAll('#notif-reports-body tr[id^="report-row-"]').length === 4);
-    ok('accounting: 4 × „Тест до мен"', ['daily', 'weekly', 'pallets', 'warehouse'].every(k => !!rowBtn(h, k, 'Тест до мен')));
+    ok('accounting: картата е скрита', card.style.display === 'none', card.style.display);
+    ok('accounting: секцията „Общи отчети" НЕ е нарисувана', h.doc.querySelectorAll('#notif-reports-body tr[id^="report-row-"]').length === 0);
     ok('accounting: НЯМА „Изпрати сега"', sendBtns(h).length === 0, sendBtns(h).length);
-    ok('accounting: темите са скрити, матрицата — не',
-      h.doc.getElementById('notif-topics-body').style.display === 'none' &&
-      h.doc.getElementById('notif-matrix-body').style.display !== 'none');
     ok('accounting: базата не е питана за изключенията и насрочените',
       !h.calls.get.some(u => u.indexOf('notification_overrides') >= 0 || u.indexOf('notification_schedules') >= 0));
     const before = h.calls.confirm.length;

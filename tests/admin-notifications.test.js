@@ -153,26 +153,19 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
 (async function run() {
 
   /* ═══ 1. Права ═══════════════════════════════════════════════════════ */
-  section('1. Права: admin — всичко, accounting — матрицата, друга роля — нищо');
+  section('1. Права: admin — всичко, друга роля (вкл. accounting) — нищо');
   {
-    /* accounting (от 15.09.2026): картата се вижда, но само с матрицата и
-       „📧 Общи отчети". Темите, изключенията и насрочените не се рисуват и за
-       тях базата не се пита. */
+    /* accounting: от 18.10.2026 БЕЗ картата (Администрацията е само за admin;
+       до тогава виждаше матрицата и „📧 Общи отчети"). */
     const h = env({ user: NOT_ADMIN });
     if (guard('loadNotificationsAdmin() не хвърля при accounting', () => h.w.loadNotificationsAdmin())) {
       await ticks();
       const card = h.doc.getElementById('notif-admin-card');
       ok('картата съществува в index.html', !!card);
-      ok('accounting: картата е видима', !!card && card.style.display !== 'none', card ? card.style.display : '—');
-      ok('accounting: матрицата е нарисувана',
-        h.doc.querySelectorAll('#notif-matrix-body tbody tr').length === TOPICS.length,
-        h.doc.querySelectorAll('#notif-matrix-body tbody tr').length);
-      ok('accounting: темите са скрити и без редове',
-        h.doc.getElementById('notif-topics-body').style.display === 'none' &&
-        h.doc.querySelectorAll('#notif-topics-body tbody tr').length === 0);
-      ok('accounting: изключенията и насрочените са скрити',
-        h.doc.getElementById('notif-overrides-body').style.display === 'none' &&
-        h.doc.getElementById('notif-schedules-body').style.display === 'none');
+      ok('accounting: картата е скрита', !!card && card.style.display === 'none', card ? card.style.display : '—');
+      ok('accounting: матрицата НЕ е нарисувана', h.doc.querySelectorAll('#notif-matrix-body tbody tr').length === 0);
+      ok('accounting: базата НЕ е питана за темите и матрицата',
+        !h.calls.get.some(u => u.indexOf('notification_topics') >= 0 || u.indexOf('notification_matrix') >= 0), h.calls.get.join('\n'));
       ok('accounting: базата НЕ е питана за изключенията',
         !h.calls.get.some(u => u.indexOf('notification_overrides') >= 0), h.calls.get.join('\n'));
       ok('accounting: базата НЕ е питана за насрочените',

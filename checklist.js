@@ -102,6 +102,9 @@ function checklistGroupsOf(u) {
 function canSeeChecklist() {
   if (!currentUser) return false;
   if (currentUser.role === 'admin') return true;
+  /* Роля 'controlling' — без Чек лист (решение 18.10.2026), дори да е в група
+     'controlling'. Изрично, а не по това, че notify_groups не е зареден. */
+  if (currentUser.role === 'controlling') return false;
   return checklistGroupsOf(currentUser).indexOf('controlling') >= 0;
 }
 

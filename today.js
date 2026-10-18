@@ -214,6 +214,9 @@ function loadTodayDashboard(){
           if (!isReportableStore(u.store_name) || seen[u.store_name]) return false;
           seen[u.store_name] = 1; return true;
         }).map(function(u){ return u.store_name; });
+        /* Регионален accounting — само зачислените обекти (18.10.2026). */
+        var scope = todayScope();
+        if (scope) stores = stores.filter(function(s){ return scope.indexOf(s) >= 0; });
 
         if (!stores.length) { wrap.innerHTML = todayEmptyHtml('Няма намерени обекти.'); return; }
 
@@ -308,7 +311,11 @@ function loadTodayDashboard(){
 }
 
 /* Смяна на филтъра по магазин — рендира наново от кеша, без нова заявка */
+/* Обектите на регионалния accounting (roleRegionalScope в shared.js) или null. */
+function todayScope(){ return typeof roleRegionalScope === 'function' ? roleRegionalScope() : null; }
 function todayFilterChange(sel){
+  var scope = todayScope();
+  if (scope && scope.indexOf(sel.value) < 0) return; /* без „всички" и без чужд обект */
   todayFilterStore = sel.value;
   /* при филтриране към конкретен магазин - разгъваме го автоматично, за да
      не се налага двоен клик (избери от dropdown + после пак кликни картата) */
@@ -429,7 +436,8 @@ function todayFetchYesterdaySnapshot(cb){
 
 function todayStoreFilterHtml(stores, selected){
   var h = '<select onchange="todayFilterChange(this)" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;font-size:13px;background:#fff;color:#0f172a;cursor:pointer;">';
-  h += '<option value="all"' + (selected==='all' ? ' selected' : '') + '>Всички обекти</option>';
+  /* Регионалният accounting няма „всички" — само своите обекти. */
+  if (!todayScope()) h += '<option value="all"' + (selected==='all' ? ' selected' : '') + '>Всички обекти</option>';
   stores.forEach(function(s){
     h += '<option value="' + esc(s) + '"' + (selected===s ? ' selected' : '') + '>' + esc(s) + '</option>';
   });
@@ -567,7 +575,8 @@ function todayTogglePhotoQueue(){
   var wrap = document.getElementById('mod-today');
   if (todayPhotosExpanded && todayPhotosCache===null) {
     todayLoadPhotoQueue(function(entries){
-      todayPhotosCache = entries;
+      var scope = todayScope();
+      todayPhotosCache = scope ? entries.filter(function(e){ return scope.indexOf(e.store) >= 0; }) : entries;
       if (wrap && todayCache) renderTodayDashboard(wrap, todayCache.items, todayCache.noDueItems, todayCache.comps, todayCache.stores);
     });
   }
@@ -609,6 +618,8 @@ function todayNoDueRowsHtml(noDueItems, comps, storeName){
 }
 
 function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
+  /* Регионален accounting: без „всички" — по подразбиране първият му обект. */
+  if (todayScope() && (todayFilterStore === 'all' || stores.indexOf(todayFilterStore) < 0)) todayFilterStore = stores[0] || 'all';
   noDueItems = noDueItems || [];
   var totalDone=0, totalAll=0, laggards=0;
   var storeStatsArr = stores.map(function(s){
@@ -622,7 +633,10 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
 
   /* Тих snapshot + fetch на тенденцията - само веднъж на зареждане, не при
      всеки re-render (filter/expand toggle). */
-  if (!todayTrendFetched) {
+  /* Регионалният accounting вижда само част от обектите — неговият процент НЕ
+     се записва като общия дневен snapshot (иначе презаписва тенденцията на
+     компанията) и тенденция спрямо общия вчерашен няма. */
+  if (!todayTrendFetched && !todayScope()) {
     todayTrendFetched = true;
     todaySaveSnapshot(overallPct, totalDone, totalAll);
     todayFetchYesterdaySnapshot(function(snap){

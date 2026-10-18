@@ -1,37 +1,42 @@
-/* Роля 'controlling' („Контролинг", 18.10.2026) — вижда САМО подтаба
-   „🏷️ Преоценка" и работи в него като ЦО; група 'revaluation' — кой получава
-   известието за подадена бланка.
+/* Роля 'controlling' („Контролинг") и група 'revaluation'.
+   От 18.10.2026 (решение на Тенчо, wt-roli-tabove): общите табове + „Ревизии
+   и преоценка" с ДВАТА под-таба (графикът — само гледане) + „Днес". Без
+   Каса, История, Чек лист, Администрация. В Преоценка работи като ЦО.
+   (До 18.10.2026 виждаше САМО Преоценка — скриването на всички табове,
+   data-ctrl-hidden и спрените банер / polling / loadAll са махнати.)
+   Известието за подадена бланка — по групата 'revaluation' (+ регионалния).
    Минава през ИСТИНСКИЯ startApp() (shared.js + обвивката от notifications.js)
-   и през реалните revaluation.js / revisions.js / admin.js.
+   и през реалните revaluation.js / revisions.js / admin.js / checklist.js.
 
    Мутационна проверка (18.10.2026) — всеки вариант е пуснат и е паднал:
      K1 rvRecipients обратно на 'controlling'
         → пада „получава само групата revaluation";
-     K2 без скриването на табовете в setupTabsForRole
-        → пада „видим е САМО #tab-revaluation";
+     K2 controlling без „Днес" (roleCanSeeToday)
+        → пада „Днес — да";
      K3 rsCanSee без 'controlling'
-        → пада „#tab-revaluation е видим";
-     K4 без връщането на скритите табове при следващ вход (без презареждане)
-        → пада „след admin: главният таб пак отваря графика, графикът е видим".
+        → пада „„Ревизии и преоценка" — да";
+     K4 Чек лист по група 'controlling' и за ролята (без изричното изключване)
+        → пада „Чек лист — не (дори в група controlling)".
 */
 'use strict';
 
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
 const { boot, realClick, btn, ok, guard, section, report, ticks } = H;
 
-const CTRL = { email: 'e.gurova@temax.bg', display_name: 'Елица Гюрова', role: 'controlling', store_name: 'Централен офис' };
-const ADMIN = { email: 'ten.tenev@temax.bg', display_name: 'Тен Тенев', role: 'admin', store_name: 'Централен офис' };
+const CTRL = { id: 'u-c', email: 'e.gurova@temax.bg', display_name: 'Елица Гюрова', role: 'controlling', store_name: 'Централен офис',
+  notify_groups: ['controlling', 'revaluation'] };
+const ADMIN = { id: 'u-a', email: 'ten.tenev@temax.bg', display_name: 'Тен Тенев', role: 'admin', store_name: 'Централен офис' };
 
 function env(user) {
-  const h = boot({
-    modules: ['admin.js', 'stock-returns.js', 'notifications.js', 'revaluation.js', 'revisions.js'],
-    user: user,
+  return boot({
+    modules: ['admin.js', 'stock-returns.js', 'checklist.js', 'notifications.js', 'revaluation.js', 'revisions.js'],
+    user: Object.assign({}, user),
     data: { revaluation_campaigns: [], revaluation_submissions: [], revaluation_items: [], revaluation_codes: [],
-      revision_schedule: [], stores: [], users: [], app_settings: [], transport_orders: [], client_orders: [], docs: [] }
+      revision_schedule: [], stores: [], app_settings: [], transport_orders: [], client_orders: [], docs: [],
+      users: url => url.indexOf('id=eq.') >= 0 ? [{ is_regional: false, assigned_stores: [] }] : [] }
   });
-  return h;
 }
-const visibleTabs = h => Array.from(h.doc.querySelectorAll('#nav-tabs-container .nav-tab')).filter(t => t.style.display !== 'none').map(t => t.id);
+const vis = (h, id) => { const el = h.doc.getElementById(id); return !!el && el.style.display !== 'none'; };
 const shown = (h, id) => { const m = h.doc.getElementById(id); return !!m && m.style.display === 'block'; };
 
 (async function run() {
@@ -39,26 +44,28 @@ const shown = (h, id) => { const m = h.doc.getElementById(id); return !!m && m.s
   section('1. Вход като Контролинг');
   {
     const h = env(CTRL);
+    let loadAllCalls = 0; h.w.loadAll = () => { loadAllCalls++; };
     guard('startApp()', () => h.w.startApp()); await ticks(8);
-    const vis = visibleTabs(h);
-    ok('видим е САМО #tab-revaluation', vis.length === 1 && vis[0] === 'tab-revaluation', vis.join(','));
-    ok('#tab-revaluation е видим', h.doc.getElementById('tab-revaluation').style.display !== 'none');
-    ok('разделителите са скрити', Array.from(h.doc.querySelectorAll('#nav-tabs-container .tab-sep')).every(s => s.style.display === 'none'));
-    ok('#rvs-schedule скрит', h.doc.getElementById('rvs-schedule').style.display === 'none');
-    ok('отвореният модул е revaluation', shown(h, 'mod-revaluation') && !shown(h, 'mod-transport') && !shown(h, 'mod-rev-schedule'));
-    ok('rvIsCO() === true', h.w.rvIsCO() === true);
-    ok('rvCanSee() === true', h.w.rvCanSee() === true);
-    ok('rvIsCoViewer() === true', h.w.rvIsCoViewer() === true);
-    ok('rsCanEdit() === false', h.w.rsCanEdit() === false);
-    ok('isGlobal() === false (без История / Днес / Чек лист)', h.w.isGlobal() === false);
-    ok('Транспорт / Клиентски не са заредени', !h.calls.get.some(u => u.indexOf('/transport_orders') >= 0 || u.indexOf('/client_orders') >= 0));
+    ['tab-transport', 'tab-client', 'tab-bulletin', 'tab-docs', 'tab-contacts', 'tab-reference'].forEach(id =>
+      ok('общ таб ' + id + ' — да', vis(h, id)));
+    ok('„Ревизии и преоценка" — да', vis(h, 'tab-revaluation'));
+    ok('Днес — да', vis(h, 'tab-today'));
+    ok('Каса — не', !vis(h, 'tab-kasa'));
+    ok('История — не', !vis(h, 'tab-history'));
+    ok('Чек лист — не (дори в група controlling)', !vis(h, 'tab-checklist'));
+    ok('Администрация — не', !vis(h, 'tab-admin') && !vis(h, 'sep-admin'));
+    ok('под-таб „📅 График ревизии" — да', vis(h, 'rvs-schedule'));
+    ok('под-таб „🏷️ Преоценка" — да', vis(h, 'rvs-revaluation'));
+    ok('отвореният модул е revaluation', shown(h, 'mod-revaluation') && !shown(h, 'mod-transport'));
+    ok('rvIsCO() === true, rvCanSee() === true', h.w.rvIsCO() === true && h.w.rvCanSee() === true);
+    ok('rsCanEdit() === false (графикът — само гледане)', h.w.rsCanEdit() === false);
+    ok('isGlobal() === false', h.w.isGlobal() === false);
+    ok('loadAll() се вика (Транспорт / Клиентски / Документи)', loadAllCalls === 1, loadAllCalls);
     realClick(h.w, h.doc.getElementById('tab-revaluation')); await ticks(6);
-    ok('клик по главния таб → Преоценка, не графикът', shown(h, 'mod-revaluation') && !shown(h, 'mod-rev-schedule'));
-    guard('showModule(rev-schedule)', () => h.w.showModule('rev-schedule')); await ticks(6);
-    ok('графикът по друг път → „Нямаш достъп", не пада', h.doc.getElementById('mod-rev-schedule').textContent.indexOf('Нямаш достъп') >= 0);
-    guard('showLoginBanner()', () => h.w.showLoginBanner()); await ticks(4);
-    const b = h.doc.getElementById('notif-banner');
-    ok('без банер при вход', !b || b.style.display === 'none' || !b.innerHTML.trim());
+    ok('клик по главния таб → Преоценка', shown(h, 'mod-revaluation'));
+    realClick(h.w, h.doc.getElementById('rvs-schedule')); await ticks(6);
+    ok('„📅 График ревизии" се отваря, без „Нямаш достъп"', shown(h, 'mod-rev-schedule') && h.doc.getElementById('mod-rev-schedule').textContent.indexOf('Нямаш достъп') < 0);
+    ok('в графика — без „＋ Седмица" (само гледане)', !btn(h.doc.getElementById('mod-rev-schedule'), '＋ Седмица'));
     guard('showModule(revaluation)', () => h.w.showModule('revaluation')); await ticks(6);
     ok('в Преоценка: бутоните на ЦО („📅 График на кампаниите")', !!btn(h.doc.getElementById('mod-revaluation'), 'График на кампаниите'));
   }
@@ -67,24 +74,21 @@ const shown = (h, id) => { const m = h.doc.getElementById(id); return !!m && m.s
   {
     const h = env(ADMIN);
     guard('startApp()', () => h.w.startApp()); await ticks(8);
-    const vis = visibleTabs(h);
-    ['tab-transport', 'tab-client', 'tab-bulletin', 'tab-history', 'tab-today', 'tab-admin', 'tab-revaluation', 'tab-docs'].forEach(id => {
-      ok('admin вижда ' + id, vis.indexOf(id) >= 0, vis.join(','));
-    });
-    ok('#rvs-schedule видим', h.doc.getElementById('rvs-schedule').style.display !== 'none');
+    ['tab-transport', 'tab-client', 'tab-bulletin', 'tab-history', 'tab-today', 'tab-admin', 'tab-revaluation', 'tab-docs', 'tab-kasa'].forEach(id =>
+      ok('admin вижда ' + id, vis(h, id)));
+    ok('#rvs-schedule видим', vis(h, 'rvs-schedule'));
     ok('главният таб отваря графика', h.doc.getElementById('tab-revaluation').getAttribute('onclick') === "showModule('rev-schedule')");
     ok('стартовият модул е Транспорт', shown(h, 'mod-transport'));
-    ok('rsCanEdit() === true', h.w.rsCanEdit() === true);
   }
 
   section('3. Смяна на потребителя без презареждане');
   {
     const h = env(CTRL);
     guard('startApp(controlling)', () => h.w.startApp()); await ticks(6);
-    h.w.currentUser = ADMIN;
+    h.w.currentUser = Object.assign({}, ADMIN);
     guard('startApp(admin)', () => h.w.startApp()); await ticks(6);
-    ok('след admin: главният таб пак отваря графика, графикът е видим', h.doc.getElementById('tab-revaluation').getAttribute('onclick') === "showModule('rev-schedule')" &&
-      h.doc.getElementById('rvs-schedule').style.display !== 'none' && visibleTabs(h).indexOf('tab-transport') >= 0);
+    ok('след admin: главният таб пак отваря графика, История и Администрация се виждат',
+      h.doc.getElementById('tab-revaluation').getAttribute('onclick') === "showModule('rev-schedule')" && vis(h, 'tab-history') && vis(h, 'tab-admin'));
   }
 
   section('4. Известието за подадена бланка — група revaluation');

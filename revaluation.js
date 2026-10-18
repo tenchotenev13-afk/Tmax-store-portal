@@ -67,6 +67,11 @@ function rvRegionStores(){
   return rvParseList(rvMe.assigned_stores);
 }
 function rvIsRegionalFor(store){ return !!store && rvRegionStores().indexOf(store) >= 0; }
+/* Регионален accounting (18.10.2026): вижда и обработва САМО зачислените си
+   обекти; кампанийните бутони (Excel — кампания, MM41, „Кодовете са създадени",
+   График на кампаниите, Затвори) не са за него. admin с is_regional (В. Филев)
+   НЕ попада тук — admin е admin. */
+function rvRegionalAcc(){ return !!currentUser && currentUser.role === 'accounting' && rvRegionStores().length > 0; }
 /* Видимост на таба: admin, accounting, supply — винаги; обекти — само при
    revaluation_stores = 'on' (скрито от 13.10.2026 до етап 3). Регионалните днес
    са admin/accounting (проверено 12.10.2026) и виждат таба като ЦО; правото им
@@ -169,7 +174,7 @@ function rvSortCampaigns(list){
 function rvStoreOptions(){
   if(rvIsStoreUser()) return [currentUser.store_name];
   var reg = rvRegionStores();
-  if(reg.length && !rvIsCO() && currentUser.role !== 'supply') return reg;
+  if(reg.length && (rvRegionalAcc() || (!rvIsCO() && currentUser.role !== 'supply'))) return reg;
   return reg.concat(rvStoreList.filter(function(s){ return reg.indexOf(s) < 0; }));
 }
 
@@ -181,7 +186,11 @@ function loadRevaluation(){
   el.innerHTML = '<div class="pg-title">🏷️ Преоценка</div><div style="padding:20px;color:#94a3b8;">⏳ Зареждане...</div>';
   return Promise.all([
     sbGet('revaluation_campaigns', 'select=*&order=starts_on.desc'),
-    sbGet('users', 'email=eq.' + encodeURIComponent(currentUser.email || '') + '&select=is_regional,assigned_stores'),
+    /* is_regional / assigned_stores — от currentUser, ако rolesLoadRegional
+       (shared.js) вече ги е донесъл; иначе собствена заявка, както досега. */
+    currentUser.is_regional !== undefined
+      ? Promise.resolve([{ is_regional: currentUser.is_regional, assigned_stores: currentUser.assigned_stores }])
+      : sbGet('users', 'email=eq.' + encodeURIComponent(currentUser.email || '') + '&select=is_regional,assigned_stores'),
     sbGet('stores', 'select=name&order=name.asc'),
     rvIsCoViewer() ? rvLoadCodes() : Promise.resolve([]),
     rvIsStoreUser() ? sbGet('revaluation_submissions', 'store_name=eq.' + encodeURIComponent(currentUser.store_name || '') + '&status=in.(submitted,processed)&select=campaign_id') : Promise.resolve([])
@@ -252,7 +261,7 @@ function rvRender(){
     h += rvHistOpen
       ? '<button class="btn-sm" onclick="rvHistClose()">← Към кампанията</button>'
       : '<button class="btn-sm" onclick="rvHistOpenView()">📁 История</button>';
-    if(c){
+    if(c && !rvRegionalAcc()){
       h += '<button class="btn-sm" onclick="rvExportCampaign()">📥 Excel — кампания</button>';
       h += '<button class="btn-sm" onclick="rvMm41()">📄 MM41 — нови кодове</button>';
       if(rvIsCO()) h += '<button class="btn-sm" onclick="rvMm41Done()">✔ Кодовете са създадени в SAP</button>';
@@ -263,7 +272,7 @@ function rvRender(){
     opts.forEach(function(s){ h += '<option value="' + escAttr(s) + '"' + (s === rvStore ? ' selected' : '') + '>' + esc(s) + '</option>'; });
     h += '</select>';
   }
-  if(rvIsCO()){
+  if(rvIsCO() && !rvRegionalAcc()){
     h += '<button class="btn-sm" onclick="rvToggleSchedule()">📅 График на кампаниите</button>';
     if(c && c.status === 'open') h += '<button class="btn-sm" onclick="rvCloseCampaign()">🔒 Затвори кампанията</button>';
   }
@@ -801,7 +810,7 @@ function rvExport(){
    кампаниите" (етап 3б) — виж rvScheduleHtml по-долу. */
 function rvCloseCampaign(){
   var c = rvCampaign();
-  if(!rvIsCO() || !c || c.status !== 'open') return Promise.resolve(false);
+  if(!rvIsCO() || rvRegionalAcc() || !c || c.status !== 'open') return Promise.resolve(false);
   if(!confirm('Затваряне на кампания „' + c.title + '"? Обектите няма да могат да подават.')) return Promise.resolve(false);
   var patch = { status: 'closed', closed_at: new Date().toISOString(), closed_by: currentUser.display_name || currentUser.email };
   return sbPatch('revaluation_campaigns', 'id=eq.' + c.id, patch).then(function(res){
@@ -890,6 +899,7 @@ function rvLoadOverview(){
     subs.forEach(function(s){ bySt[s.store_name] = s; });
     var names = rvStoreList.filter(function(n){ return typeof isReportableStore !== 'function' || isReportableStore(n); });
     subs.forEach(function(s){ if(names.indexOf(s.store_name) < 0) names.push(s.store_name); });
+    if(rvRegionalAcc()){ var reg = rvRegionStores(); names = names.filter(function(n){ return reg.indexOf(n) >= 0; }); }
     names.sort(function(a, b){ return a.localeCompare(b, 'bg'); });
     rvCoRows = names.map(function(n){ var s = bySt[n] || null; return { store: n, sub: s, n: s ? (cnt[s.id] || 0) : 0 }; });
     rvRender();
@@ -917,7 +927,10 @@ function rvOverviewHtml(){
     '<div class="tbl-wrap tbl-compact"><table><thead><tr><th>Обект</th><th>Статус</th><th>Редове</th><th></th></tr></thead><tbody id="rv-co-rows">' +
     (rows || '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Няма обекти.</td></tr>') + '</tbody></table></div></div>';
 }
-function rvCoOpenStore(name){ rvCoOpen = true; rvStore = name; rvShowAdd = false; return rvLoadSheet(); }
+function rvCoOpenStore(name){
+  if(rvRegionalAcc() && rvRegionStores().indexOf(name) < 0){ toast('Обектът не е в твоя регион', '#dc2626'); return Promise.resolve(false); }
+  rvCoOpen = true; rvStore = name; rvShowAdd = false; return rvLoadSheet();
+}
 function rvCoBack(){ rvCoOpen = false; rvBad = {}; rvErr = {}; return rvLoadOverview(); }
 
 /* ─── Розовите колони ──────────────────────────────────── */
@@ -1108,6 +1121,7 @@ function rvCopyCodes(){
 
 /* ─── Excel — кампания (лист на обект + „Общо") ────────── */
 function rvExportCampaign(){
+  if(rvRegionalAcc()) return Promise.resolve(false);
   var c = rvCampaign();
   if(!c){ toast('Няма кампания', '#dc2626'); return Promise.resolve(false); }
   return Promise.all([
@@ -1251,7 +1265,7 @@ function rvDefaultTitle(kind, from){
   return (kind === 'optional' ? 'Пожелателна' : 'Задължителна') + ' преоценка' + m;
 }
 function rvToggleSchedule(){
-  if(!rvIsCO()) return Promise.resolve();
+  if(!rvIsCO() || rvRegionalAcc()) return Promise.resolve();
   rvShowSchedule = !rvShowSchedule;
   if(!rvShowSchedule){ rvRender(); return Promise.resolve(); }
   if(!rvSchedRows.length) rvSchedRows = [rvSchedBlank()];
@@ -1464,7 +1478,7 @@ function rvMm41Aoa(rows){
   return [RV_MM41_HEADERS.slice()].concat(rows.map(function(x){ return [x.new_sap_code, x.maktx, x.unit, x.std == null ? '' : x.std]; }));
 }
 function rvMm41(){
-  if(!rvIsCoViewer()) return Promise.resolve(false);
+  if(!rvIsCoViewer() || rvRegionalAcc()) return Promise.resolve(false);
   return rvMm41Collect().then(function(res){
     if(!res.ok){ toast('Данните са непълни — MM41 НЕ е направен', '#dc2626'); return false; }
     if(!res.rows.length){ toast('Няма нови кодове за MM41'); return false; }
@@ -1486,7 +1500,7 @@ function rvMm41(){
   });
 }
 function rvMm41Done(){
-  if(!rvIsCO()) return Promise.resolve(false);
+  if(!rvIsCO() || rvRegionalAcc()) return Promise.resolve(false);
   return rvMm41Collect().then(function(res){
     if(!res.ok){ toast('Данните са непълни — нищо не е записано', '#dc2626'); return false; }
     if(!res.rows.length){ toast('Няма нови кодове за MM41'); return false; }
@@ -1558,7 +1572,8 @@ function rvHistOpenView(){
       toast('Историята не се зареди изцяло — дървото не е показано', '#dc2626');
       rvHistSubs = null; rvRender(); return false;
     }
-    rvHistSubs = r[0];
+    var hreg = rvRegionalAcc() ? rvRegionStores() : null;
+    rvHistSubs = hreg ? r[0].filter(function(sb){ return hreg.indexOf(sb.store_name) >= 0; }) : r[0];
     rvHistCounts = {};
     r[1].forEach(function(it){ rvHistCounts[it.submission_id] = (rvHistCounts[it.submission_id] || 0) + 1; });
     /* по подразбиране е разгъната последната година */

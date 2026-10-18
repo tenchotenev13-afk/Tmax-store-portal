@@ -24,9 +24,9 @@ var RS_KIND_LABEL = { groups: 'Ревизия на групи', none: 'Няма 
 function rsCanSee(){
   return !!currentUser && ['admin', 'accounting', 'supply', 'manager', 'sklad', 'controlling'].indexOf(currentUser.role) >= 0;
 }
-/* Самият график — без Контролинг (rsCanSee го пуска само заради главния
-   таб, под който е „🏷️ Преоценка"). Отворен по друг път → „Нямаш достъп". */
-function rsCanSeeSchedule(){ return rsCanSee() && currentUser.role !== 'controlling'; }
+/* Самият график. От 18.10.2026 и за Контролинг (само гледане — rsCanEdit е
+   admin / accounting); дотогава Контролинг го нямаше. */
+function rsCanSeeSchedule(){ return rsCanSee(); }
 function rsCanEdit(){ return !!currentUser && (currentUser.role === 'admin' || currentUser.role === 'accounting'); }
 
 /* ─── Подредба ─────────────────────────────────────────── */
