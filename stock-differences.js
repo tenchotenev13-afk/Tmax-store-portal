@@ -4643,7 +4643,10 @@ function sendDiffEmail(reportId){
       return null;
     }
     if(btn) btn.textContent='⏳ Изпращане...';
-    return sendEmail(toArr,subject,bodyHtml,{cc:ccArr.length?ccArr:undefined,reply_to:replyTo||undefined,attachments:attachments});
+    /* „От: Цветелина Тенева · ТеМАХ <portal@temax.bg>" — доставчикът вижда
+       кой пише (решение 19.10.2026). Адресът остава portal@ от едж функцията. */
+    var fromName=(currentUser&&(currentUser.display_name||currentUser.email))||'';
+    return sendEmail(toArr,subject,bodyHtml,{cc:ccArr.length?ccArr:undefined,reply_to:replyTo||undefined,attachments:attachments,from_name:fromName?fromName+' · ТеМАХ':undefined});
   }).then(function(res){
     if(res===null) return; /* спряно заради лимита - вече е казано */
     if(!res.ok){

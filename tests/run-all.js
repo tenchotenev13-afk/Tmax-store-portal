@@ -234,6 +234,7 @@ const TESTS = [
   'report-grid.test.js',
   'email-encoding.test.js',
   'email-subject-rfc2047.test.js',
+  'mail-from-name.test.js',
   'daily-turnover.test.js',
   'kasa-tab-routing.test.js',
   'kasa-ui.test.js',

@@ -52,7 +52,7 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 |---|---|---|---|---|---|
 | `auth-login` | 19 | `index.ts` + `_shared/session.ts` | Логин: само bcrypt срещу `password_hash` (от 30.09.2026 колоната `password` не се чете); от 28.09.2026 връща и подписан пропуск `session` | портал — `shared.js` | ✅ |
 | `auth-set-password` | 19 | `index.ts` + `_shared/session.ts` | Смяна/ресет на парола (мин. 4 символа), пише само `password_hash`; от 28.09.2026 ресетът БЕЗ стара парола иска админски пропуск, иначе 403 | портал — `shared.js` (своята, със стара парола), `admin.js` (ресет, с `session`) | ✅ |
-| `resend-email` | 56 | **`send-email.ts`** | Праща И имейл (SMTP `mail.temax.bg`), И push — по поле `type` | портал — `email.js`, `push.js`; и четирите крон функции по-долу | ✅ |
+| `resend-email` | 59 | **`send-email.ts`** | Праща И имейл (SMTP `mail.temax.bg`, от 19.10.2026 от `portal@temax.bg`), И push — по поле `type`; от 19.10.2026 незадължително `from_name` — показвано име в „От“ (само Разлики до доставчик) | портал — `email.js`, `push.js`; и четирите крон функции по-долу | ✅ |
 | `portal-push` | 24 | `index.ts` | Push през OneSignal — до всички или по таг `store_name` | портал — `push.js` (`osSend`) | ✅ |
 | `bulletin-notify` | 19 | `index.ts` | Известията от Бюлетина: теми `overdue_tasks`, `today_deadlines`, `deadline_passed`, `promo_expiring`; от 20.09.2026 и `loading_lists_pending` — товарен лист, изпратен преди 48 ч и още неотметнат (v8) | **крон 15** (`*/15 * * * *`) + портал — `push.js` (`runNotifyTopic`) | ✅ |
 | `send-scheduled-report` | 67 | `index.ts` | Дневен (днешният ден) и седмичен (текущата седмица) репорт по имейл; по `type` в тялото и „Палети" (петък) и „Логистичен склад" (неделя); от 20.09.2026 върнато Равнение не влиза в „Непоправени от по-рано", ако всички ПОС отчети за обекта и деня са потвърдени (v40); от 23.09.2026 нова секция „⏳ Необработени разлики над N дни" в СЕДМИЧНИЯ — моментна снимка към изпращането, праг `app_settings.diff_stale_days` (v41); от 29.09.2026 Пазарджик и Сервиз Троян са извън обектите — същият списък като `bulletin-notify` (v44); от 30.09.2026 в СЕДМИЧНИЯ „Сторна с по-малка нова сума" (`new_sum < returned_sum`) вместо „Сторна под N €" (v45); от 01.10.2026 в СЕДМИЧНИЯ „🕒 Трансфери — застояли над N дни" след „Стока на път", праг `app_settings.transfer_stale_days` (v46); от 06.10.2026 нов type `co_overdue` — „Просрочени клиентски заявки — ЦО", едно общо писмо до `report_recipients.co_overdue=true`, понеделник–петък 08:00 София, не се праща на празник (v59–v60); от 08.10.2026 `reportIsLate` не брои за закъсняла клиентска заявка със статус `arrived` (v61); от 09.10.2026 четенията без прозорец по дата (`differences_reports`, `stock_differences`, отворените `goods_transit`) са на страници по 1000 — PostgREST реже на 1000 без грешка, а `stock_differences` е 1015, `goods_transit` 1650; прекъснато четене се показва като червен ред „⚠️ Непълни данни“; `{"type":"weekly","dry_run":true}` връща броевете на двете секции и `rows_read` без писмо и без запис (v62); от 15.10.2026 просрочието и „чака“ при клиентските заявки (и закъснелият транспорт в седмичния) са в РАБОТНИ дни — `reportWorkdaysBetween`, изтекъл срок е поне 1 (v65, бележка v54); от 16.10.2026 „🕒 Трансфери — застояли“ по ЕДИНИЦА — крайната отметка важи при всички единици 1..qty (`reportTransferUnits`, `transfer_cargo_events.unit`), частично получен е „в път“, „чака прехвърляне“ от най-новата единица (v66, бележка v55); от 18.10.2026 „в път“ / „застоял“ при трансферите се мерят от „🚚 Тръгна“ (`transfers.departed_at`), иначе от `depart_date` (v67, бележка v56) | **крон 26** `co-overdue-weekdays-8h` (`0 5,6 * * 1-5`, `co_overdue`, условие час в София = **8**, СЪЗДАДЕН НЕАКТИВЕН — виж `report-cron-co-overdue-schema.sql`), **крон 19** `daily-report-21h` (`0 18,19 * * *`, `{"type":"daily"}`), **крон 20** `weekly-report-sun-21h` (`0 18,19 * * 0`, неделя, `weekly`), **крон 17** `pallets-report-friday-21` (`0 15,16 * * 5`, петък, `pallets`, условие час в София = **18** — името на заданието е останало от 21:00), **крон 18** (`0 18,19 * * 0`, неделя, `warehouse`) — останалите с условие час в София = 21 | ✅ |
@@ -267,6 +267,17 @@ denomailer@1.6.0 реже символи и чупи SMTP dot-stuffing; тема
 собствен RFC 2047 енкодер. Подробностите са в самия файл — прочети ги, преди
 да пипаш кодирането.
 
+От **19.10.2026** тялото може да носи `from_name` — показвано име в „От“
+(`buildFrom()` / `cleanFromName()`): махат се контролните символи, CR/LF,
+`<`, `>`, `"` и обратната черта, най-много 64 знака; празно → `SMTP_FROM_NAME`
+буквално както преди. Кирилицата се кодира с `encodeSubject()` и се подава
+като ОБЕКТ `{mail, name}`, не като низ: вграденото кодиране на denomailer
+оставя литерални интервали в encoded word, а низовият път прави `trim()` и
+увива готовия encoded word втори път (проверено с истинския denomailer срещу
+фалшив SMTP сървър). Адресът е винаги `SMTP_USER` — клиентът не го задава.
+Ползва го само `sendDiffEmail` (stock-differences.js): „Цветелина Тенева ·
+ТеМАХ <portal@temax.bg>“. Тест `tests/mail-from-name.test.js`.
+
 **`portal-push`** — push през OneSignal към целия портал или по таг.
 
 **`bulletin-notify`** — единственият източник за известията от Бюлетина.
@@ -365,11 +376,21 @@ denomailer@1.6.0 реже символи и чупи SMTP dot-stuffing; тема
 |---|---|
 | `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | auth-login, auth-set-password, admin-users, kasa-access-check, set-history-pin, send-scheduled-report, send-oborot-report, dynamic-responder, bulletin-notify |
 | `ONESIGNAL_REST_KEY` | portal-push, resend-email, swift-handler |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_NAME` | resend-email |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_NAME` | resend-email. `SMTP_USER` = `portal@temax.bg` от 19.10.2026 (дотогава `c.teneva@temax.bg`); `SMTP_FROM_NAME` = `TeMAX`. |
 | `PORTAL_SESSION_SECRET` | auth-login (подписва пропуска), auth-set-password, set-history-pin и admin-users (проверяват го през `requireAdmin`) — всичките през `_shared/session.ts`. ≥48 случайни байта (`openssl rand -base64 48`), зададен на 28.09.2026 с `supabase secrets set`. Смяната му обезсилва всички издадени пропуски — хората влизат наново. |
 
 Задават се в Supabase → Project Settings → Edge Functions → Secrets.
 **Не ги слагай във файл в тази папка.**
+
+**Смяната на `SMTP_USER` на 19.10.2026.** В 11:10 SuperHosting блокира паролата
+на `c.teneva@temax.bg` заради входове от променливите IP адреси на Supabase
+(IP-то, от което едж функциите пращат, НЕ е постоянно). От 11:15 до 14:34 —
+43 неуспешни изпращания с „535 Incorrect authentication data“ (`function_logs`,
+редове „SMTP send error“; в първоначалния доклад — 55 до 14:55, броени иначе).
+Тенчо смени `SMTP_USER`/`SMTP_PASSWORD` на отделната кутия `portal@temax.bg`
+(~14:50); тестовото писмо в 14:56 пристигна от „TeMAX <portal@temax.bg>“.
+Живко е помолил SuperHosting да не блокира кутията. Пропуснатите писма не се
+пращат повторно. Блокира ли се пак — същият симптом „535“ в `function_logs`.
 
 OneSignal App ID (`a326639e-…`) стои в кода нарочно — публичен идентификатор е,
 не ключ.

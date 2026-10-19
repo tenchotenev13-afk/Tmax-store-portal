@@ -39,9 +39,15 @@
 // Изисква следните Supabase Edge Function Secrets (Project Settings → Edge Functions):
 //   SMTP_HOST      - по подразбиране mail.temax.bg, ако не е зададен
 //   SMTP_PORT      - по подразбиране 465
-//   SMTP_USER      - пълният имейл адрес, от който се изпраща (напр. c.teneva@temax.bg)
+//   SMTP_USER      - пълният имейл адрес, от който се изпраща (от 19.10.2026 portal@temax.bg)
 //   SMTP_PASSWORD  - РЕАЛНАТА парола на този имейл акаунт (НЕ паролата за портала!)
 //   SMTP_FROM_NAME - показвано име (по избор), напр. "ТеМАХ - Разлики"
+//
+// ПОКАЗВАНО ИМЕ ОТ КЛИЕНТА (19.10.2026): незадължително поле body.from_name.
+// Ползва го само писмото до доставчик от Разлики (sendDiffEmail), за да се
+// вижда кой го праща: "Цветелина Тенева · ТеМАХ <portal@temax.bg>". Липсва ли
+// или е празно след почистване - From е буквално същият като преди
+// (SMTP_FROM_NAME + SMTP_USER). АДРЕСЪТ не се приема от клиента никога.
 
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
@@ -193,6 +199,53 @@ function encodeSubject(subject: string): string {
   return ' ' + words.join('\r\n ');
 }
 
+/* Почиства показваното име, подадено от клиента (body.from_name).
+   Маха контролните символи (вкл. CR/LF - иначе би било инжекция на заглавие),
+   < > " и обратната наклонена черта; trim; най-много 64 знака (по кодови
+   точки, не по UTF-16 единици). Празен резултат значи "няма име".
+   С charCodeAt, не с регекс - виж бележката за u-escape над hasNonAscii(). */
+function cleanFromName(raw: unknown): string {
+  var s = (raw === undefined || raw === null) ? '' : String(raw);
+  var out = '';
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    if (c < 32 || c === 127 || (c >= 128 && c <= 159)) { continue; }
+    if (c === 60 || c === 62 || c === 34 || c === 92) { continue; } /* < > " и обратна черта */
+    out += s.charAt(i);
+  }
+  out = out.trim();
+  var cps = Array.from(out);
+  if (cps.length > 64) { out = cps.slice(0, 64).join('').trim(); }
+  return out;
+}
+
+/* Сглобява полето `from` за client.send().
+
+   Без име от клиента - низът е ТОЧНО същият като преди 19.10.2026, тоест
+   всички останали писма (отчети, оборот, известия...) не се променят.
+
+   С име - връща ОБЕКТ {mail, name}, не низ. Причината е в denomailer@1.6.0:
+     - низ "Име <адрес>" минава през parseSingleEmail()
+       (config/mail/email.ts), която прави name.trim() и после
+       quotedPrintableEncodeInline(). Вградената дава Q-кодиране с ЛИТЕРАЛНИ
+       интервали вътре в encoded word - същият дефект като при темата (виж
+       encodeSubject), тоест "Цветелина Тенева · ТеМАХ" излиза счупено. А
+       наше готово "=?UTF-8?B?...?=" губи водещия си интервал от trim() и
+       бива увито втори път;
+     - обект {mail, name} минава по другия клон на parseSingleEmail - БЕЗ
+       trim. Готовите encoded words от encodeSubject() с водещия им интервал
+       са чист ASCII и не започват с "=?", тоест минават дословно.
+   Чисто ASCII име отива като quoted-string ("..."), защото @ , ; и подобни
+   не са позволени в display-name без кавички; " и обратната черта вече са
+   махнати от cleanFromName(). */
+type FromObj = { mail: string; name: string };
+function buildFrom(rawName: unknown, fallbackName: string, mail: string): string | FromObj {
+  var name = cleanFromName(rawName);
+  if (!name) { return fallbackName + ' <' + mail + '>'; }
+  if (!hasNonAscii(name)) { return { mail: mail, name: '"' + name + '"' }; }
+  return { mail: mail, name: encodeSubject(name) };
+}
+
 function guessContentType(filename: string): string {
   var ext = (filename.split(".").pop() || "").toLowerCase();
   var map: Record<string, string> = {
@@ -268,7 +321,9 @@ Deno.serve(async (req) => {
 
       try {
         await client.send({
-          from: SMTP_FROM_NAME + ' <' + SMTP_USER + '>',
+          /* Низ или обект - виж buildFrom(). SendConfig.from е типизиран
+             като string, но parseSingleEmail() приема и {mail, name}. */
+          from: buildFrom(body.from_name, SMTP_FROM_NAME, SMTP_USER) as unknown as string,
           to: Array.isArray(to) ? to : [to],
           cc: cc ? (Array.isArray(cc) ? cc : [cc]) : undefined,
           replyTo: replyTo || undefined,

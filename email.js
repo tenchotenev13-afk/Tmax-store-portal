@@ -1,9 +1,7 @@
-/* email.js — Имейл нотификации чрез Resend API
-   Тест: изпраща от onboarding@resend.dev
-   Продукция: след верификация на temax.bg домейн в Resend */
+/* email.js — Имейл нотификации през едж функцията resend-email (SMTP
+   mail.temax.bg, от 19.10.2026 от portal@temax.bg). Името „resend" е
+   историческо — Resend API не се ползва. */
 
-var RESEND_KEY = 're_fUTBSVW2_P76jnDkZheuT4XtgXfiSPsck';
-var EMAIL_FROM = 'ТеМАХ Бюлетин <onboarding@resend.dev>';
 var EMAIL_TEST = ''; /* попълва се автоматично от currentUser */
 
 /* ─── BASE SEND ─────────────────────────────────────────── */
@@ -14,6 +12,9 @@ function sendEmail(to, subject, html, extra) {
   if (extra.attachments && extra.attachments.length) payload.attachments = extra.attachments;
   if (extra.cc) payload.cc = extra.cc;
   if (extra.reply_to) payload.reply_to = extra.reply_to;
+  /* Показвано име в „От" — само Разлики до доставчик (sendDiffEmail).
+     Без него едж функцията ползва SMTP_FROM_NAME („TeMAX"). */
+  if (extra.from_name) payload.from_name = extra.from_name;
   /* Използваме Supabase Edge Function като proxy (решава CORS) */
   /* Пробваме send-email, после index ако неуспешно */
   var fnUrl='https://xiwkdiqqplgdcrkewgtv.supabase.co/functions/v1/resend-email';
