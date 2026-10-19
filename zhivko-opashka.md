@@ -14,14 +14,14 @@
 
 ## Чака изпращане
 
-## Изпратено 18.10.2026
+## Потвърдено 19.10.2026
 
 - 18.10 · transfers.departed_at — timestamptz, NULL, без default (кога е тръгнал бусът / камионът)
   (в базата от миграцията 20261018151927)
 - 18.10 · transfers.departed_by — text, NULL, без default (кой е отбелязал „Тръгна")
   (в базата от миграцията 20261018151927)
 - 18.10 · transfers.status — нова стойност на статус 'sent' („Изпратен"; досега 'planned' / 'partial' / 'done')
-- 15.10 · transfer_cargo_events.unit — integer, NULL, без default (номер на единицата 1..qty; null = целият товар)
+- 15.10 · transfer_cargo_events.unit — integer, NULL, без default (номер на единицата 1..qty; null = целият товар) (индекс transfer_cargo_events_unit_once — само в Supabase, не е в огледалото)
   (в базата от миграцията 20261015132314)
 
 ## Потвърдено 16.10.2026
