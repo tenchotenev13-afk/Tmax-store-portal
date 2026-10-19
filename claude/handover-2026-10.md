@@ -577,7 +577,8 @@ CLAUDE.md. Опашката от задачи НЕ е тук — тя живее
   `sendDiffEmail` подава `from_name`, `resend-email` го почиства и кодира
   (`buildFrom`/`cleanFromName`). Останалите писма — „TeMAX“ без промяна.
   От email.js махнати мъртвите RESEND_KEY/EMAIL_FROM. Без схема. Тест
-  `mail-from-name.test.js`.
+  `mail-from-name.test.js`. resend-email v60 (19.10, CLI), обратно четене байт в
+  байт с a1202de.
 
 ## 1. Хора
 
