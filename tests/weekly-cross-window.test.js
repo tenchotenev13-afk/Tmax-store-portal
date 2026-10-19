@@ -111,6 +111,32 @@ function urlFor(calls, table) {
       w.reportCrossWindow({}).toStamp === null);
   }
 
+  section('1б. Седмица със смяна на часа (октомври и март)');
+  {
+    /* В Europe/Sofia: 25.10.2026 (UTC+3 → UTC+2) и 29.03.2026 (UTC+2 → UTC+3).
+       TZ се задава ВЪТРЕ в процеса (Git Bash не го подава; CI е в UTC, където
+       смяна няма) и се връща след проверката. */
+    const prevTZ = process.env.TZ;
+    process.env.TZ = 'Europe/Sofia';
+    try {
+      const { w } = env();
+      const oct = w.reportCrossWindow({ from: '2026-10-19', to: '2026-10-25' });
+      ok('октомври: долна граница = 19.10 00:00 лятно (18.10 21:00Z)', oct.fromStamp === '2026-10-18T21:00:00.000Z', oct.fromStamp);
+      ok('октомври: горна граница = 26.10 00:00 зимно (25.10 22:00Z)', oct.toStamp === '2026-10-25T22:00:00.000Z', oct.toStamp);
+      ok('октомври: седмицата е 169 часа', (new Date(oct.toStamp) - new Date(oct.fromStamp)) / 3600000 === 169);
+      const naiveOct = new Date(new Date('2026-10-25T00:00:00').getTime() + 86400000).toISOString();
+      ok('октомври: „неделя + 24 ч" НЕ е горната граница (затова тестът я смята календарно)', naiveOct !== oct.toStamp, naiveOct);
+      const mar = w.reportCrossWindow({ from: '2026-03-23', to: '2026-03-29' });
+      ok('март: долна граница = 23.03 00:00 зимно (22.03 22:00Z)', mar.fromStamp === '2026-03-22T22:00:00.000Z', mar.fromStamp);
+      ok('март: горна граница = 30.03 00:00 лятно (29.03 21:00Z)', mar.toStamp === '2026-03-29T21:00:00.000Z', mar.toStamp);
+      ok('март: седмицата е 167 часа', (new Date(mar.toStamp) - new Date(mar.fromStamp)) / 3600000 === 167);
+      ok('март: последната секунда на неделята е ВЪТРЕ', new Date('2026-03-29T23:59:59') < new Date(mar.toStamp));
+      ok('октомври: последната секунда на неделята е ВЪТРЕ', new Date('2026-10-25T23:59:59') < new Date(oct.toStamp));
+    } finally {
+      if (prevTZ === undefined) delete process.env.TZ; else process.env.TZ = prevTZ;
+    }
+  }
+
   section('2. ЯДРОТО: шапката и кросмодулната секция мерят едно и също');
   {
     const probe = env();
@@ -140,7 +166,12 @@ function urlFor(calls, table) {
         summary.weekLabel);
 
       const monday = new Date(wk.dates[0] + 'T00:00:00').toISOString();
-      const nextMon = new Date(new Date(wk.dates[6] + 'T00:00:00').getTime() + 86400000).toISOString();
+      /* Следващата КАЛЕНДАРНА полунощ, не „неделя + 24 ч": в седмицата със
+         смяна на часа неделята е 25 ч (октомври) или 23 ч (март) и „+24 ч"
+         даваше грешно очакване (червен тест 19.10.2026 при верен report.js). */
+      const nextMonD = new Date(wk.dates[6] + 'T00:00:00');
+      nextMonD.setDate(nextMonD.getDate() + 1);
+      const nextMon = nextMonD.toISOString();
 
       const diffUrl = urlFor(h.calls, 'differences_reports');
       ok('Разлики: долна граница = понеделника на седмицата',
