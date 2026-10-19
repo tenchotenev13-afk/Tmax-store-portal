@@ -313,6 +313,7 @@ const TESTS = [
   'transfers-card-note.test.js',
   'transfers-departed.test.js',
   'transfers-notify.test.js',
+  'transfers-warehouses.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',

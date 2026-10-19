@@ -28,7 +28,9 @@
    ВИДИМОСТ: обектът вижда транспортите, които е създал, и тези, в които е
    спирка, крайна точка, точка на прехвърляне, получател или е дотоварил
    товар (transfer_cargo.loaded_at_store). isGlobal()
-   (admin / accounting / logistics) — всички. Правилото е в
+   (admin / accounting / logistics) — всички. Складовете (logistics със
+   store_name „Логистичен склад …") ГЛЕДАТ всички, но ДЕЙСТВАТ само от името
+   на своя обект (tfWarehouseStore → tfActorStores; решение 19.10.2026). Правилото е в
    tfVisibleToStores() и е едно за списъка и за теста.
 
    Обектите се пазят като ТЕКСТ (store_name), не като FK — конвенцията на
@@ -111,6 +113,9 @@ function tfLoadStoreList() {
    обектът — само себе си (или назначените си). Само обекти от tfStoreList:
    ЦО (supply) не е обект, между който се движи товар. */
 function tfCreatorStores() {
+  /* Складът — само от своя обект, не целия списък. */
+  var wh = tfWarehouseStore();
+  if (wh && isGlobal()) return tfStoreList.indexOf(wh) >= 0 ? [wh] : [];
   var st = assignedStores();
   if (!st) return tfStoreList.slice();
   return st.filter(function (s) { return !!s && tfStoreList.indexOf(s) >= 0; });
@@ -1383,10 +1388,22 @@ function tfCargoRouteStores(t, c) {
   return [tfCargoSender(t, c)].concat((c && c.transfer_points) || []).concat([c && c.recipient_store]).filter(Boolean);
 }
 function tfIsAdmin() { return !!currentUser && currentUser.role === 'admin'; }
+/* Логистичният склад (Логистика 1 / 2: роля logistics, store_name
+   „Логистичен склад …") е глобален профил за четене, но в Трансфери е
+   ОБЕКТ: получава, разтоварва, създава и „Тръгна" от свое име. null — не е
+   склад. isLogisticsWarehouseUser е в stock-differences.js (преди
+   transfers.js в index.html), но не се разчита на реда. */
+function tfWarehouseStore() {
+  return (currentUser && typeof isLogisticsWarehouseUser === 'function' && isLogisticsWarehouseUser())
+    ? currentUser.store_name : null;
+}
 /* От името на кои обекти потребителят отбелязва. Глобалните роли не са
-   обект и не потвърждават вместо обекта — само админът решава проблеми. */
+   обект и не потвърждават вместо обекта — само админът решава проблеми.
+   Изключение: складът — от името на своя обект (19.10.2026). admin и
+   accounting — без права за отметки. */
 function tfActorStores() {
-  if (!currentUser || isGlobal()) return [];
+  if (!currentUser) return [];
+  if (isGlobal()) { var wh = tfWarehouseStore(); return wh ? [wh] : []; }
   var st = assignedStores();
   return (st || []).filter(Boolean);
 }
@@ -1674,7 +1691,7 @@ function tfStaleItems(q) {
   return out;
 }
 /* „⏳ Чакащи прехвърляне": обектът — своите; admin / ЦО — всички. */
-function tfReshipScope() { return (currentUser && isGlobal()) ? null : tfActorStores(); }
+function tfReshipScope() { return (currentUser && isGlobal() && !tfWarehouseStore()) ? null : tfActorStores(); }
 /* Етикетът на брояча и на филтъра — едно място, за да не се разминат. */
 function tfReshipLabel() {
   return tfReshipScope() === null ? 'Чакащи прехвърляне (всички обекти)' : 'Чакащи прехвърляне при мен';
@@ -2197,6 +2214,11 @@ function tfCanDepart(t) {
   if (!t) return 'Няма транспорт.';
   if (t.mode === 'courier') return 'При куриер се отбелязва „Предаден на куриер“.';
   if (t.departed_at) return 'Транспортът вече е тръгнал на ' + tfFmtTs(t.departed_at) + '.';
+  /* Приключен или вече отбелязан по товарите — „Тръгна" няма смисъл
+     (Кърджали-0001, 18.10: бутонът излизаше на завършен транспорт). */
+  var evs = tfEventsOf(t.id);
+  if (t.status === 'done' || tfComputeStatus(t, tfCargoByTransfer[t.id] || [], evs).status === 'done') return 'Транспортът е завършен.';
+  if (evs.length) return 'Има отметки по товарите.';
   if (!tfIsAdmin() && tfActorStores().indexOf(t.from_store) < 0) return 'Отбелязва създалият го обект или админ.';
   return null;
 }

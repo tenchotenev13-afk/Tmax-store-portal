@@ -6,7 +6,7 @@
 
    Какво заковава файлът:
    a) Обект с 3 дължими ЕДИНИЦИ (от тръгнал бус) и 1 чакащ прехвърляне →
-      картата „3 товара за потвърждение в Трансфери · 1 чака прехвърляне";
+      картата „3 бройки за потвърждение в Трансфери · 1 чака прехвърляне";
       клик → модул transfers и филтър „📥 За потвърждение при мен".
    b) 0 и 0 → няма карта; само чакащ → „1 товар чака прехвърляне…" и клик
       към „⏳ Чакащи".
@@ -112,7 +112,7 @@ async function settle() { for (let i = 0; i < 6; i++) await ticks(); }
   {
     const h = env(RADNEVO, state());
     h.w.showLoginBanner(); await settle();
-    ok('текстът', title(h) === '3 товара за потвърждение в Трансфери · 1 чака прехвърляне', title(h));
+    ok('текстът', title(h) === '3 бройки за потвърждение в Трансфери · 1 чака прехвърляне', title(h));
     ok('иконата и подзаглавието', /🔁/.test(card(h).textContent) && /Отвори Транспорт → Трансфери/.test(card(h).textContent));
     realClick(h.w, card(h)); await settle();
     ok('клик → модул transfers', h.modules.indexOf('transfers') >= 0, JSON.stringify(h.modules));
@@ -182,7 +182,7 @@ async function settle() { for (let i = 0; i < 6; i++) await ticks(); }
     ok('цикъл 2: звук веднъж', h.sounds === 1, String(h.sounds));
     ok('цикъл 2: „🔁 Тръгна Враца-0002 към вас · от Враца · 1 товар"', h.notify.length === 1 && h.notify[0].text === '🔁 Тръгна Враца-0002 към вас · от Враца · 1 товар', JSON.stringify(h.notify.map(function (n) { return n.text; })));
     ok('подсказката „Отвори Трансфери"', h.notify[0] && h.notify[0].hover === 'Отвори Трансфери');
-    ok('картата: 3 + 4 = 7 единици', title(h) === '7 товара за потвърждение в Трансфери · 1 чака прехвърляне', title(h));
+    ok('картата: 3 + 4 = 7 единици', title(h) === '7 бройки за потвърждение в Трансфери · 1 чака прехвърляне', title(h));
     ok('знакът е преместен', h.w._tfWatermark === Date.parse(t2.departed_at));
     h.w.checkNewTransfers(); await settle();
     ok('цикъл 3 без ново: нищо', h.sounds === 1 && h.notify.length === 1);

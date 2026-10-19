@@ -542,10 +542,16 @@ function checkNewLoadingLists(){
    портала — без push към телефона и без имейл (решение 18.10.2026). */
 var _tfWatermark=null;  /* ms — най-новото „тръгна към вас", вече чуто */
 
-/* Обектът, не офисът: глобалните роли не потвърждават (tfActorStores). */
+/* Кой получава картата и звънеца — ТОЧНО който може да натисне „Получен" /
+   „Разтоварен": tfActorStores() (transfers.js). Обектът — своите обекти;
+   складът (logistics, „Логистичен склад …") — своя обект (19.10.2026);
+   admin / accounting — [] → нищо. */
+function notifTransferStores(){
+  if(!currentUser || typeof tfActorStores!=='function') return [];
+  return tfActorStores().filter(Boolean);
+}
 function notifWantsTransfers(){
-  if(!currentUser || (typeof isGlobal==='function' && isGlobal())) return false;
-  if(!assignedStores()) return false;
+  if(!notifTransferStores().length) return false;
   return typeof tfDueForStores==='function' && typeof tfArrCs==='function';
 }
 /* cb(null) = нямаме информация (глобален профил, срив, нито един транспорт);
@@ -554,7 +560,7 @@ function notifWantsTransfers(){
    чакат прехвърляне — последните 200 по created_at. */
 function notifTransfersPending(cb){
   if(!notifWantsTransfers()){ cb(null); return; }
-  var stores=assignedStores().filter(Boolean);
+  var stores=notifTransferStores();
   var hq=[], cq=[];
   stores.forEach(function(st){
     var e=encodeURIComponent(st);
@@ -592,8 +598,10 @@ function notifTransfersPending(cb){
     });
   }).catch(function(){ cb(null); });
 }
+/* n е в БРОЙКИ (единици), не в товарни редове — филтърът „📥 За
+   потвърждение при мен (N)" в таба брои редове; разликата е нарочна. */
 function notifTransfersCardTitle(n,m){
-  if(n>0) return n+(n===1?' товар':' товара')+' за потвърждение в Трансфери'+(m>0?' · '+m+(m===1?' чака':' чакат')+' прехвърляне':'');
+  if(n>0) return n+(n===1?' бройка':' бройки')+' за потвърждение в Трансфери'+(m>0?' · '+m+(m===1?' чака':' чакат')+' прехвърляне':'');
   return m+(m===1?' товар чака':' товара чакат')+' прехвърляне в Трансфери';
 }
 /* Кликът води към филтъра, който има какво да покаже. */
