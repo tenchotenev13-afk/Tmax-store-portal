@@ -2429,6 +2429,16 @@ function tfEvToggleUnit(n, on) {
   }
   renderEventModal();
 }
+/* „Избери всички свободни" (on) / „Махни избора" (!on) — само свободните
+   единици; отбелязаните (✅) не се пипат. */
+function tfEvSelectAll(on) {
+  var f = tfEvForm;
+  if (!f || (f.kind !== 'received' && f.kind !== 'unloaded')) return;
+  var x = tfFindCargo(f.tid, f.cid);
+  if (!x.c) return;
+  f.units = on ? tfUnitsState(x.c, tfEventsOf(f.tid), f.kind, f.store).left.slice() : [];
+  renderEventModal();
+}
 function closeEventModal() {
   tfEvForm = null;
   var ov = document.getElementById('tfe-ov');
@@ -2450,7 +2460,17 @@ function renderEventModal() {
   var qty = Math.max(1, parseInt(x.c.qty, 10) || 1);
   if (qty > 1 && (f.kind === 'received' || f.kind === 'unloaded' || f.kind === 'problem')) {
     var usM = f.kind === 'problem' ? null : tfUnitsState(x.c, tfEventsOf(f.tid), f.kind, f.store);
-    h += '<label class="fl">' + (f.kind === 'problem' ? 'За кои единици' : 'Единици (може няколко)') + '</label><div id="tfe-units" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
+    h += '<label class="fl">' + (f.kind === 'problem' ? 'За кои единици' : 'Единици (може няколко)') + '</label>';
+    /* „Избери всички свободни" — при 90 бройки 87 клика стават един.
+       „Махни избора" — от 10 нагоре, където ръчното махане е досадно.
+       При „Проблем" не — там е „целият товар". */
+    if (usM) {
+      h += '<div style="display:flex;gap:6px;margin-bottom:6px;">' +
+        '<button id="tfe-all" type="button" class="btn-sm" onclick="tfEvSelectAll(true)">Избери всички свободни (' + usM.left.length + ')</button>' +
+        (qty >= 10 ? '<button id="tfe-none" type="button" class="btn-sm" onclick="tfEvSelectAll(false)">Махни избора</button>' : '') +
+        '</div>';
+    }
+    h += '<div id="tfe-units" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px;">';
     if (f.kind === 'problem') {
       h += '<label class="tfe-unit" data-u="0" style="font-size:13px;"><input type="checkbox" id="tfe-whole"' + (f.whole ? ' checked' : '') + ' onchange="tfEvToggleUnit(0,this.checked)"> целият товар</label>';
     }
