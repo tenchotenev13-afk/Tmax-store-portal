@@ -25,9 +25,19 @@ function section(t) { console.log('\n=== ' + t + ' ==='); }
    фикстур беше изместен с един ден — не се виждаше, защото всички сравнения
    бяха със същото d(). Излезе наяве чак когато calcElapsed() започна да чете
    и o.date: o-1 беше date=10 дни назад при created_at=9 дни назад. */
-const d = n => { const x = new Date(); x.setHours(0, 0, 0, 0); x.setDate(x.getDate() + n);
+/* ЗАКОВАН ЧАСОВНИК (18.10.2026): „Изминало" и банерът броят РАБОТНИ дни
+   (calcElapsed), тоест резултатът зависи от деня от седмицата. Датите вече са
+   спрямо ОПОРЕН ДЕН вторник 20.10.2026, а boot() заковава w.Date и TODAY на
+   него. Сметнато НА РЪКА — работни дни в (опорен-n, 20.10]:
+     o-1  ср 07.10 → 9  (08, 09, 12–16, 19, 20)               → 🔶 (7–9)
+     o-2  пон 05.10 → 11 (06–09, 12–16, 19, 20)
+     o-3  вт 22.09 (празник) → 20 (23–25, 28.09–02.10, 05–09, 12–16, 19, 20) → 🔴
+     o-4  нд 18.10 → 2;  o-5 пон 19.10 → 1 */
+process.env.TZ = 'Europe/Sofia';
+const REF = [2026, 9, 20]; /* вторник 20.10.2026 */
+const d = n => { const x = new Date(REF[0], REF[1], REF[2] + n);
   return x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0'); };
-const daysAgoISO = n => { const x = new Date(); x.setDate(x.getDate() - n); return x.toISOString(); };
+const daysAgoISO = n => new Date(REF[0], REF[1], REF[2] - n, 10).toISOString();
 
 const CO = 'Централен офис';
 
@@ -37,26 +47,26 @@ const PROBE = hBoot({ modules: [], user: { email: 'a@temax.bg', display_name: '�
 const wk = n => { let x = d(n); while (!PROBE.isBgWorkday(x)) { const t = new Date(x + 'T00:00:00'); t.setDate(t.getDate() + 1); x = d(Math.round((t - new Date(d(0) + 'T00:00:00')) / 86400000)); } return x; };
 
 const ORDERS = [
-  /* 1) Заявка към ЦО, още необработена, стара 9 дни -> трябва да алармира */
+  /* 1) Заявка към ЦО, още необработена, стара 9 раб. дни -> трябва да алармира */
   { id: 'o-1', in_num: '0001', store_name: 'Троян', fulfiller: CO, status: 'pending',
-    date: d(-9), hour: '10:00', customer_name: 'Иван Петров', phone: '0888111222',
+    date: d(-13), hour: '10:00', customer_name: 'Иван Петров', phone: '0888111222',
     product: 'ПАРКЕТ', sap: '111', qty: 5, unit: 'кв.м',
     items: [{ product: 'ПАРКЕТ', sap: '111', qty: 5, unit: 'кв.м' }],
-    delivery: wk(12), note: '', created_at: daysAgoISO(9), co_eta: null, co_note: null,
+    delivery: wk(12), note: '', created_at: daysAgoISO(13), co_eta: null, co_note: null,
     paid_transport: false, transport_id: null },
-  /* 2) Заявка към ЦО, обработена, доставчикът има срок напред -> НЕ алармира */
+  /* 2) Заявка към ЦО, обработена (11 раб. дни), доставчикът има срок напред -> НЕ алармира */
   { id: 'o-2', in_num: '0002', store_name: 'Монтана', fulfiller: CO, status: 'processed',
-    date: d(-11), hour: '11:00', customer_name: 'Мария Георгиева', phone: '0888333444',
+    date: d(-15), hour: '11:00', customer_name: 'Мария Георгиева', phone: '0888333444',
     product: 'МИВКА', sap: '222', qty: 1, unit: 'бр.',
     items: [{ product: 'МИВКА', sap: '222', qty: 1, unit: 'бр.' }],
-    delivery: d(14), note: '', created_at: daysAgoISO(11),
+    delivery: d(14), note: '', created_at: daysAgoISO(15),
     co_eta: d(10), co_note: 'ТЕСИ, поръчка 4500123', paid_transport: false, transport_id: null },
-  /* 3) Заявка към ЦО, обработена, но очакваната дата е МИНАЛА -> пак алармира */
+  /* 3) Заявка към ЦО, обработена (20 раб. дни), но очакваната дата е МИНАЛА -> пак алармира */
   { id: 'o-3', in_num: '0003', store_name: 'Добрич', fulfiller: CO, status: 'processed',
-    date: d(-20), hour: '12:00', customer_name: 'Петър Иванов', phone: '0888555666',
+    date: d(-28), hour: '12:00', customer_name: 'Петър Иванов', phone: '0888555666',
     product: 'ВРАТА', sap: '333', qty: 1, unit: 'бр.',
     items: [{ product: 'ВРАТА', sap: '333', qty: 1, unit: 'бр.' }],
-    delivery: d(5), note: '', created_at: daysAgoISO(20),
+    delivery: d(5), note: '', created_at: daysAgoISO(28),
     co_eta: d(-3), co_note: '', paid_transport: false, transport_id: null },
   /* 4) Заявка към ДРУГ магазин (не ЦО) -> ЦО няма работа по нея */
   { id: 'o-4', in_num: '0004', store_name: 'Враца', fulfiller: 'Габрово', status: 'pending',
@@ -109,6 +119,10 @@ function boot(opts) {
   const load = f => w.eval(fs.readFileSync(DIR + f, 'utf8'));
   load('shared.js'); load('transport.js'); load('client-orders.js');
   load('history.js'); load('notifications.js');
+  /* Закован часовник: new Date() без аргументи → 10:00 на опорния ден, TODAY → полунощ. */
+  { const Real = w.Date, ms = new Real(REF[0], REF[1], REF[2], 10).getTime();
+    w.Date = class extends Real { constructor(...a) { if (!a.length) super(ms); else super(...a); } static now() { return ms; } };
+    w.TODAY = new w.Date(REF[0], REF[1], REF[2]); }
   ['loadDocs', 'loadBulletin', 'loadKasa', 'loadAdmin', 'loadContacts', 'loadTransit', 'loadCalendar',
    'loadStockReturns', 'loadStockDiff', 'loadPallets', 'loadReference', 'loadTodayDashboard', 'loadHandbook']
     .forEach(fn => { if (typeof w[fn] !== 'function') w[fn] = () => {}; });
@@ -275,13 +289,13 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     const { w, doc } = boot();
     w.renderClientOrders();
     const r1 = row(doc, 'o-1'), r2 = row(doc, 'o-2'), r3 = row(doc, 'o-3');
-    ok('необработена заявка на 9 дни е оранжева', r1.innerHTML.indexOf('🔶') >= 0 || r1.innerHTML.indexOf('9 дни') >= 0);
+    ok('необработена заявка на 9 раб. дни е оранжева', r1.innerHTML.indexOf('🔶') >= 0 || r1.innerHTML.indexOf('9 раб. дни') >= 0);
     /* В компактния ред срокът на ЦО се вижда веднъж — „🏭 очаквана …" от coEtaCell; бадж „🏭 до …"
        на „Изминало" вече не се показва, докато заявката чака доставчика. */
     ok('обработена + бъдеща дата показва 🏭 (срока на ЦО), не червено',
       r2.innerHTML.indexOf('🏭 очаквана') >= 0 && r2.innerHTML.indexOf('🏭 до') < 0 && r2.innerHTML.indexOf('🔴') < 0);
     ok('обработена + бъдеща дата НЕ пулсира', !/rowPulse/.test(r2.innerHTML));
-    ok('обработена + МИНАЛА дата пак алармира (20 дни)', r3.innerHTML.indexOf('🔴') >= 0);
+    ok('обработена + МИНАЛА дата пак алармира (20 раб. дни)', r3.innerHTML.indexOf('🔴') >= 0);
     ok('coWaitingSupplier: бъдеща дата → true', w.coWaitingSupplier(w.clientOrders.find(o => o.id === 'o-2')) === true);
     ok('coWaitingSupplier: минала дата → false', w.coWaitingSupplier(w.clientOrders.find(o => o.id === 'o-3')) === false);
     ok('coWaitingSupplier: без дата → false',
@@ -296,8 +310,8 @@ const tick = () => new Promise(r => setTimeout(r, 0));
     const { w, doc } = boot();
     w.showLoginBanner();
     const txt = (doc.getElementById('notif-banner') || {}).textContent || '';
-    /* o-1 (9 дни, необработена) и o-3 (20 дни, минала дата от ЦО) трябва да влязат;
-       o-2 (11 дни, обработена с бъдеща дата) — не. От 15.10.2026 банерът е на
+    /* o-1 (9 раб. дни, необработена) и o-3 (20 раб. дни, минала дата от ЦО) трябва да влязат;
+       o-2 (11 раб. дни, обработена с бъдеща дата) — не. От 15.10.2026 банерът е на
        три карти: и двете са „над 7 дни" (C) — доставката им е в бъдещето,
        затова isLate() е false и карта A („изтекла дата на доставка") няма. */
     const titles = Array.from(doc.querySelectorAll('#notif-banner .notif-title')).map(t => t.textContent.trim());

@@ -901,6 +901,27 @@ function addBgWorkdays(iso,n){
   }
   return localDateISO(dt);
 }
+/* РАБОТНИ дни между две полунощни дати: броят дни d с from < d <= refD, за
+   които isBgWorkday() — без събота, неделя и официалните празници
+   (bgHolidaysForYear). Отрицателен или нулев интервал → 0. Итерира по
+   календарни дати (new Date(y,m,d+1)), не по 86400000 мс, затова смяната на
+   часовото време не мести броя. Примери: срок петък → понеделник = 1 (само
+   понеделникът); срок вчера (работен) = 1; срок днес = 0; срок събота,
+   опорен ден понеделник = 1.
+   ЕДНО копие за клиента (18.10.2026): lateBadge(), calcElapsed() в
+   client-orders.js и отчетите в report.js (reportWorkdaysBetween я вика).
+   send-scheduled-report носи свое копие под името reportWorkdaysBetween —
+   tests/report-edge-sync.test.js ги сверява. */
+function workdaysBetween(fromD, refD){
+  var n = 0;
+  var d = new Date(fromD.getFullYear(), fromD.getMonth(), fromD.getDate());
+  while (true) {
+    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
+    if (d > refD) break;
+    if (isBgWorkday(localDateISO(d))) n++;
+  }
+  return n;
+}
 /* ═══ ОТКОГА ВАЖИ АВТОМАТИЧНОТО ОТМЯТАНЕ ═══════════════════════════════════
    Задача, която минава от РЪЧНА на автоматична отметка, не може да го направи
    в мига на деплоя: порталът заключва квадратчето, а функцията в базата има
@@ -1043,12 +1064,15 @@ function isLate(o){
 }
 /* Малък чип до статусния бадж. Не замества statusBadge() — двата стоят
    един до друг, защото носят различна информация: докъде е стигнала
-   заявката и с колко е закъсняла. */
+   заявката и с колко е закъсняла.
+   В РАБОТНИ дни от 18.10.2026 — като отчетите (reportLateDays): същото число
+   в модула, в „Днес" и в писмото. Изтекъл срок е ПОНЕ 1 — срок петък,
+   погледнат в събота, дава 0 работни дни и чипът иначе би изчезнал. */
 function lateBadge(o){
   if(!isLate(o))return '';
   var dl=new Date(o.delivery);dl.setHours(0,0,0,0);
-  var days=Math.round((TODAY-dl)/86400000);
-  return '<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;display:inline-flex;align-items:center;background:#fee2e2;color:#991b1b;margin-left:4px;">🔴 +'+days+(days===1?' ден':' дни')+'</span>';
+  var days=Math.max(1, workdaysBetween(dl, TODAY));
+  return '<span style="font-size:11px;font-weight:600;padding:2px 9px;border-radius:20px;display:inline-flex;align-items:center;background:#fee2e2;color:#991b1b;margin-left:4px;">🔴 +'+days+(days===1?' раб. ден':' раб. дни')+'</span>';
 }
 /* Транспорт по клиентска заявка, чиято стока вече е пристигнала: статусът
    остава по дата (syncLinkedTransport() в client-orders.js нулира

@@ -8,8 +8,26 @@
 
    Пускане: node tests/co-compact-row.test.js . */
 'use strict';
+/* ── ЗАКОВАН ЧАСОВНИК (18.10.2026) ────────────────────────────────────────
+   „Изминало" е в РАБОТНИ дни (calcElapsed) — зависи от деня от седмицата.
+   Опорен ден вторник 20.10.2026; w.Date и TODAY се заковават след boot.
+   Сметнато НА РЪКА — работни дни в (опорен+n, 20.10]:
+     -2 нд 18.10 → 2 (19, 20)   -9 нд 11.10 → 7 (12–16, 19, 20)
+     -12 чт 08.10 → 8 (09, 12–16, 19, 20) */
+process.env.TZ = 'Europe/Sofia';
+const REF = [2026, 9, 20]; /* вторник 20.10.2026 */
+const isoOf = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+const dayOffset = n => isoOf(new Date(REF[0], REF[1], REF[2] + (n || 0), 12));
+const tsOffset = n => new Date(REF[0], REF[1], REF[2] + (n || 0), 10).toISOString();
+function pinClock(h) {
+  const Real = h.w.Date, ms = new Real(REF[0], REF[1], REF[2], 10).getTime();
+  h.w.Date = class extends Real { constructor(...a) { if (!a.length) super(ms); else super(...a); } static now() { return ms; } };
+  h.w.TODAY = new h.w.Date(REF[0], REF[1], REF[2]);
+  return h;
+}
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, bubbleClick, ok, guard, section, report, dayOffset, tsOffset } = H;
+const { bubbleClick, ok, guard, section, report } = H;
+const boot = o => pinClock(H.boot(o));
 
 const CO = 'Централен офис';
 const WH = 'Логистичен склад Добрич';
@@ -124,19 +142,22 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b.slice().sort());
 
   section('5. „Изминало": само от 5 дни и когато НЕ чака доставчика');
   {
-    const old7 = order('e7', { created_at: tsOffset(-7), date: dayOffset(-7) });
+    /* e7: нд 11.10 → 20.10 = 7 раб. дни; e2: нд 18.10 → 20.10 = 2 раб. дни */
+    const old7 = order('e7', { created_at: tsOffset(-9), date: dayOffset(-9) });
     const new2 = order('e2', { created_at: tsOffset(-2), date: dayOffset(-2) });
     const h = env(user('admin', CO), [old7, new2]);
-    ok('7 дни → има бадж „дни"', /\d+ дни/.test(tds(h, 'e7')[4].textContent) && /🔶|⚠️|🔴/.test(tds(h, 'e7')[4].textContent), tds(h, 'e7')[4].textContent);
-    ok('2 дни → няма', !/\d+ дни/.test(tds(h, 'e2')[4].textContent), tds(h, 'e2')[4].textContent);
+    ok('7 раб. дни → има бадж „7 раб. дни"', /\b7 раб\. дни/.test(tds(h, 'e7')[4].textContent) && /🔶|⚠️|🔴/.test(tds(h, 'e7')[4].textContent), tds(h, 'e7')[4].textContent);
+    ok('2 раб. дни → няма', !/\d+ раб\. дни/.test(tds(h, 'e2')[4].textContent), tds(h, 'e2')[4].textContent);
     const sup = order('sup', { status: 'processed', fulfiller: CO, co_eta: dayOffset(6), created_at: tsOffset(-1), date: dayOffset(-1) });
     const h2 = env(user('admin', CO), [sup]);
     const c5 = tds(h2, 'sup')[4].textContent;
     ok('ЦО със срок (processed, бъдещ co_eta) → НЯМА „🏭 до"', !/🏭 до/.test(c5), c5);
     ok('срокът се вижда веднъж — „🏭 очаквана …" от coEtaCell', (c5.match(/🏭/g) || []).length === 1 && /очаквана/.test(c5), c5);
-    const supOld = order('supOld', { status: 'processed', fulfiller: CO, co_eta: dayOffset(6), created_at: tsOffset(-8), date: dayOffset(-8) });
+    /* чт 08.10 → 20.10 = 8 раб. дни */
+    const supOld = order('supOld', { status: 'processed', fulfiller: CO, co_eta: dayOffset(6), created_at: tsOffset(-12), date: dayOffset(-12) });
     const h3 = env(user('admin', CO), [supOld]);
-    ok('и 8-дневна ЦО заявка със срок — без „дни" бадж, докато чака доставчика', !/d+ дни/.test(tds(h3, 'supOld')[4].textContent), tds(h3, 'supOld')[4].textContent);
+    /* Регексът беше /d+ дни/ (без \) — търсеше буквата „d" и минаваше винаги. */
+    ok('и 8-раб.-дневна ЦО заявка със срок — без „раб. дни" бадж, докато чака доставчика', !/\d+ раб\. дни/.test(tds(h3, 'supOld')[4].textContent), tds(h3, 'supOld')[4].textContent);
   }
   report();
 })().catch(e => { console.error(e); process.exit(1); });

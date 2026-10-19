@@ -15,8 +15,34 @@
 */
 'use strict';
 
+/* ── ЗАКОВАН ЧАСОВНИК (18.10.2026) ────────────────────────────────────────
+   lateBadge() брои РАБОТНИ дни след срока („🔴 +N раб. дни“, минимум 1) —
+   зависи от деня от седмицата. Опорен ден вторник 20.10.2026; след всеки boot
+   w.Date и TODAY се заковават на него (pinClock приема и друг ден за
+   граничните случаи). Сметнато НА РЪКА — работни дни в (срок, TODAY]:
+     срок пон 19.10, TODAY вт 20.10 → 1 (20)
+     срок чт 08.10, TODAY вт 20.10 → 8 (09, 12–16, 19, 20)
+     срок пет 16.10, TODAY вт 20.10 → 2 (19, 20) — календарно 4
+     срок сб 17.10, TODAY нд 18.10 → 0 работни, Math.max(1, …) → „+1 раб. ден“ */
+process.env.TZ = 'Europe/Sofia';
+const REF = [2026, 9, 20]; /* вторник 20.10.2026 */
+const isoOf = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+const dayOffset = n => isoOf(new Date(REF[0], REF[1], REF[2] + (n || 0), 12));
+const tsOffset = n => new Date(REF[0], REF[1], REF[2] + (n || 0), 10).toISOString();
+function pinClock(h, y, m, dd) {
+  if (y === undefined) { y = REF[0]; m = REF[1]; dd = REF[2]; }
+  const Real = h.w.__RealDate || h.w.Date, ms = new Real(y, m, dd, 10).getTime();
+  h.w.__RealDate = Real;
+  h.w.Date = class extends Real { constructor(...a) { if (!a.length) super(ms); else super(...a); } static now() { return ms; } };
+  h.w.TODAY = new h.w.Date(y, m, dd);
+  return h;
+}
+/* Чипът за закъснение: „+N раб. ден“ / „+N раб. дни“. */
+const LATE_RE = /\+\d+ раб\. (ден|дни)/;
+
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, realClick, btn, ok, guard, section, report, dayOffset, tsOffset } = H;
+const { realClick, btn, ok, guard, section, report } = H;
+const boot = o => pinClock(H.boot(o));
 
 const USER = {
   email: 'troyan@temax.bg', display_name: 'Магазин Троян',
@@ -168,13 +194,27 @@ function rowIds(doc, bodyId) {
   {
     const { w } = env();
     ok('не закъсняла → празен низ', w.lateBadge({ delivery: dayOffset(3), status: 'sent' }) === '');
-    const b8 = w.lateBadge({ delivery: dayOffset(-8), status: 'sent' });
-    ok('8 дни → "🔴 +8 дни"', b8.indexOf('🔴 +8 дни') >= 0, b8);
+    /* срок чт 08.10 → вт 20.10 = 8 раб. дни */
+    const b8 = w.lateBadge({ delivery: dayOffset(-12), status: 'sent' });
+    ok('8 раб. дни → "🔴 +8 раб. дни"', b8.indexOf('🔴 +8 раб. дни') >= 0, b8);
+    /* срок пон 19.10 → вт 20.10 = 1 */
     const b1 = w.lateBadge({ delivery: dayOffset(-1), status: 'sent' });
-    ok('1 ден → "+1 ден", не "+1 дни"', b1.indexOf('+1 ден<') >= 0, b1);
+    ok('1 ден → "+1 раб. ден", не "+1 раб. дни"', b1.indexOf('+1 раб. ден<') >= 0, b1);
     ok('носи червения фон на statusBadge', b8.indexOf('background:#fee2e2') >= 0, b8);
     ok('има margin-left, за да не се лепне за статуса',
       b8.indexOf('margin-left:4px') >= 0, b8);
+    /* срок пет 16.10 → вт 20.10: календарно 4, работни 2 (19, 20) */
+    const bWe = w.lateBadge({ delivery: dayOffset(-4), status: 'sent' });
+    ok('уикендът не се брои: срок пет 16.10 → "+2 раб. дни", не +4', bWe.indexOf('🔴 +2 раб. дни') >= 0, bWe);
+  }
+  {
+    /* Граница: закъсняла, но 0 работни дни след срока (срок сб 17.10, днес
+       нд 18.10) → Math.max(1, …) → „+1 раб. ден“, никога „+0“. */
+    const h = env();
+    pinClock(h, 2026, 9, 18);
+    const b0 = h.w.lateBadge({ delivery: '2026-10-17', status: 'sent' });
+    ok('срок сб, днес нд → закъсняла и "+1 раб. ден", не "+0"',
+      b0.indexOf('+1 раб. ден<') >= 0 && b0.indexOf('+0') < 0, b0);
   }
 
   /* ── Истински клик по чипа ─────────────────────────────────────────────── */
@@ -203,9 +243,9 @@ function rowIds(doc, bodyId) {
         ok('статусният бадж "📤 Изпратена" ВСЕ ОЩЕ се вижда',
           row.textContent.indexOf('Изпратена') >= 0, row.textContent);
         ok('до него стои и чипът за закъснение',
-          /\+\d+ (ден|дни)/.test(row.textContent), row.textContent);
+          LATE_RE.test(row.textContent), row.textContent);
         ok('двата са в една клетка, статусът е първи',
-          row.textContent.indexOf('Изпратена') < row.textContent.search(/\+\d+ (ден|дни)/));
+          row.textContent.indexOf('Изпратена') < row.textContent.search(LATE_RE));
       }
     }
 
@@ -235,7 +275,7 @@ function rowIds(doc, bodyId) {
           txt.indexOf('Мария Тестова') >= 0, txt.slice(0, 200));
         ok('чакащият стока (Петър/ДИВАН) НЕ излиза',
           txt.indexOf('Петър Тестов') < 0, txt.slice(0, 200));
-        ok('чипът за закъснение е на реда', /\+\d+ (ден|дни)/.test(txt), txt.slice(0, 200));
+        ok('чипът за закъснение е на реда', LATE_RE.test(txt), txt.slice(0, 200));
       }
     }
   }
@@ -253,7 +293,7 @@ function rowIds(doc, bodyId) {
       const wrap = doc.getElementById('h-results');
       const txt = wrap ? wrap.textContent : '';
       ok('клиентската заявка в История носи чипа',
-        /\+\d+ (ден|дни)/.test(txt), txt.slice(0, 300));
+        LATE_RE.test(txt), txt.slice(0, 300));
       ok('статусът ѝ пак се вижда', txt.indexOf('Изпратена') >= 0);
     }
   }
@@ -270,7 +310,8 @@ function rowIds(doc, bodyId) {
       const wrap = doc.getElementById('h-results');
       const txt = wrap ? wrap.textContent : '';
       ok('баджът "Чака стока" стои', txt.indexOf('Чака стока') >= 0, txt.slice(0, 300));
-      ok('чип за закъснение НЯМА', !/\+\d+ (ден|дни)/.test(txt), txt.slice(0, 300));
+      /* Отрицанието хваща и стария календарен вид „+N дни“, за да не отслабне. */
+      ok('чип за закъснение НЯМА', !/\+\d+ (раб\. )?(ден|дни)/.test(txt), txt.slice(0, 300));
     }
   }
 

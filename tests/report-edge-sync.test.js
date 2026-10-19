@@ -72,7 +72,7 @@ const SHARED_FNS = [
      другаде и явяванията, пренесени В прозореца. Разминае ли се копието,
      писмото брои деня, на който задачата вече не се очаква. */
   'reportDM', 'reportCompMovedOff', 'reportCarriedItems',
-  'reportIsLate', 'reportLateDays', 'reportWorkdaysBetween',
+  'reportIsLate', 'reportLateDays',
   'reportDailyTargetDate', 'reportWeekdayIdx',
   /* обобщение */
   'reportBuildSummary', 'reportSaveSnapshot', 'reportFetchSnapshot',
@@ -118,6 +118,13 @@ const COPIED_HELPERS = [
   { fn: 'recurringApplyVersion', from: SHARED },
   { fn: 'recurringApplyVersions', from: SHARED },
   { fn: 'esc', from: SHARED },
+  /* Работни дни (18.10.2026): реализацията е workdaysBetween() в shared.js —
+     ЕДНО копие за клиента (lateBadge, calcElapsed, отчетите). report.js
+     пази само обвивка reportWorkdaysBetween → workdaysBetween, а едж
+     функцията носи цялото тяло под старото име. Сравнява се тялото от
+     shared.js с копието; `orig` е името в оригинала. Разминае ли се —
+     модулът и писмото пак броят различни дни. */
+  { fn: 'reportWorkdaysBetween', from: SHARED, orig: 'workdaysBetween' },
   /* Колоната „чака обекта" в „Необработени разлики над N дни" (14.10.2026) —
      огледало на SQL stock_diff_store_done. Разминае ли се копието, писмото
      оценява обектите по друго правило от портала и от отметката. */
@@ -507,7 +514,10 @@ const routed = fs.existsSync(ROUTED) ? topLevelFns(ROUTED) : {};
   section('4. Копираните помощници съвпадат с оригиналите си');
   {
     COPIED_HELPERS.forEach(function (h) {
-      const orig = topLevelFns(h.from)[h.fn];
+      const origSrc = topLevelFns(h.from)[h.orig || h.fn];
+      /* Различно име в оригинала (h.orig) — сравнява се тялото, затова
+         името в заглавния ред се изравнява преди normalize(). */
+      const orig = origSrc && h.orig ? origSrc.replace('function ' + h.orig + '(', 'function ' + h.fn + '(') : origSrc;
       const copy = edge[h.fn];
       if (!ok(h.fn + ' я има в едж функцията', !!copy)) return;
       if (!ok(h.fn + ' я има в ' + path.basename(h.from), !!orig)) return;

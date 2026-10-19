@@ -22,9 +22,35 @@
 */
 'use strict';
 
+/* ── ЗАКОВАН ЧАСОВНИК (18.10.2026) ────────────────────────────────────────
+   От 18.10.2026 calcElapsed() брои РАБОТНИ дни (без сб/нд и БГ празници),
+   затова резултатът зависи от деня от седмицата. Датите вече не са спрямо
+   истинското „днес“, а спрямо ОПОРЕН ДЕН вторник 20.10.2026; след всеки boot
+   w.Date и TODAY се заковават на него. Числата в проверките са сметнати НА
+   РЪКА (не с workdaysBetween от кода). Таблица: отместване → работни дни в
+   (опорен+n, 20.10]:
+     -1 пон 19.10 → 1   -2 нд 18.10 → 2   -3 сб 17.10 → 2   -5 чт 15.10 → 3
+     -8 пон 12.10 → 6 (13–16, 19, 20)     -9 нд 11.10 → 7 (12–16, 19, 20)
+     -12 чт 08.10 → 8 (09, 12–16, 19, 20) -13 ср 07.10 → 9 (08, 09, 12–16, 19, 20) */
+process.env.TZ = 'Europe/Sofia';
+const REF = [2026, 9, 20]; /* вторник 20.10.2026 */
+const isoOf = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+const dayOffset = n => isoOf(new Date(REF[0], REF[1], REF[2] + (n || 0), 12));
+const tsOffset = n => new Date(REF[0], REF[1], REF[2] + (n || 0), 10).toISOString();
+/* Подменя w.Date (new Date() без аргументи → 10:00 на дадения ден) и TODAY
+   (глобална var в shared.js, смята се веднъж при зареждане). */
+function pinClock(h, y, m, dd) {
+  if (y === undefined) { y = REF[0]; m = REF[1]; dd = REF[2]; }
+  const Real = h.w.__RealDate || h.w.Date, ms = new Real(y, m, dd, 10).getTime();
+  h.w.__RealDate = Real;
+  h.w.Date = class extends Real { constructor(...a) { if (!a.length) super(ms); else super(...a); } static now() { return ms; } };
+  h.w.TODAY = new h.w.Date(y, m, dd);
+  return h;
+}
+
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, realClick, fire, btnExact, ok, guard, section, report,
-        dayOffset, tsOffset, ticks } = H;
+const { realClick, fire, btnExact, ok, guard, section, report, ticks } = H;
+const boot = o => pinClock(H.boot(o));
 
 /* Потребител в обект, който е ИЗПЪЛНИТЕЛ по чужди заявки — само така
    _isFulfiller става true, а без него банерът в notifications.js мълчи. */
@@ -45,20 +71,23 @@ function order(over) {
   }, over);
 }
 
-/* Заявката е ВЪВЕДЕНА днес, но е от преди 6 дни — случаят на Петрич. */
+/* Заявката е ВЪВЕДЕНА днес, но е от пон 12.10 — случаят на Петрич.
+   12.10 → 20.10 = 6 раб. дни (8 календарни) → ⚠️ степента 5–6. */
 const BACKDATED = order({
   id: 'co-back', in_num: 'Троян-0001',
-  date: dayOffset(-6), created_at: tsOffset(0)
+  date: dayOffset(-8), created_at: tsOffset(0)
 });
-/* Въведена в деня, за който е — нищо не бива да се променя. */
+/* Въведена в деня, за който е — нищо не бива да се променя.
+   нд 18.10 → вт 20.10 = 2 раб. дни (19, 20). */
 const SAME_DAY = order({
   id: 'co-same', in_num: 'Троян-0002',
   date: dayOffset(-2), created_at: tsOffset(-2)
 });
-/* Без дата — старото поведение, брои се от created_at. */
+/* Без дата — старото поведение, брои се от created_at.
+   чт 08.10 → 20.10 = 8 раб. дни (12 календарни). */
 const NO_DATE = order({
   id: 'co-nodate', in_num: 'Троян-0003',
-  date: null, created_at: tsOffset(-8)
+  date: null, created_at: tsOffset(-12)
 });
 
 function env(over) {
@@ -84,35 +113,64 @@ function env(over) {
     const { w } = env();
     const ce = w.calcElapsed;
 
+    /* пон 12.10 → вт 20.10 = 6 раб. дни */
     ok('date ПРЕДИ created_at → дните се броят от date',
-      ce(tsOffset(0), dayOffset(-6)) === 6, String(ce(tsOffset(0), dayOffset(-6))));
+      ce(tsOffset(0), dayOffset(-8)) === 6, String(ce(tsOffset(0), dayOffset(-8))));
     ok('без втория аргумент старият случай е непокътнат',
       ce(tsOffset(0)) === 0, String(ce(tsOffset(0))));
 
+    /* нд 18.10 → вт 20.10 = 2 (19, 20) */
     ok('date == created_at (същият ден) → без промяна',
       ce(tsOffset(-2), dayOffset(-2)) === 2, String(ce(tsOffset(-2), dayOffset(-2))));
     ok('date == created_at дава същото като без date',
       ce(tsOffset(-2), dayOffset(-2)) === ce(tsOffset(-2)));
 
+    /* чт 08.10 → 20.10 = 8 */
     ok('липсваща date (null) → като досега',
-      ce(tsOffset(-8), null) === 8, String(ce(tsOffset(-8), null)));
+      ce(tsOffset(-12), null) === 8, String(ce(tsOffset(-12), null)));
     ok('липсваща date (undefined) → като досега',
-      ce(tsOffset(-8), undefined) === 8);
+      ce(tsOffset(-12), undefined) === 8);
     ok('празен низ за date → като досега',
-      ce(tsOffset(-8), '') === 8);
+      ce(tsOffset(-12), '') === 8);
     ok('невалидна date („не-дата") → като досега, а не NaN',
-      ce(tsOffset(-8), 'не-дата') === 8, String(ce(tsOffset(-8), 'не-дата')));
+      ce(tsOffset(-12), 'не-дата') === 8, String(ce(tsOffset(-12), 'не-дата')));
 
-    /* Границата, заради която се взима ПО-РАННАТА, а не просто date. */
+    /* Границата, заради която се взима ПО-РАННАТА, а не просто date.
+       created чт 15.10 → 20.10 = 3 (16, 19, 20). */
     ok('БЪДЕЩА date не прави брояча отрицателен',
-      ce(tsOffset(-3), dayOffset(5)) === 3, String(ce(tsOffset(-3), dayOffset(5))));
+      ce(tsOffset(-5), dayOffset(5)) === 3, String(ce(tsOffset(-5), dayOffset(5))));
+    /* created ср 07.10 → 20.10 = 9; date нд 18.10 сама би дала 2 */
     ok('date СЛЕД created_at (но в миналото) не скъсява брояча',
-      ce(tsOffset(-9), dayOffset(-2)) === 9, String(ce(tsOffset(-9), dayOffset(-2))));
+      ce(tsOffset(-13), dayOffset(-2)) === 9, String(ce(tsOffset(-13), dayOffset(-2))));
 
     ok('липсващ created_at пак дава 0, дори с валидна date',
-      ce(null, dayOffset(-6)) === 0, String(ce(null, dayOffset(-6))));
+      ce(null, dayOffset(-8)) === 0, String(ce(null, dayOffset(-8))));
+    /* пон 19.10 → вт 20.10 = 1 */
     ok('точно на границата: date вчера, въведена днес → 1 ден',
       ce(tsOffset(0), dayOffset(-1)) === 1, String(ce(tsOffset(0), dayOffset(-1))));
+  }
+
+  /* ══════════ 1б. Работни, не календарни дни ══════════
+     Случаят от брифа (с поправката на координатора): created вт 06.10.2026,
+     TODAY нд 18.10.2026. Работни в (06.10, 18.10]: 07, 08, 09 (3) +
+     12, 13, 14, 15, 16 (5) = 8. Календарно — 12. (10–11 и 17–18.10 са
+     събота/неделя; 06.10.2026 е вторник, не понеделник.) */
+  section('1б. calcElapsed брои работни дни — вт 06.10 → нд 18.10 = 8, не 12');
+  {
+    const h = H.boot({ modules: ['transport.js', 'client-orders.js', 'notifications.js'], user: USER, data: {} });
+    pinClock(h, 2026, 9, 18);
+    const r = h.w.calcElapsed(new Date(2026, 9, 6, 9, 30).toISOString(), '2026-10-06');
+    ok('вт 06.10 → нд 18.10 = 8 работни дни', r === 8, String(r));
+    ok('и НЕ 12 календарни', r !== 12, String(r));
+    /* Празник в средата: пон 21.09 → ср 23.09; 22.09 (Ден на независимостта)
+       не е работен → само 23.09 = 1. */
+    pinClock(h, 2026, 8, 23);
+    const r2 = h.w.calcElapsed(new Date(2026, 8, 21, 9).toISOString(), '2026-09-21');
+    ok('пон 21.09 → ср 23.09 през празника 22.09 = 1', r2 === 1, String(r2));
+    /* Уикенд: пет 16.10 → нд 18.10 = 0 (нито един работен ден не е минал). */
+    pinClock(h, 2026, 9, 18);
+    const r3 = h.w.calcElapsed(new Date(2026, 9, 16, 9).toISOString(), '2026-10-16');
+    ok('пет 16.10 → нд 18.10 = 0', r3 === 0, String(r3));
   }
 
   /* ══════════ 2. Реалният loadClientOrders() подава o.date ══════════ */
@@ -144,24 +202,24 @@ function env(over) {
       guard('renderClientOrders() не хвърля', () => w.renderClientOrders());
       const row = doc.getElementById('co-row-co-back');
       if (ok('редът за заявката със задна дата съществува', !!row)) {
-        ok('показва 6 дни, а не 0', row.textContent.indexOf('6 дни') >= 0,
+        ok('показва 6 раб. дни, а не 0', row.textContent.indexOf('6 раб. дни') >= 0,
           row.textContent.replace(/\s+/g, ' ').slice(0, 200));
         ok('баджът е предупредителен (⚠️ при 5–6 дни), не спокоен',
           row.innerHTML.indexOf('⚠️') >= 0);
       }
       /* Обратната посока: заявка без date не бива да „порасне". */
       const rowNo = doc.getElementById('co-row-co-nodate');
-      ok('заявката без date показва 8 дни (непроменено)',
-        !!rowNo && rowNo.textContent.indexOf('8 дни') >= 0);
+      ok('заявката без date показва 8 раб. дни (непроменено)',
+        !!rowNo && rowNo.textContent.indexOf('8 раб. дни') >= 0);
     }
   }
 
   /* ══════════ 4. notifications.js — банерът гледа същата начална точка ══════════ */
   section('4. Банерът при вход — същата начална точка като таблицата');
   {
-    /* Въведена ДНЕС, но заявена преди 9 дни: по стария код 0 дни → банерът
-       мълчи, докато таблицата вече свети. Точно разминаването, което не бива
-       да се случва. */
+    /* Въведена ДНЕС, но заявена нд 11.10 (9 календарни = 7 раб. дни — точно
+       на прага ≥7): по стария код 0 дни → банерът мълчи, докато таблицата
+       вече свети. Точно разминаването, което не бива да се случва. */
     const OLD = order({ id: 'co-old', in_num: 'Троян-0009',
       date: dayOffset(-9), created_at: tsOffset(0) });
     const { w, doc } = env({ data: { client_orders: [OLD] } });
@@ -187,6 +245,27 @@ function env(over) {
         html.replace(/\s+/g, ' ').slice(0, 220));
       ok('и НЕ показва спокойната карта „Всичко е наред"',
         html.indexOf('Всичко е наред') < 0);
+    }
+  }
+  {
+    /* Обратната страна на прага: пон 12.10 = 8 календарни, но 6 раб. дни →
+       под 7, тоест НЕ е карта „над 7 дни" (по календарни щеше да е). */
+    const YOUNG = order({ id: 'co-young', in_num: 'Троян-0010',
+      date: dayOffset(-8), created_at: tsOffset(0) });
+    const { w, doc } = env({ data: { client_orders: [YOUNG] } });
+    w.transportOrders = [];
+    w.clientOrders = [YOUNG];
+    w.clientOrders.forEach(o => {
+      o._status = w.calcStatus(o.delivery, o.status);
+      o._days = w.calcElapsed(o.created_at, o.date);
+      o._isFulfiller = !w.isGlobal() &&
+        o.fulfiller === w.currentUser.store_name &&
+        o.store_name !== w.currentUser.store_name;
+    });
+    if (guard('showLoginBanner() не хвърля (6 раб. дни)', () => w.showLoginBanner())) {
+      const html = (doc.getElementById('notif-banner') || {}).innerHTML || '';
+      ok('8 календарни = 6 раб. дни → НЯМА „над 7 дни"',
+        html.indexOf('над 7 дни без приключване') < 0, html.replace(/\s+/g, ' ').slice(0, 220));
     }
   }
 

@@ -365,27 +365,16 @@ function reportIsLate(o, refD){
   var dl = new Date(o.delivery); dl.setHours(0,0,0,0);
   return dl < refD;
 }
-/* РАБОТНИ дни между две полунощни дати: броят дни d с from < d <= refD, за
-   които isBgWorkday() — без събота, неделя и официалните празници
-   (bgHolidaysForYear). Отрицателен или нулев интервал → 0. Итерира по
-   календарни дати (new Date(y,m,d+1)), не по 86400000 мс, затова смяната на
-   часовото време не мести броя. Примери: срок петък → понеделник = 1 (само
-   понеделникът); срок вчера (работен) = 1; срок днес = 0; срок събота,
-   опорен ден понеделник = 1. */
-function reportWorkdaysBetween(fromD, refD){
-  var n = 0;
-  var d = new Date(fromD.getFullYear(), fromD.getMonth(), fromD.getDate());
-  while (true) {
-    d = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1);
-    if (d > refD) break;
-    if (isBgWorkday(localDateISO(d))) n++;
-  }
-  return n;
-}
+/* РАБОТНИ дни между две полунощни дати — реализацията е workdaysBetween() в
+   shared.js (едно копие за клиента от 18.10.2026: ползват я и lateBadge(),
+   и calcElapsed()). Името остава заради извикванията тук и заради копието
+   в send-scheduled-report, което носи цялото тяло под това име —
+   tests/report-edge-sync.test.js го сверява с workdaysBetween. */
+function reportWorkdaysBetween(fromD, refD){ return workdaysBetween(fromD, refD); }
 /* С колко дни — РАБОТНИ от 15.10.2026 (reportWorkdaysBetween; писмо на
-   Теодор от 14.10: „системата брои събота и неделя"). lateBadge() в shared.js
-   и calcElapsed() в client-orders.js още броят КАЛЕНДАРНИ — модулът и
-   писмата се разминават, отворено в предавката.
+   Теодор от 14.10: „системата брои събота и неделя"). От 18.10.2026 и
+   lateBadge() в shared.js, и calcElapsed() в client-orders.js броят по
+   същото правило — модулът и писмата дават едно число.
    Изтекъл срок е ПОНЕ 1: срок петък, опорен ден събота/неделя (дневният и
    складовият отчет текат и в почивни дни) дава 0 работни дни, а навсякъде
    „просрочена" се познава по lateDays > 0 — без пода заявката тихо изчезва

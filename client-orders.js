@@ -17,24 +17,27 @@ function calcElapsed(createdAt, orderDate){
       if(od<start) start=od;
     }
   }
-  return Math.floor((TODAY-start)/86400000);
+  /* РАБОТНИ дни от 18.10.2026 (вариант А, писмо на Теодор от 14.10) — същото
+     правило като отчетите: workdaysBetween() в shared.js. Праговете 5 / 7 / 10
+     в elapsedBadge / elapsedRowStyle са същите числа, вече в работни дни. */
+  return workdaysBetween(start, TODAY);
 }
 
 function elapsedBadge(days, status, order){
   /* Не показваме за финални статуси */
   if(['done','refused','postponed'].indexOf(status)>=0) return '';
   /* Пристигнала в магазина — срокът е изпълнен, броячът е спокоен. */
-  if(status==='arrived') return '<span style="font-size:11px;color:#94a3b8;">'+days+' дни</span>';
+  if(status==='arrived') return '<span style="font-size:11px;color:#94a3b8;">'+days+' раб. дни</span>';
   /* Обработена от ЦО и все още в срока на доставчика — броячът остава спокоен и
      показва какво чакаме. Иначе заявка с доставчик за 3 седмици светва червено
      на 10-ия ден без никой да е закъснял. */
   if(typeof coWaitingSupplier==='function'&&coWaitingSupplier(order)){
     return '<span style="font-size:11px;font-weight:600;color:#047857;background:#ecfdf5;padding:2px 7px;border-radius:20px;" title="Обработена от ЦО — чака доставчика">🏭 до '+fmtDate(order.co_eta)+'</span>';
   }
-  if(days<5) return '<span style="font-size:11px;color:#94a3b8;">'+days+' дни</span>';
-  if(days<7)  return '<span style="font-size:11px;font-weight:600;color:#d97706;background:#fef3c7;padding:2px 7px;border-radius:20px;">⚠️ '+days+' дни</span>';
-  if(days<10) return '<span style="font-size:11px;font-weight:600;color:#ea580c;background:#fff7ed;padding:2px 7px;border-radius:20px;">🔶 '+days+' дни</span>';
-  return '<span style="font-size:11px;font-weight:600;color:#dc2626;background:#fee2e2;padding:2px 7px;border-radius:20px;animation:rowPulse 1.5s infinite;">🔴 '+days+' дни!</span>';
+  if(days<5) return '<span style="font-size:11px;color:#94a3b8;">'+days+' раб. дни</span>';
+  if(days<7)  return '<span style="font-size:11px;font-weight:600;color:#d97706;background:#fef3c7;padding:2px 7px;border-radius:20px;">⚠️ '+days+' раб. дни</span>';
+  if(days<10) return '<span style="font-size:11px;font-weight:600;color:#ea580c;background:#fff7ed;padding:2px 7px;border-radius:20px;">🔶 '+days+' раб. дни</span>';
+  return '<span style="font-size:11px;font-weight:600;color:#dc2626;background:#fee2e2;padding:2px 7px;border-radius:20px;animation:rowPulse 1.5s infinite;">🔴 '+days+' раб. дни!</span>';
 }
 
 function elapsedRowStyle(days, baseStatus, order){
@@ -683,7 +686,7 @@ function openClientOrderDetail(id){
     ? esc(o.client_notified_by||'')+(o.client_notified_by?' · ':'')+coFmtStamp(o.client_notified_at)
     : '—';
   var statusHtml=coDetailRow('Статус',statusBadge(st)+lateBadge(o)+ptBadge(o))+
-    coDetailRow('Изминало',esc(String(days))+' дни'+(badge?' · '+badge:''))+
+    coDetailRow('Изминало',esc(String(days))+' раб. дни'+(badge?' · '+badge:''))+
     coDetailRow('Клиентът уведомен',notified);
 
   var html='<div class="bov" id="cod-ov"><div class="bmod" style="width:560px;max-width:95vw;">'+

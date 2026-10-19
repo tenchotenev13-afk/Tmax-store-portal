@@ -21,9 +21,26 @@
 */
 'use strict';
 
+/* ── ЗАКОВАН ЧАСОВНИК (18.10.2026) ────────────────────────────────────────
+   „Изминало" в модала е в РАБОТНИ дни (calcElapsed) — зависи от деня от
+   седмицата. Опорен ден вторник 20.10.2026; w.Date и TODAY се заковават след
+   boot. Сметнато НА РЪКА: заявките са от сб 17.10 (dayOffset(-3)) → работни
+   дни в (17.10, 20.10] = 19, 20 → 2 (календарно 3). */
+process.env.TZ = 'Europe/Sofia';
+const REF = [2026, 9, 20]; /* вторник 20.10.2026 */
+const isoOf = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+const dayOffset = n => isoOf(new Date(REF[0], REF[1], REF[2] + (n || 0), 12));
+const tsOffset = n => new Date(REF[0], REF[1], REF[2] + (n || 0), 10).toISOString();
+function pinClock(h) {
+  const Real = h.w.Date, ms = new Real(REF[0], REF[1], REF[2], 10).getTime();
+  h.w.Date = class extends Real { constructor(...a) { if (!a.length) super(ms); else super(...a); } static now() { return ms; } };
+  h.w.TODAY = new h.w.Date(REF[0], REF[1], REF[2]);
+  return h;
+}
+
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
-const { boot, realClick, bubbleClick, btnExact, ok, guard, section, report,
-        dayOffset, tsOffset, ticks } = H;
+const { realClick, bubbleClick, btnExact, ok, guard, section, report, ticks } = H;
+const boot = o => pinClock(H.boot(o));
 
 const CO = 'Централен офис';
 const USER = {
@@ -262,7 +279,8 @@ function pressEsc(w) {
       /gotoLinkedTransport/.test(modal(doc).innerHTML));
     ok('group_id дава бутон към заявките на клиента',
       /openCustomerOrders/.test(modal(doc).innerHTML));
-    ok('показва „Изминало" в дни', /Изминало/.test(t) && /\d+ дни/.test(t));
+    /* сб 17.10 → вт 20.10 = 2 раб. дни (не 3 календарни) */
+    ok('показва „Изминало" в работни дни: 2 раб. дни', /Изминало/.test(t) && /(^|\D)2 раб\. дни/.test(t), t);
   }
 
   /* ══════════ 4. Затваряне ══════════ */
