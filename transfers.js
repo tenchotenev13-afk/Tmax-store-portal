@@ -316,10 +316,10 @@ function tfCargoRef(c) {
 }
 /* Отметката „Разтоварен" в първата точка на прехвърляне — най-новата, и то
    САМО когато всички единици са разтоварени (по единица от 15.10.2026). */
-function tfUnloadedEvent(c) {
+function tfUnloadedEvent(c, evs) {
   var tg = tfCargoTarget(c);
   if (!c || tg.event !== 'unloaded') return null;
-  var st = tfUnitsState(c, tfEventsOf(c.transfer_id), 'unloaded', tg.store);
+  var st = tfUnitsState(c, evs || tfEventsOf(c.transfer_id), 'unloaded', tg.store);
   return st.left.length ? null : st.last;
 }
 /* Пълни календарни дни между отметката и днес (местно време). 0 = днес. */
@@ -344,10 +344,70 @@ function tfReshipItems(stores, q) {
   tfTransfers.forEach(function (t) {
     if (q !== null && q !== undefined && !tfListMatch(t, q)) return;
     (tfCargoByTransfer[t.id] || []).forEach(function (c, i) {
-      var ev = tfUnloadedEvent(c);
-      if (!ev || (stores && stores.indexOf(ev.store_name) < 0) || tfSuccessor(c)) return;
+      var ev = tfCargoReshipFor(c, tfEventsOf(t.id), stores, !!tfSuccessor(c));
+      if (!ev) return;
       out.push({ t: t, c: c, i: i, ev: ev, days: tfWaitDays(ev.created_at) });
     });
+  });
+  return out;
+}
+
+/* ── Какво дължи обектът (18.10.2026) ──────────────────────────────────────
+   ЕДНИ И СЪЩИ предикати за таба (tfPendingItems / tfReshipItems) и за
+   банера и пулса в notifications.js (notifTransfersPending), който НЕ
+   разчита на заредени tfTransfers — подава си своите данни. */
+/* „За потвърждение": крайната отметка на товара е в един от stores и още
+   може да се постави (tfEventAllowed — същото като бутона). null = не. */
+function tfCargoConfirmFor(t, c, evs, stores) {
+  if (!t || !c || !stores || !stores.length) return null;
+  var tg = tfCargoTarget(c);
+  if (stores.indexOf(tg.store) < 0) return null;
+  if (tfEventAllowed(tg.event, t, c, evs, tg.store, false)) return null;
+  return { kind: tg.event, store: tg.store, left: tfUnitsState(c, evs, tg.event, tg.store).left };
+}
+/* „Чака прехвърляне": всички единици разтоварени в точката, точката е в
+   stores (null = всички), без наследник. Връща отметката (най-новата). */
+function tfCargoReshipFor(c, evs, stores, hasSucc) {
+  if (stores && !stores.length) return null;
+  var ev = tfUnloadedEvent(c, evs);
+  if (!ev || hasSucc || (stores && stores.indexOf(ev.store_name) < 0)) return null;
+  return ev;
+}
+/* Сборът за обектите stores от подадените данни:
+   confirm — ЕДИНИЦИ за потвърждение от транспорт „в движение": бус / камион
+   с departed_at, ИЛИ без него, но с depart_date днес или по-рано (същото
+   падане назад като since в reportTransferOpenStates); куриерът няма
+   „Тръгна" и винаги се брои. Не се броят само бъдещи транспорти без
+   „Тръгна". confirmItems — всички, с moving;
+   reship — товари, чакащи прехвърляне при stores;
+   departed — транспортите с товар за stores и кога са тръгнали (бус /
+   камион: departed_at; куриер: „Предаден на куриер", иначе created_at).
+   todayISO — местна дата (по подразбиране today()); за теста. */
+function tfDueForStores(stores, transfers, cargoByTransfer, evs, succOf, todayISO) {
+  var out = { confirm: 0, confirmItems: [], reship: 0, reshipItems: [], departed: [] };
+  if (!stores || !stores.length) return out;
+  var td = todayISO || today();
+  (transfers || []).forEach(function (t) {
+    var tEvs = (evs || []).filter(function (e) { return e && e.transfer_id === t.id; });
+    var moving = t.mode === 'courier' || !!t.departed_at ||
+      (!!t.depart_date && String(t.depart_date).slice(0, 10) <= td), mine = 0;
+    ((cargoByTransfer || {})[t.id] || []).forEach(function (c, i) {
+      var cf = tfCargoConfirmFor(t, c, tEvs, stores);
+      if (cf && cf.left.length) {
+        out.confirmItems.push({ t: t, c: c, i: i, kind: cf.kind, left: cf.left.length, moving: moving });
+        if (moving) out.confirm += cf.left.length;
+        mine++;
+      }
+      var ev = tfCargoReshipFor(c, tEvs, stores, !!(succOf && succOf[c.id]));
+      if (ev) { out.reshipItems.push({ t: t, c: c, i: i, ev: ev }); out.reship++; }
+    });
+    if (!mine) return;
+    var ts = null;
+    if (t.mode === 'courier') {
+      tEvs.forEach(function (e) { if (e.event === 'handed_to_courier' && (!ts || e.created_at > ts)) ts = e.created_at; });
+      ts = ts || t.created_at;
+    } else ts = t.departed_at || null;
+    if (ts) out.departed.push({ id: t.id, transfer_num: t.transfer_num, from_store: t.from_store, ts: ts, n: mine });
   });
   return out;
 }

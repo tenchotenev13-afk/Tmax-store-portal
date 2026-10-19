@@ -231,6 +231,14 @@ function showLoginBanner(){
     el.style.display='block';
   });
 
+  /* Трансфери: единици за потвърждение (само от тръгнал транспорт) и товари,
+     чакащи прехвърляне при обекта. Самостоятелна заявка — табът може да не е
+     отварян. Глобалният профил отпада вътре в notifTransfersPending(). */
+  notifTransfersPending(function(res){
+    if(!res || (!res.confirm && !res.reship)) return;
+    notifUpsertTransfersCard(res.confirm, res.reship);
+  });
+
   /* Нови задачи от Бюлетин през последните 3 дни, все още неотметнати от
      този магазин — само за store роли (не и за офиса, който сам ги пише). */
   if(!isGlobal() && currentUser.store_name) checkNewBulletinTasksBanner();
@@ -526,6 +534,133 @@ function checkNewLoadingLists(){
   });
 }
 
+/* ── Трансфери (18.10.2026): карта при вход + звънец „🔁 Тръгна към вас" ──
+   По образеца на товарните листи отгоре. Броенето е tfDueForStores() от
+   transfers.js (зареден ПРЕДИ този файл) — същите предикати като таба
+   „📥 За потвърждение при мен" и „⏳ Чакащи". Данните се теглят тук, не от
+   tfTransfers: табът може изобщо да не е отварян. Само банер и звук в
+   портала — без push към телефона и без имейл (решение 18.10.2026). */
+var _tfWatermark=null;  /* ms — най-новото „тръгна към вас", вече чуто */
+
+/* Обектът, не офисът: глобалните роли не потвърждават (tfActorStores). */
+function notifWantsTransfers(){
+  if(!currentUser || (typeof isGlobal==='function' && isGlobal())) return false;
+  if(!assignedStores()) return false;
+  return typeof tfDueForStores==='function' && typeof tfArrCs==='function';
+}
+/* cb(null) = нямаме информация (глобален профил, срив, нито един транспорт);
+   иначе cb(tfDueForStores(...)). Без филтър по статус: транспорт, чиито
+   товари са разтоварени изцяло в точката, е „Завършен", а товарите му още
+   чакат прехвърляне — последните 200 по created_at. */
+function notifTransfersPending(cb){
+  if(!notifWantsTransfers()){ cb(null); return; }
+  var stores=assignedStores().filter(Boolean);
+  var hq=[], cq=[];
+  stores.forEach(function(st){
+    var e=encodeURIComponent(st);
+    hq.push('end_store.eq.'+e, tfArrCs('stops', st));
+    cq.push('recipient_store.eq.'+e, tfArrCs('transfer_points', st));
+  });
+  var T_SEL='select=id,transfer_num,from_store,mode,stops,end_store,status,created_at,departed_at,depart_date,courier_company';
+  Promise.all([
+    sbGet('transfers','or=('+hq.join(',')+')&order=created_at.desc&limit=200&'+T_SEL,true),
+    sbGet('transfer_cargo','or=('+cq.join(',')+')&select=transfer_id&limit=1000',true)
+  ]).then(function(r){
+    var list=Array.isArray(r[0])?r[0]:[], have={};
+    list.forEach(function(t){ have[t.id]=1; });
+    var extra=(Array.isArray(r[1])?r[1]:[]).map(function(c){ return c.transfer_id; })
+      .filter(function(id,i,a){ return id && !have[id] && a.indexOf(id)===i; });
+    return (extra.length ? sbGet('transfers','id=in.('+extra.join(',')+')&'+T_SEL,true) : Promise.resolve([])).then(function(more){
+      return list.concat(Array.isArray(more)?more:[]);
+    });
+  }).then(function(list){
+    if(!list.length){ cb(null); return; }
+    var ids=list.map(function(t){ return t.id; }).join(',');
+    return Promise.all([
+      sbGet('transfer_cargo','transfer_id=in.('+ids+')&order=position.asc&select=id,transfer_id,position,kind,qty,recipient_store,transfer_points,loaded_at_store,prev_cargo_id',true),
+      sbGet('transfer_cargo_events','transfer_id=in.('+ids+')&order=created_at.asc&select=id,cargo_id,transfer_id,store_name,event,unit,resolves_id,created_at',true)
+    ]).then(function(x){
+      var cargo=Array.isArray(x[0])?x[0]:[], evs=Array.isArray(x[1])?x[1]:[], byT={};
+      cargo.forEach(function(c){ (byT[c.transfer_id]=byT[c.transfer_id]||[]).push(c); });
+      /* Наследниците — само за разтоварените при мен (кандидатите за „Чакащи"). */
+      var cand=tfDueForStores(stores,list,byT,evs,{}).reshipItems.map(function(it){ return it.c.id; });
+      var succP=cand.length ? sbGet('transfer_cargo','prev_cargo_id=in.('+cand.join(',')+')&select=prev_cargo_id',true) : Promise.resolve([]);
+      return succP.then(function(rows){
+        var succ={}; (Array.isArray(rows)?rows:[]).forEach(function(c){ if(c.prev_cargo_id) succ[c.prev_cargo_id]=1; });
+        cb(tfDueForStores(stores,list,byT,evs,succ));
+      });
+    });
+  }).catch(function(){ cb(null); });
+}
+function notifTransfersCardTitle(n,m){
+  if(n>0) return n+(n===1?' товар':' товара')+' за потвърждение в Трансфери'+(m>0?' · '+m+(m===1?' чака':' чакат')+' прехвърляне':'');
+  return m+(m===1?' товар чака':' товара чакат')+' прехвърляне в Трансфери';
+}
+/* Кликът води към филтъра, който има какво да покаже. */
+function notifTransfersFilter(n){ return n>0?'mine':'reship'; }
+function notifTransfersCardHtml(n,m){
+  return '<div class="notif-card info" data-notif="transfers" data-f="'+notifTransfersFilter(n)+'" onclick="notifOpenTransfers(this.getAttribute(\'data-f\'))" style="cursor:pointer;">'+
+    '<div class="notif-icon">🔁</div><div class="notif-text">'+
+    '<div class="notif-title">'+notifTransfersCardTitle(n,m)+'</div>'+
+    '<div class="notif-sub">Отвори Транспорт → Трансфери</div>'+
+    '</div><span class="notif-close" onclick="event.stopPropagation();dismissCard(this)">✕</span></div>';
+}
+/* Като notifUpsertLoadingCard: обновява броя, не пресъздава картата. */
+function notifUpsertTransfersCard(n,m){
+  var el=document.getElementById('notif-banner');
+  if(!el || (!n && !m)) return;
+  var card=el.querySelector('[data-notif="transfers"]');
+  if(card){
+    var t=card.querySelector('.notif-title');
+    if(t) t.textContent=notifTransfersCardTitle(n,m);
+    card.setAttribute('data-f',notifTransfersFilter(n));
+  } else {
+    el.insertAdjacentHTML('afterbegin', notifTransfersCardHtml(n,m));
+  }
+  el.style.display='block';
+}
+/* showModule('transfers') пуска loadTransfers(), който връща филтъра на
+   „Всички" синхронно и рисува след зареждането — затова филтърът се слага
+   СЛЕД извикването. */
+function notifOpenTransfers(f){
+  if(typeof showModule==='function') showModule('transfers');
+  if(typeof tfFilter!=='undefined' && f) tfFilter=f;
+}
+/* Звънецът: транспорт с товар за мен, тръгнал (бус / камион — departed_at;
+   куриер — предаден / създаден) след водния знак. Знакът е като при
+   листите: първият цикъл само го слага; празен / сринат отговор след него не
+   го мърда; не се връща назад. */
+function checkNewTransfers(){
+  if(!notifWantsTransfers()) return;
+  notifTransfersPending(function(res){
+    var tsOf=function(d){ var x=Date.parse(d.ts); return isNaN(x)?0:x; };
+    if(_tfWatermark===null){
+      var base=0;
+      if(res) res.departed.forEach(function(d){ if(tsOf(d)>base) base=tsOf(d); });
+      _tfWatermark = base || Date.now();
+      return;
+    }
+    if(!res || !res.departed.length) return;
+    var fresh=res.departed.filter(function(d){ return tsOf(d)>_tfWatermark; });
+    var maxTs=res.departed.reduce(function(m,d){ return Math.max(m,tsOf(d)); },_tfWatermark);
+    if(fresh.length){
+      playSound();
+      var f0=fresh[0];
+      if(typeof coNotifyToast==='function'){
+        coNotifyToast(fresh.length===1
+          ? '🔁 Тръгна '+(f0.transfer_num||'')+' към вас · от '+(f0.from_store||'—')+' · '+f0.n+(f0.n===1?' товар':' товара')
+          : '🔁 '+fresh.length+' транспорта тръгнаха към вас',
+          '', 'Отвори Трансфери',
+          function(){ notifOpenTransfers('mine'); });
+      }
+      notifUpsertTransfersCard(res.confirm, res.reship);
+      var mod=document.getElementById('mod-transfers');
+      if(mod && mod.style.display!=='none' && typeof loadTransfers==='function') loadTransfers(true);
+    }
+    _tfWatermark=maxTs;
+  });
+}
+
 function checkNewOrders(){
   if(!currentUser)return;
   var stores=assignedStores();
@@ -595,6 +730,7 @@ function checkNewOrders(){
   }).catch(function(){});
   /* Отделно от заявките и НЕ вплетено в тяхната логика. */
   checkNewLoadingLists();
+  checkNewTransfers();
 }
 
 /* Какво точно е дошло: номер · клиент · от кой обект. Звънецът тегли само id,
@@ -623,6 +759,7 @@ function startPolling(){
   if(_poll)clearInterval(_poll);
   _seenIds=null; /* нулираме при всеки нов старт, за да хванем правилния базов snapshot */
   _llWatermark=null;
+  _tfWatermark=null;
   _coNewForMe={};
   _coNotifyRows={};
   _poll=setInterval(checkNewOrders,30000);
