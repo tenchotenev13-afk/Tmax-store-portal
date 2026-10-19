@@ -1,8 +1,18 @@
-/* Пуска всички jsdom тестове на портала последователно.
-   Спира при първия провал (exit 1); при пълен успех — обобщение и exit 0.
-   Изключение: тест, който ЗАБИЕ (над TEST_TIMEOUT_MS), се убива, отчита се
-   като ❌ „ЗАБИ" и пускът продължава със следващия — един увиснал тест не
-   бива да крие резултата на останалите. Общият резултат тогава е червен.
+/* Пуска всички jsdom тестове на портала — паралелно, в пул от N процеса.
+   N = env TEST_JOBS; иначе floor(процесори / 3), между 1 и 8 (на 24 процесора
+   — 8). Над 8 само с изричен TEST_JOBS: jsdom е тежък по памет (~300 MB на
+   процес). TEST_JOBS=1 дава старото последователно поведение — същият ред,
+   същият изход; ползва се при подозрение за скрито споделено състояние.
+
+   Изходът на всеки тест се буферира и се печата цял, щом тестът свърши —
+   редове от различни тестове не се смесват. Стартът е по реда на TESTS,
+   печатът е по реда на завършване, обобщението накрая — пак по TESTS.
+
+   При провал не се стартират нови тестове; вече тръгналите се довършват и
+   отпечатват, после exit 1 със списък на падналите.
+   Изключение: тест, който ЗАБИЕ (над лимита си), се убива, отчита се като
+   ❌ „ЗАБИ" и пускът продължава — един увиснал тест не бива да крие
+   резултата на останалите. Общият резултат тогава е червен.
 
    Тестовете приемат корена на репото като argv[2]. Подаваме го явно,
    за да не зависи резултатът от това откъде е извикана командата.
@@ -11,14 +21,37 @@
    Текстът в изхода не решава нищо — регексът долу служи единствено
    за събиране на общия брой проверки. Ако не хване число, това е
    предупреждение, не провал. */
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const ROOT = path.join(__dirname, '..');
-/* Цял тест тече секунди; над 120 сек значи увиснал (22.09.2026 пакетът стоя
-   над 10 мин на task-report-schedule.test.js, който сам минава за 10 сек). */
-const TEST_TIMEOUT_MS = 120000;
+
+const JOBS = (function () {
+  const env = parseInt(process.env.TEST_JOBS, 10);
+  if (env >= 1) return env;
+  return Math.max(1, Math.min(8, Math.floor(os.cpus().length / 3)));
+})();
+
+/* Лимитът се мери от СТАРТА на самия процес, не от влизането в опашката.
+   Цял тест тече секунди: измерено 19.10.2026 на 1 ядро — средно 6,3 сек,
+   медиана 4,5, p90 10,8. 180 сек значи увиснал (22.09.2026 пакетът стоя над
+   10 мин на task-report-schedule.test.js, който сам минава за 10 сек).
+   До 19.10.2026 лимитът беше 120 сек; при паралелен пуск ядрата се делят и
+   тестовете се забавят, затова е вдигнат. */
+const TEST_TIMEOUT_MS = 180000;
+/* Известно тежките — измерено 19.10.2026 сами на 1 ядро:
+   stock-diff-co-viewer 85 сек (близо до стария лимит 120 и „забиваше" под
+   натоварване, макар сам да минава), sr-diff-types-url 25 сек. */
+const TEST_TIMEOUTS = {
+  'stock-diff-co-viewer.test.js': 240000,
+  'sr-diff-types-url.test.js': 240000
+};
+function timeoutFor(name) {
+  return TEST_TIMEOUTS[name] || TEST_TIMEOUT_MS;
+}
+
 const TESTS = [
   'client-groups.test.js',
   'client-order-double-submit.test.js',
@@ -382,82 +415,160 @@ const TESTS = [
    "0 неуспешни", други "0 провалени". Хващаме и двата варианта. */
 const SUMMARY = /(\d+)\s+успешни,\s*(\d+)\s+(?:неуспешни|провалени)/;
 
-let totalOk = 0;
-let unknownCounts = 0;
-const rows = [];
-const warnings = [];
-const hung = [];
-
-for (let i = 0; i < TESTS.length; i++) {
-  const name = TESTS[i];
-  const file = path.join(__dirname, name);
-
-  if (!fs.existsSync(file)) {
+/* Всички файлове се проверяват преди първия старт — при паралелен пуск
+   липсващ файл по средата иначе би излязъл чак след минути. */
+TESTS.forEach(function (name) {
+  if (!fs.existsSync(path.join(__dirname, name))) {
     console.error('\n❌ ЛИПСВА ФАЙЛ: ' + name);
     process.exit(1);
   }
-
-  console.log('\n━━━ ' + name + ' ━━━');
-  const res = spawnSync(process.execPath, [file, ROOT],
-    { encoding: 'utf8', timeout: TEST_TIMEOUT_MS, killSignal: 'SIGKILL' });
-  const out = (res.stdout || '') + (res.stderr || '');
-  process.stdout.write(out);
-
-  /* Забил тест: убит от timeout-а. Отчита се и се продължава. */
-  if ((res.error && res.error.code === 'ETIMEDOUT') || res.signal) {
-    console.error('\n❌ ЗАБИ (>' + (TEST_TIMEOUT_MS / 1000) + ' сек): ' + name +
-                  (res.signal ? ' — убит със ' + res.signal : ''));
-    hung.push(name);
-    continue;
-  }
-
-  /* Единственият критерий за провал. */
-  if (res.status !== 0) {
-    console.error('\n❌ ПРОВАЛ: ' + name + ' — exit код ' + res.status);
-    console.error('Спирам. Останалите ' + (TESTS.length - i - 1) + ' теста НЕ са пускани.');
-    process.exit(1);
-  }
-
-  /* Оттук нататък тестът е минал. Само събираме числа за обобщението. */
-  const m = out.match(SUMMARY);
-  if (!m) {
-    unknownCounts++;
-    rows.push({ name: name, ok: null });
-    warnings.push(name + ': тестът мина (exit 0), но броячът не се разчете');
-    continue;
-  }
-
-  const ok = Number(m[1]);
-  const bad = Number(m[2]);
-  totalOk += ok;
-  rows.push({ name: name, ok: ok });
-
-  /* Несъответствие: изходът твърди, че има падащи проверки, а exit кодът е 0.
-     Не проваля пуска — само го изкарваме на светло. */
-  if (bad > 0) {
-    warnings.push(name + ': exit 0, но в изхода пише ' + bad + ' падащи проверки');
-  }
-}
-
-console.log('\n═════════════════════════════');
-rows.forEach(function (r) {
-  console.log('✅ ' + r.name + '  —  ' + (r.ok === null ? 'брой неизвестен' : r.ok + ' проверки'));
 });
-hung.forEach(function (n) {
-  console.log('❌ ' + n + '  —  ЗАБИ (>' + (TEST_TIMEOUT_MS / 1000) + ' сек)');
-});
-console.log('─────────────────────────────');
-if (hung.length) {
-  console.log('ОБЩО: ❌ ' + hung.length + ' от ' + TESTS.length + ' теста ЗАБИХА; останалите ' +
-              rows.length + ' минаха с ' + (unknownCounts ? 'поне ' : '') + totalOk + ' проверки');
-} else {
-  console.log('ОБЩО: ' + (unknownCounts ? 'поне ' : '') + totalOk +
-              ' проверки, 0 падащи (' + rows.length + ' теста, всички с exit 0)');
+
+function fmtSec(ms) {
+  return (ms / 1000).toFixed(1).replace('.', ',') + ' сек';
 }
 
-if (warnings.length) {
-  console.log('\n⚠️  предупреждения (не влияят на резултата):');
-  warnings.forEach(function (w) { console.log('   · ' + w); });
+const results = {};   // name -> { status, ms, ok, bad, hung, signal }
+const failed = [];
+let next = 0;
+let running = 0;
+let stopping = false;
+const t0 = Date.now();
+
+console.log('Тестове: ' + TESTS.length + ', паралелно: ' + JOBS +
+            (process.env.TEST_JOBS ? ' (TEST_JOBS)' : ''));
+
+function runOne(name) {
+  const file = path.join(__dirname, name);
+  const limit = timeoutFor(name);
+  const out = [];
+  const err = [];
+  const start = Date.now();
+  let timedOut = false;
+  let spawnError = null;
+
+  const child = spawn(process.execPath, [file, ROOT], { stdio: ['ignore', 'pipe', 'pipe'] });
+  child.stdout.on('data', function (b) { out.push(b); });
+  child.stderr.on('data', function (b) { err.push(b); });
+  const timer = setTimeout(function () {
+    timedOut = true;
+    child.kill('SIGKILL');
+  }, limit);
+
+  child.on('error', function (e) { spawnError = e; });
+  child.on('close', function (code, signal) {
+    clearTimeout(timer);
+    running--;
+    const ms = Date.now() - start;
+    /* Като преди: stdout, после stderr — цял блок за теста. */
+    const text = Buffer.concat(out).toString('utf8') + Buffer.concat(err).toString('utf8') +
+                 (spawnError ? '\n' + spawnError.message + '\n' : '');
+    console.log('\n━━━ ' + name + ' ━━━ (' + fmtSec(ms) + ')');
+    process.stdout.write(text);
+
+    const r = { status: code, ms: ms, ok: null, bad: 0, hung: false, signal: signal };
+    results[name] = r;
+
+    /* Забил тест: убит от лимита. Отчита се и се продължава. */
+    if (timedOut || signal) {
+      r.hung = true;
+      console.error('\n❌ ЗАБИ (>' + (limit / 1000) + ' сек): ' + name +
+                    (signal ? ' — убит със ' + signal : ''));
+    } else if (code !== 0) {
+      /* Единственият критерий за провал. */
+      failed.push(name);
+      console.error('\n❌ ПРОВАЛ: ' + name + ' — exit код ' + code);
+      if (!stopping) {
+        stopping = true;
+        console.error('Спирам: нови тестове не се стартират' +
+                      (running ? ', изчаквам ' + running + ' вече тръгнали.' : '.'));
+      }
+    } else {
+      /* Оттук нататък тестът е минал. Само събираме числа за обобщението. */
+      const m = text.match(SUMMARY);
+      if (m) { r.ok = Number(m[1]); r.bad = Number(m[2]); }
+    }
+
+    pump();
+  });
 }
 
-process.exit(hung.length ? 1 : 0);
+function pump() {
+  while (!stopping && running < JOBS && next < TESTS.length) {
+    running++;
+    runOne(TESTS[next++]);
+  }
+  if (running === 0) finish();
+}
+
+function finish() {
+  const wall = Date.now() - t0;
+  const hung = TESTS.filter(function (n) { return results[n] && results[n].hung; });
+
+  if (failed.length) {
+    const notStarted = TESTS.length - next;
+    console.error('\n═════════════════════════════');
+    failed.forEach(function (n) {
+      console.error('❌ ПРОВАЛ: ' + n + ' — exit код ' + results[n].status);
+    });
+    hung.forEach(function (n) {
+      console.error('❌ ЗАБИ: ' + n + ' (>' + (timeoutFor(n) / 1000) + ' сек)');
+    });
+    console.error('Останалите ' + notStarted + ' теста НЕ са пускани. Общо време: ' + fmtSec(wall));
+    process.exitCode = 1;
+    return;
+  }
+
+  let totalOk = 0;
+  let unknownCounts = 0;
+  let passed = 0;
+  const warnings = [];
+
+  console.log('\n═════════════════════════════');
+  TESTS.forEach(function (n) {
+    const r = results[n];
+    if (r.hung) return;
+    passed++;
+    if (r.ok === null) {
+      unknownCounts++;
+      warnings.push(n + ': тестът мина (exit 0), но броячът не се разчете');
+    } else {
+      totalOk += r.ok;
+      /* Несъответствие: изходът твърди, че има падащи проверки, а exit
+         кодът е 0. Не проваля пуска — само го изкарваме на светло. */
+      if (r.bad > 0) warnings.push(n + ': exit 0, но в изхода пише ' + r.bad + ' падащи проверки');
+    }
+    console.log('✅ ' + n + '  —  ' + (r.ok === null ? 'брой неизвестен' : r.ok + ' проверки') +
+                '  (' + fmtSec(r.ms) + ')');
+  });
+  hung.forEach(function (n) {
+    console.log('❌ ' + n + '  —  ЗАБИ (>' + (timeoutFor(n) / 1000) + ' сек)');
+  });
+
+  console.log('─────────────────────────────');
+  console.log('10 най-бавни:');
+  TESTS.slice().sort(function (a, b) { return results[b].ms - results[a].ms; })
+    .slice(0, 10).forEach(function (n) {
+      console.log('   ' + fmtSec(results[n].ms).padStart(10) + '  ' + n);
+    });
+  console.log('─────────────────────────────');
+  if (hung.length) {
+    console.log('ОБЩО: ❌ ' + hung.length + ' от ' + TESTS.length + ' теста ЗАБИХА; останалите ' +
+                passed + ' минаха с ' + (unknownCounts ? 'поне ' : '') + totalOk + ' проверки');
+  } else {
+    console.log('ОБЩО: ' + (unknownCounts ? 'поне ' : '') + totalOk +
+                ' проверки, 0 падащи (' + passed + ' теста, всички с exit 0)');
+  }
+  console.log('Време: ' + fmtSec(wall) + ' (паралелно: ' + JOBS + ')');
+
+  if (warnings.length) {
+    console.log('\n⚠️  предупреждения (не влияят на резултата):');
+    warnings.forEach(function (w) { console.log('   · ' + w); });
+  }
+
+  /* exitCode, не process.exit(): при пренасочен изход process.exit може да
+     отреже недописания буфер на stdout. */
+  process.exitCode = hung.length ? 1 : 0;
+}
+
+pump();
