@@ -1,6 +1,7 @@
 {
   "devDependencies": {
-    "jsdom": "^30.0.1"
+    "jsdom": "^30.0.1",
+    "xlsx": "0.18.5"
   },
   "scripts": {
     "test": "node tests/run-all.js",

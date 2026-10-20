@@ -10,12 +10,13 @@
                      'pallets_drop_threshold', липсва/невалиден → 10);
      · „Обобщение" — последното по обект; без данни и остарели (>7 дни)
                      отгоре; ред с броя им и ред ОБЩО = сума по колоните.
-   Датите са Date (местна полунощ) + cellDates/dateNF dd.mm.yyyy → Excel дата.
+   Датите са Date (местна полунощ) + cellDates/dateNF dd"."mm"."yyyy → Excel дата.
    SheetJS се зарежда веднъж: второ натискане, докато се зарежда, не добавя
    втори <script>; след провал може да се опита пак.
 
-   SheetJS не е в node_modules — тестът подава фалшив XLSX, който пази
-   масивите и опциите на листовете. Проверява се какво строи pallets.js.
+   Тестът подава фалшив XLSX, който пази масивите и опциите на листовете.
+   Проверява се какво строи pallets.js. С ИСТИНСКИЯ SheetJS 0.18.5 —
+   xlsx-real-datenf.test.js (фалшивият не хвана „bad second format: .“).
 
    Враца са РЕАЛНИТЕ редове от transport_pallets (18.09 / 11.09 / 04.09):
    18.09 спрямо 11.09 — Европалет +20, Малък +8; 11.09 спрямо 04.09 —
@@ -141,8 +142,8 @@ async function exportWith(h) {
     h.w.loadPallets(); await ticks();
     const X = await exportWith(h);
     const f = X.written[0];
-    ok('и двата листа са с cellDates:true и dateNF dd.mm.yyyy',
-      ['Палети', 'Обобщение'].every(n => f.wb.sheets[n].opts && f.wb.sheets[n].opts.cellDates === true && f.wb.sheets[n].opts.dateNF === 'dd.mm.yyyy'),
+    ok('и двата листа са с cellDates:true и dateNF dd"."mm"."yyyy',
+      ['Палети', 'Обобщение'].every(n => f.wb.sheets[n].opts && f.wb.sheets[n].opts.cellDates === true && f.wb.sheets[n].opts.dateNF === 'dd"."mm"."yyyy'),
       JSON.stringify(['Палети', 'Обобщение'].map(n => f.wb.sheets[n].opts)));
     ok('writeFile с cellDates:true', f.opts && f.opts.cellDates === true, JSON.stringify(f.opts));
     h.close();

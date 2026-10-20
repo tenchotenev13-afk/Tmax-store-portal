@@ -190,7 +190,7 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
     ok('ред без sale_price не влиза (8044444)', !a.some(x => x[0] === '8044444'));
     ok('повторната влиза (цената се сменя)', a.some(x => x[0] === '8025298'));
     ok('3 реда + заглавие', a.length === 4, a.length);
-    ok('датите се пишат с формат за дата (dateNF)', h.opts[0] && h.opts[0].dateNF === 'dd.mm.yyyy');
+    ok('датите се пишат с формат за дата (dateNF)', h.opts[0] && h.opts[0].dateNF === 'dd"."mm"."yyyy');
     ok('файл VK11-8-2026-10-20.xlsx', h.files[0] === 'VK11-8-2026-10-20.xlsx', h.files[0]);
     const n = env(); await open(n, 'Габрово');
     ok('бланка „нямат“ → без бутон VK11', !btn(mod(n), 'VK11'));

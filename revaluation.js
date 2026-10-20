@@ -1572,8 +1572,9 @@ function rvVk11(){
   var bad = aoa.slice(1).filter(function(r){ return !rvSapUnit(r[1]).ok; }).map(function(r){ return r[0] + ' (' + (r[1] || 'празна') + ')'; });
   rvWithXlsx(function(){
     var wb = XLSX.utils.book_new();
-    /* Date клетка → Excel сериен номер с формат за дата (като в шаблона), не текст. */
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa, { dateNF: 'dd.mm.yyyy' }), RV_VK11_SHEET);
+    /* Date клетка → Excel сериен номер с формат за дата (като в шаблона), не текст.
+       Точките са екранирани: SheetJS 0.18.5 отказва неекранирана точка („bad second format: .“). */
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa, { dateNF: 'dd"."mm"."yyyy' }), RV_VK11_SHEET);
     XLSX.writeFile(wb, 'VK11-' + (no || 'obekt') + '-' + fromIso + '.xlsx');
     toast('VK11: ' + (aoa.length - 1) + ' реда' + (bad.length ? ' · МЕ не е по SAP: ' + bad.join(', ') : ''), bad.length ? '#d97706' : undefined);
   });

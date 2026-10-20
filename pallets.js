@@ -283,7 +283,8 @@ function palletsParseThreshold(rows){
   var n=raw?Number(raw):NaN;
   return Number.isFinite(n)&&n>0?n:10;
 }
-var PALLETS_XLS_OPTS={cellDates:true,dateNF:'dd.mm.yyyy'};
+/* Точките са екранирани: SheetJS 0.18.5 отказва неекранирана точка („bad second format: .“). */
+var PALLETS_XLS_OPTS={cellDates:true,dateNF:'dd"."mm"."yyyy'};
 /* Чиста — строи workbook-а с подадения XLSX и праг. Тестът я вика с фалшив. */
 function palletsBuildWorkbook(X,thr){
   if(!(thr>0))thr=10;
