@@ -4,12 +4,14 @@
    "sdMarkTaken(s1) ✅ Върната",
    "openSDModal(s1) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s1) ✕",
    "sdDeleteReport(rep-s) 🗑"
   ],
   "ВЗЕТ РЕД": [
    "openSDModal(s2) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s2) ✕",
    "sdDeleteReport(rep-s) 🗑"
   ],
@@ -18,6 +20,7 @@
    "sdMarkTaken(s3) ✅ Изписана",
    "openSDModal(s3) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s3) ✕",
    "sdDeleteReport(rep-s) 🗑"
   ],
@@ -25,6 +28,7 @@
    "sdToggleCreditNote(s4) ✅ Издадено",
    "openSDModal(s4) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s4) ✕",
    "sdDeleteReport(rep-s) 🗑"
   ],
@@ -33,6 +37,7 @@
    "resolveDiffLine(s5),return ↩️ Връщане",
    "openSDModal(s5) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s5) ✕",
    "sdDeleteReport(rep-s) 🗑"
   ],
@@ -44,6 +49,7 @@
   "ЗАПРИХОДЕНА": [
    "openSDModal(s7) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s7) ✕",
    "sdDeleteReport(rep-s) 🗑"
   ]
@@ -53,12 +59,14 @@
    "sdMarkTaken(i1) ✅ Върната",
    "openSDModal(i1) ✏️",
    "loadDiffPrint(rep-i) 🖨",
+   "openDiffEmailModal(rep-i) ✉️",
    "sdDelete(i1) ✕",
    "sdDeleteReport(rep-i) 🗑"
   ],
   "МЕЖДУСКЛАДОВ ПРИЕТ": [
    "openSDModal(i2) ✏️",
    "loadDiffPrint(rep-i) 🖨",
+   "openDiffEmailModal(rep-i) ✉️",
    "sdDelete(i2) ✕",
    "sdDeleteReport(rep-i) 🗑"
   ],
@@ -67,6 +75,7 @@
    "sdMarkTaken(i3) ✅ Изписана",
    "openSDModal(i3) ✏️",
    "loadDiffPrint(rep-i) 🖨",
+   "openDiffEmailModal(rep-i) ✉️",
    "sdDelete(i3) ✕",
    "sdDeleteReport(rep-i) 🗑"
   ]
@@ -76,11 +85,13 @@
    "sdMarkTaken(s1) ✅ Върната",
    "openSDModal(s1) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s1) ✕"
   ],
   "ВЗЕТ РЕД": [
    "openSDModal(s2) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s2) ✕"
   ],
   "ЛИПСА ЧАКАЩА": [
@@ -88,12 +99,14 @@
    "sdMarkTaken(s3) ✅ Изписана",
    "openSDModal(s3) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s3) ✕"
   ],
   "ЛИПСА ИЗДАДЕНА": [
    "sdToggleCreditNote(s4) ✅ Издадено",
    "openSDModal(s4) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s4) ✕"
   ],
   "НЕФАКТУРИРАН": [
@@ -101,6 +114,7 @@
    "resolveDiffLine(s5),return ↩️ Връщане",
    "openSDModal(s5) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s5) ✕"
   ],
   "РЪЧЕН РЕД": [
@@ -111,6 +125,7 @@
   "ЗАПРИХОДЕНА": [
    "openSDModal(s7) ✏️",
    "loadDiffPrint(rep-s) 🖨",
+   "openDiffEmailModal(rep-s) ✉️",
    "sdDelete(s7) ✕"
   ]
  },
@@ -119,11 +134,13 @@
    "sdMarkTaken(i1) ✅ Върната",
    "openSDModal(i1) ✏️",
    "loadDiffPrint(rep-i) 🖨",
+   "openDiffEmailModal(rep-i) ✉️",
    "sdDelete(i1) ✕"
   ],
   "МЕЖДУСКЛАДОВ ПРИЕТ": [
    "openSDModal(i2) ✏️",
    "loadDiffPrint(rep-i) 🖨",
+   "openDiffEmailModal(rep-i) ✉️",
    "sdDelete(i2) ✕"
   ],
   "МЕЖДУСКЛАДОВ ЛИПСА": [
@@ -131,6 +148,7 @@
    "sdMarkTaken(i3) ✅ Изписана",
    "openSDModal(i3) ✏️",
    "loadDiffPrint(rep-i) 🖨",
+   "openDiffEmailModal(rep-i) ✉️",
    "sdDelete(i3) ✕"
   ]
  },

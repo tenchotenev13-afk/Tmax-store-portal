@@ -141,6 +141,14 @@ function sdFmtDateTime(val){
   var t=s.indexOf('T');
   return fmtDate(t>=0?s.slice(0,t):s);
 }
+/* „дд.мм чч:мм" в местно време — за title-а на повторното пращане от
+   долната таблица, където часът е важен (пратено ли е вече днес). */
+function sdFmtDayTime(val){
+  var d=new Date(val);
+  if(!val||isNaN(d.getTime())) return '—';
+  function p(n){ return (n<10?'0':'')+n; }
+  return p(d.getDate())+'.'+p(d.getMonth()+1)+' '+p(d.getHours())+':'+p(d.getMinutes());
+}
 /* Логистични складове - отделни физически обекти (не роля), чиито служители
    влизат с обичайните си профили, но с store_name = точно името на склада.
    Те виждат само разликите, при които ТЕ са насрещната страна (counterpart)
@@ -585,6 +593,14 @@ function renderStockDiff() {
            report_id, тоест няма какво да се разпечата. */
         if (r.report_id) {
           h += '<button data-rid="'+r.report_id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #e2e8f0;background:#fff;color:#475569;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">🖨</button>';
+        }
+        /* Имейл и от долу: „✓ Без имейл" не е окончателно, а горната карта
+           изчезва, щом бланката слезе (решение 20.10.2026). Вече пратен →
+           бутонът остава, title-ът казва кога. */
+        var emRep = (r.report_id && canSendDiffEmail()) ? diffReports.find(function(x){ return String(x.id) === String(r.report_id); }) : null;
+        if (emRep) {
+          var emTitle = emRep.email_sent_at ? 'Вече изпратен на '+sdFmtDayTime(emRep.email_sent_at)+' — изпрати отново' : 'Изпрати имейл до '+diffDirEmailTo(emRep.direction);
+          h += '<button data-rid="'+emRep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" title="'+escAttr(emTitle)+'" style="border:1px solid #bae6fd;background:#f0f9ff;color:#0369a1;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">✉️</button>';
         }
         if (isAdmin) {
           h += '<button data-id="'+r.id+'" onclick="sdDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✕</button>';
@@ -4655,8 +4671,9 @@ function sendDiffEmail(reportId){
       return;
     }
     toast('✅ Имейлът е изпратен!');
-    /* email_pending=false в СЪЩИЯ patch: „Решена — чака имейл" слиза долу. */
-    sbPatch('differences_reports','id=eq.'+rep.id,{email_sent_at:new Date().toISOString(), email_pending:false}).then(function(res){
+    /* email_pending=false в СЪЩИЯ patch: „Решена — чака имейл" слиза долу.
+       email_skipped_at=null: писмо, пратено след „✓ Без имейл", отменя отказа. */
+    sbPatch('differences_reports','id=eq.'+rep.id,{email_sent_at:new Date().toISOString(), email_pending:false, email_skipped_at:null}).then(function(res){
       /* Имейлът е тръгнал, но бланката не е отбелязана — казва се и тя
          остава горе, вместо тихо да изглежда, че всичко е наред. */
       if(res && !res.ok) toast('Имейлът е изпратен, но бланката НЕ е отбелязана: '+sbErrMsg(res),'#dc2626');

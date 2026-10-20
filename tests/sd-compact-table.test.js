@@ -8,6 +8,9 @@
    „✅ Изписана“ / „Кредитно“ вика същите функции със същото id; няма „📎N“
    дубликат след коментара на контролера; картата на бланката е в
    overflow-x:auto обвивка.
+   От 20.10.2026 еталонът има и „✉️" (openDiffEmailModal) след „🖨" за
+   admin/accounting — добавен нарочно (diff-email-after-skip.test.js), само
+   вмъкване; сверено със свеж --dump.
 
    Пускане:  node tests/sd-compact-table.test.js .
    Снемане на еталона от друга версия:  node tests/sd-compact-table.test.js <корен> --dump */
