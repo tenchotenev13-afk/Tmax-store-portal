@@ -49,8 +49,17 @@
 // или е празно след почистване - From е буквално същият като преди
 // (SMTP_FROM_NAME + SMTP_USER). АДРЕСЪТ не се приема от клиента никога.
 
+// ПРИКАЧЕНИ ФАЙЛОВЕ БЕЗ „CPU Time exceeded" (20.10.2026): denomailer е
+// ЛОКАЛНО КОПИЕ на 1.6.0 (vendor/denomailer@1.6.0/, README вътре) с една
+// промяна. Оригиналът пращаше всеки 75-знаков ред base64 като отделен запис
+// през опашка със splice(0,1) - квадратично. Бланка Раднево 180508904 с
+// 4,7 MB прикачени: 4 000 ms CPU при лимит 2 000, пет неуспешни опита на
+// Цветелина. Сега частта се сглобява тук (attachmentMimePart) и отива с
+// ЕДИН запис. Името на файла - RFC 2231 (filename*) + encoded word (name=);
+// дотогава вървеше суров UTF-8 без кавички.
+
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
-import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
+import { SMTPClient } from "./vendor/denomailer@1.6.0/mod.ts";
 
 const OS_KEY = Deno.env.get("ONESIGNAL_REST_KEY") || "";
 const OS_APP = 'a326639e-4ace-46f5-baa7-3f6259431d18';
@@ -255,6 +264,90 @@ function guessContentType(filename: string): string {
   return map[ext] || "application/octet-stream";
 }
 
+/* Чист base64, както го дава FileReader.readAsDataURL след запетаята:
+   само A-Z a-z 0-9 + /, най-много два '=' накрая, дължина кратна на 4.
+   Без интервали и нови редове - attachmentMimePart() реже сама. */
+function isCleanBase64(s: unknown): boolean {
+  return typeof s === 'string' && s.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(s);
+}
+
+/* Име на файл за заглавие: без контролни символи (вкл. CR/LF - иначе
+   инжекция на заглавие), trim; празно -> "attachment". */
+function cleanAttachmentName(raw: unknown): string {
+  var s = (raw === undefined || raw === null) ? '' : String(raw);
+  var out = '';
+  for (var i = 0; i < s.length; i++) {
+    var c = s.charCodeAt(i);
+    if (c < 32 || c === 127 || (c >= 128 && c <= 159)) { continue; }
+    out += s.charAt(i);
+  }
+  out = out.trim();
+  return out || 'attachment';
+}
+
+/* RFC 2231 attr-char минава както е; всичко друго - %XX от UTF-8. */
+function rfc2231Token(ch: string): string {
+  var c = ch.charCodeAt(0);
+  var plain = ch.length === 1 && ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) ||
+    (c >= 97 && c <= 122) || '!#$&+-.^_`|~'.indexOf(ch) >= 0);
+  if (plain) { return ch; }
+  var b = new TextEncoder().encode(ch);
+  var t = '';
+  for (var i = 0; i < b.length; i++) { t += '%' + (b[i] < 16 ? '0' : '') + b[i].toString(16).toUpperCase(); }
+  return t;
+}
+
+/* Параметър filename* по RFC 2231 за Content-Disposition. Реже на кодови
+   точки (никога в средата на %XX или на UTF-8 последователност) на парчета
+   filename*0*=, filename*1*=..., така че никой ред да не е над 78 знака.
+   Връща редовете без разделителя ';' - attachmentMimePart() го слага. */
+function rfc2231Filename(name: string): string[] {
+  var tokens = Array.from(name).map(rfc2231Token);
+  var whole = "UTF-8''" + tokens.join('');
+  if ((' filename*=' + whole).length <= 78) { return [' filename*=' + whole]; }
+  var lines: string[] = [];
+  var cur = "UTF-8''";
+  for (var i = 0; i < tokens.length; i++) {
+    var head = ' filename*' + lines.length + '*=';
+    if ((head + cur + tokens[i] + ';').length > 78) {
+      lines.push(head + cur);
+      cur = '';
+    }
+    cur += tokens[i];
+  }
+  lines.push(' filename*' + lines.length + '*=' + cur);
+  return lines;
+}
+
+/* Сглобява ЦЯЛАТА MIME част за прикачен файл - заглавия, празен ред и тяло
+   на редове по 76 знака (кратно на 4: base64 група не се цепи; азбуката няма
+   точка, тоест няма ред, започващ с '.'). Клиентският base64 НЕ се
+   разкодира - режат се готовите знаци. Резултатът отива дословно във
+   vendor/denomailer@1.6.0 (поле mimePart) с ЕДИН запис.
+
+   Име: ASCII -> name="..." и filename="..." (обратната черта и кавичката
+   екранирани); иначе -> name="<encoded words>" (encodeSubject, за по-старите
+   пощи) и filename* по RFC 2231. */
+function attachmentMimePart(rawName: unknown, contentType: string, b64: string): string {
+  var name = cleanAttachmentName(rawName);
+  var head: string[] = ['Content-Type: ' + contentType + ';'];
+  if (!hasNonAscii(name)) {
+    var q = '"' + name.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+    head.push(' name=' + q);
+    head.push('Content-Disposition: attachment;');
+    head.push(' filename=' + q);
+  } else {
+    head.push(' name="' + encodeSubject(name).trim() + '"');
+    head.push('Content-Disposition: attachment;');
+    var fl = rfc2231Filename(name);
+    for (var k = 0; k < fl.length; k++) { head.push(fl[k] + (k < fl.length - 1 ? ';' : '')); }
+  }
+  head.push('Content-Transfer-Encoding: base64');
+  var lines: string[] = [];
+  for (var j = 0; j < b64.length; j += 76) { lines.push(b64.slice(j, j + 76)); }
+  return head.join('\r\n') + '\r\n\r\n' + lines.join('\r\n');
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { status: 200, headers: CORS });
@@ -304,6 +397,13 @@ Deno.serve(async (req) => {
       const SMTP_PASSWORD = Deno.env.get('SMTP_PASSWORD');
       const SMTP_FROM_NAME = Deno.env.get('SMTP_FROM_NAME') || 'TeMAX';
 
+      for (var ai = 0; ai < attachments.length; ai++) {
+        var att = attachments[ai] || {};
+        if (!isCleanBase64(att.content)) {
+          return Response.json({ ok: false, data: { message: 'Прикаченият файл „' + cleanAttachmentName(att.filename) + '“ не е чист base64 (без префикс data:, интервали и нови редове).' } }, { headers: CORS, status: 400 });
+        }
+      }
+
       if (!SMTP_USER || !SMTP_PASSWORD) {
         return Response.json({ ok: false, data: { message: 'SMTP не е конфигуриран. Липсват SMTP_USER/SMTP_PASSWORD в Edge Function Secrets.' } }, { headers: CORS, status: 500 });
       }
@@ -336,12 +436,18 @@ Deno.serve(async (req) => {
             base64Part('text/plain; charset="utf-8"', htmlToPlainText(html)),
             base64Part('text/html; charset="utf-8"', html),
           ],
+          /* mimePart - готовата част, пратена с един запис (виж
+             attachmentMimePart и vendor/denomailer@1.6.0/README.md).
+             filename/content остават, защото denomailer сканира content
+             за граници; base64 няма '-', тоест не влияе. */
           attachments: attachments.map(function (a: { filename: string; content: string }) {
+            var ct = guessContentType(a.filename || '');
             return {
-              filename: a.filename || 'attachment',
+              filename: cleanAttachmentName(a.filename),
               content: a.content,
-              encoding: 'base64',
-              contentType: guessContentType(a.filename || ''),
+              encoding: 'base64' as const,
+              contentType: ct,
+              mimePart: attachmentMimePart(a.filename, ct, a.content),
             };
           }),
         });

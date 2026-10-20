@@ -270,6 +270,7 @@ const TESTS = [
   'email-encoding.test.js',
   'email-subject-rfc2047.test.js',
   'mail-from-name.test.js',
+  'resend-email-attach.test.js',
   'daily-turnover.test.js',
   'kasa-tab-routing.test.js',
   'kasa-ui.test.js',
