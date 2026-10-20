@@ -263,8 +263,11 @@ function rvRender(){
       : '<button class="btn-sm" onclick="rvHistOpenView()">📁 История</button>';
     if(c && !rvRegionalAcc()){
       h += '<button class="btn-sm" onclick="rvExportCampaign()">📥 Excel — кампания</button>';
-      h += '<button class="btn-sm" onclick="rvMm41()">📄 MM41 — нови кодове</button>';
-      if(rvIsCO()) h += '<button class="btn-sm" onclick="rvMm41Done()">✔ Кодовете са създадени в SAP</button>';
+      /* MM41 и VK11 — само ЦО (19.10.2026); Снабдяването има прегледа и двата Excel-а. */
+      if(rvIsCO()){
+        h += '<button class="btn-sm" onclick="rvMm41()">📄 MM41 — нови кодове</button>';
+        h += '<button class="btn-sm" onclick="rvMm41Done()">✔ Кодовете са създадени в SAP</button>';
+      }
     }
   } else if(!rvIsStoreUser()){
     var opts = rvStoreOptions();
@@ -279,7 +282,11 @@ function rvRender(){
   h += '</div>';
   if(c && c.note) h += '<div style="font-size:12px;color:#64748b;margin-top:6px;">📝 ' + esc(c.note) + '</div>';
   if(c && !rvCampaignOpenNow(c)){
-    h += '<div style="font-size:12px;color:#b45309;margin-top:6px;">' + (c.status === 'open' ? 'Извън прозореца на кампанията — бланката е само за четене.' : 'Кампанията е затворена — само за четене.') + '</div>';
+    /* ЦО (19.10.2026): прозорецът спира обектите, не обработката от ЦО. */
+    var winTxt = rvIsCoViewer()
+      ? (c.status === 'open' ? 'Кампанията е извън прозореца' : 'Кампанията е затворена') + ' — обектите не могат да подават. Обработката от ЦО продължава.'
+      : (c.status === 'open' ? 'Извън прозореца на кампанията — бланката е само за четене.' : 'Кампанията е затворена — само за четене.');
+    h += '<div id="rv-window" style="font-size:12px;color:#b45309;margin-top:6px;">' + winTxt + '</div>';
   }
   if(rvShowSchedule && rvIsCO()) h += rvScheduleHtml();
   h += '</div>';
@@ -775,20 +782,21 @@ function rvNotify(what){
 
 /* ─── Износ: „Изтегли моята бланка" ───────────────────── */
 /* 13-те колони. От етап 3а: МЕ — по SAP (rvSapUnit), количествата — до 3
-   знака, „Тотал преоценка" = ПРЕХВЪРЛЕНОТО (co_qty; ако го няма — qty) ×
-   цената на преоценения код (решение на сесията 15.10.2026: прехвърленото
-   е количеството, което реално става с нова цена). */
+   знака, „Тотал преоценка" = ПРЕХВЪРЛЕНОТО (co_qty) × цената на преоценения
+   код (решение на сесията 15.10.2026: прехвърленото е количеството, което
+   реално става с нова цена). Без co_qty → празно, БЕЗ падане към qty
+   (19.10.2026) — иначе се разминаваше с TOTAL в „Общо". */
 function rvItemExportRow(store, it){
   var no = rvStoreNo(store);
   var shop = no ? Number(no) : store;
   var qty = rvRound3(it.qty == null ? 0 : Number(it.qty));
-  var moved = it.co_qty == null ? qty : rvRound3(Number(it.co_qty));
+  var moved = it.co_qty == null || it.co_qty === '' ? null : rvRound3(Number(it.co_qty));
   var std = it.std_price == null ? null : Number(it.std_price);
   var sale = it.sale_price == null ? null : Number(it.sale_price);
   return [shop, it.sap_code, it.product_name || '', qty, rvSapUnit(it.unit).unit, it.store_comment || '',
     std == null ? '' : std, it.proposed_price == null ? '' : Number(it.proposed_price),
     it.new_sap_code || '', sale == null ? '' : sale, it.co_comment || '',
-    std == null ? '' : rvRound2(qty * std), sale == null ? '' : rvRound2(moved * sale)];
+    std == null ? '' : rvRound2(qty * std), sale == null || moved == null ? '' : rvRound2(moved * sale)];
 }
 function rvExportAoa(store, items){
   store = store || rvStore;
@@ -831,25 +839,30 @@ function rvCloseCampaign(){
    - код = „8" + sap_code, допълнен с нули до 6 цифри (14557 → 8014557,
      103125 → 8103125); вече /^8\d{6}$/ (повторна преоценка) → същият код;
    - цена = proposed_price на обекта; прехвърлено = qty.
-   „Готово за обект" → status 'processed' + известие САМО до този обект
-   (push + имейл с прикачена 13-колонна бланка, копие до
-   app_settings.revaluation_done_cc). „Отключи бланката" → обратно 'draft'. */
+   „Готово за обект" → status 'processed' + известие САМО до управителя на
+   обекта (role manager, active; push + имейл с прикачена 13-колонна бланка),
+   копие до app_settings.revaluation_done_cc — ВИНАГИ; без имейл на
+   управител копието става основен получател (19.10.2026). „Отключи бланката" → обратно 'draft'. */
 
 var rvCoOpen = false;     /* ЦО: false = списъкът на обектите, true = бланката на rvStore */
 var rvCoRows = [];        /* [{store, sub, n}] за списъка */
 var rvCoSeq = 0;
 /* МЕ по SAP: главни, без точка. Само тези се свеждат; друго остава както е и
-   редът се маркира в екрана на ЦО. Стойности, които вече са главни без точка
-   (БР, M2, КАШ от ZSTOCK), се приемат за SAP.
+   редът се маркира в екрана на ЦО. Валидни са САМО стойностите от списъка
+   RV_SAP_VALUES (и ключовете на картата) — от 19.10.2026 произволни главни
+   букви/цифри (L, KG, M, TOM) вече НЕ минават автоматично, а получават
+   „МЕ не е по SAP".
    Източник: EXPORT.XLSX от Елица, 16.10.2026, колона БМЕ (107 353 артикула).
    15 стойности в SAP: БР, M2, ЛМ, ПАК, ЧФТ, ККТ, БЛИ, КГ, КУТ, КАШ, ТОП, РОЛ,
-   ТОН, M3 (+ TOM — правописна грешка на 1 код, 97573). M2 и M3 са с ЛАТИНСКО
-   M, всички останали — кирилица. В SAP няма L, KG, M — не ги връщай. */
+   ТОН, M3 (+ TOM — правописна грешка на 1 код, 97573; не се приема). M2 и M3
+   са с ЛАТИНСКО M, всички останали — кирилица. В SAP няма L, KG, M — не ги
+   връщай. */
 var RV_SAP_UNITS = { 'бр.': 'БР', 'бр': 'БР', 'кв.м': 'M2', 'кв.м.': 'M2', 'м2': 'M2',
   'л.м': 'ЛМ', 'л.м.': 'ЛМ', 'лм': 'ЛМ', 'м': 'ЛМ', 'пакет': 'ПАК', 'пак': 'ПАК',
   'чифт': 'ЧФТ', 'чфт': 'ЧФТ', 'ккт': 'ККТ', 'к-кт': 'ККТ', 'бли': 'БЛИ', 'блистер': 'БЛИ',
   'кг': 'КГ', 'кут': 'КУТ', 'кутия': 'КУТ', 'кашон': 'КАШ', 'каш': 'КАШ', 'топ': 'ТОП',
   'рол': 'РОЛ', 'ролка': 'РОЛ', 'тон': 'ТОН', 'm3': 'M3', 'м3': 'M3' };
+var RV_SAP_VALUES = ['БР', 'M2', 'ЛМ', 'ПАК', 'ЧФТ', 'ККТ', 'БЛИ', 'КГ', 'КУТ', 'КАШ', 'ТОП', 'РОЛ', 'ТОН', 'M3'];
 
 function rvIsCoViewer(){ return rvIsCO() || (!!currentUser && currentUser.role === 'supply'); }
 function rvRound3(x){
@@ -861,7 +874,7 @@ function rvSapUnit(u){
   var t = String(u == null ? '' : u).trim();
   var k = t.toLowerCase();
   if(Object.prototype.hasOwnProperty.call(RV_SAP_UNITS, k)) return { unit: RV_SAP_UNITS[k], ok: true };
-  if(t && /^[A-ZА-Я0-9]+$/.test(t)) return { unit: t, ok: true };
+  if(RV_SAP_VALUES.indexOf(t) >= 0) return { unit: t, ok: true };
   return { unit: t, ok: false };
 }
 function rvCoProposeCode(sap){
@@ -996,18 +1009,25 @@ function rvCoAcceptAll(){
 function rvCoButtonsHtml(){
   if(!rvIsCoViewer() || !rvSub) return '';
   var h = '';
+  if(!rvIsCO()) return h;
   if(!rvSub.no_items && rvItems.length){
     h += '<label style="font-size:12px;color:#64748b;margin-left:6px;">Валидна от</label><input id="rv-vk-from" type="date" value="' + today() + '">' +
       '<button class="btn-sm" onclick="rvVk11()">📄 VK11 — ' + esc(rvStore) + '</button>';
   }
-  if(!rvIsCO()) return h;
   if(rvCoCanEdit() && rvItems.some(function(it){ return Object.keys(rvCoProposal(it)).length > 0; })){
     h += '<button class="btn-sm" onclick="rvCoAcceptAll()">✔ Приеми предложените за всички</button>';
   }
   if(rvSub.status === 'submitted') h += '<button class="btn-sm" onclick="rvCoDone()" style="background:#16a34a;color:#fff;">✅ Готово за обект</button>';
-  if(rvSub.status === 'submitted' || rvSub.status === 'processed') h += '<button class="btn-sm" onclick="rvCoUnlock()">🔓 Отключи бланката</button>';
+  if(rvSub.status === 'submitted' || rvSub.status === 'processed'){
+    h += rvCoCanUnlock()
+      ? '<button class="btn-sm" onclick="rvCoUnlock()">🔓 Отключи бланката</button>'
+      : '<button class="btn-sm" onclick="rvCoUnlock()" disabled title="' + escAttr(RV_UNLOCK_NO) + '">🔓 Отключи бланката</button>';
+  }
   return h;
 }
+/* Отключване има смисъл само ако обектът може да подаде наново (19.10.2026). */
+var RV_UNLOCK_NO = 'Обектът не може да подаде наново — кампанията е извън прозореца или Преоценка е скрита за обектите';
+function rvCoCanUnlock(){ return rvStoresOn === true && rvCampaignOpenNow(rvCampaign()); }
 function rvCoDone(){
   if(!rvIsCO() || !rvSub || rvSub.status !== 'submitted') return Promise.resolve(false);
   rvBad = {};
@@ -1017,12 +1037,13 @@ function rvCoDone(){
       var p = [];
       if(!String(it.new_sap_code || '').trim()) p.push('няма преоценен код');
       if(!(Number(it.sale_price) > 0)) p.push('няма цена на преоценения код');
+      if(it.co_qty == null || it.co_qty === '') p.push('няма прехвърлено количество');
       if(p.length){ rvBad[it.id] = p; n++; }
     });
   }
   if(n){
     rvRender();
-    toast(n + (n === 1 ? ' ред е' : ' реда са') + ' без записан код/цена — „Приеми предложените“ или попълни. Нищо не е обработено.', '#dc2626');
+    toast(n + (n === 1 ? ' ред е' : ' реда са') + ' без записан код/цена/прехвърлено — „Приеми предложените“ или попълни. Нищо не е обработено.', '#dc2626');
     return Promise.resolve(false);
   }
   if(!confirm('Готово за ' + rvStore + '? Обектът ще получи известие и бланката се заключва.')) return Promise.resolve(false);
@@ -1037,8 +1058,10 @@ function rvCoDone(){
 }
 function rvCoUnlock(){
   if(!rvIsCO() || !rvSub || (rvSub.status !== 'submitted' && rvSub.status !== 'processed')) return Promise.resolve(false);
+  if(!rvCoCanUnlock()){ toast(RV_UNLOCK_NO, '#dc2626'); return Promise.resolve(false); }
   if(!confirm('Отключване на бланката на ' + rvStore + '? Обектът пак ще може да редактира и да подаде наново.')) return Promise.resolve(false);
-  var patch = { status: 'draft', reopened_at: new Date().toISOString(), reopened_by: currentUser.display_name || currentUser.email, processed_at: null, processed_by: null };
+  /* no_items: false — бланка „нямат" става обикновена чернова (19.10.2026). */
+  var patch = { status: 'draft', no_items: false, reopened_at: new Date().toISOString(), reopened_by: currentUser.display_name || currentUser.email, processed_at: null, processed_by: null };
   return sbPatch('revaluation_submissions', 'id=eq.' + rvSub.id, patch).then(function(res){
     if(!res.ok){ toast('Бланката не е отключена: ' + sbErrMsg(res), '#dc2626'); return false; }
     Object.keys(patch).forEach(function(k){ rvSub[k] = patch[k]; });
@@ -1073,11 +1096,12 @@ function rvCoNotifyDone(store, sub, items){
   var text = 'Преоценка · ' + store + ' · ' + (c ? c.title : '') + ': обработена';
   var warns = [];
   return Promise.all([
-    sbGetOk('users', 'active=eq.true&store_name=eq.' + encodeURIComponent(store) + '&select=display_name,email'),
+    sbGetOk('users', 'active=eq.true&role=eq.manager&store_name=eq.' + encodeURIComponent(store) + '&select=display_name,email,role,active'),
     sbGetOk('app_settings', 'key=eq.revaluation_done_cc&select=key,value'),
     sub.no_items || !items.length ? Promise.resolve(null) : rvXlsxBase64(store, items)
   ]).then(function(r){
-    var users = r[0].ok ? r[0].rows : [];
+    /* Само управителят на обекта (19.10.2026) — kasa / sklad не получават. */
+    var users = (r[0].ok ? r[0].rows : []).filter(function(u){ return u && u.active === true && u.role === 'manager'; });
     if(!r[0].ok) warns.push('получателите не се прочетоха');
     var ccRow = r[1].ok ? r[1].rows.filter(function(x){ return x && x.key === 'revaluation_done_cc'; })[0] : null;
     var cc = ccRow && ccRow.value ? String(ccRow.value).split(/[,;\s]+/).filter(Boolean) : [];
@@ -1089,22 +1113,25 @@ function rvCoNotifyDone(store, sub, items){
     else {
       html += '<table border="1" cellpadding="4" style="border-collapse:collapse;font-size:12px;"><tr><th>Код</th><th>Описание</th><th>Прехвърлено</th><th>Преоценен код</th><th>Цена</th></tr>' +
         items.map(function(it){
-          return '<tr><td>' + esc(it.sap_code) + '</td><td>' + esc(it.product_name) + '</td><td>' + esc(rvFmtQty(it.co_qty == null ? it.qty : it.co_qty)) + '</td><td>' + esc(it.new_sap_code) + '</td><td>' + esc(rvFmt(it.sale_price)) + '</td></tr>';
+          return '<tr><td>' + esc(it.sap_code) + '</td><td>' + esc(it.product_name) + '</td><td>' + esc(rvFmtQty(it.co_qty)) + '</td><td>' + esc(it.new_sap_code) + '</td><td>' + esc(rvFmt(it.sale_price)) + '</td></tr>';
         }).join('') + '</table>';
       if(r[2]) html += '<p>Бланката е прикачена (13 колони).</p>';
       else { html += '<p>Файлът е в портала: Ревизии и преоценка → Преоценка.</p>'; warns.push('без прикачен файл'); }
     }
     html += '<p>Обработи: ' + esc(currentUser.display_name || currentUser.email) + '</p>';
     var extra = {};
-    if(cc.length) extra.cc = cc;
+    /* Копието тръгва ВИНАГИ: без имейл на управител cc става основен получател. */
+    var to = emails;
+    if(cc.length && emails.length) extra.cc = cc;
+    else if(cc.length){ to = cc; warns.push('обектът няма имейл на управител — пратено само до копието'); }
     if(r[2]) extra.attachments = [{ filename: 'preocenka-' + (rvStoreNo(store) || 'obekt') + '-' + ((c && c.starts_on) || today()) + '.xlsx', content: r[2] }];
     var jobs = [
       names.length && typeof pushToPeople === 'function' ? pushToPeople(names, 'Преоценка', text) : Promise.resolve({ ok: false, none: true }),
-      emails.length && typeof sendEmail === 'function' ? sendEmail(emails, text, html, extra) : Promise.resolve({ ok: false, none: true })
+      to.length && typeof sendEmail === 'function' ? sendEmail(to, text, html, extra) : Promise.resolve({ ok: false, none: true })
     ];
     return Promise.all(jobs).then(function(res){
       if(!res[0] || !res[0].ok) warns.push(res[0] && res[0].none ? 'няма получатели за push' : 'push не тръгна');
-      if(!res[1] || !res[1].ok) warns.push(res[1] && res[1].none ? 'обектът няма имейли' : 'имейлът не тръгна');
+      if(!res[1] || !res[1].ok) warns.push(res[1] && res[1].none ? 'обектът няма имейл на управител и няма копие' : 'имейлът не тръгна');
     });
   }).catch(function(e){ warns.push('грешка: ' + ((e && e.message) || e)); })
     .then(function(){
@@ -1154,7 +1181,7 @@ function rvExportCampaign(){
           used[nm] = 1;
           XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rvExportAoa(st, byStore[st])), nm);
           byStore[st].forEach(function(it){
-            var moved = it.co_qty == null ? null : rvRound3(Number(it.co_qty));
+            var moved = it.co_qty == null || it.co_qty === '' ? null : rvRound3(Number(it.co_qty));
             var sale = it.sale_price == null ? null : Number(it.sale_price);
             var t = moved == null || sale == null ? '' : rvRound2(moved * sale);
             if(t !== '') sum += t;
@@ -1482,7 +1509,7 @@ function rvMm41Aoa(rows){
   return [RV_MM41_HEADERS.slice()].concat(rows.map(function(x){ return [x.new_sap_code, x.maktx, x.unit, x.std == null ? '' : x.std]; }));
 }
 function rvMm41(){
-  if(!rvIsCoViewer() || rvRegionalAcc()) return Promise.resolve(false);
+  if(!rvIsCO() || rvRegionalAcc()) return Promise.resolve(false);
   return rvMm41Collect().then(function(res){
     if(!res.ok){ toast('Данните са непълни — MM41 НЕ е направен', '#dc2626'); return false; }
     if(!res.rows.length){ toast('Няма нови кодове за MM41'); return false; }
@@ -1534,17 +1561,21 @@ function rvVk11Aoa(items, fromIso){
   }));
 }
 function rvVk11(){
-  if(!rvIsCoViewer() || !rvSub) return false;
+  if(!rvIsCO() || !rvSub) return false;
   var fromIso = v('rv-vk-from') || today();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(fromIso)){ toast('Невалидна дата „Валидна от"', '#dc2626'); return false; }
   var aoa = rvVk11Aoa(rvSub.no_items ? [] : rvItems, fromIso);
   if(aoa.length < 2){ toast('Няма редове с преоценен код и цена — VK11 НЕ е направен', '#dc2626'); return false; }
   var no = rvStoreNo(rvStore);
+  /* МЕ не по SAP — предупреждение като при MM41, файлът пак се прави (20.10.2026).
+     rvSapUnit е идемпотентна: SAP стойност остава ок, несведената — не. */
+  var bad = aoa.slice(1).filter(function(r){ return !rvSapUnit(r[1]).ok; }).map(function(r){ return r[0] + ' (' + (r[1] || 'празна') + ')'; });
   rvWithXlsx(function(){
     var wb = XLSX.utils.book_new();
     /* Date клетка → Excel сериен номер с формат за дата (като в шаблона), не текст. */
     XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa, { dateNF: 'dd.mm.yyyy' }), RV_VK11_SHEET);
     XLSX.writeFile(wb, 'VK11-' + (no || 'obekt') + '-' + fromIso + '.xlsx');
+    toast('VK11: ' + (aoa.length - 1) + ' реда' + (bad.length ? ' · МЕ не е по SAP: ' + bad.join(', ') : ''), bad.length ? '#d97706' : undefined);
   });
   return true;
 }

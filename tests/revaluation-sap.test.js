@@ -163,7 +163,7 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
     realClick(f.w, btn(mod(f), 'Кодовете са създадени в SAP')); await ticks(8);
     ok('провален POST → червен toast', f.calls.toast.some(t => t.indexOf('Кодовете НЕ са записани') >= 0));
     const s = env({ user: { email: 'sn@temax.bg', display_name: 'Снаб', role: 'supply', store_name: 'Централен офис' } }); await open(s);
-    ok('supply: MM41 има, „създадени“ няма', !!btn(mod(s), 'MM41') && !btn(mod(s), 'Кодовете са създадени'));
+    ok('supply: без MM41 и без „създадени“ (19.10.2026 — само ЦО)', !btn(mod(s), 'MM41') && !btn(mod(s), 'Кодовете са създадени'));
   }
 
   section('3. Баджове на реда в бланката на ЦО');

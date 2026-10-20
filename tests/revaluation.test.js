@@ -458,7 +458,7 @@ async function imported(o) {
   section('12. Износ — 13 колони в точния ред');
   {
     const h = await imported();
-    h.w.rvItems[0].sale_price = 9.99; h.w.rvItems[0].new_sap_code = '8053531';
+    h.w.rvItems[0].sale_price = 9.99; h.w.rvItems[0].new_sap_code = '8053531'; h.w.rvItems[0].co_qty = 56;
     realClick(h.w, btn(mod(h), 'Изтегли моята бланка'));
     const want = ['Магазин', 'Код', 'Описание на материал', 'Количество', 'Мерна единица', 'Коментар Обект',
       'Стандартна прод. цена', 'Предложение за цена', 'Преоценен код', 'Цена преоценен код', 'Коментар Ели',
@@ -467,7 +467,7 @@ async function imported(o) {
     const r = h.aoa && h.aoa.find(x => x[1] === '53531');
     ok('Магазин = 14 (номер)', r && r[0] === 14);
     ok('L = qty × std (56 × 17,79 = 996,24), стойност', r && r[11] === 996.24, r && r[11]);
-    ok('M = qty × sale_price (56 × 9,99 = 559,44)', r && r[12] === 559.44, r && r[12]);
+    ok('M = co_qty × sale_price (56 × 9,99 = 559,44)', r && r[12] === 559.44, r && r[12]);
     ok('I/J от базата', r && r[8] === '8053531' && r[9] === 9.99);
     const r2 = h.aoa.find(x => x[1] === '92836');
     ok('без sale_price → M празно', r2 && r2[12] === '' && r2[9] === '');

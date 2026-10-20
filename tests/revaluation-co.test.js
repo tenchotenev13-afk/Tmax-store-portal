@@ -36,8 +36,8 @@ const ITEMS = [
 const ELITSA = { email: 'e.gurova@temax.bg', display_name: 'Елица Гюрова', role: 'admin', store_name: 'Централен офис' };
 const KARDZHALI = { email: 'managerkardjali@temax.bg', display_name: 'Управител Кърджали', role: 'manager', store_name: 'Кърджали' };
 const USERS = [
-  { email: 'managerkardjali@temax.bg', display_name: 'Управител Кърджали', store_name: 'Кърджали', active: true },
-  { email: 'sklad.kardjali@temax.bg', display_name: 'Склад Кърджали', store_name: 'Кърджали', active: true },
+  { email: 'managerkardjali@temax.bg', display_name: 'Управител Кърджали', role: 'manager', store_name: 'Кърджали', active: true },
+  { email: 'sklad.kardjali@temax.bg', display_name: 'Склад Кърджали', role: 'sklad', store_name: 'Кърджали', active: true },
   { email: 'e.gurova@temax.bg', display_name: 'Елица Гюрова', store_name: 'Централен офис', active: true, is_regional: false, assigned_stores: [] },
   { email: 'reg.kardzhali@temax.bg', display_name: 'Регионален Кърджали', store_name: 'Централен офис', active: true, is_regional: true, assigned_stores: ['Кърджали'] }
 ];
@@ -171,10 +171,10 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     realClick(h.w, btn(mod(h), 'Готово за обект')); await ticks(10);
     const sp = h.calls.patch.find(x => x.table === 'revaluation_submissions');
     ok('PATCH status processed + processed_at/by', sp && sp.body.status === 'processed' && !!sp.body.processed_at && sp.body.processed_by === 'Елица Гюрова');
-    ok('push до потребителите на обекта', h.push.length === 1 && h.push[0].names.join(',') === 'Управител Кърджали,Склад Кърджали', h.push[0] && h.push[0].names.join(','));
+    ok('push само до управителя на обекта (19.10.2026)', h.push.length === 1 && h.push[0].names.join(',') === 'Управител Кърджали', h.push[0] && h.push[0].names.join(','));
     ok('само обектът — Елица не е сред получателите', h.push[0] && h.push[0].names.indexOf('Елица Гюрова') < 0);
     const m = h.mail[0];
-    ok('имейл до имейлите на обекта', m && m.to.join(',') === 'managerkardjali@temax.bg,sklad.kardjali@temax.bg');
+    ok('имейл само до управителя на обекта', m && m.to.join(',') === 'managerkardjali@temax.bg', m && m.to.join(','));
     ok('тема „Преоценка · Кърджали · <кампания>: обработена“', m && m.subj === 'Преоценка · Кърджали · Тестова преоценка Кърджали 10.2026: обработена');
     ok('копие до revaluation_done_cc', m && JSON.stringify(m.extra.cc) === '["t.tenev@temax.bg"]');
     ok('attachment в payload: xlsx, base64', m && m.extra.attachments && m.extra.attachments[0].content === 'QkFTRTY0' && /^preocenka-8-.*\.xlsx$/.test(m.extra.attachments[0].filename), JSON.stringify(m && m.extra.attachments));
