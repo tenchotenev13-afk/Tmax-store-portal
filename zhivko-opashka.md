@@ -14,6 +14,8 @@
 
 ## Чака изпращане
 
+## Изпратено 21.10.2026
+
 (в базата от миграциите 20261021050541_minusi_schema и 20261021050606_minusi_seed, приложени 21.10.2026)
 - 20.10 · нова таблица minus_plants — plant text PK, store_name text NOT NULL, role text NOT NULL (стойности 'доставка' / 'продажби' / 'наличност')
 - 20.10 · нова таблица minus_uploads — id uuid PK default gen_random_uuid(), uploaded_at timestamptz NOT NULL default now(), uploaded_by text NULL, file_name text NULL, rows_total int NULL, rows_new int NULL, date_from date NULL, date_to date NULL
