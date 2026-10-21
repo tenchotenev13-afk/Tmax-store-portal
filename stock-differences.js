@@ -1932,6 +1932,17 @@ function sdModalHtml() {
     coreField('Код на материал (SAP)','sd-mat',r.material_code,'напр. 34989')+
     coreField('Количество','sd-qty',r.quantity,'',storeLocked?'':'number')+
     '</div>'+
+    /* Корекция на количествата по бланката от ЦО (Цвети, 20-21.10.2026) -
+       и след решение, защото имейлът до доставчика тръгва след него. Само ред
+       от ДОСТАВЧИКОВА бланка: картата, имейлът и печатът четат двете колони
+       по бланка, а ред без бланка („+ Добави ръчно") няма къде да ги покаже.
+       Магазинът след решение не ги вижда като полета (storeLocked). */
+    ((isEdit && r.report_id && !storeLocked && sdLineDirection(r)==='supplier')
+      ? (function(){ var ql=diffQtyLabels('supplier'); return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
+          coreField(ql.formReal,'sd-qty-real',r.quantity_received,'','number')+
+          coreField(ql.formSupDoc,'sd-qty-sup',r.quantity_supplier_doc,'','number')+
+        '</div>'; })()
+      : '')+
 
     '<label class="fl">Наименование *</label>'+
     (storeLocked
@@ -2317,6 +2328,16 @@ function submitSD(sync) {
     sdQtyEl.focus();
     return;
   }
+  /* Реално получено / По стокова - само ако модалът ги е показал (ред от
+     доставчикова бланка, без storeLocked). Същата проверка за номер на документ. */
+  var sdQtyRealEl=document.getElementById('sd-qty-real'), sdQtySupEl=document.getElementById('sd-qty-sup');
+  var sdQtyBad=[[sdQtyRealEl,'Реално получено'],[sdQtySupEl,'По стокова на доставчика']].filter(function(p){ return p[0] && diffQtyLooksLikeDocNum(p[0].value); })[0];
+  if(sdQtyBad){
+    var qtyMsg2=diffQtyDocNumMsg(sdQtyBad[0].value);
+    toast(qtyMsg2.charAt(0).toUpperCase()+qtyMsg2.slice(1)+' в „'+sdQtyBad[1]+'"','#dc2626');
+    sdQtyBad[0].focus();
+    return;
+  }
   var data={
     store_name:     store,
     supplier:       document.getElementById('sd-supplier').value,
@@ -2331,6 +2352,8 @@ function submitSD(sync) {
     resolution_comment: document.getElementById('sd-ctrl-comment').value,
     created_by:     currentUser.display_name||currentUser.email
   };
+  if(sdQtyRealEl) data.quantity_received = sdQtyRealEl.value;
+  if(sdQtySupEl)  data.quantity_supplier_doc = sdQtySupEl.value;
   /* Само ЦО пише „Поръчка за връщане". Магазинът не праща ключа изобщо -
      иначе запис от него би изтрил номера, който Цвети е въвела. */
   var retOrderEl=document.getElementById('sd-return-order');
@@ -3577,6 +3600,11 @@ function openSDCorrectModal(lineId){
     '<div><label class="fl">'+sdcQty.doc+'</label><input type="number" step="0.001" class="fi" id="sdc-qty" value="'+(l.quantity!=null?l.quantity:'')+'"></div>'+
     '<div><label class="fl">'+sdcQty.real+'</label><input type="number" step="0.001" class="fi" id="sdc-qty-real" value="'+(l.quantity_received!=null?l.quantity_received:'')+'"></div>'+
     '</div>'+
+    /* „По стокова на доставчика" - само при доставчик (Цвети, 20-21.10.2026:
+       обектите понякога трябва да я коригират, а досега не можеха). */
+    (sdLineDirection(l)==='supplier'
+      ? '<label class="fl">'+sdcQty.formSupDoc+'</label><input type="number" step="0.001" class="fi" id="sdc-qty-sup" value="'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'')+'">'
+      : '')+
     '<label class="fl">Коментар (по избор)</label>'+
     '<input class="fi" id="sdc-comment" value="'+escVal(l.comment)+'" placeholder="напр. Намерена в склада при ревизия">'+
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:16px;">'+
@@ -3738,10 +3766,11 @@ function submitSDCorrection(){
   }
   var sapEl=document.getElementById('sdc-sap'), nameEl=document.getElementById('sdc-name'),
       qtyEl=document.getElementById('sdc-qty'), qtyRealEl=document.getElementById('sdc-qty-real'),
-      commentEl=document.getElementById('sdc-comment');
+      commentEl=document.getElementById('sdc-comment'),
+      qtySupEl=document.getElementById('sdc-qty-sup'); /* само при доставчик */
   var name=(nameEl.value||'').trim();
   if(!name){toast('Наименованието не може да е празно','#dc2626');return;}
-  var qtyBad=[qtyEl,qtyRealEl].filter(function(el){ return diffQtyLooksLikeDocNum(el.value); })[0];
+  var qtyBad=[qtyEl,qtyRealEl,qtySupEl].filter(function(el){ return el && diffQtyLooksLikeDocNum(el.value); })[0];
   if(qtyBad){
     toast('Корекция: '+diffQtyDocNumMsg(qtyBad.value),'#dc2626');
     qtyBad.focus();
@@ -3755,6 +3784,7 @@ function submitSDCorrection(){
     comment: commentEl.value,
     store_corrected_at: new Date().toISOString()
   };
+  if(qtySupEl) data.quantity_supplier_doc = qtySupEl.value;
   sdCleanPayload(data);
   sdKeepScroll(current?current.report_id:null);
   sbPatch('stock_differences','id=eq.'+sdCorrectLineId,data).then(function(res){

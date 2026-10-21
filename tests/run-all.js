@@ -224,6 +224,7 @@ const TESTS = [
   'diff-return-order.test.js',
   'diff-order-required.test.js',
   'sd-melki-oct21.test.js',
+  'sd-korekcia-qty.test.js',
   'diff-order-wrong-receipt.test.js',
   'diff-form-qty-labels.test.js',
   'diff-excel-export.test.js',
