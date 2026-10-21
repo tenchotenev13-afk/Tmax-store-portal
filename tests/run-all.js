@@ -219,6 +219,7 @@ const TESTS = [
   'sd-wrong-receipt-storno.test.js',
   'diff-email-pending.test.js',
   'diff-email-after-skip.test.js',
+  'diff-email-order-phone.test.js',
   'diff-return-order.test.js',
   'diff-order-required.test.js',
   'sd-melki-oct21.test.js',

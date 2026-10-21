@@ -4500,11 +4500,28 @@ function diffEmailJpgName(name){
   return String(name||'снимка').replace(/\.[^.]+$/,'') + '.jpg';
 }
 
+/* Телефонът на Цветелина Тенева под подписа на ВСЕКИ имейл до доставчик,
+   който и да го праща — отговорите на доставчиците отиват при нея (решение
+   21.10.2026). Само при посока доставчик. */
+var DIFF_EMAIL_PHONE = '+359 884733836';
+/* Поръчката на бланката за писмото до доставчик (Цвети, 20-21.10.2026):
+   доставчиците не познават входящата доставка (180…), а само поръчката, и
+   всяка бланка е по една поръчка. Връща order_number, ако всички непразни
+   по редовете са еднакви и валидни (diffOrderNumValid); иначе '' — тогава
+   темата и текстът остават с входящата. Едно място за темата и за текста. */
+function diffReportOrderNum(rep,lines){
+  if(!rep || rep.direction!=='supplier') return '';
+  var ords=(lines||[]).map(function(l){ return String(l.order_number||'').trim(); }).filter(Boolean);
+  if(!ords.length || !diffOrderNumValid(ords[0])) return '';
+  return ords.every(function(o){ return o===ords[0]; }) ? ords[0] : '';
+}
 function diffEmailBodyHtml(rep,lines,note){
+  var ord=diffReportOrderNum(rep,lines);
   var h='<div style="font-family:Arial,sans-serif;font-size:14px;color:#1f2937;">';
   h+='<p>Здравейте,</p>';
   h+='<p>Установени са разлики при '+diffDirEmailPhrase(rep.direction)+' — '+esc(rep.counterpart||'')+
-     (rep.no_document?', документ: няма (стока без документ)':(rep.document_number?', документ №'+esc(rep.document_number):''))+
+     /* „Без документ" + поръчка → и двете: доставчикът познава само поръчката. */
+     (rep.no_document?', документ: няма (стока без документ)'+(ord?', поръчка №'+esc(ord):''):(ord?', поръчка №'+esc(ord):(rep.document_number?', документ №'+esc(rep.document_number):'')))+
      (rep.doc_date?', дата '+fmtDate(rep.doc_date):'')+'.</p>';
   var isSupplier=rep.direction==='supplier';
   h+='<table style="width:100%;border-collapse:collapse;font-size:13px;margin:14px 0;">';
@@ -4540,13 +4557,16 @@ function diffEmailBodyHtml(rep,lines,note){
      предварителния преглед, И самото изпращане, тоест преглед, различен от
      изпратеното, е по-лошо от изтичането. Заковано в
      tests/diff-email-internal-comment.test.js. */
-  h+='<p>Поздрави,<br>'+esc(currentUser.display_name||currentUser.email)+'<br>ТеМАХ</p>';
+  h+='<p>Поздрави,<br>'+esc(currentUser.display_name||currentUser.email)+'<br>ТеМАХ'+
+     (rep.direction==='supplier'?'<br>Тел: '+esc(DIFF_EMAIL_PHONE):'')+'</p>';
   h+='</div>';
   return h;
 }
 
 function diffEmailModalHtml(rep,lines){
-  var subject=(rep.document_number?rep.document_number+' - ':'')+'РАЗЛИКИ ('+esc(rep.store_name||'')+')';
+  /* Поръчката вместо входящата при доставчик — същата функция като текста. */
+  var subjNum=diffReportOrderNum(rep,lines)||rep.document_number;
+  var subject=(subjNum?subjNum+' - ':'')+'РАЗЛИКИ ('+esc(rep.store_name||'')+')';
   return '<div class="bov" id="diff-email-ov"><div class="bmod" style="width:680px;max-height:90vh;overflow-y:auto;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
     '<div style="font-size:16px;font-weight:700;">✉️ Изпрати имейл до '+diffDirEmailTo(rep.direction)+'</div>'+
