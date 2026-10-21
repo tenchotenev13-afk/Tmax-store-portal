@@ -412,7 +412,8 @@ const TESTS = [
   'nav-tabs-css.test.js',
   'table-scroll.test.js',
   'recurring-store-hints.test.js',
-  'banner-split.test.js'
+  'banner-split.test.js',
+  'handover-structure.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
