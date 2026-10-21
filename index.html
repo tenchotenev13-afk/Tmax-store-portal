@@ -416,12 +416,13 @@ OneSignalDeferred.push(async function(OneSignal) {
     </div>
   </div>
 
-  <!-- Под-лента на „Ревизии и преоценка“ (tab-revaluation). Нов под-таб (напр.
-       „Минуси (953)“) = нов бутон тук + нов mod-* — без пренареждане. -->
+  <!-- Под-лента на „Ревизии и преоценка“ (tab-revaluation). Нов под-таб = нов
+       бутон тук + нов mod-* — без пренареждане. „➖ Минуси“ — minusi.js (20.10.2026). -->
   <div id="rev-subnav" class="no-print" style="display:none;max-width:1300px;margin:12px auto 0;width:100%;padding:0 16px;">
     <div style="display:flex;gap:8px;">
       <button id="rvs-schedule" class="filter-btn" onclick="showModule('rev-schedule')">📅 График ревизии</button>
       <button id="rvs-revaluation" class="filter-btn" onclick="showModule('revaluation')" style="display:none;">🏷️ Преоценка</button>
+      <button id="rvs-minusi" class="filter-btn" onclick="showModule('minusi')" style="display:none;">➖ Минуси</button>
     </div>
   </div>
 
@@ -543,6 +544,7 @@ OneSignalDeferred.push(async function(OneSignal) {
   <div id="mod-stock-returns" class="page" style="display:none;"></div>
   <div id="mod-rev-schedule" class="page" style="display:none;"></div>
   <div id="mod-revaluation" class="page" style="display:none;"></div>
+  <div id="mod-minusi" class="page" style="display:none;"></div>
   <div id="mod-stock-diff" class="page" style="display:none;"></div>
 
   <!-- ADMIN -->
@@ -893,5 +895,6 @@ function loadTabOrder(){
 <script src="handbook.js?v=20260707a"></script>
 <script src="revaluation.js"></script>
 <script src="revisions.js"></script>
+<script src="minusi.js"></script>
 </body>
 </html>

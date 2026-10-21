@@ -1804,6 +1804,11 @@ function setupTabsForRole(){
       rvSubBtn.style.display=rvCanSee()?'':'none';
     });
   }
+  /* Под-бутон „➖ Минуси“ (minusi.js) — по роля: обект (manager/sklad) и
+     контролинг (admin/accounting/controlling). НЕ по app_settings.minus_stores:
+     обект извън списъка вижда бутона и вътре „още не е включен“. */
+  var mnSubBtn=document.getElementById('rvs-minusi');
+  if(mnSubBtn)mnSubBtn.style.display=(typeof mnCanSee==='function'&&mnCanSee())?'':'none';
   var sdTab=document.getElementById('tab-stock-diff');
   if(sdTab)sdTab.style.display='';
   /* Таб Администрация — САМО admin (от 18.10.2026; дотогава и accounting с
@@ -1830,7 +1835,7 @@ function showModule(mod){
     showModule('kasa');
     return;
   }
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist','revaluation','rev-schedule'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist','revaluation','rev-schedule','minusi'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -1866,12 +1871,14 @@ function showModule(mod){
      tab-revaluation и за двата под-таба. */
   var rvSubnav=document.getElementById('rev-subnav');
   if(rvSubnav){
-    rvSubnav.style.display=(mod==='rev-schedule'||mod==='revaluation')?'block':'none';
+    rvSubnav.style.display=(mod==='rev-schedule'||mod==='revaluation'||mod==='minusi')?'block':'none';
     var btnRs=document.getElementById('rvs-schedule'),btnRv=document.getElementById('rvs-revaluation');
     if(btnRs)btnRs.classList.toggle('active',mod==='rev-schedule');
     if(btnRv)btnRv.classList.toggle('active',mod==='revaluation');
+    var btnMn=document.getElementById('rvs-minusi');
+    if(btnMn)btnMn.classList.toggle('active',mod==='minusi');
   }
-  if(mod==='rev-schedule'){var rvMainTab=document.getElementById('tab-revaluation');if(rvMainTab)rvMainTab.classList.add('active');}
+  if(mod==='rev-schedule'||mod==='minusi'){var rvMainTab=document.getElementById('tab-revaluation');if(rvMainTab)rvMainTab.classList.add('active');}
   if(mod==='admin')loadAdmin();
   if(mod==='transport')loadTransport();
   if(mod==='client')loadClientOrders();
@@ -1887,6 +1894,7 @@ function showModule(mod){
   if(mod==='stock-returns')loadStockReturns();
   if(mod==='revaluation'&&typeof loadRevaluation==='function')loadRevaluation();
   if(mod==='rev-schedule'&&typeof loadRevSchedule==='function')loadRevSchedule();
+  if(mod==='minusi'&&typeof loadMinusi==='function')loadMinusi();
   if(mod==='stock-diff')loadStockDiff();
   if(mod==='pallets')loadPallets();
   if(mod==='supply')loadSupply();
