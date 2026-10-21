@@ -185,9 +185,11 @@ const cardBtn = (h, id, label) => card(h, id) ? btn(card(h, id), label) : null;
     ok('за доставчик = reviewed + email_pending',
       (() => { h.w.diffReports[0].direction = 'supplier'; const s = JSON.stringify(h.w.sdReviewedPatch('rep-1'));
         h.w.diffReports[0].direction = 'interstore'; return s === '{"reviewed":true,"email_pending":true}'; })());
-    ok('за сторна по грешен прием = reviewed + email_pending',
+    /* От 21.10.2026 сторното не се изпраща на доставчика (решение на Тенчо,
+       19-20.10; tests/sd-wrong-receipt-storno.test.js) — само reviewed. */
+    ok('за сторна по грешен прием = само reviewed (без имейл)',
       (() => { h.w.diffReports[0].direction = 'wrong_receipt'; const s = JSON.stringify(h.w.sdReviewedPatch('rep-1'));
-        h.w.diffReports[0].direction = 'interstore'; return s === '{"reviewed":true,"email_pending":true}'; })());
+        h.w.diffReports[0].direction = 'interstore'; return s === '{"reviewed":true}'; })());
     ok('непозната бланка = само reviewed', JSON.stringify(h.w.sdReviewedPatch('няма')) === '{"reviewed":true}');
     /* Истинският път на междускладовия поток: магазинът потвърждава
        „Прието" по последния ред (sdConfirmInterstore) — оттам идва reviewed. */

@@ -1,0 +1,19 @@
+-- stock-diff-storno-schema.sql
+-- Нова стойност stock_differences.type = 'storno' (сторно по грешен прием), без DDL.
+--
+-- Решение на Тенчо (19-20.10.2026): редовете от бланки „Сторна по грешен
+-- прием" (differences_reports.direction='wrong_receipt') се приключват с един
+-- бутон „🧾 Сторнирано" (stock-differences.js, resolveDiffLine). Записът:
+--   stock_differences: type='storno', status='taken', resolved_by/at, completed_by/at
+--   differences_reports (щом всички редове имат тип): reviewed=true, БЕЗ email_pending
+-- stock_differences.type е text, nullable, без CHECK — схемата не се пипа.
+-- Нищо за прилагане. Ред в zhivko-opashka.md („Чака изпращане") — 21.10.
+--
+-- ROLLBACK (връща сторнираните редове и бланките им в „за преглед"):
+-- Първо се записват бланките, приключени със storno, за да се върнат само те:
+--   select distinct report_id from stock_differences where type='storno';
+--
+-- update differences_reports set reviewed=false where direction='wrong_receipt'
+--        and id in (<бланките от горната заявка>);
+-- update stock_differences set type=null, status='new', resolved_by=null, resolved_at=null,
+--        completed_by=null, completed_at=null where type='storno';

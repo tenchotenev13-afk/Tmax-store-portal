@@ -216,6 +216,7 @@ const TESTS = [
   'analysis-postponed.test.js',
   'wrong-receipt-tab.test.js',
   'wrong-receipt-store-submit.test.js',
+  'sd-wrong-receipt-storno.test.js',
   'diff-email-pending.test.js',
   'diff-email-after-skip.test.js',
   'diff-return-order.test.js',

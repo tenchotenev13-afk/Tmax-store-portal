@@ -369,8 +369,8 @@ function renderStockDiff() {
   var list = sdTableRows();
   var showWh = sdWhColumnInTable(); /* „Отговор на склада" - само междускладов */
 
-  var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса', not_invoiced:'🧾 Не са фактурирани' };
-  var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626', not_invoiced:'#64748b' };
+  var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса', not_invoiced:'🧾 Не са фактурирани', storno:'🧾 Сторнирано' };
+  var TYPE_COLORS = { writein:'#2563eb', 'return':'#7c3aed', missing:'#dc2626', not_invoiced:'#64748b', storno:'#0f766e' };
 
   var cw = sdCounterWords(sdTypeFilter);
   /* Дали обектът има „Чакат моя отговор“ (null за офис и склад) — за бележката горе и за чипа долу. */
@@ -596,8 +596,9 @@ function renderStockDiff() {
         }
         /* Имейл и от долу: „✓ Без имейл" не е окончателно, а горната карта
            изчезва, щом бланката слезе (решение 20.10.2026). Вече пратен →
-           бутонът остава, title-ът казва кога. */
-        var emRep = (r.report_id && canSendDiffEmail()) ? diffReports.find(function(x){ return String(x.id) === String(r.report_id); }) : null;
+           бутонът остава, title-ът казва кога. Сторното не се изпраща на
+           доставчика (решение 21.10.2026) - там бутон няма. */
+        var emRep = (r.report_id && canSendDiffEmail() && sdLineDirection(r) !== 'wrong_receipt') ? diffReports.find(function(x){ return String(x.id) === String(r.report_id); }) : null;
         if (emRep) {
           var emTitle = emRep.email_sent_at ? 'Вече изпратен на '+sdFmtDayTime(emRep.email_sent_at)+' — изпрати отново' : 'Изпрати имейл до '+diffDirEmailTo(emRep.direction);
           h += '<button data-rid="'+emRep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" title="'+escAttr(emTitle)+'" style="border:1px solid #bae6fd;background:#f0f9ff;color:#0369a1;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;margin-right:2px;">✉️</button>';
@@ -642,7 +643,7 @@ function renderStockDiff() {
    посока, магазин, тип, статус и търсене важат и тук, без втора логика.
    Същият подход и CDN като exportSRExcel() в stock-returns.js. Имената са
    различни нарочно: двата модула живеят в едно глобално пространство. */
-var SD_TYPE_PLAIN = { writein:'Заприхождаване', 'return':'Връщане', missing:'Липса', not_invoiced:'Не са фактурирани' };
+var SD_TYPE_PLAIN = { writein:'Заприхождаване', 'return':'Връщане', missing:'Липса', not_invoiced:'Не са фактурирани', storno:'Сторнирано' };
 /* Текстът на HTML фрагмент - статусът и отговорите се изнасят „като на
    екрана", през същите функции, които ги рисуват. */
 function sdHtmlText(html){
@@ -914,7 +915,9 @@ function sdVisibleEmailPendingReports(){
 function sdReviewedPatch(reportId){
   var rep = diffReports.find(function(r){ return String(r.id) === String(reportId); });
   var p = {reviewed:true};
-  if(rep && rep.direction !== 'interstore' && !rep.email_sent_at) p.email_pending = true;
+  /* Сторна по грешен прием не се изпраща на доставчика (решение на Тенчо,
+     19-20.10.2026) - бланката слиза направо, без „Решена — чака имейл". */
+  if(rep && rep.direction !== 'interstore' && rep.direction !== 'wrong_receipt' && !rep.email_sent_at) p.email_pending = true;
   return p;
 }
 /* „✓ Без имейл": бланката е решена, имейл до доставчика нарочно не се праща.
@@ -1015,7 +1018,7 @@ function sdStoreChipsHtml(){
 
 /* ── Бутони за решение по ред (само canReviewDiff) ── */
 function diffLineResolveButtons(l){
-  var TYPE_LABELS={writein:'📥 Заприх.',return:'↩️ Връщане',missing:'❓ Липса',not_invoiced:'🧾 Не са фактурирани'};
+  var TYPE_LABELS={writein:'📥 Заприх.',return:'↩️ Връщане',missing:'❓ Липса',not_invoiced:'🧾 Не са фактурирани',storno:'🧾 Сторнирано'};
   /* Логистичните складове НИКОГА не виждат/пипат решението на Цвети - то е
      само за разлики с доставчици, независимо каква роля има складовият
      профил технически (напр. 'logistics'). */
@@ -1030,7 +1033,7 @@ function diffLineResolveButtons(l){
     if(sdLineDirection(l)==='interstore') return '<span style="color:#cbd5e1;">—</span>';
     return '<span style="color:#94a3b8;">чака преглед</span>';
   }
-  var TYPE_COLORS={writein:'#2563eb',return:'#7c3aed',missing:'#dc2626',not_invoiced:'#64748b'};
+  var TYPE_COLORS={writein:'#2563eb',return:'#7c3aed',missing:'#dc2626',not_invoiced:'#64748b',storno:'#0f766e'};
   /* Вече решен ред - трите бутона се свиват до един спокоен чип с избора.
      Така нерешените редове изпъкват от само себе си при преглед на дълга
      бланка, вместо навсякъде да стоят по три еднакво тежки бутона. */
@@ -1047,6 +1050,15 @@ function diffLineResolveButtons(l){
     var active=l.type===type;
     return '<button data-id="'+l.id+'" onclick="resolveDiffLine(this.dataset.id,\''+type+'\')" title="'+(active?'Текущ избор — кликни друг бутон, за да коригираш':'Кликни, за да избереш')+'" style="border:none;background:'+(active?color:color+'1a')+';color:'+(active?'#fff':color)+';border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">'+(active?'✓ ':'')+label+'</button>';
   };
+  /* Сторна по грешен прием (решение на Тенчо, 19-20.10.2026): нито
+     заприхождаване, нито връщане, нито липса пасва - стоката е сторнирана.
+     Един бутон, без имейл до доставчика (виж sdReviewedPatch). */
+  if(sdLineDirection(l)==='wrong_receipt'){
+    return '<div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;">'+
+      mk('storno','🧾 Сторнирано','#0f766e')+
+      (l.type?'<button data-id="'+l.id+'" onclick="sdToggleResolveEdit(this.dataset.id)" title="Затвори" style="border:none;background:none;color:#94a3b8;font-size:12px;cursor:pointer;padding:0 2px;">✕</button>':'')+
+    '</div>';
+  }
   return '<div style="display:flex;gap:3px;flex-wrap:wrap;align-items:center;">'+
     mk('writein','📥 Заприх.','#2563eb')+
     mk('return','↩️ Връщане','#7c3aed')+
@@ -1594,6 +1606,9 @@ function resolveDiffLine(id,type,sync){
      крайно решение (заприхождаване или връщане). Затова статусът е 'pending'
      както при другите типове и completed_* не се пишат. */
   var payload={type:type,status:'pending',resolved_by:sdActor(),resolved_at:resolvedAt};
+  /* "Сторнирано" е крайно решение - редът е изчистен ("Изчистена" в
+     sdStatusWords за wrong_receipt), никой нищо не взима и не заприхождава. */
+  if(type==='storno'){ payload.status='taken'; payload.completed_by=payload.resolved_by; payload.completed_at=resolvedAt; }
   /* Липса/Връщане: количеството е РЕАЛНАТА разлика, не това по документ.
      Досега Цветелина го пренаписваше на ръка след всяко решение. Останалите
      типове (Заприхождаване и т.н.) не се пипат - там количеството по документ
@@ -1618,7 +1633,7 @@ function resolveDiffLine(id,type,sync){
   }
   sbPatch('stock_differences','id=eq.'+id,payload).then(function(res){
     if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    line.type=type; line.status='pending'; line.resolved_by=sdActor(); line.resolved_at=resolvedAt; /* локално, за незабавна проверка по-долу без чакане на reload */
+    line.type=type; line.status=payload.status; line.resolved_by=sdActor(); line.resolved_at=resolvedAt; /* локално, за незабавна проверка по-долу без чакане на reload */
     /* ПРЕДИ autoCreateReturnFromDiff - тя чете line.quantity за stock_returns. */
     if(autoQty!==null) line.quantity=autoQty;
     /* Едно съобщение, не две: toast() презаписва един и същ елемент, затова
@@ -1938,9 +1953,12 @@ function sdModalHtml() {
       '<option value="return"'+(r.type==='return'?' selected':'')+'>↩️ Връщане</option>'+
       '<option value="missing"'+(r.type==='missing'?' selected':'')+'>❓ Липса</option>'+
       '<option value="not_invoiced"'+(r.type==='not_invoiced'?' selected':'')+'>🧾 Не са фактурирани</option>'+
+      /* Без тази опция ред „Сторнирано" отваря селекта на първата опция и
+         „Запази" тихо изтрива типа. Само за сторното - другите посоки не я виждат. */
+      ((r.type==='storno'||(isEdit&&sdLineDirection(r)==='wrong_receipt'))?'<option value="storno"'+(r.type==='storno'?' selected':'')+'>🧾 Сторнирано</option>':'')+
       '</select>';
   } else {
-    var typeLabels={writein:'📥 Заприхождаване',return:'↩️ Връщане',missing:'❓ Липса',not_invoiced:'🧾 Не са фактурирани'};
+    var typeLabels={writein:'📥 Заприхождаване',return:'↩️ Връщане',missing:'❓ Липса',not_invoiced:'🧾 Не са фактурирани',storno:'🧾 Сторнирано'};
     h += '<label class="fl">Тип на решение</label>'+
       '<div class="fi" style="background:#f8fafc;color:#64748b;">'+(r.type?typeLabels[r.type]||r.type:'⏳ Още не е решено от Цветелина')+'</div>'+
       '<input type="hidden" id="sd-type" value="'+escVal(r.type)+'">';
@@ -1961,7 +1979,8 @@ function sdModalHtml() {
      бутона 💬 - тихо преобръщаше реда на "чакащ". Затова 'new' се показва като
      истинска опция, а докато няма тип на решение, селектът е заключен:
      статусът се движи чак след като Цвети реши какво става с реда. */
-  var sw = sdStatusWords(r.type);
+  /* При сторното думата е „Изчистена", както в баджа и в печата. */
+  var sw = sdStatusWords(r.type, r.type==='storno' ? 'wrong_receipt' : undefined);
   var sdStatusIsNew = r.status === 'new';
   var sdNoTypeYet = isEdit && !r.type;
   /* „Приключена" - само за тип „Връщане" и само за canCompleteSR(), както в
@@ -3402,7 +3421,8 @@ function renderDiffReportsSection(){
        (rep.email_sent_at?'<span style="font-size:10.5px;color:#16a34a;font-weight:600;">✉️ Изпратен '+sdFmtDateTime(rep.email_sent_at)+'</span>':'')+
        '<button data-rid="'+rep.id+'" onclick="loadDiffPrint(this.dataset.rid)" title="Печат на бланката" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
        (sdCanMoveReport(rep)?'<button data-rid="'+rep.id+'" onclick="openSDMoveModal(this.dataset.rid)" title="Смени посоката на бланката" style="border:1px solid #c4b5fd;background:#f5f3ff;color:#6d28d9;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">'+(sdMoveTarget(rep)==='wrong_receipt'?'🧾 Премести в Сторна':'📦 Върни в Доставчици')+'</button>':'')+
-       (canSendDiffEmail()?'<button data-rid="'+rep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✉️ Изпрати имейл</button>':'')+
+       /* Сторното не се изпраща на доставчика (решение 21.10.2026). */
+       (canSendDiffEmail()&&rep.direction!=='wrong_receipt'?'<button data-rid="'+rep.id+'" onclick="openDiffEmailModal(this.dataset.rid)" style="border:none;background:#0ea5e9;color:#fff;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✉️ Изпрати имейл</button>':'')+
        (canSendDiffEmail()&&rep.reviewed&&rep.email_pending?'<button data-rid="'+rep.id+'" onclick="sdSkipDiffEmail(this.dataset.rid)" title="Бланката е решена — слиза долу без имейл" style="border:1px solid #a7f3d0;background:#ecfdf5;color:#047857;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">✓ Без имейл</button>':'')+
        (sdCanDeleteReport()?'<button data-rid="'+rep.id+'" onclick="sdDeleteReport(this.dataset.rid)" title="Изтрий ЦЯЛАТА бланка — редове и файлове, необратимо" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;padding:4px 10px;font-size:11px;font-weight:600;cursor:pointer;">🗑 Изтрий бланката</button>':'')+
        '</div>';
@@ -4738,7 +4758,7 @@ function renderDiffPrint(rep){
      затова проверката е по trim(), не по истинност. */
   var genComment = (rep.general_comment||'').trim();
 
-  var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса', not_invoiced:'🧾 Не са фактурирани' };
+  var TYPE_LABELS = { writein:'📥 Заприхождаване', 'return':'↩️ Връщане', missing:'❓ Липса', not_invoiced:'🧾 Не са фактурирани', storno:'🧾 Сторнирано' };
   /* Същата логика като sdRowStatusBadge, но без цветната таблетка - на хартия
      остава само думата. */
   var statusText = function(r){
