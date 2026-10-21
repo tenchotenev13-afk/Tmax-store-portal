@@ -39,6 +39,11 @@
    Без фиксирана ширина менюто беше ~378 px и таблицата — 1412 px.
    Самата ширина на таблицата jsdom НЕ я мери (няма лейаут) — тя се
    проверява на живо (claude/open/21-10-minusi-save-visible-live.md).
+   Секция 3в (21.10.2026, бутоните да изглеждат като бутони):
+     M10 „Запази“ пак с btn-primary → пада „„Запази“: btn + btn-green…“;
+     M11 „📤 Качи файл“ пак с btn-primary → пада „„📤 Качи файл“ (admin)…“.
+   jsdom не смята CSS — тестът заковава класовете; че бутонът е зелен,
+   се проверява на живо (claude/open/21-10-minusi-btn-style-live.md).
 */
 'use strict';
 
@@ -270,6 +275,19 @@ function noAmountInDom(name, h) {
     empty.value = '';
     fire(h.w, empty, 'change');
     ok('обратно на „— избери —“ → празен title', empty.title === '', JSON.stringify(empty.title));
+  }
+
+  section('3в. „Запази“ и „📤 Качи файл“ — класът btn-green, не btn-primary');
+  {
+    /* .btn-primary няма правило никъде, а .btn (border:none) върху .btn-sm
+       оставяше „Запази“ сив текст без фон и рамка (на живо, 21.10.2026). */
+    const h = env(GD, db); await open(h);
+    const saves = Array.from(mod(h).querySelectorAll('button')).filter(b => b.textContent.trim() === 'Запази');
+    ok('3 бутона „Запази“', saves.length === 3, saves.length);
+    ok('„Запази“: btn + btn-green, без btn-primary и btn-sm', saves.every(b => b.classList.contains('btn') && b.classList.contains('btn-green') && !b.classList.contains('btn-primary') && !b.classList.contains('btn-sm')), saves.map(b => b.className).join(' | '));
+    const ha = env(ADMIN, db); await open(ha);
+    const lbl = ha.doc.getElementById('mn-file') && ha.doc.getElementById('mn-file').parentNode;
+    ok('„📤 Качи файл“ (admin): label с btn + btn-green, без btn-primary', !!lbl && lbl.tagName === 'LABEL' && lbl.textContent.indexOf('📤 Качи файл') >= 0 && lbl.classList.contains('btn') && lbl.classList.contains('btn-green') && !lbl.classList.contains('btn-primary'), lbl && lbl.className);
   }
 
   section('4. Повторно качване на същия файл — нищо ново, попълненото непокътнато');

@@ -387,7 +387,7 @@ function mnRender(){
 function mnUploadHtml(){
   var h = '<div class="card" id="mn-upload">';
   h += '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;"><b>Качване от SAP (MB51, лист „от САП“)</b>';
-  h += '<label class="btn btn-primary" style="cursor:pointer;">📤 Качи файл<input type="file" id="mn-file" accept=".xlsx,.xls,.csv" style="display:none;" onchange="mnImportFile(this)"></label>';
+  h += '<label class="btn btn-green" style="cursor:pointer;">📤 Качи файл<input type="file" id="mn-file" accept=".xlsx,.xls,.csv" style="display:none;" onchange="mnImportFile(this)"></label>';
   if(mnLastUpload) h += '<span style="color:#64748b;font-size:13px;">Последно: ' + esc(mnFmtTs(mnLastUpload.uploaded_at)) + ' · ' + esc(mnLastUpload.uploaded_by || '') + ' · ' + esc(mnLastUpload.file_name || '') + ' · нови ' + esc(String(mnLastUpload.rows_new == null ? '—' : mnLastUpload.rows_new)) + '</span>';
   h += '</div>';
   if(mnReport) h += mnReportHtml(mnReport);
@@ -433,7 +433,7 @@ function mnDailyHtml(rows){
       h += '</select></td>';
       h += '<td style="' + yel + '"><input id="mn-emp-' + escAttr(id) + '" value="' + escAttrVal(val('employee_name')) + '" style="width:120px;"></td>';
       h += '<td style="' + yel + '"><input id="mn-note-' + escAttr(id) + '" value="' + escAttrVal(val('note')) + '" style="width:140px;"></td>';
-      h += '<td style="white-space:nowrap;">' + (done ? '<span class="mn-done" title="' + escAttr('Попълнено: ' + (r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span> ' : '') + '<button class="btn btn-sm btn-primary" onclick="mnSave(\'' + escAttr(id) + '\')">Запази</button></td>';
+      h += '<td style="white-space:nowrap;">' + (done ? '<span class="mn-done" title="' + escAttr('Попълнено: ' + (r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span> ' : '') + '<button class="btn btn-green" onclick="mnSave(\'' + escAttr(id) + '\')">Запази</button></td>';
     } else {
       h += '<td>' + esc(r.real_code || '') + '</td><td>' + esc(mnReasonLabel(r.reason_id)) + '</td><td>' + esc(r.employee_name || '') + '</td><td>' + esc(r.note || '') + '</td>';
       h += '<td>' + (done ? '<span class="mn-done" title="' + escAttr((r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span>' : '') + '</td>';
