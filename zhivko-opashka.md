@@ -16,15 +16,16 @@
 
 - 21.10 · stock_differences.type — нова стойност 'storno' (text, без промяна в схемата)
 
-## Изпратено 21.10.2026
+## Потвърдено 21.10.2026
 
 (в базата от миграциите 20261021050541_minusi_schema и 20261021050606_minusi_seed, приложени 21.10.2026)
 - 20.10 · нова таблица minus_plants — plant text PK, store_name text NOT NULL, role text NOT NULL (стойности 'доставка' / 'продажби' / 'наличност')
 - 20.10 · нова таблица minus_uploads — id uuid PK default gen_random_uuid(), uploaded_at timestamptz NOT NULL default now(), uploaded_by text NULL, file_name text NULL, rows_total int NULL, rows_new int NULL, date_from date NULL, date_to date NULL
 - 20.10 · нова таблица minus_reasons — id serial PK, label text NOT NULL, excluded_from_revision boolean NOT NULL default false, active boolean NOT NULL default true, sort int NULL
 - 20.10 · нова таблица minus_uom_thresholds — uom text PK, min_qty numeric NOT NULL
-- 20.10 · нова таблица minus_movements — id uuid PK default gen_random_uuid(), upload_id uuid NULL → minus_uploads, plant text NOT NULL, store_name text NOT NULL, material text NOT NULL, material_desc text NULL, mvt_type text NOT NULL (стойности '955' / '956'), qty numeric NOT NULL, uom text NULL, mat_doc text NOT NULL, doc_item text NOT NULL, doc_year int NOT NULL, posting_date date NOT NULL, header_text text NULL, real_code text NULL, reason_id int NULL → minus_reasons, employee_name text NULL, note text NULL, filled_by text NULL, filled_at timestamptz NULL, created_at timestamptz NOT NULL default now(); уникалност (mat_doc, doc_item, doc_year)
+- 20.10 · нова таблица minus_movements — id uuid PK default gen_random_uuid(), upload_id uuid NULL → minus_uploads, plant text NOT NULL, store_name text NOT NULL, material text NOT NULL, material_desc text NULL, mvt_type text NOT NULL (стойности '955' / '956'), qty numeric NOT NULL, uom text NULL, mat_doc text NOT NULL, doc_item text NOT NULL, doc_year int NOT NULL, posting_date date NOT NULL, header_text text NULL, real_code text NULL, reason_id int NULL → minus_reasons, employee_name text NULL, note text NULL, filled_by text NULL, filled_at timestamptz NULL, created_at timestamptz NOT NULL default now(); уникалност (mat_doc, doc_item, doc_year) (в огледалото — обикновен индекс вместо UNIQUE; дубликатите се спират само в Supabase, ограничение minus_movements_doc_uq)
 - 20.10 · app_settings — нов ключ minus_stores (списък имена на обекти, разделени със запетая; начална стойност 'Гоце Делчев')
+(потвърдено от Живко с писмо на 21.10: 80 таблици, 0 грешки; minus_plants, minus_reasons, minus_uom_thresholds се презареждат цялостно на всеки цикъл)
 
 ## Потвърдено 19.10.2026
 
