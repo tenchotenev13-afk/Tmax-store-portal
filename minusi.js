@@ -421,8 +421,11 @@ function mnDailyHtml(rows){
     h += '<td class="mn-qty" style="text-align:right;">' + esc(mnFmtQty(r._rest)) + '</td><td>' + esc(r.uom) + '</td>';
     if(fill){
       h += '<td style="' + yel + '"><input id="mn-code-' + escAttr(id) + '" value="' + escAttrVal(val('real_code')) + '" style="width:90px;"></td>';
-      h += '<td style="' + yel + '"><select id="mn-reason-' + escAttr(id) + '"><option value="">— избери —</option>';
       var cur = String(val('reason_id'));
+      /* Фиксирана ширина: най-дългата причина разтягаше менюто до ~378 px и
+         „Запази“ излизаше извън картата (21.10.2026). Целият текст — в title. */
+      h += '<td style="' + yel + '"><select id="mn-reason-' + escAttr(id) + '" style="width:180px;max-width:180px;" title="' + escAttrVal(mnReasonLabel(cur)) + '"' +
+        ' onchange="this.title=this.value?this.options[this.selectedIndex].text:\'\'"><option value="">— избери —</option>';
       mnReasons.forEach(function(x){
         if(x.active === false && String(x.id) !== cur) return;
         h += '<option value="' + escAttr(String(x.id)) + '"' + (String(x.id) === cur ? ' selected' : '') + '>' + esc(x.label) + '</option>';

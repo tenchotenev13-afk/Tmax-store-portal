@@ -27,6 +27,18 @@
         → пада „движенията не се теглят“;
      M6 PATCH-ът носи и qty
         → пада „само real_code/reason_id/…“.
+   Секция 3б (21.10.2026, „Запази“ в рамките на картата) — пак пуснати:
+     M7 менюто „Причина“ без width:180px → пада „всяко е с width:180px…“;
+     M8 onchange не пипа title → пада „смяна на избора (change) → title…“;
+     M9 title без записаната причина → пада „ред със записана причина…“.
+   Защо 180px, а не 220px — измерено от чата с Playwright върху 89dc753 +
+   тази промяна (manager, Гоце Делчев, 33 реда), #mn-daily срещу картата:
+     220px, екран 1280 → 1254 срещу 1246 px — прелива;
+     180px, екран 1280 → 1214 срещу 1246 px — събира се (~30 px запас);
+     180px, екран 1366 → 1226 срещу 1266 px.
+   Без фиксирана ширина менюто беше ~378 px и таблицата — 1412 px.
+   Самата ширина на таблицата jsdom НЕ я мери (няма лейаут) — тя се
+   проверява на живо (claude/open/21-10-minusi-save-visible-live.md).
 */
 'use strict';
 
@@ -240,6 +252,24 @@ function noAmountInDom(name, h) {
     const h = env(GD_SKLAD, db); await open(h);
     ok('роля sklad също попълва (има „Запази“)', !!btn(mod(h), 'Запази'));
     ok('sklad вижда попълненото: причината е избрана', h.doc.getElementById('mn-reason-' + fillId).value === '5');
+  }
+
+  section('3б. „Причина“ — фиксирана ширина 180px, целият текст в title');
+  {
+    const h = env(GD, db); await open(h);
+    const sels = Array.from(h.doc.querySelectorAll('select[id^="mn-reason-"]'));
+    ok('менютата „Причина“ са 3', sels.length === 3, sels.length);
+    ok('всяко е с width:180px и max-width:180px', sels.every(s => s.style.width === '180px' && s.style.maxWidth === '180px'), sels.map(s => s.getAttribute('style')).join(' | '));
+    const done = h.doc.getElementById('mn-reason-' + fillId);
+    ok('ред със записана причина → title = текстът ѝ', done && done.title === 'реална продажба, чака вход от ЛСТ', done && done.title);
+    const empty = sels.find(s => s.id !== 'mn-reason-' + fillId);
+    ok('ред без причина → празен title', empty && empty.title === '' && empty.value === '', empty && JSON.stringify(empty.title));
+    empty.value = '3';
+    fire(h.w, empty, 'change');
+    ok('смяна на избора (change) → title = новата причина', empty.title === 'продажба на цялото количество, липсва код', empty.title);
+    empty.value = '';
+    fire(h.w, empty, 'change');
+    ok('обратно на „— избери —“ → празен title', empty.title === '', JSON.stringify(empty.title));
   }
 
   section('4. Повторно качване на същия файл — нищо ново, попълненото непокътнато');
