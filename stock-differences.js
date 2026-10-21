@@ -3357,8 +3357,10 @@ function renderDiffReportsSection(){
     }
     return '';
   }
-  /* Бланки с наскоро коригиран от магазина ред изскачат най-отгоре -
-     иначе биха останали "погребани" в дъното на списъка. */
+  /* Подредба по дата на подаване, НАЙ-СТАРИТЕ ОТГОРЕ (решение на Тенчо,
+     21.10.2026, по отговора на Цвети): преглежда се по реда на подаване.
+     Коригираната от магазина бланка вече НЕ изскача отгоре - тя си остава
+     отличена с жълтата рамка и „✏️ КОРИГИРАНА" на мястото си. */
   /* Бланка, на която складът вече е отговорил напълно (всички редове имат
      warehouse_response), слиза надолу - вече не е спешна за преглед, чака
      магазина да потвърди получаването. */
@@ -3373,14 +3375,13 @@ function renderDiffReportsSection(){
     var bResponded = warehouseFullyResponded(b.id);
     if(aResponded&&!bResponded)return 1;
     if(bResponded&&!aResponded)return -1;
-    var aLines=sdData.filter(function(x){return x.report_id===a.id;});
-    var bLines=sdData.filter(function(x){return x.report_id===b.id;});
-    var aCorr=aLines.reduce(function(m,l){return l.store_corrected_at&&l.store_corrected_at>m?l.store_corrected_at:m;},'');
-    var bCorr=bLines.reduce(function(m,l){return l.store_corrected_at&&l.store_corrected_at>m?l.store_corrected_at:m;},'');
-    if(aCorr&&!bCorr)return -1;
-    if(bCorr&&!aCorr)return 1;
-    if(aCorr&&bCorr)return bCorr.localeCompare(aCorr); /* по-скоро коригираните - по-напред */
-    return 0; /* иначе пази оригиналния ред */
+    /* created_at възходящо; при равни - id, за стабилен ред (заявката идва
+       created_at.desc, тоест „return 0" би оставил най-новите отгоре). */
+    var ac=String(a.created_at||''), bc=String(b.created_at||'');
+    if(ac!==bc) return ac<bc ? -1 : 1;
+    var ai=Number(a.id), bi=Number(b.id);
+    if(!isNaN(ai) && !isNaN(bi) && ai!==bi) return ai-bi;
+    return String(a.id)<String(b.id) ? -1 : (String(a.id)>String(b.id) ? 1 : 0);
   });
   var h='<div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:10px;padding:14px;margin-bottom:14px;">';
   h+='<div style="font-size:14px;font-weight:700;color:#5b21b6;margin-bottom:10px;">🆕 Нови подадени бланки — чакат преглед ('+unreviewed.length+(unreviewed.length!==allVisible.length?' от '+allVisible.length:'')+')'+
@@ -3637,7 +3638,7 @@ function openSDMoveModal(rid){
       '<div style="font-size:12px;">'+(i+1)+'. '+esc(l.material_name||'')+' <span style="color:#94a3b8;">('+esc(diffCategoryLabel(cur))+')</span></div>'+
       '<select class="fi sdm-cat" data-id="'+l.id+'" style="margin:0;">'+diffCategoryOptionsForDirection(target, pick)+'</select></div>';
   });
-  h += '<label class="fl">Поръчка № * <span style="color:#94a3b8;font-weight:400;">(41…, не входяща доставка)</span></label>'+
+  h += '<label class="fl">Поръчка № * <span style="color:#94a3b8;font-weight:400;">(41… или 43…, не входяща доставка)</span></label>'+
     '<input class="fi" id="sdm-order" inputmode="numeric" placeholder="напр. 4100135756" value="'+escVal(ord0)+'" style="max-width:220px;">'+
     '<div style="background:'+(toWr?'#fef2f2':'#eff6ff')+';border:1px solid '+(toWr?'#fecaca':'#bfdbfe')+';border-radius:6px;padding:8px 12px;margin:10px 0;font-size:12px;color:'+(toWr?'#991b1b':'#1e40af')+';">'+
       (toWr ? 'От сторната излиза удръжка за <b>'+esc(rep.store_name||'')+'</b>. Магазинът ще получи известие и бланката става само за четене за него.'
@@ -3667,7 +3668,7 @@ function submitSDMove(rid){
   if(missing.length){ toast((missing.length===1?'Ред ':'Редове ')+missing.join(', ')+': избери категория','#dc2626'); return; }
   var ordEl = document.getElementById('sdm-order');
   var ord = ordEl ? String(ordEl.value||'').trim() : '';
-  if(!diffOrderNumValid(ord)){ toast('Поръчка №: впиши номер на поръчка 41…, не входяща доставка','#dc2626'); if(ordEl) ordEl.focus(); return; }
+  if(!diffOrderNumValid(ord)){ toast('Поръчка №: впиши номер на поръчка 41… или 43…, не входяща доставка','#dc2626'); if(ordEl) ordEl.focus(); return; }
   var ids = lines.map(function(l){ return l.id; });
   /* „За връщане" не е в sdData - проверява се в базата преди първия запис. */
   var retCheck = ids.length ? sbGet('stock_returns','diff_line_id=in.('+ids.join(',')+')&select=id&limit=1') : Promise.resolve([]);
@@ -3908,10 +3909,11 @@ function diffQtyDocNumMsg(value){ return 'количеството прилич�
 /* Първият ред на формата с такова количество: {row (1-базиран, както на
    екрана), value, el}. „По стокова на доставчика" НЕ се проверява - то е
    полето на централния офис. */
-/* Поръчка от доставчика: точно 10 цифри, започва с 41 (напр. 4100135756).
-   Входяща доставка (180…), документ (46…) и поръчка за връщане (42…) - не. */
+/* Поръчка от доставчика: точно 10 цифри, започва с 41 (напр. 4100135756) или с
+   43 - внос (Билка, Левиор; Цвети, 21.10.2026).
+   Входяща доставка (180…), документ (46…), 44… и поръчка за връщане (42…) - не. */
 function diffOrderNumValid(v){
-  return /^41\d{8}$/.test(String(v==null?'':v).trim());
+  return /^4[13]\d{8}$/.test(String(v==null?'':v).trim());
 }
 function diffRowQtyLikeDocNum(){
   var rows=document.querySelectorAll('#diff-items .diff-item-row');
@@ -4121,7 +4123,7 @@ function updateDiffCounterpartLabel(){
     if(oldOrderEl) noDocWrap.setAttribute('data-order-num',oldOrderEl.value);
     var withOrder = dir==='supplier' || dir==='wrong_receipt';
     noDocWrap.innerHTML = (withOrder
-      ? '<div style="margin-bottom:8px;"><label class="fl">Поръчка № * <span style="color:#94a3b8;font-weight:400;">(41…, не входяща доставка)</span></label>'+
+      ? '<div style="margin-bottom:8px;"><label class="fl">Поръчка № * <span style="color:#94a3b8;font-weight:400;">(41… или 43…, не входяща доставка)</span></label>'+
           '<input class="fi" id="diff-order-num" inputmode="numeric" placeholder="напр. 4100135756" style="max-width:220px;"></div>'
       : '')+
       (dir==='supplier'
@@ -4270,7 +4272,7 @@ function submitDiffReport(){
     qtyDocNum.el.focus();
     return;
   }
-  /* „Поръчка №" (41…): задължителна при посока доставчик без „без документ"
+  /* „Поръчка №" (41… или 43…): задължителна при посока доставчик без „без документ"
      и винаги при сторна по грешен прием (там отметка няма - сторната тръгва
      от фактура); попълнена ли е — и навсякъде другаде трябва да е валидна.
      Спира ПРЕДИ снимките и POST-а, както проверката за количеството по-горе:
@@ -4281,7 +4283,7 @@ function submitDiffReport(){
   var noDocEarly=document.getElementById('diff-no-doc');
   var orderRequired=(direction==='supplier' && !(noDocEarly && noDocEarly.checked)) || direction==='wrong_receipt';
   if((orderNum||orderRequired) && !diffOrderNumValid(orderNum)){
-    toast('Поръчка №: впиши номер на поръчка 41…, не входяща доставка','#dc2626');
+    toast('Поръчка №: впиши номер на поръчка 41… или 43…, не входяща доставка','#dc2626');
     if(orderEl) orderEl.focus();
     return;
   }
@@ -4735,6 +4737,11 @@ var DIFF_IMG_RE = /\.(jpe?g|png|gif|webp)(\?|$)/i;
 function loadDiffPrint(reportId){
   var rep = diffReports.find(function(x){return String(x.id)===String(reportId);});
   if(!rep){ toast('Бланката не е намерена','#dc2626'); return; }
+  /* „← Обратно" (showModule('stock-diff') → loadStockDiff → renderStockDiff
+     → sdRestoreScroll) връща при същата бланка: картата горе по котвата
+     diff-rep-<id>, а от „Решени редове" (там карти няма) — на позицията
+     отпреди печата (Цвети, 20.10.2026). */
+  sdKeepScroll(rep.id);
   renderDiffPrint(rep);
   showModule('print');
 }

@@ -79,7 +79,7 @@ async function submit(h) {
 const repPosts = h => h.calls.post.filter(p => p.table === 'differences_reports');
 const linePosts = h => h.calls.post.filter(p => p.table === 'stock_differences')
   .map(p => Array.isArray(p.body) ? p.body : [p.body]).reduce((a, b) => a.concat(b), []);
-const ORDER_MSG = 'Поръчка №: впиши номер на поръчка 41…, не входяща доставка';
+const ORDER_MSG = 'Поръчка №: впиши номер на поръчка 41… или 43…, не входяща доставка'; /* 43… — внос, от 21.10.2026 */
 const lastToast = h => String(h.calls.toast[h.calls.toast.length - 1] || '');
 
 (async function run() {
