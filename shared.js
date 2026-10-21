@@ -1809,6 +1809,13 @@ function setupTabsForRole(){
      обект извън списъка вижда бутона и вътре „още не е включен“. */
   var mnSubBtn=document.getElementById('rvs-minusi');
   if(mnSubBtn)mnSubBtn.style.display=(typeof mnCanSee==='function'&&mnCanSee())?'':'none';
+  /* Под-бутон „📦 Пикинг“ в Транспорт (picking.js) — пилот: само имейлите от
+     app_settings.picking_users. Скрит до отговора; pkLoadUsers() го показва. */
+  var pkSubBtn=document.getElementById('tps-picking');
+  if(pkSubBtn){
+    pkSubBtn.style.display='none';
+    if(typeof pkLoadUsers==='function') pkLoadUsers();
+  }
   var sdTab=document.getElementById('tab-stock-diff');
   if(sdTab)sdTab.style.display='';
   /* Таб Администрация — САМО admin (от 18.10.2026; дотогава и accounting с
@@ -1835,7 +1842,7 @@ function showModule(mod){
     showModule('kasa');
     return;
   }
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist','revaluation','rev-schedule','minusi'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist','revaluation','rev-schedule','minusi','picking'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -1855,7 +1862,7 @@ function showModule(mod){
   /* "Транспорт" и "Палети" — под-таб в Транспорт (наличности на празни палети по обекти) */
   var tpSub=document.getElementById('transport-pallets-subnav');
   if(tpSub){
-    tpSub.style.display=(mod==='transport'||mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers')?'block':'none';
+    tpSub.style.display=(mod==='transport'||mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'||mod==='picking')?'block':'none';
     var btnT=document.getElementById('tps-transport'),btnP=document.getElementById('tps-pallets'),btnS=document.getElementById('tps-supply'),btnL=document.getElementById('tps-loading');
     if(btnT)btnT.classList.toggle('active',mod==='transport');
     if(btnP)btnP.classList.toggle('active',mod==='pallets');
@@ -1863,10 +1870,12 @@ function showModule(mod){
     if(btnL)btnL.classList.toggle('active',mod==='loading');
     var btnX=document.getElementById('tps-transfers');
     if(btnX)btnX.classList.toggle('active',mod==='transfers');
+    var btnPk=document.getElementById('tps-picking');
+    if(btnPk)btnPk.classList.toggle('active',mod==='picking');
   }
   /* Подтабовете на Транспорт държат главния таб активен - иначе навигацията
      показва Транспорт като незает, докато си вътре в негов подтаб. */
-  if(mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
+  if(mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'||mod==='picking'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
   /* „Ревизии и преоценка“ — под-лента като при Транспорт; главният таб е
      tab-revaluation и за двата под-таба. */
   var rvSubnav=document.getElementById('rev-subnav');
@@ -1900,6 +1909,7 @@ function showModule(mod){
   if(mod==='supply')loadSupply();
   if(mod==='loading')loadLoadingLists();
   if(mod==='transfers')loadTransfers();
+  if(mod==='picking'&&typeof loadPicking==='function')loadPicking();
   if(mod==='reference')loadReference();
   if(mod==='handbook')loadHandbook();
 }

@@ -15,6 +15,9 @@
 ## Чака изпращане
 
 - 21.10 · stock_differences.type — нова стойност 'storno' (text, без промяна в схемата)
+- 21.10 · нова таблица picking_batches (миграция 20261021090405_picking_schema) — id uuid PK default gen_random_uuid(), warehouse text NOT NULL, source text NOT NULL (стойности 'planned' / 'unplanned'), file_name text NULL, rows_total int NULL, rows_imported int NULL, rows_skipped int NULL, uploaded_by text NULL, uploaded_at timestamptz NOT NULL default now()
+- 21.10 · нова таблица picking_lines (същата миграция) — id uuid PK default gen_random_uuid(), batch_id uuid NOT NULL → picking_batches (on delete cascade), warehouse text NOT NULL, store_name text NOT NULL, sap_code text NOT NULL, product_name text NULL, unit text NULL, qty_requested numeric NOT NULL, supply_group text NULL, sap_order text NULL, sap_item text NULL, line_no int NULL, status text NOT NULL default 'open' (стойности 'open' / 'picked' / 'skipped'), qty_picked numeric NULL, comment text NULL, done_by text NULL, done_at timestamptz NULL, created_at timestamptz NOT NULL default now(); уникалност (warehouse, sap_order, sap_item)
+- 21.10 · app_settings — нов ключ picking_users (списък имейли, разделени със запетая)
 
 ## Потвърдено 21.10.2026
 

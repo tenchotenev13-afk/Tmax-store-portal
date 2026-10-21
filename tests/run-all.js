@@ -84,6 +84,7 @@ const TESTS = [
   'xlsx-real-datenf.test.js',
   'revision-schedule.test.js',
   'minusi.test.js',
+  'picking.test.js',
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',
   'catalog-lookup.test.js',
