@@ -70,6 +70,19 @@
         „Мерна ед.““ и всички по индекс на колоните);
      M20 „Състояние“ пак с nowrap → пада „td „Състояние“ се пренася…“;
      M21 служител пак 120px → пада „… width:110px (22 полета)“.
+   Търсене, „Всички обекти“, Excel и печат (секция 11, 22.10.2026) — пуснати:
+     M22 търсенето не гледа заметнатия код → падат „по заметнат код „40244““
+        и „главни/малки и trim“;
+     M23 менюто „Обект“ (с „Всички обекти“) и за обекта → падат проверките
+        за manager и sklad;
+     M24 mnIsAll() без проверка на роля → пада „mnIsAll() е false дори при
+        mnStore = „Всички““. Махнатата проверка в mnSetStore САМА не пада —
+        loadMinusi и без нея връща обекта към своя (еквивалентен мутант);
+     M25 Excel пренебрегва филтрите → падат „3 реда“ и „следва търсенето“;
+     M26 печатът съдържа input → пада „няма input, select и button“;
+     M27 търсенето прерисува целия модул → пада „полето НЕ се прерисува“;
+     M28 печатът без white-space:normal → пада проверката по т.12;
+     M29 печатът пренебрегва филтрите → пада „редовете на текущия изглед“.
 */
 'use strict';
 
@@ -529,6 +542,139 @@ function noAmountInDom(name, h) {
     ok('заредено: Дневен с 11 реда', dailyRows(h).length === 11);
     realClick(h.w, h.doc.getElementById('rvs-schedule')); await ticks(3);
     ok('към графика: Минуси се скрива, бутонът не е активен', mod(h).style.display === 'none' && !h.doc.getElementById('rvs-minusi').classList.contains('active'));
+  }
+
+  section('11. Търсене по код, „Всички обекти“, Excel и печат (22.10.2026)');
+  {
+    /* Копие на базата след секции 1–4: 40243 от 14.10 е попълнен с
+       real_code '40244'. Добавяме заметнат код с букви (главни/малки) и втори
+       обект (Шумен) — същите движения с други документи. */
+    const base = db.movs.map(x => Object.assign({}, x));
+    const r17273 = base.find(x => x.material === '17273' && x.mvt_type === '955');
+    r17273.real_code = 'Ab-77';
+    const shumen = base.map(x => Object.assign({}, x, { id: 'sh-' + x.id, store_name: 'Шумен', plant: '5514', mat_doc: 'SH' + x.mat_doc, real_code: null, reason_id: null }));
+    const dbs = fakeDb({ movs: base.concat(shumen), settings: 'Гоце Делчев, Шумен' });
+    const today = H.boot({ modules: ['minusi.js'], user: ADMIN, data: {} }).w;
+    const TODAY = today.fmtDate(today.today());
+    const searchBox = h => h.doc.getElementById('mn-search');
+    const type = (h, v) => { const el = searchBox(h); el.value = v; fire(h.w, el, 'input'); };
+
+    /* ── търсене, обект ── */
+    const h = env(GD, dbs); await open(h);
+    const box = searchBox(h);
+    ok('поле „🔍 Код“ — и за обекта', !!box && box.getAttribute('placeholder') === '🔍 Код');
+    type(h, '40243');
+    let rs = dailyRows(h).map(cellTxt);
+    ok('търсене по материал „40243“ → двата реда 40243', rs.length === 2 && rs.every(c => c[0] === '40243'), rs.map(c => c[0]).join(','));
+    ok('полето НЕ се прерисува при писане (същият елемент — не губи фокуса)', searchBox(h) === box);
+    ok('броячите в бутоните остават общите', h.doc.getElementById('mn-v-daily').textContent.indexOf('общо 11 · незакрити 3') >= 0, h.doc.getElementById('mn-v-daily').textContent);
+    type(h, '40244');
+    rs = dailyRows(h).map(cellTxt);
+    ok('търсене по заметнат код „40244“ → редът 40243 от 14.10', rs.length === 1 && rs[0][0] === '40243' && rs[0][2] === '14.10.2026', rs.map(c => c[0] + '@' + c[2]).join(','));
+    type(h, '  aB-7 ');
+    rs = dailyRows(h).map(cellTxt);
+    ok('заметнат код без значение главни/малки и с trim („  aB-7 “ → 17273)', rs.length === 1 && rs[0][0] === '17273', rs.map(c => c[0]).join(','));
+    type(h, '40243');
+    const oo = h.doc.getElementById('mn-onlyopen'); oo.checked = true; fire(h.w, oo, 'change');
+    rs = dailyRows(h).map(cellTxt);
+    ok('търсене И „само незакрити“ → 1 ред (40243 от 14.10)', rs.length === 1 && rs[0][2] === '14.10.2026', rs.map(c => c[2]).join(','));
+    ok('… търсенето се пази при прерисуване от отметката', searchBox(h).value === '40243');
+    type(h, 'няма-такъв');
+    ok('няма съвпадение → „Няма редове за „…““', !!h.doc.getElementById('mn-empty') && h.doc.getElementById('mn-empty').textContent.indexOf('няма-такъв') >= 0);
+    type(h, '');
+    realClick(h.w, h.doc.getElementById('mn-v-bymat'));
+    type(h, '982');
+    const bm = Array.from(h.doc.querySelectorAll('#mn-bymat tbody tr')).map(cellTxt);
+    ok('„Незакрити по артикул“: търсене „982“ → 98275', bm.length === 1 && bm[0][0] === '98275', bm.map(c => c[0]).join(','));
+    type(h, '40244');
+    ok('„Незакрити по артикул“ НЕ търси по заметнат код („40244“ → нищо)', !h.doc.querySelector('#mn-bymat tbody tr'));
+
+    /* ── обект: няма „Всички обекти“ ── */
+    for (const u of [GD, GD_SKLAD]) {
+      const hs = env(u, dbs); await open(hs);
+      ok(u.role + ': няма меню „Обект“ и опция „Всички обекти“', !hs.doc.getElementById('mn-store') && mod(hs).innerHTML.indexOf('Всички обекти') < 0 && mod(hs).innerHTML.indexOf('__all__') < 0);
+      const n0 = dbs.log.length;
+      hs.w.mnSetStore('__all__'); await ticks(6);
+      ok(u.role + ': mnSetStore(„Всички“) отвън не тегли чужди обекти', !dbs.log.slice(n0).some(x => x.tbl === 'minus_movements' && !/store_name=eq\./.test(x.q)) && dailyRows(hs).every(r => !r.querySelector('.mn-store')));
+      /* Пряко, без loadMinusi (който и без това връща обекта към своя):
+         mnIsAll() е по роля, не само по стойността на mnStore. */
+      hs.w.mnStore = '__all__'; hs.w.mnStoresOn = ['__all__'];
+      ok(u.role + ': mnIsAll() е false дори при mnStore = „Всички“', hs.w.mnIsAll() === false);
+      hs.w.mnStore = u.store_name; hs.w.mnStoresOn = ['Гоце Делчев', 'Шумен'];
+    }
+
+    /* ── контролинг: „Всички обекти“ ── */
+    const ha = env(ADMIN, dbs); await open(ha);
+    const sel = ha.doc.getElementById('mn-store');
+    ok('контролинг: „Всички обекти“ е първата опция', sel && sel.options[0].value === '__all__' && sel.options[0].textContent === 'Всички обекти');
+    const n1 = dbs.log.length;
+    sel.value = '__all__'; fire(ha.w, sel, 'change'); await ticks(8);
+    ok('„Всички обекти“ тегли движенията без филтър по обект', dbs.log.slice(n1).some(x => x.tbl === 'minus_movements' && !/store_name=eq\./.test(x.q)));
+    rs = dailyRows(ha).map(cellTxt);
+    const ths = Array.from(ha.doc.querySelectorAll('#mn-daily thead th')).map(x => x.textContent.trim());
+    ok('Дневен: първа колона „Обект“, 22 реда от два обекта', ths[0] === 'Обект' && rs.length === 22 && rs.some(c => c[0] === 'Гоце Делчев') && rs.some(c => c[0] === 'Шумен'), ths[0] + ' / ' + rs.length);
+    ok('… бутонът: „общо 22 · незакрити 6“', ha.doc.getElementById('mn-v-daily').textContent.indexOf('общо 22 · незакрити 6') >= 0, ha.doc.getElementById('mn-v-daily').textContent);
+    type(ha, '17273');
+    rs = dailyRows(ha).map(cellTxt);
+    ok('„Всички“ + търсене „17273“ → по един ред от всеки обект', rs.length === 2 && rs.map(c => c[0]).sort().join(',') === 'Гоце Делчев,Шумен', rs.map(c => c[0]).join(','));
+    type(ha, '');
+    realClick(ha.w, ha.doc.getElementById('mn-v-bymat'));
+    const bmA = Array.from(ha.doc.querySelectorAll('#mn-bymat tbody tr')).map(cellTxt);
+    ok('по артикул при „Всички“: колона „Обект“, 6 реда', ha.doc.querySelector('#mn-bymat thead th').textContent === 'Обект' && bmA.length === 6, bmA.length);
+
+    /* ── Excel ── */
+    const xl = w => { const cap = { aoa: null, name: null, sheet: null }; w.XLSX = { utils: { book_new: () => ({}), aoa_to_sheet: a => { cap.aoa = a; return {}; }, book_append_sheet: (wb, ws, n) => { cap.sheet = n; } }, writeFile: (wb, n) => { cap.name = n; } }; return cap; };
+    const he = env(GD, dbs); await open(he);
+    let cap = xl(he.w);
+    const ooE = he.doc.getElementById('mn-onlyopen'); ooE.checked = true; fire(he.w, ooE, 'change');
+    realClick(he.w, he.doc.getElementById('mn-excel'));
+    ok('Excel (Дневен, само незакрити): заглавията', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|Дата|Количество|Мерна ед.|Състояние|Заметнат код|Причина|Име на служител|Бележка', cap.aoa && cap.aoa[0].join('|'));
+    ok('… 3 реда (филтърът е приложен)', cap.aoa && cap.aoa.length === 4, cap.aoa && cap.aoa.length);
+    const r98 = cap.aoa && cap.aoa.find(r => r[0] === '98275');
+    ok('… количеството е число, мерната единица — отделна колона', r98 && r98[3] === 2.88 && r98[4] === 'M2' && r98[2] === '07.10.2026', JSON.stringify(r98));
+    const r40 = cap.aoa && cap.aoa.find(r => r[0] === '40243');
+    ok('… заметнат код и причината като текст', r40 && r40[6] === '40244' && r40[7] === 'реална продажба, чака вход от ЛСТ' && r40[8] === 'Иван Иванов', JSON.stringify(r40));
+    ok('… без колона и стойност за сума', cap.aoa && !cap.aoa[0].some(x => /сума|amount/i.test(x)) && !/(^|[^\d.])(3\.7|13\.97|-1\.96)([^\d]|$)/.test(JSON.stringify(cap.aoa)));
+    ok('… име: Минуси_Гоце Делчев_Дневен_' + TODAY + '.xlsx', cap.name === 'Минуси_Гоце Делчев_Дневен_' + TODAY + '.xlsx', cap.name);
+    type(he, '40243');
+    cap = xl(he.w);
+    realClick(he.w, he.doc.getElementById('mn-excel'));
+    ok('Excel следва и търсенето („40243“ + само незакрити → 1 ред)', cap.aoa && cap.aoa.length === 2 && cap.aoa[1][0] === '40243', cap.aoa && cap.aoa.length);
+    type(he, '');
+    realClick(he.w, he.doc.getElementById('mn-v-bymat'));
+    cap = xl(he.w);
+    realClick(he.w, he.doc.getElementById('mn-excel'));
+    ok('Excel (по артикул): заглавията и 3 реда', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|955|956|Остатък|Мерна ед.' && cap.aoa.length === 4, cap.aoa && cap.aoa[0].join('|'));
+    ok('… име: Минуси_Гоце Делчев_Незакрити_' + TODAY + '.xlsx', cap.name === 'Минуси_Гоце Делчев_Незакрити_' + TODAY + '.xlsx', cap.name);
+    cap = xl(ha.w);
+    realClick(ha.w, ha.doc.getElementById('mn-excel'));
+    ok('Excel при „Всички обекти“ (по артикул): „Обект“ първа, 6 реда, име „Минуси_Всички_Незакрити_…“', cap.aoa && cap.aoa[0][0] === 'Обект' && cap.aoa.length === 7 && cap.name === 'Минуси_Всички_Незакрити_' + TODAY + '.xlsx', cap.name);
+
+    /* ── печат ── */
+    const hp = env(GD, dbs); await open(hp);
+    const ooP = hp.doc.getElementById('mn-onlyopen'); ooP.checked = true; fire(hp.w, ooP, 'change');
+    type(hp, '40243');
+    realClick(hp.w, hp.doc.getElementById('mn-print'));
+    const pw = hp.doc.getElementById('mn-print-wrap');
+    ok('печат: #mod-print е показан', hp.doc.getElementById('mod-print').style.display === 'block' && !!pw);
+    ok('печат: заглавие „Минуси — Гоце Делчев — Дневен — ' + TODAY + '“', pw && hp.doc.getElementById('mn-print-title').textContent === 'Минуси — Гоце Делчев — Дневен — ' + TODAY, pw && hp.doc.getElementById('mn-print-title').textContent);
+    ok('печат: редът с филтрите и търсенето', pw && /само незакрити/.test(hp.doc.getElementById('mn-print-filters').textContent) && /търсене „40243“/.test(hp.doc.getElementById('mn-print-filters').textContent), pw && hp.doc.getElementById('mn-print-filters').textContent);
+    const prow = pw ? Array.from(pw.querySelectorAll('table.mn-ptbl tr')).slice(1).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim())) : [];
+    ok('печат: редовете на текущия изглед (1 ред, 40243 от 14.10, причината като текст)', prow.length === 1 && prow[0][0] === '40243' && prow[0][2] === '14.10.2026' && prow[0][3] === '1 БР' && prow[0][6] === 'реална продажба, чака вход от ЛСТ', JSON.stringify(prow));
+    ok('печат: в съдържанието няма input, select и button', pw && pw.querySelectorAll('input, select, button').length === 0);
+    ok('печат: бутоните „Принтирай“ / „Назад“ са само в лентата .no-print', Array.from(hp.doc.querySelectorAll('#mod-print button')).every(b => !!b.closest('.no-print')));
+    const css = hp.doc.querySelector('#mod-print style').textContent;
+    ok('печат: т.12 — th white-space:normal, border-box, рамка на последния ред', /\.mn-ptbl th,\.mn-ptbl td\{[^}]*box-sizing:border-box[^}]*white-space:normal/.test(css) && /\.mn-ptbl tr:last-child td\{border-bottom:1px solid #333;\}/.test(css));
+    ok('печат: колоните се събират в 190 mm', Array.from(pw.querySelectorAll('col')).reduce((a, c) => a + parseFloat(c.style.width), 0) === 190);
+    realClick(hp.w, hp.doc.getElementById('mod-print').querySelector('button[onclick*="minusi"]')); await ticks(6);
+    type(hp, '');
+    const ooP2 = hp.doc.getElementById('mn-onlyopen'); ooP2.checked = false; fire(hp.w, ooP2, 'change');
+    realClick(hp.w, hp.doc.getElementById('mn-print'));
+    const grays = Array.from(hp.doc.querySelectorAll('#mn-print-wrap table.mn-ptbl tr')).slice(1);
+    ok('печат без филтри: 11 реда, закритите и под прага — сиви (8)', grays.length === 11 && grays.filter(tr => tr.classList.contains('mn-p-gray')).length === 8, grays.length + ' / ' + grays.filter(tr => tr.classList.contains('mn-p-gray')).length);
+    ok('печат без суми', !/(^|[^\d,.])(3[.,]7|13[.,]97|1[.,]96)([^\d]|$)/.test(hp.doc.getElementById('mn-print-wrap').textContent));
+    realClick(ha.w, ha.doc.getElementById('mn-print'));
+    ok('печат при „Всички обекти“: заглавие „… Всички обекти — Незакрити по артикул …“, колона „Обект“', ha.doc.getElementById('mn-print-title').textContent === 'Минуси — Всички обекти — Незакрити по артикул — ' + TODAY && ha.doc.querySelector('#mn-print-wrap th').textContent === 'Обект');
   }
 
   report();

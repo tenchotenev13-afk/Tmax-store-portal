@@ -37,7 +37,15 @@
      на качването, двата изгледа с избор на обект, филтър „непопълнени",
      свръхсторно. Не попълва вместо обекта.
    „Качва само контролинг" / „попълва само обектът" е проверка тук, не в
-   базата (общ anon ключ — виж хедъра на схемата). */
+   базата (общ anon ключ — виж хедъра на схемата).
+
+   Търсене, „Всички обекти", Excel и печат (22.10.2026, Миглена — писмо от
+   21.10 и телефон): поле „🔍 Код" (Дневен — материал ИЛИ заметнат код; по
+   артикул — материал), И с отметките; броячите в бутоните не се филтрират.
+   „Всички обекти" — само контролингът (първа опция в „Обект", колона „Обект").
+   „📥 Excel" и „🖨️ Печат" — текущият изглед с текущите филтри и търсене, без
+   суми. Печатът е в #mod-print (образец pkPrintDeviations в picking.js);
+   правилата от CLAUDE.md т.12 са изрично в mnPrintCss(). */
 
 var mnMovs = [];
 var mnReasons = [];
@@ -48,6 +56,8 @@ var mnStore = '';
 var mnView = 'daily';    /* 'daily' | 'bymat' */
 var mnOnlyUnfilled = false;
 var mnOnlyOpen = false;  /* „само незакрити" в Дневен — за обекта и контролинга */
+var mnSearch = '';       /* „🔍 Код" — материал или заметнат код */
+var MN_ALL = '__all__';  /* mnStore за „Всички обекти" — само контролингът */
 var mnReport = null;     /* отчет на последното качване в тази сесия */
 var mnLastUpload = null;
 var mnDraft = {};        /* id → {real_code, reason_id, employee_name, note} — незаписаното */
@@ -82,6 +92,8 @@ function mnParseStores(v){
   return String(v == null ? '' : v).split(',').map(function(s){ return s.trim(); }).filter(Boolean);
 }
 function mnStoreOn(store){ return !!store && mnStoresOn.indexOf(store) >= 0; }
+function mnIsAll(){ return mnIsCO() && mnStore === MN_ALL; }
+function mnStoreLabel(){ return mnIsAll() ? 'Всички обекти' : mnStore; }
 
 /* ─── Числа, дати, единици ─────────────────────────────── */
 function mnRound(x){ return Math.round(Number(x) * 1e6) / 1e6; }
@@ -192,7 +204,9 @@ function mnCompute(movs, thr){
   var newest = function(a, b){ return String(b.posting_date).localeCompare(String(a.posting_date)) || String(a.material).localeCompare(String(b.material), undefined, { numeric: true }); };
   out.all.sort(newest);
   out.open.sort(newest);
-  out.byMat.sort(function(a, b){ return String(a.material).localeCompare(String(b.material), undefined, { numeric: true }); });
+  var byMatSort = function(a, b){ return String(a.material).localeCompare(String(b.material), undefined, { numeric: true }) || String(a.store_name).localeCompare(String(b.store_name), 'bg'); };
+  out.byMat.sort(byMatSort);
+  out.over.sort(byMatSort);
   return out;
 }
 
@@ -343,9 +357,10 @@ function loadMinusi(){
     mnThresholds = {};
     rs[3].rows.forEach(function(t){ mnThresholds[mnNormUom(t.uom)] = Number(t.min_qty); });
     if(mnIsStoreUser()) mnStore = currentUser.store_name || '';
-    else if(!mnStore || mnStoreList().indexOf(mnStore) < 0) mnStore = mnStoresOn.filter(function(s){ return mnStoreList().indexOf(s) >= 0; })[0] || mnStoreList()[0] || '';
+    else if(mnStore !== MN_ALL && (!mnStore || mnStoreList().indexOf(mnStore) < 0)) mnStore = mnStoresOn.filter(function(s){ return mnStoreList().indexOf(s) >= 0; })[0] || mnStoreList()[0] || '';
     if(mnIsStoreUser() && !mnStoreOn(mnStore)){ mnMovs = []; mnRender(); return; }
-    var q = 'select=' + MN_MOV_COLS + '&store_name=eq.' + encodeURIComponent(mnStore) + '&order=posting_date.asc,mat_doc.asc,doc_item.asc,id.asc';
+    /* „Всички обекти" (само контролингът) — без филтър по обект. */
+    var q = 'select=' + MN_MOV_COLS + (mnIsAll() ? '' : '&store_name=eq.' + encodeURIComponent(mnStore)) + '&order=posting_date.asc,mat_doc.asc,doc_item.asc,id.asc';
     var reads = [sbGetAll('minus_movements', q)];
     if(mnIsCO()) reads.push(sbGetOk('minus_uploads', 'select=*&order=uploaded_at.desc&limit=1'));
     return Promise.all(reads).then(function(r2){
@@ -398,6 +413,7 @@ function mnRender(){
   h += '<div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
   if(mnIsCO()){
     h += '<label style="font-weight:600;">Обект:</label><select id="mn-store" onchange="mnSetStore(this.value)">';
+    h += '<option value="' + MN_ALL + '"' + (mnIsAll() ? ' selected' : '') + '>Всички обекти</option>';
     mnStoreList().forEach(function(s){ h += '<option value="' + escAttr(s) + '"' + (s === mnStore ? ' selected' : '') + '>' + esc(s) + (mnStoreOn(s) ? '' : ' (не е включен)') + '</option>'; });
     h += '</select>';
   } else h += '<b>' + esc(mnStore) + '</b>';
@@ -410,11 +426,42 @@ function mnRender(){
       h += '<label><input type="checkbox" id="mn-unfilled"' + (mnOnlyUnfilled ? ' checked' : '') + ' onchange="mnSetUnfilled(this.checked)"> само непопълнени (' + nUnf + ')</label>';
     }
   }
+  h += '<input id="mn-search" type="search" placeholder="🔍 Код" value="' + escAttrVal(mnSearch) + '" oninput="mnSetSearch(this.value)" style="width:140px;">';
+  h += '<button id="mn-excel" class="filter-btn" onclick="mnExportExcel()">📥 Excel</button>';
+  h += '<button id="mn-print" class="filter-btn" onclick="mnPrint()">🖨️ Печат</button>';
   h += '</div>';
-  h += mnView === 'bymat' ? mnByMatHtml(calc.byMat) : mnDailyHtml(calc.all);
+  /* Таблиците са в #mn-body — търсенето прерисува само тях, за да не губи
+     полето фокуса при всяка буква. */
+  h += '<div id="mn-body">' + mnBodyHtml(calc) + '</div>';
+  el.innerHTML = h;
+}
+/* Редовете на текущия изглед — с отметките и търсенето. Общо за екрана,
+   Excel и печата, за да не се разминат. */
+function mnMatchSearch(r, daily){
+  var q = String(mnSearch || '').trim().toLowerCase();
+  if(!q) return true;
+  if(String(r.material == null ? '' : r.material).toLowerCase().indexOf(q) >= 0) return true;
+  return !!daily && String(r.real_code == null ? '' : r.real_code).toLowerCase().indexOf(q) >= 0;
+}
+function mnViewRows(calc){
+  if(mnView === 'bymat') return calc.byMat.filter(function(r){ return mnMatchSearch(r, false); });
+  var rows = calc.all;
+  if(mnOnlyOpen) rows = rows.filter(function(r){ return r._state === 'open'; });
+  if(mnIsCO() && mnOnlyUnfilled) rows = rows.filter(function(r){ return r.reason_id == null; });
+  return rows.filter(function(r){ return mnMatchSearch(r, true); });
+}
+function mnBodyHtml(calc){
+  var rows = mnViewRows(calc);
+  var h = mnView === 'bymat' ? mnByMatHtml(rows) : mnDailyHtml(rows);
   /* Свръхсторното е грешка на магазина — вижда го и обектът (Миглена, 21.10.2026). */
   if(calc.over.length) h += mnOverHtml(calc.over);
-  el.innerHTML = h;
+  return h;
+}
+function mnRenderBody(){
+  var b = document.getElementById('mn-body');
+  if(!b){ mnRender(); return; }
+  mnCaptureDrafts();
+  b.innerHTML = mnBodyHtml(mnCompute(mnMovs, mnThresholds));
 }
 function mnUploadHtml(){
   var h = '<div class="card" id="mn-upload">';
@@ -439,12 +486,10 @@ function mnReportHtml(r){
   return h + '</div>';
 }
 function mnDailyHtml(rows){
-  if(mnOnlyOpen) rows = rows.filter(function(r){ return r._state === 'open'; });
-  if(mnIsCO() && mnOnlyUnfilled) rows = rows.filter(function(r){ return r.reason_id == null; });
-  if(!rows.length) return '<div class="card" id="mn-empty" style="color:#64748b;">' + (mnOnlyOpen ? 'Няма незакрити минуси.' : 'Няма минуси.') + '</div>';
-  var fill = mnCanFill();
+  if(!rows.length) return '<div class="card" id="mn-empty" style="color:#64748b;">' + (mnSearch.trim() ? 'Няма редове за „' + esc(mnSearch.trim()) + '“.' : mnOnlyOpen ? 'Няма незакрити минуси.' : 'Няма минуси.') + '</div>';
+  var fill = mnCanFill(), all = mnIsAll();
   var yel = 'background:#fef9c3;';
-  var h = '<div class="card" style="overflow-x:auto;"><table id="mn-daily"><thead><tr><th>Материал</th><th>Описание</th><th>Дата</th><th>Количество</th><th style="width:90px;">Състояние</th>';
+  var h = '<div class="card" style="overflow-x:auto;"><table id="mn-daily"><thead><tr>' + (all ? '<th>Обект</th>' : '') + '<th>Материал</th><th>Описание</th><th>Дата</th><th>Количество</th><th style="width:90px;">Състояние</th>';
   h += '<th style="' + yel + '">Заметнат код</th><th style="' + yel + '">Причина</th><th style="' + yel + '">Име на служител</th><th style="' + yel + '">Бележка</th><th></th></tr></thead><tbody>';
   rows.forEach(function(r){
     var id = String(r.id), done = r.reason_id != null;
@@ -452,7 +497,7 @@ function mnDailyHtml(rows){
     var val = function(k){ return d[k] != null ? d[k] : (r[k] == null ? '' : r[k]); };
     /* Закритите и под прага — сив текст; жълтите колони си остават жълти. */
     var gray = r._state === 'open' ? '' : ' style="color:#94a3b8;"';
-    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '><td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
+    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
     /* Мерната единица е в „Количество", „Състояние" се пренася на два реда,
        служител / бележка — 110px: с отделна колона „Мерна ед." таблицата беше
        1342 px срещу карта 1246 и „Запази" излизаше навън (Playwright, 22.10). */
@@ -490,10 +535,11 @@ function mnStateText(r){
   return mnRound(r._rest) < q - MN_EPS ? 'незакрит ' + mnFmtQty(r._rest) + ' от ' + mnFmtQty(q) : 'незакрит';
 }
 function mnByMatHtml(rows){
-  if(!rows.length) return '<div class="card" id="mn-empty" style="color:#64748b;">Няма незакрити артикули.</div>';
-  var h = '<div class="card" style="overflow-x:auto;"><table id="mn-bymat"><thead><tr><th>Материал</th><th>Описание</th><th>955</th><th>956</th><th>Остатък</th><th>Мерна ед.</th></tr></thead><tbody>';
+  if(!rows.length) return '<div class="card" id="mn-empty" style="color:#64748b;">' + (mnSearch.trim() ? 'Няма артикули за „' + esc(mnSearch.trim()) + '“.' : 'Няма незакрити артикули.') + '</div>';
+  var all = mnIsAll();
+  var h = '<div class="card" style="overflow-x:auto;"><table id="mn-bymat"><thead><tr>' + (all ? '<th>Обект</th>' : '') + '<th>Материал</th><th>Описание</th><th>955</th><th>956</th><th>Остатък</th><th>Мерна ед.</th></tr></thead><tbody>';
   rows.forEach(function(r){
-    h += '<tr id="mn-mat-' + escAttr(r.material) + '"><td>' + esc(r.material) + '</td><td>' + esc(r.desc) + '</td>';
+    h += '<tr id="mn-mat-' + escAttr((all ? r.store_name + '-' : '') + r.material) + '">' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.desc) + '</td>';
     h += '<td class="mn-s955" style="text-align:right;">' + esc(mnFmtQty(r.s955)) + '</td><td class="mn-s956" style="text-align:right;">' + esc(mnFmtQty(r.s956)) + '</td>';
     h += '<td class="mn-rest" style="text-align:right;font-weight:600;">' + esc(mnFmtQty(r.rest)) + '</td><td>' + esc(r.uom) + '</td></tr>';
   });
@@ -501,9 +547,10 @@ function mnByMatHtml(rows){
 }
 function mnOverHtml(rows){
   var h = '<div class="card" id="mn-over" style="border-left:4px solid #dc2626;"><b style="color:#b91c1c;">⚠ Свръхсторно — 956 над 955</b>';
-  h += '<table><thead><tr><th>Материал</th><th>Описание</th><th>955</th><th>956</th><th>Разлика</th><th>Мерна ед.</th></tr></thead><tbody>';
+  var all = mnIsAll();
+  h += '<table><thead><tr>' + (all ? '<th>Обект</th>' : '') + '<th>Материал</th><th>Описание</th><th>955</th><th>956</th><th>Разлика</th><th>Мерна ед.</th></tr></thead><tbody>';
   rows.forEach(function(r){
-    h += '<tr><td>' + esc(r.material) + '</td><td>' + esc(r.desc) + '</td><td>' + esc(mnFmtQty(r.s955)) + '</td><td>' + esc(mnFmtQty(r.s956)) + '</td><td>' + esc(mnFmtQty(r.rest)) + '</td><td>' + esc(r.uom) + '</td></tr>';
+    h += '<tr>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.desc) + '</td><td>' + esc(mnFmtQty(r.s955)) + '</td><td>' + esc(mnFmtQty(r.s956)) + '</td><td>' + esc(mnFmtQty(r.rest)) + '</td><td>' + esc(r.uom) + '</td></tr>';
   });
   return h + '</tbody></table></div>';
 }
@@ -512,6 +559,102 @@ function mnOverHtml(rows){
 function mnSetView(v){ mnView = v === 'bymat' ? 'bymat' : 'daily'; mnRender(); }
 function mnSetUnfilled(on){ mnOnlyUnfilled = !!on; mnRender(); }
 function mnSetOnlyOpen(on){ mnOnlyOpen = !!on; mnRender(); }
+function mnSetSearch(v){ mnSearch = String(v == null ? '' : v); mnRenderBody(); }
+
+/* ─── Excel и печат на текущия изглед ──────────────────── */
+function mnViewLabel(){ return mnView === 'bymat' ? 'Незакрити по артикул' : 'Дневен'; }
+function mnFilterText(){
+  var f = [];
+  if(mnView === 'daily' && mnOnlyOpen) f.push('само незакрити');
+  if(mnView === 'daily' && mnIsCO() && mnOnlyUnfilled) f.push('само непопълнени');
+  if(String(mnSearch || '').trim()) f.push('търсене „' + String(mnSearch).trim() + '“');
+  return f.length ? 'Филтри: ' + f.join(' · ') : 'Без филтри';
+}
+/* aoa за Excel: колоните като на екрана, без полета за въвеждане; БЕЗ СУМИ. */
+function mnExportAoa(){
+  var calc = mnCompute(mnMovs, mnThresholds), rows = mnViewRows(calc), all = mnIsAll();
+  var aoa;
+  if(mnView === 'bymat'){
+    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', '955', '956', 'Остатък', 'Мерна ед.'])];
+    rows.forEach(function(r){
+      aoa.push((all ? [r.store_name] : []).concat([r.material, r.desc || '', r.s955, r.s956, r.rest, r.uom || '']));
+    });
+  } else {
+    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка'])];
+    rows.forEach(function(r){
+      aoa.push((all ? [r.store_name] : []).concat([r.material, r.material_desc || '', fmtDate(r.posting_date), mnRound(Number(r.qty) || 0), r.uom || '',
+        mnStateText(r), r.real_code || '', mnReasonLabel(r.reason_id), r.employee_name || '', r.note || '']));
+    });
+  }
+  return aoa;
+}
+function mnExportName(){
+  return 'Минуси_' + (mnIsAll() ? 'Всички' : mnStore) + '_' + (mnView === 'bymat' ? 'Незакрити' : 'Дневен') + '_' + fmtDate(today()) + '.xlsx';
+}
+function mnExportExcel(){
+  var aoa = mnExportAoa();
+  if(aoa.length < 2){ toast('Няма редове за износ', '#d97706'); return; }
+  var name = mnExportName();
+  mnWithXlsx(function(){
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), mnView === 'bymat' ? 'Незакрити' : 'Дневен');
+    XLSX.writeFile(wb, name);
+  });
+}
+/* CLAUDE.md т.12: глобалните правила от index.html (th nowrap, без долна
+   рамка на последния ред) важат и тук — затова са изрично; border-box, за да
+   не излиза таблицата извън 190 mm. */
+function mnPrintCss(){
+  return '.mn-ptbl{width:100%;border-collapse:collapse;table-layout:fixed;font-size:10px;}' +
+    '.mn-ptbl th,.mn-ptbl td{box-sizing:border-box;border:1px solid #333;padding:1.2mm 0.8mm;white-space:normal;word-wrap:break-word;vertical-align:top;text-align:left;}' +
+    '.mn-ptbl tr:last-child td{border-bottom:1px solid #333;}' +
+    '.mn-ptbl th{background:#f1f5f9;}' +
+    '.mn-ptbl tr.mn-p-gray td{color:#888;}';
+}
+function mnP(v){ return v == null || v === '' ? '' : esc(String(v)); }
+function mnPrint(){
+  var wrap = document.getElementById('mod-print');
+  if(!wrap) return;
+  var calc = mnCompute(mnMovs, mnThresholds), rows = mnViewRows(calc), all = mnIsAll();
+  var cols, head, body;
+  if(mnView === 'bymat'){
+    cols = all ? [24, 18, 78, 16, 16, 20, 18] : [18, 102, 16, 16, 20, 18];
+    head = (all ? ['Обект'] : []).concat(['Материал', 'Описание', '955', '956', 'Остатък', 'Мерна ед.']);
+    body = rows.map(function(r){
+      return '<tr>' + (all ? '<td>' + mnP(r.store_name) + '</td>' : '') + '<td>' + mnP(r.material) + '</td><td>' + mnP(r.desc) + '</td><td>' + mnP(mnFmtQty(r.s955)) + '</td><td>' + mnP(mnFmtQty(r.s956)) + '</td><td>' + mnP(mnFmtQty(r.rest)) + '</td><td>' + mnP(r.uom) + '</td></tr>';
+    }).join('');
+  } else {
+    cols = all ? [18, 16, 34, 16, 16, 18, 16, 22, 18, 16] : [16, 44, 16, 16, 18, 16, 30, 18, 16];
+    head = (all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка']);
+    body = rows.map(function(r){
+      return '<tr' + (r._state === 'open' ? '' : ' class="mn-p-gray"') + '>' + (all ? '<td>' + mnP(r.store_name) + '</td>' : '') +
+        '<td>' + mnP(r.material) + '</td><td>' + mnP(r.material_desc) + '</td><td>' + mnP(fmtDate(r.posting_date)) + '</td>' +
+        '<td>' + mnP(mnFmtQty(Number(r.qty)) + (r.uom ? ' ' + r.uom : '')) + '</td><td>' + mnP(mnStateText(r)) + '</td>' +
+        '<td>' + mnP(r.real_code) + '</td><td>' + mnP(mnReasonLabel(r.reason_id)) + '</td><td>' + mnP(r.employee_name) + '</td><td>' + mnP(r.note) + '</td></tr>';
+    }).join('');
+  }
+  var title = 'Минуси — ' + mnStoreLabel() + ' — ' + mnViewLabel() + ' — ' + fmtDate(today());
+  var tbl = rows.length
+    ? '<table class="mn-ptbl"><colgroup>' + cols.map(function(w){ return '<col style="width:' + w + 'mm;">'; }).join('') + '</colgroup>' +
+      '<tr>' + head.map(function(x){ return '<th>' + esc(x) + '</th>'; }).join('') + '</tr>' + body + '</table>'
+    : '<div style="padding:12px;color:#777;">Няма редове.</div>';
+  wrap.innerHTML = '<style>' + mnPrintCss() + '</style>' +
+    '<div style="max-width:190mm;margin:0 auto;padding:16px 0 40px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;" class="no-print">' +
+        '<div style="font-size:18px;font-weight:600;">🖨️ Минуси</div>' +
+        '<div style="display:flex;gap:8px;align-items:center;">' +
+          '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>' +
+          '<button onclick="showModule(\'minusi\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Назад</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="mn-print-wrap">' +
+        '<div id="mn-print-title" style="font-size:15px;font-weight:700;">' + esc(title) + '</div>' +
+        '<div id="mn-print-filters" style="font-size:11px;color:#555;margin-bottom:6px;">' + esc(mnFilterText()) + ' · редове: ' + rows.length + '</div>' +
+        tbl +
+      '</div>' +
+    '</div>';
+  showModule('print');
+}
 function mnSetStore(s){
   if(!mnIsCO()) return;
   mnStore = s; mnMovs = []; mnDraft = {};
