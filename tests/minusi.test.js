@@ -83,6 +83,8 @@
      M27 търсенето прерисува целия модул → пада „полето НЕ се прерисува“;
      M28 печатът без white-space:normal → пада проверката по т.12;
      M29 печатът пренебрегва филтрите → пада „редовете на текущия изглед“.
+   Заглавие „Кол-во“ в печата (22.10.2026, Тенчо: „Количест / во“ в PDF):
+     M30 печатът пак с „Количество“ → пада „печат: заглавието … „Кол-во““.
 */
 'use strict';
 
@@ -661,6 +663,11 @@ function noAmountInDom(name, h) {
     ok('печат: редът с филтрите и търсенето', pw && /само незакрити/.test(hp.doc.getElementById('mn-print-filters').textContent) && /търсене „40243“/.test(hp.doc.getElementById('mn-print-filters').textContent), pw && hp.doc.getElementById('mn-print-filters').textContent);
     const prow = pw ? Array.from(pw.querySelectorAll('table.mn-ptbl tr')).slice(1).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent.trim())) : [];
     ok('печат: редовете на текущия изглед (1 ред, 40243 от 14.10, причината като текст)', prow.length === 1 && prow[0][0] === '40243' && prow[0][2] === '14.10.2026' && prow[0][3] === '1 БР' && prow[0][6] === 'реална продажба, чака вход от ЛСТ', JSON.stringify(prow));
+    /* 22.10.2026: в 16 mm „Количество“ се пречупваше по средата на думата
+       (Chrome → PDF) — в печата е „Кол-во“; екранът и Excel са непроменени. */
+    const pth = pw ? Array.from(pw.querySelectorAll('table.mn-ptbl th')).map(x => x.textContent.trim()) : [];
+    ok('печат: заглавието на колоната е „Кол-во“, не „Количество“', pth[3] === 'Кол-во' && pth.indexOf('Количество') < 0, pth.join(' | '));
+    ok('екран: заглавието си остава „Количество“', Array.from(hp.doc.querySelectorAll('#mn-daily thead th')).some(x => x.textContent.trim() === 'Количество'));
     ok('печат: в съдържанието няма input, select и button', pw && pw.querySelectorAll('input, select, button').length === 0);
     ok('печат: бутоните „Принтирай“ / „Назад“ са само в лентата .no-print', Array.from(hp.doc.querySelectorAll('#mod-print button')).every(b => !!b.closest('.no-print')));
     const css = hp.doc.querySelector('#mod-print style').textContent;
