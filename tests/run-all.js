@@ -85,6 +85,7 @@ const TESTS = [
   'revision-schedule.test.js',
   'minusi.test.js',
   'picking.test.js',
+  'picking-pallets.test.js',
   'stock-diff-null-payload.test.js',
   'stock-diff-status-labels.test.js',
   'catalog-lookup.test.js',

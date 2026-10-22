@@ -1748,9 +1748,11 @@ function startApp(){
   } catch(e){}
   showModule(startTab);
   /* Deep link от етикет — след входа. Палет (#tl=…&p=…) чете loading.js;
-     само ако не е негов, товар от трансфер (#tf=…&c=…&u=…) — transfers.js. */
+     само ако не е негов, товар от трансфер (#tf=…&c=…&u=…) — transfers.js;
+     после единица от пикинга (#pk=<id>) — picking.js. */
   var dl = (typeof llDeepLinkBoot==='function') && llDeepLinkBoot();
-  if(!dl && typeof tfDeepLinkBoot==='function') tfDeepLinkBoot();
+  if(!dl && typeof tfDeepLinkBoot==='function') dl = tfDeepLinkBoot();
+  if(!dl && typeof pkDeepLinkBoot==='function') pkDeepLinkBoot();
 }
 function setupTabsForRole(){
   /* Таб Каса — само за kasa, manager, admin, accounting */

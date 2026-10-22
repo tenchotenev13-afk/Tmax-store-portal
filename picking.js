@@ -29,7 +29,19 @@
    повторното му качване ДУБЛИРА (етап 1, известно).
 
    Видими редове: от качванията за последните PK_DAYS дни на избрания склад
-   (решение на сесията — иначе старите седмици трупат „Отворени" завинаги). */
+   (решение на сесията — иначе старите седмици трупат „Отворени" завинаги).
+
+   ЕТАП 2, част А (22.10.2026) — единици. Схема: picking-pallets-schema.sql
+   (picking_pallets, picking_pallet_items). Вътрешна лента „📦 Събиране" /
+   „🚚 Изпращане" (второто — етап 2б); обектът вижда само „Изпращане".
+   „✓ Взето" записва реда И го слага в ТЕКУЩАТА единица на обекта с този
+   брой (без текуща → нов палет; текущата затворена → отказ). Един ред може
+   да е в няколко единици: взето = qty_picked ?? qty_requested, остатък =
+   взето − Σ qty по единици; „➕ В единицата" добавя към СБОРА (не
+   презаписва). „↩ Върни" на ред в единица — отказ. „Събрано" не е колона:
+   няма отворени редове, остатък и отворени единици. Етикети (само
+   затворените, 4 на A4) с QR #pk=<id> — библиотеката на Товарни листи
+   (llLoadQrLib / llQrSvg от loading.js, само се викат); „🖨 Опис" по единица. */
 
 var pkUsersOn = [];     /* app_settings.picking_users — малки букви */
 var pkUsersSeq = 0;
@@ -43,11 +55,22 @@ var pkEdit = null;      /* {id, mode:'pick'|'skip'} — отвореното п�
 var pkLoadSeq = 0;
 var pkLoadErr = '';
 var pkBusy = false;
+var pkSub = 'collect';  /* collect | ship — вътрешната лента */
+var pkPallets = [];     /* единиците на склада: отворени + от последните PK_DAYS дни */
+var pkItems = [];       /* picking_pallet_items на тези единици */
+var pkExtraLines = {};  /* id → ред от по-старо качване, който е в заредена единица */
+var pkCurByStore = {};  /* обект → id на текущата единица */
+var pkNewOpen = false;  /* отворен ли е изборът „➕ Нова единица" */
+var pkFinish = {};      /* обект → {ok} | {issues:[…]} — резултатът от „Приключи" */
+var pkDeepLink = null;  /* чакащият #pk=<id> */
 
 var PK_DAYS = 14;
 var PK_CHUNK = 500;
 var PK_LINE_COLS = 'id,batch_id,warehouse,store_name,sap_code,product_name,unit,qty_requested,supply_group,sap_order,sap_item,line_no,status,qty_picked,comment,done_by,done_at,created_at';
 var PK_FILTER_LABEL = { open: 'Отворени', picked: 'Взети', skipped: 'Пропуснати', all: 'Всички' };
+var PK_KIND = { pallet: { icon: '📦', label: 'Палет' }, bulk: { icon: '🧱', label: 'Насип' }, carton: { icon: '🗃', label: 'Кашон' } };
+var PK_ITEM_COLS = 'id,pallet_id,line_id,qty,qty_received,receive_comment,created_at';
+var PK_EPS = 1e-9;
 
 /* ─── Достъп ───────────────────────────────────────────── */
 function pkParseUsers(v){
@@ -75,6 +98,11 @@ function pkFixedWarehouse(){
 }
 function pkActiveWarehouse(){
   return pkFixedWarehouse() || (LOGISTICS_WAREHOUSES.indexOf(pkWarehouse) >= 0 ? pkWarehouse : '');
+}
+/* Обект (не склад, не ЦО, не глобална роля) — вижда само „🚚 Изпращане". */
+function pkIsStoreSide(){
+  if(!currentUser || !currentUser.store_name || pkFixedWarehouse() || isGlobal()) return false;
+  return !(typeof isCentralOffice === 'function' && isCentralOffice(currentUser.store_name));
 }
 
 /* ─── Числа и дати ─────────────────────────────────────── */
@@ -283,24 +311,80 @@ function loadPicking(){
   var seq = ++pkLoadSeq;
   return pkLoadUsers().then(function(){
     if(seq !== pkLoadSeq) return;
-    if(!pkCanSee()){ el.innerHTML = pkTitle() + '<div class="card" id="pk-noaccess">Нямаш достъп до този модул.</div>'; return; }
+    if(!pkCanSee()){ pkDeepLink = null; el.innerHTML = pkTitle() + '<div class="card" id="pk-noaccess">Нямаш достъп до този модул.</div>'; return; }
+    /* Обектът: само „🚚 Изпращане" (етап 2б) — тук нищо не се чете. */
+    if(pkIsStoreSide()){ pkSub = 'ship'; pkDeepLink = null; pkRender(); return; }
+    if(pkDeepLink) return pkDeepLinkResolve(seq).then(function(){ if(seq === pkLoadSeq) return pkLoadData(seq); });
+    return pkLoadData(seq);
+  });
+}
+function pkLoadData(seq){
+  var el = document.getElementById('mod-picking');
+  return Promise.resolve().then(function(){
     var wh = pkActiveWarehouse();
-    if(!wh){ pkBatches = []; pkLines = []; pkRender(); return; }
+    if(!wh){ pkBatches = []; pkLines = []; pkPallets = []; pkItems = []; pkExtraLines = {}; pkRender(); return; }
     if(!pkBatches.length) el.innerHTML = pkTitle() + '<div style="padding:20px;color:#94a3b8;">⏳ Зареждане...</div>';
     var since = new Date(Date.now() - PK_DAYS * 86400000).toISOString();
     return sbGetOk('picking_batches', 'select=*&warehouse=eq.' + encodeURIComponent(wh) + '&uploaded_at=gte.' + encodeURIComponent(since) + '&order=uploaded_at.desc').then(function(rb){
       if(seq !== pkLoadSeq) return;
       if(!rb.ok){ pkLoadErr = rb.error; pkRenderErr(); return; }
       var batches = rb.rows;
-      if(!batches.length){ pkLoadErr = ''; pkBatches = []; pkLines = []; pkRender(); return; }
-      var ids = batches.map(function(b){ return b.id; }).join(',');
-      return sbGetAll('picking_lines', 'select=' + PK_LINE_COLS + '&batch_id=in.(' + ids + ')&order=created_at.asc,line_no.asc,id.asc').then(function(lines){
+      var linesP = batches.length
+        ? sbGetAll('picking_lines', 'select=' + PK_LINE_COLS + '&batch_id=in.(' + batches.map(function(b){ return b.id; }).join(',') + ')&order=created_at.asc,line_no.asc,id.asc')
+        : Promise.resolve([]);
+      return linesP.then(function(lines){
         if(seq !== pkLoadSeq) return;
         if(lines.partial){ pkLoadErr = 'редовете не се заредиха изцяло'; pkRenderErr(); return; }
-        pkLoadErr = '';
-        pkBatches = batches;
-        pkLines = lines;
-        pkRender();
+        return pkLoadUnits(wh, lines).then(function(u){
+          if(seq !== pkLoadSeq) return;
+          if(u.error){ pkLoadErr = u.error; pkRenderErr(); return; }
+          pkLoadErr = '';
+          pkBatches = batches;
+          pkLines = lines;
+          pkPallets = u.pallets;
+          pkItems = u.items;
+          pkExtraLines = u.extra;
+          pkRender();
+        });
+      });
+    });
+  });
+}
+/* GET с in.(…) на порции — дълъг списък id-та не бива да удари лимита на URL. */
+function pkGetIn(table, col, ids, select, order){
+  var parts = [];
+  for(var i = 0; i < ids.length; i += 80) parts.push(ids.slice(i, i + 80));
+  return Promise.all(parts.map(function(p){
+    return sbGetAll(table, 'select=' + select + '&' + col + '=in.(' + p.join(',') + ')&order=' + order);
+  })).then(function(rs){
+    var out = [], partial = false;
+    rs.forEach(function(r){ if(r.partial) partial = true; out = out.concat(r); });
+    if(partial) out.partial = true;
+    return out;
+  });
+}
+/* Единиците на склада (отворени + от последните PK_DAYS дни), редовете в тях
+   и редовете от по-стари качвания, които са в тях. → {pallets, items, extra} | {error} */
+function pkLoadUnits(wh, lines){
+  var since = new Date(Date.now() - PK_DAYS * 86400000);
+  var sinceD = since.getFullYear() + '-' + pkPad(since.getMonth() + 1) + '-' + pkPad(since.getDate());
+  return sbGetOk('picking_pallets', 'select=*&warehouse=eq.' + encodeURIComponent(wh) +
+    '&or=(status.eq.open,created_on.gte.' + sinceD + ')&order=created_at.asc,id.asc').then(function(rp){
+    if(!rp.ok) return { error: rp.error };
+    var pallets = rp.rows;
+    if(!pallets.length) return { pallets: [], items: [], extra: {} };
+    return pkGetIn('picking_pallet_items', 'pallet_id', pallets.map(function(p){ return p.id; }), PK_ITEM_COLS, 'created_at.asc,id.asc').then(function(items){
+      if(items.partial) return { error: 'единиците не се заредиха изцяло' };
+      var have = {};
+      lines.forEach(function(l){ have[l.id] = 1; });
+      var miss = [];
+      items.forEach(function(it){ if(!have[it.line_id] && miss.indexOf(it.line_id) < 0) miss.push(it.line_id); });
+      if(!miss.length) return { pallets: pallets, items: items, extra: {} };
+      return pkGetIn('picking_lines', 'id', miss, PK_LINE_COLS, 'id.asc').then(function(ex){
+        if(ex.partial) return { error: 'редовете на единиците не се заредиха изцяло' };
+        var extra = {};
+        ex.forEach(function(l){ extra[l.id] = l; });
+        return { pallets: pallets, items: items, extra: extra };
       });
     });
   });
@@ -335,8 +419,28 @@ function pkBatchDeletable(bId){
 function pkRender(){
   var el = document.getElementById('mod-picking');
   if(!el) return;
+  if(pkIsStoreSide()) pkSub = 'ship';
+  el.innerHTML = pkTitle() + pkSubnavHtml() + (pkSub === 'ship' ? pkRenderShip() : pkRenderCollect());
+}
+/* Вътрешната лента (образец #rev-subnav). Обектът вижда само „Изпращане". */
+function pkSubnavHtml(){
+  var h = '<div id="pk-subnav" class="no-print" style="display:flex;gap:8px;margin:0 0 10px;">';
+  if(!pkIsStoreSide()) h += '<button id="pks-collect" class="filter-btn' + (pkSub === 'collect' ? ' active' : '') + '" onclick="pkSetSub(\'collect\')">📦 Събиране</button>';
+  h += '<button id="pks-ship" class="filter-btn' + (pkSub === 'ship' ? ' active' : '') + '" onclick="pkSetSub(\'ship\')">🚚 Изпращане</button>';
+  return h + '</div>';
+}
+function pkSetSub(s){
+  pkSub = (s === 'ship' || pkIsStoreSide()) ? 'ship' : 'collect';
+  pkEdit = null;
+  pkRender();
+}
+/* Етап 2б — изпращане и приемане. Не се крие (правило 11). */
+function pkRenderShip(){
+  return '<div class="card" id="pk-ship-stub" style="color:#64748b;">🚚 Изпращане и приемане — етап 2б (в разработка).</div>';
+}
+function pkRenderCollect(){
   var wh = pkActiveWarehouse();
-  var h = pkTitle();
+  var h = '';
   h += '<div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
   if(pkFixedWarehouse()) h += '<b id="pk-wh-fixed">' + esc(wh) + '</b>';
   else {
@@ -349,17 +453,19 @@ function pkRender(){
     h += '<button id="pk-print" class="btn" onclick="pkPrintDeviations()">🖨 Отклонения</button>';
   }
   h += '</div>';
-  if(!wh){ el.innerHTML = h + '<div class="card" id="pk-need-wh" style="color:#64748b;">Избери склад, за да качиш файл и да видиш списъка.</div>'; return; }
+  if(!wh) return h + '<div class="card" id="pk-need-wh" style="color:#64748b;">Избери склад, за да качиш файл и да видиш списъка.</div>';
   h += pkBatchesHtml();
   var stats = pkStoreStats();
-  if(!stats.length){ el.innerHTML = h + '<div class="card" id="pk-empty" style="color:#64748b;">Няма редове за пикинг за последните ' + PK_DAYS + ' дни.</div>'; return; }
+  if(!stats.length) return h + '<div class="card" id="pk-empty" style="color:#64748b;">Няма редове за пикинг за последните ' + PK_DAYS + ' дни.</div>';
   if(!pkStore || !stats.some(function(s){ return s.store === pkStore; })) pkStore = stats[0].store;
   h += '<div class="card" id="pk-chips" style="display:flex;flex-wrap:wrap;gap:6px;">';
   stats.forEach(function(s){
     h += '<button class="filter-btn pk-chip' + (s.store === pkStore ? ' active' : '') + '" data-pk-store="' + escAttr(s.store) + '" onclick="pkSetStore(this.getAttribute(\'data-pk-store\'))">' +
-      esc(s.store) + ' · взети ' + s.picked + ' от ' + s.total + (s.skipped ? ' · ⤼ ' + s.skipped : '') + '</button>';
+      esc(s.store) + ' · взети ' + s.picked + ' от ' + s.total + (s.skipped ? ' · ⤼ ' + s.skipped : '') +
+      (pkStoreCollected(s.store) ? ' · ✅ събрано' : '') + '</button>';
   });
   h += '</div>';
+  h += pkUnitsHtml(pkStore);
   var mine = pkLines.filter(function(l){ return l.store_name === pkStore; });
   var cnt = { open: 0, picked: 0, skipped: 0, all: mine.length };
   mine.forEach(function(l){ if(cnt[l.status] != null) cnt[l.status]++; });
@@ -370,7 +476,7 @@ function pkRender(){
   h += '<input id="pk-search" class="fi" placeholder="🔍 код или име" value="' + escAttrVal(pkSearch) + '" oninput="pkSetSearch(this.value)" style="max-width:240px;margin-left:auto;">';
   h += '</div>';
   h += '<div id="pk-list">' + pkListHtml() + '</div>';
-  el.innerHTML = h;
+  return h;
 }
 function pkBatchesHtml(){
   if(!pkBatches.length) return '<div class="card" id="pk-batches" style="color:#64748b;">Няма качвания за последните ' + PK_DAYS + ' дни.</div>';
@@ -431,15 +537,33 @@ function pkRowHtml(l){
     } else {
       h += '<span class="pk-badge" title="' + who + '" style="background:#fef3c7;color:#92400e;border-radius:6px;padding:2px 6px;">⤼ ' + pkE(l.comment) + '</span>';
     }
+    var rest = l.status === 'picked' ? pkRest(l) : 0;
+    if(rest > PK_EPS && ed === 'add'){
+      h += ' <input id="pk-add-' + id + '" type="number" step="any" value="' + escAttrVal(String(pkRound(rest))) + '" style="width:80px;"> ' +
+        '<button class="btn btn-sm btn-primary" onclick="pkSaveAdd(\'' + id + '\')">Добави</button> <button class="btn btn-sm" onclick="pkCancel()">Отказ</button>';
+    } else if(rest > PK_EPS){
+      h += ' <button class="btn btn-sm pk-add" onclick="pkStartEdit(\'' + id + '\',\'add\')">➕ В единицата (' + esc(pkFmtQty(rest)) + ')</button>';
+    }
     h += ' <button class="btn btn-sm" onclick="pkUndo(\'' + id + '\')">↩ Върни</button>';
   }
-  return h + '</td></tr>';
+  h += '</td></tr>';
+  var parts = pkItemsOfLine(l.id);
+  if(parts.length){
+    h += '<tr class="pk-parts" data-pk-parts="' + id + '"><td colspan="4" style="font-size:12px;color:#475569;padding-top:0;">' +
+      parts.map(function(it){
+        var p = pkPalletById(it.pallet_id);
+        return '<span class="pk-part" data-pk-item="' + escAttr(it.id) + '">' + (p ? esc(pkUnitName(p)) : 'единица') + ' × ' + esc(pkFmtQty(it.qty)) +
+          ' <button class="btn btn-sm pk-part-x" title="Махни от единицата" onclick="pkRemoveItem(\'' + escAttr(it.id) + '\')">✕</button></span>';
+      }).join(' · ') + '</td></tr>';
+  }
+  return h;
 }
 
 /* ─── Действия ─────────────────────────────────────────── */
 function pkSetWarehouse(v){
   pkWarehouse = v || '';
   pkBatches = []; pkLines = []; pkStore = ''; pkEdit = null;
+  pkPallets = []; pkItems = []; pkExtraLines = {}; pkCurByStore = {}; pkFinish = {}; pkNewOpen = false;
   return loadPicking();
 }
 function pkSetStore(s){ pkStore = s; pkEdit = null; pkRender(); }
@@ -470,7 +594,42 @@ function pkSavePick(id){
   var n = pkNum(inp ? inp.value : null);
   if(n == null || !(n > 0)){ toast('Броят трябва да е над 0', '#dc2626'); return Promise.resolve(false); }
   var same = Math.abs(n - Number(l.qty_requested)) < 1e-9;
-  return pkWrite(l, { status: 'picked', qty_picked: same ? null : n, comment: null, done_by: pkWho(), done_at: new Date().toISOString() }, '✓ Взето');
+  /* Редът влиза в ТЕКУЩАТА единица с целия взет брой. Затворена текуща →
+     отказ ПРЕДИ всеки запис; без текуща → нов палет. */
+  return pkTargetUnit(l.store_name).then(function(u){
+    if(!u) return false;
+    var body = { status: 'picked', qty_picked: same ? null : n, comment: null, done_by: pkWho(), done_at: new Date().toISOString() };
+    return sbPatch('picking_lines', 'id=eq.' + encodeURIComponent(l.id), body).then(function(res){
+      if(!res.ok){ toast('Не е записано: ' + sbErrMsg(res), '#dc2626'); return false; }
+      Object.keys(body).forEach(function(k){ l[k] = body[k]; });
+      return pkAddToUnit(u, l, n).then(function(ok){
+        pkEdit = null;
+        pkRender();
+        if(ok) toast('✓ Взето · ' + pkUnitName(u));
+        else toast('Взето, но не влезе в единицата — „➕ В единицата"', '#dc2626');
+        return ok;
+      });
+    });
+  });
+}
+/* „➕ В единицата" — остатъкът на взет ред; сборът, не презапис. */
+function pkSaveAdd(id){
+  var l = pkFind(id);
+  if(!l || !pkCanSee() || l.status !== 'picked') return Promise.resolve(false);
+  var rest = pkRest(l);
+  var inp = document.getElementById('pk-add-' + id);
+  var n = pkNum(inp ? inp.value : null);
+  if(n == null || !(n > PK_EPS)){ toast('Броят трябва да е над 0', '#dc2626'); return Promise.resolve(false); }
+  if(n > rest + PK_EPS){ toast('Над остатъка (' + pkFmtQty(rest) + ')', '#dc2626'); return Promise.resolve(false); }
+  return pkTargetUnit(l.store_name).then(function(u){
+    if(!u) return false;
+    return pkAddToUnit(u, l, n).then(function(ok){
+      pkEdit = null;
+      pkRender();
+      if(ok) toast('➕ ' + pkFmtQty(n) + ' в ' + pkUnitName(u));
+      return ok;
+    });
+  });
 }
 function pkSaveSkip(id){
   var l = pkFind(id);
@@ -483,6 +642,7 @@ function pkSaveSkip(id){
 function pkUndo(id){
   var l = pkFind(id);
   if(!l || !pkCanSee()) return Promise.resolve(false);
+  if(pkInUnits(l.id) > PK_EPS){ toast('Махни го от единиците първо', '#dc2626'); return Promise.resolve(false); }
   return pkWrite(l, { status: 'open', qty_picked: null, comment: null, done_by: null, done_at: null }, '↩ Върнат');
 }
 function pkDeleteBatch(id){
@@ -493,6 +653,375 @@ function pkDeleteBatch(id){
     if(!res.ok){ toast('Не е изтрито: ' + sbErrMsg(res), '#dc2626'); return false; }
     toast('Качването е изтрито');
     return loadPicking().then(function(){ return true; });
+  });
+}
+
+/* ─── Единици (етап 2, част А) ─────────────────────────── */
+function pkRound(x){ return Math.round(Number(x) * 1e6) / 1e6; }
+function pkLineById(id){ return pkFind(id) || pkExtraLines[id] || null; }
+/* Взето на реда: qty_picked, ако го има, иначе заявеното; невзет ред — 0. */
+function pkTaken(l){
+  if(!l || l.status !== 'picked') return 0;
+  return Number(l.qty_picked != null ? l.qty_picked : l.qty_requested) || 0;
+}
+function pkItemsOfLine(lineId){ return pkItems.filter(function(it){ return it.line_id === lineId; }); }
+function pkItemsOfUnit(pid){ return pkItems.filter(function(it){ return it.pallet_id === pid; }); }
+function pkInUnits(lineId){
+  var s = 0;
+  pkItemsOfLine(lineId).forEach(function(it){ s += Number(it.qty) || 0; });
+  return pkRound(s);
+}
+function pkRest(l){ return pkRound(pkTaken(l) - pkInUnits(l.id)); }
+function pkPalletById(id){ return pkPallets.filter(function(p){ return p.id === id; })[0] || null; }
+function pkUnitName(p){ var k = PK_KIND[p.kind] || PK_KIND.pallet; return k.icon + ' ' + k.label + ' №' + p.no; }
+function pkUnitsOf(store){ return pkPallets.filter(function(p){ return p.store_name === store; }); }
+function pkUnitSum(pid){
+  var s = 0;
+  pkItemsOfUnit(pid).forEach(function(it){ s += Number(it.qty) || 0; });
+  return pkRound(s);
+}
+/* Текущата единица на обекта; ако няма избрана — последната отворена. */
+function pkCurUnit(store){
+  var p = pkPalletById(pkCurByStore[store]);
+  if(p && p.store_name === store) return p;
+  var open = pkUnitsOf(store).filter(function(x){ return x.status === 'open'; });
+  p = open.length ? open[open.length - 1] : null;
+  if(p) pkCurByStore[store] = p.id; else delete pkCurByStore[store];
+  return p;
+}
+/* Къде отива взетото: текущата (ако е отворена) или нов палет. null = отказ. */
+function pkTargetUnit(store){
+  var cur = pkCurUnit(store);
+  if(cur){
+    if(cur.status !== 'open'){ toast('Текущата единица е затворена — отвори единица', '#dc2626'); return Promise.resolve(null); }
+    return Promise.resolve(cur);
+  }
+  return pkCreateUnit(store, 'pallet').then(function(u){
+    if(u) toast(PK_KIND.pallet.label + ' №' + u.no + ' е създаден');
+    return u;
+  });
+}
+function pkNextNo(store, kind, day){
+  var wh = pkActiveWarehouse(), mx = 0;
+  pkPallets.forEach(function(p){
+    if(p.warehouse === wh && p.store_name === store && p.kind === kind && String(p.created_on) === day && Number(p.no) > mx) mx = Number(p.no);
+  });
+  return mx + 1;
+}
+function pkIsDupErr(res){ return !!res && (res.status === 409 || !!(res.error && res.error.code === '23505')); }
+/* № = max+1 от заредените; сблъсък с друго устройство → един опит с +1. */
+function pkCreateUnit(store, kind){
+  var wh = pkActiveWarehouse();
+  if(!wh || !store) return Promise.resolve(null);
+  var day = today();
+  var no = pkNextNo(store, kind, day);
+  var post = function(n){
+    return sbPostReturn('picking_pallets', { warehouse: wh, store_name: store, kind: kind, no: n, created_on: day, status: 'open', created_by: pkWho() });
+  };
+  return post(no).then(function(res){
+    if(!res.ok && pkIsDupErr(res)) return post(no + 1);
+    return res;
+  }).then(function(res){
+    if(!res.ok || !res.row){ toast('Единицата не е създадена: ' + sbErrMsg(res), '#dc2626'); return null; }
+    pkPallets.push(res.row);
+    pkCurByStore[store] = res.row.id;
+    delete pkFinish[store];
+    return res.row;
+  });
+}
+/* Добавя n от реда l в единица u — към СБОРА, ако редът вече е там. */
+function pkAddToUnit(u, l, n){
+  var ex = pkItemsOfUnit(u.id).filter(function(it){ return it.line_id === l.id; })[0];
+  delete pkFinish[l.store_name];
+  if(ex){
+    var q = pkRound(Number(ex.qty) + n);
+    return sbPatch('picking_pallet_items', 'id=eq.' + encodeURIComponent(ex.id), { qty: q }).then(function(res){
+      if(!res.ok){ toast('Не е записано в единицата: ' + sbErrMsg(res), '#dc2626'); return false; }
+      ex.qty = q;
+      return true;
+    });
+  }
+  return sbPostReturn('picking_pallet_items', { pallet_id: u.id, line_id: l.id, qty: pkRound(n) }).then(function(res){
+    if(!res.ok || !res.row){
+      toast(pkIsDupErr(res) ? 'Редът вече е в единицата от друго устройство — обнови' : 'Не е записано в единицата: ' + sbErrMsg(res), '#dc2626');
+      return false;
+    }
+    pkItems.push(res.row);
+    return true;
+  });
+}
+function pkSetCurrent(id){
+  var p = pkPalletById(id);
+  if(!p) return;
+  pkCurByStore[p.store_name] = p.id;
+  pkNewOpen = false;
+  pkRender();
+}
+function pkToggleNew(){ pkNewOpen = !pkNewOpen; pkRender(); }
+function pkNewUnit(kind){
+  if(!PK_KIND[kind] || !pkCanSee()) return Promise.resolve(null);
+  return pkCreateUnit(pkStore, kind).then(function(u){
+    pkNewOpen = false;
+    pkRender();
+    if(u) toast(pkUnitName(u) + ' — текуща');
+    return u;
+  });
+}
+function pkPatchUnit(p, body, okMsg){
+  return sbPatch('picking_pallets', 'id=eq.' + encodeURIComponent(p.id), body).then(function(res){
+    if(!res.ok){ toast('Не е записано: ' + sbErrMsg(res), '#dc2626'); return false; }
+    Object.keys(body).forEach(function(k){ p[k] = body[k]; });
+    delete pkFinish[p.store_name];
+    pkRender();
+    toast(okMsg);
+    return true;
+  });
+}
+function pkCloseUnit(id){
+  var p = pkPalletById(id);
+  if(!p || !pkCanSee() || p.status !== 'open') return Promise.resolve(false);
+  if(!pkItemsOfUnit(p.id).length){ toast('Празна единица — изтрий я', '#dc2626'); return Promise.resolve(false); }
+  return pkPatchUnit(p, { status: 'closed', closed_by: pkWho(), closed_at: new Date().toISOString() }, '🔒 ' + pkUnitName(p) + ' — затворен');
+}
+function pkReopenUnit(id){
+  var p = pkPalletById(id);
+  if(!p || !pkCanSee() || p.status !== 'closed') return Promise.resolve(false);
+  if(p.shipment_id){ toast('Единицата е изпратена — не се отваря', '#dc2626'); return Promise.resolve(false); }
+  pkCurByStore[p.store_name] = p.id;
+  return pkPatchUnit(p, { status: 'open', closed_by: null, closed_at: null }, '🔓 ' + pkUnitName(p) + ' — отворен');
+}
+/* 🗑 — само празна единица. Без confirm: няма какво да се загуби. */
+function pkDeleteUnit(id){
+  var p = pkPalletById(id);
+  if(!p || !pkCanSee()) return Promise.resolve(false);
+  if(pkItemsOfUnit(p.id).length){ toast('Единицата не е празна', '#dc2626'); return Promise.resolve(false); }
+  if(p.shipment_id){ toast('Единицата е изпратена', '#dc2626'); return Promise.resolve(false); }
+  return sbDelete('picking_pallets', 'id=eq.' + encodeURIComponent(p.id)).then(function(res){
+    if(!res.ok){ toast('Не е изтрита: ' + sbErrMsg(res), '#dc2626'); return false; }
+    pkPallets = pkPallets.filter(function(x){ return x.id !== p.id; });
+    if(pkCurByStore[p.store_name] === p.id) delete pkCurByStore[p.store_name];
+    delete pkFinish[p.store_name];
+    pkRender();
+    toast('Единицата е изтрита');
+    return true;
+  });
+}
+/* ✕ — маха частта на реда от единицата. Само от отворена, неизпратена единица. */
+function pkRemoveItem(itemId){
+  var it = pkItems.filter(function(x){ return x.id === itemId; })[0];
+  if(!it || !pkCanSee()) return Promise.resolve(false);
+  var p = pkPalletById(it.pallet_id);
+  if(p && (p.status !== 'open' || p.shipment_id)){ toast('Отвори единицата първо', '#dc2626'); return Promise.resolve(false); }
+  return sbDelete('picking_pallet_items', 'id=eq.' + encodeURIComponent(it.id)).then(function(res){
+    if(!res.ok){ toast('Не е махнато: ' + sbErrMsg(res), '#dc2626'); return false; }
+    pkItems = pkItems.filter(function(x){ return x.id !== it.id; });
+    if(p) delete pkFinish[p.store_name];
+    pkRender();
+    toast('Махнато от единицата');
+    return true;
+  });
+}
+/* Какво пречи обектът да е „събран": неотметнати редове, остатък извън
+   единица, отворени единици. Празен списък = събрано. */
+function pkFinishIssues(store){
+  var out = [];
+  pkLines.forEach(function(l){
+    if(l.store_name !== store) return;
+    if(l.status === 'open') out.push('Неотметнат ред: ' + l.sap_code + ' · ' + (l.product_name || ''));
+    else if(l.status === 'picked'){
+      var r = pkRest(l);
+      if(r > PK_EPS) out.push('Извън единица: ' + l.sap_code + ' · ' + (l.product_name || '') + ' — ' + pkFmtQty(r));
+    }
+  });
+  pkUnitsOf(store).forEach(function(p){ if(p.status === 'open') out.push('Отворена единица: ' + pkUnitName(p)); });
+  return out;
+}
+function pkStoreCollected(store){
+  return pkLines.some(function(l){ return l.store_name === store; }) && !pkFinishIssues(store).length;
+}
+/* „✅ Приключи събирането" — без запис: само проверка и съобщение. */
+function pkFinishCollect(){
+  var store = pkStore;
+  if(!store) return false;
+  var issues = pkFinishIssues(store);
+  pkFinish[store] = issues.length ? { issues: issues } : { ok: true };
+  pkRender();
+  if(issues.length) toast('Не е събрано — виж списъка', '#dc2626');
+  return !issues.length;
+}
+function pkUnitsHtml(store){
+  var units = pkUnitsOf(store), cur = pkCurUnit(store);
+  var h = '<div class="card" id="pk-units" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;"><b style="margin-right:4px;">Единици:</b>';
+  units.forEach(function(p){
+    var n = pkItemsOfUnit(p.id).length;
+    h += '<button class="filter-btn pk-unit' + (cur && cur.id === p.id ? ' active' : '') + '" data-pk-unit="' + escAttr(p.id) + '"' +
+      (cur && cur.id === p.id ? ' style="outline:2px solid #2563eb;"' : '') +
+      ' onclick="pkSetCurrent(this.getAttribute(\'data-pk-unit\'))">' + esc(pkUnitName(p)) + ' · ' + n + (n === 1 ? ' ред' : ' реда') + ' · ' + esc(pkFmtQty(pkUnitSum(p.id)) || '0') +
+      (p.status === 'closed' ? ' ✅' : '') + (p.shipment_id ? ' 🚚' : '') + '</button>';
+  });
+  if(!units.length) h += '<span style="color:#94a3b8;">няма — първото „✓ Взето" прави палет</span>';
+  h += '<button id="pk-unit-new" class="btn btn-sm" onclick="pkToggleNew()">➕ Нова единица</button>';
+  if(pkNewOpen){
+    Object.keys(PK_KIND).forEach(function(k){
+      h += '<button id="pk-new-' + k + '" class="btn btn-sm" onclick="pkNewUnit(\'' + k + '\')">' + PK_KIND[k].icon + ' ' + PK_KIND[k].label + '</button>';
+    });
+  }
+  if(cur || units.length){
+    var sel = cur || null;
+    if(sel){
+      var sid = escAttr(sel.id), empty = !pkItemsOfUnit(sel.id).length;
+      h += '<span style="margin-left:8px;color:#475569;">Текуща: <b id="pk-cur-name">' + esc(pkUnitName(sel)) + '</b></span>';
+      if(sel.status === 'open') h += '<button id="pk-unit-close" class="btn btn-sm" onclick="pkCloseUnit(\'' + sid + '\')">🔒 Затвори</button>';
+      else if(!sel.shipment_id) h += '<button id="pk-unit-open" class="btn btn-sm" onclick="pkReopenUnit(\'' + sid + '\')">🔓 Отвори</button>';
+      if(empty && !sel.shipment_id) h += '<button id="pk-unit-del" class="btn btn-sm" onclick="pkDeleteUnit(\'' + sid + '\')">🗑</button>';
+      if(!empty) h += '<button id="pk-unit-opis" class="btn btn-sm" onclick="pkPrintUnit(\'' + sid + '\')">🖨 Опис</button>';
+    }
+  }
+  h += '<span style="margin-left:auto;display:flex;gap:6px;">';
+  h += '<button id="pk-finish" class="btn btn-sm btn-primary" onclick="pkFinishCollect()">✅ Приключи събирането</button>';
+  if(units.some(function(p){ return p.status === 'closed'; })) h += '<button id="pk-labels" class="btn btn-sm" onclick="pkLabels()">🏷 Етикети</button>';
+  h += '</span>';
+  var f = pkFinish[store];
+  if(f && f.issues){
+    h += '<div id="pk-finish-issues" style="flex-basis:100%;border-left:4px solid #dc2626;padding:6px 10px;background:#fef2f2;"><b>Не е събрано:</b><ul style="margin:4px 0 0 18px;">' +
+      f.issues.map(function(s){ return '<li>' + esc(s) + '</li>'; }).join('') + '</ul></div>';
+  } else if(f && f.ok){
+    var lineIds = {};
+    pkLines.forEach(function(l){ if(l.store_name === store && pkInUnits(l.id) > PK_EPS) lineIds[l.id] = 1; });
+    h += '<div id="pk-finish-ok" style="flex-basis:100%;border-left:4px solid #16a34a;padding:6px 10px;background:#f0fdf4;">✅ Събрано: ' + units.length + (units.length === 1 ? ' единица' : ' единици') +
+      ' · ' + Object.keys(lineIds).length + ' реда <button id="pk-finish-labels" class="btn btn-sm" onclick="pkLabels()">🏷 Етикети</button></div>';
+  }
+  return h + '</div>';
+}
+
+/* ─── Етикети и опис (етап 2, част А) ──────────────────── */
+function pkUnitUrl(id){ return LL_PORTAL_URL + '#pk=' + encodeURIComponent(String(id)); }
+function pkLabelCss(){
+  return '@page{size:A4;margin:10mm;}' +
+    '.pk-lbl-page{display:grid;grid-template-columns:1fr 1fr;grid-auto-rows:136mm;gap:4mm;page-break-after:always;break-after:page;}' +
+    '.pk-lbl-page:last-child{page-break-after:auto;break-after:auto;}' +
+    '.pk-lbl{box-sizing:border-box;border:1px dashed #94a3b8;padding:4mm;overflow:hidden;white-space:normal;}' +
+    '.pk-lbl-wh{font-size:10pt;color:#333;}' +
+    '.pk-lbl-store{font-size:26pt;font-weight:800;line-height:1.1;margin:1mm 0;}' +
+    '.pk-lbl-unit{font-size:22pt;font-weight:800;line-height:1.1;}' +
+    '.pk-lbl-date{font-size:10pt;margin-top:1mm;}' +
+    '.pk-lbl-mid{display:flex;gap:4mm;align-items:flex-start;margin:3mm 0;}' +
+    '.pk-lbl-box{box-sizing:border-box;width:30mm;height:30mm;border:2px solid #000;font-size:8pt;padding:1mm;color:#555;}' +
+    '.pk-lbl-rows{font-size:8.5pt;line-height:1.35;}';
+}
+/* „🏷 Етикети" — само ЗАТВОРЕНИТЕ единици на обекта, 4 на A4. */
+function pkLabels(){
+  var units = pkUnitsOf(pkStore).filter(function(p){ return p.status === 'closed'; });
+  if(!units.length){ toast('Няма затворени единици за етикети', '#d97706'); return Promise.resolve(0); }
+  return llLoadQrLib().then(function(){
+    var n = pkRenderLabels(units);
+    showModule('print');
+    return n;
+  }).catch(function(e){
+    toast('Етикетите не се получиха: ' + (e && e.message ? e.message : e), '#dc2626');
+    return 0;
+  });
+}
+function pkRenderLabels(units){
+  var wrap = document.getElementById('mod-print');
+  if(!wrap) return 0;
+  var labels = units.map(function(p){
+    var items = pkItemsOfUnit(p.id), url = pkUnitUrl(p.id), k = PK_KIND[p.kind] || PK_KIND.pallet;
+    var rows = items.slice(0, 6).map(function(it){
+      var l = pkLineById(it.line_id) || {};
+      return '<div>' + pkE(l.sap_code) + ' · ' + pkE(l.product_name) + ' · <b>' + esc(pkFmtQty(it.qty)) + '</b></div>';
+    }).join('') + (items.length > 6 ? '<div>… още ' + (items.length - 6) + '</div>' : '');
+    return '<div class="pk-lbl" data-pk-label="' + escAttr(p.id) + '" data-pk-qr-text="' + escAttr(url) + '">' +
+      '<div class="pk-lbl-wh">' + esc(p.warehouse) + ' →</div>' +
+      '<div class="pk-lbl-store">' + esc(String(p.store_name).toUpperCase()) + '</div>' +
+      '<div class="pk-lbl-unit">' + k.icon + ' ' + esc(k.label) + ' № ' + esc(String(p.no)) + '</div>' +
+      '<div class="pk-lbl-date">' + esc(fmtDate(p.created_on)) + '</div>' +
+      '<div class="pk-lbl-mid"><div class="pk-lbl-box">№ за маркер</div><div class="pk-lbl-qr">' + llQrSvg(url, 30) + '</div></div>' +
+      '<div class="pk-lbl-rows">' + rows + '</div></div>';
+  });
+  var pages = [];
+  for(var i = 0; i < labels.length; i += 4) pages.push('<div class="pk-lbl-page">' + labels.slice(i, i + 4).join('') + '</div>');
+  wrap.innerHTML = '<style>' + pkLabelCss() + '</style>' +
+    '<div style="max-width:820px;margin:0 auto;padding:16px 16px 40px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;" class="no-print">' +
+        '<div style="font-size:18px;font-weight:600;">🏷 Етикети · ' + esc(pkStore) + ' · ' + labels.length + (labels.length === 1 ? ' етикет' : ' етикета') + '</div>' +
+        '<div style="display:flex;gap:8px;align-items:center;">' +
+          '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>' +
+          '<button onclick="showModule(\'picking\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Назад</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="pk-labels-wrap" data-pk-labels="1">' + pages.join('') + '</div>' +
+    '</div>';
+  return labels.length;
+}
+/* „🖨 Опис" — всички редове на единицата, A4. */
+function pkPrintUnit(id){
+  var p = pkPalletById(id);
+  var wrap = document.getElementById('mod-print');
+  if(!p || !wrap) return false;
+  var items = pkItemsOfUnit(p.id);
+  var body = items.map(function(it, i){
+    var l = pkLineById(it.line_id) || {};
+    return '<tr class="pk-opis-row" data-pk-line="' + escAttr(it.line_id) + '"><td>' + (i + 1) + '</td><td>' + pkE(l.sap_code) + '</td><td>' + pkE(l.product_name) + '</td>' +
+      '<td>' + esc(pkFmtQty(it.qty)) + ' ' + pkE(l.unit) + '</td><td>' + (l.sap_order ? esc(l.sap_order) + ' / ' + pkE(l.sap_item) : '') + '</td>' +
+      '<td>' + pkE(l.done_by || p.created_by) + '</td><td>' + esc(pkFmtTs(it.created_at)) + '</td></tr>';
+  }).join('');
+  wrap.innerHTML = '<style>' + pkPrintCss() + '</style>' +
+    '<div style="max-width:820px;margin:0 auto;padding:16px 16px 40px;">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px;" class="no-print">' +
+        '<div style="font-size:18px;font-weight:600;">🖨 Опис · ' + esc(pkUnitName(p)) + '</div>' +
+        '<div style="display:flex;gap:8px;align-items:center;">' +
+          '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>' +
+          '<button onclick="showModule(\'picking\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Назад</button>' +
+        '</div>' +
+      '</div>' +
+      '<div id="pk-opis" data-pk-opis="' + escAttr(p.id) + '">' +
+        '<div style="font-size:16px;font-weight:700;">Опис — ' + esc(pkUnitName(p)) + ' · ' + esc(p.store_name) + '</div>' +
+        '<div style="font-size:12px;color:#555;margin-bottom:6px;">' + esc(p.warehouse) + ' · ' + esc(fmtDate(p.created_on)) + ' · създал ' + pkE(p.created_by) +
+          (p.status === 'closed' ? ' · затворен ' + esc(pkFmtTs(p.closed_at)) : ' · ОТВОРЕН') + '</div>' +
+        '<table class="pk-tbl"><colgroup><col style="width:8mm;"><col style="width:20mm;"><col style="width:70mm;"><col style="width:16mm;"><col style="width:30mm;"><col style="width:26mm;"><col style="width:20mm;"></colgroup>' +
+        '<tr><th>№</th><th>Код</th><th>Име</th><th>Брой</th><th>SAP заявка / поз.</th><th>Събрал</th><th>Дата</th></tr>' + body + '</table>' +
+      '</div>' +
+    '</div>';
+  showModule('print');
+  return true;
+}
+
+/* ─── Deep link #pk=<id> (етикетът на единица) ─────────── */
+function pkParseDeep(text){
+  var s = String(text == null ? '' : text), i = s.indexOf('#');
+  if(i < 0) return null;
+  var id = null;
+  s.slice(i + 1).split('&').forEach(function(part){
+    var k = part.indexOf('=');
+    if(k < 0 || part.slice(0, k) !== 'pk') return;
+    try { id = decodeURIComponent(part.slice(k + 1)); } catch(e){ id = null; }
+  });
+  return id && /^[0-9a-f-]{36}$/i.test(id) ? id : null;
+}
+/* Вика се от startApp() (shared.js) след #tl= и #tf=. false = хешът не е наш.
+   Достъпът се проверява в loadPicking — без него „Нямаш достъп", нищо не се чете. */
+function pkDeepLinkBoot(hash){
+  var id = pkParseDeep(hash === undefined ? (window.location.hash || '') : hash);
+  if(!id) return false;
+  if(typeof llClearUrlHash === 'function') llClearUrlHash();
+  pkDeepLink = id;
+  showModule('picking');
+  return true;
+}
+/* Единицата → склад, обект, текуща. Складът с фиксиран склад не отваря чужда. */
+function pkDeepLinkResolve(seq){
+  var id = pkDeepLink;
+  pkDeepLink = null;
+  return sbGetOk('picking_pallets', 'select=id,warehouse,store_name&id=eq.' + encodeURIComponent(id)).then(function(r){
+    if(seq !== pkLoadSeq) return;
+    if(!r.ok || !r.rows.length){ toast('Единицата не е намерена', '#dc2626'); return; }
+    var p = r.rows[0], fx = pkFixedWarehouse();
+    if(fx && fx !== p.warehouse){ toast('Единицата е от ' + p.warehouse, '#dc2626'); return; }
+    if(!fx && pkWarehouse !== p.warehouse){ pkWarehouse = p.warehouse; pkBatches = []; pkLines = []; }
+    pkSub = 'collect';
+    pkStore = p.store_name;
+    pkCurByStore[p.store_name] = p.id;
   });
 }
 

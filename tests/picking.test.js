@@ -87,6 +87,11 @@ function install(h, db) {
       }
       return resp(200, []);
     }
+    /* Етап 2: „✓ Взето" слага реда в единица — тук само се приемат записите
+       (единиците се проверяват в picking-pallets.test.js). */
+    if (m === 'POST' && (tbl === 'picking_pallets' || tbl === 'picking_pallet_items')) {
+      return resp(201, [Object.assign({ id: 'u-' + (++db.seq), created_at: new Date().toISOString() }, body)]);
+    }
     if (m === 'POST' && tbl === 'picking_batches') {
       const row = Object.assign({ id: 'b-' + (++db.seq), uploaded_at: new Date().toISOString() }, body);
       db.batches.push(row);

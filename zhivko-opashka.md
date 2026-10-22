@@ -15,6 +15,8 @@
 ## Чака изпращане
 
 - 21.10 · stock_differences.type — нова стойност 'storno' (text, без промяна в схемата)
+- 22.10 · нова таблица picking_pallets (миграция 20261022133218_picking_pallets_schema) — id uuid PK default gen_random_uuid(), warehouse text NOT NULL, store_name text NOT NULL, kind text NOT NULL default 'pallet' (стойности 'pallet' / 'bulk' / 'carton'), no int NOT NULL, created_on date NOT NULL default current_date, status text NOT NULL default 'open' (стойности 'open' / 'closed'), note text NULL, created_by text NULL, created_at timestamptz NOT NULL default now(), closed_by text NULL, closed_at timestamptz NULL, shipment_id uuid NULL (връзка към picking_shipments идва с част Б), loaded_by text NULL, loaded_at timestamptz NULL, received_status text NULL (стойности 'received' / 'missing'), received_by text NULL, received_at timestamptz NULL, receive_note text NULL; уникалност (warehouse, store_name, kind, no, created_on)
+- 22.10 · нова таблица picking_pallet_items (същата миграция) — id uuid PK default gen_random_uuid(), pallet_id uuid NOT NULL → picking_pallets (on delete cascade), line_id uuid NOT NULL → picking_lines (on delete cascade), qty numeric NOT NULL, qty_received numeric NULL, receive_comment text NULL, created_at timestamptz NOT NULL default now(); уникалност (pallet_id, line_id)
 
 (в базата от миграцията 20261022130434_minusi_repeat, приложена 22.10.2026)
 - 22.10 · minus_movements.action — text, NULL, без default
