@@ -2,7 +2,8 @@
 
    По модела на „За връщане": status='completed', задава го само
    canCompleteSR() (Цвети/admin) от модала „Редактирай"; за другите статусът
-   на приключен ред е заключен и не се праща. Само за тип „Връщане".
+   на приключен ред е заключен и не се праща. Само за тип „Връщане" (от
+   21.10.2026 и за „Липса" — виж sd-lipsa-priklyuchena.test.js).
      · чипове при тип „Връщане": Невзета / Взета / Приключени; първите два НЕ
        включват приключените; „Всички" ги включва;
      · в сборния изглед неутралното „Приключени" (taken) ги включва;
@@ -119,7 +120,7 @@ const sdPatch = (h, id) => h.calls.patch.find(p => /stock_differences/.test(p.ur
     ok('на приключения ред няма „✅ Върната"', !!tr && !Array.prototype.some.call(tr.querySelectorAll('button'),
       b => /sdMarkTaken/.test(b.getAttribute('onclick') || '')));
     /* Смяна на типа от „Приключени" → филтърът по статус се връща на „Всички". */
-    realClick(h.w, typeChip(h, 'missing'));
+    realClick(h.w, typeChip(h, 'writein'));
     ok('при друг тип чипът „Приключени" го няма', !statusChip(h, 'completed'));
     ok('и филтърът се връща на „Всички"', h.w.sdFilter === 'all', h.w.sdFilter);
     h.close();
@@ -174,25 +175,21 @@ const sdPatch = (h, id) => h.calls.patch.find(p => /stock_differences/.test(p.ur
   section('д) Други типове — без промяна');
   {
     const h = env(CVETI, LINES);
-    realClick(h.w, editBtn(h, 'm-p'));
-    await settle();
-    ok('Липса: няма опция „ПРИКЛЮЧЕНА"', !h.doc.querySelector('#sd-status option[value="completed"]'));
-    h.w.closeSDModal();
     realClick(h.w, editBtn(h, 'w-t'));
     await settle();
     ok('Заприхождаване: няма опция „ПРИКЛЮЧЕНА"', !h.doc.querySelector('#sd-status option[value="completed"]'));
     h.w.closeSDModal();
     realClick(h.w, typeChip(h, 'writein'));
     ok('Заприхождаване: чиповете са три, без „Приключени"', !statusChip(h, 'completed'));
-    /* Подправено completed на Липса → отказ. */
+    /* Подправено completed на Заприхождаване → отказ. */
     realClick(h.w, typeChip(h, 'all'));
-    realClick(h.w, editBtn(h, 'm-p'));
+    realClick(h.w, editBtn(h, 'w-t'));
     await settle();
     const s = h.doc.getElementById('sd-status');
     s.insertAdjacentHTML('beforeend', '<option value="completed">x</option>'); s.value = 'completed';
     realClick(h.w, btn(h.doc.getElementById('sd-ov'), 'Запази'));
     await settle();
-    ok('Липса + подправено completed → няма PATCH', !sdPatch(h, 'm-p'));
+    ok('Заприхождаване + подправено completed → няма PATCH', !sdPatch(h, 'w-t'));
     ok('toast „само за тип Връщане"', h.calls.toast.some(t => String(t).indexOf('само за тип „Връщане"') >= 0), h.calls.toast.join(' | '));
     h.close();
   }

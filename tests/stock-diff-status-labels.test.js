@@ -105,10 +105,12 @@ function chipCount(doc, which) {
       String(chipCount(doc, 'all')));
     if (guard('превключване към "Липса"', () => realClick(w, typeChip(doc, 'missing')))) {
       const hm = doc.getElementById('mod-stock-diff').innerHTML;
-      ok('при "Липса" също е неутрално', hm.indexOf('Чакащи') >= 0 && hm.indexOf('Приключени') >= 0);
-      ok('при "Липса" числата са само за нея (1/0)',
-        hm.indexOf('Чакащи (1)') >= 0 && hm.indexOf('Приключени (0)') >= 0,
-        (hm.match(/Чакащи \(\d+\)/) || '') + ' ' + (hm.match(/Приключени \(\d+\)/) || ''));
+      /* От 21.10.2026 при "Липса" думите са тези на реда (Невзета/Взета) -
+         до тях стои трети чип "🏁 Приключени" (sd-lipsa-priklyuchena.test.js). */
+      ok('при "Липса" думите са на реда', hm.indexOf('Невзета') >= 0 && hm.indexOf('Взета') >= 0);
+      ok('при "Липса" числата са само за нея (1/0/0)',
+        hm.indexOf('Невзета (1)') >= 0 && hm.indexOf('Взета (0)') >= 0 && hm.indexOf('Приключени (0)') >= 0,
+        (hm.match(/Невзета \(\d+\)/) || '') + ' ' + (hm.match(/ Взета \(\d+\)/) || '') + ' ' + (hm.match(/Приключени \(\d+\)/) || ''));
     }
   }
 
@@ -230,7 +232,8 @@ function chipCount(doc, which) {
     ok('sdStatusWords("return").taken', w.sdStatusWords('return').taken === 'Взета');
     ok('sdStatusWords(null) пада към Невзета/Взета', w.sdStatusWords(null).pending === 'Невзета');
     ok('sdCounterWords("all") е неутрално', w.sdCounterWords('all').taken === 'Приключени');
-    ok('sdCounterWords("missing") е неутрално', w.sdCounterWords('missing').pending === 'Чакащи');
+    ok('sdCounterWords("missing") е на реда (от 21.10.2026)', w.sdCounterWords('missing').pending === 'Невзета' &&
+      w.sdCounterWords('missing').taken === 'Взета');
     ok('sdCounterWords("writein") е типово', w.sdCounterWords('writein').taken === 'Заприходена');
   }
 
