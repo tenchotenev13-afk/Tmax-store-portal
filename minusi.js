@@ -59,7 +59,13 @@
    · „сторно преди минуса" — 956, който закрива реда (изцяло или частично), е
      с по-ранна дата от 955. Грешка на магазина: червено в „Състояние" и
      втора таблица в червената карта. Същата дата не е грешка.
-   Ширината на „Дневен" не се мени — нищо от това не е нова колона. */
+   Ширината на „Дневен" не се мени — нищо от това не е нова колона.
+
+   Задължителна бележка (22.10.2026, Тенчо): причина с
+   minus_reasons.requires_note (днес само „клиентска поръчка (номер/дата)")
+   не се записва без „Бележка" — номерът и датата на поръчката. Вече записан
+   ред с такава причина и празна бележка показва „попълни номер/дата" под
+   бележката и влиза в „само непопълнени". */
 
 var mnMovs = [];
 var mnReasons = [];
@@ -161,7 +167,14 @@ function mnDays(a, b){
   var pa = String(a).split('-'), pb = String(b).split('-');
   return Math.round((Date.UTC(+pb[0], +pb[1] - 1, +pb[2]) - Date.UTC(+pa[0], +pa[1] - 1, +pa[2])) / 86400000);
 }
-function mnUnfilled(r){ return r.reason_id == null || (!!r._repeat && !String(r.action || '').trim()); }
+function mnReasonNeedsNote(id){
+  for(var i = 0; i < mnReasons.length; i++) if(String(mnReasons[i].id) === String(id)) return mnReasons[i].requires_note === true;
+  return false;
+}
+/* Записан ред с причина, която иска бележка, а бележката е празна. */
+function mnNoteMissing(r){ return r.reason_id != null && mnReasonNeedsNote(r.reason_id) && !String(r.note || '').trim(); }
+function mnUnfilled(r){ return r.reason_id == null || (!!r._repeat && !String(r.action || '').trim()) || mnNoteMissing(r); }
+var MN_NOTE_MISSING = '<div class="mn-note-missing" style="color:#b91c1c;font-size:11px;font-weight:600;margin-top:2px;">попълни номер/дата</div>';
 function mnFmtTs(ts){
   if(!ts) return '';
   var d = new Date(ts);
@@ -385,7 +398,7 @@ function loadMinusi(){
   return Promise.all([
     sbGetOk('app_settings', 'key=in.(minus_stores,minus_repeat_days)&select=key,value'),
     sbGetOk('minus_plants', 'select=plant,store_name'),
-    sbGetOk('minus_reasons', 'select=id,label,active,sort&order=sort.asc,id.asc'),
+    sbGetOk('minus_reasons', 'select=id,label,active,sort,requires_note&order=sort.asc,id.asc'),
     sbGetOk('minus_uom_thresholds', 'select=uom,min_qty')
   ]).then(function(rs){
     if(seq !== mnLoadSeq) return;
@@ -563,10 +576,12 @@ function mnDailyHtml(rows){
       h += '<td style="' + yel + '"><input id="mn-emp-' + escAttr(id) + '" value="' + escAttrVal(val('employee_name')) + '" style="width:110px;"></td>';
       /* „Действие" — само на повторенията, под „Бележка" (без нова колона). */
       h += '<td style="' + yel + '"><input id="mn-note-' + escAttr(id) + '" value="' + escAttrVal(val('note')) + '" style="width:110px;">' +
+        (mnNoteMissing(r) ? MN_NOTE_MISSING : '') +
         (r._repeat ? '<input id="mn-action-' + escAttr(id) + '" value="' + escAttrVal(val('action')) + '" placeholder="Действие срещу повторение" style="width:110px;display:block;margin-top:4px;">' : '') + '</td>';
       h += '<td style="white-space:nowrap;">' + (done ? '<span class="mn-done" title="' + escAttr('Попълнено: ' + (r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span> ' : '') + '<button class="btn btn-green" onclick="mnSave(\'' + escAttr(id) + '\')">Запази</button></td>';
     } else {
       h += '<td>' + esc(r.real_code || '') + '</td><td>' + esc(mnReasonLabel(r.reason_id)) + '</td><td>' + esc(r.employee_name || '') + '</td><td>' + esc(r.note || '') +
+        (mnNoteMissing(r) ? MN_NOTE_MISSING : '') +
         (r.action ? '<div class="mn-action-txt" style="margin-top:2px;">Действие: ' + esc(r.action) + '</div>' : '') + '</td>';
       h += '<td>' + (done ? '<span class="mn-done" title="' + escAttr((r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span>' : '') + '</td>';
     }
@@ -762,6 +777,7 @@ function mnSave(id){
   mnCompute(mnMovs, mnThresholds).all.forEach(function(x){ if(String(x.id) === String(id)) crow = x; });
   var isRep = !!(crow && crow._repeat), action = g('mn-action-');
   if(isRep && !action){ toast('Повторен минус до ' + mnRepeatDays + ' дни — попълни действие', '#dc2626'); return Promise.resolve(false); }
+  if(mnReasonNeedsNote(reason) && !g('mn-note-')){ toast('За тази причина попълни номер и дата на поръчката в „Бележка"', '#dc2626'); return Promise.resolve(false); }
   var body = {
     real_code: g('mn-code-') || null,
     reason_id: parseInt(reason, 10),

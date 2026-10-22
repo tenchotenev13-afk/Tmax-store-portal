@@ -18,15 +18,21 @@
 - 22.10 · нова таблица picking_pallets (миграция 20261022133218_picking_pallets_schema) — id uuid PK default gen_random_uuid(), warehouse text NOT NULL, store_name text NOT NULL, kind text NOT NULL default 'pallet' (стойности 'pallet' / 'bulk' / 'carton'), no int NOT NULL, created_on date NOT NULL default current_date, status text NOT NULL default 'open' (стойности 'open' / 'closed'), note text NULL, created_by text NULL, created_at timestamptz NOT NULL default now(), closed_by text NULL, closed_at timestamptz NULL, shipment_id uuid NULL (връзка към picking_shipments идва с част Б), loaded_by text NULL, loaded_at timestamptz NULL, received_status text NULL (стойности 'received' / 'missing'), received_by text NULL, received_at timestamptz NULL, receive_note text NULL; уникалност (warehouse, store_name, kind, no, created_on)
 - 22.10 · нова таблица picking_pallet_items (същата миграция) — id uuid PK default gen_random_uuid(), pallet_id uuid NOT NULL → picking_pallets (on delete cascade), line_id uuid NOT NULL → picking_lines (on delete cascade), qty numeric NOT NULL, qty_received numeric NULL, receive_comment text NULL, created_at timestamptz NOT NULL default now(); уникалност (pallet_id, line_id)
 
+(в базата от миграцията 20261022133937_minusi_note_required, приложена 22.10.2026)
+- 22.10 · minus_reasons.requires_note — boolean, NOT NULL, default false (true за „клиентска поръчка (номер/дата)")
+
+## Изпратено 22.10.2026
+
 (в базата от миграцията 20261022130434_minusi_repeat, приложена 22.10.2026)
 - 22.10 · minus_movements.action — text, NULL, без default
 - 22.10 · app_settings — нов ключ minus_repeat_days (брой дни за повторение на минус; начална стойност '10')
 
-## Изпратено 22.10.2026
+## Потвърдено 22.10.2026
 
 - 21.10 · нова таблица picking_batches (миграция 20261021090405_picking_schema) — id uuid PK default gen_random_uuid(), warehouse text NOT NULL, source text NOT NULL (стойности 'planned' / 'unplanned'), file_name text NULL, rows_total int NULL, rows_imported int NULL, rows_skipped int NULL, uploaded_by text NULL, uploaded_at timestamptz NOT NULL default now()
 - 21.10 · нова таблица picking_lines (същата миграция) — id uuid PK default gen_random_uuid(), batch_id uuid NOT NULL → picking_batches (on delete cascade), warehouse text NOT NULL, store_name text NOT NULL, sap_code text NOT NULL, product_name text NULL, unit text NULL, qty_requested numeric NOT NULL, supply_group text NULL, sap_order text NULL, sap_item text NULL, line_no int NULL, status text NOT NULL default 'open' (стойности 'open' / 'picked' / 'skipped'), qty_picked numeric NULL, comment text NULL, done_by text NULL, done_at timestamptz NULL, created_at timestamptz NOT NULL default now(); уникалност (warehouse, sap_order, sap_item)
 - 21.10 · app_settings — нов ключ picking_users (списък имейли, разделени със запетая)
+(потвърдено от Живко с писмо на 22.10: 82 таблици, 0 грешки; уникалността по warehouse, sap_order, sap_item — обикновен индекс в огледалото)
 
 ## Потвърдено 21.10.2026
 

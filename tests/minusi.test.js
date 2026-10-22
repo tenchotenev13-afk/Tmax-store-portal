@@ -98,6 +98,13 @@
      M37 картата само при свръхсторно → пада втората таблица за 17279;
      M38 броячът за 30 дни брои и бъдещите → падат „×2 / ×3“ и Excel.
      M39 обвивката на значката пак nowrap → пада „обвивката НЕ е nowrap“.
+   Задължителна бележка при причина с requires_note (секция 13, 22.10.2026):
+     M40 проверката при запис махната → падат „toast, 0 PATCH“ и следващите;
+     M41 „само непопълнени“ без липсващата бележка → пада „включва n3“;
+     M42 надписът „попълни номер/дата“ не се показва → падат обект и контролинг;
+     M43 loadMinusi не иска requires_note → падат 8. Оцеляваше, докато
+        фалшивата база пренебрегваше select= — сега minus_reasons връща само
+        поисканите колони, като PostgREST.
    Секция 3 пише в „Действие“ само ако полето го има (if (act)) — иначе при
    M31/M34 тестът гърмеше там и секция 12 не се стигаше: мутантът падаше от
    TypeError, не от проверка.
@@ -137,7 +144,7 @@ const AMOUNTS = ['3.7', '13.97', '-1.96', '3,7', '13,97', '1,96'];
 const PLANTS = [['5502', 'Севлиево'], ['2502', 'Севлиево'], ['5514', 'Шумен'], ['6514', 'Шумен'], ['5519', 'Гоце Делчев'], ['7519', 'Гоце Делчев']]
   .map(p => ({ plant: p[0], store_name: p[1] }));
 const REASONS = ['клиентска поръчка (номер/дата)', 'последна бройка, липсва код', 'продажба на цялото количество, липсва код',
-  'има още количество, липсва код', 'реална продажба, чака вход от ЛСТ'].map((l, i) => ({ id: i + 1, label: l, active: true, sort: i + 1 }));
+  'има още количество, липсва код', 'реална продажба, чака вход от ЛСТ'].map((l, i) => ({ id: i + 1, label: l, active: true, sort: i + 1, requires_note: i === 0 }));
 const THR = [{ uom: 'M2', min_qty: 0.01 }, { uom: 'ЛМ', min_qty: 0.01 }];
 
 const ADMIN = { email: 'm.pavlova@temax.bg', display_name: 'Миглена', role: 'admin', store_name: 'Централен офис' };
@@ -169,7 +176,9 @@ function install(h, db) {
     if (m === 'GET') {
       if (tbl === 'app_settings') return resp(200, (db.settings == null ? [] : [{ key: 'minus_stores', value: db.settings }]).concat(db.repeatDays === undefined ? [] : [{ key: 'minus_repeat_days', value: db.repeatDays }]));
       if (tbl === 'minus_plants') return resp(200, PLANTS);
-      if (tbl === 'minus_reasons') return resp(200, REASONS);
+      /* Като PostgREST: само колоните от select= — иначе тестът не би видял
+         заявка, която забравя колона (requires_note, 22.10.2026). */
+      if (tbl === 'minus_reasons') { const cols = ((q.match(/select=([^&]+)/) || [])[1] || '*').split(','); return resp(200, REASONS.map(r => cols[0] === '*' ? r : cols.reduce((o, c) => (c in r ? (o[c] = r[c], o) : o), {}))); }
       if (tbl === 'minus_uom_thresholds') return resp(200, db.thr);
       if (tbl === 'minus_uploads') return resp(200, db.uploads.slice(-1));
       if (tbl === 'minus_movements') {
@@ -828,6 +837,54 @@ function noAmountInDom(name, h) {
     const hep = env(GD, fakeDb({ movs: copy(EARLY) })); await open(hep);
     realClick(hep.w, hep.doc.getElementById('mn-print'));
     ok('печат: „⚠ сторно преди минуса“ в клетката „Състояние“', Array.from(hep.doc.querySelectorAll('#mn-print-wrap td')).some(td => td.textContent === 'закрит 20.10 ⚠ сторно преди минуса'));
+  }
+
+  section('13. Задължителна бележка при „клиентска поръчка (номер/дата)“ (22.10.2026)');
+  {
+    /* Четири отделни материала (без повторения): n1, n2 — непопълнени;
+       n3 — записан с причина 1 и празна бележка (като 98275 и 32033 в
+       базата на 22.10); n4 — причина 1 с бележка. */
+    const b = { store_name: 'Гоце Делчев', plant: '5519', material_desc: 'ТЕСТ БЕЛЕЖКА', uom: 'БР', doc_year: 2026, doc_item: '1', mvt_type: '955', qty: 1, posting_date: '2026-10-15' };
+    const NOTE = [
+      Object.assign({ id: 'n1', material: '81001', mat_doc: 'N1' }, b),
+      Object.assign({ id: 'n2', material: '81002', mat_doc: 'N2' }, b),
+      Object.assign({ id: 'n3', material: '81003', mat_doc: 'N3', reason_id: 1, employee_name: 'Арза', note: '', filled_by: 'Управител ГД' }, b),
+      Object.assign({ id: 'n4', material: '81004', mat_doc: 'N4', reason_id: 1, employee_name: 'Арза', note: 'КЗ 5 / 10.10', filled_by: 'Управител ГД' }, b)
+    ];
+    const cp = () => NOTE.map(x => Object.assign({}, x));
+    const rowOf = (h, id) => h.doc.getElementById('mn-row-' + id);
+    const miss = (h, id) => { const tr = rowOf(h, id); const m = tr && tr.querySelector('.mn-note-missing'); return m ? m.textContent : null; };
+
+    const dbN = fakeDb({ movs: cp() });
+    const h = env(GD, dbN); await open(h);
+    ok('обект: записан ред с причина 1 и празна бележка → „попълни номер/дата“ под бележката', miss(h, 'n3') === 'попълни номер/дата' && rowOf(h, 'n3').querySelector('.mn-note-missing').parentNode === h.doc.getElementById('mn-note-n3').parentNode);
+    ok('… с бележка (n4) и непопълнените (n1, n2) — без надпис', miss(h, 'n4') === null && miss(h, 'n1') === null && miss(h, 'n2') === null);
+    ok('броят th в #mn-daily е непроменен (10)', h.doc.querySelectorAll('#mn-daily thead th').length === 10);
+    h.doc.getElementById('mn-reason-n1').value = '1';
+    h.doc.getElementById('mn-emp-n1').value = 'Здравка';
+    realClick(h.w, btn(rowOf(h, 'n1'), 'Запази')); await ticks(4);
+    ok('причина 1 + празна бележка → червен toast, 0 PATCH', dbN.log.filter(x => x.m === 'PATCH').length === 0 && h.calls.toast.slice(-1)[0] === 'За тази причина попълни номер и дата на поръчката в „Бележка"' && h.doc.getElementById('toast').style.background.indexOf('220, 38, 38') >= 0, h.calls.toast.slice(-1)[0]);
+    h.doc.getElementById('mn-note-n1').value = '   ';
+    realClick(h.w, btn(rowOf(h, 'n1'), 'Запази')); await ticks(4);
+    ok('… бележка само от интервали → пак отказ', dbN.log.filter(x => x.m === 'PATCH').length === 0);
+    h.doc.getElementById('mn-note-n1').value = 'КЗ Гоце Делчев-0006 / 11.10';
+    realClick(h.w, btn(rowOf(h, 'n1'), 'Запази')); await ticks(4);
+    let pp = dbN.log.filter(x => x.m === 'PATCH');
+    ok('с бележка → PATCH с note', pp.length === 1 && pp[0].q === 'id=eq.n1' && pp[0].body.note === 'КЗ Гоце Делчев-0006 / 11.10' && pp[0].body.reason_id === 1, pp[0] && JSON.stringify(pp[0].body));
+    h.doc.getElementById('mn-reason-n2').value = '2';
+    h.doc.getElementById('mn-emp-n2').value = 'Здравка';
+    realClick(h.w, btn(rowOf(h, 'n2'), 'Запази')); await ticks(4);
+    pp = dbN.log.filter(x => x.m === 'PATCH');
+    ok('причина без requires_note + празна бележка → записва (note null)', pp.length === 2 && pp[1].q === 'id=eq.n2' && pp[1].body.note === null, pp[1] && JSON.stringify(pp[1].body));
+    h.doc.getElementById('mn-note-n3').value = 'КЗ Гоце Делчев-0007 / 07.10';
+    realClick(h.w, btn(rowOf(h, 'n3'), 'Запази')); await ticks(4);
+    ok('допълване на записания n3 с бележка → записва и надписът изчезва', dbN.log.filter(x => x.m === 'PATCH').length === 3 && miss(h, 'n3') === null);
+
+    const hc = env(ADMIN, fakeDb({ movs: cp() })); await open(hc);
+    ok('контролинг: „попълни номер/дата“ под бележката на n3', miss(hc, 'n3') === 'попълни номер/дата' && miss(hc, 'n4') === null);
+    const u = hc.doc.getElementById('mn-unfilled'); u.checked = true; fire(hc.w, u, 'change');
+    const ids = Array.from(hc.doc.querySelectorAll('#mn-daily tbody tr')).map(tr => tr.getAttribute('data-mn-id')).sort();
+    ok('„само непопълнени“ включва n3 (причина 1 без бележка), не и n4', ids.join(',') === 'n1,n2,n3', ids.join(','));
   }
 
   report();
