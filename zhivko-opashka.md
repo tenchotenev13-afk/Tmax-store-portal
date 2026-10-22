@@ -16,6 +16,10 @@
 
 - 21.10 · stock_differences.type — нова стойност 'storno' (text, без промяна в схемата)
 
+(в базата от миграцията 20261022130434_minusi_repeat, приложена 22.10.2026)
+- 22.10 · minus_movements.action — text, NULL, без default
+- 22.10 · app_settings — нов ключ minus_repeat_days (брой дни за повторение на минус; начална стойност '10')
+
 ## Изпратено 22.10.2026
 
 - 21.10 · нова таблица picking_batches (миграция 20261021090405_picking_schema) — id uuid PK default gen_random_uuid(), warehouse text NOT NULL, source text NOT NULL (стойности 'planned' / 'unplanned'), file_name text NULL, rows_total int NULL, rows_imported int NULL, rows_skipped int NULL, uploaded_by text NULL, uploaded_at timestamptz NOT NULL default now()

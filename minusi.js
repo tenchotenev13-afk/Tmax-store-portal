@@ -45,7 +45,21 @@
    „Всички обекти" — само контролингът (първа опция в „Обект", колона „Обект").
    „📥 Excel" и „🖨️ Печат" — текущият изглед с текущите филтри и търсене, без
    суми. Печатът е в #mod-print (образец pkPrintDeviations в picking.js);
-   правилата от CLAUDE.md т.12 са изрично в mnPrintCss(). */
+   правилата от CLAUDE.md т.12 са изрично в mnPrintCss().
+
+   Етап 2 — повторения (22.10.2026; Теодор 06.10, Миглена 21–22.10), по
+   обект + материал, независимо от завода:
+   · „предишен минус" на ред 955 — най-близкият по-ранен 955 (дата, документ,
+     позиция); значка „↻ предишен дд.мм" под описанието, цвят по давност
+     (≤7 дни червено, 8–30 оранжево, >30 жълто), лилав „×N за 30 дни" при N ≥ 2
+     (955 с дата в [датата − 29; датата]);
+   · „повторение" — предишен минус до N дни включително, N =
+     app_settings.minus_repeat_days (липсва / невалидно → 10). Само там има
+     поле „Действие" (minus_movements.action) и при „Запази" е задължително;
+   · „сторно преди минуса" — 956, който закрива реда (изцяло или частично), е
+     с по-ранна дата от 955. Грешка на магазина: червено в „Състояние" и
+     втора таблица в червената карта. Същата дата не е грешка.
+   Ширината на „Дневен" не се мени — нищо от това не е нова колона. */
 
 var mnMovs = [];
 var mnReasons = [];
@@ -58,6 +72,8 @@ var mnOnlyUnfilled = false;
 var mnOnlyOpen = false;  /* „само незакрити" в Дневен — за обекта и контролинга */
 var mnSearch = '';       /* „🔍 Код" — материал или заметнат код */
 var MN_ALL = '__all__';  /* mnStore за „Всички обекти" — само контролингът */
+var MN_REPEAT_DEFAULT = 10;
+var mnRepeatDays = MN_REPEAT_DEFAULT; /* app_settings.minus_repeat_days */
 var mnReport = null;     /* отчет на последното качване в тази сесия */
 var mnLastUpload = null;
 var mnDraft = {};        /* id → {real_code, reason_id, employee_name, note} — незаписаното */
@@ -81,7 +97,7 @@ var MN_COL_LABEL = {
   qty: 'Колич. в ед. въвежд.', uom: 'Единица на запис', doc: 'Документ за материал',
   item: 'Позиция докум.матер.', date: 'Дата осчетоводяване', htext: 'Текст общи данни док'
 };
-var MN_MOV_COLS = 'id,plant,store_name,material,material_desc,mvt_type,qty,uom,mat_doc,doc_item,doc_year,posting_date,real_code,reason_id,employee_name,note,filled_by,filled_at';
+var MN_MOV_COLS = 'id,plant,store_name,material,material_desc,mvt_type,qty,uom,mat_doc,doc_item,doc_year,posting_date,real_code,reason_id,employee_name,note,action,filled_by,filled_at';
 
 /* ─── Роли ─────────────────────────────────────────────── */
 function mnIsStoreUser(){ return !!currentUser && MN_STORE_ROLES.indexOf(currentUser.role) >= 0; }
@@ -133,6 +149,19 @@ function mnDate(v){
   if((m = s.match(/^(\d{4})-(\d{2})-(\d{2})/))) return m[1] + '-' + m[2] + '-' + m[3];
   return null;
 }
+/* Цяло число ≥ 1, иначе 10 (липсващ ключ, празно, боклук). */
+function mnParseRepeatDays(v){
+  var s = String(v == null ? '' : v).trim();
+  if(!/^\d+$/.test(s)) return MN_REPEAT_DEFAULT;
+  var n = parseInt(s, 10);
+  return n >= 1 ? n : MN_REPEAT_DEFAULT;
+}
+/* Дни от a до b ('yyyy-mm-dd'); b по-късна → положително. */
+function mnDays(a, b){
+  var pa = String(a).split('-'), pb = String(b).split('-');
+  return Math.round((Date.UTC(+pb[0], +pb[1] - 1, +pb[2]) - Date.UTC(+pa[0], +pa[1] - 1, +pa[2])) / 86400000);
+}
+function mnUnfilled(r){ return r.reason_id == null || (!!r._repeat && !String(r.action || '').trim()); }
 function mnFmtTs(ts){
   if(!ts) return '';
   var d = new Date(ts);
@@ -160,7 +189,8 @@ function mnPassThreshold(rest, uom, thr){
    all — всеки ред 955 + _rest, _state, _closedOn; open — само незакритите;
    byMat — един ред на материал с остатък над прага; over — свръхсторно
    (956 над 955). */
-function mnCompute(movs, thr){
+function mnCompute(movs, thr, repeatDays){
+  var N = repeatDays != null ? repeatDays : mnRepeatDays;
   var groups = {}, order = [];
   (movs || []).forEach(function(m){
     var k = m.store_name + '\u0001' + m.material;
@@ -176,28 +206,39 @@ function mnCompute(movs, thr){
      на 956, който го е закрил ДОКРАЙ). open — само 'open' (броячът и
      „само незакрити"). FIFO: 956 се подреждат по дата, документ, позиция и
      закриват 955 от най-стария. */
-  var out = { all: [], open: [], byMat: [], over: [] };
+  /* early — двойки (955, 956) „сторно преди минуса" за червената карта. */
+  var out = { all: [], open: [], byMat: [], over: [], early: [] };
   order.forEach(function(k){
     var g = groups[k];
     var net = mnRound(g.s955 + g.s956);
     if(net < -MN_EPS) out.over.push({ store_name: g.store_name, material: g.material, desc: g.desc, uom: g.uom, s955: mnRound(g.s955), s956: mnRound(g.s956), rest: net });
     var q956 = g.r956.slice().sort(mnCmp955), qi = 0;
     var avail = q956.map(function(m){ return mnRound(-(Number(m.qty) || 0)); });
-    g.r955.slice().sort(mnCmp955).forEach(function(r){
-      var need = Number(r.qty) || 0, lastDate = null;
+    var s955 = g.r955.slice().sort(mnCmp955);
+    s955.forEach(function(r, i){
+      var need = Number(r.qty) || 0, lastDate = null, early = [];
       while(need > MN_EPS && qi < q956.length){
         if(!(avail[qi] > MN_EPS)){ qi++; continue; }
         var take = Math.min(need, avail[qi]);
         need = mnRound(need - take);
         avail[qi] = mnRound(avail[qi] - take);
         lastDate = q956[qi].posting_date;
+        if(take > MN_EPS && String(q956[qi].posting_date) < String(r.posting_date)) early.push(q956[qi]);
         if(!(avail[qi] > MN_EPS)) qi++;
       }
       var rest = mnRound(need);
       var st = !(rest > MN_EPS) ? 'closed' : mnPassThreshold(rest, r.uom, thr) ? 'open' : 'under';
-      var row = Object.assign({}, r, { _rest: rest, _state: st, _closedOn: st === 'closed' ? lastDate : null });
+      var prev = i > 0 ? s955[i - 1] : null;
+      var prevDays = prev ? mnDays(prev.posting_date, r.posting_date) : null;
+      var cnt30 = s955.filter(function(x){ var d = mnDays(x.posting_date, r.posting_date); return d >= 0 && d <= 29; }).length;
+      var row = Object.assign({}, r, {
+        _rest: rest, _state: st, _closedOn: st === 'closed' ? lastDate : null,
+        _prevDate: prev ? prev.posting_date : null, _prevDays: prevDays, _cnt30: cnt30,
+        _repeat: !!prev && prevDays <= N, _early: early.length > 0
+      });
       out.all.push(row);
       if(st === 'open') out.open.push(row);
+      early.forEach(function(m6){ out.early.push({ row: row, m956: m6 }); });
     });
     if(net >= -MN_EPS && mnPassThreshold(net, g.uom, thr)) out.byMat.push({ store_name: g.store_name, material: g.material, desc: g.desc, uom: g.uom, s955: mnRound(g.s955), s956: mnRound(g.s956), rest: net });
   });
@@ -207,6 +248,7 @@ function mnCompute(movs, thr){
   var byMatSort = function(a, b){ return String(a.material).localeCompare(String(b.material), undefined, { numeric: true }) || String(a.store_name).localeCompare(String(b.store_name), 'bg'); };
   out.byMat.sort(byMatSort);
   out.over.sort(byMatSort);
+  out.early.sort(function(a, b){ return byMatSort(a.row, b.row) || mnCmp955(a.row, b.row); });
   return out;
 }
 
@@ -341,7 +383,7 @@ function loadMinusi(){
   var seq = ++mnLoadSeq;
   if(!mnMovs.length) el.innerHTML = mnTitle() + '<div style="padding:20px;color:#94a3b8;">⏳ Зареждане...</div>';
   return Promise.all([
-    sbGetOk('app_settings', 'key=eq.minus_stores&select=key,value'),
+    sbGetOk('app_settings', 'key=in.(minus_stores,minus_repeat_days)&select=key,value'),
     sbGetOk('minus_plants', 'select=plant,store_name'),
     sbGetOk('minus_reasons', 'select=id,label,active,sort&order=sort.asc,id.asc'),
     sbGetOk('minus_uom_thresholds', 'select=uom,min_qty')
@@ -351,6 +393,8 @@ function loadMinusi(){
     if(bad){ mnLoadErr = bad.error; mnRenderErr(); return; }
     var row = rs[0].rows.filter(function(r){ return r && r.key === 'minus_stores'; })[0];
     mnStoresOn = mnParseStores(row && row.value);
+    var rd = rs[0].rows.filter(function(r){ return r && r.key === 'minus_repeat_days'; })[0];
+    mnRepeatDays = mnParseRepeatDays(rd && rd.value);
     mnPlants = {};
     rs[1].rows.forEach(function(p){ mnPlants[mnCode(p.plant)] = p.store_name; });
     mnReasons = rs[2].rows;
@@ -396,7 +440,7 @@ function mnCaptureDrafts(){
     var id = tr.getAttribute('data-mn-id');
     var g = function(p){ var e = document.getElementById(p + id); return e ? e.value : null; };
     if(g('mn-code-') == null) return;
-    mnDraft[id] = { real_code: g('mn-code-'), reason_id: g('mn-reason-'), employee_name: g('mn-emp-'), note: g('mn-note-') };
+    mnDraft[id] = { real_code: g('mn-code-'), reason_id: g('mn-reason-'), employee_name: g('mn-emp-'), note: g('mn-note-'), action: g('mn-action-') };
   });
 }
 function mnRender(){
@@ -422,7 +466,7 @@ function mnRender(){
   if(mnView === 'daily'){
     h += '<label style="margin-left:auto;"><input type="checkbox" id="mn-onlyopen"' + (mnOnlyOpen ? ' checked' : '') + ' onchange="mnSetOnlyOpen(this.checked)"> само незакрити</label>';
     if(mnIsCO()){
-      var nUnf = (mnOnlyOpen ? calc.open : calc.all).filter(function(r){ return r.reason_id == null; }).length;
+      var nUnf = (mnOnlyOpen ? calc.open : calc.all).filter(mnUnfilled).length;
       h += '<label><input type="checkbox" id="mn-unfilled"' + (mnOnlyUnfilled ? ' checked' : '') + ' onchange="mnSetUnfilled(this.checked)"> само непопълнени (' + nUnf + ')</label>';
     }
   }
@@ -447,14 +491,15 @@ function mnViewRows(calc){
   if(mnView === 'bymat') return calc.byMat.filter(function(r){ return mnMatchSearch(r, false); });
   var rows = calc.all;
   if(mnOnlyOpen) rows = rows.filter(function(r){ return r._state === 'open'; });
-  if(mnIsCO() && mnOnlyUnfilled) rows = rows.filter(function(r){ return r.reason_id == null; });
+  /* „Непопълнен" е и повторение с причина, но без действие. */
+  if(mnIsCO() && mnOnlyUnfilled) rows = rows.filter(mnUnfilled);
   return rows.filter(function(r){ return mnMatchSearch(r, true); });
 }
 function mnBodyHtml(calc){
   var rows = mnViewRows(calc);
   var h = mnView === 'bymat' ? mnByMatHtml(rows) : mnDailyHtml(rows);
   /* Свръхсторното е грешка на магазина — вижда го и обектът (Миглена, 21.10.2026). */
-  if(calc.over.length) h += mnOverHtml(calc.over);
+  if(calc.over.length || calc.early.length) h += mnOverHtml(calc.over, calc.early);
   return h;
 }
 function mnRenderBody(){
@@ -497,12 +542,12 @@ function mnDailyHtml(rows){
     var val = function(k){ return d[k] != null ? d[k] : (r[k] == null ? '' : r[k]); };
     /* Закритите и под прага — сив текст; жълтите колони си остават жълти. */
     var gray = r._state === 'open' ? '' : ' style="color:#94a3b8;"';
-    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
+    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + mnBadgeHtml(r) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
     /* Мерната единица е в „Количество", „Състояние" се пренася на два реда,
        служител / бележка — 110px: с отделна колона „Мерна ед." таблицата беше
        1342 px срещу карта 1246 и „Запази" излизаше навън (Playwright, 22.10). */
     h += '<td class="mn-qty" style="text-align:right;white-space:nowrap;">' + esc(mnFmtQty(Number(r.qty))) + (r.uom ? ' ' + esc(r.uom) : '') + '</td>';
-    h += '<td class="mn-state">' + esc(mnStateText(r)) + '</td>';
+    h += '<td class="mn-state"' + (r._early ? ' style="color:#b91c1c;font-weight:600;"' : '') + '>' + esc(mnStateText(r)) + '</td>';
     if(fill){
       h += '<td style="' + yel + '"><input id="mn-code-' + escAttr(id) + '" value="' + escAttrVal(val('real_code')) + '" style="width:90px;"></td>';
       var cur = String(val('reason_id'));
@@ -516,23 +561,43 @@ function mnDailyHtml(rows){
       });
       h += '</select></td>';
       h += '<td style="' + yel + '"><input id="mn-emp-' + escAttr(id) + '" value="' + escAttrVal(val('employee_name')) + '" style="width:110px;"></td>';
-      h += '<td style="' + yel + '"><input id="mn-note-' + escAttr(id) + '" value="' + escAttrVal(val('note')) + '" style="width:110px;"></td>';
+      /* „Действие" — само на повторенията, под „Бележка" (без нова колона). */
+      h += '<td style="' + yel + '"><input id="mn-note-' + escAttr(id) + '" value="' + escAttrVal(val('note')) + '" style="width:110px;">' +
+        (r._repeat ? '<input id="mn-action-' + escAttr(id) + '" value="' + escAttrVal(val('action')) + '" placeholder="Действие срещу повторение" style="width:110px;display:block;margin-top:4px;">' : '') + '</td>';
       h += '<td style="white-space:nowrap;">' + (done ? '<span class="mn-done" title="' + escAttr('Попълнено: ' + (r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span> ' : '') + '<button class="btn btn-green" onclick="mnSave(\'' + escAttr(id) + '\')">Запази</button></td>';
     } else {
-      h += '<td>' + esc(r.real_code || '') + '</td><td>' + esc(mnReasonLabel(r.reason_id)) + '</td><td>' + esc(r.employee_name || '') + '</td><td>' + esc(r.note || '') + '</td>';
+      h += '<td>' + esc(r.real_code || '') + '</td><td>' + esc(mnReasonLabel(r.reason_id)) + '</td><td>' + esc(r.employee_name || '') + '</td><td>' + esc(r.note || '') +
+        (r.action ? '<div class="mn-action-txt" style="margin-top:2px;">Действие: ' + esc(r.action) + '</div>' : '') + '</td>';
       h += '<td>' + (done ? '<span class="mn-done" title="' + escAttr((r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span>' : '') + '</td>';
     }
     h += '</tr>';
   });
   return h + '</tbody></table></div>';
 }
+/* „↻ предишен дд.мм" (цвят по давност) + „×N за 30 дни" при N ≥ 2. */
+function mnAgeClass(days){ return days <= 7 ? 'red' : days <= 30 ? 'orange' : 'yellow'; }
+var MN_AGE_STYLE = { red: 'background:#fee2e2;color:#b91c1c;', orange: 'background:#ffedd5;color:#c2410c;', yellow: 'background:#fef9c3;color:#a16207;' };
+function mnBadgeHtml(r){
+  if(!r._prevDate) return '';
+  var c = mnAgeClass(r._prevDays);
+  /* Две части, всяка nowrap, с обикновен интервал между тях: при тясна
+     колона броячът минава на втори ред, вместо да разширява „Описание". */
+  var h = '<div class="mn-badges" style="margin-top:3px;font-size:11px;">' +
+    '<span class="mn-prev mn-age-' + c + '" style="' + MN_AGE_STYLE[c] + 'border-radius:4px;padding:0 4px;white-space:nowrap;">↻ предишен ' + esc(fmtDate(r._prevDate).slice(0, 5)) + '</span>';
+  if(r._cnt30 >= 2) h += ' <span class="mn-cnt30" style="background:#ede9fe;color:#6d28d9;border-radius:4px;padding:0 4px;white-space:nowrap;">×' + r._cnt30 + ' за 30 дни</span>';
+  return h + '</div>';
+}
 /* „незакрит" / „незакрит N от M" (частично закрит) / „закрит дд.мм" /
-   „остатък под прага". */
+   „остатък под прага"; + „⚠ сторно преди минуса" (956 преди 955). */
 function mnStateText(r){
-  if(r._state === 'closed') return 'закрит' + (r._closedOn ? ' ' + fmtDate(r._closedOn).slice(0, 5) : '');
-  if(r._state === 'under') return 'остатък под прага';
-  var q = mnRound(Number(r.qty) || 0);
-  return mnRound(r._rest) < q - MN_EPS ? 'незакрит ' + mnFmtQty(r._rest) + ' от ' + mnFmtQty(q) : 'незакрит';
+  var t;
+  if(r._state === 'closed') t = 'закрит' + (r._closedOn ? ' ' + fmtDate(r._closedOn).slice(0, 5) : '');
+  else if(r._state === 'under') t = 'остатък под прага';
+  else {
+    var q = mnRound(Number(r.qty) || 0);
+    t = mnRound(r._rest) < q - MN_EPS ? 'незакрит ' + mnFmtQty(r._rest) + ' от ' + mnFmtQty(q) : 'незакрит';
+  }
+  return r._early ? t + ' ⚠ сторно преди минуса' : t;
 }
 function mnByMatHtml(rows){
   if(!rows.length) return '<div class="card" id="mn-empty" style="color:#64748b;">' + (mnSearch.trim() ? 'Няма артикули за „' + esc(mnSearch.trim()) + '“.' : 'Няма незакрити артикули.') + '</div>';
@@ -545,14 +610,30 @@ function mnByMatHtml(rows){
   });
   return h + '</tbody></table></div>';
 }
-function mnOverHtml(rows){
-  var h = '<div class="card" id="mn-over" style="border-left:4px solid #dc2626;"><b style="color:#b91c1c;">⚠ Свръхсторно — 956 над 955</b>';
+function mnOverHtml(rows, early){
+  rows = rows || []; early = early || [];
+  var h = '<div class="card" id="mn-over" style="border-left:4px solid #dc2626;">';
   var all = mnIsAll();
+  if(rows.length){
+  h += '<b style="color:#b91c1c;">⚠ Свръхсторно — 956 над 955</b>';
   h += '<table><thead><tr>' + (all ? '<th>Обект</th>' : '') + '<th>Материал</th><th>Описание</th><th>955</th><th>956</th><th>Разлика</th><th>Мерна ед.</th></tr></thead><tbody>';
   rows.forEach(function(r){
     h += '<tr>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.desc) + '</td><td>' + esc(mnFmtQty(r.s955)) + '</td><td>' + esc(mnFmtQty(r.s956)) + '</td><td>' + esc(mnFmtQty(r.rest)) + '</td><td>' + esc(r.uom) + '</td></tr>';
   });
-  return h + '</tbody></table></div>';
+  h += '</tbody></table>';
+  }
+  /* 956 с дата ПРЕДИ минуса 955, който закрива — грешка на магазина и след
+     като нетът стане 0 (Миглена, 22.10.2026; пример 17279). */
+  if(early.length){
+    h += '<div id="mn-early"' + (rows.length ? ' style="margin-top:12px;"' : '') + '><b style="color:#b91c1c;">⚠ Сторно преди минуса (956 преди 955)</b>';
+    h += '<table><thead><tr>' + (all ? '<th>Обект</th>' : '') + '<th>Материал</th><th>Описание</th><th>Дата 955</th><th>Дата 956</th><th>Документ 956</th></tr></thead><tbody>';
+    early.forEach(function(e){
+      h += '<tr class="mn-early-row">' + (all ? '<td class="mn-store">' + esc(e.row.store_name) + '</td>' : '') + '<td>' + esc(e.row.material) + '</td><td>' + esc(e.row.material_desc) + '</td>' +
+        '<td>' + esc(fmtDate(e.row.posting_date)) + '</td><td>' + esc(fmtDate(e.m956.posting_date)) + '</td><td>' + esc(e.m956.mat_doc) + '</td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  return h + '</div>';
 }
 
 /* ─── Действия ─────────────────────────────────────────── */
@@ -580,10 +661,11 @@ function mnExportAoa(){
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.desc || '', r.s955, r.s956, r.rest, r.uom || '']));
     });
   } else {
-    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка'])];
+    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие'])];
     rows.forEach(function(r){
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.material_desc || '', fmtDate(r.posting_date), mnRound(Number(r.qty) || 0), r.uom || '',
-        mnStateText(r), r.real_code || '', mnReasonLabel(r.reason_id), r.employee_name || '', r.note || '']));
+        mnStateText(r), r.real_code || '', mnReasonLabel(r.reason_id), r.employee_name || '', r.note || '',
+        r._prevDate ? fmtDate(r._prevDate) : '', r._cnt30 || 0, r.action || '']));
     });
   }
   return aoa;
@@ -630,9 +712,12 @@ function mnPrint(){
     head = (all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Кол-во', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка']);
     body = rows.map(function(r){
       return '<tr' + (r._state === 'open' ? '' : ' class="mn-p-gray"') + '>' + (all ? '<td>' + mnP(r.store_name) + '</td>' : '') +
-        '<td>' + mnP(r.material) + '</td><td>' + mnP(r.material_desc) + '</td><td>' + mnP(fmtDate(r.posting_date)) + '</td>' +
+        '<td>' + mnP(r.material) + '</td><td>' + mnP(r.material_desc) +
+        (r._prevDate ? '<br><span class="mn-p-prev">' + mnP('↻ ' + fmtDate(r._prevDate).slice(0, 5) + (r._cnt30 >= 2 ? ' ×' + r._cnt30 : '')) + '</span>' : '') +
+        '</td><td>' + mnP(fmtDate(r.posting_date)) + '</td>' +
         '<td>' + mnP(mnFmtQty(Number(r.qty)) + (r.uom ? ' ' + r.uom : '')) + '</td><td>' + mnP(mnStateText(r)) + '</td>' +
-        '<td>' + mnP(r.real_code) + '</td><td>' + mnP(mnReasonLabel(r.reason_id)) + '</td><td>' + mnP(r.employee_name) + '</td><td>' + mnP(r.note) + '</td></tr>';
+        '<td>' + mnP(r.real_code) + '</td><td>' + mnP(mnReasonLabel(r.reason_id)) + '</td><td>' + mnP(r.employee_name) + '</td><td>' + mnP(r.note) +
+        (r.action ? (r.note ? '<br>' : '') + '<span class="mn-p-action">' + mnP('Действие: ' + r.action) + '</span>' : '') + '</td></tr>';
     }).join('');
   }
   var title = 'Минуси — ' + mnStoreLabel() + ' — ' + mnViewLabel() + ' — ' + fmtDate(today());
@@ -672,6 +757,11 @@ function mnSave(id){
   if(!reason){ toast('Избери причина от списъка', '#dc2626'); return Promise.resolve(false); }
   if(!mnReasonLabel(reason)){ toast('Непозната причина', '#dc2626'); return Promise.resolve(false); }
   if(!emp){ toast('Попълни име на служител', '#dc2626'); return Promise.resolve(false); }
+  /* Повторение до N дни → „Действие" е задължително (Теодор, 06.10.2026). */
+  var crow = null;
+  mnCompute(mnMovs, mnThresholds).all.forEach(function(x){ if(String(x.id) === String(id)) crow = x; });
+  var isRep = !!(crow && crow._repeat), action = g('mn-action-');
+  if(isRep && !action){ toast('Повторен минус до ' + mnRepeatDays + ' дни — попълни действие', '#dc2626'); return Promise.resolve(false); }
   var body = {
     real_code: g('mn-code-') || null,
     reason_id: parseInt(reason, 10),
@@ -680,6 +770,7 @@ function mnSave(id){
     filled_by: currentUser.display_name || currentUser.email || '',
     filled_at: new Date().toISOString()
   };
+  if(isRep) body.action = action;
   return sbPatch('minus_movements', 'id=eq.' + encodeURIComponent(id), body).then(function(res){
     if(!res.ok){ toast('Не е записано: ' + sbErrMsg(res), '#dc2626'); return false; }
     Object.keys(body).forEach(function(k){ row[k] = body[k]; });

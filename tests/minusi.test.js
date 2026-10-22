@@ -85,6 +85,22 @@
      M29 печатът пренебрегва филтрите → пада „редовете на текущия изглед“.
    Заглавие „Кол-во“ в печата (22.10.2026, Тенчо: „Количест / во“ в PDF):
      M30 печатът пак с „Количество“ → пада „печат: заглавието … „Кол-во““.
+   Етап 2 — повторения и „сторно преди минуса“ (секция 12, 22.10.2026):
+     M31 повторението по завод вместо по обект → падат значките 05.10 / 20.10
+        и броячите (05.10 е в 5519, другите в 7519), плюс „Действие“ в секция 3;
+     M32 < вместо ≤ N → пада „точно 10 дни е повторение“ (77002);
+     M33 действието не е задължително → падат „без действие → toast“ (секции
+        3 и 12) и броят PATCH;
+     M34 значката спрямо следващия минус → падат 13 проверки в секция 12;
+     M35 „сторно преди минуса“ с ≤ → пада „17280 (един ден) → без ⚠“ и
+        втората таблица (2 реда вместо 1);
+     M36 „само непопълнени“ без повторенията → пада „включва r2“;
+     M37 картата само при свръхсторно → пада втората таблица за 17279;
+     M38 броячът за 30 дни брои и бъдещите → падат „×2 / ×3“ и Excel.
+     M39 обвивката на значката пак nowrap → пада „обвивката НЕ е nowrap“.
+   Секция 3 пише в „Действие“ само ако полето го има (if (act)) — иначе при
+   M31/M34 тестът гърмеше там и секция 12 не се стигаше: мутантът падаше от
+   TypeError, не от проверка.
 */
 'use strict';
 
@@ -133,6 +149,7 @@ function fakeDb(o) {
   o = o || {};
   return {
     settings: o.settings != null ? o.settings : 'Гоце Делчев',
+    repeatDays: o.repeatDays,   /* undefined → ключът minus_repeat_days липсва */
     thr: o.thr || THR,
     movs: o.movs || [], uploads: [], log: [], seq: 0
   };
@@ -150,7 +167,7 @@ function install(h, db) {
     const body = init && init.body ? JSON.parse(init.body) : null;
     db.log.push({ m, tbl, url: u, q, body, prefer: init && init.headers && init.headers.Prefer });
     if (m === 'GET') {
-      if (tbl === 'app_settings') return resp(200, db.settings == null ? [] : [{ key: 'minus_stores', value: db.settings }]);
+      if (tbl === 'app_settings') return resp(200, (db.settings == null ? [] : [{ key: 'minus_stores', value: db.settings }]).concat(db.repeatDays === undefined ? [] : [{ key: 'minus_repeat_days', value: db.repeatDays }]));
       if (tbl === 'minus_plants') return resp(200, PLANTS);
       if (tbl === 'minus_reasons') return resp(200, REASONS);
       if (tbl === 'minus_uom_thresholds') return resp(200, db.thr);
@@ -316,13 +333,20 @@ function noAmountInDom(name, h) {
     sel.value = '5';
     h.doc.getElementById('mn-emp-' + fillId).value = 'Иван Иванов';
     h.doc.getElementById('mn-note-' + fillId).value = 'КЗ 123 / 13.10';
+    /* 40243 от 14.10 е повторение (предишен 11.10, 3 дни ≤ 10) — без действие не записва. */
+    const act = h.doc.getElementById('mn-action-' + fillId);
+    ok('повторение → поле „Действие“ под „Бележка“, в същата клетка', !!act && act.getAttribute('placeholder') === 'Действие срещу повторение' && act.parentNode === h.doc.getElementById('mn-note-' + fillId).parentNode && act.style.width === '110px');
+    const nP = db.log.filter(x => x.m === 'PATCH').length;
+    realClick(h.w, btn(h.doc.getElementById('mn-row-' + fillId), 'Запази')); await ticks(4);
+    ok('повторение без действие → червен toast и нула PATCH', db.log.filter(x => x.m === 'PATCH').length === nP && h.calls.toast[h.calls.toast.length - 1] === 'Повторен минус до 10 дни — попълни действие' && h.doc.getElementById('toast').style.background.indexOf('220, 38, 38') >= 0, h.calls.toast.slice(-1)[0]);
+    if (act) act.value = 'ще преетикираме';
     realClick(h.w, btn(h.doc.getElementById('mn-row-' + fillId), 'Запази')); await ticks(4);
     const p = db.log.filter(x => x.m === 'PATCH' && x.tbl === 'minus_movements');
     ok('един PATCH към minus_movements', p.length === 1, p.length);
     if (p[0]) {
       ok('PATCH на точния ред (id=eq.)', p[0].q === 'id=eq.' + fillId, p[0].q);
-      ok('само real_code/reason_id/employee_name/note/filled_by/filled_at', Object.keys(p[0].body).sort().join(',') === 'employee_name,filled_at,filled_by,note,real_code,reason_id', Object.keys(p[0].body).join(','));
-      ok('стойностите', p[0].body.real_code === '40244' && p[0].body.reason_id === 5 && p[0].body.employee_name === 'Иван Иванов' && p[0].body.note === 'КЗ 123 / 13.10' && p[0].body.filled_by === 'Управител ГД');
+      ok('повторение: полетата за попълване + action', Object.keys(p[0].body).sort().join(',') === 'action,employee_name,filled_at,filled_by,note,real_code,reason_id', Object.keys(p[0].body).join(','));
+      ok('стойностите', p[0].body.action === 'ще преетикираме' && p[0].body.real_code === '40244' && p[0].body.reason_id === 5 && p[0].body.employee_name === 'Иван Иванов' && p[0].body.note === 'КЗ 123 / 13.10' && p[0].body.filled_by === 'Управител ГД');
     }
     const tr2 = h.doc.getElementById('mn-row-' + fillId);
     ok('попълненият ред остава видим, с отметка ✅', tr2 && !!tr2.querySelector('.mn-done'));
@@ -630,7 +654,7 @@ function noAmountInDom(name, h) {
     let cap = xl(he.w);
     const ooE = he.doc.getElementById('mn-onlyopen'); ooE.checked = true; fire(he.w, ooE, 'change');
     realClick(he.w, he.doc.getElementById('mn-excel'));
-    ok('Excel (Дневен, само незакрити): заглавията', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|Дата|Количество|Мерна ед.|Състояние|Заметнат код|Причина|Име на служител|Бележка', cap.aoa && cap.aoa[0].join('|'));
+    ok('Excel (Дневен, само незакрити): заглавията', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|Дата|Количество|Мерна ед.|Състояние|Заметнат код|Причина|Име на служител|Бележка|Предишен минус|Брой за 30 дни|Действие', cap.aoa && cap.aoa[0].join('|'));
     ok('… 3 реда (филтърът е приложен)', cap.aoa && cap.aoa.length === 4, cap.aoa && cap.aoa.length);
     const r98 = cap.aoa && cap.aoa.find(r => r[0] === '98275');
     ok('… количеството е число, мерната единица — отделна колона', r98 && r98[3] === 2.88 && r98[4] === 'M2' && r98[2] === '07.10.2026', JSON.stringify(r98));
@@ -682,6 +706,128 @@ function noAmountInDom(name, h) {
     ok('печат без суми', !/(^|[^\d,.])(3[.,]7|13[.,]97|1[.,]96)([^\d]|$)/.test(hp.doc.getElementById('mn-print-wrap').textContent));
     realClick(ha.w, ha.doc.getElementById('mn-print'));
     ok('печат при „Всички обекти“: заглавие „… Всички обекти — Незакрити по артикул …“, колона „Обект“', ha.doc.getElementById('mn-print-title').textContent === 'Минуси — Всички обекти — Незакрити по артикул — ' + TODAY && ha.doc.querySelector('#mn-print-wrap th').textContent === 'Обект');
+  }
+
+  section('12. Повторения, давност, „Действие“, „сторно преди минуса“ (етап 2, 22.10.2026)');
+  {
+    /* Синтетичен обект + материал 77001: 955 на 01.10, 05.10, 20.10, 30.11 —
+       05.10 е в завод 5519, останалите в 7519 (повторението е по ОБЕКТ).
+       По определението:
+         01.10 — без предишен; 30 дни [02.09–01.10] → 1;
+         05.10 — предишен 01.10 (4 дни, червено); [06.09–05.10] → 2 (×2);
+         20.10 — предишен 05.10 (15 дни, оранжево); [21.09–20.10] → 3 (×3);
+         30.11 — предишен 20.10 (41 дни, жълто); [01.11–30.11] → 1.
+       77002: 10.10 и 20.10 — точно 10 дни. */
+    const b = { store_name: 'Гоце Делчев', material_desc: 'ТЕСТ ПОВТОРЕНИЕ', uom: 'БР', doc_year: 2026, doc_item: '1', mvt_type: '955', qty: 1 };
+    const REP = [
+      Object.assign({ id: 'r1', plant: '7519', material: '77001', mat_doc: 'R1', posting_date: '2026-10-01' }, b),
+      Object.assign({ id: 'r2', plant: '5519', material: '77001', mat_doc: 'R2', posting_date: '2026-10-05' }, b),
+      Object.assign({ id: 'r3', plant: '7519', material: '77001', mat_doc: 'R3', posting_date: '2026-10-20' }, b),
+      Object.assign({ id: 'r4', plant: '7519', material: '77001', mat_doc: 'R4', posting_date: '2026-11-30' }, b),
+      Object.assign({ id: 'e1', plant: '7519', material: '77002', mat_doc: 'E1', posting_date: '2026-10-10' }, b),
+      Object.assign({ id: 'e2', plant: '7519', material: '77002', mat_doc: 'E2', posting_date: '2026-10-20' }, b)
+    ];
+    const copy = a => a.map(x => Object.assign({}, x));
+    const rowOf = (h, id) => h.doc.getElementById('mn-row-' + id);
+    const badge = (h, id) => { const tr = rowOf(h, id); return tr && tr.querySelector('.mn-prev'); };
+    const cnt = (h, id) => { const tr = rowOf(h, id); const c = tr && tr.querySelector('.mn-cnt30'); return c ? c.textContent : null; };
+
+    const h = env(GD, fakeDb({ movs: copy(REP) })); await open(h);
+    ok('01.10 — без значка', rowOf(h, 'r1') && !rowOf(h, 'r1').querySelector('.mn-badges'));
+    ok('05.10 — „↻ предишен 01.10“, червена', badge(h, 'r2') && badge(h, 'r2').textContent === '↻ предишен 01.10' && badge(h, 'r2').classList.contains('mn-age-red'), badge(h, 'r2') && badge(h, 'r2').className);
+    ok('20.10 — „↻ предишен 05.10“, оранжева (15 дни)', badge(h, 'r3') && badge(h, 'r3').textContent === '↻ предишен 05.10' && badge(h, 'r3').classList.contains('mn-age-orange'), badge(h, 'r3') && badge(h, 'r3').className);
+    ok('30.11 — „↻ предишен 20.10“, жълта (41 дни)', badge(h, 'r4') && badge(h, 'r4').textContent === '↻ предишен 20.10' && badge(h, 'r4').classList.contains('mn-age-yellow'), badge(h, 'r4') && badge(h, 'r4').className);
+    ok('броячи: 05.10 „×2 за 30 дни“, 20.10 „×3 за 30 дни“, 01.10 и 30.11 — без', cnt(h, 'r2') === '×2 за 30 дни' && cnt(h, 'r3') === '×3 за 30 дни' && cnt(h, 'r1') === null && cnt(h, 'r4') === null, [cnt(h, 'r1'), cnt(h, 'r2'), cnt(h, 'r3'), cnt(h, 'r4')].join(' / '));
+    ok('значката е в клетката с описанието', badge(h, 'r2').closest('td').textContent.indexOf('ТЕСТ ПОВТОРЕНИЕ') === 0);
+    /* Две части, всяка nowrap, с интервал между тях — броячът може да мине
+       на втори ред, без да разширява „Описание“. */
+    const bw = rowOf(h, 'r3').querySelector('.mn-badges');
+    const p3 = bw && bw.querySelector('.mn-prev'), c3 = bw && bw.querySelector('.mn-cnt30');
+    ok('значката: „↻ предишен“ и „×N“ са два отделни елемента, всеки с nowrap', !!p3 && !!c3 && p3 !== c3 && p3.style.whiteSpace === 'nowrap' && c3.style.whiteSpace === 'nowrap', p3 && p3.getAttribute('style'));
+    ok('… обвивката НЕ е nowrap (броячът може да пренесе)', bw && bw.style.whiteSpace !== 'nowrap', bw && bw.getAttribute('style'));
+    ok('… между двете части има обикновен интервал', !!p3 && !!p3.nextSibling && p3.nextSibling.nodeType === 3 && p3.nextSibling.textContent === ' ' && p3.nextSibling.nextSibling === c3, p3 && p3.nextSibling && JSON.stringify(p3.nextSibling.textContent));
+    ok('броят th в #mn-daily е непроменен (10)', h.doc.querySelectorAll('#mn-daily thead th').length === 10, h.doc.querySelectorAll('#mn-daily thead th').length);
+    const hasAct = (hh, id) => !!hh.doc.getElementById('mn-action-' + id);
+    ok('N = 10 (ключът липсва): „Действие“ на 05.10 (4 дни) и на 77002 от 20.10 (точно 10 дни); не на 01.10, 20.10 (15), 30.11', hasAct(h, 'r2') && hasAct(h, 'e2') && !hasAct(h, 'r1') && !hasAct(h, 'r3') && !hasAct(h, 'r4') && !hasAct(h, 'e1'));
+    const h20 = env(GD, fakeDb({ movs: copy(REP), repeatDays: '20' })); await open(h20);
+    ok('minus_repeat_days = „20“ → и 20.10 е повторение; 30.11 (41) — не', hasAct(h20, 'r3') && hasAct(h20, 'r2') && !hasAct(h20, 'r4'));
+    const hBad = env(GD, fakeDb({ movs: copy(REP), repeatDays: 'abc' })); await open(hBad);
+    ok('невалидна стойност („abc“) → 10', hasAct(hBad, 'r2') && !hasAct(hBad, 'r3') && hBad.w.mnRepeatDays === 10);
+
+    /* Запис: ред без повторение → без action; повторение без действие → toast, с действие → action. */
+    const dbS = fakeDb({ movs: copy(REP) });
+    const hs = env(GD, dbS); await open(hs);
+    const fillRow = (id, act) => {
+      hs.doc.getElementById('mn-reason-' + id).value = '2';
+      hs.doc.getElementById('mn-emp-' + id).value = 'Здравка';
+      if (act != null) hs.doc.getElementById('mn-action-' + id).value = act;
+    };
+    fillRow('r1');
+    realClick(hs.w, btn(rowOf(hs, 'r1'), 'Запази')); await ticks(4);
+    let pp = dbS.log.filter(x => x.m === 'PATCH');
+    ok('ред без повторение → PATCH без action', pp.length === 1 && pp[0].q === 'id=eq.r1' && !('action' in pp[0].body) && Object.keys(pp[0].body).length === 6, pp[0] && Object.keys(pp[0].body).join(','));
+    fillRow('r2', '');
+    realClick(hs.w, btn(rowOf(hs, 'r2'), 'Запази')); await ticks(4);
+    ok('повторение без действие (05.10) → toast, нула нови PATCH', dbS.log.filter(x => x.m === 'PATCH').length === 1 && hs.calls.toast.slice(-1)[0] === 'Повторен минус до 10 дни — попълни действие');
+    hs.doc.getElementById('mn-action-r2').value = '  грешен етикет — ще преетикираме ';
+    realClick(hs.w, btn(rowOf(hs, 'r2'), 'Запази')); await ticks(4);
+    pp = dbS.log.filter(x => x.m === 'PATCH');
+    ok('с действие → PATCH с action (trim)', pp.length === 2 && pp[1].q === 'id=eq.r2' && pp[1].body.action === 'грешен етикет — ще преетикираме', pp[1] && JSON.stringify(pp[1].body.action));
+
+    /* „само непопълнени“: 05.10 с причина, но без действие — вътре; 01.10 с
+       причина (не е повторение) — вън. */
+    const unf = copy(REP);
+    unf.find(x => x.id === 'r1').reason_id = 2;
+    unf.find(x => x.id === 'r2').reason_id = 2;
+    const hc = env(ADMIN, fakeDb({ movs: unf })); await open(hc);
+    const u = hc.doc.getElementById('mn-unfilled'); u.checked = true; fire(hc.w, u, 'change');
+    const ids = Array.from(hc.doc.querySelectorAll('#mn-daily tbody tr')).map(tr => tr.getAttribute('data-mn-id')).sort();
+    ok('„само непопълнени“ включва повторение с причина без действие (r2), без r1', ids.indexOf('r2') >= 0 && ids.indexOf('r1') < 0 && ids.length === 5, ids.join(','));
+    const withAct = copy(unf); withAct.find(x => x.id === 'r2').action = 'ще преетикираме';
+    const hc2 = env(ADMIN, fakeDb({ movs: withAct })); await open(hc2);
+    ok('контролингът вижда действието като текст под бележката', rowOf(hc2, 'r2') && rowOf(hc2, 'r2').querySelector('.mn-action-txt') && rowOf(hc2, 'r2').querySelector('.mn-action-txt').textContent === 'Действие: ще преетикираме');
+    const u2 = hc2.doc.getElementById('mn-unfilled'); u2.checked = true; fire(hc2.w, u2, 'change');
+    ok('… и с действие r2 вече не е „непопълнен“', !rowOf(hc2, 'r2'));
+
+    /* Excel и печат за синтетичните. */
+    const cap = { aoa: null }; hc2.w.XLSX = { utils: { book_new: () => ({}), aoa_to_sheet: a => { cap.aoa = a; return {}; }, book_append_sheet: () => {} }, writeFile: () => {} };
+    const u3 = hc2.doc.getElementById('mn-unfilled'); u3.checked = false; fire(hc2.w, u3, 'change');
+    realClick(hc2.w, hc2.doc.getElementById('mn-excel'));
+    const xr = id => cap.aoa && cap.aoa.find(r => r[0] === '77001' && r[2] === ({ r1: '01.10.2026', r2: '05.10.2026', r3: '20.10.2026', r4: '30.11.2026' })[id]);
+    ok('Excel: „Предишен минус“, „Брой за 30 дни“, „Действие“ накрая', cap.aoa && cap.aoa[0].slice(-3).join('|') === 'Предишен минус|Брой за 30 дни|Действие');
+    ok('Excel 05.10: 01.10.2026 | 2 | действието', xr('r2') && xr('r2').slice(-3).join('|') === '01.10.2026|2|ще преетикираме', xr('r2') && JSON.stringify(xr('r2').slice(-3)));
+    ok('Excel 01.10: празно | 1 | празно', xr('r1') && xr('r1')[xr('r1').length - 3] === '' && xr('r1')[xr('r1').length - 2] === 1 && xr('r1')[xr('r1').length - 1] === '', xr('r1') && JSON.stringify(xr('r1').slice(-3)));
+    ok('Excel без суми', !/(^|[^\d.])(3\.7|13\.97|-1\.96)([^\d]|$)/.test(JSON.stringify(cap.aoa)));
+    realClick(hc2.w, hc2.doc.getElementById('mn-print'));
+    const pw = hc2.doc.getElementById('mn-print-wrap');
+    const pths = Array.from(pw.querySelectorAll('table.mn-ptbl th')).map(x => x.textContent.trim());
+    ok('печат: без нови колони (9 th, 190 mm)', pths.length === 9 && Array.from(pw.querySelectorAll('col')).reduce((a, c) => a + parseFloat(c.style.width), 0) === 190, pths.join('|'));
+    const prow2 = Array.from(pw.querySelectorAll('table.mn-ptbl tr')).slice(1).find(tr => tr.textContent.indexOf('05.10.2026') >= 0);
+    const pc = prow2 ? Array.from(prow2.querySelectorAll('td')) : [];
+    ok('печат: „↻ 01.10 ×2“ под описанието', pc[1] && pc[1].querySelector('.mn-p-prev') && pc[1].querySelector('.mn-p-prev').textContent === '↻ 01.10 ×2', pc[1] && pc[1].textContent);
+    ok('печат: „Действие: …“ в клетката „Бележка“', pc[8] && pc[8].textContent.indexOf('Действие: ще преетикираме') >= 0, pc[8] && pc[8].textContent);
+
+    /* „Сторно преди минуса“ — реалният 17279 (Гоце Делчев, 5519) + същата дата (не е грешка). */
+    const S = { store_name: 'Гоце Делчев', plant: '5519', uom: 'БР', doc_year: 2026 };
+    const EARLY = [
+      Object.assign({ id: 'k956', material: '17279', material_desc: 'ПЯНА WHITETEQ МОНТАЖНА РЪЧНА 750МЛ/12', mvt_type: '956', qty: -1, mat_doc: '4903360010', doc_item: '6', posting_date: '2026-10-20' }, S),
+      Object.assign({ id: 'k955', material: '17279', material_desc: 'ПЯНА WHITETEQ МОНТАЖНА РЪЧНА 750МЛ/12', mvt_type: '955', qty: 1, mat_doc: '4903361772', doc_item: '1', posting_date: '2026-10-21' }, S),
+      Object.assign({ id: 's956', material: '17280', material_desc: 'СЪЩИЯ ДЕН', mvt_type: '956', qty: -1, mat_doc: 'SD6', doc_item: '1', posting_date: '2026-10-21' }, S),
+      Object.assign({ id: 's955', material: '17280', material_desc: 'СЪЩИЯ ДЕН', mvt_type: '955', qty: 1, mat_doc: 'SD5', doc_item: '1', posting_date: '2026-10-21' }, S)
+    ];
+    for (const usr of [GD, ADMIN]) {
+      const he = env(usr, fakeDb({ movs: copy(EARLY) })); await open(he);
+      const stCell = rowOf(he, 'k955') && rowOf(he, 'k955').querySelector('.mn-state');
+      ok(usr.role + ': 17279 → „закрит 20.10 ⚠ сторно преди минуса“, червено', stCell && stCell.textContent === 'закрит 20.10 ⚠ сторно преди минуса' && /185, 28, 28/.test(stCell.style.color), stCell && stCell.textContent);
+      ok(usr.role + ': 17280 (956 и 955 в един ден) → „закрит 21.10“, без ⚠', rowOf(he, 's955') && rowOf(he, 's955').querySelector('.mn-state').textContent === 'закрит 21.10');
+      const er = Array.from(he.doc.querySelectorAll('#mn-early tbody tr')).map(cellTxt);
+      ok(usr.role + ': картата — „⚠ Сторно преди минуса“, 1 ред: 17279 · 21.10.2026 · 20.10.2026 · 4903360010', er.length === 1 && er[0].join('|') === '17279|ПЯНА WHITETEQ МОНТАЖНА РЪЧНА 750МЛ/12|21.10.2026|20.10.2026|4903360010', JSON.stringify(er));
+      ok(usr.role + ': без свръхсторно — няма таблицата „956 над 955“, картата е само за сторното', !!he.doc.getElementById('mn-over') && he.doc.getElementById('mn-over').textContent.indexOf('956 над 955') < 0);
+      ok(usr.role + ': редът със сторно преди минуса остава попълваем само за обекта', usr === GD ? !!he.doc.getElementById('mn-reason-k955') : !he.doc.getElementById('mn-reason-k955'));
+    }
+    const hep = env(GD, fakeDb({ movs: copy(EARLY) })); await open(hep);
+    realClick(hep.w, hep.doc.getElementById('mn-print'));
+    ok('печат: „⚠ сторно преди минуса“ в клетката „Състояние“', Array.from(hep.doc.querySelectorAll('#mn-print-wrap td')).some(td => td.textContent === 'закрит 20.10 ⚠ сторно преди минуса'));
   }
 
   report();
