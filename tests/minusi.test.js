@@ -11,9 +11,11 @@
    Базата е фалшив PostgREST в паметта (fakeDb): on_conflict + ignore-duplicates
    при POST към minus_movements връща само реално вмъкнатите — както живият.
 
-   Мутационна проверка (20.10.2026) — всеки вариант е пуснат и е паднал:
-     M1 FIFO от най-новия (mnCmp955 обърнат)
-        → падат „40243 — само редът от 14.10“ и „редът е точно 955 от 14.10“;
+   Мутационна проверка (20.10.2026) — всеки вариант е пуснат и е паднал
+   (M1 и M2 — пуснати наново на 22.10 срещу историята в Дневен):
+     M1 FIFO от най-новия (редовете 955 обърнати)
+        → падат „40243 от 14.10 → незакрит“, „40243 от 11.10 → закрит 12.10“,
+        „52215 / 95498 от … → закрит 12.10“;
      M2 нетиране по завод вместо по обект (ключът на групата с m.plant)
         → падат „40243 → 2 | -1 | 1“ (по артикул излиза 1|0|1 — двата завода
         са два реда) и синтетичните 99001 / 99002. Дневният изглед на
@@ -44,6 +46,30 @@
      M11 „📤 Качи файл“ пак с btn-primary → пада „„📤 Качи файл“ (admin)…“.
    jsdom не смята CSS — тестът заковава класовете; че бутонът е зелен,
    се проверява на живо (claude/open/21-10-minusi-btn-style-live.md).
+   История в „Дневен" (22.10.2026, решения на Миглена от 21.10) — всеки
+   вариант пуснат и паднал:
+     M12 Дневен пак само с незакритите → пада „всичките 11 реда 955“ (+14);
+     M13 датата на закриване — от първия 956, докоснал реда → пада само
+        синтетичното „закрит от два 956 → закрит 15.10“: във фикстурата
+        всеки ред се закрива от ЕДИН 956, затова случаят е добавен нарочно;
+     M14 датата — от първия 956 на артикула → падат „95498 от 13.10“ и
+        „52215 — двата реда от 13.10 → закрит 14.10“;
+     M15 свръхсторното пак само за контролинга → падат трите проверки на
+        обекта (99002, заглавието, 956 без 955 като 17279);
+     M16 „под прага“ броено като незакрит → падат „48349 → остатък под
+        прага“, „незакритите са точно 3“ и бутонът „общо 11 · незакрити 3“;
+     M17 „Количество“ показва остатъка, не SAP → пада „95498 от 08.10 → 3“;
+     M18 „само незакрити“ не филтрира → падат „точно 3 реда“ и комбинацията.
+   Ширината на „Дневен“ с колоната „Състояние“ (22.10.2026; Playwright от
+   чата, фикстура, manager): с отделна „Мерна ед.“ таблицата беше 1342 px
+   срещу карта 1246 (1280) / 1266 (1366) — „Запази“ навън. Сега единицата е в
+   „Количество“, „Състояние“ — th 90px и се пренася, служител / бележка —
+   110px: 1280 → 1206 / 1246, „Запази“ дясно 1233 / 1264; 1366 → 1226 / 1266,
+   1286 / 1317. Пуснати и паднали:
+     M19 колоната „Мерна ед.“ върната → падат 22 проверки (вкл. „няма th
+        „Мерна ед.““ и всички по индекс на колоните);
+     M20 „Състояние“ пак с nowrap → пада „td „Състояние“ се пренася…“;
+     M21 служител пак 120px → пада „… width:110px (22 полета)“.
 */
 'use strict';
 
@@ -192,15 +218,48 @@ function noAmountInDom(name, h) {
     }
 
     section('2. Изгледите на контролинга (Гоце Делчев по подразбиране)');
+    /* От 22.10.2026 (Миглена, 21.10): „Дневен" показва ВСИЧКИ 955 — история.
+       Колони: 0 материал, 1 описание, 2 дата, 3 количество от SAP + мерна
+       единица („2,88 M2“), 4 състояние (отделна колона „Мерна ед.“ няма —
+       таблицата не се побираше в картата, 22.10). Очакваното е сверено на ръка с FIFO върху фикстурата. */
     const rows = dailyRows(h);
-    ok('Дневният изглед: ТОЧНО 3 реда', rows.length === 3, rows.map(r => cellTxt(r)[0]).join(','));
-    const by = {}; rows.forEach(r => { by[cellTxt(r)[0]] = cellTxt(r); });
-    ok('17273: 14.10.2026, 1 БР', by['17273'] && by['17273'][2] === '14.10.2026' && by['17273'][3] === '1' && by['17273'][4] === 'БР');
-    ok('40243 — само редът от 14.10 (11.10 е закрит от 956 на 12.10)', by['40243'] && by['40243'][2] === '14.10.2026' && by['40243'][3] === '1', by['40243'] && by['40243'][2]);
-    ok('98275: 07.10.2026, 2,88 M2', by['98275'] && by['98275'][2] === '07.10.2026' && by['98275'][3] === '2,88' && by['98275'][4] === 'M2');
-    ok('23030, 52215, 95498 — закрити, 48349 — скрит от прага', ['23030', '52215', '95498', '48349'].every(m => !by[m]));
+    ok('Дневният изглед: всичките 11 реда 955', rows.length === 11, rows.map(r => cellTxt(r)[0]).join(','));
+    const st = {}; rows.forEach(r => { const c = cellTxt(r); st[c[0] + '@' + c[2].slice(0, 5)] = (st[c[0] + '@' + c[2].slice(0, 5)] || []).concat([c]); });
+    const one = k => (st[k] || [])[0];
+    const STATES = {
+      '17273@14.10': 'незакрит', '40243@14.10': 'незакрит', '98275@07.10': 'незакрит',
+      '40243@11.10': 'закрит 12.10', '23030@12.10': 'закрит 14.10',
+      '52215@11.10': 'закрит 12.10', '95498@08.10': 'закрит 12.10', '95498@13.10': 'закрит 14.10',
+      '48349@07.10': 'остатък под прага'
+    };
+    Object.keys(STATES).forEach(k => ok(k.replace('@', ' от ') + ' → „' + STATES[k] + '“', one(k) && one(k)[4] === STATES[k], one(k) && one(k)[4]));
+    ok('52215 — двата реда от 13.10 → „закрит 14.10“', (st['52215@13.10'] || []).length === 2 && st['52215@13.10'].every(c => c[4] === 'закрит 14.10'), JSON.stringify((st['52215@13.10'] || []).map(c => c[4])));
+    ok('незакритите са точно 3', rows.filter(r => cellTxt(r)[4].indexOf('незакрит') === 0).length === 3);
+    ok('17273: „Количество“ = „1 БР“', one('17273@14.10') && one('17273@14.10')[3] === '1 БР', one('17273@14.10') && one('17273@14.10')[3]);
+    ok('98275: „Количество“ = „2,88 M2“ (мерната единица е вътре)', one('98275@07.10') && one('98275@07.10')[3] === '2,88 M2', one('98275@07.10') && one('98275@07.10')[3]);
+    ok('„Количество“ е от SAP и при закрит ред (95498 от 08.10 → 3 БР)', one('95498@08.10') && one('95498@08.10')[3] === '3 БР');
+    ok('48349 — „0,003 M2“', one('48349@07.10') && one('48349@07.10')[3] === '0,003 M2');
+    const ths = Array.from(h.doc.querySelectorAll('#mn-daily thead th')).map(x => x.textContent.trim());
+    ok('в #mn-daily няма th „Мерна ед.“; „Състояние“ е веднага след „Количество“', ths.indexOf('Мерна ед.') < 0 && ths.indexOf('Състояние') === ths.indexOf('Количество') + 1, ths.join(' | '));
+    const thSt = Array.from(h.doc.querySelectorAll('#mn-daily thead th')).find(x => x.textContent.trim() === 'Състояние');
+    ok('th „Състояние“ — width:90px', thSt && thSt.style.width === '90px', thSt && thSt.getAttribute('style'));
+    ok('td „Състояние“ се пренася (без nowrap), „Количество“ — nowrap', rows.every(r => r.querySelector('.mn-state').style.whiteSpace !== 'nowrap' && r.querySelector('.mn-qty').style.whiteSpace === 'nowrap'));
+    ok('закритите и под прага — сив текст; незакритите — не', rows.every(r => (cellTxt(r)[4].indexOf('незакрит') === 0) === !/148, 163, 184/.test(r.style.color)), rows.map(r => r.style.color).join('|'));
+    ok('най-новите отгоре', rows.map(r => cellTxt(r)[2].split('.').reverse().join('')).every((d, i, a) => !i || a[i - 1] >= d));
+    ok('бутонът: „Дневен (общо 11 · незакрити 3)“', h.doc.getElementById('mn-v-daily').textContent.indexOf('общо 11 · незакрити 3') >= 0, h.doc.getElementById('mn-v-daily').textContent);
     ok('контролингът не попълва: няма бутон „Запази“', !btn(mod(h), 'Запази'));
-    ok('филтър „само непопълнени“ (3)', !!h.doc.getElementById('mn-unfilled') && h.doc.getElementById('mn-unfilled').parentNode.textContent.indexOf('(3)') >= 0);
+    ok('филтър „само непопълнени“ (11)', !!h.doc.getElementById('mn-unfilled') && h.doc.getElementById('mn-unfilled').parentNode.textContent.indexOf('(11)') >= 0);
+    const oo = h.doc.getElementById('mn-onlyopen');
+    ok('отметка „само незакрити“ — и за контролинга, изключена', !!oo && !oo.checked);
+    oo.checked = true; fire(h.w, oo, 'change');
+    ok('„само незакрити“ → точно 3 реда', dailyRows(h).length === 3 && dailyRows(h).every(r => cellTxt(r)[4] === 'незакрит'), dailyRows(h).map(r => cellTxt(r)[0]).join(','));
+    ok('… отметката остава включена след прерисуването', h.doc.getElementById('mn-onlyopen').checked);
+    ok('… „само непопълнени“ брои вече 3', h.doc.getElementById('mn-unfilled').parentNode.textContent.indexOf('(3)') >= 0);
+    const uf = h.doc.getElementById('mn-unfilled'); uf.checked = true; fire(h.w, uf, 'change');
+    ok('„само незакрити“ И „само непопълнени“ → 3 (нищо не е попълнено)', dailyRows(h).length === 3);
+    const ooOff = h.doc.getElementById('mn-onlyopen'); ooOff.checked = false; fire(h.w, ooOff, 'change');
+    ok('само „само непопълнени“ → 11', dailyRows(h).length === 11);
+    const ufOff = h.doc.getElementById('mn-unfilled'); ufOff.checked = false; fire(h.w, ufOff, 'change');
     noAmountInDom('DOM на контролинга без суми (дневен)', h);
     realClick(h.w, h.doc.getElementById('mn-v-bymat'));
     const mats = Array.from(h.doc.querySelectorAll('#mn-bymat tbody tr')).map(cellTxt);
@@ -211,7 +270,7 @@ function noAmountInDom(name, h) {
     ok('98275 → 2,88 | 0 | 2,88', bm['98275'] && bm['98275'].slice(2, 5).join('|') === '2,88|0|2,88', bm['98275'] && bm['98275'].join('|'));
     noAmountInDom('DOM на контролинга без суми (по артикул)', h);
     realClick(h.w, h.doc.getElementById('mn-v-daily'));
-    ok('обратно към Дневен', dailyRows(h).length === 3);
+    ok('обратно към Дневен', dailyRows(h).length === 11);
   }
 
   section('3. Обектът попълва — реален клик „Запази“, PATCH само на шестте полета');
@@ -221,9 +280,10 @@ function noAmountInDom(name, h) {
     ok('обектът няма качване', !h.doc.getElementById('mn-file') && !h.doc.getElementById('mn-upload'));
     ok('обектът няма селектор на обект', !h.doc.getElementById('mn-store'));
     const rows = dailyRows(h);
-    ok('Дневен на обекта: 3 реда', rows.length === 3);
+    ok('Дневен на обекта: 11 реда', rows.length === 11);
     noAmountInDom('DOM на обекта без суми', h);
-    const tr = rows.find(r => cellTxt(r)[0] === '40243');
+    ok('отметка „само незакрити“ — и за обекта; „само непопълнени“ — не', !!h.doc.getElementById('mn-onlyopen') && !h.doc.getElementById('mn-unfilled'));
+    const tr = rows.find(r => cellTxt(r)[0] === '40243' && cellTxt(r)[2] === '14.10.2026');
     fillId = tr && tr.getAttribute('data-mn-id');
     const want = db.movs.find(x => x.material === '40243' && x.posting_date === '2026-10-14');
     ok('редът е точно 955 от 14.10', want && fillId === want.id);
@@ -258,13 +318,33 @@ function noAmountInDom(name, h) {
     ok('роля sklad също попълва (има „Запази“)', !!btn(mod(h), 'Запази'));
     ok('sklad вижда попълненото: причината е избрана', h.doc.getElementById('mn-reason-' + fillId).value === '5');
   }
+  {
+    /* Попълването работи и на ЗАКРИТ ред (история). Отделно копие на базата,
+       за да не пипа реда, на който стъпват 3б и 4. */
+    const dbc = fakeDb({ movs: db.movs.map(x => Object.assign({}, x)) });
+    const h = env(GD, dbc); await open(h);
+    const closed = dailyRows(h).find(r => cellTxt(r)[0] === '23030');
+    const cid = closed && closed.getAttribute('data-mn-id');
+    ok('23030 е закрит ред с жълти полета и „Запази“', closed && cellTxt(closed)[4] === 'закрит 14.10' && !!h.doc.getElementById('mn-reason-' + cid) && !!btn(closed, 'Запази'));
+    ok('… жълтите колони остават жълти и при закрит ред', closed && closed.querySelector('#mn-code-' + cid).parentNode.style.background.indexOf('254, 249, 195') >= 0, closed && closed.querySelector('#mn-code-' + cid).parentNode.getAttribute('style'));
+    h.doc.getElementById('mn-reason-' + cid).value = '4';
+    h.doc.getElementById('mn-emp-' + cid).value = 'Здравка';
+    realClick(h.w, btn(closed, 'Запази')); await ticks(4);
+    const pc = dbc.log.filter(x => x.m === 'PATCH' && x.tbl === 'minus_movements');
+    ok('закрит ред: един PATCH, на точния ред', pc.length === 1 && pc[0].q === 'id=eq.' + cid, pc.map(x => x.q).join(','));
+    ok('закрит ред: само полетата за попълване', pc[0] && Object.keys(pc[0].body).sort().join(',') === 'employee_name,filled_at,filled_by,note,real_code,reason_id', pc[0] && Object.keys(pc[0].body).join(','));
+    const after = h.doc.getElementById('mn-row-' + cid);
+    ok('закритият ред остава в Дневен, с ✅ и „закрит 14.10“', after && !!after.querySelector('.mn-done') && cellTxt(after)[4] === 'закрит 14.10');
+  }
 
   section('3б. „Причина“ — фиксирана ширина 180px, целият текст в title');
   {
     const h = env(GD, db); await open(h);
     const sels = Array.from(h.doc.querySelectorAll('select[id^="mn-reason-"]'));
-    ok('менютата „Причина“ са 3', sels.length === 3, sels.length);
+    ok('менютата „Причина“ са 11 (всички редове 955)', sels.length === 11, sels.length);
     ok('всяко е с width:180px и max-width:180px', sels.every(s => s.style.width === '180px' && s.style.maxWidth === '180px'), sels.map(s => s.getAttribute('style')).join(' | '));
+    const ins = Array.from(h.doc.querySelectorAll('input[id^="mn-emp-"], input[id^="mn-note-"]'));
+    ok('„Име на служител“ и „Бележка“ — width:110px (22 полета)', ins.length === 22 && ins.every(x => x.style.width === '110px'), ins.map(x => x.style.width).join(','));
     const done = h.doc.getElementById('mn-reason-' + fillId);
     ok('ред със записана причина → title = текстът ѝ', done && done.title === 'реална продажба, чака вход от ЛСТ', done && done.title);
     const empty = sels.find(s => s.id !== 'mn-reason-' + fillId);
@@ -283,7 +363,7 @@ function noAmountInDom(name, h) {
        оставяше „Запази“ сив текст без фон и рамка (на живо, 21.10.2026). */
     const h = env(GD, db); await open(h);
     const saves = Array.from(mod(h).querySelectorAll('button')).filter(b => b.textContent.trim() === 'Запази');
-    ok('3 бутона „Запази“', saves.length === 3, saves.length);
+    ok('11 бутона „Запази“ (и на закритите)', saves.length === 11, saves.length);
     ok('„Запази“: btn + btn-green, без btn-primary и btn-sm', saves.every(b => b.classList.contains('btn') && b.classList.contains('btn-green') && !b.classList.contains('btn-primary') && !b.classList.contains('btn-sm')), saves.map(b => b.className).join(' | '));
     const ha = env(ADMIN, db); await open(ha);
     const lbl = ha.doc.getElementById('mn-file') && ha.doc.getElementById('mn-file').parentNode;
@@ -374,10 +454,27 @@ function noAmountInDom(name, h) {
     ok('(същото с ръчно подаден праг)', r.has('70001') && !r.has('70002'));
 
     const h = env(GD, fakeDb({ movs: db.movs.map(x => Object.assign({}, x)), thr: [{ uom: 'M2', min_qty: 0 }] })); await open(h);
-    ok('при min_qty за M2 = 0 → 48349 (0,003 M2) се показва', dailyRows(h).some(tr => cellTxt(tr)[0] === '48349' && cellTxt(tr)[3] === '0,003'));
+    ok('при min_qty за M2 = 0 → 48349 (0,003 M2) е „незакрит“', dailyRows(h).some(tr => cellTxt(tr)[0] === '48349' && cellTxt(tr)[3] === '0,003 M2' && cellTxt(tr)[4] === 'незакрит'));
+    ok('… и бутонът брои 4 незакрити', h.doc.getElementById('mn-v-daily').textContent.indexOf('общо 11 · незакрити 4') >= 0, h.doc.getElementById('mn-v-daily').textContent);
+  }
+  {
+    /* Частично закриване: 955 × 5, 956 × −2 → „незакрит 3 от 5“; 956 на
+       две части — датата е от ВТОРИЯ 956 (който го закрива докрай). */
+    const w0 = H.boot({ modules: ['minusi.js'], user: ADMIN, data: {} }).w;
+    const b = { store_name: 'Гоце Делчев', plant: '7519', material_desc: 'P', uom: 'БР', doc_year: 2026, doc_item: '1' };
+    const c = w0.mnCompute([
+      Object.assign({ id: 'p1', material: '80001', mvt_type: '955', qty: 5, mat_doc: 'P1', posting_date: '2026-10-10' }, b),
+      Object.assign({ id: 'p2', material: '80001', mvt_type: '956', qty: -2, mat_doc: 'P2', posting_date: '2026-10-11' }, b),
+      Object.assign({ id: 'q1', material: '80002', mvt_type: '955', qty: 3, mat_doc: 'Q1', posting_date: '2026-10-10' }, b),
+      Object.assign({ id: 'q2', material: '80002', mvt_type: '956', qty: -1, mat_doc: 'Q2', posting_date: '2026-10-11' }, b),
+      Object.assign({ id: 'q3', material: '80002', mvt_type: '956', qty: -2, mat_doc: 'Q3', posting_date: '2026-10-15' }, b)
+    ], {});
+    const p = c.all.find(x => x.id === 'p1'), q = c.all.find(x => x.id === 'q1');
+    ok('частично закрит → „незакрит 3 от 5“', p && w0.mnStateText(p) === 'незакрит 3 от 5', p && w0.mnStateText(p));
+    ok('закрит от два 956 → „закрит 15.10“ (вторият)', q && w0.mnStateText(q) === 'закрит 15.10', q && w0.mnStateText(q));
   }
 
-  section('8. Нетиране по обект, не по завод; свръхсторно — само на контролинга');
+  section('8. Нетиране по обект, не по завод; свръхсторно — и на обекта');
   {
     const w0 = H.boot({ modules: ['minusi.js'], user: ADMIN, data: {} }).w;
     const base = { store_name: 'Гоце Делчев', material_desc: 'S', uom: 'БР', doc_year: 2026 };
@@ -395,7 +492,15 @@ function noAmountInDom(name, h) {
     const hc = env(ADMIN, dbo); await open(hc);
     ok('контролингът вижда „Свръхсторно“ с 99002', !!hc.doc.getElementById('mn-over') && hc.doc.getElementById('mn-over').textContent.indexOf('99002') >= 0);
     const hs = env(GD, dbo); await open(hs);
-    ok('обектът НЕ вижда свръхсторно', !hs.doc.getElementById('mn-over') && mod(hs).textContent.indexOf('99002') < 0);
+    /* Миглена, 21.10.2026: свръхсторното е грешка на магазина — вижда го и обектът. */
+    const ov = hs.doc.getElementById('mn-over');
+    ok('обектът (manager) вижда „Свръхсторно“ с 99002', !!ov && ov.textContent.indexOf('99002') >= 0);
+    ok('заглавието: „⚠ Свръхсторно — 956 над 955“, без „вижда само контролингът“', !!ov && ov.querySelector('b').textContent.trim() === '⚠ Свръхсторно — 956 над 955' && ov.textContent.indexOf('само контролингът') < 0, ov && ov.querySelector('b').textContent);
+    const r99 = dailyRows(hs).find(r => cellTxt(r)[0] === '99002');
+    ok('955 на свръхсторния артикул в Дневен — „закрит 11.10“', r99 && cellTxt(r99)[4] === 'закрит 11.10', r99 && cellTxt(r99)[4]);
+    const only956 = [Object.assign({ id: 'o1', plant: '7519', material: '17279', mvt_type: '956', qty: -1, mat_doc: 'Y1', doc_item: '1', posting_date: '2026-10-20' }, base)];
+    const hs2 = env(GD, fakeDb({ movs: only956 })); await open(hs2);
+    ok('956 без 955 (като 17279) → обектът вижда картата', !!hs2.doc.getElementById('mn-over') && hs2.doc.getElementById('mn-over').textContent.indexOf('17279') >= 0);
   }
 
   section('9. Файлът минава през input-а (FileReader + SheetJS стъб), серийна дата');
@@ -421,7 +526,7 @@ function noAmountInDom(name, h) {
     ok('контролингът вижда под-бутона', h.doc.getElementById('rvs-minusi').style.display !== 'none');
     realClick(h.w, h.doc.getElementById('rvs-minusi')); await ticks(6);
     ok('под-лентата е видима', h.doc.getElementById('rev-subnav').style.display === 'block');
-    ok('заредено: Дневен с 3 реда', dailyRows(h).length === 3);
+    ok('заредено: Дневен с 11 реда', dailyRows(h).length === 11);
     realClick(h.w, h.doc.getElementById('rvs-schedule')); await ticks(3);
     ok('към графика: Минуси се скрива, бутонът не е активен', mod(h).style.display === 'none' && !h.doc.getElementById('rvs-minusi').classList.contains('active'));
   }

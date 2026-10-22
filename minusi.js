@@ -13,10 +13,18 @@
    Закриване (FIFO): по обект + материал (независимо от завода — 5519 и 7519 са
    един обект) сумата на 956 закрива 955 редовете от най-стария (дата, после
    документ, после позиция). 956 над сумата на 955 → нищо не е отворено, а
-   артикулът е „свръхсторно" — вижда го само контролингът.
+   артикулът е „свръхсторно" — грешка на магазина, вижда го и обектът, и
+   контролингът (решение на Миглена, 21.10.2026; до тогава — само контролингът).
 
-   Праг по мерна единица (minus_uom_thresholds): остатък под min_qty не се
-   показва. Единица без ред → показва се всеки остатък ≠ 0.
+   „📋 Дневен" (от 22.10.2026, решение на Миглена от 21.10): ВСИЧКИ редове 955
+   — история, от която нищо не изчезва, за да личи кога минусът се повтаря.
+   Всеки ред има „Състояние": незакрит / закрит дд.мм (датата на 956, който
+   го закрива докрай) / остатък под прага. „📦 Незакрити по артикул" — само
+   отворените.
+
+   Праг по мерна единица (minus_uom_thresholds): остатък под min_qty не е
+   „незакрит" (в Дневен — „остатък под прага", в „по артикул" не излиза).
+   Единица без ред → всеки остатък ≠ 0 е незакрит.
 
    СУМИ НЯМА. Колоната „Сума в МестВал." от файла не се чете в payload-а и не
    се показва никъде — магазинът не вижда суми.
@@ -39,6 +47,7 @@ var mnStoresOn = [];     /* app_settings.minus_stores */
 var mnStore = '';
 var mnView = 'daily';    /* 'daily' | 'bymat' */
 var mnOnlyUnfilled = false;
+var mnOnlyOpen = false;  /* „само незакрити" в Дневен — за обекта и контролинга */
 var mnReport = null;     /* отчет на последното качване в тази сесия */
 var mnLastUpload = null;
 var mnDraft = {};        /* id → {real_code, reason_id, employee_name, note} — незаписаното */
@@ -135,35 +144,54 @@ function mnPassThreshold(rest, uom, thr){
   if(thr && Object.prototype.hasOwnProperty.call(thr, k)) return rest >= mnRound(thr[k]) - MN_EPS;
   return true;
 }
-/* Чисто изчисление, без DOM. → {open:[ред 955 + _rest], byMat:[…], over:[…]}
-   open — редовете 955 с остатък над прага; byMat — един ред на материал с
-   остатък над прага; over — свръхсторно (956 над 955). */
+/* Чисто изчисление, без DOM. → {all:[…], open:[…], byMat:[…], over:[…]}
+   all — всеки ред 955 + _rest, _state, _closedOn; open — само незакритите;
+   byMat — един ред на материал с остатък над прага; over — свръхсторно
+   (956 над 955). */
 function mnCompute(movs, thr){
   var groups = {}, order = [];
   (movs || []).forEach(function(m){
     var k = m.store_name + '\u0001' + m.material;
-    if(!groups[k]){ groups[k] = { store_name: m.store_name, material: m.material, desc: '', uom: '', r955: [], s955: 0, s956: 0 }; order.push(k); }
+    if(!groups[k]){ groups[k] = { store_name: m.store_name, material: m.material, desc: '', uom: '', r955: [], r956: [], s955: 0, s956: 0 }; order.push(k); }
     var g = groups[k], q = Number(m.qty) || 0;
     if(m.material_desc) g.desc = m.material_desc;
     if(String(m.mvt_type) === '955'){ g.r955.push(m); g.s955 += q; if(m.uom) g.uom = m.uom; }
-    else if(String(m.mvt_type) === '956'){ g.s956 += q; if(!g.uom && m.uom) g.uom = m.uom; }
+    else if(String(m.mvt_type) === '956'){ g.r956.push(m); g.s956 += q; if(!g.uom && m.uom) g.uom = m.uom; }
   });
-  var out = { open: [], byMat: [], over: [] };
+  /* all — ВСИЧКИ редове 955 (история; решение на Миглена 21.10.2026: от
+     „Дневен" нищо не изчезва), всеки със _state: 'open' (остатък ≥ прага),
+     'under' (0 < остатък < прага) или 'closed' (остатък 0; _closedOn = датата
+     на 956, който го е закрил ДОКРАЙ). open — само 'open' (броячът и
+     „само незакрити"). FIFO: 956 се подреждат по дата, документ, позиция и
+     закриват 955 от най-стария. */
+  var out = { all: [], open: [], byMat: [], over: [] };
   order.forEach(function(k){
     var g = groups[k];
     var net = mnRound(g.s955 + g.s956);
-    if(net < -MN_EPS){ out.over.push({ store_name: g.store_name, material: g.material, desc: g.desc, uom: g.uom, s955: mnRound(g.s955), s956: mnRound(g.s956), rest: net }); return; }
-    var closing = mnRound(-g.s956);
+    if(net < -MN_EPS) out.over.push({ store_name: g.store_name, material: g.material, desc: g.desc, uom: g.uom, s955: mnRound(g.s955), s956: mnRound(g.s956), rest: net });
+    var q956 = g.r956.slice().sort(mnCmp955), qi = 0;
+    var avail = q956.map(function(m){ return mnRound(-(Number(m.qty) || 0)); });
     g.r955.slice().sort(mnCmp955).forEach(function(r){
-      var q = Number(r.qty) || 0;
-      var used = Math.max(0, Math.min(q, closing));
-      closing = mnRound(closing - used);
-      var rest = mnRound(q - used);
-      if(mnPassThreshold(rest, r.uom, thr)) out.open.push(Object.assign({}, r, { _rest: rest }));
+      var need = Number(r.qty) || 0, lastDate = null;
+      while(need > MN_EPS && qi < q956.length){
+        if(!(avail[qi] > MN_EPS)){ qi++; continue; }
+        var take = Math.min(need, avail[qi]);
+        need = mnRound(need - take);
+        avail[qi] = mnRound(avail[qi] - take);
+        lastDate = q956[qi].posting_date;
+        if(!(avail[qi] > MN_EPS)) qi++;
+      }
+      var rest = mnRound(need);
+      var st = !(rest > MN_EPS) ? 'closed' : mnPassThreshold(rest, r.uom, thr) ? 'open' : 'under';
+      var row = Object.assign({}, r, { _rest: rest, _state: st, _closedOn: st === 'closed' ? lastDate : null });
+      out.all.push(row);
+      if(st === 'open') out.open.push(row);
     });
-    if(mnPassThreshold(net, g.uom, thr)) out.byMat.push({ store_name: g.store_name, material: g.material, desc: g.desc, uom: g.uom, s955: mnRound(g.s955), s956: mnRound(g.s956), rest: net });
+    if(net >= -MN_EPS && mnPassThreshold(net, g.uom, thr)) out.byMat.push({ store_name: g.store_name, material: g.material, desc: g.desc, uom: g.uom, s955: mnRound(g.s955), s956: mnRound(g.s956), rest: net });
   });
-  out.open.sort(function(a, b){ return String(b.posting_date).localeCompare(String(a.posting_date)) || String(a.material).localeCompare(String(b.material), undefined, { numeric: true }); });
+  var newest = function(a, b){ return String(b.posting_date).localeCompare(String(a.posting_date)) || String(a.material).localeCompare(String(b.material), undefined, { numeric: true }); };
+  out.all.sort(newest);
+  out.open.sort(newest);
   out.byMat.sort(function(a, b){ return String(a.material).localeCompare(String(b.material), undefined, { numeric: true }); });
   return out;
 }
@@ -373,15 +401,19 @@ function mnRender(){
     mnStoreList().forEach(function(s){ h += '<option value="' + escAttr(s) + '"' + (s === mnStore ? ' selected' : '') + '>' + esc(s) + (mnStoreOn(s) ? '' : ' (не е включен)') + '</option>'; });
     h += '</select>';
   } else h += '<b>' + esc(mnStore) + '</b>';
-  h += '<button id="mn-v-daily" class="filter-btn' + (mnView === 'daily' ? ' active' : '') + '" onclick="mnSetView(\'daily\')">📋 Дневен (' + calc.open.length + ')</button>';
+  h += '<button id="mn-v-daily" class="filter-btn' + (mnView === 'daily' ? ' active' : '') + '" onclick="mnSetView(\'daily\')">📋 Дневен (общо ' + calc.all.length + ' · незакрити ' + calc.open.length + ')</button>';
   h += '<button id="mn-v-bymat" class="filter-btn' + (mnView === 'bymat' ? ' active' : '') + '" onclick="mnSetView(\'bymat\')">📦 Незакрити по артикул (' + calc.byMat.length + ')</button>';
-  if(mnIsCO() && mnView === 'daily'){
-    var nUnf = calc.open.filter(function(r){ return r.reason_id == null; }).length;
-    h += '<label style="margin-left:auto;"><input type="checkbox" id="mn-unfilled"' + (mnOnlyUnfilled ? ' checked' : '') + ' onchange="mnSetUnfilled(this.checked)"> само непопълнени (' + nUnf + ')</label>';
+  if(mnView === 'daily'){
+    h += '<label style="margin-left:auto;"><input type="checkbox" id="mn-onlyopen"' + (mnOnlyOpen ? ' checked' : '') + ' onchange="mnSetOnlyOpen(this.checked)"> само незакрити</label>';
+    if(mnIsCO()){
+      var nUnf = (mnOnlyOpen ? calc.open : calc.all).filter(function(r){ return r.reason_id == null; }).length;
+      h += '<label><input type="checkbox" id="mn-unfilled"' + (mnOnlyUnfilled ? ' checked' : '') + ' onchange="mnSetUnfilled(this.checked)"> само непопълнени (' + nUnf + ')</label>';
+    }
   }
   h += '</div>';
-  h += mnView === 'bymat' ? mnByMatHtml(calc.byMat) : mnDailyHtml(calc.open);
-  if(mnIsCO() && calc.over.length) h += mnOverHtml(calc.over);
+  h += mnView === 'bymat' ? mnByMatHtml(calc.byMat) : mnDailyHtml(calc.all);
+  /* Свръхсторното е грешка на магазина — вижда го и обектът (Миглена, 21.10.2026). */
+  if(calc.over.length) h += mnOverHtml(calc.over);
   el.innerHTML = h;
 }
 function mnUploadHtml(){
@@ -407,18 +439,25 @@ function mnReportHtml(r){
   return h + '</div>';
 }
 function mnDailyHtml(rows){
+  if(mnOnlyOpen) rows = rows.filter(function(r){ return r._state === 'open'; });
   if(mnIsCO() && mnOnlyUnfilled) rows = rows.filter(function(r){ return r.reason_id == null; });
-  if(!rows.length) return '<div class="card" id="mn-empty" style="color:#64748b;">Няма незакрити минуси.</div>';
+  if(!rows.length) return '<div class="card" id="mn-empty" style="color:#64748b;">' + (mnOnlyOpen ? 'Няма незакрити минуси.' : 'Няма минуси.') + '</div>';
   var fill = mnCanFill();
   var yel = 'background:#fef9c3;';
-  var h = '<div class="card" style="overflow-x:auto;"><table id="mn-daily"><thead><tr><th>Материал</th><th>Описание</th><th>Дата</th><th>Количество</th><th>Мерна ед.</th>';
+  var h = '<div class="card" style="overflow-x:auto;"><table id="mn-daily"><thead><tr><th>Материал</th><th>Описание</th><th>Дата</th><th>Количество</th><th style="width:90px;">Състояние</th>';
   h += '<th style="' + yel + '">Заметнат код</th><th style="' + yel + '">Причина</th><th style="' + yel + '">Име на служител</th><th style="' + yel + '">Бележка</th><th></th></tr></thead><tbody>';
   rows.forEach(function(r){
     var id = String(r.id), done = r.reason_id != null;
     var d = mnDraft[id] || {};
     var val = function(k){ return d[k] != null ? d[k] : (r[k] == null ? '' : r[k]); };
-    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '"><td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
-    h += '<td class="mn-qty" style="text-align:right;">' + esc(mnFmtQty(r._rest)) + '</td><td>' + esc(r.uom) + '</td>';
+    /* Закритите и под прага — сив текст; жълтите колони си остават жълти. */
+    var gray = r._state === 'open' ? '' : ' style="color:#94a3b8;"';
+    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '><td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
+    /* Мерната единица е в „Количество", „Състояние" се пренася на два реда,
+       служител / бележка — 110px: с отделна колона „Мерна ед." таблицата беше
+       1342 px срещу карта 1246 и „Запази" излизаше навън (Playwright, 22.10). */
+    h += '<td class="mn-qty" style="text-align:right;white-space:nowrap;">' + esc(mnFmtQty(Number(r.qty))) + (r.uom ? ' ' + esc(r.uom) : '') + '</td>';
+    h += '<td class="mn-state">' + esc(mnStateText(r)) + '</td>';
     if(fill){
       h += '<td style="' + yel + '"><input id="mn-code-' + escAttr(id) + '" value="' + escAttrVal(val('real_code')) + '" style="width:90px;"></td>';
       var cur = String(val('reason_id'));
@@ -431,8 +470,8 @@ function mnDailyHtml(rows){
         h += '<option value="' + escAttr(String(x.id)) + '"' + (String(x.id) === cur ? ' selected' : '') + '>' + esc(x.label) + '</option>';
       });
       h += '</select></td>';
-      h += '<td style="' + yel + '"><input id="mn-emp-' + escAttr(id) + '" value="' + escAttrVal(val('employee_name')) + '" style="width:120px;"></td>';
-      h += '<td style="' + yel + '"><input id="mn-note-' + escAttr(id) + '" value="' + escAttrVal(val('note')) + '" style="width:140px;"></td>';
+      h += '<td style="' + yel + '"><input id="mn-emp-' + escAttr(id) + '" value="' + escAttrVal(val('employee_name')) + '" style="width:110px;"></td>';
+      h += '<td style="' + yel + '"><input id="mn-note-' + escAttr(id) + '" value="' + escAttrVal(val('note')) + '" style="width:110px;"></td>';
       h += '<td style="white-space:nowrap;">' + (done ? '<span class="mn-done" title="' + escAttr('Попълнено: ' + (r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span> ' : '') + '<button class="btn btn-green" onclick="mnSave(\'' + escAttr(id) + '\')">Запази</button></td>';
     } else {
       h += '<td>' + esc(r.real_code || '') + '</td><td>' + esc(mnReasonLabel(r.reason_id)) + '</td><td>' + esc(r.employee_name || '') + '</td><td>' + esc(r.note || '') + '</td>';
@@ -441,6 +480,14 @@ function mnDailyHtml(rows){
     h += '</tr>';
   });
   return h + '</tbody></table></div>';
+}
+/* „незакрит" / „незакрит N от M" (частично закрит) / „закрит дд.мм" /
+   „остатък под прага". */
+function mnStateText(r){
+  if(r._state === 'closed') return 'закрит' + (r._closedOn ? ' ' + fmtDate(r._closedOn).slice(0, 5) : '');
+  if(r._state === 'under') return 'остатък под прага';
+  var q = mnRound(Number(r.qty) || 0);
+  return mnRound(r._rest) < q - MN_EPS ? 'незакрит ' + mnFmtQty(r._rest) + ' от ' + mnFmtQty(q) : 'незакрит';
 }
 function mnByMatHtml(rows){
   if(!rows.length) return '<div class="card" id="mn-empty" style="color:#64748b;">Няма незакрити артикули.</div>';
@@ -453,7 +500,7 @@ function mnByMatHtml(rows){
   return h + '</tbody></table></div>';
 }
 function mnOverHtml(rows){
-  var h = '<div class="card" id="mn-over" style="border-left:4px solid #dc2626;"><b>⚠ Свръхсторно — 956 над 955 (вижда само контролингът)</b>';
+  var h = '<div class="card" id="mn-over" style="border-left:4px solid #dc2626;"><b style="color:#b91c1c;">⚠ Свръхсторно — 956 над 955</b>';
   h += '<table><thead><tr><th>Материал</th><th>Описание</th><th>955</th><th>956</th><th>Разлика</th><th>Мерна ед.</th></tr></thead><tbody>';
   rows.forEach(function(r){
     h += '<tr><td>' + esc(r.material) + '</td><td>' + esc(r.desc) + '</td><td>' + esc(mnFmtQty(r.s955)) + '</td><td>' + esc(mnFmtQty(r.s956)) + '</td><td>' + esc(mnFmtQty(r.rest)) + '</td><td>' + esc(r.uom) + '</td></tr>';
@@ -464,6 +511,7 @@ function mnOverHtml(rows){
 /* ─── Действия ─────────────────────────────────────────── */
 function mnSetView(v){ mnView = v === 'bymat' ? 'bymat' : 'daily'; mnRender(); }
 function mnSetUnfilled(on){ mnOnlyUnfilled = !!on; mnRender(); }
+function mnSetOnlyOpen(on){ mnOnlyOpen = !!on; mnRender(); }
 function mnSetStore(s){
   if(!mnIsCO()) return;
   mnStore = s; mnMovs = []; mnDraft = {};
