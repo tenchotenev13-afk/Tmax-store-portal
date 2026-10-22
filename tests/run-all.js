@@ -344,6 +344,7 @@ const TESTS = [
   'checklist-email.test.js',
   'checklist-send.test.js',
   'checklist-full-form.test.js',
+  'checklist-portal-columns.test.js',
   'transfers-create.test.js',
   'report-service-troyan.test.js',
   'admin-user-store-list.test.js',

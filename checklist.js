@@ -236,17 +236,30 @@ function loadChecklist() {
    (control_value); разликата между „не" и „нямат" я прави човек, който е
    прочел коментара.
 
-   РЪЧНИ ЗАСЕГА (source 'manual'): razhodi, zanulyavane_lm, razliki_dostavka,
-   srok_godnost, dogovoreni_returi. Свързването на всяка от тях е смяна на
-   source в weekly_checklist_metrics ('recurring:<uuid>' или 'module:<id>')
-   плюс ред ТУК (режим) или в CHECKLIST_MODULE_FILL (модул). Нищо в рендера,
+   От 22.10.2026 още три колони идват от постоянни задачи, които Бюлетинът
+   вече отмята сам (миграция weekly_checklist_portal_columns):
+     · srok_godnost     ← „СПИСЪК СТОКА ЗА ВРЪЩАНЕ" (сряда; отмята се от
+       stock_returns source='complaint' при потвърждение от обекта) → da/ne;
+     · razliki_dostavka ← „РАЗЛИКИ ЛОГИСТИЧНИ СКЛАДОВЕ" (Пон–Пет) → „3/5" —
+       колко дни обектът е бил без необработена разлика;
+     · zanulyavane_lm   ← „ЗАРЕЖДАНЕ АРТИКУЛИ НА Л.М." (понеделник; бланка
+       или „нямам нужда") → da/ne.
+   Докато миграцията не е приложена, редовете са с source 'manual' и
+   checklistAutoMetrics() ги прескача — записът тук сам не пълни нищо.
+
+   РЪЧНИ ЗАСЕГА (source 'manual'): razhodi, dogovoreni_returi. Свързването
+   на всяка от тях е смяна на source в weekly_checklist_metrics
+   ('recurring:<uuid>' или 'module:<id>') плюс ред ТУК (режим) или в CHECKLIST_MODULE_FILL (модул). Нищо в рендера,
    писмото или седмичния отчет не е заковано към броя или ключовете на
    колоните — нова колона идва само от реда в таблицата. */
 var CHECKLIST_PORTAL_MODE = {
   revizia_953:    'any',       /* има ли поне едно отмятане в прозореца → da/ne */
   revizia_grupi:  'any',       /* „РЕВИЗИЯ ГРУПИ", Пон–Сря → da/ne */
   spravka_minusi: 'count',     /* колко РАЗЛИЧНИ дни са отметнати → „4/5" */
-  preocenka:      'file_none'  /* файл → da, иначе ne; nyamat само ръчно */
+  preocenka:      'file_none', /* файл → da, иначе ne; nyamat само ръчно */
+  srok_godnost:     'any',     /* „СПИСЪК СТОКА ЗА ВРЪЩАНЕ", сряда → da/ne */
+  zanulyavane_lm:   'any',     /* „ЗАРЕЖДАНЕ АРТИКУЛИ НА Л.М.", понеделник → da/ne */
+  razliki_dostavka: 'count'    /* „РАЗЛИКИ ЛОГИСТИЧНИ СКЛАДОВЕ", Пон–Пет → „3/5" */
 };
 
 /* 'recurring:<uuid>' → '<uuid>'. Всичко друго ('module:kasa', 'manual',
@@ -447,9 +460,12 @@ var CHECKLIST_MODULE_FILL = {
     query: 'select=store_name,direction,status,reviewed_at',
     value: function (rows) { return checklistTransitValue(rows); }
   },
+  /* Само source='diff' (изтегляне по разлики). Рекламациите и срокът на
+     годност (source='complaint') от 22.10.2026 са в колона srok_godnost —
+     без филтъра едни и същи редове биха се брояли в две колони. */
   returns: {
     table: 'stock_returns',
-    query: 'select=store_name,status,confirmed_date',
+    query: 'select=store_name,status,confirmed_date&source=eq.diff',
     value: function (rows) { return checklistReturnsValue(rows); }
   },
   wrong_receipt: {
