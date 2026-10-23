@@ -89,9 +89,14 @@ Netlify се ползва само за тестване/staging.
   `autoCreateReturnFromDiff`); редакцията през ✏️ (`submitSR`) не го праща
   (23.10.2026). Заварените редове до тази дата често носят името на обекта,
   потвърдил реда, а не на създателя — не са поправяни.
+- `stock-differences.js` — „Разлики": `stock_differences.created_by` се пише
+  САМО при създаване на ред (подаване на бланка, „Добави" в модала);
+  редакцията през ✏️ (`submitSD`) не го праща (23.10.2026). Заварените редове
+  (290 от 1721 на 23.10, различни от `differences_reports.submitted_by`) не
+  са поправяни.
 - `handbook.js` + `docs.js` — обединени в 1 таб (под-навигация в `showModule()`)
 - `history.js`, `contacts.js`, `transit.js`, `calendar.js`,
-  `stock-differences.js`, `push.js`, `email.js`, `notifications.js`, `report.js`
+  `push.js`, `email.js`, `notifications.js`, `report.js`
 
 **Script load order в `index.html` е фиксиран и важен — не пренарежда.**
 32 локални файла + OneSignal CDN. Пример: `kasa.js` (поз. 9) зарежда преди

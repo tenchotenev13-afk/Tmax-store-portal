@@ -214,6 +214,7 @@ const TESTS = [
   'stock-returns-per-source.test.js',
   'sr-created-by-store.test.js',
   'sr-created-by.test.js',
+  'sd-created-by.test.js',
   'bulletin-week-default.test.js',
   'bulletin-completion-day-lock.test.js',
   'span-lock-completion.test.js',

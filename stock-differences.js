@@ -2349,9 +2349,14 @@ function submitSD(sync) {
     type:           document.getElementById('sd-type').value||null,
     status:         document.getElementById('sd-status').value,
     comment:        document.getElementById('sd-comment').value,
-    resolution_comment: document.getElementById('sd-ctrl-comment').value,
-    created_by:     currentUser.display_name||currentUser.email
+    resolution_comment: document.getElementById('sd-ctrl-comment').value
   };
+  /* created_by — САМО при нов ред (решение на Тенчо, 23.10.2026; същото като
+     submitSR в stock-returns.js). Дотогава се пращаше и при редакция и който
+     редактира ред, ставаше „създател": на 23.10 290 от 1721 реда имаха
+     created_by, различен от автора на бланката (284 — „Цветелина Тенева").
+     Заварените редове не се поправят. */
+  if(!sdEditId) data.created_by = currentUser.display_name||currentUser.email;
   if(sdQtyRealEl) data.quantity_received = sdQtyRealEl.value;
   if(sdQtySupEl)  data.quantity_supplier_doc = sdQtySupEl.value;
   /* Само ЦО пише „Поръчка за връщане". Магазинът не праща ключа изобщо -
