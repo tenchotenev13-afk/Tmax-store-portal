@@ -234,6 +234,7 @@ const TESTS = [
   'sr-excel-one-sheet-qty-label.test.js',
   'diff-return-completed.test.js',
   'sd-lipsa-priklyuchena.test.js',
+  'storno-notes.test.js',
   'sr-store-comment.test.js',
   'sr-diff-list-import.test.js',
   'sr-diff-no-plant.test.js',

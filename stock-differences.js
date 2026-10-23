@@ -347,7 +347,7 @@ function loadStockDiff() {
     diffReports = Array.isArray(res[1]) ? res[1] : [];
     /* Размените и връзките към „За връщане" зависят от вече заредените
        редове - затова след Promise.all, не в него. */
-    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks()]);
+    return Promise.all([sdLoadSwaps(), sdLoadReturnLinks(), sdLoadStornoNotes(sq)]);
   }).then(function(){
     renderStockDiff();
   }).catch(function(err) {
@@ -390,6 +390,8 @@ function renderStockDiff() {
      с посоката избрана предварително. ЦО я избира от селекта, както досега. */
   if (canStoreSubmitWrongReceipt()) h += '<button onclick="openDiffSubmitModal({direction:\'wrong_receipt\'})" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">🧾 Грешен прием</button>';
   if (canAdd) h += '<button onclick="openSDModal(null)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави ръчно</button>';
+  /* Съобщение от оперативния счетоводител към обекта - само в подтаба на сторната. */
+  if (sdDirTab === 'wrong_receipt' && sdNoteCanCreate()) h += '<button id="sd-note-new-btn" onclick="openSDNoteModal()" style="border:1px solid #0f766e;background:#f0fdfa;color:#0f766e;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">✍️ Счетоводител</button>';
   h += '</div></div>';
 
   /* Подтабове по посока - разделят И новоподадените бланки, И главната
@@ -453,6 +455,7 @@ function renderStockDiff() {
   if (sdView === 'reports') {
     /* Изглед „Бланки“: действията на магазините (само склад) + бланките за преглед. При 0 — празно състояние. */
     h += sdActionsCard();
+    h += sdNotesSectionHtml();
     var repHtml = renderDiffReportsSection();
     h += repHtml || '<div id="sd-reports-empty" style="text-align:center;padding:50px 20px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:14px;"><div style="font-size:36px;">📭</div><div style="margin-top:8px;">Няма бланки за преглед</div></div>';
   } else {
@@ -4176,6 +4179,14 @@ function updateDiffCounterpartLabel(){
   if(dir==='supplier'||dir==='wrong_receipt'){
     loadAllSuppliers().then(function(list){
       sel.innerHTML='<option value="">-- Избери доставчик --</option>'+list.map(function(n){return '<option>'+esc(n)+'</option>';}).join('');
+      /* Предварително избран доставчик (prefill.counterpart, напр. от
+         „Направи сторно") - списъкът идва асинхронно, затова се прилага тук.
+         Доставчик извън Контакти се добавя като опция, за да не се изгуби. */
+      var want=sel.getAttribute('data-want');
+      if(want){
+        if(list.indexOf(want)<0) sel.insertAdjacentHTML('beforeend','<option>'+esc(want)+'</option>');
+        sel.value=want;
+      }
     });
   } else {
     /* Междускладов трансфер: изпращачът може да бъде САМО логистичен склад.
@@ -4214,6 +4225,7 @@ function updateDiffCounterpartLabel(){
    Полето „Магазин" също не се пипа — то идва от самия потребител. */
 function openDiffSubmitModal(prefill){
   diffPendingPhotos=[];
+  sdStornoNoteFor=null; /* „Направи сторно" го задава СЛЕД отварянето */
   var old=document.getElementById('diff-submit-ov'); if(old)old.remove();
   document.body.insertAdjacentHTML('beforeend',diffSubmitModalHtml());
   renderDiffItemRows([{}]);
@@ -4233,8 +4245,14 @@ function openDiffSubmitModal(prefill){
          наново, иначе counterpart-ът по-долу не намира опцията си. */
       updateDiffCounterpartLabel();
     }
+    /* Списъкът с доставчици е асинхронен - желаната стойност се пази в
+       data-want и updateDiffCounterpartLabel я прилага, щом списъкът дойде. */
+    var cpEl=document.getElementById('diff-counterpart');
+    if(cpEl && prefill.counterpart) cpEl.setAttribute('data-want',prefill.counterpart);
     setVal('diff-counterpart',prefill.counterpart);
     setVal('diff-docnum',prefill.document_number);
+    /* Обектът - само ако е сред опциите (собственият обект е скрито поле). */
+    setVal('diff-store',prefill.store_name);
     /* Полето съществува само при доставчик и сторна - при междускладов setVal
        не намира елемента и не прави нищо. */
     setVal('diff-order-num',prefill.order_number);
@@ -4255,6 +4273,7 @@ function openDiffSubmitModal(prefill){
           if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
           seen[u.store_name]=1;return true;
         }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
+        if(prefill && prefill.store_name) el.value=prefill.store_name;
       }
     });
   }
@@ -4262,6 +4281,354 @@ function openDiffSubmitModal(prefill){
 function closeDiffSubmitModal(){
   var ov=document.getElementById('diff-submit-ov'); if(ov)ov.remove();
   diffPendingPhotos=[];
+  sdStornoNoteFor=null;
+}
+
+/* ══════════════════════════════════════════
+   СЪОБЩЕНИЯ ОТ СЧЕТОВОДСТВОТО (подтаб „Сторна по грешен прием"), етап 1
+   Цветелина, 23.10.2026: оперативният счетоводител пише на обекта свободен
+   текст + документ, обектът отговаря; ако е реално сторно - „🧾 Направи
+   сторно" отваря обичайната бланка за грешен прием. Без категории
+   „фактурирано/нефактурирано". Без известия (етап 2), без „Днес", Бюлетин,
+   report.js и Excel. Чек листът брои сторната както досега - през бланките.
+   Таблици: storno_notes, storno_note_replies (storno-notes-schema.sql).
+══════════════════════════════════════════ */
+var sdNotes = [];            /* storno_notes, видими за потребителя */
+var sdNoteReplies = [];      /* storno_note_replies към тях */
+var sdNotesLoadErr = '';     /* провал при четене - показва се, не се мълчи */
+var sdNotesShowClosed = false;
+var sdNoteFiles = {};        /* качени, още неизпратени файлове: ключ 'new' или id на съобщението */
+var sdStornoNoteFor = null;  /* съобщението, от което е отворена бланката за сторно */
+var sdStornoNoteFail = {};   /* note_id -> report_id: бланката е подадена, PATCH-ът на съобщението - не */
+var SD_NOTE_STATUS = {
+  open:   ['Отворено','#fffbeb','#92400e'],
+  storno: ['🧾 Пуснато за сторно','#f0fdfa','#0f766e'],
+  closed: ['✓ Затворено','#f1f5f9','#475569']
+};
+var SD_NOTE_SIDE = { store:'обект', accounting:'счетоводител', co:'ЦО' };
+
+function sdIsCveti(){ return !!currentUser && (currentUser.email||'').toLowerCase()==='c.teneva@temax.bg'; }
+/* Пише ново съобщение: оперативните счетоводители (accounting), admin и Цвети. */
+function sdNoteCanCreate(){
+  return !!currentUser && !sdIsCOViewer() && !isLogisticsWarehouseUser() &&
+    (currentUser.role==='accounting' || currentUser.role==='admin' || sdIsCveti());
+}
+/* Вижда: ЦО само за преглед - всички; логистичните складове - нищо; всички
+   останали - по assignedStores(), както бланките (празен списък на глобален
+   профил = всички обекти). */
+function sdNoteVisible(n){
+  if(!currentUser || !n || isLogisticsWarehouseUser()) return false;
+  if(sdIsCOViewer()) return true;
+  var mine = assignedStores();
+  return !mine || mine.indexOf(n.store_name) >= 0;
+}
+/* Отговаря / прави сторно / затваря: обектът по своите, accounting по своите
+   обекти, Цвети/admin по всички. ЦО само за преглед и логистика (ЦО) - не. */
+function sdNoteCanAct(n){
+  if(!sdNoteVisible(n) || sdIsCOViewer()) return false;
+  if(currentUser.role==='admin' || currentUser.role==='accounting' || sdIsCveti()) return true;
+  return !isGlobal() && canSubmitDiff();
+}
+function sdNoteSide(){
+  if(currentUser.role==='admin' || sdIsCveti()) return 'co';
+  if(currentUser.role==='accounting') return 'accounting';
+  return 'store';
+}
+
+/* Четене при отваряне на модула. Провалът не спира Разлики - бланките са
+   важното - но се показва в секцията (правило 13), не се мълчи. */
+function sdLoadStornoNotes(sq){
+  sdNotesLoadErr = '';
+  if(!currentUser || isLogisticsWarehouseUser()){ sdNotes = []; sdNoteReplies = []; return Promise.resolve(); }
+  return sbGetOk('storno_notes', 'order=created_at.desc,id.desc' + (sq||'')).then(function(res){
+    if(!res.ok){ sdNotes = []; sdNoteReplies = []; sdNotesLoadErr = res.error; return; }
+    sdNotes = res.rows;
+    if(!sdNotes.length){ sdNoteReplies = []; return; }
+    var ids = sdNotes.map(function(n){ return n.id; });
+    return sbGetOk('storno_note_replies', 'note_id=in.(' + ids.join(',') + ')&order=created_at.asc,id.asc').then(function(r2){
+      if(!r2.ok){ sdNoteReplies = []; sdNotesLoadErr = r2.error; return; }
+      sdNoteReplies = r2.rows;
+    });
+  });
+}
+
+function sdNoteFilesHtml(files){
+  files = Array.isArray(files) ? files : [];
+  if(!files.length) return '';
+  return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">'+files.map(function(f){
+    return '<a href="'+escAttr(f.url)+'" target="_blank" style="font-size:11.5px;color:#0f766e;background:#f0fdfa;border:1px solid #99f6e4;border-radius:6px;padding:2px 8px;text-decoration:none;">📎 '+esc(f.name||'файл')+'</a>';
+  }).join('')+'</div>';
+}
+function sdNotePendingHtml(key){
+  var files = sdNoteFiles[key] || [];
+  return files.map(function(f, i){
+    return '<span style="font-size:11px;background:#f1f5f9;border-radius:6px;padding:2px 6px;margin-right:4px;">📎 '+esc(f.name)+
+      ' <button type="button" data-k="'+escAttr(key)+'" data-i="'+i+'" onclick="sdNoteRemoveFile(this.dataset.k,this.dataset.i)" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:11px;">✕</button></span>';
+  }).join('');
+}
+function sdNoteRefreshPending(key){
+  var el = document.getElementById('sd-note-files-'+key);
+  if(el) el.innerHTML = sdNotePendingHtml(key);
+}
+function sdNoteRemoveFile(key, i){
+  var arr = sdNoteFiles[key] || [];
+  arr.splice(parseInt(i,10), 1);
+  sdNoteRefreshPending(key);
+}
+/* Качване в същия bucket като снимките на бланките, префикс storno-notes/.
+   Формат {url,name} - като differences_reports.photos. Само обновява списъка
+   с качените файлове, не целия модул: иначе написаният текст би се изгубил. */
+function sdNoteUploadFile(input, key){
+  var files = Array.from(input.files||[]);
+  input.value = '';
+  if(!files.length) return;
+  if(!sdNoteFiles[key]) sdNoteFiles[key] = [];
+  toast('⏳ Качване...','#2563eb');
+  files.forEach(function(file){
+    diffCompressImage(file,1600,0.75).then(function(blob){
+      var isImg = !!file.type && file.type.indexOf('image/')===0;
+      var ext = isImg ? 'jpg' : ((file.name.split('.').pop()||'bin').toLowerCase());
+      var ctype = isImg ? 'image/jpeg' : (file.type||'application/octet-stream');
+      var path = 'storno-notes/'+Date.now()+'_'+Math.random().toString(36).slice(2,8)+'.'+ext;
+      var reader = new FileReader();
+      reader.onload = function(e){
+        fetch(DIFF_SB+'/storage/v1/object/'+DIFF_BKT+'/'+path,{
+          method:'POST',
+          headers:{'Authorization':'Bearer '+DIFF_KEY,'Content-Type':ctype,'x-upsert':'true'},
+          body:e.target.result
+        }).then(function(r){ return r.ok; }).then(function(ok){
+          if(!ok){ toast('Грешка при качване на „'+file.name+'"','#dc2626'); return; }
+          sdNoteFiles[key].push({url:DIFF_SB+'/storage/v1/object/public/'+DIFF_BKT+'/'+path, name:file.name});
+          sdNoteRefreshPending(key);
+          toast('✅ Прикачено');
+        }).catch(function(err){ toast('Грешка: '+(err.message||err),'#dc2626'); });
+      };
+      reader.readAsArrayBuffer(blob);
+    });
+  });
+}
+
+function sdNoteCardHtml(n){
+  var st = SD_NOTE_STATUS[n.status] || SD_NOTE_STATUS.open;
+  var act = sdNoteCanAct(n);
+  var isOpen = n.status === 'open';
+  var reps = sdNoteReplies.filter(function(r){ return String(r.note_id) === String(n.id); });
+  var meta = [esc(n.store_name)];
+  if(n.supplier) meta.push(esc(n.supplier));
+  if(n.document_number) meta.push('док. '+esc(n.document_number));
+  var h = '<div class="sd-note-card" id="sd-note-'+escAttr(n.id)+'" data-note-id="'+escAttr(n.id)+'" data-status="'+escAttr(n.status)+'" style="background:#fff;border:1px solid #e2e8f0;border-left:4px solid '+st[2]+';border-radius:8px;padding:10px 12px;margin-bottom:8px;">';
+  h += '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;">'+
+    '<div style="font-size:13px;font-weight:600;">'+meta.join(' · ')+'</div>'+
+    '<span class="sd-note-status" style="background:'+st[1]+';color:'+st[2]+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+st[0]+'</span></div>';
+  h += '<div style="font-size:11px;color:#94a3b8;margin-top:2px;">✍️ '+esc(n.created_by)+' · '+sdFmtDateTime(n.created_at)+'</div>';
+  h += '<div class="sd-note-body" style="font-size:13px;margin-top:6px;white-space:pre-wrap;">'+esc(n.body)+'</div>';
+  h += sdNoteFilesHtml(n.files);
+  if(n.status === 'storno' && n.report_id){
+    h += '<div style="margin-top:6px;font-size:12px;"><a href="#diff-rep-'+escAttr(n.report_id)+'" class="sd-note-report-link" data-rid="'+escAttr(n.report_id)+'" onclick="sdNoteGoReport(this.dataset.rid);return false;" style="color:#0f766e;font-weight:600;">→ Бланката за сторно</a></div>';
+  }
+  if(n.status === 'closed' && n.closed_by){
+    h += '<div style="font-size:11px;color:#64748b;margin-top:4px;">Затворено: '+esc(n.closed_by)+' · '+sdFmtDateTime(n.closed_at)+'</div>';
+  }
+  if(sdStornoNoteFail[n.id]){
+    h += '<div class="sd-note-fail" style="margin-top:6px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:6px;padding:6px 10px;font-size:12px;">⚠ Бланката за сторно е подадена, но съобщението не е отбелязано.'+
+      (act ? ' <button data-nid="'+escAttr(n.id)+'" onclick="sdNoteRetryStorno(this.dataset.nid)" style="border:1px solid #dc2626;background:#fff;color:#dc2626;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;cursor:pointer;">Опитай пак</button>' : '')+
+      '</div>';
+  }
+  if(reps.length){
+    h += '<div style="margin-top:8px;border-top:1px dashed #e2e8f0;padding-top:6px;">'+reps.map(function(r){
+      return '<div class="sd-note-reply" data-side="'+escAttr(r.side)+'" style="margin-bottom:6px;padding-left:8px;border-left:2px solid '+(r.side==='store'?'#93c5fd':'#5eead4')+';">'+
+        '<div style="font-size:11px;color:#64748b;">'+esc(r.created_by)+' ('+esc(SD_NOTE_SIDE[r.side]||r.side)+') · '+sdFmtDateTime(r.created_at)+'</div>'+
+        '<div style="font-size:12.5px;white-space:pre-wrap;">'+esc(r.body)+'</div>'+sdNoteFilesHtml(r.files)+'</div>';
+    }).join('')+'</div>';
+  }
+  if(act){
+    var k = String(n.id);
+    h += '<div style="margin-top:8px;">'+
+      '<textarea class="fi" id="sd-note-reply-'+escAttr(k)+'" rows="2" placeholder="Отговори..." style="margin-bottom:4px;"></textarea>'+
+      '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'+
+        '<label style="font-size:11.5px;color:#475569;cursor:pointer;border:1px solid #e2e8f0;border-radius:6px;padding:3px 8px;">📎 Прикачи<input type="file" multiple style="display:none;" data-k="'+escAttr(k)+'" onchange="sdNoteUploadFile(this,this.dataset.k)"></label>'+
+        '<span id="sd-note-files-'+escAttr(k)+'">'+sdNotePendingHtml(k)+'</span>'+
+        '<button data-nid="'+escAttr(k)+'" onclick="sdNoteSendReply(this.dataset.nid)" style="border:none;background:#0f766e;color:#fff;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">Изпрати</button>'+
+        (isOpen ? '<button data-nid="'+escAttr(k)+'" onclick="sdNoteMakeStorno(this.dataset.nid)" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">🧾 Направи сторно</button>'+
+                  '<button data-nid="'+escAttr(k)+'" onclick="sdNoteClose(this.dataset.nid)" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">✓ Затвори</button>' : '')+
+      '</div></div>';
+  }
+  return h + '</div>';
+}
+
+/* Секцията над бланките в подтаба „Сторна по грешен прием". Отворените са
+   отгоре; пуснатите за сторно и затворените - зад чип „Затворени (N)", не
+   скрити без контрол. Чиповете по магазин важат и тук. */
+function sdNotesSectionHtml(){
+  if(sdDirTab !== 'wrong_receipt' || !currentUser || isLogisticsWarehouseUser()) return '';
+  var list = sdNotes.filter(function(n){
+    return sdNoteVisible(n) && (!sdStoreFilter || n.store_name === sdStoreFilter);
+  });
+  if(!list.length && !sdNotesLoadErr && !sdNoteCanCreate()) return '';
+  var open = list.filter(function(n){ return n.status === 'open'; });
+  var done = list.filter(function(n){ return n.status !== 'open'; });
+  var h = '<div id="sd-notes" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;padding:12px;margin-bottom:14px;">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;">'+
+    '<div style="font-size:14px;font-weight:700;">✍️ Съобщения от счетоводството ('+open.length+')</div>'+
+    (done.length ? '<button id="sd-notes-closed-chip" onclick="sdNotesToggleClosed()" style="border:1px solid '+(sdNotesShowClosed?'#0f172a':'#e2e8f0')+';background:'+(sdNotesShowClosed?'#0f172a':'#fff')+';color:'+(sdNotesShowClosed?'#fff':'#64748b')+';border-radius:40px;padding:4px 12px;font-size:11.5px;font-weight:600;cursor:pointer;">Затворени ('+done.length+')</button>' : '')+
+    '</div>';
+  if(sdNotesLoadErr) h += '<div id="sd-notes-err" style="color:#dc2626;font-size:12px;margin-bottom:6px;">⚠ Съобщенията не се заредиха: '+esc(sdNotesLoadErr)+'</div>';
+  if(!open.length && !sdNotesLoadErr) h += '<div style="font-size:12px;color:#94a3b8;">Няма отворени съобщения.</div>';
+  h += '<div id="sd-notes-open">'+open.map(sdNoteCardHtml).join('')+'</div>';
+  if(sdNotesShowClosed && done.length) h += '<div id="sd-notes-done" style="margin-top:6px;">'+done.map(sdNoteCardHtml).join('')+'</div>';
+  return h + '</div>';
+}
+function sdNotesToggleClosed(){ sdNotesShowClosed = !sdNotesShowClosed; renderStockDiff(); }
+function sdNoteGoReport(rid){
+  var el = document.getElementById('diff-rep-'+rid);
+  if(el && el.scrollIntoView) el.scrollIntoView({block:'center'});
+  else toast('Бланката не е в текущия изглед - виж „Бланки за преглед" или „Решени редове"','#d97706');
+}
+function sdNoteFind(id){ return sdNotes.find(function(n){ return String(n.id) === String(id); }); }
+
+/* ── Ново съобщение ── */
+function openSDNoteModal(){
+  if(!sdNoteCanCreate()){ toast('Нямаш право да пишеш съобщения','#dc2626'); return; }
+  sdNoteFiles['new'] = [];
+  var old = document.getElementById('sd-note-ov'); if(old) old.remove();
+  var myS = assignedStores();
+  var storeField = (myS && myS.length === 1)
+    ? '<select class="fi" id="sd-note-store"><option>'+esc(myS[0])+'</option></select>'
+    : '<select class="fi" id="sd-note-store"><option value="">'+(myS ? '-- Избери --' : '-- Зарежда се... --')+'</option>'+
+        (myS ? myS.map(function(s){ return '<option>'+esc(s)+'</option>'; }).join('') : '')+'</select>';
+  document.body.insertAdjacentHTML('beforeend',
+    '<div class="bov open" id="sd-note-ov"><div class="bmod" style="width:540px;max-height:88vh;overflow-y:auto;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;">'+
+      '<div style="font-size:16px;font-weight:700;">✍️ Съобщение до обекта</div>'+
+      '<button onclick="closeSDNoteModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<label class="fl">Обект *</label>'+storeField+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">'+
+      '<div><label class="fl">Доставчик</label><input class="fi" id="sd-note-supplier" list="sd-note-suppliers" placeholder="по избор"><datalist id="sd-note-suppliers"></datalist></div>'+
+      '<div><label class="fl">Документ №</label><input class="fi" id="sd-note-doc" placeholder="по избор"></div>'+
+    '</div>'+
+    '<label class="fl">Текст *</label><textarea class="fi" id="sd-note-body" rows="4" placeholder="Какво трябва да провери обектът..."></textarea>'+
+    '<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px;">'+
+      '<label style="font-size:12px;color:#475569;cursor:pointer;border:1px solid #e2e8f0;border-radius:6px;padding:4px 10px;">📎 Прикачи документ<input type="file" multiple style="display:none;" onchange="sdNoteUploadFile(this,\'new\')"></label>'+
+      '<span id="sd-note-files-new"></span></div>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
+      '<button onclick="closeSDNoteModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 18px;font-size:13px;cursor:pointer;">Откажи</button>'+
+      '<button onclick="sdNoteSubmit()" style="border:none;background:#0f766e;color:#fff;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;">Запиши</button>'+
+    '</div></div></div>');
+  /* Подсказките за доставчик - същият списък като във формата за подаване. */
+  loadAllSuppliers().then(function(list){
+    var dl = document.getElementById('sd-note-suppliers');
+    if(dl) dl.innerHTML = list.map(function(n){ return '<option value="'+escAttr(n)+'">'; }).join('');
+  });
+  /* Празен списък на глобален профил = всички обекти, както в openDiffSubmitModal. */
+  if(!myS){
+    sbGet('users','select=store_name&order=store_name').then(function(data){
+      var el = document.getElementById('sd-note-store');
+      if(!Array.isArray(data) || !el) return;
+      var seen = {};
+      el.innerHTML = '<option value="">-- Избери --</option>'+data.filter(function(u){
+        if(!u.store_name || isCentralOffice(u.store_name) || LOGISTICS_WAREHOUSES.indexOf(u.store_name)>=0 || seen[u.store_name]) return false;
+        seen[u.store_name] = 1; return true;
+      }).map(function(u){ return '<option>'+esc(u.store_name)+'</option>'; }).join('');
+    });
+  }
+}
+function closeSDNoteModal(){
+  var ov = document.getElementById('sd-note-ov'); if(ov) ov.remove();
+  sdNoteFiles['new'] = [];
+}
+function sdNoteSubmit(){
+  if(!sdNoteCanCreate()){ toast('Нямаш право да пишеш съобщения','#dc2626'); return; }
+  var store = (document.getElementById('sd-note-store').value||'').trim();
+  var body = (document.getElementById('sd-note-body').value||'').trim();
+  if(!store){ toast('Избери обект','#dc2626'); return; }
+  var mine = assignedStores();
+  if(mine && mine.indexOf(store) < 0){ toast('Обектът не е от твоите','#dc2626'); return; }
+  if(!body){ toast('Напиши текст','#dc2626'); return; }
+  var data = {
+    store_name: store,
+    supplier: (document.getElementById('sd-note-supplier').value||'').trim() || null,
+    document_number: (document.getElementById('sd-note-doc').value||'').trim() || null,
+    body: body,
+    files: (sdNoteFiles['new']||[]).slice(),
+    status: 'open',
+    created_by: sdActor()
+  };
+  sbPostReturn('storno_notes', data).then(function(res){
+    if(!res.ok){ toast('Съобщението не е записано: '+sbErrMsg(res),'#dc2626'); return; }
+    sdNotes.unshift(Object.assign({}, data, res.row || {}));
+    closeSDNoteModal();
+    toast('✅ Съобщението е записано');
+    renderStockDiff();
+  });
+}
+
+/* ── Отговор ── */
+function sdNoteSendReply(id){
+  var n = sdNoteFind(id);
+  if(!n || !sdNoteCanAct(n)){ toast('Нямаш право да отговаряш тук','#dc2626'); return; }
+  var ta = document.getElementById('sd-note-reply-'+id);
+  var body = ((ta && ta.value)||'').trim();
+  if(!body){ toast('Напиши отговор','#dc2626'); return; }
+  var k = String(id);
+  var data = { note_id: n.id, body: body, files: (sdNoteFiles[k]||[]).slice(), side: sdNoteSide(), created_by: sdActor() };
+  sbPostReturn('storno_note_replies', data).then(function(res){
+    if(!res.ok){ toast('Отговорът не е записан: '+sbErrMsg(res),'#dc2626'); return; }
+    sdNoteReplies.push(Object.assign({}, data, res.row || {}));
+    sdNoteFiles[k] = [];
+    toast('✅ Отговорът е изпратен');
+    renderStockDiff();
+  });
+}
+
+/* ── Затваряне без сторно ── */
+function sdNoteClose(id){
+  var n = sdNoteFind(id);
+  if(!n || !sdNoteCanAct(n) || n.status !== 'open') return;
+  if(!confirm('Затвори съобщението без сторно?')) return;
+  var patch = { status: 'closed', closed_by: sdActor(), closed_at: new Date().toISOString() };
+  sbPatch('storno_notes', 'id=eq.'+n.id, patch).then(function(res){
+    if(!res.ok){ toast('Съобщението не е затворено: '+sbErrMsg(res),'#dc2626'); return; }
+    Object.assign(n, patch);
+    toast('✅ Затворено');
+    renderStockDiff();
+  });
+}
+
+/* ── „🧾 Направи сторно": обичайната бланка за грешен прием, попълнена от
+   съобщението. Отбелязването става в submitDiffReport, СЛЕД успешното
+   подаване (sdNoteMarkStorno). ── */
+function sdNoteMakeStorno(id){
+  var n = sdNoteFind(id);
+  if(!n || !sdNoteCanAct(n) || n.status !== 'open') return;
+  if(!canSubmitWrongReceipt() && !canStoreSubmitWrongReceipt()){ toast('Нямаш право да подаваш бланка „Сторна по грешен прием"','#dc2626'); return; }
+  openDiffSubmitModal({ direction:'wrong_receipt', store_name:n.store_name, counterpart:n.supplier, document_number:n.document_number });
+  sdStornoNoteFor = n.id;
+}
+/* Провал тук НЕ трие бланката: тя е подадена и е важното. Остава червен
+   маркер на картата с „Опитай пак" (правило 13). */
+/* warn (по избор) - бланката е записана частично (без артикулите): при
+   успешен PATCH вместо „✅" излиза това червено съобщение. */
+function sdNoteMarkStorno(noteId, reportId, warn){
+  sbPatch('storno_notes', 'id=eq.'+noteId, { status:'storno', report_id:reportId }).then(function(res){
+    var n = sdNoteFind(noteId);
+    if(!res.ok){
+      sdStornoNoteFail[noteId] = reportId;
+      toast((warn ? warn+'; ' : '')+'Бланката е подадена, но съобщението НЕ е отбелязано като сторно: '+sbErrMsg(res)+' — „Опитай пак" на картата','#dc2626');
+    } else {
+      delete sdStornoNoteFail[noteId];
+      if(n){ n.status = 'storno'; n.report_id = reportId; }
+      if(warn) toast(warn+' (съобщението е свързано с бланката)','#dc2626');
+      else toast('✅ Бланката е подадена, съобщението е пуснато за сторно');
+    }
+    loadStockDiff();
+  });
+}
+function sdNoteRetryStorno(id){
+  var rid = sdStornoNoteFail[id];
+  if(!rid) return;
+  var n = sdNoteFind(id);
+  if(!n || !sdNoteCanAct(n)) return;
+  sdNoteMarkStorno(n.id, rid);
 }
 
 function submitDiffReport(){
@@ -4387,8 +4754,22 @@ function submitDiffReport(){
         headers:{'apikey':DIFF_KEY,'Authorization':'Bearer '+DIFF_KEY,'Content-Type':'application/json','Prefer':'return=minimal'},
         body:JSON.stringify(lines)
       }).then(function(r2){
-        if(!r2.ok){toast('Бланката е записана, но артикулите не се записаха - виж конзолата','#dc2626');console.error('stock_differences batch insert failed');closeDiffSubmitModal();loadStockDiff();return;}
+        if(!r2.ok){
+          var partialMsg='Бланката е записана, но артикулите не се записаха - виж конзолата';
+          console.error('stock_differences batch insert failed');
+          /* Бланката СЪЩЕСТВУВА - съобщението се свързва с нея, иначе повторно
+             „Направи сторно" би подало втора бланка. Червеното за артикулите
+             излиза последно (sdNoteMarkStorno го показва вместо „✅"). */
+          var partialNoteId=sdStornoNoteFor;
+          closeDiffSubmitModal();
+          if(partialNoteId){ sdNoteMarkStorno(partialNoteId, report.id, partialMsg); return; }
+          toast(partialMsg,'#dc2626');loadStockDiff();return;
+        }
+        /* Бланка от „🧾 Направи сторно": съобщението се отбелязва СЛЕД успешното
+           подаване. Идентификаторът се чете преди closeDiffSubmitModal (тя го нулира). */
+        var stornoNoteId=sdStornoNoteFor;
         closeDiffSubmitModal();
+        if(stornoNoteId){ sdNoteMarkStorno(stornoNoteId, report.id); return; }
         toast('✅ Бланката е подадена! Цветелина ще я прегледа.');
         loadStockDiff();
       });
