@@ -41,7 +41,22 @@
    презаписва). „↩ Върни" на ред в единица — отказ. „Събрано" не е колона:
    няма отворени редове, остатък и отворени единици. Етикети (само
    затворените, 4 на A4) с QR #pk=<id> — библиотеката на Товарни листи
-   (llLoadQrLib / llQrSvg от loading.js, само се викат); „🖨 Опис" по единица. */
+   (llLoadQrLib / llQrSvg от loading.js, само се викат); „🖨 Опис" по единица.
+
+   ЕТАП 2, част Б (23.10.2026) — изпращане и приемане. Схема:
+   picking-shipments-schema.sql (picking_shipments; FK от
+   picking_pallets.shipment_id). Склад / ЦО: обект → „➕ Нов транспорт" →
+   отметка „на камиона" (или QR #pk= при отворен транспорт за обекта) →
+   „🚚 Тръгна": статусът е departed ПРЕДИ известието; push + имейл САМО до
+   активните акаунти на обекта, чийто имейл е в picking_users (решение на
+   Тенчо 23.10, вариант б — само те виждат „Пристигащи"): push през osSend
+   (push.js) с таг store_name И display_name, имейл през llMailTo (loading.js)
+   — само се викат. Без получател в пилота → жълто предупреждение, без
+   маркер. Паднало известие → notify_error + „🔁 Прати пак" (правило 13).
+   Обект: „Пристигащи" — „✓ Получен" (с артикулите: различно → коментар) /
+   „⛔ Липсва" (коментар), „Приключи приемането" → received | partial;
+   отклоненията се виждат и на склада. Автоматична Разлика — НЕ (решение в
+   log-а: иска сверка на формата на stock_differences). */
 
 var pkUsersOn = [];     /* app_settings.picking_users — малки букви */
 var pkUsersSeq = 0;
@@ -63,6 +78,13 @@ var pkCurByStore = {};  /* обект → id на текущата единиц�
 var pkNewOpen = false;  /* отворен ли е изборът „➕ Нова единица" */
 var pkFinish = {};      /* обект → {ok} | {issues:[…]} — резултатът от „Приключи" */
 var pkDeepLink = null;  /* чакащият #pk=<id> */
+var pkShipments = [];   /* част Б: транспортите (на склада или към моя обект) */
+var pkShipFilter = 'active';
+var pkShipStore = '';   /* избраният обект в „🚚 Изпращане" на склада */
+var pkShipOpenId = null;/* отвореният транспорт */
+var pkShipNewOpen = false;
+var pkPendingLoad = null; /* {pid, sid} — QR на етикет при отворен транспорт */
+var pkRecvHighlight = null; /* id на единицата от QR при обекта */
 
 var PK_DAYS = 14;
 var PK_CHUNK = 500;
@@ -71,6 +93,8 @@ var PK_FILTER_LABEL = { open: 'Отворени', picked: 'Взети', skipped:
 var PK_KIND = { pallet: { icon: '📦', label: 'Палет' }, bulk: { icon: '🧱', label: 'Насип' }, carton: { icon: '🗃', label: 'Кашон' } };
 var PK_ITEM_COLS = 'id,pallet_id,line_id,qty,qty_received,receive_comment,created_at';
 var PK_EPS = 1e-9;
+var PK_SHIP_LABEL = { loading: 'Товари се', departed: 'Тръгнал', received: 'Приет', partial: 'Приет с отклонения' };
+var PK_SHIP_FILTER = { active: 'Активни', loading: 'Товари се', departed: 'Тръгнали', received: 'Приети', partial: 'С отклонения', all: 'Всички' };
 
 /* ─── Достъп ───────────────────────────────────────────── */
 function pkParseUsers(v){
@@ -312,10 +336,15 @@ function loadPicking(){
   return pkLoadUsers().then(function(){
     if(seq !== pkLoadSeq) return;
     if(!pkCanSee()){ pkDeepLink = null; el.innerHTML = pkTitle() + '<div class="card" id="pk-noaccess">Нямаш достъп до този модул.</div>'; return; }
-    /* Обектът: само „🚚 Изпращане" (етап 2б) — тук нищо не се чете. */
-    if(pkIsStoreSide()){ pkSub = 'ship'; pkDeepLink = null; pkRender(); return; }
-    if(pkDeepLink) return pkDeepLinkResolve(seq).then(function(){ if(seq === pkLoadSeq) return pkLoadData(seq); });
-    return pkLoadData(seq);
+    /* Обектът: само „🚚 Изпращане" → „Пристигащи" (част Б). */
+    if(pkIsStoreSide()){
+      pkSub = 'ship';
+      var pre = pkDeepLink ? pkDeepLinkResolveStore(seq) : Promise.resolve();
+      return pre.then(function(){ if(seq === pkLoadSeq) return pkLoadReceive(seq); });
+    }
+    var next = function(){ if(seq === pkLoadSeq) return pkSub === 'ship' ? pkLoadShip(seq) : pkLoadData(seq); };
+    if(pkDeepLink) return pkDeepLinkResolve(seq).then(next);
+    return next();
   });
 }
 function pkLoadData(seq){
@@ -432,11 +461,7 @@ function pkSubnavHtml(){
 function pkSetSub(s){
   pkSub = (s === 'ship' || pkIsStoreSide()) ? 'ship' : 'collect';
   pkEdit = null;
-  pkRender();
-}
-/* Етап 2б — изпращане и приемане. Не се крие (правило 11). */
-function pkRenderShip(){
-  return '<div class="card" id="pk-ship-stub" style="color:#64748b;">🚚 Изпращане и приемане — етап 2б (в разработка).</div>';
+  return loadPicking();
 }
 function pkRenderCollect(){
   var wh = pkActiveWarehouse();
@@ -564,6 +589,7 @@ function pkSetWarehouse(v){
   pkWarehouse = v || '';
   pkBatches = []; pkLines = []; pkStore = ''; pkEdit = null;
   pkPallets = []; pkItems = []; pkExtraLines = {}; pkCurByStore = {}; pkFinish = {}; pkNewOpen = false;
+  pkShipments = []; pkShipStore = ''; pkShipOpenId = null; pkShipNewOpen = false;
   return loadPicking();
 }
 function pkSetStore(s){ pkStore = s; pkEdit = null; pkRender(); }
@@ -1013,15 +1039,531 @@ function pkDeepLinkBoot(hash){
 function pkDeepLinkResolve(seq){
   var id = pkDeepLink;
   pkDeepLink = null;
-  return sbGetOk('picking_pallets', 'select=id,warehouse,store_name&id=eq.' + encodeURIComponent(id)).then(function(r){
+  return sbGetOk('picking_pallets', 'select=id,warehouse,store_name,status,shipment_id&id=eq.' + encodeURIComponent(id)).then(function(r){
     if(seq !== pkLoadSeq) return;
     if(!r.ok || !r.rows.length){ toast('Единицата не е намерена', '#dc2626'); return; }
     var p = r.rows[0], fx = pkFixedWarehouse();
     if(fx && fx !== p.warehouse){ toast('Единицата е от ' + p.warehouse, '#dc2626'); return; }
     if(!fx && pkWarehouse !== p.warehouse){ pkWarehouse = p.warehouse; pkBatches = []; pkLines = []; }
-    pkSub = 'collect';
-    pkStore = p.store_name;
-    pkCurByStore[p.store_name] = p.id;
+    /* Част Б: затворена неизпратена единица + отворен транспорт за същия
+       обект → „на камиона" (същото като отметката). Иначе — „Събиране". */
+    var loadP = (p.status === 'closed' && !p.shipment_id)
+      ? sbGetOk('picking_shipments', 'select=id&warehouse=eq.' + encodeURIComponent(p.warehouse) + '&store_name=eq.' + encodeURIComponent(p.store_name) +
+          '&status=eq.loading&order=created_at.desc&limit=1')
+      : Promise.resolve({ ok: true, rows: [] });
+    return loadP.then(function(rs){
+      if(seq !== pkLoadSeq) return;
+      var s = rs.ok && rs.rows[0];
+      if(s){
+        pkSub = 'ship'; pkShipStore = p.store_name; pkShipOpenId = s.id; pkPendingLoad = { pid: p.id, sid: s.id };
+        return;
+      }
+      pkSub = 'collect';
+      pkStore = p.store_name;
+      pkCurByStore[p.store_name] = p.id;
+    });
+  });
+}
+/* QR при обекта: единицата трябва да е за моя обект и вече изпратена. */
+function pkDeepLinkResolveStore(seq){
+  var id = pkDeepLink;
+  pkDeepLink = null;
+  return sbGetOk('picking_pallets', 'select=id,store_name,shipment_id&id=eq.' + encodeURIComponent(id)).then(function(r){
+    if(seq !== pkLoadSeq) return;
+    if(!r.ok || !r.rows.length){ toast('Единицата не е намерена', '#dc2626'); return; }
+    var p = r.rows[0];
+    if(p.store_name !== currentUser.store_name){ toast('Единицата е за ' + p.store_name + ', не за вашия обект', '#dc2626'); return; }
+    if(!p.shipment_id){ toast('Единицата още не е изпратена', '#d97706'); return; }
+    pkRecvHighlight = p.id;
+  });
+}
+
+/* ─── Изпращане и приемане (етап 2, част Б) ────────────── */
+/* Редовете на единиците и редовете за пикинг към тях. → {items, extra} | {error} */
+function pkLoadDetails(pallets){
+  if(!pallets.length) return Promise.resolve({ items: [], extra: {} });
+  return pkGetIn('picking_pallet_items', 'pallet_id', pallets.map(function(p){ return p.id; }), PK_ITEM_COLS, 'created_at.asc,id.asc').then(function(items){
+    if(items.partial) return { error: 'редовете на единиците не се заредиха изцяло' };
+    var ids = [];
+    items.forEach(function(it){ if(ids.indexOf(it.line_id) < 0) ids.push(it.line_id); });
+    if(!ids.length) return { items: items, extra: {} };
+    return pkGetIn('picking_lines', 'id', ids, PK_LINE_COLS, 'id.asc').then(function(ls){
+      if(ls.partial) return { error: 'артикулите не се заредиха изцяло' };
+      var extra = {};
+      ls.forEach(function(l){ extra[l.id] = l; });
+      return { items: items, extra: extra };
+    });
+  });
+}
+function pkSinceIso(){ return new Date(Date.now() - PK_DAYS * 86400000).toISOString(); }
+/* Склад / ЦО: транспортите на склада (активните + от последните PK_DAYS
+   дни), затворените неизпратени единици и единиците в тези транспорти. */
+function pkLoadShip(seq){
+  var wh = pkActiveWarehouse();
+  if(!wh){ pkShipments = []; pkPallets = []; pkItems = []; pkRender(); return Promise.resolve(); }
+  return sbGetOk('picking_shipments', 'select=*&warehouse=eq.' + encodeURIComponent(wh) +
+    '&or=(status.in.(loading,departed,partial),created_at.gte.' + pkSinceIso() + ')&order=created_at.desc,id.asc').then(function(rs){
+    if(seq !== pkLoadSeq) return;
+    if(!rs.ok){ pkLoadErr = rs.error; pkRenderErr(); return; }
+    var ships = rs.rows, ids = ships.map(function(s){ return s.id; });
+    return Promise.all([
+      sbGetAll('picking_pallets', 'select=*&warehouse=eq.' + encodeURIComponent(wh) + '&status=eq.closed&shipment_id=is.null&order=created_at.asc,id.asc'),
+      ids.length ? pkGetIn('picking_pallets', 'shipment_id', ids, '*', 'created_at.asc,id.asc') : Promise.resolve([])
+    ]).then(function(r2){
+      if(seq !== pkLoadSeq) return;
+      if(r2[0].partial || r2[1].partial){ pkLoadErr = 'единиците не се заредиха изцяло'; pkRenderErr(); return; }
+      var pallets = r2[0].concat(r2[1]);
+      return pkLoadDetails(pallets).then(function(d){
+        if(seq !== pkLoadSeq) return;
+        if(d.error){ pkLoadErr = d.error; pkRenderErr(); return; }
+        pkLoadErr = '';
+        pkShipments = ships; pkPallets = pallets; pkItems = d.items; pkExtraLines = d.extra;
+        pkRender();
+        if(pkPendingLoad) return pkApplyPendingLoad();
+      });
+    });
+  });
+}
+/* Обект: транспортите към моя обект — тръгнали / с отклонения + приетите
+   от последните PK_DAYS дни. */
+function pkLoadReceive(seq){
+  var store = currentUser.store_name;
+  return sbGetOk('picking_shipments', 'select=*&store_name=eq.' + encodeURIComponent(store) +
+    '&or=(status.in.(departed,partial),received_at.gte.' + pkSinceIso() + ')&order=departed_at.desc,id.asc').then(function(rs){
+    if(seq !== pkLoadSeq) return;
+    if(!rs.ok){ pkLoadErr = rs.error; pkRenderErr(); return; }
+    var ships = rs.rows.filter(function(s){ return s.status !== 'loading'; }), ids = ships.map(function(s){ return s.id; });
+    return (ids.length ? pkGetIn('picking_pallets', 'shipment_id', ids, '*', 'created_at.asc,id.asc') : Promise.resolve([])).then(function(pallets){
+      if(seq !== pkLoadSeq) return;
+      if(pallets.partial){ pkLoadErr = 'единиците не се заредиха изцяло'; pkRenderErr(); return; }
+      return pkLoadDetails(pallets).then(function(d){
+        if(seq !== pkLoadSeq) return;
+        if(d.error){ pkLoadErr = d.error; pkRenderErr(); return; }
+        pkLoadErr = '';
+        pkShipments = ships; pkPallets = pallets; pkItems = d.items; pkExtraLines = d.extra;
+        pkRender();
+      });
+    });
+  });
+}
+function pkShipById(id){ return pkShipments.filter(function(s){ return s.id === id; })[0] || null; }
+function pkUnitsOfShip(sid){ return pkPallets.filter(function(p){ return p.shipment_id === sid; }); }
+function pkShipMatches(s, f){
+  if(f === 'all') return true;
+  if(f === 'active') return s.status === 'loading' || s.status === 'departed' || s.status === 'partial';
+  return s.status === f;
+}
+function pkItemDiffers(it){ return it.qty_received != null && Math.abs(Number(it.qty_received) - Number(it.qty)) > PK_EPS; }
+
+/* ── Склад / ЦО ── */
+function pkRenderShip(){
+  if(pkIsStoreSide()) return pkRenderReceive();
+  var wh = pkActiveWarehouse();
+  var h = '<div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
+  if(pkFixedWarehouse()) h += '<b id="pk-wh-fixed">' + esc(wh) + '</b>';
+  else {
+    h += '<select id="pk-wh" class="fi" onchange="pkSetWarehouse(this.value)" style="max-width:260px;display:inline-block;width:auto;"><option value="">-- Избери склад --</option>';
+    LOGISTICS_WAREHOUSES.forEach(function(w){ h += '<option' + (w === wh ? ' selected' : '') + '>' + esc(w) + '</option>'; });
+    h += '</select>';
+  }
+  h += '</div>';
+  if(!wh) return h + '<div class="card" id="pk-need-wh" style="color:#64748b;">Избери склад, за да видиш транспортите.</div>';
+  /* Обектите: със затворени неизпратени единици или с транспорт. */
+  var free = {}, stores = [];
+  var add = function(st){ if(st && stores.indexOf(st) < 0) stores.push(st); };
+  pkPallets.forEach(function(p){ if(p.status === 'closed' && !p.shipment_id){ free[p.store_name] = (free[p.store_name] || 0) + 1; add(p.store_name); } });
+  pkShipments.forEach(function(s){ add(s.store_name); });
+  stores.sort(function(a, b){ return a.localeCompare(b, 'bg'); });
+  if(!stores.length) return h + '<div class="card" id="pk-ship-empty" style="color:#64748b;">Няма затворени единици за изпращане и няма транспорти.</div>';
+  if(!pkShipStore || stores.indexOf(pkShipStore) < 0) pkShipStore = stores[0];
+  h += '<div class="card" id="pk-ship-chips" style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;">';
+  stores.forEach(function(st){
+    h += '<button class="filter-btn pk-ship-chip' + (st === pkShipStore ? ' active' : '') + '" data-pk-store="' + escAttr(st) + '" onclick="pkSetShipStore(this.getAttribute(\'data-pk-store\'))">' +
+      esc(st) + ' · ' + (free[st] || 0) + ' за изпращане</button>';
+  });
+  h += '<button id="pk-ship-new" class="btn btn-sm btn-primary" style="margin-left:auto;" onclick="pkToggleShipNew()">➕ Нов транспорт · ' + esc(pkShipStore) + '</button>';
+  if(pkShipNewOpen){
+    h += '<div id="pk-ship-form" style="flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px;align-items:center;">' +
+      '<input id="pk-sh-vehicle" class="fi" placeholder="Превозно средство" style="max-width:180px;">' +
+      '<input id="pk-sh-driver" class="fi" placeholder="Шофьор" style="max-width:180px;">' +
+      '<input id="pk-sh-note" class="fi" placeholder="Бележка" style="max-width:240px;">' +
+      '<button id="pk-sh-create" class="btn btn-sm btn-primary" onclick="pkCreateShipment()">Създай</button>' +
+      '<button class="btn btn-sm" onclick="pkToggleShipNew()">Отказ</button></div>';
+  }
+  h += '</div>';
+  var cnt = {};
+  Object.keys(PK_SHIP_FILTER).forEach(function(f){ cnt[f] = pkShipments.filter(function(s){ return pkShipMatches(s, f); }).length; });
+  h += '<div class="card" style="display:flex;flex-wrap:wrap;gap:6px;">';
+  Object.keys(PK_SHIP_FILTER).forEach(function(f){
+    h += '<button id="pk-sf-' + f + '" class="filter-btn' + (pkShipFilter === f ? ' active' : '') + '" onclick="pkSetShipFilter(\'' + f + '\')">' + PK_SHIP_FILTER[f] + ' (' + cnt[f] + ')</button>';
+  });
+  h += '</div>';
+  var list = pkShipments.filter(function(s){ return pkShipMatches(s, pkShipFilter); });
+  if(!list.length) h += '<div class="card" id="pk-ship-none" style="color:#64748b;">Няма транспорти.</div>';
+  else {
+    h += '<div class="card" style="overflow-x:auto;"><table id="pk-ships"><tbody>';
+    list.forEach(function(s){
+      var n = pkUnitsOfShip(s.id).length;
+      h += '<tr class="pk-ship-row" data-pk-ship="' + escAttr(s.id) + '"' + (s.id === pkShipOpenId ? ' style="background:#eff6ff;"' : '') + '>' +
+        '<td><b>' + esc(s.store_name) + '</b></td><td>' + esc(PK_SHIP_LABEL[s.status] || s.status) + '</td><td>' + n + (n === 1 ? ' единица' : ' единици') + '</td>' +
+        '<td>' + esc(pkFmtTs(s.departed_at || s.created_at)) + '</td><td>' + pkE(s.vehicle) + '</td>' +
+        '<td>' + (s.notify_error ? '<span class="pk-notify-flag" title="' + escAttr(s.notify_error) + '">⚠ известието не тръгна</span>' : '') + (s.status === 'partial' ? ' ⚠️ отклонения' : '') + '</td>' +
+        '<td><button class="btn btn-sm" onclick="pkOpenShipment(\'' + escAttr(s.id) + '\')">Отвори</button></td></tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  var open = pkShipById(pkShipOpenId);
+  if(open) h += pkShipCardHtml(open);
+  return h;
+}
+function pkUnitLine(p){
+  var n = pkItemsOfUnit(p.id).length;
+  return esc(pkUnitName(p)) + ' · ' + n + (n === 1 ? ' ред' : ' реда') + ' · ' + esc(pkFmtQty(pkUnitSum(p.id)) || '0');
+}
+function pkShipCardHtml(s){
+  var sid = escAttr(s.id);
+  var h = '<div class="card" id="pk-ship-card" data-pk-ship="' + sid + '" style="border-left:4px solid #2563eb;">' +
+    '<div style="font-weight:700;">🚚 ' + esc(s.warehouse) + ' → ' + esc(s.store_name) + ' · ' + esc(PK_SHIP_LABEL[s.status] || s.status) + '</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:6px;">' + [s.vehicle, s.driver, s.note].filter(Boolean).map(esc).join(' · ') +
+      (s.created_by ? ' · създал ' + esc(s.created_by) : '') + (s.departed_at ? ' · тръгнал ' + esc(pkFmtTs(s.departed_at)) + ' ' + pkE(s.departed_by) : '') + '</div>';
+  if(s.status === 'loading'){
+    var cand = pkPallets.filter(function(p){ return p.store_name === s.store_name && p.status === 'closed' && (!p.shipment_id || p.shipment_id === s.id); });
+    if(!cand.length) h += '<div style="color:#64748b;">Няма затворени единици за ' + esc(s.store_name) + '.</div>';
+    cand.forEach(function(p){
+      var pid = escAttr(p.id);
+      h += '<label class="pk-load" data-pk-unit="' + pid + '" style="display:block;padding:3px 0;"><input type="checkbox" id="pk-load-' + pid + '"' + (p.shipment_id === s.id ? ' checked' : '') +
+        ' onchange="pkToggleLoad(\'' + pid + '\',this.checked,\'' + sid + '\')"> на камиона · ' + pkUnitLine(p) + '</label>';
+    });
+    var n = pkUnitsOfShip(s.id).length;
+    h += '<div style="display:flex;gap:6px;margin-top:8px;"><button id="pk-depart" class="btn btn-sm btn-primary" onclick="pkDepart(\'' + sid + '\')">🚚 Тръгна (' + n + ')</button>' +
+      '<button id="pk-ship-del" class="btn btn-sm" onclick="pkDeleteShipment(\'' + sid + '\')">🗑</button></div>';
+  } else {
+    pkUnitsOfShip(s.id).forEach(function(p){
+      h += '<div class="pk-ship-unit" data-pk-unit="' + escAttr(p.id) + '" style="padding:3px 0;">' + pkUnitLine(p) + ' · ' +
+        (p.received_status === 'received' ? '✓ получен' : p.received_status === 'missing' ? '⛔ липсва' : 'очаква приемане') + '</div>';
+    });
+    if(s.notify_error){
+      h += '<div id="pk-notify-err" style="margin-top:6px;border-left:4px solid #dc2626;padding:6px 10px;background:#fef2f2;">⚠ Известието до обекта не тръгна: ' + esc(s.notify_error) +
+        ' <button id="pk-renotify" class="btn btn-sm" onclick="pkRenotify(\'' + sid + '\')">🔁 Прати пак</button></div>';
+    }
+  }
+  return h + pkDeviationsHtml(s) + '</div>';
+}
+/* „⚠️ Отклонения при приемане" — вижда се и на склада, и в ЦО, и при обекта. */
+function pkDeviationsHtml(s){
+  var rows = [];
+  pkUnitsOfShip(s.id).forEach(function(p){
+    if(p.received_status === 'missing') rows.push('Липсва ' + pkUnitName(p) + (p.receive_note ? ' — ' + p.receive_note : ''));
+    pkItemsOfUnit(p.id).forEach(function(it){
+      if(!pkItemDiffers(it)) return;
+      var l = pkLineById(it.line_id) || {};
+      rows.push(pkUnitName(p) + ' · ' + (l.sap_code || '') + ' ' + (l.product_name || '') + ': изпратено ' + pkFmtQty(it.qty) + ', получено ' + pkFmtQty(it.qty_received) +
+        (it.receive_comment ? ' — ' + it.receive_comment : ''));
+    });
+  });
+  if(!rows.length) return '';
+  return '<div class="pk-deviations" id="pk-dev-' + escAttr(s.id) + '" style="margin-top:8px;border-left:4px solid #f59e0b;padding:6px 10px;background:#fffbeb;"><b>⚠️ Отклонения при приемане</b><ul style="margin:4px 0 0 18px;">' +
+    rows.map(function(r){ return '<li>' + esc(r) + '</li>'; }).join('') + '</ul></div>';
+}
+function pkSetShipStore(st){ pkShipStore = st; pkShipNewOpen = false; pkRender(); }
+function pkSetShipFilter(f){ pkShipFilter = PK_SHIP_FILTER[f] ? f : 'active'; pkRender(); }
+function pkToggleShipNew(){ pkShipNewOpen = !pkShipNewOpen; pkRender(); }
+function pkOpenShipment(id){
+  var s = pkShipById(id);
+  if(!s) return;
+  pkShipOpenId = s.id; pkShipStore = s.store_name;
+  pkRender();
+}
+function pkCreateShipment(){
+  if(!pkCanSee() || pkIsStoreSide()) return Promise.resolve(null);
+  var wh = pkActiveWarehouse(), store = pkShipStore;
+  if(!wh || !store) return Promise.resolve(null);
+  var g = function(id){ var e = document.getElementById(id); return e ? (String(e.value || '').trim() || null) : null; };
+  return sbPostReturn('picking_shipments', { warehouse: wh, store_name: store, status: 'loading', vehicle: g('pk-sh-vehicle'), driver: g('pk-sh-driver'), note: g('pk-sh-note'), created_by: pkWho() }).then(function(res){
+    if(!res.ok || !res.row){ toast('Транспортът не е създаден: ' + sbErrMsg(res), '#dc2626'); return null; }
+    pkShipments.unshift(res.row);
+    pkShipOpenId = res.row.id; pkShipNewOpen = false;
+    pkRender();
+    toast('🚚 Нов транспорт към ' + store);
+    return res.row;
+  });
+}
+/* „на камиона" — отметка / махане (и QR на етикета при отворен транспорт). */
+function pkToggleLoad(pid, on, sid){
+  var p = pkPalletById(pid), s = pkShipById(sid);
+  if(!p || !s || !pkCanSee() || pkIsStoreSide()) return Promise.resolve(false);
+  if(s.status !== 'loading'){ toast('Транспортът вече е тръгнал', '#dc2626'); pkRender(); return Promise.resolve(false); }
+  if(on && p.status !== 'closed'){ toast('Единицата не е затворена', '#dc2626'); pkRender(); return Promise.resolve(false); }
+  if(on && p.shipment_id && p.shipment_id !== sid){ toast('Единицата е в друг транспорт', '#dc2626'); pkRender(); return Promise.resolve(false); }
+  var body = on ? { shipment_id: sid, loaded_by: pkWho(), loaded_at: new Date().toISOString() } : { shipment_id: null, loaded_by: null, loaded_at: null };
+  return sbPatch('picking_pallets', 'id=eq.' + encodeURIComponent(p.id), body).then(function(res){
+    if(!res.ok){ toast('Не е записано: ' + sbErrMsg(res), '#dc2626'); pkRender(); return false; }
+    Object.keys(body).forEach(function(k){ p[k] = body[k]; });
+    pkRender();
+    toast(pkUnitName(p) + (on ? ' — на камиона' : ' — свален от камиона'));
+    return true;
+  });
+}
+function pkApplyPendingLoad(){
+  var pl = pkPendingLoad;
+  pkPendingLoad = null;
+  var p = pkPalletById(pl.pid), s = pkShipById(pl.sid);
+  if(!p || !s){ toast('Единицата или транспортът не са намерени', '#dc2626'); return Promise.resolve(false); }
+  if(p.shipment_id === s.id){ toast(pkUnitName(p) + ' — вече е на камиона', '#d97706'); return Promise.resolve(true); }
+  return pkToggleLoad(p.id, true, s.id);
+}
+/* 🗑 — само транспорт, който още се товари; единиците му се освобождават. */
+function pkDeleteShipment(sid){
+  var s = pkShipById(sid);
+  if(!s || !pkCanSee() || pkIsStoreSide()) return Promise.resolve(false);
+  if(s.status !== 'loading'){ toast('Тръгнал транспорт не се трие', '#dc2626'); return Promise.resolve(false); }
+  return sbPatch('picking_pallets', 'shipment_id=eq.' + encodeURIComponent(sid), { shipment_id: null, loaded_by: null, loaded_at: null }).then(function(r1){
+    if(!r1.ok){ toast('Единиците не са освободени: ' + sbErrMsg(r1), '#dc2626'); return false; }
+    return sbDelete('picking_shipments', 'id=eq.' + encodeURIComponent(sid)).then(function(res){
+      if(!res.ok){ toast('Транспортът не е изтрит: ' + sbErrMsg(res), '#dc2626'); return false; }
+      pkPallets.forEach(function(p){ if(p.shipment_id === sid){ p.shipment_id = null; p.loaded_by = null; p.loaded_at = null; } });
+      pkShipments = pkShipments.filter(function(x){ return x.id !== sid; });
+      if(pkShipOpenId === sid) pkShipOpenId = null;
+      pkRender();
+      toast('Транспортът е изтрит, единиците са свободни');
+      return true;
+    });
+  });
+}
+/* „🚚 Тръгна" — статусът е departed ПРЕДИ известието; падне ли известието,
+   статусът остава, а транспортът носи маркер и „🔁 Прати пак". */
+function pkDepart(sid){
+  var s = pkShipById(sid);
+  if(!s || !pkCanSee() || pkIsStoreSide() || s.status !== 'loading') return Promise.resolve(false);
+  var n = pkUnitsOfShip(s.id).length;
+  if(!n){ toast('Няма единици на камиона', '#dc2626'); return Promise.resolve(false); }
+  var body = { status: 'departed', departed_by: pkWho(), departed_at: new Date().toISOString() };
+  return sbPatch('picking_shipments', 'id=eq.' + encodeURIComponent(s.id), body).then(function(res){
+    if(!res.ok){ toast('Не е записано: ' + sbErrMsg(res), '#dc2626'); return false; }
+    Object.keys(body).forEach(function(k){ s[k] = body[k]; });
+    pkRender();
+    return pkNotifyShipment(s);
+  });
+}
+function pkRenotify(sid){
+  var s = pkShipById(sid);
+  if(!s || !pkCanSee() || s.status === 'loading') return Promise.resolve(false);
+  return pkNotifyShipment(s);
+}
+function pkResMsg(r){ return (r && r.data && r.data.message) || ('HTTP ' + ((r && r.status) || '—')); }
+/* Получателите в ПИЛОТА (решение на Тенчо 23.10, вариант б): активните
+   акаунти на обекта, чийто имейл е в picking_users — само те виждат
+   „Пристигащи" и могат да приемат. sbGetOk, не sbGet: паднала заявка трябва
+   да се различава от „няма получател" (иначе срив изглежда като празен
+   списък). → {ok, rows:[{email, tag}]} | {ok:false, error} */
+function pkPilotRecipients(store){
+  return sbGetOk('users', 'active=eq.true&select=email,display_name,store_name&store_name=eq.' + encodeURIComponent(store)).then(function(r){
+    if(!r.ok) return { ok: false, error: r.error };
+    var out = [], seen = {};
+    r.rows.forEach(function(u){
+      var em = String(u.email || '').trim().toLowerCase();
+      if(!em || seen[em] || pkUsersOn.indexOf(em) < 0 || u.store_name !== store) return;
+      seen[em] = 1;
+      /* Тагът на устройството е display_name || email (initPush в push.js). */
+      out.push({ email: u.email, tag: u.display_name || u.email });
+    });
+    return { ok: true, rows: out };
+  });
+}
+/* Push САМО до устройствата на тези акаунти: (обект И име) ИЛИ … — osSend от
+   push.js, само се вика. Тагът display_name не е уникален, затова винаги в
+   двойка с тага store_name. */
+function pkPushPilot(store, tags, title, msg){
+  if(typeof osSend !== 'function') return Promise.resolve({ ok: false, status: 0, data: { message: 'push.js не е зареден' } });
+  var filters = [];
+  tags.forEach(function(t, i){
+    if(i > 0) filters.push({ operator: 'OR' });
+    filters.push({ field: 'tag', key: 'store_name', relation: '=', value: store });
+    filters.push({ field: 'tag', key: 'display_name', relation: '=', value: t });
+  });
+  return osSend({ filters: filters, headings: { bg: title, en: title }, contents: { bg: msg, en: msg } });
+}
+/* Push + имейл до получателите в пилота. Без такива — жълто предупреждение,
+   без маркер (нищо не е паднало). Резултатът се записва в транспорта. */
+function pkNotifyShipment(s){
+  var units = pkUnitsOfShip(s.id), n = units.length;
+  var title = 'Пикинг: ' + n + (n === 1 ? ' единица тръгна към вас' : ' единици тръгнаха към вас');
+  var msg = 'От ' + s.warehouse + (s.vehicle ? ' · ' + s.vehicle : '') + (s.driver ? ' · ' + s.driver : '');
+  var subject = 'Пикинг — ' + s.warehouse + ' → ' + s.store_name + ', ' + n + (n === 1 ? ' единица' : ' единици');
+  var fail = function(e){ return { ok: false, status: 0, data: { message: String((e && e.message) || e) } }; };
+  var safe = function(fn){ try { return Promise.resolve(fn()).catch(fail); } catch(e){ return Promise.resolve(fail(e)); } };
+  return pkPilotRecipients(s.store_name).then(function(rec){
+    if(!rec.ok) return { errs: ['получатели: ' + rec.error] };
+    if(!rec.rows.length) return { none: true, errs: [] };
+    return Promise.all([
+      safe(function(){ return pkPushPilot(s.store_name, rec.rows.map(function(x){ return x.tag; }), title, msg); }),
+      safe(function(){ return llMailTo(rec.rows.map(function(x){ return x.email; }), subject, function(){ return pkShipEmailHtml(s, units); }); })
+    ]).then(function(rs){
+      var errs = [];
+      if(!rs[0] || !rs[0].ok) errs.push('push: ' + pkResMsg(rs[0]));
+      if(!rs[1] || !rs[1].ok) errs.push('имейл: ' + pkResMsg(rs[1]));
+      return { errs: errs };
+    });
+  }).then(function(r){
+    var errs = r.errs;
+    var body = errs.length ? { notify_error: errs.join('; ') } : (r.none ? { notify_error: null } : { notify_error: null, notified_at: new Date().toISOString() });
+    return sbPatch('picking_shipments', 'id=eq.' + encodeURIComponent(s.id), body).then(function(res){
+      if(res.ok) Object.keys(body).forEach(function(k){ s[k] = body[k]; });
+      else if(errs.length) s.notify_error = body.notify_error;
+      pkRender();
+      if(errs.length) toast('🚚 Тръгна, но известието НЕ тръгна (' + errs.join('; ') + ') — „🔁 Прати пак"', '#dc2626');
+      else if(r.none) toast('🚚 Тръгна · ' + s.store_name + ': няма получател в пилота — нито push, нито имейл', '#d97706');
+      else toast('🚚 Тръгна · ' + s.store_name + ' е известен');
+      return !errs.length;
+    });
+  });
+}
+function pkShipEmailHtml(s, units){
+  var TH = 'style="text-align:left;padding:5px 7px;font-size:11px;font-weight:700;color:#475569;background:#f1f5f9;border:1px solid #e2e8f0;"';
+  var TD = 'style="padding:5px 7px;font-size:12px;border:1px solid #e2e8f0;vertical-align:top;"';
+  var rows = units.map(function(p){
+    var k = PK_KIND[p.kind] || PK_KIND.pallet, items = pkItemsOfUnit(p.id);
+    var inner = items.map(function(it){
+      var l = pkLineById(it.line_id) || {};
+      return '<tr><td ' + TD + '>' + pkE(l.sap_code) + '</td><td ' + TD + '>' + pkE(l.product_name) + '</td><td ' + TD + '>' + esc(pkFmtQty(it.qty)) + ' ' + pkE(l.unit) + '</td></tr>';
+    }).join('');
+    return '<tr><td ' + TD + '><b>' + esc(k.label + ' №' + p.no) + '</b></td><td ' + TD + '>' + esc(k.label) + '</td><td ' + TD + '>' + esc(String(p.no)) + '</td><td ' + TD + '>' + items.length + '</td><td ' + TD + '>' + esc(pkFmtQty(pkUnitSum(p.id)) || '0') + '</td></tr>' +
+      '<tr><td ' + TD + ' colspan="5"><table style="border-collapse:collapse;width:100%;" data-pk-mail-items="' + escAttr(p.id) + '"><tr><th ' + TH + '>Код</th><th ' + TH + '>Име</th><th ' + TH + '>Брой</th></tr>' + inner + '</table></td></tr>';
+  }).join('');
+  var body = '<div style="font-size:15px;font-weight:700;margin-bottom:6px;">🚚 ' + esc(s.warehouse) + ' → ' + esc(s.store_name) + '</div>' +
+    '<div style="font-size:12px;color:#475569;margin-bottom:10px;">' + units.length + (units.length === 1 ? ' единица' : ' единици') +
+      (s.vehicle ? ' · ' + esc(s.vehicle) : '') + (s.driver ? ' · шофьор ' + esc(s.driver) : '') + (s.note ? ' · ' + esc(s.note) : '') +
+      (s.departed_at ? ' · тръгнал ' + esc(pkFmtTs(s.departed_at)) : '') + '</div>' +
+    '<table style="border-collapse:collapse;width:100%;"><tr><th ' + TH + '>Единица</th><th ' + TH + '>Вид</th><th ' + TH + '>№</th><th ' + TH + '>Редове</th><th ' + TH + '>Σ</th></tr>' + rows + '</table>' +
+    '<p style="font-size:12px;margin-top:12px;">Приемане: портала → Транспорт → 📦 Пикинг → 🚚 Изпращане (или QR на етикета). <a href="' + LL_PORTAL_URL + '">' + LL_PORTAL_URL + '</a></p>';
+  return emailWrap(body, 'Пикинг · ТеМАХ Вътрешна платформа');
+}
+
+/* ── Обект: „Пристигащи" ── */
+function pkRenderReceive(){
+  var store = currentUser.store_name;
+  var h = '<div class="card"><b>Пристигащи — ' + esc(store) + '</b> <span style="color:#94a3b8;font-size:12px;">(тръгнали и с отклонения + приетите за последните ' + PK_DAYS + ' дни)</span></div>';
+  if(!pkShipments.length) return h + '<div class="card" id="pk-recv-none" style="color:#64748b;">Няма пристигащи транспорти.</div>';
+  pkShipments.forEach(function(s){ h += pkRecvCardHtml(s); });
+  return h;
+}
+function pkRecvCardHtml(s){
+  var sid = escAttr(s.id), live = s.status === 'departed';
+  var h = '<div class="card pk-recv-card" data-pk-ship="' + sid + '" style="border-left:4px solid ' + (live ? '#2563eb' : '#94a3b8') + ';">' +
+    '<div style="font-weight:700;">🚚 ' + esc(s.warehouse) + ' → ' + esc(s.store_name) + ' · ' + esc(PK_SHIP_LABEL[s.status] || s.status) + '</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:6px;">' + (s.departed_at ? 'тръгнал ' + esc(pkFmtTs(s.departed_at)) : '') + [s.vehicle, s.driver, s.note].filter(Boolean).map(function(x){ return ' · ' + esc(x); }).join('') + '</div>';
+  pkUnitsOfShip(s.id).forEach(function(p){
+    var pid = escAttr(p.id), hl = pkRecvHighlight === p.id;
+    h += '<div class="pk-recv-unit" data-pk-unit="' + pid + '" style="border:1px solid #e2e8f0;border-radius:8px;padding:6px 8px;margin:6px 0;' + (hl ? 'outline:3px solid #2563eb;' : '') + '">';
+    h += '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;"><b>' + pkUnitLine(p) + '</b>';
+    if(p.received_status === 'received') h += '<span class="pk-recv-badge" style="color:#166534;">✓ получен</span>';
+    else if(p.received_status === 'missing') h += '<span class="pk-recv-badge" style="color:#b91c1c;">⛔ липсва — ' + pkE(p.receive_note) + '</span>';
+    if(live && !p.received_status){
+      if(pkEdit && pkEdit.id === p.id && pkEdit.mode === 'miss'){
+        h += '<input id="pk-rcv-note-' + pid + '" placeholder="Какво липсва (задължително)" style="width:220px;"> <button id="pk-rcv-miss-save-' + pid + '" class="btn btn-sm btn-primary" onclick="pkRecvMiss(\'' + pid + '\')">Запиши</button> <button class="btn btn-sm" onclick="pkCancel()">Отказ</button>';
+      } else {
+        h += '<button id="pk-rcv-ok-' + pid + '" class="btn btn-sm btn-primary" onclick="pkRecvOk(\'' + pid + '\')">✓ Получен</button>' +
+          '<button id="pk-rcv-miss-' + pid + '" class="btn btn-sm" onclick="pkStartEdit(\'' + pid + '\',\'miss\')">⛔ Липсва</button>';
+      }
+    } else if(live){
+      h += '<button id="pk-rcv-reset-' + pid + '" class="btn btn-sm" onclick="pkRecvReset(\'' + pid + '\')">↩ Промени</button>';
+    }
+    h += '</div><table style="margin-top:4px;"><tbody>';
+    pkItemsOfUnit(p.id).forEach(function(it){
+      var l = pkLineById(it.line_id) || {}, iid = escAttr(it.id);
+      var editable = live && !p.received_status;
+      var got = it.qty_received != null ? it.qty_received : it.qty;
+      h += '<tr class="pk-recv-item" data-pk-item="' + iid + '"><td>' + pkE(l.sap_code) + '</td><td>' + pkE(l.product_name) + '</td><td style="text-align:right;">' + esc(pkFmtQty(it.qty)) + ' ' + pkE(l.unit) + '</td>';
+      if(editable){
+        h += '<td>получено <input id="pk-rcv-qty-' + iid + '" type="number" step="any" value="' + escAttrVal(String(got)) + '" style="width:70px;"></td>' +
+          '<td><input id="pk-rcv-cmt-' + iid + '" placeholder="коментар при различно" value="' + escAttrVal(it.receive_comment) + '" style="width:180px;"></td>';
+      } else {
+        h += '<td>' + (pkItemDiffers(it) ? '⚠ получено ' + esc(pkFmtQty(it.qty_received)) + (it.receive_comment ? ' — ' + esc(it.receive_comment) : '') : '') + '</td><td></td>';
+      }
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+  });
+  if(live) h += '<button id="pk-rcv-finish-' + sid + '" class="btn btn-sm btn-primary" onclick="pkRecvFinish(\'' + sid + '\')">Приключи приемането</button>';
+  return h + pkDeviationsHtml(s) + '</div>';
+}
+function pkRecvCanEdit(p){
+  var s = p && pkShipById(p.shipment_id);
+  return !!s && pkCanSee() && pkIsStoreSide() && s.store_name === currentUser.store_name && s.status === 'departed';
+}
+/* „✓ Получен" — записва и артикулите вътре: различно получено → qty_received
+   + задължителен коментар; равно → NULL. Липсва коментар → нищо не се пише. */
+function pkRecvOk(pid){
+  var p = pkPalletById(pid);
+  if(!pkRecvCanEdit(p)) return Promise.resolve(false);
+  var plan = [];
+  var items = pkItemsOfUnit(p.id);
+  for(var i = 0; i < items.length; i++){
+    var it = items[i];
+    var qi = document.getElementById('pk-rcv-qty-' + it.id), ci = document.getElementById('pk-rcv-cmt-' + it.id);
+    var n = pkNum(qi ? qi.value : String(it.qty)), c = String(ci ? ci.value : '').trim();
+    if(n == null || n < 0){ toast('Невалиден брой при ' + ((pkLineById(it.line_id) || {}).sap_code || 'артикул'), '#dc2626'); return Promise.resolve(false); }
+    var diff = Math.abs(n - Number(it.qty)) > PK_EPS;
+    if(diff && !c){ toast('Различен брой при ' + ((pkLineById(it.line_id) || {}).sap_code || 'артикул') + ' — напиши коментар', '#dc2626'); return Promise.resolve(false); }
+    var want = diff ? { qty_received: n, receive_comment: c } : { qty_received: null, receive_comment: null };
+    if(want.qty_received !== (it.qty_received == null ? null : Number(it.qty_received)) || want.receive_comment !== (it.receive_comment || null)) plan.push({ it: it, body: want });
+  }
+  var chain = Promise.resolve(true);
+  plan.forEach(function(x){
+    chain = chain.then(function(okSoFar){
+      if(!okSoFar) return false;
+      return sbPatch('picking_pallet_items', 'id=eq.' + encodeURIComponent(x.it.id), x.body).then(function(res){
+        if(!res.ok){ toast('Артикулът не е записан: ' + sbErrMsg(res), '#dc2626'); return false; }
+        Object.keys(x.body).forEach(function(k){ x.it[k] = x.body[k]; });
+        return true;
+      });
+    });
+  });
+  return chain.then(function(okAll){
+    if(!okAll){ pkRender(); return false; }
+    return pkPatchRecv(p, { received_status: 'received', received_by: pkWho(), received_at: new Date().toISOString(), receive_note: null }, '✓ ' + pkUnitName(p) + ' — получен');
+  });
+}
+function pkRecvMiss(pid){
+  var p = pkPalletById(pid);
+  if(!pkRecvCanEdit(p)) return Promise.resolve(false);
+  var inp = document.getElementById('pk-rcv-note-' + p.id);
+  var c = String(inp ? inp.value : '').trim();
+  if(!c){ toast('Напиши какво липсва', '#dc2626'); return Promise.resolve(false); }
+  return pkPatchRecv(p, { received_status: 'missing', receive_note: c, received_by: pkWho(), received_at: new Date().toISOString() }, '⛔ ' + pkUnitName(p) + ' — липсва');
+}
+function pkRecvReset(pid){
+  var p = pkPalletById(pid);
+  if(!pkRecvCanEdit(p)) return Promise.resolve(false);
+  return pkPatchRecv(p, { received_status: null, receive_note: null, received_by: null, received_at: null }, '↩ ' + pkUnitName(p));
+}
+function pkPatchRecv(p, body, okMsg){
+  return sbPatch('picking_pallets', 'id=eq.' + encodeURIComponent(p.id), body).then(function(res){
+    if(!res.ok){ toast('Не е записано: ' + sbErrMsg(res), '#dc2626'); return false; }
+    Object.keys(body).forEach(function(k){ p[k] = body[k]; });
+    pkEdit = null;
+    pkRender();
+    toast(okMsg);
+    return true;
+  });
+}
+/* „Приключи приемането" — всяка единица с отметка; received само ако всички
+   са получени и няма артикул с различно получено; иначе partial. */
+function pkRecvFinish(sid){
+  var s = pkShipById(sid);
+  if(!s || !pkCanSee() || !pkIsStoreSide() || s.store_name !== currentUser.store_name || s.status !== 'departed') return Promise.resolve(false);
+  var units = pkUnitsOfShip(s.id);
+  var left = units.filter(function(p){ return !p.received_status; });
+  if(left.length){ toast('Без отметка: ' + left.map(pkUnitName).join(', '), '#dc2626'); return Promise.resolve(false); }
+  var clean = units.every(function(p){ return p.received_status === 'received'; }) &&
+    !units.some(function(p){ return pkItemsOfUnit(p.id).some(pkItemDiffers); });
+  var body = { status: clean ? 'received' : 'partial', received_by: pkWho(), received_at: new Date().toISOString() };
+  return sbPatch('picking_shipments', 'id=eq.' + encodeURIComponent(s.id), body).then(function(res){
+    if(!res.ok){ toast('Не е записано: ' + sbErrMsg(res), '#dc2626'); return false; }
+    Object.keys(body).forEach(function(k){ s[k] = body[k]; });
+    pkRender();
+    toast(clean ? '✅ Приемането е приключено' : '⚠️ Прието с отклонения — складът ги вижда', clean ? '#16a34a' : '#d97706');
+    return true;
   });
 }
 

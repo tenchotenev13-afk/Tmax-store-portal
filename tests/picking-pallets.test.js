@@ -157,17 +157,20 @@ async function pick(h, id, qty) {
     const d = fakeDb(); const h = env(KARDZHALI, d);
     await open(h);
     ok('обект в списъка: само „🚚 Изпращане"', !$(h, 'pks-collect') && !!$(h, 'pks-ship') && $(h, 'pks-ship').classList.contains('active'));
-    ok('обект: екранът „Етап 2б", 0 GET към picking_*', !!$(h, 'pk-ship-stub') && pickingGets(d).length === 0, pickingGets(d).map(x => x.tbl).join(','));
+    /* От част Б обектът вижда „Пристигащи" (picking-ship.test.js) — тук само
+       че не чете качванията и редовете за пикинг на склада. */
+    ok('обект: „Пристигащи", без GET към picking_batches / picking_lines', !!$(h, 'pk-recv-none') &&
+      !pickingGets(d).some(x => x.tbl === 'picking_batches' || x.tbl === 'picking_lines'), pickingGets(d).map(x => x.tbl).join(','));
   }
   const db = fakeDb();
   const h = env(TENCHO, db);
   {
     await open(h, TG);
     ok('склад/ЦО: лентата има и двата под-бутона', !!$(h, 'pks-collect') && !!$(h, 'pks-ship'));
-    realClick(h.w, $(h, 'pks-ship')); await ticks(2);
-    ok('„🚚 Изпращане" → празен екран „Етап 2б" (не е скрит)', !!$(h, 'pk-ship-stub'));
-    realClick(h.w, $(h, 'pks-collect')); await ticks(2);
-    ok('„📦 Събиране" → обратно към списъка', !!$(h, 'pk-units') && !$(h, 'pk-ship-stub'));
+    realClick(h.w, $(h, 'pks-ship')); await ticks(10);
+    ok('„🚚 Изпращане" → изгледът на изпращането (не е скрит)', !!$(h, 'pk-ship-empty') && !$(h, 'pk-units'));
+    realClick(h.w, $(h, 'pks-collect')); await ticks(10);
+    ok('„📦 Събиране" → обратно към списъка', !!$(h, 'pk-units') && !$(h, 'pk-ship-empty'));
     realClick(h.w, chip(h, 'Сливен')); await ticks(2);
     ok('Сливен: без единици', unitChips(h).length === 0);
   }
