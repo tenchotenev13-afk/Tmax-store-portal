@@ -1598,9 +1598,14 @@ function submitSR() {
     confirmed_date: document.getElementById('sr-cdate').value||null,
     courier_info:   document.getElementById('sr-courier').value,
     control_comment:document.getElementById('sr-cc').value,
-    photos:         srPendingPhotos,
-    created_by:     currentUser.display_name||currentUser.email
+    photos:         srPendingPhotos
   };
+  /* created_by — САМО при нов ред (решение на Тенчо, 23.10.2026). Дотогава
+     се пращаше и при редакция и потвърждението на обекта през ✏️ слагаше
+     неговото име върху създателя: от 52 реда, създадени от решение на
+     Цветелина в „Разлики", 49 носеха името на обекта. Решава srEditId, както
+     при plant по-долу. Заварените редове не се поправят. */
+  if(!srEditId) data.created_by = currentUser.display_name||currentUser.email;
   if(!lockStatus) data.status = document.getElementById('sr-status').value;
   /* Бъдеща дата се отказва ТУК, не с CHECK в базата (решение на Тенчо,
      02.10.2026): два заварени реда носят 2028-09-02 и 2029-09-02 и CHECK би

@@ -85,6 +85,10 @@ Netlify се ползва само за тестване/staging.
   поставянето ѝ; от следващия понеделник се брои нормално (22.10.2026, p_due в
   `stock_returns_store_done`). Същото изключение — в `srNeedsUpdate`
   (stock-returns.js) и `bulLoadReturnsPending` (bulletin.js).
+  `stock_returns.created_by` се пише САМО при създаване на ред (форма, импорти,
+  `autoCreateReturnFromDiff`); редакцията през ✏️ (`submitSR`) не го праща
+  (23.10.2026). Заварените редове до тази дата често носят името на обекта,
+  потвърдил реда, а не на създателя — не са поправяни.
 - `handbook.js` + `docs.js` — обединени в 1 таб (под-навигация в `showModule()`)
 - `history.js`, `contacts.js`, `transit.js`, `calendar.js`,
   `stock-differences.js`, `push.js`, `email.js`, `notifications.js`, `report.js`
