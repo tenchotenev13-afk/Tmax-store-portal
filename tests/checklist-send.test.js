@@ -299,11 +299,13 @@ async function doSend(h) {
   /* ── 7. Роля без права ───────────────────────────────────────────────── */
   section('7. manager: бутонът го няма');
   {
-    /* Като manager табът изобщо не се рендира. */
+    /* От етап 3А (23.10.2026) manager вижда таба в режим на обекта — само
+       своя ред, без изпращане. Режимът е заключен в checklist-store-view.test.js. */
     const h = env({ user: MANAGER });
     h.w.loadChecklist(); await ticks();
     ok('няма бутон при manager', !sendBtn(h));
-    ok('няма и таблица (табът е без достъп)', !h.doc.getElementById('checklist-table'));
+    ok('manager вижда мрежата в режим на обекта', !!h.doc.getElementById('checklist-table') &&
+       h.w.checklistStoreMode() === true);
     h.close();
 
     /* И по-строгото: мрежата е рендирана като admin, после потребителят се

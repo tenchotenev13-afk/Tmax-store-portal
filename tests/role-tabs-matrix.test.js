@@ -6,7 +6,9 @@
 
    Правилата: История — admin, accounting; Днес — admin, controlling,
    accounting само при is_regional; Администрация — само admin; Каса —
-   kasa, admin, manager; Чек лист — admin; „Ревизии и преоценка" — admin,
+   kasa, admin, manager; Чек лист — admin, а от 23.10.2026 (етап 3А) и
+   управителят на отчетен обект (само manager; sklad, kasa, info — не) — само за
+   четене и становище; „Ревизии и преоценка" — admin,
    accounting, supply, manager, sklad, controlling. Общите табове —
    всички. isGlobal() НЕ е пипан.
 
@@ -28,7 +30,7 @@ const MATRIX = [
   ['accounting',  false, 0, 1, 0, 0, 0, 1],
   ['accounting',  true,  0, 1, 1, 0, 0, 1],
   ['logistics',   false, 0, 0, 0, 0, 0, 0],
-  ['manager',     false, 1, 0, 0, 0, 0, 1],
+  ['manager',     false, 1, 0, 0, 1, 0, 1],
   ['sklad',       false, 0, 0, 0, 0, 0, 1],
   ['kasa',        false, 1, 0, 0, 0, 0, 0],
   ['supply',      false, 0, 0, 0, 0, 0, 1],

@@ -54,6 +54,7 @@ var checklistRows = [];        /* weekly_checklist за показаната с�
 var checklistStores = [];      /* 18-те отчетни обекта */
 var checklistLastSend = null;  /* последният ред от weekly_checklist_sends за седмицата */
 var checklistSendBusy = false; /* тече изпращане — бутонът мълчи */
+var checklistResponses = [];   /* weekly_checklist_responses за показаната седмица */
 
 /* Стойностите се пазят в базата на латиница, за да не зависи схемата от
    изписването. Превеждат се само тук, при показване. */
@@ -99,7 +100,7 @@ function checklistGroupsOf(u) {
    не-админ, той няма да види таба, докато notify_groups не влезе в
    select-а на auth-login (и функцията не се преразпредели ръчно).
    Заковано е в tests/checklist-view.test.js. */
-function canSeeChecklist() {
+function checklistIsControlling() {
   if (!currentUser) return false;
   if (currentUser.role === 'admin') return true;
   /* Роля 'controlling' — без Чек лист (решение 18.10.2026), дори да е в група
@@ -108,13 +109,29 @@ function canSeeChecklist() {
   return checklistGroupsOf(currentUser).indexOf('controlling') >= 0;
 }
 
-/* Редакцията е за същите хора, които виждат таба. Отделна функция, а не
-   canSeeChecklist() на самото място, за да има ЕДНО място за промяна, ако
-   утре табът се отвори за роля само за четене — тогава се пипа само тук и
-   мрежата автоматично става read-only (клетките не се закачат и handler-ът
-   пази втори път). */
+/* РЕЖИМ НА ОБЕКТА (етап 3А, 23.10.2026). Управителят (роля 'manager') на
+   отчетен обект вижда САМО своя ред, САМО изпратена от контролинга седмица,
+   и пише становище за клетките с „не". Не редактира клетките, не изпраща и
+   не пълни portal_value.
+   САМО manager (решение на Тенчо, 23.10.2026): писмото на чек листа отива до
+   управителя (checklistPickStoreEmail), той е отговорникът и той пише
+   становището. sklad, kasa, info и останалите роли на обекта — без таба. */
+function checklistStoreMode() {
+  if (!currentUser || checklistIsControlling()) return false;
+  if (currentUser.role !== 'manager') return false;
+  return !isGlobal() && isReportableStore(currentUser.store_name);
+}
+
+function canSeeChecklist() {
+  return checklistIsControlling() || checklistStoreMode();
+}
+
+/* Редакцията е САМО за контролинга (admin / група controlling), не за
+   всички, които виждат таба. Това е „ролята само за четене", заради която
+   функцията беше отделена: обектът (checklistStoreMode) вижда мрежата, но
+   клетките не се закачат и handler-ът пази втори път. */
 function canEditChecklist() {
-  return canSeeChecklist();
+  return checklistIsControlling();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -164,17 +181,36 @@ function loadChecklist() {
     return;
   }
 
+  var storeMode = checklistStoreMode();
+  wrap.innerHTML = '<div class="page"><div style="text-align:center;padding:30px;color:#94a3b8;">⏳ Зареждане...</div></div>';
+
   if (checklistWeek === null) {
+    /* Обектът отваря ПОСЛЕДНАТА ИЗПРАТЕНА седмица — другите не ги вижда.
+       Нито едно изпращане (както към 23.10.2026) → предходната седмица, като
+       при контролинга; мрежата ѝ излиза празна с надпис. */
+    if (storeMode) {
+      checklistLatestSentWeek().then(function (w) {
+        var d = w || checklistDefaultWeek();
+        checklistYear = d.year;
+        checklistWeek = d.week;
+        loadChecklist();
+      });
+      return;
+    }
     var def = checklistDefaultWeek();
     checklistYear = def.year;
     checklistWeek = def.week;
   }
 
-  wrap.innerHTML = '<div class="page"><div style="text-align:center;padding:30px;color:#94a3b8;">⏳ Зареждане...</div></div>';
+  var weekQ = 'year=eq.' + checklistYear + '&week_number=eq.' + checklistWeek;
+  /* В режим на обекта — само неговият ред (assignedStores() дава
+     [store_name] за неглобален потребител). */
+  var ownStores = storeMode ? (assignedStores() || []).filter(isReportableStore) : null;
+  var storeFilter = storeMode ? storeQ() : '';
 
   Promise.all([
     sbGet('weekly_checklist_metrics', 'active=eq.true&order=sort_order'),
-    sbGet('weekly_checklist', 'year=eq.' + checklistYear + '&week_number=eq.' + checklistWeek),
+    sbGet('weekly_checklist', weekQ + storeFilter),
     /* Последното изпращане за тази седмица — от него зависи надписът на
        бутона („Изпрати" срещу „Изпрати поправка") и редът „Последно
        изпратено" в прозорчето. Номерът на версията се чете ПАК при самото
@@ -187,12 +223,29 @@ function loadChecklist() {
        НЕ таблицата stores: тя брои и ЦО, двата склада и обекти без нито
        един акаунт (23 реда), тоест мрежата би имала пет реда, които няма
        кой да отметне. Същият източник като отчетите, „Днес" и Палети. */
-    loadReportableStores()
+    storeMode ? Promise.resolve(ownStores) : loadReportableStores(),
+    /* Становищата на обектите за седмицата (етап 3А). Липсваща таблица или
+       провал → [] (sbGet), тоест мрежата се рисува и без тях. */
+    sbGet('weekly_checklist_responses', weekQ + storeFilter)
   ]).then(function (res) {
     checklistMetrics = Array.isArray(res[0]) ? res[0] : [];
     checklistRows = Array.isArray(res[1]) ? res[1] : [];
-    checklistLastSend = (Array.isArray(res[2]) && res[2][0]) ? res[2][0] : null;
+    var sends = Array.isArray(res[2]) ? res[2] : [];
+    /* В режим на обекта „изпратена ли е" решава какво изобщо се вижда —
+       затова седмицата се сверява и тук, не само в заявката. */
+    if (storeMode) sends = sends.filter(function (s) {
+      return s && Number(s.year) === checklistYear && Number(s.week_number) === checklistWeek;
+    });
+    checklistLastSend = sends[0] || null;
     checklistStores = Array.isArray(res[3]) ? res[3] : [];
+    checklistResponses = Array.isArray(res[4]) ? res[4] : [];
+    /* Обектът НЕ пълни portal_value: той вижда това, което контролингът е
+       изпратил, а не преизчисление в момента на отваряне. И неизпратена
+       седмица излиза празна — стойностите там още не са оценка. */
+    if (storeMode) {
+      if (!checklistLastSend) { checklistRows = []; checklistResponses = []; }
+      return null;
+    }
     /* Рендерът е СЛЕД опита за попълване, не преди него — иначе мрежата
        мигва веднъж празна и втори път пълна. checklistFillPortalValues()
        никога не отхвърля: при провал сама вдига toast и не пипа редовете,
@@ -202,9 +255,25 @@ function loadChecklist() {
     renderChecklist();
   }).catch(function () {
     checklistMetrics = []; checklistRows = []; checklistStores = [];
-    checklistLastSend = null;
+    checklistLastSend = null; checklistResponses = [];
     renderChecklist();
   });
+}
+
+/* Последната седмица с изпращане → {year, week} или null. Максимумът се
+   смята и тук, не само в order-а на заявката: един ред повече не струва
+   нищо, а грешен ред би отворил чужда седмица. */
+function checklistLatestSentWeek() {
+  return sbGet('weekly_checklist_sends',
+    'select=year,week_number&order=year.desc,week_number.desc&limit=1').then(function (rows) {
+    var best = null;
+    (Array.isArray(rows) ? rows : []).forEach(function (r) {
+      var y = Number(r && r.year), w = Number(r && r.week_number);
+      if (!y || !w) return;
+      if (!best || y > best.year || (y === best.year && w > best.week)) best = { year: y, week: w };
+    });
+    return best;
+  }).catch(function () { return null; });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -839,6 +908,9 @@ function checklistDeadlineTitle(metric) {
    изглежда като счупен, а и няма как да добавиш първия коментар на клетка,
    чието балонче се появява само след като вече има коментар. */
 function checklistCommentIconHtml(row) {
+  /* Обектът не пише коментари на контролинга — вижда ги само като текст
+     под таблицата (checklistStoreCommentsHtml). */
+  if (checklistStoreMode()) return '';
   var has = !!(row && row.comment);
   return '<span class="cl-cmt"' +
     ' title="' + (has ? escAttr(row.comment) : 'Добави коментар') + '"' +
@@ -847,15 +919,36 @@ function checklistCommentIconHtml(row) {
     'cursor:pointer;opacity:' + (has ? '1' : '.25') + ';">💬</span>';
 }
 
+/* 📝 — обектът е дал становище по клетката. Само за контролинга и само
+   когато има становище (за разлика от 💬 тук няма какво да се добавя).
+   Отделен span с клас cl-resp, както 💬 — textContent на .cl-val остава
+   самата стойност. */
+function checklistResponseIconHtml(resp) {
+  if (!resp || !canEditChecklist()) return '';
+  return '<span class="cl-resp" title="Становище на обекта"' +
+    ' style="position:absolute;top:0;left:0;min-width:24px;min-height:24px;' +
+    'display:flex;align-items:center;justify-content:center;font-size:11px;line-height:1;' +
+    'cursor:pointer;">📝</span>';
+}
+
+/* Становищата за седмицата по ключ „обект показател". */
+function checklistResponseIndex() {
+  var idx = {};
+  checklistResponses.forEach(function (r) {
+    if (r && r.store_name && r.metric_key) idx[r.store_name + ' ' + r.metric_key] = r;
+  });
+  return idx;
+}
+
 /* Съдържанието на една клетка. Връща само вътрешността на <td>.
    Празният ред НЕ връща рано: балончето се рендира и когато ред няма. */
 /* early/earlyTitle идват отгоре, от renderChecklist: смятат се ВЕДНЪЖ на
    показател, не веднъж на клетка, и така рендирането не знае нищо за срокове
    — то само рисува подадения флаг. */
-function checklistCellInner(metric, row, early, earlyTitle) {
+function checklistCellInner(metric, row, early, earlyTitle, resp) {
   var text = '', faint = false;
 
-  if (!row) return checklistCommentIconHtml(null);
+  if (!row) return checklistCommentIconHtml(null) + checklistResponseIconHtml(resp);
 
   if (metric.value_type === 'number') {
     /* При числов показател водещото е control_num. control_value не се
@@ -909,6 +1002,7 @@ function checklistCellInner(metric, row, early, earlyTitle) {
     }
   }
   out += checklistCommentIconHtml(row);
+  out += checklistResponseIconHtml(resp);
   return out;
 }
 
@@ -969,7 +1063,18 @@ function renderChecklist() {
   var idx = checklistIndex();
   var cellCss = 'border:1px solid #e2e8f0;padding:6px 8px;text-align:center;font-size:12px;';
 
+  var storeMode = checklistStoreMode();
+  var sent = !!checklistLastSend;
+  var respIdx = checklistResponseIndex();
+
   var h = '<div class="page">' + checklistHeaderHtml();
+
+  /* Неизпратена седмица: мрежата остава (празна), надписът казва защо. */
+  if (storeMode && !sent) {
+    h += '<div id="cl-not-sent" style="margin-bottom:10px;padding:10px 14px;background:#fffbeb;' +
+      'border:1px solid #fde68a;border-radius:8px;font-size:13px;color:#92400e;">' +
+      'Седмица ' + checklistWeek + ' още не е изпратена от контролинга.</div>';
+  }
 
   h += '<div class="tbl-wrap tbl-compact tbl-auto">' +
     '<table id="checklist-table" style="border-collapse:collapse;width:100%;min-width:760px;">';
@@ -1012,22 +1117,234 @@ function renderChecklist() {
         ' style="' + cellCss + 'position:relative;' +
         (editable ? 'cursor:pointer;' : '') +
         (busy ? 'opacity:.45;' : '') + '">' +
-        checklistCellInner(m, idx[store + ' ' + m.key], earlyBy[m.key], earlyTitleBy[m.key]) + '</td>';
+        checklistCellInner(m, idx[store + ' ' + m.key], earlyBy[m.key], earlyTitleBy[m.key],
+          respIdx[store + ' ' + m.key]) + '</td>';
     });
     h += '</tr>';
   });
 
   h += '</tbody></table></div>';
+  if (storeMode && sent) {
+    h += checklistStoreCommentsHtml(idx);
+    h += checklistResponsesBlockHtml(idx, respIdx, now);
+  }
   h += checklistLegendHtml();
   h += '</div>';
 
   wrap.innerHTML = h;
   checklistWireCells();
+  if (storeMode && sent) checklistWireResponses(respIdx);
   /* Бутонът се закача със слушател, не с inline onclick — по същата причина
      като клетките: inline onclick не се изпълнява при element.click() под
      jsdom, тоест истинският клик не може да се тества. */
   var sendBtn = document.getElementById('cl-send-btn');
   if (sendBtn && !checklistSendBusy) sendBtn.addEventListener('click', openChecklistSendModal);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   СТАНОВИЩЕ НА ОБЕКТА (етап 3А, 23.10.2026)
+   ═══════════════════════════════════════════════════════════════════════════
+   Обект с „не" в изпратената седмица пише становище в портала, не по имейл
+   (решение на Тенчо — така то влиза в автоматичния отчет, етап 3Б).
+   Таблица weekly_checklist_responses, един ред на (седмица, обект,
+   показател), upsert. Числовите колони НЕ искат становище в този етап —
+   прагът за „Сторна по грешни приеми" чака Теодор.
+
+   СРОКЪТ („до петък ДД.ММ, 18:00" — петъкът на седмицата СЛЕД отчетната) и
+   баджът „след срока" са ПРЕДПОЛОЖЕНИЕ на чата, не правило на Теодор. След
+   срока пак може да се пише — баджът само казва, че е късно. */
+
+/* Срокът като местна дата: понеделникът на отчетната седмица + 11 дни,
+   18:00. */
+function checklistResponseDeadline(year, week) {
+  var d = new Date(weekDays(week, year)[0]);
+  d.setDate(d.getDate() + 11);
+  d.setHours(18, 0, 0, 0);
+  return d;
+}
+
+function checklistPad2(n) { return ('0' + n).slice(-2); }
+
+/* ISO от базата → „ДД.ММ ЧЧ:ММ" в местно време. Невалидно → ''. */
+function checklistFmtStamp(iso) {
+  if (!iso) return '';
+  var d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return checklistPad2(d.getDate()) + '.' + checklistPad2(d.getMonth() + 1) + ' ' +
+    checklistPad2(d.getHours()) + ':' + checklistPad2(d.getMinutes());
+}
+
+/* Клетките на обекта, които искат становище: стойност „не" (същото четене
+   като писмото — control бие portal), без числовите колони. */
+function checklistResponseItems(idx) {
+  var out = [];
+  checklistStores.forEach(function (store, si) {
+    checklistMetrics.forEach(function (m, mi) {
+      if (m.value_type === 'number') return;
+      if (checklistEmailCellValue(m, idx[store + ' ' + m.key]) !== 'не') return;
+      out.push({ si: si, mi: mi, store: store, metric: m, key: store + ' ' + m.key });
+    });
+  });
+  return out;
+}
+
+/* Коментарите на контролинга по клетките на обекта — само като текст. */
+function checklistStoreCommentsHtml(idx) {
+  var items = [];
+  checklistStores.forEach(function (store) {
+    checklistMetrics.forEach(function (m) {
+      var row = idx[store + ' ' + m.key];
+      if (row && row.comment) items.push('<div style="margin-top:4px;"><b>' + escVal(m.label) + ':</b> ' +
+        '<span style="white-space:pre-wrap;">' + escVal(row.comment) + '</span></div>');
+    });
+  });
+  if (!items.length) return '';
+  return '<div id="cl-store-comments" style="margin-top:14px;padding:12px 14px;background:#f8fafc;' +
+    'border:1px solid #e2e8f0;border-radius:8px;font-size:13px;color:#334155;">' +
+    '<div style="font-weight:700;">Коментар на контролинга</div>' + items.join('') + '</div>';
+}
+
+function checklistResponsesBlockHtml(idx, respIdx, now) {
+  var items = checklistResponseItems(idx);
+  if (!items.length) return '';
+  var dl = checklistResponseDeadline(checklistYear, checklistWeek);
+  var late = (now || new Date()).getTime() > dl.getTime();
+  var dlText = 'до петък ' + checklistPad2(dl.getDate()) + '.' + checklistPad2(dl.getMonth() + 1) + ', 18:00';
+  var h = '<div id="cl-responses" style="margin-top:14px;padding:12px 14px;background:#fff;' +
+    'border:1px solid #fecaca;border-radius:8px;">' +
+    '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">' +
+      '<span style="font-weight:700;font-size:14px;">Становище</span>' +
+      '<span class="cl-resp-deadline" style="font-size:12px;color:#64748b;">' + dlText + '</span>' +
+      (late ? '<span class="cl-resp-late" style="font-size:11px;font-weight:700;color:#fff;background:#dc2626;' +
+        'padding:1px 8px;border-radius:10px;">след срока</span>' : '') +
+    '</div>' +
+    '<div style="font-size:12px;color:#64748b;margin:4px 0 8px;">За всяка колона с „не" — защо и какво ще направите.</div>';
+  items.forEach(function (it) {
+    var resp = respIdx[it.key];
+    h += '<div class="cl-resp-row" data-si="' + it.si + '" data-mi="' + it.mi + '" style="margin-top:10px;">' +
+      '<div style="font-weight:600;font-size:13px;margin-bottom:4px;">' + escVal(it.metric.label) + '</div>' +
+      '<textarea class="cl-resp-text" rows="3" style="width:100%;box-sizing:border-box;font-size:13px;' +
+        'padding:8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical;"></textarea>' +
+      '<div style="display:flex;align-items:center;gap:8px;margin-top:6px;">' +
+        '<button class="btn-sm cl-resp-save" data-si="' + it.si + '" data-mi="' + it.mi + '"' +
+          ' style="background:#2563eb;color:#fff;">Запази</button>' +
+        '<span class="cl-resp-saved" style="font-size:11px;color:#64748b;">' +
+          (resp && resp.updated_at ? 'записано ' + checklistFmtStamp(resp.updated_at) : '') + '</span>' +
+      '</div></div>';
+  });
+  return h + '</div>';
+}
+
+/* Текстът влиза като .value, не в HTML-а — кавички и < > нямат как да
+   излязат от <textarea>. Бутоните — addEventListener, индексите от data-*. */
+function checklistWireResponses(respIdx) {
+  var rows = document.querySelectorAll('#cl-responses .cl-resp-row');
+  for (var i = 0; i < rows.length; i++) {
+    var ctx = checklistCellCtx(rows[i]);
+    var ta = rows[i].querySelector('.cl-resp-text');
+    var resp = ctx ? respIdx[ctx.key] : null;
+    if (ta) ta.value = (resp && resp.text) || '';
+    var btn = rows[i].querySelector('.cl-resp-save');
+    if (btn) btn.addEventListener('click', checklistResponseSave);
+  }
+}
+
+var checklistResponseBusy = {};
+
+/* Провал → червен toast и текстът ОСТАВА в полето (нищо не се прерисува).
+   Успех → зелен toast, „записано ДД.ММ ЧЧ:ММ" и локалният ред се обновява —
+   пак без прерисуване, за да не изчезне незаписан текст в съседно поле. */
+function checklistResponseSave() {
+  if (!checklistStoreMode()) return;
+  var btn = this;
+  var ctx = checklistCellCtx(btn);
+  if (!ctx || checklistResponseBusy[ctx.key]) return;
+  var rowEl = btn.parentNode && btn.parentNode.parentNode;
+  var ta = rowEl ? rowEl.querySelector('.cl-resp-text') : null;
+  var txt = ta ? String(ta.value || '').trim() : '';
+  if (!txt) { toast('Напиши становище преди „Запази"', '#dc2626'); return; }
+
+  var nowIso = new Date().toISOString();
+  var body = {
+    year: checklistYear,
+    week_number: checklistWeek,
+    store_name: ctx.store,
+    metric_key: ctx.metric.key,
+    text: txt,
+    created_by: (currentUser && (currentUser.display_name || currentUser.email)) || null,
+    /* Без тригер default now() важи само при INSERT — подава се явно. */
+    updated_at: nowIso
+  };
+  checklistResponseBusy[ctx.key] = true;
+  btn.disabled = true;
+  var url = API + '/weekly_checklist_responses?on_conflict=year,week_number,store_name,metric_key';
+  fetch(url, {
+    method: 'POST',
+    headers: Object.assign({}, H, { 'Prefer': 'resolution=merge-duplicates,return=representation' }),
+    body: JSON.stringify([body])
+  }).then(function (r) {
+    return r.json().catch(function () { return null; }).then(function (d) {
+      if (!r.ok) return { ok: false, error: (d && (d.message || d.hint)) || ('HTTP ' + r.status) };
+      return { ok: true, row: (Array.isArray(d) ? d[0] : d) || null };
+    });
+  }).catch(function (e) {
+    return { ok: false, error: (e && e.message) || 'мрежов срив' };
+  }).then(function (res) {
+    checklistResponseBusy[ctx.key] = false;
+    btn.disabled = false;
+    if (!res.ok) {
+      toast('Становището не е записано: ' + res.error, '#dc2626');
+      return;
+    }
+    var saved = res.row || body;
+    var kept = checklistResponses.filter(function (x) {
+      return !(x && x.store_name === ctx.store && x.metric_key === ctx.metric.key);
+    });
+    kept.push(saved);
+    checklistResponses = kept;
+    var lbl = rowEl.querySelector('.cl-resp-saved');
+    if (lbl) lbl.textContent = 'записано ' + checklistFmtStamp(saved.updated_at || nowIso);
+    toast('Становището е записано');
+  });
+}
+
+/* ── Контролингът: 📝 → прозорче само за четене ──────────────────────────── */
+function checklistResponseIconClick(ev) {
+  /* Без това кликът се качва до клетката и завърта стойността. */
+  if (ev && ev.stopPropagation) ev.stopPropagation();
+  if (!canEditChecklist()) return;
+  var ctx = checklistCellCtx(this.parentNode);
+  if (!ctx) return;
+  var resp = checklistResponseIndex()[ctx.key];
+  if (resp) openChecklistResponseModal(ctx, resp);
+}
+
+function openChecklistResponseModal(ctx, resp) {
+  closeChecklistResponseModal();
+  var ov = document.createElement('div');
+  ov.id = 'cl-resp-ov';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;' +
+    'align-items:center;justify-content:center;z-index:9999;';
+  var who = [resp.created_by || '', checklistFmtStamp(resp.updated_at || resp.created_at)]
+    .filter(Boolean).join(' · ');
+  ov.innerHTML = '<div style="background:#fff;border-radius:10px;padding:18px;width:min(460px,92vw);">' +
+    '<div style="font-weight:700;margin-bottom:4px;">📝 Становище на обекта</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">' +
+      escVal(ctx.store) + ' · ' + escVal(ctx.metric.label) + '</div>' +
+    '<div id="cl-resp-view" style="white-space:pre-wrap;font-size:13px;padding:10px;background:#f8fafc;' +
+      'border:1px solid #e2e8f0;border-radius:6px;">' + escVal(resp.text) + '</div>' +
+    '<div style="font-size:11px;color:#64748b;margin-top:6px;">' + escVal(who) + '</div>' +
+    '<div style="display:flex;justify-content:flex-end;margin-top:12px;">' +
+      '<button id="cl-resp-close" class="btn-sm">Затвори</button>' +
+    '</div></div>';
+  document.body.appendChild(ov);
+  var c = document.getElementById('cl-resp-close');
+  if (c) c.addEventListener('click', closeChecklistResponseModal);
+}
+
+function closeChecklistResponseModal() {
+  var ov = document.getElementById('cl-resp-ov');
+  if (ov) ov.remove();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -1066,6 +1383,8 @@ function checklistWireCells() {
       td.addEventListener('click', checklistCellClick);
       var ic = td.querySelector('.cl-cmt');
       if (ic) ic.addEventListener('click', checklistCommentIconClick);
+      var ri = td.querySelector('.cl-resp');
+      if (ri) ri.addEventListener('click', checklistResponseIconClick);
     }
   }
 }

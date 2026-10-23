@@ -360,16 +360,47 @@ function cellValText(doc, store, metricKey) {
     h.close();
   }
   {
+    /* От етап 3А (23.10.2026) обектът вижда таба — само за четене и само
+       своя ред. Режимът на обекта е в checklist-store-view.test.js. */
     const h = env([], MANAGER);
     h.w.setupTabsForRole();
     const tab = h.doc.getElementById('tab-checklist');
-    ok('manager НЕ вижда таба', !!tab && tab.style.display === 'none', tab ? tab.style.display : '—');
-    ok('canSeeChecklist() = false за manager', h.w.canSeeChecklist() === false);
-
-    /* Дори да стигне до модула по друг път, съдържание няма. */
-    h.w.loadChecklist();
-    ok('модулът не рендира таблица за manager', !table(h.doc));
+    ok('manager вижда таба (режим на обекта)', !!tab && tab.style.display === 'flex', tab ? tab.style.display : '—');
+    ok('canSeeChecklist() = true за manager', h.w.canSeeChecklist() === true);
+    ok('canEditChecklist() = false за manager', h.w.canEditChecklist() === false);
+    ok('checklistStoreMode() = true за manager', h.w.checklistStoreMode() === true);
     h.close();
+  }
+  {
+    /* Логистика — глобална роля, без група controlling → без достъп. */
+    const h = env([], { id: 'u-6', email: 'log@temax.bg', role: 'logistics', store_name: 'Логистичен склад Добрич' });
+    h.w.setupTabsForRole();
+    const tab = h.doc.getElementById('tab-checklist');
+    ok('logistics НЕ вижда таба', !!tab && tab.style.display === 'none', tab ? tab.style.display : '—');
+    ok('canSeeChecklist() = false за logistics', h.w.canSeeChecklist() === false);
+    h.w.loadChecklist();
+    ok('модулът не рендира таблица за logistics', !table(h.doc));
+    h.close();
+  }
+  {
+    /* Неглобален, но на неотчетен обект (ЦО) → без достъп. */
+    const h = env([], { id: 'u-7', email: 'sup@temax.bg', role: 'supply', store_name: 'Централен офис' });
+    ok('supply в ЦО — canSeeChecklist() = false', h.w.canSeeChecklist() === false);
+    h.close();
+  }
+  {
+    /* Само управителят (решение 23.10.2026): писмото отива до manager-а и той
+       пише становището. Склад, каса и инфо на същия обект — без таба. */
+    ['sklad', 'kasa', 'info'].forEach(function (role) {
+      const h = env([], { id: 'u-' + role, email: role + '.shumen@temax.bg', role: role, store_name: 'Шумен' });
+      h.w.setupTabsForRole();
+      const tab = h.doc.getElementById('tab-checklist');
+      ok(role + ' в Шумен НЕ вижда таба', !!tab && tab.style.display === 'none' && h.w.canSeeChecklist() === false,
+         tab ? tab.style.display : '—');
+      h.w.loadChecklist();
+      ok(role + ' — модулът не рендира таблица', !table(h.doc));
+      h.close();
+    });
   }
   {
     /* notify_groups съдържа 'controlling' при роля, различна от admin.

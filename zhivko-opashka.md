@@ -14,6 +14,8 @@
 
 ## Чака изпращане
 
+- 23.10 · нова таблица weekly_checklist_responses (миграция 20261023120000_weekly_checklist_responses, в базата версия 20261023093627, приложена 23.10.2026) — id uuid PK default gen_random_uuid(), year int NOT NULL, week_number int NOT NULL, store_name text NOT NULL, metric_key text NOT NULL (→ weekly_checklist_metrics.key), text text NOT NULL, created_by text NULL, created_at timestamptz NULL default now(), updated_at timestamptz NOT NULL default now(); уникалност (year, week_number, store_name, metric_key) — за UPSERT
+
 ## Изпратено 23.10.2026
 
 - 21.10 · stock_differences.type — нова стойност 'storno' (text, без промяна в схемата)

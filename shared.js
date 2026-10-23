@@ -1769,8 +1769,9 @@ function setupTabsForRole(){
   var todayTab=document.getElementById('tab-today');
   if(todayTab)todayTab.style.display=roleCanSeeToday()?'flex':'none';
   /* Таб Чек лист — седмичният контрол на контролинга. Правилото кой го вижда
-     (admin или notify_groups съдържа 'controlling') живее в checklist.js,
-     защото там е и парсването на notify_groups. Този файл се зарежда пръв,
+     (admin, notify_groups съдържа 'controlling', а от 23.10.2026 и потребител
+     на отчетен обект — само за четене и становище) живее в checklist.js
+     (canSeeChecklist), защото там е и парсването на notify_groups. Този файл се зарежда пръв,
      затова проверката е с typeof — същият похват като initPush/initTabDrag
      в startApp(). Към момента на извикването (след логин) всички файлове
      са заредени. */
