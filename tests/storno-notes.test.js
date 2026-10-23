@@ -16,7 +16,10 @@
      ж) другите подтабове — без секцията и без бутона; броячите не смесват;
      з) поправки 23.10: запис от „Решени редове" → изгледът „Бланки"; „Сервиз Троян"
         (app_settings.report_excluded_stores) не е във формата; без поле за отговор
-        при затворено / пуснато за сторно, sdNoteSendReply отказва.
+        при затворено / пуснато за сторно, sdNoteSendReply отказва;
+     и) „Магазин" в „📝 Подай бланка" и „+ Добави ръчно" — loadReportableStores()
+        за общия списък; складът вижда своя; „Обект изпращач" пази складовете;
+        редакция на запис с изключен обект пази стойността.
 
    Мутационна проверка (23.10.2026) — exit 1 при всички освен M6:
      M1 магазинът вижда чуждия обект (sdNoteVisible → true)        → 3 ❌
@@ -36,6 +39,12 @@
      F2 списъкът „Обект" пак от users (със „Сервиз Троян")        → 2 ❌
      F3a поле за отговор и при затворено / пуснато                 → 3 ❌
      F3b sdNoteSendReply без отказ за приключено                   → 1 ❌
+   „Магазин" в двете форми (и) — и петте падат с exit 1:
+     S1 „Подай бланка" пак от users (ЦО махнат, останалите — не)   → 1 ❌
+     S2 „+ Добави ръчно" пак от users                              → 2 ❌
+     S3 редакцията губи изключения обект                           → 1 ❌
+     S4 складът получава общия списък                              → 1 ❌
+     S5 „Обект изпращач" (interstore) без складовете               → 1 ❌
 
    Пускане:  node tests/storno-notes.test.js .
 */
@@ -374,6 +383,53 @@ async function reply(h, id, text) {
     ok('пуснато за сторно: старият отговор се вижда', !!cs && cs.textContent.indexOf('СТАР ОТГОВОР') >= 0);
     h.w.sdNoteSendReply('n-vraca'); await settle();
     ok('sdNoteSendReply за пуснато → без POST', posts(h, 'storno_note_replies').length === 0);
+    h.close();
+  }
+
+  section('и) „Магазин" в „📝 Подай бланка" и „+ Добави ръчно" — търговските обекти (решение А, 23.10)');
+  const opts = (doc, id) => { const el = doc.getElementById(id); return el && el.options ? Array.prototype.map.call(el.options, o => o.value).filter(Boolean) : []; };
+  {
+    const bad = ['Сервиз Троян', 'Логистичен склад Добрич', 'Централен офис'];
+    /* admin, „📝 Подай бланка" */
+    const h = env(CVETI, { dir: 'supplier' }); await settle();
+    realClick(h.w, btn(mod(h), '📝 Подай бланка')); await settle();
+    const so = opts(h.doc, 'diff-store');
+    ok('Подай бланка: без „Сервиз Троян", складовете и ЦО', bad.every(b => so.indexOf(b) < 0), so.join('|'));
+    ok('Подай бланка: Троян и Враца ги има', so.indexOf('Троян') >= 0 && so.indexOf('Враца') >= 0, so.join('|'));
+    /* Насрещната страна при междускладов — складовете остават. */
+    const dir = h.doc.getElementById('diff-direction');
+    dir.value = 'interstore'; h.w.updateDiffCounterpartLabel(); await settle();
+    const cp = opts(h.doc, 'diff-counterpart');
+    ok('„Обект изпращач" (interstore) — и двата склада', cp.indexOf('Логистичен склад Добрич') >= 0 && cp.indexOf('Логистичен склад Търговище') >= 0, cp.join('|'));
+    h.w.closeDiffSubmitModal();
+    /* admin, „+ Добави ръчно" (нов запис) */
+    realClick(h.w, btn(mod(h), '+ Добави ръчно')); await settle();
+    const mo = opts(h.doc, 'sd-store');
+    ok('Добави ръчно: без „Сервиз Троян", складовете и ЦО', mo.length > 0 && bad.every(b => mo.indexOf(b) < 0), mo.join('|'));
+    h.w.closeSDModal();
+    h.close();
+  }
+  {
+    /* Редакция на запис с изключен обект — стойността се пази. */
+    const h = env(CVETI, { dir: 'supplier', view: 'rows' }); await settle();
+    h.w.sdData = [{ id: 'l-svc', report_id: null, store_name: 'Сервиз Троян', supplier: 'ТЕСИ ООД', material_code: '1', material_name: 'РЕД НА СЕРВИЗА',
+      quantity: 1, type: 'writein', status: 'pending', attachments: [], created_at: '2026-10-20T08:00:00Z' }];
+    h.w.sdFilter = 'all'; h.w.renderStockDiff();
+    const eb = Array.prototype.find.call(mod(h).querySelectorAll('button[data-id="l-svc"]'), b => /openSDModal/.test(b.getAttribute('onclick') || ''));
+    if (ok('редакция: бутонът ✏️ на реда', !!eb)) {
+      realClick(h.w, eb); await settle();
+      const el = h.doc.getElementById('sd-store');
+      ok('редакция: стойността „Сервиз Троян" е запазена', !!el && el.value === 'Сервиз Троян', el && el.value);
+      ok('редакция: само като текущата, складовете пак ги няма', opts(h.doc, 'sd-store').indexOf('Логистичен склад Добрич') < 0);
+    }
+    h.close();
+  }
+  {
+    /* Логистичен склад: собственият обект, не общият списък. */
+    const h = env(WH, { dir: 'supplier' }); await settle();
+    realClick(h.w, btn(mod(h), '📝 Подай бланка')); await settle();
+    const el = h.doc.getElementById('diff-store');
+    ok('склад: „Магазин" е собственият склад', !!el && el.value === 'Логистичен склад Търговище', el && (el.tagName + ':' + el.value));
     h.close();
   }
 

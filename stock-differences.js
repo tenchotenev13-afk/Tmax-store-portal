@@ -2272,19 +2272,9 @@ function openSDModal(id) {
     } else if (myStores && myStores.length > 1) {
       storeEl.innerHTML = '<option value="">-- Избери --</option>'+myStores.map(function(s){return '<option>'+esc(s)+'</option>';}).join('');
     } else {
-      sbGet('users','select=store_name&order=store_name').then(function(data){
-        var el = document.getElementById('sd-store');
-        if(Array.isArray(data)&&el){
-          var seen={};
-          el.innerHTML='<option value="">-- Избери --</option>'+data.filter(function(u){
-            if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
-            seen[u.store_name]=1;return true;
-          }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
-          /* Избери текущия магазин при редактиране */
-          var cur = sdEditId ? (sdData.find(function(x){return x.id===sdEditId;}))||{} : {};
-          if(cur.store_name) el.value = cur.store_name;
-        }
-      });
+      /* Избери текущия магазин при редактиране - и когато е извън списъка. */
+      var cur = sdEditId ? (sdData.find(function(x){return x.id===sdEditId;}))||{} : {};
+      sdFillReportableStores('sd-store', cur.store_name);
     }
   }
     ov.classList.add('open');
@@ -4265,18 +4255,24 @@ function openDiffSubmitModal(prefill){
 
   var myStores=assignedStores();
   if(!(myStores&&myStores.length)){
-    sbGet('users','select=store_name&order=store_name').then(function(data){
-      var el=document.getElementById('diff-store');
-      if(Array.isArray(data)&&el){
-        var seen={};
-        el.innerHTML='<option value="">-- Избери --</option>'+data.filter(function(u){
-          if(!u.store_name||u.store_name==='Централен офис'||seen[u.store_name])return false;
-          seen[u.store_name]=1;return true;
-        }).map(function(u){return '<option>'+esc(u.store_name)+'</option>';}).join('');
-        if(prefill && prefill.store_name) el.value=prefill.store_name;
-      }
-    });
+    sdFillReportableStores('diff-store', prefill && prefill.store_name);
   }
+}
+/* Общият списък „Магазин" (глобален профил без разпределени обекти) за
+   „📝 Подай бланка" и „+ Добави ръчно": loadReportableStores() = обектите с
+   акаунт минус app_settings.report_excluded_stores (ЦО, двата склада,
+   Пазарджик, Сервиз Троян) - решение на Тенчо, 23.10.2026 (А). Профил със
+   собствен / разпределени обекти не минава оттук. Текущата стойност (редакция,
+   prefill) извън списъка се добавя като опция - не се губи при „Запази". */
+function sdFillReportableStores(selId, current){
+  loadReportableStores().then(function(list){
+    var el = document.getElementById(selId);
+    if(!el || !Array.isArray(list)) return;
+    var opts = list.slice();
+    if(current && opts.indexOf(current) < 0) opts.push(current);
+    el.innerHTML = '<option value="">-- Избери --</option>'+opts.map(function(s){ return '<option>'+esc(s)+'</option>'; }).join('');
+    if(current) el.value = current;
+  });
 }
 function closeDiffSubmitModal(){
   var ov=document.getElementById('diff-submit-ov'); if(ov)ov.remove();
