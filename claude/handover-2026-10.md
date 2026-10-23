@@ -827,7 +827,8 @@ scan скрит през `app_settings.loading_scan`), „Опис на пале
 35dfef7); 5-те нови колони са ръчни, връзка с Бюлетина — по-късно.
 22.10 (сесия checklist-portal-columns): srok_godnost, razliki_dostavka и
 zanulyavane_lm се пълнят от постоянните задачи на Бюлетина (миграция
-`20261022120000_weekly_checklist_portal_columns`); „Стока за връщане" брои
+`20261022120000_weekly_checklist_portal_columns`, приложена 23.10, версия в
+базата `20261023080810`; код `24f6f2f`); „Стока за връщане" брои
 само stock_returns source='diff'. Ръчни остават razhodi и dogovoreni_returi.
 Сверка от Миглена — `claude/open/22-10-checklist-columns-live.md`.
 
