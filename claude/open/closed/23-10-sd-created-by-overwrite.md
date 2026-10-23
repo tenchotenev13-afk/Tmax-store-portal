@@ -1,5 +1,6 @@
 Отворено: 23.10 · Кой чака: Тенчо · Сесия: sr-created-by
 Затворено: 23.10 · Как: решение на Тенчо 23.10 — created_by само при нов ред (submitSD); комитът с claude/log/2026-10-23-sd-created-by.md, тест tests/sd-created-by.test.js; заварените редове не се поправят
+Данни: 23.10 — update на 290 реда (created_by = submitted_by), rollback в stock-diff-created-by-fix.sql, сесия razliki-created-by
 
 „Разлики": `stock_differences.created_by` се презаписва при редакция — същият
 клас грешка като поправения в „За връщане" (`submitSR`, 23.10.2026).

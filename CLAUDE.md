@@ -92,8 +92,9 @@ Netlify се ползва само за тестване/staging.
 - `stock-differences.js` — „Разлики": `stock_differences.created_by` се пише
   САМО при създаване на ред (подаване на бланка, „Добави" в модала);
   редакцията през ✏️ (`submitSD`) не го праща (23.10.2026). Заварените редове
-  (290 от 1721 на 23.10, различни от `differences_reports.submitted_by`) не
-  са поправяни.
+  (290 от 1721, различни от `differences_reports.submitted_by`) са поправени
+  на 23.10.2026: `created_by = submitted_by`, rollback в
+  `stock-diff-created-by-fix.sql`.
 - `handbook.js` + `docs.js` — обединени в 1 таб (под-навигация в `showModule()`)
 - `history.js`, `contacts.js`, `transit.js`, `calendar.js`,
   `push.js`, `email.js`, `notifications.js`, `report.js`
