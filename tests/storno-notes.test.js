@@ -13,7 +13,10 @@
          с бланката, червеното за артикулите излиза последно;
      д) „Затвори" → closed + closed_by/at; затвореното е зад чипа „Затворени";
      е) ЦО само за преглед — вижда, без <button> в картите; логистичен склад — нищо;
-     ж) другите подтабове — без секцията и без бутона; броячите не смесват.
+     ж) другите подтабове — без секцията и без бутона; броячите не смесват;
+     з) поправки 23.10: запис от „Решени редове" → изгледът „Бланки"; „Сервиз Троян"
+        (app_settings.report_excluded_stores) не е във формата; без поле за отговор
+        при затворено / пуснато за сторно, sdNoteSendReply отказва.
 
    Мутационна проверка (23.10.2026) — exit 1 при всички освен M6:
      M1 магазинът вижда чуждия обект (sdNoteVisible → true)        → 3 ❌
@@ -28,6 +31,11 @@
      M11 частичен запис: „✅" вместо червеното за артикулите        → 2 ❌
      M6 (махната проверка sdIsCOViewer в sdNoteCanAct) ОЦЕЛЯВА —
         еквивалентен: ЦО само за преглед отпада и през canSubmitDiff().
+   Поправки 23.10 (з) — и четирите падат с exit 1:
+     F1 без превключване на изгледа след запис                    → 3 ❌
+     F2 списъкът „Обект" пак от users (със „Сервиз Троян")        → 2 ❌
+     F3a поле за отговор и при затворено / пуснато                 → 3 ❌
+     F3b sdNoteSendReply без отказ за приключено                   → 1 ❌
 
    Пускане:  node tests/storno-notes.test.js .
 */
@@ -94,12 +102,17 @@ function env(user, opts) {
       storno_note_replies: () => REPLIES,
       differences_reports: url => byStore(reps(), url),
       stock_differences: [], stock_returns: [], transport_orders: [], stock_diff_swaps: [],
-      users: [{ store_name: 'Троян' }, { store_name: 'Враца' }, { store_name: 'Централен офис' }],
+      /* „Сервиз Троян" има акаунт (от 23.10.2026), но е в
+         app_settings.report_excluded_stores — признакът от базата. */
+      users: [{ store_name: 'Троян' }, { store_name: 'Враца' }, { store_name: 'Централен офис' },
+              { store_name: 'Сервиз Троян' }, { store_name: 'Логистичен склад Добрич' }],
+      app_settings: [{ key: 'report_excluded_stores', value: JSON.stringify(['Централен офис', 'Логистичен склад Добрич',
+        'Логистичен склад Търговище', 'Пазарджик', 'Сервиз Троян']) }],
       contacts: [], stores: []
     }
   });
   h.w.transportOrders = [];
-  h.w.sdView = 'reports';
+  h.w.sdView = opts.view || 'reports';
   h.w.sdFilter = 'all'; h.w.sdTypeFilter = 'all'; h.w.sdStoreFilter = ''; h.w.sdSearch = '';
   h.w.sdDirTab = opts.dir || 'wrong_receipt';
   h.w.loadAllSuppliers = () => Promise.resolve(['ТЕСИ ООД', 'КАМ-04']);
@@ -315,6 +328,52 @@ async function reply(h, id, text) {
     ok('подтабът брои редове, не съобщения (0)', !!tab && /\(0\)/.test(tab.textContent) && !/🆕/.test(tab.textContent), tab && tab.textContent);
     const sw = mod(h).querySelector('button[data-sd-view="reports"]');
     ok('„Бланки за преглед (0)" — съобщенията не се броят', !!sw && /\(0\)/.test(sw.textContent), sw && sw.textContent);
+    h.close();
+  }
+
+  section('з) Поправки 23.10: изглед след запис, „Сервиз Троян", поле за отговор само на отворено');
+  {
+    /* 1. Запис от „Решени редове" → изгледът става „Бланки за преглед" и секцията е там. */
+    const h = env(CVETI, { view: 'rows' }); await settle();
+    ok('преди: изгледът е rows и секцията я няма', h.w.sdView === 'rows' && !h.doc.getElementById('sd-notes'));
+    realClick(h.w, btn(mod(h), '✍️ Счетоводител')); await settle();
+    /* 2. admin с празен assigned_stores → търговските обекти по признака. */
+    const sel = h.doc.getElementById('sd-note-store');
+    const opts = sel ? Array.prototype.map.call(sel.options, o => o.value).filter(Boolean) : [];
+    ok('„Сервиз Троян" го няма в списъка', opts.indexOf('Сервиз Троян') < 0, opts.join('|'));
+    ok('ЦО и складът ги няма; Троян и Враца ги има', opts.indexOf('Централен офис') < 0 && opts.indexOf('Логистичен склад Добрич') < 0 &&
+      opts.indexOf('Троян') >= 0 && opts.indexOf('Враца') >= 0, opts.join('|'));
+    sel.value = 'Враца';
+    h.doc.getElementById('sd-note-body').value = 'от решени редове';
+    realClick(h.w, btn(h.doc.getElementById('sd-note-ov'), 'Запиши')); await settle();
+    ok('POST storno_notes', posts(h, 'storno_notes').length === 1, h.calls.toast.join(' | '));
+    ok('след запис: sdView = reports', h.w.sdView === 'reports', h.w.sdView);
+    ok('след запис: #sd-notes е в DOM с новото съобщение', !!h.doc.getElementById('sd-notes') &&
+      h.doc.getElementById('sd-notes').textContent.indexOf('от решени редове') >= 0);
+    ok('скролва до секцията', h.calls.scrollIntoView.some(x => x.id === 'sd-notes'), JSON.stringify(h.calls.scrollIntoView));
+    h.close();
+  }
+  {
+    /* 3. Пуснато за сторно и затворено — без поле, без „📎 Прикачи", без „Изпрати". */
+    const h = env(CVETI); await settle();
+    ok('отвореното има поле и „Изпрати"', !!card(h, 'n-troyan').querySelector('textarea') && !!btn(card(h, 'n-troyan'), 'Изпрати'));
+    realClick(h.w, h.doc.getElementById('sd-notes-closed-chip'));
+    const c = card(h, 'n-old');
+    ok('затворено: без <textarea>, „Изпрати" и „📎 Прикачи"', !!c && !c.querySelector('textarea') && !btn(c, 'Изпрати') &&
+      !c.querySelector('input[type=file]') && c.textContent.indexOf('Прикачи') < 0, c && c.innerHTML.slice(-300));
+    h.w.sdNoteSendReply('n-old'); await settle();
+    ok('sdNoteSendReply за затворено → без POST', posts(h, 'storno_note_replies').length === 0);
+    ok('… и toast за отказ', h.calls.toast.some(t => /приключено/.test(t)), h.calls.toast.join(' | '));
+    /* пуснато за сторно */
+    const n = h.w.sdNotes.find(x => x.id === 'n-vraca');
+    n.status = 'storno'; n.report_id = 'rep-x';
+    h.w.sdNoteReplies.push({ id: 'rp-v', note_id: 'n-vraca', body: 'СТАР ОТГОВОР', files: [], side: 'co', created_by: 'Цветелина Тенева', created_at: '2026-10-23T10:00:00Z' });
+    h.w.renderStockDiff();
+    const cs = card(h, 'n-vraca');
+    ok('пуснато за сторно: без <textarea> и „Изпрати"', !!cs && !cs.querySelector('textarea') && !btn(cs, 'Изпрати'));
+    ok('пуснато за сторно: старият отговор се вижда', !!cs && cs.textContent.indexOf('СТАР ОТГОВОР') >= 0);
+    h.w.sdNoteSendReply('n-vraca'); await settle();
+    ok('sdNoteSendReply за пуснато → без POST', posts(h, 'storno_note_replies').length === 0);
     h.close();
   }
 

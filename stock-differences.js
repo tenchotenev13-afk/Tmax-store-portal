@@ -4441,7 +4441,9 @@ function sdNoteCardHtml(n){
         '<div style="font-size:12.5px;white-space:pre-wrap;">'+esc(r.body)+'</div>'+sdNoteFilesHtml(r.files)+'</div>';
     }).join('')+'</div>';
   }
-  if(act){
+  /* Отговор, прикачване и действия - само на ОТВОРЕНО съобщение (23.10.2026);
+     при пуснато за сторно и затворено старите отговори само се четат. */
+  if(act && isOpen){
     var k = String(n.id);
     h += '<div style="margin-top:8px;">'+
       '<textarea class="fi" id="sd-note-reply-'+escAttr(k)+'" rows="2" placeholder="Отговори..." style="margin-bottom:4px;"></textarea>'+
@@ -4449,8 +4451,8 @@ function sdNoteCardHtml(n){
         '<label style="font-size:11.5px;color:#475569;cursor:pointer;border:1px solid #e2e8f0;border-radius:6px;padding:3px 8px;">📎 Прикачи<input type="file" multiple style="display:none;" data-k="'+escAttr(k)+'" onchange="sdNoteUploadFile(this,this.dataset.k)"></label>'+
         '<span id="sd-note-files-'+escAttr(k)+'">'+sdNotePendingHtml(k)+'</span>'+
         '<button data-nid="'+escAttr(k)+'" onclick="sdNoteSendReply(this.dataset.nid)" style="border:none;background:#0f766e;color:#fff;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">Изпрати</button>'+
-        (isOpen ? '<button data-nid="'+escAttr(k)+'" onclick="sdNoteMakeStorno(this.dataset.nid)" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">🧾 Направи сторно</button>'+
-                  '<button data-nid="'+escAttr(k)+'" onclick="sdNoteClose(this.dataset.nid)" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">✓ Затвори</button>' : '')+
+        '<button data-nid="'+escAttr(k)+'" onclick="sdNoteMakeStorno(this.dataset.nid)" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">🧾 Направи сторно</button>'+
+        '<button data-nid="'+escAttr(k)+'" onclick="sdNoteClose(this.dataset.nid)" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:6px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;">✓ Затвори</button>'+
       '</div></div>';
   }
   return h + '</div>';
@@ -4519,16 +4521,15 @@ function openSDNoteModal(){
     var dl = document.getElementById('sd-note-suppliers');
     if(dl) dl.innerHTML = list.map(function(n){ return '<option value="'+escAttr(n)+'">'; }).join('');
   });
-  /* Празен списък на глобален профил = всички обекти, както в openDiffSubmitModal. */
+  /* Празен списък на глобален профил = всички ТЪРГОВСКИ обекти: loadReportableStores()
+     = обектите с акаунт минус app_settings.report_excluded_stores (ЦО, двата
+     склада, Пазарджик, Сервиз Троян - признакът в базата, не името). От
+     23.10.2026 „Сервиз Троян" има акаунт и излизаше в списъка. */
   if(!myS){
-    sbGet('users','select=store_name&order=store_name').then(function(data){
+    loadReportableStores().then(function(list){
       var el = document.getElementById('sd-note-store');
-      if(!Array.isArray(data) || !el) return;
-      var seen = {};
-      el.innerHTML = '<option value="">-- Избери --</option>'+data.filter(function(u){
-        if(!u.store_name || isCentralOffice(u.store_name) || LOGISTICS_WAREHOUSES.indexOf(u.store_name)>=0 || seen[u.store_name]) return false;
-        seen[u.store_name] = 1; return true;
-      }).map(function(u){ return '<option>'+esc(u.store_name)+'</option>'; }).join('');
+      if(!Array.isArray(list) || !el) return;
+      el.innerHTML = '<option value="">-- Избери --</option>'+list.map(function(s){ return '<option>'+esc(s)+'</option>'; }).join('');
     });
   }
 }
@@ -4558,7 +4559,12 @@ function sdNoteSubmit(){
     sdNotes.unshift(Object.assign({}, data, res.row || {}));
     closeSDNoteModal();
     toast('✅ Съобщението е записано');
+    /* Секцията е само в изгледа „Бланки за преглед" - записано от „Решени
+       редове", съобщението иначе не се вижда никъде (на живо, 23.10.2026). */
+    if(sdView !== 'reports'){ sdView = 'reports'; sdViewSave('reports'); }
     renderStockDiff();
+    var sec = document.getElementById('sd-notes');
+    if(sec && sec.scrollIntoView) sec.scrollIntoView({block:'start'});
   });
 }
 
@@ -4566,6 +4572,8 @@ function sdNoteSubmit(){
 function sdNoteSendReply(id){
   var n = sdNoteFind(id);
   if(!n || !sdNoteCanAct(n)){ toast('Нямаш право да отговаряш тук','#dc2626'); return; }
+  /* Двойна защита: полето го няма на затворено/пуснато, но извикване отвън - също не. */
+  if(n.status !== 'open'){ toast('Съобщението е приключено — отговор не се приема','#dc2626'); return; }
   var ta = document.getElementById('sd-note-reply-'+id);
   var body = ((ta && ta.value)||'').trim();
   if(!body){ toast('Напиши отговор','#dc2626'); return; }
