@@ -1724,8 +1724,130 @@ function checklistEmailCommentsHtml(rows, metrics, stores) {
     '</table></div>';
 }
 
-/* Готовото писмо за една седмица. */
-function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, note) {
+/* ═══ ПОРЕДНИ СЕДМИЦИ С „НЕ" (етап 3Б, 23.10.2026) ═══════════════════════
+   ЕДНО правило на три места: checklistNoStreak тук, reportChecklistNoStreak
+   в report.js и в send-scheduled-report/index.ts — едно и също тяло, само
+   имената на помощниците се различават (заковано в checklist-streak.test.js).
+   Поредицата = броят поредни седмици, завършващи с дадената, в които
+   клетката (правилото на checklistEmailCellValue) е „не". Назад се върви по
+   РЕАЛНИ дати (понеделник − 7 дни, ISO година), не week − 1 — иначе седмица 1
+   никога не стига до 52/53 на предходната година. Седмица без ред или с
+   друга стойност прекъсва: липсващ ред НЕ е „не" (weekly_checklist пази ред
+   само ако някой е отворил седмицата или е отметнал). Най-много 8 → „8+".
+   Числовите колони не влизат (прагът за тях е етап 3В). */
+var CHECKLIST_STREAK_MAX = 8;
+
+/* Понеделникът на ISO седмица (year, week) — местна полунощ. */
+function checklistIsoWeekMonday(year, week) {
+  var j4 = new Date(year, 0, 4);
+  return new Date(year, 0, 4 - ((j4.getDay() + 6) % 7) + 7 * (week - 1));
+}
+
+/* ISO година и седмица на дата — по четвъртъка на седмицата ѝ. */
+function checklistIsoWeekOf(d) {
+  var th = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  var y = th.getFullYear();
+  var doy = Math.round((th.getTime() - new Date(y, 0, 1).getTime()) / 86400000);
+  return { year: y, week: Math.floor(doy / 7) + 1 };
+}
+
+/* Предходната ISO седмица — през датата на понеделника. */
+function checklistPrevIsoWeek(year, week) {
+  var mon = checklistIsoWeekMonday(year, week);
+  return checklistIsoWeekOf(new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() - 7));
+}
+
+function checklistNoStreak(rows, metric, store, year, week) {
+  if (!metric || metric.value_type === 'number') return 0;
+  var idx = {};
+  (rows || []).forEach(function (r) {
+    if (r) idx[r.store_name + '|' + r.metric_key + '|' + Number(r.year) + '|' + Number(r.week_number)] = r;
+  });
+  var n = 0, cur = { year: year, week: week };
+  while (n < CHECKLIST_STREAK_MAX) {
+    var row = idx[store + '|' + metric.key + '|' + cur.year + '|' + cur.week];
+    if (checklistEmailCellValue(metric, row) !== 'не') break;
+    n++;
+    cur = checklistPrevIsoWeek(cur.year, cur.week);
+  }
+  return n;
+}
+
+/* „нова" / „2-ра седмица подред" / „3-та …" / „8+ седмици подред". */
+function checklistStreakLabel(n) {
+  if (n >= CHECKLIST_STREAK_MAX) return CHECKLIST_STREAK_MAX + '+ седмици подред';
+  if (n <= 1) return 'нова';
+  var suf = n === 2 ? 'ра' : (n === 7 || n === 8) ? 'ма' : 'та';
+  return n + '-' + suf + ' седмица подред';
+}
+
+/* Седмиците ПРЕДИ (year, week), най-новата първа — за заявката на историята. */
+function checklistPrevWeeks(year, week, count) {
+  var out = [], cur = { year: year, week: week };
+  for (var i = 0; i < count; i++) {
+    cur = checklistPrevIsoWeek(cur.year, cur.week);
+    out.push(cur);
+  }
+  return out;
+}
+
+/* „Изисква становище" — ред на клетка „не" (без числовите), по обект и
+   вътре по показател. Поредица 3+ е оцветена. Ако и предходната седмица е
+   „не" и обектът е писал становище за нея — то се цитира. Нула „не" →
+   секцията отпада. Само inline стилове, без class и без линкове — като
+   останалото писмо. */
+function checklistEmailResponsesHtml(year, weekNumber, rows, metrics, stores, extra) {
+  var history = (extra && Array.isArray(extra.history)) ? extra.history : [];
+  var prevResp = (extra && Array.isArray(extra.prevResponses)) ? extra.prevResponses : [];
+  var all = rows.concat(history);
+  var idx = {};
+  rows.forEach(function (r) { idx[r.store_name + ' ' + r.metric_key] = r; });
+  var prev = checklistPrevIsoWeek(year, weekNumber);
+  var respIdx = {};
+  prevResp.forEach(function (r) {
+    if (r && Number(r.year) === prev.year && Number(r.week_number) === prev.week) {
+      respIdx[r.store_name + ' ' + r.metric_key] = r;
+    }
+  });
+
+  var items = [];
+  stores.forEach(function (store) {
+    metrics.forEach(function (m) {
+      if (m.value_type === 'number') return;
+      if (checklistEmailCellValue(m, idx[store + ' ' + m.key]) !== 'не') return;
+      var n = checklistNoStreak(all, m, store, year, weekNumber);
+      var resp = n >= 2 ? respIdx[store + ' ' + m.key] : null;
+      items.push({ store: store, metric: m, n: n, resp: resp && resp.text ? resp : null });
+    });
+  });
+  if (!items.length) return '';
+
+  var dl = checklistResponseDeadline(year, weekNumber);
+  var dlText = checklistPad2(dl.getDate()) + '.' + checklistPad2(dl.getMonth() + 1);
+  return '<div style="margin-top:18px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.4px;margin-bottom:8px;">Изисква становище</div>' +
+    '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;">' +
+    items.map(function (it) {
+      var hot = it.n >= 3;
+      return '<tr><td style="padding:7px 10px;border-bottom:1px solid #E5E9F0;font-size:12px;' +
+        (hot ? 'background:#FEF2F2;color:#991B1B;' : 'color:#334155;') + '">' +
+        '<b>' + escVal(it.store) + '</b> · ' + escVal(it.metric.label) + ' · ' + escVal(checklistStreakLabel(it.n)) +
+        (it.resp ? '<div style="margin-top:3px;font-size:11px;color:#475569;">становище за седм. ' + prev.week + ': ' +
+          escVal(it.resp.text) + '</div>' : '') +
+        '</td></tr>';
+    }).join('') +
+    '</table>' +
+    '<div style="margin-top:6px;font-size:12px;color:#334155;">Обектите с „не" пишат становище в портала, таб „Чек лист", до петък ' +
+      dlText + ', 18:00.</div>' +
+    '</div>';
+}
+
+/* Готовото писмо за една седмица.
+   extra (етап 3Б, незадължителен): { history, prevResponses } — редовете от
+   седмиците преди показаната (за поредиците) и становищата за предходната.
+   Липсва ли → секцията „Изисква становище" пак се строи, с поредица само от
+   показаната седмица. */
+function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, note, extra) {
   rows = Array.isArray(rows) ? rows : [];
   metrics = Array.isArray(metrics) ? metrics : [];
   stores = Array.isArray(stores) ? stores : [];
@@ -1765,6 +1887,7 @@ function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, no
   });
   body += '</tbody></table>';
 
+  body += checklistEmailResponsesHtml(year, weekNumber, rows, metrics, stores, extra);
   body += checklistEmailCommentsHtml(rows, metrics, stores);
   body += checklistLegendHtml();
 
@@ -1921,6 +2044,30 @@ function closeChecklistSendModal() {
   if (ov) ov.remove();
 }
 
+/* За секцията „Изисква становище" (етап 3Б): редовете от 7-те седмици преди
+   показаната (поредиците) и становищата за предходната. На страници —
+   7 седмици × 18 обекта × 12 колони минават 1000 реда. Провал на която и да
+   е → [] за нея: писмото тръгва, само поредицата е по-къса или без цитат. */
+var CHECKLIST_HISTORY_WEEKS = 7;
+function checklistLoadEmailExtra(year, week) {
+  var weeks = checklistPrevWeeks(year, week, CHECKLIST_HISTORY_WEEKS);
+  var orQ = 'or=(' + weeks.map(function (w) {
+    return 'and(year.eq.' + w.year + ',week_number.eq.' + w.week + ')';
+  }).join(',') + ')';
+  var prev = weeks[0];
+  return Promise.all([
+    checklistGetAll('weekly_checklist',
+      orQ + '&select=id,year,week_number,store_name,metric_key,portal_value,control_value,control_num')
+      .catch(function () { return []; }),
+    Promise.resolve(sbGet('weekly_checklist_responses',
+      'year=eq.' + prev.year + '&week_number=eq.' + prev.week +
+      '&select=year,week_number,store_name,metric_key,text,updated_at', true))
+      .catch(function () { return []; })
+  ]).then(function (r) {
+    return { history: Array.isArray(r[0]) ? r[0] : [], prevResponses: Array.isArray(r[1]) ? r[1] : [] };
+  });
+}
+
 /* Номерът на версията се чете ПАК тук, не от заредения при отваряне на таба
    ред: между двете може да е минал половин ден и друг да е пратил. Иначе
    вторият изпращач получава 409 от уникалността (year, week_number, version)
@@ -1950,9 +2097,10 @@ function submitChecklistSend() {
   checklistSendBusy = true;
   renderChecklist();
 
-  checklistNextVersion().then(function (version) {
+  Promise.all([checklistNextVersion(), checklistLoadEmailExtra(checklistYear, checklistWeek)]).then(function (pre) {
+    var version = pre[0];
     var html = checklistEmailHtml(checklistYear, checklistWeek, version,
-      checklistRows, checklistMetrics, checklistStores, note || null);
+      checklistRows, checklistMetrics, checklistStores, note || null, pre[1]);
     var subject = checklistSendSubject(version);
 
     /* ПО ЕДНО ПИСМО НА ПОЛУЧАТЕЛ, не едно с всички адреси в „До".

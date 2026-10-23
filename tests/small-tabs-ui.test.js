@@ -80,6 +80,13 @@ async function snapshot() {
   out.palletsExcelStore = xm.written;
   const c = env(ADMIN);
   out.checklistEmail = c.w.checklistEmailHtml(2026, 41, 1, clone(CROWS), clone(METRICS), STORES.slice(), 'бележка');
+  /* От 23.10.2026 (чек лист, етап 3Б) писмото има и секция „Изисква
+     становище" — пази се в checklist-3b-email.test.js; тук се изрязва точно
+     веднъж, за да остане снимката за всичко останало. */
+  if (c.w.checklistEmailResponsesHtml) {
+    const sec = c.w.checklistEmailResponsesHtml(2026, 41, clone(CROWS), clone(METRICS), STORES.slice());
+    if (sec) out.checklistEmail = out.checklistEmail.split(sec).length === 2 ? out.checklistEmail.replace(sec, '') : 'СЕКЦИЯТА НЕ Е ТОЧНО ВЕДНЪЖ';
+  }
   out.checklistEmailNoNote = c.w.checklistEmailHtml(2026, 41, 2, [], clone(METRICS), STORES.slice(), null);
   out.checklistLegend = c.w.checklistLegendHtml();
   return out;

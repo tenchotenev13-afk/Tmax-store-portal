@@ -241,7 +241,12 @@ function withoutSection(html, sec) {
        ОСТАНАЛОТО около сторната, новата секция се пази в
        transfers-stale.test.js. */
     const ts = h.w.reportTransfersStaleHtml ? h.w.reportTransfersStaleHtml(data.cross) : '';
-    const rest0 = ts ? withoutSection(withoutSection(html, sec), ts) : withoutSection(html, sec);
+    let rest0 = ts ? withoutSection(withoutSection(html, sec), ts) : withoutSection(html, sec);
+    /* От 23.10.2026 (чек лист, етап 3Б) — и блокът „Чек лист — становища за
+       седмица M" след таблицата на чек листа. Пази се в
+       checklist-3b-report.test.js; тук се изрязва, по същия начин. */
+    const clr = h.w.reportChecklistResponsesHtml ? h.w.reportChecklistResponsesHtml(data.cross) : '';
+    if (clr && rest0) rest0 = withoutSection(rest0, clr);
     const before0 = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
     ok('фикстурата отпреди промяната я има', !!before0);
     const before = withoutDiffStale(before0);

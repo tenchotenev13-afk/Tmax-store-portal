@@ -165,9 +165,11 @@ function grid(h, html) {
   {
     const h = env();
     await weekly(h, SCOPE);
-    const qRows = h.calls.get.filter(u => u.indexOf('/weekly_checklist?') >= 0);
+    /* От етап 3Б (v57) има и втора заявка — историята за поредиците (or=…),
+       заключена в checklist-3b-report.test.js. Тук — само тази за таблицата. */
+    const qRows = h.calls.get.filter(u => u.indexOf('/weekly_checklist?') >= 0 && u.indexOf('/weekly_checklist?or=') < 0);
     const qMet = h.calls.get.filter(u => u.indexOf('/weekly_checklist_metrics') >= 0);
-    ok('една заявка към weekly_checklist', qRows.length === 1, qRows.join(' | '));
+    ok('една заявка към weekly_checklist за таблицата', qRows.length === 1, qRows.join(' | '));
     ok('за year=2026 и week_number=37 (неделя 13.09 21:00 → текущата)',
       qRows.length === 1 && qRows[0].indexOf('year=eq.2026') >= 0 && qRows[0].indexOf('week_number=eq.37') >= 0, qRows[0]);
     ok('една заявка към weekly_checklist_metrics, active=eq.true и order=sort_order',

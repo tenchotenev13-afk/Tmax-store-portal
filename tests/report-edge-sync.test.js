@@ -101,6 +101,11 @@ const SHARED_FNS = [
   'reportTransferAge', 'reportTransferUnits', 'reportTransferOpenStates', 'reportTransferStale',
   'reportTransferStaleDays', 'reportTransfersStaleHtml',
   'reportChecklistCellValue', 'reportChecklistSectionHtml',
+  /* Чек лист, етап 3Б (v57): поредни седмици с „не" и становищата за
+     предходната седмица. Разминае ли се копието, писмото брои поредиците по
+     друго правило от портала (checklistNoStreak в checklist.js). */
+  'reportChecklistIsoWeekMonday', 'reportChecklistIsoWeekOf', 'reportChecklistPrevIsoWeek',
+  'reportChecklistNoStreak', 'reportChecklistStreakLabel', 'reportChecklistResponsesHtml',
   'reportNotApplicableSectionHtml',
   'reportTransitListHtml', 'reportWarehousePendingHtml',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',

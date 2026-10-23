@@ -356,7 +356,13 @@ function withoutDiffStale(s) {
     const sec = h.w.reportTransfersStaleHtml(data.cross);
     ok('новата секция е в отчета точно веднъж', sec.length > 0 && html.split(sec).length === 2);
     const i = html.indexOf(sec);
-    const rest = withoutDiffStale(html.slice(0, i) + html.slice(i + sec.length));
+    let cut = html.slice(0, i) + html.slice(i + sec.length);
+    /* От 23.10.2026 (чек лист, етап 3Б) — блокът „Чек лист — становища за
+       седмица M" след таблицата на чек листа. Пази се в
+       checklist-3b-report.test.js; тук се изрязва (точно веднъж). */
+    const clr = h.w.reportChecklistResponsesHtml ? h.w.reportChecklistResponsesHtml(data.cross) : '';
+    if (clr) cut = cut.split(clr).length === 2 ? cut.replace(clr, '') : null;
+    const rest = cut === null ? null : withoutDiffStale(cut);
     const before0 = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
     ok('фикстурата отпреди промяната я има', !!before0);
     const before = withoutDiffStale(before0);

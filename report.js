@@ -1746,9 +1746,19 @@ function collectWeeklyReportData(cb, scope){
                седмичния колектор. Таб „Днес" вика кросмодулния колектор направо и
                секцията не се смята. Грешка → без секция, писмото тръгва. */
             if (!cross || !target) { cb(summary); return; }
+            /* Етап 3Б: становищата и поредиците са за ПРЕДХОДНАТА на отчетната
+               седмица (M) — нейният срок (петък 18:00) изтича в отчетната.
+               История: M и 7-те преди нея, на страници (над 1000 реда).
+               Провал на някоя от двете → без блока, писмото тръгва. */
+            var clPrev = reportChecklistPrevIsoWeek(target.year, target.week);
+            var clWeeks = [clPrev], clW = clPrev;
+            for (var cli = 0; cli < 7; cli++) { clW = reportChecklistPrevIsoWeek(clW.year, clW.week); clWeeks.push(clW); }
+            var clOr = 'or=(' + clWeeks.map(function(w){ return 'and(year.eq.' + w.year + ',week_number.eq.' + w.week + ')'; }).join(',') + ')';
             Promise.all([
               sbGet('weekly_checklist_metrics','active=eq.true&order=sort_order&select=key,label,value_type,sort_order,active'),
-              sbGet('weekly_checklist','year=eq.'+target.year+'&week_number=eq.'+target.week+'&select=year,week_number,store_name,metric_key,portal_value,control_value,control_num,comment,updated_at')
+              sbGet('weekly_checklist','year=eq.'+target.year+'&week_number=eq.'+target.week+'&select=year,week_number,store_name,metric_key,portal_value,control_value,control_num,comment,updated_at'),
+              reportGetAll('weekly_checklist', clOr + '&select=id,year,week_number,store_name,metric_key,portal_value,control_value,control_num&order=id'),
+              sbGetOk('weekly_checklist_responses','year=eq.'+clPrev.year+'&week_number=eq.'+clPrev.week+'&select=year,week_number,store_name,metric_key,text,created_at,updated_at')
             ]).then(function(cl){
               var clMetrics = (Array.isArray(cl[0]) ? cl[0] : []).filter(function(m){ return m && m.active === true; });
               clMetrics.sort(function(a,b){ return (a.sort_order || 0) - (b.sort_order || 0); });
@@ -1764,6 +1774,19 @@ function collectWeeklyReportData(cb, scope){
               cross.checklist = { year: target.year, week: target.week, metrics: clMetrics,
                                   stores: stores.slice(), rows: clRows,
                                   updatedAt: clLast === null ? null : new Date(clLast).toISOString() };
+              var clHist = cl[2], clResp = cl[3];
+              if (Array.isArray(clHist) && !clHist.partial && clResp && clResp.ok) {
+                var clKeys = {};
+                clWeeks.forEach(function(w){ clKeys[w.year + '|' + w.week] = 1; });
+                var clIn = function(x, w){ return Number(x.year) === w.year && Number(x.week_number) === w.week; };
+                var hist = clHist.filter(function(x){
+                  return x && clKeys[Number(x.year) + '|' + Number(x.week_number)] && stores.indexOf(x.store_name) >= 0;
+                });
+                cross.checklist.prev = { year: clPrev.year, week: clPrev.week,
+                  rows: hist.filter(function(x){ return clIn(x, clPrev); }),
+                  history: hist,
+                  responses: (clResp.rows || []).filter(function(x){ return x && clIn(x, clPrev) && stores.indexOf(x.store_name) >= 0; }) };
+              }
               cb(summary);
             }).catch(function(){ cb(summary); });
           }, wkDates ? { from: wkDates[0], to: wkDates[6] } : null, scope);
@@ -2841,6 +2864,114 @@ function reportChecklistSectionHtml(cross){
     '</div>';
 }
 
+/* ═══ ЧЕК ЛИСТ — ПОРЕДНИ СЕДМИЦИ С „НЕ" И СТАНОВИЩА (етап 3Б, 23.10.2026) ══
+   reportChecklistNoStreak е ЕДНО правило с checklistNoStreak в checklist.js
+   (същото тяло; заковано в checklist-streak.test.js): броят поредни седмици,
+   завършващи с дадената, в които клетката (reportChecklistCellValue) е „не".
+   Назад по РЕАЛНИ дати (понеделник − 7 дни, ISO година), не week − 1.
+   Липсващ ред прекъсва — не е „не". Най-много 8 → „8+". Числовите колони
+   не влизат (етап 3В). */
+function reportChecklistIsoWeekMonday(year, week){
+  var j4 = new Date(year, 0, 4);
+  return new Date(year, 0, 4 - ((j4.getDay() + 6) % 7) + 7 * (week - 1));
+}
+function reportChecklistIsoWeekOf(d){
+  var th = new Date(d.getFullYear(), d.getMonth(), d.getDate() + 3 - ((d.getDay() + 6) % 7));
+  var y = th.getFullYear();
+  var doy = Math.round((th.getTime() - new Date(y, 0, 1).getTime()) / 86400000);
+  return { year: y, week: Math.floor(doy / 7) + 1 };
+}
+function reportChecklistPrevIsoWeek(year, week){
+  var mon = reportChecklistIsoWeekMonday(year, week);
+  return reportChecklistIsoWeekOf(new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() - 7));
+}
+function reportChecklistNoStreak(rows, metric, store, year, week){
+  if (!metric || metric.value_type === 'number') return 0;
+  var idx = {};
+  (rows || []).forEach(function(r){
+    if (r) idx[r.store_name + '|' + r.metric_key + '|' + Number(r.year) + '|' + Number(r.week_number)] = r;
+  });
+  var n = 0, cur = { year: year, week: week };
+  while (n < 8) {
+    var row = idx[store + '|' + metric.key + '|' + cur.year + '|' + cur.week];
+    if (reportChecklistCellValue(metric, row) !== 'не') break;
+    n++;
+    cur = reportChecklistPrevIsoWeek(cur.year, cur.week);
+  }
+  return n;
+}
+function reportChecklistStreakLabel(n){
+  if (n >= 8) return '8+ седмици подред';
+  if (n <= 1) return 'нова';
+  var suf = n === 2 ? 'ра' : (n === 7 || n === 8) ? 'ма' : 'та';
+  return n + '-' + suf + ' седмица подред';
+}
+
+/* „Чек лист — становища за седмица M": клетките „не" от ПРЕДХОДНАТА на
+   отчетната седмица (M), за обектите на получателя. Срокът за M е петък
+   18:00 (Europe/Sofia) на отчетната седмица — в неделя вечер вече е
+   изтекъл. Ред: обект · показател · поредица · становище или „няма
+   становище" (червено) · „след срока" при updated_at след петък 18:00.
+   Първо по поредица низходящо, после по обект. Нула „не" → сив ред, НЕ
+   изчезва. Без cross.checklist.prev (таб „Днес", провалена заявка) → ''. */
+function reportChecklistResponsesHtml(cross){
+  var cl = cross && cross.checklist;
+  var p = cl && cl.prev;
+  if (!p) return '';
+  var metrics = (cl.metrics || []).filter(function(m){ return m && m.value_type !== 'number'; });
+  var stores = cl.stores || [];
+  var idx = {}, respIdx = {};
+  (p.rows || []).forEach(function(x){ idx[x.store_name + ' | ' + x.metric_key] = x; });
+  (p.responses || []).forEach(function(x){ if (x) respIdx[x.store_name + ' | ' + x.metric_key] = x; });
+  var pad = function(n){ return (n < 10 ? '0' : '') + n; };
+  var mon = reportChecklistIsoWeekMonday(p.year, p.week);
+  var fri = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 11);
+  var dlKey = fri.getFullYear() + '-' + pad(fri.getMonth() + 1) + '-' + pad(fri.getDate()) + ' 18:00';
+  var dlText = pad(fri.getDate()) + '.' + pad(fri.getMonth() + 1);
+  var sofiaKey = function(iso){
+    var d = iso ? new Date(iso) : null;
+    if (!d || isNaN(d.getTime())) return '';
+    var q = {};
+    new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Sofia', year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(d).forEach(function(x){ q[x.type] = x.value; });
+    return q.year + '-' + q.month + '-' + q.day + ' ' + q.hour + ':' + q.minute;
+  };
+
+  var items = [];
+  stores.forEach(function(s){
+    metrics.forEach(function(m){
+      if (reportChecklistCellValue(m, idx[s + ' | ' + m.key] || null) !== 'не') return;
+      var resp = respIdx[s + ' | ' + m.key] || null;
+      var at = resp ? sofiaKey(resp.updated_at || resp.created_at) : '';
+      items.push({ store: s, metric: m, n: reportChecklistNoStreak(p.history || [], m, s, p.year, p.week),
+                   resp: resp && resp.text ? resp : null, late: !!at && at > dlKey });
+    });
+  });
+  items.sort(function(a, b){ return (b.n - a.n) || String(a.store).localeCompare(String(b.store), 'bg'); });
+
+  var tdStyle = 'padding:5px 6px;font-size:11px;border-bottom:1px solid #eef1f6;vertical-align:top;';
+  var body = items.length ? items.map(function(it){
+    var hot = it.n >= 3;
+    return '<tr' + (hot ? ' style="background:#FEF2F2;"' : '') + '>' +
+      '<td style="' + tdStyle + 'text-align:left;">' + reportStoreLinkHtml(it.store, '#1E2761') + '</td>' +
+      '<td style="' + tdStyle + '">' + esc(it.metric.label) + '</td>' +
+      '<td style="' + tdStyle + 'white-space:nowrap;' + (hot ? 'color:#991B1B;font-weight:700;' : 'color:#475569;') + '">' +
+        esc(reportChecklistStreakLabel(it.n)) + '</td>' +
+      '<td style="' + tdStyle + '">' + (it.resp
+        ? '<span style="color:#1f2937;">' + esc(it.resp.text) + '</span>'
+        : '<span style="color:#C0392B;font-weight:700;">няма становище</span>') +
+        (it.late ? ' <span style="color:#fff;background:#C0392B;border-radius:8px;padding:0 6px;font-size:10px;">след срока</span>' : '') +
+      '</td></tr>';
+  }).join('') : '<tr><td style="' + tdStyle + 'color:#94a3b8;">няма „не" за седмица ' + esc(String(p.week)) + '</td></tr>';
+
+  return '<div style="margin-top:12px;">' +
+    '<div style="font-size:11px;font-weight:700;color:#475569;margin-bottom:6px;">Чек лист — становища за седмица ' +
+      esc(String(p.week)) + ' (срокът изтече петък ' + dlText + ')</div>' +
+    '<div style="overflow-x:auto;background:#FFFFFF;border:1px solid #e2e8f0;border-radius:8px;">' +
+    '<table role="presentation" style="width:100%;border-collapse:collapse;">' + body + '</table></div>' +
+    '</div>';
+}
+
 /* scoped казва ЧИЙ е отчетът: срязан (регионален, управител) или за
    цялата верига. Само списъкът с невзетата стока го ползва — виж
    reportReturnsListHtml. Липсващ аргумент значи пълен отчет, тоест
@@ -2998,6 +3129,7 @@ function buildCrossModuleSectionHtml(cross, scoped){
   h += reportPartialHtml(cross, ['kasa_storno', 'kasa_storno_week']);
   h += reportStornoShortHtml(cross);
   h += reportChecklistSectionHtml(cross);
+  h += reportChecklistResponsesHtml(cross);
 
   h += crossModuleRow('🧾','Каса — Равнение (за периода)',
     crossMetricCard(cross.zoborot.total,'общо записа') +
