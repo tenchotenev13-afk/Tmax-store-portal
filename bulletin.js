@@ -1342,18 +1342,37 @@ function bulLoadReturnsPending(){
   })();
   Object.keys(BUL_RETURNS_SOURCES).forEach(function(key){
     var src=BUL_RETURNS_SOURCES[key];
-    var has=(recurringTasks||[]).some(function(t){ return t && t.linked_module===key && !taskIsNotice(t); });
-    if(!has) return;
+    var task=(recurringTasks||[]).filter(function(t){ return t && t.linked_module===key && !taskIsNotice(t); })[0];
+    if(!task) return;
+    /* Денят на срока за тази седмица — за изключението по-долу. Същото като
+       due_idx в stock_returns_tasks_for_week: due_weekdays[0], иначе
+       due_weekday; 0 = понеделник. Няма ден → няма изключение.
+       recurringTasks е слят за ПОКАЗАНАТА седмица, а базата смята за
+       ДНЕШНАТА — затова денят се взема от основния запис + версията за mon. */
+    var base=(recurringAll||[]).filter(function(t){ return t && String(t.id)===String(task.id); })[0] || task;
+    var cur=recurringApplyVersion(base, recurringVersions, mon) || task;
+    var dueIdx=(cur.due_weekdays&&cur.due_weekdays.length) ? cur.due_weekdays[0] : cur.due_weekday;
+    var due=null;
+    if(dueIdx!==null && dueIdx!==undefined && dueIdx!=='' && !isNaN(Number(dueIdx))){
+      var dd=new Date(mon+'T00:00:00'); dd.setDate(dd.getDate()+Number(dueIdx)); due=toLocalISO(dd);
+    }
     /* source и в заявката, и във филтъра: всяка задача брои САМО записите от
        своя source — същото като p_source в stock_returns_store_done. */
     sbGet('stock_returns','store_name=eq.'+encodeURIComponent(currentUser.store_name)+
-          '&status=eq.pending&source=eq.'+src+'&select=id,status,source,store_name,confirmed_date,confirmed_by').then(function(rows){
+          '&status=eq.pending&source=eq.'+src+'&select=id,status,source,store_name,confirmed_date,confirmed_by,created_at').then(function(rows){
       if(!Array.isArray(rows)) return;
       var n=rows.filter(function(r){
         /* СТАТУСЪТ и source-ът и тук, не само в заявката: върне ли тя повече
            редове, чужди записи влизат в броя и надписът лъже обекта. */
         if((r.status||'pending')!=='pending') return false;
         if(r.source!==undefined && r.source!==src) return false;
+        /* ВЛЯЗЪЛ В ДЕНЯ НА СРОКА — не се брои за тази седмица (22.10.2026,
+           p_due в stock_returns_store_done; srCreatedOnDue в stock-returns.js).
+           Местната дата на created_at, не UTC. */
+        if(due && r.created_at){
+          var cd=new Date(r.created_at);
+          if(!isNaN(cd.getTime()) && toLocalISO(cd)===due) return false;
+        }
         /* СЪЩОТО правило като в базата (stock_returns_store_done) и в таба „За
            връщане" (srNeedsUpdate): дата, поставена от офиса или от импорт, не
            е актуализация на обекта. Без тази проверка надписът тук би казвал

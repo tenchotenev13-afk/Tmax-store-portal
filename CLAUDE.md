@@ -73,8 +73,15 @@ Netlify се ползва само за тестване/staging.
 - `admin.js` — Администрация (потребители, магазини, SAP каталог); accounting
   вижда таба, но вътре само картата „Известия" (матрица + общи отчети)
 - `reference.js` — Рекламации / Гаранционен справочник
+- `stock-returns.js` — „За връщане": задачите „Списък стока за връщане"
+  (source='complaint') и „… за изтегляне по разлики" (source='diff') се отмятат
+  от `stock_returns_sync_completions()`. Ред, създаден В ДЕНЯ НА СРОКА (дата по
+  Europe/Sofia), не се брои за тази седмица — не маха отметката и не пречи на
+  поставянето ѝ; от следващия понеделник се брои нормално (22.10.2026, p_due в
+  `stock_returns_store_done`). Същото изключение — в `srNeedsUpdate`
+  (stock-returns.js) и `bulLoadReturnsPending` (bulletin.js).
 - `handbook.js` + `docs.js` — обединени в 1 таб (под-навигация в `showModule()`)
-- `history.js`, `contacts.js`, `transit.js`, `calendar.js`, `stock-returns.js`,
+- `history.js`, `contacts.js`, `transit.js`, `calendar.js`,
   `stock-differences.js`, `push.js`, `email.js`, `notifications.js`, `report.js`
 
 **Script load order в `index.html` е фиксиран и важен — не пренарежда.**

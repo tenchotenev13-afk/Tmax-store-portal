@@ -103,9 +103,53 @@ function srUpdatedByStore(r, monISO, todayISO){
   if(!d || d<monISO || d>todayISO) return false;
   return String((r&&r.confirmed_by)||'') === ('store:'+((r&&r.store_name)||''));
 }
-function srNeedsUpdate(r, monISO, todayISO){
+/* ВЛЯЗЪЛ В ДЕНЯ НА СРОКА — не се брои за тази седмица (22.10.2026, миграция
+   20261023085400; p_due в stock_returns_store_done). Повод: 21.10.2026 —
+   редове от решенията в „Разлики" влязоха следобед в сряда, след като
+   обектите вече бяха потвърдили, и задачата им падна. От следващия понеделник
+   срокът е друг и редът се брои нормално. dueISO липсва (задачите не са се
+   заредили) → без изключение, тоест старото поведение. Датата на created_at е
+   МЕСТНАТА (браузърът е в България = Europe/Sofia в базата), не UTC. */
+function srCreatedOnDue(r, dueISO){
+  if(!dueISO || !r || !r.created_at) return false;
+  var d=new Date(r.created_at);
+  return !isNaN(d.getTime()) && localDateISO(d)===dueISO;
+}
+function srNeedsUpdate(r, monISO, todayISO, dueISO){
   if(!r || (r.status||'pending')!=='pending') return false;
+  if(srCreatedOnDue(r, dueISO)) return false;
   return !srUpdatedByStore(r, monISO, todayISO);
+}
+/* Срокът на задачата за седмицата на monISO, по source — същото като
+   stock_returns_tasks_for_week (linked_module → source; версията печели;
+   due_weekdays[0], иначе due_weekday; 0 = понеделник). „Само за
+   информация" не се отмята, затова и срок няма. */
+var SR_DUE_MODULES = { 'stock-returns-complaint':'complaint', 'stock-returns-diff':'diff' };
+var srDueBySource = {};
+function srDueFromTasks(tasks, monISO){
+  var out={};
+  (tasks||[]).forEach(function(t){
+    var src=t && SR_DUE_MODULES[t.linked_module];
+    if(!src || out[src] || taskIsNotice(t)) return;
+    var idx=(t.due_weekdays && t.due_weekdays.length) ? t.due_weekdays[0] : t.due_weekday;
+    if(idx===null || idx===undefined || idx==='' || isNaN(Number(idx))) return;
+    var d=new Date(monISO+'T00:00:00');
+    d.setDate(d.getDate()+Number(idx));
+    out[src]=localDateISO(d);
+  });
+  return out;
+}
+function srDueFor(r){ return srDueBySource[(r&&r.source)||'diff'] || null; }
+/* Провал на заявката → {} (без изключение), не грешка на екрана. */
+function srLoadDueDays(){
+  return Promise.all([
+    sbGet('recurring_tasks','select=id,task_type,linked_module,due_weekday,due_weekdays&active=is.true'),
+    loadRecurringVersions()
+  ]).then(function(res){
+    var mon=srWeekStartISO();
+    var tasks=recurringApplyVersions(Array.isArray(res[0])?res[0]:[], Array.isArray(res[1])?res[1]:[], mon);
+    srDueBySource=srDueFromTasks(tasks, mon);
+  }).catch(function(){ srDueBySource={}; });
 }
 
 /* Кой е поставил датата — за малкия надпис в реда и във формата. Форматът е
@@ -214,7 +258,7 @@ function loadStockReturns() {
   sbGetAll('stock_returns', 'order=doc_date.desc,id.desc' + storeQ()).then(function(data) {
     srData = Array.isArray(data) ? data : [];
     srPartial = data && data.partial ? srData.length : null;
-    return srLoadDiffTypes();
+    return Promise.all([srLoadDiffTypes(), srLoadDueDays()]);
   }).then(function(){
     renderStockReturns();
     if (srPartial !== null) toast('⚠️ Непълни данни — За връщане: прочетени ' + srPartial + ' реда, четенето прекъсна', '#dc2626');
@@ -237,7 +281,7 @@ function srFilteredList(){
     else if (srFilter === 'completed') { if (r.status !== 'completed') return false; }
     /* „Без актуализация" е подмножество на невзетите — srNeedsUpdate сам
        отсява статуса, затова тук няма втора проверка. */
-    else if (srFilter === 'needs') { if (!srNeedsUpdate(r, srWeekStartISO(), today())) return false; }
+    else if (srFilter === 'needs') { if (!srNeedsUpdate(r, srWeekStartISO(), today(), srDueFor(r))) return false; }
     /* Точните филтри по магазин и доставчик са ОТДЕЛНИ от свободното търсене
        по-долу, за да не се влияят от текст в коментари/причини, споменаващи
        друг магазин или друга фирма (напр. коментар "изпратено към ЛС
@@ -288,9 +332,9 @@ function renderStockReturns() {
      решил, че е готов, и би чакал отметка, която няма да дойде. */
   var srToday = today(), srMon = srWeekStartISO(srToday);
   var srAutoOn = srAutoActive(srToday);
-  var needs = tabData.filter(function(r){ return srNeedsUpdate(r, srMon, srToday); }).length;
+  var needs = tabData.filter(function(r){ return srNeedsUpdate(r, srMon, srToday, srDueFor(r)); }).length;
   var needsOther = srData.filter(function(r){
-    return (r.source||'diff') !== srTab && srNeedsUpdate(r, srMon, srToday);
+    return (r.source||'diff') !== srTab && srNeedsUpdate(r, srMon, srToday, srDueFor(r));
   }).length;
 
   var h = '<div style="max-width:1400px;margin:0 auto;padding:16px;">';

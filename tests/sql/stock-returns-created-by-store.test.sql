@@ -104,9 +104,9 @@ begin
 
   for m in
     select * from (values
-      ('M1 махнато сравнение на confirmed_by', 'public.stock_returns_store_done(text,date,date,text)'::text,
+      ('M1 махнато сравнение на confirmed_by', 'public.stock_returns_store_done(text,date,date,text,date)'::text,
         E'\n            or confirmed_by is distinct from (''store:'' || p_store)', ''),
-      ('M2 махната горна граница на датата',     'public.stock_returns_store_done(text,date,date,text)',
+      ('M2 махната горна граница на датата',     'public.stock_returns_store_done(text,date,date,text,date)',
         E'\n            or confirmed_date > p_upto', '')
     ) as x(name, fn, a, b)
   loop

@@ -190,7 +190,7 @@ begin
   fails := fails || pg_temp.t(
     not has_function_privilege('anon', 'public.stock_returns_tasks_for_week(date)', 'execute')
     and not has_function_privilege('authenticated', 'public.stock_returns_tasks_for_week(date)', 'execute')
-    and not has_function_privilege('anon', 'public.stock_returns_store_done(text,date,date,text)', 'execute')
+    and not has_function_privilege('anon', 'public.stock_returns_store_done(text,date,date,text,date)', 'execute')
     and not has_function_privilege('anon', 'public.stock_returns_sync_completions(text,date)', 'execute'),
     'anon/authenticated не бива да могат да викат функциите');
   fails := fails || pg_temp.t(
@@ -226,7 +226,7 @@ begin
 
   for m in
     select * from (values
-      ('M1 махнат „and source = p_source"',   'public.stock_returns_store_done(text,date,date,text)'::text, 'and source = p_source', ''),
+      ('M1 махнат „and source = p_source"',   'public.stock_returns_store_done(text,date,date,text,date)'::text, 'and source = p_source', ''),
       ('M2 разменен source на complaint',      'public.stock_returns_tasks_for_week(date)',                 'then ''complaint''',   'then ''diff'''),
       ('M3 трие и чужди (ръчни) отметки',      'public.stock_returns_sync_completions(text,date)',          'and tc.completed_by = ''auto:stock-returns''', ''),
       ('M4 махнато замразяване след срока',    'public.stock_returns_sync_completions(text,date)',          'if v_today > v_due then continue; end if;', ''),

@@ -311,5 +311,98 @@ const mod = h => h.doc.getElementById('mod-stock-returns');
     ok('и случаите не са едностранни', yes > 0 && yes < cases.length, yes + ' от ' + cases.length);
   }
 
+  section('9. Ред, влязъл в ДЕНЯ НА СРОКА, не се брои за тази седмица (22.10.2026)');
+  {
+    /* Пладне с изрично отместване — денят не зависи от TZ на процеса. */
+    const at = iso => iso + 'T13:00:00+03:00';
+    const w = env([], WED).w;
+    const TASKS = [
+      { id: 't-diff', linked_module: 'stock-returns-diff', task_type: 'required', due_weekdays: [2] },
+      { id: 't-cmp', linked_module: 'stock-returns-complaint', task_type: 'required', due_weekday: 4, due_weekdays: [] },
+      { id: 't-info', linked_module: 'stock-returns-complaint', task_type: 'notice', due_weekdays: [0] }
+    ];
+    const due = w.srDueFromTasks(TASKS, MON);
+    ok('срокът по разлики е сряда 07.10', due.diff === WED, JSON.stringify(due));
+    ok('по рекламации — due_weekday при празен due_weekdays (петък 09.10)', due.complaint === '2026-10-09', JSON.stringify(due));
+    ok('„Само за информация" не дава срок', w.srDueFromTasks([TASKS[2]], MON).complaint === undefined);
+    ok('задача без ден → без срок', w.srDueFromTasks([{ linked_module: 'stock-returns-diff', task_type: 'required' }], MON).diff === undefined);
+
+    ok('ред от деня на срока → НЕ се брои',
+      w.srNeedsUpdate(ret('x1', { created_at: at(WED) }), MON, WED, WED) === false);
+    ok('същият ред без dueISO → се брои (старото поведение)',
+      w.srNeedsUpdate(ret('x1', { created_at: at(WED) }), MON, WED) === true);
+    ok('ред от вторник → СЕ брои (дните преди срока — както досега)',
+      w.srNeedsUpdate(ret('x2', { created_at: at('2026-10-06') }), MON, WED, WED) === true);
+    ok('ред от срядата в СЛЕДВАЩАТА седмица (нов срок 14.10) → се брои',
+      w.srNeedsUpdate(ret('x1', { created_at: at(WED) }), '2026-10-12', '2026-10-13', '2026-10-14') === true);
+    ok('ред без created_at → се брои',
+      w.srNeedsUpdate(ret('x3'), MON, WED, WED) === true);
+
+    /* На екрана: задачите идват от базата, броячът и филтърът ги уважават. */
+    const rows = [
+      ret('e1', { created_at: at(MON) }),                      /* понеделник, непотвърден → брои се */
+      ret('e2', { created_at: at(WED) }),                      /* сряда = срок → не се брои */
+      ret('e3', { created_at: at(WED), source: 'complaint' })  /* сряда, но срокът по рекламации е петък → брои се */
+    ];
+    const h = boot({
+      modules: ['stock-returns.js'], user: USER,
+      data: {
+        users: [{ store_name: STORE }], stores: [{ name: STORE }],
+        stock_returns: () => rows, stock_differences: [],
+        recurring_tasks: TASKS, recurring_task_versions: []
+      }
+    });
+    freezeDate(h.w, WED);
+    if (guard('loadStockReturns() не хвърля', () => h.w.loadStockReturns())) {
+      for (let i = 0; i < 60; i++) {
+        if (mod(h).innerHTML.indexOf('Стока за връщане') >= 0) break;
+        await ticks();
+      }
+      const num = h.doc.getElementById('sr-needs-n');
+      ok('чипът по разлики показва 1 (редът от срока е изключен)', !!num && num.textContent.trim() === '1', num && num.textContent.trim());
+      const card = h.doc.getElementById('sr-needs-other');
+      ok('а в другия подтаб — 1 (срокът там е петък)', !!card && card.textContent.indexOf('+ 1 в другия подтаб') >= 0, card && card.textContent.trim());
+      const b = btn(mod(h), 'Без актуализация');
+      if (ok('бутонът-филтър го има', !!b)) {
+        realClick(h.w, b);
+        const html = mod(h).innerHTML;
+        ok('филтърът показва реда от понеделник', html.indexOf('Стока e1') >= 0);
+        ok('и НЕ показва реда от деня на срока', html.indexOf('Стока e2') === -1);
+      }
+    }
+
+    /* Бюлетинът — същото изключение, сверено по текста и функционално
+       (правилото на bulletin.js преписано изцяло, като bulRule в т.8). */
+    const bul = fs.readFileSync(path.join(ROOT, 'bulletin.js'), 'utf8');
+    ok('bulletin.js тегли created_at', bul.indexOf('confirmed_date,confirmed_by,created_at') >= 0, 'няма го');
+    ok('и изключва реда от деня на срока',
+      bul.indexOf("if(!isNaN(cd.getTime()) && toLocalISO(cd)===due) return false;") >= 0, 'няма го');
+    const bulRule = (r, mon, today, dueISO) => {
+      if ((r.status || 'pending') !== 'pending') return false;
+      if (dueISO && r.created_at) {
+        const cd = new w.Date(r.created_at);
+        if (!isNaN(cd.getTime()) && w.localDateISO(cd) === dueISO) return false;
+      }
+      const d = r.confirmed_date ? String(r.confirmed_date).slice(0, 10) : null;
+      if (!d || d < mon || d > today) return true;
+      return String(r.confirmed_by || '') !== ('store:' + (r.store_name || ''));
+    };
+    const cases = [
+      ret('y1', { created_at: at(WED) }),
+      ret('y2', { created_at: at('2026-10-06') }),
+      ret('y3'),
+      ret('y4', { created_at: at(WED), confirmed_date: WED, confirmed_by: 'store:' + STORE }),
+      ret('y5', { created_at: at(WED), status: 'taken' })
+    ];
+    const mism = cases.filter(r => bulRule(r, MON, WED, WED) !== w.srNeedsUpdate(r, MON, WED, WED));
+    ok('двете реализации дават еднакъв отговор и за деня на срока', mism.length === 0, mism.map(r => r.id).join(', '));
+
+    const sql = fs.readFileSync(path.join(ROOT, 'stock-returns-late-rows-schema.sql'), 'utf8');
+    ok('SQL-ът изключва по Europe/Sofia дата = p_due',
+      sql.indexOf("(created_at at time zone 'Europe/Sofia')::date <> p_due") >= 0, 'няма го');
+    ok('и sync подава v_due и в двете извиквания',
+      (sql.match(/v_task\.source, v_due\)/g) || []).length === 2);
+  }
+
   report();
 })();

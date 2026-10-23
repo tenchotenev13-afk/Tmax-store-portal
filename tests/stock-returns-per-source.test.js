@@ -228,5 +228,25 @@ const modBtns = h => Array.prototype.slice.call(h.doc.querySelectorAll('button[d
     ok('нито една заявка', h.calls.get.filter(u => u.indexOf('/stock_returns') >= 0).length === 0);
   }
 
+  section('8. Ред, влязъл в ДЕНЯ НА СРОКА, не се брои (22.10.2026)');
+  {
+    /* Пладне местно време — денят не зависи от часа на пускане. */
+    const noon = iso => { const d = new Date(iso + 'T12:00:00'); return d.toISOString(); };
+    /* „Изтегляне по разлики" — срок сряда (днес); „Връщане" — срок петък. */
+    const h = await view([compTask({ due_weekday: 4, due_weekdays: [4] }), diffTask()], [
+      ret('d1', { source: 'diff', created_at: noon(MON) }),   /* понеделник → брои се */
+      ret('d2', { source: 'diff', created_at: noon(WED) }),   /* сряда = срок → НЕ */
+      ret('c1', { created_at: noon(WED) })                    /* сряда, срокът е петък → брои се */
+    ]);
+    if (h) {
+      await settle(() => typeof h.w.bulAutoPending['stock-returns-complaint'] === 'number' &&
+                         typeof h.w.bulAutoPending['stock-returns-diff'] === 'number', 80);
+      ok('diff: редът от деня на срока не се брои (1)', rowNote(h, 'r-d') === '⏳ 1 запис без актуализация от понеделник', String(rowNote(h, 'r-d')));
+      ok('complaint: редът от сряда се брои — срокът там е петък (1)', rowNote(h, 'r-c') === '⏳ 1 запис без актуализация от понеделник', String(rowNote(h, 'r-c')));
+      const q = h.calls.get.filter(u => u.indexOf('/stock_returns') >= 0);
+      ok('заявката тегли created_at', q.length > 0 && q.every(u => u.indexOf('created_at') >= 0), q.join('\n'));
+    }
+  }
+
   report();
 })();
