@@ -14,14 +14,6 @@
 
 ## Чака изпращане
 
-- 23.10 · нова таблица weekly_checklist_responses (миграция 20261023120000_weekly_checklist_responses, в базата версия 20261023093627, приложена 23.10.2026) — id uuid PK default gen_random_uuid(), year int NOT NULL, week_number int NOT NULL, store_name text NOT NULL, metric_key text NOT NULL (→ weekly_checklist_metrics.key), text text NOT NULL, created_by text NULL, created_at timestamptz NULL default now(), updated_at timestamptz NOT NULL default now(); уникалност (year, week_number, store_name, metric_key) — за UPSERT
-- 23.10 · нова таблица picking_shipments (миграция 20261023085447_picking_shipments_schema) — id uuid PK default gen_random_uuid(), warehouse text NOT NULL, store_name text NOT NULL, status text NOT NULL default 'loading' (стойности 'loading' / 'departed' / 'received' / 'partial'), vehicle text NULL, driver text NULL, note text NULL, created_by text NULL, created_at timestamptz NOT NULL default now(), departed_by text NULL, departed_at timestamptz NULL, received_by text NULL, received_at timestamptz NULL, notify_error text NULL, notified_at timestamptz NULL
-- 23.10 · picking_pallets.shipment_id — колоната е пратена с реда от 22.10 (под „Изпратено 23.10.2026“, заедно с останалите колони за част Б на picking_pallets и picking_pallet_items); от тази миграция сочи → picking_shipments (on delete set null), нова колона няма
-
-(в базата от миграцията 20261023094357_storno_notes, приложена 23.10.2026)
-- 23.10 · нова таблица storno_notes — id uuid PK default gen_random_uuid(), store_name text NOT NULL, supplier text NULL, document_number text NULL, body text NOT NULL, files jsonb NOT NULL default '[]', status text NOT NULL default 'open' (стойности 'open' / 'storno' / 'closed'), report_id uuid NULL → differences_reports(id) (on delete set null), created_by text NULL, created_at timestamptz NOT NULL default now(), closed_by text NULL, closed_at timestamptz NULL
-- 23.10 · нова таблица storno_note_replies — id uuid PK default gen_random_uuid(), note_id uuid NOT NULL → storno_notes(id) (on delete cascade), body text NOT NULL, files jsonb NOT NULL default '[]', side text NOT NULL (стойности 'store' / 'accounting' / 'co'), created_by text NULL, created_at timestamptz NOT NULL default now()
-
 ## Изпратено 23.10.2026
 
 - 21.10 · stock_differences.type — нова стойност 'storno' (text, без промяна в схемата)
@@ -30,6 +22,14 @@
 
 (в базата от миграцията 20261022133937_minusi_note_required, приложена 22.10.2026)
 - 22.10 · minus_reasons.requires_note — boolean, NOT NULL, default false (true за „клиентска поръчка (номер/дата)")
+
+- 23.10 · нова таблица weekly_checklist_responses (миграция 20261023120000_weekly_checklist_responses, в базата версия 20261023093627, приложена 23.10.2026) — id uuid PK default gen_random_uuid(), year int NOT NULL, week_number int NOT NULL, store_name text NOT NULL, metric_key text NOT NULL (→ weekly_checklist_metrics.key), text text NOT NULL, created_by text NULL, created_at timestamptz NULL default now(), updated_at timestamptz NOT NULL default now(); уникалност (year, week_number, store_name, metric_key) — за UPSERT
+- 23.10 · нова таблица picking_shipments (миграция 20261023085447_picking_shipments_schema) — id uuid PK default gen_random_uuid(), warehouse text NOT NULL, store_name text NOT NULL, status text NOT NULL default 'loading' (стойности 'loading' / 'departed' / 'received' / 'partial'), vehicle text NULL, driver text NULL, note text NULL, created_by text NULL, created_at timestamptz NOT NULL default now(), departed_by text NULL, departed_at timestamptz NULL, received_by text NULL, received_at timestamptz NULL, notify_error text NULL, notified_at timestamptz NULL
+- 23.10 · picking_pallets.shipment_id — колоната е пратена с реда от 22.10 (под „Изпратено 23.10.2026“, заедно с останалите колони за част Б на picking_pallets и picking_pallet_items); от тази миграция сочи → picking_shipments (on delete set null), нова колона няма
+
+(в базата от миграцията 20261023094357_storno_notes, приложена 23.10.2026)
+- 23.10 · нова таблица storno_notes — id uuid PK default gen_random_uuid(), store_name text NOT NULL, supplier text NULL, document_number text NULL, body text NOT NULL, files jsonb NOT NULL default '[]', status text NOT NULL default 'open' (стойности 'open' / 'storno' / 'closed'), report_id uuid NULL → differences_reports(id) (on delete set null), created_by text NULL, created_at timestamptz NOT NULL default now(), closed_by text NULL, closed_at timestamptz NULL
+- 23.10 · нова таблица storno_note_replies — id uuid PK default gen_random_uuid(), note_id uuid NOT NULL → storno_notes(id) (on delete cascade), body text NOT NULL, files jsonb NOT NULL default '[]', side text NOT NULL (стойности 'store' / 'accounting' / 'co'), created_by text NULL, created_at timestamptz NOT NULL default now()
 
 ## Потвърдено 23.10.2026
 
