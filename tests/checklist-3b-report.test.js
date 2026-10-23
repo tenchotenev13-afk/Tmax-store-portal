@@ -14,7 +14,10 @@
       срок, 18:01 не е; подредба по поредица низходящо, после по обект;
    3. нула „не" → сив ред „няма „не" за седмица 42"; обект извън stores не
       влиза; провал на заявката → без блока, таблицата си остава;
-   4. мястото: веднага след таблицата на чек листа; таб „Днес" — без блока.
+   4. мястото: веднага след таблицата на чек листа; таб „Днес" — без блока;
+   5. v58: неизпратена M (0 реда в weekly_checklist_sends) → един сив ред
+      „Седмица M не е изпратена до обектите — становища не се искат." и нула
+      „няма становище"; провал на заявката за sends → без блока.
 
    Пускане:  node tests/checklist-3b-report.test.js .
 */
@@ -72,7 +75,11 @@ function env(extra, fail) {
       transport_pallets: [], client_orders: [], transport_orders: [], app_settings: [],
       weekly_checklist_metrics: METRICS,
       weekly_checklist: function (url) { return url.indexOf('or=') >= 0 ? HIST : CUR; },
-      weekly_checklist_responses: RESP
+      weekly_checklist_responses: RESP,
+      /* v58: блокът показва редовете само за ИЗПРАТЕНА седмица M. Фалшивият
+         PostgREST не филтрира — седмица 42 е изпратена, освен ако тестът не
+         подаде друго. */
+      weekly_checklist_sends: [{ year: 2026, week_number: 42, version: 1 }]
     }, extra || {})
   };
   if (fail) b.fail = fail;
@@ -164,6 +171,42 @@ function rowsOf(h, html) {
     const sec = h.w.buildCrossModuleSectionHtml(cross);
     ok('„Днес" (кросмодулният колектор направо) — без блока', sec.indexOf('становища за седмица') < 0);
     ok('reportChecklistResponsesHtml({}) → ""', h.w.reportChecklistResponsesHtml({}) === '');
+    h.close();
+  }
+
+  section('3б. v58 — неизпратена седмица M');
+  {
+    const h = env({ weekly_checklist_sends: [] });
+    const data = await weekly(h, SCOPE);
+    const sq = h.calls.get.filter(function (u) { return u.indexOf('/weekly_checklist_sends') >= 0; });
+    ok('заявка към weekly_checklist_sends за 42, select=version, limit=1', sq.length === 1 &&
+       /year=eq.2026&week_number=eq.42&select=version&limit=1/.test(sq[0]), sq.join(' | '));
+    const p = data.cross.checklist && data.cross.checklist.prev;
+    ok('prev.sent === false', !!p && p.sent === false, JSON.stringify(p && p.sent));
+    const html = h.w.reportChecklistResponsesHtml(data.cross);
+    ok('заглавието остава', html.indexOf('Чек лист — становища за седмица 42 (срокът изтече петък 23.10)') >= 0);
+    const rows = rowsOf(h, html);
+    ok('един сив ред „Седмица 42 не е изпратена до обектите — становища не се искат."',
+       rows.length === 1 && rows[0][0] === 'Седмица 42 не е изпратена до обектите — становища не се искат.' &&
+       /color:#94a3b8;">Седмица 42 не е изпратена/.test(html), JSON.stringify(rows));
+    ok('0 реда „няма становище"', html.indexOf('няма становище') < 0);
+    ok('нито един обект и нито една поредица', html.indexOf('Шумен') < 0 && html.indexOf('седмица подред') < 0);
+    ok('в цялото писмо: сивият ред е там', h.w.buildWeeklyReportHtml(data).indexOf('становища не се искат') >= 0);
+    h.close();
+  }
+  {
+    const h = env();
+    const data = await weekly(h, SCOPE);
+    ok('с изпращане → prev.sent === true', data.cross.checklist.prev && data.cross.checklist.prev.sent === true);
+    ok('с изпращане → без сивия ред „не се искат"', h.w.reportChecklistResponsesHtml(data.cross).indexOf('не се искат') < 0);
+    h.close();
+  }
+  {
+    const h = env(null, { GET: /weekly_checklist_sends/ });
+    const data = await weekly(h, SCOPE);
+    ok('провал на sends → без prev и без блока', data.cross.checklist && !data.cross.checklist.prev &&
+       h.w.reportChecklistResponsesHtml(data.cross) === '');
+    ok('… таблицата на чек листа си остава', h.w.buildWeeklyReportHtml(data).indexOf('Чек лист (контролинг) — седмица 43') >= 0);
     h.close();
   }
 

@@ -1758,7 +1758,10 @@ function collectWeeklyReportData(cb, scope){
               sbGet('weekly_checklist_metrics','active=eq.true&order=sort_order&select=key,label,value_type,sort_order,active'),
               sbGet('weekly_checklist','year=eq.'+target.year+'&week_number=eq.'+target.week+'&select=year,week_number,store_name,metric_key,portal_value,control_value,control_num,comment,updated_at'),
               reportGetAll('weekly_checklist', clOr + '&select=id,year,week_number,store_name,metric_key,portal_value,control_value,control_num&order=id'),
-              sbGetOk('weekly_checklist_responses','year=eq.'+clPrev.year+'&week_number=eq.'+clPrev.week+'&select=year,week_number,store_name,metric_key,text,created_at,updated_at')
+              sbGetOk('weekly_checklist_responses','year=eq.'+clPrev.year+'&week_number=eq.'+clPrev.week+'&select=year,week_number,store_name,metric_key,text,created_at,updated_at'),
+              /* v58: изпратена ли е M до обектите — без изпращане обектът не
+                 вижда „Становище" (етап 3А), тоест становища не се искат. */
+              sbGetOk('weekly_checklist_sends','year=eq.'+clPrev.year+'&week_number=eq.'+clPrev.week+'&select=version&limit=1')
             ]).then(function(cl){
               var clMetrics = (Array.isArray(cl[0]) ? cl[0] : []).filter(function(m){ return m && m.active === true; });
               clMetrics.sort(function(a,b){ return (a.sort_order || 0) - (b.sort_order || 0); });
@@ -1774,8 +1777,8 @@ function collectWeeklyReportData(cb, scope){
               cross.checklist = { year: target.year, week: target.week, metrics: clMetrics,
                                   stores: stores.slice(), rows: clRows,
                                   updatedAt: clLast === null ? null : new Date(clLast).toISOString() };
-              var clHist = cl[2], clResp = cl[3];
-              if (Array.isArray(clHist) && !clHist.partial && clResp && clResp.ok) {
+              var clHist = cl[2], clResp = cl[3], clSent = cl[4];
+              if (Array.isArray(clHist) && !clHist.partial && clResp && clResp.ok && clSent && clSent.ok) {
                 var clKeys = {};
                 clWeeks.forEach(function(w){ clKeys[w.year + '|' + w.week] = 1; });
                 var clIn = function(x, w){ return Number(x.year) === w.year && Number(x.week_number) === w.week; };
@@ -1783,6 +1786,7 @@ function collectWeeklyReportData(cb, scope){
                   return x && clKeys[Number(x.year) + '|' + Number(x.week_number)] && stores.indexOf(x.store_name) >= 0;
                 });
                 cross.checklist.prev = { year: clPrev.year, week: clPrev.week,
+                  sent: (clSent.rows || []).length > 0,
                   rows: hist.filter(function(x){ return clIn(x, clPrev); }),
                   history: hist,
                   responses: (clResp.rows || []).filter(function(x){ return x && clIn(x, clPrev) && stores.indexOf(x.store_name) >= 0; }) };
@@ -2918,6 +2922,9 @@ function reportChecklistResponsesHtml(cross){
   var cl = cross && cross.checklist;
   var p = cl && cl.prev;
   if (!p) return '';
+  /* v58: седмица M, неизпратена до обектите — обектът не е виждал
+     „Становище" (етап 3А), тоест липсата не е пропуск. Секцията остава. */
+  var sent = p.sent === true;
   var metrics = (cl.metrics || []).filter(function(m){ return m && m.value_type !== 'number'; });
   var stores = cl.stores || [];
   var idx = {}, respIdx = {};
@@ -2950,7 +2957,9 @@ function reportChecklistResponsesHtml(cross){
   items.sort(function(a, b){ return (b.n - a.n) || String(a.store).localeCompare(String(b.store), 'bg'); });
 
   var tdStyle = 'padding:5px 6px;font-size:11px;border-bottom:1px solid #eef1f6;vertical-align:top;';
-  var body = items.length ? items.map(function(it){
+  var body = !sent
+    ? '<tr><td style="' + tdStyle + 'color:#94a3b8;">Седмица ' + esc(String(p.week)) + ' не е изпратена до обектите — становища не се искат.</td></tr>'
+    : items.length ? items.map(function(it){
     var hot = it.n >= 3;
     return '<tr' + (hot ? ' style="background:#FEF2F2;"' : '') + '>' +
       '<td style="' + tdStyle + 'text-align:left;">' + reportStoreLinkHtml(it.store, '#1E2761') + '</td>' +
