@@ -19,6 +19,8 @@ var todayPhotosExpanded = false;   /* дали е разгъната секци�
 var todayPhotosCache = null;       /* заредените снимки - lazy, само при първо разгъване */
 var todayCrossCache = null;        /* кросмодулно обобщение (Разлики/Каса/Стока на път/Палети) - lazy */
 var todayCrossFetched = false;
+var todayMnCache = null;           /* „➖ Минуси" по обект (mnLoadSummary от minusi.js) - lazy */
+var todayMnFetched = false;
 
 /* Бюлетинът на ТЕКУЩАТА седмица, не последният създаден: следващата седмица се
    публикува в петък, а до неделя „Днес“ трябва да показва още текущата. Изборът
@@ -51,6 +53,8 @@ function loadTodayDashboard(){
   todayPhotosCache = null;
   todayCrossCache = null;
   todayCrossFetched = false;
+  todayMnCache = null;
+  todayMnFetched = false;
   /* Deep-link от имейл: ?store=Име%20магазин -> автоматично разгъва точно
      този магазин, за да не се налага търсене след клик от репорта. */
   try {
@@ -476,6 +480,43 @@ function todayCrossModuleWrapperHtml(){
   return '<div style="background:#fff;border:1px solid #eef1f6;border-radius:12px;padding:16px 18px 4px;margin-top:14px;">' + inner + '</div>';
 }
 
+/* „➖ Минуси" (23.10.2026): ред по включен обект — незакрити · непопълнени ·
+   свръхсторно. Същото изчисление като брояча на обекта и известието
+   minus_unfilled (mnLoadSummary в minusi.js). Регионалният accounting вижда
+   само своите обекти; филтърът по обект стеснява до него. Без включени
+   обекти — картата я няма. Грешка → червен ред „Непълни данни", не празна
+   карта. */
+function todayMinusiHtml(){
+  if (typeof mnLoadSummary !== 'function') return '';
+  if (!todayMnFetched) {
+    todayMnFetched = true;
+    mnLoadSummary(null).then(function(res){
+      todayMnCache = res || { ok: false, error: 'няма отговор' };
+      var wrap = document.getElementById('mod-today');
+      if (wrap && todayCache) renderTodayDashboard(wrap, todayCache.items, todayCache.noDueItems, todayCache.comps, todayCache.stores);
+    });
+  }
+  if (todayMnCache === null) return '';
+  var box = function(inner){ return '<div id="td-minusi" style="background:#fff;border:1px solid #eef1f6;border-radius:12px;padding:16px 18px;margin-top:14px;">' +
+    '<div style="font-size:13px;font-weight:800;color:#1f2937;margin-bottom:8px;">➖ Минуси</div>' + inner + '</div>'; };
+  if (!todayMnCache.ok) return box('<div id="td-minusi-err" style="color:#b91c1c;font-weight:600;font-size:12.5px;">⚠️ Непълни данни — ' + esc(todayMnCache.error || '') + '</div>');
+  var scope = todayScope();
+  var rows = todayMnCache.rows.filter(function(r){
+    if (scope && scope.indexOf(r.store) < 0) return false;
+    return todayFilterStore === 'all' || r.store === todayFilterStore;
+  });
+  if (!rows.length) return '';
+  var h = '<table style="width:100%;font-size:12.5px;border-collapse:collapse;"><tr style="color:#64748b;text-align:left;">' +
+    '<th>Обект</th><th style="text-align:right;">Незакрити</th><th style="text-align:right;">Непопълнени</th><th style="text-align:right;">Свръхсторно</th></tr>';
+  rows.forEach(function(r){
+    h += '<tr class="td-mn-row" data-store="' + escAttr(r.store) + '"><td>' + esc(r.store) + '</td>' +
+      '<td style="text-align:right;">' + r.open + '</td>' +
+      '<td style="text-align:right;' + (r.unfilled ? 'color:#b91c1c;font-weight:700;' : '') + '">' + r.unfilled + '</td>' +
+      '<td style="text-align:right;' + (r.over ? 'color:#b91c1c;font-weight:700;' : '') + '">' + r.over + '</td></tr>';
+  });
+  return box(h + '</table>');
+}
+
 /* Рендира задачите без срок за конкретен обект — визуално отделени, не участват в % */
 /* Показва коментар/снимки на вече изпълнена задача - за да не се налага
    отваряне на Бюлетин, за да се прегледа съдържанието на "вид задача с
@@ -731,6 +772,7 @@ function renderTodayDashboard(wrap, items, noDueItems, comps, stores){
 
   h += todayPhotoQueueSectionHtml();
   h += todayCrossModuleWrapperHtml();
+  h += todayMinusiHtml();
 
   h += '</div>';
   wrap.innerHTML = h;

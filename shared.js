@@ -1752,7 +1752,9 @@ function startApp(){
      после единица от пикинга (#pk=<id>) — picking.js. */
   var dl = (typeof llDeepLinkBoot==='function') && llDeepLinkBoot();
   if(!dl && typeof tfDeepLinkBoot==='function') dl = tfDeepLinkBoot();
-  if(!dl && typeof pkDeepLinkBoot==='function') pkDeepLinkBoot();
+  if(!dl && typeof pkDeepLinkBoot==='function') dl = pkDeepLinkBoot();
+  /* Известието за Минуси (bulletin-notify, minus_unfilled) отваря #mn. */
+  if(!dl && typeof mnDeepLinkBoot==='function') mnDeepLinkBoot();
 }
 function setupTabsForRole(){
   /* Таб Каса — само за kasa, manager, admin, accounting */
@@ -1812,6 +1814,9 @@ function setupTabsForRole(){
      обект извън списъка вижда бутона и вътре „още не е включен“. */
   var mnSubBtn=document.getElementById('rvs-minusi');
   if(mnSubBtn)mnSubBtn.style.display=(typeof mnCanSee==='function'&&mnCanSee())?'':'none';
+  /* Броячът „(N)" е на предишния потребител — същата страница може да смени
+     потребителя без презареждане. Брои се пак при отваряне на таба. */
+  if(mnSubBtn)mnSubBtn.textContent='➖ Минуси';
   /* Под-бутон „📦 Пикинг“ в Транспорт (picking.js) — пилот: само имейлите от
      app_settings.picking_users. Скрит до отговора; pkLoadUsers() го показва. */
   var pkSubBtn=document.getElementById('tps-picking');
@@ -1907,6 +1912,9 @@ function showModule(mod){
   if(mod==='revaluation'&&typeof loadRevaluation==='function')loadRevaluation();
   if(mod==='rev-schedule'&&typeof loadRevSchedule==='function')loadRevSchedule();
   if(mod==='minusi'&&typeof loadMinusi==='function')loadMinusi();
+  /* Брояч „➖ Минуси (N)" за обекта — при отваряне на „Ревизии и преоценка".
+     В самия модул го обновява mnRender. */
+  if((mod==='rev-schedule'||mod==='revaluation')&&typeof mnLoadBadge==='function')mnLoadBadge();
   if(mod==='stock-diff')loadStockDiff();
   if(mod==='pallets')loadPallets();
   if(mod==='supply')loadSupply();

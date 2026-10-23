@@ -105,6 +105,13 @@
      M43 loadMinusi не иска requires_note → падат 8. Оцеляваше, докато
         фалшивата база пренебрегваше select= — сега minus_reasons връща само
         поисканите колони, като PostgREST.
+   Брояч и „Днес“ (секция 14, 23.10.2026):
+     P1 броячът брои и закритите → падат „(3)“ и редът в „Днес“;
+     P2 „Днес“ без регионалния обхват → пада „само своя (Шумен)“;
+     P3 невключен обект също → пада „Шумен без брояч“;
+     P4 showModule не вика брояча → падат „(3)“ и „N = 0“;
+     P5 mnRender не обновява брояча → пада „след Запази (2)“.
+   Сверката портал ↔ bulletin-notify е в tests/minusi-notify-sync.test.js.
    Секция 3 пише в „Действие“ само ако полето го има (if (act)) — иначе при
    M31/M34 тестът гърмеше там и секция 12 не се стигаше: мутантът падаше от
    TypeError, не от проверка.
@@ -885,6 +892,83 @@ function noAmountInDom(name, h) {
     const u = hc.doc.getElementById('mn-unfilled'); u.checked = true; fire(hc.w, u, 'change');
     const ids = Array.from(hc.doc.querySelectorAll('#mn-daily tbody tr')).map(tr => tr.getAttribute('data-mn-id')).sort();
     ok('„само непопълнени“ включва n3 (причина 1 без бележка), не и n4', ids.join(',') === 'n1,n2,n3', ids.join(','));
+  }
+
+  section('14. Брояч „➖ Минуси (N)“ за обекта и картата в „Днес“ (23.10.2026)');
+  {
+    /* „Непопълнен“ = НЕЗАКРИТ и mnUnfilled. Гоце Делчев: b1, b2 — незакрити без
+       причина; b3 — незакрит с причина 1 без бележка; b4 — ЗАКРИТ без причина
+       (не се брои); b5 — незакрит и попълнен. → N = 3. Шумен: s1 — незакрит
+       без причина, плюс свръхсторно s2. */
+    const b = { plant: '5519', material_desc: 'ТЕСТ БРОЯЧ', uom: 'БР', doc_year: 2026, doc_item: '1', mvt_type: '955', qty: 1, posting_date: '2026-10-15' };
+    const BADGE = [
+      Object.assign({}, b, { id: 'b1', store_name: 'Гоце Делчев', material: '83001', mat_doc: 'B1' }),
+      Object.assign({}, b, { id: 'b2', store_name: 'Гоце Делчев', material: '83002', mat_doc: 'B2' }),
+      Object.assign({}, b, { id: 'b3', store_name: 'Гоце Делчев', material: '83003', mat_doc: 'B3', reason_id: 1, note: '' }),
+      Object.assign({}, b, { id: 'b4', store_name: 'Гоце Делчев', material: '83004', mat_doc: 'B4' }),
+      Object.assign({}, b, { id: 'b4c', store_name: 'Гоце Делчев', material: '83004', mat_doc: 'B4C', mvt_type: '956', qty: -1, posting_date: '2026-10-16' }),
+      Object.assign({}, b, { id: 'b5', store_name: 'Гоце Делчев', material: '83005', mat_doc: 'B5', reason_id: 2, employee_name: 'Здравка' }),
+      Object.assign({}, b, { id: 's1', store_name: 'Шумен', plant: '5514', material: '84001', mat_doc: 'S1' }),
+      Object.assign({}, b, { id: 's2', store_name: 'Шумен', plant: '5514', material: '84002', mat_doc: 'S2', mvt_type: '956', qty: -2 })
+    ];
+    const cpB = () => BADGE.map(x => Object.assign({}, x));
+    const env2 = (user, db) => { const h = boot({ modules: ['today.js', 'revaluation.js', 'revisions.js', 'minusi.js'], user, data: {} }); install(h, db); return h; };
+    const subBtn = h => h.doc.getElementById('rvs-minusi');
+
+    const h = env2(GD, fakeDb({ movs: cpB() }));
+    h.w.setupTabsForRole();
+    ok('преди отварянето: „➖ Минуси“ без брояч', subBtn(h).textContent === '➖ Минуси');
+    realClick(h.w, h.doc.getElementById('tab-revaluation')); await ticks(8);
+    ok('клик по „Ревизии и преоценка“ → „➖ Минуси (3)“ (закритият b4 не се брои)', subBtn(h).textContent === '➖ Минуси (3)', subBtn(h).textContent);
+    realClick(h.w, subBtn(h)); await ticks(8);
+    ok('в самия модул броячът е същият (mnRender)', subBtn(h).textContent === '➖ Минуси (3)', subBtn(h).textContent);
+    h.doc.getElementById('mn-reason-b1').value = '2';
+    h.doc.getElementById('mn-emp-b1').value = 'Здравка';
+    realClick(h.w, btn(h.doc.getElementById('mn-row-b1'), 'Запази')); await ticks(6);
+    ok('след „Запази“ на b1 → „➖ Минуси (2)“', subBtn(h).textContent === '➖ Минуси (2)', subBtn(h).textContent);
+
+    const filled = cpB().map(x => (x.store_name === 'Гоце Делчев' && x.mvt_type === '955') ? Object.assign(x, { reason_id: 2, note: 'х' }) : x);
+    const h0 = env2(GD, fakeDb({ movs: filled }));
+    h0.w.setupTabsForRole();
+    realClick(h0.w, h0.doc.getElementById('tab-revaluation')); await ticks(8);
+    ok('N = 0 → без брояч', subBtn(h0).textContent === '➖ Минуси' && subBtn(h0).getAttribute('data-mn-n') === '0', subBtn(h0).textContent);
+
+    const hs = env2(SHUMEN, fakeDb({ movs: cpB() }));  /* minus_stores = „Гоце Делчев“ */
+    hs.w.setupTabsForRole();
+    realClick(hs.w, hs.doc.getElementById('tab-revaluation')); await ticks(8);
+    ok('невключен обект (Шумен) → без брояч, макар да има незакрит', subBtn(hs).textContent === '➖ Минуси', subBtn(hs).textContent);
+
+    const hDeep = env2(GD, fakeDb({ movs: cpB() }));
+    hDeep.w.setupTabsForRole();
+    ok('#mn → mnDeepLinkBoot отваря под-таба', hDeep.w.mnDeepLinkBoot('#mn') === true && mod(hDeep).style.display === 'block');
+    ok('друг хеш (#pk=…) не е негов', hDeep.w.mnDeepLinkBoot('#pk=abc') === false);
+
+    /* „Днес“ — admin вижда двата включени обекта, регионалният — само своя. */
+    const todayCard = async (user, db) => {
+      const ht = env2(user, db);
+      ht.w.todayFilterStore = 'all';
+      ht.w.todayMinusiHtml(); await ticks(10);
+      const div = ht.doc.createElement('div'); div.innerHTML = ht.w.todayMinusiHtml();
+      return div;
+    };
+    const both = fakeDb({ movs: cpB(), settings: 'Гоце Делчев, Шумен' });
+    const dA = await todayCard(ADMIN, both);
+    const rowsA = Array.from(dA.querySelectorAll('.td-mn-row')).map(tr => Array.from(tr.querySelectorAll('td')).map(td => td.textContent).join('|'));
+    ok('„Днес“, admin: Гоце Делчев 4 · 3 · 0 и Шумен 1 · 1 · 1', rowsA.join(' / ') === 'Гоце Делчев|4|3|0 / Шумен|1|1|1', rowsA.join(' / '));
+    const REG = { email: 'reg@temax.bg', display_name: 'Регионален', role: 'accounting', store_name: 'Централен офис', is_regional: true, assigned_stores: ['Шумен', 'Севлиево'] };
+    const dR = await todayCard(REG, fakeDb({ movs: cpB(), settings: 'Гоце Делчев, Шумен' }));
+    const rowsR = Array.from(dR.querySelectorAll('.td-mn-row')).map(tr => tr.getAttribute('data-store'));
+    ok('„Днес“, регионален accounting: само своя (Шумен)', rowsR.join(',') === 'Шумен', rowsR.join(','));
+    const dNone = await todayCard(ADMIN, fakeDb({ movs: cpB(), settings: '' }));
+    ok('без включени обекти → картата я няма', dNone.innerHTML === '');
+    const dbErr = fakeDb({ movs: cpB(), settings: 'Гоце Делчев' });
+    const hE = env2(ADMIN, dbErr);
+    const of = hE.w.fetch;
+    hE.w.fetch = (url, init) => /minus_movements/.test(String(url)) ? Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({ message: 'boom' }), text: () => Promise.resolve('') }) : of(url, init);
+    hE.w.todayFilterStore = 'all';
+    hE.w.todayMinusiHtml(); await ticks(10);
+    const dE = hE.doc.createElement('div'); dE.innerHTML = hE.w.todayMinusiHtml();
+    ok('грешка при четене → червен ред „Непълни данни“, не празна карта', !!dE.querySelector('#td-minusi-err') && /Непълни данни/.test(dE.textContent) && !dE.querySelector('.td-mn-row'), dE.textContent);
   }
 
   report();

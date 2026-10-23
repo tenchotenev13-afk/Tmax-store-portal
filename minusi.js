@@ -65,7 +65,16 @@
    minus_reasons.requires_note (днес само „клиентска поръчка (номер/дата)")
    не се записва без „Бележка" — номерът и датата на поръчката. Вече записан
    ред с такава причина и празна бележка показва „попълни номер/дата" под
-   бележката и влиза в „само непопълнени". */
+   бележката и влиза в „само непопълнени".
+
+   Брояч и „Днес" (23.10.2026, решение на Тенчо): „непопълнен" = НЕЗАКРИТ
+   (calc.open) и mnUnfilled. Закритите не се броят. Обектът (manager / sklad)
+   вижда „➖ Минуси (N)" на под-бутона — зарежда се при отваряне на „Ревизии и
+   преоценка" (mnLoadBadge, вика го showModule) и се обновява при всяко
+   прерисуване на модула; без polling, без push от браузъра (CLAUDE.md т.14 —
+   известието е тема minus_unfilled в bulletin-notify, с копие на същото
+   изчисление). „Днес" (today.js) чете mnLoadSummary. Клик по push-а отваря
+   #mn → mnDeepLinkBoot. */
 
 var mnMovs = [];
 var mnReasons = [];
@@ -404,15 +413,9 @@ function loadMinusi(){
     if(seq !== mnLoadSeq) return;
     var bad = rs.filter(function(r){ return !r.ok; })[0];
     if(bad){ mnLoadErr = bad.error; mnRenderErr(); return; }
-    var row = rs[0].rows.filter(function(r){ return r && r.key === 'minus_stores'; })[0];
-    mnStoresOn = mnParseStores(row && row.value);
-    var rd = rs[0].rows.filter(function(r){ return r && r.key === 'minus_repeat_days'; })[0];
-    mnRepeatDays = mnParseRepeatDays(rd && rd.value);
+    mnApplyConfig(rs[0].rows, rs[2].rows, rs[3].rows);
     mnPlants = {};
     rs[1].rows.forEach(function(p){ mnPlants[mnCode(p.plant)] = p.store_name; });
-    mnReasons = rs[2].rows;
-    mnThresholds = {};
-    rs[3].rows.forEach(function(t){ mnThresholds[mnNormUom(t.uom)] = Number(t.min_qty); });
     if(mnIsStoreUser()) mnStore = currentUser.store_name || '';
     else if(mnStore !== MN_ALL && (!mnStore || mnStoreList().indexOf(mnStore) < 0)) mnStore = mnStoresOn.filter(function(s){ return mnStoreList().indexOf(s) >= 0; })[0] || mnStoreList()[0] || '';
     if(mnIsStoreUser() && !mnStoreOn(mnStore)){ mnMovs = []; mnRender(); return; }
@@ -429,6 +432,16 @@ function loadMinusi(){
       mnRender();
     });
   });
+}
+/* Настройките, причините и праговете — общо за loadMinusi и mnLoadSummary. */
+function mnApplyConfig(settingsRows, reasonsRows, thrRows){
+  var row = settingsRows.filter(function(r){ return r && r.key === 'minus_stores'; })[0];
+  mnStoresOn = mnParseStores(row && row.value);
+  var rd = settingsRows.filter(function(r){ return r && r.key === 'minus_repeat_days'; })[0];
+  mnRepeatDays = mnParseRepeatDays(rd && rd.value);
+  mnReasons = reasonsRows;
+  mnThresholds = {};
+  thrRows.forEach(function(t){ mnThresholds[mnNormUom(t.uom)] = Number(t.min_qty); });
 }
 function mnRenderErr(){
   var el = document.getElementById('mod-minusi');
@@ -463,10 +476,12 @@ function mnRender(){
   var h = mnTitle();
   if(mnIsStoreUser() && !mnStoreOn(mnStore)){
     el.innerHTML = h + '<div id="mn-off" class="card" style="color:#64748b;">Модулът още не е включен за вашия обект.</div>';
+    mnSetBadge(0);
     return;
   }
   if(mnIsCO()) h += mnUploadHtml();
   var calc = mnCompute(mnMovs, mnThresholds);
+  if(mnIsStoreUser()) mnSetBadge(calc.open.filter(mnUnfilled).length);
   h += '<div class="card" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">';
   if(mnIsCO()){
     h += '<label style="font-weight:600;">Обект:</label><select id="mn-store" onchange="mnSetStore(this.value)">';
@@ -797,4 +812,59 @@ function mnSave(id){
     toast('Записано');
     return true;
   });
+}
+
+/* ─── Брояч на под-бутона, „Днес", дълбока връзка ──────── */
+/* По обект: { store, open (незакрити), unfilled (незакрити и непопълнени),
+   over (свръхсторно) }. onlyStores — стесняване (обектът: само своя);
+   null = всички включени. { ok:false } при грешка в коя да е заявка или
+   непълни движения — по-добре „Непълни данни", отколкото грешно число. */
+function mnLoadSummary(onlyStores){
+  return Promise.all([
+    sbGetOk('app_settings', 'key=in.(minus_stores,minus_repeat_days)&select=key,value'),
+    sbGetOk('minus_reasons', 'select=id,label,active,sort,requires_note&order=sort.asc,id.asc'),
+    sbGetOk('minus_uom_thresholds', 'select=uom,min_qty')
+  ]).then(function(rs){
+    var bad = rs.filter(function(r){ return !r.ok; })[0];
+    if(bad) return { ok: false, error: bad.error };
+    mnApplyConfig(rs[0].rows, rs[1].rows, rs[2].rows);
+    var stores = mnStoresOn.filter(function(s){ return !onlyStores || onlyStores.indexOf(s) >= 0; });
+    if(!stores.length) return { ok: true, rows: [] };
+    var q = 'select=' + MN_MOV_COLS + '&store_name=in.(' + stores.map(encodeURIComponent).join(',') + ')&order=posting_date.asc,mat_doc.asc,doc_item.asc,id.asc';
+    return sbGetAll('minus_movements', q).then(function(movs){
+      if(movs.partial) return { ok: false, error: 'движенията не се заредиха изцяло' };
+      return { ok: true, rows: stores.map(function(s){
+        var c = mnCompute(movs.filter(function(m){ return m.store_name === s; }), mnThresholds);
+        return { store: s, open: c.open.length, unfilled: c.open.filter(mnUnfilled).length, over: c.over.length };
+      }) };
+    });
+  }).catch(function(e){ return { ok: false, error: String((e && e.message) || e) }; });
+}
+function mnSetBadge(n){
+  var b = document.getElementById('rvs-minusi');
+  if(!b) return;
+  n = n > 0 ? n : 0;
+  b.textContent = '➖ Минуси' + (n ? ' (' + n + ')' : '');
+  b.setAttribute('data-mn-n', String(n));
+}
+var mnBadgeSeq = 0;
+/* Само за обекта (manager / sklad); невключен обект → без брояч. Тихо: при
+   грешка бутонът остава без брояч, без toast. */
+function mnLoadBadge(){
+  if(!mnIsStoreUser()) return Promise.resolve();
+  var seq = ++mnBadgeSeq;
+  return mnLoadSummary([currentUser.store_name]).then(function(res){
+    if(seq !== mnBadgeSeq) return;
+    var r = res && res.ok ? res.rows[0] : null;
+    mnSetBadge(r ? r.unfilled : 0);
+  });
+}
+/* Клик по известието minus_unfilled → портала на #mn (след входа). */
+function mnDeepLinkBoot(hash){
+  var h = hash === undefined ? (window.location.hash || '') : hash;
+  if(h !== '#mn') return false;
+  if(typeof llClearUrlHash === 'function') llClearUrlHash();
+  if(!mnCanSee()) return false;
+  showModule('minusi');
+  return true;
 }

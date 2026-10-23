@@ -84,6 +84,7 @@ const TESTS = [
   'xlsx-real-datenf.test.js',
   'revision-schedule.test.js',
   'minusi.test.js',
+  'minusi-notify-sync.test.js',
   'picking.test.js',
   'picking-pallets.test.js',
   'picking-ship.test.js',

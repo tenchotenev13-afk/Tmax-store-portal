@@ -991,6 +991,7 @@ var NOTIF_IMPLEMENTED_TOPICS = [
   { key: 'promo_expiring',        fn: 'bulletin-notify' },
   { key: 'deadline_passed',       fn: 'bulletin-notify' },
   { key: 'loading_lists_pending', fn: 'bulletin-notify' },
+  { key: 'minus_unfilled',        fn: 'bulletin-notify' },
   { key: 'weekly_routed',         fn: 'send-routed-report' }
 ];
 /* Кой обслужва темата — низ или null. */

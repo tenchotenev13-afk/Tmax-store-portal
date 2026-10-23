@@ -9,6 +9,22 @@
 //   promo_expiring   — имейл/push за промоции, изтичащи днес (и до 3 дни в пон.)
 //   deadline_passed  — имейл до report_groups на задачата, 15 мин. след часа ѝ
 //   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
+//   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
+//
+// v13 (23.10.2026) — НОВА ТЕМА minus_unfilled (Минуси, решение на Тенчо
+//   23.10.2026). Push до обекта (tag store_name), делник 10:00 — Миглена качва
+//   MB51 около 08:40. Брои НЕЗАКРИТИТЕ минуси (FIFO 955 ← 956 по обект +
+//   материал, над прага за мерната единица), които са НЕПОПЪЛНЕНИ: без причина,
+//   повторение до minus_repeat_days дни без действие, или причина с
+//   requires_note без бележка. Закритите НЕ се броят. Само обектите от
+//   app_settings.minus_stores; N = 0 → нищо. Веднъж на ден на обект:
+//   ref_key 'minus:<обект>:<гггг-мм-дд>' в notification_log. Без имейл; НЕ
+//   влиза в седмичния имейл / send-scheduled-report / report.js.
+//   Изчислението е КОПИЕ на mnCompute + mnUnfilled от minusi.js (функциите
+//   mnu*) — tests/minusi-notify-sync.test.js ги пуска и двете върху едни и
+//   същи фикстури и пада, ако се разминат.
+//   sendPushFilters приема и url (по избор) — клик по известието отваря
+//   портала на #mn, тоест под-таба „➖ Минуси" (mnDeepLinkBoot в minusi.js).
 //
 // v12 (01.10.2026) — „🚫 НЕ СЕ ОТНАСЯ ЗА НАС"
 //   (task_completions.status='not_applicable'). Обектът, който физически няма
@@ -1539,10 +1555,12 @@ async function sendEmail(to: string, subject: string, html: string) {
   return res.ok;
 }
 
-async function sendPushFilters(filters: unknown[], title: string, message: string) {
+async function sendPushFilters(filters: unknown[], title: string, message: string, url?: string) {
+  const payload: Record<string, unknown> = { type: 'push', title: title, message: message, filters: filters };
+  if (url) payload.url = url;
   const res = await fetch(SEND_FN_URL, {
     method: 'POST', headers: SEND_HEADERS,
-    body: JSON.stringify({ type: 'push', title: title, message: message, filters: filters }),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) { console.error('push HTTP ' + res.status + ': ' + (await res.text())); }
   return res.ok;
@@ -2120,6 +2138,202 @@ async function runLoadingListsPending(supabase: any, topic: any, bg: any, dryRun
   };
 }
 
+/* ─────── ТЕМА: МИНУСИ — НЕЗАКРИТИ И НЕПОПЪЛНЕНИ ─────────────
+   Решение на Тенчо (23.10.2026). „Непопълнен" = незакрит минус (над прага за
+   мерната единица след FIFO закриване 955 ← 956 по обект + материал) и
+   (няма причина ИЛИ повторение до N дни без действие ИЛИ причина с
+   requires_note без бележка). Закритите НЕ се броят — те са история.
+
+   Функциите mnu* са КОПИЕ на mnCompute / mnPassThreshold / mnUnfilled от
+   minusi.js. Порталът няма как да ги изнесе в общ файл (ES5 в браузъра срещу
+   Deno тук), затова копие + тест, който пуска двете върху едни и същи
+   фикстури (tests/minusi-notify-sync.test.js). Сменя ли се правилото в
+   minusi.js, сменя се и тук — иначе тестът пада. */
+
+const MNU_EPS = 1e-9;
+const MNU_REPEAT_DEFAULT = 10;
+const MNU_LOOKALIKE: Record<string, string> = { 'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X' };
+
+function mnuRound(x: number): number { return Math.round(Number(x) * 1e6) / 1e6; }
+function mnuNormUom(u: unknown): string {
+  return String(u == null ? '' : u).trim().toUpperCase().replace(/\.+$/, '').replace(/[АВЕКМНОРСТХ]/g, (c) => MNU_LOOKALIKE[c]);
+}
+function mnuParseRepeatDays(v: unknown): number {
+  const s = String(v == null ? '' : v).trim();
+  if (!/^\d+$/.test(s)) return MNU_REPEAT_DEFAULT;
+  const n = parseInt(s, 10);
+  return n >= 1 ? n : MNU_REPEAT_DEFAULT;
+}
+function mnuParseStores(v: unknown): string[] {
+  return String(v == null ? '' : v).split(',').map((x) => x.trim()).filter(Boolean);
+}
+function mnuDays(a: string, b: string): number {
+  const pa = String(a).split('-'), pb = String(b).split('-');
+  return Math.round((Date.UTC(+pb[0], +pb[1] - 1, +pb[2]) - Date.UTC(+pa[0], +pa[1] - 1, +pa[2])) / 86400000);
+}
+function mnuCmp(a: any, b: any): number {
+  let x = String(a.posting_date).localeCompare(String(b.posting_date));
+  if (x) return x;
+  x = String(a.mat_doc).localeCompare(String(b.mat_doc), undefined, { numeric: true });
+  if (x) return x;
+  return String(a.doc_item).localeCompare(String(b.doc_item), undefined, { numeric: true });
+}
+function mnuPassThreshold(rest: number, uom: unknown, thr: Record<string, number>): boolean {
+  rest = mnuRound(rest);
+  if (!(rest > MNU_EPS)) return false;
+  const k = mnuNormUom(uom);
+  if (thr && Object.prototype.hasOwnProperty.call(thr, k)) return rest >= mnuRound(thr[k]) - MNU_EPS;
+  return true;
+}
+/* По обект → { open, unfilled, over }. needsNote — id-та на причините с
+   requires_note. Същото като calc.open.filter(mnUnfilled) в minusi.js. */
+function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: number, needsNote: string[]) {
+  const groups: Record<string, any> = {}, order: string[] = [];
+  for (const m of movs || []) {
+    const k = m.store_name + '\u0001' + m.material;
+    if (!groups[k]) { groups[k] = { store_name: m.store_name, r955: [], r956: [], s955: 0, s956: 0, uom: '' }; order.push(k); }
+    const g = groups[k], q = Number(m.qty) || 0;
+    if (String(m.mvt_type) === '955') { g.r955.push(m); g.s955 += q; if (m.uom) g.uom = m.uom; }
+    else if (String(m.mvt_type) === '956') { g.r956.push(m); g.s956 += q; if (!g.uom && m.uom) g.uom = m.uom; }
+  }
+  const out: Record<string, { open: number; unfilled: number; over: number }> = {};
+  for (const k of order) {
+    const g = groups[k];
+    const st = out[g.store_name] || (out[g.store_name] = { open: 0, unfilled: 0, over: 0 });
+    if (mnuRound(g.s955 + g.s956) < -MNU_EPS) st.over++;
+    const q956 = g.r956.slice().sort(mnuCmp);
+    const avail = q956.map((m: any) => mnuRound(-(Number(m.qty) || 0)));
+    let qi = 0;
+    const s955 = g.r955.slice().sort(mnuCmp);
+    s955.forEach((r: any, i: number) => {
+      let need = Number(r.qty) || 0;
+      while (need > MNU_EPS && qi < q956.length) {
+        if (!(avail[qi] > MNU_EPS)) { qi++; continue; }
+        const take = Math.min(need, avail[qi]);
+        need = mnuRound(need - take);
+        avail[qi] = mnuRound(avail[qi] - take);
+        if (!(avail[qi] > MNU_EPS)) qi++;
+      }
+      const rest = mnuRound(need);
+      if (!(rest > MNU_EPS) || !mnuPassThreshold(rest, r.uom, thr)) return; /* закрит или под прага */
+      st.open++;
+      const prev = i > 0 ? s955[i - 1] : null;
+      const repeat = !!prev && mnuDays(prev.posting_date, r.posting_date) <= repeatDays;
+      const noReason = r.reason_id == null;
+      const noAction = repeat && !String(r.action || '').trim();
+      const noNote = !noReason && needsNote.indexOf(String(r.reason_id)) >= 0 && !String(r.note || '').trim();
+      if (noReason || noAction || noNote) st.unfilled++;
+    });
+  }
+  return out;
+}
+
+/* Всички редове на страници по 1000 — PostgREST реже без грешка. Грешка на
+   коя да е страница → { error }, не частичен брой: по-добре нищо, отколкото
+   push с грешно число. */
+async function mnuFetchAll(supabase: any, stores: string[]) {
+  const cols = 'id,store_name,material,mvt_type,qty,uom,mat_doc,doc_item,posting_date,reason_id,note,action';
+  let all: any[] = [];
+  for (let off = 0; ; off += 1000) {
+    const { data, error } = await supabase.from('minus_movements').select(cols)
+      .in('store_name', stores).order('id', { ascending: true }).range(off, off + 999);
+    if (error) return { error: 'minus_movements: ' + (error.message || String(error)) };
+    all = all.concat(data || []);
+    if (!data || data.length < 1000) break;
+  }
+  return { rows: all };
+}
+
+async function buildMinusUnfilled(supabase: any, bg: ReturnType<typeof bgNow>) {
+  const set = await supabase.from('app_settings').select('key,value').in('key', ['minus_stores', 'minus_repeat_days']);
+  if (set.error) return { error: 'app_settings: ' + set.error.message };
+  const val = (k: string) => ((set.data || []).find((r: any) => r.key === k) || {}).value;
+  const stores = mnuParseStores(val('minus_stores'));
+  if (!stores.length) return { skip: 'Няма включени обекти (app_settings.minus_stores)' };
+  const repeatDays = mnuParseRepeatDays(val('minus_repeat_days'));
+
+  const rs = await supabase.from('minus_reasons').select('id,requires_note');
+  if (rs.error) return { error: 'minus_reasons: ' + rs.error.message };
+  const needsNote = (rs.data || []).filter((r: any) => r.requires_note === true).map((r: any) => String(r.id));
+
+  const th = await supabase.from('minus_uom_thresholds').select('uom,min_qty');
+  if (th.error) return { error: 'minus_uom_thresholds: ' + th.error.message };
+  const thr: Record<string, number> = {};
+  for (const t of th.data || []) thr[mnuNormUom(t.uom)] = Number(t.min_qty);
+
+  const mv = await mnuFetchAll(supabase, stores);
+  if ((mv as any).error) return { error: (mv as any).error };
+  const counts = mnuCountByStore((mv as any).rows, thr, repeatDays, needsNote);
+
+  const entries = stores.map((store) => {
+    const c = counts[store] || { open: 0, unfilled: 0, over: 0 };
+    return { store: store, n: c.unfilled, open: c.open, over: c.over, ref_key: 'minus:' + store + ':' + bg.dateStr };
+  });
+  return { entries: entries, stores: stores, repeat_days: repeatDays, rows_read: (mv as any).rows.length };
+}
+
+function minusPushText(n: number, store: string): string {
+  return '➖ Минуси: ' + n + ' непопълнени · ' + store;
+}
+
+async function runMinusUnfilled(supabase: any, topic: any, bg: any, dryRun: boolean) {
+  const built = await buildMinusUnfilled(supabase, bg);
+  if ((built as any).error) {
+    if (!dryRun) {
+      await supabase.from('notification_topics').update({
+        last_run_at: new Date().toISOString(), last_recipients: 0,
+        last_status: 'ГРЕШКА: ' + (built as any).error,
+      }).eq('key', topic.key);
+    }
+    return { topic: topic.key, error: (built as any).error, recipients: 0 };
+  }
+  if ((built as any).skip) return { topic: topic.key, skipped: (built as any).skip, recipients: 0 };
+
+  const all: any[] = (built as any).entries;
+  const todo = all.filter((e) => e.n > 0);
+  const planned = all.map((e) => ({
+    obekt: e.store, nepopalneni: e.n, nezakriti: e.open, svrahstorno: e.over,
+    ref_key: e.ref_key, text: e.n > 0 ? minusPushText(e.n, e.store) : null,
+  }));
+
+  if (dryRun) {
+    return {
+      topic: topic.key, dry_run: true, stores: (built as any).stores,
+      repeat_days: (built as any).repeat_days, rows_read: (built as any).rows_read,
+      recipients: todo.length, planned: planned,
+    };
+  }
+
+  let pushed = 0, failed = 0, skipped = 0;
+  for (const e of todo) {
+    /* Веднъж на ден на обект: редът е заявката за право да се прати. */
+    const ins = await supabase.from('notification_log')
+      .insert({ topic_key: topic.key, ref_key: e.ref_key, detail: e.n + ' непопълнени · ' + e.store });
+    if (ins.error) { skipped++; continue; }
+    let ok = false;
+    if (!topic.test_email) {
+      ok = await sendPushFilters(
+        [{ field: 'tag', key: 'store_name', relation: '=', value: e.store }],
+        '➖ Минуси', minusPushText(e.n, e.store), PORTAL_URL + '#mn');
+    }
+    if (ok) { pushed++; }
+    else {
+      failed++;
+      await supabase.from('notification_log').delete()
+        .eq('topic_key', topic.key).eq('ref_key', e.ref_key);
+    }
+  }
+
+  await supabase.from('notification_topics').update({
+    last_run_at: new Date().toISOString(),
+    last_recipients: pushed,
+    last_status: (failed ? 'ГРЕШКА: ' : 'ok: ') + pushed + ' обекта, ' + failed + ' неуспешни, '
+      + skipped + ' вече пратени днес' + (topic.test_email ? ' (тестов режим — без push)' : ''),
+  }).eq('key', topic.key);
+
+  return { topic: topic.key, obekti: pushed, failed: failed, already_sent: skipped, planned: planned };
+}
+
 /* ЕДИНСТВЕНИЯТ списък с темите, които имат строител. notification_topics
    държи единайсет реда; строители тук има за петте отдолу. Останалите са редове
    в базата и нищо повече — събудят ли се, връщат skipped.
@@ -2144,6 +2358,7 @@ const IMPLEMENTED_TOPICS = [
   { key: 'promo_expiring',  run: runPromoExpiring },
   { key: 'deadline_passed', run: runDeadlinePassed },
   { key: 'loading_lists_pending', run: runLoadingListsPending },
+  { key: 'minus_unfilled', run: runMinusUnfilled },
 ];
 
 async function runTopic(supabase: any, topic: any, bg: any, dryRun: boolean) {

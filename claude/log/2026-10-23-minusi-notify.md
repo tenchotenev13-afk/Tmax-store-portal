@@ -1,0 +1,8 @@
+# 23.10 — minusi-notify
+
+- Решения на Тенчо (23.10.2026): „непопълнен“ = НЕЗАКРИТ минус (`calc.open`) и `mnUnfilled` (без причина / повторение без действие / причина с `requires_note` без бележка); закритите не се броят. Известие — push до обекта, делник 10:00 (Миглена качва ~08:40), само при N > 0, веднъж на ден на обект, без имейл. Обектите не виждат „Днес“ → брояч на под-бутона. **Не влиза** в седмичния имейл, `send-scheduled-report` и `report.js` — решение, не пропуск.
+- `bulletin-notify` v13: тема `minus_unfilled` (`buildMinusUnfilled` / `runMinusUnfilled`, ред в `IMPLEMENTED_TOPICS`), копие на изчислението (`mnuCountByStore` и `mnu*`), страници по 1000, `notification_log` с `ref_key 'minus:<обект>:<дата>'`, push с `url` към `#mn`; `sendPushFilters` приема `url` по избор. `admin.js` — `NOTIF_IMPLEMENTED_TOPICS` + `minus_unfilled`; README на функциите.
+- Портал: `minusi.js` — `mnLoadSummary`, брояч `mnSetBadge` / `mnLoadBadge`, `mnDeepLinkBoot` (#mn); `shared.js` — броячът при отваряне на „Ревизии и преоценка“, нулиране при смяна на потребителя, #mn във веригата за дълбоки връзки; `today.js` — карта „➖ Минуси“ (обект · незакрити · непопълнени · свръхсторно; регионалният — само своите; грешка → „Непълни данни“).
+- Миграция `20261023091651_minusi_notify_topic` (приложена 23.10.2026, active = false) — ред в `notification_topics` (active = false), само данни → ред за Живко няма.
+- Тестове: `tests/minusi-notify-sync.test.js` (нов — портал ↔ реалния `.ts`, + build/run срещу фалшив клиент; мутации T1–T6 падат), `tests/minusi.test.js` секция 14 (брояч с истински клик, „Днес“; мутации P1–P5 падат).
+- SHA — комитът, който добавя този файл (`git log -- claude/log/2026-10-23-minusi-notify.md`).
