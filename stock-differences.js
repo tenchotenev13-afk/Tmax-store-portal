@@ -1965,6 +1965,26 @@ function sdDeleteReport(reportId){
     'Файлове: '+urls.length)) return;
   if(!confirm('Действието е НЕОБРАТИМО. Файловете също се изтриват.')) return;
 
+  /* (0) Съобщение от счетоводството, пуснато за сторно с ТАЗИ бланка, се
+     връща в „Отворено" ПРЕДИ всичко необратимо - иначе остава „🧾 Пуснато за
+     сторно" със счупен линк (Цветелина, 23.10.2026). Филтър по report_id, не
+     по заредения списък: той може да не е зареден. Провал → бланката НЕ се
+     трие (правило 13). Само за сторна - другите посоки не се свързват. */
+  var unlink = rep.direction === 'wrong_receipt'
+    ? sbPatch('storno_notes', 'report_id=eq.'+encodeURIComponent(reportId), { status:'open', report_id:null })
+    : Promise.resolve({ ok:true });
+  return unlink.then(function(res){
+    if(!res.ok){
+      toast('⚠️ Съобщението от счетоводството, свързано с бланката, НЕ е върнато в „Отворено": '+sbErrMsg(res)+' — бланката НЕ е изтрита','#dc2626');
+      return;
+    }
+    sdNotes.forEach(function(n){ if(String(n.report_id) === String(reportId)){ n.status = 'open'; n.report_id = null; } });
+    Object.keys(sdStornoNoteFail).forEach(function(k){ if(String(sdStornoNoteFail[k]) === String(reportId)) delete sdStornoNoteFail[k]; });
+    return sdDeleteReportFiles(reportId, urls);
+  });
+}
+/* (а)-(в) от sdDeleteReport - само след успешното (0). */
+function sdDeleteReportFiles(reportId, urls){
   /* (а) Файловете. Провал по един файл НЕ спира процеса — файл-сирак в
      Storage е безобиден, докато редове-сираци в базата не са. Броим ги и ги
      казваме накрая, вместо да мълчим. */
@@ -1990,7 +2010,7 @@ function sdDeleteReport(reportId){
     });
   });
 
-  Promise.all(fileJobs).then(function(){
+  return Promise.all(fileJobs).then(function(){
     /* (б) Редовете. count===0 е законен изход — бланка без редове. */
     return sbDelete('stock_differences','report_id=eq.'+reportId);
   }).then(function(res){
@@ -4570,7 +4590,10 @@ function sdNoteCardHtml(n){
   var h = '<div class="sd-note-card" id="sd-note-'+escAttr(n.id)+'" data-note-id="'+escAttr(n.id)+'" data-status="'+escAttr(n.status)+'" style="background:#fff;border:1px solid #e2e8f0;border-left:4px solid '+st[2]+';border-radius:8px;padding:10px 12px;margin-bottom:8px;">';
   h += '<div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center;">'+
     '<div style="font-size:13px;font-weight:600;">'+meta.join(' · ')+'</div>'+
-    '<span class="sd-note-status" style="background:'+st[1]+';color:'+st[2]+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+st[0]+'</span></div>';
+    '<span style="display:flex;gap:6px;align-items:center;">'+
+      '<span class="sd-note-status" style="background:'+st[1]+';color:'+st[2]+';padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600;">'+st[0]+'</span>'+
+      (sdNoteCanDelete() ? '<button class="sd-note-del" data-nid="'+escAttr(n.id)+'" onclick="sdNoteDelete(this.dataset.nid)" title="Изтрий съобщението и отговорите му — необратимо" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;cursor:pointer;">🗑 Изтрий</button>' : '')+
+    '</span></div>';
   h += '<div style="font-size:11px;color:#94a3b8;margin-top:2px;">✍️ '+esc(n.created_by)+' · '+sdFmtDateTime(n.created_at)+'</div>';
   h += '<div class="sd-note-body" style="font-size:13px;margin-top:6px;white-space:pre-wrap;">'+esc(n.body)+'</div>';
   h += sdNoteFilesHtml(n.files);
@@ -4755,6 +4778,31 @@ function sdNoteClose(id){
     Object.assign(n, patch);
     toast('✅ Затворено');
     renderStockDiff();
+  });
+}
+
+/* ── Изтриване (24.10.2026, решение на Тенчо): само Цвети и admin -
+   canSendDiffEmail(), същото „Цвети или admin" като имейла до доставчик.
+   Отговорите отиват с FK on delete cascade (cascade не минава през RLS -
+   проверено 24.10.2026; delete политика е нужна само на storno_notes, виж
+   storno-notes-delete-schema.sql). count 0 = нищо не е изтрито (липсва
+   политиката или вече го няма) - казва се, не се отчита като успех. ── */
+function sdNoteCanDelete(){ return canSendDiffEmail(); }
+function sdNoteDelete(id){
+  var n = sdNoteFind(id);
+  if(!n || !sdNoteCanDelete()) return Promise.resolve(false);
+  var nr = sdNoteReplies.filter(function(r){ return String(r.note_id) === String(n.id); }).length;
+  if(!confirm('Изтрий съобщението до '+n.store_name+(n.supplier ? ' ('+n.supplier+')' : '')+
+    (nr ? ' и '+nr+(nr === 1 ? ' отговор' : ' отговора') : '')+'?\n\nДействието е НЕОБРАТИМО.')) return Promise.resolve(false);
+  return sbDelete('storno_notes', 'id=eq.'+encodeURIComponent(n.id)).then(function(res){
+    if(!res.ok){ toast('Съобщението НЕ е изтрито: '+sbErrMsg(res),'#dc2626'); return false; }
+    if(res.count === 0){ toast('Съобщението НЕ е изтрито (0 реда — няма право за изтриване или вече го няма)','#dc2626'); return false; }
+    sdNotes = sdNotes.filter(function(x){ return x !== n; });
+    sdNoteReplies = sdNoteReplies.filter(function(r){ return String(r.note_id) !== String(n.id); });
+    delete sdStornoNoteFail[n.id];
+    toast('✅ Съобщението е изтрито');
+    renderStockDiff();
+    return true;
   });
 }
 

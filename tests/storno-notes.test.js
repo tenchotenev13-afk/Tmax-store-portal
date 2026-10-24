@@ -19,7 +19,23 @@
         при затворено / пуснато за сторно, sdNoteSendReply отказва;
      и) „Магазин" в „📝 Подай бланка" и „+ Добави ръчно" — loadReportableStores()
         за общия списък; складът вижда своя; „Обект изпращач" пази складовете;
-        редакция на запис с изключен обект пази стойността.
+        редакция на запис с изключен обект пази стойността;
+     к) „🗑 Изтрий" (24.10) — Цвети (admin и accounting с нейния имейл) на отворено,
+        пуснато и затворено; accounting, обектът и ЦО преглед — без <button>;
+     л) клик + confirm → DELETE storno_notes?id=eq.<id> (отговорите — cascade);
+        0 изтрити реда (няма политика) → червен toast, картата остава;
+        отказ → нищо; провал → червен toast, картата остава;
+     м) изтрита бланка за сторно → PATCH storno_notes?report_id=eq.<id>
+        {status:'open', report_id:null} ПРЕДИ двата DELETE; паднал PATCH →
+        нито един DELETE; бланка от друга посока — без PATCH.
+
+   Изтриване (к–м), 24.10.2026 — и шестте падат с exit 1:
+     X1 „🗑 Изтрий" за всички                                      → 4 ❌
+     X2 изтриване без confirm                                      → 3 ❌
+     X3 бланката се трие въпреки паднал PATCH                      → 2 ❌
+     X4 без PATCH на съобщението                                   → 6 ❌
+     X5 PATCH без report_id:null                                   → 1 ❌
+     X6 паднал DELETE → картата изчезва                             → 3 ❌
 
    Мутационна проверка (23.10.2026) — exit 1 при всички освен M6:
      M1 магазинът вижда чуждия обект (sdNoteVisible → true)        → 3 ❌
@@ -430,6 +446,115 @@ async function reply(h, id, text) {
     realClick(h.w, btn(mod(h), '📝 Подай бланка')); await settle();
     const el = h.doc.getElementById('diff-store');
     ok('склад: „Магазин" е собственият склад', !!el && el.value === 'Логистичен склад Търговище', el && (el.tagName + ':' + el.value));
+    h.close();
+  }
+
+  /* ── 24.10.2026: „🗑 Изтрий" (само Цвети и admin) и изтрита бланка за сторно ── */
+  const delBtn = (h, id) => { const c = card(h, id); return c ? c.querySelector('button.sd-note-del') : null; };
+  const showAll = h => { const chip = h.doc.getElementById('sd-notes-closed-chip'); if (chip && !h.w.sdNotesShowClosed) realClick(h.w, chip); };
+  const seqOf = h => { h.seq = []; const f = h.w.fetch; h.w.fetch = (u, i) => { h.seq.push(((i && i.method) || 'GET') + ' ' + String(u).replace(/^.*\/rest\/v1\//, '')); return f(u, i); }; };
+
+  section('к) „🗑 Изтрий" — Цвети/admin на отворено, пуснато и затворено; accounting и обектът — не');
+  {
+    const CVETI_ACC = Object.assign({}, CVETI, { role: 'accounting', assigned_stores: ['Троян', 'Враца'] });
+    for (const u of [CVETI, CVETI_ACC]) {
+      const h = env(u); await settle();
+      const n = h.w.sdNotes.find(x => x.id === 'n-vraca'); n.status = 'storno'; n.report_id = 'rep-x';
+      h.w.renderStockDiff(); showAll(h);
+      ok(u.role + ' Цвети: бутон на отворено', !!delBtn(h, 'n-troyan'));
+      ok(u.role + ' Цвети: бутон на пуснато за сторно', !!delBtn(h, 'n-vraca'));
+      ok(u.role + ' Цвети: бутон на затворено', !!delBtn(h, 'n-old'));
+      h.close();
+    }
+    for (const u of [ACC, MGR, VIEWER]) {
+      const h = env(u); await settle(); showAll(h);
+      const n = Array.prototype.filter.call(mod(h).querySelectorAll('.sd-note-card button'), b => /sdNoteDelete|Изтрий/.test(b.getAttribute('onclick') + b.textContent)).length;
+      ok(u.display_name + ': без „🗑 Изтрий" (<button>)', n === 0 && mod(h).querySelectorAll('.sd-note-card').length > 0, String(n));
+      h.close();
+    }
+  }
+
+  section('л) клик + confirm → DELETE storno_notes по id; отказ/провал → картата остава');
+  {
+    const h = env(CVETI); await settle();
+    realClick(h.w, delBtn(h, 'n-troyan')); await settle();
+    ok('поискано потвърждение (с броя отговори)', h.calls.confirm.length === 1 && /1 отговор/.test(h.calls.confirm[0]), h.calls.confirm.join(' | '));
+    ok('DELETE storno_notes?id=eq.n-troyan', h.calls.del.length === 1 && /storno_notes\?id=eq\.n-troyan$/.test(h.calls.del[0]), h.calls.del.join(' | '));
+    ok('без отделен DELETE на отговорите (cascade)', !h.calls.del.some(u => /storno_note_replies/.test(u)));
+    ok('картата изчезва', !card(h, 'n-troyan'));
+    ok('отговорите са махнати от паметта', !h.w.sdNoteReplies.some(r => r.note_id === 'n-troyan'));
+    ok('toast „✅ Съобщението е изтрито"', /✅ Съобщението е изтрито/.test(h.calls.toast.join(' | ')), h.calls.toast.join(' | '));
+    h.close();
+  }
+  {
+    const h = env(CVETI); await settle();
+    h.w.confirm = m => { h.calls.confirm.push(m); return false; };
+    realClick(h.w, delBtn(h, 'n-troyan')); await settle();
+    ok('отказ от confirm → нито един DELETE', h.calls.del.length === 0 && h.calls.confirm.length === 1);
+    ok('отказ → картата остава', !!card(h, 'n-troyan'));
+    h.close();
+  }
+  {
+    const h = env(CVETI, { fail: { DELETE: /storno_notes/ } }); await settle();
+    realClick(h.w, delBtn(h, 'n-troyan')); await settle();
+    ok('провал: DELETE е пратен', h.calls.del.length === 1);
+    ok('провал: червен toast', h.calls.toast.some(t => /НЕ е изтрито/.test(t)), h.calls.toast.join(' | '));
+    ok('провал: без „✅"', !h.calls.toast.some(t => /✅/.test(t)));
+    ok('провал: картата остава', !!card(h, 'n-troyan'));
+    h.close();
+  }
+  {
+    /* Без delete политика PostgREST връща 2xx и 0 изтрити реда. */
+    const h = env(CVETI); await settle();
+    h.w.sbDelete = () => Promise.resolve({ ok: true, count: 0 });
+    realClick(h.w, delBtn(h, 'n-troyan')); await settle();
+    ok('0 реда: червен toast „НЕ е изтрито"', h.calls.toast.some(t => /НЕ е изтрито \(0 реда/.test(t)), h.calls.toast.join(' | '));
+    ok('0 реда: картата остава', !!card(h, 'n-troyan'));
+    h.close();
+  }
+
+  section('м) изтрита бланка за сторно → съобщението обратно в „Отворено" ПРЕДИ триенето');
+  const REP_SN = { id: 'rep-sn', direction: 'wrong_receipt', store_name: 'Троян', counterpart: 'ТЕСИ ООД', document_number: 'ФК-111',
+    doc_date: '2026-10-23', submitted_by: 'Управител Троян', general_comment: '', created_at: '2026-10-23T10:00:00Z', reviewed: false, photos: [] };
+  async function delRep(h) {
+    h.w.diffReports = [JSON.parse(JSON.stringify(REP_SN))];
+    const n = h.w.sdNotes.find(x => x.id === 'n-troyan'); n.status = 'storno'; n.report_id = 'rep-sn';
+    h.w.renderStockDiff();
+    const b = mod(h).querySelector('button[onclick*="sdDeleteReport"][data-rid="rep-sn"]');
+    if (!ok('бутонът „🗑 Изтрий бланката" е на картата', !!b)) return;
+    seqOf(h);
+    realClick(h.w, b); await settle();
+  }
+  {
+    const h = env(CVETI); await settle();
+    await delRep(h);
+    const pi = h.seq.findIndex(s => /^PATCH storno_notes\?report_id=eq\.rep-sn$/.test(s));
+    const di = h.seq.findIndex(s => /^DELETE differences_reports\?id=eq\.rep-sn$/.test(s));
+    const si = h.seq.findIndex(s => /^DELETE stock_differences\?report_id=eq\.rep-sn$/.test(s));
+    ok('PATCH storno_notes по report_id', pi >= 0, h.seq.join(' | '));
+    const pb = (h.calls.patch.find(p => p.table === 'storno_notes') || {}).body || {};
+    ok('PATCH тяло {status:open, report_id:null}', pb.status === 'open' && pb.report_id === null && Object.keys(pb).length === 2, JSON.stringify(pb));
+    ok('PATCH ПРЕДИ двата DELETE', pi >= 0 && si > pi && di > si, h.seq.join(' | '));
+    const n = h.w.sdNotes.find(x => x.id === 'n-troyan');
+    ok('съобщението е отворено в паметта', n.status === 'open' && n.report_id === null);
+    h.close();
+  }
+  {
+    const h = env(CVETI, { fail: { PATCH: /storno_notes/ } }); await settle();
+    await delRep(h);
+    ok('провал на PATCH: нито един DELETE', h.calls.del.length === 0, h.calls.del.join(' | '));
+    ok('провал на PATCH: червен toast „НЕ е изтрита"', h.calls.toast.some(t => /бланката НЕ е изтрита/.test(t)), h.calls.toast.join(' | '));
+    ok('провал на PATCH: съобщението остава пуснато', h.w.sdNotes.find(x => x.id === 'n-troyan').status === 'storno');
+    h.close();
+  }
+  {
+    /* Бланка от друга посока — без PATCH по storno_notes. */
+    const h = env(CVETI, { dir: 'supplier' }); await settle();
+    h.w.diffReports = [Object.assign({}, REP_SN, { id: 'rep-sup', direction: 'supplier' })];
+    seqOf(h);
+    h.w.sdDeleteReport('rep-sup'); await settle();
+    ok('доставчик: без PATCH по storno_notes', !h.calls.patch.some(p => p.table === 'storno_notes'), h.seq.join(' | '));
+    ok('доставчик: бланката се трие', h.calls.del.some(u => /differences_reports\?id=eq\.rep-sup/.test(u)), h.calls.del.join(' | '));
     h.close();
   }
 
