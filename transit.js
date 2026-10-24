@@ -70,6 +70,51 @@ function transitCanMarkSent(r){
 function transitCanMarkReceived(r){
   return canEditTransit()&&(isGlobal()||transitIsReceiverOf(r));
 }
+/* Чака ли трансферът МЕН да го приема — точно условието, при което редът
+   получава „✅ Прието" / „✕ Неприето". ЕДНО място за бутоните, „за получ.",
+   филтъра „📥 Чакат мен" и банера (24.10.2026, Монтана: „11 за получ.", от
+   които 9 бяха изпратени ОТ обекта и чакаха другия). */
+function transitAwaitsMyReceive(r){
+  return !!r&&r.direction==='transfer'&&r.status==='sent'&&transitCanMarkReceived(r);
+}
+/* Изпратени от мен трансфери, по които ходът е на получателя. */
+function transitAwaitsOther(r){
+  return !!r&&r.direction==='transfer'&&r.status==='sent'&&transitIsSenderOf(r)&&!transitAwaitsMyReceive(r);
+}
+/* Влизане в модула през навигацията (showModule) — НЕ при презареждане след
+   клик. Има ли обектът трансфери за приемане, те са първото, което вижда:
+   подтаб „Трансфери" + филтър „📥 Чакат мен". Няма ли — нищо не се пипа.
+   transitOpenFocusSkip: „Отвори →" от Бюлетина (задачата е за входящите
+   доставки) иска модула както досега, без този скок. */
+var _transitFocusOnLoad = false;
+var transitOpenFocusSkip = false;
+function transitOpenFocus(){
+  _transitFocusOnLoad = !transitOpenFocusSkip;
+  transitOpenFocusSkip = false;
+}
+function transitApplyOpenFocus(){
+  if(!_transitFocusOnLoad) return;
+  _transitFocusOnLoad = false;
+  if(isGlobal()||!transitData.some(transitAwaitsMyReceive)) return;
+  transitDir='transfer'; transitFilter='mine';
+  transitStore=''; transitMonthFilter=''; transitSearch='';
+}
+/* Банерът над таблицата — само за обекта и само при брой > 0. */
+function transitStoreBannerHtml(){
+  if(isGlobal()) return '';
+  var n=transitData.filter(transitAwaitsMyReceive).length;
+  var m=transitData.filter(transitAwaitsOther).length;
+  var h='';
+  if(n){
+    h+='<div id="t-recv-note" style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:9px 14px;margin-bottom:8px;font-size:12.5px;color:#92400e;">'+
+      '📥 <b>'+n+'</b> '+(n===1?'трансфер чака да го приемете':'трансфера чакат да ги приемете')+'. Когато стоката пристигне, натиснете „'+T_STATUS.received.label+'“ или „'+T_STATUS.rejected.label+'“.</div>';
+  }
+  if(m){
+    h+='<div id="t-other-note" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;margin-bottom:8px;font-size:12px;color:#64748b;">'+
+      '📤 '+m+' ваш'+(m===1?' трансфер чака':'и трансфера чакат')+' другия обект.</div>';
+  }
+  return h;
+}
 
 /* Складов профил (role 'logistics' със store_name) вижда само редовете на
    своя склад. Връща името на склада или '' (admin, accounting, логистик без
@@ -155,6 +200,7 @@ function loadTransit(){
 /* ── RENDER ── */
 function renderTransit(){
   var wrap=document.getElementById('mod-transit');if(!wrap)return;
+  transitApplyOpenFocus();
   /* Ако полето за търсене е фокусирано в момента, запазваме позицията на
      курсора, за да не губи фокус потребителят на всяка натисната буква
      (цялата таблица се прерисува наново при всеки renderTransit()). */
@@ -204,6 +250,7 @@ function renderTransit(){
     var rows=transitData;
     if(dir==='incoming'||dir==='transfer'||dir==='outgoing') rows=rows.filter(function(r){return r.direction===dir;});
     if(status==='pending'||status==='received'||status==='rejected'||status==='sent') rows=rows.filter(function(r){return r.status===status;});
+    else if(status==='mine') rows=rows.filter(transitAwaitsMyReceive);
     if(transitStore&&transitOwnWarehouse()){
       /* Складовият профил има само своите редове (филтър на сървъра), затова
          магазинът в падащото меню е получателят - без supplier и без
@@ -255,7 +302,8 @@ function renderTransit(){
   h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:640px;">';
   [['all','📦📤 Всички',(transitData.length?'('+transitRows({dir:'all'}).length+')':'')],
    ['incoming','📦 Получавам','('+transitRows({dir:'incoming',status:'pending'}).length+' чакат)'],
-   ['transfer','🔄 Трансфери','('+transitRows({dir:'transfer',status:'pending'}).length+' за изпр. / '+transitRows({dir:'transfer',status:'sent'}).length+' за получ.)']].forEach(function(t){
+   /* „за получ." за обекта = редовете с „✅ Прието" за НЕГО (не и изпратените от него). Офисът и складовете — както досега. */
+   ['transfer','🔄 Трансфери','('+transitRows({dir:'transfer',status:'pending'}).length+' за изпр. / '+(isGlobal()?transitRows({dir:'transfer',status:'sent'}):transitRows({dir:'transfer',status:'mine'})).length+' за получ.)']].forEach(function(t){
     var active=transitDir===t[0];
     h+='<button onclick="transitDir=\''+t[0]+'\';renderTransit()" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';">'+t[1]+'<div style="font-size:10px;opacity:0.7;">'+t[2]+'</div></button>';
   });
@@ -265,7 +313,10 @@ function renderTransit(){
      атрибутът е data-tt-f (НЕ data-f — сблъсък с Разлики). Числото = редовете след клик на чипа. */
   h+='<div id="t-filters" class="filter-bar chips" style="margin:0 0 12px;">';
   h+='<span class="chips-label">Покажи:</span>';
-  [['pending','⏳ Не доставени',''],['sent','📤 Изпратена',''],['|'],['received','✅ Прието',' chip-hist'],['rejected','✕ Неприето',' chip-hist'],['all','Всички',' chip-hist']].forEach(function(f){
+  /* „📥 Чакат мен" — само за обекта и ВИНАГИ (и при 0): филтрите не изчезват според данните. */
+  var tChips=[['pending','⏳ Не доставени',''],['sent','📤 Изпратена','']];
+  if(!isGlobal()) tChips.push(['mine','📥 Чакат мен','']);
+  tChips.concat([['|'],['received','✅ Прието',' chip-hist'],['rejected','✕ Неприето',' chip-hist'],['all','Всички',' chip-hist']]).forEach(function(f){
     if(f[0]==='|'){h+='<span class="chips-sep"></span>';return;}
     var a=transitFilter===f[0];
     var cnt=transitRows({status:f[0]}).length;
@@ -305,6 +356,7 @@ function renderTransit(){
   h+='</div>';
 
   _transitVisible=list;
+  h+=transitStoreBannerHtml();
   h+=tReviewCounterHtml(list);
 
   /* Таблица */
@@ -366,7 +418,7 @@ function renderTransit(){
             h+='<span style="font-size:10px;color:#94a3b8;white-space:nowrap;">⏳ чака '+esc(r.supplier||'подателя')+'</span>';
           }
         } else if(r.status==='sent'){
-          if(transitCanMarkReceived(r)){
+          if(transitAwaitsMyReceive(r)){
             h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'received\')" style="border:none;background:#16a34a;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✅ Прието</button>';
             h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:none;background:#dc2626;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">✕ Неприето</button>';
           } else {

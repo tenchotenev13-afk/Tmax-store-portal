@@ -1906,7 +1906,7 @@ function showModule(mod){
   if(mod==='today')loadTodayDashboard();
   if(mod==='checklist')loadChecklist();
   if(mod==='contacts')loadContacts();
-  if(mod==='transit')loadTransit();
+  if(mod==='transit'){ if(typeof transitOpenFocus==='function') transitOpenFocus(); loadTransit(); } /* влизане → трансферите за приемане отпред (transit.js) */
   if(mod==='calendar')loadCalendar();
   if(mod==='stock-returns')loadStockReturns();
   if(mod==='revaluation'&&typeof loadRevaluation==='function')loadRevaluation();

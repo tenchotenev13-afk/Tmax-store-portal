@@ -1611,6 +1611,9 @@ function bulOpenPending(key){
       if(typeof sdDirTabsActive!=='function' || sdDirTabsActive()) sdDirTab='interstore';
       sdView='reports'; sdOnlyWaiting=true; sdStoreFilter=''; sdSearch='';
     }
+  } else if(key==='transit-auto'){
+    /* Задачата е за входящите доставки — без скока към „Чакат мен" в Трансфери. */
+    if(typeof transitOpenFocusSkip!=='undefined') transitOpenFocusSkip=true;
   } else if(key==='stock-returns-diff'||key==='stock-returns-complaint'){
     if(typeof srFilter!=='undefined'){ srTab=(key==='stock-returns-diff')?'diff':'complaint'; srFilter='needs'; }
   }
