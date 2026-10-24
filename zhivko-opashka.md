@@ -14,6 +14,11 @@
 
 ## Чака изпращане
 
+- 24.10 · storno_notes.notify_error — text, NULL, без default
+- 24.10 · storno_notes.notified_at — timestamptz, NULL, без default
+- 24.10 · storno_note_replies.notify_error — text, NULL, без default
+- 24.10 · storno_note_replies.notified_at — timestamptz, NULL, без default
+
 ## Потвърдено 24.10.2026
 
 - 21.10 · stock_differences.type — нова стойност 'storno' (text, без промяна в схемата)

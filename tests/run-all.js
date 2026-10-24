@@ -240,6 +240,7 @@ const TESTS = [
   'diff-return-completed.test.js',
   'sd-lipsa-priklyuchena.test.js',
   'storno-notes.test.js',
+  'storno-notes-notify.test.js',
   'sr-store-comment.test.js',
   'sr-diff-list-import.test.js',
   'sr-diff-no-plant.test.js',

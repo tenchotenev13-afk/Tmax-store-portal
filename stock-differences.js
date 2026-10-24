@@ -4436,9 +4436,13 @@ function closeDiffSubmitModal(){
    Цветелина, 23.10.2026: оперативният счетоводител пише на обекта свободен
    текст + документ, обектът отговаря; ако е реално сторно - „🧾 Направи
    сторно" отваря обичайната бланка за грешен прием. Без категории
-   „фактурирано/нефактурирано". Без известия (етап 2), без „Днес", Бюлетин,
-   report.js и Excel. Чек листът брои сторната както досега - през бланките.
-   Таблици: storno_notes, storno_note_replies (storno-notes-schema.sql).
+   „фактурирано/нефактурирано". Без „Днес", Бюлетин, report.js и Excel. Чек
+   листът брои сторната както досега - през бланките.
+   Етап 2 (24.10.2026): push + имейл при „Запиши" / „Изпрати" (бутон, не
+   зареждане - правило 14), виж sdNoteNotify. notify_error / notified_at на
+   записа; паднало → червен знак и „🔁 Прати пак".
+   Таблици: storno_notes, storno_note_replies (storno-notes-schema.sql,
+   storno-notes-notify-schema.sql).
 ══════════════════════════════════════════ */
 var sdNotes = [];            /* storno_notes, видими за потребителя */
 var sdNoteReplies = [];      /* storno_note_replies към тях */
@@ -4576,6 +4580,7 @@ function sdNoteCardHtml(n){
   if(n.status === 'closed' && n.closed_by){
     h += '<div style="font-size:11px;color:#64748b;margin-top:4px;">Затворено: '+esc(n.closed_by)+' · '+sdFmtDateTime(n.closed_at)+'</div>';
   }
+  h += sdNoteNotifyFlagHtml('note', n);
   if(sdStornoNoteFail[n.id]){
     h += '<div class="sd-note-fail" style="margin-top:6px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:6px;padding:6px 10px;font-size:12px;">⚠ Бланката за сторно е подадена, но съобщението не е отбелязано.'+
       (act ? ' <button data-nid="'+escAttr(n.id)+'" onclick="sdNoteRetryStorno(this.dataset.nid)" style="border:1px solid #dc2626;background:#fff;color:#dc2626;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;cursor:pointer;">Опитай пак</button>' : '')+
@@ -4585,7 +4590,7 @@ function sdNoteCardHtml(n){
     h += '<div style="margin-top:8px;border-top:1px dashed #e2e8f0;padding-top:6px;">'+reps.map(function(r){
       return '<div class="sd-note-reply" data-side="'+escAttr(r.side)+'" style="margin-bottom:6px;padding-left:8px;border-left:2px solid '+(r.side==='store'?'#93c5fd':'#5eead4')+';">'+
         '<div style="font-size:11px;color:#64748b;">'+esc(r.created_by)+' ('+esc(SD_NOTE_SIDE[r.side]||r.side)+') · '+sdFmtDateTime(r.created_at)+'</div>'+
-        '<div style="font-size:12.5px;white-space:pre-wrap;">'+esc(r.body)+'</div>'+sdNoteFilesHtml(r.files)+'</div>';
+        '<div style="font-size:12.5px;white-space:pre-wrap;">'+esc(r.body)+'</div>'+sdNoteFilesHtml(r.files)+sdNoteNotifyFlagHtml('reply', r)+'</div>';
     }).join('')+'</div>';
   }
   /* Отговор, прикачване и действия - само на ОТВОРЕНО съобщение (23.10.2026);
@@ -4701,17 +4706,20 @@ function sdNoteSubmit(){
     status: 'open',
     created_by: sdActor()
   };
-  sbPostReturn('storno_notes', data).then(function(res){
+  return sbPostReturn('storno_notes', data).then(function(res){
     if(!res.ok){ toast('Съобщението не е записано: '+sbErrMsg(res),'#dc2626'); return; }
-    sdNotes.unshift(Object.assign({}, data, res.row || {}));
+    var n = Object.assign({}, data, res.row || {});
+    sdNotes.unshift(n);
     closeSDNoteModal();
-    toast('✅ Съобщението е записано');
     /* Секцията е само в изгледа „Бланки за преглед" - записано от „Решени
        редове", съобщението иначе не се вижда никъде (на живо, 23.10.2026). */
     if(sdView !== 'reports'){ sdView = 'reports'; sdViewSave('reports'); }
     renderStockDiff();
     var sec = document.getElementById('sd-notes');
     if(sec && sec.scrollIntoView) sec.scrollIntoView({block:'start'});
+    /* Записът е важното и вече е направен; известието е отделно и падането
+       му не го връща назад (sdNoteNotify). */
+    return sdNoteNotify('note', n);
   });
 }
 
@@ -4726,12 +4734,13 @@ function sdNoteSendReply(id){
   if(!body){ toast('Напиши отговор','#dc2626'); return; }
   var k = String(id);
   var data = { note_id: n.id, body: body, files: (sdNoteFiles[k]||[]).slice(), side: sdNoteSide(), created_by: sdActor() };
-  sbPostReturn('storno_note_replies', data).then(function(res){
+  return sbPostReturn('storno_note_replies', data).then(function(res){
     if(!res.ok){ toast('Отговорът не е записан: '+sbErrMsg(res),'#dc2626'); return; }
-    sdNoteReplies.push(Object.assign({}, data, res.row || {}));
+    var r = Object.assign({}, data, res.row || {});
+    sdNoteReplies.push(r);
     sdNoteFiles[k] = [];
-    toast('✅ Отговорът е изпратен');
     renderStockDiff();
+    return sdNoteNotify('reply', r);
   });
 }
 
@@ -4784,6 +4793,142 @@ function sdNoteRetryStorno(id){
   var n = sdNoteFind(id);
   if(!n || !sdNoteCanAct(n)) return;
   sdNoteMarkStorno(n.id, rid);
+}
+
+/* ── Известия, етап 2 (24.10.2026, решение на Тенчо 23.10: push И имейл) ──
+   Тръгват САМО след натиснат бутон („Запиши" / „Изпрати" / „🔁 Прати пак"),
+   никога при зареждане (правило 14).
+   Кой получава:
+   · ново съобщение и отговор от счетоводител/ЦО → активните акаунти на обекта
+     с роля manager или sklad (касата - не);
+   · отговор от обекта → авторът на съобщението (users.display_name =
+     storno_notes.created_by). Не е намерен → грешка, не мълчание.
+   Отговорилият не получава за собствения си отговор.
+   Push: pushToPeople() по тага display_name - pushToStores() би стигнал и до
+   касата (тагът store_name е на всички акаунти на обекта). display_name е
+   уникален сред активните (проверено 24.10.2026).
+   Записът (POST) остава при всякакъв провал тук; провалът → notify_error +
+   червен знак „🔁 Прати пак" (правило 13, образец - Пикинг 2Б). */
+var SD_NOTE_STORE_ROLES = ['manager','sklad'];
+function sdNotePortalUrl(){ return typeof OS_PORTAL === 'string' ? OS_PORTAL : 'https://tenchotenev13-afk.github.io/Tmax-store-portal/'; }
+function sdNoteResMsg(r){ return (r && r.data && r.data.message) || ('HTTP ' + ((r && r.status) || '—')); }
+function sdNoteRecFind(kind, id){
+  var arr = kind === 'reply' ? sdNoteReplies : sdNotes;
+  return arr.find(function(x){ return String(x.id) === String(id); });
+}
+/* → {ok:true, rows:[{email, tag}], self:bool} | {ok:false, error}. sbGetOk, не
+   sbGet: паднала заявка не бива да изглежда като „няма получател". */
+function sdNoteRecipients(kind, rec, n){
+  var toStore = kind === 'note' || rec.side !== 'store';
+  var actor = rec.created_by;
+  var q = toStore
+    ? 'active=eq.true&select=email,display_name,role,store_name&store_name=eq.'+encodeURIComponent(n.store_name)+'&role=in.('+SD_NOTE_STORE_ROLES.join(',')+')'
+    : 'active=eq.true&select=email,display_name,role,store_name&display_name=eq.'+encodeURIComponent(n.created_by||'');
+  if(!toStore && (!n.created_by || n.created_by === actor)) return Promise.resolve({ ok:true, rows:[], self:true });
+  return sbGetOk('users', q).then(function(r){
+    if(!r.ok) return { ok:false, error:'получатели: '+r.error };
+    var out = [], seen = {};
+    r.rows.forEach(function(u){
+      if(toStore && (u.store_name !== n.store_name || SD_NOTE_STORE_ROLES.indexOf(u.role) < 0)) return;
+      if(!toStore && u.display_name !== n.created_by) return;
+      var tag = u.display_name || u.email;
+      if(!tag || tag === actor || seen[tag]) return;
+      seen[tag] = 1;
+      out.push({ email: String(u.email||'').trim(), tag: tag });
+    });
+    if(!out.length){
+      if(toStore) return { ok:false, error:'няма активен акаунт (управител/склад) на '+n.store_name };
+      return { ok:false, error:'авторът „'+n.created_by+'" не е намерен сред активните потребители' };
+    }
+    return { ok:true, rows: out };
+  });
+}
+function sdNoteMailSubject(n){ return 'Сторно — '+n.store_name+' · '+(n.supplier || 'без доставчик'); }
+function sdNoteMailHtml(kind, rec, n){
+  var row = function(k, v){
+    return '<tr><td style="padding:2px 10px 2px 0;font-size:12px;color:#64748b;">'+k+'</td>'+
+           '<td style="padding:2px 0;font-size:12px;font-weight:600;">'+v+'</td></tr>';
+  };
+  var who = esc(rec.created_by||'—') + (kind === 'reply' ? ' ('+esc(SD_NOTE_SIDE[rec.side]||rec.side)+')' : '');
+  var url = sdNotePortalUrl();
+  var body = '<div style="font-size:15px;font-weight:700;margin-bottom:8px;">'+(kind === 'reply' ? '💬 Отговор по съобщение за сторно' : '✍️ Ново съобщение от счетоводството')+'</div>'+
+    '<table style="border-collapse:collapse;margin-bottom:12px;">'+
+      row('Обект:', esc(n.store_name))+
+      row('Доставчик:', esc(n.supplier || 'без доставчик'))+
+      row('Документ:', esc(n.document_number || '—'))+
+      row('Пише:', who)+
+    '</table>'+
+    '<div style="font-size:13px;white-space:pre-wrap;border-left:3px solid #0f766e;padding:6px 10px;background:#f0fdfa;">'+esc(rec.body)+'</div>'+
+    (kind === 'reply' ? '<div style="font-size:11.5px;color:#64748b;margin-top:8px;">По съобщението на '+esc(n.created_by||'—')+':</div><div style="font-size:12px;white-space:pre-wrap;color:#475569;">'+esc(n.body)+'</div>' : '')+
+    '<p style="font-size:12px;margin-top:12px;">Отговор: портала → Разлики → 🧾 Сторна по грешен прием. <a href="'+url+'">'+url+'</a></p>';
+  return emailWrap(body, 'Разлики · ТеМАХ Вътрешна платформа');
+}
+/* Праща и записва резултата в реда (notify_error / notified_at). → true при успех. */
+function sdNoteNotify(kind, rec, isRetry){
+  var n = kind === 'reply' ? sdNoteFind(rec.note_id) : rec;
+  var saved = kind === 'reply' ? 'Отговорът е записан' : 'Съобщението е записано';
+  if(!n) return Promise.resolve(false);
+  var fail = function(e){ return { ok:false, status:0, data:{ message:String((e && e.message) || e) } }; };
+  var safe = function(fn){ try { return Promise.resolve(fn()).catch(fail); } catch(e){ return Promise.resolve(fail(e)); } };
+  var subject = sdNoteMailSubject(n);
+  var text = String(rec.body||'');
+  var msg = (rec.created_by||'') + ': ' + (text.length > 140 ? text.slice(0,140)+'…' : text);
+  var fromName = rec.created_by ? rec.created_by+' · ТеМАХ' : undefined;
+  toast('⏳ '+(isRetry ? 'Изпращам известието…' : saved+', изпращам известието…'),'#2563eb');
+  return sdNoteRecipients(kind, rec, n).then(function(rc){
+    if(!rc.ok) return { errs:[rc.error] };
+    if(rc.self) return { self:true, errs:[] };
+    var emails = rc.rows.map(function(x){ return x.email; }).filter(Boolean);
+    return Promise.all([
+      safe(function(){
+        if(typeof pushToPeople !== 'function') return { ok:false, status:0, data:{ message:'push.js не е зареден' } };
+        return pushToPeople(rc.rows.map(function(x){ return x.tag; }), subject, msg);
+      }),
+      safe(function(){
+        if(!emails.length) return { ok:false, status:0, data:{ message:'няма имейл' } };
+        if(typeof sendEmail !== 'function' || typeof emailWrap !== 'function') return { ok:false, status:0, data:{ message:'email.js не е зареден' } };
+        return sendEmail(emails, subject, sdNoteMailHtml(kind, rec, n), { from_name: fromName });
+      })
+    ]).then(function(rs){
+      var errs = [];
+      if(!rs[0] || !rs[0].ok) errs.push('push: '+sdNoteResMsg(rs[0]));
+      if(!rs[1] || !rs[1].ok) errs.push('имейл: '+sdNoteResMsg(rs[1]));
+      return { errs: errs, names: rc.rows.map(function(x){ return x.tag; }) };
+    });
+  }).then(function(r){
+    if(r.self){ toast('✅ '+saved); return true; }
+    var errs = r.errs;
+    var body = errs.length ? { notify_error: errs.join('; ') } : { notify_error: null, notified_at: new Date().toISOString() };
+    var table = kind === 'reply' ? 'storno_note_replies' : 'storno_notes';
+    return sbPatch(table, 'id=eq.'+encodeURIComponent(rec.id), body).then(function(res){
+      /* Провалът се показва и при паднал PATCH - на картата до презареждане. */
+      if(res.ok || errs.length) Object.assign(rec, body);
+      renderStockDiff();
+      if(errs.length){
+        toast((isRetry ? 'Известието пак НЕ тръгна' : saved+', но известието НЕ тръгна')+' ('+errs.join('; ')+') — „🔁 Прати пак" на картата','#dc2626');
+        return false;
+      }
+      if(!res.ok) toast('Известието е изпратено, но не е отбелязано: '+sbErrMsg(res),'#d97706');
+      else toast('✅ '+(isRetry ? 'Известието е изпратено' : (kind === 'reply' ? 'Отговорът е изпратен' : 'Съобщението е изпратено'))+' · '+r.names.join(', '));
+      return true;
+    });
+  });
+}
+/* „🔁 Прати пак" - авторът на записа, Цвети и admin. */
+function sdNoteCanRenotify(rec){
+  if(!currentUser || !rec) return false;
+  return currentUser.role === 'admin' || sdIsCveti() || (!!rec.created_by && rec.created_by === sdActor());
+}
+function sdNoteNotifyFlagHtml(kind, rec){
+  if(!rec || !rec.notify_error) return '';
+  return '<div class="sd-note-notify-err" data-kind="'+escAttr(kind)+'" data-id="'+escAttr(rec.id)+'" style="margin-top:6px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;border-radius:6px;padding:6px 10px;font-size:12px;">⚠️ Известието не тръгна: '+esc(rec.notify_error)+
+    (sdNoteCanRenotify(rec) ? ' <button class="sd-note-renotify" data-kind="'+escAttr(kind)+'" data-id="'+escAttr(rec.id)+'" onclick="sdNoteRenotify(this.dataset.kind,this.dataset.id)" style="border:1px solid #dc2626;background:#fff;color:#dc2626;border-radius:6px;padding:2px 8px;font-size:11px;font-weight:600;cursor:pointer;">🔁 Прати пак</button>' : '')+
+    '</div>';
+}
+function sdNoteRenotify(kind, id){
+  var rec = sdNoteRecFind(kind, id);
+  if(!rec || !sdNoteCanRenotify(rec)) return Promise.resolve(false);
+  return sdNoteNotify(kind, rec, true);
 }
 
 function submitDiffReport(){
