@@ -7,6 +7,9 @@ var sdDirTab = 'supplier'; /* 'supplier' | 'interstore' - разделя И но
 var sdEditId = null;
 var sdSearch = '';
 var sdStoreFilter = ''; /* точен филтър по магазин (чипове), отделен от свободното търсене */
+/* „Само чакащите мен" в „Бланки за преглед" — слага го „Отвори →" от Бюлетина
+   (bulOpenPending), маха го чипът над бланките или смяната на подтаб. */
+var sdOnlyWaiting = false;
 /* Два изгледа вместо две зони една под друга: 'reports' = бланки за преглед (по подразбиране),
    'rows' = решени редове (чипове по тип и статус, Excel, таблицата). Изборът се помни в
    localStorage (temax_sd_view), достъпът е в try/catch — блокиран localStorage не чупи екрана. */
@@ -456,6 +459,7 @@ function renderStockDiff() {
     /* Изглед „Бланки“: действията на магазините (само склад) + бланките за преглед. При 0 — празно състояние. */
     h += sdActionsCard();
     h += sdNotesSectionHtml();
+    h += sdOnlyWaitingBarHtml();
     var repHtml = renderDiffReportsSection();
     h += repHtml || '<div id="sd-reports-empty" style="text-align:center;padding:50px 20px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;margin-bottom:14px;"><div style="font-size:36px;">📭</div><div style="margin-top:8px;">Няма бланки за преглед</div></div>';
   } else {
@@ -779,6 +783,42 @@ function sdWaitingIds(){
   return m;
 }
 function sdResetWaitingCache(){ _sdWaitingIdsCache = null; }
+/* Бланките на обекта с поне един ред, който Бюлетинът брои в „⏳ N реда чакат
+   отговор" — по СЪЩОТО правило: bulDiffStoreWaiting() от bulletin.js (огледало
+   на stock_diff_store_done). НЕ sdMyWaitingLines: тя брои и 'sent'/'sent_sap'
+   (банерът „N реда чакат вашия отговор"), а бутонът идва от надписа в
+   Бюлетина и трябва да покаже неговите редове. Без bulletin.js (тест, който
+   вдига модула сам) — пада към sdMyWaitingLines: по-широко, но не крие чакащ
+   ред. */
+function sdBulWaitingReportIds(){
+  var ids = {};
+  if(!currentUser || isGlobal() || isLogisticsWarehouseUser()) return ids;
+  var rows;
+  if(typeof bulDiffStoreWaiting === 'function'){
+    var lines = (sdData||[]).map(function(l){
+      var rp = (diffReports||[]).find(function(x){ return x.id===l.report_id; });
+      return rp ? Object.assign({}, l, {differences_reports: rp}) : l;
+    });
+    rows = bulDiffStoreWaiting(lines, sdSwaps||[], currentUser.store_name);
+  } else {
+    rows = sdMyWaitingLines();
+  }
+  rows.forEach(function(l){ if(l && l.report_id!=null) ids[String(l.report_id)] = 1; });
+  return ids;
+}
+/* Чипът над „Бланки за преглед" — САМО за обекта и ВИНАГИ видим (и при 0):
+   изчезващ чип изглежда като счупен екран и не дава път обратно. */
+function sdOnlyWaitingBarHtml(){
+  if(sdWaitingVisible() === null) return '';
+  var n = Object.keys(sdBulWaitingReportIds()).length;
+  if(sdOnlyWaiting){
+    return '<div id="sd-only-waiting" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12.5px;font-weight:600;">'+
+      '📝 Показани са само бланките, които чакат вашия отговор ('+n+')'+
+      '<button id="sd-only-waiting-off" onclick="setSDOnlyWaiting(false)" style="border:1px solid #f59e0b;background:#fff;color:#92400e;border-radius:6px;padding:3px 10px;font-size:11.5px;font-weight:700;cursor:pointer;">Покажи всички бланки</button></div>';
+  }
+  return '<div id="sd-only-waiting" style="margin-bottom:12px;"><button id="sd-only-waiting-on" onclick="setSDOnlyWaiting(true)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:40px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">📝 Само чакащите мен ('+n+')</button></div>';
+}
+function setSDOnlyWaiting(on){ sdOnlyWaiting = !!on; renderStockDiff(); }
 /* Колко от ЧАКАЩИТЕ се виждат в текущия подтаб/филтри. null = този чип не е за
    този потребител (склад, офис). */
 function sdWaitingVisible(){
@@ -1685,7 +1725,7 @@ function setSDFilter(f) { sdFilter=f; renderStockDiff(); }
 function setSDTypeFilter(f) { sdTypeFilter=f; if(!sdTypeHasCompleted(f) && sdFilter==='completed') sdFilter='all'; renderStockDiff(); }
 /* Смяната на посока нулира филтъра по магазин - магазините в двата таба са
    различни набори и запазен чип от другия таб би дал празен екран. */
-function setSDDirTab(t) { sdDirTab=t; sdStoreFilter=''; renderStockDiff(); }
+function setSDDirTab(t) { sdDirTab=t; sdStoreFilter=''; sdOnlyWaiting=false; renderStockDiff(); }
 function setSDStoreFilter(s) { sdStoreFilter=s||''; renderStockDiff(); }
 function sdClearFilters(){ sdStoreFilter=''; sdSearch=''; renderStockDiff(); }
 /* Пре-рендира при търсене, но запазва фокуса/позицията на курсора в полето -
@@ -3348,6 +3388,11 @@ function sdFilteredReports(){
      двата потока да не се смесват в един списък). */
   if(sdDirTabsActive()){
     unreviewed = unreviewed.filter(function(r){ return (r.direction||'supplier') === sdDirTab; });
+  }
+  /* „Само чакащите мен" (sdOnlyWaitingBarHtml) — бланките с ред, който Бюлетинът брои. */
+  if(sdOnlyWaiting){
+    var waitIds = sdBulWaitingReportIds();
+    unreviewed = unreviewed.filter(function(r){ return waitIds[String(r.id)] === 1; });
   }
   /* Чип по магазин + свободно търсене - същите контроли като за таблицата
      по-долу, за да не се търси на две различни места. */

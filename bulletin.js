@@ -1454,23 +1454,7 @@ function bulLoadDiffPending(){
   ]).then(function(res){
     var lines=Array.isArray(res[0])?res[0]:[];
     var swaps=Array.isArray(res[1])?res[1]:[];
-    /* Ходът е мой: 'linked' и аз съм изпращач, или 'sent' и аз съм получател.
-       Ключът е по РЕД, защото редът трябва да е в МОЯ бланка. */
-    var myMove={};
-    swaps.forEach(function(x){
-      if(!x) return;
-      if(x.status==='linked' && x.from_store===store) myMove[String(x.from_line_id)]=1;
-      if(x.status==='sent'   && x.to_store===store)   myMove[String(x.to_line_id)]=1;
-    });
-    var n=lines.filter(function(l){
-      /* ФИЛТРИТЕ СЕ ПРОВЕРЯВАТ И ТУК, не само в заявката: върне ли тя повече
-         (друг обект, прегледана бланка, доставчикова посока), броят лъже. */
-      var r=l && l.differences_reports;
-      if(!r || r.store_name!==store || r.reviewed || r.direction!=='interstore') return false;
-      if(myMove[String(l.id)]) return true;
-      return bulDiffLineWaitsStore(l);
-    }).length;
-    bulAutoPending['stock-diff']=n;
+    bulAutoPending['stock-diff']=bulDiffStoreWaiting(lines, swaps, store).length;
     renderBulletin();
   });
 }
@@ -1480,6 +1464,30 @@ function bulLoadDiffPending(){
    заявката горе тегли и difference_category. */
 function bulDiffLineWaitsStore(l){
   return diffLineWaitsStore(l);
+}
+/* Редовете, които броят „⏳ N реда чакат отговор" — ЕДНО място за правилото
+   (огледало на stock_diff_store_done). Изнесено от bulLoadDiffPending на
+   24.10.2026, защото „Отвори →" в Разлики (sdBulWaitingReportIds в
+   stock-differences.js) трябва да покаже ТОЧНО тези редове: трето копие на
+   условието би се разминало мълчаливо. Всеки ред носи вложената си бланка
+   (l.differences_reports: id, store_name, reviewed, direction). */
+function bulDiffStoreWaiting(lines, swaps, store){
+  /* Ходът е мой: 'linked' и аз съм изпращач, или 'sent' и аз съм получател.
+     Ключът е по РЕД, защото редът трябва да е в МОЯ бланка. */
+  var myMove={};
+  (swaps||[]).forEach(function(x){
+    if(!x) return;
+    if(x.status==='linked' && x.from_store===store) myMove[String(x.from_line_id)]=1;
+    if(x.status==='sent'   && x.to_store===store)   myMove[String(x.to_line_id)]=1;
+  });
+  return (lines||[]).filter(function(l){
+    /* ФИЛТРИТЕ СЕ ПРОВЕРЯВАТ И ТУК, не само в заявката: върне ли тя повече
+       (друг обект, прегледана бланка, доставчикова посока), броят лъже. */
+    var r=l && l.differences_reports;
+    if(!r || r.store_name!==store || r.reviewed || r.direction!=='interstore') return false;
+    if(myMove[String(l.id)]) return true;
+    return bulDiffLineWaitsStore(l);
+  });
 }
 /* ═══════ ПОЛЕТО „ОПИСАНИЕ" ══════════════════════════════════════════════
    От 28.09.2026 е textarea, не input: описанията са по няколко изречения и в
@@ -1591,7 +1599,18 @@ function bulAutoTransitNoteHtml(t, done, opts){ return bulAutoNoteHtml(t, done, 
    другите модули се пипат само ако модулът е зареден (typeof). */
 function bulOpenPending(key){
   if(key==='stock-diff'){
-    if(typeof sdFilter!=='undefined'){ sdView='rows'; sdFilter='waiting'; sdTypeFilter='all'; }
+    /* Чакащите редове са по НЕПРЕГЛЕДАНИ МЕЖДУСКЛАДОВИ бланки (правилото
+       bulDiffStoreWaiting) и днес всичките са без тип (24.10.2026: 14 от 14),
+       тоест в изгледа „Решени редове" (sdTableRows) ги няма — до 24.10 бутонът
+       водеше там и показваше „Чакат моя отговор (0)" (Монтана). Картата в
+       „Бланки за преглед" показва ВСИЧКИ редове на бланката, с и без тип,
+       значи там нито един чакащ ред не остава невидим. Филтърът
+       sdOnlyWaiting оставя само тези бланки; чипът над тях го маха.
+       Магазин и търсене се изчистват — иначе биха скрили чакащото. */
+    if(typeof sdView!=='undefined'){
+      if(typeof sdDirTabsActive!=='function' || sdDirTabsActive()) sdDirTab='interstore';
+      sdView='reports'; sdOnlyWaiting=true; sdStoreFilter=''; sdSearch='';
+    }
   } else if(key==='stock-returns-diff'||key==='stock-returns-complaint'){
     if(typeof srFilter!=='undefined'){ srTab=(key==='stock-returns-diff')?'diff':'complaint'; srFilter='needs'; }
   }

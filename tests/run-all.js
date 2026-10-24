@@ -213,6 +213,7 @@ const TESTS = [
   'auto-modules-registry.test.js',
   'stock-returns-per-source.test.js',
   'bul-pending-hint.test.js',
+  'bul-pending-open.test.js',
   'sr-created-by-store.test.js',
   'sr-created-by.test.js',
   'sd-created-by.test.js',

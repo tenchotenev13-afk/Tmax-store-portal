@@ -11,8 +11,9 @@
      „План за деня", със СЪЩИЯ текст;
    · „Отвори →" е само в главния списък; в календара и плана бутонът към
      модула поема филтъра (без втори бутон);
-   · клик → showModule с правилния модул; Разлики → „Решени редове" +
-     „Чакат моя отговор"; „За връщане" → подтаб diff + „Без актуализация";
+   · клик → showModule с правилния модул; Разлики → междускладови +
+     „Бланки за преглед" + само чакащите (от 24.10.2026, подробно в
+     bul-pending-open.test.js); „За връщане" → подтаб diff + „Без актуализация";
      Зареждане → само модулът (филтър там няма);
    · отметната задача → „✓ от …", без бутон и без забележимия вид;
    · брой null (заявката не е минала) → „⏳ отмята се от …", без число, без
@@ -151,21 +152,22 @@ const calModBtn = (h, linked) => (cal(h) || h.doc).querySelector('button[data-mo
       if (!h) continue;
       const seen = [];
       h.w.showModule = function (m) { seen.push(m); };
-      h.w.sdFilter = 'pending'; h.w.sdView = 'reports'; h.w.srFilter = 'pending'; h.w.srTab = 'complaint';
+      h.w.sdFilter = 'pending'; h.w.sdView = 'rows'; h.w.sdDirTab = 'supplier'; h.w.sdOnlyWaiting = false; h.w.srFilter = 'pending'; h.w.srTab = 'complaint';
       const b = mainRow(h, id) && mainRow(h, id).querySelector('button.bul-auto-open');
       if (!ok(id + ': бутонът го има', !!b)) continue;
       realClick(h.w, b);
       ok(id + ': showModule("' + MOD[id] + '") точно веднъж', seen.length === 1 && seen[0] === MOD[id], seen.join(','));
       if (id === 'r-sd') {
-        ok('Разлики: филтър „Чакат моя отговор"', h.w.sdFilter === 'waiting', h.w.sdFilter);
-        ok('Разлики: изгледът „Решени редове" (там е чипът)', h.w.sdView === 'rows', h.w.sdView);
+        ok('Разлики: подтабът „междускладови"', h.w.sdDirTab === 'interstore', h.w.sdDirTab);
+        ok('Разлики: изгледът „Бланки за преглед"', h.w.sdView === 'reports', h.w.sdView);
+        ok('Разлики: само чакащите', h.w.sdOnlyWaiting === true, String(h.w.sdOnlyWaiting));
       }
       if (id === 'r-srd') {
         ok('„За връщане": подтабът „По разлики"', h.w.srTab === 'diff', h.w.srTab);
         ok('„За връщане": филтър „Без актуализация"', h.w.srFilter === 'needs', h.w.srFilter);
       }
       if (id === 'r-sup') {
-        ok('Зареждане: чуждите филтри не са пипнати', h.w.sdFilter === 'pending' && h.w.srFilter === 'pending');
+        ok('Зареждане: чуждите филтри не са пипнати', h.w.sdView === 'rows' && h.w.sdOnlyWaiting === false && h.w.srFilter === 'pending');
       }
     }
     /* Бутонът към модула в календара — същото. */
