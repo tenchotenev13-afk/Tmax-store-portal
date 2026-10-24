@@ -2,7 +2,8 @@
 -- съобщение (решение на Тенчо 24.10.2026; Цветелина 23.10 „Тези уж ги изтрих,
 -- ама стоят скрити").
 -- Огледало на миграцията supabase/migrations/20261024150000_storno_notes_delete.sql
--- (+ _down.sql); версията в базата се дописва след apply_migration.
+-- (+ _down.sql); приложена 24.10.2026 с apply_migration, версия в базата 20261024133040
+-- (проверено в pg_policies: storno_notes_delete, DELETE, {anon}, using true).
 --
 -- ЗАЩО. Етап 1 нарочно беше без delete политика. „🗑 Изтрий" на картата
 -- (sdNoteDelete в stock-differences.js) — само Цвети и admin
