@@ -1549,7 +1549,23 @@ function bulDescPaste(ev){
    решава нищо, отметката идва от базата.
    Класът на модула се пази (`bul-auto-transit`), защото tests/transit-auto-
    complete.test.js се закача за него; новият `bul-auto-note` е общият. */
-function bulAutoNoteHtml(t, done, kind){
+/* „Чака ли нещо обекта" — по СЪЩИЯ брояч, по който се пише текстът отдолу.
+   null/липсва (не е зареден, заявката е паднала) → НЕ: 0 от провалена заявка
+   не е „нищо не чака", но не е и „чака" — тогава остава старият надпис. */
+function bulAutoHasPending(key){
+  var am = bulAutoModuleOf(key);
+  if(!am) return false;
+  var n = bulAutoPending[key];
+  if(am.progress) return !!(n&&typeof n==='object'&&n.total>0&&n.done<n.total);
+  return !!am.unit && typeof n==='number' && n>0;
+}
+/* opts.button === false — без „Отвори": календарът и „План за деня" вече
+   имат бутон към модула и той поема филтъра (bulLinkedBtnClick). Главният
+   списък няма такъв бутон, затова там „Отвори" стои до надписа.
+   При чакащо (bulAutoHasPending) надписът е ЗАБЕЛЕЖИМ (22.10.2026: 16 от 19
+   хикса на 21.10 са по автоматичните задачи — обектите не са знаели, че нещо
+   ги чака). Текстовете са същите, само видът е друг. */
+function bulAutoNoteHtml(t, done, kind, opts){
   if(!t||isGlobal()) return '';
   var key = kind==='recurring' ? (t.linked_module||'') : bulTaskLinkKey(t);
   var am = bulAutoModuleOf(key);
@@ -1559,10 +1575,34 @@ function bulAutoNoteHtml(t, done, kind){
   else if(am.progress&&n&&typeof n==='object'&&n.total>0) txt='⏳ попълнено '+n.done+' от '+n.total+' '+(n.total===1?am.progress[0]:am.progress[1]);
   else if(typeof n==='number'&&n>0&&am.unit) txt='⏳ '+n+' '+(n===1?am.unit[0]:am.unit[1]);
   else txt='⏳ отмята се от '+am.tab;
+  if(!done && bulAutoHasPending(key)){
+    var withBtn = !(opts && opts.button===false);
+    return '<span class="bul-auto-note '+am.cls+' bul-auto-pending" style="display:inline-block;font-size:12px;font-weight:700;color:#92400e;background:#fef3c7;border:1px solid #f59e0b;border-radius:6px;padding:2px 8px;margin-top:4px;">'+txt+'</span>'+
+      (withBtn ? ' <button class="bul-auto-open" data-linked="'+escAttrVal(key)+'" onclick="bulOpenPending(this.dataset.linked)" style="margin-top:4px;border:1px solid #f59e0b;background:#fff;color:#92400e;border-radius:6px;padding:2px 10px;font-size:11.5px;font-weight:700;cursor:pointer;">Отвори →</button>' : '');
+  }
   return '<span class="bul-auto-note '+am.cls+'" style="display:block;font-size:10px;font-weight:600;color:'+(done?'#16a34a':'#b45309')+';margin-top:2px;">'+txt+'</span>';
 }
 /* Запазено име — викачите за ЕДНОКРАТНИ задачи минават през него. */
-function bulAutoTransitNoteHtml(t, done){ return bulAutoNoteHtml(t, done, 'regular'); }
+function bulAutoTransitNoteHtml(t, done, opts){ return bulAutoNoteHtml(t, done, 'regular', opts); }
+/* Отваря модула на автоматичната задача с филтъра „чака мен", където той
+   съществува: Разлики — изгледът „Решени редове" + „📝 Чакат моя отговор";
+   „За връщане" — подтабът на source-а + „Без актуализация". За останалите
+   (Стока на път, Зареждане) — само модулът: филтър там няма. Глобалните на
+   другите модули се пипат само ако модулът е зареден (typeof). */
+function bulOpenPending(key){
+  if(key==='stock-diff'){
+    if(typeof sdFilter!=='undefined'){ sdView='rows'; sdFilter='waiting'; sdTypeFilter='all'; }
+  } else if(key==='stock-returns-diff'||key==='stock-returns-complaint'){
+    if(typeof srFilter!=='undefined'){ srTab=(key==='stock-returns-diff')?'diff':'complaint'; srFilter='needs'; }
+  }
+  /* 'transit-auto' е ключ на задача (bulTaskLinkKey), не име на таб. */
+  showModule(key==='transit-auto' ? 'transit' : linkedModuleTab(key));
+}
+/* onclick на съществуващия бутон към модула (календар, „План за деня"):
+   при чакащо и НЕотметнато — с филтъра, иначе както досега. */
+function bulLinkedBtnClick(key, done){
+  return (!isGlobal() && !done && bulAutoHasPending(key)) ? 'bulOpenPending(this.dataset.linked)' : 'showModule(this.dataset.mod)';
+}
 /* completed_by на автоматичната отметка е служебен низ, не име на човек. */
 function bulCompletedByLabel(v){
   if(v==='auto:transit') return 'автоматично от Стока на път';
@@ -1985,10 +2025,13 @@ function bulPlanRowHtml(it, store, weekArr){
      обект идва текстът на ТОЗИ обект, не списъкът с всички. */
   if(isRec&&store){ var sh=bulStoreHintsOf(t)[store]; if(sh) h+=bulStoreHintBoxHtml('Жокер за '+store, sh, false); }
   if(comp&&(comp.comment||(comp.photos&&comp.photos.length)||(comp.files&&comp.files.length))) h+=renderCompletionExtras(comp);
+  /* Колко чака обекта по автоматичната задача — същият надпис като в главния
+     списък, без втори бутон: бутонът отдясно поема филтъра (bulLinkedBtnClick). */
+  if(!it.carried&&!it.notice&&!it.naComp) h+=bulAutoNoteHtml(t, done, isRec?'recurring':'regular', {button:false});
   h+='</div>';
   /* Бутонът към свързания таб — същият, който е и в календара. */
   if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
-    h+='<button data-mod="'+linkedModuleTab(t.linked_module)+'" onclick="showModule(this.dataset.mod)" style="flex-shrink:0;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 9px;font-size:10.5px;cursor:pointer;white-space:nowrap;">'+esc(linkedModuleLabel(t.linked_module))+' →</button>';
+    h+='<button data-mod="'+linkedModuleTab(t.linked_module)+'" data-linked="'+escAttrVal(lockKey)+'" onclick="'+bulLinkedBtnClick(lockKey,done)+'" style="flex-shrink:0;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 9px;font-size:10.5px;cursor:pointer;white-space:nowrap;">'+esc(linkedModuleLabel(t.linked_module))+' →</button>';
   }
   /* „🚫 Не се отнася" / „↩ Отмени заявката" — пренесеното явяване го няма:
      то вече е преместена работа, а не „не важи за нас". */
@@ -2918,7 +2961,7 @@ function renderBulView(){
           /* Прозорецът се изписва и на обекта: без него задачата изглежда като
              три отделни задължения, а заключеният чекбокс на другите дни — като
              счупен. „(28.9–30.9)" казва точно защо е заключен. */
-          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(taskIsWindow(t)?'<span style="font-size:9px;color:#94a3b8;font-weight:400;"> ('+taskDueLabel(t)+')</span>':'')+(carReg?bulCarriedMiniHtml(carReg):'')+bulAutoTransitNoteHtml(t,doneReg)+'</span>';
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneReg?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(taskIsWindow(t)?'<span style="font-size:9px;color:#94a3b8;font-weight:400;"> ('+taskDueLabel(t)+')</span>':'')+(carReg?bulCarriedMiniHtml(carReg):'')+bulAutoTransitNoteHtml(t,doneReg,{button:false})+'</span>';
         }
         html+='</div>';
         /* „🗓 Срок ДД.ММ · С41" — същият надпис, който носеше лентата. Без него
@@ -2926,7 +2969,7 @@ function renderBulView(){
         if(taskSpansWeeks(t)) html+=bulSpanBadgeRowHtml(t,dateStr);
         if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
           var lbl=linkedModuleLabel(t.linked_module);
-          if(lbl)html+='<button data-mod="'+linkedModuleTab(t.linked_module)+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lbl)+' →</button>';
+          if(lbl)html+='<button data-mod="'+linkedModuleTab(t.linked_module)+'" data-linked="'+escAttrVal(bulTaskLinkKey(t))+'" onclick="'+bulLinkedBtnClick(bulTaskLinkKey(t),doneReg)+'" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lbl)+' →</button>';
         }
       });
       recItems.forEach(function(t){
@@ -2955,12 +2998,12 @@ function renderBulView(){
           var doneRec=recWinComp?true:(store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===recCdate;}));
           html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(recWinComp?winDoneAttr(recWinComp):bulLockAttr(recCdate,t.linked_module))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(recWinComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(recCdate,t.linked_module))+'">';
           var carRec=bulCarriedInto('recurring',t.id,store,recCdate||dateStr);
-          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carRec?bulCarriedMiniHtml(carRec):'')+'</span>';
+          html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carRec?bulCarriedMiniHtml(carRec):'')+(dateStr===bulTodayISO()?bulAutoNoteHtml(t,doneRec,'recurring',{button:false}):'')+'</span>';
         }
         html+='</div>';
         if(t.linked_module&&linkedModuleAllowed(t.linked_module)){
           var lblRec=linkedModuleLabel(t.linked_module);
-          if(lblRec)html+='<button data-mod="'+linkedModuleTab(t.linked_module)+'" onclick="showModule(this.dataset.mod)" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lblRec)+' →</button>';
+          if(lblRec)html+='<button data-mod="'+linkedModuleTab(t.linked_module)+'" data-linked="'+escAttrVal(t.linked_module)+'" onclick="'+bulLinkedBtnClick(t.linked_module,doneRec)+'" style="margin:2px 0 4px 16px;border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:4px;padding:2px 8px;font-size:10.5px;cursor:pointer;">'+esc(lblRec)+' →</button>';
         }
       });
       carItems.forEach(function(r){ html+=isGlobal()?bulCarriedCalGlobalHtml(r):bulCarriedCalRowHtml(r,dept.color); });
