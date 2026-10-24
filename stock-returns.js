@@ -140,16 +140,59 @@ function srDueFromTasks(tasks, monISO){
   return out;
 }
 function srDueFor(r){ return srDueBySource[(r&&r.source)||'diff'] || null; }
+/* Заглавието на задачата за всеки подтаб — за банера (24.10.2026, Монтана:
+   банерът назоваваше „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ", задача, която вече я
+   няма). От същите задачи и версии за седмицата като срока; за обекта —
+   само задача, която той дължи (target_stores) и не е изключена за
+   седмицата (recurring_task_skips). Няма ли — в банера изречение за
+   Бюлетина няма. */
+var srTaskTitleBySource = {};
+function srTitleFromTasks(tasks, store, skips){
+  var out={};
+  (tasks||[]).forEach(function(t){
+    var src=t && SR_DUE_MODULES[t.linked_module];
+    if(!src || out[src] || taskIsNotice(t) || !t.title) return;
+    if(store){
+      if(t.target_stores && t.target_stores.length && t.target_stores.indexOf(store)<0) return;
+      if(recurringIsSkipped(t.id, store, skips)) return;
+    }
+    out[src]=String(t.title);
+  });
+  return out;
+}
 /* Провал на заявката → {} (без изключение), не грешка на екрана. */
 function srLoadDueDays(){
   return Promise.all([
-    sbGet('recurring_tasks','select=id,task_type,linked_module,due_weekday,due_weekdays&active=is.true'),
-    loadRecurringVersions()
+    sbGet('recurring_tasks','select=id,title,task_type,linked_module,due_weekday,due_weekdays,target_stores&active=is.true'),
+    loadRecurringVersions(),
+    loadRecurringSkips(recurringSkipWeekOf(new Date())).catch(function(){ return []; })
   ]).then(function(res){
     var mon=srWeekStartISO();
     var tasks=recurringApplyVersions(Array.isArray(res[0])?res[0]:[], Array.isArray(res[1])?res[1]:[], mon);
     srDueBySource=srDueFromTasks(tasks, mon);
-  }).catch(function(){ srDueBySource={}; });
+    var store=(currentUser && !isGlobal()) ? currentUser.store_name : '';
+    srTaskTitleBySource=srTitleFromTasks(tasks, store, Array.isArray(res[2])?res[2]:[]);
+  }).catch(function(){ srDueBySource={}; srTaskTitleBySource={}; });
+}
+/* Етикетът на чипа — ЕДНО място за чипа и за банера, който казва
+   „отворете ги с …". */
+var SR_NEEDS_LABEL = '📝 Без актуализация';
+/* Подтабовете — ЕДНО място за бутоните и за реда „… в „<подтаб>““ в банера. */
+var SR_TABS = [['diff','🔄 По разлики'],['complaint','📋 По рекламации / срок на годност']];
+/* Отделният ред за ДРУГИЯ подтаб (обект): какво и къде. */
+function srOtherTabText(m){
+  var t=SR_TABS.filter(function(x){ return x[0]!==srTab; })[0];
+  return '📝 '+m+' '+(m===1?'запис чака':'записа чакат')+' актуализация в „'+(t?t[1]:'другия подтаб')+'“.';
+}
+/* Банерът за ОБЕКТА. n — чакащите в ТЕКУЩИЯ подтаб; заглавието е на
+   задачата на същия подтаб. */
+function srStoreBannerText(n){
+  var title=srTaskTitleBySource[srTab];
+  var bul=title ? ' Задачата „'+esc(title)+'“ в Бюлетина се отмята сама'+(n?', когато няма такива записи.':'.') : '';
+  if(n){
+    return '📝 <b>'+n+'</b> '+(n===1?'запис чака':'записа чакат')+' актуализация тази седмица. Отворете ги с „'+SR_NEEDS_LABEL+'“ и обновете статуса или коментара.'+bul;
+  }
+  return '✅ Всички невзети записи са актуализирани тази седмица.'+bul;
 }
 
 /* Кой е поставил датата — за малкия надпис в реда и във формата. Форматът е
@@ -350,7 +393,7 @@ function renderStockReturns() {
 
   /* Подтабове */
   h += '<div style="display:flex;gap:0;margin-bottom:14px;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;max-width:560px;">';
-  [['diff','🔄 По разлики'],['complaint','📋 По рекламации / срок на годност']].forEach(function(t){
+  SR_TABS.forEach(function(t){
     var a=srTab===t[0];
     h+='<button onclick="setSRTab(\''+t[0]+'\')" style="flex:1;padding:9px;font-size:13px;font-weight:500;border:none;cursor:pointer;font-family:inherit;background:'+(a?'#2f2f2f':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+t[1]+'</button>';
   });
@@ -398,12 +441,19 @@ function renderStockReturns() {
      още не прави. */
   if (srAutoOn) {
     var srAll = needs + needsOther;
-    h += '<div style="background:'+(srAll?'#fef2f2':'#f0fdf4')+';border:1px solid '+(srAll?'#fecaca':'#bbf7d0')+';border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:'+(srAll?'#991b1b':'#166534')+';">'+
-         (srAll
+    /* Обектът: N е САМО за текущия подтаб (24.10.2026) — същото, по което се
+       отмята задачата, която банерът назовава (stock_returns_store_done по
+       source). Другият подтаб е на свой ред („+ M в другия подтаб“), и при
+       N = 0. Офисът — сборът, както досега. */
+    var srN = isGlobal() ? srAll : needs;
+    h += '<div id="sr-needs-note" style="background:'+(srN?'#fef2f2':'#f0fdf4')+';border:1px solid '+(srN?'#fecaca':'#bbf7d0')+';border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12px;color:'+(srN?'#991b1b':'#166534')+';">'+
+         /* Обектът — кратък текст с името на СВОЯТА задача (24.10.2026).
+            Офисът — както досега. */
+         (!isGlobal() ? srStoreBannerText(needs) : (srAll
            ? '📝 <b>'+srAll+'</b> невзети записа все още нямат „Дата потвърдена актуализация" от '+fmtDate(srMon)+' насам.'
            : '✅ Всички невзети записи са актуализирани тази седмица.')+
-         ' Задачата „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ" в Бюлетина се отмята САМА, когато няма нито един такъв запис — ръчна отметка няма. Броят се двата подтаба заедно. Дата, поставена от офиса или от импорт, не се брои за актуализация на обекта.'+
-         (needsOther?'<div id="sr-needs-other" style="margin-top:4px;font-weight:600;">+ '+needsOther+' в другия подтаб</div>':'')+
+         ' Задачата „СРОК НА ГОДНОСТ/РЕКЛАМАЦИИ" в Бюлетина се отмята САМА, когато няма нито един такъв запис — ръчна отметка няма. Броят се двата подтаба заедно. Дата, поставена от офиса или от импорт, не се брои за актуализация на обекта.')+
+         (needsOther?'<div id="sr-needs-other" style="margin-top:4px;font-weight:600;">'+(!isGlobal() ? srOtherTabText(needsOther) : '+ '+needsOther+' в другия подтаб')+'</div>':'')+
          '</div>';
   }
 
@@ -412,7 +462,7 @@ function renderStockReturns() {
   h += '<div id="sr-filters" class="filter-bar chips" style="margin:0 0 12px;">';
   h += '<span class="chips-label">Покажи:</span>';
   var srFilters=[['pending','⏳ Невзета',pending,'']];
-  if (srAutoOn) srFilters.push(['needs','📝 Без актуализация',needs,'']);
+  if (srAutoOn) srFilters.push(['needs',SR_NEEDS_LABEL,needs,'']);
   srFilters.push(['|'],['taken','✅ Взета',taken,' chip-hist'],['completed','🏁 Приключени',completed,' chip-hist'],['all','Всички',tabData.length,' chip-hist']);
   srFilters.forEach(function(f){
     if (f[0]==='|') { h += '<span class="chips-sep"></span>'; return; }

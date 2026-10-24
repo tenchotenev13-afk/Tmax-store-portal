@@ -97,8 +97,9 @@ const before = (a, b) => !!a && !!b && !!(a.compareDocumentPosition(b) & 4);   /
     ok('няма #sr-needs-card', !h.doc.getElementById('sr-needs-card'));
     ok('няма големи числа от картите (font-size:28px)', !mod(h).querySelector('[style*="font-size:28px"]'));
     const o = h.doc.getElementById('sr-needs-other');
-    ok('„+ 3 в другия подтаб" се вижда', !!o && o.textContent.trim() === '+ 3 в другия подтаб', o && o.textContent);
-    ok('и е вътре в кутията „какво остава"', !!o && /невзети записа все още нямат/.test(o.parentNode.textContent));
+    ok('редът за другия подтаб се вижда (какво и къде, 24.10.2026)', !!o && o.textContent.trim() === '📝 3 записа чакат актуализация в „📋 По рекламации / срок на годност“.', o && o.textContent);
+    /* От 24.10.2026 (sr-banner-text) текстът на обекта е друг — кутията се познава по id. */
+    ok('и е вътре в кутията „какво остава"', !!o && o.parentNode && o.parentNode.id === 'sr-needs-note');
   }
 
   section('3. чипове: data-sr-f, брой, подразбиране');

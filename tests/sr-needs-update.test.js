@@ -153,7 +153,7 @@ const mod = h => h.doc.getElementById('mod-stock-returns');
            тоест търсене на „2" минава винаги. */
         ok('чипът показва точно 2 за този подтаб', (num.textContent || '').trim() === '2', num.textContent.trim());
         ok('и казва, че в другия подтаб има още 3',
-          (card.textContent || '').indexOf('+ 3 в другия подтаб') >= 0, card.textContent.trim());
+          (card.textContent || '').indexOf('📝 3 записа чакат актуализация в „📋 По рекламации / срок на годност“.') >= 0, card.textContent.trim());
         ok('тоест 2 и 3 не се разменят', (card.textContent || '').indexOf('+ 2 в другия') === -1);
       }
       const b = btn(mod(h), 'Без актуализация');
@@ -167,10 +167,15 @@ const mod = h => h.doc.getElementById('mod-stock-returns');
         ok('и взетият не се вижда', html.indexOf('Стока a4') === -1);
         ok('и редовете от другия подтаб не се вижат', html.indexOf('Стока d1') === -1);
       }
-      ok('текстът казва колко остават ОБЩО (2 + 3)',
-        mod(h).innerHTML.indexOf('<b>5</b> невзети записа') >= 0, '');
-      ok('и че ръчна отметка няма',
-        mod(h).innerHTML.indexOf('ръчна отметка няма') >= 0, '');
+      /* От 24.10.2026 (sr-banner-text) за обекта първият ред брои САМО този
+         подтаб — както се отмята задачата; другият е на отделен ред (какво и къде). */
+      ok('текстът казва колко остават в ПОДТАБА (2), другият — отделно (3)',
+        mod(h).innerHTML.indexOf('<b>2</b> записа чакат актуализация') >= 0 &&
+        (h.doc.getElementById('sr-needs-other') || {}).textContent === '📝 3 записа чакат актуализация в „📋 По рекламации / срок на годност“.', '');
+      /* От 24.10.2026 (sr-banner-text) обектът вижда кратък текст — без
+         „ръчна отметка няма“; текстът се проверява в sr-banner-text.test.js. */
+      ok('и казва как: „📝 Без актуализация“',
+        mod(h).innerHTML.indexOf('Отворете ги с „📝 Без актуализация“') >= 0, '');
     }
   }
 
@@ -180,7 +185,7 @@ const mod = h => h.doc.getElementById('mod-stock-returns');
     if (h) {
       ok('няма чип „Без актуализация“ и кутия с „в другия подтаб“', !h.doc.getElementById('sr-needs-n') && !h.doc.getElementById('sr-needs-other'));
       ok('няма бутон-филтър', !btn(mod(h), 'Без актуализация'));
-      ok('няма обяснителен текст', mod(h).innerHTML.indexOf('ръчна отметка няма') === -1);
+      ok('няма обяснителен текст', !h.doc.getElementById('sr-needs-note'));
       ok('а самата таблица си е там', mod(h).innerHTML.indexOf('Стока a1') >= 0);
     }
   }
@@ -361,7 +366,7 @@ const mod = h => h.doc.getElementById('mod-stock-returns');
       const num = h.doc.getElementById('sr-needs-n');
       ok('чипът по разлики показва 1 (редът от срока е изключен)', !!num && num.textContent.trim() === '1', num && num.textContent.trim());
       const card = h.doc.getElementById('sr-needs-other');
-      ok('а в другия подтаб — 1 (срокът там е петък)', !!card && card.textContent.indexOf('+ 1 в другия подтаб') >= 0, card && card.textContent.trim());
+      ok('а в другия подтаб — 1 (срокът там е петък)', !!card && card.textContent.indexOf('📝 1 запис чака актуализация в „📋 По рекламации / срок на годност“.') >= 0, card && card.textContent.trim());
       const b = btn(mod(h), 'Без актуализация');
       if (ok('бутонът-филтър го има', !!b)) {
         realClick(h.w, b);
