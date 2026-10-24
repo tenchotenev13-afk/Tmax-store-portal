@@ -169,8 +169,10 @@ const ls = h => { try { return h.w.localStorage.getItem(KEY); } catch (e) { retu
 
   section('7. #sd-waiting-note е над превключвателя в двата изгледа (обект)');
   {
-    const myLines = [line('w-1', { report_id: 'r-w', type: 'return', status: 'pending', warehouse_response: 'sent', supplier: WH })];
-    const myRep = [rep('r-w', { direction: 'interstore', counterpart: WH, reviewed: true })];
+    /* От 24.10.2026 (sd-store-clarity) бележката я има само при чакащ ред —
+       затова 'return' по непрегледана бланка, не 'sent' по прегледана. */
+    const myLines = [line('w-1', { report_id: 'r-w', type: 'return', status: 'pending', warehouse_response: 'return', supplier: WH })];
+    const myRep = [rep('r-w', { direction: 'interstore', counterpart: WH, reviewed: false })];
     const h = env(STORE_USER, myRep, myLines, { dirTab: 'interstore' });
     for (const v of ['reports', 'rows']) {
       h.w.sdView = v; guard('рендер ' + v, () => h.w.renderStockDiff());

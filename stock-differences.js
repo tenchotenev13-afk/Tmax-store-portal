@@ -417,11 +417,31 @@ function renderStockDiff() {
       var d = rep.direction || 'supplier';
       if(dirNew.hasOwnProperty(d)) dirNew[d]++;
     });
+    /* За ОБЕКТА числото е „колко бланки има в подтаба · колко от тях чакат
+       мен" (24.10.2026, Монтана): „(0)🆕 12" се четеше като „нищо няма" —
+       нулата е броят РЕШЕНИ редове, а бланките са в „Бланки за преглед".
+       Бланките са същите като там (непрегледани + чакащи имейл), без
+       филтрите по търсене/магазин. Офисът и складът — както досега. */
+    var storeTabs = sdStoreHintsOn(), dirReps = {}, dirWait = {};
+    if(storeTabs){
+      var wIds = sdBulWaitingReportIds();
+      diffDirKeys().forEach(function(k){ dirReps[k]=0; dirWait[k]=0; });
+      sdVisibleUnreviewedReports().concat(sdVisibleEmailPendingReports()).forEach(function(rep){
+        var d = rep.direction || 'supplier';
+        if(!dirReps.hasOwnProperty(d)) return;
+        dirReps[d]++;
+        if(wIds[String(rep.id)] === 1) dirWait[d]++;
+      });
+    }
     h += '<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;">';
     DIFF_DIRECTIONS.forEach(function(t){
       var a = sdDirTab===t[0];
-      h += '<button data-dir="'+t[0]+'" onclick="setSDDirTab(this.dataset.dir)" style="border:1px solid '+(a?'#0f172a':'#e2e8f0')+';padding:6px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:'+(a?'#0f172a':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+t[1]+' ('+dirCounts[t[0]]+')'+
-        (dirNew[t[0]]?'<span style="margin-left:6px;background:#dc2626;color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;">🆕 '+dirNew[t[0]]+'</span>':'')+'</button>';
+      var cnt = storeTabs
+        ? ' <span class="sd-dir-reps" style="font-weight:500;">· '+dirReps[t[0]]+' '+(dirReps[t[0]]===1?'бланка':'бланки')+'</span>'+
+          (dirWait[t[0]]?' <span class="sd-dir-wait" style="margin-left:4px;background:#fef3c7;color:#92400e;border:1px solid #f59e0b;border-radius:20px;padding:1px 7px;font-size:11px;">📝 '+dirWait[t[0]]+' чака вас</span>':'')
+        : ' ('+dirCounts[t[0]]+')'+
+          (dirNew[t[0]]?'<span style="margin-left:6px;background:#dc2626;color:#fff;border-radius:20px;padding:1px 7px;font-size:11px;">🆕 '+dirNew[t[0]]+'</span>':'');
+      h += '<button data-dir="'+t[0]+'" onclick="setSDDirTab(this.dataset.dir)" style="border:1px solid '+(a?'#0f172a':'#e2e8f0')+';padding:6px 16px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;background:'+(a?'#0f172a':'#fff')+';color:'+(a?'#fff':'#64748b')+';">'+t[1]+cnt+'</button>';
     });
     h += '</div>';
   }
@@ -435,15 +455,7 @@ function renderStockDiff() {
      подтаба: задачата гледа всички междускладови редове, а обект, изчистил
      „Доставчици", иначе би решил, че е готов, и би чакал отметка, която няма
      да дойде. */
-  if (chipWaiting !== null && typeof autoCompleteActive==='function' && autoCompleteActive('stock-diff')) {
-    var sdWaitAll = sdMyWaitingLines().length;
-    h += '<div style="background:'+(sdWaitAll?'#fef2f2':'#f0fdf4')+';border:1px solid '+(sdWaitAll?'#fecaca':'#bbf7d0')+';border-radius:8px;padding:10px 14px;margin-bottom:12px;font-size:12px;color:'+(sdWaitAll?'#991b1b':'#166534')+'" id="sd-waiting-note">'+
-         (sdWaitAll
-           ? '📝 <b>'+sdWaitAll+'</b> '+(sdWaitAll===1?'ред чака':'реда чакат')+' вашия отговор по междускладови разлики.'
-           : '✅ Нито един ред не чака вашия отговор.')+
-         ' Задачата „РАЗЛИКИ ЛОГИСТИЧНИ СКЛАДОВЕ" в Бюлетина се отмята САМА за деня, когато няма такъв ред — ръчна отметка няма. Броят е за двата подтаба заедно. Ред, по който складът още не е отговорил или стоката не е тръгнала („ще се изпрати"), не чака вас.'+
-         '</div>';
-  }
+  h += sdStoreBannerHtml();
 
   /* Превключвател на изгледите — ВИНАГИ видим (и при 0). Числата са това, което се вижда при
      текущите филтри: бланките — както в заглавието на секцията (sdReportsCount), редовете — sdTableRows(). */
@@ -782,7 +794,7 @@ function sdWaitingIds(){
   _sdWaitingIdsCache = m;
   return m;
 }
-function sdResetWaitingCache(){ _sdWaitingIdsCache = null; }
+function sdResetWaitingCache(){ _sdWaitingIdsCache = null; _sdStoreHintCache = null; }
 /* Бланките на обекта с поне един ред, който Бюлетинът брои в „⏳ N реда чакат
    отговор" — по СЪЩОТО правило: bulDiffStoreWaiting() от bulletin.js (огледало
    на stock_diff_store_done). НЕ sdMyWaitingLines: тя брои и 'sent'/'sent_sap'
@@ -790,21 +802,89 @@ function sdResetWaitingCache(){ _sdWaitingIdsCache = null; }
    Бюлетина и трябва да покаже неговите редове. Без bulletin.js (тест, който
    вдига модула сам) — пада към sdMyWaitingLines: по-широко, но не крие чакащ
    ред. */
-function sdBulWaitingReportIds(){
-  var ids = {};
-  if(!currentUser || isGlobal() || isLogisticsWarehouseUser()) return ids;
-  var rows;
+function sdBulWaitingLines(){
+  if(!currentUser || isGlobal() || isLogisticsWarehouseUser()) return [];
   if(typeof bulDiffStoreWaiting === 'function'){
     var lines = (sdData||[]).map(function(l){
       var rp = (diffReports||[]).find(function(x){ return x.id===l.report_id; });
       return rp ? Object.assign({}, l, {differences_reports: rp}) : l;
     });
-    rows = bulDiffStoreWaiting(lines, sdSwaps||[], currentUser.store_name);
-  } else {
-    rows = sdMyWaitingLines();
+    return bulDiffStoreWaiting(lines, sdSwaps||[], currentUser.store_name);
   }
-  rows.forEach(function(l){ if(l && l.report_id!=null) ids[String(l.report_id)] = 1; });
+  return sdMyWaitingLines();
+}
+function sdBulWaitingReportIds(){
+  var ids = {};
+  sdBulWaitingLines().forEach(function(l){ if(l && l.report_id!=null) ids[String(l.report_id)] = 1; });
   return ids;
+}
+/* Текстът на бутоните, с които обектът отговаря по междускладов ред — ЕДНО
+   място за бутоните (sdInterstoreConfirmButton) и за банера, който казва
+   „отговорете с …": иначе банерът би посочил бутон, какъвто вече няма. */
+var SD_STORE_BTN = { sap_done:'📄 ПУСНАТО В SAP', no_stock:'⛔ НЯМА НАЛИЧНОСТ В ЛОГИСТИКА',
+  sent:'✅ ПРИЕТО', sent_sap:'📄 ПРИЕТО В SAP' };
+/* Подсказките за ОБЕКТА (банер, числата на подтабовете, маркировките в
+   картата) — офисът, складът и прегледът от ЦО не ги виждат (24.10.2026). */
+function sdStoreHintsOn(){
+  return !!currentUser && !sdIsCOViewer() && !isGlobal() && !isLogisticsWarehouseUser();
+}
+/* Два непресичащи се списъка за обекта, пресметнати веднъж на рендер:
+   wait  — редовете, които Бюлетинът брои (bulDiffStoreWaiting, огледало на
+           stock_diff_store_done): ходът е на обекта сега;
+   onway — стоката е тръгнала ('sent' / 'sent_sap'), обектът отговаря чак
+           когато пристигне. Базата НЕ ги брои (14.10.2026), затова не влизат
+           в числото, което отмята задачата. Ред с отворена размяна не е тук —
+           там бутон за приемане няма (sdInterstoreConfirmButton).
+   waitIds / onwayIds — същите по id на реда. */
+var _sdStoreHintCache = null;
+function sdStoreHints(){
+  if(_sdStoreHintCache) return _sdStoreHintCache;
+  var res = { wait: [], onway: [], waitIds: {}, onwayIds: {} };
+  if(sdStoreHintsOn()){
+    res.wait = sdBulWaitingLines();
+    res.wait.forEach(function(l){ res.waitIds[String(l.id)] = 1; });
+    var store = currentUser.store_name;
+    res.onway = (sdData||[]).filter(function(l){
+      if(!l || res.waitIds[String(l.id)]) return false;
+      var rp = (diffReports||[]).find(function(x){ return x.id===l.report_id; });
+      if(!rp || rp.reviewed || rp.direction!=='interstore' || rp.store_name!==store) return false;
+      var w = String(l.warehouse_response||'');
+      if(w!=='sent' && w!=='sent_sap') return false;
+      if(l.store_response || String(l.status||'')==='received') return false;
+      return !sdSwapsForLine(l).some(function(s){ return s.status!=='closed'; });
+    });
+    res.onway.forEach(function(l){ res.onwayIds[String(l.id)] = 1; });
+  }
+  _sdStoreHintCache = res;
+  return res;
+}
+/* „X“ или „Y“ от списък етикети, без повторения. */
+function sdQuoteLabels(labels){
+  var seen = {}, out = [];
+  labels.forEach(function(x){ if(x && !seen[x]){ seen[x] = 1; out.push('„'+x+'“'); } });
+  return out.join(' или ');
+}
+/* Банерът на обекта — два отделни реда, всеки само при брой > 0:
+   а) колко реда чакат отговор СЕГА — едно правило с Бюлетина, бутонът прави
+      същото като „Отвори →" там (bulOpenPending);
+   б) колко реда са на път — по-кротко, не влиза в броя на а). */
+function sdStoreBannerHtml(){
+  if(!sdStoreHintsOn()) return '';
+  var hs = sdStoreHints(), h = '';
+  var n = hs.wait.length, m = hs.onway.length;
+  if(n && typeof autoCompleteActive==='function' && autoCompleteActive('stock-diff')){
+    h += '<div id="sd-waiting-note" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:10px 14px;margin-bottom:8px;font-size:12.5px;color:#92400e;">'+
+      '<span>📝 <b>'+n+'</b> '+(n===1?'ред чака':'реда чакат')+' вашия отговор. Отговорете с '+
+      sdQuoteLabels([SD_STORE_BTN.sap_done, SD_STORE_BTN.no_stock])+
+      '. Задачата в Бюлетина се отмята сама, когато няма такива редове.</span>'+
+      '<button id="sd-waiting-show" data-linked="stock-diff" onclick="bulOpenPending(this.dataset.linked)" style="border:1px solid #f59e0b;background:#fff;color:#92400e;border-radius:6px;padding:3px 10px;font-size:12px;font-weight:700;cursor:pointer;">Покажи ги →</button></div>';
+  }
+  if(m){
+    var lbls = hs.onway.map(function(l){ return SD_STORE_BTN[l.warehouse_response]; });
+    h += '<div id="sd-onway-note" style="background:#f1f5f9;border:1px solid #cbd5e1;border-radius:8px;padding:8px 14px;margin-bottom:8px;font-size:12px;color:#475569;">'+
+      '🚚 <b>'+m+'</b> '+(m===1?'ред е':'реда са')+' на път към вас. Когато стоката пристигне, отговорете с '+sdQuoteLabels(lbls)+'.</div>';
+  }
+  return h ? '<div style="margin-bottom:4px;">'+h+'</div>' : '';
 }
 /* Чипът над „Бланки за преглед" — САМО за обекта и ВИНАГИ видим (и при 0):
    изчезващ чип изглежда като счупен екран и не дава път обратно. */
@@ -1194,11 +1274,11 @@ function sdInterstoreConfirmButton(l, rep){
   };
   var isStoreSide = sdIsInterstoreStoreSide(l, rep);
   if(l.warehouse_response==='sent'){
-    return isStoreSide ? mk('✅ ПРИЕТО','#0d9488','store') : sdStoreResponseLabel(l);
+    return isStoreSide ? mk(SD_STORE_BTN.sent,'#0d9488','store') : sdStoreResponseLabel(l);
   }
   /* Складът пуска движението по система - магазинът само го потвърждава в SAP. */
   if(l.warehouse_response==='sent_sap'){
-    return isStoreSide ? mk('📄 ПРИЕТО В SAP','#7c3aed','store_sap') : sdStoreResponseLabel(l);
+    return isStoreSide ? mk(SD_STORE_BTN.sent_sap,'#7c3aed','store_sap') : sdStoreResponseLabel(l);
   }
   /* Обратно движение: магазинът първо пуска движението в SAP (или казва, че
      не може - няма наличност в логистика), и чак тогава складът приема
@@ -1211,8 +1291,8 @@ function sdInterstoreConfirmButton(l, rep){
         return '<button data-lid="'+l.id+'" onclick="'+onclick+'" style="border:none;background:'+(active?color:color+'1a')+';color:'+(active?'#fff':color)+';border-radius:5px;padding:3px 7px;font-size:10.5px;font-weight:600;cursor:pointer;">'+(active?'✓ ':'')+label+'</button>';
       };
       var hs = '<div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap;">'+
-        sb('sap_done','📄 ПУСНАТО В SAP','#7c3aed',"sdSetStoreResponse(this.dataset.lid,'sap_done')")+
-        sb('no_stock','⛔ НЯМА НАЛИЧНОСТ В ЛОГИСТИКА','#dc2626','openStoreNoStockModal(this.dataset.lid)')+
+        sb('sap_done',SD_STORE_BTN.sap_done,'#7c3aed',"sdSetStoreResponse(this.dataset.lid,'sap_done')")+
+        sb('no_stock',SD_STORE_BTN.no_stock,'#dc2626','openStoreNoStockModal(this.dataset.lid)')+
         '</div>';
       if(l.store_response==='no_stock' && l.store_response_comment){
         hs += '<div style="margin-top:3px;font-size:11px;color:#1e293b;white-space:normal;">💬 '+esc(l.store_response_comment)+'</div>';
@@ -3555,6 +3635,16 @@ function renderDiffReportsSection(){
            status='received' редът е приключен и червеното отпада. */
         var rowBg = (l.store_response==='no_stock' && l.status!=='received') ? 'background:#fef2f2;' :
           (l.store_corrected_at ? 'background:#fffbeb;' : (l.type ? 'background:#f0fdf4;color:#64748b;' : ''));
+        /* Само за обекта (sdStoreHints е празно за офис и склад): редът, който
+           чака него, е жълт с „📝 чака вас"; тръгналият — само надпис. */
+        var hint = sdStoreHints(), rowCls = '', markHtml = '';
+        if(hint.waitIds[String(l.id)]){
+          rowBg = 'background:#fef3c7;'; rowCls = ' class="sd-row-wait"';
+          markHtml = '<div class="sd-mark-wait" style="margin-top:3px;font-size:11px;font-weight:700;color:#92400e;">📝 чака вас</div>';
+        } else if(hint.onwayIds[String(l.id)]){
+          rowCls = ' class="sd-row-onway"';
+          markHtml = '<div class="sd-mark-onway" style="margin-top:3px;font-size:11px;font-weight:600;color:#475569;">🚚 на път — отговорете, когато пристигне</div>';
+        }
         /* Бутонът за корекция е на МАГАЗИНА, не на Цвети — само че досега
            живееше в нейната клетка. Скрие ли се колоната, той се мести при
            артикула, чието количество и SAP код коригира. Без това
@@ -3562,12 +3652,12 @@ function renderDiffReportsSection(){
         var correctBtn = (canEditSD(l)&&!l.type&&currentUser.store_name===rep.store_name)
           ? ' <button data-lid="'+l.id+'" onclick="openSDCorrectModal(this.dataset.lid)" title="Коригирай количество/SAP код" style="border:1px solid #e2e8f0;background:#fff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">✏️</button>'
           : '';
-        h+='<tr style="border-top:1px solid #f1f5f9;'+rowBg+'">'+
+        h+='<tr'+rowCls+' style="border-top:1px solid #f1f5f9;'+rowBg+'">'+
           '<td style="padding:3px 6px;font-family:DM Mono,monospace;">'+esc(l.material_code||'')+'</td>'+
           /* Сигналът за размяна стои под ИМЕТО на артикула, а не в колоната на
              склада - там вече е отговорът плюс потвърждението, а въпросът
              "този ли е артикулът" е за самия артикул. Вижда го само складът. */
-          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdReturnSyncMark(l)+sdReturnMissingMark(l)+sdSwapBadge(l)+(repShowResolve?'':correctBtn)+'</td>'+
+          '<td style="padding:3px 6px;">'+esc(l.material_name||'')+(l.store_corrected_at?' <span title="Коригирано от магазина">✏️</span>':'')+sdReturnSyncMark(l)+sdReturnMissingMark(l)+sdSwapBadge(l)+(repShowResolve?'':correctBtn)+(repShowWh?'':markHtml)+'</td>'+
           '<td style="padding:3px 6px;">'+diffCategoryLabel(l.difference_category)+'</td>'+
           '<td style="padding:3px 6px;text-align:right;">'+sdQtyCell(l.quantity,(l.quantity!=null?l.quantity:'—'))+'</td>'+
           (repIsSupplier?'<td style="padding:3px 6px;text-align:right;">'+(l.quantity_supplier_doc!=null?l.quantity_supplier_doc:'—')+'</td>':'')+
@@ -3583,7 +3673,7 @@ function renderDiffReportsSection(){
           (canReviewDiff()&&!isLogisticsWarehouseUser()?' <button data-lid="'+l.id+'" onclick="openSDModal(this.dataset.lid)" title="Добави коментар/прикачи документ" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#5b21b6;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;">💬</button>':'')+
           correctBtn+
           '</td>':'')+
-          (repShowWh?'<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+sdLateReceiveButton(l,rep)+sdSwapPanel(l)+'</td>':'')+
+          (repShowWh?'<td style="padding:3px 6px;white-space:nowrap;">'+diffWarehouseResolveButtons(l,rep)+sdInterstoreConfirmButton(l,rep)+markHtml+sdLateReceiveButton(l,rep)+sdSwapPanel(l)+'</td>':'')+
         '</tr>';
       });
       h+='</table></div>';

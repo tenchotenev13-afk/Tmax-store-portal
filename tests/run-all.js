@@ -214,6 +214,7 @@ const TESTS = [
   'stock-returns-per-source.test.js',
   'bul-pending-hint.test.js',
   'bul-pending-open.test.js',
+  'sd-store-clarity.test.js',
   'sr-created-by-store.test.js',
   'sr-created-by.test.js',
   'sd-created-by.test.js',

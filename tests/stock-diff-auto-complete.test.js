@@ -224,10 +224,13 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
         const ids = h.w.sdTableRows({ status: 'waiting' }).map(x => x.id).sort().join(',');
         ok('списъкът за таблицата е точно двата реда', ids === 'l-1,l-2', ids);
       }
+      /* 2, защото тук bulletin.js не е зареден и банерът пада към
+         sdMyWaitingLines (брои и 'sent'). С Бюлетина броят е по
+         bulDiffStoreWaiting — sd-store-clarity.test.js (24.10.2026). */
       ok('обяснението казва общия брой',
         mod(h).innerHTML.indexOf('<b>2</b> реда чакат') >= 0, '');
-      ok('и че ръчна отметка няма',
-        mod(h).innerHTML.indexOf('ръчна отметка няма') >= 0, '');
+      ok('и че задачата се отмята сама',
+        mod(h).innerHTML.indexOf('Задачата в Бюлетина се отмята сама') >= 0, '');
     }
     h.close();
 
@@ -264,15 +267,15 @@ const mod = h => h.doc.getElementById('mod-stock-diff');
     h3.close();
   }
 
-  section('7. Нула чакащи → обяснението поздравява');
+  /* От 24.10.2026 (sd-store-clarity) банерът се показва САМО при брой > 0. */
+  section('7. Нула чакащи → няма обяснение, чипът стои');
   {
     const h = env(AFTER, USER, [rep_('r-1')], [line('l-1', { warehouse_response: 'will_send' })]);
     h.w.sdView = 'rows'; /* изгледът на екрана за тази проверка */
     if (guard('рендер не хвърля', () => h.w.renderStockDiff())) {
       const b = btn(mod(h), 'Чакат моя отговор');
       ok('чипът стои и при 0', !!b && (b.textContent || '').indexOf('(0)') >= 0, b && b.textContent.trim());
-      ok('и обяснението поздравява',
-        mod(h).innerHTML.indexOf('Нито един ред не чака вашия отговор') >= 0, '');
+      ok('и обяснение няма', !h.doc.getElementById('sd-waiting-note'), '');
     }
     h.close();
   }
