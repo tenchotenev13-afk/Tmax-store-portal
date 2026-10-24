@@ -14,6 +14,7 @@
 
 ## Чака изпращане
 
+(в базата от миграцията 20261024090000_storno_notes_notify, версия 20261024125100, приложена 24.10.2026)
 - 24.10 · storno_notes.notify_error — text, NULL, без default
 - 24.10 · storno_notes.notified_at — timestamptz, NULL, без default
 - 24.10 · storno_note_replies.notify_error — text, NULL, без default

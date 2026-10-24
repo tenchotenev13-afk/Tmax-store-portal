@@ -1,4 +1,5 @@
 -- 20261024090000_storno_notes_notify — огледало: storno-notes-notify-schema.sql.
+-- Приложено 24.10.2026 с apply_migration; версия в базата 20261024125100.
 -- „✍️ Счетоводител", етап 2: резултат от известието на всеки запис.
 
 alter table public.storno_notes
