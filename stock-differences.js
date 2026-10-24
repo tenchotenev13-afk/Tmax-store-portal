@@ -886,12 +886,23 @@ function sdStoreBannerHtml(){
   }
   return h ? '<div style="margin-bottom:4px;">'+h+'</div>' : '';
 }
-/* Чипът над „Бланки за преглед" — САМО за обекта и ВИНАГИ видим (и при 0):
-   изчезващ чип изглежда като счупен екран и не дава път обратно. */
+/* Чакащите обекта редове (bulDiffStoreWaiting) са САМО в междускладови
+   бланки — затова чипът и филтърът живеят само в този подтаб (или когато
+   подтабове няма). На „Доставчици" / „Сторна" чипът казваше „(1)", а под
+   него „📭 Няма бланки" (Монтана, 24.10.2026). Проверката е тук, а не само
+   нулирането в setSDDirTab: подтабът се сменя и по други пътища (местене на
+   бланка между посоки). */
+function sdOnlyWaitingHere(){
+  return !sdDirTabsActive() || sdDirTab === 'interstore';
+}
+function sdOnlyWaitingOn(){ return sdOnlyWaiting && sdOnlyWaitingHere(); }
+/* Чипът над „Бланки за преглед" — САМО за обекта и в междускладовия подтаб
+   ВИНАГИ видим (и при 0): изчезващ чип изглежда като счупен екран и не дава
+   път обратно. */
 function sdOnlyWaitingBarHtml(){
-  if(sdWaitingVisible() === null) return '';
+  if(sdWaitingVisible() === null || !sdOnlyWaitingHere()) return '';
   var n = Object.keys(sdBulWaitingReportIds()).length;
-  if(sdOnlyWaiting){
+  if(sdOnlyWaitingOn()){
     return '<div id="sd-only-waiting" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;border-radius:8px;padding:8px 12px;margin-bottom:12px;font-size:12.5px;font-weight:600;">'+
       '📝 Показани са само бланките, които чакат вашия отговор ('+n+')'+
       '<button id="sd-only-waiting-off" onclick="setSDOnlyWaiting(false)" style="border:1px solid #f59e0b;background:#fff;color:#92400e;border-radius:6px;padding:3px 10px;font-size:11.5px;font-weight:700;cursor:pointer;">Покажи всички бланки</button></div>';
@@ -3470,7 +3481,7 @@ function sdFilteredReports(){
     unreviewed = unreviewed.filter(function(r){ return (r.direction||'supplier') === sdDirTab; });
   }
   /* „Само чакащите мен" (sdOnlyWaitingBarHtml) — бланките с ред, който Бюлетинът брои. */
-  if(sdOnlyWaiting){
+  if(sdOnlyWaitingOn()){
     var waitIds = sdBulWaitingReportIds();
     unreviewed = unreviewed.filter(function(r){ return waitIds[String(r.id)] === 1; });
   }
@@ -3877,7 +3888,7 @@ function submitSDMove(rid){
           : Promise.resolve(false);
         return Promise.all([audit, push]).then(function(r3){
           closeSDMoveModal();
-          if(sdDirTabsActive()) sdDirTab = target;
+          if(sdDirTabsActive()){ sdDirTab = target; sdOnlyWaiting = false; }
           renderStockDiff();
           /* Жълтото е ПОСЛЕДНО - toast() пише в един и същ елемент. */
           var lost = [];

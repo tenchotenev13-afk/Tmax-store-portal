@@ -26,6 +26,10 @@
    M1 банерът брои по sdLineWaitsStore (sdMyWaitingLines) → 7;
    M2 bulOpenPending без смяна на подтаба;
    M3 ред 'sent_sap' маркиран като „чака вас".
+   §8 (sd-chip-interstore-only, 24.10.2026): чипът „Само чакащите мен" само в
+   междускладовия подтаб. Пада и срещу кода отпреди поправката, и при:
+   M4 чипът се рисува и на доставчиковия подтаб;
+   M5 setSDDirTab не нулира sdOnlyWaiting.
 
    Пускане: node tests/sd-store-clarity.test.js . */
 'use strict';
@@ -240,7 +244,60 @@ const ids = trs => trs.map(tr => (txt(tr).match(/АРТИКУЛ (\w+)/) || [])[1
     }
   }
 
-  section('8. Офис акаунт не вижда нищо ново');
+  /* sd-chip-interstore-only (24.10.2026, Монтана): на „Доставчици" чипът
+     казваше „Само чакащите мен (1)", а под него „📭 Няма бланки". */
+  section('8. Чипът „Само чакащите мен" — само в междускладовия подтаб');
+  {
+    const SUP = rep('rep-sup', { direction: 'supplier', counterpart: 'ТЕСИ ООД', created_at: '2026-10-18T09:00:00.000Z' });
+    const SUPL = line('p1', 'rep-sup', { supplier: 'ТЕСИ ООД', difference_category: 'shortage' });
+    const chipBtns = h => qa(h, 'button').filter(b => txt(b).indexOf('Само чакащите мен') >= 0);
+    const h = await openModule(USER, REPORTS.concat([SUP]), LINES.concat([SUPL]));
+    if (h) {
+      ok('начало: подтабът е доставчици', dirActive(h, 'supplier'));
+      ok('доставчици: няма #sd-only-waiting', !h.doc.getElementById('sd-only-waiting'));
+      ok('доставчици: няма бутон „Само чакащите мен"', chipBtns(h).length === 0, chipBtns(h).map(txt).join(' | '));
+      ok('доставчици: банерът с „Покажи ги →" си стои', !!h.doc.getElementById('sd-waiting-show'));
+      ok('доставчици: бланката се вижда', !!q(h, '#diff-rep-rep-sup'));
+      /* Останал флаг (смяна на подтаба по друг път) не бива да крие нищо тук. */
+      h.w.sdOnlyWaiting = true;
+      guard('рендер с останал флаг', () => h.w.renderStockDiff());
+      ok('останал флаг: доставчиковата бланка пак се вижда', !!q(h, '#diff-rep-rep-sup'));
+      ok('останал флаг: чип няма', !h.doc.getElementById('sd-only-waiting'));
+      h.w.sdOnlyWaiting = false;
+      guard('рендер', () => h.w.renderStockDiff());
+
+      realClick(h.w, h.doc.getElementById('sd-waiting-show'));
+      await settle(60);
+      ok('„Покажи ги →" от доставчици → междускладов', dirActive(h, 'interstore'));
+      ok('… с филтъра', !!h.doc.getElementById('sd-only-waiting-off') && !q(h, '#diff-rep-rep-sap') && !!q(h, '#diff-rep-rep-ret'));
+
+      realClick(h.w, dirBtn(h, 'supplier'));
+      await settle(6);
+      ok('клик към доставчици: чип няма', chipBtns(h).length === 0 && !h.doc.getElementById('sd-only-waiting'));
+      ok('… и бланката се вижда', !!q(h, '#diff-rep-rep-sup'));
+      realClick(h.w, dirBtn(h, 'wrong_receipt'));
+      await settle(6);
+      ok('„Сторна": чип няма', chipBtns(h).length === 0 && !h.doc.getElementById('sd-only-waiting'));
+      realClick(h.w, dirBtn(h, 'interstore'));
+      await settle(6);
+      ok('обратно в междускладов: филтърът е изключен', !h.doc.getElementById('sd-only-waiting-off') && !!q(h, '#diff-rep-rep-sap'));
+      const on = h.doc.getElementById('sd-only-waiting-on');
+      ok('… а чипът „Само чакащите мен (1)" е там', !!on && txt(on) === '📝 Само чакащите мен (1)', on && txt(on));
+      h.close();
+    }
+    const none = LINES.map(l => l.report_id === 'rep-ret' ? Object.assign({}, l, { store_response: 'sap_done' }) : l);
+    const h0 = await openModule(USER, REPORTS, none);
+    if (h0) {
+      ok('при 0, доставчици: чип няма', chipBtns(h0).length === 0);
+      realClick(h0.w, dirBtn(h0, 'interstore'));
+      await settle(6);
+      const on0 = h0.doc.getElementById('sd-only-waiting-on');
+      ok('при 0, междускладов: чипът стои с (0)', !!on0 && txt(on0) === '📝 Само чакащите мен (0)', on0 && txt(on0));
+      h0.close();
+    }
+  }
+
+  section('9. Офис акаунт не вижда нищо ново');
   {
     const h = await openModule(ADMIN);
     if (h) {
