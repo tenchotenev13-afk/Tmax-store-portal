@@ -472,9 +472,12 @@ function noAmountInDom(name, h) {
     const db4 = fakeDb({ movs: db.movs.map(x => Object.assign({}, x, { store_name: 'Шумен' })) });
     const h = env(SHUMEN, db4);
     guard('setupTabsForRole', () => h.w.setupTabsForRole());
+    await ticks(4);
     const sb = h.doc.getElementById('rvs-minusi');
-    ok('под-бутонът „➖ Минуси“ е видим', sb && sb.style.display !== 'none');
-    realClick(h.w, sb); await ticks(6);
+    /* От 25.10.2026 (пилот) обект извън minus_stores няма под-бутон; пазачът
+       вътре остава за пътя без бутона (дълбока връзка, стар линк). */
+    ok('под-бутонът „➖ Минуси“ е СКРИТ (пилот, 25.10.2026)', sb && sb.style.display === 'none');
+    h.w.showModule('minusi'); await ticks(6);
     ok('модулът е показан', mod(h).style.display === 'block');
     ok('под-бутонът е активен, главният таб също', sb.classList.contains('active') && h.doc.getElementById('tab-revaluation').classList.contains('active'));
     const off = h.doc.getElementById('mn-off');

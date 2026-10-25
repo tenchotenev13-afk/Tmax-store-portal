@@ -85,6 +85,7 @@ const TESTS = [
   'revision-schedule.test.js',
   'minusi.test.js',
   'minusi-notify-sync.test.js',
+  'pilot-tabs.test.js',
   'picking.test.js',
   'picking-pallets.test.js',
   'picking-ship.test.js',

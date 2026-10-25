@@ -38,13 +38,19 @@ var rvShowAdd = false;
 var rvAcRes = [];
 var rvAcSeq = 0;
 var rvAcTimer = null;
-/* app_settings.revaluation_stores — скрит фийчър (HIDDEN-FEATURES.md). Само
-   'on' пуска обектите (и правото на регионалния да пише в бланките им);
-   липсващ ключ, празно, боклук и паднала заявка = изключено. Чете се при
-   всеки логин от setupTabsForRole(); докато отговорът не е дошъл, е false —
-   табът на обекта е скрит, тоест не мига. */
-var rvStoresOn = false;
+/* app_settings.revaluation_stores — скрит фийчър (HIDDEN-FEATURES.md).
+   'on' пуска всички обекти (и правото на регионалния да пише в бланките им);
+   от 25.10.2026 може и списък имена, разделени със запетая (пилот:
+   'Кърджали') — пуска само тях. Липсващ ключ, празно, 'off' и паднала
+   заявка = изключено. Чете се при всеки логин от setupTabsForRole(); докато
+   отговорът не е дошъл, е изключено — табът на обекта е скрит, тоест не
+   мига. rvStoresReady — обещанието на последното четене (Бюлетинът и
+   loadRevaluation() го чакат), rvStoresDone — дошъл ли е отговорът. */
+var rvStoresOn = false;   /* 'on' — всички обекти */
+var rvStoresList = [];    /* списъкът, когато не е 'on' */
 var rvStoresSeq = 0;
+var rvStoresReady = null;
+var rvStoresDone = false;
 
 var RV_STORE_ROLES = ['manager', 'sklad'];
 var RV_KIND_LABEL = { mandatory: 'Задължителна', optional: 'Пожелателна' };
@@ -72,26 +78,38 @@ function rvIsRegionalFor(store){ return !!store && rvRegionStores().indexOf(stor
    График на кампаниите, Затвори) не са за него. admin с is_regional (В. Филев)
    НЕ попада тук — admin е admin. */
 function rvRegionalAcc(){ return !!currentUser && currentUser.role === 'accounting' && rvRegionStores().length > 0; }
-/* Видимост на таба: admin, accounting, supply — винаги; обекти — само при
-   revaluation_stores = 'on' (скрито от 13.10.2026 до етап 3). Регионалните днес
+/* Видимост на таба: admin, accounting, supply — винаги; обекти — само ако
+   обектът е включен в revaluation_stores ('on' или в списъка; скрито от
+   13.10.2026 до етап 3, пилот по обект от 25.10.2026). Регионалните днес
    са admin/accounting (проверено 12.10.2026) и виждат таба като ЦО; правото им
-   да ПИШАТ в бланката на обект е зад същия ключ (rvCanEdit). */
+   да ПИШАТ в бланката на обект е зад същия ключ, по обекта на бланката
+   (rvCanEdit). */
 function rvCanSee(){
   if(!currentUser) return false;
   if(['admin', 'accounting', 'supply', 'controlling'].indexOf(currentUser.role) >= 0) return true;
-  return rvIsStoreUser() && rvStoresOn;
+  return rvIsStoreUser() && rvStoreOn(currentUser.store_name);
+}
+function rvStoreOn(store){ return rvStoresOn === true || (!!store && rvStoresList.indexOf(store) >= 0); }
+/* 'on' → всички; '' / 'off' / null → никой; иначе — списък имена. */
+function rvParseStoresFlag(v){
+  var s = v == null ? '' : String(v).trim();
+  if(s.toLowerCase() === 'on') return { on: true, list: [] };
+  if(!s || s.toLowerCase() === 'off') return { on: false, list: [] };
+  return { on: false, list: s.split(',').map(function(x){ return x.trim(); }).filter(Boolean) };
 }
 function rvLoadStoresFlag(){
   var seq = ++rvStoresSeq;
-  return sbGet('app_settings', 'key=eq.revaluation_stores&select=key,value', true).then(function(rows){
+  rvStoresDone = false;
+  rvStoresReady = sbGet('app_settings', 'key=eq.revaluation_stores&select=key,value', true).then(function(rows){
     var row = (Array.isArray(rows) ? rows : []).filter(function(r){ return r && r.key === 'revaluation_stores'; })[0];
-    var on = !!row && row.value != null && String(row.value).trim().toLowerCase() === 'on';
-    if(seq === rvStoresSeq) rvStoresOn = on;
+    var f = rvParseStoresFlag(row && row.value);
+    if(seq === rvStoresSeq){ rvStoresOn = f.on; rvStoresList = f.list; rvStoresDone = true; }
     return rvStoresOn;
   }).catch(function(){
-    if(seq === rvStoresSeq) rvStoresOn = false;
+    if(seq === rvStoresSeq){ rvStoresOn = false; rvStoresList = []; rvStoresDone = true; }
     return false;
   });
+  return rvStoresReady;
 }
 
 /* ─── Числа ────────────────────────────────────────────── */
@@ -147,7 +165,7 @@ function rvCampaignOpenNow(c){
 }
 function rvCanEdit(){
   var c = rvCampaign();
-  if(!c || !rvStore || !rvCampaignOpenNow(c) || !rvStoresOn) return false;
+  if(!c || !rvStore || !rvCampaignOpenNow(c) || !rvStoreOn(rvStore)) return false;
   /* Обработена бланка (етап 3а) е заключена за всички — промяна само след
      „Отключи бланката“ от ЦО. */
   if(rvSub && rvSub.status === 'processed') return false;
@@ -193,7 +211,9 @@ function loadRevaluation(){
       : sbGet('users', 'email=eq.' + encodeURIComponent(currentUser.email || '') + '&select=is_regional,assigned_stores'),
     sbGet('stores', 'select=name&order=name.asc'),
     rvIsCoViewer() ? rvLoadCodes() : Promise.resolve([]),
-    rvIsStoreUser() ? sbGet('revaluation_submissions', 'store_name=eq.' + encodeURIComponent(currentUser.store_name || '') + '&status=in.(submitted,processed)&select=campaign_id') : Promise.resolve([])
+    rvIsStoreUser() ? sbGet('revaluation_submissions', 'store_name=eq.' + encodeURIComponent(currentUser.store_name || '') + '&status=in.(submitted,processed)&select=campaign_id') : Promise.resolve([]),
+    /* Кои обекти са включени — rvCanEdit / rvCoCanUnlock / списъкът го ползват. */
+    rvStoresReady || Promise.resolve()
   ]).then(function(r){
     rvMyCampaignIds = {};
     (Array.isArray(r[4]) ? r[4] : []).forEach(function(s){ rvMyCampaignIds[s.campaign_id] = true; });
@@ -915,6 +935,9 @@ function rvLoadOverview(){
     var bySt = {};
     subs.forEach(function(s){ bySt[s.store_name] = s; });
     var names = rvStoreList.filter(function(n){ return typeof isReportableStore !== 'function' || isReportableStore(n); });
+    /* Пилот по списък (25.10.2026): „не са подали" брои само включените —
+       останалите не могат да подадат. Обект с бланка остава (отдолу). */
+    if(!rvStoresOn && rvStoresList.length) names = names.filter(function(n){ return rvStoresList.indexOf(n) >= 0; });
     subs.forEach(function(s){ if(names.indexOf(s.store_name) < 0) names.push(s.store_name); });
     if(rvRegionalAcc()){ var reg = rvRegionStores(); names = names.filter(function(n){ return reg.indexOf(n) >= 0; }); }
     names.sort(function(a, b){ return a.localeCompare(b, 'bg'); });
@@ -1026,8 +1049,8 @@ function rvCoButtonsHtml(){
   return h;
 }
 /* Отключване има смисъл само ако обектът може да подаде наново (19.10.2026). */
-var RV_UNLOCK_NO = 'Обектът не може да подаде наново — кампанията е извън прозореца или Преоценка е скрита за обектите';
-function rvCoCanUnlock(){ return rvStoresOn === true && rvCampaignOpenNow(rvCampaign()); }
+var RV_UNLOCK_NO = 'Обектът не може да подаде наново — кампанията е извън прозореца или Преоценка е скрита за този обект';
+function rvCoCanUnlock(){ return rvStoreOn(rvStore) && rvCampaignOpenNow(rvCampaign()); }
 function rvCoDone(){
   if(!rvIsCO() || !rvSub || rvSub.status !== 'submitted') return Promise.resolve(false);
   rvBad = {};

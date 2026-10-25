@@ -292,6 +292,10 @@ var LINKED_MODULES = [
      всички. send-routed-report добавя секция „Зареждане" в отчета по задача
      с този linked_module. */
   { value:'supply', label:'🎨 Зареждане' },
+  /* Под-табове на „Ревизии и преоценка" (25.10.2026) — пилотни, бутонът е по
+     видимостта на под-бутона (linkedModuleAllowed). Без auto_complete. */
+  { value:'revaluation', label:'🏷️ Преоценка' },
+  { value:'minusi', label:'➖ Минуси' },
   /* Не е самостоятелен модул, а подтаб на Каса. showModule() го пренасочва —
      виж клона за 'oborot' там. */
   { value:'oborot', label:'💰 Вечерен оборот' }
@@ -326,7 +330,20 @@ function linkedModuleAllowed(value){
      ред бутонът в календара би бил път до формата за роли, които през самия
      таб Каса не стигат до нея — kasaTabBar() връща празна лента за тях. */
   if(value==='kasa'||value==='oborot') return ['kasa','admin','manager'].indexOf(currentUser&&currentUser.role)>=0;
+  /* Пилотните под-табове — по същото правило като под-бутона им в shared.js.
+     revaluation.js и minusi.js се зареждат след този файл — затова typeof. */
+  if(value==='revaluation') return typeof rvCanSee==='function'&&rvCanSee();
+  if(value==='minusi') return typeof mnTabVisible==='function'&&mnTabVisible();
   return true;
+}
+/* Кои обекти са в пилота, се знае чак след app_settings, който
+   setupTabsForRole() чете при входа. Отвори ли се Бюлетинът преди отговора —
+   обещание, след което се рисува пак (като кешовете в loadBulletin). */
+function bulPilotFlagsWait(){
+  var p=[];
+  if(typeof rvStoresReady!=='undefined'&&rvStoresReady&&!rvStoresDone)p.push(rvStoresReady);
+  if(typeof mnStoresReady!=='undefined'&&mnStoresReady&&!mnStoresDone)p.push(mnStoresReady);
+  return p.length?Promise.all(p):null;
 }
 
 /* Живи бройки/статус за елемент в седмичния календар.
@@ -2630,6 +2647,9 @@ function loadBulletin(){
      Топъл кеш връща веднага, без нова заявка. */
   if(!allStoresCache)loadAllStores().then(function(){ if(curBul)renderBulletin(); });
   if(!reportableStoresCache)loadReportableStores().then(function(){ if(curBul)renderBulletin(); });
+  /* Бутоните „🏷️ Преоценка →" / „➖ Минуси →" — след флаговете на пилота. */
+  var pilotWait=bulPilotFlagsWait();
+  if(pilotWait)pilotWait.then(function(){ if(curBul)renderBulletin(); });
   /* Хората от ЦО за отметките „Отделни хора" във формите за задача. Без
      renderBulletin() накрая — тези отметки живеят в модалите, не в тялото на
      бюлетина, тоест се строят едва при отваряне на формата и дотогава кешът

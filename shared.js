@@ -1793,7 +1793,8 @@ function setupTabsForRole(){
   /* Таб „Ревизии и преоценка“ (id tab-revaluation от преди) — admin, accounting,
      supply, manager, sklad: rsCanSee() в revisions.js. Под-бутонът „🏷️ Преоценка“
      — по rvCanSee() от revaluation.js: admin/accounting/supply винаги, обектите
-     само при app_settings.revaluation_stores = 'on'. Ключът се чете при всеки
+     само ако app_settings.revaluation_stores = 'on' или обектът е в списъка
+     (пилот, 25.10.2026). Ключът се чете при всеки
      логин; до отговора под-бутонът на обекта е скрит, после се преизчислява.
      И двата файла се зареждат след този — затова typeof. */
   var rvTab=document.getElementById('tab-revaluation');
@@ -1809,11 +1810,17 @@ function setupTabsForRole(){
       rvSubBtn.style.display=rvCanSee()?'':'none';
     });
   }
-  /* Под-бутон „➖ Минуси“ (minusi.js) — по роля: обект (manager/sklad) и
-     контролинг (admin/accounting/controlling). НЕ по app_settings.minus_stores:
-     обект извън списъка вижда бутона и вътре „още не е включен“. */
+  /* Под-бутон „➖ Минуси“ (minusi.js) — по mnTabVisible(): контролинг
+     (admin/accounting/controlling) винаги, обект (manager/sklad) само ако е в
+     app_settings.minus_stores (пилот, 25.10.2026; дотогава — всички обекти).
+     Ключът се чете при всеки логин; до отговора бутонът на обекта е скрит. */
   var mnSubBtn=document.getElementById('rvs-minusi');
-  if(mnSubBtn)mnSubBtn.style.display=(typeof mnCanSee==='function'&&mnCanSee())?'':'none';
+  if(mnSubBtn){
+    mnSubBtn.style.display=(typeof mnTabVisible==='function'&&mnTabVisible())?'':'none';
+    if(typeof mnLoadStoresFlag==='function') mnLoadStoresFlag().then(function(){
+      mnSubBtn.style.display=mnTabVisible()?'':'none';
+    });
+  }
   /* Броячът „(N)" е на предишния потребител — същата страница може да смени
      потребителя без презареждане. Брои се пак при отваряне на таба. */
   if(mnSubBtn)mnSubBtn.textContent='➖ Минуси';

@@ -118,7 +118,7 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
 
   section('2. „Отключи бланката“ — само когато обектът може да подаде наново');
   {
-    const TITLE = 'Обектът не може да подаде наново — кампанията е извън прозореца или Преоценка е скрита за обектите';
+    const TITLE = 'Обектът не може да подаде наново — кампанията е извън прозореца или Преоценка е скрита за този обект';
     let h = env({ subs: [PROC], storesOn: false }); await openCo(h, 'Кърджали');
     let b = btn(mod(h), 'Отключи бланката');
     ok('rvStoresOn=false → бутонът е показан, но disabled', !!b && b.disabled === true);

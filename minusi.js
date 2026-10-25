@@ -123,6 +123,24 @@ function mnParseStores(v){
   return String(v == null ? '' : v).split(',').map(function(s){ return s.trim(); }).filter(Boolean);
 }
 function mnStoreOn(store){ return !!store && mnStoresOn.indexOf(store) >= 0; }
+/* Под-бутонът „➖ Минуси" (25.10.2026, пилот): контролингът — винаги; обектът
+   — само ако е в minus_stores. Пазачът вътре (mnCanSee + „още не е включен")
+   остава. До отговора на mnLoadStoresFlag() бутонът на обекта е скрит. */
+function mnTabVisible(){ return mnIsCO() || (mnIsStoreUser() && mnStoreOn(currentUser.store_name)); }
+var mnStoresSeq = 0;
+var mnStoresReady = null; /* обещанието на последното четене — Бюлетинът го чака */
+var mnStoresDone = false;
+function mnLoadStoresFlag(){
+  var seq = ++mnStoresSeq;
+  mnStoresDone = false;
+  mnStoresReady = sbGetOk('app_settings', 'key=eq.minus_stores&select=key,value').then(function(r){
+    var row = r && r.ok ? r.rows.filter(function(x){ return x && x.key === 'minus_stores'; })[0] : null;
+    if(seq === mnStoresSeq){ mnStoresOn = mnParseStores(row && row.value); mnStoresDone = true; }
+  }).catch(function(){
+    if(seq === mnStoresSeq){ mnStoresOn = []; mnStoresDone = true; }
+  });
+  return mnStoresReady;
+}
 function mnIsAll(){ return mnIsCO() && mnStore === MN_ALL; }
 function mnStoreLabel(){ return mnIsAll() ? 'Всички обекти' : mnStore; }
 
