@@ -123,6 +123,28 @@ function transitOwnWarehouse(){
   return (currentUser&&currentUser.role==='logistics'&&currentUser.store_name)?currentUser.store_name:'';
 }
 
+/* ── ТЕСЕН ЕКРАН (телефон) ──
+   Таблицата е min-width 1060px (.tbl-tt-compact, index.html) и на телефон
+   колоната „Действия" остава извън екрана — бутоните се виждаха чак след
+   плъзгане надясно (Монтана, 24.10.2026). На тесен екран бутоните отиват в
+   пълноширок под-ред под реда, залепен вляво (sticky), а колоната отпада.
+   Прагът 600px е същият като за бутоните на Товарни листи (.ll-tbl, index.html).
+   Широк екран — без промяна. */
+var TRANSIT_NARROW_MQ = '(max-width:600px)';
+function transitNarrow(){
+  try{ return !!(window.matchMedia && window.matchMedia(TRANSIT_NARROW_MQ).matches); }catch(e){ return false; }
+}
+/* Завъртане на телефона / смяна на ширината през прага → наново, ако модулът е на екрана. */
+(function(){
+  try{
+    var mq = window.matchMedia && window.matchMedia(TRANSIT_NARROW_MQ);
+    if(mq && mq.addListener) mq.addListener(function(){
+      var m=document.getElementById('mod-transit');
+      if(m && m.style.display==='block' && transitData.length) renderTransit();
+    });
+  }catch(e){}
+})();
+
 /* ── LOAD с pagination чрез Range header ── */
 function loadTransit(){
   var wrap=document.getElementById('mod-transit');
@@ -363,10 +385,13 @@ function renderTransit(){
   if(!list.length){
     h+='<div style="text-align:center;padding:60px;color:#94a3b8;background:#fff;border-radius:10px;border:1px solid #e2e8f0;"><div style="font-size:40px;">📦</div><div style="margin-top:8px;">Няма записи.</div></div>';
   }else{
+    var narrow=transitNarrow();
+    var ttCols=['Документ · Дата','От → Към','Описание','Количество','Статус'];
+    if(!narrow) ttCols.push('Действия');
     h+='<div class="tbl-wrap tbl-compact tbl-tt-compact">';
     h+='<table style="border-collapse:collapse;font-size:12px;">';
     h+='<thead><tr style="background:#f8fafc;">';
-    ['Документ · Дата','От → Към','Описание','Количество','Статус','Действия'].forEach(function(c){
+    ttCols.forEach(function(c){
       h+='<th style="text-align:left;padding:8px 8px;font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;border-bottom:1px solid #e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+c+'</th>';
     });
     h+='</tr></thead><tbody>';
@@ -377,7 +402,8 @@ function renderTransit(){
       var isTransfer=r.direction==='transfer';
       var isOver=r.status==='pending'&&r.doc_date&&(new Date()-new Date(r.doc_date))>30*86400000;
       var dirBg=isOut?'rgba(124,58,237,.04)':(isTransfer?'rgba(194,65,12,.04)':'');
-      h+='<tr style="border-bottom:1px solid #f1f5f9;'+(isOver?'background:#fffbeb;':dirBg)+'">';
+      var rowBg=(isOver?'background:#fffbeb;':dirBg);
+      h+='<tr style="border-bottom:'+(narrow?'none':'1px solid #f1f5f9')+';'+rowBg+'">';
       /* 1. Документ · Дата + бадж за посока */
       h+='<td style="padding:7px 8px;">'+
         '<div style="font-family:DM Mono,monospace;font-size:11px;word-break:break-word;">'+esc(r.purchase_doc||'')+'</div>'+
@@ -406,8 +432,9 @@ function renderTransit(){
           tReviewedBadgeHtml(r)+
           (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.comment)+'">'+esc(r.comment)+'</div>':'')+
         '</td>';
-      /* 6. Действия — същите бутони и условия като преди */
-      h+='<td style="padding:6px 6px;">';
+      /* 6. Действия — същите бутони и условия като преди. Сглобяват се ВЕДНЪЖ и
+         отиват или в колоната (широк екран), или в под-реда (тесен). */
+      var actFrom=h.length;
       h+='<div style="display:flex;flex-wrap:wrap;gap:3px;">';
       if(canEdit&&isTransfer){
         /* Двустъпков поток: pending→sent само подателят, sent→received само получателят */
@@ -455,7 +482,13 @@ function renderTransit(){
         h+='<button data-id="'+r.id+'" onclick="tDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:4px 6px;font-size:10.5px;cursor:pointer;">✕</button>';
       }
       h+='</div>';
-      h+='</td></tr>';
+      var actHtml=h.slice(actFrom); h=h.slice(0,actFrom);
+      if(narrow){
+        h+='</tr><tr class="tt-act-row" style="border-bottom:1px solid #f1f5f9;'+rowBg+'"><td colspan="'+ttCols.length+'" style="padding:0 6px 8px;">'+
+          '<div class="tt-act-phone" style="position:sticky;left:6px;display:inline-block;max-width:calc(100vw - 56px);">'+actHtml+'</div></td></tr>';
+      }else{
+        h+='<td style="padding:6px 6px;">'+actHtml+'</td></tr>';
+      }
     });
     h+='</tbody></table></div>';
     h+='<div style="font-size:12px;color:#94a3b8;margin-top:8px;">Показани '+list.length+' от '+transitData.length+' записа.</div>';

@@ -217,6 +217,7 @@ const TESTS = [
   'sd-store-clarity.test.js',
   'transit-store-clarity.test.js',
   'sr-banner-text.test.js',
+  'transit-phone-buttons.test.js',
   'sr-created-by-store.test.js',
   'sr-created-by.test.js',
   'sd-created-by.test.js',
