@@ -968,8 +968,12 @@ MM41/VK11 — само admin/accounting/controlling; „Готово“ — до
 бланката, а списъкът на ЦО при пилот брои само включените. Под-бутонът
 `rvs-minusi` вече е само за обектите от `minus_stores`. Бюлетинът може да
 върже задача към 'revaluation' / 'minusi' (бутон по същото правило, без
-auto_complete). В базата `revaluation_stores` още е 'off' — включването
-на Кърджали и проверката на живо са в `claude/open/25-10-pilot-kardzhali.md`.
+auto_complete). Код: `6b4fded` (на живо на Pages 25.10). **Кърджали е
+включен на 25.10.2026 в 23:58 (Europe/Sofia)**: `revaluation_stores`
+'off' → 'Кърджали' (1 ред, прочетено обратно; rollback — value = 'off').
+Първата реална кампания за Кърджали е „Пожелателна преоценка 10.2026“
+(пожелателна, 26–27.10). Проверката на живо е в
+`claude/open/25-10-pilot-kardzhali.md`.
 
 **Сигурност** — `users` затворен (30.09). Остава: сървърна проверка на
 самоличност (ВИСОК, `claude/open-tasks.md`), OneSignal REST ключ в push.js
