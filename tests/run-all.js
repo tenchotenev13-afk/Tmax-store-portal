@@ -402,6 +402,7 @@ const TESTS = [
   'recurring-stopped.test.js',
   'bulletin-due-done.test.js',
   'subtask-due-done.test.js',
+  'bulletin-dst-days.test.js',
   'recurring-periods.test.js',
   'recurring-periods-write.test.js',
   'recurring-content-versions.test.js',

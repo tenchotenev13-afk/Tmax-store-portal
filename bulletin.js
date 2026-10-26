@@ -936,7 +936,7 @@ function promoStatus(p,refDate){
   var s=new Date(p.start_date); s.setHours(0,0,0,0);
   var e=new Date(p.end_date); e.setHours(0,0,0,0);
   if(t>e) return 'expired';
-  var daysToEnd=Math.ceil((e-t)/86400000);
+  var daysToEnd=Math.round((e-t)/86400000);
   if(daysToEnd<=5) return 'expiring'; /* краят е близо (≤5 дни) - приоритет пред "стартираща", важи и за еднодневни маркери */
   if(t<s) return 'upcoming';
   return 'active';
@@ -2349,7 +2349,7 @@ function bulDoneLate(comp,dueISO){
 function bulDueLineHtml(dueISO,doneComp,overdueTxt){
   var due=new Date(dueISO+'T00:00:00');
   var t0=new Date(); t0.setHours(0,0,0,0);
-  var diff=Math.ceil((due-t0)/86400000);
+  var diff=Math.round((due-t0)/86400000);
   var suffix, color;
   if(doneComp){
     suffix=bulDoneLate(doneComp,dueISO)?' ✓ със закъснение':'';
@@ -7399,7 +7399,7 @@ function renderSubtasks(taskId, dept, where) {
            UTC и в София смяташе вчерашния срок за diff=0: ⚠️ идваше ден късно. */
         var due = s.due_date ? new Date(String(s.due_date).slice(0,10)+'T00:00:00') : null;
         var t0 = new Date(); t0.setHours(0,0,0,0);
-        var diff = due ? Math.ceil((due-t0)/86400000) : null;
+        var diff = due ? Math.round((due-t0)/86400000) : null;
         var dueColor = diff===null?'#94a3b8':diff<0?'#dc2626':diff<=1?'#d97706':'#94a3b8';
         h += '<div style="padding:4px 0;">';
         h += '<div style="display:flex;align-items:center;gap:8px;">';
