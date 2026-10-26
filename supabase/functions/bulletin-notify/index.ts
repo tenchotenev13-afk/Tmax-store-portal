@@ -11,6 +11,15 @@
 //   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //
+// v14 (26.10.2026) — deadline_passed: ред „⏱ Отложили (N)" в писмото
+//   (повод: Миглена, РЕВИЗИЯ ГРУПИ 21.10.2026 — Севлиево отложи с коментар, а
+//   в писмото го нямаше никъде). САМО показване: отложилият и досега е извън
+//   обхвата (taskIsMovedAway) и не влиза нито в „X от Y", нито в „Не са
+//   подали" — броенето НЕ е пипано. Ред: обект → дд.мм — коментар (или „без
+//   коментар"); обект, подал за деня, не е отложил; пренесеното няма такъв
+//   ред. dry_run носи otlozhili. deadlinePassedHtmlFor има 7-и параметър
+//   postponed. Заковано в tests/deadline-postponed.test.js.
+//
 // v13 (23.10.2026) — НОВА ТЕМА minus_unfilled (Минуси, решение на Тенчо
 //   23.10.2026). Push до обекта (tag store_name), делник 10:00 — Миглена качва
 //   MB51 около 08:40. Брои НЕЗАКРИТИТЕ минуси (FIFO 955 ← 956 по обект +
@@ -1287,8 +1296,22 @@ async function buildDeadlinePassed(supabase: any, bg: ReturnType<typeof bgNow>) 
         missing.push(s);
       }
     }
+    /* „⏱ Отложили" — САМО за показване (v14). Отложилият вече е извън scope
+       (taskIsMovedAway), тоест не е нито в „X от Y", нито в „Не са подали";
+       тук само се изброява с датата и коментара. Същият обхват като горе —
+       целеви обекти, без изключените и без „Не се отнася"; подал ли е обектът
+       за деня, не е отложил. Пренесеното няма такъв ред. */
+    const postponed = d.carried ? [] : (Array.isArray(d.t.target_stores) && d.t.target_stores.length
+        ? stores.filter(s => d.t.target_stores.indexOf(s) >= 0) : stores)
+      .filter(s => !recurringIsSkipped(d.t.id, s, skips) && !naHere.some((n: any) => n.store === s)
+        && !submitted.some((x: any) => x.store === s)
+        && !(comps || []).some((x: any) => x.recurring_task_id === d.t.id && x.store_name === s && x.status === 'done'))
+      .map(s => (comps || []).find((x: any) =>
+        x.recurring_task_id === d.t.id && x.store_name === s && x.status === 'postponed'))
+      .filter((x: any) => !!x)
+      .map((x: any) => ({ store: x.store_name, comment: x.comment || '', postponed_to: x.postponed_to || null }));
     entries.push({ task: d.t, slot: d.slot, submitted: submitted, missing: missing,
-                   total: scopeNa.length, notApplicable: naHere });
+                   total: scopeNa.length, notApplicable: naHere, postponed: postponed });
   }
 
   if (!entries.length) return { skip: 'Никоя от задачите в прозореца няма обекти в обхвата си' };
@@ -1367,7 +1390,7 @@ function attachmentsHtml(photos, files){
    собствена дата — тя се явява всяка седмица и датата идва от деня, в който
    се смята (bg.dateStr). Четенето ѝ от глобална променлива би направило
    функцията нетестваема. */
-function deadlinePassedHtmlFor(task: any, slot: number, submitted: any[], missing: string[], dateStr: string, notApplicable?: any[]) {
+function deadlinePassedHtmlFor(task: any, slot: number, submitted: any[], missing: string[], dateStr: string, notApplicable?: any[], postponed?: any[]) {
   const total = submitted.length + missing.length;
   let h = '<div style="font-family:Arial,Helvetica,sans-serif;color:#1f2937;max-width:640px;">'
     + '<h2 style="margin:0 0 4px;font-size:18px;">' + esc(task.title) + '</h2>'
@@ -1401,6 +1424,19 @@ function deadlinePassedHtmlFor(task: any, slot: number, submitted: any[], missin
       + '<div style="font-size:13px;font-weight:700;color:#4B5563;margin-bottom:4px;">🚫 Не се отнася (' + notApplicable.length + '):</div>'
       + '<div style="font-size:13px;color:#4B5563;line-height:1.6;">'
       + notApplicable.map((n: any) => esc(n.store) + ' — ' + esc(n.comment || 'без причина')).join('<br>')
+      + '</div>'
+      + '<div style="font-size:11px;color:#9CA3AF;margin-top:4px;font-style:italic;">Тези обекти не влизат в бройката по-горе.</div>'
+      + '</div>';
+  }
+
+  /* „⏱ Отложили" (v14) — и те ги НЯМА в „X от Y"; коментарът е причината,
+     заради която Миглена питаше (21.10.2026). Датата е дд.мм. */
+  if (postponed && postponed.length) {
+    h += '<div style="padding:10px 12px;background:#F9FAFB;border:1px solid #E5E7EB;border-radius:8px;margin-top:10px;">'
+      + '<div style="font-size:13px;font-weight:700;color:#4B5563;margin-bottom:4px;">⏱ Отложили (' + postponed.length + '):</div>'
+      + '<div style="font-size:13px;color:#4B5563;line-height:1.6;">'
+      + postponed.map((p: any) => esc(p.store) + ' → ' + esc(p.postponed_to ? bgDate(String(p.postponed_to)).slice(0, 5) : '?')
+          + ' — ' + esc(p.comment || 'без коментар')).join('<br>')
       + '</div>'
       + '<div style="font-size:11px;color:#9CA3AF;margin-top:4px;font-style:italic;">Тези обекти не влизат в бройката по-горе.</div>'
       + '</div>';
@@ -1735,7 +1771,8 @@ async function runDeadlinePassed(supabase: any, topic: any, bg: any, dryRun: boo
     planned.push({
       task: e.task.title, slot: hhmm(e.slot),
       podadeni: e.submitted.length, ot: e.total,
-      ne_sa_podali: e.missing, poluchateli: to.map((r: any) => r.email),
+      ne_sa_podali: e.missing, otlozhili: (e.postponed || []).map((p: any) => p.store),
+      poluchateli: to.map((r: any) => r.email),
     });
   }
 
@@ -1755,7 +1792,7 @@ async function runDeadlinePassed(supabase: any, topic: any, bg: any, dryRun: boo
       .insert({ topic_key: topic.key, ref_key: refKey, detail: e.submitted.length + ' от ' + e.total + ' обекта' });
     if (ins.error) { skipped++; continue; }
 
-    const body = deadlinePassedHtmlFor(e.task, e.slot, e.submitted, e.missing, bg.dateStr, e.notApplicable);
+    const body = deadlinePassedHtmlFor(e.task, e.slot, e.submitted, e.missing, bg.dateStr, e.notApplicable, e.postponed);
     let okAny = false;
     for (const r of e.to) {
       const dest = topic.test_email ? topic.test_email : r.email;

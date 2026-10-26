@@ -414,6 +414,7 @@ const TESTS = [
   'postpone-date-consumers.test.js',
   'postpone-date-report.test.js',
   'postpone-date-notify.test.js',
+  'deadline-postponed.test.js',
   'bulletin-empty-recurring.test.js',
   'bulletin-delete-confirm.test.js',
   'bulletin-event-desc.test.js',
