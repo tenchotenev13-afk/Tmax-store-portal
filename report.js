@@ -1742,7 +1742,11 @@ function collectWeeklyReportData(cb, scope){
              "Няма публикуван бюлетин", тоест няма с какво да се разминат. */
           collectCrossModuleWeeklySummary(function(cross){
             summary.cross = cross; /* null при грешка - секцията просто не се показва, не гърми */
-            /* Чек лист (контролинг) за ОТЧЕТНАТА седмица (target) — само тук, в
+            /* Чек лист (контролинг) за ПРЕДХОДНАТА на отчетната седмица (M =
+               clPrev, от v59 / 26.10.2026) — нея контролингът вече е прегледал и
+               изпратил в понеделник, и за нея е и блокът със становищата. До v58
+               таблицата беше за отчетната седмица — снимка от средата ѝ, само
+               portal_value (Теодор, 26.10). Само тук, в
                седмичния колектор. Таб „Днес" вика кросмодулния колектор направо и
                секцията не се смята. Грешка → без секция, писмото тръгва. */
             if (!cross || !target) { cb(summary); return; }
@@ -1756,7 +1760,7 @@ function collectWeeklyReportData(cb, scope){
             var clOr = 'or=(' + clWeeks.map(function(w){ return 'and(year.eq.' + w.year + ',week_number.eq.' + w.week + ')'; }).join(',') + ')';
             Promise.all([
               sbGet('weekly_checklist_metrics','active=eq.true&order=sort_order&select=key,label,value_type,sort_order,active'),
-              sbGet('weekly_checklist','year=eq.'+target.year+'&week_number=eq.'+target.week+'&select=year,week_number,store_name,metric_key,portal_value,control_value,control_num,comment,updated_at'),
+              sbGet('weekly_checklist','year=eq.'+clPrev.year+'&week_number=eq.'+clPrev.week+'&select=year,week_number,store_name,metric_key,portal_value,control_value,control_num,comment,updated_at'),
               reportGetAll('weekly_checklist', clOr + '&select=id,year,week_number,store_name,metric_key,portal_value,control_value,control_num&order=id'),
               sbGetOk('weekly_checklist_responses','year=eq.'+clPrev.year+'&week_number=eq.'+clPrev.week+'&select=year,week_number,store_name,metric_key,text,created_at,updated_at'),
               /* v58: изпратена ли е M до обектите — без изпращане обектът не
@@ -1766,7 +1770,7 @@ function collectWeeklyReportData(cb, scope){
               var clMetrics = (Array.isArray(cl[0]) ? cl[0] : []).filter(function(m){ return m && m.active === true; });
               clMetrics.sort(function(a,b){ return (a.sort_order || 0) - (b.sort_order || 0); });
               var clRows = (Array.isArray(cl[1]) ? cl[1] : []).filter(function(x){
-                return x && Number(x.year) === target.year && Number(x.week_number) === target.week &&
+                return x && Number(x.year) === clPrev.year && Number(x.week_number) === clPrev.week &&
                        stores.indexOf(x.store_name) >= 0;
               });
               var clLast = null;
@@ -1774,7 +1778,7 @@ function collectWeeklyReportData(cb, scope){
                 var t = x.updated_at ? new Date(x.updated_at).getTime() : NaN;
                 if (!isNaN(t) && (clLast === null || t > clLast)) clLast = t;
               });
-              cross.checklist = { year: target.year, week: target.week, metrics: clMetrics,
+              cross.checklist = { year: clPrev.year, week: clPrev.week, metrics: clMetrics,
                                   stores: stores.slice(), rows: clRows,
                                   updatedAt: clLast === null ? null : new Date(clLast).toISOString() };
               var clHist = cl[2], clResp = cl[3], clSent = cl[4];

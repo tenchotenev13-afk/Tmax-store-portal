@@ -13,7 +13,8 @@
      b) само portal_value → сив курсив; control → нормален
      c) липсващ ред → празна клетка, не „—"
      d) обект извън scope → няма ред; в scope без редове → ред с празни клетки
-     e) заявките са за year/week на отчетната седмица (неделя 21:00 → текущата)
+     e) заявките са за year/week на седмицата ПРЕДИ отчетната (от v59, 26.10.2026:
+        неделя 13.09 21:00 → отчетната е 37, таблицата е за 36)
      f) comment → маркер 💬, текстът на коментара отсъства от HTML
      g) подвижен прозорец → секцията липсва
    Плюс: неактивен показател няма колона; ред от друга седмица не се ползва
@@ -38,7 +39,7 @@ const METRICS = [
 ];
 
 function row(store, key, o, week) {
-  return Object.assign({ year: 2026, week_number: week || 37, store_name: store, metric_key: key,
+  return Object.assign({ year: 2026, week_number: week || 36, store_name: store, metric_key: key,
     portal_value: null, control_value: null, control_num: null, comment: null,
     updated_at: '2026-09-12T07:05:00.000Z' }, o || {});
 }
@@ -52,7 +53,7 @@ const ROWS = [
   row('Габрово', 'preocenka', { control_value: 'nyamat', comment: 'ТАЙНА-БЕЛЕЖКА',   /* f) */
                                 updated_at: '2026-09-13T15:30:00.000Z' }),         /* 18:30 София — най-новият в scope */
   row('Силистра', 'revizia_953', { control_value: 'da', updated_at: '2026-09-13T17:00:00.000Z' }), /* d) извън scope */
-  row('Враца', 'revizia_953', { control_value: 'ne', updated_at: '2026-09-13T18:00:00.000Z' }, 36) /* друга седмица */
+  row('Враца', 'revizia_953', { control_value: 'ne', updated_at: '2026-09-13T18:00:00.000Z' }, 37) /* отчетната седмица — НЕ влиза (v59) */
   /* Шумен — нито един ред (c, d) */
 ];
 
@@ -140,7 +141,7 @@ function grid(h, html) {
       ok('a) Враца/сторна: control_num 2 печели над „3/5"', vr[1] && vr[1].text === '2', JSON.stringify(vr[1]));
       ok('b) control → нормален текст', vr[0] && !vr[0].italic && vr[1] && !vr[1].italic);
       ok('b) Враца/преоценка: само портал „да" → сив курсив', vr[2] && vr[2].text === 'да' && vr[2].italic, JSON.stringify(vr[2]));
-      ok('ред от седмица 36 не е ползван (иначе Враца/ревизия би била „не")', vr[0] && vr[0].text !== 'не');
+      ok('ред от ОТЧЕТНАТА седмица 37 не е ползван (иначе Враца/ревизия би била „не")', vr[0] && vr[0].text !== 'не');
 
       const gb = g.rows['Габрово'] || [];
       ok('Габрово/ревизия: „13/20" както е, сив курсив', gb[0] && gb[0].text === '13/20' && gb[0].italic, JSON.stringify(gb[0]));
@@ -161,7 +162,7 @@ function grid(h, html) {
     h.close();
   }
 
-  section('e) заявките са за year/week на отчетната седмица');
+  section('e) заявката на таблицата е за седмицата преди отчетната (v59)');
   {
     const h = env();
     await weekly(h, SCOPE);
@@ -170,8 +171,8 @@ function grid(h, html) {
     const qRows = h.calls.get.filter(u => u.indexOf('/weekly_checklist?') >= 0 && u.indexOf('/weekly_checklist?or=') < 0);
     const qMet = h.calls.get.filter(u => u.indexOf('/weekly_checklist_metrics') >= 0);
     ok('една заявка към weekly_checklist за таблицата', qRows.length === 1, qRows.join(' | '));
-    ok('за year=2026 и week_number=37 (неделя 13.09 21:00 → текущата)',
-      qRows.length === 1 && qRows[0].indexOf('year=eq.2026') >= 0 && qRows[0].indexOf('week_number=eq.37') >= 0, qRows[0]);
+    ok('за year=2026 и week_number=36 (неделя 13.09 21:00 → отчетната 37, таблицата 36)',
+      qRows.length === 1 && qRows[0].indexOf('year=eq.2026') >= 0 && qRows[0].indexOf('week_number=eq.36&') >= 0, qRows[0]);
     ok('една заявка към weekly_checklist_metrics, active=eq.true и order=sort_order',
       qMet.length === 1 && qMet[0].indexOf('active=eq.true') >= 0 && qMet[0].indexOf('order=sort_order') >= 0, qMet.join(' | '));
     h.close();
@@ -195,7 +196,8 @@ function grid(h, html) {
     const h = env();
     const data = await weekly(h, SCOPE);
     const html = h.w.reportChecklistSectionHtml(data.cross);
-    ok('заглавие „Чек лист (контролинг) — седмица 37"', html.indexOf('Чек лист (контролинг) — седмица 37') >= 0);
+    ok('заглавие „Чек лист (контролинг) — седмица 36" (предходната, v59)', html.indexOf('Чек лист (контролинг) — седмица 36') >= 0 &&
+      html.indexOf('Чек лист (контролинг) — седмица 37') < 0);
     ok('легенда в един ред', html.indexOf('нормален = отметка на контролинга · сив курсив = по данни на портала') >= 0);
     ok('„Данни на контролинга към 13.09 18:30" — най-новият ред в scope, в Europe/Sofia',
       html.indexOf('Данни на контролинга към 13.09 18:30') >= 0,

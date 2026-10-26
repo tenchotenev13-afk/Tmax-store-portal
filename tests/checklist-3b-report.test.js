@@ -74,7 +74,9 @@ function env(extra, fail) {
       differences_reports: [], stock_returns: [], kasa_storno: [], kasa_zoborot: [], goods_transit: [],
       transport_pallets: [], client_orders: [], transport_orders: [], app_settings: [],
       weekly_checklist_metrics: METRICS,
-      weekly_checklist: function (url) { return url.indexOf('or=') >= 0 ? HIST : CUR; },
+      /* or= (историята) → HIST; заявката на таблицата → и двете седмици: от v59
+         таблицата е за 42, а редът от отчетната 43 трябва да отпадне от филтъра. */
+      weekly_checklist: function (url) { return url.indexOf('or=') >= 0 ? HIST : CUR.concat(HIST); },
       weekly_checklist_responses: RESP,
       /* v58: блокът показва редовете само за ИЗПРАТЕНА седмица M. Фалшивият
          PostgREST не филтрира — седмица 42 е изпратена, освен ако тестът не
@@ -156,7 +158,7 @@ function rowsOf(h, html) {
     const data = await weekly(h, SCOPE);
     ok('провал на становищата → без prev', data.cross.checklist && !data.cross.checklist.prev);
     ok('… без блока', h.w.reportChecklistResponsesHtml(data.cross) === '');
-    ok('… таблицата на чек листа си остава', h.w.buildWeeklyReportHtml(data).indexOf('Чек лист (контролинг) — седмица 43') >= 0);
+    ok('… таблицата на чек листа си остава', h.w.buildWeeklyReportHtml(data).indexOf('Чек лист (контролинг) — седмица 42') >= 0);
     h.close();
   }
   {
@@ -206,7 +208,24 @@ function rowsOf(h, html) {
     const data = await weekly(h, SCOPE);
     ok('провал на sends → без prev и без блока', data.cross.checklist && !data.cross.checklist.prev &&
        h.w.reportChecklistResponsesHtml(data.cross) === '');
-    ok('… таблицата на чек листа си остава', h.w.buildWeeklyReportHtml(data).indexOf('Чек лист (контролинг) — седмица 43') >= 0);
+    ok('… таблицата на чек листа си остава', h.w.buildWeeklyReportHtml(data).indexOf('Чек лист (контролинг) — седмица 42') >= 0);
+    h.close();
+  }
+
+  section('4а. v59 — таблицата и блокът са за една и съща седмица M');
+  {
+    const h = env();
+    const data = await weekly(h, SCOPE);
+    const cl = data.cross.checklist;
+    ok('cross.checklist е за 42/2026 — както prev', cl && cl.year === 2026 && cl.week === 42 && cl.prev && cl.prev.week === cl.week && cl.prev.year === cl.year,
+       JSON.stringify(cl && { y: cl.year, w: cl.week, py: cl.prev && cl.prev.year, pw: cl.prev && cl.prev.week }));
+    const q = h.calls.get.filter(function (u) { return u.indexOf('/weekly_checklist?year=') >= 0; });
+    ok('заявката на таблицата е за 42, не за 43', q.length === 1 && q[0].indexOf('week_number=eq.42&') >= 0, q.join(' | '));
+    ok('редът от отчетната седмица 43 не влиза в таблицата', cl.rows.every(function (x) { return x.week_number === 42; }) && cl.rows.length > 0,
+       JSON.stringify(cl.rows.map(function (x) { return x.week_number; })));
+    const html = h.w.buildWeeklyReportHtml(data);
+    ok('заглавията: „седмица 42" и в таблицата, и в блока', html.indexOf('Чек лист (контролинг) — седмица 42') >= 0 &&
+       html.indexOf('Чек лист — становища за седмица 42') >= 0 && html.indexOf('Чек лист (контролинг) — седмица 43') < 0);
     h.close();
   }
 
@@ -215,7 +234,7 @@ function rowsOf(h, html) {
     const h = env();
     const data = await weekly(h, SCOPE);
     const html = h.w.buildWeeklyReportHtml(data);
-    const iTbl = html.indexOf('Чек лист (контролинг) — седмица 43'), iBlk = html.indexOf('Чек лист — становища за седмица 42');
+    const iTbl = html.indexOf('Чек лист (контролинг) — седмица 42'), iBlk = html.indexOf('Чек лист — становища за седмица 42');
     const iZob = html.indexOf('Каса — Равнение');
     ok('блокът е след таблицата и преди Равнението', iTbl >= 0 && iBlk > iTbl && iZob > iBlk, iTbl + ' / ' + iBlk + ' / ' + iZob);
     h.close();

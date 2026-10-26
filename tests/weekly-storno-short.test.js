@@ -139,6 +139,20 @@ function withoutSection(html, sec) {
   return html.slice(0, i) + html.slice(i + sec.length);
 }
 
+
+/* От 26.10.2026 (v59) таблицата на чек листа е за седмицата ПРЕДИ отчетната —
+   еталонът я пази със стария номер. Таблицата се изрязва от двете страни
+   (точно веднъж): от новия отчет — точният ѝ HTML, от еталона — същият HTML
+   с номера от еталона. Пази се в weekly-checklist-section.test.js. */
+function withoutChecklistTable(newHtml, oldHtml, tbl) {
+  if (!tbl || typeof newHtml !== 'string' || typeof oldHtml !== 'string') return [newHtml, oldHtml];
+  const m = oldHtml.match(/Чек лист \(контролинг\) — седмица (\d+)</);
+  if (!m) return [null, null];
+  const oldTbl = tbl.replace(/(Чек лист \(контролинг\) — седмица )\d+</, '$1' + m[1] + '<');
+  const cut = function (s, sec) { return s.split(sec).length === 2 ? s.replace(sec, '') : null; };
+  return [cut(newHtml, tbl), cut(oldHtml, oldTbl)];
+}
+
 (async function () {
 
   if (process.env.GEN_OLD_FIXTURE) {
@@ -247,8 +261,9 @@ function withoutSection(html, sec) {
        checklist-3b-report.test.js; тук се изрязва, по същия начин. */
     const clr = h.w.reportChecklistResponsesHtml ? h.w.reportChecklistResponsesHtml(data.cross) : '';
     if (clr && rest0) rest0 = withoutSection(rest0, clr);
-    const before0 = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
+    let before0 = fs.existsSync(FIXTURE) ? fs.readFileSync(FIXTURE, 'utf8') : null;
     ok('фикстурата отпреди промяната я има', !!before0);
+    [rest0, before0] = withoutChecklistTable(rest0, before0, h.w.reportChecklistSectionHtml(data.cross));
     const before = withoutDiffStale(before0);
     const rest = withoutDiffStale(rest0);
     ok('таблицата „Необработени разлики" е изрязана и от двете (точно веднъж)', !!before && !!rest);
