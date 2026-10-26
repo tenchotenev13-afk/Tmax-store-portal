@@ -1,6 +1,15 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v60 (26.10.2026) — ЕДНО нещо: артикулите в „Просрочени клиентски заявки —
+      ЦО" (co_overdue). Под всеки ред на заявката — сив ред на цялата ширина
+      за всеки артикул: „артикул · SAP <код> · <к-во> <мярка>" (+ „ · цвят <x>"
+      при непразен color), в реда на items; без items — един ред от
+      product/sap/qty/unit; празни части и „—" се пропускат
+      (reportCoOverdueItemLines). Колекторът тегли още items,product,sap,qty,unit.
+      dry_run връща и броя артикули на ред (без текста им). Повод: Теодор,
+      15.10. Заковано в tests/co-overdue-items.test.js.
+
    v59 (26.10.2026) — ЕДНО нещо: таблицата на чек листа е за предходната
       седмица (M = clPrev), както блокът със становищата. Заявката за
       weekly_checklist на таблицата, филтърът на редовете и
@@ -4571,13 +4580,30 @@ function reportSofiaToday(now: Date){
 function reportCoOverdueIsCO(fulfiller){
   return String(fulfiller || '').trim().toLowerCase() === 'централен офис';
 }
+/* Артикулите на заявка за писмото: по един ред „артикул · SAP <код> · <к-во> <мярка>"
+   (+ „ · цвят <x>" при непразен color), в реда на items. Без items → един ред от
+   product/sap/qty/unit на заявката. Празни части и „—" се пропускат (като tfCoLabel
+   в transfers.js); ред без нито една част не излиза. Текст, БЕЗ ескейп — esc() е при рендера. */
+function reportCoOverdueItemLines(o){
+  var val = function(x){ var s = x === null || x === undefined ? '' : String(x).trim(); return s === '—' ? '' : s; };
+  var items = o && Array.isArray(o.items) ? o.items.filter(Boolean) : [];
+  if (!items.length && o) items = [o];
+  var out: string[] = [];
+  items.forEach(function(it){
+    var sap = val(it.sap), qty = val(it.qty), unit = val(it.unit), color = val(it.color);
+    var parts = [val(it.product), sap ? 'SAP ' + sap : '', qty ? qty + (unit ? ' ' + unit : '') : '',
+                 color ? 'цвят ' + color : ''].filter(Boolean);
+    if (parts.length) out.push(parts.join(' · '));
+  });
+  return out;
+}
 /* Чиста функция (за jsdom): от редовете на client_orders строи двете секции. */
 function reportCoOverdueSections(rows, refD){
   var s1: any[] = [], s2: any[] = [];
   (Array.isArray(rows) ? rows : []).forEach(function(o){
     if (!o || !reportCoOverdueIsCO(o.fulfiller)) return;
     var base = { id: o.id, in_num: o.in_num || '', store: o.store_name || '—', customer: o.customer_name || '',
-                 delivery: o.delivery || null, waitDays: reportWaitDays(o, refD) };
+                 delivery: o.delivery || null, waitDays: reportWaitDays(o, refD), itemLines: reportCoOverdueItemLines(o) };
     if (o.status === 'pending') {
       if (!reportIsLate(o, refD)) return;
       s1.push(Object.assign(base, { lateDays: reportLateDays(o, refD) }));
@@ -4599,7 +4625,7 @@ function reportCoOverdueSections(rows, refD){
 function collectCoOverdueReportData(cb, now?: Date){
   var refD = reportSofiaToday(now || new Date());
   sbGet('client_orders','status=in.(pending,processed)&fulfiller=ilike.' + encodeURIComponent('Централен офис') +
-    '&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,co_note,co_processed_by,created_at,date').then(function(rows){
+    '&select=id,in_num,store_name,customer_name,fulfiller,delivery,status,co_eta,co_note,co_processed_by,created_at,date,items,product,sap,qty,unit').then(function(rows){
     /* Грешка на PostgREST (напр. несъществуваща колона в select) идва като
        ОБЕКТ, не масив. Без тази проверка писмото щеше да каже „Няма просрочени
        заявки" при реални просрочени — тих провал, по-лош от липсващо писмо. */
@@ -4633,6 +4659,9 @@ function reportCoOverdueHtml(data){
         (withEta ? '<td style="' + TD + '">' + (x.co_eta ? fd(x.co_eta) : '<i style="color:#C0392B;">без дата от ЦО</i>') + '</td>' : '') +
         '<td style="' + TD + 'color:#C0392B;font-weight:700;">' + x.lateDays + (x.lateDays === 1 ? ' ден' : ' дни') + '</td>' +
         '<td style="' + TD + '">' + x.waitDays + (x.waitDays === 1 ? ' ден' : ' дни') + '</td></tr>';
+      (x.itemLines || []).forEach(function(line){
+        r += '<tr><td colspan="' + cols + '" style="' + TD + 'color:#64748b;font-size:10.5px;">' + esc(line) + '</td></tr>';
+      });
       if (withEta && (x.co_note || x.processedBy)) {
         r += '<tr><td colspan="' + cols + '" style="' + TD + 'color:#64748b;font-size:10.5px;">' +
           (x.co_note ? 'Коментар от ЦО: ' + esc(x.co_note) : '') + (x.co_note && x.processedBy ? ' · ' : '') +
@@ -4708,7 +4737,7 @@ Deno.serve(async (req: Request) => {
       var coRecRes: any = await sbGet('report_recipients', 'active=eq.true&co_overdue=eq.true&select=email,name,active,co_overdue');
       var coTo: string[] = reportCoOverdueRecipients(coRecRes);
       if (coDry) {
-        var coPick = function(x: any){ return { in_num:x.in_num, store:x.store, delivery:x.delivery, co_eta:x.co_eta || null, lateDays:x.lateDays, waitDays:x.waitDays }; };
+        var coPick = function(x: any){ return { in_num:x.in_num, store:x.store, delivery:x.delivery, co_eta:x.co_eta || null, lateDays:x.lateDays, waitDays:x.waitDays, items:(x.itemLines || []).length }; };
         return new Response(JSON.stringify({ ok:true, dry_run:true, date:coIso, workday:coWorkday, subject:reportCoOverdueSubject(coData),
           recipients:coTo.length, pending:{ count:coData.pending.length, first5:coData.pending.slice(0,5).map(coPick) },
           processed:{ count:coData.processed.length, first5:coData.processed.slice(0,5).map(coPick) }, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
