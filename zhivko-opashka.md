@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията 20261026120000_weekly_checklist_portal_mode, версия 20261026125017, приложена 26.10.2026)
+- 26.10 · weekly_checklist_metrics.portal_mode — text, NULL, без default (стойности 'any' / 'count' / 'file_none')
+
 (в базата от миграцията 20261024090000_storno_notes_notify, версия 20261024125100, приложена 24.10.2026)
 - 24.10 · storno_notes.notify_error — text, NULL, без default
 - 24.10 · storno_notes.notified_at — timestamptz, NULL, без default
