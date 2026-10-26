@@ -989,7 +989,9 @@ function loadClientOrders(){
   if(coBody)enableDragScroll(coBody.closest('.tbl-wrap'));
   loadOrderRestrictions();
   renderCoSapBanner();
-  var q='order=created_at.desc';
+  /* id като tiebreaker: sbGetAll чете на страници по offset, а без
+     детерминиран ред страниците се припокриват и губят редове. */
+  var q='order=created_at.desc,id.desc';
   var stores=assignedStores();
   if(!stores){
     /* admin без ограничение - вижда всичко */
@@ -1000,8 +1002,13 @@ function loadClientOrders(){
     var orParts=stores.map(function(st){var s=encodeURIComponent(st);return 'store_name.eq.'+s+',fulfiller.eq.'+s;}).join(',');
     q+='&or=('+orParts+')';
   }
-  sbGet('client_orders',q).then(function(data){
+  /* sbGetAll: глобалният профил вижда всички 3060 реда (26.10.2026), а
+     PostgREST реже на 1000 тихо — отворени заявки отпреди 20.09 не излизаха
+     нито в таба, нито в банера при вход. При .partial — червен ред и тоаст,
+     таблицата показва прочетеното. */
+  sbGetAll('client_orders',q).then(function(data){
     clientOrders=Array.isArray(data)?data:[];
+    coShowPartial(!!(data&&data.partial));
     var mine=coMyFulfillerNames();
     clientOrders.forEach(function(o){
       o._status=calcStatus(o.delivery,o.status);
@@ -1015,6 +1022,22 @@ function loadClientOrders(){
     coBuildRoleOptions();
     renderClientOrders();renderMetrics();updateBadges();
   }).catch(function(e){console.warn('client_orders:',e);});
+}
+
+/* Червеният ред над таблицата при непълно четене (виж loadClientOrders).
+   Стои, докато следващото зареждане не мине цяло. */
+function coShowPartial(partial){
+  var body=document.getElementById('co-body');
+  var wrap=body&&body.closest('.tbl-wrap');if(!wrap)return;
+  var el=document.getElementById('co-partial');
+  if(!el){
+    el=document.createElement('div');el.id='co-partial';
+    el.style.cssText='color:#dc2626;font-weight:600;font-size:13px;margin-bottom:10px;';
+    wrap.parentNode.insertBefore(el,wrap);
+  }
+  el.style.display=partial?'':'none';
+  el.textContent=partial?'⚠️ Непълни данни — клиентски заявки: прочетени '+clientOrders.length+' реда, четенето прекъсна. Списъкът и броячите не са пълни.':'';
+  if(partial)toast('Клиентски заявки: заредени са само '+clientOrders.length+' — непълни данни','#dc2626');
 }
 
 /* Чипът на лентата „Покажи:" като предикат. 'active' = всичко, което още не е

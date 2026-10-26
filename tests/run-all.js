@@ -440,7 +440,8 @@ const TESTS = [
   'table-scroll.test.js',
   'recurring-store-hints.test.js',
   'banner-split.test.js',
-  'handover-structure.test.js'
+  'handover-structure.test.js',
+  'limit1000-co-transport.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

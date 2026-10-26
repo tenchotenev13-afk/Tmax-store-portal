@@ -91,13 +91,17 @@ function runHistorySearch(){
     : storeQ();
 
   if(type==='all'||type==='transport'){
-    var q='order=created_at.desc&date=gte.'+from+'&date=lte.'+to+sFilter;
-    promises.push(sbGet('transport_orders',q).then(function(d){histData.transport=Array.isArray(d)?d:[];}));
+    /* sbGetAll + id като tiebreaker: два месеца транспорт по всички обекти са
+       над 1000 (август 763, септември 752 — 26.10.2026). */
+    var q='order=created_at.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter;
+    promises.push(sbGetAll('transport_orders',q).then(function(d){histData.transport=Array.isArray(d)?d:[];}));
   } else { histData.transport=[]; }
 
   if(type==='all'||type==='client'){
-    var q2='order=created_at.desc&date=gte.'+from+'&date=lte.'+to+sFilter;
-    promises.push(sbGet('client_orders',q2).then(function(d){histData.client=Array.isArray(d)?d:[];}));
+    /* sbGetAll + id като tiebreaker: самият август са 1017 клиентски
+       (26.10.2026) — един месец вече минава лимита от 1000. */
+    var q2='order=created_at.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter;
+    promises.push(sbGetAll('client_orders',q2).then(function(d){histData.client=Array.isArray(d)?d:[];}));
   } else { histData.client=[]; }
 
   if(type==='all'||type==='kasa'){
@@ -118,6 +122,8 @@ function runHistorySearch(){
     stornoIndexItems(histData.storno);
     renderHistoryResults();
     if(histData.storno.partial) toast('⚠️ Непълни данни — сторно: прочетени '+histData.storno.length+' реда, четенето прекъсна','#dc2626');
+    else if(histData.client.partial) toast('⚠️ Непълни данни — клиентски: прочетени '+histData.client.length+' реда, четенето прекъсна','#dc2626');
+    else if(histData.transport.partial) toast('⚠️ Непълни данни — транспорт: прочетени '+histData.transport.length+' реда, четенето прекъсна','#dc2626');
     else if(histData.kasa.partial) toast('⚠️ Непълни данни — каса: прочетени '+histData.kasa.length+' реда, четенето прекъсна','#dc2626');
   }).catch(function(e){
     document.getElementById('h-results').innerHTML=
@@ -195,7 +201,9 @@ function renderHistoryResults(){
   var partialRow=function(what,n){
     return '<div style="color:#dc2626;font-weight:600;font-size:13px;margin-bottom:10px;">⚠️ Непълни данни — '+what+': прочетени '+n+' реда, четенето прекъсна. Броят и списъкът по-долу не са пълни.</div>';
   };
-  var partialHtml=(histData.kasa.partial?partialRow('каса',totalK):'')+
+  var partialHtml=(histData.transport.partial?partialRow('транспорт',totalT):'')+
+                  (histData.client.partial?partialRow('клиентски',totalC):'')+
+                  (histData.kasa.partial?partialRow('каса',totalK):'')+
                   (histData.storno.partial?partialRow('сторно',totalS):'');
 
   if(!totalAll){

@@ -46,9 +46,13 @@ function trBuildMonthOptions(){
 function loadTransport(){
   var trBody=document.getElementById('tr-body');
   if(trBody)enableDragScroll(trBody.closest('.tbl-wrap'));
-  var q='order=created_at.desc'+storeQ();
-  sbGet('transport_orders',q).then(function(data){
+  /* sbGetAll + id като tiebreaker: глобалният профил вижда 2598 реда
+     (26.10.2026), PostgREST реже на 1000 тихо. При .partial — червен ред и
+     тоаст, таблицата показва прочетеното. */
+  var q='order=created_at.desc,id.desc'+storeQ();
+  sbGetAll('transport_orders',q).then(function(data){
     transportOrders=Array.isArray(data)?data:[];
+    trShowPartial(!!(data&&data.partial));
     transportOrders.forEach(function(o){
       var st=calcStatus(o.delivery,o.status);
       /* Транспорт, създаден от клиентска заявка, чиято стока още не е пристигнала:
@@ -66,6 +70,21 @@ function loadTransport(){
     }).catch(function(){});
     renderTransport();renderMetrics();updateBadges();
   }).catch(function(e){console.warn('transport:',e);});
+}
+
+/* Червеният ред над таблицата при непълно четене (виж loadTransport). */
+function trShowPartial(partial){
+  var body=document.getElementById('tr-body');
+  var wrap=body&&body.closest('.tbl-wrap');if(!wrap)return;
+  var el=document.getElementById('tr-partial');
+  if(!el){
+    el=document.createElement('div');el.id='tr-partial';
+    el.style.cssText='color:#dc2626;font-weight:600;font-size:13px;margin-bottom:10px;';
+    wrap.parentNode.insertBefore(el,wrap);
+  }
+  el.style.display=partial?'':'none';
+  el.textContent=partial?'⚠️ Непълни данни — транспорт: прочетени '+transportOrders.length+' реда, четенето прекъсна. Списъкът и броячите не са пълни.':'';
+  if(partial)toast('Транспорт: заредени са само '+transportOrders.length+' — непълни данни','#dc2626');
 }
 
 /* Чипът на лентата „Покажи:" като предикат. 'active' = всичко, което още не е приключило
