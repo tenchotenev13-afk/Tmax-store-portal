@@ -1,0 +1,7 @@
+# 27.10 — pallets-three-mails
+
+- Повод: Стефан Георгиев (s.georgiev@temax.bg, Снабдяване), 12.10 — три писма „с една и съща информация" за палетите. Не е двойно пускане на крон, а три пътя: (1) bulletin-notify `deadline_passed`, петък 17:15 — „ТеМАХ — СПРАВКА ПРАЗНИ ПАЛЕТИ (дата)" (кой обект е подал справката + коментарите; `notification_log` всеки петък за `ceb052e6`); (2) send-scheduled-report `type=pallets`, петък 18:00 — „Палети за прибиране — дата" (бройките по обект, `report_recipients.pallets`); (3) send-routed-report, понеделник 08:10 — „📬 ТеМАХ — Личен седмичен отчет" (картата на същата задача). (1) и (3) идваха от `user:s.georgiev@temax.bg` в `report_groups` на постоянната задача „СПРАВКА ПРАЗНИ ПАЛЕТИ" (`ceb052e6`) — това е единствената постоянна задача, в която е вписан.
+- Решение на Тенчо 27.10 (вариант А): остава само (2). Данни, без код и без схема (без ред за Живко), през execute_sql на 27.10:
+  `update public.recurring_tasks set report_groups = array_remove(report_groups, 'user:s.georgiev@temax.bg') where id = 'ceb052e6-872f-425d-bb78-cd1e7db2909f';`
+  Rollback: `update public.recurring_tasks set report_groups = report_groups || 'user:s.georgiev@temax.bg' where id = 'ceb052e6-872f-425d-bb78-cd1e7db2909f' and not ('user:s.georgiev@temax.bg' = any(report_groups));`
+- Сверено в базата след промяната: `report_groups` = controlling, owner, user:d.ivanova@temax.bg (останалите непокътнати); версии на задачата — 0; Стефан не е в нито една постоянна задача; `report_recipients.pallets` за него — true. SHA е комитът, който добавя този файл.
