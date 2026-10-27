@@ -673,7 +673,7 @@ function noAmountInDom(name, h) {
     let cap = xl(he.w);
     const ooE = he.doc.getElementById('mn-onlyopen'); ooE.checked = true; fire(he.w, ooE, 'change');
     realClick(he.w, he.doc.getElementById('mn-excel'));
-    ok('Excel (Дневен, само незакрити): заглавията', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|Дата|Количество|Мерна ед.|Състояние|Заметнат код|Причина|Име на служител|Бележка|Предишен минус|Брой за 30 дни|Действие', cap.aoa && cap.aoa[0].join('|'));
+    ok('Excel (Дневен, само незакрити): заглавията', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|Дата|Количество|Мерна ед.|Състояние|Заметнат код|Причина|Име на служител|Бележка|Предишен минус|Брой за 30 дни|Действие|КЗ', cap.aoa && cap.aoa[0].join('|'));
     ok('… 3 реда (филтърът е приложен)', cap.aoa && cap.aoa.length === 4, cap.aoa && cap.aoa.length);
     const r98 = cap.aoa && cap.aoa.find(r => r[0] === '98275');
     ok('… количеството е число, мерната единица — отделна колона', r98 && r98[3] === 2.88 && r98[4] === 'M2' && r98[2] === '07.10.2026', JSON.stringify(r98));
@@ -813,9 +813,10 @@ function noAmountInDom(name, h) {
     const u3 = hc2.doc.getElementById('mn-unfilled'); u3.checked = false; fire(hc2.w, u3, 'change');
     realClick(hc2.w, hc2.doc.getElementById('mn-excel'));
     const xr = id => cap.aoa && cap.aoa.find(r => r[0] === '77001' && r[2] === ({ r1: '01.10.2026', r2: '05.10.2026', r3: '20.10.2026', r4: '30.11.2026' })[id]);
-    ok('Excel: „Предишен минус“, „Брой за 30 дни“, „Действие“ накрая', cap.aoa && cap.aoa[0].slice(-3).join('|') === 'Предишен минус|Брой за 30 дни|Действие');
-    ok('Excel 05.10: 01.10.2026 | 2 | действието', xr('r2') && xr('r2').slice(-3).join('|') === '01.10.2026|2|ще преетикираме', xr('r2') && JSON.stringify(xr('r2').slice(-3)));
-    ok('Excel 01.10: празно | 1 | празно', xr('r1') && xr('r1')[xr('r1').length - 3] === '' && xr('r1')[xr('r1').length - 2] === 1 && xr('r1')[xr('r1').length - 1] === '', xr('r1') && JSON.stringify(xr('r1').slice(-3)));
+    /* „КЗ“ (етап 4а, 27.10.2026) е последна — тези три са точно преди нея. */
+    ok('Excel: „Предишен минус“, „Брой за 30 дни“, „Действие“ преди „КЗ“', cap.aoa && cap.aoa[0].slice(-4).join('|') === 'Предишен минус|Брой за 30 дни|Действие|КЗ');
+    ok('Excel 05.10: 01.10.2026 | 2 | действието', xr('r2') && xr('r2').slice(-4, -1).join('|') === '01.10.2026|2|ще преетикираме', xr('r2') && JSON.stringify(xr('r2').slice(-4, -1)));
+    ok('Excel 01.10: празно | 1 | празно', xr('r1') && xr('r1')[xr('r1').length - 4] === '' && xr('r1')[xr('r1').length - 3] === 1 && xr('r1')[xr('r1').length - 2] === '', xr('r1') && JSON.stringify(xr('r1').slice(-4, -1)));
     ok('Excel без суми', !/(^|[^\d.])(3\.7|13\.97|-1\.96)([^\d]|$)/.test(JSON.stringify(cap.aoa)));
     realClick(hc2.w, hc2.doc.getElementById('mn-print'));
     const pw = hc2.doc.getElementById('mn-print-wrap');

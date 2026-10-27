@@ -74,7 +74,21 @@
    прерисуване на модула; без polling, без push от браузъра (CLAUDE.md т.14 —
    известието е тема minus_unfilled в bulletin-notify, с копие на същото
    изчисление). „Днес" (today.js) чете mnLoadSummary. Клик по push-а отваря
-   #mn → mnDeepLinkBoot. */
+   #mn → mnDeepLinkBoot.
+
+   Етап 4а — връзка с Клиентски заявки (27.10.2026, решение на Тенчо
+   „подсказка + избор"; повод — писмо на Миглена от 27.10). Ред 955 съвпада
+   със заявка на СЪЩИЯ обект (client_orders.store_name, не fulfiller), с код =
+   материала (items[].sap, при стар запис без items — колоната sap; trim,
+   сравнение като низ), дата на заявката в [дата на минуса − 7; + 7], статус
+   ≠ refused. Заявките се теглят с ЕДНА заявка (mnLoadCo) СЛЕД рисуването —
+   грешка → без подсказки + сив ред „Клиентските заявки не се заредиха".
+   „📋 Дневен": чип „🧾 КЗ <№> · <статус>" под описанието (клик → детайлът на
+   заявката, openClientOrderDetail от client-orders.js), търсене и по № на КЗ,
+   Excel колона „КЗ", печат — № под описанието. Обектът при причина с
+   requires_note вижда „↳ <№> / <дата>" под бележката — кликът попълва
+   бележката, не записва. „📦 По артикул", minus_unfilled, „Днес" и
+   bulletin-notify не знаят за КЗ. */
 
 var mnMovs = [];
 var mnReasons = [];
@@ -95,6 +109,9 @@ var mnDraft = {};        /* id → {real_code, reason_id, employee_name, note} �
 var mnLoadErr = '';
 var mnLoadSeq = 0;
 var mnBusy = false;
+var mnCoIdx = {};        /* store_name + \u0001 + код → [клиентски заявки] */
+var mnCoErr = false;     /* клиентските заявки не се заредиха */
+var MN_CO_DAYS = 7;
 
 var MN_STORE_ROLES = ['manager', 'sklad'];
 var MN_CO_ROLES = ['admin', 'accounting', 'controlling'];
@@ -448,6 +465,7 @@ function loadMinusi(){
       mnMovs = r2[0];
       mnLastUpload = r2[1] && r2[1].ok ? (r2[1].rows[0] || null) : null;
       mnRender();
+      return mnLoadCo(seq);
     });
   });
 }
@@ -470,6 +488,110 @@ function mnStoreList(){
   var seen = {}, out = [];
   Object.keys(mnPlants).forEach(function(k){ var s = mnPlants[k]; if(s && !seen[s]){ seen[s] = 1; out.push(s); } });
   return out.sort(function(a, b){ return a.localeCompare(b, 'bg'); });
+}
+
+/* ─── Клиентски заявки (етап 4а) ───────────────────────── */
+function mnAddDays(d, n){
+  var p = String(d).split('-'), x = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2] + n));
+  return x.getUTCFullYear() + '-' + mnPad(x.getUTCMonth() + 1) + '-' + mnPad(x.getUTCDate());
+}
+function mnCoKey(v){ return String(v == null ? '' : v).trim(); }
+/* Кодовете на заявката: items[].sap, а при стар запис без items — колоната sap. */
+function mnCoCodes(o){
+  var its = Array.isArray(o.items) && o.items.length ? o.items.map(function(it){ return it && it.sap; }) : [o.sap];
+  var seen = {}, out = [];
+  its.forEach(function(c){ var k = mnCoKey(c); if(k && !seen[k]){ seen[k] = 1; out.push(k); } });
+  return out;
+}
+/* Чисто: заявки → индекс по обект + код. Отказаните и без валидна дата — вън. */
+function mnCoBuildIdx(rows){
+  var idx = {};
+  (rows || []).forEach(function(o){
+    if(!o || o.status === 'refused' || !/^\d{4}-\d{2}-\d{2}$/.test(String(o.date || ''))) return;
+    mnCoCodes(o).forEach(function(c){
+      var k = o.store_name + '\u0001' + c;
+      (idx[k] = idx[k] || []).push(o);
+    });
+  });
+  return idx;
+}
+/* Заявките за ред 955: същият обект, същият код, |дата − дата на минуса| ≤ 7. */
+function mnCoMatches(r){
+  var list = mnCoIdx[r.store_name + '\u0001' + mnCoKey(r.material)] || [];
+  return list.filter(function(o){ return Math.abs(mnDays(r.posting_date, o.date)) <= MN_CO_DAYS; })
+    .sort(function(a, b){ return String(a.date).localeCompare(String(b.date)) || String(a.in_num || '').localeCompare(String(b.in_num || ''), 'bg', { numeric: true }); });
+}
+/* Една заявка за показаните обекти и прозореца от дати. Вика се СЛЕД
+   mnRender — таблицата не чака; при отговор се прерисува само #mn-body. */
+function mnLoadCo(seq){
+  var r955 = mnMovs.filter(function(m){ return String(m.mvt_type) === '955' && m.posting_date; });
+  if(!r955.length){ mnCoIdx = {}; mnCoErr = false; return Promise.resolve(); }
+  var stores = [], seen = {}, from = null, to = null;
+  r955.forEach(function(m){
+    if(!seen[m.store_name]){ seen[m.store_name] = 1; stores.push(m.store_name); }
+    if(!from || m.posting_date < from) from = m.posting_date;
+    if(!to || m.posting_date > to) to = m.posting_date;
+  });
+  var q = 'select=id,in_num,store_name,date,status,sap,items' +
+    '&store_name=in.(' + stores.map(function(s){ return '"' + encodeURIComponent(s) + '"'; }).join(',') + ')' +
+    '&date=gte.' + mnAddDays(from, -MN_CO_DAYS) + '&date=lte.' + mnAddDays(to, MN_CO_DAYS) + '&order=date.asc,id.asc';
+  return sbGetAll('client_orders', q).then(function(rows){
+    if(seq !== mnLoadSeq) return;
+    mnCoErr = !!rows.partial;
+    mnCoIdx = mnCoErr ? {} : mnCoBuildIdx(rows);
+  }).catch(function(){
+    if(seq !== mnLoadSeq) return;
+    mnCoErr = true; mnCoIdx = {};
+  }).then(function(){
+    if(seq === mnLoadSeq && document.getElementById('mn-body')) mnRenderBody();
+  });
+}
+/* Чип „🧾 КЗ <№> · <статус>" под описанието — пренася се, не разширява колоната. */
+function mnCoChipsHtml(r){
+  var ms = mnCoMatches(r);
+  if(!ms.length) return '';
+  var open = typeof openClientOrderDetail === 'function';
+  return '<div class="mn-co" style="margin-top:3px;font-size:11px;">' + ms.map(function(o){
+    return '<span class="mn-co-chip" data-co-id="' + escAttr(String(o.id)) + '"' +
+      (open ? ' onclick="mnOpenCo(this.getAttribute(\'data-co-id\'))" title="Отвори заявката"' : '') +
+      ' style="display:inline-block;background:#e0f2fe;color:#0369a1;border-radius:4px;padding:0 4px;margin:1px 2px 0 0;' + (open ? 'cursor:pointer;' : '') + '">🧾 КЗ ' +
+      esc(o.in_num || '—') + ' · ' + esc(typeof statusLabel === 'function' ? statusLabel(o.status || 'pending') : (o.status || '')) + '</span>';
+  }).join('') + '</div>';
+}
+/* Детайлът на заявката е в client-orders.js и търси реда в заредените масиви;
+   тук се дочита пълният ред и се слага в _coNotifyRows — същият път, по който
+   звънецът отваря заявка без зареден списък (notifications.js). */
+function mnOpenCo(id){
+  if(typeof openClientOrderDetail !== 'function') return Promise.resolve(false);
+  return sbGetOk('client_orders', 'id=eq.' + encodeURIComponent(id) + '&select=*').then(function(res){
+    var o = res && res.ok ? res.rows[0] : null;
+    if(!o){ toast('Заявката не се зареди', '#dc2626'); return false; }
+    if(typeof _coNotifyRows !== 'undefined' && _coNotifyRows) _coNotifyRows[String(o.id)] = o;
+    openClientOrderDetail(o.id);
+    return true;
+  });
+}
+/* „↳ <№> / <дата>" под бележката — само за обекта, само при причина с requires_note. */
+function mnCoPickHtml(id, reasonId){
+  if(!reasonId || !mnReasonNeedsNote(reasonId)) return '';
+  var r = null;
+  mnMovs.forEach(function(m){ if(String(m.id) === String(id)) r = m; });
+  if(!r) return '';
+  return mnCoMatches(r).map(function(o){
+    var lbl = (o.in_num || '—') + ' / ' + fmtDate(o.date);
+    return '<button type="button" class="mn-co-use" data-co-txt="' + escAttrVal('КЗ ' + lbl) + '"' +
+      ' onclick="mnCoUse(\'' + escAttr(String(id)) + '\',this.getAttribute(\'data-co-txt\'))"' +
+      ' style="display:block;max-width:110px;white-space:normal;text-align:left;margin-top:3px;font-size:11px;padding:1px 5px;border:1px solid #7dd3fc;background:#f0f9ff;color:#0369a1;border-radius:4px;cursor:pointer;">↳ ' + esc(lbl) + '</button>';
+  }).join('');
+}
+function mnCoPickToggle(id, reasonId){
+  var el = document.getElementById('mn-co-pick-' + id);
+  if(el) el.innerHTML = mnCoPickHtml(id, reasonId);
+}
+/* Попълва бележката — не записва; „Запази" остава отделно. */
+function mnCoUse(id, txt){
+  var e = document.getElementById('mn-note-' + id);
+  if(e) e.value = txt;
 }
 
 /* ─── Рендер ───────────────────────────────────────────── */
@@ -531,7 +653,9 @@ function mnMatchSearch(r, daily){
   var q = String(mnSearch || '').trim().toLowerCase();
   if(!q) return true;
   if(String(r.material == null ? '' : r.material).toLowerCase().indexOf(q) >= 0) return true;
-  return !!daily && String(r.real_code == null ? '' : r.real_code).toLowerCase().indexOf(q) >= 0;
+  if(!daily) return false;
+  if(String(r.real_code == null ? '' : r.real_code).toLowerCase().indexOf(q) >= 0) return true;
+  return mnCoMatches(r).some(function(o){ return String(o.in_num || '').toLowerCase().indexOf(q) >= 0; });
 }
 function mnViewRows(calc){
   if(mnView === 'bymat') return calc.byMat.filter(function(r){ return mnMatchSearch(r, false); });
@@ -544,6 +668,7 @@ function mnViewRows(calc){
 function mnBodyHtml(calc){
   var rows = mnViewRows(calc);
   var h = mnView === 'bymat' ? mnByMatHtml(rows) : mnDailyHtml(rows);
+  if(mnView === 'daily' && mnCoErr) h = '<div id="mn-co-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Клиентските заявки не се заредиха</div>' + h;
   /* Свръхсторното е грешка на магазина — вижда го и обектът (Миглена, 21.10.2026). */
   if(calc.over.length || calc.early.length) h += mnOverHtml(calc.over, calc.early);
   return h;
@@ -588,7 +713,7 @@ function mnDailyHtml(rows){
     var val = function(k){ return d[k] != null ? d[k] : (r[k] == null ? '' : r[k]); };
     /* Закритите и под прага — сив текст; жълтите колони си остават жълти. */
     var gray = r._state === 'open' ? '' : ' style="color:#94a3b8;"';
-    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + mnBadgeHtml(r) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
+    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + mnBadgeHtml(r) + mnCoChipsHtml(r) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
     /* Мерната единица е в „Количество", „Състояние" се пренася на два реда,
        служител / бележка — 110px: с отделна колона „Мерна ед." таблицата беше
        1342 px срещу карта 1246 и „Запази" излизаше навън (Playwright, 22.10). */
@@ -600,7 +725,7 @@ function mnDailyHtml(rows){
       /* Фиксирана ширина: най-дългата причина разтягаше менюто до ~378 px и
          „Запази“ излизаше извън картата (21.10.2026). Целият текст — в title. */
       h += '<td style="' + yel + '"><select id="mn-reason-' + escAttr(id) + '" style="width:180px;max-width:180px;" title="' + escAttrVal(mnReasonLabel(cur)) + '"' +
-        ' onchange="this.title=this.value?this.options[this.selectedIndex].text:\'\'"><option value="">— избери —</option>';
+        ' onchange="this.title=this.value?this.options[this.selectedIndex].text:\'\';mnCoPickToggle(\'' + escAttr(id) + '\',this.value)"><option value="">— избери —</option>';
       mnReasons.forEach(function(x){
         if(x.active === false && String(x.id) !== cur) return;
         h += '<option value="' + escAttr(String(x.id)) + '"' + (String(x.id) === cur ? ' selected' : '') + '>' + esc(x.label) + '</option>';
@@ -610,6 +735,7 @@ function mnDailyHtml(rows){
       /* „Действие" — само на повторенията, под „Бележка" (без нова колона). */
       h += '<td style="' + yel + '"><input id="mn-note-' + escAttr(id) + '" value="' + escAttrVal(val('note')) + '" style="width:110px;">' +
         (mnNoteMissing(r) ? MN_NOTE_MISSING : '') +
+        '<div id="mn-co-pick-' + escAttr(id) + '">' + mnCoPickHtml(id, cur) + '</div>' +
         (r._repeat ? '<input id="mn-action-' + escAttr(id) + '" value="' + escAttrVal(val('action')) + '" placeholder="Действие срещу повторение" style="width:110px;display:block;margin-top:4px;">' : '') + '</td>';
       h += '<td style="white-space:nowrap;">' + (done ? '<span class="mn-done" title="' + escAttr('Попълнено: ' + (r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span> ' : '') + '<button class="btn btn-green" onclick="mnSave(\'' + escAttr(id) + '\')">Запази</button></td>';
     } else {
@@ -709,11 +835,12 @@ function mnExportAoa(){
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.desc || '', r.s955, r.s956, r.rest, r.uom || '']));
     });
   } else {
-    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие'])];
+    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие', 'КЗ'])];
     rows.forEach(function(r){
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.material_desc || '', fmtDate(r.posting_date), mnRound(Number(r.qty) || 0), r.uom || '',
         mnStateText(r), r.real_code || '', mnReasonLabel(r.reason_id), r.employee_name || '', r.note || '',
-        r._prevDate ? fmtDate(r._prevDate) : '', r._cnt30 || 0, r.action || '']));
+        r._prevDate ? fmtDate(r._prevDate) : '', r._cnt30 || 0, r.action || '',
+        mnCoMatches(r).map(function(o){ return o.in_num || ''; }).join(', ')]));
     });
   }
   return aoa;
@@ -741,6 +868,10 @@ function mnPrintCss(){
     '.mn-ptbl th{background:#f1f5f9;}' +
     '.mn-ptbl tr.mn-p-gray td{color:#888;}';
 }
+function mnCoPrint(r){
+  var ms = mnCoMatches(r);
+  return ms.length ? '<br><span class="mn-p-co">' + mnP('КЗ ' + ms.map(function(o){ return o.in_num || '—'; }).join(', ')) + '</span>' : '';
+}
 function mnP(v){ return v == null || v === '' ? '' : esc(String(v)); }
 function mnPrint(){
   var wrap = document.getElementById('mod-print');
@@ -762,7 +893,7 @@ function mnPrint(){
       return '<tr' + (r._state === 'open' ? '' : ' class="mn-p-gray"') + '>' + (all ? '<td>' + mnP(r.store_name) + '</td>' : '') +
         '<td>' + mnP(r.material) + '</td><td>' + mnP(r.material_desc) +
         (r._prevDate ? '<br><span class="mn-p-prev">' + mnP('↻ ' + fmtDate(r._prevDate).slice(0, 5) + (r._cnt30 >= 2 ? ' ×' + r._cnt30 : '')) + '</span>' : '') +
-        '</td><td>' + mnP(fmtDate(r.posting_date)) + '</td>' +
+        mnCoPrint(r) + '</td><td>' + mnP(fmtDate(r.posting_date)) + '</td>' +
         '<td>' + mnP(mnFmtQty(Number(r.qty)) + (r.uom ? ' ' + r.uom : '')) + '</td><td>' + mnP(mnStateText(r)) + '</td>' +
         '<td>' + mnP(r.real_code) + '</td><td>' + mnP(mnReasonLabel(r.reason_id)) + '</td><td>' + mnP(r.employee_name) + '</td><td>' + mnP(r.note) +
         (r.action ? (r.note ? '<br>' : '') + '<span class="mn-p-action">' + mnP('Действие: ' + r.action) + '</span>' : '') + '</td></tr>';
