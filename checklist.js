@@ -127,8 +127,28 @@ function checklistStoreMode() {
   return !isGlobal() && isReportableStore(currentUser.store_name);
 }
 
+/* РЕГИОНАЛЕН РЕЖИМ (27.10.2026, решение на Тенчо): accounting с is_regional и
+   поне един обект (roleRegionalScope в shared.js). Вижда мрежата само за
+   своите обекти, знака 📝 и блока „Становища на обектите" — само четене:
+   клетките не се закачат, „Изпрати" няма (canEditChecklist остава само
+   контролинг). is_regional идва СЛЕД входа (rolesLoadRegional) — тогава и
+   табът се показва. Регионален без обекти → без таб. */
+function checklistRegionalMode() {
+  if (!currentUser || checklistIsControlling()) return false;
+  if (typeof roleRegionalScope !== 'function') return false;
+  var scope = roleRegionalScope();
+  return Array.isArray(scope) && scope.length > 0;
+}
+
 function canSeeChecklist() {
-  return checklistIsControlling() || checklistStoreMode();
+  return checklistIsControlling() || checklistStoreMode() || checklistRegionalMode();
+}
+
+/* Кой вижда становищата на обектите като преглед — знака в клетката и блока
+   под таблицата: контролингът (и admin) и регионалният. Обектът пише своите в
+   отделния блок „Становище" (режим на обекта). */
+function checklistCanSeeResponses() {
+  return checklistIsControlling() || checklistRegionalMode();
 }
 
 /* Редакцията е САМО за контролинга (admin / група controlling), не за
@@ -211,7 +231,15 @@ function loadChecklist() {
   /* В режим на обекта — само неговият ред (assignedStores() дава
      [store_name] за неглобален потребител). */
   var ownStores = storeMode ? (assignedStores() || []).filter(isReportableStore) : null;
-  var storeFilter = storeMode ? storeQ() : '';
+  /* Регионалният — само своите обекти (roleRegionalScope), сечени с
+     отчетните; заявките за клетките и становищата — със същия in.(…). */
+  var regionalMode = !storeMode && checklistRegionalMode();
+  var regionScope = regionalMode ? roleRegionalScope() : null;
+  var storeFilter = storeMode ? storeQ()
+    : regionalMode ? '&store_name=in.(' + regionScope.map(function (s) {
+        return '"' + encodeURIComponent(String(s).replace(/"/g, '')) + '"';
+      }).join(',') + ')'
+    : '';
 
   Promise.all([
     sbGet('weekly_checklist_metrics', 'active=eq.true&order=sort_order'),
@@ -228,7 +256,11 @@ function loadChecklist() {
        НЕ таблицата stores: тя брои и ЦО, двата склада и обекти без нито
        един акаунт (23 реда), тоест мрежата би имала пет реда, които няма
        кой да отметне. Същият източник като отчетите, „Днес" и Палети. */
-    storeMode ? Promise.resolve(ownStores) : loadReportableStores(),
+    storeMode ? Promise.resolve(ownStores)
+      : regionalMode ? loadReportableStores().then(function (all) {
+          return (Array.isArray(all) ? all : []).filter(function (s) { return regionScope.indexOf(s) >= 0; });
+        })
+      : loadReportableStores(),
     /* Становищата на обектите за седмицата (етап 3А). Липсваща таблица или
        провал → [] (sbGet), тоест мрежата се рисува и без тях. */
     sbGet('weekly_checklist_responses', weekQ + storeFilter),
@@ -1006,15 +1038,20 @@ function checklistCommentIconHtml(row) {
     'cursor:pointer;opacity:' + (has ? '1' : '.25') + ';">💬</span>';
 }
 
-/* 📝 — обектът е дал становище по клетката. Само за контролинга и само
-   когато има становище (за разлика от 💬 тук няма какво да се добавя).
-   Отделен span с клас cl-resp, както 💬 — textContent на .cl-val остава
-   самата стойност. */
+/* 📝 — обектът е дал становище по клетката. За контролинга и регионалния
+   (checklistCanSeeResponses) и само когато има становище.
+   ВИДИМ ЗНАК ДО СТОЙНОСТТА (27.10.2026): до тогава беше position:absolute
+   в левия горен ъгъл, 11px — на тесен екран попадаше под залепената колона с
+   имената на обектите и практически не се виждаше („не виждам такава
+   клетка", Тенчо). Сега е в потока след стойността, с размер като текста, а
+   клетката получава оцветена рамка (renderChecklist). Отделен span с клас
+   cl-resp, НЕ вътре в .cl-val — textContent на стойността остава самата
+   стойност (тестовете и писмото разчитат на това). */
 function checklistResponseIconHtml(resp) {
-  if (!resp || !canEditChecklist()) return '';
-  return '<span class="cl-resp" title="Становище на обекта"' +
-    ' style="position:absolute;top:0;left:0;min-width:24px;min-height:24px;' +
-    'display:flex;align-items:center;justify-content:center;font-size:11px;line-height:1;' +
+  if (!resp || !checklistCanSeeResponses()) return '';
+  return '<span class="cl-resp" title="Становище на обекта — отвори"' +
+    ' style="display:inline-block;margin-left:4px;padding:0 4px;font-size:12px;line-height:1.4;' +
+    'vertical-align:middle;border-radius:6px;background:#fef3c7;border:1px solid #f59e0b;' +
     'cursor:pointer;">📝</span>';
 }
 
@@ -1153,6 +1190,7 @@ function renderChecklist() {
   var storeMode = checklistStoreMode();
   var sent = !!checklistLastSend;
   var respIdx = checklistResponseIndex();
+  var seeResp = checklistCanSeeResponses();
 
   var h = '<div class="page">' + checklistHeaderHtml();
 
@@ -1197,11 +1235,14 @@ function renderChecklist() {
       '<td style="' + cellCss + 'text-align:left;font-weight:600;background:#fff;position:sticky;left:0;">' + escVal(store) + '</td>';
     checklistMetrics.forEach(function (m, mi) {
       var busy = !!checklistSaving[store + ' ' + m.key];
+      var hasResp = seeResp && !!respIdx[store + ' ' + m.key];
       /* Обектът и показателят влизат само като ИНДЕКСИ. Никакво име не се
          вплита в атрибут-handler, тоест апостроф в име на обект е безопасен. */
       h += '<td data-si="' + si + '" data-mi="' + mi + '"' +
         (busy ? ' data-busy="1"' : '') +
+        (hasResp ? ' data-resp="1"' : '') +
         ' style="' + cellCss + 'position:relative;' +
+        (hasResp ? 'box-shadow:inset 0 0 0 2px #f59e0b;background:#fffbeb;' : '') +
         (editable ? 'cursor:pointer;' : '') +
         (busy ? 'opacity:.45;' : '') + '">' +
         checklistCellInner(m, idx[store + ' ' + m.key], earlyBy[m.key], earlyTitleBy[m.key],
@@ -1215,6 +1256,7 @@ function renderChecklist() {
     h += checklistStoreCommentsHtml(idx);
     h += checklistResponsesBlockHtml(idx, respIdx, now);
   }
+  if (seeResp) h += checklistResponsesOverviewHtml(idx, respIdx, sent);
   h += checklistLegendHtml();
   h += '</div>';
 
@@ -1289,6 +1331,54 @@ function checklistStoreCommentsHtml(idx) {
   return '<div id="cl-store-comments" style="margin-top:14px;padding:12px 14px;background:#f8fafc;' +
     'border:1px solid #e2e8f0;border-radius:8px;font-size:13px;color:#334155;">' +
     '<div style="font-weight:700;">Коментар на контролинга</div>' + items.join('') + '</div>';
+}
+
+/* „Становища на обектите — седмица N" (27.10.2026) — за контролинга и
+   регионалния, под таблицата. Знакът в клетката е лесен за пропускане; тук
+   всичко е изредено:
+     · ред на становище: обект · колона · текст · кой · кога · „след срока"
+       (запис след петък 18:00 на седмицата след отчетната);
+     · изпратена седмица и клетка „не" (без числовите) без становище →
+       червено „няма становище" — вижда се кой не е отговорил;
+     · неизпратена → сив ред „не е изпратена до обектите — становища не се
+       искат" (същото правило като в неделния отчет, етап 3Б);
+     · изпратена и нищо за изреждане → сив ред „Няма становища за седмицата".
+   Блокът не изчезва (т.11). Само показаните обекти (регионалният — своите). */
+function checklistResponsesOverviewHtml(idx, respIdx, sent) {
+  var dl = checklistResponseDeadline(checklistYear, checklistWeek);
+  var items = [];
+  checklistStores.forEach(function (store) {
+    checklistMetrics.forEach(function (m) {
+      var key = store + ' ' + m.key;
+      var resp = respIdx[key];
+      if (resp) { items.push({ store: store, metric: m, resp: resp }); return; }
+      if (!sent || m.value_type === 'number') return;
+      if (checklistEmailCellValue(m, idx[key]) === 'не') items.push({ store: store, metric: m, resp: null });
+    });
+  });
+  var td = 'padding:6px 8px;border-bottom:1px solid #eef1f6;font-size:12px;vertical-align:top;';
+  var grey = function (t) { return '<tr><td class="cl-ov-empty" colspan="4" style="' + td + 'color:#94a3b8;">' + t + '</td></tr>'; };
+  var rows = items.map(function (it) {
+    var r = it.resp;
+    var when = r ? (r.updated_at || r.created_at) : null;
+    var late = !!when && !isNaN(new Date(when).getTime()) && new Date(when).getTime() > dl.getTime();
+    return '<tr class="cl-ov-row' + (r ? '' : ' cl-ov-missing') + '">' +
+      '<td style="' + td + 'font-weight:600;white-space:nowrap;">' + escVal(it.store) + '</td>' +
+      '<td style="' + td + 'white-space:nowrap;">' + escVal(it.metric.label) + '</td>' +
+      '<td style="' + td + '">' + (r
+        ? '<span class="cl-ov-text" style="white-space:pre-wrap;">' + escVal(r.text) + '</span>'
+        : '<span style="color:#dc2626;font-weight:700;">няма становище</span>') + '</td>' +
+      '<td style="' + td + 'white-space:nowrap;color:#64748b;">' + (r
+        ? escVal([r.created_by || '', checklistFmtStamp(when)].filter(Boolean).join(' · ')) +
+          (late ? ' <span class="cl-ov-late" style="color:#fff;background:#dc2626;border-radius:8px;padding:0 6px;font-size:10px;">след срока</span>' : '')
+        : '') + '</td></tr>';
+  }).join('');
+  if (!sent) rows += grey('Седмица ' + checklistWeek + ' не е изпратена до обектите — становища не се искат.');
+  else if (!items.length) rows += grey('Няма становища за седмицата.');
+  return '<div id="cl-resp-overview" style="margin-top:14px;padding:12px 14px;background:#fff;border:1px solid #f59e0b;border-radius:8px;">' +
+    '<div style="font-weight:700;font-size:14px;margin-bottom:6px;">📝 Становища на обектите — седмица ' + checklistWeek + '</div>' +
+    '<div class="tbl-wrap tbl-compact tbl-auto"><table style="border-collapse:collapse;width:100%;">' + rows + '</table></div>' +
+    '</div>';
 }
 
 function checklistResponsesBlockHtml(idx, respIdx, now) {
@@ -1399,7 +1489,7 @@ function checklistResponseSave() {
 function checklistResponseIconClick(ev) {
   /* Без това кликът се качва до клетката и завърта стойността. */
   if (ev && ev.stopPropagation) ev.stopPropagation();
-  if (!canEditChecklist()) return;
+  if (!checklistCanSeeResponses()) return;
   var ctx = checklistCellCtx(this.parentNode);
   if (!ctx) return;
   var resp = checklistResponseIndex()[ctx.key];
@@ -1470,6 +1560,9 @@ function checklistWireCells() {
       td.addEventListener('click', checklistCellClick);
       var ic = td.querySelector('.cl-cmt');
       if (ic) ic.addEventListener('click', checklistCommentIconClick);
+    }
+    /* Знакът за становище — и за регионалния, който клетките не редактира. */
+    if (checklistCanSeeResponses()) {
       var ri = td.querySelector('.cl-resp');
       if (ri) ri.addEventListener('click', checklistResponseIconClick);
     }

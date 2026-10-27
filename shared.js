@@ -1719,6 +1719,10 @@ function rolesLoadRegional(){
     if(r.assigned_stores!==undefined) currentUser.assigned_stores=r.assigned_stores;
     var t=document.getElementById('tab-today');
     if(t) t.style.display=roleCanSeeToday()?'flex':'none';
+    /* Чек лист — регионалният accounting го вижда за своите обекти
+       (checklistRegionalMode, 27.10.2026), а това се знае едва тук. */
+    var clt=document.getElementById('tab-checklist');
+    if(clt) clt.style.display=(typeof canSeeChecklist==='function'&&canSeeChecklist())?'flex':'none';
     if(rolesPendingTodayDeepLink && roleCanSeeToday()){ rolesPendingTodayDeepLink=false; showModule('today'); }
     return true;
   });

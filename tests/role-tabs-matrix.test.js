@@ -6,7 +6,7 @@
 
    Правилата: История — admin, accounting; Днес — admin, controlling,
    accounting само при is_regional; Администрация — само admin; Каса —
-   kasa, admin, manager; Чек лист — admin, а от 23.10.2026 (етап 3А) и
+   kasa, admin, manager; Чек лист — admin, регионален accounting със свои обекти (27.10.2026), а от 23.10.2026 (етап 3А) и
    управителят на отчетен обект (само manager; sklad, kasa, info — не) — само за
    четене и становище; „Ревизии и преоценка" — admin,
    accounting, supply, manager, sklad, controlling. Общите табове —
@@ -28,7 +28,7 @@ const COMMON = ['tab-transport', 'tab-client', 'tab-bulletin', 'tab-docs', 'tab-
 const MATRIX = [
   ['admin',       false, 1, 1, 1, 1, 1, 1],
   ['accounting',  false, 0, 1, 0, 0, 0, 1],
-  ['accounting',  true,  0, 1, 1, 0, 0, 1],
+  ['accounting',  true,  0, 1, 1, 1, 0, 1],   /* Чек лист — за своите обекти, от 27.10.2026 */
   ['logistics',   false, 0, 0, 0, 0, 0, 0],
   ['manager',     false, 1, 0, 0, 1, 0, 1],
   ['sklad',       false, 0, 0, 0, 0, 0, 1],
@@ -65,6 +65,7 @@ const vis = (h, id) => { const el = h.doc.getElementById(id); return !!el && el.
     const h = env(role, regional);
     guard(label + ': startApp()', () => h.w.startApp());
     const todayBefore = vis(h, 'tab-today');
+    const checklistBefore = vis(h, 'tab-checklist');
     await ticks(8);
     IDS.forEach((id, i) => {
       const want = !!row[2 + i];
@@ -74,6 +75,7 @@ const vis = (h, id) => { const el = h.doc.getElementById(id); return !!el && el.
     const commonMissing = COMMON.filter(id => !vis(h, id));
     ok(label + ': общите табове са видими', commonMissing.length === 0, commonMissing.join(','));
     if (role === 'accounting' && regional) ok('accounting+is_regional: Днес е скрит ДО отговора за is_regional', todayBefore === false);
+    if (role === 'accounting' && regional) ok('accounting+is_regional: Чек лист е скрит ДО отговора за is_regional', checklistBefore === false);
     ok(label + ': isGlobal() непроменен', h.w.isGlobal() === (['admin', 'accounting', 'logistics'].indexOf(role) >= 0));
     h.close();
   }
