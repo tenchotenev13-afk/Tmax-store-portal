@@ -38,7 +38,16 @@ function sendEmail(to, subject, html, extra) {
 }
 
 /* ─── EMAIL TEMPLATES ────────────────────────────────────── */
-function emailWrap(content, footer) {
+/* Заглавката на писмото. До 27.10.2026 беше заковано „Т-Бюлетин ТеМАХ" за
+   ВСИЧКИ писма от портала — и Товарни листи, Пикинг, „✍️ Счетоводител"
+   излизаха като Бюлетин (claude/open/23-10-email-header). По подразбиране
+   вече е общото заглавие; Бюлетинът подава EMAIL_HDR_BULLETIN изрично и
+   неговата заглавка остава байт по байт същата. */
+var EMAIL_HDR_BULLETIN = { title: 'Т-Бюлетин ТеМАХ', sub: 'Вътрешна платформа · temax.bg' };
+function emailWrap(content, footer, opts) {
+  opts = opts || {};
+  var hdrTitle = opts.title || 'ТеМАХ · Вътрешна платформа';
+  var hdrSub = opts.sub || 'temax.bg';
   return '<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1">' +
     '<style>' +
@@ -67,7 +76,7 @@ function emailWrap(content, footer) {
     '.btn{display:inline-block;background:#2563eb;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;font-size:13px;margin-top:14px;}' +
     '</style></head><body>' +
     '<div class="wrap">' +
-    '<div class="hdr"><div class="hdr-title">Т-Бюлетин ТеМАХ</div><div class="hdr-sub">Вътрешна платформа · temax.bg</div></div>' +
+    '<div class="hdr"><div class="hdr-title">' + esc(hdrTitle) + '</div><div class="hdr-sub">' + esc(hdrSub) + '</div></div>' +
     '<div class="body">' + content + '</div>' +
     '<div class="footer">' + (footer||'ТеМАХ Вътрешна платформа · Автоматично съобщение') + '</div>' +
     '</div></body></html>';
@@ -166,7 +175,8 @@ function buildWeeklyDigestHtml(storeName, tasks, wk, yr) {
   content += '<div style="text-align:center;"><a href="https://tenchotenev13-afk.github.io/Tmax-store-portal/" class="btn">Отвори портала →</a></div>';
 
   return emailWrap(content,
-    'Изпратено от ТеМАХ Вътрешна платформа · Понеделник ' + new Date().toLocaleDateString('bg-BG')
+    'Изпратено от ТеМАХ Вътрешна платформа · Понеделник ' + new Date().toLocaleDateString('bg-BG'),
+    EMAIL_HDR_BULLETIN
   );
 }
 
@@ -247,7 +257,8 @@ function sendTestEmail(toEmail) {
     '<li>📋 <b>Понеделник сутринта</b> — задачи за седмицата</li>' +
     '<li>⚠️ <b>Петък</b> — просрочени задачи (само ако има)</li>' +
     '</ul>' +
-    '<div style="text-align:center;"><a href="https://tenchotenev13-afk.github.io/Tmax-store-portal/" class="btn">Отвори портала</a></div>'
+    '<div style="text-align:center;"><a href="https://tenchotenev13-afk.github.io/Tmax-store-portal/" class="btn">Отвори портала</a></div>',
+    undefined, EMAIL_HDR_BULLETIN /* тестът на имейлите на Бюлетина (bulSendTest) */
   );
   sendEmail(toEmail, 'ТеМАХ Портал — Тест на имейл нотификации', html).then(function(res) {
     if (res.ok) {
