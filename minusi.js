@@ -88,7 +88,23 @@
    Excel колона „КЗ", печат — № под описанието. Обектът при причина с
    requires_note вижда „↳ <№> / <дата>" под бележката — кликът попълва
    бележката, не записва. „📦 По артикул", minus_unfilled, „Днес" и
-   bulletin-notify не знаят за КЗ. */
+   bulletin-notify не знаят за КЗ.
+
+   Етап 4б — „вероятно незаприходена стока" (27.10.2026, решение на Тенчо).
+   Минус по код, който за СЪЩИЯ обект е (а) в „Стока на път" като неполучен —
+   goods_transit.status pending / sent (rejected „✕ Неприето" НЕ: обектът сам
+   е казал, че не е дошло) — или (б) с отворена липса в Разлики с логистичен
+   склад — differences_reports.direction = 'interstore', ред със status ≠
+   'received'; липса = quantity − quantity_received > 0, а при празно
+   „получено" и категория undelivered — quantity (решения на Тенчо 27.10:
+   76 от 109 отворени „недоставени" са без „получено"). supplier и
+   wrong_receipt — не. Чипове „🚚 На път" / „⚖️ Разлика ЛС" + червен
+   „⚠ вероятно незаприходена стока" под описанието, за обекта и за офиса.
+   Зареждане — mnLoadUr, по образеца на mnLoadCo: след рисуването, по една
+   заявка на таблица, само за показаните обекти; грешка → сив ред. Excel —
+   колона „Незаприходена?"; печат — надписът под описанието. Търсенето,
+   „📦 По артикул", minus_unfilled, „Днес" и bulletin-notify не знаят за това.
+   stock-differences.js и transit.js само се ЧЕТАТ (таблиците), не се пипат. */
 
 var mnMovs = [];
 var mnReasons = [];
@@ -112,6 +128,10 @@ var mnBusy = false;
 var mnCoIdx = {};        /* store_name + \u0001 + код → [клиентски заявки] */
 var mnCoErr = false;     /* клиентските заявки не се заредиха */
 var MN_CO_DAYS = 7;
+var mnUrTransit = {};    /* store_name + \u0001 + код → [goods_transit, неполучени] */
+var mnUrDiff = {};       /* store_name + \u0001 + код → [{line, short}] — отворени липси с ЛС */
+var mnUrErr = false;     /* стоката на път / разликите не се заредиха */
+var MN_UR_TRANSIT = ['pending', 'sent'];
 
 var MN_STORE_ROLES = ['manager', 'sklad'];
 var MN_CO_ROLES = ['admin', 'accounting', 'controlling'];
@@ -465,7 +485,7 @@ function loadMinusi(){
       mnMovs = r2[0];
       mnLastUpload = r2[1] && r2[1].ok ? (r2[1].rows[0] || null) : null;
       mnRender();
-      return mnLoadCo(seq);
+      return Promise.all([mnLoadCo(seq), mnLoadUr(seq)]);
     });
   });
 }
@@ -546,6 +566,101 @@ function mnLoadCo(seq){
     if(seq === mnLoadSeq && document.getElementById('mn-body')) mnRenderBody();
   });
 }
+/* ─── Вероятно незаприходена стока (етап 4б) ─────────── */
+function mnUrNum(v){
+  if(v === null || v === undefined || v === '') return null;
+  var n = Number(v);
+  return isFinite(n) ? n : null;
+}
+/* Липсата на ред от Разлики с ЛС, или null. И двете количества → документ −
+   получено (> 0); само документ и категория undelivered → документът. */
+function mnUrShort(d){
+  var doc = mnUrNum(d.quantity), real = mnUrNum(d.quantity_received);
+  if(doc !== null && real !== null) return doc - real > MN_EPS ? mnRound(doc - real) : null;
+  if(doc !== null && real === null && d.difference_category === 'undelivered' && doc > MN_EPS) return mnRound(doc);
+  return null;
+}
+/* Чисто: редове → два индекса по обект + код. */
+function mnUrBuild(transit, diffs){
+  var t = {}, d = {};
+  (transit || []).forEach(function(g){
+    if(!g || MN_UR_TRANSIT.indexOf(g.status) < 0) return;
+    var c = mnCoKey(g.material_code);
+    if(!c) return;
+    var k = g.store_name + '\u0001' + c;
+    (t[k] = t[k] || []).push(g);
+  });
+  (diffs || []).forEach(function(x){
+    var rep = x && x.differences_reports;
+    if(!x || x.status === 'received' || !rep || rep.direction !== 'interstore') return;
+    var c = mnCoKey(x.material_code), sh = mnUrShort(x);
+    if(!c || sh === null) return;
+    var k = x.store_name + '\u0001' + c;
+    (d[k] = d[k] || []).push({ line: x, short: sh, date: rep.doc_date || String(x.created_at || '').slice(0, 10) });
+  });
+  return { transit: t, diff: d };
+}
+function mnUrMatches(r){
+  var k = r.store_name + '\u0001' + mnCoKey(r.material);
+  var byDate = function(a, b){ return String(a).localeCompare(String(b)); };
+  return {
+    transit: (mnUrTransit[k] || []).slice().sort(function(a, b){ return byDate(a.doc_date, b.doc_date) || byDate(a.purchase_doc, b.purchase_doc); }),
+    diff: (mnUrDiff[k] || []).slice().sort(function(a, b){ return byDate(a.date, b.date); })
+  };
+}
+function mnUrStores(){
+  var seen = {}, out = [];
+  mnMovs.forEach(function(m){ if(String(m.mvt_type) === '955' && m.store_name && !seen[m.store_name]){ seen[m.store_name] = 1; out.push(m.store_name); } });
+  return out;
+}
+/* Две заявки (стока на път, разлики с ЛС) за показаните обекти — СЛЕД mnRender. */
+function mnLoadUr(seq){
+  var stores = mnUrStores();
+  if(!stores.length){ mnUrTransit = {}; mnUrDiff = {}; mnUrErr = false; return Promise.resolve(); }
+  var inS = 'store_name=in.(' + stores.map(function(s){ return '"' + encodeURIComponent(s) + '"'; }).join(',') + ')';
+  return Promise.all([
+    sbGetAll('goods_transit', 'select=id,store_name,material_code,purchase_doc,doc_date,remaining_qty,unit,status&status=in.(' + MN_UR_TRANSIT.join(',') + ')&' + inS + '&order=doc_date.asc,id.asc'),
+    sbGetAll('stock_differences', 'select=id,store_name,material_code,quantity,quantity_received,difference_category,status,created_at,differences_reports!inner(direction,doc_date)' +
+      '&differences_reports.direction=eq.interstore&status=neq.received&' + inS + '&order=created_at.asc,id.asc')
+  ]).then(function(rs){
+    if(seq !== mnLoadSeq) return;
+    mnUrErr = !!(rs[0].partial || rs[1].partial);
+    var b = mnUrBuild(rs[0].partial ? [] : rs[0], rs[1].partial ? [] : rs[1]);
+    mnUrTransit = b.transit; mnUrDiff = b.diff;
+  }).catch(function(){
+    if(seq !== mnLoadSeq) return;
+    mnUrErr = true; mnUrTransit = {}; mnUrDiff = {};
+  }).then(function(){
+    if(seq === mnLoadSeq && document.getElementById('mn-body')) mnRenderBody();
+  });
+}
+var MN_UR_WARN = '⚠ вероятно незаприходена стока';
+function mnUrChipsHtml(r){
+  var m = mnUrMatches(r);
+  if(!m.transit.length && !m.diff.length) return '';
+  var cs = 'display:inline-block;border-radius:4px;padding:0 4px;margin:1px 2px 0 0;';
+  var h = '<div class="mn-ur" style="margin-top:3px;font-size:11px;">';
+  m.transit.forEach(function(g){
+    h += '<span class="mn-ur-transit" style="' + cs + 'background:#fef3c7;color:#92400e;">🚚 На път: ' + esc(g.purchase_doc || '—') +
+      (g.doc_date ? ' от ' + esc(fmtDate(g.doc_date).slice(0, 5)) : '') + ' · ' + esc(mnFmtQty(Number(g.remaining_qty))) + (g.unit ? ' ' + esc(g.unit) : '') + '</span>';
+  });
+  m.diff.forEach(function(x){
+    h += '<span class="mn-ur-diff" style="' + cs + 'background:#fee2e2;color:#991b1b;">⚖️ Разлика ЛС' + (x.date ? ' от ' + esc(fmtDate(x.date).slice(0, 5)) : '') + ' · липса ' + esc(mnFmtQty(x.short)) + '</span>';
+  });
+  return h + '<div class="mn-ur-warn" style="color:#b91c1c;font-weight:600;margin-top:2px;">' + MN_UR_WARN + '</div></div>';
+}
+/* Excel: '' / „на път: <док>[, <док>]" / „разлика ЛС" (двете — през „; "). */
+function mnUrExcel(r){
+  var m = mnUrMatches(r), p = [];
+  if(m.transit.length) p.push('на път: ' + m.transit.map(function(g){ return g.purchase_doc || '—'; }).join(', '));
+  if(m.diff.length) p.push('разлика ЛС');
+  return p.join('; ');
+}
+function mnUrPrint(r){
+  var m = mnUrMatches(r);
+  return m.transit.length || m.diff.length ? '<br><span class="mn-p-ur" style="color:#b91c1c;">' + mnP(MN_UR_WARN) + '</span>' : '';
+}
+
 /* Чип „🧾 КЗ <№> · <статус>" под описанието — пренася се, не разширява колоната. */
 function mnCoChipsHtml(r){
   var ms = mnCoMatches(r);
@@ -668,6 +783,7 @@ function mnViewRows(calc){
 function mnBodyHtml(calc){
   var rows = mnViewRows(calc);
   var h = mnView === 'bymat' ? mnByMatHtml(rows) : mnDailyHtml(rows);
+  if(mnView === 'daily' && mnUrErr) h = '<div id="mn-ur-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Стоката на път / разликите не се заредиха</div>' + h;
   if(mnView === 'daily' && mnCoErr) h = '<div id="mn-co-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Клиентските заявки не се заредиха</div>' + h;
   /* Свръхсторното е грешка на магазина — вижда го и обектът (Миглена, 21.10.2026). */
   if(calc.over.length || calc.early.length) h += mnOverHtml(calc.over, calc.early);
@@ -713,7 +829,7 @@ function mnDailyHtml(rows){
     var val = function(k){ return d[k] != null ? d[k] : (r[k] == null ? '' : r[k]); };
     /* Закритите и под прага — сив текст; жълтите колони си остават жълти. */
     var gray = r._state === 'open' ? '' : ' style="color:#94a3b8;"';
-    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + mnBadgeHtml(r) + mnCoChipsHtml(r) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
+    h += '<tr data-mn-id="' + escAttr(id) + '" id="mn-row-' + escAttr(id) + '" class="mn-st-' + escAttr(r._state || 'open') + '"' + gray + '>' + (all ? '<td class="mn-store">' + esc(r.store_name) + '</td>' : '') + '<td>' + esc(r.material) + '</td><td>' + esc(r.material_desc) + mnBadgeHtml(r) + mnCoChipsHtml(r) + mnUrChipsHtml(r) + '</td><td>' + esc(fmtDate(r.posting_date)) + '</td>';
     /* Мерната единица е в „Количество", „Състояние" се пренася на два реда,
        служител / бележка — 110px: с отделна колона „Мерна ед." таблицата беше
        1342 px срещу карта 1246 и „Запази" излизаше навън (Playwright, 22.10). */
@@ -835,12 +951,12 @@ function mnExportAoa(){
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.desc || '', r.s955, r.s956, r.rest, r.uom || '']));
     });
   } else {
-    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие', 'КЗ'])];
+    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие', 'КЗ', 'Незаприходена?'])];
     rows.forEach(function(r){
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.material_desc || '', fmtDate(r.posting_date), mnRound(Number(r.qty) || 0), r.uom || '',
         mnStateText(r), r.real_code || '', mnReasonLabel(r.reason_id), r.employee_name || '', r.note || '',
         r._prevDate ? fmtDate(r._prevDate) : '', r._cnt30 || 0, r.action || '',
-        mnCoMatches(r).map(function(o){ return o.in_num || ''; }).join(', ')]));
+        mnCoMatches(r).map(function(o){ return o.in_num || ''; }).join(', '), mnUrExcel(r)]));
     });
   }
   return aoa;
@@ -893,7 +1009,7 @@ function mnPrint(){
       return '<tr' + (r._state === 'open' ? '' : ' class="mn-p-gray"') + '>' + (all ? '<td>' + mnP(r.store_name) + '</td>' : '') +
         '<td>' + mnP(r.material) + '</td><td>' + mnP(r.material_desc) +
         (r._prevDate ? '<br><span class="mn-p-prev">' + mnP('↻ ' + fmtDate(r._prevDate).slice(0, 5) + (r._cnt30 >= 2 ? ' ×' + r._cnt30 : '')) + '</span>' : '') +
-        mnCoPrint(r) + '</td><td>' + mnP(fmtDate(r.posting_date)) + '</td>' +
+        mnCoPrint(r) + mnUrPrint(r) + '</td><td>' + mnP(fmtDate(r.posting_date)) + '</td>' +
         '<td>' + mnP(mnFmtQty(Number(r.qty)) + (r.uom ? ' ' + r.uom : '')) + '</td><td>' + mnP(mnStateText(r)) + '</td>' +
         '<td>' + mnP(r.real_code) + '</td><td>' + mnP(mnReasonLabel(r.reason_id)) + '</td><td>' + mnP(r.employee_name) + '</td><td>' + mnP(r.note) +
         (r.action ? (r.note ? '<br>' : '') + '<span class="mn-p-action">' + mnP('Действие: ' + r.action) + '</span>' : '') + '</td></tr>';

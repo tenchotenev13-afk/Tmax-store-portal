@@ -174,8 +174,10 @@ const coGets = db => db.log.filter(x => x.m === 'GET' && x.tbl === 'client_order
 
     section('4. Excel и печат');
     const aoa = h.w.mnExportAoa();
-    ok('Excel: последна колона „КЗ“', aoa[0][aoa[0].length - 1] === 'КЗ', JSON.stringify(aoa[0]));
-    const kz = m => (aoa.filter(r => r[0] === m)[0] || [])[aoa[0].length - 1];
+    /* „КЗ“ е след „Действие“; от 27.10 (етап 4б) след нея е „Незаприходена?“. */
+    const ik = aoa[0].indexOf('КЗ');
+    ok('Excel: колона „КЗ“ веднага след „Действие“', ik > 0 && aoa[0][ik - 1] === 'Действие', JSON.stringify(aoa[0]));
+    const kz = m => (aoa.filter(r => r[0] === m)[0] || [])[ik];
     ok('Excel: две заявки през запетая', kz('50002') === 'Гоце Делчев-0010, Гоце Делчев-0011', kz('50002'));
     ok('Excel: без заявка → празно', kz('98275') === '', JSON.stringify(kz('98275')));
     h.w.mnPrint();
