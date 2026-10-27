@@ -133,6 +133,7 @@ const TESTS = [
   'loading-lists-missing.test.js',
   'loading-lists-notify-send.test.js',
   'loading-lists-notify-closed.test.js',
+  'loading-done-gate.test.js',
   'loading-lists-notify-live.test.js',
   'loading-lists-products.test.js',
   'loading-lists-print-pallet.test.js',

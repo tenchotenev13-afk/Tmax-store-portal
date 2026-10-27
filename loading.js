@@ -4257,6 +4257,19 @@ function llSendList(id){
     loadLoadingLists();
   });
 }
+/* Редовете, по които обектът още не се е произнесъл. Отхвърленият ред не
+   съществува за листа (llLiveRows), затова не се брои. */
+function llUnmarkedRows(listId){
+  return llLiveRows(llItemsOf(listId)).filter(function(i){ return !llHandled(i); });
+}
+function llUnmarkedMsg(rows){
+  var stores = [];
+  rows.forEach(function(r){ if(r.store_name && stores.indexOf(r.store_name) < 0) stores.push(r.store_name); });
+  stores.sort(function(a, b){ return a.localeCompare(b, 'bg'); });
+  var n = rows.length;
+  return n + (n === 1 ? ' ред още не е отметнат' : ' реда още не са отметнати') +
+    ' от обекта' + (stores.length ? ' (Обект: ' + stores.join(', ') + ')' : '');
+}
 /* Ръчното приключване от склада следва СЪЩОТО правило като автоматичното:
    има ли поне един ред, заявен като неполучен, статусът е 'partial'. Иначе
    натискането на бутона би изтрило разликата между „прието наред" и „прието
@@ -4270,7 +4283,17 @@ function llDoneList(id){
     toast('Има извънреден ред, който чака одобрение','#d97706');
     return;
   }
-  if(!confirm('Приключи товарния лист?')) return;
+  /* Неотметнатите от обекта редове (решение на Тенчо 27.10.2026, вариант А):
+     складът НЕ затваря лист, по който обектът не се е произнесъл — иначе
+     листът е „приключен", а стоката по него никой не е потвърдил (16.10:
+     9 такива реда за Сливен и Раднево). Admin може, след предупреждение —
+     единственият confirm за него е този, вторият би питал същото. */
+  var open = llUnmarkedRows(id);
+  if(open.length){
+    var msg = llUnmarkedMsg(open);
+    if(!currentUser || currentUser.role !== 'admin'){ toast(msg,'#dc2626'); return; }
+    if(!confirm(msg + '\nПриключваш ли все пак?')) return;
+  } else if(!confirm('Приключи товарния лист?')) return;
   /* Отхвърленият ред не е липса — за листа той не съществува. */
   var miss = llLiveRows(llItemsOf(id)).some(function(i){ return i.missing; });
   var want = miss ? 'partial' : 'done';
@@ -4347,7 +4370,8 @@ function llViewHtml(){
     '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llOpenEdit(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✏️ Редакция</button>':'')+
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llSendList(this.dataset.id)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">📤 Изпрати към обектите</button>':'')+
-      (l.status==='sent'?'<button data-id="'+l.id+'" onclick="llDoneList(this.dataset.id)" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✅ Приключи</button>':'')+
+      (l.status==='sent'?'<button data-id="'+l.id+'" onclick="llDoneList(this.dataset.id)"'+
+        (llUnmarkedRows(l.id).length ? ' title="'+escAttr(llUnmarkedMsg(llUnmarkedRows(l.id)))+'"' : '')+' style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✅ Приключи</button>':'')+
       '<button data-id="'+l.id+'" onclick="llPrint(this.dataset.id)" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">🖨 Печат</button>'+
       '<button data-id="'+l.id+'" onclick="llDownloadPdf(this.dataset.id)" title="Сваля бланката като PDF" style="border:1px solid #cbd5e1;background:#fff;color:#475569;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">⬇ PDF</button>'+
       /* Етикетите: номерата са окончателни при запис и замразени при изпращане. */
