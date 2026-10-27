@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията 20261026210000_weekly_checklist_freezes, версия 20261026210148, приложена 26.10.2026)
+- 26.10 · нова таблица weekly_checklist_freezes — year int NOT NULL, week_number int NOT NULL, frozen_at timestamptz NOT NULL default now(), frozen_by text NULL; PK (year, week_number)
+
 (в базата от миграцията 20261026120000_weekly_checklist_portal_mode, версия 20261026125017, приложена 26.10.2026)
 - 26.10 · weekly_checklist_metrics.portal_mode — text, NULL, без default (стойности 'any' / 'count' / 'file_none')
 

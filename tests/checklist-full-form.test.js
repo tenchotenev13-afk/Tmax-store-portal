@@ -15,6 +15,11 @@
       порталът не пише нищо в нея. Писмото и седмичният отчет рисуват
       колоните от редовете, без заковани ключове.
 
+   Етап 2 (checklist-live-calc, 26.10.2026): отварянето не пише portal_value —
+   правилото се проверява през checklistComputePortalValues(), клетките
+   показват живите стойности от rpc/checklist_portal_values (`rpc` в data), а
+   „ръчното не влиза в тялото" стана „при отваряне нула записа".
+
    Пускане:  node tests/checklist-full-form.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
@@ -76,7 +81,8 @@ function env(opts) {
       differences_reports: opts.reports || [],
       stock_differences: opts.lines || [],
       stock_returns: [],
-      goods_transit: []
+      goods_transit: [],
+      rpc: opts.rpc || []
     }
   };
   if (opts.fail) b.fail = opts.fail;
@@ -108,16 +114,15 @@ function bodyOf(p) { return Array.isArray(p.body) ? p.body : [p.body]; }
 function writes(h) {
   return h.calls.post.filter(function (p) { return (p.url || '').indexOf('/weekly_checklist?') >= 0; });
 }
-function written(h, store, key) {
-  let out = null;
-  writes(h).forEach(function (p) {
-    bodyOf(p).forEach(function (r) {
-      if (r.store_name === store && r.metric_key === key) out = r;
-    });
-  });
-  return out;
+/* Отваря таба и смята правилото без запис; резултатът стои в h.__vals. */
+async function open(h) {
+  h.w.loadChecklist();
+  await ticks();
+  h.__vals = await h.w.checklistComputePortalValues();
 }
-function pv(h, store, key) { const r = written(h, store, key); return r ? r.portal_value : undefined; }
+/* Стойността по правилото; undefined = „не се пълни". */
+function pv(h, store, key) { return (h.__vals || {})[store + '|' + key]; }
+function live(store, key, value) { return { store_name: store, metric_key: key, value: value }; }
 function cellOf(h, store, key) {
   const t = h.doc.getElementById('checklist-table');
   if (!t) return null;
@@ -139,13 +144,9 @@ function cellTitle(h, store, key) {
   const v = td && td.querySelector('.cl-val');
   return v ? (v.getAttribute('title') || '') : null;
 }
-function noManualInBody(h) {
-  return writes(h).every(function (p) {
-    return bodyOf(p).every(function (r) {
-      return !('control_value' in r) && !('control_num' in r) && !('comment' in r);
-    });
-  });
-}
+/* Етап 2: при отваряне към weekly_checklist не отива НИЩО — оттам и
+   „ръчното не влиза в тялото" (до етап 2 noManualInBody) е изпълнено. */
+function noWrites(h) { return writes(h).length === 0; }
 
 (async function () {
 
@@ -162,14 +163,16 @@ function noManualInBody(h) {
         comp(GRP_ID, 'Габрово', wk[4])         /* петък — извън него */
       ],
       rows: [{ store_name:'Добрич', metric_key:'revizia_grupi', portal_value:null,
-               control_value:'da', control_num:null, comment:'по имейл' }]
+               control_value:'da', control_num:null, comment:'по имейл' }],
+      rpc: [live('Враца', 'revizia_grupi', 'da'), live('Габрово', 'revizia_grupi', 'ne'),
+            live('Добрич', 'revizia_grupi', 'ne')]
     });
-    h.w.loadChecklist(); await ticks();
+    await open(h);
 
-    ok('има данни в прозореца → da', pv(h, 'Враца', 'revizia_grupi') === 'da', JSON.stringify(written(h, 'Враца', 'revizia_grupi')));
-    ok('отмятане извън прозореца → ne', pv(h, 'Габрово', 'revizia_grupi') === 'ne', JSON.stringify(written(h, 'Габрово', 'revizia_grupi')));
-    ok('няма данни → ne (порталът пише)', pv(h, 'Добрич', 'revizia_grupi') === 'ne', JSON.stringify(written(h, 'Добрич', 'revizia_grupi')));
-    ok('control_value/comment не влизат в тялото', noManualInBody(h));
+    ok('има данни в прозореца → da', pv(h, 'Враца', 'revizia_grupi') === 'da', JSON.stringify(pv(h, 'Враца', 'revizia_grupi')));
+    ok('отмятане извън прозореца → ne', pv(h, 'Габрово', 'revizia_grupi') === 'ne', JSON.stringify(pv(h, 'Габрово', 'revizia_grupi')));
+    ok('няма данни → ne (порталът дава ne)', pv(h, 'Добрич', 'revizia_grupi') === 'ne', JSON.stringify(pv(h, 'Добрич', 'revizia_grupi')));
+    ok('при отваряне нула записа (ръчното не може да се презапише)', noWrites(h), 'реално: ' + writes(h).length);
     ok('Добрич показва ръчното „да", не портала', cellVal(h, 'Добрич', 'revizia_grupi') === 'да', cellVal(h, 'Добрич', 'revizia_grupi'));
     ok('Враца показва портала „да" (бледо)', cellVal(h, 'Враца', 'revizia_grupi') === 'да' &&
        /Стойност от портала/.test(cellTitle(h, 'Враца', 'revizia_grupi')), cellTitle(h, 'Враца', 'revizia_grupi'));
@@ -193,24 +196,26 @@ function noManualInBody(h) {
     const h = env({
       reports: reports, lines: ls,
       rows: [{ store_name:'Добрич', metric_key:'storna_priem', portal_value:null,
-               control_value:null, control_num:5, comment:null }]
+               control_value:null, control_num:5, comment:null }],
+      rpc: [live('Враца', 'storna_priem', '2/7'), live('Габрово', 'storna_priem', '0/0'),
+            live('Добрич', 'storna_priem', '1/1')]
     });
-    h.w.loadChecklist(); await ticks();
+    await open(h);
 
-    ok('Враца → „2/7"', pv(h, 'Враца', 'storna_priem') === '2/7', JSON.stringify(written(h, 'Враца', 'storna_priem')));
-    ok('Габрово без сторна → „0/0", не празно', pv(h, 'Габрово', 'storna_priem') === '0/0', JSON.stringify(written(h, 'Габрово', 'storna_priem')));
+    ok('Враца → „2/7"', pv(h, 'Враца', 'storna_priem') === '2/7', JSON.stringify(pv(h, 'Враца', 'storna_priem')));
+    ok('Габрово без сторна → „0/0", не празно', pv(h, 'Габрово', 'storna_priem') === '0/0', JSON.stringify(pv(h, 'Габрово', 'storna_priem')));
     ok('в клетката на Габрово се вижда „0/0"', cellVal(h, 'Габрово', 'storna_priem') === '0/0', cellVal(h, 'Габрово', 'storna_priem'));
-    ok('Добрич: порталът пише „1/1"', pv(h, 'Добрич', 'storna_priem') === '1/1', JSON.stringify(written(h, 'Добрич', 'storna_priem')));
+    ok('Добрич: порталът дава „1/1"', pv(h, 'Добрич', 'storna_priem') === '1/1', JSON.stringify(pv(h, 'Добрич', 'storna_priem')));
     ok('Добрич показва control_num 5, не портала', cellVal(h, 'Добрич', 'storna_priem') === '5', cellVal(h, 'Добрич', 'storna_priem'));
-    ok('control_num не влиза в тялото', noManualInBody(h));
+    ok('при отваряне нула записа', noWrites(h), 'реално: ' + writes(h).length);
     h.close();
   }
   {
     /* Провал при редовете → нищо за сторната, toast. */
     const h = env({ reports: [rep('r1', 'Враца', 'wrong_receipt', at(wk[2], '10:00'))],
                     fail: { GET: /stock_differences/ } });
-    h.w.loadChecklist(); await ticks();
-    ok('провал → сторната не се записва', written(h, 'Враца', 'storna_priem') === null && written(h, 'Габрово', 'storna_priem') === null);
+    await open(h);
+    ok('провал → сторната не се смята', pv(h, 'Враца', 'storna_priem') === undefined && pv(h, 'Габрово', 'storna_priem') === undefined, JSON.stringify(h.__vals));
     ok('провал → червен toast', h.calls.toast.some(function (t) { return /Грешка/.test(String(t)); }), JSON.stringify(h.calls.toast));
     h.close();
   }
@@ -229,18 +234,20 @@ function noManualInBody(h) {
       rows: [{ store_name:'Габрово', metric_key:'preocenka', portal_value:null,
                control_value:'da', control_num:null, comment:null },
              { store_name:'Добрич', metric_key:'preocenka', portal_value:null,
-               control_value:'nyamat', control_num:null, comment:null }]
+               control_value:'nyamat', control_num:null, comment:null }],
+      rpc: [live('Враца', 'preocenka', 'da'), live('Габрово', 'preocenka', 'ne'),
+            live('Добрич', 'preocenka', 'ne')]
     });
-    h.w.loadChecklist(); await ticks();
+    await open(h);
 
     ok('ръчното „нямат" се показва и не се пипа', cellVal(h, 'Добрич', 'preocenka') === 'нямат', cellVal(h, 'Добрич', 'preocenka'));
-    ok('файл → da', pv(h, 'Враца', 'preocenka') === 'da', JSON.stringify(written(h, 'Враца', 'preocenka')));
-    ok('само коментар → ne (порталът не дава nyamat)', pv(h, 'Габрово', 'preocenka') === 'ne', JSON.stringify(written(h, 'Габрово', 'preocenka')));
-    ok('порталът не пише nyamat никъде', writes(h).every(function (p) { return bodyOf(p).every(function (r) { return r.portal_value !== 'nyamat'; }); }));
-    ok('нищо свършено в седмицата → ne', pv(h, 'Добрич', 'preocenka') === 'ne', JSON.stringify(written(h, 'Добрич', 'preocenka')));
+    ok('файл → da', pv(h, 'Враца', 'preocenka') === 'da', JSON.stringify(pv(h, 'Враца', 'preocenka')));
+    ok('само коментар → ne (порталът не дава nyamat)', pv(h, 'Габрово', 'preocenka') === 'ne', JSON.stringify(pv(h, 'Габрово', 'preocenka')));
+    ok('порталът не дава nyamat никъде', Object.keys(h.__vals).every(function (k) { return h.__vals[k] !== 'nyamat'; }), JSON.stringify(h.__vals));
+    ok('нищо свършено в седмицата → ne', pv(h, 'Добрич', 'preocenka') === 'ne', JSON.stringify(pv(h, 'Добрич', 'preocenka')));
     ok('Враца показва „да"', cellVal(h, 'Враца', 'preocenka') === 'да', cellVal(h, 'Враца', 'preocenka'));
     ok('Габрово показва ръчното „да", не портала „не"', cellVal(h, 'Габрово', 'preocenka') === 'да', cellVal(h, 'Габрово', 'preocenka'));
-    ok('control_value не влиза в тялото', noManualInBody(h));
+    ok('при отваряне нула записа', noWrites(h), 'реално: ' + writes(h).length);
     const q = h.calls.get.filter(function (u) { return u.indexOf('/task_completions') >= 0; })[0] || '';
     ok('заявката за отмятанията носи files', /select=[^&]*files/.test(q), q);
     h.close();
@@ -254,18 +261,20 @@ function noManualInBody(h) {
       comp(PREO_ID, 'Враца', wk[3], { files: FILE }),
       comp(PREO_ID, 'Габрово', prevSun, { files: FILE, postponed_to: wk[2] })
     ]});
-    h.w.loadChecklist(); await ticks();
-    ok('коментар + по-късен файл → da', pv(h, 'Враца', 'preocenka') === 'da', JSON.stringify(written(h, 'Враца', 'preocenka')));
-    ok('пренесено в седмицата с файл → da', pv(h, 'Габрово', 'preocenka') === 'da', JSON.stringify(written(h, 'Габрово', 'preocenka')));
+    await open(h);
+    ok('коментар + по-късен файл → da', pv(h, 'Враца', 'preocenka') === 'da', JSON.stringify(pv(h, 'Враца', 'preocenka')));
+    ok('пренесено в седмицата с файл → da', pv(h, 'Габрово', 'preocenka') === 'da', JSON.stringify(pv(h, 'Габрово', 'preocenka')));
     h.close();
   }
   {
-    /* Стойността вече е записана → нищо ново не се пише. */
+    /* До етап 2: „непроменено ne не се пише наново". От етап 2 отварянето
+       не пише изобщо — проверката е за нула записа и че правилото пак дава ne. */
     const h = env({ rows: ['Враца', 'Габрово', 'Добрич'].map(function (s) {
       return { store_name: s, metric_key: 'preocenka', portal_value: 'ne', control_value: null, control_num: null, comment: null };
     })});
-    h.w.loadChecklist(); await ticks();
-    ok('непроменено „ne" не се пише наново', written(h, 'Враца', 'preocenka') === null);
+    await open(h);
+    ok('правилото пак дава „ne"', pv(h, 'Враца', 'preocenka') === 'ne', JSON.stringify(pv(h, 'Враца', 'preocenka')));
+    ok('при отваряне нула записа', noWrites(h), 'реално: ' + writes(h).length);
     h.close();
   }
 
@@ -273,7 +282,7 @@ function noManualInBody(h) {
   section('4–5. 12 колони в реда на бланката; ръчните се кликват, порталът не ги пипа');
   {
     const h = env();
-    h.w.loadChecklist(); await ticks();
+    await open(h);
 
     const ths = Array.prototype.slice.call(h.doc.querySelectorAll('#checklist-table thead th')).slice(1);
     ok('12 колони', ths.length === 12, String(ths.length));
@@ -283,8 +292,9 @@ function noManualInBody(h) {
     const mq = h.calls.get.filter(function (u) { return u.indexOf('/weekly_checklist_metrics') >= 0; })[0] || '';
     ok('метриките се искат по sort_order', /order=sort_order/.test(mq), mq);
 
-    ok('порталът не пише нищо в ръчните колони',
-       MANUAL.every(function (k) { return ['Враца', 'Габрово', 'Добрич'].every(function (s) { return written(h, s, k) === null; }); }));
+    ok('порталът не дава нищо в ръчните колони',
+       MANUAL.every(function (k) { return ['Враца', 'Габрово', 'Добрич'].every(function (s) { return pv(h, s, k) === undefined; }); }),
+       JSON.stringify(h.__vals));
 
     const before = h.calls.post.length;
     cellOf(h, 'Враца', 'razhodi').click(); await ticks();

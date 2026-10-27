@@ -1,4 +1,5 @@
 Отворено: 26.10 · Кой чака: Code · Сесия: checklist-live-calc-1
+Затворено: 26.10 · Как: етап 2 в базата (миграции 20261026210148 + 20261026210223) и в checklist.js, сесия checklist-live-calc-2; етап 3 → claude/open/26-10-checklist-live-calc-etap3.md
 
 Чек лист — „стойностите се смятат при четене", етапи 2 и 3 (решение на Тенчо
 26.10). Етап 1 е в базата: `checklist_portal_values(p_year, p_week)` и

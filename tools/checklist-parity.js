@@ -10,6 +10,8 @@
 
    Пускане:  node tools/checklist-parity.js [седмици…]     (по подразбиране 40 41 42 43)
              node tools/checklist-parity.js 40 41 --table   (+ пълната таблица в markdown)
+             node tools/checklist-parity.js 40 41 --stored  (JS срещу ЗАПИСАНОТО в
+                 weekly_checklist.portal_value — за затворените седмици, етап 2)
    Exit 0 = нула разлики. Часовата зона е Europe/Sofia — като браузъра на обектите.
 
    ЗАБЕЛЕЖКА: „Стока на път" и „Стока за връщане" и в JS, и в SQL са снимка на
@@ -23,6 +25,7 @@ const { JSDOM } = require('jsdom');
 const ROOT = path.join(__dirname, '..');
 const args = process.argv.slice(2);
 const TABLE = args.indexOf('--table') >= 0;
+const STORED = args.indexOf('--stored') >= 0;
 const WEEKS = args.filter(a => /^\d+$/.test(a)).map(Number);
 const YEAR = 2026;
 if (!WEEKS.length) WEEKS.push(40, 41, 42, 43);
@@ -70,11 +73,25 @@ async function sqlValues(week) {
   return { values: out, rows: d.length, keys: Object.keys(keys) };
 }
 
+/* --stored: записаното в weekly_checklist за колоните с recurring:/module: source
+   (каквото затварянето на седмицата е записало). Липсващ ред = null. */
+async function storedValues(week, metrics) {
+  const r = await fetch(API + '/weekly_checklist?year=eq.' + YEAR + '&week_number=eq.' + week +
+    '&select=store_name,metric_key,portal_value&limit=1000', { headers: H });
+  const d = await r.json();
+  if (!r.ok || !Array.isArray(d)) throw new Error('weekly_checklist ' + r.status);
+  const keys = metrics.filter(m => /^(recurring|module):/.test(m.source || '')).map(m => m.key);
+  const out = {};
+  d.forEach(x => { if (keys.indexOf(x.metric_key) >= 0) out[x.store_name + '|' + x.metric_key] = x.portal_value; });
+  return { values: out, rows: d.length, keys: keys };
+}
+
 (async function () {
   let totalDiff = 0, totalCells = 0;
   const report = [];
   for (const week of WEEKS) {
-    const [js, sql] = await Promise.all([jsValues(week), sqlValues(week)]);
+    const js = await jsValues(week);
+    const sql = STORED ? await storedValues(week, js.metrics) : await sqlValues(week);
     const keys = sql.keys.slice().sort((a, b) => {
       const ia = js.metrics.findIndex(m => m.key === a), ib = js.metrics.findIndex(m => m.key === b);
       return ia - ib;

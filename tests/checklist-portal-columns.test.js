@@ -18,6 +18,10 @@
    5. stoka_vrashtane чете само stock_returns source=eq.diff — рекламациите
       са в srok_godnost и не се броят два пъти.
 
+   Етап 2 (checklist-live-calc, 26.10.2026): отварянето вече не пише
+   portal_value — стойностите се проверяват през checklistComputePortalValues()
+   (правилото без запис), а при отваряне се очакват нула записа.
+
    Седмицата е закована: С43/2026 (пон 19.10 – нд 25.10).
 
    Пускане:  node tests/checklist-portal-columns.test.js .
@@ -84,6 +88,7 @@ async function open(h) {
   h.w.checklistWeek = WEEK;
   h.w.loadChecklist();
   await ticks();
+  h.__vals = await h.w.checklistComputePortalValues();
 }
 
 let seq = 0;
@@ -92,20 +97,12 @@ function comp(taskId, store, dateISO, extra) {
                          completion_date: dateISO, status: 'done', comment: null, files: [] }, extra || {});
 }
 
-function bodyOf(p) { return Array.isArray(p.body) ? p.body : [p.body]; }
+/* Записите към weekly_checklist — от етап 2 при отваряне трябва да са НУЛА. */
 function writes(h) {
   return h.calls.post.filter(function (p) { return (p.url || '').indexOf('/weekly_checklist?') >= 0; });
 }
-function written(h, store, key) {
-  let out = null;
-  writes(h).forEach(function (p) {
-    bodyOf(p).forEach(function (r) {
-      if (r.store_name === store && r.metric_key === key) out = r;
-    });
-  });
-  return out;
-}
-function pv(h, store, key) { const r = written(h, store, key); return r ? r.portal_value : undefined; }
+/* Стойността по правилото (checklistComputePortalValues); undefined = „не се пълни". */
+function pv(h, store, key) { return (h.__vals || {})[store + '|' + key]; }
 
 (async function () {
 
@@ -138,14 +135,15 @@ function pv(h, store, key) { const r = written(h, store, key); return r ? r.port
     h.close();
   }
   {
-    /* Преди миграцията: отмятания има, но колоните са manual → нищо не се пише. */
+    /* Преди миграцията: отмятания има, но колоните са manual → нищо не се пълни. */
     const h = env({
       metrics: metrics({ lm: 'manual', razl: 'manual', srok: 'manual' }),
       comps: [comp(SROK_ID, 'Враца', WK[2]), comp(RAZL_ID, 'Враца', WK[0]), comp(LM_ID, 'Враца', WK[0])]
     });
     await open(h);
-    ok('manual → порталът не пише в трите колони',
-       ['srok_godnost', 'razliki_dostavka', 'zanulyavane_lm'].every(function (k) { return written(h, 'Враца', k) === null; }));
+    ok('manual → порталът не пълни трите колони',
+       ['srok_godnost', 'razliki_dostavka', 'zanulyavane_lm'].every(function (k) { return pv(h, 'Враца', k) === undefined; }),
+       JSON.stringify(h.__vals));
     h.close();
   }
 
@@ -165,9 +163,10 @@ function pv(h, store, key) { const r = written(h, store, key); return r ? r.port
       comp(RAZL_ID, 'Добрич', WK[4])
     ]});
     await open(h);
-    ok('пон, вт, чет → „3/5"', pv(h, 'Враца', 'razliki_dostavka') === '3/5', JSON.stringify(written(h, 'Враца', 'razliki_dostavka')));
-    ok('само събота → „0/5"', pv(h, 'Габрово', 'razliki_dostavka') === '0/5', JSON.stringify(written(h, 'Габрово', 'razliki_dostavka')));
-    ok('всичките пет → „5/5"', pv(h, 'Добрич', 'razliki_dostavka') === '5/5', JSON.stringify(written(h, 'Добрич', 'razliki_dostavka')));
+    ok('пон, вт, чет → „3/5"', pv(h, 'Враца', 'razliki_dostavka') === '3/5', JSON.stringify(pv(h, 'Враца', 'razliki_dostavka')));
+    ok('само събота → „0/5"', pv(h, 'Габрово', 'razliki_dostavka') === '0/5', JSON.stringify(pv(h, 'Габрово', 'razliki_dostavka')));
+    ok('всичките пет → „5/5"', pv(h, 'Добрич', 'razliki_dostavka') === '5/5', JSON.stringify(pv(h, 'Добрич', 'razliki_dostavka')));
+    ok('при отваряне — нула записа към weekly_checklist (етап 2)', writes(h).length === 0, 'реално: ' + writes(h).length);
     h.close();
   }
 
@@ -180,17 +179,17 @@ function pv(h, store, key) { const r = written(h, store, key); return r ? r.port
       comp(SROK_ID, 'Добрич', '2026-10-14', { postponed_to: WK[4] }) /* от предната сряда, пренесено в петък */
     ]});
     await open(h);
-    ok('сряда → da', pv(h, 'Враца', 'srok_godnost') === 'da', JSON.stringify(written(h, 'Враца', 'srok_godnost')));
-    ok('четвъртък → ne', pv(h, 'Габрово', 'srok_godnost') === 'ne', JSON.stringify(written(h, 'Габрово', 'srok_godnost')));
-    ok('пренесено в седмицата → da по новата дата', pv(h, 'Добрич', 'srok_godnost') === 'da', JSON.stringify(written(h, 'Добрич', 'srok_godnost')));
+    ok('сряда → da', pv(h, 'Враца', 'srok_godnost') === 'da', JSON.stringify(pv(h, 'Враца', 'srok_godnost')));
+    ok('четвъртък → ne', pv(h, 'Габрово', 'srok_godnost') === 'ne', JSON.stringify(pv(h, 'Габрово', 'srok_godnost')));
+    ok('пренесено в седмицата → da по новата дата', pv(h, 'Добрич', 'srok_godnost') === 'da', JSON.stringify(pv(h, 'Добрич', 'srok_godnost')));
     h.close();
   }
   {
     /* Пренесено ОТ седмицата навън: сряда → следващ понеделник. */
     const h = env({ comps: [comp(SROK_ID, 'Враца', WK[2], { postponed_to: '2026-10-26' })] });
     await open(h);
-    ok('пренесено извън седмицата → клетката празна (нищо не се дължи)', written(h, 'Враца', 'srok_godnost') === null,
-       JSON.stringify(written(h, 'Враца', 'srok_godnost')));
+    ok('пренесено извън седмицата → клетката празна (нищо не се дължи)', pv(h, 'Враца', 'srok_godnost') === undefined,
+       JSON.stringify(pv(h, 'Враца', 'srok_godnost')));
     h.close();
   }
 
@@ -203,9 +202,9 @@ function pv(h, store, key) { const r = written(h, store, key); return r ? r.port
       comp(LM_ID, 'Добрич', WK[1])                                 /* вторник — извън срока */
     ]});
     await open(h);
-    ok('понеделник → da', pv(h, 'Враца', 'zanulyavane_lm') === 'da', JSON.stringify(written(h, 'Враца', 'zanulyavane_lm')));
-    ok('„нямам нужда" → da', pv(h, 'Габрово', 'zanulyavane_lm') === 'da', JSON.stringify(written(h, 'Габрово', 'zanulyavane_lm')));
-    ok('вторник → ne', pv(h, 'Добрич', 'zanulyavane_lm') === 'ne', JSON.stringify(written(h, 'Добрич', 'zanulyavane_lm')));
+    ok('понеделник → da', pv(h, 'Враца', 'zanulyavane_lm') === 'da', JSON.stringify(pv(h, 'Враца', 'zanulyavane_lm')));
+    ok('„нямам нужда" → da', pv(h, 'Габрово', 'zanulyavane_lm') === 'da', JSON.stringify(pv(h, 'Габрово', 'zanulyavane_lm')));
+    ok('вторник → ne', pv(h, 'Добрич', 'zanulyavane_lm') === 'ne', JSON.stringify(pv(h, 'Добрич', 'zanulyavane_lm')));
     h.close();
   }
 

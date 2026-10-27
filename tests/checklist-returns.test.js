@@ -17,6 +17,11 @@
    Числата тук са РЕАЛНИТЕ от базата (сверени на 02.09.2026):
      Раднево 29/40 · Петрич 4/28 · Шумен 26/26
 
+   ЕТАП 2 (checklist-live-calc, 26.10.2026): отварянето на таба вече НЕ пише
+   portal_value, затова правилото се проверява през чистата
+   checklistComputePortalValues() (без запис), а мрежата се захранва от
+   rpc/checklist_portal_values (data.rpc).
+
    Пускане:  node tests/checklist-returns.test.js .
 */
 const H = require('../.claude/skills/tmax-jsdom-test/harness');
@@ -60,26 +65,26 @@ function env(opts) {
       recurring_tasks: [],
       task_completions: [],
       stock_returns: opts.returns || [],
-      goods_transit: opts.transit || []
+      goods_transit: opts.transit || [],
+      rpc: opts.rpc || []
     }
   };
   if (opts.fail) b.fail = opts.fail;
   return boot(b);
 }
 
-function bodyOf(p) { return Array.isArray(p.body) ? p.body : [p.body]; }
 function writes(h) {
   return h.calls.post.filter(function (p) { return (p.url || '').indexOf('/weekly_checklist') >= 0; });
 }
-function written(h, store, key) {
-  let out = null;
-  writes(h).forEach(function (p) {
-    bodyOf(p).forEach(function (r) {
-      if (r.store_name === store && r.metric_key === key) out = r;
-    });
-  });
-  return out;
+/* Етап 2: стойностите по правилото — от checklistComputePortalValues(), не
+   от записите при отваряне. null = липсва във vals (празна клетка). */
+async function compute(h) { h.vals = await h.w.checklistComputePortalValues(); return h.vals; }
+function got(h, store, key) {
+  const k = store + '|' + key;
+  return h.vals && Object.prototype.hasOwnProperty.call(h.vals, k) ? h.vals[k] : null;
 }
+/* Живата стойност, която мрежата получава от checklist_portal_values(). */
+function live(store, key, value) { return { store_name: store, metric_key: key, value: value }; }
 function cellOf(h, store, key) {
   const t = h.doc.getElementById('checklist-table');
   if (!t) return null;
@@ -124,18 +129,18 @@ function freezeDay(h, day) {
     });
     h.w.loadChecklist();
     await ticks();
+    await compute(h);
 
-    const w = written(h, 'Раднево', 'stoka_vrashtane');
-    ok('записано е 29/40', !!w && w.portal_value === '29/40', JSON.stringify(w));
-    ok('клетката показва 29/40', valText(h, 'Раднево', 'stoka_vrashtane') === '29/40',
-       JSON.stringify(valText(h, 'Раднево', 'stoka_vrashtane')));
+    /* „клетката показва 29/40" е махната: от етап 2 клетката идва от rpc. */
+    const w = got(h, 'Раднево', 'stoka_vrashtane');
+    ok('изчислено е 29/40', w === '29/40', JSON.stringify(w));
 
     /* Точно това, което пада без второто условие. */
     ok('НЕ е 22/40 — проверените се броят',
-       !!w && w.portal_value !== '22/40', JSON.stringify(w));
+       !!w && w !== '22/40', JSON.stringify(w));
     /* И не всичко подред. */
     ok('НЕ е 40/40 — нищонеправещите не се броят',
-       !!w && w.portal_value !== '40/40', JSON.stringify(w));
+       !!w && w !== '40/40', JSON.stringify(w));
     h.close();
   }
 
@@ -150,29 +155,30 @@ function freezeDay(h, day) {
     ]});
     h.w.loadChecklist();
     await ticks();
-    ok('3 от 4', (written(h, 'Раднево', 'stoka_vrashtane') || {}).portal_value === '3/4',
-       JSON.stringify(written(h, 'Раднево', 'stoka_vrashtane')));
+    await compute(h);
+    ok('3 от 4', got(h, 'Раднево', 'stoka_vrashtane') === '3/4',
+       JSON.stringify(got(h, 'Раднево', 'stoka_vrashtane')));
 
     /* Поотделно, за да не се крие едното зад другото. */
     const only = env({ returns: many('Петрич', 'taken', null, 3) });
-    only.w.loadChecklist(); await ticks();
+    only.w.loadChecklist(); await ticks(); await compute(only);
     ok('само taken, без нито една дата → 3/3',
-       (written(only, 'Петрич', 'stoka_vrashtane') || {}).portal_value === '3/3',
-       JSON.stringify(written(only, 'Петрич', 'stoka_vrashtane')));
+       got(only, 'Петрич', 'stoka_vrashtane') === '3/3',
+       JSON.stringify(got(only, 'Петрич', 'stoka_vrashtane')));
     only.close();
 
     const dates = env({ returns: many('Петрич', 'pending', '2026-08-19', 3) });
-    dates.w.loadChecklist(); await ticks();
+    dates.w.loadChecklist(); await ticks(); await compute(dates);
     ok('само pending с дати → 3/3',
-       (written(dates, 'Петрич', 'stoka_vrashtane') || {}).portal_value === '3/3',
-       JSON.stringify(written(dates, 'Петрич', 'stoka_vrashtane')));
+       got(dates, 'Петрич', 'stoka_vrashtane') === '3/3',
+       JSON.stringify(got(dates, 'Петрич', 'stoka_vrashtane')));
     dates.close();
 
     const none = env({ returns: many('Петрич', 'pending', null, 3) });
-    none.w.loadChecklist(); await ticks();
+    none.w.loadChecklist(); await ticks(); await compute(none);
     ok('само pending без дати → 0/3',
-       (written(none, 'Петрич', 'stoka_vrashtane') || {}).portal_value === '0/3',
-       JSON.stringify(written(none, 'Петрич', 'stoka_vrashtane')));
+       got(none, 'Петрич', 'stoka_vrashtane') === '0/3',
+       JSON.stringify(got(none, 'Петрич', 'stoka_vrashtane')));
     none.close();
     h.close();
   }
@@ -191,33 +197,34 @@ function freezeDay(h, day) {
     });
     h.w.loadChecklist();
     await ticks();
+    await compute(h);
 
-    ok('Раднево 29/40', (written(h, 'Раднево', 'stoka_vrashtane') || {}).portal_value === '29/40',
-       JSON.stringify(written(h, 'Раднево', 'stoka_vrashtane')));
-    ok('Петрич 4/28', (written(h, 'Петрич', 'stoka_vrashtane') || {}).portal_value === '4/28',
-       JSON.stringify(written(h, 'Петрич', 'stoka_vrashtane')));
+    ok('Раднево 29/40', got(h, 'Раднево', 'stoka_vrashtane') === '29/40',
+       JSON.stringify(got(h, 'Раднево', 'stoka_vrashtane')));
+    ok('Петрич 4/28', got(h, 'Петрич', 'stoka_vrashtane') === '4/28',
+       JSON.stringify(got(h, 'Петрич', 'stoka_vrashtane')));
     ok('Шумен 26/26 (всичко обработено)',
-       (written(h, 'Шумен', 'stoka_vrashtane') || {}).portal_value === '26/26',
-       JSON.stringify(written(h, 'Шумен', 'stoka_vrashtane')));
+       got(h, 'Шумен', 'stoka_vrashtane') === '26/26',
+       JSON.stringify(got(h, 'Шумен', 'stoka_vrashtane')));
     h.close();
   }
 
   /* ── 4. Обект без записи ─────────────────────────────────────────────── */
-  section('4. Без записи: празна клетка, не „0/0"');
+  section('4. Без записи: няма стойност, не „0/0"');
   {
     const h = env({ returns: many('Раднево', 'taken', null, 3) });
     h.w.loadChecklist();
     await ticks();
+    await compute(h);
 
-    ok('за Враца НЕ е записано нищо', written(h, 'Враца', 'stoka_vrashtane') === null,
-       JSON.stringify(written(h, 'Враца', 'stoka_vrashtane')));
-    ok('клетката на Враца е празна', valText(h, 'Враца', 'stoka_vrashtane') === '',
-       JSON.stringify(valText(h, 'Враца', 'stoka_vrashtane')));
-    ok('няма „0/0" никъде в таблицата',
-       h.doc.getElementById('mod-checklist').textContent.indexOf('0/0') < 0);
-    /* Контрол: обектът със записи все пак е записан. */
-    ok('Раднево пак е записано', (written(h, 'Раднево', 'stoka_vrashtane') || {}).portal_value === '3/3',
-       JSON.stringify(written(h, 'Раднево', 'stoka_vrashtane')));
+    ok('за Враца НЯМА стойност', got(h, 'Враца', 'stoka_vrashtane') === null,
+       JSON.stringify(got(h, 'Враца', 'stoka_vrashtane')));
+    /* Клетката идва от rpc (етап 2) — „0/0" се търси в изчисленото. */
+    ok('няма „0/0" никъде в изчисленото',
+       Object.keys(h.vals).every(function (k) { return h.vals[k] !== '0/0'; }), JSON.stringify(h.vals));
+    /* Контрол: обектът със записи все пак е изчислен. */
+    ok('Раднево пак е изчислено', got(h, 'Раднево', 'stoka_vrashtane') === '3/3',
+       JSON.stringify(got(h, 'Раднево', 'stoka_vrashtane')));
     h.close();
   }
 
@@ -226,7 +233,8 @@ function freezeDay(h, day) {
   {
     const h = env({
       returns: many('Раднево', 'pending', null, 10),
-      transit: [{ store_name:'Раднево', direction:'incoming', status:'pending' }]
+      transit: [{ store_name:'Раднево', direction:'incoming', status:'pending' }],
+      rpc: [live('Раднево', 'stoka_vrashtane', '0/10'), live('Раднево', 'stoka_na_pat', '0/1')]
     });
     freezeDay(h, 5);            /* ден, в който „стока на път" Е рано */
     h.w.loadChecklist();
@@ -265,29 +273,25 @@ function freezeDay(h, day) {
     });
     h.w.loadChecklist();
     await ticks();
+    await compute(h);
 
     ok('връщанията са попълнени',
-       (written(h, 'Раднево', 'stoka_vrashtane') || {}).portal_value === '5/5',
-       JSON.stringify(written(h, 'Раднево', 'stoka_vrashtane')));
+       got(h, 'Раднево', 'stoka_vrashtane') === '5/5',
+       JSON.stringify(got(h, 'Раднево', 'stoka_vrashtane')));
     ok('стоката на път — също',
-       (written(h, 'Раднево', 'stoka_na_pat') || {}).portal_value === '2/10',
-       JSON.stringify(written(h, 'Раднево', 'stoka_na_pat')));
+       got(h, 'Раднево', 'stoka_na_pat') === '2/10',
+       JSON.stringify(got(h, 'Раднево', 'stoka_na_pat')));
     ok('module:kasa НЕ се пълни (няма правило)',
-       written(h, 'Раднево', 'storna_priem') === null,
-       JSON.stringify(written(h, 'Раднево', 'storna_priem')));
+       got(h, 'Раднево', 'storna_priem') === null,
+       JSON.stringify(got(h, 'Раднево', 'storna_priem')));
 
-    /* ЕДНА заявка за двата източника — общ път за грешките.
-       Броят заявки сам по себе си НЕ стига: една заявка само с връщанията
-       също би дала 1. Затова се проверява и че тялото носи ДВАТА ключа —
-       точно случаят, който пропуснах при първия опит. */
-    ok('една заявка за двата източника', writes(h).length === 1,
+    /* До етап 2: „ЕДНА заявка за запис, носеща двата показателя". Запис при
+       отваряне вече няма — проверката става „нула POST", а ДВАТА показателя
+       се търсят в едно и също изчисление (горните две проверки). */
+    ok('нула POST към weekly_checklist', writes(h).length === 0,
        'реално заявки: ' + writes(h).length);
-    const keys = {};
-    writes(h).forEach(function (p) { bodyOf(p).forEach(function (r) { keys[r.metric_key] = 1; }); });
-    ok('и тя носи ДВАТА показателя',
-       !!keys.stoka_vrashtane && !!keys.stoka_na_pat, Object.keys(keys).join(','));
     ok('Централен офис не влиза',
-       written(h, 'Централен офис', 'stoka_vrashtane') === null);
+       got(h, 'Централен офис', 'stoka_vrashtane') === null);
     h.close();
   }
 
@@ -301,44 +305,54 @@ function freezeDay(h, day) {
     });
     h.w.loadChecklist();
     await ticks();
+    await compute(h);
 
-    const w = written(h, 'Раднево', 'stoka_vrashtane');
-    if (ok('редът е записан', !!w)) {
-      ok('portal_value е обновено на 5/5', w.portal_value === '5/5', JSON.stringify(w));
-      ok('control_value НЕ е в тялото',
-         !Object.prototype.hasOwnProperty.call(w, 'control_value'), JSON.stringify(Object.keys(w)));
-      ok('comment НЕ е в тялото',
-         !Object.prototype.hasOwnProperty.call(w, 'comment'), JSON.stringify(Object.keys(w)));
-    }
+    /* Проверките за тялото на записа (без control_value / comment) са махнати:
+       от етап 2 при отваряне няма запис — виж секция 8 (нула POST). */
+    ok('изчислено е 5/5 (не старото 1/2)', got(h, 'Раднево', 'stoka_vrashtane') === '5/5',
+       JSON.stringify(got(h, 'Раднево', 'stoka_vrashtane')));
+    ok('нула POST към weekly_checklist', writes(h).length === 0, 'реално: ' + writes(h).length);
     ok('клетката показва ръчното с превес',
        valText(h, 'Раднево', 'stoka_vrashtane') === 'да',
        JSON.stringify(valText(h, 'Раднево', 'stoka_vrashtane')));
     h.close();
 
+    /* Провал на модулната заявка (до етап 2 — провал при запис, но запис
+       при отваряне вече няма): червен toast, колоната липсва. */
     const h2 = env({
       returns: many('Раднево', 'taken', null, 5),
-      fail: { POST: { status: 400, body: { message: 'отказано' } } }
+      fail: { GET: { status: 400, body: { message: 'отказано' }, url: /stock_returns/ } }
     });
     h2.w.loadChecklist();
     await ticks();
+    await compute(h2);
     ok('излязъл е toast', h2.calls.toast.length > 0, JSON.stringify(h2.calls.toast));
-    ok('клетката НЕ изглежда попълнена', valText(h2, 'Раднево', 'stoka_vrashtane') === '',
-       JSON.stringify(valText(h2, 'Раднево', 'stoka_vrashtane')));
+    ok('toast-ът носи таблицата и причината', h2.calls.toast.join(' ').indexOf('stock_returns') >= 0 &&
+       h2.calls.toast.join(' ').indexOf('отказано') >= 0, JSON.stringify(h2.calls.toast));
+    ok('стойност НЯМА (провалът не става число)', got(h2, 'Раднево', 'stoka_vrashtane') === null,
+       JSON.stringify(h2.vals));
     ok('таблицата пак се рендира', !!h2.doc.getElementById('checklist-table'));
     h2.close();
   }
 
-  /* ── 8. Нищо ново → нула записи ──────────────────────────────────────── */
-  section('8. Непроменена стойност не праща заявка');
+  /* ── 8. Отварянето не пише ───────────────────────────────────────────── */
+  /* До етап 2: „непроменена стойност не праща заявка". От етап 2 отварянето
+     не пише НИКОГА — и при различна стойност в базата (1/2 срещу 5/5). */
+  section('8. Отваряне → нула записи, и изчислението също не пише');
   {
     const h = env({
-      rows: [{ store_name:'Раднево', metric_key:'stoka_vrashtane', portal_value:'5/5',
+      rows: [{ store_name:'Раднево', metric_key:'stoka_vrashtane', portal_value:'1/2',
                control_value:null, control_num:null, comment:null }],
       returns: many('Раднево', 'taken', null, 5)
     });
     h.w.loadChecklist();
     await ticks();
-    ok('нула записа', writes(h).length === 0, 'реално: ' + writes(h).length);
+    ok('нула записа при отваряне', writes(h).length === 0, 'реално: ' + writes(h).length);
+    await compute(h);
+    ok('нула записа и след checklistComputePortalValues()', writes(h).length === 0,
+       'реално: ' + writes(h).length);
+    ok('а стойността е изчислена (5/5)', got(h, 'Раднево', 'stoka_vrashtane') === '5/5',
+       JSON.stringify(h.vals));
     h.close();
   }
 

@@ -9,9 +9,11 @@
      B. банерът при вход (notifications.js) — изключената за обекта не се
         предлага като нова чакаща задача; без нова задача изключванията
         изобщо не се теглят;
-     C. чек листът (checklist.js) — изключен обект/седмица → portal_value
-        се ИЗЧИСТВА (null, празна клетка), не „не"/„0/5"; вече записано „не"
-        отпреди изключването изчезва; липсващ ред не се създава празен.
+     C. чек листът (checklist.js) — изключен обект/седмица → няма стойност
+        (празна клетка), не „не"/„0/5"; вече записано „не" отпреди
+        изключването не се показва. От етап 2 (checklist-live-calc,
+        26.10.2026) правилото се проверява през checklistComputePortalValues(),
+        а отварянето не пише нищо в weekly_checklist.
 
    Отчетите (report.js и едж функциите) са етап 2 и имат собствен тест.
 
@@ -266,12 +268,8 @@ function rec(id, over) {
     h.k = k; h.def = def;
     return h;
   }
-  const writes = h => h.calls.post.filter(p => (p.url || '').indexOf('/weekly_checklist?') >= 0);
-  function written(h, store, key) {
-    let out;
-    writes(h).forEach(p => [].concat(p.body).forEach(r => { if (r.store_name === store && r.metric_key === key) out = r; }));
-    return out;
-  }
+  /* Без „?" — хваща и запис без query низ. */
+  const writes = h => h.calls.post.filter(p => (p.url || '').indexOf('/weekly_checklist') >= 0);
   function cellVal(h, store, key) {
     const t = h.doc.getElementById('checklist-table');
     if (!t) return null;
@@ -293,25 +291,41 @@ function rec(id, over) {
     ]);
     if (guard('loadChecklist() не хвърля', () => h.w.loadChecklist())) {
       await settle(() => !!h.doc.getElementById('checklist-table'));
+      /* Етап 2 (checklist-live-calc, 26.10.2026): отварянето НЕ пише
+         portal_value. Правилото се проверява през checklistComputePortalValues()
+         (чисто, без запис): „изчиства се / празна клетка" = ключът липсва
+         във vals, а вместо записа на null — нула POST при отваряне.
+         Клетките на незатворена седмица идват от RPC checklist_portal_values();
+         тук RPC-то се захранва с изхода на правилото (липсващо → null) и се
+         проверява, че мрежата показва ТОВА, а не застоялото записано. */
+      ok('при отваряне нула POST към /weekly_checklist (етап 2)', writes(h).length === 0,
+        JSON.stringify(writes(h).map(p => p.body)));
+      const vals = await h.w.checklistComputePortalValues();
+      const has = (s, k) => Object.prototype.hasOwnProperty.call(vals, s + '|' + k);
       const q = skipGets(h);
       ok('една заявка за ПОКАЗАНАТА седмица', q.length === 1 && q[0].indexOf('year=eq.' + h.k.year) >= 0 &&
         q[0].indexOf('week_number=eq.' + h.k.week + '&') >= 0, q.join(' | '));
-      ok('Враца: ревизия → da (изключването за ДРУГА седмица не я пипа)', (written(h, VR, 'revizia_953') || {}).portal_value === 'da',
-        JSON.stringify(written(h, VR, 'revizia_953')));
-      const ga = written(h, GA, 'revizia_953');
-      ok('Габрово: записаното „ne" се ИЗЧИСТВА — portal_value: null в тялото',
-        !!ga && Object.prototype.hasOwnProperty.call(ga, 'portal_value') && ga.portal_value === null, JSON.stringify(ga));
-      ok('Габрово: отметката му не превръща клетката в „da"', !ga || ga.portal_value !== 'da');
-      ok('тялото на записа не носи control_value/comment (ръчната работа не се пипа)',
-        !!ga && !('control_value' in ga) && !('comment' in ga));
-      ok('Добрич: ревизия → ne (не е изключен)', (written(h, DO, 'revizia_953') || {}).portal_value === 'ne');
-      ok('Добрич: справката (глобално изключена) „2/5" се изчиства',
-        (written(h, DO, 'spravka_minusi') || {}).portal_value === null, JSON.stringify(written(h, DO, 'spravka_minusi')));
-      ok('Враца/Габрово: справката без ред → НЕ се създава празен ред',
-        written(h, VR, 'spravka_minusi') === undefined && written(h, GA, 'spravka_minusi') === undefined);
+      ok('Враца: ревизия → da (изключването за ДРУГА седмица не я пипа)', vals[VR + '|revizia_953'] === 'da',
+        JSON.stringify(vals));
+      ok('Габрово: записаното „ne" не се повтаря — стойност НЯМА', !has(GA, 'revizia_953'), JSON.stringify(vals));
+      ok('Габрово: отметката му не превръща клетката в „da"', vals[GA + '|revizia_953'] !== 'da');
+      ok('Добрич: ревизия → ne (не е изключен)', vals[DO + '|revizia_953'] === 'ne', JSON.stringify(vals));
+      ok('Добрич: справката (глобално изключена) — стойност НЯМА („2/5" не се повтаря)',
+        !has(DO, 'spravka_minusi'), JSON.stringify(vals));
+      ok('Враца/Габрово: справката — стойност НЯМА', !has(VR, 'spravka_minusi') && !has(GA, 'spravka_minusi'),
+        JSON.stringify(vals));
+
+      /* Мрежата: RPC-то връща изхода на правилото, второ отваряне. */
+      const live = [];
+      [VR, GA, DO].forEach(s => METRICS.forEach(m => live.push({ store_name: s, metric_key: m.key,
+        value: has(s, m.key) ? vals[s + '|' + m.key] : null })));
+      h.setData('rpc', live);
+      h.w.loadChecklist();
+      await settle(() => cellVal(h, VR, 'revizia_953') === 'да');
       ok('клетката Габрово/ревизия е празна', cellVal(h, GA, 'revizia_953') === '', cellVal(h, GA, 'revizia_953'));
       ok('клетката Враца/ревизия е „да"', cellVal(h, VR, 'revizia_953') === 'да', cellVal(h, VR, 'revizia_953'));
       ok('клетката Добрич/справка е празна', cellVal(h, DO, 'spravka_minusi') === '', cellVal(h, DO, 'spravka_minusi'));
+      ok('и второто отваряне — нула POST', writes(h).length === 0);
     }
   }
 
@@ -328,6 +342,12 @@ function rec(id, over) {
     h.w.loadChecklist();
     await settle(() => !!h.doc.getElementById('checklist-table'));
     ok('нула записа в weekly_checklist', writes(h).length === 0, JSON.stringify(writes(h).map(p => p.body)));
+    /* Етап 2: нулата горе е вече тривиална (отварянето не пише изобщо) —
+       правилото върху вече записаните стойности се сверява през vals. */
+    const vals = await h.w.checklistComputePortalValues();
+    ok('vals съвпада със записаното: Враца da, Добрич ne, Габрово няма',
+      vals[VR + '|revizia_953'] === 'da' && vals[DO + '|revizia_953'] === 'ne' &&
+      !Object.prototype.hasOwnProperty.call(vals, GA + '|revizia_953'), JSON.stringify(vals));
   }
 
   report();

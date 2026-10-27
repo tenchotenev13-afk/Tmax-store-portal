@@ -362,6 +362,7 @@ const TESTS = [
   'checklist-streak.test.js',
   'checklist-3b-email.test.js',
   'checklist-3b-report.test.js',
+  'checklist-live-frozen.test.js',
   'checklist-full-form.test.js',
   'checklist-portal-columns.test.js',
   'transfers-create.test.js',

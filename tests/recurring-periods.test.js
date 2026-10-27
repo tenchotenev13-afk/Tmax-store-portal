@@ -328,30 +328,34 @@ function expectRows(h, label, present, absent) {
       portal_value: 'ne', control_value: null, control_num: null, comment: null }]);
     return h;
   }
-  const writes = h => h.calls.post.filter(p => (p.url || '').indexOf('/weekly_checklist?') >= 0);
-  function written(h) {
-    let out;
-    writes(h).forEach(p => [].concat(p.body).forEach(r => { if (r.store_name === TR && r.metric_key === 'revizia_953') out = r; }));
-    return out;
-  }
+  /* Етап 2 (checklist-live-calc, 26.10.2026): loadChecklist() вече НЕ пише
+     portal_value при отваряне — правилото се проверява през
+     checklistComputePortalValues() (чисто изчисление, без запис).
+     „Празна клетка" = ключът липсва във vals. Изчистването на записаното
+     „ne" вече не е запис на null, а: липса във vals + нула POST към
+     /weekly_checklist при отваряне. */
+  const writes = h => h.calls.post.filter(p => (p.url || '').indexOf('/weekly_checklist') >= 0);
+  const KEY = TR + '|revizia_953';
 
   section('7. Чек лист: седмица, в която задачата не важи → празна клетка');
   {
     const h = checklistEnv((mon, prevMon) => [{ recurring_task_id: REV, from_monday: prevMon, to_monday: prevMon }]);
     if (guard('loadChecklist() не хвърля', () => h.w.loadChecklist())) {
-      await settle(() => !!h.doc.getElementById('checklist-table') && writes(h).length > 0);
+      await settle(() => !!h.doc.getElementById('checklist-table'));
+      const vals = await h.w.checklistComputePortalValues();
       ok('заявка към recurring_task_periods за id-тата', h.calls.get.some(u => u.indexOf('/recurring_task_periods') >= 0 && u.indexOf(REV) >= 0));
-      const r = written(h);
-      ok('записаното „ne" се изчиства (portal_value: null), въпреки отметката',
-        !!r && Object.prototype.hasOwnProperty.call(r, 'portal_value') && r.portal_value === null, JSON.stringify(r));
+      ok('стойност НЯМА (празна клетка, не „da"), въпреки отметката',
+        !Object.prototype.hasOwnProperty.call(vals, KEY), JSON.stringify(vals));
+      ok('при отваряне нула POST към /weekly_checklist (етап 2)', writes(h).length === 0, JSON.stringify(writes(h).map(p => p.body)));
     }
   }
   section('7б. КОНТРОЛА: задачата важи → „da" (отметката се брои)');
   {
     const h = checklistEnv((mon) => [{ recurring_task_id: REV, from_monday: mon, to_monday: null }]);
     h.w.loadChecklist();
-    await settle(() => !!h.doc.getElementById('checklist-table') && writes(h).length > 0);
-    ok('portal_value = da', (written(h) || {}).portal_value === 'da', JSON.stringify(written(h)));
+    await settle(() => !!h.doc.getElementById('checklist-table'));
+    const vals = await h.w.checklistComputePortalValues();
+    ok('portal_value = da', vals[KEY] === 'da', JSON.stringify(vals));
   }
 
   report();

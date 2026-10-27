@@ -10,6 +10,11 @@
      · обект без сторна → „0/0"; бъдеща седмица → нищо не се пише;
      · control_value / control_num на контролинга не се пипат.
 
+   ЕТАП 2 (checklist-live-calc, 26.10.2026): отварянето на таба вече НЕ пише
+   portal_value, затова правилото се проверява през чистата
+   checklistComputePortalValues() (без запис); заявките за четене се пускат
+   от нея, не от loadChecklist().
+
    Пускане:  node tests/checklist-wrong-receipt.test.js .
 */
 /* Git Bash не подава TZ към Node — задава се тук, ПРЕДИ да се създаде jsdom,
@@ -88,12 +93,12 @@ function env(set, opts) {
   return h;
 }
 const writes = h => h.calls.post.filter(p => (p.url || '').indexOf('/weekly_checklist') >= 0);
-function written(h, store, key) {
-  let out = null;
-  writes(h).forEach(p => (Array.isArray(p.body) ? p.body : [p.body]).forEach(r => {
-    if (r.store_name === store && r.metric_key === key) out = r;
-  }));
-  return out;
+/* Етап 2: стойностите по правилото — от checklistComputePortalValues(), не
+   от записите при отваряне. null = липсва във vals (празна клетка). */
+async function compute(h) { h.vals = await h.w.checklistComputePortalValues(); return h.vals; }
+function got(h, store, key) {
+  const k = store + '|' + key;
+  return h.vals && Object.prototype.hasOwnProperty.call(h.vals, k) ? h.vals[k] : null;
 }
 function valText(h, store, key) {
   const t = h.doc.getElementById('checklist-table');
@@ -127,18 +132,17 @@ const settle = async () => { for (let i = 0; i < 6; i++) await ticks(); };
     h.w.loadChecklist();
     await settle();
     ok('показана е седмица 39', h.w.checklistWeek === 39, String(h.w.checklistWeek));
-    const a = written(h, 'Раднево', 'storna_priem');
-    ok('Раднево: записано „2/5"', !!a && a.portal_value === '2/5', JSON.stringify(a));
-    ok('НЕ „3/9" — предишната седмица не се брои', !!a && a.portal_value !== '3/9');
-    ok('НЕ „4/12" — другите посоки не се броят', !!a && a.portal_value !== '4/12');
-    const b = written(h, 'Петрич', 'storna_priem');
-    ok('Петрич (без сторна): „0/0"', !!b && b.portal_value === '0/0', JSON.stringify(b));
-    ok('клетката на Раднево показва „2/5"', valText(h, 'Раднево', 'storna_priem') === '2/5',
-      JSON.stringify(valText(h, 'Раднево', 'storna_priem')));
-    ok('клетката на Петрич показва „0/0"', valText(h, 'Петрич', 'storna_priem') === '0/0',
-      JSON.stringify(valText(h, 'Петрич', 'storna_priem')));
-    ok('записът носи САМО portal_value (без control_*)',
-      !!a && !('control_value' in a) && !('control_num' in a) && !('comment' in a), JSON.stringify(a));
+    /* Етап 2: отварянето не пише, а заявките за четене тръгват от изчислението. */
+    ok('нула POST към weekly_checklist при отваряне', writes(h).length === 0, 'реално: ' + writes(h).length);
+    await compute(h);
+    const a = got(h, 'Раднево', 'storna_priem');
+    ok('Раднево: изчислено „2/5"', a === '2/5', JSON.stringify(a));
+    ok('НЕ „3/9" — предишната седмица не се брои', !!a && a !== '3/9');
+    ok('НЕ „4/12" — другите посоки не се броят', !!a && a !== '4/12');
+    const b = got(h, 'Петрич', 'storna_priem');
+    ok('Петрич (без сторна): „0/0"', b === '0/0', JSON.stringify(b));
+    /* Махнати: „клетката показва 2/5 / 0/0" (клетката идва от rpc от етап 2) и
+       „записът носи САМО portal_value" (запис при отваряне няма — горе нула POST). */
     const lineGets = h.calls.get.filter(u => u.indexOf('/stock_differences') >= 0);
     ok('редовете се теглят само за бланките от седмицата (2 id)',
       lineGets.length === 1 && (decodeURIComponent(lineGets[0]).match(/rep-\d+/g) || []).length === 2,
@@ -155,10 +159,12 @@ const settle = async () => { for (let i = 0; i < 6; i++) await ticks(); };
     });
     h.w.loadChecklist();
     await settle();
-    const a = written(h, 'Раднево', 'storna_priem');
-    ok('portal_value се пише („1/3")', !!a && a.portal_value === '1/3', JSON.stringify(a));
-    ok('тялото не съдържа control_value / control_num / comment',
-      !!a && !('control_value' in a) && !('control_num' in a) && !('comment' in a), JSON.stringify(a));
+    await compute(h);
+    const a = got(h, 'Раднево', 'storna_priem');
+    ok('изчислено е „1/3"', a === '1/3', JSON.stringify(a));
+    /* „тялото не съдържа control_*" е махната — от етап 2 при отваряне няма
+       запис, затова проверката е нула POST (и след изчислението). */
+    ok('нула POST към weekly_checklist', writes(h).length === 0, 'реално: ' + writes(h).length);
     ok('клетката показва числото на контролинга (7), не „1/3"',
       valText(h, 'Раднево', 'storna_priem') === '7', JSON.stringify(valText(h, 'Раднево', 'storna_priem')));
     const row = h.w.checklistRows.find(r => r.store_name === 'Раднево' && r.metric_key === 'storna_priem');
@@ -167,15 +173,16 @@ const settle = async () => { for (let i = 0; i < 6; i++) await ticks(); };
     h.close();
   }
 
-  section('3. Бъдеща седмица → нищо не се пише');
+  section('3. Бъдеща седмица → няма стойност');
   {
     seq = 0;
     const h = env([rep('Раднево', '2026-10-06T08:00:00Z', 'wrong_receipt', 3)], { week: 41 });
     h.w.loadChecklist();
     await settle();
     ok('показана е седмица 41', h.w.checklistWeek === 41, String(h.w.checklistWeek));
-    ok('няма запис за storna_priem', !written(h, 'Раднево', 'storna_priem') && !written(h, 'Петрич', 'storna_priem'),
-      JSON.stringify(writes(h).map(p => p.body)));
+    await compute(h);
+    ok('няма стойност за storna_priem', got(h, 'Раднево', 'storna_priem') === null && got(h, 'Петрич', 'storna_priem') === null,
+      JSON.stringify(h.vals));
     ok('и няма заявка към differences_reports', !h.calls.get.some(u => u.indexOf('/differences_reports') >= 0));
     h.close();
   }
@@ -195,20 +202,22 @@ const settle = async () => { for (let i = 0; i < 6; i++) await ticks(); };
     const h39 = env(SET());
     h39.w.loadChecklist();
     await settle();
-    const a39 = written(h39, 'Раднево', 'storna_priem');
+    await compute(h39);
+    const a39 = got(h39, 'Раднево', 'storna_priem');
     ok('седмица 39: Раднево „1/1" — неделя 23:30 влиза, понеделник 00:30 не',
-      !!a39 && a39.portal_value === '1/1', JSON.stringify(a39));
-    const p39 = written(h39, 'Петрич', 'storna_priem');
+      a39 === '1/1', JSON.stringify(a39));
+    const p39 = got(h39, 'Петрич', 'storna_priem');
     ok('седмица 39: Петрич „1/4" — понеделник 00:30 влиза, предишната неделя 23:30 не',
-      !!p39 && p39.portal_value === '1/4', JSON.stringify(p39));
+      p39 === '1/4', JSON.stringify(p39));
     h39.close();
 
     const h40 = env(SET(), { week: 40 });
     h40.w.loadChecklist();
     await settle();
-    const a40 = written(h40, 'Раднево', 'storna_priem');
+    await compute(h40);
+    const a40 = got(h40, 'Раднево', 'storna_priem');
     ok('седмица 40 (текущата): Раднево „1/2" — понеделник 00:30 е тук',
-      !!a40 && a40.portal_value === '1/2', JSON.stringify(a40));
+      a40 === '1/2', JSON.stringify(a40));
     h40.close();
   }
 
@@ -219,12 +228,13 @@ const settle = async () => { for (let i = 0; i < 6; i++) await ticks(); };
                    rep('Раднево', '2026-09-23T08:00:00Z', 'wrong_receipt', 2)]);
     h.w.loadChecklist();
     await settle();
-    const a = written(h, 'Раднево', 'storna_priem');
-    ok('„2/2"', !!a && a.portal_value === '2/2', JSON.stringify(a));
+    await compute(h);
+    const a = got(h, 'Раднево', 'storna_priem');
+    ok('„2/2"', a === '2/2', JSON.stringify(a));
     h.close();
   }
 
-  section('6. Провал на заявката за редовете → нищо не се пише (не частично)');
+  section('6. Провал на заявката за редовете → няма стойност (не частично)');
   {
     seq = 0;
     const set = [rep('Раднево', '2026-09-22T08:00:00Z', 'wrong_receipt', 3)];
@@ -241,8 +251,9 @@ const settle = async () => { for (let i = 0; i < 6; i++) await ticks(); };
     h.w.checklistYear = 2026; h.w.checklistWeek = 39;
     h.w.loadChecklist();
     await settle();
-    ok('няма запис за storna_priem', !written(h, 'Раднево', 'storna_priem') && !written(h, 'Петрич', 'storna_priem'),
-      JSON.stringify(writes(h).map(p => p.body)));
+    await compute(h);
+    ok('няма стойност за storna_priem', got(h, 'Раднево', 'storna_priem') === null && got(h, 'Петрич', 'storna_priem') === null,
+      JSON.stringify(h.vals));
     ok('показан е toast за грешката', h.calls.toast.some(t => String(t).indexOf('differences_reports') >= 0),
       JSON.stringify(h.calls.toast));
     h.close();

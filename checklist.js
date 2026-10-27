@@ -55,6 +55,11 @@ var checklistStores = [];      /* 18-те отчетни обекта */
 var checklistLastSend = null;  /* последният ред от weekly_checklist_sends за седмицата */
 var checklistSendBusy = false; /* тече изпращане — бутонът мълчи */
 var checklistResponses = [];   /* weekly_checklist_responses за показаната седмица */
+/* Затворена ли е показаната седмица (weekly_checklist_freezes, етап 2 от
+   26.10.2026). true → стойностите са записаните в weekly_checklist;
+   false → portal_value се смята ЖИВО от checklist_portal_values() и стои
+   само в паметта; null → още не е заредено. */
+var checklistWeekFrozen = null;
 
 /* Стойностите се пазят в базата на латиница, за да не зависи схемата от
    изписването. Превеждат се само тук, при показване. */
@@ -226,7 +231,10 @@ function loadChecklist() {
     storeMode ? Promise.resolve(ownStores) : loadReportableStores(),
     /* Становищата на обектите за седмицата (етап 3А). Липсваща таблица или
        провал → [] (sbGet), тоест мрежата се рисува и без тях. */
-    sbGet('weekly_checklist_responses', weekQ + storeFilter)
+    sbGet('weekly_checklist_responses', weekQ + storeFilter),
+    /* Затворена ли е седмицата (checklist-live-calc, етап 2). Провал → []
+       → показва се живо — стойностите пак са верни към момента. */
+    sbGet('weekly_checklist_freezes', weekQ + '&select=year,week_number', true)
   ]).then(function (res) {
     checklistMetrics = Array.isArray(res[0]) ? res[0] : [];
     checklistRows = Array.isArray(res[1]) ? res[1] : [];
@@ -239,24 +247,72 @@ function loadChecklist() {
     checklistLastSend = sends[0] || null;
     checklistStores = Array.isArray(res[3]) ? res[3] : [];
     checklistResponses = Array.isArray(res[4]) ? res[4] : [];
-    /* Обектът НЕ пълни portal_value: той вижда това, което контролингът е
-       изпратил, а не преизчисление в момента на отваряне. И неизпратена
-       седмица излиза празна — стойностите там още не са оценка. */
-    if (storeMode) {
-      if (!checklistLastSend) { checklistRows = []; checklistResponses = []; }
+    checklistWeekFrozen = (Array.isArray(res[5]) ? res[5] : []).some(function (f) {
+      return f && Number(f.year) === checklistYear && Number(f.week_number) === checklistWeek;
+    });
+    /* Неизпратена седмица в режим на обекта излиза празна — стойностите
+       там още не са оценка. */
+    if (storeMode && !checklistLastSend) {
+      checklistRows = []; checklistResponses = [];
       return null;
     }
-    /* Рендерът е СЛЕД опита за попълване, не преди него — иначе мрежата
-       мигва веднъж празна и втори път пълна. checklistFillPortalValues()
-       никога не отхвърля: при провал сама вдига toast и не пипа редовете,
-       тоест долният ред рисува това, което РЕАЛНО е записано. */
-    return checklistFillPortalValues();
+    /* ЖИВО ИЛИ ЗАМРАЗЕНО (checklist-live-calc, етап 2, решение на Тенчо
+       26.10.2026). Затворената седмица се показва от записаното в
+       weekly_checklist. Незатворената — от checklist_portal_values() в
+       базата, само в паметта: при отваряне НИЩО не се пише. До етап 2 тук
+       стоеше checklistFillPortalValues(), която пишеше portal_value при
+       всяко отваряне — снимка от момента на отварянето, която после не се
+       местеше (Теодор, 26.10). Рендерът е СЛЕД живите стойности — иначе
+       мрежата мигва веднъж празна. */
+    if (checklistWeekFrozen) return null;
+    return checklistLoadLiveValues();
   }).then(function () {
     renderChecklist();
   }).catch(function () {
     checklistMetrics = []; checklistRows = []; checklistStores = [];
-    checklistLastSend = null; checklistResponses = [];
+    checklistLastSend = null; checklistResponses = []; checklistWeekFrozen = null;
     renderChecklist();
+  });
+}
+
+/* Живите стойности за показаната седмица от checklist_portal_values() —
+   ЕДНОТО правило в базата (етап 1, сверено с checklist.js клетка по клетка).
+   Слагат се в checklistRows като portal_value САМО В ПАМЕТТА:
+     · ред има → portal_value се заменя (и с NULL — живото казва „няма");
+     · ред няма и стойност има → нов ред в паметта, без id (в базата го няма);
+     · колона, която функцията не връща (ръчна) → не се пипа.
+   Само за показаните обекти (в режим на обекта — неговият ред).
+   Провал → червен toast и мрежата се рисува с това, което е записано —
+   не празна без обяснение. Никога не отхвърля. */
+function checklistLoadLiveValues() {
+  return sbGetOk('rpc/checklist_portal_values',
+    'p_year=' + checklistYear + '&p_week=' + checklistWeek).then(function (res) {
+    if (!res || !res.ok) {
+      toast('Чек лист: живите стойности не се заредиха (' + ((res && res.error) || 'грешка') +
+        ') — показано е записаното', '#dc2626');
+      return;
+    }
+    checklistApplyLiveValues(res.rows);
+  });
+}
+
+function checklistApplyLiveValues(rows) {
+  var idx = checklistIndex();
+  var shown = {};
+  checklistStores.forEach(function (s) { shown[s] = 1; });
+  (Array.isArray(rows) ? rows : []).forEach(function (r) {
+    if (!r || !shown[r.store_name] || !r.metric_key) return;
+    var v = (r.value === undefined || r.value === '') ? null : r.value;
+    var row = idx[r.store_name + ' ' + r.metric_key];
+    if (row) { row.portal_value = v; return; }
+    if (v === null) return;
+    row = {
+      year: checklistYear, week_number: checklistWeek,
+      store_name: r.store_name, metric_key: r.metric_key,
+      portal_value: v, control_value: null, control_num: null, comment: null
+    };
+    checklistRows.push(row);
+    idx[r.store_name + ' ' + r.metric_key] = row;
   });
 }
 
@@ -320,7 +376,14 @@ function checklistLatestSentWeek() {
    на всяка от тях е смяна на source в weekly_checklist_metrics
    ('recurring:<uuid>' или 'module:<id>') плюс ред ТУК (режим) или в CHECKLIST_MODULE_FILL (модул). Нищо в рендера,
    писмото или седмичния отчет не е заковано към броя или ключовете на
-   колоните — нова колона идва само от реда в таблицата. */
+   колоните — нова колона идва само от реда в таблицата.
+
+   ОТ 26.10.2026 (checklist-live-calc, етап 2) ТОВА Е ДОКУМЕНТАЦИЯ И ЕТАЛОН,
+   не източник: режимът на колоната е в weekly_checklist_metrics.portal_mode,
+   а таба го смята checklist_portal_values() в базата. Правилото долу
+   (checklistPortalPlan и сие) остава ЕТАЛОНЪТ, срещу който
+   tools/checklist-parity.js сверява функцията, и се тества директно през
+   checklistComputePortalValues(). Нова колона → ред в portal_mode И тук. */
 var CHECKLIST_PORTAL_MODE = {
   revizia_953:    'any',       /* има ли поне едно отмятане в прозореца → da/ne */
   revizia_grupi:  'any',       /* „РЕВИЗИЯ ГРУПИ", Пон–Сря → da/ne */
@@ -464,7 +527,9 @@ function checklistFileNonePlan(comps, weekISO) {
   return { mode: 'file_none', denom: 1, hits: hits, denomFor: function () { return 1; } };
 }
 
-/* Записва САМО portal_value. control_value, control_num и comment не влизат
+/* НЕ СЕ ВИКА от 26.10.2026 (етап 2) — само от checklistFillPortalValues, която
+   също не се вика. Етап 3 ги маха.
+   Записва САМО portal_value. control_value, control_num и comment не влизат
    в тялото — при resolution=merge-duplicates PostgREST обновява единствено
    подадените колони, тоест отсъствието им е защитата на ръчната работа.
    По същата причина тук НЯМА updated_by/updated_at: те описват кой и кога е
@@ -810,7 +875,29 @@ function checklistModuleChanges(idx) {
   });
 }
 
-/* Пълни portal_value от всички автоматични източници.
+/* ЕТАЛОНЪТ: всички автоматични стойности за показаната седмица по правилото
+   на checklist.js — без запис. → Promise с { 'обект|колона': стойност } само за
+   НЕпразните (null = „няма стойност" не се включва). Вика го
+   tools/checklist-parity.js и тестовете на правилото (checklist-portal-value,
+   -transit, -returns, -wrong-receipt, …). Табът НЕ го вика от етап 2 —
+   там стойностите идват от checklist_portal_values() в базата. */
+function checklistComputePortalValues() {
+  return Promise.all([checklistRecurringChanges({}), checklistModuleChanges({})]).then(function (parts) {
+    var out = {};
+    parts[0].concat(parts[1]).forEach(function (c) {
+      if (c && c.value !== null && c.value !== undefined) out[c.store + '|' + c.metric_key] = c.value;
+    });
+    return out;
+  });
+}
+
+/* НЕ СЕ ВИКА от 26.10.2026 (checklist-live-calc, етап 2): отварянето на
+   таба вече не пише portal_value — незатворената седмица се показва живо от
+   checklist_portal_values(), затворената се записва веднъж от
+   checklist_freeze_week() в базата. Остава до етап 3, който я маха заедно с
+   checklistWritePortalValues — дотогава е под ръка за сравнение.
+
+   Пълни portal_value от всички автоматични източници.
    ЕДИН запис и ЕДИН път за грешка за двата източника: две отделни заявки
    значат две отделни половини успех, тоест таблица, попълнена наполовина,
    без никой да е казал коя половина.
@@ -1599,7 +1686,13 @@ function checklistApply(ctx, fields) {
          клетката се изпразва след успешен запис. Сливането на празен обект е
          безобидно, а на пълен върши същата работа. */
       if (res.row && typeof res.row === 'object') {
-        Object.keys(res.row).forEach(function (k) { row[k] = res.row[k]; });
+        Object.keys(res.row).forEach(function (k) {
+          /* Жива седмица: portal_value в паметта е изчисленото сега, а в
+             базата — старо или празно. Отговорът на upsert-а не бива да го
+             замени (етап 2, 26.10.2026). */
+          if (k === 'portal_value' && checklistWeekFrozen === false) return;
+          row[k] = res.row[k];
+        });
       }
       renderChecklist();
       return;
