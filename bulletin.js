@@ -3221,6 +3221,7 @@ function renderBulView(){
         html+=bulSpanHomeNoteHtml(t);
         if(isGlobal()&&t.target_stores&&t.target_stores.length)html+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">🏬 Само за: '+t.target_stores.map(esc).join(', ')+'</div>';
         if(isGlobal()&&t.created_by)html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">👤 Поставена от: '+esc(t.created_by)+'</div>';
+        html+=bulAllowHtml(t,true);
         html+=bulNaOfficeHtml('regular',t,bulWeekArr());
         if(compObj&&(compObj.comment||(compObj.photos&&compObj.photos.length)))html+=renderCompletionExtras(compObj);
         html+=renderTaskAttachments(t);
@@ -3240,7 +3241,7 @@ function renderBulView(){
                се отлага: обектът не може да я отметне, а тригерът пак ще я
                направи done. „↩ Отмени" остава — вече отложеното трябва да може
                да се върне. */
-            else if(!bulAutoLocked(bulTaskLinkKey(t)))html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+            else if(!bulAutoLocked(bulTaskLinkKey(t))&&bulRecAllows('regular',t,'postpone'))html+='<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
           }
           html+='</div>';
         }
@@ -3794,7 +3795,8 @@ function taskModalHtml(){
     '<label class="fl">Заглавие *</label><input class="fi" id="tk-title" placeholder="напр. Провери наличностите">' +
     '<label class="fl">Описание</label><textarea class="fi fi-desc" id="tk-desc" rows="3" placeholder="Допълнителна информация. Дълъг адрес се скрива така: [Инструкцията](https://…)" oninput="bulAutoGrow(this)" onpaste="bulDescPaste(event)"></textarea>' +
     '<label class="fl">Отдел</label><select class="fi" id="tk-dept"><option value="trade">🛒 Търговска</option><option value="warehouse">📦 Склад/Приемане</option><option value="admin">⚙️ Администрация</option></select>' +
-    '<label class="fl">Вид задача</label><select class="fi" id="tk-type">'+taskTypeOptsHtml('info')+'</select>' +
+    '<label class="fl">Вид задача</label><select class="fi" id="tk-type" onchange="bulAllowFieldToggle(\'tk\')">'+taskTypeOptsHtml('info')+'</select>' +
+    bulAllowFieldHtml('tk', null) +
     '<label class="fl">Срок — избери един или няколко дни (по избор)</label>' +
     dueDatesCheckboxesHtml('tk-due-dates', days, []) +
     taskWindowFieldHtml('tk', [], true) +
@@ -3867,7 +3869,8 @@ function openEditTaskModal(taskId) {
       '<option value="warehouse"'+(t.department==='warehouse'?' selected':'')+'>📦 Склад/Приемане</option>' +
       '<option value="admin"'+(t.department==='admin'?' selected':'')+'>⚙️ Администрация</option>' +
     '</select>' +
-    '<label class="fl">Вид задача</label><select class="fi" id="etk-type">'+taskTypeOptsHtml(t.task_type)+'</select>' +
+    '<label class="fl">Вид задача</label><select class="fi" id="etk-type" onchange="bulAllowFieldToggle(\'etk\')">'+taskTypeOptsHtml(t.task_type)+'</select>' +
+    bulAllowFieldHtml('etk', t) +
     '<label class="fl">Срок — избери един или няколко дни (по избор)</label>' +
     dueDatesCheckboxesHtml('etk-due-dates', days, taskSpansWeeks(t)?[]:taskDueDates(t)) +
     taskWindowFieldHtml('etk', taskSpansWeeks(t)?[]:taskDueDates(t), !!t.due_window) +
@@ -3919,6 +3922,7 @@ function submitEditTask(taskId) {
   var trc = trCollect('etk');
   if (trc.error) { toast(trc.error,'#dc2626'); return; }
   var body = {title:title,description:desc,department:dept,due_date:etkDue.due_date,due_dates:etkDue.due_dates,due_window:readTaskWindow('etk'),spans_from:etkDue.spans_from,starts_on:etkDue.starts_on,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete};
+  bulAllowFieldRead('etk', body);
   /* sort_order влиза САМО при истинска смяна на отдела - иначе всяко
      отваряне и запазване на задачата би я хвърлило най-отдолу. */
   var t = bulTasks.find(function(x){ return String(x.id) === String(taskId); });
@@ -4298,7 +4302,9 @@ function trSaveReports(taskId, list){
 function openTaskModal(){trDrafts.tk=[];var trw=document.getElementById('tk-tr-wrap');if(trw)trw.innerHTML=trSectionHtml('tk',null);if(!reportGroupPeopleCache)loadReportGroupPeople();document.getElementById('tk-ov').classList.add('open');document.getElementById('tk-title').value='';document.getElementById('tk-desc').value='';bulFillStoreMultiSelect('tk-stores',[]);var ac=document.getElementById('tk-auto-complete');if(ac)ac.checked=false;bulAutoCompleteToggle('tk');var sp=document.getElementById('tk-span-on');if(sp){sp.checked=false;var spd=document.getElementById('tk-span-due');if(spd)spd.value='';var sps=document.getElementById('tk-span-start');if(sps)sps.value='';bulSpanToggle(sp);}/* Прозорецът е ВКЛЮЧЕН по подразбиране при нова задача: щом човек избере
      няколко дни, почти винаги става дума за едно задължение до последния, не за
      N отделни. taskWinBindDays го синхронизира с реално избраните дни. */
-  taskWinWant.tk=true;taskWinBindDays('tk');}
+  taskWinWant.tk=true;taskWinBindDays('tk');
+  ['tk-allow-pp','tk-allow-na'].forEach(function(id){var c=document.getElementById(id);if(c)c.checked=true;});
+  bulAllowFieldToggle('tk');}
 function closeTk(){document.getElementById('tk-ov').classList.remove('open');}
 function submitTask(){
   var title=(document.getElementById('tk-title').value||'').trim();
@@ -4325,7 +4331,9 @@ function submitTask(){
   var trc=trCollect('tk');
   if(trc.error){toast(trc.error,'#dc2626');return;}
   /* sbPostReturn — id-то на задачата трябва за насрочените отчети. */
-  sbPostReturn('bulletin_tasks',{bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:tkDue.due_date,due_dates:tkDue.due_dates,due_window:readTaskWindow('tk'),spans_from:tkDue.spans_from,starts_on:tkDue.starts_on,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1}).then(function(r){
+  var tkBody={bulletin_id:curBul.id,week_number:curBul.week_number,year:curBul.year,department:dept,title:title,description:document.getElementById('tk-desc').value,due_date:tkDue.due_date,due_dates:tkDue.due_dates,due_window:readTaskWindow('tk'),spans_from:tkDue.spans_from,starts_on:tkDue.starts_on,target_stores:stores.length?stores:null,task_type:taskType,report_groups:reportGroups.length?reportGroups:null,linked_module:linkedModule||null,auto_complete:autoComplete,created_by:currentUser.display_name||currentUser.email,sort_order:maxOrder+1};
+  bulAllowFieldRead('tk',tkBody);
+  sbPostReturn('bulletin_tasks',tkBody).then(function(r){
     if(!r.ok){toast('Грешка','#dc2626');return;}
     var newId=r.row&&r.row.id;
     var repP=trc.list.length
@@ -5357,6 +5365,7 @@ function renderTasksPanel() {
         h += esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!isGlobal()&&!isMulti&&!isDone&&!naComp,singleDate)+bulPostponedBadgeHtml(ppComp)+bulNaBadgeHtml(naComp)+bulSpanBadgeHtml(t)+'</div>';
         if (t.description) h += '<div class="bul-desc">'+linkify(t.description)+'</div>';
         h += renderTaskAttachments(t);
+        h += bulAllowHtml(t, true);
         h += bulAutoTransitNoteHtml(t, isDone);
         if (isMulti) {
           h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">📅 Дни: '+taskDueLabel(t)+' — отмятай в 📅 Седмичен календар</div>';
@@ -5379,7 +5388,7 @@ function renderTasksPanel() {
         }
         if (!isGlobal() && !isMulti && !isDone && !naComp) {
           if (isPostponed) h += '<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
-          else if (!bulAutoLocked(bulTaskLinkKey(t))) h += '<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+          else if (!bulAutoLocked(bulTaskLinkKey(t)) && bulRecAllows('regular', t, 'postpone')) h += '<button data-task-id="'+t.id+'" data-cdate="'+(singleDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'regular\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 7px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
         }
         if (canEdit()) {
           h += '<button data-task-id="'+t.id+'" onclick="openEditTaskModal(this.dataset.taskId)" style="border:1px solid #bfdbfe;background:#eff6ff;border-radius:5px;padding:2px 7px;font-size:11px;cursor:pointer;color:#2563eb;">✏️</button>';
@@ -7015,7 +7024,9 @@ function bulNaLineHtml(comp){
    седмици, като store_hints: НЕ са в RECURRING_CONTENT_FIELDS и се пишат с
    PATCH върху recurring_tasks, не през версиите. Липсваща стойност = true.
    Вече отложеното / заявеното НЕ се пипа — забраната спира само нови.
-   Еднократните задачи (bulletin_tasks) нямат тези колони → винаги true. */
+   От 28.10.2026 (bul-allow-postpone-oneoff) същите две колони ги има и в
+   bulletin_tasks. Там се пишат от формата на задачата (нова / ✏️), не с
+   отметки в реда: еднократната има пълна форма, а постоянната — версии. */
 var BUL_ALLOW_OFF_MSG = {
   postpone: 'Отлагането на тази задача е изключено от офиса',
   na: '„Не се отнася" за тази задача е изключено от офиса'
@@ -7024,18 +7035,25 @@ function bulRecTaskById(id){
   var f = function(x){ return x && String(x.id)===String(id); };
   return (recurringAll||[]).find(f) || (recurringTasks||[]).find(f) || null;
 }
+/* Еднократната — от бюлетина на седмицата или от дотеглените пренесени. */
+function bulAllowTaskById(kind, id){
+  if(kind==='recurring') return bulRecTaskById(id);
+  var f = function(x){ return x && String(x.id)===String(id); };
+  return (bulTasks||[]).find(f) || (bulCarriedTasks||[]).find(f) || null;
+}
 function bulRecAllows(kind, t, what){
-  if(kind!=='recurring' || !t) return true;
+  if(!t) return true;
   return what==='na' ? t.allow_not_applicable!==false : t.allow_postpone!==false;
 }
 /* Защитата във функциите — за отворен стар таб, в който бутонът още стои. */
 function bulRecBlocked(kind, taskId, what){
-  if(kind!=='recurring' || bulRecAllows(kind, bulRecTaskById(taskId), what)) return false;
+  if(bulRecAllows(kind, bulAllowTaskById(kind||'regular', taskId), what)) return false;
   toast(BUL_ALLOW_OFF_MSG[what], '#d97706');
   return true;
 }
-/* Офисът: знак „🔒" в реда (за всички глобални) + двете отметки (canEdit). */
-function bulAllowHtml(t){
+/* Офисът: знак „🔒" в реда (за всички глобални) + двете отметки (canEdit).
+   tagsOnly — за еднократната: отметките ѝ са във формата. */
+function bulAllowHtml(t, tagsOnly){
   /* „Само за информация" няма нито отлагане, нито „Не се отнася" — няма и какво да се забрани. */
   if(!isGlobal() || !t || taskIsNotice(t)) return '';
   var noPp = t.allow_postpone===false, noNa = t.allow_not_applicable===false;
@@ -7045,7 +7063,7 @@ function bulAllowHtml(t){
     h += '<div class="bul-allow-tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">'+
       (noPp ? tag('🔒 без отлагане') : '') + (noNa ? tag('🔒 без „Не се отнася"') : '') + '</div>';
   }
-  if(canEdit()){
+  if(canEdit() && !tagsOnly){
     var cb = function(field, on, label){
       return '<label style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#475569;cursor:pointer;">'+
         '<input type="checkbox" class="bul-allow-cb" data-rtid="'+t.id+'" data-field="'+field+'"'+(on?' checked':'')+' onchange="bulAllowToggle(this)" style="width:12px;height:12px;cursor:pointer;">'+label+'</label>';
@@ -7055,6 +7073,32 @@ function bulAllowHtml(t){
       cb('allow_not_applicable', !noNa, 'Обектът може да маркира „Не се отнася"') + '</div>';
   }
   return h;
+}
+/* Формата на ЕДНОКРАТНАТА задача (нова и ✏️): двете отметки, включени по
+   подразбиране; стар запис без полетата = включени. „Само за информация" —
+   без отметки (скрити), записват се като true. */
+function bulAllowFieldHtml(prefix, t){
+  var pp = !(t && t.allow_postpone===false), na = !(t && t.allow_not_applicable===false);
+  var hide = !!(t && taskIsNotice(t));
+  var cb = function(id, on, label){
+    return '<label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#475569;cursor:pointer;margin-top:4px;">'+
+      '<input type="checkbox" id="'+id+'"'+(on?' checked':'')+' style="width:14px;height:14px;cursor:pointer;">'+label+'</label>';
+  };
+  return '<div id="'+prefix+'-allow-wrap" style="margin-top:6px;'+(hide?'display:none;':'')+'">'+
+    cb(prefix+'-allow-pp', pp, 'Обектът може да отлага') +
+    cb(prefix+'-allow-na', na, 'Обектът може да маркира „Не се отнася"') + '</div>';
+}
+function bulAllowFieldToggle(prefix){
+  var w = document.getElementById(prefix+'-allow-wrap'), s = document.getElementById(prefix+'-type');
+  if(w) w.style.display = (s && s.value==='notice') ? 'none' : '';
+}
+function bulAllowFieldRead(prefix, body){
+  var s = document.getElementById(prefix+'-type');
+  var notice = !!(s && s.value==='notice');
+  var pp = document.getElementById(prefix+'-allow-pp'), na = document.getElementById(prefix+'-allow-na');
+  body.allow_postpone = notice || !pp || !!pp.checked;
+  body.allow_not_applicable = notice || !na || !!na.checked;
+  return body;
 }
 function bulAllowToggle(cb){
   var rtid = cb.dataset.rtid, field = cb.dataset.field;

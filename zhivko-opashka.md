@@ -14,6 +14,10 @@
 
 ## Чака изпращане
 
+(миграция bul_allow_postpone_oneoff, bul-allow-postpone-oneoff-schema.sql — прилага се след комита и преди push-а на кода; версията — в supabase_migrations по име bul_allow_postpone_oneoff)
+- 28.10 · bulletin_tasks.allow_postpone — boolean, NOT NULL, default true
+- 28.10 · bulletin_tasks.allow_not_applicable — boolean, NOT NULL, default true
+
 (в базата от миграцията minusi_multi_report, версия 20261028104053, приложена 28.10.2026)
 - 28.10 · report_recipients.minus_multi — boolean, NOT NULL, default false
 - 28.10 · app_settings — нов ключ minus_multi_count (праг „многократен минус"; начална стойност '3')
