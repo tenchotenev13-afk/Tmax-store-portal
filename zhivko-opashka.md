@@ -14,9 +14,13 @@
 
 ## Чака изпращане
 
-(миграция bul_allow_postpone, bul-allow-postpone-schema.sql — прилага се след комита и преди push-а на кода; версията — в supabase_migrations по име bul_allow_postpone)
+## Изпратено 28.10.2026
+
+(миграция bul_allow_postpone, bul-allow-postpone-schema.sql — в базата от миграцията bul_allow_postpone, версия 20261028093135, приложена 28.10.2026)
 - 28.10 · recurring_tasks.allow_postpone — boolean, NOT NULL, default true
 - 28.10 · recurring_tasks.allow_not_applicable — boolean, NOT NULL, default true
+
+## Потвърдено 27.10.2026
 
 (в базата от миграцията 20261026210000_weekly_checklist_freezes, версия 20261026210148, приложена 26.10.2026)
 - 26.10 · нова таблица weekly_checklist_freezes — year int NOT NULL, week_number int NOT NULL, frozen_at timestamptz NOT NULL default now(), frozen_by text NULL; PK (year, week_number)
@@ -29,6 +33,7 @@
 - 24.10 · storno_notes.notified_at — timestamptz, NULL, без default
 - 24.10 · storno_note_replies.notify_error — text, NULL, без default
 - 24.10 · storno_note_replies.notified_at — timestamptz, NULL, без default
+(потвърдено от Живко с писмо на 27.10: огледалото 89 таблици, 0 грешки)
 
 ## Потвърдено 24.10.2026
 
