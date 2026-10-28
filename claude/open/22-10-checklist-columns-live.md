@@ -14,3 +14,5 @@ zanulyavane_lm) + stoka_vrashtane само по разлики. Кодът е н
    отметнатото от контролинга (control_value) не се пипа и бие портала.
 
 Затваря се, когато Миглена потвърди, че колоните съвпадат с Бюлетина.
+
+- 28.10 (сесия checklist-zanulyavane-manual): zanulyavane_lm НЕ е вече от портала — решение на Тенчо, отново ръчна (миграция 20261028120335). За сверката на Миглена остават srok_godnost, razliki_dostavka и stoka_vrashtane.

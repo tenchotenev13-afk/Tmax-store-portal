@@ -13,8 +13,11 @@
       без отмятане „0/5"; събота не влиза.
    3. srok_godnost („СПИСЪК СТОКА ЗА ВРЪЩАНЕ", сряда) → da; четвъртък → ne;
       пренесено (postponed_to) — по новата дата.
-   4. zanulyavane_lm („ЗАРЕЖДАНЕ АРТИКУЛИ НА Л.М.", понеделник) → da;
-      авто отметката „нямам нужда" е обикновен task_completions ред → da.
+   4. zanulyavane_lm — от 28.10.2026 ОТНОВО РЪЧНА (решение на Тенчо: друг вид
+      задача, Миглена я отмята; миграция weekly_checklist_zanulyavane_manual).
+      Няма режим в CHECKLIST_PORTAL_MODE, затова дори при стария източник
+      'recurring:72aed3fc…' клетката остава празна — отметките по „ЗАРЕЖДАНЕ
+      АРТИКУЛИ НА Л.М." не я пълнят.
    5. stoka_vrashtane чете само stock_returns source=eq.diff — рекламациите
       са в srok_godnost и не се броят два пъти.
 
@@ -120,14 +123,14 @@ function pv(h, store, key) { return (h.__vals || {})[store + '|' + key]; }
     const h = env();
     const M = h.w.CHECKLIST_PORTAL_MODE;
     ok('srok_godnost → any', M.srok_godnost === 'any', M.srok_godnost);
-    ok('zanulyavane_lm → any', M.zanulyavane_lm === 'any', M.zanulyavane_lm);
+    ok('zanulyavane_lm — без режим (ръчна от 28.10)', M.zanulyavane_lm === undefined, M.zanulyavane_lm);
     ok('razliki_dostavka → count', M.razliki_dostavka === 'count', M.razliki_dostavka);
     ok('razhodi и dogovoreni_returi остават без режим', !M.razhodi && !M.dogovoreni_returi);
 
     h.w.checklistMetrics = metrics();
     const autoKeys = h.w.checklistAutoMetrics().map(function (m) { return m.key; }).sort();
-    ok('при recurring: — и трите са автоматични',
-       JSON.stringify(autoKeys) === JSON.stringify(['razliki_dostavka', 'srok_godnost', 'zanulyavane_lm']), JSON.stringify(autoKeys));
+    ok('при recurring: — srok_godnost и razliki_dostavka; zanulyavane_lm — НЕ (без режим, дори при стария източник)',
+       JSON.stringify(autoKeys) === JSON.stringify(['razliki_dostavka', 'srok_godnost']), JSON.stringify(autoKeys));
 
     h.w.checklistMetrics = metrics({ lm: 'manual', razl: 'manual', srok: 'manual' });
     const before = h.w.checklistAutoMetrics().length;
@@ -194,7 +197,7 @@ function pv(h, store, key) { return (h.__vals || {})[store + '|' + key]; }
   }
 
   /* ── 4. Зануляване л.м. ─────────────────────────────────────────────── */
-  section('4. zanulyavane_lm — „ЗАРЕЖДАНЕ АРТИКУЛИ НА Л.М.", понеделник');
+  section('4. zanulyavane_lm — ръчна: отметките по „ЗАРЕЖДАНЕ АРТИКУЛИ НА Л.М." не я пълнят');
   {
     const h = env({ comps: [
       comp(LM_ID, 'Враца', WK[0]),
@@ -202,9 +205,9 @@ function pv(h, store, key) { return (h.__vals || {})[store + '|' + key]; }
       comp(LM_ID, 'Добрич', WK[1])                                 /* вторник — извън срока */
     ]});
     await open(h);
-    ok('понеделник → da', pv(h, 'Враца', 'zanulyavane_lm') === 'da', JSON.stringify(pv(h, 'Враца', 'zanulyavane_lm')));
-    ok('„нямам нужда" → da', pv(h, 'Габрово', 'zanulyavane_lm') === 'da', JSON.stringify(pv(h, 'Габрово', 'zanulyavane_lm')));
-    ok('вторник → ne', pv(h, 'Добрич', 'zanulyavane_lm') === 'ne', JSON.stringify(pv(h, 'Добрич', 'zanulyavane_lm')));
+    ok('понеделник (беше da) → празно', pv(h, 'Враца', 'zanulyavane_lm') === undefined, JSON.stringify(pv(h, 'Враца', 'zanulyavane_lm')));
+    ok('„нямам нужда" (беше da) → празно', pv(h, 'Габрово', 'zanulyavane_lm') === undefined, JSON.stringify(pv(h, 'Габрово', 'zanulyavane_lm')));
+    ok('вторник (беше ne) → празно', pv(h, 'Добрич', 'zanulyavane_lm') === undefined, JSON.stringify(pv(h, 'Добрич', 'zanulyavane_lm')));
     h.close();
   }
 

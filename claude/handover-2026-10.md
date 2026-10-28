@@ -842,6 +842,11 @@ zanulyavane_lm се пълнят от постоянните задачи на �
 `20261022120000_weekly_checklist_portal_columns`, приложена 23.10, версия в
 базата `20261023080810`; код `24f6f2f`); „Стока за връщане" брои
 само stock_returns source='diff'. Ръчни остават razhodi и dogovoreni_returi.
+28.10 (сесия checklist-zanulyavane-manual): zanulyavane_lm е ОТНОВО РЪЧНА —
+решение на Тенчо, друг вид задача, Миглена я отмята; не е „ЗАРЕЖДАНЕ АРТИКУЛИ
+НА Л.М.“ (миграция `20261028120335_weekly_checklist_zanulyavane_manual`:
+source 'manual'; portal_value в седмици 40–43 изчистен — 72 реда, списъкът
+е в `claude/log/2026-10-28-checklist-zanulyavane-manual.md`).
 Сверка от Миглена — `claude/open/22-10-checklist-columns-live.md`.
 23.10 (сесия checklist-stanovishte-3a), етап 3А: табът „Чек лист" се вижда
 и от управителя на отчетен обект (само роля manager — до него отива писмото,

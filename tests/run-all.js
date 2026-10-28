@@ -370,6 +370,7 @@ const TESTS = [
   'checklist-3b-report.test.js',
   'checklist-live-frozen.test.js',
   'checklist-resp-visible.test.js',
+  'checklist-zanulyavane-manual.test.js',
   'checklist-full-form.test.js',
   'checklist-portal-columns.test.js',
   'transfers-create.test.js',

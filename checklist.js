@@ -399,12 +399,13 @@ function checklistLatestSentWeek() {
        stock_returns source='complaint' при потвърждение от обекта) → da/ne;
      · razliki_dostavka ← „РАЗЛИКИ ЛОГИСТИЧНИ СКЛАДОВЕ" (Пон–Пет) → „3/5" —
        колко дни обектът е бил без необработена разлика;
-     · zanulyavane_lm   ← „ЗАРЕЖДАНЕ АРТИКУЛИ НА Л.М." (понеделник; бланка
-       или „нямам нужда") → da/ne.
+     · zanulyavane_lm — свързана на 23.10 със „ЗАРЕЖДАНЕ АРТИКУЛИ НА Л.М.",
+       ВЪРНАТА НА РЪЧНА на 28.10.2026 (решение на Тенчо: друг вид задача,
+       Миглена я отмята ръчно; миграция weekly_checklist_zanulyavane_manual).
    Докато миграцията не е приложена, редовете са с source 'manual' и
    checklistAutoMetrics() ги прескача — записът тук сам не пълни нищо.
 
-   РЪЧНИ ЗАСЕГА (source 'manual'): razhodi, dogovoreni_returi. Свързването
+   РЪЧНИ ЗАСЕГА (source 'manual'): razhodi, dogovoreni_returi, zanulyavane_lm. Свързването
    на всяка от тях е смяна на source в weekly_checklist_metrics
    ('recurring:<uuid>' или 'module:<id>') плюс ред ТУК (режим) или в CHECKLIST_MODULE_FILL (модул). Нищо в рендера,
    писмото или седмичния отчет не е заковано към броя или ключовете на
@@ -422,7 +423,6 @@ var CHECKLIST_PORTAL_MODE = {
   spravka_minusi: 'count',     /* колко РАЗЛИЧНИ дни са отметнати → „4/5" */
   preocenka:      'file_none', /* файл → da, иначе ne; nyamat само ръчно */
   srok_godnost:     'any',     /* „СПИСЪК СТОКА ЗА ВРЪЩАНЕ", сряда → da/ne */
-  zanulyavane_lm:   'any',     /* „ЗАРЕЖДАНЕ АРТИКУЛИ НА Л.М.", понеделник → da/ne */
   razliki_dostavka: 'count'    /* „РАЗЛИКИ ЛОГИСТИЧНИ СКЛАДОВЕ", Пон–Пет → „3/5" */
 };
 
