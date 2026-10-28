@@ -199,7 +199,9 @@ function views(h, id) {
         const b = v.list.querySelector('.rec-skip-badge');
         ok(id + ': бадж „⏸ Не се изисква тази седмица"', b && txt(b) === '⏸ Не се изисква тази седмица', txt(b));
         ok(id + ': бутон „↩ Върни"', !!v.list.querySelector('.rec-unskip-all') && /Върни/.test(txt(v.list.querySelector('.rec-unskip-all'))));
-        ok(id + ': без чекбокс', !v.list.querySelector('input[type=checkbox]'));
+        /* Отметките за настройка на офиса (.bul-allow-cb, 28.10.2026 — „обектът може да
+           отлага“) са общи за всички седмици и стоят и тук; проверката е за отмятане. */
+        ok(id + ': без чекбокс', !v.list.querySelector('input[type=checkbox]:not(.bul-allow-cb)'));
       }
     });
     const vr = views(ha, 'r-g');

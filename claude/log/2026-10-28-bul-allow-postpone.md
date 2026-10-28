@@ -1,0 +1,7 @@
+# 28.10 — bul-allow-postpone
+
+- Бюлетин: офисът забранява „⏱ Отложи“ и/или „🚫 Не се отнася“ по постоянна задача. Решение на Тенчо 28.10, вариант А (писмото на Миглена от 21.10 за РЕВИЗИЯ ГРУПИ). Новите колони `recurring_tasks.allow_postpone` / `allow_not_applicable` (boolean NOT NULL default true) са общи за всички седмици, като store_hints. Не са във версиите; пишат се с PATCH върху recurring_tasks. Миграция `bul_allow_postpone` (`bul-allow-postpone-schema.sql`, rollback вътре); ред за Живко — в „Чака изпращане“.
+- bulletin.js: `bulRecAllows` / `bulRecBlocked`, `bulAllowHtml` (знак „🔒 без отлагане“ за глобалните + две отметки за canEdit до „💡“), `bulAllowToggle` (при грешка червен toast и връщане на отметката). Бутоните са скрити в списъка, „План за деня“, `bulNaBtnHtml` и модала за отметка. Защита в openPostponeModal / submitPostpone / openNotApplicableModal / submitNotApplicable. Вече отложеното / заявеното не се пипа („↩ Отмени“ остава). Функции 417 → 422.
+- Тест `tests/bul-allow-postpone.test.js`: 59/0. Покрива списък, план, календар (отметка → модал), бадж → модал, директни извиквания, admin PATCH, провал, заварено отлагане. Мутантите M1–M8 падат.
+- Затворено `26-10-bul-postpone-per-task`; отворени `28-10-bul-allow-postpone-live` (Тенчо) и `28-10-bul-allow-postpone-oneoff` (еднократните, Тенчо).
+- Отметките не се показват при „Само за информация“. В `tests/skip-hide.test.js` проверката „без чекбокс“ е стеснена до `:not(.bul-allow-cb)`, защото отметките за настройка законно стоят и в реда, изключен за седмицата; иначе тестът падаше на r-g.

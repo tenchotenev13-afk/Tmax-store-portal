@@ -217,6 +217,7 @@ const TESTS = [
   'stock-returns-per-source.test.js',
   'bul-pending-hint.test.js',
   'bul-pending-open.test.js',
+  'bul-allow-postpone.test.js',
   'sd-store-clarity.test.js',
   'transit-store-clarity.test.js',
   'sr-banner-text.test.js',

@@ -2078,7 +2078,7 @@ function bulPlanRowHtml(it, store, weekArr){
     h+=bulNaBtnHtml(isRec?'recurring':'regular',t,bulNaDeclareDate(),it.naComp);
   }
   /* „⏱ Отложи" — само за обекта, само за неотметнато и неавтоматично. */
-  if(!isGlobal()&&!done&&!it.notice&&!it.carried&&!it.naComp&&!bulAutoLocked(lockKey)){
+  if(!isGlobal()&&!done&&!it.notice&&!it.carried&&!it.naComp&&!bulAutoLocked(lockKey)&&bulRecAllows(isRec?'recurring':'regular',t,'postpone')){
     h+='<button data-task-id="'+t.id+'" data-cdate="'+(cdate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\''+(isRec?'recurring':'regular')+'\',this.dataset.cdate||null)" style="flex-shrink:0;border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:3px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
   }
   return h+'</div>';
@@ -5586,7 +5586,7 @@ function openTaskCompletionModal(taskId, kind, completionDate, carriedOrig){
      иска снимка, и точно тогава се сеща, че няма какво да снима. Бутонът НЕ
      минава през изискванията на модала — заявката не е изпълнение. Модалът се
      затваря, за да не остане отворен над новия. */
-  if (!isGlobal() && !carriedOrig) {
+  if (!isGlobal() && !carriedOrig && bulRecAllows(kind, t, 'na')) {
     body += '<div style="margin-top:14px;padding-top:12px;border-top:1px dashed #e2e8f0;">' +
       '<button data-task-id="'+taskId+'" data-kind="'+kind+'" data-cdate="'+(completionDate||'')+'" onclick="var e=document.getElementById(&#39;tc-modal-ov&#39;);if(e)e.remove();openNotApplicableModal(this.dataset.taskId,this.dataset.kind,this.dataset.cdate||null);" style="border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:7px;padding:6px 12px;font-size:12px;cursor:pointer;">🚫 Не се отнася за нас</button>' +
       '<div style="font-size:10.5px;color:#94a3b8;margin-top:5px;">Обектът няма стелажа/стоката — иска се само причина, без снимка.</div>' +
@@ -5692,6 +5692,7 @@ function bulPostponeBounds(completionDate){
 }
 function openPostponeModal(taskId, kind, completionDate){
   kind = kind || 'regular';
+  if (bulRecBlocked(kind, taskId, 'postpone')) return;
   var t = (kind==='recurring' ? recurringTasks : bulTasks).find(function(x){ return String(x.id)===String(taskId); });
   if (!t) return;
   var existing = document.getElementById('pp-modal-ov');
@@ -5718,6 +5719,7 @@ function openPostponeModal(taskId, kind, completionDate){
 }
 function submitPostpone(taskId, kind, completionDate){
   kind = kind || 'regular';
+  if (bulRecBlocked(kind, taskId, 'postpone')) return;
   completionDate = completionDate || null;
   var comment = (document.getElementById('pp-comment').value||'').trim();
   if (!comment) { toast('Въведи причина за отлагането','#dc2626'); return; }
@@ -5794,6 +5796,7 @@ function submitPostpone(taskId, kind, completionDate){
    без изискване вика toggleTask() направо и модал не се отваря никога. */
 function openNotApplicableModal(taskId, kind, completionDate){
   kind = kind || 'regular';
+  if (bulRecBlocked(kind, taskId, 'na')) return;
   completionDate = completionDate || null;
   var t = (kind==='recurring' ? recurringTasks : bulTasks).find(function(x){ return String(x.id)===String(taskId); });
   if (!t) return;
@@ -5830,6 +5833,7 @@ function openNotApplicableModal(taskId, kind, completionDate){
 }
 function submitNotApplicable(taskId, kind, completionDate){
   kind = kind || 'regular';
+  if (bulRecBlocked(kind, taskId, 'na')) return;
   completionDate = completionDate || null;
   var el = document.getElementById('na-comment');
   var comment = ((el&&el.value)||'').trim();
@@ -6397,6 +6401,8 @@ function renderRecurringTasks(dk) {
       if (t.description) h += '<div class="bul-desc">' + linkify(t.description) + '</div>';
       /* Жокер по обект (store_hints): обектът вижда своя, глобалният — всички. */
       h += bulStoreHintsHtml(t, store);
+      /* Забраната за „⏱ Отложи" / „🚫 Не се отнася" (28.10.2026) — знак и отметки за офиса. */
+      h += bulAllowHtml(t);
       /* Автоматичната постоянна задача („За връщане") казва какво остава —
          дотук този надпис го имаше САМО при еднократните.
          Многодневната („РАЗЛИКИ" пон–пет) тук няма `done` — за надписа важи
@@ -6435,7 +6441,7 @@ function renderRecurringTasks(dk) {
       }
       if(!isGlobal()&&!isMultiRec&&!done&&!skipView&&!isNotice&&!naRecComp){
         if(postponed)showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="cancelPostpone(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #ddd6fe;background:#f5f3ff;color:#7c3aed;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени</button>';
-        else if(!bulAutoLocked(t.linked_module||''))showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
+        else if(!bulAutoLocked(t.linked_module||'')&&bulRecAllows('recurring',t,'postpone'))showBtns+='<button data-task-id="'+t.id+'" data-cdate="'+(singleRecDate||'')+'" onclick="openPostponeModal(this.dataset.taskId,\'recurring\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">⏱ Отложи</button>';
       }
       if (showBtns) h += '<div style="flex-shrink:0;align-self:flex-start;">'+showBtns+'</div>';
       if (canEdit()) {
@@ -7002,6 +7008,69 @@ function bulNaLineHtml(comp){
    самия ред, защото точно по нея се трие.
    Автоматичната задача не получава бутон: състоянието ѝ идва от данните, а не
    от твърдение — същото правило като при „⏱ Отложи". */
+/* ═══ ЗАБРАНА НА „⏱ Отложи" / „🚫 Не се отнася" ПО ПОСТОЯННА ЗАДАЧА ═══════
+   Решение на Тенчо 28.10.2026, вариант А (по писмото на Миглена от 21.10 за
+   РЕВИЗИЯ ГРУПИ: „всеки може да си отложи както на него му харесва").
+   recurring_tasks.allow_postpone / allow_not_applicable — ОБЩИ за всички
+   седмици, като store_hints: НЕ са в RECURRING_CONTENT_FIELDS и се пишат с
+   PATCH върху recurring_tasks, не през версиите. Липсваща стойност = true.
+   Вече отложеното / заявеното НЕ се пипа — забраната спира само нови.
+   Еднократните задачи (bulletin_tasks) нямат тези колони → винаги true. */
+var BUL_ALLOW_OFF_MSG = {
+  postpone: 'Отлагането на тази задача е изключено от офиса',
+  na: '„Не се отнася" за тази задача е изключено от офиса'
+};
+function bulRecTaskById(id){
+  var f = function(x){ return x && String(x.id)===String(id); };
+  return (recurringAll||[]).find(f) || (recurringTasks||[]).find(f) || null;
+}
+function bulRecAllows(kind, t, what){
+  if(kind!=='recurring' || !t) return true;
+  return what==='na' ? t.allow_not_applicable!==false : t.allow_postpone!==false;
+}
+/* Защитата във функциите — за отворен стар таб, в който бутонът още стои. */
+function bulRecBlocked(kind, taskId, what){
+  if(kind!=='recurring' || bulRecAllows(kind, bulRecTaskById(taskId), what)) return false;
+  toast(BUL_ALLOW_OFF_MSG[what], '#d97706');
+  return true;
+}
+/* Офисът: знак „🔒" в реда (за всички глобални) + двете отметки (canEdit). */
+function bulAllowHtml(t){
+  /* „Само за информация" няма нито отлагане, нито „Не се отнася" — няма и какво да се забрани. */
+  if(!isGlobal() || !t || taskIsNotice(t)) return '';
+  var noPp = t.allow_postpone===false, noNa = t.allow_not_applicable===false;
+  var h = '';
+  if(noPp || noNa){
+    var tag = function(s){ return '<span style="font-size:9.5px;font-weight:700;padding:1px 7px;border-radius:20px;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;white-space:nowrap;">'+s+'</span>'; };
+    h += '<div class="bul-allow-tags" style="display:flex;gap:4px;flex-wrap:wrap;margin-top:4px;">'+
+      (noPp ? tag('🔒 без отлагане') : '') + (noNa ? tag('🔒 без „Не се отнася"') : '') + '</div>';
+  }
+  if(canEdit()){
+    var cb = function(field, on, label){
+      return '<label style="display:inline-flex;align-items:center;gap:4px;font-size:10px;color:#475569;cursor:pointer;">'+
+        '<input type="checkbox" class="bul-allow-cb" data-rtid="'+t.id+'" data-field="'+field+'"'+(on?' checked':'')+' onchange="bulAllowToggle(this)" style="width:12px;height:12px;cursor:pointer;">'+label+'</label>';
+    };
+    h += '<div class="bul-allow-edit" style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">'+
+      cb('allow_postpone', !noPp, 'Обектът може да отлага') +
+      cb('allow_not_applicable', !noNa, 'Обектът може да маркира „Не се отнася"') + '</div>';
+  }
+  return h;
+}
+function bulAllowToggle(cb){
+  var rtid = cb.dataset.rtid, field = cb.dataset.field;
+  if(field!=='allow_postpone' && field!=='allow_not_applicable') return;
+  var val = !!cb.checked;
+  if(!canEdit()){ cb.checked = !val; toast('Нямаш права за това действие','#dc2626'); return; }
+  var patch = {}; patch[field] = val;
+  var fail = function(msg){ cb.checked = !val; toast('Грешка при запис: '+msg,'#dc2626'); };
+  sbPatch('recurring_tasks','id=eq.'+rtid, patch).then(function(res){
+    if(!res || !res.ok){ fail(sbErrMsg(res)); return; }
+    (recurringTasks||[]).forEach(function(x){ if(String(x.id)===String(rtid)) x[field] = val; });
+    bulSyncBaseRow(rtid, patch);
+    renderBulletin();
+    toast(val ? '✅ Разрешено на обектите' : '🔒 Забранено на обектите');
+  }).catch(function(e){ fail((e && e.message) || 'мрежова грешка'); });
+}
 function bulNaBtnHtml(kind, t, cdate, naComp){
   if(isGlobal()||!t||taskIsNotice(t)) return '';
   var lockKey = kind==='recurring' ? (t.linked_module||'') : bulTaskLinkKey(t);
@@ -7011,6 +7080,9 @@ function bulNaBtnHtml(kind, t, cdate, naComp){
     var ncd = String(naComp.completion_date||'').slice(0,10);
     return '<button data-task-id="'+t.id+'" data-cdate="'+ncd+'" onclick="cancelNotApplicable(this.dataset.taskId,\''+k+'\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">↩ Отмени заявката</button>';
   }
+  /* Забранено от офиса — нова заявка няма. Вече заявената (горе) си остава
+     с „↩ Отмени заявката". */
+  if(!bulRecAllows(k, t, 'na')) return '';
   return '<button data-task-id="'+t.id+'" data-cdate="'+(cdate||'')+'" onclick="openNotApplicableModal(this.dataset.taskId,\''+k+'\',this.dataset.cdate||null)" style="border:1px solid #e2e8f0;background:#fff;color:#64748b;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;white-space:nowrap;">🚫 Не се отнася</button>';
 }
 /* ВСИЧКИ заявки за една задача — за ОФИСА. Той не вижда един обект, а всичките,

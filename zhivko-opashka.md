@@ -14,6 +14,10 @@
 
 ## Чака изпращане
 
+(миграция bul_allow_postpone, bul-allow-postpone-schema.sql — прилага се след комита и преди push-а на кода; версията — в supabase_migrations по име bul_allow_postpone)
+- 28.10 · recurring_tasks.allow_postpone — boolean, NOT NULL, default true
+- 28.10 · recurring_tasks.allow_not_applicable — boolean, NOT NULL, default true
+
 (в базата от миграцията 20261026210000_weekly_checklist_freezes, версия 20261026210148, приложена 26.10.2026)
 - 26.10 · нова таблица weekly_checklist_freezes — year int NOT NULL, week_number int NOT NULL, frozen_at timestamptz NOT NULL default now(), frozen_by text NULL; PK (year, week_number)
 
