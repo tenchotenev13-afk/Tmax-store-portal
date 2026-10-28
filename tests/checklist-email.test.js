@@ -16,10 +16,13 @@
    провери изрично. Реалният вид се потвърждава само с истинско пробно
    писмо до себе си.
 
-   И: НУЛА ЛИНКОВЕ КЪМ ПОРТАЛА. Писмото отива до обектите, които нямат
-   достъп до таб „Чек лист"; линк, водещ до отказан достъп, е по-лош от
-   липсващ. Затова reportEmailShell() не се ползва — тя завършва с бутон
-   „Отвори в портала →".
+   И: ЕДИН ЛИНК КЪМ ПОРТАЛА (от 28.10.2026). До 23.10 нямаше нито един —
+   обектите нямаха таб „Чек лист". От 23.10 управителят го има, затова под
+   „Изисква становище" стои бутон „Напиши становище в портала →" към
+   ?tab=checklist&y=…&w=…; reportEmailShell() пак не се ползва (нейният
+   общ бутон „Отвори в портала →" не води на седмицата). От 28.10 и: само
+   колоните със стойност — затова клетките се търсят по заглавието на
+   колоната, не по позицията (tests/checklist-email-design.test.js).
 
    Пускане:  node tests/checklist-email.test.js .
 */
@@ -78,13 +81,27 @@ function rowOf(d, store) {
     return f && f.textContent.trim() === store;
   })[0] || null;
 }
+/* Колоната — по заглавието (празните колони отпадат от 28.10.2026). */
+function colIndex(d, key) {
+  const label = (METRICS.filter(function (m) { return m.key === key; })[0] || {}).label;
+  const ths = gridOf(d) ? Array.prototype.slice.call(gridOf(d).querySelectorAll('thead th')) : [];
+  for (let i = 1; i < ths.length; i++) { const dv = ths[i].querySelector('div'); if (dv && dv.textContent.trim() === label) return i; }
+  return -1;
+}
 function cellText(d, store, key) {
   const tr = rowOf(d, store);
   if (!tr) return null;
-  const i = METRICS.map(function (m) { return m.key; }).indexOf(key);
-  const td = tr.querySelectorAll('td')[i + 1];
+  const i = colIndex(d, key);
+  if (i < 0) return null;
+  const td = tr.querySelectorAll('td')[i];
   return td ? td.textContent.trim() : null;
 }
+/* По една стойност във всяка колона (Шумен) — за да има всичките 6 колони. */
+const FULL = [
+  row('Шумен', 'revizia_953', { portal_value:'da' }), row('Шумен', 'spravka_minusi', { portal_value:'5/5' }),
+  row('Шумен', 'stoka_vrashtane', { portal_value:'da' }), row('Шумен', 'storna_priem', { control_num: 1 }),
+  row('Шумен', 'stoka_na_pat', { portal_value:'da' }), row('Шумен', 'preocenka', { portal_value:'da' })
+];
 
 (async function () {
 
@@ -94,7 +111,7 @@ function cellText(d, store, key) {
   /* ── 1. Скелетът ─────────────────────────────────────────────────────── */
   section('1. Шапка, размери, 18 × 6');
   {
-    const html = W.checklistEmailHtml(2026, 34, 1, [], METRICS, STORES, null);
+    const html = W.checklistEmailHtml(2026, 34, 1, FULL, METRICS, STORES, null);
     const d = parse(h, html);
 
     ok('заглавието носи седмицата и годината',
@@ -124,7 +141,7 @@ function cellText(d, store, key) {
   /* ── 2. Стойностите ──────────────────────────────────────────────────── */
   section('2. control бие portal; преводът и съотношенията');
   {
-    const rows = [
+    const rows = FULL.concat([
       row('Враца', 'revizia_953', { portal_value:'da', control_value:'ne' }),
       row('Габрово', 'revizia_953', { portal_value:'da' }),
       row('Добрич', 'preocenka', { control_value:'nyamat' }),
@@ -132,7 +149,7 @@ function cellText(d, store, key) {
       row('Карлово', 'spravka_minusi', { portal_value:'0/5', control_value:'da' }),
       row('Козлодуй', 'storna_priem', { control_num: 7, portal_value:'da' }),
       row('Кърджали', 'storna_priem', { control_num: 0 })
-    ];
+    ]);
     const d = parse(h, W.checklistEmailHtml(2026, 34, 1, rows, METRICS, STORES, null));
 
     ok('control_value бие portal_value („не", не „да")',
@@ -180,7 +197,7 @@ function cellText(d, store, key) {
     const v1 = W.checklistEmailHtml(2026, 34, 1, [], METRICS, STORES, null);
     ok('при версия 1 НЯМА лента', v1.indexOf('Поправена версия') < 0);
 
-    const v2 = W.checklistEmailHtml(2026, 34, 2, [], METRICS, STORES, 'поправена Враца');
+    const v2 = W.checklistEmailHtml(2026, 34, 2, FULL, METRICS, STORES, 'поправена Враца');
     ok('при версия 2 ИМА лента', v2.indexOf('Поправена версия 2') >= 0);
     ok('лентата носи днешната дата',
        v2.indexOf(W.fmtDate(W.toLocalISO(new Date()))) >= 0,
@@ -203,7 +220,7 @@ function cellText(d, store, key) {
     const none = W.checklistEmailHtml(2026, 34, 1,
       [row('Враца', 'revizia_953', { portal_value:'da' })], METRICS, STORES, null);
     ok('нула коментара → няма заглавие „Коментари"', none.indexOf('Коментари') < 0);
-    ok('и няма втора таблица', parse(h, none).querySelectorAll('table').length === 1,
+    ok('и няма таблица освен мрежата и легендата на цветовете', parse(h, none).querySelectorAll('table').length === 2,
        'реално таблици: ' + parse(h, none).querySelectorAll('table').length);
 
     const rows = [
@@ -249,9 +266,10 @@ function cellText(d, store, key) {
     ok('нула position:sticky (таба го ползва, пощата не го разбира)',
        html.indexOf('position:sticky') < 0);
 
-    /* Няма линкове изобщо — обектите нямат достъп до таба. */
-    ok('нула <a> тагове', html.toLowerCase().indexOf('<a ') < 0,
-       (html.match(/<a [^>]*>/) || ['—'])[0]);
+    /* Един линк — бутонът към таба на седмицата (има „не"). */
+    const as = html.match(/<a [^>]*>/g) || [];
+    ok('точно един <a> — бутонът към ?tab=checklist&y=2026&w=34', as.length === 1 &&
+       as[0].indexOf('href="https://tenchotenev13-afk.github.io/Tmax-store-portal/?tab=checklist&amp;y=2026&amp;w=34"') >= 0, as.join(' '));
     ok('нула „Отвори в портала"', html.indexOf('Отвори в портала') < 0);
 
     /* А стиловете ги ИМА — инак горните проверки минават и за празен низ. */

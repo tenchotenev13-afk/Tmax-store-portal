@@ -7,7 +7,8 @@
       становище за предходната седмица — ескейпнато, само ако и тя е „не";
       редът със срока „до петък ДД.ММ, 18:00".
    2. нула „не" → секцията отпада; extra липсва → писмото се строи;
-      нула class= / href= / <style> в писмото.
+      нула class= / <style> в писмото; от 28.10.2026 — точно един href= (бутонът
+      „Напиши становище в портала →", tests/checklist-email-design.test.js).
    3. submitChecklistSend: двете нови заявки (историята с or= за 7-те
       седмици, становищата за предходната); провал на тях → писмото пак
       тръгва (sendEmail е извикан).
@@ -105,12 +106,12 @@ function sectionOf(html) {
     ok('ескейпнато — няма <b> в HTML-а', html.indexOf('<b>при РУ</b>') < 0 && html.indexOf('&lt;b&gt;при РУ&lt;/b&gt;') >= 0);
     ok('при „нова" (42 е „да") становището за 42 НЕ се цитира', html.indexOf('НЕ БИВА ДА СЕ ВИЖДА') < 0);
     const tds = secTable ? secTable.querySelectorAll('td') : [];
-    ok('поредица 3+ е оцветена (#FEF2F2 / #991B1B)', tds[1] && /background:#FEF2F2/.test(tds[1].getAttribute('style')) &&
-       /color:#991B1B/.test(tds[1].getAttribute('style')));
-    ok('поредица 2 — не е оцветена', tds[0] && !/#FEF2F2/.test(tds[0].getAttribute('style')));
+    ok('поредица 3+ е оцветена (#dc2626 / #fff, като клетката в мрежата — 28.10)', tds[1] && /background:#dc2626/.test(tds[1].getAttribute('style')) &&
+       /color:#fff/.test(tds[1].getAttribute('style')));
+    ok('поредица 2 — не е оцветена', tds[0] && !/background:/.test(tds[0].getAttribute('style')));
     ok('редът със срока: „до петък 30.10, 18:00"', /пишат становище в портала, таб „Чек лист", до петък 30\.10, 18:00\./.test(html));
     ok('нула class=', !/\sclass=/.test(html));
-    ok('нула href=', !/href=/.test(html));
+    ok('точно един href= — към ?tab=checklist&y=2026&w=43', (html.match(/href=/g) || []).length === 1 && html.indexOf('?tab=checklist&amp;y=2026&amp;w=43') >= 0);
     ok('нула <style>', !/<style/i.test(html));
     h.close();
   }

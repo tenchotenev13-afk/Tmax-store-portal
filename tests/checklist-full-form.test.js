@@ -320,11 +320,15 @@ function noWrites(h) { return writes(h).length === 0; }
     const html = h.w.checklistEmailHtml(2026, 39, 1, rows, METRICS, stores, null);
     const d = new h.w.DOMParser().parseFromString(html, 'text/html');
     const th = d.querySelectorAll('thead th');
-    ok('писмото: 1 + 12 колони', th.length === 13, String(th.length));
+    /* От 28.10.2026 писмото показва само колоните със стойност (checklist-email-design):
+       тук 3 — сторна, преоценка и срок на годност. Седмичният отчет — всичките 12. */
+    ok('писмото: 1 + 3 колони (само тези със стойност)', th.length === 4, String(th.length));
+    const heads = Array.prototype.map.call(th, function (x) { return x.querySelector('div') ? x.querySelector('div').textContent.trim() : x.textContent.trim(); });
     const tr = Array.prototype.slice.call(d.querySelectorAll('tbody tr'));
     const cell = function (s, k) {
+      const lbl = METRICS.filter(function (m) { return m.key === k; })[0].label;
       const r = tr.filter(function (x) { return x.querySelector('td').textContent.trim() === s; })[0];
-      return r.querySelectorAll('td')[KEYS.indexOf(k) + 1].textContent.trim();
+      return r.querySelectorAll('td')[heads.indexOf(lbl)].textContent.trim();
     };
     ok('писмото: сторна „0/0"', cell('Враца', 'storna_priem') === '0/0', cell('Враца', 'storna_priem'));
     ok('писмото: преоценка „нямат"', cell('Габрово', 'preocenka') === 'нямат', cell('Габрово', 'preocenka'));

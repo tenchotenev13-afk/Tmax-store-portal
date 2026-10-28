@@ -193,6 +193,53 @@ function checklistShiftWeek(delta) {
   loadChecklist();
 }
 
+/* ═══ ЛИНК ОТ ПИСМОТО (28.10.2026) ═══════════════════════════════════════
+   ?tab=checklist&y=2026&w=43 (checklistDeepLinkUrl, бутонът „Напиши становище
+   в портала →") → след входа табът „Чек лист" на тази седмица. Невалиден
+   параметър или потребител без таба → нищо, обичайният старт. Регионалният
+   accounting вижда таба чак след rolesLoadRegional — затова параметърът чака
+   там (checklistDeepLinkAfterRegional), по образеца на ?store= и „Днес".
+   Управителят пак вижда само изпратена седмица (неизпратена — с надписа). */
+var checklistPendingDeepLink = null;
+
+/* search ('?tab=…') → { year, week } или null. Седмицата трябва да съществува
+   в ISO годината (53 само където я има). */
+function checklistDeepLinkParams(search) {
+  var p;
+  try { p = new URLSearchParams(search || ''); } catch (e) { return null; }
+  if (p.get('tab') !== 'checklist') return null;
+  var ys = String(p.get('y') || ''), ws = String(p.get('w') || '');
+  if (!/^\d{4}$/.test(ys) || !/^\d{1,2}$/.test(ws)) return null;
+  var y = parseInt(ys, 10), w = parseInt(ws, 10);
+  if (y < 2020 || y > 2100 || w < 1 || w > 53) return null;
+  var chk = checklistIsoWeekOf(checklistIsoWeekMonday(y, w));
+  if (chk.year !== y || chk.week !== w) return null;
+  return { year: y, week: w };
+}
+
+function checklistDeepLinkOpen(d) {
+  checklistYear = d.year;
+  checklistWeek = d.week;
+  showModule('checklist');
+}
+
+/* Вика се от startApp() след обичайния таб. true → отворено. */
+function checklistDeepLinkBoot() {
+  checklistPendingDeepLink = null;
+  var d = checklistDeepLinkParams(window.location.search);
+  if (!d || !currentUser) return false;
+  if (canSeeChecklist()) { checklistDeepLinkOpen(d); return true; }
+  if (currentUser.role === 'accounting') checklistPendingDeepLink = d;
+  return false;
+}
+
+/* Вика се от rolesLoadRegional(), след като табът е показан или скрит. */
+function checklistDeepLinkAfterRegional() {
+  var d = checklistPendingDeepLink;
+  checklistPendingDeepLink = null;
+  if (d && canSeeChecklist()) checklistDeepLinkOpen(d);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    ЗАРЕЖДАНЕ
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -1824,10 +1871,55 @@ function checklistRestore(key, snapshot) {
    Нито един class= в изхода: клас без таблица със стилове е просто невидим
    атрибут, а <style> блок Gmail изрязва. Същият подход като reportGridHtml.
 
-   БЕЗ ЛИНКОВЕ КЪМ ПОРТАЛА. Затова тук НЕ се ползва reportEmailShell():
-   тя завършва с бутон „Отвори в портала →", а писмото отива до обектите,
-   които нямат достъп до таб „Чек лист". Линк, който води до отказан достъп,
-   е по-лош от липсващ. Оформлението е нейно, съдържанието не. */
+   ЕДИН ЛИНК КЪМ ПОРТАЛА (от 28.10.2026). До 23.10 писмото беше без линкове:
+   обектите нямаха таб „Чек лист" и линкът водеше до отказан достъп. От 23.10
+   управителят на отчетен обект вижда таба (своя ред, изпратените седмици,
+   блок „Становище"), а писмото е поканата да напише становище — затова под
+   „Изисква становище" стои бутон „Напиши становище в портала →" към
+   ?tab=checklist&y=<година>&w=<седмица> (checklistDeepLinkBoot). Само там и
+   само ако има „не". reportEmailShell() пак не се ползва: нейният бутон е
+   общ „Отвори в портала" в края, а този води на конкретната седмица.
+
+   САМО КОЛОНИТЕ СЪС СТОЙНОСТ (28.10.2026, Тенчо): колона, празна за всички
+   обекти в писмото (правилото на checklistEmailCellValue), отпада; нито една →
+   сив ред „Няма отметки за седмицата". Табът показва всички колони.
+
+   ОЦВЕТЯВАНЕ (Теодор 26.10, Тенчо 28.10): inline background — „да" зелено,
+   „не" червено (цветовете на CHECKLIST_TONES.bg от таба), „не" 3+ поредна
+   седмица (checklistNoStreak) — тъмночервено с бял текст; брой и „нямат" —
+   без фон. Легенда под таблицата; същото тъмночервено в „Изисква становище". */
+var CHECKLIST_PORTAL_URL = 'https://tenchotenev13-afk.github.io/Tmax-store-portal/';
+var CHECKLIST_EMAIL_HOT = { bg: '#dc2626', fg: '#fff' };   /* „не" 3+ седмици подред */
+
+/* Стилът на клетката в писмото по текста ѝ и поредицата „не". */
+function checklistEmailCellStyle(txt, streak) {
+  if (txt === 'да') return 'background:' + CHECKLIST_TONES.da.bg + ';color:#0f172a;';
+  if (txt === 'не') {
+    return streak >= 3
+      ? 'background:' + CHECKLIST_EMAIL_HOT.bg + ';color:' + CHECKLIST_EMAIL_HOT.fg + ';font-weight:700;'
+      : 'background:' + CHECKLIST_TONES.ne.bg + ';color:#0f172a;';
+  }
+  return 'color:#0f172a;';
+}
+
+/* Легендата на цветовете — три квадратчета. */
+function checklistEmailColorLegendHtml() {
+  var sq = function (bg, label) {
+    return '<td style="padding:0 14px 0 0;font-size:11px;color:#475569;white-space:nowrap;">' +
+      '<span style="display:inline-block;width:11px;height:11px;background:' + bg + ';border:1px solid #cbd5e1;vertical-align:middle;margin-right:5px;"></span>' +
+      label + '</td>';
+  };
+  return '<table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin-top:8px;border-collapse:collapse;"><tr>' +
+    sq(CHECKLIST_TONES.da.bg, 'да') +
+    sq(CHECKLIST_TONES.ne.bg, 'не') +
+    sq(CHECKLIST_EMAIL_HOT.bg, '„не“ 3 или повече седмици подред') +
+    '</tr></table>';
+}
+
+/* Линкът към таба на седмицата — разчита го checklistDeepLinkBoot(). */
+function checklistDeepLinkUrl(year, weekNumber) {
+  return CHECKLIST_PORTAL_URL + '?tab=checklist&y=' + encodeURIComponent(year) + '&w=' + encodeURIComponent(weekNumber);
+}
 
 /* „17.08 – 23.08.2026" — по образеца на reportWeekRangeLabel. */
 function checklistEmailWeekRange(year, weekNumber) {
@@ -2016,15 +2108,19 @@ function checklistEmailResponsesHtml(year, weekNumber, rows, metrics, stores, ex
     items.map(function (it) {
       var hot = it.n >= 3;
       return '<tr><td style="padding:7px 10px;border-bottom:1px solid #E5E9F0;font-size:12px;' +
-        (hot ? 'background:#FEF2F2;color:#991B1B;' : 'color:#334155;') + '">' +
+        (hot ? 'background:' + CHECKLIST_EMAIL_HOT.bg + ';color:' + CHECKLIST_EMAIL_HOT.fg + ';' : 'color:#334155;') + '">' +
         '<b>' + escVal(it.store) + '</b> · ' + escVal(it.metric.label) + ' · ' + escVal(checklistStreakLabel(it.n)) +
-        (it.resp ? '<div style="margin-top:3px;font-size:11px;color:#475569;">становище за седм. ' + prev.week + ': ' +
+        (it.resp ? '<div style="margin-top:3px;font-size:11px;color:' + (hot ? '#fee2e2' : '#475569') + ';">становище за седм. ' + prev.week + ': ' +
           escVal(it.resp.text) + '</div>' : '') +
         '</td></tr>';
     }).join('') +
     '</table>' +
     '<div style="margin-top:6px;font-size:12px;color:#334155;">Обектите с „не" пишат становище в портала, таб „Чек лист", до петък ' +
       dlText + ', 18:00.</div>' +
+    /* Бутонът — само тук, само при поне едно „не" (секцията без „не" я няма). */
+    '<div style="margin-top:12px;"><a href="' + escAttr(checklistDeepLinkUrl(year, weekNumber)) + '" ' +
+      'style="display:inline-block;background:#1E2761;color:#fff;text-decoration:none;font-size:13px;font-weight:700;padding:10px 18px;border-radius:7px;">' +
+      'Напиши становище в портала →</a></div>' +
     '</div>';
 }
 
@@ -2044,6 +2140,17 @@ function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, no
   var cellCss = 'padding:6px 8px;border:1px solid #E5E9F0;font-size:12px;';
   var body = checklistEmailVersionBanner(version, note);
 
+  /* Поредиците „не" за оцветяването — същият източник като „Изисква становище". */
+  var all = rows.concat((extra && Array.isArray(extra.history)) ? extra.history : []);
+  var allMetrics = metrics;
+  /* Само колоните с поне една непразна клетка за обектите в писмото. */
+  metrics = metrics.filter(function (m) {
+    return stores.some(function (s) { return checklistEmailCellValue(m, idx[s + ' ' + m.key]) !== ''; });
+  });
+
+  if (!metrics.length) {
+    body += '<div style="padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;color:#64748b;text-align:center;">Няма отметки за седмицата</div>';
+  } else {
   body += '<table role="presentation" cellpadding="0" cellspacing="0" border="0" ' +
     'style="width:100%;border-collapse:collapse;">';
 
@@ -2067,14 +2174,17 @@ function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, no
       escVal(store) + '</td>';
     metrics.forEach(function (m) {
       var txt = checklistEmailCellValue(m, idx[store + ' ' + m.key]);
-      body += '<td align="center" style="' + cellCss + 'color:#0f172a;">' + escVal(txt) + '</td>';
+      var n = txt === 'не' ? checklistNoStreak(all, m, store, year, weekNumber) : 0;
+      body += '<td align="center" style="' + cellCss + checklistEmailCellStyle(txt, n) + '">' + escVal(txt) + '</td>';
     });
     body += '</tr>';
   });
   body += '</tbody></table>';
+  body += checklistEmailColorLegendHtml();
+  }
 
-  body += checklistEmailResponsesHtml(year, weekNumber, rows, metrics, stores, extra);
-  body += checklistEmailCommentsHtml(rows, metrics, stores);
+  body += checklistEmailResponsesHtml(year, weekNumber, rows, allMetrics, stores, extra);
+  body += checklistEmailCommentsHtml(rows, allMetrics, stores);
   body += checklistLegendHtml();
 
   return '<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">' +

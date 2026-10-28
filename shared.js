@@ -1724,6 +1724,8 @@ function rolesLoadRegional(){
     var clt=document.getElementById('tab-checklist');
     if(clt) clt.style.display=(typeof canSeeChecklist==='function'&&canSeeChecklist())?'flex':'none';
     if(rolesPendingTodayDeepLink && roleCanSeeToday()){ rolesPendingTodayDeepLink=false; showModule('today'); }
+    /* ?tab=checklist от писмото — за регионалния accounting табът е видим едва тук. */
+    if(typeof checklistDeepLinkAfterRegional==='function') checklistDeepLinkAfterRegional();
     return true;
   });
 }
@@ -1754,7 +1756,9 @@ function startApp(){
   /* Deep link от етикет — след входа. Палет (#tl=…&p=…) чете loading.js;
      само ако не е негов, товар от трансфер (#tf=…&c=…&u=…) — transfers.js;
      после единица от пикинга (#pk=<id>) — picking.js. */
-  var dl = (typeof llDeepLinkBoot==='function') && llDeepLinkBoot();
+  /* Първо ?tab=checklist&y=…&w=… от писмото на чек листа (checklist.js). */
+  var dl = (typeof checklistDeepLinkBoot==='function') && checklistDeepLinkBoot();
+  if(!dl && typeof llDeepLinkBoot==='function') dl = llDeepLinkBoot();
   if(!dl && typeof tfDeepLinkBoot==='function') dl = tfDeepLinkBoot();
   if(!dl && typeof pkDeepLinkBoot==='function') dl = pkDeepLinkBoot();
   /* Известието за Минуси (bulletin-notify, minus_unfilled) отваря #mn. */
