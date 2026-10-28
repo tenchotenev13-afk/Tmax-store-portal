@@ -92,8 +92,10 @@
 
    Етап 4б — „вероятно незаприходена стока" (27.10.2026, решение на Тенчо).
    Минус по код, който за СЪЩИЯ обект е (а) в „Стока на път" като неполучен —
-   goods_transit.status pending / sent (rejected „✕ Неприето" НЕ: обектът сам
-   е казал, че не е дошло) — или (б) с отворена липса в Разлики с логистичен
+   goods_transit.status pending / sent („🚚 На път") или rejected („✕ Неприето"
+   → „🚚 Неприето": обектът казва, че не е дошло, а минусът показва, че е
+   продадено — решение на Тенчо 27.10; само received не свети) — или (б) с
+   отворена липса в Разлики с логистичен
    склад — differences_reports.direction = 'interstore', ред със status ≠
    'received'; липса = quantity − quantity_received > 0, а при празно
    „получено" и категория undelivered — quantity (решения на Тенчо 27.10:
@@ -131,7 +133,7 @@ var MN_CO_DAYS = 7;
 var mnUrTransit = {};    /* store_name + \u0001 + код → [goods_transit, неполучени] */
 var mnUrDiff = {};       /* store_name + \u0001 + код → [{line, short}] — отворени липси с ЛС */
 var mnUrErr = false;     /* стоката на път / разликите не се заредиха */
-var MN_UR_TRANSIT = ['pending', 'sent'];
+var MN_UR_TRANSIT = ['pending', 'sent', 'rejected'];
 
 var MN_STORE_ROLES = ['manager', 'sklad'];
 var MN_CO_ROLES = ['admin', 'accounting', 'controlling'];
@@ -641,7 +643,8 @@ function mnUrChipsHtml(r){
   var cs = 'display:inline-block;border-radius:4px;padding:0 4px;margin:1px 2px 0 0;';
   var h = '<div class="mn-ur" style="margin-top:3px;font-size:11px;">';
   m.transit.forEach(function(g){
-    h += '<span class="mn-ur-transit" style="' + cs + 'background:#fef3c7;color:#92400e;">🚚 На път: ' + esc(g.purchase_doc || '—') +
+    var rej = g.status === 'rejected';
+    h += '<span class="mn-ur-transit' + (rej ? ' mn-ur-rejected' : '') + '" style="' + cs + 'background:#fef3c7;color:#92400e;">🚚 ' + (rej ? 'Неприето' : 'На път') + ': ' + esc(g.purchase_doc || '—') +
       (g.doc_date ? ' от ' + esc(fmtDate(g.doc_date).slice(0, 5)) : '') + ' · ' + esc(mnFmtQty(Number(g.remaining_qty))) + (g.unit ? ' ' + esc(g.unit) : '') + '</span>';
   });
   m.diff.forEach(function(x){
@@ -649,10 +652,14 @@ function mnUrChipsHtml(r){
   });
   return h + '<div class="mn-ur-warn" style="color:#b91c1c;font-weight:600;margin-top:2px;">' + MN_UR_WARN + '</div></div>';
 }
-/* Excel: '' / „на път: <док>[, <док>]" / „разлика ЛС" (двете — през „; "). */
+/* Excel: '' / „на път: <док>[, <док>]" / „неприето: <док>" / „разлика ЛС"
+   (няколко — през „; "). */
 function mnUrExcel(r){
   var m = mnUrMatches(r), p = [];
-  if(m.transit.length) p.push('на път: ' + m.transit.map(function(g){ return g.purchase_doc || '—'; }).join(', '));
+  var docs = function(rej){ return m.transit.filter(function(g){ return (g.status === 'rejected') === rej; }).map(function(g){ return g.purchase_doc || '—'; }); };
+  var onWay = docs(false), rejd = docs(true);
+  if(onWay.length) p.push('на път: ' + onWay.join(', '));
+  if(rejd.length) p.push('неприето: ' + rejd.join(', '));
   if(m.diff.length) p.push('разлика ЛС');
   return p.join('; ');
 }
