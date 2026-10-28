@@ -14,6 +14,11 @@
 
 ## Чака изпращане
 
+(в базата от миграцията minusi_multi_report, версия 20261028104053, приложена 28.10.2026)
+- 28.10 · report_recipients.minus_multi — boolean, NOT NULL, default false
+- 28.10 · app_settings — нов ключ minus_multi_count (праг „многократен минус"; начална стойност '3')
+- 28.10 · app_settings — нов ключ minus_multi_days (прозорец в дни за „многократен минус"; начална стойност '30')
+
 ## Изпратено 28.10.2026
 
 (миграция bul_allow_postpone, bul-allow-postpone-schema.sql — в базата от миграцията bul_allow_postpone, версия 20261028093135, приложена 28.10.2026)

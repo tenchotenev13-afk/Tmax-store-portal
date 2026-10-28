@@ -106,7 +106,19 @@
    заявка на таблица, само за показаните обекти; грешка → сив ред. Excel —
    колона „Незаприходена?"; печат — надписът под описанието. Търсенето,
    „📦 По артикул", minus_unfilled, „Днес" и bulletin-notify не знаят за това.
-   stock-differences.js и transit.js само се ЧЕТАТ (таблиците), не се пипат. */
+   stock-differences.js и transit.js само се ЧЕТАТ (таблиците), не се пипат.
+
+   Многократен минус (28.10.2026; Теодор 27.10, решения на Тенчо 27.10):
+   обект + материал, 3 или повече реда 955 с дата в последните 30 дни, броено
+   към деня на минуса — редът е N-тият в [дата − 29; дата] по реда на
+   mnCmp955 (по-късните от същия ден не се броят). Прагът и дните —
+   app_settings minus_multi_count / minus_multi_days (липсва / невалидно → 3
+   и 30). Такъв ред иска „Становище" — СЪЩАТА колона action, задължителна при
+   „Запази", и без нея е непопълнен (mnUnfilled → брояч, „само непопълнени",
+   „Днес", minus_unfilled в bulletin-notify — копие на правилото). Чип
+   „🔁 N за 30 дни" вместо лилавия „×N". Седмичното писмо „Минуси —
+   повтарящи се артикули" (send-scheduled-report, type 'minus_multi'; копие за
+   „Тест до мен" в report.js) ползва СЪЩОТО правило. */
 
 var mnMovs = [];
 var mnReasons = [];
@@ -121,6 +133,10 @@ var mnSearch = '';       /* „🔍 Код" — материал или заме
 var MN_ALL = '__all__';  /* mnStore за „Всички обекти" — само контролингът */
 var MN_REPEAT_DEFAULT = 10;
 var mnRepeatDays = MN_REPEAT_DEFAULT; /* app_settings.minus_repeat_days */
+var MN_MULTI_COUNT_DEFAULT = 3;
+var MN_MULTI_DAYS_DEFAULT = 30;
+var mnMultiCount = MN_MULTI_COUNT_DEFAULT; /* app_settings.minus_multi_count */
+var mnMultiDays = MN_MULTI_DAYS_DEFAULT;   /* app_settings.minus_multi_days */
 var mnReport = null;     /* отчет на последното качване в тази сесия */
 var mnLastUpload = null;
 var mnDraft = {};        /* id → {real_code, reason_id, employee_name, note} — незаписаното */
@@ -228,6 +244,13 @@ function mnParseRepeatDays(v){
   var n = parseInt(s, 10);
   return n >= 1 ? n : MN_REPEAT_DEFAULT;
 }
+/* Цяло число ≥ 1, иначе def — за minus_multi_count / minus_multi_days. */
+function mnParsePosInt(v, def){
+  var s = String(v == null ? '' : v).trim();
+  if(!/^\d+$/.test(s)) return def;
+  var n = parseInt(s, 10);
+  return n >= 1 ? n : def;
+}
 /* Дни от a до b ('yyyy-mm-dd'); b по-късна → положително. */
 function mnDays(a, b){
   var pa = String(a).split('-'), pb = String(b).split('-');
@@ -239,7 +262,7 @@ function mnReasonNeedsNote(id){
 }
 /* Записан ред с причина, която иска бележка, а бележката е празна. */
 function mnNoteMissing(r){ return r.reason_id != null && mnReasonNeedsNote(r.reason_id) && !String(r.note || '').trim(); }
-function mnUnfilled(r){ return r.reason_id == null || (!!r._repeat && !String(r.action || '').trim()) || mnNoteMissing(r); }
+function mnUnfilled(r){ return r.reason_id == null || (!!(r._repeat || r._multi) && !String(r.action || '').trim()) || mnNoteMissing(r); }
 var MN_NOTE_MISSING = '<div class="mn-note-missing" style="color:#b91c1c;font-size:11px;font-weight:600;margin-top:2px;">попълни номер/дата</div>';
 function mnFmtTs(ts){
   if(!ts) return '';
@@ -268,8 +291,10 @@ function mnPassThreshold(rest, uom, thr){
    all — всеки ред 955 + _rest, _state, _closedOn; open — само незакритите;
    byMat — един ред на материал с остатък над прага; over — свръхсторно
    (956 над 955). */
-function mnCompute(movs, thr, repeatDays){
+function mnCompute(movs, thr, repeatDays, multi){
   var N = repeatDays != null ? repeatDays : mnRepeatDays;
+  var MC = multi && multi.count != null ? multi.count : mnMultiCount;
+  var MD = multi && multi.days != null ? multi.days : mnMultiDays;
   var groups = {}, order = [];
   (movs || []).forEach(function(m){
     var k = m.store_name + '\u0001' + m.material;
@@ -310,10 +335,13 @@ function mnCompute(movs, thr, repeatDays){
       var prev = i > 0 ? s955[i - 1] : null;
       var prevDays = prev ? mnDays(prev.posting_date, r.posting_date) : null;
       var cnt30 = s955.filter(function(x){ var d = mnDays(x.posting_date, r.posting_date); return d >= 0 && d <= 29; }).length;
+      /* Многократен: N-тият 955 в [дата − (MD − 1); дата] до този ред включително. */
+      var multiN = s955.slice(0, i + 1).filter(function(x){ var d = mnDays(x.posting_date, r.posting_date); return d >= 0 && d <= MD - 1; }).length;
       var row = Object.assign({}, r, {
         _rest: rest, _state: st, _closedOn: st === 'closed' ? lastDate : null,
         _prevDate: prev ? prev.posting_date : null, _prevDays: prevDays, _cnt30: cnt30,
-        _repeat: !!prev && prevDays <= N, _early: early.length > 0
+        _repeat: !!prev && prevDays <= N, _early: early.length > 0,
+        _multiN: multiN, _multi: multiN >= MC
       });
       out.all.push(row);
       if(st === 'open') out.open.push(row);
@@ -462,7 +490,7 @@ function loadMinusi(){
   var seq = ++mnLoadSeq;
   if(!mnMovs.length) el.innerHTML = mnTitle() + '<div style="padding:20px;color:#94a3b8;">⏳ Зареждане...</div>';
   return Promise.all([
-    sbGetOk('app_settings', 'key=in.(minus_stores,minus_repeat_days)&select=key,value'),
+    sbGetOk('app_settings', 'key=in.(minus_stores,minus_repeat_days,minus_multi_count,minus_multi_days)&select=key,value'),
     sbGetOk('minus_plants', 'select=plant,store_name'),
     sbGetOk('minus_reasons', 'select=id,label,active,sort,requires_note&order=sort.asc,id.asc'),
     sbGetOk('minus_uom_thresholds', 'select=uom,min_qty')
@@ -497,6 +525,10 @@ function mnApplyConfig(settingsRows, reasonsRows, thrRows){
   mnStoresOn = mnParseStores(row && row.value);
   var rd = settingsRows.filter(function(r){ return r && r.key === 'minus_repeat_days'; })[0];
   mnRepeatDays = mnParseRepeatDays(rd && rd.value);
+  var mc = settingsRows.filter(function(r){ return r && r.key === 'minus_multi_count'; })[0];
+  var md = settingsRows.filter(function(r){ return r && r.key === 'minus_multi_days'; })[0];
+  mnMultiCount = mnParsePosInt(mc && mc.value, MN_MULTI_COUNT_DEFAULT);
+  mnMultiDays = mnParsePosInt(md && md.value, MN_MULTI_DAYS_DEFAULT);
   mnReasons = reasonsRows;
   mnThresholds = {};
   thrRows.forEach(function(t){ mnThresholds[mnNormUom(t.uom)] = Number(t.min_qty); });
@@ -855,16 +887,18 @@ function mnDailyHtml(rows){
       });
       h += '</select></td>';
       h += '<td style="' + yel + '"><input id="mn-emp-' + escAttr(id) + '" value="' + escAttrVal(val('employee_name')) + '" style="width:110px;"></td>';
-      /* „Действие" — само на повторенията, под „Бележка" (без нова колона). */
+      /* „Действие" — само на повторенията, под „Бележка" (без нова колона);
+         при многократен минус — „Становище" (същата колона action). */
       h += '<td style="' + yel + '"><input id="mn-note-' + escAttr(id) + '" value="' + escAttrVal(val('note')) + '" style="width:110px;">' +
         (mnNoteMissing(r) ? MN_NOTE_MISSING : '') +
         '<div id="mn-co-pick-' + escAttr(id) + '">' + mnCoPickHtml(id, cur) + '</div>' +
-        (r._repeat ? '<input id="mn-action-' + escAttr(id) + '" value="' + escAttrVal(val('action')) + '" placeholder="Действие срещу повторение" style="width:110px;display:block;margin-top:4px;">' : '') + '</td>';
+        (r._multi ? '<div class="mn-action-lbl" style="font-size:11px;font-weight:600;color:#c2410c;margin-top:4px;">Становище</div>' : '') +
+        (r._repeat || r._multi ? '<input id="mn-action-' + escAttr(id) + '" value="' + escAttrVal(val('action')) + '" placeholder="' + (r._multi ? 'Становище' : 'Действие срещу повторение') + '" style="width:110px;display:block;margin-top:' + (r._multi ? '1' : '4') + 'px;">' : '') + '</td>';
       h += '<td style="white-space:nowrap;">' + (done ? '<span class="mn-done" title="' + escAttr('Попълнено: ' + (r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span> ' : '') + '<button class="btn btn-green" onclick="mnSave(\'' + escAttr(id) + '\')">Запази</button></td>';
     } else {
       h += '<td>' + esc(r.real_code || '') + '</td><td>' + esc(mnReasonLabel(r.reason_id)) + '</td><td>' + esc(r.employee_name || '') + '</td><td>' + esc(r.note || '') +
         (mnNoteMissing(r) ? MN_NOTE_MISSING : '') +
-        (r.action ? '<div class="mn-action-txt" style="margin-top:2px;">Действие: ' + esc(r.action) + '</div>' : '') + '</td>';
+        (r.action ? '<div class="mn-action-txt" style="margin-top:2px;">' + mnActionLabel(r) + ': ' + esc(r.action) + '</div>' : '') + '</td>';
       h += '<td>' + (done ? '<span class="mn-done" title="' + escAttr((r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span>' : '') + '</td>';
     }
     h += '</tr>';
@@ -881,9 +915,12 @@ function mnBadgeHtml(r){
      колона броячът минава на втори ред, вместо да разширява „Описание". */
   var h = '<div class="mn-badges" style="margin-top:3px;font-size:11px;">' +
     '<span class="mn-prev mn-age-' + c + '" style="' + MN_AGE_STYLE[c] + 'border-radius:4px;padding:0 4px;white-space:nowrap;">↻ предишен ' + esc(fmtDate(r._prevDate).slice(0, 5)) + '</span>';
-  if(r._cnt30 >= 2) h += ' <span class="mn-cnt30" style="background:#ede9fe;color:#6d28d9;border-radius:4px;padding:0 4px;white-space:nowrap;">×' + r._cnt30 + ' за 30 дни</span>';
+  if(r._multi) h += ' <span class="mn-multi" style="background:#ffedd5;color:#c2410c;font-weight:600;border-radius:4px;padding:0 4px;white-space:nowrap;">🔁 ' + r._multiN + ' за ' + mnMultiDays + ' дни</span>';
+  else if(r._cnt30 >= 2) h += ' <span class="mn-cnt30" style="background:#ede9fe;color:#6d28d9;border-radius:4px;padding:0 4px;white-space:nowrap;">×' + r._cnt30 + ' за 30 дни</span>';
   return h + '</div>';
 }
+/* „Становище" при многократен минус, иначе „Действие" — за прочит, Excel, печат. */
+function mnActionLabel(r){ return r && r._multi ? 'Становище' : 'Действие'; }
 /* „незакрит" / „незакрит N от M" (частично закрит) / „закрит дд.мм" /
    „остатък под прага"; + „⚠ сторно преди минуса" (956 преди 955). */
 function mnStateText(r){
@@ -958,7 +995,7 @@ function mnExportAoa(){
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.desc || '', r.s955, r.s956, r.rest, r.uom || '']));
     });
   } else {
-    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие', 'КЗ', 'Незаприходена?'])];
+    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие / становище', 'КЗ', 'Незаприходена?'])];
     rows.forEach(function(r){
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.material_desc || '', fmtDate(r.posting_date), mnRound(Number(r.qty) || 0), r.uom || '',
         mnStateText(r), r.real_code || '', mnReasonLabel(r.reason_id), r.employee_name || '', r.note || '',
@@ -1015,11 +1052,11 @@ function mnPrint(){
     body = rows.map(function(r){
       return '<tr' + (r._state === 'open' ? '' : ' class="mn-p-gray"') + '>' + (all ? '<td>' + mnP(r.store_name) + '</td>' : '') +
         '<td>' + mnP(r.material) + '</td><td>' + mnP(r.material_desc) +
-        (r._prevDate ? '<br><span class="mn-p-prev">' + mnP('↻ ' + fmtDate(r._prevDate).slice(0, 5) + (r._cnt30 >= 2 ? ' ×' + r._cnt30 : '')) + '</span>' : '') +
+        (r._prevDate ? '<br><span class="mn-p-prev">' + mnP('↻ ' + fmtDate(r._prevDate).slice(0, 5) + (r._multi ? ' 🔁' + r._multiN : r._cnt30 >= 2 ? ' ×' + r._cnt30 : '')) + '</span>' : '') +
         mnCoPrint(r) + mnUrPrint(r) + '</td><td>' + mnP(fmtDate(r.posting_date)) + '</td>' +
         '<td>' + mnP(mnFmtQty(Number(r.qty)) + (r.uom ? ' ' + r.uom : '')) + '</td><td>' + mnP(mnStateText(r)) + '</td>' +
         '<td>' + mnP(r.real_code) + '</td><td>' + mnP(mnReasonLabel(r.reason_id)) + '</td><td>' + mnP(r.employee_name) + '</td><td>' + mnP(r.note) +
-        (r.action ? (r.note ? '<br>' : '') + '<span class="mn-p-action">' + mnP('Действие: ' + r.action) + '</span>' : '') + '</td></tr>';
+        (r.action ? (r.note ? '<br>' : '') + '<span class="mn-p-action">' + mnP(mnActionLabel(r) + ': ' + r.action) + '</span>' : '') + '</td></tr>';
     }).join('');
   }
   var title = 'Минуси — ' + mnStoreLabel() + ' — ' + mnViewLabel() + ' — ' + fmtDate(today());
@@ -1062,7 +1099,9 @@ function mnSave(id){
   /* Повторение до N дни → „Действие" е задължително (Теодор, 06.10.2026). */
   var crow = null;
   mnCompute(mnMovs, mnThresholds).all.forEach(function(x){ if(String(x.id) === String(id)) crow = x; });
-  var isRep = !!(crow && crow._repeat), action = g('mn-action-');
+  var isRep = !!(crow && crow._repeat), isMulti = !!(crow && crow._multi), action = g('mn-action-');
+  /* Многократен (3+ за 30 дни) → „Становище" е задължително (Теодор, 27.10.2026). */
+  if(isMulti && !action){ toast('🔁 ' + crow._multiN + ' минуса за ' + mnMultiDays + ' дни — попълни становище', '#dc2626'); return Promise.resolve(false); }
   if(isRep && !action){ toast('Повторен минус до ' + mnRepeatDays + ' дни — попълни действие', '#dc2626'); return Promise.resolve(false); }
   if(mnReasonNeedsNote(reason) && !g('mn-note-')){ toast('За тази причина попълни номер и дата на поръчката в „Бележка"', '#dc2626'); return Promise.resolve(false); }
   var body = {
@@ -1073,7 +1112,7 @@ function mnSave(id){
     filled_by: currentUser.display_name || currentUser.email || '',
     filled_at: new Date().toISOString()
   };
-  if(isRep) body.action = action;
+  if(isRep || isMulti) body.action = action;
   return sbPatch('minus_movements', 'id=eq.' + encodeURIComponent(id), body).then(function(res){
     if(!res.ok){ toast('Не е записано: ' + sbErrMsg(res), '#dc2626'); return false; }
     Object.keys(body).forEach(function(k){ row[k] = body[k]; });
@@ -1093,7 +1132,7 @@ function mnSave(id){
    непълни движения — по-добре „Непълни данни", отколкото грешно число. */
 function mnLoadSummary(onlyStores){
   return Promise.all([
-    sbGetOk('app_settings', 'key=in.(minus_stores,minus_repeat_days)&select=key,value'),
+    sbGetOk('app_settings', 'key=in.(minus_stores,minus_repeat_days,minus_multi_count,minus_multi_days)&select=key,value'),
     sbGetOk('minus_reasons', 'select=id,label,active,sort,requires_note&order=sort.asc,id.asc'),
     sbGetOk('minus_uom_thresholds', 'select=uom,min_qty')
   ]).then(function(rs){

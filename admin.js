@@ -1149,7 +1149,9 @@ var ADMIN_RCPT_FLAGS = [
   { flag: 'daily',     icon: '📋', label: 'дневен',   def: true },
   { flag: 'weekly',    icon: '📊', label: 'седмичен', def: true },
   { flag: 'pallets',   icon: '🟫', label: 'палети',   def: false },
-  { flag: 'warehouse', icon: '📦', label: 'склад',    def: false }
+  { flag: 'warehouse', icon: '📦', label: 'склад',    def: false },
+  /* „Минуси — повтарящи се артикули" (28.10.2026) */
+  { flag: 'minus_multi', icon: '🔁', label: 'минуси', def: false }
 ];
 
 /* schedule е РЕЗЕРВА: колоната „Разписание" се чете от cron.job през
@@ -1159,7 +1161,9 @@ var ADMIN_REPORTS = [
   { kind: 'daily',     label: '📋 Дневен',   schedule: 'всеки ден 21:00', test: 'sendDailyReportTest',     send: 'sendDailyReportToRecipients' },
   { kind: 'weekly',    label: '📊 Седмичен', schedule: 'неделя 21:00',    test: 'sendWeeklyReportTest',    send: 'sendWeeklyReportToRecipients' },
   { kind: 'pallets',   label: '🟫 Палети',   schedule: 'петък 18:00',     test: 'sendPalletsReportTest',   send: null },
-  { kind: 'warehouse', label: '📦 Склад',    schedule: 'неделя 21:00',    test: 'sendWarehouseReportTest', send: null }
+  { kind: 'warehouse', label: '📦 Склад',    schedule: 'неделя 21:00',    test: 'sendWarehouseReportTest', send: null },
+  /* „Изпрати сега" вика самата едж функция (sendMinusMultiReportNow в report.js). */
+  { kind: 'minus_multi', label: '🔁 Минуси — повтарящи се', schedule: 'понеделник 08:00', test: 'sendMinusMultiReportTest', send: 'sendMinusMultiReportNow' }
 ];
 
 function adminReportsCanSee(){ return notifCanSee(); }
@@ -1215,6 +1219,7 @@ function adminReportCount(kind){
     reportWarehouseRecipients(adminReportLogistics, rc).forEach(function(x){ seenW[String(x.email).trim().toLowerCase()] = 1; });
     return Object.keys(seenW).length;
   }
+  if (kind === 'minus_multi') return typeof reportMinusMultiRecipients === 'function' ? reportMinusMultiRecipients(rc).length : 0;
   return 0;
 }
 
@@ -1260,8 +1265,9 @@ function renderReportsAdmin(){
   h += '<div style="font-size:11px;color:#64748b;margin:6px 0 12px;line-height:1.7;">' +
     '„Тест до мен" праща на твоя имейл с „(тест)" в темата — данните към момента, не редовния отчет.<br>' +
     'Палети: отметнатите 🟫 + регионалните (за своите обекти). Склад: отметнатите 📦 (по писмо за всеки склад) + всеки потребител с роля „logistics" (за своя склад). Тях ги праща само кронът.<br>' +
+    'Минуси — повтарящи се: отметнатите 🔁; „Изпрати сега" пуска самата едж функция (като крона).<br>' +
     'Разписанието е от сървъра (час по София). Смяна — само през Claude Code: от браузъра сървърът не може да провери, че викащият е admin.<br>' +
-    'В списъка долу: 📋 дневен · 📊 седмичен · 🟫 палети · 📦 склад — натисни иконата, за да включиш или спреш отчета за този човек.' +
+    'В списъка долу: 📋 дневен · 📊 седмичен · 🟫 палети · 📦 склад · 🔁 минуси — натисни иконата, за да включиш или спреш отчета за този човек.' +
     '</div>';
 
   /* Списъкът получатели — кодът е преместен от today.js без промяна в

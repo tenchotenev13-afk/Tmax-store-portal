@@ -11,6 +11,15 @@
 //   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //
+// v15 (28.10.2026) — ЕДНО нещо: minus_unfilled брои и МНОГОКРАТНИЯ минус
+//   без становище (Теодор 27.10, решения на Тенчо 27.10): за обект + материал
+//   редът 955 е 3-ти или следващ с дата в последните 30 дни (до него
+//   включително, по реда на mnuCmp) и action е празно. Прагът и дните —
+//   app_settings minus_multi_count / minus_multi_days (липсва / невалидно →
+//   3 и 30), mnuParsePosInt. Копие на _multi / mnUnfilled от minusi.js;
+//   dry_run носи multi. Заковано в tests/minusi-notify-sync.test.js и
+//   tests/minusi-multi.test.js.
+//
 // v14 (26.10.2026) — deadline_passed: ред „⏱ Отложили (N)" в писмото
 //   (повод: Миглена, РЕВИЗИЯ ГРУПИ 21.10.2026 — Севлиево отложи с коментар, а
 //   в писмото го нямаше никъде). САМО показване: отложилият и досега е извън
@@ -2189,6 +2198,8 @@ async function runLoadingListsPending(supabase: any, topic: any, bg: any, dryRun
 
 const MNU_EPS = 1e-9;
 const MNU_REPEAT_DEFAULT = 10;
+const MNU_MULTI_COUNT_DEFAULT = 3;
+const MNU_MULTI_DAYS_DEFAULT = 30;
 const MNU_LOOKALIKE: Record<string, string> = { 'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O', 'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X' };
 
 function mnuRound(x: number): number { return Math.round(Number(x) * 1e6) / 1e6; }
@@ -2200,6 +2211,13 @@ function mnuParseRepeatDays(v: unknown): number {
   if (!/^\d+$/.test(s)) return MNU_REPEAT_DEFAULT;
   const n = parseInt(s, 10);
   return n >= 1 ? n : MNU_REPEAT_DEFAULT;
+}
+/* Копие на mnParsePosInt — minus_multi_count / minus_multi_days. */
+function mnuParsePosInt(v: unknown, def: number): number {
+  const s = String(v == null ? '' : v).trim();
+  if (!/^\d+$/.test(s)) return def;
+  const n = parseInt(s, 10);
+  return n >= 1 ? n : def;
 }
 function mnuParseStores(v: unknown): string[] {
   return String(v == null ? '' : v).split(',').map((x) => x.trim()).filter(Boolean);
@@ -2223,8 +2241,11 @@ function mnuPassThreshold(rest: number, uom: unknown, thr: Record<string, number
   return true;
 }
 /* По обект → { open, unfilled, over }. needsNote — id-та на причините с
-   requires_note. Същото като calc.open.filter(mnUnfilled) в minusi.js. */
-function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: number, needsNote: string[]) {
+   requires_note. Същото като calc.open.filter(mnUnfilled) в minusi.js.
+   multi — { count, days } на многократния минус (липсва → 3 и 30). */
+function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: number, needsNote: string[], multi?: { count: number; days: number }) {
+  const MC = multi && multi.count != null ? multi.count : MNU_MULTI_COUNT_DEFAULT;
+  const MD = multi && multi.days != null ? multi.days : MNU_MULTI_DAYS_DEFAULT;
   const groups: Record<string, any> = {}, order: string[] = [];
   for (const m of movs || []) {
     const k = m.store_name + '\u0001' + m.material;
@@ -2257,7 +2278,9 @@ function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: n
       const prev = i > 0 ? s955[i - 1] : null;
       const repeat = !!prev && mnuDays(prev.posting_date, r.posting_date) <= repeatDays;
       const noReason = r.reason_id == null;
-      const noAction = repeat && !String(r.action || '').trim();
+      /* Многократен: N-тият 955 в [дата − (MD − 1); дата] до този ред включително. */
+      const multiN = s955.slice(0, i + 1).filter((x: any) => { const d = mnuDays(x.posting_date, r.posting_date); return d >= 0 && d <= MD - 1; }).length;
+      const noAction = (repeat || multiN >= MC) && !String(r.action || '').trim();
       const noNote = !noReason && needsNote.indexOf(String(r.reason_id)) >= 0 && !String(r.note || '').trim();
       if (noReason || noAction || noNote) st.unfilled++;
     });
@@ -2282,12 +2305,13 @@ async function mnuFetchAll(supabase: any, stores: string[]) {
 }
 
 async function buildMinusUnfilled(supabase: any, bg: ReturnType<typeof bgNow>) {
-  const set = await supabase.from('app_settings').select('key,value').in('key', ['minus_stores', 'minus_repeat_days']);
+  const set = await supabase.from('app_settings').select('key,value').in('key', ['minus_stores', 'minus_repeat_days', 'minus_multi_count', 'minus_multi_days']);
   if (set.error) return { error: 'app_settings: ' + set.error.message };
   const val = (k: string) => ((set.data || []).find((r: any) => r.key === k) || {}).value;
   const stores = mnuParseStores(val('minus_stores'));
   if (!stores.length) return { skip: 'Няма включени обекти (app_settings.minus_stores)' };
   const repeatDays = mnuParseRepeatDays(val('minus_repeat_days'));
+  const multi = { count: mnuParsePosInt(val('minus_multi_count'), MNU_MULTI_COUNT_DEFAULT), days: mnuParsePosInt(val('minus_multi_days'), MNU_MULTI_DAYS_DEFAULT) };
 
   const rs = await supabase.from('minus_reasons').select('id,requires_note');
   if (rs.error) return { error: 'minus_reasons: ' + rs.error.message };
@@ -2300,13 +2324,13 @@ async function buildMinusUnfilled(supabase: any, bg: ReturnType<typeof bgNow>) {
 
   const mv = await mnuFetchAll(supabase, stores);
   if ((mv as any).error) return { error: (mv as any).error };
-  const counts = mnuCountByStore((mv as any).rows, thr, repeatDays, needsNote);
+  const counts = mnuCountByStore((mv as any).rows, thr, repeatDays, needsNote, multi);
 
   const entries = stores.map((store) => {
     const c = counts[store] || { open: 0, unfilled: 0, over: 0 };
     return { store: store, n: c.unfilled, open: c.open, over: c.over, ref_key: 'minus:' + store + ':' + bg.dateStr };
   });
-  return { entries: entries, stores: stores, repeat_days: repeatDays, rows_read: (mv as any).rows.length };
+  return { entries: entries, stores: stores, repeat_days: repeatDays, multi: multi, rows_read: (mv as any).rows.length };
 }
 
 function minusPushText(n: number, store: string): string {
@@ -2336,7 +2360,7 @@ async function runMinusUnfilled(supabase: any, topic: any, bg: any, dryRun: bool
   if (dryRun) {
     return {
       topic: topic.key, dry_run: true, stores: (built as any).stores,
-      repeat_days: (built as any).repeat_days, rows_read: (built as any).rows_read,
+      repeat_days: (built as any).repeat_days, multi: (built as any).multi, rows_read: (built as any).rows_read,
       recipients: todo.length, planned: planned,
     };
   }

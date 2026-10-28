@@ -4146,6 +4146,170 @@ function sendWeeklyReportRouted(testEmail){
   });
 }
 
+/* ═══════ МИНУСИ — ПОВТАРЯЩИ СЕ АРТИКУЛИ (minus_multi) ═══════════════
+   Понеделник 08:00 по София, body {"type":"minus_multi"}: ЕДНО общо писмо
+   до report_recipients с active=true и minus_multi=true (Теодор 27.10.2026,
+   решения на Тенчо 27.10). Обхват — последните D дни към неделята ПРЕДИ
+   деня на пращането (опорният ден идва отвън: refISO), само обектите от
+   app_settings.minus_stores. Артикул влиза, ако за обект + материал има C
+   или повече реда 955 с posting_date в [ref − (D − 1); ref] — правилото
+   „многократен минус" от minusi.js (minus_multi_count / minus_multi_days,
+   липсва / невалидно → 3 и 30). По обект → артикул: код, описание, брой,
+   датите, становището (последното непразно action в прозореца) или червено
+   „няма становище". Нула артикули → един ред „Няма артикул с C+ минуса за
+   D дни" — писмото тръгва, за да се вижда, че е минало. Непълни движения →
+   cb(null): по-добре без писмо, отколкото с грешен списък. Без суми.
+   Функциите от REPORT_MINUS_MULTI_COUNT до reportMinusMultiRecipients са
+   еднакви в report.js и send-scheduled-report (tests/report-edge-sync.test.js). */
+var REPORT_MINUS_MULTI_COUNT = 3;
+var REPORT_MINUS_MULTI_DAYS = 30;
+function reportMinusMultiPosInt(v, def){
+  var s = String(v == null ? '' : v).trim();
+  if (!/^\d+$/.test(s)) return def;
+  var n = parseInt(s, 10);
+  return n >= 1 ? n : def;
+}
+/* 'yyyy-mm-dd' ± n дни, без часова зона (UTC аритметика). */
+function reportMinusMultiAddDays(iso, n){
+  var p = String(iso).split('-');
+  var d = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2] + n));
+  return d.getUTCFullYear() + '-' + String(d.getUTCMonth() + 1).padStart(2, '0') + '-' + String(d.getUTCDate()).padStart(2, '0');
+}
+/* Неделята ПРЕДИ todayISO (в понеделник — вчера; в неделя — предишната). */
+function reportMinusMultiRefSunday(todayISO){
+  var p = String(todayISO).split('-');
+  var dow = new Date(Date.UTC(+p[0], +p[1] - 1, +p[2])).getUTCDay();
+  return reportMinusMultiAddDays(todayISO, -(dow === 0 ? 7 : dow));
+}
+function reportMinusMultiDM(iso){ var s = String(iso || ''); return s.slice(8, 10) + '.' + s.slice(5, 7); }
+/* Чисто групиране, без заявки. rows — 955 в прозореца (всякакъв ред). */
+function reportMinusMultiGroup(rows, stores, count, days, refISO){
+  var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
+  var cmp = function(a, b){
+    return String(a.posting_date).localeCompare(String(b.posting_date)) ||
+      String(a.mat_doc).localeCompare(String(b.mat_doc), undefined, { numeric: true }) ||
+      String(a.doc_item).localeCompare(String(b.doc_item), undefined, { numeric: true });
+  };
+  var groups = {}, order = [];
+  (Array.isArray(rows) ? rows : []).slice().sort(cmp).forEach(function(m){
+    if (!m || String(m.mvt_type) !== '955') return;
+    var dt = String(m.posting_date || '').slice(0, 10);
+    if (dt < fromISO || dt > refISO || stores.indexOf(m.store_name) < 0) return;
+    var k = m.store_name + '\u0001' + m.material;
+    if (!groups[k]) { groups[k] = { store: m.store_name, material: String(m.material), desc: '', dates: [], action: '' }; order.push(k); }
+    var g = groups[k];
+    if (m.material_desc) g.desc = m.material_desc;
+    g.dates.push(dt);
+    if (String(m.action || '').trim()) g.action = String(m.action).trim();
+  });
+  var out = { from: fromISO, ref: refISO, count: count, days: days, stores: [], total: 0, noStatement: 0 };
+  stores.forEach(function(s){
+    var items = order.map(function(k){ return groups[k]; }).filter(function(g){
+      return g.store === s && g.dates.length >= count;
+    });
+    if (!items.length) return;
+    items.sort(function(a, b){ return b.dates.length - a.dates.length || a.material.localeCompare(b.material, undefined, { numeric: true }); });
+    out.stores.push({ store: s, items: items });
+    out.total += items.length;
+    items.forEach(function(g){ if (!g.action) out.noStatement++; });
+  });
+  return out;
+}
+function collectMinusMultiReportData(refISO, cb){
+  sbGet('app_settings', 'key=in.(minus_stores,minus_multi_count,minus_multi_days)&select=key,value').then(function(set){
+    if (!Array.isArray(set)) { cb(null); return; }
+    var val = function(k){ var r = set.filter(function(x){ return x && x.key === k; })[0]; return r ? r.value : null; };
+    var stores = String(val('minus_stores') || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
+    var count = reportMinusMultiPosInt(val('minus_multi_count'), REPORT_MINUS_MULTI_COUNT);
+    var days = reportMinusMultiPosInt(val('minus_multi_days'), REPORT_MINUS_MULTI_DAYS);
+    if (!stores.length) { cb(reportMinusMultiGroup([], [], count, days, refISO)); return; }
+    var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
+    return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action' +
+      '&mvt_type=eq.955&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')' +
+      '&posting_date=gte.' + fromISO + '&posting_date=lte.' + refISO + '&order=id.asc').then(function(rows){
+      if (rows.partial) { cb(null); return; }
+      cb(reportMinusMultiGroup(rows, stores, count, days, refISO));
+    });
+  }).catch(function(){ cb(null); });
+}
+function reportMinusMultiSubject(data){
+  var ref = data && data.ref ? String(data.ref) : '';
+  return 'Минуси — повтарящи се артикули' + (ref ? ' — до ' + reportMinusMultiDM(ref) + '.' + ref.slice(0, 4) : '');
+}
+function reportMinusMultiHtml(data){
+  var d = data || { stores: [], total: 0, noStatement: 0, count: REPORT_MINUS_MULTI_COUNT, days: REPORT_MINUS_MULTI_DAYS };
+  var th = function(t){ return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:left;border-bottom:2px solid #e2e8f0;">' + t + '</th>'; };
+  var td = function(h, extra){ return '<td style="padding:6px;font-size:12px;color:#1e293b;vertical-align:top;border-bottom:1px solid #eef1f6;' + (extra || '') + '">' + h + '</td>'; };
+  var body = '';
+  if (!d.total) {
+    body = '<div class="mm-empty" style="font-size:13px;color:#64748b;">Няма артикул с ' + d.count + '+ минуса за ' + d.days + ' дни</div>';
+  } else {
+    body += '<div style="font-size:12px;color:#475569;margin-bottom:10px;">Артикули с ' + d.count + ' или повече минуса (955) за ' + d.days + ' дни: <b>' + d.total + '</b>' +
+      (d.noStatement ? ' · без становище: <b style="color:#dc2626;">' + d.noStatement + '</b>' : '') + '</div>';
+    d.stores.forEach(function(s){
+      body += '<div class="mm-store" style="font-size:13px;font-weight:700;color:#1E2761;margin:14px 0 4px;">' + esc(s.store) + ' (' + s.items.length + ')</div>';
+      body += '<table style="width:100%;border-collapse:collapse;"><tr>' + th('Код') + th('Описание') + th('Брой') + th('Дати') + th('Становище') + '</tr>';
+      s.items.forEach(function(g){
+        body += '<tr class="mm-item">' + td(esc(g.material), 'white-space:nowrap;') + td(esc(g.desc)) +
+          td(String(g.dates.length), 'text-align:center;font-weight:700;') +
+          td(g.dates.map(reportMinusMultiDM).join(', ')) +
+          (g.action ? td(esc(g.action)) : td('<span class="mm-none" style="color:#dc2626;font-weight:700;">няма становище</span>')) + '</tr>';
+      });
+      body += '</table>';
+    });
+  }
+  var sub = d.from && d.ref ? 'Последните ' + d.days + ' дни: ' + reportMinusMultiDM(d.from) + ' – ' + reportMinusMultiDM(d.ref) + '.' + String(d.ref).slice(0, 4) : '';
+  return reportEmailShell('➖ Минуси — повтарящи се артикули', sub, body, 'Автоматичен репорт · ТеМАХ Портал');
+}
+/* Кой получава: активните редове с minus_multi=true, по един път на имейл */
+function reportMinusMultiRecipients(rows){
+  var out = [], seen = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(r){
+    if (!r || r.active === false || r.minus_multi !== true || !r.email) return;
+    var k = String(r.email).trim().toLowerCase();
+    if (seen[k]) return;
+    seen[k] = 1; out.push(r.email);
+  });
+  return out;
+}
+/* „Тест до мен" — данните към последната неделя, само до натисналия. */
+function sendMinusMultiReportTest(toEmail, done){
+  var fin = typeof done === 'function' ? done : function(){};
+  if (!toEmail) { toast('Въведи имейл','#dc2626'); fin(); return; }
+  toast('⏳ Подготвям отчета за минусите...');
+  collectMinusMultiReportData(reportMinusMultiRefSunday(today()), function(data){
+    if (!data) { toast('Грешка при събиране на данните','#dc2626'); fin(); return; }
+    try {
+      sendEmail(toEmail, reportMinusMultiSubject(data) + ' (тест)', reportMinusMultiHtml(data)).then(function(res){
+        if (res.ok) toast('✅ Отчетът за минусите е изпратен на ' + toEmail);
+        else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
+        fin();
+      });
+    } catch (e) { fin(); throw e; }
+  });
+}
+/* „📤 Изпрати сега" — вика самата едж функция (същият път като крона), за
+   да не се смятат получателите и писмото втори път. */
+function sendMinusMultiReportNow(done){
+  var fin = typeof done === 'function' ? done : function(){};
+  toast('⏳ Изпращане...');
+  fetch(SB_URL + '/functions/v1/send-scheduled-report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SB_KEY, 'apikey': SB_KEY },
+    body: JSON.stringify({ type: 'minus_multi' })
+  }).then(function(r){
+    return r.text().then(function(txt){
+      var d; try { d = JSON.parse(txt); } catch (e) { d = { message: txt }; }
+      return { ok: r.ok, status: r.status, data: d };
+    });
+  }).then(function(res){
+    var d = res.data || {};
+    if (!res.ok || d.ok === false || d.sent !== true) toast('❌ Отчетът НЕ тръгна: ' + String(d.error || d.reason || d.message || ('HTTP ' + res.status)).slice(0, 150), '#dc2626');
+    else toast('✅ Изпратен до ' + d.recipients + ' получатели');
+    fin();
+  }).catch(function(e){ toast('❌ ' + String((e && e.message) || e).slice(0, 150), '#dc2626'); fin(); });
+}
+
 /* ═══════ ПОЛУЧАТЕЛИ НА ОБЩИЯ РЕПОРТ (report_recipients) ═══════════
    Редактируем списък (name/email + флагове daily/weekly/pallets/warehouse) - управлява се от
    Администрация → Известия → „📧 Общи отчети" (loadReportsAdmin в admin.js;
@@ -4157,8 +4321,8 @@ function loadReportRecipients(cb){
     cb(Array.isArray(rows) ? rows : []);
   }).catch(function(){ cb([]); });
 }
-/* flags: { daily, weekly, pallets, warehouse } — всеки флаг е отделен отчет. */
-var REPORT_RECIPIENT_FLAGS = ['daily', 'weekly', 'pallets', 'warehouse'];
+/* flags: { daily, weekly, pallets, warehouse, minus_multi } — всеки флаг е отделен отчет. */
+var REPORT_RECIPIENT_FLAGS = ['daily', 'weekly', 'pallets', 'warehouse', 'minus_multi'];
 function addReportRecipient(name, email, flags, cb){
   if (!email) { cb(false); return; }
   var row = { name: name||null, email: email };

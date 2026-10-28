@@ -109,11 +109,12 @@ const sendBtns = h => Array.prototype.filter.call(h.doc.querySelectorAll('#notif
         ok(expect[k][0] + ': „Тест до мен"', !!rowBtn(h, k, 'Тест до мен'));
       }
     });
-    ok('„📤 Изпрати сега" на Дневен и Седмичен', !!rowBtn(h, 'daily', '📤 Изпрати сега') && !!rowBtn(h, 'weekly', '📤 Изпрати сега'));
-    ok('и никъде другаде (2 общо)', sendBtns(h).length === 2, sendBtns(h).length);
+    ok('„📤 Изпрати сега" на Дневен, Седмичен и Минуси', !!rowBtn(h, 'daily', '📤 Изпрати сега') && !!rowBtn(h, 'weekly', '📤 Изпрати сега') && !!rowBtn(h, 'minus_multi', '📤 Изпрати сега'));
+    ok('и никъде другаде (3 общо)', sendBtns(h).length === 3, sendBtns(h).length);
+    ok('ред „Минуси — повтарящи се" с „Тест до мен"', !!rowBtn(h, 'minus_multi', 'Тест до мен'));
     ok('списъкът получатели е тук (3 реда)', b.querySelectorAll('.report-recipient').length === 3);
     ok('няма поле за адрес на теста', !h.doc.getElementById('today-report-email') &&
-      b.querySelectorAll('input').length === 6 /* само формата за добавяне: име, имейл, 4 отметки */, b.querySelectorAll('input').length);
+      b.querySelectorAll('input').length === 7 /* само формата за добавяне: име, имейл, 5 отметки */, b.querySelectorAll('input').length);
     const userGets = h.calls.get.filter(u => u.indexOf('/users') >= 0);
     ok('users с изричен select=, никога select=* или хеш',
       userGets.length > 0 && userGets.every(u => u.indexOf('select=') >= 0 && u.indexOf('select=*') < 0 && u.indexOf('hash') < 0),
@@ -255,7 +256,7 @@ const sendBtns = h => Array.prototype.filter.call(h.doc.querySelectorAll('#notif
     const posts = h.calls.post.filter(p => p.table === 'report_recipients');
     ok('POST към report_recipients', posts.length === 1, posts.length);
     ok('с име, имейл и флаговете', !!posts[0] && JSON.stringify(posts[0].body) ===
-      JSON.stringify({ name: 'Нов', email: 'nov@temax.bg', daily: true, weekly: false, pallets: false, warehouse: false }), posts[0] && JSON.stringify(posts[0].body));
+      JSON.stringify({ name: 'Нов', email: 'nov@temax.bg', daily: true, weekly: false, pallets: false, warehouse: false, minus_multi: false }), posts[0] && JSON.stringify(posts[0].body));
     ok('toast „✅ Добавен получател"', h.calls.toast.indexOf('✅ Добавен получател') >= 0);
     ok('списъкът се презарежда', h.calls.get.filter(u => u.indexOf('report_recipients') >= 0).length > getsBefore);
 

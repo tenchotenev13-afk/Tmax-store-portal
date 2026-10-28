@@ -673,7 +673,7 @@ function noAmountInDom(name, h) {
     let cap = xl(he.w);
     const ooE = he.doc.getElementById('mn-onlyopen'); ooE.checked = true; fire(he.w, ooE, 'change');
     realClick(he.w, he.doc.getElementById('mn-excel'));
-    ok('Excel (Дневен, само незакрити): заглавията', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|Дата|Количество|Мерна ед.|Състояние|Заметнат код|Причина|Име на служител|Бележка|Предишен минус|Брой за 30 дни|Действие|КЗ|Незаприходена?', cap.aoa && cap.aoa[0].join('|'));
+    ok('Excel (Дневен, само незакрити): заглавията', cap.aoa && cap.aoa[0].join('|') === 'Материал|Описание|Дата|Количество|Мерна ед.|Състояние|Заметнат код|Причина|Име на служител|Бележка|Предишен минус|Брой за 30 дни|Действие / становище|КЗ|Незаприходена?', cap.aoa && cap.aoa[0].join('|'));
     ok('… 3 реда (филтърът е приложен)', cap.aoa && cap.aoa.length === 4, cap.aoa && cap.aoa.length);
     const r98 = cap.aoa && cap.aoa.find(r => r[0] === '98275');
     ok('… количеството е число, мерната единица — отделна колона', r98 && r98[3] === 2.88 && r98[4] === 'M2' && r98[2] === '07.10.2026', JSON.stringify(r98));
@@ -756,22 +756,29 @@ function noAmountInDom(name, h) {
     ok('05.10 — „↻ предишен 01.10“, червена', badge(h, 'r2') && badge(h, 'r2').textContent === '↻ предишен 01.10' && badge(h, 'r2').classList.contains('mn-age-red'), badge(h, 'r2') && badge(h, 'r2').className);
     ok('20.10 — „↻ предишен 05.10“, оранжева (15 дни)', badge(h, 'r3') && badge(h, 'r3').textContent === '↻ предишен 05.10' && badge(h, 'r3').classList.contains('mn-age-orange'), badge(h, 'r3') && badge(h, 'r3').className);
     ok('30.11 — „↻ предишен 20.10“, жълта (41 дни)', badge(h, 'r4') && badge(h, 'r4').textContent === '↻ предишен 20.10' && badge(h, 'r4').classList.contains('mn-age-yellow'), badge(h, 'r4') && badge(h, 'r4').className);
-    ok('броячи: 05.10 „×2 за 30 дни“, 20.10 „×3 за 30 дни“, 01.10 и 30.11 — без', cnt(h, 'r2') === '×2 за 30 дни' && cnt(h, 'r3') === '×3 за 30 дни' && cnt(h, 'r1') === null && cnt(h, 'r4') === null, [cnt(h, 'r1'), cnt(h, 'r2'), cnt(h, 'r3'), cnt(h, 'r4')].join(' / '));
+    /* 20.10 е 3-тият за 30 дни → многократен (28.10.2026): „🔁 3 за 30 дни“
+       вместо лилавото „×3“ (tests/minusi-multi.test.js). */
+    const multi = (h, id) => { const tr = rowOf(h, id); const c = tr && tr.querySelector('.mn-multi'); return c ? c.textContent : null; };
+    ok('броячи: 05.10 „×2 за 30 дни“, 20.10 „🔁 3 за 30 дни“ (без ×3), 01.10 и 30.11 — без', cnt(h, 'r2') === '×2 за 30 дни' && cnt(h, 'r3') === null && multi(h, 'r3') === '🔁 3 за 30 дни' && cnt(h, 'r1') === null && cnt(h, 'r4') === null, [cnt(h, 'r1'), cnt(h, 'r2'), cnt(h, 'r3'), multi(h, 'r3'), cnt(h, 'r4')].join(' / '));
     ok('значката е в клетката с описанието', badge(h, 'r2').closest('td').textContent.indexOf('ТЕСТ ПОВТОРЕНИЕ') === 0);
     /* Две части, всяка nowrap, с интервал между тях — броячът може да мине
        на втори ред, без да разширява „Описание“. */
     const bw = rowOf(h, 'r3').querySelector('.mn-badges');
-    const p3 = bw && bw.querySelector('.mn-prev'), c3 = bw && bw.querySelector('.mn-cnt30');
-    ok('значката: „↻ предишен“ и „×N“ са два отделни елемента, всеки с nowrap', !!p3 && !!c3 && p3 !== c3 && p3.style.whiteSpace === 'nowrap' && c3.style.whiteSpace === 'nowrap', p3 && p3.getAttribute('style'));
+    const p3 = bw && bw.querySelector('.mn-prev'), c3 = bw && bw.querySelector('.mn-multi');
+    ok('значката: „↻ предишен“ и „🔁 N“ са два отделни елемента, всеки с nowrap', !!p3 && !!c3 && p3 !== c3 && p3.style.whiteSpace === 'nowrap' && c3.style.whiteSpace === 'nowrap', p3 && p3.getAttribute('style'));
     ok('… обвивката НЕ е nowrap (броячът може да пренесе)', bw && bw.style.whiteSpace !== 'nowrap', bw && bw.getAttribute('style'));
     ok('… между двете части има обикновен интервал', !!p3 && !!p3.nextSibling && p3.nextSibling.nodeType === 3 && p3.nextSibling.textContent === ' ' && p3.nextSibling.nextSibling === c3, p3 && p3.nextSibling && JSON.stringify(p3.nextSibling.textContent));
     ok('броят th в #mn-daily е непроменен (10)', h.doc.querySelectorAll('#mn-daily thead th').length === 10, h.doc.querySelectorAll('#mn-daily thead th').length);
     const hasAct = (hh, id) => !!hh.doc.getElementById('mn-action-' + id);
-    ok('N = 10 (ключът липсва): „Действие“ на 05.10 (4 дни) и на 77002 от 20.10 (точно 10 дни); не на 01.10, 20.10 (15), 30.11', hasAct(h, 'r2') && hasAct(h, 'e2') && !hasAct(h, 'r1') && !hasAct(h, 'r3') && !hasAct(h, 'r4') && !hasAct(h, 'e1'));
+    /* Повторение — по _repeat от mnCompute: 20.10 (15 дни) има поле само
+       защото е многократен (3-ти за 30 дни), не защото е повторение. */
+    const rep = (hh, id) => { const x = hh.w.mnCompute(hh.w.mnMovs, {}).all.find(y => y.id === id); return x ? x._repeat : null; };
+    ok('N = 10 (ключът липсва): „Действие“ на 05.10 (4 дни) и на 77002 от 20.10 (точно 10 дни); не на 01.10, 30.11; 20.10 (15) — не е повторение', hasAct(h, 'r2') && hasAct(h, 'e2') && !hasAct(h, 'r1') && rep(h, 'r3') === false && !hasAct(h, 'r4') && !hasAct(h, 'e1'));
+    ok('… 20.10 има поле „Становище“ — многократен, не повторение', hasAct(h, 'r3') && h.doc.getElementById('mn-action-r3').getAttribute('placeholder') === 'Становище' && h.doc.getElementById('mn-action-r2').getAttribute('placeholder') === 'Действие срещу повторение');
     const h20 = env(GD, fakeDb({ movs: copy(REP), repeatDays: '20' })); await open(h20);
-    ok('minus_repeat_days = „20“ → и 20.10 е повторение; 30.11 (41) — не', hasAct(h20, 'r3') && hasAct(h20, 'r2') && !hasAct(h20, 'r4'));
+    ok('minus_repeat_days = „20“ → и 20.10 е повторение; 30.11 (41) — не', rep(h20, 'r3') === true && hasAct(h20, 'r2') && !hasAct(h20, 'r4'));
     const hBad = env(GD, fakeDb({ movs: copy(REP), repeatDays: 'abc' })); await open(hBad);
-    ok('невалидна стойност („abc“) → 10', hasAct(hBad, 'r2') && !hasAct(hBad, 'r3') && hBad.w.mnRepeatDays === 10);
+    ok('невалидна стойност („abc“) → 10', hasAct(hBad, 'r2') && rep(hBad, 'r3') === false && hBad.w.mnRepeatDays === 10);
 
     /* Запис: ред без повторение → без action; повторение без действие → toast, с действие → action. */
     const dbS = fakeDb({ movs: copy(REP) });
@@ -813,10 +820,10 @@ function noAmountInDom(name, h) {
     const u3 = hc2.doc.getElementById('mn-unfilled'); u3.checked = false; fire(hc2.w, u3, 'change');
     realClick(hc2.w, hc2.doc.getElementById('mn-excel'));
     const xr = id => cap.aoa && cap.aoa.find(r => r[0] === '77001' && r[2] === ({ r1: '01.10.2026', r2: '05.10.2026', r3: '20.10.2026', r4: '30.11.2026' })[id]);
-    /* След „Действие“ идват „КЗ“ (етап 4а) и „Незаприходена?“ (етап 4б,
+    /* След „Действие / становище“ идват „КЗ“ (етап 4а) и „Незаприходена?“ (етап 4б,
        27.10.2026) — проверките са спрямо мястото на „Предишен минус“. */
     const ip = cap.aoa ? cap.aoa[0].indexOf('Предишен минус') : -1;
-    ok('Excel: „Предишен минус“, „Брой за 30 дни“, „Действие“, „КЗ“, „Незаприходена?“ накрая', cap.aoa && ip >= 0 && cap.aoa[0].slice(ip).join('|') === 'Предишен минус|Брой за 30 дни|Действие|КЗ|Незаприходена?');
+    ok('Excel: „Предишен минус“, „Брой за 30 дни“, „Действие / становище“, „КЗ“, „Незаприходена?“ накрая', cap.aoa && ip >= 0 && cap.aoa[0].slice(ip).join('|') === 'Предишен минус|Брой за 30 дни|Действие / становище|КЗ|Незаприходена?');
     ok('Excel 05.10: 01.10.2026 | 2 | действието', xr('r2') && xr('r2').slice(ip, ip + 3).join('|') === '01.10.2026|2|ще преетикираме', xr('r2') && JSON.stringify(xr('r2').slice(ip, ip + 3)));
     ok('Excel 01.10: празно | 1 | празно', xr('r1') && xr('r1')[ip] === '' && xr('r1')[ip + 1] === 1 && xr('r1')[ip + 2] === '', xr('r1') && JSON.stringify(xr('r1').slice(ip, ip + 3)));
     ok('Excel без суми', !/(^|[^\d.])(3\.7|13\.97|-1\.96)([^\d]|$)/.test(JSON.stringify(cap.aoa)));

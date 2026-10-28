@@ -107,6 +107,12 @@ const SHARED_FNS = [
   'reportChecklistIsoWeekMonday', 'reportChecklistIsoWeekOf', 'reportChecklistPrevIsoWeek',
   'reportChecklistNoStreak', 'reportChecklistStreakLabel', 'reportChecklistResponsesHtml',
   'reportNotApplicableSectionHtml',
+  /* „Минуси — повтарящи се артикули" (v61, 28.10.2026): правилото, колекторът,
+     писмото и получателите. Разминае ли се копието, „Тест до мен" показва
+     друго от това, което кронът праща. */
+  'reportMinusMultiPosInt', 'reportMinusMultiAddDays', 'reportMinusMultiRefSunday',
+  'reportMinusMultiDM', 'reportMinusMultiGroup', 'collectMinusMultiReportData',
+  'reportMinusMultiSubject', 'reportMinusMultiHtml', 'reportMinusMultiRecipients',
   'reportTransitListHtml', 'reportWarehousePendingHtml',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',
   'buildCrossModuleSectionHtml', 'buildDailyReportHtml', 'buildWeeklyReportHtml'
@@ -204,7 +210,8 @@ const CLIENT_ONLY = [
   'reportRoutedTaskWindow',
   'resolveRecipientsForTask', 'buildRecipientMap', 'taskStoreBreakdown',
   'personalizedTaskCardHtml', 'personalizedSectionHtml',
-  'sendWeeklyReportRouted', 'sendWeeklyReportTest'
+  'sendWeeklyReportRouted', 'sendWeeklyReportTest',
+  'sendMinusMultiReportTest', 'sendMinusMultiReportNow'  /* минуси: „Тест до мен" и „Изпрати сега" — само в портала */
 ];
 const EDGE_ONLY = ['sbGet', 'sbGetOk', 'sbPost', 'sbPatch', 'loadRecurringVersions'];  /* loadRecurringVersions: service ключ, не sbGet от shared.js */  /* SERVICE ROLE, не shared.js */
 

@@ -141,8 +141,8 @@ function branch(type) {
     const h = await env();
     const r = rowOf(h, 'week@temax.bg');
     const icons = r ? Array.from(r.querySelectorAll('button.rcpt-flag')) : [];
-    ok('4 икони в реда', icons.map(b => b.dataset.flag).join('|') === 'daily|weekly|pallets|warehouse', icons.map(b => b.dataset.flag).join('|'));
-    ok('състоянието: само седмичен е включен', icons.map(b => b.dataset.on).join('') === '0100', icons.map(b => b.dataset.on).join(''));
+    ok('5 икони в реда', icons.map(b => b.dataset.flag).join('|') === 'daily|weekly|pallets|warehouse|minus_multi', icons.map(b => b.dataset.flag).join('|'));
+    ok('състоянието: само седмичен е включен', icons.map(b => b.dataset.on).join('') === '01000', icons.map(b => b.dataset.on).join(''));
     ok('включеният е ярък, изключеният е избледнял',
       icons[1].getAttribute('style').indexOf('opacity:.25') < 0 && icons[2].getAttribute('style').indexOf('opacity:.25') >= 0);
     realClick(h.w, flagBtn(h, 'week@temax.bg', 'pallets'), '🟫 на week@');
@@ -184,8 +184,8 @@ function branch(type) {
     realClick(h.w, Array.prototype.find.call(body(h).querySelectorAll('button'), x => x.textContent.trim() === '+ Добави'), '+ Добави');
     await settle();
     const posts = h.calls.post.filter(p => p.table === 'report_recipients');
-    ok('POST с четирите флага', posts.length === 1 && JSON.stringify(posts[0].body) ===
-      JSON.stringify({ name: null, email: 'nov@temax.bg', daily: false, weekly: true, pallets: false, warehouse: true }),
+    ok('POST с петте флага', posts.length === 1 && JSON.stringify(posts[0].body) ===
+      JSON.stringify({ name: null, email: 'nov@temax.bg', daily: false, weekly: true, pallets: false, warehouse: true, minus_multi: false }),
       posts[0] && JSON.stringify(posts[0].body));
     h.close();
   }
