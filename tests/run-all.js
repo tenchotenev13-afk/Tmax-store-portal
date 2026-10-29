@@ -88,6 +88,7 @@ const TESTS = [
   'minusi-co-link.test.js',
   'minusi-transit-link.test.js',
   'minusi-multi.test.js',
+  'minusi-multi-scope.test.js',
   'pilot-tabs.test.js',
   'picking.test.js',
   'picking-pallets.test.js',

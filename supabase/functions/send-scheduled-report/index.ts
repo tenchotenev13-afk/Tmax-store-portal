@@ -1,6 +1,14 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v62 (29.10.2026) — ЕДНО нещо: „Минуси — повтарящи се артикули“ (minus_multi) —
+      ОТДЕЛНО писмо на получател по обхват: report_recipients.scope_stores ∩
+      minus_stores (NULL → всички; масив, и празен → само сечението). Без обхват —
+      както в v61 (и при 0 артикула); с обхват — само при непразно сечение и поне
+      един артикул. dry_run връща получател → обекти → брой артикули → send.
+      reportMinusMultiPlan / ForStores / ShouldSend / ScopeOf — копие от report.js.
+      Заковано в tests/minusi-multi-scope.test.js и tests/report-edge-sync.test.js.
+
    v61 (28.10.2026) — ЕДНО нещо: нов type 'minus_multi' — „Минуси —
       повтарящи се артикули" (Теодор 27.10, решения на Тенчо 27.10). Едно
       общо писмо до report_recipients.minus_multi=true, понеделник 08:00
@@ -4720,7 +4728,7 @@ function reportCoOverdueRecipients(rows){
    „няма становище". Нула артикули → един ред „Няма артикул с C+ минуса за
    D дни" — писмото тръгва, за да се вижда, че е минало. Непълни движения →
    cb(null): по-добре без писмо, отколкото с грешен списък. Без суми.
-   Функциите от REPORT_MINUS_MULTI_COUNT до reportMinusMultiRecipients са
+   Функциите от REPORT_MINUS_MULTI_COUNT до reportMinusMultiShouldSend са
    еднакви в report.js и send-scheduled-report (tests/report-edge-sync.test.js). */
 var REPORT_MINUS_MULTI_COUNT = 3;
 var REPORT_MINUS_MULTI_DAYS = 30;
@@ -4763,7 +4771,7 @@ function reportMinusMultiGroup(rows, stores, count, days, refISO){
     g.dates.push(dt);
     if (String(m.action || '').trim()) g.action = String(m.action).trim();
   });
-  var out = { from: fromISO, ref: refISO, count: count, days: days, stores: [], total: 0, noStatement: 0 };
+  var out = { from: fromISO, ref: refISO, count: count, days: days, allStores: stores.slice(), stores: [], total: 0, noStatement: 0 };
   stores.forEach(function(s){
     var items = order.map(function(k){ return groups[k]; }).filter(function(g){
       return g.store === s && g.dates.length >= count;
@@ -4833,6 +4841,47 @@ function reportMinusMultiRecipients(rows){
   });
   return out;
 }
+/* Обхват на получателя (minus-multi-scope, 29.10.2026). report_recipients.scope_stores:
+   NULL → всички обекти от minus_stores (както досега); масив → само сечението с
+   minus_stores — и празният масив е „никакви обекти“, не „всички“ (за разлика от
+   дневния, където празното е пълният отчет). */
+function reportMinusMultiScopeOf(r){
+  if (!r || r.scope_stores === null || r.scope_stores === undefined) return null;
+  return (Array.isArray(r.scope_stores) ? r.scope_stores : []).map(function(s){ return String(s == null ? '' : s).trim(); }).filter(Boolean);
+}
+/* Получател → обекти: [{ email, name, scoped, stores }]. Активните с minus_multi=true,
+   по един път на имейл (първият ред печели). stores е в реда на minus_stores. */
+function reportMinusMultiPlan(rows, minusStores){
+  var out = [], seen = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(r){
+    if (!r || r.active === false || r.minus_multi !== true || !r.email) return;
+    var k = String(r.email).trim().toLowerCase();
+    if (seen[k]) return;
+    seen[k] = 1;
+    var sc = reportMinusMultiScopeOf(r);
+    out.push({ email: r.email, name: r.name || '', scoped: sc !== null,
+      stores: (Array.isArray(minusStores) ? minusStores : []).filter(function(s){ return sc === null || sc.indexOf(s) >= 0; }) });
+  });
+  return out;
+}
+/* Данните на писмото, срязани до обектите на получателя (total / noStatement — наново). */
+function reportMinusMultiForStores(data, stores){
+  var out = Object.assign({}, data, { stores: [], total: 0, noStatement: 0 });
+  ((data && data.stores) || []).forEach(function(s){
+    if (stores.indexOf(s.store) < 0) return;
+    out.stores.push(s);
+    out.total += s.items.length;
+    s.items.forEach(function(g){ if (!g.action) out.noStatement++; });
+  });
+  return out;
+}
+/* Праща ли се на този получател: без обхват — винаги, и при 0 артикула (ред „Няма
+   артикул…“ — непроменено от v61); с обхват — само при непразно сечение И поне един
+   артикул в неговите обекти. */
+function reportMinusMultiShouldSend(plan, sub){
+  if (!plan || !plan.scoped) return true;
+  return plan.stores.length > 0 && !!sub && sub.total > 0;
+}
 
 Deno.serve(async (req: Request) => {
   try {
@@ -4858,10 +4907,14 @@ Deno.serve(async (req: Request) => {
         rows_read: wkCross.rowsRead, partial: wkCross.partial }), { status:200, headers:{'Content-Type':'application/json'} });
     }
 
-    /* v61 — „Минуси — повтарящи се артикули": ЕДНО общо писмо, ранен клон
-       като „Просрочени — ЦО". Опорният ден — неделята преди днешния по
-       София. Праща се и при 0 артикула (ред „Няма артикул…"). dry_run:true
-       не праща нищо и не връща текста на становищата. */
+    /* v61 — „Минуси — повтарящи се артикули": ранен клон като „Просрочени — ЦО".
+       Опорният ден — неделята преди днешния по София. dry_run:true не праща
+       нищо и не връща текста на становищата.
+       v62 (29.10.2026) — ОТДЕЛНО писмо на получател, по обхват
+       (report_recipients.scope_stores ∩ minus_stores, reportMinusMultiPlan):
+       без обхват — всички обекти и писмото тръгва и при 0 артикула (ред „Няма
+       артикул…", както в v61); с обхват — само при непразно сечение и поне
+       един артикул в неговите обекти (reportMinusMultiShouldSend). */
     if (type === 'minus_multi') {
       var mmToday = localDateISO(reportSofiaToday(new Date()));
       var mmRef = reportMinusMultiRefSunday(mmToday);
@@ -4870,23 +4923,34 @@ Deno.serve(async (req: Request) => {
       if (!mmData) {
         return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{'Content-Type':'application/json'} });
       }
-      var mmRecRes: any = await sbGet('report_recipients', 'active=eq.true&minus_multi=eq.true&select=email,name,active,minus_multi');
-      var mmTo: string[] = reportMinusMultiRecipients(mmRecRes);
+      var mmRecRes: any = await sbGet('report_recipients', 'active=eq.true&minus_multi=eq.true&select=email,name,active,minus_multi,scope_stores');
+      var mmJobs: any[] = reportMinusMultiPlan(mmRecRes, mmData.allStores || []).map(function(p: any){
+        var sub = reportMinusMultiForStores(mmData, p.stores);
+        return { plan: p, sub: sub, send: reportMinusMultiShouldSend(p, sub) };
+      });
       if (mmDry) {
         return new Response(JSON.stringify({ ok:true, dry_run:true, today:mmToday, from:mmData.from, ref:mmData.ref, count:mmData.count, days:mmData.days,
-          subject:reportMinusMultiSubject(mmData), recipients:mmTo.length, total:mmData.total, no_statement:mmData.noStatement,
+          subject:reportMinusMultiSubject(mmData), minus_stores:mmData.allStores, total:mmData.total, no_statement:mmData.noStatement,
+          recipients: mmJobs.map(function(j: any){ return { email:j.plan.email, scoped:j.plan.scoped, stores:j.plan.stores,
+            rows:j.sub.stores.map(function(s: any){ return { store:s.store, items:s.items.length }; }), total:j.sub.total, send:j.send }; }),
           stores:(mmData.stores || []).map(function(s: any){ return { store:s.store, items:s.items.map(function(g: any){ return { material:g.material, n:g.dates.length, dates:g.dates, statement:!!g.action }; }) }; }),
           type:type }), { status:200, headers:{'Content-Type':'application/json'} });
       }
-      if (!mmTo.length) {
-        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      var mmSend: any[] = mmJobs.filter(function(j: any){ return j.send; });
+      if (!mmSend.length) {
+        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', recipients:mmJobs.length, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
       }
-      var mmRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
-        method: 'POST',
-        headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
-        body: JSON.stringify({ to: mmTo, subject: reportMinusMultiSubject(mmData), html: reportMinusMultiHtml(mmData) })
-      });
-      return new Response(JSON.stringify({ ok:true, sent:mmRes.ok, email_status:mmRes.status, recipients:mmTo.length, total:mmData.total, no_statement:mmData.noStatement, ref:mmData.ref, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      var mmOut: any[] = [];
+      for (const j of mmSend) {
+        var mmRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
+          method: 'POST',
+          headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
+          body: JSON.stringify({ to: [j.plan.email], subject: reportMinusMultiSubject(j.sub), html: reportMinusMultiHtml(j.sub) })
+        });
+        mmOut.push({ email:j.plan.email, stores:j.plan.stores.length, total:j.sub.total, sent:mmRes.ok, status:mmRes.status });
+      }
+      return new Response(JSON.stringify({ ok:true, sent:mmOut.every(function(x: any){ return x.sent; }), recipients:mmOut.length,
+        skipped:mmJobs.length - mmSend.length, personal:mmOut, total:mmData.total, ref:mmData.ref, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
     }
 
     /* v49 — „Просрочени клиентски заявки — ЦО": ЕДНО общо писмо, ранен клон

@@ -113,6 +113,8 @@ const SHARED_FNS = [
   'reportMinusMultiPosInt', 'reportMinusMultiAddDays', 'reportMinusMultiRefSunday',
   'reportMinusMultiDM', 'reportMinusMultiGroup', 'collectMinusMultiReportData',
   'reportMinusMultiSubject', 'reportMinusMultiHtml', 'reportMinusMultiRecipients',
+  /* Обхват по получател (v62, 29.10.2026). */
+  'reportMinusMultiScopeOf', 'reportMinusMultiPlan', 'reportMinusMultiForStores', 'reportMinusMultiShouldSend',
   'reportTransitListHtml', 'reportWarehousePendingHtml',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',
   'buildCrossModuleSectionHtml', 'buildDailyReportHtml', 'buildWeeklyReportHtml'

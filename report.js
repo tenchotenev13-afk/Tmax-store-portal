@@ -4159,7 +4159,7 @@ function sendWeeklyReportRouted(testEmail){
    „няма становище". Нула артикули → един ред „Няма артикул с C+ минуса за
    D дни" — писмото тръгва, за да се вижда, че е минало. Непълни движения →
    cb(null): по-добре без писмо, отколкото с грешен списък. Без суми.
-   Функциите от REPORT_MINUS_MULTI_COUNT до reportMinusMultiRecipients са
+   Функциите от REPORT_MINUS_MULTI_COUNT до reportMinusMultiShouldSend са
    еднакви в report.js и send-scheduled-report (tests/report-edge-sync.test.js). */
 var REPORT_MINUS_MULTI_COUNT = 3;
 var REPORT_MINUS_MULTI_DAYS = 30;
@@ -4202,7 +4202,7 @@ function reportMinusMultiGroup(rows, stores, count, days, refISO){
     g.dates.push(dt);
     if (String(m.action || '').trim()) g.action = String(m.action).trim();
   });
-  var out = { from: fromISO, ref: refISO, count: count, days: days, stores: [], total: 0, noStatement: 0 };
+  var out = { from: fromISO, ref: refISO, count: count, days: days, allStores: stores.slice(), stores: [], total: 0, noStatement: 0 };
   stores.forEach(function(s){
     var items = order.map(function(k){ return groups[k]; }).filter(function(g){
       return g.store === s && g.dates.length >= count;
@@ -4271,6 +4271,47 @@ function reportMinusMultiRecipients(rows){
     seen[k] = 1; out.push(r.email);
   });
   return out;
+}
+/* Обхват на получателя (minus-multi-scope, 29.10.2026). report_recipients.scope_stores:
+   NULL → всички обекти от minus_stores (както досега); масив → само сечението с
+   minus_stores — и празният масив е „никакви обекти“, не „всички“ (за разлика от
+   дневния, където празното е пълният отчет). */
+function reportMinusMultiScopeOf(r){
+  if (!r || r.scope_stores === null || r.scope_stores === undefined) return null;
+  return (Array.isArray(r.scope_stores) ? r.scope_stores : []).map(function(s){ return String(s == null ? '' : s).trim(); }).filter(Boolean);
+}
+/* Получател → обекти: [{ email, name, scoped, stores }]. Активните с minus_multi=true,
+   по един път на имейл (първият ред печели). stores е в реда на minus_stores. */
+function reportMinusMultiPlan(rows, minusStores){
+  var out = [], seen = {};
+  (Array.isArray(rows) ? rows : []).forEach(function(r){
+    if (!r || r.active === false || r.minus_multi !== true || !r.email) return;
+    var k = String(r.email).trim().toLowerCase();
+    if (seen[k]) return;
+    seen[k] = 1;
+    var sc = reportMinusMultiScopeOf(r);
+    out.push({ email: r.email, name: r.name || '', scoped: sc !== null,
+      stores: (Array.isArray(minusStores) ? minusStores : []).filter(function(s){ return sc === null || sc.indexOf(s) >= 0; }) });
+  });
+  return out;
+}
+/* Данните на писмото, срязани до обектите на получателя (total / noStatement — наново). */
+function reportMinusMultiForStores(data, stores){
+  var out = Object.assign({}, data, { stores: [], total: 0, noStatement: 0 });
+  ((data && data.stores) || []).forEach(function(s){
+    if (stores.indexOf(s.store) < 0) return;
+    out.stores.push(s);
+    out.total += s.items.length;
+    s.items.forEach(function(g){ if (!g.action) out.noStatement++; });
+  });
+  return out;
+}
+/* Праща ли се на този получател: без обхват — винаги, и при 0 артикула (ред „Няма
+   артикул…“ — непроменено от v61); с обхват — само при непразно сечение И поне един
+   артикул в неговите обекти. */
+function reportMinusMultiShouldSend(plan, sub){
+  if (!plan || !plan.scoped) return true;
+  return plan.stores.length > 0 && !!sub && sub.total > 0;
 }
 /* „Тест до мен" — данните към последната неделя, само до натисналия. */
 function sendMinusMultiReportTest(toEmail, done){

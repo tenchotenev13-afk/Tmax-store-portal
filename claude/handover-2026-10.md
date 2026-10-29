@@ -984,6 +984,10 @@ pills с бройки, „Активни“ по подразбиране. Ек�
 (send-scheduled-report `minus_multi`, понеделник 08:00, флаг
 `report_recipients.minus_multi` — Теодор, Миглена, Тенчо); миграцията в базата
 **20261028104053** (`minusi-multi-schema.sql`), приложена 28.10.
+29.10 (сесия minusi-multi-scope): писмото minus_multi е ОТДЕЛНО на получател,
+по обхват `scope_stores` ∩ `minus_stores` (NULL → всички; с обхват — само при
+артикул в неговите обекти). Проверка в понеделник 02.11 —
+`claude/open/29-10-minusi-multi-scope-monday.md`.
 Графикът за 2026 е зареден еднократно от „график до края на 2026.xlsx“
 (`tools/revision-schedule-2026.js`; файлът не е в репото).
 
