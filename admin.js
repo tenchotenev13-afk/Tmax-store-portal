@@ -1281,8 +1281,10 @@ function renderReportsAdmin(){
   } else {
     h += '<div id="report-recipients-list" style="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;">';
     list.forEach(function(r){
-      h += '<div class="report-recipient" style="display:flex;align-items:center;gap:8px;font-size:12px;color:#334155;background:#fff;border:1px solid #eef1f6;border-radius:7px;padding:5px 9px;">';
-      h += '<span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(r.name||r.email) + ' <span style="color:#94a3b8;">(' + esc(r.email) + ')</span></span>';
+      /* flex-wrap + min-width на името (29.10.2026): на тесен екран „обекти: …"
+         минава на нов ред, вместо да свие името до 0 px (323 px — само икони). */
+      h += '<div class="report-recipient" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12px;color:#334155;background:#fff;border:1px solid #eef1f6;border-radius:7px;padding:5px 9px;">';
+      h += '<span style="flex:1 1 140px;min-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(r.name||r.email) + ' <span style="color:#94a3b8;">(' + esc(r.email) + ')</span></span>';
       h += '<span style="white-space:nowrap;">' + ADMIN_RCPT_FLAGS.map(function(f){
         var on = !!r[f.flag];
         return '<button class="rcpt-flag" data-id="' + esc(r.id) + '" data-flag="' + f.flag + '" data-on="' + (on ? '1' : '0') + '"' +

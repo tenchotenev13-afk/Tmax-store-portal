@@ -22,6 +22,8 @@
      A3 без проверката за 0 отметнати (записва {})               → пада 3
      A4 без проверката „същото" (PATCH при непроменен обхват)     → пада 3
      A5 при грешка редът пак се обновява                          → пада 3
+     A6 редът без flex-wrap:wrap (29.10, тесен екран)            → пада 1б
+     A7 името обратно на flex:1;min-width:0 (свива се до 0 px)   → пада 1б
    Пускане:  node tests/admin-recipient-scope.test.js .
 */
 'use strict';
@@ -81,6 +83,23 @@ function setAll(h, on) { const a = h.doc.getElementById('rcpt-scope-all'); a.che
       return iS > iF && kids[kids.length - 1].textContent === '✕';
     })());
     ok('за admin — <button>', scopeEl(h, 't.tenev@temax.bg').tagName === 'BUTTON');
+    h.close();
+  }
+
+  section('1б. Тесен екран — стилът на реда (29.10.2026)');
+  {
+    /* На 323 px името падаше до 0 px и редът беше само икони. jsdom не смята
+       лейаут — проверката е по inline стила. */
+    const h = await env(ADMIN);
+    const r = rowOf(h, 'n.koleva@temax.bg');
+    const st = r.getAttribute('style') || '';
+    ok('редът .report-recipient има flex-wrap:wrap', /(^|;)\s*flex-wrap:\s*wrap\s*(;|$)/.test(st), st);
+    const nameSpan = r.firstElementChild;
+    const ns = (nameSpan && nameSpan.getAttribute('style')) || '';
+    ok('първият елемент е името (Надя Колева)', nameSpan && nameSpan.tagName === 'SPAN' && nameSpan.textContent.indexOf('Надя Колева') === 0);
+    const mw = (ns.match(/(?:^|;)\s*min-width:\s*(\d+)px/) || [])[1];
+    ok('името има min-width > 0 (140px)', Number(mw) > 0 && Number(mw) >= 100, ns);
+    ok('… и flex-basis, не flex:1 с нулева основа', /(?:^|;)\s*flex:\s*1 1 \d+px/.test(ns), ns);
     h.close();
   }
 
