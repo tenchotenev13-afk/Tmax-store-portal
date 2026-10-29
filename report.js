@@ -4380,6 +4380,18 @@ function setReportRecipientFlag(id, flag, value, cb){
     cb(!!(res && res.ok));
   }).catch(function(){ cb(false); });
 }
+/* Обхватът на получателя (scope_stores) — PATCH само с него. null = без
+   ограничение; иначе НЕПРАЗЕН масив имена. Празен масив не се записва:
+   за „Минуси — повтарящи се“ {} значи „никакви обекти“, а за дневния —
+   „пълен отчет“ (admin-recipient-scope, 29.10.2026). */
+function setReportRecipientScope(id, stores, cb){
+  var ok = stores === null || (Array.isArray(stores) && stores.length > 0 &&
+    stores.every(function(s){ return typeof s === 'string' && s.trim(); }));
+  if (!id || !ok) { cb(false); return; }
+  sbPatch('report_recipients', 'id=eq.' + id, { scope_stores: stores }).then(function(res){
+    cb(!!(res && res.ok));
+  }).catch(function(){ cb(false); });
+}
 function deleteReportRecipient(id, cb){
   sbDelete('report_recipients','id=eq.'+id).then(function(res){ cb(!!res.ok); }).catch(function(){ cb(false); });
 }

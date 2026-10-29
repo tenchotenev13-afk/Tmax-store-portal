@@ -1292,6 +1292,7 @@ function renderReportsAdmin(){
           ' style="border:none;background:none;cursor:pointer;font-size:13px;padding:0 2px;line-height:1;' +
           (on ? '' : 'opacity:.25;filter:grayscale(1);') + '">' + f.icon + '</button>';
       }).join('') + '</span>';
+      h += adminRecipientScopeHtml(r, admin);
       h += '<button onclick="adminDeleteReportRecipient(\'' + esc(r.id) + '\')" style="border:none;background:none;color:#dc2626;cursor:pointer;font-size:13px;line-height:1;">✕</button>';
       h += '</div>';
     });
@@ -1335,6 +1336,135 @@ function adminToggleReportRecipientFlag(id, flag, value){
     else toast('❌ Грешка при запис','#dc2626');
   });
 }
+/* ═══ ОБХВАТ НА ПОЛУЧАТЕЛЯ (report_recipients.scope_stores, 29.10.2026) ═══
+   На реда, след иконите: „обекти: всички" (NULL) или имената. За admin
+   текстът е бутон → модал „Всички обекти" + отметки по обект (stores);
+   за всеки друг е само текст. Записът — setReportRecipientScope (report.js):
+   „Всички" → null, иначе непразен масив; 0 отметнати не се записва (за
+   „Минуси — повтарящи се" {} значи „никакви обекти", за дневния — „пълен");
+   същото → само затваряне. Смисълът по отчет е в бележката на модала. */
+var ADMIN_SCOPE_SHOW = 3;          /* имена в реда; останалите — „…" и title */
+var adminScopeStores = null;       /* имената от stores — веднъж на сесия */
+var adminScopeEditId = null;
+
+function adminRecipientScopeOf(r){
+  return (r && Array.isArray(r.scope_stores)) ? r.scope_stores.filter(Boolean) : null;
+}
+function adminRecipientScopeText(r){
+  var sc = adminRecipientScopeOf(r);
+  if (!sc) return { text: 'обекти: всички', title: 'Без ограничение по обект' };
+  if (!sc.length) return { text: 'обекти: няма', title: 'Празен обхват' };
+  var shown = sc.slice(0, ADMIN_SCOPE_SHOW).join(', ') + (sc.length > ADMIN_SCOPE_SHOW ? ', …' : '');
+  return { text: 'обекти: ' + shown, title: sc.join(', ') };
+}
+function adminRecipientScopeHtml(r, admin){
+  var t = adminRecipientScopeText(r);
+  var css = 'font-size:11px;color:#475569;white-space:nowrap;max-width:220px;overflow:hidden;text-overflow:ellipsis;';
+  if (!admin) return '<span class="rcpt-scope" data-id="' + esc(r.id) + '" title="' + esc(t.title) + '" style="' + css + '">' + esc(t.text) + '</span>';
+  return '<button type="button" class="rcpt-scope" data-id="' + esc(r.id) + '" title="' + esc(t.title) + ' — натисни, за да смениш"' +
+    ' onclick="adminOpenRecipientScope(this.dataset.id)"' +
+    ' style="' + css + 'border:none;background:none;cursor:pointer;padding:0 2px;text-decoration:underline dotted;">' + esc(t.text) + '</button>';
+}
+function adminScopeOverlay(){
+  var ov = document.getElementById('rcpt-scope-ov');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'rcpt-scope-ov';
+    ov.className = 'modal-bg';
+    ov.onclick = function(ev){ if (ev.target === ov) closeModal('rcpt-scope-ov'); };
+    document.body.appendChild(ov);
+  }
+  return ov;
+}
+function adminRecipientById(id){
+  return (adminReportRecipients || []).filter(function(r){ return String(r.id) === String(id); })[0] || null;
+}
+function adminOpenRecipientScope(id){
+  if (!notifIsAdmin()) return;
+  var r = adminRecipientById(id);
+  if (!r) return;
+  adminScopeEditId = r.id;
+  var ov = adminScopeOverlay();
+  var draw = function(names){
+    var sc = adminRecipientScopeOf(r);
+    var all = !sc;
+    /* Обект от обхвата, който го няма в stores (преименуван), пак е в списъка — да не се изгуби. */
+    var list = names.slice();
+    (sc || []).forEach(function(s){ if (list.indexOf(s) < 0) list.push(s); });
+    ov.innerHTML = '<div class="modal" style="width:440px;">' +
+      '<h3>Обхват — ' + esc(r.name || r.email) + '</h3>' +
+      '<div class="modal-sub" id="rcpt-scope-note">Обхватът важи за дневния отчет, „Палети“ и „Минуси — повтарящи се“; седмичният го пренебрегва.</div>' +
+      '<label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;margin-bottom:8px;">' +
+        '<input type="checkbox" id="rcpt-scope-all"' + (all ? ' checked' : '') + ' onchange="adminScopeSync()"> Всички обекти (без ограничение)</label>' +
+      '<div id="rcpt-scope-list" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr));gap:2px 10px;max-height:46vh;overflow-y:auto;padding:4px 0 4px 4px;border-top:1px solid #eef1f6;">' +
+        list.map(function(s){
+          var on = !all && sc.indexOf(s) >= 0;
+          return '<label style="display:flex;align-items:center;gap:5px;font-size:12px;"><input type="checkbox" class="rcpt-scope-store" value="' + esc(s) + '"' +
+            (on ? ' checked' : '') + ' onchange="adminScopeSync()"> ' + esc(s) + '</label>';
+        }).join('') +
+      '</div>' +
+      '<div class="modal-actions" style="margin-top:12px;">' +
+        '<button type="button" class="btn" style="background:#f1f5f9;" onclick="closeModal(\'rcpt-scope-ov\')">Отказ</button> ' +
+        '<button type="button" class="btn btn-green" id="rcpt-scope-save" onclick="adminSaveRecipientScope()">Запази</button>' +
+      '</div></div>';
+    adminScopeSync();
+  };
+  ov.innerHTML = '<div class="modal"><div style="text-align:center;padding:18px;color:#94a3b8;">⏳ Зареждане...</div></div>';
+  ov.classList.add('open');
+  if (adminScopeStores) { draw(adminScopeStores); return; }
+  sbGet('stores', 'order=name&select=name').then(function(data){
+    adminScopeStores = (Array.isArray(data) ? data : []).map(function(s){ return s && s.name; }).filter(Boolean);
+    if (adminScopeEditId === r.id) draw(adminScopeStores);
+  });
+}
+/* Избраното в модала: null („Всички") или масив имена в реда на списъка. */
+function adminScopePicked(){
+  var all = document.getElementById('rcpt-scope-all');
+  if (all && all.checked) return null;
+  return Array.prototype.slice.call(document.querySelectorAll('#rcpt-scope-list .rcpt-scope-store'))
+    .filter(function(x){ return x.checked; }).map(function(x){ return x.value; });
+}
+function adminScopeSync(){
+  var all = document.getElementById('rcpt-scope-all');
+  var boxes = document.querySelectorAll('#rcpt-scope-list .rcpt-scope-store');
+  Array.prototype.forEach.call(boxes, function(b){ b.disabled = !!(all && all.checked); });
+  var btn = document.getElementById('rcpt-scope-save');
+  if (!btn) return;
+  var p = adminScopePicked();
+  var empty = p !== null && !p.length;
+  btn.disabled = empty;
+  btn.title = empty ? 'Избери поне един обект или „Всички обекти“' : '';
+}
+function adminScopeSame(a, b){
+  if (a === null || b === null) return a === b;
+  if (a.length !== b.length) return false;
+  var x = a.slice().sort(), y = b.slice().sort();
+  return x.every(function(v, i){ return v === y[i]; });
+}
+function adminSaveRecipientScope(){
+  if (!notifIsAdmin()) return;
+  var r = adminRecipientById(adminScopeEditId);
+  if (!r) return;
+  var val = adminScopePicked();
+  if (val !== null && !val.length) { toast('Избери поне един обект или „Всички обекти“', '#dc2626'); return; }
+  if (adminScopeSame(val, adminRecipientScopeOf(r))) { closeModal('rcpt-scope-ov'); return; }
+  var key = 'scope:' + r.id;
+  if (adminReportBusy[key] || typeof setReportRecipientScope !== 'function') return;
+  adminReportBusy[key] = true;
+  var btn = document.getElementById('rcpt-scope-save');
+  if (btn) btn.disabled = true;
+  setReportRecipientScope(r.id, val, function(ok){
+    adminReportBusy[key] = false;
+    if (!ok) { toast('❌ Обхватът не е записан', '#dc2626'); adminScopeSync(); return; }
+    r.scope_stores = val;
+    /* Само редът — без презареждане на картата. */
+    var el = document.querySelector('.rcpt-scope[data-id="' + String(r.id).replace(/"/g, '') + '"]');
+    if (el) { var t = adminRecipientScopeText(r); el.textContent = t.text; el.title = t.title + ' — натисни, за да смениш'; }
+    closeModal('rcpt-scope-ov');
+    toast('✅ Обхват: ' + (val ? val.join(', ') : 'всички обекти'));
+  });
+}
+
 function adminDeleteReportRecipient(id){
   deleteReportRecipient(id, function(ok){
     if (ok) { toast('Изтрит получател'); loadReportsAdmin(); }
