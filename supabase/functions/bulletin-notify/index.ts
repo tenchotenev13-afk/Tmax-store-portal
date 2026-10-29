@@ -11,6 +11,20 @@
 //   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //
+// v16 (29.10.2026) — ЕДНО нещо: АВТОМАТИЧНА ОТМЕТКА на „СПРАВКА МИНУСИ"
+//   (runMinusAutoTick; Миглена 29.10, решения на Тенчо 29.10). Не е тема —
+//   тече при ВСЯКО пускане на крона, след темите; ръчно с
+//   {"minus_auto_tick":true[,"dry_run":true]}. За всеки обект от minus_stores
+//   и всяка постоянна задача с linked_module 'minusi' за седмицата (след
+//   версията), дължима днес: 0 непопълнени (buildMinusUnfilled) след
+//   днешното първо качване в minus_uploads, или — без качване — от
+//   due_time до края на деня (23:59 София) → task_completions
+//   completed_by 'auto:minusi', completion_date днешният.
+//   Съществуващ ред за деня не се пипа; отметка не се маха. Грешка при
+//   четене → нищо, ред в лога. Тече ПРЕДИ темите — deadline_passed и
+//   today_deadlines виждат отметката от същото пускане. Темите НЕ са пипани. Заковано в
+//   tests/minusi-auto-tick.test.js.
+//
 // v15 (28.10.2026) — ЕДНО нещо: minus_unfilled брои и МНОГОКРАТНИЯ минус
 //   без становище (Теодор 27.10, решения на Тенчо 27.10): за обект + материал
 //   редът 955 е 3-ти или следващ с дата в последните 30 дни (до него
@@ -2395,6 +2409,144 @@ async function runMinusUnfilled(supabase: any, topic: any, bg: any, dryRun: bool
   return { topic: topic.key, obekti: pushed, failed: failed, already_sent: skipped, planned: planned };
 }
 
+/* ═══ АВТОМАТИЧНА ОТМЕТКА НА „СПРАВКА МИНУСИ" (v16, 29.10.2026) ═══════════
+   Повод: Миглена 29.10 — обектът попълва всички редове в таб „Дневен" и пак
+   трябва да влезе в Бюлетина да отметне. Решения на Тенчо 29.10:
+   · Денят D (делник от due_weekdays на задачата) е изпълнен, когато обектът
+     няма нито един НЕЗАКРИТ НЕПОПЪЛНЕН минус — същият брой като известието
+     minus_unfilled (buildMinusUnfilled, НЕ трето FIFO копие) — в момент СЛЕД
+     първото качване в minus_uploads за D (по българско време).
+   · Без качване на D — при всяко пускане на крона от due_time на задачата до
+     края на деня (23:59 по София); с качване — от качването до края на деня.
+     (Решение на Тенчо 29.10 — до него беше „само веднъж, в [due_time; +15)“,
+     а обект, попълнил в 20:05, оставаше без отметка и без ръчен изход.)
+     Предишен ден НЕ се отмята: completion_date е винаги днешният.
+   · Отметка, веднъж поставена, НЕ се маха. Каквото и да има вече за деня
+     (ръчна отметка, отлагане, „не се отнася") — не се пипа.
+   · Само обектите от app_settings.minus_stores; задачите — с linked_module
+     'minusi' СЛЕД сливането на версията за седмицата (в recurring_tasks
+     linked_module е NULL, стойността е в recurring_task_versions).
+   Тече при ВСЯКО пускане на крона, извън темите за известия (няма ред в
+   notification_topics). Грешка при четене → нищо не се отмята, ред в лога.
+   Полетата на реда — по образеца на stock_diff_sync_completions. */
+const MNU_TICK_BY = 'auto:minusi';
+
+/* Чисто решение за един обект + задача. unfilled — брой от buildMinusUnfilled. */
+function mnuTickDecide(o: { unfilled: number; uploadedToday: boolean; dueMin: number | null; nowMin: number }): string {
+  if (o.unfilled > 0) return 'nepopalneni';
+  if (o.uploadedToday) return 'tick';
+  if (o.dueMin === null) return 'chaka_kachvane';
+  if (o.nowMin < o.dueMin) return 'chaka_kachvane';
+  return 'tick';
+}
+
+/* target_stores празно/NULL = „всички" — същото правило като на екрана. */
+function mnuTaskHasStore(t: any, store: string): boolean {
+  const ts = Array.isArray(t.target_stores) ? t.target_stores : [];
+  return !ts.length || ts.indexOf(store) >= 0;
+}
+
+async function runMinusAutoTick(supabase: any, bg: ReturnType<typeof bgNow>, dryRun: boolean) {
+  const fail = (msg: string) => {
+    console.error('minus_auto_tick: ' + msg + ' — нищо не е отметнато');
+    return { step: 'minus_auto_tick', error: msg, ticked: 0 };
+  };
+  const today = bg.dateStr, idx = bg.weekdayIdx;
+  const monday = plusDaysISO(today, -idx);
+
+  const set = await supabase.from('app_settings').select('key,value').eq('key', 'minus_stores');
+  if (set.error) return fail('app_settings: ' + set.error.message);
+  const stores = mnuParseStores(((set.data || [])[0] || {}).value);
+  if (!stores.length) return { step: 'minus_auto_tick', skipped: 'Няма включени обекти', ticked: 0 };
+
+  /* Задачите за седмицата — с изрична проверка за грешка (loadRecurring* горе
+     връщат [] при провал, а без версиите linked_module е NULL). */
+  const rt = await supabase.from('recurring_tasks').select('*');
+  if (rt.error) return fail('recurring_tasks: ' + rt.error.message);
+  const rp = await supabase.from('recurring_task_periods').select('recurring_task_id,from_monday,to_monday');
+  if (rp.error) return fail('recurring_task_periods: ' + rp.error.message);
+  const rv = await supabase.from('recurring_task_versions')
+    .select('id,recurring_task_id,from_monday,to_monday,title,description,due_weekday,due_weekdays,due_window,due_time,task_type,department,target_stores,report_groups,linked_module');
+  if (rv.error) return fail('recurring_task_versions: ' + rv.error.message);
+  const wk = isoWeekOf(today);
+  const sk = await supabase.from('recurring_task_skips').select('recurring_task_id,store_name')
+    .eq('year', wk.year).eq('week_number', wk.week);
+  if (sk.error) return fail('recurring_task_skips: ' + sk.error.message);
+  const skips = sk.data || [];
+
+  const tasks = recurringTasksForWeek(rt.data || [], rp.data || [], monday, rv.data || [])
+    .filter((t: any) => t && t.linked_module === 'minusi' && !taskIsNotice(t) && recurringDueOnWeekday(t, idx)
+      && !recurringIsSkipped(t.id, null, skips));
+  if (!tasks.length) return { step: 'minus_auto_tick', skipped: 'Няма задача Минуси за днес', ticked: 0 };
+
+  const pairs: any[] = [];
+  for (const t of tasks) for (const s of stores) {
+    if (mnuTaskHasStore(t, s) && !recurringIsSkipped(t.id, s, skips)) pairs.push({ task: t, store: s });
+  }
+  if (!pairs.length) return { step: 'minus_auto_tick', skipped: 'Задачите не са за включените обекти', ticked: 0 };
+
+  const ids = tasks.map((t: any) => String(t.id));
+  const ex = await supabase.from('task_completions').select('recurring_task_id,store_name,status')
+    .in('recurring_task_id', ids).eq('completion_date', today);
+  if (ex.error) return fail('task_completions: ' + ex.error.message);
+  const has: Record<string, string> = {};
+  for (const r of ex.data || []) has[String(r.recurring_task_id) + '\u0001' + r.store_name] = r.status || 'done';
+
+  /* Качване ДНЕС по българско време. Тегли се от вчера (UTC) нататък и се
+     сверява през bgNow — полунощ в София е 21:00/22:00 UTC предния ден. */
+  const up = await supabase.from('minus_uploads').select('uploaded_at')
+    .gte('uploaded_at', plusDaysISO(today, -1) + 'T00:00:00Z').order('uploaded_at', { ascending: true });
+  if (up.error) return fail('minus_uploads: ' + up.error.message);
+  const firstUp = (up.data || []).map((r: any) => r.uploaded_at)
+    .filter((ts: string) => bgNow(new Date(ts)).dateStr === today)[0] || null;
+
+  const nowMin = bg.hours * 60 + bg.minutes;
+  const decide = (p: any, n: number) => mnuTickDecide({ unfilled: n, uploadedToday: !!firstUp, dueMin: minutesOf(p.task.due_time), nowMin: nowMin });
+  /* Евтините проверки първо: без кандидат движенията не се теглят. */
+  const cand = pairs.filter((p) => !has[String(p.task.id) + '\u0001' + p.store] && decide(p, 0) === 'tick');
+
+  const counts: Record<string, number> = {};
+  if (cand.length) {
+    const built = await buildMinusUnfilled(supabase, bg);
+    if ((built as any).error) return fail((built as any).error);
+    for (const e of ((built as any).entries || [])) counts[e.store] = e.n;
+  }
+
+  const planned: any[] = [];
+  let ticked = 0, failed = 0;
+  for (const p of pairs) {
+    const key = String(p.task.id) + '\u0001' + p.store;
+    const row: any = { zadacha: p.task.title, task_id: p.task.id, obekt: p.store, due_time: p.task.due_time || null };
+    planned.push(row);
+    if (has[key]) { row.reshenie = 'veche_ima_red:' + has[key]; continue; }
+    if (cand.indexOf(p) < 0) { row.reshenie = decide(p, 0); continue; }
+    /* Обект без нито един ред в minus_movements няма запис в counts → 0. */
+    row.nepopalneni = Object.prototype.hasOwnProperty.call(counts, p.store) ? counts[p.store] : 0;
+    row.reshenie = decide(p, row.nepopalneni);
+    if (row.reshenie !== 'tick' || dryRun) continue;
+    const ins = await supabase.from('task_completions').insert({
+      recurring_task_id: p.task.id, store_name: p.store, completed_by: MNU_TICK_BY,
+      completed_at: new Date().toISOString(), status: 'done', completion_date: today,
+    });
+    /* Дубликат (уникалният индекс по задача + обект + ден) = някой е отметнал
+       между четенето и записа — не е грешка. */
+    if (ins.error) {
+      if (!/duplicate|23505/i.test(String(ins.error.message || '') + ' ' + String(ins.error.code || ''))) {
+        failed++;
+        console.error('minus_auto_tick: insert ' + p.store + ' / ' + p.task.id + ': ' + ins.error.message);
+      }
+      continue;
+    }
+    ticked++;
+  }
+
+  return {
+    step: 'minus_auto_tick', dry_run: dryRun, date: today, first_upload: firstUp,
+    would_tick: planned.filter((r) => r.reshenie === 'tick').length,
+    ticked: ticked, failed: failed, planned: planned,
+  };
+}
+
 /* ЕДИНСТВЕНИЯТ списък с темите, които имат строител. notification_topics
    държи единайсет реда; строители тук има за петте отдолу. Останалите са редове
    в базата и нищо повече — събудят ли се, връщат skipped.
@@ -2469,6 +2621,12 @@ Deno.serve(async (req) => {
     const bg = bgNow(new Date());
     const dryRun = body.dry_run === true;
 
+    /* Само автоматичната отметка на Минуси — за ръчен dry_run / проверка. */
+    if (body.minus_auto_tick === true) {
+      const tick = await runMinusAutoTick(supabase, bg, dryRun);
+      return Response.json({ ok: true, mode: 'minus_auto_tick', bg_date: bg.dateStr, result: tick }, { headers: CORS });
+    }
+
     if (body.topic_key) {
       const { data: topics } = await supabase
         .from('notification_topics').select('*').eq('key', body.topic_key).limit(1);
@@ -2484,12 +2642,21 @@ Deno.serve(async (req) => {
 
     const due = (topics || []).filter((t: any) => isDue(t, bg));
     const results = [];
+    /* При ВСЯКО пускане, извън темите и ПРЕДИ тях: deadline_passed (писмото
+       „не са подали“) и today_deadlines четат task_completions — обект,
+       попълнил минусите преди това пускане, трябва вече да е отметнат.
+       Хвърли ли — темите пак минават; грешката е в лога. */
+    let minusTick: any = null;
+    try { minusTick = await runMinusAutoTick(supabase, bg, dryRun); }
+    catch (e) { console.error('minus_auto_tick: ' + (e as Error).message); minusTick = { step: 'minus_auto_tick', error: (e as Error).message }; }
+
     for (const t of due) { results.push(await runTopic(supabase, t, bg, dryRun)); }
 
     return Response.json({
       ok: true, mode: 'scheduled', bg_date: bg.dateStr,
       bg_time: bg.hours + ':' + String(bg.minutes).padStart(2, '0'),
       checked: (topics || []).length, ran: results.length, results: results,
+      minus_auto_tick: minusTick,
     }, { headers: CORS });
 
   } catch (e) {

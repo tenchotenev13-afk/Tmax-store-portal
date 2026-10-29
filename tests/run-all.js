@@ -85,6 +85,7 @@ const TESTS = [
   'revision-schedule.test.js',
   'minusi.test.js',
   'minusi-notify-sync.test.js',
+  'minusi-auto-tick.test.js',
   'minusi-co-link.test.js',
   'minusi-transit-link.test.js',
   'minusi-multi.test.js',

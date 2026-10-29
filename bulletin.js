@@ -293,7 +293,8 @@ var LINKED_MODULES = [
      с този linked_module. */
   { value:'supply', label:'🎨 Зареждане' },
   /* Под-табове на „Ревизии и преоценка" (25.10.2026) — пилотни, бутонът е по
-     видимостта на под-бутона (linkedModuleAllowed). Без auto_complete. */
+     видимостта на под-бутона (linkedModuleAllowed). Без auto_complete (полето
+     е само за Стока на път); minusi е автоматичен по друг път — BUL_AUTO_MODULES. */
   { value:'revaluation', label:'🏷️ Преоценка' },
   { value:'minusi', label:'➖ Минуси' },
   /* Не е самостоятелен модул, а подтаб на Каса. showModule() го пренасочва —
@@ -1303,11 +1304,29 @@ var BUL_AUTO_MODULES = {
     tab:      'Зареждане',
     cls:      'bul-auto-supply',
     progress: ['бланка', 'бланки']
+  },
+  /* „СПРАВКА МИНУСИ" (29.10.2026). Отметка от bulletin-notify (runMinusAutoTick,
+     крон на 15 мин), completed_by 'auto:minusi' — когато обектът няма незакрит
+     непопълнен минус след днешното качване (или, без качване — от due_time на
+     задачата, днес 20:00, до края на деня).
+     САМО за обектите от app_settings.minus_stores (storeOn): невключеният
+     обект отмята ръчно, както досега. Броят — mnLoadSummary от minusi.js,
+     същото правило като известието minus_unfilled. */
+  'minusi': {
+    reason:  'auto-minusi',
+    label:   'Отмята се автоматично от Минуси',
+    tab:     'Минуси',
+    cls:     'bul-auto-minusi',
+    unit:    ['непопълнен', 'непопълнени'],
+    storeOn: function(){ return typeof mnStoreOn==='function' && !!currentUser && mnStoreOn(currentUser.store_name); }
   }
 };
 function bulAutoModuleOf(linkedModule, todayISO){
   var m = BUL_AUTO_MODULES[linkedModule];
   if(!m) return null;
+  /* Модул, автоматичен само за част от обектите (Минуси) — за останалите
+     квадратчето си е ръчно. */
+  if(m.storeOn && !m.storeOn()) return null;
   /* Модул с дата на влизане в сила не е автоматичен ПРЕДИ нея: квадратчето
      трябва да работи до последния ден преди превключването. Датата е една за
      портала и за базата — AUTO_COMPLETE_FROM в shared.js. */
@@ -1465,6 +1484,29 @@ function bulLoadSupplyPending(){
     res[2].forEach(function(n){ filled[n.template_id]=true; });
     bulAutoPending['supply']={done:mine.filter(function(t){return filled[t.id];}).length, total:mine.length};
     renderBulletin();
+  });
+}
+/* „Минуси": непопълнените незакрити минуси на обекта — mnLoadSummary от
+   minusi.js (същото правило като известието minus_unfilled и автоматичната
+   отметка в bulletin-notify). САМО за надписа. minusi.js се зарежда след този
+   файл — затова typeof. Чака флага за включените обекти (mnStoresReady). */
+var bulMinusSeq = 0;
+function bulLoadMinusPending(){
+  bulAutoPending['minusi']=null;
+  if(bulSeesAll()||!currentUser||!currentUser.store_name) return;
+  if(typeof mnLoadSummary!=='function') return;
+  var has=(recurringTasks||[]).some(function(t){ return t && t.linked_module==='minusi' && !taskIsNotice(t); });
+  if(!has) return;
+  var store=currentUser.store_name, seq=++bulMinusSeq;
+  Promise.resolve(typeof mnStoresReady!=='undefined'&&mnStoresReady?mnStoresReady:null).then(function(){
+    if(seq!==bulMinusSeq||!bulAutoModuleOf('minusi')) return;
+    return mnLoadSummary([store]).then(function(res){
+      if(seq!==bulMinusSeq) return;
+      /* Провал → null, не 0: „0 непопълнени" от паднала заявка е твърдение без основание. */
+      var r=res&&res.ok?res.rows.filter(function(x){ return x.store===store; })[0]:null;
+      bulAutoPending['minusi']=r?r.unfilled:(res&&res.ok?0:null);
+      renderBulletin();
+    });
   });
 }
 /* „Разлики": редовете, чакащи ДЕЙСТВИЕ НА ОБЕКТА — същият критерий, по който
@@ -1658,6 +1700,9 @@ function bulOpenPending(key){
     if(typeof transitOpenFocusSkip!=='undefined') transitOpenFocusSkip=true;
   } else if(key==='stock-returns-diff'||key==='stock-returns-complaint'){
     if(typeof srFilter!=='undefined'){ srTab=(key==='stock-returns-diff')?'diff':'complaint'; srFilter='needs'; }
+  } else if(key==='minusi'){
+    /* Таб „Дневен" + „само непопълнени", без търсене — иначе би скрило чакащото. */
+    if(typeof mnOnlyUnfilled!=='undefined'){ mnView='daily'; mnOnlyUnfilled=true; mnSearch=''; }
   }
   /* 'transit-auto' е ключ на задача (bulTaskLinkKey), не име на таб. */
   showModule(key==='transit-auto' ? 'transit' : linkedModuleTab(key));
@@ -1683,6 +1728,8 @@ function bulCompletedByLabel(v){
   /* „Зареждане" (05.10.2026): обектът има попълнена бланка във всяка активна
      бланка, която важи за него. */
   if(v==='auto:supply') return 'автоматично от Зареждане';
+  /* „Минуси" (29.10.2026): обектът няма незакрит непопълнен минус. */
+  if(v==='auto:minusi') return 'автоматично от Минуси';
   return v||'';
 }
 /* Полето „Отмята се автоматично" във формите за задача. Стои в DOM-а винаги
@@ -2751,6 +2798,7 @@ function loadBulletin(){
       bulLoadReturnsPending();
       bulLoadDiffPending();
       bulLoadSupplyPending();
+      bulLoadMinusPending();
       bulLoadTaskReports();
       /* Дата и в самата ЗАЯВКА. Глобалният клон (без store_name) теглеше
          ВСЯКО отмятане на постоянна задача, правено някога - 1595 реда на
@@ -6762,6 +6810,7 @@ function bulSetRecurring(all, periods, versions) {
   bulLoadReturnsPending();
   bulLoadDiffPending();
   bulLoadSupplyPending();
+  bulLoadMinusPending();
 }
 /* Всички задачи + периодите, наново от базата (след запис). */
 function bulFetchRecurring() {
