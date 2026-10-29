@@ -374,6 +374,7 @@ const TESTS = [
   'checklist-resp-visible.test.js',
   'checklist-zanulyavane-manual.test.js',
   'checklist-email-design.test.js',
+  'checklist-legend-preocenka.test.js',
   'checklist-full-form.test.js',
   'checklist-portal-columns.test.js',
   'transfers-create.test.js',

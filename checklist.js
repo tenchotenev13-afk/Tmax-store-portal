@@ -1212,7 +1212,12 @@ function checklistSendButtonHtml() {
 /* Легендата ДОСЛОВНО от бланката, в ЕДИН източник за таба и за писмото.
    Дублирана, двете формулировки рано или късно се разминават и контролингът
    чете едно на екрана и друго в пощата. Не се преформулира — разликата
-   между „не" и „нямат" е целият смисъл на тези три реда. */
+   между „не" и „нямат" е целият смисъл на тези три реда.
+   Легендата е САМО за колоната „преоценка" (yes_no_none) — затова от
+   28.10.2026 има заглавие над трите реда, а в писмото излиза само ако
+   колоната преоценка е сред показаните (Тенчо 28.10: без колоната се четеше
+   като обща). */
+var CHECKLIST_LEGEND_TITLE = 'Колона „преоценка“:';
 var CHECKLIST_LEGEND_LINES = [
   ['ДА', 'има изпратена преоценка.'],
   ['НЕ', 'от магазина не са писали, че няма преоценка.'],
@@ -1221,6 +1226,7 @@ var CHECKLIST_LEGEND_LINES = [
 
 function checklistLegendHtml() {
   return '<div style="margin-top:14px;padding:12px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;font-size:12px;color:#334155;line-height:1.7;">' +
+    '<div style="font-weight:700;color:#0f172a;">' + CHECKLIST_LEGEND_TITLE + '</div>' +
     CHECKLIST_LEGEND_LINES.map(function (l) {
       return '<div><b>' + l[0] + '</b> — ' + l[1] + '</div>';
     }).join('') +
@@ -2185,7 +2191,9 @@ function checklistEmailHtml(year, weekNumber, version, rows, metrics, stores, no
 
   body += checklistEmailResponsesHtml(year, weekNumber, rows, allMetrics, stores, extra);
   body += checklistEmailCommentsHtml(rows, allMetrics, stores);
-  body += checklistLegendHtml();
+  /* Легендата „ДА / НЕ / НЯМАТ" е за колоната „преоценка" — само ако е сред
+     показаните (metrics тук е вече филтрираният списък). */
+  if (metrics.some(function (m) { return m.key === 'preocenka'; })) body += checklistLegendHtml();
 
   return '<!DOCTYPE html><html lang="bg"><head><meta charset="UTF-8">' +
     '<meta name="viewport" content="width=device-width,initial-scale=1"></head>' +
