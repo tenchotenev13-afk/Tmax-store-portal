@@ -491,8 +491,14 @@ function loadLoadingLists(){
       if(!ids.length){ llItems = []; renderLoadingLists(); return; }
       /* Редовете на ВСИЧКИ листи наведнъж — броячите в списъка се смятат от
          тях, а втора заявка на всеки клик би била по-бавна от една обща. */
-      return sbGet('loading_list_items','list_id=in.('+ids.join(',')+')&order=position.asc&select='+LL_ITEM_SELECT)
+      /* sbGetAll, не sbGet: PostgREST реже на 1000 реда БЕЗ грешка, а при
+         order=position.asc отпадат високите позиции на ВСЕКИ лист. Добрич
+         мина 1000 реда на 27.10.2026 — прегледът спря на позиция 35 и
+         складът въведе ламперията и рулата наново (лист d1002304…).
+         id е tiebreaker-ът, без който offset страниците се припокриват. */
+      return sbGetAll('loading_list_items','list_id=in.('+ids.join(',')+')&order=position.asc,id.asc&select='+LL_ITEM_SELECT)
         .then(function(items){
+          llWarnPartial(items);
           llItems = llNormProducts(Array.isArray(items) ? items : []);
           /* Снимките на всички листи наведнъж — картите ги искат при първото
              рисуване, а заявка на карта би била N+1. */
@@ -500,6 +506,11 @@ function loadLoadingLists(){
         })
         .then(function(){ renderLoadingLists(); });
     });
+}
+/* Непълен отговор от sbGetAll (паднала страница) не се премълчава: прегледът
+   би показал лист без последните му редове, а складът — въвел ги наново. */
+function llWarnPartial(rows){
+  if(rows && rows.partial) toast('Редовете на товарните листи не се заредиха изцяло — презареди','#dc2626');
 }
 function llItemsOf(listId){
   return llItems.filter(function(i){ return String(i.list_id) === String(listId); });
@@ -534,7 +545,10 @@ function llLoadStoreSide(){
     llProductsOn = f.products;
     renderLoadingLists();
   });
-  sbGet('loading_list_items','order=position.asc&select='+LL_ITEM_SELECT+storeQ()).then(function(items){
+  /* sbGetAll: глобалният профил и регионалният виждат редовете на МНОГО
+     обекти — над 1000 общо (виж loadLoadingLists). */
+  sbGetAll('loading_list_items','order=position.asc,id.asc&select='+LL_ITEM_SELECT+storeQ()).then(function(items){
+    llWarnPartial(items);
     var mine = llNormProducts(Array.isArray(items) ? items : []);
     var ids = {}, keys = [];
     mine.forEach(function(i){ if(i.list_id && !ids[i.list_id]){ ids[i.list_id] = 1; keys.push(i.list_id); } });
@@ -1303,8 +1317,11 @@ function llLoadPhotos(listIds){
   var ids = (listIds || []).filter(Boolean);
   llPhotos = {};
   if(!ids.length) return Promise.resolve({});
-  return sbGet('loading_list_photos','list_id=in.('+ids.join(',')+')&order=uploaded_at.asc')
+  /* sbGetAll: снимките на всички листи на склада растат без край (299 общо
+     на 30.10.2026) и ще минат 1000 като редовете. */
+  return sbGetAll('loading_list_photos','list_id=in.('+ids.join(',')+')&order=uploaded_at.asc,id.asc')
     .then(function(rows){
+      if(rows && rows.partial) toast('Снимките на товарните листи не се заредиха изцяло — презареди','#dc2626');
       (Array.isArray(rows) ? rows : []).forEach(function(p){
         if(!llPhotos[p.list_id]) llPhotos[p.list_id] = [];
         llPhotos[p.list_id].push(p);
