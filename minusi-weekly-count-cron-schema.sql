@@ -13,7 +13,12 @@
 -- Командата се сменя САМО в числото на условието — Authorization (service ключ)
 -- не минава през този файл.
 --
--- Up (apply_migration, след „давай" на Тенчо):
+-- ПРИЛОЖЕНО 30.10.2026 през apply_migration: версия 20261030120628, minus_multi_cron_mon_11h
+-- (supabase/migrations/20261030120628_minus_multi_cron_mon_11h.sql + _down.sql). Проверено след
+-- това: job 30 — 0 8,9 * * 1, active, условие = 11, type/url/Authorization непокътнати;
+-- report_cron_schedule() → {minus_multi, dow 1, minute 0, hour_sofia 11, active}.
+--
+-- Up:
 do $$
 declare c text;
 begin
