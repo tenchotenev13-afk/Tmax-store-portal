@@ -1163,7 +1163,7 @@ var ADMIN_REPORTS = [
   { kind: 'pallets',   label: '🟫 Палети',   schedule: 'петък 18:00',     test: 'sendPalletsReportTest',   send: null },
   { kind: 'warehouse', label: '📦 Склад',    schedule: 'неделя 21:00',    test: 'sendWarehouseReportTest', send: null },
   /* „Изпрати сега" вика самата едж функция (sendMinusMultiReportNow в report.js). */
-  { kind: 'minus_multi', label: '🔁 Минуси — повтарящи се', schedule: 'понеделник 08:00', test: 'sendMinusMultiReportTest', send: 'sendMinusMultiReportNow' }
+  { kind: 'minus_multi', label: '🔁 Минуси — повтарящи се', schedule: 'понеделник 11:00', test: 'sendMinusMultiReportTest', send: 'sendMinusMultiReportNow' }
 ];
 
 function adminReportsCanSee(){ return notifCanSee(); }

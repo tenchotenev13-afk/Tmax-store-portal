@@ -1,6 +1,17 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v63 (30.10.2026) — ЕДНО нещо: „Минуси — повтарящи се артикули“ (minus_multi) носи
+      и „Минуси за седмицата <пн>–<нд>“ — брой 955 по обект от обхвата на получателя
+      за седмицата към неделята и за предходната, промяна в % (предходна 0 → „—“),
+      ред „Общо“ и „Данни до <дд.мм>“ (max posting_date, всякакъв вид движение).
+      С обхват писмото тръгва и при 0 повтарящи се, ако има поне един минус за
+      седмицата. Втора заявка към minus_movements от ref − 13 дни. Кронът се мести
+      на понеделник 11:00 София (данните за петък–неделя влизат 08:34–09:25).
+      dry_run по получател: week (cur / prev / pct / lastDate). reportMinusMultiPct /
+      WeekTotal / Week / WeekHtml — копие от report.js. Заковано в
+      tests/minusi-multi-week.test.js и tests/report-edge-sync.test.js.
+
    v62 (29.10.2026) — ЕДНО нещо: „Минуси — повтарящи се артикули“ (minus_multi) —
       ОТДЕЛНО писмо на получател по обхват: report_recipients.scope_stores ∩
       minus_stores (NULL → всички; масив, и празен → само сечението). Без обхват —
@@ -4716,7 +4727,8 @@ function reportCoOverdueRecipients(rows){
 }
 
 /* ═══════ МИНУСИ — ПОВТАРЯЩИ СЕ АРТИКУЛИ (minus_multi) ═══════════════
-   Понеделник 08:00 по София, body {"type":"minus_multi"}: ЕДНО общо писмо
+   Понеделник 11:00 по София (до 30.10.2026 — 08:00, преди качването на петък–неделя),
+   body {"type":"minus_multi"}: ЕДНО общо писмо
    до report_recipients с active=true и minus_multi=true (Теодор 27.10.2026,
    решения на Тенчо 27.10). Обхват — последните D дни към неделята ПРЕДИ
    деня на пращането (опорният ден идва отвън: refISO), само обектите от
@@ -4784,6 +4796,56 @@ function reportMinusMultiGroup(rows, stores, count, days, refISO){
   });
   return out;
 }
+/* „Минуси за седмицата" (Теодор 29.10.2026, сесия minusi-weekly-count): брой 955
+   по обект за седмицата пн–нд, завършваща в refISO, и за предходната. 956 не се
+   брои. lastDate — max(posting_date) на обекта от подадените редове (всякакъв вид
+   движение). Промяна в % — (сегашна − предходна) / предходна, цяло, със знак;
+   предходна 0 → „—". Чисто, без заявки. */
+function reportMinusMultiPct(cur, prev){
+  if (!(prev > 0)) return '—';
+  var p = Math.round((cur - prev) / prev * 100);
+  return p > 0 ? '+' + p + '%' : p < 0 ? '\u2212' + (-p) + '%' : '0%';
+}
+function reportMinusMultiWeekTotal(rows){
+  var cur = 0, prev = 0, last = '';
+  rows.forEach(function(r){ cur += r.cur; prev += r.prev; if (r.lastDate && r.lastDate > last) last = r.lastDate; });
+  return { cur: cur, prev: prev, pct: reportMinusMultiPct(cur, prev), lastDate: last || null };
+}
+function reportMinusMultiWeek(rows, stores, refISO){
+  var from = reportMinusMultiAddDays(refISO, -6), prevFrom = reportMinusMultiAddDays(refISO, -13), prevTo = reportMinusMultiAddDays(refISO, -7);
+  var by = {};
+  stores.forEach(function(s){ by[s] = { store: s, cur: 0, prev: 0, pct: '—', lastDate: null }; });
+  (Array.isArray(rows) ? rows : []).forEach(function(m){
+    if (!m || !by[m.store_name]) return;
+    var r = by[m.store_name], dt = String(m.posting_date || '').slice(0, 10);
+    if (!dt) return;
+    if (!r.lastDate || dt > r.lastDate) r.lastDate = dt;
+    if (String(m.mvt_type) !== '955') return;
+    if (dt >= from && dt <= refISO) r.cur++;
+    else if (dt >= prevFrom && dt <= prevTo) r.prev++;
+  });
+  var list = stores.map(function(s){ var r = by[s]; r.pct = reportMinusMultiPct(r.cur, r.prev); return r; });
+  return { from: from, to: refISO, prevFrom: prevFrom, prevTo: prevTo, rows: list, total: reportMinusMultiWeekTotal(list) };
+}
+function reportMinusMultiWeekHtml(w){
+  if (!w || !w.rows || !w.rows.length) return '';
+  var th = function(t, a){ return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:' + (a || 'left') + ';border-bottom:2px solid #e2e8f0;">' + t + '</th>'; };
+  var td = function(h, extra){ return '<td style="padding:6px;font-size:12px;color:#1e293b;border-bottom:1px solid #eef1f6;' + (extra || '') + '">' + h + '</td>'; };
+  var c = 'text-align:center;';
+  var h = '<div class="mm-week-title" style="font-size:13px;font-weight:700;color:#1E2761;margin:0 0 4px;">Минуси за седмицата ' +
+    reportMinusMultiDM(w.from) + '–' + reportMinusMultiDM(w.to) + '</div>';
+  h += '<table class="mm-week" style="width:100%;border-collapse:collapse;"><tr>' + th('Обект') +
+    th('Седмица ' + reportMinusMultiDM(w.from) + '–' + reportMinusMultiDM(w.to), 'center') +
+    th('Предходна ' + reportMinusMultiDM(w.prevFrom) + '–' + reportMinusMultiDM(w.prevTo), 'center') + th('Промяна', 'center') + '</tr>';
+  w.rows.forEach(function(r){
+    h += '<tr class="mm-week-row">' + td(esc(r.store)) + td(String(r.cur), c + 'font-weight:700;') + td(String(r.prev), c) + td(r.pct, c) + '</tr>';
+  });
+  var t = w.total || reportMinusMultiWeekTotal(w.rows);
+  h += '<tr class="mm-week-total">' + td('Общо', 'font-weight:700;') + td(String(t.cur), c + 'font-weight:700;') + td(String(t.prev), c + 'font-weight:700;') + td(t.pct, c + 'font-weight:700;') + '</tr></table>';
+  h += '<div class="mm-week-data" style="font-size:11px;color:#94a3b8;margin:4px 0 16px;">Данни до ' +
+    (t.lastDate ? reportMinusMultiDM(t.lastDate) : '—') + ' (последна дата на движение в портала)</div>';
+  return h;
+}
 function collectMinusMultiReportData(refISO, cb){
   sbGet('app_settings', 'key=in.(minus_stores,minus_multi_count,minus_multi_days)&select=key,value').then(function(set){
     if (!Array.isArray(set)) { cb(null); return; }
@@ -4791,13 +4853,19 @@ function collectMinusMultiReportData(refISO, cb){
     var stores = String(val('minus_stores') || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
     var count = reportMinusMultiPosInt(val('minus_multi_count'), REPORT_MINUS_MULTI_COUNT);
     var days = reportMinusMultiPosInt(val('minus_multi_days'), REPORT_MINUS_MULTI_DAYS);
-    if (!stores.length) { cb(reportMinusMultiGroup([], [], count, days, refISO)); return; }
+    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO) })); return; }
     var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
+    var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
     return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action' +
-      '&mvt_type=eq.955&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')' +
+      '&mvt_type=eq.955' + inStores +
       '&posting_date=gte.' + fromISO + '&posting_date=lte.' + refISO + '&order=id.asc').then(function(rows){
       if (rows.partial) { cb(null); return; }
-      cb(reportMinusMultiGroup(rows, stores, count, days, refISO));
+      /* Седмицата и предходната (955 в JS) и „Данни до" — всякакъв вид, без горна граница. */
+      return reportGetAll('minus_movements', 'select=id,store_name,mvt_type,posting_date' + inStores +
+        '&posting_date=gte.' + reportMinusMultiAddDays(refISO, -13) + '&order=id.asc').then(function(wk){
+        if (wk.partial) { cb(null); return; }
+        cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO), { week: reportMinusMultiWeek(wk, stores, refISO) }));
+      });
     });
   }).catch(function(){ cb(null); });
 }
@@ -4827,6 +4895,7 @@ function reportMinusMultiHtml(data){
       body += '</table>';
     });
   }
+  body = reportMinusMultiWeekHtml(d.week) + body;
   var sub = d.from && d.ref ? 'Последните ' + d.days + ' дни: ' + reportMinusMultiDM(d.from) + ' – ' + reportMinusMultiDM(d.ref) + '.' + String(d.ref).slice(0, 4) : '';
   return reportEmailShell('➖ Минуси — повтарящи се артикули', sub, body, 'Автоматичен репорт · ТеМАХ Портал');
 }
@@ -4873,14 +4942,20 @@ function reportMinusMultiForStores(data, stores){
     out.total += s.items.length;
     s.items.forEach(function(g){ if (!g.action) out.noStatement++; });
   });
+  if (data && data.week) {
+    var wr = (data.week.rows || []).filter(function(r){ return stores.indexOf(r.store) >= 0; });
+    out.week = Object.assign({}, data.week, { rows: wr, total: reportMinusMultiWeekTotal(wr) });
+  }
   return out;
 }
 /* Праща ли се на този получател: без обхват — винаги, и при 0 артикула (ред „Няма
    артикул…“ — непроменено от v61); с обхват — само при непразно сечение И поне един
-   артикул в неговите обекти. */
+   повтарящ се артикул ИЛИ поне един минус (955) за седмицата в неговите обекти
+   (minusi-weekly-count, 30.10.2026). */
 function reportMinusMultiShouldSend(plan, sub){
   if (!plan || !plan.scoped) return true;
-  return plan.stores.length > 0 && !!sub && sub.total > 0;
+  var wk = sub && sub.week && sub.week.total ? sub.week.total.cur : 0;
+  return plan.stores.length > 0 && !!sub && (sub.total > 0 || wk > 0);
 }
 
 Deno.serve(async (req: Request) => {
@@ -4932,7 +5007,10 @@ Deno.serve(async (req: Request) => {
         return new Response(JSON.stringify({ ok:true, dry_run:true, today:mmToday, from:mmData.from, ref:mmData.ref, count:mmData.count, days:mmData.days,
           subject:reportMinusMultiSubject(mmData), minus_stores:mmData.allStores, total:mmData.total, no_statement:mmData.noStatement,
           recipients: mmJobs.map(function(j: any){ return { email:j.plan.email, scoped:j.plan.scoped, stores:j.plan.stores,
-            rows:j.sub.stores.map(function(s: any){ return { store:s.store, items:s.items.length }; }), total:j.sub.total, send:j.send }; }),
+            rows:j.sub.stores.map(function(s: any){ return { store:s.store, items:s.items.length }; }), total:j.sub.total,
+            week: j.sub.week ? { from:j.sub.week.from, to:j.sub.week.to, cur:j.sub.week.total.cur, prev:j.sub.week.total.prev, pct:j.sub.week.total.pct, last_date:j.sub.week.total.lastDate,
+              by_store:j.sub.week.rows.map(function(r: any){ return { store:r.store, cur:r.cur, prev:r.prev, pct:r.pct }; }) } : null,
+            send:j.send }; }),
           stores:(mmData.stores || []).map(function(s: any){ return { store:s.store, items:s.items.map(function(g: any){ return { material:g.material, n:g.dates.length, dates:g.dates, statement:!!g.action }; }) }; }),
           type:type }), { status:200, headers:{'Content-Type':'application/json'} });
       }
@@ -4947,7 +5025,7 @@ Deno.serve(async (req: Request) => {
           headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
           body: JSON.stringify({ to: [j.plan.email], subject: reportMinusMultiSubject(j.sub), html: reportMinusMultiHtml(j.sub) })
         });
-        mmOut.push({ email:j.plan.email, stores:j.plan.stores.length, total:j.sub.total, sent:mmRes.ok, status:mmRes.status });
+        mmOut.push({ email:j.plan.email, stores:j.plan.stores.length, total:j.sub.total, week:j.sub.week ? j.sub.week.total.cur : null, sent:mmRes.ok, status:mmRes.status });
       }
       return new Response(JSON.stringify({ ok:true, sent:mmOut.every(function(x: any){ return x.sent; }), recipients:mmOut.length,
         skipped:mmJobs.length - mmSend.length, personal:mmOut, total:mmData.total, ref:mmData.ref, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
