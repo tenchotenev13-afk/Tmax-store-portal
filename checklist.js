@@ -742,21 +742,82 @@ function checklistWrongReceiptValue(rows) {
   return rows.length + '/' + lines;
 }
 
+/* ГРУПАТА НА КОЛОНАТА (30.10.2026, решение А на Тенчо от 29.10).
+   Колоната брои не само задачата от source, а всяка постоянна задача, която
+   ЗА ПОКАЗАНАТА СЕДМИЦА има същия linked_module (полето е във версиите —
+   recurring_task_versions; в recurring_tasks често е NULL) и важи за нея
+   (периоди, а без тях active — както recurringTasksForWeek). Повод: от 26.10
+   „СПРАВКА МИНУСИ" е две задачи — 03c44560 (13 обекта) и 5a4e0562 (Гоце
+   Делчев, Монтана, Петрич, Троян, Шумен) — и колоната виждаше само първата.
+   Задачата от source е винаги първа и винаги в групата; без linked_module
+   групата е само тя, тоест старото поведение. Огледално на grp в
+   checklist_portal_values() (миграция 20261030120000). */
+function checklistTaskGroup(anchorId, taskById, periods, mondayISO) {
+  var anchor = taskById[anchorId];
+  var lm = anchor && anchor.linked_module;
+  var group = [String(anchorId)];
+  if (!lm) return group;
+  var has = {};
+  (Array.isArray(periods) ? periods : []).forEach(function (p) { if (p) has[String(p.recurring_task_id)] = 1; });
+  Object.keys(taskById).sort().forEach(function (id) {
+    var t = taskById[id];
+    if (id === String(anchorId) || !t || t.linked_module !== lm) return;
+    var valid = has[id] ? recurringValidForWeek(id, mondayISO, periods) : !!t.active;
+    if (valid) group.push(id);
+  });
+  return group;
+}
+
+/* Коя задача от групата важи ЗА ОБЕКТА: тя дава дните, знаменателя,
+   периода и изключването. Изрично в target_stores (на версията за седмицата)
+   > без списък (за всички) > нито една → задачата от source. При равенство —
+   задачата от source, после по id (group е подреден така). */
+function checklistTaskForStore(group, taskById, store) {
+  var best = group[0], bestRank = -1;
+  group.forEach(function (id) {
+    var t = taskById[id];
+    var ts = t && Array.isArray(t.target_stores) ? t.target_stores : null;
+    var rank = (!ts || !ts.length) ? 1 : (ts.indexOf(store) >= 0 ? 2 : 0);
+    if (rank > bestRank) { best = id; bestRank = rank; }
+  });
+  return bestRank > 0 ? best : group[0];
+}
+
 /* Промените от постоянните задачи. Връща Promise с масив
    {store, metric_key, value} — само за клетките, чиято стойност се МЕНИ. */
 function checklistRecurringChanges(idx) {
   var autos = checklistAutoMetrics();
   if (!autos.length) return Promise.resolve([]);
 
-  var ids = autos.map(checklistRecurringId);
+  var anchorIds = autos.map(checklistRecurringId);
   var weekISO = weekDays(checklistWeek, checklistYear).map(toLocalISO);
 
+  /* Кандидатите за група — всички задачи с linked_module в реда ИЛИ в някоя
+     версия. Кой реално влиза, се решава след сливането с версията за
+     седмицата (checklistTaskGroup). Провалена заявка → само задачите от
+     source, тоест старото поведение. */
   return Promise.all([
-    sbGet('recurring_tasks', 'id=in.(' + ids.join(',') + ')&select=id,due_weekdays'),
+    sbGet('recurring_tasks', 'linked_module=not.is.null&select=id').catch(function () { return []; }),
+    sbGet('recurring_task_versions', 'linked_module=not.is.null&select=recurring_task_id').catch(function () { return []; })
+  ]).then(function (cand) {
+    var ids = anchorIds.slice(), seenId = {};
+    ids.forEach(function (x) { seenId[x] = 1; });
+    (Array.isArray(cand[0]) ? cand[0] : []).concat(Array.isArray(cand[1]) ? cand[1] : []).forEach(function (r) {
+      var x = r ? String(r.id || r.recurring_task_id || '') : '';
+      if (x && !seenId[x]) { seenId[x] = 1; ids.push(x); }
+    });
+    return checklistRecurringChangesFor(idx, autos, ids, weekISO);
+  });
+}
+
+function checklistRecurringChangesFor(idx, autos, ids, weekISO) {
+  return Promise.all([
+    sbGet('recurring_tasks', 'id=in.(' + ids.join(',') + ')&select=id,due_weekdays,target_stores,linked_module,active'),
     /* Дните са СЪДЪРЖАНИЕ по седмици (recurring_task_versions, 24.09.2026):
        редакция за показаната седмица мени знаменателя („2 от 3 дни"), но не
-       и за другите. Версиите са само за тези задачи. */
-    sbGet('recurring_task_versions', 'recurring_task_id=in.(' + ids.join(',') + ')&select=recurring_task_id,from_monday,to_monday,due_weekdays')
+       и за другите. Версиите са само за тези задачи. target_stores и
+       linked_module — за групата (checklistTaskGroup). */
+    sbGet('recurring_task_versions', 'recurring_task_id=in.(' + ids.join(',') + ')&select=recurring_task_id,from_monday,to_monday,due_weekdays,target_stores,linked_module')
       .catch(function () { return []; }),
     /* Прозорецът е самата показана седмица. Заявката вече изключва
        записите без дата — PostgREST не връща NULL при gte/lte.
@@ -790,21 +851,30 @@ function checklistRecurringChanges(idx) {
     var skips = Array.isArray(r[3]) ? r[3] : [];
     var periods = Array.isArray(r[4]) ? r[4] : [];
     var taskById = {};
-    tasks.forEach(function (t) { taskById[t.id] = t; });
+    tasks.forEach(function (t) { if (t) taskById[String(t.id)] = t; });
 
     var changes = [];
     autos.forEach(function (m) {
-      var id = checklistRecurringId(m);
-      var mine = comps.filter(function (c) { return c.recurring_task_id === id; });
-      var plan = checklistPortalPlan(m, taskById[id], mine, weekISO);
-      if (!plan) return;
-      /* Задачата НЕ ВАЖИ за показаната седмица (recurring_task_periods) →
-         празна клетка за всички обекти, както при изключване за всички.
-         Само ако задачата ИМА периоди: без нито един (периодите не са се
-         заредили) клетката не се пипа — провалена заявка не чисти данни. */
-      var hasPeriods = periods.some(function (p) { return p && String(p.recurring_task_id) === String(id); });
-      var offWeek = hasPeriods && !recurringValidForWeek(id, weekISO[0], periods);
+      var group = checklistTaskGroup(checklistRecurringId(m), taskById, periods, weekISO[0]);
+      var inGroup = {};
+      group.forEach(function (x) { inGroup[x] = 1; });
+      /* Отметките на обекта по ВСИЧКИ задачи от групата: две отметки в един
+         ден по две задачи са едно попадение (hits е множество дати). Затова
+         обект, отмятал една седмица по старата задача и после по новата, не
+         губи нито един ден. */
+      var mine = comps.filter(function (c) { return c && inGroup[String(c.recurring_task_id)]; });
+      var plans = {};
       checklistStores.forEach(function (store) {
+        var id = checklistTaskForStore(group, taskById, store);
+        if (!(id in plans)) plans[id] = checklistPortalPlan(m, taskById[id], mine, weekISO);
+        var plan = plans[id];
+        if (!plan) return;
+        /* Задачата НЕ ВАЖИ за показаната седмица (recurring_task_periods) →
+           празна клетка, както при изключване за всички. Само ако задачата
+           ИМА периоди: без нито един (периодите не са се заредили) клетката
+           не се пипа — провалена заявка не чисти данни. */
+        var hasPeriods = periods.some(function (p) { return p && String(p.recurring_task_id) === String(id); });
+        var offWeek = hasPeriods && !recurringValidForWeek(id, weekISO[0], periods);
         /* Задачата не се изисква от обекта тази седмица (recurring_task_skips,
            за всички или само за него) → клетката е ПРАЗНА, не „не"/„0/5".
            Иначе контролингът получава провал за работа, която не е искана.

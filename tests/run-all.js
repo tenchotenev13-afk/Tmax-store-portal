@@ -379,6 +379,7 @@ const TESTS = [
   'checklist-legend-preocenka.test.js',
   'checklist-full-form.test.js',
   'checklist-portal-columns.test.js',
+  'checklist-minusi-group.test.js',
   'transfers-create.test.js',
   'report-service-troyan.test.js',
   'admin-user-store-list.test.js',

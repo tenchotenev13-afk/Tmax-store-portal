@@ -1,5 +1,6 @@
 -- checklist-portal-values-fn.sql
--- Огледало на supabase/migrations/20261026120100_checklist_portal_values.sql.
+-- Огледало на supabase/migrations/20261030120000_checklist_portal_values_linked_group.sql
+-- (предишната версия: 20261026120100_checklist_portal_values.sql).
 --
 -- ЗАЩО (checklist-live-calc, етап 1 от 3; Теодор 26.10, решение на Тенчо
 -- 26.10.2026). portal_value в weekly_checklist е снимка от последното
@@ -52,8 +53,19 @@
 -- STABLE, SECURITY INVOKER: чете с правата на викащия (anon има SELECT на
 -- всички таблици тук, users.store_name — колонно).
 --
--- Rollback: supabase/migrations/20261026120100_checklist_portal_values_down.sql
---   drop function if exists public.checklist_portal_values(int, int);
+-- ГРУПА ПО linked_module (30.10.2026, решение А на Тенчо от 29.10;
+-- claude/open/closed/29-10-checklist-minusi-gd.md). Колона от постоянна задача
+-- брои не само задачата от source, а всяка, която ЗА СЕДМИЦАТА има същия
+-- linked_module (от версията; в recurring_tasks често е NULL) и важи за нея
+-- (периоди, иначе active). За всеки обект дните, знаменателят, периодът и
+-- изключването са на задачата, в чийто target_stores е (изрично > за всички >
+-- нито една → задачата от source); отметките — по ВСИЧКИ задачи от групата,
+-- като множество дати. Без linked_module → само задачата от source (старото).
+-- Повод: „СПРАВКА МИНУСИ“ 03c44560 + 5a4e0562 от 26.10 — Гоце Делчев 0/5.
+-- В checklist.js: checklistTaskGroup / checklistTaskForStore.
+--
+-- Rollback: supabase/migrations/20261030120000_checklist_portal_values_linked_group_down.sql
+--   (връща тялото от 20261026120100).
 
 create or replace function public.checklist_portal_values(p_year int, p_week int)
 returns table(store_name text, metric_key text, value text)
@@ -111,48 +123,96 @@ begin
        and (m.source like 'recurring:%' or m.source like 'module:%')
   ),
   -- ── постоянни задачи ─────────────────────────────────────────────────
-  rt as (
-    select mt.key, mt.portal_mode, mt.task_id,
-           (t.id is not null) as task_exists,
+  anchors as (
+    select mt.key, mt.portal_mode, mt.task_id
+      from metrics mt
+     where mt.kind = 'recurring' and mt.portal_mode in ('any', 'count', 'file_none')
+  ),
+  -- Съдържанието на ВСЯКА задача за седмицата: версията (печели най-късният
+  -- from_monday), иначе редът в recurring_tasks — recurringApplyVersion.
+  eff as (
+    select t.id, t.active,
            case when ver.recurring_task_id is not null then ver.due_weekdays
                 else t.due_weekdays end                                      as days,
+           case when ver.recurring_task_id is not null then ver.target_stores
+                else t.target_stores end                                     as targets,
+           case when ver.recurring_task_id is not null then ver.linked_module
+                else t.linked_module end                                     as lm,
            exists (select 1 from public.recurring_task_periods p
-                    where p.recurring_task_id = mt.task_id)                  as has_periods,
+                    where p.recurring_task_id = t.id)                        as has_periods,
            exists (select 1 from public.recurring_task_periods p
-                    where p.recurring_task_id = mt.task_id
+                    where p.recurring_task_id = t.id
                       and p.from_monday <= v_mon
                       and (p.to_monday is null or p.to_monday >= v_mon))     as valid_week
-      from metrics mt
-      left join public.recurring_tasks t on t.id = mt.task_id
+      from public.recurring_tasks t
       left join lateral (
-        select v.recurring_task_id, v.due_weekdays
+        select v.recurring_task_id, v.due_weekdays, v.target_stores, v.linked_module
           from public.recurring_task_versions v
-         where v.recurring_task_id = mt.task_id
+         where v.recurring_task_id = t.id
            and v.from_monday <= v_mon
            and (v.to_monday is null or v.to_monday >= v_mon)
          order by v.from_monday desc
          limit 1
       ) ver on true
-     where mt.kind = 'recurring' and mt.portal_mode in ('any', 'count', 'file_none')
+  ),
+  -- Групата на колоната (30.10.2026, решение А на Тенчо от 29.10): задачата
+  -- от source плюс всяка друга, която ЗА СЕДМИЦАТА има същия linked_module и
+  -- важи за нея (периоди, иначе active — recurringTasksForWeek). Без
+  -- linked_module → само задачата от source, тоест старото поведение.
+  grp as (
+    select a.key, e.id as task_id
+      from anchors a
+      join eff ea on ea.id = a.task_id
+      join eff e  on e.id = a.task_id
+                  or (ea.lm is not null and e.lm = ea.lm
+                      and case when e.has_periods then e.valid_week else e.active end)
+  ),
+  -- Задачата, която важи ЗА ОБЕКТА: изрично в target_stores > без списък
+  -- (за всички) > нито една → задачата от source. При равенство — задачата
+  -- от source, после по id.
+  pick as (
+    select distinct on (a.key, st.s)
+           a.key, st.s,
+           case when (case when coalesce(cardinality(e.targets), 0) = 0 then 1
+                           when st.s = any (e.targets) then 2 else 0 end) > 0
+                then g.task_id else a.task_id end                            as task_id
+      from anchors a
+      cross join stores st
+      join grp g on g.key = a.key
+      join eff e on e.id = g.task_id
+     order by a.key, st.s,
+              case when coalesce(cardinality(e.targets), 0) = 0 then 1
+                   when st.s = any (e.targets) then 2 else 0 end desc,
+              (g.task_id = a.task_id) desc,
+              g.task_id
+  ),
+  rt as (
+    select pk.key, a.portal_mode, pk.s, pk.task_id, e.days, e.has_periods, e.valid_week
+      from pick pk
+      join anchors a on a.key = pk.key
+      join eff e on e.id = pk.task_id
   ),
   rt_plan as (
-    -- Само колоните, за които checklistPortalPlan връща план.
+    -- Само клетките, за които checklistPortalPlan връща план.
     select rt.*,
            coalesce(array(select v_mon + d from unnest(rt.days) as d
                            where d between 0 and 6), '{}'::date[])          as allowed,
            coalesce(cardinality(rt.days), 0)                                 as base_denom
       from rt
-     where rt.task_exists
-       and (rt.portal_mode = 'file_none' or coalesce(cardinality(rt.days), 0) > 0)
+     where rt.portal_mode = 'file_none' or coalesce(cardinality(rt.days), 0) > 0
   ),
+  -- Отметките на обекта по ВСИЧКИ задачи от групата; дните (allowed) са на
+  -- задачата, която важи за него. Две отметки в един ден по две задачи са
+  -- едно попадение (множество дати).
   comps as (
-    select p.key, c.store_name as s, c.status, c.completion_date as orig,
+    select p.key, p.s, c.status, c.completion_date as orig,
            c.postponed_to, coalesce(c.postponed_to, c.completion_date) as eff,
            c.files, p.allowed
       from rt_plan p
-      join public.task_completions c on c.recurring_task_id = p.task_id
+      join grp g on g.key = p.key
+      join public.task_completions c on c.recurring_task_id = g.task_id
+                                    and c.store_name = p.s
      where c.completion_date is not null
-       and coalesce(c.store_name, '') <> ''
        and ((c.completion_date between v_mon and v_sun)
          or (c.postponed_to   between v_mon and v_sun))
   ),
@@ -185,13 +245,13 @@ begin
      group by c.key, c.s
   ),
   rec_vals as (
-    select st.s, p.key,
+    select p.s, p.key,
            case
              when p.has_periods and not p.valid_week then null
              when exists (select 1 from public.recurring_task_skips k
                            where k.recurring_task_id = p.task_id
                              and k.year = v_skip_y and k.week_number = v_skip_w
-                             and (k.store_name is null or k.store_name = st.s)) then null
+                             and (k.store_name is null or k.store_name = p.s)) then null
              when p.portal_mode = 'file_none' then
                case when coalesce(ps.has_file, false) then 'da' else 'ne' end
              when p.base_denom + coalesce(ps.delta, 0) <= 0 then null
@@ -200,8 +260,7 @@ begin
              else coalesce(ps.hits, 0)::text || '/' || (p.base_denom + coalesce(ps.delta, 0))::text
            end as value
       from rt_plan p
-      cross join stores st
-      left join per_store ps on ps.key = p.key and ps.s = st.s
+      left join per_store ps on ps.key = p.key and ps.s = p.s
   ),
   -- ── модули ───────────────────────────────────────────────────────────
   transit as (
@@ -262,7 +321,7 @@ end
 $function$;
 
 comment on function public.checklist_portal_values(int, int) is
-  'Чек лист: автоматичните стойности за ISO седмица (p_year, p_week) — ред на recurring:/module: колона за всеки отчетен обект, смятани в момента на четене по правилото на checklist.js. value NULL = няма стойност. Етап 1 (26.10.2026): още никой не я вика.';
+  'Чек лист: автоматичните стойности за ISO седмица (p_year, p_week) — ред на recurring:/module: колона за всеки отчетен обект, смятани в момента на четене по правилото на checklist.js. value NULL = няма стойност. Колона от постоянна задача брои групата със същия linked_module за седмицата, всеки обект по задачата от своя target_stores (30.10.2026).';
 
 revoke all on function public.checklist_portal_values(int, int) from public;
 grant execute on function public.checklist_portal_values(int, int) to anon, authenticated, service_role;
