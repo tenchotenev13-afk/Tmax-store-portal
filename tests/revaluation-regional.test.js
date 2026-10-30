@@ -56,7 +56,9 @@ function env(user) {
   return h;
 }
 const mod = h => h.doc.getElementById('mod-revaluation');
-const CAMP_BTNS = ['Excel — кампания', 'MM41', 'Кодовете са създадени', 'График на кампаниите', 'Затвори кампанията'];
+/* MM41 и „Кодовете са създадени“ са в бланката от 30.10.2026 — виж раздел 2 и 4. */
+const CAMP_BTNS = ['Excel — кампания', 'График на кампаниите', 'Затвори кампанията'];
+const SHEET_MM41 = ['⬇ MM41', 'Кодовете са създадени'];
 async function open(h) { await h.w.loadRevaluation(); await ticks(8); }
 
 (async function run() {
@@ -80,6 +82,7 @@ async function open(h) { await h.w.loadRevaluation(); await ticks(8); }
     ok('свой обект → листът е отворен', !!h.doc.getElementById('rv-row-i-1'));
     ok('„Excel — този обект" е там', !!btn(mod(h), 'Excel — този обект'));
     ok('и „Готово за обект" (обработва своя)', !!btn(mod(h), 'Готово за обект'));
+    ok('регионален: без MM41 / „създадени" и в бланката', SHEET_MM41.every(t => !btn(mod(h), t)));
     const g = env(REG); await open(g);
     await g.w.rvCoOpenStore('Добрич'); await ticks(6);
     ok('чужд обект → отказ, без лист', !g.doc.getElementById('rv-row-i-3') && g.calls.toast.some(t => t.indexOf('не е в твоя регион') >= 0));
@@ -106,6 +109,9 @@ async function open(h) { await h.w.loadRevaluation(); await ticks(8); }
     ok('В. Филев: всички обекти в обзора', ['Добрич', 'Кърджали', 'Шумен'].every(s => rows.indexOf(s) >= 0), rows.join(','));
     const missing = CAMP_BTNS.filter(t => !btn(mod(h), t));
     ok('В. Филев: всички кампанийни бутони', missing.length === 0, missing.join(' | '));
+    await h.w.rvCoOpenStore('Кърджали'); await ticks(8);
+    const missS = SHEET_MM41.filter(t => !btn(mod(h), t));
+    ok('В. Филев: MM41 и „създадени" в бланката', missS.length === 0, missS.join(' | '));
     const a = env(ACC); await open(a);
     const rowsA = Array.from(a.doc.querySelectorAll('#rv-co-rows tr[id^="rv-co-"]')).map(r => r.id.slice(6));
     ok('нерегионален accounting: всички обекти', ['Добрич', 'Кърджали', 'Шумен'].every(s => rowsA.indexOf(s) >= 0));

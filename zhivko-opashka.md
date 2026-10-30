@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията revaluation_codes_store, revaluation-codes-store-schema.sql, версия 20261030123801, приложена 30.10.2026)
+- 30.10 · revaluation_codes.store_name — text, NULL, без default (11-те заварени реда → 'Кърджали')
+
 (в базата от миграцията bul_allow_postpone_oneoff, bul-allow-postpone-oneoff-schema.sql, версия 20261028124513, приложена 28.10.2026)
 - 28.10 · bulletin_tasks.allow_postpone — boolean, NOT NULL, default true
 - 28.10 · bulletin_tasks.allow_not_applicable — boolean, NOT NULL, default true

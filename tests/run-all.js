@@ -81,6 +81,7 @@ const TESTS = [
   'today-regional-scope.test.js',
   'revaluation-regional.test.js',
   'revaluation-bugs-1910.test.js',
+  'revaluation-elica-2910.test.js',
   'xlsx-real-datenf.test.js',
   'revision-schedule.test.js',
   'minusi.test.js',

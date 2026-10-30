@@ -220,8 +220,8 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     ok('supply: rvVk11() → отказ, без файл', r2 === false && !h.files.length);
 
     h = env(); await openCo(h);
-    ok('admin: MM41 има', !!btn(mod(h), 'MM41'));
     await h.w.rvCoOpenStore('Кърджали'); await ticks(5);
+    ok('admin: MM41 има (в бланката, 30.10.2026)', !!btn(mod(h), 'MM41'));
     ok('admin: VK11 има', !!btn(mod(h), 'VK11'));
     realClick(h.w, btn(mod(h), 'VK11')); await ticks(2);
     ok('admin: VK11 прави файл', h.files.length === 1 && /^VK11-/.test(h.files[0]), h.files.join(','));

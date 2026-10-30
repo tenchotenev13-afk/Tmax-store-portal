@@ -98,10 +98,12 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
 
 (async function run() {
 
-  section('1. MM41 — нови кодове');
+  /* От 30.10.2026 MM41 е по бланката на обекта (revaluation-elica-2910.test.js
+     пази правилата за бланката и каталога); тук — шаблонът и изключенията. */
+  section('1. MM41 — нови кодове (бланката на Кърджали)');
   {
-    const h = env(); await open(h);
-    realClick(h.w, btn(mod(h), 'MM41 — нови кодове')); await ticks(8);
+    const h = env(); await open(h, 'Кърджали');
+    realClick(h.w, btn(mod(h), '⬇ MM41')); await ticks(8);
     const a = h.aoas[0] || [];
     ok('заглавията точно MATNR/MAKTX/MEINH_01/ENDPR', JSON.stringify(a[0]) === '["MATNR","MAKTX","MEINH_01","ENDPR"]', JSON.stringify(a[0]));
     ok('листът е като в шаблона', h.sheets[0] === 'MM41RAZPR Създаване на преоцене');
@@ -109,18 +111,19 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
     ok('MAKTX = ПРЕОЦ.+име, отрязано на 40', r && r[1] === ('ПРЕОЦ.' + LONG).slice(0, 40) && r[1].length === 40, r && JSON.stringify(r[1]));
     ok('ENDPR = стандартната цена на оригинала (139,99, не новата)', r && r[3] === 139.99);
     ok('MEINH_01 по SAP („бр.“ → БР)', r && r[2] === 'БР');
-    ok('дубликат по код (Кърджали + Шумен) → 1 ред', a.filter(x => x[0] === '8014557').length === 1);
+    ok('8014557 → 1 ред (Шумен не е в тази бланка)', a.filter(x => x[0] === '8014557').length === 1);
     ok('8025298 не влиза (повторна преоценка)', !a.some(x => x[0] === '8025298'));
     ok('код в регистъра не влиза (8033333)', !a.some(x => x[0] === '8033333'));
     ok('чернова не влиза (8077777)', !a.some(x => x[0] === '8077777'));
     ok('ред без new_sap_code не влиза', a.length === 3, a.length);
     ok('„пале“ (непозната МЕ) влиза, но toast го изброява', a.some(x => x[0] === '8044444') && h.calls.toast.some(t => t.indexOf('МЕ не е по SAP: 8044444 (пале)') >= 0), h.calls.toast.join(' | '));
-    ok('файл MM41-preocenka-…', /^MM41-preocenka-/.test(h.files[0] || ''));
-    const e = env({ subs: [Object.assign({}, SUBS[2])], items: [ITEMS[6]] }); await open(e);
-    realClick(e.w, btn(mod(e), 'MM41 — нови кодове')); await ticks(8);
-    ok('кампания без обработени/подадени бланки → „Няма нови кодове за MM41“, без файл', !e.files.length && e.calls.toast.some(t => t.indexOf('Няма нови кодове за MM41') >= 0));
-    const f = env({ fail: { GET: /revaluation_codes/ } }); await open(f);
-    realClick(f.w, btn(mod(f), 'MM41 — нови кодове')); await ticks(8);
+    ok('файл MM41-8-Кърджали-<кампания>.xlsx', h.files[0] === 'MM41-8-Кърджали-Тестова_преоценка_Кърджали_10.2026.xlsx', h.files[0]);
+    const e = env({ subs: [Object.assign({}, SUBS[2])], items: [ITEMS[6]] }); await open(e, 'Добрич');
+    ok('чернова → без бутон MM41', !btn(mod(e), 'MM41'));
+    await e.w.rvMm41(); await ticks(8);
+    ok('…и извикан отвън → „Няма нови кодове за MM41“, без файл', !e.files.length && e.calls.toast.some(t => t.indexOf('Няма нови кодове за MM41') >= 0));
+    const f = env({ fail: { GET: /revaluation_codes/ } }); await open(f, 'Кърджали');
+    realClick(f.w, btn(mod(f), '⬇ MM41')); await ticks(8);
     ok('паднал регистър → файлът НЕ е направен', !f.files.length && f.calls.toast.some(t => t.indexOf('MM41 НЕ е направен') >= 0));
   }
 
@@ -148,21 +151,21 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
 
   section('2. „Кодовете са създадени в SAP“ → регистър');
   {
-    const h = env(); await open(h);
+    const h = env(); await open(h, 'Кърджали');
     realClick(h.w, btn(mod(h), 'Кодовете са създадени в SAP')); await ticks(8);
     const p = h.calls.post.find(x => x.table === 'revaluation_codes');
     ok('confirm с броя (2)', h.calls.confirm.some(m => m.indexOf('2 кода') >= 0));
     ok('POST с точните редове (8014557, 8044444)', p && Array.isArray(p.body) && p.body.map(x => x.new_sap_code).join(',') === '8014557,8044444', p && JSON.stringify(p.body.map(x => x.new_sap_code)));
     const b = p && p.body.find(x => x.new_sap_code === '8014557');
-    ok('редът: sap_code, MAKTX, МЕ, ENDPR, кампания, кой', b && b.sap_code === '14557' && b.product_name.length === 40 && b.unit === 'БР' && b.std_price === 139.99 && b.campaign_id === 'c-1' && b.created_by === 'Елица Гюрова');
+    ok('редът: sap_code, MAKTX, МЕ, ENDPR, кампания, обект, кой', b && b.sap_code === '14557' && b.product_name.length === 40 && b.unit === 'БР' && b.std_price === 139.99 && b.campaign_id === 'c-1' && b.store_name === 'Кърджали' && b.created_by === 'Елица Гюрова');
     ok('без повторната и без регистъра', p && !p.body.some(x => x.new_sap_code === '8025298' || x.new_sap_code === '8033333'));
-    const c = env({ confirm: false }); await open(c);
+    const c = env({ confirm: false }); await open(c, 'Кърджали');
     realClick(c.w, btn(mod(c), 'Кодовете са създадени в SAP')); await ticks(8);
     ok('без потвърждение → нищо', !c.calls.post.length);
-    const f = env({ fail: { POST: /revaluation_codes/ } }); await open(f);
+    const f = env({ fail: { POST: /revaluation_codes/ } }); await open(f, 'Кърджали');
     realClick(f.w, btn(mod(f), 'Кодовете са създадени в SAP')); await ticks(8);
     ok('провален POST → червен toast', f.calls.toast.some(t => t.indexOf('Кодовете НЕ са записани') >= 0));
-    const s = env({ user: { email: 'sn@temax.bg', display_name: 'Снаб', role: 'supply', store_name: 'Централен офис' } }); await open(s);
+    const s = env({ user: { email: 'sn@temax.bg', display_name: 'Снаб', role: 'supply', store_name: 'Централен офис' } }); await open(s, 'Кърджали');
     ok('supply: без MM41 и без „създадени“ (19.10.2026 — само ЦО)', !btn(mod(s), 'MM41') && !btn(mod(s), 'Кодовете са създадени'));
   }
 
@@ -181,7 +184,7 @@ function setVal(h, id, val) { const el = h.doc.getElementById(id); el.value = va
     h.doc.getElementById('rv-vk-from').value = '2026-10-20';
     realClick(h.w, btn(mod(h), 'VK11 — Кърджали')); await ticks(3);
     const a = h.aoas[0] || [];
-    ok('заглавията точно', JSON.stringify(a[0]) === JSON.stringify(['Материал', 'МЕ', 'Прод,цена нова', 'Валидна от', 'Валидна до']), JSON.stringify(a[0]));
+    ok('заглавията: шаблонът + „Обект“ (30.10.2026)', JSON.stringify(a[0]) === JSON.stringify(['Материал', 'МЕ', 'Прод,цена нова', 'Валидна от', 'Валидна до', 'Обект']), JSON.stringify(a[0]));
     ok('листът е като в шаблона (с интервала)', h.sheets[0] === 'смяна на продажна цена ');
     const r = a.find(x => x[0] === '8014557');
     ok('ред: код, МЕ по SAP, нова цена', r && r[1] === 'БР' && r[2] === 69.99);

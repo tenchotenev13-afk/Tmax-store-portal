@@ -242,6 +242,9 @@ function rvLoadSheet(){
       if(!rvSub){ rvItems = []; return; }
       return sbGet('revaluation_items', 'submission_id=eq.' + rvSub.id + '&select=*&order=sort_order.asc,created_at.asc')
         .then(function(items){ if(seq === rvLoadSeq) rvItems = Array.isArray(items) ? items : []; });
+    }).then(function(){
+      /* Баджът „в SAP" гледа и product_catalog — само кодовете на бланката (30.10.2026). */
+      if(seq === rvLoadSeq && rvIsCoViewer() && rvItems.length) return rvLoadCat(rvItems.map(function(it){ return it.new_sap_code; }));
     }).then(function(){ if(seq === rvLoadSeq) rvRender(); });
 }
 function rvPickCampaign(id){
@@ -283,11 +286,8 @@ function rvRender(){
       : '<button class="btn-sm" onclick="rvHistOpenView()">📁 История</button>';
     if(c && !rvRegionalAcc()){
       h += '<button class="btn-sm" onclick="rvExportCampaign()">📥 Excel — кампания</button>';
-      /* MM41 и VK11 — само ЦО (19.10.2026); Снабдяването има прегледа и двата Excel-а. */
-      if(rvIsCO()){
-        h += '<button class="btn-sm" onclick="rvMm41()">📄 MM41 — нови кодове</button>';
-        h += '<button class="btn-sm" onclick="rvMm41Done()">✔ Кодовете са създадени в SAP</button>';
-      }
+      /* MM41 и „Кодовете са създадени" са в бланката на обекта (30.10.2026) —
+         само ЦО, виж rvCoButtonsHtml. */
     }
   } else if(!rvIsStoreUser()){
     var opts = rvStoreOptions();
@@ -370,7 +370,7 @@ function rvInp(it, field, val, w){
 function rvRowHtml(it, edit, pink, coEdit){
   var bad = rvBad[it.id], err = rvErr[it.id];
   var bg = bad || err ? 'background:#fef2f2;' : '';
-  var badge = (rvIsRepeat(it.sap_code) ? ' <span class="rv-repeat" style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;">вече преоценен</span>' : '') + rvCodeBadge(it);
+  var badge = rvIsRepeat(it.sap_code) ? ' <span class="rv-repeat" style="background:#ede9fe;color:#5b21b6;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;">вече преоценен</span>' : '';
   var h = '<tr id="rv-row-' + escAttr(it.id) + '" style="' + bg + '">';
   h += '<td style="font-family:DM Mono,monospace;">' + esc(it.sap_code) + badge +
     (bad ? '<div class="rv-bad" style="font-size:10px;color:#b91c1c;">' + esc(bad.join(' · ')) + '</div>' : '') +
@@ -980,13 +980,16 @@ function rvPinkCells(it, coEdit){
   var isProp = function(f){ return (it[f] == null || it[f] === '') && prop[f] != null; };
   var fmt = { new_sap_code: function(x){ return x == null ? '' : String(x); }, sale_price: rvFmt, co_qty: function(x){ return x == null ? '' : rvFmtQty(x); }, co_comment: function(x){ return x || ''; } };
   var PINK = 'background:#fdf2f8;';
+  /* Баджът „за създаване" / „в SAP" стои под новия код (30.10.2026, Елица). */
+  var badge = rvCodeBadge(it);
+  var under = function(f){ return f === 'new_sap_code' && badge ? '<div class="rv-code-badge">' + badge + '</div>' : ''; };
   return ['new_sap_code', 'sale_price', 'co_qty', 'co_comment'].map(function(f){
     var v = fmt[f](val(f));
-    if(!coEdit) return '<td style="' + PINK + (f === 'new_sap_code' ? 'font-family:DM Mono,monospace;' : '') + '">' + esc(v) + '</td>';
+    if(!coEdit) return '<td style="' + PINK + (f === 'new_sap_code' ? 'font-family:DM Mono,monospace;' : '') + '">' + esc(v) + under(f) + '</td>';
     var w = f === 'co_comment' ? '160px' : (f === 'new_sap_code' ? '84px' : '68px');
     return '<td style="' + PINK + '"><input type="text" class="' + (isProp(f) ? 'rv-prop' : '') + '" data-id="' + escAttr(it.id) + '" data-f="' + f + '" value="' + escAttrVal(v) + '"' +
       (isProp(f) ? ' title="предложено — записва се, когато пипнеш реда" style="width:' + w + ';font-style:italic;color:#9d174d;border:1px dashed #f9a8d4;"' : ' style="width:' + w + ';"') +
-      ' onchange="rvCoEdit(this.dataset.id,this.dataset.f,this.value)"></td>';
+      ' onchange="rvCoEdit(this.dataset.id,this.dataset.f,this.value)">' + under(f) + '</td>';
   }).join('');
 }
 function rvCoEditableProposal(it, coEdit){ return coEdit ? rvCoProposal(it) : {}; }
@@ -1003,7 +1006,9 @@ function rvCoEdit(id, field, val){
     if(t !== '' && (n == null || n < 0)){ toast('Невалидно число', '#dc2626'); rvRender(); return Promise.resolve(false); }
     p[field] = n == null ? null : (field === 'co_qty' ? rvRound3(n) : rvRound2(n));
   }
-  return rvCoPatchItem(it, p).then(function(ok){ rvRender(); return ok; });
+  return rvCoPatchItem(it, p).then(function(ok){
+    return (ok && it.new_sap_code ? rvLoadCat([it.new_sap_code]) : Promise.resolve()).then(function(){ rvRender(); return ok; });
+  });
 }
 function rvCoPatchItem(it, p){
   p.co_by = currentUser.display_name || currentUser.email;
@@ -1036,6 +1041,12 @@ function rvCoButtonsHtml(){
   if(!rvSub.no_items && rvItems.length){
     h += '<label style="font-size:12px;color:#64748b;margin-left:6px;">Валидна от</label><input id="rv-vk-from" type="date" value="' + today() + '">' +
       '<button class="btn-sm" onclick="rvVk11()">📄 VK11 — ' + esc(rvStore) + '</button>';
+    /* MM41 и прехвърлянето — по бланката на обекта (30.10.2026, Елица). */
+    if(!rvRegionalAcc() && (rvSub.status === 'submitted' || rvSub.status === 'processed')){
+      h += '<button class="btn-sm" onclick="rvMm41()">⬇ MM41</button>' +
+        '<button class="btn-sm" onclick="rvMm41Done()">✔ Кодовете са създадени в SAP</button>';
+    }
+    h += '<button class="btn-sm" onclick="rvTransfer()">⬇ Прехвърляне</button>';
   }
   if(rvCoCanEdit() && rvItems.some(function(it){ return Object.keys(rvCoProposal(it)).length > 0; })){
     h += '<button class="btn-sm" onclick="rvCoAcceptAll()">✔ Приеми предложените за всички</button>';
@@ -1231,6 +1242,8 @@ function rvExportCampaign(){
      оригиналния артикул. Не влизат: повторна преоценка (sap_code
      /^8\d{6}$/), кодове от регистъра revaluation_codes (създадени по-рано),
      дубликати по код. Източник: подадени и обработени бланки на кампанията.
+     От 30.10.2026 — по БЛАНКАТА на обекта (rvMm41Collect) и без кодовете от
+     product_catalog; регистърът пази и обекта (revaluation_codes.store_name).
    VK11 (цената по обект) — шаблон „Смяна на продажна цена.xlsx": точно
    Материал, МЕ, „Прод,цена нова", „Валидна от", „Валидна до". Датите са
    ИСТИНСКИ дати (Date → Excel сериен номер с формат за дата), „Валидна до" =
@@ -1247,7 +1260,11 @@ var rvSchedEdit = null;      /* {from,to,kind,pct,title} на редактира
 var rvSchedSubs = null;      /* campaign_id → брой бланки; null = не е заредено */
 var rvMyCampaignIds = {};    /* обект: кампании, в които СВОЯТА му бланка е submitted / processed */
 var RV_MM41_HEADERS = ['MATNR', 'MAKTX', 'MEINH_01', 'ENDPR'];
-var RV_VK11_HEADERS = ['Материал', 'МЕ', 'Прод,цена нова', 'Валидна от', 'Валидна до'];
+/* „Обект" след „Валидна до" (30.10.2026, Елица) — първите 5 са точно шаблона. */
+var RV_VK11_HEADERS = ['Материал', 'МЕ', 'Прод,цена нова', 'Валидна от', 'Валидна до', 'Обект'];
+var RV_TR_HEADERS = ['Основен код', 'Количество', 'Код 8', 'Количество', 'Завод'];
+var rvCat = {};              /* new_sap_code → true (в product_catalog) / false; липсва = не е проверен */
+var RV_CAT_CHUNK = 100;
 var RV_MM41_SHEET = 'MM41RAZPR Създаване на преоцене';  /* както в шаблона (31 знака) */
 var RV_VK11_SHEET = 'смяна на продажна цена ';          /* както в шаблона, с интервала */
 
@@ -1492,41 +1509,81 @@ function rvLoadCodes(){
     return rows;
   });
 }
+/* Каталогът (107 хил. реда) НЕ се чете цял — само дадените кодове, на порции
+   по RV_CAT_CHUNK през in.(…), и само непроверените. Код, който не прилича на
+   SAP код, не може да е в каталога → false без заявка. {ok:false} = порция
+   падна; кодовете от нея остават непроверени (30.10.2026). */
+function rvLoadCat(codes){
+  var todo = [], seen = {};
+  (codes || []).forEach(function(x){
+    var c = String(x == null ? '' : x).trim();
+    if(!c || seen[c] || rvCat[c] !== undefined) return;
+    seen[c] = 1;
+    if(/^[0-9A-Za-z_-]+$/.test(c)) todo.push(c); else rvCat[c] = false;
+  });
+  var chunks = [];
+  for(var i = 0; i < todo.length; i += RV_CAT_CHUNK) chunks.push(todo.slice(i, i + RV_CAT_CHUNK));
+  return Promise.all(chunks.map(function(ch){
+    return sbGetOk('product_catalog', 'sap_code=in.(' + ch.join(',') + ')&select=sap_code').then(function(res){
+      if(!res.ok) return false;
+      var found = {};
+      res.rows.forEach(function(r){ found[String(r.sap_code)] = 1; });
+      ch.forEach(function(c){ rvCat[c] = !!found[c]; });
+      return true;
+    });
+  })).then(function(oks){ return { ok: oks.every(function(x){ return x; }) }; });
+}
+/* „в SAP" = в регистъра ИЛИ в каталога; „за създаване" само ако каталогът е
+   проверен и го няма. Непроверен код (паднала заявка) → без бадж. */
 function rvCodeBadge(it){
   if(!rvIsCoViewer()) return '';
   var code = String(it.new_sap_code || '').trim();
   if(!code || rvIsRepeat(it.sap_code)) return '';
-  return rvCodes[code]
-    ? ' <span class="rv-in-sap" style="background:#dcfce7;color:#166534;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;">в SAP</span>'
-    : ' <span class="rv-to-create" style="background:#ffedd5;color:#9a3412;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;">за създаване</span>';
+  if(rvCodes[code] || rvCat[code] === true) return '<span class="rv-in-sap" style="background:#dcfce7;color:#166534;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;">в SAP</span>';
+  if(rvCat[code] === false) return '<span class="rv-to-create" style="background:#ffedd5;color:#9a3412;border-radius:20px;padding:1px 7px;font-size:10px;font-weight:700;">за създаване</span>';
+  return '';
 }
 
-/* ─── MM41 ─────────────────────────────────────────────── */
-/* Чете НАНОВО бланките, редовете и регистъра (не вярва на екрана) и връща
-   {ok:true, rows:[…]} или {ok:false}. */
+/* ─── MM41 (по бланката на обекта, 30.10.2026) ─────────── */
+/* Чете НАНОВО бланката, редовете ѝ, регистъра и каталога за кандидатите
+   (не вярва на екрана) и връща {ok:true, rows:[…]} или {ok:false}. Не влизат:
+   повторна преоценка, код в регистъра, код в каталога, дубликат. */
 function rvMm41Collect(){
   var c = rvCampaign();
-  if(!c) return Promise.resolve({ ok: false });
+  if(!c || !rvSub) return Promise.resolve({ ok: false });
+  var store = rvStore;
   return Promise.all([
-    sbGetOk('revaluation_submissions', 'campaign_id=eq.' + c.id + '&select=id,status,no_items'),
-    sbGetAll('revaluation_items', 'campaign_id=eq.' + c.id + '&select=*&order=store_name.asc,sort_order.asc,id.asc'),
+    sbGetOk('revaluation_submissions', 'id=eq.' + rvSub.id + '&select=id,status,no_items'),
+    sbGetAll('revaluation_items', 'submission_id=eq.' + rvSub.id + '&select=*&order=sort_order.asc,id.asc'),
     rvLoadCodes()
   ]).then(function(r){
     if(!r[0].ok || r[1].partial || r[2].partial) return { ok: false };
-    var subs = {};
-    r[0].rows.forEach(function(s){ if(!s.no_items && (s.status === 'submitted' || s.status === 'processed')) subs[s.id] = 1; });
-    var seen = {}, rows = [];
-    r[1].forEach(function(it){
-      if(!subs[it.submission_id]) return;
+    var s = r[0].rows[0];
+    if(!s || s.no_items || (s.status !== 'submitted' && s.status !== 'processed')) return { ok: true, rows: [] };
+    var cand = r[1].filter(function(it){
       var code = String(it.new_sap_code || '').trim();
-      if(!code || rvIsRepeat(it.sap_code) || rvCodes[code] || seen[code]) return;
-      seen[code] = 1;
-      var su = rvSapUnit(it.unit);
-      rows.push({ new_sap_code: code, sap_code: String(it.sap_code), maktx: ('ПРЕОЦ.' + String(it.product_name || '').trim()).slice(0, 40),
-        unit: su.unit, unitOk: su.ok, std: it.std_price == null ? null : Number(it.std_price), campaign_id: c.id });
+      return code && !rvIsRepeat(it.sap_code) && !rvCodes[code];
     });
-    return { ok: true, rows: rows };
+    return rvLoadCat(cand.map(function(it){ return it.new_sap_code; })).then(function(cat){
+      if(!cat.ok) return { ok: false };
+      var seen = {}, rows = [];
+      cand.forEach(function(it){
+        var code = String(it.new_sap_code).trim();
+        if(rvCat[code] !== false || seen[code]) return;
+        seen[code] = 1;
+        var su = rvSapUnit(it.unit);
+        rows.push({ new_sap_code: code, sap_code: String(it.sap_code), maktx: ('ПРЕОЦ.' + String(it.product_name || '').trim()).slice(0, 40),
+          unit: su.unit, unitOk: su.ok, std: it.std_price == null ? null : Number(it.std_price), campaign_id: c.id, store_name: store });
+      });
+      return { ok: true, rows: rows };
+    });
   });
+}
+/* Име на файл с обекта и кампанията: без знаците, които Windows не позволява. */
+function rvFileName(prefix){
+  var c = rvCampaign(), no = rvStoreNo(rvStore);
+  var part = function(s){ return String(s || '').replace(/[\\\/:*?"<>|]+/g, '-').replace(/\s+/g, '_'); };
+  return prefix + '-' + (no ? no + '-' : '') + part(rvStore) + '-' + part((c && c.title) || (c && c.starts_on) || today()) + '.xlsx';
 }
 function rvMm41Aoa(rows){
   return [RV_MM41_HEADERS.slice()].concat(rows.map(function(x){ return [x.new_sap_code, x.maktx, x.unit, x.std == null ? '' : x.std]; }));
@@ -1538,12 +1595,11 @@ function rvMm41(){
     if(!res.rows.length){ toast('Няма нови кодове за MM41'); return false; }
     var bad = res.rows.filter(function(x){ return !x.unitOk; }).map(function(x){ return x.new_sap_code + ' (' + (x.unit || 'празна') + ')'; });
     var noStd = res.rows.filter(function(x){ return x.std == null; }).map(function(x){ return x.new_sap_code; });
-    var c = rvCampaign();
     return new Promise(function(resolve){
       rvWithXlsx(function(){
         var wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rvMm41Aoa(res.rows)), RV_MM41_SHEET);
-        XLSX.writeFile(wb, 'MM41-preocenka-' + ((c && c.starts_on) || today()) + '.xlsx');
+        XLSX.writeFile(wb, rvFileName('MM41'));
         var w = [];
         if(bad.length) w.push('МЕ не е по SAP: ' + bad.join(', '));
         if(noStd.length) w.push('без стандартна цена: ' + noStd.join(', '));
@@ -1561,7 +1617,7 @@ function rvMm41Done(){
     if(!confirm('Да се запишат ' + res.rows.length + ' кода като създадени в SAP? Следващият MM41 няма да ги съдържа.')) return false;
     var who = currentUser.display_name || currentUser.email;
     var bodies = res.rows.map(function(x){
-      return { new_sap_code: x.new_sap_code, sap_code: x.sap_code, product_name: x.maktx, unit: x.unit, std_price: x.std, campaign_id: x.campaign_id, created_by: who };
+      return { new_sap_code: x.new_sap_code, sap_code: x.sap_code, product_name: x.maktx, unit: x.unit, std_price: x.std, campaign_id: x.campaign_id, store_name: x.store_name, created_by: who };
     });
     return sbPost('revaluation_codes', bodies).then(function(p){
       if(!p.ok){ toast('Кодовете НЕ са записани: ' + sbErrMsg(p), '#dc2626'); return false; }
@@ -1573,21 +1629,22 @@ function rvMm41Done(){
 }
 
 /* ─── VK11 (цената по обект) ───────────────────────────── */
-function rvVk11Aoa(items, fromIso){
+function rvVk11Aoa(items, fromIso, store){
   var p = fromIso.split('-');
   var from = new Date(+p[0], +p[1] - 1, +p[2]);
   var to = new Date(9999, 11, 31);
   return [RV_VK11_HEADERS.slice()].concat(items.filter(function(it){
     return String(it.new_sap_code || '').trim() && it.sale_price != null && it.sale_price !== '';
   }).map(function(it){
-    return [String(it.new_sap_code).trim(), rvSapUnit(it.unit).unit, Number(it.sale_price), from, to];
+    /* Цената остава ЧИСЛО — точка/запетая е настройка на Excel-а, не на файла. */
+    return [String(it.new_sap_code).trim(), rvSapUnit(it.unit).unit, Number(it.sale_price), from, to, store || ''];
   }));
 }
 function rvVk11(){
   if(!rvIsCO() || !rvSub) return false;
   var fromIso = v('rv-vk-from') || today();
   if(!/^\d{4}-\d{2}-\d{2}$/.test(fromIso)){ toast('Невалидна дата „Валидна от"', '#dc2626'); return false; }
-  var aoa = rvVk11Aoa(rvSub.no_items ? [] : rvItems, fromIso);
+  var aoa = rvVk11Aoa(rvSub.no_items ? [] : rvItems, fromIso, rvStore);
   if(aoa.length < 2){ toast('Няма редове с преоценен код и цена — VK11 НЕ е направен', '#dc2626'); return false; }
   var no = rvStoreNo(rvStore);
   /* МЕ не по SAP — предупреждение като при MM41, файлът пак се прави (20.10.2026).
@@ -1602,6 +1659,41 @@ function rvVk11(){
     toast('VK11: ' + (aoa.length - 1) + ' реда' + (bad.length ? ' · МЕ не е по SAP: ' + bad.join(', ') : ''), bad.length ? '#d97706' : undefined);
   });
   return true;
+}
+
+/* ─── Прехвърляне (30.10.2026, Елица) ──────────────────── */
+/* Ред на всеки ред с new_sap_code и co_qty > 0: основен код → код 8, двете
+   количества = co_qty. Завод = minus_plants.plant с role 'наличност' за
+   обекта; няма ли (Пазарджик, Сервиз Троян, складовете) — празна клетка и
+   жълто предупреждение, файлът пак се прави. Повторната преоценка влиза. */
+function rvTransferAoa(items, plant){
+  return [RV_TR_HEADERS.slice()].concat(items.filter(function(it){
+    return String(it.new_sap_code || '').trim() && Number(it.co_qty) > 0;
+  }).map(function(it){
+    var q = Number(it.co_qty);
+    return [String(it.sap_code == null ? '' : it.sap_code).trim(), q, String(it.new_sap_code).trim(), q, plant || ''];
+  }));
+}
+function rvTransfer(){
+  if(!rvIsCO() || !rvSub) return Promise.resolve(false);
+  var aoa = rvTransferAoa(rvSub.no_items ? [] : rvItems, '');
+  if(aoa.length < 2){ toast('Няма редове с преоценен код и прехвърлено количество — файлът НЕ е направен', '#dc2626'); return Promise.resolve(false); }
+  var store = rvStore;
+  return sbGetOk('minus_plants', 'store_name=eq.' + encodeURIComponent(store) + '&role=eq.' + encodeURIComponent('наличност') + '&select=plant,store_name,role').then(function(res){
+    if(!res.ok){ toast('Заводите не се прочетоха — файлът НЕ е направен', '#dc2626'); return false; }
+    var row = res.rows.filter(function(r){ return r.store_name === store && r.role === 'наличност'; })[0];
+    var plant = row ? String(row.plant) : '';
+    aoa = rvTransferAoa(rvItems, plant);
+    return new Promise(function(resolve){
+      rvWithXlsx(function(){
+        var wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Прехвърляне');
+        XLSX.writeFile(wb, rvFileName('Prehvarlyane'));
+        toast('Прехвърляне: ' + (aoa.length - 1) + ' реда' + (plant ? ' · завод ' + plant : ' · няма завод „наличност" за ' + store + ' — колоната „Завод" е празна'), plant ? undefined : '#d97706');
+        resolve(true);
+      });
+    });
+  });
 }
 
 /* ═══ „📁 История" за ЦО (16.10.2026) ═══════════════════════════════════════
