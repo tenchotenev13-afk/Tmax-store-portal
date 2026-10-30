@@ -118,7 +118,12 @@
    „Днес", minus_unfilled в bulletin-notify — копие на правилото). Чип
    „🔁 N за 30 дни" вместо лилавия „×N". Седмичното писмо „Минуси —
    повтарящи се артикули" (send-scheduled-report, type 'minus_multi'; копие за
-   „Тест до мен" в report.js) ползва СЪЩОТО правило. */
+   „Тест до мен" в report.js) ползва СЪЩОТО правило.
+
+   Етап 3 — темплейт за ревизия (30.10.2026, Тенчо): „📄 Темплейт за ревизия"
+   в „📋 Дневен" (обектът; контролингът — само при един избран обект) →
+   преглед → Excel „ref | SAP код | (празно)" за ZINVCOUNT. Без запис в базата;
+   956 не се генерира. Правилото — при mnRevRows. */
 
 var mnMovs = [];
 var mnReasons = [];
@@ -167,6 +172,9 @@ var MN_COL_LABEL = {
   qty: 'Колич. в ед. въвежд.', uom: 'Единица на запис', doc: 'Документ за материал',
   item: 'Позиция докум.матер.', date: 'Дата осчетоводяване', htext: 'Текст общи данни док'
 };
+/* Причините — едно четене за loadMinusi и mnLoadSummary: двете пишат mnReasons
+   и по-късното не бива да изтрие excluded_from_revision (темплейтът за ревизия). */
+var MN_REASON_Q = 'select=id,label,active,sort,requires_note,excluded_from_revision&order=sort.asc,id.asc';
 var MN_MOV_COLS = 'id,plant,store_name,material,material_desc,mvt_type,qty,uom,mat_doc,doc_item,doc_year,posting_date,real_code,reason_id,employee_name,note,action,filled_by,filled_at';
 
 /* ─── Роли ─────────────────────────────────────────────── */
@@ -492,7 +500,7 @@ function loadMinusi(){
   return Promise.all([
     sbGetOk('app_settings', 'key=in.(minus_stores,minus_repeat_days,minus_multi_count,minus_multi_days)&select=key,value'),
     sbGetOk('minus_plants', 'select=plant,store_name'),
-    sbGetOk('minus_reasons', 'select=id,label,active,sort,requires_note&order=sort.asc,id.asc'),
+    sbGetOk('minus_reasons', MN_REASON_Q),
     sbGetOk('minus_uom_thresholds', 'select=uom,min_qty')
   ]).then(function(rs){
     if(seq !== mnLoadSeq) return;
@@ -795,6 +803,7 @@ function mnRender(){
   h += '<input id="mn-search" type="search" placeholder="🔍 Код" value="' + escAttrVal(mnSearch) + '" oninput="mnSetSearch(this.value)" style="width:140px;">';
   h += '<button id="mn-excel" class="filter-btn" onclick="mnExportExcel()">📥 Excel</button>';
   h += '<button id="mn-print" class="filter-btn" onclick="mnPrint()">🖨️ Печат</button>';
+  if(mnView === 'daily') h += mnRevBtnHtml(calc);
   h += '</div>';
   /* Таблиците са в #mn-body — търсенето прерисува само тях, за да не губи
      полето фокуса при всяка буква. */
@@ -970,6 +979,123 @@ function mnOverHtml(rows, early){
   return h + '</div>';
 }
 
+/* ─── Темплейт за ревизия (етап 3, 30.10.2026) ─────────── */
+/* Обектът ревизира в ZINVCOUNT кода с минуса и заметнатия код; 956 се пуска
+   ръчно след това. Порталът дава само файла за броенето — нищо не записва.
+   Влиза минус, който е незакрит (calc.open), попълнен (не mnUnfilled) и с
+   причина, чийто minus_reasons.excluded_from_revision е false (флагът — от
+   базата; липсва → не влиза). Кодове: материалът + заметнатият (real_code),
+   ако е попълнен и различен; trim; всеки код веднъж. „Преброено количество"
+   остава празно — попълва го обектът. */
+function mnRevReasonOk(id){
+  if(id == null) return false;
+  for(var i = 0; i < mnReasons.length; i++) if(String(mnReasons[i].id) === String(id)) return mnReasons[i].excluded_from_revision === false;
+  return false;
+}
+function mnRevRows(calc){
+  var map = {}, out = [], descOf = {};
+  mnMovs.forEach(function(m){ var c = mnCoKey(m.material); if(c && m.material_desc && !descOf[c]) descOf[c] = m.material_desc; });
+  var add = function(code, id, of){
+    var e = map[code];
+    if(!e){ e = map[code] = { code: code, desc: descOf[code] || '', minus: false, realOf: [], ids: {}, n: 0 }; out.push(e); }
+    if(of == null) e.minus = true;
+    else if(e.realOf.indexOf(of) < 0) e.realOf.push(of);
+    if(!e.ids[id]){ e.ids[id] = 1; e.n++; }
+  };
+  mnRevReady(calc).forEach(function(r){
+    var mat = mnCoKey(r.material), real = mnCoKey(r.real_code);
+    if(!mat) return;
+    add(mat, String(r.id), null);
+    if(real && real !== mat && mnRevIsCode(real)) add(real, String(r.id), mat);
+  });
+  return out.sort(function(a, b){ return a.code.localeCompare(b.code, undefined, { numeric: true }); });
+}
+function mnRevReady(calc){
+  return (calc.open || []).filter(function(r){ return !mnUnfilled(r) && mnRevReasonOk(r.reason_id); });
+}
+/* Заметнатият код е свободен текст („38554 и 38619" — Гоце Делчев, 30.10):
+   с интервал / запетая / „;" / „/" не е ЕДИН код и не влиза във файла —
+   SAP би го отхвърлил. Прегледът го показва с предупреждение. */
+function mnRevIsCode(c){ return /^[^\s,;\/]+$/.test(c); }
+function mnRevBad(calc){
+  var out = [];
+  mnRevReady(calc).forEach(function(r){
+    var mat = mnCoKey(r.material), real = mnCoKey(r.real_code);
+    if(mat && real && real !== mat && !mnRevIsCode(real)) out.push({ real: real, of: mat });
+  });
+  return out;
+}
+function mnRevOrigin(e){
+  var p = [];
+  if(e.minus) p.push('минус');
+  if(e.realOf.length) p.push('заметнат към ' + e.realOf.join(', '));
+  return p.join(' · ');
+}
+/* Неактивен, не скрит: „избери обект" при „Всички обекти", „няма минуси за
+   ревизия" при 0 реда. */
+function mnRevWhyOff(calc){
+  if(mnIsAll() || !mnStore) return 'избери обект';
+  return mnRevRows(calc).length ? '' : 'няма минуси за ревизия';
+}
+function mnRevBtnHtml(calc){
+  var why = mnRevWhyOff(calc);
+  return '<button id="mn-rev" class="filter-btn" onclick="mnRevOpen()"' + (why ? ' disabled title="' + escAttrVal(why) + '" style="opacity:.55;cursor:not-allowed;"' : ' title="Excel за ZINVCOUNT: ref | SAP код | преброено"') + '>📄 Темплейт за ревизия</button>' +
+    (why ? '<span id="mn-rev-hint" style="color:#94a3b8;font-size:12px;">' + esc(why) + '</span>' : '');
+}
+function mnRevOverlay(){
+  var ov = document.getElementById('mn-rev-ov');
+  if(!ov){
+    ov = document.createElement('div');
+    ov.id = 'mn-rev-ov';
+    ov.className = 'modal-bg';
+    ov.onclick = function(ev){ if(ev.target === ov) closeModal('mn-rev-ov'); };
+    document.body.appendChild(ov);
+  }
+  return ov;
+}
+function mnRevOpen(){
+  var calc = mnCompute(mnMovs, mnThresholds), why = mnRevWhyOff(calc);
+  if(why){ toast('Темплейт за ревизия: ' + why, '#d97706'); return false; }
+  var rows = mnRevRows(calc), ov = mnRevOverlay();
+  var h = '<div class="modal" style="width:680px;"><h3>📄 Темплейт за ревизия — ' + esc(mnStore) + '</h3>' +
+    '<div class="modal-sub">Кодове за броене в ZINVCOUNT: незакритите попълнени минуси (без причините извън ревизия) и заметнатите кодове. „Преброено количество“ се попълва след броенето.</div>' +
+    '<table id="mn-rev-tbl"><thead><tr><th>Код</th><th>Описание</th><th>Откъде е</th><th>Брой минуси</th></tr></thead><tbody>';
+  rows.forEach(function(e){
+    h += '<tr class="mn-rev-row" data-code="' + escAttrVal(e.code) + '"><td>' + esc(e.code) + '</td><td>' + esc(e.desc) + '</td><td class="mn-rev-origin">' + esc(mnRevOrigin(e)) + '</td><td class="mn-rev-n" style="text-align:right;">' + e.n + '</td></tr>';
+  });
+  h += '</tbody></table>';
+  var bad = mnRevBad(calc);
+  if(bad.length) h += '<div id="mn-rev-bad" style="margin-top:10px;color:#b91c1c;font-size:13px;">⚠ Заметнат код, който не е един код — НЕ е във файла; оправи го в реда или го добави ръчно: ' +
+    bad.map(function(x){ return '„' + esc(x.real) + '“ (към ' + esc(x.of) + ')'; }).join(', ') + '</div>';
+  h += '<div class="modal-actions">' +
+    '<button class="btn" onclick="closeModal(\'mn-rev-ov\')">Затвори</button>' +
+    '<button id="mn-rev-xlsx" class="btn btn-green" onclick="mnRevDownload()">📥 Свали Excel (' + rows.length + ')</button></div></div>';
+  ov.innerHTML = h;
+  ov.classList.add('open');
+  return true;
+}
+/* Точно 3 колони; „ref" в първата (Тенчо 30.10 — SAP го хваща); третата празна. */
+function mnRevAoa(rows){
+  return [['Референция', 'SAP код', 'Преброено количество']].concat(rows.map(function(e){ return ['ref', String(e.code), null]; }));
+}
+function mnRevName(){ return 'Ревизия минуси ' + mnStore + ' ' + fmtDate(today()) + '.xlsx'; }
+function mnRevDownload(){
+  var calc = mnCompute(mnMovs, mnThresholds);
+  if(mnRevWhyOff(calc)) return;
+  var aoa = mnRevAoa(mnRevRows(calc)), name = mnRevName();
+  mnWithXlsx(function(){
+    var ws = XLSX.utils.aoa_to_sheet(aoa);
+    /* Кодът — текст: без загуба на водещи нули, без 1,23E+12. */
+    for(var i = 1; i < aoa.length; i++){
+      var c = ws['B' + (i + 1)];
+      if(c){ c.t = 's'; c.v = String(aoa[i][1]); c.z = '@'; }
+    }
+    var wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Ревизия');
+    XLSX.writeFile(wb, name);
+  });
+}
+
 /* ─── Действия ─────────────────────────────────────────── */
 function mnSetView(v){ mnView = v === 'bymat' ? 'bymat' : 'daily'; mnRender(); }
 function mnSetUnfilled(on){ mnOnlyUnfilled = !!on; mnRender(); }
@@ -1133,7 +1259,7 @@ function mnSave(id){
 function mnLoadSummary(onlyStores){
   return Promise.all([
     sbGetOk('app_settings', 'key=in.(minus_stores,minus_repeat_days,minus_multi_count,minus_multi_days)&select=key,value'),
-    sbGetOk('minus_reasons', 'select=id,label,active,sort,requires_note&order=sort.asc,id.asc'),
+    sbGetOk('minus_reasons', MN_REASON_Q),
     sbGetOk('minus_uom_thresholds', 'select=uom,min_qty')
   ]).then(function(rs){
     var bad = rs.filter(function(r){ return !r.ok; })[0];
