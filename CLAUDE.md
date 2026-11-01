@@ -550,8 +550,9 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
 
 ## Сигурност — текущо състояние
 
-- Anon ключът е публичен в клиента. RLS: 30 от 45 таблици с включено RLS,
-  15 без. Повечето политики следват permissive `anon_all_*`
+- Anon ключът е публичен в клиента. RLS (01.11.2026): Advisor показва 19
+  таблици без RLS, плюс `users` (затворена с колонни grants, виж долу); общо
+  86 от 106 в `public` с включено RLS. Повечето политики следват permissive `anon_all_*`
   (`for all using (true) with check (true)`).
 - `users` е с **изключено RLS**. `anon` и `authenticated` имат САМО колонен
   SELECT върху 11 безопасни колони (от `20260824190214_users_column_grants`) —
@@ -561,6 +562,9 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
   `auth-login`, `auth-set-password`, `set-history-pin`). Нова колона в
   `users` → само `grant select (колона)`; запис от клиента — само през
   `admin-users` (бял списък в `handler.ts`).
+- Колоната `users.password` (чист текст) я НЯМА от етап 5б (01.11.2026,
+  `users-drop-password-schema.sql`) — входът е само по `password_hash`.
+  Не се връща; заковано в `tests/users-no-plain-password.test.js`.
 - Не изключвай RLS „за да мине" — това е решение, което се записва в
   миграцията с едно изречение защо, не мълчалив заобикаляне.
 - При `SECURITY DEFINER` функция проверявай ACL-а за водещо `=X/` ПРЕДИ да

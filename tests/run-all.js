@@ -465,7 +465,8 @@ const TESTS = [
   'recurring-store-hints.test.js',
   'banner-split.test.js',
   'handover-structure.test.js',
-  'limit1000-co-transport.test.js'
+  'limit1000-co-transport.test.js',
+  'users-no-plain-password.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

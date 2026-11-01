@@ -97,7 +97,7 @@ function checklistGroupsOf(u) {
 
    ⚠️ ВТОРАТА ПОЛОВИНА ДНЕС Е СПЯЩА. Едж функцията auth-login връща
    currentUser без notify_groups (select-ът ѝ е
-   id,email,password,password_hash,store_name,role,display_name,
+   id,email,password_hash,store_name,role,display_name,
    assigned_stores,active), тоест полето стига дотук като undefined и
    проверката пада на false. Двамата с 'controlling' в базата към
    01.09.2026 са Цветелина Тенева и Миглена Павлова — и двете с роля

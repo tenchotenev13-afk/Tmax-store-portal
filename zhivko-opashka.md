@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(миграцията users_drop_password, users-drop-password-schema.sql — още НЕ е приложена; версията се дописва след прилагането)
+- 01.11 · users.password — text, колоната е ПРЕМАХНАТА (огледалото никога не е имало стойности: anon няма select върху нея)
+
 (в базата от миграцията revaluation_codes_store, revaluation-codes-store-schema.sql, версия 20261030123801, приложена 30.10.2026)
 - 30.10 · revaluation_codes.store_name — text, NULL, без default (11-те заварени реда → 'Кърджали')
 
