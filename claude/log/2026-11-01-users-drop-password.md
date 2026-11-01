@@ -5,5 +5,5 @@
 - Живите `auth-login`, `auth-set-password`, `admin-users`, `set-history-pin` (+ `_shared/session.ts` на всяка, `functions download --use-api`) — байт в байт като репото след `tr -d '\r'`; никоя не пипа колоната. Ресетът без стара парола иска admin пропуск → дупката в `claude/open-tasks.md` е затворена (62314bd).
 - Тест: `tests/users-no-plain-password.test.js` (статичен, бял списък по ред); 5 мутанта — съборени.
 - `checklist.js`: застарял коментар за select-а на auth-login (без `password`) — само коментар.
-- Миграция: още НЕ е приложена (след push). Версия: —.
+- Миграция: `users_drop_password`, версия 20261101213607 (01.11, след push на bd55528); в базата: колоната, default-ът и правата върху нея — 0; 104 реда, всички с хеш. Пробен вход admin 21:38 UTC — auth-login 200, пропуск получен (чатът през браузъра). Създаване на нов потребител — непроверено (`claude/open/01-11-users-create-after-5b.md`).
 - SHA е комитът, който добавя този файл.

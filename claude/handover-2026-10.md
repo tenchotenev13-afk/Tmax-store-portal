@@ -1087,8 +1087,8 @@ auto_complete). Код: `6b4fded` (на живо на Pages 25.10). **Кърдж
 в самия ред на `recurring_tasks`.
 
 **Сигурност** — `users` затворен (30.09). Етап 5б (01.11): колоната
-`users.password` махната (`users-drop-password-schema.sql`; номер на
-миграцията — след прилагането, виж `claude/log/2026-11-01-users-drop-password.md`).
+`users.password` махната (`users-drop-password-schema.sql`, миграция
+`20261101213607`, приложена 01.11; пробен вход admin 21:38 UTC — ок). Отворено: създаване на нов потребител след 5б — непроверено на живо (`claude/open/01-11-users-create-after-5b.md`).
 Остава: сървърна проверка на
 самоличност (ВИСОК, `claude/open-tasks.md`), OneSignal REST ключ в push.js
 (ротация), `in.(<списък>)` без горна граница (среден/висок).

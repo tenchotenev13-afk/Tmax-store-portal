@@ -14,7 +14,7 @@
 
 ## Чака изпращане
 
-(миграцията users_drop_password, users-drop-password-schema.sql — още НЕ е приложена; версията се дописва след прилагането)
+(в базата от миграцията users_drop_password, users-drop-password-schema.sql, версия 20261101213607, приложена 01.11.2026)
 - 01.11 · users.password — text, колоната е ПРЕМАХНАТА (огледалото никога не е имало стойности: anon няма select върху нея)
 
 (в базата от миграцията grafik_schema, grafik-schema.sql, версия 20261101205213, приложена 01.11.2026)
