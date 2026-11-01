@@ -1,6 +1,16 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v64 (01.11.2026) — ЕДНО нещо: „Минуси — повтарящи се артикули“ (minus_multi) носи
+      и „Общи проблеми в няколко обекта (за <minus_multi_days> дни, до нд <дд.мм>)“ —
+      след повтарящите се, същият прозорец, само 955, само minus_stores: артикули с
+      минус в 2+ обекта и попълнени причини (minus_reasons.label) в 2+ обекта.
+      САМО за получател без обхват (scope_stores NULL); с обхват частта липсва и не
+      пипа reportMinusMultiShouldSend. Колекторът тегли и reason_id и minus_reasons
+      (непълно → без писмо). dry_run по получател: common { items, reasons } или null.
+      reportMinusMultiCommon / CommonHtml — копие от report.js. Заковано в
+      tests/minusi-multi-common.test.js и tests/report-edge-sync.test.js.
+
    v63 (30.10.2026) — ЕДНО нещо: „Минуси — повтарящи се артикули“ (minus_multi) носи
       и „Минуси за седмицата <пн>–<нд>“ — брой 955 по обект от обхвата на получателя
       за седмицата към неделята и за предходната, промяна в % (предходна 0 → „—“),
@@ -4846,6 +4856,66 @@ function reportMinusMultiWeekHtml(w){
     (t.lastDate ? reportMinusMultiDM(t.lastDate) : '—') + ' (последна дата на движение в портала)</div>';
   return h;
 }
+/* „Общи проблеми в няколко обекта" (Теодор 29.10.2026, сесия minusi-common-problems):
+   същият прозорец като повтарящите се, само 955 и само обектите от minus_stores.
+   items — материал с минус в 2+ обекта (брой обекти, брой минуси, обектите в реда на
+   minus_stores); reasons — попълнена причина (reason_id) в 2+ обекта. Подредба: брой
+   обекти ↓, после брой минуси / редове ↓. reasons (аргументът) — [{ id, label }] от
+   minus_reasons. Чисто, без заявки. Само за получател без обхват
+   (reportMinusMultiForStores). Без суми. */
+function reportMinusMultiCommon(rows, stores, days, refISO, reasons){
+  var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
+  var lbl = {}, mats = {}, rsn = {};
+  (Array.isArray(reasons) ? reasons : []).forEach(function(r){ if (r && r.id != null) lbl[String(r.id)] = String(r.label || ''); });
+  (Array.isArray(rows) ? rows : []).forEach(function(m){
+    if (!m || String(m.mvt_type) !== '955') return;
+    var dt = String(m.posting_date || '').slice(0, 10);
+    if (dt < fromISO || dt > refISO || stores.indexOf(m.store_name) < 0) return;
+    var mk = String(m.material);
+    var g = mats[mk] || (mats[mk] = { material: mk, desc: '', n: 0, seen: {} });
+    g.n++; g.seen[m.store_name] = 1;
+    if (m.material_desc) g.desc = m.material_desc;
+    if (m.reason_id === null || m.reason_id === undefined || m.reason_id === '') return;
+    var rk = String(m.reason_id);
+    var r = rsn[rk] || (rsn[rk] = { id: rk, label: lbl[rk] || ('причина #' + rk), n: 0, seen: {} });
+    r.n++; r.seen[m.store_name] = 1;
+  });
+  var multi = function(map){
+    return Object.keys(map).map(function(k){
+      var g = map[k];
+      g.stores = stores.filter(function(s){ return g.seen[s]; });
+      delete g.seen;
+      return g;
+    }).filter(function(g){ return g.stores.length >= 2; });
+  };
+  var items = multi(mats).sort(function(a, b){ return b.stores.length - a.stores.length || b.n - a.n || a.material.localeCompare(b.material, undefined, { numeric: true }); });
+  var rs = multi(rsn).sort(function(a, b){ return b.stores.length - a.stores.length || b.n - a.n || a.label.localeCompare(b.label); });
+  return { from: fromISO, ref: refISO, days: days, items: items, reasons: rs };
+}
+function reportMinusMultiCommonHtml(c){
+  if (!c) return '';
+  var th = function(t, a){ return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:' + (a || 'left') + ';border-bottom:2px solid #e2e8f0;">' + t + '</th>'; };
+  var td = function(h, extra){ return '<td style="padding:6px;font-size:12px;color:#1e293b;vertical-align:top;border-bottom:1px solid #eef1f6;' + (extra || '') + '">' + h + '</td>'; };
+  var empty = function(n, t){ return '<tr class="mm-common-empty"><td colspan="' + n + '" style="padding:6px;font-size:12px;color:#94a3b8;border-bottom:1px solid #eef1f6;">' + t + '</td></tr>'; };
+  var sub = function(t){ return '<div style="font-size:12px;font-weight:700;color:#475569;margin:10px 0 4px;">' + t + '</div>'; };
+  var c2 = 'text-align:center;';
+  var h = '<div class="mm-common" style="font-size:13px;font-weight:700;color:#1E2761;margin:22px 0 4px;padding-top:12px;border-top:2px solid #e2e8f0;">Общи проблеми в няколко обекта (за ' +
+    c.days + ' дни, до нд ' + reportMinusMultiDM(c.ref) + ')</div>';
+  h += sub('Артикули с минус в 2+ обекта');
+  h += '<table class="mm-common-items" style="width:100%;border-collapse:collapse;"><tr>' + th('Материал') + th('Описание') + th('Обекти', 'center') + th('Минуси', 'center') + th('Обектите') + '</tr>';
+  if (!c.items.length) h += empty(5, 'Няма артикул с минус в повече от един обект.');
+  c.items.forEach(function(g){
+    h += '<tr class="mm-common-item">' + td(esc(g.material), 'white-space:nowrap;') + td(esc(g.desc)) + td(String(g.stores.length), c2 + 'font-weight:700;') +
+      td(String(g.n), c2) + td(esc(g.stores.join(', '))) + '</tr>';
+  });
+  h += '</table>' + sub('Причини в 2+ обекта');
+  h += '<table class="mm-common-reasons" style="width:100%;border-collapse:collapse;"><tr>' + th('Причина') + th('Редове', 'center') + th('Обекти', 'center') + th('Обектите') + '</tr>';
+  if (!c.reasons.length) h += empty(4, 'Няма причина, повторена в повече от един обект.');
+  c.reasons.forEach(function(r){
+    h += '<tr class="mm-common-reason">' + td(esc(r.label)) + td(String(r.n), c2) + td(String(r.stores.length), c2 + 'font-weight:700;') + td(esc(r.stores.join(', '))) + '</tr>';
+  });
+  return h + '</table>';
+}
 function collectMinusMultiReportData(refISO, cb){
   sbGet('app_settings', 'key=in.(minus_stores,minus_multi_count,minus_multi_days)&select=key,value').then(function(set){
     if (!Array.isArray(set)) { cb(null); return; }
@@ -4853,10 +4923,10 @@ function collectMinusMultiReportData(refISO, cb){
     var stores = String(val('minus_stores') || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
     var count = reportMinusMultiPosInt(val('minus_multi_count'), REPORT_MINUS_MULTI_COUNT);
     var days = reportMinusMultiPosInt(val('minus_multi_days'), REPORT_MINUS_MULTI_DAYS);
-    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO) })); return; }
+    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO), common: reportMinusMultiCommon([], [], days, refISO, []) })); return; }
     var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
     var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
-    return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action' +
+    return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action,reason_id' +
       '&mvt_type=eq.955' + inStores +
       '&posting_date=gte.' + fromISO + '&posting_date=lte.' + refISO + '&order=id.asc').then(function(rows){
       if (rows.partial) { cb(null); return; }
@@ -4864,7 +4934,12 @@ function collectMinusMultiReportData(refISO, cb){
       return reportGetAll('minus_movements', 'select=id,store_name,mvt_type,posting_date' + inStores +
         '&posting_date=gte.' + reportMinusMultiAddDays(refISO, -13) + '&order=id.asc').then(function(wk){
         if (wk.partial) { cb(null); return; }
-        cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO), { week: reportMinusMultiWeek(wk, stores, refISO) }));
+        /* „Общи проблеми" — имената на причините; непълно → без писмо. */
+        return reportGetAll('minus_reasons', 'select=id,label&order=id.asc').then(function(rs){
+          if (rs.partial) { cb(null); return; }
+          cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO), { week: reportMinusMultiWeek(wk, stores, refISO),
+            common: reportMinusMultiCommon(rows, stores, days, refISO, rs) }));
+        });
       });
     });
   }).catch(function(){ cb(null); });
@@ -4895,7 +4970,7 @@ function reportMinusMultiHtml(data){
       body += '</table>';
     });
   }
-  body = reportMinusMultiWeekHtml(d.week) + body;
+  body = reportMinusMultiWeekHtml(d.week) + body + reportMinusMultiCommonHtml(d.common);
   var sub = d.from && d.ref ? 'Последните ' + d.days + ' дни: ' + reportMinusMultiDM(d.from) + ' – ' + reportMinusMultiDM(d.ref) + '.' + String(d.ref).slice(0, 4) : '';
   return reportEmailShell('➖ Минуси — повтарящи се артикули', sub, body, 'Автоматичен репорт · ТеМАХ Портал');
 }
@@ -4933,9 +5008,11 @@ function reportMinusMultiPlan(rows, minusStores){
   });
   return out;
 }
-/* Данните на писмото, срязани до обектите на получателя (total / noStatement — наново). */
-function reportMinusMultiForStores(data, stores){
+/* Данните на писмото, срязани до обектите на получателя (total / noStatement — наново).
+   „Общи проблеми" (common) остават САМО при scoped === false (получател без обхват). */
+function reportMinusMultiForStores(data, stores, scoped){
   var out = Object.assign({}, data, { stores: [], total: 0, noStatement: 0 });
+  out.common = scoped === false && data && data.common ? data.common : null;
   ((data && data.stores) || []).forEach(function(s){
     if (stores.indexOf(s.store) < 0) return;
     out.stores.push(s);
@@ -5000,7 +5077,7 @@ Deno.serve(async (req: Request) => {
       }
       var mmRecRes: any = await sbGet('report_recipients', 'active=eq.true&minus_multi=eq.true&select=email,name,active,minus_multi,scope_stores');
       var mmJobs: any[] = reportMinusMultiPlan(mmRecRes, mmData.allStores || []).map(function(p: any){
-        var sub = reportMinusMultiForStores(mmData, p.stores);
+        var sub = reportMinusMultiForStores(mmData, p.stores, p.scoped);
         return { plan: p, sub: sub, send: reportMinusMultiShouldSend(p, sub) };
       });
       if (mmDry) {
@@ -5010,6 +5087,7 @@ Deno.serve(async (req: Request) => {
             rows:j.sub.stores.map(function(s: any){ return { store:s.store, items:s.items.length }; }), total:j.sub.total,
             week: j.sub.week ? { from:j.sub.week.from, to:j.sub.week.to, cur:j.sub.week.total.cur, prev:j.sub.week.total.prev, pct:j.sub.week.total.pct, last_date:j.sub.week.total.lastDate,
               by_store:j.sub.week.rows.map(function(r: any){ return { store:r.store, cur:r.cur, prev:r.prev, pct:r.pct }; }) } : null,
+            common: j.sub.common ? { items:j.sub.common.items.length, reasons:j.sub.common.reasons.length } : null,
             send:j.send }; }),
           stores:(mmData.stores || []).map(function(s: any){ return { store:s.store, items:s.items.map(function(g: any){ return { material:g.material, n:g.dates.length, dates:g.dates, statement:!!g.action }; }) }; }),
           type:type }), { status:200, headers:{'Content-Type':'application/json'} });
@@ -5025,7 +5103,7 @@ Deno.serve(async (req: Request) => {
           headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
           body: JSON.stringify({ to: [j.plan.email], subject: reportMinusMultiSubject(j.sub), html: reportMinusMultiHtml(j.sub) })
         });
-        mmOut.push({ email:j.plan.email, stores:j.plan.stores.length, total:j.sub.total, week:j.sub.week ? j.sub.week.total.cur : null, sent:mmRes.ok, status:mmRes.status });
+        mmOut.push({ email:j.plan.email, stores:j.plan.stores.length, total:j.sub.total, week:j.sub.week ? j.sub.week.total.cur : null, common:!!j.sub.common, sent:mmRes.ok, status:mmRes.status });
       }
       return new Response(JSON.stringify({ ok:true, sent:mmOut.every(function(x: any){ return x.sent; }), recipients:mmOut.length,
         skipped:mmJobs.length - mmSend.length, personal:mmOut, total:mmData.total, ref:mmData.ref, type:type }), { status:200, headers:{'Content-Type':'application/json'} });

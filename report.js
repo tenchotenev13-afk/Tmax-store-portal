@@ -4266,6 +4266,66 @@ function reportMinusMultiWeekHtml(w){
     (t.lastDate ? reportMinusMultiDM(t.lastDate) : '—') + ' (последна дата на движение в портала)</div>';
   return h;
 }
+/* „Общи проблеми в няколко обекта" (Теодор 29.10.2026, сесия minusi-common-problems):
+   същият прозорец като повтарящите се, само 955 и само обектите от minus_stores.
+   items — материал с минус в 2+ обекта (брой обекти, брой минуси, обектите в реда на
+   minus_stores); reasons — попълнена причина (reason_id) в 2+ обекта. Подредба: брой
+   обекти ↓, после брой минуси / редове ↓. reasons (аргументът) — [{ id, label }] от
+   minus_reasons. Чисто, без заявки. Само за получател без обхват
+   (reportMinusMultiForStores). Без суми. */
+function reportMinusMultiCommon(rows, stores, days, refISO, reasons){
+  var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
+  var lbl = {}, mats = {}, rsn = {};
+  (Array.isArray(reasons) ? reasons : []).forEach(function(r){ if (r && r.id != null) lbl[String(r.id)] = String(r.label || ''); });
+  (Array.isArray(rows) ? rows : []).forEach(function(m){
+    if (!m || String(m.mvt_type) !== '955') return;
+    var dt = String(m.posting_date || '').slice(0, 10);
+    if (dt < fromISO || dt > refISO || stores.indexOf(m.store_name) < 0) return;
+    var mk = String(m.material);
+    var g = mats[mk] || (mats[mk] = { material: mk, desc: '', n: 0, seen: {} });
+    g.n++; g.seen[m.store_name] = 1;
+    if (m.material_desc) g.desc = m.material_desc;
+    if (m.reason_id === null || m.reason_id === undefined || m.reason_id === '') return;
+    var rk = String(m.reason_id);
+    var r = rsn[rk] || (rsn[rk] = { id: rk, label: lbl[rk] || ('причина #' + rk), n: 0, seen: {} });
+    r.n++; r.seen[m.store_name] = 1;
+  });
+  var multi = function(map){
+    return Object.keys(map).map(function(k){
+      var g = map[k];
+      g.stores = stores.filter(function(s){ return g.seen[s]; });
+      delete g.seen;
+      return g;
+    }).filter(function(g){ return g.stores.length >= 2; });
+  };
+  var items = multi(mats).sort(function(a, b){ return b.stores.length - a.stores.length || b.n - a.n || a.material.localeCompare(b.material, undefined, { numeric: true }); });
+  var rs = multi(rsn).sort(function(a, b){ return b.stores.length - a.stores.length || b.n - a.n || a.label.localeCompare(b.label); });
+  return { from: fromISO, ref: refISO, days: days, items: items, reasons: rs };
+}
+function reportMinusMultiCommonHtml(c){
+  if (!c) return '';
+  var th = function(t, a){ return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:' + (a || 'left') + ';border-bottom:2px solid #e2e8f0;">' + t + '</th>'; };
+  var td = function(h, extra){ return '<td style="padding:6px;font-size:12px;color:#1e293b;vertical-align:top;border-bottom:1px solid #eef1f6;' + (extra || '') + '">' + h + '</td>'; };
+  var empty = function(n, t){ return '<tr class="mm-common-empty"><td colspan="' + n + '" style="padding:6px;font-size:12px;color:#94a3b8;border-bottom:1px solid #eef1f6;">' + t + '</td></tr>'; };
+  var sub = function(t){ return '<div style="font-size:12px;font-weight:700;color:#475569;margin:10px 0 4px;">' + t + '</div>'; };
+  var c2 = 'text-align:center;';
+  var h = '<div class="mm-common" style="font-size:13px;font-weight:700;color:#1E2761;margin:22px 0 4px;padding-top:12px;border-top:2px solid #e2e8f0;">Общи проблеми в няколко обекта (за ' +
+    c.days + ' дни, до нд ' + reportMinusMultiDM(c.ref) + ')</div>';
+  h += sub('Артикули с минус в 2+ обекта');
+  h += '<table class="mm-common-items" style="width:100%;border-collapse:collapse;"><tr>' + th('Материал') + th('Описание') + th('Обекти', 'center') + th('Минуси', 'center') + th('Обектите') + '</tr>';
+  if (!c.items.length) h += empty(5, 'Няма артикул с минус в повече от един обект.');
+  c.items.forEach(function(g){
+    h += '<tr class="mm-common-item">' + td(esc(g.material), 'white-space:nowrap;') + td(esc(g.desc)) + td(String(g.stores.length), c2 + 'font-weight:700;') +
+      td(String(g.n), c2) + td(esc(g.stores.join(', '))) + '</tr>';
+  });
+  h += '</table>' + sub('Причини в 2+ обекта');
+  h += '<table class="mm-common-reasons" style="width:100%;border-collapse:collapse;"><tr>' + th('Причина') + th('Редове', 'center') + th('Обекти', 'center') + th('Обектите') + '</tr>';
+  if (!c.reasons.length) h += empty(4, 'Няма причина, повторена в повече от един обект.');
+  c.reasons.forEach(function(r){
+    h += '<tr class="mm-common-reason">' + td(esc(r.label)) + td(String(r.n), c2) + td(String(r.stores.length), c2 + 'font-weight:700;') + td(esc(r.stores.join(', '))) + '</tr>';
+  });
+  return h + '</table>';
+}
 function collectMinusMultiReportData(refISO, cb){
   sbGet('app_settings', 'key=in.(minus_stores,minus_multi_count,minus_multi_days)&select=key,value').then(function(set){
     if (!Array.isArray(set)) { cb(null); return; }
@@ -4273,10 +4333,10 @@ function collectMinusMultiReportData(refISO, cb){
     var stores = String(val('minus_stores') || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
     var count = reportMinusMultiPosInt(val('minus_multi_count'), REPORT_MINUS_MULTI_COUNT);
     var days = reportMinusMultiPosInt(val('minus_multi_days'), REPORT_MINUS_MULTI_DAYS);
-    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO) })); return; }
+    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO), common: reportMinusMultiCommon([], [], days, refISO, []) })); return; }
     var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
     var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
-    return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action' +
+    return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action,reason_id' +
       '&mvt_type=eq.955' + inStores +
       '&posting_date=gte.' + fromISO + '&posting_date=lte.' + refISO + '&order=id.asc').then(function(rows){
       if (rows.partial) { cb(null); return; }
@@ -4284,7 +4344,12 @@ function collectMinusMultiReportData(refISO, cb){
       return reportGetAll('minus_movements', 'select=id,store_name,mvt_type,posting_date' + inStores +
         '&posting_date=gte.' + reportMinusMultiAddDays(refISO, -13) + '&order=id.asc').then(function(wk){
         if (wk.partial) { cb(null); return; }
-        cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO), { week: reportMinusMultiWeek(wk, stores, refISO) }));
+        /* „Общи проблеми" — имената на причините; непълно → без писмо. */
+        return reportGetAll('minus_reasons', 'select=id,label&order=id.asc').then(function(rs){
+          if (rs.partial) { cb(null); return; }
+          cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO), { week: reportMinusMultiWeek(wk, stores, refISO),
+            common: reportMinusMultiCommon(rows, stores, days, refISO, rs) }));
+        });
       });
     });
   }).catch(function(){ cb(null); });
@@ -4315,7 +4380,7 @@ function reportMinusMultiHtml(data){
       body += '</table>';
     });
   }
-  body = reportMinusMultiWeekHtml(d.week) + body;
+  body = reportMinusMultiWeekHtml(d.week) + body + reportMinusMultiCommonHtml(d.common);
   var sub = d.from && d.ref ? 'Последните ' + d.days + ' дни: ' + reportMinusMultiDM(d.from) + ' – ' + reportMinusMultiDM(d.ref) + '.' + String(d.ref).slice(0, 4) : '';
   return reportEmailShell('➖ Минуси — повтарящи се артикули', sub, body, 'Автоматичен репорт · ТеМАХ Портал');
 }
@@ -4353,9 +4418,11 @@ function reportMinusMultiPlan(rows, minusStores){
   });
   return out;
 }
-/* Данните на писмото, срязани до обектите на получателя (total / noStatement — наново). */
-function reportMinusMultiForStores(data, stores){
+/* Данните на писмото, срязани до обектите на получателя (total / noStatement — наново).
+   „Общи проблеми" (common) остават САМО при scoped === false (получател без обхват). */
+function reportMinusMultiForStores(data, stores, scoped){
   var out = Object.assign({}, data, { stores: [], total: 0, noStatement: 0 });
+  out.common = scoped === false && data && data.common ? data.common : null;
   ((data && data.stores) || []).forEach(function(s){
     if (stores.indexOf(s.store) < 0) return;
     out.stores.push(s);
