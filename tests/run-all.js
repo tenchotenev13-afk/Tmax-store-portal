@@ -159,6 +159,7 @@ const TESTS = [
   'loading-scan-toggle.test.js',
   'loading-diff-prefill.test.js',
   'loading-limit-1000.test.js',
+  'loading-stoka-v-stoka.test.js',
   'transit-store-scope.test.js',
   'transit-warehouse-scope.test.js',
   'transit-counts-follow-filters.test.js',

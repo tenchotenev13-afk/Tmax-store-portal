@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията loading_items_nested_codes, loading-stoka-v-stoka-schema.sql, версия 20261101220220, приложена 02.11.2026)
+- 01.11 · loading_list_items.nested_codes — text, NULL, без default
+
 (в базата от миграцията users_drop_password, users-drop-password-schema.sql, версия 20261101213607, приложена 01.11.2026)
 - 01.11 · users.password — text, колоната е ПРЕМАХНАТА (огледалото никога не е имало стойности: anon няма select върху нея)
 

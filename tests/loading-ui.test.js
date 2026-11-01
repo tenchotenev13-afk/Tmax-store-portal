@@ -10,6 +10,9 @@
    а зоната е Europe/Sofia (CI е UTC).
    27.10.2026: еталонът е снет наново САМО заради заглавката на писмата (emailWrap → „ТеМАХ · Вътрешна
    платформа“ / „temax.bg“, сесия email-header); машинно сверено, че друга разлика няма.
+   01.11.2026: снет наново САМО заради правилото .lp-nest в печатния CSS („Стока в стока“, сесия
+   loading-stoka-v-stoka) — printAll / printStore / printPallet / labelsPrint; машинно сверено, че без
+   този низ еталонът е байт по байт старият.
 
    Пускане:  node tests/loading-ui.test.js .
    Еталон от друга версия:  node tests/loading-ui.test.js <корен> --dump */

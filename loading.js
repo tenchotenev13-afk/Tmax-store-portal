@@ -114,6 +114,39 @@ function llIsOversize(kind){ return kind === 'oversize'; }
 function llOversizeNeedsComment(it){
   return !!it && llIsOversize(it.kind) && !String(it.warehouse_comment || '').trim();
 }
+/* „Стока в стока" (Теодор 29.10.2026, сесия loading-stoka-v-stoka): кодове,
+   опаковани един в друг (коледните кутии 98235/98234/98233). Обектът не отваря
+   кашона и подава разлика за вътрешните. nested_codes — по една група на ред,
+   кодовете разделени с „/". Палетът с N документа е N реда със същата стойност. */
+var LL_NESTED_HINT = 'кодове един в друг, разделени с /, напр. 98235/98234/98233';
+/* Текст от полето → { ok, value }: тримване, празните редове махнати, интервали
+   около „/" махнати; група — само цифри и „/", поне 2 кода. Празно → null.
+   Невалидна група → ok:false и bad (редът, както е написан). */
+function llNestedParse(text){
+  var groups = [];
+  var lines = String(text == null ? '' : text).split(/\r?\n/);
+  for(var i = 0; i < lines.length; i++){
+    var g = lines[i].trim().replace(/\s*\/\s*/g, '/');
+    if(!g) continue;
+    if(!/^\d+(\/\d+)+$/.test(g)) return { ok: false, value: null, bad: lines[i].trim() };
+    groups.push(g);
+  }
+  return { ok: true, value: groups.length ? groups.join('\n') : null };
+}
+/* Записаната стойност → групи (масиви от кодове). Само за показване. */
+function llNestedGroups(val){
+  return String(val == null ? '' : val).split(/\r?\n/).map(function(g){
+    return g.split('/').map(function(c){ return c.trim(); }).filter(Boolean);
+  }).filter(function(g){ return g.length > 0; });
+}
+/* Жълтият бадж за обекта — по един на група. Без групи → ''. */
+function llNestedBadgeHtml(val){
+  return llNestedGroups(val).map(function(g){
+    return '<div class="ll-nested" style="display:inline-block;margin:3px 4px 0 0;background:#fef3c7;border:1px solid #f59e0b;color:#92400e;'+
+      'border-radius:6px;padding:2px 8px;font-size:11.5px;font-weight:700;white-space:normal;">📦 Стока в стока: '+
+      esc(g.join(' / '))+' — отворете кашона</div>';
+  }).join('');
+}
 /* [ключ, етикет, цвят, фон] — един източник за чиповете, баджовете и
    филтъра. Нов статус се добавя тук, не на четири места. */
 var LL_STATUSES = [
@@ -1230,7 +1263,7 @@ function llStoreCardHtml(l){
         (it.added_by_store?'<div style="margin-top:3px;text-decoration:none;font-weight:400;">'+llApprovalBadge(it)+llApprovalNote(it)+llApproveBtnsHtml(l, it)+'</div>':'')+'</td>'+
       '<td style="padding:6px 9px;font-family:DM Mono,monospace;">'+(it.purchase_doc?esc(it.purchase_doc):'<span style="color:#cbd5e1;">без</span>')+
         (it.partial?' '+llPartialBadge():'')+'</td>'+
-      '<td style="padding:6px 9px;color:#64748b;">'+esc(it.warehouse_comment||'—')+'</td>'+
+      '<td style="padding:6px 9px;color:#64748b;">'+esc(it.warehouse_comment||'—')+llNestedBadgeHtml(it.nested_codes)+'</td>'+
       /* Коментарът на обекта остава редактируем и СЛЕД отмятането: разминаването
          често се вижда чак при подреждане на стоката, не при разтоварването. */
       /* id-то е за llMarkMissing(): бутонът чете ТОЗИ input, а не it.store_comment.
@@ -1502,6 +1535,8 @@ function llOpenDiffForItem(itemId){
     ', ' + where + ' (позиция ' + (it.position != null ? it.position : '—') + ')' +
     ', стокова № ' + (doc || 'без документ') + '.';
   if(it.warehouse_comment) comment += ' Коментар склад: ' + it.warehouse_comment;
+  var nested = llNestedGroups(it.nested_codes);
+  if(nested.length) comment += ' Стока в стока: ' + nested.map(function(g){ return g.join('/'); }).join('; ') + '.';
 
   var open = function(items){
     openDiffSubmitModal({
@@ -1996,6 +2031,7 @@ function llBuildPdf(list, items, storeFilter){
     var pdfRow = function(it, lead){
       /* При извънгабаритния коментарът вече е до вида — втори път би бил шум. */
       if(it.warehouse_comment && !llIsOversize(it.kind)) line('    коментар склад: ' + it.warehouse_comment, 9, 4.5);
+      llNestedGroups(it.nested_codes).forEach(function(g){ line('    стока в стока: ' + g.join(' / ') + ' — отворете кашона', 9, 4.5); });
       (it.products || []).forEach(function(p){
         line('    · ' + p.sap_code + '  ' + p.product_name +
           '  —  ' + llFmtQty(p.qty) + ' ' + (p.unit || '') +
@@ -2194,7 +2230,7 @@ function llSentHtmlFor(list, store, rows, nPhotos){
           ? '<div style="font-size:10.5px;color:#475569;font-weight:600;">'+esc(it.warehouse_comment)+'</div>' : '')+'</td>'+
       '<td '+LL_MAIL_TD+'>'+(it.purchase_doc ? esc(it.purchase_doc) : 'без')+
         (it.partial ? '<div style="font-size:10px;color:#92400e;">частично</div>' : '')+'</td>'+
-      '<td '+LL_MAIL_TD+'>'+esc(it.warehouse_comment || '—')+'</td></tr>';
+      '<td '+LL_MAIL_TD+'>'+esc(it.warehouse_comment || '—')+llNestedBadgeHtml(it.nested_codes)+'</td></tr>';
     /* Какво има на палета — компактно и сиво: писмото е „идва товар", не
        опис; описът е на хартия върху самия палет. Отделен ред с colspan,
        за да не разтяга колоните на таблицата с дълги имена. */
@@ -2542,7 +2578,7 @@ function llQuickReset(keepStore){
 function llBlankUnit(){
   return { kind: 'pallet', pallet_no: null, pallet_total: null,
            docs: [], clears_doc: null, store_name: '',
-           warehouse_comment: '', partial: false, products: [], _rowIds: [], _spareIds: [], _docDraft: '' };
+           warehouse_comment: '', nested_codes: '', partial: false, products: [], _rowIds: [], _spareIds: [], _docDraft: '' };
 }
 /* Единица, която човекът НЕ е пипал: без обект, без документ и без артикули.
    Коментарът не я прави „попълнена" сама по себе си — без обект единицата
@@ -2599,6 +2635,7 @@ function llUnitsFromRows(rows){
       if(doc && u.docs.indexOf(doc) < 0){ u.docs.push(doc); u._rowIds.push(r.id); }
       else if(r.id){ u._spareIds.push(r.id); }
       if(!u.warehouse_comment && r.warehouse_comment) u.warehouse_comment = r.warehouse_comment;
+      if(!u.nested_codes && r.nested_codes) u.nested_codes = r.nested_codes;
       if(r.partial) u.partial = true;
       if(r.clears_doc && !u.clears_doc) u.clears_doc = r.clears_doc;
       (r.products || []).forEach(function(pr){
@@ -3951,7 +3988,11 @@ function llEditorHtml(){
           (llIsOversize(it.kind) ? '<div style="font-size:10px;font-weight:700;color:#92400e;margin-bottom:2px;">Какъв е товарът *</div>' : '')+
           '<input id="ll-wc-'+i+'" value="'+escVal(it.warehouse_comment)+'" data-i="'+i+'"'+
           (llIsOversize(it.kind) ? ' placeholder="напр. стелажи, ламперия…"' : '')+
-          ' oninput="llSetRowField(this.dataset.i,\'warehouse_comment\',this.value)" style="width:100%;min-width:120px;border:1px solid '+(llOversizeNeedsComment(it)?'#fca5a5':'#e2e8f0')+';border-radius:5px;padding:2px 6px;font-size:12px;"></td>'+
+          ' oninput="llSetRowField(this.dataset.i,\'warehouse_comment\',this.value)" style="width:100%;min-width:120px;border:1px solid '+(llOversizeNeedsComment(it)?'#fca5a5':'#e2e8f0')+';border-radius:5px;padding:2px 6px;font-size:12px;">'+
+          /* „Стока в стока" — по една група на ред; проверката е при запис. */
+          '<div style="font-size:10px;font-weight:700;color:#92400e;margin:4px 0 2px;">📦 Стока в стока</div>'+
+          '<textarea id="ll-nc-'+i+'" data-i="'+i+'" rows="2" placeholder="'+llAttr(LL_NESTED_HINT)+'" title="'+llAttr(LL_NESTED_HINT)+'"'+
+          ' oninput="llSetRowField(this.dataset.i,\'nested_codes\',this.value)" style="width:100%;min-width:120px;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;font-family:DM Mono,monospace;resize:vertical;">'+llAttr(it.nested_codes)+'</textarea></td>'+
         '<td style="padding:3px 6px;text-align:center;white-space:nowrap;">'+(!hasDocs
           ? '<span style="color:#cbd5e1;" title="Единица без документ — няма какво да остане чакащо">—</span>'
           : '<input type="checkbox" data-i="'+i+'" onchange="llSetRowPartial(this.dataset.i,this.checked)"'+(it.partial?' checked':'')+' title="Само част от документите тръгва с този товар — отмятането няма да ги затвори в Стока на път">')+'</td>'+
@@ -3988,6 +4029,7 @@ function llBuildItemRows(listId, items){
       clears_doc: it.clears_doc || null,
       store_name: it.store_name,
       warehouse_comment: it.warehouse_comment || null,
+      nested_codes: llNestedParse(it.nested_codes).value,
       partial: !!it.partial
     };
   });
@@ -4007,7 +4049,7 @@ function llDraftFlat(){
         id: ids[k] || spare.shift() || null,
         kind: u.kind, pallet_no: u.pallet_no, pallet_total: u.pallet_total,
         purchase_doc: (u.docs || [])[k] || null, clears_doc: u.clears_doc || null,
-        store_name: u.store_name, warehouse_comment: u.warehouse_comment,
+        store_name: u.store_name, warehouse_comment: u.warehouse_comment, nested_codes: u.nested_codes,
         partial: !!u.partial && (u.docs || []).length > 0,
         _unit: u, _first: k === 0
       });
@@ -4055,6 +4097,18 @@ function llSaveDraft(){
     var wc = document.getElementById('ll-wc-' + noDesc);
     if(wc && wc.focus) wc.focus();
     return;
+  }
+  /* „Стока в стока": невалидна група спира ЦЕЛИЯ запис — нищо не тръгва към
+     базата, докато складът не я поправи. */
+  for(var ni = 0; ni < llDraft.units.length; ni++){
+    var np = llNestedParse(llDraft.units[ni].nested_codes);
+    if(!np.ok){
+      toast('Стока в стока, ред '+(ni + 1)+': „'+np.bad+'“ — само цифри и /, поне 2 кода в група','#dc2626');
+      renderLoadingLists();
+      var nc = document.getElementById('ll-nc-' + ni);
+      if(nc && nc.focus) nc.focus();
+      return;
+    }
   }
   if(dropped) renderLoadingLists();
   /* Палетите се преномерират плътно ПРЕДИ записа — иначе „палет 2 от 5"
@@ -4497,7 +4551,7 @@ function llViewHtml(){
       /* Единственото, което остава редактируемо след изпращане. */
       '<td style="padding:6px 9px;">'+(locked
         ? '<input value="'+escVal(it.warehouse_comment)+'" data-id="'+it.id+'" onchange="llSaveWarehouseComment(this.dataset.id,this.value)" style="width:100%;min-width:120px;border:1px solid #e2e8f0;border-radius:5px;padding:2px 6px;font-size:12px;">'
-        : esc(it.warehouse_comment||'—'))+'</td>'+
+        : esc(it.warehouse_comment||'—'))+llNestedBadgeHtml(it.nested_codes)+'</td>'+
       '<td style="padding:6px 9px;font-weight:500;">'+esc(it.store_name||'')+'</td>'+
       /* Коментарът на обекта е ОБЯСНЕНИЕТО на липсата — при missing той не е
          бележка встрани, а самото съдържание на реда, затова е откроен. */
@@ -4720,6 +4774,7 @@ function llPrintCss(){
     '.lp-tbl td.lp-uh{background:#f4f4f4;font-weight:700;font-size:8.5pt;}'+
     '.lp-kind{font-weight:700;}'+
     '.lp-tag{font-size:7pt;color:#92400e;white-space:nowrap;}'+
+    '.lp-nest{font-size:7.5pt;color:#92400e;font-weight:700;white-space:normal;}'+
     '.lp-mtag{font-size:7pt;color:#111;white-space:normal;overflow-wrap:break-word;}'+
     /* Черно на сиво, не цветно: бланката се печата и на черно-бял принтер,
        а там светлочервен текст става почти невидим. */
@@ -4792,7 +4847,8 @@ function llRenderPrint(list, items, storeFilter){
             ? '<div class="lp-tag">'+esc(g.rows[0].warehouse_comment)+'</div>' : '')+'</td>' : '')+
         '<td>'+doc+'</td>'+
         '<td>'+esc(it.store_name || '—')+'</td>'+
-        '<td>'+esc(it.warehouse_comment || '—')+'</td>'+
+        '<td>'+esc(it.warehouse_comment || '—')+
+          llNestedGroups(it.nested_codes).map(function(g){ return '<div class="lp-nest">Стока в стока: '+esc(g.join(' / '))+'</div>'; }).join('')+'</td>'+
         '<td>'+esc(it.store_comment || '—')+'</td>'+
         /* Празното каре значи „още не е разписано". Заявената липса НЕ е
            празно каре — тя е попълнен ред и на хартия трябва да се чете така,
