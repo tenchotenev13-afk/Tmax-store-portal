@@ -17,6 +17,22 @@
 (миграцията users_drop_password, users-drop-password-schema.sql — още НЕ е приложена; версията се дописва след прилагането)
 - 01.11 · users.password — text, колоната е ПРЕМАХНАТА (огледалото никога не е имало стойности: anon няма select върху нея)
 
+(в базата от миграцията grafik_schema, grafik-schema.sql, версия 20261101205213, приложена 01.11.2026)
+(ВНИМАНИЕ: таблиците grafik_* са БЕЗ права за anon — огледалото НЕ МОЖЕ да ги тегли с anon ключа. Прието за етап 1 (beta), решение 01.11.2026; преди пускане за всички — решение за бекъп. Редовете са за схемата.)
+- 01.11 · нова таблица grafik_vtr — id uuid, name text NOT NULL, note text, created_at timestamptz NOT NULL default now()
+- 01.11 · нова таблица grafik_vtr_codes — id uuid, vtr_id uuid NOT NULL, code text NOT NULL, hours numeric(4,1), kind text NOT NULL default 'work', seasons text[], legend text, sort_order int NOT NULL default 0, valid_from date, valid_to date
+- 01.11 · нова таблица grafik_vtr_seasons — id uuid, vtr_id uuid NOT NULL, months jsonb NOT NULL, valid_from date, valid_to date
+- 01.11 · нова таблица grafik_letter_map — id uuid, vtr_id uuid NOT NULL, letter text NOT NULL, day_kind text NOT NULL, code text NOT NULL, valid_from date, valid_to date
+- 01.11 · нова таблица grafik_company_terms — id uuid, company_id uuid NOT NULL, vtr_id uuid NOT NULL, approver text NOT NULL, valid_from date, valid_to date
+- 01.11 · нова таблица grafik_store_company — id uuid, store_name text NOT NULL, company_id uuid NOT NULL, blank_name text NOT NULL, address text, valid_from date, valid_to date
+- 01.11 · нова таблица grafik_extra_days — id uuid, day date NOT NULL, store_name text, note text, created_by text, created_at timestamptz NOT NULL default now()
+- 01.11 · нова таблица grafik_staff — id uuid, store_name text NOT NULL, short_name text NOT NULL, full_name text NOT NULL, contract_title text, position text, sector text, hours_per_day numeric(3,1) NOT NULL default 8, hired_on date, left_on date, sort_order int NOT NULL default 0, note text, prev_staff_id uuid, created_at timestamptz NOT NULL default now(), created_by text, updated_at timestamptz NOT NULL default now(), updated_by text
+- 01.11 · нова таблица grafik_months — id uuid, store_name text NOT NULL, month date NOT NULL, status text NOT NULL default 'draft', submitted_at timestamptz, submitted_by text, submitted_by_name text, snapshot jsonb, created_at timestamptz NOT NULL default now(), updated_at timestamptz NOT NULL default now()
+- 01.11 · grafik_months.status — нови стойности на статус 'draft', 'submitted'
+- 01.11 · нова таблица grafik_rows — id uuid, month_id uuid NOT NULL, staff_id uuid NOT NULL, letters text[] NOT NULL default '{}', locked jsonb NOT NULL default '{}', sort_order int NOT NULL default 0, updated_at timestamptz NOT NULL default now(), updated_by text
+- 01.11 · companies — 2 реда (ТЦД 3, Темакс Юг); stores.company_id попълнено за Кърджали, Шумен, Раднево (колоните съществуват отпреди)
+- 01.11 · app_settings — нови ключове grafik_beta_users, grafik_trz_users (списъци имейли)
+
 (в базата от миграцията revaluation_codes_store, revaluation-codes-store-schema.sql, версия 20261030123801, приложена 30.10.2026)
 - 30.10 · revaluation_codes.store_name — text, NULL, без default (11-те заварени реда → 'Кърджали')
 
