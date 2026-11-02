@@ -150,6 +150,10 @@ Deno.test("validAt / resolveSetup: кодове и сезон към месец�
   eq(nov.season, "З1", "ноември 2026 = З1");
   eq(nov.missing, [], "Кърджали има всичко");
   eq(nov.approver, "Теодор Тенев", "утвърдил");
+  const raw2 = { ...raw, letterMap: raw.letterMap.concat([{ vtr_id: VTR, letter: "П", day_kind: "З1", code: "Д5/1", hours_per_day: 4, valid_from: null, valid_to: null }]) };
+  const lm4 = resolveSetup(raw2, "2026-11-01", "2026-11-30").letter_map.filter((l) => l.hours_per_day === 4);
+  eq(lm4, [{ letter: "П", day_kind: "З1", code: "Д5/1", hours_per_day: 4 }], "буквите по договор стигат до браузъра");
+  eq(nov.letter_map.every((l) => l.hours_per_day === null), true, "общите редове — hours_per_day null");
   const oct = resolveSetup(raw, "2026-10-01", "2026-10-31");
   eq(oct.codes.map((c) => c.code), ["Д1/З", "Д7"], "октомври: с Д7, без Д5/З");
   eq(oct.season, "Л", "октомври = Л");

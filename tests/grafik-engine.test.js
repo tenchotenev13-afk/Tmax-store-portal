@@ -28,14 +28,6 @@ function rowsOf(c) {
     return { staff: { id: s.id, tag: s.tag, hired_on: s.hired_on, left_on: s.left_on, hours_per_day: 8 }, letters: s.letters, expect: s.expected };
   });
 }
-// Бланката превежда О4 → Д5/1 (4 ч. работа). От 01.11.2026 в базата О4 → О.
-// За сравнението с бланката се ползва нейният превод — виж отделния блок за Раднево.
-function withOldO4(setup) {
-  var s = clone(setup);
-  s.letter_map.forEach(function (l) { if (l.letter === 'О4') l.code = 'Д5/1'; });
-  return s;
-}
-
 /* ── 1. Еталонът, по служител ─────────────────────────────────────────── */
 function compareCase(key, setup) {
   var c = caseBy(key);
@@ -78,20 +70,23 @@ check('Кърджали 11.2026: човекодни 618, човекочасов�
 
 compareCase('kardzhali-2026-10', ET.setups['2026-10']);
 
-var rNov = compareCase('radnevo-2026-11', withOldO4(ET.setups['2026-11']));
+// О4 → Д5/1 (къс ден 4 ч., целта не се намалява) — от базата след миграция 20261102095558,
+// както в бланката. Раднево се сравнява с живите букви, без замяна.
+var rNov = compareCase('radnevo-2026-11', ET.setups['2026-11']);
 ['acc-3a', 'acc-3b'].forEach(function (t) {
   var r = rNov.rows.filter(function (x) { return x.staff.tag === t; })[0];
-  check('Раднево 11.2026 (О4 като в бланката): ' + t + ' −3 ч., маркиран, без смени', r && r.diff === -3 && !r.reachable && !r.changed.length, r && r.diff);
+  check('Раднево 11.2026: ' + t + ' −3 ч., маркиран, без смени', r && r.diff === -3 && !r.reachable && !r.changed.length, r && r.diff);
 });
-check('Раднево 11.2026: 15 в графика, 13 на нормата', rNov.rows.length === 15 && rNov.rows.filter(function (r) { return r.diff === 0; }).length === 13);
-
-// Раднево с превода от базата (О4 → О): О4 при 8-часов договор → предупреждение на всеки ред.
+check('Раднево 11.2026: 15 в графика, 13 на нормата, 261 човекодни, 2370 ч.', rNov.rows.length === 15 && rNov.rows.filter(function (r) { return r.diff === 0; }).length === 13 &&
+  rNov.totals.manDays === 261 && rNov.totals.manHours === 2370, rNov.totals.manDays + '/' + rNov.totals.manHours);
 (function () {
-  var c = caseBy('radnevo-2026-11');
-  var res = E.computeMonth(ET.setups['2026-11'], c.ym, rowsOf(c));
-  var withO4 = res.rows.filter(function (r) { return r.staff && c.staff.filter(function (s) { return s.id === r.staff.id; })[0].letters.indexOf('О4') >= 0; });
-  check('Раднево (О4 → О от базата): всеки ред с О4 при 8 ч. носи предупреждение o4_full', withO4.length === 11 &&
-    withO4.every(function (r) { return r.warnings.some(function (w) { return w.type === 'o4_full'; }); }), withO4.length);
+  var c = caseBy('radnevo-2026-11'), withO4 = 0, bad = [];
+  rNov.rows.forEach(function (r) {
+    var L = c.staff.filter(function (s) { return s.id === r.staff.id; })[0].letters;
+    L.forEach(function (v, i) { if (v === 'О4') { withO4++; if (r.codes[i] !== 'Д5/1') bad.push(r.staff.id + ':' + (i + 1)); } });
+    if (r.warnings.some(function (w) { return /О4/.test(w.text); })) bad.push(r.staff.id + ' предупреждение за О4');
+  });
+  check('Раднево: 11-те О4 при 8 ч. → Д5/1, без предупреждение', withO4 === 11 && !bad.length, withO4 + ' ' + bad.join(' '));
 })();
 
 /* ── 2. Празници, Великден, норми 2026–2030 срещу Excel ───────────────── */
@@ -115,32 +110,56 @@ check('2027-01-01 е петък', E.dow('2027-01-01') === 5);
 check('допълнителен неработен ден маха работен ден от нормата',
   E.monthInfo('2026-11', [{ day: '2026-11-16' }]).norm === 160 && E.monthInfo('2026-11', []).norm === 168);
 
-/* ── 3. Непълен работен ден (4 ч.) ────────────────────────────────────── */
+/* ── 3. Непълен работен ден — буквите по договор ─────────────────────── */
 var S11 = ET.setups['2026-11'], P11 = E.prepare(S11), M11 = E.monthInfo('2026-11', []);
-function lockAllWorkdays(code, except) {
-  var lk = {};
-  for (var i = 0; i < M11.days; i++) if (M11.dow[i] <= 5 && !M11.holiday[i] && (except || []).indexOf(i + 1) < 0) lk[i + 1] = code;
-  return lk;
+function workdayLetters(letter, except) {
+  var L = new Array(M11.days).fill('');
+  for (var i = 0; i < M11.days; i++) if (M11.dow[i] <= 5 && !M11.holiday[i] && (except || []).indexOf(i + 1) < 0) L[i] = letter;
+  return L;
 }
 var four = { hours_per_day: 4 };
-var r4 = E.computeRow(P11, M11, four, [], lockAllWorkdays('Д5/1'));
-check('4 ч. договор: 21 × Д5/1 през 11.2026 → 84 ч. = цел 84, разлика 0', r4.official === 84 && r4.target === 84 && r4.diff === 0, r4.official + '/' + r4.target);
-var r4b = E.computeRow(P11, M11, four, [], lockAllWorkdays('Д5/2'));
-check('4 ч. договор: 21 × Д5/2 → 84 ч. (ред 38 от образеца)', r4b.official === 84 && r4b.diff === 0, r4b.official);
-var lettersO = new Array(30).fill(''); lettersO[1] = 'О';                 // 2.11 — понеделник
-var r4o = E.computeRow(P11, M11, four, lettersO, lockAllWorkdays('Д5/1', [2]));
+var r4 = E.computeRow(P11, M11, four, workdayLetters('П'), {});
+check('4 ч. договор: 21 × П → 21 × Д5/1 = 84 ч. = цел 84, разлика 0 (ред 37 от образеца)', r4.official === 84 && r4.target === 84 && r4.diff === 0 &&
+  r4.codes.filter(function (c) { return c === 'Д5/1'; }).length === 21, r4.official + '/' + r4.target);
+var r4b = E.computeRow(P11, M11, four, workdayLetters('В'), {});
+check('4 ч. договор: 21 × В → Д5/2 = 84 ч. (ред 38)', r4b.official === 84 && r4b.diff === 0 && r4b.codes[1] === 'Д5/2', r4b.official);
+var Pl4 = E.prepare(ET.setups['2026-10']), Ml4 = E.monthInfo('2026-10', []), lv = new Array(31).fill(''); lv[0] = 'П'; lv[1] = 'В';
+var rl4 = E.computeRow(Pl4, Ml4, four, lv, {});
+check('4 ч. договор през лятото: П → Д5/1, В → Д5/2', rl4.codes[0] === 'Д5/1' && rl4.codes[1] === 'Д5/2', rl4.codes.slice(0, 2).join());
+var lO = workdayLetters('П'); lO[1] = 'О';                                       // 2.11 — понеделник
+var r4o = E.computeRow(P11, M11, four, lO, {});
 check('4 ч. договор: О вади 4 ч. от целта (84 → 80), 20 × Д5/1 = 80', r4o.target === 80 && r4o.official === 80 && r4o.diff === 0, r4o.target + '/' + r4o.official);
-var lettersO4 = new Array(30).fill(''); lettersO4[1] = 'О4';
-var r4o4 = E.computeRow(P11, M11, four, lettersO4, lockAllWorkdays('Д5/1', [2]));
-check('4 ч. договор: О4 = отпуск 4 ч. (код О), цел 80', r4o4.codes[1] === 'О' && r4o4.target === 80 && r4o4.diff === 0 &&
-  !r4o4.warnings.some(function (w) { return w.type === 'o4_full'; }), r4o4.codes[1] + ' ' + r4o4.target);
-var r4short = E.computeRow(P11, M11, four, [], lockAllWorkdays('Д5/1', [3]));
-check('4 ч. договор: изравняването не пипа — само маркира (−4 ч.)', r4short.diff === -4 && !r4short.reachable && !r4short.changed.length, r4short.diff);
-
-check('4 ч. договор: вътрешните часове на О са 4, не 8', r4o.internal === 4, r4o.internal);
-var tenP = new Array(30).fill(''); [1, 2, 3, 4, 5, 8, 9, 10, 11, 12].forEach(function (d) { tenP[d] = 'П'; });   // 10 делника × Д1/З = 80 ч.
-var r4p = E.computeRow(P11, M11, four, tenP, {});
-check('4 ч. договор с 8-часови смени (80/84): НЕ се изравнява (+2 +2 би стигнало), само маркира', r4p.diff === -4 && !r4p.changed.length && !r4p.reachable, r4p.diff + ' ' + JSON.stringify(r4p.changed));
+check('4 ч. договор: вътрешните часове с О — 20 × 8 (П) + 4 (О по договор)', r4o.internal === 164, r4o.internal);
+var lO4 = workdayLetters('П'); lO4[1] = 'О4';
+var r4o4 = E.computeRow(P11, M11, four, lO4, {});
+check('4 ч. договор: О4 → Д5/1 (къс ден), целта не се намалява', r4o4.codes[1] === 'Д5/1' && r4o4.target === 84 && r4o4.diff === 0, r4o4.codes[1] + ' ' + r4o4.target);
+var lSun = workdayLetters('П'); lSun[0] = 'П';                                   // 1.11 — неделя
+var r4sun = E.computeRow(P11, M11, four, lSun, {});
+check('4 ч. договор: П в неделя → без код + предупреждение (няма 4-часов неделен код)', r4sun.codes[0] === '' &&
+  r4sun.warnings.some(function (w) { return w.day === 1 && w.type === 'unknown'; }) && r4sun.official === 84, r4sun.codes[0] + ' ' + r4sun.official);
+var lB = workdayLetters('П'); lB[0] = 'Б';
+check('4 ч. договор: Б в неделя → Б (отсъствията са вписани и за неделя)', E.computeRow(P11, M11, four, lB, {}).codes[0] === 'Б');
+var r4short = E.computeRow(P11, M11, four, workdayLetters('П', [3]), {});
+check('4 ч. договор: −4 ч. → само маркира', r4short.diff === -4 && !r4short.reachable && !r4short.changed.length, r4short.diff);
+// Изравняване при договор под 8 ч. — не. Ако някой ден договорът има 8-часов код с ход
+// (тук: изкуствено П → Д1/З за 4 ч.), пак не се пипа.
+var Sx = clone(S11); Sx.letter_map.forEach(function (l) { if (+l.hours_per_day === 4 && l.letter === 'П') l.code = 'Д1/З'; });
+var tenP = new Array(30).fill(''); [1, 2, 3, 4, 5, 8, 9, 10, 11, 12].forEach(function (d) { tenP[d] = 'П'; });
+var r4p = E.computeRow(E.prepare(Sx), M11, four, tenP, {});
+check('договор 4 ч. с 8-часови кодове (80/84): НЕ се изравнява (+2 +2 би стигнало), само маркира', r4p.diff === -4 && !r4p.changed.length && !r4p.reachable, r4p.diff + ' ' + JSON.stringify(r4p.changed));
+// Договор без нито един ред (6 ч.) — НЕ пада към общите букви.
+var six = E.computeRow(P11, M11, { hours_per_day: 6 }, workdayLetters('П'), {});
+check('6 ч. договор (без редове): кодове не се поставят', six.codes.every(function (c) { return c === ''; }) && six.official === 0, six.codes.filter(Boolean).join());
+check('6 ч. договор: всеки ден с буква — „няма букви за договор 6 ч.“', six.warnings.filter(function (w) { return w.type === 'no_contract' && w.text === 'няма букви за договор 6 ч.'; }).length === 21,
+  six.warnings.filter(function (w) { return w.type === 'no_contract'; }).length);
+check('6 ч. договор: целта е по договора (21 × 6 = 126), разликата се вижда', six.target === 126 && six.diff === -126, six.target);
+var lk6 = {}; lk6[2] = 'Д8';
+var six2 = E.computeRow(P11, M11, { hours_per_day: 6 }, workdayLetters('П'), lk6);
+check('6 ч. договор: ръчно заключен код се приема и без предупреждение за деня', six2.codes[1] === 'Д8' && !six2.warnings.some(function (w) { return w.day === 2; }), six2.codes[1]);
+var lkAll = {}; workdayLetters('x').forEach(function (v, i) { if (v) lkAll[i + 1] = 'Д1/З'; });
+var rLk = E.computeRow(P11, M11, { hours_per_day: 8 }, [], lkAll);
+check('ред само със заключени кодове (без букви) има цел — 21 × Д1/З = 168 = цел', rLk.target === 168 && rLk.official === 168 && rLk.diff === 0, rLk.target + '/' + rLk.official);
+check('8 ч. договор: общите букви (П → Д1/З)', E.computeRow(P11, M11, { hours_per_day: 8 }, workdayLetters('П'), {}).codes[1] === 'Д1/З');
 
 /* ── 3б. К — командировка ─────────────────────────────────────────────── */
 var kL = new Array(30).fill(''); kL[1] = 'К'; kL[0] = 'К';                  // пн 2.11 и нд 1.11

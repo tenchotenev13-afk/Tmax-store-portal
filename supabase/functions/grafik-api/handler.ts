@@ -39,7 +39,7 @@ export type SetupRaw = {
   terms: (Dated & { id: string; company_id: string; vtr_id: string; approver: string })[];
   codes: (Dated & { vtr_id: string; code: string; hours: number | null; kind: string; seasons: string[] | null; legend: string | null; sort_order: number })[];
   seasons: (Dated & { vtr_id: string; months: Record<string, string> })[];
-  letterMap: (Dated & { vtr_id: string; letter: string; day_kind: string; code: string })[];
+  letterMap: (Dated & { vtr_id: string; letter: string; day_kind: string; code: string; hours_per_day?: number | null })[];
   extraDays: { day: string; store_name: string | null; note: string | null }[];
 };
 export type AdminTable = "companies" | "grafik_company_terms" | "grafik_store_company" | "grafik_extra_days" | "grafik_letter_map";
@@ -138,7 +138,7 @@ export function resolveSetup(raw: SetupRaw, start: string, end: string) {
     vtr_id: vtr,
     season: seasonRow ? seasonRow.months[mo] || null : null,
     codes: vtr ? raw.codes.filter((c) => c.vtr_id === vtr && validAt(c, start)).sort((a, b) => a.sort_order - b.sort_order) : [],
-    letter_map: vtr ? raw.letterMap.filter((l) => l.vtr_id === vtr && validAt(l, start)).map((l) => ({ letter: l.letter, day_kind: l.day_kind, code: l.code })) : [],
+    letter_map: vtr ? raw.letterMap.filter((l) => l.vtr_id === vtr && validAt(l, start)).map((l) => ({ letter: l.letter, day_kind: l.day_kind, code: l.code, hours_per_day: l.hours_per_day ?? null })) : [],
     extra_days: raw.extraDays.filter((e) => e.day >= start && e.day <= end),
     missing,
   };

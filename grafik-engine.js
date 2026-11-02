@@ -89,23 +89,36 @@
   // Подготовка на setup → бързи справочници.
   E.prepare = function (setup) {
     var map = {}, codes = {};
-    (setup.letter_map || []).forEach(function (r) { map[r.letter + '|' + r.day_kind] = r.code; });
+    // Общите редове (hours_per_day NULL) — за 8-часов договор; редовете с договор — само за него
+    // (grafik_letter_map.hours_per_day, миграция 20261102095558). Без връщане към общите.
+    var byHpd = {};
+    (setup.letter_map || []).forEach(function (r) {
+      if (r.hours_per_day === null || r.hours_per_day === undefined) map[r.letter + '|' + r.day_kind] = r.code;
+      else (byHpd[String(+r.hours_per_day)] = byHpd[String(+r.hours_per_day)] || {})[r.letter + '|' + r.day_kind] = r.code;
+    });
     (setup.codes || []).forEach(function (c) { codes[c.code] = { hours: c.hours === null || c.hours === undefined ? null : +c.hours, kind: c.kind || 'work' }; });
     var season = setup.season;
     var full = map['ЛД|' + season] || null;            // пълна дневна смяна за сезона
     var first = map['П|' + season] || null;            // първа смяна 8 ч.
     var fullH = full && codes[full] ? codes[full].hours : null;
     return {
-      season: season, map: map, codes: codes, full: full, first: first, fullHours: fullH,
+      season: season, map: map, byHpd: byHpd, codes: codes, full: full, first: first, fullHours: fullH,
       // Междинната зимна (Д4/З, 10 ч.) — ход само в З1, където пълната е Д5/З.
       mid: season === 'З1' ? (map['ЗД|З1'] || null) : null,
       sunFull: map['ЛД|Н'] || null, sunFirst: map['П|Н'] || null
     };
   };
 
-  E.translate = function (P, letter, w) {
+  // Буквите за договора: 8 ч. (или без договор) → общите; иначе само редовете за
+  // този договор; няма такива → null (computeRow предупреждава, код не се поставя).
+  E.lettersFor = function (P, hpd) {
+    if (!hpd || +hpd === 8) return P.map;
+    return P.byHpd[String(+hpd)] || null;
+  };
+  E.translate = function (P, letter, w, hpd) {
     if (!letter || E.isHours(letter)) return '';
-    return P.map[letter + '|' + E.dayKind(P.season, w)] || '';
+    var m = E.lettersFor(P, hpd);
+    return m ? (m[letter + '|' + E.dayKind(P.season, w)] || '') : '';
   };
 
   // Официалните часове на код. К (командировка) = пълната смяна на сезона,
@@ -210,21 +223,24 @@
     var hpd = staff && staff.hours_per_day ? +staff.hours_per_day : 8;
     var codes = [], internal = 0, abs = 0, any = false, notes = [], warn = [];
     locked = locked || {};
+    var noLetters = !E.lettersFor(P, hpd);
     for (var i = 0; i < M.days; i++) {
       var L = (letters && letters[i]) || '';
       if (L || locked[i + 1]) any = true;
       internal += E.internalHours(P, L, hpd);
-      var c = locked[i + 1] ? locked[i + 1] : E.translate(P, L, M.dow[i]);
+      var c = locked[i + 1] ? locked[i + 1] : E.translate(P, L, M.dow[i], hpd);
       codes.push(c);
       if (E.isAbsence(P, c)) abs++;
       if (E.isHours(L)) notes.push({ day: i + 1, type: 'hours', text: L + ' свободни ч. — ръчен код' });
-      if (L === 'О4' && hpd >= 8) warn.push({ day: i + 1, type: 'o4_full', text: 'О4 при 8-часов договор' });
       if (L && E.WORK_LETTERS.indexOf(L) >= 0) {
         if (M.holiday[i]) warn.push({ day: i + 1, type: 'holiday', text: 'смяна на празник (' + M.holiday[i] + ')' });
         if (staff && staff.hired_on && M.dates[i] < staff.hired_on) warn.push({ day: i + 1, type: 'before_hire', text: 'смяна преди назначаване' });
         if (staff && staff.left_on && M.dates[i] > staff.left_on) warn.push({ day: i + 1, type: 'after_leave', text: 'смяна след напускане' });
       }
-      if (L && !E.isHours(L) && !c) warn.push({ day: i + 1, type: 'unknown', text: 'буквата „' + L + '“ няма код за този ден' });
+      if (L && !E.isHours(L) && !c && !locked[i + 1]) {
+        if (!noLetters) warn.push({ day: i + 1, type: 'unknown', text: 'буквата „' + L + '“ няма код за този ден' });
+        else warn.push({ day: i + 1, type: 'no_contract', text: 'няма букви за договор ' + hpd + ' ч.' });
+      }
     }
     // Повече от 5 работни дни в 7 поредни (в рамките на месеца, както _help).
     var maxRun = 0;

@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията grafik_letters_contract, grafik-letters-contract-schema.sql, версия 20261102095558, приложена 02.11.2026; таблицата е без anon — виж бележката при grafik_schema)
+- 02.11 · grafik_letter_map.hours_per_day — numeric(3,1), NULL, без default
+
 ## Изпратено 02.11.2026
 
 Живко моли (02.11) промените, близки по време, да се събират в един имейл; спешните — веднага.
