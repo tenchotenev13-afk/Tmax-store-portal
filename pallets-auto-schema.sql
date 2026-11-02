@@ -1,8 +1,9 @@
 -- pallets-auto-schema.sql
 -- Автоматично отмятане на „СПРАВКА ПРАЗНИ ПАЛЕТИ" от справката в Палети
 -- (решение на Тенчо, 02.11.2026).
--- Миграция: supabase/migrations/<версия>_pallets_auto_complete.sql (след „давай")
--- Rollback: дословно най-долу в този файл и в <версия>_pallets_auto_complete_down.sql
+-- Приложено в Supabase (xiwkdiqqplgdcrkewgtv) на 02.11.2026, версия 20261102131415.
+-- Миграция: supabase/migrations/20261102131415_pallets_auto_complete.sql
+-- Rollback: дословно най-долу в този файл и в 20261102131415_pallets_auto_complete_down.sql
 -- SQL тест: tests/sql/pallets-auto-complete.test.sql
 -- Огледало (Живко): НЯМА ред — нова таблица/колона/статус няма; функции,
 -- тригер и крон не са в огледалото.
@@ -235,7 +236,7 @@ revoke execute on function public.pallets_sync_trg() from public, anon, authenti
 select cron.schedule('pallets-auto-complete', '0 * * * *',
                      'select public.pallets_sync_completions();');
 
--- ═══ ROLLBACK (дословно в <версия>_pallets_auto_complete_down.sql) ══════
+-- ═══ ROLLBACK (дословно в 20261102131415_pallets_auto_complete_down.sql) ══════
 -- Редовете в task_completions с completed_by='auto:pallets' ОСТАВАТ (история).
 -- Ръчното отмятане се връща с rollback на ПОРТАЛА (BUL_AUTO_MODULES в
 -- bulletin.js и AUTO_COMPLETE_FROM в shared.js). Върне ли се само базата,
