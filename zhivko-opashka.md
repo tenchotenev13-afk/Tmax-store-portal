@@ -14,6 +14,10 @@
 
 ## Чака изпращане
 
+## Изпратено 02.11.2026
+
+Живко моли (02.11) промените, близки по време, да се събират в един имейл; спешните — веднага.
+
 (в базата от миграцията loading_items_nested_codes, loading-stoka-v-stoka-schema.sql, версия 20261101220220, приложена 02.11.2026)
 - 01.11 · loading_list_items.nested_codes — text, NULL, без default
 
@@ -39,20 +43,21 @@
 (в базата от миграцията revaluation_codes_store, revaluation-codes-store-schema.sql, версия 20261030123801, приложена 30.10.2026)
 - 30.10 · revaluation_codes.store_name — text, NULL, без default (11-те заварени реда → 'Кърджали')
 
-(в базата от миграцията bul_allow_postpone_oneoff, bul-allow-postpone-oneoff-schema.sql, версия 20261028124513, приложена 28.10.2026)
-- 28.10 · bulletin_tasks.allow_postpone — boolean, NOT NULL, default true
-- 28.10 · bulletin_tasks.allow_not_applicable — boolean, NOT NULL, default true
-
 (в базата от миграцията minusi_multi_report, версия 20261028104053, приложена 28.10.2026)
 - 28.10 · report_recipients.minus_multi — boolean, NOT NULL, default false
 - 28.10 · app_settings — нов ключ minus_multi_count (праг „многократен минус"; начална стойност '3')
 - 28.10 · app_settings — нов ключ minus_multi_days (прозорец в дни за „многократен минус"; начална стойност '30')
 
-## Изпратено 28.10.2026
+## Потвърдено 02.11.2026
 
 (миграция bul_allow_postpone, bul-allow-postpone-schema.sql — в базата от миграцията bul_allow_postpone, версия 20261028093135, приложена 28.10.2026)
 - 28.10 · recurring_tasks.allow_postpone — boolean, NOT NULL, default true
 - 28.10 · recurring_tasks.allow_not_applicable — boolean, NOT NULL, default true
+
+(в базата от миграцията bul_allow_postpone_oneoff, bul-allow-postpone-oneoff-schema.sql, версия 20261028124513, приложена 28.10.2026)
+- 28.10 · bulletin_tasks.allow_postpone — boolean, NOT NULL, default true
+- 28.10 · bulletin_tasks.allow_not_applicable — boolean, NOT NULL, default true
+(потвърдено от Живко с писмо на 02.11: recurring_tasks 26 реда, bulletin_tasks 94 реда; огледалото 89 таблици, 0 грешки)
 
 ## Потвърдено 27.10.2026
 
