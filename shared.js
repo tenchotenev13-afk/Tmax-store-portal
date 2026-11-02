@@ -1839,6 +1839,14 @@ function setupTabsForRole(){
     pkSubBtn.style.display='none';
     if(typeof pkLoadUsers==='function') pkLoadUsers();
   }
+  /* Таб „📆 Работен график“ (grafik.js) — в разработка: само имейлите от
+     app_settings.grafik_beta_users. Скрит до отговора; grLoadUsers() го показва.
+     Данните са само през grafik-api — скритият бутон не е защитата. */
+  var grTab=document.getElementById('tab-grafik');
+  if(grTab){
+    grTab.style.display='none';
+    if(typeof grLoadUsers==='function') grLoadUsers();
+  }
   var sdTab=document.getElementById('tab-stock-diff');
   if(sdTab)sdTab.style.display='';
   /* Таб Администрация — САМО admin (от 18.10.2026; дотогава и accounting с
@@ -1865,7 +1873,7 @@ function showModule(mod){
     showModule('kasa');
     return;
   }
-  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist','revaluation','rev-schedule','minusi','picking'].forEach(function(m){
+  ['transport','client','bulletin','docs','handbook','kasa','history','admin','print','contacts','reference','transit','calendar','stock-returns','stock-diff','pallets','supply','loading','transfers','today','checklist','revaluation','rev-schedule','minusi','picking','grafik'].forEach(function(m){
     var el=document.getElementById('mod-'+m);if(el)el.style.display=m===mod?'block':'none';
   });
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active');});
@@ -1936,6 +1944,7 @@ function showModule(mod){
   if(mod==='loading')loadLoadingLists();
   if(mod==='transfers')loadTransfers();
   if(mod==='picking'&&typeof loadPicking==='function')loadPicking();
+  if(mod==='grafik'&&typeof loadGrafik==='function')loadGrafik();
   if(mod==='reference')loadReference();
   if(mod==='handbook')loadHandbook();
 }

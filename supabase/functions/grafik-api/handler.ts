@@ -197,6 +197,12 @@ function uuid(v: unknown, what: string): string {
   return v;
 }
 
+// Същото правило като GrafikEngine.inMonth: не е напуснал преди първия ден и не е назначен след последния.
+export function staffInMonth(s: Record<string, unknown>, start: string, end: string): boolean {
+  const left = typeof s.left_on === "string" ? s.left_on : null, hired = typeof s.hired_on === "string" ? s.hired_on : null;
+  return !(left && left < start) && !(hired && hired > end);
+}
+
 export const SNAPSHOT_MAX_BYTES = 512 * 1024;
 // Снимката идва от браузъра (изчисленията са там в етап 1). Сървърът проверява
 // структурата; заглавката (дружество, адрес, утвърдил, съставил) я пише САМ.
@@ -396,8 +402,12 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       if (month.status !== "draft") throw new HttpError(409, "submitted", "Графикът вече е подаден.");
       const setup = resolveSetup(await repo.setupRaw(store), m.start, m.end);
       if (setup.missing.length) throw new HttpError(409, "missing_company", "Липсват данни за дружеството — админ (" + setup.missing.join(", ") + ").");
+      // Редове на хора извън месеца (датата им на назначаване/напускане е сменена след
+      // въвеждането) остават в grafik_rows, но не са в графика → не се искат в снимката.
       const rows = await repo.listRows(month.id);
-      const err = checkSnapshot(b.snapshot, m.days, rows.map((r) => r.staff_id));
+      const rowStaff = await repo.getStaff(rows.map((r) => r.staff_id));
+      const inMonthIds = rowStaff.filter((s) => staffInMonth(s, m.start, m.end)).map((s) => s.id);
+      const err = checkSnapshot(b.snapshot, m.days, inMonthIds);
       if (err) throw new HttpError(400, "bad_snapshot", err);
       const snapshot = {
         ...(b.snapshot as Record<string, unknown>),
@@ -413,7 +423,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
         status: "submitted", submitted_at: at, submitted_by: acc.email, submitted_by_name: acc.name, snapshot, updated_at: at,
       }, "draft");
       if (!ok) throw new HttpError(409, "submitted", "Графикът вече е подаден.");
-      await audit(repo, acc, "grafik_submit", store, { month: m.start, rows: rows.length });
+      await audit(repo, acc, "grafik_submit", store, { month: m.start, rows: inMonthIds.length, skipped_out_of_month: rows.length - inMonthIds.length });
       return { status: "submitted", submitted_at: at, submitted_by_name: acc.name };
     }
 

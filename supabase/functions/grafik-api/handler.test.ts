@@ -3,7 +3,7 @@
 // База в паметта (MemRepo) — без мрежа. Проверява правата по вид × действие ×
 // свой/чужд обект, пропуска, beta/ТРЗ списъците, клетките, снимката и валидността по дати.
 import {
-  handleGrafik, parseEmailList, parseMonth, resolveSetup, badCells, validAt,
+  handleGrafik, parseEmailList, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
   type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable,
 } from "./handler.ts";
 import { signSession } from "../_shared/session.ts";
@@ -302,6 +302,22 @@ Deno.test("submit: снимка, заглавка от сървъра, посл�
   eq((await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [{ staff_id: ids[0], letters: L30() }] })).body.reason, "submitted", "подаден → без промени");
   eq((await call(r, U.mgrK, { action: "submit", store: "Кърджали", month: "2026-11", snapshot: snap(ids) })).body.reason, "submitted", "втори път");
   eq((await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" })).body.can_edit, false, "екранът знае, че е заключен");
+});
+
+Deno.test("submit: ред на служител, изкаран от месеца след въвеждането, не се иска в снимката", async () => {
+  const r = new MemRepo();
+  const ids = await filled(r);
+  r.staff.filter((s) => s.id === ids[1])[0].left_on = "2026-10-31";        // напуснал преди ноември
+  eq((await call(r, U.mgrK, { action: "submit", store: "Кърджали", month: "2026-11", snapshot: snap(ids) })).body.reason, "bad_snapshot", "с него — отказ (не е в графика)");
+  const x = await call(r, U.mgrK, { action: "submit", store: "Кърджали", month: "2026-11", snapshot: snap([ids[0]]) });
+  eq([x.status, x.body.status], [200, "submitted"], "без него — подаден");
+  r.staff.push({ id: nid(), store_name: "Кърджали", short_name: "Х", full_name: "Х", hired_on: "2026-12-01", left_on: null });
+});
+
+Deno.test("staffInMonth: граници", () => {
+  eq([staffInMonth({ left_on: "2026-11-01" }, "2026-11-01", "2026-11-30"), staffInMonth({ left_on: "2026-10-31" }, "2026-11-01", "2026-11-30"),
+      staffInMonth({ hired_on: "2026-11-30" }, "2026-11-01", "2026-11-30"), staffInMonth({ hired_on: "2026-12-01" }, "2026-11-01", "2026-11-30"), staffInMonth({}, "2026-11-01", "2026-11-30")],
+     [true, false, true, false, true], "напуснал на 1-ви е в месеца; назначен на последния — също");
 });
 
 Deno.test("submit: без данни за дружеството → 409, но попълването е позволено", async () => {

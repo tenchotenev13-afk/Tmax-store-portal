@@ -385,6 +385,8 @@ OneSignalDeferred.push(async function(OneSignal) {
       <button id="tab-history" class="nav-tab" onclick="showModule('history')" style="display:none;"><span class="ti">📈</span><span class="tl">История</span></button>
       <button id="tab-today" class="nav-tab" onclick="showModule('today')" style="display:none;"><span class="ti">📊</span><span class="tl">Днес</span></button>
       <button id="tab-checklist" class="nav-tab" onclick="showModule('checklist')" style="display:none;"><span class="ti">🗓️</span><span class="tl">Чек лист</span></button>
+      <!-- Работен график (grafik.js) — в разработка: само app_settings.grafik_beta_users (HIDDEN-FEATURES.md) -->
+      <button id="tab-grafik" class="nav-tab" onclick="showModule('grafik')" style="display:none;"><span class="ti">📆</span><span class="tl">Работен график</span></button>
       <button id="tab-docs" class="nav-tab" onclick="showModule('docs')"><span class="ti">📁</span><span class="tl">Инструкции</span></button>
       <div class="tab-sep" id="sep-admin" style="display:none;"></div>
       <!-- Група: Администрация (лилаво) -->
@@ -470,6 +472,7 @@ OneSignalDeferred.push(async function(OneSignal) {
   <!-- TRANSFERS (междускладови трансфери, transfers.js) -->
   <div id="mod-transfers" class="page" style="display:none;"></div>
   <div id="mod-picking" class="page" style="display:none;"></div>
+  <div id="mod-grafik" class="page" style="display:none;"></div>
 
   <!-- CLIENT ORDERS -->
   <div id="mod-client" class="page" style="display:none;">
@@ -899,5 +902,7 @@ function loadTabOrder(){
 <script src="revisions.js"></script>
 <script src="minusi.js"></script>
 <script src="picking.js"></script>
+<script src="grafik-engine.js"></script>
+<script src="grafik.js"></script>
 </body>
 </html>
