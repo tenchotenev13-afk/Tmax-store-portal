@@ -1319,6 +1319,17 @@ var BUL_AUTO_MODULES = {
     cls:     'bul-auto-minusi',
     unit:    ['непопълнен', 'непопълнени'],
     storeOn: function(){ return typeof mnStoreOn==='function' && !!currentUser && mnStoreOn(currentUser.store_name); }
+  },
+  /* „СПРАВКА ПРАЗНИ ПАЛЕТИ" (02.11.2026). Отметка от pallets_sync_completions
+     (тригер при запис в transport_pallets + часов крон), completed_by
+     'auto:pallets', completion_date — денят на срока (петък): справка в
+     седмицата, записана до петък 17:00. Не разотмята. Брояч няма — надписът е
+     „⏳ отмята се от Палети". От AUTO_COMPLETE_FROM['pallets'] (shared.js). */
+  'pallets': {
+    reason: 'auto-pallets',
+    label:  'Отмята се автоматично от Палети',
+    tab:    'Палети',
+    cls:    'bul-auto-pallets'
   }
 };
 function bulAutoModuleOf(linkedModule, todayISO){
@@ -1730,6 +1741,8 @@ function bulCompletedByLabel(v){
   if(v==='auto:supply') return 'автоматично от Зареждане';
   /* „Минуси" (29.10.2026): обектът няма незакрит непопълнен минус. */
   if(v==='auto:minusi') return 'автоматично от Минуси';
+  /* „Палети" (02.11.2026): справка в седмицата, записана до срока. */
+  if(v==='auto:pallets') return 'автоматично от Палети';
   return v||'';
 }
 /* Полето „Отмята се автоматично" във формите за задача. Стои в DOM-а винаги

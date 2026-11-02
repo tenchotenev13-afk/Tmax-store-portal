@@ -940,7 +940,10 @@ var AUTO_COMPLETE_FROM = {
   'stock-diff': '2026-10-12',  /* понеделник; решение на Тенчо, 04.10.2026 */
   /* „Зареждане": същата дата като v_start в supply_sync_completions (05.10.2026).
      05.10 вече има ръчни отметки; първият чист ден е 12.10. */
-  'supply':     '2026-10-12'
+  'supply':     '2026-10-12',
+  /* „Палети": същата дата като v_start в pallets_sync_completions
+     (pallets-auto-schema.sql, 02.11.2026). */
+  'pallets':    '2026-11-02'
 };
 function autoCompleteActive(linkedModule, todayISO){
   var from = AUTO_COMPLETE_FROM[linkedModule];

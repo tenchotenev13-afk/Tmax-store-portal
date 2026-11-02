@@ -119,11 +119,11 @@ const noteOf = (h, cls) => {
     const h = env();
     const w = h.w;
     const keys = Object.keys(w.BUL_AUTO_MODULES);
-    /* СЕДЕМ от 29.10.2026 („Минуси", само за включените обекти — storeOn);
+    /* ОСЕМ от 02.11.2026 („Палети"); СЕДЕМ от 29.10.2026 („Минуси", само за включените обекти — storeOn);
        ПЕТ от 05.10.2026 („Зареждане"); ЧЕТИРИ от 04.10.2026: „Разлики" (stock-diff) влезе с дата на влизане в
        сила. Числото е заковано нарочно — нов модул трябва да мине и през
        този тест, а не да се промъкне. */
-    ok('съдържа седемте ключа', keys.length === 7 && keys.indexOf('stock-returns-diff') >= 0 && keys.indexOf('supply') >= 0 && keys.indexOf('oborot') >= 0 &&
+    ok('съдържа осемте ключа', keys.length === 8 && keys.indexOf('pallets') >= 0 && keys.indexOf('stock-returns-diff') >= 0 && keys.indexOf('supply') >= 0 && keys.indexOf('oborot') >= 0 &&
       keys.indexOf('transit-auto') >= 0 && keys.indexOf('stock-returns-complaint') >= 0 &&
       keys.indexOf('stock-diff') >= 0 && keys.indexOf('minusi') >= 0, keys.join(', '));
     ok('bulAutoLocked чете от него', w.bulAutoLocked('stock-returns-complaint') === true);
