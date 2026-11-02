@@ -94,6 +94,7 @@ const TESTS = [
   'minusi-multi-week.test.js',
   'minusi-multi-common.test.js',
   'minusi-revision-template.test.js',
+  'minusi-revision-split.test.js',
   'pilot-tabs.test.js',
   'picking.test.js',
   'picking-pallets.test.js',

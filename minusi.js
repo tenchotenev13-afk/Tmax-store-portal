@@ -123,7 +123,8 @@
    Етап 3 — темплейт за ревизия (30.10.2026, Тенчо): „📄 Темплейт за ревизия"
    в „📋 Дневен" (обектът; контролингът — само при един избран обект) →
    преглед → Excel „ref | SAP код | (празно)" за ZINVCOUNT. Без запис в базата;
-   956 не се генерира. Правилото — при mnRevRows. */
+   956 не се генерира. Правилото — при mnRevRows; заметнат код като свободен
+   текст се разделя на числата от 4 до 7 цифри (mnRevRealCodes, 02.11). */
 
 var mnMovs = [];
 var mnReasons = [];
@@ -1006,22 +1007,30 @@ function mnRevRows(calc){
     var mat = mnCoKey(r.material), real = mnCoKey(r.real_code);
     if(!mat) return;
     add(mat, String(r.id), null);
-    if(real && real !== mat && mnRevIsCode(real)) add(real, String(r.id), mat);
+    mnRevRealCodes(real).forEach(function(c){ if(c !== mat) add(c, String(r.id), mat); });
   });
   return out.sort(function(a, b){ return a.code.localeCompare(b.code, undefined, { numeric: true }); });
 }
 function mnRevReady(calc){
   return (calc.open || []).filter(function(r){ return !mnUnfilled(r) && mnRevReasonOk(r.reason_id); });
 }
-/* Заметнатият код е свободен текст („38554 и 38619" — Гоце Делчев, 30.10):
-   с интервал / запетая / „;" / „/" не е ЕДИН код и не влиза във файла —
-   SAP би го отхвърлил. Прегледът го показва с предупреждение. */
-function mnRevIsCode(c){ return /^[^\s,;\/]+$/.test(c); }
+/* Заметнатият код е свободен текст („38554 и 38619" — Гоце Делчев, 30.10).
+   Един код (само латински букви, цифри, „.", „-", „_") влиза както е. Иначе
+   (решение Б на Тенчо, 02.11) всяко число от 4 до 7 цифри в полето е отделен
+   код; без нито едно — нищо не влиза, а прегледът предупреждава. */
+function mnRevIsCode(c){ return /^[0-9A-Za-z._\-]+$/.test(c); }
+function mnRevRealCodes(real){
+  if(!real) return [];
+  if(mnRevIsCode(real)) return [real];
+  var out = [], re = /(^|\D)(\d{4,7})(?!\d)/g, m;
+  while((m = re.exec(real))) if(out.indexOf(m[2]) < 0) out.push(m[2]);
+  return out;
+}
 function mnRevBad(calc){
   var out = [];
   mnRevReady(calc).forEach(function(r){
     var mat = mnCoKey(r.material), real = mnCoKey(r.real_code);
-    if(mat && real && real !== mat && !mnRevIsCode(real)) out.push({ real: real, of: mat });
+    if(mat && real && real !== mat && !mnRevRealCodes(real).length) out.push({ real: real, of: mat });
   });
   return out;
 }
@@ -1065,7 +1074,7 @@ function mnRevOpen(){
   });
   h += '</tbody></table>';
   var bad = mnRevBad(calc);
-  if(bad.length) h += '<div id="mn-rev-bad" style="margin-top:10px;color:#b91c1c;font-size:13px;">⚠ Заметнат код, който не е един код — НЕ е във файла; оправи го в реда или го добави ръчно: ' +
+  if(bad.length) h += '<div id="mn-rev-bad" style="margin-top:10px;color:#b91c1c;font-size:13px;">⚠ Заметнат код без число от 4 до 7 цифри — НЕ е във файла; оправи го в реда или го добави ръчно: ' +
     bad.map(function(x){ return '„' + esc(x.real) + '“ (към ' + esc(x.of) + ')'; }).join(', ') + '</div>';
   h += '<div class="modal-actions">' +
     '<button class="btn" onclick="closeModal(\'mn-rev-ov\')">Затвори</button>' +
