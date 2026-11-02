@@ -468,7 +468,8 @@ const TESTS = [
   'banner-split.test.js',
   'handover-structure.test.js',
   'limit1000-co-transport.test.js',
-  'users-no-plain-password.test.js'
+  'users-no-plain-password.test.js',
+  'grafik-engine.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
