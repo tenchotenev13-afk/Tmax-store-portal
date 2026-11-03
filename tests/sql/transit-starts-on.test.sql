@@ -32,6 +32,8 @@ declare
   ob         text := '__sqltest_ob_transit';     -- импорт навреме
   ob_ran     text := '__sqltest_ob_ranen';       -- импорт ден по-рано
   ob_gran    text := '__sqltest_ob_granica';     -- импорт 8 дни по-рано
+  ob_surv    text := '__sqltest_ob_ocelyal';     -- ред, оцелял от стар импорт
+  t_surv     uuid;   -- starts_on = mon + 10, оцелял ред
   b_id       uuid;
   t_plain    uuid;   -- без starts_on → старото поведение
   t_span     uuid;   -- starts_on = mon + 10
@@ -185,6 +187,40 @@ begin
   checks := checks + 1;
   if n <> 0 then fails := fails || ' [редове извън месечния импорт = 0, са ' || n || ' → допускът от 7 дни иска преглед]'; end if;
 
+  /* ── 7. ОЦЕЛЯЛ РЕД (решение А, 03.11.2026): стар created_at, нов imported_at ─
+     Таблицата вече не се изчиства: ред от стария импорт, който SAP пак носи,
+     пази created_at = s − 30, но новият импорт му пише imported_at = s. Той е
+     в НОВАТА партида и докато чака, задачата НЕ се отмята. Обработеният ред до
+     него е с created_at = imported_at = s — по created_at (мутантът M-A) само
+     той би бил в прозореца и задачата би се отметнала. */
+  insert into public.bulletin_tasks
+    (bulletin_id, department, title, task_type, linked_module, auto_complete,
+     due_date, due_dates, spans_from, starts_on, target_stores)
+  values (b_id, 'warehouse', '__sqltest_ocelyal', 'info', 'transit', true,
+          due_span, array[due_span], mon, s_span, array[ob_surv])
+  returning id into t_surv;
+
+  insert into public.goods_transit
+    (store_name, direction, material_name, status, reviewed_at, reviewed_by, created_at, imported_at)
+  values (ob_surv, 'incoming', '__sqltest_surv_nov', 'received', now(), 'sqltest',
+          (s_span::timestamp at time zone sofia), (s_span::timestamp at time zone sofia)),
+         (ob_surv, 'incoming', '__sqltest_surv_star', 'pending', null, null,
+          ((s_span - 30)::timestamp at time zone sofia), (s_span::timestamp at time zone sofia));
+
+  select count(*) into n from public.task_completions
+   where task_id = t_surv and store_name = ob_surv;
+  checks := checks + 1;
+  if n <> 0 then fails := fails || ' [оцелял чакащ ред (стар created_at, нов imported_at) ПРЕЧИ на отметката (има ' || n || ')]'; end if;
+
+  update public.goods_transit
+     set status = 'received', reviewed_at = now(), reviewed_by = 'sqltest'
+   where store_name = ob_surv and material_name = '__sqltest_surv_star';
+
+  select count(*) into n from public.task_completions
+   where task_id = t_surv and store_name = ob_surv and status = 'done';
+  checks := checks + 1;
+  if n <> 1 then fails := fails || ' [оцелелият ред обработен → ЕДНО отмятане (има ' || n || ')]'; end if;
+
   if fails = '' then
     raise exception 'SQL-ТЕСТ ОК (% проверки)', checks;
   else
@@ -208,6 +244,11 @@ $test$;
 --        → „ранен импорт, обработен" (има 0)
 --  S5  completion_date = v_today вместо срока
 --        → „completion_date = СРОКЪТ 2026-10-07, е 2026-09-27"
+--
+--  M-A (03.11.2026) transit_store_done_since чете created_at вместо imported_at
+--        → „оцелял чакащ ред … ПРЕЧИ на отметката" (има 1). Проверки 1–6
+--        сами НЕ го хващат: там created_at = now() и без това е извън
+--        прозореца — затова е проверка 7.
 --
 -- Не е писан мутант за „p_since IS NULL дава всички редове": той е покрит от
 -- КОНТРОЛАТА (задача без starts_on) в проверка 2 — повреди ли се, тя пада.

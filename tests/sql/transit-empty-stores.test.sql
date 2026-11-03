@@ -44,11 +44,13 @@ declare
   t_plain   uuid;   -- без прозорец (v_from = null)
   t_all     uuid;   -- без target_stores → обхватът е „отчетните обекти"
   t_old     uuid;   -- срокът е минал
+  t_past    uuid;   -- срокът е вчера (без самопочистване) — за т.12
   d_win     date;
   d_old     date;
   from_old  timestamptz;
   ob_a  text := '__sqltest_ob_a';    -- ИМА редове, необработени
   ob_b  text := '__sqltest_ob_b';    -- НЯМА редове
+  ob_c  text := '__sqltest_ob_c';    -- само ОЦЕЛЯЛ ред: стар created_at, нов imported_at
   ob_in text := '__sqltest_ob_incl'; -- потребителски обект, отчетен
   ob_ex text := '__sqltest_ob_excl'; -- потребителски обект, ИЗКЛЮЧЕН
   n integer;
@@ -105,7 +107,7 @@ begin
     (bulletin_id, department, title, task_type, linked_module, auto_complete,
      spans_from, starts_on, due_date, due_dates, target_stores)
   values (b_id, 'warehouse', '__sqltest_win', 'info', 'transit', true,
-          v_mon, v_today, d_win, array[d_win], array[ob_a, ob_b])
+          v_mon, v_today, d_win, array[d_win], array[ob_a, ob_b, ob_c])
   returning id into t_win;
 
   /* ── 1. ПРЕДИ ИМПОРТА: нула редове в прозореца → никой не се отмята ────── */
@@ -137,7 +139,32 @@ begin
   update goods_transit set imported_at = now() - interval '20 minutes'
    where material_name = '__sqltest_p1';
 
+  /* Оцелял ред (решение А, 03.11.2026): от стария импорт, created_at е извън
+     прозореца, но новият импорт го е видял → imported_at е в него. Обектът
+     НЕ е празен. Проверява се в т.12. */
+  insert into goods_transit (store_name, direction, material_name, status, created_at, imported_at)
+  values (ob_c, 'incoming', '__sqltest_surv', 'pending',
+          ((v_mon - 60)::timestamp at time zone 'Europe/Sofia'), now() - interval '20 minutes');
+
+  /* Задача със срок ВЧЕРА (в рамките на 14-те дни): за нея самопочистването
+     не тръгва (t.due < v_today), тоест грешна отметка би ОСТАНАЛА. При t_win
+     (срок в бъдещето) същото извикване би я махнало веднага и мутантът M12 би
+     оцелял — проверено на 03.11.2026. spans_from = срокът − 7: многоседмична
+     задача изисква начало в по-ранна седмица (bulletin_tasks_spans_later_week_chk). */
+  insert into bulletin_tasks
+    (bulletin_id, department, title, task_type, linked_module, auto_complete,
+     spans_from, starts_on, due_date, due_dates, target_stores)
+  values (b_id, 'warehouse', '__sqltest_past', 'info', 'transit', true,
+          v_today - 8, v_today - 1, v_today - 1, array[v_today - 1], array[ob_c])
+  returning id into t_past;
+
   n := transit_mark_empty_stores();
+
+  /* ── 12. ОЦЕЛЯЛ РЕД: обектът не е „празен“ ─────────────────────────────── */
+  if exists (select 1 from task_completions
+              where task_id in (t_win, t_past) and store_name = ob_c) then
+    fails := fails || ' [12 обект само с оцелял ред (стар created_at, нов imported_at) НЕ се отмята като празен]';
+  end if;
 
   if not exists (select 1 from task_completions
                   where task_id = t_win and store_name = ob_b and status = 'done') then
@@ -196,8 +223,11 @@ begin
   /* ── 7. ДОПЪЛВАЩ ИМПОРТ: празният обект получава редове → отметката пада ─
      Тригерът по goods_transit САМО вмъква (transit_sync_completions никога не
      трие), тоест махането може да дойде единствено от проверяваната функция. */
-  insert into goods_transit (store_name, direction, material_name, status, imported_at)
-  values (ob_b, 'incoming', '__sqltest_late', 'pending', now() - interval '20 minutes');
+  /* created_at е СТАР — редът е оцелял от предишен импорт; брои се imported_at
+     (решение А, 03.11.2026). По created_at отметката не би паднала (M13). */
+  insert into goods_transit (store_name, direction, material_name, status, created_at, imported_at)
+  values (ob_b, 'incoming', '__sqltest_late', 'pending',
+          ((v_mon - 60)::timestamp at time zone 'Europe/Sofia'), now() - interval '20 minutes');
 
   n := transit_mark_empty_stores();
   if exists (select 1 from task_completions
@@ -284,7 +314,10 @@ declare
     'M7  чистенето не различава ръчното   (хваща я 8)',
     'M8  срокът не се зачита              (хваща я 9)',
     'M9  няма самопочистване              (хваща я 7)',
-    'M10 липсващият ключ не спира         (хваща я 10)'
+    'M10 липсващият ключ не спира         (хваща я 10)',
+    'M11 тишината по created_at            (хваща я 3)',
+    'M12 „празен“ по created_at            (хваща я 12)',
+    'M13 самопочистване по created_at      (хваща я 7)'
   ];
   m_from text[] := array[
     null,
@@ -297,7 +330,10 @@ declare
     'and tc.completed_by = ''auto:transit-empty''',
     'if t.due >= v_today then',
     'if t.due >= v_today then',
-    'if v_excl is null then'
+    'if v_excl is null then',
+    'max(imported_at)',
+    E'g.imported_at >= v_from))\n',
+    'g.imported_at >= v_from));'
   ];
   m_to text[] := array[
     null,
@@ -310,7 +346,10 @@ declare
     'and tc.completed_by is not null',
     'if true then',
     'if false then',
-    'if false then'
+    'if false then',
+    'max(created_at)',
+    E'g.created_at >= v_from))\n',
+    'g.created_at >= v_from));'
   ];
   i integer;
   res text;

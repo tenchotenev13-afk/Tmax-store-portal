@@ -1185,8 +1185,12 @@ floor(процесори/3), най-много 8). Измерено 19.10 на �
 `report.js` + `send-scheduled-report` (v65), `minusi.js`, `checklist.js`,
 `loading.js` (2 места; търсенето по конкретен документ — не), функциите в
 базата `transit_store_done_since`, `transit_mark_empty_stores`,
-`checklist_portal_values` (`transit-vd-schema.sql`). Миграция — чака
-apply_migration (номерът — в `claude/log/2026-11-03-transit-vd-import.md`).
+`checklist_portal_values` (`transit-vd-schema.sql`). Миграция
+**20261103122006** `transit_vd_import` (apply_migration, 03.11.2026): колоните,
+индексът и md5 на трите функции — сверени в базата; SQL тестовете
+`transit-starts-on` (12 проверки) и `transit-empty-stores` (13/13 мутанта
+убити) — „SQL-ТЕСТ ОК“. „Снимка към“ в Товарни листи (`llTransitSnapshot`,
+`loading.js`) също чете `imported_at`.
 **Връзка за етап 3:** `loading.js` (≈1822, `llAutoCloseDoc`, приет палет)
 слага `goods_transit.status='received'` — когато статусът се раздели на две
 полета, това място трябва да се реши заедно с него. Етапи 2–4 са отворени
@@ -1199,7 +1203,7 @@ apply_migration (номерът — в `claude/log/2026-11-03-transit-vd-import.
 `created_at`. Защитата от 27.09 („никой не се отмята преди новия импорт“)
 остава. SQL тестовете `tests/sql/transit-starts-on.test.sql` и
 `transit-empty-stores.test.sql` разиграват прозореца през `imported_at` —
-пускат се СЛЕД миграцията.
+минати срещу базата след миграцията (03.11).
 **`transit_mark_empty_stores`: тялото в `transit-empty-stores-schema.sql`
 (и в миграция 20260928001552) СЕ РАЗЛИЧАВА от живото в базата** — md5 на
 живото `1eaabaf1…`, на файла друго. `transit-vd-schema.sql` е генериран от

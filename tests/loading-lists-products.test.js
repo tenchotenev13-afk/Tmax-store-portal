@@ -812,14 +812,27 @@ async function openProducts(h, i) {
 
   section('н) Етикетът на снимката: „Документи от Стока на път · снимка към …"');
   {
+    /* Мутанти (03.11.2026): старият код (created_at в select и сравнение) и
+       „select с двете, сравнение по created_at" — и двата падат тук.
+       От 03.11.2026 (Стока на път, етап 1) снимката е по imported_at — кога
+       импортът последно е видял реда. created_at е първото внасяне и при
+       сверката вместо изчистване остава старо: тук най-новият created_at
+       (01.09) е на ред, видян последно на 01.10, а най-новият imported_at е
+       02.11 на ред от 01.08 — „снимка към" трябва да каже 02.11. */
     const h = env(WAREHOUSE, { lists: [L_DRAFT], items: [item()], transit: [
-      { purchase_doc: 'ИЗХ-100', store_name: 'Петрич', doc_date: '2026-08-20', status: 'pending', supplier: WH, created_at: '2026-09-01T05:00:00.000Z' },
-      { purchase_doc: 'ИЗХ-101', store_name: 'Петрич', doc_date: '2026-08-25', status: 'pending', supplier: WH, created_at: '2026-08-15T05:00:00.000Z' }
+      { purchase_doc: 'ИЗХ-100', store_name: 'Петрич', doc_date: '2026-08-20', status: 'pending', supplier: WH,
+        created_at: '2026-09-01T05:00:00.000Z', imported_at: '2026-10-01T05:00:00.000Z' },
+      { purchase_doc: 'ИЗХ-101', store_name: 'Петрич', doc_date: '2026-08-25', status: 'pending', supplier: WH,
+        created_at: '2026-08-01T05:00:00.000Z', imported_at: '2026-11-02T05:00:00.000Z' }
     ] });
     await openDraft(h);
     const t = mod(h).textContent;
     ok('новото заглавие', /Документи от Стока на път/.test(t), t.slice(0, 400));
-    ok('„снимка към" с НАЙ-новата дата', /снимка към 01\.09\.2026/.test(t), t.slice(0, 400));
+    ok('„снимка към" с НАЙ-новия imported_at (02.11.2026)', /снимка към 02\.11\.2026/.test(t), t.slice(0, 400));
+    ok('… не с най-новия created_at (01.09.2026)', !/снимка към 01\.09\.2026/.test(t));
+    const tq = h.calls.get.filter(u => /goods_transit\?/.test(u)).map(u => decodeURIComponent(u));
+    ok('заявката за снимката иска imported_at, не created_at',
+      tq.length > 0 && tq.every(u => /select=[^&]*\bimported_at\b/.test(u) && !/select=[^&]*\bcreated_at\b/.test(u)), tq.join(' | '));
     ok('старото „Чакащи стокови документи" го няма', t.indexOf('Чакащи стокови документи') < 0);
     ok('редакторът казва „Изходящи №"', t.indexOf('Изходящи №') >= 0);
   }

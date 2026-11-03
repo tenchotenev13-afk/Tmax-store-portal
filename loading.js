@@ -56,7 +56,7 @@ var llDocFailures = {};
    item_id → loading_list_items(id). Втора заявка item_id=in.(…) би растяла
    с броя на редовете на ВСИЧКИ листи на склада и би ударила тавана на URL-а. */
 var LL_ITEM_SELECT = '*,loading_list_products(*)';
-var llTransitSnapshot = null; /* max(created_at) на чакащите документи — „снимка към“ */
+var llTransitSnapshot = null; /* max(imported_at) на чакащите документи — „снимка към“ (до 03.11.2026 created_at) */
 var llAcTimer = null;         /* debounce на автодопълването */
 var llAcSeq = 0;              /* срещу разбъркани отговори: печели последната заявка */
 var llAcResults = {};         /* {rowIdx: [каталожни редове]} — последните подсказки */
@@ -2732,7 +2732,7 @@ function llLoadEditorData(){
     return Promise.all([
       f.transitDocs
         ? llTransitGetAll('supplier=eq.' + encodeURIComponent(wh) + '&status=eq.pending&archived_at=is.null' +
-            '&select=purchase_doc,store_name,doc_date,created_at,material_code,material_name,ordered_qty,remaining_qty,unit,position')
+            '&select=purchase_doc,store_name,doc_date,imported_at,material_code,material_name,ordered_qty,remaining_qty,unit,position')
             .catch(function(e){
               /* Снимката не се зареди — казва се, вместо да изглежда като „няма
                  документи". Редакторът продължава: листът се пише и без нея. */
@@ -2747,10 +2747,12 @@ function llLoadEditorData(){
   }).then(function(res){
     llPendingDocs = llGroupTransitDocs(res[0]);
     /* Кога е наливана снимката. max, не min: при частично доналиване най-
-       новото показва, че данните са поне толкова пресни. */
+       новото показва, че данните са поне толкова пресни. По imported_at, не по
+       created_at: от 03.11.2026 импортът сверява вместо да изчиства и
+       created_at остава датата на ПЪРВОТО внасяне на реда. */
     llTransitSnapshot = null;
     (Array.isArray(res[0]) ? res[0] : []).forEach(function(r){
-      if(r && r.created_at && (!llTransitSnapshot || r.created_at > llTransitSnapshot)) llTransitSnapshot = r.created_at;
+      if(r && r.imported_at && (!llTransitSnapshot || r.imported_at > llTransitSnapshot)) llTransitSnapshot = r.imported_at;
     });
     llStores = Array.isArray(res[1]) ? res[1] : [];
     if(llView === 'edit') renderLoadingLists();
