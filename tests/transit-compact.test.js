@@ -125,7 +125,9 @@ const S = a => a.slice().sort();
     ok('обвивката е .tbl-wrap.tbl-compact.tbl-tt-compact', !!h.w.document.querySelector('.tbl-wrap.tbl-compact.tbl-tt-compact table'));
     ok('всеки ред има точно 6 <td>', rows(h).length === 8 && rows(h).every(tr => tr.children.length === 6), rows(h).map(tr => tr.children.length).join(','));
     const tr = rowOf(h, 'TR-RECV');
-    ok('колона 1: документ, поз., дата и бадж „Трансфер"', /TR-RECV/.test(tr.children[0].textContent) && /Поз\. 10/.test(tr.children[0].textContent) && /🔄 Трансфер/.test(tr.children[0].textContent), tr.children[0].textContent);
+    /* От 03.11.2026 (етап 2) баджът при офис без избран обект е по вида на
+       изпращача: Шумен е магазин → „🏬 От магазин" (до тогава „🔄 Трансфер"). */
+    ok('колона 1: документ, поз., дата и бадж „🏬 От магазин"', /TR-RECV/.test(tr.children[0].textContent) && /Поз\. 10/.test(tr.children[0].textContent) && /🏬 От магазин/.test(tr.children[0].textContent), tr.children[0].textContent);
     ok('колона 2: Шумен → Кърджали (доставчик → магазин)', /Шумен\s*→\s*Кърджали/.test(tr.children[1].textContent), tr.children[1].textContent);
     ok('колона 4: брой, мярка, остатък и дата на трансфер', /5бр/.test(tr.children[3].textContent.replace(/\s+/g, '')) && /остатък 2/.test(tr.children[3].textContent) && tr.children[3].textContent.indexOf(h.w.fmtDate(dayOffset(-1))) >= 0, tr.children[3].textContent);
     ok('колона 5: статус „Изпратена"', /Изпратена/.test(tr.children[4].textContent));

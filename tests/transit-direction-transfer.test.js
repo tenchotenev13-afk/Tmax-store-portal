@@ -39,7 +39,8 @@ const ROWS = [
   sapRow('5512', '6516 Добрич', '4600185283', 20, 'M-2'),
   /* 3: получаващ код + склад — incoming */
   sapRow('5512', '5518 Логистичен склад Добрич', '4600185284', 30, 'M-3'),
-  /* 4: изпращащ код + склад — остава outgoing */
+  /* 4: изпращащ код + склад — от етап 2 (03.11.2026) incoming: доставка от
+     логистичен склад е винаги входяща (TRANSIT_WAREHOUSE_CODES, transit-tabs-role.test.js) */
   sapRow('6512', '5505 Логистичен склад Търговище', '4600185285', 40, 'M-4')
 ];
 
@@ -88,7 +89,7 @@ const byDoc = (rows, doc) => rows.filter(r => r.purchase_doc === doc)[0];
       ok('5512 ← 5518 Логистичен склад Добрич → incoming', r3 && r3.direction === 'incoming', r3 && r3.direction);
 
       const r4 = byDoc(parsed, '4600185285');
-      ok('6512 ← 5505 Логистичен склад Търговище → outgoing', r4 && r4.direction === 'outgoing', r4 && r4.direction);
+      ok('6512 ← 5505 Логистичен склад Търговище → incoming (етап 2)', r4 && r4.direction === 'incoming', r4 && r4.direction);
       ok('  получателят пак е Търговище', r4 && r4.store_name === 'Търговище', r4 && r4.store_name);
     }
   }
@@ -130,8 +131,8 @@ const byDoc = (rows, doc) => rows.filter(r => r.purchase_doc === doc)[0];
     if (ok('прегледът се отваря', !!ov)) {
       const txt = ov.textContent;
       ok('трансферите в прегледа са 2 реда', /ТРАНСФЕРИ МЕЖДУ МАГАЗИНИ[^—]*— 2 реда/.test(txt), txt.slice(0, 200));
-      ok('outgoing в прегледа е 1 ред', /ИЗПРАЩАМ \(outgoing\) — 1 реда/.test(txt));
-      ok('получавам в прегледа е 1 ред', /ПОЛУЧАВАМ \(от склад\) — 1 реда/.test(txt));
+      ok('outgoing в прегледа е 0 реда (етап 2)', /ИЗПРАЩАМ \(outgoing\) — 0 реда/.test(txt));
+      ok('получавам в прегледа е 2 реда (вкл. 6512 ← склад)', /ПОЛУЧАВАМ \(от склад\) — 2 реда/.test(txt));
 
       const imp = btn(ov, 'Импортирай');
       if (ok('бутонът „Импортирай" съществува', !!imp)) {
@@ -146,7 +147,7 @@ const byDoc = (rows, doc) => rows.filter(r => r.purchase_doc === doc)[0];
           ok('записаната посока за 6512 ← Добрич е transfer', b1 && b1.direction === 'transfer', b1 && b1.direction);
           ok('  със статус pending (подателят маркира „Изпратена")', b1 && b1.status === 'pending', b1 && b1.status);
           const b4 = body.filter(r => r.purchase_doc === '4600185285')[0];
-          ok('записаната посока за 6512 ← склад е outgoing', b4 && b4.direction === 'outgoing', b4 && b4.direction);
+          ok('записаната посока за 6512 ← склад е incoming (етап 2)', b4 && b4.direction === 'incoming', b4 && b4.direction);
         }
       }
     }

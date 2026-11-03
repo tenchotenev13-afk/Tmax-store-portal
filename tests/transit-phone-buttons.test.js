@@ -91,7 +91,10 @@ const ths = h => Array.from(mod(h).querySelectorAll('thead th')).map(txt);
 const dataRow = (h, id) => Array.from(mod(h).querySelectorAll('tbody tr')).find(tr => !tr.classList.contains('tt-act-row') && txt(tr).indexOf('АРТИКУЛ ' + id + ' ') >= 0 || (!tr.classList.contains('tt-act-row') && txt(tr).indexOf('АРТИКУЛ ' + id + 'M') >= 0));
 const btnsIn = el => el ? Array.from(el.querySelectorAll('button')) : [];
 const sig = el => btnsIn(el).map(b => txt(b) + '|' + b.getAttribute('onclick') + '|' + (b.dataset.id || '')).join(' ; ');
-const recvCount = h => { const b = Array.from(mod(h).querySelectorAll('button')).find(x => txt(x).indexOf('🔄 Трансфери') === 0); const m = b && txt(b).match(/\/ (\d+) за получ\./); return m ? +m[1] : -1; };
+/* „за получ." = трансферите, които чакат обекта да ги приеме. До 03.11.2026 стоеше
+   под таба „🔄 Трансфери"; от етап 2 табът го няма и същото число е в чипа
+   „📥 Чакат мен" (transitAwaitsMyReceive). */
+const recvCount = h => { const c = mod(h).querySelector('[data-tt-f="mine"] .chips-n'); return c ? +txt(c) : -1; };
 
 (async function () {
 

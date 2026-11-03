@@ -1709,7 +1709,7 @@ function bulOpenPending(key){
       sdView='reports'; sdOnlyWaiting=true; sdStoreFilter=''; sdSearch='';
     }
   } else if(key==='transit-auto'){
-    /* Задачата е за входящите доставки — без скока към „Чакат мен" в Трансфери. */
+    /* Задачата е за входящите доставки — без скока към „📥 Получавам" + „Чакат мен" (до 03.11.2026 — подтаб „Трансфери"). */
     if(typeof transitOpenFocusSkip!=='undefined') transitOpenFocusSkip=true;
   } else if(key==='stock-returns-diff'||key==='stock-returns-complaint'){
     if(typeof srFilter!=='undefined'){ srTab=(key==='stock-returns-diff')?'diff':'complaint'; srFilter='needs'; }

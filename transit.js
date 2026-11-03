@@ -3,7 +3,7 @@
 var transitData   = [];
 var transitFilter = 'pending';
 var transitStore  = '';
-var transitDir    = 'all'; /* 'all' | 'incoming' | 'outgoing' */
+var transitDir    = 'all'; /* 'all' | 'in' („📥 Получавам") | 'out' („📤 Изпращам") — спрямо transitViewpoint(), не direction */
 var transitEditId = null;
 var transitMonthFilter = ''; /* 'YYYY-MM' за филтър по месец */
 var transitSearch = ''; /* търсене по документ / SAP код / описание */
@@ -36,6 +36,9 @@ var PLANT_OUTGOING = {
   '2505':'Логистичен склад Търговище','2518':'Логистичен склад Добрич'
 };
 var PLANT_ALL = Object.assign({}, PLANT_INCOMING, PLANT_OUTGOING);
+/* Кодовете на двата логистични склада (и „получаващ", и „изпращащ" тип) —
+   доставка от тях е винаги 'incoming' за получателя (parseTransitRows). */
+var TRANSIT_WAREHOUSE_CODES = { '5505':1, '5518':1, '2505':1, '2518':1 };
 
 /* Истинските 18 магазина (без складове/сервиз/администрация) — използва се
    за разпознаване на "трансфер между магазини" при импорт, независимо дали
@@ -87,7 +90,8 @@ function transitAwaitsOther(r){
 }
 /* Влизане в модула през навигацията (showModule) — НЕ при презареждане след
    клик. Има ли обектът трансфери за приемане, те са първото, което вижда:
-   подтаб „Трансфери" + филтър „📥 Чакат мен". Няма ли — нищо не се пипа.
+   подтаб „📥 Получавам" + филтър „📥 Чакат мен" (до 03.11.2026 — подтаб
+   „Трансфери"). Няма ли — нищо не се пипа.
    transitOpenFocusSkip: „Отвори →" от Бюлетина (задачата е за входящите
    доставки) иска модула както досега, без този скок. */
 var _transitFocusOnLoad = false;
@@ -100,8 +104,39 @@ function transitApplyOpenFocus(){
   if(!_transitFocusOnLoad) return;
   _transitFocusOnLoad = false;
   if(isGlobal()||!transitData.some(transitAwaitsMyReceive)) return;
-  transitDir='transfer'; transitFilter='mine';
+  transitDir='in'; transitFilter='mine';
   transitStore=''; transitMonthFilter=''; transitSearch='';
+}
+
+/* ── ТАБОВЕТЕ „📥 Получавам" / „📤 Изпращам" (етап 2, 03.11.2026) ──
+   Табът не е посоката от импорта (direction), а РОЛЯТА на един обект в реда:
+   „Получавам" = редовете, в които той е получател (store_name), „Изпращам" =
+   в които е изпращач (supplier) — от склад и от магазин заедно. Този обект е
+   „гледната точка": за обекта — самият той, за склада — складът, за офиса —
+   избраният в падащото меню. Без гледна точка (офис без избран обект)
+   табовете показват празна таблица и молба да се избере обект. */
+function transitViewpoint(){
+  if(!isGlobal()) return (currentUser&&currentUser.store_name)||'';
+  var wh=transitOwnWarehouse();
+  if(wh) return wh;
+  return transitStore||'';
+}
+/* Изпращачът е магазин (реален обект) или склад / сервиз / администрация. */
+function transitSenderIsStore(r){
+  return !!(r&&r.supplier&&REAL_STORE_NAMES[r.supplier]);
+}
+function transitSenderKindLabel(r){
+  return transitSenderIsStore(r)?'🏬 От магазин':'🏭 От склад';
+}
+/* Баджът на реда: спрямо гледната точка („📥 Получавам" / „📤 Изпращам");
+   без нея (офис без избран обект) — по вида на изпращача. */
+function transitRowBadgeHtml(r,vp){
+  var S='padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;';
+  if(vp&&r.store_name===vp) return '<span class="t-badge" style="background:#eff6ff;color:#1e40af;'+S+'">📥 Получавам</span>';
+  if(vp&&r.supplier===vp)   return '<span class="t-badge" style="background:#f5f3ff;color:#7c3aed;'+S+'">📤 Изпращам</span>';
+  return transitSenderIsStore(r)
+    ? '<span class="t-badge" style="background:#fff7ed;color:#c2410c;'+S+'">'+transitSenderKindLabel(r)+'</span>'
+    : '<span class="t-badge" style="background:#f1f5f9;color:#334155;'+S+'">'+transitSenderKindLabel(r)+'</span>';
 }
 /* Банерът над таблицата — само за обекта и само при брой > 0. */
 function transitStoreBannerHtml(){
@@ -285,16 +320,30 @@ function renderTransit(){
   }
   var _q=transitSearch?transitSearch.trim().toLowerCase():'';
   var _qId=transitStripZeros(_q); /* само нули („00") → празно, не съвпада с всичко */
+  var _vp=transitViewpoint();
   function transitRows(over){
     over=over||{};
     var dir=over.dir!==undefined?over.dir:transitDir;
     var status=over.status!==undefined?over.status:transitFilter;
     /* „🗄 Архив" сменя ИЗТОЧНИКА, не е статус: останалите филтри важат и там. */
     var rows=status==='archive'?transitArchive:transitData;
-    if(dir==='incoming'||dir==='transfer'||dir==='outgoing') rows=rows.filter(function(r){return r.direction===dir;});
+    /* „📥 Получавам" / „📤 Изпращам" — по ролята на гледната точка в реда, не по
+       direction. Без гледна точка — нищо (офисът трябва да избере обект). */
+    var vpTab=dir==='in'||dir==='out';
+    if(vpTab){
+      if(!_vp) rows=[];
+      else rows=rows.filter(function(r){ return dir==='in' ? r.store_name===_vp : r.supplier===_vp; });
+    }
     if(status==='pending'||status==='received'||status==='rejected'||status==='sent') rows=rows.filter(function(r){return r.status===status;});
     else if(status==='mine') rows=rows.filter(transitAwaitsMyReceive);
-    if(transitStore&&transitOwnWarehouse()){
+    if(vpTab){
+      /* В табовете падащото меню за офиса Е гледната точка (вече приложена).
+         За обекта и склада то е ДРУГАТА страна: изпращачът в „Получавам",
+         получателят в „Изпращам". */
+      if(transitStore&&(transitOwnWarehouse()||!isGlobal())){
+        rows=rows.filter(function(r){ return dir==='in' ? r.supplier===transitStore : r.store_name===transitStore; });
+      }
+    }else if(transitStore&&transitOwnWarehouse()){
       /* Складовият профил има само своите редове (филтър на сървъра), затова
          магазинът в падащото меню е получателят - без supplier и без
          мажоритарно правило. */
@@ -343,13 +392,16 @@ function renderTransit(){
   }
   h+='</div></div>';
 
-  /* Direction tabs — "Изпращам" (outgoing) е скрит по същата причина.
-     Ако някога се появи такъв ред, ще се вижда под "Всички". */
+  /* Табовете (етап 2, 03.11.2026): „Получавам" / „Изпращам" спрямо гледната
+     точка (transitViewpoint). Числата — само при гледна точка:
+     „Получавам" = чакащите (pending), в които тя е получател — точно
+     редовете след клик с „⏳ Не доставени"; „Изпращам" = трансферите за
+     изпращане (direction transfer, pending), в които тя е изпращач —
+     само те имат „📤 Изпратена". */
   h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:640px;">';
   [['all','📦📤 Всички',(transitData.length?'('+transitRows({dir:'all'}).length+')':'')],
-   ['incoming','📦 Получавам','('+transitRows({dir:'incoming',status:'pending'}).length+' чакат)'],
-   /* „за получ." за обекта = редовете с „✅ Прието" за НЕГО (не и изпратените от него). Офисът и складовете — както досега. */
-   ['transfer','🔄 Трансфери','('+transitRows({dir:'transfer',status:'pending'}).length+' за изпр. / '+(isGlobal()?transitRows({dir:'transfer',status:'sent'}):transitRows({dir:'transfer',status:'mine'})).length+' за получ.)']].forEach(function(t){
+   ['in','📥 Получавам',_vp?'('+transitRows({dir:'in',status:'pending'}).length+' чакат)':''],
+   ['out','📤 Изпращам',_vp?'('+transitRows({dir:'out',status:'pending'}).filter(function(r){return r.direction==='transfer';}).length+' за изпр.)':'']].forEach(function(t){
     var active=transitDir===t[0];
     h+='<button onclick="transitDir=\''+t[0]+'\';renderTransit()" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';">'+t[1]+'<div style="font-size:10px;opacity:0.7;">'+t[2]+'</div></button>';
   });
@@ -407,6 +459,10 @@ function renderTransit(){
   _transitVisible=inArchive?[]:list;
   h+=transitStoreBannerHtml();
   h+=tReviewCounterHtml(_transitVisible);
+  if((transitDir==='in'||transitDir==='out')&&!_vp){
+    h+='<div id="t-vp-note" style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 14px;margin-bottom:8px;font-size:12.5px;color:#1e3a5f;">'+
+      'Изберете обект от падащото меню — табът показва какво '+(transitDir==='in'?'получава':'изпраща')+' той.</div>';
+  }
   if(inArchive){
     h+='<div id="t-archive-note" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;margin-bottom:8px;font-size:12px;color:#64748b;">'+
       '🗄 Архив: редове, чиято доставка (ВД) я няма в последния импорт от SAP. Само за четене; появи ли се ВД-то пак, редът се връща сам.</div>';
@@ -442,13 +498,7 @@ function renderTransit(){
         (r.inbound_delivery?'<div class="t-vd" style="font-family:DM Mono,monospace;font-size:10.5px;color:#334155;margin-top:2px;white-space:nowrap;"><b style="font-family:inherit;color:#64748b;">ВД</b> '+esc(r.inbound_delivery)+(r.delivery_position?'<span style="color:#94a3b8;"> · '+esc(r.delivery_position)+'</span>':'')+'</div>':'')+
         (r.outbound_delivery?'<div class="t-id" style="font-family:DM Mono,monospace;font-size:10.5px;color:#334155;white-space:nowrap;"><b style="font-family:inherit;color:#64748b;">ИД</b> '+esc(transitStripZeros(r.outbound_delivery))+'</div>':'')+
         '<div style="font-family:DM Mono,monospace;font-size:11px;color:#94a3b8;margin-top:2px;">'+fmtDate(r.doc_date)+'</div>'+
-        '<div style="margin-top:3px;">'+
-        (isOut?
-          '<span style="background:#f5f3ff;color:#7c3aed;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">📤 Изпращам</span>':
-          isTransfer?
-          '<span style="background:#fff7ed;color:#c2410c;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">🔄 Трансфер</span>':
-          '<span style="background:#eff6ff;color:#1e40af;padding:2px 6px;border-radius:20px;font-size:9.5px;font-weight:700;white-space:nowrap;">📦 Получавам</span>')+
-        '</div></td>';
+        '<div style="margin-top:3px;">'+transitRowBadgeHtml(r,_vp)+'</div></td>';
       /* 2. От → Към: доставчикът (почистен както преди) → магазинът */
       h+='<td style="padding:7px 8px;" title="'+esc(r.supplier||'')+'">'+
         '<span style="font-size:11px;color:#64748b;">'+esc((r.supplier||'').replace(/^\d+\s+\d*\s*/,'').replace(/^\d+\s*/,'').replace(/^ТМ\s+/,''))+'</span>'+
@@ -710,7 +760,8 @@ function exportTransitExcel(){
     'Обновен от','Обновен на']];
   transitData.forEach(function(r){
     rows.push([
-      r.direction==='outgoing'?'📤 Изпращам':r.direction==='transfer'?'🔄 Трансфер':'📦 Получавам',
+      /* „Посока" по вида на изпращача (етап 2), не по direction от импорта. */
+      transitSenderIsStore(r)?'От магазин':'От склад',
       r.store_name||'',r.supplier||'',r.purchase_doc||'',r.position||'',
       r.inbound_delivery||'',r.outbound_delivery?transitStripZeros(r.outbound_delivery):'',
       r.doc_date||'',r.material_code||'',r.material_name||'',
@@ -1122,6 +1173,13 @@ function parseTransitRows(rows, forceFmt){
          6512 Търговище ← 6516 Добрич ставаше 'outgoing' и получателят
          нямаше бутон "Прието". */
       direction='transfer';
+    }else if(TRANSIT_WAREHOUSE_CODES[supplierFirstCode]){
+      /* Доставчикът е логистичен склад → входяща доставка към обекта,
+         независимо от кода на завода (етап 2, 03.11.2026). SAP подава и
+         „изпращащ" код на завода (2520 / 2521 / 2522) за доставки от склад
+         Търговище — те ставаха 'outgoing', обектът не ги виждаше в
+         „Получавам" и нямаше „Прието" (3 реда в импорта от 03.11.2026). */
+      direction='incoming';
     }else if(plantIsOutgoingType){
       /* Заводът е с "изпращащ" код, а доставчикът НЕ е реален магазин
          (склад/сервиз/администрация или непознат код). */

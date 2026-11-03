@@ -5,6 +5,8 @@
    останалите активни филтри (магазин, месец, търсене, посока/статус) остават.
 
    Еталонът в теста (ref) е написан отделно от transitRows() — не е копие.
+   От 03.11.2026 (етап 2) табовете са „📥 Получавам" / „📤 Изпращам" спрямо
+   гледната точка (склад → себе си, офис → избраният магазин), не по direction.
 
    Пускане:  node tests/transit-counts-follow-filters.test.js .
 */
@@ -55,8 +57,13 @@ const DATA = [];
 DATA.push(row({ direction: 'outgoing', status: 'pending', store_name: 'Шумен', supplier: 'Склад Х' }));
 DATA.push(row({ store_name: TG, supplier: 'Доставчик X' }));
 
-/* Еталон: НЕЗАВИСИМО от transitRows. f={dir,status,store,month,q,wh} */
+/* Еталон: НЕЗАВИСИМО от transitRows. f={dir,status,store,month,q,wh}
+   От 03.11.2026 (етап 2) табовете са 'in' / 'out' спрямо гледната точка:
+   склад → складът (TG), офис → избраният магазин; без нея — нищо.
+   В таба падащото меню на офиса Е гледната точка; на склада е другата страна. */
 function ref(data, f) {
+  const vp = f.wh ? TG : (f.store || '');
+  const vpTab = f.dir === 'in' || f.dir === 'out';
   let majStore = true;
   if (f.store && !f.wh) {
     let a = 0, b = 0;
@@ -64,9 +71,18 @@ function ref(data, f) {
     majStore = a >= b;
   }
   return data.filter(r => {
-    if (f.dir && f.dir !== 'all' && r.direction !== f.dir) return false;
+    if (vpTab) {
+      if (!vp) return false;
+      if (f.dir === 'in' && r.store_name !== vp) return false;
+      if (f.dir === 'out' && r.supplier !== vp) return false;
+    }
     if (f.status && f.status !== 'all' && r.status !== f.status) return false;
-    if (f.store) {
+    if (vpTab) {
+      if (f.wh && f.store) {
+        if (f.dir === 'in' && r.supplier !== f.store) return false;
+        if (f.dir === 'out' && r.store_name !== f.store) return false;
+      }
+    } else if (f.store) {
       if (f.wh) { if (r.store_name !== f.store) return false; }
       else if (r.direction === 'transfer') { if (r.store_name !== f.store && r.supplier !== f.store) return false; }
       else if (majStore) { if (r.store_name !== f.store) return false; }
@@ -96,7 +112,7 @@ function ui(h) {
 }
 /* Бройката е в <span class="chips-n"> (общите чипове), не в скоби след текста. */
 const num = (el) => parseInt((el.querySelector('.chips-n') || { textContent: '' }).textContent, 10);
-const tabNums = (b) => (b.querySelector('div').textContent.match(/\d+/g) || []).map(Number);
+const tabNums = (b) => (((b.querySelector('div') || { textContent: '' }).textContent).match(/\d+/g) || []).map(Number);
 const trs = (h) => h.w.document.querySelectorAll('#mod-transit tbody tr').length;
 function cards(h) {
   const g = h.w.document.querySelector('#mod-transit div[style*="repeat(6,1fr)"]');
@@ -117,22 +133,26 @@ function checkAll(h, name, base) {
     ok(name + ': статус „' + k + '" показва ' + shown + ' = редове след клик (' + trs(h) + ')', shown === trs(h));
     ok(name + ': … и = еталон', shown === ref(h.w.transitData, Object.assign({}, base, { dir: st0.dir, status: k })));
   });
-  ['all', 'incoming', 'transfer'].forEach(k => {
+  /* Табовете (етап 2): 'in' = „📥 Получавам", 'out' = „📤 Изпращам". */
+  const hasVp = !!(base.wh || base.store);
+  ['all', 'in', 'out'].forEach(k => {
     reset();
     const t = tabNums(ui(h).tabs[k]);
     clickTab(h, k);
     if (k === 'all') {
       ok(name + ': таб „Всички" ' + t[0] + ' = редове след клик (' + trs(h) + ')', t[0] === trs(h));
       ok(name + ': … и = еталон', t[0] === ref(h.w.transitData, Object.assign({}, base, { dir: 'all', status: st0.status })));
-    } else if (k === 'incoming') {
+    } else if (!hasVp) {
+      ok(name + ': „' + k + '" без гледна точка — без число', t.length === 0, t.join('/'));
+      ok(name + ': … и празна таблица след клик', h.w._transitVisible.length === 0, h.w._transitVisible.length);
+    } else if (k === 'in') {
       clickStat(h, 'pending');
       ok(name + ': „Получавам" ' + t[0] + ' чакат = редове след таб+„Не доставени" (' + trs(h) + ')', t[0] === trs(h));
+      ok(name + ': … и = еталон', t[0] === ref(h.w.transitData, Object.assign({}, base, { dir: 'in', status: 'pending' })));
     } else {
       clickStat(h, 'pending');
-      const p = trs(h);
-      clickStat(h, 'sent');
-      const s = trs(h);
-      ok(name + ': „Трансфери" ' + t[0] + '/' + t[1] + ' = ' + p + '/' + s + ' след таб+статус', t[0] === p && t[1] === s);
+      const p = h.w._transitVisible.filter(r => r.direction === 'transfer').length;
+      ok(name + ': „Изпращам" ' + t[0] + ' за изпр. = трансферите след таб+„Не доставени" (' + p + ')', t[0] === p);
     }
   });
   reset();
@@ -155,11 +175,12 @@ const SKLAD = { email: 'ls@temax.bg', display_name: TG, role: 'logistics', store
     ['pending', 'received', 'sent', 'rejected'].forEach(k =>
       ok('статус ' + k + ' = брой по статус', num(u.stat[k]) === cnt(r => r.status === k), num(u.stat[k])));
     ok('таб Всички = всички редове', tabNums(u.tabs.all)[0] === DATA.length);
-    ok('Получавам = incoming+pending', tabNums(u.tabs.incoming)[0] === cnt(r => r.direction === 'incoming' && r.status === 'pending'));
-    const t = tabNums(u.tabs.transfer);
-    ok('Трансфери = transfer pending / sent',
-      t[0] === cnt(r => r.direction === 'transfer' && r.status === 'pending') &&
-      t[1] === cnt(r => r.direction === 'transfer' && r.status === 'sent'), t.join('/'));
+    /* От 03.11.2026 (етап 2): офис без избран магазин няма гледна точка —
+       „Получавам" / „Изпращам" са без числа (до тогава „Получавам" =
+       incoming+pending и „Трансфери" = transfer pending / sent). */
+    ok('Получавам — без число (без гледна точка)', !!u.tabs.in && tabNums(u.tabs.in).length === 0, u.tabs.in && u.tabs.in.textContent);
+    ok('Изпращам — без число (без гледна точка)', !!u.tabs.out && tabNums(u.tabs.out).length === 0, u.tabs.out && u.tabs.out.textContent);
+    ok('таб „Трансфери" го няма', !u.tabs.transfer && !u.tabs.incoming);
     /* Шестте stat карти са махнати — числата им са в табовете за посока и в чиповете. */
     ok('няма stat карти (repeat(6,1fr))', cards(h) === null, cards(h));
     checkAll(h, 'без филтри', {});
@@ -196,7 +217,7 @@ const SKLAD = { email: 'ls@temax.bg', display_name: TG, role: 'logistics', store
     const own = DATA.filter(r => r.supplier === TG || r.store_name === TG);
     const h = env(SKLAD, own);
     h.w.renderTransit();
-    checkAll(h, 'склад без магазин', {});
+    checkAll(h, 'склад без магазин', { wh: true }); /* складът винаги има гледна точка — себе си */
     const h2 = env(SKLAD, own);
     h2.w.setTStore('Кърджали');
     checkAll(h2, 'склад + Кърджали', { store: 'Кърджали', wh: true });

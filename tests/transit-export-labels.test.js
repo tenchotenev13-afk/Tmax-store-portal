@@ -1,5 +1,6 @@
-/* Стока на път → Excel износ: етикетите на посоката и статуса са като на екрана
-   (трансфер → „🔄 Трансфер", sent → „Изпратена"). Износът е на всички
+/* Стока на път → Excel износ: колоната „Посока" е по вида на изпращача
+   („От склад" / „От магазин", етап 2 — 03.11.2026), статусът е като на екрана
+   (sent → „Изпратена"). Износът е на всички
    активни редове (transitData, без архива) — не следва филтъра на екрана.
 
    Пускане: node tests/transit-export-labels.test.js .
@@ -9,7 +10,7 @@ const H = require('../.claude/skills/tmax-jsdom-test/harness');
 const { boot, ok, guard, section, report } = H;
 
 const row = (id, direction, status) => ({
-  id, direction, status, store_name: 'Троян', supplier: 'Склад', purchase_doc: 'D' + id,
+  id, direction, status, store_name: 'Троян', supplier: direction === 'transfer' ? 'Добрич' : 'Склад', purchase_doc: 'D' + id,
   position: '10', doc_date: '2026-09-01', material_code: 'M' + id, material_name: 'Стока ' + id,
   ordered_qty: 1, unit: 'бр.', remaining_qty: 1, transfer_date: null, comment: '', updated_by: '', updated_at: null
 });
@@ -45,7 +46,8 @@ const ST = 15; /* колоната „Статус" (от 03.11.2026; преди
     const body = cap.aoa ? cap.aoa.slice(1) : [];
     ok('4 реда + заглавен', cap.aoa && cap.aoa.length === 5, cap.aoa && cap.aoa.length);
     ok('„Статус" е колона ' + ST, cap.aoa && cap.aoa[0][ST] === 'Статус', cap.aoa && cap.aoa[0].indexOf('Статус'));
-    ok('посоки', JSON.stringify(body.map(r => r[0])) === JSON.stringify(['📦 Получавам', '📦 Получавам', '🔄 Трансфер', '🔄 Трансфер']), JSON.stringify(body.map(r => r[0])));
+    /* От 03.11.2026 (етап 2) „Посока" е по вида на изпращача, не по direction. */
+    ok('посоки: „От склад" / „От магазин"', JSON.stringify(body.map(r => r[0])) === JSON.stringify(['От склад', 'От склад', 'От магазин', 'От магазин']), JSON.stringify(body.map(r => r[0])));
     ok('статуси', JSON.stringify(body.map(r => r[ST])) === JSON.stringify(['Не доставена', 'Прието', 'Изпратена', 'Не доставена']), JSON.stringify(body.map(r => r[ST])));
     ok('20 колони (от 03.11.2026 + ВД, ИД, К-во по ВД)', cap.aoa[0].length === 20 && body.every(r => r.length === 20), cap.aoa[0].length);
   }
@@ -72,7 +74,7 @@ const ST = 15; /* колоната „Статус" (от 03.11.2026; преди
     w.transitData = [row('a', 'outgoing', 'rejected'), row('b', 'incoming', 'странен')];
     guard('exportTransitExcel()', () => w.exportTransitExcel());
     const body = cap.aoa.slice(1);
-    ok('outgoing → „📤 Изпращам"', body[0][0] === '📤 Изпращам');
+    ok('outgoing от склад → „От склад" (не по direction)', body[0][0] === 'От склад', body[0][0]);
     ok('rejected → „Неприето"', body[0][ST] === 'Неприето', body[0][ST]);
     ok('непознат статус → самата стойност', body[1][ST] === 'странен', body[1][ST]);
   }

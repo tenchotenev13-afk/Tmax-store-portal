@@ -8,20 +8,22 @@
 
    ТВЪРДЕНИЯТА (обект, fixture като Монтана — 2 входящи трансфера 'sent' към
    обекта, 3 изходящи 'sent' от обекта, 1 приет):
-   · „за получ." = 2 (правилото transitAwaitsMyReceive — същото, по което се
-     рисуват бутоните);
-   · при влизане (showModule) — подтаб „Трансфери", филтър „📥 Чакат мен" и
+   · чипът „📥 Чакат мен" = 2 (правилото transitAwaitsMyReceive — същото, по
+     което се рисуват бутоните; до 03.11.2026 и „за получ." под таба „Трансфери");
+   · при влизане (showModule) — подтаб „📥 Получавам" (до 03.11.2026 „Трансфери"),
+     филтър „📥 Чакат мен" и
      в таблицата ТОЧНО двата реда (<tr>) с по един „✅ Прието" / „✕ Неприето";
    · банерът казва 2 и назовава бутоните; сивият ред — 3 ваши чакат другия;
    · истински клик на „✅ Прието" → PATCH, презареждане, броят става 1 и
      филтърът остава;
    · обект без чакащи — без банер, модулът се отваря както днес;
    · „Отвори →" от Бюлетина (transit-auto) — без скока;
-   · офис акаунт — нищо ново: „за получ." брои всички изпратени, без чип и
-     без банер.
+   · офис акаунт — без скок, без чип и без банер; без избран обект табовете
+     „Получавам" / „Изпращам" са без числа (етап 2, 03.11.2026).
 
    МУТАЦИИ (пускани ръчно на 24.10.2026, всяка пада):
-   M1 „за получ." брои и изходящите (status 'sent' вместо 'mine');
+   M1 „за получ." брои и изходящите (status 'sent' вместо 'mine') — броячът под
+      „Трансфери" е махнат на 03.11.2026, мутантът вече няма къде да се приложи;
    M2 при влизане не се показват чакащите (transitApplyOpenFocus не пипа нищо);
    M3 банерът брои по друг критерий (всички 'sent' трансфери).
 
@@ -107,9 +109,11 @@ async function open(user, rows) {
   {
     const h = await open(USER);
     if (h) {
-      const tr = dirBtn(h, '🔄 Трансфери');
-      ok('„за получ." = 2', !!tr && txt(tr).indexOf('/ 2 за получ.') >= 0, txt(tr));
-      ok('подтабът „Трансфери" е активен', h.w.transitDir === 'transfer' && /background:#0f172a/.test(tr.getAttribute('style')));
+      /* От 03.11.2026 (етап 2) скокът е към „📥 Получавам"; „за получ." под
+         стария таб „Трансфери" го няма — същото число е в чипа „Чакат мен". */
+      const tr = dirBtn(h, '📥 Получавам');
+      ok('таб „🔄 Трансфери" го няма', !dirBtn(h, '🔄 Трансфери'));
+      ok('подтабът „📥 Получавам" е активен', !!tr && h.w.transitDir === 'in' && /background:#0f172a/.test(tr.getAttribute('style')));
       ok('филтърът „📥 Чакат мен" е активен', h.w.transitFilter === 'mine' && !!chip(h, 'mine') && chip(h, 'mine').classList.contains('active'));
       ok('чипът казва 2', txt(chip(h, 'mine')) === '📥 Чакат мен 2', txt(chip(h, 'mine')));
       ok('в таблицата са точно двата реда', rowIds(h) === 'in1,in2', rowIds(h));
@@ -129,7 +133,7 @@ async function open(user, rows) {
         await settle();
         ok('PATCH status=received за in1', h.stub.patches.length === 1 && h.stub.patches[0].id === 'in1' && h.stub.patches[0].body.status === 'received',
           JSON.stringify(h.stub.patches));
-        ok('„за получ." = 1', txt(dirBtn(h, '🔄 Трансфери')).indexOf('/ 1 за получ.') >= 0, txt(dirBtn(h, '🔄 Трансфери')));
+        ok('чипът „Чакат мен" = 1', txt(chip(h, 'mine')) === '📥 Чакат мен 1', txt(chip(h, 'mine')));
         ok('филтърът остава „Чакат мен"', h.w.transitFilter === 'mine');
         ok('в таблицата остава in2', rowIds(h) === 'in2', rowIds(h));
         ok('банерът казва 1', /^📥 1 трансфер чака да го приемете./.test(txt(h.doc.getElementById('t-recv-note'))), txt(h.doc.getElementById('t-recv-note')));
@@ -145,7 +149,7 @@ async function open(user, rows) {
     if (h) {
       ok('без банер', !h.doc.getElementById('t-recv-note'));
       ok('подтабът е „Всички", филтърът „Не доставени"', h.w.transitDir === 'all' && h.w.transitFilter === 'pending', h.w.transitDir + '/' + h.w.transitFilter);
-      ok('„за получ." = 0', txt(dirBtn(h, '🔄 Трансфери')).indexOf('/ 0 за получ.') >= 0, txt(dirBtn(h, '🔄 Трансфери')));
+      ok('табът „📥 Получавам" е там, неактивен', !!dirBtn(h, '📥 Получавам') && h.w.transitDir !== 'in');
       ok('чипът „📥 Чакат мен" стои и при 0', txt(chip(h, 'mine')) === '📥 Чакат мен 0', txt(chip(h, 'mine')));
       ok('сивият ред за изходящите си стои', !!h.doc.getElementById('t-other-note'));
       h.close();
@@ -163,7 +167,7 @@ async function open(user, rows) {
       /* Следващо влизане през навигацията — скокът пак работи. */
       h.w.showModule('transit');
       await settle();
-      ok('следващото влизане пак отваря „Чакат мен"', h.w.transitFilter === 'mine' && h.w.transitDir === 'transfer');
+      ok('следващото влизане пак отваря „Получавам" + „Чакат мен"', h.w.transitFilter === 'mine' && h.w.transitDir === 'in');
     }
     h.close();
   }
@@ -173,7 +177,9 @@ async function open(user, rows) {
     const h = await open(ADMIN);
     if (h) {
       ok('без скок: „Всички" / „Не доставени"', h.w.transitDir === 'all' && h.w.transitFilter === 'pending', h.w.transitDir + '/' + h.w.transitFilter);
-      ok('„за получ." брои всички изпратени (5)', txt(dirBtn(h, '🔄 Трансфери')).indexOf('/ 5 за получ.') >= 0, txt(dirBtn(h, '🔄 Трансфери')));
+      /* От 03.11.2026: офис без избран обект няма гледна точка — табовете без числа. */
+      ok('без избран обект „Получавам" / „Изпращам" са без числа', txt(dirBtn(h, '📥 Получавам')) === '📥 Получавам' && txt(dirBtn(h, '📤 Изпращам')) === '📤 Изпращам',
+        txt(dirBtn(h, '📥 Получавам')) + ' | ' + txt(dirBtn(h, '📤 Изпращам')));
       ok('без чип „Чакат мен"', !chip(h, 'mine'));
       ok('без банер и без сив ред', !h.doc.getElementById('t-recv-note') && !h.doc.getElementById('t-other-note'));
       h.close();
