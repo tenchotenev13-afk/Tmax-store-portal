@@ -225,7 +225,81 @@ check('целта е 0 за служител без нито един ден', E
 /* ── 6. Предупреждения ────────────────────────────────────────────────── */
 var w = synth([]);
 var rw = E.computeRow(P11, M11, { hours_per_day: 8, hired_on: '2026-11-10', left_on: '2026-11-25' }, w, {});
-check('над 5 работни дни в 7 поредни', rw.warnings.some(function (x) { return x.type === 'over5'; }));
+check('„6 работни дни в 7“ вече НЕ е предупреждение (ВТР чл. 19)', !rw.warnings.some(function (x) { return x.type === 'over5'; }));
+
+/* ── 6б. Почивки и седмични часове (ВТР чл. 19 от 01.11.2026) ─────────── */
+// Ноември 2026: 1.11 = неделя, 2.11 = понеделник. Седмици пон–нед: 26.10–1.11, 2–8, 9–15, 16–22, 23–29, 30.11–6.12.
+function monthRows(letters, hpd) { return [{ staff: { id: 'x', hours_per_day: hpd || 8 }, letters: letters, locked: {} }]; }
+function warnsOf(letters, prev) { return E.computeMonth(S11, '2026-11', monthRows(letters), prev).rows[0].warnings; }
+function L30(map) { var a = new Array(30).fill(''); Object.keys(map).forEach(function (d) { a[+d - 1] = map[d]; }); return a; }
+function onDays(from, to, letter) { var m = {}; for (var d = from; d <= to; d++) m[d] = letter; return m; }
+var only = function (ws, t) { return ws.filter(function (x) { return x.type === t; }); };
+
+var w7 = warnsOf(L30(onDays(2, 8, 'П')));                                       // пон 2 – нед 8: точно 7
+check('точно 7 поредни работни дни → „няма 36 ч. седмична почивка“', only(w7, 'no_weekly_rest').length === 1 &&
+  /^7 поредни работни дни \(02\.11–08\.11\) — няма 36 ч\. седмична почивка$/.test(only(w7, 'no_weekly_rest')[0].text) && only(w7, 'no_weekly_rest')[0].day === 2,
+  JSON.stringify(only(w7, 'no_weekly_rest')));
+var w6 = warnsOf(L30(onDays(2, 7, 'П')));                                       // 6 дни, после свободна неделя
+check('6 поредни работни дни → без предупреждение', !only(w6, 'no_weekly_rest').length);
+var w10 = warnsOf(L30(onDays(2, 11, 'П')));
+check('10 поредни → ЕДНО предупреждение за цялата поредица', only(w10, 'no_weekly_rest').length === 1 && /^10 поредни/.test(only(w10, 'no_weekly_rest')[0].text));
+var wAbs = warnsOf(L30(Object.assign(onDays(2, 11, 'П'), { 5: 'О' })));
+check('отсъствие (О) по средата = почивка → няма поредица от 7', !only(wAbs, 'no_weekly_rest').length);
+var wB = warnsOf(L30(Object.assign(onDays(2, 11, 'П'), { 5: 'Б', 9: 'НО' })));
+check('Б и НО също са почивка', !only(wB, 'no_weekly_rest').length);
+var wH = warnsOf(L30(Object.assign(onDays(2, 7, 'П'), { 8: '6' })));              // 6 смени + 6 свободни часа в неделя
+check('„свободни часове“ са работен ден → 7 поредни', only(wH, 'no_weekly_rest').length === 1);
+
+// 56 ч.: 6 × Д5/З (10.5) = 63 ч.
+var w63 = warnsOf(L30(onDays(2, 7, 'ЛД')));
+check('6 × Д5/З = 63 ч. в седмицата → „над 56 ч.“', only(w63, 'week_over_56').length === 1 &&
+  /^63 ч\. в седмицата 02\.11–08\.11 \(пон–нед\) — над 56 ч\.$/.test(only(w63, 'week_over_56')[0].text), JSON.stringify(only(w63, 'week_over_56')));
+check('…и 6 дни без 7-и → без „поредни дни“', !only(w63, 'no_weekly_rest').length);
+var w56 = warnsOf(L30(onDays(2, 6, 'ЛД')));                                       // 5 × 10.5 = 52.5
+check('52.5 ч. → без предупреждение', !only(w56, 'week_over_56').length);
+var w56b = warnsOf(L30({ 2: 'П', 3: 'П', 4: 'П', 5: 'П', 6: 'П', 7: 'П', 8: '8' }));   // 6 × 8 + 8 свободни = 56
+check('точно 56 ч. (6 × 8 + 8 свободни часа) → НЕ е над 56', !only(w56b, 'week_over_56').length);
+var w57 = warnsOf(L30({ 2: 'П', 3: 'П', 4: 'П', 5: 'П', 6: 'П', 7: 'П', 8: '9' }));   // 57
+check('57 ч. (свободните часове влизат в сбора) → над 56', only(w57, 'week_over_56').length === 1 && /^57 ч\./.test(only(w57, 'week_over_56')[0].text));
+
+// Седмица през границата на месеца: 26.10–1.11.
+var nov1 = L30({ 1: 'ЛД' });                                                     // нд 1.11 → Д6/1 = 9 ч.
+var octL = new Array(31).fill(''); [25, 26, 27, 28, 29, 30].forEach(function (d) { octL[d] = 'ЛД'; });  // 26–31.10, Л: Д4/Л = 11 ч.
+var PREV = { setup: ET.setups['2026-10'], ym: '2026-10', rows: { x: { letters: octL, locked: {} } } };
+var wb = warnsOf(nov1, PREV);
+check('седмица 26.10–1.11 с октомври от базата: 6 × 11 + 9 = 75 ч. → над 56', only(wb, 'week_over_56').length === 1 &&
+  /^75 ч\. в седмицата 26\.10–01\.11/.test(only(wb, 'week_over_56')[0].text) && !/непълна/.test(only(wb, 'week_over_56')[0].text), JSON.stringify(only(wb, 'week_over_56')));
+check('…и 7 поредни дни през границата (26.10–1.11) → предупреждение с ден 1-ви', only(wb, 'no_weekly_rest').length === 1 &&
+  only(wb, 'no_weekly_rest')[0].day === 1 && /\(26\.10–01\.11\)/.test(only(wb, 'no_weekly_rest')[0].text), JSON.stringify(only(wb, 'no_weekly_rest')));
+var wnp = warnsOf(nov1);
+check('без октомври: 9 ч. → без „над 56“, без „поредни“', !only(wnp, 'week_over_56').length && !only(wnp, 'no_weekly_rest').length);
+var cm = E.computeMonth(S11, '2026-11', monthRows(nov1));
+check('без октомври: бележка за месеца „непълна седмица“', cm.notes.length === 1 && /^Седмицата 26\.10–01\.11 е непълна/.test(cm.notes[0]), cm.notes.join());
+check('с октомври: без бележка', E.computeMonth(S11, '2026-11', monthRows(nov1), PREV).notes.length === 0);
+var octOnly = new Array(31).fill(''); [18, 19, 20, 21, 22, 23, 24].forEach(function (d) { octOnly[d] = 'П'; });   // 19–25.10 — изцяло в октомври
+check('поредица изцяло в предходния месец — не се отчита в ноември', !only(warnsOf(L30({}), { setup: ET.setups['2026-10'], ym: '2026-10', rows: { x: { letters: octOnly, locked: {} } } }), 'no_weekly_rest').length);
+// Последната седмица (30.11–6.12) излиза в декември — над 56 само ако вече е над.
+var wEnd = warnsOf(L30({ 30: 'ЛД' }));
+check('последната седмица (през декември) с 10.5 ч. → нищо', !only(wEnd, 'week_over_56').length);
+
+// Смяна над 12 ч.: в ВТР няма такъв код — проверка с изкуствен код от 13 ч.
+var S13 = clone(S11); S13.codes.push({ code: 'Т13', hours: 13, kind: 'work' }); S13.letter_map.push({ letter: 'П', day_kind: 'З1', code: 'Т13', hours_per_day: null });
+S13.letter_map = S13.letter_map.filter(function (l) { return !(l.letter === 'П' && l.day_kind === 'З1' && l.code !== 'Т13' && (l.hours_per_day === null || l.hours_per_day === undefined)); });
+var w13 = E.computeMonth(S13, '2026-11', monthRows(L30({ 2: 'П' }))).rows[0].warnings;
+check('смяна 13 ч. → „над 12 ч.“ с дата', only(w13, 'shift_over_12').length === 1 && only(w13, 'shift_over_12')[0].day === 2);
+check('Д4/Л (11 ч.) и свободни 12 ч. → НЕ са над 12', !only(E.computeMonth(ET.setups['2026-10'], '2026-10', monthRows(new Array(31).fill('').map(function (v, i) { return i === 5 ? 'ЛД' : i === 6 ? '12' : ''; }))).rows[0].warnings, 'shift_over_12').length);
+// Декември 2026: 1.12 = вторник → седмицата 30.11–06.12 има 6 дни в декември. Без ноември → „непълна“.
+var D31 = function (map) { var a = new Array(31).fill(''); Object.keys(map).forEach(function (d) { a[+d - 1] = map[d]; }); return a; };
+var dec = E.computeMonth(S11, '2026-12', [{ staff: { id: 'x', hours_per_day: 8 }, letters: D31(Object.assign(onDays(1, 6, 'ЛД'), { 24: 'П' })), locked: {} }]).rows[0].warnings;
+var dw = only(dec, 'week_over_56');
+check('декември без ноември: 5 × 10.5 + 9 (нд) = 61.5 ч. в седмицата 30.11–06.12 → „над 56 ч. (непълна седмица)“',
+  dw.length === 1 && /^61\.5 ч\. в седмицата 30\.11–06\.12 \(пон–нед\) — над 56 ч\. \(непълна седмица\)$/.test(dw[0].text) && dw[0].day === 1, JSON.stringify(dw));
+check('предупрежденията са подредени по ден (седмицата от 1-ви преди празника на 24-ти)', dec.length >= 2 &&
+  dec.every(function (w, i) { return !i || dec[i - 1].day <= w.day; }) && dec[0].type === 'week_over_56' && dec[dec.length - 1].type === 'holiday', JSON.stringify(dec.map(function (w) { return w.day + ':' + w.type; })));
+var S12 = clone(S11); S12.codes.push({ code: 'Т12', hours: 12, kind: 'work' });
+S12.letter_map = S12.letter_map.filter(function (l) { return !(l.letter === 'П' && l.day_kind === 'З1' && (l.hours_per_day === null || l.hours_per_day === undefined)); });
+S12.letter_map.push({ letter: 'П', day_kind: 'З1', code: 'Т12', hours_per_day: null });
+check('смяна точно 12 ч. → НЕ е над 12', !only(E.computeMonth(S12, '2026-11', monthRows(L30({ 2: 'П' }))).rows[0].warnings, 'shift_over_12').length);
 check('смяна преди назначаване', rw.warnings.some(function (x) { return x.type === 'before_hire' && x.day === 2; }));
 check('смяна след напускане', rw.warnings.some(function (x) { return x.type === 'after_leave' && x.day === 26; }));
 var dec = E.monthInfo('2026-12', []), Pd = E.prepare(S11);

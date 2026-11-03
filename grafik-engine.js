@@ -242,14 +242,6 @@
         else warn.push({ day: i + 1, type: 'no_contract', text: 'няма букви за договор ' + hpd + ' ч.' });
       }
     }
-    // Повече от 5 работни дни в 7 поредни (в рамките на месеца, както _help).
-    var maxRun = 0;
-    for (i = 0; i + 7 <= M.days; i++) {
-      var cnt = 0;
-      for (var j = i; j < i + 7; j++) if (letters && E.WORK_LETTERS.indexOf(letters[j]) >= 0) cnt++;
-      if (cnt > maxRun) maxRun = cnt;
-      if (cnt > 5 && !warn.some(function (x) { return x.type === 'over5'; })) warn.push({ day: i + 1, type: 'over5', text: cnt + ' работни дни в 7 поредни (от ' + (i + 1) + '-ви)' });
-    }
     var target = any ? M.workDays * hpd - hpd * abs : 0;
     var off = codes.reduce(function (s, c) { return s + E.codeHours(P, c); }, 0);
     var before = codes.slice(), changed = [], reachable = true;
@@ -266,8 +258,63 @@
       codes: codes, before: before, changed: changed, internal: internal, official: off,
       target: target, diff: diff, reachable: diff === 0 ? true : reachable,
       message: diff === 0 ? 'OK' : diff < 0 ? 'не стигат ' + (-diff) + ' ч.' : 'над нормата с ' + diff + ' ч.',
-      absences: abs, manDays: manDays, maxIn7: maxRun, notes: notes, warnings: warn
+      absences: abs, manDays: manDays, notes: notes, warnings: warn
     };
+  };
+
+  /* ── Почивки и седмични часове (ВТР чл. 19, от 01.11.2026; ТЦД 3 / ТЦД 4 / Темакс Юг) ──
+     смяна до 12 ч.; работна седмица до 56 ч.; междудневна почивка ≥ 12 ч.; междуседмична ≥ 36 ч.
+     В grafik_vtr_codes НЯМА начало/край на смяната (само часове и текст на легендата), затова
+     12-те и 36-те часа НЕ се смятат по часовник. Седмичната почивка се проверява по дни:
+     7 поредни работни дни = няма свободен ден = няма 36 ч. почивка. Отсъствия (О, Б, Н) и
+     празен ден = почивка. „Свободните часове“ 1–12 са работен ден с тези часове. */
+  function dayInfo(P, code, letter) {
+    var hrs = E.codeHours(P, code) + (E.isHours(letter) ? +letter : 0);
+    var k = code ? P.codes[code] : null;
+    var worked = !!(k && k.kind !== 'absence') || E.isHours(letter);
+    return { worked: worked, hours: hrs, shift: E.codeHours(P, code) };
+  }
+  function ddmm(s) { return s.slice(8, 10) + '.' + s.slice(5, 7); }
+  // days: [{date, worked, hours, shift, own}] — own = денят е от текущия месец.
+  // known: дали дните преди месеца са известни (иначе първата седмица е „непълна“).
+  E.restWarnings = function (days, M, knownBefore) {
+    var warn = [], i, first = null;
+    for (i = 0; i < days.length; i++) if (days[i].own) { first = i; break; }
+    // 1) Поредни работни дни (≥ 7) — веднъж на поредица, ако поне 7-ият ден е в месеца.
+    var run = 0, runStart = 0;
+    for (i = 0; i <= days.length; i++) {
+      var w = i < days.length && days[i].worked;
+      if (w) { if (!run) runStart = i; run++; continue; }
+      if (run >= 7 && runStart + 6 >= first) {
+        var dayIn = Math.max(runStart, first);
+        warn.push({ day: +days[dayIn].date.slice(8, 10), type: 'no_weekly_rest',
+          text: run + ' поредни работни дни (' + ddmm(days[runStart].date) + '–' + ddmm(days[i - 1].date) + ') — няма 36 ч. седмична почивка' });
+      }
+      run = 0;
+    }
+    // 2) Календарни седмици пон–нед, които докосват месеца.
+    var byDate = {};
+    days.forEach(function (d) { byDate[d.date] = d; });
+    var d0 = M.start;
+    while (dow(d0) !== 1) d0 = addDays(d0, -1);
+    for (var wk = d0; wk <= M.end; wk = addDays(wk, 7)) {
+      var sum = 0, missing = false;
+      for (var k = 0; k < 7; k++) {
+        var dd = addDays(wk, k), x = byDate[dd];
+        if (x) sum += x.hours;
+        else if (dd < M.start ? !knownBefore : true) missing = true;
+      }
+      if (sum > 56 + 1e-9) {
+        var dIn = wk < M.start ? M.start : wk;
+        warn.push({ day: +dIn.slice(8, 10), type: 'week_over_56',
+          text: (Math.round(sum * 2) / 2) + ' ч. в седмицата ' + ddmm(wk) + '–' + ddmm(addDays(wk, 6)) + ' (пон–нед) — над 56 ч.' + (missing ? ' (непълна седмица)' : '') });
+      }
+    }
+    // 3) Смяна над 12 ч. — по часовете на кода (свободните часове 1–12 никога не са над 12).
+    days.forEach(function (x) {
+      if (x.own && x.shift > 12 + 1e-9) warn.push({ day: +x.date.slice(8, 10), type: 'shift_over_12', text: 'смяна ' + x.shift + ' ч. — над 12 ч.' });
+    });
+    return warn;
   };
 
   // Кой е в графика за месеца: не е напуснал преди първия ден и не е назначен след последния.
@@ -276,19 +323,41 @@
   };
 
   // Целият месец на обекта. rows: [{staff, letters, locked}] → редовете + сборовете.
-  E.computeMonth = function (setup, ym, rows) {
+  // prev (по избор): {setup, ym, rows: {staff_id: {letters, locked}}} — предходният месец,
+  // за седмицата и поредните дни през границата. Без него първата седмица е „непълна“.
+  E.computeMonth = function (setup, ym, rows, prev) {
     var P = E.prepare(setup), M = E.monthInfo(ym, setup.extra_days);
-    var out = [], tot = { manDays: 0, manHours: 0, offNorm: 0, o: 0, b: 0, n: 0 };
+    var out = [], tot = { manDays: 0, manHours: 0, offNorm: 0, o: 0, b: 0, n: 0 }, notes = [];
+    var PP = prev && prev.setup ? E.prepare(prev.setup) : null, PM = PP ? E.monthInfo(prev.ym, prev.setup.extra_days) : null;
+    var firstMon = M.start; while (dow(firstMon) !== 1) firstMon = addDays(firstMon, -1);
+    if (firstMon < M.start && !PP) {
+      notes.push('Седмицата ' + ddmm(firstMon) + '–' + ddmm(addDays(firstMon, 6)) + ' е непълна — няма данни за предходния месец; проверките за 56 ч. и за поредните дни ползват само дните от този месец.');
+    }
     rows.forEach(function (r) {
       if (!E.inMonth(M, r.staff)) return;
       var x = E.computeRow(P, M, r.staff, r.letters, r.locked);
       x.staff = r.staff;
+      var days = [];
+      if (PP) {
+        var pr = (prev.rows && r.staff && prev.rows[r.staff.id]) || { letters: [], locked: {} };
+        var px = E.computeRow(PP, PM, r.staff, pr.letters, pr.locked);
+        for (var p = 0; p < PM.days; p++) {
+          var pi = dayInfo(PP, px.codes[p], (pr.letters || [])[p] || '');
+          days.push({ date: PM.dates[p], worked: pi.worked, hours: pi.hours, shift: pi.shift, own: false });
+        }
+      }
+      for (var d = 0; d < M.days; d++) {
+        var di = dayInfo(P, x.codes[d], (r.letters || [])[d] || '');
+        days.push({ date: M.dates[d], worked: di.worked, hours: di.hours, shift: di.shift, own: true });
+      }
+      E.restWarnings(days, M, !!PP).forEach(function (w) { x.warnings.push(w); });
+      x.warnings.sort(function (a, b) { return a.day - b.day; });
       out.push(x);
       tot.manDays += x.manDays; tot.manHours += x.official;
       if (x.diff !== 0) tot.offNorm++;
       x.codes.forEach(function (c) { if (c === 'О') tot.o++; else if (c === 'Б') tot.b++; else if (c === 'Н') tot.n++; });
     });
-    return { month: M, rows: out, totals: tot };
+    return { month: M, rows: out, totals: tot, notes: notes };
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = E;

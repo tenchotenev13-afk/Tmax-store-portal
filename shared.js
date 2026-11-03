@@ -1842,7 +1842,7 @@ function setupTabsForRole(){
     pkSubBtn.style.display='none';
     if(typeof pkLoadUsers==='function') pkLoadUsers();
   }
-  /* Таб „📆 Работен график“ (grafik.js) — в разработка: само имейлите от
+  /* Таб „📆 График“ (grafik.js, Работен график) — в разработка: само имейлите от
      app_settings.grafik_beta_users. Скрит до отговора; grLoadUsers() го показва.
      Данните са само през grafik-api — скритият бутон не е защитата. */
   var grTab=document.getElementById('tab-grafik');

@@ -10,6 +10,7 @@
 
 var GR_LETTERS_FALLBACK = ['ЛД','ЗД','П','В','М','О','Б','НО','К','О4'];
 var GR_WORK_LETTERS = ['ЛД','ЗД','П','В','М','К'];
+var GR_DATED_WARN = { no_weekly_rest: 1, week_over_56: 1 };   // текстът вече носи датите (ВТР чл. 19)
 var GR_POSITIONS = ['Каса','Продавач','ОТЗ','Склад','Шофьор','Снабдител','Ръководител'];
 var GR_MONTHS = ['януари','февруари','март','април','май','юни','юли','август','септември','октомври','ноември','декември'];
 var GR_DOW = ['','Пн','Вт','Ср','Чт','Пт','Сб','Нд'];
@@ -23,6 +24,7 @@ var grView = 'grid';        // 'grid' | 'staff'
 var grData = null;          // load_month
 var grRows = {};            // staff_id → {letters:[], locked:{}}
 var grCalc = null;          // GrafikEngine.computeMonth(...)
+var grPrev = null;          // предходният месец {setup, ym, rows} — за седмицата през границата (или null)
 var grSel = { r: 0, d: 0 }; // избрана клетка (ред в grVisible, ден 0..days-1)
 var grEdit = '';            // буфер при въвеждане
 var grDirty = {}, grSaveTimer = null, grSavePromise = null, grSaveState = '';
@@ -161,8 +163,26 @@ function grLoadMonth(seq){
     (grData.rows || []).forEach(function(r){ grRows[r.staff_id] = { letters: (r.letters || []).slice(), locked: r.locked || {} }; });
     grDirty = {}; grSaveState = ''; grSaved = {};
     (grData.rows || []).forEach(function(r){ grSaved[r.staff_id] = 1; });
-    grRecalc();
-    grRender();
+    return grLoadPrev(seq).then(function(){
+      if(seq !== grLoadSeq) return;
+      grRecalc();
+      grRender();
+    });
+  });
+}
+/* Предходният месец — само ако първата седмица (пон–нед) почва в него и месецът го има в
+   базата. Нужен е за 56-те часа и за поредните дни през границата (ВТР чл. 19). Няма ли го
+   (или няма достъп — ТРЗ виждат само подадени) — grPrev = null и седмицата е „непълна“. */
+function grLoadPrev(seq){
+  grPrev = null;
+  var first = GrafikEngine.monthInfo(grMonth, []);
+  if(first.dow[0] === 1) return Promise.resolve();
+  var pym = grShiftMonth(grMonth, -1);
+  return grApi('load_month', { store: grStore, month: pym }).then(function(res){
+    if(seq !== grLoadSeq || !res.ok || !res.data || !res.data.month_row) return;
+    var rows = {};
+    (res.data.rows || []).forEach(function(r){ rows[r.staff_id] = { letters: r.letters || [], locked: r.locked || {} }; });
+    grPrev = { setup: res.data.setup || {}, ym: pym, rows: rows };
   });
 }
 
@@ -176,7 +196,7 @@ function grRecalc(){
     var r = grRows[s.id] || { letters: [], locked: {} };
     return { staff: s, letters: r.letters, locked: r.locked };
   });
-  grCalc = GrafikEngine.computeMonth(grData.setup || {}, grMonth, input);
+  grCalc = GrafikEngine.computeMonth(grData.setup || {}, grMonth, input, grPrev);
   grVisible = grCalc.rows.map(function(x){ return x.staff; });
   if(grSel.r >= grVisible.length) grSel.r = Math.max(0, grVisible.length - 1);
   if(grSel.d >= grCalc.month.days) grSel.d = grCalc.month.days - 1;
@@ -327,11 +347,13 @@ function grWarningsHtml(){
     if(x.diff !== 0) list.push({ t: 'norm', s: name + ': ' + x.message + (x.reachable ? '' : ' — изравняването не намира точна комбинация, кодовете не са пипнати') });
     var seen = {};
     x.warnings.forEach(function(w){
-      var key = w.type + (w.type === 'over5' ? '' : ':' + w.day);
+      var key = w.type + ':' + w.day;
       if(seen[key]) return; seen[key] = 1;
-      list.push({ t: w.type, s: name + ': ' + (w.type === 'over5' ? w.text : w.day + '-ви — ' + w.text) });
+      /* Почивките и седмиците носят датите си в текста („7 поредни работни дни (02.11–08.11) …“). */
+      list.push({ t: w.type, s: name + ': ' + (GR_DATED_WARN[w.type] ? w.text : w.day + '-ви — ' + w.text) });
     });
   });
+  (grCalc.notes || []).forEach(function(n){ list.push({ t: 'month', s: n }); });
   if(!list.length) return '';
   return '<details class="card" id="gr-warnings" style="border-left:4px solid #f59e0b;"' + (list.length <= 12 ? ' open' : '') + '><summary style="cursor:pointer;font-weight:600;">⚠ Предупреждения (' + list.length + ')</summary><ul style="margin:6px 0 0 18px;font-size:12px;">' +
     list.map(function(x){ return '<li class="gr-warn gr-warn-' + escAttrVal(x.t) + '">' + escVal(x.s) + '</li>'; }).join('') + '</ul></details>';

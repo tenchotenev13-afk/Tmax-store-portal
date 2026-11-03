@@ -58,7 +58,7 @@ Netlify се ползва само за тестване/staging.
   само до акаунтите на обекта, които са в `picking_users` (push през
   `osSend` с таг обект И име; паднало → `notify_error` + „🔁 Прати пак"),
   приемане от обекта → received / partial. Автоматична Разлика — не
-- `grafik.js` + `grafik-engine.js` — Работен график (таб „📆 Работен график“, в
+- `grafik.js` + `grafik-engine.js` — Работен график (таб „📆 График“, в
   разработка — само `app_settings.grafik_beta_users`, виж HIDDEN-FEATURES.md).
   Данните са САМО през едж функцията `grafik-api` (пропускът `currentSession`):
   таблиците `grafik_*` са с RLS без политики и без права за anon — не добавяй

@@ -220,7 +220,13 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   ok('неделя без хора → червено (0)', h.doc.querySelectorAll('#gr-coverage .gr-cov0').length > 0);
   h.w.grSelect(1, 0);
   for (let d = 0; d < 7; d++) { typeIn(h, 'В'); key(h, 'Tab'); }
-  ok('над 5 работни дни в 7 → предупреждение', !!h.doc.querySelector('#gr-warnings .gr-warn-over5'));
+  // 1.11 (нд) – 7.11 (сб) работни, 8.11 празна → точно 7 поредни (ВТР чл. 19: няма 36 ч. почивка).
+  const rest = h.doc.querySelector('#gr-warnings .gr-warn-no_weekly_rest');
+  ok('7 поредни работни дни → „няма 36 ч. седмична почивка“ с датите', !!rest && /7 поредни работни дни \(01\.11–07\.11\) — няма 36 ч\. седмична почивка/.test(rest.textContent), rest && rest.textContent);
+  ok('„6 работни дни в 7“ вече НЕ е предупреждение', !h.doc.querySelector('#gr-warnings .gr-warn-over5'));
+  const note = h.doc.querySelector('#gr-warnings .gr-warn-month');
+  ok('без октомври в базата → бележка „Седмицата 26.10–01.11 е непълна“', !!note && /^Седмицата 26\.10–01\.11 е непълна/.test(note.textContent), note && note.textContent);
+  ok('екранът е поискал октомври (за седмицата през границата)', h.S.calls.some(c => c.action === 'load_month' && c.month === '2026-10'));
   ok('извън нормата → в предупрежденията', !!h.doc.querySelector('#gr-warnings .gr-warn-norm'));
 
   section('7. Подаване');
@@ -257,7 +263,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   H.fire(a.w, sel, 'change'); await ticks(8);
   ok('смяна на обект → load_month за Шумен', h.S.calls.slice(-1)[0].action === 'load_month' && h.S.calls.slice(-1)[0].store === 'Шумен');
   realClick(a.w, btn(mod(a), '▶')); await ticks(8);
-  ok('▶ → декември 2026', h.S.calls.slice(-1)[0].month === '2026-12' && /декември 2026/.test(mod(a).textContent));
+  ok('▶ → декември 2026', h.S.calls.some(c => c.action === 'load_month' && c.month === '2026-12' && c.prev === true) && /декември 2026/.test(mod(a).textContent));
 
   section('9. Ритъмът от предходния месец');
   {
@@ -268,6 +274,8 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     S.rows.push({ month_id: 'm-oct', staff_id: 'st-1', letters: oct, locked: {} });
     const r = env(MGR, { server: S });
     await load(r);
+    ok('октомври го има в базата → подаден на изчисленията (grPrev), без бележка „непълна“', !!r.w.grPrev && r.w.grPrev.ym === '2026-10' &&
+      !!r.w.grPrev.rows['st-1'] && (r.w.grCalc.notes || []).length === 0);
     r.w.grRows['st-1'] = { letters: ['', '', '', 'В'], locked: {} };                                // 4.11 (ср) вече е попълнен
     r.w.grRecalc(); r.w.grCopyRhythm();
     const L = r.w.grRows['st-1'].letters;
