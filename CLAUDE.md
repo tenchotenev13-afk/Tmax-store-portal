@@ -573,6 +573,10 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
 - Колоната `users.password` (чист текст) я НЯМА от етап 5б (01.11.2026,
   `users-drop-password-schema.sql`) — входът е само по `password_hash`.
   Не се връща; заковано в `tests/users-no-plain-password.test.js`.
+- DELETE за `anon`/`authenticated` — само върху таблиците от `DELETE_ALLOWED`
+  в `tests/delete-tables-whitelist.test.js` (от 02.11.2026,
+  `anon-revoke-delete-schema.sql`). Нова таблица, от която браузърът трие →
+  `grant delete` в нова миграция + запис в `DELETE_ALLOWED`.
 - Не изключвай RLS „за да мине" — това е решение, което се записва в
   миграцията с едно изречение защо, не мълчалив заобикаляне.
 - При `SECURITY DEFINER` функция проверявай ACL-а за водещо `=X/` ПРЕДИ да

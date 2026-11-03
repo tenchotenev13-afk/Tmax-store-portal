@@ -472,7 +472,8 @@ const TESTS = [
   'limit1000-co-transport.test.js',
   'users-no-plain-password.test.js',
   'grafik-engine.test.js',
-  'grafik-ui.test.js'
+  'grafik-ui.test.js',
+  'delete-tables-whitelist.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

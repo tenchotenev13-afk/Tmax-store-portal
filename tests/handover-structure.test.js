@@ -73,8 +73,9 @@ var real = problems(ROOT);
 check('репото: структурата на предавката е чиста', real.length === 0, real.join(' | '));
 
 // --- е) tools/open.js на фикстура с 3 точки ---
-var TMP = path.join(os.tmpdir(), 'tmax-handover-structure');
-fs.rmSync(TMP, { recursive: true, force: true });
+// уникална за всеки пуск — паралелни сесии/пакети не си делят папката (01.11.2026)
+var TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'tmax-handover-structure-'));
+process.on('exit', function () { try { fs.rmSync(TMP, { recursive: true, force: true }); } catch (e) {} });
 var fx = path.join(TMP, 'fixture');
 fs.mkdirSync(path.join(fx, 'closed'), { recursive: true });
 fs.writeFileSync(path.join(fx, '10-10-old-tencho.md'), 'Отворено: 10.10 · Кой чака: Тенчо · Сесия: a\n\n- **Стара за Тенчо**\n');

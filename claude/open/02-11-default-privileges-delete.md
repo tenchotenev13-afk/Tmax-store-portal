@@ -1,0 +1,5 @@
+Отворено: 02.11 · Кой чака: Code · Сесия: anon-revoke-delete
+
+- **Нова таблица в public получава DELETE за anon автоматично.** Default privileges в схемата дават на anon и authenticated всички права върху всяка нова таблица (`pg_default_acl` за public, собственици postgres и supabase_admin: `anon=arwdDxtm`; потвърдено 02.11 и с временна таблица в транзакция с rollback). Тоест revoke-ът от `anon-revoke-delete-schema.sql` важи за 45-те заварени таблици, но следващата нова таблица пак ще е отворена за триене. Тестът `delete-tables-whitelist` вижда само кода, не базата. Решение А: `alter default privileges in schema public revoke delete on tables from anon, authenticated` (засяга всички бъдещи таблици — модул, който трие, трябва изричен grant в миграцията си). Решение Б: остава, но всяка миграция с нова таблица пише изричен `revoke delete`.
+
+**Решение: А, 02.11 — Тенчо.** Новата таблица да е затворена по подразбиране: забравен `grant` дава видима грешка, забравен `revoke` — тиха дупка. Отделна следваща стъпка (своя миграция + rollback `alter default privileges … grant delete …`), НЕ в `anon-revoke-delete`.
