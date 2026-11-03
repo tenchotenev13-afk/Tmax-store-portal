@@ -88,8 +88,15 @@ try {
   check(ok3 && (await repo.getMonth(STORE, MONTH))!.status === "draft", "reopen: submitted → draft");
 
   const setup = await repo.setupRaw(STORE);
-  check(setup.storeCompany.length >= 1 && setup.codes.length === 35 && setup.letterMap.length === 40 && setup.seasons.length === 2, "setupRaw — обект, 35 кода, 40 букви, 2 сезона",
+  // 61 = 40 общи + 21 за 4-часов договор (миграция 20261102095558); сектори и labels — 20261103135820.
+  check(setup.storeCompany.length >= 1 && setup.codes.length === 35 && setup.letterMap.length === 61 && setup.seasons.length === 2, "setupRaw — обект, 35 кода, 61 букви, 2 сезона",
     [setup.storeCompany.length, setup.codes.length, setup.letterMap.length, setup.seasons.length]);
+  const secs = setup.sectors || [];
+  check(secs.length === 14 && secs.every((x) => x.store_name === STORE) && secs.some((x) => x.name === "Хигиена"), "setupRaw — секторите на Кърджали (14, вкл. Хигиена)", secs.length);
+  check(setup.seasons.every((x) => !!x.labels), "setupRaw — сезоните носят labels");
+  const sec0 = await repo.getSector(secs[0].id);
+  check(!!sec0 && sec0.id === secs[0].id && sec0.store_name === STORE, "getSector");
+  check((await repo.getSector("00000000-0000-4000-8000-000000000000")) === null, "getSector — непознат → null");
   const letters = await repo.letterSet();
   check(letters.length === 10 && letters.indexOf("ЛД") >= 0 && letters.indexOf("НО") >= 0, "letterSet — 10 букви", letters.length);
   check((await repo.adminList("grafik_extra_days")).length >= 0, "adminList");

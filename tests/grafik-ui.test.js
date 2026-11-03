@@ -25,13 +25,18 @@ function makeServer(opt) {
   const S = {
     calls: [], months: {}, rows: [], seq: 0, log: [], delay: opt.delay || null,
     staff: [
-      { id: 'st-1', store_name: 'Кърджали', short_name: 'ИВАН', full_name: 'Иван Иванов Иванов', sector: 'КАСА', hours_per_day: 8, sort_order: 10, hired_on: null, left_on: null },
-      { id: 'st-2', store_name: 'Кърджали', short_name: 'МАРИЯ', full_name: "Мария Д'Анджело", sector: 'СКЛАД', hours_per_day: 8, sort_order: 20, hired_on: null, left_on: null },
-      { id: 'st-3', store_name: 'Кърджали', short_name: 'ПЕТЯ', full_name: 'Петя Петрова', sector: 'КАСА', hours_per_day: 4, sort_order: 30, hired_on: null, left_on: null },
-      { id: 'st-4', store_name: 'Кърджали', short_name: 'СТАР', full_name: 'Напуснал Отдавна', sector: 'СКЛАД', hours_per_day: 8, sort_order: 40, hired_on: null, left_on: '2026-09-30' },
+      { id: 'st-1', store_name: 'Кърджали', short_name: 'ИВАН', full_name: 'Иван Иванов Иванов', sector: 'каса', sector_id: 'sec-k-kasa', hours_per_day: 8, sort_order: 10, hired_on: null, left_on: null },
+      { id: 'st-2', store_name: 'Кърджали', short_name: 'МАРИЯ', full_name: "Мария Д'Анджело", sector: 'СКЛАД', sector_id: 'sec-k-sklad', hours_per_day: 8, sort_order: 20, hired_on: null, left_on: null },
+      { id: 'st-3', store_name: 'Кърджали', short_name: 'ПЕТЯ', full_name: 'Петя Петрова', sector: 'КАСА', sector_id: 'sec-k-kasa', hours_per_day: 4, sort_order: 30, hired_on: null, left_on: null },
+      { id: 'st-4', store_name: 'Кърджали', short_name: 'СТАР', full_name: 'Напуснал Отдавна', sector: 'ХИГИЕНИСТ', sector_id: null, hours_per_day: 8, sort_order: 40, hired_on: null, left_on: '2026-09-30' },
       { id: 'st-9', store_name: 'Шумен', short_name: 'ШУМЕН', full_name: 'Служител Шумен', sector: 'ОТЗ', hours_per_day: 8, sort_order: 10, hired_on: null, left_on: null }
     ],
     missing: opt.missing || [],
+    sectors: [
+      { id: 'sec-k-sklad', store_name: 'Кърджали', name: 'Склад', sort_order: 5 },   // нарочно преди Каса — редът е на магазина, не азбучен
+      { id: 'sec-k-kasa', store_name: 'Кърджали', name: 'Каса', sort_order: 10 },
+      { id: 'sec-sh-otz', store_name: 'Шумен', name: 'ОТЗ', sort_order: 20 }
+    ],
     fail: opt.fail || {}
   };
   const me = u => {
@@ -53,7 +58,8 @@ function makeServer(opt) {
           can_reopen: u.role === 'admin' && !!mo && mo.status === 'submitted', status: mo ? mo.status : 'draft', month_row: mo || null,
           staff: S.staff.filter(s => s.store_name === b.store), rows: mo ? S.rows.filter(r => r.month_id === mo.id) : [],
           prev_rows: pm ? S.rows.filter(r => r.month_id === pm.id) : [],
-          setup: Object.assign({}, b.month === '2026-11' || b.month === '2026-12' ? SETUP11 : ET.setups['2026-10'], { missing: S.missing, extra_days: [] }) } };
+          setup: Object.assign({}, b.month === '2026-11' || b.month === '2026-12' ? SETUP11 : ET.setups['2026-10'], { missing: S.missing, extra_days: [], season_label: b.month === '2026-10' ? 'Лято (до 20:00)' : 'Зима 1 (до 19:30)',
+            sectors: S.sectors.filter(x => x.store_name === b.store).sort((a, c) => a.sort_order - c.sort_order).map(x => ({ id: x.id, name: x.name, sort_order: x.sort_order })) }) } };
       }
       case 'save_rows': {
         if (!canEdit(b.store)) return { status: 403, body: { ok: false, reason: 'readonly', message: 'Нямате права да променяте графика на този обект.' } };
@@ -77,6 +83,12 @@ function makeServer(opt) {
         const mo = S.months[key(b.store, b.month + '-01')];
         mo.status = 'draft';
         return { status: 200, body: { ok: true, status: 'draft' } };
+      }
+      case 'sector_save': {
+        if (!canEdit(b.store) || (u.role !== 'admin' && !u.is_regional)) return { status: 403, body: { ok: false, reason: 'forbidden', message: 'Сектор добавят регионалният и admin.' } };
+        if (S.sectors.some(x => x.store_name === b.store && x.name.toLowerCase() === b.name.toLowerCase())) return { status: 409, body: { ok: false, reason: 'duplicate', message: 'Секторът вече го има.' } };
+        const x = { id: 'sec-new-' + (++S.seq), store_name: b.store, name: b.name, sort_order: 500 }; S.sectors.push(x);
+        return { status: 200, body: { ok: true, sector: x } };
       }
       case 'staff_save': {
         if (!canEdit(b.store)) return { status: 403, body: { ok: false, reason: 'readonly', message: 'Нямате права.' } };
@@ -202,7 +214,9 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   ok('втори Ctrl+L отключва', !h.w.grRows['st-1'].locked[String(ch[0].day)]);
 
   section('6. Покритие и предупреждения');
-  ok('покритие по сектор: КАСА и СКЛАД', /КАСА/.test(h.doc.getElementById('gr-coverage').textContent) && /СКЛАД/.test(h.doc.getElementById('gr-coverage').textContent));
+  const covRows = Array.from(h.doc.querySelectorAll('#gr-coverage tbody tr')).map(tr => tr.firstChild.textContent);
+  ok('покритие по сектор: по списъка и реда на магазина (Склад, Каса), не по текста от бланката', JSON.stringify(covRows) === JSON.stringify(['Склад', 'Каса']), JSON.stringify(covRows));
+  ok('„каса“ и „КАСА“ от бланката са в ЕДИН ред (Каса)', covRows.filter(x => /каса/i.test(x)).length === 1);
   ok('неделя без хора → червено (0)', h.doc.querySelectorAll('#gr-coverage .gr-cov0').length > 0);
   h.w.grSelect(1, 0);
   for (let d = 0; d < 7; d++) { typeIn(h, 'В'); key(h, 'Tab'); }
@@ -296,6 +310,55 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     realClick(r.w, btn(r.doc.getElementById('gr-staff-modal'), 'Запиши')); await ticks(8);
     const se = S.calls.filter(c => c.action === 'staff_save').slice(-1)[0];
     ok('staff_save — редакция с id и дата на напускане', se && se.id === 'st-2' && se.fields.left_on === '2026-11-20');
+  }
+
+  section('10б. Сезон и сектори');
+  {
+    const r = env(MGR);
+    await load(r);
+    const se = (r.doc.getElementById('gr-season') || {}).textContent || '';
+    ok('сезонът е с пълно име „Зима 1 (до 19:30)“', se === 'Зима 1 (до 19:30)', se);
+    const head = r.doc.getElementById('gr-season').parentNode.parentNode.textContent;
+    ok('„З1“ не се показва в реда с месеца', head.indexOf('З1') < 0 && head.indexOf('Зима 1') >= 0, head);
+    realClick(r.w, btn(mod(r), '◀')); await ticks(8);
+    ok('октомври → „Лято (до 20:00)“', (r.doc.getElementById('gr-season') || {}).textContent === 'Лято (до 20:00)');
+    realClick(r.w, btn(mod(r), '▶')); await ticks(8);
+    ok('мрежата показва сектора от списъка (Каса), не текста от бланката (каса)', r.doc.getElementById('gr-row-st-1').textContent.indexOf('Каса') >= 0 &&
+      r.doc.getElementById('gr-row-st-1').textContent.indexOf('каса') < 0);
+    realClick(r.w, btn(mod(r), 'Персонал'));
+    ok('manager: без „➕ Сектор“', !btn(mod(r), 'Сектор'));
+    realClick(r.w, r.doc.querySelector('#gr-st-st-4 button'));
+    const sel = r.doc.getElementById('gr-sf-sector');
+    ok('секторът е падащ списък: без сектор + Склад + Каса (реда на магазина)', sel && sel.tagName === 'SELECT' &&
+      JSON.stringify(Array.from(sel.options).map(o => o.textContent)) === JSON.stringify(['— без сектор —', 'Склад', 'Каса']), sel && Array.from(sel.options).map(o => o.textContent).join(','));
+    ok('при служител без сектор се вижда текстът от бланката', /в бланката: ХИГИЕНИСТ/.test(r.doc.getElementById('gr-staff-modal').textContent));
+    sel.value = 'sec-k-sklad';
+    realClick(r.w, btn(r.doc.getElementById('gr-staff-modal'), 'Запиши')); await ticks(8);
+    const ss = r.S.calls.filter(c => c.action === 'staff_save').slice(-1)[0];
+    ok('staff_save праща sector_id, не текст', ss && ss.fields.sector_id === 'sec-k-sklad' && !('sector' in ss.fields), ss && JSON.stringify(ss.fields));
+    realClick(r.w, btn(mod(r), 'Персонал'));
+    realClick(r.w, r.doc.querySelector('#gr-st-st-4 button'));
+    r.doc.getElementById('gr-sf-sector').value = '';
+    realClick(r.w, btn(r.doc.getElementById('gr-staff-modal'), 'Запиши')); await ticks(8);
+    ok('„— без сектор —“ → sector_id null', r.S.calls.filter(c => c.action === 'staff_save').slice(-1)[0].fields.sector_id === null);
+
+    const a = env(ADM);
+    await load(a);
+    realClick(a.w, btn(mod(a), 'Персонал'));
+    ok('admin: има „➕ Сектор“', !!btn(mod(a), 'Сектор'));
+    realClick(a.w, btn(mod(a), 'Сектор'));
+    const dlg = a.doc.getElementById('gr-sector-modal');
+    ok('модалът изброява сегашните сектори', dlg && /Сега: Склад, Каса/.test(dlg.textContent));
+    a.doc.getElementById('gr-sec-name').value = '  КАСА ';
+    realClick(a.w, btn(dlg, 'Добави')); await ticks(4);
+    ok('„КАСА“ при съществуваща „Каса“ → отказ в браузъра, без заявка', a.calls.toast.some(t => /вече го има/.test(t)) && !a.S.calls.some(c => c.action === 'sector_save'));
+    a.doc.getElementById('gr-sec-name').value = '  Градина   и  двор ';
+    realClick(a.w, btn(dlg, 'Добави')); await ticks(8);
+    const sv = a.S.calls.filter(c => c.action === 'sector_save')[0];
+    ok('sector_save: магазинът и името (интервалите свити)', sv && sv.store === 'Кърджали' && sv.name === 'Градина и двор', sv && JSON.stringify(sv));
+    realClick(a.w, btn(mod(a), 'Персонал'));
+    realClick(a.w, a.doc.querySelector('#gr-st-st-1 button'));
+    ok('новият сектор е в падащия списък', Array.from(a.doc.getElementById('gr-sf-sector').options).some(o => o.textContent === 'Градина и двор'));
   }
 
   section('11. Само гледа, липсващо дружество, грешки');

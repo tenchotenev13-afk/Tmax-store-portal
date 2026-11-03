@@ -3,8 +3,8 @@
 // База в паметта (MemRepo) — без мрежа. Проверява правата по вид × действие ×
 // свой/чужд обект, пропуска, beta/ТРЗ списъците, клетките, снимката и валидността по дати.
 import {
-  handleGrafik, parseEmailList, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
-  type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable,
+  handleGrafik, HttpError, parseEmailList, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
+  type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector,
 } from "./handler.ts";
 import { signSession } from "../_shared/session.ts";
 
@@ -55,6 +55,12 @@ class MemRepo implements Repo {
     grafik_letter_map: ["ЛД", "ЗД", "П", "В", "М", "О4", "К", "О", "Б", "НО"].map((l) => ({ id: nid(), vtr_id: VTR, letter: l, day_kind: "З1", code: "x", valid_from: null, valid_to: null })),
   };
   opened = 0;
+  sectors: Sector[] = [
+    { id: "5ec00000-0000-4000-8000-000000000001", store_name: "Кърджали", name: "Склад", sort_order: 30, active: true },
+    { id: "5ec00000-0000-4000-8000-000000000002", store_name: "Кърджали", name: "Каса", sort_order: 10, active: true },
+    { id: "5ec00000-0000-4000-8000-000000000003", store_name: "Кърджали", name: "Стар", sort_order: 5, active: false },
+    { id: "5ec00000-0000-4000-8000-000000000004", store_name: "Шумен", name: "Каса", sort_order: 10, active: true },
+  ];
   constructor() {
     for (const s of ["Кърджали", "Кърджали", "Шумен", "Раднево"]) {
       this.staff.push({ id: nid(), store_name: s, short_name: "ЛИЦЕ " + seq, full_name: "Лице " + seq, sort_order: 0, left_on: null });
@@ -99,12 +105,20 @@ class MemRepo implements Repo {
         { vtr_id: VTR, code: "Д1/З", hours: 8, kind: "work", seasons: ["З"], legend: null, sort_order: 11, valid_from: null, valid_to: null },
       ],
       seasons: [
-        { vtr_id: VTR, months: { "1": "З2", "2": "З2", "3": "З2", "4": "Л", "5": "Л", "6": "Л", "7": "Л", "8": "Л", "9": "Л", "10": "Л", "11": "З2", "12": "З2" }, valid_from: null, valid_to: "2026-10-31" },
-        { vtr_id: VTR, months: { "1": "З2", "2": "З2", "3": "З1", "4": "З1", "5": "Л", "6": "Л", "7": "Л", "8": "Л", "9": "Л", "10": "Л", "11": "З1", "12": "З1" }, valid_from: "2026-11-01", valid_to: null },
+        { vtr_id: VTR, months: { "1": "З2", "2": "З2", "3": "З2", "4": "Л", "5": "Л", "6": "Л", "7": "Л", "8": "Л", "9": "Л", "10": "Л", "11": "З2", "12": "З2" }, valid_from: null, valid_to: "2026-10-31", labels: { "Л": "Лято (до 20:00)", "З2": "Зима (до 19:00)" } },
+        { vtr_id: VTR, months: { "1": "З2", "2": "З2", "3": "З1", "4": "З1", "5": "Л", "6": "Л", "7": "Л", "8": "Л", "9": "Л", "10": "Л", "11": "З1", "12": "З1" }, valid_from: "2026-11-01", valid_to: null, labels: { "Л": "Лято (до 20:00)", "З1": "Зима 1 (до 19:30)", "З2": "Зима 2 (до 19:00)" } },
       ],
       letterMap: this.admin.grafik_letter_map as SetupRaw["letterMap"],
       extraDays: (this.admin.grafik_extra_days as SetupRaw["extraDays"]).filter((e) => !e.store_name || e.store_name === store),
+      sectors: this.sectors.filter((x) => x.store_name === store),
     };
+  }
+  async getSector(id: string) { return this.sectors.filter((x) => x.id === id)[0] || null; }
+  async insertSector(f: Record<string, unknown>) {
+    if (this.sectors.some((x) => x.store_name === f.store_name && x.name.toLowerCase() === String(f.name).toLowerCase())) {
+      throw new HttpError(400, "db_constraint", "duplicate key value violates unique constraint");
+    }
+    const x = { id: nid(), active: true, ...f } as Sector; this.sectors.push(x); return x;
   }
   async letterSet() { return Array.from(new Set(this.admin.grafik_letter_map.map((r) => r.letter as string))); }
   async adminList(t: AdminTable) { return this.admin[t]; }
@@ -405,6 +419,56 @@ Deno.test("admin_*: само admin, бели списъци, stores.company_id",
   eq(ed.body.row.created_by, "ten.tenev@temax.bg", "неработен ден");
   eq((await call(r, U.admin, { action: "admin_delete", table: "companies", id: C3 })).status, 400, "дружество не се трие");
   eq((await call(r, U.admin, { action: "admin_delete", table: "grafik_extra_days", id: ed.body.row.id })).body.deleted, 1, "неработен ден се трие");
+});
+
+Deno.test("сезон: пълното име от labels, кодът остава вътрешен", async () => {
+  const r = new MemRepo();
+  const raw = await r.setupRaw("Кърджали");
+  const lab = (a: string, b: string) => resolveSetup(raw, a, b);
+  eq([lab("2026-11-01", "2026-11-30").season, lab("2026-11-01", "2026-11-30").season_label], ["З1", "Зима 1 (до 19:30)"], "ноември 2026");
+  eq(lab("2027-01-01", "2027-01-31").season_label, "Зима 2 (до 19:00)", "януари 2027");
+  eq(lab("2027-06-01", "2027-06-30").season_label, "Лято (до 20:00)", "юни 2027");
+  eq(lab("2026-10-01", "2026-10-31").season_label, "Лято (до 20:00)", "октомври 2026 (стар ВТР)");
+  eq(lab("2026-02-01", "2026-02-28").season_label, "Зима (до 19:00)", "февруари 2026 (стар ВТР — една зима)");
+  const noLab = { ...raw, seasons: raw.seasons.map((x) => ({ ...x, labels: null })) };
+  eq(resolveSetup(noLab, "2026-11-01", "2026-11-30").season_label, "З1", "без labels → кодът (не празно)");
+});
+
+Deno.test("сектори: setup носи само активните на магазина, подредени", async () => {
+  const r = new MemRepo();
+  const st = resolveSetup(await r.setupRaw("Кърджали"), "2026-11-01", "2026-11-30");
+  eq(st.sectors.map((x) => x.name), ["Каса", "Склад"], "без неактивния и без Шумен");
+});
+
+Deno.test("sector_save: admin и регионалният — да; manager, склад, ТРЗ — не; дубликат → 409", async () => {
+  const r = new MemRepo();
+  const add = async (u: User, store: string, name: unknown) => (await call(r, u, { action: "sector_save", store, name })).body;
+  const a = await add(U.admin, "Кърджали", "  Градина   и   двор ");
+  eq([a.ok, a.sector.name, a.sector.store_name], [true, "Градина и двор", "Кърджали"], "admin; интервалите се свиват");
+  eq((await add(U.regSh, "Шумен", "Бои")).ok, true, "регионален — свой");
+  eq((await add(U.regSh, "Кърджали", "Бои")).reason, "readonly", "регионален — чужд");
+  eq((await add(U.mgrK, "Кърджали", "Бои")).reason, "forbidden", "manager");
+  eq((await add(U.sklK, "Кърджали", "Бои")).reason, "readonly", "склад");
+  eq((await add(U.trz, "Кърджали", "Бои")).reason, "readonly", "ТРЗ");
+  const d = await call(r, U.admin, { action: "sector_save", store: "Кърджали", name: "каса" });
+  eq([d.status, d.body.reason], [409, "duplicate"], "„каса“ при съществуваща „Каса“");
+  eq((await add(U.admin, "Кърджали", "   ")).reason, "bad_request", "празно име");
+  eq((await add(U.admin, "Кърджали", "x".repeat(61))).reason, "bad_request", "над 60 знака");
+  eq(r.audits.filter((x) => x.event === "grafik_sector_create").length, 2, "audit за двата успешни");
+});
+
+Deno.test("staff_save: sector_id само от същия магазин и активен; staff_move го маха", async () => {
+  const r = new MemRepo();
+  const sid = kStaff(r)[0];
+  const save = async (sector_id: unknown) => (await call(r, U.mgrK, { action: "staff_save", store: "Кърджали", id: sid, fields: { sector_id } })).body;
+  eq((await save("5ec00000-0000-4000-8000-000000000002")).staff.sector_id, "5ec00000-0000-4000-8000-000000000002", "свой сектор");
+  eq((await save("5ec00000-0000-4000-8000-000000000004")).message, "Секторът не е от този магазин.", "сектор на Шумен");
+  eq((await save("5ec00000-0000-4000-8000-000000000003")).message, "Секторът не е от този магазин.", "неактивен");
+  eq((await save("5ec00000-0000-4000-8000-0000000000ff")).reason, "bad_request", "несъществуващ");
+  eq((await save(null)).ok, true, "без сектор (null) — позволено");
+  await save("5ec00000-0000-4000-8000-000000000002");
+  const mv = await call(r, U.admin, { action: "staff_move", id: sid, to_store: "Шумен", date: "2026-12-01" });
+  eq([mv.body.staff.store_name, mv.body.staff.sector_id], ["Шумен", undefined], "новият ред в Шумен е без сектора на Кърджали");
 });
 
 Deno.test("HTTP: OPTIONS, GET, лош JSON, непознато действие", async () => {

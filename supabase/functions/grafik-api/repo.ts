@@ -2,7 +2,7 @@
 // Repo на grafik-api върху supabase-js със service ключа. Отделно от index.ts,
 // за да се пуска и от repo.live-test.ts (без Deno.serve при импорт).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { HttpError, type AdminTable, type Repo, type RowRec, type Staff } from "./handler.ts";
+import { HttpError, type AdminTable, type Repo, type RowRec, type Sector, type Staff } from "./handler.ts";
 
 // Само безопасни колони — никога password_hash / history_pin_hash.
 const USER_COLS = "id,email,display_name,store_name,role,is_regional,assigned_stores,active";
@@ -87,7 +87,7 @@ export function makeRepo(): Repo {
       return ok<Staff | null>(await db.from("grafik_staff").update(fields).eq("id", id).select("*").maybeSingle());
     },
     async setupRaw(store) {
-      const [sc, co, te, cd, se, lm, ex] = await Promise.all([
+      const [sc, co, te, cd, se, lm, ex, secs] = await Promise.all([
         db.from("grafik_store_company").select("*").eq("store_name", store),
         db.from("companies").select("id,name,eik,mol,addr"),
         db.from("grafik_company_terms").select("*"),
@@ -95,13 +95,21 @@ export function makeRepo(): Repo {
         db.from("grafik_vtr_seasons").select("*"),
         db.from("grafik_letter_map").select("*"),
         db.from("grafik_extra_days").select("day,store_name,note"),
+        db.from("grafik_sectors").select("id,store_name,name,sort_order,active").eq("store_name", store),
       ]);
       return {
         storeCompany: ok(sc), companies: ok(co), terms: ok(te), codes: ok(cd),
         seasons: ok(se), letterMap: ok(lm),
         // всички обекти (NULL) + този; филтърът е тук, не в .or(), заради имената с интервал
         extraDays: ok<{ day: string; store_name: string | null; note: string | null }[]>(ex).filter((e) => !e.store_name || e.store_name === store),
+        sectors: ok<Sector[]>(secs),
       };
+    },
+    async getSector(id) {
+      return ok<Sector | null>(await db.from("grafik_sectors").select("id,store_name,name,sort_order,active").eq("id", id).maybeSingle());
+    },
+    async insertSector(fields) {
+      return ok<Sector>(await db.from("grafik_sectors").insert(fields).select("id,store_name,name,sort_order,active").single());
     },
     async letterSet() {
       const rows = ok<{ letter: string }[]>(await db.from("grafik_letter_map").select("letter"));

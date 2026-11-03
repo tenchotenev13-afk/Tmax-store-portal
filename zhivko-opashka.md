@@ -14,6 +14,11 @@
 
 ## Чака изпращане
 
+(в базата от миграцията grafik_sectors, grafik-sectors-schema.sql, версия 20261103135820, приложена 03.11.2026; таблиците grafik_* са без anon — виж бележката при grafik_schema)
+- 03.11 · нова таблица grafik_sectors — id uuid, store_name text NOT NULL, name text NOT NULL, sort_order int NOT NULL default 0, active boolean NOT NULL default true, created_at timestamptz NOT NULL default now(), created_by text
+- 03.11 · grafik_staff.sector_id — uuid, NULL, без default
+- 03.11 · grafik_vtr_seasons.labels — jsonb, NULL, без default
+
 (в базата от миграцията grafik_letters_contract, grafik-letters-contract-schema.sql, версия 20261102095558, приложена 02.11.2026; таблицата е без anon — виж бележката при grafik_schema)
 - 02.11 · grafik_letter_map.hours_per_day — numeric(3,1), NULL, без default
 

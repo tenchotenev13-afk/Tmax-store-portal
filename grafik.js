@@ -108,7 +108,20 @@ function grStaffById(id){
   return null;
 }
 function grCanEdit(){ return !!(grData && grData.can_edit); }
-function grSector(s){ return String(s && s.sector || 'без сектор').trim().toUpperCase() || 'БЕЗ СЕКТОР'; }
+/* Секторът е от списъка на магазина (grafik_sectors → setup.sectors) по sector_id.
+   Старият текст от бланката (staff.sector) НЕ се ползва — от него се разпадаше покритието. */
+var GR_NO_SECTOR = 'Без сектор';
+function grSectors(){ return (grData && grData.setup && grData.setup.sectors) || []; }
+function grSectorById(id){
+  var l = grSectors();
+  for(var i = 0; i < l.length; i++) if(l[i].id === id) return l[i];
+  return null;
+}
+function grSector(s){ var x = s && s.sector_id ? grSectorById(s.sector_id) : null; return x ? x.name : GR_NO_SECTOR; }
+/* Пълното име на сезона (grafik_vtr_seasons.labels) — „З1“ се чете като „31“. */
+function grSeasonLabel(setup){ return (setup && (setup.season_label || setup.season)) || '—'; }
+/* Нов сектор — admin и регионалният (сървърът проверява същото). */
+function grCanAddSector(){ return !!grMe && (grMe.kind === 'admin' || grMe.kind === 'regional') && grCanEditStaff(); }
 
 /* ─── Зареждане ────────────────────────────────────────── */
 function loadGrafik(){
@@ -214,7 +227,7 @@ function grGridPageHtml(){
   }
   var off = grCalc.rows.filter(function(r){ return r.diff !== 0; }).length;
   h += '<div class="card" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">' + grStatusBadge() +
-    '<span>Работни дни: <b>' + M.workDays + '</b> · норма <b>' + M.norm + ' ч.</b> · сезон <b>' + escVal(setup.season || '—') + '</b></span>' +
+    '<span>Работни дни: <b>' + M.workDays + '</b> · норма <b>' + M.norm + ' ч.</b> · <b id="gr-season">' + escVal(grSeasonLabel(setup)) + '</b></span>' +
     '<span id="gr-offnorm" style="color:' + (off ? '#dc2626' : '#16a34a') + ';font-weight:600;">' + (off ? off + ' извън нормата' : 'всички на нормата') + '</span>' +
     '<span id="gr-save" style="color:#64748b;font-size:12px;">' + escVal(grSaveState) + '</span><span style="flex:1"></span>';
   if(grCanEdit()){
@@ -251,7 +264,7 @@ function grGridHtml(){
     var warnDays = {};
     x.warnings.forEach(function(w){ (warnDays[w.day] = warnDays[w.day] || []).push(w.text); });
     h += '<tr id="gr-row-' + escAttrVal(s.id) + '"><td>' + (r + 1) + '</td><td style="text-align:left;white-space:nowrap;" title="' + escAttrVal((s.full_name || '') + (s.contract_title ? ' · ' + s.contract_title : '') + (+s.hours_per_day && +s.hours_per_day !== 8 ? ' · ' + s.hours_per_day + ' ч.' : '')) + '">' +
-      escVal(s.short_name || s.full_name) + (+s.hours_per_day && +s.hours_per_day !== 8 ? ' <span style="color:#64748b;">(' + escVal(String(+s.hours_per_day)) + ' ч.)</span>' : '') + '</td><td style="font-size:11px;">' + escVal(s.sector || '') + '</td>';
+      escVal(s.short_name || s.full_name) + (+s.hours_per_day && +s.hours_per_day !== 8 ? ' <span style="color:#64748b;">(' + escVal(String(+s.hours_per_day)) + ' ч.)</span>' : '') + '</td><td style="font-size:11px;">' + escVal(s.sector_id ? grSector(s) : '') + '</td>';
     for(var d = 0; d < M.days; d++){
       var L = row.letters[d] || '', code = x.codes[d] || '', lk = row.locked && row.locked[d + 1];
       var ch = changed[d + 1], w = M.dow[d], hol = M.holiday[d];
@@ -279,7 +292,14 @@ function grCoverage(){
     var L = (grRows[x.staff.id] || { letters: [] }).letters;
     for(var d = 0; d < M.days; d++) if(GR_WORK_LETTERS.indexOf(L[d]) >= 0) sec[k][d]++;
   });
-  order.sort();
+  /* По реда на списъка на магазина; „Без сектор“ — последен. */
+  var pos = {};
+  grSectors().forEach(function(x, i){ pos[x.name] = i; });
+  order.sort(function(a, b){
+    var pa = a === GR_NO_SECTOR ? 1e9 : (pos[a] === undefined ? 1e8 : pos[a]);
+    var pb = b === GR_NO_SECTOR ? 1e9 : (pos[b] === undefined ? 1e8 : pos[b]);
+    return pa - pb || a.localeCompare(b, 'bg');
+  });
   return { order: order, sec: sec };
 }
 function grCoverageHtml(){
@@ -561,10 +581,11 @@ function grStaffHtml(){
   });
   var edit = grCanEditStaff();
   var h = '<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><b>Персонал — ' + escVal(grStore) + '</b><span style="color:#64748b;font-size:12px;">' + list.length + ' души</span><span style="flex:1"></span>' +
+    (grCanAddSector() ? '<button class="btn-sm" onclick="grSectorOpen()" title="Нов сектор в списъка на магазина">➕ Сектор</button>' : '') +
     (edit ? '<button class="btn btn-green" onclick="grStaffOpen(\'\')">➕ Нов служител</button>' : '') + '</div>';
   h += '<div class="tbl-wrap"><table id="gr-staff" class="tbl-compact"><thead><tr><th>Име в графика</th><th>Три имена</th><th>Длъжност</th><th>Позиция</th><th>Сектор</th><th>Ч./ден</th><th>Назначен</th><th>Напуснал</th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>';
   list.forEach(function(s){
-    h += '<tr id="gr-st-' + escAttrVal(s.id) + '" style="' + (s.left_on ? 'color:#94a3b8;' : '') + '"><td>' + escVal(s.short_name) + '</td><td>' + escVal(s.full_name) + '</td><td>' + escVal(s.contract_title || '') + '</td><td>' + escVal(s.position || '') + '</td><td>' + escVal(s.sector || '') + '</td><td>' + escVal(String(+s.hours_per_day || 8)) + '</td><td>' + (s.hired_on ? escVal(fmtDate(s.hired_on)) : '') + '</td><td>' + (s.left_on ? escVal(fmtDate(s.left_on)) : '') + '</td>' +
+    h += '<tr id="gr-st-' + escAttrVal(s.id) + '" style="' + (s.left_on ? 'color:#94a3b8;' : '') + '"><td>' + escVal(s.short_name) + '</td><td>' + escVal(s.full_name) + '</td><td>' + escVal(s.contract_title || '') + '</td><td>' + escVal(s.position || '') + '</td><td>' + escVal(s.sector_id ? grSector(s) : '') + '</td><td>' + escVal(String(+s.hours_per_day || 8)) + '</td><td>' + (s.hired_on ? escVal(fmtDate(s.hired_on)) : '') + '</td><td>' + (s.left_on ? escVal(fmtDate(s.left_on)) : '') + '</td>' +
       (edit ? '<td><button class="btn-sm" onclick="grStaffOpen(\'' + escAttrVal(s.id) + '\')">✏️</button></td>' : '') + '</tr>';
   });
   if(!list.length) h += '<tr><td colspan="9" style="color:#64748b;padding:12px;">Няма въведен персонал.</td></tr>';
@@ -579,7 +600,7 @@ function grStaffOpen(id){
   if(!grCanEditStaff()) return;
   var s = id ? grStaffById(id) : null;
   if(id && !s) return;
-  s = s || { short_name: '', full_name: '', contract_title: '', position: '', sector: '', hours_per_day: 8, hired_on: '', left_on: '', note: '', sort_order: ((grData.staff || []).length + 1) * 10 };
+  s = s || { short_name: '', full_name: '', contract_title: '', position: '', sector_id: null, hours_per_day: 8, hired_on: '', left_on: '', note: '', sort_order: ((grData.staff || []).length + 1) * 10 };
   var old = document.getElementById('gr-staff-modal');
   if(old) old.parentNode.removeChild(old);
   var f = function(lbl, inner){ return '<label style="display:block;margin:6px 0;font-size:13px;">' + lbl + '<br>' + inner + '</label>'; };
@@ -589,7 +610,9 @@ function grStaffOpen(id){
     f('Три имена (по документ) *', inp('gr-sf-full', s.full_name)) +
     f('Длъжност по договор', inp('gr-sf-title', s.contract_title)) +
     f('Позиция в графика', '<select id="gr-sf-pos" style="width:100%;"><option value=""></option>' + GR_POSITIONS.map(function(p){ return '<option' + (p === s.position ? ' selected' : '') + '>' + escVal(p) + '</option>'; }).join('') + '</select>') +
-    f('Сектор', inp('gr-sf-sector', s.sector)) +
+    f('Сектор', '<select id="gr-sf-sector" style="width:100%;"><option value="">— без сектор —</option>' + grSectors().map(function(x){
+      return '<option value="' + escAttrVal(x.id) + '"' + (x.id === s.sector_id ? ' selected' : '') + '>' + escVal(x.name) + '</option>';
+    }).join('') + '</select>' + (s.sector && !s.sector_id ? '<span style="font-size:11px;color:#64748b;">в бланката: ' + escVal(s.sector) + '</span>' : '')) +
     f('Часове по договор на ден', '<select id="gr-sf-hpd" style="width:100%;">' + [8, 7, 6, 5, 4].map(function(n){ return '<option value="' + n + '"' + (+s.hours_per_day === n ? ' selected' : '') + '>' + n + '</option>'; }).join('') + '</select>') +
     f('Назначен на', inp('gr-sf-hired', s.hired_on || '', 'date')) +
     f('Напуснал на', inp('gr-sf-left', s.left_on || '', 'date')) +
@@ -602,7 +625,7 @@ function grStaffSave(id){
   var v = function(k){ var e = document.getElementById(k); return e ? String(e.value).trim() : ''; };
   var fields = {
     short_name: v('gr-sf-short'), full_name: v('gr-sf-full'), contract_title: v('gr-sf-title') || null,
-    position: v('gr-sf-pos') || null, sector: v('gr-sf-sector') || null, hours_per_day: +v('gr-sf-hpd') || 8,
+    position: v('gr-sf-pos') || null, sector_id: v('gr-sf-sector') || null, hours_per_day: +v('gr-sf-hpd') || 8,
     hired_on: v('gr-sf-hired') || null, left_on: v('gr-sf-left') || null, note: v('gr-sf-note') || null, sort_order: parseInt(v('gr-sf-sort'), 10) || 0
   };
   if(!fields.short_name || !fields.full_name){ toast('Име в графика и три имена са задължителни.', '#dc2626'); return; }
@@ -613,6 +636,31 @@ function grStaffSave(id){
     if(!res.ok){ toast('Не е записан: ' + grErrText(res), '#dc2626'); return; }
     closeModal('gr-staff-modal');
     toast(id ? 'Служителят е обновен.' : 'Служителят е добавен.');
+    return grLoadMonth();
+  });
+}
+
+/* ─── Нов сектор (admin / регионален) ──────────────────── */
+function grSectorOpen(){
+  if(!grCanAddSector()) return;
+  var old = document.getElementById('gr-sector-modal');
+  if(old) old.parentNode.removeChild(old);
+  var have = grSectors().map(function(x){ return escVal(x.name); }).join(', ') || 'няма';
+  document.body.insertAdjacentHTML('beforeend', '<div class="modal-bg open" id="gr-sector-modal"><div class="modal"><h3>➕ Нов сектор — ' + escVal(grStore) + '</h3>' +
+    '<div class="modal-sub" style="font-size:12px;">Сега: ' + have + '</div>' +
+    '<label style="display:block;margin:6px 0;font-size:13px;">Име<br><input id="gr-sec-name" type="text" maxlength="60" style="width:100%;"></label>' +
+    '<div class="modal-actions"><button class="btn" onclick="closeModal(\'gr-sector-modal\')">Откажи</button><button class="btn btn-green" onclick="grSectorSave()">Добави</button></div></div></div>');
+}
+function grSectorSave(){
+  var el = document.getElementById('gr-sec-name');
+  var name = el ? String(el.value).trim().replace(/\s+/g, ' ') : '';
+  if(!name){ toast('Въведи име на сектора.', '#dc2626'); return; }
+  var dup = grSectors().some(function(x){ return x.name.toLowerCase() === name.toLowerCase(); });
+  if(dup){ toast('Секторът „' + name + '“ вече го има.', '#dc2626'); return; }
+  return grApi('sector_save', { store: grStore, name: name }).then(function(res){
+    if(!res.ok){ toast('Не е добавен: ' + grErrText(res), '#dc2626'); return; }
+    closeModal('gr-sector-modal');
+    toast('Секторът „' + name + '“ е добавен.');
     return grLoadMonth();
   });
 }

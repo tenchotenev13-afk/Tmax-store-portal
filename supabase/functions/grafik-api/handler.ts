@@ -38,10 +38,12 @@ export type SetupRaw = {
   companies: { id: string; name: string | null; eik: string | null; mol: string | null; addr: string | null }[];
   terms: (Dated & { id: string; company_id: string; vtr_id: string; approver: string })[];
   codes: (Dated & { vtr_id: string; code: string; hours: number | null; kind: string; seasons: string[] | null; legend: string | null; sort_order: number })[];
-  seasons: (Dated & { vtr_id: string; months: Record<string, string> })[];
+  seasons: (Dated & { vtr_id: string; months: Record<string, string>; labels?: Record<string, string> | null })[];
   letterMap: (Dated & { vtr_id: string; letter: string; day_kind: string; code: string; hours_per_day?: number | null })[];
   extraDays: { day: string; store_name: string | null; note: string | null }[];
+  sectors?: Sector[];
 };
+export type Sector = { id: string; store_name: string; name: string; sort_order: number; active: boolean };
 export type AdminTable = "companies" | "grafik_company_terms" | "grafik_store_company" | "grafik_extra_days" | "grafik_letter_map";
 
 export interface Repo {
@@ -62,6 +64,8 @@ export interface Repo {
   updateStaff(id: string, fields: Record<string, unknown>): Promise<Staff | null>;
   setupRaw(store: string): Promise<SetupRaw>;
   letterSet(): Promise<string[]>;
+  getSector(id: string): Promise<Sector | null>;
+  insertSector(fields: Record<string, unknown>): Promise<Sector>;
   adminList(table: AdminTable): Promise<unknown[]>;
   adminInsert(table: AdminTable, fields: Record<string, unknown>): Promise<unknown>;
   adminUpdate(table: AdminTable, id: string, fields: Record<string, unknown>): Promise<unknown | null>;
@@ -137,9 +141,13 @@ export function resolveSetup(raw: SetupRaw, start: string, end: string) {
     approver: term ? term.approver : null,
     vtr_id: vtr,
     season: seasonRow ? seasonRow.months[mo] || null : null,
+    // Пълното име за екрана (grafik_vtr_seasons.labels) — „З1“ се чете като „31“. Кодът остава вътрешен.
+    season_label: seasonRow && seasonRow.months[mo] ? ((seasonRow.labels && seasonRow.labels[seasonRow.months[mo]]) || seasonRow.months[mo]) : null,
     codes: vtr ? raw.codes.filter((c) => c.vtr_id === vtr && validAt(c, start)).sort((a, b) => a.sort_order - b.sort_order) : [],
     letter_map: vtr ? raw.letterMap.filter((l) => l.vtr_id === vtr && validAt(l, start)).map((l) => ({ letter: l.letter, day_kind: l.day_kind, code: l.code, hours_per_day: l.hours_per_day ?? null })) : [],
     extra_days: raw.extraDays.filter((e) => e.day >= start && e.day <= end),
+    sectors: (raw.sectors || []).filter((x) => x.active).sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name, "bg"))
+      .map((x) => ({ id: x.id, name: x.name, sort_order: x.sort_order })),
     missing,
   };
 }
@@ -171,7 +179,15 @@ function isObj(v: unknown): v is Record<string, unknown> {
 }
 
 // Бели списъци.
-export const STAFF_FIELDS = ["short_name", "full_name", "contract_title", "position", "sector", "hours_per_day", "hired_on", "left_on", "sort_order", "note"] as const;
+// sector — старият текст от бланката (история на импорта); екранът пише sector_id (grafik_sectors).
+export const STAFF_FIELDS = ["short_name", "full_name", "contract_title", "position", "sector", "sector_id", "hours_per_day", "hired_on", "left_on", "sort_order", "note"] as const;
+
+// Секторът трябва да е от същия магазин и активен.
+async function checkSector(repo: Repo, v: unknown, store: string): Promise<void> {
+  if (v === undefined || v === null) return;
+  const sec = await repo.getSector(uuid(v, "sector_id"));
+  if (!sec || sec.store_name !== store || !sec.active) throw new HttpError(400, "bad_request", "Секторът не е от този магазин.");
+}
 export const ADMIN_FIELDS: Record<AdminTable, readonly string[]> = {
   companies: ["name", "eik", "mol", "addr"],
   grafik_company_terms: ["company_id", "vtr_id", "approver", "valid_from", "valid_to"],
@@ -324,6 +340,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
     case "staff_save": {
       const store = await needStore(repo, acc, b.store, "edit");
       const fields = pick(b.fields, STAFF_FIELDS);
+      await checkSector(repo, fields.sector_id, store);
       if (b.id === undefined || b.id === null) {
         if (typeof fields.short_name !== "string" || !fields.short_name.trim() || typeof fields.full_name !== "string" || !fields.full_name.trim()) {
           throw new HttpError(400, "bad_request", "Име за графика и три имена са задължителни.");
@@ -352,7 +369,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const leftOn = new Date(d.getTime() - 86400000).toISOString().slice(0, 10);
       await repo.updateStaff(id, { left_on: leftOn, updated_by: acc.email, updated_at: new Date().toISOString() });
       const copy: Record<string, unknown> = {};
-      for (const k of STAFF_FIELDS) if (k !== "left_on" && k !== "hired_on" && cur[k] !== undefined) copy[k] = cur[k];
+      for (const k of STAFF_FIELDS) if (k !== "left_on" && k !== "hired_on" && k !== "sector_id" && cur[k] !== undefined) copy[k] = cur[k];   // секторът е на стария магазин
       const s = await repo.insertStaff({ ...copy, store_name: to, hired_on: b.date, prev_staff_id: id, created_by: acc.email, updated_by: acc.email });
       await audit(repo, acc, "grafik_staff_move", to, { from_id: id, from_store: cur.store_name, to_id: s.id, date: b.date });
       return { staff: s };
@@ -439,6 +456,23 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       if (!ok) throw new HttpError(409, "not_submitted", "Графикът не е подаден.");
       await audit(repo, acc, "grafik_reopen", store, { month: m.start, was_submitted_by: month.submitted_by, was_submitted_at: month.submitted_at });
       return { status: "draft" };
+    }
+
+    case "sector_save": {
+      // Нов сектор в списъка на магазина — admin или регионалният за своя обект.
+      const store = await needStore(repo, acc, b.store, "edit");
+      if (acc.kind !== "admin" && acc.kind !== "regional") throw new HttpError(403, "forbidden", "Сектор добавят регионалният и admin.");
+      const name = typeof b.name === "string" ? b.name.trim().replace(/\s+/g, " ") : "";
+      if (!name || name.length > 60) throw new HttpError(400, "bad_request", "Име на сектора: от 1 до 60 знака.");
+      const sort = typeof b.sort_order === "number" && isFinite(b.sort_order) ? Math.round(b.sort_order) : 500;
+      let sec: Sector;
+      try { sec = await repo.insertSector({ store_name: store, name, sort_order: sort, created_by: acc.email }); }
+      catch (e) {
+        if (e instanceof HttpError && e.reason === "db_constraint") throw new HttpError(409, "duplicate", "Секторът „" + name + "“ вече го има в този магазин.");
+        throw e;
+      }
+      await audit(repo, acc, "grafik_sector_create", store, { id: sec.id, name });
+      return { sector: sec };
     }
 
     case "overview": {
