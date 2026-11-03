@@ -1,6 +1,10 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v65 (03.11.2026) — ЕДНО нещо: „Стока на път“ без архива — заявката към
+      goods_transit е с archived_at=is.null (етап 1 на „Стока на път“: импортът
+      архивира редовете, чието ВД го няма в новия файл). Копие от report.js.
+
    v64 (01.11.2026) — ЕДНО нещо: „Минуси — повтарящи се артикули“ (minus_multi) носи
       и „Общи проблеми в няколко обекта (за <minus_multi_days> дни, до нд <дд.мм>)“ —
       след повтарящите се, същият прозорец, само 955, само minus_stores: артикули с
@@ -2917,7 +2921,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
     /* Отворените позиции, БЕЗ филтър по created_at - той е датата на SAP
        импорта, не възрастта на позицията (виж пресмятането по-долу). */
-    reportGetAll('goods_transit','status=in.(pending,sent)&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name&order=id.asc'),
+    reportGetAll('goods_transit','status=in.(pending,sent)&archived_at=is.null&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name&order=id.asc'),
     sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
     sbGet('users','select=store_name&order=store_name'),
     /* Прагът за „застояла" — една заявка вътре в колектора. Функцията се

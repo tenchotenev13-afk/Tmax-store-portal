@@ -661,7 +661,7 @@ function mnLoadUr(seq){
   if(!stores.length){ mnUrTransit = {}; mnUrDiff = {}; mnUrErr = false; return Promise.resolve(); }
   var inS = 'store_name=in.(' + stores.map(function(s){ return '"' + encodeURIComponent(s) + '"'; }).join(',') + ')';
   return Promise.all([
-    sbGetAll('goods_transit', 'select=id,store_name,material_code,purchase_doc,doc_date,remaining_qty,unit,status&status=in.(' + MN_UR_TRANSIT.join(',') + ')&' + inS + '&order=doc_date.asc,id.asc'),
+    sbGetAll('goods_transit', 'select=id,store_name,material_code,purchase_doc,doc_date,remaining_qty,unit,status&archived_at=is.null&status=in.(' + MN_UR_TRANSIT.join(',') + ')&' + inS + '&order=doc_date.asc,id.asc'),
     sbGetAll('stock_differences', 'select=id,store_name,material_code,quantity,quantity_received,difference_category,status,created_at,differences_reports!inner(direction,doc_date)' +
       '&differences_reports.direction=eq.interstore&status=neq.received&' + inS + '&order=created_at.asc,id.asc')
   ]).then(function(rs){

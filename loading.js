@@ -1808,7 +1808,7 @@ function llAutoCloseDoc(d){
     return Promise.resolve();
   }
   var f = 'purchase_doc=eq.'+encodeURIComponent(d.doc)+
-          '&store_name=eq.'+encodeURIComponent(d.store)+'&status=eq.pending';
+          '&store_name=eq.'+encodeURIComponent(d.store)+'&status=eq.pending&archived_at=is.null';
   /* Първо ПИТАМЕ има ли какво да се затваря. sbPatch праща
      Prefer: return=minimal без count=exact, тоест res.count е null и "нула
      засегнати реда" е неразличимо от успех - а документ, който вече не е
@@ -2731,7 +2731,7 @@ function llLoadEditorData(){
     llProductsOn = f.products;
     return Promise.all([
       f.transitDocs
-        ? llTransitGetAll('supplier=eq.' + encodeURIComponent(wh) + '&status=eq.pending' +
+        ? llTransitGetAll('supplier=eq.' + encodeURIComponent(wh) + '&status=eq.pending&archived_at=is.null' +
             '&select=purchase_doc,store_name,doc_date,created_at,material_code,material_name,ordered_qty,remaining_qty,unit,position')
             .catch(function(e){
               /* Снимката не се зареди — казва се, вместо да изглежда като „няма

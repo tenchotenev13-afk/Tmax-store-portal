@@ -1940,7 +1940,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
     sbGet('kasa_zoborot','date=gte.'+W.fromISO+upDate+'&select=store_name,status'),
     /* Отворените позиции, БЕЗ филтър по created_at - той е датата на SAP
        импорта, не възрастта на позицията (виж пресмятането по-долу). */
-    reportGetAll('goods_transit','status=in.(pending,sent)&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name&order=id.asc'),
+    reportGetAll('goods_transit','status=in.(pending,sent)&archived_at=is.null&select=store_name,supplier,doc_date,status,direction,remaining_qty,unit,material_name&order=id.asc'),
     sbGet('transport_pallets','order=report_date.desc&select=store_name,report_date'),
     sbGet('users','select=store_name&order=store_name'),
     /* Прагът за „застояла" — една заявка вътре в колектора. Функцията се

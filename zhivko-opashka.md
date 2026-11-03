@@ -17,6 +17,14 @@
 (в базата от миграцията grafik_letters_contract, grafik-letters-contract-schema.sql, версия 20261102095558, приложена 02.11.2026; таблицата е без anon — виж бележката при grafik_schema)
 - 02.11 · grafik_letter_map.hours_per_day — numeric(3,1), NULL, без default
 
+(transit-vd-schema.sql — ЧАКА apply_migration; номерът на версията се дописва след прилагането)
+- 03.11 · goods_transit.inbound_delivery — text, NULL, без default (ВД)
+- 03.11 · goods_transit.outbound_delivery — text, NULL, без default (ИД, без водещите нули)
+- 03.11 · goods_transit.delivery_position — text, NULL, без default (позиция в доставката)
+- 03.11 · goods_transit.delivery_qty — numeric, NULL, без default
+- 03.11 · goods_transit.archived_at — timestamptz, NULL, без default
+- 03.11 · goods_transit — уникалност (inbound_delivery, delivery_position); NULL-ите не се сблъскват (ръчните редове са без ВД). Нужна е за UPSERT-а на импорта.
+
 ## Изпратено 02.11.2026
 
 Живко моли (02.11) промените, близки по време, да се събират в един имейл; спешните — веднага.

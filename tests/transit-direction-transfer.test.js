@@ -114,8 +114,18 @@ const byDoc = (rows, doc) => rows.filter(r => r.purchase_doc === doc)[0];
 
   section('в) Прегледът и истинският клик „Импортирай"');
   {
+    /* От 03.11.2026 импортът иска и файла „ВД и ИД" (transit-vd-import.test.js);
+       тук той само дава ВД на четирите реда — посоката идва от файл 1. */
+    const VD = [['Доставка', 'Позиция', 'Материал', 'Описание на позиция', 'К-во по доставка',
+      'Ед. за измерв. прод.', 'СтатусДвижениеСтоки', 'Пункт експ./пункт получав.', 'Доставчик',
+      'Име на доставчик', 'Документ за покупка', 'Външен идентиф. на доставка', 'Дата на дос. (от/к.)']]
+      .concat(ROWS.slice(1).map((r, i) => ['18000000' + i, '10', r[11], '', 10, 'бр.', 'A', '', '', '', r[3], '008000000' + i, '']));
     const h = env();
-    guard('parseTransitRows()', () => h.w.parseTransitRows(ROWS));
+    h.w.openTransitImportModal();
+    h.w.transitImportSetFile('Стока на път.xlsx', ROWS);
+    h.w.transitImportSetFile('ВД и ИД.xlsx', VD);
+    await h.w.transitImportPrepare();
+    await ticks();
     const ov = h.doc.getElementById('transit-import-ov');
     if (ok('прегледът се отваря', !!ov)) {
       const txt = ov.textContent;
@@ -127,6 +137,7 @@ const byDoc = (rows, doc) => rows.filter(r => r.purchase_doc === doc)[0];
       if (ok('бутонът „Импортирай" съществува', !!imp)) {
         realClick(h.w, imp, 'Импортирай');
         await ticks();
+        await ticks(10);
         const post = h.posts.filter(p => /goods_transit/.test(p.url))[0];
         if (ok('кликът праща POST към goods_transit', !!post, h.posts.map(p => p.url).join(' | '))) {
           const body = JSON.parse(post.body);

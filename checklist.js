@@ -670,7 +670,7 @@ function checklistModuleId(metric) {
 var CHECKLIST_MODULE_FILL = {
   transit: {
     table: 'goods_transit',
-    query: 'select=store_name,direction,status,reviewed_at',
+    query: 'select=store_name,direction,status,reviewed_at&archived_at=is.null',
     value: function (rows) { return checklistTransitValue(rows); }
   },
   /* Само source='diff' (изтегляне по разлики). Рекламациите и срокът на

@@ -1384,7 +1384,7 @@ function bulLoadTransitPending(){
   sbGet('goods_transit','store_name=eq.'+encodeURIComponent(currentUser.store_name)+winQ+
         /* NULL статус е „необработен" — както coalesce(status,'pending') в
            transit_store_done и броячът в transit.js. */
-        '&direction=eq.incoming&or=(status.eq.pending,status.is.null)&reviewed_at=is.null&select=id').then(function(rows){
+        '&direction=eq.incoming&or=(status.eq.pending,status.is.null)&reviewed_at=is.null&archived_at=is.null&select=id').then(function(rows){
     if(!Array.isArray(rows)) return;
     bulAutoPending['transit-auto']=rows.length;
     renderBulletin();

@@ -10,6 +10,10 @@ var transitSearch = ''; /* търсене по документ / SAP код / �
 var _transitPendingScrollY = null; /* мост между loadTransit() и renderTransit() за запазване на скрола */
 var _transitSearchTimer = null;
 var _transitVisible = []; /* показаният списък след филтрите — за „Провери всички чакащи" */
+/* Архивът (archived_at, етап 1 от 03.11.2026): редове, чието ВД го няма в
+   последния импорт. Държат се ОТДЕЛНО от transitData, за да не влизат в нито
+   един брояч, банер или таб — виждат се само през чипа „🗄 Архив". */
+var transitArchive = [];
 
 /* ── PLANT MAPPING ── */
 var PLANT_INCOMING = {
@@ -178,7 +182,7 @@ function loadTransit(){
     storeFilter='&or=(store_name.eq.'+se+',and(direction.eq.transfer,supplier.eq.'+se+'))';
   }
 
-  transitData=[];
+  transitData=[]; transitArchive=[];
   var SB_URL='https://xiwkdiqqplgdcrkewgtv.supabase.co';
   var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
 
@@ -219,9 +223,24 @@ function loadTransit(){
   loadPage(0);
 }
 
+/* Изважда архивираните редове от transitData в transitArchive. Вика се при
+   всяко рисуване — идемпотентно, тоест няма значение откъде е дошъл редът. */
+function transitSplitArchive(){
+  if(!transitData.some(function(r){return !!r.archived_at;})) return;
+  transitArchive=transitArchive.concat(transitData.filter(function(r){return !!r.archived_at;}));
+  transitData=transitData.filter(function(r){return !r.archived_at;});
+}
+
+/* ИД се пази без водещите нули (0080472987 → 80472987); търсенето реже и
+   въведеното, тоест ИД се намира и с нулите, и без тях. */
+function transitStripZeros(v){
+  return String(v==null?'':v).trim().replace(/^0+/,'');
+}
+
 /* ── RENDER ── */
 function renderTransit(){
   var wrap=document.getElementById('mod-transit');if(!wrap)return;
+  transitSplitArchive();
   transitApplyOpenFocus();
   /* Ако полето за търсене е фокусирано в момента, запазваме позицията на
      курсора, за да не губи фокус потребителят на всяка натисната буква
@@ -265,11 +284,13 @@ function renderTransit(){
     _matchByStoreName=_ownCount>=_asSupplierCount;
   }
   var _q=transitSearch?transitSearch.trim().toLowerCase():'';
+  var _qId=transitStripZeros(_q); /* само нули („00") → празно, не съвпада с всичко */
   function transitRows(over){
     over=over||{};
     var dir=over.dir!==undefined?over.dir:transitDir;
     var status=over.status!==undefined?over.status:transitFilter;
-    var rows=transitData;
+    /* „🗄 Архив" сменя ИЗТОЧНИКА, не е статус: останалите филтри важат и там. */
+    var rows=status==='archive'?transitArchive:transitData;
     if(dir==='incoming'||dir==='transfer'||dir==='outgoing') rows=rows.filter(function(r){return r.direction===dir;});
     if(status==='pending'||status==='received'||status==='rejected'||status==='sent') rows=rows.filter(function(r){return r.status===status;});
     else if(status==='mine') rows=rows.filter(transitAwaitsMyReceive);
@@ -291,7 +312,9 @@ function renderTransit(){
       rows=rows.filter(function(r){
         return (r.purchase_doc&&String(r.purchase_doc).toLowerCase().indexOf(_q)>=0)
             || (r.material_code&&String(r.material_code).toLowerCase().indexOf(_q)>=0)
-            || (r.material_name&&String(r.material_name).toLowerCase().indexOf(_q)>=0);
+            || (r.material_name&&String(r.material_name).toLowerCase().indexOf(_q)>=0)
+            || (r.inbound_delivery&&String(r.inbound_delivery).toLowerCase().indexOf(_q)>=0)
+            || (_qId&&r.outbound_delivery&&transitStripZeros(r.outbound_delivery).indexOf(_qId)>=0);
       });
     }
     return rows;
@@ -315,7 +338,8 @@ function renderTransit(){
   }
   if(isAdmin){
     h+='<button onclick="exportTransitExcel()" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📊 Експорт Excel</button>';
-    h+='<button onclick="confirmClearTransit()" style="border:1px solid #dc2626;background:#fff5f5;color:#dc2626;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">🗑 Изчисти всички</button>';
+    /* „🗑 Изчисти всички" е махнат (етап 1, 03.11.2026): импортът сверява по
+       ВД и архивира липсващите, таблицата вече не се изчиства. */
   }
   h+='</div></div>';
 
@@ -338,7 +362,8 @@ function renderTransit(){
   /* „📥 Чакат мен" — само за обекта и ВИНАГИ (и при 0): филтрите не изчезват според данните. */
   var tChips=[['pending','⏳ Не доставени',''],['sent','📤 Изпратена','']];
   if(!isGlobal()) tChips.push(['mine','📥 Чакат мен','']);
-  tChips.concat([['|'],['received','✅ Прието',' chip-hist'],['rejected','✕ Неприето',' chip-hist'],['all','Всички',' chip-hist']]).forEach(function(f){
+  /* „🗄 Архив" — винаги, и при 0 (същото правило като „📥 Чакат мен"). */
+  tChips.concat([['|'],['received','✅ Прието',' chip-hist'],['rejected','✕ Неприето',' chip-hist'],['all','Всички',' chip-hist'],['archive','🗄 Архив',' chip-hist']]).forEach(function(f){
     if(f[0]==='|'){h+='<span class="chips-sep"></span>';return;}
     var a=transitFilter===f[0];
     var cnt=transitRows({status:f[0]}).length;
@@ -371,15 +396,21 @@ function renderTransit(){
      прерисува таблицата на всяка буква; фокусът/курсорът се пазят от
      логиката горе/долу в renderTransit(). */
   h+='<div style="margin-bottom:12px;position:relative;max-width:340px;">';
-  h+='<input type="text" id="t-search" placeholder="🔍 Търси по документ, SAP код, описание..." value="'+escVal(transitSearch)+'" oninput="setTSearch(this.value)" style="width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:7px 32px 7px 10px;font-size:12.5px;font-family:inherit;">';
+  h+='<input type="text" id="t-search" placeholder="🔍 Търси по документ, ВД, ИД, SAP код, описание..."value="'+escVal(transitSearch)+'" oninput="setTSearch(this.value)" style="width:100%;box-sizing:border-box;border:1px solid #e2e8f0;border-radius:8px;padding:7px 32px 7px 10px;font-size:12.5px;font-family:inherit;">';
   if(transitSearch){
     h+='<button onclick="setTSearch(\'\');document.getElementById(\'t-search\').value=\'\';" style="position:absolute;right:6px;top:50%;transform:translateY(-50%);border:none;background:none;color:#94a3b8;cursor:pointer;font-size:14px;padding:2px 6px;">✕</button>';
   }
   h+='</div>';
 
-  _transitVisible=list;
+  /* Архивът е само за четене — не влиза и в „Провери всички чакащи". */
+  var inArchive=transitFilter==='archive';
+  _transitVisible=inArchive?[]:list;
   h+=transitStoreBannerHtml();
-  h+=tReviewCounterHtml(list);
+  h+=tReviewCounterHtml(_transitVisible);
+  if(inArchive){
+    h+='<div id="t-archive-note" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;margin-bottom:8px;font-size:12px;color:#64748b;">'+
+      '🗄 Архив: редове, чиято доставка (ВД) я няма в последния импорт от SAP. Само за четене; появи ли се ВД-то пак, редът се връща сам.</div>';
+  }
 
   /* Таблица */
   if(!list.length){
@@ -408,6 +439,8 @@ function renderTransit(){
       h+='<td style="padding:7px 8px;">'+
         '<div style="font-family:DM Mono,monospace;font-size:11px;word-break:break-word;">'+esc(r.purchase_doc||'')+'</div>'+
         '<div style="font-size:10px;color:#94a3b8;">Поз. '+(r.position||'—')+'</div>'+
+        (r.inbound_delivery?'<div class="t-vd" style="font-family:DM Mono,monospace;font-size:10.5px;color:#334155;margin-top:2px;white-space:nowrap;"><b style="font-family:inherit;color:#64748b;">ВД</b> '+esc(r.inbound_delivery)+(r.delivery_position?'<span style="color:#94a3b8;"> · '+esc(r.delivery_position)+'</span>':'')+'</div>':'')+
+        (r.outbound_delivery?'<div class="t-id" style="font-family:DM Mono,monospace;font-size:10.5px;color:#334155;white-space:nowrap;"><b style="font-family:inherit;color:#64748b;">ИД</b> '+esc(transitStripZeros(r.outbound_delivery))+'</div>':'')+
         '<div style="font-family:DM Mono,monospace;font-size:11px;color:#94a3b8;margin-top:2px;">'+fmtDate(r.doc_date)+'</div>'+
         '<div style="margin-top:3px;">'+
         (isOut?
@@ -423,20 +456,24 @@ function renderTransit(){
       /* 3. Описание (реже се с …) + код */
       h+='<td style="padding:7px 8px;overflow:hidden;"><div style="font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.material_name||'')+'">'+esc(r.material_name||'')+'</div><div style="font-size:10px;color:#94a3b8;">'+esc(r.material_code||'')+'</div></td>';
       /* 4. Количество + остатък + дата на трансфер */
-      h+='<td style="padding:7px 8px;white-space:nowrap;">'+(r.ordered_qty||'')+'<span style="font-size:10px;color:#94a3b8;margin-left:2px;">'+esc(r.unit||'')+'</span>'+
+      /* Основното количество е „К-во по доставка" (ВД); ред без ВД — поръчаното. */
+      h+='<td style="padding:7px 8px;white-space:nowrap;">'+(r.delivery_qty!=null?r.delivery_qty:(r.ordered_qty||''))+'<span style="font-size:10px;color:#94a3b8;margin-left:2px;">'+esc(r.unit||'')+'</span>'+
         (r.remaining_qty?'<div style="font-size:10px;color:#64748b;font-weight:600;">остатък '+r.remaining_qty+'</div>':'')+
         (r.transfer_date?'<div style="font-family:DM Mono,monospace;font-size:10px;color:#94a3b8;">'+fmtDate(r.transfer_date)+'</div>':'')+'</td>';
       /* 5. Статус */
       h+='<td style="padding:7px 8px;">'+
           '<span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">'+st.label+'</span>'+
           tReviewedBadgeHtml(r)+
+          (r.archived_at?'<div class="t-archived" style="font-size:10px;color:#64748b;font-weight:600;margin-top:2px;white-space:nowrap;">🗄 архив '+fmtDate(String(r.archived_at).slice(0,10))+'</div>':'')+
           (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.comment)+'">'+esc(r.comment)+'</div>':'')+
         '</td>';
       /* 6. Действия — същите бутони и условия като преди. Сглобяват се ВЕДНЪЖ и
          отиват или в колоната (широк екран), или в под-реда (тесен). */
       var actFrom=h.length;
+      /* Архивиран ред — само за четене: никакви бутони (canEdit/isAdmin = false за реда). */
+      var rowCanEdit=canEdit&&!r.archived_at, rowIsAdmin=isAdmin&&!r.archived_at;
       h+='<div style="display:flex;flex-wrap:wrap;gap:3px;">';
-      if(canEdit&&isTransfer){
+      if(rowCanEdit&&isTransfer){
         /* Двустъпков поток: pending→sent само подателят, sent→received само получателят */
         if(r.status==='pending'){
           if(transitCanMarkSent(r)){
@@ -461,7 +498,7 @@ function renderTransit(){
           h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">↩ Върни</button>';
         }
       }
-      if(canEdit&&!isTransfer&&r.status==='pending'){
+      if(rowCanEdit&&!isTransfer&&r.status==='pending'){
         if(isOut){
           h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'sent\')" style="border:none;background:#7c3aed;color:#fff;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap;">📤 Изпратена</button>';
         } else {
@@ -472,13 +509,13 @@ function renderTransit(){
           h+='<button data-id="'+r.id+'" onclick="tMarkReviewed(this.dataset.id)" style="border:1px solid #0369a1;background:#f0f9ff;color:#0369a1;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">👁 Проверено, не е пристигнало</button>';
         }
       }
-      if(canEdit&&!isTransfer&&r.status!=='pending'){
+      if(rowCanEdit&&!isTransfer&&r.status!=='pending'){
         h+='<button data-id="'+r.id+'" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="border:1px solid #94a3b8;background:#fff;color:#334155;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">↩ Върни</button>';
       }
-      if(canEdit){
+      if(rowCanEdit){
         h+='<button data-id="'+r.id+'" onclick="openTransitEdit(this.dataset.id)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">✏️ Редакция</button>';
       }
-      if(isAdmin){
+      if(rowIsAdmin){
         h+='<button data-id="'+r.id+'" onclick="tDelete(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#94a3b8;border-radius:5px;padding:4px 6px;font-size:10.5px;cursor:pointer;">✕</button>';
       }
       h+='</div>';
@@ -491,7 +528,7 @@ function renderTransit(){
       }
     });
     h+='</tbody></table></div>';
-    h+='<div style="font-size:12px;color:#94a3b8;margin-top:8px;">Показани '+list.length+' от '+transitData.length+' записа.</div>';
+    h+='<div style="font-size:12px;color:#94a3b8;margin-top:8px;">Показани '+list.length+' от '+(inArchive?transitArchive:transitData).length+' записа'+(inArchive?' в архива':'')+'.</div>';
   }
   h+='</div>';
   h+=transitModalHtml();
@@ -554,7 +591,7 @@ function tMarkStatus(id,status){
    решава дали задачата „Стока на път" е изпълнена (transit_store_done в
    transit-reviewed-schema.sql). Проверява получателят (или офисът). */
 function tCanReview(r){
-  return !!r&&canEditTransit()&&r.direction==='incoming'&&(r.status||'pending')==='pending'&&
+  return !!r&&!r.archived_at&&canEditTransit()&&r.direction==='incoming'&&(r.status||'pending')==='pending'&&
          (isGlobal()||transitIsReceiverOf(r));
 }
 function tReviewedBadgeHtml(r){
@@ -655,24 +692,6 @@ function tDelete(id){
   });
 }
 
-/* ── ИЗЧИСТИ ВСИЧКИ (admin) ── */
-function confirmClearTransit(){
-  if(currentUser.role!=='admin'){toast('Само за admin','#dc2626');return;}
-  if(!confirm('ВНИМАНИЕ: Ще се изтрият ВСИЧКИ записи в Стока на път!\n\nПродължи ли?'))return;
-  if(!confirm('Потвърди повторно — това е необратимо!'))return;
-  /* Изтриваме на batch-ове — sbDelete без id изтрива всичко */
-  fetch('https://xiwkdiqqplgdcrkewgtv.supabase.co/rest/v1/goods_transit?id=neq.00000000-0000-0000-0000-000000000000',{
-    method:'DELETE',
-    headers:{
-      'apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
-      'Authorization':'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA'
-    }
-  }).then(function(r){
-    if(r.ok){toast('🗑 Всички записи са изтрити');transitData=[];renderTransit();}
-    else toast('Грешка при изчистване','#dc2626');
-  });
-}
-
 /* ── ЕКСПОРТ EXCEL ── */
 function exportTransitExcel(){
   if(!window.XLSX){
@@ -683,15 +702,19 @@ function exportTransitExcel(){
     document.head.appendChild(s);return;
   }
   var wb=window.XLSX.utils.book_new();
-  var rows=[['Посока','Магазин','Доставчик/Склад','Документ','Позиция','Дата',
-    'Материал','Описание','Кол.','МЕ','Остатък','Дата трансфер','Статус','Проверено','Коментар',
+  /* Износът е на активните редове — архивът (transitArchive) не влиза.
+     Разделянето е и тук: износът не бива да зависи от това дали екранът е рисуван. */
+  transitSplitArchive();
+  var rows=[['Посока','Магазин','Доставчик/Склад','Документ','Позиция','ВД','ИД','Дата',
+    'Материал','Описание','Кол.','К-во по ВД','МЕ','Остатък','Дата трансфер','Статус','Проверено','Коментар',
     'Обновен от','Обновен на']];
   transitData.forEach(function(r){
     rows.push([
       r.direction==='outgoing'?'📤 Изпращам':r.direction==='transfer'?'🔄 Трансфер':'📦 Получавам',
       r.store_name||'',r.supplier||'',r.purchase_doc||'',r.position||'',
+      r.inbound_delivery||'',r.outbound_delivery?transitStripZeros(r.outbound_delivery):'',
       r.doc_date||'',r.material_code||'',r.material_name||'',
-      r.ordered_qty||'',r.unit||'',r.remaining_qty||'',
+      r.ordered_qty||'',r.delivery_qty!=null?r.delivery_qty:'',r.unit||'',r.remaining_qty||'',
       r.transfer_date||'',
       T_STATUS[r.status]?T_STATUS[r.status].label.replace(/^[^A-Za-zА-Яа-я]+/,''):(r.status||''),
       tReviewedExcel(r),
@@ -699,21 +722,12 @@ function exportTransitExcel(){
     ]);
   });
   var ws=window.XLSX.utils.aoa_to_sheet(rows);
-  ws['!cols']=[{wch:14},{wch:16},{wch:22},{wch:14},{wch:8},{wch:12},{wch:10},{wch:30},
-    {wch:8},{wch:6},{wch:8},{wch:14},{wch:12},{wch:26},{wch:20},{wch:16},{wch:18}];
+  ws['!cols']=[{wch:14},{wch:16},{wch:22},{wch:14},{wch:8},{wch:12},{wch:10},{wch:12},{wch:10},{wch:30},
+    {wch:8},{wch:10},{wch:6},{wch:8},{wch:14},{wch:12},{wch:26},{wch:20},{wch:16},{wch:18}];
   window.XLSX.utils.book_append_sheet(wb,ws,'Стока на път');
   var fname='ТеМАХ_Стока_на_път_'+today()+'.xlsx';
   window.XLSX.writeFile(wb,fname);
   toast('✅ Excel изтеглен! ('+transitData.length+' записа)');
-
-  /* Питаме дали да изчистим след експорта */
-  if(currentUser.role==='admin'){
-    setTimeout(function(){
-      if(confirm('Да изчистя ли всички записи след експорта?\n(За да се качи новият месечен файл чисто)')){
-        confirmClearTransit();
-      }
-    },1000);
-  }
 }
 
 /* ── ДАТА НА ТРАНСФЕР ── */
@@ -885,44 +899,96 @@ function submitTransit(){
    ИМПОРТ ОТ SAP EXCEL
 ═══════════════════════════════════════════════════════════════ */
 
+/* Импортът иска ДВА файла от SAP (етап 1, 03.11.2026):
+     1) „Стока на път" — досегашният формат (Завод, Доставчик, Документ, …);
+     2) „ВД и ИД"      — Доставка (ВД), Позиция в доставката, … , Външен
+        идентиф. на доставка (ИД).
+   Кой е кой се разпознава по header-а, не по името на файла. Редът влиза само
+   ако има ВД — връзката е Документ за покупка + Материал. Без двата файла
+   импортът не тръгва. */
+var _transitImportFiles={transit:null,vd:null}; /* {name, rows} */
+var _transitImportPlan=null;
+
 function openTransitImportModal(){
   if(!canAddTransit()){toast('Нямаш права за импорт','#dc2626');return;}
+  _transitImportFiles={transit:null,vd:null};
+  _transitImportPlan=null;
+  transitRenderImportFiles();
+}
+
+/* Модалът с двата слота. Файловете се добавят наведнъж (multiple) или един по един. */
+function transitRenderImportFiles(){
+  var old=document.getElementById('transit-import-ov');
+  if(old&&old.remove)old.remove();
+  function slot(key,title,hint){
+    var f=_transitImportFiles[key];
+    return '<div class="t-imp-slot" data-slot="'+key+'" style="border:1px solid '+(f?'#86efac':'#e2e8f0')+';background:'+(f?'#f0fdf4':'#f8fafc')+';border-radius:8px;padding:9px 12px;margin-bottom:8px;font-size:12.5px;">'+
+      '<b>'+title+'</b> — '+(f?'✅ '+esc(f.name)+' <span style="color:#64748b;">('+Math.max(f.rows.length-1,0)+' реда)</span>':'<span style="color:#dc2626;">липсва</span>')+
+      '<div style="font-size:11px;color:#94a3b8;margin-top:2px;">'+hint+'</div></div>';
+  }
+  var both=!!(_transitImportFiles.transit&&_transitImportFiles.vd);
+  var h='<div class="bov open" id="transit-import-ov" onclick="if(event.target===this)closeTransitImport()">'+
+    '<div class="bmod" style="width:560px;max-height:85vh;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">'+
+      '<div style="font-size:16px;font-weight:700;">📥 Импорт от SAP — два файла</div>'+
+      '<button onclick="closeTransitImport()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>'+
+    '</div>'+
+    slot('transit','Файл 1 „Стока на път"','Завод, Доставчик, Документ за покупка, Позиция, Материал, Количество поръчка…')+
+    slot('vd','Файл 2 „ВД и ИД"','Доставка, Позиция, Материал, К-во по доставка, Документ за покупка, Външен идентиф. на доставка…')+
+    '<div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:14px;flex-wrap:wrap;">'+
+      '<button onclick="transitPickImportFiles()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;cursor:pointer;">📂 Избери файлове</button>'+
+      '<span style="display:flex;gap:8px;">'+
+      '<button onclick="closeTransitImport()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 18px;font-size:13px;cursor:pointer;">Откажи</button>'+
+      '<button id="t-imp-next" onclick="transitImportPrepare()" style="border:none;background:'+(both?'#16a34a':'#94a3b8')+';color:#fff;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;">Напред →</button>'+
+      '</span>'+
+    '</div>'+
+    '</div></div>';
+  document.body.insertAdjacentHTML('beforeend',h);
+}
+
+function transitPickImportFiles(){
   var input=document.createElement('input');
-  input.type='file';input.accept='.xlsx,.xls';
+  input.type='file';input.accept='.xlsx,.xls';input.multiple=true;
   input.onchange=function(e){
-    var file=e.target.files[0];if(!file)return;
-    handleTransitExcelFile(file);
+    var files=[].slice.call(e.target.files||[]);
+    files.forEach(function(f){ handleTransitExcelFile(f); });
   };
   input.click();
 }
 
+/* Кой файл е това: 'vd' (има „Доставка" и „Външен идентиф. на доставка" в
+   header-а) или 'transit' (всичко останало — форматът се разпознава после). */
+function transitFileKind(rows){
+  var head=(rows&&rows[0]||[]).map(function(c){return String(c==null?'':c).trim();});
+  return (head.indexOf('Доставка')>=0&&head.indexOf('Външен идентиф. на доставка')>=0)?'vd':'transit';
+}
+
+/* Слага прочетените редове (с header-а) в правилния слот. */
+function transitImportSetFile(name,rows){
+  if(!rows||!rows.length){toast('Файлът „'+name+'" е празен или невалиден','#dc2626');return;}
+  var kind=transitFileKind(rows);
+  _transitImportFiles[kind]={name:name,rows:rows};
+  _transitImportPlan=null;
+  transitRenderImportFiles();
+}
+
 function handleTransitExcelFile(file){
-  toast('⏳ Зареждане на файла...');
+  toast('⏳ Зареждане на '+file.name+'...');
   function doImport(){
     var reader=new FileReader();
     reader.onload=function(e){
       try{
         var data=new Uint8Array(e.target.result);
         var wb=window.XLSX.read(data,{type:'array',cellDates:true});
-        /* Четем ВСИЧКИ sheet-ове, пропускаме header */
+        /* ВСИЧКИ sheet-ове; header-ът на следващите се пропуска, ако е същият. */
         var allRows=[];
-        var detectedFmt='old';
         wb.SheetNames.forEach(function(sheetName){
-          var ws=wb.Sheets[sheetName];
-          var rows=window.XLSX.utils.sheet_to_json(ws,{header:1,raw:true});
+          var rows=window.XLSX.utils.sheet_to_json(wb.Sheets[sheetName],{header:1,raw:true});
           if(!rows.length)return;
-          /* Определяме формата по ПЪРВИЯ ред (header или данни) */
-          if(rows[0][0]&&(isNaN(parseInt(String(rows[0][0]).trim()))||typeof rows[0][0]==='string'&&rows[0][0].trim()==='Завод')){
-            detectedFmt='new';
-            /* Нов формат: пропускаме header */
-            if(rows.length>1) allRows=allRows.concat(rows.slice(1));
-          }else{
-            /* Стар формат: без header */
-            allRows=allRows.concat(rows);
-          }
+          if(allRows.length&&String(rows[0][0]==null?'':rows[0][0]).trim()===String(allRows[0][0]==null?'':allRows[0][0]).trim()) rows=rows.slice(1);
+          allRows=allRows.concat(rows);
         });
-        if(!allRows.length){toast('Файлът е празен или невалиден','#dc2626');return;}
-        parseTransitRows(allRows, detectedFmt);
+        transitImportSetFile(file.name,allRows);
       }catch(err){
         toast('Грешка при четене: '+err.message,'#dc2626');
         console.error('Excel error:',err);
@@ -1020,7 +1086,7 @@ function detectSapFormat(rows){
 }
 
 function parseTransitRows(rows, forceFmt){
-  if(!rows||!rows.length){toast('Файлът е празен','#dc2626');return;}
+  if(!rows||!rows.length){toast('Файлът е празен','#dc2626');return [];}
   
   /* Ако форматът е подаден директно - използваме го, иначе го определяме */
   var fmt=forceFmt||detectSapFormat(rows);
@@ -1103,42 +1169,174 @@ function parseTransitRows(rows, forceFmt){
   }).filter(Boolean).filter(function(r){return r.material_code||r.material_name;});
 
   _transitImportRows=parsed;
-
-  /* Summary по магазин и посока */
-  var summary={};
-  parsed.forEach(function(r){
-    var key=r.store_name+'|'+r.direction;
-    if(!summary[key])summary[key]={store:r.store_name,dir:r.direction,count:0};
-    summary[key].count++;
-  });
-
-  renderTransitImportPreview(summary,parsed.length);
+  return parsed;
 }
 
-function renderTransitImportPreview(summary,total){
+function transitCell(v){ return String(v==null?'':v).trim(); }
+
+/* Файл 2 „ВД и ИД" → [{inbound_delivery, delivery_position, material_code,
+   purchase_doc, delivery_qty, outbound_delivery}]. Колоните се търсят по
+   ИМЕ в header-а. Липсва ли задължителна — null (импортът спира). */
+function transitParseVdRows(rows){
+  var head=(rows&&rows[0]||[]).map(transitCell);
+  var need={vd:'Доставка',pos:'Позиция',mat:'Материал',qty:'К-во по доставка',doc:'Документ за покупка',id:'Външен идентиф. на доставка'};
+  var ix={},miss=[];
+  Object.keys(need).forEach(function(k){ ix[k]=head.indexOf(need[k]); if(ix[k]<0) miss.push(need[k]); });
+  if(miss.length){ toast('Файл „ВД и ИД": липсват колони '+miss.join(', '),'#dc2626'); return null; }
+  var out=[];
+  rows.slice(1).forEach(function(r){
+    if(!r) return;
+    var vd=transitCell(r[ix.vd]);
+    if(!vd) return;
+    out.push({
+      inbound_delivery:vd,
+      delivery_position:transitCell(r[ix.pos])||null,
+      material_code:transitCell(r[ix.mat]),
+      purchase_doc:transitCell(r[ix.doc]),
+      delivery_qty:parseExcelNum(r[ix.qty]),
+      outbound_delivery:transitStripZeros(r[ix.id])||null
+    });
+  });
+  return out;
+}
+
+/* Сдвояване по Документ за покупка + Материал. Ред от файл 1 без двойка — без
+   ВД, не влиза (за всички посоки). Ред от файл 2 без двойка — „само във файл
+   2", не влиза. При повтарящ се ключ двойките вървят по реда във файловете. */
+function transitMatchVd(parsed,vd){
+  var byKey={};
+  vd.forEach(function(v){
+    var k=v.purchase_doc+'\u0001'+v.material_code;
+    (byKey[k]=byKey[k]||[]).push(v);
+  });
+  var rows=[],skipped=[];
+  parsed.forEach(function(r){
+    var k=String(r.purchase_doc||'')+'\u0001'+String(r.material_code||'');
+    var v=byKey[k]&&byKey[k].shift();
+    if(!v){ skipped.push(r); return; }
+    rows.push(Object.assign({},r,{
+      inbound_delivery:v.inbound_delivery, delivery_position:v.delivery_position,
+      outbound_delivery:v.outbound_delivery, delivery_qty:v.delivery_qty
+    }));
+  });
+  var only2=[];
+  Object.keys(byKey).forEach(function(k){ only2=only2.concat(byKey[k]); });
+  return {rows:rows,skipped:skipped,only2:only2};
+}
+
+function transitVdKey(vd,pos){ return String(vd||'')+'\u0001'+String(pos==null?'':pos); }
+
+/* „Напред →": разбор на двата файла, сверка с базата, преглед. Нищо не пише. */
+function transitImportPrepare(){
+  var f1=_transitImportFiles.transit, f2=_transitImportFiles.vd;
+  if(!f1||!f2){
+    toast('Липсва '+(!f1&&!f2?'и двата файла — „Стока на път" и „ВД и ИД"':(!f1?'файл 1 „Стока на път"':'файл 2 „ВД и ИД"'))+'. Импортът иска и двата.','#dc2626');
+    return Promise.resolve(null);
+  }
+  var vd=transitParseVdRows(f2.rows);
+  if(!vd) return Promise.resolve(null);
+  var hasHead=detectSapFormat(f1.rows)==='new';
+  var f1Total=f1.rows.slice(hasHead?1:0).filter(function(r){return r&&transitCell(r[0]);}).length;
+  var parsed=parseTransitRows(f1.rows);
+  var m=transitMatchVd(parsed,vd);
+
+  /* (ВД, позиция) е уникална — повторение би съборило цялата партида. */
+  var seen={},dups=[];
+  m.rows.forEach(function(r){
+    var k=transitVdKey(r.inbound_delivery,r.delivery_position);
+    if(seen[k]) dups.push(r.inbound_delivery+' / '+r.delivery_position);
+    seen[k]=1;
+  });
+  if(dups.length){
+    toast('Файлът носи повтарящи се ВД + позиция ('+dups.slice(0,3).join(', ')+(dups.length>3?'…':'')+') — импортът е спрян','#dc2626');
+    return Promise.resolve(null);
+  }
+
+  toast('⏳ Сверка със записаните редове...');
+  /* Само редовете с ВД — ръчните (inbound_delivery = null) импортът не пипа.
+     На страници: PostgREST реже на 1000. */
+  return sbGetAll('goods_transit','select=id,inbound_delivery,delivery_position,archived_at&inbound_delivery=not.is.null&order=id.asc').then(function(ex){
+    if(ex.partial){
+      toast('⚠️ Записаните редове не се прочетоха докрай — импортът е спрян. Опитай пак.','#dc2626');
+      return null;
+    }
+    var exMap={};
+    ex.forEach(function(e){ if(e.inbound_delivery) exMap[transitVdKey(e.inbound_delivery,e.delivery_position)]=e; });
+    var newRows=[],updRows=[],revived=0;
+    m.rows.forEach(function(r){
+      var e=exMap[transitVdKey(r.inbound_delivery,r.delivery_position)];
+      if(e){ updRows.push(r); if(e.archived_at) revived++; }
+      else newRows.push(r);
+    });
+    var archiveIds=ex.filter(function(e){
+      return e.inbound_delivery&&!e.archived_at&&!seen[transitVdKey(e.inbound_delivery,e.delivery_position)];
+    }).map(function(e){return e.id;});
+    _transitImportPlan={
+      f1Total:f1Total, recognized:parsed.length, rows:m.rows, skipped:m.skipped, only2:m.only2,
+      newRows:newRows, updRows:updRows, revived:revived, archiveIds:archiveIds
+    };
+    renderTransitImportPreview(_transitImportPlan);
+    return _transitImportPlan;
+  });
+}
+
+function renderTransitImportPreview(plan){
   var old=document.getElementById('transit-import-ov');
   if(old&&old.remove)old.remove();
 
-  var rows=Object.values(summary).sort(function(a,b){
-    return a.store.localeCompare(b.store,'bg')||(a.dir>b.dir?1:-1);
-  });
+  function byStore(list){
+    var s={};
+    list.forEach(function(r){ var k=r.store_name+'|'+r.direction; if(!s[k])s[k]={store:r.store_name,dir:r.direction,count:0}; s[k].count++; });
+    return Object.values(s).sort(function(a,b){ return a.store.localeCompare(b.store,'bg')||(a.dir>b.dir?1:-1); });
+  }
+  function sum(list){ return list.reduce(function(s,r){return s+r.count;},0); }
+  var rows=byStore(plan.rows);
   var incoming=rows.filter(function(r){return r.dir==='incoming';});
   var transfer=rows.filter(function(r){return r.dir==='transfer';});
   var outgoing=rows.filter(function(r){return r.dir==='outgoing';});
+  /* Пропуснатите без ВД — по обект (получател), всички посоки заедно. */
+  var skip={};
+  plan.skipped.forEach(function(r){ skip[r.store_name]=(skip[r.store_name]||0)+1; });
+  var skipList=Object.keys(skip).sort(function(a,b){return a.localeCompare(b,'bg');});
+  var dropped=plan.f1Total-plan.recognized;
+  function stat(id,label,n,color){
+    return '<div id="'+id+'" style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;"><span>'+label+'</span><b style="color:'+(color||'#0f172a')+';">'+n+'</b></div>';
+  }
 
   var h='<div class="bov open" id="transit-import-ov" onclick="if(event.target===this)closeTransitImport()">'+
-    '<div class="bmod" style="width:660px;max-height:85vh;">'+
+    '<div class="bmod" style="width:660px;max-height:85vh;overflow-y:auto;">'+
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">'+
-      '<div style="font-size:16px;font-weight:700;">📥 Импорт от SAP Excel</div>'+
+      '<div style="font-size:16px;font-weight:700;">📥 Импорт от SAP — преглед</div>'+
       '<button onclick="closeTransitImport()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button>'+
     '</div>'+
-    '<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:13px;color:#1e3a5f;">'+
-      'Разпознати <b>'+total+'</b> реда от SAP файла.'+
+    '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px 20px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;margin-bottom:14px;font-size:12.5px;color:#1e3a5f;">'+
+      '<div>'+
+      stat('t-imp-f1','Редове във файл 1',plan.f1Total)+
+      (dropped>0?stat('t-imp-drop','  без познат завод / материал',dropped,'#64748b'):'')+
+      stat('t-imp-vd','С ВД — за запис',plan.rows.length,'#16a34a')+
+      stat('t-imp-skip','Без ВД — пропускат се',plan.skipped.length,plan.skipped.length?'#dc2626':'#16a34a')+
+      stat('t-imp-only2','Само във файл 2 — пропускат се',plan.only2.length,plan.only2.length?'#d97706':'#16a34a')+
+      '</div><div>'+
+      stat('t-imp-new','Нови',plan.newRows.length,'#16a34a')+
+      stat('t-imp-upd','Обновяват се',plan.updRows.length,'#2563eb')+
+      (plan.revived?stat('t-imp-revived','  от тях излизат от архива',plan.revived,'#64748b'):'')+
+      stat('t-imp-arch','Отиват в архив',plan.archiveIds.length,plan.archiveIds.length?'#d97706':'#16a34a')+
+      '</div>'+
     '</div>'+
+
+    (skipList.length?
+    '<div style="margin-bottom:14px;">'+
+    '<div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;">⛔ БЕЗ ВД (не влизат) — по обект</div>'+
+    '<div id="t-imp-skip-stores" style="max-height:120px;overflow-y:auto;border:1px solid #fecaca;border-radius:8px;">'+
+    '<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
+    skipList.map(function(s){
+      return '<tr style="border-bottom:1px solid #fff1f2;"><td style="padding:5px 10px;font-weight:500;">'+esc(s)+'</td><td style="padding:5px 10px;text-align:right;color:#dc2626;font-weight:600;">'+skip[s]+'</td></tr>';
+    }).join('')+
+    '</table></div></div>':'')+
 
     /* Трансфери между магазини — най-важно да се провери преди импорт */
     '<div style="margin-bottom:14px;">'+
-    '<div style="font-size:12px;font-weight:700;color:#c2410c;margin-bottom:8px;">🔄 ТРАНСФЕРИ МЕЖДУ МАГАЗИНИ (получател / брой) — '+transfer.reduce(function(s,r){return s+r.count;},0)+' реда</div>'+
+    '<div style="font-size:12px;font-weight:700;color:#c2410c;margin-bottom:8px;">🔄 ТРАНСФЕРИ МЕЖДУ МАГАЗИНИ (получател / брой) — '+sum(transfer)+' реда</div>'+
     '<div style="max-height:150px;overflow-y:auto;border:1px solid #fed7aa;border-radius:8px;">'+
     '<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
     (transfer.length?transfer.map(function(r){
@@ -1149,7 +1347,7 @@ function renderTransitImportPreview(summary,total){
     /* Incoming + Outgoing */
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">'+
     '<div>'+
-    '<div style="font-size:12px;font-weight:700;color:#1e40af;margin-bottom:8px;">📦 ПОЛУЧАВАМ (от склад) — '+incoming.reduce(function(s,r){return s+r.count;},0)+' реда</div>'+
+    '<div style="font-size:12px;font-weight:700;color:#1e40af;margin-bottom:8px;">📦 ПОЛУЧАВАМ (от склад) — '+sum(incoming)+' реда</div>'+
     '<div style="max-height:200px;overflow-y:auto;border:1px solid #dbeafe;border-radius:8px;">'+
     '<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
     incoming.map(function(r){
@@ -1159,7 +1357,7 @@ function renderTransitImportPreview(summary,total){
 
     /* Outgoing */
     '<div>'+
-    '<div style="font-size:12px;font-weight:700;color:#7c3aed;margin-bottom:8px;">📤 ИЗПРАЩАМ (outgoing) — '+outgoing.reduce(function(s,r){return s+r.count;},0)+' реда</div>'+
+    '<div style="font-size:12px;font-weight:700;color:#7c3aed;margin-bottom:8px;">📤 ИЗПРАЩАМ (outgoing) — '+sum(outgoing)+' реда</div>'+
     '<div style="max-height:200px;overflow-y:auto;border:1px solid #e9d5ff;border-radius:8px;">'+
     '<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
     (outgoing.length?outgoing.map(function(r){
@@ -1170,7 +1368,7 @@ function renderTransitImportPreview(summary,total){
 
     '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
       '<button onclick="closeTransitImport()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 18px;font-size:13px;cursor:pointer;">Откажи</button>'+
-      '<button onclick="confirmTransitImport()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;">✅ Импортирай '+total+' реда</button>'+
+      '<button onclick="confirmTransitImport()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;">✅ Импортирай '+plan.rows.length+' реда</button>'+
     '</div>'+
     '</div></div>';
 
@@ -1181,57 +1379,83 @@ function closeTransitImport(){
   var ov=document.getElementById('transit-import-ov');
   if(ov&&ov.remove)ov.remove();
   _transitImportRows=[];
+  _transitImportFiles={transit:null,vd:null};
+  _transitImportPlan=null;
 }
 
+/* Тялото за upsert. Съществуващ ред: само полетата от SAP + archived_at=null
+   (излиза от архива) — status, comment, reviewed_*, transfer_date и
+   updated_* НЕ се пращат, тоест остават. Нов ред: и status 'pending'. */
+function transitImportBody(r,isNew,who,at){
+  var b={
+    direction:r.direction,store_name:r.store_name,supplier:String(r.supplier||''),
+    purchase_doc:String(r.purchase_doc||''),position:r.position,doc_date:r.doc_date,
+    material_code:String(r.material_code||''),material_name:String(r.material_name||''),
+    ordered_qty:r.ordered_qty,unit:r.unit,remaining_qty:r.remaining_qty,
+    inbound_delivery:r.inbound_delivery,outbound_delivery:r.outbound_delivery,
+    delivery_position:r.delivery_position,delivery_qty:r.delivery_qty,
+    archived_at:null
+  };
+  if(isNew){ b.status='pending'; b.comment=''; b.transfer_date=null; b.updated_by=who; b.updated_at=at; }
+  return b;
+}
+
+/* Запис: първо нови + обновени (upsert по ВД + позиция в доставката), на
+   партиди по 50. Архивирането е ПОСЛЕДНО и само ако всяка партида е минала —
+   иначе червен toast и нищо не се архивира. Повторният импорт е безопасен:
+   upsert-ът по същия ключ просто обновява. */
 function confirmTransitImport(){
-  var rows=_transitImportRows;
-  if(!rows.length){toast('Няма редове за импорт','#dc2626');return;}
-  toast('⏳ Импортиране на '+rows.length+' реда ('+Math.ceil(rows.length/25)+' batch-а)...');
-  var batches=[];
-  for(var i=0;i<rows.length;i+=50)batches.push(rows.slice(i,i+50));
-  var inserted=0,failed=0;
-  function next(idx){
-    if(idx>=batches.length){
-      closeTransitImport();
-      toast('✅ Импортирани '+inserted+' реда'+(failed?', '+failed+' грешки':''));
-      loadTransit();return;
-    }
-    var batch=batches[idx].map(function(r){
-      return {
-        direction:r.direction,store_name:r.store_name,supplier:String(r.supplier||''),
-        purchase_doc:String(r.purchase_doc||''),position:r.position,doc_date:r.doc_date,
-        material_code:String(r.material_code||''),material_name:String(r.material_name||''),
-        ordered_qty:r.ordered_qty,unit:r.unit,remaining_qty:r.remaining_qty,
-        comment:r.comment,transfer_date:r.transfer_date,
-        status:'pending',
-        updated_by:currentUser.display_name||currentUser.email,
-        updated_at:new Date().toISOString()
-      };
-    });
-    /* Batch INSERT директно - sbPost не поддържа масиви */
-    fetch('https://xiwkdiqqplgdcrkewgtv.supabase.co/rest/v1/goods_transit',{
-      method:'POST',
-      headers:{
-        'apikey':'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
-        'Authorization':'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA',
-        'Content-Type':'application/json',
-        'Prefer':'return=minimal'
-      },
-      body:JSON.stringify(batch)
-    }).then(function(r){
-      if(r.ok){
-        inserted+=batch.length;
-        /* Показваме прогрес */
-        if(idx%5===0) toast('⏳ Импортирани '+inserted+' от '+rows.length+'...');
-      }else{
-        r.json().then(function(e){
-          console.error('Batch грешка:',JSON.stringify(e));
-        }).catch(function(){});
-        failed+=batch.length;
-      }
-      /* Малък delay между batch-овете за да не претоварим Supabase */
-      setTimeout(function(){next(idx+1);}, 50);
-    }).catch(function(e){console.error('Fetch грешка:',e);failed+=batch.length;setTimeout(function(){next(idx+1);},50);});
+  var plan=_transitImportPlan;
+  if(!plan||!plan.rows.length){toast('Няма редове за импорт','#dc2626');return Promise.resolve();}
+  var who=currentUser.display_name||currentUser.email, at=new Date().toISOString();
+  var batches=[],i;
+  for(i=0;i<plan.newRows.length;i+=50) batches.push({rows:plan.newRows.slice(i,i+50),isNew:true});
+  for(i=0;i<plan.updRows.length;i+=50) batches.push({rows:plan.updRows.slice(i,i+50),isNew:false});
+  var archiveIds=plan.archiveIds.slice();
+  var failed=0,written=0;
+  toast('⏳ Импортиране на '+plan.rows.length+' реда ('+batches.length+' партиди)...');
+
+  function postBatch(b){
+    var url=API+'/goods_transit?on_conflict=inbound_delivery,delivery_position';
+    /* Нов ред: ignore-duplicates — ако междувременно е влязъл, статусът му не се пипа. */
+    var prefer=(b.isNew?'resolution=ignore-duplicates':'resolution=merge-duplicates')+',return=minimal';
+    return fetch(url,{method:'POST',headers:Object.assign({},H,{'Prefer':prefer}),
+      body:JSON.stringify(b.rows.map(function(r){return transitImportBody(r,b.isNew,who,at);}))})
+    .then(function(r){
+      if(r.ok){ written+=b.rows.length; return; }
+      failed++;
+      return r.text().then(function(t){console.error('Стока на път, импорт: партида НЕ е записана',r.status,t);}).catch(function(){});
+    }).catch(function(e){ failed++; console.error('Стока на път, импорт: мрежова грешка',e); });
   }
-  next(0);
+  var chain=Promise.resolve();
+  batches.forEach(function(b){ chain=chain.then(function(){ return postBatch(b); }); });
+
+  return chain.then(function(){
+    if(failed){
+      closeTransitImport();
+      toast('⚠️ '+failed+' от '+batches.length+' партиди НЕ се записаха — архивирането е пропуснато. Пусни импорта пак (повторният е безопасен).','#dc2626');
+      loadTransit();
+      return;
+    }
+    var chunks=[];
+    for(var k=0;k<archiveIds.length;k+=100) chunks.push(archiveIds.slice(k,k+100));
+    var archFailed=0;
+    var ac=Promise.resolve();
+    chunks.forEach(function(c){
+      ac=ac.then(function(){
+        return sbPatch('goods_transit','id=in.('+c.join(',')+')&archived_at=is.null',{archived_at:at}).then(function(res){
+          if(!res||res.ok===false) archFailed++;
+        });
+      });
+    });
+    return ac.then(function(){
+      closeTransitImport();
+      if(archFailed){
+        toast('⚠️ Редовете са записани, но архивирането не мина ('+archFailed+' от '+chunks.length+' пакета). Пусни импорта пак.','#dc2626');
+      }else{
+        toast('✅ Импорт: '+plan.newRows.length+' нови, '+plan.updRows.length+' обновени, '+archiveIds.length+' в архива');
+      }
+      loadTransit();
+    });
+  });
 }

@@ -166,6 +166,7 @@ const TESTS = [
   'transit-counts-follow-filters.test.js',
   'transit-compact.test.js',
   'transit-direction-transfer.test.js',
+  'transit-vd-import.test.js',
   'transit-export-labels.test.js',
   'loading-lists-print.test.js',
   'stock-diff-capitalized-counter.test.js',

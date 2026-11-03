@@ -129,8 +129,8 @@ function env(failGet) {
        /reportGetAll\('differences_reports','select=id,store_name,direction,reviewed,created_at&order=id\.asc'\)/.test(ts));
     ok('stock_differences през reportGetAll с order=id.asc',
        /reportGetAll\('stock_differences','select=report_id,[^']*&order=id\.asc'\)/.test(ts));
-    ok('goods_transit през reportGetAll с order=id.asc',
-       /reportGetAll\('goods_transit','status=in\.\(pending,sent\)&select=[^']*&order=id\.asc'\)/.test(ts));
+    ok('goods_transit през reportGetAll с order=id.asc и без архива (03.11.2026)',
+       /reportGetAll\('goods_transit','status=in\.\(pending,sent\)&archived_at=is\.null&select=[^']*&order=id\.asc'\)/.test(ts));
     ok('без голи sbGet към трите таблици в колектора',
        !/sbGet\('(stock_differences|goods_transit)'/.test(ts) &&
        !/sbGet\('differences_reports','select=id,store_name/.test(ts));

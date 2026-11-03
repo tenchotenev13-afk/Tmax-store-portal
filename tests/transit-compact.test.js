@@ -50,11 +50,13 @@ const DATA = [
   row('INC-REJ', { status: 'rejected' }),
   row('INC-LONG', { material_name: 'Много дълго описание на артикул '.repeat(8) })
 ];
-const F = ['pending', 'sent', 'received', 'rejected', 'all'];
-const WANT = { pending: 5, sent: 1, received: 1, rejected: 1, all: 8 };
+/* „🗄 Архив" — от 03.11.2026 (етап 1, transit-vd-import.test.js), винаги последен. */
+const F = ['pending', 'sent', 'received', 'rejected', 'all', 'archive'];
+const WANT = { pending: 5, sent: 1, received: 1, rejected: 1, all: 8, archive: 0 };
 const DOCS = {
   pending: 'INC-LONG,INC-NEW,INC-OLD,TR-SEND,TR-WAIT', sent: 'TR-RECV', received: 'INC-REC', rejected: 'INC-REJ',
-  all: 'INC-LONG,INC-NEW,INC-OLD,INC-REC,INC-REJ,TR-RECV,TR-SEND,TR-WAIT'
+  all: 'INC-LONG,INC-NEW,INC-OLD,INC-REC,INC-REJ,TR-RECV,TR-SEND,TR-WAIT',
+  archive: ''
 };
 
 const bar = h => h.w.document.getElementById('t-filters');
@@ -95,7 +97,7 @@ const S = a => a.slice().sort();
     const h = env(user('admin', 'Централен офис'), DATA);
     ok('контейнерът е .filter-bar.chips', bar(h).classList.contains('chips') && bar(h).classList.contains('filter-bar'));
     ok('„Покажи:"', /Покажи:/.test(bar(h).textContent));
-    ok('ред: pending, sent | received, rejected, all', j(Array.from(bar(h).querySelectorAll('button')).map(b => b.getAttribute('data-tt-f'))) === j(F));
+    ok('ред: pending, sent | received, rejected, all, archive', j(Array.from(bar(h).querySelectorAll('button')).map(b => b.getAttribute('data-tt-f'))) === j(F));
     ok('разделител преди историческите', !!bar(h).querySelector('.chips-sep'));
     ok('received / rejected / all са .chip-hist; pending / sent — не', ['received', 'rejected', 'all'].every(f => chip(h, f).classList.contains('chip-hist')) && !chip(h, 'pending').classList.contains('chip-hist') && !chip(h, 'sent').classList.contains('chip-hist'));
     ok('няма data-f (сблъсък с Разлики)', !bar(h).querySelector('[data-f]'));
