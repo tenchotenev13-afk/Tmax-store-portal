@@ -89,6 +89,14 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .chips .chips-n{font-size:11px;opacity:.7;font-variant-numeric:tabular-nums;}
 .chips .chips-sep{width:1px;height:20px;background:#cbd5e1;margin:0 4px;}
 .tbl-wrap{overflow-x:auto;border-radius:8px;border:1px solid var(--border);}
+/* Работен график (grafik.js): мрежата е собствена кутия за скрол (31 колони) — в хоризонтален скрол
+   заглавието не може да залепне за страницата. Затова САМАТА кутия залепва под лентата (--nav-h) и е
+   висока до долния край на екрана, а заглавието залепва в горния ѝ край — тоест точно под лентата.
+   60px = долният отстъп на .page (и на тесен екран): залепващ елемент не излиза от контейнера си, затова
+   кутията трябва да е последна в модула (подсказката е над нея) и да се побира над отстъпа.
+   Фонът е изричен — без него редовете прозират под заглавието; почивните дни идват inline и го бият. */
+.gr-grid-wrap{overflow:auto;max-height:calc(100vh - var(--nav-h,58px) - 60px);position:sticky;top:var(--nav-h,58px);}
+.gr-grid-wrap thead th{position:sticky;top:0;z-index:2;background:var(--surf);}
 .co-sticky-actions table td:last-child,
 .co-sticky-actions table th:last-child{position:sticky;right:0;background:#fff;box-shadow:-6px 0 6px -6px rgba(0,0,0,.15);}
 .co-sticky-actions table th:last-child{background:var(--surf);}

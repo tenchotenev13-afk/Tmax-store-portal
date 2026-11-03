@@ -239,10 +239,12 @@ function grGridPageHtml(){
   h += '</div>';
   h += grWarningsHtml();
   h += grCoverageHtml();
-  h += grGridHtml();
-  h += '<div style="font-size:12px;color:#64748b;margin:6px 2px;">Букви: ' + escVal(grAllowedLetters().join(', ')) +
+  /* Подсказката е НАД мрежата: кутията на мрежата залепва под лентата и трябва да е последна в
+     модула — иначе редът под нея я избутва нагоре при скрол докрай (index.html, .gr-grid-wrap). */
+  h += '<div id="gr-hint" style="font-size:12px;color:#64748b;margin:6px 2px;">Букви: ' + escVal(grAllowedLetters().join(', ')) +
     ' · число 1–12 = свободни часове · стрелки / Tab / Enter · Delete изтрива · Ctrl+V поставя от Excel · Ctrl+L заключва кода · ' +
     '<span style="background:#fde68a;padding:0 4px;">жълто</span> = кодът е сменен автоматично до нормата · 🔒 = заключен код</div>';
+  h += grGridHtml();
   return h;
 }
 function grDayHead(i){
@@ -253,7 +255,10 @@ function grDayHead(i){
 }
 function grGridHtml(){
   var M = grCalc.month;
-  var h = '<div class="tbl-wrap" style="overflow-x:auto;"><table id="gr-grid" tabindex="0" onkeydown="grKey(event)" onpaste="grPaste(event)" style="border-collapse:collapse;font-size:12px;">';
+  /* 31 колони → хоризонтален скрол; в такъв контейнер заглавието не може да залепне под лентата
+     на страницата, затова мрежата е кутия с височината на екрана и заглавието залепва в нейния
+     горен край (index.html, .gr-grid-wrap thead th), без да закрива редове. */
+  var h = '<div class="tbl-wrap gr-grid-wrap" id="gr-grid-wrap"><table id="gr-grid" tabindex="0" onkeydown="grKey(event)" onpaste="grPaste(event)" style="border-collapse:collapse;font-size:12px;">';
   h += '<thead><tr><th>№</th><th style="text-align:left;">Служител</th><th>Сектор</th>';
   for(var i = 0; i < M.days; i++) h += grDayHead(i);
   h += '<th title="Вътрешни часове (буквите + свободните часове)">Вътр.</th><th title="Официални часове по кодовете">Офиц.</th><th>Цел</th><th>Разл.</th></tr></thead><tbody>';
@@ -583,7 +588,10 @@ function grStaffHtml(){
   var h = '<div class="card"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;"><b>Персонал — ' + escVal(grStore) + '</b><span style="color:#64748b;font-size:12px;">' + list.length + ' души</span><span style="flex:1"></span>' +
     (grCanAddSector() ? '<button class="btn-sm" onclick="grSectorOpen()" title="Нов сектор в списъка на магазина">➕ Сектор</button>' : '') +
     (edit ? '<button class="btn btn-green" onclick="grStaffOpen(\'\')">➕ Нов служител</button>' : '') + '</div>';
-  h += '<div class="tbl-wrap"><table id="gr-staff" class="tbl-compact"><thead><tr><th>Име в графика</th><th>Три имена</th><th>Длъжност</th><th>Позиция</th><th>Сектор</th><th>Ч./ден</th><th>Назначен</th><th>Напуснал</th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>';
+  /* tbl-compact е на обвивката (както навсякъде в портала): от 1200px тя сваля скрола и
+     заглавието залепва под лентата (index.html, .tbl-compact thead th). Върху самата <table>
+     вътре в .tbl-wrap заглавието залепваше на --nav-h ВЪТРЕ в кутията — върху първите редове. */
+  h += '<div class="tbl-wrap tbl-compact tbl-auto" id="gr-staff-wrap"><table id="gr-staff"><thead><tr><th>Име в графика</th><th>Три имена</th><th>Длъжност</th><th>Позиция</th><th>Сектор</th><th>Ч./ден</th><th>Назначен</th><th>Напуснал</th>' + (edit ? '<th></th>' : '') + '</tr></thead><tbody>';
   list.forEach(function(s){
     h += '<tr id="gr-st-' + escAttrVal(s.id) + '" style="' + (s.left_on ? 'color:#94a3b8;' : '') + '"><td>' + escVal(s.short_name) + '</td><td>' + escVal(s.full_name) + '</td><td>' + escVal(s.contract_title || '') + '</td><td>' + escVal(s.position || '') + '</td><td>' + escVal(s.sector_id ? grSector(s) : '') + '</td><td>' + escVal(String(+s.hours_per_day || 8)) + '</td><td>' + (s.hired_on ? escVal(fmtDate(s.hired_on)) : '') + '</td><td>' + (s.left_on ? escVal(fmtDate(s.left_on)) : '') + '</td>' +
       (edit ? '<td><button class="btn-sm" onclick="grStaffOpen(\'' + escAttrVal(s.id) + '\')">✏️</button></td>' : '') + '</tr>';

@@ -361,6 +361,38 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('новият сектор е в падащия списък', Array.from(a.doc.getElementById('gr-sf-sector').options).some(o => o.textContent === 'Градина и двор'));
   }
 
+  section('10в. Залепналото заглавие — над първия ред, не върху него');
+  {
+    /* Дефект от проверката на живо (03.11.2026): в „Персонал“ tbl-compact беше върху <table>
+       вътре в .tbl-wrap (overflow-x:auto) → заглавието залепваше на --nav-h ВЪТРЕ в кутията и
+       закриваше втория ред. jsdom не смята лейаут: заковават се структурата и CSS-ът като текст;
+       видимото — само с поглед на живо. */
+    const css = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    const before = (a, b) => !!(a && b && (a.compareDocumentPosition(b) & 4));   // a е преди b
+    const r = env(MGR);
+    await load(r);
+    const grid = r.doc.getElementById('gr-grid'), gw = r.doc.getElementById('gr-grid-wrap');
+    ok('График: заглавието е преди първия ред в DOM-а', before(grid.querySelector('thead'), grid.querySelector('tbody tr')));
+    ok('График: обвивката е .gr-grid-wrap (собствена кутия за скрол)', !!gw && gw.classList.contains('gr-grid-wrap') && grid.parentNode === gw);
+    ok('График: таблицата НЕ е tbl-compact (иначе top:--nav-h вътре в кутията)', !grid.classList.contains('tbl-compact') && !gw.classList.contains('tbl-compact'));
+    ok('CSS: .gr-grid-wrap — собствен скрол, до долния край на екрана, залепва под лентата',
+      /\.gr-grid-wrap\{overflow:auto;max-height:calc\(100vh - var\(--nav-h,58px\) - \d+px\);position:sticky;top:var\(--nav-h,58px\);\}/.test(css));
+    ok('CSS: .gr-grid-wrap thead th — sticky, top:0, над редовете, с фон', /\.gr-grid-wrap thead th\{position:sticky;top:0;z-index:2;background:var\(--surf\);\}/.test(css));
+    ok('График: кутията е ПОСЛЕДНА в модула (иначе редът под нея я избутва под лентата при скрол докрай)', mod(r).lastElementChild === gw);
+    ok('График: подсказката за буквите е над мрежата', !!r.doc.getElementById('gr-hint') && before(r.doc.getElementById('gr-hint'), gw));
+    ok('CSS: заглавието в кутията е top:0 (кутията вече е под лентата — без двоен отстъп)', !/\.gr-grid-wrap thead th\{[^}]*--nav-h/.test(css));
+
+    realClick(r.w, btn(mod(r), 'Персонал'));
+    const st = r.doc.getElementById('gr-staff'), sw = r.doc.getElementById('gr-staff-wrap');
+    ok('Персонал: заглавието е преди първия ред (Тенчо…) в DOM-а', before(st.querySelector('thead'), st.querySelector('tbody tr')));
+    ok('Персонал: tbl-compact е на обвивката, не на таблицата', !!sw && st.parentNode === sw && sw.classList.contains('tbl-wrap') &&
+      sw.classList.contains('tbl-compact') && !st.classList.contains('tbl-compact'), sw && sw.className + ' / ' + st.className);
+    ok('CSS: от 1200px .tbl-compact сваля скрола и заглавието залепва под лентата (--nav-h)',
+      /@media\(min-width:1200px\)\{[\s\S]*?\.tbl-compact\{overflow:visible;\}[\s\S]*?\.tbl-compact thead th\{position:sticky;top:var\(--nav-h,58px\);/.test(css));
+    const anyTableCompact = Array.from(r.doc.querySelectorAll('#mod-grafik table')).some(t => t.classList.contains('tbl-compact'));
+    ok('никоя таблица в модула не носи tbl-compact върху самата <table>', !anyTableCompact);
+  }
+
   section('11. Само гледа, липсващо дружество, грешки');
   {
     const v = env(SKL);
