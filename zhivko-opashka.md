@@ -23,6 +23,7 @@
 - 03.11 · goods_transit.delivery_position — text, NULL, без default (позиция в доставката)
 - 03.11 · goods_transit.delivery_qty — numeric, NULL, без default
 - 03.11 · goods_transit.archived_at — timestamptz, NULL, без default
+- 03.11 · goods_transit.imported_at — timestamptz, NOT NULL, default now() (кога импортът последно е видял реда)
 - 03.11 · goods_transit — уникалност (inbound_delivery, delivery_position); NULL-ите не се сблъскват (ръчните редове са без ВД). Нужна е за UPSERT-а на импорта.
 
 ## Изпратено 02.11.2026

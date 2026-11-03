@@ -4,7 +4,8 @@
 -- (md5 на телата: transit_store_done_since 53cc951b…, transit_mark_empty_stores
 -- 1eaabaf1…, checklist_portal_values 313d47f8…), после маха индекса и колоните.
 --
--- ВНИМАНИЕ: махането на колоните губи ВД / ИД / к-во по доставка и архива.
+-- ВНИМАНИЕ: махането на колоните губи ВД / ИД / к-во по доставка, архива и
+-- imported_at (прозорецът на авто-отметката се връща към created_at).
 -- Преди rollback — колко реда носят данни, които ще се изгубят:
 --   select count(*) filter (where inbound_delivery is not null) as s_vd,
 --          count(*) filter (where archived_at is not null)      as v_arhiv
@@ -376,6 +377,7 @@ $function$;
 drop index if exists public.goods_transit_vd_pos_uniq;
 
 alter table public.goods_transit
+  drop column if exists imported_at,
   drop column if exists archived_at,
   drop column if exists delivery_qty,
   drop column if exists delivery_position,

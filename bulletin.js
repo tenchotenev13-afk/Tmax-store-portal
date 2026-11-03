@@ -1370,7 +1370,9 @@ function bulLoadTransitPending(){
   if(!autoT.length) return;
   /* Прозорец по импорта, ако ВСИЧКИ такива задачи са с „В сила от": критерият
      в базата (transit_store_done_since) брои само редове, внесени от
-     starts_on − 7 дни насам, и надписът трябва да казва същото. Иначе на
+     starts_on − 7 дни насам, и надписът трябва да казва същото. „Внесен" е
+     imported_at (кога импортът последно е видял реда), не created_at — от
+     03.11.2026 таблицата не се изчиства и стар ред пази стария created_at. Иначе на
      starts_on обектът чете „⏳ 12 необработени реда" от СТАРАТА партида, а
      тригерът не ги гледа. Има ли и една задача без starts_on, прозорец няма —
      за нея важат всички редове и по-тесният брой би излъгал в другата посока. */
@@ -1380,7 +1382,7 @@ function bulLoadTransitPending(){
     var w=bulShiftISO(String(t.starts_on).slice(0,10),-7);
     if(!winFrom||w<winFrom) winFrom=w;
   });
-  var winQ=(winFrom&&autoT.every(function(t){return !!t.starts_on;})) ? '&created_at=gte.'+winFrom : '';
+  var winQ=(winFrom&&autoT.every(function(t){return !!t.starts_on;})) ? '&imported_at=gte.'+winFrom : '';
   sbGet('goods_transit','store_name=eq.'+encodeURIComponent(currentUser.store_name)+winQ+
         /* NULL статус е „необработен" — както coalesce(status,'pending') в
            transit_store_done и броячът в transit.js. */

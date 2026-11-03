@@ -829,8 +829,9 @@ const deptCount = h => txt(h.doc.querySelector('[data-dept-count="admin"]'));
     const hT = await view('b-0', dbT, { user: STORE, nowMs: new Date(SO_FUT + 'T12:00:00').getTime() });
     await settle(() => hT.calls.get.some(u => /goods_transit/.test(u)));
     const gq = hT.calls.get.filter(u => /goods_transit/.test(u));
-    ok('заявката за необработените носи прозореца starts_on − 7',
-      gq.some(u => u.indexOf('created_at=gte.' + isoOf(shifted(2 - 7))) >= 0),
+    ok('заявката за необработените носи прозореца starts_on − 7 по imported_at (не created_at)',
+      gq.some(u => u.indexOf('imported_at=gte.' + isoOf(shifted(2 - 7))) >= 0) &&
+      !gq.some(u => u.indexOf('created_at=gte.') >= 0),
       JSON.stringify(gq));
   }
 

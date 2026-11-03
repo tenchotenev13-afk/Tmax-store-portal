@@ -1385,7 +1385,10 @@ function closeTransitImport(){
 
 /* Тялото за upsert. Съществуващ ред: само полетата от SAP + archived_at=null
    (излиза от архива) — status, comment, reviewed_*, transfer_date и
-   updated_* НЕ се пращат, тоест остават. Нов ред: и status 'pending'. */
+   updated_* НЕ се пращат, тоест остават. Нов ред: и status 'pending'.
+   imported_at — при ВСЕКИ upsert (нов и обновен): по нея е прозорецът на
+   авто-отметката (starts_on − 7), не по created_at — ред, оцелял от стар
+   импорт, пази стария created_at (решение А, 03.11.2026). */
 function transitImportBody(r,isNew,who,at){
   var b={
     direction:r.direction,store_name:r.store_name,supplier:String(r.supplier||''),
@@ -1394,7 +1397,7 @@ function transitImportBody(r,isNew,who,at){
     ordered_qty:r.ordered_qty,unit:r.unit,remaining_qty:r.remaining_qty,
     inbound_delivery:r.inbound_delivery,outbound_delivery:r.outbound_delivery,
     delivery_position:r.delivery_position,delivery_qty:r.delivery_qty,
-    archived_at:null
+    archived_at:null,imported_at:at
   };
   if(isNew){ b.status='pending'; b.comment=''; b.transfer_date=null; b.updated_by=who; b.updated_at=at; }
   return b;

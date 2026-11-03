@@ -29,6 +29,11 @@
         (д) остава зелена: търсенето реже нулите и от двете страни)
      4. сверка по position вместо delivery_position           → ❌ в)
      5. архивът в transitData (без transitSplitArchive)       → ❌ е)
+     6. imported_at само за новите редове (не при обновяване)  → ❌ в)
+     7. imported_at изобщо не се праща                        → ❌ в)
+   Прозорецът по imported_at в Бюлетина (bulletin.js) е заключен в
+   task-span-weeks.test.js (раздел 13); мутант 8 — '&created_at=gte.' там
+   → ❌. Функциите в базата — tests/sql/transit-*.test.sql (след миграцията).
 
    Пускане:  node tests/transit-vd-import.test.js .
 */
@@ -206,6 +211,15 @@ const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' &
     ok('обновеният ред НЕ праща comment, reviewed_*, transfer_date',
       !('comment' in e1) && !('reviewed_at' in e1) && !('reviewed_by' in e1) && !('transfer_date' in e1));
     ok('обновеният ред носи новото количество 6', e1.delivery_qty === 6, e1.delivery_qty);
+    /* Решение А (03.11.2026): прозорецът на авто-отметката е по imported_at —
+       пише се при ВСЕКИ upsert, иначе оцелелият ред остава извън прозореца. */
+    const stamp = b => typeof b.imported_at === 'string' && !isNaN(Date.parse(b.imported_at));
+    ok('обновеният ред носи imported_at', stamp(e1), e1.imported_at);
+    const nw = bodies.filter(b => b.delivery_position === '900002')[0] || {};
+    ok('новият ред носи imported_at', stamp(nw), nw.imported_at);
+    ok('всички редове в импорта — с еднакъв imported_at', bodies.length > 0 && bodies.every(b => b.imported_at === bodies[0].imported_at),
+      JSON.stringify(bodies.map(b => b.imported_at)));
+    ok('created_at не се праща (остава първото внасяне)', bodies.every(b => !('created_at' in b)));
     const e4 = bodies.filter(b => b.inbound_delivery === '180000003')[0] || {};
     ok('архивираният, появил се пак, получава archived_at = null', 'archived_at' in e4 && e4.archived_at === null, JSON.stringify(e4));
     ok('и пак без status', !('status' in e4));

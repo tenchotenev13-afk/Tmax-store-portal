@@ -18,9 +18,9 @@
 -- Критерият НЕ сравнява starts_on с днес (решение на Тенчо, 27.09.2026:
 -- синхронизацията не се блокира по starts_on > днес, иначе обект, приключил
 -- ранен импорт, никога не се отмята — на starts_on няма тригер). Сравнява
--- created_at на редовете с starts_on − 7 дни. Затова „преди/на/след starts_on"
+-- imported_at (до 03.11.2026 created_at) на редовете с starts_on − 7 дни. Затова „преди/на/след starts_on"
 -- се разиграва с ДАТИТЕ НА ИМПОРТА, а не с фалшив часовник: старата партида е
--- с created_at = starts_on − 30, новата — starts_on или starts_on − 1.
+-- с imported_at = starts_on − 30, новата — starts_on или starts_on − 1.
 --
 -- Отмятането минава през ИСТИНСКИТЕ тригери по goods_transit (INSERT/UPDATE),
 -- не през пряко извикване на функцията — това е пътят, по който работи на живо.
@@ -85,7 +85,7 @@ begin
      Точно ситуацията на 27.09.2026 — 11 от 19 обекта са приключили старата
      партида. INSERT-ът пуска тригера, тоест синхронизацията тече веднага. */
   insert into public.goods_transit
-    (store_name, direction, material_name, status, reviewed_at, reviewed_by, created_at)
+    (store_name, direction, material_name, status, reviewed_at, reviewed_by, imported_at)
   values (ob, 'incoming', '__sqltest_star_1', 'received',
           ((s_span - 25)::timestamp at time zone sofia), 'sqltest',
           ((s_span - 30)::timestamp at time zone sofia)),
@@ -107,7 +107,7 @@ begin
 
   /* ── 2. НОВАТА ПАРТИДА пристига: редовете са необработени ──────────────── */
   insert into public.goods_transit
-    (store_name, direction, material_name, status, reviewed_at, created_at)
+    (store_name, direction, material_name, status, reviewed_at, imported_at)
   values (ob, 'incoming', '__sqltest_nov_1', 'pending', null,
           (s_span::timestamp at time zone sofia)),
          (ob, 'incoming', '__sqltest_nov_2', 'pending', null,
@@ -137,7 +137,7 @@ begin
      Заради този случай допускът е 7 дни, а не нула: при нулев прозорец
      задачата не би се отметнала никога — на starts_on няма тригер. */
   insert into public.goods_transit
-    (store_name, direction, material_name, status, reviewed_at, created_at)
+    (store_name, direction, material_name, status, reviewed_at, imported_at)
   values (ob_ran, 'incoming', '__sqltest_ranen_1', 'pending', null,
           ((s_ran - 1)::timestamp at time zone sofia));
 
@@ -162,7 +162,7 @@ begin
 
   /* ── 5. ПАРТИДА ОТПРЕДИ ПРОЗОРЕЦА (8 дни преди starts_on) НЕ важи ──────── */
   insert into public.goods_transit
-    (store_name, direction, material_name, status, reviewed_at, reviewed_by, created_at)
+    (store_name, direction, material_name, status, reviewed_at, reviewed_by, imported_at)
   values (ob_gran, 'incoming', '__sqltest_gran_1', 'received',
           now(), 'sqltest', ((s_ran - 8)::timestamp at time zone sofia));
 
@@ -171,14 +171,16 @@ begin
   checks := checks + 1;
   if n <> 0 then fails := fails || ' [ред 8 дни преди „в сила от" е ИЗВЪН прозореца (има ' || n || ')]'; end if;
 
-  /* ── 6. ДАННИТЕ: колко реда са внесени извън последния месечен импорт ────
-     Допускането зад числото 7 е, че импортът е един на месец и вътре в месеца
-     не се добавят редове на ръка. Стане ли това число > 0, прозорецът може да
-     захване стар ред — виж коментара в схемата. Тестовите редове по-горе са в
-     същата транзакция, затова се изключват по име. */
+  /* ── 6. ДАННИТЕ: колко неархивирани реда последният импорт не е видял ────
+     От 03.11.2026 (transit-vd-schema.sql) импортът пише imported_at на всеки
+     ред, който вижда, и архивира останалите с ВД. Неархивиран ред с по-стар
+     imported_at е ръчно добавен посред месеца. Стане ли това число > 0,
+     прозорецът може да захване стар ред — виж коментара в схемата. Тестовите
+     редове по-горе са в същата транзакция, затова се изключват по име. */
   select count(*) into n from public.goods_transit
    where material_name not like '\_\_sqltest%'
-     and created_at < (select max(created_at) from public.goods_transit
+     and archived_at is null
+     and imported_at < (select max(imported_at) from public.goods_transit
                         where material_name not like '\_\_sqltest%') - interval '1 day';
   checks := checks + 1;
   if n <> 0 then fails := fails || ' [редове извън месечния импорт = 0, са ' || n || ' → допускът от 7 дни иска преглед]'; end if;

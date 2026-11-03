@@ -29,10 +29,28 @@
 -- индекс са различни помежду си (по подразбиране, без NULLS NOT DISTINCT),
 -- тоест колкото и редове с inbound_delivery = null да има, не се сблъскват.
 --
+-- ═══ imported_at — ПРОЗОРЕЦЪТ НА АВТО-ОТМЕТКАТА (решение А на Тенчо, 03.11) ══
+-- Авто-отметката на задача с starts_on брои само редовете, внесени от
+-- starts_on − 7 насам (bulletin-task-starts-on-schema.sql, 27.09.2026). Досега
+-- „внесен“ беше created_at — вярно, докато таблицата се изчистваше всеки
+-- месец. От етап 1 ред, оцелял от стар импорт, пази стария created_at и
+-- излиза от прозореца: стар чакащ ред не пречи на отметката, а обект само със
+-- стари редове изглежда „празен“ (auto:transit-empty). imported_at е „кога
+-- импортът последно е видял реда“: пише се при ВСЕКИ upsert — нов и обновен
+-- ред. transit_store_done_since, transit_mark_empty_stores и броячът в
+-- bulletin.js четат нея вместо created_at. Защитата от 27.09 („никой не се
+-- отмята преди новия импорт“) остава: старите редове получават нов imported_at
+-- чак когато дойде новият импорт. NOT NULL default now() — ръчно добавеният
+-- ред („+ Добави ред“) получава часа на добавянето, както досега created_at.
+-- Таблицата е празна → нищо не се попълва назад.
+--
 -- ═══ ФУНКЦИИТЕ В БАЗАТА ═══════════════════════════════════════════════════
 -- Архивът не се брои никъде. Трите функции, които БРОЯТ редове на обекта,
--- получават „archived_at is null“ — само това, нищо друго в телата им не е
--- пипнато (телата са генерирани от живите, сверени с md5 на 03.11.2026).
+-- получават „archived_at is null“; transit_store_done_since и
+-- transit_mark_empty_stores четат и imported_at вместо created_at. Нищо друго
+-- в телата не е пипнато (генерирани са от живите, сверени с md5 на 03.11.2026).
+-- transit_mark_empty_stores: тялото в transit-empty-stores-schema.sql СЕ
+-- РАЗЛИЧАВА от живото (md5 1eaabaf1… на живото) — основа е живото.
 -- Без промяна, нарочно:
 --   · goods_transit_sync_trg, bulletin_tasks_transit_sync_trg — само обхождат
 --     обектите; архивирането е UPDATE и пуска синхронизацията само;
@@ -48,7 +66,8 @@ alter table public.goods_transit
   add column if not exists outbound_delivery text,
   add column if not exists delivery_position text,
   add column if not exists delivery_qty      numeric,
-  add column if not exists archived_at       timestamptz;
+  add column if not exists archived_at       timestamptz,
+  add column if not exists imported_at       timestamptz not null default now();
 
 create unique index if not exists goods_transit_vd_pos_uniq
   on public.goods_transit (inbound_delivery, delivery_position);
@@ -63,8 +82,10 @@ comment on column public.goods_transit.delivery_qty is
   '„К-во по доставка“ от файла „ВД и ИД“ — основното количество на реда.';
 comment on column public.goods_transit.archived_at is
   'Кога импортът е архивирал реда (ВД-то го няма в новия импорт). Архивираният ред не се брои никъде; появи ли се пак — става NULL.';
+comment on column public.goods_transit.imported_at is
+  'Кога импортът последно е видял реда (пише се при всеки upsert; ръчен ред — часът на добавяне). Прозорецът на авто-отметката (starts_on − 7) чете нея, не created_at.';
 
--- ── 2. transit_store_done_since: само неархивираните редове ──────────────
+-- ── 2. transit_store_done_since: без архива, прозорецът по imported_at ──
 create or replace function public.transit_store_done_since(p_store text, p_since date)
  returns boolean
  language sql
@@ -76,18 +97,18 @@ as $function$
             where store_name = p_store and direction = 'incoming'
               and archived_at is null
               and (p_since is null
-                   or created_at >= (p_since::timestamp at time zone 'Europe/Sofia')))
+                   or imported_at >= (p_since::timestamp at time zone 'Europe/Sofia')))
      and not exists (
            select 1 from goods_transit
             where store_name = p_store and direction = 'incoming'
               and archived_at is null
               and (p_since is null
-                   or created_at >= (p_since::timestamp at time zone 'Europe/Sofia'))
+                   or imported_at >= (p_since::timestamp at time zone 'Europe/Sofia'))
               and coalesce(status, 'pending') = 'pending'
               and reviewed_at is null);
 $function$;
 
--- ── 3. transit_mark_empty_stores: обект „без редове" се смята без архива ──
+-- ── 3. transit_mark_empty_stores: без архива, прозорецът по imported_at ──
 create or replace function public.transit_mark_empty_stores()
  returns integer
  language plpgsql
@@ -125,11 +146,11 @@ begin
     v_from := case when t.starts_on is null then null
                    else ((t.starts_on - 7)::timestamp at time zone 'Europe/Sofia') end;
 
-    select count(*), max(created_at) into v_rows, v_last
+    select count(*), max(imported_at) into v_rows, v_last
       from goods_transit
      where direction = 'incoming'
        and archived_at is null
-       and (v_from is null or created_at >= v_from);
+       and (v_from is null or imported_at >= v_from);
 
     if v_rows = 0 then continue; end if;
     if v_last > now() - v_quiet then continue; end if;
@@ -151,7 +172,7 @@ begin
              select 1 from goods_transit g
               where g.store_name = s and g.direction = 'incoming'
                 and g.archived_at is null
-                and (v_from is null or g.created_at >= v_from))
+                and (v_from is null or g.imported_at >= v_from))
     on conflict (task_id, store_name, completion_date)
        where task_id is not null and completion_date is not null
     do nothing;
@@ -167,7 +188,7 @@ begin
                select 1 from goods_transit g
                 where g.store_name = tc.store_name and g.direction = 'incoming'
                   and g.archived_at is null
-                  and (v_from is null or g.created_at >= v_from));
+                  and (v_from is null or g.imported_at >= v_from));
       get diagnostics v_tmp = row_count;
       v_d := v_d + coalesce(v_tmp, 0);
     end if;

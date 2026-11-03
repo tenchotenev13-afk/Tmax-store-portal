@@ -1190,8 +1190,21 @@ apply_migration (номерът — в `claude/log/2026-11-03-transit-vd-import.
 **Връзка за етап 3:** `loading.js` (≈1822, `llAutoCloseDoc`, приет палет)
 слага `goods_transit.status='received'` — когато статусът се раздели на две
 полета, това място трябва да се реши заедно с него. Етапи 2–4 са отворени
-(`claude/open/03-11-transit-stages-2-4.md`); прозорецът по `created_at` в
-авто-отметката — `claude/open/03-11-transit-created-at-window.md`.
+(`claude/open/03-11-transit-stages-2-4.md`).
+**Прозорецът на авто-отметката е по `imported_at`, не по `created_at`**
+(решение А на Тенчо, 03.11, в същата миграция): импортът пише `imported_at`
+при всеки upsert (нов и обновен ред), а `transit_store_done_since`,
+`transit_mark_empty_stores` и броячът в `bulletin.js` (`bulLoadTransitPending`)
+четат нея. Причина: таблицата вече не се изчиства и оцелелият ред пази стария
+`created_at`. Защитата от 27.09 („никой не се отмята преди новия импорт“)
+остава. SQL тестовете `tests/sql/transit-starts-on.test.sql` и
+`transit-empty-stores.test.sql` разиграват прозореца през `imported_at` —
+пускат се СЛЕД миграцията.
+**`transit_mark_empty_stores`: тялото в `transit-empty-stores-schema.sql`
+(и в миграция 20260928001552) СЕ РАЗЛИЧАВА от живото в базата** — md5 на
+живото `1eaabaf1…`, на файла друго. `transit-vd-schema.sql` е генериран от
+ЖИВОТО тяло; rollback-ът връща също живото. Старият файл не е поправян —
+кой е последният запис на функцията, не е проследено.
 
 ## 6. Отворени точки → виж claude/open/ (npm run open). Затворени — claude/open/closed/.
 

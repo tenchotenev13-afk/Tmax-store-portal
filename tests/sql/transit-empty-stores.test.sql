@@ -8,9 +8,9 @@
 --
 -- ═══ КАК СЕ РАЗИГРАВА ИМПОРТЪТ ═════════════════════════════════════════════
 -- Импортът в transit.js пише на порции по 50 реда и тригерите по goods_transit
--- се палят след ВСЯКА порция. Тук порциите се разиграват през created_at:
---   · ред с created_at = now()              → „току-що", тишината НЕ е минала;
---   · ред с created_at = now() − 20 минути  → импортът е приключил.
+-- се палят след ВСЯКА порция. Тук порциите се разиграват през imported_at (от 03.11.2026; дотогава created_at):
+--   · ред с imported_at = now()             → „току-що", тишината НЕ е минала;
+--   · ред с imported_at = now() − 20 минути → импортът е приключил.
 -- Часовникът не се пипа. now() е замразено за транзакцията, значи двете
 -- сравнения са детерминирани, а не зависят от това колко е текъл тестът.
 --
@@ -73,7 +73,7 @@ begin
 
   /* ── 0. ИЗОЛАЦИЯ: реални редове в прозореца на теста? ─────────────────── */
   select count(*) into n from goods_transit
-   where direction = 'incoming' and created_at >= from_old;
+   where direction = 'incoming' and archived_at is null and imported_at >= from_old;
   if n <> 0 then
     raise exception 'ТЕСТЪТ НЕ Е ИЗОЛИРАН: % реални входящи реда след % — не може да различи своите от чуждите', n, from_old;
   end if;
@@ -115,7 +115,7 @@ begin
   end if;
 
   /* ── 2. ПЪРВА ПОРЦИЯ, току-що вмъкната: тишината НЕ е минала ───────────── */
-  insert into goods_transit (store_name, direction, material_name, status, created_at)
+  insert into goods_transit (store_name, direction, material_name, status, imported_at)
   values (ob_a, 'incoming', '__sqltest_p1', 'pending', now());
 
   /* Задача БЕЗ прозорец (v_from = null) — вижда цялата таблица, значи и двата
@@ -134,7 +134,7 @@ begin
   end if;
 
   /* ── 3. ИМПОРТЪТ Е ПРИКЛЮЧИЛ (последният ред е на 20 минути) ───────────── */
-  update goods_transit set created_at = now() - interval '20 minutes'
+  update goods_transit set imported_at = now() - interval '20 minutes'
    where material_name = '__sqltest_p1';
 
   n := transit_mark_empty_stores();
@@ -196,7 +196,7 @@ begin
   /* ── 7. ДОПЪЛВАЩ ИМПОРТ: празният обект получава редове → отметката пада ─
      Тригерът по goods_transit САМО вмъква (transit_sync_completions никога не
      трие), тоест махането може да дойде единствено от проверяваната функция. */
-  insert into goods_transit (store_name, direction, material_name, status, created_at)
+  insert into goods_transit (store_name, direction, material_name, status, imported_at)
   values (ob_b, 'incoming', '__sqltest_late', 'pending', now() - interval '20 minutes');
 
   n := transit_mark_empty_stores();
