@@ -1182,7 +1182,8 @@ floor(процесори/3), най-много 8). Измерено 19.10 на �
 вместо да изчиства — пази статус / коментар / проверено / дата на трансфер,
 липсващото ВД отива в архив (`archived_at`), не се трие; „🗑 Изчисти всички"
 е махнат. Архивът е изключен от всички четящи места: `bulletin.js`,
-`report.js` + `send-scheduled-report` (v65), `minusi.js`, `checklist.js`,
+`report.js` + `send-scheduled-report` (бележка v65, **версия 78** в Supabase,
+деплойната 03.11 от `60d5974`, обратното четене байт в байт), `minusi.js`, `checklist.js`,
 `loading.js` (2 места; търсенето по конкретен документ — не), функциите в
 базата `transit_store_done_since`, `transit_mark_empty_stores`,
 `checklist_portal_values` (`transit-vd-schema.sql`). Миграция
