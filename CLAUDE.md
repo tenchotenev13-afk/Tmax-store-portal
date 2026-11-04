@@ -577,6 +577,13 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
   в `tests/delete-tables-whitelist.test.js` (от 02.11.2026,
   `anon-revoke-delete-schema.sql`). Нова таблица, от която браузърът трие →
   `grant delete` в нова миграция + запис в `DELETE_ALLOWED`.
+- Нова таблица в `public` е **без DELETE** за `anon`/`authenticated` по
+  подразбиране (default privileges за postgres, 04.11.2026,
+  `default-privileges-delete-schema.sql`); SELECT/INSERT/UPDATE остават.
+  Таблица, от която браузърът трие → изричен `grant delete` в миграцията +
+  запис в `DELETE_ALLOWED`. Граница: записът за `supabase_admin` не може да
+  се промени от postgres (42501) — таблица, създадена от supabase_admin, пак
+  получава DELETE за anon; нашите миграции вървят като postgres.
 - Не изключвай RLS „за да мине" — това е решение, което се записва в
   миграцията с едно изречение защо, не мълчалив заобикаляне.
 - При `SECURITY DEFINER` функция проверявай ACL-а за водещо `=X/` ПРЕДИ да
