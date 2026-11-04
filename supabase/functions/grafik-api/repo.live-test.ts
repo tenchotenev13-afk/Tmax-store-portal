@@ -19,7 +19,7 @@ function check(c: boolean, msg: string, extra?: unknown) {
 }
 async function counts() {
   const out: Record<string, number> = {};
-  for (const t of ["grafik_months", "grafik_rows", "grafik_staff", "companies", "grafik_store_company"]) {
+  for (const t of ["grafik_months", "grafik_rows", "grafik_staff", "companies", "grafik_store_company", "grafik_access"]) {
     const r = await raw.from(t).select("*", { count: "exact", head: true });
     if (r.error) throw new Error(t + ": " + r.error.message);
     out[t] = r.count ?? -1;
@@ -31,8 +31,19 @@ const before = await counts();
 console.log("ПРЕДИ:", JSON.stringify(before));
 const created: { staff: string[]; month: string | null } = { staff: [], month: null };
 try {
-  const st = await repo.getSettings(["grafik_beta_users", "grafik_trz_users", "няма_такъв"]);
-  check(!!st.grafik_beta_users && !!st.grafik_trz_users && !("няма_такъв" in st), "getSettings — двата ключа, без непознатия");
+  const acc0 = await repo.listAccess();
+  check(acc0.some((r) => r.list === "beta") && acc0.some((r) => r.list === "trz") && acc0.every((r) => r.email === r.email.toLowerCase()), "listAccess — beta и trz, малки букви", acc0.length);
+  const ins = await repo.insertAccess({ list: "beta", email: "repo.live-test@nikoj.bg", note: MARK, created_by: "repo.live-test" });
+  check(!!ins.id && ins.email === "repo.live-test@nikoj.bg", "insertAccess");
+  let dup = "";
+  try { await repo.insertAccess({ list: "beta", email: "repo.live-test@nikoj.bg" }); } catch (e) { dup = (e as { reason?: string }).reason || String(e); }
+  check(dup === "db_constraint", "insertAccess — дубликат → db_constraint (уникален индекс)", dup);
+  let upper = "";
+  try { await repo.insertAccess({ list: "beta", email: "Repo.Live-Test2@nikoj.bg" }); } catch (e) { upper = (e as { reason?: string }).reason || String(e); }
+  check(upper === "db_constraint", "insertAccess — главни букви → db_constraint (CHECK)", upper);
+  check(await repo.deleteAccess(ins.id) && !(await repo.deleteAccess(ins.id)), "deleteAccess — веднъж true, после false");
+  const vtrs = await repo.vtrList();
+  check(vtrs.length >= 1 && vtrs.every((v) => !!v.id && !!v.name), "vtrList", vtrs.map((v) => v.name));
 
   const names = await repo.storeNames();
   check(names.indexOf(STORE) >= 0 && names.indexOf("Гоце Делчев") >= 0, "storeNames — с кирилица и интервал", names.length);

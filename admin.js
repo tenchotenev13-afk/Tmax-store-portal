@@ -8,6 +8,7 @@ function loadAdmin(){
   loadRestrictionsAdmin();
   loadCatalogAdmin();
   loadNotificationsAdmin();
+  if(typeof grAdminLoad === 'function') grAdminLoad();   /* „📆 График“ (grafik.js) — само ако grafik-api го дава на admin */
 }
 
 /* Кои карти вижда ролята. Табът е за admin и accounting (setupTabsForRole в

@@ -59,7 +59,9 @@ Netlify се ползва само за тестване/staging.
   `osSend` с таг обект И име; паднало → `notify_error` + „🔁 Прати пак"),
   приемане от обекта → received / partial. Автоматична Разлика — не
 - `grafik.js` + `grafik-engine.js` — Работен график (таб „📆 График“, в
-  разработка — само `app_settings.grafik_beta_users`, виж HIDDEN-FEATURES.md).
+  разработка — само списъкът beta в `grafik_access`, виж HIDDEN-FEATURES.md;
+  табът се показва по `grafik-api` „me“, списъкът не е публичен; редакция —
+  Администрация → „📆 График“).
   Данните са САМО през едж функцията `grafik-api` (пропускът `currentSession`):
   таблиците `grafik_*` са с RLS без политики и без права за anon — не добавяй
   `sbGet` към тях. Изчисленията (празници, буква → код по сезон и договор,

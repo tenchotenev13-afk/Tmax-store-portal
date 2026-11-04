@@ -8,8 +8,9 @@
 //   1) подписан пропуск от auth-login (verifySession) — иначе 401 session_expired;
 //   2) редът от users по uid от пропуска — роля, обект, is_regional,
 //      assigned_stores и active идват от базата, не от пропуска;
-//   3) имейлът е в app_settings.grafik_beta_users — иначе 403 not_beta;
-//   4) вид достъп: ТРЗ (grafik_trz_users, има предимство пред admin) → чете
+//   3) имейлът е в grafik_access (list = beta; до 04.11.2026 — app_settings.grafik_beta_users) —
+//      иначе 403 not_beta (така браузърът знае и дали да покаже таба);
+//   4) вид достъп: ТРЗ (grafik_access list = trz, има предимство пред admin) → чете
 //      всички, само подадени месеци, не пише; admin → всичко; регионален
 //      (is_regional + assigned_stores) → своите обекти; manager → своя обект;
 //      останалите → чете своя обект.
@@ -33,6 +34,10 @@ export type MonthRow = {
 };
 export type RowRec = { id?: string; month_id: string; staff_id: string; letters: string[]; locked: Record<string, string>; sort_order?: number; updated_at?: string; updated_by?: string | null };
 export type Staff = { id: string; store_name: string; [k: string]: unknown };
+// Списъците за модула (grafik_access): beta — кой вижда таба; trz — чете само подадените.
+export type AccessList = "beta" | "trz";
+export type AccessRow = { id: string; list: AccessList; email: string; note: string | null; created_at?: string; created_by?: string | null };
+export type Vtr = { id: string; name: string };
 // По месец: колко реда има и последната промяна по тях (кой, кога) — за обзора.
 export type RowStat = { rows: number; last_at: string | null; last_by: string | null };
 export type SetupRaw = {
@@ -50,7 +55,10 @@ export type AdminTable = "companies" | "grafik_company_terms" | "grafik_store_co
 
 export interface Repo {
   getUser(id: string): Promise<User | null>;
-  getSettings(keys: string[]): Promise<Record<string, string>>;
+  listAccess(): Promise<AccessRow[]>;
+  insertAccess(fields: Record<string, unknown>): Promise<AccessRow>;
+  deleteAccess(id: string): Promise<boolean>;
+  vtrList(): Promise<Vtr[]>;
   storeNames(): Promise<string[]>;
   getMonth(store: string, month: string): Promise<MonthRow | null>;
   ensureMonth(store: string, month: string): Promise<MonthRow>;
@@ -82,16 +90,18 @@ export class HttpError extends Error {
 }
 
 // ── Чисти помощни функции ─────────────────────────────────────────────────
-// „a@x, b@y" → ["a@x","b@y"]: разделяне по запетая, trim, lowercase.
-export function parseEmailList(v: unknown): string[] {
-  if (typeof v !== "string") return [];
-  return v.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+export function accessEmails(rows: AccessRow[], list: AccessList): string[] {
+  return rows.filter((r) => r.list === list).map((r) => String(r.email).trim().toLowerCase());
 }
+// Имейл за списъците: малки букви, без интервали, точно едно „@“ и точка в домейна.
+export const ACCESS_EMAIL_RE = /^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/;
 
 export function resolveAccess(u: User, beta: string[], trz: string[]): Access | HttpError {
   const email = String(u.email || "").trim().toLowerCase();
   if (u.active === false) return new HttpError(403, "inactive", "Акаунтът е неактивен.");
-  if (!email || beta.indexOf(email) < 0) return new HttpError(403, "not_beta", "Модулът „Работен график“ още не е отворен за този акаунт.");
+  // ТРЗ списъкът е достатъчен сам (04.11.2026): картата в „Администрация“ добавя ТРЗ с един ред —
+  // не трябва да се помни, че е нужен и beta (trz@temax.bg от 01.11 беше само в ТРЗ и не влизаше).
+  if (!email || (beta.indexOf(email) < 0 && trz.indexOf(email) < 0)) return new HttpError(403, "not_beta", "Модулът „Работен график“ още не е отворен за този акаунт.");
   const base = { email, name: u.display_name || email, role: u.role || "" };
   if (trz.indexOf(email) >= 0) return { ...base, kind: "trz", readAll: true, read: [], edit: [], canAdmin: false, canReopen: false };
   if (u.role === "admin") return { ...base, kind: "admin", readAll: true, read: [], edit: "all", canAdmin: true, canReopen: true };
@@ -329,9 +339,9 @@ export async function handleGrafik(req: Request, getRepo: () => Repo, now?: numb
     // 2) Актуалният потребител от базата.
     const user = await repo.getUser(String(sess.uid));
     if (!user) return json({ ok: false, reason: "forbidden", message: "Потребителят не е намерен." }, 403);
-    // 3) + 4) Списъците и видът достъп.
-    const st = await repo.getSettings(["grafik_beta_users", "grafik_trz_users"]);
-    const acc = resolveAccess(user, parseEmailList(st.grafik_beta_users), parseEmailList(st.grafik_trz_users));
+    // 3) + 4) Списъците (grafik_access — от 04.11.2026, вместо app_settings) и видът достъп.
+    const lists = await repo.listAccess();
+    const acc = resolveAccess(user, accessEmails(lists, "beta"), accessEmails(lists, "trz"));
     if (acc instanceof HttpError) return json({ ok: false, reason: acc.reason, message: acc.message }, acc.status);
     const result = await dispatch(repo, acc, body);
     return json({ ok: true, ...result }, 200);
@@ -578,6 +588,8 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const t: AdminTable[] = ["companies", "grafik_company_terms", "grafik_store_company", "grafik_extra_days", "grafik_letter_map"];
       const out: Record<string, unknown> = {};
       for (const k of t) out[k] = await repo.adminList(k);
+      out.vtrs = await repo.vtrList();             // за избора на ВТР при дружеството (картата в „Администрация“)
+      out.stores = await repo.storeNames();
       return out;
     }
 
@@ -613,6 +625,40 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const ok = await repo.adminDelete(table, uuid(b.id, "id"));
       if (!ok) throw new HttpError(404, "not_found", "Записът не е намерен.");
       await audit(repo, acc, "grafik_admin_delete", null, { table, id: b.id });
+      return { deleted: 1 };
+    }
+
+    // ── Списъците beta / ТРЗ (grafik_access, етап 1е-3) — само admin, всяка промяна в одита.
+    // Собственият имейл не се пипа: махнат от beta — admin губи модула; добавен в ТРЗ — губи
+    // администрацията (ТРЗ има предимство пред admin) и не може да го махне сам.
+    case "access_list": {
+      if (!acc.canAdmin) throw new HttpError(403, "forbidden", "Само admin.");
+      return { rows: await repo.listAccess() };
+    }
+
+    case "access_add": {
+      if (!acc.canAdmin) throw new HttpError(403, "forbidden", "Само admin.");
+      const list = b.list;
+      if (list !== "beta" && list !== "trz") throw new HttpError(400, "bad_request", "Списъкът е beta или trz.");
+      const email = typeof b.email === "string" ? b.email.trim().toLowerCase() : "";
+      if (!ACCESS_EMAIL_RE.test(email)) throw new HttpError(400, "bad_email", "Невалиден имейл.");
+      if (email === acc.email) throw new HttpError(409, "self", "Собствения си имейл не променяш оттук — би загубил достъпа до администрацията.");
+      const rows = await repo.listAccess();
+      if (rows.some((r) => r.list === list && r.email === email)) throw new HttpError(409, "duplicate", "Имейлът вече е в списъка.");
+      const note = typeof b.note === "string" && b.note.trim() ? b.note.trim().slice(0, 200) : null;
+      const row = await repo.insertAccess({ list, email, note, created_by: acc.email });
+      await audit(repo, acc, "grafik_access_add", null, { list, email, note });
+      return { row };
+    }
+
+    case "access_remove": {
+      if (!acc.canAdmin) throw new HttpError(403, "forbidden", "Само admin.");
+      const id = uuid(b.id, "id");
+      const cur = (await repo.listAccess()).filter((r) => r.id === id)[0];
+      if (!cur) throw new HttpError(404, "not_found", "Записът не е намерен.");
+      if (cur.email === acc.email) throw new HttpError(409, "self", "Собствения си имейл не променяш оттук — би загубил достъпа до администрацията.");
+      if (!(await repo.deleteAccess(id))) throw new HttpError(404, "not_found", "Записът не е намерен.");
+      await audit(repo, acc, "grafik_access_remove", null, { list: cur.list, email: cur.email });
       return { deleted: 1 };
     }
   }

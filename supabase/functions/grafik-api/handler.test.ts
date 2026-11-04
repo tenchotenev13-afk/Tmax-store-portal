@@ -3,9 +3,9 @@
 // База в паметта (MemRepo) — без мрежа. Проверява правата по вид × действие ×
 // свой/чужд обект, пропуска, beta/ТРЗ списъците, клетките, снимката и валидността по дати.
 import {
-  handleGrafik, HttpError, parseEmailList, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
+  handleGrafik, HttpError, accessEmails, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
   snapshotOffNorm,
-  type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector, type RowStat,
+  type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector, type RowStat, type AccessRow,
 } from "./handler.ts";
 import { signSession } from "../_shared/session.ts";
 
@@ -37,7 +37,10 @@ const BETA = " Ten.Tenev@temax.bg, tencho.tenev13@gmail.com,trz@temax.bg , sklad
 
 class MemRepo implements Repo {
   users = Object.values(U);
-  settings: Record<string, string> = { grafik_beta_users: BETA, grafik_trz_users: "TRZ@temax.bg" };
+  // grafik_access: имейлите от BETA + ТРЗ (в базата CHECK пази малки букви — тук идват както са записани).
+  access: AccessRow[] = ([] as AccessRow[]).concat(BETA.split(",").map((e) => e.trim().toLowerCase()).filter(Boolean).map((email) => ({ id: nid(), list: "beta" as const, email, note: null })),
+    [{ id: nid(), list: "trz" as const, email: "trz@temax.bg", note: null }]);
+  vtrs = [{ id: VTR, name: "ВТР ТЦД 3 / ТЦД 4 / Юг (01.11.2026)" }];
   stores = ["Кърджали", "Шумен", "Раднево", "Добрич"];
   months: MonthRow[] = [];
   rows: RowRec[] = [];
@@ -68,7 +71,10 @@ class MemRepo implements Repo {
     }
   }
   async getUser(id: string) { return this.users.filter((u) => u.id === id)[0] || null; }
-  async getSettings(keys: string[]) { const o: Record<string, string> = {}; keys.forEach((k) => { if (this.settings[k] !== undefined) o[k] = this.settings[k]; }); return o; }
+  async listAccess() { return this.access.slice(); }
+  async insertAccess(f: Record<string, unknown>) { const r = { id: nid(), note: null, ...f } as AccessRow; this.access.push(r); return r; }
+  async deleteAccess(id: string) { const n = this.access.length; this.access = this.access.filter((r) => r.id !== id); return this.access.length < n; }
+  async vtrList() { return this.vtrs.slice(); }
   async storeNames() { return this.stores.slice(); }
   async getMonth(store: string, month: string) { return this.months.filter((m) => m.store_name === store && m.month === month)[0] || null; }
   async ensureMonth(store: string, month: string) {
@@ -153,10 +159,9 @@ const kStaff = (r: MemRepo, store = "Кърджали") => r.staff.filter((s) =>
 const L30 = (fill: string[] = []) => { const a = new Array(30).fill(""); fill.forEach((v, i) => { a[i] = v; }); return a; };
 
 // ── Чисти функции ─────────────────────────────────────────────────────────
-Deno.test("parseEmailList: запетаи, интервали, главни букви, празни", () => {
-  eq(parseEmailList(" A@x.bg, b@Y.bg ,, c@z "), ["a@x.bg", "b@y.bg", "c@z"], "разделяне");
-  eq(parseEmailList(null), [], "null");
-  eq(parseEmailList(""), [], "празно");
+Deno.test("accessEmails: по списък, малки букви", () => {
+  const rows = [{ id: "1", list: "beta", email: "A@x.bg ", note: null }, { id: "2", list: "trz", email: "t@x.bg", note: null }] as AccessRow[];
+  eq([accessEmails(rows, "beta"), accessEmails(rows, "trz"), accessEmails([], "beta")], [["a@x.bg"], ["t@x.bg"], []], "разделяне по list");
 });
 
 Deno.test("parseMonth: дни, предходен месец, високосна, невалидни", () => {
@@ -234,10 +239,10 @@ Deno.test("неактивен, извън beta, непознат → 403", async
   eq((await call(r, U.outside, { action: "me" })).body.reason, "not_beta", "извън beta");
   const ghost = { ...U.admin, id: "99999999-0000-4000-8000-000000000000" };
   eq((await call(r, ghost, { action: "me" })).status, 403, "няма го в users");
-  r.settings.grafik_beta_users = "ten.tenev@temax.bg";
+  r.access = r.access.filter((x) => !(x.list === "beta" && x.email !== "ten.tenev@temax.bg"));
   eq((await call(r, U.mgrK, { action: "me" })).body.reason, "not_beta", "махнат от beta → веднага без достъп");
-  delete (r.settings as Record<string, string>).grafik_beta_users;
-  eq((await call(r, U.admin, { action: "me" })).body.reason, "not_beta", "без ключ → никой");
+  r.access = [];
+  eq((await call(r, U.admin, { action: "me" })).body.reason, "not_beta", "празна grafik_access → никой");
 });
 
 Deno.test("me: вид и видими обекти за всеки", async () => {
@@ -489,6 +494,48 @@ Deno.test("snapshotOffNorm: празно, стара снимка без norm, �
   eq(snapshotOffNorm({ rows: [{ full_name: "А", codes: ["", ""], diff: 0 }] }), ["А: няма нито един ден"], "стара снимка без norm");
   eq(snapshotOffNorm({ rows: [{ full_name: "Б", codes: [""], diff: 0, norm: 0 }] }), [], "норма 0 — нищо");
   eq(snapshotOffNorm({ rows: [{ short_name: "В", codes: ["Д1/З"], official: 168.5, target: 168, diff: 0.5 }] }), ["В: 168,5 ч. вместо 168 ч."], "над нормата, кратко име");
+});
+
+// ── Списъците beta / ТРЗ (grafik_access, етап 1е-3) ──────────────────────────
+Deno.test("access_*: само admin; добавяне, дубликат, невалиден имейл, махане, одит", async () => {
+  const r = new MemRepo();
+  for (const u of [U.mgrK, U.trz, U.regSh]) eq((await call(r, u, { action: "access_list" })).status, 403, "не-admin — " + u.email);
+  const l = await call(r, U.admin, { action: "access_list" });
+  eq(l.body.rows.map((x: AccessRow) => x.list + ":" + x.email).sort().slice(0, 2), ["beta:off@temax.bg", "beta:sklad.k@temax.bg"], "списъкът");
+  const add = await call(r, U.admin, { action: "access_add", list: "beta", email: "  Drug@Temax.bg ", note: " Регионален Юг " });
+  eq([add.status, add.body.row.email, add.body.row.note, add.body.row.created_by], [200, "drug@temax.bg", "Регионален Юг", "ten.tenev@temax.bg"], "добавен (малки букви, без интервали)");
+  eq((await call(r, U.outside, { action: "me" })).body.kind, "manager", "…и веднага има достъп");
+  eq((await call(r, U.admin, { action: "access_add", list: "beta", email: "drug@temax.bg" })).body.reason, "duplicate", "втори път — 409");
+  eq((await call(r, U.admin, { action: "access_add", list: "trz", email: "drug@temax.bg" })).status, 200, "същият имейл в другия списък — може");
+  eq((await call(r, U.outside, { action: "me" })).body.kind, "trz", "…и става ТРЗ (предимство)");
+  for (const bad of ["", "без-маймунка", "a@b", "a b@c.bg", "a,b@c.bg"]) eq((await call(r, U.admin, { action: "access_add", list: "beta", email: bad })).body.reason, "bad_email", "лош имейл: " + bad);
+  eq((await call(r, U.admin, { action: "access_add", list: "admin", email: "x@temax.bg" })).body.reason, "bad_request", "непознат списък");
+  eq((await call(r, U.admin, { action: "access_add", list: "trz", email: "Ten.Tenev@temax.bg" })).body.reason, "self", "собственият имейл в ТРЗ — не");
+  const own = r.access.filter((x) => x.email === "ten.tenev@temax.bg")[0];
+  eq((await call(r, U.admin, { action: "access_remove", id: own.id })).body.reason, "self", "собственият от beta — не");
+  const tz = r.access.filter((x) => x.list === "trz" && x.email === "drug@temax.bg")[0];
+  eq((await call(r, U.admin, { action: "access_remove", id: tz.id })).body.deleted, 1, "махнат");
+  eq((await call(r, U.outside, { action: "me" })).body.kind, "manager", "…и вече не е ТРЗ");
+  eq((await call(r, U.admin, { action: "access_remove", id: tz.id })).status, 404, "втори път — 404");
+  eq((await call(r, U.admin, { action: "access_remove", id: "не-uuid" })).body.reason, "bad_request", "лош id");
+  eq(r.audits.map((a) => a.event), ["grafik_access_add", "grafik_access_add", "grafik_access_remove"], "одит — само успешните промени");
+});
+
+Deno.test("ТРЗ списъкът е достатъчен сам — без beta (04.11.2026)", async () => {
+  const r = new MemRepo();
+  r.access = r.access.filter((x) => x.email !== "trz@temax.bg" || x.list === "trz");      // trz@temax.bg — само в ТРЗ
+  eq(r.access.filter((x) => x.email === "trz@temax.bg").map((x) => x.list), ["trz"], "наистина само в ТРЗ");
+  const t = await call(r, U.trz, { action: "me" });
+  eq([t.status, t.body.kind, t.body.can_admin], [200, "trz", false], "влиза като ТРЗ");
+  r.access = r.access.filter((x) => x.email !== "trz@temax.bg");
+  eq((await call(r, U.trz, { action: "me" })).body.reason, "not_beta", "в нито един списък → 403");
+});
+
+Deno.test("admin_get: носи и ВТР-ите и обектите (за картата)", async () => {
+  const r = new MemRepo();
+  const g = (await call(r, U.admin, { action: "admin_get" })).body;
+  eq([g.vtrs, g.stores], [[{ id: VTR, name: "ВТР ТЦД 3 / ТЦД 4 / Юг (01.11.2026)" }], ["Кърджали", "Шумен", "Раднево", "Добрич"]], "vtrs и stores");
+  eq((await call(r, U.regSh, { action: "admin_get" })).status, 403, "регионален — не");
 });
 
 // ── Персонал ─────────────────────────────────────────────────────────────

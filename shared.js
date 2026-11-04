@@ -1844,8 +1844,8 @@ function setupTabsForRole(){
     pkSubBtn.style.display='none';
     if(typeof pkLoadUsers==='function') pkLoadUsers();
   }
-  /* Таб „📆 График“ (grafik.js, Работен график) — в разработка: само имейлите от
-     app_settings.grafik_beta_users. Скрит до отговора; grLoadUsers() го показва.
+  /* Таб „📆 График“ (grafik.js, Работен график) — в разработка: само списъкът beta
+     (grafik_access, от 04.11.2026). Скрит до отговора; grLoadUsers() пита grafik-api „me“.
      Данните са само през grafik-api — скритият бутон не е защитата. */
   var grTab=document.getElementById('tab-grafik');
   if(grTab){

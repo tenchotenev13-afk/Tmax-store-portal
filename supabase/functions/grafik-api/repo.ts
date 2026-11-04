@@ -2,7 +2,7 @@
 // Repo на grafik-api върху supabase-js със service ключа. Отделно от index.ts,
 // за да се пуска и от repo.live-test.ts (без Deno.serve при импорт).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { HttpError, type AdminTable, type Repo, type RowRec, type Sector, type Staff } from "./handler.ts";
+import { HttpError, type AccessRow, type AdminTable, type Repo, type RowRec, type Sector, type Staff, type Vtr } from "./handler.ts";
 
 // Само безопасни колони — никога password_hash / history_pin_hash.
 const USER_COLS = "id,email,display_name,store_name,role,is_regional,assigned_stores,active";
@@ -26,11 +26,18 @@ export function makeRepo(): Repo {
     async getUser(id) {
       return ok(await db.from("users").select(USER_COLS).eq("id", id).maybeSingle());
     },
-    async getSettings(keys) {
-      const rows = ok<{ key: string; value: string }[]>(await db.from("app_settings").select("key,value").in("key", keys));
-      const out: Record<string, string> = {};
-      rows.forEach((r) => { out[r.key] = r.value; });
-      return out;
+    async listAccess() {
+      return ok<AccessRow[]>(await db.from("grafik_access").select("id,list,email,note,created_at,created_by").order("list").order("email"));
+    },
+    async insertAccess(fields) {
+      return ok<AccessRow>(await db.from("grafik_access").insert(fields).select("id,list,email,note,created_at,created_by").single());
+    },
+    async deleteAccess(id) {
+      const rows = ok<unknown[]>(await db.from("grafik_access").delete().eq("id", id).select("id"));
+      return rows.length > 0;
+    },
+    async vtrList() {
+      return ok<Vtr[]>(await db.from("grafik_vtr").select("id,name").order("name"));
     },
     async storeNames() {
       const rows = ok<{ name: string; active: boolean | null }[]>(await db.from("stores").select("name,active").order("name"));

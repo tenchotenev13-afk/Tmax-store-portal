@@ -1,7 +1,8 @@
 /* grafik.js — Работен график (етап 1г, 02.11.2026): месечният график на обекта и
-   персоналът. Модулът е в разработка: табът се вижда само от имейлите в
-   app_settings.grafik_beta_users (HIDDEN-FEATURES.md); данните са само през
-   едж функцията grafik-api (таблиците grafik_* са без права за anon).
+   персоналът. Модулът е в разработка: табът се вижда само от имейлите в списъка
+   beta (grafik_access, от 04.11.2026 — до тогава app_settings.grafik_beta_users;
+   HIDDEN-FEATURES.md) — браузърът го научава от grafik-api „me“, защото списъкът не
+   е публичен; данните са само през grafik-api (таблиците grafik_* са без права за anon).
    Изчисленията — в grafik-engine.js (GrafikEngine), общи с файла за ТРЗ (1д).
 
    Въвеждане: само клавиатура — буква / число 1–12, стрелки, Tab, Enter, Delete;
@@ -17,7 +18,7 @@ var GR_DOW = ['','Пн','Вт','Ср','Чт','Пт','Сб','Нд'];
 /* Фонетична кирилица: магазинът пише и на латиница (p → П, ld → ЛД). */
 var GR_LATIN = {a:'А',b:'Б',v:'В',w:'В',g:'Г',d:'Д',e:'Е',z:'З',i:'И',k:'К',l:'Л',m:'М',n:'Н',o:'О',p:'П',r:'Р',s:'С',t:'Т',u:'У',f:'Ф',h:'Х',c:'Ц'};
 
-var grUsersOn = [], grUsersSeq = 0, grLoadSeq = 0;
+var grTabOk = false, grTabRes = null, grUsersSeq = 0, grLoadSeq = 0;
 var grMe = null;            // отговорът на action "me"
 var grStore = '', grMonth = '';
 var grView = 'grid';        // 'grid' | 'staff' | 'overview'
@@ -33,22 +34,18 @@ var grSaved = {};           // staff_id → има ред в grafik_rows за т
 var grVisible = [];         // служителите в графика за месеца (подредени)
 
 /* ─── Достъп (бутонът) ─────────────────────────────────── */
-function grParseUsers(v){
-  return String(v == null ? '' : v).split(',').map(function(s){ return s.trim().toLowerCase(); }).filter(Boolean);
-}
-function grCanSee(){
-  return !!currentUser && !!currentUser.email && grUsersOn.indexOf(String(currentUser.email).trim().toLowerCase()) >= 0;
-}
+function grCanSee(){ return grTabOk; }
 function grSyncButton(){
   var b = document.getElementById('tab-grafik');
   if(b) b.style.display = grCanSee() ? '' : 'none';
 }
-/* Само скрива/показва таба; истинската проверка е в grafik-api при всяка заявка. */
+/* Табът — по отговора на grafik-api „me“ (списъкът beta е в grafik_access, без права за
+   anon): ок → показан, 403 not_beta / 401 / мрежа → скрит. Истинската проверка остава в
+   grafik-api при всяка заявка; отговорът пълни и grMe. */
 function grLoadUsers(){
   var seq = ++grUsersSeq;
-  return sbGet('app_settings', 'key=eq.grafik_beta_users&select=key,value', true).then(function(rows){
-    var row = (Array.isArray(rows) ? rows : []).filter(function(r){ return r && r.key === 'grafik_beta_users'; })[0];
-    if(seq === grUsersSeq) grUsersOn = grParseUsers(row && row.value);
+  return grApi('me', {}).then(function(res){
+    if(seq === grUsersSeq){ grTabOk = !!res.ok; grTabRes = res; grMe = res.ok ? res.data : null; }
     grSyncButton();
     return grCanSee();
   });
@@ -147,24 +144,26 @@ function loadGrafik(){
   var seq = ++grLoadSeq;
   if(!grMonth) grMonth = grThisMonth();
   el.innerHTML = grTitle() + '<div style="padding:20px;color:#94a3b8;">⏳ Зареждане...</div>';
+  /* grLoadUsers() вече пита grafik-api „me“ — отговорът му е и достъпът, и grMe. */
   return grLoadUsers().then(function(see){
     if(seq !== grLoadSeq) return;
-    if(!see){ el.innerHTML = grTitle() + '<div class="card" id="gr-noaccess">Нямаш достъп до този модул.</div>'; return; }
-    return grApi('me', {}).then(function(res){
-      if(seq !== grLoadSeq) return;
-      if(!res.ok){ el.innerHTML = grTitle() + '<div class="card" id="gr-error" style="color:#dc2626;">' + escVal(grErrText(res)) + '</div>'; return; }
-      grMe = res.data;
-      var names = (grMe.stores || []).map(function(s){ return s.name; });
-      if(!grStore || names.indexOf(grStore) < 0){
-        grStore = (currentUser && names.indexOf(currentUser.store_name) >= 0) ? currentUser.store_name : (names[0] || '');
-      }
-      /* ТРЗ започват от обзора (виждат само подадените); регионалният и admin — от своя график. */
-      if(grMe.kind === 'trz') grView = 'overview';
-      else if(grView === 'overview' && !grCanOverview()) grView = 'grid';
-      if(grView === 'overview') return grLoadOverview(seq);
-      if(!grStore){ el.innerHTML = grTitle() + '<div class="card" id="gr-nostore">Няма обект, чийто график да виждаш.</div>'; return; }
-      return grLoadMonth(seq);
-    });
+    var res = grTabRes || {};
+    if(!see){
+      var beta = !res.data || res.data.reason === 'not_beta' || res.data.reason === 'inactive';
+      el.innerHTML = grTitle() + (beta ? '<div class="card" id="gr-noaccess">Нямаш достъп до този модул.</div>'
+        : '<div class="card" id="gr-error" style="color:#dc2626;">' + escVal(grErrText(res)) + '</div>');
+      return;
+    }
+    var names = (grMe.stores || []).map(function(s){ return s.name; });
+    if(!grStore || names.indexOf(grStore) < 0){
+      grStore = (currentUser && names.indexOf(currentUser.store_name) >= 0) ? currentUser.store_name : (names[0] || '');
+    }
+    /* ТРЗ започват от обзора (виждат само подадените); регионалният и admin — от своя график. */
+    if(grMe.kind === 'trz') grView = 'overview';
+    else if(grView === 'overview' && !grCanOverview()) grView = 'grid';
+    if(grView === 'overview') return grLoadOverview(seq);
+    if(!grStore){ el.innerHTML = grTitle() + '<div class="card" id="gr-nostore">Няма обект, чийто график да виждаш.</div>'; return; }
+    return grLoadMonth(seq);
   });
 }
 function grLoadMonth(seq){
@@ -229,7 +228,7 @@ function grOverviewHtml(){
     '<span id="gr-ov-count" style="color:#64748b;font-size:12px;">' + (trz ? sub + ' подадени' : sub + ' подадени от ' + list.length) + '</span>' +
     (trz ? '<span style="color:#64748b;font-size:12px;">· ТРЗ: само подадените графици, без редакция</span>' : '') + '</div>';
   if(!list.length){
-    h += '<div id="gr-ov-empty" style="color:#64748b;padding:8px 0;">' + (trz ? 'Няма подадени графици за ' + escVal(grMonthLabel(grMonth)) + '.' : 'Няма обекти за показване.') + '</div>';
+    h += '<div id="gr-ov-empty" style="color:#64748b;padding:8px 0;">' + (trz ? 'Няма подадени графици за ' + escVal(grMonthLabel(grMonth)) : 'Няма обекти за показване.')   /* grMonthLabel завършва на „г.“ */ + '</div>';
   } else {
     h += '<div class="tbl-wrap"><table id="gr-ov-tbl"><thead><tr><th>Обект</th><th>Статус</th><th>' + (trz ? 'Подаден' : 'Подаден / последна промяна') + '</th>' +
       (trz ? '' : '<th>Служители</th>') + '<th>Извън нормата</th><th></th></tr></thead><tbody>';
@@ -1116,4 +1115,157 @@ function grPrintGrafik(){
       '</div>' +
     '</div>';
   showModule('print');
+}
+
+/* ─── Администрация → „📆 График“ (етап 1е-3, 04.11.2026) ────────────────
+   Само admin (и то от списъка beta — иначе grafik-api не отговаря); картата се
+   вмъква от loadAdmin() (admin.js) и се маха, ако „me“ не е admin. Всичко минава през
+   grafik-api: списъците beta / ТРЗ (grafik_access — access_*), дружества, обект →
+   дружество, ВТР и утвърдил, неработни дни (admin_*). Сървърът пази бял списък на
+   полетата и одит; собственият имейл в списъците не се пипа (сървърът отказва). */
+var grAdm = null;            // { access: [...], data: admin_get }
+var GR_ADM_SPEC = {
+  companies: { title: 'Дружество', fields: [
+    { k: 'name', l: 'Име (както в бланката)', req: 1 }, { k: 'eik', l: 'ЕИК' }, { k: 'mol', l: 'МОЛ' }, { k: 'addr', l: 'Адрес (седалище)' }] },
+  grafik_store_company: { title: 'Обект → дружество', fields: [
+    { k: 'store_name', l: 'Обект', t: 'store', req: 1 }, { k: 'company_id', l: 'Дружество', t: 'company', req: 1 },
+    { k: 'blank_name', l: 'Име на обекта за бланката', req: 1 }, { k: 'address', l: 'Адрес на обекта' },
+    { k: 'valid_from', l: 'В сила от', t: 'date' }, { k: 'valid_to', l: 'В сила до', t: 'date' }] },
+  grafik_company_terms: { title: 'ВТР и утвърдил', fields: [
+    { k: 'company_id', l: 'Дружество', t: 'company', req: 1 }, { k: 'vtr_id', l: 'ВТР', t: 'vtr', req: 1 },
+    { k: 'approver', l: 'Утвърдил (управител)', req: 1 }, { k: 'valid_from', l: 'В сила от', t: 'date' }, { k: 'valid_to', l: 'В сила до', t: 'date' }] },
+  grafik_extra_days: { title: 'Неработен ден', fields: [
+    { k: 'day', l: 'Дата', t: 'date', req: 1 }, { k: 'store_name', l: 'Обект (празно = всички)', t: 'store_opt' }, { k: 'note', l: 'Бележка' }] }
+};
+function grAdminLoad(){
+  var mod = document.getElementById('mod-admin');
+  if(!mod) return Promise.resolve();
+  var card = document.getElementById('gr-admin-card');
+  if(!card){ card = document.createElement('div'); card.className = 'card'; card.id = 'gr-admin-card'; mod.appendChild(card); }
+  card.innerHTML = '<div class="card-title">📆 График</div><div style="padding:12px;color:#94a3b8;font-size:12px;">⏳ Зареждане...</div>';
+  return grApi('me', {}).then(function(me){
+    if(!me.ok || !me.data || !me.data.can_admin){ if(card.parentNode) card.parentNode.removeChild(card); return; }
+    return Promise.all([grApi('access_list', {}), grApi('admin_get', {})]).then(function(r){
+      if(!r[0].ok || !r[1].ok){ card.innerHTML = '<div class="card-title">📆 График</div><div id="gr-adm-error" style="color:#dc2626;">' + escVal(grErrText(r[0].ok ? r[1] : r[0])) + '</div>'; return; }
+      grAdm = { access: r[0].data.rows || [], data: r[1].data };
+      grAdminRender();
+    });
+  });
+}
+function grAdmCompany(id){ var c = (grAdm.data.companies || []).filter(function(x){ return x.id === id; })[0]; return c ? c.name : '—'; }
+function grAdmVtr(id){ var x = (grAdm.data.vtrs || []).filter(function(y){ return y.id === id; })[0]; return x ? x.name : '—'; }
+function grAdmPeriod(r){ return (r.valid_from ? fmtDate(r.valid_from) : '…') + ' – ' + (r.valid_to ? fmtDate(r.valid_to) : '…'); }
+function grAdmTable(id, head, rows){
+  return '<div class="tbl-wrap"><table id="' + id + '"><thead><tr>' + head.map(function(t){ return '<th>' + t + '</th>'; }).join('') + '</tr></thead><tbody>' +
+    (rows.length ? rows.join('') : '<tr><td colspan="' + head.length + '" style="color:#94a3b8;">няма</td></tr>') + '</tbody></table></div>';
+}
+function grAdmEditBtn(t, id){ return '<button class="btn-sm" onclick="grAdmEdit(\'' + t + '\',\'' + escAttrVal(id) + '\')">✏️</button>'; }
+function grAdminRender(){
+  var card = document.getElementById('gr-admin-card');
+  if(!card || !grAdm) return;
+  var d = grAdm.data;
+  var lists = ['beta', 'trz'].map(function(l){
+    var rows = grAdm.access.filter(function(a){ return a.list === l; }).map(function(a){
+      return '<tr><td>' + escVal(a.email) + '</td><td>' + escVal(a.note || '') + '</td><td style="font-size:11px;color:#64748b;">' + escVal(a.created_by || '') + (a.created_at ? ' · ' + escVal(grFmtAt(a.created_at)) : '') + '</td>' +
+        '<td><button class="btn-sm" onclick="grAdmAccessRemove(\'' + escAttrVal(a.id) + '\')">✕ Махни</button></td></tr>';
+    });
+    return '<div style="margin:10px 0 4px;font-weight:600;">' + (l === 'beta' ? '👁 Beta — кой вижда таба „График“' : '🧾 ТРЗ — само подадените графици, без редакция (не е нужно и в beta; има предимство пред admin)') + '</div>' +
+      grAdmTable('gr-adm-' + l, ['Имейл', 'Бележка', 'Добавен', ''], rows);
+  }).join('');
+  var h = '<div class="card-title">📆 График</div>' +
+    '<div style="font-size:12px;color:#64748b;">Работен график (в разработка). Всяка промяна минава през grafik-api и се записва в одита. Собствения си имейл не променяш оттук.</div>' +
+    lists +
+    '<div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:8px;">' +
+      '<input class="fi" id="gr-adm-email" placeholder="имейл" style="flex:2;min-width:180px;">' +
+      '<select class="fi" id="gr-adm-list" style="flex:0 0 auto;"><option value="beta">Beta</option><option value="trz">ТРЗ</option></select>' +
+      '<input class="fi" id="gr-adm-note" placeholder="бележка (по избор)" style="flex:2;min-width:140px;">' +
+      '<button class="btn btn-green" onclick="grAdmAccessAdd()">➕ Добави</button></div>';
+  h += '<div style="margin:16px 0 4px;font-weight:600;">🏢 Дружества <button class="btn-sm" onclick="grAdmEdit(\'companies\')">➕ Дружество</button></div>' +
+    grAdmTable('gr-adm-companies', ['Име', 'ЕИК', 'МОЛ', 'Адрес', ''], (d.companies || []).map(function(c){
+      return '<tr><td>' + escVal(c.name || '') + '</td><td>' + escVal(c.eik || '') + '</td><td>' + escVal(c.mol || '') + '</td><td' + (c.addr ? '' : ' style="color:#dc2626;"') + '>' + escVal(c.addr || 'липсва') + '</td><td>' + grAdmEditBtn('companies', c.id) + '</td></tr>';
+    }));
+  h += '<div style="margin:16px 0 4px;font-weight:600;">🏬 Обект → дружество <button class="btn-sm" onclick="grAdmEdit(\'grafik_store_company\')">➕ Връзка</button></div>' +
+    grAdmTable('gr-adm-store-company', ['Обект', 'Дружество', 'Име за бланката', 'Адрес', 'Период', ''], (d.grafik_store_company || []).slice().sort(function(a, b){
+      return String(a.store_name).localeCompare(String(b.store_name), 'bg') || String(a.valid_from || '').localeCompare(String(b.valid_from || ''));
+    }).map(function(s){
+      return '<tr><td>' + escVal(s.store_name) + '</td><td>' + escVal(grAdmCompany(s.company_id)) + '</td><td>' + escVal(s.blank_name || '') + '</td><td>' + escVal(s.address || '') + '</td><td>' + escVal(grAdmPeriod(s)) + '</td><td>' + grAdmEditBtn('grafik_store_company', s.id) + '</td></tr>';
+    }));
+  h += '<div style="margin:16px 0 4px;font-weight:600;">📜 ВТР и утвърдил по дружество <button class="btn-sm" onclick="grAdmEdit(\'grafik_company_terms\')">➕ ВТР</button></div>' +
+    grAdmTable('gr-adm-terms', ['Дружество', 'ВТР', 'Утвърдил', 'Период', ''], (d.grafik_company_terms || []).map(function(t){
+      return '<tr><td>' + escVal(grAdmCompany(t.company_id)) + '</td><td>' + escVal(grAdmVtr(t.vtr_id)) + '</td><td>' + escVal(t.approver || '') + '</td><td>' + escVal(grAdmPeriod(t)) + '</td><td>' + grAdmEditBtn('grafik_company_terms', t.id) + '</td></tr>';
+    }));
+  h += '<div style="margin:16px 0 4px;font-weight:600;">📅 Допълнителни неработни дни <button class="btn-sm" onclick="grAdmEdit(\'grafik_extra_days\')">➕ Ден</button></div>' +
+    grAdmTable('gr-adm-extra', ['Дата', 'Обект', 'Бележка', ''], (d.grafik_extra_days || []).slice().sort(function(a, b){ return String(a.day).localeCompare(String(b.day)); }).map(function(e){
+      return '<tr><td>' + escVal(fmtDate(e.day)) + '</td><td>' + escVal(e.store_name || 'всички') + '</td><td>' + escVal(e.note || '') + '</td>' +
+        '<td>' + grAdmEditBtn('grafik_extra_days', e.id) + ' <button class="btn-sm" onclick="grAdmExtraDelete(\'' + escAttrVal(e.id) + '\')">✕</button></td></tr>';
+    }));
+  card.innerHTML = h;
+}
+function grAdmAccessAdd(){
+  var email = String(v('gr-adm-email') || '').trim().toLowerCase(), list = v('gr-adm-list'), note = v('gr-adm-note');
+  if(!/^[^\s@,]+@[^\s@,]+\.[^\s@,]+$/.test(email)){ toast('Невалиден имейл.', '#dc2626'); return; }
+  return grApi('access_add', { list: list, email: email, note: note }).then(function(res){
+    if(!res.ok){ toast('Не е добавен: ' + grErrText(res), '#dc2626'); return; }
+    toast('✔ ' + email + ' е добавен в ' + (list === 'trz' ? 'ТРЗ' : 'beta') + '.');
+    return grAdminLoad();
+  });
+}
+function grAdmAccessRemove(id){
+  var a = ((grAdm && grAdm.access) || []).filter(function(x){ return x.id === id; })[0];
+  if(!a || !confirm('Да махна ' + a.email + ' от ' + (a.list === 'trz' ? 'ТРЗ' : 'beta') + '?')) return;
+  return grApi('access_remove', { id: id }).then(function(res){
+    if(!res.ok){ toast('Не е махнат: ' + grErrText(res), '#dc2626'); return; }
+    toast('✔ ' + a.email + ' е махнат.');
+    return grAdminLoad();
+  });
+}
+function grAdmExtraDelete(id){
+  if(!confirm('Да махна неработния ден?')) return;
+  return grApi('admin_delete', { table: 'grafik_extra_days', id: id }).then(function(res){
+    if(!res.ok){ toast('Не е махнат: ' + grErrText(res), '#dc2626'); return; }
+    return grAdminLoad();
+  });
+}
+/* Един формуляр за четирите таблици (GR_ADM_SPEC); празно поле → null. */
+function grAdmEdit(table, id){
+  var spec = GR_ADM_SPEC[table];
+  if(!spec || !grAdm) return;
+  var row = id ? ((grAdm.data[table] || []).filter(function(x){ return x.id === id; })[0] || {}) : {};
+  var opts = function(list, cur, empty){
+    return (empty ? '<option value="">' + empty + '</option>' : '') + list.map(function(o){ return '<option value="' + escAttrVal(o.v) + '"' + (o.v === cur ? ' selected' : '') + '>' + escVal(o.l) + '</option>'; }).join('');
+  };
+  var stores = (grAdm.data.stores || []).map(function(n){ return { v: n, l: n }; });
+  var companies = (grAdm.data.companies || []).map(function(c){ return { v: c.id, l: c.name }; });
+  var vtrs = (grAdm.data.vtrs || []).map(function(c){ return { v: c.id, l: c.name }; });
+  var f = spec.fields.map(function(x){
+    var cur = row[x.k] == null ? '' : String(row[x.k]), fid = 'gr-adm-f-' + x.k, inp;
+    if(x.t === 'store') inp = '<select class="fi" id="' + fid + '">' + opts(stores, cur, '— избери —') + '</select>';
+    else if(x.t === 'store_opt') inp = '<select class="fi" id="' + fid + '">' + opts(stores, cur, 'всички обекти') + '</select>';
+    else if(x.t === 'company') inp = '<select class="fi" id="' + fid + '">' + opts(companies, cur, '— избери —') + '</select>';
+    else if(x.t === 'vtr') inp = '<select class="fi" id="' + fid + '">' + opts(vtrs, cur, '— избери —') + '</select>';
+    else inp = '<input class="fi" id="' + fid + '" type="' + (x.t === 'date' ? 'date' : 'text') + '" value="' + escAttrVal(cur) + '">';
+    return '<label style="display:block;margin:6px 0;font-size:12px;">' + escVal(x.l) + (x.req ? ' *' : '') + inp + '</label>';
+  }).join('');
+  var old = document.getElementById('gr-adm-modal');
+  if(old) old.parentNode.removeChild(old);
+  document.body.insertAdjacentHTML('beforeend', '<div class="modal-bg open" id="gr-adm-modal"><div class="modal"><h3>' + (id ? '✏️ ' : '➕ ') + escVal(spec.title) + '</h3>' + f +
+    '<div class="modal-actions"><button class="btn" onclick="closeModal(\'gr-adm-modal\')">Отказ</button>' +
+    '<button class="btn btn-green" onclick="grAdmSave(\'' + table + '\',\'' + escAttrVal(id || '') + '\')">Запиши</button></div></div></div>');
+}
+function grAdmSave(table, id){
+  var spec = GR_ADM_SPEC[table], fields = {}, miss = [];
+  spec.fields.forEach(function(x){
+    var val = String(v('gr-adm-f-' + x.k) || '').trim();
+    if(x.req && !val) miss.push(x.l);
+    fields[x.k] = val || null;
+  });
+  if(miss.length){ toast('Попълни: ' + miss.join(', ') + '.', '#dc2626'); return; }
+  if(fields.eik && !/^\d{9}(\d{4})?$/.test(fields.eik)){ toast('ЕИК е 9 или 13 цифри.', '#dc2626'); return; }
+  if(fields.valid_from && fields.valid_to && fields.valid_to < fields.valid_from){ toast('„До“ е преди „от“.', '#dc2626'); return; }
+  return grApi('admin_save', { table: table, id: id || null, fields: fields }).then(function(res){
+    if(!res.ok){ toast('Не е записано: ' + grErrText(res), '#dc2626'); return; }
+    closeModal('gr-adm-modal');
+    toast('✔ Записано.');
+    return grAdminLoad();
+  });
 }

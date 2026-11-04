@@ -23,6 +23,9 @@
 - 04.11 · goods_transit.recon_side — text, NULL, без default ('sender' / 'receiver')
 - 04.11 · goods_transit.status — стойността 'sent' отпада (след data-миграцията); остават 'pending' / 'received' / 'rejected'
 
+(в базата от миграцията grafik_access, grafik-access-schema.sql, версия 20261104210513, приложена 04.11.2026; таблицата е без anon — виж бележката при grafik_schema. Ключовете app_settings.grafik_beta_users / grafik_trz_users отпадат СЛЕД проверката на живо — отделен ред тогава)
+- 04.11 · нова таблица grafik_access — id uuid, list text NOT NULL ('beta' / 'trz'), email text NOT NULL, note text, created_at timestamptz NOT NULL default now(), created_by text
+
 (в базата от миграцията grafik_shift_times, grafik-shift-times-schema.sql, версия 20261104073847, приложена 04.11.2026; таблиците grafik_* са без anon)
 - 04.11 · grafik_vtr_codes.start_time — time, NULL, без default
 - 04.11 · grafik_vtr_codes.end_time — time, NULL, без default

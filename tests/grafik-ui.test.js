@@ -42,7 +42,15 @@ function makeServer(opt) {
       { id: 'sec-k-kasa', store_name: 'Кърджали', name: 'Каса', sort_order: 10 },
       { id: 'sec-sh-otz', store_name: 'Шумен', name: 'ОТЗ', sort_order: 20 }
     ],
-    fail: opt.fail || {}
+    fail: opt.fail || {},
+    // Админ картата (етап 1е-3) — същата форма като admin_get / access_list в handler.ts.
+    adm: {
+      companies: [{ id: 'c3', name: '"ТЕМАКС ТЦД 3" ЕООД', eik: '207322431', mol: null, addr: 'гр. Варна' }, { id: 'cy', name: '"ТЕМАКС ЮГ" ЕООД', eik: '202885071', mol: null, addr: null }],
+      grafik_store_company: [{ id: 'sc1', store_name: 'Кърджали', company_id: 'c3', blank_name: '"Темакс" – Кърджали', address: null, valid_from: null, valid_to: null }],
+      grafik_company_terms: [{ id: 't1', company_id: 'c3', vtr_id: 'vtr1', approver: 'Теодор Тенев', valid_from: '2026-11-01', valid_to: null }],
+      grafik_extra_days: [], grafik_letter_map: [], vtrs: [{ id: 'vtr1', name: 'ВТР ТЦД 3 / ТЦД 4 / Темакс Юг' }], stores: ['Кърджали', 'Шумен', 'Раднево']
+    },
+    access: [{ id: 'a1', list: 'trz', email: 'trz@temax.bg', note: null, created_by: 'migration' }]
   };
   const me = u => {
     // ТРЗ има предимство пред admin (handler.ts access): чете всичко, не пише.
@@ -54,11 +62,13 @@ function makeServer(opt) {
   };
   S.handle = (u, b) => {
     S.calls.push(b); S.log.push('→' + b.action);
+    // Списъкът beta (grafik_access) — проверява се при ВСЯКА заявка, както в handler.ts.
+    if ((S.beta || []).indexOf(String(u.email || '').trim().toLowerCase()) < 0) return { status: 403, body: { ok: false, reason: 'not_beta', message: 'Модулът „Работен график“ още не е отворен за този акаунт.' } };
     if (S.fail[b.action]) { const fr = S.fail[b.action](b); if (fr) return fr; }
     const M = me(u), canEdit = st => M.stores.some(s => s.name === st && s.can_edit);
     const key = (st, m) => st + '|' + m;
     switch (b.action) {
-      case 'me': return { status: 200, body: Object.assign({ ok: true }, M) };
+      case 'me': return { status: 200, body: Object.assign({ ok: true, can_admin: M.kind === 'admin' }, M) };
       case 'overview': {
         // Обхватът (дружество с ВТР) и „извън нормата“ от снимката се смятат в handler.ts — тук е
         // само формата на отговора; логиката е заключена в handler.test.ts.
@@ -115,6 +125,23 @@ function makeServer(opt) {
         const x = { id: 'sec-new-' + (++S.seq), store_name: b.store, name: b.name, sort_order: 500 }; S.sectors.push(x);
         return { status: 200, body: { ok: true, sector: x } };
       }
+      case 'access_list': case 'admin_get': case 'access_add': case 'access_remove': case 'admin_save': case 'admin_delete': {
+        if (M.kind !== 'admin') return { status: 403, body: { ok: false, reason: 'forbidden', message: 'Само admin.' } };
+        if (b.action === 'access_list') return { status: 200, body: { ok: true, rows: S.access.concat((S.beta || []).map((e, i) => ({ id: 'b' + i, list: 'beta', email: e, note: null }))) } };
+        if (b.action === 'admin_get') return { status: 200, body: Object.assign({ ok: true }, JSON.parse(JSON.stringify(S.adm))) };
+        if (b.action === 'access_add') {
+          if (b.email === String(u.email).toLowerCase()) return { status: 409, body: { ok: false, reason: 'self', message: 'Собствения си имейл не променяш оттук — би загубил достъпа до администрацията.' } };
+          if (b.list === 'beta') S.beta.push(b.email); else S.access.push({ id: 'a' + (++S.seq), list: b.list, email: b.email, note: b.note || null });
+          return { status: 200, body: { ok: true, row: { email: b.email } } };
+        }
+        if (b.action === 'access_remove') {
+          if (/^b\d+$/.test(b.id)) S.beta.splice(+b.id.slice(1), 1); else S.access = S.access.filter(a => a.id !== b.id);
+          return { status: 200, body: { ok: true, deleted: 1 } };
+        }
+        if (b.action === 'admin_delete') { S.adm[b.table] = S.adm[b.table].filter(x => x.id !== b.id); return { status: 200, body: { ok: true, deleted: 1 } }; }
+        if (b.id) Object.assign(S.adm[b.table].filter(x => x.id === b.id)[0], b.fields); else S.adm[b.table].push(Object.assign({ id: 'n' + (++S.seq) }, b.fields));
+        return { status: 200, body: { ok: true, row: b.fields } };
+      }
       case 'staff_save': {
         if (!canEdit(b.store)) return { status: 403, body: { ok: false, reason: 'readonly', message: 'Нямате права.' } };
         if (b.id) { const s = S.staff.filter(x => x.id === b.id)[0]; Object.assign(s, b.fields); return { status: 200, body: { ok: true, staff: s } }; }
@@ -130,9 +157,11 @@ function makeServer(opt) {
 function env(user, opt) {
   opt = opt || {};
   const S = opt.server || makeServer(opt);
+  // beta — в сървъра (grafik_access), не в app_settings: браузърът го научава само от „me“.
+  if (opt.beta !== undefined || !S.beta) S.beta = String(opt.beta === undefined ? BETA : opt.beta).split(',').map(x => x.trim().toLowerCase()).filter(Boolean);
   const h = boot({
     modules: ['grafik-engine.js', 'grafik.js'], user,
-    data: { app_settings: [{ key: 'grafik_beta_users', value: opt.beta === undefined ? BETA : opt.beta }] },
+    data: {},
     confirm: opt.confirm === undefined ? true : opt.confirm,
     globals: { currentSession: 'sess.sig' }
   });
@@ -170,7 +199,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     await h2.w.grLoadUsers(); await ticks();
     ok('извън списъка → табът е скрит', h2.doc.getElementById('tab-grafik').style.display === 'none');
     await load(h2);
-    ok('извън списъка → „Нямаш достъп“, без заявка към grafik-api', !!h2.doc.getElementById('gr-noaccess') && h2.S.calls.length === 0);
+    ok('извън списъка → „Нямаш достъп“; единствената заявка е „me“ (отказана 403 not_beta)', !!h2.doc.getElementById('gr-noaccess') && h2.S.calls.map(c => c.action).join() === 'me,me', h2.S.calls.map(c => c.action).join());
     ok('showModule(\'grafik\') показва контейнера', guard('showModule', () => h.w.showModule('grafik')) && mod(h).style.display === 'block');
   }
 
@@ -791,6 +820,120 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('ТРЗ: клавиатурата не пише (няма save_rows)', t.S.calls.filter(c => c.action === 'save_rows').length === before);
     realClick(t.w, btn(tm, 'Обекти')); await ticks(8);
     ok('ТРЗ: „🏬 Обекти“ връща към обзора', t.w.grView === 'overview' && ovRows(t).length === 1);
+  }
+
+  section('16. Етап 1е-3: табът по „me“ и картата „📆 График“ в Администрация');
+  {
+    const S = makeServer();
+    const card = h => h.doc.getElementById('gr-admin-card');
+    const calls = (h, a) => h.S.calls.filter(c => c.action === a);
+    // Табът: сървърът казва (403 not_beta → скрит), app_settings не се чете изобщо.
+    const t0 = env(MGR, { server: S, beta: BETA_ALL });
+    await t0.w.grLoadUsers(); await ticks();
+    ok('табът — по „me“: manager от beta → видим', t0.doc.getElementById('tab-grafik').style.display === '' && calls(t0, 'me').length >= 1);
+    ok('браузърът не чете app_settings за таба (нито един GET към него)', Array.isArray(t0.calls.get) && !t0.calls.get.some(u => /app_settings/.test(String(u))), (t0.calls.get || []).join(' | '));
+    const t1 = env(MGR, { server: makeServer({ fail: { me: () => ({ status: 401, body: { ok: false, reason: 'session_expired', message: 'x' } }) } }) });
+    await t1.w.grLoadUsers(); await ticks();
+    ok('401 (изтекъл пропуск) → табът е скрит', t1.doc.getElementById('tab-grafik').style.display === 'none');
+    await load(t1);
+    ok('…а отвореният таб казва „Сесията е изтекла“, не „Нямаш достъп“', /Сесията е изтекла/.test((t1.doc.getElementById('gr-error') || {}).textContent || '') && !t1.doc.getElementById('gr-noaccess'));
+
+    // Картата — admin.
+    const a = env(ADM, { server: S, beta: BETA_ALL });
+    await a.w.grAdminLoad(); await ticks(6);
+    const c = card(a);
+    ok('admin: картата „📆 График“ е в Администрация', !!c && c.parentNode === a.doc.getElementById('mod-admin') && /📆 График/.test(c.textContent));
+    const beta = Array.from(a.doc.querySelectorAll('#gr-adm-beta tbody tr')).map(r => r.cells[0].textContent);
+    const trz = Array.from(a.doc.querySelectorAll('#gr-adm-trz tbody tr')).map(r => r.cells[0].textContent);
+    ok('списъците beta и ТРЗ — от grafik-api', beta.indexOf('ten.tenev@temax.bg') >= 0 && beta.indexOf('trz@temax.bg') >= 0 && JSON.stringify(trz) === '["trz@temax.bg"]', beta.join(',') + ' / ' + trz.join(','));
+    ok('дружество без адрес — „липсва“ в червено', /липсва/.test(a.doc.querySelector('#gr-adm-companies tbody tr:nth-child(2)').textContent) && /dc2626/.test(a.doc.querySelector('#gr-adm-companies tbody tr:nth-child(2) td:nth-child(4)').getAttribute('style') || ''));
+    ok('ВТР — с името, не с id; утвърдил и период', /ВТР ТЦД 3 \/ ТЦД 4 \/ Темакс Юг/.test(a.doc.getElementById('gr-adm-terms').textContent) && /Теодор Тенев/.test(a.doc.getElementById('gr-adm-terms').textContent) && /01\.11\.2026 – …/.test(a.doc.getElementById('gr-adm-terms').textContent));
+    ok('обект → дружество — името на дружеството', /"ТЕМАКС ТЦД 3" ЕООД/.test(a.doc.getElementById('gr-adm-store-company').textContent));
+
+    // Добавяне в списък.
+    a.doc.getElementById('gr-adm-email').value = '  Nov.Regionalen@Temax.bg ';
+    a.doc.getElementById('gr-adm-list').value = 'beta';
+    realClick(a.w, btn(card(a), 'Добави')); await ticks(8);
+    const add = calls(a, 'access_add').slice(-1)[0];
+    ok('➕ Добави → access_add с малки букви и без интервали', !!add && add.email === 'nov.regionalen@temax.bg' && add.list === 'beta', JSON.stringify(add));
+    ok('…и списъкът е презареден с новия', Array.from(a.doc.querySelectorAll('#gr-adm-beta tbody tr')).some(r => r.cells[0].textContent === 'nov.regionalen@temax.bg'));
+    const nAdd = calls(a, 'access_add').length;
+    a.doc.getElementById('gr-adm-email').value = 'без-маймунка';
+    realClick(a.w, btn(card(a), 'Добави')); await ticks(4);
+    ok('невалиден имейл → съобщение, без заявка', calls(a, 'access_add').length === nAdd && a.calls.toast.some(t => /Невалиден имейл/.test(t)));
+    a.doc.getElementById('gr-adm-email').value = 'ten.tenev@temax.bg'; a.doc.getElementById('gr-adm-list').value = 'trz';
+    realClick(a.w, btn(card(a), 'Добави')); await ticks(6);
+    ok('собственият имейл → отказ от сървъра, показан в съобщението', a.calls.toast.some(t => /Собствения си имейл/.test(t)));
+    // Махане: отказано потвърждение → нищо.
+    const no = env(ADM, { server: S, confirm: false });
+    await no.w.grAdminLoad(); await ticks(6);
+    const nRem = calls(no, 'access_remove').length;
+    realClick(no.w, btn(no.doc.querySelector('#gr-adm-trz tbody tr'), 'Махни')); await ticks(6);
+    ok('✕ Махни, потвърждението отказано → без access_remove', calls(no, 'access_remove').length === nRem && no.calls.confirm.some(m => /Да махна trz@temax.bg от ТРЗ/.test(m)));
+    no.doc.getElementById('gr-admin-card').remove();
+    // Махане.
+    const trzRow = a.doc.querySelector('#gr-adm-trz tbody tr');
+    realClick(a.w, btn(trzRow, 'Махни')); await ticks(8);
+    ok('✕ Махни (с потвърждение) → access_remove; ТРЗ списъкът е празен', calls(a, 'access_remove').length === 1 && /няма/.test(a.doc.querySelector('#gr-adm-trz tbody').textContent));
+
+    // Дружество: редакция.
+    realClick(a.w, btn(a.doc.querySelector('#gr-adm-companies tbody tr:nth-child(2)'), '✏️')); await ticks(2);
+    ok('✏️ → формуляр с текущите стойности', !!a.doc.getElementById('gr-adm-modal') && a.doc.getElementById('gr-adm-f-eik').value === '202885071');
+    a.doc.getElementById('gr-adm-f-eik').value = '12345';
+    realClick(a.w, btn(a.doc.getElementById('gr-adm-modal'), 'Запиши')); await ticks(4);
+    ok('ЕИК не е 9/13 цифри → съобщение, без заявка', calls(a, 'admin_save').length === 0 && a.calls.toast.some(t => /ЕИК е 9 или 13 цифри/.test(t)));
+    a.doc.getElementById('gr-adm-f-eik').value = '202885071';
+    a.doc.getElementById('gr-adm-f-addr').value = 'гр. Стара Загора, ул. „Тест“ 1';
+    realClick(a.w, btn(a.doc.getElementById('gr-adm-modal'), 'Запиши')); await ticks(8);
+    const sv = calls(a, 'admin_save').slice(-1)[0];
+    ok('Запиши → admin_save (companies, id, само позволените полета; празно → null)', !!sv && sv.table === 'companies' && sv.id === 'cy' &&
+      JSON.stringify(Object.keys(sv.fields)) === '["name","eik","mol","addr"]' && sv.fields.mol === null && /Стара Загора/.test(sv.fields.addr), JSON.stringify(sv));
+    ok('…адресът вече не е „липсва“', !/липсва/.test(a.doc.getElementById('gr-adm-companies').textContent));
+
+    // ВТР: задължителните полета.
+    realClick(a.w, btn(card(a), '➕ ВТР')); await ticks(2);
+    realClick(a.w, btn(a.doc.getElementById('gr-adm-modal'), 'Запиши')); await ticks(4);
+    ok('нов ВТР без дружество / ВТР / утвърдил → „Попълни: …“, без заявка', calls(a, 'admin_save').length === 1 && a.calls.toast.some(t => /^Попълни: Дружество, ВТР, Утвърдил/.test(t)));
+    a.doc.getElementById('gr-adm-f-company_id').value = 'cy'; a.doc.getElementById('gr-adm-f-vtr_id').value = 'vtr1';
+    a.doc.getElementById('gr-adm-f-approver').value = 'Някой Управител';
+    a.doc.getElementById('gr-adm-f-valid_from').value = '2026-12-01'; a.doc.getElementById('gr-adm-f-valid_to').value = '2026-11-01';
+    realClick(a.w, btn(a.doc.getElementById('gr-adm-modal'), 'Запиши')); await ticks(4);
+    ok('„до“ преди „от“ → съобщение, без заявка', calls(a, 'admin_save').length === 1 && a.calls.toast.some(t => /„До“ е преди „от“/.test(t)));
+    a.doc.getElementById('gr-adm-f-valid_to').value = '';
+    realClick(a.w, btn(a.doc.getElementById('gr-adm-modal'), 'Запиши')); await ticks(8);
+    const tv = calls(a, 'admin_save').slice(-1)[0];
+    ok('нов ВТР → admin_save без id (нов ред)', tv.table === 'grafik_company_terms' && tv.id === null && tv.fields.vtr_id === 'vtr1' && tv.fields.valid_to === null, JSON.stringify(tv));
+
+    // Неработен ден: добавяне и махане.
+    realClick(a.w, btn(card(a), '➕ Ден')); await ticks(2);
+    a.doc.getElementById('gr-adm-f-day').value = '2026-12-24'; a.doc.getElementById('gr-adm-f-note').value = 'Бъдни вечер';
+    realClick(a.w, btn(a.doc.getElementById('gr-adm-modal'), 'Запиши')); await ticks(8);
+    const ex = calls(a, 'admin_save').slice(-1)[0];
+    ok('неработен ден за всички обекти (store_name null)', ex.table === 'grafik_extra_days' && ex.fields.day === '2026-12-24' && ex.fields.store_name === null && /24\.12\.2026/.test(a.doc.getElementById('gr-adm-extra').textContent));
+    realClick(a.w, btn(a.doc.querySelector('#gr-adm-extra tbody tr'), '✕')); await ticks(8);
+    ok('✕ на деня → admin_delete', calls(a, 'admin_delete').length === 1 && /няма/.test(a.doc.querySelector('#gr-adm-extra tbody').textContent));
+
+    // Не-admin: картата изчезва; grafik-api дори не е питан за списъците.
+    const m = env(MGR, { server: S });
+    const nList = calls(m, 'access_list').length;
+    await m.w.grAdminLoad(); await ticks(6);
+    ok('manager: картата я няма; access_list не е поискан', !card(m) && calls(m, 'access_list').length === nList);
+    const o = env(Object.assign({}, ADM, { email: 'drug.admin@temax.bg' }), { server: makeServer(), beta: 'ten.tenev@temax.bg' });
+    await o.w.grAdminLoad(); await ticks(6);
+    ok('admin извън beta (403 not_beta) → без карта', !card(o));
+  }
+  {
+    // Интеграция с admin.js в реалния ред: loadAdmin() вика картата.
+    const S = makeServer();
+    const h = boot({ modules: ['grafik-engine.js', 'grafik.js', 'admin.js'], user: ADM, data: {}, confirm: true, globals: { currentSession: 'sess.sig' } });
+    S.beta = String(BETA_ALL).split(',').map(x => x.trim().toLowerCase());
+    const orig = h.w.fetch;
+    h.w.fetch = function (url, init) {
+      if (String(url).indexOf('/functions/v1/grafik-api') >= 0) { const r = S.handle(ADM, JSON.parse(init.body)); return Promise.resolve({ ok: r.status < 400, status: r.status, json: () => Promise.resolve(r.body) }); }
+      return orig.apply(this, arguments);
+    };
+    await guard('loadAdmin() не хвърля', () => h.w.loadAdmin()); await ticks(10);
+    ok('admin.js loadAdmin() → картата „📆 График“ се появява', !!h.doc.getElementById('gr-admin-card') && !!h.doc.getElementById('gr-adm-beta'));
   }
 
   report();
