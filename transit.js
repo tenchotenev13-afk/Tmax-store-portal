@@ -14,6 +14,10 @@ var _transitVisible = []; /* показаният списък след филт
    последния импорт. Държат се ОТДЕЛНО от transitData, за да не влизат в нито
    един брояч, банер или таб — виждат се само през чипа „🗄 Архив". */
 var transitArchive = [];
+/* Таблицата се рисува на порции (ускоряване, 04.11.2026) — виж renderTransit. */
+var TRANSIT_PAGE = 200;
+var transitShown = TRANSIT_PAGE;
+var _transitListSig = null;
 
 /* ── PLANT MAPPING ── */
 var PLANT_INCOMING = {
@@ -221,41 +225,57 @@ function loadTransit(){
   var SB_URL='https://xiwkdiqqplgdcrkewgtv.supabase.co';
   var SB_KEY='eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inhpd2tkaXFxcGxnZGNya2V3Z3R2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk1NTA5MjYsImV4cCI6MjA5NTEyNjkyNn0.aOlvvQI6x5wS60iH7rMDD7j_Go9FMP1YkWrLnfeL0CA';
 
-  function loadPage(from){
-    var to=from+999;
-    fetch(SB_URL+'/rest/v1/goods_transit?order=doc_date.desc,purchase_doc.asc,position.asc'+storeFilter,{
+  /* Една страница → {ok, data, total, err}. Не хвърля: дали грешката има
+     значение, решава извикващият (страница 1 при непълна страница 0 е
+     извън данните и PostgREST може да върне 416 — това не е грешка). */
+  function fetchPage(from){
+    return fetch(SB_URL+'/rest/v1/goods_transit?order=doc_date.desc,purchase_doc.asc,position.asc'+storeFilter,{
       headers:{
         'apikey':SB_KEY,
         'Authorization':'Bearer '+SB_KEY,
-        'Range':from+'-'+to,
+        'Range':from+'-'+(from+999),
         'Range-Unit':'items',
         'Prefer':'count=exact'
       }
     }).then(function(r){
-      var range=r.headers.get('content-range')||'';
+      var range='';
+      try{ range=(r.headers&&r.headers.get&&r.headers.get('content-range'))||''; }catch(e){}
       return r.json().then(function(data){
-        return {data:data,range:range};
+        var m=range.match(/\/(\d+)$/);
+        if(r.ok===false||!Array.isArray(data)) return {ok:false,data:[],total:0,err:data||('HTTP '+r.status)};
+        return {ok:true,data:data,total:m?parseInt(m[1]):0};
       });
-    }).then(function(res){
-      var data=Array.isArray(res.data)?res.data:[];
-      transitData=transitData.concat(data);
-      /* Парсваме total от content-range: "0-999/1305" */
-      var total=0;
-      var m=res.range.match(/\/(\d+)$/);
-      if(m)total=parseInt(m[1]);
-      var loaded=transitData.length;
-      if(total>0&&loaded<total&&data.length===1000){
-        /* Има още - зареждаме следващата страница */
-        loadPage(from+1000);
-      }else{
-        renderTransit();
-      }
-    }).catch(function(err){
-      var w=document.getElementById('mod-transit');
-      if(w)w.innerHTML='<div style="color:#dc2626;padding:40px;">Грешка: '+JSON.stringify(err)+'</div>';
+    }).catch(function(e){ return {ok:false,data:[],total:0,err:e}; });
+  }
+  function fail(err){
+    var w=document.getElementById('mod-transit');
+    if(w)w.innerHTML='<div style="color:#dc2626;padding:40px;">Грешка: '+JSON.stringify(err&&err.message?err.message:err)+'</div>';
+  }
+  /* „Има още" — пълна страница и (ако броят е известен) не сме стигнали края. */
+  function more(page,loaded){ return page.data.length===1000&&(!page.total||loaded<page.total); }
+  /* Страница 3 и нататък — една след друга, както досега. */
+  function rest(from){
+    return fetchPage(from).then(function(p){
+      if(!p.ok){ fail(p.err); return; }
+      transitData=transitData.concat(p.data);
+      if(more(p,transitData.length)) return rest(from+1000);
+      renderTransit();
     });
   }
-  loadPage(0);
+  /* Страници 0 и 1 — ЕДНОВРЕМЕННО (ускоряване, 04.11.2026): при 1 000–2 000
+     реда (офис, склад Търговище) това е второто чакане по мрежата по-малко.
+     Редът в transitData е по номер на страница, не по реда на пристигане.
+     Провалена страница → съобщението за грешка, без непълна таблица. */
+  Promise.all([fetchPage(0),fetchPage(1000)]).then(function(ps){
+    var p0=ps[0], p1=ps[1];
+    if(!p0.ok){ fail(p0.err); return; }
+    transitData=p0.data.slice();
+    if(!more(p0,transitData.length)){ renderTransit(); return; }
+    if(!p1.ok){ fail(p1.err); return; }
+    transitData=transitData.concat(p1.data);
+    if(more(p1,transitData.length)) return rest(2000);
+    renderTransit();
+  });
 }
 
 /* Изважда архивираните редове от transitData в transitArchive. Вика се при
@@ -369,6 +389,13 @@ function renderTransit(){
     return rows;
   }
   var list=transitRows();
+  /* На порции по TRANSIT_PAGE (ускоряване, 04.11.2026): рисуват се първите N
+     реда от ЦЕЛИЯ филтриран списък. Смяна на таб / чип / обект / месец /
+     търсене (подписът на филтрите) → отново първите 200; действие на ред не
+     сменя подписа и пази колко са показани. */
+  var _sig=[transitDir,transitFilter,transitStore,transitMonthFilter,transitSearch].join('\u0001');
+  if(_sig!==_transitListSig){ transitShown=TRANSIT_PAGE; _transitListSig=_sig; }
+  var shownList=list.slice(0,transitShown);
 
   /* Магазини за dropdown */
   var stores={};
@@ -483,7 +510,7 @@ function renderTransit(){
     });
     h+='</tr></thead><tbody>';
 
-    list.forEach(function(r){
+    shownList.forEach(function(r){
       var st=T_STATUS[r.status]||T_STATUS.pending;
       var isOut=r.direction==='outgoing';
       var isTransfer=r.direction==='transfer';
@@ -578,7 +605,16 @@ function renderTransit(){
       }
     });
     h+='</tbody></table></div>';
-    h+='<div style="font-size:12px;color:#94a3b8;margin-top:8px;">Показани '+list.length+' от '+(inArchive?transitArchive:transitData).length+' записа'+(inArchive?' в архива':'')+'.</div>';
+    /* „Показани X от Y" — X на екрана, Y във филтрирания списък; бутонът е там,
+       докато има непоказани. Броячите и „Провери всички" са за целия списък. */
+    var _total=(inArchive?transitArchive:transitData).length;
+    h+='<div id="t-shown" style="font-size:12px;color:#94a3b8;margin-top:8px;">Показани '+shownList.length+' от '+list.length+' записа'+(inArchive?' в архива':'')+
+      (list.length!==_total?' <span style="color:#cbd5e1;">(общо '+_total+')</span>':'')+'.</div>';
+    if(shownList.length<list.length){
+      var _next=Math.min(TRANSIT_PAGE,list.length-shownList.length);
+      h+='<div style="text-align:center;margin-top:10px;"><button id="t-more" onclick="transitShowMore()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:8px 18px;font-size:13px;font-weight:600;cursor:pointer;">Покажи още '+_next+'</button>'+
+        '<div style="font-size:11.5px;color:#64748b;margin-top:4px;">Показани '+shownList.length+' от '+list.length+'</div></div>';
+    }
   }
   h+='</div>';
   h+=transitModalHtml();
@@ -588,7 +624,9 @@ function renderTransit(){
      за търсене (ако потребителят пишеше в него в момента на прерисуването). */
   if(_transitPendingScrollY!=null){
     var _y=_transitPendingScrollY;_transitPendingScrollY=null;
-    requestAnimationFrame(function(){window.scrollTo(0,_y);});
+    /* След локалното обновяване (действие на ред) пътят минава оттук много по-често;
+       без requestAnimationFrame (стара среда, jsdom) — setTimeout. */
+    (window.requestAnimationFrame||function(f){return setTimeout(f,0);})(function(){window.scrollTo(0,_y);});
   }
   if(_searchHadFocus){
     var _si=document.getElementById('t-search');
@@ -599,6 +637,11 @@ function renderTransit(){
   }
 }
 
+/* „Покажи още 200" — без да мести скрола. */
+function transitShowMore(){
+  transitShown+=TRANSIT_PAGE;
+  transitRerender();
+}
 function setTFilter(f){ transitFilter=f; renderTransit(); }
 function setTStore(s){ transitStore=s; renderTransit(); }
 function setTSearch(v){
@@ -606,6 +649,25 @@ function setTSearch(v){
   clearTimeout(_transitSearchTimer);
   _transitSearchTimer=setTimeout(function(){renderTransit();},180);
 }
+
+/* ── ЛОКАЛНО ОБНОВЯВАНЕ СЛЕД ЗАПИС (ускоряване, 04.11.2026) ──
+   Действие на ред (статус, „Проверено", дата на трансфер, редакция,
+   изтриване) вече НЕ вика loadTransit() — то тегли и рисува всичко наново
+   (~3 сек при офиса). След УСПЕШЕН запис същите пратени полета се записват в
+   реда в transitData и се рисува отново; скролът и колко реда са показани
+   се пазят. При грешка — червен toast и нищо не се пипа. Пълното теглене
+   остава при влизане в модула и след импорт. Тригерите в базата работят
+   на сървъра както досега. */
+function transitApplyLocal(ids,body){
+  var set={};
+  ids.forEach(function(i){ set[String(i)]=1; });
+  transitData.forEach(function(r){ if(set[String(r.id)]) Object.assign(r,body); });
+}
+function transitRerender(){
+  _transitPendingScrollY=window.scrollY||window.pageYOffset||0;
+  renderTransit();
+}
+function transitWriteOk(res){ return !!res&&res.ok!==false; }
 
 /* ── СТАТУС ПРОМЯНА ── */
 function tMarkStatus(id,status){
@@ -630,8 +692,11 @@ function tMarkStatus(id,status){
   /* Прието/неприето затваря реда — „проверено, не е пристигнало" вече не
      описва нищо. Иначе при „↩ Върни" редът би се върнал като проверен. */
   if(status==='received'||status==='rejected'){ body.reviewed_at=null; body.reviewed_by=null; }
-  sbPatch('goods_transit','id=eq.'+id,body)
-  .then(function(){ loadTransit(); }).catch(function(){ toast('Грешка','#dc2626'); });
+  return sbPatch('goods_transit','id=eq.'+id,body).then(function(res){
+    if(!transitWriteOk(res)){ toast('⚠️ Статусът НЕ е записан: '+sbErrMsg(res),'#dc2626'); return; }
+    transitApplyLocal([id],body);
+    transitRerender();
+  });
 }
 
 /* ── „ПРОВЕРЕНО, НЕ Е ПРИСТИГНАЛО" ──
@@ -665,13 +730,16 @@ function tMarkReviewed(id){
   var r=transitData.find(function(x){return String(x.id)===String(id);});
   if(!tCanReview(r)) return;
   var who=currentUser.display_name||currentUser.email, at=new Date().toISOString();
-  sbPatch('goods_transit','id=eq.'+id,{reviewed_at:at,reviewed_by:who,updated_by:who,updated_at:at}).then(function(res){
-    if(res&&res.ok===false){ toast('Грешка при запис','#dc2626'); return; }
+  var body={reviewed_at:at,reviewed_by:who,updated_by:who,updated_at:at};
+  return sbPatch('goods_transit','id=eq.'+id,body).then(function(res){
+    if(!transitWriteOk(res)){ toast('Грешка при запис','#dc2626'); return; }
     toast('👁 Отбелязано: проверено, не е пристигнало');
-    loadTransit();
+    transitApplyLocal([id],body);
+    transitRerender();
   });
 }
-/* Всички ПОКАЗАНИ чакащи редове, които потребителят има право да провери.
+/* Всички чакащи редове от ФИЛТРИРАНИЯ списък (целия, не само показаните
+   на екрана 200), които потребителят има право да провери.
    Пакети по 100 id — адресът на PATCH-а не бива да расте без край (офисът
    може да гледа стотици редове). Всеки пакет е една заявка, тоест тригерът
    тръгва веднъж на обект на пакет. */
@@ -682,20 +750,22 @@ function tReviewAllPending(){
   var who=currentUser.display_name||currentUser.email, at=new Date().toISOString();
   var ids=todo.map(function(r){return r.id;}), chunks=[];
   for(var i=0;i<ids.length;i+=100) chunks.push(ids.slice(i,i+100));
-  var failed=0;
+  var failed=0, failedRows=0, body={reviewed_at:at,reviewed_by:who,updated_by:who,updated_at:at};
   function next(k){
     if(k>=chunks.length){
-      if(failed) toast('Част от редовете не се записаха ('+failed+' от '+chunks.length+' пакета)','#dc2626');
+      if(failed) toast('Част от редовете не се записаха ('+failedRows+' реда в '+failed+' от '+chunks.length+' пакета)','#dc2626');
       else toast('👁 Проверени: '+ids.length);
-      loadTransit();
+      transitRerender();
       return;
     }
-    sbPatch('goods_transit','id=in.('+chunks[k].join(',')+')',{reviewed_at:at,reviewed_by:who,updated_by:who,updated_at:at}).then(function(res){
-      if(res&&res.ok===false) failed++;
-      next(k+1);
+    return sbPatch('goods_transit','id=in.('+chunks[k].join(',')+')',body).then(function(res){
+      /* Локално — само редовете от УСПЕШНИТЕ пакети. */
+      if(transitWriteOk(res)) transitApplyLocal(chunks[k],body);
+      else { failed++; failedRows+=chunks[k].length; }
+      return next(k+1);
     });
   }
-  next(0);
+  return next(0);
 }
 /* „Обработени X / проверени Y / необработени Z" за входящите редове на
    обекта — собственият за магазин, избраният във филтъра за офиса; без обект
@@ -731,14 +801,17 @@ function tReviewCounterHtml(list){
 /* ── ИЗТРИЙ РЕД ── */
 function tDelete(id){
   if(!confirm('Изтрий този ред?'))return;
-  sbDelete('goods_transit','id=eq.'+id).then(function(res){
+  return sbDelete('goods_transit','id=eq.'+id).then(function(res){
     if(!res.ok){
       console.error('tDelete: редът НЕ беше изтрит',id,res.error);
       toast('⚠️ Редът НЕ беше изтрит: '+sbErrMsg(res),'#dc2626');
-      loadTransit(); return;
+      return;
     }
-    if(res.count===0){ toast('Нямаше какво да се изтрие — списъкът е опреснен','#64748b'); loadTransit(); return; }
-    toast('✓ Изтрит'); loadTransit();
+    /* И при count 0 редът го няма в базата — маха се и от екрана. */
+    transitData=transitData.filter(function(r){ return String(r.id)!==String(id); });
+    if(res.count===0) toast('Нямаше какво да се изтрие — редът вече го няма','#64748b');
+    else toast('✓ Изтрит');
+    transitRerender();
   });
 }
 
@@ -785,8 +858,12 @@ function exportTransitExcel(){
 function tSetTransferDate(id){
   var d=prompt('Дата на трансфер (ГГГГ-ММ-ДД):',today());
   if(!d)return;
-  sbPatch('goods_transit','id=eq.'+id,{transfer_date:d,updated_by:currentUser.display_name||currentUser.email,updated_at:new Date().toISOString()})
-  .then(function(){loadTransit();});
+  var body={transfer_date:d,updated_by:currentUser.display_name||currentUser.email,updated_at:new Date().toISOString()};
+  return sbPatch('goods_transit','id=eq.'+id,body).then(function(res){
+    if(!transitWriteOk(res)){ toast('⚠️ Датата НЕ е записана: '+sbErrMsg(res),'#dc2626'); return; }
+    transitApplyLocal([id],body);
+    transitRerender();
+  });
 }
 
 /* ── МОДАЛ ДОБАВЯНЕ/РЕДАКТИРАНЕ ── */
@@ -935,13 +1012,21 @@ function submitTransit(){
   };
   /* Същото правило като в tMarkStatus: затворен ред не е „проверен, чака". */
   if(statusVal!=='pending'){ data.reviewed_at=null; data.reviewed_by=null; }
-  var req=transitEditId?
-    sbPatch('goods_transit','id=eq.'+transitEditId,data):
-    sbPost('goods_transit',data);
-  req.then(function(res){
-    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    toast(transitEditId?'✅ Записано!':'✅ Добавено!');
-    closeTransitModal();loadTransit();
+  /* Редакция → PATCH и същите полета в реда; нов ред → POST с
+     return=representation (sbPostReturn), за да влезе в списъка с id-то си —
+     без loadTransit (ускоряване, 04.11.2026). */
+  var editId=transitEditId;
+  var req=editId?
+    sbPatch('goods_transit','id=eq.'+editId,data):
+    sbPostReturn('goods_transit',data);
+  return req.then(function(res){
+    if(!res||!res.ok){toast('Грешка при запис','#dc2626');return;}
+    toast(editId?'✅ Записано!':'✅ Добавено!');
+    closeTransitModal();
+    if(editId) transitApplyLocal([editId],data);
+    else if(res.row) transitData.unshift(res.row);
+    else { loadTransit(); return; }   /* без върнат ред няма какво да се покаже — пълно теглене */
+    transitRerender();
   });
 }
 
