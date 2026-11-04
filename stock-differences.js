@@ -797,11 +797,11 @@ function sdWaitingIds(){
 function sdResetWaitingCache(){ _sdWaitingIdsCache = null; _sdStoreHintCache = null; }
 /* Бланките на обекта с поне един ред, който Бюлетинът брои в „⏳ N реда чакат
    отговор" — по СЪЩОТО правило: bulDiffStoreWaiting() от bulletin.js (огледало
-   на stock_diff_store_done). НЕ sdMyWaitingLines: тя брои и 'sent'/'sent_sap'
-   (банерът „N реда чакат вашия отговор"), а бутонът идва от надписа в
-   Бюлетина и трябва да покаже неговите редове. Без bulletin.js (тест, който
-   вдига модула сам) — пада към sdMyWaitingLines: по-широко, но не крие чакащ
-   ред. */
+   на stock_diff_store_done). От 04.11.2026 sdMyWaitingLines брои по същото
+   правило за реда (diffLineWaitsStore) — вече НЕ брои 'sent'/'sent_sap'.
+   Разликата, която остава: тук обектът е само currentUser.store_name (както
+   Бюлетина), там — и назначените обекти (assignedStores). Без bulletin.js
+   (тест, който вдига модула сам) — пада към sdMyWaitingLines. */
 function sdBulWaitingLines(){
   if(!currentUser || isGlobal() || isLogisticsWarehouseUser()) return [];
   if(typeof bulDiffStoreWaiting === 'function'){
@@ -5784,22 +5784,13 @@ function sdSetTabBadge(n){
    модула би останал с осакатени размени — без id, без status, без чуждите.
    Подаден null/undefined значи „ползвай sdSwaps", което е верният източник по
    пътя на рендера (sdUpdateTabBadgeFromData). */
-/* Чака ли редът действие ОТ ОБЕКТА. Изнесено от sdUnreviewedCountFor, защото
-   от 04.10.2026 същото условие трябва и на брояча/филтъра в таба, и в базата
-   (stock_diff_store_done). Три копия на едно условие се разминават мълчаливо.
-   'will_send' не се брои (стоката още не е тръгнала), празен отговор на склада
-   не се брои (чака СКЛАДА), 'no_stock' вече е отговор на обекта, приключен ред
-   не се брои. */
-function sdLineWaitsStore(l){
-  if(!l) return false;
-  if(String(l.status||'')==='received') return false;
-  if(l.store_response) return false;
-  var w=String(l.warehouse_response||'');
-  return w==='sent' || w==='sent_sap' || w==='return';
-}
-/* Редовете на ОБЕКТА, чакащи неговото действие — за брояча и филтъра в таба.
-   Само МЕЖДУСКЛАДОВИ и само по НЕПРЕГЛЕДАНИ бланки, точно като правилото в
-   базата. Размените също местят хода, затова влизат. */
+/* Редовете на ОБЕКТА, чакащи неговото действие — за статус-филтъра
+   „📝 Чакат моя отговор". Само МЕЖДУСКЛАДОВИ и само по НЕПРЕГЛЕДАНИ бланки,
+   точно като правилото в базата. Размените също местят хода, затова влизат.
+   Редът — по diffLineWaitsStore() от shared.js, същото като баджа, Бюлетина и
+   чипа „Само чакащите мен" (решение на Тенчо 04.11.2026; отменя решението от
+   14–15.10, по което тук се брояха и 'sent'/'sent_sap'). Старата
+   sdLineWaitsStore е махната — нямаше друг потребител. */
 function sdMyWaitingLines(){
   if(!currentUser || isGlobal() || isLogisticsWarehouseUser()) return [];
   var mine = assignedStores();
@@ -5816,7 +5807,7 @@ function sdMyWaitingLines(){
     if(!l || !myStore(l.store_name)) return false;
     var rp = (diffReports||[]).find(function(x){ return x.id===l.report_id; });
     if(!rp || rp.reviewed || rp.direction!=='interstore') return false;
-    return !!myMove[String(l.id)] || sdLineWaitsStore(l);
+    return !!myMove[String(l.id)] || diffLineWaitsStore(l);
   });
 }
 function sdUnreviewedCountFor(reports, lines, swaps){
@@ -5929,10 +5920,13 @@ function sdRefreshTabBadge(){
   /* Обектът (04.11.2026): direction — броят се само междускладовите;
      difference_category — diffLineWaitsStore изключва wrong_barcode /
      similar_item; id на реда — ходът по размяна е ключиран по ред.
-     Складът и Цвети/admin — заявката им е непроменена. */
+     Складът (04.11.2026, sd-waiting-filter-align): само id на реда — без него
+     закъсняла размяна (lateTo[String(l.id)]) се засичаше при рендер, но не и
+     в пулса. Цвети/admin — заявката им е непроменена. */
   var storeBadge = !isLogisticsWarehouseUser() && !canReviewDiff();
+  var lineCols = storeBadge ? 'id,difference_category,' : (isLogisticsWarehouseUser() ? 'id,' : '');
   var q = 'select=id,store_name,counterpart,reviewed'+(storeBadge ? ',direction' : '')+
-    (needLines ? ',stock_differences('+(storeBadge ? 'id,difference_category,' : '')+'report_id,warehouse_response,store_response,status)' : '')+
+    (needLines ? ',stock_differences('+lineCols+'report_id,warehouse_response,store_response,status)' : '')+
     '&reviewed=eq.false';
   if(isLogisticsWarehouseUser()){
     q += '&counterpart=eq.' + encodeURIComponent(currentUser.store_name);

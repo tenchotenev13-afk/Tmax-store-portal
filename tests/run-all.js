@@ -238,6 +238,7 @@ const TESTS = [
   'bul-supply-view-all.test.js',
   'sd-store-clarity.test.js',
   'sd-badge-store-align.test.js',
+  'sd-waiting-filter-align.test.js',
   'transit-store-clarity.test.js',
   'sr-banner-text.test.js',
   'transit-phone-buttons.test.js',

@@ -961,12 +961,12 @@ function autoCompleteActive(linkedModule, todayISO){
    Ползват я: надписът „⏳ N реда чакат отговор" в Бюлетина и колоната
    „чака обекта" в „Необработени разлики над N дни" (report.js + копие в
    send-scheduled-report); от 04.11.2026 и балончето на таба Разлики за
-   ОБЕКТ (sdUnreviewedCountFor — решение на Тенчо: стока на път не е ход).
-   НАРОЧНО НЕ я ползват (решение на Тенчо, 14.10):
-   sdLineWaitsStore / sdMyWaitingLines (чипът „📝 Чакат моя отговор"; банерът
-   в модула от 24.10 брои по bulDiffStoreWaiting) — там
-   'sent' остава, защото обектът трябва да отговори „прието", когато стоката
-   дойде. Те казват „какво да направя", не „изпълнил ли съм". */
+   ОБЕКТ (sdUnreviewedCountFor — решение на Тенчо: стока на път не е ход),
+   и статус-филтърът „📝 Чакат моя отговор" (sdMyWaitingLines). Решението от
+   14–15.10 („там 'sent' остава", sdLineWaitsStore) е ОТМЕНЕНО от Тенчо на
+   04.11.2026, а sdLineWaitsStore е махната. Стоката на път се показва само
+   като подсказка: банерът „🚚 … на път към вас" и маркировката в картата
+   (sdStoreHints().onway), не като чакащ ред. */
 function diffLineWaitsStore(l){
   if(!l) return false;
   if(String(l.status||'')==='received') return false;

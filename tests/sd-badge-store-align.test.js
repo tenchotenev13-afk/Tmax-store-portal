@@ -228,7 +228,9 @@ async function pulseCount(h, reps, lines, swaps) {
     const pw = await pulseCount(hw, WH_REPS.filter(r => r.counterpart === WH), WH_LINES, []);
     ok('склад: пулс = 2', pw.n === 2, String(pw.n));
     const qw = pw.seen.find(s => s.indexOf('differences_reports?') === 0) || '';
-    ok('склад: заявката е постарому', qw === 'differences_reports?select=id,store_name,counterpart,reviewed,stock_differences(report_id,warehouse_response,store_response,status)&reviewed=eq.false&counterpart=eq.' + encodeURIComponent(WH), qw);
+    /* От 04.11.2026 (sd-waiting-filter-align) складът тегли и id на реда —
+       иначе закъсняла размяна не се засича в пулса. */
+    ok('склад: заявката — постарому плюс id на реда', qw === 'differences_reports?select=id,store_name,counterpart,reviewed,stock_differences(id,report_id,warehouse_response,store_response,status)&reviewed=eq.false&counterpart=eq.' + encodeURIComponent(WH), qw);
 
     const ha = env(ADMIN, [], [], []);
     ok('admin е canReviewDiff', !!ha.w.canReviewDiff());
