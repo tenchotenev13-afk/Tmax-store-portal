@@ -1314,8 +1314,9 @@ floor(процесори/3), най-много 8). Измерено 19.10 на �
 `minusi.js` — без промяна (решение А на Тенчо, 04.11): „🚚 На път“ = неприето от
 получателя; по отметката на изпращача би скрило повечето доставки от склада.
 Схемата — миграция 20261104114441 `transit_status_split` (04.11; SQL тест
-`tests/sql/transit-recon.test.sql` — ОК, мутанти R1, R2 падат). Данните
-(`transit-status-split-data.sql`, 44 → 0 'sent') — след push-а на кода.
+`tests/sql/transit-recon.test.sql` — ОК, мутанти R1, R2 падат). Кодът —
+`798022a` (04.11). Данните — миграция 20261104122306 `transit_status_split_data`
+(04.11, след push-а): 40 реда 'sent' → pending + sender_status 'sent', остават 0.
 
 ## 6. Отворени точки → виж claude/open/ (npm run open). Затворени — claude/open/closed/.
 
