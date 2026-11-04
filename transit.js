@@ -43,6 +43,19 @@ var PLANT_ALL = Object.assign({}, PLANT_INCOMING, PLANT_OUTGOING);
 /* Кодовете на двата логистични склада (и „получаващ", и „изпращащ" тип) —
    доставка от тях е винаги 'incoming' за получателя (parseTransitRows). */
 var TRANSIT_WAREHOUSE_CODES = { '5505':1, '5518':1, '2505':1, '2518':1 };
+/* Ред от логистичен склад влиза при импорта направо като ИЗПРАТЕН (решение
+   на Тенчо, 04.11.2026): ред влиза само с ВД, импортът е месечен — стоката
+   почти винаги вече е тръгнала; складът ползва „↩ Върни изпращането" само за
+   изключенията. sender_status_by = TRANSIT_IMPORT_SENDER_BY, за да личи, че
+   не е натиснато от склада. Само НОВ ред — съществуващият не се пипа
+   (transitImportBody). Трансферите между магазини — ръчно, без промяна.
+   Складът се познава по името, в което parseSupplierName превежда кода. */
+var TRANSIT_IMPORT_SENDER_BY = 'импорт';
+function transitIsWarehouseSupplier(r){
+  var s=r&&r.supplier; if(!s) return false;
+  for(var c in TRANSIT_WAREHOUSE_CODES){ if(PLANT_ALL[c]===s) return true; }
+  return false;
+}
 
 /* Истинските 18 магазина (без складове/сервиз/администрация) — използва се
    за разпознаване на "трансфер между магазини" при импорт, независимо дали
@@ -576,6 +589,8 @@ function renderTransit(){
     transitData.forEach(function(x){ if(x.inbound_delivery&&!x.archived_at&&!transitSenderSent(x)){ var k=transitVdSupKey(x); _vdUnsent[k]=(_vdUnsent[k]||0)+1; } });
     shownList.forEach(function(r){
       var rs=transitRecvStatus(r), st=T_STATUS[rs]||T_STATUS.pending, sentS=transitSenderSent(r), ss=sentS?T_SENDER.sent:T_SENDER.none;
+      /* Отбелязано от импорта, не от склада — „📤 Изпратена · импорт". */
+      var ssLabel=ss.label+(sentS&&r.sender_status_by===TRANSIT_IMPORT_SENDER_BY?' · импорт':'');
       var isOut=r.direction==='outgoing';
       var isTransfer=r.direction==='transfer';
       var isOver=rs==='pending'&&r.doc_date&&(new Date()-new Date(r.doc_date))>30*86400000;
@@ -605,7 +620,7 @@ function renderTransit(){
       h+='<td style="padding:7px 8px;">'+
           /* Две значки (етап 3): получател и изпращач; плюс „🔍 Чака засечка“. */
           '<div class="t-recv" title="Получател" style="white-space:nowrap;"><span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">'+st.label+'</span></div>'+
-          '<div class="t-send" title="Изпращач'+(r.sender_status_by?' · '+esc(r.sender_status_by):'')+'" style="margin-top:3px;white-space:nowrap;"><span style="background:'+ss.bg+';color:'+ss.color+';padding:2px 6px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">'+ss.label+'</span></div>'+
+          '<div class="t-send" title="Изпращач'+(r.sender_status_by?' · '+esc(r.sender_status_by):'')+'" style="margin-top:3px;white-space:nowrap;"><span style="background:'+ss.bg+';color:'+ss.color+';padding:2px 6px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">'+ssLabel+'</span></div>'+
           transitReconBadgeHtml(r)+
           tReviewedBadgeHtml(r)+
           (r.archived_at?'<div class="t-archived" style="font-size:10px;color:#64748b;font-weight:600;margin-top:2px;white-space:nowrap;">🗄 архив '+fmtDate(String(r.archived_at).slice(0,10))+'</div>':'')+
@@ -1635,6 +1650,7 @@ function renderTransitImportPreview(plan){
          архив не се знаят и не се показват. */
       (blocked?'<div style="color:#991b1b;font-weight:600;padding:3px 0;">Нищо не се записва.</div>':
       stat('t-imp-new','Нови',plan.newRows.length,'#16a34a')+
+      stat('t-imp-wh','  от склад — влизат като изпратени',plan.newRows.filter(transitIsWarehouseSupplier).length,'#7c3aed')+
       stat('t-imp-upd','Обновяват се',plan.updRows.length,'#2563eb')+
       (plan.revived?stat('t-imp-revived','  от тях излизат от архива',plan.revived,'#64748b'):'')+
       stat('t-imp-arch','Отиват в архив',plan.archiveIds.length,plan.archiveIds.length?'#d97706':'#16a34a'))+
@@ -1731,6 +1747,10 @@ function transitImportBody(r,isNew,who,at){
     archived_at:null,imported_at:at
   };
   if(isNew){ b.status='pending'; b.comment=''; b.transfer_date=null; b.updated_by=who; b.updated_at=at; }
+  /* Нов ред от склад → изпратен „· импорт" (виж TRANSIT_IMPORT_SENDER_BY).
+     Съществуващ ред: sender_status* НЕ се пращат — каквото е отбелязал
+     складът (вкл. върнато на NULL), остава. */
+  if(isNew&&transitIsWarehouseSupplier(r)){ b.sender_status='sent'; b.sender_status_by=TRANSIT_IMPORT_SENDER_BY; b.sender_status_at=at; }
   return b;
 }
 

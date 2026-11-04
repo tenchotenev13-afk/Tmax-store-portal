@@ -42,6 +42,17 @@
         (вкл. „НЯМА нито една пишеща заявка")
      B3 бутонът изчезва вместо да е неактивен                     → ❌ а)
      B4 без втората защита в confirmTransitImport                 → ❌ а)
+   з) (04.11.2026, сесия transit-wh-sent) нов ред от логистичен склад влиза
+      като изпратен: sender_status 'sent', by „импорт", at = imported_at;
+      нов трансфер — без sender_status*; повторен импорт (върнат на NULL от
+      склада / изпратен от склада) — тялото не носи sender_status*, тоест
+      остават; значката „📤 Изпратена · импорт" само при by „импорт".
+      Мутанти (04.11.2026, всеки върху чист transit.js, чистият — exit 0),
+      и четирите падат (exit 1):
+     W1 импортът маркира и трансферите (без transitIsWarehouseSupplier) → ❌ з)1
+     W2 повторният импорт презаписва sender_status (без isNew)          → ❌ з)2
+     W3 без правилото за склада                                          → ❌ з)1
+     W4 значката без „· импорт"                                          → ❌ з)3
    Прозорецът по imported_at в Бюлетина (bulletin.js) е заключен в
    task-span-weeks.test.js (раздел 13); мутант 8 — '&created_at=gte.' там
    → ❌. Функциите в базата — tests/sql/transit-*.test.sql (след миграцията).
@@ -410,6 +421,68 @@ const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' &
     ok('само файл 2 → „Липсва файл 1"', h.toasts.some(x => /Липсва файл 1/.test(x.m)), h.toasts.map(x => x.m).join(' | '));
     ok('разпознаване по header: файл 2 → vd, файл 1 → transit',
       h.w.transitFileKind(F2()) === 'vd' && h.w.transitFileKind(F1) === 'transit');
+  }
+
+  section('з) Нов ред от склад влиза като изпратен „· импорт" (решение 04.11.2026); трансфер и стар ред — не');
+  {
+    /* 1. Празна база: M1, M2 — от „Логистичен склад Добрич", M4 — трансфер от магазин Добрич. */
+    const h = env();
+    await runImport(h, F1_OK, F2());
+    ok('прегледът: „от склад — влизат като изпратени: 2"', num(h, 't-imp-wh') === 2, num(h, 't-imp-wh'));
+    await clickImport(h);
+    const body = [].concat.apply([], upserts(h).map(p => p.body));
+    const wh = body.filter(b => b.material_code === 'M1' || b.material_code === 'M2');
+    ok('двата реда от склад са записани', wh.length === 2, wh.length);
+    ok('… sender_status = sent', wh.length === 2 && wh.every(b => b.sender_status === 'sent'), JSON.stringify(wh.map(b => b.sender_status)));
+    ok('… sender_status_by = „импорт"', wh.length === 2 && wh.every(b => b.sender_status_by === 'импорт'), JSON.stringify(wh.map(b => b.sender_status_by)));
+    ok('… sender_status_at = imported_at (часът на импорта)', wh.length === 2 && wh.every(b => !!b.imported_at && b.sender_status_at === b.imported_at),
+      JSON.stringify(wh.map(b => [b.sender_status_at, b.imported_at])));
+    ok('… получателят остава pending', wh.every(b => b.status === 'pending'));
+    const tr = body.filter(b => b.material_code === 'M4')[0] || {};
+    ok('трансферът (M4) е записан като transfer', tr.direction === 'transfer', tr.direction);
+    ok('… БЕЗ sender_status* (ръчно „Изпратена", както досега)',
+      !('sender_status' in tr) && !('sender_status_by' in tr) && !('sender_status_at' in tr), JSON.stringify(tr));
+  }
+  {
+    /* 2. Повторен импорт: M1 — складът е върнал изпращането (NULL); M2 — изпратен
+       от склада по-рано. И двата съществуват → sender_status* не се пращат. */
+    const existing = [
+      { id: 'w1', inbound_delivery: '180000001', delivery_position: '900001', archived_at: null, status: 'pending',
+        store_name: 'Търговище', direction: 'incoming', supplier: 'Логистичен склад Добрич',
+        sender_status: null, sender_status_by: null, sender_status_at: null },
+      { id: 'w2', inbound_delivery: '180000001', delivery_position: '900002', archived_at: null, status: 'pending',
+        store_name: 'Търговище', direction: 'incoming', supplier: 'Логистичен склад Добрич',
+        sender_status: 'sent', sender_status_by: 'Склад Добрич', sender_status_at: '2026-10-20T08:00:00Z' }
+    ];
+    const h = env({ existing });
+    await runImport(h, F1_OK, F2());
+    ok('прегледът: от склад като изпратени = 0 (и двата са стари, M4 е трансфер)', num(h, 't-imp-wh') === 0, num(h, 't-imp-wh'));
+    await clickImport(h);
+    const body = [].concat.apply([], upserts(h).map(p => p.body));
+    const w1 = body.filter(b => b.delivery_position === '900001')[0];
+    const w2 = body.filter(b => b.delivery_position === '900002')[0];
+    const noSender = b => !!b && !('sender_status' in b) && !('sender_status_by' in b) && !('sender_status_at' in b);
+    ok('върнатият от склада (NULL) — тялото не носи sender_status* → остава NULL', noSender(w1), JSON.stringify(w1));
+    ok('изпратеният от склада — тялото не носи sender_status* → остава със стария by/at', noSender(w2), JSON.stringify(w2));
+  }
+  {
+    /* 3. Значката на изпращача: „· импорт" само при sender_status_by 'импорт'. */
+    const h = env();
+    h.w.transitData = [
+      { id: 'b1', direction: 'incoming', status: 'pending', store_name: 'Търговище', supplier: 'Логистичен склад Добрич',
+        material_name: 'A', sender_status: 'sent', sender_status_by: 'импорт', sender_status_at: '2026-11-04T10:00:00Z' },
+      { id: 'b2', direction: 'incoming', status: 'pending', store_name: 'Търговище', supplier: 'Логистичен склад Добрич',
+        material_name: 'B', sender_status: 'sent', sender_status_by: 'Склад Добрич', sender_status_at: '2026-11-04T10:00:00Z' },
+      { id: 'b3', direction: 'incoming', status: 'pending', store_name: 'Търговище', supplier: 'Логистичен склад Добрич',
+        material_name: 'C', sender_status: null, sender_status_by: 'импорт' }
+    ];
+    h.w.transitDir = 'all'; h.w.transitFilter = 'all'; h.w.renderTransit();
+    const badges = Array.from(h.doc.querySelectorAll('#mod-transit .t-send')).map(txtOf);
+    ok('три значки на изпращача', badges.length === 3, JSON.stringify(badges));
+    ok('отбелязаният от импорта → „📤 Изпратена · импорт"', badges.indexOf('📤 Изпратена · импорт') >= 0, JSON.stringify(badges));
+    ok('отбелязаният от склада → „📤 Изпратена" без „импорт"', badges.indexOf('📤 Изпратена') >= 0, JSON.stringify(badges));
+    ok('неизпратен (дори с by „импорт") → „📭 Неизпратена"', badges.indexOf('📭 Неизпратена') >= 0, JSON.stringify(badges));
+    ok('„· импорт" е точно на един ред', badges.filter(b => /импорт/.test(b)).length === 1, JSON.stringify(badges));
   }
 
   report();
