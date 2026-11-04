@@ -94,7 +94,9 @@ const sig = el => btnsIn(el).map(b => txt(b) + '|' + b.getAttribute('onclick') +
 /* „за получ." = трансферите, които чакат обекта да ги приеме. До 03.11.2026 стоеше
    под таба „🔄 Трансфери"; от етап 2 табът го няма и същото число е в чипа
    „📥 Чакат мен" (transitAwaitsMyReceive). */
-const recvCount = h => { const c = mod(h).querySelector('[data-tt-f="mine"] .chips-n'); return c ? +txt(c) : -1; };
+/* От етап 3 (04.11.2026) чипът „Чакат мен" е само в таба „Получавам", а тестът е
+   на „Всички" — затова броят е по самото правило (transitAwaitsViewpoint). */
+const recvCount = h => (h.w.transitData || []).filter(h.w.transitAwaitsViewpoint).length;
 
 (async function () {
 
@@ -110,7 +112,7 @@ const recvCount = h => { const c = mod(h).querySelector('[data-tt-f="mine"] .chi
       ok(id + ': 6 клетки, бутоните в шестата', !!tr && tr.cells.length === 6 && btnsIn(tr.cells[5]).length > 0, tr && tr.cells.length);
       wideSig[id] = tr ? sig(tr.cells[5]) : '';
     }
-    ok('in1 има „✅ Прието" и „✕ Неприето"', /✅ Прието\|tMarkStatus\(this\.dataset\.id,'received'\)/.test(wideSig.in1) && /✕ Неприето/.test(wideSig.in1), wideSig.in1);
+    ok('in1 има „✅ Доставена" и „✕ Неприето" (етап 3)', /✅ Доставена\|tMarkStatus\(this\.dataset\.id,'received'\)/.test(wideSig.in1) && /✕ Неприето/.test(wideSig.in1), wideSig.in1);
     ok('out1 има „↩ Върни"', /↩ Върни/.test(wideSig.out1), wideSig.out1);
     ok('inc1 има „👁 Проверено…" и „✏️ Редакция"', /👁 Проверено/.test(wideSig.inc1) && /✏️ Редакция/.test(wideSig.inc1), wideSig.inc1);
     wide.close();
@@ -135,8 +137,8 @@ const recvCount = h => { const c = mod(h).querySelector('[data-tt-f="mine"] .chi
     section('3. Истински клик на „✅ Прието" в под-реда');
     ok('преди клика „за получ." = 2', recvCount(h) === 2, recvCount(h));
     const sub = dataRow(h, 'in1').nextElementSibling;
-    const b = btnsIn(sub).find(x => txt(x) === '✅ Прието');
-    if (ok('бутонът „✅ Прието" на in1 е в под-реда', !!b)) {
+    const b = btnsIn(sub).find(x => txt(x) === '✅ Доставена');
+    if (ok('бутонът „✅ Доставена" на in1 е в под-реда', !!b)) {
       realClick(h.w, b);
       for (let i = 0; i < 30; i++) await ticks();
       ok('PATCH status=received за in1', h.stub.patches.length === 1 && h.stub.patches[0].id === 'in1' && h.stub.patches[0].body.status === 'received',

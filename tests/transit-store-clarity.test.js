@@ -117,17 +117,17 @@ async function open(user, rows) {
       ok('филтърът „📥 Чакат мен" е активен', h.w.transitFilter === 'mine' && !!chip(h, 'mine') && chip(h, 'mine').classList.contains('active'));
       ok('чипът казва 2', txt(chip(h, 'mine')) === '📥 Чакат мен 2', txt(chip(h, 'mine')));
       ok('в таблицата са точно двата реда', rowIds(h) === 'in1,in2', rowIds(h));
-      ok('два бутона „✅ Прието"', btns(h, '✅ Прието').length === 2);
+      ok('два бутона „✅ Доставена" (етап 3)', btns(h, '✅ Доставена').length === 2);
       ok('два бутона „✕ Неприето"', btns(h, '✕ Неприето').length === 2);
       ok('„↩ Върни" (изходящите) го няма', btns(h, '↩ Върни').length === 0);
       const n = h.doc.getElementById('t-recv-note');
-      ok('банерът казва 2', !!n && txt(n).indexOf('📥 2 трансфера чакат да ги приемете.') === 0, txt(n));
-      ok('… и назовава бутоните', !!n && txt(n).indexOf('натиснете „✅ Прието“ или „✕ Неприето“.') >= 0, txt(n));
+      ok('банерът казва 2', !!n && txt(n).indexOf('📥 2 изпратени реда чакат да ги приемете.') === 0, txt(n));
+      ok('… и назовава бутоните', !!n && txt(n).indexOf('натиснете „✅ Доставена“ или „✕ Неприето“.') >= 0, txt(n));
       const o = h.doc.getElementById('t-other-note');
-      ok('сивият ред: 3 ваши чакат другия', !!o && txt(o) === '📤 3 ваши трансфера чакат другия обект.', txt(o));
+      ok('сивият ред: 3 ваши чакат получателя', !!o && txt(o) === '📤 3 ваши изпратени реда чакат получателя.', txt(o));
 
-      section('2. Истински клик на „✅ Прието" → броят става 1');
-      const b = btns(h, '✅ Прието').find(x => x.closest('tr') && txt(x.closest('tr')).indexOf('АРТИКУЛ in1') >= 0);
+      section('2. Истински клик на „✅ Доставена" → броят става 1');
+      const b = btns(h, '✅ Доставена').find(x => x.closest('tr') && txt(x.closest('tr')).indexOf('АРТИКУЛ in1') >= 0);
       if (ok('бутонът на in1 го има', !!b)) {
         realClick(h.w, b);
         await settle();
@@ -136,7 +136,7 @@ async function open(user, rows) {
         ok('чипът „Чакат мен" = 1', txt(chip(h, 'mine')) === '📥 Чакат мен 1', txt(chip(h, 'mine')));
         ok('филтърът остава „Чакат мен"', h.w.transitFilter === 'mine');
         ok('в таблицата остава in2', rowIds(h) === 'in2', rowIds(h));
-        ok('банерът казва 1', /^📥 1 трансфер чака да го приемете./.test(txt(h.doc.getElementById('t-recv-note'))), txt(h.doc.getElementById('t-recv-note')));
+        ok('банерът казва 1', /^📥 1 изпратен ред чака да го приемете./.test(txt(h.doc.getElementById('t-recv-note'))), txt(h.doc.getElementById('t-recv-note')));
       }
       h.close();
     }
@@ -150,7 +150,8 @@ async function open(user, rows) {
       ok('без банер', !h.doc.getElementById('t-recv-note'));
       ok('подтабът е „Всички", филтърът „Не доставени"', h.w.transitDir === 'all' && h.w.transitFilter === 'pending', h.w.transitDir + '/' + h.w.transitFilter);
       ok('табът „📥 Получавам" е там, неактивен', !!dirBtn(h, '📥 Получавам') && h.w.transitDir !== 'in');
-      ok('чипът „📥 Чакат мен" стои и при 0', txt(chip(h, 'mine')) === '📥 Чакат мен 0', txt(chip(h, 'mine')));
+      h.w.transitDir = 'in'; h.w.renderTransit();   /* етап 3: чипът е в таба „Получавам" */
+      ok('чипът „📥 Чакат мен" стои и при 0 (в „Получавам")', txt(chip(h, 'mine')) === '📥 Чакат мен 0', txt(chip(h, 'mine')));
       ok('сивият ред за изходящите си стои', !!h.doc.getElementById('t-other-note'));
       h.close();
     }
@@ -163,7 +164,7 @@ async function open(user, rows) {
       await settle();
       ok('подтабът остава „Всички"', h.w.transitDir === 'all', h.w.transitDir);
       ok('филтърът остава „Не доставени"', h.w.transitFilter === 'pending', h.w.transitFilter);
-      ok('банерът пак казва 2', /📥 2 трансфера/.test(txt(h.doc.getElementById('t-recv-note'))));
+      ok('банерът пак казва 2', /📥 2 изпратени реда/.test(txt(h.doc.getElementById('t-recv-note'))));
       /* Следващо влизане през навигацията — скокът пак работи. */
       h.w.showModule('transit');
       await settle();

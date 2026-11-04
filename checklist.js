@@ -670,7 +670,7 @@ function checklistModuleId(metric) {
 var CHECKLIST_MODULE_FILL = {
   transit: {
     table: 'goods_transit',
-    query: 'select=store_name,direction,status,reviewed_at&archived_at=is.null',
+    query: 'select=store_name,direction,status,reviewed_at,recon_at&archived_at=is.null',
     value: function (rows) { return checklistTransitValue(rows); }
   },
   /* Само source='diff' (изтегляне по разлики). Рекламациите и срокът на
@@ -924,7 +924,8 @@ function checklistTransitValue(rows) {
   var incoming = rows.filter(function (t) { return t && t.direction === 'incoming'; });
   if (!incoming.length) return null;
   var done = incoming.filter(function (t) {
-    return (!!t.status && t.status !== 'pending') || !!t.reviewed_at;
+    /* „🔍 Чака засечка" (recon_at) е обработен — както reviewed_at (етап 3, 04.11.2026). */
+    return (!!t.status && t.status !== 'pending') || !!t.reviewed_at || !!t.recon_at;
   });
   return done.length + '/' + incoming.length;
 }

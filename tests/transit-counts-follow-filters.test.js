@@ -56,6 +56,11 @@ const DATA = [];
 });
 DATA.push(row({ direction: 'outgoing', status: 'pending', store_name: 'Шумен', supplier: 'Склад Х' }));
 DATA.push(row({ store_name: TG, supplier: 'Доставчик X' }));
+/* Етап 3 (04.11.2026): изпращачът е отбелязал, засечка — от двете страни. */
+DATA.push(row({ store_name: 'Кърджали', supplier: TG, sender_status: 'sent' }));
+DATA.push(row({ store_name: 'Шумен', supplier: TG, sender_status: 'sent', status: 'received' }));
+DATA.push(row({ direction: 'transfer', store_name: 'Кърджали', supplier: 'Шумен', recon_at: '2026-11-04T08:00:00Z', recon_by: 'X', recon_side: 'receiver' }));
+DATA.push(row({ store_name: 'Кърджали', supplier: TG, sender_status: 'sent', recon_at: '2026-11-04T09:00:00Z', recon_by: 'Y', recon_side: 'sender' }));
 
 /* Еталон: НЕЗАВИСИМО от transitRows. f={dir,status,store,month,q,wh}
    От 03.11.2026 (етап 2) табовете са 'in' / 'out' спрямо гледната точка:
@@ -76,9 +81,16 @@ function ref(data, f) {
       if (f.dir === 'in' && r.store_name !== vp) return false;
       if (f.dir === 'out' && r.supplier !== vp) return false;
     }
-    /* 'mine' (04.11.2026) = изпратен трансфер, който чака гледната точка да го приеме. */
-    if (f.status === 'mine') { if (!(vp && r.direction === 'transfer' && r.status === 'sent' && r.store_name === vp)) return false; }
-    else if (f.status && f.status !== 'all' && r.status !== f.status) return false;
+    /* Етап 3 (04.11.2026): получател — по статуса (стар 'sent' = pending); изпращач —
+       snone / ssent по sender_status (или стар 'sent'); recon; mine = изпратено,
+       получателят pending, гледната точка е получателят. */
+    const rs = (!r.status || r.status === 'sent') ? 'pending' : r.status;
+    const snt = r.sender_status === 'sent' || r.status === 'sent';
+    if (f.status === 'mine') { if (!(vp && snt && rs === 'pending' && r.store_name === vp)) return false; }
+    else if (f.status === 'snone') { if (snt) return false; }
+    else if (f.status === 'ssent') { if (!snt) return false; }
+    else if (f.status === 'recon') { if (!r.recon_at) return false; }
+    else if (f.status && f.status !== 'all' && rs !== f.status) return false;
     if (vpTab) {
       if (f.wh && f.store) {
         if (f.dir === 'in' && r.supplier !== f.store) return false;
@@ -123,47 +135,40 @@ function cards(h) {
 function clickTab(h, k) { realClick(h.w, ui(h).tabs[k], 'tab ' + k); }
 function clickStat(h, k) { realClick(h.w, ui(h).stat[k], 'stat ' + k); }
 
-/* Проверка на всички бутони при текущото състояние; всеки се кликва реално. */
+/* Проверка на всички бутони при текущото състояние; всеки се кликва реално.
+   Етап 3 (04.11.2026): чиповете са по таб, а кликът на таб слага
+   подразбирания чип — числото под таба = редовете след този клик. */
+const TAB_DEF = { all: 'pending', in: 'pending', out: 'snone' };
 function checkAll(h, name, base) {
-  const st0 = { dir: h.w.transitDir, status: h.w.transitFilter };
-  const reset = () => { h.w.transitDir = st0.dir; h.w.transitFilter = st0.status; h.w.renderTransit(); };
-  reset();
-  ['all', 'pending', 'received', 'sent', 'rejected'].forEach(k => {
-    reset();
-    const shown = num(ui(h).stat[k]);
-    clickStat(h, k);
-    ok(name + ': статус „' + k + '" показва ' + shown + ' = редове след клик (' + trs(h) + ')', shown === trs(h));
-    ok(name + ': … и = еталон', shown === ref(h.w.transitData, Object.assign({}, base, { dir: st0.dir, status: k })));
-  });
-  /* Табовете (етап 2): 'in' = „📥 Получавам", 'out' = „📤 Изпращам". */
   const hasVp = !!(base.wh || base.store);
-  ['all', 'in', 'out'].forEach(k => {
-    reset();
-    const t = tabNums(ui(h).tabs[k]);
-    clickTab(h, k);
-    if (k === 'all') {
-      ok(name + ': таб „Всички" ' + t[0] + ' = редове след клик (' + trs(h) + ')', t[0] === trs(h));
-      ok(name + ': … и = еталон', t[0] === ref(h.w.transitData, Object.assign({}, base, { dir: 'all', status: st0.status })));
-    } else if (!hasVp) {
-      ok(name + ': „' + k + '" без гледна точка — без число', t.length === 0, t.join('/'));
+  const CH = {
+    all: ['pending', 'received', 'rejected', 'recon', 'all'],
+    in: ['pending', 'received', 'rejected', 'recon', 'all'].concat(hasVp ? ['mine'] : []),
+    out: ['snone', 'ssent', 'recon', 'all']
+  };
+  ['all', 'in', 'out'].forEach(dir => {
+    h.w.transitDir = 'all'; h.w.transitFilter = 'pending'; h.w.renderTransit();
+    const t = tabNums(ui(h).tabs[dir]);
+    clickTab(h, dir);
+    ok(name + ': клик на таб „' + dir + '" → подразбиращият се чип „' + TAB_DEF[dir] + '"', h.w.transitFilter === TAB_DEF[dir], h.w.transitFilter);
+    if (dir !== 'all' && !hasVp) {
+      ok(name + ': „' + dir + '" без гледна точка — без число', t.length === 0, t.join('/'));
       ok(name + ': … и празна таблица след клик', h.w._transitVisible.length === 0, h.w._transitVisible.length);
-    } else if (k === 'in') {
-      /* От 04.11.2026 „N чакат" = „⏳ Не доставени" + „📥 Чакат мен" (изпратените,
-         които чакат гледната точка) — двата чипа не се застъпват (pending / sent). */
-      clickStat(h, 'pending');
-      const p = trs(h);
-      clickStat(h, 'mine');
-      const mn = trs(h);
-      ok(name + ': „Получавам" ' + t[0] + ' чакат = след таб+„Не доставени" (' + p + ') + „Чакат мен" (' + mn + ')', t[0] === p + mn);
-      ok(name + ': … и = еталон', t[0] === ref(h.w.transitData, Object.assign({}, base, { dir: 'in', status: 'pending' })) +
-        ref(h.w.transitData, Object.assign({}, base, { dir: 'in', status: 'mine' })));
-    } else {
-      clickStat(h, 'pending');
-      const p = h.w._transitVisible.filter(r => r.direction === 'transfer').length;
-      ok(name + ': „Изпращам" ' + t[0] + ' за изпр. = трансферите след таб+„Не доставени" (' + p + ')', t[0] === p);
+      return;
     }
+    ok(name + ': таб „' + dir + '" ' + t[0] + ' = редове след клик (' + trs(h) + ')', t[0] === trs(h));
+    ok(name + ': … и = еталон', t[0] === ref(h.w.transitData, Object.assign({}, base, { dir: dir, status: TAB_DEF[dir] })));
+    CH[dir].forEach(k => {
+      h.w.transitDir = dir; h.w.transitFilter = TAB_DEF[dir]; h.w.renderTransit();
+      const el = ui(h).stat[k];
+      if (!ok(name + ' / ' + dir + ': чип „' + k + '" е там', !!el)) return;
+      const shown = num(el);
+      clickStat(h, k);
+      ok(name + ' / ' + dir + ': чип „' + k + '" ' + shown + ' = редове след клик (' + trs(h) + ')', shown === trs(h));
+      ok(name + ' / ' + dir + ': … и = еталон', shown === ref(h.w.transitData, Object.assign({}, base, { dir: dir, status: k })));
+    });
   });
-  reset();
+  h.w.transitDir = 'all'; h.w.transitFilter = 'pending'; h.w.renderTransit();
 }
 
 const ADMIN = { email: 'c@temax.bg', display_name: 'Админ', role: 'admin', store_name: 'Централен офис' };
@@ -180,9 +185,13 @@ const SKLAD = { email: 'ls@temax.bg', display_name: TG, role: 'logistics', store
        Получавам = incoming+pending; Трансфери = transfer pending / sent. */
     const cnt = (f) => DATA.filter(f).length;
     ok('Всички (статус) = всички редове', num(u.stat.all) === DATA.length, num(u.stat.all) + ' vs ' + DATA.length);
-    ['pending', 'received', 'sent', 'rejected'].forEach(k =>
-      ok('статус ' + k + ' = брой по статус', num(u.stat[k]) === cnt(r => r.status === k), num(u.stat[k])));
-    ok('таб Всички = всички редове', tabNums(u.tabs.all)[0] === DATA.length);
+    /* Етап 3: чиповете на „Всички" са по статуса на ПОЛУЧАТЕЛЯ (стар 'sent' = pending) + засечка. */
+    const rsOf = r => (!r.status || r.status === 'sent') ? 'pending' : r.status;
+    ['pending', 'received', 'rejected'].forEach(k =>
+      ok('статус на получателя ' + k + ' = брой', num(u.stat[k]) === cnt(r => rsOf(r) === k), num(u.stat[k])));
+    ok('„🔍 Чака засечка" = редовете с recon_at (2)', num(u.stat.recon) === 2, num(u.stat.recon));
+    ok('чип „sent" го няма', !u.stat.sent);
+    ok('таб Всички = получател pending (подразбиращият се чип)', tabNums(u.tabs.all)[0] === cnt(r => rsOf(r) === 'pending'), tabNums(u.tabs.all)[0]);
     /* От 03.11.2026 (етап 2): офис без избран магазин няма гледна точка —
        „Получавам" / „Изпращам" са без числа (до тогава „Получавам" =
        incoming+pending и „Трансфери" = transfer pending / sent). */

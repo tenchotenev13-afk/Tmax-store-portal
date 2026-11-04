@@ -78,7 +78,7 @@ const settle = async () => { for (let i = 0; i < 20; i++) await ticks(3); };
   {
     const h = env(ADMIN, mkRows(5));
     const pend0 = chipN(h, 'pending'), rec0 = chipN(h, 'received');
-    const b = rowBtn(h, 'g2', '✅ Прието');
+    const b = rowBtn(h, 'g2', '✅ Доставена');
     if (ok('бутонът „✅ Прието" на ред 2', !!b)) {
       const g0 = gets(h).length;
       realClick(h.w, b, 'Прието');
@@ -88,7 +88,7 @@ const settle = async () => { for (let i = 0; i < 20; i++) await ticks(3); };
       const row = h.w.transitData.find(r => r.id === 'g2');
       ok('в transitData статусът е received', row.status === 'received', row.status);
       const tr2 = dataRows(h).find(x => /АРТ-0002/.test(x.textContent));
-      ok('редът показва „✅ Прието"', !!tr2 && /✅ Прието/.test(tr2.querySelector('td:nth-child(5)').textContent), tr2 && tr2.textContent.slice(0, 160));
+      ok('редът показва „✅ Доставена"', !!tr2 && /✅ Доставена/.test(tr2.querySelector('td:nth-child(5)').textContent), tr2 && tr2.textContent.slice(0, 160));
       ok('броячите: „Не доставени" −1, „Прието" +1', chipN(h, 'pending') === pend0 - 1 && chipN(h, 'received') === rec0 + 1,
         pend0 + '→' + chipN(h, 'pending') + ' / ' + rec0 + '→' + chipN(h, 'received'));
     }
@@ -97,14 +97,14 @@ const settle = async () => { for (let i = 0; i < 20; i++) await ticks(3); };
   section('б) PATCH с грешка → червен toast, редът непроменен, 0 GET');
   {
     const h = env(ADMIN, mkRows(5), { fail: { PATCH: /goods_transit/ } });
-    const b = rowBtn(h, 'g3', '✅ Прието');
+    const b = rowBtn(h, 'g3', '✅ Доставена');
     if (ok('бутонът го има', !!b)) {
       realClick(h.w, b, 'Прието');
       await settle();
       const t = h.toasts.find(x => /НЕ е записан/.test(x.m));
       ok('червен toast', !!t && t.c === '#dc2626', h.toasts.map(x => x.m).join(' | '));
       ok('редът остава pending', h.w.transitData.find(r => r.id === 'g3').status === 'pending');
-      ok('на екрана пак е „Не доставена" с бутона', /Не доставена/.test(dataRows(h).find(x => /АРТ-0003/.test(x.textContent)).textContent));
+      ok('на екрана пак е „Не доставена" с бутона', /Все още недоставена/.test(dataRows(h).find(x => /АРТ-0003/.test(x.textContent)).textContent));
       ok('0 GET и без презареждане', gets(h).length === 0 && h.reloads === 0, gets(h).length + ' / ' + h.reloads);
     }
   }
@@ -138,7 +138,7 @@ const settle = async () => { for (let i = 0; i < 20; i++) await ticks(3); };
     realClick(h.w, mod(h).querySelector('[data-tt-f="all"]'), 'Всички');
     realClick(h.w, moreBtn(h), 'още');
     ok('пак 400', dataRows(h).length === 400);
-    const b = rowBtn(h, 'g351', '✅ Прието');
+    const b = rowBtn(h, 'g351', '✅ Доставена');
     if (ok('бутонът на ред 351 е на екрана', !!b)) realClick(h.w, b, 'Прието');
     await settle();
     ok('след „Прието" на ред 351 — остават 400', dataRows(h).length === 400, dataRows(h).length);

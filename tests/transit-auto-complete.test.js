@@ -271,7 +271,8 @@ function fakeCb(doc, id, linked) {
                  writeFile() { written = true; } };
     if (guard('exportTransitExcel()', () => h.w.exportTransitExcel()) && ok('файлът е записан', written && !!sheet)) {
       const head = sheet[0], ci = head.indexOf('Проверено');
-      ok('заглавие „Проверено" веднага след „Статус"', ci > 0 && head[ci - 1] === 'Статус', JSON.stringify(head));
+      /* Етап 3 (04.11.2026): статусът е „Получател — статус", после изпращачът и засечката. */
+      ok('заглавие „Проверено" веднага след „Чака засечка (кой, кога)"', ci > 0 && head[ci - 1] === 'Чака засечка (кой, кога)' && head[ci - 3] === 'Получател — статус', JSON.stringify(head));
       ok('всеки ред е с дължината на заглавието', sheet.every(r => r.length === head.length), sheet.map(r => r.length).join(','));
       const byMat = m => sheet.find(r => r.indexOf('Артикул ' + m) >= 0);
       const d = reviewedNoon(), p = n => String(n).padStart(2, '0');

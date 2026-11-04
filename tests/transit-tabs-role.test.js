@@ -73,7 +73,9 @@ const mod = h => h.doc.getElementById('mod-transit');
 const tabBtn = (h, key) => Array.from(mod(h).querySelectorAll('button'))
   .find(b => (b.getAttribute('onclick') || '').indexOf("transitDir='" + key + "'") === 0) || null;
 const shown = h => h.w._transitVisible.map(r => r.id).sort().join(',');
-const click = (h, key) => { const b = tabBtn(h, key); if (b) realClick(h.w, b, key); return b; };
+/* От етап 3 (04.11.2026) кликът на таб нулира чипа към подразбирания; за да се
+   види кои редове са в таба при ВСИЧКИ статуси, след таба се кликва и чипът „Всички". */
+const click = (h, key) => { const b = tabBtn(h, key); if (b) { realClick(h.w, b, key); const a = mod(h).querySelector('[data-tt-f="all"]'); if (a) realClick(h.w, a, 'Всички'); } return b; };
 const tabNum = (h, key) => { const b = tabBtn(h, key); const m = b && /\((\d+) /.exec(b.textContent); return m ? +m[1] : null; };
 
 (async function run() {
@@ -131,11 +133,13 @@ const tabNum = (h, key) => { const b = tabBtn(h, key); const m = b && /\((\d+) /
   {
     const h = env(STORE);
     const nin = tabNum(h, 'in'), nout = tabNum(h, 'out');
-    h.w.transitFilter = 'pending'; click(h, 'in');
-    ok('„Получавам (N чакат)" = редовете след клик + „Не доставени" (2)', nin === 2 && h.w._transitVisible.length === nin, nin + ' / ' + h.w._transitVisible.length);
-    click(h, 'out');
-    const tr = h.w._transitVisible.filter(r => r.direction === 'transfer').length;
-    ok('„Изпращам (N за изпр.)" = трансферите за изпращане след клик (2)', nout === 2 && tr === nout, nout + ' / ' + tr);
+    /* Само кликът на таба — той слага подразбирания чип (етап 3). */
+    realClick(h.w, tabBtn(h, 'in'), 'in');
+    ok('„Получавам (N чакат)" = редовете след клик (чип „Все още недоставени", 2)', nin === 2 && h.w.transitFilter === 'pending' && h.w._transitVisible.length === nin,
+      nin + ' / ' + h.w._transitVisible.length + ' / ' + h.w.transitFilter);
+    realClick(h.w, tabBtn(h, 'out'), 'out');
+    ok('„Изпращам (N за изпр.)" = редовете след клик (чип „Неизпратени", 2)', nout === 2 && h.w.transitFilter === 'snone' && h.w._transitVisible.length === nout,
+      nout + ' / ' + h.w._transitVisible.length + ' / ' + h.w.transitFilter);
   }
 
   section('д) импорт: доставка от склад е incoming; магазин → магазин — transfer; сверката обновява direction');
@@ -227,11 +231,12 @@ const tabNum = (h, key) => { const b = tabBtn(h, key); const m = b && /\((\d+) /
       row('w5', 'Силистра', WH, 'incoming', 'received')
     ];
     const h = env(WAREHOUSE, data);
+    h.w.transitDir = 'in'; h.w.renderTransit();   /* „Чакат мен" е чип на „Получавам" (етап 3) */
     ok('„Получавам (3 чакат)" = 1 pending + 2 sent към склада', tabNum(h, 'in') === 3, tabNum(h, 'in'));
     const chip = mod(h).querySelector('[data-tt-f="mine"]');
     ok('чипът „📥 Чакат мен" е там и казва 2', !!chip && /Чакат мен\s*2/.test(chip.textContent), chip && chip.textContent);
     const ban = h.doc.getElementById('t-recv-note');
-    ok('банерът „2 трансфера чакат да ги приемете"', !!ban && /2 трансфера чакат да ги приемете/.test(ban.textContent), ban && ban.textContent);
+    ok('банерът „2 изпратени реда чакат да ги приемете"', !!ban && /2 изпратени реда чакат да ги приемете/.test(ban.textContent), ban && ban.textContent);
     /* Влизане: скок към „Получавам" + „Чакат мен". */
     const h2 = env(WAREHOUSE, data);
     h2.w.transitFilter = 'pending'; h2.w.transitOpenFocus(); h2.w.renderTransit();
@@ -241,9 +246,11 @@ const tabNum = (h, key) => { const b = tabBtn(h, key); const m = b && /\((\d+) /
     /* Офис с избран обект: чипът спрямо избрания, без банер и без скок. */
     const ho = env(OFFICE, DATA.concat([row('o1', 'Раднево', 'Добрич', 'transfer', 'sent')]));
     ho.w.transitStore = 'Раднево'; ho.w.transitFilter = 'pending'; ho.w.transitOpenFocus(); ho.w.renderTransit();
+    const dirBefore = ho.w.transitDir;
+    ho.w.transitDir = 'in'; ho.w.renderTransit();
     const oc = mod(ho).querySelector('[data-tt-f="mine"]');
     ok('офис + Раднево: чипът казва 1 (за Раднево)', !!oc && /Чакат мен\s*1/.test(oc.textContent), oc && oc.textContent);
-    ok('офис: без банер и без скок', !ho.doc.getElementById('t-recv-note') && ho.w.transitDir === 'all' && ho.w.transitFilter === 'pending',
+    ok('офис: без банер и без скок', !ho.doc.getElementById('t-recv-note') && dirBefore === 'all',
       ho.w.transitDir + '/' + ho.w.transitFilter);
     const hz = env(OFFICE);
     ok('офис без обект: без чип „Чакат мен"', !mod(hz).querySelector('[data-tt-f="mine"]'));

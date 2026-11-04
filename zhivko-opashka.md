@@ -14,6 +14,15 @@
 
 ## Чака изпращане
 
+(в базата от миграцията transit-status-split-schema.sql, версия 20261104114441, приложена 04.11.2026. Данните — transit-status-split-data.sql — минават сами с UPSERT)
+- 04.11 · goods_transit.sender_status — text, NULL, без default ('sent' / NULL — статусът на изпращача)
+- 04.11 · goods_transit.sender_status_at — timestamptz, NULL, без default
+- 04.11 · goods_transit.sender_status_by — text, NULL, без default
+- 04.11 · goods_transit.recon_at — timestamptz, NULL, без default („Чака засечка“)
+- 04.11 · goods_transit.recon_by — text, NULL, без default
+- 04.11 · goods_transit.recon_side — text, NULL, без default ('sender' / 'receiver')
+- 04.11 · goods_transit.status — стойността 'sent' отпада (след data-миграцията); остават 'pending' / 'received' / 'rejected'
+
 (в базата от миграцията grafik_shift_times, grafik-shift-times-schema.sql, версия 20261104073847, приложена 04.11.2026; таблиците grafik_* са без anon)
 - 04.11 · grafik_vtr_codes.start_time — time, NULL, без default
 - 04.11 · grafik_vtr_codes.end_time — time, NULL, без default

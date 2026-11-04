@@ -36,7 +36,9 @@ function env(role) {
   return { h, w, cap };
 }
 const wait = ms => new Promise(r => setTimeout(r, ms));
-const ST = 15; /* колоната „Статус" (от 03.11.2026; преди 12) — проверява се долу по заглавието */
+/* Колоната „Получател — статус" (етап 3, 04.11.2026; до тогава „Статус" — от 03.11 на 15,
+   преди 12). До нея — „Изпращач — статус" и „Чака засечка (кой, кога)". */
+const ST = 15;
 
 (async function run() {
   section('1. посока и статус');
@@ -45,11 +47,14 @@ const ST = 15; /* колоната „Статус" (от 03.11.2026; преди
     guard('exportTransitExcel()', () => w.exportTransitExcel());
     const body = cap.aoa ? cap.aoa.slice(1) : [];
     ok('4 реда + заглавен', cap.aoa && cap.aoa.length === 5, cap.aoa && cap.aoa.length);
-    ok('„Статус" е колона ' + ST, cap.aoa && cap.aoa[0][ST] === 'Статус', cap.aoa && cap.aoa[0].indexOf('Статус'));
+    ok('„Получател — статус" е колона ' + ST + ', след нея изпращачът и засечката', cap.aoa && cap.aoa[0][ST] === 'Получател — статус' &&
+      cap.aoa[0][ST + 1] === 'Изпращач — статус' && cap.aoa[0][ST + 2] === 'Чака засечка (кой, кога)', cap.aoa && JSON.stringify(cap.aoa[0].slice(ST, ST + 3)));
     /* От 03.11.2026 (етап 2) „Посока" е по вида на изпращача, не по direction. */
     ok('посоки: „От склад" / „От магазин"', JSON.stringify(body.map(r => r[0])) === JSON.stringify(['От склад', 'От склад', 'От магазин', 'От магазин']), JSON.stringify(body.map(r => r[0])));
-    ok('статуси', JSON.stringify(body.map(r => r[ST])) === JSON.stringify(['Не доставена', 'Прието', 'Изпратена', 'Не доставена']), JSON.stringify(body.map(r => r[ST])));
-    ok('20 колони (от 03.11.2026 + ВД, ИД, К-во по ВД)', cap.aoa[0].length === 20 && body.every(r => r.length === 20), cap.aoa[0].length);
+    /* стар status 'sent' (ред 3) = получател „Все още недоставена", изпращач „Изпратена" */
+    ok('статуси на получателя', JSON.stringify(body.map(r => r[ST])) === JSON.stringify(['Все още недоставена', 'Доставена', 'Все още недоставена', 'Все още недоставена']), JSON.stringify(body.map(r => r[ST])));
+    ok('статуси на изпращача', JSON.stringify(body.map(r => r[ST + 1])) === JSON.stringify(['Неизпратена', 'Неизпратена', 'Изпратена', 'Неизпратена']), JSON.stringify(body.map(r => r[ST + 1])));
+    ok('22 колони (етап 3: + изпращач, засечка)', cap.aoa[0].length === 22 && body.every(r => r.length === 22), cap.aoa[0].length);
   }
 
   section('1б. ВД, ИД, К-во по ВД; архивът не се изнася');
