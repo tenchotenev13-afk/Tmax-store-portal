@@ -965,14 +965,18 @@ function grPrintCss(){
     '.grp-head{display:flex;justify-content:space-between;gap:8mm;font-size:9px;margin-bottom:1.5mm;}' +
     '.grp-title{text-align:center;font-size:13px;font-weight:700;margin:1mm 0;}' +
     '.grp-tbl{width:277mm;border-collapse:collapse;table-layout:fixed;font-size:7px;}' +
-    '.grp-tbl th,.grp-tbl td{box-sizing:border-box;border:1px solid #333;padding:0.4mm 0.2mm;white-space:normal;word-wrap:break-word;text-align:center;vertical-align:middle;overflow:hidden;}' +
+    '.grp-tbl th,.grp-tbl td{box-sizing:border-box;border:1px solid #333;padding:0.15mm 0.2mm;white-space:normal;word-wrap:break-word;text-align:center;vertical-align:middle;overflow:hidden;}' +
     '.grp-tbl tr:last-child td{border-bottom:1px solid #333;}' +
     '.grp-tbl th{background:#f1f5f9;font-weight:700;}' +
     '.grp-tbl td.grp-name{text-align:left;}' +
     '.grp-we{background:#e2e8f0;}.grp-hol{background:#fecaca;}.grp-trip{background:#fed7aa;}.grp-bad{background:#fca5a5;font-weight:700;}' +
     '.grp-off td{background:#fee2e2;}.grp-off-note{display:block;color:#b91c1c;font-size:6px;}' +
-    '.grp-sign{display:flex;justify-content:space-between;gap:10mm;margin-top:6mm;font-size:9px;}' +
-    '.grp-legend{columns:2;column-gap:8mm;font-size:6.5px;margin-top:3mm;}' +
+    /* Подписи + ВТР + легенда — един блок, който не се къса: Кърджали 11.2026 (41 реда) се
+       събира на 1 лист (измерено — PDF от Edge); при повече редове блокът отива цял на втория. */
+    '#grp-foot{break-inside:avoid;page-break-inside:avoid;}' +
+    '.grp-sign{display:flex;justify-content:space-between;gap:10mm;margin-top:3mm;font-size:9px;}' +
+    '.grp-legend{columns:2;column-gap:8mm;font-size:6.5px;line-height:1.2;margin-top:1.5mm;}' +
+    '@media print{#grp-page{padding:0 !important;}}' +
     '.grp-draft{position:fixed;top:35%;left:18%;font-size:96px;font-weight:700;color:rgba(220,38,38,.16);transform:rotate(-22deg);pointer-events:none;z-index:5;}' +
     '@media print{.grp-tbl tr{page-break-inside:avoid;}}';
 }
@@ -1003,7 +1007,7 @@ function grPrintGrafik(){
   body += '<tr class="grp-total"><td colspan="' + (3 + nd) + '" style="text-align:right;font-weight:700;">ВСИЧКО за обекта:</td><td>' + tot('days') + '</td><td>' + grHrsTxt(tot('hours')) +
     '</td><td>' + tot('o') + '</td><td>' + tot('b') + '</td><td>' + tot('n') + '</td><td>' + grHrsTxt(tot('total')) + '</td><td></td></tr>';
   wrap.innerHTML = '<style>' + grPrintCss() + '</style>' +
-    '<div style="padding:12px 12px 30px;">' +
+    '<div id="grp-page" style="padding:12px 12px 30px;">' +
       '<div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">' +
         '<b style="font-size:16px;">🖨 График за явяване на работа</b><span style="flex:1"></span>' +
         '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>' +
@@ -1015,10 +1019,12 @@ function grPrintGrafik(){
         '<div class="grp-title" id="grp-title">' + (m.draft ? 'ЧЕРНОВА — ' : '') + 'ГРАФИК ЗА ЯВЯВАНЕ НА РАБОТА</div>' +
         '<div style="text-align:center;font-size:10px;margin-bottom:2mm;">за месец ' + escVal(H.monthText) + ' · ' + escVal(H.seasonLabel) + ' · ' + H.workDays + ' раб. дни · ' + H.norm + ' часа</div>' +
         '<table class="grp-tbl" id="grp-tbl"><colgroup>' + cols + '</colgroup><thead>' + head + '</thead><tbody>' + body + '</tbody></table>' +
-        '<div class="grp-sign"><div id="grp-made">Изготвил: ' + (H.compiledBy ? escVal(H.compiledBy) + ' ' : '') + '………………………… (ръководител обект)</div>' +
-          '<div id="grp-appr">Утвърдил: ' + escVal(H.approver) + ' ………………………… (управител)</div></div>' +
-        '<div style="font-size:7px;margin-top:1.5mm;">ВТР, чл. 19, ал. 4. Графиците се изготвят с междудневна почивка – не по-малко от 12 часа и междуседмична почивка – не по-малко от 36 часа.</div>' +
-        '<div class="grp-legend">' + m.legend.map(function(t){ return '<div>' + escVal(t) + '</div>'; }).join('') + '</div>' +
+        '<div id="grp-foot">' +
+          '<div class="grp-sign"><div id="grp-made">Изготвил: ' + (H.compiledBy ? escVal(H.compiledBy) + ' ' : '') + '………………………… (ръководител обект)</div>' +
+            '<div id="grp-appr">Утвърдил: ' + escVal(H.approver) + ' ………………………… (управител)</div></div>' +
+          '<div style="font-size:7px;margin-top:1mm;">ВТР, чл. 19, ал. 4. Графиците се изготвят с междудневна почивка – не по-малко от 12 часа и междуседмична почивка – не по-малко от 36 часа.</div>' +
+          '<div class="grp-legend" id="grp-legend">' + m.legend.map(function(t){ return '<div>' + escVal(t) + '</div>'; }).join('') + '</div>' +
+        '</div>' +
       '</div>' +
     '</div>';
   showModule('print');

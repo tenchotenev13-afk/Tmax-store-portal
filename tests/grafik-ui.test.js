@@ -602,6 +602,17 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('печат: общо ч. вкл. О/Б/Н за Мария = 168', tbl.querySelectorAll('tbody tr')[1].children[3 + 30 + 5].textContent === '168');
     ok('печат: редът извън нормата е червен с бележката', /grp-off/.test(tbl.querySelectorAll('tbody tr')[0].className) && /извън нормата/.test(tbl.querySelectorAll('tbody tr')[0].textContent));
     const pcss = x.doc.querySelector('#mod-print style').textContent;
+    // Легендата — на листа с таблицата (04.11.2026): подписите, ВТР и легендата са един неразделим блок
+    // под таблицата; редовете са по-ниски, обвивката е без отстъп при печат. Лейаутът е измерен в PDF
+    // от Edge (Кърджали 11.2026, 41 реда → 1 лист; до 43 → 1; 60 → 2) — jsdom не смята лейаут (правило 12).
+    const foot = x.doc.getElementById('grp-foot'), leg = x.doc.getElementById('grp-legend');
+    ok('печат: легендата е в блока с подписите, СЛЕД „Утвърдил“, и блокът е веднага след таблицата',
+      !!foot && foot.contains(leg) && foot.contains(x.doc.getElementById('grp-appr')) &&
+      !!(x.doc.getElementById('grp-appr').compareDocumentPosition(leg) & 4) && tbl.nextElementSibling === foot);
+    ok('печат: легендата — дребен шрифт, две колони', /\.grp-legend\{columns:2;[^}]*font-size:6\.5px;/.test(pcss) && leg.children.length > 0);
+    ok('печат CSS: блокът не се къса (break-inside:avoid)', /#grp-foot\{break-inside:avoid;page-break-inside:avoid;\}/.test(pcss));
+    ok('печат CSS: редовете с отстъп 0.15mm (досега 0.4mm → легендата падаше на втори лист)', /\.grp-tbl th,\.grp-tbl td\{[^}]*padding:0\.15mm 0\.2mm;/.test(pcss));
+    ok('печат CSS: обвивката без отстъп при печат', /@media print\{#grp-page\{padding:0 !important;\}\}/.test(pcss) && !!x.doc.getElementById('grp-page'));
     ok('печат CSS: A4 хоризонтално; white-space:normal, border-box, рамка на последния ред (правило 12)', /@page\{size:A4 landscape;/.test(pcss) &&
       /\.grp-tbl th,\.grp-tbl td\{box-sizing:border-box;[^}]*white-space:normal;/.test(pcss) && /\.grp-tbl tr:last-child td\{border-bottom:1px solid #333;\}/.test(pcss) && /\.grp-tbl\{width:277mm;/.test(pcss));
 
