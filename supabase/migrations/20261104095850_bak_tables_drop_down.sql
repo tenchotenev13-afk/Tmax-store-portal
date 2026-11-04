@@ -1,0 +1,8 @@
+-- Rollback на 20261104095850_bak_tables_drop (bak-tables-drop-schema.sql)
+-- SQL rollback НЯМА. Петте таблици се възстановяват от JSON копията в
+--   C:\Users\tench\Documents\temax-bak-2026-11\
+--     <име>.json    — пълното съдържание (MD5 = базата преди дропа)
+--     _columns.json — колоните (име, тип, not null)
+-- Възстановяване: create table по _columns.json, после
+--   insert into … select * from json_populate_recordset(null::<таблица>, '<json>');
+-- Пробвано 1:1 за петте на 04.11.2026 (claude/log/2026-11-04-bak-tables-drop.md).

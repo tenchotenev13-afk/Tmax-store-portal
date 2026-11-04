@@ -1097,7 +1097,7 @@ Default privileges (04.11): нова таблица в `public` — без DELET
 Резервни таблици (04.11): махнати `task_completions_bak_20260910` (2126),
 `kasa_cleanup_bak_20260920` (60), `kasa_cleanup_bak_20260928` (10),
 `stock_returns_auto_bak_20261007` (5), `dash_guard_bak_20261027` (137) —
-`bak-tables-drop-schema.sql`, номер на миграцията — след прилагането; копие
+`bak-tables-drop-schema.sql`, миграция `20261104095850`, приложена 04.11; копие
 като JSON (MD5 = базата) в `C:\Users\tench\Documents\temax-bak-2026-11\`.
 Остават `loading_items_bak_20261030_shumen` (~14.11) и
 `loading_items_bak_20261102_dupnica` (~16.11).

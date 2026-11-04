@@ -527,7 +527,7 @@ if(typeof autoCompleteActive==='function' && autoCompleteActive('stock-diff')) r
 ## ✅ ЗАТВОРЕНА на 04.11.2026: Дроп на `stock_returns_auto_bak_20261007` — след ~14.10.2026
 
 **Затворена:** таблицата е махната с `bak-tables-drop-schema.sql` (04.11.2026,
-номер на миграцията — след прилагането); 5-те реда са копирани като JSON в
+миграция `20261104095850_bak_tables_drop`); 5-те реда са копирани като JSON в
 `C:\Users\tench\Documents\temax-bak-2026-11\stock_returns_auto_bak_20261007.json`.
 Описанието по-долу е състоянието преди дропа.
 
