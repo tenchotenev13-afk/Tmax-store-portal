@@ -960,9 +960,11 @@ function autoCompleteActive(linkedModule, todayISO){
    извикващия — тук е само редът.
    Ползват я: надписът „⏳ N реда чакат отговор" в Бюлетина и колоната
    „чака обекта" в „Необработени разлики над N дни" (report.js + копие в
-   send-scheduled-report). НАРОЧНО НЕ я ползват (решение на Тенчо, 14.10):
+   send-scheduled-report); от 04.11.2026 и балончето на таба Разлики за
+   ОБЕКТ (sdUnreviewedCountFor — решение на Тенчо: стока на път не е ход).
+   НАРОЧНО НЕ я ползват (решение на Тенчо, 14.10):
    sdLineWaitsStore / sdMyWaitingLines (чипът „📝 Чакат моя отговор"; банерът
-   в модула от 24.10 брои по bulDiffStoreWaiting) и sdUnreviewedCountFor (балончето на таба Разлики) — там
+   в модула от 24.10 брои по bulDiffStoreWaiting) — там
    'sent' остава, защото обектът трябва да отговори „прието", когато стоката
    дойде. Те казват „какво да направя", не „изпълнил ли съм". */
 function diffLineWaitsStore(l){

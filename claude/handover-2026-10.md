@@ -967,7 +967,8 @@ send-scheduled-report; по реални дати, липсващ ред пре�
 колона `kind`). Чака Цвети: промени за тип „Липса“ (колона „ПВ“, статус
 „ИЗД КИ/КИ“ — припокрива се с „Кредитно“). Известен стар бъг: `submitSD()`
 не създава `stock_returns` при „Връщане“ (само бутонът ↩️).
-Правило: sdLineWaitsStore (sdMyWaitingLines) и sdUnreviewedCountFor нарочно броят и 'sent'/'sent_sap' по старото правило — виж claude/open/closed/15-10-diff-old-rule-two-places.md
+Правило: sdLineWaitsStore (sdMyWaitingLines) нарочно брои и 'sent'/'sent_sap' по старото правило — виж claude/open/closed/15-10-diff-old-rule-two-places.md
+От 04.11.2026 баджът на таба Разлики за ОБЕКТ (sdUnreviewedCountFor) НЕ брои стока на път ('sent'/'sent_sap') — брои като Бюлетина и „Само чакащите мен" (diffLineWaitsStore + ход по размяна, само междускладови). Складът и Цвети/admin — без промяна. Проверка на живо с Управител Шумен — отворена (claude/open/04-11-sd-badge-shumen-live.md).
 
 **За връщане (т.5 на Теодор)** — НЕ е започнато; стартира чак след като
 Цвети тества импорта и потвърди процеса (имейл с 6 точки изпратен 01.10).

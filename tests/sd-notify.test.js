@@ -262,7 +262,9 @@ process.on('unhandledRejection', () => { unhandled++; });
 
   section('4. Бадж на магазина — "чака моето действие"');
   {
-    const R = (id, o) => Object.assign({ id: id, store_name: 'Петрич', counterpart: WH_NAME, reviewed: false }, o || {});
+    const R = (id, o) => Object.assign({ id: id, direction: 'interstore', store_name: 'Петрич', counterpart: WH_NAME, reviewed: false }, o || {});
+    /* От 04.11.2026 (sd-badge-store-align) баджът брои като Бюлетина: 'sent' без
+       отговор е стока на път, не ход на обекта — A вече не се брои. */
     const reports = [R('A'), R('B'), R('C')];
     const lines = [
       { report_id: 'A', warehouse_response: 'sent', store_response: null, status: 'new' },
@@ -271,8 +273,8 @@ process.on('unhandledRejection', () => { unhandled++; });
       { report_id: 'C', warehouse_response: 'return', store_response: null, status: 'received' }
     ];
     const h = env(STORE, []);
-    ok('3 бланки (sent без отговор / no_stock / всичко received) → 1',
-      h.w.sdUnreviewedCountFor(reports, lines) === 1, String(h.w.sdUnreviewedCountFor(reports, lines)));
+    ok('3 бланки (sent без отговор / no_stock / всичко received) → 0',
+      h.w.sdUnreviewedCountFor(reports, lines) === 0, String(h.w.sdUnreviewedCountFor(reports, lines)));
 
     const more = reports.concat([R('D'), R('E'), R('F'), R('G', { store_name: 'Шумен' }), R('H')]);
     const moreLines = lines.concat([
@@ -282,8 +284,8 @@ process.on('unhandledRejection', () => { unhandled++; });
       { report_id: 'G', warehouse_response: 'sent', store_response: null, status: 'new' },
       { report_id: 'H', warehouse_response: 'return', store_response: 'sap_done', status: 'new' }
     ]);
-    ok('will_send / без отговор / чужд обект / sap_done не се броят; return без отговор се брои → 2',
-      h.w.sdUnreviewedCountFor(more, moreLines) === 2, String(h.w.sdUnreviewedCountFor(more, moreLines)));
+    ok('will_send / без отговор / чужд обект / sap_done / sent не се броят; return без отговор се брои → 1',
+      h.w.sdUnreviewedCountFor(more, moreLines) === 1, String(h.w.sdUnreviewedCountFor(more, moreLines)));
 
     const hc = env(CVETI, []);
     ok('Цвети/admin — без промяна: всички непрегледани (8)',
@@ -296,10 +298,10 @@ process.on('unhandledRejection', () => { unhandled++; });
     const setCount = (n, forWarehouse) => {
       state.reports = []; state.lines = [];
       for (let i = 0; i < n; i++) {
-        state.reports.push({ id: 'p' + i, store_name: 'Петрич', counterpart: WH_NAME, reviewed: false });
+        state.reports.push({ id: 'p' + i, direction: 'interstore', store_name: 'Петрич', counterpart: WH_NAME, reviewed: false });
         state.lines.push(forWarehouse
           ? { report_id: 'p' + i, warehouse_response: null, store_response: null, status: 'new' }
-          : { report_id: 'p' + i, warehouse_response: 'sent', store_response: null, status: 'new' });
+          : { report_id: 'p' + i, warehouse_response: 'return', store_response: null, status: 'new' }); /* 'return', не 'sent': от 04.11.2026 на път не е ход */
       }
     };
     /* Редовете идват ВЛОЖЕНИ в бланките (PostgREST embedding от 27.09.2026) -
@@ -384,8 +386,9 @@ process.on('unhandledRejection', () => { unhandled++; });
     const shown = [];
     h.w.showModule = (m) => { shown.push(m); };
     h.w.startSDBadgePolling(); await settle();
-    state.reports = [{ id: 't1', store_name: 'Петрич', counterpart: WH_NAME, reviewed: false }];
-    state.lines = [{ report_id: 't1', warehouse_response: 'sent', store_response: null, status: 'new' }];
+    state.reports = [{ id: 't1', direction: 'interstore', store_name: 'Петрич', counterpart: WH_NAME, reviewed: false }];
+    /* 'return', не 'sent': от 04.11.2026 стоката на път не е ход на обекта (sd-badge-store-align). */
+    state.lines = [{ report_id: 't1', warehouse_response: 'return', store_response: null, status: 'new' }];
     h.w.sdRefreshTabBadge(); await settle();
     const t = h.doc.getElementById('co-toast');
     if (t) t.click();
@@ -403,8 +406,9 @@ process.on('unhandledRejection', () => { unhandled++; });
     Object.defineProperty(h.doc, 'hidden', { configurable: true, get: () => false });
     ok('coNotifyToast наистина липсва', typeof h.w.coNotifyToast === 'undefined');
     h.w.startSDBadgePolling(); await settle();
-    state.reports = [{ id: 'x1', store_name: 'Петрич', counterpart: WH_NAME, reviewed: false }];
-    state.lines = [{ report_id: 'x1', warehouse_response: 'sent', store_response: null, status: 'new' }];
+    state.reports = [{ id: 'x1', direction: 'interstore', store_name: 'Петрич', counterpart: WH_NAME, reviewed: false }];
+    /* 'return', не 'sent': от 04.11.2026 стоката на път не е ход на обекта (sd-badge-store-align). */
+    state.lines = [{ report_id: 'x1', warehouse_response: 'return', store_response: null, status: 'new' }];
     const threw = !guard('ръст без notifications.js не хвърля', () => h.w.sdRefreshTabBadge());
     await settle();
     const b = h.doc.getElementById('badge-stock-diff');

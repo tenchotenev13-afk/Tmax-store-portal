@@ -314,11 +314,19 @@ function runRest() {
     s.w.renderStockDiff();
     ok('магазин Враца: нищо не чака неговото действие -> скрито', s.doc.getElementById('badge-stock-diff').style.display === 'none',
       'текст=' + s.doc.getElementById('badge-stock-diff').textContent);
+    /* От 04.11.2026 (sd-badge-store-align) 'sent' е стока на път, не ход на
+       обекта — баджът брои като Бюлетина: само 'return' без отговор. */
+    const linesSent = JSON.parse(JSON.stringify(LINES));
+    linesSent.find(l => l.id === 'l3').warehouse_response = 'sent';
+    const s1 = boot(STORE, { lines: linesSent });
+    s1.w.renderStockDiff();
+    ok('магазин Враца: складът изпрати (на път) -> скрито', s1.doc.getElementById('badge-stock-diff').style.display === 'none',
+      'текст=' + s1.doc.getElementById('badge-stock-diff').textContent);
     const linesS = JSON.parse(JSON.stringify(LINES));
-    linesS.find(l => l.id === 'l3').warehouse_response = 'sent';
+    linesS.find(l => l.id === 'l3').warehouse_response = 'return';
     const s2 = boot(STORE, { lines: linesS });
     s2.w.renderStockDiff();
-    ok('магазин Враца: складът изпрати -> 1', s2.doc.getElementById('badge-stock-diff').textContent === '1',
+    ok('магазин Враца: складът поиска обратно движение -> 1', s2.doc.getElementById('badge-stock-diff').textContent === '1',
       'текст=' + s2.doc.getElementById('badge-stock-diff').textContent);
 
     const wh = boot(WH);

@@ -5865,14 +5865,19 @@ function sdUnreviewedCountFor(reports, lines, swaps){
     if(x.status==='linked' && myStore(x.from_store)) myMove[String(x.from_line_id)] = true;
     if(x.status==='sent' && myStore(x.to_store)) myMove[String(x.to_line_id)] = true;
   });
+  /* От 04.11.2026 (решение на Тенчо) баджът на обекта брои САМО реалния ход
+     на обекта — същото правило като Бюлетина и чипа „Само чакащите мен"
+     (bulDiffStoreWaiting): МЕЖДУСКЛАДОВА бланка, ход по размяна или ред по
+     diffLineWaitsStore() от shared.js (огледало на stock_diff_store_done).
+     'sent' / 'sent_sap' без отговор — стока на път — НЕ се броят: казусът
+     Шумен (бадж 1 при „Само чакащите мен (0)"). Банерът „на път към вас" си
+     ги показва отделно. */
   return unrev.filter(function(r){
     if(mine && mine.indexOf(r.store_name) < 0) return false;
+    if(r.direction !== 'interstore') return false;
     var repLines = (lines||[]).filter(function(l){ return l.report_id===r.id; });
     if(repLines.some(function(l){ return myMove[String(l.id)]; })) return true;
-    return repLines.some(function(l){
-      return (l.warehouse_response==='sent' || l.warehouse_response==='sent_sap' || l.warehouse_response==='return') &&
-        !l.store_response && l.status!=='received';
-    });
+    return repLines.some(function(l){ return diffLineWaitsStore(l); });
   }).length;
 }
 function sdUpdateTabBadgeFromData(){
@@ -5921,8 +5926,13 @@ function sdRefreshTabBadge(){
      посока: пулсът е ЕДНА заявка вместо две.
      Цвети/admin не получават децата - те броят бланки, не редове. */
   var needLines = isLogisticsWarehouseUser() || !canReviewDiff();
-  var q = 'select=id,store_name,counterpart,reviewed'+
-    (needLines ? ',stock_differences(report_id,warehouse_response,store_response,status)' : '')+
+  /* Обектът (04.11.2026): direction — броят се само междускладовите;
+     difference_category — diffLineWaitsStore изключва wrong_barcode /
+     similar_item; id на реда — ходът по размяна е ключиран по ред.
+     Складът и Цвети/admin — заявката им е непроменена. */
+  var storeBadge = !isLogisticsWarehouseUser() && !canReviewDiff();
+  var q = 'select=id,store_name,counterpart,reviewed'+(storeBadge ? ',direction' : '')+
+    (needLines ? ',stock_differences('+(storeBadge ? 'id,difference_category,' : '')+'report_id,warehouse_response,store_response,status)' : '')+
     '&reviewed=eq.false';
   if(isLogisticsWarehouseUser()){
     q += '&counterpart=eq.' + encodeURIComponent(currentUser.store_name);

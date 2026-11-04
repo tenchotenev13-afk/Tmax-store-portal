@@ -203,11 +203,11 @@ const whClick = async (h, cell, val, label) => {
     ok('без store_response - само warehouse полетата', !('store_response' in sdPatches(h3)[0].body));
   }
 
-  section('6. Бройка за непрегледани: sent_sap се брои като sent');
+  section('6. Бройка за непрегледани: sent_sap (на път) не се брои — от 04.11.2026 като Бюлетина');
   {
     const h = env(STORE, [line({ id: 'l-1', warehouse_response: 'sent_sap' })]);
     const n = h.w.sdUnreviewedCountFor(JSON.parse(JSON.stringify([REP_INT])), h.w.sdData);
-    ok('брои 1', n === 1, String(n));
+    ok('брои 0', n === 0, String(n));
   }
 
   report();
