@@ -12,3 +12,7 @@
   stock_returns (`dash-db-guard-schema.sql`), заварените редове почистени
   (`dash-db-guard-data.sql`, резерва `dash_guard_bak_20261027`). Затваря се,
   когато на 28.10 в базата има 0 нови записа с водещо „—“ (проверка — чат).
+  **Условието е изпълнено:** от 28.10 в kasa_reports 254 нови реда, 0 с
+  водещо „—“ (сверено от чата 04.11). Резервата `dash_guard_bak_20261027`
+  (137 реда) е махната с `bak-tables-drop-schema.sql`, копие в
+  `C:\Users\tench\Documents\temax-bak-2026-11\`.

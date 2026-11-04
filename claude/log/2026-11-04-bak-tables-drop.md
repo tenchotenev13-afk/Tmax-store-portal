@@ -1,0 +1,12 @@
+# 04.11 — bak-tables-drop
+
+- `bak-tables-drop-schema.sql`: `drop table` на 5 резервни таблици — `task_completions_bak_20260910` (2126 реда), `kasa_cleanup_bak_20260920` (60; задачата казваше 52), `kasa_cleanup_bak_20260928` (10), `stock_returns_auto_bak_20261007` (5), `dash_guard_bak_20261027` (137). Остават `loading_items_bak_20261030_shumen` (106, ~14.11) и `loading_items_bak_20261102_dupnica` (63, ~16.11 — нов `claude/open/04-11-loading-bak-dupnica-drop.md`). Кодът не е пипан.
+- Сверено преди (04.11): няма изгледи, FK, функции (prosrc), тригери, политики и pg_cron команди с имената им. В репото — документи, schema файлове, `supabase/migrations/` и два коментара „backup: kasa_cleanup_bak_20260920“ (`kasa.js:717`, `tests/kasa-returned-day-close.test.js:8`).
+- Копие: `C:\Users\tench\Documents\temax-bak-2026-11\<име>.json` (json_agg, подредено по to_jsonb(ред)::text) + `_columns.json`. Свалено през `supabase db query --linked` (Management API) направо във файл — нищо не минава през изхода на сесията. За всеки файл: MD5 на файла = MD5 в базата и брой редове = брой в таблицата (2126 / 60 / 10 / 5 / 137). CLI-то създава временна роля `cli_login_postgres` (rolvaliduntil 04.11 09:27:51 UTC).
+- Rollback: SQL rollback няма — от JSON копията (create по `_columns.json` + `json_populate_recordset`).
+- Проба за възстановяване преди дропа (04.11), и петте: SQL, сглобен от `_columns.json` и JSON файла на диска и подаден през `supabase db query --linked -f` (не през изхода на сесията) — транзакция → временна таблица по `_columns.json` → `insert … select * from json_populate_recordset(null::<временна>, <JSON>)` → брой + MD5 на `json_agg(ред order by to_jsonb(ред)::text)` → ROLLBACK. Резултат 1:1 за всяка: 5 / 10 / 60 / 137 / 2126 реда, MD5 = MD5 на файла (bdad8fe3…, 977ea72e…, ec1ad8ad…, 7260eeae…, b96675ec…). След пробата в базата няма `zz_restore_*`.
+- Тест: нов jsdom тест няма — промяната е само в базата.
+- Огледалото: ред в `zhivko-opashka.md` НЕ се пише — резервните таблици са еднократни (прецедент: `claude/open-tasks.md`, `kasa_cleanup_bak_20260920`).
+- Затворено в `claude/open-tasks.md`: „Дроп на stock_returns_auto_bak_20261007“; в `18-10-dash-empty-fields-live.md` — подточката за 28.10 (условието изпълнено, 0 от 254).
+- Миграция: още НЕ е приложена (след push). Версия: —.
+- SHA е комитът, който добавя този файл.
