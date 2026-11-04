@@ -545,7 +545,25 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
         /ч\. вместо 168 ч\. — извън нормата/.test(JSON.stringify(nm.note)), JSON.stringify(nm.note));
       ok('легендата е отдолу (зимни кодове с часовете, О/Н/Б)', (() => { let txt = ''; ws.eachRow(r => { const a = r.getCell(1).value; if (typeof a === 'string') txt += a + '\n'; }); return /Работните смени при зимно работно време/.test(txt) && /Д5\/З – от 8:00 до 19:30/.test(txt) && /О – ПЛАТЕН ГОДИШЕН ОТПУСК/.test(txt) && !/Д4\/Л –/.test(txt); })());
       ok('A4 хоризонтално, събрано по ширина', ws.pageSetup.orientation === 'landscape' && ws.pageSetup.fitToWidth === 1 && ws.pageSetup.paperSize === 9);
+      // Петя (4 ч. договор) няма ред в месеца → извън нормата: 0 ч. вместо 21 × 4 = 84 ч. (решение 04.11.2026).
+      const pt = ws.getCell('B14');
+      ok('няма ред в месеца (чернова) → червен ред с бележка „няма ред в графика за месеца (0 ч. вместо 84 ч.)“', pt.fill && pt.fill.fgColor.argb === 'FFFEE2E2' &&
+        /няма ред в графика за месеца \(0 ч\. вместо 84 ч\.\)/.test(JSON.stringify(pt.note)), JSON.stringify(pt.note));
     }
+    // Същото на екрана: предупреждение, брояч, мрежа.
+    const nw = x.doc.querySelector('#gr-warnings .gr-warn-norow');
+    ok('екранът: „ПЕТЯ: няма ред в графика за месеца (0 ч. вместо 84 ч.)“', !!nw && nw.textContent === 'ПЕТЯ: няма ред в графика за месеца (0 ч. вместо 84 ч.)', nw && nw.textContent);
+    ok('екранът: броячът „2 извън нормата“ (Иван + Петя)', /^2 извън нормата$/.test(x.doc.getElementById('gr-offnorm').textContent), x.doc.getElementById('gr-offnorm').textContent);
+    const pd = x.doc.querySelectorAll('#gr-grid .gr-diff')[2];
+    ok('мрежата: разликата на Петя е −84 (червено), не 0', pd && pd.textContent === '-84' && /dc2626/.test(pd.getAttribute('style')), pd && pd.textContent);
+    // Записан, но празен ред — същото, с друга дума.
+    const S2 = makeServer();
+    S2.months['Кърджали|2026-11-01'] = { id: 'm-e', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+    S2.rows.push({ month_id: 'm-e', staff_id: 'st-3', letters: [], locked: {} }, { month_id: 'm-e', staff_id: 'st-1', letters: ['', 'П'], locked: {} });
+    const e2 = env(MGR, { server: S2 }); await load(e2);
+    const ew = Array.from(e2.doc.querySelectorAll('#gr-warnings .gr-warn-norow')).map(li => li.textContent);
+    ok('записан празен ред → „редът в графика е празен (0 ч. вместо 84 ч.)“', ew.indexOf('ПЕТЯ: редът в графика е празен (0 ч. вместо 84 ч.)') >= 0, ew.join(' | '));
+    ok('…служител с поне един ден не е „празен“ (Иван), а без ред — е (Мария)', !ew.some(t => /^ИВАН/.test(t)) && ew.indexOf('МАРИЯ: няма ред в графика за месеца (0 ч. вместо 168 ч.)') >= 0, ew.join(' | '));
 
     // Печат на черновата.
     realClick(x.w, btn(mod(x), 'Печат')); await ticks(4);
@@ -576,7 +594,15 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     await load(x); setupX(x, got2);
     realClick(x.w, btn(mod(x), 'Excel за ТРЗ')); await wait(200); await ticks(6);
     ok('подаден + свободни часове → без файл, казва кой и кой ден', got2.length === 0 && /Мария Д'Анджело: 3-ви — 9 свободни ч\. без код\./.test(x.doc.getElementById('gr-export-issues').textContent));
+    // Подаден със служител без нито един ден → без файл, казва кой.
+    S.months['Кърджали|2026-11-01'].snapshot.rows.push({ staff_id: 'st-3', full_name: 'Петя Петрова', contract_title: '', hours_per_day: 4, codes: new Array(30).fill(''), official: 0, target: 0, diff: 0, notes: [] });
     S.months['Кърджали|2026-11-01'].snapshot.rows[0].notes = [];
+    await load(x); setupX(x, got2);
+    realClick(x.w, btn(mod(x), 'Excel за ТРЗ')); await wait(200); await ticks(6);
+    ok('подаден + служител без ред → без файл: „Петя Петрова: няма ред в графика за месеца (0 ч. вместо 84 ч.).“', got2.length === 0 &&
+      /Петя Петрова: няма ред в графика за месеца \(0 ч\. вместо 84 ч\.\)\./.test(x.doc.getElementById('gr-export-issues').textContent), x.doc.getElementById('gr-export-issues').textContent);
+    realClick(x.w, btn(x.doc.getElementById('gr-export-modal'), 'Затвори'));
+    S.months['Кърджали|2026-11-01'].snapshot.rows.pop();
     await load(x); setupX(x, got2);
     realClick(x.w, btn(mod(x), 'Excel за ТРЗ')); await wait(400); await ticks(8);
     ok('подаден и чист → файл без „_ЧЕРНОВА“', got2.length === 1 && got2[0].name === 'График_Кърджали_2026-11.xlsx', got2[0] && got2[0].name);

@@ -110,6 +110,19 @@ function grStaffById(id){
   return null;
 }
 function grCanEdit(){ return !!(grData && grData.can_edit); }
+/* Служител в графика за месеца без нито един ден — няма ред в grafik_rows или редът е
+   празен (без букви и без заключени кодове). Изчисленията му дават цел 0 (както бланката),
+   но по решение на Тенчо (04.11.2026) това е ИЗВЪН нормата: 0 ч. вместо работни дни × договор.
+   Връща текста на бележката или ''. */
+function grEmptyRow(x){
+  if(!x || !grCalc) return '';
+  var r = grRows[x.staff.id];
+  var any = r && ((r.letters || []).some(function(v){ return !!v; }) || Object.keys(r.locked || {}).length);
+  if(any) return '';
+  var norm = grCalc.month.workDays * (+x.staff.hours_per_day || 8);
+  return (r && grSaved[x.staff.id] ? 'редът в графика е празен' : 'няма ред в графика за месеца') + ' (0 ч. вместо ' + grHrsTxt(norm) + ' ч.)';
+}
+function grOffCount(){ return grCalc.rows.filter(function(x){ return x.diff !== 0 || !!grEmptyRow(x); }).length; }
 /* Секторът е от списъка на магазина (grafik_sectors → setup.sectors) по sector_id.
    Старият текст от бланката (staff.sector) НЕ се ползва — от него се разпадаше покритието. */
 var GR_NO_SECTOR = 'Без сектор';
@@ -245,7 +258,7 @@ function grGridPageHtml(){
   if(setup.missing && setup.missing.length){
     h += '<div class="card" id="gr-missing" style="border-left:4px solid #dc2626;color:#991b1b;">⚠ Липсват данни за дружеството — админ (' + escVal(setup.missing.join(', ')) + '). Графикът може да се попълва, но не и да се подаде.</div>';
   }
-  var off = grCalc.rows.filter(function(r){ return r.diff !== 0; }).length;
+  var off = grOffCount();
   h += '<div class="card" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;">' + grStatusBadge() +
     '<span>Работни дни: <b>' + M.workDays + '</b> · норма <b>' + M.norm + ' ч.</b> · <b id="gr-season">' + escVal(grSeasonLabel(setup)) + '</b></span>' +
     '<span id="gr-offnorm" style="color:' + (off ? '#dc2626' : '#16a34a') + ';font-weight:600;">' + (off ? off + ' извън нормата' : 'всички на нормата') + '</span>' +
@@ -303,9 +316,10 @@ function grGridHtml(){
         (bg ? 'background:' + bg + ';' : '') + (sel ? 'outline:2px solid #2563eb;outline-offset:-2px;' : '') + (warnDays[d + 1] ? 'color:#dc2626;font-weight:700;' : '') + '">' +
         escVal(sel && grEdit ? grEdit : L) + (lk ? '<span style="font-size:9px;">🔒</span>' : '') + '</td>';
     }
-    var dc = x.diff === 0 ? '#16a34a' : '#dc2626';
-    h += '<td>' + x.internal + '</td><td>' + x.official + '</td><td>' + x.target + '</td>' +
-      '<td class="gr-diff" style="color:' + dc + ';font-weight:700;" title="' + escAttrVal(x.message) + '">' + (x.diff > 0 ? '+' : '') + x.diff + '</td></tr>';
+    var er = grEmptyRow(x), tg = er ? grCalc.month.workDays * (+s.hours_per_day || 8) : x.target, df = er ? -tg : x.diff;
+    var dc = df === 0 ? '#16a34a' : '#dc2626';
+    h += '<td>' + x.internal + '</td><td>' + x.official + '</td><td>' + tg + '</td>' +
+      '<td class="gr-diff" style="color:' + dc + ';font-weight:700;" title="' + escAttrVal(er || x.message) + '">' + (df > 0 ? '+' : '') + df + '</td></tr>';
   });
   if(!grCalc.rows.length) h += '<tr><td colspan="' + (M.days + 7) + '" style="padding:14px;color:#64748b;">Няма служители в графика за месеца — добави ги от „👥 Персонал“.</td></tr>';
   h += '</tbody></table></div>';
@@ -347,6 +361,8 @@ function grWarningsHtml(){
   var list = [];
   grCalc.rows.forEach(function(x){
     var name = x.staff.short_name || x.staff.full_name;
+    var er = grEmptyRow(x);
+    if(er) list.push({ t: 'norow', s: name + ': ' + er });
     if(x.diff !== 0) list.push({ t: 'norm', s: name + ': ' + x.message + (x.reachable ? '' : ' — изравняването не намира точна комбинация, кодовете не са пипнати') });
     var seen = {};
     x.warnings.forEach(function(w){
@@ -574,7 +590,7 @@ function grSubmit(){
   var setup = grData.setup || {};
   if(setup.missing && setup.missing.length){ toast('Не може да се подаде: липсват данни за дружеството — админ (' + setup.missing.join(', ') + ').', '#dc2626'); return; }
   grCommitEdit();
-  var off = grCalc.rows.filter(function(x){ return x.diff !== 0; });
+  var off = grCalc.rows.filter(function(x){ return x.diff !== 0 || !!grEmptyRow(x); });
   var q = 'Подаване на графика за ' + grMonthLabel(grMonth) + ' — ' + grStore + '?\nСлед подаване промени се правят само след връщане в чернова (admin / регионален).';
   if(off.length) q += '\n\n⚠ ' + off.length + ' души са извън нормата:\n' + off.slice(0, 10).map(function(x){ return '· ' + (x.staff.short_name || '') + ' — ' + x.message; }).join('\n') + (off.length > 10 ? '\n…' : '');
   if(!confirm(q)) return;
@@ -760,12 +776,13 @@ function grExportModel(){
   var src = snap ? (snap.rows || []).map(function(r){
     var hd = (r.notes || []).filter(function(n){ return n.type === 'hours'; }).map(function(n){ return { day: n.day, hours: parseFloat(n.text) || 0 }; });
     return { name: r.full_name || r.short_name || '', title: r.contract_title || '', hpd: +r.hours_per_day || 8, codes: (r.codes || []).slice(0, M.days),
-      official: +r.official || 0, target: +r.target || 0, diff: +r.diff || 0, hoursDays: hd };
+      official: +r.official || 0, target: +r.target || 0, diff: +r.diff || 0, hoursDays: hd,
+      empty: (r.codes || []).some(function(c){ return !!c; }) || hd.length ? '' : 'няма ред в графика за месеца (0 ч. вместо ' + grHrsTxt(M.workDays * (+r.hours_per_day || 8)) + ' ч.)' };
   }) : grCalc.rows.map(function(x){
     var L = (grRows[x.staff.id] || { letters: [] }).letters || [], hd = [];
     for(var d = 0; d < M.days; d++) if(GrafikEngine.isHours(L[d] || '')) hd.push({ day: d + 1, hours: +L[d] });
     return { name: x.staff.full_name || x.staff.short_name || '', title: x.staff.contract_title || '', hpd: +x.staff.hours_per_day || 8,
-      codes: x.codes.slice(0, M.days), official: x.official, target: x.target, diff: x.diff, hoursDays: hd };
+      codes: x.codes.slice(0, M.days), official: x.official, target: x.target, diff: x.diff, hoursDays: hd, empty: grEmptyRow(x) };
   });
   var rows = src.map(function(r){
     var cell = {}, o = 0, b = 0, n = 0, days = 0;
@@ -782,9 +799,10 @@ function grExportModel(){
       else cell[x.day] = { fill: GR_FILL.bad, note: grHrsTxt(x.hours) + ' свободни ч. — сложи код', text: grHrsTxt(x.hours) + ' ч.' };
     });
     var off = r.diff !== 0;
+    if(r.empty && snap) blocking.push(r.name + ': ' + r.empty + '.');
     if(off && snap) blocking.push(r.name + ': ' + grHrsTxt(r.official) + ' ч. вместо ' + grHrsTxt(r.target) + ' ч. — извън нормата.');
     return { name: r.name, title: r.title, hpd: r.hpd, codes: r.codes, cell: cell, days: days, hours: r.official, o: o, b: b, n: n,
-      total: r.official + (o + b + n) * r.hpd, off: off ? (grHrsTxt(r.official) + ' ч. вместо ' + grHrsTxt(r.target) + ' ч. — извън нормата') : '' };
+      total: r.official + (o + b + n) * r.hpd, off: r.empty ? r.empty : off ? (grHrsTxt(r.official) + ' ч. вместо ' + grHrsTxt(r.target) + ' ч. — извън нормата') : '' };
   });
   var season = setup.season || (h.season || ''), sl = (setup.season_label || season);
   var legend = (setup.codes || []).filter(function(c){
