@@ -107,7 +107,9 @@ function transitOpenFocus(){
 function transitApplyOpenFocus(){
   if(!_transitFocusOnLoad) return;
   _transitFocusOnLoad = false;
-  if(isGlobal()||!transitData.some(transitAwaitsMyReceive)) return;
+  /* Обект ИЛИ склад (04.11.2026: складът е в isGlobal(), затова до тогава не
+     скачаше и не виждаше връщанията, които чакат него). Офис — без скок. */
+  if(!transitHasOwnViewpoint()||!transitData.some(transitAwaitsViewpoint)) return;
   transitDir='in'; transitFilter='mine';
   transitStore=''; transitMonthFilter=''; transitSearch='';
 }
@@ -124,6 +126,21 @@ function transitViewpoint(){
   var wh=transitOwnWarehouse();
   if(wh) return wh;
   return transitStore||'';
+}
+/* Собствена гледна точка — обект или склад (не офис с избран обект). Банерът
+   и скокът при влизане са само за тях. */
+function transitHasOwnViewpoint(){
+  return !isGlobal()||!!transitOwnWarehouse();
+}
+/* „Чака гледната точка" (04.11.2026): трансфер, вече изпратен (sent), в който
+   гледната точка е ПОЛУЧАТЕЛ — тоест чака тя да приеме. Чипът „📥 Чакат мен",
+   банерът, скокът при влизане и „N чакат" под „📥 Получавам" вървят по него.
+   До 04.11 същото беше само за обекта (transitAwaitsMyReceive при !isGlobal),
+   а склад Търговище не виждаше 6 връщания от магазин Търговище, които го чакат.
+   Бутоните „✅ Прието" / „✕ Неприето" остават по transitAwaitsMyReceive (етап 3). */
+function transitAwaitsViewpoint(r){
+  var vp=transitViewpoint();
+  return !!r&&!!vp&&r.direction==='transfer'&&r.status==='sent'&&r.store_name===vp;
 }
 /* Изпращачът е магазин (реален обект) или склад / сервиз / администрация. */
 function transitSenderIsStore(r){
@@ -142,10 +159,10 @@ function transitRowBadgeHtml(r,vp){
     ? '<span class="t-badge" style="background:#fff7ed;color:#c2410c;'+S+'">'+transitSenderKindLabel(r)+'</span>'
     : '<span class="t-badge" style="background:#f1f5f9;color:#334155;'+S+'">'+transitSenderKindLabel(r)+'</span>';
 }
-/* Банерът над таблицата — само за обекта и само при брой > 0. */
+/* Банерът над таблицата — за обекта и склада (не за офиса), само при брой > 0. */
 function transitStoreBannerHtml(){
-  if(isGlobal()) return '';
-  var n=transitData.filter(transitAwaitsMyReceive).length;
+  if(!transitHasOwnViewpoint()) return '';
+  var n=transitData.filter(transitAwaitsViewpoint).length;
   var m=transitData.filter(transitAwaitsOther).length;
   var h='';
   if(n){
@@ -355,7 +372,7 @@ function renderTransit(){
       else rows=rows.filter(function(r){ return dir==='in' ? r.store_name===_vp : r.supplier===_vp; });
     }
     if(status==='pending'||status==='received'||status==='rejected'||status==='sent') rows=rows.filter(function(r){return r.status===status;});
-    else if(status==='mine') rows=rows.filter(transitAwaitsMyReceive);
+    else if(status==='mine') rows=rows.filter(transitAwaitsViewpoint);
     if(vpTab){
       /* В табовете падащото меню за офиса Е гледната точка (вече приложена).
          За обекта и склада то е ДРУГАТА страна: изпращачът в „Получавам",
@@ -427,7 +444,9 @@ function renderTransit(){
      само те имат „📤 Изпратена". */
   h+='<div style="display:flex;gap:0;margin-bottom:12px;border:1.5px solid #e2e8f0;border-radius:10px;overflow:hidden;max-width:640px;">';
   [['all','📦📤 Всички',(transitData.length?'('+transitRows({dir:'all'}).length+')':'')],
-   ['in','📥 Получавам',_vp?'('+transitRows({dir:'in',status:'pending'}).length+' чакат)':''],
+   /* „N чакат" = pending като получател + изпратените трансфери, които чакат
+      гледната точка да ги приеме („📥 Чакат мен") — 04.11.2026. */
+   ['in','📥 Получавам',_vp?'('+(transitRows({dir:'in',status:'pending'}).length+transitRows({dir:'in',status:'mine'}).length)+' чакат)':''],
    ['out','📤 Изпращам',_vp?'('+transitRows({dir:'out',status:'pending'}).filter(function(r){return r.direction==='transfer';}).length+' за изпр.)':'']].forEach(function(t){
     var active=transitDir===t[0];
     h+='<button onclick="transitDir=\''+t[0]+'\';renderTransit()" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';">'+t[1]+'<div style="font-size:10px;opacity:0.7;">'+t[2]+'</div></button>';
@@ -438,9 +457,11 @@ function renderTransit(){
      атрибутът е data-tt-f (НЕ data-f — сблъсък с Разлики). Числото = редовете след клик на чипа. */
   h+='<div id="t-filters" class="filter-bar chips" style="margin:0 0 12px;">';
   h+='<span class="chips-label">Покажи:</span>';
-  /* „📥 Чакат мен" — само за обекта и ВИНАГИ (и при 0): филтрите не изчезват според данните. */
+  /* „📥 Чакат мен" — при гледна точка (обект, склад, офис с избран обект) и
+     тогава ВИНАГИ (и при 0): филтрите не изчезват според данните. За офиса е
+     спрямо избрания обект (04.11.2026; до тогава само за обекта). */
   var tChips=[['pending','⏳ Не доставени',''],['sent','📤 Изпратена','']];
-  if(!isGlobal()) tChips.push(['mine','📥 Чакат мен','']);
+  if(_vp) tChips.push(['mine','📥 Чакат мен','']);
   /* „🗄 Архив" — винаги, и при 0 (същото правило като „📥 Чакат мен"). */
   tChips.concat([['|'],['received','✅ Прието',' chip-hist'],['rejected','✕ Неприето',' chip-hist'],['all','Всички',' chip-hist'],['archive','🗄 Архив',' chip-hist']]).forEach(function(f){
     if(f[0]==='|'){h+='<span class="chips-sep"></span>';return;}

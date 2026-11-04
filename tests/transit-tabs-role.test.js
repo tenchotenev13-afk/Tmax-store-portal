@@ -17,7 +17,11 @@
         магазин → магазин остава 'transfer'; сверката праща новия direction
         за съществуващ ред;
      е) transitApplyOpenFocus → „Получавам" + „Чакат мен";
-     ж) баджът на реда и колоната „Посока" в Excel.
+     ж) баджът на реда и колоната „Посока" в Excel;
+     з) (04.11.2026) складът вижда изпратените връщания, които чакат НЕГО:
+        „Получавам (N чакат)" ги брои, чипът „📥 Чакат мен", банерът и скокът
+        при влизане важат и за склада; офис с обект — чипът спрямо обекта,
+        без банер и скок; обектът — без промяна.
 
    Мутационна проверка (03.11.2026, върху чист transit.js; чистият — exit 0):
      M1 „Изпращам" по direction='transfer' вместо по supplier   → ❌ а), б), в), г)
@@ -25,6 +29,11 @@
      M3 офис без гледна точка показва всичко                    → ❌ в)
      M4 сверката не праща direction                             → ❌ д)
      M5 transitApplyOpenFocus пак към 'transfer'                → ❌ е)
+   04.11.2026 (складът и „чака гледната точка"):
+     W1 „Получавам (N чакат)" без изпратените към гледната точка → ❌ з)
+     W2 банерът само за обекта (isGlobal)                        → ❌ з)
+     W3 скокът при влизане само за обекта                         → ❌ з)
+     W4 чипът „Чакат мен" само за обекта                          → ❌ з)
 
    Пускане:  node tests/transit-tabs-role.test.js .
 */
@@ -205,6 +214,44 @@ const tabNum = (h, key) => { const b = tabBtn(h, key); const m = b && /\((\d+) /
     const vals = aoa ? aoa.slice(1).map(r => r[col]) : [];
     ok('Excel „Посока" = „От склад" / „От магазин" (по изпращача)', col === 0 && vals.filter(v => v === 'От магазин').length === 3 &&
       vals.filter(v => v === 'От склад').length === 4, JSON.stringify(vals));
+  }
+
+  section('з) складът вижда изпратените връщания, които чакат НЕГО (04.11.2026)');
+  {
+    /* Като на живо 04.11: магазин Търговище връща към склада, статус sent. */
+    const data = [
+      row('w1', WH, 'Търговище', 'transfer', 'sent'),
+      row('w2', WH, 'Търговище', 'transfer', 'sent'),
+      row('w3', WH, 'Търговище', 'transfer', 'pending'),
+      row('w4', 'Раднево', WH, 'incoming', 'pending'),
+      row('w5', 'Силистра', WH, 'incoming', 'received')
+    ];
+    const h = env(WAREHOUSE, data);
+    ok('„Получавам (3 чакат)" = 1 pending + 2 sent към склада', tabNum(h, 'in') === 3, tabNum(h, 'in'));
+    const chip = mod(h).querySelector('[data-tt-f="mine"]');
+    ok('чипът „📥 Чакат мен" е там и казва 2', !!chip && /Чакат мен\s*2/.test(chip.textContent), chip && chip.textContent);
+    const ban = h.doc.getElementById('t-recv-note');
+    ok('банерът „2 трансфера чакат да ги приемете"', !!ban && /2 трансфера чакат да ги приемете/.test(ban.textContent), ban && ban.textContent);
+    /* Влизане: скок към „Получавам" + „Чакат мен". */
+    const h2 = env(WAREHOUSE, data);
+    h2.w.transitFilter = 'pending'; h2.w.transitOpenFocus(); h2.w.renderTransit();
+    ok('при влизане — „Получавам" + „Чакат мен"', h2.w.transitDir === 'in' && h2.w.transitFilter === 'mine', h2.w.transitDir + '/' + h2.w.transitFilter);
+    ok('… точно w1 и w2', shown(h2) === 'w1,w2', shown(h2));
+
+    /* Офис с избран обект: чипът спрямо избрания, без банер и без скок. */
+    const ho = env(OFFICE, DATA.concat([row('o1', 'Раднево', 'Добрич', 'transfer', 'sent')]));
+    ho.w.transitStore = 'Раднево'; ho.w.transitFilter = 'pending'; ho.w.transitOpenFocus(); ho.w.renderTransit();
+    const oc = mod(ho).querySelector('[data-tt-f="mine"]');
+    ok('офис + Раднево: чипът казва 1 (за Раднево)', !!oc && /Чакат мен\s*1/.test(oc.textContent), oc && oc.textContent);
+    ok('офис: без банер и без скок', !ho.doc.getElementById('t-recv-note') && ho.w.transitDir === 'all' && ho.w.transitFilter === 'pending',
+      ho.w.transitDir + '/' + ho.w.transitFilter);
+    const hz = env(OFFICE);
+    ok('офис без обект: без чип „Чакат мен"', !mod(hz).querySelector('[data-tt-f="mine"]'));
+
+    /* Обектът — без промяна: числата са като преди. */
+    const hs = env(STORE);
+    ok('обект Раднево: „Получавам (2 чакат)" и „Изпращам (2 за изпр.)" както преди', tabNum(hs, 'in') === 2 && tabNum(hs, 'out') === 2,
+      tabNum(hs, 'in') + ' / ' + tabNum(hs, 'out'));
   }
 
   report();

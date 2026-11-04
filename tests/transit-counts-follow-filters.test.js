@@ -76,7 +76,9 @@ function ref(data, f) {
       if (f.dir === 'in' && r.store_name !== vp) return false;
       if (f.dir === 'out' && r.supplier !== vp) return false;
     }
-    if (f.status && f.status !== 'all' && r.status !== f.status) return false;
+    /* 'mine' (04.11.2026) = изпратен трансфер, който чака гледната точка да го приеме. */
+    if (f.status === 'mine') { if (!(vp && r.direction === 'transfer' && r.status === 'sent' && r.store_name === vp)) return false; }
+    else if (f.status && f.status !== 'all' && r.status !== f.status) return false;
     if (vpTab) {
       if (f.wh && f.store) {
         if (f.dir === 'in' && r.supplier !== f.store) return false;
@@ -146,9 +148,15 @@ function checkAll(h, name, base) {
       ok(name + ': „' + k + '" без гледна точка — без число', t.length === 0, t.join('/'));
       ok(name + ': … и празна таблица след клик', h.w._transitVisible.length === 0, h.w._transitVisible.length);
     } else if (k === 'in') {
+      /* От 04.11.2026 „N чакат" = „⏳ Не доставени" + „📥 Чакат мен" (изпратените,
+         които чакат гледната точка) — двата чипа не се застъпват (pending / sent). */
       clickStat(h, 'pending');
-      ok(name + ': „Получавам" ' + t[0] + ' чакат = редове след таб+„Не доставени" (' + trs(h) + ')', t[0] === trs(h));
-      ok(name + ': … и = еталон', t[0] === ref(h.w.transitData, Object.assign({}, base, { dir: 'in', status: 'pending' })));
+      const p = trs(h);
+      clickStat(h, 'mine');
+      const mn = trs(h);
+      ok(name + ': „Получавам" ' + t[0] + ' чакат = след таб+„Не доставени" (' + p + ') + „Чакат мен" (' + mn + ')', t[0] === p + mn);
+      ok(name + ': … и = еталон', t[0] === ref(h.w.transitData, Object.assign({}, base, { dir: 'in', status: 'pending' })) +
+        ref(h.w.transitData, Object.assign({}, base, { dir: 'in', status: 'mine' })));
     } else {
       clickStat(h, 'pending');
       const p = h.w._transitVisible.filter(r => r.direction === 'transfer').length;
