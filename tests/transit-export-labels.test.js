@@ -54,7 +54,7 @@ const ST = 15;
     /* стар status 'sent' (ред 3) = получател „Все още недоставена", изпращач „Изпратена" */
     ok('статуси на получателя', JSON.stringify(body.map(r => r[ST])) === JSON.stringify(['Все още недоставена', 'Доставена', 'Все още недоставена', 'Все още недоставена']), JSON.stringify(body.map(r => r[ST])));
     ok('статуси на изпращача', JSON.stringify(body.map(r => r[ST + 1])) === JSON.stringify(['Неизпратена', 'Неизпратена', 'Изпратена', 'Неизпратена']), JSON.stringify(body.map(r => r[ST + 1])));
-    ok('22 колони (етап 3: + изпращач, засечка)', cap.aoa[0].length === 22 && body.every(r => r.length === 22), cap.aoa[0].length);
+    ok('21 колони (етап 3: + изпращач, засечка; 04.11.2026: без „Проверено")', cap.aoa[0].length === 21 && body.every(r => r.length === 21), cap.aoa[0].length);
   }
 
   section('1б. ВД, ИД, К-во по ВД; архивът не се изнася');
@@ -80,7 +80,7 @@ const ST = 15;
     guard('exportTransitExcel()', () => w.exportTransitExcel());
     const body = cap.aoa.slice(1);
     ok('outgoing от склад → „От склад" (не по direction)', body[0][0] === 'От склад', body[0][0]);
-    ok('rejected → „Неприето"', body[0][ST] === 'Неприето', body[0][ST]);
+    ok('стар rejected → „Недоставена"', body[0][ST] === 'Недоставена', body[0][ST]);
     ok('непознат статус → самата стойност', body[1][ST] === 'странен', body[1][ST]);
   }
 

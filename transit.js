@@ -70,10 +70,15 @@ var REAL_STORE_NAMES = {
    поле sender_status ('sent' / NULL). Стойност status 'sent' повече не се
    пише — стар ред с нея (преди transit-status-split-data.sql) се показва като
    „получател pending + изпращач изпратена" (transitRecvStatus / transitSenderSent). */
+/* „✕ Недоставена" (04.11.2026, сесия transit-cleanup) замества „✕ Неприето" и
+   „👁 Проверено, не е пристигнало": ЕДИН отговор на получателя, записан като
+   reviewed_at / reviewed_by при status 'pending' (status 'rejected' вече не се
+   пише; стар ред с него се чете като „Недоставена" — transitRecvStatus).
+   Отговорите на получателя: „✅ Доставена", „✕ Недоставена", „🔍 Чака засечка". */
 var T_STATUS = {
-  pending:  { label:'⏳ Все още недоставена', bg:'#fef9c3', color:'#92400e' },
-  received: { label:'✅ Доставена',           bg:'#f0fdf4', color:'#16a34a' },
-  rejected: { label:'✕ Неприето',            bg:'#fff1f2', color:'#dc2626' }
+  pending:     { label:'⏳ Все още недоставена', bg:'#fef9c3', color:'#92400e' },
+  received:    { label:'✅ Доставена',           bg:'#f0fdf4', color:'#16a34a' },
+  undelivered: { label:'✕ Недоставена',          bg:'#fff1f2', color:'#dc2626' }
 };
 var T_SENDER = {
   none: { label:'📭 Неизпратена', bg:'#f1f5f9', color:'#64748b' },
@@ -92,9 +97,23 @@ function canAddTransit(){
    sender_status. Всеки отбелязва своето БЕЗ да чака другия; офисът може и
    двете. „Чака засечка" (recon_*) — и двете страни и офисът. Правилата по
    direction (outgoing, двустъпковият поток) отпадат. */
+/* Отговорът на получателя: 'pending' (няма отговор) / 'received' /
+   'undelivered' („✕ Недоставена" = reviewed_at при неприет ред; стар
+   'rejected' — същото). Стар 'sent' = получателят още не е отговорил.
+   Непознат статус — самата стойност. */
 function transitRecvStatus(r){
   var s=r&&r.status;
-  return (!s||s==='sent')?'pending':s;   /* стар 'sent' = получателят още не е отговорил */
+  if(s==='received') return 'received';
+  if(s==='rejected') return 'undelivered';
+  if(!s||s==='pending'||s==='sent') return r&&r.reviewed_at?'undelivered':'pending';
+  return s;
+}
+/* „✕ Недоставена · кой · дд.мм" — значката на получателя и Excel. */
+function transitUndeliveredWho(r,full){
+  /* Без reviewed_at (стар 'rejected') — само кой; new Date(null) е 1970. */
+  var d=new Date(r&&r.reviewed_at?r.reviewed_at:NaN), p=function(n){return (n<10?'0':'')+n;};
+  var when=isNaN(d.getTime())?'':p(d.getDate())+'.'+p(d.getMonth()+1)+(full?'.'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes()):'');
+  return [r&&r.reviewed_by||'',when].filter(Boolean);
 }
 function transitSenderSent(r){
   return !!r&&(r.sender_status==='sent'||r.status==='sent');
@@ -126,7 +145,7 @@ function transitCanRecon(r){
   return transitCanMarkReceived(r)||transitCanMarkSent(r);
 }
 /* Чака ли редът МЕН като получател: изпращачът го е изпратил, аз още не съм
-   отговорил. Бутоните „✅ Доставена" / „✕ Неприето" НЕ зависят от това —
+   отговорил. Бутоните „✅ Доставена" / „✕ Недоставена" НЕ зависят от това —
    получателят може да отбележи и неизпратен ред. */
 function transitAwaitsMyReceive(r){
   return !!r&&transitSenderSent(r)&&transitRecvStatus(r)==='pending'&&transitCanMarkReceived(r);
@@ -188,7 +207,7 @@ var TRANSIT_TAB_DEFAULT = { all:'pending', 'in':'pending', out:'snone' };
 function transitChipsFor(dir,vp){
   var H=' chip-hist', tail=[['|'],['all','Всички',H],['archive','🗄 Архив',H]];
   if(dir==='out') return [['snone','📭 Неизпратени',''],['ssent','📤 Изпратени',''],['recon','🔍 Чака засечка','']].concat(tail);
-  var c=[['pending','⏳ Все още недоставени',''],['received','✅ Доставени',''],['rejected','✕ Неприети',''],['recon','🔍 Чака засечка','']];
+  var c=[['pending','⏳ Все още недоставени',''],['received','✅ Доставени',''],['undelivered','✕ Недоставени',''],['recon','🔍 Чака засечка','']];
   if(dir==='in'&&vp) c.push(['mine','📥 Чакат мен','']);
   return c.concat(tail);
 }
@@ -217,7 +236,7 @@ function transitStoreBannerHtml(){
   var h='';
   if(n){
     h+='<div id="t-recv-note" style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:9px 14px;margin-bottom:8px;font-size:12.5px;color:#92400e;">'+
-      '📥 <b>'+n+'</b> '+(n===1?'изпратен ред чака да го приемете':'изпратени реда чакат да ги приемете')+'. Когато стоката пристигне, натиснете „'+T_STATUS.received.label+'“ или „'+T_STATUS.rejected.label+'“.</div>';
+      '📥 <b>'+n+'</b> '+(n===1?'изпратен ред чака да го приемете':'изпратени реда чакат да ги приемете')+'. Когато стоката пристигне, натиснете „'+T_STATUS.received.label+'“ или „'+T_STATUS.undelivered.label+'“.</div>';
   }
   if(m){
     h+='<div id="t-other-note" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;margin-bottom:8px;font-size:12px;color:#64748b;">'+
@@ -421,10 +440,11 @@ function renderTransit(){
       if(!_vp) rows=[];
       else rows=rows.filter(function(r){ return dir==='in' ? r.store_name===_vp : r.supplier===_vp; });
     }
-    /* Чиповете (етап 3): получател — pending / received / rejected (по
-       transitRecvStatus, стар 'sent' = pending); изпращач — snone / ssent (по
-       sender_status); recon — „🔍 Чака засечка"; mine — „📥 Чакат мен". */
-    if(status==='pending'||status==='received'||status==='rejected') rows=rows.filter(function(r){return transitRecvStatus(r)===status;});
+    /* Чиповете (етап 3): получател — pending / received / undelivered (по
+       transitRecvStatus: стар 'sent' = pending, reviewed_at или стар 'rejected'
+       = „✕ Недоставена"); изпращач — snone / ssent (по sender_status);
+       recon — „🔍 Чака засечка"; mine — „📥 Чакат мен". */
+    if(status==='pending'||status==='received'||status==='undelivered') rows=rows.filter(function(r){return transitRecvStatus(r)===status;});
     else if(status==='snone') rows=rows.filter(function(r){return !transitSenderSent(r);});
     else if(status==='ssent') rows=rows.filter(transitSenderSent);
     else if(status==='recon') rows=rows.filter(function(r){return !!r.recon_at;});
@@ -464,6 +484,14 @@ function renderTransit(){
   /* Чип, който го няма в този таб (напр. стар 'sent' или 'snone' в „Получавам"),
      → подразбиращият се за таба. */
   if(!transitChipsFor(transitDir,_vp).some(function(f){return f[0]===transitFilter;})) transitFilter=TRANSIT_TAB_DEFAULT[transitDir]||'pending';
+  /* Клик на таб (setTDir) нулира чипа към подразбирания за таба. „📤 Изпращам"
+     без нито един неизпратен за гледната точка → „Всички" (04.11.2026: склад
+     Търговище — всичките 686 изпратени от импорта, таблицата беше празна). */
+  if(_transitTabReset){
+    _transitTabReset=false;
+    transitFilter=TRANSIT_TAB_DEFAULT[transitDir]||'pending';
+    if(transitDir==='out'&&_vp&&!transitRows({status:'snone'}).length) transitFilter='all';
+  }
   var list=transitRows();
   /* На порции по TRANSIT_PAGE (ускоряване, 04.11.2026): рисуват се първите N
      реда от ЦЕЛИЯ филтриран списък. Смяна на таб / чип / обект / месец /
@@ -506,7 +534,7 @@ function renderTransit(){
    ['in','📥 Получавам',_vp?'('+transitRows({dir:'in',status:TRANSIT_TAB_DEFAULT['in']}).length+' чакат)':''],
    ['out','📤 Изпращам',_vp?'('+transitRows({dir:'out',status:TRANSIT_TAB_DEFAULT.out}).length+' за изпр.)':'']].forEach(function(t){
     var active=transitDir===t[0];
-    h+='<button onclick="transitDir=\''+t[0]+'\';transitFilter=\''+TRANSIT_TAB_DEFAULT[t[0]]+'\';renderTransit()" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';">'+t[1]+'<div style="font-size:10px;opacity:0.7;">'+t[2]+'</div></button>';
+    h+='<button onclick="setTDir(\''+t[0]+'\')" style="flex:1;padding:8px;font-size:12px;font-weight:600;border:none;cursor:pointer;background:'+(active?'#0f172a':'#fff')+';color:'+(active?'#fff':'#64748b')+';">'+t[1]+'<div style="font-size:10px;opacity:0.7;">'+t[2]+'</div></button>';
   });
   h+='</div>';
 
@@ -589,11 +617,13 @@ function renderTransit(){
     transitData.forEach(function(x){ if(x.inbound_delivery&&!x.archived_at&&!transitSenderSent(x)){ var k=transitVdSupKey(x); _vdUnsent[k]=(_vdUnsent[k]||0)+1; } });
     shownList.forEach(function(r){
       var rs=transitRecvStatus(r), st=T_STATUS[rs]||T_STATUS.pending, sentS=transitSenderSent(r), ss=sentS?T_SENDER.sent:T_SENDER.none;
+      /* „✕ Недоставена · кой · дд.мм" */
+      var stLabel=esc(st.label)+(rs==='undelivered'?transitUndeliveredWho(r).map(function(x){return ' · '+esc(x);}).join(''):'');
       /* Отбелязано от импорта, не от склада — „📤 Изпратена · импорт". */
       var ssLabel=ss.label+(sentS&&r.sender_status_by===TRANSIT_IMPORT_SENDER_BY?' · импорт':'');
       var isOut=r.direction==='outgoing';
       var isTransfer=r.direction==='transfer';
-      var isOver=rs==='pending'&&r.doc_date&&(new Date()-new Date(r.doc_date))>30*86400000;
+      var isOver=(rs==='pending'||rs==='undelivered')&&r.doc_date&&(new Date()-new Date(r.doc_date))>30*86400000;
       var dirBg=isOut?'rgba(124,58,237,.04)':(isTransfer?'rgba(194,65,12,.04)':'');
       var rowBg=(isOver?'background:#fffbeb;':dirBg);
       h+='<tr style="border-bottom:'+(narrow?'none':'1px solid #f1f5f9')+';'+rowBg+'">';
@@ -601,7 +631,10 @@ function renderTransit(){
       h+='<td style="padding:7px 8px;">'+
         '<div style="font-family:DM Mono,monospace;font-size:11px;word-break:break-word;">'+esc(r.purchase_doc||'')+'</div>'+
         '<div style="font-size:10px;color:#94a3b8;">Поз. '+(r.position||'—')+'</div>'+
-        (r.inbound_delivery?'<div class="t-vd" style="font-family:DM Mono,monospace;font-size:10.5px;color:#334155;margin-top:2px;white-space:nowrap;"><b style="font-family:inherit;color:#64748b;">ВД</b> '+esc(r.inbound_delivery)+(r.delivery_position?'<span style="color:#94a3b8;"> · '+esc(r.delivery_position)+'</span>':'')+'</div>':'')+
+        (r.inbound_delivery?'<div class="t-vd" style="font-family:DM Mono,monospace;font-size:10.5px;color:#334155;margin-top:2px;white-space:nowrap;"><b style="font-family:inherit;color:#64748b;">ВД</b> '+esc(r.inbound_delivery)+'</div>':'')+
+        /* Позицията в ДОСТАВКАТА (delivery_position) не се показва на реда
+           (04.11.2026, Цвети: „какви са тези цифри"); остава в данните и е
+           ключът на импорта. „Поз." горе е позицията в поръчката. */
         (r.outbound_delivery?'<div class="t-id" style="font-family:DM Mono,monospace;font-size:10.5px;color:#334155;white-space:nowrap;"><b style="font-family:inherit;color:#64748b;">ИД</b> '+esc(transitStripZeros(r.outbound_delivery))+'</div>':'')+
         '<div style="font-family:DM Mono,monospace;font-size:11px;color:#94a3b8;margin-top:2px;">'+fmtDate(r.doc_date)+'</div>'+
         '<div style="margin-top:3px;">'+transitRowBadgeHtml(r,_vp)+'</div></td>';
@@ -619,10 +652,9 @@ function renderTransit(){
       /* 5. Статус */
       h+='<td style="padding:7px 8px;">'+
           /* Две значки (етап 3): получател и изпращач; плюс „🔍 Чака засечка“. */
-          '<div class="t-recv" title="Получател" style="white-space:nowrap;"><span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">'+st.label+'</span></div>'+
+          '<div class="t-recv" title="Получател" style="white-space:nowrap;"><span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">'+stLabel+'</span></div>'+
           '<div class="t-send" title="Изпращач'+(r.sender_status_by?' · '+esc(r.sender_status_by):'')+'" style="margin-top:3px;white-space:nowrap;"><span style="background:'+ss.bg+';color:'+ss.color+';padding:2px 6px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">'+ssLabel+'</span></div>'+
           transitReconBadgeHtml(r)+
-          tReviewedBadgeHtml(r)+
           (r.archived_at?'<div class="t-archived" style="font-size:10px;color:#64748b;font-weight:600;margin-top:2px;white-space:nowrap;">🗄 архив '+fmtDate(String(r.archived_at).slice(0,10))+'</div>':'')+
           (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.comment)+'">'+esc(r.comment)+'</div>':'')+
         '</td>';
@@ -632,8 +664,8 @@ function renderTransit(){
       /* Архивиран ред — само за четене: никакви бутони (canEdit/isAdmin = false за реда). */
       var rowCanEdit=canEdit&&!r.archived_at, rowIsAdmin=isAdmin&&!r.archived_at;
       h+='<div style="display:flex;flex-wrap:wrap;gap:3px;">';
-      /* Получател (store_name / офис): „✅ Доставена" / „✕ Неприето" БЕЗ да
-         чака изпращача; „↩ Върни" → status pending. Изпращач (supplier / офис):
+      /* Получател (store_name / офис): „✅ Доставена" / „✕ Недоставена" БЕЗ да
+         чака изпращача; „↩ Върни" → status pending без reviewed_at. Изпращач (supplier / офис):
          „📤 Изпратена" на реда и „📤 Цялата доставка (N)" (N > 1); „↩ Върни
          изпращането" → sender_status NULL. Засечка — и двете страни (етап 3). */
       var BTN='border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:700;cursor:pointer;white-space:nowrap;';
@@ -641,10 +673,7 @@ function renderTransit(){
       if(transitCanMarkReceived(r)){
         if(rs==='pending'){
           h+='<button data-id="'+r.id+'" data-side="recv" onclick="tMarkStatus(this.dataset.id,\'received\')" style="border:none;background:#16a34a;color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15);'+BTN+'">'+T_STATUS.received.label+'</button>';
-          h+='<button data-id="'+r.id+'" data-side="recv" onclick="tMarkStatus(this.dataset.id,\'rejected\')" style="border:none;background:#dc2626;color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15);'+BTN+'">'+T_STATUS.rejected.label+'</button>';
-          if(tCanReview(r)&&!r.reviewed_at){
-            h+='<button data-id="'+r.id+'" onclick="tMarkReviewed(this.dataset.id)" style="border:1px solid #0369a1;background:#f0f9ff;color:#0369a1;'+BTN+'font-weight:600;">👁 Проверено, не е пристигнало</button>';
-          }
+          h+='<button data-id="'+r.id+'" data-side="recv" onclick="tMarkStatus(this.dataset.id,\'undelivered\')" style="border:none;background:#dc2626;color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.15);'+BTN+'">'+T_STATUS.undelivered.label+'</button>';
         } else {
           h+='<button data-id="'+r.id+'" data-side="recv" onclick="tMarkStatus(this.dataset.id,\'pending\')" style="'+BACK+'">↩ Върни</button>';
         }
@@ -719,6 +748,9 @@ function transitShowMore(){
   transitRerender();
 }
 function setTFilter(f){ transitFilter=f; renderTransit(); }
+/* Клик на таб: чипът се нулира в renderTransit (там се знае колко са неизпратените). */
+var _transitTabReset=false;
+function setTDir(d){ transitDir=d; _transitTabReset=true; renderTransit(); }
 function setTStore(s){ transitStore=s; renderTransit(); }
 function setTSearch(v){
   transitSearch=v;
@@ -727,7 +759,7 @@ function setTSearch(v){
 }
 
 /* ── ЛОКАЛНО ОБНОВЯВАНЕ СЛЕД ЗАПИС (ускоряване, 04.11.2026) ──
-   Действие на ред (статус, „Проверено", дата на трансфер, редакция,
+   Действие на ред (статус, „Недоставена", дата на трансфер, редакция,
    изтриване) вече НЕ вика loadTransit() — то тегли и рисува всичко наново
    (~3 сек при офиса). След УСПЕШЕН запис същите пратени полета се записват в
    реда в transitData и се рисува отново; скролът и колко реда са показани
@@ -745,25 +777,25 @@ function transitRerender(){
 }
 function transitWriteOk(res){ return !!res&&res.ok!==false; }
 
-/* ── СТАТУС НА ПОЛУЧАТЕЛЯ ──
-   Етап 3 (04.11.2026): само pending / received / rejected и само страната
-   получател (или офисът). Не чака изпращача; правилата по direction отпадат.
-   Стар ред със status 'sent' (преди data-миграцията): при отговор на
-   получателя изпращането се пази в sender_status, за да не се изгуби. */
+/* ── ОТГОВОРЪТ НА ПОЛУЧАТЕЛЯ ──
+   'received' („✅ Доставена") → status received; 'undelivered' („✕
+   Недоставена") → status pending + reviewed_at / reviewed_by (status
+   'rejected' вече не се пише, 04.11.2026); 'pending' („↩ Върни") → status
+   pending без reviewed_at. Само страната получател (или офисът); не чака
+   изпращача. Стар ред със status 'sent': изпращането се пази в sender_status. */
 function tMarkStatus(id,status){
   var r=transitData.find(function(x){return String(x.id)===String(id);});
   if(!r)return;
-  if(['pending','received','rejected'].indexOf(status)<0) return;
+  if(['pending','received','undelivered'].indexOf(status)<0) return;
   if(!transitCanMarkReceived(r)){
     toast('Статуса на получателя отбелязва получателят ('+(r.store_name||'')+') или офисът','#dc2626');
     return;
   }
   var who=currentUser.display_name||currentUser.email, at=new Date().toISOString();
-  var body={status:status,updated_by:who,updated_at:at};
+  var body={status:status==='received'?'received':'pending',updated_by:who,updated_at:at};
   if(r.status==='sent'&&r.sender_status!=='sent'){ body.sender_status='sent'; body.sender_status_at=r.updated_at||at; body.sender_status_by=r.updated_by||null; }
-  /* Прието/неприето затваря реда — „проверено, не е пристигнало" вече не
-     описва нищо. Иначе при „↩ Върни" редът би се върнал като проверен. */
-  if(status==='received'||status==='rejected'){ body.reviewed_at=null; body.reviewed_by=null; }
+  if(status==='undelivered'){ body.reviewed_at=at; body.reviewed_by=who; }
+  else { body.reviewed_at=null; body.reviewed_by=null; }
   return sbPatch('goods_transit','id=eq.'+id,body).then(function(res){
     if(!transitWriteOk(res)){ toast('⚠️ Статусът НЕ е записан: '+sbErrMsg(res),'#dc2626'); return; }
     transitApplyLocal([id],body);
@@ -841,54 +873,25 @@ function transitReconBadgeHtml(r){
     (r.recon_by?' · '+esc(r.recon_by):'')+(when?' · '+when:'')+(side?' ('+side+')':'')+'</div>';
 }
 
-/* ── „ПРОВЕРЕНО, НЕ Е ПРИСТИГНАЛО" ──
-   Изричното твърдение на обекта, че е гледал реда и стоката още я няма.
-   Статусът остава pending; reviewed_at е отделна колона. Входящ ред без
-   нито статус, нито reviewed_at е „необработен" — по него тригерът в базата
-   решава дали задачата „Стока на път" е изпълнена (transit_store_done в
-   transit-reviewed-schema.sql). Проверява получателят (или офисът). */
+/* ── „✕ НЕДОСТАВЕНА" (reviewed_at) ──
+   Изричното твърдение на получателя, че стоката още я няма. Статусът остава
+   pending; reviewed_at е отделна колона. Входящ ред без нито статус, нито
+   reviewed_at, нито засечка е „необработен" — по него тригерът в базата
+   решава дали задачата „Стока на път" е изпълнена (transit_store_done_since).
+   Отбелязва получателят (или офисът), при всяка посока — както някога
+   „✕ Неприето"; до 04.11.2026 „👁 Проверено" беше само за incoming. */
 function tCanReview(r){
-  /* Страната получател (етап 3): обектът-получател или офисът — не складът-изпращач. */
-  return !!r&&r.direction==='incoming'&&transitRecvStatus(r)==='pending'&&transitCanMarkReceived(r);
-}
-function tReviewedBadgeHtml(r){
-  if(!r||!r.reviewed_at||transitRecvStatus(r)!=='pending') return '';
-  var d=new Date(r.reviewed_at);
-  if(isNaN(d.getTime())) return '';
-  var p=function(n){return (n<10?'0':'')+n;};
-  return '<div class="t-reviewed" title="'+esc(r.reviewed_by||'')+'" style="font-size:10px;color:#0369a1;font-weight:600;margin-top:2px;white-space:nowrap;">👁 проверено '+p(d.getDate())+'.'+p(d.getMonth()+1)+'</div>';
-}
-/* Колоната „Проверено" в Excel: „дд.мм.гггг ЧЧ:ММ · кой". Само за чакащ ред —
-   същото условие като баджа; затворен ред с останала стара стойност е празен. */
-function tReviewedExcel(r){
-  if(!r||!r.reviewed_at||transitRecvStatus(r)!=='pending') return '';
-  var d=new Date(r.reviewed_at);
-  if(isNaN(d.getTime())) return '';
-  var p=function(n){return (n<10?'0':'')+n;};
-  return p(d.getDate())+'.'+p(d.getMonth()+1)+'.'+d.getFullYear()+' '+p(d.getHours())+':'+p(d.getMinutes())+
-         (r.reviewed_by?' · '+r.reviewed_by:'');
-}
-function tMarkReviewed(id){
-  var r=transitData.find(function(x){return String(x.id)===String(id);});
-  if(!tCanReview(r)) return;
-  var who=currentUser.display_name||currentUser.email, at=new Date().toISOString();
-  var body={reviewed_at:at,reviewed_by:who,updated_by:who,updated_at:at};
-  return sbPatch('goods_transit','id=eq.'+id,body).then(function(res){
-    if(!transitWriteOk(res)){ toast('Грешка при запис','#dc2626'); return; }
-    toast('👁 Отбелязано: проверено, не е пристигнало');
-    transitApplyLocal([id],body);
-    transitRerender();
-  });
+  return !!r&&transitRecvStatus(r)==='pending'&&transitCanMarkReceived(r);
 }
 /* Всички чакащи редове от ФИЛТРИРАНИЯ списък (целия, не само показаните
-   на екрана 200), които потребителят има право да провери.
+   на екрана 200), които потребителят може да отбележи „✕ Недоставена".
    Пакети по 100 id — адресът на PATCH-а не бива да расте без край (офисът
    може да гледа стотици редове). Всеки пакет е една заявка, тоест тригерът
    тръгва веднъж на обект на пакет. */
 function tReviewAllPending(){
-  var todo=(_transitVisible||[]).filter(function(r){return tCanReview(r)&&!r.reviewed_at;});
-  if(!todo.length){ toast('Няма чакащи редове за проверка','#64748b'); return; }
-  if(!confirm('Отбележи '+todo.length+' чакащи реда като „Проверено, не е пристигнало"?\n\nПотвърждаваш, че си ги проверил и стоката още я няма.')) return;
+  var todo=(_transitVisible||[]).filter(tCanReview);
+  if(!todo.length){ toast('Няма чакащи редове','#64748b'); return; }
+  if(!confirm('Отбележи '+todo.length+' чакащи реда като „✕ Недоставена"?\n\nПотвърждаваш, че си ги проверил и стоката още я няма.')) return;
   var who=currentUser.display_name||currentUser.email, at=new Date().toISOString();
   var ids=todo.map(function(r){return r.id;}), chunks=[];
   for(var i=0;i<ids.length;i+=100) chunks.push(ids.slice(i,i+100));
@@ -896,7 +899,7 @@ function tReviewAllPending(){
   function next(k){
     if(k>=chunks.length){
       if(failed) toast('Част от редовете не се записаха ('+failedRows+' реда в '+failed+' от '+chunks.length+' пакета)','#dc2626');
-      else toast('👁 Проверени: '+ids.length);
+      else toast('✕ Недоставени: '+ids.length);
       transitRerender();
       return;
     }
@@ -909,11 +912,12 @@ function tReviewAllPending(){
   }
   return next(0);
 }
-/* „Обработени X / проверени Y / необработени Z" за входящите редове на
-   обекта — собственият за магазин, избраният във филтъра за офиса; без обект
-   броячът не се показва. Числата са за ЦЕЛИЯ обект, не за филтрирания
-   изглед: точно по тях тригерът решава за задачата. Бутонът „Провери всички
-   чакащи" работи върху ПОКАЗАНИЯ списък. */
+/* „Доставени X / недоставени или засечка Y / необработени Z" за входящите
+   редове на обекта — собственият за магазин, избраният във филтъра за офиса;
+   без обект броячът не се показва. Числата са за ЦЕЛИЯ обект, не за
+   филтрирания изглед: точно по тях тригерът решава за задачата (Y и X са
+   обработени). Бутонът „✕ Всички чакащи — недоставени" работи върху
+   ПОКАЗАНИЯ списък. */
 function tReviewCounterHtml(list){
   var store=isGlobal()?transitStore:(currentUser&&currentUser.store_name);
   var inner='';
@@ -923,20 +927,21 @@ function tReviewCounterHtml(list){
       if(r.store_name!==store||r.direction!=='incoming') return;
       /* „🔍 Чака засечка" се брои като обработен — както reviewed_at (етап 3,
          същото правило като transit_store_done_since). */
-      if(transitRecvStatus(r)!=='pending') done++;
-      else if(r.reviewed_at||r.recon_at) rev++;
+      var rs=transitRecvStatus(r);
+      if(rs==='received') done++;
+      else if(rs==='undelivered'||r.recon_at) rev++;
       else open++;
     });
     if(done+rev+open){
       inner+='<div id="t-review-counter" style="font-size:12.5px;color:#334155;">📦 '+esc(store)+': '+
-        '<b style="color:#16a34a;">Обработени '+done+'</b> / '+
-        '<b style="color:#0369a1;">проверени '+rev+'</b> / '+
+        '<b style="color:#16a34a;">Доставени '+done+'</b> / '+
+        '<b style="color:#0369a1;">недоставени или засечка '+rev+'</b> / '+
         '<b style="color:'+(open?'#dc2626':'#16a34a')+';">необработени '+open+'</b></div>';
     }
   }
-  var todo=(list||[]).filter(function(r){return tCanReview(r)&&!r.reviewed_at;});
+  var todo=(list||[]).filter(tCanReview);
   if(todo.length){
-    inner+='<button id="t-review-all" onclick="tReviewAllPending()" style="border:1px solid #0369a1;background:#f0f9ff;color:#0369a1;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">👁 Провери всички чакащи ('+todo.length+')</button>';
+    inner+='<button id="t-review-all" onclick="tReviewAllPending()" style="border:1px solid #dc2626;background:#fff1f2;color:#dc2626;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">✕ Всички чакащи — недоставени ('+todo.length+')</button>';
   }
   if(!inner) return '';
   return '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:8px 12px;margin-bottom:12px;">'+inner+'</div>';
@@ -974,7 +979,7 @@ function exportTransitExcel(){
   transitSplitArchive();
   var rows=[['Посока','Магазин','Доставчик/Склад','Документ','Позиция','ВД','ИД','Дата',
     'Материал','Описание','Кол.','К-во по ВД','МЕ','Остатък','Дата трансфер',
-    'Получател — статус','Изпращач — статус','Чака засечка (кой, кога)','Проверено','Коментар',
+    'Получател — статус','Изпращач — статус','Чака засечка (кой, кога)','Коментар',
     'Обновен от','Обновен на']];
   var _plain=function(lbl){ return lbl.replace(/^[^A-Za-zА-Яа-я]+/,''); };
   transitData.forEach(function(r){
@@ -987,19 +992,21 @@ function exportTransitExcel(){
       r.ordered_qty||'',r.delivery_qty!=null?r.delivery_qty:'',r.unit||'',r.remaining_qty||'',
       r.transfer_date||'',
       /* Етап 3: две страни + засечка. Стар 'sent' — получател „Все още
-         недоставена", изпращач „Изпратена". Непознат статус — самата стойност. */
-      T_STATUS[transitRecvStatus(r)]?_plain(T_STATUS[transitRecvStatus(r)].label):(r.status||''),
+         недоставена", изпращач „Изпратена". Непознат статус — самата стойност.
+         „Недоставена (кой, дд.мм.гггг ЧЧ:ММ)" — колоната „Проверено" отпада
+         (04.11.2026: „👁 Проверено" и „✕ Неприето" са един отговор). */
+      T_STATUS[transitRecvStatus(r)]?_plain(T_STATUS[transitRecvStatus(r)].label)+
+        (transitRecvStatus(r)==='undelivered'&&transitUndeliveredWho(r,true).length?' ('+transitUndeliveredWho(r,true).join(', ')+')':''):(r.status||''),
       _plain((transitSenderSent(r)?T_SENDER.sent:T_SENDER.none).label)+
         (transitSenderSent(r)&&r.sender_status_by?' · '+r.sender_status_by:''),
       r.recon_at?((r.recon_by||'')+(r.recon_by?', ':'')+String(r.recon_at).slice(0,16).replace('T',' ')+
         (r.recon_side?' ('+(r.recon_side==='sender'?'изпращач':'получател')+')':'')):'',
-      tReviewedExcel(r),
       r.comment||'',r.updated_by||'',r.updated_at?r.updated_at.slice(0,16).replace('T',' '):''
     ]);
   });
   var ws=window.XLSX.utils.aoa_to_sheet(rows);
   ws['!cols']=[{wch:14},{wch:16},{wch:22},{wch:14},{wch:8},{wch:12},{wch:10},{wch:12},{wch:10},{wch:30},
-    {wch:8},{wch:10},{wch:6},{wch:8},{wch:14},{wch:20},{wch:22},{wch:30},{wch:26},{wch:20},{wch:16},{wch:18}];
+    {wch:8},{wch:10},{wch:6},{wch:8},{wch:14},{wch:30},{wch:22},{wch:30},{wch:20},{wch:16},{wch:18}];
   window.XLSX.utils.book_append_sheet(wb,ws,'Стока на път');
   var fname='ТеМАХ_Стока_на_път_'+today()+'.xlsx';
   window.XLSX.writeFile(wb,fname);
@@ -1051,7 +1058,7 @@ function transitModalHtml(){
       '<select class="fi" id="tr-status">'+
         '<option value="pending">⏳ Не доставена</option>'+
         '<option value="received">✅ Прието</option>'+
-        '<option value="rejected">✕ Неприето</option>'+
+        '<option value="undelivered">✕ Недоставена</option>'+
       '</select></div>'+
     '<div style="grid-column:1/-1;"><label class="fl">Коментар</label><input class="fi" id="tr-comment" placeholder="прието / неприето / изпратена на... / все още не доставена"></div>'+
     '</div>'+
@@ -1116,7 +1123,7 @@ function updateTrStatusOptions(preferredStatus){
   void dir;
   var opts='<option value="pending">'+T_STATUS.pending.label+'</option>'+
            '<option value="received">'+T_STATUS.received.label+'</option>'+
-           '<option value="rejected">'+T_STATUS.rejected.label+'</option>';
+           '<option value="undelivered">'+T_STATUS.undelivered.label+'</option>';
   statusEl.innerHTML=opts;
   var validValues=[].map.call(statusEl.options,function(o){return o.value;});
   var want = preferredStatus!==undefined ? preferredStatus : statusEl.value;
@@ -1150,13 +1157,18 @@ function submitTransit(){
     ordered_qty:parseFloat(document.getElementById('tr-qty').value)||null,
     remaining_qty:parseFloat(document.getElementById('tr-remaining').value)||null,
     transfer_date:document.getElementById('tr-transfer-date').value||null,
-    status:statusVal,
+    status:statusVal==='received'?'received':'pending',
     comment:document.getElementById('tr-comment').value.trim(),
     updated_by:currentUser.display_name||currentUser.email,
     updated_at:new Date().toISOString()
   };
-  /* Същото правило като в tMarkStatus: затворен ред не е „проверен, чака". */
-  if(statusVal!=='pending'){ data.reviewed_at=null; data.reviewed_by=null; }
+  /* Същото правило като в tMarkStatus: „✕ Недоставена" = reviewed_at при
+     pending (status 'rejected' не се пише). Ред, който вече е недоставен,
+     пази кой / кога; новият — сега и този, който записва. */
+  var _prev=transitEditId?transitData.find(function(x){return x.id===transitEditId;}):null;
+  if(statusVal==='undelivered'){
+    if(!(_prev&&transitRecvStatus(_prev)==='undelivered'&&_prev.reviewed_at)){ data.reviewed_at=data.updated_at; data.reviewed_by=data.updated_by; }
+  }else{ data.reviewed_at=null; data.reviewed_by=null; }
   /* Редакция → PATCH и същите полета в реда; нов ред → POST с
      return=representation (sbPostReturn), за да влезе в списъка с id-то си —
      без loadTransit (ускоряване, 04.11.2026). */

@@ -53,10 +53,10 @@ const DATA = [
 /* „🗄 Архив" — от 03.11.2026 (етап 1, transit-vd-import.test.js), винаги последен. */
 /* Етап 3 (04.11.2026): „Всички" — получател pending / received / rejected + „🔍 Чака засечка";
    'sent' вече не е чип, а стар ред със status 'sent' (TR-RECV) е получател pending. */
-const F = ['pending', 'received', 'rejected', 'recon', 'all', 'archive'];
-const WANT = { pending: 6, received: 1, rejected: 1, recon: 0, all: 8, archive: 0 };
+const F = ['pending', 'received', 'undelivered', 'recon', 'all', 'archive'];
+const WANT = { pending: 6, received: 1, undelivered: 1, recon: 0, all: 8, archive: 0 };
 const DOCS = {
-  pending: 'INC-LONG,INC-NEW,INC-OLD,TR-RECV,TR-SEND,TR-WAIT', received: 'INC-REC', rejected: 'INC-REJ', recon: '',
+  pending: 'INC-LONG,INC-NEW,INC-OLD,TR-RECV,TR-SEND,TR-WAIT', received: 'INC-REC', undelivered: 'INC-REJ', recon: '',
   all: 'INC-LONG,INC-NEW,INC-OLD,INC-REC,INC-REJ,TR-RECV,TR-SEND,TR-WAIT',
   archive: ''
 };
@@ -78,7 +78,7 @@ const S = a => a.slice().sort();
   {
     const h = env(user('admin', 'Централен офис'), DATA);
     ok('няма grid repeat(6,1fr)', !h.w.document.querySelector('#mod-transit div[style*="repeat(6,1fr)"]'));
-    ok('таб „Всички" още е там (посока)', !!Array.from(h.w.document.querySelectorAll('#mod-transit button')).find(b => /^transitDir='all'/.test(b.getAttribute('onclick') || '')));
+    ok('таб „Всички" още е там (посока)', !!Array.from(h.w.document.querySelectorAll('#mod-transit button')).find(b => /^setTDir\('all'\)/.test(b.getAttribute('onclick') || '')));
   }
 
   section('1б. празно търсене и надпис на таба „Всички"');
@@ -86,7 +86,7 @@ const S = a => a.slice().sort();
     const h = env(user('admin', 'Централен офис'), DATA);
     const si = h.w.document.getElementById('t-search');
     ok('празно търсене → value е празен низ (не „—")', !!si && si.value === '' && si.getAttribute('value') === '', si && si.getAttribute('value'));
-    const tab = Array.from(h.w.document.querySelectorAll('#mod-transit button')).find(b => /^transitDir='all'/.test(b.getAttribute('onclick') || ''));
+    const tab = Array.from(h.w.document.querySelectorAll('#mod-transit button')).find(b => /^setTDir\('all'\)/.test(b.getAttribute('onclick') || ''));
     const sub = tab.querySelector('div').textContent.trim();
     /* броят = редовете след клик с подразбирания чип на таба (pending → 6 реда, етап 3) */
     ok('надписът на „Всички" е само броят „(6)", без „all"', sub === '(6)' && !/all/i.test(sub), sub);
@@ -99,9 +99,9 @@ const S = a => a.slice().sort();
     const h = env(user('admin', 'Централен офис'), DATA);
     ok('контейнерът е .filter-bar.chips', bar(h).classList.contains('chips') && bar(h).classList.contains('filter-bar'));
     ok('„Покажи:"', /Покажи:/.test(bar(h).textContent));
-    ok('ред: pending, received, rejected, recon | all, archive', j(Array.from(bar(h).querySelectorAll('button')).map(b => b.getAttribute('data-tt-f'))) === j(F));
+    ok('ред: pending, received, undelivered, recon | all, archive', j(Array.from(bar(h).querySelectorAll('button')).map(b => b.getAttribute('data-tt-f'))) === j(F));
     ok('разделител преди историческите', !!bar(h).querySelector('.chips-sep'));
-    ok('all / archive са .chip-hist; pending / received / rejected / recon — не', ['all', 'archive'].every(f => chip(h, f).classList.contains('chip-hist')) && ['pending', 'received', 'rejected', 'recon'].every(f => !chip(h, f).classList.contains('chip-hist')));
+    ok('all / archive са .chip-hist; pending / received / undelivered / recon — не', ['all', 'archive'].every(f => chip(h, f).classList.contains('chip-hist')) && ['pending', 'received', 'undelivered', 'recon'].every(f => !chip(h, f).classList.contains('chip-hist')));
     ok('няма data-f (сблъсък с Разлики)', !bar(h).querySelector('[data-f]'));
     ok('подразбиране pending, само той е активен', h.w.transitFilter === 'pending' && j(Array.from(bar(h).querySelectorAll('.active')).map(b => b.getAttribute('data-tt-f'))) === j(['pending']));
     F.forEach(f => ok('брой „' + f + '" = ' + WANT[f], count(h, f) === WANT[f], String(count(h, f))));
@@ -143,16 +143,16 @@ const S = a => a.slice().sort();
   }
 
   /* Етап 3 (04.11.2026): двете страни са независими — получателят
-     („✅ Доставена" / „✕ Неприето" / „↩ Върни") не чака изпращача, изпращачът
+     („✅ Доставена" / „✕ Недоставена" / „↩ Върни") не чака изпращача, изпращачът
      има „📤 Изпратена" / „↩ Върни изпращането"; „🔍 Чака засечка" — и двете
      страни. Офисът вижда и двете. Старият двустъпков поток („чака Шумен") отпада. */
   section('5. бутоните — офис (admin): и двете страни');
   {
     const h = env(user('admin', 'Централен офис'), DATA);
     realClick(h.w, chip(h, 'all'));
-    ok('incoming pending', j(btns(rowOf(h, 'INC-NEW'))) === j(S(['✅ Доставена', '✕ Неприето', '👁 Проверено, не е пристигнало', '📤 Изпратена', '🔍 Чака засечка', '✏️ Редакция', '✕'])), j(btns(rowOf(h, 'INC-NEW'))));
-    ok('трансфер pending: получател + изпращач', j(btns(rowOf(h, 'TR-SEND'))) === j(S(['✅ Доставена', '✕ Неприето', '📤 Изпратена', '🔍 Чака засечка', '✏️ Редакция', '✕'])), j(btns(rowOf(h, 'TR-SEND'))));
-    ok('стар sent: получателят отговаря, изпращачът може да върне изпращането', j(btns(rowOf(h, 'TR-RECV'))) === j(S(['✅ Доставена', '✕ Неприето', '↩ Върни изпращането', '🔍 Чака засечка', '✏️ Редакция', '✕'])), j(btns(rowOf(h, 'TR-RECV'))));
+    ok('incoming pending', j(btns(rowOf(h, 'INC-NEW'))) === j(S(['✅ Доставена', '✕ Недоставена', '📤 Изпратена', '🔍 Чака засечка', '✏️ Редакция', '✕'])), j(btns(rowOf(h, 'INC-NEW'))));
+    ok('трансфер pending: получател + изпращач', j(btns(rowOf(h, 'TR-SEND'))) === j(S(['✅ Доставена', '✕ Недоставена', '📤 Изпратена', '🔍 Чака засечка', '✏️ Редакция', '✕'])), j(btns(rowOf(h, 'TR-SEND'))));
+    ok('стар sent: получателят отговаря, изпращачът може да върне изпращането', j(btns(rowOf(h, 'TR-RECV'))) === j(S(['✅ Доставена', '✕ Недоставена', '↩ Върни изпращането', '🔍 Чака засечка', '✏️ Редакция', '✕'])), j(btns(rowOf(h, 'TR-RECV'))));
     ok('received: „↩ Върни" (получател) и „📤 Изпратена" (изпращач)', j(btns(rowOf(h, 'INC-REC'))) === j(S(['↩ Върни', '📤 Изпратена', '🔍 Чака засечка', '✏️ Редакция', '✕'])), j(btns(rowOf(h, 'INC-REC'))));
   }
 
@@ -160,10 +160,10 @@ const S = a => a.slice().sort();
   {
     const h = env(user('manager', 'Кърджали'), DATA);
     realClick(h.w, chip(h, 'all'));
-    ok('incoming pending (магазинът е получател)', j(btns(rowOf(h, 'INC-NEW'))) === j(S(['✅ Доставена', '✕ Неприето', '👁 Проверено, не е пристигнало', '🔍 Чака засечка', '✏️ Редакция'])), j(btns(rowOf(h, 'INC-NEW'))));
+    ok('incoming pending (магазинът е получател)', j(btns(rowOf(h, 'INC-NEW'))) === j(S(['✅ Доставена', '✕ Недоставена', '🔍 Чака засечка', '✏️ Редакция'])), j(btns(rowOf(h, 'INC-NEW'))));
     ok('трансфер при ИЗПРАЩАЧ: само „📤 Изпратена"', j(btns(rowOf(h, 'TR-SEND'))) === j(S(['📤 Изпратена', '🔍 Чака засечка', '✏️ Редакция'])), j(btns(rowOf(h, 'TR-SEND'))));
-    ok('трансфер при ПОЛУЧАТЕЛ, неизпратен: „✅ Доставена" без да чака изпращача', j(btns(rowOf(h, 'TR-WAIT'))) === j(S(['✅ Доставена', '✕ Неприето', '🔍 Чака засечка', '✏️ Редакция'])), j(btns(rowOf(h, 'TR-WAIT'))));
-    ok('стар sent при получател: „✅ Доставена" / „✕ Неприето", без „Върни изпращането"', j(btns(rowOf(h, 'TR-RECV'))) === j(S(['✅ Доставена', '✕ Неприето', '🔍 Чака засечка', '✏️ Редакция'])), j(btns(rowOf(h, 'TR-RECV'))));
+    ok('трансфер при ПОЛУЧАТЕЛ, неизпратен: „✅ Доставена" без да чака изпращача', j(btns(rowOf(h, 'TR-WAIT'))) === j(S(['✅ Доставена', '✕ Недоставена', '🔍 Чака засечка', '✏️ Редакция'])), j(btns(rowOf(h, 'TR-WAIT'))));
+    ok('стар sent при получател: „✅ Доставена" / „✕ Недоставена", без „Върни изпращането"', j(btns(rowOf(h, 'TR-RECV'))) === j(S(['✅ Доставена', '✕ Недоставена', '🔍 Чака засечка', '✏️ Редакция'])), j(btns(rowOf(h, 'TR-RECV'))));
     ok('received: „↩ Върни" (магазинът е получател)', j(btns(rowOf(h, 'INC-REC'))) === j(S(['↩ Върни', '🔍 Чака засечка', '✏️ Редакция'])), j(btns(rowOf(h, 'INC-REC'))));
     const tr2 = env(user('manager', 'Шумен'), DATA);
     realClick(tr2.w, chip(tr2, 'all'));
@@ -171,7 +171,7 @@ const S = a => a.slice().sort();
     ok('Шумен е получател на TR-SEND: „✅ Доставена", без „📤 Изпратена"', b2.indexOf('✅ Доставена') >= 0 && b2.indexOf('📤 Изпратена') < 0, j(b2));
   }
 
-  section('7. tReviewCounterHtml() — същите числа като в стария код');
+  section('7. tReviewCounterHtml() — 04.11.2026: стар rejected = недоставен; бутонът и за трансфер при получателя (TR-WAIT)');
   {
     const text = h => {
       const el = h.w.document.createElement('div');
@@ -180,8 +180,8 @@ const S = a => a.slice().sort();
     };
     const mgr = env(user('manager', 'Кърджали'), DATA);
     const adm = env(user('admin', 'Централен офис'), DATA);
-    ok('магазин Кърджали', text(mgr) === '📦 Кърджали: Обработени 2 / проверени 0 / необработени 3👁 Провери всички чакащи (3)', text(mgr));
-    ok('офис (без избран магазин)', text(adm) === '👁 Провери всички чакащи (3)', text(adm));
+    ok('магазин Кърджали', text(mgr) === '📦 Кърджали: Доставени 1 / недоставени или засечка 1 / необработени 3✕ Всички чакащи — недоставени (4)', text(mgr));
+    ok('офис (без избран магазин)', text(adm) === '✕ Всички чакащи — недоставени (5)', text(adm));
   }
   report();
 })().catch(e => { console.error(e); process.exit(1); });

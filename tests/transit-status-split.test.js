@@ -68,7 +68,7 @@ const rowBtns = (h, id) => Array.from(mod(h).querySelectorAll('button[data-id="'
 const patches = h => h.calls.patch.filter(p => p.table === 'goods_transit');
 const R = (h, id) => h.w.transitData.find(r => r.id === id);
 const settle = async () => { for (let i = 0; i < 20; i++) await ticks(3); };
-const tabBtn = (h, k) => Array.from(mod(h).querySelectorAll('button')).find(b => (b.getAttribute('onclick') || '').indexOf("transitDir='" + k + "'") === 0);
+const tabBtn = (h, k) => Array.from(mod(h).querySelectorAll('button')).find(b => (b.getAttribute('onclick') || '').indexOf("setTDir('" + k + "')") === 0);
 const chipN = (h, f) => { const c = mod(h).querySelector('[data-tt-f="' + f + '"] .chips-n'); return c ? +c.textContent : NaN; };
 const tabNum = (h, k) => { const b = tabBtn(h, k); const m = b && /\((\d+) /.exec(b.textContent); return m ? +m[1] : null; };
 const shown = h => h.w._transitVisible.map(r => r.id).sort().join(',');
@@ -146,7 +146,7 @@ const shown = h => h.w._transitVisible.map(r => r.id).sort().join(',');
     const badge = Array.from(mod(h).querySelectorAll('.t-recon')).map(x => x.textContent).join(' | ');
     ok('значка „🔍 Чака засечка · Раднево · дд.мм (получател)"', /🔍 Чака засечка · Раднево · \d\d\.\d\d \(получател\)/.test(badge), badge);
     ok('бутонът става „↩ Махни засечка"', !!btn(h, 'a1', '↩ Махни засечка'));
-    ok('броячът на обекта: засечката е „обработена" (проверени 1)', /проверени 1/.test((h.doc.getElementById('t-review-counter') || {}).textContent || ''),
+    ok('броячът на обекта: засечката е „обработена" (недоставени или засечка 1)', /недоставени или засечка 1/.test((h.doc.getElementById('t-review-counter') || {}).textContent || ''),
       (h.doc.getElementById('t-review-counter') || {}).textContent);
     /* Изпращачът (складът) вижда засечката в „Изпращам" и може да отбележи своя. */
     const hw = env(WAREHOUSE, h.w.transitData);
@@ -191,7 +191,7 @@ const shown = h => h.w._transitVisible.map(r => r.id).sort().join(',');
     realClick(hs.w, mod(hs).querySelector('[data-tt-f="mine"]'), 'Чакат мен');
     ok('„📥 Чакат мен" = a3 и s1 (изпратени, получателят pending)', shown(hs) === 'a3,s1', shown(hs));
     const keysIn = Array.from(mod(hs).querySelectorAll('[data-tt-f]')).map(b => b.getAttribute('data-tt-f')).join(',');
-    ok('чиповете на „Получавам"', keysIn === 'pending,received,rejected,recon,mine,all,archive', keysIn);
+    ok('чиповете на „Получавам"', keysIn === 'pending,received,undelivered,recon,mine,all,archive', keysIn);
     realClick(hs.w, tabBtn(hs, 'out'), 'Изпращам');
     ok('минаване в „Изпращам" → „📭 Неизпратени", не празна таблица', hs.w.transitFilter === 'snone' && shown(hs) === 'c1', hs.w.transitFilter + ' / ' + shown(hs));
   }
@@ -220,11 +220,11 @@ const shown = h => h.w._transitVisible.map(r => r.id).sort().join(',');
     const bs = rowBtns(hs, 'a1');
     ok('Раднево (получател) на a1: „✅ Доставена", без „📤 Изпратена"', bs.indexOf('✅ Доставена') >= 0 && !bs.some(t => /📤/.test(t)), bs.join(' | '));
     const bc = rowBtns(hs, 'c1');
-    ok('Раднево (изпращач) на c1: „📤 Изпратена", без „✅ Доставена" / „✕ Неприето"', bc.indexOf('📤 Изпратена') >= 0 && bc.indexOf('✅ Доставена') < 0 && bc.indexOf('✕ Неприето') < 0, bc.join(' | '));
+    ok('Раднево (изпращач) на c1: „📤 Изпратена", без „✅ Доставена" / „✕ Недоставена"', bc.indexOf('📤 Изпратена') >= 0 && bc.indexOf('✅ Доставена') < 0 && bc.indexOf('✕ Недоставена') < 0, bc.join(' | '));
     const hw = env(WAREHOUSE);
     const bw = rowBtns(hw, 'a1');
     ok('складът (изпращач) на a1: без „✅ Доставена"', bw.indexOf('✅ Доставена') < 0 && bw.indexOf('📤 Изпратена') >= 0, bw.join(' | '));
-    ok('… и без „👁 Проверено" (то е на получателя)', !bw.some(t => /Проверено/.test(t)));
+    ok('… и без „✕ Недоставена" (то е на получателя)', !bw.some(t => /Недоставена/.test(t)));
   }
 
   report();

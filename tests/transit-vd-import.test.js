@@ -367,7 +367,7 @@ const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' &
     ok('„Всички" брои 1 (без архива)', chip('all') && chip('all').textContent === '1', chip('all') && chip('all').textContent);
     const cnt = h.doc.getElementById('t-review-counter');
     ok('броячът на обекта: необработени 1 (без архива)', !!cnt && /необработени 1/.test(cnt.textContent), cnt && cnt.textContent);
-    ok('„Провери всички чакащи (1)"', !!btn(mod(), 'Провери всички чакащи (1)'));
+    ok('„✕ Всички чакащи — недоставени (1)"', !!btn(mod(), 'Всички чакащи — недоставени (1)'));
     ok('табът „Получавам" брои 1 чакащ', /\(1 чакат\)/.test(mod().textContent));
     const ach = chip('archive');
     ok('чипът „🗄 Архив" брои 1', !!ach && ach.textContent === '1', ach && ach.textContent);
@@ -381,7 +381,7 @@ const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' &
       const stBtns = body ? Array.from(body.querySelectorAll('button')) : null;
       ok('в реда на архивирания няма нито един <button>', !!stBtns && stBtns.length === 0,
         stBtns && stBtns.map(b => b.textContent).join(' | '));
-      ok('няма „Провери всички чакащи" в архива', !btn(mod(), 'Провери всички чакащи'));
+      ok('няма „Всички чакащи — недоставени" в архива', !btn(mod(), 'Всички чакащи — недоставени'));
       ok('баджът „🗄 архив" е на реда', !!mod().querySelector('.t-archived'));
     }
     /* Чипът е видим и при 0. */

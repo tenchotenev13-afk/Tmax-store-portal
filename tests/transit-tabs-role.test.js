@@ -71,7 +71,7 @@ function env(user, data) {
 }
 const mod = h => h.doc.getElementById('mod-transit');
 const tabBtn = (h, key) => Array.from(mod(h).querySelectorAll('button'))
-  .find(b => (b.getAttribute('onclick') || '').indexOf("transitDir='" + key + "'") === 0) || null;
+  .find(b => (b.getAttribute('onclick') || '').indexOf("setTDir('" + key + "')") === 0) || null;
 const shown = h => h.w._transitVisible.map(r => r.id).sort().join(',');
 /* От етап 3 (04.11.2026) кликът на таб нулира чипа към подразбирания; за да се
    види кои редове са в таба при ВСИЧКИ статуси, след таба се кликва и чипът „Всички". */

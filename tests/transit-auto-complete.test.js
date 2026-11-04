@@ -139,48 +139,57 @@ function fakeCb(doc, id, linked) {
     const c = h.doc.getElementById('t-review-counter');
     if (ok('броячът е изрисуван', !!c)) {
       const t = txt(c);
-      ok('Обработени 1', t.indexOf('Обработени 1') >= 0, t);
-      ok('проверени 1', t.indexOf('проверени 1') >= 0, t);
+      ok('Доставени 1', t.indexOf('Доставени 1') >= 0, t);
+      ok('недоставени или засечка 1', t.indexOf('недоставени или засечка 1') >= 0, t);
       ok('необработени 1 (чуждият обект и трансферът не влизат)', t.indexOf('необработени 1') >= 0, t);
     }
   }
 
-  section('A2. Бутонът и баджът по редове');
+  section('A2. „✕ Недоставена" по редове (04.11.2026: замества „👁 Проверено" и „✕ Неприето")');
   {
     const h = transitEnv(MANAGER, baseRows());
     const d = h.doc;
-    ok('r1 (чакащ, свой) има „👁 Проверено"', !!rowBtn(d, 'r1', 'tMarkReviewed'));
-    ok('r2 (вече проверен) НЯМА бутона', !rowBtn(d, 'r2', 'tMarkReviewed'));
-    const r2 = rowOf(d, 'r2'), badge = r2 && r2.querySelector('.t-reviewed');
-    ok('r2 носи бадж „👁 проверено ' + dm(reviewedNoon()) + '"', !!badge && txt(badge) === '👁 проверено ' + dm(reviewedNoon()), txt(badge));
-    ok('r3 (прието) НЯМА бутона', !rowBtn(d, 'r3', 'tMarkReviewed'));
-    ok('r3 няма бадж', !(rowOf(d, 'r3') || d).querySelector('.t-reviewed'));
-    ok('r4 (чужд обект) НЯМА бутона', !rowBtn(d, 'r4', 'tMarkReviewed'));
-    ok('r5 (трансфер) НЯМА бутона', !rowBtn(d, 'r5', 'tMarkReviewed'));
+    ok('r1 (чакащ, свой) има „✕ Недоставена"', !!rowBtn(d, 'r1', "'undelivered'") && txt(rowBtn(d, 'r1', "'undelivered'")) === '✕ Недоставена');
+    ok('r2 (вече недоставен) НЯМА бутона', !rowBtn(d, 'r2', "'undelivered'"));
+    ok('… а има „↩ Върни"', !!rowBtn(d, 'r2', "'pending'"));
+    const r2 = rowOf(d, 'r2'), badge = r2 && r2.querySelector('.t-recv');
+    ok('r2: значката „✕ Недоставена · Управител Троян · ' + dm(reviewedNoon()) + '"',
+      !!badge && txt(badge) === '✕ Недоставена · Управител Троян · ' + dm(reviewedNoon()), txt(badge));
+    ok('r3 (доставен) НЯМА бутона', !rowBtn(d, 'r3', "'undelivered'"));
+    ok('r4 (чужд обект) НЯМА бутона', !rowBtn(d, 'r4', "'undelivered'"));
+    ok('r5 (трансфер, обектът е получател) ИМА бутона — както някога „✕ Неприето"', !!rowBtn(d, 'r5', "'undelivered'"));
+    const all = Array.prototype.slice.call(d.querySelectorAll('#mod-transit button'));
+    ok('няма <button> „Неприето"', !all.some(b => /Неприет/.test(b.textContent)), all.map(b => b.textContent).filter(t => /Непри/.test(t)).join(' | '));
+    ok('няма <button> „Проверено"', !all.some(b => /Проверено/.test(b.textContent)));
+    ok('няма старата значка .t-reviewed', !d.querySelector('.t-reviewed'));
+    ok('няма onclick с \'rejected\'', !all.some(b => /'rejected'/.test(b.getAttribute('onclick') || '')));
   }
 
-  section('A3. Истински клик „👁 Проверено" → PATCH само с проверката');
+  section('A3. Истински клик „✕ Недоставена" → reviewed_at, status остава pending');
   {
     const h = transitEnv(MANAGER, baseRows());
-    const b = rowBtn(h.doc, 'r1', 'tMarkReviewed');
-    if (b && guard('клик', () => realClick(h.w, b, '👁 Проверено'))) {
+    const b = rowBtn(h.doc, 'r1', "'undelivered'");
+    if (b && guard('клик', () => realClick(h.w, b, '✕ Недоставена'))) {
       await settle();
       const p = patchesTo(h, 'goods_transit');
       if (ok('една заявка', p.length === 1, p.length)) {
         ok('към r1', /id=eq\.r1(&|$)/.test(p[0].url), p[0].url);
         ok('reviewed_at е ISO време', typeof p[0].body.reviewed_at === 'string' && !isNaN(Date.parse(p[0].body.reviewed_at)), JSON.stringify(p[0].body));
         ok('reviewed_by = името', p[0].body.reviewed_by === 'Управител Троян', p[0].body.reviewed_by);
-        ok('status НЕ се пипа', !('status' in p[0].body), JSON.stringify(p[0].body));
+        ok('status = pending (НЕ rejected)', p[0].body.status === 'pending', JSON.stringify(p[0].body));
       }
+      const r1 = rowOf(h.doc, 'r1');
+      ok('след клика редът е „✕ Недоставена · Управител Троян · …"', !!r1 && /^✕ Недоставена · Управител Троян · \d\d\.\d\d$/.test(txt(r1.querySelector('.t-recv'))), r1 && txt(r1.querySelector('.t-recv')));
+      ok('… и има „↩ Върни"', !!rowBtn(h.doc, 'r1', "'pending'"));
     }
   }
 
-  section('A4. Прието/Неприето чистят проверката; „↩ Върни" не');
+  section('A4. „✅ Доставена" чисти reviewed_at; „↩ Върни" маха „Недоставена"');
   {
     const h = transitEnv(MANAGER, baseRows());
-    const acc = rowBtn(h.doc, 'r2', "'received'");
-    if (ok('r2 има „✅ Прието"', !!acc)) {
-      realClick(h.w, acc, 'Прието'); await settle();
+    const acc = rowBtn(h.doc, 'r1', "'received'");
+    if (ok('r1 има „✅ Доставена"', !!acc)) {
+      realClick(h.w, acc, 'Доставена'); await settle();
       const p = patchesTo(h, 'goods_transit')[0];
       ok('status received', p && p.body.status === 'received');
       ok('reviewed_at → null', p && 'reviewed_at' in p.body && p.body.reviewed_at === null, p && JSON.stringify(p.body));
@@ -189,36 +198,38 @@ function fakeCb(doc, id, linked) {
   }
   {
     const h = transitEnv(MANAGER, baseRows());
-    const rej = rowBtn(h.doc, 'r2', "'rejected'");
-    if (ok('r2 има „✕ Неприето"', !!rej)) {
-      realClick(h.w, rej, 'Неприето'); await settle();
+    const back = rowBtn(h.doc, 'r2', "'pending'");
+    if (ok('r2 (недоставен) има „↩ Върни"', !!back)) {
+      realClick(h.w, back, 'Върни'); await settle();
       const p = patchesTo(h, 'goods_transit')[0];
-      ok('rejected → reviewed_at null', p && p.body.status === 'rejected' && p.body.reviewed_at === null, p && JSON.stringify(p.body));
+      ok('„↩ Върни" → status pending, reviewed_at null', p && p.body.status === 'pending' && p.body.reviewed_at === null && p.body.reviewed_by === null, p && JSON.stringify(p.body));
+      const r2 = rowOf(h.doc, 'r2');
+      ok('… редът е пак „⏳ Все още недоставена"', !!r2 && txt(r2.querySelector('.t-recv')) === '⏳ Все още недоставена', r2 && txt(r2.querySelector('.t-recv')));
     }
   }
   {
     const h = transitEnv(MANAGER, baseRows());
     const back = rowBtn(h.doc, 'r3', "'pending'");
-    if (ok('r3 има „↩ Върни"', !!back)) {
+    if (ok('r3 (доставен) има „↩ Върни"', !!back)) {
       realClick(h.w, back, 'Върни'); await settle();
       const p = patchesTo(h, 'goods_transit')[0];
-      ok('КОНТРОЛА: „↩ Върни" не пипа reviewed_at', p && p.body.status === 'pending' && !('reviewed_at' in p.body), p && JSON.stringify(p.body));
+      ok('„↩ Върни" на доставен → pending без reviewed_at', p && p.body.status === 'pending' && p.body.reviewed_at === null, p && JSON.stringify(p.body));
     }
   }
 
-  section('A5. „Провери всички чакащи" — confirm и пакети');
+  section('A5. „✕ Всички чакащи — недоставени" — confirm и пакети');
   {
     const h = transitEnv(MANAGER, baseRows());
     const all = h.doc.getElementById('t-review-all');
-    if (ok('бутонът е там и брои само проверимите (1)', !!all && txt(all).indexOf('(1)') >= 0, txt(all))) {
+    if (ok('бутонът „✕ Всички чакащи — недоставени (2)" (r1 и трансферът r5)', !!all && txt(all) === '✕ Всички чакащи — недоставени (2)', txt(all))) {
       h.w.confirm = () => false;
-      realClick(h.w, all, 'Провери всички'); await settle();
+      realClick(h.w, all, 'Всички чакащи'); await settle();
       ok('„Откажи" → нищо не се пише', patchesTo(h, 'goods_transit').length === 0);
       h.w.confirm = () => true;
-      realClick(h.w, h.doc.getElementById('t-review-all'), 'Провери всички'); await settle();
+      realClick(h.w, h.doc.getElementById('t-review-all'), 'Всички чакащи'); await settle();
       const p = patchesTo(h, 'goods_transit');
-      ok('„ОК" → една заявка за r1', p.length === 1 && /id=in\.\(r1\)/.test(p[0].url), p.map(x => x.url).join(' | '));
-      ok('тялото е проверката, без status', p[0] && p[0].body.reviewed_by === 'Управител Троян' && !('status' in p[0].body));
+      ok('„ОК" → една заявка за r1, r5', p.length === 1 && /id=in\.\(r1,r5\)/.test(p[0].url), p.map(x => x.url).join(' | '));
+      ok('тялото е reviewed_*, без status', p[0] && p[0].body.reviewed_by === 'Управител Троян' && !('status' in p[0].body));
     }
   }
   {
@@ -226,27 +237,40 @@ function fakeCb(doc, id, linked) {
     for (let i = 0; i < 250; i++) rows.push(trow('x' + i));
     const h = transitEnv(MANAGER, rows);
     h.w.confirm = () => true;
-    realClick(h.w, h.doc.getElementById('t-review-all'), 'Провери всички');
+    realClick(h.w, h.doc.getElementById('t-review-all'), 'Всички чакащи');
     await settle(30);
     const p = patchesTo(h, 'goods_transit');
     const sizes = p.map(x => (/id=in\.\(([^)]*)\)/.exec(x.url) || ['', ''])[1].split(',').length);
     ok('250 реда → 3 пакета (100, 100, 50)', sizes.join(',') === '100,100,50', sizes.join(','));
   }
 
-  section('A6. Формата за редакция: затворен статус чисти проверката');
-  {
+  section('A6. Формата за редакция: „Недоставена" = reviewed_at при pending');
+  async function editSave(rowId, val) {
     const h = transitEnv(MANAGER, baseRows());
-    const ed = rowBtn(h.doc, 'r2', 'openTransitEdit');
-    if (ok('r2 има ✏️ Редакция', !!ed)) {
-      realClick(h.w, ed, 'Редакция');
-      const st = h.doc.getElementById('tr-status');
-      const save = Array.prototype.find.call(h.doc.querySelectorAll('#transit-modal button'), b => (b.getAttribute('onclick') || '').indexOf('submitTransit') >= 0);
-      if (ok('формата е отворена', !!st && !!save)) {
-        st.value = 'received';
-        realClick(h.w, save, 'Запиши'); await settle();
-        const p = patchesTo(h, 'goods_transit')[0];
-        ok('PATCH с reviewed_at null', p && p.body.status === 'received' && p.body.reviewed_at === null, p && JSON.stringify(p.body));
-      }
+    const ed = rowBtn(h.doc, rowId, 'openTransitEdit');
+    if (!ok(rowId + ' има ✏️ Редакция', !!ed)) return null;
+    realClick(h.w, ed, 'Редакция');
+    const st = h.doc.getElementById('tr-status');
+    const save = Array.prototype.find.call(h.doc.querySelectorAll('#transit-modal button'), b => (b.getAttribute('onclick') || '').indexOf('submitTransit') >= 0);
+    if (!ok('формата е отворена', !!st && !!save)) return null;
+    ok('опциите: pending / received / undelivered', Array.from(st.options).map(o => o.value).join(',') === 'pending,received,undelivered', Array.from(st.options).map(o => o.value).join(','));
+    st.value = val;
+    realClick(h.w, save, 'Запиши'); await settle();
+    return { h, st, p: patchesTo(h, 'goods_transit')[0] };
+  }
+  {
+    const e = await editSave('r2', 'received');
+    if (e) ok('r2 → Доставена: received, reviewed_at null', e.p && e.p.body.status === 'received' && e.p.body.reviewed_at === null, e.p && JSON.stringify(e.p.body));
+  }
+  {
+    const e = await editSave('r1', 'undelivered');
+    if (e) ok('r1 → Недоставена: status pending + reviewed_at / by', e.p && e.p.body.status === 'pending' && !!e.p.body.reviewed_at && e.p.body.reviewed_by === 'Управител Троян', e.p && JSON.stringify(e.p.body));
+  }
+  {
+    const e = await editSave('r2', 'undelivered');
+    if (e) {
+      ok('r2 се отваря като „Недоставена"', e.st.value === 'undelivered', e.st.value);
+      ok('r2 остава Недоставена: status pending, кой / кога НЕ се пипат', e.p && e.p.body.status === 'pending' && !('reviewed_at' in e.p.body) && !('reviewed_by' in e.p.body), e.p && JSON.stringify(e.p.body));
     }
   }
 
@@ -256,30 +280,34 @@ function fakeCb(doc, id, linked) {
     ok('без избран обект броячът го няма', !h.doc.getElementById('t-review-counter'));
     h.w.transitStore = TR; h.w.renderTransit();
     const c = h.doc.getElementById('t-review-counter');
-    ok('с избран Троян — има, 1/1/1', !!c && txt(c).indexOf('Обработени 1') >= 0 && txt(c).indexOf('необработени 1') >= 0, txt(c));
+    ok('с избран Троян — има, 1/1/1', !!c && txt(c).indexOf('Доставени 1') >= 0 && txt(c).indexOf('необработени 1') >= 0, txt(c));
   }
 
-  section('A8. Excel износът: колона „Проверено"');
+  section('A8. Excel износът: „Недоставена (кой, дата)" в колоната на получателя');
   {
     const rows = baseRows().concat([
-      /* затворен ред със стара стойност — колоната е празна, като баджа */
-      trow('r6', { status: 'received', reviewed_at: reviewedNoon().toISOString(), reviewed_by: 'Стар' })
+      /* доставен ред със стара стойност — „Доставена", без кой / кога */
+      trow('r6', { status: 'received', reviewed_at: reviewedNoon().toISOString(), reviewed_by: 'Стар' }),
+      /* стар 'rejected' без reviewed_at (преди data-миграцията) */
+      trow('r7', { status: 'rejected' })
     ]);
     const h = transitEnv(MANAGER, rows);
     let sheet = null, written = false;
     h.w.XLSX = { utils: { book_new: () => ({}), aoa_to_sheet: a => { sheet = a; return {}; }, book_append_sheet() {} },
                  writeFile() { written = true; } };
     if (guard('exportTransitExcel()', () => h.w.exportTransitExcel()) && ok('файлът е записан', written && !!sheet)) {
-      const head = sheet[0], ci = head.indexOf('Проверено');
-      /* Етап 3 (04.11.2026): статусът е „Получател — статус", после изпращачът и засечката. */
-      ok('заглавие „Проверено" веднага след „Чака засечка (кой, кога)"', ci > 0 && head[ci - 1] === 'Чака засечка (кой, кога)' && head[ci - 3] === 'Получател — статус', JSON.stringify(head));
+      const head = sheet[0], ci = head.indexOf('Получател — статус');
+      ok('колоната „Проверено" я няма', head.indexOf('Проверено') < 0, JSON.stringify(head));
+      ok('„Получател — статус", после „Изпращач — статус", „Чака засечка (кой, кога)", „Коментар"',
+        ci > 0 && head[ci + 1] === 'Изпращач — статус' && head[ci + 2] === 'Чака засечка (кой, кога)' && head[ci + 3] === 'Коментар', JSON.stringify(head));
       ok('всеки ред е с дължината на заглавието', sheet.every(r => r.length === head.length), sheet.map(r => r.length).join(','));
       const byMat = m => sheet.find(r => r.indexOf('Артикул ' + m) >= 0);
       const d = reviewedNoon(), p = n => String(n).padStart(2, '0');
-      const exp = p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear() + ' 12:00 · Управител Троян';
-      ok('r2 (проверен) → „' + exp + '"', byMat('r2') && byMat('r2')[ci] === exp, byMat('r2') && byMat('r2')[ci]);
-      ok('r1 (непроверен) → празно', byMat('r1') && byMat('r1')[ci] === '');
-      ok('r6 (прието, стара стойност) → празно', byMat('r6') && byMat('r6')[ci] === '', byMat('r6') && byMat('r6')[ci]);
+      const exp = 'Недоставена (Управител Троян, ' + p(d.getDate()) + '.' + p(d.getMonth() + 1) + '.' + d.getFullYear() + ' 12:00)';
+      ok('r2 → „' + exp + '"', byMat('r2') && byMat('r2')[ci] === exp, byMat('r2') && byMat('r2')[ci]);
+      ok('r1 → „Все още недоставена"', byMat('r1') && byMat('r1')[ci] === 'Все още недоставена', byMat('r1') && byMat('r1')[ci]);
+      ok('r6 (доставен, стара стойност) → „Доставена"', byMat('r6') && byMat('r6')[ci] === 'Доставена', byMat('r6') && byMat('r6')[ci]);
+      ok('r7 (стар rejected) → „Недоставена"', byMat('r7') && byMat('r7')[ci] === 'Недоставена', byMat('r7') && byMat('r7')[ci]);
     }
   }
 

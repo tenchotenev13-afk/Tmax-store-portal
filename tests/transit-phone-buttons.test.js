@@ -112,9 +112,9 @@ const recvCount = h => (h.w.transitData || []).filter(h.w.transitAwaitsViewpoint
       ok(id + ': 6 клетки, бутоните в шестата', !!tr && tr.cells.length === 6 && btnsIn(tr.cells[5]).length > 0, tr && tr.cells.length);
       wideSig[id] = tr ? sig(tr.cells[5]) : '';
     }
-    ok('in1 има „✅ Доставена" и „✕ Неприето" (етап 3)', /✅ Доставена\|tMarkStatus\(this\.dataset\.id,'received'\)/.test(wideSig.in1) && /✕ Неприето/.test(wideSig.in1), wideSig.in1);
+    ok('in1 има „✅ Доставена" и „✕ Недоставена" (етап 3)', /✅ Доставена\|tMarkStatus\(this\.dataset\.id,'received'\)/.test(wideSig.in1) && /✕ Недоставена/.test(wideSig.in1), wideSig.in1);
     ok('out1 има „↩ Върни"', /↩ Върни/.test(wideSig.out1), wideSig.out1);
-    ok('inc1 има „👁 Проверено…" и „✏️ Редакция"', /👁 Проверено/.test(wideSig.inc1) && /✏️ Редакция/.test(wideSig.inc1), wideSig.inc1);
+    ok('inc1 има „✕ Недоставена" и „✏️ Редакция"', /✕ Недоставена/.test(wideSig.inc1) && /✏️ Редакция/.test(wideSig.inc1), wideSig.inc1);
     wide.close();
   }
 

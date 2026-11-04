@@ -92,9 +92,10 @@
 
    Етап 4б — „вероятно незаприходена стока" (27.10.2026, решение на Тенчо).
    Минус по код, който за СЪЩИЯ обект е (а) в „Стока на път" като неполучен —
-   goods_transit.status pending / sent („🚚 На път") или rejected („✕ Неприето"
-   → „🚚 Неприето": обектът казва, че не е дошло, а минусът показва, че е
-   продадено — решение на Тенчо 27.10; само received не свети) — или (б) с
+   goods_transit.status pending / sent („🚚 На път") или „✕ Недоставена"
+   (reviewed_at при pending, от 04.11.2026; стар status rejected — същото):
+   обектът казва, че не е дошло, а минусът показва, че е продадено — решение
+   на Тенчо 27.10, надписът — решение Б от 04.11; само received не свети) — или (б) с
    отворена липса в Разлики с логистичен
    склад — differences_reports.direction = 'interstore', ред със status ≠
    'received'; липса = quantity − quantity_received > 0, а при празно
@@ -662,7 +663,7 @@ function mnLoadUr(seq){
   if(!stores.length){ mnUrTransit = {}; mnUrDiff = {}; mnUrErr = false; return Promise.resolve(); }
   var inS = 'store_name=in.(' + stores.map(function(s){ return '"' + encodeURIComponent(s) + '"'; }).join(',') + ')';
   return Promise.all([
-    sbGetAll('goods_transit', 'select=id,store_name,material_code,purchase_doc,doc_date,remaining_qty,unit,status&archived_at=is.null&status=in.(' + MN_UR_TRANSIT.join(',') + ')&' + inS + '&order=doc_date.asc,id.asc'),
+    sbGetAll('goods_transit', 'select=id,store_name,material_code,purchase_doc,doc_date,remaining_qty,unit,status,reviewed_at&archived_at=is.null&status=in.(' + MN_UR_TRANSIT.join(',') + ')&' + inS + '&order=doc_date.asc,id.asc'),
     sbGetAll('stock_differences', 'select=id,store_name,material_code,quantity,quantity_received,difference_category,status,created_at,differences_reports!inner(direction,doc_date)' +
       '&differences_reports.direction=eq.interstore&status=neq.received&' + inS + '&order=created_at.asc,id.asc')
   ]).then(function(rs){
@@ -678,14 +679,22 @@ function mnLoadUr(seq){
   });
 }
 var MN_UR_WARN = '⚠ вероятно незаприходена стока';
+/* „✕ Недоставена" (Стока на път, 04.11.2026): обектът е казал „няма я" —
+   reviewed_at при status pending (или стар 'sent'); стар 'rejected' — същото.
+   Решение Б на Тенчо (04.11.2026): в Минуси да личи, а не да изглежда „на път". */
+function mnUrUndelivered(g){
+  if(!g) return false;
+  if(g.status === 'rejected') return true;
+  return (g.status === 'pending' || g.status === 'sent') && !!g.reviewed_at;
+}
 function mnUrChipsHtml(r){
   var m = mnUrMatches(r);
   if(!m.transit.length && !m.diff.length) return '';
   var cs = 'display:inline-block;border-radius:4px;padding:0 4px;margin:1px 2px 0 0;';
   var h = '<div class="mn-ur" style="margin-top:3px;font-size:11px;">';
   m.transit.forEach(function(g){
-    var rej = g.status === 'rejected';
-    h += '<span class="mn-ur-transit' + (rej ? ' mn-ur-rejected' : '') + '" style="' + cs + 'background:#fef3c7;color:#92400e;">🚚 ' + (rej ? 'Неприето' : 'На път') + ': ' + esc(g.purchase_doc || '—') +
+    var und = mnUrUndelivered(g);
+    h += '<span class="mn-ur-transit' + (und ? ' mn-ur-undelivered' : '') + '" style="' + cs + 'background:#fef3c7;color:#92400e;">' + (und ? '✕ Недоставена' : '🚚 На път') + ': ' + esc(g.purchase_doc || '—') +
       (g.doc_date ? ' от ' + esc(fmtDate(g.doc_date).slice(0, 5)) : '') + ' · ' + esc(mnFmtQty(Number(g.remaining_qty))) + (g.unit ? ' ' + esc(g.unit) : '') + '</span>';
   });
   m.diff.forEach(function(x){
@@ -693,14 +702,14 @@ function mnUrChipsHtml(r){
   });
   return h + '<div class="mn-ur-warn" style="color:#b91c1c;font-weight:600;margin-top:2px;">' + MN_UR_WARN + '</div></div>';
 }
-/* Excel: '' / „на път: <док>[, <док>]" / „неприето: <док>" / „разлика ЛС"
+/* Excel: '' / „на път: <док>[, <док>]" / „недоставена: <док>" / „разлика ЛС"
    (няколко — през „; "). */
 function mnUrExcel(r){
   var m = mnUrMatches(r), p = [];
-  var docs = function(rej){ return m.transit.filter(function(g){ return (g.status === 'rejected') === rej; }).map(function(g){ return g.purchase_doc || '—'; }); };
-  var onWay = docs(false), rejd = docs(true);
+  var docs = function(und){ return m.transit.filter(function(g){ return mnUrUndelivered(g) === und; }).map(function(g){ return g.purchase_doc || '—'; }); };
+  var onWay = docs(false), undd = docs(true);
   if(onWay.length) p.push('на път: ' + onWay.join(', '));
-  if(rejd.length) p.push('неприето: ' + rejd.join(', '));
+  if(undd.length) p.push('недоставена: ' + undd.join(', '));
   if(m.diff.length) p.push('разлика ЛС');
   return p.join('; ');
 }

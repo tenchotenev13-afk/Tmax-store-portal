@@ -4,9 +4,11 @@
 
    Правилото: същият обект + код (trim) и
      а) goods_transit със status pending / sent → „🚚 На път: <док> от <дд.мм>
-        · <ост.> <ед.>"; rejected („✕ Неприето") → „🚚 Неприето: …" — обектът
+        · <ост.> <ед.>"; „✕ Недоставена" (reviewed_at при pending — от
+        04.11.2026; стар rejected — същото) → „✕ Недоставена: …" — обектът
         казва, че не е дошло, а минусът показва, че е продадено (решение на
-        Тенчо 27.10, второ — първото го изключваше); само received не свети;
+        Тенчо 27.10, второ — първото го изключваше; надписът — решение Б от
+        04.11); само received не свети;
      б) stock_differences на бланка с direction 'interstore', status ≠
         'received', с липса: документ − получено > 0, а при празно „получено"
         и категория undelivered — документът (решение на Тенчо 27.10) →
@@ -23,7 +25,14 @@
    Мутационна проверка (27.10.2026) — всеки вариант пуснат и паднал:
      U1 rejected изпада (махнат от MN_UR_TRANSIT — и от заявката, и от
         кода) → падат заявката (status=in.), „rejected → „🚚 Неприето““ (обект
-        и офис) и Excel „неприето: …“;
+        и офис) и Excel „недоставена: …“;
+   „✕ Недоставена" по reviewed_at (04.11.2026, сесия transit-cleanup), всеки
+   върху чист minusi.js:
+     U6 надписът само по status rejected (без reviewed_at) → падат „pending +
+        reviewed_at → ✕ Недоставена", класът mn-ur-undelivered и Excel
+        „недоставена: 4600166666" (3);
+     U7 reviewed_at не се тегли (махнат от select-а) → пада заявката (1) —
+        фалшивият PostgREST не прилага select, затова редовете носят полето.
      U2 липсата с обратен знак (получено − документ) → падат „липса 3“,
         „излишък → нищо“, трите чипа при 40001 и още (10);
      U3 без резервата „само документ + undelivered“ → падат „липса 4“ и
@@ -56,7 +65,8 @@ const MOVS = () => { seq = 0; return [
   mv('20001'), mv('20002'), mv('20003'), mv('20004'), mv('20005'), /* 5–9  разлики */
   mv('20006'), mv('20007'),                                         /* 10–11 само документ: undelivered / excess */
   mv('30001'), mv('30001', SH),                                     /* 12–13 друг обект */
-  mv('40001'), mv('50000')                                          /* 14 и двете; 15 нищо */
+  mv('40001'), mv('50000'),                                         /* 14 и двете; 15 нищо */
+  mv('60001')                                                       /* 16 pending + reviewed_at = „✕ Недоставена" */
 ]; };
 const gt = (store, code, status, doc, date, qty, unit) => ({ id: 'gt-' + code + '-' + doc, store_name: store, material_code: code, purchase_doc: doc, doc_date: date, remaining_qty: qty, unit, status });
 const TRANSIT = [
@@ -66,7 +76,10 @@ const TRANSIT = [
   gt(GDN, '10004', 'rejected', '4600122222', '2026-09-02', 2, 'БР'),
   gt(SH, '30001', 'pending', '4600133333', '2026-09-03', 5, 'БР'),
   gt(GDN, '40001', 'sent', '4600144444', '2026-09-10', 1, 'БР'),
-  gt(GDN, '40001', 'pending', '4600144400', '2026-09-05', 3, 'БР')
+  gt(GDN, '40001', 'pending', '4600144400', '2026-09-05', 3, 'БР'),
+  Object.assign(gt(GDN, '60001', 'pending', '4600166666', '2026-09-04', 3, 'БР'), { reviewed_at: '2026-11-04T09:00:00Z' }),
+  /* доставен със стар reviewed_at — пак нищо */
+  Object.assign(gt(GDN, '10003', 'received', '4600111112', '2026-09-01', 1, 'БР'), { reviewed_at: '2026-11-01T09:00:00Z' })
 ];
 let dn = 0;
 const sd = (store, code, dir, status, q, qr, cat, docDate) => ({ id: 'sd-' + (++dn), store_name: store, material_code: code, quantity: q, quantity_received: qr, difference_category: cat || null, status, created_at: '2026-10-1' + (dn % 9) + 'T10:00:00+00:00', differences_reports: { direction: dir, doc_date: docDate || '2026-10-15' } });
@@ -139,12 +152,14 @@ const J = JSON.stringify;
     const db = fakeDb(); const h = env(GD, db); await open(h);
     const gq = db.log.filter(x => x.tbl === 'goods_transit'), dq = db.log.filter(x => x.tbl === 'stock_differences');
     ok('по една заявка към goods_transit и stock_differences', gq.length === 1 && dq.length === 1, gq.length + '/' + dq.length);
-    ok('goods_transit: явен select, pending/sent/rejected (без received), само обекта', /^select=id,store_name,material_code,purchase_doc,doc_date,remaining_qty,unit,status&/.test(gq[0].q) && /status=in\.\(pending,sent,rejected\)/.test(gq[0].q) && /store_name=in\.\("Гоце Делчев"\)/.test(gq[0].q), gq[0].q);
+    ok('goods_transit: явен select, pending/sent/rejected (без received), само обекта', /^select=id,store_name,material_code,purchase_doc,doc_date,remaining_qty,unit,status,reviewed_at&/.test(gq[0].q) && /status=in\.\(pending,sent,rejected\)/.test(gq[0].q) && /store_name=in\.\("Гоце Делчев"\)/.test(gq[0].q), gq[0].q);
     ok('stock_differences: вградена бланка, interstore, ≠ received, само обекта', /differences_reports!inner\(direction,doc_date\)/.test(dq[0].q) && /differences_reports\.direction=eq\.interstore/.test(dq[0].q) && /status=neq\.received/.test(dq[0].q) && /store_name=in\.\("Гоце Делчев"\)/.test(dq[0].q), dq[0].q);
     ok('на път pending → „🚚 На път: 4600186703 от 27.08 · 36,48 M2“', J(chips(h, 'mv-1')) === J(['🚚 На път: 4600186703 от 27.08 · 36,48 M2']), J(chips(h, 'mv-1')));
     ok('на път sent (код с интервали) → чип', J(chips(h, 'mv-2')) === J(['🚚 На път: 4600190503 от 26.09 · 4,32 M2']), J(chips(h, 'mv-2')));
     ok('на път received → нищо', chips(h, 'mv-3').length === 0 && !warn(h, 'mv-3'));
-    ok('rejected („✕ Неприето“) → „🚚 Неприето: 4600122222 от 02.09 · 2 БР“ + надпис', J(chips(h, 'mv-4')) === J(['🚚 Неприето: 4600122222 от 02.09 · 2 БР']) && warn(h, 'mv-4'), J(chips(h, 'mv-4')));
+    ok('стар rejected → „✕ Недоставена: 4600122222 от 02.09 · 2 БР“ + надпис', J(chips(h, 'mv-4')) === J(['✕ Недоставена: 4600122222 от 02.09 · 2 БР']) && warn(h, 'mv-4'), J(chips(h, 'mv-4')));
+    ok('pending + reviewed_at → „✕ Недоставена: 4600166666 от 04.09 · 3 БР“ + надпис', J(chips(h, 'mv-16')) === J(['✕ Недоставена: 4600166666 от 04.09 · 3 БР']) && warn(h, 'mv-16'), J(chips(h, 'mv-16')));
+    ok('„✕ Недоставена“ е с клас mn-ur-undelivered, „На път“ — без', !!row(h, 'mv-16').querySelector('.mn-ur-transit.mn-ur-undelivered') && !row(h, 'mv-1').querySelector('.mn-ur-undelivered'));
     ok('received → нищо (и без надпис)', chips(h, 'mv-3').length === 0 && !warn(h, 'mv-3'));
     ok('interstore липса (10 / 7), отворена → „⚖️ Разлика ЛС от 14.10 · липса 3“', J(chips(h, 'mv-5')) === J(['⚖️ Разлика ЛС от 14.10 · липса 3']), J(chips(h, 'mv-5')));
     ok('interstore received → нищо', chips(h, 'mv-6').length === 0);
@@ -170,7 +185,8 @@ const J = JSON.stringify;
     ok('Excel: на път → „на път: 4600186703“', xv('10001') === 'на път: 4600186703', xv('10001'));
     ok('Excel: разлика → „разлика ЛС“', xv('20001') === 'разлика ЛС', xv('20001'));
     ok('Excel: и двете → „на път: 4600144400, 4600144444; разлика ЛС“', xv('40001') === 'на път: 4600144400, 4600144444; разлика ЛС', xv('40001'));
-    ok('Excel: rejected → „неприето: 4600122222“', xv('10004') === 'неприето: 4600122222', xv('10004'));
+    ok('Excel: стар rejected → „недоставена: 4600122222“', xv('10004') === 'недоставена: 4600122222', xv('10004'));
+    ok('Excel: pending + reviewed_at → „недоставена: 4600166666“', xv('60001') === 'недоставена: 4600166666', xv('60001'));
     ok('Excel: нищо / received → празно', xv('50000') === '' && xv('10003') === '', J([xv('50000'), xv('10003')]));
     h.w.mnPrint();
     const pr = h.doc.getElementById('mod-print');
@@ -195,7 +211,7 @@ const J = JSON.stringify;
     const db = fakeDb(); const h = env(ADMIN, db);
     h.w.mnStore = GDN; await open(h);
     ok('CO: същите чипове при 40001', chips(h, 'mv-14').length === 3 && warn(h, 'mv-14'), J(chips(h, 'mv-14')));
-    ok('CO: rejected → „🚚 Неприето“ + надпис', J(chips(h, 'mv-4')) === J(['🚚 Неприето: 4600122222 от 02.09 · 2 БР']) && warn(h, 'mv-4'), J(chips(h, 'mv-4')));
+    ok('CO: стар rejected → „✕ Недоставена“ + надпис', J(chips(h, 'mv-4')) === J(['✕ Недоставена: 4600122222 от 02.09 · 2 БР']) && warn(h, 'mv-4'), J(chips(h, 'mv-4')));
     ok('CO: received → нищо', chips(h, 'mv-3').length === 0);
     h.w.mnSetStore(h.w.MN_ALL); await ticks(10);
     const gq = db.log.filter(x => x.tbl === 'goods_transit').slice(-1)[0].q;
@@ -209,7 +225,7 @@ const J = JSON.stringify;
     const db = fakeDb({ [which]: true }); const h = env(GD, db); await open(h);
     const e = h.doc.getElementById('mn-ur-err');
     ok(which + ': сив ред „Стоката на път / разликите не се заредиха“', !!e && e.textContent === 'Стоката на път / разликите не се заредиха' && /#94a3b8/.test(e.getAttribute('style')));
-    ok(which + ': Минуси работи — 14 реда (ГД), „Запази“ на място', h.doc.querySelectorAll('#mn-daily tbody tr').length === 14 && !!h.doc.getElementById('mn-reason-mv-1'));
+    ok(which + ': Минуси работи — 15 реда (ГД), „Запази“ на място', h.doc.querySelectorAll('#mn-daily tbody tr').length === 15 && !!h.doc.getElementById('mn-reason-mv-1'));
   }
   {
     const db = fakeDb({ failTransit: true }); const h = env(GD, db); await open(h);

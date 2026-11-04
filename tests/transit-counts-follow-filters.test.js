@@ -61,6 +61,11 @@ DATA.push(row({ store_name: 'Кърджали', supplier: TG, sender_status: 'se
 DATA.push(row({ store_name: 'Шумен', supplier: TG, sender_status: 'sent', status: 'received' }));
 DATA.push(row({ direction: 'transfer', store_name: 'Кърджали', supplier: 'Шумен', recon_at: '2026-11-04T08:00:00Z', recon_by: 'X', recon_side: 'receiver' }));
 DATA.push(row({ store_name: 'Кърджали', supplier: TG, sender_status: 'sent', recon_at: '2026-11-04T09:00:00Z', recon_by: 'Y', recon_side: 'sender' }));
+/* 04.11.2026 (transit-cleanup): „✕ Недоставена" = reviewed_at при pending (и при стар 'sent'). */
+DATA.push(row({ store_name: 'Кърджали', supplier: TG, reviewed_at: '2026-11-04T10:00:00Z', reviewed_by: 'Кърджали' }));
+DATA.push(row({ store_name: 'Шумен', supplier: TG, status: 'sent', reviewed_at: '2026-11-04T10:00:00Z', reviewed_by: 'Шумен' }));
+/* … а received със стар reviewed_at е „Доставена". */
+DATA.push(row({ store_name: 'Шумен', supplier: TG, status: 'received', reviewed_at: '2026-11-01T10:00:00Z' }));
 
 /* Еталон: НЕЗАВИСИМО от transitRows. f={dir,status,store,month,q,wh}
    От 03.11.2026 (етап 2) табовете са 'in' / 'out' спрямо гледната точка:
@@ -84,7 +89,11 @@ function ref(data, f) {
     /* Етап 3 (04.11.2026): получател — по статуса (стар 'sent' = pending); изпращач —
        snone / ssent по sender_status (или стар 'sent'); recon; mine = изпратено,
        получателят pending, гледната точка е получателят. */
-    const rs = (!r.status || r.status === 'sent') ? 'pending' : r.status;
+    /* 04.11.2026 (transit-cleanup): „✕ Недоставена" = reviewed_at при неприет ред
+       или стар 'rejected'. */
+    const rs = r.status === 'received' ? 'received'
+      : (r.status === 'rejected' || r.reviewed_at) ? 'undelivered'
+      : (!r.status || r.status === 'sent' || r.status === 'pending') ? 'pending' : r.status;
     const snt = r.sender_status === 'sent' || r.status === 'sent';
     if (f.status === 'mine') { if (!(vp && snt && rs === 'pending' && r.store_name === vp)) return false; }
     else if (f.status === 'snone') { if (snt) return false; }
@@ -117,7 +126,7 @@ function ui(h) {
   const tabs = {}, stat = {};
   btns.forEach(b => {
     const oc = b.getAttribute('onclick') || '';
-    let m = oc.match(/^transitDir='(\w+)'/);
+    let m = oc.match(/^setTDir\('(\w+)'\)/);
     if (m) tabs[m[1]] = b;
     m = oc.match(/^transitFilter='(\w+)'/);
     if (m) stat[m[1]] = b;
@@ -142,22 +151,26 @@ const TAB_DEF = { all: 'pending', in: 'pending', out: 'snone' };
 function checkAll(h, name, base) {
   const hasVp = !!(base.wh || base.store);
   const CH = {
-    all: ['pending', 'received', 'rejected', 'recon', 'all'],
-    in: ['pending', 'received', 'rejected', 'recon', 'all'].concat(hasVp ? ['mine'] : []),
+    all: ['pending', 'received', 'undelivered', 'recon', 'all'],
+    in: ['pending', 'received', 'undelivered', 'recon', 'all'].concat(hasVp ? ['mine'] : []),
     out: ['snone', 'ssent', 'recon', 'all']
   };
   ['all', 'in', 'out'].forEach(dir => {
     h.w.transitDir = 'all'; h.w.transitFilter = 'pending'; h.w.renderTransit();
     const t = tabNums(ui(h).tabs[dir]);
     clickTab(h, dir);
-    ok(name + ': клик на таб „' + dir + '" → подразбиращият се чип „' + TAB_DEF[dir] + '"', h.w.transitFilter === TAB_DEF[dir], h.w.transitFilter);
+    /* 04.11.2026 (transit-cleanup): „Изпращам" без неизпратени → „Всички". */
+    const nDef = ref(h.w.transitData, Object.assign({}, base, { dir: dir, status: TAB_DEF[dir] }));
+    const want = (dir === 'out' && hasVp && nDef === 0) ? 'all' : TAB_DEF[dir];
+    ok(name + ': клик на таб „' + dir + '" → подразбиращият се чип „' + want + '"', h.w.transitFilter === want, h.w.transitFilter);
     if (dir !== 'all' && !hasVp) {
       ok(name + ': „' + dir + '" без гледна точка — без число', t.length === 0, t.join('/'));
       ok(name + ': … и празна таблица след клик', h.w._transitVisible.length === 0, h.w._transitVisible.length);
       return;
     }
-    ok(name + ': таб „' + dir + '" ' + t[0] + ' = редове след клик (' + trs(h) + ')', t[0] === trs(h));
-    ok(name + ': … и = еталон', t[0] === ref(h.w.transitData, Object.assign({}, base, { dir: dir, status: TAB_DEF[dir] })));
+    ok(name + ': таб „' + dir + '" ' + t[0] + ' = еталон на подразбиращия се чип (' + nDef + ')', t[0] === nDef);
+    ok(name + ': … и таблицата след клик = еталон на „' + want + '" (' + trs(h) + ')',
+      trs(h) === Math.min(200, ref(h.w.transitData, Object.assign({}, base, { dir: dir, status: want }))));
     CH[dir].forEach(k => {
       h.w.transitDir = dir; h.w.transitFilter = TAB_DEF[dir]; h.w.renderTransit();
       const el = ui(h).stat[k];
@@ -186,8 +199,8 @@ const SKLAD = { email: 'ls@temax.bg', display_name: TG, role: 'logistics', store
     const cnt = (f) => DATA.filter(f).length;
     ok('Всички (статус) = всички редове', num(u.stat.all) === DATA.length, num(u.stat.all) + ' vs ' + DATA.length);
     /* Етап 3: чиповете на „Всички" са по статуса на ПОЛУЧАТЕЛЯ (стар 'sent' = pending) + засечка. */
-    const rsOf = r => (!r.status || r.status === 'sent') ? 'pending' : r.status;
-    ['pending', 'received', 'rejected'].forEach(k =>
+    const rsOf = r => r.status === 'received' ? 'received' : (r.status === 'rejected' || r.reviewed_at) ? 'undelivered' : 'pending';
+    ['pending', 'received', 'undelivered'].forEach(k =>
       ok('статус на получателя ' + k + ' = брой', num(u.stat[k]) === cnt(r => rsOf(r) === k), num(u.stat[k])));
     ok('„🔍 Чака засечка" = редовете с recon_at (2)', num(u.stat.recon) === 2, num(u.stat.recon));
     ok('чип „sent" го няма', !u.stat.sent);

@@ -171,6 +171,7 @@ const TESTS = [
   'transit-tabs-role.test.js',
   'transit-speed.test.js',
   'transit-status-split.test.js',
+  'transit-cleanup.test.js',
   'transit-export-labels.test.js',
   'loading-lists-print.test.js',
   'stock-diff-capitalized-counter.test.js',
