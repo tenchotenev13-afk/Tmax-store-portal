@@ -7,5 +7,8 @@
 - Пробно прилагане в транзакция с rollback (като anon в същата транзакция): checklist_portal_values(2026,45) — md5 4046e5e2… и 162 реда преди и след; report_excluded_stores — еднакъв списък; report_cron_schedule — 5 реда; transit като anon → `42501 permission denied for function transit_mark_empty_stores`. След rollback ACL-ите и prosecdef — както преди.
 - Тест: нов jsdom тест няма — промяната е само в базата.
 - Огледалото: ред в `zhivko-opashka.md` НЕ се пише — функциите не влизат в огледалото.
-- Миграция: още НЕ е приложена (след push). Версия: —.
+- Миграция: `definer_functions_anon`, версия 20261104115617 (04.11 11:56 UTC, след push на 3e85a21); приложеният SQL = двата реда от файла (MD5 0befafa40a948822334f45e844e7caff). След нея: ACL на transit `{postgres=X/postgres,service_role=X/postgres}`; report_excluded_stores — prosecdef=false, search_path=public; report_cron_schedule — непроменена.
+- curl с anon: POST rpc/transit_mark_empty_stores → 401 `{"code":"42501","details":null,"hint":null,"message":"permission denied for function transit_mark_empty_stores"}`; report_cron_schedule → 200, отговорът байт в байт = референтния; report_excluded_stores → 200, = референтния; checklist_portal_values 2026/45 и 46 → 200, 162 реда, същите обекти и показатели, но 8 / 4 сменени стойности (напредък на обектите през деня — Раднево stoka_vrashtane 10/14 → 14/14 и др.). Доказателство, че разликата не е от миграцията: в една транзакция като anon INVOKER и временно върнат DEFINER дават еднакъв md5 (w45 30150f0b…, w46 b191af2a…, по 162 реда), rollback.
+- cron job 22 след миграцията: 12:00:00 UTC — succeeded, „1 row“ (като postgres).
+- Advisor `anon_security_definer_function_executable` и `authenticated_…`: само report_cron_schedule.
 - SHA е комитът, който добавя този файл.

@@ -1104,8 +1104,9 @@ Default privileges (04.11): нова таблица в `public` — без DELET
 SECURITY DEFINER за anon (04.11): `transit_mark_empty_stores` — revoke
 execute от public/anon/authenticated; `report_excluded_stores` — INVOKER;
 `report_cron_schedule` остава (admin.js) до етап 2
-(`definer-functions-anon-schema.sql`, номер на миграцията — след
-прилагането). **Етап 1 от сигурността е приключен.**
+(`definer-functions-anon-schema.sql`, миграция `20261104115617`,
+приложена 04.11; curl с anon към transit → 401/42501; Advisor — само
+`report_cron_schedule`). **Етап 1 от сигурността е приключен.**
 За етап 2: при преминаване на портала към роля authenticated — `app_settings`
 трябва да получи SELECT политика за authenticated (сега
 `app_settings_anon_select_all` е само за anon), иначе `report_excluded_stores`
