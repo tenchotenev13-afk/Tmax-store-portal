@@ -1259,7 +1259,8 @@ function transitParseVdRows(rows){
 }
 
 /* Сдвояване по Документ за покупка + Материал. Ред от файл 1 без двойка — без
-   ВД, не влиза (за всички посоки). Ред от файл 2 без двойка — „само във файл
+   ВД; от 04.11.2026 такъв ред СПИРА целия импорт (transitImportPrepare),
+   дотогава се пропускаше. Ред от файл 2 без двойка — „само във файл
    2", не влиза. При повтарящ се ключ двойките вървят по реда във файловете. */
 function transitMatchVd(parsed,vd){
   var byKey={};
@@ -1310,6 +1311,20 @@ function transitImportPrepare(){
     return Promise.resolve(null);
   }
 
+  /* Ред от „Стока на път“ без входяща доставка спира ЦЕЛИЯ импорт (решение
+     от 04.11.2026, Тенчо с Миглена и Цвети; дотогава такъв ред се пропускаше).
+     Нищо не се чете и не се пише — нито частично, нито архив. Прегледът
+     показва редовете, за да се добави ВД в SAP и двата файла да се качат
+     наново. Редовете само във файл 2 НЕ спират — те са за сведение. */
+  if(m.skipped.length){
+    _transitImportPlan={
+      f1Total:f1Total, recognized:parsed.length, rows:m.rows, skipped:m.skipped, only2:m.only2,
+      newRows:[], updRows:[], revived:0, archiveIds:[], blocked:true
+    };
+    renderTransitImportPreview(_transitImportPlan);
+    return Promise.resolve(_transitImportPlan);
+  }
+
   toast('⏳ Сверка със записаните редове...');
   /* Само редовете с ВД — ръчните (inbound_delivery = null) импортът не пипа.
      На страници: PostgREST реже на 1000. */
@@ -1338,6 +1353,33 @@ function transitImportPrepare(){
   });
 }
 
+/* Редовете без входяща доставка — едни и същи колони в прегледа и в Excel. */
+var TRANSIT_SKIP_COLS=['Обект','Доставчик','Документ за покупка','Позиция','Материал','Описание','Недоставено','Дата'];
+function transitSkipRow(r){
+  var q=r.remaining_qty!=null?r.remaining_qty:(r.ordered_qty!=null?r.ordered_qty:'');
+  return [r.store_name||'',r.supplier||'',r.purchase_doc||'',r.position!=null?String(r.position):'',
+    r.material_code||'',r.material_name||'',(q===''?'':String(q)+(r.unit?' '+r.unit:'')),r.doc_date?fmtDate(r.doc_date):''];
+}
+/* „📊 Свали списъка" — същите колони като таблицата в прегледа. */
+function transitExportSkipped(){
+  var plan=_transitImportPlan;
+  if(!plan||!plan.skipped||!plan.skipped.length){ toast('Няма редове без входяща доставка','#64748b'); return; }
+  if(!window.XLSX){
+    var s=document.createElement('script');
+    s.src='https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js';
+    s.onload=transitExportSkipped;
+    s.onerror=function(){toast('Грешка при зареждане на SheetJS','#dc2626');};
+    document.head.appendChild(s);return;
+  }
+  var aoa=[TRANSIT_SKIP_COLS.slice()].concat(plan.skipped.map(transitSkipRow));
+  var wb=window.XLSX.utils.book_new();
+  var ws=window.XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols']=[{wch:22},{wch:24},{wch:14},{wch:8},{wch:10},{wch:40},{wch:12},{wch:12}];
+  window.XLSX.utils.book_append_sheet(wb,ws,'Без входяща доставка');
+  window.XLSX.writeFile(wb,'ТеМАХ_Стока_на_път_без_ВД_'+today()+'.xlsx');
+  toast('✅ Списъкът е изтеглен ('+plan.skipped.length+' реда)');
+}
+
 function renderTransitImportPreview(plan){
   var old=document.getElementById('transit-import-ov');
   if(old&&old.remove)old.remove();
@@ -1352,11 +1394,10 @@ function renderTransitImportPreview(plan){
   var incoming=rows.filter(function(r){return r.dir==='incoming';});
   var transfer=rows.filter(function(r){return r.dir==='transfer';});
   var outgoing=rows.filter(function(r){return r.dir==='outgoing';});
-  /* Пропуснатите без ВД — по обект (получател), всички посоки заедно. */
-  var skip={};
-  plan.skipped.forEach(function(r){ skip[r.store_name]=(skip[r.store_name]||0)+1; });
-  var skipList=Object.keys(skip).sort(function(a,b){return a.localeCompare(b,'bg');});
+  var blocked=!!plan.blocked;
   var dropped=plan.f1Total-plan.recognized;
+  var TH='text-align:left;padding:5px 8px;font-size:10px;font-weight:700;text-transform:uppercase;color:#991b1b;border-bottom:1px solid #fecaca;white-space:nowrap;';
+  var TD='padding:4px 8px;border-bottom:1px solid #fff1f2;vertical-align:top;';
   function stat(id,label,n,color){
     return '<div id="'+id+'" style="display:flex;justify-content:space-between;gap:10px;padding:3px 0;"><span>'+label+'</span><b style="color:'+(color||'#0f172a')+';">'+n+'</b></div>';
   }
@@ -1372,25 +1413,37 @@ function renderTransitImportPreview(plan){
       stat('t-imp-f1','Редове във файл 1',plan.f1Total)+
       (dropped>0?stat('t-imp-drop','  без познат завод / материал',dropped,'#64748b'):'')+
       stat('t-imp-vd','С ВД — за запис',plan.rows.length,'#16a34a')+
-      stat('t-imp-skip','Без ВД — пропускат се',plan.skipped.length,plan.skipped.length?'#dc2626':'#16a34a')+
-      stat('t-imp-only2','Само във файл 2 — пропускат се',plan.only2.length,plan.only2.length?'#d97706':'#16a34a')+
+      stat('t-imp-skip','Без ВД — спират импорта',plan.skipped.length,plan.skipped.length?'#dc2626':'#16a34a')+
+      stat('t-imp-only2','Само във файл 2 — за сведение',plan.only2.length,plan.only2.length?'#d97706':'#16a34a')+
       '</div><div>'+
+      /* При спрян импорт записаните редове не се четат — нови / обновени /
+         архив не се знаят и не се показват. */
+      (blocked?'<div style="color:#991b1b;font-weight:600;padding:3px 0;">Нищо не се записва.</div>':
       stat('t-imp-new','Нови',plan.newRows.length,'#16a34a')+
       stat('t-imp-upd','Обновяват се',plan.updRows.length,'#2563eb')+
       (plan.revived?stat('t-imp-revived','  от тях излизат от архива',plan.revived,'#64748b'):'')+
-      stat('t-imp-arch','Отиват в архив',plan.archiveIds.length,plan.archiveIds.length?'#d97706':'#16a34a')+
+      stat('t-imp-arch','Отиват в архив',plan.archiveIds.length,plan.archiveIds.length?'#d97706':'#16a34a'))+
       '</div>'+
     '</div>'+
 
-    (skipList.length?
+    (blocked?
+    '<div id="t-imp-blocked" style="background:#fef2f2;border:1.5px solid #dc2626;border-radius:8px;padding:10px 14px;margin-bottom:10px;font-size:13px;color:#991b1b;font-weight:600;">'+
+      'Импортът е спрян: '+plan.skipped.length+' '+(plan.skipped.length===1?'ред':'реда')+' без входяща доставка. Добавете ВД в SAP и качете двата файла наново.'+
+    '</div>'+
     '<div style="margin-bottom:14px;">'+
-    '<div style="font-size:12px;font-weight:700;color:#dc2626;margin-bottom:8px;">⛔ БЕЗ ВД (не влизат) — по обект</div>'+
-    '<div id="t-imp-skip-stores" style="max-height:120px;overflow-y:auto;border:1px solid #fecaca;border-radius:8px;">'+
-    '<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
-    skipList.map(function(s){
-      return '<tr style="border-bottom:1px solid #fff1f2;"><td style="padding:5px 10px;font-weight:500;">'+esc(s)+'</td><td style="padding:5px 10px;text-align:right;color:#dc2626;font-weight:600;">'+skip[s]+'</td></tr>';
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">'+
+      '<div style="font-size:12px;font-weight:700;color:#dc2626;">⛔ РЕДОВЕ БЕЗ ВХОДЯЩА ДОСТАВКА</div>'+
+      '<button id="t-imp-skip-xls" onclick="transitExportSkipped()" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:8px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer;">📊 Свали списъка</button>'+
+    '</div>'+
+    '<div style="max-height:220px;overflow:auto;border:1px solid #fecaca;border-radius:8px;">'+
+    '<table id="t-imp-skip-list" style="width:100%;border-collapse:collapse;font-size:11.5px;">'+
+    '<thead><tr>'+TRANSIT_SKIP_COLS.map(function(c){return '<th style="'+TH+'">'+c+'</th>';}).join('')+'</tr></thead><tbody>'+
+    plan.skipped.map(function(r){
+      return '<tr>'+transitSkipRow(r).map(function(v,i){
+        return '<td style="'+TD+(i===5?'':'white-space:nowrap;')+'">'+esc(v)+'</td>';
+      }).join('')+'</tr>';
     }).join('')+
-    '</table></div></div>':'')+
+    '</tbody></table></div></div>':'')+
 
     /* Трансфери между магазини — най-важно да се провери преди импорт */
     '<div style="margin-bottom:14px;">'+
@@ -1424,9 +1477,14 @@ function renderTransitImportPreview(plan){
     '</table></div></div>'+
     '</div>'+
 
+    /* Спрян импорт: бутонът остава видим, но неактивен, с обяснение защо
+       (правило 11 — бутонът не изчезва според данните). */
+    (blocked?'<div id="t-imp-go-why" style="font-size:12px;color:#991b1b;text-align:right;margin-bottom:6px;">Импортът е неактивен: има редове без входяща доставка (списъкът горе).</div>':'')+
     '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
       '<button onclick="closeTransitImport()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 18px;font-size:13px;cursor:pointer;">Откажи</button>'+
-      '<button onclick="confirmTransitImport()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;">✅ Импортирай '+plan.rows.length+' реда</button>'+
+      (blocked?
+      '<button id="t-imp-go" disabled title="Има редове без входяща доставка — добавете ВД в SAP и качете двата файла наново" style="border:none;background:#94a3b8;color:#fff;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:not-allowed;opacity:.7;">✅ Импортирай '+plan.rows.length+' реда</button>':
+      '<button id="t-imp-go" onclick="confirmTransitImport()" style="border:none;background:#16a34a;color:#fff;border-radius:8px;padding:8px 20px;font-size:13px;font-weight:600;cursor:pointer;">✅ Импортирай '+plan.rows.length+' реда</button>')+
     '</div>'+
     '</div></div>';
 
@@ -1467,6 +1525,11 @@ function transitImportBody(r,isNew,who,at){
    upsert-ът по същия ключ просто обновява. */
 function confirmTransitImport(){
   var plan=_transitImportPlan;
+  /* Втора защита: спрян план не пише нищо, дори ако бутонът се извика отвън. */
+  if(plan&&plan.blocked){
+    toast('Импортът е спрян: '+plan.skipped.length+' реда без входяща доставка. Добавете ВД в SAP и качете двата файла наново.','#dc2626');
+    return Promise.resolve();
+  }
   if(!plan||!plan.rows.length){toast('Няма редове за импорт','#dc2626');return Promise.resolve();}
   var who=currentUser.display_name||currentUser.email, at=new Date().toISOString();
   var batches=[],i;

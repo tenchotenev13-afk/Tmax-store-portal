@@ -6,8 +6,12 @@
    transit.js, зареден в реда от index.html, и натиска истинските бутони.
 
    Проверки:
-     а) ред без ВД не влиза; ред само във файл 2 не влиза; броят в прегледа
-        съвпада с POST тялото;
+     а) от 04.11.2026 ред без ВД СПИРА целия импорт (дотогава се пропускаше):
+        червен блок, таблица с редовете, „📊 Свали списъка" (Excel със същите
+        колони), „Импортирай" е <button disabled> с обяснение; НИТО ЕДНА
+        пишеща заявка (и не се чете за сверка), и при извикване отвън;
+     а2) без ред без ВД — импортът минава както досега; ред само във файл 2
+        не влиза и не спира; броят в прегледа съвпада с POST тялото;
      б) ИД без водещи нули; delivery_qty от файл 2; position от файл 1,
         delivery_position от файл 2;
      в) втори импорт: ред 'received' с коментар ги пази и обновява
@@ -24,6 +28,7 @@
    Мутационна проверка (03.11.2026, всеки вариант върху чист transit.js;
    чистият код — exit 0 преди кръга). И петте падат (exit 1):
      1. без филтъра за ВД (редовете без двойка влизат)       → ❌ а), в)
+        (03.11; от 04.11 същото го хваща и B1)
      2. архивиране и при провалена партида                    → ❌ г)
      3. ИД с водещите нули (без transitStripZeros при разбора) → ❌ б)
         (д) остава зелена: търсенето реже нулите и от двете страни)
@@ -31,6 +36,12 @@
      5. архивът в transitData (без transitSplitArchive)       → ❌ е)
      6. imported_at само за новите редове (не при обновяване)  → ❌ в)
      7. imported_at изобщо не се праща                        → ❌ в)
+   Спирането при ред без ВД (04.11.2026), всеки върху чист transit.js:
+     B1 импорт въпреки ред без ВД (без проверката в transitImportPrepare) → ❌ а)
+     B2 частичен запис преди проверката (confirm в спрения клон)  → ❌ а)
+        (вкл. „НЯМА нито една пишеща заявка")
+     B3 бутонът изчезва вместо да е неактивен                     → ❌ а)
+     B4 без втората защита в confirmTransitImport                 → ❌ а)
    Прозорецът по imported_at в Бюлетина (bulletin.js) е заключен в
    task-span-weeks.test.js (раздел 13); мутант 8 — '&created_at=gte.' там
    → ❌. Функциите в базата — tests/sql/transit-*.test.sql (след миграцията).
@@ -75,6 +86,9 @@ const F1 = [HEAD1,
   r1('5520', '5518 5518 Логистичен склад Добрич', 'D2', 10, 'M3', 4),
   r1('6512', '6516 Добрич', 'D3', 10, 'M4', 3)
 ];
+/* Същият файл без реда без ВД (D2) — от 04.11.2026 ред без ВД спира импорта,
+   затова секциите, които проверяват записа, тръгват от този. */
+const F1_OK = F1.filter(r => r[3] !== 'D2');
 /* Файл 2: позициите в ДОСТАВКАТА са различни от тези в поръчката.
    180000009 / M9 / D9 го няма във файл 1. */
 function F2(q1) {
@@ -128,25 +142,64 @@ const num = (h, id) => {
   const el = h.doc.querySelector('#' + id + ' b');
   return el ? Number(el.textContent) : NaN;
 };
+const txtOf = el => (el && el.textContent || '').replace(/\s+/g, ' ').trim();
 const upserts = h => h.calls.post.filter(p => /goods_transit\?on_conflict=inbound_delivery,delivery_position/.test(p.url));
 const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' && p.body && 'archived_at' in p.body);
 
 (async function run() {
 
-  section('а) Без ВД не влиза; само във файл 2 не влиза; прегледът = записът');
+  section('а) Ред без ВД СПИРА импорта (решение 04.11.2026): нищо не се записва');
   {
     const h = env();
     await runImport(h, F1, F2());
     const ov = h.doc.getElementById('transit-import-ov');
     ok('прегледът се отваря', !!ov && /преглед/.test(ov.textContent));
-    ok('редове във файл 1 = 4', num(h, 't-imp-f1') === 4, num(h, 't-imp-f1'));
-    ok('с ВД за запис = 3', num(h, 't-imp-vd') === 3, num(h, 't-imp-vd'));
+    const bl = h.doc.getElementById('t-imp-blocked');
+    ok('червеният блок с точния текст', !!bl && txtOf(bl) === 'Импортът е спрян: 1 ред без входяща доставка. Добавете ВД в SAP и качете двата файла наново.', bl && txtOf(bl));
     ok('без ВД = 1', num(h, 't-imp-skip') === 1, num(h, 't-imp-skip'));
-    ok('само във файл 2 = 1', num(h, 't-imp-only2') === 1, num(h, 't-imp-only2'));
+    ok('само във файл 2 = 1 (за сведение, не спира)', num(h, 't-imp-only2') === 1, num(h, 't-imp-only2'));
+    const tbl = h.doc.getElementById('t-imp-skip-list');
+    const heads = tbl ? Array.from(tbl.querySelectorAll('th')).map(txtOf) : [];
+    ok('таблицата с колоните', heads.join('|') === 'Обект|Доставчик|Документ за покупка|Позиция|Материал|Описание|Недоставено|Дата', heads.join('|'));
+    const cells = tbl ? Array.from(tbl.querySelectorAll('tbody tr')).map(tr => Array.from(tr.cells).map(txtOf)) : [];
+    ok('един ред: Силистра, склад Добрич, D2, 10, M3, описание, 4 БР, 14.10.2026',
+      cells.length === 1 && cells[0].join('|') === 'Силистра|Логистичен склад Добрич|D2|10|M3|Материал M3|4 БР|14.10.2026', JSON.stringify(cells));
+    const go = h.doc.getElementById('t-imp-go');
+    ok('бутонът „Импортирай" е видим <button disabled>', !!go && go.tagName === 'BUTTON' && go.disabled === true && /Импортирай/.test(go.textContent),
+      go && go.outerHTML.slice(0, 120));
+    ok('… без onclick', !!go && !go.getAttribute('onclick'));
+    ok('обяснението защо', /Импортът е неактивен: има редове без входяща доставка/.test(txtOf(h.doc.getElementById('t-imp-go-why'))));
+    /* Опит за импорт отвън (втората защита) — нищо не тръгва. */
+    await h.w.confirmTransitImport();
+    for (let i = 0; i < 20; i++) await ticks(3);
+    ok('НЯМА нито една пишеща заявка (POST/PATCH/DELETE)', h.seq.length === 0, h.seq.join(' | '));
+    ok('… и не е четено от базата за сверка', !h.calls.get.some(u => /goods_transit/.test(u)), h.calls.get.join(' | '));
+    ok('червен toast при опит', h.toasts.some(x => /Импортът е спрян/.test(x.m) && x.c === '#dc2626'), h.toasts.map(x => x.m).join(' | '));
+    /* „📊 Свали списъка" — Excel със същите колони. */
+    let aoa = null, fname = '';
+    h.w.XLSX = { utils: { book_new: () => ({}), aoa_to_sheet: a => { aoa = a; return {}; }, book_append_sheet: () => {} }, writeFile: (wb, f) => { fname = f; } };
+    const xb = h.doc.getElementById('t-imp-skip-xls');
+    if (ok('бутонът „📊 Свали списъка" е там', !!xb && /Свали списъка/.test(xb.textContent))) {
+      realClick(h.w, xb, 'Свали списъка');
+      ok('Excel със същите колони и реда', !!aoa && aoa[0].join('|') === heads.join('|') && aoa.length === 2 && aoa[1].join('|') === cells[0].join('|'), JSON.stringify(aoa));
+      ok('… и с име на файл', /без_ВД/.test(fname), fname);
+    }
+  }
+
+  section('а2) Файлове без ред без ВД — импортът минава както досега');
+  {
+    const h = env();
+    await runImport(h, F1_OK, F2());
+    const ov = h.doc.getElementById('transit-import-ov');
+    ok('без червен блок', !h.doc.getElementById('t-imp-blocked'));
+    ok('редове във файл 1 = 3', num(h, 't-imp-f1') === 3, num(h, 't-imp-f1'));
+    ok('с ВД за запис = 3', num(h, 't-imp-vd') === 3, num(h, 't-imp-vd'));
+    ok('без ВД = 0', num(h, 't-imp-skip') === 0, num(h, 't-imp-skip'));
+    ok('само във файл 2 = 1 — не спира', num(h, 't-imp-only2') === 1, num(h, 't-imp-only2'));
     ok('нови = 3, обновяват се = 0, в архив = 0',
       num(h, 't-imp-new') === 3 && num(h, 't-imp-upd') === 0 && num(h, 't-imp-arch') === 0);
-    const sk = h.doc.getElementById('t-imp-skip-stores');
-    ok('пропуснатите без ВД са по обект (Силистра 1)', !!sk && /Силистра\s*1/.test(sk.textContent), sk && sk.textContent);
+    const go = h.doc.getElementById('t-imp-go');
+    ok('бутонът е активен', !!go && go.disabled === false && !!go.getAttribute('onclick'));
     ok('бутонът казва 3 реда', !!btn(ov, 'Импортирай 3 реда'));
     await clickImport(h);
     const body = [].concat.apply([], upserts(h).map(p => p.body));
@@ -163,7 +216,7 @@ const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' &
   section('б) ИД без нули; delivery_qty от файл 2; position от 1, delivery_position от 2');
   {
     const h = env();
-    await runImport(h, F1, F2());
+    await runImport(h, F1_OK, F2());
     await clickImport(h);
     const body = [].concat.apply([], upserts(h).map(p => p.body));
     const m1 = body.filter(b => b.material_code === 'M1')[0] || {};
@@ -198,7 +251,7 @@ const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' &
         status: 'pending', store_name: 'Търговище', direction: 'incoming' }
     ];
     const h = env({ existing });
-    await runImport(h, F1, F2(6));
+    await runImport(h, F1_OK, F2(6));
     ok('нови = 1 (M2 / 900002)', num(h, 't-imp-new') === 1, num(h, 't-imp-new'));
     ok('обновяват се = 2 (e1, e4)', num(h, 't-imp-upd') === 2, num(h, 't-imp-upd'));
     ok('от тях излизат от архива = 1', num(h, 't-imp-revived') === 1, num(h, 't-imp-revived'));
@@ -241,7 +294,7 @@ const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' &
       { id: 'g2', inbound_delivery: '180000005', delivery_position: '10', archived_at: null, status: 'pending', store_name: 'Търговище' }
     ];
     const h = env({ existing, fail: { POST: /goods_transit/ } });
-    await runImport(h, F1, F2());
+    await runImport(h, F1_OK, F2());
     ok('прегледът обещава 1 за архив', num(h, 't-imp-arch') === 1);
     await clickImport(h);
     ok('опитът за запис е направен', upserts(h).length >= 1);
