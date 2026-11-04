@@ -21,6 +21,12 @@
   // 1 = понеделник … 7 = неделя (WEEKDAY(…,2) в Excel)
   function dow(s) { var w = new Date(toUtc(s)).getUTCDay(); return w === 0 ? 7 : w; }
   E.dow = dow;
+  // „08:00“ / „08:00:00“ → минути от полунощ; празно → null.
+  E.toMin = function (t) {
+    if (!t || typeof t !== 'string') return null;
+    var m = t.match(/^(\d{1,2}):(\d{2})/);
+    return m ? +m[1] * 60 + +m[2] : null;
+  };
 
   // Православен Великден — формулата от Настройки!E2 (юлиански + 13 дни, 1900–2099).
   E.orthodoxEaster = function (y) {
@@ -96,7 +102,10 @@
       if (r.hours_per_day === null || r.hours_per_day === undefined) map[r.letter + '|' + r.day_kind] = r.code;
       else (byHpd[String(+r.hours_per_day)] = byHpd[String(+r.hours_per_day)] || {})[r.letter + '|' + r.day_kind] = r.code;
     });
-    (setup.codes || []).forEach(function (c) { codes[c.code] = { hours: c.hours === null || c.hours === undefined ? null : +c.hours, kind: c.kind || 'work' }; });
+    (setup.codes || []).forEach(function (c) {
+      codes[c.code] = { hours: c.hours === null || c.hours === undefined ? null : +c.hours, kind: c.kind || 'work',
+        start: E.toMin(c.start_time), end: E.toMin(c.end_time) };
+    });
     var season = setup.season;
     var full = map['ЛД|' + season] || null;            // пълна дневна смяна за сезона
     var first = map['П|' + season] || null;            // първа смяна 8 ч.
@@ -264,33 +273,86 @@
 
   /* ── Почивки и седмични часове (ВТР чл. 19, от 01.11.2026; ТЦД 3 / ТЦД 4 / Темакс Юг) ──
      смяна до 12 ч.; работна седмица до 56 ч.; междудневна почивка ≥ 12 ч.; междуседмична ≥ 36 ч.
-     В grafik_vtr_codes НЯМА начало/край на смяната (само часове и текст на легендата), затова
-     12-те и 36-те часа НЕ се смятат по часовник. Седмичната почивка се проверява по дни:
-     7 поредни работни дни = няма свободен ден = няма 36 ч. почивка. Отсъствия (О, Б, Н) и
-     празен ден = почивка. „Свободните часове“ 1–12 са работен ден с тези часове. */
+     От 04.11.2026 кодовете имат начало/край (grafik_vtr_codes.start_time / end_time — рамката
+     на смяната; hours са нетните часове и не се сверяват с нея). По часовник:
+       - междудневна почивка: от края на смяната до началото на следващата, ≥ 12 ч.;
+       - междуседмична: във всеки 7 поредни дни поне една непрекъсната почивка ≥ 36 ч.
+     Ден без часове (свободни часове 1–12, „К“, отпаднал код) → за 7-те дни, които го съдържат,
+     остава проверката по дни (7 поредни работни дни = няма 36 ч.), а 12-те часа не се смятат.
+     Отсъствия (О, Б, Н) и празен ден = почивка. „Свободните часове“ са работен ден с тези часове. */
   function dayInfo(P, code, letter) {
     var hrs = E.codeHours(P, code) + (E.isHours(letter) ? +letter : 0);
     var k = code ? P.codes[code] : null;
     var worked = !!(k && k.kind !== 'absence') || E.isHours(letter);
-    return { worked: worked, hours: hrs, shift: E.codeHours(P, code) };
+    var timed = worked && !E.isHours(letter) && !!k && k.start !== null && k.end !== null && k.end > k.start;
+    return { worked: worked, hours: hrs, shift: E.codeHours(P, code), start: timed ? k.start : null, end: timed ? k.end : null };
   }
+  function hm(min) { var m = ((min % 1440) + 1440) % 1440; return pad(Math.floor(m / 60)) + ':' + pad(m % 60); }
+  function hrsTxt(min) { return String(Math.round(min / 30) / 2).replace('.', ','); }
   function ddmm(s) { return s.slice(8, 10) + '.' + s.slice(5, 7); }
   // days: [{date, worked, hours, shift, own}] — own = денят е от текущия месец.
   // known: дали дните преди месеца са известни (иначе първата седмица е „непълна“).
   E.restWarnings = function (days, M, knownBefore) {
-    var warn = [], i, first = null;
+    var warn = [], i, first = null;   // first — индексът на първия ден от месеца в days
     for (i = 0; i < days.length; i++) if (days[i].own) { first = i; break; }
-    // 1) Поредни работни дни (≥ 7) — веднъж на поредица, ако поне 7-ият ден е в месеца.
-    var run = 0, runStart = 0;
-    for (i = 0; i <= days.length; i++) {
-      var w = i < days.length && days[i].worked;
-      if (w) { if (!run) runStart = i; run++; continue; }
-      if (run >= 7 && runStart + 6 >= first) {
-        var dayIn = Math.max(runStart, first);
-        warn.push({ day: +days[dayIn].date.slice(8, 10), type: 'no_weekly_rest',
-          text: run + ' поредни работни дни (' + ddmm(days[runStart].date) + '–' + ddmm(days[i - 1].date) + ') — няма 36 ч. седмична почивка' });
+    // 1а) Междудневна почивка ≥ 12 ч. — между две смени в поредни дни, и двете с часове.
+    for (i = 0; i + 1 < days.length; i++) {
+      var a = days[i], b = days[i + 1];
+      if (!b.own || !a.worked || !b.worked || a.start === null || b.start === null) continue;
+      var gap = 1440 + b.start - a.end;
+      if (gap < 12 * 60) warn.push({ day: +b.date.slice(8, 10), type: 'daily_rest',
+        text: 'почивка ' + hrsTxt(gap) + ' ч. между смените (' + ddmm(a.date) + ' ' + hm(a.end) + ' → ' + ddmm(b.date) + ' ' + hm(b.start) + ') — под 12 ч.' });
+    }
+    // 1б) Междуседмична почивка ≥ 36 ч. във всеки 7 поредни дни. Заетото време: смените с часове
+    //     точно, работен ден без часове — цял ден. Почивка = празнина между заетите отрязъци;
+    //     празнината преди първата / след последната известна смяна е неограничена.
+    //     Почивката „принадлежи“ на 7-те дни, ако е ≥ 36 ч. И поне 24 ч. от нея (цяло денонощие)
+    //     са в тези 7 дни. Само „застъпва“ е малко: 7 работни дни пон–нед минаваха, защото
+    //     почивката до 08:00 в понеделник застъпва прозореца с 8 ч. „Изцяло вътре“ е много:
+    //     „6 дни + свободна неделя“ (Сб 19:30 → Пн 08:00) се реже в края на седмицата и гърми
+    //     фалшиво. При смени 08:00–20:00 правилото съвпада със „свободен ден на всеки 7“.
+    var busy = [];
+    days.forEach(function (x, k) {
+      if (!x.worked) return;
+      if (x.start !== null) busy.push([k * 1440 + x.start, k * 1440 + x.end]);
+      else busy.push([k * 1440, (k + 1) * 1440]);
+    });
+    var gaps = [], prevEnd = -Infinity;
+    busy.forEach(function (bz) { gaps.push([prevEnd, bz[0]]); prevEnd = bz[1]; });
+    gaps.push([prevEnd, Infinity]);
+    var bad = [];                                   // [начален ден на прозореца, режим, най-дългата почивка]
+    for (var w = 0; first !== null && w + 7 <= days.length; w++) {
+      if (w + 6 < first) continue;                  // прозорецът трябва да докосва месеца
+      var win = days.slice(w, w + 7);
+      var untimed = win.some(function (x) { return x.worked && x.start === null; });
+      if (untimed) {
+        if (win.every(function (x) { return x.worked; })) bad.push([w, 'day', 0]);
+        continue;
       }
-      run = 0;
+      var ws = w * 1440, we = (w + 7) * 1440, best = 0;
+      var okRest = false;
+      gaps.forEach(function (g) {
+        var inside = Math.min(g[1], we) - Math.max(g[0], ws);
+        if (inside <= 0) return;
+        var len = g[1] - g[0];
+        if (isFinite(len)) best = Math.max(best, len);
+        if (len >= 36 * 60 && inside >= 24 * 60) okRest = true;
+      });
+      if (!okRest) bad.push([w, 'clock', best]);
+    }
+    // Съседните прозорци със същия режим → едно предупреждение за целия отрязък.
+    for (i = 0; i < bad.length; i++) {
+      var j = i;
+      while (j + 1 < bad.length && bad[j + 1][0] === bad[j][0] + 1 && bad[j + 1][1] === bad[i][1]) j++;
+      var from = bad[i][0], to = bad[j][0] + 6, dIn = Math.max(from, first), txt;
+      if (bad[i][1] === 'day') txt = (to - from + 1) + ' поредни работни дни (' + ddmm(days[from].date) + '–' + ddmm(days[to].date) + ') — няма 36 ч. седмична почивка';
+      else {
+        var longest = Infinity;
+        for (var q = i; q <= j; q++) longest = Math.min(longest, bad[q][2]);
+        txt = 'няма непрекъсната почивка ≥ 36 ч. в 7 поредни дни (' + ddmm(days[from].date) + '–' + ddmm(days[to].date) + ') — най-дългата е ' + hrsTxt(longest) + ' ч.';
+      }
+      warn.push({ day: +days[dIn].date.slice(8, 10), type: 'no_weekly_rest', text: txt });
+      i = j;
     }
     // 2) Календарни седмици пон–нед, които докосват месеца.
     var byDate = {};
@@ -343,12 +405,12 @@
         var px = E.computeRow(PP, PM, r.staff, pr.letters, pr.locked);
         for (var p = 0; p < PM.days; p++) {
           var pi = dayInfo(PP, px.codes[p], (pr.letters || [])[p] || '');
-          days.push({ date: PM.dates[p], worked: pi.worked, hours: pi.hours, shift: pi.shift, own: false });
+          days.push({ date: PM.dates[p], worked: pi.worked, hours: pi.hours, shift: pi.shift, start: pi.start, end: pi.end, own: false });
         }
       }
       for (var d = 0; d < M.days; d++) {
         var di = dayInfo(P, x.codes[d], (r.letters || [])[d] || '');
-        days.push({ date: M.dates[d], worked: di.worked, hours: di.hours, shift: di.shift, own: true });
+        days.push({ date: M.dates[d], worked: di.worked, hours: di.hours, shift: di.shift, start: di.start, end: di.end, own: true });
       }
       E.restWarnings(days, M, !!PP).forEach(function (w) { x.warnings.push(w); });
       x.warnings.sort(function (a, b) { return a.day - b.day; });

@@ -14,6 +14,10 @@
 
 ## Чака изпращане
 
+(в базата от миграцията grafik_shift_times, grafik-shift-times-schema.sql, версия 20261104073847, приложена 04.11.2026; таблиците grafik_* са без anon)
+- 04.11 · grafik_vtr_codes.start_time — time, NULL, без default
+- 04.11 · grafik_vtr_codes.end_time — time, NULL, без default
+
 (в базата от миграцията grafik_sectors, grafik-sectors-schema.sql, версия 20261103135820, приложена 03.11.2026; таблиците grafik_* са без anon — виж бележката при grafik_schema)
 - 03.11 · нова таблица grafik_sectors — id uuid, store_name text NOT NULL, name text NOT NULL, sort_order int NOT NULL default 0, active boolean NOT NULL default true, created_at timestamptz NOT NULL default now(), created_by text
 - 03.11 · grafik_staff.sector_id — uuid, NULL, без default

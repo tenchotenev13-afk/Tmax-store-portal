@@ -222,7 +222,9 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   for (let d = 0; d < 7; d++) { typeIn(h, 'В'); key(h, 'Tab'); }
   // 1.11 (нд) – 7.11 (сб) работни, 8.11 празна → точно 7 поредни (ВТР чл. 19: няма 36 ч. почивка).
   const rest = h.doc.querySelector('#gr-warnings .gr-warn-no_weekly_rest');
-  ok('7 поредни работни дни → „няма 36 ч. седмична почивка“ с датите', !!rest && /7 поредни работни дни \(01\.11–07\.11\) — няма 36 ч\. седмична почивка/.test(rest.textContent), rest && rest.textContent);
+  // Кодовете носят начало/край (20261104073847) → по часовник: най-дългата почивка между смените на МАРИЯ е 16,5 ч.
+  ok('7 поредни работни дни → „няма непрекъсната почивка ≥ 36 ч.“ с датите', !!rest &&
+    /МАРИЯ: няма непрекъсната почивка ≥ 36 ч\. в 7 поредни дни \(01\.11–07\.11\) — най-дългата е \d+(,5)? ч\./.test(rest.textContent), rest && rest.textContent);
   ok('„6 работни дни в 7“ вече НЕ е предупреждение', !h.doc.querySelector('#gr-warnings .gr-warn-over5'));
   const note = h.doc.querySelector('#gr-warnings .gr-warn-month');
   ok('без октомври в базата → бележка „Седмицата 26.10–01.11 е непълна“', !!note && /^Седмицата 26\.10–01\.11 е непълна/.test(note.textContent), note && note.textContent);

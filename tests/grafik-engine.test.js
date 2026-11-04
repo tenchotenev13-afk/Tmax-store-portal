@@ -236,19 +236,67 @@ function onDays(from, to, letter) { var m = {}; for (var d = from; d <= to; d++)
 var only = function (ws, t) { return ws.filter(function (x) { return x.type === t; }); };
 
 var w7 = warnsOf(L30(onDays(2, 8, 'П')));                                       // пон 2 – нед 8: точно 7
-check('точно 7 поредни работни дни → „няма 36 ч. седмична почивка“', only(w7, 'no_weekly_rest').length === 1 &&
-  /^7 поредни работни дни \(02\.11–08\.11\) — няма 36 ч\. седмична почивка$/.test(only(w7, 'no_weekly_rest')[0].text) && only(w7, 'no_weekly_rest')[0].day === 2,
+// Кодовете имат начало/край (миграция 20261104073847) → седмичната почивка се мери по часовник.
+check('точно 7 поредни работни дни (с часове) → „няма непрекъсната почивка ≥ 36 ч.“, най-дългата 15,5 ч. (сб 17:00 → нд 08:30)',
+  only(w7, 'no_weekly_rest').length === 1 && only(w7, 'no_weekly_rest')[0].day === 2 &&
+  /^няма непрекъсната почивка ≥ 36 ч\. в 7 поредни дни \(02\.11–08\.11\) — най-дългата е 15,5 ч\.$/.test(only(w7, 'no_weekly_rest')[0].text),
   JSON.stringify(only(w7, 'no_weekly_rest')));
 var w6 = warnsOf(L30(onDays(2, 7, 'П')));                                       // 6 дни, после свободна неделя
 check('6 поредни работни дни → без предупреждение', !only(w6, 'no_weekly_rest').length);
 var w10 = warnsOf(L30(onDays(2, 11, 'П')));
-check('10 поредни → ЕДНО предупреждение за цялата поредица', only(w10, 'no_weekly_rest').length === 1 && /^10 поредни/.test(only(w10, 'no_weekly_rest')[0].text));
+check('10 поредни → ЕДНО предупреждение за целия отрязък (02.11–11.11)', only(w10, 'no_weekly_rest').length === 1 && /\(02\.11–11\.11\)/.test(only(w10, 'no_weekly_rest')[0].text), JSON.stringify(only(w10, 'no_weekly_rest')));
 var wAbs = warnsOf(L30(Object.assign(onDays(2, 11, 'П'), { 5: 'О' })));
 check('отсъствие (О) по средата = почивка → няма поредица от 7', !only(wAbs, 'no_weekly_rest').length);
 var wB = warnsOf(L30(Object.assign(onDays(2, 11, 'П'), { 5: 'Б', 9: 'НО' })));
 check('Б и НО също са почивка', !only(wB, 'no_weekly_rest').length);
 var wH = warnsOf(L30(Object.assign(onDays(2, 7, 'П'), { 8: '6' })));              // 6 смени + 6 свободни часа в неделя
-check('„свободни часове“ са работен ден → 7 поредни', only(wH, 'no_weekly_rest').length === 1);
+check('„свободни часове“ (без начало/край) в 7-те дни → проверка ПО ДНИ: „7 поредни работни дни“', only(wH, 'no_weekly_rest').length === 1 &&
+  /^7 поредни работни дни \(02\.11–08\.11\) — няма 36 ч\. седмична почивка$/.test(only(wH, 'no_weekly_rest')[0].text), JSON.stringify(only(wH, 'no_weekly_rest')));
+var wK = warnsOf(L30(Object.assign(onDays(2, 7, 'П'), { 8: 'К' })));
+check('„К“ (без часове) в 7-те дни → също по дни', only(wK, 'no_weekly_rest').length === 1 && /^7 поредни работни дни/.test(only(wK, 'no_weekly_rest')[0].text));
+
+/* ── По часовник: граничните случаи (ВТР чл. 19) ── */
+var S10 = ET.setups['2026-10'];                      // октомври = Л: ЛД → Д4/Л 08:00–20:00
+function warnsOct(map) { var a = new Array(31).fill(''); Object.keys(map).forEach(function (d) { a[+d - 1] = map[d]; }); return E.computeMonth(S10, '2026-10', [{ staff: { id: 'x', hours_per_day: 8 }, letters: a, locked: {} }]).rows[0].warnings; }
+// 5.10 пон … 10.10 съб ЛД (08–20), 11.10 нд свободна, 12.10 пон ЛД 08:00.
+var o20 = warnsOct(Object.assign(onDays(5, 10, 'ЛД'), onDays(12, 17, 'ЛД')));
+check('20:00 → 08:00 на другия ден = точно 12 ч. → без „под 12 ч.“', !only(o20, 'daily_rest').length, JSON.stringify(only(o20, 'daily_rest')));
+check('20:00 → свободен ден → 08:00 = точно 36 ч. → без „няма 36 ч.“', !only(o20, 'no_weekly_rest').length, JSON.stringify(only(o20, 'no_weekly_rest')));
+// Ноември (З1): ЛД → Д5/З 08:00–19:30; пон–съб работа, неделя свободна, цял месец.
+var nWk = {}; for (var dd = 2; dd <= 28; dd++) if (M11.dow[dd - 1] !== 7) nWk[dd] = 'ЛД';
+var n195 = warnsOf(L30(nWk));
+check('19:30 → свободен ден → 08:00 = 36,5 ч. → без „няма 36 ч.“ (6 дни + свободна неделя)', !only(n195, 'no_weekly_rest').length, JSON.stringify(only(n195, 'no_weekly_rest')));
+check('…и 19:30 → 08:00 = 12,5 ч. → без „под 12 ч.“', !only(n195, 'daily_rest').length);
+// Под 12 и под 36: изкуствени кодове — Т22 12:00–22:00, Т06 06:00–14:00.
+var SX = clone(S11);
+SX.codes.push({ code: 'Т22', hours: 9, kind: 'work', start_time: '12:00:00', end_time: '22:00:00' }, { code: 'Т06', hours: 7, kind: 'work', start_time: '06:00:00', end_time: '14:00:00' });
+SX.letter_map = SX.letter_map.filter(function (l) { return !((l.letter === 'В' || l.letter === 'П') && (l.hours_per_day === null || l.hours_per_day === undefined)); });
+['З1', 'Н'].forEach(function (k) { SX.letter_map.push({ letter: 'В', day_kind: k, code: 'Т22', hours_per_day: null }, { letter: 'П', day_kind: k, code: 'Т06', hours_per_day: null }); });
+function warnsX(map) { return E.computeMonth(SX, '2026-11', monthRows(L30(map))).rows[0].warnings; }
+var x10 = warnsX({ 2: 'В', 3: 'П' });                // пон 22:00 → вт 06:00 = 8 ч.
+check('22:00 → 06:00 = 8 ч. → „почивка 8 ч. между смените (02.11 22:00 → 03.11 06:00) — под 12 ч.“ на 3-ти',
+  only(x10, 'daily_rest').length === 1 && only(x10, 'daily_rest')[0].day === 3 &&
+  /^почивка 8 ч\. между смените \(02\.11 22:00 → 03\.11 06:00\) — под 12 ч\.$/.test(only(x10, 'daily_rest')[0].text), JSON.stringify(only(x10, 'daily_rest')));
+var x32 = warnsX(Object.assign(onDays(2, 6, 'П'), { 7: 'В', 9: 'П', 10: 'П', 11: 'П', 12: 'П', 13: 'П' }));   // сб 22:00 → нд свободна → пон 06:00 = 32 ч.
+check('свободен ден, но 22:00 → 06:00 = 32 ч. → под 36 ч. → „няма непрекъсната почивка ≥ 36 ч.“', only(x32, 'no_weekly_rest').length === 1 &&
+  /^няма непрекъсната почивка ≥ 36 ч\./.test(only(x32, 'no_weekly_rest')[0].text), JSON.stringify(only(x32, 'no_weekly_rest')));
+check('…и по дни това НЕ би се хванало (има свободен ден) — затова е по часовник', !/поредни работни дни/.test((only(x32, 'no_weekly_rest')[0] || {}).text || ''));
+var x36 = warnsX(Object.assign(onDays(2, 6, 'П'), { 7: 'П', 9: 'П', 10: 'П', 11: 'П', 12: 'П', 13: 'П' }));  // сб 14:00 → пон 06:00 = 40 ч.
+check('сб 14:00 → свободна нд → пон 06:00 = 40 ч. → OK', !only(x36, 'no_weekly_rest').length, JSON.stringify(only(x36, 'no_weekly_rest')));
+// Т2030 12:00–20:30 (буква ЗД) — за почивки между 11 и 12 ч. и между 35 и 36 ч.
+var SY = clone(SX);
+SY.codes.push({ code: 'Т2030', hours: 8, kind: 'work', start_time: '12:00:00', end_time: '20:30:00' });
+SY.letter_map = SY.letter_map.filter(function (l) { return !(l.letter === 'ЗД' && (l.hours_per_day === null || l.hours_per_day === undefined)); });
+['З1', 'Н'].forEach(function (k) { SY.letter_map.push({ letter: 'ЗД', day_kind: k, code: 'Т2030', hours_per_day: null }); });
+function warnsY(map) { return E.computeMonth(SY, '2026-11', monthRows(L30(map))).rows[0].warnings; }
+var y115 = warnsY({ 2: 'ЗД', 3: 'ЛД' });            // пон 20:30 → вт 08:00 (Д5/З) = 11,5 ч.
+check('20:30 → 08:00 = 11,5 ч. → „под 12 ч.“', only(y115, 'daily_rest').length === 1 && /^почивка 11,5 ч\./.test(only(y115, 'daily_rest')[0].text), JSON.stringify(only(y115, 'daily_rest')));
+var y355 = warnsY(Object.assign(onDays(2, 6, 'ЛД'), { 7: 'ЗД', 9: 'ЛД', 10: 'ЛД', 11: 'ЛД', 12: 'ЛД', 13: 'ЛД' }));   // сб 20:30 → нд → пон 08:00 = 35,5 ч.
+check('20:30 → свободен ден → 08:00 = 35,5 ч. → под 36 ч.', only(y355, 'no_weekly_rest').length === 1 && /^няма непрекъсната почивка ≥ 36 ч\./.test(only(y355, 'no_weekly_rest')[0].text), JSON.stringify(only(y355, 'no_weekly_rest')));
+// „К“ (без часове) е зает цял ден: нд 8 К, пон 9 свободен, вт 10 – нд 15 работа → почивката е само пон (нд 24:00 → вт 08:00 = 32 ч.).
+var kBusy = warnsOf(L30(Object.assign(onDays(2, 7, 'ЛД'), { 8: 'К' }, onDays(10, 15, 'ЛД'))));
+check('ден „К“ е зает цял ден — почивката не „минава“ през него (пон 9 = 32 ч. → под 36)',
+  only(kBusy, 'no_weekly_rest').some(function (w) { return /^няма непрекъсната почивка ≥ 36 ч\..*\(09\.11–/.test(w.text); }), JSON.stringify(only(kBusy, 'no_weekly_rest')));
 
 // 56 ч.: 6 × Д5/З (10.5) = 63 ч.
 var w63 = warnsOf(L30(onDays(2, 7, 'ЛД')));
