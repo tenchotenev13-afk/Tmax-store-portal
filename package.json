@@ -1,5 +1,6 @@
 {
   "devDependencies": {
+    "exceljs": "^4.4.0",
     "jsdom": "^30.0.1",
     "xlsx": "0.18.5"
   },

@@ -32,6 +32,8 @@ function makeServer(opt) {
       { id: 'st-9', store_name: 'Шумен', short_name: 'ШУМЕН', full_name: 'Служител Шумен', sector: 'ОТЗ', hours_per_day: 8, sort_order: 10, hired_on: null, left_on: null }
     ],
     missing: opt.missing || [],
+    company: opt.company !== undefined ? opt.company : { name: '"ТЕМАКС ТЪРГОВСКИ ЦЕНТЪР ЗА ДОМА 3" ЕООД', eik: '207322431', addr: 'гр. Варна, ул. "Блян" 2' },
+    store: { blank_name: '"Темакс" – Кърджали', address: null }, approver: 'Теодор Тенев',
     sectors: [
       { id: 'sec-k-sklad', store_name: 'Кърджали', name: 'Склад', sort_order: 5 },   // нарочно преди Каса — редът е на магазина, не азбучен
       { id: 'sec-k-kasa', store_name: 'Кърджали', name: 'Каса', sort_order: 10 },
@@ -58,7 +60,7 @@ function makeServer(opt) {
           can_reopen: u.role === 'admin' && !!mo && mo.status === 'submitted', status: mo ? mo.status : 'draft', month_row: mo || null,
           staff: S.staff.filter(s => s.store_name === b.store), rows: mo ? S.rows.filter(r => r.month_id === mo.id) : [],
           prev_rows: pm ? S.rows.filter(r => r.month_id === pm.id) : [],
-          setup: Object.assign({}, b.month === '2026-11' || b.month === '2026-12' ? SETUP11 : ET.setups['2026-10'], { missing: S.missing, extra_days: [], season_label: b.month === '2026-10' ? 'Лято (до 20:00)' : 'Зима 1 (до 19:30)',
+          setup: Object.assign({}, b.month === '2026-11' || b.month === '2026-12' ? SETUP11 : ET.setups['2026-10'], { missing: S.missing, extra_days: [], company: S.company, store: S.store, approver: S.approver, season_label: b.month === '2026-10' ? 'Лято (до 20:00)' : 'Зима 1 (до 19:30)',
             sectors: S.sectors.filter(x => x.store_name === b.store).sort((a, c) => a.sort_order - c.sort_order).map(x => ({ id: x.id, name: x.name, sort_order: x.sort_order })) }) } };
       }
       case 'save_rows': {
@@ -482,6 +484,124 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     b.w.grSelect(0, 1); typeIn(b, 'П'); key(b, 'Enter');
     realClick(b.w, btn(mod(b), '▶')); await wait(200); await ticks(8);
     ok('„не“ на въпроса → оставаме в месеца, промяната е в паметта', b.w.grMonth === '2026-11' && b.w.grRows['st-1'].letters[1] === 'П' && Object.keys(b.w.grDirty).length === 1);
+  }
+
+  section('13. 1д: файл за ТРЗ и печат');
+  {
+    const ExcelJS = require(path.join(ROOT, 'node_modules', 'exceljs'));
+    /* ExcelJS: в браузъра — от cdnjs (байт в байт същият dist като в npm, сверено 04.11.2026);
+       тук — npm пакетът. Свалянето се подменя, за да се прочете файлът обратно. */
+    const setupX = (h, got) => {
+      h.w.grWithExcelJS = () => Promise.resolve(ExcelJS);
+      h.w.grDownload = (buf, name) => got.push({ buf, name });
+    };
+    const readBack = async buf => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); return wb; };
+    const S = makeServer();
+    // Мария (st-2): 21 × В (168 ч. — на нормата); Иван (st-1): 2 × П + 9 свободни часа → извън нормата; Петя (4 ч.): празно.
+    S.months['Кърджали|2026-11-01'] = { id: 'm-x', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+    const wd = h.w.GrafikEngine.monthInfo('2026-11', []);
+    const lV = wd.dow.map(w => (w <= 5 ? 'В' : ''));
+    const lI = new Array(30).fill(''); lI[1] = 'П'; lI[2] = 'П'; lI[3] = '9'; lI[5] = 'К';
+    S.rows.push({ month_id: 'm-x', staff_id: 'st-2', letters: lV, locked: {} }, { month_id: 'm-x', staff_id: 'st-1', letters: lI, locked: {} });
+    const x = env(MGR, { server: S });
+    await load(x);
+    const got = []; setupX(x, got);
+    ok('бутоните „📥 Excel за ТРЗ“ и „🖨 Печат“ са над мрежата', !!btn(mod(x), 'Excel за ТРЗ') && !!btn(mod(x), 'Печат'));
+    realClick(x.w, btn(mod(x), 'Excel за ТРЗ'));
+    await wait(400); await ticks(8);
+    ok('чернова → файл с „_ЧЕРНОВА“ в името', got.length === 1 && got[0].name === 'График_Кърджали_2026-11_ЧЕРНОВА.xlsx', got[0] && got[0].name);
+    if (got.length) {
+      const wb = await readBack(got[0].buf), ws = wb.worksheets[0];
+      const v = a => { const c = ws.getCell(a).value; return c && typeof c === 'object' && 'result' in c ? c.result : c; };
+      const f = a => { const c = ws.getCell(a).value; return c && typeof c === 'object' ? c.formula : null; };
+      ok('листът е „11.2026“ и НЕ е защитен', ws.name === '11.2026' && !ws.sheetProtection, ws.name + ' ' + JSON.stringify(ws.sheetProtection));
+      ok('ред 1: дружество + ЕИК; „ЧЕРНОВА — График за явяване на работа 21 раб.дни/ 168 часа“',
+        /ЕООД, ЕИК 207322431$/.test(v('A1')) && v('D1') === 'ЧЕРНОВА — График за явяване на работа 21 раб.дни/ 168 часа', v('A1') + ' | ' + v('D1'));
+      ok('„Утвърдил: Теодор Тенев“ след дните', v('AH1') === 'Утвърдил: Теодор Тенев', v('AH1'));
+      ok('ред 3 — адресът на дружеството; ред 4 — обект, месец, сезон', v('A3') === 'Адрес: гр. Варна, ул. "Блян" 2' && v('A4') === 'Обект: "Темакс" – Кърджали' &&
+        v('D4') === 'за месец ноември 2026 г. · Зима 1 (до 19:30)', v('A3') + ' | ' + v('A4') + ' | ' + v('D4'));
+      ok('заглавия: дни 1–30 (ред 11), букви на дните (ред 10: 1.11 = Н)', v('D11') === 1 && v('AG11') === 30 && v('D10') === 'Н' && v('E10') === 'П');
+      ok('колони след дните: човекодни, човекочасове, ПОДПИС, О, Б, Н', v('AH7') === 'всичко човекодни' && v('AI7') === 'всичко човекочасове' && v('AJ5') === 'ПОДПИС' &&
+        v('AK5') === 'отпуск (О) дни' && v('AL5') === 'болничен (Б) дни' && v('AM5') === 'неплатен (Н) дни');
+      ok('редовете: трите служители в графика (без напусналия)', v('B12') === 'Иван Иванов Иванов' && v('B13') === "Мария Д'Анджело" && v('B14') === 'Петя Петрова' && v('B15') === 'ВСИЧКО за обекта:');
+      ok('кодовете са след превода/изравняването (Д3/З при В)', v('E13') === 'Д3/З');
+      ok('празен ден — наистина празна клетка (без стойност)', ws.getCell('D13').value === null && ws.getCell('D14').value === null);
+      ok('човекодни: COUNTIFS с "?*" и без О/Б/Н', f('AH13') === 'COUNTIFS(D13:AG13,"?*",D13:AG13,"<>О",D13:AG13,"<>Б",D13:AG13,"<>Н")', f('AH13'));
+      ok('човекочасове: буквални кодове × часове, само изработени, К по пълната смяна', /^COUNTIF\(D13:AG13,"Д1\/Л"\)\*8\+/.test(f('AI13')) &&
+        /COUNTIF\(D13:AG13,"Д5\/З"\)\*10\.5/.test(f('AI13')) && /COUNTIF\(D13:AG13,"К"\)\*10\.5/.test(f('AI13')) && !/"О"|"Б"|"Н"/.test(f('AI13')), f('AI13').slice(0, 90));
+      let bang = 0, star = 0, n = 0;
+      ws.eachRow(r => r.eachCell(c => { const fx = c.value && c.value.formula; if (fx) { n++; if (fx.indexOf('!') >= 0) bang++; if (/"\*"/.test(fx)) star++; } }));
+      ok('нито една формула към друг лист; нито една с "*" без ?', n > 10 && bang === 0 && star === 0, n + ' / ' + bang + ' / ' + star);
+      ok('Мария: 21 дни, 168 ч. (резултатът е записан до формулата)', v('AH13') === 21 && v('AI13') === 168);
+      ok('ВСИЧКО за обекта: SUM по колоната', f('AH15') === 'SUM(AH12:AH14)' && f('AI15') === 'SUM(AI12:AI14)');
+      const c4 = ws.getCell('G12');
+      ok('свободни часове в черновата: клетката е празна, червена, с бележка „9 свободни ч. — сложи код“', c4.value === null &&
+        c4.fill && c4.fill.fgColor.argb === 'FFFCA5A5' && /^9 свободни ч\. — сложи код$/.test(String(c4.note && (c4.note.texts ? c4.note.texts.map(t => t.text).join('') : c4.note))),
+        JSON.stringify(c4.note));
+      const c6 = ws.getCell('I12');
+      ok('„К“ — оранжево, бележка за часовете на пълната смяна', c6.value === 'К' && c6.fill.fgColor.argb === 'FFFED7AA' && /командировка — 10,5 ч\./.test(JSON.stringify(c6.note)));
+      const nm = ws.getCell('B12');
+      ok('извън нормата в черновата: редът е червен, бележка „X ч. вместо Y ч. — извън нормата“', nm.fill && nm.fill.fgColor.argb === 'FFFEE2E2' &&
+        /ч\. вместо 168 ч\. — извън нормата/.test(JSON.stringify(nm.note)), JSON.stringify(nm.note));
+      ok('легендата е отдолу (зимни кодове с часовете, О/Н/Б)', (() => { let txt = ''; ws.eachRow(r => { const a = r.getCell(1).value; if (typeof a === 'string') txt += a + '\n'; }); return /Работните смени при зимно работно време/.test(txt) && /Д5\/З – от 8:00 до 19:30/.test(txt) && /О – ПЛАТЕН ГОДИШЕН ОТПУСК/.test(txt) && !/Д4\/Л –/.test(txt); })());
+      ok('A4 хоризонтално, събрано по ширина', ws.pageSetup.orientation === 'landscape' && ws.pageSetup.fitToWidth === 1 && ws.pageSetup.paperSize === 9);
+    }
+
+    // Печат на черновата.
+    realClick(x.w, btn(mod(x), 'Печат')); await ticks(4);
+    const pr = x.doc.getElementById('mod-print'), tbl = x.doc.getElementById('grp-tbl');
+    ok('печат: показан е #mod-print с таблицата', pr.style.display === 'block' && !!tbl);
+    ok('печат: колони — №, имена, длъжност, 30 дни, 6 сбора и „Запознат / подпис“', tbl.querySelectorAll('colgroup col').length === 3 + 30 + 7 &&
+      tbl.querySelector('thead tr').lastElementChild.textContent === 'Запознат / подпис');
+    ok('печат: „ЧЕРНОВА“ (надпис и заглавие)', !!x.doc.getElementById('grp-draft') && /^ЧЕРНОВА — ГРАФИК ЗА ЯВЯВАНЕ НА РАБОТА$/.test(x.doc.getElementById('grp-title').textContent));
+    ok('печат: „Изготвил … (ръководител обект)“ и „Утвърдил: Теодор Тенев … (управител)“', /\(ръководител обект\)$/.test(x.doc.getElementById('grp-made').textContent) &&
+      /^Утвърдил: Теодор Тенев .*\(управител\)$/.test(x.doc.getElementById('grp-appr').textContent));
+    ok('печат: общо ч. вкл. О/Б/Н за Мария = 168', tbl.querySelectorAll('tbody tr')[1].children[3 + 30 + 5].textContent === '168');
+    ok('печат: редът извън нормата е червен с бележката', /grp-off/.test(tbl.querySelectorAll('tbody tr')[0].className) && /извън нормата/.test(tbl.querySelectorAll('tbody tr')[0].textContent));
+    const pcss = x.doc.querySelector('#mod-print style').textContent;
+    ok('печат CSS: A4 хоризонтално; white-space:normal, border-box, рамка на последния ред (правило 12)', /@page\{size:A4 landscape;/.test(pcss) &&
+      /\.grp-tbl th,\.grp-tbl td\{box-sizing:border-box;[^}]*white-space:normal;/.test(pcss) && /\.grp-tbl tr:last-child td\{border-bottom:1px solid #333;\}/.test(pcss) && /\.grp-tbl\{width:277mm;/.test(pcss));
+
+    // Подаден месец със служител извън нормата → НЕ се прави (нито файл, нито печат), казва кой.
+    S.months['Кърджали|2026-11-01'].status = 'submitted';
+    S.months['Кърджали|2026-11-01'].snapshot = { header: { company_name: 'Д', company_eik: '1', company_addr: 'А', store_blank_name: 'О', approver: 'У', compiled_by: 'Управител Кърджали', season: 'З1' },
+      rows: [{ staff_id: 'st-2', full_name: "Мария Д'Анджело", contract_title: '', hours_per_day: 8, codes: new Array(30).fill(''), official: 160, target: 168, diff: -8, notes: [] }] };
+    realClick(x.w, btn(x.doc.getElementById('mod-print'), 'Назад')); await load(x);
+    const got2 = []; setupX(x, got2);
+    realClick(x.w, btn(mod(x), 'Excel за ТРЗ')); await wait(200); await ticks(6);
+    const mdl = x.doc.getElementById('gr-export-issues');
+    ok('подаден + извън нормата → без файл, съобщението казва кой', got2.length === 0 && !!mdl && /Мария Д'Анджело: 160 ч\. вместо 168 ч\. — извън нормата\./.test(mdl.textContent), mdl && mdl.textContent);
+    S.months['Кърджали|2026-11-01'].snapshot.rows[0] = { staff_id: 'st-2', full_name: "Мария Д'Анджело", contract_title: '', hours_per_day: 8,
+      codes: wd.dow.map(w => (w <= 5 ? 'Д1/З' : '')), official: 168, target: 168, diff: 0, notes: [{ day: 3, type: 'hours', text: '9 свободни ч. — ръчен код' }] };
+    await load(x); setupX(x, got2);
+    realClick(x.w, btn(mod(x), 'Excel за ТРЗ')); await wait(200); await ticks(6);
+    ok('подаден + свободни часове → без файл, казва кой и кой ден', got2.length === 0 && /Мария Д'Анджело: 3-ви — 9 свободни ч\. без код\./.test(x.doc.getElementById('gr-export-issues').textContent));
+    S.months['Кърджали|2026-11-01'].snapshot.rows[0].notes = [];
+    await load(x); setupX(x, got2);
+    realClick(x.w, btn(mod(x), 'Excel за ТРЗ')); await wait(400); await ticks(8);
+    ok('подаден и чист → файл без „_ЧЕРНОВА“', got2.length === 1 && got2[0].name === 'График_Кърджали_2026-11.xlsx', got2[0] && got2[0].name);
+    if (got2.length) {
+      const ws2 = (await readBack(got2[0].buf)).worksheets[0];
+      ok('подаден: заглавката е от СНИМКАТА (замразена), без „ЧЕРНОВА“', ws2.getCell('A1').value === 'Предприятие: Д, ЕИК 1' && ws2.getCell('D1').value === 'График за явяване на работа 21 раб.дни/ 168 часа');
+    }
+    realClick(x.w, btn(mod(x), 'Печат')); await ticks(4);
+    ok('печат на подаден: без „ЧЕРНОВА“, „Изготвил: Управител Кърджали“', !x.doc.getElementById('grp-draft') && /^Изготвил: Управител Кърджали /.test(x.doc.getElementById('grp-made').textContent));
+
+    // Липсващи данни за дружеството и код извън ВТР → без файл и в черновата.
+    const y = env(MGR, { missing: ['адрес на дружеството'], company: { name: 'X', eik: null, addr: null } });
+    await load(y); const got3 = []; setupX(y, got3);
+    realClick(y.w, btn(mod(y), 'Excel за ТРЗ')); await wait(200); await ticks(6);
+    ok('липсващ адрес и ЕИК → без файл: „Липсват данни за дружеството — админ: адрес на дружеството, ЕИК на дружеството.“', got3.length === 0 &&
+      /Липсват данни за дружеството — админ: адрес на дружеството, ЕИК на дружеството\./.test(y.doc.getElementById('gr-export-issues').textContent));
+    realClick(y.w, btn(y.doc.getElementById('gr-export-modal'), 'Затвори'));
+    realClick(y.w, btn(mod(y), 'Печат')); await ticks(4);
+    ok('…и печатът също спира', y.doc.getElementById('mod-print').innerHTML.indexOf('grp-tbl') < 0 && !!y.doc.getElementById('gr-export-modal'));
+    const z = env(MGR);
+    await load(z); const got4 = []; setupX(z, got4);
+    z.w.grRows['st-1'] = { letters: [], locked: { '4': 'Д7' } }; z.w.grRecalc();
+    realClick(z.w, btn(mod(z), 'Excel за ТРЗ')); await wait(200); await ticks(6);
+    ok('код извън ВТР (заключен Д7 от стария правилник) → без файл, казва кой и кой ден', got4.length === 0 &&
+      /Иван Иванов Иванов: 4-ви — код „Д7“ не е във ВТР за месеца\./.test(z.doc.getElementById('gr-export-issues').textContent));
   }
 
   report();
