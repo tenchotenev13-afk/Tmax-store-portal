@@ -1112,6 +1112,10 @@ execute от public/anon/authenticated; `report_excluded_stores` — INVOKER;
 трябва да получи SELECT политика за authenticated (сега
 `app_settings_anon_select_all` е само за anon), иначе `report_excluded_stores`
 (вече INVOKER) връща NULL и `checklist_portal_values` губи изключените обекти.
+Етап 2, стъпка 1 — инвентар (04.11, само четене): `claude/security-etap2-inventar.md`
+— подписване (ES256 + приет legacy HS256, едж функциите без ключ за JWT),
+права и политики по роля, кой ползва anon (портал, RM-app, огледало, PowerShell
+клиент, 13 крона), Storage, преди вход, открити въпроси.
 Остава: сървърна проверка на
 самоличност (ВИСОК, `claude/open-tasks.md`), OneSignal REST ключ в push.js
 (ротация), `in.(<списък>)` без горна граница (среден/висок).
