@@ -1089,7 +1089,7 @@ auto_complete). Код: `6b4fded` (на живо на Pages 25.10). **Кърдж
 **Сигурност** — `users` затворен (30.09). Етап 5б (01.11): колоната
 `users.password` махната (`users-drop-password-schema.sql`, миграция
 `20261101213607`, приложена 01.11; пробен вход admin 21:38 UTC — ок). Създаване на нов потребител след 5б — проверено на живо 02.11 11:37–11:40 (затворено в `claude/open/closed/`).
-DELETE за anon (02.11): само върху 45-те таблици, от които браузърът трие (`DELETE_ALLOWED` в `tests/delete-tables-whitelist.test.js`); от другите 45 — revoke (`anon-revoke-delete-schema.sql`, номер на миграцията — след прилагането).
+DELETE за anon (02.11): само върху 45-те таблици, от които браузърът трие (`DELETE_ALLOWED` в `tests/delete-tables-whitelist.test.js`); от другите 45 — revoke (`anon-revoke-delete-schema.sql`, миграция `20261103212604`, приложена 03.11; curl с anon: `kasa_reports` 401/42501, `bus_routes` 204). На живо 04.11: контакт „проверка 04.11“ създаден (POST /contacts 201, 07:57 UTC) и изтрит през ✕ в Контакти — 0 реда. Отворено: махане на отметка в Бюлетина от обект (`task_completions`) след revoke — непроверено на живо; правото е true в базата (`claude/open/04-11-task-completions-delete-live.md`).
 Остава: сървърна проверка на
 самоличност (ВИСОК, `claude/open-tasks.md`), OneSignal REST ключ в push.js
 (ротация), `in.(<списък>)` без горна граница (среден/висок).
