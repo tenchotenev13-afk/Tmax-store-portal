@@ -233,13 +233,20 @@
     var codes = [], internal = 0, abs = 0, any = false, notes = [], warn = [];
     locked = locked || {};
     var noLetters = !E.lettersFor(P, hpd);
+    // Нормата е само за дните на работа: назначен / напуснал в месеца → работните дни от
+    // hired_on до left_on (вкл.) × договора; отсъствията извън тях не я намаляват (04.11.2026).
+    var lo = staff && staff.hired_on && staff.hired_on > M.start ? staff.hired_on : M.start;
+    var hi = staff && staff.left_on && staff.left_on < M.end ? staff.left_on : M.end;
+    var wd = 0, absIn = 0;
     for (var i = 0; i < M.days; i++) {
       var L = (letters && letters[i]) || '';
       if (L || locked[i + 1]) any = true;
       internal += E.internalHours(P, L, hpd);
       var c = locked[i + 1] ? locked[i + 1] : E.translate(P, L, M.dow[i], hpd);
       codes.push(c);
-      if (E.isAbsence(P, c)) abs++;
+      var emp = M.dates[i] >= lo && M.dates[i] <= hi;
+      if (emp && M.dow[i] <= 5 && !M.holiday[i]) wd++;
+      if (E.isAbsence(P, c)) { abs++; if (emp) absIn++; }
       if (E.isHours(L)) notes.push({ day: i + 1, type: 'hours', text: L + ' свободни ч. — ръчен код' });
       if (L && E.WORK_LETTERS.indexOf(L) >= 0) {
         if (M.holiday[i]) warn.push({ day: i + 1, type: 'holiday', text: 'смяна на празник (' + M.holiday[i] + ')' });
@@ -251,7 +258,7 @@
         else warn.push({ day: i + 1, type: 'no_contract', text: 'няма букви за договор ' + hpd + ' ч.' });
       }
     }
-    var target = any ? M.workDays * hpd - hpd * abs : 0;
+    var target = any ? wd * hpd - hpd * absIn : 0;
     var off = codes.reduce(function (s, c) { return s + E.codeHours(P, c); }, 0);
     var before = codes.slice(), changed = [], reachable = true;
     if (Math.abs(off - target) > 1e-9 && hpd >= 8) {
@@ -267,7 +274,8 @@
       codes: codes, before: before, changed: changed, internal: internal, official: off,
       target: target, diff: diff, reachable: diff === 0 ? true : reachable,
       message: diff === 0 ? 'OK' : diff < 0 ? 'не стигат ' + (-diff) + ' ч.' : 'над нормата с ' + diff + ' ч.',
-      absences: abs, manDays: manDays, notes: notes, warnings: warn
+      absences: abs, manDays: manDays, notes: notes, warnings: warn,
+      workDays: wd, norm: wd * hpd                                   // норма на човека (дните на работа)
     };
   };
 

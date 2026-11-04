@@ -235,9 +235,37 @@ export function checkSnapshot(s: unknown, days: number, staffIds: string[]): str
     seen[r.staff_id] = true;
     if (!Array.isArray(r.codes) || r.codes.length !== days) return "Кодовете на ред не са " + days + " (дните в месеца).";
     if (!r.codes.every((c) => typeof c === "string" && c.length <= 8)) return "Невалиден код в снимката.";
+    if (![r.official, r.target, r.diff].every((n) => typeof n === "number" && isFinite(n))) return "Липсват часовете (official / target / diff) в снимката.";
   }
   if (rows.length !== staffIds.length) return "Снимката не съдържа всички редове от графика.";
   return null;
+}
+
+// „Подай" спира (решение на Тенчо 04.11.2026, вариант а) — същото като grSubmitIssues в grafik.js:
+//   - служител в месеца без ред / с празен ред (без букви и без заключени кодове) — по grafik_rows;
+//     норма 0 в снимката (назначен след последния работен ден) → не се иска нищо;
+//   - свободни часове 1–12 в клетка — по grafik_rows;
+//   - извън нормата — по diff от снимката (целта е сметната в браузъра: празниците и нормата
+//     още не са на сървъра — общото ядро е отворена точка).
+export const SUBMIT_HINT = "Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — махни го от месеца.";
+function hrs(n: number): string { return String(Math.round(n * 10) / 10).replace(".", ","); }
+function p2(n: number): string { return (n < 10 ? "0" : "") + n; }
+export function submitIssues(staff: Staff[], rows: RowRec[], snapRows: Record<string, unknown>[], days: number, month: number): string[] {
+  const byRow: Record<string, RowRec> = {}, bySnap: Record<string, Record<string, unknown>> = {};
+  rows.forEach((r) => { byRow[r.staff_id] = r; });
+  snapRows.forEach((r) => { bySnap[r.staff_id as string] = r; });
+  const out: string[] = [];
+  for (const s of staff) {
+    const name = String(s.full_name || s.short_name || ""), r = byRow[s.id], sr = bySnap[s.id] || {};
+    const letters = (r && Array.isArray(r.letters) ? r.letters : []).slice(0, days);
+    const any = letters.some((v) => !!v) || (!!r && Object.keys(r.locked || {}).length > 0);
+    const norm = typeof sr.norm === "number" ? sr.norm : null;
+    if (!any) {
+      if (norm !== 0) out.push(name + ": " + (r ? "редът в графика е празен" : "няма ред в графика за месеца") + (norm ? " (0 ч. вместо " + hrs(norm) + " ч.)" : ""));
+    } else if (sr.diff !== 0) out.push(name + ": " + hrs(Number(sr.official)) + " ч. вместо " + hrs(Number(sr.target)) + " ч.");
+    letters.forEach((v, i) => { if (typeof v === "string" && HOURS_RE.test(v)) out.push(name + ": " + v + " свободни ч. на " + p2(i + 1) + "." + p2(month) + " — сложи код"); });
+  }
+  return out;
 }
 
 // ── HTTP ─────────────────────────────────────────────────────────────────
@@ -421,11 +449,17 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       if (setup.missing.length) throw new HttpError(409, "missing_company", "Липсват данни за дружеството — админ (" + setup.missing.join(", ") + ").");
       // Редове на хора извън месеца (датата им на назначаване/напускане е сменена след
       // въвеждането) остават в grafik_rows, но не са в графика → не се искат в снимката.
+      // В месеца са ВСИЧКИ служители на обекта по дати (както екранът), не само тези с ред —
+      // човек без ред трябва да спре подаването, а не да изпадне от снимката.
       const rows = await repo.listRows(month.id);
-      const rowStaff = await repo.getStaff(rows.map((r) => r.staff_id));
-      const inMonthIds = rowStaff.filter((s) => staffInMonth(s, m.start, m.end)).map((s) => s.id);
+      const monthStaff = (await repo.listStaff(store)).filter((s) => staffInMonth(s, m.start, m.end));
+      const inMonthIds = monthStaff.map((s) => s.id);
       const err = checkSnapshot(b.snapshot, m.days, inMonthIds);
       if (err) throw new HttpError(400, "bad_snapshot", err);
+      const issues = submitIssues(monthStaff, rows, (b.snapshot as { rows: Record<string, unknown>[] }).rows, m.days, +m.start.slice(5, 7));
+      if (issues.length) {
+        throw new HttpError(409, "off_norm", "Графикът не може да се подаде:\n" + issues.map((t) => "· " + t).join("\n") + "\n" + SUBMIT_HINT, { issues, hint: SUBMIT_HINT });
+      }
       const snapshot = {
         ...(b.snapshot as Record<string, unknown>),
         header: {
@@ -440,7 +474,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
         status: "submitted", submitted_at: at, submitted_by: acc.email, submitted_by_name: acc.name, snapshot, updated_at: at,
       }, "draft");
       if (!ok) throw new HttpError(409, "submitted", "Графикът вече е подаден.");
-      await audit(repo, acc, "grafik_submit", store, { month: m.start, rows: inMonthIds.length, skipped_out_of_month: rows.length - inMonthIds.length });
+      await audit(repo, acc, "grafik_submit", store, { month: m.start, rows: inMonthIds.length, skipped_out_of_month: rows.filter((r) => inMonthIds.indexOf(r.staff_id) < 0).length });
       return { status: "submitted", submitted_at: at, submitted_by_name: acc.name };
     }
 

@@ -299,7 +299,7 @@ async function filled(r: MemRepo, store = "Кърджали", who = U.mgrK) {
   await call(r, who, { action: "save_rows", store, month: "2026-11", rows: ids.map((id) => ({ staff_id: id, letters: L30(["П"]) })) });
   return ids;
 }
-const snap = (ids: string[], days = 30) => ({ rows: ids.map((id) => ({ staff_id: id, codes: new Array(days).fill("") })),
+const snap = (ids: string[], days = 30) => ({ rows: ids.map((id) => ({ staff_id: id, codes: new Array(days).fill(""), official: 168, target: 168, diff: 0, norm: 168 } as Record<string, unknown>)),
   header: { company_name: "ФАЛШИВО", approver: "Някой друг", compiled_by: "Хакер" } });
 
 Deno.test("submit: снимка, заглавка от сървъра, после заключено", async () => {
@@ -332,6 +332,58 @@ Deno.test("staffInMonth: граници", () => {
   eq([staffInMonth({ left_on: "2026-11-01" }, "2026-11-01", "2026-11-30"), staffInMonth({ left_on: "2026-10-31" }, "2026-11-01", "2026-11-30"),
       staffInMonth({ hired_on: "2026-11-30" }, "2026-11-01", "2026-11-30"), staffInMonth({ hired_on: "2026-12-01" }, "2026-11-01", "2026-11-30"), staffInMonth({}, "2026-11-01", "2026-11-30")],
      [true, false, true, false, true], "напуснал на 1-ви е в месеца; назначен на последния — също");
+});
+
+// „Подай" спира (решение 04.11.2026, вариант а) — и на сървъра, не само в браузъра.
+const sub = (r: MemRepo, s: unknown) => call(r, U.mgrK, { action: "submit", store: "Кърджали", month: "2026-11", snapshot: s });
+const nm = (r: MemRepo, id: string) => String(r.staff.filter((s) => s.id === id)[0].full_name);
+
+Deno.test("submit: извън нормата → 409 off_norm със списъка и подсказката; нищо не се записва", async () => {
+  const r = new MemRepo();
+  const ids = await filled(r);
+  const s = snap(ids);
+  Object.assign(s.rows[0], { official: 40, target: 168, diff: -128 });
+  const x = await sub(r, s);
+  eq([x.status, x.body.reason], [409, "off_norm"], "отказ");
+  eq(x.body.issues, [nm(r, ids[0]) + ": 40 ч. вместо 168 ч."], "кой и с колко");
+  eq(x.body.hint, "Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — махни го от месеца.", "подсказката");
+  assert(String(x.body.message).indexOf(nm(r, ids[0]) + ": 40 ч. вместо 168 ч.") >= 0 && String(x.body.message).indexOf("махни го от месеца") >= 0, "съобщението носи и двете");
+  eq([r.months[0].status, r.months[0].snapshot, r.audits.length], ["draft", null, 0], "месецът остава чернова");
+  Object.assign(s.rows[0], { official: 168.5, diff: 0.5 });
+  eq((await sub(r, s)).body.issues, [nm(r, ids[0]) + ": 168,5 ч. вместо 168 ч."], "и над нормата, с десетична запетая");
+});
+
+Deno.test("submit: празен ред, липсващ ред и свободни часове → 409; норма 0 → минава", async () => {
+  const r = new MemRepo();
+  const ids = await filled(r);
+  // Празен ред (записан, без букви) у първия; свободни часове „9“ на 05.11 у втория.
+  await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [{ staff_id: ids[0], letters: L30() }, { staff_id: ids[1], letters: L30(["П", "", "", "", "9"]) }] });
+  // Нов служител без ред изобщо.
+  const newId = nid();
+  r.staff.push({ id: newId, store_name: "Кърджали", short_name: "НОВ", full_name: "Нов Новев", sort_order: 0, left_on: null, hired_on: "2026-11-16" });
+  const s = snap([...ids, newId]);
+  s.rows[2].norm = 88;
+  const x = await sub(r, s);
+  eq([x.status, x.body.reason], [409, "off_norm"], "отказ");
+  eq(x.body.issues, [
+    nm(r, ids[0]) + ": редът в графика е празен (0 ч. вместо 168 ч.)",
+    nm(r, ids[1]) + ": 9 свободни ч. на 05.11 — сложи код",
+    "Нов Новев: няма ред в графика за месеца (0 ч. вместо 88 ч.)",
+  ], "трите — с имената");
+  eq((await sub(r, snap(ids))).body.reason, "bad_snapshot", "човек без ред не може просто да изпадне от снимката");
+  // Норма 0 (назначен след последния работен ден) — празен ред не спира; поправените — минава.
+  await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [{ staff_id: ids[0], letters: L30(["П"]) }, { staff_id: ids[1], letters: L30(["П"]) }] });
+  s.rows[2].norm = 0;
+  const ok = await sub(r, s);
+  eq([ok.status, ok.body.status], [200, "submitted"], "подаден");
+});
+
+Deno.test("submit: снимка без часовете → bad_snapshot (не се приема мълчаливо като 0)", async () => {
+  const r = new MemRepo();
+  const ids = await filled(r);
+  const s = snap(ids);
+  delete s.rows[0].diff;
+  eq((await sub(r, s)).body.reason, "bad_snapshot", "без diff");
 });
 
 Deno.test("submit: без данни за дружеството → 409, но попълването е позволено", async () => {

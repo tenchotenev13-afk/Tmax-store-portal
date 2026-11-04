@@ -356,5 +356,34 @@ check('смяна на празник (24.12.2026)', E.computeRow(Pd, dec, { hou
 check('кой е в графика: напуснал преди месеца — не; назначен след него — не; в месеца — да',
   !E.inMonth(M11, { left_on: '2026-10-31' }) && !E.inMonth(M11, { hired_on: '2026-12-01' }) && E.inMonth(M11, { left_on: '2026-11-01', hired_on: '2026-11-30' }));
 
+/* ── 9. Назначен / напуснал в месеца — нормата е за дните на работа (04.11.2026) ── */
+// Ноември 2026: 21 работни дни, 168 ч. От 16.11 (пон) до 30.11 — 11 работни дни.
+function wkLetters(M, from, to, letter) { var a = new Array(M.days).fill(''); for (var d = from; d <= to; d++) if (M.dow[d - 1] <= 5 && !M.holiday[d - 1]) a[d - 1] = letter || 'П'; return a; }
+var h16 = E.computeRow(P11, M11, { hours_per_day: 8, hired_on: '2026-11-16' }, wkLetters(M11, 16, 30), {});
+check('назначен 16.11, работи всеки работен ден → 11 дни, норма и цел 88 ч., разлика 0 (досега 168 → −80)',
+  h16.workDays === 11 && h16.norm === 88 && h16.target === 88 && h16.official === 88 && h16.diff === 0, JSON.stringify([h16.workDays, h16.target, h16.diff]));
+var l13 = E.computeRow(P11, M11, { hours_per_day: 8, left_on: '2026-11-13' }, wkLetters(M11, 1, 13), {});
+check('напуснал 13.11 (петък), денят на напускане се брои → 10 дни, цел 80 ч., разлика 0', l13.workDays === 10 && l13.target === 80 && l13.diff === 0, JSON.stringify([l13.workDays, l13.target]));
+var h4 = E.computeRow(P11, M11, { hours_per_day: 4, hired_on: '2026-11-16' }, wkLetters(M11, 16, 30), {});
+check('договор 4 ч., назначен 16.11 → цел 44 ч.', h4.norm === 44 && h4.target === 44 && h4.diff === 0, JSON.stringify([h4.target, h4.diff]));
+var bd = E.computeRow(P11, M11, { hours_per_day: 8, hired_on: '2026-11-01', left_on: '2026-11-30' }, wkLetters(M11, 1, 30), {});
+check('граници: назначен на 1-ви, напуснал на 30-ти → целият месец, 168 ч.', bd.workDays === 21 && bd.target === 168 && bd.diff === 0, JSON.stringify([bd.workDays, bd.target]));
+var oBefore = wkLetters(M11, 16, 30); oBefore[9] = 'О';                       // 10.11 — преди назначаването
+var ob = E.computeRow(P11, M11, { hours_per_day: 8, hired_on: '2026-11-16' }, oBefore, {});
+check('отсъствие ПРЕДИ назначаването не намалява целта (88, не 80)', ob.target === 88, ob.target);
+var oIn = wkLetters(M11, 16, 30); oIn[16] = 'О';                              // 17.11 — на работа
+var oi = E.computeRow(P11, M11, { hours_per_day: 8, hired_on: '2026-11-16' }, oIn, {});
+check('отсъствие в дните на работа намалява целта: 88 − 8 = 80, разлика 0', oi.target === 80 && oi.diff === 0, JSON.stringify([oi.target, oi.diff]));
+var e0 = E.computeRow(P11, M11, { hours_per_day: 8, hired_on: '2026-11-16' }, [], {});
+check('без нито един ден: цел 0 (бланката), но нормата на човека е 88', e0.target === 0 && e0.norm === 88, JSON.stringify([e0.target, e0.norm]));
+var sun = E.computeRow(P11, M11, { hours_per_day: 8, hired_on: '2026-11-29' }, [], {});
+check('назначен 29.11 (неделя) → само 30.11 е работен: норма 8', sun.workDays === 1 && sun.norm === 8, sun.workDays);
+// Декември 2026: 24 (чт) и 25 (пт) — празници, 26 (сб) → ползван 28 (пн). От 21.12: 21, 22, 23, 29, 30, 31 = 6 дни.
+var M12 = E.monthInfo('2026-12', []);
+var d21 = E.computeRow(P11, M12, { hours_per_day: 8, hired_on: '2026-12-21' }, wkLetters(M12, 21, 31), {});
+check('назначен 21.12 → празниците и ползваният 28.12 не са работни: 6 дни, 48 ч.', d21.workDays === 6 && d21.target === 48 && d21.diff === 0, JSON.stringify([d21.workDays, d21.target, d21.diff]));
+var full = E.computeRow(P11, M11, { hours_per_day: 8 }, wkLetters(M11, 1, 30), {});
+check('без дати — норма = работните дни на месеца × договора (както досега)', full.workDays === M11.workDays && full.norm === M11.norm && full.target === 168, full.target);
+
 console.log('\n' + ok + ' успешни, ' + fail + ' неуспешни');
 process.exit(fail ? 1 : 0);

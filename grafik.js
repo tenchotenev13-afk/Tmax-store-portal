@@ -112,14 +112,15 @@ function grStaffById(id){
 function grCanEdit(){ return !!(grData && grData.can_edit); }
 /* Служител в графика за месеца без нито един ден — няма ред в grafik_rows или редът е
    празен (без букви и без заключени кодове). Изчисленията му дават цел 0 (както бланката),
-   но по решение на Тенчо (04.11.2026) това е ИЗВЪН нормата: 0 ч. вместо работни дни × договор.
-   Връща текста на бележката или ''. */
+   но по решение на Тенчо (04.11.2026) това е ИЗВЪН нормата: 0 ч. вместо нормата на човека
+   (x.norm — работните дни от назначаването до напускането × договора). Норма 0 (назначен
+   след последния работен ден) → нищо не се иска. Връща текста на бележката или ''. */
 function grEmptyRow(x){
   if(!x || !grCalc) return '';
   var r = grRows[x.staff.id];
   var any = r && ((r.letters || []).some(function(v){ return !!v; }) || Object.keys(r.locked || {}).length);
-  if(any) return '';
-  var norm = grCalc.month.workDays * (+x.staff.hours_per_day || 8);
+  if(any || !x.norm) return '';
+  var norm = x.norm;
   return (r && grSaved[x.staff.id] ? 'редът в графика е празен' : 'няма ред в графика за месеца') + ' (0 ч. вместо ' + grHrsTxt(norm) + ' ч.)';
 }
 function grOffCount(){ return grCalc.rows.filter(function(x){ return x.diff !== 0 || !!grEmptyRow(x); }).length; }
@@ -316,7 +317,7 @@ function grGridHtml(){
         (bg ? 'background:' + bg + ';' : '') + (sel ? 'outline:2px solid #2563eb;outline-offset:-2px;' : '') + (warnDays[d + 1] ? 'color:#dc2626;font-weight:700;' : '') + '">' +
         escVal(sel && grEdit ? grEdit : L) + (lk ? '<span style="font-size:9px;">🔒</span>' : '') + '</td>';
     }
-    var er = grEmptyRow(x), tg = er ? grCalc.month.workDays * (+s.hours_per_day || 8) : x.target, df = er ? -tg : x.diff;
+    var er = grEmptyRow(x), tg = er ? x.norm : x.target, df = er ? -tg : x.diff;
     var dc = df === 0 ? '#16a34a' : '#dc2626';
     h += '<td>' + x.internal + '</td><td>' + x.official + '</td><td>' + tg + '</td>' +
       '<td class="gr-diff" style="color:' + dc + ';font-weight:700;" title="' + escAttrVal(er || x.message) + '">' + (df > 0 ? '+' : '') + df + '</td></tr>';
@@ -578,7 +579,7 @@ function grSnapshot(){
   return {
     rows: grCalc.rows.map(function(x){
       return { staff_id: x.staff.id, short_name: x.staff.short_name, full_name: x.staff.full_name, contract_title: x.staff.contract_title || '',
-        hours_per_day: +x.staff.hours_per_day || 8, codes: x.codes.slice(0, M.days), official: x.official, target: x.target, diff: x.diff,
+        hours_per_day: +x.staff.hours_per_day || 8, codes: x.codes.slice(0, M.days), official: x.official, target: x.target, diff: x.diff, norm: x.norm,
         internal: x.internal, man_days: x.manDays, notes: x.notes, warnings: x.warnings.length };
     }),
     totals: { man_days: grCalc.totals.manDays, man_hours: grCalc.totals.manHours, off_norm: grCalc.totals.offNorm, o: grCalc.totals.o, b: grCalc.totals.b, n: grCalc.totals.n },
@@ -590,9 +591,9 @@ function grSubmit(){
   var setup = grData.setup || {};
   if(setup.missing && setup.missing.length){ toast('Не може да се подаде: липсват данни за дружеството — админ (' + setup.missing.join(', ') + ').', '#dc2626'); return; }
   grCommitEdit();
-  var off = grCalc.rows.filter(function(x){ return x.diff !== 0 || !!grEmptyRow(x); });
+  var issues = grSubmitIssues();
+  if(issues.length){ grSubmitBlocked(issues); return; }
   var q = 'Подаване на графика за ' + grMonthLabel(grMonth) + ' — ' + grStore + '?\nСлед подаване промени се правят само след връщане в чернова (admin / регионален).';
-  if(off.length) q += '\n\n⚠ ' + off.length + ' души са извън нормата:\n' + off.slice(0, 10).map(function(x){ return '· ' + (x.staff.short_name || '') + ' — ' + x.message; }).join('\n') + (off.length > 10 ? '\n…' : '');
   if(!confirm(q)) return;
   return grFlush().then(function(saved){
     if(!saved){ toast('Не е подаден: първо графикът трябва да се запише.', '#dc2626'); return; }
@@ -603,12 +604,37 @@ function grSubmit(){
       if(!r0.ok){ toast('Не може да се подаде: ' + grErrText(r0), '#dc2626'); return; }
       missing.forEach(function(x){ grSaved[x.staff.id] = 1; if(!grRows[x.staff.id]) grRows[x.staff.id] = { letters: [], locked: {} }; });
       return grApi('submit', { store: grStore, month: grMonth, snapshot: grSnapshot() }).then(function(res){
+        var d = res.data || {};
+        if(!res.ok && d.reason === 'off_norm' && d.issues && d.issues.length){ grSubmitBlocked(d.issues); return; }
         if(!res.ok){ toast('Не е подаден: ' + grErrText(res), '#dc2626'); return; }
         toast('✔ Графикът е подаден.');
         return grLoadMonth();
       });
     });
   });
+}
+/* „Подай“ спира (решение на Тенчо 04.11.2026, вариант а): служител извън нормата, свободни
+   часове 1–12 и служител без ред / с празен ред. Същото проверява и grafik-api (submit → 409
+   off_norm със същия списък) — браузърът е само първата преграда. */
+var GR_SUBMIT_HINT = 'Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — махни го от месеца.';
+function grSubmitIssues(){
+  var M = grCalc.month, out = [];
+  grCalc.rows.forEach(function(x){
+    var name = x.staff.full_name || x.staff.short_name || '', er = grEmptyRow(x);
+    if(er) out.push(name + ': ' + er);
+    else if(x.diff !== 0) out.push(name + ': ' + grHrsTxt(x.official) + ' ч. вместо ' + grHrsTxt(x.target) + ' ч.');
+    var L = (grRows[x.staff.id] || {}).letters || [];
+    for(var d = 0; d < M.days; d++) if(GrafikEngine.isHours(L[d] || '')) out.push(name + ': ' + L[d] + ' свободни ч. на ' + grPad(d + 1) + '.' + grPad(M.month) + ' — сложи код');
+  });
+  return out;
+}
+function grSubmitBlocked(issues){
+  var old = document.getElementById('gr-submit-modal');
+  if(old) old.parentNode.removeChild(old);
+  document.body.insertAdjacentHTML('beforeend', '<div class="modal-bg open" id="gr-submit-modal"><div class="modal"><h3>⛔ Графикът не може да се подаде</h3>' +
+    '<ul id="gr-submit-issues" style="margin:6px 0 0 18px;font-size:13px;">' + issues.map(function(t){ return '<li>' + escVal(t) + '</li>'; }).join('') + '</ul>' +
+    '<p id="gr-submit-hint" style="font-size:13px;margin:10px 0 0;">' + escVal(GR_SUBMIT_HINT) + '</p>' +
+    '<div class="modal-actions"><button class="btn" onclick="closeModal(\'gr-submit-modal\')">Затвори</button></div></div></div>');
 }
 function grReopen(){
   if(!grData || !grData.can_reopen) return;
@@ -748,6 +774,13 @@ function grColName(n){ var s = ''; n++; while(n > 0){ var m = (n - 1) % 26; s = 
 function grNum(x){ return Math.round(x * 10) / 10; }
 function grHrsTxt(x){ return String(grNum(x)).replace('.', ','); }
 
+/* Ред от снимката без нито един ден. Нормата — от снимката (r.norm, от 04.11.2026); в по-старите
+   снимки я няма → работните дни на месеца × договора. */
+function grSnapEmpty(r, hd, M){
+  if((r.codes || []).some(function(c){ return !!c; }) || hd.length) return '';
+  var norm = typeof r.norm === 'number' ? r.norm : M.workDays * (+r.hours_per_day || 8);
+  return norm ? 'няма ред в графика за месеца (0 ч. вместо ' + grHrsTxt(norm) + ' ч.)' : '';
+}
 function grExportModel(){
   if(!grData || !grCalc) return null;
   var setup = grData.setup || {}, P = GrafikEngine.prepare(setup), M = GrafikEngine.monthInfo(grMonth, setup.extra_days);
@@ -777,7 +810,7 @@ function grExportModel(){
     var hd = (r.notes || []).filter(function(n){ return n.type === 'hours'; }).map(function(n){ return { day: n.day, hours: parseFloat(n.text) || 0 }; });
     return { name: r.full_name || r.short_name || '', title: r.contract_title || '', hpd: +r.hours_per_day || 8, codes: (r.codes || []).slice(0, M.days),
       official: +r.official || 0, target: +r.target || 0, diff: +r.diff || 0, hoursDays: hd,
-      empty: (r.codes || []).some(function(c){ return !!c; }) || hd.length ? '' : 'няма ред в графика за месеца (0 ч. вместо ' + grHrsTxt(M.workDays * (+r.hours_per_day || 8)) + ' ч.)' };
+      empty: grSnapEmpty(r, hd, M) };
   }) : grCalc.rows.map(function(x){
     var L = (grRows[x.staff.id] || { letters: [] }).letters || [], hd = [];
     for(var d = 0; d < M.days; d++) if(GrafikEngine.isHours(L[d] || '')) hd.push({ day: d + 1, hours: +L[d] });

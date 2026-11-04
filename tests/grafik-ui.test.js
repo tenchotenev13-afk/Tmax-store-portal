@@ -238,7 +238,29 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   h.calls.confirm.length = 0;
   realClick(h.w, btn(M, 'Подай'));
   await ticks(8);
-  ok('confirm показва хората извън нормата', h.calls.confirm.some(c => /извън нормата/.test(c)));
+  // Вариант (а), 04.11.2026: извън нормата / свободни часове / без ред → „Подай“ спира.
+  const bl = Array.from(h.doc.querySelectorAll('#gr-submit-issues li')).map(li => li.textContent);
+  ok('извън нормата → „Подай“ спира: прозорец със списъка, без confirm и без submit',
+    !!h.doc.getElementById('gr-submit-modal') && h.calls.confirm.length === 0 && !h.S.calls.some(c => c.action === 'submit'), bl.join(' | '));
+  ok('списъкът казва кой и с колко („Петя Петрова: 4 ч. вместо 84 ч.“, Мария — … вместо 168 ч.)',
+    bl.indexOf('Петя Петрова: 4 ч. вместо 84 ч.') >= 0 && bl.some(t => /^Мария Д'Анджело: [\d,]+ ч\. вместо 168 ч\.$/.test(t)), bl.join(' | '));
+  ok('подсказката под списъка', (h.doc.getElementById('gr-submit-hint') || {}).textContent === 'Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — махни го от месеца.');
+  realClick(h.w, btn(h.doc.getElementById('gr-submit-modal'), 'Затвори'));
+  // Свободни часове в иначе пълен ред също спират.
+  h.w.grSelect(0, 0);
+  h.w.grPaste({ clipboardData: { getData: () => [line, line, line].join('\n') }, preventDefault() {} });
+  ok('попълнени до нормата → 0 извън нормата', h.w.grOffCount() === 0, h.w.grOffCount());
+  h.w.grSelect(2, 0); typeIn(h, '9'); key(h, 'Enter');               // 1.11 (нд) — 9 свободни ч.
+  realClick(h.w, btn(M, 'Подай')); await ticks(8);
+  const bl2 = Array.from(h.doc.querySelectorAll('#gr-submit-issues li')).map(li => li.textContent);
+  ok('свободни часове → спира: „Петя Петрова: 9 свободни ч. на 01.11 — сложи код“',
+    bl2.indexOf('Петя Петрова: 9 свободни ч. на 01.11 — сложи код') >= 0 && !h.S.calls.some(c => c.action === 'submit'), bl2.join(' | '));
+  realClick(h.w, btn(h.doc.getElementById('gr-submit-modal'), 'Затвори'));
+  h.w.grSelect(2, 0); key(h, 'Delete');
+  await wait(1000); await ticks();
+  realClick(h.w, btn(M, 'Подай'));
+  await ticks(8);
+  ok('всичко в нормата → confirm и подаване', h.calls.confirm.length === 1 && !h.doc.querySelector('#gr-submit-modal.open'), h.calls.confirm.length);
   const sub = h.S.calls.filter(c => c.action === 'submit')[0];
   ok('submit е изпратен', !!sub);
   if (sub) {
@@ -246,6 +268,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('кодовете са по 30 (дните)', sub.snapshot.rows.every(r => r.codes.length === 30));
     ok('снимката: заключеният/сменен код и Д5/1 на 4-часовия', sub.snapshot.rows[2].codes[1] === 'Д5/1');
     ok('сборове в снимката', typeof sub.snapshot.totals.man_hours === 'number' && sub.snapshot.norm === 168);
+    ok('снимката носи нормата на човека (сървърът я ползва за „0 ч. вместо N ч.“)', sub.snapshot.rows[0].norm === 168 && sub.snapshot.rows[2].norm === 84, JSON.stringify(sub.snapshot.rows.map(r => r.norm)));
   }
   await ticks(6);
   ok('след подаване: „Подаден от …“, без „Подай“', /Подаден от Управител Кърджали/.test(mod(h).textContent) && !btn(mod(h), 'Подай'));
@@ -448,6 +471,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     r.w.grSelect(0, 1); typeIn(r, 'П'); key(r, 'Enter');
     r.w.grSaveNow();                                                     // записът тръгва и виси 300 мс
     r.w.grSelect(1, 1); typeIn(r, 'В'); key(r, 'Enter');                 // още промяна, докато виси
+    r.w.grSubmitIssues = () => [];                                       // тук се проверява редът на записите, не нормата (тя — в раздел 7)
     realClick(r.w, btn(mod(r), 'Подай'));
     await wait(1200); await ticks(8);
     const order = S.log.join(' ');
@@ -460,6 +484,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     const f = env(MGR, { fail: { save_rows: () => ({ status: 500, body: { ok: false, message: 'boom' } }) } });
     await load(f);
     f.w.grSelect(0, 1); typeIn(f, 'П'); key(f, 'Enter');
+    f.w.grSubmitIssues = () => [];                                       // същото — тук е падналият запис
     realClick(f.w, btn(mod(f), 'Подай'));
     await wait(200); await ticks(8);
     ok('паднал запис → НЕ се подава', !f.S.calls.some(c => c.action === 'submit') && f.calls.toast.some(t => /първо графикът трябва да се запише/.test(t)), f.calls.toast.join(' | '));
@@ -628,6 +653,34 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     realClick(z.w, btn(mod(z), 'Excel за ТРЗ')); await wait(200); await ticks(6);
     ok('код извън ВТР (заключен Д7 от стария правилник) → без файл, казва кой и кой ден', got4.length === 0 &&
       /Иван Иванов Иванов: 4-ви — код „Д7“ не е във ВТР за месеца\./.test(z.doc.getElementById('gr-export-issues').textContent));
+  }
+
+  section('14. Назначен / напуснал в месеца; отказ от сървъра (04.11.2026)');
+  {
+    const S = makeServer();
+    S.staff.filter(s => s.id === 'st-2')[0].hired_on = '2026-11-16';       // Мария — от 16.11: 11 работни дни
+    S.staff.filter(s => s.id === 'st-3')[0].hired_on = '2026-11-29';       // Петя — от 29.11 (нд): само 30.11
+    const n = env(MGR, { server: S });
+    await load(n);
+    const wd = n.w.GrafikEngine.monthInfo('2026-11', []);
+    const from16 = wd.dow.map((w, i) => (w <= 5 && i >= 15 ? 'П' : '')).join('\t');
+    n.w.grSelect(1, 0);
+    n.w.grPaste({ clipboardData: { getData: () => from16 }, preventDefault() {} });
+    const md = n.doc.querySelectorAll('#gr-grid .gr-diff')[1];
+    ok('назначена 16.11, работи всеки работен ден от 16.11 → разлика 0 (цел 88, не 168)', md && md.textContent === '0' && n.w.grCalc.rows[1].target === 88, md && md.textContent);
+    const ws = Array.from(n.doc.querySelectorAll('#gr-warnings .gr-warn-norow')).map(li => li.textContent);
+    ok('Петя (от 29.11, 4 ч.) без ред → „0 ч. вместо 4 ч.“ — нормата е само за 30.11', ws.indexOf('ПЕТЯ: няма ред в графика за месеца (0 ч. вместо 4 ч.)') >= 0, ws.join(' | '));
+    n.w.grRows['st-1'] = { letters: from16.split('\t').map((v, i) => i < 15 && wd.dow[i] <= 5 ? 'П' : v), locked: {} };
+    Object.assign(S.staff.filter(s => s.id === 'st-3')[0], { hired_on: null, left_on: '2026-11-01' });   // напуснала в неделя 1.11 — в месеца, 0 работни дни
+    n.w.grData.staff = S.staff.filter(s => s.store_name === 'Кърджали'); n.w.grRecalc();
+    ok('Петя напуснала 1.11 (нд) е в графика, но с норма 0', n.w.grCalc.rows.length === 3 && n.w.grCalc.rows[2].norm === 0);
+    ok('Иван пълен, Мария от 16.11, Петя с норма 0 и празен ред → нищо не спира', n.w.grSubmitIssues().length === 0, n.w.grSubmitIssues().join(' | '));
+    // Сървърът отказва (напр. друг браузър / стар файл) → същият прозорец със списъка от сървъра.
+    S.fail.submit = () => ({ status: 409, body: { ok: false, reason: 'off_norm', message: 'Графикът не може да се подаде: …', issues: ['Иван Иванов Иванов: 160 ч. вместо 168 ч.'], hint: 'x' } });
+    await wait(1000); await ticks();
+    realClick(n.w, btn(mod(n), 'Подай')); await ticks(10);
+    const si = Array.from(n.doc.querySelectorAll('#gr-submit-issues li')).map(li => li.textContent);
+    ok('409 off_norm от сървъра → прозорецът със списъка му, не тост', JSON.stringify(si) === JSON.stringify(['Иван Иванов Иванов: 160 ч. вместо 168 ч.']) && !n.calls.toast.some(t => /Не е подаден/.test(t)), si.join(' | ') + ' / ' + n.calls.toast.join(' | '));
   }
 
   report();
