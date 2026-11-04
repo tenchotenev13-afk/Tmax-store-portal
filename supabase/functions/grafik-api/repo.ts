@@ -48,15 +48,28 @@ export function makeRepo(): Repo {
       return rows.length > 0;
     },
     async listMonths(month, stores) {
-      let q = db.from("grafik_months").select("id,store_name,month,status,submitted_at,submitted_by,submitted_by_name,updated_at").eq("month", month);
+      // snapshot — за „извън нормата“ на подадените в обзора (черновите са с null).
+      let q = db.from("grafik_months").select(MONTH_COLS).eq("month", month);
       if (stores) q = q.in("store_name", stores.length ? stores : ["—"]);
       return ok(await q);
     },
-    async rowCounts(ids) {
+    async rowStats(ids) {
       if (!ids.length) return {};
-      const rows = ok<{ month_id: string }[]>(await db.from("grafik_rows").select("month_id").in("month_id", ids));
-      const out: Record<string, number> = {};
-      rows.forEach((r) => { out[r.month_id] = (out[r.month_id] || 0) + 1; });
+      const rows = ok<{ month_id: string; updated_at: string | null; updated_by: string | null }[]>(
+        await db.from("grafik_rows").select("month_id,updated_at,updated_by").in("month_id", ids));
+      const out: Record<string, { rows: number; last_at: string | null; last_by: string | null }> = {};
+      rows.forEach((r) => {
+        const o = out[r.month_id] || (out[r.month_id] = { rows: 0, last_at: null, last_by: null });
+        o.rows++;
+        if (r.updated_at && (!o.last_at || r.updated_at > o.last_at)) { o.last_at = r.updated_at; o.last_by = r.updated_by; }
+      });
+      return out;
+    },
+    async userNames(emails) {
+      if (!emails.length) return {};
+      const rows = ok<{ email: string; display_name: string | null }[]>(await db.from("users").select("email,display_name").in("email", emails));
+      const out: Record<string, string> = {};
+      rows.forEach((r) => { if (r.display_name) out[r.email.toLowerCase()] = r.display_name; });
       return out;
     },
     async listRows(monthId) {

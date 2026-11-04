@@ -33,6 +33,8 @@ export type MonthRow = {
 };
 export type RowRec = { id?: string; month_id: string; staff_id: string; letters: string[]; locked: Record<string, string>; sort_order?: number; updated_at?: string; updated_by?: string | null };
 export type Staff = { id: string; store_name: string; [k: string]: unknown };
+// По месец: колко реда има и последната промяна по тях (кой, кога) — за обзора.
+export type RowStat = { rows: number; last_at: string | null; last_by: string | null };
 export type SetupRaw = {
   storeCompany: (Dated & { id: string; store_name: string; company_id: string; blank_name: string; address: string | null })[];
   companies: { id: string; name: string | null; eik: string | null; mol: string | null; addr: string | null }[];
@@ -54,7 +56,8 @@ export interface Repo {
   ensureMonth(store: string, month: string): Promise<MonthRow>;
   updateMonth(id: string, fields: Partial<MonthRow>, expectStatus: string): Promise<boolean>;
   listMonths(month: string, stores: string[] | null): Promise<MonthRow[]>;
-  rowCounts(monthIds: string[]): Promise<Record<string, number>>;
+  rowStats(monthIds: string[]): Promise<Record<string, RowStat>>;
+  userNames(emails: string[]): Promise<Record<string, string>>;
   listRows(monthId: string): Promise<RowRec[]>;
   upsertRows(rows: RowRec[]): Promise<void>;
   listStaff(store: string): Promise<Staff[]>;
@@ -264,6 +267,38 @@ export function submitIssues(staff: Staff[], rows: RowRec[], snapRows: Record<st
       if (norm !== 0) out.push(name + ": " + (r ? "редът в графика е празен" : "няма ред в графика за месеца") + (norm ? " (0 ч. вместо " + hrs(norm) + " ч.)" : ""));
     } else if (sr.diff !== 0) out.push(name + ": " + hrs(Number(sr.official)) + " ч. вместо " + hrs(Number(sr.target)) + " ч.");
     letters.forEach((v, i) => { if (typeof v === "string" && HOURS_RE.test(v)) out.push(name + ": " + v + " свободни ч. на " + p2(i + 1) + "." + p2(month) + " — сложи код"); });
+  }
+  return out;
+}
+
+// Обектите в обзора: с дружество (grafik_store_company) И ВТР на дружеството (grafik_company_terms),
+// валидни към първия ден на месеца. Без дружество → noCompany (admin го вижда като пропуск);
+// с дружество без ВТР (ТЦД 2 — логистичните складове) → извън обхвата, мълчаливо.
+export async function scopeStores(repo: Repo, names: string[], start: string): Promise<{ company: Record<string, string>; noCompany: string[] }> {
+  const [sc, te, co] = await Promise.all([repo.adminList("grafik_store_company"), repo.adminList("grafik_company_terms"), repo.adminList("companies")]) as
+    [SetupRaw["storeCompany"], SetupRaw["terms"], SetupRaw["companies"]];
+  const company: Record<string, string> = {}, noCompany: string[] = [];
+  for (const n of names) {
+    const link = sc.filter((r) => r.store_name === n && validAt(r, start))[0];
+    if (!link) { noCompany.push(n); continue; }
+    if (!te.some((t) => t.company_id === link.company_id && validAt(t, start))) continue;
+    const c = co.filter((x) => x.id === link.company_id)[0];
+    company[n] = (c && c.name) || "—";
+  }
+  return { company, noCompany };
+}
+
+// „Извън нормата" в подадена снимка — същите думи като при „Подай" (submitIssues / grSubmitIssues).
+// Старите снимки (до 04.11.2026) нямат norm → „няма нито един ден".
+export function snapshotOffNorm(snap: unknown): string[] {
+  const rows = isObj(snap) && Array.isArray(snap.rows) ? snap.rows as Record<string, unknown>[] : [];
+  const out: string[] = [];
+  for (const r of rows) {
+    const name = String(r.full_name || r.short_name || "");
+    const empty = !(Array.isArray(r.codes) && r.codes.some((c) => !!c));
+    const norm = typeof r.norm === "number" ? r.norm : null;
+    if (empty && norm !== 0) out.push(name + ": " + (norm ? "няма ред в графика за месеца (0 ч. вместо " + hrs(norm) + " ч.)" : "няма нито един ден"));
+    else if (!empty && typeof r.diff === "number" && r.diff !== 0) out.push(name + ": " + hrs(Number(r.official)) + " ч. вместо " + hrs(Number(r.target)) + " ч.");
   }
   return out;
 }
@@ -510,24 +545,32 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
     }
 
     case "overview": {
+      // Етап 1е-1 (решение на Тенчо 04.11.2026): само обектите, чието дружество има ВТР за
+      // месеца — логистичните складове (ТЦД 2, без ВТР) не са в обхвата. „Извън нормата" —
+      // само за подадените (от снимката); за черновите — последната промяна (кой, кога).
       const m = needMonth(b.month);
       const names = await repo.storeNames();
-      const visible = acc.readAll ? names : names.filter((n) => acc.read.indexOf(n) >= 0);
-      const months = (await repo.listMonths(m.start, acc.readAll ? null : visible))
+      const sc = await scopeStores(repo, names, m.start);
+      const visible = (acc.readAll ? names : names.filter((n) => acc.read.indexOf(n) >= 0)).filter((n) => !!sc.company[n]);
+      const months = (await repo.listMonths(m.start, visible))
         .filter((r) => acc.kind !== "trz" || r.status === "submitted");
-      const counts = await repo.rowCounts(months.map((r) => r.id));
-      const staffN = acc.kind === "trz" ? {} : await repo.staffCounts(acc.readAll ? null : visible);
+      const stats = await repo.rowStats(months.map((r) => r.id));
+      const staffN = acc.kind === "trz" ? {} : await repo.staffCounts(visible);
       const byStore: Record<string, MonthRow> = {};
       months.forEach((r) => { byStore[r.store_name] = r; });
-      const list = (acc.kind === "trz" ? months.map((r) => r.store_name) : visible).map((n) => {
-        const r = byStore[n];
+      const who = await repo.userNames(Array.from(new Set(Object.values(stats).map((s) => (s.last_by || "").toLowerCase()).filter(Boolean))));
+      const list = (acc.kind === "trz" ? visible.filter((n) => !!byStore[n]) : visible).map((n) => {
+        const r = byStore[n], st = r ? stats[r.id] : null, sub = !!r && r.status === "submitted";
+        const lastBy = st && st.last_by ? st.last_by.toLowerCase() : null;
         return {
-          store: n, status: r ? r.status : null, submitted_at: r ? r.submitted_at : null,
-          submitted_by_name: r ? r.submitted_by_name : null, rows: r ? counts[r.id] || 0 : 0,
+          store: n, company: sc.company[n], status: r ? r.status : null, submitted_at: r ? r.submitted_at : null,
+          submitted_by_name: r ? r.submitted_by_name : null, rows: st ? st.rows : 0,
           staff: (staffN as Record<string, number>)[n] || 0, can_edit: canEdit(acc, n),
+          last_at: st ? st.last_at : null, last_by: lastBy ? (who[lastBy] || lastBy) : null,
+          off_norm: sub ? snapshotOffNorm(r!.snapshot) : null,
         };
       });
-      return { month: m.start, stores: list };
+      return { month: m.start, stores: list, no_company: acc.kind === "admin" ? sc.noCompany : [] };
     }
 
     case "admin_get": {

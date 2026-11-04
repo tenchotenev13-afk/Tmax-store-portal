@@ -72,10 +72,13 @@ try {
   const ra = rows.filter((r) => r.staff_id === a.id)[0], rb = rows.filter((r) => r.staff_id === b.id)[0];
   check(rows.length === 2 && ra.letters[0] === "В" && ra.letters[1] === "9" && ra.updated_by === "repo.live-test 2", "upsertRows — презаписва по (month_id, staff_id), не дублира", rows.length);
   check(rb.locked["2"] === "Д4/З" && rb.sort_order === 0, "locked и default sort_order");
-  check((await repo.rowCounts([m1.id]))[m1.id] === 2, "rowCounts");
+  const rs = (await repo.rowStats([m1.id]))[m1.id];
+  check(!!rs && rs.rows === 2 && rs.last_by === "repo.live-test 2" && !!rs.last_at, "rowStats — брой и последната промяна (кой)", rs);
+  const un = await repo.userNames(["ten.tenev@temax.bg", "nyama@nikoj.bg"]);
+  check(!!un["ten.tenev@temax.bg"] && !un["nyama@nikoj.bg"], "userNames — име по имейл; непознат → няма", Object.keys(un));
 
   const lm = await repo.listMonths(MONTH, [STORE, "Гоце Делчев"]);
-  check(lm.length === 1 && lm[0].store_name === STORE, "listMonths с in() по кирилски имена", lm.length);
+  check(lm.length === 1 && lm[0].store_name === STORE && "snapshot" in lm[0], "listMonths с in() по кирилски имена (носи snapshot)", lm.length);
   check((await repo.listMonths(MONTH, [])).length === 0, "listMonths с празен списък → нищо");
   check((await repo.staffCounts([STORE, "Гоце Делчев"]))[STORE] >= 2, "staffCounts с in()");
 

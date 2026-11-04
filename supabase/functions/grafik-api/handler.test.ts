@@ -4,7 +4,8 @@
 // свой/чужд обект, пропуска, beta/ТРЗ списъците, клетките, снимката и валидността по дати.
 import {
   handleGrafik, HttpError, parseEmailList, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
-  type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector,
+  snapshotOffNorm,
+  type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector, type RowStat,
 } from "./handler.ts";
 import { signSession } from "../_shared/session.ts";
 
@@ -81,7 +82,17 @@ class MemRepo implements Repo {
     if (!m) return false; Object.assign(m, f); return true;
   }
   async listMonths(month: string, stores: string[] | null) { return this.months.filter((m) => m.month === month && (!stores || stores.indexOf(m.store_name) >= 0)); }
-  async rowCounts(ids: string[]) { const o: Record<string, number> = {}; this.rows.forEach((r) => { if (ids.indexOf(r.month_id) >= 0) o[r.month_id] = (o[r.month_id] || 0) + 1; }); return o; }
+  async rowStats(ids: string[]) {
+    const o: Record<string, RowStat> = {};
+    this.rows.forEach((r) => {
+      if (ids.indexOf(r.month_id) < 0) return;
+      const s = o[r.month_id] || (o[r.month_id] = { rows: 0, last_at: null, last_by: null });
+      s.rows++;
+      if (r.updated_at && (!s.last_at || r.updated_at > s.last_at)) { s.last_at = r.updated_at; s.last_by = r.updated_by || null; }
+    });
+    return o;
+  }
+  async userNames(emails: string[]) { const o: Record<string, string> = {}; this.users.forEach((u) => { if (emails.indexOf(u.email.toLowerCase()) >= 0 && u.display_name) o[u.email.toLowerCase()] = u.display_name; }); return o; }
   async listRows(monthId: string) { return this.rows.filter((r) => r.month_id === monthId); }
   async upsertRows(rows: RowRec[]) {
     for (const r of rows) {
@@ -427,10 +438,57 @@ Deno.test("reopen: admin и регионалният — да, ръководи�
 Deno.test("overview: регионалният вижда само своите", async () => {
   const r = new MemRepo();
   await filled(r);
-  const o = (await call(r, U.regSh, { action: "overview", month: "2026-11" })).body.stores;
-  eq(o.map((s: { store: string }) => s.store), ["Шумен", "Добрич"], "без Кърджали");
-  const a = (await call(r, U.admin, { action: "overview", month: "2026-11" })).body.stores;
-  eq(a.filter((s: { store: string }) => s.store === "Кърджали")[0].rows, 2, "admin вижда редовете на Кърджали");
+  const ro = (await call(r, U.regSh, { action: "overview", month: "2026-11" })).body;
+  eq(ro.stores.map((s: { store: string }) => s.store), ["Шумен"], "без Кърджали; Добрич е без дружество → не е в обзора");
+  eq(ro.no_company, [], "регионалният не вижда списъка без дружество (той е за admin)");
+  const ab = (await call(r, U.admin, { action: "overview", month: "2026-11" })).body;
+  eq(ab.stores.filter((s: { store: string }) => s.store === "Кърджали")[0].rows, 2, "admin вижда редовете на Кърджали");
+  eq(ab.no_company, ["Добрич"], "admin: обектите без дружество — отделно, за да не се скрие пропуск");
+});
+
+// ── Обзор (етап 1е-1, решение 04.11.2026) ─────────────────────────────────
+Deno.test("overview: обхват — само обекти с дружество И ВТР; ТЦД 2 (без ВТР) мълчаливо навън", async () => {
+  const r = new MemRepo();
+  const C2 = "6a1d0000-0000-4000-8000-0000000000c2";
+  r.stores.push("Логистичен склад Добрич");
+  r.admin.companies.push({ id: C2, name: "\"ТЕМАКС ТЪРГОВСКИ ЦЕНТЪР ЗА ДОМА 2\" ЕООД", eik: "206360338", mol: null, addr: null });
+  r.admin.grafik_store_company.push({ id: nid(), store_name: "Логистичен склад Добрич", company_id: C2, blank_name: "x", address: null, valid_from: null, valid_to: null });
+  // Връзка, изтекла преди месеца → все едно няма дружество.
+  r.admin.grafik_store_company.push({ id: nid(), store_name: "Добрич", company_id: C3, blank_name: "x", address: null, valid_from: null, valid_to: "2026-10-31" });
+  const ab = (await call(r, U.admin, { action: "overview", month: "2026-11" })).body;
+  eq(ab.stores.map((s: { store: string }) => s.store), ["Кърджали", "Шумен", "Раднево"], "ТЦД 2 и Добрич — не");
+  eq(ab.no_company, ["Добрич"], "Добрич (изтекла връзка) — в пропуските; складът на ТЦД 2 — не");
+  eq(ab.stores[0].company, "\"ТЕМАКС ТЪРГОВСКИ ЦЕНТЪР ЗА ДОМА 3\" ЕООД", "дружеството");
+  // Връзката на Добрич от декември → в обзора за декември.
+  r.admin.grafik_store_company.push({ id: nid(), store_name: "Добрич", company_id: C3, blank_name: "x", address: null, valid_from: "2026-12-01", valid_to: null });
+  eq((await call(r, U.admin, { action: "overview", month: "2026-12" })).body.stores.map((s: { store: string }) => s.store).indexOf("Добрич") >= 0, true, "декември — да");
+});
+
+Deno.test("overview: чернова → последна промяна (кой, кога); подаден → извън нормата от снимката", async () => {
+  const r = new MemRepo();
+  const ids = await filled(r);                                              // Кърджали — mgrK
+  await filled(r, "Шумен", U.regSh);
+  const o1 = (await call(r, U.admin, { action: "overview", month: "2026-11" })).body.stores;
+  const k1 = o1.filter((s: { store: string }) => s.store === "Кърджали")[0];
+  eq([k1.status, k1.last_by, typeof k1.last_at, k1.off_norm], ["draft", "Управител Кърджали", "string", null], "чернова: кой (име от users) и кога; без „извън нормата“");
+  eq(o1.filter((s: { store: string }) => s.store === "Раднево")[0].status, null, "не е започнат → status null");
+  const s = snap(ids);
+  await call(r, U.mgrK, { action: "submit", store: "Кърджали", month: "2026-11", snapshot: s });
+  r.months[0].snapshot = { rows: [
+    { full_name: "Красимира Павлова", codes: ["Д1/З"], official: 40, target: 168, diff: -128, norm: 168 },
+    { full_name: "Атанас Бакалов", codes: [""], official: 0, target: 0, diff: 0, norm: 168 },
+    { full_name: "Наред", codes: ["Д1/З"], official: 168, target: 168, diff: 0, norm: 168 },
+  ] };                                                                      // старо подаване (преди правилото)
+  const k2 = (await call(r, U.trz, { action: "overview", month: "2026-11" })).body.stores[0];
+  eq([k2.store, k2.status, k2.off_norm], ["Кърджали", "submitted", ["Красимира Павлова: 40 ч. вместо 168 ч.", "Атанас Бакалов: няма ред в графика за месеца (0 ч. вместо 168 ч.)"]], "ТРЗ вижда кой е извън нормата");
+  eq((await call(r, U.trz, { action: "overview", month: "2026-11" })).body.stores.map((x: { store: string }) => x.store), ["Кърджали"], "ТРЗ — само подадените (Шумен е чернова)");
+});
+
+Deno.test("snapshotOffNorm: празно, стара снимка без norm, норма 0", () => {
+  eq(snapshotOffNorm(null), [], "няма снимка");
+  eq(snapshotOffNorm({ rows: [{ full_name: "А", codes: ["", ""], diff: 0 }] }), ["А: няма нито един ден"], "стара снимка без norm");
+  eq(snapshotOffNorm({ rows: [{ full_name: "Б", codes: [""], diff: 0, norm: 0 }] }), [], "норма 0 — нищо");
+  eq(snapshotOffNorm({ rows: [{ short_name: "В", codes: ["Д1/З"], official: 168.5, target: 168, diff: 0.5 }] }), ["В: 168,5 ч. вместо 168 ч."], "над нормата, кратко име");
 });
 
 // ── Персонал ─────────────────────────────────────────────────────────────
