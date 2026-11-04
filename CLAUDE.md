@@ -586,6 +586,12 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
   запис в `DELETE_ALLOWED`. Граница: записът за `supabase_admin` не може да
   се промени от postgres (42501) — таблица, създадена от supabase_admin, пак
   получава DELETE за anon; нашите миграции вървят като postgres.
+- SECURITY DEFINER за anon (04.11.2026, `definer-functions-anon-schema.sql`):
+  `transit_mark_empty_stores()` — без EXECUTE за public/anon/authenticated
+  (вика я само pg_cron job 22 като postgres); `report_excluded_stores()` —
+  SECURITY INVOKER (чете само публичния `app_settings`, вика я
+  `checklist_portal_values()` от браузъра); `report_cron_schedule()` остава
+  DEFINER с EXECUTE за anon (admin.js, само дни/часове) — решение до етап 2.
 - Не изключвай RLS „за да мине" — това е решение, което се записва в
   миграцията с едно изречение защо, не мълчалив заобикаляне.
 - При `SECURITY DEFINER` функция проверявай ACL-а за водещо `=X/` ПРЕДИ да
