@@ -28,7 +28,7 @@ var GR_LATIN = {a:'А',b:'Б',v:'В',w:'В',g:'Г',d:'Д',e:'Е',z:'З',i:'И',k
 var grTabOk = false, grTabRes = null, grUsersSeq = 0, grLoadSeq = 0;
 var grMe = null;            // отговорът на action "me"
 var grStore = '', grMonth = '';
-var grView = 'grid';        // 'grid' | 'staff' | 'overview'
+var grView = 'grid';        // 'grid' | 'staff' | 'overview' | 'changes'
 var grOverview = null;      // action "overview" за grMonth (етап 1е-1)
 var grData = null;          // load_month
 var grRows = {};            // staff_id → {letters:[], locked:{}}
@@ -188,7 +188,7 @@ function grLoadMonth(seq){
     (grData.rows || []).forEach(function(r){ grRows[r.staff_id] = { letters: (r.letters || []).slice(), locked: r.locked || {} }; });
     grDirty = {}; grSaveState = ''; grSaved = {};
     (grData.rows || []).forEach(function(r){ grSaved[r.staff_id] = 1; });
-    return grLoadPrev(seq).then(function(){
+    return grLoadPrev(seq).then(function(){ return grChLoad(); }).then(function(){
       if(seq !== grLoadSeq) return;
       grRecalc();
       grRender();
@@ -312,6 +312,7 @@ function grToolbar(){
   h += '<span style="flex:1"></span>';
   if(grCanOverview()) h += '<button class="filter-btn' + (grView === 'overview' ? ' active' : '') + '" onclick="grSetView(\'overview\')">🏬 Обекти</button>';
   h += '<button class="filter-btn' + (grView === 'grid' ? ' active' : '') + '" onclick="grSetView(\'grid\')">📅 График</button>';
+  h += '<button class="filter-btn' + (grView === 'changes' ? ' active' : '') + '" onclick="grSetView(\'changes\')">✎ Промени</button>';
   if(!trz) h += '<button class="filter-btn' + (grView === 'staff' ? ' active' : '') + '" onclick="grSetView(\'staff\')">👥 Персонал</button>';
   h += '</div>';
   return h;
@@ -332,6 +333,7 @@ function grRender(){
   if(!grData){ el.innerHTML = grTitle() + grToolbar(); return; }
   var h = grTitle() + grToolbar();
   if(grView === 'staff') h += grStaffHtml();
+  else if(grView === 'changes') h += grChangesHtml();
   else h += grGridPageHtml();
   el.innerHTML = h;
   if(grView === 'grid') grFocusGrid();
@@ -374,7 +376,7 @@ function grDayHead(i){
     (i + 1) + '<br><span style="font-weight:400;font-size:10px;">' + GR_DOW[w] + '</span></th>';
 }
 function grGridHtml(){
-  var M = grCalc.month;
+  var M = grCalc.month, chMap = grChMap();
   /* 31 колони → хоризонтален скрол; в такъв контейнер заглавието не може да залепне под лентата
      на страницата, затова мрежата е кутия с височината на екрана и заглавието залепва в нейния
      горен край (index.html, .gr-grid-wrap thead th), без да закрива редове. */
@@ -398,9 +400,11 @@ function grGridHtml(){
       var outside = (s.hired_on && M.dates[d] < s.hired_on) || (s.left_on && M.dates[d] > s.left_on);
       /* Цветовете от бланката (05.11.2026): ЛД в неделя — червено; О / Б — техните; дни извън
          назначението — сиво; после празник и събота/неделя. Автоматично сменен код — жълто, най-отгоре. */
-      var bg = ch ? '#fde68a' : sunLd[d + 1] ? GR_GRID_FILL.bad : L === 'О' ? GR_GRID_FILL.o : L === 'Б' ? GR_GRID_FILL.b :
+      /* Подаден месец: денят с промяна („Промени“) — оранжев, най-отгоре (бланката: присъствената). */
+      var dev = chMap[s.id + '|' + (d + 1)];
+      var bg = dev ? GR_CH_FILL : ch ? '#fde68a' : sunLd[d + 1] ? GR_GRID_FILL.bad : L === 'О' ? GR_GRID_FILL.o : L === 'Б' ? GR_GRID_FILL.b :
         outside ? GR_GRID_FILL.outside : (hol ? '#fee2e2' : (w >= 6 ? '#f1f5f9' : ''));
-      var title = M.dates[d] + (code ? ' · ' + code : '') + (ch ? ' · автоматично: ' + ch.from + ' → ' + ch.to : '') + (lk ? ' · заключен' : '') + (warnDays[d + 1] ? ' · ⚠ ' + warnDays[d + 1].join('; ') : '');
+      var title = M.dates[d] + (code ? ' · ' + code : '') + (dev ? ' · промяна: ' + (dev.planned_letter || 'почивка') + ' → ' + dev.actual + ' (' + dev.reason + ')' : '') + (ch ? ' · автоматично: ' + ch.from + ' → ' + ch.to : '') + (lk ? ' · заключен' : '') + (warnDays[d + 1] ? ' · ⚠ ' + warnDays[d + 1].join('; ') : '');
       var sel = (grSel.r === r && grSel.d === d);
       h += '<td class="gr-c" id="gr-c-' + r + '-' + d + '" data-r="' + r + '" data-d="' + d + '" onclick="grSelect(' + r + ',' + d + ')" title="' + escAttrVal(title) + '" style="text-align:center;border:1px solid #e2e8f0;cursor:cell;min-width:30px;height:24px;' +
         (bg ? 'background:' + bg + ';' : '') + (sel ? 'outline:2px solid #2563eb;outline-offset:-2px;' : '') + (warnDays[d + 1] ? 'color:#dc2626;font-weight:700;' : '') + '">' +
@@ -788,12 +792,197 @@ function grSubmitBlocked(issues){
 }
 function grReopen(){
   if(!grData || !grData.can_reopen) return;
-  if(!confirm('Връщане на графика за ' + grMonthLabel(grMonth) + ' — ' + grStore + ' в чернова?')) return;
+  var nCh = (grChanges || []).length;
+  if(!confirm('Връщане на графика за ' + grMonthLabel(grMonth) + ' — ' + grStore + ' в чернова?' + (nCh ? '\nИма ' + nCh + (nCh === 1 ? ' промяна — остава' : ' промени — остават') + ' за новото подаване.' : ''))) return;
   return grApi('reopen', { store: grStore, month: grMonth }).then(function(res){
     if(!res.ok){ toast('Не е върнат: ' + grErrText(res), '#dc2626'); return; }
     toast('Графикът е върнат в чернова.');
     return grLoadMonth();
   });
+}
+
+/* ─── „Промени“ (П2, план одобрен 05.11.2026; решения а–з) ─────────────
+   Реалните отклонения от ПОДАДЕН график — лист „Промени“ в бланката v70. Пишат manager /
+   регионален / admin за своя обект; „Отразено в ТРЗ“ отмятат ТРЗ и admin; отразената се пипа
+   само от admin. Всички проверки са в grafik-api (changes_*); тук са само за бърза подсказка.
+   ВТР чл. 19, ал. 4: всяка промяна е актуализация на графика с подпис — „🖨 Промени за подпис“. */
+var GR_CH_ACTUALS = [
+  ['ЛД', 'ЛД — работена смяна'], ['ЗД', 'ЗД — работена смяна'], ['П', 'П — работена смяна'], ['В', 'В — работена смяна'], ['М', 'М — работена смяна'],
+  ['почивка', 'почивка — не е дошъл / почивен по размяна'], ['О', 'О — платен отпуск'], ['Б', 'Б — болничен'], ['Н', 'Н — неплатен отпуск'],
+  ['Д', 'Д — държавни задължения'], ['А', 'А — с разрешение на администрацията'], ['С', 'С — самоотлъчка'], ['Майч', 'Майч — майчинство']
+];
+var GR_CH_FILL = '#F8CBAD';   // „ден с отклонение“ — оранжевото от бланката (ПРИСЪСТВЕНА ФОРМА)
+var grChanges = null;         // changes_list за подадения месец; null — чернова или не е зареден
+function grChCanEdit(){ return grCanEditStaff(); }
+function grChCanTrz(){ return !!grMe && (grMe.kind === 'trz' || !!grMe.can_admin); }
+function grChLoad(){
+  grChanges = null;
+  if(!grData || grData.status !== 'submitted') return Promise.resolve();
+  var store = grStore, month = grMonth;
+  return grApi('changes_list', { store: store, month: month }).then(function(res){
+    if(store !== grStore || month !== grMonth) return;
+    grChanges = res.ok ? (res.data.rows || []) : [];
+    if(!res.ok) toast('Промените не се заредиха: ' + grErrText(res), '#dc2626');
+  });
+}
+function grChMap(){
+  var m = {};
+  (grChanges || []).forEach(function(c){ m[c.staff_id + '|' + c.day] = c; });
+  return m;
+}
+function grChSnapRows(){
+  var s = grData && grData.month_row && grData.month_row.snapshot;
+  return (s && s.rows) || [];
+}
+function grChName(staffId){
+  var r = grChSnapRows().filter(function(x){ return x.staff_id === staffId; })[0];
+  if(r) return r.full_name || r.short_name || '';
+  var s = grStaffById(staffId);
+  return s ? (s.full_name || s.short_name) : '—';
+}
+function grChDayLabel(day){
+  var M = grCalc.month;
+  return grPad(day) + '.' + grPad(M.month) + ' ' + GR_DOW[M.dow[day - 1]];
+}
+/* „По график“ — същото, което сървърът ще запише: буквата от графика и кодът от снимката. */
+function grChPlanned(staffId, day){
+  var L = ((grRows[staffId] || {}).letters || [])[day - 1] || '';
+  var r = grChSnapRows().filter(function(x){ return x.staff_id === staffId; })[0];
+  var code = r && r.codes ? (r.codes[day - 1] || '') : '';
+  return { letter: L, code: code, text: (L || 'почивка') + (code ? ' / ' + code : '') };
+}
+function grChSame(actual, letter){
+  var p = letter === 'НО' ? 'Н' : (letter === '' ? 'почивка' : letter);
+  return actual === p;
+}
+function grChangesHtml(){
+  if(grData.status !== 'submitted'){
+    return '<div class="card" id="gr-ch-draft" style="color:#64748b;">Промените се въвеждат след подаване на графика. По ВТР чл. 19, ал. 4 всяка промяна в утвърдения график е актуализация с подпис.</div>';
+  }
+  var list = (grChanges || []).slice().sort(function(a, b){ return a.day - b.day || grChName(a.staff_id).localeCompare(grChName(b.staff_id), 'bg'); });
+  var open = list.filter(function(c){ return !c.trz_done; }).length, edit = grChCanEdit(), trz = grChCanTrz(), adm = !!(grMe && grMe.can_admin);
+  var h = '<div class="card" id="gr-changes"><div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:8px;">' +
+    '<b>Промени — ' + escVal(grStore) + ', ' + escVal(grMonthLabel(grMonth)) + '</b>' +
+    '<span id="gr-ch-count" style="color:#64748b;font-size:12px;">' + list.length + (list.length === 1 ? ' промяна' : ' промени') + ' · неотразени в ТРЗ: ' + open + '</span><span style="flex:1"></span>' +
+    (edit ? '<button class="btn btn-green" onclick="grChOpen(\'\')">➕ Промяна</button>' : '') +
+    (list.length ? '<button class="btn-sm" onclick="grPrintChanges()" title="ВТР чл. 19, ал. 4 — актуализация с подпис">🖨 Промени за подпис</button>' : '') + '</div>';
+  if(!list.length){
+    h += '<div id="gr-ch-empty" style="color:#64748b;padding:6px 0;">Няма въведени промени за месеца.</div>';
+  } else {
+    h += '<div class="tbl-wrap"><table id="gr-ch-tbl"><thead><tr><th>Дата</th><th style="text-align:left;">Служител</th><th>По график</th><th>Реално</th><th style="text-align:left;">Основание / документ</th><th>Въведено от</th><th>Отразено в ТРЗ</th>' + (edit || adm ? '<th></th>' : '') + '</tr></thead><tbody>';
+    list.forEach(function(c){
+      var who = (c.updated_by || c.created_by || '') + (c.updated_at || c.created_at ? ' · ' + grFmtAt(c.updated_at || c.created_at) : '');
+      var tz = trz ? '<input type="checkbox" class="gr-ch-trz" ' + (c.trz_done ? 'checked ' : '') + 'onchange="grChTrz(\'' + escAttrVal(c.id) + '\',this.checked)" title="' + escAttrVal(c.trz_done ? 'отметнато от ' + (c.trz_done_by || '') + ' · ' + grFmtAt(c.trz_done_at) : 'отметни, когато е отразено в ТРЗ') + '">'
+        : (c.trz_done ? '<span style="color:#16a34a;font-weight:600;" title="' + escAttrVal((c.trz_done_by || '') + ' · ' + grFmtAt(c.trz_done_at)) + '">✔ да</span>' : '<span style="color:#94a3b8;">не</span>');
+      var can = (edit && !c.trz_done) || adm;
+      h += '<tr id="gr-ch-' + escAttrVal(c.id) + '"><td style="white-space:nowrap;">' + escVal(grChDayLabel(c.day)) + '</td><td style="text-align:left;">' + escVal(grChName(c.staff_id)) + '</td>' +
+        '<td>' + escVal((c.planned_letter || 'почивка') + (c.planned_code ? ' / ' + c.planned_code : '')) + '</td><td style="font-weight:700;">' + escVal(c.actual) + '</td>' +
+        '<td style="text-align:left;">' + escVal(c.reason) + '</td><td style="font-size:11px;color:#64748b;">' + escVal(who) + '</td><td style="text-align:center;">' + tz + '</td>' +
+        (edit || adm ? '<td style="white-space:nowrap;">' + (can ? '<button class="btn-sm" onclick="grChOpen(\'' + escAttrVal(c.id) + '\')">✏️</button> <button class="btn-sm" onclick="grChDelete(\'' + escAttrVal(c.id) + '\')">✕</button>'
+          : '<span style="font-size:11px;color:#94a3b8;" title="Отразена в ТРЗ — само admin">🔒</span>') + '</td>' : '') + '</tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  h += '<div style="font-size:11px;color:#64748b;margin-top:6px;">Една промяна за служител и ден. Отразената в ТРЗ се променя само от admin. Денят с промяна е оранжев в графика.</div>';
+  return h + '</div>';
+}
+function grChOpen(id){
+  if(!grChCanEdit() && !(grMe && grMe.can_admin)) return;
+  var c = id ? (grChanges || []).filter(function(x){ return x.id === id; })[0] : null;
+  if(id && !c) return;
+  var M = grCalc.month, rows = grChSnapRows();
+  var staffId = c ? c.staff_id : (rows[0] ? rows[0].staff_id : ''), day = c ? c.day : 1;
+  var days = ''; for(var d = 1; d <= M.days; d++) days += '<option value="' + d + '"' + (d === day ? ' selected' : '') + '>' + escVal(grChDayLabel(d)) + '</option>';
+  var ppl = rows.map(function(r){ return '<option value="' + escAttrVal(r.staff_id) + '"' + (r.staff_id === staffId ? ' selected' : '') + '>' + escVal(r.full_name || r.short_name || '') + '</option>'; }).join('');
+  var act = GR_CH_ACTUALS.map(function(a){ return '<option value="' + escAttrVal(a[0]) + '"' + (c && c.actual === a[0] ? ' selected' : '') + '>' + escVal(a[1]) + '</option>'; }).join('');
+  var f = function(lbl, inner){ return '<label style="display:block;margin:6px 0;font-size:13px;">' + lbl + '<br>' + inner + '</label>'; };
+  var old = document.getElementById('gr-ch-modal');
+  if(old) old.parentNode.removeChild(old);
+  document.body.insertAdjacentHTML('beforeend', '<div class="modal-bg open" id="gr-ch-modal"><div class="modal"><h3>' + (c ? '✏️ Промяна' : '➕ Промяна в графика') + '</h3>' +
+    f('Дата', '<select id="gr-ch-day" style="width:100%;" onchange="grChPlannedShow()">' + days + '</select>') +
+    f('Служител', '<select id="gr-ch-staff" style="width:100%;" onchange="grChPlannedShow()">' + ppl + '</select>') +
+    f('По график', '<b id="gr-ch-planned"></b>') +
+    f('Реално *', '<select id="gr-ch-actual" style="width:100%;">' + (c ? '' : '<option value="">— избери —</option>') + act + '</select>') +
+    f('Основание / документ № *', '<input id="gr-ch-reason" style="width:100%;" maxlength="300" value="' + escAttrVal(c ? c.reason : '') + '">') +
+    '<div class="modal-actions"><button class="btn" onclick="closeModal(\'gr-ch-modal\')">Откажи</button><button class="btn btn-green" onclick="grChSave(\'' + escAttrVal(id || '') + '\')">Запиши</button></div></div></div>');
+  grChPlannedShow();
+}
+function grChPlannedShow(){
+  var el = document.getElementById('gr-ch-planned');
+  if(el) el.textContent = grChPlanned(v('gr-ch-staff'), +v('gr-ch-day')).text;
+}
+function grChSave(id){
+  var staffId = v('gr-ch-staff'), day = +v('gr-ch-day'), actual = v('gr-ch-actual'), reason = v('gr-ch-reason');
+  if(!staffId || !day){ toast('Избери дата и служител.', '#dc2626'); return; }
+  if(!actual){ toast('Избери какво е станало реално.', '#dc2626'); return; }
+  if(!reason){ toast('Основанието / документът е задължително.', '#dc2626'); return; }
+  var p = grChPlanned(staffId, day);
+  if(grChSame(actual, p.letter)){ toast('Няма отклонение — по график е същото (' + (p.letter || 'почивка') + ').', '#dc2626'); return; }
+  var payload = { store: grStore, month: grMonth, staff_id: staffId, day: day, actual: actual, reason: reason };
+  if(id) payload.id = id;
+  return grApi('changes_save', payload).then(function(res){
+    if(!res.ok){ toast('Не е записана: ' + grErrText(res), '#dc2626'); return; }
+    closeModal('gr-ch-modal');
+    toast(id ? 'Промяната е обновена.' : 'Промяната е записана.');
+    return grChLoad().then(function(){ grRender(); });
+  });
+}
+function grChDelete(id){
+  var c = (grChanges || []).filter(function(x){ return x.id === id; })[0];
+  if(!c || !confirm('Да махна промяната за ' + grChName(c.staff_id) + ' на ' + grChDayLabel(c.day) + ' (' + c.actual + ')?')) return;
+  return grApi('changes_delete', { store: grStore, month: grMonth, id: id }).then(function(res){
+    if(!res.ok){ toast('Не е махната: ' + grErrText(res), '#dc2626'); return; }
+    toast('Промяната е махната.');
+    return grChLoad().then(function(){ grRender(); });
+  });
+}
+function grChTrz(id, done){
+  return grApi('changes_trz', { store: grStore, month: grMonth, id: id, done: !!done }).then(function(res){
+    if(!res.ok) toast('Не е отметнато: ' + grErrText(res), '#dc2626');
+    return grChLoad().then(function(){ grRender(); });
+  });
+}
+/* Печат за подпис (ВТР чл. 19, ал. 4) — в #mod-print, както графикът; заглавката е от снимката. */
+function grPrintChanges(){
+  if(!grData || grData.status !== 'submitted' || !(grChanges || []).length) return;
+  var wrap = document.getElementById('mod-print');
+  if(!wrap) return;
+  var snap = (grData.month_row && grData.month_row.snapshot) || {}, H = snap.header || {};
+  var list = grChanges.slice().sort(function(a, b){ return a.day - b.day || grChName(a.staff_id).localeCompare(grChName(b.staff_id), 'bg'); });
+  var css = '@page{size:A4 landscape;margin:8mm 10mm;}' +
+    '#grc-wrap{font-family:Arial,sans-serif;color:#000;}' +
+    '.grc-head{display:flex;justify-content:space-between;gap:8mm;font-size:9px;margin-bottom:2mm;}' +
+    '.grc-title{text-align:center;font-size:13px;font-weight:700;margin:1mm 0;}' +
+    '.grc-tbl{width:277mm;border-collapse:collapse;table-layout:fixed;font-size:8px;}' +
+    '.grc-tbl th,.grc-tbl td{box-sizing:border-box;border:1px solid #333;padding:1mm 0.8mm;white-space:normal;word-wrap:break-word;vertical-align:middle;}' +
+    '.grc-tbl tr:last-child td{border-bottom:1px solid #333;}' +
+    '.grc-tbl th{background:#f1f5f9;font-weight:700;text-align:center;}' +
+    '.grc-tbl tr{page-break-inside:avoid;break-inside:avoid;}' +
+    '.grc-sign{display:flex;justify-content:space-between;gap:10mm;margin-top:6mm;font-size:9px;break-inside:avoid;}' +
+    '@media print{#grc-page{padding:0 !important;}}';
+  var cols = '<col style="width:7mm;"><col style="width:20mm;"><col style="width:48mm;"><col style="width:24mm;"><col style="width:20mm;"><col style="width:66mm;"><col style="width:42mm;"><col style="width:50mm;">';
+  var rows = list.map(function(c, i){
+    return '<tr><td style="text-align:center;">' + (i + 1) + '</td><td style="text-align:center;">' + escVal(grChDayLabel(c.day)) + '</td><td>' + escVal(grChName(c.staff_id)) + '</td>' +
+      '<td style="text-align:center;">' + escVal((c.planned_letter || 'почивка') + (c.planned_code ? ' / ' + c.planned_code : '')) + '</td><td style="text-align:center;font-weight:700;">' + escVal(c.actual) + '</td>' +
+      '<td>' + escVal(c.reason) + '</td><td>' + escVal(c.created_by || '') + '</td><td></td></tr>';
+  }).join('');
+  wrap.innerHTML = '<style>' + css + '</style>' +
+    '<div id="grc-page" style="padding:12px 12px 30px;">' +
+      '<div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">' +
+        '<b style="font-size:16px;">🖨 Промени в графика</b><span style="flex:1"></span>' +
+        '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>' +
+        '<button onclick="showModule(\'grafik\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Назад</button>' +
+      '</div>' +
+      '<div id="grc-wrap">' +
+        '<div class="grc-head"><div>Предприятие: <b>' + escVal(H.company_name || '') + '</b>, ЕИК ' + escVal(H.company_eik || '') + '<br>Адрес: ' + escVal(H.company_addr || '') + '<br>Обект: <b>' + escVal(H.store_blank_name || grStore) + '</b></div>' +
+          '<div style="text-align:right;">Утвърдил: ' + escVal(H.approver || '') + '<br>подпис и печат: ………………</div></div>' +
+        '<div class="grc-title" id="grc-title">ПРОМЕНИ В ГРАФИКА ЗА ЯВЯВАНЕ НА РАБОТА</div>' +
+        '<div style="text-align:center;font-size:10px;margin-bottom:2mm;">за месец ' + escVal(grMonthLabel(grMonth)) + ' · актуализация по ВТР, чл. 19, ал. 4</div>' +
+        '<table class="grc-tbl" id="grc-tbl"><colgroup>' + cols + '</colgroup><thead><tr><th>№</th><th>Дата</th><th>Служител</th><th>По график</th><th>Реално</th><th>Основание / документ №</th><th>Въведено от</th><th>Подпис на служителя</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+        '<div class="grc-sign"><div id="grc-made">Изготвил: ………………………… (ръководител обект)</div><div id="grc-appr">Утвърдил: ' + escVal(H.approver || '') + ' ………………………… (управител)</div></div>' +
+      '</div>' +
+    '</div>';
+  showModule('print');
 }
 
 /* ─── Персонал ─────────────────────────────────────────── */

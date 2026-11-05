@@ -125,6 +125,29 @@ function makeServer(opt) {
         const x = { id: 'sec-new-' + (++S.seq), store_name: b.store, name: b.name, sort_order: 500 }; S.sectors.push(x);
         return { status: 200, body: { ok: true, sector: x } };
       }
+      case 'changes_list': case 'changes_save': case 'changes_delete': case 'changes_trz': {
+        // „Промени“ (П1) — правилата са в handler.ts и се проверяват в handler.test.ts; тук — само формата.
+        const mo = S.months[key(b.store, b.month + '-01')];
+        if (!mo || mo.status !== 'submitted') return { status: 409, body: { ok: false, reason: 'not_submitted', message: 'Промените се въвеждат след подаване на графика.' } };
+        S.changes = S.changes || [];
+        if (b.action === 'changes_list') return { status: 200, body: { ok: true, rows: S.changes.filter(c => c.month_id === mo.id).map(c => Object.assign({}, c)) } };
+        if (b.action === 'changes_trz') {
+          if (M.kind !== 'trz' && M.kind !== 'admin') return { status: 403, body: { ok: false, reason: 'forbidden', message: '„Отразено в ТРЗ“ отмятат ТРЗ.' } };
+          const c = S.changes.filter(x => x.id === b.id)[0];
+          Object.assign(c, b.done ? { trz_done: true, trz_done_by: u.email, trz_done_at: '2026-11-05T12:00:00Z' } : { trz_done: false, trz_done_by: null, trz_done_at: null });
+          return { status: 200, body: { ok: true, row: c } };
+        }
+        if (!canEdit(b.store)) return { status: 403, body: { ok: false, reason: 'readonly', message: 'Нямате права.' } };
+        if (b.action === 'changes_delete') { S.changes = S.changes.filter(x => x.id !== b.id); return { status: 200, body: { ok: true, deleted: 1 } }; }
+        const sr = (mo.snapshot.rows || []).filter(r => r.staff_id === b.staff_id)[0];
+        const row = S.rows.filter(r => r.month_id === mo.id && r.staff_id === b.staff_id)[0];
+        const fields = { staff_id: b.staff_id, day: b.day, actual: b.actual, reason: b.reason, planned_letter: (row && row.letters[b.day - 1]) || '', planned_code: (sr && sr.codes[b.day - 1]) || '',
+          updated_by: u.email, updated_at: '2026-11-05T10:00:00Z' };
+        if (b.id) { Object.assign(S.changes.filter(x => x.id === b.id)[0], fields); return { status: 200, body: { ok: true, row: fields } }; }
+        const c = Object.assign({ id: 'ch-' + (++S.seq), month_id: mo.id, created_by: u.email, created_at: '2026-11-05T10:00:00Z', trz_done: false }, fields);
+        S.changes.push(c);
+        return { status: 200, body: { ok: true, row: c } };
+      }
       case 'access_list': case 'admin_get': case 'access_add': case 'access_remove': case 'admin_save': case 'admin_delete': {
         if (M.kind !== 'admin') return { status: 403, body: { ok: false, reason: 'forbidden', message: 'Само admin.' } };
         if (b.action === 'access_list') return { status: 200, body: { ok: true, rows: S.access.concat((S.beta || []).map((e, i) => ({ id: 'b' + i, list: 'beta', email: e, note: null }))) } };
@@ -1028,6 +1051,110 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     realClick(x.w, btn(d.getElementById('gr-staff-modal'), 'Запиши')); await ticks(6);
     ok('т.10: 409 duplicate → „Не е записан: „иван“ вече е в графика на обекта — …“; формулярът остава', x.calls.toast.some(t => t === 'Не е записан: „иван“ вече е в графика на обекта — сложи различно име в графика.') && !!d.getElementById('gr-staff-modal'), x.calls.toast.slice(-2).join(' | '));
   }
+
+  section('18. П2: екранът „✎ Промени“ (подаден месец)');
+  {
+    const S = makeServer();
+    const calls = (h, a) => h.S.calls.filter(c => c.action === a);
+    // Чернова — само съобщение, без changes_list.
+    S.months['Кърджали|2026-11-01'] = { id: 'm-c', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+    const L1 = new Array(30).fill(''); L1[1] = 'П'; L1[2] = 'П';
+    S.rows.push({ month_id: 'm-c', staff_id: 'st-1', letters: L1, locked: {} });
+    const dr = env(MGR, { server: S });
+    await load(dr);
+    ok('бутон „✎ Промени“ в лентата', !!btn(mod(dr), 'Промени'));
+    realClick(dr.w, btn(mod(dr), 'Промени')); await ticks(6);
+    ok('чернова: „Промените се въвеждат след подаване на графика …“; без changes_list', /Промените се въвеждат след подаване на графика/.test((dr.doc.getElementById('gr-ch-draft') || {}).textContent || '') && !calls(dr, 'changes_list').length);
+
+    // Подаден месец със снимка.
+    const codes1 = new Array(30).fill(''); codes1[1] = 'Д1/З'; codes1[2] = 'Д1/З';
+    Object.assign(S.months['Кърджали|2026-11-01'], { status: 'submitted', submitted_by_name: 'Управител Кърджали', submitted_at: '2026-11-04T10:00:00Z',
+      snapshot: { rows: [{ staff_id: 'st-1', full_name: 'Иван Иванов Иванов', codes: codes1 }, { staff_id: 'st-2', full_name: "Мария Д'Анджело", codes: new Array(30).fill('') }],
+        header: { company_name: '"ТЕМАКС ТЦД 3" ЕООД', company_eik: '207322431', company_addr: 'гр. Варна', store_blank_name: '"Темакс" – Кърджали', approver: 'Теодор Тенев' } } });
+    const x = env(MGR, { server: S });
+    await load(x);
+    const d = x.doc;
+    ok('подаден: changes_list се тегли със зареждането', calls(x, 'changes_list').length === 1 && calls(x, 'changes_list')[0].month === '2026-11');
+    realClick(x.w, btn(mod(x), 'Промени')); await ticks(4);
+    ok('празно: „Няма въведени промени“; „➕ Промяна“ — да; „🖨 Промени за подпис“ — не', !!d.getElementById('gr-ch-empty') && !!btn(mod(x), '➕ Промяна') && !btn(mod(x), 'Промени за подпис'));
+    realClick(x.w, btn(mod(x), '➕ Промяна')); await ticks(2);
+    const md = () => d.getElementById('gr-ch-modal');
+    ok('формулярът: дата (30 дни), служителите от снимката, „по график“ за 1.11 — почивка', md() && d.getElementById('gr-ch-day').options.length === 30 &&
+      Array.from(d.getElementById('gr-ch-staff').options).map(o => o.textContent).join('|') === "Иван Иванов Иванов|Мария Д'Анджело" && d.getElementById('gr-ch-planned').textContent === 'почивка');
+    d.getElementById('gr-ch-day').value = '3'; x.w.grChPlannedShow();
+    ok('„по график“ се сменя с деня: 3.11 → „П / Д1/З“', d.getElementById('gr-ch-planned').textContent === 'П / Д1/З');
+    ok('датите — „03.11 Вт“', d.getElementById('gr-ch-day').options[2].textContent === '03.11 Вт');
+    const nSave = () => calls(x, 'changes_save').length;
+    d.getElementById('gr-ch-actual').value = 'П'; d.getElementById('gr-ch-reason').value = 'x';
+    realClick(x.w, btn(md(), 'Запиши')); await ticks(4);
+    ok('реално = по график → „Няма отклонение …“, без заявка', nSave() === 0 && x.calls.toast.some(t => /^Няма отклонение — по график е същото \(П\)\./.test(t)));
+    d.getElementById('gr-ch-actual').value = 'Б'; d.getElementById('gr-ch-reason').value = '';
+    realClick(x.w, btn(md(), 'Запиши')); await ticks(4);
+    ok('без основание → съобщение, без заявка', nSave() === 0 && x.calls.toast.some(t => /Основанието \/ документът е задължително/.test(t)));
+    d.getElementById('gr-ch-reason').value = 'болничен лист № 123';
+    realClick(x.w, btn(md(), 'Запиши')); await ticks(8);
+    const sv = calls(x, 'changes_save')[0];
+    ok('Запиши → changes_save (служител, ден, реално, основание; „по график“ НЕ се праща)', !!sv && sv.staff_id === 'st-1' && sv.day === 3 && sv.actual === 'Б' && sv.reason === 'болничен лист № 123' && !('planned_letter' in sv) && !('id' in sv), JSON.stringify(sv));
+    const tr = Array.from(d.querySelectorAll('#gr-ch-tbl tbody tr'));
+    ok('списъкът: „03.11 Вт · Иван … · П / Д1/З · Б · болничен лист № 123 · не“', tr.length === 1 && /03\.11 Вт/.test(tr[0].textContent) && /Иван Иванов Иванов/.test(tr[0].textContent) &&
+      /П \/ Д1\/З/.test(tr[0].textContent) && tr[0].children[3].textContent === 'Б' && /болничен лист № 123/.test(tr[0].textContent) && tr[0].children[6].textContent === 'не', tr[0] && tr[0].textContent);
+    ok('броячът „1 промяна · неотразени в ТРЗ: 1“; „🖨 Промени за подпис“ — вече да', /^1 промяна · неотразени в ТРЗ: 1$/.test(d.getElementById('gr-ch-count').textContent) && !!btn(mod(x), 'Промени за подпис'));
+    ok('магазинът не вижда отметката за ТРЗ', !d.querySelector('.gr-ch-trz'));
+    // Мрежата — оранжево.
+    realClick(x.w, btn(mod(x), 'График')); await ticks(4);
+    const c02 = d.getElementById('gr-c-0-2');
+    ok('мрежата: 3.11 при Иван — оранжево (#F8CBAD), с „промяна: П → Б (болничен лист № 123)“', /background:#F8CBAD/.test(c02.getAttribute('style')) && /промяна: П → Б \(болничен лист № 123\)/.test(c02.getAttribute('title')), c02.getAttribute('title'));
+    // Редакция.
+    realClick(x.w, btn(mod(x), 'Промени')); await ticks(4);
+    realClick(x.w, btn(d.querySelector('#gr-ch-tbl tbody tr'), '✏️')); await ticks(2);
+    ok('✏️ → формулярът с текущите стойности', d.getElementById('gr-ch-actual').value === 'Б' && d.getElementById('gr-ch-reason').value === 'болничен лист № 123' && d.getElementById('gr-ch-day').value === '3');
+    d.getElementById('gr-ch-actual').value = 'О';
+    realClick(x.w, btn(md(), 'Запиши')); await ticks(8);
+    ok('редакцията праща id', calls(x, 'changes_save').slice(-1)[0].id === S.changes[0].id && S.changes[0].actual === 'О');
+    // Грешка от сървъра.
+    S.fail.changes_save = () => ({ status: 400, body: { ok: false, reason: 'not_in_schedule', message: 'Служителят не е в подадения график — върни графика в чернова, добави го и го подай пак.' } });
+    realClick(x.w, btn(mod(x), '➕ Промяна')); await ticks(2);
+    d.getElementById('gr-ch-day').value = '5'; d.getElementById('gr-ch-actual').value = 'Б'; d.getElementById('gr-ch-reason').value = 'x';
+    realClick(x.w, btn(md(), 'Запиши')); await ticks(6);
+    ok('отказ от сървъра → „Не е записана: …“, формулярът остава', x.calls.toast.some(t => /^Не е записана: Служителят не е в подадения график/.test(t)) && !!md());
+    delete S.fail.changes_save; realClick(x.w, btn(md(), 'Откажи'));
+    // Печат за подпис.
+    realClick(x.w, btn(mod(x), 'Промени за подпис')); await ticks(4);
+    const pt = d.getElementById('grc-tbl');
+    ok('печат: „ПРОМЕНИ В ГРАФИКА ЗА ЯВЯВАНЕ НА РАБОТА“ + ВТР чл. 19, ал. 4', /^ПРОМЕНИ В ГРАФИКА ЗА ЯВЯВАНЕ НА РАБОТА$/.test(d.getElementById('grc-title').textContent) && /ВТР, чл\. 19, ал\. 4/.test(d.getElementById('mod-print').textContent));
+    ok('печат: колоните — №, Дата, Служител, По график, Реално, Основание, Въведено от, Подпис на служителя', Array.from(pt.querySelectorAll('thead th')).map(t => t.textContent).join('|') === '№|Дата|Служител|По график|Реално|Основание / документ №|Въведено от|Подпис на служителя');
+    ok('печат: редът и празната клетка за подпис; „Утвърдил: Теодор Тенев … (управител)“', pt.querySelectorAll('tbody tr').length === 1 && pt.querySelector('tbody tr').lastElementChild.textContent === '' &&
+      /^Утвърдил: Теодор Тенев .*\(управител\)$/.test(d.getElementById('grc-appr').textContent));
+    x.w.showModule('grafik');
+    // ТРЗ: отметка, без ➕ и без ✏️.
+    const t = env(TRZ, { server: S, beta: BETA_ALL });
+    await load(t);
+    realClick(t.w, btn(t.doc.querySelector('#gr-ov-tbl tbody tr'), 'Отвори')); await ticks(8);
+    realClick(t.w, btn(mod(t), 'Промени')); await ticks(4);
+    ok('ТРЗ: вижда промяната, без „➕ Промяна“ и без ✏️ / ✕', t.doc.querySelectorAll('#gr-ch-tbl tbody tr').length === 1 && !btn(mod(t), '➕ Промяна') && !btn(t.doc.getElementById('gr-ch-tbl'), '✏️'));
+    const cb = t.doc.querySelector('.gr-ch-trz');
+    ok('ТРЗ: отметка „Отразено в ТРЗ“', !!cb && !cb.checked);
+    cb.checked = true; H.fire(t.w, cb, 'change'); await ticks(8);
+    ok('ТРЗ: отметката → changes_trz done:true; след презареждане е отметната', calls(t, 'changes_trz').slice(-1)[0].done === true && t.doc.querySelector('.gr-ch-trz').checked && S.changes[0].trz_done);
+    // Магазинът — отразената е заключена; admin — не.
+    await load(x); realClick(x.w, btn(mod(x), 'Промени')); await ticks(4);
+    ok('магазинът: отразената — 🔒 вместо ✏️ / ✕; колоната казва „✔ да“', !btn(d.getElementById('gr-ch-tbl'), '✏️') && /🔒/.test(d.querySelector('#gr-ch-tbl tbody tr').textContent) && /✔ да/.test(d.querySelector('#gr-ch-tbl tbody tr').textContent));
+    const a = env(ADM, { server: S });
+    await load(a); realClick(a.w, btn(mod(a), 'Промени')); await ticks(4);
+    ok('admin: отразената — ✏️ и ✕ има; отметката също', !!btn(a.doc.getElementById('gr-ch-tbl'), '✏️') && !!a.doc.querySelector('.gr-ch-trz'));
+    // Триене (admin) с потвърждение.
+    realClick(a.w, btn(a.doc.getElementById('gr-ch-tbl'), '✕')); await ticks(8);
+    ok('✕ (с потвърждение) → changes_delete; списъкът е празен', calls(a, 'changes_delete').length === 1 && !!a.doc.getElementById('gr-ch-empty') &&
+      a.calls.confirm.some(m => /^Да махна промяната за Иван Иванов Иванов на 03\.11 Вт \(О\)\?$/.test(m)));
+    // „Върни“ — предупреждение с броя.
+    S.changes.push({ id: 'ch-x', month_id: 'm-c', staff_id: 'st-2', day: 10, actual: 'Б', reason: 'x', planned_letter: '', planned_code: '', trz_done: false });
+    await load(a);
+    realClick(a.w, btn(mod(a), '📅 График')); await ticks(4);
+    a.calls.confirm.length = 0;
+    realClick(a.w, btn(mod(a), 'Върни')); await ticks(6);
+    ok('„Върни в чернова“ — „Има 1 промяна — остава за новото подаване.“', a.calls.confirm.some(m => /\nИма 1 промяна — остава за новото подаване\.$/.test(m)), a.calls.confirm.join(' | '));
+  }
+
 
   report();
 })();
