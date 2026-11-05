@@ -99,6 +99,8 @@ try {
   check(!!cu && cu.trz_done === true && cu.actual === "Б", "updateChange — само отметката");
   const cl = await repo.listChanges(m1.id);
   check(cl.length === 1 && cl[0].id === c1.id, "listChanges по месец", cl.length);
+  const cst = (await repo.changeStats([m1.id]))[m1.id];
+  check(!!cst && cst.n === 1 && cst.open === 0, "changeStats — 1 промяна, 0 неотразени (отметната)", cst);
   check(await repo.deleteChange(c1.id) && !(await repo.deleteChange(c1.id)), "deleteChange — веднъж true, после false");
   const un = await repo.userNames(["ten.tenev@temax.bg", "nyama@nikoj.bg"]);
   check(!!un["ten.tenev@temax.bg"] && !un["nyama@nikoj.bg"], "userNames — име по имейл; непознат → няма", Object.keys(un));

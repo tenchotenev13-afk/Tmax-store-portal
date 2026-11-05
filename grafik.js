@@ -238,7 +238,7 @@ function grOverviewHtml(){
     h += '<div id="gr-ov-empty" style="color:#64748b;padding:8px 0;">' + (trz ? 'Няма подадени графици за ' + escVal(grMonthLabel(grMonth)) : 'Няма обекти за показване.')   /* grMonthLabel завършва на „г.“ */ + '</div>';
   } else {
     h += '<div class="tbl-wrap"><table id="gr-ov-tbl"><thead><tr><th>Обект</th><th>Статус</th><th>' + (trz ? 'Подаден' : 'Подаден / последна промяна') + '</th>' +
-      (trz ? '' : '<th>Служители</th>') + '<th>Извън нормата</th><th></th></tr></thead><tbody>';
+      (trz ? '' : '<th>Служители</th>') + '<th>Извън нормата</th><th>Промени</th><th></th></tr></thead><tbody>';
     list.forEach(function(s, i){
       var st = s.status === 'submitted' ? '<span class="gr-ov-st" style="background:#dcfce7;color:#166534;border-radius:10px;padding:1px 8px;font-weight:600;">✔ Подаден</span>'
         : s.status === 'draft' ? '<span class="gr-ov-st" style="background:#fef3c7;color:#92400e;border-radius:10px;padding:1px 8px;font-weight:600;">✎ Чернова</span>'
@@ -251,6 +251,7 @@ function grOverviewHtml(){
         : '<span style="color:#16a34a;font-weight:600;">всички на нормата</span>';
       h += '<tr id="gr-ov-' + i + '"><td><b>' + escVal(s.store) + '</b><div style="color:#94a3b8;font-size:11px;">' + escVal(s.company || '') + '</div></td><td>' + st + '</td>' +
         '<td class="gr-ov-when" style="font-size:12px;">' + when + '</td>' + (trz ? '' : '<td>' + (+s.staff || 0) + '</td>') + '<td>' + off + '</td>' +
+        '<td class="gr-ov-ch" style="font-size:12px;">' + (s.status === 'submitted' && typeof s.changes === 'number' ? s.changes + (s.changes ? ' · <span style="color:' + (s.changes_open ? '#dc2626' : '#16a34a') + ';">неотразени ' + (s.changes_open || 0) + '</span>' : '') : '<span style="color:#94a3b8;">—</span>') + '</td>' +
         '<td><button class="btn-sm" onclick="grOpenStoreAt(' + i + ')">Отвори →</button></td></tr>';
     });
     h += '</tbody></table></div>';
@@ -357,6 +358,7 @@ function grGridPageHtml(){
   /* 1д: файл за ТРЗ и печат — за всеки, който вижда графика (засега само beta списъка). */
   h += '<button class="btn-sm" onclick="grExportTrz()" title="Excel файл по образеца на ТРЗ">📥 Excel за ТРЗ</button>';
   h += '<button class="btn-sm" onclick="grPrintGrafik()" title="График за явяване на работа — A4 хоризонтално, с подписи">🖨 Печат</button>';
+  if(grData.status === 'submitted') h += grPresenceButtons();
   h += '</div>';
   h += grWarningsHtml();
   h += grCoverageHtml();
@@ -851,6 +853,14 @@ function grChPlanned(staffId, day){
   var code = r && r.codes ? (r.codes[day - 1] || '') : '';
   return { letter: L, code: code, text: (L || 'почивка') + (code ? ' / ' + code : '') };
 }
+// Работната буква трябва да има код за договора (часовете — от снимката) и вида ден (сезон / неделя) — както на сървъра.
+function grChLetterOk(staffId, day, actual){
+  if(['ЛД','ЗД','П','В','М'].indexOf(actual) < 0) return true;
+  var r = grChSnapRows().filter(function(x){ return x.staff_id === staffId; })[0];
+  var hpd = r && +r.hours_per_day ? +r.hours_per_day : 8;
+  var E = GrafikEngine, setup = grData.setup || {}, M = E.monthInfo(grMonth, setup.extra_days);
+  return !!E.translate(E.prepare(setup), actual, M.dow[day - 1], hpd);
+}
 function grChSame(actual, letter){
   var p = letter === 'НО' ? 'Н' : (letter === '' ? 'почивка' : letter);
   return actual === p;
@@ -865,7 +875,7 @@ function grChangesHtml(){
     '<b>Промени — ' + escVal(grStore) + ', ' + escVal(grMonthLabel(grMonth)) + '</b>' +
     '<span id="gr-ch-count" style="color:#64748b;font-size:12px;">' + list.length + (list.length === 1 ? ' промяна' : ' промени') + ' · неотразени в ТРЗ: ' + open + '</span><span style="flex:1"></span>' +
     (edit ? '<button class="btn btn-green" onclick="grChOpen(\'\')">➕ Промяна</button>' : '') +
-    (list.length ? '<button class="btn-sm" onclick="grPrintChanges()" title="ВТР чл. 19, ал. 4 — актуализация с подпис">🖨 Промени за подпис</button>' : '') + '</div>';
+    (list.length ? '<button class="btn-sm" onclick="grPrintChanges()" title="ВТР чл. 19, ал. 4 — актуализация с подпис">🖨 Промени за подпис</button>' : '') + grPresenceButtons() + '</div>';
   if(!list.length){
     h += '<div id="gr-ch-empty" style="color:#64748b;padding:6px 0;">Няма въведени промени за месеца.</div>';
   } else {
@@ -884,7 +894,7 @@ function grChangesHtml(){
     h += '</tbody></table></div>';
   }
   h += '<div style="font-size:11px;color:#64748b;margin-top:6px;">Една промяна за служител и ден. Отразената в ТРЗ се променя само от admin. Денят с промяна е оранжев в графика.</div>';
-  return h + '</div>';
+  return h + '</div>' + grPresenceCheckHtml();
 }
 function grChOpen(id){
   if(!grChCanEdit() && !(grMe && grMe.can_admin)) return;
@@ -918,6 +928,7 @@ function grChSave(id){
   if(!reason){ toast('Основанието / документът е задължително.', '#dc2626'); return; }
   var p = grChPlanned(staffId, day);
   if(grChSame(actual, p.letter)){ toast('Няма отклонение — по график е същото (' + (p.letter || 'почивка') + ').', '#dc2626'); return; }
+  if(!grChLetterOk(staffId, day, actual)){ toast('Буквата „' + actual + '“ няма код за договора на служителя в този ден — избери друга.', '#dc2626'); return; }
   var payload = { store: grStore, month: grMonth, staff_id: staffId, day: day, actual: actual, reason: reason };
   if(id) payload.id = id;
   return grApi('changes_save', payload).then(function(res){
@@ -983,6 +994,179 @@ function grPrintChanges(){
       '</div>' +
     '</div>';
   showModule('print');
+}
+
+/* ─── ПРИСЪСТВЕНА ФОРМА (П3, план одобрен 05.11.2026) ─────────────────
+   = подаденият график (снимката) + „Промени“ — изчисленията са в GrafikEngine.presence.
+   Печат (A4 хоризонтално, 1 лист до 43 реда — мерено в PDF) и Excel за ТРЗ по модела на графика.
+   „Съставил“ — влезлият (решение е). Само за подаден месец. */
+var GR_PRESENCE_LEGEND = 'Оранжево = ден с отклонение от „Промени“. Легенда неявявания: О платен отпуск · М майчинство · Б болест · Д държавни задължения · А с разрешение на администрацията · С самоотлъчка · Н неплатен отпуск';
+var GR_PRESENCE_COLS = [['О', 'Платен отпуск'], ['М', 'Майчинство'], ['Б', 'Болест'], ['Д', 'Изпълн. държ. задълж.'], ['А', 'С разреш. на админ.'], ['С', 'Самоотлъчка'], ['Н', 'Неплатен отпуск']];
+function grPresenceButtons(){
+  return '<button class="btn-sm" onclick="grPrintPresence()" title="График + промени — A4 хоризонтално">🖨 Присъствена</button>' +
+    '<button class="btn-sm" onclick="grExportPresence()" title="Присъствената форма — Excel за ТРЗ">📥 Присъствена Excel</button>';
+}
+function grPresenceModel(){
+  if(!grData || grData.status !== 'submitted' || !grData.month_row || !grData.month_row.snapshot) return null;
+  var snap = grData.month_row.snapshot, H = snap.header || {};
+  var p = GrafikEngine.presence(grData.setup || {}, grMonth, snap.rows || [], grChanges || []);
+  var M = p.month;
+  return { p: p, M: M, header: { company: H.company_name || '', eik: H.company_eik || '', addr: H.company_addr || '', store: H.store_blank_name || grStore,
+    compiledBy: (grMe && grMe.name) || '', monthText: GR_MONTHS[M.month - 1] + ' ' + M.year + ' г.', workDays: M.workDays, norm: M.norm, storeName: grStore, ym: grMonth } };
+}
+// Като Excel за ТРЗ: непознат код или буква без код — файлът не се прави, а се казва къде.
+function grPresenceBlocked(m){
+  var bad = [];
+  m.p.rows.forEach(function(r){ r.issues.forEach(function(t){ bad.push(r.name + ' — ' + t); }); });
+  if(!bad.length) return false;
+  toast('Присъствената не се прави: ' + bad.slice(0, 3).join('; ') + (bad.length > 3 ? ' и още ' + (bad.length - 3) : '') + '.', '#dc2626');
+  return true;
+}
+function grPresenceCell(c){ return typeof c.v === 'number' ? grHrsTxt(c.v) : (c.v || ''); }
+function grPrintPresence(){
+  var m = grPresenceModel();
+  if(!m || grPresenceBlocked(m)) return;
+  var wrap = document.getElementById('mod-print');
+  if(!wrap) return;
+  var M = m.M, H = m.header, nd = M.days, dayCls = function(d){ return M.holiday[d] ? 'grq-hol' : M.dow[d] >= 6 ? 'grq-we' : ''; };
+  var css = '@page{size:A4 landscape;margin:8mm 10mm;}' +
+    '#grq-wrap{font-family:Arial,sans-serif;color:#000;}' +
+    '.grq-head{display:flex;justify-content:space-between;gap:8mm;font-size:9px;margin-bottom:1.5mm;}' +
+    '.grq-title{text-align:center;font-size:13px;font-weight:700;margin:1mm 0;}' +
+    '.grq-tbl{width:277mm;border-collapse:collapse;table-layout:fixed;font-size:7px;}' +
+    '.grq-tbl th,.grq-tbl td{box-sizing:border-box;border:1px solid #333;padding:0.15mm 0.2mm;white-space:normal;word-wrap:break-word;text-align:center;vertical-align:middle;overflow:hidden;}' +
+    '.grq-tbl tr:last-child td{border-bottom:1px solid #333;}' +
+    '.grq-tbl th{background:#f1f5f9;font-weight:700;}' +
+    '.grq-tbl td.grq-name{text-align:left;}' +
+    '.grq-we{background:#e2e8f0;}.grq-hol{background:#fecaca;}.grq-chg{background:' + GR_CH_FILL + ';}' +
+    '#grq-foot{break-inside:avoid;page-break-inside:avoid;font-size:7px;margin-top:2mm;}' +
+    '@media print{.grq-tbl tr{page-break-inside:avoid;}#grq-page{padding:0 !important;}}';
+  var cols = '<col style="width:5mm;"><col style="width:35mm;"><col style="width:24mm;">' + Array.apply(null, Array(nd)).map(function(){ return '<col style="width:5mm;">'; }).join('') +
+    '<col style="width:6mm;"><col style="width:8mm;">' + GR_PRESENCE_COLS.map(function(){ return '<col style="width:4.5mm;">'; }).join('') + '<col style="width:8mm;">';
+  var head = '<tr><th rowspan="2">№</th><th rowspan="2">Трите имена</th><th rowspan="2">Длъжност</th>';
+  for(var d = 0; d < nd; d++) head += '<th class="' + dayCls(d) + '">' + (d + 1) + '</th>';
+  head += '<th rowspan="2">дни</th><th rowspan="2">часове</th>' + GR_PRESENCE_COLS.map(function(c){ return '<th rowspan="2" title="' + escAttrVal(c[1]) + '">' + escVal(c[0]) + '</th>'; }).join('') +
+    '<th rowspan="2">общо ч. вкл. О/Б/Н</th></tr><tr>';
+  for(d = 0; d < nd; d++) head += '<th class="' + dayCls(d) + '">' + GR_DOW1[M.dow[d]] + '</th>';
+  head += '</tr>';
+  var body = m.p.rows.map(function(r, i){
+    var h = '<tr class="grq-row"><td>' + (i + 1) + '</td><td class="grq-name">' + escVal(r.name) + '</td><td>' + escVal(r.title) + '</td>';
+    r.cells.forEach(function(c, d){ h += '<td class="' + (c.change ? 'grq-chg' : dayCls(d)) + '">' + escVal(grPresenceCell(c)) + '</td>'; });
+    return h + '<td>' + r.days + '</td><td>' + grHrsTxt(r.hours) + '</td>' + GR_PRESENCE_COLS.map(function(c){ return '<td>' + r[c[0]] + '</td>'; }).join('') + '<td>' + grHrsTxt(r.total) + '</td></tr>';
+  }).join('');
+  var T = m.p.totals;
+  body += '<tr class="grq-total"><td colspan="' + (3 + nd) + '" style="text-align:right;font-weight:700;">ВСИЧКО за обекта:</td><td>' + T.days + '</td><td>' + grHrsTxt(T.hours) + '</td>' +
+    GR_PRESENCE_COLS.map(function(c){ return '<td>' + T[c[0]] + '</td>'; }).join('') + '<td>' + grHrsTxt(T.total) + '</td></tr>';
+  wrap.innerHTML = '<style>' + css + '</style>' +
+    '<div id="grq-page" style="padding:12px 12px 30px;">' +
+      '<div class="no-print" style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">' +
+        '<b style="font-size:16px;">🖨 Присъствена форма</b><span style="flex:1"></span>' +
+        '<button onclick="window.print()" style="border:none;border-radius:8px;padding:8px 16px;background:#16a34a;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">🖨 Принтирай / Запази PDF</button>' +
+        '<button onclick="showModule(\'grafik\')" style="border:1px solid #e2e8f0;border-radius:8px;padding:8px 14px;background:#fff;font-size:13px;cursor:pointer;">← Назад</button>' +
+      '</div>' +
+      '<div id="grq-wrap">' +
+        '<div class="grq-head"><div>Предприятие: <b>' + escVal(H.company) + '</b>, ЕИК ' + escVal(H.eik) + '<br>Адрес: ' + escVal(H.addr) + '<br>Обект: <b>' + escVal(H.store) + '</b></div>' +
+          '<div style="text-align:right;" id="grq-made">Съставил: ' + escVal(H.compiledBy) + '<br>(име и фамилия)<br>………………………… (подпис)</div></div>' +
+        '<div class="grq-title" id="grq-title">ПРИСЪСТВЕНА ФОРМА</div>' +
+        '<div style="text-align:center;font-size:10px;margin-bottom:2mm;">за месец ' + escVal(H.monthText) + ' · ' + H.workDays + ' раб. дни · ' + H.norm + ' часа</div>' +
+        '<table class="grq-tbl" id="grq-tbl"><colgroup>' + cols + '</colgroup><thead>' + head + '</thead><tbody>' + body + '</tbody></table>' +
+        '<div id="grq-foot">' + escVal(GR_PRESENCE_LEGEND) + '</div>' +
+      '</div>' +
+    '</div>';
+  showModule('print');
+}
+/* Excel за ТРЗ — като файла на графика: без защита, формулите в реда, празният ден е празна клетка. */
+function grBuildPresenceWorkbook(m, ExcelJS){
+  var M = m.M, H = m.header, nd = M.days;
+  var wb = new ExcelJS.Workbook();
+  var ws = wb.addWorksheet(H.ym.slice(5, 7) + '.' + H.ym.slice(0, 4), {
+    pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
+      margins: { left: 0.25, right: 0.25, top: 0.4, bottom: 0.4, header: 0.2, footer: 0.2 }, printTitlesRow: '5:11' }
+  });
+  var D0 = 3, DL = D0 + nd - 1, cDays = DL + 1, cHrs = DL + 2, cL0 = DL + 3, cTot = cL0 + GR_PRESENCE_COLS.length;
+  var C = function(i){ return grColName(i); }, thin = { style: 'thin' }, box = { top: thin, left: thin, bottom: thin, right: thin };
+  ws.columns = [{ width: 4 }, { width: 30 }, { width: 22 }].concat(Array.apply(null, Array(nd)).map(function(){ return { width: 5.6 }; }))
+    .concat([{ width: 7 }, { width: 8 }]).concat(GR_PRESENCE_COLS.map(function(){ return { width: 6 }; })).concat([{ width: 9 }]);
+  var put = function(addr, v, st){ var c = ws.getCell(addr); c.value = v; if(st){ for(var k in st) c[k] = st[k]; } return c; };
+  var bold = { font: { name: 'Arial', size: 9, bold: true } }, norm9 = { font: { name: 'Arial', size: 9 } };
+  ws.mergeCells('A1:C2'); put('A1', 'Предприятие: ' + H.company + ', ЕИК ' + H.eik, { font: { name: 'Arial', size: 9, bold: true }, alignment: { wrapText: true, vertical: 'top' } });
+  ws.mergeCells(C(D0) + '1:' + C(DL) + '2');
+  put(C(D0) + '1', 'ПРИСЪСТВЕНА ФОРМА ' + H.workDays + ' раб.дни/ ' + H.norm + ' часа', { font: { name: 'Arial', size: 12, bold: true }, alignment: { horizontal: 'center', vertical: 'middle' } });
+  ws.mergeCells(C(cDays) + '1:' + C(cTot) + '4');
+  put(C(cDays) + '1', 'Съставил: ' + H.compiledBy + '\n(име и фамилия)\n………………… (подпис)', { font: { name: 'Arial', size: 9, bold: true }, alignment: { wrapText: true, vertical: 'top' } });
+  ws.mergeCells('A3:C3'); put('A3', 'Адрес: ' + H.addr, norm9);
+  ws.mergeCells('A4:C4'); put('A4', 'Обект: ' + H.store, bold);
+  ws.mergeCells(C(D0) + '4:' + C(DL) + '4'); put(C(D0) + '4', 'за месец ' + H.monthText, { font: { name: 'Arial', size: 10, bold: true }, alignment: { horizontal: 'center' } });
+  var hd = { font: { name: 'Arial', size: 8, bold: true }, alignment: { wrapText: true, horizontal: 'center', vertical: 'middle' },
+    fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: GR_FILL.head } }, border: box };
+  [['A', '№'], ['B', 'Трите имена по документ за самоличност'], ['C', 'Длъжност']].forEach(function(x){ ws.mergeCells(x[0] + '5:' + x[0] + '11'); put(x[0] + '5', x[1], hd); });
+  ws.mergeCells(C(D0) + '5:' + C(DL) + '6'); put(C(D0) + '5', 'Дни на месеца', hd);
+  ws.mergeCells(C(cDays) + '5:' + C(cHrs) + '6'); put(C(cDays) + '5', 'Явявания на работа', hd);
+  ws.mergeCells(C(cL0) + '5:' + C(cTot - 1) + '6'); put(C(cL0) + '5', 'Неявявания', hd);
+  ws.mergeCells(C(cDays) + '7:' + C(cDays) + '11'); put(C(cDays) + '7', 'дни', hd);
+  ws.mergeCells(C(cHrs) + '7:' + C(cHrs) + '11'); put(C(cHrs) + '7', 'часове', hd);
+  GR_PRESENCE_COLS.forEach(function(x, i){ var col = C(cL0 + i); ws.mergeCells(col + '7:' + col + '10'); put(col + '7', x[1], hd); put(col + '11', x[0], hd); });
+  ws.mergeCells(C(cTot) + '5:' + C(cTot) + '11'); put(C(cTot) + '5', 'общо часове вкл. О/Б/Н (по договора)', hd);
+  for(var d = 0; d < nd; d++){
+    var col = C(D0 + d), w = M.dow[d], dayFill = M.holiday[d] ? GR_FILL.holiday : (w >= 6 ? GR_FILL.weekend : GR_FILL.head);
+    var dh = { font: { name: 'Arial', size: 8, bold: true }, alignment: { horizontal: 'center', vertical: 'middle' }, border: box, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: dayFill } } };
+    ws.mergeCells(col + '7:' + col + '9'); put(col + '7', '', dh);
+    put(col + '10', GR_DOW1[w], dh); put(col + '11', d + 1, dh);
+  }
+  var r0 = 12, num = { font: { name: 'Arial', size: 9 }, border: box, alignment: { horizontal: 'center', vertical: 'middle' } };
+  m.p.rows.forEach(function(r, i){
+    var row = r0 + i, rng = C(D0) + row + ':' + C(DL) + row, base = { font: { name: 'Arial', size: 9 }, border: box, alignment: { vertical: 'middle' } };
+    put('A' + row, i + 1, base); put('B' + row, r.name, base);
+    put('C' + row, r.title, { font: { name: 'Arial', size: 8 }, border: box, alignment: { vertical: 'middle', wrapText: true } });
+    r.cells.forEach(function(c, d){
+      var cell = ws.getCell(C(D0 + d) + row), w = M.dow[d];
+      if(c.v !== '') cell.value = c.v;                 // празен ден — наистина празна клетка
+      cell.font = { name: 'Arial', size: 8 }; cell.alignment = { horizontal: 'center', vertical: 'middle' }; cell.border = box;
+      var f = c.change ? 'FF' + GR_CH_FILL.slice(1) : (M.holiday[d] ? GR_FILL.holiday : (w >= 6 ? GR_FILL.weekend : null));
+      if(f) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: f } };
+      if(c.change) cell.note = 'промяна: ' + (c.change.planned_letter || 'почивка') + ' → ' + c.change.actual + (c.change.reason ? ' (' + c.change.reason + ')' : '');
+    });
+    put(C(cDays) + row, { formula: 'COUNT(' + rng + ')', result: r.days }, num);
+    put(C(cHrs) + row, { formula: 'SUM(' + rng + ')', result: r.hours }, num);
+    GR_PRESENCE_COLS.forEach(function(x, j){ put(C(cL0 + j) + row, { formula: 'COUNTIF(' + rng + ',"' + x[0] + '")', result: r[x[0]] }, num); });
+    var cO = C(cL0), cB = C(cL0 + 2), cN = C(cL0 + 6);
+    put(C(cTot) + row, { formula: C(cHrs) + row + '+' + r.hpd + '*(' + cO + row + '+' + cB + row + '+' + cN + row + ')', result: r.total }, num);
+  });
+  var last = r0 + m.p.rows.length - 1, tr = last + 1, T = m.p.totals;
+  var tot = { font: { name: 'Arial', size: 9, bold: true }, border: box, alignment: { horizontal: 'center', vertical: 'middle' } };
+  var sum = function(col, v){ return { formula: m.p.rows.length ? 'SUM(' + col + r0 + ':' + col + last + ')' : '0', result: v }; };
+  ws.mergeCells('A' + tr + ':' + C(DL) + tr); put('A' + tr, 'ВСИЧКО за обекта:', { font: { name: 'Arial', size: 9, bold: true }, border: box, alignment: { horizontal: 'right' } });
+  put(C(cDays) + tr, sum(C(cDays), T.days), tot); put(C(cHrs) + tr, sum(C(cHrs), T.hours), tot);
+  GR_PRESENCE_COLS.forEach(function(x, j){ put(C(cL0 + j) + tr, sum(C(cL0 + j), T[x[0]]), tot); });
+  put(C(cTot) + tr, sum(C(cTot), T.total), tot);
+  put('A' + (tr + 2), GR_PRESENCE_LEGEND, norm9);
+  return wb;
+}
+function grPresenceFileName(m){ return 'Присъствена_' + String(m.header.storeName || '').replace(/[\\/:*?"<>|\s]+/g, '_') + '_' + m.header.ym + '.xlsx'; }
+function grExportPresence(){
+  var m = grPresenceModel();
+  if(!m || grPresenceBlocked(m)) return;
+  return grWithExcelJS().then(function(X){
+    var wb = grBuildPresenceWorkbook(m, X);
+    return wb.xlsx.writeBuffer().then(function(buf){ grDownload(buf, grPresenceFileName(m)); toast('📥 ' + grPresenceFileName(m)); });
+  }).catch(function(e){ toast('Файлът не се направи: ' + (e && e.message ? e.message : e), '#dc2626'); });
+}
+/* ПРОВЕРКА L / M / N — реално (присъствената): реални часове, реално − норма, макс. дни в 7,
+   правилата по ВТР чл. 19 върху реалните дни. Под „Промени“, сгъваемо. */
+function grPresenceCheckHtml(){
+  var m = grPresenceModel();
+  if(!m) return '';
+  var bad = m.p.rows.filter(function(r){ return r.realDiff !== 0 || r.maxIn7 > 5 || r.warnings.length || r.issues.length; }).length;
+  var h = '<details class="card" id="gr-real"' + (bad ? ' open' : '') + '><summary style="cursor:pointer;font-weight:600;">Проверка — реално (присъствената)' + (bad ? ' · <span style="color:#dc2626;">' + bad + ' за внимание</span>' : ' · всичко наред') + '</summary>' +
+    '<div class="tbl-wrap"><table id="gr-real-tbl"><thead><tr><th style="text-align:left;">Служител</th><th>Реални часове</th><th>Реално − норма</th><th>Макс. дни в 7</th><th style="text-align:left;">ВТР чл. 19 (реално)</th></tr></thead><tbody>';
+  m.p.rows.forEach(function(r){
+    h += '<tr><td style="text-align:left;">' + escVal(r.name) + '</td><td>' + grHrsTxt(r.hours) + '</td>' +
+      '<td class="gr-real-diff" style="' + (r.realDiff !== 0 ? 'color:#dc2626;font-weight:700;' : 'color:#16a34a;') + '">' + (r.realDiff > 0 ? '+' : '') + grHrsTxt(r.realDiff) + '</td>' +
+      '<td style="' + (r.maxIn7 > 5 ? 'color:#dc2626;font-weight:700;' : '') + '">' + r.maxIn7 + '</td>' +
+      '<td style="text-align:left;font-size:11px;">' + (r.issues.length ? '<span class="gr-real-issue" style="color:#dc2626;font-weight:700;">' + escVal(r.issues.join('; ')) + '</span>' + (r.warnings.length ? '; ' : '') : '') +
+        escVal(r.warnings.map(function(w){ return w.text; }).join('; ')) + '</td></tr>';
+  });
+  return h + '</tbody></table></div></details>';
 }
 
 /* ─── Персонал ─────────────────────────────────────────── */

@@ -438,6 +438,63 @@
     return { month: M, rows: out, totals: tot, notes: notes };
   };
 
+  /* ── ПРИСЪСТВЕНА ФОРМА (П3, план одобрен 05.11.2026) ─────────────────────
+     = подаденият график (кодовете от снимката, след изравняването) + „Промени“.
+     Ден с промяна: работна буква → код по сезона, неделята и договора → часовете на кода
+     (без изравняване — както бланката); неявяване → буквата (Майч → „М“); почивка → празно.
+     Ден без промяна: празно → празно; О / Б / Н → буквата; иначе часовете на кода.
+     Колоните: AI дни (с часове), AJ часове, О, М, Б, Д, А, С, Н, AR = AJ + договор × (О + Б + Н).
+     ПРОВЕРКА L/M/N: реално − норма (норма на човека − договор × (О + Б + Н)), макс. дни в 7,
+     и правилата по ВТР чл. 19 върху реалните дни. */
+  E.PRESENCE_ABSENCE = { 'О': 'О', 'Б': 'Б', 'Н': 'Н', 'Д': 'Д', 'А': 'А', 'С': 'С', 'Майч': 'М', 'почивка': '' };
+  E.PRESENCE_LETTERS = ['О', 'М', 'Б', 'Д', 'А', 'С', 'Н'];
+  // snapRows: снимката на подадения месец [{staff_id, full_name, contract_title, hours_per_day, codes, norm}];
+  // changes: [{staff_id, day, actual, reason}].
+  E.presence = function (setup, ym, snapRows, changes) {
+    var P = E.prepare(setup), M = E.monthInfo(ym, setup.extra_days);
+    var byKey = {};
+    (changes || []).forEach(function (c) { byKey[c.staff_id + '|' + c.day] = c; });
+    var tot = { days: 0, hours: 0, total: 0 };
+    E.PRESENCE_LETTERS.forEach(function (l) { tot[l] = 0; });
+    var rows = (snapRows || []).map(function (sr) {
+      var hpd = +sr.hours_per_day || 8, cells = [], days = [], issues = [];
+      var dd = function (d) { return ('0' + (d + 1)).slice(-2) + '.' + ('0' + M.month).slice(-2); };
+      for (var d = 0; d < M.days; d++) {
+        var ch = byKey[sr.staff_id + '|' + (d + 1)], code = ((sr.codes || [])[d]) || '', v;
+        if (ch) {
+          if (ch.actual in E.PRESENCE_ABSENCE) { v = E.PRESENCE_ABSENCE[ch.actual]; code = ch.actual === 'О' || ch.actual === 'Б' || ch.actual === 'Н' ? ch.actual : ''; }
+          else {
+            // Без код (напр. М при договор, за който буквата няма код): „М?“ — да не се брои като майчинство.
+            code = E.translate(P, ch.actual, M.dow[d], hpd);
+            if (code && P.codes[code]) v = E.codeHours(P, code);
+            else { v = ch.actual + '?'; issues.push(dd(d) + ': „' + ch.actual + '“ няма код за договор ' + hpd + ' ч.'); }
+          }
+        } else if (!code) v = '';
+        else if (code === 'О' || code === 'Б' || code === 'Н') v = code;
+        else if (P.codes[code]) v = E.codeHours(P, code);
+        else { v = code + '?'; issues.push(dd(d) + ': кодът „' + code + '“ липсва в настройката на ВТР'); }
+        cells.push({ v: v, code: code, change: ch || null });
+        var di = dayInfo(P, typeof v === 'number' ? code : '', '');
+        days.push({ date: M.dates[d], worked: di.worked, hours: di.hours, shift: di.shift, start: di.start, end: di.end, own: true });
+      }
+      var num = cells.filter(function (c) { return typeof c.v === 'number'; });
+      var r = { staff_id: sr.staff_id, name: sr.full_name || sr.short_name || '', title: sr.contract_title || '', hpd: hpd, cells: cells,
+        days: num.length, hours: num.reduce(function (s, c) { return s + c.v; }, 0), changes: cells.filter(function (c) { return c.change; }).length, issues: issues };
+      E.PRESENCE_LETTERS.forEach(function (l) { r[l] = cells.filter(function (c) { return c.v === l; }).length; });
+      r.total = r.hours + hpd * (r['О'] + r['Б'] + r['Н']);
+      var norm = typeof sr.norm === 'number' ? sr.norm : M.workDays * hpd;
+      r.realDiff = r.days ? Math.round((r.hours - (norm - hpd * (r['О'] + r['Б'] + r['Н']))) * 2) / 2 : 0;
+      var mx = 0;
+      for (var w = 0; w + 7 <= M.days; w++) { var n7 = 0; for (var k = w; k < w + 7; k++) if (typeof cells[k].v === 'number') n7++; if (n7 > mx) mx = n7; }
+      r.maxIn7 = mx;
+      r.warnings = E.restWarnings(days, M, false).filter(function (x) { return x.type !== 'shift_over_12'; });
+      tot.days += r.days; tot.hours += r.hours; tot.total += r.total;
+      E.PRESENCE_LETTERS.forEach(function (l) { tot[l] += r[l]; });
+      return r;
+    });
+    return { month: M, rows: rows, totals: tot };
+  };
+
   if (typeof module !== 'undefined' && module.exports) module.exports = E;
   else root.GrafikEngine = E;
 })(this);

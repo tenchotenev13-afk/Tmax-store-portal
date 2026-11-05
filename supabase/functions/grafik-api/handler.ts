@@ -75,6 +75,7 @@ export interface Repo {
   updateMonth(id: string, fields: Partial<MonthRow>, expectStatus: string): Promise<boolean>;
   listMonths(month: string, stores: string[] | null): Promise<MonthRow[]>;
   rowStats(monthIds: string[]): Promise<Record<string, RowStat>>;
+  changeStats(monthIds: string[]): Promise<Record<string, { n: number; open: number }>>;
   userNames(emails: string[]): Promise<Record<string, string>>;
   listRows(monthId: string): Promise<RowRec[]>;
   upsertRows(rows: RowRec[]): Promise<void>;
@@ -316,7 +317,7 @@ async function submittedMonth(repo: Repo, store: string, ym: unknown) {
   return { m, month };
 }
 // Всички проверки на един ред „Промени“ → „по график“ (буква и официален код).
-async function checkChange(repo: Repo, m: { start: string; days: number }, month: MonthRow, staffId: unknown, day: unknown, actual: unknown, reason: unknown) {
+async function checkChange(repo: Repo, store: string, m: { start: string; end: string; days: number }, month: MonthRow, staffId: unknown, day: unknown, actual: unknown, reason: unknown) {
   const sid = uuid(staffId, "служител");
   if (typeof day !== "number" || !Number.isInteger(day) || day < 1 || day > m.days) throw new HttpError(400, "bad_request", "Денят не е в месеца.");
   if (typeof actual !== "string" || CHANGE_ACTUALS.indexOf(actual) < 0) throw new HttpError(400, "bad_request", "„Реално“ е една от: " + CHANGE_ACTUALS.join(", ") + ".");
@@ -333,6 +334,16 @@ async function checkChange(repo: Repo, m: { start: string; days: number }, month
   }
   // Решение в: ЛД в неделя — както в графика.
   if (actual === "ЛД" && new Date(date + "T00:00:00Z").getUTCDay() === 0) throw new HttpError(400, "sunday_ld", "ЛД в неделя — ползвай ЗД.");
+  // Работната буква трябва да има код за договора на човека (П3: присъствената я превежда по договора;
+  // напр. ЛД при 4 ч. няма код). Буквите — от grafik_letter_map за ВТР на месеца.
+  if (["ЛД", "ЗД", "П", "В", "М"].indexOf(actual) >= 0) {
+    // Часовете — от снимката (присъствената превежда по нея), не от днешния договор.
+    const hpd = typeof sr.hours_per_day === "number" && sr.hours_per_day > 0 ? sr.hours_per_day : (st && st.hours_per_day ? +st.hours_per_day : 8);
+    const setup = resolveSetup(await repo.setupRaw(store), m.start, m.end);
+    const kind = new Date(date + "T00:00:00Z").getUTCDay() === 0 ? "Н" : setup.season;
+    const okL = setup.letter_map.some((l) => l.letter === actual && l.day_kind === kind && (hpd === 8 ? (l.hours_per_day === null || l.hours_per_day === undefined) : +(l.hours_per_day as number) === hpd));
+    if (!okL) throw new HttpError(400, "letter_contract", "Буквата „" + actual + "“ няма код за договор " + hpd + " ч." + (kind === "Н" ? " в неделя" : "") + ".");
+  }
   const row = (await repo.listRows(month.id)).filter((r) => r.staff_id === sid)[0];
   const plannedLetter = row && Array.isArray(row.letters) && typeof row.letters[day - 1] === "string" ? row.letters[day - 1] : "";
   const plannedCode = Array.isArray(sr.codes) && typeof sr.codes[day - 1] === "string" ? sr.codes[day - 1] as string : "";
@@ -630,7 +641,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
     case "changes_save": {
       const store = await needStore(repo, acc, b.store, "edit");
       const { m, month } = await submittedMonth(repo, store, b.month);
-      const ch = await checkChange(repo, m, month, b.staff_id, b.day, b.actual, b.reason);
+      const ch = await checkChange(repo, store, m, month, b.staff_id, b.day, b.actual, b.reason);
       const all = await repo.listChanges(month.id);
       const self = b.id === undefined || b.id === null ? null : uuid(b.id, "id");
       const cur = self ? all.filter((c) => c.id === self)[0] : null;
@@ -701,6 +712,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const months = (await repo.listMonths(m.start, visible))
         .filter((r) => acc.kind !== "trz" || r.status === "submitted");
       const stats = await repo.rowStats(months.map((r) => r.id));
+      const chs = await repo.changeStats(months.filter((r) => r.status === "submitted").map((r) => r.id));   // П3: „промени / неотразени“
       const staffN = acc.kind === "trz" ? {} : await repo.staffCounts(visible);
       const byStore: Record<string, MonthRow> = {};
       months.forEach((r) => { byStore[r.store_name] = r; });
@@ -714,6 +726,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
           staff: (staffN as Record<string, number>)[n] || 0, can_edit: canEdit(acc, n),
           last_at: st ? st.last_at : null, last_by: lastBy ? (who[lastBy] || lastBy) : null,
           off_norm: sub ? snapshotOffNorm(r!.snapshot) : null,
+          changes: sub ? (chs[r!.id] || { n: 0, open: 0 }).n : null, changes_open: sub ? (chs[r!.id] || { n: 0, open: 0 }).open : null,
         };
       });
       return { month: m.start, stores: list, no_company: acc.kind === "admin" ? sc.noCompany : [] };

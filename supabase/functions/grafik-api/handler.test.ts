@@ -57,7 +57,8 @@ class MemRepo implements Repo {
                            { id: nid(), store_name: "Шумен", company_id: C3, blank_name: "\"Темакс\" - Шумен", address: null, valid_from: null, valid_to: null },
                            { id: nid(), store_name: "Раднево", company_id: CY, blank_name: "\"Темакс\" – Раднево", address: "гр. Раднево", valid_from: null, valid_to: null }],
     grafik_extra_days: [],
-    grafik_letter_map: ["ЛД", "ЗД", "П", "В", "М", "О4", "К", "О", "Б", "НО"].map((l) => ({ id: nid(), vtr_id: VTR, letter: l, day_kind: "З1", code: "x", valid_from: null, valid_to: null })),
+    // Като базата: при 8 ч. всяка буква има ред и за неделя („Н“).
+    grafik_letter_map: ["З1", "Н"].flatMap((k) => ["ЛД", "ЗД", "П", "В", "М", "О4", "К", "О", "Б", "НО"].map((l) => ({ id: nid(), vtr_id: VTR, letter: l, day_kind: k, code: "x", valid_from: null, valid_to: null }))),
   };
   opened = 0;
   sectors: Sector[] = [
@@ -72,6 +73,7 @@ class MemRepo implements Repo {
     }
   }
   async getUser(id: string) { return this.users.filter((u) => u.id === id)[0] || null; }
+  async changeStats(ids: string[]) { const o: Record<string, { n: number; open: number }> = {}; this.changes.forEach((c) => { if (ids.indexOf(c.month_id) < 0) return; const x = o[c.month_id] || (o[c.month_id] = { n: 0, open: 0 }); x.n++; if (!c.trz_done) x.open++; }); return o; }
   async listChanges(monthId: string) { return this.changes.filter((c) => c.month_id === monthId).map((c) => ({ ...c })); }
   async insertChange(f: Record<string, unknown>) { const c = { id: nid(), trz_done: false, ...f } as ChangeRow; this.changes.push(c); return { ...c }; }
   async updateChange(id: string, f: Record<string, unknown>) { const c = this.changes.filter((x) => x.id === id)[0]; if (!c) return null; Object.assign(c, f); return { ...c }; }
@@ -631,6 +633,44 @@ Deno.test("changes и „Върни“ / ново подаване (решени
   eq([s2.status, s2.body.changes_removed], [200, 1], "ново подаване — махната е промяната след напускането");
   eq(r.changes.map((c) => c.staff_id + ":" + c.day), [ids[0] + ":3"], "останалата");
   assert(JSON.stringify(r.audits.slice(-1)[0]).indexOf("grafik_submit") >= 0, "одит на подаването");
+});
+
+Deno.test("changes_save: работната буква трябва да има код за договора (П3)", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  r.staff.filter((s) => s.id === ids[1])[0].hours_per_day = 4;
+  const x = await chg(r, U.mgrK, { staff_id: ids[1], day: 5, actual: "П", reason: "дошла" });
+  eq([x.status, x.body.reason], [400, "letter_contract"], "П за 4 ч. — няма ред в буквите → отказ");
+  assert(/Буквата „П“ няма код за договор 4 ч\./.test(String(x.body.message)), "съобщението");
+  r.admin.grafik_letter_map.push({ id: nid(), vtr_id: VTR, letter: "П", day_kind: "З1", code: "Д5/1", hours_per_day: 4, valid_from: null, valid_to: null });
+  eq((await chg(r, U.mgrK, { staff_id: ids[1], day: 5, actual: "П", reason: "дошла" })).status, 200, "с ред за 4 ч. — може");
+  eq((await chg(r, U.mgrK, { staff_id: ids[1], day: 6, actual: "Б", reason: "болничен" })).status, 200, "неявяване — без проверка на буквите");
+  eq((await chg(r, U.mgrK, { staff_id: ids[0], day: 5, actual: "ЛД", reason: "x" })).status, 200, "8 ч. — общите букви");
+  // Часовете — от СНИМКАТА: договорът е сменен след подаването, присъствената превежда по снимката.
+  (r.months[0].snapshot as { rows: Record<string, unknown>[] }).rows[0].hours_per_day = 8;
+  r.staff.filter((s) => s.id === ids[0])[0].hours_per_day = 4;
+  eq((await chg(r, U.mgrK, { staff_id: ids[0], day: 9, actual: "ЗД", reason: "x" })).status, 200, "снимката е 8 ч. — общите букви, не днешните 4 ч.");
+  // Видът ден: 8.11.2026 е неделя. Като базата: при 4 ч. П има ред за сезона, но не и за „Н“.
+  (r.months[0].snapshot as { rows: Record<string, unknown>[] }).rows[1].hours_per_day = 4;
+  const n = await chg(r, U.mgrK, { staff_id: ids[1], day: 8, actual: "П", reason: "извикана" });
+  eq([n.status, n.body.reason], [400, "letter_contract"], "4 ч., П в неделя без ред П|Н → отказ");
+  assert(/няма код за договор 4 ч. в неделя./.test(String(n.body.message)), "съобщението казва „в неделя“: " + n.body.message);
+  r.admin.grafik_letter_map.push({ id: nid(), vtr_id: VTR, letter: "П", day_kind: "Н", code: "x", hours_per_day: 4, valid_from: null, valid_to: null });
+  eq((await chg(r, U.mgrK, { staff_id: ids[1], day: 8, actual: "П", reason: "извикана" })).status, 200, "с ред П|Н за 4 ч. — може");
+});
+
+Deno.test("overview: за подадените — брой промени и неотразени (П3)", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const a = await chg(r, U.mgrK, { staff_id: ids[0], day: 5, actual: "Б", reason: "x" });
+  await chg(r, U.mgrK, { staff_id: ids[0], day: 6, actual: "Б", reason: "x" });
+  await call(r, U.trz, { action: "changes_trz", store: "Кърджали", month: "2026-11", id: a.body.row.id, done: true });
+  const o = (await call(r, U.admin, { action: "overview", month: "2026-11" })).body.stores;
+  const k = o.filter((s: { store: string }) => s.store === "Кърджали")[0], sh = o.filter((s: { store: string }) => s.store === "Шумен")[0];
+  eq([k.changes, k.changes_open], [2, 1], "Кърджали: 2 промени, 1 неотразена");
+  eq([sh.changes, sh.changes_open], [null, null], "неподаден — без брой");
+  const t = (await call(r, U.trz, { action: "overview", month: "2026-11" })).body.stores[0];
+  eq([t.store, t.changes, t.changes_open], ["Кърджали", 2, 1], "ТРЗ вижда същото");
 });
 
 Deno.test("sameAsPlanned / staleChanges", () => {

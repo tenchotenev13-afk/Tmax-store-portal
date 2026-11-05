@@ -26,6 +26,13 @@ export function makeRepo(): Repo {
     async getUser(id) {
       return ok(await db.from("users").select(USER_COLS).eq("id", id).maybeSingle());
     },
+    async changeStats(ids) {
+      if (!ids.length) return {};
+      const rows = ok<{ month_id: string; trz_done: boolean }[]>(await db.from("grafik_changes").select("month_id,trz_done").in("month_id", ids));
+      const out: Record<string, { n: number; open: number }> = {};
+      rows.forEach((r) => { const o = out[r.month_id] || (out[r.month_id] = { n: 0, open: 0 }); o.n++; if (!r.trz_done) o.open++; });
+      return out;
+    },
     async listChanges(monthId) {
       return ok<ChangeRow[]>(await db.from("grafik_changes").select("*").eq("month_id", monthId).order("day").order("created_at"));
     },

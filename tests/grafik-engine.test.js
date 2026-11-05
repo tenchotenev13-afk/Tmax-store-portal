@@ -419,5 +419,48 @@ check('internalNorm = 168 − 8 × (Б + НО в периода на работ�
 check('internalNorm при назначен 16.11 — само дните на работа: 88 − 8 × 1 (Б на 17.11) = 80',
   E.computeRow(P11, M11, { hours_per_day: 8, hired_on: '2026-11-16' }, L30({ 10: 'Б', 17: 'Б' }), {}).internalNorm === 80);
 
+/* ── 11. ПРИСЪСТВЕНА ФОРМА = подаден график + „Промени“ (П3, 05.11.2026) ── */
+// Ноември 2026 (З1): 1.11 нд. Иван — П всеки делник (Д1/З, 168 ч.); О на 16.11, К на 20.11; Петя (4 ч.) — П всеки делник (Д5/1).
+var pv = wkLetters(M11, 1, 30); pv[15] = 'О'; pv[19] = 'К';
+var pvR = E.computeRow(P11, M11, { hours_per_day: 8 }, pv, {});
+var p4R = E.computeRow(P11, M11, { hours_per_day: 4 }, wkLetters(M11, 1, 30), {});
+var pvCodes = pvR.codes.slice(); pvCodes[22] = 'Д7';                                   // отпаднал код в снимката (23.11)
+var SNAP = [{ staff_id: 'i', full_name: 'Иван', hours_per_day: 8, codes: pvCodes, norm: 168 }, { staff_id: 'p', full_name: 'Петя', hours_per_day: 4, codes: p4R.codes, norm: 84 }];
+var CH = [
+  { staff_id: 'i', day: 2, actual: 'Б' }, { staff_id: 'i', day: 3, actual: 'ЛД' }, { staff_id: 'i', day: 8, actual: 'ЗД' }, { staff_id: 'i', day: 4, actual: 'почивка' },
+  { staff_id: 'i', day: 5, actual: 'Майч' }, { staff_id: 'i', day: 6, actual: 'Д' }, { staff_id: 'i', day: 9, actual: 'А' }, { staff_id: 'i', day: 10, actual: 'С' },
+  { staff_id: 'i', day: 11, actual: 'Н' }, { staff_id: 'i', day: 12, actual: 'О' }, { staff_id: 'i', day: 16, actual: 'П' },
+  { staff_id: 'p', day: 2, actual: 'В' }, { staff_id: 'p', day: 3, actual: 'ЛД' }
+];
+var PR = E.presence(S11, '2026-11', SNAP, CH), pi = PR.rows[0], pp = PR.rows[1];
+var cv = function (r, d) { return r.cells[d - 1].v; };
+check('присъствена: без промяна — часовете на кода (2-ри по график Д1/З = 8 → тук е с промяна; 13.11 = 8), празно, О от графика',
+  cv(pi, 13) === 8 && cv(pi, 1) === '' && cv(pi, 17) === 8 && cv(pi, 7) === '', [cv(pi, 13), cv(pi, 1), cv(pi, 7)].join());
+check('промяна: Б → „Б“; ЛД → Д5/З = 10.5; ЗД в неделя → Д6/1 = 9; почивка → празно', cv(pi, 2) === 'Б' && cv(pi, 3) === 10.5 && cv(pi, 8) === 9 && cv(pi, 4) === '');
+check('промяна: Майч → „М“; Д, А, С, Н, О — буквите', cv(pi, 5) === 'М' && cv(pi, 6) === 'Д' && cv(pi, 9) === 'А' && cv(pi, 10) === 'С' && cv(pi, 11) === 'Н' && cv(pi, 12) === 'О');
+check('промяна в ден О по график (16.11 → П) → 8 ч.; О от графика намалява', cv(pi, 16) === 8 && pvR.codes[15] === 'О');
+check('К (командировка) от графика → часовете на пълната смяна (10.5)', cv(pi, 20) === 10.5);
+check('отпаднал код в снимката (Д7) → „Д7?“, не число, и проблем (печатът и Excel-ът спират)', cv(pi, 23) === 'Д7?' && pi.issues.some(function (t) { return t === '23.11: кодът „Д7“ липсва в настройката на ВТР'; }), JSON.stringify(pi.issues));
+check('ден с промяна е отбелязан (за оранжевото), без промяна — не', !!pi.cells[1].change && !pi.cells[12].change && pi.changes === 11);
+var ivNum = pi.cells.filter(function (c) { return typeof c.v === 'number'; });
+check('AI дни / AJ часове — само числовите клетки', pi.days === ivNum.length && pi.hours === ivNum.reduce(function (s, c) { return s + c.v; }, 0), pi.days + ' / ' + pi.hours);
+check('О, М, Б, Д, А, С, Н — броят на буквите', pi['О'] === 1 && pi['М'] === 1 && pi['Б'] === 1 && pi['Д'] === 1 && pi['А'] === 1 && pi['С'] === 1 && pi['Н'] === 1,
+  E.PRESENCE_LETTERS.map(function (l) { return l + pi[l]; }).join(' '));
+check('AR = AJ + договор × (О + Б + Н)', pi.total === pi.hours + 8 * 3 && pp.total === pp.hours + 4 * (pp['О'] + pp['Б'] + pp['Н']), pi.total);
+check('реално − норма = AJ − (норма − договор × (О + Б + Н))', pi.realDiff === Math.round((pi.hours - (168 - 8 * 3)) * 2) / 2, pi.realDiff);
+check('договор 4 ч.: В като промяна → по договора Д5/2 = 4 (не 8)', cv(pp, 2) === 4 && pp.cells[1].code === 'Д5/2', cv(pp, 2));
+check('договор 4 ч.: ЛД няма код за договора → „ЛД?“ и проблем (сървърът я отказва)', cv(pp, 3) === 'ЛД?' && pp.issues.length === 1 && pp.issues[0] === '03.11: „ЛД“ няма код за договор 4 ч.', JSON.stringify(pp.issues));
+// Работната буква М (смяна) без код за договора НЕ е майчинство: „М?“, не влиза в колоната М.
+var mx = E.presence(S11, '2026-11', [{ staff_id: 'q', hours_per_day: 4, codes: p4R.codes, norm: 84 }], [{ staff_id: 'q', day: 2, actual: 'М' }, { staff_id: 'q', day: 3, actual: 'Майч' }]).rows[0];
+check('смяна М без код при 4 ч. → „М?“ и проблем; майчинството (3.11) → „М“; колоната М = 1', mx.cells[1].v === 'М?' && mx.cells[2].v === 'М' && mx['М'] === 1 && mx.issues.length === 1, mx['М'] + ' ' + JSON.stringify(mx.issues));
+check('без проблем → issues е празен', E.presence(S11, '2026-11', [{ staff_id: 'q', hours_per_day: 4, codes: p4R.codes, norm: 84 }], []).rows[0].issues.length === 0);
+check('сборът „ВСИЧКО“', PR.totals.days === pi.days + pp.days && PR.totals.hours === pi.hours + pp.hours && PR.totals.total === pi.total + pp.total && PR.totals['О'] === pi['О'] + pp['О']);
+// Макс. дни в 7 и ВТР върху реалните дни: 7 поредни дни с часове → 7 и предупреждение.
+var seven = E.presence(S11, '2026-11', [{ staff_id: 'z', full_name: 'З', hours_per_day: 8, codes: wkLetters(M11, 1, 30).map(function (l) { return l ? 'Д1/З' : ''; }), norm: 168 }],
+  [{ staff_id: 'z', day: 7, actual: 'П' }, { staff_id: 'z', day: 8, actual: 'ЗД' }]).rows[0];
+check('реално: 2–8.11 без почивен (промени в сб и нд) → макс. дни в 7 = 7 и „няма 36 ч.“', seven.maxIn7 === 7 && seven.warnings.some(function (w) { return w.type === 'no_weekly_rest'; }), seven.maxIn7 + ' ' + JSON.stringify(seven.warnings));
+check('без дни с часове → реално − норма = 0 (както ПРОВЕРКА M при AI = 0)', E.presence(S11, '2026-11', [{ staff_id: 'e', hours_per_day: 8, codes: new Array(30).fill('Б'), norm: 168 }], []).rows[0].realDiff === 0);
+check('снимка без norm (стара) → норма = работни дни × договор', E.presence(S11, '2026-11', [{ staff_id: 'e', hours_per_day: 8, codes: E.computeRow(P11, M11, { hours_per_day: 8 }, wkLetters(M11, 1, 30), {}).codes }], []).rows[0].realDiff === 0);
+
 console.log('\n' + ok + ' успешни, ' + fail + ' неуспешни');
 process.exit(fail ? 1 : 0);

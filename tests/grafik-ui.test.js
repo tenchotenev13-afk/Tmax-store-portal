@@ -68,7 +68,7 @@ function makeServer(opt) {
     const M = me(u), canEdit = st => M.stores.some(s => s.name === st && s.can_edit);
     const key = (st, m) => st + '|' + m;
     switch (b.action) {
-      case 'me': return { status: 200, body: Object.assign({ ok: true, can_admin: M.kind === 'admin' }, M) };
+      case 'me': return { status: 200, body: Object.assign({ ok: true, can_admin: M.kind === 'admin', name: u.display_name, email: u.email }, M) };
       case 'overview': {
         // Обхватът (дружество с ВТР) и „извън нормата“ от снимката се смятат в handler.ts — тук е
         // само формата на отговора; логиката е заключена в handler.test.ts.
@@ -78,7 +78,8 @@ function makeServer(opt) {
           return { store: st, company: '"ТЕМАКС ТЪРГОВСКИ ЦЕНТЪР ЗА ДОМА 3" ЕООД', status: mo ? mo.status : null, submitted_at: mo ? mo.submitted_at || null : null,
             submitted_by_name: mo ? mo.submitted_by_name || null : null, rows: mo ? S.rows.filter(r => r.month_id === mo.id).length : 0,
             staff: S.staff.filter(s => s.store_name === st && !s.left_on).length, can_edit: canEdit(st),
-            last_at: mo ? mo.last_at || null : null, last_by: mo ? mo.last_by || null : null, off_norm: sub ? (mo.off_norm || []) : null };
+            last_at: mo ? mo.last_at || null : null, last_by: mo ? mo.last_by || null : null, off_norm: sub ? (mo.off_norm || []) : null,
+            changes: sub ? (S.changes || []).filter(c => c.month_id === mo.id).length : null, changes_open: sub ? (S.changes || []).filter(c => c.month_id === mo.id && !c.trz_done).length : null };
         });
         if (M.kind === 'trz') list = list.filter(s => s.status === 'submitted').map(s => Object.assign(s, { staff: 0 }));
         return { status: 200, body: { ok: true, month: m, stores: list, no_company: M.kind === 'admin' ? ['Пазарджик'] : [] } };
@@ -1153,6 +1154,106 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     a.calls.confirm.length = 0;
     realClick(a.w, btn(mod(a), 'Върни')); await ticks(6);
     ok('„Върни в чернова“ — „Има 1 промяна — остава за новото подаване.“', a.calls.confirm.some(m => /\nИма 1 промяна — остава за новото подаване\.$/.test(m)), a.calls.confirm.join(' | '));
+  }
+
+
+  section('19. П3: ПРИСЪСТВЕНА ФОРМА — печат, Excel, проверка „реално“, обзор');
+  {
+    const ExcelJS = require(path.join(ROOT, 'node_modules', 'exceljs'));
+    const S = makeServer();
+    const wd = h.w.GrafikEngine.monthInfo('2026-11', []);
+    const work = wd.dow.map(w => (w <= 5 ? 'П' : ''));
+    const codes = work.map(l => (l ? 'Д1/З' : ''));
+    S.months['Кърджали|2026-11-01'] = { id: 'm-p', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+    S.rows.push({ month_id: 'm-p', staff_id: 'st-1', letters: work.slice(), locked: {} });
+    // Чернова — без бутоните за присъствената.
+    const dr = env(MGR, { server: S }); await load(dr);
+    ok('чернова: без „🖨 Присъствена“ и „📥 Присъствена Excel“', !btn(mod(dr), 'Присъствена'));
+    Object.assign(S.months['Кърджали|2026-11-01'], { status: 'submitted', submitted_by_name: 'Управител Кърджали', submitted_at: '2026-11-04T10:00:00Z',
+      snapshot: { rows: [{ staff_id: 'st-1', full_name: 'Иван Иванов Иванов', contract_title: 'продавач-консултант', hours_per_day: 8, codes: codes, norm: 168 },
+                         { staff_id: 'st-3', full_name: 'Петя Петрова', contract_title: 'касиер', hours_per_day: 4, codes: work.map(l => (l ? 'Д5/1' : '')), norm: 84 }],
+        header: { company_name: '"ТЕМАКС ТЦД 3" ЕООД', company_eik: '207322431', company_addr: 'гр. Варна', store_blank_name: '"Темакс" – Кърджали', approver: 'Теодор Тенев' } } });
+    S.changes = [
+      { id: 'c1', month_id: 'm-p', staff_id: 'st-1', day: 3, actual: 'Б', reason: 'болничен', planned_letter: 'П', planned_code: 'Д1/З', trz_done: false },
+      { id: 'c2', month_id: 'm-p', staff_id: 'st-1', day: 10, actual: 'ЛД', reason: 'остава', planned_letter: 'П', planned_code: 'Д1/З', trz_done: true },
+      { id: 'c3', month_id: 'm-p', staff_id: 'st-3', day: 4, actual: 'Майч', reason: 'майчинство', planned_letter: 'П', planned_code: 'Д5/1', trz_done: false },
+    ];
+    const x = env(MGR, { server: S }); await load(x);
+    const d = x.doc;
+    ok('подаден: „🖨 Присъствена“ и „📥 Присъствена Excel“ до „Excel за ТРЗ“', !!btn(mod(x), '🖨 Присъствена') && !!btn(mod(x), 'Присъствена Excel'));
+    const m = x.w.grPresenceModel(), iv = m.p.rows[0], pt = m.p.rows[1];
+    ok('моделът: Иван — 3.11 „Б“, 10.11 Д5/З = 10.5, 2.11 = 8; 20 дни, 160 − 8 + 10.5 = 162.5 ч.', iv.cells[2].v === 'Б' && iv.cells[9].v === 10.5 && iv.cells[1].v === 8 && iv.days === 20 && iv.hours === 162.5, iv.days + ' / ' + iv.hours);
+    ok('моделът: Петя (4 ч.) — 4.11 „М“; AR по договора', pt.cells[3].v === 'М' && pt['М'] === 1 && pt.total === pt.hours + 4 * (pt['О'] + pt['Б'] + pt['Н']), pt.total);
+    // Печат.
+    realClick(x.w, btn(mod(x), '🖨 Присъствена')); await ticks(4);
+    const tb = d.getElementById('grq-tbl');
+    ok('печат: „ПРИСЪСТВЕНА ФОРМА“, „Съставил: Управител Кърджали“ (влезлият)', d.getElementById('grq-title').textContent === 'ПРИСЪСТВЕНА ФОРМА' && /^Съставил: Управител Кърджали/.test(d.getElementById('grq-made').textContent));
+    ok('печат: колоните след дните — дни, часове, О, М, Б, Д, А, С, Н, общо', Array.from(tb.querySelector('thead tr').children).slice(-10).map(t => t.textContent).join('|') === 'дни|часове|О|М|Б|Д|А|С|Н|общо ч. вкл. О/Б/Н');
+    const r1 = tb.querySelectorAll('tbody tr')[0];
+    ok('печат: денят с промяна е оранжев (grq-chg), стойността — „Б“ / „10,5“', /grq-chg/.test(r1.children[3 + 2].className) && r1.children[3 + 2].textContent === 'Б' && r1.children[3 + 9].textContent === '10,5' && !/grq-chg/.test(r1.children[3 + 1].className));
+    ok('печат: ред „ВСИЧКО за обекта“ и легендата на неявяванията', /ВСИЧКО за обекта/.test(tb.querySelector('.grq-total').textContent) && /Легенда неявявания: О платен отпуск · М майчинство/.test(d.getElementById('grq-foot').textContent));
+    const pcss = d.querySelector('#mod-print style').textContent;
+    ok('печат CSS: A4 хоризонтално, border-box, white-space:normal, рамка на последния ред (правило 12)', /@page\{size:A4 landscape;/.test(pcss) && /\.grq-tbl th,\.grq-tbl td\{box-sizing:border-box;[^}]*white-space:normal;/.test(pcss) && /\.grq-tbl tr:last-child td\{border-bottom:1px solid #333;\}/.test(pcss));
+    x.w.showModule('grafik'); await load(x);
+    // Excel.
+    const got = [];
+    x.w.grWithExcelJS = () => Promise.resolve(ExcelJS);
+    x.w.grDownload = (buf, name) => got.push({ buf, name });
+    realClick(x.w, btn(mod(x), 'Присъствена Excel')); await wait(400); await ticks(8);
+    ok('Excel: „Присъствена_Кърджали_2026-11.xlsx“', got.length === 1 && got[0].name === 'Присъствена_Кърджали_2026-11.xlsx', got[0] && got[0].name);
+    if (got.length) {
+      const wb = new ExcelJS.Workbook(); await wb.xlsx.load(got[0].buf); const ws = wb.worksheets[0];
+      const v = a => { const c = ws.getCell(a).value; return c && typeof c === 'object' && 'result' in c ? c.result : c; };
+      const f = a => { const c = ws.getCell(a).value; return c && typeof c === 'object' ? c.formula : null; };
+      // 30 дни: D..AG; AH дни, AI часове, AJ..AP О М Б Д А С Н, AQ общо.
+      ok('Excel: заглавия — дни, часове, О…Н, общо', v('AH7') === 'дни' && v('AI7') === 'часове' && v('AJ11') === 'О' && v('AP11') === 'Н' && v('AQ5') === 'общо часове вкл. О/Б/Н (по договора)');
+      ok('Excel: формулите — COUNT / SUM / COUNTIF, AR = часове + договор × (О + Б + Н)', f('AH12') === 'COUNT(D12:AG12)' && f('AI12') === 'SUM(D12:AG12)' && f('AJ12') === 'COUNTIF(D12:AG12,"О")' &&
+        f('AQ12') === 'AI12+8*(AJ12+AL12+AP12)' && f('AQ13') === 'AI13+4*(AJ13+AL13+AP13)', f('AQ12'));
+      ok('Excel: стойностите — Иван 20 дни, 162.5 ч.; 3.11 = „Б“, 10.11 = 10.5 (число)', v('AH12') === 20 && v('AI12') === 162.5 && ws.getCell('F12').value === 'Б' && ws.getCell('M12').value === 10.5);
+      const c3 = ws.getCell('F12');
+      ok('Excel: денят с промяна — оранжев, с бележка „промяна: П → Б (болничен)“', c3.fill && c3.fill.fgColor.argb === 'FFF8CBAD' && /промяна: П → Б \(болничен\)/.test(JSON.stringify(c3.note)));
+      ok('Excel: празен ден — празна клетка; ВСИЧКО — SUM', ws.getCell('D12').value === null && f('AH14') === 'SUM(AH12:AH13)' && v('A14') === 'ВСИЧКО за обекта:');
+      ok('Excel: „Съставил: Управител Кърджали“ в заглавката', /^Съставил: Управител Кърджали/.test(String(v('AH1'))));
+    }
+    // Проверка „реално“ под „Промени“.
+    realClick(x.w, btn(mod(x), 'Промени')); await ticks(4);
+    const rt = Array.from(d.querySelectorAll('#gr-real-tbl tbody tr'));
+    ok('„Промени“: проверката „реално“ — по ред на човек; Иван +2.5 (червено), Петя −4 (майчинството не е в О+Б+Н)', rt.length === 2 && rt[0].querySelector('.gr-real-diff').textContent === '+2,5' && /dc2626/.test(rt[0].querySelector('.gr-real-diff').getAttribute('style')) &&
+      rt[1].querySelector('.gr-real-diff').textContent === '-4', rt.map(r => r.textContent).join(' | '));
+    ok('„Промени“: бутоните за присъствената са и тук', !!btn(mod(x), '🖨 Присъствена') && !!btn(mod(x), 'Присъствена Excel'));
+    // Формулярът: работна буква без код за договора В ТОЗИ ДЕН — отказ без заявка (както сървърът, letter_contract).
+    {
+      const nSave = () => x.S.calls.filter(c => c.action === 'changes_save').length;
+      realClick(x.w, btn(mod(x), '➕ Промяна')); await ticks(4);
+      d.getElementById('gr-ch-staff').value = 'st-3'; d.getElementById('gr-ch-day').value = '8';
+      d.getElementById('gr-ch-actual').value = 'П'; d.getElementById('gr-ch-reason').value = 'извикана';
+      realClick(x.w, btn(d.getElementById('gr-ch-modal'), 'Запиши')); await ticks(4);
+      ok('формуляр: Петя (4 ч.), П в неделя 8.11 — няма код П|Н → съобщение, без заявка', nSave() === 0 && x.calls.toast.some(t => /^Буквата „П“ няма код за договора на служителя в този ден/.test(t)), x.calls.toast.slice(-1)[0]);
+      d.getElementById('gr-ch-day').value = '9'; d.getElementById('gr-ch-actual').value = 'В';
+      realClick(x.w, btn(d.getElementById('gr-ch-modal'), 'Запиши')); await ticks(8);
+      ok('формуляр: Петя, В в понеделник 9.11 (Д5/2) — заявката тръгва', nSave() === 1 && x.S.calls.filter(c => c.action === 'changes_save')[0].actual === 'В');
+      d.getElementById('gr-ch-modal') && x.w.closeModal('gr-ch-modal');
+    }
+    // Промяна с буква без код (заварена) → проверката я показва, печатът и Excel-ът спират с обяснение.
+    {
+      x.w.grChanges = x.w.grChanges.concat([{ id: 'c9', month_id: 'm-p', staff_id: 'st-3', day: 2, actual: 'ЛД', reason: 'стара', planned_letter: 'П', planned_code: 'Д5/1', trz_done: false }]);
+      x.w.grRender(); await ticks(2);
+      const iss = d.querySelector('#gr-real-tbl .gr-real-issue');
+      ok('проверката: „02.11: „ЛД“ няма код за договор 4 ч.“ — червено', iss && iss.textContent === '02.11: „ЛД“ няма код за договор 4 ч.', iss && iss.textContent);
+      const before = d.getElementById('mod-print').innerHTML, got2 = [];
+      x.w.grDownload = (buf, name) => got2.push(name);
+      realClick(x.w, btn(mod(x), '🖨 Присъствена')); await ticks(4);
+      realClick(x.w, btn(mod(x), 'Присъствена Excel')); await wait(200); await ticks(4);
+      const blocked = x.calls.toast.filter(t => /^Присъствената не се прави: Петя Петрова — 02\.11: „ЛД“ няма код за договор 4 ч\.\.$/.test(t)).length;
+      ok('печат и Excel: спират със съобщение (2 пъти), без печат и без файл', blocked === 2 && d.getElementById('mod-print').innerHTML === before && got2.length === 0, blocked + ' ' + got2.length);
+    }
+    // Обзорът — „Промени: N · неотразени M“.
+    const a = env(ADM, { server: S }); await load(a);
+    realClick(a.w, btn(mod(a), 'Обекти')); await ticks(8);
+    const kr = Array.from(a.doc.querySelectorAll('#gr-ov-tbl tbody tr')).filter(tr => /Кърджали/.test(tr.textContent))[0];
+    ok('обзор: „Промени“ — „4 · неотразени 3“ (3 + записаната от формуляра; червено)', kr && kr.querySelector('.gr-ov-ch').textContent === '4 · неотразени 3' && /dc2626/.test(kr.querySelector('.gr-ov-ch').innerHTML), kr && kr.querySelector('.gr-ov-ch').textContent);
+    const shr = Array.from(a.doc.querySelectorAll('#gr-ov-tbl tbody tr')).filter(tr => /Шумен/.test(tr.textContent))[0];
+    ok('обзор: неподаден — „—“', shr && shr.querySelector('.gr-ov-ch').textContent === '—');
   }
 
 
