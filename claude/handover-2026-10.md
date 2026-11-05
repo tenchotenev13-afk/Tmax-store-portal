@@ -1347,8 +1347,9 @@ floor(процесори/3), най-много 8). Измерено 19.10 на �
 `goods_transit_legacy_status_trg` (BEFORE INSERT OR UPDATE, `transit-cleanup-schema.sql`)
 превежда 'sent' / 'rejected' в новия модел; данните — `transit-cleanup-data.sql`.
 Тригерът — миграция 20261104215023 `transit_cleanup` (04.11; SQL тест
-`tests/sql/transit-legacy-status.test.sql` — ОК, мутанти L1, L2 падат); данните —
-след push-а. Минуси (решение Б, 04.11): надпис „✕ Недоставена“ по `reviewed_at`
+`tests/sql/transit-legacy-status.test.sql` — ОК, мутанти L1, L2 падат). Кодът —
+`687136a`. Данните — миграция 20261105082515 `transit_cleanup_data` (05.11): 4
+'sent' + 19 'rejected' → pending, остават 0 (id-тата — в лога, за rollback-а). Минуси (решение Б, 04.11): надпис „✕ Недоставена“ по `reviewed_at`
 при pending (и стар 'rejected'), иначе „🚚 На път“.
 Отчетът (`report.js` / `send-scheduled-report`) — без промяна: брои отворени
 `status=in.(pending,sent)`; след данните 19-те бивши 'rejected' стават отворени —
