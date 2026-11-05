@@ -244,9 +244,11 @@ function fakeCb(doc, id, linked) {
     ok('250 реда → 3 пакета (100, 100, 50)', sizes.join(',') === '100,100,50', sizes.join(','));
   }
 
-  section('A6. Формата за редакция: „Недоставена" = reviewed_at при pending');
+  /* От 05.11.2026 (transit-fixes) пълната форма е само за офиса — обектът
+     има само „Коментар" (tests/transit-fixes.test.js). Затова тук е ADMIN. */
+  section('A6. Формата за редакция (офис): „Недоставена" = reviewed_at при pending');
   async function editSave(rowId, val) {
-    const h = transitEnv(MANAGER, baseRows());
+    const h = transitEnv(ADMIN, baseRows());
     const ed = rowBtn(h.doc, rowId, 'openTransitEdit');
     if (!ok(rowId + ' има ✏️ Редакция', !!ed)) return null;
     realClick(h.w, ed, 'Редакция');
@@ -264,7 +266,7 @@ function fakeCb(doc, id, linked) {
   }
   {
     const e = await editSave('r1', 'undelivered');
-    if (e) ok('r1 → Недоставена: status pending + reviewed_at / by', e.p && e.p.body.status === 'pending' && !!e.p.body.reviewed_at && e.p.body.reviewed_by === 'Управител Троян', e.p && JSON.stringify(e.p.body));
+    if (e) ok('r1 → Недоставена: status pending + reviewed_at / by', e.p && e.p.body.status === 'pending' && !!e.p.body.reviewed_at && e.p.body.reviewed_by === 'Админ', e.p && JSON.stringify(e.p.body));
   }
   {
     const e = await editSave('r2', 'undelivered');

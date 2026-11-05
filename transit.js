@@ -85,10 +85,21 @@ var T_SENDER = {
   sent: { label:'📤 Изпратена',   bg:'#f5f3ff', color:'#7c3aed' }
 };
 
+/* Значка в колоната „Статус" (160px) — пренася се, не излиза извън клетката. */
+var TRANSIT_BADGE_WRAP='display:inline-block;max-width:100%;box-sizing:border-box;white-space:normal;overflow-wrap:anywhere;line-height:1.35;';
+
+/* canEditTransit — отбелязва статуси и отваря „✏️ Редакция" (обект и склад —
+   само коментар). canAddTransit — ОФИСЪТ (admin, accounting): импорт,
+   „+ Добави ред", пълна редакция, изтриване (решение на Тенчо, 05.11.2026;
+   до тогава и логистичният склад). canExportTransit — „📊 Експорт Excel"
+   (офисът и складът). */
 function canEditTransit(){
   return currentUser&&['admin','accounting','logistics','manager','sklad','info'].indexOf(currentUser.role)>=0;
 }
 function canAddTransit(){
+  return currentUser&&['admin','accounting'].indexOf(currentUser.role)>=0;
+}
+function canExportTransit(){
   return currentUser&&['admin','accounting','logistics'].indexOf(currentUser.role)>=0;
 }
 
@@ -388,7 +399,8 @@ function renderTransit(){
      (цялата таблица се прерисува наново при всеки renderTransit()). */
   var _searchHadFocus=document.activeElement&&document.activeElement.id==='t-search';
   var _searchCursorPos=_searchHadFocus?document.activeElement.selectionStart:null;
-  var isAdmin=currentUser&&['admin','accounting','logistics'].indexOf(currentUser.role)>=0;
+  var isAdmin=canAddTransit();     /* изтриване (✕) — само офисът */
+  var canExport=canExportTransit();
   var canEdit=canEditTransit();
   var canAdd=canAddTransit();
 
@@ -516,7 +528,7 @@ function renderTransit(){
     h+='<button onclick="openTransitImportModal()" style="border:1px solid #16a34a;background:#f0fdf4;color:#16a34a;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📥 Импорт Excel</button>';
     h+='<button onclick="openTransitAdd()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">+ Добави ред</button>';
   }
-  if(isAdmin){
+  if(canExport){
     h+='<button onclick="exportTransitExcel()" style="border:1px solid #7c3aed;background:#f5f3ff;color:#7c3aed;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">📊 Експорт Excel</button>';
     /* „🗑 Изчисти всички" е махнат (етап 1, 03.11.2026): импортът сверява по
        ВД и архивира липсващите, таблицата вече не се изчиства. */
@@ -651,9 +663,12 @@ function renderTransit(){
         (r.transfer_date?'<div style="font-family:DM Mono,monospace;font-size:10px;color:#94a3b8;">'+fmtDate(r.transfer_date)+'</div>':'')+'</td>';
       /* 5. Статус */
       h+='<td style="padding:7px 8px;">'+
-          /* Две значки (етап 3): получател и изпращач; плюс „🔍 Чака засечка“. */
-          '<div class="t-recv" title="Получател" style="white-space:nowrap;"><span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:20px;font-size:10.5px;font-weight:600;white-space:nowrap;">'+stLabel+'</span></div>'+
-          '<div class="t-send" title="Изпращач'+(r.sender_status_by?' · '+esc(r.sender_status_by):'')+'" style="margin-top:3px;white-space:nowrap;"><span style="background:'+ss.bg+';color:'+ss.color+';padding:2px 6px;border-radius:20px;font-size:10px;font-weight:600;white-space:nowrap;">'+ssLabel+'</span></div>'+
+          /* Две значки (етап 3): получател и изпращач; плюс „🔍 Чака засечка“.
+             Значките се ПРЕНАСЯТ (TRANSIT_BADGE_WRAP, 05.11.2026): „✕ Недоставена ·
+             Управител Шумен · 04.11" не се побира в 160px и с nowrap излизаше
+             под бутоните в „Действия" при 1280 и 1600 px. */
+          '<div class="t-recv" title="Получател"><span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:12px;font-size:10.5px;font-weight:600;'+TRANSIT_BADGE_WRAP+'">'+stLabel+'</span></div>'+
+          '<div class="t-send" title="Изпращач'+(r.sender_status_by?' · '+esc(r.sender_status_by):'')+'" style="margin-top:3px;"><span style="background:'+ss.bg+';color:'+ss.color+';padding:2px 6px;border-radius:12px;font-size:10px;font-weight:600;'+TRANSIT_BADGE_WRAP+'">'+ssLabel+'</span></div>'+
           transitReconBadgeHtml(r)+
           (r.archived_at?'<div class="t-archived" style="font-size:10px;color:#64748b;font-weight:600;margin-top:2px;white-space:nowrap;">🗄 архив '+fmtDate(String(r.archived_at).slice(0,10))+'</div>':'')+
           (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.comment)+'">'+esc(r.comment)+'</div>':'')+
@@ -869,7 +884,7 @@ function transitReconBadgeHtml(r){
   var d=new Date(r.recon_at), p=function(n){return (n<10?'0':'')+n;};
   var when=isNaN(d.getTime())?'':p(d.getDate())+'.'+p(d.getMonth()+1);
   var side=r.recon_side==='sender'?'изпращач':(r.recon_side==='receiver'?'получател':'');
-  return '<div class="t-recon" style="font-size:10px;color:#b45309;font-weight:700;margin-top:3px;white-space:nowrap;" title="'+esc((r.recon_by||'')+(side?' · '+side:''))+'">🔍 Чака засечка'+
+  return '<div class="t-recon" style="font-size:10px;color:#b45309;font-weight:700;margin-top:3px;'+TRANSIT_BADGE_WRAP+'" title="'+esc((r.recon_by||'')+(side?' · '+side:''))+'">🔍 Чака засечка'+
     (r.recon_by?' · '+esc(r.recon_by):'')+(when?' · '+when:'')+(side?' ('+side+')':'')+'</div>';
 }
 
@@ -949,6 +964,8 @@ function tReviewCounterHtml(list){
 
 /* ── ИЗТРИЙ РЕД ── */
 function tDelete(id){
+  /* Само офисът (05.11.2026) — проверката е тук, не само в бутона. */
+  if(!canAddTransit()){ toast('Изтриване — само офисът','#dc2626'); return; }
   if(!confirm('Изтрий този ред?'))return;
   return sbDelete('goods_transit','id=eq.'+id).then(function(res){
     if(!res.ok){
@@ -1033,9 +1050,11 @@ function transitModalHtml(){
     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">'+
     '<div style="grid-column:1/-1;"><label class="fl">Посока *</label>'+
       '<select class="fi" id="tr-direction" onchange="updateTrStatusOptions()">'+
-        '<option value="incoming">📦 Получавам (incoming)</option>'+
-        '<option value="transfer">🔄 Трансфер между магазини</option>'+
-        '<option value="outgoing">📤 Изпращам (outgoing)</option>'+
+        /* Стойностите остават; надписите — по вида на изпращача (05.11.2026),
+           както баджа на реда („🏭 От склад" / „🏬 От магазин"). */
+        '<option value="incoming">🏭 От склад</option>'+
+        '<option value="transfer">🏬 От магазин</option>'+
+        '<option value="outgoing">Друго (outgoing)</option>'+
       '</select></div>'+
     '<div><label class="fl">Магазин *</label>'+
       '<select class="fi" id="tr-store">'+
@@ -1056,11 +1075,13 @@ function transitModalHtml(){
     '<div><label class="fl">Дата на трансфер</label><input class="fi" type="date" id="tr-transfer-date"></div>'+
     '<div><label class="fl">Статус</label>'+
       '<select class="fi" id="tr-status">'+
-        '<option value="pending">⏳ Не доставена</option>'+
-        '<option value="received">✅ Прието</option>'+
-        '<option value="undelivered">✕ Недоставена</option>'+
+        '<option value="pending">'+T_STATUS.pending.label+'</option>'+
+        '<option value="received">'+T_STATUS.received.label+'</option>'+
+        '<option value="undelivered">'+T_STATUS.undelivered.label+'</option>'+
       '</select></div>'+
-    '<div style="grid-column:1/-1;"><label class="fl">Коментар</label><input class="fi" id="tr-comment" placeholder="прието / неприето / изпратена на... / все още не доставена"></div>'+
+    /* Статусите се отбелязват с бутоните на реда, не с текст в коментара. */
+    '<div style="grid-column:1/-1;"><label class="fl">Коментар</label><input class="fi" id="tr-comment" placeholder="напр. дойде непълно, чакаме второ пале"></div>'+
+    '<div id="tr-comment-only-note" style="display:none;grid-column:1/-1;font-size:12px;color:#64748b;">Можете да промените само коментара. Статусите се отбелязват с бутоните на реда; останалите данни поправя офисът.</div>'+
     '</div>'+
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:20px;">'+
       '<button onclick="closeTransitModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:8px 18px;font-size:13px;cursor:pointer;">Откажи</button>'+
@@ -1070,6 +1091,7 @@ function transitModalHtml(){
 }
 
 function openTransitAdd(){
+  if(!canAddTransit()){ toast('Нов ред добавя само офисът','#dc2626'); return; }
   transitEditId=null;
   var m=document.getElementById('transit-modal');if(!m)return;
   document.getElementById('transit-modal-title').textContent='+ Добави ред';
@@ -1087,7 +1109,19 @@ function openTransitAdd(){
   document.getElementById('tr-transfer-date').value='';
   updateTrStatusOptions('pending');
   document.getElementById('tr-comment').value='';
+  transitModalCommentOnly(false);
   m.classList.add('open');
+}
+
+/* Обект и склад (не офисът) в „✏️ Редакция" — само „Коментар" (05.11.2026,
+   решение на Тенчо): останалите полета са само за четене, а submitTransit
+   праща само comment. Статусите се отбелязват с бутоните на реда. */
+var TRANSIT_FORM_FIELDS=['tr-direction','tr-store','tr-supplier','tr-purchase-doc','tr-position','tr-doc-date',
+  'tr-material-code','tr-unit','tr-material-name','tr-qty','tr-remaining','tr-transfer-date','tr-status'];
+function transitModalCommentOnly(only){
+  TRANSIT_FORM_FIELDS.forEach(function(fid){ var el=document.getElementById(fid); if(el) el.disabled=!!only; });
+  var n=document.getElementById('tr-comment-only-note');
+  if(n) n.style.display=only?'':'none';
 }
 
 function openTransitEdit(id){
@@ -1109,6 +1143,9 @@ function openTransitEdit(id){
   document.getElementById('tr-transfer-date').value=r.transfer_date||'';
   updateTrStatusOptions(transitRecvStatus(r));
   document.getElementById('tr-comment').value=r.comment||'';
+  var only=!canAddTransit();
+  document.getElementById('transit-modal-title').textContent=only?'✏️ Коментар към реда':'✏️ Редактирай ред';
+  transitModalCommentOnly(only);
   m.classList.add('open');
 }
 
@@ -1137,6 +1174,20 @@ function closeTransitModal(){
 }
 
 function submitTransit(){
+  /* Обект и склад — само коментар (виж transitModalCommentOnly); нов ред — само офисът. */
+  if(!canAddTransit()){
+    var cid=transitEditId;
+    if(!cid){ toast('Нов ред добавя само офисът','#dc2626'); return; }
+    var cdata={comment:document.getElementById('tr-comment').value.trim(),
+      updated_by:currentUser.display_name||currentUser.email,updated_at:new Date().toISOString()};
+    return sbPatch('goods_transit','id=eq.'+cid,cdata).then(function(res){
+      if(!res||!res.ok){toast('Грешка при запис','#dc2626');return;}
+      toast('✅ Записано!');
+      closeTransitModal();
+      transitApplyLocal([cid],cdata);
+      transitRerender();
+    });
+  }
   var store=document.getElementById('tr-store').value;
   var material=document.getElementById('tr-material-name').value.trim();
   if(!store){toast('Избери магазин','#dc2626');return;}
@@ -1771,6 +1822,7 @@ function transitImportBody(r,isNew,who,at){
    иначе червен toast и нищо не се архивира. Повторният импорт е безопасен:
    upsert-ът по същия ключ просто обновява. */
 function confirmTransitImport(){
+  if(!canAddTransit()){ toast('Импорт — само офисът','#dc2626'); return Promise.resolve(); }
   var plan=_transitImportPlan;
   /* Втора защита: спрян план не пише нищо, дори ако бутонът се извика отвън. */
   if(plan&&plan.blocked){

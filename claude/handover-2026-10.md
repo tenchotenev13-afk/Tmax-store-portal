@@ -1359,6 +1359,16 @@ floor(процесори/3), най-много 8). Измерено 19.10 на �
 Отчетът (`report.js` / `send-scheduled-report`) — без промяна: брои отворени
 `status=in.(pending,sent)`; след данните 19-те бивши 'rejected' стават отворени —
 както и досега „проверените, не е пристигнало“.
+**Поправки при инструкцията (сесия transit-fixes, 05.11):** (1) значките в
+„Статус“ (получател, изпращач, засечка) се пренасят (`TRANSIT_BADGE_WRAP`) — с
+nowrap излизаха под „Действия“ при 1280 / 1600 px; (2) „✏️ Редакция“ — пълна
+форма само за офиса (admin, accounting); обект и склад — само „Коментар“
+(`transitModalCommentOnly`, `submitTransit` праща само `comment` + кой и кога); (3) формата:
+„🏭 От склад“ / „🏬 От магазин“ / „Друго (outgoing)“, подсказка „напр. дойде
+непълно, чакаме второ пале“; (4) импорт, „+ Добави ред“ и „✕“ — само офисът
+(`canAddTransit` без logistics; защита и в `tDelete`, `openTransitAdd`,
+`confirmTransitImport`); складът пази „📊 Експорт Excel“ (`canExportTransit`).
+Схема няма. Проверка на живо — `claude/open/05-11-transit-fixes-live.md`.
 
 ## 6. Отворени точки → виж claude/open/ (npm run open). Затворени — claude/open/closed/.
 
