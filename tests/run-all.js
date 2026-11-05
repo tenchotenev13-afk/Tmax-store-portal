@@ -484,7 +484,8 @@ const TESTS = [
   'users-no-plain-password.test.js',
   'grafik-engine.test.js',
   'grafik-ui.test.js',
-  'delete-tables-whitelist.test.js'
+  'delete-tables-whitelist.test.js',
+  'preocenka-buletin-vrazka.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
