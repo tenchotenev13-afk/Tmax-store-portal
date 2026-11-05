@@ -1186,8 +1186,14 @@ function tfCargoMetaHtml(c) {
   var parts = [];
   if (c.note && String(c.note).trim()) parts.push(String(c.note).trim());
   parts = parts.concat(tfCargoLinks(c, tfCoNumCache, true));
-  if (!parts.length) return '';
-  return '<div class="trf-cargo-meta" style="font-size:12px;color:#64748b;margin-top:2px;">' + escVal(parts.join(' · ')) + '</div>';
+  /* Автоматичното „Изпратена" е паднало за заявка на този товар (tfCoAutoSent). */
+  var bad = tfCoSyncFailed[c.id] || [];
+  var badHtml = bad.length
+    ? '<div class="trf-co-sync-failed" style="font-size:12px;color:#b91c1c;font-weight:600;margin-top:2px;">⚠️ НЕ е обновена на „Изпратена“: ' +
+      escVal(bad.join(', ')) + ' — отбележи ръчно в Клиентски заявки</div>'
+    : '';
+  if (!parts.length) return badHtml;
+  return '<div class="trf-cargo-meta" style="font-size:12px;color:#64748b;margin-top:2px;">' + escVal(parts.join(' · ')) + '</div>' + badHtml;
 }
 
 function printTransfer(id) {
@@ -2299,8 +2305,11 @@ function submitDepart() {
     }
     Object.keys(body).forEach(function (k) { t[k] = body[k]; });
     closeDepartModal();
-    toast('🚚 ' + (t.transfer_num || '') + ' тръгна в ' + tfFmtTs(t.departed_at));
+    var head = '🚚 ' + (t.transfer_num || '') + ' тръгна в ' + tfFmtTs(t.departed_at);
+    toast(head);
     renderTransfers();
+    /* Чак СЛЕД записаното тръгване — свързаните заявки на всички товари. */
+    return tfCoAutoSent(t, tfCargoByTransfer[t.id] || [], head);
   }).catch(function () {
     f.saving = false; renderDepartModal();
     toast('Грешка при запис', '#dc2626');
@@ -2607,10 +2616,14 @@ function submitEvent() {
     var extra = (f.kind === 'handed_to_courier' && wb && !x.t.waybill_no) ? { waybill_no: wb } : null;
     return tfSyncStatus(x.t, extra).then(function () {
       var uTxt = units[0] !== null && qty > 1 ? ' · ' + units.join(', ') + ' от ' + qty : '';
-      toast('✅ ' + TF_EVENT_LABELS[f.kind] + uTxt);
+      var head = '✅ ' + TF_EVENT_LABELS[f.kind] + uTxt;
+      toast(head);
       renderTransfers();
+      /* Предаден на куриер — заявките САМО на този товар, след записаната отметка. */
+      var co = f.kind === 'handed_to_courier' ? tfCoAutoSent(x.t, [x.c], head) : null;
       /* Местните редове нямат истински id — за „Решен“ по тях трябва презареждане. */
       if (rows.length > 1) return loadTransfers(true);
+      return co;
     });
   }).catch(function () {
     f.saving = false; renderEventModal();
@@ -2636,4 +2649,92 @@ function tfSyncStatus(t, extra, what) {
     Object.keys(body).forEach(function (k) { t[k] = body[k]; });
     return true;
   });
+}
+
+/* ── Свързаните клиентски заявки → „Изпратена" (етап 1, 05.11.2026) ──────
+   Идея на Хасан Шатов (Склад Карлово). Вика се САМО след успешно записано
+   „🚚 Тръгна" (всички товари) или „Предаден на куриер" (само този товар).
+   Пипа заявка само ако изпълнителят ѝ е изпращачът на товара
+   (tfCargoSender — дотоварилият обект или създателят) и статусът, прочетен
+   СВЕЖ от базата, е от TF_CO_AUTO_FROM. Записът е като ръчния бутон:
+   PATCH status='sent' + syncLinkedTransport с прочетения ред (clientOrders в
+   таб Трансфери може да е празен — затова редът се подава изрично).
+   Провал по заявка не връща тръгването назад: червен toast + маркер в
+   картата на товара (tfCoSyncFailed, до презареждане на страницата). */
+var TF_CO_AUTO_FROM = ['pending', 'processed', 'approved'];
+var tfCoSyncFailed = {};
+function tfCoNorm(s) { return String(s || '').trim().toLowerCase(); }
+function tfCoAutoSent(t, cargoList, head) {
+  var pairs = [], ids = [];
+  (cargoList || []).forEach(function (c) {
+    var sender = tfCargoSender(t, c);
+    (c && c.client_order_ids || []).forEach(function (id) {
+      if (!id) return;
+      pairs.push({ c: c, id: id, sender: sender });
+      if (ids.indexOf(id) < 0) ids.push(id);
+    });
+  });
+  if (!ids.length) return Promise.resolve(null);
+  var sum = { sent: [], foreign: [], failed: [], trFailed: [] };
+  var label = function (r, id) { return (r && r.in_num) || tfCoNumCache[id] || String(id).slice(0, 8); };
+  var fail = function (p, r) {
+    var l = label(r, p.id);
+    sum.failed.push(l);
+    var arr = tfCoSyncFailed[p.c.id] || (tfCoSyncFailed[p.c.id] = []);
+    if (arr.indexOf(l) < 0) arr.push(l);
+  };
+  return sbGet('client_orders', 'select=id,in_num,status,fulfiller,paid_transport,transport_id&id=in.(' + ids.join(',') + ')', true)
+    .then(function (rows) {
+      var byId = {};
+      (Array.isArray(rows) ? rows : []).forEach(function (r) { if (r && r.id) { byId[r.id] = r; if (r.in_num) tfCoNumCache[r.id] = r.in_num; } });
+      var seen = {}, jobs = [];
+      pairs.forEach(function (p) {
+        if (seen[p.id]) return;
+        var r = byId[p.id];
+        /* Не върнат ред (мрежа / права) = непроверена заявка, не „няма какво". */
+        if (!r) { seen[p.id] = 1; fail(p, null); return; }
+        if (TF_CO_AUTO_FROM.indexOf(r.status) < 0) { seen[p.id] = 1; return; }
+        if (tfCoNorm(r.fulfiller) !== tfCoNorm(p.sender)) {
+          /* Същата заявка може да е и в друг товар с правилния изпращач. */
+          if (pairs.some(function (q) { return q.id === p.id && tfCoNorm(q.sender) === tfCoNorm(r.fulfiller); })) return;
+          seen[p.id] = 1; sum.foreign.push(label(r, p.id)); return;
+        }
+        seen[p.id] = 1;
+        jobs.push(sbPatch('client_orders', 'id=eq.' + r.id, { status: 'sent' }).then(function (res) {
+          if (!res || !res.ok) { fail(p, r); return; }
+          sum.sent.push(label(r, p.id));
+          if (tfCoSyncFailed[p.c.id]) {
+            tfCoSyncFailed[p.c.id] = tfCoSyncFailed[p.c.id].filter(function (x) { return x !== label(r, p.id); });
+            if (!tfCoSyncFailed[p.c.id].length) delete tfCoSyncFailed[p.c.id];
+          }
+          /* Провал тук не се губи под общия toast — отделен ред в него. */
+          if (typeof syncLinkedTransport === 'function') {
+            return Promise.resolve(syncLinkedTransport(r.id, 'sent', r)).then(function (okT) {
+              if (okT === false) sum.trFailed.push(label(r, p.id));
+            });
+          }
+        }, function () { fail(p, r); }));
+      });
+      return Promise.all(jobs);
+    }, function () {
+      var s = {};
+      pairs.forEach(function (p) { if (!s[p.id]) { s[p.id] = 1; fail(p, null); } });
+    })
+    .then(function () {
+      if (!sum.sent.length && !sum.foreign.length && !sum.failed.length) return sum;
+      var lines = [head || '✅ Записано'];
+      if (sum.sent.length) lines.push('✅ ' + sum.sent.length + ' клиентски заявки → Изпратена (' + sum.sent.join(', ') + ')');
+      if (sum.foreign.length) lines.push('Не са маркирани — изпълнител е друг обект: ' + sum.foreign.join(', '));
+      if (sum.failed.length) lines.push('⚠️ НЕ са обновени на „Изпратена“: ' + sum.failed.join(', ') + ' — отбележи ги ръчно в Клиентски заявки');
+      if (sum.trFailed.length) lines.push('⚠️ Платеният транспорт НЕ е обновен за: ' + sum.trFailed.join(', ') + ' — провери в таб Транспорт');
+      var el = document.getElementById('toast');
+      if (el) el.style.whiteSpace = 'pre-line';
+      toast(lines.join('\n'), sum.failed.length ? '#dc2626' : (sum.foreign.length || sum.trFailed.length ? '#d97706' : '#16a34a'));
+      if (sum.failed.length && tfView !== 'form') renderTransfersKeepFocus();
+      return sum;
+    }).catch(function () {
+      /* Тръгването вече е записано — тук нищо не бива да го „провали". */
+      toast('⚠️ Свързаните клиентски заявки НЕ са проверени — отбележи ги ръчно в Клиентски заявки', '#dc2626');
+      return null;
+    });
 }

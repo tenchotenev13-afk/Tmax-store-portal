@@ -127,19 +127,23 @@ function createLinkedTransport(co,addr,hour,deliveryDate,cb){
 
 /* Синхронизира свързания транспорт при смяна на статуса на клиентската заявка.
    Извиква се от setClientStatus() тук, както и от setStatus()/revertStatus() в shared.js. */
-function syncLinkedTransport(id,status){
-  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+/* row (по избор) — редът на заявката с paid_transport и transport_id, когато
+   глобалният clientOrders не е зареден (Трансфери → „Тръгна", 05.11.2026).
+   Връща Promise<bool> при запис към транспорта, иначе undefined. */
+function syncLinkedTransport(id,status,row){
+  var o=row||clientOrders.find(function(x){return String(x.id)===String(id);});
   if(!o||!o.paid_transport||!o.transport_id)return;
   var patch=null;
   if(status==='arrived'||status==='done')      patch={awaiting_stock:false};
   else if(status==='refused')                  patch={status:'refused',awaiting_stock:false};
   else if(status==='pending'||status==='sent') patch={awaiting_stock:true};
   if(!patch)return; /* postponed — транспортът остава както е */
-  sbPatch('transport_orders','id=eq.'+o.transport_id,patch).then(function(r){
+  return sbPatch('transport_orders','id=eq.'+o.transport_id,patch).then(function(r){
     if(!r.ok){
       console.error('syncLinkedTransport: неуспешно обновяване на транспорт',o.transport_id);
       toast('⚠️ Свързаният транспорт не се обнови — провери в таб Транспорт','#d97706');
     }
+    return !!r.ok;
   });
 }
 

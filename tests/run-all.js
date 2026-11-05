@@ -412,6 +412,7 @@ const TESTS = [
   'transfers-notify.test.js',
   'transfers-warehouses.test.js',
   'transfers-select-all.test.js',
+  'tf-co-auto-sent.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',
