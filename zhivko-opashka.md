@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията grafik_changes, grafik-changes-schema.sql, версия 20261105103650, приложена 05.11.2026; таблицата е без anon — виж бележката при grafik_schema)
+- 05.11 · нова таблица grafik_changes — id uuid, month_id uuid NOT NULL, staff_id uuid NOT NULL, day int NOT NULL, planned_letter text, planned_code text, actual text NOT NULL, reason text NOT NULL, created_at timestamptz NOT NULL default now(), created_by text, updated_at timestamptz NOT NULL default now(), updated_by text, trz_done boolean NOT NULL default false, trz_done_at timestamptz, trz_done_by text
+
 (в базата от миграцията transit-status-split-schema.sql, версия 20261104114441, приложена 04.11.2026. Данните — transit-status-split-data.sql — минават сами с UPSERT)
 - 04.11 · goods_transit.sender_status — text, NULL, без default ('sent' / NULL — статусът на изпращача)
 - 04.11 · goods_transit.sender_status_at — timestamptz, NULL, без default

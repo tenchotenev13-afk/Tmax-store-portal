@@ -34,6 +34,12 @@ export type MonthRow = {
 };
 export type RowRec = { id?: string; month_id: string; staff_id: string; letters: string[]; locked: Record<string, string>; sort_order?: number; updated_at?: string; updated_by?: string | null };
 export type Staff = { id: string; store_name: string; [k: string]: unknown };
+// „Промени“ (grafik_changes, 05.11.2026): реалните отклонения от ПОДАДЕН график, ред за човек и ден.
+export type ChangeRow = {
+  id: string; month_id: string; staff_id: string; day: number; planned_letter: string | null; planned_code: string | null;
+  actual: string; reason: string; created_at?: string; created_by?: string | null; updated_at?: string; updated_by?: string | null;
+  trz_done: boolean; trz_done_at?: string | null; trz_done_by?: string | null;
+};
 // Списъците за модула (grafik_access): beta — кой вижда таба; trz — чете само подадените.
 export type AccessList = "beta" | "trz";
 export type AccessRow = { id: string; list: AccessList; email: string; note: string | null; created_at?: string; created_by?: string | null };
@@ -55,6 +61,10 @@ export type AdminTable = "companies" | "grafik_company_terms" | "grafik_store_co
 
 export interface Repo {
   getUser(id: string): Promise<User | null>;
+  listChanges(monthId: string): Promise<ChangeRow[]>;
+  insertChange(fields: Record<string, unknown>): Promise<ChangeRow>;
+  updateChange(id: string, fields: Record<string, unknown>): Promise<ChangeRow | null>;
+  deleteChange(id: string): Promise<boolean>;
   listAccess(): Promise<AccessRow[]>;
   insertAccess(fields: Record<string, unknown>): Promise<AccessRow>;
   deleteAccess(id: string): Promise<boolean>;
@@ -284,6 +294,60 @@ export function submitIssues(staff: Staff[], rows: RowRec[], snapRows: Record<st
     });
   }
   return out;
+}
+
+// ── „Промени“ (П1, план одобрен 05.11.2026; решения а–з) ─────────────────────
+// „Реално“ — списъкът на бланката (лист „Промени“, D2:D500): работните букви + неявяванията от
+// Настройки Q:R. „По график“ се взема тук (grafik_rows + снимката), не от браузъра.
+export const CHANGE_ACTUALS = ["ЛД", "ЗД", "П", "В", "М", "почивка", "О", "Б", "Н", "Д", "А", "С", "Майч"];
+// „Реално“ = „по график“ → няма отклонение. В графика неплатеният е „НО“, а празният ден е почивка.
+export function sameAsPlanned(actual: string, plannedLetter: string): boolean {
+  const p = plannedLetter === "НО" ? "Н" : plannedLetter === "" ? "почивка" : plannedLetter;
+  return actual === p;
+}
+function addDay(start: string, day: number): string {
+  const d = new Date(start + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + day - 1); return d.toISOString().slice(0, 10);
+}
+// Подаденият месец на обекта — иначе 409 (промените се въвеждат само след подаване).
+async function submittedMonth(repo: Repo, store: string, ym: unknown) {
+  const m = needMonth(ym);
+  const month = await repo.getMonth(store, m.start);
+  if (!month || month.status !== "submitted") throw new HttpError(409, "not_submitted", "Промените се въвеждат след подаване на графика.");
+  return { m, month };
+}
+// Всички проверки на един ред „Промени“ → „по график“ (буква и официален код).
+async function checkChange(repo: Repo, m: { start: string; days: number }, month: MonthRow, staffId: unknown, day: unknown, actual: unknown, reason: unknown) {
+  const sid = uuid(staffId, "служител");
+  if (typeof day !== "number" || !Number.isInteger(day) || day < 1 || day > m.days) throw new HttpError(400, "bad_request", "Денят не е в месеца.");
+  if (typeof actual !== "string" || CHANGE_ACTUALS.indexOf(actual) < 0) throw new HttpError(400, "bad_request", "„Реално“ е една от: " + CHANGE_ACTUALS.join(", ") + ".");
+  if (typeof reason !== "string" || !reason.trim()) throw new HttpError(400, "bad_request", "Основанието / документът е задължително.");
+  if (reason.trim().length > 300) throw new HttpError(400, "bad_request", "Основанието е до 300 знака.");
+  // Решение ж: само хората от ПОДАДЕНИЯ график (нов човек — връщане, добавяне, ново подаване).
+  const snap = (isObj(month.snapshot) && Array.isArray(month.snapshot.rows) ? month.snapshot.rows : []) as Record<string, unknown>[];
+  const sr = snap.filter((r) => r.staff_id === sid)[0];
+  if (!sr) throw new HttpError(400, "not_in_schedule", "Служителят не е в подадения график — върни графика в чернова, добави го и го подай пак.");
+  const st = (await repo.getStaff([sid]))[0];
+  const date = addDay(m.start, day);
+  if (st && ((typeof st.hired_on === "string" && date < st.hired_on) || (typeof st.left_on === "string" && date > st.left_on))) {
+    throw new HttpError(400, "not_employed", "На " + date + " служителят не е на работа (назначен / напуснал).");
+  }
+  // Решение в: ЛД в неделя — както в графика.
+  if (actual === "ЛД" && new Date(date + "T00:00:00Z").getUTCDay() === 0) throw new HttpError(400, "sunday_ld", "ЛД в неделя — ползвай ЗД.");
+  const row = (await repo.listRows(month.id)).filter((r) => r.staff_id === sid)[0];
+  const plannedLetter = row && Array.isArray(row.letters) && typeof row.letters[day - 1] === "string" ? row.letters[day - 1] : "";
+  const plannedCode = Array.isArray(sr.codes) && typeof sr.codes[day - 1] === "string" ? sr.codes[day - 1] as string : "";
+  if (sameAsPlanned(actual, plannedLetter)) throw new HttpError(409, "no_change", "Няма отклонение — по график е същото (" + (plannedLetter || "почивка") + ").");
+  return { sid, plannedLetter, plannedCode, reason: reason.trim() };
+}
+// Решение а: след ново подаване остават само промените, които още важат — човекът е в графика
+// и денят е в периода му на работа. Останалите се махат (с одит).
+export function staleChanges(changes: ChangeRow[], staff: Staff[], start: string): ChangeRow[] {
+  const byId: Record<string, Staff> = {}; staff.forEach((s) => { byId[s.id] = s; });
+  return changes.filter((c) => {
+    const s = byId[c.staff_id]; if (!s) return true;
+    const date = addDay(start, c.day);
+    return (typeof s.hired_on === "string" && date < s.hired_on) || (typeof s.left_on === "string" && date > s.left_on);
+  });
 }
 
 // Обектите в обзора: с дружество (grafik_store_company) И ВТР на дружеството (grafik_company_terms),
@@ -532,8 +596,12 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
         status: "submitted", submitted_at: at, submitted_by: acc.email, submitted_by_name: acc.name, snapshot, updated_at: at,
       }, "draft");
       if (!ok) throw new HttpError(409, "submitted", "Графикът вече е подаден.");
-      await audit(repo, acc, "grafik_submit", store, { month: m.start, rows: inMonthIds.length, skipped_out_of_month: rows.filter((r) => inMonthIds.indexOf(r.staff_id) < 0).length });
-      return { status: "submitted", submitted_at: at, submitted_by_name: acc.name };
+      // Решение а: промените от предишното подаване остават; махат се само невалидните.
+      const stale = staleChanges(await repo.listChanges(month.id), monthStaff, m.start);
+      for (const c of stale) await repo.deleteChange(c.id);
+      await audit(repo, acc, "grafik_submit", store, { month: m.start, rows: inMonthIds.length, skipped_out_of_month: rows.filter((r) => inMonthIds.indexOf(r.staff_id) < 0).length,
+        changes_removed: stale.map((c) => ({ staff_id: c.staff_id, day: c.day, actual: c.actual })) });
+      return { status: "submitted", submitted_at: at, submitted_by_name: acc.name, changes_removed: stale.length };
     }
 
     case "reopen": {
@@ -546,8 +614,63 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
         status: "draft", submitted_at: null, submitted_by: null, submitted_by_name: null, snapshot: null, updated_at: new Date().toISOString(),
       }, "submitted");
       if (!ok) throw new HttpError(409, "not_submitted", "Графикът не е подаден.");
-      await audit(repo, acc, "grafik_reopen", store, { month: m.start, was_submitted_by: month.submitted_by, was_submitted_at: month.submitted_at });
-      return { status: "draft" };
+      // Решение а: промените остават за новото подаване; броят им — за предупреждението в екрана.
+      const kept = (await repo.listChanges(month.id)).length;
+      await audit(repo, acc, "grafik_reopen", store, { month: m.start, was_submitted_by: month.submitted_by, was_submitted_at: month.submitted_at, changes_kept: kept });
+      return { status: "draft", changes: kept };
+    }
+
+    // ── „Промени“ ──────────────────────────────────────────────────────────
+    case "changes_list": {
+      const store = await needStore(repo, acc, b.store, "read");
+      const { month } = await submittedMonth(repo, store, b.month);
+      return { rows: (await repo.listChanges(month.id)).sort((a, c) => a.day - c.day) };
+    }
+
+    case "changes_save": {
+      const store = await needStore(repo, acc, b.store, "edit");
+      const { m, month } = await submittedMonth(repo, store, b.month);
+      const ch = await checkChange(repo, m, month, b.staff_id, b.day, b.actual, b.reason);
+      const all = await repo.listChanges(month.id);
+      const self = b.id === undefined || b.id === null ? null : uuid(b.id, "id");
+      const cur = self ? all.filter((c) => c.id === self)[0] : null;
+      if (self && !cur) throw new HttpError(404, "not_found", "Промяната не е намерена в този месец.");
+      // Решение б: отразената в ТРЗ се пипа само от admin.
+      if (cur && cur.trz_done && !acc.canAdmin) throw new HttpError(409, "trz_done", "Промяната е отразена в ТРЗ — само admin може да я променя.");
+      if (all.some((c) => c.id !== self && c.staff_id === ch.sid && c.day === b.day)) {
+        throw new HttpError(409, "duplicate", "За този служител и ден вече има промяна — редактирай нея.");
+      }
+      const now = new Date().toISOString();
+      const fields = { staff_id: ch.sid, day: b.day, planned_letter: ch.plannedLetter, planned_code: ch.plannedCode, actual: b.actual, reason: ch.reason, updated_at: now, updated_by: acc.email };
+      const row = cur ? await repo.updateChange(cur.id, fields) : await repo.insertChange({ ...fields, month_id: month.id, created_by: acc.email });
+      await audit(repo, acc, cur ? "grafik_change_update" : "grafik_change_create", store, { month: m.start, id: row ? row.id : null, staff_id: ch.sid, day: b.day, actual: b.actual, planned: ch.plannedLetter + "/" + ch.plannedCode });
+      return { row };
+    }
+
+    case "changes_delete": {
+      const store = await needStore(repo, acc, b.store, "edit");
+      const { m, month } = await submittedMonth(repo, store, b.month);
+      const id = uuid(b.id, "id");
+      const cur = (await repo.listChanges(month.id)).filter((c) => c.id === id)[0];
+      if (!cur) throw new HttpError(404, "not_found", "Промяната не е намерена в този месец.");
+      if (cur.trz_done && !acc.canAdmin) throw new HttpError(409, "trz_done", "Промяната е отразена в ТРЗ — само admin може да я трие.");
+      await repo.deleteChange(id);
+      await audit(repo, acc, "grafik_change_delete", store, { month: m.start, id, staff_id: cur.staff_id, day: cur.day, actual: cur.actual, reason: cur.reason });
+      return { deleted: 1 };
+    }
+
+    case "changes_trz": {
+      // „Отразено в ТРЗ“ — само ТРЗ и admin; останалите полета не се пипат.
+      if (acc.kind !== "trz" && !acc.canAdmin) throw new HttpError(403, "forbidden", "„Отразено в ТРЗ“ отмятат ТРЗ.");
+      const store = await needStore(repo, acc, b.store, "read");
+      const { m, month } = await submittedMonth(repo, store, b.month);
+      const id = uuid(b.id, "id");
+      if (typeof b.done !== "boolean") throw new HttpError(400, "bad_request", "done е true или false.");
+      const cur = (await repo.listChanges(month.id)).filter((c) => c.id === id)[0];
+      if (!cur) throw new HttpError(404, "not_found", "Промяната не е намерена в този месец.");
+      const row = await repo.updateChange(id, b.done ? { trz_done: true, trz_done_at: new Date().toISOString(), trz_done_by: acc.email } : { trz_done: false, trz_done_at: null, trz_done_by: null });
+      await audit(repo, acc, b.done ? "grafik_change_trz" : "grafik_change_trz_undo", store, { month: m.start, id, staff_id: cur.staff_id, day: cur.day });
+      return { row };
     }
 
     case "sector_save": {

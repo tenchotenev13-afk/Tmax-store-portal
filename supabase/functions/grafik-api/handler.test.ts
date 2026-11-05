@@ -4,8 +4,8 @@
 // свой/чужд обект, пропуска, beta/ТРЗ списъците, клетките, снимката и валидността по дати.
 import {
   handleGrafik, HttpError, accessEmails, parseMonth, resolveSetup, badCells, validAt, staffInMonth,
-  snapshotOffNorm,
-  type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector, type RowStat, type AccessRow,
+  snapshotOffNorm, sameAsPlanned, staleChanges,
+  type Repo, type User, type MonthRow, type RowRec, type Staff, type SetupRaw, type AdminTable, type Sector, type RowStat, type AccessRow, type ChangeRow,
 } from "./handler.ts";
 import { signSession } from "../_shared/session.ts";
 
@@ -44,6 +44,7 @@ class MemRepo implements Repo {
   stores = ["Кърджали", "Шумен", "Раднево", "Добрич"];
   months: MonthRow[] = [];
   rows: RowRec[] = [];
+  changes: ChangeRow[] = [];
   staff: Staff[] = [];
   audits: { event: string; store_name: string | null }[] = [];
   storeRef: Record<string, string | null> = {};
@@ -71,6 +72,10 @@ class MemRepo implements Repo {
     }
   }
   async getUser(id: string) { return this.users.filter((u) => u.id === id)[0] || null; }
+  async listChanges(monthId: string) { return this.changes.filter((c) => c.month_id === monthId).map((c) => ({ ...c })); }
+  async insertChange(f: Record<string, unknown>) { const c = { id: nid(), trz_done: false, ...f } as ChangeRow; this.changes.push(c); return { ...c }; }
+  async updateChange(id: string, f: Record<string, unknown>) { const c = this.changes.filter((x) => x.id === id)[0]; if (!c) return null; Object.assign(c, f); return { ...c }; }
+  async deleteChange(id: string) { const n = this.changes.length; this.changes = this.changes.filter((c) => c.id !== id); return this.changes.length < n; }
   async listAccess() { return this.access.slice(); }
   async insertAccess(f: Record<string, unknown>) { const r = { id: nid(), note: null, ...f } as AccessRow; this.access.push(r); return r; }
   async deleteAccess(id: string) { const n = this.access.length; this.access = this.access.filter((r) => r.id !== id); return this.access.length < n; }
@@ -509,6 +514,130 @@ Deno.test("snapshotOffNorm: празно, стара снимка без norm, �
   eq(snapshotOffNorm({ rows: [{ full_name: "А", codes: ["", ""], diff: 0 }] }), ["А: няма нито един ден"], "стара снимка без norm");
   eq(snapshotOffNorm({ rows: [{ full_name: "Б", codes: [""], diff: 0, norm: 0 }] }), [], "норма 0 — нищо");
   eq(snapshotOffNorm({ rows: [{ short_name: "В", codes: ["Д1/З"], official: 168.5, target: 168, diff: 0.5 }] }), ["В: 168,5 ч. вместо 168 ч."], "над нормата, кратко име");
+});
+
+// ── „Промени“ (П1, 05.11.2026; решения а–з) ─────────────────────────────────
+// Ноември 2026: 1.11 и 8.11 — неделя; 30 дни. Подаденият месец: ids[0] П на 2 и 3, ids[1] О на 2, НО на 4.
+async function submittedK(r: MemRepo) {
+  const ids = kStaff(r);
+  await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [
+    { staff_id: ids[0], letters: L30(["", "П", "П"]) }, { staff_id: ids[1], letters: L30(["", "О", "", "НО"]) },
+  ] });
+  eq((await sub(r, snap(ids))).status, 200, "подаден");
+  const sn = r.months[0].snapshot as { rows: { codes: string[] }[] };
+  sn.rows[0].codes[1] = "Д1/З"; sn.rows[0].codes[2] = "Д1/З"; sn.rows[1].codes[1] = "О"; sn.rows[1].codes[3] = "Н";
+  return ids;
+}
+const chg = (r: MemRepo, who: User, f: Record<string, unknown>) => call(r, who, { action: "changes_save", store: "Кърджали", month: "2026-11", ...f });
+
+Deno.test("changes: само за подаден месец", async () => {
+  const r = new MemRepo();
+  const ids = kStaff(r);
+  await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [{ staff_id: ids[0], letters: L30(["", "П"]) }] });
+  eq((await call(r, U.mgrK, { action: "changes_list", store: "Кърджали", month: "2026-11" })).body.reason, "not_submitted", "чернова — списък не");
+  eq((await chg(r, U.mgrK, { staff_id: ids[0], day: 2, actual: "Б", reason: "x" })).body.reason, "not_submitted", "чернова — запис не");
+  eq((await call(r, U.mgrK, { action: "changes_list", store: "Кърджали", month: "2026-12" })).body.reason, "not_submitted", "месец без график");
+});
+
+Deno.test("changes_save: „по график“ от сървъра, въведено от, одит; дубликат → редакция", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const a = await chg(r, U.mgrK, { staff_id: ids[0], day: 3, actual: "Б", reason: "  болничен лист № 123 ", planned_letter: "ЛЪЖА" });
+  eq([a.status, a.body.row.planned_letter, a.body.row.planned_code, a.body.row.reason, a.body.row.created_by, a.body.row.trz_done],
+    [200, "П", "Д1/З", "болничен лист № 123", "tencho.tenev13@gmail.com", false], "по график П / Д1/З — от базата, не от браузъра");
+  eq(r.audits.slice(-1)[0].event, "grafik_change_create", "одит");
+  eq((await chg(r, U.mgrK, { staff_id: ids[0], day: 3, actual: "О", reason: "x" })).body.reason, "duplicate", "втори ред за човек и ден — отказ");
+  const e = await chg(r, U.mgrK, { id: a.body.row.id, staff_id: ids[0], day: 3, actual: "О", reason: "отпуск по молба № 7" });
+  eq([e.status, e.body.row.actual, e.body.row.updated_by, r.changes.length], [200, "О", "tencho.tenev13@gmail.com", 1], "редакцията е на същия ред");
+  eq(r.audits.slice(-1)[0].event, "grafik_change_update", "одит на редакцията");
+  const l = await call(r, U.mgrK, { action: "changes_list", store: "Кърджали", month: "2026-11" });
+  eq(l.body.rows.map((x: ChangeRow) => x.day + ":" + x.actual), ["3:О"], "списъкът");
+});
+
+Deno.test("changes_save: проверките — реално, основание, ден, неделя, без отклонение", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const bad = async (f: Record<string, unknown>) => (await chg(r, U.mgrK, f)).body.reason;
+  eq(await bad({ staff_id: ids[0], day: 5, actual: "X", reason: "x" }), "bad_request", "„реално“ извън списъка");
+  eq(await bad({ staff_id: ids[0], day: 5, actual: "Б", reason: "   " }), "bad_request", "празно основание");
+  eq(await bad({ staff_id: ids[0], day: 31, actual: "Б", reason: "x" }), "bad_request", "31-ви в ноември");
+  eq(await bad({ staff_id: ids[0], day: 0, actual: "Б", reason: "x" }), "bad_request", "ден 0");
+  eq(await bad({ staff_id: ids[0], day: 8, actual: "ЛД", reason: "x" }), "sunday_ld", "решение в: ЛД в неделя");
+  eq((await chg(r, U.mgrK, { staff_id: ids[0], day: 8, actual: "ЗД", reason: "дошъл в неделя" })).status, 200, "ЗД в неделя — може");
+  eq(await bad({ staff_id: ids[0], day: 2, actual: "П", reason: "x" }), "no_change", "по график П → реално П");
+  eq(await bad({ staff_id: ids[0], day: 10, actual: "почивка", reason: "x" }), "no_change", "празен ден → почивка");
+  eq(await bad({ staff_id: ids[1], day: 4, actual: "Н", reason: "x" }), "no_change", "НО в графика = Н");
+  eq(await bad({ staff_id: ids[1], day: 2, actual: "О", reason: "x" }), "no_change", "О → О");
+  const o = await chg(r, U.mgrK, { staff_id: ids[1], day: 2, actual: "П", reason: "извикана от отпуск" });
+  eq([o.status, o.body.row.planned_letter, o.body.row.planned_code], [200, "О", "О"], "ден О по график → П (решение: замества деня)");
+  eq((await chg(r, U.mgrK, { staff_id: ids[0], day: 20, actual: "Майч", reason: "майчинство" })).status, 200, "Майч — може");
+});
+
+Deno.test("changes_save: само хората от подадения график и само в дните им на работа", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const nw = nid();
+  r.staff.push({ id: nw, store_name: "Кърджали", short_name: "НОВ", full_name: "Нов След Подаването", sort_order: 0, left_on: null });
+  eq((await chg(r, U.mgrK, { staff_id: nw, day: 5, actual: "П", reason: "x" })).body.reason, "not_in_schedule", "решение ж: нов човек — не");
+  r.staff.filter((s) => s.id === ids[1])[0].left_on = "2026-11-10";
+  eq((await chg(r, U.mgrK, { staff_id: ids[1], day: 12, actual: "П", reason: "x" })).body.reason, "not_employed", "след напускане — не");
+  eq((await chg(r, U.mgrK, { staff_id: ids[1], day: 10, actual: "Б", reason: "x" })).status, 200, "денят на напускане — може");
+  eq((await chg(r, U.mgrK, { staff_id: "не-uuid", day: 5, actual: "П", reason: "x" })).body.reason, "bad_request", "лош id");
+});
+
+Deno.test("changes: права — склад и ТРЗ не пишат; чужд обект не; ТРЗ чете", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  eq((await chg(r, U.sklK, { staff_id: ids[0], day: 5, actual: "Б", reason: "x" })).status, 403, "склад — не");
+  eq((await chg(r, U.trz, { staff_id: ids[0], day: 5, actual: "Б", reason: "x" })).status, 403, "ТРЗ — не пише");
+  eq((await chg(r, U.regSh, { staff_id: ids[0], day: 5, actual: "Б", reason: "x" })).status, 403, "регионален на друг обект — не");
+  eq((await chg(r, U.admin, { staff_id: ids[0], day: 5, actual: "Б", reason: "x" })).status, 200, "admin — да");
+  const t = await call(r, U.trz, { action: "changes_list", store: "Кърджали", month: "2026-11" });
+  eq([t.status, t.body.rows.length], [200, 1], "ТРЗ чете");
+});
+
+Deno.test("changes_trz: само ТРЗ и admin; отразената се пипа само от admin (решение б)", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  const a = await chg(r, U.mgrK, { staff_id: ids[0], day: 3, actual: "Б", reason: "болничен" });
+  const id = a.body.row.id;
+  const trz = (who: User, done: unknown) => call(r, who, { action: "changes_trz", store: "Кърджали", month: "2026-11", id, done });
+  eq((await trz(U.mgrK, true)).status, 403, "магазинът не отмята");
+  eq((await trz(U.trz, "да")).body.reason, "bad_request", "done е boolean");
+  const t = await trz(U.trz, true);
+  eq([t.status, t.body.row.trz_done, t.body.row.trz_done_by, typeof t.body.row.trz_done_at], [200, true, "trz@temax.bg", "string"], "ТРЗ отмята (кой, кога)");
+  eq(t.body.row.actual, "Б", "…без да пипа другите полета");
+  eq((await chg(r, U.mgrK, { id, staff_id: ids[0], day: 3, actual: "О", reason: "x" })).body.reason, "trz_done", "магазинът не редактира отразената");
+  eq((await call(r, U.mgrK, { action: "changes_delete", store: "Кърджали", month: "2026-11", id })).body.reason, "trz_done", "…и не я трие");
+  eq((await chg(r, U.admin, { id, staff_id: ids[0], day: 3, actual: "О", reason: "поправка" })).status, 200, "admin — може");
+  const u = await trz(U.trz, false);
+  eq([u.body.row.trz_done, u.body.row.trz_done_by, u.body.row.trz_done_at], [false, null, null], "ТРЗ размаркира");
+  eq(r.audits.filter((x) => /grafik_change_trz/.test(x.event)).map((x) => x.event), ["grafik_change_trz", "grafik_change_trz_undo"], "одит");
+  const d = await call(r, U.mgrK, { action: "changes_delete", store: "Кърджали", month: "2026-11", id });
+  eq([d.status, r.changes.length], [200, 0], "неотразена — магазинът трие");
+  eq((await call(r, U.mgrK, { action: "changes_delete", store: "Кърджали", month: "2026-11", id })).status, 404, "втори път — 404");
+});
+
+Deno.test("changes и „Върни“ / ново подаване (решение а): остават; махат се само невалидните", async () => {
+  const r = new MemRepo();
+  const ids = await submittedK(r);
+  await chg(r, U.mgrK, { staff_id: ids[0], day: 3, actual: "Б", reason: "болничен" });
+  await chg(r, U.mgrK, { staff_id: ids[1], day: 20, actual: "П", reason: "дошла на почивен ден" });
+  const ro = await call(r, U.admin, { action: "reopen", store: "Кърджали", month: "2026-11" });
+  eq([ro.body.status, ro.body.changes], ["draft", 2], "„Върни“ казва колко промени има");
+  eq(r.changes.length, 2, "…и те остават");
+  r.staff.filter((s) => s.id === ids[1])[0].left_on = "2026-11-15";     // напуска преди 20-и
+  const s2 = await sub(r, snap(ids));
+  eq([s2.status, s2.body.changes_removed], [200, 1], "ново подаване — махната е промяната след напускането");
+  eq(r.changes.map((c) => c.staff_id + ":" + c.day), [ids[0] + ":3"], "останалата");
+  assert(JSON.stringify(r.audits.slice(-1)[0]).indexOf("grafik_submit") >= 0, "одит на подаването");
+});
+
+Deno.test("sameAsPlanned / staleChanges", () => {
+  eq([sameAsPlanned("П", "П"), sameAsPlanned("Н", "НО"), sameAsPlanned("почивка", ""), sameAsPlanned("Б", "П"), sameAsPlanned("П", "")], [true, true, true, false, false], "сравнение");
+  const st = [{ id: "a", store_name: "K", hired_on: "2026-11-05", left_on: null }, { id: "b", store_name: "K", left_on: "2026-11-20" }] as Staff[];
+  const ch = (staff_id: string, day: number) => ({ id: staff_id + day, month_id: "m", staff_id, day, planned_letter: "", planned_code: "", actual: "П", reason: "x", trz_done: false });
+  eq(staleChanges([ch("a", 4), ch("a", 5), ch("b", 20), ch("b", 21), ch("c", 1)], st, "2026-11-01").map((c) => c.id), ["a4", "b21", "c1"], "преди назначаване, след напускане, извън графика");
 });
 
 // ── Списъците beta / ТРЗ (grafik_access, етап 1е-3) ──────────────────────────

@@ -2,7 +2,7 @@
 // Repo на grafik-api върху supabase-js със service ключа. Отделно от index.ts,
 // за да се пуска и от repo.live-test.ts (без Deno.serve при импорт).
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
-import { HttpError, type AccessRow, type AdminTable, type Repo, type RowRec, type Sector, type Staff, type Vtr } from "./handler.ts";
+import { HttpError, type AccessRow, type AdminTable, type ChangeRow, type Repo, type RowRec, type Sector, type Staff, type Vtr } from "./handler.ts";
 
 // Само безопасни колони — никога password_hash / history_pin_hash.
 const USER_COLS = "id,email,display_name,store_name,role,is_regional,assigned_stores,active";
@@ -25,6 +25,19 @@ export function makeRepo(): Repo {
   return {
     async getUser(id) {
       return ok(await db.from("users").select(USER_COLS).eq("id", id).maybeSingle());
+    },
+    async listChanges(monthId) {
+      return ok<ChangeRow[]>(await db.from("grafik_changes").select("*").eq("month_id", monthId).order("day").order("created_at"));
+    },
+    async insertChange(fields) {
+      return ok<ChangeRow>(await db.from("grafik_changes").insert(fields).select("*").single());
+    },
+    async updateChange(id, fields) {
+      return ok<ChangeRow | null>(await db.from("grafik_changes").update(fields).eq("id", id).select("*").maybeSingle());
+    },
+    async deleteChange(id) {
+      const rows = ok<unknown[]>(await db.from("grafik_changes").delete().eq("id", id).select("id"));
+      return rows.length > 0;
     },
     async listAccess() {
       return ok<AccessRow[]>(await db.from("grafik_access").select("id,list,email,note,created_at,created_by").order("list").order("email"));

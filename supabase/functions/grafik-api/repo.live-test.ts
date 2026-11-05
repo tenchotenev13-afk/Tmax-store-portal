@@ -19,7 +19,7 @@ function check(c: boolean, msg: string, extra?: unknown) {
 }
 async function counts() {
   const out: Record<string, number> = {};
-  for (const t of ["grafik_months", "grafik_rows", "grafik_staff", "companies", "grafik_store_company", "grafik_access"]) {
+  for (const t of ["grafik_months", "grafik_rows", "grafik_staff", "companies", "grafik_store_company", "grafik_access", "grafik_changes"]) {
     const r = await raw.from(t).select("*", { count: "exact", head: true });
     if (r.error) throw new Error(t + ": " + r.error.message);
     out[t] = r.count ?? -1;
@@ -85,6 +85,21 @@ try {
   check(rb.locked["2"] === "Д4/З" && rb.sort_order === 0, "locked и default sort_order");
   const rs = (await repo.rowStats([m1.id]))[m1.id];
   check(!!rs && rs.rows === 2 && rs.last_by === "repo.live-test 2" && !!rs.last_at, "rowStats — брой и последната промяна (кой)", rs);
+
+  // „Промени“ (grafik_changes, 05.11.2026): запис, уникален човек+ден, CHECK, редакция, триене.
+  const c1 = await repo.insertChange({ month_id: m1.id, staff_id: a.id, day: 3, planned_letter: "П", planned_code: "Д1/З", actual: "Б", reason: MARK, created_by: "repo.live-test" });
+  check(!!c1.id && c1.trz_done === false && c1.planned_code === "Д1/З", "insertChange — trz_done по подразбиране false");
+  let cdup = "";
+  try { await repo.insertChange({ month_id: m1.id, staff_id: a.id, day: 3, actual: "О", reason: MARK }); } catch (e) { cdup = (e as { reason?: string }).reason || String(e); }
+  check(cdup === "db_constraint", "insertChange — втори за човек и ден → db_constraint", cdup);
+  let cbad = "";
+  try { await repo.insertChange({ month_id: m1.id, staff_id: a.id, day: 4, actual: "X", reason: MARK }); } catch (e) { cbad = (e as { reason?: string }).reason || String(e); }
+  check(cbad === "db_constraint", "insertChange — „реално“ извън списъка → db_constraint", cbad);
+  const cu = await repo.updateChange(c1.id, { trz_done: true, trz_done_by: "repo.live-test", trz_done_at: new Date().toISOString() });
+  check(!!cu && cu.trz_done === true && cu.actual === "Б", "updateChange — само отметката");
+  const cl = await repo.listChanges(m1.id);
+  check(cl.length === 1 && cl[0].id === c1.id, "listChanges по месец", cl.length);
+  check(await repo.deleteChange(c1.id) && !(await repo.deleteChange(c1.id)), "deleteChange — веднъж true, после false");
   const un = await repo.userNames(["ten.tenev@temax.bg", "nyama@nikoj.bg"]);
   check(!!un["ten.tenev@temax.bg"] && !un["nyama@nikoj.bg"], "userNames — име по имейл; непознат → няма", Object.keys(un));
 
@@ -123,6 +138,7 @@ try {
 } finally {
   // Почистване — всичко създадено, в обратен ред.
   if (created.month) {
+    await raw.from("grafik_changes").delete().eq("month_id", created.month);
     await raw.from("grafik_rows").delete().eq("month_id", created.month);
     await raw.from("grafik_months").delete().eq("id", created.month);
   }
