@@ -414,6 +414,7 @@ const TESTS = [
   'transfers-warehouses.test.js',
   'transfers-select-all.test.js',
   'tf-co-auto-sent.test.js',
+  'tf-co-stage2-origin-reload.test.js',
   'task-completions-row-cap.test.js',
   'task-type-notice.test.js',
   'overdue-recurring.test.js',

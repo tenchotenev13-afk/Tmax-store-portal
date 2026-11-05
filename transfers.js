@@ -696,7 +696,7 @@ function renderTransferForm() {
   var courier = f.mode === 'courier';
 
   var rl = f.reload;
-  var h = '<div class="pg-title">' + (rl ? '➕ Дотоварване в ' + escVal(f.from_store) + ' — ' + escVal(rl.num) : '🔁 Нов транспорт') + '</div>' +
+  var h = '<div class="pg-title">' + (rl ? (rl.origin ? '➕ Добави товар — ' : '➕ Дотоварване в ' + escVal(f.from_store) + ' — ') + escVal(rl.num) : '🔁 Нов транспорт') + '</div>' +
     '<div id="trf-form" style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;max-width:1000px;">';
 
   if (rl) {
@@ -922,7 +922,7 @@ function tfValidate(f) {
 
   if (f.reload) {
     /* Дотоварване: заглавието на транспорта вече е записано и валидно. */
-    if (f.mode === 'courier') return 'Дотоварва се само бус или камион.';
+    if (f.mode === 'courier' && !f.reload.origin) return 'Дотоварва се само бус или камион.';
   } else if (f.mode !== 'courier') {
     if (f.mode === 'truck' && !String(f.plate_no || '').trim()) return 'Въведи регистрационен номер на камиона.';
     if (!f.depart_date) return 'Въведи дата на тръгване.';
@@ -1085,26 +1085,36 @@ function tfCargoErrText(res) {
 
 /* От кои обекти текущият потребител може да дотовари t: спирка на буса (не
    началото, не крайната точка), докато транспортът не е Завършен. Глобалните
-   роли не са обект и не дотоварват. */
+   роли не са обект и не дотоварват.
+   Етап 2 (05.11.2026, идея на Хасан Шатов): и началният обект — докато
+   транспортът не е тръгнал (tfOriginCanReload), вкл. куриер преди първото
+   „Предаден". Спирките — без промяна. */
+function tfOriginCanReload(t, evs) {
+  return !!t && !t.departed_at && t.status !== 'done' && !(evs || []).length;
+}
 function tfReloadStores(t) {
-  if (!t || t.mode === 'courier') return [];
+  if (!t) return [];
+  var actors = tfActorStores();
+  var origin = actors.indexOf(t.from_store) >= 0 && tfOriginCanReload(t, tfEventsOf(t.id)) ? [t.from_store] : [];
+  if (t.mode === 'courier') return origin;
   if (tfComputeStatus(t, tfCargoByTransfer[t.id] || [], tfEventsOf(t.id)).status === 'done') return [];
-  return tfActorStores().filter(function (s) {
+  return origin.concat(actors.filter(function (s) {
     return (t.stops || []).indexOf(s) >= 0 && s !== t.from_store && s !== t.end_store;
-  });
+  }));
 }
 
 function openReloadForm(tid, store) {
   var t = tfTransfers.filter(function (x) { return x.id === tid; })[0];
   if (!t || tfReloadStores(t).indexOf(store) < 0) { toast('Не можеш да дотовариш този транспорт', '#dc2626'); return; }
   var stops = t.stops || [];
-  var at = stops.indexOf(store);
+  /* Началният обект: indexOf = -1 → целият маршрут, „before" — само той. */
+  var at = store === t.from_store ? -1 : stops.indexOf(store);
   tfForm = {
-    reload: { tid: t.id, num: t.transfer_num, before: [t.from_store].concat(stops.slice(0, at + 1)) },
+    reload: { tid: t.id, num: t.transfer_num, before: [t.from_store].concat(stops.slice(0, at + 1)), origin: store === t.from_store },
     from_store: store, mode: t.mode,
     depart_date: t.depart_date, depart_time: t.depart_time, driver: t.driver || '', plate_no: t.plate_no || '',
     stops: stops.slice(at + 1), end_store: t.end_store,
-    courier_company: '', waybill_no: '', note: '',
+    courier_company: t.courier_company || '', waybill_no: '', note: '',
     cargo: [tfNewCargo()]
   };
   tfView = 'form';
@@ -1113,20 +1123,43 @@ function openReloadForm(tid, store) {
 }
 
 /* Само товарите — заглавието не се пипа. loaded_at_store пази кой е
-   дотоварил: той е изпращачът на товара (tfCargoSender). */
+   дотоварил: той е изпращачът на товара (tfCargoSender). Товар от началния
+   обект — loaded_at_store = null: изпращачът и без него е from_store, а с
+   null не излиза „дотоварен в …" (картата, печатът, търсенето). */
 function tfSubmitReload(f) {
   var tid = f.reload.tid;
   var t = tfTransfers.filter(function (x) { return x.id === tid; })[0];
   if (!t || tfReloadStores(t).indexOf(f.from_store) < 0) { toast('Транспортът вече не може да се дотоварва', '#dc2626'); return; }
+  var origin = f.from_store === t.from_store;
   var maxPos = (tfCargoByTransfer[tid] || []).reduce(function (m, c) { return Math.max(m, parseInt(c.position, 10) || 0); }, 0);
   var body = f.cargo.map(function (c, i) {
     var row = tfCargoRow(f, c, tid, maxPos + i + 1);
-    row.loaded_at_store = f.from_store;
+    row.loaded_at_store = origin ? null : f.from_store;
     return row;
   });
   tfSaving = true;
   renderTransferForm();
-  sbPost('transfer_cargo', body).then(function (r) {
+  /* Началният обект: свежо от БАЗАТА, че транспортът още не е тръгнал и
+     няма отметки — кешът може да е отпреди „Тръгна" на друг. ЕДНА заявка с
+     вградените отметки: sbGet при грешка връща [], тоест отделна заявка за
+     отметките не различава „няма" от „паднала". Без ред = не е проверено →
+     нищо не се пише. */
+  var fresh = !origin ? Promise.resolve(null)
+    : sbGet('transfers', 'select=id,departed_at,status,transfer_cargo_events(id)&id=eq.' + tid, true).then(function (rows) {
+      var row = Array.isArray(rows) ? rows[0] : null;
+      if (!row || !Array.isArray(row.transfer_cargo_events)) return 'Не успях да проверя транспорта — товарът не е добавен. Опитай пак.';
+      if (!tfOriginCanReload(row, row.transfer_cargo_events)) return 'Транспортът вече е тръгнал — товарът не е добавен';
+      return null;
+    });
+  fresh.then(function (why) {
+    if (why) {
+      tfSaving = false; renderTransferForm();
+      toast(why, '#dc2626');
+      return { stop: true };
+    }
+    return sbPost('transfer_cargo', body);
+  }).then(function (r) {
+    if (r && r.stop) return;
     tfSaving = false;
     if (!r.ok) { renderTransferForm(); toast('Грешка при дотоварването: ' + tfCargoErrText(r), '#dc2626'); return; }
     toast('✅ Дотоварено в ' + (t.transfer_num || ''));

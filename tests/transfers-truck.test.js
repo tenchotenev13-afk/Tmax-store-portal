@@ -190,7 +190,10 @@ const visibleIds = function (h) { return $$(h, '#trf-table tbody tr[data-id]').m
 
     const h3 = env(U('Добрич'), { transfers: [Object.assign({}, TRUCK, { mode: 'courier', stops: [] })] });
     await open(h3);
-    ok('контрол: куриер не се дотоварва (tfReloadStores празно)', h3.w.tfReloadStores(h3.w.tfTransfers[0]).length === 0);
+    /* От 05.11.2026 (етап 2, tf-co-stage2-origin-reload.test.js): началният
+       обект дотоварва и куриер без отметки — но спирки при куриер няма. */
+    ok('контрол: куриер — само началото (Добрич), без спирки', JSON.stringify(h3.w.tfReloadStores(h3.w.tfTransfers[0])) === '["Добрич"]',
+      JSON.stringify(h3.w.tfReloadStores(h3.w.tfTransfers[0])));
     h3.close();
   }
 
