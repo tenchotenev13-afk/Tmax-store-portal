@@ -906,9 +906,28 @@ function srCmtRoAttr(tab){
 function srIsDiscard(text){
   return String(text||'').toLowerCase().indexOf('изхвърл')>=0;
 }
+/* "Ревизия" (05.11.2026, идея на Нина Ковачева, решение на Тенчо): контролерът
+   е написал стоката да се заприходи с ревизия („Заприходете с ревизия",
+   „ревизия"). Тя не минава през куриер - като изхвърлянето се иска само дата
+   (на заприхождаването). По корените "ревизи" / "заприход", без значение от
+   главни/малки букви. Чете се по същия начин като srIsDiscard. */
+function srIsRevision(text){
+  var t=String(text||'').toLowerCase();
+  return t.indexOf('ревизи')>=0 || t.indexOf('заприход')>=0;
+}
+/* Кое изключение важи: 'discard' | 'revision' | ''. Ако коментарът съдържа и
+   двете думи, печели изхвърлянето - то е физическото действие със стоката
+   (ревизията е само счетоводният ѝ край), а правилото за него е по-старо и
+   остава непроменено. И в двата случая снимка и куриер не се искат. */
+function srProofExempt(text){
+  return srIsDiscard(text) ? 'discard' : (srIsRevision(text) ? 'revision' : '');
+}
 function srPhotoHintHtml(ctrlText){
-  return srIsDiscard(ctrlText)
+  var ex=srProofExempt(ctrlText);
+  return ex==='discard'
     ? '🗑️ <b>Изхвърляне:</b> нужна е само дата.'
+    : ex==='revision'
+    ? '📋 <b>Заприхождаване с ревизия:</b> нужна е само дата на заприхождаване — без снимка на товарителница и без куриер.'
     : '📸 <b>Задължително:</b> снимка на товарителницата, дата на изтегляне и куриер.';
 }
 function closeSRModal() {
@@ -1698,16 +1717,19 @@ function submitSR() {
       /* Заключен ли е коментарът (магазин в „По рекламации") - решава
          ЗАПИСАНОТО от Цвети, не полето: подправено „изхвърл…" в DOM-а иначе
          би отменило снимката. */
-      var discard=srIsDiscard(cmtLocked ? (origRecord&&origRecord.controller_comment) : (ctrlNow?ctrlNow.value:''));
+      /* Същото и за заприхождаване с ревизия (srProofExempt): без снимка и
+         куриер, само дата. */
+      var exempt=srProofExempt(cmtLocked ? (origRecord&&origRecord.controller_comment) : (ctrlNow?ctrlNow.value:''));
+      var discard=exempt==='discard', revision=exempt==='revision';
       var missing=[];
-      if(!discard && !(Array.isArray(srPendingPhotos) && srPendingPhotos.length)) missing.push('снимка на товарителницата');
-      if(!data.withdrawal_date) missing.push(discard?'дата на изхвърляне':'дата на изтегляне');
+      if(!exempt && !(Array.isArray(srPendingPhotos) && srPendingPhotos.length)) missing.push('снимка на товарителницата');
+      if(!data.withdrawal_date) missing.push(discard?'дата на изхвърляне':(revision?'дата на заприхождаване':'дата на изтегляне'));
       var courier=(data.courier_info||'').trim();
       /* "—" и "-" не са куриер - махаме тиретата и празното място и проверяваме
          дали изобщо е останало нещо. */
-      if(!discard && (courier.length<3 || !courier.replace(/[—–\-\s]/g,''))) missing.push('изтеглена от/с куриер');
+      if(!exempt && (courier.length<3 || !courier.replace(/[—–\-\s]/g,''))) missing.push('изтеглена от/с куриер');
       if(missing.length){
-        toast((discard?'Изхвърляне — липсва ':'Липсва товарителница — ')+missing.join(', '),'#dc2626');
+        toast((discard?'Изхвърляне — липсва ':(revision?'Заприхождаване с ревизия — липсва ':'Липсва товарителница — '))+missing.join(', '),'#dc2626');
         return;
       }
     }

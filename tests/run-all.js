@@ -208,6 +208,7 @@ const TESTS = [
   'stock-returns-complaint-docdate.test.js',
   'stock-returns-import-serial-date.test.js',
   'stock-returns-discard.test.js',
+  'sr-revision-no-photo.test.js',
   'stock-returns-import-completed.test.js',
   'stock-returns-single-expiry.test.js',
   'stock-returns-completed-no-taken-btn.test.js',
