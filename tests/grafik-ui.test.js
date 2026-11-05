@@ -620,7 +620,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
       const nm = ws.getCell('B12');
       ok('извън нормата в черновата: редът е червен, бележка „X ч. вместо Y ч. — извън нормата“', nm.fill && nm.fill.fgColor.argb === 'FFFEE2E2' &&
         /ч\. вместо 168 ч\. — извън нормата/.test(JSON.stringify(nm.note)), JSON.stringify(nm.note));
-      ok('легендата е отдолу (зимни кодове с часовете, О/Н/Б)', (() => { let txt = ''; ws.eachRow(r => { const a = r.getCell(1).value; if (typeof a === 'string') txt += a + '\n'; }); return /Работните смени при зимно работно време/.test(txt) && /Д5\/З – от 8:00 до 19:30/.test(txt) && /О – ПЛАТЕН ГОДИШЕН ОТПУСК/.test(txt) && !/Д4\/Л –/.test(txt); })());
+      ok('легендата е отдолу — и двата сезона (05.11.2026): лятото и зимата с часовете, О/Н/Б', (() => { let txt = ''; ws.eachRow(r => { const a = r.getCell(1).value; if (typeof a === 'string') txt += a + '\n'; }); return /Работните смени при зимно работно време/.test(txt) && /Д5\/З – от 8:00 до 19:30/.test(txt) && /О – ПЛАТЕН ГОДИШЕН ОТПУСК/.test(txt) && /Работните смени при лятно работно време \(май–октомври\) са:/.test(txt) && /Д4\/Л – от 8:00 до 20:00/.test(txt) && txt.indexOf('лятно') < txt.indexOf('зимно'); })());
       ok('A4 хоризонтално, събрано по ширина', ws.pageSetup.orientation === 'landscape' && ws.pageSetup.fitToWidth === 1 && ws.pageSetup.paperSize === 9);
       // Петя (4 ч. договор) няма ред в месеца → извън нормата: 0 ч. вместо 21 × 4 = 84 ч. (решение 04.11.2026).
       const pt = ws.getCell('B14');
@@ -646,12 +646,12 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     realClick(x.w, btn(mod(x), 'Печат')); await ticks(4);
     const pr = x.doc.getElementById('mod-print'), tbl = x.doc.getElementById('grp-tbl');
     ok('печат: показан е #mod-print с таблицата', pr.style.display === 'block' && !!tbl);
-    ok('печат: колони — №, имена, длъжност, 30 дни, 6 сбора и „Запознат / подпис“', tbl.querySelectorAll('colgroup col').length === 3 + 30 + 7 &&
-      tbl.querySelector('thead tr').lastElementChild.textContent === 'Запознат / подпис');
+    ok('печат: колони — №, имена, длъжност, 30 дни, после чов. дни, чов. часове, „Запознат / подпис“, О, Б, Н, общо (както AI–AO в бланката)', tbl.querySelectorAll('colgroup col').length === 3 + 30 + 7 &&
+      Array.from(tbl.querySelector('thead tr').children).slice(-7).map(th => th.textContent).join('|') === 'чов.дни|чов.часове|Запознат / подпис|О|Б|Н|общо ч. вкл. О/Б/Н', Array.from(tbl.querySelector('thead tr').children).slice(-7).map(th => th.textContent).join('|'));
     ok('печат: „ЧЕРНОВА“ (надпис и заглавие)', !!x.doc.getElementById('grp-draft') && /^ЧЕРНОВА — ГРАФИК ЗА ЯВЯВАНЕ НА РАБОТА$/.test(x.doc.getElementById('grp-title').textContent));
     ok('печат: „Изготвил … (ръководител обект)“ и „Утвърдил: Теодор Тенев … (управител)“', /\(ръководител обект\)$/.test(x.doc.getElementById('grp-made').textContent) &&
       /^Утвърдил: Теодор Тенев .*\(управител\)$/.test(x.doc.getElementById('grp-appr').textContent));
-    ok('печат: общо ч. вкл. О/Б/Н за Мария = 168', tbl.querySelectorAll('tbody tr')[1].children[3 + 30 + 5].textContent === '168');
+    ok('печат: общо ч. вкл. О/Б/Н за Мария = 168', tbl.querySelectorAll('tbody tr')[1].children[3 + 30 + 6].textContent === '168' && tbl.querySelectorAll('tbody tr')[1].children[3 + 30 + 2].textContent === '');
     ok('печат: редът извън нормата е червен с бележката', /grp-off/.test(tbl.querySelectorAll('tbody tr')[0].className) && /извън нормата/.test(tbl.querySelectorAll('tbody tr')[0].textContent));
     const pcss = x.doc.querySelector('#mod-print style').textContent;
     // Легендата — на листа с таблицата (04.11.2026): подписите, ВТР и легендата са един неразделим блок
@@ -661,7 +661,10 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('печат: легендата е в блока с подписите, СЛЕД „Утвърдил“, и блокът е веднага след таблицата',
       !!foot && foot.contains(leg) && foot.contains(x.doc.getElementById('grp-appr')) &&
       !!(x.doc.getElementById('grp-appr').compareDocumentPosition(leg) & 4) && tbl.nextElementSibling === foot);
-    ok('печат: легендата — дребен шрифт, две колони', /\.grp-legend\{columns:2;[^}]*font-size:6\.5px;/.test(pcss) && leg.children.length > 0);
+    ok('печат: легендата — дребен шрифт, ТРИ колони (двата сезона в две не се събират на 1 лист — измерено 05.11.2026)', /\.grp-legend\{columns:3;[^}]*font-size:6\.5px;/.test(pcss) && leg.children.length > 0);
+    const lt = Array.from(leg.querySelectorAll('.grp-leg-title')).map(d => d.textContent);
+    ok('печат: легендата — заглавие за лятото, после за зимата; кодове и от двата сезона', lt.length === 2 && /^Работните смени при лятно/.test(lt[0]) && /^Работните смени при зимно/.test(lt[1]) &&
+      /Д4\/Л – /.test(leg.textContent) && /Д5\/З – /.test(leg.textContent) && /О – ПЛАТЕН/.test(leg.textContent), lt.join(' | '));
     ok('печат CSS: блокът не се къса (break-inside:avoid)', /#grp-foot\{break-inside:avoid;page-break-inside:avoid;\}/.test(pcss));
     ok('печат CSS: редовете с отстъп 0.15mm (досега 0.4mm → легендата падаше на втори лист)', /\.grp-tbl th,\.grp-tbl td\{[^}]*padding:0\.15mm 0\.2mm;/.test(pcss));
     ok('печат CSS: обвивката без отстъп при печат', /@media print\{#grp-page\{padding:0 !important;\}\}/.test(pcss) && !!x.doc.getElementById('grp-page'));
@@ -934,6 +937,96 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     };
     await guard('loadAdmin() не хвърля', () => h.w.loadAdmin()); await ticks(10);
     ok('admin.js loadAdmin() → картата „📆 График“ се появява', !!h.doc.getElementById('gr-admin-card') && !!h.doc.getElementById('gr-adm-beta'));
+  }
+
+  section('17. 05.11.2026: дневни сборове, ЛД в неделя, цветове, колона AO, дублирано име');
+  {
+    const ExcelJS = require(path.join(ROOT, 'node_modules', 'exceljs'));
+    const S = makeServer();
+    S.staff.filter(s => s.id === 'st-1')[0].position = 'Продавач';
+    S.staff.filter(s => s.id === 'st-2')[0].position = 'Каса';
+    S.staff.filter(s => s.id === 'st-3')[0].position = 'Каса';
+    S.staff.filter(s => s.id === 'st-2')[0].hired_on = '2026-11-10';      // Мария — от 10.11
+    S.staff.filter(s => s.id === 'st-3')[0].left_on = '2026-11-20';       // Петя — напуска на 20.11
+    S.months['Кърджали|2026-11-01'] = { id: 'm-d', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+    // Ноември 2026: 1.11 — неделя. Иван: нд ЛД, пн ЛД, вт П, ср О, чт Б, пт НО.
+    const L1 = new Array(30).fill(''); ['ЛД', 'ЛД', 'П', 'О', 'Б', 'НО'].forEach((v, i) => { L1[i] = v; });
+    const L2 = new Array(30).fill(''); ['ЗД', 'В', 'М', 'К', '9'].forEach((v, i) => { L2[i] = v; });
+    const L3 = new Array(30).fill(''); L3[1] = 'О4'; L3[2] = 'П';
+    S.rows.push({ month_id: 'm-d', staff_id: 'st-1', letters: L1, locked: {} }, { month_id: 'm-d', staff_id: 'st-2', letters: L2, locked: {} }, { month_id: 'm-d', staff_id: 'st-3', letters: L3, locked: {} });
+    const x = env(MGR, { server: S });
+    await load(x);
+    const d = x.doc;
+    const rowNums = id => { const tr = d.getElementById(id); return tr ? Array.from(tr.children).slice(1).map(td => +td.textContent) : null; };
+    const first = (id, n) => (rowNums(id) || []).slice(0, n).join(',');
+
+    // т.2 — дневните сборове.
+    ok('т.2: блокът „Дневни сборове“ е сгъваем (<details>), след „Покритие по сектор“', !!d.getElementById('gr-daily') && d.getElementById('gr-daily').tagName === 'DETAILS' &&
+      !!(d.getElementById('gr-coverage').compareDocumentPosition(d.getElementById('gr-daily')) & 4));
+    ok('т.2: по буква — 10 реда (ЛД, ЗД, П, В, М, К, Б, О, НО, О4)', ['ЛД', 'ЗД', 'П', 'В', 'М', 'К', 'Б', 'О', 'НО', 'О4'].every(l => !!d.getElementById('gr-daily-l-' + l)));
+    ok('т.2: ЛД — 1,1,0,0,0 · О4 — 0,1,0 · К — 0,0,0,1', first('gr-daily-l-ЛД', 5) === '1,1,0,0,0' && first('gr-daily-l-О4', 3) === '0,1,0' && first('gr-daily-l-К', 4) === '0,0,0,1', first('gr-daily-l-ЛД', 5));
+    ok('т.2: „Общо на ден“ — сборът на буквите (вкл. О, Б, НО, О4; свободните часове не са буква): 2,3,3,2,1,1', first('gr-daily-total', 6) === '2,3,3,2,1,1', first('gr-daily-total', 6));
+    ok('т.2: „Сутрин общо“ = ЛД + ЗД + П: 2,1,2,0,0', first('gr-daily-morning', 5) === '2,1,2,0,0', first('gr-daily-morning', 5));
+    ok('т.2: „Вечер общо“ = ЛД + ЗД + В + М: 2,2,1,0,0', first('gr-daily-evening', 5) === '2,2,1,0,0', first('gr-daily-evening', 5));
+    ok('т.2: по позиция — хората на смяна: Продавач 1,1,1,0,0 (О и Б не са смяна)', first('gr-daily-p-Продавач', 5) === '1,1,1,0,0', first('gr-daily-p-Продавач', 5));
+    ok('т.2: …Каса 1,1,2,1,1 (О4 не е смяна; К и свободни часове — да)', first('gr-daily-p-Каса', 5) === '1,1,2,1,1', first('gr-daily-p-Каса', 5));
+    ok('т.2: позиция без хора — без ред (Склад)', !d.getElementById('gr-daily-p-Склад'));
+
+    // т.3 — ЛД в неделя.
+    const c00 = d.getElementById('gr-c-0-0');
+    ok('т.3: ЛД в неделя (1.11) — червена клетка, без код', /background:#FF8080/i.test(c00.getAttribute('style')) && x.w.grCalc.rows[0].codes[0] === '', c00.getAttribute('style'));
+    const sw = Array.from(d.querySelectorAll('#gr-warnings .gr-warn-sunday_ld')).map(li => li.textContent);
+    ok('т.3: предупреждение „ИВАН: 1-ви — ЛД в неделя — ползвай ЗД“', sw.length === 1 && sw[0] === 'ИВАН: 1-ви — ЛД в неделя — ползвай ЗД', sw.join(' | '));
+    ok('т.3: ЛД в делник (2.11) — без червено', !/background:#FF8080/i.test(d.getElementById('gr-c-0-1').getAttribute('style')));
+    ok('т.3: „Подай“ го изрежда: „Иван Иванов Иванов: ЛД в неделя на 01.11 — ползвай ЗД“', x.w.grSubmitIssues().indexOf('Иван Иванов Иванов: ЛД в неделя на 01.11 — ползвай ЗД') >= 0, x.w.grSubmitIssues().join(' | '));
+
+    // т.6 — цветове.
+    const bg = (r, c) => (d.getElementById('gr-c-' + r + '-' + c).getAttribute('style').match(/background:(#[0-9A-Fa-f]{6})/) || [])[1];
+    ok('т.6: О — светло жълто (#FFF2CC), Б — светло синьо (#B4C6E7)', bg(0, 3) === '#FFF2CC' && bg(0, 4) === '#B4C6E7', bg(0, 3) + ' ' + bg(0, 4));
+    ok('т.6: дни преди назначаването (Мария, 7.11) — сиво #D9D9D9; след него (13.11) — не', bg(1, 6) === '#D9D9D9' && bg(1, 12) !== '#D9D9D9', bg(1, 6) + ' ' + bg(1, 12));
+    ok('т.6: дни след напускането (Петя, 26.11) — сиво; денят на напускане (20.11) — не', bg(2, 25) === '#D9D9D9' && bg(2, 19) !== '#D9D9D9', bg(2, 25) + ' ' + bg(2, 19));
+    const pn = d.querySelectorAll('#gr-grid tbody tr')[2].querySelector('.gr-name');
+    ok('т.6: напуска през месеца (Петя) — името е маркирано (#BDD7EE) и казва датата', /gr-leaving/.test(pn.className) && /background:#BDD7EE/.test(pn.getAttribute('style')) && /напуска на 20\.11\.2026/.test(pn.getAttribute('title')), pn.getAttribute('title'));
+    ok('т.6: Иван не напуска — без маркировка', !/gr-leaving/.test(d.querySelectorAll('#gr-grid tbody tr')[0].querySelector('.gr-name').className));
+    const intBg = r => (d.querySelectorAll('#gr-grid .gr-int')[r].getAttribute('style').match(/background:(#[0-9A-Fa-f]{6})/) || [])[1] || '';
+    ok('т.6: „Вътр.“ под нормата — червено (Иван: 37 ч. срещу праг 152 = 168 − 8 × (Б + НО))', intBg(0) === '#FF8080' && x.w.grCalc.rows[0].internalNorm === 152, intBg(0) + ' ' + x.w.grCalc.rows[0].internalNorm);
+    const setI = letters => { x.w.grRows['st-1'] = { letters, locked: {} }; x.w.grRecalc(); x.w.grRender(); };
+    const wd = x.w.GrafikEngine.monthInfo('2026-11', []);
+    const work = (fill, extra) => { const a = wd.dow.map(w => (w <= 5 ? fill : '')); if (extra) a[0] = extra; return a; };
+    setI(work('П'));
+    ok('т.6: точно на нормата (21 × П = 168) — без цвят', intBg(0) === '', intBg(0));
+    setI(work('П', '3'));
+    ok('т.6: норма + 3 ч. (171) — още без цвят (границата не е „над“)', intBg(0) === '', intBg(0));
+    setI(work('П', '4'));
+    ok('т.6: норма + 4 ч. (172) — оранжево #FFC000', intBg(0) === '#FFC000', intBg(0));
+    setI(L1);
+
+    // т.5 — Excel за ТРЗ: AO и ВСИЧКО.
+    const got = [];
+    x.w.grWithExcelJS = () => Promise.resolve(ExcelJS);
+    x.w.grDownload = (buf, name) => got.push({ buf, name });
+    realClick(x.w, btn(mod(x), 'Excel за ТРЗ')); await wait(400); await ticks(8);
+    ok('т.5: файлът е направен', got.length === 1);
+    if (got.length) {
+      const wb = new ExcelJS.Workbook(); await wb.xlsx.load(got[0].buf); const ws = wb.worksheets[0];
+      const v = a => { const c = ws.getCell(a).value; return c && typeof c === 'object' && 'result' in c ? c.result : c; };
+      const f = a => { const c = ws.getCell(a).value; return c && typeof c === 'object' ? c.formula : null; };
+      ok('т.5: колона AO след „неплатен (Н) дни“ — „общо часове вкл. О/Б/Н (по договора)“', v('AM5') === 'неплатен (Н) дни' && v('AN5') === 'общо часове вкл. О/Б/Н (по договора)', v('AN5'));
+      ok('т.5: формулата — човекочасове + договор × (О + Б + Н): Иван × 8, Петя (4 ч.) × 4', f('AN12') === 'AI12+8*(AK12+AL12+AM12)' && f('AN14') === 'AI14+4*(AK14+AL14+AM14)', f('AN12') + ' | ' + f('AN14'));
+      const r0 = x.w.grExportModel().rows;
+      ok('т.5: резултатът до формулата = общото от модела (Иван: часове + 8 × (О + Б + Н от НО) = + 24)', v('AN12') === r0[0].total && r0[0].total === r0[0].hours + 24, v('AN12') + ' / ' + r0[0].total);
+      ok('т.5: ред „ВСИЧКО за обекта“ — и в AO: SUM', v('A15') === 'ВСИЧКО за обекта:' && f('AN15') === 'SUM(AN12:AN14)' && v('AN15') === r0.reduce((s, r) => s + r.total, 0), f('AN15'));
+      ok('т.5: „Утвърдил“ покрива и новата колона (обединено до AN)', ws.getCell('AN1').master && ws.getCell('AN1').master.address === 'AH1');
+    }
+
+    // т.10 — дублирано име: сървърът отказва, екранът казва защо и формулярът остава отворен.
+    S.fail.staff_save = b => String(b.fields.short_name || '').trim().toLowerCase() === 'иван'
+      ? { status: 409, body: { ok: false, reason: 'duplicate', message: '„иван“ вече е в графика на обекта — сложи различно име в графика.' } } : null;
+    x.w.grSetView('staff'); await ticks(4);
+    x.w.grStaffOpen('');
+    d.getElementById('gr-sf-short').value = 'иван'; d.getElementById('gr-sf-full').value = 'Иван Втори';
+    realClick(x.w, btn(d.getElementById('gr-staff-modal'), 'Запиши')); await ticks(6);
+    ok('т.10: 409 duplicate → „Не е записан: „иван“ вече е в графика на обекта — …“; формулярът остава', x.calls.toast.some(t => t === 'Не е записан: „иван“ вече е в графика на обекта — сложи различно име в графика.') && !!d.getElementById('gr-staff-modal'), x.calls.toast.slice(-2).join(' | '));
   }
 
   report();

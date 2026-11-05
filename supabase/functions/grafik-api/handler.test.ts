@@ -394,6 +394,21 @@ Deno.test("submit: празен ред, липсващ ред и свободн�
   eq([ok.status, ok.body.status], [200, "submitted"], "подаден");
 });
 
+Deno.test("submit: ЛД в неделя → 409 с деня; ЛД в делник и ЗД в неделя — не (05.11.2026)", async () => {
+  const r = new MemRepo();
+  const ids = await filled(r);
+  // Ноември 2026: 1.11 и 8.11 са неделя, 2.11 — понеделник.
+  await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [
+    { staff_id: ids[0], letters: L30(["ЛД", "ЛД", "", "", "", "", "", "ЛД"]) },
+    { staff_id: ids[1], letters: L30(["ЗД", "ЛД"]) },
+  ] });
+  const x = await sub(r, snap(ids));
+  eq([x.status, x.body.reason], [409, "off_norm"], "отказ");
+  eq(x.body.issues, [nm(r, ids[0]) + ": ЛД в неделя на 01.11 — ползвай ЗД", nm(r, ids[0]) + ": ЛД в неделя на 08.11 — ползвай ЗД"], "само неделите с ЛД, с датите");
+  await call(r, U.mgrK, { action: "save_rows", store: "Кърджали", month: "2026-11", rows: [{ staff_id: ids[0], letters: L30(["ЗД", "ЛД", "", "", "", "", "", "ЗД"]) }] });
+  eq((await sub(r, snap(ids))).status, 200, "сменено на ЗД → подаден");
+});
+
 Deno.test("submit: снимка без часовете → bad_snapshot (не се приема мълчаливо като 0)", async () => {
   const r = new MemRepo();
   const ids = await filled(r);
@@ -539,6 +554,25 @@ Deno.test("admin_get: носи и ВТР-ите и обектите (за кар
 });
 
 // ── Персонал ─────────────────────────────────────────────────────────────
+Deno.test("staff_save: дублирано „Име в графика“ в същия обект → 409 (05.11.2026)", async () => {
+  const r = new MemRepo();
+  const save = (fields: Record<string, unknown>, id?: string, store = "Кърджали") => call(r, U.admin, { action: "staff_save", store, fields, ...(id ? { id } : {}) });
+  const a = await save({ short_name: "МАРИЯ", full_name: "Мария Първа" });
+  eq(a.status, 200, "първата МАРИЯ");
+  const d = await save({ short_name: "  мария ", full_name: "Мария Втора" });
+  eq([d.status, d.body.reason], [409, "duplicate"], "същото име (малки букви, интервали) — отказ");
+  assert(/„мария“ вече е в графика на обекта/.test(String(d.body.message)), "съобщението казва кое име");
+  eq((await save({ short_name: "МАРИЯ", full_name: "Мария Шумен" }, undefined, "Шумен")).status, 200, "в друг обект — може");
+  const b = await save({ short_name: "МАРИЯ 2", full_name: "Мария Втора" });
+  eq((await save({ short_name: "Мария" }, b.body.staff.id)).body.reason, "duplicate", "преименуване към заето име — отказ");
+  eq((await save({ short_name: "МАРИЯ", note: "бележка" }, a.body.staff.id)).status, 200, "записът на самия човек със същото име — може");
+  eq((await save({ note: "без име в полетата" }, b.body.staff.id)).status, 200, "редакция без short_name — без проверка");
+  r.staff.filter((x) => x.id === a.body.staff.id)[0].left_on = "2026-09-30";
+  const lf = await save({ short_name: "МАРИЯ", full_name: "Мария Нова" });
+  eq(lf.body.reason, "duplicate", "напусналият също заема името");
+  assert(/напуснал на 2026-09-30/.test(String(lf.body.message)), "…и съобщението казва, че е напуснал");
+});
+
 Deno.test("staff_save / staff_move: права и бял списък", async () => {
   const r = new MemRepo();
   const n = await call(r, U.mgrK, { action: "staff_save", store: "Кърджали", fields: { short_name: "НОВ", full_name: "Нов Човек", hours_per_day: 4 } });

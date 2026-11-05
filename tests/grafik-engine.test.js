@@ -23,9 +23,18 @@ function check(name, cond, extra) {
 }
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 function caseBy(key) { return ET.cases.filter(function (c) { return c.key === key; })[0]; }
+// Бланката превежда ЛД в неделя към Д6/1 (и само го оцветява), а порталът от 05.11.2026 го спира
+// (код няма, предупреждение sunday_ld). За сверката с бланката тези клетки се заключват на Д6/1 —
+// точно каквото прави тя; самото правило се проверява отделно (раздел 1б).
+var SUN_LD = {};
 function rowsOf(c) {
+  SUN_LD[c.key] = [];
   return c.staff.map(function (s) {
-    return { staff: { id: s.id, tag: s.tag, hired_on: s.hired_on, left_on: s.left_on, hours_per_day: 8 }, letters: s.letters, expect: s.expected };
+    var lk = {};
+    (s.letters || []).forEach(function (v, i) {
+      if (v === 'ЛД' && E.dow(c.ym + '-' + (i < 9 ? '0' : '') + (i + 1)) === 7) { lk[i + 1] = 'Д6/1'; SUN_LD[c.key].push(s.tag + ':' + (i + 1)); }
+    });
+    return { staff: { id: s.id, tag: s.tag, hired_on: s.hired_on, left_on: s.left_on, hours_per_day: 8 }, letters: s.letters, locked: lk, expect: s.expected };
   });
 }
 /* ── 1. Еталонът, по служител ─────────────────────────────────────────── */
@@ -204,7 +213,7 @@ var c3 = E.computeRow(P11, M11, { hours_per_day: 8 }, L3, {});
 check('ЛД вместо П (+2.5 над нормата) → един ход надолу −2.5 на НАЙ-РАННИЯ възможен ден',
   c3.diff === 0 && c3.changed.length === 1 && c3.changed[0].day === 30 && c3.changed[0].to === 'Д1/З', JSON.stringify(c3.changed));
 // Смесено: −1.5 = −1 (Д6/1→Д6/2) + −0.5 (Д5/З→Д4/З) — нагоре и надолу в един месец.
-var L4 = L1.slice(); L4[0] = 'ЛД'; L4[2] = 'ЛД'; L4[3] = '';                   // нд 1.11 ЛД (+9), вт 3.11 ЛД (+10.5 вм. 8), ср 4.11 празно (−8)
+var L4 = L1.slice(); L4[0] = 'ЗД'; L4[2] = 'ЛД'; L4[3] = '';                   // нд 1.11 ЗД → Д6/1 (+9), вт 3.11 ЛД (+10.5 вм. 8), ср 4.11 празно (−8)
 var d4 = E.computeRow(P11, M11, { hours_per_day: 8 }, L4, {});
 check('смесено +9 +2.5 −8 = +3.5 → изравнено с 2 хода (−1 и −2.5 или подобни), точно 0', d4.diff === 0 && d4.changed.length === 2, JSON.stringify(d4.changed) + ' diff ' + d4.diff);
 check('детерминистично — същият вход, същите смени', JSON.stringify(E.computeRow(P11, M11, { hours_per_day: 8 }, L4, {}).changed) === JSON.stringify(d4.changed));
@@ -294,7 +303,7 @@ check('20:30 → 08:00 = 11,5 ч. → „под 12 ч.“', only(y115, 'daily_re
 var y355 = warnsY(Object.assign(onDays(2, 6, 'ЛД'), { 7: 'ЗД', 9: 'ЛД', 10: 'ЛД', 11: 'ЛД', 12: 'ЛД', 13: 'ЛД' }));   // сб 20:30 → нд → пон 08:00 = 35,5 ч.
 check('20:30 → свободен ден → 08:00 = 35,5 ч. → под 36 ч.', only(y355, 'no_weekly_rest').length === 1 && /^няма непрекъсната почивка ≥ 36 ч\./.test(only(y355, 'no_weekly_rest')[0].text), JSON.stringify(only(y355, 'no_weekly_rest')));
 // „К“ (без часове) е зает цял ден: нд 8 К, пон 9 свободен, вт 10 – нд 15 работа → почивката е само пон (нд 24:00 → вт 08:00 = 32 ч.).
-var kBusy = warnsOf(L30(Object.assign(onDays(2, 7, 'ЛД'), { 8: 'К' }, onDays(10, 15, 'ЛД'))));
+var kBusy = warnsOf(L30(Object.assign(onDays(2, 7, 'ЛД'), { 8: 'К' }, onDays(10, 14, 'ЛД'), { 15: 'ЗД' })));
 check('ден „К“ е зает цял ден — почивката не „минава“ през него (пон 9 = 32 ч. → под 36)',
   only(kBusy, 'no_weekly_rest').some(function (w) { return /^няма непрекъсната почивка ≥ 36 ч\..*\(09\.11–/.test(w.text); }), JSON.stringify(only(kBusy, 'no_weekly_rest')));
 
@@ -311,7 +320,7 @@ var w57 = warnsOf(L30({ 2: 'П', 3: 'П', 4: 'П', 5: 'П', 6: 'П', 7: 'П', 8:
 check('57 ч. (свободните часове влизат в сбора) → над 56', only(w57, 'week_over_56').length === 1 && /^57 ч\./.test(only(w57, 'week_over_56')[0].text));
 
 // Седмица през границата на месеца: 26.10–1.11.
-var nov1 = L30({ 1: 'ЛД' });                                                     // нд 1.11 → Д6/1 = 9 ч.
+var nov1 = L30({ 1: 'ЗД' });                                                     // нд 1.11 ЗД → Д6/1 = 9 ч.
 var octL = new Array(31).fill(''); [25, 26, 27, 28, 29, 30].forEach(function (d) { octL[d] = 'ЛД'; });  // 26–31.10, Л: Д4/Л = 11 ч.
 var PREV = { setup: ET.setups['2026-10'], ym: '2026-10', rows: { x: { letters: octL, locked: {} } } };
 var wb = warnsOf(nov1, PREV);
@@ -338,7 +347,7 @@ check('смяна 13 ч. → „над 12 ч.“ с дата', only(w13, 'shift_
 check('Д4/Л (11 ч.) и свободни 12 ч. → НЕ са над 12', !only(E.computeMonth(ET.setups['2026-10'], '2026-10', monthRows(new Array(31).fill('').map(function (v, i) { return i === 5 ? 'ЛД' : i === 6 ? '12' : ''; }))).rows[0].warnings, 'shift_over_12').length);
 // Декември 2026: 1.12 = вторник → седмицата 30.11–06.12 има 6 дни в декември. Без ноември → „непълна“.
 var D31 = function (map) { var a = new Array(31).fill(''); Object.keys(map).forEach(function (d) { a[+d - 1] = map[d]; }); return a; };
-var dec = E.computeMonth(S11, '2026-12', [{ staff: { id: 'x', hours_per_day: 8 }, letters: D31(Object.assign(onDays(1, 6, 'ЛД'), { 24: 'П' })), locked: {} }]).rows[0].warnings;
+var dec = E.computeMonth(S11, '2026-12', [{ staff: { id: 'x', hours_per_day: 8 }, letters: D31(Object.assign(onDays(1, 5, 'ЛД'), { 6: 'ЗД', 24: 'П' })), locked: {} }]).rows[0].warnings;
 var dw = only(dec, 'week_over_56');
 check('декември без ноември: 5 × 10.5 + 9 (нд) = 61.5 ч. в седмицата 30.11–06.12 → „над 56 ч. (непълна седмица)“',
   dw.length === 1 && /^61\.5 ч\. в седмицата 30\.11–06\.12 \(пон–нед\) — над 56 ч\. \(непълна седмица\)$/.test(dw[0].text) && dw[0].day === 1, JSON.stringify(dw));
@@ -384,6 +393,31 @@ var d21 = E.computeRow(P11, M12, { hours_per_day: 8, hired_on: '2026-12-21' }, w
 check('назначен 21.12 → празниците и ползваният 28.12 не са работни: 6 дни, 48 ч.', d21.workDays === 6 && d21.target === 48 && d21.diff === 0, JSON.stringify([d21.workDays, d21.target, d21.diff]));
 var full = E.computeRow(P11, M11, { hours_per_day: 8 }, wkLetters(M11, 1, 30), {});
 check('без дати — норма = работните дни на месеца × договора (както досега)', full.workDays === M11.workDays && full.norm === M11.norm && full.target === 168, full.target);
+
+/* ── 10. ЛД в неделя — грешка, не тих превод (05.11.2026) ─────────────── */
+check('еталонът: ЛД в неделя — Кърджали 11.2026 няма, Раднево 11.2026 — точно един (29.11)',
+  SUN_LD['kardzhali-2026-11'].length === 0 && SUN_LD['radnevo-2026-11'].length === 1 && /:29$/.test(SUN_LD['radnevo-2026-11'][0]), JSON.stringify(SUN_LD));
+(function () {
+  var c = caseBy('radnevo-2026-11'), tag = SUN_LD['radnevo-2026-11'][0].split(':')[0];
+  var s = c.staff.filter(function (x) { return x.tag === tag; })[0];
+  var r = E.computeRow(P11, M11, { hours_per_day: 8 }, s.letters, {});
+  var w = r.warnings.filter(function (x) { return x.type === 'sunday_ld'; });
+  check('без заключване: 29.11 (нд) ЛД → без код, предупреждение „ЛД в неделя — ползвай ЗД“, без „няма код“',
+    r.codes[28] === '' && w.length === 1 && w[0].day === 29 && w[0].text === 'ЛД в неделя — ползвай ЗД' && !r.warnings.some(function (x) { return x.type === 'unknown'; }), JSON.stringify(w));
+  check('…и часовете на неделята (Д6/1, 9 ч.) не се броят: разлика ' + s.expected.diff + ' → ' + (s.expected.diff - 9), r.diff === s.expected.diff - 9, r.diff);
+})();
+var sl = L30({ 8: 'ЛД' }), slR = E.computeRow(P11, M11, { hours_per_day: 8 }, sl, {});
+check('синтетично: нд 8.11 ЛД → празен код, едно предупреждение', slR.codes[7] === '' && slR.warnings.filter(function (x) { return x.type === 'sunday_ld' && x.day === 8; }).length === 1);
+var zd8 = E.computeRow(P11, M11, { hours_per_day: 8 }, L30({ 8: 'ЗД' }), {});
+check('ЗД в неделя → Д6/1, без предупреждение', zd8.codes[7] === 'Д6/1' && !zd8.warnings.some(function (x) { return x.type === 'sunday_ld'; }));
+check('ЛД в делник → както досега (Д5/З)', E.computeRow(P11, M11, { hours_per_day: 8 }, L30({ 9: 'ЛД' }), {}).codes[8] === 'Д5/З');
+var slL = E.computeRow(P11, M11, { hours_per_day: 8 }, sl, { 8: 'Д6/2' });
+check('заключен код на ЛД/неделя → кодът е заключеният, предупреждението остава (буквата е грешна)', slL.codes[7] === 'Д6/2' && slL.warnings.some(function (x) { return x.type === 'sunday_ld'; }));
+// Прагът за „Вътр.“: нормата без дните Б / НО (вътрешните часове ги броят 0, а О — по договора).
+var inN = E.computeRow(P11, M11, { hours_per_day: 8 }, L30({ 2: 'Б', 3: 'НО', 4: 'О', 7: 'Б' }), {});
+check('internalNorm = 168 − 8 × (Б + НО в периода на работа) = 168 − 24 = 144 (О не намалява)', inN.internalNorm === 144, inN.internalNorm);
+check('internalNorm при назначен 16.11 — само дните на работа: 88 − 8 × 1 (Б на 17.11) = 80',
+  E.computeRow(P11, M11, { hours_per_day: 8, hired_on: '2026-11-16' }, L30({ 10: 'Б', 17: 'Б' }), {}).internalNorm === 80);
 
 console.log('\n' + ok + ' успешни, ' + fail + ' неуспешни');
 process.exit(fail ? 1 : 0);

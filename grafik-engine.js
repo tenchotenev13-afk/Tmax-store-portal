@@ -237,23 +237,28 @@
     // hired_on до left_on (вкл.) × договора; отсъствията извън тях не я намаляват (04.11.2026).
     var lo = staff && staff.hired_on && staff.hired_on > M.start ? staff.hired_on : M.start;
     var hi = staff && staff.left_on && staff.left_on < M.end ? staff.left_on : M.end;
-    var wd = 0, absIn = 0;
+    var wd = 0, absIn = 0, unpaidIn = 0;
     for (var i = 0; i < M.days; i++) {
       var L = (letters && letters[i]) || '';
       if (L || locked[i + 1]) any = true;
       internal += E.internalHours(P, L, hpd);
-      var c = locked[i + 1] ? locked[i + 1] : E.translate(P, L, M.dow[i], hpd);
+      // ЛД в неделя е грешка (бланката: червено + ПРОВЕРКА „ЛД в неделя“; неделята е ЗД) — не се
+      // превежда тихо към Д6/1: кодът остава празен, докато не се смени буквата (05.11.2026).
+      var sunLd = L === 'ЛД' && M.dow[i] === 7;
+      var c = locked[i + 1] ? locked[i + 1] : sunLd ? '' : E.translate(P, L, M.dow[i], hpd);
       codes.push(c);
       var emp = M.dates[i] >= lo && M.dates[i] <= hi;
       if (emp && M.dow[i] <= 5 && !M.holiday[i]) wd++;
       if (E.isAbsence(P, c)) { abs++; if (emp) absIn++; }
+      if (emp && (L === 'Б' || L === 'НО')) unpaidIn++;
+      if (sunLd) warn.push({ day: i + 1, type: 'sunday_ld', text: 'ЛД в неделя — ползвай ЗД' });
       if (E.isHours(L)) notes.push({ day: i + 1, type: 'hours', text: L + ' свободни ч. — ръчен код' });
       if (L && E.WORK_LETTERS.indexOf(L) >= 0) {
         if (M.holiday[i]) warn.push({ day: i + 1, type: 'holiday', text: 'смяна на празник (' + M.holiday[i] + ')' });
         if (staff && staff.hired_on && M.dates[i] < staff.hired_on) warn.push({ day: i + 1, type: 'before_hire', text: 'смяна преди назначаване' });
         if (staff && staff.left_on && M.dates[i] > staff.left_on) warn.push({ day: i + 1, type: 'after_leave', text: 'смяна след напускане' });
       }
-      if (L && !E.isHours(L) && !c && !locked[i + 1]) {
+      if (L && !E.isHours(L) && !c && !locked[i + 1] && !sunLd) {
         if (!noLetters) warn.push({ day: i + 1, type: 'unknown', text: 'буквата „' + L + '“ няма код за този ден' });
         else warn.push({ day: i + 1, type: 'no_contract', text: 'няма букви за договор ' + hpd + ' ч.' });
       }
@@ -275,7 +280,10 @@
       target: target, diff: diff, reachable: diff === 0 ? true : reachable,
       message: diff === 0 ? 'OK' : diff < 0 ? 'не стигат ' + (-diff) + ' ч.' : 'над нормата с ' + diff + ' ч.',
       absences: abs, manDays: manDays, notes: notes, warnings: warn,
-      workDays: wd, norm: wd * hpd                                   // норма на човека (дните на работа)
+      workDays: wd, norm: wd * hpd,                                  // норма на човека (дните на работа)
+      // За „Вътр.“ (бланката BE срещу BL): вътрешните часове броят О по договора, а Б и НО — 0,
+      // затова прагът е нормата без дните Б / НО в периода на работа.
+      internalNorm: wd * hpd - hpd * unpaidIn
     };
   };
 

@@ -263,7 +263,9 @@ export function checkSnapshot(s: unknown, days: number, staffIds: string[]): str
 export const SUBMIT_HINT = "Сложи кодове за дните или О/Б/Н; ако човекът не работи този месец — махни го от месеца.";
 function hrs(n: number): string { return String(Math.round(n * 10) / 10).replace(".", ","); }
 function p2(n: number): string { return (n < 10 ? "0" : "") + n; }
-export function submitIssues(staff: Staff[], rows: RowRec[], snapRows: Record<string, unknown>[], days: number, month: number): string[] {
+// От 05.11.2026 и ЛД в неделя (бланката: червено + ПРОВЕРКА „ЛД в неделя“) — по grafik_rows и датата.
+export function submitIssues(staff: Staff[], rows: RowRec[], snapRows: Record<string, unknown>[], days: number, start: string): string[] {
+  const month = +start.slice(5, 7), dow0 = new Date(start + "T00:00:00Z").getUTCDay();   // 0 = неделя
   const byRow: Record<string, RowRec> = {}, bySnap: Record<string, Record<string, unknown>> = {};
   rows.forEach((r) => { byRow[r.staff_id] = r; });
   snapRows.forEach((r) => { bySnap[r.staff_id as string] = r; });
@@ -276,7 +278,10 @@ export function submitIssues(staff: Staff[], rows: RowRec[], snapRows: Record<st
     if (!any) {
       if (norm !== 0) out.push(name + ": " + (r ? "редът в графика е празен" : "няма ред в графика за месеца") + (norm ? " (0 ч. вместо " + hrs(norm) + " ч.)" : ""));
     } else if (sr.diff !== 0) out.push(name + ": " + hrs(Number(sr.official)) + " ч. вместо " + hrs(Number(sr.target)) + " ч.");
-    letters.forEach((v, i) => { if (typeof v === "string" && HOURS_RE.test(v)) out.push(name + ": " + v + " свободни ч. на " + p2(i + 1) + "." + p2(month) + " — сложи код"); });
+    letters.forEach((v, i) => {
+      if (typeof v === "string" && HOURS_RE.test(v)) out.push(name + ": " + v + " свободни ч. на " + p2(i + 1) + "." + p2(month) + " — сложи код");
+      else if (v === "ЛД" && (dow0 + i) % 7 === 0) out.push(name + ": ЛД в неделя на " + p2(i + 1) + "." + p2(month) + " — ползвай ЗД");
+    });
   }
   return out;
 }
@@ -414,6 +419,14 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const store = await needStore(repo, acc, b.store, "edit");
       const fields = pick(b.fields, STAFF_FIELDS);
       await checkSector(repo, fields.sector_id, store);
+      // „Име в графика“ е уникално в обекта (бланката: Персонал!B — оцветява дубликата; 05.11.2026 — отказ).
+      // Сравнява се без главни/малки букви и интервали в краищата; напусналите също се броят.
+      if (typeof fields.short_name === "string" && fields.short_name.trim()) {
+        const nm = fields.short_name.trim().toLowerCase();
+        const self = b.id === undefined || b.id === null ? null : String(b.id);
+        const dup = (await repo.listStaff(store)).filter((x) => x.id !== self && String(x.short_name || "").trim().toLowerCase() === nm)[0];
+        if (dup) throw new HttpError(409, "duplicate", "„" + fields.short_name.trim() + "“ вече е в графика на обекта" + (dup.left_on ? " (напуснал на " + dup.left_on + ")" : "") + " — сложи различно име в графика.");
+      }
       if (b.id === undefined || b.id === null) {
         if (typeof fields.short_name !== "string" || !fields.short_name.trim() || typeof fields.full_name !== "string" || !fields.full_name.trim()) {
           throw new HttpError(400, "bad_request", "Име за графика и три имена са задължителни.");
@@ -501,7 +514,7 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
       const inMonthIds = monthStaff.map((s) => s.id);
       const err = checkSnapshot(b.snapshot, m.days, inMonthIds);
       if (err) throw new HttpError(400, "bad_snapshot", err);
-      const issues = submitIssues(monthStaff, rows, (b.snapshot as { rows: Record<string, unknown>[] }).rows, m.days, +m.start.slice(5, 7));
+      const issues = submitIssues(monthStaff, rows, (b.snapshot as { rows: Record<string, unknown>[] }).rows, m.days, m.start);
       if (issues.length) {
         throw new HttpError(409, "off_norm", "Графикът не може да се подаде:\n" + issues.map((t) => "· " + t).join("\n") + "\n" + SUBMIT_HINT, { issues, hint: SUBMIT_HINT });
       }
