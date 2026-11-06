@@ -1029,7 +1029,11 @@ function rvCoAcceptAll(){
   todo.forEach(function(it){ chain = chain.then(function(){ return rvCoPatchItem(it, rvCoProposal(it)).then(function(ok){ if(ok) okN++; }); }); });
   return chain.then(function(){
     if(okN < todo.length) toast((todo.length - okN) + ' реда не са записани', '#dc2626'); else toast('Записани: ' + okN + ' реда');
-    rvRender(); return okN;
+    /* Като rvCoEdit: знакът „в SAP" / „за създаване" за току-що записаните
+       кодове — без това се появяваше чак при ново отваряне (06.11.2026).
+       Паднала порция → кодът остава непроверен → без знак. */
+    var codes = todo.map(function(it){ return it.new_sap_code; }).filter(Boolean);
+    return (codes.length ? rvLoadCat(codes) : Promise.resolve()).then(function(){ rvRender(); return okN; });
   });
 }
 

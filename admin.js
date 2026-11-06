@@ -795,7 +795,12 @@ function deleteCatalogItem(sap){
 
 /* ── Импорт/обновяване през CSV или TSV (SAP export) ── */
 var CATALOG_COL_MAP={sap:'Материал',name:'Описание на Материал',unit:'БМЕ',category:'Група материали',ean:'EAN/UPC код'};
-var CATALOG_UNIT_MAP={'БР':'бр.','КАШ':'кашон','M2':'кв.м','M²':'кв.м','ЛМ':'л.м','ПАК':'пакет','ЧФТ':'чифт','КОМПЛ':'компл.'};
+/* Стойностите са тези, които вече стоят в product_catalog.default_unit, и
+   rvSapUnit (revaluation.js, RV_SAP_UNITS) ги превежда обратно в SAP единица.
+   ККТ … M3 — изрично от 06.11.2026 (дотогава минаваха през toLowerCase със
+   същия резултат). M3 е с ЛАТИНСКО M. */
+var CATALOG_UNIT_MAP={'БР':'бр.','КАШ':'кашон','M2':'кв.м','M²':'кв.м','ЛМ':'л.м','ПАК':'пакет','ЧФТ':'чифт','КОМПЛ':'компл.',
+  'ККТ':'ккт','БЛИ':'бли','КГ':'кг','КУТ':'кут','ТОП':'топ','РОЛ':'рол','ТОН':'тон','M3':'m3'};
 function normalizeCatalogUnit(u){
   u=(u||'').trim().toUpperCase();
   return CATALOG_UNIT_MAP[u]||(u?u.toLowerCase():'бр.');

@@ -487,7 +487,8 @@ const TESTS = [
   'grafik-engine.test.js',
   'grafik-ui.test.js',
   'delete-tables-whitelist.test.js',
-  'preocenka-buletin-vrazka.test.js'
+  'preocenka-buletin-vrazka.test.js',
+  'preocenka-dovarshvane.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват
