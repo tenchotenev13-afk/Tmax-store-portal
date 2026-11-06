@@ -282,6 +282,11 @@ function renderKasa(){
       tCount+=parseFloat(r.counted_cash)||0;
       tRaz  +=parseFloat(r.razlika)||0;
     });
+    /* Върнат ПОС отчет → същата лента като в Главна каса и Равнение.
+       Връщането (kasa-docs.js) пише една и съща причина на всички отчети за
+       деня, затова първият върнат е достатъчен. */
+    var retRep=todayRep.filter(function(r){return r.status==='returned';})[0];
+    if(retRep) html+='<div id="kasa-pos-returned">'+kasaReturnedBanner(retRep)+'</div>';
     html+='<div class="card" style="margin-bottom:16px;">'+
       '<div class="card-title">📅 ПОС отчети — '+fmtDate(todayStr)+'</div>'+
       '<div class="tbl-wrap tbl-compact tbl-auto"><table>'+
@@ -992,6 +997,21 @@ function glavnaLiveCalc(){
   if(rEl){rEl.textContent=(razlika<0?'– ':'')+Math.abs(razlika).toFixed(2)+' EUR';rEl.style.color=razCol(razlika);}
 }
 
+/* Общо налични за Главна каса: купюрите на ВСИЧКИ ПОС отчети за работния
+   ден + колона „Главна“ (g). Същата сметка като sumDenom() в renderGlavna()
+   и glavnaLiveCalc() — закръгляне по номинал, после сбор. */
+function glavnaAllCounted(g){
+  var d=kasaActiveDate();
+  var reps=kasaReports.filter(function(r){return r.date===d;});
+  var total=0;
+  ALL_DENOM.forEach(function(v){
+    var q=parseInt(g[DENOM_KEY[v]])||0;
+    reps.forEach(function(r){q+=parseInt(r[DENOM_KEY[v]])||0;});
+    total+=Math.round(q*v*100)/100;
+  });
+  return Math.round(total*100)/100;
+}
+
 /* ─── SAVE ГЛАВНА КАСА ───────────────────────────────────────── */
 function saveGlavna(){
   if(kasaGlavna&&kasaGlavna.status==='confirmed'){toast('Потвърдената Главна каса не може да се редактира — първо я разключи','#dc2626');return;}
@@ -1006,7 +1026,12 @@ function saveGlavna(){
   var sapEl=document.getElementById('gl-sap');
   p.slujebno=sEl?parseFloat(sEl.value)||0:0;
   p.sap_balance=sapEl?parseFloat(sapEl.value)||0:0;
-  p.razlika=Math.round((p.counted_cash+p.slujebno-p.sap_balance)*100)/100;
+  /* counted_cash остава САМО колона „Главна“ — така го четат печатът
+     („Главна налични“) и дневният преглед в kasa-docs.js. Разликата обаче е
+     тази от екрана: всички ПОС отчети за деня + Главна (renderGlavna /
+     glavnaLiveCalc). До 06.11.2026 се записваше само от Главна и в базата
+     стоеше напр. −3836,05 при 0,10 на екрана (Карлово, 05.11.2026). */
+  p.razlika=Math.round((glavnaAllCounted(p)+p.slujebno-p.sap_balance)*100)/100;
 
   var LOCK='glavna-save', BTN='k-btn-glavna-save';
   if(!kasaLock(LOCK,BTN))return;
@@ -1425,7 +1450,7 @@ function renderHistTable(rows) {
     var statusLabel = r.status==='confirmed'
       ? '<span style="background:#dcfce7;color:#14532d;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">✅ Потвърден</span>'
       : r.status==='returned'
-      ? '<span style="background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">↩ Върнат</span>'
+      ? '<span class="kasa-hist-returned" title="'+escAttr('Причина:'+(r.return_reason||'—')+' · върнато от '+(r.returned_by||'—')+(r.returned_at?' на '+fmtDate(String(r.returned_at).slice(0,10)):''))+'" style="background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;cursor:help;">↩ Върнат</span>'
       : '<span style="background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">✏️ Чернова</span>';
     h += '<tr>'+
       '<td>'+fmtDate(r.date)+'</td>'+

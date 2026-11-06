@@ -135,14 +135,34 @@ function initKasaDocsView() {
   }
   var btnWrap = document.getElementById('ready-btn-wrap');
   if (btnWrap && ['kasa','manager','admin'].indexOf(currentUser.role) >= 0) {
-    btnWrap.innerHTML = '<button onclick="markReady()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;">📤 Изпрати за проверка към счетоводство</button>';
+    var sent = kasaReadySentAt();
+    btnWrap.style.alignItems = 'center';
+    btnWrap.style.gap = '12px';
+    btnWrap.style.flexWrap = 'wrap';
+    btnWrap.innerHTML = (sent ? '<span id="kasa-ready-sent" style="font-size:13px;color:#1e40af;font-weight:600;">📤 Изпратено за проверка на ' + sent + '</span>' : '') +
+      '<button id="k-btn-mark-ready" onclick="markReady()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:10px 22px;font-size:14px;font-weight:600;cursor:pointer;">📤 Изпрати за проверка към счетоводство</button>';
   }
+}
+
+/* „дд.мм в чч:мм" на последното изпращане, ако ВСИЧКИ потвърдени ПОС отчети
+   за работния ден имат ready_at; иначе ''. Нов потвърден отчет без ready_at
+   маха реда — тогава има какво да се изпрати пак. */
+function kasaReadySentAt() {
+  var d = (typeof kasaActiveDate==='function') ? kasaActiveDate() : today();
+  var conf = kasaReports.filter(function(r) { return r.date === d && r.status === 'confirmed'; });
+  if (!conf.length || conf.some(function(r) { return !r.ready_at; })) return '';
+  var last = conf.filter(function(r) { return r.ready_at; })
+    .map(function(r) { return String(r.ready_at); }).sort().pop();
+  var t = new Date(last);
+  if (isNaN(t.getTime())) return '';
+  function p2(n) { return (n < 10 ? '0' : '') + n; }
+  return p2(t.getDate()) + '.' + p2(t.getMonth() + 1) + ' в ' + p2(t.getHours()) + ':' + p2(t.getMinutes());
 }
 
 function markReady() {
   var todayStr = (typeof kasaActiveDate==='function') ? kasaActiveDate() : today();
   var reps = kasaReports.filter(function(r) { return r.date === todayStr; });
-  if (!reps.length) { toast('Няма касови отчети за днес','#dc2626'); return; }
+  if (!reps.length) { toast('Няма касови отчети за ' + todayStr.slice(8,10) + '.' + todayStr.slice(5,7),'#dc2626'); return; }
 
   /* Върнатият за корекция върви с черновите: не е потвърден, значи НЕ се
      изпраща — но трябва да се изброи. Досега 'returned' не попадаше в нито
@@ -166,9 +186,19 @@ function markReady() {
 
   var by = currentUser.display_name||currentUser.email;
   var now = new Date().toISOString();
+  /* Всеки PATCH се проверява поотделно (същият образец като връщането по-долу).
+     Паднал ли е един — червено с кой ПОС, без зелено: иначе обектът мисли, че
+     е изпратил, а счетоводството не вижда нищо. */
   Promise.all(confirmedReps.map(function(r) {
     return sbPatch('kasa_reports','id=eq.'+r.id,{ready_at:now,ready_by:by});
-  })).then(function() {
+  })).then(function(res) {
+    var bad = [];
+    res.forEach(function(x, i) { if (!x || !x.ok) bad.push(posLabel(confirmedReps[i]) + ' (' + sbErrMsg(x) + ')'); });
+    if (bad.length) {
+      toast('❌ НЕ е изпратено за проверка: ' + bad.join('; ') + '. Опитай пак.','#dc2626');
+      loadKasa();
+      return;
+    }
     if (pendingReps.length) {
       var posLabels = pendingReps.map(posLabel).join(', ');
       toast('📤 Изпратени '+confirmedReps.length+' потвърдени! Останаха непотвърдени: '+posLabels+' — изпрати ги отделно, след като ги потвърдиш.','#d97706');
