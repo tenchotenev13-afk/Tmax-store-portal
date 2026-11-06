@@ -1257,5 +1257,84 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   }
 
 
+  section('20. Мрежата: кликът не мести изгледа (т.1), №, Служител, Сектор залепени вляво (т.2)');
+  {
+    const x = env(MGR); await load(x);
+    const d = x.doc, W = x.w;
+    // jsdom не смята лейаут: scrollLeft / scrollTop се пазят, правоъгълниците — по проста схема:
+    // кутията 0..600 × 0..400, заглавието 40 px, залепените колони до 274 px, клетка 30 × 24.
+    for (const p of ['scrollLeft', 'scrollTop']) {
+      Object.defineProperty(W.HTMLElement.prototype, p, { configurable: true, get() { return this['_' + p] || 0; }, set(v) { this['_' + p] = v; } });
+    }
+    const rect = (l, t, w, h) => ({ left: l, top: t, right: l + w, bottom: t + h, width: w, height: h });
+    W.HTMLElement.prototype.getBoundingClientRect = function () {
+      const wrap = d.getElementById('gr-grid-wrap');
+      if (this === wrap) return rect(0, 0, 600, 400);
+      if (this.tagName === 'THEAD') return rect(0, 0, 900, 40);
+      if (this.classList.contains('gr-stk2') && this.tagName === 'TH') return rect(184, 0, 90, 40);
+      const m = /^gr-c-(\d+)-(\d+)$/.exec(this.id || '');
+      if (m) return rect(274 + (+m[2]) * 30 - wrap.scrollLeft, 40 + (+m[1]) * 24 - wrap.scrollTop, 30, 24);
+      return rect(0, 0, 0, 0);
+    };
+    const wrap = () => d.getElementById('gr-grid-wrap');
+    // т.1 — кликът в 21-ви ден при изгледа, преместен надясно и надолу, не го връща в началото.
+    wrap().scrollLeft = 500; wrap().scrollTop = 30;
+    const w0 = wrap();
+    realClick(W, d.getElementById('gr-c-1-20')); await ticks(2);
+    ok('т.1: кликът прерисува мрежата (нова кутия), а изгледът остава — scrollLeft 500, scrollTop 30',
+      wrap() !== w0 && wrap().scrollLeft === 500 && wrap().scrollTop === 30 && W.grSel.r === 1 && W.grSel.d === 20, wrap().scrollLeft + ' / ' + wrap().scrollTop);
+    ok('т.1: избраната клетка е 21-ви ден на втория ред', /outline:2px solid #2563eb/.test(d.getElementById('gr-c-1-20').getAttribute('style')));
+    // Писане на буква (пълен рендер при всеки клавиш) — пак на място.
+    W.grKey({ key: 'В', preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });
+    ok('т.1: писането в клетката също не мести изгледа', wrap().scrollLeft === 500 && wrap().scrollTop === 30);
+    W.grKey({ key: 'Escape', preventDefault() {} });
+    // Сгъваемите блокове пазят състоянието си при рендер.
+    d.getElementById('gr-daily').open = true;
+    realClick(W, d.getElementById('gr-c-0-3')); await ticks(2);
+    ok('т.1: отворените „Дневни сборове“ остават отворени след клик в мрежата', d.getElementById('gr-daily').open === true);
+    d.getElementById('gr-daily').open = false;
+    realClick(W, d.getElementById('gr-c-0-4')); await ticks(2);
+    ok('т.1: затворени — остават затворени', d.getElementById('gr-daily').open === false);
+    // Стрелките: клетката излиза вдясно → кутията се мести точно колкото трябва (страницата — не).
+    wrap().scrollLeft = 0; wrap().scrollTop = 0;
+    realClick(W, d.getElementById('gr-c-0-9')); await ticks(2);
+    let scrolled = 0; const origScroll = W.scrollTo; W.scrollTo = () => { scrolled++; };
+    W.grKey({ key: 'ArrowRight', preventDefault() {} });
+    ok('т.1: → от 10-и към 11-и ден: клетката (574–604) излиза от кутията (600) → scrollLeft += 4', W.grSel.d === 10 && wrap().scrollLeft === 4, wrap().scrollLeft);
+    // Клетка под залепените колони → кутията се връща наляво до тях.
+    wrap().scrollLeft = 300;
+    realClick(W, d.getElementById('gr-c-0-2')); await ticks(2);
+    W.grKey({ key: 'ArrowLeft', preventDefault() {} });
+    ok('т.1: ← към 2-ри ден под залепените колони (лява страна 4 < 274) → scrollLeft 300 − 270 = 30', W.grSel.d === 1 && wrap().scrollLeft === 30, wrap().scrollLeft);
+    W.grKey({ key: 'ArrowDown', preventDefault() {} });
+    ok('т.1: страницата не е скролвана (само кутията)', scrolled === 0);
+    W.scrollTo = origScroll;
+    // Нов месец — от началото.
+    wrap().scrollLeft = 400;
+    await W.grGoMonth(1); await ticks(8);
+    ok('т.1: смяна на месеца → изгледът от началото (scrollLeft 0)', wrap().scrollLeft === 0, wrap().scrollLeft);
+    await W.grGoMonth(-1); await ticks(8);
+    // т.2 — залепените колони.
+    const th = Array.from(d.querySelectorAll('#gr-grid thead th'));
+    ok('т.2: заглавията №, Служител, Сектор — gr-stk 0 / 1 / 2, последната със сянка', th[0].className === 'gr-stk gr-stk0' && th[1].className === 'gr-stk gr-stk1' && th[2].className === 'gr-stk gr-stk2 gr-stk-last' && !/gr-stk/.test(th[3].className));
+    const tr0 = d.querySelector('#gr-grid tbody tr');
+    ok('т.2: всеки ред — №, името, секторът залепени; дните — не',
+      /gr-stk0/.test(tr0.children[0].className) && /gr-name gr-stk gr-stk1/.test(tr0.children[1].className) && /gr-stk2/.test(tr0.children[2].className) && !/gr-stk/.test(tr0.children[3].className) &&
+      Array.from(d.querySelectorAll('#gr-grid tbody tr')).every(tr => tr.querySelectorAll('.gr-stk').length === 3));
+    ok('т.2: фиксирани ширини 34 / 150 / 90 px (border-box), дълго име — с „…“', /box-sizing:border-box;width:150px;min-width:150px;max-width:150px;/.test(tr0.children[1].getAttribute('style')) &&
+      /text-overflow:ellipsis/.test(tr0.children[1].getAttribute('style')) && /width:34px;/.test(th[0].getAttribute('style')) && /width:90px;/.test(th[2].getAttribute('style')));
+    ok('т.2: отместванията — по реалната ширина (в jsdom 0 → резервните 34 и 184)', d.getElementById('gr-stk-css').textContent === '#gr-grid .gr-stk1{left:34px;}#gr-grid .gr-stk2{left:184px;}', d.getElementById('gr-stk-css').textContent);
+    // Истинските ширини (напр. по-широк шрифт) → отместванията ги следват при следващия рендер.
+    Object.defineProperty(W.HTMLElement.prototype, 'offsetWidth', { configurable: true, get() { return this.classList.contains('gr-stk0') ? 40 : this.classList.contains('gr-stk1') ? 160 : 0; } });
+    realClick(W, d.getElementById('gr-c-0-1')); await ticks(2);
+    ok('т.2: отместванията по реалната ширина — 40 и 40 + 160 = 200', d.getElementById('gr-stk-css').textContent === '#gr-grid .gr-stk1{left:40px;}#gr-grid .gr-stk2{left:200px;}', d.getElementById('gr-stk-css').textContent);
+    delete W.HTMLElement.prototype.offsetWidth;
+    const css = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
+    ok('т.2 CSS: .gr-stk — sticky вляво, над дните, с плътен фон; ъгълът — над двете', /\.gr-grid-wrap \.gr-stk\{position:sticky;left:0;z-index:1;background:var\(--surf\);\}/.test(css) &&
+      /\.gr-grid-wrap thead th\.gr-stk\{z-index:3;\}/.test(css) && /\.gr-grid-wrap thead th\{position:sticky;top:0;z-index:2;/.test(css));
+    delete W.HTMLElement.prototype.getBoundingClientRect;
+  }
+
+
   report();
 })();

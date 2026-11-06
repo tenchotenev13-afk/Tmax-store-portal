@@ -97,6 +97,10 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
    Фонът е изричен — без него редовете прозират под заглавието; почивните дни идват inline и го бият. */
 .gr-grid-wrap{overflow:auto;max-height:calc(100vh - var(--nav-h,58px) - 60px);position:sticky;top:var(--nav-h,58px);}
 .gr-grid-wrap thead th{position:sticky;top:0;z-index:2;background:var(--surf);}
+/* №, Служител, Сектор — залепени вляво (left се смята в grafik.js по реалната ширина); ъгълът — над двете. */
+.gr-grid-wrap .gr-stk{position:sticky;left:0;z-index:1;background:var(--surf);}
+.gr-grid-wrap thead th.gr-stk{z-index:3;}
+.gr-grid-wrap .gr-stk-last{box-shadow:6px 0 6px -6px rgba(0,0,0,.25);}
 .co-sticky-actions table td:last-child,
 .co-sticky-actions table th:last-child{position:sticky;right:0;background:#fff;box-shadow:-6px 0 6px -6px rgba(0,0,0,.15);}
 .co-sticky-actions table th:last-child{background:var(--surf);}

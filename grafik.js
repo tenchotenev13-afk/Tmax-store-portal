@@ -38,6 +38,8 @@ var grSel = { r: 0, d: 0 }; // избрана клетка (ред в grVisible,
 var grEdit = '';            // буфер при въвеждане
 var grDirty = {}, grSaveTimer = null, grSavePromise = null, grSaveState = '';
 var grSaved = {};           // staff_id → има ред в grafik_rows за този месец (сървърът го знае)
+var GR_STK_W = [34, 150, 90];  // ширините на залепените колони (№, Служител, Сектор), px
+var grViewKey = '';
 var grVisible = [];         // служителите в графика за месеца (подредени)
 
 /* ─── Достъп (бутонът) ─────────────────────────────────── */
@@ -336,8 +338,50 @@ function grRender(){
   if(grView === 'staff') h += grStaffHtml();
   else if(grView === 'changes') h += grChangesHtml();
   else h += grGridPageHtml();
+  var keep = grKeepView(el);
   el.innerHTML = h;
-  if(grView === 'grid') grFocusGrid();
+  grRestoreView(el, keep);
+  if(grView === 'grid'){ grStickyLeft(); grFocusGrid(); }
+}
+/* Рендерът сглобява модула наново (innerHTML) и новата кутия на мрежата тръгва от скрол 0 —
+   кликът в 25-и ден връщаше изгледа в началото на месеца (Раднево, 05.11.2026). Пазим скрола
+   (за същия обект / месец / изглед) и отвореното / затвореното на сгъваемите блокове. */
+function grKeepView(el){
+  var w = document.getElementById('gr-grid-wrap'), open = {};
+  Array.prototype.forEach.call(el.querySelectorAll('details[id]'), function(d){ open[d.id] = d.open; });
+  return { key: grViewKey, x: w ? w.scrollLeft : 0, y: w ? w.scrollTop : 0, open: open, had: !!w };
+}
+function grRestoreView(el, k){
+  Array.prototype.forEach.call(el.querySelectorAll('details[id]'), function(d){ if(k.open.hasOwnProperty(d.id)) d.open = k.open[d.id]; });
+  // Ключът е на ПОКАЗАНОТО досега (grViewKey), не на текущите grStore / grMonth — при смяна на месеца
+  // те вече са новите, а кутията още е от стария.
+  var w = document.getElementById('gr-grid-wrap'), now = grStore + '|' + grMonth + '|' + grView;
+  if(w && k.had && k.key === now){ w.scrollLeft = k.x; w.scrollTop = k.y; }
+  grViewKey = now;
+}
+/* т.2: №, Служител и Сектор залепват вляво. Отместването на втората и третата колона — по
+   реалната ширина на първите (padding-ът и рамките идват от общите правила на таблиците). */
+function grStickyLeft(){
+  var g = document.getElementById('gr-grid'), st = document.getElementById('gr-stk-css');
+  if(!g || !st) return;
+  var th = g.querySelectorAll('thead th.gr-stk');
+  if(th.length < 3) return;
+  var a = th[0].offsetWidth || GR_STK_W[0], b = a + (th[1].offsetWidth || GR_STK_W[1]);
+  st.textContent = '#gr-grid .gr-stk1{left:' + a + 'px;}#gr-grid .gr-stk2{left:' + b + 'px;}';
+}
+/* При стрелки / Tab / Enter: избраната клетка да се вижда — мести се само кутията, не страницата,
+   и клетката не остава под залепените колони. */
+function grEnsureVisible(){
+  var w = document.getElementById('gr-grid-wrap'), c = document.getElementById('gr-c-' + grSel.r + '-' + grSel.d);
+  if(!w || !c || !c.getBoundingClientRect) return;
+  var wr = w.getBoundingClientRect(), cr = c.getBoundingClientRect(), sticky = 0, head = 0;
+  var last = document.querySelector('#gr-grid thead th.gr-stk2'), hd = document.querySelector('#gr-grid thead');
+  if(last) sticky = last.getBoundingClientRect().right - wr.left;
+  if(hd) head = hd.getBoundingClientRect().height;
+  if(cr.left < wr.left + sticky) w.scrollLeft -= (wr.left + sticky - cr.left);
+  else if(cr.right > wr.right) w.scrollLeft += (cr.right - wr.right);
+  if(cr.top < wr.top + head) w.scrollTop -= (wr.top + head - cr.top);
+  else if(cr.bottom > wr.bottom) w.scrollTop += (cr.bottom - wr.bottom);
 }
 function grGridPageHtml(){
   var M = grCalc.month, setup = grData.setup || {}, h = '';
@@ -371,6 +415,7 @@ function grGridPageHtml(){
   h += grGridHtml();
   return h;
 }
+function grStkW(i){ var w = GR_STK_W[i]; return 'box-sizing:border-box;width:' + w + 'px;min-width:' + w + 'px;max-width:' + w + 'px;'; }
 function grDayHead(i){
   var M = grCalc.month, w = M.dow[i], hol = M.holiday[i];
   var bg = hol ? '#fecaca' : (w >= 6 ? '#e2e8f0' : '');
@@ -382,8 +427,9 @@ function grGridHtml(){
   /* 31 колони → хоризонтален скрол; в такъв контейнер заглавието не може да залепне под лентата
      на страницата, затова мрежата е кутия с височината на екрана и заглавието залепва в нейния
      горен край (index.html, .gr-grid-wrap thead th), без да закрива редове. */
-  var h = '<div class="tbl-wrap gr-grid-wrap" id="gr-grid-wrap"><table id="gr-grid" tabindex="0" onkeydown="grKey(event)" onpaste="grPaste(event)" style="border-collapse:collapse;font-size:12px;">';
-  h += '<thead><tr><th>№</th><th style="text-align:left;">Служител</th><th>Сектор</th>';
+  var h = '<style id="gr-stk-css">#gr-grid .gr-stk1{left:' + GR_STK_W[0] + 'px;}#gr-grid .gr-stk2{left:' + (GR_STK_W[0] + GR_STK_W[1]) + 'px;}</style>';
+  h += '<div class="tbl-wrap gr-grid-wrap" id="gr-grid-wrap"><table id="gr-grid" tabindex="0" onkeydown="grKey(event)" onpaste="grPaste(event)" style="border-collapse:collapse;font-size:12px;">';
+  h += '<thead><tr><th class="gr-stk gr-stk0" style="' + grStkW(0) + '">№</th><th class="gr-stk gr-stk1" style="text-align:left;' + grStkW(1) + '">Служител</th><th class="gr-stk gr-stk2 gr-stk-last" style="' + grStkW(2) + '">Сектор</th>';
   for(var i = 0; i < M.days; i++) h += grDayHead(i);
   h += '<th title="Вътрешни часове (буквите + свободните часове)">Вътр.</th><th title="Официални часове по кодовете">Офиц.</th><th>Цел</th><th>Разл.</th></tr></thead><tbody>';
   grCalc.rows.forEach(function(x, r){
@@ -394,8 +440,8 @@ function grGridHtml(){
     x.warnings.forEach(function(w){ (warnDays[w.day] = warnDays[w.day] || []).push(w.text); if(w.type === 'sunday_ld') sunLd[w.day] = 1; });
     /* Напуска през месеца — маркиран (бланката: L5:L80, светлосиньо). */
     var leaving = s.left_on && s.left_on >= M.start && s.left_on <= M.end;
-    h += '<tr id="gr-row-' + escAttrVal(s.id) + '"><td>' + (r + 1) + '</td><td class="gr-name' + (leaving ? ' gr-leaving' : '') + '" style="text-align:left;white-space:nowrap;' + (leaving ? 'background:' + GR_GRID_FILL.leaving + ';' : '') + '" title="' + escAttrVal((s.full_name || '') + (s.contract_title ? ' · ' + s.contract_title : '') + (+s.hours_per_day && +s.hours_per_day !== 8 ? ' · ' + s.hours_per_day + ' ч.' : '') + (leaving ? ' · напуска на ' + fmtDate(s.left_on) : '')) + '">' +
-      escVal(s.short_name || s.full_name) + (+s.hours_per_day && +s.hours_per_day !== 8 ? ' <span style="color:#64748b;">(' + escVal(String(+s.hours_per_day)) + ' ч.)</span>' : '') + '</td><td style="font-size:11px;">' + escVal(s.sector_id ? grSector(s) : '') + '</td>';
+    h += '<tr id="gr-row-' + escAttrVal(s.id) + '"><td class="gr-stk gr-stk0" style="' + grStkW(0) + '">' + (r + 1) + '</td><td class="gr-name gr-stk gr-stk1' + (leaving ? ' gr-leaving' : '') + '" style="text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' + grStkW(1) + (leaving ? 'background:' + GR_GRID_FILL.leaving + ';' : '') + '" title="' + escAttrVal((s.full_name || '') + (s.contract_title ? ' · ' + s.contract_title : '') + (+s.hours_per_day && +s.hours_per_day !== 8 ? ' · ' + s.hours_per_day + ' ч.' : '') + (leaving ? ' · напуска на ' + fmtDate(s.left_on) : '')) + '">' +
+      escVal(s.short_name || s.full_name) + (+s.hours_per_day && +s.hours_per_day !== 8 ? ' <span style="color:#64748b;">(' + escVal(String(+s.hours_per_day)) + ' ч.)</span>' : '') + '</td><td class="gr-stk gr-stk2 gr-stk-last" style="font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;' + grStkW(2) + '" title="' + escAttrVal(s.sector_id ? grSector(s) : '') + '">' + escVal(s.sector_id ? grSector(s) : '') + '</td>';
     for(var d = 0; d < M.days; d++){
       var L = row.letters[d] || '', code = x.codes[d] || '', lk = row.locked && row.locked[d + 1];
       var ch = changed[d + 1], w = M.dow[d], hol = M.holiday[d];
@@ -577,9 +623,9 @@ function grKey(e){
   if((e.ctrlKey || e.metaKey) && (k === 'l' || k === 'L' || k === 'л' || k === 'Л')){ e.preventDefault(); grToggleLock(); return; }
   if(e.ctrlKey || e.metaKey || e.altKey) return;           // Ctrl+V → grPaste
   var nav = { ArrowLeft: [0, -1], ArrowRight: [0, 1], ArrowUp: [-1, 0], ArrowDown: [1, 0] };
-  if(nav[k]){ e.preventDefault(); if(grCommitEdit()) grMove(nav[k][0], nav[k][1]); grRender(); return; }
-  if(k === 'Tab'){ e.preventDefault(); if(grCommitEdit()) grMove(0, e.shiftKey ? -1 : 1); grRender(); return; }
-  if(k === 'Enter'){ e.preventDefault(); if(grCommitEdit()) grMove(1, 0); grRender(); return; }
+  if(nav[k]){ e.preventDefault(); if(grCommitEdit()) grMove(nav[k][0], nav[k][1]); grRender(); grEnsureVisible(); return; }
+  if(k === 'Tab'){ e.preventDefault(); if(grCommitEdit()) grMove(0, e.shiftKey ? -1 : 1); grRender(); grEnsureVisible(); return; }
+  if(k === 'Enter'){ e.preventDefault(); if(grCommitEdit()) grMove(1, 0); grRender(); grEnsureVisible(); return; }
   if(k === 'Escape'){ grEdit = ''; grRender(); return; }
   if(!edit) return;
   if(k === 'Delete' || k === 'Backspace'){
