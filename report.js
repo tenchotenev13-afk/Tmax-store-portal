@@ -4148,8 +4148,9 @@ function sendWeeklyReportRouted(testEmail){
 
 /* ═══════ МИНУСИ — ПОВТАРЯЩИ СЕ АРТИКУЛИ (minus_multi) ═══════════════
    Понеделник 11:00 по София (до 30.10.2026 — 08:00, преди качването на петък–неделя),
-   body {"type":"minus_multi"}: ЕДНО общо писмо
-   до report_recipients с active=true и minus_multi=true (Теодор 27.10.2026,
+   body {"type":"minus_multi"}: писмо на получател (от v62) до
+   report_recipients с active=true и minus_multi=true и до регионалните по
+   assigned_stores ∩ minus_stores (от 06.11.2026, reportMinusMultiPlan) (Теодор 27.10.2026,
    решения на Тенчо 27.10). Обхват — последните D дни към неделята ПРЕДИ
    деня на пращането (опорният ден идва отвън: refISO), само обектите от
    app_settings.minus_stores. Артикул влиза, ако за обект + материал има C
@@ -4384,7 +4385,8 @@ function reportMinusMultiHtml(data){
   var sub = d.from && d.ref ? 'Последните ' + d.days + ' дни: ' + reportMinusMultiDM(d.from) + ' – ' + reportMinusMultiDM(d.ref) + '.' + String(d.ref).slice(0, 4) : '';
   return reportEmailShell('➖ Минуси — повтарящи се артикули', sub, body, 'Автоматичен репорт · ТеМАХ Портал');
 }
-/* Кой получава: активните редове с minus_multi=true, по един път на имейл */
+/* Само РЪЧНИЯТ списък: активните редове с minus_multi=true, по един път на имейл.
+   НЕ е „кой получава писмото“ — регионалните ги няма; за това е reportMinusMultiPlan. */
 function reportMinusMultiRecipients(rows){
   var out = [], seen = {};
   (Array.isArray(rows) ? rows : []).forEach(function(r){
@@ -4403,18 +4405,42 @@ function reportMinusMultiScopeOf(r){
   if (!r || r.scope_stores === null || r.scope_stores === undefined) return null;
   return (Array.isArray(r.scope_stores) ? r.scope_stores : []).map(function(s){ return String(s == null ? '' : s).trim(); }).filter(Boolean);
 }
-/* Получател → обекти: [{ email, name, scoped, stores }]. Активните с minus_multi=true,
-   по един път на имейл (първият ред печели). stores е в реда на minus_stores. */
-function reportMinusMultiPlan(rows, minusStores){
+/* Получател → обекти: [{ email, name, scoped, stores, regional }]. Активните с
+   minus_multi=true, по един път на имейл (първият ред печели). stores е в реда на
+   minus_stores.
+   Регионалните (minusi-multi-regional, 06.11.2026, решение на Тенчо): всеки
+   users.is_regional, активен, с имейл, чийто assigned_stores ∩ minus_stores не е
+   празно, е получател сам — включването на обект в minus_stores стига. Обхват =
+   сечението. Същият имейл в ръчния списък → един получател: без обхват остава без
+   обхват; с обхват — обединение. regional: true, ако регионалният е допринесъл. */
+function reportMinusMultiPlan(rows, minusStores, userRows){
   var out = [], seen = {};
+  var ms = Array.isArray(minusStores) ? minusStores : [];
   (Array.isArray(rows) ? rows : []).forEach(function(r){
     if (!r || r.active === false || r.minus_multi !== true || !r.email) return;
     var k = String(r.email).trim().toLowerCase();
     if (seen[k]) return;
-    seen[k] = 1;
     var sc = reportMinusMultiScopeOf(r);
-    out.push({ email: r.email, name: r.name || '', scoped: sc !== null,
-      stores: (Array.isArray(minusStores) ? minusStores : []).filter(function(s){ return sc === null || sc.indexOf(s) >= 0; }) });
+    seen[k] = { email: r.email, name: r.name || '', scoped: sc !== null, regional: false,
+      stores: ms.filter(function(s){ return sc === null || sc.indexOf(s) >= 0; }) };
+    out.push(seen[k]);
+  });
+  (Array.isArray(userRows) ? userRows : []).forEach(function(u){
+    if (!u || u.is_regional !== true || u.active === false || !u.email || !String(u.email).trim()) return;
+    var as = (Array.isArray(u.assigned_stores) ? u.assigned_stores : []).map(function(s){ return String(s == null ? '' : s).trim(); });
+    var mine = ms.filter(function(s){ return as.indexOf(s) >= 0; });
+    if (!mine.length) return;
+    var k = String(u.email).trim().toLowerCase();
+    var cur = seen[k];
+    if (!cur) {
+      seen[k] = { email: u.email, name: u.display_name || '', scoped: true, regional: true, stores: mine };
+      out.push(seen[k]);
+      return;
+    }
+    cur.regional = true;
+    if (!cur.scoped) return;
+    cur.stores = ms.filter(function(s){ return cur.stores.indexOf(s) >= 0 || mine.indexOf(s) >= 0; });
+    if (!cur.name && u.display_name) cur.name = u.display_name;
   });
   return out;
 }
@@ -4477,7 +4503,7 @@ function sendMinusMultiReportNow(done){
   }).then(function(res){
     var d = res.data || {};
     if (!res.ok || d.ok === false || d.sent !== true) toast('❌ Отчетът НЕ тръгна: ' + String(d.error || d.reason || d.message || ('HTTP ' + res.status)).slice(0, 150), '#dc2626');
-    else toast('✅ Изпратен до ' + d.recipients + ' получатели');
+    else toast('✅ Изпратен до ' + d.recipients + ' получатели' + (d.skipped ? ' · пропуснати ' + d.skipped + ' (без минуси в обектите им)' : ''));
     fin();
   }).catch(function(e){ toast('❌ ' + String((e && e.message) || e).slice(0, 150), '#dc2626'); fin(); });
 }

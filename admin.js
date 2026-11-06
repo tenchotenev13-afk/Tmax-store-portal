@@ -1138,7 +1138,8 @@ function loadNotificationsAdmin(){
    Бутонът „📬 Маршрутизация (тест)" (sendWeeklyReportRouted) беше махнат на
    02.09.2026 и не се връща — send-routed-report го върши по крон 16. */
 var adminReportRecipients = null;   /* report_recipients (active) */
-var adminReportRegional = [];       /* users.is_regional — за броя при Палети */
+var adminReportRegional = [];       /* users.is_regional — за броя при Палети и Минуси */
+var adminReportMinusStores = [];    /* app_settings.minus_stores — автоматичните получатели на Минуси */
 var adminReportLogistics = [];      /* users.role=logistics — за броя при Склад */
 var adminReportBusy = {};           /* 'test:daily' / 'send:weekly' → true, докато заявката тече */
 var adminReportCron = null;         /* kind → ред от rpc/report_cron_schedule; null = не е прочетено */
@@ -1187,11 +1188,16 @@ function loadReportsAdmin(){
     sbGet('users','is_regional=eq.true&select=email,display_name,assigned_stores,active,is_regional'),
     sbGet('users','role=eq.logistics&select=email,display_name,store_name,role,active'),
     /* silent: провал → резервният текст, не червен toast. */
-    sbGet('rpc/report_cron_schedule','',true)
+    sbGet('rpc/report_cron_schedule','',true),
+    /* Минуси — регионалните получават по assigned_stores ∩ minus_stores
+       (reportMinusMultiPlan, 06.11.2026). Правилото за списъка — като в minusi.js. */
+    sbGet('app_settings','key=eq.minus_stores&select=value',true)
   ]).then(function(res){
     adminReportRecipients = Array.isArray(res[0]) ? res[0] : [];
     adminReportRegional   = Array.isArray(res[1]) ? res[1] : [];
     adminReportLogistics  = Array.isArray(res[2]) ? res[2] : [];
+    var ms = Array.isArray(res[4]) && res[4][0] ? res[4][0].value : '';
+    adminReportMinusStores = String(ms || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
     var cron = Array.isArray(res[3]) ? res[3] : [];
     adminReportCron = {};
     cron.forEach(function(c){ if (c && c.kind) adminReportCron[c.kind] = c; });
@@ -1220,7 +1226,10 @@ function adminReportCount(kind){
     reportWarehouseRecipients(adminReportLogistics, rc).forEach(function(x){ seenW[String(x.email).trim().toLowerCase()] = 1; });
     return Object.keys(seenW).length;
   }
-  if (kind === 'minus_multi') return typeof reportMinusMultiRecipients === 'function' ? reportMinusMultiRecipients(rc).length : 0;
+  /* Минуси — ръчните 🔁 + регионалните по обектите си (reportMinusMultiPlan, като
+     крона). Броят е на получателите в плана; дали писмото тръгва към обхват без
+     минуси за седмицата, решава кронът (reportMinusMultiShouldSend). */
+  if (kind === 'minus_multi') return typeof reportMinusMultiPlan === 'function' ? reportMinusMultiPlan(rc, adminReportMinusStores, adminReportRegional).length : 0;
   return 0;
 }
 
@@ -1234,6 +1243,27 @@ function adminCronLabel(c){
   var day = d === '*' ? 'всеки ден' : (/^[0-6]$/.test(d) ? ADMIN_CRON_DOW[+d] : 'cron „' + d + '"');
   var mm = (c.minute === null || c.minute === undefined) ? '??' : String(c.minute).padStart(2, '0');
   return day + ' ' + String(c.hour_sofia).padStart(2, '0') + ':' + mm + (c.active === false ? ' (спряно)' : '');
+}
+
+/* Минуси — автоматичните получатели (06.11.2026): регионалните, които
+   reportMinusMultiPlan добавя или чийто обхват разширява. Само за четене —
+   управляват се от профила (assigned_stores) и от app_settings.minus_stores. */
+function adminMinusMultiAutoHtml(){
+  if (adminReportRecipients === null || typeof reportMinusMultiPlan !== 'function') return '';
+  var auto = reportMinusMultiPlan(adminReportRecipients, adminReportMinusStores, adminReportRegional)
+    .filter(function(p){ return p.regional; });
+  var h = '<div id="report-minus-auto" style="margin:0 0 12px;">' +
+    '<div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:6px;">🔁 Минуси — автоматични получатели</div>';
+  if (!auto.length) return h + '<div style="font-size:11.5px;color:#94a3b8;">Няма регионален с обект в Минуси.</div></div>';
+  h += '<div style="display:flex;flex-direction:column;gap:4px;">';
+  auto.forEach(function(p){
+    h += '<div class="report-minus-auto" data-email="' + esc(String(p.email).toLowerCase()) + '" style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;font-size:12px;color:#334155;background:#f8fafc;border:1px dashed #e2e8f0;border-radius:7px;padding:5px 9px;">' +
+      '<span style="flex:1 1 140px;min-width:140px;">' + esc(p.name || p.email) + ' <span style="color:#94a3b8;">(' + esc(p.email) + ')</span></span>' +
+      '<span style="color:#475569;">обекти: ' + esc(p.scoped ? p.stores.join(', ') : 'всички') + '</span>' +
+      '<span class="report-minus-auto-note" style="color:#94a3b8;font-size:11px;">регионален — по обектите в профила</span>' +
+      '</div>';
+  });
+  return h + '</div></div>';
 }
 
 function renderReportsAdmin(){
@@ -1266,10 +1296,11 @@ function renderReportsAdmin(){
   h += '<div style="font-size:11px;color:#64748b;margin:6px 0 12px;line-height:1.7;">' +
     '„Тест до мен" праща на твоя имейл с „(тест)" в темата — данните към момента, не редовния отчет.<br>' +
     'Палети: отметнатите 🟫 + регионалните (за своите обекти). Склад: отметнатите 📦 (по писмо за всеки склад) + всеки потребител с роля „logistics" (за своя склад). Тях ги праща само кронът.<br>' +
-    'Минуси — повтарящи се: отметнатите 🔁; „Изпрати сега" пуска самата едж функция (като крона).<br>' +
+    'Минуси — повтарящи се: отметнатите 🔁 + регионалните (за своите обекти, които са в Минуси); „Изпрати сега" пуска самата едж функция (като крона).<br>' +
     'Разписанието е от сървъра (час по София). Смяна — само през Claude Code: от браузъра сървърът не може да провери, че викащият е admin.<br>' +
     'В списъка долу: 📋 дневен · 📊 седмичен · 🟫 палети · 📦 склад · 🔁 минуси — натисни иконата, за да включиш или спреш отчета за този човек.' +
     '</div>';
+  h += adminMinusMultiAutoHtml();
 
   /* Списъкът получатели — кодът е преместен от today.js без промяна в
      поведението (добавяне и ✕ без потвърждение, както беше). */
@@ -1510,7 +1541,8 @@ function adminReportSendClick(btn, kind){
   if (typeof fn !== 'function' || adminReportBusy[key]) return;
   var n = adminReportCount(kind);
   if (!n) { toast('Няма получатели за този отчет','#dc2626'); return; }
-  if (!confirm('Ще се изпрати до ' + n + ' получатели — сигурен ли си?')) return;
+  /* Минуси: n е броят в плана — регионален без минуси за седмицата се пропуска. */
+  if (!confirm((kind === 'minus_multi' ? 'Ще се изпрати до най-много ' + n + ' получатели (без минуси в обектите — пропуска се)' : 'Ще се изпрати до ' + n + ' получатели') + ' — сигурен ли си?')) return;
   var done = adminReportLock(key, btn);
   try { fn(done); } catch (e) { done(); throw e; }
 }
