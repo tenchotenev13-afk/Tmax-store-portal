@@ -31,7 +31,8 @@
 
    Кой какво:
    · обект (manager / sklad) — своя обект; попълва заметнат код, причина (само
-     от списъка), служител, бележка. Обект извън app_settings.minus_stores
+     от списъка; неактивната — само на ред, който вече я има), служител
+     (незадължително от 06.11.2026), бележка. Обект извън app_settings.minus_stores
      вижда „Модулът още не е включен за вашия обект" (под-бутонът си стои);
    · контролинг (admin / accounting / controlling) — качва файла, вижда отчета
      на качването, двата изгледа с избор на обект, филтър „непопълнени",
@@ -62,7 +63,7 @@
    Ширината на „Дневен" не се мени — нищо от това не е нова колона.
 
    Задължителна бележка (22.10.2026, Тенчо): причина с
-   minus_reasons.requires_note (днес само „клиентска поръчка (номер/дата)")
+   minus_reasons.requires_note (днес само „Клиентска поръчка", id 1)
    не се записва без „Бележка" — номерът и датата на поръчката. Вече записан
    ред с такава причина и празна бележка показва „попълни номер/дата" под
    бележката и влиза в „само непопълнени".
@@ -1239,7 +1240,8 @@ function mnSave(id){
   var reason = g('mn-reason-'), emp = g('mn-emp-');
   if(!reason){ toast('Избери причина от списъка', '#dc2626'); return Promise.resolve(false); }
   if(!mnReasonLabel(reason)){ toast('Непозната причина', '#dc2626'); return Promise.resolve(false); }
-  if(!emp){ toast('Попълни име на служител', '#dc2626'); return Promise.resolve(false); }
+  /* „Име на служител" — незадължително от 06.11.2026 (решение на Тенчо, списъкът
+     на Миглена); празното се пише като null. */
   /* Повторение до N дни → „Действие" е задължително (Теодор, 06.10.2026). */
   var crow = null;
   mnCompute(mnMovs, mnThresholds).all.forEach(function(x){ if(String(x.id) === String(id)) crow = x; });
@@ -1251,7 +1253,7 @@ function mnSave(id){
   var body = {
     real_code: g('mn-code-') || null,
     reason_id: parseInt(reason, 10),
-    employee_name: emp,
+    employee_name: emp || null,
     note: g('mn-note-') || null,
     filled_by: currentUser.display_name || currentUser.email || '',
     filled_at: new Date().toISOString()
