@@ -189,6 +189,9 @@ function env(user, opt) {
     confirm: opt.confirm === undefined ? true : opt.confirm,
     globals: { currentSession: 'sess.sig' }
   });
+  // Разделите до 20 адресират редовете по плоския ред (Иван, Мария, Петя); групите по сектор
+  // (подразбирането от т.3) се тестват в раздел 21 с opt.grouped — тогава ключът изобщо липсва.
+  if (!opt.grouped) { try { h.w.localStorage.setItem('gr-grid-group', 'flat'); } catch (e) { throw new Error('localStorage в jsdom: ' + e.message); } }
   const orig = h.w.fetch;
   h.w.fetch = function (url, init) {
     if (String(url).indexOf('/functions/v1/grafik-api') >= 0) {
@@ -209,7 +212,7 @@ function env(user, opt) {
 const mod = h => h.doc.getElementById('mod-grafik');
 const key = (h, k, extra) => h.w.grKey(Object.assign({ key: k, preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false }, extra || {}));
 const typeIn = (h, s) => { for (const ch of s) key(h, ch); };
-const cellText = (h, r, d) => { const c = h.doc.getElementById('gr-c-' + r + '-' + d); return c ? c.textContent.replace('🔒', '').trim() : null; };
+const cellText = (h, r, d) => { const c = h.doc.getElementById('gr-c-' + r + '-' + d); return c ? c.textContent.replace('🔒', '').replace('▾', '').trim() : null; };
 const lastSave = h => h.S.calls.filter(c => c.action === 'save_rows').slice(-1)[0];
 async function load(h) { await guard('loadGrafik() не хвърля', () => h.w.loadGrafik()); await ticks(6); }
 
@@ -1333,6 +1336,184 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('т.2 CSS: .gr-stk — sticky вляво, над дните, с плътен фон; ъгълът — над двете', /\.gr-grid-wrap \.gr-stk\{position:sticky;left:0;z-index:1;background:var\(--surf\);\}/.test(css) &&
       /\.gr-grid-wrap thead th\.gr-stk\{z-index:3;\}/.test(css) && /\.gr-grid-wrap thead th\{position:sticky;top:0;z-index:2;/.test(css));
     delete W.HTMLElement.prototype.getBoundingClientRect;
+  }
+
+
+  section('21. Мрежата: групи по сектор (т.3), избор / копиране / поставяне (т.5), дърпане (т.6), списък в клетката (т.4)');
+  {
+    const S = makeServer();
+    const x = env(MGR, { server: S, grouped: true }); await load(x);
+    const d = x.doc, W = x.w;
+    const L = id => (W.grRows[id] || { letters: [] }).letters;
+    // Inline атрибутите (onclick, ondblclick, onmousedown, onmouseover, oncopy, onpaste, onkeydown) нагоре по
+    // родителите, както в браузъра — harness-ът е с runScripts:'outside-only', тоест истинско dispatchEvent
+    // не ги пуска. Спира при stopPropagation. document — истинско събитие (grFillEnd е addEventListener).
+    const inl = (w2, el, type, init) => {
+      const e = Object.assign({ type, target: el, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, defaultPrevented: false, _stop: false,
+        preventDefault() { this.defaultPrevented = true; }, stopPropagation() { this._stop = true; } }, init || {});
+      for (let n = el; n && n.getAttribute && !e._stop; n = n.parentNode) {
+        const code = n.getAttribute('on' + type);
+        if (code) { e.currentTarget = n; w2.eval('(function(event){' + code + '})').call(n, e); }
+      }
+      return e;
+    };
+    const ev = (el, type, init) => el === d ? d.dispatchEvent(new W.MouseEvent(type, { bubbles: true })) : inl(W, el, type, init);
+    const kd = (el, k, init) => inl(W, el, 'keydown', Object.assign({ key: k }, init || {}));
+    const cell = (r, dd) => d.getElementById('gr-c-' + r + '-' + dd);
+    const rowsSig = () => Array.from(d.querySelectorAll('#gr-grid tbody tr')).map(tr => tr.classList.contains('gr-grp') ? '[' + tr.getAttribute('data-sector') + ']' : tr.classList.contains('gr-grp-cov') ? '{' + tr.getAttribute('data-sector') + '}' : tr.id.replace('gr-row-', '')).join(' ');
+
+    /* ── т.3 ── */
+    ok('т.3: без запомнен избор — по сектори; бутонът предлага „☰ Плосък списък“', W.grGroupMode() === 'sector' && d.getElementById('gr-group-btn').textContent === '☰ Плосък списък');
+    ok('т.3: редът — по секторите на магазина (Склад преди Каса), хората по sort_order, „на смяна“ под всяка група', rowsSig() === '[Склад] st-2 {Склад} [Каса] st-1 st-3 {Каса}', rowsSig());
+    ok('т.3: заглавието на групата — „Каса (2)“, залепено вляво през трите колони', /^Каса \(2\)$/.test(d.querySelector('tr.gr-grp[data-sector="Каса"] td').textContent) &&
+      d.querySelector('tr.gr-grp[data-sector="Каса"] td').getAttribute('colspan') === '3' && /gr-stk/.test(d.querySelector('tr.gr-grp[data-sector="Каса"] td').className));
+    ok('т.3: № е номерът от печата и Excel за ТРЗ (sort_order), не мястото на екрана — Мария 2, Иван 1, Петя 3', ['st-2', 'st-1', 'st-3'].map(id => d.getElementById('gr-row-' + id).children[0].textContent).join() === '2,1,3');
+    ok('т.3: данните остават по sort_order (снимката / Excel / печат) — Иван, Мария, Петя', W.grCalc.rows.map(r => r.staff.id).join() === 'st-1,st-2,st-3');
+    // Писане по реда на екрана: ред 0 е Мария.
+    W.grSelect(0, 1); typeIn(x, 'П'); key(x, 'Enter');
+    W.grSelect(1, 1); typeIn(x, 'В'); key(x, 'Enter');
+    W.grSelect(2, 1); typeIn(x, 'О'); key(x, 'Enter');
+    ok('т.3: буквата отива при човека на реда от екрана (ред 1 = Мария, 2 = Иван, 3 = Петя)', L('st-2')[1] === 'П' && L('st-1')[1] === 'В' && L('st-3')[1] === 'О');
+    const cov = sk => Array.from(d.querySelectorAll('tr.gr-grp-cov[data-sector="' + sk + '"] td.gr-gcov')).map(t => t.textContent);
+    ok('т.3: „на смяна“ 2.11 — Склад 1, Каса 1 (О не се брои); 1.11 — 0 и червено', cov('Склад')[1] === '1' && cov('Каса')[1] === '1' && cov('Каса')[0] === '0' &&
+      d.querySelectorAll('tr.gr-grp-cov[data-sector="Каса"] td.gr-gcov0').length > 0 && cov('Каса').length === 30, cov('Каса').slice(0, 3).join());
+    ok('т.3: картата „Покритие“ брои същото (Каса 2.11 = 1)', Array.from(d.querySelectorAll('#gr-coverage tbody tr')).filter(tr => /^Каса/.test(tr.textContent))[0].children[2].textContent === '1');
+    // 🔒 по реда на екрана — кодът на Мария.
+    W.grSelect(0, 1); W.grToggleLock();
+    const mCode = W.grCalc.rows.filter(r => r.staff.id === 'st-2')[0].codes[1], iCode = W.grCalc.rows.filter(r => r.staff.id === 'st-1')[0].codes[1];
+    ok('т.3: заключването взема кода на човека от реда на екрана (Мария, П), не на Иван (В)', mCode !== iCode && (W.grRows['st-2'].locked || {})['2'] === mCode && !(W.grRows['st-1'].locked || {})['2'], JSON.stringify(W.grRows['st-2'].locked) + ' ' + mCode + '/' + iCode);
+    W.grToggleLock();
+    // Превключване: избраният човек остава избран.
+    W.grSelect(0, 4);
+    realClick(W, d.getElementById('gr-group-btn')); await ticks(2);
+    let stored = null; try { stored = W.localStorage.getItem('gr-grid-group'); } catch (e) {}
+    ok('т.3: „☰ Плосък списък“ → без групи, по sort_order; бутонът — „▤ По сектори“; изборът се помни', rowsSig() === 'st-1 st-2 st-3' && d.getElementById('gr-group-btn').textContent === '▤ По сектори' && stored === 'flat', rowsSig() + ' / ' + stored);
+    ok('т.3: Мария остава избрана (вече е на ред 2)', W.grSel.r === 1 && W.grSel.d === 4 && W.grVisible[1].id === 'st-2');
+    realClick(W, d.getElementById('gr-group-btn')); await ticks(2);
+    ok('т.3: обратно — по сектори', rowsSig() === '[Склад] st-2 {Склад} [Каса] st-1 st-3 {Каса}' && W.grSel.r === 0);
+
+    // Котвата след по-малко хора: избор до последния ред, после един човек излиза от месеца.
+    W.grSelect(2, 3); ev(cell(0, 1), 'click', { shiftKey: true });             // котвата — на последния ред (Петя)
+    const petya = W.grData.staff.filter(z => z.id === 'st-3')[0], keepLeft = petya.left_on;
+    petya.left_on = '2026-10-31'; W.grRecalc();
+    let cc = null; ev(d.getElementById('gr-grid'), 'copy', { clipboardData: { setData: (t2, v2) => { cc = v2; } } });
+    ok('котвата се ограничава при по-малко хора (Ctrl+C не гърми; изборът — 2 реда)', W.grVisible.length === 2 && W.grAnc.r === 1 && W.grSel.r === 0 && typeof cc === 'string' && cc.split('\r\n').length === 2, String(cc));
+    petya.left_on = keepLeft; W.grRecalc();
+    realClick(W, btn(mod(x), 'Персонал')); realClick(W, btn(mod(x), 'График')); await ticks(2);
+    ok('смяна на изгледа нулира избора и списъка', W.grAnc === null && W.grDrop === false);
+
+    /* ── т.5 ── */
+    W.grSelect(0, 1);
+    ev(cell(2, 3), 'click', { shiftKey: true });
+    ok('т.5: Shift+клик — избор 3 реда × 3 дни (9 клетки, оцветени)', d.querySelectorAll('#gr-grid td.gr-insel').length === 9 && W.grRange().r0 === 0 && W.grRange().r1 === 2 && W.grRange().d0 === 1 && W.grRange().d1 === 3);
+    // Ctrl+C.
+    let copied = null;
+    ev(d.getElementById('gr-grid'), 'copy', { clipboardData: { setData: (t, v) => { copied = [t, v]; } } });
+    ok('т.5: Ctrl+C — текст с табулации, редовете с CRLF (за Excel)', copied && copied[0] === 'text/plain' && copied[1] === 'П\t\t\r\nВ\t\t\r\nО\t\t', copied && JSON.stringify(copied[1]));
+    ok('т.5: „Копирани 9 клетки.“', x.calls.toast.slice(-1)[0] === 'Копирани 9 клетки.');
+    // Ctrl+V с една стойност върху избор — пълни целия избор.
+    const paste = txt => ev(d.getElementById('gr-grid'), 'paste', { clipboardData: { getData: () => txt } });
+    paste('ЗД');
+    ok('т.5: Ctrl+V „ЗД“ върху избора 3 × 3 → и деветте клетки', [0, 1, 2].every(r => [1, 2, 3].every(dd => cellText(x, r, dd) === 'ЗД')) && x.calls.toast.slice(-1)[0] === 'Поставени 9 клетки.', x.calls.toast.slice(-1)[0]);
+    // Delete — целият избор.
+    key(x, 'Delete');
+    ok('т.5: Delete изчиства целия избор (9 клетки)', [0, 1, 2].every(r => [1, 2, 3].every(dd => cellText(x, r, dd) === '')));
+    // Shift+стрелки; обикновена стрелка нулира избора.
+    W.grSelect(0, 1);
+    key(x, 'ArrowRight', { shiftKey: true }); key(x, 'ArrowRight', { shiftKey: true }); key(x, 'ArrowDown', { shiftKey: true });
+    ok('т.5: Shift+→ →, Shift+↓ — избор 2 реда × 3 дни', d.querySelectorAll('#gr-grid td.gr-insel').length === 6 && W.grSel.r === 1 && W.grSel.d === 3);
+    // Shift+стрелки не прескачат на следващия ред в края на месеца.
+    W.grSelect(0, 29); key(x, 'ArrowRight', { shiftKey: true });
+    ok('т.5: Shift+→ на 30-и остава на 30-и (без прескачане на следващия ред)', W.grSel.r === 0 && W.grSel.d === 29);
+    W.grSelect(0, 1); key(x, 'ArrowRight', { shiftKey: true }); key(x, 'ArrowRight');
+    ok('т.5: обикновена стрелка нулира избора', d.querySelectorAll('#gr-grid td.gr-insel').length === 0 && W.grSel.d === 3);
+    // Многоредово поставяне — от горния ляв ъгъл на избора.
+    W.grSelect(1, 5); ev(cell(2, 6), 'click', { shiftKey: true });
+    paste('П\tВ\r\nЗД\tМ\r\n');
+    ok('т.5: поставяне 2 × 2 от Excel — от горния ляв ъгъл на избора', cellText(x, 1, 5) === 'П' && cellText(x, 1, 6) === 'В' && cellText(x, 2, 5) === 'ЗД' && cellText(x, 2, 6) === 'М');
+    await wait(1000); await ticks();
+    const sv = lastSave(x);
+    ok('т.5: записът — save_rows, както досега (Иван 6.11 = П)', sv && sv.rows.some(r => r.staff_id === 'st-1' && r.letters[5] === 'П'), sv && JSON.stringify(sv.rows.map(r => r.staff_id)));
+
+    /* ── т.6 ── */
+    W.grSelect(0, 1); typeIn(x, 'П'); key(x, 'Tab'); typeIn(x, 'П'); key(x, 'Tab');
+    W.grSelect(0, 1); ev(cell(0, 4), 'click', { shiftKey: true });           // П П _ _
+    const fh = cell(0, 4).querySelector('.gr-fill');
+    ok('т.6: квадратчето е в долния десен ъгъл на избора (и само там)', !!fh && d.querySelectorAll('#gr-grid .gr-fill').length === 1);
+    ev(fh, 'mousedown');
+    ev(cell(0, 14), 'mouseover');
+    ok('т.6: докато се дърпа — рамка на 5–15.11 (10 клетки), още без запис', d.querySelectorAll('#gr-grid td.gr-fillto').length === 10 && L('st-2')[5] !== 'П');
+    ev(cell(0, 9), 'mouseover');
+    ok('т.6: назад до 10.11 — рамката се смалява (5 клетки)', d.querySelectorAll('#gr-grid td.gr-fillto').length === 5);
+    ev(cell(0, 14), 'mouseover');
+    ev(d, 'mouseup');
+    const m14 = L('st-2').slice(1, 15).map(v => v || '_').join(' ');
+    ok('т.6: пускане → 2 на 2 до 15.11: П П _ _ П П _ _ П П _ _ П П', m14 === 'П П _ _ П П _ _ П П _ _ П П', m14);
+    ok('т.6: „Попълнени …“ и изборът — целият попълнен правоъгълник', /^Попълнени \d+ клетки\.$/.test(x.calls.toast.slice(-1)[0]) && W.grRange().d0 === 1 && W.grRange().d1 === 14 && d.querySelectorAll('#gr-grid td.gr-insel').length === 14);
+    // 5+2 за двама наведнъж: Иван (ред 2) и Петя (ред 3), 2.11–8.11, до края на месеца.
+    for (const r of [1, 2]) { W.grSelect(r, 1); for (let i = 0; i < 7; i++) { if (i < 5) typeIn(x, r === 1 ? 'П' : 'В'); else key(x, 'Delete'); key(x, 'Tab'); } }
+    W.grSelect(1, 1); ev(cell(2, 7), 'click', { shiftKey: true });
+    ev(cell(2, 7).querySelector('.gr-fill'), 'mousedown'); ev(cell(2, 29), 'mouseover'); ev(d, 'mouseup');
+    const wk = id => L(id).slice(1, 30).map(v => v || '_').join('');
+    ok('т.6: 5+2 — всеки ред своя шаблон до 30.11', wk('st-1') === 'ППППП__ППППП__ППППП__ППППП__П' && wk('st-3') === 'ВВВВВ__ВВВВВ__ВВВВВ__ВВВВВ__В', wk('st-1') + ' / ' + wk('st-3'));
+    // Пуснато на същото място — нищо.
+    const before = JSON.stringify(W.grRows);
+    W.grSelect(0, 20); const nToast = x.calls.toast.length; ev(cell(0, 20).querySelector('.gr-fill'), 'mousedown'); ev(d, 'mouseup');
+    ok('т.6: без дърпане → нищо не се пипа: данните, изборът (20-и, без котва), без съобщение', JSON.stringify(W.grRows) === before && W.grFill === null &&
+      W.grSel.r === 0 && W.grSel.d === 20 && W.grAnc === null && x.calls.toast.length === nToast);
+    // Наляво не пълни (само надясно).
+    W.grSelect(0, 20); ev(cell(0, 20).querySelector('.gr-fill'), 'mousedown'); ev(cell(0, 15), 'mouseover');
+    ok('т.6: наляво — без рамка (само надясно)', d.querySelectorAll('#gr-grid td.gr-fillto').length === 0);
+    ev(d, 'mouseup');
+    ok('т.6: …и без промяна, изборът е същият', JSON.stringify(W.grRows) === before && W.grSel.d === 20 && W.grAnc === null);
+
+    /* ── т.4 ── */
+    // Двоен клик в браузъра = клик, клик, dblclick: вторият клик в същата клетка не прерисува,
+    // иначе dblclick пада върху откачен елемент.
+    realClick(W, cell(1, 9)); const c19 = cell(1, 9); realClick(W, c19);
+    ok('т.4: втори клик в избраната клетка — без рендер (същият елемент в страницата)', cell(1, 9) === c19 && W.grSel.r === 1 && W.grSel.d === 9);
+    ok('т.4: мрежата е без маркиране на текст (Shift+клик)', /user-select:none/.test(d.getElementById('gr-grid').getAttribute('style')));
+    ev(c19, 'dblclick');
+    let ds = d.getElementById('gr-drop-sel');
+    ok('т.4: двоен клик → списък в клетката: „— празно —“ и буквите', !!ds && ds.options[0].value === '' && ds.options[0].textContent === '— празно —' &&
+      Array.from(ds.options).slice(1).map(o => o.value).join() === W.grAllowedLetters().join() && W.grAllowedLetters().length >= 8, ds && Array.from(ds.options).map(o => o.value).join());
+    ok('т.4: текущата буква е избрана, фокусът е в списъка', ds.value === L('st-1')[9] && d.activeElement === ds, ds.value + ' / ' + (d.activeElement && d.activeElement.id));
+    ds.value = 'ЗД'; ev(ds, 'click');
+    ok('т.4: избор с мишката → клетката е „ЗД“, списъкът е затворен', L('st-1')[9] === 'ЗД' && !d.getElementById('gr-drop-sel') && W.grSel.r === 1 && W.grSel.d === 9);
+    // ▾ в избраната клетка.
+    const tri = cell(1, 9).querySelector('.gr-drop-btn');
+    ok('т.4: ▾ е в избраната клетка', !!tri && tri.textContent === '▾' && d.querySelectorAll('#gr-grid .gr-drop-btn').length === 1);
+    realClick(W, tri); await ticks(1);
+    ds = d.getElementById('gr-drop-sel');
+    kd(ds, 'ArrowDown');
+    ok('т.4: стрелките в списъка не местят избора в мрежата', !!d.getElementById('gr-drop-sel') && W.grSel.r === 1 && W.grSel.d === 9);
+    kd(ds, 'Escape');
+    ok('т.4: Escape затваря, клетката не се променя', !d.getElementById('gr-drop-sel') && L('st-1')[9] === 'ЗД');
+    // Alt+↓ отваря; голата ↓ мести.
+    key(x, 'ArrowDown', { altKey: true });
+    ok('т.4: Alt+↓ отваря списъка', !!d.getElementById('gr-drop-sel'));
+    ds = d.getElementById('gr-drop-sel'); ds.value = ''; kd(ds, 'Enter');
+    ok('т.4: Enter на „— празно —“ изчиства клетката', !d.getElementById('gr-drop-sel') && (L('st-1')[9] || '') === '');
+    key(x, 'ArrowDown');
+    ok('т.4: голата ↓ мести надолу, без списък', !d.getElementById('gr-drop-sel') && W.grSel.r === 2 && W.grSel.d === 9);
+    // Отвореният списък се затваря с клик в друга клетка.
+    ev(cell(2, 9), 'dblclick'); realClick(W, cell(0, 3)); await ticks(1);
+    ok('т.4: клик в друга клетка затваря списъка', !d.getElementById('gr-drop-sel') && W.grSel.r === 0 && W.grSel.d === 3);
+    await wait(1000); await ticks();
+    ok('т.4: изборите се записват със save_rows (Иван 10.11 празно след „— празно —“)', lastSave(x) && lastSave(x).rows.some(r => r.staff_id === 'st-1' && !(r.letters[9])));
+
+    /* ── Само чете (склад): избор и копиране — да; писане, списък, квадратче — не ── */
+    const v = env(SKL, { server: S, grouped: true }); await load(v);
+    const vd = v.doc, VW = v.w;
+    VW.grSelect(0, 1); inl(VW, vd.getElementById('gr-c-1-3'), 'click', { shiftKey: true });
+    let vc = null; inl(VW, vd.getElementById('gr-grid'), 'copy', { clipboardData: { setData: (t, s2) => { vc = s2; } } });
+    ok('само чете: изборът и Ctrl+C работят', vd.querySelectorAll('#gr-grid td.gr-insel').length === 6 && typeof vc === 'string' && vc.split('\r\n').length === 2);
+    ok('само чете: без квадратче и без ▾', !vd.querySelector('#gr-grid .gr-fill') && !vd.querySelector('#gr-grid .gr-drop-btn'));
+    const vb = JSON.stringify(VW.grRows);
+    inl(VW, vd.getElementById('gr-c-0-5'), 'dblclick');
+    VW.grKey({ key: 'Delete', preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });
+    VW.grKey({ key: 'ArrowDown', preventDefault() {}, ctrlKey: false, metaKey: false, altKey: true, shiftKey: false });
+    ok('само чете: двоен клик / Alt+↓ — без списък (и без отворено състояние); Delete — нищо', !vd.getElementById('gr-drop-sel') && VW.grDrop === false && JSON.stringify(VW.grRows) === vb);
   }
 
 
