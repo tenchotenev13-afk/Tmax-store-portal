@@ -14,6 +14,12 @@
 
 ## Чака изпращане
 
+(в базата от миграцията sap_prices_vkp2, sap-prices-vkp2-schema.sql, версия 20261108150623, приложена 08.11.2026; функцията catalog_set_sale_prices — не за огледалото)
+- 08.11 · product_catalog.sale_price — numeric, NULL, без default
+- 08.11 · product_catalog.sale_price_unit — text, NULL, без default
+- 08.11 · product_catalog.sale_price_valid_from — date, NULL, без default
+- 08.11 · product_catalog.sale_price_uploaded_at — timestamptz, NULL, без default
+
 (в базата от миграцията grafik_changes, grafik-changes-schema.sql, версия 20261105103650, приложена 05.11.2026; таблицата е без anon — виж бележката при grafik_schema)
 - 05.11 · нова таблица grafik_changes — id uuid, month_id uuid NOT NULL, staff_id uuid NOT NULL, day int NOT NULL, planned_letter text, planned_code text, actual text NOT NULL, reason text NOT NULL, created_at timestamptz NOT NULL default now(), created_by text, updated_at timestamptz NOT NULL default now(), updated_by text, trz_done boolean NOT NULL default false, trz_done_at timestamptz, trz_done_by text
 

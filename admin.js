@@ -718,6 +718,7 @@ function loadCatalogAdmin(){
       renderCatalogAdmin(total);
     }).catch(function(){renderCatalogAdmin('?');});
   }).catch(function(){renderCatalogAdmin('?');});
+  vkpLoadStat();
 }
 function renderCatalogAdmin(total){
   var body=document.getElementById('catalog-admin-body'); if(!body)return;
@@ -727,7 +728,14 @@ function renderCatalogAdmin(total){
     '<div style="display:flex;gap:8px;">'+
     '<button onclick="openAddCatalogItemModal()" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">+ Добави артикул</button>'+
     '<button onclick="openCatalogImportModal()" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">📤 Импортирай CSV/TSV</button>'+
+    (vkpCanUpload()
+      ? '<button id="vkp-btn" onclick="document.getElementById(\'vkp-file\').click()" style="border:none;background:#0f766e;color:#fff;border-radius:8px;padding:6px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">💶 Цени (VKP2)</button>'+
+        '<input type="file" id="vkp-file" accept=".xlsx,.xls" style="display:none;" onchange="vkpImportFile(this)">'
+      : '')+
     '</div></div>'+
+    '<div id="vkp-stat" style="font-size:12px;color:#475569;margin-bottom:6px;">'+vkpStatText()+'</div>'+
+    '<div id="vkp-progress" style="font-size:12px;color:#475569;margin-bottom:4px;"></div>'+
+    '<div id="vkp-report">'+(vkpLastReport?vkpReportHtml(vkpLastReport):'')+'</div>'+
     '<div style="display:flex;gap:8px;margin-bottom:8px;">'+
     '<input class="fi" id="catalog-search-inp" placeholder="Търси по SAP код или наименование..." style="flex:1;" onkeydown="if(event.key===\'Enter\')searchCatalog()">'+
     '<button onclick="searchCatalog()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:6px 16px;font-size:12.5px;cursor:pointer;">Търси</button>'+
@@ -935,6 +943,220 @@ function batchUpsertCatalog(rows,onProgress,onDone){
   }
   next();
 }
+
+/* ── 💶 Продажни цени от SAP (VKP2) → product_catalog (06.11.2026, сесия sap-prices-vkp2) ──
+   Решения на Тенчо 06.11: качва admin (Миглена Павлова, Цветелина Тенева,
+   Тенчо Тенев) от тази карта; цените са в product_catalog (sale_price,
+   sale_price_unit, sale_price_valid_from, sale_price_uploaded_at); пише се с
+   публичния ключ, както имената.
+   · колоните — по ИМЕ (VKP_COLS); липсва задължителна → грешка, нищо не се пише;
+   · само „Вид условие“ = VKP0 (VKA0 и др. — не);
+   · по материал — редът, валиден днес (Валиден от ≤ днес ≤ Валидна до); при
+     няколко — с най-късно „Валиден от“ (при равенство — по-долният в файла);
+     без валиден днес → не се пипа (брои се „без валидна цена днес“);
+   · цена = Сума / Ценова единица;
+   · запис през rpc/catalog_set_sale_prices — САМО UPDATE на ценовите колони
+     на съществуващ sap_code; непознат материал НЕ се създава, брои се;
+   · порции по VKP_BATCH, последователно, с прогрес; паднала порция → червено
+     и брой незаписани, не „готово“.
+   Нищо в портала още не показва цените (Минуси — следваща сесия). */
+var VKP_COLS = { mat: 'Материал', sum: 'Сума', per: 'Ценова единица', unit: 'Единица на условие',
+  from: 'Валиден от', to: 'Валидна до', kind: 'Вид условие' };
+var VKP_KIND = 'VKP0';
+var VKP_BATCH = 2000;
+var vkpBusy = false;
+var vkpStat = null;          /* { at: ISO, n: брой от последното качване } | null */
+var vkpLastReport = null;
+function vkpCanUpload(){ return !!(currentUser && currentUser.role === 'admin'); }
+function vkpPad(n){ return String(n).padStart(2, '0'); }
+/* Дата от клетка → 'yyyy-mm-dd' | null: Date, сериен номер на Excel (вкл.
+   31.12.9999 = 2958465), dd.mm.yyyy, yyyy-mm-dd. */
+function vkpDate(v){
+  if(v == null || v === '') return null;
+  if(v instanceof Date && !isNaN(v.getTime())) return v.getFullYear() + '-' + vkpPad(v.getMonth() + 1) + '-' + vkpPad(v.getDate());
+  if(typeof v === 'number' && isFinite(v) && v >= 1 && v <= 2958466){
+    var d = new Date(Math.round((v - 25569) * 86400000));
+    return String(d.getUTCFullYear()).padStart(4, '0') + '-' + vkpPad(d.getUTCMonth() + 1) + '-' + vkpPad(d.getUTCDate());
+  }
+  var s = String(v).trim(), m;
+  if((m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})$/))) return m[3] + '-' + vkpPad(m[2]) + '-' + vkpPad(m[1]);
+  if((m = s.match(/^(\d{4})-(\d{2})-(\d{2})/))) return m[1] + '-' + m[2] + '-' + m[3];
+  return null;
+}
+/* Число от клетка: число; низ „1 234,56“ / „1.234,56“ / „12,5“ / „12.5“. */
+function vkpNum(v){
+  if(typeof v === 'number') return isFinite(v) ? v : NaN;
+  var s = String(v == null ? '' : v).replace(/[\s ]/g, '');
+  if(!s) return NaN;
+  if(s.indexOf(',') >= 0) s = s.replace(/\./g, '').replace(',', '.');
+  return /^-?\d+(\.\d+)?$/.test(s) ? parseFloat(s) : NaN;
+}
+function vkpCode(v){ return String(v == null ? '' : v).trim().replace(/\.0+$/, ''); }
+function vkpHead(v){ return String(v == null ? '' : v).replace(/[\s ]+/g, ' ').trim().toLowerCase(); }
+/* aoa (масив от редове) → { error } | { read, vkp0, rows: [{sap_code, price, unit, valid_from}], noValid, bad }.
+   Чисто — без DOM и заявки. */
+function vkpParse(aoa, todayISO){
+  if(!Array.isArray(aoa) || !aoa.length) return { error: 'Файлът е празен' };
+  var hi = -1, idx = {}, keys = Object.keys(VKP_COLS);
+  for(var r = 0; r < Math.min(aoa.length, 15) && hi < 0; r++){
+    var hdr = (aoa[r] || []).map(vkpHead);
+    if(hdr.indexOf(vkpHead(VKP_COLS.mat)) >= 0 && hdr.indexOf(vkpHead(VKP_COLS.kind)) >= 0){
+      hi = r;
+      keys.forEach(function(k){ idx[k] = hdr.indexOf(vkpHead(VKP_COLS[k])); });
+    }
+  }
+  if(hi < 0) return { error: 'Не е намерен ред със заглавия „' + VKP_COLS.mat + '“ и „' + VKP_COLS.kind + '“' };
+  var miss = keys.filter(function(k){ return idx[k] < 0; }).map(function(k){ return VKP_COLS[k]; });
+  if(miss.length) return { error: 'Липсва колона: ' + miss.join(', ') };
+  var out = { read: 0, vkp0: 0, rows: [], noValid: 0, bad: 0 };
+  var best = {}, seen = {}, order = [];
+  for(var i = hi + 1; i < aoa.length; i++){
+    var row = aoa[i];
+    if(!row || !row.some(function(c){ return c !== '' && c != null; })) continue;
+    out.read++;
+    if(String(row[idx.kind] == null ? '' : row[idx.kind]).trim().toUpperCase() !== VKP_KIND) continue;
+    out.vkp0++;
+    var mat = vkpCode(row[idx.mat]), from = vkpDate(row[idx.from]), to = vkpDate(row[idx.to]);
+    var sum = vkpNum(row[idx.sum]), per = vkpNum(row[idx.per]);
+    if(!mat || !from || !to || !isFinite(sum) || !(per > 0)){ out.bad++; continue; }
+    if(!seen[mat]){ seen[mat] = 1; order.push(mat); }
+    if(from > todayISO || to < todayISO) continue;
+    var cur = best[mat];
+    if(cur && cur.valid_from > from) continue;
+    best[mat] = { sap_code: mat, price: Math.round(sum / per * 1e6) / 1e6,
+      unit: String(row[idx.unit] == null ? '' : row[idx.unit]).trim() || null, valid_from: from };
+  }
+  order.forEach(function(m){ if(best[m]) out.rows.push(best[m]); else out.noValid++; });
+  return out;
+}
+function vkpWithXlsx(cb){
+  if(window.XLSX){ cb(); return; }
+  var sc = document.createElement('script');
+  sc.src = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+  sc.onload = cb;
+  sc.onerror = function(){ toast('Грешка при зареждане на SheetJS', '#dc2626'); };
+  document.head.appendChild(sc);
+}
+function vkpImportFile(input){
+  var f = input && input.files && input.files[0];
+  if(!f) return;
+  input.value = '';
+  if(!vkpCanUpload()){ toast('Цените качва само admin', '#dc2626'); return; }
+  var prog = document.getElementById('vkp-progress');
+  if(prog) prog.textContent = '⏳ Четене на файла...';
+  vkpWithXlsx(function(){
+    var rd = new FileReader();
+    rd.onload = function(e){
+      var aoa, t0 = Date.now();
+      try {
+        var wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        aoa = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '', raw: true });
+      } catch(err){ vkpFail('Файлът не може да се прочете: ' + err.message); return; }
+      vkpImportAoa(aoa, f.name, Date.now() - t0);
+    };
+    rd.readAsArrayBuffer(f);
+  });
+}
+function vkpFail(msg){
+  var prog = document.getElementById('vkp-progress');
+  if(prog) prog.innerHTML = '<span id="vkp-error" style="color:#dc2626;font-weight:600;">⚠ ' + esc(msg) + ' — нищо не е записано.</span>';
+  toast(msg + ' — нищо не е записано', '#dc2626');
+}
+/* Една порция → { ok, updated, unknown[] } | { ok:false, error } */
+function vkpPostBatch(rows, at){
+  var url = API + '/rpc/catalog_set_sale_prices';
+  return fetch(url, { method: 'POST', headers: Object.assign({}, H, { 'Prefer': 'return=representation' }),
+    body: JSON.stringify({ p_rows: rows, p_uploaded_at: at }) }).then(function(r){
+    return r.text().then(function(t){
+      var d = null; try { d = t ? JSON.parse(t) : null; } catch(e){}
+      if(!r.ok || !d || typeof d.updated !== 'number') return { ok: false, error: (d && (d.message || d.hint)) || ('HTTP ' + r.status) };
+      return { ok: true, updated: d.updated, unknown: Array.isArray(d.unknown) ? d.unknown : [] };
+    });
+  }).catch(function(e){ return { ok: false, error: String((e && e.message) || e) }; });
+}
+function vkpImportAoa(aoa, fileName, parseMs){
+  if(!vkpCanUpload()){ toast('Цените качва само admin', '#dc2626'); return Promise.resolve(null); }
+  if(vkpBusy) return Promise.resolve(null);
+  var t0 = Date.now();
+  var p = vkpParse(aoa, today());
+  if(p.error){ vkpFail(p.error); return Promise.resolve({ error: p.error }); }
+  var rep = { file: fileName || '', read: p.read, vkp0: p.vkp0, picked: p.rows.length, updated: 0, noValid: p.noValid,
+    unknown: 0, unknownSample: [], bad: p.bad, failedRows: 0, failedBatches: 0, firstError: null,
+    parseMs: (parseMs || 0) + (Date.now() - t0), writeMs: 0 };
+  var prog = document.getElementById('vkp-progress');
+  var at = new Date().toISOString(), i = 0, tw = Date.now();
+  vkpBusy = true;
+  var btn = document.getElementById('vkp-btn'); if(btn) btn.disabled = true;
+  function step(){
+    if(prog) prog.textContent = '⏳ Цени: ' + Math.min(i, p.rows.length) + ' / ' + p.rows.length +
+      (rep.failedBatches ? ' (' + rep.failedBatches + ' порции с грешка)' : '') + '...';
+    if(i >= p.rows.length) return Promise.resolve();
+    var batch = p.rows.slice(i, i + VKP_BATCH);
+    return vkpPostBatch(batch, at).then(function(res){
+      if(res.ok){
+        rep.updated += res.updated;
+        rep.unknown += res.unknown.length;
+        res.unknown.forEach(function(c){ if(rep.unknownSample.length < 10) rep.unknownSample.push(c); });
+      } else {
+        rep.failedBatches++; rep.failedRows += batch.length;
+        if(!rep.firstError) rep.firstError = res.error;
+        console.error('VKP2: порция ' + i + '–' + (i + batch.length) + ' не е записана: ' + res.error);
+      }
+      i += VKP_BATCH;
+      return step();
+    });
+  }
+  return step().then(function(){
+    rep.writeMs = Date.now() - tw;
+    vkpBusy = false;
+    var b = document.getElementById('vkp-btn'); if(b) b.disabled = false;
+    vkpLastReport = rep;
+    var pr = document.getElementById('vkp-progress');
+    if(pr) pr.innerHTML = rep.failedRows
+      ? '<span id="vkp-error" style="color:#dc2626;font-weight:600;">⚠ Незаписани ' + rep.failedRows + ' цени (' + rep.failedBatches + ' порции с грешка) — качи файла пак.</span>'
+      : '<span id="vkp-done" style="color:#16a34a;font-weight:600;">✅ Готово — обновени ' + rep.updated + ' цени.</span>';
+    var box = document.getElementById('vkp-report'); if(box) box.innerHTML = vkpReportHtml(rep);
+    if(rep.failedRows) toast('⚠ Цените са записани частично — ' + rep.failedRows + ' незаписани', '#dc2626');
+    else toast('✅ Цените са обновени: ' + rep.updated);
+    vkpLoadStat();
+    return rep;
+  });
+}
+function vkpReportHtml(r){
+  var line = function(id, label, val, red){ return '<div id="' + id + '"' + (red ? ' style="color:#dc2626;font-weight:600;"' : '') + '>' + label + ': <b>' + val + '</b></div>'; };
+  return '<div class="vkp-report" style="font-size:12px;line-height:1.7;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:8px 12px;margin-bottom:10px;">' +
+    '<div style="font-weight:700;">💶 ' + esc(r.file || 'VKP2') + '</div>' +
+    line('vkp-r-read', 'Прочетени редове', r.read) +
+    line('vkp-r-vkp0', 'VKP0', r.vkp0) +
+    line('vkp-r-updated', 'Обновени цени', r.updated) +
+    line('vkp-r-novalid', 'Без валидна цена днес', r.noValid) +
+    line('vkp-r-unknown', 'Непознати материали (няма ги в каталога)', r.unknown + (r.unknownSample.length ? ' — ' + esc(r.unknownSample.join(', ')) + (r.unknown > r.unknownSample.length ? ', …' : '') : '')) +
+    line('vkp-r-errors', 'Грешки', (r.bad ? r.bad + ' невалидни реда' : '0') + (r.failedRows ? ' · ' + r.failedRows + ' незаписани (' + esc(String(r.firstError || '').slice(0, 150)) + ')' : ''), !!(r.bad || r.failedRows)) +
+    '<div style="color:#94a3b8;">Време: четене ' + (r.parseMs / 1000).toFixed(1) + ' сек · запис ' + (r.writeMs / 1000).toFixed(1) + ' сек</div>' +
+    '</div>';
+}
+function vkpFmtAt(iso){
+  var d = new Date(iso); if(isNaN(d.getTime())) return '';
+  return vkpPad(d.getDate()) + '.' + vkpPad(d.getMonth() + 1) + '.' + d.getFullYear() + ' ' + vkpPad(d.getHours()) + ':' + vkpPad(d.getMinutes());
+}
+function vkpStatText(){
+  if(!vkpStat) return '';
+  return 'Цени: обновени ' + esc(vkpFmtAt(vkpStat.at)) + ', ' + vkpStat.n + ' артикула';
+}
+/* Последното качване: най-новото sale_price_uploaded_at и колко реда го носят. Тихо при грешка. */
+function vkpLoadStat(){
+  return sbGet('product_catalog', 'select=sale_price_uploaded_at&sale_price_uploaded_at=not.is.null&order=sale_price_uploaded_at.desc&limit=1', true).then(function(rows){
+    var at = Array.isArray(rows) && rows[0] ? rows[0].sale_price_uploaded_at : null;
+    if(!at){ vkpStat = null; vkpPaintStat(); return; }
+    return fetch(API + '/product_catalog?select=sap_code&sale_price_uploaded_at=eq.' + encodeURIComponent(at),
+      { method: 'HEAD', headers: Object.assign({}, H, { 'Prefer': 'count=exact' }) }).then(function(res){
+      var cr = res.headers.get('content-range');
+      vkpStat = { at: at, n: cr ? cr.split('/')[1] : '?' };
+      vkpPaintStat();
+    });
+  }).catch(function(){ vkpStat = null; vkpPaintStat(); });
+}
+function vkpPaintStat(){ var el = document.getElementById('vkp-stat'); if(el) el.innerHTML = vkpStatText(); }
 
 /* ══════════════════════════════════════════
    ИЗВЕСТИЯ ОТ БЮЛЕТИНА — теми, матрица, изключения

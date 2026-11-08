@@ -461,6 +461,7 @@ const TESTS = [
   'bulletin-event-desc.test.js',
   'transit-auto-complete.test.js',
   'admin-reports.test.js',
+  'sap-prices-vkp2.test.js',
   'admin-recipient-scope.test.js',
   'admin-role-view.test.js',
   'admin-no-backup-dead-code.test.js',
