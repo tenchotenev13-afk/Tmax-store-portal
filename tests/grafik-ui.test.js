@@ -236,7 +236,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   const M = mod(h);
   ok('месецът е ноември 2026', (h.doc.getElementById('gr-month-label') || {}).textContent === 'ноември 2026 г.');
   ok('чернова', /Чернова/.test((h.doc.getElementById('gr-status') || {}).textContent || ''));
-  ok('редове: 3 (напусналият през септември не е в графика)', M.querySelectorAll('#gr-grid tbody tr').length === 3, M.querySelectorAll('#gr-grid tbody tr').length);
+  ok('редове: 3 (напусналият през септември не е в графика)', M.querySelectorAll('#gr-grid tbody:not(.gr-foot) tr').length === 3, M.querySelectorAll('#gr-grid tbody:not(.gr-foot) tr').length);
   ok('30 колони за дни', M.querySelectorAll('#gr-grid .gr-dh').length === 30);
   ok('празните клетки са празни (не „—“)', cellText(h, 0, 5) === '', JSON.stringify(cellText(h, 0, 5)));
   ok('неделите са оцветени (1.11 е неделя)', /background/.test(M.querySelector('#gr-grid .gr-dh').getAttribute('style')));
@@ -295,10 +295,13 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   ok('втори Ctrl+L отключва', !h.w.grRows['st-1'].locked[String(ch[0].day)]);
 
   section('6. Покритие и предупреждения');
-  const covRows = Array.from(h.doc.querySelectorAll('#gr-coverage tbody tr')).map(tr => tr.firstChild.textContent);
+  // От 08.11.2026 покритието по сектор е под мрежата (плосък изглед → под „▸ още“), не отделна карта.
+  h.w.grToggleMore();
+  const covRows = Array.from(h.doc.querySelectorAll('#gr-grid tr[id^="gr-foot-sec-"]')).map(tr => tr.firstChild.textContent.replace('на смяна: ', ''));
   ok('покритие по сектор: по списъка и реда на магазина (Склад, Каса), не по текста от бланката', JSON.stringify(covRows) === JSON.stringify(['Склад', 'Каса']), JSON.stringify(covRows));
   ok('„каса“ и „КАСА“ от бланката са в ЕДИН ред (Каса)', covRows.filter(x => /каса/i.test(x)).length === 1);
-  ok('неделя без хора → червено (0)', h.doc.querySelectorAll('#gr-coverage .gr-cov0').length > 0);
+  ok('неделя без хора → червено (0)', /background:#fecaca/.test(h.doc.getElementById('gr-foot-sec-Каса').children[1].getAttribute('style')));
+  h.w.grToggleMore();
   h.w.grSelect(1, 0);
   for (let d = 0; d < 7; d++) { typeIn(h, 'В'); key(h, 'Tab'); }
   // 1.11 (нд) – 7.11 (сб) работни, 8.11 празна → точно 7 поредни (ВТР чл. 19: няма 36 ч. почивка).
@@ -988,8 +991,9 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     const first = (id, n) => (rowNums(id) || []).slice(0, n).join(',');
 
     // т.2 — дневните сборове.
-    ok('т.2: блокът „Дневни сборове“ е сгъваем (<details>), след „Покритие по сектор“', !!d.getElementById('gr-daily') && d.getElementById('gr-daily').tagName === 'DETAILS' &&
-      !!(d.getElementById('gr-coverage').compareDocumentPosition(d.getElementById('gr-daily')) & 4));
+    // От 08.11.2026 сборовете са долният блок на мрежата; по буква и по позиция — под „▸ още“.
+    x.w.grToggleMore();
+    ok('т.2: сборовете са в мрежата (tbody.gr-foot), без отделна карта', !!d.querySelector('#gr-grid tbody.gr-foot #gr-daily-l-ЛД') && !d.getElementById('gr-daily') && !d.getElementById('gr-coverage'));
     ok('т.2: по буква — 10 реда (ЛД, ЗД, П, В, М, К, Б, О, НО, О4)', ['ЛД', 'ЗД', 'П', 'В', 'М', 'К', 'Б', 'О', 'НО', 'О4'].every(l => !!d.getElementById('gr-daily-l-' + l)));
     ok('т.2: ЛД — 1,1,0,0,0 · О4 — 0,1,0 · К — 0,0,0,1', first('gr-daily-l-ЛД', 5) === '1,1,0,0,0' && first('gr-daily-l-О4', 3) === '0,1,0' && first('gr-daily-l-К', 4) === '0,0,0,1', first('gr-daily-l-ЛД', 5));
     ok('т.2: „Общо на ден“ — сборът на буквите (вкл. О, Б, НО, О4; свободните часове не са буква): 2,3,3,2,1,1', first('gr-daily-total', 6) === '2,3,3,2,1,1', first('gr-daily-total', 6));
@@ -1012,9 +1016,9 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('т.6: О — светло жълто (#FFF2CC), Б — светло синьо (#B4C6E7)', bg(0, 3) === '#FFF2CC' && bg(0, 4) === '#B4C6E7', bg(0, 3) + ' ' + bg(0, 4));
     ok('т.6: дни преди назначаването (Мария, 7.11) — сиво #D9D9D9; след него (13.11) — не', bg(1, 6) === '#D9D9D9' && bg(1, 12) !== '#D9D9D9', bg(1, 6) + ' ' + bg(1, 12));
     ok('т.6: дни след напускането (Петя, 26.11) — сиво; денят на напускане (20.11) — не', bg(2, 25) === '#D9D9D9' && bg(2, 19) !== '#D9D9D9', bg(2, 25) + ' ' + bg(2, 19));
-    const pn = d.querySelectorAll('#gr-grid tbody tr')[2].querySelector('.gr-name');
+    const pn = d.querySelectorAll('#gr-grid tbody:not(.gr-foot) tr')[2].querySelector('.gr-name');
     ok('т.6: напуска през месеца (Петя) — името е маркирано (#BDD7EE) и казва датата', /gr-leaving/.test(pn.className) && /background:#BDD7EE/.test(pn.getAttribute('style')) && /напуска на 20\.11\.2026/.test(pn.getAttribute('title')), pn.getAttribute('title'));
-    ok('т.6: Иван не напуска — без маркировка', !/gr-leaving/.test(d.querySelectorAll('#gr-grid tbody tr')[0].querySelector('.gr-name').className));
+    ok('т.6: Иван не напуска — без маркировка', !/gr-leaving/.test(d.querySelectorAll('#gr-grid tbody:not(.gr-foot) tr')[0].querySelector('.gr-name').className));
     const intBg = r => (d.querySelectorAll('#gr-grid .gr-int')[r].getAttribute('style').match(/background:(#[0-9A-Fa-f]{6})/) || [])[1] || '';
     ok('т.6: „Вътр.“ под нормата — червено (Иван: 37 ч. срещу праг 152 = 168 − 8 × (Б + НО))', intBg(0) === '#FF8080' && x.w.grCalc.rows[0].internalNorm === 152, intBg(0) + ' ' + x.w.grCalc.rows[0].internalNorm);
     const setI = letters => { x.w.grRows['st-1'] = { letters, locked: {} }; x.w.grRecalc(); x.w.grRender(); };
@@ -1292,12 +1296,14 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('т.1: писането в клетката също не мести изгледа', wrap().scrollLeft === 500 && wrap().scrollTop === 30);
     W.grKey({ key: 'Escape', preventDefault() {} });
     // Сгъваемите блокове пазят състоянието си при рендер.
-    d.getElementById('gr-daily').open = true;
+    const wd = d.getElementById('gr-warnings');
+    ok('т.1: (предпоставка) има блок „Предупреждения“', !!wd);
+    wd.open = true;
     realClick(W, d.getElementById('gr-c-0-3')); await ticks(2);
-    ok('т.1: отворените „Дневни сборове“ остават отворени след клик в мрежата', d.getElementById('gr-daily').open === true);
-    d.getElementById('gr-daily').open = false;
+    ok('т.1: отворените „Предупреждения“ остават отворени след клик в мрежата', d.getElementById('gr-warnings').open === true);
+    d.getElementById('gr-warnings').open = false;
     realClick(W, d.getElementById('gr-c-0-4')); await ticks(2);
-    ok('т.1: затворени — остават затворени', d.getElementById('gr-daily').open === false);
+    ok('т.1: затворени — остават затворени', d.getElementById('gr-warnings').open === false);
     // Стрелките: клетката излиза вдясно → кутията се мести точно колкото трябва (страницата — не).
     wrap().scrollLeft = 0; wrap().scrollTop = 0;
     realClick(W, d.getElementById('gr-c-0-9')); await ticks(2);
@@ -1320,10 +1326,10 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     // т.2 — залепените колони.
     const th = Array.from(d.querySelectorAll('#gr-grid thead th'));
     ok('т.2: заглавията №, Служител, Сектор — gr-stk 0 / 1 / 2, последната със сянка', th[0].className === 'gr-stk gr-stk0' && th[1].className === 'gr-stk gr-stk1' && th[2].className === 'gr-stk gr-stk2 gr-stk-last' && !/gr-stk/.test(th[3].className));
-    const tr0 = d.querySelector('#gr-grid tbody tr');
+    const tr0 = d.querySelector('#gr-grid tbody:not(.gr-foot) tr');
     ok('т.2: всеки ред — №, името, секторът залепени; дните — не',
       /gr-stk0/.test(tr0.children[0].className) && /gr-name gr-stk gr-stk1/.test(tr0.children[1].className) && /gr-stk2/.test(tr0.children[2].className) && !/gr-stk/.test(tr0.children[3].className) &&
-      Array.from(d.querySelectorAll('#gr-grid tbody tr')).every(tr => tr.querySelectorAll('.gr-stk').length === 3));
+      Array.from(d.querySelectorAll('#gr-grid tbody:not(.gr-foot) tr')).every(tr => tr.querySelectorAll('.gr-stk').length === 3));
     ok('т.2: фиксирани ширини 34 / 150 / 90 px (border-box), дълго име — с „…“', /box-sizing:border-box;width:150px;min-width:150px;max-width:150px;/.test(tr0.children[1].getAttribute('style')) &&
       /text-overflow:ellipsis/.test(tr0.children[1].getAttribute('style')) && /width:34px;/.test(th[0].getAttribute('style')) && /width:90px;/.test(th[2].getAttribute('style')));
     ok('т.2: отместванията — по реалната ширина (в jsdom 0 → резервните 34 и 184)', d.getElementById('gr-stk-css').textContent === '#gr-grid .gr-stk1{left:34px;}#gr-grid .gr-stk2{left:184px;}', d.getElementById('gr-stk-css').textContent);
@@ -1360,7 +1366,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     const ev = (el, type, init) => el === d ? d.dispatchEvent(new W.MouseEvent(type, { bubbles: true })) : inl(W, el, type, init);
     const kd = (el, k, init) => inl(W, el, 'keydown', Object.assign({ key: k }, init || {}));
     const cell = (r, dd) => d.getElementById('gr-c-' + r + '-' + dd);
-    const rowsSig = () => Array.from(d.querySelectorAll('#gr-grid tbody tr')).map(tr => tr.classList.contains('gr-grp') ? '[' + tr.getAttribute('data-sector') + ']' : tr.classList.contains('gr-grp-cov') ? '{' + tr.getAttribute('data-sector') + '}' : tr.id.replace('gr-row-', '')).join(' ');
+    const rowsSig = () => Array.from(d.querySelectorAll('#gr-grid tbody:not(.gr-foot) tr')).map(tr => tr.classList.contains('gr-grp') ? '[' + tr.getAttribute('data-sector') + ']' : tr.classList.contains('gr-grp-cov') ? '{' + tr.getAttribute('data-sector') + '}' : tr.id.replace('gr-row-', '')).join(' ');
 
     /* ── т.3 ── */
     ok('т.3: без запомнен избор — по сектори; бутонът предлага „☰ Плосък списък“', W.grGroupMode() === 'sector' && d.getElementById('gr-group-btn').textContent === '☰ Плосък списък');
@@ -1377,7 +1383,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     const cov = sk => Array.from(d.querySelectorAll('tr.gr-grp-cov[data-sector="' + sk + '"] td.gr-gcov')).map(t => t.textContent);
     ok('т.3: „на смяна“ 2.11 — Склад 1, Каса 1 (О не се брои); 1.11 — 0 и червено', cov('Склад')[1] === '1' && cov('Каса')[1] === '1' && cov('Каса')[0] === '0' &&
       d.querySelectorAll('tr.gr-grp-cov[data-sector="Каса"] td.gr-gcov0').length > 0 && cov('Каса').length === 30, cov('Каса').slice(0, 3).join());
-    ok('т.3: картата „Покритие“ брои същото (Каса 2.11 = 1)', Array.from(d.querySelectorAll('#gr-coverage tbody tr')).filter(tr => /^Каса/.test(tr.textContent))[0].children[2].textContent === '1');
+    ok('т.3: „На смяна“ под мрежата = сборът на групите (2.11: Склад 1 + Каса 1 = 2)', d.getElementById('gr-foot-onshift').children[2].textContent === '2');
     // 🔒 по реда на екрана — кодът на Мария.
     W.grSelect(0, 1); W.grToggleLock();
     const mCode = W.grCalc.rows.filter(r => r.staff.id === 'st-2')[0].codes[1], iCode = W.grCalc.rows.filter(r => r.staff.id === 'st-1')[0].codes[1];
@@ -1514,6 +1520,69 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     VW.grKey({ key: 'Delete', preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });
     VW.grKey({ key: 'ArrowDown', preventDefault() {}, ctrlKey: false, metaKey: false, altKey: true, shiftKey: false });
     ok('само чете: двоен клик / Alt+↓ — без списък (и без отворено състояние); Delete — нищо', !vd.getElementById('gr-drop-sel') && VW.grDrop === false && JSON.stringify(VW.grRows) === vb);
+  }
+
+
+  section('22. Долният блок на мрежата: На смяна / Сутрин / Вечер / Сектори без човек, „▸ още“ (08.11.2026)');
+  {
+    const S = makeServer();
+    S.months['Кърджали|2026-11-01'] = { id: 'm-f', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+    // 1.11 (нд) — никой; 2.11 — Мария П, Иван В; 3.11 — Иван ЛД, Петя П (Мария почива).
+    const Lm = new Array(30).fill(''), Li = new Array(30).fill(''), Lp = new Array(30).fill('');
+    Lm[1] = 'П'; Li[1] = 'В'; Li[2] = 'ЛД'; Lp[2] = 'П';
+    S.rows.push({ month_id: 'm-f', staff_id: 'st-2', letters: Lm, locked: {} }, { month_id: 'm-f', staff_id: 'st-1', letters: Li, locked: {} }, { month_id: 'm-f', staff_id: 'st-3', letters: Lp, locked: {} });
+    const x = env(MGR, { server: S, grouped: true }); await load(x);
+    const d = x.doc, W = x.w;
+    const nums = id => Array.from(d.getElementById(id).children).slice(1, 31).map(td => td.textContent);
+    const foot = d.querySelector('#gr-grid tbody.gr-foot');
+    ok('блокът е в самата мрежа — втори tbody след хората (същият скрол, същите колони)', !!foot && foot.parentNode === d.getElementById('gr-grid') && foot.previousElementSibling.tagName === 'TBODY' && !foot.previousElementSibling.classList.contains('gr-foot'));
+    ok('по подразбиране: На смяна, Сутрин, Вечер, Сектори без човек, „▸ още“ — без редовете по буква', Array.from(foot.children).map(tr => tr.id).join() === 'gr-foot-onshift,gr-daily-morning,gr-daily-evening,gr-foot-nosec,gr-foot-more' &&
+      d.getElementById('gr-foot-more').children[0].textContent === '▸ още', Array.from(foot.children).map(tr => tr.id).join());
+    const on = d.getElementById('gr-foot-onshift');
+    ok('колоните съвпадат с мрежата: залепен етикет през трите леви (colspan 3), 30 дни, едно поле под „Вътр./Офиц./Цел/Разл.“',
+      on.children[0].getAttribute('colspan') === '3' && /gr-stk gr-stk0 gr-stk-last/.test(on.children[0].className) && on.children.length === 1 + 30 + 1 && on.lastElementChild.getAttribute('colspan') === '4');
+    ok('„На смяна“: 1.11 — 0 (червено), 2.11 — 2, 3.11 — 2', nums('gr-foot-onshift').slice(0, 3).join() === '0,2,2' && /background:#fecaca/.test(on.children[1].getAttribute('style')) && !/fecaca/.test(on.children[2].getAttribute('style')));
+    ok('„Сутрин (ЛД+ЗД+П)“: 0, 1, 2 · „Вечер (ЛД+ЗД+В+М)“: 0, 1, 1', nums('gr-daily-morning').slice(0, 3).join() === '0,1,2' && nums('gr-daily-evening').slice(0, 3).join() === '0,1,1' &&
+      d.getElementById('gr-daily-morning').children[0].textContent === 'Сутрин (ЛД+ЗД+П)' && d.getElementById('gr-daily-evening').children[0].textContent === 'Вечер (ЛД+ЗД+В+М)');
+    const ns = d.getElementById('gr-foot-nosec');
+    ok('„Сектори без човек“: 1.11 — 2 (Склад, Каса), 2.11 — 0, 3.11 — 1 (Склад); >0 червено, при задържане — кои',
+      nums('gr-foot-nosec').slice(0, 3).join() === '2,0,1' && ns.children[1].getAttribute('title') === 'Склад, Каса' && ns.children[3].getAttribute('title') === 'Склад' &&
+      !ns.children[2].hasAttribute('title') && /background:#fecaca/.test(ns.children[3].getAttribute('style')) && !/fecaca/.test(ns.children[2].getAttribute('style')), nums('gr-foot-nosec').slice(0, 3).join());
+    ok('редът „на смяна“ на групата и долният блок броят еднакво (2.11: Склад 1 + Каса 1 = „На смяна“ 2)',
+      +d.querySelectorAll('tr.gr-grp-cov[data-sector="Склад"] td.gr-gcov')[1].textContent + +d.querySelectorAll('tr.gr-grp-cov[data-sector="Каса"] td.gr-gcov')[1].textContent === +nums('gr-foot-onshift')[1]);
+    ok('картите „Покритие по сектор и ден“ и „Дневни сборове“ ги няма; над мрежата — само предупрежденията', !d.getElementById('gr-coverage') && !d.getElementById('gr-daily') &&
+      Array.from(mod(x).querySelectorAll('details')).every(e => e.id === 'gr-warnings') && mod(x).lastElementChild === d.getElementById('gr-grid-wrap'));
+    // „▸ още“.
+    realClick(W, d.getElementById('gr-foot-more').children[0]); await ticks(1);
+    let st = null; try { st = W.localStorage.getItem('gr-grid-more'); } catch (e) {}
+    ok('„▸ още“ → по буква (10), „Общо на ден“, по позиция; надписът „▾ по-малко“; помни се', ['ЛД', 'ЗД', 'П', 'В', 'М', 'К', 'Б', 'О', 'НО', 'О4'].every(l => !!d.getElementById('gr-daily-l-' + l)) &&
+      !!d.getElementById('gr-daily-total') && d.getElementById('gr-foot-more').children[0].textContent === '▾ по-малко' && st === '1', st);
+    ok('по сектори: редовете по сектор НЕ се повтарят под „още“ (те са под групите)', !d.querySelector('#gr-grid tr[id^="gr-foot-sec-"]'));
+    ok('„още“: ЛД — 0, 0, 1 · В — 0, 1, 0', nums('gr-daily-l-ЛД').slice(0, 3).join() === '0,0,1' && nums('gr-daily-l-В').slice(0, 3).join() === '0,1,0');
+    realClick(W, d.getElementById('gr-group-btn')); await ticks(1);
+    ok('плосък изглед: под „още“ са и редовете по сектор (Склад, Каса), 0 — червено', Array.from(d.querySelectorAll('#gr-grid tr[id^="gr-foot-sec-"]')).map(tr => tr.id.replace('gr-foot-sec-', '')).join() === 'Склад,Каса' &&
+      nums('gr-foot-sec-Склад').slice(0, 3).join() === '0,1,0' && /background:#fecaca/.test(d.getElementById('gr-foot-sec-Склад').children[1].getAttribute('style')));
+    // Клик в мрежата не сгъва „още“ (пълен рендер).
+    realClick(W, d.getElementById('gr-c-0-5')); await ticks(1);
+    ok('клик в клетка — „още“ остава отворено', !!d.getElementById('gr-daily-l-ЛД'));
+    realClick(W, d.getElementById('gr-foot-more').children[0]); await ticks(1);
+    try { st = W.localStorage.getItem('gr-grid-more'); } catch (e) {}
+    ok('„▾ по-малко“ → сгънато, помни се', !d.getElementById('gr-daily-l-ЛД') && d.getElementById('gr-foot-more').children[0].textContent === '▸ още' && st === '0');
+    W.grMore = null; try { W.localStorage.setItem('gr-grid-more', '1'); } catch (e) {}
+    W.grRender();
+    ok('запомненото „отворено“ се чете при ново зареждане', !!d.getElementById('gr-daily-l-ЛД'));
+    // „Без сектор“ не е сектор без човек.
+    const S2 = makeServer();
+    S2.staff.filter(z => z.id === 'st-3')[0].sector_id = null;
+    S2.months['Кърджали|2026-11-01'] = { id: 'm-g', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+    const Lm2 = new Array(30).fill(''), Li2 = new Array(30).fill(''); Lm2[1] = 'П'; Li2[1] = 'П';
+    S2.rows.push({ month_id: 'm-g', staff_id: 'st-2', letters: Lm2, locked: {} }, { month_id: 'm-g', staff_id: 'st-1', letters: Li2, locked: {} });
+    const y = env(MGR, { server: S2, grouped: true }); await load(y);
+    ok('„Без сектор“ не се брои като сектор без човек (2.11 — 0, макар Петя да почива)', Array.from(y.doc.getElementById('gr-foot-nosec').children).slice(1, 3).map(t => t.textContent).join() === '2,0' &&
+      y.doc.getElementById('gr-foot-nosec').children[1].getAttribute('title') === 'Склад, Каса');
+    const keep = y.w.grCalc; y.w.grCalc = { rows: [], month: keep.month };
+    ok('без хора в месеца — без долен блок', y.w.grFootHtml() === '');
+    y.w.grCalc = keep;
   }
 
 

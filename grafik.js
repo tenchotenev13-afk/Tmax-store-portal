@@ -40,7 +40,8 @@ var grAnc = null;           // котвата на избора (Shift+клик 
 var grDrop = false;         // падащият списък в избраната клетка е отворен
 var grFill = null;          // дърпане на квадратчето: { r0, r1, d0, d1, to }
 var grGroupBy = null;       // 'sector' (по подразбиране) | 'flat' — помни се в браузъра
-var grOrder = [];           // редът на екрана: индекси в grCalc.rows (данните остават по sort_order)
+var grOrder = [];
+var grMore = null;          // „▸ още“ под мрежата е отворено — помни се в браузъра (по подразбиране сгънато)           // редът на екрана: индекси в grCalc.rows (данните остават по sort_order)
 var grDirty = {}, grSaveTimer = null, grSavePromise = null, grSaveState = '';
 var grSaved = {};           // staff_id → има ред в grafik_rows за този месец (сървърът го знае)
 var GR_STK_W = [34, 150, 90];  // ширините на залепените колони (№, Служител, Сектор), px
@@ -474,8 +475,6 @@ function grGridPageHtml(){
   if(grData.status === 'submitted') h += grPresenceButtons();
   h += '</div>';
   h += grWarningsHtml();
-  h += grCoverageHtml();
-  h += grDailyHtml();
   /* Подсказката е НАД мрежата: кутията на мрежата залепва под лентата и трябва да е последна в
      модула — иначе редът под нея я избутва нагоре при скрол докрай (index.html, .gr-grid-wrap). */
   h += '<div id="gr-hint" style="font-size:12px;color:#64748b;margin:6px 2px;">Букви: ' + escVal(grAllowedLetters().join(', ')) +
@@ -549,8 +548,57 @@ function grGridHtml(){
   });
   if(grp && prevSec !== null) h += grGroupCovHtml(prevSec);
   if(!grCalc.rows.length) h += '<tr><td colspan="' + (M.days + 7) + '" style="padding:14px;color:#64748b;">Няма служители в графика за месеца — добави ги от „👥 Персонал“.</td></tr>';
-  h += '</tbody></table></div>';
+  h += '</tbody>' + grFootHtml() + '</table></div>';
   return h;
+}
+/* Долният блок на мрежата (08.11.2026, вместо картите „Покритие“ и „Дневни сборове“): в същите
+   колони за дните, със същия хоризонтален скрол и залепените леви колони. Отгоре — „На смяна“,
+   „Сутрин“, „Вечер“, „Сектори без човек“; под „▸ още“ (сгънато, помни се) — по буква, „Общо на
+   ден“, по позиция и в плоския изглед — по сектор (в изгледа по сектори той е под всяка група). */
+function grMoreOpen(){
+  if(grMore === null){ var v = null; try { v = localStorage.getItem('gr-grid-more'); } catch(e){} grMore = v === '1'; }
+  return grMore;
+}
+function grToggleMore(){
+  grMore = !grMoreOpen();
+  try { localStorage.setItem('gr-grid-more', grMore ? '1' : '0'); } catch(e){}
+  grRender();
+}
+function grFootHtml(){
+  if(!grCalc.rows.length) return '';
+  var M = grCalc.month, t = grDaily(), c = grCoverage(), more = grMoreOpen(), flat = grGroupMode() !== 'sector';
+  var on = new Array(M.days).fill(0), empty = [];
+  grCalc.rows.forEach(function(x){
+    var L = (grRows[x.staff.id] || { letters: [] }).letters || [];
+    for(var d = 0; d < M.days; d++) if(GR_WORK_LETTERS.indexOf(L[d]) >= 0) on[d]++;
+  });
+  var secs = c.order.filter(function(k){ return k !== GR_NO_SECTOR; });   // „Без сектор“ не е сектор
+  for(var d = 0; d < M.days; d++) empty.push(secs.filter(function(k){ return !c.sec[k][d]; }));
+  var first = true;
+  var line = function(id, label, arr, o){
+    o = o || {};
+    var top = first ? 'border-top:2px solid #94a3b8;' : '';
+    first = false;
+    var h = '<tr id="' + id + '" class="gr-foot-row"><td colspan="3" class="gr-stk gr-stk0 gr-stk-last" style="text-align:left;white-space:nowrap;font-size:11px;' + top + (o.bold ? 'font-weight:700;' : '') + '">' + escVal(label) + '</td>';
+    arr.forEach(function(n, i){
+      var st = o.red0 && !n ? 'background:#fecaca;color:#991b1b;font-weight:700;' : o.redPos && n ? 'background:#fecaca;color:#991b1b;font-weight:700;' : (n ? '' : 'color:#cbd5e1;');
+      h += '<td style="text-align:center;font-size:11px;' + top + st + '"' + (o.titles && o.titles[i].length ? ' title="' + escAttrVal(o.titles[i].join(', ')) + '"' : '') + '>' + n + '</td>';
+    });
+    return h + '<td colspan="4" style="' + top + '"></td></tr>';
+  };
+  var h = line('gr-foot-onshift', 'На смяна', on, { bold: true, red0: true }) +
+    line('gr-daily-morning', 'Сутрин (ЛД+ЗД+П)', t.morning, { bold: true }) +
+    line('gr-daily-evening', 'Вечер (ЛД+ЗД+В+М)', t.evening, { bold: true }) +
+    line('gr-foot-nosec', 'Сектори без човек', empty.map(function(l){ return l.length; }), { redPos: true, titles: empty });
+  h += '<tr id="gr-foot-more" class="gr-foot-row"><td colspan="3" class="gr-stk gr-stk0 gr-stk-last" onclick="grToggleMore()" style="text-align:left;white-space:nowrap;font-size:11px;color:#2563eb;cursor:pointer;" title="По буква, „Общо на ден“, по позиция (хората на смяна — работна буква или свободни часове)' + (flat ? ', по сектор' : '') + '">' +
+    (more ? '▾ по-малко' : '▸ още') + '</td><td colspan="' + (M.days + 4) + '"></td></tr>';
+  if(more){
+    h += GR_DAILY_LETTERS.map(function(l){ return line('gr-daily-l-' + l, l, t.by[l]); }).join('') +
+      line('gr-daily-total', 'Общо на ден (буквите)', t.total, { bold: true }) +
+      t.posOrder.map(function(k){ return line('gr-daily-p-' + k, k, t.pos[k]); }).join('');
+    if(flat) h += c.order.map(function(k){ return line('gr-foot-sec-' + k, 'на смяна: ' + k, c.sec[k], { red0: k !== GR_NO_SECTOR }); }).join('');
+  }
+  return '<tbody class="gr-foot">' + h + '</tbody>';
 }
 /* Покритие по сектор и ден: колко души са на смяна (ЛД, ЗД, П, В, М, К). 0 → червено. */
 function grCoverage(){
@@ -570,19 +618,6 @@ function grCoverage(){
     return pa - pb || a.localeCompare(b, 'bg');
   });
   return { order: order, sec: sec };
-}
-function grCoverageHtml(){
-  var M = grCalc.month, c = grCoverage();
-  if(!c.order.length) return '';
-  var h = '<details class="card" id="gr-coverage" open><summary style="cursor:pointer;font-weight:600;">Покритие по сектор и ден</summary><div class="tbl-wrap" style="overflow-x:auto;"><table style="border-collapse:collapse;font-size:11px;"><thead><tr><th style="text-align:left;">Сектор</th>';
-  for(var i = 0; i < M.days; i++) h += '<th style="padding:1px 3px;' + (M.holiday[i] ? 'background:#fecaca;' : M.dow[i] >= 6 ? 'background:#e2e8f0;' : '') + '">' + (i + 1) + '</th>';
-  h += '</tr></thead><tbody>';
-  c.order.forEach(function(k){
-    h += '<tr><td style="text-align:left;white-space:nowrap;">' + escVal(k) + '</td>';
-    c.sec[k].forEach(function(n){ h += '<td class="gr-cov' + (n ? '' : ' gr-cov0') + '" style="text-align:center;' + (n ? '' : 'background:#fecaca;color:#991b1b;font-weight:700;') + '">' + n + '</td>'; });
-    h += '</tr>';
-  });
-  return h + '</tbody></table></div></details>';
 }
 /* Дневни сборове (бланката: месечният лист, редове 80–100), 05.11.2026: колко души по буква,
    „Общо на ден“ (сборът на буквите), „Сутрин общо“ = ЛД + ЗД + П, „Вечер общо“ = ЛД + ЗД + В + М
@@ -606,26 +641,6 @@ function grDaily(){
   });
   var posOrder = GR_DAILY_POSITIONS.filter(function(k){ return pos[k]; }).concat(Object.keys(pos).filter(function(k){ return GR_DAILY_POSITIONS.indexOf(k) < 0; }));
   return { by: by, total: total, morning: morning, evening: evening, pos: pos, posOrder: posOrder };
-}
-function grDailyHtml(){
-  var M = grCalc.month;
-  if(!grCalc.rows.length) return '';
-  var t = grDaily();
-  var head = '<tr><th style="text-align:left;"></th>';
-  for(var i = 0; i < M.days; i++) head += '<th style="padding:1px 3px;' + (M.holiday[i] ? 'background:#fecaca;' : M.dow[i] >= 6 ? 'background:#e2e8f0;' : '') + '">' + (i + 1) + '</th>';
-  head += '</tr>';
-  var line = function(id, label, arr, bold){
-    return '<tr id="' + id + '"' + (bold ? ' style="font-weight:700;"' : '') + '><td style="text-align:left;white-space:nowrap;">' + escVal(label) + '</td>' +
-      arr.map(function(n){ return '<td style="text-align:center;' + (n ? '' : 'color:#cbd5e1;') + '">' + n + '</td>'; }).join('') + '</tr>';
-  };
-  var body = GR_DAILY_LETTERS.map(function(l){ return line('gr-daily-l-' + l, l, t.by[l]); }).join('') +
-    line('gr-daily-total', 'Общо на ден', t.total, true) +
-    line('gr-daily-morning', 'Сутрин общо (ЛД + ЗД + П)', t.morning, true) +
-    line('gr-daily-evening', 'Вечер общо (ЛД + ЗД + В + М)', t.evening, true) +
-    t.posOrder.map(function(k){ return line('gr-daily-p-' + k, k, t.pos[k]); }).join('');
-  return '<details class="card" id="gr-daily"><summary style="cursor:pointer;font-weight:600;">Дневни сборове — по буква, сутрин / вечер, по позиция</summary>' +
-    '<div class="tbl-wrap" style="overflow-x:auto;"><table style="border-collapse:collapse;font-size:11px;"><thead>' + head + '</thead><tbody>' + body + '</tbody></table></div>' +
-    '<div style="font-size:11px;color:#64748b;margin-top:4px;">По позиция — хората на смяна (работна буква или свободни часове).</div></details>';
 }
 function grWarningsHtml(){
   var list = [];
