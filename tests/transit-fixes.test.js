@@ -200,7 +200,7 @@ const FIELDS = ['tr-direction', 'tr-store', 'tr-supplier', 'tr-purchase-doc', 't
     const wraps = el => { const s = (el.getAttribute('style') || '').replace(/\s/g, ''); return !/white-space:nowrap/.test(s) && /white-space:normal/.test(s) && /max-width:100%/.test(s); };
     ok('получател: span без nowrap, white-space:normal, max-width:100%', wraps(recvSpan), recvSpan.getAttribute('style'));
     ok('получател: div без nowrap', !/nowrap/.test(recv.getAttribute('style') || ''), recv.getAttribute('style'));
-    ok('изпращач („📤 Изпратена · импорт"): span се пренася', wraps(send), send.getAttribute('style'));
+    ok('изпращач („📤 Изпратена по SAP"): span се пренася', wraps(send), send.getAttribute('style'));
     ok('засечка: div се пренася', wraps(recon), recon.getAttribute('style'));
     ok('span е inline-block (рамката следва реда)', /display:inline-block/.test(recvSpan.getAttribute('style')));
   }

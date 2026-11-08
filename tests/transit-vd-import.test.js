@@ -466,7 +466,7 @@ const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' &
     ok('изпратеният от склада — тялото не носи sender_status* → остава със стария by/at', noSender(w2), JSON.stringify(w2));
   }
   {
-    /* 3. Значката на изпращача: „· импорт" само при sender_status_by 'импорт'. */
+    /* 3. Значката на изпращача: „по SAP" (08.11.2026; беше „· импорт") само при sender_status_by 'импорт'. */
     const h = env();
     h.w.transitData = [
       { id: 'b1', direction: 'incoming', status: 'pending', store_name: 'Търговище', supplier: 'Логистичен склад Добрич',
@@ -479,10 +479,10 @@ const archPatches = h => h.calls.patch.filter(p => p.table === 'goods_transit' &
     h.w.transitDir = 'all'; h.w.transitFilter = 'all'; h.w.renderTransit();
     const badges = Array.from(h.doc.querySelectorAll('#mod-transit .t-send')).map(txtOf);
     ok('три значки на изпращача', badges.length === 3, JSON.stringify(badges));
-    ok('отбелязаният от импорта → „📤 Изпратена · импорт"', badges.indexOf('📤 Изпратена · импорт') >= 0, JSON.stringify(badges));
+    ok('отбелязаният от импорта → „📤 Изпратена по SAP"', badges.indexOf('📤 Изпратена по SAP') >= 0, JSON.stringify(badges));
     ok('отбелязаният от склада → „📤 Изпратена" без „импорт"', badges.indexOf('📤 Изпратена') >= 0, JSON.stringify(badges));
     ok('неизпратен (дори с by „импорт") → „📭 Неизпратена"', badges.indexOf('📭 Неизпратена') >= 0, JSON.stringify(badges));
-    ok('„· импорт" е точно на един ред', badges.filter(b => /импорт/.test(b)).length === 1, JSON.stringify(badges));
+    ok('„по SAP" е точно на един ред, „импорт" никъде', badges.every(b => !/импорт/.test(b)) && badges.filter(b => /SAP/.test(b)).length === 1, JSON.stringify(badges));
   }
 
   report();

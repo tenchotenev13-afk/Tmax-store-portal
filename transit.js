@@ -80,6 +80,9 @@ var T_STATUS = {
   received:    { label:'✅ Доставена',           bg:'#f0fdf4', color:'#16a34a' },
   undelivered: { label:'✕ Недоставена',          bg:'#fff1f2', color:'#dc2626' }
 };
+/* Етикетът на бутона „🔍 Чака засечка" — ЕДНО място: бутонът и банерът на
+   обекта („Отговорете на всеки ред — …") го четат оттук (08.11.2026). */
+var T_RECON_LABEL='🔍 Чака засечка';
 var T_SENDER = {
   none: { label:'📭 Неизпратена', bg:'#f1f5f9', color:'#64748b' },
   sent: { label:'📤 Изпратена',   bg:'#f5f3ff', color:'#7c3aed' }
@@ -239,15 +242,32 @@ function transitRowBadgeHtml(r,vp){
     ? '<span class="t-badge" style="background:#fff7ed;color:#c2410c;'+S+'">'+transitSenderKindLabel(r)+'</span>'
     : '<span class="t-badge" style="background:#f1f5f9;color:#334155;'+S+'">'+transitSenderKindLabel(r)+'</span>';
 }
-/* Банерът над таблицата — за обекта и склада (не за офиса), само при брой > 0. */
+/* Най-ранната doc_date сред редовете като „дд.мм"; няма ли нито една — ''. */
+function transitOldestDocDdMm(rows){
+  var min='';
+  (rows||[]).forEach(function(r){
+    var d=r&&r.doc_date?String(r.doc_date).slice(0,10):'';
+    if(/^\d{4}-\d{2}-\d{2}$/.test(d)&&(!min||d<min)) min=d;
+  });
+  return min?min.slice(8,10)+'.'+min.slice(5,7):'';
+}
+/* Банерът над таблицата — за обекта и склада (не за офиса), само при брой > 0.
+   Текстът (решение на Тенчо 08.11.2026): чака ОТГОВОР, не пристигане — и
+   задачата в Бюлетина зависи от него. Случай: Севлиево, 17 реда от 24.09. */
 function transitStoreBannerHtml(){
   if(!transitHasOwnViewpoint()) return '';
-  var n=transitData.filter(transitAwaitsViewpoint).length;
+  var waiting=transitData.filter(transitAwaitsViewpoint);
+  var n=waiting.length;
   var m=transitData.filter(transitAwaitsOther).length;
   var h='';
   if(n){
+    var oldest=transitOldestDocDdMm(waiting);
+    var ans=T_STATUS.received.label+', '+T_STATUS.undelivered.label+' или '+T_RECON_LABEL;
     h+='<div id="t-recv-note" style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:9px 14px;margin-bottom:8px;font-size:12.5px;color:#92400e;">'+
-      '📥 <b>'+n+'</b> '+(n===1?'изпратен ред чака да го приемете':'изпратени реда чакат да ги приемете')+'. Когато стоката пристигне, натиснете „'+T_STATUS.received.label+'“ или „'+T_STATUS.undelivered.label+'“.</div>';
+      '📥 <b>'+n+'</b> '+(n===1
+        ? 'ред е изпратен към вас и чака отговор'+(oldest?' (от '+oldest+')':'')+'. Отговорете на реда — '
+        : 'реда са изпратени към вас и чакат отговор'+(oldest?' (най-старият от '+oldest+')':'')+'. Отговорете на всеки ред — ')+
+      esc(ans)+'. Дотогава задачата в Бюлетина не се отмята.</div>';
   }
   if(m){
     h+='<div id="t-other-note" style="background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:6px 14px;margin-bottom:8px;font-size:12px;color:#64748b;">'+
@@ -631,8 +651,10 @@ function renderTransit(){
       var rs=transitRecvStatus(r), st=T_STATUS[rs]||T_STATUS.pending, sentS=transitSenderSent(r), ss=sentS?T_SENDER.sent:T_SENDER.none;
       /* „✕ Недоставена · кой · дд.мм" */
       var stLabel=esc(st.label)+(rs==='undelivered'?transitUndeliveredWho(r).map(function(x){return ' · '+esc(x);}).join(''):'');
-      /* Отбелязано от импорта, не от склада — „📤 Изпратена · импорт". */
-      var ssLabel=ss.label+(sentS&&r.sender_status_by===TRANSIT_IMPORT_SENDER_BY?' · импорт':'');
+      /* Отбелязано от импорта, не от склада — „📤 Изпратена по SAP" (08.11.2026;
+         „· импорт" не говореше нищо на обекта). В базата остава 'импорт'. */
+      var byImport=r.sender_status_by===TRANSIT_IMPORT_SENDER_BY;
+      var ssLabel=ss.label+(sentS&&byImport?' по SAP':'');
       var isOut=r.direction==='outgoing';
       var isTransfer=r.direction==='transfer';
       var isOver=(rs==='pending'||rs==='undelivered')&&r.doc_date&&(new Date()-new Date(r.doc_date))>30*86400000;
@@ -668,7 +690,7 @@ function renderTransit(){
              Управител Шумен · 04.11" не се побира в 160px и с nowrap излизаше
              под бутоните в „Действия" при 1280 и 1600 px. */
           '<div class="t-recv" title="Получател"><span style="background:'+st.bg+';color:'+st.color+';padding:2px 6px;border-radius:12px;font-size:10.5px;font-weight:600;'+TRANSIT_BADGE_WRAP+'">'+stLabel+'</span></div>'+
-          '<div class="t-send" title="Изпращач'+(r.sender_status_by?' · '+esc(r.sender_status_by):'')+'" style="margin-top:3px;"><span style="background:'+ss.bg+';color:'+ss.color+';padding:2px 6px;border-radius:12px;font-size:10px;font-weight:600;'+TRANSIT_BADGE_WRAP+'">'+ssLabel+'</span></div>'+
+          '<div class="t-send" title="Изпращач'+(r.sender_status_by?' · '+(byImport?'по SAP':esc(r.sender_status_by)):'')+'" style="margin-top:3px;"><span style="background:'+ss.bg+';color:'+ss.color+';padding:2px 6px;border-radius:12px;font-size:10px;font-weight:600;'+TRANSIT_BADGE_WRAP+'">'+ssLabel+'</span></div>'+
           transitReconBadgeHtml(r)+
           (r.archived_at?'<div class="t-archived" style="font-size:10px;color:#64748b;font-weight:600;margin-top:2px;white-space:nowrap;">🗄 архив '+fmtDate(String(r.archived_at).slice(0,10))+'</div>':'')+
           (r.comment?'<div style="font-size:10px;color:#94a3b8;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+esc(r.comment)+'">'+esc(r.comment)+'</div>':'')+
@@ -707,7 +729,7 @@ function renderTransit(){
       if(transitCanRecon(r)){
         h+=r.recon_at
           ? '<button data-id="'+r.id+'" data-side="recon" onclick="tToggleRecon(this.dataset.id)" style="'+BACK+'">↩ Махни засечка</button>'
-          : '<button data-id="'+r.id+'" data-side="recon" onclick="tToggleRecon(this.dataset.id)" style="border:1px solid #b45309;background:#fffbeb;color:#b45309;'+BTN+'font-weight:600;">🔍 Чака засечка</button>';
+          : '<button data-id="'+r.id+'" data-side="recon" onclick="tToggleRecon(this.dataset.id)" style="border:1px solid #b45309;background:#fffbeb;color:#b45309;'+BTN+'font-weight:600;">'+T_RECON_LABEL+'</button>';
       }
       if(rowCanEdit){
         h+='<button data-id="'+r.id+'" onclick="openTransitEdit(this.dataset.id)" style="border:1px solid #2563eb;background:#eff6ff;color:#2563eb;border-radius:5px;padding:4px 7px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;">✏️ Редакция</button>';

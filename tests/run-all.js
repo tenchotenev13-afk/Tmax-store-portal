@@ -246,6 +246,7 @@ const TESTS = [
   'sd-badge-store-align.test.js',
   'sd-waiting-filter-align.test.js',
   'transit-store-clarity.test.js',
+  'transit-store-banner-text.test.js',
   'sr-banner-text.test.js',
   'transit-phone-buttons.test.js',
   'sr-created-by-store.test.js',

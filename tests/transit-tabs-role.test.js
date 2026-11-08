@@ -236,7 +236,7 @@ const tabNum = (h, key) => { const b = tabBtn(h, key); const m = b && /\((\d+) /
     const chip = mod(h).querySelector('[data-tt-f="mine"]');
     ok('чипът „📥 Чакат мен" е там и казва 2', !!chip && /Чакат мен\s*2/.test(chip.textContent), chip && chip.textContent);
     const ban = h.doc.getElementById('t-recv-note');
-    ok('банерът „2 изпратени реда чакат да ги приемете"', !!ban && /2 изпратени реда чакат да ги приемете/.test(ban.textContent), ban && ban.textContent);
+    ok('банерът „2 реда са изпратени към вас и чакат отговор"', !!ban && /2 реда са изпратени към вас и чакат отговор/.test(ban.textContent), ban && ban.textContent);
     /* Влизане: скок към „Получавам" + „Чакат мен". */
     const h2 = env(WAREHOUSE, data);
     h2.w.transitFilter = 'pending'; h2.w.transitOpenFocus(); h2.w.renderTransit();
