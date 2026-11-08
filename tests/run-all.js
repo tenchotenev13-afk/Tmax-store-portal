@@ -461,6 +461,7 @@ const TESTS = [
   'bulletin-event-desc.test.js',
   'transit-auto-complete.test.js',
   'transit-auto-always.test.js',
+  'transit-multi-hint.test.js',
   'admin-reports.test.js',
   'sap-prices-vkp2.test.js',
   'admin-recipient-scope.test.js',

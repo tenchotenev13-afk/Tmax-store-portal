@@ -1691,6 +1691,20 @@ function bulAutoNoteHtml(t, done, kind, opts){
 }
 /* Запазено име — викачите за ЕДНОКРАТНИ задачи минават през него. */
 function bulAutoTransitNoteHtml(t, done, opts){ return bulAutoNoteHtml(t, done, 'regular', opts); }
+/* Подсказката за многодневна ЕДНОКРАТНА задача. Задача към Стока на път се
+   отмята автоматично (от 08.11.2026 — винаги, и многодневна), затова за нея
+   „отмятай в календара" е невярно: обектът няма какво да отмята. Другите
+   многодневни — без промяна. Постоянните задачи не минават оттук: при тях
+   Стока на път не е автоматична (bulTaskLinkKey е само за bulletin_tasks). */
+function bulMultiIsAuto(t){ return bulTaskLinkKey(t)==='transit-auto'; }
+function bulMultiHint(t, where){
+  return bulMultiIsAuto(t)
+    ? 'отмята се автоматично (виж 📅 Седмичен календар'+(where?' '+where:'')+')'
+    : 'отмятай в 📅 Седмичен календар'+(where?' '+where:'');
+}
+function bulMultiIconTitle(t){
+  return bulMultiIsAuto(t) ? 'Многодневна — отмята се автоматично (виж Седмичен календар)' : 'Многодневна — отмятай в Седмичен календар';
+}
 /* Отваря модула на автоматичната задача с филтъра „чака мен", където той
    съществува: Разлики — изгледът „Решени редове" + „📝 Чакат моя отговор";
    „За връщане" — подтабът на source-а + „Без актуализация". За останалите
@@ -3290,7 +3304,7 @@ function renderBulView(){
         } else if(naComp){
           html+=bulNaBoxHtml(naComp);
         } else if(isMulti){
-          html+='<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
+          html+='<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="'+bulMultiIconTitle(t)+'">📅</div>';
         } else if(bulReadOnly()){
           html+=bulReadOnlyCellHtml();
         } else {
@@ -3304,7 +3318,7 @@ function renderBulView(){
           html+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">📅 Дни: '+taskDueLabel(t)+'</div>';
           if(!bulSeesAll()&&store){
             var doneDaysCount=multiDates.filter(function(d){return bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===d;});}).length;
-            html+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">✅ '+doneDaysCount+'/'+multiDates.length+' дни отметнати — отмятай в 📅 Седмичен календар по-горе</div>';
+            html+='<div style="font-size:10px;color:#7c3aed;margin-top:2px;">✅ '+doneDaysCount+'/'+multiDates.length+' дни отметнати — '+bulMultiHint(t,'по-горе')+'</div>';
           } else if(bulSeesAll()){
             html+='<div style="font-size:10px;color:#94a3b8;margin-top:2px;">Живи бройки по дни виж в 📅 Седмичен календар по-горе</div>';
           }
@@ -5451,7 +5465,7 @@ function renderTasksPanel() {
         if (naComp) {
           h += bulNaBoxHtml(naComp);
         } else if (isMulti) {
-          h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="Многодневна — отмятай в Седмичен календар">📅</div>';
+          h += '<div style="width:16px;flex-shrink:0;margin-top:2px;text-align:center;font-size:12px;" title="'+bulMultiIconTitle(t)+'">📅</div>';
         } else if (bulReadOnly()) {
           h += bulReadOnlyCellHtml();
         } else {
@@ -5465,7 +5479,7 @@ function renderTasksPanel() {
         h += bulAllowHtml(t, true);
         h += bulAutoTransitNoteHtml(t, isDone);
         if (isMulti) {
-          h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">📅 Дни: '+taskDueLabel(t)+' — отмятай в 📅 Седмичен календар</div>';
+          h += '<div style="font-size:10px;color:#7c3aed;margin-top:2px;">📅 Дни: '+taskDueLabel(t)+' — '+bulMultiHint(t,'')+'</div>';
         } else if (isWin) {
           h += taskWindowDueLineHtml(t, winComp);
         } else if (singleDate) {
