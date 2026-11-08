@@ -156,6 +156,7 @@ const TESTS = [
   'loading-lists-doc-products.test.js',
   'loading-lists-blank-rows.test.js',
   'loading-lists-search.test.js',
+  'll-store-names.test.js',
   'loading-lists-pdf.test.js',
   'loading-lists-store-rows.test.js',
   'loading-lists-photos.test.js',

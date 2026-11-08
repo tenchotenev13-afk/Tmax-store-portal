@@ -744,6 +744,26 @@ function llRowPending(it){ return !!it && it.approval_status === 'pending'; }
    е било поискано и отказано — изтриването му би изтрило и обяснението. */
 function llRowCounts(it){ return !llRowRejected(it); }
 function llLiveRows(items){ return (items || []).filter(llRowCounts); }
+/* Имената на обектите за колоната „Обекти" в списъка (искане на Теодор,
+   06.11.2026). СЪЩИЯТ набор като llCounts() — llLiveRows — иначе броят в
+   отворения лист и имената в списъка се разминават. Ред на първа поява по
+   position, всеки обект веднъж. */
+function llStoreNames(items){
+  var seen = {}, out = [];
+  llLiveRows(items).slice().sort(llByPosition).forEach(function(it){
+    if(it.store_name && !seen[it.store_name]){ seen[it.store_name] = 1; out.push(it.store_name); }
+  });
+  return out;
+}
+/* До 3 имена, над 3 — първите 3 + „ +N"; пълният списък в title. Празна
+   чернова → „—". Имената идват от базата — през esc()/escAttr(). */
+function llStoreNamesCell(items){
+  var n = llStoreNames(items);
+  if(!n.length) return '<td class="ll-stores" style="padding:7px 10px;color:#94a3b8;">—</td>';
+  var shown = n.slice(0, 3).map(function(s){ return esc(s); }).join(', ');
+  if(n.length > 3) shown += ' <span style="color:#64748b;font-weight:600;">+'+(n.length - 3)+'</span>';
+  return '<td class="ll-stores" title="'+escAttr(n.join(', '))+'" style="padding:7px 10px;text-align:left;">'+shown+'</td>';
+}
 
 /* text[] от PostgREST идва като масив. currentUser обаче минава през
    auth-login и в по-стари сесии е носил Postgres литерала {"А","Б"} като
@@ -2534,7 +2554,7 @@ function llListHtml(){
       '<td style="padding:7px 10px;font-weight:600;white-space:nowrap;">'+fmtDate(l.list_date)+'</td>'+
       '<td style="padding:7px 10px;white-space:nowrap;">'+llStatusBadge(l.status)+
         (llIncompleteSaves[l.id]?' <span title="Заглавието е записано, но редовете НЕ са. Отвори листа и запиши пак." style="background:#fef2f2;color:#dc2626;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">⚠️ непълен запис</span>':'')+'</td>'+
-      '<td style="padding:7px 10px;text-align:center;">'+c.stores+'</td>'+
+      llStoreNamesCell(llItemsOf(l.id))+
       '<td style="padding:7px 10px;text-align:center;">'+c.pallet+'</td>'+
       '<td style="padding:7px 10px;text-align:center;">'+c.roll+'</td>'+
       '<td style="padding:7px 10px;text-align:center;">'+c.bulk+'</td>'+
