@@ -161,6 +161,7 @@ const TESTS = [
   'loading-lists-store-rows.test.js',
   'loading-lists-photos.test.js',
   'loading-transit-toggle.test.js',
+  'loading-store-banner.test.js',
   'loading-scan-toggle.test.js',
   'loading-diff-prefill.test.js',
   'loading-limit-1000.test.js',

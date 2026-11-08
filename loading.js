@@ -45,6 +45,10 @@ var llIncompleteSaves = {};
 /* ── Магазинска страна ── */
 var llStoreLists = [];     /* изпратените/приключените листи с редове за мен */
 var llStoreItems = [];     /* МОИТЕ редове от тях (филтърът е в заявката) */
+/* Етикетите на двата отговора на обекта по ред — ЕДНО място: бутоните на реда
+   и банерът „📦 N реда … чакат отговор" ги четат оттук (08.11.2026). */
+var LL_RECV_LABEL = '✅ Получено';
+var LL_MISS_LABEL = '⛔ Неполучено';
 var llCollapsed = {};      /* {listId:true} — свити карти */
 /* Редове, чийто палет Е получен, но стоковият документ НЕ се затвори.
    Живее само в тази сесия: колона за това няма. Смисълът е човекът да ВИДИ
@@ -687,6 +691,7 @@ function llStoreBodyHtml(){
       'oninput="llSetStoreQuery(this.value)" style="flex:1 1 240px;min-width:180px;border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;">'+
     (llStoreQuery ? '<button onclick="llSetStoreQuery(\'\')" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 12px;font-size:12.5px;cursor:pointer;">✕ Изчисти</button>' : '')+
     '</div>';
+  h += llStoreWaitBannerHtml();
   var shown = llStoreLists.filter(function(l){ return llStoreMatches(l, llStoreQuery); });
   if(!shown.length){
     return h + '<div style="text-align:center;padding:40px 20px;color:#94a3b8;background:#fff;border:1px solid #e2e8f0;border-radius:10px;">'+
@@ -694,6 +699,45 @@ function llStoreBodyHtml(){
   }
   shown.forEach(function(l){ h += llStoreCardHtml(l); });
   return h;
+}
+/* Банерът „📦 N реда от товарни листи … чакат отговор" (08.11.2026, по модела
+   на Стока на път). САМО за обекта: глобален профил (офис, контролинг) няма
+   свой обект, складът е в складовия изглед. Брои се същото като в известието
+   loading_lists_pending (bulletin-notify) и картата при вход: ред на МОЯ
+   обект, в лист със status 'sent', без received и без missing — тоест ред с
+   бутоните „✅ Получено" / „⛔ Неполучено". Датата — най-ранният sent_at на
+   листите с такъв ред. Последствието е реално: llAutoDoneList приключва листа
+   само когато всеки ред на всеки обект е обработен. */
+function llStoreWaitRows(){
+  var mine = (currentUser && currentUser.store_name) || '';
+  if(!mine || isGlobal()) return [];
+  var sent = {};
+  llStoreLists.forEach(function(l){ if(l.status === 'sent') sent[l.id] = l; });
+  return llLiveRows(llStoreItems).filter(function(i){
+    return sent[i.list_id] && i.store_name === mine && !llHandled(i);
+  });
+}
+function llStoreWaitBannerHtml(){
+  if(llCanEdit()) return '';
+  var rows = llStoreWaitRows();
+  var n = rows.length;
+  if(!n) return '';
+  var min = null, minRaw = '';
+  llStoreLists.forEach(function(l){
+    if(l.status !== 'sent' || !l.sent_at) return;
+    if(!rows.some(function(i){ return String(i.list_id) === String(l.id); })) return;
+    var t = new Date(l.sent_at).getTime();
+    if(!isNaN(t) && (min === null || t < min)){ min = t; minRaw = String(l.sent_at); }
+  });
+  /* Денят — както llFmtStamp го показва в картата на листа („Изпратен:"),
+     тоест датата от низа, за да не се разминат банерът и картата. */
+  var oldest = /^\d{4}-\d{2}-\d{2}/.test(minRaw) ? minRaw.slice(8, 10) + '.' + minRaw.slice(5, 7) : '';
+  var ans = LL_RECV_LABEL + ' или ' + LL_MISS_LABEL;
+  return '<div id="ll-wait-note" style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:9px 14px;margin-bottom:12px;font-size:12.5px;color:#92400e;">'+
+    '📦 <b>' + n + '</b> ' + (n === 1
+      ? 'ред от товарен лист е изпратен към вас и чака отговор' + (oldest ? ' (от ' + oldest + ')' : '') + '. Отбележете го — '
+      : 'реда от товарни листи са изпратени към вас и чакат отговор' + (oldest ? ' (най-старият от ' + oldest + ')' : '') + '. Отбележете всеки — ') +
+    esc(ans) + '. Дотогава листът не се приключва.</div>';
 }
 function llToggleCard(id){
   llCollapsed[id] = !llCollapsed[id];
@@ -1299,8 +1343,8 @@ function llStoreCardHtml(l){
             /* Отмяната е за сгрешен клик и за стока, която е дошла по-късно. */
             (llCanReceive(it)?' <button data-id="'+it.id+'" onclick="llUnmarkMissing(this.dataset.id)" style="border:1px solid #e2e8f0;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">↩ Отмени</button>':'')
           : (llCanReceive(it)
-            ? '<button data-id="'+it.id+'" onclick="llMarkReceived(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">✅ Получено</button>'+
-              ' <button data-id="'+it.id+'" onclick="llMarkMissing(this.dataset.id)" title="Редът НЕ е пристигнал — описва се в „Моят коментар“" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">⛔ Неполучено</button>'+llDiffBtn(it.id)
+            ? '<button data-id="'+it.id+'" onclick="llMarkReceived(this.dataset.id)" style="border:1px solid #bbf7d0;background:#f0fdf4;color:#16a34a;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">'+LL_RECV_LABEL+'</button>'+
+              ' <button data-id="'+it.id+'" onclick="llMarkMissing(this.dataset.id)" title="Редът НЕ е пристигнал — описва се в „Моят коментар“" style="border:1px solid #fecaca;background:#fef2f2;color:#dc2626;border-radius:5px;padding:3px 9px;font-size:11.5px;font-weight:600;cursor:pointer;">'+LL_MISS_LABEL+'</button>'+llDiffBtn(it.id)
             : '<span style="color:#cbd5e1;">—</span>')))+
       (failed?'<div style="margin-top:3px;font-size:10px;color:#b45309;font-weight:600;">⚠️ документът не е затворен</div>':'')+
       '</td></tr>';
