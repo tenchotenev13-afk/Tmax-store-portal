@@ -1247,8 +1247,9 @@ function bulDateLockReason(cdate){
    добавянето на четвърти е един ред ТУК.
 
    Ключът е този на bulTaskLinkKey() / linked_module на постоянната задача:
-   'transit-auto' е 'transit' + auto_complete, затова е отделен от 'transit'
-   (ръчните задачи от С36/С37 останаха на 'transit').
+   'transit-auto' е ключът на ВСЯКА задача с linked_module 'transit' (от
+   08.11.2026 — винаги автоматична, без auto_complete и за многодневна);
+   bulTaskLinkKey го дава, а linked_module в базата си остава 'transit'.
 
    reason се ПАЗИ дословно ('auto', 'auto-transit'): tests/oborot-bulletin-link
    и tests/transit-auto-complete се закачат за тези низове и за етикетите им.
@@ -1345,14 +1346,15 @@ function bulAutoModuleOf(linkedModule, todayISO){
   return m;
 }
 function bulAutoLocked(linkedModule){ return !!bulAutoModuleOf(linkedModule); }
-/* Ключът за заключване на задача. Автоматичната „Стока на път" (linked_module
-   'transit' + auto_complete) се отмята от тригера в базата
-   (transit-reviewed-schema.sql), затова носи собствен ключ. 'transit' без
-   auto_complete остава ръчна — така са старите задачи от С36/С37. Същият
-   ключ пътува в data-linked до обработчиците. */
+/* Ключът за заключване на задача. Задача, свързана със „Стока на път"
+   (linked_module 'transit'), е автоматична ВИНАГИ — решение на Тенчо
+   08.11.2026 (transit-auto-always-schema.sql): auto_complete НЕ се чете, и
+   многодневната се отмята за всеки свой ден. До тогава беше по избор и само
+   еднодневна — 379d9f9d… (05–08.11) остана с неотметнати 07–08.11 при
+   обработени всички редове. Същият ключ пътува в data-linked до обработчиците. */
 function bulTaskLinkKey(t){
   if(!t) return '';
-  if(t.linked_module==='transit'&&t.auto_complete) return 'transit-auto';
+  if(t.linked_module==='transit') return 'transit-auto';
   return t.linked_module||'';
 }
 /* Броят необработени входящи редове на обекта в Стока на път — САМО за
@@ -1747,31 +1749,32 @@ function bulCompletedByLabel(v){
   if(v==='auto:pallets') return 'автоматично от Палети';
   return v||'';
 }
-/* Полето „Отмята се автоматично" във формите за задача. Стои в DOM-а винаги
-   и само се крие, когато свързаният таб не е Стока на път — смяна напред-назад
-   не губи отметката. prefix: 'tk' (нова) / 'etk' (редакция). */
+/* Бележката „Отмята се автоматично" във формите за задача. От 08.11.2026 НЕ е
+   чекбокс: задача към Стока на път е автоматична винаги (bulTaskLinkKey).
+   Стои в DOM-а и само се крие, когато свързаният таб не е Стока на път.
+   checked — пази се в сигнатурата за викачите, не се ползва.
+   prefix: 'tk' (нова) / 'etk' (редакция). */
 function bulAutoCompleteFieldHtml(prefix, checked, linked){
-  return '<label id="'+prefix+'-auto-wrap" style="display:'+(linked==='transit'?'flex':'none')+';align-items:center;gap:6px;font-size:12px;color:#374151;margin-top:8px;cursor:pointer;">'+
-    '<input type="checkbox" id="'+prefix+'-auto-complete"'+(checked?' checked':'')+' style="width:14px;height:14px;cursor:pointer;">'+
-    'Отмята се автоматично от Стока на път (само един ден срок)</label>';
+  return '<div id="'+prefix+'-auto-wrap" style="display:'+(linked==='transit'?'flex':'none')+';align-items:center;gap:6px;font-size:12px;color:#b45309;margin-top:8px;">'+
+    '⏳ Отмята се автоматично от Стока на път — за всеки ден от срока, когато обектът обработи всички входящи редове</div>';
 }
 function bulAutoCompleteToggle(prefix){
   var sel=document.getElementById(prefix+'-linked-module'), wrap=document.getElementById(prefix+'-auto-wrap');
   if(wrap) wrap.style.display=(sel&&sel.value==='transit')?'flex':'none';
 }
+/* auto_complete се пише true за всяка задача към Стока на път — само за
+   прегледност на данните; базата и порталът не го четат за transit. */
 function bulAutoCompleteRead(prefix, linkedModule){
-  var cb=document.getElementById(prefix+'-auto-complete');
-  return linkedModule==='transit'&&!!(cb&&cb.checked);
+  return linkedModule==='transit';
 }
-/* Автоматичната задача е ЕДНОДНЕВНА: тригерът пише отметка за срока и не
-   отгатва кой от няколко дни е „денят" (cardinality(due_dates) <= 1 в
-   transit_sync_completions). Без срок няма какво да се отметне. */
+/* Автоматичната задача трябва да има поне един ден срок — базата пише
+   отметка за ВСЕКИ ден от due_dates (от 08.11.2026; дотогава — само
+   еднодневна). Без срок няма какво да се отметне, а обектът не може да я
+   отметне ръчно. */
 function bulAutoCompleteValid(auto, dueDates){
   if(!auto) return true;
-  if(dueDates.length===1) return true;
-  toast(dueDates.length>1
-    ? 'Автоматичната задача е с ЕДИН ден срок — махни останалите дни'
-    : 'Автоматичната задача трябва да има срок — един ден', '#dc2626');
+  if(dueDates.length>=1) return true;
+  toast('Задачата към Стока на път трябва да има срок — поне един ден', '#dc2626');
   return false;
 }
 /* Автоматичното бие датата: за такава задача чекбоксът е заключен винаги,

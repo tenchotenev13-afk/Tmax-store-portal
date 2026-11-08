@@ -16,15 +16,19 @@
      7. офисът: без избран обект броячът го няма, с избран — има.
    B. bulletin.js (обект)
      8. автоматичната задача: чекбоксът е заключен с „Отмята се автоматично
-        от Стока на път", data-linked='transit-auto'; ръчната 'transit' — не;
+        от Стока на път", data-linked='transit-auto'; ръчна задача с друг
+        свързан таб (Контакти) — не. От 08.11.2026 ВСЯКА 'transit' е
+        автоматична (transit-auto-always) — ръчна Стока на път няма;
      9. надписът „⏳ N необработени реда" / „✓ от Стока на път"; служебното
         auto:transit не се показва като име;
     10. пряко извикване на обработчика и на модала се отхвърля;
     11. броят се тегли с точния филтър и само когато има смисъл.
    C. bulletin.js (офис) — формата за задача
-    12. полето се показва само при Стока на път; повече от един ден → отказ,
-        без запис; един ден → auto_complete:true; без Стока на път → false;
-    13. редакция: полето носи стойността; махане на Стока на път → false.
+    12. бележката се показва само при Стока на път (не е чекбокс); без срок →
+        отказ, без запис; няколко дни → запис с auto_complete:true (от
+        08.11.2026); без Стока на път → false;
+    13. редакция: бележката е видима; многодневна се записва; махане на
+        Стока на път → false.
 
    Мутации, с които тестът ТРЯБВА да падне — виж края на отчета за сесията.
 
@@ -315,7 +319,9 @@ function fakeCb(doc, id, linked) {
 
   /* ═══ B ═══════════════════════════════════════════════════════════════ */
   const T_AUTO = () => btask('t-auto', { title: 'Стока на път авто', linked_module: 'transit', auto_complete: true, task_type: 'comment' });
-  const T_MAN = () => btask('t-man', { title: 'Стока на път ръчна', linked_module: 'transit', auto_complete: false });
+  /* Ръчна задача със свързан таб. До 08.11.2026 беше 'transit' без
+     auto_complete — оттогава такава няма (transit-auto-always). */
+  const T_MAN = () => btask('t-man', { title: 'Контакти ръчна', linked_module: 'contacts', auto_complete: false });
 
   section('B8. Заключеният чекбокс');
   {
@@ -329,9 +335,9 @@ function fakeCb(doc, id, linked) {
       ok('data-linked = transit-auto', a.every(c => c.getAttribute('data-linked') === 'transit-auto'));
       ok('приглушени, не скрити', a.every(c => (c.getAttribute('style') || '').indexOf('cursor:not-allowed') >= 0));
     }
-    if (ok('КОНТРОЛА: ръчната transit има чекбокси', m.length > 0)) {
+    if (ok('КОНТРОЛА: ръчната (Контакти) има чекбокси', m.length > 0)) {
       ok('КОНТРОЛА: ръчната е натискаема днес', m.every(c => !c.disabled));
-      ok('КОНТРОЛА: data-linked = transit', m.every(c => c.getAttribute('data-linked') === 'transit'));
+      ok('КОНТРОЛА: data-linked = contacts', m.every(c => c.getAttribute('data-linked') === 'contacts'));
     }
     ok('oborot не е засегнат', h.w.bulLockLabel('auto') === 'Отмята се автоматично при запис на оборота' && h.w.bulTaskLinkKey({ linked_module: 'oborot' }) === 'oborot');
   }
@@ -372,7 +378,7 @@ function fakeCb(doc, id, linked) {
   {
     const h = bulEnv(MANAGER, [T_MAN()]);
     guard('ръчна: openTaskCompletionModal()', () => h.w.openTaskCompletionModal('t-man', 'regular', TODAY));
-    ok('КОНТРОЛА: за ръчната transit модалът се отваря', !!h.doc.getElementById('tc-modal-ov'));
+    ok('КОНТРОЛА: за ръчната (Контакти) модалът се отваря', !!h.doc.getElementById('tc-modal-ov'));
   }
 
   section('B11. Броят се тегли точно и само когато има смисъл');
@@ -413,7 +419,7 @@ function fakeCb(doc, id, linked) {
     const pp = id => h.doc.querySelectorAll('button[data-task-id="' + id + '"][onclick^="openPostponeModal"]').length;
     ok('автоматична Стока на път: няма „Отложи"', pp('t-auto') === 0, pp('t-auto'));
     ok('постоянна oborot: няма „Отложи"', pp('r-ob') === 0, pp('r-ob'));
-    ok('КОНТРОЛА: ръчна Стока на път има „Отложи"', pp('t-man') > 0, pp('t-man'));
+    ok('КОНТРОЛА: ръчна (Контакти) има „Отложи"', pp('t-man') > 0, pp('t-man'));
     ok('КОНТРОЛА: обикновена постоянна има „Отложи"', pp('r-plain') > 0, pp('r-plain'));
 
     /* Вече отложената автоматична задача трябва да може да се върне. */
@@ -436,33 +442,29 @@ function fakeCb(doc, id, linked) {
   }
   const addBtn = doc => Array.prototype.find.call(doc.querySelectorAll('#tk-ov button'), b => (b.getAttribute('onclick') || '') === 'submitTask()');
 
-  section('C12. Нова задача: полето, отказът за няколко дни, записът');
+  section('C12. Нова задача: бележката, отказът без срок, записът (и многодневна)');
   {
     const h = bulEnv(ADMIN, [btask('t-x')]);
     h.w.renderBulView();
     guard('openTaskModal()', () => h.w.openTaskModal());
     const d = h.doc, wrap = () => d.getElementById('tk-auto-wrap'), sel = d.getElementById('tk-linked-module');
-    if (ok('полето съществува и е скрито без Стока на път', !!wrap() && wrap().style.display === 'none')) {
+    if (ok('бележката съществува и е скрита без Стока на път', !!wrap() && wrap().style.display === 'none')) {
       sel.value = 'transit'; fire(h.w, sel, 'change');
       ok('при Стока на път се показва', wrap().style.display !== 'none');
+      ok('без чекбокс за избор', !d.getElementById('tk-auto-complete'));
       d.getElementById('tk-title').value = 'Авто стока на път';
-      d.getElementById('tk-auto-complete').checked = true;
-
-      pickDays(d, 'tk-due-dates', 2);
-      realClick(h.w, addBtn(d), 'Добави задача'); await settle();
-      ok('2 дни → НЯМА запис', postsTo(h, 'bulletin_tasks').length === 0);
-      ok('2 дни → казва защо', h.calls.toast.some(t => /ЕДИН ден/.test(t)), JSON.stringify(h.calls.toast));
 
       dueBoxes(d, 'tk-due-dates').forEach(b => { b.checked = false; });
       realClick(h.w, addBtn(d), 'Добави задача'); await settle();
       ok('0 дни → НЯМА запис', postsTo(h, 'bulletin_tasks').length === 0);
+      ok('0 дни → казва защо', h.calls.toast.some(t => /трябва да има срок/.test(t)), JSON.stringify(h.calls.toast));
 
-      const one = pickDays(d, 'tk-due-dates', 1);
+      const two = pickDays(d, 'tk-due-dates', 2);
       realClick(h.w, addBtn(d), 'Добави задача'); await settle();
       const p = postsTo(h, 'bulletin_tasks');
-      if (ok('1 ден → един запис', p.length === 1, p.length)) {
+      if (ok('2 дни → един запис', p.length === 1, p.length)) {
         ok('auto_complete: true', p[0].body.auto_complete === true, JSON.stringify(p[0].body));
-        ok('linked_module: transit, срокът е един ден', p[0].body.linked_module === 'transit' && JSON.stringify(p[0].body.due_dates) === JSON.stringify(one));
+        ok('linked_module: transit, срокът е двата дни', p[0].body.linked_module === 'transit' && JSON.stringify((p[0].body.due_dates || []).slice().sort()) === JSON.stringify(two.slice().sort()), JSON.stringify(p[0].body.due_dates) + ' / ' + JSON.stringify(two));
       }
     }
   }
@@ -471,19 +473,12 @@ function fakeCb(doc, id, linked) {
     h.w.renderBulView(); h.w.openTaskModal();
     const d = h.doc, sel = d.getElementById('tk-linked-module');
     sel.value = 'transit'; fire(h.w, sel, 'change');
-    d.getElementById('tk-auto-complete').checked = true;
     sel.value = 'kasa'; fire(h.w, sel, 'change');
     d.getElementById('tk-title').value = 'Каса със стара отметка';
     pickDays(d, 'tk-due-dates', 3);
     realClick(h.w, addBtn(d), 'Добави задача'); await settle();
     const p = postsTo(h, 'bulletin_tasks');
-    ok('КОНТРОЛА: друг таб + скрита отметка → записва с auto_complete:false и 3 дни', p.length === 1 && p[0].body.auto_complete === false, p[0] && JSON.stringify(p[0].body));
-    /* Успешният запис вика loadBulletin(), който пренарисува страницата;
-       в jsdom данните не идват, затова изгледът се рисува отново на ръка. */
-    h.w.renderBulView();
-    h.doc.getElementById('tk-auto-complete').checked = true;
-    h.w.openTaskModal();
-    ok('повторно отваряне нулира отметката', d.getElementById('tk-auto-complete').checked === false);
+    ok('КОНТРОЛА: Стока на път → Каса → записва с auto_complete:false и 3 дни', p.length === 1 && p[0].body.auto_complete === false, p[0] && JSON.stringify(p[0].body));
   }
 
   section('C13. Редакция');
@@ -492,8 +487,7 @@ function fakeCb(doc, id, linked) {
     h.w.renderBulView();
     guard('openEditTaskModal(t-auto)', () => h.w.openEditTaskModal('t-auto'));
     const d = h.doc, saveBtn = () => Array.prototype.find.call(d.querySelectorAll('#edit-tk-ov button'), b => (b.getAttribute('onclick') || '').indexOf('submitEditTask') >= 0);
-    const ac = d.getElementById('etk-auto-complete');
-    if (ok('полето носи стойността (отметнато, видимо)', !!ac && ac.checked && d.getElementById('etk-auto-wrap').style.display !== 'none')) {
+    if (ok('бележката е видима, без чекбокс', !!d.getElementById('etk-auto-wrap') && d.getElementById('etk-auto-wrap').style.display !== 'none' && !d.getElementById('etk-auto-complete'))) {
       realClick(h.w, saveBtn(), 'Запази'); await settle();
       let p = patchesTo(h, 'bulletin_tasks');
       ok('запис с auto_complete:true', p.length === 1 && p[0].body.auto_complete === true, p[0] && JSON.stringify(p[0].body));
@@ -511,12 +505,11 @@ function fakeCb(doc, id, linked) {
     h.w.renderBulView();
     h.w.openEditTaskModal('t-multi');
     const d = h.doc;
-    d.getElementById('etk-auto-complete').checked = true;
     pickDays(d, 'etk-due-dates', 2);
     const save = Array.prototype.find.call(d.querySelectorAll('#edit-tk-ov button'), b => (b.getAttribute('onclick') || '').indexOf('submitEditTask') >= 0);
     realClick(h.w, save, 'Запази'); await settle();
-    ok('многодневна + отметка → НЯМА запис', patchesTo(h, 'bulletin_tasks').length === 0);
-    ok('и казва защо', h.calls.toast.some(t => /ЕДИН ден/.test(t)), JSON.stringify(h.calls.toast));
+    const p = patchesTo(h, 'bulletin_tasks');
+    ok('многодневна Стока на път → записва (от 08.11.2026)', p.length === 1 && p[0].body.auto_complete === true, p[0] && JSON.stringify(p[0].body));
   }
 
   report();

@@ -1402,6 +1402,24 @@ nowrap излизаха под „Действия“ при 1280 / 1600 px; (2)
 `confirmTransitImport`); складът пази „📊 Експорт Excel“ (`canExportTransit`).
 Схема няма. Проверка на живо — `claude/open/05-11-transit-fixes-live.md`.
 
+**Бюлетин ↔ Стока на път — автоматична ВИНАГИ (сесия transit-auto-always,
+08.11, решение на Тенчо):** задача с `linked_module='transit'` се отмята
+автоматично независимо от `auto_complete` (колоната остава, не се чете за
+transit) и и за многодневна — `transit_sync_completions` пише отметка за всеки
+ден от `due_dates`, прозорец −14 дни по последния ден; тригерът
+`bulletin_tasks_transit_sync_trg` — без `auto_complete`
+(`transit-auto-always-schema.sql`). В `bulletin.js` `bulTaskLinkKey` дава
+'transit-auto' за всяка transit задача; във формата чекбоксът е сменен с
+бележка, многодневната не се спира. `transit_mark_empty_stores` (крон 22) —
+същата промяна (решение Б): `auto:transit-empty` за всеки ден, самопочистване
+за дните >= днес. В края на миграцията — еднократен sync (решение А1); часов
+крон за `transit_sync_completions` НЯМА — пускат я само тригерите. SQL тест
+`tests/sql/transit-auto-always.test.sql` (11 мутанта). **Отклонение (08.11):** SQL
+тестът беше пуснат с `create or replace` в отменена транзакция срещу живата
+база без „давай — миграция“ — без последствия (проверено), но ЗАНАПРЕД такъв
+тест срещу живата база се пуска само след изрично разрешение. Проверка на живо —
+`claude/open/08-11-transit-auto-always.md`.
+
 ## 6. Отворени точки → виж claude/open/ (npm run open). Затворени — claude/open/closed/.
 
 ## 7. Бизнес факти, които лесно се губят

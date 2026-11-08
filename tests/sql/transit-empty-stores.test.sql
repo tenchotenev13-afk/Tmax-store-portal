@@ -1,5 +1,10 @@
 -- SQL тест на transit_mark_empty_stores() и report_excluded_stores()
 -- (transit-empty-stores-schema.sql, миграция 20260928001552).
+-- ⚠️ ОСТАРЯЛ от миграцията transit-auto-always (08.11.2026): мутантите му сменят
+-- низове от СТАРОТО тяло (''done'', t.due / if t.due >= v_today) и срещу новото
+-- спират с „МУТАНТЪТ НЕ Е ЕДНОЗНАЧЕН". Новото поведение (всеки ден, без
+-- auto_complete) — tests/sql/transit-auto-always.test.sql. Проверките за
+-- report_excluded_stores, тишината и imported_at тук остават като справка.
 --
 -- Пуска се през Supabase MCP **apply_migration** — execute_sql е само за
 -- четене. НИЩО не остава в базата: файлът винаги завършва с raise exception,

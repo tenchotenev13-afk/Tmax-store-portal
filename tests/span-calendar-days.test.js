@@ -71,7 +71,11 @@ function spanTask(over) {
     id: 't-span', bulletin_id: 'b-1', department: 'warehouse', title: 'Надстройка в буса',
     description: null, due_date: DUE, due_dates: [DUE], spans_from: W0, starts_on: WED,
     target_stores: null, task_type: 'info', report_groups: ['controlling'],
-    linked_module: 'transit', auto_complete: false, attachments: null, sort_order: 1,
+    /* Ръчна задача със свързан таб. До 08.11.2026 беше 'transit' без
+       auto_complete — оттогава всяка задача към Стока на път е автоматична
+       (transit-auto-always), затова ръчната е към Контакти. Раздел 5 си е
+       автоматичната Стока на път (изрично linked_module 'transit'). */
+    linked_module: 'contacts', auto_complete: false, attachments: null, sort_order: 1,
     created_by: 'Админ', created_at: W0,
     bulletins: { id: 'b-1', status: 'published', week_number: 0, year: 2026 }
   }, over || {});
@@ -179,7 +183,7 @@ function cbOf(h, dayIdx, taskId) {
     /* Изискване 2: бележката със срока и бутонът към свързания таб. */
     const wed = txtOf(cellOf(h, 2));
     ok('редът носи „Срок ДД.ММ"', /Срок \d\d\.\d\d/.test(wed), wed);
-    ok('и бутонът към „Стока на път"', wed.indexOf('Стока на път') >= 0, wed);
+    ok('и бутонът към „Контакти"', wed.indexOf('Контакти') >= 0, wed);
     /* Без дереференциране на null: липсва ли чекбоксът (точно това става при
        стария код), тестът трябва да ДОКЛАДВА, а не да хвърли преди report() —
        иначе остава стек вместо диагноза (CLAUDE.md, Тестване). */
@@ -248,7 +252,7 @@ function cbOf(h, dayIdx, taskId) {
 
   section('5. Автоматичната „Стока на път": бутон + заключен чекбокс с надпис');
   {
-    const db = freshDb({ tasks: [spanTask({ id: 't-auto', title: 'Стока на път', auto_complete: true }), PLAIN] });
+    const db = freshDb({ tasks: [spanTask({ id: 't-auto', title: 'Стока на път', linked_module: 'transit', auto_complete: true }), PLAIN] });
     const h = await view('b-1', db);
     if (!h) return report();
     const wed = cellOf(h, 2);
