@@ -516,7 +516,8 @@ function loadMinusi(){
     else if(mnStore !== MN_ALL && (!mnStore || mnStoreList().indexOf(mnStore) < 0)) mnStore = mnStoresOn.filter(function(s){ return mnStoreList().indexOf(s) >= 0; })[0] || mnStoreList()[0] || '';
     if(mnIsStoreUser() && !mnStoreOn(mnStore)){ mnMovs = []; mnRender(); return; }
     /* „Всички обекти" (само контролингът) — без филтър по обект. */
-    var q = 'select=' + MN_MOV_COLS + (mnIsAll() ? '' : '&store_name=eq.' + encodeURIComponent(mnStore)) + '&order=posting_date.asc,mat_doc.asc,doc_item.asc,id.asc';
+    /* co_comment — само офисът го чете (Минуси, т.3); обектът — без него. */
+    var q = 'select=' + MN_MOV_COLS + (mnIsCO() ? ',co_comment' : '') + (mnIsAll() ? '' : '&store_name=eq.' + encodeURIComponent(mnStore)) + '&order=posting_date.asc,mat_doc.asc,doc_item.asc,id.asc';
     var reads = [sbGetAll('minus_movements', q)];
     if(mnIsCO()) reads.push(sbGetOk('minus_uploads', 'select=*&order=uploaded_at.desc&limit=1'));
     return Promise.all(reads).then(function(r2){
@@ -525,8 +526,9 @@ function loadMinusi(){
       mnLoadErr = '';
       mnMovs = r2[0];
       mnLastUpload = r2[1] && r2[1].ok ? (r2[1].rows[0] || null) : null;
+      if(mnIsCO()) mnPriceState = 'loading';
       mnRender();
-      return Promise.all([mnLoadCo(seq), mnLoadUr(seq)]);
+      return Promise.all([mnLoadCo(seq), mnLoadUr(seq), mnLoadPrices(seq)]);
     });
   });
 }
@@ -778,6 +780,13 @@ function mnCaptureDrafts(){
   root.querySelectorAll('tr[data-mn-id]').forEach(function(tr){
     var id = tr.getAttribute('data-mn-id');
     var g = function(p){ var e = document.getElementById(p + id); return e ? e.value : null; };
+    /* Коментарът на офиса — пази се при прерисуване (цените идват след таблицата). */
+    var cc = g('mn-cocmt-');
+    if(cc != null){
+      var row = null;
+      mnMovs.forEach(function(m){ if(String(m.id) === String(id)) row = m; });
+      if(row && cc !== (row.co_comment || '')) mnCoCmtDraft[id] = cc; else delete mnCoCmtDraft[id];
+    }
     if(g('mn-code-') == null) return;
     mnDraft[id] = { real_code: g('mn-code-'), reason_id: g('mn-reason-'), employee_name: g('mn-emp-'), note: g('mn-note-'), action: g('mn-action-') };
   });
@@ -843,6 +852,7 @@ function mnBodyHtml(calc){
   var rows = mnViewRows(calc);
   var h = mnView === 'bymat' ? mnByMatHtml(rows) : mnDailyHtml(rows);
   if(mnView === 'daily' && mnUrErr) h = '<div id="mn-ur-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Стоката на път / разликите не се заредиха</div>' + h;
+  if(mnView === 'daily' && mnIsCO() && mnPriceState === 'err') h = '<div id="mn-price-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Цените не се заредиха</div>' + h;
   if(mnView === 'daily' && mnCoErr) h = '<div id="mn-co-err" style="color:#94a3b8;font-size:12px;margin:0 0 6px 4px;">Клиентските заявки не се заредиха</div>' + h;
   /* Свръхсторното е грешка на магазина — вижда го и обектът (Миглена, 21.10.2026). */
   if(calc.over.length || calc.early.length) h += mnOverHtml(calc.over, calc.early);
@@ -878,10 +888,12 @@ function mnReportHtml(r){
 }
 function mnDailyHtml(rows){
   if(!rows.length) return '<div class="card" id="mn-empty" style="color:#64748b;">' + (mnSearch.trim() ? 'Няма редове за „' + esc(mnSearch.trim()) + '“.' : mnOnlyOpen ? 'Няма незакрити минуси.' : 'Няма минуси.') + '</div>';
-  var fill = mnCanFill(), all = mnIsAll();
+  var fill = mnCanFill(), all = mnIsAll(), co = mnIsCO();
   var yel = 'background:#fef9c3;';
   var h = '<div class="card" style="overflow-x:auto;"><table id="mn-daily"><thead><tr>' + (all ? '<th>Обект</th>' : '') + '<th>Материал</th><th>Описание</th><th>Дата</th><th>Количество</th><th style="width:90px;">Състояние</th>';
-  h += '<th style="' + yel + '">Заметнат код</th><th style="' + yel + '">Причина</th><th style="' + yel + '">Име на служител</th><th style="' + yel + '">Бележка</th><th></th></tr></thead><tbody>';
+  h += '<th style="' + yel + '">Заметнат код</th><th style="' + yel + '">Причина</th><th style="' + yel + '">Име на служител</th><th style="' + yel + '">Бележка</th><th></th>' +
+    (co ? mnValHeadHtml() : '') + '</tr></thead><tbody>';
+  var tot = { minus: 0, real: 0, diff: 0, nMinus: 0, nReal: 0, nDiff: 0 };
   rows.forEach(function(r){
     var id = String(r.id), done = r.reason_id != null;
     var d = mnDraft[id] || {};
@@ -921,9 +933,144 @@ function mnDailyHtml(rows){
         (r.action ? '<div class="mn-action-txt" style="margin-top:2px;">' + mnActionLabel(r) + ': ' + esc(r.action) + '</div>' : '') + '</td>';
       h += '<td>' + (done ? '<span class="mn-done" title="' + escAttr((r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span>' : '') + '</td>';
     }
+    if(co) h += mnValCellsHtml(r, tot);
     h += '</tr>';
   });
-  return h + '</tbody></table></div>';
+  return h + '</tbody>' + (co ? '<tfoot>' + mnValTotalHtml(tot, (all ? 1 : 0) + 10) + '</tfoot>' : '') + '</table></div>';
+}
+
+/* ─── Суми по продажни цени — САМО за офиса (Минуси, т.3, 09.11.2026) ─────
+   Искане на Миглена 06.11 (оранжевите колони в „за корекции“); решение от
+   21.10: обектът НЕ вижда суми — при него нито колони, нито заявка към цените.
+   Цените — product_catalog.sale_price / sale_price_unit (VKP2, admin.js).
+   · „Стойност минус“ = незакрития остатък (_rest) × цената на материала;
+   · „Стойност заметнат“ = същият остатък × цената на real_code, само ако
+     заметнатият е ЕДИН код (mnRevRealCodes); няколко или празно → „—“;
+   · „Разлика“ = минус − заметнат, само когато има и двете;
+   · без цена → „—“ и „няма цена“; мярката на цената ≠ мярката на минуса
+     (mnNormUom) → „⚠ мярка“ с двете единици в title;
+   · ред „Общо“ за показаните редове; „Коментар (офис)“ — co_comment, отделен
+     PATCH (mnSaveCoComment), не през mnSave.
+   Печат, „По артикул“, известията, отчетите, „Днес“ — без суми. */
+var mnPrices = {};          /* sap_code → { price, unit } (само при офиса) */
+var mnPriceState = 'idle';  /* 'idle' | 'loading' | 'ok' | 'err' */
+var mnCoCmtDraft = {};      /* id → незаписан коментар на офиса */
+var MN_PRICE_BATCH = 150;
+/* Заметнатият код, ако е ТОЧНО един (правилото на темплейта за ревизия). */
+function mnRealOne(r){
+  var c = mnRevRealCodes(mnCoKey(r.real_code));
+  return c.length === 1 ? c[0] : null;
+}
+function mnPriceCodes(rows){
+  var seen = {}, out = [];
+  var add = function(c){ c = mnCoKey(c); if(c && !seen[c]){ seen[c] = 1; out.push(c); } };
+  (rows || []).forEach(function(r){ if(String(r.mvt_type) !== '955') return; add(r.material); var one = mnRealOne(r); if(one) add(one); });
+  return out;
+}
+/* Цените за кодовете в изгледа, на порции — СЛЕД mnRender. Само офисът. */
+function mnLoadPrices(seq){
+  if(!mnIsCO()){ mnPrices = {}; mnPriceState = 'idle'; return Promise.resolve(); }
+  var codes = mnPriceCodes(mnMovs);
+  if(!codes.length){ mnPrices = {}; mnPriceState = 'ok'; return Promise.resolve(); }
+  mnPriceState = 'loading';
+  var parts = [];
+  for(var i = 0; i < codes.length; i += MN_PRICE_BATCH) parts.push(codes.slice(i, i + MN_PRICE_BATCH));
+  return Promise.all(parts.map(function(p){
+    return sbGetOk('product_catalog', 'select=sap_code,sale_price,sale_price_unit&sap_code=in.(' +
+      p.map(function(c){ return '"' + encodeURIComponent(c) + '"'; }).join(',') + ')');
+  })).then(function(rs){
+    if(seq !== mnLoadSeq) return;
+    if(rs.some(function(r){ return !r || !r.ok; })){ mnPrices = {}; mnPriceState = 'err'; return; }
+    var m = {};
+    rs.forEach(function(r){ r.rows.forEach(function(x){
+      if(x && x.sale_price != null && isFinite(Number(x.sale_price))) m[mnCoKey(x.sap_code)] = { price: Number(x.sale_price), unit: x.sale_price_unit || '' };
+    }); });
+    mnPrices = m; mnPriceState = 'ok';
+  }).catch(function(){
+    if(seq !== mnLoadSeq) return;
+    mnPrices = {}; mnPriceState = 'err';
+  }).then(function(){
+    if(seq === mnLoadSeq && document.getElementById('mn-body')) mnRenderBody();
+  });
+}
+/* Чисто: ред → { minus, real, diff, minusWarn, realWarn, noMinus, noReal, realMulti } (суми в евро, неокръглени). */
+function mnValRow(r){
+  var rest = Number(r._rest) || 0, out = { minus: null, real: null, diff: null };
+  var pm = mnPrices[mnCoKey(r.material)];
+  out.noMinus = !pm;
+  if(pm){ out.minus = rest * pm.price; out.minusWarn = mnValUomWarn(pm.unit, r.uom); }
+  var raw = mnCoKey(r.real_code), one = mnRealOne(r);
+  out.realMulti = !!raw && !one;
+  if(one){
+    var pr = mnPrices[one];
+    out.noReal = !pr;
+    if(pr){ out.real = rest * pr.price; out.realWarn = mnValUomWarn(pr.unit, r.uom); }
+  }
+  if(out.minus != null && out.real != null) out.diff = out.minus - out.real;
+  return out;
+}
+/* null — мерките съвпадат (или някоя липсва); иначе текстът за title. */
+function mnValUomWarn(priceUnit, uom){
+  if(!priceUnit || !uom || mnNormUom(priceUnit) === mnNormUom(uom)) return null;
+  return 'цена за ' + priceUnit + ' · минус в ' + uom;
+}
+function mnFmtEur(n){
+  if(n == null || !isFinite(n)) return '';
+  var v = Math.round(n * 100) / 100;
+  return (v < 0 ? '−' : '') + Math.abs(v).toFixed(2).replace('.', ',') + ' €';
+}
+/* Ширина (мерено в браузър при 1280px, ГД, 195 реда, 09.11.2026): с nowrap на
+   заглавията (глобалното th от index.html) и поле 130px таблицата беше 1392px
+   при карта 1231px. Заглавията се пренасят, полето е 76px с „💾“ отдолу → 1227px. */
+function mnValHeadHtml(){
+  var o = 'background:#ffedd5;white-space:normal;';
+  return '<th class="mn-val-h" style="' + o + '">Стойност минус</th><th class="mn-val-h" style="' + o + '">Стойност заметнат</th>' +
+    '<th class="mn-val-h" style="' + o + '">Разлика</th><th class="mn-val-h" style="' + o + '">Коментар (офис)</th>';
+}
+var MN_NO_PRICE = '<div class="mn-noprice" style="color:#94a3b8;font-size:11px;">няма цена</div>';
+function mnValCell(cls, n, warn, none){
+  if(mnPriceState === 'loading' || mnPriceState === 'idle') return '<td class="' + cls + '" style="color:#94a3b8;text-align:right;">…</td>';
+  /* Цените не са заредени — не е „няма цена“, а не знаем (сивият ред горе го казва). */
+  if(mnPriceState === 'err') return '<td class="' + cls + '" style="text-align:right;color:#94a3b8;">—</td>';
+  if(n == null) return '<td class="' + cls + '" style="text-align:right;color:#94a3b8;">—' + (none || '') + '</td>';
+  return '<td class="' + cls + '" style="text-align:right;white-space:nowrap;">' + esc(mnFmtEur(n)) +
+    (warn ? '<div class="mn-uom-warn" title="' + escAttrVal(warn) + '" style="color:#b45309;font-size:11px;">⚠ мярка</div>' : '') + '</td>';
+}
+function mnValCellsHtml(r, tot){
+  var v = mnValRow(r), id = String(r.id);
+  if(mnPriceState === 'ok'){
+    if(v.minus != null){ tot.minus += v.minus; tot.nMinus++; }
+    if(v.real != null){ tot.real += v.real; tot.nReal++; }
+    if(v.diff != null){ tot.diff += v.diff; tot.nDiff++; }
+  }
+  var cmt = Object.prototype.hasOwnProperty.call(mnCoCmtDraft, id) ? mnCoCmtDraft[id] : (r.co_comment || '');
+  return mnValCell('mn-val-minus', v.minus, v.minusWarn, v.noMinus ? MN_NO_PRICE : '') +
+    mnValCell('mn-val-real', v.real, v.realWarn, v.realMulti ? '<div class="mn-val-multi" style="color:#94a3b8;font-size:11px;">няколко кода</div>' : (v.noReal ? MN_NO_PRICE : '')) +
+    mnValCell('mn-val-diff', v.diff, null, '') +
+    '<td class="mn-cocmt"><input id="mn-cocmt-' + escAttr(id) + '" value="' + escAttrVal(cmt) + '" style="width:76px;">' +
+    '<button class="mn-cocmt-save" title="Запази коментара" onclick="mnSaveCoComment(\'' + escAttr(id) + '\')" style="display:block;margin-top:2px;border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:1px 6px;cursor:pointer;">💾</button></td>';
+}
+function mnValTotalHtml(tot, span){
+  var ok = mnPriceState === 'ok';
+  var cell = function(cls, n, cnt){ return '<td class="' + cls + '" style="text-align:right;white-space:nowrap;font-weight:700;">' + (ok && cnt ? esc(mnFmtEur(n)) : '—') + '</td>'; };
+  return '<tr id="mn-val-total" style="background:#fff7ed;"><td colspan="' + span + '" style="text-align:right;font-weight:700;">Общо (показаните редове)</td>' +
+    cell('mn-tot-minus', tot.minus, tot.nMinus) + cell('mn-tot-real', tot.real, tot.nReal) + cell('mn-tot-diff', tot.diff, tot.nDiff) + '<td></td></tr>';
+}
+/* „💾“ на офиса — PATCH САМО на co_comment. Обектът не стига дотук (няма колона). */
+function mnSaveCoComment(id){
+  if(!mnIsCO()){ toast('Коментарът е само за офиса', '#dc2626'); return Promise.resolve(false); }
+  var row = null;
+  mnMovs.forEach(function(m){ if(String(m.id) === String(id)) row = m; });
+  var el = document.getElementById('mn-cocmt-' + id);
+  if(!row || !el) return Promise.resolve(false);
+  var v = String(el.value || '').trim() || null;
+  return sbPatch('minus_movements', 'id=eq.' + encodeURIComponent(id), { co_comment: v }).then(function(res){
+    if(!res.ok){ toast('Коментарът не е записан: ' + sbErrMsg(res), '#dc2626'); return false; }
+    row.co_comment = v;
+    delete mnCoCmtDraft[id];
+    toast('Коментарът е записан');
+    return true;
+  });
 }
 /* „↻ предишен дд.мм" (цвят по давност) + „×N за 30 дни" при N ≥ 2. */
 function mnAgeClass(days){ return days <= 7 ? 'red' : days <= 30 ? 'orange' : 'yellow'; }
@@ -1140,12 +1287,17 @@ function mnExportAoa(){
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.desc || '', r.s955, r.s956, r.rest, r.uom || '']));
     });
   } else {
-    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие / становище', 'КЗ', 'Незаприходена?'])];
+    /* Офисът — и четирите колони на сумите накрая (Минуси, т.3); обектът — непроменено. */
+    var co = mnIsCO(), eur = function(n){ return n == null || mnPriceState !== 'ok' ? '' : Math.round(n * 100) / 100; };
+    aoa = [(all ? ['Обект'] : []).concat(['Материал', 'Описание', 'Дата', 'Количество', 'Мерна ед.', 'Състояние', 'Заметнат код', 'Причина', 'Име на служител', 'Бележка', 'Предишен минус', 'Брой за 30 дни', 'Действие / становище', 'КЗ', 'Незаприходена?'])
+      .concat(co ? ['Стойност минус (€)', 'Стойност заметнат (€)', 'Разлика (€)', 'Коментар (офис)'] : [])];
     rows.forEach(function(r){
+      var v = co ? mnValRow(r) : null;
       aoa.push((all ? [r.store_name] : []).concat([r.material, r.material_desc || '', fmtDate(r.posting_date), mnRound(Number(r.qty) || 0), r.uom || '',
         mnStateText(r), r.real_code || '', mnReasonLabel(r.reason_id), r.employee_name || '', r.note || '',
         r._prevDate ? fmtDate(r._prevDate) : '', r._cnt30 || 0, r.action || '',
-        mnCoMatches(r).map(function(o){ return o.in_num || ''; }).join(', '), mnUrExcel(r)]));
+        mnCoMatches(r).map(function(o){ return o.in_num || ''; }).join(', '), mnUrExcel(r)])
+        .concat(co ? [eur(v.minus), eur(v.real), eur(v.diff), r.co_comment || ''] : []));
     });
   }
   return aoa;

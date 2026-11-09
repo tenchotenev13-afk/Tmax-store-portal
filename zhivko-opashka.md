@@ -14,6 +14,9 @@
 
 ## Чака изпращане
 
+(в базата от миграцията minusi_co_comment, minusi-co-comment-schema.sql, версия 20261109102704, приложена 09.11.2026)
+- 09.11 · minus_movements.co_comment — text, NULL, без default (коментар на офиса)
+
 (в базата от миграцията sap_prices_vkp2, sap-prices-vkp2-schema.sql, версия 20261108150623, приложена 08.11.2026; функцията catalog_set_sale_prices — не за огледалото)
 - 08.11 · product_catalog.sale_price — numeric, NULL, без default
 - 08.11 · product_catalog.sale_price_unit — text, NULL, без default
