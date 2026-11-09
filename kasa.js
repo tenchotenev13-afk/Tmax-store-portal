@@ -16,6 +16,8 @@ var DENOM_KEY = {};
 [500,200,100,50,20,10,5,2,1].forEach(function(v){ DENOM_KEY[v]='bills_'+v; });
 DENOM_KEY[0.5]='coins_50'; DENOM_KEY[0.2]='coins_20'; DENOM_KEY[0.1]='coins_10';
 DENOM_KEY[0.05]='coins_5'; DENOM_KEY[0.02]='coins_2'; DENOM_KEY[0.01]='coins_1';
+/* Колоните с купюри — за select= (Excel износът в history.js) */
+var GL_DENOM_COLS = ALL_DENOM.map(function(v){ return DENOM_KEY[v]; }).join(',');
 
 var INKASO_DENOM = [500,200,100,50,20,10,5];
 var kasaSelectedDate = null;
@@ -282,6 +284,10 @@ function renderKasa(){
       tCount+=parseFloat(r.counted_cash)||0;
       tRaz  +=parseFloat(r.razlika)||0;
     });
+    /* Сбор с плаваща запетая: 10.25 + (−10.25) дава −1e-15 и излизаше
+       „–0.00“ в ОБЩО. Закръгля се тук, не във fmtMoney (тя е и в history.js). */
+    tTurn=Math.round(tTurn*100)/100; tCash=Math.round(tCash*100)/100; tCard=Math.round(tCard*100)/100;
+    tCount=Math.round(tCount*100)/100; tRaz=Math.round(tRaz*100)/100;
     /* Върнат ПОС отчет → същата лента като в Главна каса и Равнение.
        Връщането (kasa-docs.js) пише една и съща причина на всички отчети за
        деня, затова първият върнат е достатъчен. */
@@ -415,7 +421,7 @@ function openKasaForm(report){
     /* Данни */
     '<div class="card" style="margin-bottom:14px;"><div class="card-title">Данни за смяната</div>'+
     '<div class="form-grid">'+
-      '<div><label class="fl">Дата</label><input type="date" class="fi" id="kf-date" value="'+(r.date||kasaActiveDate())+'" oninput="kasaSetDate(this.value)"></div>'+
+      '<div><label class="fl">Дата</label><input type="date" class="fi" id="kf-date" value="'+(r.date||kasaActiveDate())+'" max="'+today()+'" oninput="kasaSetDate(this.value)"></div>'+
       '<div><label class="fl">ПОС №</label><select class="fi" id="kf-pos">'+
         [1,2,3].map(function(n){return '<option value="'+n+'"'+(r.pos_number==n?' selected':'')+'>ПОС '+n+'</option>';}).join('')+
       '</select></div>'+
@@ -566,6 +572,10 @@ function submitKasaForm(){
   var cashier=(document.getElementById('kf-cashier')||{}).value||'';
   cashier=cashier.trim();
   if(!cashier){toast('Въведи името на касиера','#dc2626');return;}
+  /* Бъдеща дата не се приема (max на полето спира само избора от календара,
+     не и ръчно написаната дата). Сравнение на ISO низове; today() е местна. */
+  var kfDate=(document.getElementById('kf-date')||{}).value||'';
+  if(kfDate&&kfDate>today()){toast('Датата '+fmtDate(kfDate)+' е в бъдещето — ПОС отчет може да е най-късно за днес ('+fmtDate(today())+').','#dc2626');return;}
 
   /* Пресметни counted */
   var counted=0;
@@ -1002,7 +1012,11 @@ function glavnaLiveCalc(){
    и glavnaLiveCalc() — закръгляне по номинал, после сбор. */
 function glavnaAllCounted(g){
   var d=kasaActiveDate();
-  var reps=kasaReports.filter(function(r){return r.date===d;});
+  return glavnaCountedFrom(g,kasaReports.filter(function(r){return r.date===d;}));
+}
+/* Същото за произволни ПОС отчети (reps = отчетите за обекта и датата на g).
+   Ползва го и Excel износът в history.js — една формула, не две. */
+function glavnaCountedFrom(g,reps){
   var total=0;
   ALL_DENOM.forEach(function(v){
     var q=parseInt(g[DENOM_KEY[v]])||0;
@@ -1010,6 +1024,10 @@ function glavnaAllCounted(g){
     total+=Math.round(q*v*100)/100;
   });
   return Math.round(total*100)/100;
+}
+/* РАЗЛИКА на Главна каса като на екрана: общо налични + служебно − SAP. */
+function glavnaRazlikaFrom(g,reps){
+  return Math.round((glavnaCountedFrom(g,reps)+(parseFloat(g.slujebno)||0)-(parseFloat(g.sap_balance)||0))*100)/100;
 }
 
 /* ─── SAVE ГЛАВНА КАСА ───────────────────────────────────────── */
@@ -1450,7 +1468,7 @@ function renderHistTable(rows) {
     var statusLabel = r.status==='confirmed'
       ? '<span style="background:#dcfce7;color:#14532d;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">✅ Потвърден</span>'
       : r.status==='returned'
-      ? '<span class="kasa-hist-returned" title="'+escAttr('Причина:'+(r.return_reason||'—')+' · върнато от '+(r.returned_by||'—')+(r.returned_at?' на '+fmtDate(String(r.returned_at).slice(0,10)):''))+'" style="background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;cursor:help;">↩ Върнат</span>'
+      ? '<span class="kasa-hist-returned" title="'+escAttr('Причина: '+(r.return_reason||'—')+' · върнато от '+(r.returned_by||'—')+(r.returned_at?' на '+fmtDate(String(r.returned_at).slice(0,10)):''))+'" style="background:#fee2e2;color:#991b1b;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;cursor:help;">↩ Върнат</span>'
       : '<span style="background:#fef3c7;color:#92400e;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:600;">✏️ Чернова</span>';
     h += '<tr>'+
       '<td>'+fmtDate(r.date)+'</td>'+
@@ -1774,6 +1792,24 @@ function zoborotLiveCalc(){
 /* ─── SAVE / CONFIRM / UNLOCK ───────────────────────────────── */
 function saveZoborot(){
   if(zoborotData&&zoborotData.status==='confirmed'){toast('Потвърденото равнение не може да се редактира — първо го разключи','#dc2626');return;}
+  var p=zoborotFormValues();
+  var LOCK='zoborot-save', BTN='k-btn-zoborot-save';
+  if(!kasaLock(LOCK,BTN))return;
+  /* kasa_zoborot вече има уникален индекс (store_name, date) — както
+     kasa_glavna. Габрово 20.08.2026 имаше два реда в една минута точно преди
+     той да влезе; оттук нататък вторият POST се връща като 409 и става PATCH. */
+  var zq='store_name=eq.'+encodeURIComponent(p.store_name)+'&date=eq.'+p.date;
+  var req=zoborotData?sbPatch('kasa_zoborot','id=eq.'+zoborotData.id,p):kasaUpsert('kasa_zoborot',zq,p);
+  req.then(function(res){
+    kasaUnlock(LOCK,BTN);
+    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
+    toast('💾 Равнението е запазено!');
+    loadZoborot();
+  });
+}
+/* Стойностите от полетата на Равнение — същото тяло, което saveZoborot()
+   записва. Ползва го и печатът (printZoborot), без да записва. */
+function zoborotFormValues(){
   var g=function(id){return parseFloat((document.getElementById('zf-'+id)||{}).value)||0;};
   var cashBgn=g('cash_bgn'),cashEur=g('cash_eur'),card=g('card_eur'),bank=g('bank_eur'),vouch=g('voucheri');
   var fu1g=g('fu1_gross'),fu1d=g('fu1_discount');
@@ -1796,19 +1832,7 @@ function saveZoborot(){
     pos_no_bank:posNoBank,fu_total_net:fuTotal,
     razlika:raz,voucheri:vouch,status:'draft'
   };
-  var LOCK='zoborot-save', BTN='k-btn-zoborot-save';
-  if(!kasaLock(LOCK,BTN))return;
-  /* kasa_zoborot вече има уникален индекс (store_name, date) — както
-     kasa_glavna. Габрово 20.08.2026 имаше два реда в една минута точно преди
-     той да влезе; оттук нататък вторият POST се връща като 409 и става PATCH. */
-  var zq='store_name=eq.'+encodeURIComponent(p.store_name)+'&date=eq.'+p.date;
-  var req=zoborotData?sbPatch('kasa_zoborot','id=eq.'+zoborotData.id,p):kasaUpsert('kasa_zoborot',zq,p);
-  req.then(function(res){
-    kasaUnlock(LOCK,BTN);
-    if(!res.ok){toast('Грешка при запис','#dc2626');return;}
-    toast('💾 Равнението е запазено!');
-    loadZoborot();
-  });
+  return p;
 }
 function confirmZoborot(){
   if(!confirm('Потвърди равнението? След потвърждение не може да се редактира.'))return;
@@ -1843,10 +1867,12 @@ function unlockZoborot(){
 
 /* ─── PRINT ZOBOROT ─────────────────────────────────────────── */
 function printZoborot(){
-  /* Автоматично запази преди печат */
-  saveZoborot();
-  setTimeout(function(){
-  var z=zoborotData||{};
+  /* Печатът НЕ записва (до 09.11.2026 викаше saveZoborot() и печаташе след
+     400 ms — при потвърдено излизаше червена грешка). Отпечатва се това, което
+     е на екрана: за чернова/върнато — полетата, за потвърдено — записаното. */
+  var z0=zoborotData||{};
+  var z=(z0.status!=='confirmed'&&document.getElementById('zf-cash_bgn'))?
+    Object.assign(zoborotFormValues(),{status:z0.status||'draft'}):z0;
   var pnb=parseFloat(z.pos_no_bank)||0;
   var ftn=parseFloat(z.fu_total_net)||0;
   var raz=parseFloat(z.razlika)||0;
@@ -1909,7 +1935,6 @@ function printZoborot(){
   '</body></html>');
   win.document.close();
   setTimeout(function(){win.focus();},300);
-  }, 400);
 }
 
 

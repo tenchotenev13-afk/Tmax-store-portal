@@ -21,7 +21,7 @@ function uploadKasaDoc(file, reportType, docType, onDone) {
       },
       body: e.target.result
     }).then(function(r) {
-      if (!r.ok) { toast('Грешка при качване','#dc2626'); return; }
+      if (!r.ok) { toast('Грешка при качване: '+file.name,'#dc2626'); if (onDone) onDone(false); return; }
       sbPost('kasa_documents', {
         store_name: currentUser.store_name,
         date: docDate,
@@ -31,11 +31,18 @@ function uploadKasaDoc(file, reportType, docType, onDone) {
         file_url: path,
         file_size: file.size,
         uploaded_by: currentUser.display_name||currentUser.email
-      }).then(function() {
+      }).then(function(res) {
+        /* Записът в kasa_documents се проверява. Без него файлът стои в
+           Storage, но не се вижда в списъка — а обектът е видял зелено. */
+        if (!res || !res.ok) {
+          toast('❌ „'+file.name+'“ НЕ е записан в документите ('+sbErrMsg(res)+'). Качи го пак.','#dc2626');
+          if (onDone) onDone(false);
+          return;
+        }
         toast('✅ Документът е качен!');
-        if (onDone) onDone();
+        if (onDone) onDone(true);
       });
-    }).catch(function() { toast('Грешка при качване','#dc2626'); });
+    }).catch(function() { toast('Грешка при качване: '+file.name,'#dc2626'); if (onDone) onDone(false); });
   };
   reader.readAsArrayBuffer(file);
 }
@@ -104,7 +111,11 @@ function handleDocUpload(event, reportType) {
   if (!files.length) return;
   var t = prompt('Тип документ:\n1 — Z-Четене\n2 — Сторно бележки\n3 — Отстъпки\n4 — Друго\n\nВъведи число:');
   var typeMap = {'1':'z_report','2':'storno','3':'discount','4':'other'};
-  var docType = typeMap[t] || 'other';
+  /* „Отказ“ спира качването (досега записваше тихо „Друго“). Изборът на файл
+     се нулира, за да може същият файл да се избере пак. */
+  if (t === null) { event.target.value = ''; toast('Качването е отказано.','#d97706'); return; }
+  var docType = typeMap[String(t).trim()];
+  if (!docType) { event.target.value = ''; toast('Непознат тип „'+t+'“ — въведи 1, 2, 3 или 4. Нищо не е качено.','#dc2626'); return; }
   var done = 0;
   files.forEach(function(file) {
     uploadKasaDoc(file, reportType, docType, function() {

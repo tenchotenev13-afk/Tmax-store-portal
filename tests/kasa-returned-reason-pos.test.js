@@ -13,6 +13,11 @@
    М2. филтърът по 'draft' вместо 'returned'               → секции 2 и 3 падат.
    М3. title махнат от баджа в renderHistTable              → секция 4 пада.
 
+   kasa-fixes-2 (09.11.2026): интервал след „Причина:" в title (секция 5) и
+   „–0.00" в ОБЩО (секция 6). Мутанти:
+   М4. „Причина:" пак без интервал                          → секция 5 пада.
+   М5. закръглянето на tRaz/tCount махнато                  → секция 6 пада.
+
    Пускане:
      node tests/kasa-returned-reason-pos.test.js .
 */
@@ -126,6 +131,28 @@ function posCard(doc) {
       const b = doc.querySelector('#mod-kasa .kasa-hist-returned');
       ok('title е цял с кавичките', !!b && (b.getAttribute('title') || '').indexOf('Сума "0" <грешна>') >= 0,
         b && b.getAttribute('title'));
+      /* kasa-fixes-2: до 09.11.2026 излизаше „Причина:Сума…" без интервал */
+      ok('title започва с „Причина: " (с интервал)', !!b && (b.getAttribute('title') || '').indexOf('Причина: Сума') === 0,
+        b && b.getAttribute('title'));
+    }
+    h.close();
+  }
+
+  section('6. ОБЩО не показва „–0.00" при сбор с плаваща запетая (kasa-fixes-2)');
+  {
+    const day = dayOffset(-1);
+    /* 0.3 − 0.1 − 0.2 = −2.8e-17 в JS → без закръгляне „–0.00" */
+    const h = env([rep('r-1', 1, day, 'confirmed', { razlika: 0.3, counted_cash: 0.3 }),
+                   rep('r-2', 2, day, 'confirmed', { razlika: -0.1, counted_cash: -0.1 }),
+                   rep('r-3', 3, day, 'confirmed', { razlika: -0.2, counted_cash: -0.2 })]);
+    const { w, doc } = h;
+    if (guard('renderKasa() не хвърля', () => w.renderKasa())) {
+      const card = posCard(doc);
+      const tot = card && Array.prototype.find.call(card.querySelectorAll('tr'), tr => /ОБЩО/.test(tr.textContent));
+      if (ok('редът ОБЩО го има', !!tot)) {
+        ok('няма „–0.00" в ОБЩО', !/[–-]\s*0\.00/.test(tot.textContent), tot.textContent);
+        ok('разликата в ОБЩО е 0.00', /0\.00/.test(tot.textContent));
+      }
     }
     h.close();
   }

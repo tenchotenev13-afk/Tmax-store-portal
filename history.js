@@ -637,12 +637,17 @@ function exportKasaToExcel(){
       return Promise.all([
         sbGetAll('kasa_zoborot',  'order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
         sbGetAll('kasa_glavna',   'order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
-        sbGetAll('kasa_documents','order=date.desc,store_name.asc,created_at.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter)
+        sbGetAll('kasa_documents','order=date.desc,store_name.asc,created_at.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter),
+        /* Купюрите на ПОС отчетите — за „Разлика“ на Главна каса, смятана като
+           на екрана. Отделна заявка, не histData.kasa: то е празно, ако
+           търсенето е било за друг тип. */
+        sbGetAll('kasa_reports',  'select=id,store_name,date,'+GL_DENOM_COLS+'&order=date.desc,id.desc&date=gte.'+from+'&date=lte.'+to+sFilter)
       ]).then(function(res){
       var zobAll   = Array.isArray(res[0]) ? res[0] : [];
       var glAll    = Array.isArray(res[1]) ? res[1] : [];
       var docsAll  = Array.isArray(res[2]) ? res[2] : [];
-      var cut = [['каса', histData.kasa], ['равнение на оборота', zobAll], ['главна каса', glAll], ['документи', docsAll]]
+      var glReps   = Array.isArray(res[3]) ? res[3] : [];
+      var cut = [['каса', histData.kasa], ['равнение на оборота', zobAll], ['главна каса', glAll], ['документи', docsAll], ['ПОС за главна каса', glReps]]
         .filter(function(p){ return p[1].partial; });
       if(cut.length){
         toast('⚠️ Непълни данни — '+cut.map(function(p){ return p[0]+': прочетени '+p[1].length+' реда'; }).join(', ')+
@@ -782,7 +787,9 @@ function exportKasaToExcel(){
             parseFloat(g.counted_cash)||0,
             parseFloat(g.slujebno)||0,
             parseFloat(g.sap_balance)||0,
-            parseFloat(g.razlika)||0,
+            /* Смятана като на екрана, не записаната: записаната остарява, ако
+               ПОС отчет се поправи след записа на Главна каса. */
+            glavnaRazlikaFrom(g, glReps.filter(function(r){ return r.store_name===g.store_name && r.date===g.date; })),
             statusStr
           ]);
         });
