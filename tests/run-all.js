@@ -423,6 +423,7 @@ const TESTS = [
   'transfers-notify.test.js',
   'transfers-warehouses.test.js',
   'transfers-select-all.test.js',
+  'transfers-store-banner.test.js',
   'tf-co-auto-sent.test.js',
   'tf-co-stage2-origin-reload.test.js',
   'task-completions-row-cap.test.js',

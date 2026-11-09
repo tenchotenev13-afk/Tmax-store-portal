@@ -79,6 +79,10 @@ var TF_EVENT_LABELS = {
   problem: 'Проблем',
   resolved: 'Решен'
 };
+/* Иконите пред етикета на бутона — ЕДНО място: бутоните (tfActBtn) и банерът
+   на обекта (tfStoreWaitBannerHtml) ги четат оттук (08.11.2026). */
+var TF_EVENT_ICONS = { unloaded: '⏸', received: '✅', handed_to_courier: '🚚', problem: '⚠️', resolved: '✔' };
+function tfEventBtnText(kind) { return (TF_EVENT_ICONS[kind] || '') + ' ' + (TF_EVENT_LABELS[kind] || kind); }
 var TF_PROBLEM_KINDS = [['damaged', 'Повреден'], ['missing', 'Липсва'], ['incomplete', 'Непълен']];
 /* Обекти без отчетен статус, които участват в трансферите. Сервиз Троян е
    извън isReportableStore (няма бюлетин), но приема и праща товари. */
@@ -464,6 +468,7 @@ function renderTransfers() {
 
   var h = '<div class="pg-title">🔁 Трансфери</div>' +
     '<div class="pg-sub">Транспорти между обекти — бус със спирки или куриер. Всеки товар има краен получател.</div>' +
+    tfStoreWaitBannerHtml() +
     tfCountersHtml(q) +
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px;">' +
       '<input id="trf-search" placeholder="🔍 Номер / получател / товарителница…" value="' + tfAttr(q) + '"' +
@@ -1653,7 +1658,7 @@ function tfProblemItems(q) {
 }
 
 function tfActBtn(t, c, a, extraCls) {
-  var icon = { unloaded: '⏸', received: '✅', handed_to_courier: '🚚', problem: '⚠️', resolved: '✔' }[a.kind] || '';
+  var icon = TF_EVENT_ICONS[a.kind] || '';
   /* По единица: „✅ Получен (2 остават)" — колко още чакат отметка. */
   var rest = '';
   if ((a.kind === 'received' || a.kind === 'unloaded') && (parseInt(c.qty, 10) || 1) > 1) {
@@ -1662,6 +1667,64 @@ function tfActBtn(t, c, a, extraCls) {
   }
   return '<button class="btn-sm trf-act trf-act-' + a.kind + (extraCls || '') + '" data-t="' + tfAttr(t.id) + '" data-c="' + tfAttr(c.id) + '"' +
     ' onclick="openEventModal(\'' + tfAttr(t.id) + '\',\'' + tfAttr(c.id) + '\',\'' + a.kind + '\')">' + icon + ' ' + escVal(TF_EVENT_LABELS[a.kind]) + rest + '</button>';
+}
+
+/* ── Банерът на обекта „🚚 N товара пътуват към вас и чакат отговор"
+   (08.11.2026, по модела на Стока на път и Товарни листи) ─────────────────
+   Брои се товар, по който обектът ИМА бутон за крайната отметка днес
+   (tfCargoTarget + tfEventAllowed — същото като бутона): получател или
+   първа точка на прехвърляне. СТРОГО само тръгнало (решение на Тенчо
+   08.11): бус / камион — „🚚 Тръгна" (departed_at); куриер — „Предаден на
+   куриер" за този товар. Това е по-тясно от картата при вход
+   (tfDueForStores: куриер винаги, бус и по минала depart_date) и от таба
+   „📥 За потвърждение при мен" (без проверка за тръгване) — разликата е
+   нарочна, правилата не са изравнени. Брои ТОВАРИ, не бройки.
+   Кой го вижда: tfActorStores() — обектът, регионалният за своите, складът
+   за себе си (той е реален получател); admin / контролинг — не. */
+function tfStoreWaitItems() {
+  var stores = tfActorStores();
+  var out = [];
+  if (!stores.length) return out;
+  tfTransfers.forEach(function (t) {
+    var evs = tfEventsOf(t.id);
+    (tfCargoByTransfer[t.id] || []).forEach(function (c) {
+      var tg = tfCargoTarget(c);
+      if (stores.indexOf(tg.store) < 0) return;
+      if (tfEventAllowed(tg.event, t, c, evs, tg.store, false)) return;
+      var ts = null;
+      if (t.mode === 'courier') {
+        tfCargoEvents(evs, c.id).forEach(function (e) {
+          if (e.event === 'handed_to_courier' && (!ts || String(e.created_at) < String(ts))) ts = e.created_at;
+        });
+      } else ts = t.departed_at || null;
+      if (!ts) return;   /* не е тръгнал — нищо не чака */
+      out.push({ t: t, c: c, kind: tg.event, ts: ts });
+    });
+  });
+  return out;
+}
+function tfStoreWaitBannerHtml() {
+  var items = tfStoreWaitItems();
+  var n = items.length;
+  if (!n) return '';
+  var min = null, minTs = null;
+  items.forEach(function (x) {
+    var v = new Date(x.ts).getTime();
+    if (!isNaN(v) && (min === null || v < min)) { min = v; minTs = x.ts; }
+  });
+  /* Денят — както картата показва тръгването (tfFmtTs, местно време). */
+  var oldest = minTs ? tfFmtTs(minTs).slice(0, 5) : '';
+  var kinds = [];
+  if (items.some(function (x) { return x.kind === 'received'; })) kinds.push(tfEventBtnText('received'));
+  if (items.some(function (x) { return x.kind === 'unloaded'; })) kinds.push(tfEventBtnText('unloaded'));
+  /* Без „⚠️ Проблем" (решение на Тенчо 09.11): той не маха товара от броя и
+     обектът би решил, че банерът не работи. Само крайните отметки. */
+  var ans = kinds.join(' или ');
+  return '<div id="trf-wait-note" style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:9px 14px;margin-bottom:12px;font-size:12.5px;color:#92400e;">' +
+    '🚚 <b>' + n + '</b> ' + (n === 1
+      ? 'товар пътува към вас и чака отговор' + (oldest ? ' (тръгнал на ' + oldest + ')' : '') + '. Отбележете го с '
+      : 'товара пътуват към вас и чакат отговор' + (oldest ? ' (най-старият тръгнал на ' + oldest + ')' : '') + '. Отбележете всеки с ') +
+    escVal(ans) + ', когато пристигне. Дотогава трансферът не става „' + escVal(TF_STATUS_LABELS.done) + '“.</div>';
 }
 function tfCargoLabel(c, i) {
   return '#' + (i + 1) + ' ' + tfKindLabel(c.kind) + (c.qty > 1 ? ' ×' + c.qty : '') + ' → ' + c.recipient_store +
