@@ -38,16 +38,17 @@ function updateBadges(){
   var tU=transportOrders.filter(function(o){return o._status==='overdue'||o._status==='today';}).length;
   /* Клиентски: просрочени/днешни (както беше) + чакащи, на които съм
      изпълнител. ИЛИ, не сбор — заявка, която е и просрочена, и за мен, се
-     брои веднъж. _isFulfiller идва от coIsMineToFulfill() в loadClientOrders. */
-  var cU=clientOrders.filter(function(o){
-    return o._status==='overdue'||o._status==='today'||(o.status==='pending'&&o._isFulfiller);
-  }).length;
+     брои веднъж. _isFulfiller идва от coIsMineToFulfill() в loadClientOrders.
+     Предикатът е coBadgeMatch() (client-orders.js) — ЕДИН с банера над
+     таблицата (coWaitBannerHtml), за да не се разминат (09.11.2026). */
+  var cU=clientOrders.filter(coBadgeMatch).length;
   /* badge-transport го няма в index.html по същата причина като badge-client;
      транспортът е извън тази промяна и редът стои както е. */
   var bt=document.getElementById('badge-transport');
   var bc=coTabBadgeEl();
   if(bt){if(tU>0){bt.textContent=tU;bt.style.display='inline';}else bt.style.display='none';}
   if(bc){if(cU>0){bc.textContent=cU>99?'99+':String(cU);bc.style.display='block';}else bc.style.display='none';}
+  coRenderWaitBanner();
   coRenderNewForMeCard();
 }
 

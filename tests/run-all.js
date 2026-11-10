@@ -64,6 +64,7 @@ const TESTS = [
   'order-numbering.test.js',
   'paid-transport.test.js',
   'co-sap-banner-state.test.js',
+  'client-orders-store-banner.test.js',
   'stock-differences.test.js',
   'sbget-errors.test.js',
   'sb-get-all.test.js',

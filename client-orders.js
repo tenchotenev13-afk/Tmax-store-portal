@@ -988,6 +988,83 @@ function coIsMineToFulfill(o,names){
   return names.indexOf(o.fulfiller)>=0&&names.indexOf(o.store_name)<0;
 }
 
+/* ═══ БАДЖЪТ НА ТАБА И БАНЕРЪТ НАД ТАБЛИЦАТА — ЕДИН предикат (09.11.2026) ═══
+   Броят се просрочените, днешните и чакащите (pending), на които съм
+   изпълнител. ИЛИ, не сбор — заявка, която е и просрочена, и за мен, е веднъж.
+   Ползват го updateBadges() (notifications.js) и coWaitBannerHtml() отдолу —
+   да не се разминат. */
+function coBadgeMatch(o){
+  return !!o&&(o._status==='overdue'||o._status==='today'||(o.status==='pending'&&!!o._isFulfiller));
+}
+/* Етикетът на бутона „📤 Изпратена" — ЕДНО място: бутонът на реда и банерът. */
+var CO_SENT_BTN_LABEL='📤 '+statusLabel('sent');
+/* Банерът е САМО за обекта (по модела на Стока на път, Товарни листи и
+   Трансфери). Глобалните профили — admin, accounting и логистичните складове
+   (роля logistics) — НЕ го виждат: заявките им се зареждат за всички обекти
+   и просрочените в баджа им са на цялата верига, тоест „чакат вас" би
+   излъгало. ЦО-снабдяване (роля supply) НЕ е глобален профил и го вижда:
+   _isFulfiller за него е истина за заявките към ЦО. */
+function coShowsWaitBanner(){
+  return !!currentUser&&!isGlobal();
+}
+/* Денят на подаване — същата начална точка като „Изминало" (calcElapsed):
+   по-ранната от created_at и date, местно време. null при липса. */
+function coSubmittedDay(o){
+  var best=null;
+  [o&&o.created_at,o&&o.date].forEach(function(v){
+    if(!v)return;
+    var d=new Date(v);if(isNaN(d.getTime()))return;
+    d.setHours(0,0,0,0);
+    if(!best||d<best)best=d;
+  });
+  return best;
+}
+function coWaitBannerHtml(){
+  if(!coShowsWaitBanner()||typeof clientOrders==='undefined'||!clientOrders)return '';
+  var all=clientOrders.filter(coBadgeMatch);
+  if(!all.length)return '';
+  /* Разбивката е по ИЗКЛЮЧВАНЕ, за да е сборът точно броят на баджа:
+     първо „за мен" (pending + изпълнител — вкл. просрочените сред тях), после
+     „Още" — просрочените и днешните, които НЕ са вече в първата част. */
+  var mine=all.filter(function(o){return o.status==='pending'&&!!o._isFulfiller;});
+  var rest=all.filter(function(o){return mine.indexOf(o)<0;});
+  var late=rest.filter(function(o){return o._status==='overdue';}).length;
+  var tod=rest.length-late;
+  var p=function(x){return (x<10?'0':'')+x;};
+  var parts=[];
+  if(mine.length){
+    var old=null;
+    mine.forEach(function(o){var d=coSubmittedDay(o);if(d&&(!old||d<old))old=d;});
+    var ds=old?p(old.getDate())+'.'+p(old.getMonth()+1):'';
+    var n=mine.length;
+    parts.push('📋 <b>'+n+'</b> '+(n===1
+      ?'заявка от друг обект чака вие да я изпълните'+(ds?' (от '+ds+')':'')
+      :'заявки от други обекти чакат вие да ги изпълните'+(ds?' (най-старата от '+ds+')':''))+
+      '. Когато изпратите стоката, сменете статуса на '+esc(CO_SENT_BTN_LABEL)+'.');
+  }
+  if(rest.length){
+    var cnt=function(k,one,many){return '<b>'+k+'</b> '+(k===1?one:many);};
+    var s=[];
+    if(late)s.push(cnt(late,'заявка е с изтекла дата на доставка','заявки са с изтекла дата на доставка'));
+    if(tod)s.push(late?'<b>'+tod+'</b> — с доставка днес':cnt(tod,'заявка е с доставка днес','заявки са с доставка днес'));
+    parts.push('⏰ '+(mine.length?'Още ':'')+s.join(', ')+'.');
+  }
+  return '<div id="co-wait-note" style="background:#fef3c7;border:1px solid #f59e0b;border-radius:8px;padding:9px 14px;margin-bottom:12px;font-size:12.5px;color:#92400e;line-height:1.5;">'+
+    parts.map(function(x){return '<div>'+x+'</div>';}).join('')+'</div>';
+}
+/* Слага / обновява / маха банера най-горе в таба (преди „⚠️ … SAP").
+   Вика се от updateBadges() — банерът и баджът се преизчисляват заедно. */
+function coRenderWaitBanner(){
+  var anchor=document.getElementById('co-sap-banner');if(!anchor)return;
+  var html=coWaitBannerHtml();
+  var box=document.getElementById('co-wait-box');
+  if(!box){
+    box=document.createElement('div');box.id='co-wait-box';
+    anchor.parentNode.insertBefore(box,anchor);
+  }
+  box.innerHTML=html;
+}
+
 function loadClientOrders(){
   var coBody=document.getElementById('co-body');
   if(coBody)enableDragScroll(coBody.closest('.tbl-wrap'));
@@ -1135,7 +1212,7 @@ function renderClientOrders(){
          към заявителя. След това вече чака заявителя — няма повече действия. */
       if(isFulfiller||isCoJob){
         if(['pending','postponed','processed'].indexOf(rawStatus)>=0){
-          btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;sent&apos;)" style="border:1px solid #5b21b6;background:#ede9fe;color:#5b21b6;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">📤 Изпратена</button>';
+          btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;sent&apos;)" style="border:1px solid #5b21b6;background:#ede9fe;color:#5b21b6;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">'+CO_SENT_BTN_LABEL+'</button>';
           btns+='<button data-id="'+o.id+'" onclick="setClientStatus(this.dataset.id,&apos;refused&apos;)" style="border:1px solid #dc2626;background:#fff1f2;color:#dc2626;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✕ Откаже</button>';
         } else if(isFulfiller){
           btns+='<span style="font-size:10px;color:#94a3b8;white-space:nowrap;">⏳ чака '+esc(o.store_name||'заявителя')+'</span>';
