@@ -4,8 +4,11 @@
    отметки, статус); отличава се с регистрационния номер.
 
    Какво заковава файлът:
-   a) Камион без рег. номер → отказ с текста, 0 POST; с номер → POST transfers
-      с mode:'truck', plate_no:'СА 1234 АВ', courier_company:null.
+   a) Камион без рег. номер → POST с plate_no:null (от 10.11.2026 номерът НЕ
+      е задължителен при създаване — иска се при „🚚 Тръгна", виж
+      tests/trf-edit-plate.test.js; дотогава тук се заковаваше отказ);
+      с номер → POST transfers с mode:'truck', plate_no:'СА 1234 АВ'
+      (подрязан), courier_company:null.
    b) Бус → plate_no:null в POST и полето #trf-plate го няма; куриер — също.
    c) Списък: етикет „🚛 Камион · СА 1234 АВ"; чипът „Камион" филтрира;
       търсенето „1234" намира транспорта.
@@ -18,7 +21,7 @@
    f) Печат: „Вид: Камион" и „Рег. номер".
 
    Мутационна проверка (14.10.2026, всяка поотделно върху transfers.js):
-     1. махната валидацията за plate_no              → пада a)
+     1. (отпадна на 10.11.2026 — валидацията при създаване е махната нарочно)
      2. радио „Бус" пак с `!courier`                  → пада e)
      3. plate_no махнат от hay в tfMatches            → пада c)
    И трите събарят теста.
@@ -92,8 +95,19 @@ const visibleIds = function (h) { return $$(h, '#trf-table tbody tr[data-id]').m
 
 (async function () {
 
-  section('a) Камион: рег. номерът е задължителен');
+  section('a) Камион: рег. номерът НЕ е задължителен при създаване (10.11.2026)');
   {
+    const h0 = env(U('Добрич'));
+    await openForm(h0);
+    await pickMode(h0, 'truck');
+    fillBasic(h0);
+    setInp(h0, $(h0, '#trf-plate'), '   ');
+    ok('само интервали — валидацията минава', h0.w.tfValidate(h0.w.tfForm) === null, h0.w.tfValidate(h0.w.tfForm));
+    realClick(h0.w, $(h0, '#trf-save')); await ticks();
+    const b0 = (posts(h0, 'transfers')[0] || {}).body || {};
+    ok('без рег. номер — POST с mode truck, plate_no null', posts(h0, 'transfers').length === 1 && b0.mode === 'truck' && b0.plate_no === null, JSON.stringify(b0));
+    h0.close();
+
     const h = env(U('Добрич'));
     await openForm(h);
     ok('радио „🚛 Камион" съществува', !!$(h, '#trf-mode-truck'));
@@ -101,11 +115,6 @@ const visibleIds = function (h) { return $$(h, '#trf-table tbody tr[data-id]').m
     ok('при камион полето #trf-plate е там', !!$(h, '#trf-plate'));
     ok('при камион маршрутът (спирки) е там', !!$(h, '#trf-add-stop'));
     fillBasic(h);
-    realClick(h.w, $(h, '#trf-save')); await ticks();
-    ok('без рег. номер — 0 POST', posts(h, 'transfers').length === 0);
-    ok('текстът на отказа', ($(h, '#trf-error') || {}).textContent === 'Въведи регистрационен номер на камиона.', ($(h, '#trf-error') || {}).textContent);
-    setInp(h, $(h, '#trf-plate'), '   ');
-    ok('само интервали — също отказ', h.w.tfValidate(h.w.tfForm) === 'Въведи регистрационен номер на камиона.', h.w.tfValidate(h.w.tfForm));
     setInp(h, $(h, '#trf-plate'), ' СА 1234 АВ ');
     realClick(h.w, $(h, '#trf-save')); await ticks();
     const b = (posts(h, 'transfers')[0] || {}).body || {};

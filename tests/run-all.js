@@ -415,6 +415,7 @@ const TESTS = [
   'transfers-stale.test.js',
   'transfers-delete.test.js',
   'transfers-truck.test.js',
+  'trf-edit-plate.test.js',
   'transfers-co-label.test.js',
   'transfers-labels.test.js',
   'transfers-units.test.js',

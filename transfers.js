@@ -430,7 +430,7 @@ function tfRouteText(t) {
 
 function tfModeLabel(t) {
   if (t.mode === 'courier') return '📦 Куриер' + (t.courier_company ? ' · ' + t.courier_company : '');
-  if (t.mode === 'truck') return '🚛 Камион' + (t.plate_no ? ' · ' + t.plate_no : '');
+  if (t.mode === 'truck') return '🚛 Камион · ' + (t.plate_no ? t.plate_no : 'номер при тръгване');
   return '🚐 Бус';
 }
 
@@ -731,7 +731,7 @@ function renderTransferForm() {
       '<label style="font-size:12px;">Дата<br><input id="trf-date" type="date" value="' + tfAttr(f.depart_date) + '" onchange="tfSetField(\'depart_date\',this.value)" style="' + TF_FLD + '"></label>' +
       '<label style="font-size:12px;">Час<br><input id="trf-time" type="time" value="' + tfAttr(f.depart_time) + '" onchange="tfSetField(\'depart_time\',this.value)" style="' + TF_FLD + '"></label>' +
       '<label style="font-size:12px;">Шофьор<br><input id="trf-driver" value="' + tfAttr(f.driver) + '" oninput="tfSetField(\'driver\',this.value)" style="' + TF_FLD + 'min-width:200px;"></label>' +
-      (f.mode === 'truck' ? '<label style="font-size:12px;">Рег. номер<br><input id="trf-plate" value="' + tfAttr(f.plate_no || '') + '" oninput="tfSetField(\'plate_no\',this.value)" style="' + TF_FLD + '"></label>' : '') +
+      (f.mode === 'truck' ? '<label style="font-size:12px;">Рег. номер <span style="color:#64748b;">(може и при „Тръгна")</span><br><input id="trf-plate" value="' + tfAttr(f.plate_no || '') + '" oninput="tfSetField(\'plate_no\',this.value)" style="' + TF_FLD + '"></label>' : '') +
     '</div>';
     /* Маршрут */
     h += '<div style="font-size:12px;font-weight:700;margin-bottom:4px;">Маршрут</div>' +
@@ -929,7 +929,8 @@ function tfValidate(f) {
     /* Дотоварване: заглавието на транспорта вече е записано и валидно. */
     if (f.mode === 'courier' && !f.reload.origin) return 'Дотоварва се само бус или камион.';
   } else if (f.mode !== 'courier') {
-    if (f.mode === 'truck' && !String(f.plate_no || '').trim()) return 'Въведи регистрационен номер на камиона.';
+    /* Рег. номерът на камиона НЕ се иска тук — складът го научава, когато
+       камионът дойде; иска се при „🚚 Тръгна" (Пирдоп-0015, 10.11.2026). */
     if (!f.depart_date) return 'Въведи дата на тръгване.';
     if (!f.depart_time) return 'Въведи час на тръгване.';
     var seen = {};
@@ -1014,7 +1015,7 @@ function submitTransfer() {
     depart_date: courier ? null : f.depart_date,
     depart_time: courier ? null : f.depart_time,
     driver: courier ? null : (f.driver.trim() || null),
-    plate_no: f.mode === 'truck' ? String(f.plate_no || '').trim() : null,
+    plate_no: f.mode === 'truck' ? (String(f.plate_no || '').trim() || null) : null,
     stops: courier ? [] : f.stops.slice(),
     end_store: f.end_store,
     courier_company: courier ? f.courier_company : null,
@@ -1280,7 +1281,7 @@ function renderTransferPrint(t, cargo, coNum) {
     (courier ? kv('№ товарителница', t.waybill_no) : kv('Дата / час', tfDateLabel(t))) +
     (courier ? '' : kv('Шофьор', t.driver)) +
     (courier || !t.departed_at ? '' : kv('Тръгнал', tfFmtTs(t.departed_at) + (t.departed_by ? ' · ' + t.departed_by : ''))) +
-    (t.mode === 'truck' ? kv('Рег. номер', t.plate_no) : '') +
+    (t.mode === 'truck' ? kv('Рег. номер', t.plate_no || '— (при тръгване)') : '') +
     kv('Маршрут', tfRouteText(t)) +
     kv('Статус', (TF_STATUS_LABELS[tfComputeStatus(t, cargo, tfEventsOf(t.id)).status] || t.status) + ' · ' + tfProgressLabel(t, cargo)) +
     kv('Бележка', t.note) +
@@ -2307,6 +2308,94 @@ function tfCanDelete(t) {
   return null;
 }
 
+/* ── „✏️ Редактирай" (10.11.2026) ─────────────────────────────────────────
+   Вид (бус ↔ камион), рег. номер (само камион) и шофьор — преди тръгване.
+   Правилото е това на изтриването (tfCanDelete): не е тръгнал, без отметки,
+   планиран; създалият го обект или админ. Куриер не се редактира. Едно
+   правило за бутона и за записа. Товарите не се пипат. */
+function tfCanEdit(t) {
+  if (t && t.mode === 'courier') return 'Куриер не се редактира.';
+  var why = tfCanDelete(t);
+  return why ? why.replace('Изтрива', 'Редактира').replace('не се трие', 'не се редактира') : null;
+}
+var tfEditForm = null;
+function openTransferEdit(tid) {
+  var t = tfFindTransfer(tid);
+  var why = tfCanEdit(t);
+  if (why) { toast(why, '#dc2626'); return; }
+  tfEditForm = { tid: tid, mode: t.mode, plate: t.plate_no || '', driver: t.driver || '', saving: false };
+  renderTransferEdit();
+}
+function closeTransferEdit() {
+  tfEditForm = null;
+  var ov = document.getElementById('tfm-ov');
+  if (ov) ov.remove();
+}
+function tfEditSetMode(m) {
+  if (!tfEditForm || (m !== 'bus' && m !== 'truck')) return;
+  tfEditForm.mode = m;
+  renderTransferEdit();
+}
+function renderTransferEdit() {
+  var f = tfEditForm;
+  if (!f) return;
+  var t = tfFindTransfer(f.tid);
+  var old = document.getElementById('tfm-ov');
+  if (old) old.remove();
+  var h = '<div class="bmod" style="width:min(380px,94vw);">' +
+    '<div style="font-weight:700;font-size:15px;margin-bottom:2px;">✏️ Редактирай</div>' +
+    '<div style="font-size:12px;color:#64748b;margin-bottom:12px;">' + escVal(t.transfer_num) + ' · ' + escVal(tfRouteText(t)) + '</div>' +
+    '<label class="fl">Вид</label>' +
+    '<div style="font-size:13px;margin-bottom:8px;">' +
+      '<label style="margin-right:12px;"><input type="radio" name="tfm-mode" id="tfm-mode-bus" value="bus"' + (f.mode === 'bus' ? ' checked' : '') + ' onchange="tfEditSetMode(\'bus\')"> 🚐 Бус</label>' +
+      '<label><input type="radio" name="tfm-mode" id="tfm-mode-truck" value="truck"' + (f.mode === 'truck' ? ' checked' : '') + ' onchange="tfEditSetMode(\'truck\')"> 🚛 Камион</label>' +
+    '</div>' +
+    (f.mode === 'truck'
+      ? '<label class="fl">Рег. номер</label>' +
+        '<input id="tfm-plate" class="fi" value="' + tfAttr(f.plate) + '" oninput="if(tfEditForm)tfEditForm.plate=this.value">'
+      : '') +
+    '<label class="fl" style="margin-top:8px;">Шофьор</label>' +
+    '<input id="tfm-driver" class="fi" value="' + tfAttr(f.driver) + '" oninput="if(tfEditForm)tfEditForm.driver=this.value">' +
+    '<div id="tfm-error" style="color:#b91c1c;font-size:13px;margin-top:8px;"></div>' +
+    '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">' +
+      '<button class="btn-sm" onclick="closeTransferEdit()">Откажи</button>' +
+      '<button id="tfm-save" class="btn btn-green"' + (f.saving ? ' disabled' : '') + ' onclick="submitTransferEdit()">' + (f.saving ? '⏳ Записвам…' : 'Запиши') + '</button>' +
+    '</div></div>';
+  var ov = document.createElement('div');
+  ov.id = 'tfm-ov'; ov.className = 'bov open';
+  ov.innerHTML = h;
+  document.body.appendChild(ov);
+}
+function submitTransferEdit() {
+  var f = tfEditForm;
+  if (!f || f.saving) return;
+  var t = tfFindTransfer(f.tid);
+  /* Пак при записа — между отварянето и клика може да е тръгнал / отметнат. */
+  var err = tfCanEdit(t) || (f.mode !== 'bus' && f.mode !== 'truck' ? 'Избери бус или камион.' : null);
+  var errEl = document.getElementById('tfm-error');
+  if (err) { if (errEl) errEl.textContent = err; toast(err, '#dc2626'); return; }
+  var body = {
+    mode: f.mode,
+    plate_no: f.mode === 'truck' ? (String(f.plate || '').trim() || null) : null,
+    driver: String(f.driver || '').trim() || null
+  };
+  f.saving = true; renderTransferEdit();
+  sbPatch('transfers', 'id=eq.' + t.id, body).then(function (res) {
+    if (!res || !res.ok) {
+      f.saving = false; renderTransferEdit();
+      toast('Промяната НЕ е записана: ' + sbErrMsg(res), '#dc2626');
+      return;
+    }
+    Object.keys(body).forEach(function (k) { t[k] = body[k]; });
+    closeTransferEdit();
+    toast('✏️ ' + (t.transfer_num || '') + ' е обновен');
+    renderTransfers();
+  }).catch(function () {
+    f.saving = false; renderTransferEdit();
+    toast('Грешка при запис', '#dc2626');
+  });
+}
+
 /* ── „🚚 Тръгна" (18.10.2026) ─────────────────────────────────────────────
    Бус / камион; отбелязва създалият го обект или админ; веднъж, без
    връщане. Часът — между създаването на транспорта и сега. Без отметки
@@ -2347,7 +2436,7 @@ function openDepartModal(tid) {
   var t = tfFindTransfer(tid);
   var why = tfCanDepart(t);
   if (why) { toast(why, '#dc2626'); return; }
-  tfDepartForm = { tid: tid, value: tfLocalDT(new Date()), saving: false };
+  tfDepartForm = { tid: tid, value: tfLocalDT(new Date()), plate: t.plate_no || '', saving: false };
   renderDepartModal();
 }
 function closeDepartModal() {
@@ -2369,6 +2458,11 @@ function renderDepartModal() {
     '<input id="tfd-time" type="datetime-local" class="fi" value="' + tfAttr(f.value) + '"' +
       (isNaN(created.getTime()) ? '' : ' min="' + tfLocalDT(created) + '"') + ' max="' + tfLocalDT(new Date()) + '"' +
       ' onchange="if(tfDepartForm)tfDepartForm.value=this.value">' +
+    /* Камион: рег. номерът се иска тук, попълнен с текущия (10.11.2026). */
+    (t.mode === 'truck'
+      ? '<label class="fl" style="margin-top:8px;">Рег. номер</label>' +
+        '<input id="tfd-plate" class="fi" value="' + tfAttr(f.plate) + '" oninput="if(tfDepartForm)tfDepartForm.plate=this.value">'
+      : '') +
     '<div style="font-size:11px;color:#64748b;margin-top:4px;">Отбелязва се веднъж и не се връща.</div>' +
     '<div id="tfd-error" style="color:#b91c1c;font-size:13px;margin-top:8px;"></div>' +
     '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">' +
@@ -2387,10 +2481,12 @@ function submitDepart() {
   /* Пак при записа — между отварянето и клика друг може да е отбелязал. */
   var why = tfCanDepart(t);
   var v = why ? null : tfValidateDepart(t, f.value);
-  var err = why || (v && v.err);
+  var plate = String(f.plate || '').trim();
+  var err = why || (v && v.err) || (t.mode === 'truck' && !plate ? 'Въведи регистрационен номер на камиона.' : null);
   var errEl = document.getElementById('tfd-error');
   if (err) { if (errEl) errEl.textContent = err; toast(err, '#dc2626'); return; }
   var body = { departed_at: v.iso, departed_by: (currentUser && (currentUser.display_name || currentUser.email)) || null };
+  if (t.mode === 'truck') body.plate_no = plate;
   if (!tfEventsOf(t.id).length) body.status = 'sent';
   f.saving = true; renderDepartModal();
   sbPatch('transfers', 'id=eq.' + t.id, body).then(function (res) {
@@ -2458,6 +2554,7 @@ function renderTransferCard() {
       '<button class="btn-sm" onclick="printTransfer(\'' + tfAttr(t.id) + '\')">🖨 Печат</button>' +
       '<button id="trf-labels" class="btn-sm" onclick="tfLabels(\'' + tfAttr(t.id) + '\')">🏷 Етикети</button>' +
       (tfCanDepart(t) === null ? '<button id="trf-depart" class="btn-sm" onclick="openDepartModal(\'' + tfAttr(t.id) + '\')">🚚 Тръгна</button>' : '') +
+      (tfCanEdit(t) === null ? '<button id="trf-edit" class="btn-sm" onclick="openTransferEdit(\'' + tfAttr(t.id) + '\')">✏️ Редактирай</button>' : '') +
       (tfCanDelete(t) === null ? '<button id="trf-delete" class="btn-sm" onclick="deleteTransfer(\'' + tfAttr(t.id) + '\')">🗑 Изтрий</button>' : '') +
       '<button id="trf-card-back" class="btn-sm" onclick="closeTransferCard()">← Обратно</button></div>' +
     '</div>' +
