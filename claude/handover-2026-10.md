@@ -1479,7 +1479,7 @@ SQL тестът след миграцията не е пускан (по реш
 изречение за последствие (отчетът „Закъснели" е по `isLate`, не по баджа).
 Само за не-глобални профили: обект, регионален, ЦО (вкл. supply); admin,
 accounting и логистичните складове — НЕ (заявките им са за цялата верига).
-Проверка на живо — `claude/open/09-11-client-orders-store-banner-live.md`.
+Проверено на живо 11.11 (чат: Силистра — бадж 7 = 5 + 2; admin без банер) — `claude/open/closed/09-11-client-orders-store-banner-live.md`.
 
 ## 6. Отворени точки → виж claude/open/ (npm run open). Затворени — claude/open/closed/.
 
