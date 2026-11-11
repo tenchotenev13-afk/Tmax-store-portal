@@ -192,12 +192,14 @@ const mulBoxFor = (h, dateISO) =>
     ok('редът е още в четирите дни (не се крие)', boxes.filter(Boolean).length === 4);
     ok('и във ВСИЧКИТЕ е отметнат', boxes.filter(Boolean).every(b => b.checked),
       boxes.map(b => b && String(b.checked)).join(','));
-    ok('и заключен', boxes.filter(Boolean).every(b => b.disabled));
+    /* От 10.11.2026 (bul-window-untick): докато прозорецът е ОТВОРЕН, обектът
+       може да махне отметката — чекбоксът е отключен, title казва до кога. */
+    ok('и ОТКЛЮЧЕН (прозорецът е отворен)', boxes.filter(Boolean).every(b => !b.disabled));
     const t = boxes.filter(Boolean).map(b => b.getAttribute('title') || '');
     ok('title казва КОГА е изпълнена, на всеки ден',
       t.length === 4 && t.every(x => /Изпълнена на /.test(x)), t.join(' | '));
     ok('и датата е на РЕАЛНОТО изпълнение (понеделник), не на срока',
-      t.every(x => x.indexOf(fdate(MON)) >= 0 && x.indexOf(fdate(THU)) < 0), t[0]);
+      t.every(x => x.indexOf('Изпълнена на ' + dm(MON) + ' ') === 0), t[0]);
   }
 
   section('3. КАЛЕНДАР, офис: ЕДНО число за целия прозорец, не по едно на ден');
@@ -289,9 +291,9 @@ const mulBoxFor = (h, dateISO) =>
     const box = panel.querySelector('input[data-tid="t-win"]');
     if (ok('чекбоксът е там', !!box)) {
       ok('отметнат е', box.checked === true);
-      ok('и заключен', box.disabled === true);
+      ok('и отключен (прозорецът е отворен)', box.disabled === false);
       ok('title казва деня на изпълнението',
-        (box.getAttribute('title') || '').indexOf('Изпълнена на ' + fdate(MON)) >= 0,
+        (box.getAttribute('title') || '').indexOf('Изпълнена на ' + dm(MON) + ' ') === 0,
         box.getAttribute('title'));
     }
     const txt = (panel.textContent || '').replace(/\s+/g, ' ');
@@ -323,9 +325,9 @@ const mulBoxFor = (h, dateISO) =>
     if (guard('renderTasksPanel() не хвърля (отметната)', () => { div2.innerHTML = h2.w.renderTasksPanel(); })) {
       const b2 = div2.querySelector('input[data-tid="t-win"]');
       ok('отметната: чекбоксът е отметнат', !!b2 && b2.checked === true);
-      ok('и заключен', !!b2 && b2.disabled === true);
+      ok('и отключен (прозорецът е отворен)', !!b2 && b2.disabled === false);
       ok('title сочи вторник — реалния ден',
-        !!b2 && (b2.getAttribute('title') || '').indexOf('Изпълнена на ' + fdate(TUE)) >= 0,
+        !!b2 && (b2.getAttribute('title') || '').indexOf('Изпълнена на ' + dm(TUE) + ' ') === 0,
         b2 && b2.getAttribute('title'));
     }
   }

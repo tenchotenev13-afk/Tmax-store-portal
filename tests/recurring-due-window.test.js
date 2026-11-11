@@ -169,13 +169,15 @@ function doneComp(date) {
       ok('трите чекбокса са там (нищо не се крие)', boxes.length === 3, 'бр.: ' + boxes.length);
       ok('и трите са ОТМЕТНАТИ', boxes.every(c => c.checked === true),
         boxes.map(c => c.checked).join(','));
-      ok('и трите са заключени', boxes.every(c => c.disabled === true));
-      ok('title сочи реалната дата на изпълнение',
-        boxes.every(c => c.getAttribute('title') === 'Изпълнена на ' + w.fmtDate(MON)),
+      /* От 10.11.2026 (bul-window-untick): докато прозорецът е ОТВОРЕН, обектът
+         може да махне отметката — чекбоксът е отключен, title казва до кога. */
+      ok('и трите са ОТКЛЮЧЕНИ (прозорецът е отворен — може да се махне)', boxes.every(c => c.disabled === false));
+      ok('title сочи реалната дата на изпълнение и до кога може да се махне',
+        boxes.every(c => c.getAttribute('title') === 'Изпълнена на ' + w.bulDM(MON) + ' — можете да я махнете до ' + w.bulDM(WED) + ', ако трябва да смените файла'),
         boxes.map(c => c.getAttribute('title')).join(' | '));
       ok('заглавието е зачертано и на трите дни',
         (doc.querySelector('#sec-calendar').innerHTML.match(/text-decoration:line-through/g) || []).length >= 3);
-      ok('приглушен вид', boxes.every(c => (c.getAttribute('style') || '').indexOf('cursor:not-allowed') >= 0));
+      ok('НЕ е приглушен (отключен)', boxes.every(c => (c.getAttribute('style') || '').indexOf('cursor:not-allowed') < 0));
     }
   }
 
@@ -217,7 +219,7 @@ function doneComp(date) {
         panel.querySelectorAll('input[type=checkbox][data-rtid="r-win"]'));
       ok('има чекбокс (единично-дневният път), не иконка 📅', inPanel.length >= 1,
         'бр.: ' + inPanel.length);
-      ok('отметнат и заключен', inPanel.every(c => c.checked === true && c.disabled === true));
+      ok('отметнат и отключен (прозорецът е отворен)', inPanel.every(c => c.checked === true && c.disabled === false));
     }
   }
 

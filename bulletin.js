@@ -2147,12 +2147,12 @@ function bulPlanRowHtml(it, store, weekArr){
        вместо да допише първоначалния. data-kind носи истинския вид. */
     h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-kind="'+(isRec?'recurring':'regular')+'" data-orig="'+(it.carriedFrom||'')+'" data-cdate="'+(cdate||'')+'" data-linked="'+lockKey+'" onchange="bulCarriedCheckboxChanged(this)"'+bulLockAttr(cdate,lockKey)+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+bulLockStyle(cdate,lockKey)+'">';
   } else if(isRec){
-    h+='<input type="checkbox" '+(done?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(it.winComp?winDoneAttr(it.winComp):bulLockAttr(cdate,lockKey))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+(it.winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(cdate,lockKey))+'">';
+    h+='<input type="checkbox" '+(done?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(it.winComp?winDoneAttr(it.winComp,'recurring',t):bulLockAttr(cdate,lockKey))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+(it.winComp?winDoneStyle(it.winComp,'recurring',t):bulLockStyle(cdate,lockKey))+'">';
   } else {
     /* it.winComp го има и при еднократната с прозорец: тогава редът стои само в
        деня на изпълнението и чекбоксът казва в title КОГА е свършена, вместо
        само „друг ден" от заключването по дата. */
-    h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+lockKey+'" onchange="bulCheckboxChanged(this)"'+(it.winComp?winDoneAttr(it.winComp):bulLockAttr(cdate,lockKey,bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+(it.winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(cdate,lockKey,bulSpanOf(t)))+'">';
+    h+='<input type="checkbox" '+(done?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+(cdate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+lockKey+'" onchange="bulCheckboxChanged(this)"'+(it.winComp?winDoneAttr(it.winComp,'regular',t):bulLockAttr(cdate,lockKey,bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:'+d.color+';'+(it.winComp?winDoneStyle(it.winComp,'regular',t):bulLockStyle(cdate,lockKey,bulSpanOf(t)))+'">';
   }
   h+='<div style="flex:1;min-width:0;">';
   h+='<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">';
@@ -3105,7 +3105,7 @@ function renderBulView(){
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;color:#94a3b8;">'+esc(t.title||'')+'</span>';
         } else {
           var doneReg=regWinComp?true:(store&&bulComps.some(function(cc){return cc.task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===cdateReg;}));
-          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+cdateReg+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(regWinComp?winDoneAttr(regWinComp):bulLockAttr(cdateReg,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(regWinComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(cdateReg,bulTaskLinkKey(t),bulSpanOf(t)))+'">';
+          html+='<input type="checkbox" '+(doneReg?'checked ':'')+'data-tid="'+t.id+'" data-cdate="'+cdateReg+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(regWinComp?winDoneAttr(regWinComp,'regular',t):bulLockAttr(cdateReg,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(regWinComp?winDoneStyle(regWinComp,'regular',t):bulLockStyle(cdateReg,bulTaskLinkKey(t),bulSpanOf(t)))+'">';
           var carReg=bulCarriedInto('regular',t.id,store,cdateReg);
           /* Прозорецът се изписва и на обекта: без него задачата изглежда като
              три отделни задължения, а заключеният чекбокс на другите дни — като
@@ -3145,7 +3145,7 @@ function renderBulView(){
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;color:#94a3b8;">'+esc(t.title||'')+'</span>';
         } else {
           var doneRec=recWinComp?true:(store&&recurringComps.some(function(cc){return cc.recurring_task_id===t.id&&cc.store_name===store&&cc.status==='done'&&(cc.completion_date||null)===recCdate;}));
-          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(recWinComp?winDoneAttr(recWinComp):bulLockAttr(recCdate,t.linked_module))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(recWinComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(recCdate,t.linked_module))+'">';
+          html+='<input type="checkbox" '+(doneRec?'checked ':'')+'data-rtid="'+t.id+'" data-cdate="'+(recCdate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"'+(recWinComp?winDoneAttr(recWinComp,'recurring',t):bulLockAttr(recCdate,t.linked_module))+' style="margin-top:2px;width:15px;height:15px;cursor:pointer;flex-shrink:0;accent-color:'+dept.color+';'+(recWinComp?winDoneStyle(recWinComp,'recurring',t):bulLockStyle(recCdate,t.linked_module))+'">';
           var carRec=bulCarriedInto('recurring',t.id,store,recCdate||dateStr);
           html+='<span style="font-size:13px;font-weight:500;flex:1;line-height:1.35;'+(doneRec?'color:#94a3b8;text-decoration:line-through;':'')+'">'+esc(t.title||'')+(carRec?bulCarriedMiniHtml(carRec):'')+(dateStr===bulTodayISO()?bulAutoNoteHtml(t,doneRec,'recurring',{button:false}):'')+'</span>';
         }
@@ -3308,7 +3308,7 @@ function renderBulView(){
         } else if(bulReadOnly()){
           html+=bulReadOnlyCellHtml();
         } else {
-          html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(winComp?winDoneAttr(winComp):bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+(winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+'">';
+          html+='<input type="checkbox" '+(done?'checked ':'')+' data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(winComp?winDoneAttr(winComp,'regular',t):bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+dept.color+';flex-shrink:0;'+(winComp?winDoneStyle(winComp,'regular',t):bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+'">';
         }
         html+='<div style="flex:1;"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+titleColor+';'+(done?'text-decoration:line-through;':'')+'">'+esc(t.title||'')+'</div>'+taskTypeBadgeHtml(t.task_type,t.id,'regular',!bulSeesAll()&&!isMulti&&!done&&!naComp,singleDate)+bulPostponedBadgeHtml(ppComp)+bulNaBadgeHtml(naComp)+bulSpanBadgeHtml(t)+'</div>';
         if(t.description)html+='<div class="bul-desc">'+linkify(t.description)+'</div>';
@@ -5469,7 +5469,7 @@ function renderTasksPanel() {
         } else if (bulReadOnly()) {
           h += bulReadOnlyCellHtml();
         } else {
-          h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(winComp?winDoneAttr(winComp):bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+(winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+'">' ;
+          h += '<input type="checkbox" '+(isDone?'checked ':'')+ 'data-tid="'+t.id+'" data-cdate="'+(singleDate||'')+'" data-span="'+bulSpanOf(t)+'" data-linked="'+bulTaskLinkKey(t)+'" onchange="bulCheckboxChanged(this)"'+(winComp?winDoneAttr(winComp,'regular',t):bulLockAttr(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+' style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:'+d.color+';'+(winComp?winDoneStyle(winComp,'regular',t):bulLockStyle(singleDate,bulTaskLinkKey(t),bulSpanOf(t)))+'">' ;
         }
         h += '<div style="flex:1;">';
         h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:'+(isDone?'#94a3b8':isPostponed?'#b45309':'#0f172a')+';'+(isDone?'text-decoration:line-through;':'')+'">';
@@ -5633,10 +5633,11 @@ function bulToggleTask(cb){toggleTask(cb.dataset.tid, cb.checked);}
    винаги е директно - не се пита повторно за коментар/снимка. */
 function bulCheckboxChanged(cb){
   if(bulReadOnlyBlocked(cb)) return;
-  if (bulLockRejected(cb)) return;
+  if (cb.dataset.wcdate ? bulWinUntickRejected(cb) : bulLockRejected(cb)) return;
   var taskId = cb.dataset.tid;
   var completionDate = cb.dataset.cdate || null; /* конкретен ден за многодневна задача, ако е зададен */
-  if (!cb.checked) { toggleTask(taskId, false, null, completionDate); return; }
+  /* Отворен прозорец: махането трие ЗАТВАРЯЩИЯ ред (data-wcdate), не днешния. */
+  if (!cb.checked) { toggleTask(taskId, false, null, cb.dataset.wcdate || completionDate); return; }
   var t = bulTasks.find(function(x){ return String(x.id)===String(taskId); });
   var tt = TASK_TYPES[(t&&t.task_type)||'info'];
   if (!tt || (!tt.needsPhoto && !tt.needsFile && !tt.needsComment)) { toggleTask(taskId, true, null, completionDate); return; }
@@ -6521,8 +6522,8 @@ function renderRecurringTasks(dk) {
       } else if (bulReadOnly()) {
         h += bulReadOnlyCellHtml();
       } else {
-        h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" data-cdate="'+(singleRecDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"' + (winComp?winDoneAttr(winComp):bulLockAttr(singleRecDate,t.linked_module)) + ' ' +
-          'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + (winComp?'opacity:.45;cursor:not-allowed;':bulLockStyle(singleRecDate,t.linked_module)) + '">';
+        h += '<input type="checkbox" ' + (done?'checked ':'') + 'data-rtid="' + t.id + '" data-cdate="'+(singleRecDate||'')+'" data-linked="'+(t.linked_module||'')+'" onchange="bulRecurringCheckboxChanged(this)"' + (winComp?winDoneAttr(winComp,'recurring',t):bulLockAttr(singleRecDate,t.linked_module)) + ' ' +
+          'style="margin-top:2px;width:16px;height:16px;cursor:pointer;accent-color:' + d.color + ';flex-shrink:0;' + (winComp?winDoneStyle(winComp,'recurring',t):bulLockStyle(singleRecDate,t.linked_module)) + '">';
       }
       h += '<div style="flex:1;">';
       h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;"><div style="font-size:13px;font-weight:500;color:' + titleColor + ';' + (done?'text-decoration:line-through;':'') + '">' + esc(t.title||'') + '</div>'+taskTypeBadgeHtml(t.task_type,t.id,'recurring',!bulSeesAll()&&!isMultiRec&&!done&&!skipView&&!naRecComp,singleRecDate)+bulPostponedBadgeHtml(ppComp)+bulNaBadgeHtml(naRecComp)+(canEdit()?recSkipEditBadgeHtml(t):recSkipBadgeHtml(t.id,bulSkipViewStore()))+bulFromBadgeHtml(t)+'</div>';
@@ -6705,10 +6706,11 @@ function toggleRecurringTask(taskId, checked, extra, completionDate) {
    bulCheckboxChanged() за обикновените задачи. */
 function bulRecurringCheckboxChanged(cb){
   if(bulReadOnlyBlocked(cb)) return;
-  if (bulLockRejected(cb)) return;
+  if (cb.dataset.wcdate ? bulWinUntickRejected(cb) : bulLockRejected(cb)) return;
   var taskId = cb.dataset.rtid;
   var completionDate = cb.dataset.cdate || null;
-  if (!cb.checked) { toggleRecurringTask(taskId, false, null, completionDate); return; }
+  /* Отворен прозорец: махането трие ЗАТВАРЯЩИЯ ред (data-wcdate), не днешния. */
+  if (!cb.checked) { toggleRecurringTask(taskId, false, null, cb.dataset.wcdate || completionDate); return; }
   var t = recurringTasks.find(function(x){ return String(x.id)===String(taskId); });
   var tt = TASK_TYPES[(t&&t.task_type)||'info'];
   if (!tt || (!tt.needsPhoto && !tt.needsFile && !tt.needsComment)) { toggleRecurringTask(taskId, true, null, completionDate); return; }
@@ -7392,8 +7394,54 @@ function taskWindowDueLineHtml(t, doneComp){
 }
 /* Атрибути за вече затворен прозорец: отметнат и заключен на ВСЕКИ ден от
    прозореца, с датата на реалното изпълнение в title. */
-function winDoneAttr(comp){
+/* ОТ 10.11.2026 (решение на Тенчо, bul-window-untick): докато прозорецът е
+   ОТВОРЕН (днес между първия и последния му ден), ОБЕКТЪТ може сам да махне
+   СВОЯТА отметка — грешен файл/коментар — и да отметне наново. Повод:
+   Търговище и Враца 09–10.11, трите пъти отметката се триеше с SQL.
+   След последния ден — заключена, както досега. Автоматичните модули — винаги
+   заключени (състоянието им идва от данните). Офисът — без промяна.
+   data-wcdate носи completion_date на ЗАТВАРЯЩИЯ ред: махането трие него, не
+   „днешния" (data-cdate е датата за НОВО отмятане — днес или срокът).
+   Извикване само с comp (стар път) → заключено. */
+function winUntickDates(comp, kind, t){
+  if(!comp||!t||!comp.completion_date) return [];
+  if(kind==='recurring') return recurringWindowDatesForDate(t, new Date(String(comp.completion_date).slice(0,10)+'T00:00:00'));
+  return taskWindowDates(t);
+}
+function winUntickable(comp, kind, t){
+  if(!kind||!t||!comp) return false;
+  if(bulSeesAll()||bulReadOnly()) return false;
+  var lockKey = kind==='recurring' ? (t.linked_module||'') : bulTaskLinkKey(t);
+  if(bulAutoModuleOf(lockKey)) return false;
+  var d = winUntickDates(comp, kind, t);
+  if(!d.length) return false;
+  var td = bulTodayISO();
+  return td>=d[0] && td<=d[d.length-1];
+}
+function winDoneAttr(comp, kind, t){
+  if(winUntickable(comp, kind, t)){
+    var d = winUntickDates(comp, kind, t);
+    var cd = String(comp.completion_date).slice(0,10);
+    return ' data-wcdate="'+cd+'" data-wfirst="'+d[0]+'" data-wlast="'+d[d.length-1]+'" title="'+
+      escAttr('Изпълнена на '+bulDM(cd)+' — можете да я махнете до '+bulDM(d[d.length-1])+', ако трябва да смените файла')+'"';
+  }
   return ' disabled title="Изпълнена на '+esc(fmtDate(comp.completion_date))+'"';
+}
+function winDoneStyle(comp, kind, t){
+  return winUntickable(comp, kind, t) ? '' : 'opacity:.45;cursor:not-allowed;';
+}
+/* Втората защита за махането (огледално на bulLockRejected): прозорецът от
+   атрибутите трябва да е още отворен — стар таб от вторник, отворен в сряда,
+   не бива да трие. Кликът тук винаги е махане (чекбоксът е отметнат). */
+function bulWinUntickRejected(cb){
+  var ds=(cb&&cb.dataset)||{};
+  var td=bulTodayISO(), am=bulAutoModuleOf(ds.linked||null), why=null;
+  if(am) why=bulLockLabel(am.reason);
+  else if(!ds.wfirst||!ds.wlast||td<ds.wfirst||td>ds.wlast) why='Прозорецът е приключил';
+  if(!why) return false;
+  cb.checked=!cb.checked;
+  toast(why,'#d97706');
+  return true;
 }
 /* Постоянна задача с НЯКОЛКО избрани дни, които са ОТДЕЛНИ задължения.
    Прозоречната задача НЕ е такава — тя има едно състояние и минава по

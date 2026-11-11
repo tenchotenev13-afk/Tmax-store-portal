@@ -186,7 +186,7 @@ const weekly = h => new Promise(r => { h.w.collectWeeklyReportData(r); });
                     boxes.filter(Boolean).length + ' от 3')) {
       ok('и във всичките е отметнат — прозорецът е затворен',
         boxes.every(b => b.checked), boxes.map(b => String(b.checked)).join(','));
-      ok('и заключен', boxes.every(b => b.disabled),
+      ok('и отключен — прозорецът е отворен (bul-window-untick)', boxes.every(b => !b.disabled),
         boxes.map(b => String(b.disabled)).join(','));
       ok('title казва деня на изпълнението',
         boxes.every(b => /Изпълнена на /.test(b.getAttribute('title') || '')),

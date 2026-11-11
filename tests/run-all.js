@@ -242,6 +242,7 @@ const TESTS = [
   'stock-returns-per-source.test.js',
   'bul-pending-hint.test.js',
   'bul-pending-open.test.js',
+  'bul-window-untick.test.js',
   'bul-allow-postpone.test.js',
   'bul-allow-postpone-oneoff.test.js',
   'bul-supply-view-all.test.js',
