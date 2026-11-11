@@ -839,3 +839,67 @@ Deno.test("HTTP: OPTIONS, GET, лош JSON, непознато действие"
   eq((await handleGrafik(new Request("http://x", { method: "POST", body: "{" }), () => r)).status, 400, "лош JSON");
   eq((await call(r, U.admin, { action: "drop_table" })).status, 400, "непознато действие");
 });
+
+// ── v11 (11.11.2026): предишният месец в същия отговор, паралелни заявки ─────────────────────
+Deno.test("load_month v11: prev_month — има / няма / без prev; prev_rows както досега", async () => {
+  const r = new MemRepo();
+  const ids = kStaff(r);
+  const oct = await r.ensureMonth("Кърджали", "2026-10-01");
+  r.rows.push({ month_id: oct.id, staff_id: ids[0], letters: ["П", "П"], locked: {} });
+  const a = (await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11", prev: true })).body;
+  eq([a.prev_month && a.prev_month.month_row.id, a.prev_month && a.prev_month.rows.length, a.prev_rows.length], [oct.id, 1, 1], "октомври — в същия отговор");
+  const o = (await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-10" })).body;
+  eq(JSON.stringify(a.prev_month.setup), JSON.stringify(o.setup), "настройката — за октомври (както load_month за октомври), не за ноември");
+  assert(JSON.stringify(o.setup) !== JSON.stringify(a.setup), "(предпоставка) октомври и ноември са с различна настройка: " + o.setup.season + " / " + a.setup.season);
+  const b = (await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" })).body;
+  assert(!("prev_month" in b), "без prev — без prev_month (старият клиент не го иска)");
+  const c = (await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-10", prev: true })).body;
+  eq(c.prev_month, null, "септември го няма → null (браузърът не пита втори път)");
+});
+
+Deno.test("load_month v11: ТРЗ — предишният месец само ако е подаден; ритъмът — никога", async () => {
+  const r = new MemRepo();
+  const ids = kStaff(r);
+  const nov = await r.ensureMonth("Кърджали", "2026-11-01"); nov.status = "submitted";
+  const oct = await r.ensureMonth("Кърджали", "2026-10-01");
+  r.rows.push({ month_id: oct.id, staff_id: ids[0], letters: ["П"], locked: {} });
+  const a = (await call(r, U.trz, { action: "load_month", store: "Кърджали", month: "2026-11", prev: true })).body;
+  eq([a.prev_month, a.prev_rows], [null, []], "октомври е чернова → ТРЗ не го вижда");
+  oct.status = "submitted";
+  const b = (await call(r, U.trz, { action: "load_month", store: "Кърджали", month: "2026-11", prev: true })).body;
+  eq([b.prev_month && b.prev_month.rows.length, b.prev_rows], [1, []], "подаден → вижда го; ритъмът (prev_rows) пак празен");
+});
+
+Deno.test("load_month v11: отказът (403 / 400) е пръв, дори ако данните гърмят", async () => {
+  const r = new MemRepo();
+  kStaff(r);
+  r.setupRaw = async () => { throw new Error("данните гърмят"); };
+  eq((await call(r, U.mgrK, { action: "load_month", store: "Шумен", month: "2026-11" })).status, 403, "чужд обект → 403, не 500");
+  eq((await call(r, U.admin, { action: "load_month", store: "Няма такъв", month: "2026-11" })).status, 400, "непознат обект → 400, не 500");
+  eq((await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11" })).status, 500, "своя обект — грешката на данните (500)");
+});
+
+Deno.test("load_month v11: заявките към базата — най-много три нива една след друга", async () => {
+  const r = new MemRepo();
+  const ids = kStaff(r);
+  const oct = await r.ensureMonth("Кърджали", "2026-10-01");
+  await r.ensureMonth("Кърджали", "2026-11-01");
+  r.rows.push({ month_id: oct.id, staff_id: ids[0], letters: ["П"], locked: {} });
+  // Ниво на заявка = 1 + най-високото ниво сред вече ЗАВЪРШИЛИТЕ при старта ѝ (всяка заявка — един такт).
+  let done = 0, depth = 0;
+  const seen: string[] = [];
+  for (const k of ["getUser", "listAccess", "storeNames", "getMonth", "listStaff", "listRows", "setupRaw"] as const) {
+    const orig = (r as unknown as Record<string, (...a: unknown[]) => Promise<unknown>>)[k].bind(r);
+    (r as unknown as Record<string, unknown>)[k] = async (...a: unknown[]) => {
+      const lvl = done + 1; depth = Math.max(depth, lvl); seen.push(k + "@" + lvl);
+      const v = await orig(...a);
+      await new Promise((ok) => setTimeout(ok, 5));
+      done = Math.max(done, lvl);
+      return v;
+    };
+  }
+  const res = await call(r, U.mgrK, { action: "load_month", store: "Кърджали", month: "2026-11", prev: true });
+  eq(res.status, 200, "зарежда");
+  assert(depth <= 3, "нива: " + depth + " (" + seen.join(", ") + ")");
+  assert(seen.indexOf("getUser@1") >= 0 && seen.indexOf("listAccess@1") >= 0, "потребителят и списъците — едновременно: " + seen.join(", "));
+});

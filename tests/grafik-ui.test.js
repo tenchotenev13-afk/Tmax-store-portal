@@ -93,6 +93,8 @@ function makeServer(opt) {
           can_reopen: M.kind === 'admin' && !!mo && mo.status === 'submitted', status: mo ? mo.status : 'draft', month_row: mo || null,
           staff: S.staff.filter(s => s.store_name === b.store), rows: mo ? S.rows.filter(r => r.month_id === mo.id) : [],
           prev_rows: pm ? S.rows.filter(r => r.month_id === pm.id) : [],
+          // S.v11 — като grafik-api v11: предишният месец в същия отговор (при prev: true). Без него — както v10.
+          ...(S.v11 && b.prev === true ? { prev_month: pm && (M.kind !== 'trz' || pm.status === 'submitted') ? { month_row: pm, rows: S.rows.filter(r => r.month_id === pm.id), setup: Object.assign({}, ET.setups['2026-10']) } : null } : {}),
           setup: Object.assign({}, b.month === '2026-11' || b.month === '2026-12' ? SETUP11 : ET.setups['2026-10'], { missing: S.missing, extra_days: [], company: S.company, store: S.store, approver: S.approver, season_label: b.month === '2026-10' ? 'Лято (до 20:00)' : 'Зима 1 (до 19:30)',
             sectors: S.sectors.filter(x => x.store_name === b.store).sort((a, c) => a.sort_order - c.sort_order).map(x => ({ id: x.id, name: x.name, sort_order: x.sort_order })) }) } };
       }
@@ -413,6 +415,21 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('съобщение: 5 клетки (2, 5, 9, 23, 30.11)', L[22] === 'П' && r.calls.toast.some(t => /Пренесени 5 клетки/.test(t)), r.calls.toast.join('|'));
   }
 
+  section('9б. Предишният месец в отговора на load_month (grafik-api v11, 11.11.2026)');
+  {
+    const mk = v11 => { const S = makeServer(); S.v11 = v11; S.months['Кърджали|2026-10-01'] = { id: 'm-oct', store_name: 'Кърджали', month: '2026-10-01', status: 'submitted' };
+      const oct = new Array(31).fill(''); oct[26] = 'ЛД'; oct[27] = 'ЛД'; oct[28] = 'ЛД'; oct[29] = 'ЛД'; oct[30] = 'ЛД'; S.rows.push({ month_id: 'm-oct', staff_id: 'st-1', letters: oct, locked: {} }); return S; };
+    const o = env(MGR, { server: mk(false) }); await load(o);
+    const n = env(MGR, { server: mk(true) }); await load(n);
+    const lm = h => h.S.calls.filter(c => c.action === 'load_month').map(c => c.month).join();
+    ok('v10: две заявки load_month (ноември, после октомври)', lm(o) === '2026-11,2026-10', lm(o));
+    ok('v11: една заявка load_month — октомври идва с нея', lm(n) === '2026-11', lm(n));
+    ok('v11: grPrev — същият като при отделната заявка (редове, месец)', !!n.w.grPrev && n.w.grPrev.ym === '2026-10' && JSON.stringify(n.w.grPrev.rows) === JSON.stringify(o.w.grPrev.rows));
+    ok('v11: правилата през границата дават същото (предупрежденията)', JSON.stringify(n.w.grCalc.rows.map(r => r.warnings)) === JSON.stringify(o.w.grCalc.rows.map(r => r.warnings)));
+    const Sx = mk(true); delete Sx.months['Кърджали|2026-10-01'];
+    const e = env(MGR, { server: Sx }); await load(e);
+    ok('v11: октомври го няма (prev_month: null) → без втора заявка, седмицата — „непълна“', lm(e) === '2026-11' && e.w.grPrev === null && (e.w.grCalc.notes || []).length > 0, lm(e) + ' ' + JSON.stringify(e.w.grCalc.notes));
+  }
 
   section('10. Персонал');
   {

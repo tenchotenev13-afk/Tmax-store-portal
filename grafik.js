@@ -209,7 +209,7 @@ function grLoadMonth(seq){
     (grData.rows || []).forEach(function(r){ grRows[r.staff_id] = { letters: (r.letters || []).slice(), locked: r.locked || {} }; });
     grDirty = {}; grSaveState = ''; grSaved = {};
     (grData.rows || []).forEach(function(r){ grSaved[r.staff_id] = 1; });
-    return grLoadPrev(seq).then(function(){ return grChLoad(); }).then(function(){
+    return grLoadPrev(seq, res.data).then(function(){ return grChLoad(); }).then(function(){
       if(seq !== grLoadSeq) return;
       grRecalc();
       grRender();
@@ -286,11 +286,22 @@ function grOverviewHtml(){
 /* Предходният месец — само ако първата седмица (пон–нед) почва в него и месецът го има в
    базата. Нужен е за 56-те часа и за поредните дни през границата (ВТР чл. 19). Няма ли го
    (или няма достъп — ТРЗ виждат само подадени) — grPrev = null и седмицата е „непълна“. */
-function grLoadPrev(seq){
+function grLoadPrev(seq, cur){
   grPrev = null;
   var first = GrafikEngine.monthInfo(grMonth, []);
   if(first.dow[0] === 1) return Promise.resolve();
   var pym = grShiftMonth(grMonth, -1);
+  /* grafik-api v11 (11.11.2026): предишният месец идва в отговора на load_month — без втора заявка.
+     Няма ли ключа (сървър до v10) — както досега, отделно load_month. null — няма го / не е видим. */
+  if(cur && Object.prototype.hasOwnProperty.call(cur, 'prev_month')){
+    var pm = cur.prev_month;
+    if(pm && pm.month_row){
+      var pr = {};
+      (pm.rows || []).forEach(function(r){ pr[r.staff_id] = { letters: r.letters || [], locked: r.locked || {} }; });
+      grPrev = { setup: pm.setup || {}, ym: pym, rows: pr };
+    }
+    return Promise.resolve();
+  }
   return grApi('load_month', { store: grStore, month: pym }).then(function(res){
     if(seq !== grLoadSeq || !res.ok || !res.data || !res.data.month_row) return;
     var rows = {};

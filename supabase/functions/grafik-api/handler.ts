@@ -416,14 +416,17 @@ export async function handleGrafik(req: Request, getRepo: () => Repo, now?: numb
 
   try {
     const repo = getRepo();
-    // 2) Актуалният потребител от базата.
-    const user = await repo.getUser(String(sess.uid));
+    // 2) + 3) Актуалният потребител и списъците (grafik_access) — едновременно (v11, 11.11.2026:
+    // двете заявки са независими, а всяка последователна стъпка към базата е ~80–90 ms).
+    const [user, lists] = await Promise.all([repo.getUser(String(sess.uid)), repo.listAccess()]);
     if (!user) return json({ ok: false, reason: "forbidden", message: "Потребителят не е намерен." }, 403);
-    // 3) + 4) Списъците (grafik_access — от 04.11.2026, вместо app_settings) и видът достъп.
-    const lists = await repo.listAccess();
+    // 4) Видът достъп.
     const acc = resolveAccess(user, accessEmails(lists, "beta"), accessEmails(lists, "trz"));
     if (acc instanceof HttpError) return json({ ok: false, reason: acc.reason, message: acc.message }, acc.status);
+    const t0 = Date.now();
     const result = await dispatch(repo, acc, body);
+    // За измерване по логовете (function_logs): действие и време в dispatch — без лични данни.
+    console.log(JSON.stringify({ grafik_api: String(body.action || ""), dispatch_ms: Date.now() - t0 }));
     return json({ ok: true, ...result }, 200);
   } catch (e) {
     if (e instanceof HttpError) return json({ ok: false, reason: e.reason, message: e.message, ...(e.extra || {}) }, e.status);
@@ -462,25 +465,40 @@ async function dispatch(repo: Repo, acc: Access, b: Record<string, unknown>): Pr
     }
 
     case "load_month": {
-      const store = await needStore(repo, acc, b.store, "read");
+      // v11 (11.11.2026): заявките към базата — на три нива вместо осем (обект + месец + персонал +
+      // настройка + предишният месец едновременно, после двата списъка с редове едновременно).
+      // needStore се чака първи (отказът е 403 / 400, не грешка на данните); данните текат успоредно.
       const m = needMonth(b.month);
-      const month = await repo.getMonth(store, m.start);
-      // ТРЗ виждат само подадени месеци — черновата за тях не съществува.
+      if (typeof b.store !== "string" || !b.store) throw new HttpError(400, "bad_request", "Липсва обект.");
+      const wantPrev = b.prev === true;
+      const pmP = parseMonth(m.prev)!;
+      const storeP = needStore(repo, acc, b.store, "read");
+      const dataP = Promise.all([
+        repo.getMonth(b.store, m.start), repo.listStaff(b.store), repo.setupRaw(b.store),
+        wantPrev ? repo.getMonth(b.store, pmP.start) : Promise.resolve(null),
+      ]);
+      dataP.catch(() => {});                       // откаже ли needStore — неговата грешка, не тази
+      const store = await storeP;                   // правата / обектът — първи, данните вече текат
+      const [month, staff, raw, pm] = await dataP;
+      // ТРЗ виждат само подадени месеци — черновата за тях не съществува (и за предишния).
       if (acc.kind === "trz" && (!month || month.status !== "submitted")) {
         throw new HttpError(404, "not_submitted", "Графикът за този месец още не е подаден.");
       }
-      const staff = await repo.listStaff(store);
-      const rows = month ? await repo.listRows(month.id) : [];
-      let prevRows: RowRec[] = [];
-      if (b.prev === true && acc.kind !== "trz") {
-        const pm = await repo.getMonth(store, m.prev + "-01");
-        prevRows = pm ? await repo.listRows(pm.id) : [];
-      }
-      const setup = resolveSetup(await repo.setupRaw(store), m.start, m.end);
+      const pmSeen = !!pm && (acc.kind !== "trz" || pm.status === "submitted");
+      const [rows, pRows] = await Promise.all([
+        month ? repo.listRows(month.id) : Promise.resolve([] as RowRec[]),
+        pmSeen ? repo.listRows(pm!.id) : Promise.resolve([] as RowRec[]),
+      ]);
+      const setup = resolveSetup(raw, m.start, m.end);
       return {
         store, month: m.start, days: m.days, can_edit: canEdit(acc, store) && (!month || month.status === "draft"),
         can_reopen: acc.canReopen && canEdit(acc, store) && !!month && month.status === "submitted",
-        status: month ? month.status : "draft", month_row: month, staff, rows, prev_rows: prevRows, setup,
+        status: month ? month.status : "draft", month_row: month, staff, rows, setup,
+        // Ритъмът от предходния месец — както досега: само за тези, които редактират (не ТРЗ).
+        prev_rows: wantPrev && acc.kind !== "trz" ? pRows : [],
+        // Предишният месец за ВТР чл. 19 през границата (първата седмица) — вместо втора заявка
+        // load_month от браузъра. null — няма го или (ТРЗ) не е подаден.
+        ...(wantPrev ? { prev_month: pmSeen ? { month_row: pm, rows: pRows, setup: resolveSetup(raw, pmP.start, pmP.end) } : null } : {}),
       };
     }
 
