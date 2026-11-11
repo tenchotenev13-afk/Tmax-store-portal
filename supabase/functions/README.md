@@ -59,7 +59,7 @@ supabase functions deploy ИМЕ --project-ref xiwkdiqqplgdcrkewgtv
 | `send-oborot-report` | 9 | `index.ts` | Вечерният имейл с оборота от `daily_turnover` | **крон 14** (`45 17,18 * * *`, условие час в София = **20** → 20:45 и лятно, и зимно; от 25.10.2026) | ✅ |
 | `send-routed-report` | 16 | `index.ts` | Личният седмичен отчет по задачи (`report_groups` → отделно писмо на човек); от 19.09.2026 и **отчет по задача** — вход `{task_id, recipients}`, една картичка; при `linked_module='supply'` под нея и секция „Зареждане“ (v10); и за постоянна задача — прозорец по седмицата на `run_date` (v11); от 29.09.2026 Пазарджик и Сервиз Троян извън обектите (v14) | **крон 16** (`10 5,6 * * 1`, понеделник, условие час в София = **8** → 08:10; от 25.10.2026); тема `weekly_routed`; `dynamic-responder` (`task_report`) | ✅ |
 | `dynamic-responder` | 23 | `index.ts` | Насрочените напомняния от `notification_schedules`; `task_report` → писмо през `send-routed-report`, не push (и за постоянна задача) | **крон 11** (`*/15 * * * *`) | ✅ |
-| `kasa-access-check` | 7 | `index.ts` | Проверка на индивидуален PIN за таб История | **никой** — няма клиентска част | ✅ |
+| `kasa-access-check` | — | — | **махната 11.11.2026** (папката от репото; живата — `supabase functions delete`). Приемаше `user_id` + ПИН без ограничение на опитите; никой код не я викаше, 0 извиквания за 7 дни, 0 реда `history_pin_*` в `audit_log` (`claude/log/2026-11-11-kasa-access-check-remove.md`) | — | — |
 | `admin-users` | 1 | `index.ts` + `handler.ts` + `_shared/session.ts` | Записите в `users` от Администрация (create / update / delete) — само с админски пропуск, бели списъци на полетата | портал — `admin.js` (`adminUsers` — шестте записа в users) | ✅ |
 | `grafik-api` | 10 | `index.ts` + `handler.ts` + `repo.ts` + `_shared/session.ts` | Работен график — ЕДИНСТВЕНИЯТ път до таблиците `grafik_*` (RLS без политики). Пропуск → `users` по uid → списъците в `grafik_access` (beta / trz; до v7 — `app_settings.grafik_beta_users`) → вид достъп (ТРЗ / admin / регионален / manager / чете). Версия 10 — 05.11.2026 през CLI от `e2fe5c0` (П3: changes_save отказва работна буква без код за договора — часовете от снимката, видът ден сезон / неделя → 400 letter_contract; overview връща changes / changes_open — Repo changeStats); обратно четене 4/4 байт в байт (`ezbr_sha256` `36bd3164…7537`). Версия 9 — 05.11.2026 през CLI от `e5b43f5` („Промени“: changes_list / save / delete / trz върху grafik_changes; „Върни“ връща броя промени; ново подаване маха невалидните); обратно четене 4/4 байт в байт (`ezbr_sha256` `ec5afdea…3093`). Версия 8 — 05.11.2026 през CLI от `0fa8448` (submit спира и при ЛД в неделя; staff_save — дублирано „Име в графика“ в обекта → 409); обратно четене 4/4 байт в байт (`ezbr_sha256` `0b56f164…b188`). Версия 7 — 04.11.2026 през CLI от `3c95c27` (етап 1е-3: списъците от `grafik_access` — ТРЗ списъкът е достатъчен сам; access_list / access_add / access_remove; admin_get с vtrs и stores); обратно четене 4/4 байт в байт (`ezbr_sha256` `f0a29a48…3584`). Версия 6 — 04.11.2026 през CLI от `fbdc0b8` (етап 1е-1: overview с дружество, последна промяна, извън нормата от снимката, обхват — обекти с дружество и ВТР; Repo rowStats / userNames); обратно четене 4/4 байт в байт (`ezbr_sha256` `3056683d…5387`). Версия 5 — 04.11.2026 през CLI от `2464e86` („Подай“ спира: 409 off_norm; в месеца — всички служители на обекта по дати); обратно четене 4/4 байт в байт (`ezbr_sha256` `f3e5161c…79c7`). Версия 4 — 03.11.2026 през CLI от `5abb5a5` (season_label, сектори: sectors в setup, sector_id, sector_save); обратно четене 4/4 байт в байт (`ezbr_sha256` `e25217f2…4e28`). Версия 3 — 02.11.2026 през CLI от `8cd5ca5` (submit пропуска редовете на хора извън месеца — `staffInMonth`); обратно четене 4/4 байт в байт (`ezbr_sha256` `937f039f…00f3`). Версия 2 — 02.11.2026 през CLI от `2639033` (resolveSetup подава hours_per_day); обратно четене `download --use-api` — 4/4 байт в байт (`ezbr_sha256` `e06d79f2…f0af`, `verify_jwt` true). Версия 1 — деплой 02.11.2026 през CLI от `a3a0998` (след rebase в main — `bac4a8d`, същото съдържание на функциите); обратно четене `download --use-api` — 4/4 байт в байт (`ezbr_sha256` `2b300310…5b1a`, `verify_jwt` true). Тестове: `handler.test.ts` (deno), ръчен `repo.live-test.ts` срещу живата база | портал — `grafik.js` (етап 1г; до тогава — никой) | ✅ |
 | `set-history-pin` | 8 | `index.ts` + `_shared/session.ts` | Админ задава/ресетва PIN (4–6 цифри); от 28.09.2026 винаги иска админски пропуск, иначе 403 | **никой** — няма клиентска част | ✅ |
@@ -397,15 +397,15 @@ encoded word (`name=`), дотогава суров UTF-8. Нечист base64 (
 
 ### Готови на сървъра, но без клиентска част
 
-**`kasa-access-check`** и **`set-history-pin`** — недовършен фийчър, не счупен.
-Двете функции са ACTIVE и `users.history_pin_hash` съществува, но нито един
-файл на портала не ги вика. Достъпът до таб История в момента е **само по
+**`set-history-pin`** — недовършен фийчър, не счупен. (`kasa-access-check`, проверката на ПИН-а, е махната на 11.11.2026 — виж таблицата горе.)
+Функцията е ACTIVE и `users.history_pin_hash` съществува, но нито един
+файл на портала не я вика. Достъпът до таб История в момента е **само по
 роля**, не по PIN. Не разчитай на PIN защита, докато клиентската част не бъде
 свързана.
 
 От 28.09.2026 `set-history-pin` **винаги** иска `requireAdmin(body)` (иначе
 403, преди базата) — клиентът, който тепърва ще я вика, трябва да праща
-`session: currentSession`. `kasa-access-check` не е пипана.
+`session: currentSession`. Довършването на ПИН-а (или махането му) — отделно решение (`claude/open/11-11-history-pin-decision.md`).
 
 ## Секрети
 
@@ -413,7 +413,7 @@ encoded word (`name=`), дотогава суров UTF-8. Нечист base64 (
 
 | Променлива | Ползва се от |
 |---|---|
-| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | auth-login, auth-set-password, admin-users, kasa-access-check, set-history-pin, send-scheduled-report, send-oborot-report, dynamic-responder, bulletin-notify |
+| `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` | auth-login, auth-set-password, admin-users, set-history-pin, send-scheduled-report, send-oborot-report, send-routed-report, dynamic-responder, bulletin-notify, grafik-api |
 | `ONESIGNAL_REST_KEY` | portal-push, resend-email, swift-handler |
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_NAME` | resend-email. `SMTP_USER` = `portal@temax.bg` от 19.10.2026 (дотогава `c.teneva@temax.bg`); `SMTP_FROM_NAME` = `TeMAX`. |
 | `PORTAL_SESSION_SECRET` | auth-login (подписва пропуска), auth-set-password, set-history-pin и admin-users (проверяват го през `requireAdmin`) — всичките през `_shared/session.ts`. ≥48 случайни байта (`openssl rand -base64 48`), зададен на 28.09.2026 с `supabase secrets set`. Смяната му обезсилва всички издадени пропуски — хората влизат наново. |

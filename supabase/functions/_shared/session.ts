@@ -2,7 +2,7 @@
 // Подписан пропуск на портала: "payload.подпис", и двете base64url.
 //   payload = JSON {uid, role, email, iat, exp}, exp = iat + 12 часа (секунди)
 //   подпис  = HMAC-SHA256 върху payload-частта (низа), ключ PORTAL_SESSION_SECRET
-// Издава го auth-login. verifySession() още никой не вика — това е етап 2.
+// Издава го auth-login. Проверяват го verifySession() (grafik-api) и requireAdmin() (admin-users, auth-set-password, set-history-pin).
 // Без външни библиотеки: само crypto.subtle.
 
 export const SESSION_TTL_SECONDS = 12 * 60 * 60;

@@ -1191,6 +1191,11 @@ execute от public/anon/authenticated; `report_excluded_stores` — INVOKER;
 — подписване (ES256 + приет legacy HS256, едж функциите без ключ за JWT),
 права и политики по роля, кой ползва anon (портал, RM-app, огледало, PowerShell
 клиент, 13 крона), Storage, преди вход, открити въпроси.
+`kasa-access-check` (11.11): махната от репото — приемаше `user_id` + ПИН без
+ограничение на опитите, никой не я викаше (0 извиквания за 7 дни); живата —
+`supabase functions delete` след push. `set-history-pin` и
+`users.history_pin_hash` не са пипани — решение в
+`claude/open/11-11-history-pin-decision.md`.
 Остава: сървърна проверка на
 самоличност (ВИСОК, `claude/open-tasks.md`), OneSignal REST ключ в push.js
 (ротация), `in.(<списък>)` без горна граница (среден/висок).
