@@ -462,5 +462,50 @@ check('реално: 2–8.11 без почивен (промени в сб и �
 check('без дни с часове → реално − норма = 0 (както ПРОВЕРКА M при AI = 0)', E.presence(S11, '2026-11', [{ staff_id: 'e', hours_per_day: 8, codes: new Array(30).fill('Б'), norm: 168 }], []).rows[0].realDiff === 0);
 check('снимка без norm (стара) → норма = работни дни × договор', E.presence(S11, '2026-11', [{ staff_id: 'e', hours_per_day: 8, codes: E.computeRow(P11, M11, { hours_per_day: 8 }, wkLetters(M11, 1, 30), {}).codes }], []).rows[0].realDiff === 0);
 
+
+/* ── 12. Подсказка как да се стигне нормата (11.11.2026) ── */
+// Примерите са намерени с търсене върху ноемврийската настройка; проверката е самият computeRow.
+var HS = { hours_per_day: 8 };
+var applyHint = function (letters, h) { var a = letters.slice(); h.days.forEach(function (d) { a[d - 1] = h.kind === 'add' ? h.letter : ''; }); return a; };
+var H1 = ',,П,,,В,,ЗД,М,М,,П,ЛД,ЛД,,,ЛД,М,В,,ЗД,П,,,М,П,,,ЗД,'.split(',');
+var h1 = E.normHint(P11, M11, HS, H1, {});
+check('подсказка: не стигат 28,5 ч. → „добави една П“ на първия празен делник (2.11), обхват 8–10,5 ч.',
+  E.computeRow(P11, M11, HS, H1, {}).diff === -28.5 && !E.computeRow(P11, M11, HS, H1, {}).reachable &&
+  h1 && h1.kind === 'add' && h1.count === 1 && h1.letter === 'П' && h1.days.join() === '2' && h1.range.join() === '8,10.5', JSON.stringify(h1));
+check('…и с нея изравняването стига нормата (разлика 0)', E.computeRow(P11, M11, HS, applyHint(H1, h1), {}).diff === 0);
+var H3 = ',В,ЗД,,ЗД,,,,П,,,ЛД,В,,,,ЛД,П,,В,В,ЗД,П,,В,,,ЗД,,'.split(',');
+var h3 = E.normHint(P11, M11, HS, H3, {});
+check('не стигат 44 ч. → „добави три П“ (една и две не стигат)', h3 && h3.kind === 'add' && h3.count === 3 && h3.letter === 'П' &&
+  E.computeRow(P11, M11, HS, applyHint(H3, h3), {}).diff === 0, JSON.stringify(h3));
+var HR = 'П,М,В,М,,,М,,,ЛД,В,ЛД,,П,,,,П,ЛД,ЛД,ЗД,М,ЛД,М,П,П,В,М,В,ЛД'.split(',');
+var hr = E.normHint(P11, M11, HS, HR, {});
+check('25 ч. в повече → „махни една П“ — последната (26.11)', E.computeRow(P11, M11, HS, HR, {}).diff === 25 &&
+  hr && hr.kind === 'remove' && hr.count === 1 && hr.from === 'П' && hr.days.join() === '26' && E.computeRow(P11, M11, HS, applyHint(HR, hr), {}).diff === 0, JSON.stringify(hr));
+check('на нормата → без подсказка', E.normHint(P11, M11, HS, wkLetters(M11, 1, 30), {}) === null);
+// Заключен празен ден не се предлага; назначен от 3.11 — 2.11 не е в назначението.
+var lk = {}; lk['2'] = 'Д1/З';
+var hl = E.normHint(P11, M11, HS, H1, lk);
+check('заключен ден (2.11) не се предлага', !hl || hl.days.indexOf(2) < 0, JSON.stringify(hl));
+var hh = E.normHint(P11, M11, { hours_per_day: 8, hired_on: '2026-11-03' }, H1, {});
+check('назначен от 3.11 → предложеният ден е в назначението', !hh || hh.days.every(function (d) { return M11.dates[d - 1] >= '2026-11-03'; }), JSON.stringify(hh));
+// Назначен от 10.11, почти празен месец: дните преди назначаването НЕ се предлагат (иначе 2–5.11 „решават“ —
+// часовете им се броят, а нормата е само за дните на работа).
+var HH = ',,,,,,,,,,,М,П,ЗД,М,ЛД,В,,ЛД,,,,,П,,,,,,'.split(',');
+var hh10 = E.normHint(P11, M11, { hours_per_day: 8, hired_on: '2026-11-10' }, HH, {});
+check('назначен от 10.11: „добави четири П“ на 10, 11, 18, 20.11 — не преди назначаването', hh10 && hh10.kind === 'add' && hh10.count === 4 && hh10.days.join() === '10,11,18,20', JSON.stringify(hh10));
+// Делниците — преди съботите и неделите.
+var hw = E.normHint(P11, M11, HS, H3, {});
+check('предложените дни са делници (празни делници има)', hw.days.every(function (d) { return M11.dow[d - 1] <= 5; }), hw.days.join());
+// Договор 4 ч. (без изравняване): един ден по-малко → добави една П на 4 ч.
+var w4 = wkLetters(M11, 1, 30); var drop = w4.indexOf('П'); w4[drop] = '';
+var h4 = E.normHint(P11, M11, { hours_per_day: 4 }, w4, {});
+check('договор 4 ч.: не стигат 4 ч. → „добави една П“ (4 ч.) на освободения ден', h4 && h4.kind === 'add' && h4.count === 1 && h4.letter === 'П' && h4.range.join() === '4,4' && h4.days.join() === String(drop + 1), JSON.stringify(h4));
+// ЛД не се предлага в неделя; обхватите — от изравняването.
+check('обхват: П и ЛД в делник 8–10,5 ч. (изравняването сваля и ЛД до Д1), П / ЗД в неделя 8–9 ч.',
+  E.letterRange(P11, 'П', 1, 8).join() === '8,10.5' && E.letterRange(P11, 'ЛД', 1, 8).join() === '8,10.5' && E.letterRange(P11, 'ЗД', 7, 8).join() === '8,9' && E.letterRange(P11, 'ЛД', 7, 8) === null);
+var onlySun = new Array(30).fill(''); [1, 8, 15, 22, 29].forEach(function (d) { onlySun[d - 1] = 'ЗД'; });
+var hs = E.normHint(P11, M11, HS, onlySun, {});
+check('подсказка с „добави“ никога не слага ЛД в неделя', !hs || hs.kind !== 'add' || hs.letter !== 'ЛД' || hs.days.every(function (d) { return M11.dow[d - 1] !== 7; }));
+
 console.log('\n' + ok + ' успешни, ' + fail + ' неуспешни');
 process.exit(fail ? 1 : 0);

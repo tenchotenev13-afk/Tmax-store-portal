@@ -544,7 +544,8 @@ function grGridHtml(){
        Прагът е нормата на човека без дните Б / НО (internalNorm, grafik-engine.js). */
     var inC = x.internal < x.internalNorm ? GR_GRID_FILL.under : x.internal > x.internalNorm + 3 ? GR_GRID_FILL.over : '';
     h += '<td class="gr-int" style="' + (inC ? 'background:' + inC + ';' : '') + '" title="' + escAttrVal('вътрешни ' + grHrsTxt(x.internal) + ' ч. · праг ' + grHrsTxt(x.internalNorm) + ' ч. (норма без Б / НО)') + '">' + x.internal + '</td><td>' + x.official + '</td><td>' + tg + '</td>' +
-      '<td class="gr-diff" style="color:' + dc + ';font-weight:700;" title="' + escAttrVal(er || x.message) + '">' + (df > 0 ? '+' : '') + df + '</td></tr>';
+      '<td class="gr-diff" style="color:' + dc + ';font-weight:700;white-space:nowrap;" title="' + escAttrVal(er || x.message) + '">' + (df > 0 ? '+' : '') + df +
+      (function(){ var ht = er ? '' : grHintText(grNormHint(x)); return ht ? ' <span class="gr-hint" title="' + escAttrVal('💡 ' + ht) + '" style="cursor:help;">💡</span>' : ''; })() + '</td></tr>';
   });
   if(grp && prevSec !== null) h += grGroupCovHtml(prevSec);
   if(!grCalc.rows.length) h += '<tr><td colspan="' + (M.days + 7) + '" style="padding:14px;color:#64748b;">Няма служители в графика за месеца — добави ги от „👥 Персонал“.</td></tr>';
@@ -642,13 +643,39 @@ function grDaily(){
   var posOrder = GR_DAILY_POSITIONS.filter(function(k){ return pos[k]; }).concat(Object.keys(pos).filter(function(k){ return GR_DAILY_POSITIONS.indexOf(k) < 0; }));
   return { by: by, total: total, morning: morning, evening: evening, pos: pos, posOrder: posOrder };
 }
+/* Подсказка как да се стигне нормата (11.11.2026): само при разлика, само предложение — не се
+   записва. Кешира се по буквите и заключените на човека (сметката пробва десетки варианта). */
+var grHintCache = {};
+function grNormHint(x){
+  if(!x || x.diff === 0) return null;                  // празният ред е с разлика 0 в двигателя
+  var r = grRows[x.staff.id] || { letters: [], locked: {} };
+  var key = grMonth + '|' + x.staff.id, sig = JSON.stringify([r.letters, r.locked, x.staff.hours_per_day, x.staff.hired_on, x.staff.left_on]);
+  var c = grHintCache[key];
+  if(c && c.sig === sig) return c.hint;
+  var setup = grData.setup || {}, E = GrafikEngine;
+  var h = E.normHint(E.prepare(setup), E.monthInfo(grMonth, setup.extra_days), x.staff, r.letters || [], r.locked || {}) || { kind: 'many', diff: x.diff };
+  grHintCache[key] = { sig: sig, hint: h };
+  return h;
+}
+var GR_COUNT_WORD = { 1: 'една', 2: 'две', 3: 'три', 4: 'четири' };
+function grHintText(h){
+  if(!h) return '';
+  if(h.kind === 'many') return h.diff < 0 ? 'не стигат и четири смени повече — попълни още дни' : 'над четири смени в повече — махни дни';
+  var cnt = GR_COUNT_WORD[h.count] || h.count, days = h.days.slice().sort(function(p, q){ return p - q; }).map(grChDayLabel).join(', ').replace(/, ([^,]*)$/, ' и $1');
+  var rng = h.range ? ' (' + (h.range[0] === h.range[1] ? grHrsTxt(h.range[0]) : grHrsTxt(h.range[0]) + '–' + grHrsTxt(h.range[1])) + ' ч.)' : '';
+  if(h.kind === 'add') return 'добави ' + cnt + ' ' + h.letter + rng + ', напр. на ' + days;
+  return 'махни ' + cnt + ' ' + h.from + ', напр. на ' + days;
+}
 function grWarningsHtml(){
   var list = [];
   grCalc.rows.forEach(function(x){
     var name = x.staff.short_name || x.staff.full_name;
     var er = grEmptyRow(x);
     if(er) list.push({ t: 'norow', s: name + ': ' + er });
-    if(x.diff !== 0) list.push({ t: 'norm', s: name + ': ' + x.message + (x.reachable ? '' : ' — изравняването не намира точна комбинация, кодовете не са пипнати') });
+    if(x.diff !== 0){
+      var ht = er ? '' : grHintText(grNormHint(x));
+      list.push({ t: 'norm', s: name + ': ' + x.message + (x.reachable ? '' : ' — изравняването не намира точна комбинация, кодовете не са пипнати') + (ht ? ' · 💡 ' + ht : '') });
+    }
     var seen = {};
     x.warnings.forEach(function(w){
       var key = w.type + ':' + w.day;
@@ -848,10 +875,31 @@ function grKey(e){
   if(k && k.length === 1 && /[\wА-Яа-я]/.test(k)){
     e.preventDefault();
     grAnc = null;
+    /* 11.11.2026: завършена стойност → курсорът надясно (следващия ден). „О“ (може да е „О4“) и
+       „1“ (10–12) чакат следващия клавиш; не продължи ли той стойността, тя се записва и клавишът
+       почва следващия ден. Enter — надолу, Tab — надясно, както досега. */
+    if(grEdit && grNormalize(grEdit) !== null && !grCouldBe(grEdit + k)){
+      if(grCommitEdit()) grMove(0, 1);
+    }
     grEdit = (grEdit + k).slice(0, 3);
+    if(grNormalize(grEdit) !== null && !grHasLonger(grEdit)){
+      if(grCommitEdit()) grMove(0, 1);
+      grRender(); grEnsureVisible(); return;
+    }
     grRender();
   }
 }
+/* Частично въведеното, нормализирано като в grNormalize (латиница → кирилица, 0 → О). */
+function grPartial(t){
+  t = String(t || '');
+  if(/^\d+$/.test(t)) return t;
+  var u = '';
+  for(var i = 0; i < t.length; i++){ var ch = t.charAt(i); u += GR_LATIN[ch.toLowerCase()] || ch.toUpperCase(); }
+  return u.replace(/^O/, 'О').replace(/^О0$/, 'О');
+}
+function grCandidates(){ return grAllowedLetters().concat(['1','2','3','4','5','6','7','8','9','10','11','12']); }
+function grCouldBe(t){ var p = grPartial(t); return grCandidates().some(function(c){ return c.indexOf(p) === 0; }); }
+function grHasLonger(t){ var p = grPartial(t); return grCandidates().some(function(c){ return c.length > p.length && c.indexOf(p) === 0; }); }
 /* Поставяне от Excel: редове с табулации, от избраната клетка надясно и надолу. */
 function grPaste(e){
   if(!grCanEdit() || !grCalc) return;

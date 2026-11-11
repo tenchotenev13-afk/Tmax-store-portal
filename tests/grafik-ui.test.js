@@ -246,17 +246,34 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
 
   section('3. Клавиатура и автозапис');
   h.w.grSelect(0, 1);                                  // 2.11 (пн)
-  typeIn(h, 'p'); key(h, 'Enter');
-  ok('„p“ на латиница → П', cellText(h, 0, 1) === 'П', cellText(h, 0, 1));
-  ok('Enter мести надолу', h.w.grSel.r === 1 && h.w.grSel.d === 1);
-  typeIn(h, 'ЛД'); key(h, 'Tab');
-  ok('„ЛД“ на кирилица, Tab надясно', cellText(h, 1, 1) === 'ЛД' && h.w.grSel.d === 2);
-  typeIn(h, '9'); key(h, 'ArrowRight');
-  ok('число 9 (свободни часове) се приема', cellText(h, 1, 2) === '9');
+  typeIn(h, 'p');
+  ok('„p“ на латиница → П и курсорът сам НАДЯСНО (3.11), не надолу', cellText(h, 0, 1) === 'П' && h.w.grSel.r === 0 && h.w.grSel.d === 2, cellText(h, 0, 1) + ' ' + JSON.stringify(h.w.grSel));
+  h.w.grSelect(1, 1);
+  typeIn(h, 'Л');
+  ok('„Л“ — още не е буква: курсорът стои', h.w.grSel.d === 1 && h.w.grEdit === 'Л');
+  typeIn(h, 'Д');
+  ok('„ЛД“ на кирилица — след „Д“ надясно, без Tab', cellText(h, 1, 1) === 'ЛД' && h.w.grSel.r === 1 && h.w.grSel.d === 2);
+  typeIn(h, 'О');
+  ok('„О“ чака (може да е „О4“) — курсорът стои', h.w.grSel.d === 2 && h.w.grEdit === 'О');
+  key(h, 'Enter');
+  ok('Enter записва „О“ и мести НАДОЛУ', cellText(h, 1, 2) === 'О' && h.w.grSel.r === 2 && h.w.grSel.d === 2);
+  h.w.grSelect(1, 3); typeIn(h, 'О4');
+  ok('„О4“ → надясно', cellText(h, 1, 3) === 'О4' && h.w.grSel.d === 4);
+  typeIn(h, '1');
+  ok('„1“ чака (10–12)', h.w.grSel.d === 4 && h.w.grEdit === '1');
+  typeIn(h, 'П');
+  ok('„1“ и после „П“ → 1 на 5.11, П на 6.11, курсорът на 7.11', cellText(h, 1, 4) === '1' && cellText(h, 1, 5) === 'П' && h.w.grSel.d === 6);
+  typeIn(h, '9');
+  ok('число 9 (свободни часове) се приема и мести надясно', cellText(h, 1, 6) === '9' && h.w.grSel.d === 7);
+  h.w.grSelect(1, 8); typeIn(h, '12');
+  ok('„12“ → надясно', cellText(h, 1, 8) === '12' && h.w.grSel.d === 9);
+  h.w.grSelect(1, 10); typeIn(h, 'о'); key(h, 'Tab');
+  ok('„о“ + Tab → „О“ и надясно', cellText(h, 1, 10) === 'О' && h.w.grSel.d === 11);
   typeIn(h, 'х'); key(h, 'Enter');
-  ok('непозната буква → съобщение, клетката остава празна', cellText(h, 1, 3) === '' && h.calls.toast.some(t => /Непозната стойност/.test(t)));
-  h.w.grSelect(1, 2); key(h, 'Delete');
-  ok('Delete изтрива', cellText(h, 1, 2) === '');
+  ok('непозната буква → съобщение, клетката остава празна, курсорът стои', cellText(h, 1, 11) === '' && h.w.grSel.d === 11 && h.calls.toast.some(t => /Непозната стойност/.test(t)));
+  for (const dd of [2, 3, 4, 5, 6, 8, 10]) { h.w.grSelect(1, dd); key(h, 'Delete'); }
+  h.w.grSelect(1, 2);
+  ok('Delete изтрива', cellText(h, 1, 2) === '' && cellText(h, 1, 6) === '');
   await wait(1000); await ticks();
   const sv = lastSave(h);
   ok('автозаписът праща save_rows за двамата', sv && sv.rows.length === 2 && sv.store === 'Кърджали' && sv.month === '2026-11', sv && JSON.stringify(sv.rows.map(r => r.staff_id)));
@@ -274,7 +291,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
   ok('непознатото „zz“ е пропуснато със съобщение', h.calls.toast.some(t => /непознати \(пропуснати\) 1/.test(t)));
   const diff0 = M.querySelectorAll('.gr-diff');
   ok('разлика 0 за 21 × П (168 ч.) — зелено', diff0[0] && diff0[0].textContent === '0' && /16a34a/.test(diff0[0].getAttribute('style')), diff0[0] && diff0[0].textContent);
-  ok('4-часовият: П (4 ч. договор) → Д5/1; 1 ден → разлика −80 (червено)', h.w.grCalc.rows[2].codes[1] === 'Д5/1' && diff0[2].textContent === '-80' && /dc2626/.test(diff0[2].getAttribute('style')), h.w.grCalc.rows[2].codes[1] + ' ' + (diff0[2] && diff0[2].textContent));
+  ok('4-часовият: П (4 ч. договор) → Д5/1; 1 ден → разлика −80 (червено)', h.w.grCalc.rows[2].codes[1] === 'Д5/1' && diff0[2].firstChild.textContent.trim() === '-80' && /dc2626/.test(diff0[2].getAttribute('style')), h.w.grCalc.rows[2].codes[1] + ' ' + (diff0[2] && diff0[2].textContent));
 
   section('5. Автоматично изравняване — видимо, заключване');
   h.w.grSelect(0, 2); typeIn(h, 'ЛД'); key(h, 'Enter');           // +2.5 над нормата
@@ -1292,7 +1309,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
       wrap() !== w0 && wrap().scrollLeft === 500 && wrap().scrollTop === 30 && W.grSel.r === 1 && W.grSel.d === 20, wrap().scrollLeft + ' / ' + wrap().scrollTop);
     ok('т.1: избраната клетка е 21-ви ден на втория ред', /outline:2px solid #2563eb/.test(d.getElementById('gr-c-1-20').getAttribute('style')));
     // Писане на буква (пълен рендер при всеки клавиш) — пак на място.
-    W.grKey({ key: 'В', preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });
+    W.grKey({ key: 'О', preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });   // „О“ чака — курсорът стои
     ok('т.1: писането в клетката също не мести изгледа', wrap().scrollLeft === 500 && wrap().scrollTop === 30);
     W.grKey({ key: 'Escape', preventDefault() {} });
     // Сгъваемите блокове пазят състоянието си при рендер.
@@ -1442,7 +1459,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('т.5: записът — save_rows, както досега (Иван 6.11 = П)', sv && sv.rows.some(r => r.staff_id === 'st-1' && r.letters[5] === 'П'), sv && JSON.stringify(sv.rows.map(r => r.staff_id)));
 
     /* ── т.6 ── */
-    W.grSelect(0, 1); typeIn(x, 'П'); key(x, 'Tab'); typeIn(x, 'П'); key(x, 'Tab');
+    W.grSelect(0, 1); typeIn(x, 'П'); typeIn(x, 'П');             // буквата мести надясно сама
     W.grSelect(0, 1); ev(cell(0, 4), 'click', { shiftKey: true });           // П П _ _
     const fh = cell(0, 4).querySelector('.gr-fill');
     ok('т.6: квадратчето е в долния десен ъгъл на избора (и само там)', !!fh && d.querySelectorAll('#gr-grid .gr-fill').length === 1);
@@ -1457,7 +1474,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('т.6: пускане → 2 на 2 до 15.11: П П _ _ П П _ _ П П _ _ П П', m14 === 'П П _ _ П П _ _ П П _ _ П П', m14);
     ok('т.6: „Попълнени …“ и изборът — целият попълнен правоъгълник', /^Попълнени \d+ клетки\.$/.test(x.calls.toast.slice(-1)[0]) && W.grRange().d0 === 1 && W.grRange().d1 === 14 && d.querySelectorAll('#gr-grid td.gr-insel').length === 14);
     // 5+2 за двама наведнъж: Иван (ред 2) и Петя (ред 3), 2.11–8.11, до края на месеца.
-    for (const r of [1, 2]) { W.grSelect(r, 1); for (let i = 0; i < 7; i++) { if (i < 5) typeIn(x, r === 1 ? 'П' : 'В'); else key(x, 'Delete'); key(x, 'Tab'); } }
+    for (const r of [1, 2]) { W.grSelect(r, 1); for (let i = 0; i < 7; i++) { if (i < 5) typeIn(x, r === 1 ? 'П' : 'В'); else { key(x, 'Delete'); key(x, 'Tab'); } } }
     W.grSelect(1, 1); ev(cell(2, 7), 'click', { shiftKey: true });
     ev(cell(2, 7).querySelector('.gr-fill'), 'mousedown'); ev(cell(2, 29), 'mouseover'); ev(d, 'mouseup');
     const wk = id => L(id).slice(1, 30).map(v => v || '_').join('');
@@ -1583,6 +1600,50 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     const keep = y.w.grCalc; y.w.grCalc = { rows: [], month: keep.month };
     ok('без хора в месеца — без долен блок', y.w.grFootHtml() === '');
     y.w.grCalc = keep;
+  }
+
+
+  section('23. Подсказка как да се стигне нормата (11.11.2026)');
+  {
+    const S = makeServer();
+    S.months['Кърджали|2026-11-01'] = { id: 'm-h', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+    const H1 = ',,П,,,В,,ЗД,М,М,,П,ЛД,ЛД,,,ЛД,М,В,,ЗД,П,,,М,П,,,ЗД,'.split(',');                 // не стигат 28,5 ч.
+    const wd = h.w.GrafikEngine.monthInfo('2026-11', []);
+    const P4 = wd.dow.map(w => (w <= 5 ? 'П' : '')); const drop = P4.indexOf('П'); P4[drop] = '';      // 4 ч.: един делник по-малко
+    S.rows.push({ month_id: 'm-h', staff_id: 'st-1', letters: H1, locked: {} }, { month_id: 'm-h', staff_id: 'st-3', letters: P4, locked: {} });
+    const x = env(MGR, { server: S }); await load(x);
+    const d = x.doc, W = x.w;
+    const diffCell = id => d.getElementById('gr-row-' + id).querySelector('.gr-diff');
+    const hintOf = id => { const s = diffCell(id).querySelector('.gr-hint'); return s ? s.getAttribute('title') : null; };
+    ok('до човека (колона „Разл.“): 💡 с „добави една П (8–10,5 ч.), напр. на 02.11 Пн“', hintOf('st-1') === '💡 добави една П (8–10,5 ч.), напр. на 02.11 Пн', hintOf('st-1'));
+    ok('числото на разликата остава първо (−28,5 → „-28.5“)', diffCell('st-1').firstChild.textContent.trim() === '-28.5', diffCell('st-1').textContent);
+    const wn = Array.from(d.querySelectorAll('#gr-warnings li.gr-warn-norm')).map(li => li.textContent);
+    ok('в предупреждението — същата подсказка след съобщението', wn.some(t => /^ИВАН: не стигат 28\.5 ч\. — изравняването не намира точна комбинация, кодовете не са пипнати · 💡 добави една П \(8–10,5 ч\.\), напр\. на 02\.11 Пн$/.test(t)), JSON.stringify(wn));
+    ok('договор 4 ч.: „добави една П (4 ч.)“ на освободения ден', hintOf('st-3') === '💡 добави една П (4 ч.), напр. на ' + W.grChDayLabel(drop + 1), hintOf('st-3'));
+    ok('нищо не се записва само (буквите на Иван са същите, няма запис)', JSON.stringify(W.grRows['st-1'].letters) === JSON.stringify(H1) && !x.S.calls.some(c => c.action === 'save_rows'));
+    ok('Мария (без нито един ден) — без 💡 (там съобщението е „0 ч.“)', !hintOf('st-2'));
+    // Много далеч от нормата (пет дни за месеца) — четири смени не стигат: казва го, вместо да мълчи.
+    W.grRows['st-2'] = { letters: ['', 'П', 'П', 'П', 'П', 'П'], locked: {} }; W.grRecalc(); W.grRender();
+    ok('пет дни за месеца → „💡 не стигат и четири смени повече — попълни още дни“', hintOf('st-2') === '💡 не стигат и четири смени повече — попълни още дни', hintOf('st-2'));
+    W.grRows['st-2'] = { letters: [], locked: {} }; W.grRecalc(); W.grRender();
+    // Изпълнена подсказка → разлика 0, без 💡.
+    W.grSelect(0, 1); typeIn(x, 'П');
+    ok('след „П“ на 02.11 — Иван на нормата, без 💡', diffCell('st-1').firstChild.textContent.trim() === '0' && !hintOf('st-1'), diffCell('st-1').textContent);
+    // Кешът се обновява при промяна.
+    W.grSelect(0, 1); key(x, 'Delete');
+    ok('изтрито пак → подсказката се връща (кешът следи буквите)', hintOf('st-1') === '💡 добави една П (8–10,5 ч.), напр. на 02.11 Пн');
+    // Друга разлика → друга подсказка (кешът следи буквите, не само заключените).
+    W.grSelect(0, 11); key(x, 'Delete');                                         // махнат П на 12.11 → не стигат 36,5 ч.
+    ok('махната П (12.11) → нова подсказка, не старата от кеша', hintOf('st-1') && hintOf('st-1') !== '💡 добави една П (8–10,5 ч.), напр. на 02.11 Пн', hintOf('st-1'));
+    W.grSelect(0, 11); typeIn(x, 'П');
+    // „Махни две“ — дните подредени по дата (подсказката ги дава от края).
+    W.grRows['st-1'] = { letters: ',П,В,ЗД,П,В,П,,ЗД,,ЗД,М,В,ЛД,,М,,ЛД,ЛД,В,ЛД,ЗД,М,,В,,П,М,ЗД,М'.split(','), locked: {} }; W.grRecalc(); W.grRender();
+    ok('„махни две П, напр. на 07.11 Сб и 27.11 Пт“ — дните по ред', hintOf('st-1') === '💡 махни две П, напр. на 07.11 Сб и 27.11 Пт', hintOf('st-1'));
+    W.grRows['st-1'] = { letters: H1.slice(), locked: {} }; W.grRecalc(); W.grRender();
+    const keep = W.GrafikEngine.normHint; let n = 0; W.GrafikEngine.normHint = function () { n++; return keep.apply(this, arguments); };
+    W.grRender(); W.grRender();
+    ok('без промяна в буквите — без ново смятане (кеш)', n === 0, n);
+    W.GrafikEngine.normHint = keep;
   }
 
 

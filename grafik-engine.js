@@ -287,6 +287,68 @@
     };
   };
 
+  /* ── Подсказка, когато изравняването не стига (11.11.2026) ──────────────
+     Най-малката промяна в БУКВИТЕ, след която нормата е постижима: една, после две, три,
+     четири еднакви — добави или махни. „Смени ЛД с П“ няма: при изравняването всички работни
+     букви в делник имат един и същ обхват (8 ч. → пълната смяна), в неделя — също един, тоест
+     смяната на буквата не мести нищо (проверено 11.11.2026 върху настройката за ноември). Проверката е самият computeRow — същите граници на
+     изравняването (moves) и същите правила. Нищо не се записва; връща предложението или null.
+     Ден: за „добави“ — първите празни дни в назначението (делник преди събота и неделя, без
+     празници); за „махни“ — последните дни с тази буква (незаключени). */
+  E.HINT_LETTERS = ['П', 'ЛД', 'ЗД', 'В', 'М'];
+  E.letterRange = function (P, letter, w, hpd) {
+    if (letter === 'ЛД' && w === 7) return null;                    // ЛД в неделя — грешка (computeRow)
+    var code = E.translate(P, letter, w, hpd);
+    if (!code) return null;
+    var h = E.codeHours(P, code), lo = h, hi = h;
+    if (hpd >= 8) moves(P, code, w).forEach(function (m) { lo = Math.min(lo, h + m[0]); hi = Math.max(hi, h + m[0]); });
+    return [lo, hi];
+  };
+  E.normHint = function (P, M, staff, letters, locked) {
+    locked = locked || {};
+    var hpd = staff && staff.hours_per_day ? +staff.hours_per_day : 8;
+    var base = [];
+    for (var i = 0; i < M.days; i++) base.push((letters && letters[i]) || '');
+    if (E.computeRow(P, M, staff, base, locked).diff === 0) return null;
+    var lo = staff && staff.hired_on && staff.hired_on > M.start ? staff.hired_on : M.start;
+    var hi = staff && staff.left_on && staff.left_on < M.end ? staff.left_on : M.end;
+    var free = [];
+    for (i = 0; i < M.days; i++) if (!base[i] && !locked[i + 1] && M.dates[i] >= lo && M.dates[i] <= hi && !M.holiday[i]) free.push(i);
+    free.sort(function (a, b) { return (M.dow[a] >= 6 ? 1 : 0) - (M.dow[b] >= 6 ? 1 : 0) || a - b; });
+    var lastOf = function (Y) {                                   // последните дни с буквата, от края
+      var out = [];
+      for (var j = M.days - 1; j >= 0; j--) if (base[j] === Y && !locked[j + 1]) out.push(j);
+      return out;
+    };
+    var solves = function (edits) {
+      var arr = base.slice();
+      for (var k = 0; k < edits.length; k++) {
+        var e = edits[k];
+        if (e.to && !E.translate(P, e.to, M.dow[e.i], hpd)) return false;   // буквата няма код за деня / договора
+        if (e.to === 'ЛД' && M.dow[e.i] === 7) return false;                 // ЛД в неделя — грешка
+        arr[e.i] = e.to;
+      }
+      return E.computeRow(P, M, staff, arr, locked).diff === 0;
+    };
+    var present = E.HINT_LETTERS.filter(function (Y) { return base.indexOf(Y) >= 0; }), b, Y, ds;
+    for (var n = 1; n <= 4; n++) {
+      // добави n еднакви
+      for (var a = 0; a < E.HINT_LETTERS.length; a++) {
+        var X = E.HINT_LETTERS[a], ok = free.filter(function (d) { return !!E.translate(P, X, M.dow[d], hpd) && !(X === 'ЛД' && M.dow[d] === 7); });
+        for (var s = 0; s + n <= ok.length && s < 8; s++) {
+          var days = ok.slice(s, s + n);
+          if (solves(days.map(function (d) { return { i: d, to: X }; }))) return { kind: 'add', count: n, letter: X, days: days.map(function (d) { return d + 1; }), range: E.letterRange(P, X, M.dow[days[0]], hpd) };
+        }
+      }
+      // махни n еднакви (последните)
+      for (b = 0; b < present.length; b++) {
+        Y = present[b]; ds = lastOf(Y).slice(0, n);
+        if (ds.length === n && solves(ds.map(function (d) { return { i: d, to: '' }; }))) return { kind: 'remove', count: n, from: Y, days: ds.map(function (d) { return d + 1; }) };
+      }
+    }
+    return null;
+  };
+
   /* ── Почивки и седмични часове (ВТР чл. 19, от 01.11.2026; ТЦД 3 / ТЦД 4 / Темакс Юг) ──
      смяна до 12 ч.; работна седмица до 56 ч.; междудневна почивка ≥ 12 ч.; междуседмична ≥ 36 ч.
      От 04.11.2026 кодовете имат начало/край (grafik_vtr_codes.start_time / end_time — рамката
