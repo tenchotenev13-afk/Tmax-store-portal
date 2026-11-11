@@ -119,6 +119,8 @@ const SHARED_FNS = [
   'reportMinusMultiPct', 'reportMinusMultiWeekTotal', 'reportMinusMultiWeek', 'reportMinusMultiWeekHtml',
   /* „Общи проблеми в няколко обекта" (v64, 30.10.2026) — само без обхват. */
   'reportMinusMultiCommon', 'reportMinusMultiCommonHtml',
+  /* клиентските поръчки — отделна секция (11.11.2026) */
+  'reportMinusMultiCoIds', 'reportMinusMultiIsCo', 'reportMinusMultiCoGroup', 'reportMinusMultiCoHtml',
   'reportTransitListHtml', 'reportWarehousePendingHtml',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',
   'buildCrossModuleSectionHtml', 'buildDailyReportHtml', 'buildWeeklyReportHtml'

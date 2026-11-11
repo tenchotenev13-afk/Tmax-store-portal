@@ -198,7 +198,8 @@ function install(h, db) {
   const m = src.match(/if \(type === 'minus_multi'\) \{[\s\S]*?\n    \}\n/);
   const br = m ? m[0] : '';
   ok('срязването подава обхвата: reportMinusMultiForStores(mmData, p.stores, p.scoped)', /reportMinusMultiForStores\(mmData, p\.stores, p\.scoped\)/.test(br));
-  ok('dry_run по получател: common { items, reasons } или null', /common: j\.sub\.common \? \{ items:j\.sub\.common\.items\.length, reasons:j\.sub\.common\.reasons\.length \} : null/.test(br));
+  /* От v67 (11.11.2026) dry_run носи и reason_labels — проверката е за двете полета. */
+  ok('dry_run по получател: common { items, reasons, … } или null', /common: j\.sub\.common \? \{ items:j\.sub\.common\.items\.length, reasons:j\.sub\.common\.reasons\.length[,\s}]/.test(br) && /\} : null,/.test(br));
   ok('бележката v64 описва частта', /v64 \(01\.11\.2026\)[^\n]*\n[^\n]*Общи проблеми в няколко обекта/.test(src));
   report();
 }).catch(function (e) { console.error(e); process.exit(1); });

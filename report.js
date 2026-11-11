@@ -4184,8 +4184,75 @@ function reportMinusMultiRefSunday(todayISO){
   return reportMinusMultiAddDays(todayISO, -(dow === 0 ? 7 : dow));
 }
 function reportMinusMultiDM(iso){ var s = String(iso || ''); return s.slice(8, 10) + '.' + s.slice(5, 7); }
-/* Чисто групиране, без заявки. rows — 955 в прозореца (всякакъв ред). */
-function reportMinusMultiGroup(rows, stores, count, days, refISO){
+/* „Клиентска поръчка" (Теодор 09–11.11.2026, Тенчо 11.11): минус с причина, чийто
+   minus_reasons.requires_note е true — по флага, не по id / етикет. Без причина —
+   НЕ е клиентска поръчка. → { id: true } */
+function reportMinusMultiCoIds(reasons){
+  var out = {};
+  (Array.isArray(reasons) ? reasons : []).forEach(function(r){ if (r && r.id != null && r.requires_note === true) out[String(r.id)] = true; });
+  return out;
+}
+function reportMinusMultiIsCo(m, coIds){
+  return !!m && m.reason_id !== null && m.reason_id !== undefined && m.reason_id !== '' && !!coIds[String(m.reason_id)];
+}
+/* „Повтарящи се по клиентски поръчки" — отделна секция: само минусите с клиентска
+   поръчка, C+ за D дни по обект + материал (същият прозорец и праг); вместо
+   становище — бележките им (номер / дата), без „без становище". Артикул с двата
+   вида минуси може да е и тук, и в основната секция, всяка със свой брой. */
+function reportMinusMultiCoGroup(rows, stores, count, days, refISO, reasons){
+  var coIds = reportMinusMultiCoIds(reasons);
+  var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
+  var groups = {}, order = [];
+  (Array.isArray(rows) ? rows : []).slice().sort(function(a, b){
+    return String(a.posting_date).localeCompare(String(b.posting_date)) ||
+      String(a.mat_doc).localeCompare(String(b.mat_doc), undefined, { numeric: true }) ||
+      String(a.doc_item).localeCompare(String(b.doc_item), undefined, { numeric: true });
+  }).forEach(function(m){
+    if (!m || String(m.mvt_type) !== '955' || !reportMinusMultiIsCo(m, coIds)) return;
+    var dt = String(m.posting_date || '').slice(0, 10);
+    if (dt < fromISO || dt > refISO || stores.indexOf(m.store_name) < 0) return;
+    var k = m.store_name + '\u0001' + m.material;
+    if (!groups[k]) { groups[k] = { store: m.store_name, material: String(m.material), desc: '', dates: [], notes: [] }; order.push(k); }
+    var g = groups[k];
+    if (m.material_desc) g.desc = m.material_desc;
+    g.dates.push(dt);
+    var n = String(m.note || '').trim();
+    if (n && g.notes.indexOf(n) < 0) g.notes.push(n);
+  });
+  var out = { stores: [], total: 0 };
+  stores.forEach(function(s){
+    var items = order.map(function(k){ return groups[k]; }).filter(function(g){ return g.store === s && g.dates.length >= count; });
+    if (!items.length) return;
+    items.sort(function(a, b){ return b.dates.length - a.dates.length || a.material.localeCompare(b.material, undefined, { numeric: true }); });
+    out.stores.push({ store: s, items: items });
+    out.total += items.length;
+  });
+  return out;
+}
+function reportMinusMultiCoHtml(c){
+  if (!c) return '';
+  var th = function(t){ return '<th style="padding:6px;font-size:11px;font-weight:700;color:#475569;text-align:left;border-bottom:2px solid #e2e8f0;">' + t + '</th>'; };
+  var td = function(h, extra){ return '<td style="padding:6px;font-size:12px;color:#1e293b;vertical-align:top;border-bottom:1px solid #eef1f6;' + (extra || '') + '">' + h + '</td>'; };
+  var h = '<div class="mm-co" style="font-size:13px;font-weight:700;color:#1E2761;margin:22px 0 4px;padding-top:12px;border-top:2px solid #e2e8f0;">Повтарящи се по клиентски поръчки</div>';
+  if (!c.total) return h + '<div class="mm-co-empty" style="font-size:12px;color:#64748b;">Няма артикул с повтарящи се минуси по клиентски поръчки.</div>';
+  h += '<div style="font-size:12px;color:#475569;margin-bottom:6px;">Артикули: <b>' + c.total + '</b></div>';
+  c.stores.forEach(function(s){
+    h += '<div class="mm-co-store" style="font-size:13px;font-weight:700;color:#1E2761;margin:12px 0 4px;">' + esc(s.store) + ' (' + s.items.length + ')</div>';
+    h += '<table style="width:100%;border-collapse:collapse;"><tr>' + th('Код') + th('Описание') + th('Брой') + th('Дати') + th('Поръчки') + '</tr>';
+    s.items.forEach(function(g){
+      h += '<tr class="mm-co-item">' + td(esc(g.material), 'white-space:nowrap;') + td(esc(g.desc)) +
+        td(String(g.dates.length), 'text-align:center;font-weight:700;') + td(g.dates.map(reportMinusMultiDM).join(', ')) +
+        td(g.notes.length ? esc(g.notes.join('; ')) : '<span style="color:#94a3b8;">—</span>') + '</tr>';
+    });
+    h += '</table>';
+  });
+  return h;
+}
+/* Чисто групиране, без заявки. rows — 955 в прозореца (всякакъв ред). reasons
+   (по желание) — minus_reasons с requires_note: минусите с клиентска поръчка НЕ
+   влизат тук (11.11.2026) — те са в reportMinusMultiCoGroup. */
+function reportMinusMultiGroup(rows, stores, count, days, refISO, reasons){
+  var coIds = reportMinusMultiCoIds(reasons);
   var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
   var cmp = function(a, b){
     return String(a.posting_date).localeCompare(String(b.posting_date)) ||
@@ -4194,7 +4261,7 @@ function reportMinusMultiGroup(rows, stores, count, days, refISO){
   };
   var groups = {}, order = [];
   (Array.isArray(rows) ? rows : []).slice().sort(cmp).forEach(function(m){
-    if (!m || String(m.mvt_type) !== '955') return;
+    if (!m || String(m.mvt_type) !== '955' || reportMinusMultiIsCo(m, coIds)) return;
     var dt = String(m.posting_date || '').slice(0, 10);
     if (dt < fromISO || dt > refISO || stores.indexOf(m.store_name) < 0) return;
     var k = m.store_name + '\u0001' + m.material;
@@ -4277,9 +4344,12 @@ function reportMinusMultiWeekHtml(w){
 function reportMinusMultiCommon(rows, stores, days, refISO, reasons){
   var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
   var lbl = {}, mats = {}, rsn = {};
+  /* Минусите с клиентска поръчка не се броят нито в артикулите, нито в причините
+     (Теодор 09.11.2026). */
+  var coIds = reportMinusMultiCoIds(reasons);
   (Array.isArray(reasons) ? reasons : []).forEach(function(r){ if (r && r.id != null) lbl[String(r.id)] = String(r.label || ''); });
   (Array.isArray(rows) ? rows : []).forEach(function(m){
-    if (!m || String(m.mvt_type) !== '955') return;
+    if (!m || String(m.mvt_type) !== '955' || reportMinusMultiIsCo(m, coIds)) return;
     var dt = String(m.posting_date || '').slice(0, 10);
     if (dt < fromISO || dt > refISO || stores.indexOf(m.store_name) < 0) return;
     var mk = String(m.material);
@@ -4334,10 +4404,10 @@ function collectMinusMultiReportData(refISO, cb){
     var stores = String(val('minus_stores') || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
     var count = reportMinusMultiPosInt(val('minus_multi_count'), REPORT_MINUS_MULTI_COUNT);
     var days = reportMinusMultiPosInt(val('minus_multi_days'), REPORT_MINUS_MULTI_DAYS);
-    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO), common: reportMinusMultiCommon([], [], days, refISO, []) })); return; }
+    if (!stores.length) { cb(Object.assign(reportMinusMultiGroup([], [], count, days, refISO), { week: reportMinusMultiWeek([], [], refISO), common: reportMinusMultiCommon([], [], days, refISO, []), co: reportMinusMultiCoGroup([], [], count, days, refISO, []) })); return; }
     var fromISO = reportMinusMultiAddDays(refISO, -(days - 1));
     var inStores = '&store_name=in.(' + stores.map(function(s){ return encodeURIComponent('"' + s + '"'); }).join(',') + ')';
-    return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action,reason_id' +
+    return reportGetAll('minus_movements', 'select=id,store_name,material,material_desc,mvt_type,posting_date,mat_doc,doc_item,action,reason_id,note' +
       '&mvt_type=eq.955' + inStores +
       '&posting_date=gte.' + fromISO + '&posting_date=lte.' + refISO + '&order=id.asc').then(function(rows){
       if (rows.partial) { cb(null); return; }
@@ -4345,11 +4415,12 @@ function collectMinusMultiReportData(refISO, cb){
       return reportGetAll('minus_movements', 'select=id,store_name,mvt_type,posting_date' + inStores +
         '&posting_date=gte.' + reportMinusMultiAddDays(refISO, -13) + '&order=id.asc').then(function(wk){
         if (wk.partial) { cb(null); return; }
-        /* „Общи проблеми" — имената на причините; непълно → без писмо. */
-        return reportGetAll('minus_reasons', 'select=id,label&order=id.asc').then(function(rs){
+        /* „Общи проблеми" — имената на причините; requires_note — коя е клиентска
+           поръчка (отделна секция, 11.11.2026); непълно → без писмо. */
+        return reportGetAll('minus_reasons', 'select=id,label,requires_note&order=id.asc').then(function(rs){
           if (rs.partial) { cb(null); return; }
-          cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO), { week: reportMinusMultiWeek(wk, stores, refISO),
-            common: reportMinusMultiCommon(rows, stores, days, refISO, rs) }));
+          cb(Object.assign(reportMinusMultiGroup(rows, stores, count, days, refISO, rs), { week: reportMinusMultiWeek(wk, stores, refISO),
+            common: reportMinusMultiCommon(rows, stores, days, refISO, rs), co: reportMinusMultiCoGroup(rows, stores, count, days, refISO, rs) }));
         });
       });
     });
@@ -4381,7 +4452,7 @@ function reportMinusMultiHtml(data){
       body += '</table>';
     });
   }
-  body = reportMinusMultiWeekHtml(d.week) + body + reportMinusMultiCommonHtml(d.common);
+  body = reportMinusMultiWeekHtml(d.week) + body + reportMinusMultiCoHtml(d.co) + reportMinusMultiCommonHtml(d.common);
   var sub = d.from && d.ref ? 'Последните ' + d.days + ' дни: ' + reportMinusMultiDM(d.from) + ' – ' + reportMinusMultiDM(d.ref) + '.' + String(d.ref).slice(0, 4) : '';
   return reportEmailShell('➖ Минуси — повтарящи се артикули', sub, body, 'Автоматичен репорт · ТеМАХ Портал');
 }
@@ -4458,6 +4529,11 @@ function reportMinusMultiForStores(data, stores, scoped){
   if (data && data.week) {
     var wr = (data.week.rows || []).filter(function(r){ return stores.indexOf(r.store) >= 0; });
     out.week = Object.assign({}, data.week, { rows: wr, total: reportMinusMultiWeekTotal(wr) });
+  }
+  /* „Повтарящи се по клиентски поръчки" — същото срязване по обект (11.11.2026). */
+  if (data && data.co) {
+    var cs = (data.co.stores || []).filter(function(s){ return stores.indexOf(s.store) >= 0; });
+    out.co = { stores: cs, total: cs.reduce(function(a, s){ return a + s.items.length; }, 0) };
   }
   return out;
 }

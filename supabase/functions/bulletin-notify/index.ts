@@ -11,6 +11,12 @@
 //   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //
+// v17 (11.11.2026) — ЕДНО нещо: „Клиентска поръчка“ (причина с requires_note)
+//   НЕ иска действие / становище и НЕ се брои в многократния минус
+//   (mnuCountByStore; Теодор 09–11.11, Тенчо 11.11). Засяга броя непопълнени в
+//   minus_unfilled и автоматичната отметка. Копие на mnIsCoReason / _multi от
+//   minusi.js — заковано в tests/minusi-notify-sync.test.js.
+//
 // v16 (29.10.2026) — ЕДНО нещо: АВТОМАТИЧНА ОТМЕТКА на „СПРАВКА МИНУСИ"
 //   (runMinusAutoTick; Миглена 29.10, решения на Тенчо 29.10). Не е тема —
 //   тече при ВСЯКО пускане на крона, след темите; ръчно с
@@ -2292,9 +2298,14 @@ function mnuCountByStore(movs: any[], thr: Record<string, number>, repeatDays: n
       const prev = i > 0 ? s955[i - 1] : null;
       const repeat = !!prev && mnuDays(prev.posting_date, r.posting_date) <= repeatDays;
       const noReason = r.reason_id == null;
-      /* Многократен: N-тият 955 в [дата − (MD − 1); дата] до този ред включително. */
-      const multiN = s955.slice(0, i + 1).filter((x: any) => { const d = mnuDays(x.posting_date, r.posting_date); return d >= 0 && d <= MD - 1; }).length;
-      const noAction = (repeat || multiN >= MC) && !String(r.action || '').trim();
+      /* „Клиентска поръчка" (причина с requires_note) — не иска действие /
+         становище и не се брои в многократния (11.11.2026; копие на mnIsCoReason
+         и _multi от minusi.js). Без причина — НЕ е клиентска поръчка. */
+      const isCo = (x: any) => x.reason_id != null && needsNote.indexOf(String(x.reason_id)) >= 0;
+      /* Многократен: N-тият 955 в [дата − (MD − 1); дата] до този ред включително,
+         само минусите, които не са клиентска поръчка. */
+      const multiN = isCo(r) ? 0 : s955.slice(0, i + 1).filter((x: any) => { const d = mnuDays(x.posting_date, r.posting_date); return d >= 0 && d <= MD - 1 && !isCo(x); }).length;
+      const noAction = !isCo(r) && (repeat || multiN >= MC) && !String(r.action || '').trim();
       const noNote = !noReason && needsNote.indexOf(String(r.reason_id)) >= 0 && !String(r.note || '').trim();
       if (noReason || noAction || noNote) st.unfilled++;
     });

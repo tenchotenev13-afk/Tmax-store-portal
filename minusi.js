@@ -273,7 +273,12 @@ function mnReasonNeedsNote(id){
 }
 /* Записан ред с причина, която иска бележка, а бележката е празна. */
 function mnNoteMissing(r){ return r.reason_id != null && mnReasonNeedsNote(r.reason_id) && !String(r.note || '').trim(); }
-function mnUnfilled(r){ return r.reason_id == null || (!!(r._repeat || r._multi) && !String(r.action || '').trim()) || mnNoteMissing(r); }
+/* „Клиентска поръчка" = причина с requires_note (флагът, не id/етикет). Непопълнен
+   ред (без причина) НЕ е клиентска поръчка. Такъв ред НЕ иска „Становище" /
+   „Действие" и не се брои в „🔁 N за 30 дни" (Теодор 09–11.11, Тенчо 11.11.2026);
+   копие на правилото — bulletin-notify (mnuCountByStore). */
+function mnIsCoReason(r){ return !!r && r.reason_id != null && mnReasonNeedsNote(r.reason_id); }
+function mnUnfilled(r){ return r.reason_id == null || (!mnIsCoReason(r) && !!(r._repeat || r._multi) && !String(r.action || '').trim()) || mnNoteMissing(r); }
 var MN_NOTE_MISSING = '<div class="mn-note-missing" style="color:#b91c1c;font-size:11px;font-weight:600;margin-top:2px;">попълни номер/дата</div>';
 function mnFmtTs(ts){
   if(!ts) return '';
@@ -346,13 +351,18 @@ function mnCompute(movs, thr, repeatDays, multi){
       var prev = i > 0 ? s955[i - 1] : null;
       var prevDays = prev ? mnDays(prev.posting_date, r.posting_date) : null;
       var cnt30 = s955.filter(function(x){ var d = mnDays(x.posting_date, r.posting_date); return d >= 0 && d <= 29; }).length;
-      /* Многократен: N-тият 955 в [дата − (MD − 1); дата] до този ред включително. */
-      var multiN = s955.slice(0, i + 1).filter(function(x){ var d = mnDays(x.posting_date, r.posting_date); return d >= 0 && d <= MD - 1; }).length;
+      /* Многократен: N-тият 955 в [дата − (MD − 1); дата] до този ред включително.
+         Брои САМО минусите, които НЕ са клиентска поръчка (11.11.2026); редът с
+         клиентска поръчка не носи баджа — _coMulti само показва полето по желание. */
+      var inWin = s955.slice(0, i + 1).filter(function(x){ var d = mnDays(x.posting_date, r.posting_date); return d >= 0 && d <= MD - 1; });
+      var isCo = mnIsCoReason(r);
+      var multiN = isCo ? 0 : inWin.filter(function(x){ return !mnIsCoReason(x); }).length;
       var row = Object.assign({}, r, {
         _rest: rest, _state: st, _closedOn: st === 'closed' ? lastDate : null,
         _prevDate: prev ? prev.posting_date : null, _prevDays: prevDays, _cnt30: cnt30,
         _repeat: !!prev && prevDays <= N, _early: early.length > 0,
-        _multiN: multiN, _multi: multiN >= MC
+        _multiN: multiN, _multi: !isCo && multiN >= MC,
+        _coMulti: isCo && inWin.filter(mnIsCoReason).length >= MC
       });
       out.all.push(row);
       if(st === 'open') out.open.push(row);
@@ -925,7 +935,9 @@ function mnDailyHtml(rows){
         (mnNoteMissing(r) ? MN_NOTE_MISSING : '') +
         '<div id="mn-co-pick-' + escAttr(id) + '">' + mnCoPickHtml(id, cur) + '</div>' +
         (r._multi ? '<div class="mn-action-lbl" style="font-size:11px;font-weight:600;color:#c2410c;margin-top:4px;">Становище</div>' : '') +
-        (r._repeat || r._multi ? '<input id="mn-action-' + escAttr(id) + '" value="' + escAttrVal(val('action')) + '" placeholder="' + (r._multi ? 'Становище' : 'Действие срещу повторение') + '" style="width:110px;display:block;margin-top:' + (r._multi ? '1' : '4') + 'px;">' : '') + '</td>';
+        (r._repeat || r._multi || r._coMulti ? '<input id="mn-action-' + escAttr(id) + '" value="' + escAttrVal(val('action')) + '" placeholder="' +
+          (mnIsCoReason(r) ? (r._coMulti ? 'Становище (по желание)' : 'Действие (по желание)') : r._multi ? 'Становище' : 'Действие срещу повторение') +
+          '" style="width:110px;display:block;margin-top:' + (r._multi ? '1' : '4') + 'px;">' : '') + '</td>';
       h += '<td style="white-space:nowrap;">' + (done ? '<span class="mn-done" title="' + escAttr('Попълнено: ' + (r.filled_by || '') + ' ' + mnFmtTs(r.filled_at)) + '">✅</span> ' : '') + '<button class="btn btn-green" onclick="mnSave(\'' + escAttr(id) + '\')">Запази</button></td>';
     } else {
       h += '<td>' + esc(r.real_code || '') + '</td><td>' + esc(mnReasonLabel(r.reason_id)) + '</td><td>' + esc(r.employee_name || '') + '</td><td>' + esc(r.note || '') +
@@ -1006,7 +1018,9 @@ function mnValRow(r){
     out.noReal = !pr;
     if(pr){ out.real = rest * pr.price; out.realWarn = mnValUomWarn(pr.unit, r.uom); }
   }
-  if(out.minus != null && out.real != null) out.diff = out.minus - out.real;
+  /* Разликата — от закръглените до 2 знака стойности, каквито се виждат (проверка
+     на живо 09.11: 0,85 ЛМ даваше −0,43 при 2,97 − 3,39). */
+  if(out.minus != null && out.real != null) out.diff = Math.round(out.minus * 100) / 100 - Math.round(out.real * 100) / 100;
   return out;
 }
 /* null — мерките съвпадат (или някоя липсва); иначе текстът за title. */
@@ -1395,9 +1409,13 @@ function mnSave(id){
   /* „Име на служител" — незадължително от 06.11.2026 (решение на Тенчо, списъкът
      на Миглена); празното се пише като null. */
   /* Повторение до N дни → „Действие" е задължително (Теодор, 06.10.2026). */
-  var crow = null;
-  mnCompute(mnMovs, mnThresholds).all.forEach(function(x){ if(String(x.id) === String(id)) crow = x; });
-  var isRep = !!(crow && crow._repeat), isMulti = !!(crow && crow._multi), action = g('mn-action-');
+  /* Броенето е с ИЗБРАНАТА причина — смяна към / от „Клиентска поръчка" мени и
+     „🔁" на този ред (11.11.2026). Клиентска поръчка не иска действие / становище. */
+  var crow = null, rid = parseInt(reason, 10);
+  var movs2 = mnMovs.map(function(m){ return String(m.id) === String(id) ? Object.assign({}, m, { reason_id: rid }) : m; });
+  mnCompute(movs2, mnThresholds).all.forEach(function(x){ if(String(x.id) === String(id)) crow = x; });
+  var coNow = mnReasonNeedsNote(reason);
+  var isRep = !coNow && !!(crow && crow._repeat), isMulti = !coNow && !!(crow && crow._multi), action = g('mn-action-');
   /* Многократен (3+ за 30 дни) → „Становище" е задължително (Теодор, 27.10.2026). */
   if(isMulti && !action){ toast('🔁 ' + crow._multiN + ' минуса за ' + mnMultiDays + ' дни — попълни становище', '#dc2626'); return Promise.resolve(false); }
   if(isRep && !action){ toast('Повторен минус до ' + mnRepeatDays + ' дни — попълни действие', '#dc2626'); return Promise.resolve(false); }
@@ -1410,7 +1428,9 @@ function mnSave(id){
     filled_by: currentUser.display_name || currentUser.email || '',
     filled_at: new Date().toISOString()
   };
+  /* По желание при клиентска поръчка: полето го има → записва се (празно → null). */
   if(isRep || isMulti) body.action = action;
+  else if(document.getElementById('mn-action-' + id)) body.action = action || null;
   return sbPatch('minus_movements', 'id=eq.' + encodeURIComponent(id), body).then(function(res){
     if(!res.ok){ toast('Не е записано: ' + sbErrMsg(res), '#dc2626'); return false; }
     Object.keys(body).forEach(function(k){ row[k] = body[k]; });

@@ -88,6 +88,7 @@ const TESTS = [
   'minusi.test.js',
   'minusi-reasons-v2.test.js',
   'minusi-co-values.test.js',
+  'minusi-multi-co-split.test.js',
   'minusi-notify-sync.test.js',
   'minusi-auto-tick.test.js',
   'minusi-co-link.test.js',
