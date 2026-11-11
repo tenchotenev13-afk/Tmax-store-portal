@@ -226,7 +226,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     await h2.w.grLoadUsers(); await ticks();
     ok('извън списъка → табът е скрит', h2.doc.getElementById('tab-grafik').style.display === 'none');
     await load(h2);
-    ok('извън списъка → „Нямаш достъп“; единствената заявка е „me“ (отказана 403 not_beta)', !!h2.doc.getElementById('gr-noaccess') && h2.S.calls.map(c => c.action).join() === 'me,me', h2.S.calls.map(c => c.action).join());
+    ok('извън списъка → „Нямаш достъп“; единствената заявка е ЕДНО „me“ (403 not_beta) — отварянето на таба ползва отговора от влизането', !!h2.doc.getElementById('gr-noaccess') && h2.S.calls.map(c => c.action).join() === 'me', h2.S.calls.map(c => c.action).join());
     ok('showModule(\'grafik\') показва контейнера', guard('showModule', () => h.w.showModule('grafik')) && mod(h).style.display === 'block');
   }
 
@@ -412,6 +412,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('пн 9.11 ← пн 12.10; пн 30.11 ← пн 26.10 (−35 дни)', L[8] === 'П' && L[29] === 'П', L[8] + L[29]);
     ok('съобщение: 5 клетки (2, 5, 9, 23, 30.11)', L[22] === 'П' && r.calls.toast.some(t => /Пренесени 5 клетки/.test(t)), r.calls.toast.join('|'));
   }
+
 
   section('10. Персонал');
   {
@@ -1305,8 +1306,10 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     wrap().scrollLeft = 500; wrap().scrollTop = 30;
     const w0 = wrap();
     realClick(W, d.getElementById('gr-c-1-20')); await ticks(2);
-    ok('т.1: кликът прерисува мрежата (нова кутия), а изгледът остава — scrollLeft 500, scrollTop 30',
-      wrap() !== w0 && wrap().scrollLeft === 500 && wrap().scrollTop === 30 && W.grSel.r === 1 && W.grSel.d === 20, wrap().scrollLeft + ' / ' + wrap().scrollTop);
+    ok('т.1: кликът подменя само редовете (същата кутия, от 11.11.2026), изгледът остава — scrollLeft 500, scrollTop 30',
+      wrap() === w0 && wrap().scrollLeft === 500 && wrap().scrollTop === 30 && W.grSel.r === 1 && W.grSel.d === 20, wrap().scrollLeft + ' / ' + wrap().scrollTop);
+    W.grRender();
+    ok('т.1: пълен рендер (нова кутия) — изгледът се връща: scrollLeft 500, scrollTop 30', wrap() !== w0 && wrap().scrollLeft === 500 && wrap().scrollTop === 30, wrap().scrollLeft + ' / ' + wrap().scrollTop);
     ok('т.1: избраната клетка е 21-ви ден на втория ред', /outline:2px solid #2563eb/.test(d.getElementById('gr-c-1-20').getAttribute('style')));
     // Писане на буква (пълен рендер при всеки клавиш) — пак на място.
     W.grKey({ key: 'О', preventDefault() {}, ctrlKey: false, metaKey: false, altKey: false, shiftKey: false });   // „О“ чака — курсорът стои
@@ -1352,7 +1355,7 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     ok('т.2: отместванията — по реалната ширина (в jsdom 0 → резервните 34 и 184)', d.getElementById('gr-stk-css').textContent === '#gr-grid .gr-stk1{left:34px;}#gr-grid .gr-stk2{left:184px;}', d.getElementById('gr-stk-css').textContent);
     // Истинските ширини (напр. по-широк шрифт) → отместванията ги следват при следващия рендер.
     Object.defineProperty(W.HTMLElement.prototype, 'offsetWidth', { configurable: true, get() { return this.classList.contains('gr-stk0') ? 40 : this.classList.contains('gr-stk1') ? 160 : 0; } });
-    realClick(W, d.getElementById('gr-c-0-1')); await ticks(2);
+    W.grRender();                                                      // ширините се мерят при пълен рендер
     ok('т.2: отместванията по реалната ширина — 40 и 40 + 160 = 200', d.getElementById('gr-stk-css').textContent === '#gr-grid .gr-stk1{left:40px;}#gr-grid .gr-stk2{left:200px;}', d.getElementById('gr-stk-css').textContent);
     delete W.HTMLElement.prototype.offsetWidth;
     const css = fs.readFileSync(path.join(ROOT, 'index.html'), 'utf8');
@@ -1644,6 +1647,74 @@ async function load(h) { await guard('loadGrafik() не хвърля', () => h.w
     W.grRender(); W.grRender();
     ok('без промяна в буквите — без ново смятане (кеш)', n === 0, n);
     W.GrafikEngine.normHint = keep;
+  }
+
+
+  section('24. Бързо зареждане и писане (11.11.2026): едно „me“, бързото обновяване = пълният рендер');
+  {
+    // ── А: „me“ от влизането ──
+    const a = env(MGR); a.S.calls.length = 0;
+    a.w.grLoadUsers();                                            // влизането (shared.js) — без аргумент
+    await a.w.loadGrafik(); await ticks(4);
+    ok('А: влизане + отваряне на таба → едно „me“ (второто е от отговора на влизането)', a.S.calls.filter(c => c.action === 'me').length === 1, a.S.calls.map(c => c.action).join());
+    await a.w.loadGrafik(); await ticks(4);
+    ok('А: второ отваряне до 5 мин — пак без „me“', a.S.calls.filter(c => c.action === 'me').length === 1);
+    a.w.grMeAt = Date.now() - 6 * 60 * 1000;
+    await a.w.loadGrafik(); await ticks(4);
+    ok('А: след 5 мин — ново „me“', a.S.calls.filter(c => c.action === 'me').length === 2);
+    a.w.grLoadUsers(); await ticks(4);
+    ok('А: влизането винаги пита наново (без аргумент)', a.S.calls.filter(c => c.action === 'me').length === 3);
+
+    // ── Г: бързото обновяване дава същото като пълния рендер ──
+    const S = makeServer();
+    S.months['Кърджали|2026-11-01'] = { id: 'm-q', store_name: 'Кърджали', month: '2026-11-01', status: 'draft' };
+    const H1 = ',,П,,,В,,ЗД,М,М,,П,ЛД,ЛД,,,ЛД,М,В,,ЗД,П,,,М,П,,,ЗД,'.split(',');
+    S.rows.push({ month_id: 'm-q', staff_id: 'st-1', letters: H1, locked: {} }, { month_id: 'm-q', staff_id: 'st-3', letters: [], locked: {} });
+    const x = env(MGR, { server: S, grouped: true }); await load(x);
+    const d = x.doc, W = x.w;
+    const inl = (el, type, init) => {
+      const e = Object.assign({ type, target: el, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, _stop: false, preventDefault() {}, stopPropagation() { this._stop = true; } }, init || {});
+      for (let n = el; n && n.getAttribute && !e._stop; n = n.parentNode) { const code = n.getAttribute('on' + type); if (code) W.eval('(function(event){' + code + '})').call(n, e); }
+    };
+    d.getElementById('gr-warnings') && (d.getElementById('gr-warnings').open = true);
+    // Сверка: HTML-ът на мрежата, предупрежденията и брояча — след бързото обновяване и след пълния рендер.
+    const snap = () => d.getElementById('gr-grid').outerHTML + '§' + d.getElementById('gr-warn-box').innerHTML + '§' + d.getElementById('gr-offnorm').outerHTML;
+    const same = (label, act) => {
+      const w0 = d.getElementById('gr-grid-wrap');
+      act();
+      const fast = snap(), kept = d.getElementById('gr-grid-wrap') === w0;
+      W.grRender();
+      const full = snap();
+      let at = 0; while (at < fast.length && fast[at] === full[at]) at++;
+      ok('Г: ' + label + ' — без пълен рендер, а резултатът е същият', kept && fast === full, kept ? 'разлика от знак ' + at + ': …' + fast.slice(at - 60, at + 60) + ' ≠ …' + full.slice(at - 60, at + 60) : 'кутията е сменена (пълен рендер)');
+    };
+    // 🔒 може да смени подсказката (по-малко ходове): при заключени 3, 6, 8.11 четвъртото (9.11) прави „една П“ → „две П“.
+    const iv = W.grCalc.rows.filter(z => z.staff.id === 'st-1')[0];
+    W.grRows['st-1'].locked = { 3: iv.codes[2], 6: iv.codes[5], 8: iv.codes[7] }; W.grRecalc(); W.grRender();
+    const before = d.getElementById('gr-warn-box').textContent;
+    same('🔒, което сменя подсказката в предупреждението', () => { W.grSelect(1, 8); W.grToggleLock(); });
+    ok('Г: …подсказката в предупреждението е новата („две П“)', /добави една П/.test(before) && /ИВАН: [^·]*· 💡 добави две П/.test(d.getElementById('gr-warn-box').textContent), d.getElementById('gr-warn-box').textContent.slice(0, 300));
+    W.grRows['st-1'].locked = {}; W.grRecalc(); W.grRender();
+    same('клик в клетка', () => inl(d.getElementById('gr-c-1-1'), 'click'));
+    same('буква „П“ (запис, надясно, сборове, подсказка)', () => typeIn(x, 'П'));
+    same('„О“ — чакаща (буферът в клетката)', () => typeIn(x, 'О'));
+    same('Enter (записва „О“, надолу)', () => key(x, 'Enter'));
+    same('стрелка', () => key(x, 'ArrowRight'));
+    same('Shift+клик (избор 2 реда)', () => inl(d.getElementById('gr-c-2-5'), 'click', { shiftKey: true }));
+    same('Delete върху избора', () => key(x, 'Delete'));
+    same('поставяне 2 × 2', () => { W.grSelect(0, 10); inl(d.getElementById('gr-grid'), 'paste', { clipboardData: { getData: () => 'П\tВ\r\nЗД\tМ\r\n' } }); });
+    same('дърпане надясно', () => { W.grSelect(1, 1); inl(d.getElementById('gr-c-1-2'), 'click', { shiftKey: true }); inl(d.querySelector('#gr-grid .gr-fill'), 'mousedown'); inl(d.getElementById('gr-c-1-9'), 'mouseover'); d.dispatchEvent(new W.MouseEvent('mouseup', { bubbles: true })); });
+    same('списък — отваряне (двоен клик)', () => { W.grSelect(0, 15); inl(d.getElementById('gr-c-0-15'), 'dblclick'); });
+    ok('Г: списъкът е във фокуса след бързото отваряне', (() => { W.grSelect(0, 15); inl(d.getElementById('gr-c-0-15'), 'dblclick'); return d.activeElement && d.activeElement.id === 'gr-drop-sel'; })());
+    same('списък — избор', () => { const ds = d.getElementById('gr-drop-sel'); ds.value = 'ЗД'; inl(ds, 'click'); });
+    same('🔒 заключване', () => { W.grSelect(1, 2); W.grToggleLock(); });
+    ok('Г: затворените предупреждения остават затворени при бързото обновяване (по подразбиране са отворени)', (() => { const wv = d.getElementById('gr-warnings'); if (!wv) return false; wv.open = false; W.grSelect(0, 3); typeIn(x, 'П'); return d.getElementById('gr-warnings').open === false; })());
+    // Без мрежа на екрана (друг изглед) → пълен рендер, без грешка.
+    realClick(W, btn(mod(x), 'Персонал')); await ticks(2);
+    let ge = null; try { W.grUpdate(); } catch (e) { ge = e; }
+    ok('Г: без мрежа — grUpdate пада на пълен рендер', !ge && !!d.getElementById('gr-staff'), ge && ge.message);
+    await wait(1000); await ticks();
+    ok('Г: записите — пак save_rows', x.S.calls.some(c => c.action === 'save_rows'));
   }
 
 
