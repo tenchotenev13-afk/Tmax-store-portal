@@ -1653,7 +1653,28 @@ function renderPrint(o){
       '.cp-cut{page-break-after:avoid;page-break-before:avoid;}'+
     '}';
 
-  var blank=function(copy,sign1,sign2){
+  /* Срок за доставка (решение 11.11.2026): „до дд.мм.гггг г.“; без дата —
+     празно място за ръчно попълване (без „до“), не „—“ / „undefined“. */
+  var dlvLine=o.delivery?'до '+fmtDate(o.delivery)+' г.':'__________';
+  /* col=true — колона в signRow: височината на съседа, а редът „Подпис / Дата"
+     слиза най-долу, за да са линиите на двата подписа на една височина. */
+  var signBox=function(title,text,col){
+    return '<div style="padding:7px 10px 8px;border-top:1px solid #eee;'+(col?'flex:1;display:flex;flex-direction:column;':'')+'">'+
+        '<div style="font-size:8.5px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">'+title+'</div>'+
+        '<div style="font-size:10px;font-style:italic;color:#555;margin-bottom:8px;padding:3px 8px;background:#f9f8f6;border-left:3px solid #dc2626;border-radius:0 4px 4px 0;">'+text+'</div>'+
+        '<div style="display:flex;gap:16px;'+(col?'margin-top:auto;':'')+'">'+
+          '<div style="flex:1;"><div style="border-top:1px solid #999;padding-top:3px;font-size:8.5px;color:#bbb;margin-top:16px;">Подпис: _______________________</div></div>'+
+          '<div style="width:110px;"><div style="border-top:1px solid #999;padding-top:3px;font-size:8.5px;color:#bbb;margin-top:16px;">Дата: __________ г.</div></div>'+
+        '</div></div>';
+  };
+  /* Двата подписа на магазина — един до друг в една редица (решение
+     11.11.2026): един под друг бутаха бланка с 3+ артикула на втори лист. */
+  var signRow=function(boxes){
+    return '<div class="cp-sign-row" style="display:flex;">'+boxes.map(function(b,i){
+      return '<div style="flex:1;min-width:0;display:flex;flex-direction:column;'+(i?'border-left:1px solid #eee;':'')+'">'+b+'</div>';
+    }).join('')+'</div>';
+  };
+  var blank=function(copy,signs){
     return '<div class="cp-card" style="background:#fff;border:1px solid #ccc;border-radius:8px;overflow:hidden;margin-bottom:10px;font-family:Arial,sans-serif;font-size:11.5px;color:#1a1a1a;">'+
       '<div style="background:#2b2b2b;display:flex;align-items:stretch;min-height:48px;">'+
         '<div style="padding:6px 10px;display:flex;align-items:center;border-right:1px solid rgba(255,255,255,.1);">'+
@@ -1674,8 +1695,8 @@ function renderPrint(o){
         '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:6px;">'+
           itemsPrintBlock(o)+
           '<div style="background:#fff8e1;border:1px solid #f0c940;border-radius:5px;padding:4px 8px;grid-column:1/-1;">'+
-            '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">★ Дата на доставка</div>'+
-            '<div style="font-size:12px;font-weight:700;color:#dc2626;">'+fmtDate(o.delivery)+'</div>'+
+            '<div style="font-size:7.5px;font-weight:700;color:#bbb;text-transform:uppercase;letter-spacing:.5px;margin-bottom:1px;">★ Срок за доставка</div>'+
+            '<div style="font-size:12px;font-weight:700;color:#dc2626;">'+dlvLine+'</div>'+
             (o.delivery_reason?'<div style="font-size:9px;color:#666;">'+esc(o.delivery_reason)+'</div>':'')+'</div>'+
           /* Клиентът трябва да знае, че поръчката му е разделена на няколко заявки —
              иначе идва с една бланка и очаква цялата стока. */
@@ -1697,13 +1718,7 @@ function renderPrint(o){
             '<div style="font-size:11px;">'+esc(o.agent||'')+'</div></div>'+
         '</div></div>'+
       '<div style="background:#f9f8f6;border-top:1px solid #eee;padding:4px 10px;font-size:8.5px;color:#999;line-height:1.4;"><b style="color:#777;">ОБЩИ УСЛОВИЯ:</b> Поръчката е валидна само след цялостно заплащане или капариране. Срокът за доставка е посочен по-горе.</div>'+
-      '<div style="padding:7px 10px 8px;border-top:1px solid #eee;">'+
-        '<div style="font-size:8.5px;font-weight:700;color:#aaa;text-transform:uppercase;letter-spacing:.8px;margin-bottom:3px;">'+sign1+'</div>'+
-        '<div style="font-size:10px;font-style:italic;color:#555;margin-bottom:8px;padding:3px 8px;background:#f9f8f6;border-left:3px solid #dc2626;border-radius:0 4px 4px 0;">'+sign2+'</div>'+
-        '<div style="display:flex;gap:16px;">'+
-          '<div style="flex:1;"><div style="border-top:1px solid #999;padding-top:3px;font-size:8.5px;color:#bbb;margin-top:16px;">Подпис: _______________________</div></div>'+
-          '<div style="width:110px;"><div style="border-top:1px solid #999;padding-top:3px;font-size:8.5px;color:#bbb;margin-top:16px;">Дата: __________ г.</div></div>'+
-        '</div></div>'+
+      signs.join('')+
     '</div>';
   };
   var dot='<div class="cp-cut" style="text-align:center;color:#94a3b8;font-size:10px;margin:2px 0;letter-spacing:.15em;">— — — — — — — — — — ОТКЪСВАТЕ ТУК — — — — — — — — — —</div>';
@@ -1719,8 +1734,10 @@ function renderPrint(o){
       '<div style="font-size:12px;color:#64748b;background:#f8fafc;border-radius:8px;padding:9px 13px;margin-bottom:14px;" class="no-print">'+
         '📄 И двете копия се събират на 1 лист А4. Горна половина — остава при магазина с подпис на клиента. Долна — за клиента. '+
         'За PDF: при печат избери "Запази като PDF" вместо принтер.</div>'+
-      blank('КОПИЕ НА МАГАЗИНА','Подпис на клиента','Получих стоката без забележка. Запознат/а съм с условията.')+
+      blank('КОПИЕ НА МАГАЗИНА',[signRow([
+        signBox('Подпис на клиента при поръчката','Запознат/а съм, че срокът за доставка е '+dlvLine+(o.delivery?'':'.')+' Ако стоката пристигне по-рано, ще бъда уведомен/а по телефона.',true),
+        signBox('Подпис на клиента при получаването','Получих стоката без забележка.',true)])])+
       dot+
-      blank('КОПИЕ НА КЛИЕНТА','Подпис на клиента','Получих стоката без забележка.')+
+      blank('КОПИЕ НА КЛИЕНТА',[signBox('Подпис на клиента','Получих стоката без забележка.')])+
     '</div>';
 }

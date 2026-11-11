@@ -493,6 +493,7 @@ const TESTS = [
   'contacts-home.test.js',
   'contacts-photos.test.js',
   'co-row-click.test.js',
+  'co-print-signature.test.js',
   'co-row-all-items.test.js',
   'co-compact-row.test.js',
   'co-warehouse-fulfiller-buttons.test.js',
