@@ -623,7 +623,7 @@ npm run brief   # -> docs/BRIEF.md: CLAUDE.md + PEOPLE + DECISIONS + PATTERNS + 
   `query_logs` за диагностика по логовете (ClickHouse SQL срещу таблица `logs`,
   филтър по `source` — напр. `edge_logs`, `postgres_logs`, `function_edge_logs`;
   прозорецът е максимум 24 часа)
-- **Edge Functions** — 13 на брой (11.11.2026: 13 папки в репото = 13 живи без `kasa-access-check`; живите са 14, докато тя не е изтрита). Изходният код е в `supabase/functions/`
+- **Edge Functions** — 13 на брой (11.11.2026: папки в репото = живи). Изходният код е в `supabase/functions/`
   (таблица с версия, крон задание и кой ги вика — в README-то там).
   **Деплоят е РЪЧЕН през Supabase; файлът в репото е ОГЛЕДАЛО, не източник.**
   Няма CI стъпка. **От 18.09.2026 `supabase` CLI е инсталиран и логнат**

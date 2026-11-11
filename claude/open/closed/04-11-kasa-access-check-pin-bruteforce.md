@@ -1,4 +1,5 @@
 Отворено: 04.11 · Кой чака: Code · Сесия: etap2-inventar
+Затворено: 11.11 · Как: функцията махната — от репото с cb6cf7f, на живо с `supabase functions delete kasa-access-check` (11.11); `list_edge_functions` — 13 без нея; curl с anon → 404 NOT_FOUND. ПИН-ът на История (set-history-pin, history_pin_hash) — отделно решение в `claude/open/11-11-history-pin-decision.md`.
 
 - **Приоритет: ВИСОК. Едж функцията `kasa-access-check` приема `user_id` + ПИН без ограничение на опитите.** Намерено при инвентара за етап 2 (`claude/security-etap2-inventar.md`, т.3б).
   - **Какво прави** (`supabase/functions/kasa-access-check/index.ts`): чете `body.user_id` и `body.pin`, взема `users.history_pin_hash` със service_role, сравнява с bcrypt и връща `{ok:true}` / `{ok:false}`. Пише всеки опит в `audit_log` (`history_pin_success` / `history_pin_failed`). Няма проверка на пропуска (`requireAdmin` / `verifySession`), няма брояч на неуспешни опити, няма забавяне или заключване — пази я само `verify_jwt` на шлюза, който приема публичния anon ключ.

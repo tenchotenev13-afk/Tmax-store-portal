@@ -5,5 +5,5 @@
 - `supabase/functions/README.md`: редът за функцията — „махната 11.11.2026“; разделът „Готови на сървъра“ — само `set-history-pin`; таблицата с променливите — без `kasa-access-check`, с `grafik-api` и `send-routed-report`. `_shared/session.ts:5` — коментарът поправен (стига до живо при следващия деплой на функция с `_shared`). Затворено `04-11-edge-docs-stale`.
 - `set-history-pin` и `users.history_pin_hash` не са пипани — `claude/open/11-11-history-pin-decision.md` (Тенчо).
 - Тест: нов няма — няма клиентски код. Ред в `zhivko-opashka.md` няма — функциите не са в огледалото.
-- Живата функция: още НЕ е изтрита (след push).
+- Живата функция изтрита (11.11, след push на cb6cf7f): `supabase functions delete kasa-access-check` → „Deleted Edge Function.“; `list_edge_functions` — 13, без нея (= 13-те папки в репото); curl с anon `POST /functions/v1/kasa-access-check` → 404 `{"code":"NOT_FOUND","message":"Requested function was not found"}`. Затворено `04-11-kasa-access-check-pin-bruteforce`.
 - SHA е комитът, който добавя този файл.
