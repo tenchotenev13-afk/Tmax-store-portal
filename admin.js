@@ -2769,7 +2769,7 @@ function whoBuild(by, users, cron){
     if (!p) {
       var u = uBy[k];
       p = people[k] = { email: (u && u.email) || String(email).trim(), name: (u && u.display_name) || name || String(email).trim(),
-        store: u ? (u.store_name || '') : '', role: whoRoleOf(u), cells: {} };
+        store: u ? (u.store_name || '') : '', own: whoOwnStores(u), role: whoRoleOf(u), cells: {} };
     }
     var c = p.cells[col];
     if (!c) { p.cells[col] = { all: !!cell.all, stores: (cell.stores || []).slice(), cond: !!cell.cond, text: cell.text || '', title: cell.title || '' }; return; }
@@ -2864,7 +2864,30 @@ function whoBuild(by, users, cron){
   return { people: list, err: err, meta: meta, extra: extra };
 }
 
-/* Текстът на клетка — един и същ в таблицата и в Excel. */
+/* „Обекти" на човека (12.11.2026): регионален → assigned_stores; иначе обектът
+   на акаунта (управител / склад / инфо / каса); ЦО и външен адрес → празно.
+   Само за показване — кой какво получава решават функциите. */
+function whoOwnStores(u){
+  if (!u) return [];
+  if (u.is_regional === true) return (Array.isArray(u.assigned_stores) ? u.assigned_stores : []).filter(Boolean);
+  return u.store_name && u.store_name !== 'Централен офис' ? [u.store_name] : [];
+}
+/* Едни и същи обекти — като МНОЖЕСТВО, не по ред (функциите връщат и сортирани). */
+function whoSameSet(a, b){
+  if (!a.length || a.length !== b.length) return false;
+  return a.every(function(s){ return b.indexOf(s) >= 0; }) && b.every(function(s){ return a.indexOf(s) >= 0; });
+}
+/* Клетката В ТАБЛИЦАТА: списъкът, равен на „Обекти" → „✓ своите" (пълният — в
+   title). Подмножество / различен — пълният списък. Excel ползва whoCellText. */
+function whoCellShown(c, own){
+  if (!c) return { text: '', title: '' };
+  if (!c.text && !c.all && whoSameSet(c.stores, own || [])) {
+    return { text: c.cond ? 'условно · своите' : '✓ своите', title: c.stores.join(', ') + (c.title ? '\n' + c.title : '') };
+  }
+  return { text: whoCellText(c), title: c.title || '' };
+}
+
+/* Текстът на клетка — пълният; така е и в Excel. */
 function whoCellText(c){
   if (!c) return '';
   var t = c.text ? c.text : c.all ? '✓ всички' : (c.stores.length ? c.stores.join(', ') : '✓');
@@ -2929,7 +2952,7 @@ function whoRender(){
     }).join('') + '</ul></div>';
   /* При действие в портала */
   h += '<div id="who-browser" style="margin-top:12px;"><div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:4px;">При действие в портала</div>' +
-    '<div class="tbl-wrap tbl-compact"><table><thead><tr><th>Писмо</th><th>При какво</th><th>Кой го получава</th></tr></thead><tbody>' +
+    '<div class="tbl-wrap tbl-compact tbl-auto"><table><thead><tr><th>Писмо</th><th>При какво</th><th>Кой го получава</th></tr></thead><tbody>' +
     WHO_BROWSER_MAILS.map(function(m){
       return '<tr class="who-browser-row"><td>' + esc(m.mail) + '</td><td>' + esc(m.on) + '</td><td>' + esc(m.who) + '</td></tr>';
     }).join('') + '</tbody></table></div></div>';
@@ -2941,24 +2964,34 @@ function whoRenderTable(){
   var wrap = document.getElementById('who-table-wrap'); if (!wrap || !whoState) return;
   var st = whoState, rows = whoVisible();
   var h = '<div style="font-size:11.5px;color:#64748b;margin-bottom:4px;" id="who-count">' + rows.length + ' души</div>' +
-    '<div class="tbl-wrap tbl-compact"><table id="who-table"><thead><tr><th>Име</th><th>Имейл</th><th>Роля / отдел</th>';
+    /* tbl-compact БЕЗ tbl-auto (table-layout:fixed) свиваше 17 колони в картата и
+       имейлът излизаше в съседната клетка. tbl-auto = лейаут по съдържанието;
+       overflow-x:auto inline — на ≥1200px tbl-compact е overflow:visible и
+       широката таблица иначе би избутала страницата. position:static на
+       заглавките — закаченият thead на tbl-compact (top: височината на
+       навигацията) вътре в кутия с overflow-x се измества и покрива първия ред. */
+    '<div class="tbl-wrap tbl-compact tbl-auto" style="overflow-x:auto;"><table id="who-table"><thead><tr><th style="position:static;">Име</th><th style="position:static;">Имейл</th>' +
+    '<th style="position:static;min-width:120px;">Роля / отдел</th><th data-col="own" style="position:static;white-space:normal;min-width:110px;">Обекти</th>';
   WHO_COLS.forEach(function(c){
     var m = st.meta[c.key] || { when: c.when, notes: [] };
-    h += '<th data-col="' + c.key + '" style="white-space:normal;min-width:90px;" title="' + escAttrVal(m.notes.join('\n')) + '">' + esc(c.label) +
+    h += '<th data-col="' + c.key + '" style="position:static;white-space:normal;min-width:90px;" title="' + escAttrVal(m.notes.join('\n')) + '">' + esc(c.label) +
       '<div style="font-weight:400;font-size:10.5px;color:#64748b;">' + esc(m.when) + '</div>' +
       (st.err[c.key] ? '<div class="who-col-err" style="font-weight:600;font-size:10.5px;color:#dc2626;">не се зареди</div>' : '') +
       (m.notes.length ? '<div style="font-weight:400;font-size:10px;color:#94a3b8;">' + esc(m.notes.join(' · ')) + '</div>' : '') + '</th>';
   });
   h += '</tr></thead><tbody>';
-  if (!rows.length) h += '<tr><td colspan="' + (3 + WHO_COLS.length) + '" style="text-align:center;color:#94a3b8;">Няма хора по този филтър</td></tr>';
+  if (!rows.length) h += '<tr><td colspan="' + (4 + WHO_COLS.length) + '" style="text-align:center;color:#94a3b8;">Няма хора по този филтър</td></tr>';
   rows.forEach(function(p){
-    h += '<tr class="who-row" data-email="' + escAttr(whoLow(p.email)) + '"><td>' + esc(p.name) + '</td><td style="font-size:11px;">' + esc(p.email) +
-      '</td><td style="font-size:11px;">' + esc(p.role.label) + '</td>';
+    /* Имейлът се ПРЕНАСЯ (overflow-wrap:anywhere), не се реже — цял е видим и се копира. */
+    h += '<tr class="who-row" data-email="' + escAttr(whoLow(p.email)) + '"><td style="min-width:110px;">' + esc(p.name) + '</td>' +
+      '<td class="who-email" style="font-size:11px;min-width:140px;max-width:200px;white-space:normal;overflow-wrap:anywhere;">' + esc(p.email) + '</td>' +
+      '<td style="font-size:11px;min-width:120px;white-space:normal;">' + esc(p.role.label) + '</td>' +
+      '<td data-col="own" style="font-size:11px;min-width:110px;white-space:normal;">' + escVal((p.own || []).join(', ')) + '</td>';
     WHO_COLS.forEach(function(c){
       if (st.err[c.key]) { h += '<td data-col="' + c.key + '" style="color:#dc2626;text-align:center;">—</td>'; return; }
-      var cell = p.cells[c.key];
-      h += '<td data-col="' + c.key + '" style="font-size:11px;white-space:normal;' + (cell && cell.cond ? 'color:#92400e;' : '') + '"' +
-        (cell && cell.title ? ' title="' + escAttr(cell.title) + '"' : '') + '>' + (cell ? escVal(whoCellText(cell)) : '') + '</td>';
+      var cell = p.cells[c.key], sh = whoCellShown(cell, p.own);
+      h += '<td data-col="' + c.key + '" style="font-size:11px;min-width:80px;white-space:normal;' + (cell && cell.cond ? 'color:#92400e;' : '') + '"' +
+        (sh.title ? ' title="' + escAttr(sh.title) + '"' : '') + '>' + escVal(sh.text) + '</td>';
     });
     h += '</tr>';
   });

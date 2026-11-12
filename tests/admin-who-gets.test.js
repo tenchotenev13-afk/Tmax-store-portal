@@ -31,6 +31,8 @@
      М6 bulletin-notify recipients_only пада в пращането (без ранното return);
      М7 таблицата вика функциите без dry_run (предпазителят срещу стара версия);
      и отделно: UI_BODY без dry_run → „старите“ oborot и routed пращат (3б пада).
+     „Обекти“ / „✓ своите“ (otcheti-tablica-vid, 12.11.2026): М8 сравнение като масив по
+     ред вместо като множество; М9 „✓ своите“ и при подмножество; М10 Excel с „✓ своите“.
 
    Пускане:  node tests/admin-who-gets.test.js .
 */
@@ -366,9 +368,9 @@ const activeUsers = () => USERS.filter(u => u.active);
   const CRON = [{ kind: 'daily', dow: '*', minute: 0, hour_sofia: 21, active: true }, { kind: 'co_overdue', dow: '1-5', minute: 0, hour_sofia: 8, active: true }];
   const wait = ms => new Promise(r => setTimeout(r, ms));
   async function settle() { await wait(120); for (let i = 0; i < 4; i++) await ticks(); }
-  function env(user, replies) {
+  function env(user, replies, users) {
     const h = boot({ modules: ['bulletin.js', 'email.js', 'admin.js', 'report.js'], user,
-      data: { users: USERS.map(u => { const c = Object.assign({}, u); delete c.oborot_report; delete c.id; return c; }), rpc: CRON,
+      data: { users: (users || USERS).map(u => { const c = Object.assign({}, u); delete c.oborot_report; delete c.id; return c; }), rpc: CRON,
         report_recipients: [], notification_topics: [], notification_matrix: [], notification_overrides: [], notification_schedules: [], app_settings: [] } });
     h.edge = {};
     const w = h.w, base = w.fetch;
@@ -407,12 +409,12 @@ const activeUsers = () => USERS.filter(u => u.active);
       ok('„Данни към дд.мм чч:мм"', /^Данни към \d\d\.\d\d \d\d:\d\d$/.test((h.doc.getElementById('who-at') || {}).textContent || ''));
       ok('Теодор: Дневен ✓ всички и Оборот ✓ всички (човек в две колони)', cell(h, 't.tenev@temax.bg', 'daily') === '✓ всички' && cell(h, 't.tenev@temax.bg', 'oborot') === '✓ всички');
       ok('външен адрес без акаунт (ten.tenev) — ред с роля „външен адрес"', /външен адрес/.test((h.doc.querySelector('tr.who-row[data-email="ten.tenev@temax.bg"]') || {}).textContent || ''));
-      ok('регионален: Дневен по обекти, роля „регионален"', cell(h, 'reg1@temax.bg', 'daily') === 'Троян, Ловеч' && /регионален/.test(h.doc.querySelector('tr.who-row[data-email="reg1@temax.bg"]').textContent));
+      ok('регионален: Дневен = своите обекти → „✓ своите“, роля „регионален"', cell(h, 'reg1@temax.bg', 'daily') === '✓ своите' && /регионален/.test(h.doc.querySelector('tr.who-row[data-email="reg1@temax.bg"]').textContent));
       ok('minus_multi с обхват → „условно · Троян", не ✓', cell(h, 'reg1@temax.bg', 'minus_multi') === 'условно · Троян', cell(h, 'reg1@temax.bg', 'minus_multi'));
       ok('minus_multi без обхват → обектите, без „условно"', cell(h, 'm.pavlova@temax.bg', 'minus_multi') === 'Троян, Ловеч');
       ok('Задачи седмично: „3 задачи"; Отчети по задача: „1 отчет"; Изтекъл срок: „1 задача"',
         cell(h, 'm.pavlova@temax.bg', 'weekly_routed') === '3 задачи' && cell(h, 'co@temax.bg', 'task_report') === '1 отчет' && cell(h, 'm.pavlova@temax.bg', 'deadline_passed') === '1 задача');
-      ok('Товарни листи: акаунтът на обекта — условно · Ловеч', cell(h, 'm2@temax.bg', 'loading_lists_pending') === 'условно · Ловеч');
+      ok('Товарни листи: акаунтът на обекта (Ловеч = своят) — „условно · своите“', cell(h, 'm2@temax.bg', 'loading_lists_pending') === 'условно · своите');
       const th = col => (h.doc.querySelector('#who-table th[data-col="' + col + '"]') || {}).textContent || '';
       ok('часът от report_cron_schedule (Просрочени КЗ „пн–пт 08:00", Дневен „21:00")', /пн–пт 08:00/.test(th('co_overdue')) && /21:00/.test(th('daily')), th('co_overdue'));
       ok('часът на темите от notification_topics (Промоции 08:30, Просрочени задачи пн–пт 08:15)', /08:30/.test(th('promo_expiring')) && /пн–пт 08:15/.test(th('overdue_tasks')));
@@ -449,6 +451,59 @@ const activeUsers = () => USERS.filter(u => u.active);
       const hdr = aoa[1], ri = aoa.filter(rw => rw[1] === 'reg1@temax.bg')[0];
       ok('Excel: клетката minus_multi е „условно · Троян"', ri && ri[hdr.findIndex(c => /^Минуси повтарящи се/.test(c))] === 'условно · Троян', JSON.stringify(ri));
     }
+    h.close();
+  }
+  {
+    /* „Обекти" и „✓ своите" (otcheti-tablica-vid, 12.11.2026). Регионален със 7
+       обекта, отчетите връщат обектите в ДРУГ ред (функциите сортират) — пак е
+       „своите"; подмножество → пълният списък; Excel — винаги пълният. */
+    const SEVEN = ['Добрич', 'Силистра', 'Сливен', 'Търговище', 'Шумен', 'Варна', 'Разград'];
+    const SORTED = SEVEN.slice().sort((a, b) => a.localeCompare(b, 'bg'));
+    const U7 = USERS.concat([
+      { email: 'filev@temax.bg', display_name: 'В. Филев', role: 'admin', store_name: 'Централен офис', active: true, is_regional: true, notify_groups: [], assigned_stores: SEVEN }
+    ]);
+    const R7 = Object.assign({}, REPLIES, {
+      'send-scheduled-report': Object.assign({}, SSR, { types: Object.assign({}, SSR.types, {
+        daily: { type: 'daily', general: SSR.types.daily.general, personal: SSR.types.daily.personal.concat([{ email: 'filev@temax.bg', name: 'ВФ', stores: SORTED, source: 'regional' }]) },
+        minus_multi: { type: 'minus_multi', general: [], personal: SSR.types.minus_multi.personal.concat([{ email: 'filev@temax.bg', name: 'ВФ', stores: ['Шумен', 'Добрич', 'Търговище'], source: 'regional', scoped: true, conditional: true }]) },
+        pallets: { type: 'pallets', general: SSR.types.pallets.general, personal: [{ email: 'filev@temax.bg', name: 'ВФ', stores: SORTED, source: 'regional' }] }
+      }) }),
+      'send-oborot-report': Object.assign({}, OB, { personal: OB.personal.concat([{ email: 'filev@temax.bg', name: 'ВФ', stores: SEVEN.slice(0, 6).concat(['Габрово']), all: false, source: 'assigned', send: true }]) }),
+      'bulletin-notify': Object.assign({}, BN, { topics: Object.assign({}, BN.topics, {
+        loading_lists_pending: Object.assign({}, BN.topics.loading_lists_pending, { store_accounts: [{ email: 'm2@temax.bg', name: 'М2', store: 'Ловеч' }, { email: 'm1@temax.bg', name: 'М1', store: 'Троян' }] })
+      }) })
+    });
+    const h = env(ADMIN, R7, U7);
+    h.w.loadNotificationsAdmin(); await settle();
+    realClick(h.w, h.doc.getElementById('who-load-btn'), 'Зареди'); await settle();
+    const td = (e, col) => { const tr = h.doc.querySelector('tr.who-row[data-email="' + e + '"]'); return tr && tr.querySelector('td[data-col="' + col + '"]'); };
+    ok('колона „Обекти" веднага след „Роля / отдел"', (() => { const ths = Array.prototype.map.call(h.doc.querySelectorAll('#who-table thead th'), t => t.textContent.trim().split('\n')[0]); return ths[2] === 'Роля / отдел' && ths[3] === 'Обекти'; })());
+    ok('регионален: „Обекти" = assigned_stores (7)', td('filev@temax.bg', 'own').textContent === SEVEN.join(', '), td('filev@temax.bg', 'own').textContent);
+    ok('регионален: Дневен = същите 7 в друг ред → „✓ своите", пълният списък в title',
+      td('filev@temax.bg', 'daily').textContent === '✓ своите' && td('filev@temax.bg', 'daily').getAttribute('title') === SORTED.join(', '), td('filev@temax.bg', 'daily').outerHTML.slice(0, 200));
+    ok('регионален: Палети — също „✓ своите"', td('filev@temax.bg', 'pallets').textContent === '✓ своите');
+    ok('регионален: Минуси (подмножество, условно) → пълният списък', td('filev@temax.bg', 'minus_multi').textContent === 'условно · Шумен, Добрич, Търговище');
+    ok('регионален: Оборот — различни (6 свои + Габрово) → пълният списък', td('filev@temax.bg', 'oborot').textContent === SEVEN.slice(0, 6).concat(['Габрово']).join(', '));
+    ok('управител: „Обекти" = обектът; Товарни листи на своя обект → „условно · своите"', td('m1@temax.bg', 'own').textContent === 'Троян' && td('m1@temax.bg', 'loading_lists_pending').textContent === 'условно · своите' &&
+      td('m1@temax.bg', 'daily').textContent === '✓ своите');
+    ok('ЦО: „Обекти" е празно; ✓ всички остава', td('co@temax.bg', 'own').textContent === '' && td('co@temax.bg', 'co_overdue').textContent === '✓ всички');
+    ok('външен адрес: „Обекти" е празно', td('ten.tenev@temax.bg', 'own').textContent === '');
+    ok('имейлът се пренася в клетката си (overflow-wrap:anywhere), не се реже', /overflow-wrap:\s*anywhere/.test(td('filev@temax.bg', 'own').previousElementSibling.previousElementSibling.getAttribute('style')) &&
+      td('filev@temax.bg', 'own').previousElementSibling.previousElementSibling.textContent === 'filev@temax.bg');
+    ok('таблицата е tbl-wrap tbl-compact tbl-auto (лейаут по съдържанието) и превърта в кутията (overflow-x:auto inline)', (() => {
+      const wr = h.doc.querySelector('#who-table').closest('.tbl-wrap');
+      return !!wr && wr.classList.contains('tbl-compact') && wr.classList.contains('tbl-auto') && /overflow-x:\s*auto/.test(wr.getAttribute('style') || '');
+    })());
+    /* Закаченият thead на tbl-compact (≥1200px) в кутия с overflow-x се измества и
+       покрива първия ред — мерено в браузър на 1600px; тук — заковано по стил. */
+    ok('заглавките на таблицата са position:static (без закачане)', Array.prototype.every.call(h.doc.querySelectorAll('#who-table thead th'), t => /position:\s*static/.test(t.getAttribute('style') || '')));
+    realClick(h.w, h.doc.getElementById('who-xlsx-btn'), 'Excel');
+    const aoa = h.xlsx[0] && h.xlsx[0].wb.sheets[0].ws.aoa;
+    const hdr = aoa && aoa[1], fr = aoa && aoa.filter(r => r[1] === 'filev@temax.bg')[0], mr = aoa && aoa.filter(r => r[1] === 'm1@temax.bg')[0];
+    const col = re => hdr.findIndex(c => re.test(c));
+    ok('Excel: пълният списък, не „✓ своите" (Дневен, Палети, Товарни листи)', !!fr && fr[col(/^Дневен/)] === SORTED.join(', ') && fr[col(/^Палети/)] === SORTED.join(', ') &&
+      mr[col(/^Товарни листи/)] === 'условно · Троян' && aoa.every(r => r.indexOf('✓ своите') < 0 && r.indexOf('условно · своите') < 0), JSON.stringify(fr));
+    ok('Excel: колоните са непроменени (няма „Обекти")', hdr.indexOf('Обекти') < 0 && hdr.length === 3 + 13);
     h.close();
   }
   {
