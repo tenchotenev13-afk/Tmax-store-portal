@@ -1,4 +1,5 @@
 Отворено: 12.11 · Кой чака: чат · Сесия: otcheti-inventar
+Затворено: 12.11 · Как: таблицата „📋 Кой какво получава“ на живо, проверена от чата в 22:33 (admin, Pages `c661f49`): „📋 Зареди“ — 67 души, 13 колони, без „не се зареди“; броячите непроменени (task_completions 6529, notification_log 2904, report_snapshots 103), weekly_routed.last_run_at остава 19:52:34; preflight към send-scheduled-report / send-oborot-report / send-routed-report — 200 „ok“ за 0,2–0,3 сек. Т.5 направена (`43fb77c`, `848a7f9`, CORS `1dd510d`); т.4.1 и т.2 — `4aa2b2d`; т.4.3 — миграция 20261112193205 и README; т.4.2 и т.4.4 → `claude/open/12-11-otcheti-gmail-dvoini-zadachi.md`. Инцидентът с preflight-а → `claude/open/12-11-cors-preflight-pisma.md` (отворен, чака Тенчо).
 
 # Опис на автоматичните писма — етап 1 (Теодор, 11.11)
 
