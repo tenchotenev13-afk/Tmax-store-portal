@@ -195,10 +195,13 @@ function showLoginBanner(){
     /* sbGetAll + order=id.asc: 30 дни са над 1000 реда (2287 на 11.10.2026),
        а PostgREST реже тихо. При .partial банерът НЕ мълчи — тишината би
        значила „няма разминаване“, а това не е проверено. */
-    sbGetAll('kasa_storno','storno_date=gte.'+localDateISO(stFrom)+'&select=store_name,returned_sum,new_sum&order=id.asc').then(function(rows){
+    sbGetAll('kasa_storno','storno_date=gte.'+localDateISO(stFrom)+'&select=store_name,returned_sum,new_sum,articles&order=id.asc').then(function(rows){
       if(!Array.isArray(rows)) return;
       var partialNote=rows.partial?' &nbsp;·&nbsp; ⚠️ Непълни данни — прочетени '+rows.length+' реда':'';
-      var flagged=rows.filter(function(r){return (parseFloat(r.new_sum)||0)<(parseFloat(r.returned_sum)||0);});
+      /* Правилото е САМО stornoIndicator (kasa.js) — изключва капаро/ваучер
+         (900001/900009), както История. Със собствено сравнение банерът казваше
+         52 при 47 в История за същия период (12.11.2026). */
+      var flagged=rows.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum,r.articles).flagged;});
       var el=document.getElementById('notif-banner');if(!el)return;
       if(!flagged.length){
         if(!rows.partial) return;

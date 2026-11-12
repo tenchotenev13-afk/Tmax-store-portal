@@ -68,6 +68,7 @@ const TESTS = [
   'stock-differences.test.js',
   'sbget-errors.test.js',
   'sb-get-all.test.js',
+  'storno-banner-count.test.js',
   'history-kasa-get-all.test.js',
   'history-storno-filter.test.js',
   'history-store-dropdown.test.js',
