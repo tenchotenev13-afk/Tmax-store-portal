@@ -1271,6 +1271,9 @@ function renderTransferPrint(t, cargo, coNum) {
     '.tf-tbl th{background:#eee;}' +
     '.tf-head{display:flex;justify-content:space-between;align-items:flex-start;}' +
     '.tf-logo{height:24pt;width:auto;flex-shrink:0;margin-left:8mm;}' +
+    /* „Проверено" — проверката ПРЕДИ тръгване (снабдител / началник склад),
+       на собствен ред над трите подписа за предаване (решение 12.11.2026). */
+    '.tf-check{margin-top:8mm;font-size:9pt;}' +
     '.tf-sign{display:flex;justify-content:space-between;gap:10mm;margin-top:8mm;font-size:9pt;}' +
     '.tf-sign div{flex:1;border-top:1px dotted #999;padding-top:2mm;}';
 
@@ -1331,6 +1334,7 @@ function renderTransferPrint(t, cargo, coNum) {
         (hist ? '<div style="font-weight:700;margin:0 0 2mm;">История на товарите</div>' +
           '<table class="tf-tbl tf-hist"><colgroup><col style="width:7mm"><col><col style="width:1mm"></colgroup>' +
           '<thead><tr><th>#</th><th colspan="2">Отметки</th></tr></thead><tbody>' + hist + '</tbody></table>' : '') +
+        '<div class="tf-check"><b>Проверено</b> (снабдител / началник склад): имена ........................................ подпис ..............................</div>' +
         '<div class="tf-sign"><div>Предал: ………………………</div><div>Превозвач: ………………………</div><div>Приел: ………………………</div></div>' +
       '</div>' +
     '</div>';

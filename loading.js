@@ -2119,6 +2119,16 @@ function llBuildPdf(list, items, storeFilter){
       }
     });
     y += 4;
+    /* „Проверено" преди „Товарил" — проверката преди тръгване (12.11.2026).
+       В PDF-а е вграден само Roboto normal, затова думата се удебелява с
+       контур върху същия текст, на същото място (дебелината по подразбиране,
+       0,2 мм — тя не се пипа, за да не се отрази на нищо след това).
+       Двата реда (Проверено / Товарил + Приел) се пазят ЗАЕДНО: ако вторият
+       не би се побрал на листа, нов лист ПРЕДИ „Проверено" (решение 12.11.2026).
+       Прагът е същият като в line(): ред се пише, докато y <= 282. */
+    if(y + 5 > 282){ doc.addPage(); doc.setFont(LL_PDF_FONT_NAME, 'normal'); y = 16; }
+    line('Проверено (снабдител / началник склад): имена ............................  подпис ............................', 10, 5);
+    doc.text('Проверено', L, y - 5, { renderingMode: 'fillThenStroke' });
     line('Товарил: ............................        Приел: ............................', 10, 5);
 
     /* datauristring е „data:application/pdf;filename=…;base64,AAAA" — взима
@@ -4760,6 +4770,7 @@ function llRenderPalletPrint(list, rows){
           body+
         '</table>'+
         '<div class="lp-sign">'+
+          '<div class="lp-sign-item lp-check"><b>Проверено</b> (снабдител / началник склад): имена ........................................ подпис ..............................</div>'+
           '<div class="lp-sign-item"><div class="lp-dots"></div>Товарил: име и подпис</div>'+
           '<div class="lp-sign-item"><div class="lp-dots"></div>Приел: име и подпис</div>'+
         '</div>'+
@@ -4850,6 +4861,9 @@ function llPrintCss(){
     '.lp-box{display:inline-block;width:4mm;height:4mm;border:1px solid #555;}'+
     '.lp-sign{display:flex;flex-wrap:wrap;gap:6mm;border-top:1px dotted #999;padding-top:3mm;margin-top:2mm;}'+
     '.lp-sign-item{flex:1 1 60mm;font-size:8.5pt;}'+
+    /* „Проверено" — цял ред над „Товарил" / „Приел": проверката преди
+       тръгване (снабдител / началник склад), решение 12.11.2026. */
+    '.lp-check{flex:1 1 100%;}'+
     '.lp-dots{border-bottom:1px dotted #555;height:6mm;margin-bottom:1mm;}'+
     '.lp-foot{font-size:7.5pt;color:#555;margin-top:3mm;}' +
     /* Артикулите под реда в печата на целия лист — малки, но пречупващи се:
@@ -4990,6 +5004,7 @@ function llRenderPrint(list, items, storeFilter){
           bodyHtml+
         '</table>'+
         '<div class="lp-sign">'+
+          '<div class="lp-sign-item lp-check"><b>Проверено</b> (снабдител / началник склад): имена ........................................ подпис ..............................</div>'+
           '<div class="lp-sign-item"><div class="lp-dots"></div>Товарил: име и подпис</div>'+
           '<div class="lp-sign-item"><div class="lp-dots"></div>Приел: име и подпис</div>'+
         '</div>'+

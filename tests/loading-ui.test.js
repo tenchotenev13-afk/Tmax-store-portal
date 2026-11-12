@@ -13,6 +13,10 @@
    01.11.2026: снет наново САМО заради правилото .lp-nest в печатния CSS („Стока в стока“, сесия
    loading-stoka-v-stoka) — printAll / printStore / printPallet / labelsPrint; машинно сверено, че без
    този низ еталонът е байт по байт старият.
+   12.11.2026: снет наново САМО заради реда „Проверено (снабдител / началник склад)“ преди „Товарил“
+   (сесия transfer-loading-print-checked) — printAll / printStore / printPallet (+ правилото .lp-check, и в
+   labelsPrint, защото CSS-ът е общ) и pdf (редът, „Проверено“ с контур и един setFontSize); машинно сверено,
+   че без тези низове еталонът е байт по байт старият.
 
    Пускане:  node tests/loading-ui.test.js .
    Еталон от друга версия:  node tests/loading-ui.test.js <корен> --dump */

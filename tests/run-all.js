@@ -426,6 +426,7 @@ const TESTS = [
   'transfers-co-label.test.js',
   'transfers-labels.test.js',
   'transfers-units.test.js',
+  'transfer-loading-print-checked.test.js',
   'transfers-card-note.test.js',
   'transfers-departed.test.js',
   'transfers-notify.test.js',
