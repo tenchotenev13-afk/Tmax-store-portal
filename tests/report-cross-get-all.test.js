@@ -67,7 +67,7 @@ function env(failOn) {
   failOn = failOn || {};
   const seen = { stock_returns: [], kasa_storno: [] };
   const h = boot({
-    modules: ['bulletin.js', 'report.js'],
+    modules: ['kasa.js', 'bulletin.js', 'report.js'],
     user: ADMIN,
     fail: { GET: function (url) {
       const u = decodeURIComponent(String(url));

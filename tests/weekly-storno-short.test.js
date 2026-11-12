@@ -97,7 +97,7 @@ const OTHER = {
 function env(storno, repo) {
   const h = boot({
     repo: repo,
-    modules: ['bulletin.js', 'report.js'],
+    modules: ['kasa.js', 'bulletin.js', 'report.js'],
     user: ADMIN,
     data: Object.assign({
       users: USERS, bulletins: [{ id: 'b-37', week_number: 37, year: 2026, status: 'published' }],
@@ -235,10 +235,10 @@ function withoutChecklistTable(newHtml, oldHtml, tbl) {
     const byStorno = h.calls.get.filter(u => u.indexOf('/kasa_storno') >= 0 && u.indexOf('storno_date=') >= 0);
     ok('една заявка по storno_date за седмицата', byStorno.length === 1 &&
       byStorno[0].indexOf('storno_date=gte.2026-09-07') >= 0 && byStorno[0].indexOf('storno_date=lte.2026-09-13') >= 0, byStorno.join(' | '));
-    ok('select носи new_sum, reason, store_comment, status',
+    ok('select носи new_sum, articles, reason, store_comment, status',
       /* (&|$), не $: от 12.10.2026 заявката е през reportGetAll и след select
          идват &order=id.asc&limit=1000&offset=0 (report-cross-get-all). */
-      /select=store_name,storno_date,returned_sum,new_sum,reason,store_comment,status(&|$)/.test(byStorno[0] || ''), byStorno[0]);
+      /select=store_name,storno_date,returned_sum,new_sum,articles,reason,store_comment,status(&|$)/.test(byStorno[0] || ''), byStorno[0]);
     ok('storno_small_threshold не се чете', !h.calls.get.some(u => decodeURIComponent(u).indexOf('storno_small_threshold') >= 0));
     h.close();
   }

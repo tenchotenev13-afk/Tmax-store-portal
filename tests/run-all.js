@@ -318,6 +318,7 @@ const TESTS = [
   'pallets-export.test.js',
   'pallets-supply-access.test.js',
   'weekly-storno-short.test.js',
+  'storno-short-weekly.test.js',
   'weekly-diff-stale.test.js',
   'weekly-checklist-section.test.js',
   'warehouse-report.test.js',

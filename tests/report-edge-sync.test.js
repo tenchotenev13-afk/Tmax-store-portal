@@ -48,6 +48,7 @@ const EDGE = path.join(ROOT, 'supabase/functions/send-scheduled-report/index.ts'
 const ROUTED = path.join(ROOT, 'supabase/functions/send-routed-report/index.ts');
 const SHARED = path.join(ROOT, 'shared.js');
 const BULLETIN = path.join(ROOT, 'bulletin.js');
+const KASA = path.join(ROOT, 'kasa.js');
 
 /* ── Списъкът е ИЗРИЧЕН, не сканиран ──
    Ако беше сканиран, изтриването на функция от двата файла щеше да мине
@@ -210,6 +211,12 @@ const COPIED_HELPERS = [
   { fn: 'spanWeekSunday', from: SHARED },
   { fn: 'loadSpanningTasks', from: SHARED },
   { fn: 'mergeSpanningTasks', from: SHARED },
+  /* „Сторна с по-малка нова сума" в седмичния отчет — СЪЩОТО правило като
+     портала (12.11.2026). Разминае ли се копието, писмото брои капаро/ваучер,
+     които История, банерът и Каса не броят (52 срещу 47 на 12.11). Списъкът
+     с кодовете е отделна проверка (секция 4б) — той е променлива, не функция. */
+  { fn: 'stornoIsExempt', from: KASA },
+  { fn: 'stornoIndicator', from: KASA },
 ];
 
 /* Съзнателни разминавания — изброени, за да не изглеждат като пропуск.
@@ -555,6 +562,15 @@ const routed = fs.existsSync(ROUTED) ? topLevelFns(ROUTED) : {};
       ok(h.fn + ' съвпада с оригинала', normalize(orig) === normalize(copy),
         '\n      оригинал: ' + normalize(orig) + '\n      копие:    ' + normalize(copy));
     });
+  }
+
+  section('4б. STORNO_EXEMPT_CODES — кодовете за капаро/ваучер са същите като в kasa.js');
+  {
+    const decl = f => (fs.readFileSync(f, 'utf8').match(/^var STORNO_EXEMPT_CODES = \[[^\]]*\];/m) || [])[0];
+    const k = decl(KASA), e = decl(EDGE);
+    ok('декларацията я има в kasa.js', !!k);
+    ok('декларацията я има в едж функцията', !!e);
+    ok('списъкът с кодове е дословно същият', !!k && k === e, '\n      kasa.js: ' + k + '\n      едж:     ' + e);
   }
 
   section('5. ЯДРОТО: едж функцията не вика нищо, което няма');

@@ -1,6 +1,12 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v70 (12.11.2026) — ЕДНО нещо: „Сторна с по-малка нова сума" (седмичният) брои
+      по правилото на портала — stornoIndicator, копие от kasa.js заедно със
+      stornoIsExempt и STORNO_EXEMPT_CODES (report-edge-sync): капаро/ваучер
+      (900001/900009) не влизат, разликата е закръглена до цент. Заявката по
+      storno_date тегли и articles. Решение на Тенчо 12.11; копие от report.js.
+
    v69 (12.11.2026) — ЕДНО нещо: CORS. OPTIONS → 200 и CORS заглавките на всеки
       отговор — порталът вика функцията от браузъра (recipients_only, „📤 Изпрати
       сега“); без тях preflight-ът падаше. Логиката не е пипана.
@@ -2936,6 +2942,29 @@ function reportGetAll(t, q){
   return page(0);
 }
 
+/* Копие от kasa.js (Deno няма достъп до него) — „по-малка сума" при сторно,
+   същото правило като в портала (История, банер, Каса). Заковано в
+   tests/report-edge-sync.test.js (COPIED_HELPERS + STORNO_EXEMPT_CODES). */
+var STORNO_EXEMPT_CODES = ['900001','900009'];
+
+function stornoIsExempt(articlesStr){
+  if(!articlesStr) return false;
+  var codes=String(articlesStr).split('/').map(function(s){return s.trim();});
+  return codes.some(function(c){return STORNO_EXEMPT_CODES.indexOf(c)>=0;});
+}
+
+function stornoIndicator(returnedSum, newSum, articlesStr) {
+  if(stornoIsExempt(articlesStr)){
+    return { flagged:false, exempt:true, label:'➖ Капаро/Ваучер', color:'#64748b', bg:null, diff:0 };
+  }
+  var ret = parseFloat(returnedSum) || 0;
+  var nw  = parseFloat(newSum) || 0;
+  var diff = Math.round((nw - ret) * 100) / 100;
+  if (diff < 0) return { flagged: true,  label: '⚠️ ПО-МАЛКО', color: '#dc2626', bg: '#fef2f2', diff: diff };
+  if (diff > 0) return { flagged: false, label: '✅ ПОВЕЧЕ',    color: '#16a34a', bg: '#f0fdf4', diff: diff };
+  return          { flagged: false, label: '✅ РАВНО',      color: '#16a34a', bg: '#f0fdf4', diff: diff };
+}
+
 /* scope: масив с обекти или null/празно = цялата верига. Дневният отчет не
    рендира тази секция; параметърът е тук, за да не се смятат числата втори
    път другаде. store_name влезе в четирите select-а, които взимаха само
@@ -2988,7 +3017,7 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        принадлежи на седмицата на сторното. Подвижен прозорец (таб „Днес")
        няма седмица. */
     W.toISO
-      ? reportGetAll('kasa_storno','storno_date=gte.'+W.fromISO+'&storno_date=lte.'+W.toISO+'&select=store_name,storno_date,returned_sum,new_sum,reason,store_comment,status&order=id.asc')
+      ? reportGetAll('kasa_storno','storno_date=gte.'+W.fromISO+'&storno_date=lte.'+W.toISO+'&select=store_name,storno_date,returned_sum,new_sum,articles,reason,store_comment,status&order=id.asc')
       : Promise.resolve([]),
     /* ⏳ „Необработени разлики над N дни" — МОМЕНТНА СНИМКА, не срез от
        седмицата. Затова и трите заявки нямат прозорец по дата: въпросът е
@@ -3243,17 +3272,19 @@ function collectCrossModuleWeeklySummary(cb, win, scope){
        НЕ отговаря на изискванията, когато новата бележка е по-малка от
        върнатата — kasa_storno.new_sum < returned_sum. Замества „Сторна под
        N €" (праг по returned_sum). Само при затворен прозорец (седмичният
-       отчет); редовете са от отделната заявка по storno_date (r[11]). Равна
-       или по-голяма нова сума не влиза; липсваща сума — също. Без филтър по
-       reason и по status — статусът се показва, не отсява. */
+       отчет); редовете са от отделната заявка по storno_date (r[11]). Без
+       филтър по reason и по status — статусът се показва, не отсява.
+       От 12.11.2026 (решение на Тенчо) — СЪЩОТО правило като портала:
+       stornoIndicator (kasa.js; в едж функцията — копие, заковано в
+       report-edge-sync): капаро/ваучер (900001/900009) не влизат, разликата
+       е закръглена до цент, липсваща сума се брои като 0. */
     var stornoShort = null;
     if (W.toISO) {
       var shRound = function(n){ return Math.round(n * 100) / 100; };
       var shMap = {}, shByStore = [], shTotal = 0, shDiff = 0;
       (Array.isArray(r[11]) ? r[11] : []).filter(function(x){ return inScope(x.store_name); }).forEach(function(x){
-        if (x.returned_sum == null || x.new_sum == null) return;
-        var ret = Number(x.returned_sum), nw = Number(x.new_sum);
-        if (!Number.isFinite(ret) || !Number.isFinite(nw) || !(nw < ret)) return;
+        if (!stornoIndicator(x.returned_sum, x.new_sum, x.articles).flagged) return;
+        var ret = parseFloat(x.returned_sum) || 0, nw = parseFloat(x.new_sum) || 0;
         var d = shRound(ret - nw);
         var g = shMap[x.store_name];
         if (!g) { g = { store: x.store_name, count: 0, diff: 0, items: [] }; shMap[x.store_name] = g; shByStore.push(g); }
