@@ -2,7 +2,11 @@
 -- report_cron_schedule() — и co_overdue (крон 26, „Просрочени клиентски заявки — ЦО").
 -- Сесия otcheti-tablica, 12.11.2026 (Теодор 11.11, етап 2б — таблицата
 -- „📋 Кой какво получава" в Администрация → Известия чете часовете оттук).
--- НЕ Е ПРИЛОЖЕНО — чака „давай" (apply_migration).
+-- ПРИЛОЖЕНО В SUPABASE НА 12.11.2026 като миграция 20261112193205
+-- (report_cron_schedule_co_overdue) и прочетено обратно: шест реда — co_overdue
+-- dow 1-5, 08:00 София, active; daily / weekly / pallets / warehouse / minus_multi
+-- непроменени; ACL без PUBLIC (anon / authenticated / service_role), SECURITY DEFINER.
+-- Този файл е ОГЛЕДАЛО на миграцията. Rollback: supabase/migrations/20261112193205_report_cron_schedule_co_overdue_down.sql.
 --
 -- ЕДНО нещо: 'co_overdue' влиза в списъка с типове. Тялото иначе е
 -- непроменено (20261028104053_minusi_multi_report). create or replace пази
