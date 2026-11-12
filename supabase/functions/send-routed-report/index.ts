@@ -1,5 +1,9 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v18 (12.11.2026) — ЕДНО нещо: CORS. OPTIONS → 200 и CORS заглавките на всеки
+   отговор (таблицата „📋 Кой какво получава“ вика функцията от браузъра).
+   Логиката не е пипана.
+
    v17 (12.11.2026) — ЕДНО нещо: {"recipients_only":true} (Теодор 11.11, етап 2б,
    таблицата „📋 Кой какво получава“). Връща weekly — плана на седмичния отчет за
    приключилата седмица (collectWeeklyRoutingData → buildRecipientMap →
@@ -227,6 +231,15 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const REST = SUPABASE_URL + '/rest/v1/';
 const TOPIC_KEY = 'weekly_routed';
+
+/* CORS (12.11.2026) — порталът вика функцията от браузъра (Администрация →
+   Известия: „📋 Кой какво получава“, „📤 Изпрати сега“). Без тях preflight-ът
+   пада и fetch дава „Failed to fetch“. Същият модел като в bulletin-notify. */
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-client-info, apikey',
+};
 
 function sbGet(t: string, q?: string) {
   return fetch(REST + t + (q ? '?' + q : ''), {
@@ -1447,7 +1460,7 @@ async function collectRecurringTaskReportData(taskId: any, recipients: any, runD
   return { task:t, bul:wk, comps:cp.comps, stores:cp.stores, groupUsers:cp.groupUsers, idUsers:cp.idUsers };
 }
 async function routedTaskReportResponse(body: any, dryRun: boolean, testEmail: any){
-  var json = function(o: any, st?: number){ return new Response(JSON.stringify(o), { status: st || 200, headers:{'Content-Type':'application/json'} }); };
+  var json = function(o: any, st?: number){ return new Response(JSON.stringify(o), { status: st || 200, headers:{...CORS, 'Content-Type':'application/json'} }); };
   var taskId = String(body.task_id);
   var data: any = await collectTaskReportData(taskId, body.recipients, body.run_date);
   if (data.missing) {
@@ -1578,6 +1591,7 @@ function routedSendEmail(to: string, subject: string, html: string) {
 
 
 Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { status: 200, headers: CORS });
   try {
     var body: any = {};
     try { body = await req.json(); } catch (_e) { body = {}; }
@@ -1588,7 +1602,7 @@ Deno.serve(async (req: Request) => {
     var topics = Array.isArray(topicsRes) ? topicsRes : [];
     if (!topics.length) {
       return new Response(JSON.stringify({ ok:false, error:'no_topic', topic:TOPIC_KEY }),
-        { status:404, headers:{'Content-Type':'application/json'} });
+        { status:404, headers:{...CORS, 'Content-Type':'application/json'} });
     }
     var topic: any = topics[0];
 
@@ -1597,14 +1611,14 @@ Deno.serve(async (req: Request) => {
        изчезва от таблицата; пращане тук няма. ═══ */
     if (body && body.recipients_only === true) {
       return new Response(JSON.stringify(await routedRecipientsOnly(topic)),
-        { status:200, headers:{'Content-Type':'application/json'} });
+        { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     /* Изключената тема не праща НИЩО — включително в dry_run. Превключвателят
        в Администрация трябва да значи едно и също нещо навсякъде. */
     if (!topic.active) {
       return new Response(JSON.stringify({ ok:true, skipped:'темата е изключена', topic:TOPIC_KEY, sent:0 }),
-        { status:200, headers:{'Content-Type':'application/json'} });
+        { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
     var testEmail = topic.test_email || null;
 
@@ -1622,7 +1636,7 @@ Deno.serve(async (req: Request) => {
     var data: any = await new Promise(function(resolve){ collectWeeklyRoutingData(resolve); });
     if (!data) {
       return new Response(JSON.stringify({ ok:false, error:'collect_failed', topic:TOPIC_KEY }),
-        { status:500, headers:{'Content-Type':'application/json'} });
+        { status:500, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     var wkDates = data.bul ? weekDays(data.bul.week_number, data.bul.year).map(toLocalISO) : null;
@@ -1642,7 +1656,7 @@ Deno.serve(async (req: Request) => {
         week: data.weekLabel, subject: subject, test_email: testEmail,
         tasks: data.tasks.length, recipients: plan.length, empty_groups: emptyGroups,
         planned: plan.map(function(p: any){ return { email:p.email, name:p.name, zadachi:p.tasks.length }; })
-      }), { status:200, headers:{'Content-Type':'application/json'} });
+      }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     /* ═══ 4. По едно писмо на получател ═══ */
@@ -1670,9 +1684,9 @@ Deno.serve(async (req: Request) => {
 
     return new Response(JSON.stringify({ ok:true, topic:TOPIC_KEY, week:data.weekLabel,
       tasks:data.tasks.length, recipients:plan.length, sent:sent, failed:failed,
-      test_email:testEmail, empty_groups:emptyGroups }), { status:200, headers:{'Content-Type':'application/json'} });
+      test_email:testEmail, empty_groups:emptyGroups }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
 
   } catch (e) {
-    return new Response(JSON.stringify({ ok:false, error:String(e) }), { status:500, headers:{'Content-Type':'application/json'} });
+    return new Response(JSON.stringify({ ok:false, error:String(e) }), { status:500, headers:{...CORS, 'Content-Type':'application/json'} });
   }
 });

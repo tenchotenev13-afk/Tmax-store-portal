@@ -1,6 +1,10 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v69 (12.11.2026) — ЕДНО нещо: CORS. OPTIONS → 200 и CORS заглавките на всеки
+      отговор — порталът вика функцията от браузъра (recipients_only, „📤 Изпрати
+      сега“); без тях preflight-ът падаше. Логиката не е пипана.
+
    v68 (12.11.2026) — ЕДНО нещо: един източник на получателите (Теодор 11.11, етап 2а).
       Изборът кой получава дневния / седмичния е изнесен от Deno.serve в
       reportDailyWeeklyRecipients (копие от report.js, report-edge-sync) и
@@ -816,6 +820,15 @@
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const REST = SUPABASE_URL + '/rest/v1/';
+
+/* CORS (12.11.2026) — порталът вика функцията от браузъра (Администрация →
+   Известия: „📋 Кой какво получава“, „📤 Изпрати сега“). Без тях preflight-ът
+   пада и fetch дава „Failed to fetch“. Същият модел като в bulletin-notify. */
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-client-info, apikey',
+};
 
 function sbGet(t: string, q?: string) {
   return fetch(REST + t + (q ? '?' + q : ''), {
@@ -5320,6 +5333,7 @@ async function reportRecipientsOnly(t: string) {
 }
 
 Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { status: 200, headers: CORS });
   try {
     var body: any = {};
     try { body = await req.json(); } catch(e) {}
@@ -5328,15 +5342,15 @@ Deno.serve(async (req: Request) => {
     /* v68 — само получателите, нищо не се праща (reportRecipientsOnly). */
     if (body && body.recipients_only === true) {
       if (body.type !== undefined && body.type !== null && REPORT_RO_TYPES.indexOf(body.type) < 0) {
-        return new Response(JSON.stringify({ ok:false, error:'unknown_type', type:body.type, recipients_only:true }), { status:400, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify({ ok:false, error:'unknown_type', type:body.type, recipients_only:true }), { status:400, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       if (body.type) {
         var roOne: any = await reportRecipientsOnly(body.type);
-        return new Response(JSON.stringify(Object.assign({ ok:true, recipients_only:true }, roOne)), { status:200, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify(Object.assign({ ok:true, recipients_only:true }, roOne)), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var roAll: any = {};
       for (const t of REPORT_RO_TYPES) roAll[t] = await reportRecipientsOnly(t);
-      return new Response(JSON.stringify({ ok:true, recipients_only:true, types:roAll }), { status:200, headers:{'Content-Type':'application/json'} });
+      return new Response(JSON.stringify({ ok:true, recipients_only:true, types:roAll }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     /* v52 — dry_run за седмичния отчет: {"type":"weekly","dry_run":true}. Вика САМО
@@ -5346,7 +5360,7 @@ Deno.serve(async (req: Request) => {
     if (type === 'weekly' && body && body.dry_run === true) {
       var wkCross: any = await new Promise(function(resolve){ collectCrossModuleWeeklySummary(resolve, null, null); });
       if (!wkCross) {
-        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type, dry_run:true }), { status:500, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type, dry_run:true }), { status:500, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var wkDs: any = wkCross.diffStale || { days:null, byStore:[], total:{} };
       var wkOpen = 0;
@@ -5354,7 +5368,7 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok:true, dry_run:true, type:type,
         diffStale:{ days:wkDs.days, stores:(wkDs.byStore || []).length, control:wkDs.total.control, warehouse:wkDs.total.warehouse, storeSide:wkDs.total.storeSide, oldest:wkDs.total.oldest },
         transit:{ open:wkOpen, stale:wkCross.transitStale },
-        rows_read: wkCross.rowsRead, partial: wkCross.partial }), { status:200, headers:{'Content-Type':'application/json'} });
+        rows_read: wkCross.rowsRead, partial: wkCross.partial }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     /* v61 — „Минуси — повтарящи се артикули": ранен клон като „Просрочени — ЦО".
@@ -5371,7 +5385,7 @@ Deno.serve(async (req: Request) => {
       var mmDry = !!(body && body.dry_run === true);
       var mmData: any = await new Promise(function(resolve){ collectMinusMultiReportData(mmRef, resolve); });
       if (!mmData) {
-        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var mmRecRes: any = await sbGet('report_recipients', 'active=eq.true&minus_multi=eq.true&select=email,name,active,minus_multi,scope_stores');
       /* v66 — и регионалните: assigned_stores ∩ minus_stores (reportMinusMultiPlan). */
@@ -5394,11 +5408,11 @@ Deno.serve(async (req: Request) => {
             send:j.send }; }),
           stores:(mmData.stores || []).map(function(s: any){ return { store:s.store, items:s.items.map(function(g: any){ return { material:g.material, n:g.dates.length, dates:g.dates, statement:!!g.action }; }) }; }),
           co_stores:((mmData.co && mmData.co.stores) || []).map(function(s: any){ return { store:s.store, items:s.items.map(function(g: any){ return { material:g.material, n:g.dates.length, dates:g.dates, notes:g.notes.length }; }) }; }),
-          type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+          type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var mmSend: any[] = mmJobs.filter(function(j: any){ return j.send; });
       if (!mmSend.length) {
-        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', recipients:mmJobs.length, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', recipients:mmJobs.length, type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var mmOut: any[] = [];
       for (const j of mmSend) {
@@ -5410,7 +5424,7 @@ Deno.serve(async (req: Request) => {
         mmOut.push({ email:j.plan.email, regional:!!j.plan.regional, stores:j.plan.stores.length, total:j.sub.total, week:j.sub.week ? j.sub.week.total.cur : null, common:!!j.sub.common, sent:mmRes.ok, status:mmRes.status });
       }
       return new Response(JSON.stringify({ ok:true, sent:mmOut.every(function(x: any){ return x.sent; }), recipients:mmOut.length,
-        skipped:mmJobs.length - mmSend.length, personal:mmOut, total:mmData.total, ref:mmData.ref, regional_read:Array.isArray(mmRegRes), type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+        skipped:mmJobs.length - mmSend.length, personal:mmOut, total:mmData.total, ref:mmData.ref, regional_read:Array.isArray(mmRegRes), type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     /* v49 — „Просрочени клиентски заявки — ЦО": ЕДНО общо писмо, ранен клон
@@ -5422,28 +5436,28 @@ Deno.serve(async (req: Request) => {
       var coDry = !!(body && body.dry_run === true);
       var coWorkday = isBgWorkday(coIso);
       if (!coWorkday && !coDry) {
-        return new Response(JSON.stringify({ ok:true, sent:false, reason: bgHolidaysForYear(coToday.getFullYear())[coIso] ? 'holiday' : 'weekend', date:coIso, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify({ ok:true, sent:false, reason: bgHolidaysForYear(coToday.getFullYear())[coIso] ? 'holiday' : 'weekend', date:coIso, type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var coData: any = await new Promise(function(resolve){ collectCoOverdueReportData(resolve); });
       if (!coData) {
-        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var coTo: string[] = await loadCoOverdueTo();
       if (coDry) {
         var coPick = function(x: any){ return { in_num:x.in_num, store:x.store, delivery:x.delivery, co_eta:x.co_eta || null, lateDays:x.lateDays, waitDays:x.waitDays, items:(x.itemLines || []).length }; };
         return new Response(JSON.stringify({ ok:true, dry_run:true, date:coIso, workday:coWorkday, subject:reportCoOverdueSubject(coData),
           recipients:coTo.length, pending:{ count:coData.pending.length, first5:coData.pending.slice(0,5).map(coPick) },
-          processed:{ count:coData.processed.length, first5:coData.processed.slice(0,5).map(coPick) }, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+          processed:{ count:coData.processed.length, first5:coData.processed.slice(0,5).map(coPick) }, type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       if (!coTo.length) {
-        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var coRes = await fetch(SUPABASE_URL + '/functions/v1/resend-email', {
         method: 'POST',
         headers: { 'Content-Type':'application/json', 'Authorization':'Bearer '+SERVICE_KEY, 'apikey':SERVICE_KEY },
         body: JSON.stringify({ to: coTo, subject: reportCoOverdueSubject(coData), html: reportCoOverdueHtml(coData) })
       });
-      return new Response(JSON.stringify({ ok:true, sent:coRes.ok, email_status:coRes.status, recipients:coTo.length, pending:coData.pending.length, processed:coData.processed.length, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      return new Response(JSON.stringify({ ok:true, sent:coRes.ok, email_status:coRes.status, recipients:coTo.length, pending:coData.pending.length, processed:coData.processed.length, type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     /* v33 — „Палети": отделен, по-кратък път. Без праг за каса, без
@@ -5452,7 +5466,7 @@ Deno.serve(async (req: Request) => {
     if (type === 'pallets') {
       var pData: any = await new Promise(function(resolve){ collectPalletsReportData(null, resolve); });
       if (!pData) {
-        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{...CORS, 'Content-Type':'application/json'} });
       }
       var pSubject = reportPalletsSubject(pData.reportDate);
       var pPlan: any = (await loadPalletsPlan()).plan;
@@ -5484,9 +5498,9 @@ Deno.serve(async (req: Request) => {
       }
 
       if (!pPlan.all.length && !pPersonal.length) {
-        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }
-      return new Response(JSON.stringify({ ok:true, sent:pOk, email_status:pStatus, recipients:pPlan.all.length, personal:pPersonal, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      return new Response(JSON.stringify({ ok:true, sent:pOk, email_status:pStatus, recipients:pPlan.all.length, personal:pPersonal, type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     /* v36 — „Логистичен склад — необработени заявки": писмо до всеки склад
@@ -5506,9 +5520,9 @@ Deno.serve(async (req: Request) => {
         wOut.push({ email:u.email, warehouse:u.warehouse, orders:wData.total, sent:wRes.ok, status:wRes.status });
       }
       if (!wPlan.length) {
-        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+        return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
       }
-      return new Response(JSON.stringify({ ok:true, personal:wOut, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      return new Response(JSON.stringify({ ok:true, personal:wOut, type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     /* Прагът за секцията „Каса" се чете ВЕДНЪЖ на изпълнение и се подава на
@@ -5529,7 +5543,7 @@ Deno.serve(async (req: Request) => {
     });
 
     if (!data) {
-      return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{'Content-Type':'application/json'} });
+      return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
     var html = type === 'weekly' ? buildWeeklyReportHtml(data) : buildDailyReportHtml(data);
@@ -5628,11 +5642,11 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!emails.length && !personalOut.length) {
-      return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+      return new Response(JSON.stringify({ ok:true, sent:false, reason:'no_recipients', type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
     }
 
-    return new Response(JSON.stringify({ ok:true, sent:emailOk, email_status:emailStatus, recipients:emails.length, personal:personalOut, type:type }), { status:200, headers:{'Content-Type':'application/json'} });
+    return new Response(JSON.stringify({ ok:true, sent:emailOk, email_status:emailStatus, recipients:emails.length, personal:personalOut, type:type }), { status:200, headers:{...CORS, 'Content-Type':'application/json'} });
   } catch (e) {
-    return new Response(JSON.stringify({ ok:false, error:String(e) }), { status:500, headers:{'Content-Type':'application/json'} });
+    return new Response(JSON.stringify({ ok:false, error:String(e) }), { status:500, headers:{...CORS, 'Content-Type':'application/json'} });
   }
 });

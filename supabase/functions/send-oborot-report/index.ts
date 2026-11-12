@@ -1,5 +1,9 @@
 /* send-oborot-report — вечерният имейл с оборота.
 
+   v15 (12.11.2026) — ЕДНО нещо: CORS. OPTIONS → 200 и CORS заглавките на всеки
+      отговор (таблицата „📋 Кой какво получава“ вика функцията от браузъра).
+      Логиката не е пипана.
+
    v14 (12.11.2026) — ЕДНО нещо: {"recipients_only":true} (Теодор 11.11, етап 2б,
       таблицата „📋 Кой какво получава“). Изборът е изнесен в oborotStoresFromUsers
       и oborotRecipientPlan — същите правила като досега (users.oborot_report
@@ -44,6 +48,15 @@ const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const REST = SUPABASE_URL + '/rest/v1/';
 const PORTAL_URL = 'https://tenchotenev13-afk.github.io/Tmax-store-portal/';
 const CUR = 'EUR';
+
+/* CORS (12.11.2026) — порталът вика функцията от браузъра (Администрация →
+   Известия: „📋 Кой какво получава“, „📤 Изпрати сега“). Без тях preflight-ът
+   пада и fetch дава „Failed to fetch“. Същият модел като в bulletin-notify. */
+const CORS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'content-type, authorization, x-client-info, apikey',
+};
 
 /* Праг, над който разминаването се отчита в имейла. По-ниско от прага
    в базата (50%) — базата блокира само типографски грешки, а имейлът
@@ -363,6 +376,7 @@ async function sendMail(to: string[], subject: string, html: string) {
 }
 
 Deno.serve(async (req: Request) => {
+  if (req.method === 'OPTIONS') return new Response('ok', { status: 200, headers: CORS });
   try {
     let body: any = {};
     try { body = await req.json(); } catch (_e) { /* празно тяло е допустимо */ }
@@ -375,7 +389,7 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, recipients_only: true, type: 'oborot', general: [],
         personal: plan.map((p) => ({ email: p.email, name: p.name, stores: p.stores, all: p.all,
           source: p.all ? 'all' : 'assigned', send: p.all || p.stores.length > 0 })) }),
-        { headers: { 'Content-Type': 'application/json' } });
+        { headers: { ...CORS, 'Content-Type': 'application/json' } });
     }
 
     const dateISO = (body && body.date) ? String(body.date).slice(0, 10) : sofiaToday();
@@ -384,19 +398,19 @@ Deno.serve(async (req: Request) => {
     if (body && Array.isArray(body.to) && body.to.length) {
       const html = buildHtml(d, d.rows, 'all');
       const subj = buildSubject(dateISO, d.rows);
-      if (body.dry_run) return new Response(JSON.stringify({ ok: true, dry_run: true, subject: subj, html }), { headers: { 'Content-Type': 'application/json' } });
+      if (body.dry_run) return new Response(JSON.stringify({ ok: true, dry_run: true, subject: subj, html }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
       const res = await sendMail(body.to, subj, html);
-      return new Response(JSON.stringify({ ok: true, sent: res.ok, status: res.status, to: body.to, subject: subj }), { headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ ok: true, sent: res.ok, status: res.status, to: body.to, subject: subj }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
     }
 
     if (body && body.dry_run) {
-      return new Response(JSON.stringify({ ok: true, dry_run: true, date: dateISO, stores: d.rows.length, subject: buildSubject(dateISO, d.rows), html: buildHtml(d, d.rows, 'all') }), { headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ ok: true, dry_run: true, date: dateISO, stores: d.rows.length, subject: buildSubject(dateISO, d.rows), html: buildHtml(d, d.rows, 'all') }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
     }
 
     const recips = oborotRecipientPlan(d.users, d.rows.map((r: any) => r.store));
 
     if (!recips.length) {
-      return new Response(JSON.stringify({ ok: true, sent: false, reason: 'no_recipients', date: dateISO }), { headers: { 'Content-Type': 'application/json' } });
+      return new Response(JSON.stringify({ ok: true, sent: false, reason: 'no_recipients', date: dateISO }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
     }
 
     const out: any[] = [];
@@ -412,8 +426,8 @@ Deno.serve(async (req: Request) => {
       out.push({ email: u.email, scope: u.oborot_report, stores: rows.length, sent: res.ok, status: res.status });
     }
 
-    return new Response(JSON.stringify({ ok: true, date: dateISO, results: out }), { headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ ok: true, date: dateISO, results: out }), { headers: { ...CORS, 'Content-Type': 'application/json' } });
   } catch (e) {
-    return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500, headers: { ...CORS, 'Content-Type': 'application/json' } });
   }
 });

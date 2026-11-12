@@ -478,6 +478,7 @@ const TESTS = [
   'admin-reports.test.js',
   'report-recipients-only.test.js',
   'admin-who-gets.test.js',
+  'edge-cors.test.js',
   'sap-prices-vkp2.test.js',
   'admin-recipient-scope.test.js',
   'admin-role-view.test.js',
