@@ -121,6 +121,10 @@ const SHARED_FNS = [
   'reportMinusMultiCommon', 'reportMinusMultiCommonHtml',
   /* клиентските поръчки — отделна секция (11.11.2026) */
   'reportMinusMultiCoIds', 'reportMinusMultiIsCo', 'reportMinusMultiCoGroup', 'reportMinusMultiCoHtml',
+  /* Кой получава дневния / седмичния (v68, 12.11.2026) — ЕДИН избор за крона,
+     recipients_only и „Изпрати сега“. Разминае ли се копието, порталът ще
+     показва едни получатели, а кронът ще праща на други. */
+  'reportDailyWeeklyRecipients',
   'reportTransitListHtml', 'reportWarehousePendingHtml',
   'buildWrongReceiptRowHtml', 'reportCrossWindowLabel',
   'buildCrossModuleSectionHtml', 'buildDailyReportHtml', 'buildWeeklyReportHtml'
@@ -219,9 +223,14 @@ const CLIENT_ONLY = [
   'resolveRecipientsForTask', 'buildRecipientMap', 'taskStoreBreakdown',
   'personalizedTaskCardHtml', 'personalizedSectionHtml',
   'sendWeeklyReportRouted', 'sendWeeklyReportTest',
-  'sendMinusMultiReportTest', 'sendMinusMultiReportNow'  /* минуси: „Тест до мен" и „Изпрати сега" — само в портала */
+  'sendMinusMultiReportTest', 'sendMinusMultiReportNow',  /* минуси: „Тест до мен" и „Изпрати сега" — само в портала */
+  /* дневен / седмичен „Изпрати сега" през едж функцията (12.11.2026) */
+  'reportEdgeCall', 'reportFetchRecipientsOnly', 'reportRecipientsLetters', 'reportSendNowResultToast',
+  'reportSendNow', 'sendDailyReportNow', 'sendWeeklyReportNow'
 ];
-const EDGE_ONLY = ['sbGet', 'sbGetOk', 'sbPost', 'sbPatch', 'loadRecurringVersions'];  /* loadRecurringVersions: service ключ, не sbGet от shared.js */  /* SERVICE ROLE, не shared.js */
+const EDGE_ONLY = ['sbGet', 'sbGetOk', 'sbPost', 'sbPatch', 'loadRecurringVersions',
+  /* входните четения и recipients_only (v68) — service ключ */
+  'loadDailyWeeklyRecipients', 'loadPalletsPlan', 'loadWarehousePlan', 'loadCoOverdueTo', 'reportRecipientsOnly'];  /* loadRecurringVersions: service ключ, не sbGet от shared.js */  /* SERVICE ROLE, не shared.js */
 
 /* ── send-routed-report ─────────────────────────────────────────────────
    Личният седмичен отчет по задачи. Носи СРЕЗА на report.js около

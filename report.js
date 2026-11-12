@@ -3463,7 +3463,7 @@ function reportPalletsHtml(data){
      личен отчет само за тези обекти;
    · управителите НЕ получават този отчет.
    Личните се дедуплицират по имейл с малки букви и обединяват обхвата —
-   същото правило като addPersonal() при дневния/седмичния, в същия ред. */
+   същото правило като reportDailyWeeklyRecipients() при дневния/седмичния, в същия ред. */
 function reportPalletsRecipients(recipientRows, userRows){
   var all = [], allSeen = {}, personal = [], seen = {};
   var addPersonal = function(email, name, stores){
@@ -4587,9 +4587,8 @@ function sendMinusMultiReportNow(done){
 /* ═══════ ПОЛУЧАТЕЛИ НА ОБЩИЯ РЕПОРТ (report_recipients) ═══════════
    Редактируем списък (name/email + флагове daily/weekly/pallets/warehouse) - управлява се от
    Администрация → Известия → „📧 Общи отчети" (loadReportsAdmin в admin.js;
-   до 15.09.2026 беше в таб "Днес"). Използва се от sendDailyReportToRecipients/
-   sendWeeklyReportToRecipients по-долу за РЕАЛНО ръчно изпращане до целия
-   списък наведнъж, а send-scheduled-report го чете по крон. */
+   до 15.09.2026 беше в таб "Днес"). send-scheduled-report го чете по крон;
+   „📤 Изпрати сега" (sendDailyReportNow / sendWeeklyReportNow) вика пак нея. */
 function loadReportRecipients(cb){
   sbGet('report_recipients','active=eq.true&order=created_at.asc').then(function(rows){
     cb(Array.isArray(rows) ? rows : []);
@@ -4629,50 +4628,133 @@ function deleteReportRecipient(id, cb){
   sbDelete('report_recipients','id=eq.'+id).then(function(res){ cb(!!res.ok); }).catch(function(){ cb(false); });
 }
 
-/* РЕАЛНО изпращане (не тест) - до всички активни получатели с daily=true.
-   Едно писмо, всички в общо поле "to" (вътрешен екип, не е проблем да се
-   виждат взаимно).
-   done (по избор) се вика на ВСЕКИ изход — по него „📤 Изпрати сега" в
-   Администрация → Известия отключва бутона (adminReportSendClick в admin.js). */
-function sendDailyReportToRecipients(done){
-  var fin = typeof done === 'function' ? done : function(){};
-  loadReportRecipients(function(recipients){
-    var targets = recipients.filter(function(r){ return r.daily; });
-    if (!targets.length) { toast('Няма получатели с включен дневен репорт','#dc2626'); fin(); return; }
-    toast('⏳ Подготвям и изпращам дневния репорт...');
-    collectDailyReportData(function(data){
-      if (!data) { toast('Грешка при събиране на данните','#dc2626'); fin(); return; }
-      try {
-        var html = buildDailyReportHtml(data);
-        var emails = targets.map(function(r){ return r.email; });
-        sendEmail(emails, reportDailySubject(data.reportDate), html).then(function(res){
-          if (res.ok) toast('✅ Дневен репорт изпратен на ' + emails.length + ' получатели');
-          else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
-          fin();
-        });
-      } catch (e) { fin(); throw e; }
-    });
+/* Кой получава дневния / седмичния (otcheti-recipients-only, 12.11.2026) — ЕДИН
+   избор за крона (send-scheduled-report), за recipients_only и за „📤 Изпрати
+   сега“ (през едж функцията). Изнесено от Deno.serve без промяна на правилата:
+   · general — report_recipients (active, флаг daily/weekly) без обхват; едно
+     общо писмо. При седмичния scope_stores се пренебрегва → всички са тук;
+   · personal — лични писма, по ЕДИН адрес, внесени в този ред:
+       1. регионалните (is_regional, active !== false, имейл) — assigned_stores;
+       2. само дневният — получателите с непразен scope_stores;
+       3. управителите (role 'manager') — store_name, само при
+          settings['daily_report_managers' | 'weekly_report_managers'] = 'on'.
+   Същият имейл (малки букви) → едно писмо, обединен обхват, source на първия.
+   Празен обхват остава в списъка — пращането го пропуска (no_assigned_stores). */
+function reportDailyWeeklyRecipients(type, recipientRows, userRows, settings){
+  var weekly = type === 'weekly';
+  var flag = weekly ? 'weekly' : 'daily';
+  var scopeOf = function(r){
+    if (weekly) return [];
+    return (Array.isArray(r.scope_stores) ? r.scope_stores : []).filter(Boolean);
+  };
+  var recips = (Array.isArray(recipientRows) ? recipientRows : []).filter(function(r){
+    return !!r && r.active !== false && r[flag] === true;
   });
-}
-/* РЕАЛНО изпращане на седмичния репорт - до всички активни получатели с weekly=true. */
-function sendWeeklyReportToRecipients(done){
-  var fin = typeof done === 'function' ? done : function(){};
-  loadReportRecipients(function(recipients){
-    var targets = recipients.filter(function(r){ return r.weekly; });
-    if (!targets.length) { toast('Няма получатели с включен седмичен репорт','#dc2626'); fin(); return; }
-    toast('⏳ Подготвям и изпращам седмичния репорт...');
-    collectWeeklyReportData(function(data){
-      if (!data) { toast('Грешка при събиране на данните','#dc2626'); fin(); return; }
-      try {
-        var html = buildWeeklyReportHtml(data);
-        var emails = targets.map(function(r){ return r.email; });
-        sendEmail(emails, reportWeeklySubject(data.weekDates), html).then(function(res){
-          if (res.ok) toast('✅ Седмичен репорт изпратен на ' + emails.length + ' получатели');
-          else toast('❌ ' + res.status + ': ' + ((res.data && (res.data.message||res.data.error)) || 'грешка'), '#dc2626');
-          fin();
-        });
-      } catch (e) { fin(); throw e; }
-    });
+  var general = recips.filter(function(r){ return !scopeOf(r).length; })
+                      .map(function(r){ return r.email; }).filter(Boolean);
+  var personal = [], seen = {};
+  var add = function(email, name, stores, source){
+    var key = String(email || '').trim().toLowerCase();
+    if (!key) return;
+    var list = (Array.isArray(stores) ? stores : []).filter(Boolean);
+    var cur = seen[key];
+    if (cur) {
+      list.forEach(function(s){ if (cur.stores.indexOf(s) < 0) cur.stores.push(s); });
+      if (!cur.name && name) cur.name = name;
+      return;
+    }
+    cur = { email: email, name: name || '', stores: list, source: source };
+    seen[key] = cur;
+    personal.push(cur);
+  };
+  var users = Array.isArray(userRows) ? userRows : [];
+  users.forEach(function(u){
+    if (!u || u.is_regional !== true || u.active === false || !u.email) return;
+    add(u.email, u.display_name, u.assigned_stores, 'regional');
   });
+  recips.forEach(function(r){
+    var sc = scopeOf(r);
+    if (sc.length) add(r.email, r.name, sc, 'recipient');
+  });
+  var mgrKey = weekly ? 'weekly_report_managers' : 'daily_report_managers';
+  var mv = settings ? settings[mgrKey] : null;
+  var managersOn = String(mv == null ? '' : mv).trim().toLowerCase() === 'on';
+  if (managersOn) {
+    users.forEach(function(u){
+      if (!u || u.role !== 'manager' || u.active === false || !u.email) return;
+      add(u.email, u.display_name, u.store_name ? [u.store_name] : [], 'manager');
+    });
+  }
+  return { general: general, personal: personal, managers_on: managersOn };
 }
 
+/* „📤 Изпрати сега" за дневния и седмичния (otcheti-recipients-only, 12.11.2026) —
+   вика самата едж функция, като при минусите: същите получатели като крона
+   (общото писмо + регионалните + обхватите + управителите при 'on'), без второ
+   копие на правилата в браузъра. До 12.11 тук имаше sendDailyReportToRecipients /
+   sendWeeklyReportToRecipients — едно общо писмо до report_recipients, без
+   обхват, регионални и управители, тоест различно от крона. */
+function reportEdgeCall(payload){
+  return fetch(SB_URL + '/functions/v1/send-scheduled-report', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SB_KEY, 'apikey': SB_KEY },
+    body: JSON.stringify(payload)
+  }).then(function(r){
+    return r.text().then(function(txt){
+      var d; try { d = JSON.parse(txt); } catch (e) { d = { message: txt }; }
+      return { ok: r.ok, status: r.status, data: d };
+    });
+  });
+}
+/* Кой би получил — {"type":…,"recipients_only":true}; нищо не се праща.
+   cb(data) при успех, cb(null, текст) при грешка. */
+function reportFetchRecipientsOnly(type, cb){
+  reportEdgeCall({ type: type, recipients_only: true }).then(function(res){
+    var d = res.data || {};
+    if (!res.ok || d.ok === false || !Array.isArray(d.general) || !Array.isArray(d.personal)) {
+      cb(null, String(d.error || d.message || ('HTTP ' + res.status)).slice(0, 150));
+      return;
+    }
+    cb(d);
+  }).catch(function(e){ cb(null, String((e && e.message) || e).slice(0, 150)); });
+}
+/* Колко писма тръгват: едно общо (ако има адреси) + по едно лично с обхват.
+   Лично без обекти не тръгва (no_assigned_stores); „до" — защото и лично с
+   обекти, които не влизат в отчета, се пропуска (no_reportable_stores). */
+function reportRecipientsLetters(ro){
+  var gen = (ro && Array.isArray(ro.general)) ? ro.general.length : 0;
+  var by = { regional: 0, recipient: 0, manager: 0 };
+  var personal = 0;
+  ((ro && ro.personal) || []).forEach(function(p){
+    if (!p || !Array.isArray(p.stores) || !p.stores.length) return;
+    personal++;
+    if (by[p.source] !== undefined) by[p.source]++;
+  });
+  return { letters: (gen ? 1 : 0) + personal, general: gen, personal: personal, by: by };
+}
+function reportSendNowResultToast(label, res){
+  var d = res.data || {};
+  if (!res.ok || d.ok === false) {
+    toast('❌ ' + label + ' НЕ тръгна: ' + String(d.error || d.reason || d.message || ('HTTP ' + res.status)).slice(0, 150), '#dc2626');
+    return;
+  }
+  if (d.sent === false && d.reason === 'no_recipients') { toast('Няма получатели за ' + label.toLowerCase(), '#dc2626'); return; }
+  var pers = Array.isArray(d.personal) ? d.personal : [];
+  var pOk = pers.filter(function(p){ return p && p.sent === true; }).length;
+  var pBad = pers.filter(function(p){ return p && p.sent === false && p.reason !== 'no_assigned_stores' && p.reason !== 'no_reportable_stores'; }).length;
+  var genBad = d.recipients > 0 && d.sent !== true;
+  var msg = label + ': общо писмо ' + (d.recipients > 0 ? (genBad ? 'НЕ тръгна' : 'до ' + d.recipients + ' адреса') : '—') +
+            ' · лични ' + pOk + (pBad ? ' · неуспешни ' + pBad : '');
+  if (genBad || pBad) toast('❌ ' + msg, '#dc2626');
+  else toast('✅ ' + msg);
+}
+function reportSendNow(type, label, done){
+  var fin = typeof done === 'function' ? done : function(){};
+  toast('⏳ Изпращане...');
+  reportEdgeCall({ type: type }).then(function(res){
+    reportSendNowResultToast(label, res);
+    fin();
+  }).catch(function(e){ toast('❌ ' + String((e && e.message) || e).slice(0, 150), '#dc2626'); fin(); });
+}
+function sendDailyReportNow(done){ reportSendNow('daily', 'Дневен репорт', done); }
+function sendWeeklyReportNow(done){ reportSendNow('weekly', 'Седмичен репорт', done); }

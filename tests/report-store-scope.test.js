@@ -303,8 +303,10 @@ function snapshotPosts(h) {
     const edge = fs.readFileSync(
       path.join(ROOT, 'supabase/functions/send-scheduled-report/index.ts'), 'utf8');
 
+    /* От v68 (12.11.2026) флагът се сглобява в loadDailyWeeklyRecipients. */
     ok('списък 1 още чете report_recipients с флага за деня',
-       edge.indexOf("'daily=eq.true'") >= 0 || edge.indexOf('daily=eq.true') >= 0);
+       /var flag = type === 'weekly' \? 'weekly' : 'daily';/.test(edge) &&
+       /sbGet\('report_recipients', 'active=eq\.true&' \+ flag \+ '=eq\.true&/.test(edge));
     ok('списък 2 чете регионалните от users',
        edge.indexOf('is_regional=eq.true') >= 0);
     /* Дотук тук стоеше „регионалните се четат САМО за дневния" (пазачът
@@ -316,8 +318,11 @@ function snapshotPosts(h) {
        'daily') {`: от v19 такъв клон пак има, но той чете само прага за
        секцията „Каса". Регионалните се четат на върхово ниво в обработчика
        (4 интервала); вкарат ли се обратно в клон, отстъпът става 6. */
+    /* От v68 (12.11.2026) четенето е в loadDailyWeeklyRecipients, викана на
+       върхово ниво (4 интервала) — същият инвариант, друго място. */
     ok('регионалните се четат на върхово ниво, не в клон за дневния',
-       /\n    var regRes: any = await sbGet\('users', 'is_regional=eq\.true/.test(edge));
+       /\n    var dwPlan: any = await loadDailyWeeklyRecipients\(type\);/.test(edge) &&
+       /async function loadDailyWeeklyRecipients[\s\S]{0,800}\n  var regRes: any = await sbGet\('users', 'is_regional=eq\.true/.test(edge));
     ok('празен assigned_stores → без писмо',
        edge.indexOf('no_assigned_stores') >= 0);
     ok('празен обхват след срязването → без писмо',

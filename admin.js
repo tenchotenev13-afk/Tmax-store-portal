@@ -1355,12 +1355,13 @@ function loadNotificationsAdmin(){
 
    „Тест до мен" праща на currentUser.email — без поле за адрес. Преди полето
    беше с фиксиран ten.tenev@temax.bg и всеки натиснал пращаше на Тенчо.
-   „📤 Изпрати сега" е само за admin и минава по съществуващия ръчен път
-   (sendDaily/WeeklyReportToRecipients в report.js → resend-email). За Палети и
-   Склад такъв път няма — там праща само кронът (send-scheduled-report), затова
-   бутонът не се показва. Не го добавяй с POST към send-scheduled-report от
-   браузъра: функцията няма проверка за часа (тя е в SQL на крона) и праща и
-   на регионалните — това е нов път, не бутон.
+   „📤 Изпрати сега" е само за admin. От 12.11.2026 Дневен и Седмичен (както
+   Минуси от 28.10) викат самата send-scheduled-report — същите получатели като
+   крона: общото писмо, регионалните, обхватите и управителите при 'on'.
+   Потвърждението носи броя писма от {"recipients_only":true} на СЪЩАТА
+   функция (adminReportSendDailyWeekly). Функцията няма проверка за часа (тя е
+   в SQL на крона) — бутонът праща ИСТИНСКИТЕ писма в момента на клика. За
+   Палети и Склад бутон няма — там праща само кронът.
 
    Бутонът „📬 Маршрутизация (тест)" (sendWeeklyReportRouted) беше махнат на
    02.09.2026 и не се връща — send-routed-report го върши по крон 16. */
@@ -1387,8 +1388,8 @@ var ADMIN_RCPT_FLAGS = [
    rpc/report_cron_schedule (само четене, 18.09.2026). Текстът тук се
    показва, само ако заявката се провали — с пояснение в title. */
 var ADMIN_REPORTS = [
-  { kind: 'daily',     label: '📋 Дневен',   schedule: 'всеки ден 21:00', test: 'sendDailyReportTest',     send: 'sendDailyReportToRecipients' },
-  { kind: 'weekly',    label: '📊 Седмичен', schedule: 'неделя 21:00',    test: 'sendWeeklyReportTest',    send: 'sendWeeklyReportToRecipients' },
+  { kind: 'daily',     label: '📋 Дневен',   schedule: 'всеки ден 21:00', test: 'sendDailyReportTest',     send: 'sendDailyReportNow' },
+  { kind: 'weekly',    label: '📊 Седмичен', schedule: 'неделя 21:00',    test: 'sendWeeklyReportTest',    send: 'sendWeeklyReportNow' },
   { kind: 'pallets',   label: '🟫 Палети',   schedule: 'петък 18:00',     test: 'sendPalletsReportTest',   send: null },
   { kind: 'warehouse', label: '📦 Склад',    schedule: 'неделя 21:00',    test: 'sendWarehouseReportTest', send: null },
   /* „Изпрати сега" вика самата едж функция (sendMinusMultiReportNow в report.js). */
@@ -1766,12 +1767,36 @@ function adminReportSendClick(btn, kind){
   var fn = r && r.send && window[r.send];
   var key = 'send:' + kind;
   if (typeof fn !== 'function' || adminReportBusy[key]) return;
+  /* Дневен / седмичен (12.11.2026): пращането е в едж функцията — до общия
+     списък, регионалните, обхватите и управителите при 'on'. Броят в
+     потвърждението е от recipients_only на СЪЩАТА функция, не от списъка тук. */
+  if (kind === 'daily' || kind === 'weekly') { adminReportSendDailyWeekly(btn, kind, fn, key); return; }
   var n = adminReportCount(kind);
   if (!n) { toast('Няма получатели за този отчет','#dc2626'); return; }
   /* Минуси: n е броят в плана — регионален без минуси за седмицата се пропуска. */
   if (!confirm((kind === 'minus_multi' ? 'Ще се изпрати до най-много ' + n + ' получатели (без минуси в обектите — пропуска се)' : 'Ще се изпрати до ' + n + ' получатели') + ' — сигурен ли си?')) return;
   var done = adminReportLock(key, btn);
   try { fn(done); } catch (e) { done(); throw e; }
+}
+
+function adminReportSendDailyWeekly(btn, kind, fn, key){
+  var done = adminReportLock(key, btn);
+  toast('⏳ Проверявам получателите...');
+  reportFetchRecipientsOnly(kind, function(ro, err){
+    if (!ro) { toast('❌ Получателите не се прочетоха: ' + (err || 'грешка'), '#dc2626'); done(); return; }
+    var c = reportRecipientsLetters(ro);
+    if (!c.letters) { toast('Няма получатели за този отчет','#dc2626'); done(); return; }
+    var parts = [];
+    if (c.by.regional) parts.push('регионални ' + c.by.regional);
+    if (c.by.recipient) parts.push('с обхват ' + c.by.recipient);
+    if (c.by.manager) parts.push('управители ' + c.by.manager);
+    var msg = 'Ще тръгнат до ' + c.letters + ' писма: ' +
+      (c.general ? '1 общо до ' + c.general + ' адреса' : 'без общо писмо') +
+      (c.personal ? ' + ' + c.personal + ' лични (' + parts.join(', ') + ')' : '') +
+      '. Лично писмо без данни за обектите се пропуска. Писмата са ИСТИНСКИ — сигурен ли си?';
+    if (!confirm(msg)) { done(); return; }
+    try { fn(done); } catch (e) { done(); throw e; }
+  });
 }
 
 /* ── Теми ──────────────────────────────────────────────────────────────── */

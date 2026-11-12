@@ -98,6 +98,15 @@ daily и weekly логиката е **вградена в `Deno.serve`** (не �
 трябва да се изнесе (`reportDailyWeeklyRecipients`), иначе таблицата ще е второ
 копие на правилата.
 
+> **12.11 — решено за daily / weekly / pallets / warehouse / co_overdue (и
+> minus_multi)** в сесия otcheti-recipients-only (етап 2а):
+> `{"type":…,"recipients_only":true}` в `send-scheduled-report` (без тип — и
+> шестте) връща `general` / `personal` от същите функции като пращането;
+> `reportDailyWeeklyRecipients` е изнесена. Живо след деплоя — виж
+> `claude/log/2026-11-12-otcheti-recipients-only.md`. Остават отворени тук:
+> `send-oborot-report`, `send-routed-report`, `bulletin-notify` (за таблицата
+> в етап 2б).
+
 ## 3. Код срещу логове (5.11–12.11)
 
 `cron.job_run_details`: всички задания с писма — 0 неуспешни за 7 дни.
@@ -127,6 +136,10 @@ daily и weekly логиката е **вградена в `Deno.serve`** (не �
    с `daily=true` в едно писмо, без `scope_stores`, без регионалните и без
    управителите. Това е второ копие на правилата, което вече се разминава с
    крона.
+   **12.11 — решено (етап 2а, otcheti-recipients-only):** бутонът вика
+   `send-scheduled-report` (`{"type":"daily"}` / `{"type":"weekly"}`), а
+   потвърждението носи броя писма от `recipients_only`. Старите
+   `sendDaily/WeeklyReportToRecipients` са махнати.
 2. **Тестовият акаунт `tencho.tenev13@gmail.com`** (role manager, Кърджали)
    получава дневния и седмичния репорт за Кърджали всяка вечер и е в
    `picking_users`.

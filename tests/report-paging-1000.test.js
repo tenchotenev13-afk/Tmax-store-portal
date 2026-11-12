@@ -176,7 +176,8 @@ function env(failGet) {
        !/resend-email|sbPost|sbPatch|notification_log|reportSaveSnapshot|fetch\(/.test(block), block.slice(0, 120));
     ok('връща diffStale, transit, rows_read и partial',
        /diffStale:/.test(block) && /transit:/.test(block) && /rows_read: wkCross\.rowsRead/.test(block) && /partial: wkCross\.partial/.test(block));
-    const before = ts.indexOf("var recipientsRes: any = await sbGet('report_recipients', 'active=eq.true&' + flagFilter");
+    /* От v68 (12.11.2026) получателите се четат през loadDailyWeeklyRecipients. */
+    const before = ts.indexOf("var dwPlan: any = await loadDailyWeeklyRecipients(type);");
     ok('е ПРЕДИ четенето на получателите (рано връщане)', start > 0 && start < before);
     ok('едж sbGetOk е дефиниран', /\nfunction sbGetOk\(t: string, q\?: string\) \{/.test(ts));
   }

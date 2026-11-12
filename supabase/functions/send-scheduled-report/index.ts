@@ -1,6 +1,15 @@
 /* send-scheduled-report — Edge Function за АВТОМАТИЧНОТО (cron) изпращане
    на общия дневен/седмичен репорт, без нужда от отворен браузър.
 
+   v68 (12.11.2026) — ЕДНО нещо: един източник на получателите (Теодор 11.11, етап 2а).
+      Изборът кой получава дневния / седмичния е изнесен от Deno.serve в
+      reportDailyWeeklyRecipients (копие от report.js, report-edge-sync) и
+      loadDailyWeeklyRecipients — правилата и редът са непроменени. Нов режим
+      {"type":…,"recipients_only":true} (без type — и шестте): връща general /
+      personal по СЪЩИТЕ функции като пращането; не събира данни, не праща, не
+      пише report_snapshots. „📤 Изпрати сега“ за дневния и седмичния вика тази
+      функция вместо второто копие в браузъра.
+
    v67 (11.11.2026) — ЕДНО нещо: „Минуси — повтарящи се артикули“ (minus_multi) —
       клиентските поръчки отделно (Теодор 09–11.11, Тенчо 11.11). „Клиентска
       поръчка“ = причина с minus_reasons.requires_note (флагът; без причина — не е).
@@ -4439,7 +4448,7 @@ function reportPalletsHtml(data){
      личен отчет само за тези обекти;
    · управителите НЕ получават този отчет.
    Личните се дедуплицират по имейл с малки букви и обединяват обхвата —
-   същото правило като addPersonal() при дневния/седмичния, в същия ред. */
+   същото правило като reportDailyWeeklyRecipients() при дневния/седмичния, в същия ред. */
 function reportPalletsRecipients(recipientRows, userRows){
   var all = [], allSeen = {}, personal = [], seen = {};
   var addPersonal = function(email, name, stores){
@@ -5161,11 +5170,174 @@ function reportMinusMultiShouldSend(plan, sub){
   return plan.stores.length > 0 && !!sub && (sub.total > 0 || wk > 0);
 }
 
+/* Кой получава дневния / седмичния (otcheti-recipients-only, 12.11.2026) — ЕДИН
+   избор за крона (send-scheduled-report), за recipients_only и за „📤 Изпрати
+   сега“ (през едж функцията). Изнесено от Deno.serve без промяна на правилата:
+   · general — report_recipients (active, флаг daily/weekly) без обхват; едно
+     общо писмо. При седмичния scope_stores се пренебрегва → всички са тук;
+   · personal — лични писма, по ЕДИН адрес, внесени в този ред:
+       1. регионалните (is_regional, active !== false, имейл) — assigned_stores;
+       2. само дневният — получателите с непразен scope_stores;
+       3. управителите (role 'manager') — store_name, само при
+          settings['daily_report_managers' | 'weekly_report_managers'] = 'on'.
+   Същият имейл (малки букви) → едно писмо, обединен обхват, source на първия.
+   Празен обхват остава в списъка — пращането го пропуска (no_assigned_stores). */
+function reportDailyWeeklyRecipients(type, recipientRows, userRows, settings){
+  var weekly = type === 'weekly';
+  var flag = weekly ? 'weekly' : 'daily';
+  var scopeOf = function(r){
+    if (weekly) return [];
+    return (Array.isArray(r.scope_stores) ? r.scope_stores : []).filter(Boolean);
+  };
+  var recips = (Array.isArray(recipientRows) ? recipientRows : []).filter(function(r){
+    return !!r && r.active !== false && r[flag] === true;
+  });
+  var general = recips.filter(function(r){ return !scopeOf(r).length; })
+                      .map(function(r){ return r.email; }).filter(Boolean);
+  var personal = [], seen = {};
+  var add = function(email, name, stores, source){
+    var key = String(email || '').trim().toLowerCase();
+    if (!key) return;
+    var list = (Array.isArray(stores) ? stores : []).filter(Boolean);
+    var cur = seen[key];
+    if (cur) {
+      list.forEach(function(s){ if (cur.stores.indexOf(s) < 0) cur.stores.push(s); });
+      if (!cur.name && name) cur.name = name;
+      return;
+    }
+    cur = { email: email, name: name || '', stores: list, source: source };
+    seen[key] = cur;
+    personal.push(cur);
+  };
+  var users = Array.isArray(userRows) ? userRows : [];
+  users.forEach(function(u){
+    if (!u || u.is_regional !== true || u.active === false || !u.email) return;
+    add(u.email, u.display_name, u.assigned_stores, 'regional');
+  });
+  recips.forEach(function(r){
+    var sc = scopeOf(r);
+    if (sc.length) add(r.email, r.name, sc, 'recipient');
+  });
+  var mgrKey = weekly ? 'weekly_report_managers' : 'daily_report_managers';
+  var mv = settings ? settings[mgrKey] : null;
+  var managersOn = String(mv == null ? '' : mv).trim().toLowerCase() === 'on';
+  if (managersOn) {
+    users.forEach(function(u){
+      if (!u || u.role !== 'manager' || u.active === false || !u.email) return;
+      add(u.email, u.display_name, u.store_name ? [u.store_name] : [], 'manager');
+    });
+  }
+  return { general: general, personal: personal, managers_on: managersOn };
+}
+
+/* Входните данни за reportDailyWeeklyRecipients — същите четения като до v67 в
+   Deno.serve: report_recipients (active + флагът), регионалните, ключът за
+   управителите и управителите. Управителите се четат винаги, но влизат само при
+   'on' (решава reportDailyWeeklyRecipients); падналата заявка за тях се отчита
+   САМО при 'on' — както преди. Ползва го и кронът, и recipients_only. */
+async function loadDailyWeeklyRecipients(type: string) {
+  var flag = type === 'weekly' ? 'weekly' : 'daily';
+  var mgrKey = type === 'weekly' ? 'weekly_report_managers' : 'daily_report_managers';
+  var recRes: any = await sbGet('report_recipients', 'active=eq.true&' + flag + '=eq.true&select=email,name,scope_stores,active,daily,weekly');
+  var regRes: any = await sbGet('users', 'is_regional=eq.true&select=email,display_name,assigned_stores,store_name,role,active,is_regional');
+  var settings: any = {};
+  try {
+    var setRes: any = await sbGet('app_settings', 'key=eq.' + mgrKey + '&select=value&limit=1');
+    var setRow = Array.isArray(setRes) ? setRes[0] : null;
+    if (setRow) settings[mgrKey] = setRow.value;
+  } catch (e) {}
+  var users: any[] = Array.isArray(regRes) ? regRes.slice() : [];
+  var mgrFailed = false;
+  try {
+    var mgrRes: any = await sbGet('users', 'role=eq.manager&select=email,display_name,assigned_stores,store_name,role,active,is_regional');
+    if (Array.isArray(mgrRes)) users = users.concat(mgrRes);
+  } catch (e) {
+    mgrFailed = true;
+  }
+  var plan: any = reportDailyWeeklyRecipients(type, recRes, users, settings);
+  plan.managers_query_failed = mgrFailed && plan.managers_on;
+  return plan;
+}
+
+/* Палети / Склад / ЦО — входните четения, общи за крона и recipients_only. */
+async function loadPalletsPlan() {
+  var pRecRes: any = await sbGet('report_recipients', 'active=eq.true&pallets=eq.true&select=email,name,scope_stores,active,pallets');
+  var pRegRes: any = await sbGet('users', 'is_regional=eq.true&select=email,display_name,assigned_stores,active,is_regional');
+  return { plan: reportPalletsRecipients(pRecRes, pRegRes), regional: Array.isArray(pRegRes) ? pRegRes : [] };
+}
+async function loadWarehousePlan() {
+  var wUsersRes: any = await sbGet('users', 'role=eq.logistics&select=email,display_name,store_name,role,active');
+  var wRecRes: any = await sbGet('report_recipients', 'active=eq.true&warehouse=eq.true&select=email,name,active,warehouse');
+  return { plan: reportWarehouseRecipients(wUsersRes, wRecRes), users: Array.isArray(wUsersRes) ? wUsersRes : [] };
+}
+async function loadCoOverdueTo() {
+  var coRecRes: any = await sbGet('report_recipients', 'active=eq.true&co_overdue=eq.true&select=email,name,active,co_overdue');
+  return reportCoOverdueRecipients(coRecRes);
+}
+
+/* v68 — {"type":…,"recipients_only":true}: КОЙ би получил, по същите функции като
+   пращането. Не събира данни за отчета, не праща, не пише report_snapshots.
+   general — адресите в общото писмо; personal — по едно писмо на ред.
+   minus_multi: обектите са app_settings.minus_stores (същият разбор като в
+   collectMinusMultiReportData); дали писмо с обхват тръгва, зависи от минусите
+   за седмицата (reportMinusMultiShouldSend) — тук е conditional:true, не се смята. */
+var REPORT_RO_TYPES = ['daily', 'weekly', 'pallets', 'warehouse', 'co_overdue', 'minus_multi'];
+async function reportRecipientsOnly(t: string) {
+  var low = function(e: any){ return String(e || '').trim().toLowerCase(); };
+  if (t === 'daily' || t === 'weekly') {
+    var dw: any = await loadDailyWeeklyRecipients(t);
+    return { type: t, general: dw.general, managers_on: dw.managers_on, managers_query_failed: dw.managers_query_failed,
+      personal: dw.personal.map(function(p: any){ return { email: p.email, name: p.name, stores: p.stores, source: p.source }; }) };
+  }
+  if (t === 'pallets') {
+    var pp: any = await loadPalletsPlan();
+    var regSet: any = {};
+    pp.regional.forEach(function(u: any){ if (u && u.is_regional === true && u.active !== false && u.email) regSet[low(u.email)] = 1; });
+    return { type: t, general: pp.plan.all,
+      personal: pp.plan.personal.map(function(p: any){ return { email: p.email, name: p.name, stores: p.stores, source: regSet[low(p.email)] ? 'regional' : 'recipient' }; }) };
+  }
+  if (t === 'warehouse') {
+    var wp: any = await loadWarehousePlan();
+    return { type: t, general: [],
+      personal: wp.plan.map(function(p: any){
+        var own = wp.users.some(function(u: any){ return u && low(u.email) === low(p.email) && u.store_name === p.warehouse && u.role === 'logistics' && u.active !== false; });
+        return { email: p.email, name: p.name, stores: [p.warehouse], source: own ? 'logistics' : 'recipient' }; }) };
+  }
+  if (t === 'co_overdue') {
+    return { type: t, general: await loadCoOverdueTo(), personal: [] };
+  }
+  if (t === 'minus_multi') {
+    var msRes: any = await sbGet('app_settings', 'key=eq.minus_stores&select=value&limit=1');
+    var msRow = Array.isArray(msRes) ? msRes[0] : null;
+    var ms = String((msRow && msRow.value) || '').split(',').map(function(x){ return x.trim(); }).filter(Boolean);
+    var mmRecRes: any = await sbGet('report_recipients', 'active=eq.true&minus_multi=eq.true&select=email,name,active,minus_multi,scope_stores');
+    var mmRegRes: any = await sbGet('users', 'is_regional=eq.true&select=email,display_name,assigned_stores,active,is_regional');
+    return { type: t, general: [], minus_stores: ms,
+      personal: reportMinusMultiPlan(mmRecRes, ms, mmRegRes).map(function(p: any){
+        return { email: p.email, name: p.name, stores: p.stores, source: p.regional ? 'regional' : 'recipient', scoped: p.scoped, conditional: !!p.scoped }; }) };
+  }
+  return { type: t, error: 'unknown_type' };
+}
+
 Deno.serve(async (req: Request) => {
   try {
     var body: any = {};
     try { body = await req.json(); } catch(e) {}
     var type = body && (body.type === 'weekly' || body.type === 'pallets' || body.type === 'warehouse' || body.type === 'co_overdue' || body.type === 'minus_multi') ? body.type : 'daily';
+
+    /* v68 — само получателите, нищо не се праща (reportRecipientsOnly). */
+    if (body && body.recipients_only === true) {
+      if (body.type !== undefined && body.type !== null && REPORT_RO_TYPES.indexOf(body.type) < 0) {
+        return new Response(JSON.stringify({ ok:false, error:'unknown_type', type:body.type, recipients_only:true }), { status:400, headers:{'Content-Type':'application/json'} });
+      }
+      if (body.type) {
+        var roOne: any = await reportRecipientsOnly(body.type);
+        return new Response(JSON.stringify(Object.assign({ ok:true, recipients_only:true }, roOne)), { status:200, headers:{'Content-Type':'application/json'} });
+      }
+      var roAll: any = {};
+      for (const t of REPORT_RO_TYPES) roAll[t] = await reportRecipientsOnly(t);
+      return new Response(JSON.stringify({ ok:true, recipients_only:true, types:roAll }), { status:200, headers:{'Content-Type':'application/json'} });
+    }
 
     /* v52 — dry_run за седмичния отчет: {"type":"weekly","dry_run":true}. Вика САМО
        кросмодулния колектор (четене, без запис в report_snapshots), не праща писмо и не
@@ -5256,8 +5428,7 @@ Deno.serve(async (req: Request) => {
       if (!coData) {
         return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{'Content-Type':'application/json'} });
       }
-      var coRecRes: any = await sbGet('report_recipients', 'active=eq.true&co_overdue=eq.true&select=email,name,active,co_overdue');
-      var coTo: string[] = reportCoOverdueRecipients(coRecRes);
+      var coTo: string[] = await loadCoOverdueTo();
       if (coDry) {
         var coPick = function(x: any){ return { in_num:x.in_num, store:x.store, delivery:x.delivery, co_eta:x.co_eta || null, lateDays:x.lateDays, waitDays:x.waitDays, items:(x.itemLines || []).length }; };
         return new Response(JSON.stringify({ ok:true, dry_run:true, date:coIso, workday:coWorkday, subject:reportCoOverdueSubject(coData),
@@ -5284,9 +5455,7 @@ Deno.serve(async (req: Request) => {
         return new Response(JSON.stringify({ ok:false, error:'collect_failed', type:type }), { status:500, headers:{'Content-Type':'application/json'} });
       }
       var pSubject = reportPalletsSubject(pData.reportDate);
-      var pRecRes: any = await sbGet('report_recipients', 'active=eq.true&pallets=eq.true&select=email,name,scope_stores,active,pallets');
-      var pRegRes: any = await sbGet('users', 'is_regional=eq.true&select=email,display_name,assigned_stores,active,is_regional');
-      var pPlan: any = reportPalletsRecipients(pRecRes, pRegRes);
+      var pPlan: any = (await loadPalletsPlan()).plan;
 
       var pOk = false;
       var pStatus = 0;
@@ -5324,9 +5493,7 @@ Deno.serve(async (req: Request) => {
        (users.role='logistics') САМО за неговите заявки. Праща се и при 0.
        Ранен клон като „Палети" — daily/weekly не се докосват. */
     if (type === 'warehouse') {
-      var wUsersRes: any = await sbGet('users', 'role=eq.logistics&select=email,display_name,store_name,role,active');
-      var wRecRes: any = await sbGet('report_recipients', 'active=eq.true&warehouse=eq.true&select=email,name,active,warehouse');
-      var wPlan: any[] = reportWarehouseRecipients(wUsersRes, wRecRes);
+      var wPlan: any[] = (await loadWarehousePlan()).plan;
       var wOut: any[] = [];
       for (const u of wPlan) {
         var wData: any = await new Promise(function(resolve){ collectWarehouseReportData(u.warehouse, resolve); });
@@ -5367,20 +5534,10 @@ Deno.serve(async (req: Request) => {
 
     var html = type === 'weekly' ? buildWeeklyReportHtml(data) : buildDailyReportHtml(data);
 
-    var flagFilter = type === 'weekly' ? 'weekly=eq.true' : 'daily=eq.true';
-    var recipientsRes: any = await sbGet('report_recipients', 'active=eq.true&' + flagFilter + '&select=email,name,scope_stores');
-    var recipients = Array.isArray(recipientsRes) ? recipientsRes : [];
-    /* scope_stores: NULL/празен = пълният отчет както досега; непразен масив =
-       ЛИЧЕН отчет само за тези обекти, тоест човекът излиза от общото "to" и
-       влиза в личния цикъл по-долу. Обхватът важи САМО за дневния — при
-       седмичния колоната се пренебрегва и получателят си остава в общото
-       писмо, вместо мълчаливо да изпадне и оттам. */
-    function recipientScope(r: any): string[] {
-      if (type !== 'daily') return [];
-      return (Array.isArray(r.scope_stores) ? r.scope_stores : []).filter(Boolean);
-    }
-    var emails = recipients.filter(function(r: any){ return !recipientScope(r).length; })
-                           .map(function(r: any){ return r.email; }).filter(Boolean);
+    /* Кой получава — reportDailyWeeklyRecipients (v68): общото "to" без обхват,
+       личните по-долу. Същата функция отговаря и на recipients_only. */
+    var dwPlan: any = await loadDailyWeeklyRecipients(type);
+    var emails: string[] = dwPlan.general;
 
     var subject = type === 'weekly' ? reportWeeklySubject(data.weekDates) : reportDailySubject(data.reportDate);
 
@@ -5414,9 +5571,9 @@ Deno.serve(async (req: Request) => {
          1. регионалните — users.is_regional, обхват assigned_stores; важи
             и за двата отчета;
          2. получателите с обхват — report_recipients.scope_stores; САМО
-            дневният. recipientScope() връща [] при седмичен, тоест тук
+            дневният (scopeOf в reportDailyWeeklyRecipients връща [] при седмичен, тоест тук
             просто няма кого да добави: седмичният е обзорен и получателят
-            с обхват го получава ПЪЛЕН, в общото "to";
+            с обхват го получава ПЪЛЕН, в общото "to");
          3. управителите — users.role='manager', обхват собственият обект,
             зад шалтер в базата. Ключовете са ДВА и независими:
             'daily_report_managers' и 'weekly_report_managers'. Нарочно
@@ -5440,64 +5597,10 @@ Deno.serve(async (req: Request) => {
        понеделник за седмичния. Приемливо за нещо, което тече веднъж на ден
        — не рефакторирай събирането заради това. */
     var personalOut: any[] = [];
-    var personal: any[] = [];
-    var personalSeen: any = {};
-    function addPersonal(email: any, name: any, stores: any, source: string) {
-      var key = String(email || '').trim().toLowerCase();
-      if (!key) return;
-      var list = (Array.isArray(stores) ? stores : []).filter(Boolean);
-      var cur = personalSeen[key];
-      if (cur) {
-        list.forEach(function(s: any){ if (cur.stores.indexOf(s) < 0) cur.stores.push(s); });
-        if (!cur.name && name) cur.name = name;
-        return;
-      }
-      cur = { email: email, name: name || '', stores: list, source: source };
-      personalSeen[key] = cur;
-      personal.push(cur);
-    }
-
-    /* Източник 1 — регионалните, обхват assigned_stores. И за двата отчета. */
-    var regRes: any = await sbGet('users', 'is_regional=eq.true&select=email,display_name,assigned_stores,active');
-    (Array.isArray(regRes) ? regRes : []).forEach(function(u: any){
-      if (u.active === false || !u.email) return;
-      addPersonal(u.email, u.display_name, u.assigned_stores, 'regional');
-    });
-
-    /* Източник 2 — получателите с непразен scope_stores. Списъкът вече е
-       прочетен по-горе; тези хора са извадени от общото "to". При седмичен
-       recipientScope() връща [] и оттук не влиза никой. */
-    recipients.forEach(function(r: any){
-      var sc = recipientScope(r);
-      if (sc.length) addPersonal(r.email, r.name, sc, 'recipient');
-    });
-
-    /* Източник 3 — управителите, всеки САМО за своя обект. Липсващ ключ или
-       каквато и да е друга стойност освен 'on' = ИЗКЛЮЧЕНО, тоест списъкът
-       се пуска и спира от базата, без нов деплой.
-       Двете четения са в свой try/catch нарочно: нова функционалност не бива
-       да събори писмата на регионалните, ако app_settings или users отговорят
-       с грешка. Отказът се вижда в отговора вместо да изяде целия цикъл. */
-    var mgrKey = type === 'weekly' ? 'weekly_report_managers' : 'daily_report_managers';
-    var managersOn = false;
-    try {
-      var setRes: any = await sbGet('app_settings', 'key=eq.' + mgrKey + '&select=value&limit=1');
-      var setRow = Array.isArray(setRes) ? setRes[0] : null;
-      managersOn = !!setRow && String(setRow.value == null ? '' : setRow.value).trim().toLowerCase() === 'on';
-    } catch (e) {
-      managersOn = false;
-    }
-    if (managersOn) {
-      try {
-        var mgrRes: any = await sbGet('users', 'role=eq.manager&select=email,display_name,store_name,active');
-        (Array.isArray(mgrRes) ? mgrRes : []).forEach(function(u: any){
-          if (u.active === false || !u.email) return;
-          addPersonal(u.email, u.display_name, u.store_name ? [u.store_name] : [], 'manager');
-        });
-      } catch (e) {
-        personalOut.push({ email:null, source:'manager', sent:false, reason:'managers_query_failed' });
-      }
-    }
+    var personal: any[] = dwPlan.personal;
+    /* Падналата заявка за управителите се вижда в отговора, без да спира
+       регионалните — както до v67. */
+    if (dwPlan.managers_query_failed) personalOut.push({ email:null, source:'manager', sent:false, reason:'managers_query_failed' });
 
     for (const u of personal) {
       var mine: string[] = Array.isArray(u.stores) ? u.stores : [];

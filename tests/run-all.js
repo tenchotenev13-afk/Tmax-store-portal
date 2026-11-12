@@ -475,6 +475,7 @@ const TESTS = [
   'transit-auto-always.test.js',
   'transit-multi-hint.test.js',
   'admin-reports.test.js',
+  'report-recipients-only.test.js',
   'sap-prices-vkp2.test.js',
   'admin-recipient-scope.test.js',
   'admin-role-view.test.js',

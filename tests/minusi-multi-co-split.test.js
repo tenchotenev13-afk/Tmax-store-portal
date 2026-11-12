@@ -232,7 +232,8 @@ function mailChecks(label, F) {
     if (okRun) mailChecks('.ts', ctx);
     const m = src.match(/if \(type === 'minus_multi'\) \{[\s\S]*?\n    \}\n/);
     ok('dry_run носи co_total и co_stores', !!m && /co_total: j\.sub\.co \? j\.sub\.co\.total : null/.test(m[0]) && /co_stores:/.test(m[0]));
-    ok('v67 бележка най-отгоре', /^\/\*[\s\S]{0,200}v67 \(11\.11\.2026\)/.test(src));
+    /* От v68 (12.11.2026) най-отгоре е по-новата бележка — тук се иска само v67 да е в заглавния коментар. */
+    ok('v67 бележка в заглавния коментар', /^\/\*[\s\S]{0,2000}v67 \(11\.11\.2026\)/.test(src));
   }
 
   section('6. Сумите за офиса — „Разлика“ от закръглените');

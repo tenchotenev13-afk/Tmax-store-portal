@@ -15,8 +15,8 @@
      3. „Тест до мен" праща на currentUser.email (не на написаното в
         полетата), двоен клик = една заявка, заключено до края; без имейл в
         профила → нула заявки; заключването е по вид отчет;
-     4. „Изпрати сега": confirm с броя; „Откажи" → нищо; двоен клик = един
-        confirm и една заявка до списъка, без „(тест)";
+     4. „Изпрати сега" (от 12.11.2026 през send-scheduled-report): confirm с
+        броя писма; „Откажи" → нищо; двоен клик = един confirm и едно пращане;
      5. CRUD на получател от новото място: + Добави → POST, ✕ → DELETE;
      6. в таб „Днес" няма нито един от махнатите елементи.
 
@@ -198,44 +198,46 @@ const sendBtns = h => Array.prototype.filter.call(h.doc.querySelectorAll('#notif
   }
 
   section('4. „📤 Изпрати сега"');
+  /* От 12.11.2026 дневният и седмичният се пращат от send-scheduled-report
+     (recipients_only за броя, после {"type":…}); подробно — в
+     report-recipients-only.test.js. Тук: заключване и нула писма от браузъра. */
+  function edgeStub(h, confirmed) {
+    const base = h.w.fetch; h.edge = [];
+    h.w.fetch = function (url, init) {
+      if (String(url).indexOf('/functions/v1/send-scheduled-report') >= 0) {
+        const b = JSON.parse(init.body); h.edge.push(b);
+        const out = b.recipients_only ? { ok: true, type: b.type, general: ['t@temax.bg', 'j@temax.bg'], personal: [] }
+                                      : { ok: true, sent: true, recipients: 2, personal: [], type: b.type };
+        return new Promise(res => h.w.setTimeout(() => res({ ok: true, status: 200, text: () => Promise.resolve(JSON.stringify(out)) }), 30));
+      }
+      return base(url, init);
+    };
+  }
   {
     const h = await env(ADMIN, { confirm: false });
+    edgeStub(h);
     const b = rowBtn(h, 'daily', '📤 Изпрати сега');
     guard('клик → „Откажи"', () => realClick(h.w, b, 'Изпрати сега'));
     await settle();
-    ok('confirm с броя', h.calls.confirm.length === 1 &&
-      h.calls.confirm[0] === 'Ще се изпрати до 2 получатели — сигурен ли си?', JSON.stringify(h.calls.confirm));
-    ok('„Откажи" → нула заявки към resend-email', mails(h).length === 0, mails(h).length);
+    ok('confirm с броя писма', h.calls.confirm.length === 1 &&
+      h.calls.confirm[0].indexOf('Ще тръгнат до 1 писма: 1 общо до 2 адреса') === 0, JSON.stringify(h.calls.confirm));
+    ok('„Откажи" → само recipients_only, нула писма', h.edge.length === 1 && h.edge[0].recipients_only === true && mails(h).length === 0);
     ok('„Откажи" → данни не се събират', h.collected.daily === 0);
     ok('„Откажи" → бутонът не е заключен', b.disabled === false);
     h.close();
   }
   {
     const h = await env(ADMIN, { confirm: true });
+    edgeStub(h);
     const b = rowBtn(h, 'daily', '📤 Изпрати сега');
     realClick(h.w, b, 'Изпрати сега');
-    ok('заключен след потвърждението', b.disabled === true);
+    ok('заключен веднага след клика', b.disabled === true);
     realClick(h.w, b, 'Изпрати сега');
-    await settle();
+    await settle(); await settle();
     ok('двоен клик → един confirm', h.calls.confirm.length === 1, h.calls.confirm.length);
-    const m = mails(h);
-    ok('двоен клик → ЕДНА заявка', m.length === 1, m.length);
-    if (m[0]) {
-      ok('до дневния списък', JSON.stringify(m[0].body.to) === JSON.stringify(['t@temax.bg', 'j@temax.bg']), JSON.stringify(m[0].body.to));
-      ok('без „(тест)" в темата', m[0].body.subject.indexOf('(тест)') < 0, m[0].body.subject);
-    }
-    ok('toast с резултата', h.calls.toast.some(t => String(t).indexOf('✅ Дневен репорт изпратен на 2 получатели') >= 0), JSON.stringify(h.calls.toast));
+    ok('двоен клик → ЕДНО пращане през едж функцията', JSON.stringify(h.edge) === '[{"type":"daily","recipients_only":true},{"type":"daily"}]', JSON.stringify(h.edge));
+    ok('нула писма от браузъра, данни не се събират', mails(h).length === 0 && h.collected.daily === 0);
     ok('отключен след края', b.disabled === false);
-    h.close();
-  }
-  {
-    const h = await env(ADMIN, { confirm: true });
-    realClick(h.w, rowBtn(h, 'weekly', '📤 Изпрати сега'), 'Седмичен: Изпрати сега');
-    await settle();
-    const m = mails(h);
-    ok('седмичен: confirm с 2', h.calls.confirm[0] === 'Ще се изпрати до 2 получатели — сигурен ли си?', h.calls.confirm[0]);
-    ok('седмичен: до седмичния списък', m.length === 1 && JSON.stringify(m[0].body.to) === JSON.stringify(['t@temax.bg', 'w@temax.bg']),
-      m[0] && JSON.stringify(m[0].body.to));
     h.close();
   }
 

@@ -267,8 +267,10 @@ function snapshotWrites(h) {
        низ: от v19 такъв клон пак съществува, но чете само прага за секцията
        „Каса". На върхово ниво в обработчика отстъпът е 4 интервала; вкарат
        ли се източниците обратно в клон, става 6. */
+    /* От v68 (12.11.2026) — през loadDailyWeeklyRecipients на върхово ниво. */
     ok('личните източници се четат на върхово ниво, не в клон за дневния',
-       /\n    var regRes: any = await sbGet\('users', 'is_regional=eq\.true/.test(edge));
+       /\n    var dwPlan: any = await loadDailyWeeklyRecipients\(type\);/.test(edge) &&
+       /async function loadDailyWeeklyRecipients[\s\S]{0,800}\n  var regRes: any = await sbGet\('users', 'is_regional=eq\.true/.test(edge));
     ok('регионалните се четат за двата вида отчет',
        edge.indexOf('is_regional=eq.true') >= 0);
 
@@ -291,8 +293,10 @@ function snapshotWrites(h) {
        edge.indexOf(".trim().toLowerCase() === 'on'") >= 0);
 
     /* scope_stores остава САМО за дневния — седмичният е обзорен. */
-    ok('recipientScope връща [] при седмичен',
-       /function recipientScope\(r: any\): string\[\] \{\s*\n\s*if \(type !== 'daily'\) return \[\];/.test(edge));
+    /* От v68 (12.11.2026) — scopeOf в reportDailyWeeklyRecipients. */
+    ok('обхватът е [] при седмичен',
+       /var scopeOf = function\(r\)\{\s*\n\s*if \(weekly\) return \[\];/.test(edge) &&
+       /var weekly = type === 'weekly';/.test(edge));
 
     ok('всеки ред в отговора носи източника',
        /source: 'regional' \| 'recipient' \| 'manager'/.test(edge) &&

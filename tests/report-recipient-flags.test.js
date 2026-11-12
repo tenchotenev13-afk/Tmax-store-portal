@@ -73,6 +73,14 @@ function branch(type) {
   const e = EDGE.indexOf('if (type ===', s + 10);
   return EDGE.slice(s, e > 0 ? e : s + 4000);
 }
+/* От v68 (12.11.2026) четенията на получателите са в load* функции, общи за
+   крона и recipients_only — клонът ги вика, тялото им се проверява отделно. */
+function fnBody(name) {
+  const s = EDGE.indexOf('async function ' + name + '(');
+  if (s < 0) return '';
+  const e = EDGE.indexOf('\n}\n', s);
+  return EDGE.slice(s, e > 0 ? e : s + 2000);
+}
 
 (async function () {
   const h0 = await env();
@@ -115,7 +123,10 @@ function branch(type) {
 
   section('3. Едж функцията — всеки тип чете своя флаг');
   {
-    const pb = branch('pallets'), wb = branch('warehouse');
+    const pBr = branch('pallets'), wBr = branch('warehouse');
+    ok('Палети: клонът чете през loadPalletsPlan', /await loadPalletsPlan\(\)/.test(pBr));
+    ok('Склад: клонът чете през loadWarehousePlan', /await loadWarehousePlan\(\)/.test(wBr));
+    const pb = pBr + fnBody('loadPalletsPlan'), wb = wBr + fnBody('loadWarehousePlan');
     ok('Палети: report_recipients с pallets=eq.true', /sbGet\('report_recipients', 'active=eq\.true&pallets=eq\.true&/.test(pb));
     ok('Палети: НЕ чете weekly', pb.indexOf('weekly=eq.true') < 0);
     ok('Палети: регионалните се четат (is_regional)', /is_regional=eq\.true/.test(pb));
@@ -123,7 +134,8 @@ function branch(type) {
     ok('Склад: подава ги на reportWarehouseRecipients', /reportWarehouseRecipients\(wUsersRes, wRecRes\)/.test(wb));
     ok('Склад: НЕ чете регионалните', wb.indexOf('is_regional') < 0);
     ok('Дневен/Седмичен: daily / weekly',
-      /var flagFilter = type === 'weekly' \? 'weekly=eq\.true' : 'daily=eq\.true';/.test(EDGE));
+      /var flag = type === 'weekly' \? 'weekly' : 'daily';/.test(fnBody('loadDailyWeeklyRecipients')) &&
+      /'active=eq\.true&' \+ flag \+ '=eq\.true&/.test(fnBody('loadDailyWeeklyRecipients')));
   }
 
   section('4. UI — броячите от флаговете');
