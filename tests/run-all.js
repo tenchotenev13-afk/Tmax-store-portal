@@ -69,6 +69,7 @@ const TESTS = [
   'sbget-errors.test.js',
   'sb-get-all.test.js',
   'history-kasa-get-all.test.js',
+  'history-storno-filter.test.js',
   'history-store-dropdown.test.js',
   'report-cross-get-all.test.js',
   'stock-returns-get-all.test.js',

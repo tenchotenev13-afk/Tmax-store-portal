@@ -3,6 +3,9 @@
    Редактирай САМО тук при промени по модула. */
 
 var histData   = { transport:[], client:[], kasa:[], storno:[] };
+/* Филтър „Само с по-малка сума" в картата Сторно бележки — само в паметта,
+   нулира се при всяко ново „Търси →" (runHistorySearch). 12.11.2026. */
+var histStornoOnlyFlagged = false;
 var histFilter = { from:'', to:'', store:'', type:'all' };
 var histStores = [];
 /* Подтабове: 'daily' = „Дневен преглед“ (по подразбиране), 'search' = „Търсене по период“.
@@ -77,6 +80,7 @@ function runHistorySearch(){
   var store=document.getElementById('h-store').value;
   var type =document.getElementById('h-type').value;
   histFilter={from:from,to:to,store:store,type:type};
+  histStornoOnlyFlagged=false;
   if(!from||!to){toast('Избери период от — до','#dc2626');return;}
 
   document.getElementById('h-results').innerHTML=
@@ -241,7 +245,8 @@ function renderHistoryResults(){
   }
   if(histData.storno.length){
     var flaggedS=histData.storno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum,r.articles).flagged;}).length;
-    html+=metricCard('🧾 Сторно бележки',histData.storno.length,flaggedS?'⚠️ '+flaggedS+' с по-малка сума':'без разминавания',flaggedS?'#dc2626':'#16a34a');
+    var stornoCard=metricCard('🧾 Сторно бележки',histData.storno.length,flaggedS?'⚠️ '+flaggedS+' с по-малка сума':'без разминавания',flaggedS?'#dc2626':'#16a34a');
+    html+=flaggedS?'<div id="h-storno-metric" onclick="histStornoShowFlagged()" style="cursor:pointer;" title="Покажи само бележките с по-малка сума">'+stornoCard+'</div>':stornoCard;
   }
   html+='</div>';
 
@@ -351,10 +356,18 @@ function renderHistoryResults(){
   if(histData.storno.length){
     var canReturnStorno=['admin','accounting'].indexOf(currentUser.role)>=0;
     var flaggedTotal=histData.storno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum,r.articles).flagged;}).length;
-    html+='<div class="card" style="margin-top:14px;">'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">'+
-        '<div class="card-title" style="margin:0;">🧾 Сторно бележки ('+histData.storno.length+')</div>'+
-        (flaggedTotal?'<div style="font-size:13px;font-weight:700;color:#dc2626;">⚠️ '+flaggedTotal+' с по-малка сума на новата покупка</div>':'')+
+    /* Правилото е САМО stornoIndicator (kasa.js) — тук няма второ сравнение на сумите. */
+    var histStornoFilterOn=histStornoOnlyFlagged&&flaggedTotal>0;
+    var stornoShown=histStornoFilterOn
+      ? histData.storno.filter(function(r){return stornoIndicator(r.returned_sum,r.new_sum,r.articles).flagged;})
+      : histData.storno;
+    html+='<div class="card" id="h-storno-card" style="margin-top:14px;">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:10px;">'+
+        '<div class="card-title" style="margin:0;">🧾 Сторно бележки ('+(histStornoFilterOn?stornoShown.length+' от '+histData.storno.length:histData.storno.length)+')</div>'+
+        (flaggedTotal?'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">'+
+          '<div style="font-size:13px;font-weight:700;color:#dc2626;">⚠️ '+flaggedTotal+' с по-малка сума на новата покупка</div>'+
+          '<button id="h-storno-only-flagged" onclick="histStornoToggleFlagged()" aria-pressed="'+(histStornoFilterOn?'true':'false')+'" style="border:1px solid #dc2626;background:'+(histStornoFilterOn?'#dc2626':'#fef2f2')+';color:'+(histStornoFilterOn?'#fff':'#dc2626')+';border-radius:20px;padding:4px 12px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;">'+(histStornoFilterOn?'✓ ':'')+'Само с по-малка сума</button>'+
+        '</div>':'')+
       '</div>'+
       '<div class="tbl-wrap tbl-compact tbl-auto"><table>'+
       '<thead><tr>'+
@@ -369,7 +382,7 @@ function renderHistoryResults(){
         '<th style="width:8%;white-space:nowrap;">Индикация</th>'+
         '<th style="width:9%;white-space:nowrap;">Статус</th>'+(canReturnStorno?'<th>Действие</th>':'')+'</tr></thead>'+
       '<tbody>'+
-      histData.storno.slice().sort(function(a,b){return stornoSortPriority(a)-stornoSortPriority(b);}).map(function(r){
+      stornoShown.slice().sort(function(a,b){return stornoSortPriority(a)-stornoSortPriority(b);}).map(function(r){
         var ind=stornoIndicator(r.returned_sum,r.new_sum,r.articles);
         var rowBg=ind.flagged?ind.bg:(r.status==='returned'?'#fffbeb':(r.status==='resubmitted'?'#eff6ff':null));
         var statusBadge=
@@ -454,6 +467,20 @@ function histGroupBadge(o){
   var pos=1;
   for(var i=0;i<m.length;i++) if(String(m[i].id)===String(o.id)) pos=i+1;
   return '<span title="Част от обща поръчка на този клиент" style="margin-left:5px;font-size:10px;font-weight:700;padding:2px 6px;border-radius:20px;background:#e0e7ff;color:#3730a3;">👥 '+pos+' от '+m.length+'</span>';
+}
+
+/* Чипът „Само с по-малка сума" в картата Сторно бележки. */
+function histStornoToggleFlagged(){
+  histStornoOnlyFlagged=!histStornoOnlyFlagged;
+  renderHistoryResults();
+}
+
+/* Клик по метричната карта „⚠️ N с по-малка сума" — включва филтъра и скролва до таблицата. */
+function histStornoShowFlagged(){
+  histStornoOnlyFlagged=true;
+  renderHistoryResults();
+  var card=document.getElementById('h-storno-card');
+  if(card&&card.scrollIntoView) card.scrollIntoView({behavior:'smooth',block:'start'});
 }
 
 function metricCard(label,val,sub,col){
