@@ -494,6 +494,7 @@ const TESTS = [
   'contacts-photos.test.js',
   'co-row-click.test.js',
   'co-print-signature.test.js',
+  'transport-print-checked.test.js',
   'co-row-all-items.test.js',
   'co-compact-row.test.js',
   'co-warehouse-fulfiller-buttons.test.js',
