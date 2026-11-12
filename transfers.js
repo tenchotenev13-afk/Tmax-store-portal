@@ -1269,6 +1269,10 @@ function renderTransferPrint(t, cargo, coNum) {
     '.tf-tbl th,.tf-tbl td{border:1px solid #444;padding:1.2mm 1mm;font-size:8.5pt;vertical-align:top;text-align:left;white-space:normal;box-sizing:border-box;}' +
     '.tf-tbl tr:last-child td{border-bottom:1px solid #444;}' +
     '.tf-tbl th{background:#eee;}' +
+    /* Дълги низове без интервали („80485351/80485352/…" в Забележка, номера във
+       Връзки) се пренасят в клетката, вместо да излизат от таблицата и да се
+       режат на листа (Козлодуй-0015, 12.11.2026). Само таблицата с товарите. */
+    '.tf-cargo td{overflow-wrap:anywhere;}' +
     '.tf-head{display:flex;justify-content:space-between;align-items:flex-start;}' +
     '.tf-logo{height:24pt;width:auto;flex-shrink:0;margin-left:8mm;}' +
     /* „Проверено" — проверката ПРЕДИ тръгване (снабдител / началник склад),
@@ -1328,7 +1332,7 @@ function renderTransferPrint(t, cargo, coNum) {
         '<div class="tf-num">' + escVal(t.transfer_num) + '</div></div>' +
         '<img src="' + TF_PRINT_LOGO + '" class="tf-logo" alt="TeMAX"></div>' +
         head +
-        '<table class="tf-tbl"><colgroup><col style="width:7mm"><col style="width:16mm"><col style="width:11mm"><col style="width:34mm"><col style="width:40mm"><col style="width:48mm"><col style="width:34mm"></colgroup>' +
+        '<table class="tf-tbl tf-cargo"><colgroup><col style="width:7mm"><col style="width:16mm"><col style="width:11mm"><col style="width:34mm"><col style="width:40mm"><col style="width:48mm"><col style="width:34mm"></colgroup>' +
           '<thead><tr><th>#</th><th>Вид</th><th>Брой</th><th>Краен получател</th><th>Прехвърляне през</th><th>Връзки</th><th>Забележка</th></tr></thead>' +
           '<tbody>' + rows + '</tbody></table>' +
         (hist ? '<div style="font-weight:700;margin:0 0 2mm;">История на товарите</div>' +

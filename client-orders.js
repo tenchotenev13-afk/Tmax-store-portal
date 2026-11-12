@@ -1732,7 +1732,8 @@ function renderPrint(o){
         '<div style="padding:6px 10px;text-align:right;display:flex;flex-direction:column;justify-content:center;border-left:1px solid rgba(255,255,255,.1);">'+
           '<div style="font-size:8px;color:rgba(255,255,255,.4);text-transform:uppercase;letter-spacing:1px;">Заявка №</div>'+
           '<div style="font-size:13px;font-weight:700;color:#fff;margin:1px 0;">'+esc(o.in_num||'—')+'</div>'+
-          '<div style="font-size:9px;color:rgba(255,255,255,.45);">'+esc(o.date||'')+'</div></div>'+
+          /* дд.мм.гггг (12.11.2026); без дата — празно, както досега. */
+          '<div style="font-size:9px;color:rgba(255,255,255,.45);">'+(o.date?esc(fmtDate(o.date)):'')+'</div></div>'+
       '</div>'+
       '<div style="display:flex;align-items:center;justify-content:space-between;padding:4px 10px;border-bottom:1px solid #eee;">'+
         '<span style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:1px;">'+copy+'</span>'+
