@@ -1,4 +1,10 @@
 /* send-oborot-report — вечерният имейл с оборота.
+
+   v14 (12.11.2026) — ЕДНО нещо: {"recipients_only":true} (Теодор 11.11, етап 2б,
+      таблицата „📋 Кой какво получава“). Изборът е изнесен в oborotStoresFromUsers
+      и oborotRecipientPlan — същите правила като досега (users.oborot_report
+      'all' / 'assigned', активни, с имейл; 'assigned' без нито един обект от
+      списъка → не праща). Режимът чете само users, не събира оборот и не праща.
    Крон: 45 17 * * * (UTC) = 20:45 лятно / 19:45 зимно софийско време.
 
    Чете САМО daily_turnover (вечерната сводка), НЕ kasa_reports — истинската
@@ -29,6 +35,8 @@
      { "date": "2026-08-19" }  — друга дата вместо днешната (за проба)
      { "dry_run": true }       — връща HTML-а, без да праща имейл
      { "to": ["a@b.bg"] }      — праща само на този адрес, игнорира базата
+     { "recipients_only": true } — само кой би получил (general [] / personal),
+                                   без данни за оборота, без писмо
 */
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -116,6 +124,34 @@ function dateLabel(iso: string) {
   return shortDate(iso) + '.' + iso.slice(0, 4) + ' (' + weekdayBg(iso) + ')';
 }
 
+/* Обектите в писмото — уникалните store_name на активните акаунти, без
+   изключените. Общо за collect и recipients_only. */
+function oborotStoresFromUsers(users: any[]): string[] {
+  const seen: Record<string, boolean> = {};
+  const stores: string[] = [];
+  users.forEach((u: any) => {
+    if (u.active === false) return;
+    if (!isReportableStore(u.store_name) || seen[u.store_name]) return;
+    seen[u.store_name] = true; stores.push(u.store_name);
+  });
+  stores.sort();
+  return stores;
+}
+
+/* КОЙ получава — един източник за пращането и за recipients_only.
+   'all' → всички обекти; 'assigned' → assigned_stores ∩ обектите в писмото
+   (празно → писмо няма: no_assigned_stores). */
+function oborotRecipientPlan(users: any[], stores: string[]) {
+  return users.filter((u: any) =>
+    u.active !== false && u.email && (u.oborot_report === 'all' || u.oborot_report === 'assigned'))
+    .map((u: any) => {
+      const all = u.oborot_report === 'all';
+      const mine: string[] = Array.isArray(u.assigned_stores) ? u.assigned_stores : [];
+      return { user: u, email: u.email, name: u.display_name || u.email, all,
+               stores: all ? stores.slice() : stores.filter((s) => mine.indexOf(s) >= 0) };
+    });
+}
+
 /* ══════════════ СЪБИРАНЕ НА ДАННИТЕ ══════════════ */
 async function collect(dateISO: string) {
   const prevISO = addDays(dateISO, -7);
@@ -133,14 +169,7 @@ async function collect(dateISO: string) {
   ]);
 
   const users = Array.isArray(usersRaw) ? usersRaw : [];
-  const seen: Record<string, boolean> = {};
-  const stores: string[] = [];
-  users.forEach((u: any) => {
-    if (u.active === false) return;
-    if (!isReportableStore(u.store_name) || seen[u.store_name]) return;
-    seen[u.store_name] = true; stores.push(u.store_name);
-  });
-  stores.sort();
+  const stores = oborotStoresFromUsers(users);
 
   const today: Record<string, any> = {};
   (Array.isArray(todayRows) ? todayRows : []).forEach((r: any) => { today[r.store_name] = r; });
@@ -338,6 +367,17 @@ Deno.serve(async (req: Request) => {
     let body: any = {};
     try { body = await req.json(); } catch (_e) { /* празно тяло е допустимо */ }
 
+    /* v14 — само получателите: чете users, нищо друго; не праща. */
+    if (body && body.recipients_only === true) {
+      const usersRaw = await sbGet('users', 'select=store_name,display_name,email,role,active,assigned_stores,oborot_report');
+      const users = Array.isArray(usersRaw) ? usersRaw : [];
+      const plan = oborotRecipientPlan(users, oborotStoresFromUsers(users));
+      return new Response(JSON.stringify({ ok: true, recipients_only: true, type: 'oborot', general: [],
+        personal: plan.map((p) => ({ email: p.email, name: p.name, stores: p.stores, all: p.all,
+          source: p.all ? 'all' : 'assigned', send: p.all || p.stores.length > 0 })) }),
+        { headers: { 'Content-Type': 'application/json' } });
+    }
+
     const dateISO = (body && body.date) ? String(body.date).slice(0, 10) : sofiaToday();
     const d = await collect(dateISO);
 
@@ -353,19 +393,18 @@ Deno.serve(async (req: Request) => {
       return new Response(JSON.stringify({ ok: true, dry_run: true, date: dateISO, stores: d.rows.length, subject: buildSubject(dateISO, d.rows), html: buildHtml(d, d.rows, 'all') }), { headers: { 'Content-Type': 'application/json' } });
     }
 
-    const recips = d.users.filter((u: any) =>
-      u.active !== false && u.email && (u.oborot_report === 'all' || u.oborot_report === 'assigned'));
+    const recips = oborotRecipientPlan(d.users, d.rows.map((r: any) => r.store));
 
     if (!recips.length) {
       return new Response(JSON.stringify({ ok: true, sent: false, reason: 'no_recipients', date: dateISO }), { headers: { 'Content-Type': 'application/json' } });
     }
 
     const out: any[] = [];
-    for (const u of recips) {
+    for (const p of recips) {
+      const u = p.user;
       let rows = d.rows, scope = 'all';
-      if (u.oborot_report === 'assigned') {
-        const mine: string[] = Array.isArray(u.assigned_stores) ? u.assigned_stores : [];
-        rows = d.rows.filter((r: any) => mine.indexOf(r.store) >= 0);
+      if (!p.all) {
+        rows = d.rows.filter((r: any) => p.stores.indexOf(r.store) >= 0);
         scope = rows.length + ' обекта';
         if (!rows.length) { out.push({ email: u.email, sent: false, reason: 'no_assigned_stores' }); continue; }
       }

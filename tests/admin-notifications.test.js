@@ -835,7 +835,17 @@ const ovrPosts      = h => h.calls.post.filter(p => p.table === 'notification_ov
 
     /* Екранът не праща известия — CLAUDE.md т.14. Единственият изход навън
        е през крона, който чете тези таблици. */
-    const block = adm.slice(adm.indexOf('function loadNotificationsAdmin'));
+    /* „📋 Кой какво получава" (12.11.2026) — в края на файла; той вика
+       функциите САМО с {"recipients_only":true} (нищо не праща) и се проверява
+       отделно по-долу и в tests/admin-who-gets.test.js. */
+    const whoAt = adm.indexOf('📋 КОЙ КАКВО ПОЛУЧАВА');
+    const block = adm.slice(adm.indexOf('function loadNotificationsAdmin'), whoAt > 0 ? whoAt : undefined);
+    const whoBlock = whoAt > 0 ? adm.slice(whoAt) : '';
+    ok('„Кой какво получава": един fetch, тялото е само {recipients_only:true}',
+      whoBlock.split('fetch(').length === 2 &&
+      whoBlock.indexOf('whoEdgeCall(WHO_SOURCES[k], { recipients_only: true, dry_run: true })') > 0 &&
+      whoBlock.split('whoEdgeCall(').length === 3 &&
+      whoBlock.indexOf('pushToAll') < 0 && whoBlock.indexOf('runNotifyTopic') < 0 && whoBlock.indexOf('sendEmail(') < 0);
     ok('новият код не вика pushToAll', block.indexOf('pushToAll') < 0);
     ok('нито runNotifyTopic', block.indexOf('runNotifyTopic') < 0);
     /* Името се СПОМЕНАВА в коментарите — търси се самото извикване. */

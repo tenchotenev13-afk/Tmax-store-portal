@@ -28,5 +28,7 @@
 -- Rollback: select cron.unschedule('co-overdue-weekdays-8h');
 --
 -- ОГЛЕДАЛО (Живко): нищо — крон задание, без таблици и колони.
--- report_cron_schedule() (report-cron-schedule-schema.sql) НЕ го показва: филтрира
--- само daily/weekly/pallets/warehouse, а в admin.js няма ред за този отчет.
+-- report_cron_schedule() (report-cron-schedule-schema.sql) НЕ го показваше: филтрираше
+-- само daily/weekly/pallets/warehouse. От 12.11.2026 го показва —
+-- report-cron-schedule-co-overdue-schema.sql (таблицата „📋 Кой какво получава“).
+-- Заданието е АКТИВНО (сверено в cron.job на 12.11.2026), не неактивно както горе.

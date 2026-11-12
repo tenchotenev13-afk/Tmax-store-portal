@@ -1312,6 +1312,7 @@ function loadNotificationsAdmin(){
     var el = document.getElementById(id); if (el) el.style.display = admin ? '' : 'none';
   });
   loadReportsAdmin();
+  renderWhoGetsShell();   /* „📋 Кой какво получава" — само бутон; данните при „Зареди" */
   if (!admin) {
     /* Темите трябват само за редовете на матрицата — таблицата им не се рисува. */
     Promise.all([
@@ -2573,4 +2574,410 @@ function submitNotifyGroups(){
     closeNotifyGroupsModal();
     loadUsersAdmin();
   });
+}
+
+/* ══════════════════════════════════════════
+   📋 КОЙ КАКВО ПОЛУЧАВА (Теодор 11.11, етап 2б, 12.11.2026)
+   Таблица човек × писмо в картата „Известия" (същото право като картата —
+   notifCanSee). Правилата НЕ се смятат тук: всяка колона е отговорът на
+   функцията, която праща писмото, в режим {"recipients_only":true} — нищо не
+   се праща. Едно извикване на функция при бутона „Зареди", не при всяко
+   отваряне на Администрация. Провал на източник → колоните му са „—" с
+   червено „не се зареди", останалите се показват.
+   Тук остават само: имената на колоните и резервният им час (истинският е от
+   rpc/report_cron_schedule и notification_topics), етикетът на ролята (от
+   users) и описанието на писмата от браузъра (WHO_BROWSER_MAILS — сверено с
+   извикванията на sendEmail / llMailTo в tests/admin-who-gets.test.js).
+   ══════════════════════════════════════════ */
+var WHO_SOURCES = {
+  ssr:      'send-scheduled-report',
+  oborot:   'send-oborot-report',
+  routed:   'send-routed-report',
+  bulletin: 'bulletin-notify'
+};
+/* Колоните = писмата по крон. Списъкът се сверява в теста с типовете в
+   send-scheduled-report (REPORT_RO_TYPES), темите с имейл в bulletin-notify
+   (RO_TOPIC_KEYS без само-push) и cron.job (14, 16, 11 → task_report). */
+var WHO_COLS = [
+  { key: 'daily',       src: 'ssr', label: 'Дневен',              when: '21:00',        cron: 'daily' },
+  { key: 'weekly',      src: 'ssr', label: 'Седмичен',            when: 'нд 21:00',     cron: 'weekly' },
+  { key: 'pallets',     src: 'ssr', label: 'Палети',              when: 'пт 18:00',     cron: 'pallets' },
+  { key: 'warehouse',   src: 'ssr', label: 'Склад',               when: 'нд 21:00',     cron: 'warehouse' },
+  { key: 'co_overdue',  src: 'ssr', label: 'Просрочени КЗ',       when: 'пн–пт 08:00',  cron: 'co_overdue' },
+  { key: 'minus_multi', src: 'ssr', label: 'Минуси повтарящи се', when: 'пн 11:00',     cron: 'minus_multi' },
+  { key: 'oborot',      src: 'oborot', label: 'Оборот',           when: '20:45' },
+  { key: 'weekly_routed', src: 'routed', label: 'Задачи седмично', when: 'пн 08:10' },
+  { key: 'task_report', src: 'routed', label: 'Отчети по задача', when: 'по графика на реда' },
+  { key: 'overdue_tasks',   src: 'bulletin', label: 'Просрочени задачи', when: 'пн–пт 08:15' },
+  { key: 'deadline_passed', src: 'bulletin', label: 'Изтекъл срок',      when: '15 мин след часа' },
+  { key: 'promo_expiring',  src: 'bulletin', label: 'Промоции',          when: '08:30' },
+  { key: 'loading_lists_pending', src: 'bulletin', label: 'Товарни листи 48 ч', when: 'пн–пт 09:00' }
+];
+/* Теми само с push — не са колона, а ред под таблицата. */
+var WHO_PUSH_ONLY = ['today_deadlines', 'minus_unfilled'];
+/* Писмата от браузъра — правило, не имена (получателите зависят от обекта
+   на действието). sites = файл:функция с извикването на sendEmail / llMailTo. */
+var WHO_BROWSER_MAILS = [
+  { mail: 'Товарен лист — изпратен', on: '„Изпрати" лист от склада', who: 'акаунтите на всеки обект в листа (+ push, PDF)', sites: ['loading.js:llNotifySent'] },
+  { mail: 'Товарен лист — извънреден ред', on: 'обектът добавя ред', who: 'акаунтите на склада + регионалните на обекта', sites: ['loading.js:llNotifyRowAdded'] },
+  { mail: 'Товарен лист — одобрен / отхвърлен ред', on: 'складът решава', who: 'акаунтите на обекта', sites: ['loading.js:llNotifyRowDecided'] },
+  { mail: 'Товарен лист — приключен / с липси', on: 'обектът приключва листа', who: 'акаунтите на склада', sites: ['loading.js:llNotifyClosed'] },
+  { mail: 'Пикинг — „🚚 Тръгна"', on: 'складът пуска транспорта', who: 'акаунтите на обекта, които са в app_settings.picking_users', sites: ['picking.js:pkNotifyShipment'] },
+  { mail: 'Разлики — до доставчик', on: '„✉️ Изпрати" (Ц. Тенева, admin)', who: 'ръчно въведени адреси (до / копие / отговор)', sites: ['stock-differences.js:sendDiffEmail'] },
+  { mail: 'Разлики — сторно бележка / отговор', on: 'бележка или отговор по разлика', who: 'бележка → управител и склад на обекта; отговор → авторът', sites: ['stock-differences.js:sdNoteNotify'] },
+  { mail: 'Преоценка — подадено', on: 'обектът подава', who: 'група „преоценка" + регионалните на обекта', sites: ['revaluation.js:rvNotify'] },
+  { mail: 'Преоценка — обработено', on: 'ЦО отбелязва обработено', who: 'акаунтите на обекта + копие app_settings.revaluation_done_cc', sites: ['revaluation.js:rvCoNotifyDone'] },
+  { mail: 'Чек лист', on: '„✉️ Изпрати"', who: 'по един адрес на отметнат обект (управител, първо @temax.bg)', sites: ['checklist.js:submitChecklistSend'] },
+  { mail: 'Бюлетин — седмичен дайджест', on: 'меню „Имейл" / понеделнишкият банер', who: 'всички активни управители', sites: ['email.js:sendWeeklyDigest'] },
+  { mail: 'Тест на имейл нотификации', on: 'бутон в Бюлетина', who: 'въведеният адрес', sites: ['email.js:sendTestEmail'] },
+  { mail: 'Общи отчети — „Тест до мен"', on: 'бутон в „📧 Общи отчети"', who: 'натиснилият (тема с „(тест)")', sites: ['report.js:sendDailyReportTest', 'report.js:sendWeeklyReportTest', 'report.js:sendPalletsReportTest', 'report.js:sendWarehouseReportTest', 'report.js:sendMinusMultiReportTest'] },
+  { mail: 'Седмичен по задачи — тест', on: 'функцията стои, бутонът е махнат (02.09.2026)', who: 'въведеният тестов адрес', sites: ['report.js:sendWeeklyReportRouted'] }
+];
+var WHO_ROLE_CATS = ['регионален', 'управител', 'склад', 'контролинг', 'ЦО', 'owner', 'преоценка', 'друг', 'външен адрес'];
+var WHO_DAY_SHORT = ['нд', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб'];
+var WHO_ISO_SHORT = { 1: 'пн', 2: 'вт', 3: 'ср', 4: 'чт', 5: 'пт', 6: 'сб', 7: 'нд' };
+var WHO_DOW_KEY = { mon: 'пн', tue: 'вт', wed: 'ср', thu: 'чт', fri: 'пт', sat: 'сб', sun: 'нд' };
+var whoState = null;
+var whoFilter = { role: '', store: '', q: '' };
+var whoBusy = false;
+
+function whoCanSee(){ return notifCanSee(); }
+
+function whoShellHtml(){
+  return '<div style="font-size:11px;color:#94a3b8;text-transform:uppercase;font-weight:700;margin:16px 0 6px;">📋 Кой какво получава</div>' +
+    '<div style="font-size:11.5px;color:#64748b;margin-bottom:8px;">Кой човек какви автоматични писма получава — по правилата на самите функции, без да се праща нищо.</div>' +
+    '<button type="button" class="btn btn-sm" id="who-load-btn" onclick="whoLoad(this)">📋 Зареди</button>' +
+    '<div id="who-out" style="margin-top:10px;"></div>';
+}
+function renderWhoGetsShell(){
+  var body = document.getElementById('notif-whogets-body'); if (!body) return;
+  if (!whoCanSee()) { body.innerHTML = ''; body.style.display = 'none'; return; }
+  body.style.display = '';
+  body.innerHTML = whoShellHtml();
+  if (whoState) whoRender();
+}
+
+/* POST към функция; {ok, data, err}. Тялото се чете като текст — 401 от
+   gateway-я не е JSON. */
+function whoEdgeCall(fn, payload){
+  return fetch(SB_URL + '/functions/v1/' + fn, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + SB_KEY, 'apikey': SB_KEY },
+    body: JSON.stringify(payload)
+  }).then(function(r){
+    return r.text().then(function(txt){
+      var d; try { d = JSON.parse(txt); } catch (e) { d = { message: txt }; }
+      if (!r.ok || !d || d.ok === false) return { ok: false, err: String((d && (d.error || d.message)) || ('HTTP ' + r.status)).slice(0, 150) };
+      return { ok: true, data: d };
+    });
+  }).catch(function(e){ return { ok: false, err: String((e && e.message) || e).slice(0, 150) }; });
+}
+/* Отговорът трябва да има формата на recipients_only, иначе е грешка, не празнота. */
+function whoCheckShape(src, r){
+  if (!r || !r.ok) return r || { ok: false, err: 'няма отговор' };
+  var d = r.data || {};
+  var good = src === 'ssr' ? (!!d.types && typeof d.types === 'object')
+    : src === 'oborot' ? Array.isArray(d.personal)
+    : src === 'routed' ? (d.recipients_only === true && !!d.weekly)
+    : (!!d.topics && typeof d.topics === 'object');
+  return good ? r : { ok: false, err: 'неочакван отговор (няма recipients_only)' };
+}
+
+function whoLoad(btn){
+  if (whoBusy || !whoCanSee()) return;
+  whoBusy = true;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Зареждане...'; }
+  var keys = Object.keys(WHO_SOURCES);
+  /* dry_run:true — ПРЕДПАЗИТЕЛ: стара версия на функция (преди деплоя или след
+     връщане назад) не познава recipients_only и би минала по пътя на пращането;
+     с dry_run тя само симулира. Новите проверяват recipients_only ПРЕДИ dry_run. */
+  Promise.all(keys.map(function(k){ return whoEdgeCall(WHO_SOURCES[k], { recipients_only: true, dry_run: true }); }).concat([
+    /* Изричен select= — users никога не се чете със select=* от клиента. */
+    sbGet('users', 'active=eq.true&select=email,display_name,role,store_name,is_regional,notify_groups,assigned_stores', true),
+    sbGet('rpc/report_cron_schedule', '', true)
+  ])).then(function(res){
+    var by = {};
+    keys.forEach(function(k, i){ by[k] = whoCheckShape(k, res[i]); });
+    var cron = {};
+    (Array.isArray(res[keys.length + 1]) ? res[keys.length + 1] : []).forEach(function(c){ if (c && c.kind) cron[c.kind] = c; });
+    whoState = whoBuild(by, Array.isArray(res[keys.length]) ? res[keys.length] : [], cron);
+    whoState.at = new Date();
+    whoBusy = false;
+    renderWhoGetsShell();
+  }).catch(function(e){
+    whoBusy = false;
+    if (btn) { btn.disabled = false; btn.textContent = '📋 Зареди'; }
+    toast('❌ Таблицата не се зареди: ' + String((e && e.message) || e).slice(0, 150), '#dc2626');
+  });
+}
+
+function whoLow(e){ return String(e || '').trim().toLowerCase(); }
+
+/* Роля / отдел — от users, само за надпис и филтър (не решава кой получава). */
+function whoGroupsOf(u){
+  var g = u && u.notify_groups;
+  if (Array.isArray(g)) return g;
+  if (typeof g === 'string' && g.length > 2) return g.replace(/^{|}$/g, '').split(',').map(function(s){ return s.trim().replace(/^"|"$/g, ''); });
+  return [];
+}
+function whoRoleOf(u){
+  if (!u) return { label: 'външен адрес', cats: ['външен адрес'] };
+  var g = whoGroupsOf(u), parts = [], cats = [];
+  var put = function(cat, label){ if (cats.indexOf(cat) < 0) cats.push(cat); parts.push(label); };
+  if (u.is_regional === true) put('регионален', 'регионален');
+  if (u.role === 'manager') put('управител', 'управител · ' + (u.store_name || '—'));
+  if (u.role === 'logistics') put('склад', 'склад · ' + (u.store_name || '—'));
+  if (g.indexOf('controlling') >= 0) put('контролинг', 'контролинг');
+  if (g.indexOf('co') >= 0) put('ЦО', 'ЦО');
+  if (g.indexOf('owner') >= 0) put('owner', 'owner');
+  if (g.indexOf('revaluation') >= 0) put('преоценка', 'преоценка');
+  if (!cats.length) put('друг', (u.role || '—') + (u.store_name ? ' · ' + u.store_name : ''));
+  return { label: parts.join(' · '), cats: cats };
+}
+
+/* Къс час от реда на report_cron_schedule: „пт 18:00", „пн–пт 08:00". */
+function whoCronShort(c){
+  if (!c || c.hour_sofia === null || c.hour_sofia === undefined) return null;
+  var d = String(c.dow), day;
+  if (d === '*') day = '';
+  else if (/^[0-6]$/.test(d)) day = WHO_DAY_SHORT[+d];
+  else if (/^[0-6]-[0-6]$/.test(d)) day = WHO_DAY_SHORT[+d.charAt(0)] + '–' + WHO_DAY_SHORT[+d.charAt(2)];
+  else day = 'cron „' + d + '"';
+  var mm = (c.minute === null || c.minute === undefined) ? '??' : String(c.minute).padStart(2, '0');
+  return (day ? day + ' ' : '') + String(c.hour_sofia).padStart(2, '0') + ':' + mm + (c.active === false ? ' (спряно)' : '');
+}
+/* Къс час на тема от notification_topics (отговорът я носи). */
+function whoTopicShort(t){
+  if (!t || !t.scheduled_time) return null;
+  var hm = String(t.scheduled_time).slice(0, 5), day = '';
+  if (t.schedule_type === 'weekly') day = WHO_DOW_KEY[t.day_of_week] || String(t.day_of_week || '');
+  else {
+    var w = notifWeekdays(t).slice().sort(function(a, b){ return a - b; });
+    if (w.join(',') === '1,2,3,4,5') day = 'пн–пт';
+    else if (w.length && w.length < 7) day = w.map(function(n){ return WHO_ISO_SHORT[n]; }).join(', ');
+  }
+  return (day ? day + ' ' : '') + hm;
+}
+
+function whoBuild(by, users, cron){
+  var people = {}, err = {}, meta = {}, extra = { push: [] };
+  var uBy = {};
+  users.forEach(function(u){ if (u && u.email) uBy[whoLow(u.email)] = u; });
+  var add = function(email, name, col, cell){
+    var k = whoLow(email); if (!k) return;
+    var p = people[k];
+    if (!p) {
+      var u = uBy[k];
+      p = people[k] = { email: (u && u.email) || String(email).trim(), name: (u && u.display_name) || name || String(email).trim(),
+        store: u ? (u.store_name || '') : '', role: whoRoleOf(u), cells: {} };
+    }
+    var c = p.cells[col];
+    if (!c) { p.cells[col] = { all: !!cell.all, stores: (cell.stores || []).slice(), cond: !!cell.cond, text: cell.text || '', title: cell.title || '' }; return; }
+    c.all = c.all || !!cell.all;
+    (cell.stores || []).forEach(function(s){ if (c.stores.indexOf(s) < 0) c.stores.push(s); });
+    c.cond = c.cond && !!cell.cond;
+    if (c.all || c.stores.length) c.text = '';
+  };
+  var scopeCell = function(r){
+    if (r.channel === 'push') return { text: 'само push' };
+    if (r.scope === 'all') return { all: true };
+    if (r.scope === 'own_tasks') return { text: 'своите задачи' };
+    return { stores: r.stores || [], text: (r.stores && r.stores.length) ? '' : 'без обекти' };
+  };
+  WHO_COLS.forEach(function(col){
+    var s = by[col.src];
+    meta[col.key] = { when: col.when, notes: [] };
+    if (col.cron && cron[col.cron]) meta[col.key].when = whoCronShort(cron[col.cron]) || col.when;
+    if (!s || !s.ok) { err[col.key] = (s && s.err) || 'не се зареди'; return; }
+    var d = s.data;
+    if (col.src === 'ssr') {
+      var t = d.types[col.key];
+      if (!t || t.error) { err[col.key] = (t && t.error) || 'липсва в отговора'; return; }
+      (t.general || []).forEach(function(e){ add(e, null, col.key, { all: true }); });
+      (t.personal || []).forEach(function(p){
+        var st = p.stores || [];
+        add(p.email, p.name, col.key, { stores: st, cond: !!p.conditional, text: st.length ? '' : 'без обекти' });
+      });
+      if (col.key === 'minus_multi') meta[col.key].notes.push('условно = само при минуси в обектите му');
+    } else if (col.src === 'oborot') {
+      d.personal.forEach(function(p){
+        add(p.email, p.name, col.key, p.all ? { all: true } : { stores: p.stores || [], text: (p.stores && p.stores.length) ? '' : 'без обекти' });
+      });
+    } else if (col.src === 'routed') {
+      if (d.active === false) meta[col.key].notes.push('темата е изключена — не тръгва');
+      if (d.test_email) meta[col.key].notes.push('⚠ тестов режим: всичко до ' + d.test_email);
+      if (col.key === 'weekly_routed') {
+        meta[col.key].when = whoTopicShort({ schedule_type: 'weekly', day_of_week: d.day_of_week, scheduled_time: d.scheduled_time }) || col.when;
+        if (d.weekly.error) { err[col.key] = d.weekly.error; return; }
+        if (d.weekly.week) meta[col.key].notes.push('по задачите от ' + d.weekly.week);
+        (d.weekly.personal || []).forEach(function(p){
+          add(p.email, p.name, col.key, { text: p.zadachi + (p.zadachi === 1 ? ' задача' : ' задачи'), title: (p.titles || []).join('\n') });
+        });
+      } else {
+        var agg = {}, order = [];
+        (d.task_reports || []).forEach(function(tr){
+          (tr.personal || []).forEach(function(p){
+            var k = whoLow(p.email); if (!k) return;
+            if (!agg[k]) { agg[k] = { email: p.email, name: p.name, titles: [] }; order.push(k); }
+            agg[k].titles.push((tr.title || '') + (tr.scheduled_time ? ' · ' + String(tr.scheduled_time).slice(0, 5) : ''));
+          });
+        });
+        order.forEach(function(k){
+          var a = agg[k];
+          add(a.email, a.name, col.key, { text: a.titles.length + (a.titles.length === 1 ? ' отчет' : ' отчета'), title: a.titles.join('\n') });
+        });
+        meta[col.key].notes.push((d.task_reports || []).length + ' активни реда');
+      }
+    } else {
+      var tp = d.topics[col.key];
+      if (!tp || tp.error) { err[col.key] = (tp && tp.error) || 'липсва в отговора'; return; }
+      meta[col.key].when = whoTopicShort(tp) || col.when;
+      if (tp.active === false) meta[col.key].notes.push('темата е изключена — не тръгва');
+      if (tp.test_email) meta[col.key].notes.push('⚠ тестов режим: всичко до ' + tp.test_email);
+      if (col.key === 'deadline_passed') {
+        (tp.personal || []).forEach(function(p){
+          var ts = p.tasks || [];
+          add(p.email, p.name, col.key, { text: ts.length + (ts.length === 1 ? ' задача' : ' задачи'),
+            title: ts.map(function(x){ return x.title + ' · ' + x.slot; }).join('\n') });
+        });
+      } else {
+        (tp.personal || []).forEach(function(p){ add(p.email, p.name, col.key, scopeCell(p)); });
+      }
+      if (tp.conditional === 'creators') meta[col.key].notes.push('+ авторът на задача с неотметнат ред');
+      if (col.key === 'loading_lists_pending') {
+        (tp.store_accounts || []).forEach(function(a){ add(a.email, a.name, col.key, { stores: [a.store], cond: true }); });
+        meta[col.key].notes.push('акаунтите на обекта — само при неприет лист');
+      }
+    }
+  });
+  /* Само push — ред под таблицата. */
+  var bt = by.bulletin;
+  WHO_PUSH_ONLY.forEach(function(k){
+    if (!bt || !bt.ok) { extra.push.push({ key: k, err: (bt && bt.err) || 'не се зареди' }); return; }
+    var tp = bt.data.topics[k];
+    if (!tp || tp.error) { extra.push.push({ key: k, err: (tp && tp.error) || 'липсва в отговора' }); return; }
+    extra.push.push({ key: k, label: tp.label || k, when: whoTopicShort(tp) || '', active: tp.active !== false,
+      stores: tp.push_stores || [] });
+  });
+  var list = Object.keys(people).map(function(k){ return people[k]; })
+    .sort(function(a, b){ return String(a.name).localeCompare(String(b.name), 'bg'); });
+  return { people: list, err: err, meta: meta, extra: extra };
+}
+
+/* Текстът на клетка — един и същ в таблицата и в Excel. */
+function whoCellText(c){
+  if (!c) return '';
+  var t = c.text ? c.text : c.all ? '✓ всички' : (c.stores.length ? c.stores.join(', ') : '✓');
+  return c.cond ? 'условно · ' + t : t;
+}
+function whoStores(){
+  var seen = {}, out = [];
+  (whoState ? whoState.people : []).forEach(function(p){
+    var put = function(s){ if (s && !seen[s]) { seen[s] = 1; out.push(s); } };
+    put(p.store);
+    Object.keys(p.cells).forEach(function(k){ p.cells[k].stores.forEach(put); });
+  });
+  return out.sort(function(a, b){ return a.localeCompare(b, 'bg'); });
+}
+function whoVisible(){
+  if (!whoState) return [];
+  var f = whoFilter, q = whoLow(f.q);
+  return whoState.people.filter(function(p){
+    if (f.role && p.role.cats.indexOf(f.role) < 0) return false;
+    if (q && whoLow(p.name).indexOf(q) < 0 && whoLow(p.email).indexOf(q) < 0) return false;
+    if (f.store) {
+      var hit = p.store === f.store || Object.keys(p.cells).some(function(k){
+        var c = p.cells[k]; return c.all || c.stores.indexOf(f.store) >= 0;
+      });
+      if (!hit) return false;
+    }
+    return true;
+  });
+}
+function whoAtText(d){
+  var p2 = function(n){ return (n < 10 ? '0' : '') + n; };
+  return p2(d.getDate()) + '.' + p2(d.getMonth() + 1) + ' ' + p2(d.getHours()) + ':' + p2(d.getMinutes());
+}
+function whoSetFilter(k, v){ whoFilter[k] = v; whoRenderTable(); }
+
+function whoRender(){
+  var out = document.getElementById('who-out'); if (!out || !whoState) return;
+  var st = whoState, errs = Object.keys(st.err);
+  var roles = WHO_ROLE_CATS.filter(function(c){ return st.people.some(function(p){ return p.role.cats.indexOf(c) >= 0; }); });
+  var h = '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:8px;">' +
+    '<span id="who-at" style="font-size:12px;color:#334155;font-weight:600;">Данни към ' + whoAtText(st.at) + '</span>' +
+    '<button type="button" class="btn btn-sm" id="who-xlsx-btn" onclick="whoExportXlsx()">⬇ Excel</button>' +
+    '<select id="who-f-role" onchange="whoSetFilter(\'role\', this.value)" style="font-size:12px;"><option value="">Всички роли</option>' +
+    roles.map(function(r){ return '<option value="' + escAttr(r) + '"' + (whoFilter.role === r ? ' selected' : '') + '>' + esc(r) + '</option>'; }).join('') + '</select>' +
+    '<select id="who-f-store" onchange="whoSetFilter(\'store\', this.value)" style="font-size:12px;"><option value="">Всички обекти</option>' +
+    whoStores().map(function(s){ return '<option value="' + escAttr(s) + '"' + (whoFilter.store === s ? ' selected' : '') + '>' + esc(s) + '</option>'; }).join('') + '</select>' +
+    '<input id="who-f-q" type="search" placeholder="Търси по име" value="' + escVal(whoFilter.q) + '" oninput="whoSetFilter(\'q\', this.value)" style="font-size:12px;min-width:140px;">' +
+    '</div>';
+  if (errs.length) {
+    var srcs = {};
+    errs.forEach(function(k){ var c = WHO_COLS.filter(function(x){ return x.key === k; })[0]; srcs[WHO_SOURCES[c.src]] = st.err[k]; });
+    h += '<div id="who-errors" style="font-size:12px;color:#dc2626;margin-bottom:8px;">❌ Не се зареди: ' +
+      Object.keys(srcs).map(function(s){ return esc(s) + ' (' + esc(srcs[s]) + ')'; }).join('; ') + '</div>';
+  }
+  h += '<div id="who-table-wrap"></div>';
+  /* Само push */
+  h += '<div id="who-push" style="margin-top:10px;font-size:12px;color:#334155;"><b>Само push, по обект (без имейл):</b><ul style="margin:4px 0 0 18px;padding:0;">' +
+    st.extra.push.map(function(p){
+      if (p.err) return '<li class="who-push-row" data-key="' + escAttr(p.key) + '" style="color:#dc2626;">' + esc(p.key) + ' — не се зареди (' + esc(p.err) + ')</li>';
+      return '<li class="who-push-row" data-key="' + escAttr(p.key) + '">' + esc(p.label) + (p.when ? ' · ' + esc(p.when) : '') +
+        (p.active ? '' : ' · изключена') + ' — ' + (p.stores.length ? p.stores.length + ' обекта' : 'няма обекти') + '</li>';
+    }).join('') + '</ul></div>';
+  /* При действие в портала */
+  h += '<div id="who-browser" style="margin-top:12px;"><div style="font-size:12px;font-weight:700;color:#0f172a;margin-bottom:4px;">При действие в портала</div>' +
+    '<div class="tbl-wrap tbl-compact"><table><thead><tr><th>Писмо</th><th>При какво</th><th>Кой го получава</th></tr></thead><tbody>' +
+    WHO_BROWSER_MAILS.map(function(m){
+      return '<tr class="who-browser-row"><td>' + esc(m.mail) + '</td><td>' + esc(m.on) + '</td><td>' + esc(m.who) + '</td></tr>';
+    }).join('') + '</tbody></table></div></div>';
+  out.innerHTML = h;
+  whoRenderTable();
+}
+
+function whoRenderTable(){
+  var wrap = document.getElementById('who-table-wrap'); if (!wrap || !whoState) return;
+  var st = whoState, rows = whoVisible();
+  var h = '<div style="font-size:11.5px;color:#64748b;margin-bottom:4px;" id="who-count">' + rows.length + ' души</div>' +
+    '<div class="tbl-wrap tbl-compact"><table id="who-table"><thead><tr><th>Име</th><th>Имейл</th><th>Роля / отдел</th>';
+  WHO_COLS.forEach(function(c){
+    var m = st.meta[c.key] || { when: c.when, notes: [] };
+    h += '<th data-col="' + c.key + '" style="white-space:normal;min-width:90px;" title="' + escAttrVal(m.notes.join('\n')) + '">' + esc(c.label) +
+      '<div style="font-weight:400;font-size:10.5px;color:#64748b;">' + esc(m.when) + '</div>' +
+      (st.err[c.key] ? '<div class="who-col-err" style="font-weight:600;font-size:10.5px;color:#dc2626;">не се зареди</div>' : '') +
+      (m.notes.length ? '<div style="font-weight:400;font-size:10px;color:#94a3b8;">' + esc(m.notes.join(' · ')) + '</div>' : '') + '</th>';
+  });
+  h += '</tr></thead><tbody>';
+  if (!rows.length) h += '<tr><td colspan="' + (3 + WHO_COLS.length) + '" style="text-align:center;color:#94a3b8;">Няма хора по този филтър</td></tr>';
+  rows.forEach(function(p){
+    h += '<tr class="who-row" data-email="' + escAttr(whoLow(p.email)) + '"><td>' + esc(p.name) + '</td><td style="font-size:11px;">' + esc(p.email) +
+      '</td><td style="font-size:11px;">' + esc(p.role.label) + '</td>';
+    WHO_COLS.forEach(function(c){
+      if (st.err[c.key]) { h += '<td data-col="' + c.key + '" style="color:#dc2626;text-align:center;">—</td>'; return; }
+      var cell = p.cells[c.key];
+      h += '<td data-col="' + c.key + '" style="font-size:11px;white-space:normal;' + (cell && cell.cond ? 'color:#92400e;' : '') + '"' +
+        (cell && cell.title ? ' title="' + escAttr(cell.title) + '"' : '') + '>' + (cell ? escVal(whoCellText(cell)) : '') + '</td>';
+    });
+    h += '</tr>';
+  });
+  wrap.innerHTML = h + '</tbody></table></div>';
+}
+
+function whoExportXlsx(){
+  if (!whoState) return;
+  if (typeof XLSX === 'undefined') { toast('Excel библиотеката не е заредена', '#dc2626'); return; }
+  var st = whoState;
+  var head = ['Име', 'Имейл', 'Роля / отдел'].concat(WHO_COLS.map(function(c){ return c.label + ' (' + ((st.meta[c.key] || {}).when || c.when) + ')'; }));
+  var aoa = [['Кой какво получава — данни към ' + whoAtText(st.at)], head];
+  whoVisible().forEach(function(p){
+    aoa.push([p.name, p.email, p.role.label].concat(WHO_COLS.map(function(c){
+      return st.err[c.key] ? '— не се зареди' : whoCellText(p.cells[c.key]);
+    })));
+  });
+  var wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(aoa), 'Кой какво получава');
+  var d = st.at, p2 = function(n){ return (n < 10 ? '0' : '') + n; };
+  XLSX.writeFile(wb, 'koy-kakvo-poluchava-' + d.getFullYear() + '-' + p2(d.getMonth() + 1) + '-' + p2(d.getDate()) + '.xlsx');
 }

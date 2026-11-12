@@ -1,5 +1,14 @@
 /* send-routed-report — Edge Function за ЛИЧНИЯ седмичен отчет по задачи.
 
+   v17 (12.11.2026) — ЕДНО нещо: {"recipients_only":true} (Теодор 11.11, етап 2б,
+   таблицата „📋 Кой какво получава“). Връща weekly — плана на седмичния отчет за
+   приключилата седмица (collectWeeklyRoutingData → buildRecipientMap →
+   routedMailPlan, същото като пращането) — и task_reports — за всеки активен
+   ред entity_type='task_report' в notification_schedules получателите през
+   routedTaskReportRecipients. Не праща, не пише last_run / last_status.
+   Отговаря и при изключена тема (active: false в отговора) — таблицата казва
+   „изключена“, не мълчи.
+
    v16 (11.10.2026) — ЕДНО нещо: КОМЕНТАРЪТ от обекта в секция „Зареждане"
    (нова колона supply_entries.note, supply-note-schema.sql). Чете се с
    останалите колони; под стойностите на артикула излиза ред „💬 Обект:
@@ -1490,6 +1499,62 @@ async function routedTaskReportResponse(body: any, dryRun: boolean, testEmail: a
     sent:sent, failed:failed, test_email:testEmail, empty_groups:emptyGroups });
 }
 
+/* v17 — КОЙ получава, по същите функции като пращането; нищо не праща.
+   Изключената тема не спира отговора — само се отбелязва (active). */
+async function routedRecipientsOnly(topic: any){
+  /* Имената на хората от ЦО ('user:<имейл>') — същият кеш като в Deno.serve. */
+  if (!coPeopleCache) {
+    var coRes: any = await sbGet('users', 'store_name=eq.' + encodeURIComponent('Централен офис') +
+      '&active=eq.true&select=email,display_name&order=display_name');
+    coPeopleCache = Array.isArray(coRes) ? coRes.filter(function(u: any){ return u && u.email; }) : [];
+  }
+  var data: any = await new Promise(function(resolve){ collectWeeklyRoutingData(resolve); });
+  var weekly: any;
+  if (!data) {
+    weekly = { error: 'collect_failed' };
+  } else {
+    var wWarn: any[] = [];
+    var plan = routedMailPlan(buildRecipientMap(data.tasks, data.groupUsers, data.creatorMap, wWarn));
+    weekly = { week: data.weekLabel, tasks: data.tasks.length, empty_groups: routedEmptyGroups(wWarn),
+      personal: plan.map(function(p: any){ return { email: p.email, name: p.name, zadachi: p.tasks.length,
+        titles: p.tasks.map(function(t: any){ return t.title || ''; }) }; }) };
+  }
+  /* Отчетите по задача — един прочит на хората за всички редове. */
+  var sch: any = await sbGet('notification_schedules', 'entity_type=eq.task_report&active=eq.true&select=id,entity_id,schedule_type,scheduled_date,day_of_week,scheduled_time,target_recipients&order=created_at');
+  var rows: any[] = Array.isArray(sch) ? sch : [];
+  var ids: string[] = [];
+  rows.forEach(function(s: any){ var rc = s.target_recipients || {};
+    (Array.isArray(rc.user_ids) ? rc.user_ids : []).forEach(function(x: any){ x = String(x); if (/^[0-9a-f-]{8,}$/i.test(x) && ids.indexOf(x) < 0) ids.push(x); }); });
+  var taskIds = rows.map(function(s: any){ return String(s.entity_id || ''); }).filter(function(x){ return /^[0-9a-f-]{8,}$/i.test(x); });
+  var pr: any[] = await Promise.all([
+    sbGet('users', 'active=eq.true&email=not.is.null&select=email,display_name,assigned_stores,is_regional,notify_groups&order=display_name'),
+    ids.length ? sbGet('users', 'id=in.(' + ids.join(',') + ')&select=id,email,display_name,active') : Promise.resolve([]),
+    taskIds.length ? sbGet('bulletin_tasks', 'id=in.(' + taskIds.join(',') + ')&select=id,title,target_stores') : Promise.resolve([]),
+    taskIds.length ? sbGet('recurring_tasks', 'id=in.(' + taskIds.join(',') + ')&select=id,title,target_stores,report_groups') : Promise.resolve([]),
+    loadRecurringVersions()
+  ]);
+  var monISO = toLocalISO(reportMondayOfWeek(new Date()));
+  var versions = Array.isArray(pr[4]) ? pr[4] : [];
+  var taskReports = rows.map(function(s: any){
+    var id = String(s.entity_id || '');
+    var t: any = (Array.isArray(pr[2]) ? pr[2] : []).filter(function(x: any){ return String(x.id) === id; })[0];
+    var kind = 'regular';
+    if (!t) {
+      t = (Array.isArray(pr[3]) ? pr[3] : []).filter(function(x: any){ return String(x.id) === id; })[0];
+      if (t) { kind = 'recurring'; t = recurringApplyVersion(t, versions, monISO); }
+    }
+    if (!t) return { schedule_id: s.id, task_id: id, missing: true, personal: [] };
+    var warn: any[] = [];
+    var to = routedTaskReportRecipients(t, s.target_recipients, pr[0], pr[1], warn);
+    return { schedule_id: s.id, task_id: id, kind: kind, title: t.title || '', schedule_type: s.schedule_type,
+      scheduled_date: s.scheduled_date, day_of_week: s.day_of_week, scheduled_time: s.scheduled_time,
+      empty_groups: routedEmptyGroups(warn), personal: to };
+  });
+  return { ok: true, recipients_only: true, topic: TOPIC_KEY, active: !!topic.active, test_email: topic.test_email || null,
+    scheduled_time: topic.scheduled_time || null, day_of_week: topic.day_of_week || null,
+    weekly: weekly, task_reports: taskReports };
+}
+
 /* Предупрежденията от resolveRecipientsForTask, събрани по група — едно
    на група, с броя и заглавията на засегнатите задачи. */
 function routedEmptyGroups(warnings){
@@ -1526,6 +1591,14 @@ Deno.serve(async (req: Request) => {
         { status:404, headers:{'Content-Type':'application/json'} });
     }
     var topic: any = topics[0];
+
+    /* ═══ v17 — само получателите (таблицата в Администрация). СТОИ ПРЕДИ
+       проверката за active: изключената тема се показва като изключена, не
+       изчезва от таблицата; пращане тук няма. ═══ */
+    if (body && body.recipients_only === true) {
+      return new Response(JSON.stringify(await routedRecipientsOnly(topic)),
+        { status:200, headers:{'Content-Type':'application/json'} });
+    }
 
     /* Изключената тема не праща НИЩО — включително в dry_run. Превключвателят
        в Администрация трябва да значи едно и също нещо навсякъде. */

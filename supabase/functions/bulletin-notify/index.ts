@@ -11,6 +11,15 @@
 //   loading_lists_pending — товарен лист, изпратен преди 48 ч и още неотметнат
 //   minus_unfilled   — Минуси: незакрити и непопълнени, push до обекта (v13)
 //
+// v18 (12.11.2026) — ЕДНО нещо: {"recipients_only":true[,"topic_key":…]}
+//   (Теодор 11.11, етап 2б, таблицата „📋 Кой какво получава“). За всяка тема
+//   от RO_TOPIC_KEYS — КОЙ получава като правило, по същите resolveRecipients /
+//   resolveTaskRecipients / reportableStores като пращането, БЕЗ днешните
+//   данни (dry_run казва кой би получил сега; този режим — правилото). Не
+//   праща, не пише notification_log / notification_topics, не пуска
+//   автоматичната отметка на Минуси. Отговаря и за изключена тема (active).
+//   Темите и пращането — непроменени.
+//
 // v17 (11.11.2026) — ЕДНО нещо: „Клиентска поръчка“ (причина с requires_note)
 //   НЕ иска действие / становище и НЕ се брои в многократния минус
 //   (mnuCountByStore; Теодор 09–11.11, Тенчо 11.11). Засяга броя непопълнени в
@@ -645,6 +654,82 @@ async function reportableStores(supabase: any): Promise<string[]> {
   }
   stores.sort();
   return stores;
+}
+
+/* ──────────── v18: САМО ПОЛУЧАТЕЛИТЕ (recipients_only) ──────────── */
+/* Списъкът е същият като IMPLEMENTED_TOPICS (заковано в
+   tests/admin-who-gets.test.js); строителят за всяка тема е в RO_BUILDERS. */
+const RO_TOPIC_KEYS = ['overdue_tasks', 'deadline_passed', 'promo_expiring', 'loading_lists_pending', 'today_deadlines', 'minus_unfilled'];
+
+const roAsP = (r: Recipient) => ({ email: r.email, name: r.name, channel: r.channel, scope: r.scope, stores: r.stores, groups: r.groups });
+const roIsMail = (r: Recipient) => r.channel === 'email' || r.channel === 'both';
+
+/* Имейл по матрицата + push до обектите (promo_expiring, today_deadlines). */
+async function roMatrixWithPush(supabase: any, topic: any, forcePush: boolean) {
+  const all = await resolveRecipients(supabase, topic.key);
+  const stores = await reportableStores(supabase);
+  return { personal: all.filter(roIsMail).map(roAsP),
+    push: forcePush || all.filter((r: Recipient) => !roIsMail(r)).length > 0, push_stores: stores };
+}
+
+const RO_BUILDERS: Record<string, (supabase: any, topic: any, bg: ReturnType<typeof bgNow>) => Promise<any>> = {
+  overdue_tasks: async (supabase, topic) => {
+    const all = await resolveRecipients(supabase, topic.key);
+    /* + авторът на всяка задача с неотметнат ред (runOverdueTasks) — по данни. */
+    return { personal: all.map(roAsP), conditional: 'creators' };
+  },
+  promo_expiring: (supabase, topic) => roMatrixWithPush(supabase, topic, false),
+  today_deadlines: (supabase, topic) => roMatrixWithPush(supabase, topic, true),
+  loading_lists_pending: async (supabase, topic) => {
+    const watchers = await resolveRecipients(supabase, topic.key);
+    const { data: su } = await supabase.from('users').select('email,display_name,store_name').eq('active', true);
+    /* emailsOf в runLoadingListsPending: всички активни акаунти на обекта, до
+       който е листът. Тук — всички акаунти с обект (листът може да е до всеки). */
+    const accounts = (su || []).filter((u: any) => u.email && u.store_name && EXCLUDED_STORES.indexOf(u.store_name) < 0)
+      .map((u: any) => ({ email: u.email, name: u.display_name || u.email, store: u.store_name }));
+    return { personal: watchers.filter(roIsMail).map(roAsP), store_accounts: accounts, push: true };
+  },
+  minus_unfilled: async (supabase) => {
+    const { data: ms } = await supabase.from('app_settings').select('key,value').eq('key', 'minus_stores');
+    return { personal: [], push: true, push_stores: mnuParseStores(((ms || [])[0] || {}).value) };
+  },
+  deadline_passed: async (supabase, _topic, bg) => {
+    /* Същият вход като buildDeadlinePassed, без прозореца и отметките:
+       активните постоянни задачи (версията за седмицата на днес), не notice,
+       с час; получателите — resolveTaskRecipients. */
+    const { data: users } = await supabase.from('users').select('email,display_name,notify_groups').eq('active', true);
+    const { data: recsRaw } = await supabase.from('recurring_tasks').select('*').eq('active', true);
+    const monday = plusDaysISO(bg.dateStr, -bg.weekdayIdx);
+    const recs = recurringApplyVersions(recsRaw || [], await loadRecurringVersions(supabase), monday);
+    const tasks: any[] = [];
+    const byEmail: Record<string, any> = {};
+    for (const t of (recs || [])) {
+      if (taskIsNotice(t) || minutesOf(t.due_time) === null) continue;
+      const to = resolveTaskRecipients(t, users || []);
+      if (!to.length) continue;
+      const days = [0, 1, 2, 3, 4, 5, 6].filter((i) => recurringDueOnWeekday(t, i));
+      const slot = hhmm((minutesOf(t.due_time) as number) + GRACE_MINUTES);
+      tasks.push({ id: t.id, title: t.title || '', slot: slot, days: days, to: to.map((r) => r.email) });
+      for (const r of to) {
+        const k = String(r.email).toLowerCase();
+        if (!byEmail[k]) byEmail[k] = { email: r.email, name: r.name, tasks: [] };
+        byEmail[k].tasks.push({ title: t.title || '', slot: slot, days: days });
+      }
+    }
+    return { tasks: tasks, personal: Object.keys(byEmail).map((k) => byEmail[k]) };
+  },
+};
+
+async function topicRecipientsOnly(supabase: any, topic: any, bg: ReturnType<typeof bgNow>) {
+  const base: any = {
+    topic: topic.key, label: topic.label || topic.key, active: !!topic.active,
+    schedule_type: topic.schedule_type || null, scheduled_time: topic.scheduled_time || null,
+    weekdays: topic.weekdays || null, day_of_week: topic.day_of_week || null,
+    test_email: topic.test_email || null,
+  };
+  const build = RO_BUILDERS[topic.key];
+  if (!build) return Object.assign(base, { error: 'unknown_topic' });
+  return Object.assign(base, await build(supabase, topic, bg));
 }
 
 /* ──────────────────── ТЕМА: ПРОСРОЧЕНИ ЗАДАЧИ ────────────────── */
@@ -2636,6 +2721,24 @@ Deno.serve(async (req) => {
     if (body.minus_auto_tick === true) {
       const tick = await runMinusAutoTick(supabase, bg, dryRun);
       return Response.json({ ok: true, mode: 'minus_auto_tick', bg_date: bg.dateStr, result: tick }, { headers: CORS });
+    }
+
+    /* v18 — само получателите (правилото), нищо не се праща и не се пише. */
+    if (body.recipients_only === true) {
+      let q = supabase.from('notification_topics').select('*');
+      if (body.topic_key) q = q.eq('key', body.topic_key);
+      const { data: roTopics, error: roErr } = await q;
+      if (roErr) return Response.json({ ok: false, error: 'notification_topics: ' + roErr.message }, { headers: CORS, status: 500 });
+      const list = (roTopics || []).filter((t: any) => RO_TOPIC_KEYS.indexOf(t.key) >= 0);
+      if (body.topic_key && !list.length) {
+        return Response.json({ ok: false, error: 'Няма такава тема: ' + body.topic_key }, { headers: CORS, status: 404 });
+      }
+      const out: Record<string, any> = {};
+      for (const t of list) {
+        try { out[t.key] = await topicRecipientsOnly(supabase, t, bg); }
+        catch (e) { out[t.key] = { topic: t.key, error: (e as Error).message }; }
+      }
+      return Response.json({ ok: true, recipients_only: true, bg_date: bg.dateStr, topics: out }, { headers: CORS });
     }
 
     if (body.topic_key) {

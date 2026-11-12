@@ -319,7 +319,9 @@ const ROUTED_ONLY = ['sbGet', 'sbPatch', 'loadRecurringVersions', 'routedMailPla
   /* секция „Зареждане" в отчета по задача (v10, 19.09.2026) — само тук;
      браузърът показва същите данни през supply.js, не през report.js */
   'supplyRest', 'supplyRestAll', 'supplyHasVal', 'supplyNum', 'collectSupplyReport', 'supplyReportSectionHtml', 'supplyReportSummary',
-  'routedTestBannerHtml', 'routedWeeklySubject', 'routedSendEmail'];
+  'routedTestBannerHtml', 'routedWeeklySubject', 'routedSendEmail',
+  /* {"recipients_only":true} — таблицата „📋 Кой какво получава" (v17, 12.11.2026) */
+  'routedRecipientsOnly'];
 
 /* Наистина само в браузъра — ръчните бутони от портала. Няма ги в НИТО
    ЕДНА от двете едж функции и това е смисълът на реда: изнасянето на
