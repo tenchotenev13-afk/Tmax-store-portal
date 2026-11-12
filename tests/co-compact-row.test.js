@@ -84,8 +84,9 @@ const same = (a, b) => JSON.stringify(a) === JSON.stringify(b.slice().sort());
   section('2. бутоните са като преди');
   {
     let h = env(user('admin', CO), [order('p', { fulfiller: CO })]);
+    /* „💬 Коментар" — нарочно добавен на 12.11.2026 (co-comment-pending.test.js) */
     ok('admin в ЦО, заявка към ЦО, pending',
-      same(btns(h, 'p'), ['✅ Обработена от ЦО', '📤 Изпратена', '✕ Откаже', 'Статус', '🚚 Платен транспорт', '🖨 Бланка', '✕']), JSON.stringify(btns(h, 'p')));
+      same(btns(h, 'p'), ['✅ Обработена от ЦО', '💬 Коментар', '📤 Изпратена', '✕ Откаже', 'Статус', '🚚 Платен транспорт', '🖨 Бланка', '✕']), JSON.stringify(btns(h, 'p')));
 
     h = env(user('manager', 'Троян'), [order('s', { status: 'sent' }), order('r', { status: 'arrived' })]);
     ok('магазин заявител, sent', same(btns(h, 's'), ['📦 Пристигнала', 'Статус', '🚚 Платен транспорт', '🖨 Бланка']), JSON.stringify(btns(h, 's')));

@@ -510,7 +510,8 @@ const TESTS = [
   'grafik-ui.test.js',
   'delete-tables-whitelist.test.js',
   'preocenka-buletin-vrazka.test.js',
-  'preocenka-dovarshvane.test.js'
+  'preocenka-dovarshvane.test.js',
+  'co-comment-pending.test.js'
 ];
 
 /* Броячът не е изписан еднакво навсякъде — едни тестове казват

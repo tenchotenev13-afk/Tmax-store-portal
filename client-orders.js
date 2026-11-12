@@ -531,6 +531,49 @@ function submitCoProcessed(id){
   });
 }
 
+/* ═══ „💬 КОМЕНТАР" от ЦО при „Изчаква" / „Отложена" (12.11.2026) ═══
+   Снабдяване пише към обекта (объркан цвят, размер...) БЕЗ да сменя статуса и
+   без дата. Пише САМО co_note — status, co_eta, co_processed_* не се пипат. */
+function openCoCommentModal(id){
+  var o=clientOrders.find(function(x){return String(x.id)===String(id);});
+  if(!o){toast('Заявката не е намерена','#dc2626');return;}
+  if(!isCentralOfficeUser()){toast('Само Централен офис може да пише коментар','#dc2626');return;}
+  if(!isCentralOffice(o.fulfiller)){toast('Тази заявка не е насочена към Централен офис','#dc2626');return;}
+  var html='<div class="bov" id="coc-ov"><div class="bmod" style="width:440px;max-width:95vw;">'+
+    '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:4px;">'+
+      '<div style="font-size:15px;font-weight:600;color:#475569;">💬 Коментар от ЦО</div>'+
+      '<button onclick="closeCoCommentModal()" style="border:none;background:none;font-size:20px;color:#94a3b8;cursor:pointer;">✕</button></div>'+
+    '<div style="font-size:12px;color:#64748b;margin-bottom:10px;">Заявка №'+esc(o.in_num||'—')+' · '+esc(o.store_name||'')+' · '+esc(o.customer_name||'')+'</div>'+
+    '<label class="fl">Коментар към обекта (статусът не се сменя)</label>'+
+    '<textarea class="fi" id="coc-note" rows="4" placeholder="напр. Уточнете цвета — в SAP е бял, клиентът иска сив" style="margin-bottom:12px;resize:vertical;">'+escAttrVal(o.co_note)+'</textarea>'+
+    '<div style="display:flex;gap:8px;justify-content:flex-end;">'+
+      '<button onclick="closeCoCommentModal()" style="border:1px solid #e2e8f0;background:#f8fafc;border-radius:8px;padding:7px 16px;font-size:13px;cursor:pointer;">Откажи</button>'+
+      '<button id="coc-submit" data-id="'+esc(o.id)+'" onclick="submitCoComment(this.dataset.id)" style="border:none;background:#475569;color:#fff;border-radius:8px;padding:7px 16px;font-size:13px;font-weight:600;cursor:pointer;">Запази</button>'+
+    '</div></div></div>';
+  var ex=document.getElementById('coc-ov');if(ex)ex.remove();
+  document.body.insertAdjacentHTML('beforeend',html);
+  document.getElementById('coc-ov').classList.add('open');
+}
+function closeCoCommentModal(){var el=document.getElementById('coc-ov');if(el)el.remove();}
+function submitCoComment(id){
+  var btn=document.getElementById('coc-submit');
+  if(btn&&btn.disabled)return;
+  var el=document.getElementById('coc-note');
+  var note=el?String(el.value||'').trim():'';
+  if(btn){btn.disabled=true;btn.textContent='Записване...';}
+  sbPatch('client_orders','id=eq.'+id,{co_note:note||null}).then(function(res){
+    if(!res||!res.ok){
+      console.error('submitCoComment: неуспешен запис',id);
+      toast('Грешка при запис на коментара','#dc2626');
+      if(btn){btn.disabled=false;btn.textContent='Запази';}
+      return;
+    }
+    closeCoCommentModal();
+    toast(note?'✓ Коментарът е записан':'✓ Коментарът е изтрит');
+    loadClientOrders();
+  });
+}
+
 /* ═══ „📞 УВЕДОМЕН" — клиентът е уведомен за пристигналата стока ═══
    Не сменя статуса: заявката остава arrived, докато не бъде предадена.
    Името е display_name — същото поле като co_processed_by. */
@@ -1205,6 +1248,8 @@ function renderClientOrders(){
     if(!done){
       if(isCoJob&&['pending','postponed'].indexOf(rawStatus)>=0){
         btns+='<button data-id="'+o.id+'" onclick="openCoProcessedModal(this.dataset.id)" title="ЦО е обработил заявката и я е пуснал към доставчик" style="border:1px solid #047857;background:#ecfdf5;color:#047857;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;">✅ Обработена от ЦО</button>';
+        /* Коментар към обекта БЕЗ смяна на статуса и без дата — при „Изчаква" и „Отложена" (12.11.2026) */
+        btns+='<button data-id="'+o.id+'" onclick="openCoCommentModal(this.dataset.id)" title="Коментар към обекта, без смяна на статуса" style="border:1px solid #94a3b8;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">💬 Коментар</button>';
       } else if(isCoJob&&rawStatus==='processed'){
         btns+='<button data-id="'+o.id+'" onclick="openCoProcessedModal(this.dataset.id)" title="Промени очакваната дата или коментара" style="border:1px solid #94a3b8;background:#f8fafc;color:#475569;border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;">✏️ Дата от ЦО</button>';
       }
@@ -1325,11 +1370,13 @@ function coItemCells(o){
    Ако датата е минала, а заявката още е "Обработена", се оцветява червено:
    доставчикът е закъснял и някой трябва да се обади. */
 function coEtaCell(o){
-  if(!o.co_eta)return '';
+  /* Коментар от ЦО без дата (💬 Коментар при „Изчаква"/„Отложена") — иначе не се вижда на реда.
+     В title — escAttr (кавички), и в двата клона (12.11.2026). */
+  if(!o.co_eta)return o.co_note?'<div style="font-size:10px;color:#475569;margin-top:2px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="'+escAttr(o.co_note)+'">💬 ЦО: '+esc(o.co_note)+'</div>':'';
   var late=o.status==='processed'&&!coWaitingSupplier(o);
   var col=late?'#dc2626':'#047857';
   return '<div style="font-size:10px;color:'+col+';margin-top:2px;white-space:nowrap;" title="'+
-    (o.co_note?esc(o.co_note):'Ориентировъчна дата за получаване в обекта')+'">'+
+    (o.co_note?escAttr(o.co_note):'Ориентировъчна дата за получаване в обекта')+'">'+
     (late?'🏭 просрочена от ':'🏭 очаквана ')+fmtDate(o.co_eta)+'</div>'+
     (o.co_note?'<div style="font-size:10px;color:#94a3b8;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(o.co_note)+'</div>':'');
 }
