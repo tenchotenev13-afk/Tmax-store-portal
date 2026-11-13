@@ -1,4 +1,5 @@
 Отворено: 12.11 · Кой чака: Тенчо · Сесия: storno-banner-count
+Затворено: 13.11 · Как: b9b2931 (report.js + send-scheduled-report v70, правилото stornoIndicator) — push, живият report.js на Pages байт по байт b9b2931; едж функцията деплойната през CLI → версия 83, ezbr_sha256 2a6e44e324011c5c2848a26ab865ebf52beb24a6c67e12c985638636d354f8c0, обратното четене (functions download) байт по байт с комита, маркерите v70 / stornoIndicator / STORNO_EXEMPT_CODES / articles в select-а — по 1. Реални данни по седмици: 13→12, 9→9, 8→5, 14→13.
 
 - **Седмичният отчет брои капаро/ваучер в „Сторна с по-малка нова сума".** report.js (`stornoShort`, ~ред 2220) и копието му в `supabase/functions/send-scheduled-report/index.ts` (~ред 3244) сравняват сами `new_sum < returned_sum` и не изключват 900001/900009, за разлика от История, Каса и банера (`stornoIndicator`, kasa.js). Заявката (`kasa_storno_week`) дори не тегли `articles`. Дневният отчет не съдържа тази секция.
 - Разлика по седмици (реални данни, отчетно правило → stornoIndicator): 13–18.10: 13 → 12; 19.10: 9 → 9; 26.10: 8 → 5; 02.11: 14 → 13.
