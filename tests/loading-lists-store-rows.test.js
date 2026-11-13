@@ -9,9 +9,9 @@
        съпоставя по position спрямо llDraft.units и с една-единствена
        чернова би ги закачил за ПЪРВИЯ ред на листа. Тестът проверява
        item_id, не само че е имало POST;
-     · „чака одобрение" ДЪРЖИ листа отворен. Без този гейт писмото до склада
-       тръгва с ред, по който още никой не се е произнесъл, а после
-       одобрението няма къде да влезе;
+     · „чака одобрение" НЕ държи листа отворен при обекта (решение на Тенчо
+       13.11.2026, заменя гейта на Г2 — виж ll-approval-nonblocking.test.js);
+       ръчното „✅ Приключи" на склада още го държи (ж1);
      · първото решение печели. PATCH-ът носи &approval_status=eq.pending и
        нула засегнати реда значи „някой вече е решил" — без това вторият
        натиснал презаписва чуждото решение и вижда своето;
@@ -416,8 +416,12 @@ const modal = doc => doc.getElementById('ll-add-modal');
       h.mails.length === 1 && h.mails[0].html.indexOf('чака одобрение') >= 0);
   }
 
-  section('д) Чакащият ред държи листа отворен');
+  section('д) Чакащият ред НЕ държи листа отворен (решение 13.11.2026, заменя гейта на Г2)');
   {
+    /* До 13.11.2026 тук беше заковано обратното: бутонът disabled, toast
+       „чака одобрение" и llAutoDoneList мълчи. Новото правило подробно —
+       в tests/ll-approval-nonblocking.test.js; тук остава само обратната
+       страна, за да не се върне старият гейт тихо. */
     const items = [
       it_({ id: 'i1', position: 1, received: true, received_by: 'Управител Петрич' }),
       added_({ id: 'a1' })
@@ -438,22 +442,13 @@ const modal = doc => doc.getElementById('ll-add-modal');
 
     const fin = btnIn(c, '🏁 Приключи приемането');
     if (ok('бутонът „Приключи" съществува', !!fin)) {
-      ok('и е disabled, макар всеки ред да е отметнат', fin.disabled === true, String(fin.disabled));
-      ok('title-ът обяснява ЗАЩО именно',
-        (fin.getAttribute('title') || '').indexOf('чака одобрение') >= 0, fin.getAttribute('title'));
+      ok('и е АКТИВЕН — чакащият ред не спира приемането', fin.disabled === false, String(fin.disabled));
     }
-    /* Извикването наум също не приключва — disabled се смята при рендиране. */
-    h.w.llFinishReceiving('L1');
-    await ticks(); await ticks();
-    ok('извикването наум не приключва листа', patchesTo(h, 'loading_lists').length === 0,
-      JSON.stringify(h.calls.patch.map(p => p.table)));
-    ok('с обяснение в toast',
-      h.toasts.some(t => /чака одобрение/.test(String(t.msg))), JSON.stringify(h.toasts));
-    /* И автоматичният път мълчи. */
     await h.w.llAutoDoneList('L1');
     await ticks();
-    ok('llAutoDoneList също не пише статус', patchesTo(h, 'loading_lists').length === 0,
-      JSON.stringify(h.calls.patch.map(p => p.table)));
+    const lp = patchesTo(h, 'loading_lists');
+    ok('llAutoDoneList затваря листа като done', lp.length === 1 && lp[0].body.status === 'done',
+      JSON.stringify(lp.map(p => p.body)));
   }
 
   section('е) Кой може да реши');

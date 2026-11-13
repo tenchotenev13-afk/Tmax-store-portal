@@ -615,6 +615,12 @@ function llLoadStoreSide(){
           if(llCollapsed[l.id] !== undefined) return;
           if(l.status !== 'done' && l.status !== 'partial') return;
           var it = llStoreItemsOf(l.id);
+          /* Затворен лист с извънреден ред, по който ТОЗИ човек може да реши
+             (регионален / admin), остава разгънат — иначе „✅ Одобри" стои
+             скрит зад „▼ Разгъни" (13.11.2026: листът вече се затваря с
+             чакащ ред). Обектът няма какво да реши — при него се свива,
+             значката „⏳ N чака одобрение" е в заглавието. */
+          if(it.some(function(x){ return llRowPending(x) && llCanApprove(l, x); })) return;
           if(it.length && it.every(function(x){ return x.received || x.missing; })) llCollapsed[l.id] = true;
         });
         renderLoadingLists();
@@ -769,6 +775,13 @@ function llOpenForStore(it){ return !llHandled(it) && llCanReceive(it); }
    ФАКТЪТ И РАЗРЕШЕНИЕТО СА РАЗЛИЧНИ НЕЩА. Редът се записва с received=true
    веднага: стоката Е получена, това не подлежи на одобрение. Одобрява се
    дали влиза в ДОКУМЕНТИТЕ на листа — броячи, печат, PDF, писмо.
+
+   ЧАКАЩИЯТ РЕД НЕ СПИРА ПРИЕМАНЕТО (решение на Тенчо 13.11.2026, заменя
+   гейта от Г2). Обектът приключва листа си, листът се затваря, а редът
+   остава „⏳ чака одобрение" — решението идва и след затварянето, а писмото
+   при затваряне го маркира и брои. Изключение: ръчното „✅ Приключи" на
+   склада (llDoneList) още иска решение преди затваряне — складът е онзи,
+   който може сам да реши реда в същата минута.
 
    КОЙ РЕШАВА: складът-изпращач (акаунтът на самия склад) ИЛИ регионалният
    на обекта-получател, плюс admin. Първото решение е окончателно — PATCH-ът
@@ -1083,8 +1096,9 @@ function llDecideRow(listId, itemId, approve){
     }
     toast(approve ? '✅ Редът е одобрен' : '⛔ Редът е отхвърлен', approve ? undefined : '#dc2626');
     llNotifyRowDecided(list, row, approve, comment);
-    /* Решението може да е било последното, което е пречело листът да се
-       затвори — затова проверката тръгва веднага, не на следващото отмятане. */
+    /* Чакащият ред вече НЕ пречи на затварянето (13.11.2026) — решението
+       обикновено идва по затворен лист и тук не гледаме статуса му. Проверката
+       остава: отхвърленият ред излиза от сметката и статусът се преизчислява. */
     return llAutoDoneList(listId).then(function(){
       loadLoadingLists();
       return true;
@@ -1207,14 +1221,15 @@ function llStoreCardHtml(l){
   var canAny = live.some(llOpenForStore);
   /* Гейтът на „Приключи приемането": нито един ред без произнасяне. */
   var pending = live.filter(function(i){ return !llHandled(i); }).length;
-  /* ВТОРИ гейт: ред, който чака одобрение. Затвори ли се листът дотогава,
-     писмото до склада тръгва с ред, по който още никой не се е произнесъл —
-     а после одобрението няма къде да влезе. */
+  /* Ред, който чака одобрение, НЕ спира приемането (решение на Тенчо
+     13.11.2026, заменя гейта от Пакет Г2). Той е received:true, тоест вече е
+     отметнат; складът / регионалният / admin решават по него и след
+     затварянето — значката „⏳ N чака одобрение" остава и на затворен лист.
+     Повод: 12 такива реда (13.10–29.10) никой не беше решил, а изцяло
+     приетите листове висяха „изпратени" от седмици. */
   var aprPending = items.filter(llRowPending).length;
-  var allDone = pending === 0 && aprPending === 0;
-  var gateTitle = pending
-    ? 'Отметни всеки ред като получен или неполучен'
-    : 'Има ред, който чака одобрение';
+  var allDone = pending === 0;
+  var gateTitle = 'Отметни всеки ред като получен или неполучен';
   var canAdd = l.status === 'sent' && items.some(llCanReceive);
   /* Обектът на картата — за печата. При глобален профил в един лист може да
      има няколко обекта; тогава филтър няма и се печата целият лист. */
@@ -1809,10 +1824,9 @@ function llFinishReceiving(listId){
   if(!mine.length) return;
   var left = llLiveRows(mine).filter(function(i){ return !llHandled(i); }).length;
   if(left){ toast('Отметни всеки ред като получен или неполучен','#d97706'); return; }
-  /* Гейтът е и тук, не само в disabled атрибута на бутона: бутонът може да
-     бъде извикан и от конзолата, а и disabled-ът се смята при рендиране —
-     между него и клика някой може да е добавил ред. */
-  if(mine.some(llRowPending)){ toast('Има ред, който чака одобрение','#d97706'); return; }
+  /* Чакащ одобрение ред НЕ спира приключването (13.11.2026, заменя гейта от
+     Пакет Г2): той е received:true и се брои като получен при избора
+     done/partial. Решението по него идва и след затварянето. */
   var l = llStoreLists.find(function(x){ return String(x.id) === String(listId); });
   var was = l && l.status;
   llAutoDoneList(listId).then(function(){
@@ -1922,9 +1936,13 @@ function llAutoDoneList(listId){
      се приключвал още на първия готов обект. */
   return sbGet('loading_list_items','list_id=eq.'+listId+'&select=id,received,missing,approval_status').then(function(all){
     if(!Array.isArray(all) || !all.length) return;
-    /* Ред, който чака одобрение, ДЪРЖИ листа отворен: решението още може да го
-       извади от него или да го добави към писмото до склада. */
-    if(all.some(llRowPending)) return;
+    /* Ред, който чака одобрение, НЕ държи листа отворен (решение на Тенчо
+       13.11.2026, заменя гейта от Пакет Г2). Той е received:true, тоест се
+       брои като получен; писмото при затварянето го маркира „⏳ чака
+       одобрение", а решението идва после — llDecideRow не гледа статуса на
+       листа. Отхвърли ли се след това, редът излиза от llLiveRows и
+       llDecideRow вика пак тази функция — статусът се преизчислява от
+       останалите редове (изходът при l.status === want пази от второ писмо). */
     var rows = llLiveRows(all);
     if(!rows.length) return;
     if(!rows.every(function(r){ return r.received || r.missing; })) return;
@@ -2333,11 +2351,18 @@ function llClosedHtmlFor(list, items){
   items = llLiveRows(items);   /* отхвърленият ред не влиза в писмото (Г2) */
   var c = llCounts(items);
   var miss = c.missing > 0;
+  /* От 13.11.2026 листът се затваря и с извънреден ред, който чака одобрение.
+     Писмото е за склада — той (или регионалният) решава по реда, затова
+     броят стои до брояча, а редът е маркиран в таблицата. */
+  var apr = items.filter(llRowPending).length;
   var body = '<h2 style="color:'+(miss?'#b91c1c':'#16a34a')+';margin:0 0 4px;font-size:19px;">'+
       (miss ? '⛔ Товарен лист — приключен с липси' : '✅ Товарен лист — приключен')+'</h2>'+
     '<p style="color:#64748b;font-size:13px;margin:0 0 16px;">получени <b>'+c.received+
       '</b> · неполучени <b style="color:'+(miss?'#b91c1c':'#64748b')+';">'+c.missing+
-      '</b> от '+c.total+' реда</p>'+
+      '</b> от '+c.total+' реда'+
+      (apr ? ' · <b data-ll-mail-apr="'+apr+'" style="color:#92400e;">⏳ '+apr+' '+(apr === 1 ? 'ред чака' : 'реда чакат')+' одобрение</b>' : '')+'</p>'+
+    (apr ? '<p style="background:#fffbeb;border:1px solid #fde68a;color:#92400e;border-radius:6px;padding:8px 12px;font-size:12.5px;margin:0 0 14px;">'+
+      'Обектът е добавил извънреден ред, по който още никой не е решил. Одобри или отхвърли го в портала — Транспорт → Товарни листи.</p>' : '')+
     llMailMeta(list);
   body += '<table style="width:100%;border-collapse:collapse;"><tr>'+
     '<th '+LL_MAIL_TH+'>Товарна единица</th><th '+LL_MAIL_TH+'>Стокова №</th>'+
@@ -2347,12 +2372,16 @@ function llClosedHtmlFor(list, items){
     g.rows.slice().sort(llByPosition).forEach(function(it){
       /* Червеният ред е СЪДЪРЖАНИЕ, не украса: писмото се чете по диагонал и
          липсата трябва да се хване от първия поглед. */
-      var bg = it.missing ? ' style="background:#fef2f2;"' : '';
+      var bg = it.missing ? ' style="background:#fef2f2;"'
+             : (llRowPending(it) ? ' style="background:#fffbeb;"' : '');
       var res = it.received
         ? '<span style="color:#16a34a;font-weight:600;">✅ получено</span>'
         : (it.missing
           ? '<span style="color:#dc2626;font-weight:700;">⛔ НЕПОЛУЧЕНО</span>'
           : '<span style="color:#94a3b8;">не е отметнато</span>');
+      if(llRowPending(it)){
+        res += ' <span data-ll-mail-appr="pending" style="color:#92400e;font-weight:700;white-space:nowrap;">⏳ чака одобрение</span>';
+      }
       var who = it.received ? it.received_by : (it.missing ? it.missing_by : null);
       var when = it.received ? it.received_at : (it.missing ? it.missing_at : null);
       if(who || when){
@@ -2463,7 +2492,9 @@ function llNotifyClosed(list){
     var title = miss
       ? '⛔ Товарен лист ' + dateTxt + ' — с липси'
       : '✅ Товарен лист ' + dateTxt + ' приключен';
-    var msg = 'получени ' + c.received + ' · неполучени ' + c.missing + ' от ' + c.total;
+    var apr = llLiveRows(items).filter(llRowPending).length;
+    var msg = 'получени ' + c.received + ' · неполучени ' + c.missing + ' от ' + c.total +
+      (apr ? ' · ⏳ ' + apr + ' чака одобрение' : '');
     var subject = (miss ? 'Товарен лист с ЛИПСИ · ' : 'Товарен лист приключен · ') + dateTxt;
     return llStoreEmails([wh]).then(function(byStore){
       return Promise.all([
@@ -4423,9 +4454,10 @@ function llUnmarkedMsg(rows){
    с липси" — и то точно от страната, която липсата засяга. */
 function llDoneList(id){
   if(!llCanEdit()){ toast('Нямаш права за това действие','#dc2626'); return; }
-  /* Същият гейт като при обекта (Пакет Г2), и то ПРЕДИ confirm-а: складът е
-     точно онзи, който може и да одобри, и да затвори. Затвори ли преди
-     решението, писмото тръгва с ред, по който никой не се е произнесъл. */
+  /* Гейтът от Пакет Г2, ПРЕДИ confirm-а: складът е точно онзи, който може и
+     да одобри, и да затвори — затова решава реда, преди да затвори. От
+     13.11.2026 при обекта (картата, llFinishReceiving, llAutoDoneList) този
+     гейт го НЯМА — там чакащият ред не спира приемането. Тук остава нарочно. */
   if(llItemsOf(id).some(llRowPending)){
     toast('Има извънреден ред, който чака одобрение','#d97706');
     return;
@@ -4511,9 +4543,13 @@ function llViewHtml(){
   if(!l) return llListHtml();
   var items = llItemsOf(l.id).slice().sort(llByStorePallet);
   var c = llCounts(items);
+  /* Значката стои и на затворен лист (13.11.2026): листът вече се затваря с
+     чакащ извънреден ред и складът решава по него след това. */
+  var aprWait = items.filter(llRowPending).length;
 
   var h = '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">'+
-    '<div class="pg-title" style="margin:0;">🚛 Товарен лист · '+fmtDate(l.list_date)+' '+llStatusBadge(l.status)+'</div>'+
+    '<div class="pg-title" style="margin:0;">🚛 Товарен лист · '+fmtDate(l.list_date)+' '+llStatusBadge(l.status)+
+      (aprWait ? ' <span data-ll-apr-wait="'+aprWait+'" style="background:#fffbeb;color:#92400e;border:1px solid #fde68a;padding:2px 8px;border-radius:20px;font-size:10.5px;font-weight:700;">⏳ '+aprWait+' чака одобрение</span>' : '')+'</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;">'+
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llOpenEdit(this.dataset.id)" style="border:1px solid #bfdbfe;background:#eff6ff;color:#2563eb;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">✏️ Редакция</button>':'')+
       (l.status==='draft'?'<button data-id="'+l.id+'" onclick="llSendList(this.dataset.id)" style="border:none;background:#2563eb;color:#fff;border-radius:8px;padding:7px 14px;font-size:12.5px;font-weight:600;cursor:pointer;">📤 Изпрати към обектите</button>':'')+
