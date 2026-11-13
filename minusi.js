@@ -1180,7 +1180,41 @@ function mnRevRows(calc){
     add(mat, String(r.id), null);
     mnRevRealCodes(real).forEach(function(c){ if(c !== mat) add(c, String(r.id), mat); });
   });
-  return out.sort(function(a, b){ return a.code.localeCompare(b.code, undefined, { numeric: true }); });
+  /* Групи (Теодор 13.11): минусите по код (числово), под всеки — заметнатите
+     му кодове (числово). Код, който е и минус, стои като глава на своя група;
+     заметнат към няколко минуса — под първия по подредбата. Всеки код веднъж. */
+  var cmp = function(a, b){ return a.code.localeCompare(b.code, undefined, { numeric: true }); };
+  var heads = out.filter(function(e){ return e.minus; }).sort(cmp), pos = {}, kids = {};
+  heads.forEach(function(e, i){ pos[e.code] = i; kids[e.code] = []; e.group = e.code; });
+  out.filter(function(e){ return !e.minus; }).sort(cmp).forEach(function(e){
+    var g = e.realOf.slice().sort(function(a, b){ return pos[a] - pos[b]; })[0];
+    e.group = g;
+    kids[g].push(e);
+  });
+  var res = [];
+  heads.forEach(function(e){ res.push(e); res = res.concat(kids[e.code]); });
+  return res;
+}
+/* Описание на заметнатите (нямат движение) — от product_catalog при отваряне
+   на прегледа. Грешка / липса → „—“; прегледът не чака и не спира. */
+var mnRevDescs = {};
+function mnRevDesc(e){ return e.desc || mnRevDescs[e.code] || '—'; }
+function mnRevLoadDescs(rows){
+  var miss = rows.filter(function(e){ return !e.desc && !mnRevDescs[e.code]; }).map(function(e){ return e.code; });
+  if(!miss.length) return Promise.resolve();
+  var q = 'select=sap_code,product_name&sap_code=in.(' + miss.map(function(c){ return '"' + c + '"'; }).join(',') + ')';
+  var fill = function(res){
+    if(!res || !res.ok) return;
+    res.rows.forEach(function(p){ if(p && p.sap_code && p.product_name) mnRevDescs[String(p.sap_code)] = String(p.product_name); });
+    var ov = document.getElementById('mn-rev-ov');
+    if(!ov) return;
+    Array.prototype.forEach.call(ov.querySelectorAll('tr.mn-rev-row'), function(tr){
+      var c = tr.getAttribute('data-code'), td = tr.querySelector('.mn-rev-desc');
+      if(td && td.textContent === '—' && mnRevDescs[c]) td.textContent = mnRevDescs[c];
+    });
+  };
+  try { return sbGetOk('product_catalog', encodeURI(q)).then(fill).catch(function(){}); }
+  catch(err){ return Promise.resolve(); }
 }
 function mnRevReady(calc){
   return (calc.open || []).filter(function(r){ return !mnUnfilled(r) && mnRevReasonOk(r.reason_id); });
@@ -1240,8 +1274,13 @@ function mnRevOpen(){
   var h = '<div class="modal" style="width:680px;"><h3>📄 Темплейт за ревизия — ' + esc(mnStore) + '</h3>' +
     '<div class="modal-sub">Кодове за броене в ZINVCOUNT: незакритите попълнени минуси (без причините извън ревизия) и заметнатите кодове. „Преброено количество“ се попълва след броенето.</div>' +
     '<table id="mn-rev-tbl"><thead><tr><th>Код</th><th>Описание</th><th>Откъде е</th><th>Брой минуси</th></tr></thead><tbody>';
-  rows.forEach(function(e){
-    h += '<tr class="mn-rev-row" data-code="' + escAttrVal(e.code) + '"><td>' + esc(e.code) + '</td><td>' + esc(e.desc) + '</td><td class="mn-rev-origin">' + esc(mnRevOrigin(e)) + '</td><td class="mn-rev-n" style="text-align:right;">' + e.n + '</td></tr>';
+  /* Заметнатите — синьо; нова група — дебела линия отгоре (само на екрана). */
+  rows.forEach(function(e, i){
+    var sub = !e.minus, gs = e.minus && i > 0;
+    var st = (sub ? 'color:#1d4ed8;background:#eff6ff;' : '') + (gs ? 'border-top:2px solid #475569;' : '');
+    var td = function(cls, x, extra){ return '<td' + (cls ? ' class="' + cls + '"' : '') + ((st || extra) ? ' style="' + st + (extra || '') + '"' : '') + '>' + x + '</td>'; };
+    h += '<tr class="mn-rev-row' + (sub ? ' mn-rev-sub' : '') + (gs ? ' mn-rev-gstart' : '') + '" data-code="' + escAttrVal(e.code) + '" data-group="' + escAttrVal(e.group) + '">' +
+      td('', esc(e.code)) + td('mn-rev-desc', esc(mnRevDesc(e))) + td('mn-rev-origin', esc(mnRevOrigin(e))) + td('mn-rev-n', e.n, 'text-align:right;') + '</tr>';
   });
   h += '</tbody></table>';
   var bad = mnRevBad(calc);
@@ -1252,9 +1291,12 @@ function mnRevOpen(){
     '<button id="mn-rev-xlsx" class="btn btn-green" onclick="mnRevDownload()">📥 Свали Excel (' + rows.length + ')</button></div></div>';
   ov.innerHTML = h;
   ov.classList.add('open');
+  mnRevLoadDescs(rows);
   return true;
 }
-/* Точно 3 колони; „ref" в първата (Тенчо 30.10 — SAP го хваща); третата празна. */
+/* Точно 3 колони; „ref" в първата (Тенчо 30.10 — SAP го хваща); третата празна.
+   Редът е групиран като прегледа (13.11), но без празни редове, цвят и
+   описание — файлът отива в ZINVCOUNT. */
 function mnRevAoa(rows){
   return [['Референция', 'SAP код', 'Преброено количество']].concat(rows.map(function(e){ return ['ref', String(e.code), null]; }));
 }
