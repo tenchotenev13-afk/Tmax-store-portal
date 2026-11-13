@@ -142,8 +142,8 @@ function wireRow(w, tr) {
     /* Заглавията по номер — ако колона се премести, nth-child-овете лъжат */
     const heads = id => Array.prototype.map.call(doc.getElementById(id).closest('table').querySelectorAll('thead th'), t => t.textContent.trim());
     const trH = heads('tr-body'), coH = heads('co-body');
-    ok('Транспорт: 6 колони — Дата · Час / Клиент / Адрес / Артикул / Статус · Доставка / Действия',
-      JSON.stringify(trH) === JSON.stringify(['Дата · Час', 'Клиент', 'Адрес', 'Артикул', 'Статус · Доставка', 'Действия']), JSON.stringify(trH));
+    ok('Транспорт: 6 колони — Доставка · Час / Клиент / Адрес / Артикул / Статус / Действия',
+      JSON.stringify(trH) === JSON.stringify(['Доставка · Час', 'Клиент', 'Адрес', 'Артикул', 'Статус', 'Действия']), JSON.stringify(trH));
     ok('Клиентски: 6 колони — № · Пусната / Клиент / Артикул / От → Изпълнява / Статус · Доставка / Действия',
       JSON.stringify(coH) === JSON.stringify(['№ · Пусната', 'Клиент', 'Артикул', 'От → Изпълнява', 'Статус · Доставка', 'Действия']), JSON.stringify(coH));
   }

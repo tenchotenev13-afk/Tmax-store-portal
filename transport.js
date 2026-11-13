@@ -102,6 +102,18 @@ function trItemCellFallback(o){
   return '<td>'+esc(o.product||'')+' — '+esc(String(o.qty||1))+(o.unit?' '+esc(o.unit):'')+
     '<br><small style="color:#94a3b8;">SAP '+esc(o.sap||'—')+(o.color?' · '+esc(o.color):'')+'</small></td>';
 }
+/* Първата клетка на реда (решение Б, 13.11.2026): денят на ДОСТАВКАТА с часа ѝ
+   (o.hour е часът на доставката), под нея в сиво денят на заявката и обектът.
+   Без delivery — денят на заявката с часа и „без дата на доставка“ (не се крие).
+   Месечният филтър остава по o.date (trBuildMonthOptions / renderTransport). */
+function trWhenCell(o){
+  var hr=o.hour?' '+esc(o.hour):'';
+  var grey='<div style="color:#94a3b8;margin-top:2px;">';
+  var head=o.delivery
+    ? '<b>'+esc(fmtDate(o.delivery))+'</b>'+hr+grey+'заявена '+esc(fmtDate(o.date))+'</div>'
+    : esc(fmtDate(o.date))+hr+grey+'без дата на доставка</div>';
+  return '<td style="font-size:11px;">'+head+grey+esc(o.store_name||'')+'</div></td>';
+}
 function renderTransport(){
   var search=((document.getElementById('tr-search')||{}).value||'').trim().toLowerCase();
   var month=(document.getElementById('tr-month')||{}).value||'';
@@ -152,11 +164,11 @@ function renderTransport(){
     /* „Артикул" — като в Клиентски (до 3 артикула + „+N още“), една клетка. */
     var tdItems=typeof coItemCellCompact==='function'?coItemCellCompact(o):trItemCellFallback(o);
     return '<tr id="tr-row-'+esc(o.id)+'" class="row-click" data-id="'+esc(o.id)+'" onclick="openTransportDetail(this.dataset.id)" title="Отвори заявката" style="border-left:3px solid '+bdrColor+';'+anim+hl+'cursor:pointer;">'+
-      '<td style="font-size:11px;">'+esc(o.date||'')+' '+esc(o.hour||'')+'<div style="color:#94a3b8;margin-top:2px;">'+esc(o.store_name||'')+'</div></td>'+
+      trWhenCell(o)+
       '<td><b>'+esc(o.customer_name||'')+'</b><br><small style="color:#94a3b8;">'+esc(o.phone||'')+' · Бон: '+esc(o.bon||'—')+'</small>'+coLinkBadge(o)+'</td>'+
       '<td style="font-size:12px;">'+esc(o.address||'')+'</td>'+
       tdItems+
-      '<td>'+statusBadge(o._status)+stockArrivedBadge(o)+lateBadge(o)+'<div style="margin-top:3px;font-size:12px;"><b>'+fmtDate(o.delivery)+'</b></div></td>'+
+      '<td>'+statusBadge(o._status)+stockArrivedBadge(o)+lateBadge(o)+'</td>'+
       '<td onclick="event.stopPropagation()" style="cursor:default;">'+actionBtns(o.id,'transport_orders',o._status,o.store_name)+'</td></tr>';
   }).join('');
   /* Подсветка + скрол към реда, отворен от бутона 🚚 в Клиентски заявки */
@@ -218,7 +230,7 @@ function openTransportDetail(id){
     : '—';
   var btnS='border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:6px;padding:3px 9px;font-size:11.5px;cursor:pointer;';
 
-  var zayavka=coDetailRow('Дата / Час',esc(o.date||'')+(o.hour?' · '+esc(o.hour):''))+
+  var zayavka=coDetailRow('Заявена',esc(fmtDate(o.date)))+
     coDetailRow('Касов бон',esc(o.bon||''));
   if(o.client_order_num||o.client_order_id){
     zayavka+=coDetailRow('По клиентска заявка',
@@ -233,7 +245,8 @@ function openTransportDetail(id){
     coDetailRow('Адрес',esc(o.address||''));
 
   var st=o._status||calcStatus(o.delivery,o.status);
-  var dostavka=coDetailRow('Доставка',o.delivery?fmtDate(o.delivery):'—')+
+  /* Часът е на доставката — стои до нейната дата (13.11.2026). */
+  var dostavka=coDetailRow('Доставка',(o.delivery?esc(fmtDate(o.delivery)):'—')+(o.hour?' · '+esc(o.hour):''))+
     coDetailRow('Статус',statusBadge(st)+lateBadge(o));
   if(o.awaiting_stock)dostavka+=coDetailRow('Стока','⏳ чака стока по клиентска заявка');
   else if(stockArrivedBadge(o))dostavka+=coDetailRow('Стока','📦 пристигнала в магазина');

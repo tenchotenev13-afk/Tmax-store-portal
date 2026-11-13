@@ -495,6 +495,7 @@ const TESTS = [
   'co-filter-store.test.js',
   'co-filter-bar.test.js',
   'transport-detail.test.js',
+  'transport-delivery-column.test.js',
   'transport-row-items.test.js',
   'transport-filter-bar.test.js',
   'metrics-only-transport-client.test.js',

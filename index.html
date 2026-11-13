@@ -143,7 +143,8 @@ body{font-family:'DM Sans','Segoe UI',sans-serif;background:#f1f5f9;color:var(--
 .tbl-co-compact th:nth-child(5){width:170px;}
 .tbl-co-compact th:nth-child(6){width:330px;}
 .tbl-co-compact td:nth-child(3){overflow:hidden;}
-/* Транспорт: 6 колони — Дата · Час / Клиент / Адрес / Артикул / Статус · Доставка / Действия */
+/* Транспорт: 6 колони — Доставка · Час / Клиент / Адрес / Артикул / Статус / Действия
+   (от 13.11.2026 първата е денят на ДОСТАВКАТА, под нея „заявена дд.мм.гггг“) */
 .tbl-tr-compact table{min-width:1130px;}
 .tbl-tr-compact th:nth-child(1){width:110px;}
 .tbl-tr-compact th:nth-child(2){width:200px;}
@@ -471,7 +472,7 @@ OneSignalDeferred.push(async function(OneSignal) {
       <select id="tr-month" onchange="renderTransport()" style="border:1px solid #e2e8f0;border-radius:8px;padding:7px 10px;font-size:13px;font-family:inherit;outline:none;min-width:150px;"><option value="">Всички месеци</option></select>
     </div>
     <div class="tbl-wrap tbl-compact tbl-tr-compact"><table>
-      <thead><tr><th>Дата · Час</th><th>Клиент</th><th>Адрес</th><th>Артикул</th><th>Статус · Доставка</th><th>Действия</th></tr></thead>
+      <thead><tr><th>Доставка · Час</th><th>Клиент</th><th>Адрес</th><th>Артикул</th><th>Статус</th><th>Действия</th></tr></thead>
       <tbody id="tr-body"><tr><td colspan="6" style="text-align:center;padding:30px;color:#94a3b8;">Зареждане...</td></tr></tbody>
     </table></div>
   </div>

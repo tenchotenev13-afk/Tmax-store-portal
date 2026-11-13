@@ -124,14 +124,17 @@ const btns = (h, id) => Array.from(row(h, id).querySelectorAll('button')).map(b 
     const h = env();
     guard('рендер', () => h.w.renderTransport());
     const th = Array.from(h.doc.getElementById('tr-body').closest('table').querySelectorAll('thead th')).map(x => x.textContent.trim());
-    ok('thead: 6 колони', JSON.stringify(th) === JSON.stringify(['Дата · Час', 'Клиент', 'Адрес', 'Артикул', 'Статус · Доставка', 'Действия']), JSON.stringify(th));
+    ok('thead: 6 колони', JSON.stringify(th) === JSON.stringify(['Доставка · Час', 'Клиент', 'Адрес', 'Артикул', 'Статус', 'Действия']), JSON.stringify(th));
     ok('обвивката е .tbl-compact.tbl-tr-compact', !!h.doc.querySelector('.tbl-wrap.tbl-compact.tbl-tr-compact #tr-body'));
     const r = Array.from(row(h, 'p1').children);
     ok('редът има точно 6 <td>', r.length === 6, r.length);
     ok('колона 1: дата, час и магазин (сив)', /14:30/.test(r[0].textContent) && /Троян/.test(r[0].textContent) && !!r[0].querySelector('div'), r[0].textContent);
     ok('колона 2: име, телефон · бон', /Иван Петров/.test(r[1].textContent) && /0888111222 · Бон: Б-p1/.test(r[1].textContent), r[1].textContent);
     ok('колона 3: адрес', /ул\. p1/.test(r[2].textContent));
-    ok('колона 5: статус и дата на доставка', /Изчаква/.test(r[4].textContent) && r[4].innerHTML.indexOf('<b>') >= 0, r[4].textContent);
+    /* От 13.11.2026 денят на доставката е удебелен в колона 1 („Доставка · Час"),
+       а колона 5 е само „Статус" — transport-delivery-column.test.js. */
+    ok('колона 1: денят на доставката е удебелен', r[0].innerHTML.indexOf('<b>') >= 0, r[0].innerHTML);
+    ok('колона 5: само статус, без ден на доставка', /Изчаква/.test(r[4].textContent) && r[4].innerHTML.indexOf('<b>') < 0, r[4].textContent);
     ok('бутони, pending (admin): Статус и Бланка', JSON.stringify(btns(h, 'p1')) === JSON.stringify(['Статус', '🖨 Бланка'].sort()), JSON.stringify(btns(h, 'p1')));
     realClick(h.w, chip(h, 'done'));
     ok('бутони, done (admin): Върни, Корекция, Бланка', JSON.stringify(btns(h, 'd1')) === JSON.stringify(['↩ Върни', '✏️ Корекция', '🖨 Бланка'].sort()), JSON.stringify(btns(h, 'd1')));
