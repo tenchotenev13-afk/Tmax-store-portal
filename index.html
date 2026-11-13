@@ -270,10 +270,10 @@ tr:hover td{background:#fafafa;}
 @keyframes rowPulseSoftOpaque{0%,100%{background:#fff;}50%{background:#fdf7f0;}}
 
 /* ── TAB GROUPS ── */
-/* Green: Transport/Client/Calendar */
-#tab-transport,#tab-client,#tab-calendar{border-top:3px solid transparent;}
-#tab-transport:hover,#tab-client:hover,#tab-calendar:hover{color:#86efac;background:rgba(22,101,52,.25);}
-#tab-transport.active,#tab-client.active,#tab-calendar.active{color:#4ade80;border-bottom-color:#16a34a;border-top-color:#16a34a;background:rgba(22,101,52,.2);}
+/* Green: Transport/Client */
+#tab-transport,#tab-client{border-top:3px solid transparent;}
+#tab-transport:hover,#tab-client:hover{color:#86efac;background:rgba(22,101,52,.25);}
+#tab-transport.active,#tab-client.active{color:#4ade80;border-bottom-color:#16a34a;border-top-color:#16a34a;background:rgba(22,101,52,.2);}
 /* Blue: Warehouse */
 #tab-transit,#tab-stock-returns,#tab-revaluation,#tab-stock-diff{border-top:3px solid transparent;}
 #tab-transit:hover,#tab-stock-returns:hover,#tab-revaluation:hover,#tab-stock-diff:hover{color:#93c5fd;background:rgba(30,64,175,.25);}
@@ -379,7 +379,6 @@ OneSignalDeferred.push(async function(OneSignal) {
       <!-- Група: Транспортни операции (зелено) -->
       <button id="tab-transport" class="nav-tab active" onclick="showModule('transport')"><span class="ti">🚚</span><span class="tl">Транспорт</span></button>
       <button id="tab-client" class="nav-tab" onclick="showModule('client')"><span class="ti">📋</span><span class="tl">Клиентски</span></button>
-      <button id="tab-calendar" class="nav-tab" onclick="showModule('calendar')" style="display:none;"><span class="ti">🚐</span><span class="tl">Календар</span></button>
       <div class="tab-sep" id="sep-bul"></div>
       <!-- Група: Бюлетин (червено) -->
       <button id="tab-bulletin" class="nav-tab" onclick="showModule('bulletin')"><span class="ti">📰</span><span class="tl">Бюлетин</span></button>
@@ -421,13 +420,18 @@ OneSignalDeferred.push(async function(OneSignal) {
     </div>
   </div>
   <div id="transport-pallets-subnav" class="no-print" style="display:none;max-width:1300px;margin:12px auto 0;width:100%;padding:0 16px;">
-    <div style="display:flex;gap:8px;">
+    <!-- Ред (13.11.2026, Теодор): Заявки, Календар, Зареждане, Товарни листи,
+         Трансфери, Пикинг, Палети — Палети най-вдясно. В бутона — кратко име,
+         пълното е в заглавието на страницата. Календар до 13.11.2026 беше горен
+         таб tab-calendar; видимостта му е в setupTabsForRole (shared.js). -->
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
       <button id="tps-transport" class="filter-btn" onclick="showModule('transport')">🚚 Заявки</button>
-      <button id="tps-pallets" class="filter-btn" onclick="showModule('pallets')">📦 Палети</button>
+      <button id="tps-calendar" class="filter-btn" style="display:none" onclick="showModule('calendar')">🚐 Календар</button>
       <button id="tps-supply" class="filter-btn" onclick="showModule('supply')">🎨 Зареждане</button>
       <button id="tps-loading" class="filter-btn" onclick="showModule('loading')">🚛 Товарни листи</button>
       <button id="tps-transfers" class="filter-btn" onclick="showModule('transfers')">🔁 Трансфери</button>
       <button id="tps-picking" class="filter-btn" style="display:none" onclick="showModule('picking')">📦 Пикинг</button>
+      <button id="tps-pallets" class="filter-btn" onclick="showModule('pallets')">📦 Палети</button>
     </div>
   </div>
 
@@ -443,7 +447,7 @@ OneSignalDeferred.push(async function(OneSignal) {
 
   <!-- TRANSPORT -->
   <div id="mod-transport" class="page">
-    <div class="pg-title">🚚 Транспортни заявки</div>
+    <div class="pg-title">🚚 Заявки за транспорт</div>
     <div class="pg-sub">Заявки за доставка до адрес на клиент.</div>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
       <div id="tr-filters" class="filter-bar chips" style="margin:0;">
@@ -488,7 +492,7 @@ OneSignalDeferred.push(async function(OneSignal) {
 
   <!-- CLIENT ORDERS -->
   <div id="mod-client" class="page" style="display:none;">
-    <div class="pg-title">📋 Клиентски заявки</div>
+    <div class="pg-title">📋 Клиентски заявки по поръчка</div>
     <div class="pg-sub">Поръчки за стока от клиенти с дата на доставка.</div>
     <div id="co-sap-banner"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:12px;">

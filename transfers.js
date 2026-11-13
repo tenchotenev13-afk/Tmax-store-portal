@@ -466,7 +466,7 @@ function renderTransfers() {
     tfTransitItems(q).forEach(function (x) { if (!seenT[x.t.id]) { seenT[x.t.id] = 1; rows.push(x.t); } });
   }
 
-  var h = '<div class="pg-title">🔁 Трансфери</div>' +
+  var h = '<div class="pg-title">🔁 Междускладови трансфери</div>' +
     '<div class="pg-sub">Транспорти между обекти — бус със спирки или куриер. Всеки товар има краен получател.</div>' +
     tfStoreWaitBannerHtml() +
     tfCountersHtml(q) +

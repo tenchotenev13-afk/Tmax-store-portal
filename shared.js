@@ -1802,7 +1802,9 @@ function setupTabsForRole(){
   if(referenceTab)referenceTab.style.display='';
   var transitTab=document.getElementById('tab-transit');
   if(transitTab)transitTab.style.display='';
-  var calTab=document.getElementById('tab-calendar');
+  /* „🚐 Календар“ — от 13.11.2026 под-бутон в лентата на Транспорт (дотогава
+     горен таб tab-calendar); видимостта е същата — за всички. */
+  var calTab=document.getElementById('tps-calendar');
   if(calTab)calTab.style.display='';
   var srTab=document.getElementById('tab-stock-returns');
   if(srTab)srTab.style.display='';
@@ -1901,7 +1903,7 @@ function showModule(mod){
   /* "Транспорт" и "Палети" — под-таб в Транспорт (наличности на празни палети по обекти) */
   var tpSub=document.getElementById('transport-pallets-subnav');
   if(tpSub){
-    tpSub.style.display=(mod==='transport'||mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'||mod==='picking')?'block':'none';
+    tpSub.style.display=(mod==='transport'||mod==='calendar'||mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'||mod==='picking')?'block':'none';
     var btnT=document.getElementById('tps-transport'),btnP=document.getElementById('tps-pallets'),btnS=document.getElementById('tps-supply'),btnL=document.getElementById('tps-loading');
     if(btnT)btnT.classList.toggle('active',mod==='transport');
     if(btnP)btnP.classList.toggle('active',mod==='pallets');
@@ -1911,10 +1913,12 @@ function showModule(mod){
     if(btnX)btnX.classList.toggle('active',mod==='transfers');
     var btnPk=document.getElementById('tps-picking');
     if(btnPk)btnPk.classList.toggle('active',mod==='picking');
+    var btnCal=document.getElementById('tps-calendar');
+    if(btnCal)btnCal.classList.toggle('active',mod==='calendar');
   }
   /* Подтабовете на Транспорт държат главния таб активен - иначе навигацията
      показва Транспорт като незает, докато си вътре в негов подтаб. */
-  if(mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'||mod==='picking'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
+  if(mod==='calendar'||mod==='pallets'||mod==='supply'||mod==='loading'||mod==='transfers'||mod==='picking'){var trTab=document.getElementById('tab-transport');if(trTab)trTab.classList.add('active');}
   /* „Ревизии и преоценка“ — под-лента като при Транспорт; главният таб е
      tab-revaluation и за двата под-таба. */
   var rvSubnav=document.getElementById('rev-subnav');

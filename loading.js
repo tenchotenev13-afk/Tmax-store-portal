@@ -669,7 +669,7 @@ function llSetStoreQuery(v){
   }
 }
 function llStoreHtml(){
-  return '<div class="pg-title">🚛 Товарни листи</div>'+
+  return '<div class="pg-title">🚛 Товарни листи от логистични складове</div>'+
     '<div class="pg-sub">Какво е натоварено към обекта.</div>'+
     llStoreBodyHtml();
 }
@@ -2550,7 +2550,7 @@ function llVisibleLists(){
 }
 function llListHtml(){
   var wh = llActiveWarehouse();
-  var h = '<div class="pg-title">🚛 Товарни листи</div>'+
+  var h = '<div class="pg-title">🚛 Товарни листи от логистични складове</div>'+
     '<div class="pg-sub">Какво е натоварено от склада към обектите.</div>';
 
   h += '<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">';

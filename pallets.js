@@ -94,7 +94,7 @@ function renderPalletsAdmin(storeNames,latestByStore){
   });
 
   var html='<div class="page">'+
-    '<div class="pg-title">📦 Палети</div>'+
+    '<div class="pg-title">📦 Налични палети за извозване</div>'+
     '<div class="pg-sub">Наличности на празни палети по обекти — обичайно се попълва всеки петък. '+
     'Показва се ПОСЛЕДНАТА подадена наличност за всеки обект, а не сбор от седмиците.</div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">'+
@@ -163,7 +163,7 @@ function renderPalletsStore(){
   }
 
   var html='<div class="page">'+
-    '<div class="pg-title">📦 Палети</div>'+
+    '<div class="pg-title">📦 Налични палети за извозване</div>'+
     '<div class="pg-sub">'+esc(currentUser.store_name)+' — наличности на празни палети (попълва се до петък 17:00)</div>'+
     '<div style="margin-bottom:12px;"><button id="pallets-export-btn" onclick="exportPalletsExcel()" style="'+PALLETS_EXPORT_BTN_CSS+'">📊 Експорт Excel</button></div>'+
 
