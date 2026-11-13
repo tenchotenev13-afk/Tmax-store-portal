@@ -92,8 +92,12 @@ function checkMoment(label, iso, localTime) {
       const trUrl = h.calls.get.filter(u => /\/transport_orders\?/.test(u))[0] || '';
       ok('а) маршрутите се питат от понеделник 14.09', routesUrl.indexOf('route_date=gte.2026-09-14') >= 0, routesUrl);
       ok('а) … до неделя 20.09', routesUrl.indexOf('route_date=lte.2026-09-20') >= 0, routesUrl);
+      /* От 13.11.2026 транспортът е по деня на доставката: or=(delivery в
+         седмицата, или без delivery и date в седмицата) — calendar-delivery-day.test.js.
+         Тук важат само границите: местен понеделник–неделя и за двете полета. */
       ok('а) транспортът се пита от 14.09 до 20.09',
-        trUrl.indexOf('date=gte.2026-09-14') >= 0 && trUrl.indexOf('date=lte.2026-09-20') >= 0, trUrl);
+        trUrl.indexOf('delivery.gte.2026-09-14') >= 0 && trUrl.indexOf('delivery.lte.2026-09-20') >= 0 &&
+        trUrl.indexOf('date.gte.2026-09-14') >= 0 && trUrl.indexOf('date.lte.2026-09-20') >= 0, trUrl);
 
       const cs = cells(h.doc);
       if (ok('а) гридът има 7 клетки', cs.length === 7, 'клетки: ' + cs.length)) {

@@ -292,11 +292,19 @@ function hourToMinutes(h){
 /* Проверява дали вече има друга активна транспортна заявка от СЪЩИЯ ИЗБРАН
    магазин (не непременно магазина на логнатия потребител - важно за admin/
    global потребители, които подават от името на конкретен магазин),
-   в рамките на +/-30 минути на същия ден. */
-function checkTransportConflict(storeName,date,hour,onResolved){
+   в рамките на +/-30 минути на същия ден.
+   Ден = денят на ДОСТАВКАТА (13.11.2026): при подадено delivery се сравнява
+   със заявките с delivery = този ден ИЛИ без delivery и date = този ден
+   (същото правило като calTrDay в calendar.js). Без delivery — както преди,
+   по date. */
+function checkTransportConflict(storeName,date,hour,onResolved,delivery){
   var newMin=hourToMinutes(hour);
-  if(!date||newMin===null){ onResolved([]); return; }
-  sbGet('transport_orders','store_name=eq.'+encodeURIComponent(storeName)+'&date=eq.'+encodeURIComponent(date)).then(function(rows){
+  var day=delivery||date;
+  if(!day||newMin===null){ onResolved([]); return; }
+  var dayQ=delivery
+    ? 'or=(delivery.eq.'+encodeURIComponent(day)+',and(delivery.is.null,date.eq.'+encodeURIComponent(day)+'))'
+    : 'date=eq.'+encodeURIComponent(day);
+  sbGet('transport_orders','store_name=eq.'+encodeURIComponent(storeName)+'&'+dayQ).then(function(rows){
     if(!Array.isArray(rows)){
       /* Заявката е върнала грешка (не масив) - PostgREST/мрежов проблем.
          НЕ третираме мълчаливо като "няма конфликт" (стар, скрит бъг) -
@@ -366,7 +374,7 @@ function submitTransport(){
     } else {
       doSubmitTransport();
     }
-  });
+  },v('o-delivery'));
 }
 
 /* Показва блокиращо предупреждение при засечен конфликт - изисква изрично

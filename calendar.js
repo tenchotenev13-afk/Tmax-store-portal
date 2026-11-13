@@ -54,7 +54,10 @@ function loadCalendar() {
 
   Promise.all([
     sbGet('bus_routes', 'route_date=gte.'+from+'&route_date=lte.'+to+'&order=route_date.asc'+storeQ()),
-    sbGet('transport_orders', 'date=gte.'+from+'&date=lte.'+to+'&order=date.asc'+storeQ()),
+    /* Транспортна заявка — в деня на ДОСТАВКАТА (delivery); без delivery — в деня
+       на заявката (date). Една заявка с or=, за да не се дублира ред. Отказаните
+       не се показват — като клиентските по-долу (13.11.2026, calTrDay). */
+    sbGet('transport_orders', 'or=(and(delivery.gte.'+from+',delivery.lte.'+to+'),and(delivery.is.null,date.gte.'+from+',date.lte.'+to+'))&status=neq.refused&order=date.asc'+storeQ()),
     sbGet('client_orders', 'delivery=gte.'+from+'&delivery=lte.'+to+'&status=neq.refused&order=delivery.asc'+storeQ()),
     sbGet('route_templates', 'active=eq.true&order=day_of_week.asc'+storeQ())
   ]).then(function(r) {
@@ -141,7 +144,7 @@ function renderCalendar() {
     var isWeekend = i >= 5;
 
     var dayRoutes    = calRoutes.filter(function(r){ return r.route_date===dateStr; });
-    var dayTransport = calTransport.filter(function(r){ return r.date===dateStr; });
+    var dayTransport = calTransport.filter(function(r){ return calTrDay(r)===dateStr; });
     var dayClients   = calClients.filter(function(r){ return r.delivery===dateStr; });
     var total = dayRoutes.length + dayTransport.length + dayClients.length;
 
@@ -210,6 +213,12 @@ function renderCalendar() {
   h += '</div></div>';
   h += calRouteModalHtml(days);
   wrap.innerHTML = h;
+}
+
+/* Денят на транспортна заявка в календара — доставката (delivery), а без нея —
+   денят на заявката (date). Същото правило е в checkTransportConflict (transport.js). */
+function calTrDay(t) {
+  return (t && (t.delivery || t.date)) || '';
 }
 
 /* Намира кои транспортни заявки за деня се "сблъскват" — същия магазин, часове в

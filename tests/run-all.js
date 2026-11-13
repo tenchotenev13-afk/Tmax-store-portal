@@ -366,6 +366,7 @@ const TESTS = [
   'kasa-history-window.test.js',
   'local-date.test.js',
   'calendar-local-dates.test.js',
+  'calendar-delivery-day.test.js',
   'calendar-client-delivery.test.js',
   'kasa-returned-in-reports.test.js',
   'kasa-glavna-razlika.test.js',
