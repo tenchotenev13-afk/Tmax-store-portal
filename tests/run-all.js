@@ -86,6 +86,7 @@ const TESTS = [
   'revaluation-bugs-1910.test.js',
   'revaluation-elica-2910.test.js',
   'revaluation-approve.test.js',
+  'revaluation-repeat-qty.test.js',
   'xlsx-real-datenf.test.js',
   'revision-schedule.test.js',
   'minusi.test.js',

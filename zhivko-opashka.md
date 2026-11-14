@@ -25,6 +25,8 @@
 (в базата от миграцията minusi_co_comment, minusi-co-comment-schema.sql, версия 20261109102704, приложена 09.11.2026)
 - 09.11 · minus_movements.co_comment — text, NULL, без default (коментар на офиса)
 
+## Потвърдено 09.11.2026
+
 (в базата от миграцията sap_prices_vkp2, sap-prices-vkp2-schema.sql, версия 20261108150623, приложена 08.11.2026; функцията catalog_set_sale_prices — не за огледалото)
 - 08.11 · product_catalog.sale_price — numeric, NULL, без default
 - 08.11 · product_catalog.sale_price_unit — text, NULL, без default
@@ -67,6 +69,7 @@
 - 03.11 · goods_transit.archived_at — timestamptz, NULL, без default
 - 03.11 · goods_transit.imported_at — timestamptz, NOT NULL, default now() (кога импортът последно е видял реда)
 - 03.11 · goods_transit — уникалност (inbound_delivery, delivery_position); NULL-ите не се сблъскват (ръчните редове са без ВД). Нужна е за UPSERT-а на импорта.
+(потвърдено от Живко на 09.11.2026: product_catalog sale_*, goods_transit, grafik_*)
 
 ## Изпратено 02.11.2026
 

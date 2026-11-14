@@ -231,9 +231,10 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     ok('clipboard получава „8014557\\n8082216“', h.clip === '8014557\n8082216', JSON.stringify(h.clip));
     realClick(h.w, btn(mod(h), 'Изтегли моята бланка'));
     const r = h.aoas[0] && h.aoas[0].find(x => x[1] === '14557');
-    ok('„Изтегли моята бланка“ с попълнени I–K', r && r[8] === '8014557' && r[9] === 60 && r[10] === 'ок');
-    ok('МЕ в износа по SAP („бр.“ → БР)', r && r[4] === 'БР');
-    ok('M = прехвърлено × цена (2 × 60 = 120)', r && r[12] === 120);
+    /* 14 колони от 14.11.2026 — „Прехвърлено“ е [4], всичко след него е с 1 надясно. */
+    ok('„Изтегли моята бланка“ с попълнени код / цена / коментар Ели', r && r[9] === '8014557' && r[10] === 60 && r[11] === 'ок');
+    ok('МЕ в износа по SAP („бр.“ → БР)', r && r[5] === 'БР');
+    ok('Тотал преоценка = прехвърлено × цена (2 × 60 = 120)', r && r[13] === 120);
     const rg = env({ user: REG_K, subs: [proc], items }); await openCo(rg, 'Кърджали');
     ok('регионалният при processed: без бутони за редакция', !btn(mod(rg), 'Изтрий ред') && !btn(mod(rg), 'Качи файл') && !btn(mod(rg), '＋ Ред'));
     const rgs = env({ user: REG_K, subs: [Object.assign({}, SUB, { status: 'submitted' })] }); await openCo(rgs, 'Кърджали');
@@ -256,17 +257,18 @@ async function openCo(h, store) { await h.w.loadRevaluation(); await ticks(5); i
     await h.w.rvExportCampaign(); await ticks(5);
     ok('листове: 8 (Кърджали), 14 (Шумен), „Общо“; без чернова и „нямат“', h.sheets.join(',') === '8,14,Общо', h.sheets.join(','));
     const tot = h.aoas[h.aoas.length - 1];
-    ok('„Общо“ — 13 колони + Прехвърлено + TOTAL', tot[0].length === 15 && tot[0][13] === 'Прехвърлено' && tot[0][14] === 'TOTAL');
+    ok('„Общо“ — 14 колони + TOTAL, „Прехвърлено“ веднъж (на [4])', tot[0].length === 15 && tot[0][4] === 'Прехвърлено' && tot[0][14] === 'TOTAL' && tot[0].filter(x => x === 'Прехвърлено').length === 1);
     const r1 = tot.find(x => x[1] === '14557');
     ok('TOTAL = co_qty × sale_price (2 × 60,00 = 120,00)', r1 && r1[14] === 120, r1 && r1[14]);
     const r2 = tot.find(x => x[1] === '82216');
-    ok('3 знака в количеството (1,235)', r2 && r2[13] === 1.235 && r2[3] === 1.235, r2 && (r2[13] + ' / ' + r2[3]));
+    ok('3 знака в количеството (1,235)', r2 && r2[4] === 1.235 && r2[3] === 1.235, r2 && (r2[4] + ' / ' + r2[3]));
     const r3 = tot.find(x => x[1] === '8025298');
-    ok('ред с co_qty 0 → TOTAL 0, не грешка', r3 && r3[14] === 0 && r3[13] === 0);
+    /* 8025298 е повторно преоценен — „само цена“, тоталът по qty (3 × 4,5), не по co_qty 0 (14.11.2026). */
+    ok('повторен ред: „само цена“, TOTAL = qty × цена (3 × 4,5 = 13,5)', r3 && r3[4] === 'само цена' && r3[14] === 13.5 && r3[13] === 13.5, r3 && JSON.stringify(r3));
     const r4 = tot.find(x => x[1] === '103125');
-    ok('без co_qty → TOTAL празно', r4 && r4[14] === '' && r4[13] === '');
+    ok('без co_qty → TOTAL празно', r4 && r4[14] === '' && r4[4] === '');
     const last = tot[tot.length - 1];
-    ok('ред ОБЩО = сумата (120 + 8,65 + 0 + 8,9 = 137,55; 1,235 × 7 = 8,645 → 8,65)', last[0] === 'ОБЩО' && last[14] === 137.55, last[14]);
+    ok('ред ОБЩО = сумата (120 + 8,65 + 13,5 + 8,9 = 151,05; 1,235 × 7 = 8,645 → 8,65)', last[0] === 'ОБЩО' && last[14] === 151.05, last[14]);
     ok('файл preocenka-kampania-…', /^preocenka-kampania-/.test(h.files[0] && h.files[0].f));
     const f = env({ fail: { GET: /revaluation_items\?campaign_id/ } }); await openCo(f);
     await f.w.rvExportCampaign(); await ticks(5);

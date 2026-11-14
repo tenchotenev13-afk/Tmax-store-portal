@@ -58,7 +58,7 @@ var rvStoresDone = false;
 
 var RV_STORE_ROLES = ['manager', 'sklad'];
 var RV_KIND_LABEL = { mandatory: 'Задължителна', optional: 'Пожелателна' };
-var RV_EXPORT_HEADERS = ['Магазин', 'Код', 'Описание на материал', 'Количество', 'Мерна единица',
+var RV_EXPORT_HEADERS = ['Магазин', 'Код', 'Описание на материал', 'Количество', 'Прехвърлено', 'Мерна единица',
   'Коментар Обект', 'Стандартна прод. цена', 'Предложение за цена', 'Преоценен код',
   'Цена преоценен код', 'Коментар Ели', 'Тотал ст.пр.цена', 'Тотал преоценка'];
 
@@ -996,22 +996,33 @@ function rvNotifyReturned(note){
 }
 
 /* ─── Износ: „Изтегли моята бланка" ───────────────────── */
-/* 13-те колони. От етап 3а: МЕ — по SAP (rvSapUnit), количествата — до 3
-   знака, „Тотал преоценка" = ПРЕХВЪРЛЕНОТО (co_qty) × цената на преоценения
-   код (решение на сесията 15.10.2026: прехвърленото е количеството, което
-   реално става с нова цена). Без co_qty → празно, БЕЗ падане към qty
-   (19.10.2026) — иначе се разминаваше с TOTAL в „Общо". */
+/* 14-те колони (14.11.2026, Елица): „Прехвърлено" веднага след
+   „Количество" (поисканото от обекта). МЕ — по SAP (rvSapUnit), количествата
+   — до 3 знака. Двата тотала са по ЕДНО и също ефективно количество
+   (rvEffQty): прехвърленото (co_qty); при повторно преоценен код — qty
+   (там Контролинг само сменя цената). Без ефективно количество
+   (необработена бланка): „Тотал ст.пр.цена" = qty × ст. цена, „Тотал
+   преоценка" — празно. До 14.11.2026 „Тотал ст.пр.цена" беше винаги по qty,
+   а „Тотал преоценка" — по co_qty, и при Шумен (80291 6,178 → 5,738) двата
+   се разминаваха. „Прехвърлено" при повторен ред = текст „само цена". */
+var RV_PRICE_ONLY = 'само цена';
+function rvEffQty(it){
+  if(rvIsRepeat(it.sap_code)) return it.qty == null || it.qty === '' ? null : rvRound3(Number(it.qty));
+  return it.co_qty == null || it.co_qty === '' ? null : rvRound3(Number(it.co_qty));
+}
 function rvItemExportRow(store, it){
   var no = rvStoreNo(store);
   var shop = no ? Number(no) : store;
   var qty = rvRound3(it.qty == null ? 0 : Number(it.qty));
+  var rep = rvIsRepeat(it.sap_code);
   var moved = it.co_qty == null || it.co_qty === '' ? null : rvRound3(Number(it.co_qty));
+  var eff = rvEffQty(it);
   var std = it.std_price == null ? null : Number(it.std_price);
   var sale = it.sale_price == null ? null : Number(it.sale_price);
-  return [shop, it.sap_code, it.product_name || '', qty, rvSapUnit(it.unit).unit, it.store_comment || '',
+  return [shop, it.sap_code, it.product_name || '', qty, rep ? RV_PRICE_ONLY : (moved == null ? '' : moved), rvSapUnit(it.unit).unit, it.store_comment || '',
     std == null ? '' : std, it.proposed_price == null ? '' : Number(it.proposed_price),
     it.new_sap_code || '', sale == null ? '' : sale, it.co_comment || '',
-    std == null ? '' : rvRound2(qty * std), sale == null || moved == null ? '' : rvRound2(moved * sale)];
+    std == null ? '' : rvRound2((eff == null ? qty : eff) * std), sale == null || eff == null ? '' : rvRound2(eff * sale)];
 }
 function rvExportAoa(store, items){
   store = store || rvStore;
@@ -1055,7 +1066,7 @@ function rvCloseCampaign(){
      103125 → 8103125); вече /^8\d{6}$/ (повторна преоценка) → същият код;
    - цена = proposed_price на обекта; прехвърлено = qty.
    „Готово за обект" → status 'processed' + известие САМО до управителя на
-   обекта (role manager, active; push + имейл с прикачена 13-колонна бланка),
+   обекта (role manager, active; push + имейл с прикачена 14-колонна бланка),
    копие до app_settings.revaluation_done_cc — ВИНАГИ; без имейл на
    управител копието става основен получател (19.10.2026). „Отключи бланката" → обратно 'draft'. */
 
@@ -1103,7 +1114,8 @@ function rvCoProposal(it){
   var p = {};
   if(it.new_sap_code == null || it.new_sap_code === ''){ var c = rvCoProposeCode(it.sap_code); if(c) p.new_sap_code = c; }
   if(it.sale_price == null && it.proposed_price != null) p.sale_price = rvRound2(Number(it.proposed_price));
-  if(it.co_qty == null && it.qty != null) p.co_qty = rvRound3(Number(it.qty));
+  /* Повторно преоценен код — само цена, без прехвърляне (14.11.2026). */
+  if(it.co_qty == null && it.qty != null && !rvIsRepeat(it.sap_code)) p.co_qty = rvRound3(Number(it.qty));
   return p;
 }
 /* Бланка, която Контролинг обработва: одобрена от регионалния (или без
@@ -1185,6 +1197,7 @@ function rvPinkCells(it, coEdit){
   var badge = rvCodeBadge(it);
   var under = function(f){ return f === 'new_sap_code' && badge ? '<div class="rv-code-badge">' + badge + '</div>' : ''; };
   return ['new_sap_code', 'sale_price', 'co_qty', 'co_comment'].map(function(f){
+    if(f === 'co_qty' && rvIsRepeat(it.sap_code)) return '<td class="rv-price-only" style="' + PINK + 'color:#6b7280;font-style:italic;">' + RV_PRICE_ONLY + '</td>';
     var v = fmt[f](val(f));
     if(!coEdit) return '<td style="' + PINK + (f === 'new_sap_code' ? 'font-family:DM Mono,monospace;' : '') + '">' + esc(v) + under(f) + '</td>';
     var w = f === 'co_comment' ? '160px' : (f === 'new_sap_code' ? '84px' : '68px');
@@ -1199,6 +1212,7 @@ function rvCoEditableProposal(it, coEdit){ return coEdit ? rvCoProposal(it) : {}
 function rvCoEdit(id, field, val){
   var it = rvItem(id);
   if(!it || !rvCoCanEdit()) return Promise.resolve(false);
+  if(field === 'co_qty' && rvIsRepeat(it.sap_code)) return Promise.resolve(false);
   var p = rvCoProposal(it);
   var t = String(val == null ? '' : val).trim();
   if(field === 'new_sap_code' || field === 'co_comment'){ p[field] = t || null; }
@@ -1276,7 +1290,7 @@ function rvCoDone(){
       var p = [];
       if(!String(it.new_sap_code || '').trim()) p.push('няма преоценен код');
       if(!(Number(it.sale_price) > 0)) p.push('няма цена на преоценения код');
-      if(it.co_qty == null || it.co_qty === '') p.push('няма прехвърлено количество');
+      if(!rvIsRepeat(it.sap_code) && (it.co_qty == null || it.co_qty === '')) p.push('няма прехвърлено количество');
       if(p.length){ rvBad[it.id] = p; n++; }
     });
   }
@@ -1312,7 +1326,7 @@ function rvCoUnlock(){
 }
 
 /* ─── Известие „обработена" ────────────────────────────── */
-/* base64 на 13-колонния xlsx или null (SheetJS не се зареди / гръмна). */
+/* base64 на 14-колонния xlsx или null (SheetJS не се зареди / гръмна). */
 function rvXlsxBase64(store, items){
   return new Promise(function(resolve){
     var done = false;
@@ -1354,9 +1368,9 @@ function rvCoNotifyDone(store, sub, items){
     else {
       html += '<table border="1" cellpadding="4" style="border-collapse:collapse;font-size:12px;"><tr><th>Код</th><th>Описание</th><th>Прехвърлено</th><th>Преоценен код</th><th>Цена</th></tr>' +
         items.map(function(it){
-          return '<tr><td>' + esc(it.sap_code) + '</td><td>' + esc(it.product_name) + '</td><td>' + esc(rvFmtQty(it.co_qty)) + '</td><td>' + esc(it.new_sap_code) + '</td><td>' + esc(rvFmt(it.sale_price)) + '</td></tr>';
+          return '<tr><td>' + esc(it.sap_code) + '</td><td>' + esc(it.product_name) + '</td><td>' + esc(rvIsRepeat(it.sap_code) ? RV_PRICE_ONLY : rvFmtQty(it.co_qty)) + '</td><td>' + esc(it.new_sap_code) + '</td><td>' + esc(rvFmt(it.sale_price)) + '</td></tr>';
         }).join('') + '</table>';
-      if(r[2]) html += '<p>Бланката е прикачена (13 колони).</p>';
+      if(r[2]) html += '<p>Бланката е прикачена (14 колони).</p>';
       else { html += '<p>Файлът е в портала: Ревизии и преоценка → Преоценка.</p>'; warns.push('без прикачен файл'); }
     }
     html += '<p>Обработи: ' + esc(currentUser.display_name || currentUser.email) + '</p>';
@@ -1420,7 +1434,9 @@ function rvExportCampaign(){
       rvWithXlsx(function(){
         var wb = XLSX.utils.book_new();
         var used = {};
-        var total = [RV_EXPORT_HEADERS.concat(['Прехвърлено', 'TOTAL'])];
+        /* „Общо" (14.11.2026): без втора „Прехвърлено" — тя вече е в 14-те;
+           TOTAL = „Тотал преоценка" (последната колона на реда), същото правило. */
+        var total = [RV_EXPORT_HEADERS.concat(['TOTAL'])];
         var sum = 0;
         order.forEach(function(st){
           var nm = String(rvStoreNo(st) || st).slice(0, 31);
@@ -1428,14 +1444,13 @@ function rvExportCampaign(){
           used[nm] = 1;
           XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rvExportAoa(st, byStore[st])), nm);
           byStore[st].forEach(function(it){
-            var moved = it.co_qty == null || it.co_qty === '' ? null : rvRound3(Number(it.co_qty));
-            var sale = it.sale_price == null ? null : Number(it.sale_price);
-            var t = moved == null || sale == null ? '' : rvRound2(moved * sale);
+            var row = rvItemExportRow(st, it);
+            var t = row[row.length - 1];
             if(t !== '') sum += t;
-            total.push(rvItemExportRow(st, it).concat([moved == null ? '' : moved, t]));
+            total.push(row.concat([t]));
           });
         });
-        var last = new Array(RV_EXPORT_HEADERS.length + 2).fill('');
+        var last = new Array(RV_EXPORT_HEADERS.length + 1).fill('');
         last[0] = 'ОБЩО'; last[last.length - 1] = rvRound2(sum);
         total.push(last);
         XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(total), 'Общо');
@@ -1879,10 +1894,12 @@ function rvVk11(){
 /* Ред на всеки ред с new_sap_code и co_qty > 0: основен код → код 8, двете
    количества = co_qty. Завод = minus_plants.plant с role 'наличност' за
    обекта; няма ли (Пазарджик, Сервиз Троян, складовете) — празна клетка и
-   жълто предупреждение, файлът пак се прави. Повторната преоценка влиза. */
+   жълто предупреждение, файлът пак се прави. Повторно преоценен код НЕ влиза
+   (14.11.2026, Елица — там се сменя само цената; до тогава излизаше
+   8086397 → 8086397). */
 function rvTransferAoa(items, plant){
   return [RV_TR_HEADERS.slice()].concat(items.filter(function(it){
-    return String(it.new_sap_code || '').trim() && Number(it.co_qty) > 0;
+    return String(it.new_sap_code || '').trim() && Number(it.co_qty) > 0 && !rvIsRepeat(it.sap_code);
   }).map(function(it){
     var q = Number(it.co_qty);
     return [String(it.sap_code == null ? '' : it.sap_code).trim(), q, String(it.new_sap_code).trim(), q, plant || ''];

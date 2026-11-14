@@ -187,12 +187,12 @@ async function open(h, store) { await h.w.loadRevaluation(); await ticks(8); if 
     const { ws, aoa } = readBack(h);
     ok('заглавията', JSON.stringify(aoa[0]) === JSON.stringify(['Основен код', 'Количество', 'Код 8', 'Количество', 'Завод']), JSON.stringify(aoa[0]));
     const body = aoa.slice(1);
-    ok('12 реда (11 + повторната; co_qty 0 не влиза)', body.length === 12, body.length);
+    ok('11 реда (повторната и co_qty 0 не влизат — 14.11.2026)', body.length === 11, body.length);
     const r1 = body.find(r => String(r[2]) === '8097638');
     ok('ред: 97638 · 1 · 8097638 · 1 · 6508', r1 && String(r1[0]) === '97638' && r1[1] === 1 && r1[3] === 1 && String(r1[4]) === '6508', JSON.stringify(r1));
     ok('Завод = 6508 на всички (наличност, не доставка 5508)', body.every(r => String(r[4]) === '6508'));
     const rp = body.find(r => String(r[0]) === '8025298');
-    ok('повторна преоценка влиза (8025298 → 8025298, 2)', rp && String(rp[2]) === '8025298' && rp[1] === 2 && rp[3] === 2, JSON.stringify(rp));
+    ok('повторна преоценка НЕ влиза (беше 8025298 → 8025298)', !rp, JSON.stringify(rp));
     ok('количествата са числа', ws.B2.t === 'n' && ws.D2.t === 'n');
     ok('без код 8055555 (co_qty 0)', !body.some(r => String(r[2]) === '8055555'));
 
